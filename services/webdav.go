@@ -39,6 +39,9 @@ func (a *AppService) SetWebDAVConfig(config *WebDAVConfig) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
+	if config == nil {
+		return Fail(fmt.Errorf("配置不能为空"))
+	}
 	inner := &webdav.Config{
 		URL:      config.URL,
 		Username: config.Username,
@@ -91,6 +94,9 @@ func (a *AppService) WebDAVExportBackup() *ApiResult {
 
 // WebDAVListBackups 列出 WebDAV 服务器上的备份文件
 func (a *AppService) WebDAVListBackups() *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
 	cfg, err := a.getWebdavCfg()
 	if err != nil {
 		return Fail(fmt.Errorf("获取 WebDAV 配置失败: %w", err))
@@ -131,6 +137,9 @@ func (a *AppService) WebDAVDownaloadAndRestore(filename string) *ApiResult {
 
 // WebDAVDeleteBackup 删除 WebDAV 上的备份文件
 func (a *AppService) WebDAVDeleteBackup(filename string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
 	cfg, err := a.getWebdavCfg()
 	if err != nil {
 		return Fail(fmt.Errorf("获取 WebDAV 配置失败: %w", err))

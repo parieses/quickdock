@@ -2,12 +2,24 @@ package services
 
 // ===== 命令面板 =====
 
-// SearchAll 跨全部工作空间搜索项目
+// SearchAll 跨全部工作空间搜索项目（使用 FTS5）
 func (a *AppService) SearchAll(query string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
 	items, err := a.DB.SearchAllItems(query)
+	if err != nil {
+		return dberr(err)
+	}
+	return Ok(items)
+}
+
+// GetMostUsedItems 返回最常使用的项目（命令面板「最近使用」）
+func (a *AppService) GetMostUsedItems(limit int) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	items, err := a.DB.GetMostUsedItems(limit)
 	if err != nil {
 		return dberr(err)
 	}

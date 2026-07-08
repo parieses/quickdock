@@ -3,32 +3,108 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Search, Hash, Command, ArrowRight, Lock, Power, Moon, Trash2, RotateCcw,
-  Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, X
+  Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, X,
+  MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera
 } from '@lucide/vue'
-import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText } from '../../bindings/quickdock/services/appservice'
+import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import type { CollectionItem } from '../types'
+import { evaluate, format } from '../utils/calc'
 import { pinyin } from 'pinyin-pro'
-import { create, all } from 'mathjs'
-
-const math = create(all)
 const { t } = useI18n()
 
+// ---- 关闭面板（清空搜索框）----
+function closePalette() {
+  query.value = ''
+  selectedIndex.value = 0
+  inlineQuicklink.value = null
+  inlineQuery.value = ''
+  try { HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
+}
+
+// ---- 应用图标映射（根据名称匹配常见应用）----
+const APP_ICON_MAP: [RegExp, any][] = [
+  [/chrome|google/i, Globe],
+  [/firefox|edge|brave|opera|safari|浏览器/i, Globe],
+  [/微信|wechat|weixin/i, MessageCircle],
+  [/qq|tencent/i, MessageCircle],
+  [/terminal|cmd|powershell|wsl|命令提示符|windows terminal/i, Terminal],
+  [/code|vs Code|visual studio|jetbrains|idea|goland|webstorm|pycharm|sublime|atom/i, Code2],
+  [/文件资源管理器|explorer|文件管理/i, FolderOpen],
+  [/计算器|calculator/i, Calculator],
+  [/notepad|记事本|编辑/i, FileEdit],
+  [/vscode|visual studio code/i, Code2],
+  [/postman|apifox|curl/i, Server],
+  [/docker/i, Container],
+  [/figma|sketch|xd|ps|photoshop/i, Palette],
+  [/spotify|音乐|网易云|qq音乐/i, Music],
+  [/word|excel|powerpoint|office|wps|文档|表格|演示/i, FileText],
+  [/设置|settings|control panel|控制面板/i, Settings],
+  [/任务管理器|task manager/i, Activity],
+  [/画图|paint|mspaint/i, Image],
+  [/截图|snip|snipping tool/i, Camera],
+]
+
+// ---- 应用中文别名映射（用于搜索匹配）----
+// 键 = 英文名关键词（小写），值 = 中文名别名词组
+const APP_NAME_ALIASES: [RegExp, string[]][] = [
+  [/notepad/i, ['记事本', 'jb']],
+  [/calculator/i, ['计算器', 'jsq']],
+  [/paint|mspaint/i, ['画图', 'ht']],
+  [/snipping/i, ['截图工具', '截图', 'jttj']],
+  [/explorer/i, ['文件资源管理器', '资源管理器', 'wjj']],
+  [/task manager/i, ['任务管理器', 'rwglq']],
+  [/control panel/i, ['控制面板', 'kzmb']],
+  [/command prompt/i, ['命令提示符', 'cmd', 'mltsf']],
+  [/registry editor|regedit/i, ['注册表编辑器', '注册表', 'zcb']],
+  [/windows terminal/i, ['终端', 'zd']],
+  [/word/i, ['文档', 'wd']],
+  [/excel/i, ['表格', 'bg']],
+  [/powerpoint|ppt/i, ['演示文稿', 'ppt']],
+  [/visual studio code|vscode/i, ['代码编辑器', 'vscode']],
+  [/steam/i, ['游戏平台']],
+  [/wechat|weixin/i, ['微信', 'wx']],
+  [/qq\b/i, ['腾讯qq']],
+  [/discord/i, ['discord聊天']],
+  [/spotify/i, ['音乐播放器']],
+  [/docker/i, ['容器引擎']],
+  [/postman/i, ['接口测试']],
+  [/figma/i, ['设计工具']],
+  [/photoshop|ps\b/i, ['图像编辑']],
+  [/snipaste/i, ['截图工具']],
+  [/everything/i, ['文件搜索']],
+  [/7-zip|7zip|winrar/i, ['压缩软件']],
+  [/vmware|virtualbox/i, ['虚拟机']],
+  [/git/i, ['版本控制']],
+  [/node/i, ['node运行时']],
+  [/python/i, ['python运行时']],
+]
+
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app'
+
+interface InstalledApp {
+  name: string
+  path: string
+  category: string
+  iconBase64?: string
+}
 
 interface SearchResult {
   type: ResultType
   label: string
   desc?: string
   icon?: any
+  iconBase64?: string
   item?: CollectionItem
   cmd?: SystemCmd
   calcResult?: string
   snippet?: CmdSnippet
   inlineQuery?: string
   frecencyScore?: number
+  appPath?: string
+  appCategory?: string
 }
 
 interface SystemCmd {
@@ -46,19 +122,29 @@ interface CmdSnippet { id: string; keyword: string; content: string; category: s
 interface FrecencyEntry { count: number; lastUsed: number }
 const FRECENCY_KEY = 'quickdock:frecency'
 
+// 内存缓存 — 启动时从 localStorage 加载一次，避免每次搜索都 JSON.parse
+let frecencyCache: Record<string, FrecencyEntry> = {}
+let frecencyLoaded = false
+
 function loadFrecency(): Record<string, FrecencyEntry> {
+  if (frecencyLoaded) return frecencyCache
   try {
     const raw = localStorage.getItem(FRECENCY_KEY)
-    return raw ? JSON.parse(raw) : {}
-  } catch { return {} }
+    frecencyCache = raw ? JSON.parse(raw) : {}
+  } catch {
+    frecencyCache = {}
+  }
+  frecencyLoaded = true
+  return frecencyCache
 }
 
 function saveFrecency(data: Record<string, FrecencyEntry>) {
+  frecencyCache = data
   try { localStorage.setItem(FRECENCY_KEY, JSON.stringify(data)) } catch {}
 }
 
 function recordUsage(key: string) {
-  const data = loadFrecency()
+  const data = { ...loadFrecency() }
   const now = Date.now()
   data[key] = { count: (data[key]?.count || 0) + 1, lastUsed: now }
   saveFrecency(data)
@@ -70,7 +156,6 @@ function frecencyScore(key: string): number {
   if (!entry) return 0
   const now = Date.now()
   const recencyDays = (now - entry.lastUsed) / 86400000
-  // 越近期使用 + 使用次数越多 → 分数越高
   return entry.count * 10 + Math.max(0, 30 - recencyDays)
 }
 
@@ -78,6 +163,7 @@ function frecencyScore(key: string): number {
 const query = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const items = ref<CollectionItem[]>([])
+const installedApps = ref<InstalledApp[]>([])
 const loading = ref(false)
 const selectedIndex = ref(0)
 const listRef = ref<HTMLElement | null>(null)
@@ -90,19 +176,19 @@ const inlineInputRef = ref<HTMLInputElement | null>(null)
 // ---- 片段 ----
 const snippets = ref<CmdSnippet[]>([])
 
-// ---- 系统命令 ----
-const systemCommands: SystemCmd[] = [
-  { id: 'lock', label: t('cmdLock'), desc: t('cmdLockDesc'), keywords: ['lock', '锁屏', '锁定', 'suo ping', 'suo ding'], icon: Lock,
-    action: async () => { await ExecuteSystemCommand('lock'); HidePaletteWindow() } },
-  { id: 'shutdown', label: t('cmdShutdown'), desc: t('cmdShutdownDesc'), keywords: ['shutdown', '关机', 'guan ji', '关闭'], icon: Power,
-    action: async () => { await ExecuteSystemCommand('shutdown'); HidePaletteWindow() } },
-  { id: 'restart', label: t('cmdRestart'), desc: t('cmdRestartDesc'), keywords: ['restart', '重启', 'reboot', 'chong qi', '重新启动'], icon: RotateCcw,
-    action: async () => { await ExecuteSystemCommand('restart'); HidePaletteWindow() } },
-  { id: 'sleep', label: t('cmdsleep'), desc: t('cmdsleepDesc'), keywords: ['sleep', '休眠', '睡眠', 'shui mian', 'xiu mian'], icon: Moon,
-    action: async () => { await ExecuteSystemCommand('sleep'); HidePaletteWindow() } },
-  { id: 'emptytrash', label: t('cmdEmptyTrash'), desc: t('cmdEmptyTrashDesc'), keywords: ['trash', '回收站', '清空', '垃圾', 'hui shou zhan', 'qing kong'], icon: Trash2,
-    action: async () => { await ExecuteSystemCommand('emptytrash'); HidePaletteWindow() } },
-]
+// ---- 系统命令（computed 以响应语言切换）----
+const systemCommands = computed<SystemCmd[]>(() => [
+  { id: 'lock', label: t('cmdLock'), desc: t('cmdLockDesc'), keywords: ['lock', '锁屏', '锁定', 'suo ping', 'suo ding', '系统'], icon: Lock,
+    action: async () => { await ExecuteSystemCommand('lock'); closePalette() } },
+  { id: 'shutdown', label: t('cmdShutdown'), desc: t('cmdShutdownDesc'), keywords: ['shutdown', '关机', 'guan ji', '关闭', '系统'], icon: Power,
+    action: async () => { await ExecuteSystemCommand('shutdown'); closePalette() } },
+  { id: 'restart', label: t('cmdRestart'), desc: t('cmdRestartDesc'), keywords: ['restart', '重启', 'reboot', 'chong qi', '重新启动', '系统'], icon: RotateCcw,
+    action: async () => { await ExecuteSystemCommand('restart'); closePalette() } },
+  { id: 'sleep', label: t('cmdsleep'), desc: t('cmdsleepDesc'), keywords: ['sleep', '休眠', '睡眠', 'shui mian', 'xiu mian', '系统'], icon: Moon,
+    action: async () => { await ExecuteSystemCommand('sleep'); closePalette() } },
+  { id: 'emptytrash', label: t('cmdEmptyTrash'), desc: t('cmdEmptyTrashDesc'), keywords: ['trash', '回收站', '清空', '垃圾', 'hui shou zhan', 'qing kong', '系统'], icon: Trash2,
+    action: async () => { await ExecuteSystemCommand('emptytrash'); closePalette() } },
+])
 
 // ---- 拼音匹配 ----
 function pinyinMatch(text: string, queryLC: string): boolean {
@@ -116,15 +202,17 @@ function pinyinMatch(text: string, queryLC: string): boolean {
 }
 
 // ---- 项目类型图标 ----
+// type 值来自后端 DB（schema.go: items.type DEFAULT '目录'），是稳定的中文枚举
+// 不要与 i18n 翻译混淆
+const ITEM_TYPE_ICONS: Record<string, any> = {
+  '网页': Globe,
+  '命令': Terminal,
+  '文件': FileText,
+  '应用': AppWindow,
+  '快速链接': Link,
+}
 function itemIcon(item: CollectionItem): any {
-  switch (item.type) {
-    case '网页': return Globe
-    case '命令': return Terminal
-    case '文件': return FileText
-    case '应用': return AppWindow
-    case '快速链接': return Link
-    default: return Folder
-  }
+  return ITEM_TYPE_ICONS[item.type] || Folder
 }
 
 // ---- 搜索结果（分组） ----
@@ -146,14 +234,14 @@ const groupedResults = computed<ResultGroup[]>(() => {
   if (/^[0-9+\-*/().%^, ]+$/.test(q) || q.startsWith('=')) {
     const expr = q.startsWith('=') ? q.slice(1) : q
     try {
-      const result = math.evaluate(expr)
+      const result = evaluate(expr)
       if (result !== undefined && result !== null) {
         groups.push({
           type: 'calculator',
           label: t('cmdGroupCalc'),
           results: [{
             type: 'calculator',
-            label: `${q} = ${math.format(result, { precision: 14 })}`,
+            label: `${q} = ${format(result, { precision: 14 })}`,
             desc: t('calcHint'),
             icon: Hash,
             calcResult: String(result),
@@ -163,25 +251,26 @@ const groupedResults = computed<ResultGroup[]>(() => {
     } catch {}
   }
 
-  // 2. 项目 + Quicklink（按名称匹配）
+  // 2. 项目 + Quicklink — items.value 已由后端 FTS5 筛选
+  // 前端补充拼音匹配 + 文本匹配（用户可能输入中文或拼音）
   const itemResults: SearchResult[] = []
   for (const item of items.value) {
+    if (seen.has(item.id)) continue
     const nameLC = item.name.toLowerCase()
     const valueLC = (item.value || '').toLowerCase()
+    // FTS5 已确保文本匹配，但拼音可能编码不一致需要前端补充
+    // 同时允许中文直输匹配（用户输入中文名直接筛选）
+    if (!(nameLC.includes(qLC) || valueLC.includes(qLC) || pinyinMatch(item.name, qLC))) continue
+    seen.add(item.id)
     const isQuicklink = item.value && item.value.includes('{query}')
-    if (nameLC.includes(qLC) || valueLC.includes(qLC) || pinyinMatch(item.name, qLC)) {
-      if (!seen.has(item.id)) {
-        seen.add(item.id)
-        itemResults.push({
-          type: isQuicklink ? 'quicklink' : 'item',
-          label: item.name,
-          desc: item.value || '',
-          icon: itemIcon(item),
-          item,
-          frecencyScore: frecencyScore('item:' + item.id),
-        })
-      }
-    }
+    itemResults.push({
+      type: isQuicklink ? 'quicklink' : 'item',
+      label: item.name,
+      desc: item.value || '',
+      icon: itemIcon(item),
+      item,
+      frecencyScore: frecencyScore('item:' + item.id),
+    })
   }
   // Frecency 排序
   itemResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
@@ -236,9 +325,51 @@ const groupedResults = computed<ResultGroup[]>(() => {
     groups.push({ type: 'snippet', label: t('cmdGroupSnippets'), results: snippetResults })
   }
 
-  // 5. 系统命令
+  // 5. 已安装的应用
+  function appIcon(name: string): any {
+    for (const [re, icon] of APP_ICON_MAP) {
+      if (re.test(name)) return icon
+    }
+    return AppWindow
+  }
+
+  // 获取应用的中文别名
+  function getAppAliases(name: string): string[] {
+    for (const [re, aliases] of APP_NAME_ALIASES) {
+      if (re.test(name)) return aliases
+    }
+    return []
+  }
+
+  const appResults: SearchResult[] = []
+  for (const app of installedApps.value) {
+    const nameLC = app.name.toLowerCase()
+    // 匹配：英文名包含 / 拼音匹配 / 中文别名匹配
+    const aliases = getAppAliases(app.name)
+    const aliasMatch = aliases.some(a =>
+      a.toLowerCase().includes(qLC) || pinyinMatch(a, qLC)
+    )
+    if (nameLC.includes(qLC) || pinyinMatch(app.name, qLC) || aliasMatch) {
+      appResults.push({
+        type: 'app',
+        label: app.name,
+        desc: app.category !== '其他' && app.category !== '系统工具' ? app.category : app.path,
+        icon: appIcon(app.name),
+        iconBase64: app.iconBase64,
+        appPath: app.path,
+        appCategory: app.category,
+        frecencyScore: frecencyScore('app:' + app.name),
+      })
+    }
+  }
+  appResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
+  if (appResults.length > 0) {
+    groups.push({ type: 'app', label: t('cmdGroupApps'), results: appResults.slice(0, 8) })
+  }
+
+  // 6. 系统命令
   const sysResults: SearchResult[] = []
-  for (const cmd of systemCommands) {
+  for (const cmd of systemCommands.value) {
     if (cmd.keywords.some(k => k.includes(qLC)) || cmd.label.toLowerCase().includes(qLC) || pinyinMatch(cmd.label, qLC)) {
       sysResults.push({ type: 'system', label: cmd.label, desc: cmd.desc, icon: cmd.icon, cmd })
     }
@@ -306,10 +437,12 @@ const displayFlat = computed<SearchResult[]>(() => {
 
 // ---- 键盘导航 ----
 function scrollToSelected() {
-  const list = listRef.value
-  if (!list) return
-  const el = list.querySelector('.result-item.active') as HTMLElement | undefined
-  el?.scrollIntoView({ block: 'nearest' })
+  nextTick(() => {
+    const list = listRef.value
+    if (!list) return
+    const el = list.querySelector('.result-item.active') as HTMLElement | undefined
+    el?.scrollIntoView({ block: 'nearest' })
+  })
 }
 
 function onKeydown(e: KeyboardEvent) {
@@ -344,7 +477,7 @@ function onKeydown(e: KeyboardEvent) {
       executeSelected()
       break
     case 'Escape':
-      HidePaletteWindow()
+      closePalette()
       break
   }
 }
@@ -357,15 +490,15 @@ async function executeSelected() {
   if (result.type === 'system' && result.cmd) {
     await result.cmd.action()
   } else if (result.type === 'quicklink-inline' && result.item) {
-    const item = result.item
+    const item = { ...result.item }
     let value = item.value || ''
     if (result.inlineQuery) {
       value = value.replace(/\{query\}/g, result.inlineQuery)
     }
     item.value = value
     recordUsage('item:' + item.id)
-    await OpenItem(item as any)
-    HidePaletteWindow()
+    try { await OpenItem(item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
+    closePalette()
   } else if (result.type === 'quicklink' && result.item) {
     // 进入内联输入模式
     inlineQuicklink.value = result.item
@@ -374,31 +507,35 @@ async function executeSelected() {
     inlineInputRef.value?.focus()
   } else if (result.type === 'item' && result.item) {
     recordUsage('item:' + result.item.id)
-    await OpenItem(result.item as any)
-    HidePaletteWindow()
+    try { await OpenItem(result.item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
+    closePalette()
   } else if (result.type === 'calculator' && result.calcResult) {
     try { await navigator.clipboard.writeText(result.calcResult) } catch {}
-    HidePaletteWindow()
+    closePalette()
   } else if (result.type === 'snippet' && result.snippet) {
     recordUsage('snippet:' + result.snippet.id)
-    await PasteSnippet(result.snippet.content)
-    HidePaletteWindow()
+    try { await PasteSnippet(result.snippet.content) } catch (e) { console.error('[CmdPalette] PasteSnippet:', e) }
+    closePalette()
+  } else if (result.type === 'app' && result.appPath) {
+    recordUsage('app:' + result.label)
+    try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }
+    closePalette()
   }
 }
 
 async function commitInlineQuicklink() {
   if (!inlineQuicklink.value) return
-  const item = inlineQuicklink.value
+  const item = { ...inlineQuicklink.value }
   let value = item.value || ''
   if (inlineQuery.value) {
     value = value.replace(/\{query\}/g, inlineQuery.value)
   }
   item.value = value
   recordUsage('item:' + item.id)
-  await OpenItem(item as any)
+  try { await OpenItem(item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
   inlineQuicklink.value = null
   inlineQuery.value = ''
-  HidePaletteWindow()
+  closePalette()
 }
 
 function cancelInlineQuicklink() {
@@ -426,38 +563,83 @@ function getFlatIndex(groupIdx: number, itemIdx: number): number {
 }
 
 // ---- 加载数据 ----
-async function loadItems() {
+// 命令面板打开时不再一次性加载全部项目，而是：
+// 1. 打开时加载 Top-N 最常用项目（用于最近使用面板）
+// 2. 用户输入搜索词时，后端 FTS5 精确匹配
+let itemsLoadGen = 0
+
+async function loadMostUsedItems() {
   loading.value = true
+  const gen = ++itemsLoadGen
   try {
-    const result = unwrap<CollectionItem[]>(await SearchAll(''))
+    const result = unwrap<CollectionItem[]>(await GetMostUsedItems(30))
+    if (gen !== itemsLoadGen) return
     items.value = result || []
   } catch (e) {
-    console.error('[CmdPalette] SearchAll:', getErrorMessage(e))
+    console.error('[CmdPalette] GetMostUsedItems:', getErrorMessage(e))
+  }
+  // 并行加载已安装应用（后端有缓存，只扫一次）
+  try {
+    const apps = unwrap<InstalledApp[]>(await ScanInstalledApps())
+    if (gen === itemsLoadGen) installedApps.value = apps || []
+  } catch (e) {
+    console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e))
   }
   try {
     const snips = unwrap<CmdSnippet[]>(await SearchSnippets(''))
+    if (gen !== itemsLoadGen) return
     snippets.value = snips || []
   } catch (e) {
     console.error('[CmdPalette] SearchSnippets:', getErrorMessage(e))
-    try {
-      const { ListSnippets } = await import('../../bindings/quickdock/services/appservice')
-      const fallback = unwrap<CmdSnippet[]>(await ListSnippets())
-      snippets.value = fallback || []
-    } catch (e2) {
-      console.error('[CmdPalette] ListSnippets fallback:', getErrorMessage(e2))
-    }
   } finally {
-    loading.value = false
+    if (gen === itemsLoadGen) loading.value = false
+  }
+}
+
+// 用户输入搜索词时 → 后端 FTS5 搜索
+async function searchItems(query: string) {
+  if (!query.trim()) {
+    // 无查询时加载 Top 常用
+    await loadMostUsedItems()
+    return
+  }
+  loading.value = true
+  const gen = ++itemsLoadGen
+  try {
+    const result = unwrap<CollectionItem[]>(await SearchAll(query))
+    if (gen !== itemsLoadGen) return
+    items.value = result || []
+  } catch (e) {
+    console.error('[CmdPalette] SearchAll:', getErrorMessage(e))
+    if (gen === itemsLoadGen) loading.value = false
+  }
+  // 片段搜索（后端已有 LIKE 过滤）
+  try {
+    const snips = unwrap<CmdSnippet[]>(await SearchSnippets(query))
+    if (gen !== itemsLoadGen) return
+    snippets.value = snips || []
+  } catch (e) {
+    console.error('[CmdPalette] SearchSnippets:', getErrorMessage(e))
+    if (gen === itemsLoadGen) loading.value = false
+  } finally {
+    if (gen === itemsLoadGen) loading.value = false
   }
 }
 
 // ---- 窗口打开 ----
 onMounted(async () => {
-  loadItems()
+  // 每次打开面板时清空搜索框
+  query.value = ''
+  selectedIndex.value = 0
+  inlineQuicklink.value = null
+  inlineQuery.value = ''
+  await loadMostUsedItems()
   try {
     const copied = unwrap<string>(await GetLastCopiedText())
     if (copied && copied.trim() && copied.trim().length < 200) {
       query.value = copied.trim()
+      // 如果有预填文本，直接用后端搜索
+      searchItems(query.value.trim())
     }
   } catch {}
   setTimeout(() => {
@@ -471,14 +653,28 @@ watch(displayFlat, () => {
   selectedIndex.value = 0
 })
 
+// 用户输入时触发后端搜索（100ms 防抖）
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+watch(query, (val) => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchTimer = setTimeout(() => {
+    searchItems(val.trim())
+  }, 100)
+})
+
 // 切换到内联模式时清空选中
 watch(inlineQuicklink, (v) => {
   if (v) selectedIndex.value = 0
 })
+
+// 组件卸载时清理定时器
+onUnmounted(() => {
+  if (searchTimer) clearTimeout(searchTimer)
+})
 </script>
 
 <template>
-  <div class="palette-root" @keydown="onKeydown" @click.self="HidePaletteWindow">
+  <div class="palette-root" @click.self="closePalette">
     <!-- 搜索栏 -->
     <div class="palette-searchbar">
       <Search :size="16" class="search-icon" />
@@ -522,7 +718,8 @@ watch(inlineQuicklink, (v) => {
           @mousemove="selectResult(gIdx, iIdx)"
         >
           <div class="result-icon">
-            <component :is="result.icon" :size="15" />
+            <img v-if="result.iconBase64" :src="result.iconBase64" class="result-app-icon" alt="" />
+            <component v-else :is="result.icon" :size="15" />
           </div>
           <div class="result-body">
             <span class="result-label">{{ result.label }}</span>
@@ -699,6 +896,13 @@ watch(inlineQuicklink, (v) => {
 .result-item.active .result-icon {
   color: var(--color-accent);
   background: var(--color-accent-bg);
+}
+
+.result-app-icon {
+  width: 18px;
+  height: 18px;
+  object-fit: contain;
+  border-radius: 2px;
 }
 
 .result-body {

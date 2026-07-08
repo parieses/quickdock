@@ -38,6 +38,7 @@ var validColumns = map[string]bool{
 	"open_strategy": true, "tool": true,
 	"recent": true, "recent_at": true,
 	"plugin_id": true, "plugin_data": true,
+	"collection": true,
 	"working_directory": true, "args": true,
 	"path": true, "version": true, "capability": true,
 	"permissions": true, "manifest": true, "configurable": true, "built_in": true,
@@ -103,9 +104,16 @@ func Open(path string) (*Database, error) {
 	conn.SetMaxOpenConns(1)
 
 	// 连接级 PRAGMA（SetMaxOpenConns(1) 保证始终同一连接）
-	conn.Exec("PRAGMA journal_mode=WAL")
-	conn.Exec("PRAGMA busy_timeout=5000")
-	conn.Exec("PRAGMA foreign_keys=ON")
+	// 显式检查错误，PRAGMA 失败时可能引发外键约束不生效等严重问题
+	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return nil, fmt.Errorf("设置 WAL 模式失败: %w", err)
+	}
+	if _, err := conn.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		return nil, fmt.Errorf("设置 busy_timeout 失败: %w", err)
+	}
+	if _, err := conn.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		return nil, fmt.Errorf("启用外键约束失败: %w", err)
+	}
 
 	db := &Database{conn: conn, path: path}
 	if err := db.migrate(); err != nil {

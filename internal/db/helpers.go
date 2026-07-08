@@ -2,6 +2,7 @@ package db
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
 
@@ -16,86 +17,50 @@ func newID() string {
 	return uuid.New().String()
 }
 
+// camelToSnake 驼峰 → 蛇形：createdAt → created_at, workspaceId → workspace_id
+func camelToSnake(s string) string {
+	var result strings.Builder
+	for i, r := range s {
+		if r >= 'A' && r <= 'Z' {
+			if i > 0 {
+				result.WriteByte('_')
+			}
+			result.WriteRune(r + 32) // to lowercase
+		} else {
+			result.WriteRune(r)
+		}
+	}
+	return result.String()
+}
+
 // structToMap 将结构体转为 map（供 BulkInsert 使用）
+// 使用 reflect 按 json tag 取 key，再转为蛇形 → 匹配数据库列名
 func structToMap(v interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
-	switch val := v.(type) {
-	case *Workspace:
-		result["id"] = val.ID
-		result["name"] = val.Name
-		result["storage"] = val.Storage
-		result["remark"] = val.Remark
-		result["created_at"] = val.CreatedAt
-		result["updated_at"] = val.UpdatedAt
-	case *Scene:
-		result["id"] = val.ID
-		result["workspace_id"] = val.WorkspaceID
-		result["name"] = val.Name
-		result["type"] = val.Type
-		result["description"] = val.Description
-		result["icon"] = val.Icon
-		result["color"] = val.Color
-		result["favorite"] = val.Favorite
-		result["unbound"] = val.Unbound
-		result["usage_count"] = val.UsageCount
-		result["sort"] = val.Sort
-		result["created_at"] = val.CreatedAt
-		result["updated_at"] = val.UpdatedAt
-	case *Collection:
-		result["id"] = val.ID
-		result["workspace_id"] = val.WorkspaceID
-		result["scene_id"] = val.SceneID
-		result["name"] = val.Name
-		result["type"] = val.Type
-		result["description"] = val.Description
-		result["default_tool_id"] = val.DefaultToolID
-		result["tool"] = val.Tool
-		result["icon"] = val.Icon
-		result["color"] = val.Color
-		result["open_strategy"] = val.OpenStrategy
-		result["favorite"] = val.Favorite
-		result["recent"] = val.Recent
-		result["recent_at"] = val.RecentAt
-		result["unbound"] = val.Unbound
-		result["plugin_id"] = val.PluginID
-		result["usage_count"] = val.UsageCount
-		result["sort"] = val.Sort
-		result["created_at"] = val.CreatedAt
-		result["updated_at"] = val.UpdatedAt
-	case *CollectionItem:
-		result["id"] = val.ID
-		result["workspace_id"] = val.WorkspaceID
-		result["collection_id"] = val.CollectionID
-		result["name"] = val.Name
-		result["type"] = val.Type
-		result["value"] = val.Value
-		result["working_directory"] = val.WorkingDirectory
-		result["tool_id"] = val.ToolID
-		result["tool"] = val.Tool
-		result["args"] = val.Args
-		result["icon"] = val.Icon
-		result["color"] = val.Color
-		result["remark"] = val.Remark
-		result["plugin_data"] = val.PluginData
-		result["usage_count"] = val.UsageCount
-		result["sort"] = val.Sort
-		result["created_at"] = val.CreatedAt
-		result["updated_at"] = val.UpdatedAt
-	case *OpenTool:
-		result["id"] = val.ID
-		result["name"] = val.Name
-		result["type"] = val.Type
-		result["path"] = val.Path
-		result["args"] = val.Args
-		result["is_default"] = val.IsDefault
-	case *Snapshot:
-		result["id"] = val.ID
-		result["kind"] = val.Kind
-		result["label"] = val.Label
-		result["note"] = val.Note
-		result["payload"] = val.Payload
-		result["size"] = val.Size
-		result["created_at"] = val.CreatedAt
+	rv := reflect.ValueOf(v)
+	if rv.Kind() == reflect.Ptr {
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		return result
+	}
+	t := rv.Type()
+	for i := 0; i < rv.NumField(); i++ {
+		field := t.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		key := field.Tag.Get("json")
+		if key != "" {
+			// json tag 是 camelCase，但数据库列是 snake_case，需要转换
+			if idx := strings.Index(key, ","); idx > 0 {
+				key = key[:idx] // 去掉 ",omitempty" 等选项
+			}
+			key = camelToSnake(key)
+		} else {
+			key = camelToSnake(field.Name)
+		}
+		result[key] = rv.Field(i).Interface()
 	}
 	return result
 }

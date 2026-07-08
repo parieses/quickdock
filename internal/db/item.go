@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"os/exec"
 	goruntime "runtime"
@@ -8,6 +9,8 @@ import (
 
 	"golang.org/x/sys/windows"
 )
+
+const itemCols = "id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, usage_count, sort, created_at, updated_at"
 
 // ---- 项目 ----
 
@@ -19,16 +22,67 @@ func (d *Database) ListItems(collectionID string) ([]CollectionItem, error) {
 	return mapSlice(rows, mapToItem), nil
 }
 
-// SearchAllItems 跨全部工作空间搜索项目（按名称和值模糊匹配）
+// fts5Escape 清理 FTS5 查询中的特殊字符（移除会导致 FTS5 解析错误的运算符和关键字）
+func fts5Escape(q string) string {
+	specials := []string{"\"", "*", "+", "-", "(", ")", "~", "^", "<", ">", ",", "AND", "OR", "NOT", "NEAR"}
+	result := q
+	for _, s := range specials {
+		result = strings.ReplaceAll(result, s, "")
+	}
+	return strings.TrimSpace(result)
+}
+
+// SearchAllItems 跨全部工作空间搜索项目（使用 FTS5 全文索引）
+// query 为空时返回空结果（前端请使用 GetMostUsedItems 获取热数据）
 func (d *Database) SearchAllItems(query string) ([]CollectionItem, error) {
-	like := "%" + query + "%"
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rows, err := d.conn.Query("SELECT id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, usage_count, sort, created_at, updated_at FROM items WHERE name LIKE ? OR value LIKE ? ORDER BY sort ASC, created_at DESC", like, like)
+
+	if query == "" {
+		return nil, nil
+	}
+
+	// FTS5 前缀匹配：每个词 + *
+	safe := fts5Escape(query)
+	if safe == "" {
+		return nil, nil
+	}
+	words := strings.Fields(safe)
+	var parts []string
+	for _, w := range words {
+		parts = append(parts, w+"*")
+	}
+	ftsQuery := strings.Join(parts, " ")
+
+	rows, err := d.conn.Query(`SELECT `+itemCols+`
+		FROM items_fts JOIN items ON items.rowid = items_fts.rowid
+		WHERE items_fts MATCH ?
+		ORDER BY rank
+		LIMIT 200`, ftsQuery)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	return scanItems(rows)
+}
+
+// GetMostUsedItems 返回最常使用的项目（按 usage_count 降序，用于命令面板「最近使用」）
+func (d *Database) GetMostUsedItems(limit int) ([]CollectionItem, error) {
+	if limit <= 0 {
+		limit = 30
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rows, err := d.conn.Query("SELECT "+itemCols+" FROM items ORDER BY usage_count DESC, updated_at DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanItems(rows)
+}
+
+// scanItems 通用 items 行扫描器
+func scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 	var items []CollectionItem
 	for rows.Next() {
 		var item CollectionItem
@@ -88,14 +142,14 @@ func (d *Database) DeleteItem(id string) error {
 }
 
 func (d *Database) ReorderItems(orderedIDs []string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for i, id := range orderedIDs {
-		if _, err := d.conn.Exec("UPDATE items SET sort = ? WHERE id = ?", i*10, id); err != nil {
-			return err
+	return d.Transaction(func(tx *sql.Tx) error {
+		for i, id := range orderedIDs {
+			if _, err := tx.Exec("UPDATE items SET sort = ? WHERE id = ?", i*10, id); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // ---- 打开项目 ----

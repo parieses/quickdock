@@ -76,10 +76,16 @@ function onDropItem(e: DragEvent, targetId: string) {
   const ids = store.filteredItems.map(it => it.id)
   const from = ids.indexOf(dragItemId.value!)
   const to = ids.indexOf(targetId)
-  if (from < 0 || to < 0 || from === to) return
+  if (from < 0 || to < 0 || from === to) {
+    dragItemId.value = null
+    return
+  }
+  if (store.hasSearch) {
+    dragItemId.value = null
+    return
+  }
   ids.splice(from, 1)
   ids.splice(to, 0, dragItemId.value!)
-  if (store.hasSearch) return
   store.reorderItems(ids)
   dragItemId.value = null
 }

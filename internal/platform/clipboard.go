@@ -85,7 +85,10 @@ func SetClipboardFiles(hwnd uintptr, paths []string) error {
 			copy(unsafe.Slice((*byte)(unsafe.Pointer(ptr)), len(data)), data)
 			kernel32.NewProc("GlobalUnlock").Call(handle)
 		}
-		user32.NewProc("SetClipboardData").Call(15, handle) // CF_HDROP
+		if ret, _, _ := user32.NewProc("SetClipboardData").Call(15, handle); ret == 0 {
+			// 设置失败 → 释放已分配的内存
+			kernel32.NewProc("GlobalFree").Call(handle)
+		}
 	}
 
 	return nil
@@ -161,7 +164,10 @@ func SetClipboardImage(hwnd uintptr, imagePath string) error {
 			copy(unsafe.Slice((*byte)(unsafe.Pointer(ptr)), len(dibData)), dibData)
 			kernel32.NewProc("GlobalUnlock").Call(handle)
 		}
-		user32.NewProc("SetClipboardData").Call(8, handle) // CF_DIB
+		if ret, _, _ := user32.NewProc("SetClipboardData").Call(8, handle); ret == 0 {
+			// 设置失败 → 释放已分配的内存
+			kernel32.NewProc("GlobalFree").Call(handle)
+		}
 	}
 
 	return nil

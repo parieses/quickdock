@@ -80,14 +80,14 @@ func (d *Database) GetWorkspace(id string) (*Workspace, error) {
 }
 
 func (d *Database) ReorderWorkspaces(orderedIDs []string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for i, id := range orderedIDs {
-		if _, err := d.conn.Exec("UPDATE workspaces SET sort = ? WHERE id = ?", i*10, id); err != nil {
-			return err
+	return d.Transaction(func(tx *sql.Tx) error {
+		for i, id := range orderedIDs {
+			if _, err := tx.Exec("UPDATE workspaces SET sort = ? WHERE id = ?", i*10, id); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // ---- 场景 ----
@@ -156,12 +156,12 @@ func (d *Database) DeleteScene(id string) error {
 }
 
 func (d *Database) ReorderScenes(orderedIDs []string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for i, id := range orderedIDs {
-		if _, err := d.conn.Exec("UPDATE scenes SET sort = ? WHERE id = ?", i*10, id); err != nil {
-			return err
+	return d.Transaction(func(tx *sql.Tx) error {
+		for i, id := range orderedIDs {
+			if _, err := tx.Exec("UPDATE scenes SET sort = ? WHERE id = ?", i*10, id); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }

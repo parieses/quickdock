@@ -76,12 +76,12 @@ func (d *Database) DeleteCollection(id string) error {
 }
 
 func (d *Database) ReorderCollections(orderedIDs []string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for i, id := range orderedIDs {
-		if _, err := d.conn.Exec("UPDATE collections SET sort = ? WHERE id = ?", i*10, id); err != nil {
-			return err
+	return d.Transaction(func(tx *sql.Tx) error {
+		for i, id := range orderedIDs {
+			if _, err := tx.Exec("UPDATE collections SET sort = ? WHERE id = ?", i*10, id); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }

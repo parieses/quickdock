@@ -1,6 +1,10 @@
 package db
 
-import "time"
+import (
+	"fmt"
+	"strings"
+	"time"
+)
 
 // Snippet 文本片段
 type Snippet struct {
@@ -14,7 +18,7 @@ type Snippet struct {
 // CreateSnippet 创建文本片段
 func (d *Database) CreateSnippet(keyword, content, category string) (*Snippet, error) {
 	if keyword == "" || content == "" {
-		return nil, nil
+		return nil, fmt.Errorf("关键词和内容不能为空")
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -44,10 +48,13 @@ func (d *Database) ListSnippets() ([]Snippet, error) {
 
 // SearchSnippets 按关键词搜索文本片段
 func (d *Database) SearchSnippets(query string) ([]Snippet, error) {
-	like := "%" + query + "%"
+	// LIKE 中 % 和 _ 是通配符，需要转义
+	escaped := strings.ReplaceAll(query, "%", "\\%")
+	escaped = strings.ReplaceAll(escaped, "_", "\\_")
+	like := "%" + escaped + "%"
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rows, err := d.conn.Query("SELECT id, keyword, content, category, created_at FROM snippets WHERE keyword LIKE ? OR content LIKE ? ORDER BY keyword ASC", like, like)
+	rows, err := d.conn.Query("SELECT id, keyword, content, category, created_at FROM snippets WHERE keyword LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' ORDER BY keyword ASC", like, like)
 	if err != nil {
 		return nil, err
 	}

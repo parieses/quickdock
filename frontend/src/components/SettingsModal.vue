@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, toRef, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Trash2, Plus } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
@@ -135,6 +135,7 @@ watch(activePage, (page) => {
 // ---- 剪贴板设置 ----
 const clipboardRetentionDays = ref(30)
 const cleanupResult = ref('')
+const autoStartResult = ref('')
 const autoStart = ref(false)
 const cleanupTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
@@ -150,12 +151,16 @@ function onGlobalKeydown(e: KeyboardEvent) {
   if (activePage.value === 'hotkeys' && hotkeyRef.value?.capturing) {
     return
   }
+  // 全局 handler 和模板 @keydown 可能同时触发，跳过已关闭状态
+  if (activePage.value === null) return
   close()
 }
 
 onUnmounted(() => {
   document.removeEventListener('keydown', onGlobalKeydown)
   clearCleanupTimer()
+  if (snapshotMsgTimer.value) clearTimeout(snapshotMsgTimer.value)
+  if (webdavTimer !== null) clearTimeout(webdavTimer)
 })
 
 async function saveRetentionDays() {
@@ -186,7 +191,7 @@ async function toggleAutoStart() {
     unwrap(await SetAutoStart(newVal))
     autoStart.value = newVal
   } catch (e) {
-    cleanupResult.value = t('saveFailed2') + ': ' + getErrorMessage(e)
+    autoStartResult.value = t('saveFailed2') + ': ' + getErrorMessage(e)
   }
 }
 
@@ -270,12 +275,14 @@ const webdavURL = ref('')
 const webdavUser = ref('')
 const webdavPass = ref('')
 const webdavMsg = ref('')
+let webdavTimer: ReturnType<typeof setTimeout> | null = null
 const webdavBackups = ref<{ name: string; size: number; time: string }[]>([])
 const webdavLoading = ref(false)
 
 function showWebdavMsg(msg: string, duration = 3000) {
+  if (webdavTimer !== null) clearTimeout(webdavTimer)
   webdavMsg.value = msg
-  if (duration > 0) setTimeout(() => { webdavMsg.value = '' }, duration)
+  if (duration > 0) webdavTimer = setTimeout(() => { webdavMsg.value = ''; webdavTimer = null }, duration)
 }
 
 async function loadWebDAVConfig() {
@@ -616,6 +623,7 @@ async function deleteWebDAVBackup(name: string) {
                   </button>
                   <span class="toggle-label">{{ autoStart ? t('autoStartOn') : t('autoStartOff') }}</span>
                 </div>
+                <p v-if="autoStartResult" class="result-hint error">{{ autoStartResult }}</p>
               </div>
             </div>
           </div>

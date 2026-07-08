@@ -47,6 +47,7 @@ export default {
   // 集合列表
   collections: '集合',
   collectionName: '集合名称',
+  collectionNamePlaceholder: '例如：前端项目',
   collectionType: '集合类型',
   noCollections: '暂无集合',
   noMatchCollections: '无匹配集合',
@@ -303,6 +304,7 @@ export default {
   cmdGroupQuicklink: '快速链接',
   cmdGroupSnippets: '文本片段',
   cmdGroupSystem: '系统命令',
+  cmdGroupApps: '应用程序',
   cmdRecent: '最近使用',
   // 命令面板 — 空状态
   cmdEmptyTitle: '开始搜索',

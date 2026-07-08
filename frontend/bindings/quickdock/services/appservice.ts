@@ -126,6 +126,13 @@ export function GetLastCopiedText(): $CancellablePromise<$models.ApiResult | nul
     return $Call.ByID(4290356633);
 }
 
+/**
+ * GetMostUsedItems 返回最常使用的项目（命令面板「最近使用」）
+ */
+export function GetMostUsedItems(limit: number): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(174226976, limit);
+}
+
 export function GetPaletteHotkeyConfig(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2693772577);
 }
@@ -175,6 +182,13 @@ export function HideWindow(): $CancellablePromise<void> {
 
 export function InsertClipboardEntry(text: string, sourceApp: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2229753297, text, sourceApp);
+}
+
+/**
+ * LaunchInstalledApp 启动指定路径的应用
+ */
+export function LaunchInstalledApp(path: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2257915428, path);
 }
 
 export function ListClipboardEntries(): $CancellablePromise<$models.ApiResult | null> {
@@ -254,6 +268,13 @@ export function ReorderWorkspaces(orderedIDs: string[] | null): $CancellableProm
     return $Call.ByID(3135663759, orderedIDs);
 }
 
+/**
+ * ResetInstalledAppsCache 清除应用缓存（下次搜索时重新扫描）
+ */
+export function ResetInstalledAppsCache(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(421562045);
+}
+
 export function RestoreSnapshot(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2330421416, id);
 }
@@ -263,7 +284,14 @@ export function ResumeHotkeys(): $CancellablePromise<void> {
 }
 
 /**
- * SearchAll 跨全部工作空间搜索项目
+ * ScanInstalledApps 扫描已安装应用（缓存，首次调用后复用）
+ */
+export function ScanInstalledApps(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2397186455);
+}
+
+/**
+ * SearchAll 跨全部工作空间搜索项目（使用 FTS5）
  */
 export function SearchAll(query: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1354570973, query);

@@ -47,6 +47,7 @@ export default {
   // Collection List
   collections: 'Collections',
   collectionName: 'Collection Name',
+  collectionNamePlaceholder: 'e.g. Frontend Projects',
   collectionType: 'Collection Type',
   noCollections: 'No collections yet',
   noMatchCollections: 'No matching collections',
@@ -303,6 +304,7 @@ export default {
   cmdGroupQuicklink: 'Quicklinks',
   cmdGroupSnippets: 'Snippets',
   cmdGroupSystem: 'System',
+  cmdGroupApps: 'Apps',
   cmdRecent: 'Recent',
   // Command Palette — Empty State
   cmdEmptyTitle: 'Start Searching',

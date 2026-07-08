@@ -153,14 +153,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function fetchWorkspaces() {
     loading.value = true
+    error.value = ''
     try {
       const result = unwrap(await ListWorkspaces())
       workspaces.value = normalizeRows(result) as Workspace[]
-      if (workspaces.value.length > 0 && !activeWorkspaceId.value) {
-        await selectWorkspace(workspaces.value[0].id)
-      }
     } catch (e) {
-      error.value = getErrorMessage(e)
+      console.error('工作空间加载失败:', e)
     } finally {
       loading.value = false
     }
@@ -182,12 +180,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function fetchScenes(workspaceId: string, gen?: number) {
+    error.value = ''
     try {
       const result = unwrap(await ListScenes(workspaceId))
       if (gen !== undefined && gen !== workspaceGen) return
       scenes.value = normalizeRows(result) as Scene[]
     } catch (e) {
-      error.value = getErrorMessage(e)
+      console.error('场景加载失败:', e)
     }
   }
 
@@ -267,7 +266,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const scene = scenes.value.find(s => s.id === id)
       if (scene) scene.sort = idx * 10
     })
-    scenes.value.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+    scenes.value = [...scenes.value].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
 
     try {
       await ReorderScenes(orderedIDs)
@@ -282,7 +281,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const col = collections.value.find(c => c.id === id)
       if (col) col.sort = idx * 10
     })
-    collections.value.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+    collections.value = [...collections.value].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
 
     try {
       await ReorderCollections(orderedIDs)
@@ -297,7 +296,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const item = items.value.find(i => i.id === id)
       if (item) item.sort = idx * 10
     })
-    items.value.sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+    items.value = [...items.value].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
 
     try {
       await ReorderItems(orderedIDs)
@@ -307,12 +306,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function fetchCollections(sceneId: string, gen?: number) {
+    error.value = ''
     try {
       const result = unwrap(await ListCollections(sceneId))
       if (gen !== undefined && gen !== sceneGen) return
       collections.value = normalizeRows(result) as Collection[]
     } catch (e) {
-      error.value = getErrorMessage(e)
+      console.error('集合加载失败:', e)
     }
   }
 
@@ -326,12 +326,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function fetchItems(collectionId: string, gen?: number) {
+    error.value = ''
     try {
       const result = unwrap(await ListItems(collectionId))
       if (gen !== undefined && gen !== collectionGen) return
       items.value = normalizeRows(result) as CollectionItem[]
     } catch (e) {
-      error.value = getErrorMessage(e)
+      console.error('项目加载失败:', e)
     }
   }
 
@@ -429,13 +430,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function removeScene(id: string) {
     unwrap(await DeleteScene(id))
     scenes.value = scenes.value.filter(s => s.id !== id)
+    openedSceneIds.value = openedSceneIds.value.filter(sid => sid !== id)
     if (activeSceneId.value === id) activeSceneId.value = ''
   }
 
   async function removeCollection(id: string) {
     unwrap(await DeleteCollection(id))
     collections.value = collections.value.filter(c => c.id !== id)
-    if (activeCollectionId.value === id) activeCollectionId.value = ''
+    if (activeCollectionId.value === id) {
+      activeCollectionId.value = ''
+      // 清空属于此集合的 items，防止残留数据
+      items.value = []
+    }
   }
 
   async function removeItem(id: string) {

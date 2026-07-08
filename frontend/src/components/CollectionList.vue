@@ -17,7 +17,7 @@ const collectionFields = computed(() => {
   const ct = tm('collectionTypes') as Record<string, string>
   const os = tm('openStrategies') as Record<string, string>
   return [
-  { key: 'name', label: t('collectionName'), type: 'text' as const, placeholder: '例如：项目源码' },
+  { key: 'name', label: t('collectionName'), type: 'text' as const, placeholder: t('collectionNamePlaceholder') },
   { key: 'type', label: t('collectionType'), type: 'select' as const, options: [
     { label: ct['目录集合'] || '目录集合', value: '目录集合' },
     { label: ct['网页集合'] || '网页集合', value: '网页集合' },
@@ -91,10 +91,16 @@ function onDropCol(e: DragEvent, targetId: string) {
   const ids = store.filteredCollections.map(c => c.id)
   const from = ids.indexOf(dragColId.value!)
   const to = ids.indexOf(targetId)
-  if (from < 0 || to < 0 || from === to) return
+  if (from < 0 || to < 0 || from === to) {
+    dragColId.value = null
+    return
+  }
+  if (store.hasSearch) {
+    dragColId.value = null
+    return
+  }
   ids.splice(from, 1)
   ids.splice(to, 0, dragColId.value!)
-  if (store.hasSearch) return
   store.reorderCollections(ids)
   dragColId.value = null
 }

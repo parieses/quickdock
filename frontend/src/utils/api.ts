@@ -10,7 +10,7 @@ export function unwrap<T = any>(result: ApiResult | null): T | null {
     return null
   }
   if (result.code !== 0) {
-    throw new Error(result.msg || '请求失败')
+    throw new Error(result.msg || 'Request failed')
   }
   return result.data as T
 }

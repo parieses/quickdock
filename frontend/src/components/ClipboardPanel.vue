@@ -65,19 +65,19 @@ function detectType(text: string): DetectedType {
   return null
 }
 
-const tags: SmartTag[] = [
+const tags = computed<SmartTag[]>(() => [
   { id: 'all', label: t('tagAll'), icon: Tag, match: () => true },
   { id: 'url', label: t('tagUrl'), icon: Globe, match: (e) => detectType(e.textContent || '') === 'url' },
   { id: 'email', label: t('tagEmail'), icon: Mail, match: (e) => detectType(e.textContent || '') === 'email' },
   { id: 'json', label: t('tagJson'), icon: Braces, match: (e) => detectType(e.textContent || '') === 'json' },
   { id: 'code', label: t('tagCode'), icon: Code, match: (e) => detectType(e.textContent || '') === 'code' },
   { id: 'phone', label: t('tagPhone'), icon: Phone, match: (e) => detectType(e.textContent || '') === 'phone' },
-]
+])
 
 const filteredEntries = computed(() => {
   let list = entries.value
   // 按标签筛选
-  const tag = tags.find(t => t.id === activeTag.value)
+  const tag = tags.value.find(t => t.id === activeTag.value)
   if (tag && tag.id !== 'all') {
     list = list.filter(e => e.contentType === 'text' && tag.match(e))
   }
@@ -526,8 +526,8 @@ onUnmounted(() => {
   padding: 10px 12px; border-radius: 8px;
   cursor: pointer; transition: background 0.1s;
 }
-.clipboard-item:hover { background: var(--color-accent-bg); }
 .clipboard-item:hover {
+  background: var(--color-accent-bg);
   outline: 1px solid var(--color-accent-border);
   outline-offset: -1px;
 }

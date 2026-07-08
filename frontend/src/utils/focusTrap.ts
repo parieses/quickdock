@@ -27,6 +27,7 @@ export function useFocusTrap(visible: Ref<boolean>, panelRef: Ref<HTMLElement | 
           firstFocusable.value = focusable[0]
           focusable[0].focus()
         } else {
+          panelRef.value.setAttribute('tabindex', '-1')
           panelRef.value.focus()
         }
       })

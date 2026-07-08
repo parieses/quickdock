@@ -138,6 +138,32 @@ var baseTables = []string{
 	)`,
 }
 
+// ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
+var ftsTables = []string{
+	`CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
+		id UNINDEXED,
+		name,
+		value,
+		content='items',
+		content_rowid='rowid',
+		tokenize='unicode61'
+	)`,
+}
+
+// ftsTriggers 同步 items ↔ items_fts 的触发器
+var ftsTriggers = []string{
+	`CREATE TRIGGER IF NOT EXISTS items_ai AFTER INSERT ON items BEGIN
+		INSERT INTO items_fts(rowid, id, name, value) VALUES (new.rowid, new.id, new.name, new.value);
+	END`,
+	`CREATE TRIGGER IF NOT EXISTS items_ad AFTER DELETE ON items BEGIN
+		INSERT INTO items_fts(items_fts, rowid, id, name, value) VALUES ('delete', old.rowid, old.id, old.name, old.value);
+	END`,
+	`CREATE TRIGGER IF NOT EXISTS items_au AFTER UPDATE ON items BEGIN
+		INSERT INTO items_fts(items_fts, rowid, id, name, value) VALUES ('delete', old.rowid, old.id, old.name, old.value);
+		INSERT INTO items_fts(rowid, id, name, value) VALUES (new.rowid, new.id, new.name, new.value);
+	END`,
+}
+
 // migrate 执行首次初始化（兼容现有数据库）
 // 所有表使用 CREATE TABLE IF NOT EXISTS，安全重复执行
 func (d *Database) migrate() error {
@@ -150,6 +176,25 @@ func (d *Database) migrate() error {
 			return fmt.Errorf("创建表失败: %w", err)
 		}
 	}
+
+	// 创建 FTS5 虚拟表
+	for _, sql := range ftsTables {
+		if _, err := d.conn.Exec(sql); err != nil {
+			return fmt.Errorf("FTS5 创建失败: %w", err)
+		}
+	}
+
+	// 创建 FTS5 同步触发器
+	for _, sql := range ftsTriggers {
+		if _, err := d.conn.Exec(sql); err != nil {
+			return fmt.Errorf("FTS5 触发器创建失败: %w", err)
+		}
+	}
+
+	// 填充已有的 items 数据到 FTS5 索引
+	d.conn.Exec(`INSERT INTO items_fts(rowid, id, name, value)
+		SELECT rowid, id, name, value FROM items
+		WHERE NOT EXISTS (SELECT 1 FROM items_fts WHERE items_fts.rowid = items.rowid)`)
 
 	// 安全兜底：检查 clipboard_entries 是否有 copy_count 列
 	// （仅对 2026-07-07 之前创建的旧数据库生效）

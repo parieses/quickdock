@@ -72,7 +72,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	}
 
 	// 设置全局 App 引用（供 SetClipboardText 等函数使用）
-	AppRef = a.app
+	AppRef.Store(a.app)
 
 	// 启动全局快捷键和系统托盘（由 main 包注入的回调）
 	if a.WindowVisible != nil {

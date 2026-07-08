@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"path"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -53,15 +54,23 @@ type resourceType struct {
 	Collection string `xml:"collection"`
 }
 
-// HTTP 客户端创建与请求构建
+// ---- HTTP 客户端单例（复用 TCP 连接，减少 TIME_WAIT）----
+
+var (
+	httpClientOnce sync.Once
+	httpClient     *http.Client
+)
 
 func newClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
-		},
-		Timeout: 30 * time.Second,
-	}
+	httpClientOnce.Do(func() {
+		httpClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
+			},
+			Timeout: 30 * time.Second,
+		}
+	})
+	return httpClient
 }
 
 func newRequest(cfg *Config, method, urlPath string, body io.Reader) (*http.Request, error) {
@@ -75,6 +84,36 @@ func newRequest(cfg *Config, method, urlPath string, body io.Reader) (*http.Requ
 		req.SetBasicAuth(cfg.Username, cfg.Password)
 	}
 	return req, nil
+}
+
+// maxResponseSize 最大响应体大小：10MB
+const maxResponseSize int64 = 10 * 1024 * 1024
+
+// sanitizeFilename 校验备份文件名，防止路径穿越
+func sanitizeFilename(name string) error {
+	if name == "" {
+		return fmt.Errorf("文件名不能为空")
+	}
+	if strings.Contains(name, "..") || strings.Contains(name, "/") || strings.Contains(name, "\\") {
+		return fmt.Errorf("非法的文件名: %s", name)
+	}
+	if len(name) > 255 {
+		return fmt.Errorf("文件名过长: %d", len(name))
+	}
+	return nil
+}
+
+// readLimited 限制读取大小
+func readLimited(r io.Reader, limit int64) ([]byte, error) {
+	reader := io.LimitReader(r, limit+1)
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(body)) > limit {
+		return nil, fmt.Errorf("响应体过大 (超过 %d bytes)", limit)
+	}
+	return body, nil
 }
 
 // ---- 公开 API ----
@@ -127,7 +166,7 @@ func ListBackups(cfg *Config) ([]BackupFile, error) {
 		return nil, fmt.Errorf("服务器返回状态码: %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimited(resp.Body, maxResponseSize)
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +218,7 @@ func UploadBackup(cfg *Config, jsonData string) (string, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := readLimited(resp.Body, maxResponseSize)
 		return "", fmt.Errorf("上传失败 (HTTP %d): %s", resp.StatusCode, string(body))
 	}
 
@@ -190,6 +229,9 @@ func UploadBackup(cfg *Config, jsonData string) (string, error) {
 func DownloadBackup(cfg *Config, filename string) (string, error) {
 	if cfg.URL == "" {
 		return "", fmt.Errorf("服务器地址不能为空")
+	}
+	if err := sanitizeFilename(filename); err != nil {
+		return "", err
 	}
 	client := newClient()
 	req, err := newRequest(cfg, "GET", "/"+filename, nil)
@@ -207,7 +249,7 @@ func DownloadBackup(cfg *Config, filename string) (string, error) {
 		return "", fmt.Errorf("下载失败 (HTTP %d)", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := readLimited(resp.Body, maxResponseSize)
 	if err != nil {
 		return "", err
 	}
@@ -217,6 +259,9 @@ func DownloadBackup(cfg *Config, filename string) (string, error) {
 
 // DeleteBackup 删除 WebDAV 上的备份文件
 func DeleteBackup(cfg *Config, filename string) error {
+	if err := sanitizeFilename(filename); err != nil {
+		return err
+	}
 	client := newClient()
 	req, err := newRequest(cfg, "DELETE", "/"+filename, nil)
 	if err != nil {

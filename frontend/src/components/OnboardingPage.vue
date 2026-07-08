@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { inject } from 'vue'
+import { inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
@@ -8,15 +8,20 @@ import type { ToastAPI } from '../types'
 const { t } = useI18n()
 const store = useWorkspaceStore()
 const toast = inject<ToastAPI>('toast')!
+const isCreating = ref(false)
 
 const emit = defineEmits<{ (e: 'open-settings', page?: string): void }>()
 
 async function handleGetStarted() {
+  if (isCreating.value) return
+  isCreating.value = true
   try {
     const ws = await store.addWorkspace(t('defaultWorkspaceName'))
     await store.selectWorkspace(ws.id)
   } catch (e) {
     toast.error(t('createFailed') + ': ' + getErrorMessage(e))
+  } finally {
+    isCreating.value = false
   }
 }
 
@@ -42,7 +47,7 @@ function openSettings() {
       <p class="ob-desc">{{ t('welcomeDesc') }}</p>
 
       <!-- 开始按钮 -->
-      <button class="ob-start-btn" @click="handleGetStarted">
+      <button class="ob-start-btn" :class="{ disabled: isCreating }" :disabled="isCreating" @click="handleGetStarted">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <polygon points="5 3 19 12 5 21 5 3"/>
         </svg>
