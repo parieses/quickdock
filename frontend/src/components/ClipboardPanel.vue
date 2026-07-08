@@ -549,7 +549,7 @@ onUnmounted(() => {
 .clipboard-item.selected .pin-btn { opacity: 0.4; }
 .pin-btn:hover { opacity: 0.8 !important; }
 .pin-btn.pinned {
-  opacity: 0.9; color: #f59e0b;
+  opacity: 0.9; color: var(--color-star);
 }
 .pin-btn.pinned:hover { opacity: 1 !important; }
 

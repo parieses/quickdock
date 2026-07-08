@@ -16,7 +16,10 @@ import ConfirmDialog from './components/ConfirmDialog.vue';
 import OnboardingPage from './components/OnboardingPage.vue';
 import CommandPalette from './components/CommandPalette.vue';
 
-document.title = '快启坞';
+document.title = i18n.global.t('appName');
+watch(() => i18n.global.locale.value, () => {
+  document.title = i18n.global.t('appName');
+});
 
 const store = useWorkspaceStore();
 const { items, remove, error, success, confirm, confirmItems, resolveConfirm } = useToast();
@@ -162,6 +165,11 @@ body {
 .clipboard-standalone {
   height: 100vh; width: 100vw; overflow: hidden;
   background: var(--color-bg-primary);
+}
+
+.palette-standalone {
+  height: 100vh; width: 100vw; overflow: hidden;
+  background: transparent;
 }
 
 .app-container {

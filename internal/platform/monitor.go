@@ -31,31 +31,24 @@ var (
 // expects a POINT struct (two int32 packed into one 8-byte value).
 // On 64-bit Windows this causes dwFlags to receive the y coordinate,
 // making the function return NULL.
-func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight int) {
-	if win == nil {
-		return
-	}
-
-	// 1. Get cursor position (physical pixel coordinates)
+// getCursorMonitorWorkArea returns the work area (physical pixels) of the
+// monitor nearest to the mouse cursor. Returns false on failure.
+func getCursorMonitorWorkArea() (workLeft, workTop, workWidth, workHeight int, ok bool) {
 	var cursorPt struct{ X, Y int32 }
 	ret, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursorPt)))
 	if ret == 0 {
 		fmt.Println("QuickDock: GetCursorPos failed, keeping default position")
-		return
+		return 0, 0, 0, 0, false
 	}
 
-	// 2. Find nearest monitor.
-	// Pack POINT into a single uintptr: low 32 bits = X, high 32 bits = Y.
-	// This is how the x64 calling convention passes an 8-byte struct by value.
 	pointPacked := uintptr(uint32(cursorPt.X)) | (uintptr(uint32(cursorPt.Y)) << 32)
 	const MONITOR_DEFAULTTONEAREST = 0x00000002
 	hMonitor, _, _ := procMonitorFromPt.Call(pointPacked, uintptr(MONITOR_DEFAULTTONEAREST))
 	if hMonitor == 0 {
 		fmt.Println("QuickDock: MonitorFromPoint failed, keeping default position")
-		return
+		return 0, 0, 0, 0, false
 	}
 
-	// 3. Get monitor work area (physical coordinates — excludes taskbar etc.)
 	var mi struct {
 		CbSize    uint32
 		RcMonitor struct{ Left, Top, Right, Bottom int32 }
@@ -66,13 +59,75 @@ func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight
 	ret, _, _ = procGetMonitorInfo.Call(hMonitor, uintptr(unsafe.Pointer(&mi)))
 	if ret == 0 {
 		fmt.Println("QuickDock: GetMonitorInfo failed, keeping default position")
+		return 0, 0, 0, 0, false
+	}
+
+	return int(mi.RcWork.Left), int(mi.RcWork.Top),
+		int(mi.RcWork.Right - mi.RcWork.Left), int(mi.RcWork.Bottom - mi.RcWork.Top),
+		true
+}
+
+// setWindowPosPhysical moves the window using SetWindowPos with physical
+// pixel coordinates, bypassing Wails' DIP conversion to avoid double-scaling.
+func setWindowPosPhysical(win *application.WebviewWindow, x, y int) {
+	hwnd := win.NativeWindow()
+	if hwnd == nil {
+		win.SetPosition(x, y)
+		return
+	}
+	const SWP_NOSIZE = 0x0001
+	const SWP_NOZORDER = 0x0004
+	procSetWindowPos.Call(
+		uintptr(hwnd),
+		0,
+		uintptr(x), uintptr(y),
+		0, 0,
+		uintptr(SWP_NOSIZE|SWP_NOZORDER),
+	)
+}
+
+// SetWindowToScreenTopCenter positions the window at the top-center of the
+// monitor where the mouse cursor is located (Spotlight style).
+// topMargin is the gap from the top of the work area, in physical pixels.
+func SetWindowToScreenTopCenter(win *application.WebviewWindow, winWidth, winHeight, topMargin int) {
+	if win == nil {
 		return
 	}
 
-	workLeft := int(mi.RcWork.Left)
-	workTop := int(mi.RcWork.Top)
-	workWidth := int(mi.RcWork.Right - mi.RcWork.Left)
-	workHeight := int(mi.RcWork.Bottom - mi.RcWork.Top)
+	workLeft, workTop, workWidth, _, ok := getCursorMonitorWorkArea()
+	if !ok {
+		return
+	}
+
+	// Get window physical size
+	var physW int
+	hwnd := win.NativeWindow()
+	if hwnd != nil {
+		var winRect struct{ Left, Top, Right, Bottom int32 }
+		ret, _, _ := procGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&winRect)))
+		if ret != 0 && winRect.Right > winRect.Left {
+			physW = int(winRect.Right - winRect.Left)
+		}
+	}
+	if physW == 0 {
+		physW = winWidth
+	}
+
+	x := workLeft + (workWidth-physW)/2
+	y := workTop + topMargin
+
+	setWindowPosPhysical(win, x, y)
+}
+
+func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight int) {
+	if win == nil {
+		return
+	}
+
+	workLeft, workTop, workWidth, workHeight, ok := getCursorMonitorWorkArea()
+	if !ok {
+		return
+	}
 
 	// 4. Try to use SetWindowPos directly with physical coordinates
 	hwnd := win.NativeWindow()
@@ -103,24 +158,14 @@ func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight
 		if y < workTop {
 			y = workTop
 		}
-		if x+physW > int(mi.RcWork.Right) {
-			x = int(mi.RcWork.Right) - physW
+		if x+physW > workLeft+workWidth {
+			x = workLeft + workWidth - physW
 		}
-		if y+physH > int(mi.RcWork.Bottom) {
-			y = int(mi.RcWork.Bottom) - physH
+		if y+physH > workTop+workHeight {
+			y = workTop + workHeight - physH
 		}
 
-		// 6. Move window using SetWindowPos (physical coordinates, no DPI conversion)
-		const SWP_NOSIZE = 0x0001
-		const SWP_NOZORDER = 0x0004
-		procSetWindowPos.Call(
-			uintptr(hwnd),
-			0, // HWND_TOP (ignored with SWP_NOZORDER)
-			uintptr(x), uintptr(y),
-			0, 0, // width/height ignored (SWP_NOSIZE)
-			uintptr(SWP_NOSIZE|SWP_NOZORDER),
-		)
-
+		setWindowPosPhysical(win, x, y)
 		return
 	}
 
@@ -135,11 +180,11 @@ func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight
 	if y < workTop {
 		y = workTop
 	}
-	if x+winWidth > int(mi.RcWork.Right) {
-		x = int(mi.RcWork.Right) - winWidth
+	if x+winWidth > workLeft+workWidth {
+		x = workLeft + workWidth - winWidth
 	}
-	if y+winHeight > int(mi.RcWork.Bottom) {
-		y = int(mi.RcWork.Bottom) - winHeight
+	if y+winHeight > workTop+workHeight {
+		y = workTop + workHeight - winHeight
 	}
 
 	win.SetPosition(x, y)

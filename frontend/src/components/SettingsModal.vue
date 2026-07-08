@@ -367,14 +367,6 @@ async function deleteWebDAVBackup(name: string) {
     showWebdavMsg(t('saveFailed2') + ': ' + getErrorMessage(e))
   }
 }
-
-// 进入 WebDAV 页面自动加载配置和备份列表
-watch(activePage, (page) => {
-  if (page === 'webdav') {
-    loadWebDAVConfig()
-    listWebDAVBackups()
-  }
-})
 </script>
 
 <template>
@@ -702,7 +694,7 @@ watch(activePage, (page) => {
 .menu-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .menu-row-label { font-size: 13px; font-weight: 500; }
 .menu-row-desc { font-size: 11px; color: var(--color-text-disabled); }
-.menu-row.active .menu-row-desc { color: rgba(74, 158, 255, 0.5); }
+.menu-row.active .menu-row-desc { color: var(--color-accent-muted); }
 .menu-row-arrow { color: var(--color-text-disabled); flex-shrink: 0; }
 .menu-row.active .menu-row-arrow { color: var(--color-accent); }
 
@@ -748,7 +740,7 @@ watch(activePage, (page) => {
   font-family: inherit; transition: all 0.12s;
 }
 .theme-card:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
-.theme-card.active { border-color: var(--color-accent); background: rgba(74,158,255,0.08); color: var(--color-accent); }
+.theme-card.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
 .locale-selector { display: flex; gap: 8px; }
 .locale-btn {
   padding: 8px 20px; border: 1px solid var(--color-border); border-radius: 8px;
@@ -756,7 +748,7 @@ watch(activePage, (page) => {
   font-family: inherit; transition: all 0.12s;
 }
 .locale-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
-.locale-btn.active { border-color: var(--color-accent); background: rgba(74,158,255,0.08); color: var(--color-accent); }
+.locale-btn.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
 
 /* 数据与备份 */
 .content-left { align-items: flex-start; justify-content: flex-start; }
@@ -830,7 +822,7 @@ watch(activePage, (page) => {
   outline: none; transition: border-color 0.15s;
   font-family: inherit;
 }
-.webdav-form .field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px rgba(74,158,255,0.12); }
+.webdav-form .field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-border); }
 .webdav-form .field-input::placeholder { color: var(--color-text-disabled); }
 .snapshot-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
 .snapshot-item {

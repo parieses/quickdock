@@ -144,7 +144,7 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 	if args == "" {
 		args = "{{path}}"
 	}
-	if itemType == "网页" {
+	if itemType == "网页" || itemType == "快速链接" {
 		args = strings.ReplaceAll(args, "{{url}}", value)
 		args = strings.ReplaceAll(args, "{{path}}", value)
 	} else if itemType == "命令" {
@@ -167,7 +167,7 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 func openWithSystemDefault(value, itemType string, workingDir string) error {
 	goos := goruntime.GOOS
 
-	if itemType == "网页" {
+	if itemType == "网页" || itemType == "快速链接" {
 		if goos == "windows" {
 			return windows.ShellExecute(0,
 				windows.StringToUTF16Ptr("open"),
@@ -192,6 +192,9 @@ func openWithSystemDefault(value, itemType string, workingDir string) error {
 	} else if itemType == "命令" {
 		if goos == "windows" {
 			argList := splitArgs(value)
+			if len(argList) == 0 {
+				return fmt.Errorf("命令内容为空")
+			}
 			cmd := exec.Command(argList[0], argList[1:]...)
 			if workingDir != "" {
 				cmd.Dir = workingDir

@@ -18,12 +18,14 @@ export default {
   workspace: '工作空间',
   workspaces: '工作空间',
   addWorkspace: '新建工作空间',
+  workspaceNamePlaceholder: '例如：日常工作',
   selectWorkspace: '选择工作空间',
   confirmDeleteWorkspace: '确定删除此工作空间？所有场景、集合和项目将被一并删除。',
 
   // 侧边栏 - 场景
   scenes: '场景',
   sceneName: '场景名称',
+  sceneNamePlaceholder: '例如：前端开发',
   sceneType: '场景类型',
   noScenes: '暂无场景',
   noMatchScenes: '无匹配场景',
@@ -90,7 +92,12 @@ export default {
     '命令': '命令',
     '文件': '文件',
     '应用': '应用',
+    '快速链接': '快速链接',
   },
+  quicklink: '快速链接',
+  quicklinkDesc: '支持 {query} 占位符的模板链接，在命令面板中动态替换',
+  quicklinkUrlPlaceholder: '例如：https://google.com/search?q={query}',
+  quicklinkBadge: 'QL',
 
   // 项目编辑器
   itemEditorTitle: '编辑项目',
@@ -270,10 +277,11 @@ export default {
   restore: '恢复',
 
   // 命令面板
-  cmdPlaceholder: '搜索项目、计算表达式、系统命令...',
+  cmdPlaceholder: '搜索项目、快速链接、计算表达式、系统命令...',
   cmdTipSearch: '输入关键词搜索项目（支持拼音首字母）',
   cmdTipCalc: '输入数学表达式实时计算（如 12*34）',
   cmdTipSystem: '输入系统命令（锁屏/关机/休眠/清空回收站）',
+  cmdTipQuicklink: '输入任意文本可用快速链接搜索（如 Google/Bing）',
   cmdNoResults: '无匹配结果',
   cmdLoadFailed: '加载项目失败',
   calcHint: '按 Enter 复制结果',
@@ -289,4 +297,17 @@ export default {
   cmdsleepDesc: 'Sleep',
   cmdEmptyTrash: '清空回收站',
   cmdEmptyTrashDesc: 'Empty Recycle Bin',
+  // 命令面板 — 分组标题
+  cmdGroupCalc: '计算器',
+  cmdGroupItems: '项目',
+  cmdGroupQuicklink: '快速链接',
+  cmdGroupSnippets: '文本片段',
+  cmdGroupSystem: '系统命令',
+  cmdRecent: '最近使用',
+  // 命令面板 — 空状态
+  cmdEmptyTitle: '开始搜索',
+  cmdEmptyDesc: '输入关键词搜索项目、快速链接、文本片段，或输入数学表达式计算',
+  // 命令面板 — 底部快捷键
+  cmdNavigate: '导航',
+  cmdExecute: '执行',
 };

@@ -79,6 +79,12 @@ export interface OpenTool {
   isDefault?: number
 }
 
+export interface HotkeyConfig {
+  modifiers: number
+  vk: number
+  label: string
+}
+
 // scene.type 实际使用中文值，见 schema.go scenes.type DEFAULT '通用'
 // collection.type 实际使用中文值，见 schema.go collections.type DEFAULT '目录集合'
 // collectionItem.type 实际使用中文值，见 schema.go items.type DEFAULT '目录'

@@ -8,6 +8,7 @@ import { ListScenes, CreateScene, UpdateScene, DeleteScene, ReorderScenes } from
 import { ListCollections, CreateCollection, UpdateCollection, DeleteCollection, ReorderCollections } from '../../bindings/quickdock/services/appservice'
 import { ListItems, CreateItem, UpdateItem, DeleteItem, OpenItem, OpenAllInCollection, ReorderItems } from '../../bindings/quickdock/services/appservice'
 import { ListTools, GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
+import type { CollectionItem as BindingCollectionItem } from '../../bindings/quickdock/internal/db/models'
 import type { Workspace, Scene, Collection, CollectionItem, OpenTool } from '../types'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -19,6 +20,7 @@ const TYPE_TOOL_MAP: Record<string, string> = {
   '网页': '浏览器',
   '命令': '终端',
   '应用': '系统',
+  '快速链接': '浏览器',
 }
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -204,7 +206,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     try { unwrap(await SetValue('lastSceneId', id)) } catch (_) {}
   }
 
-  function closeSceneTab(id: string) {
+  async function closeSceneTab(id: string) {
     const idx = openedSceneIds.value.indexOf(id)
     if (idx < 0) return
     openedSceneIds.value.splice(idx, 1)
@@ -213,7 +215,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (openedSceneIds.value.length > 0) {
         // 优先切换到后一个，没有则前一个
         const nextId = openedSceneIds.value[Math.min(idx, openedSceneIds.value.length - 1)]
-        selectScene(nextId)
+        await selectScene(nextId)
       } else {
         activeSceneId.value = ''
         activeCollectionId.value = ''
@@ -225,36 +227,36 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   // 关闭左侧所有标签页
-  function closeTabsToLeft(id: string) {
+  async function closeTabsToLeft(id: string) {
     const idx = openedSceneIds.value.indexOf(id)
     if (idx <= 0) return
     const toRemove = openedSceneIds.value.slice(0, idx)
     openedSceneIds.value.splice(0, idx)
     // 如果当前激活的场景被关闭了，切换到被右击的场景
     if (toRemove.includes(activeSceneId.value)) {
-      selectScene(id)
+      await selectScene(id)
     }
   }
 
   // 关闭右侧所有标签页
-  function closeTabsToRight(id: string) {
+  async function closeTabsToRight(id: string) {
     const idx = openedSceneIds.value.indexOf(id)
     if (idx < 0 || idx >= openedSceneIds.value.length - 1) return
     const toRemove = openedSceneIds.value.slice(idx + 1)
     openedSceneIds.value.splice(idx + 1)
     // 如果当前激活的场景被关闭了，切换到被右击的场景
     if (toRemove.includes(activeSceneId.value)) {
-      selectScene(id)
+      await selectScene(id)
     }
   }
 
   // 关闭其他所有标签页（仅保留当前）
-  function closeOtherTabs(id: string) {
+  async function closeOtherTabs(id: string) {
     if (openedSceneIds.value.length <= 1) return
     openedSceneIds.value = [id]
     // 如果当前激活的不是被右击的场景，切换过去
     if (activeSceneId.value !== id) {
-      selectScene(id)
+      await selectScene(id)
     }
   }
 
@@ -444,7 +446,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // ---- 打开 ----
 
   async function openItem(item: CollectionItem) {
-    unwrap(await OpenItem(item as any))
+    unwrap(await OpenItem(item as BindingCollectionItem))
   }
 
   async function openAllInCollection(collectionId: string) {

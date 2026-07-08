@@ -124,7 +124,7 @@ const showSceneDialog = ref(false)
 const sceneFields = computed(() => {
   const st = tm('sceneTypes') as Record<string, string>
   return [
-  { key: 'name', label: t('sceneName'), type: 'text' as const, placeholder: '例如：前端开发' },
+  { key: 'name', label: t('sceneName'), type: 'text' as const, placeholder: t('sceneNamePlaceholder') },
   { key: 'type', label: t('sceneType'), type: 'select' as const, options: [
     { label: st['项目'] || '项目', value: '项目' },
     { label: st['办公'] || '办公', value: '办公' },
@@ -277,10 +277,10 @@ async function handleDeleteScene(sceneId: string) {
       :editValues="editingScene ? { name: editingScene.name, type: editingScene.type ?? '通用' } : undefined"
       @confirm="handleEditScene" @cancel="showEditDialog = false; editingScene = null" />
     <CreateDialog :visible="showCreateWorkspaceDialog" :title="t('addWorkspace')"
-      :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: '例如：日常工作' }]"
+      :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: t('workspaceNamePlaceholder') }]"
       @confirm="handleCreateWorkspace" @cancel="showCreateWorkspaceDialog = false" />
     <CreateDialog :visible="showEditWorkspaceDialog" :title="t('edit')"
-      :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: '例如：日常工作' }]"
+      :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: t('workspaceNamePlaceholder') }]"
       :editValues="{ name: editingWorkspaceName }"
       @confirm="handleEditWorkspace" @cancel="showEditWorkspaceDialog = false" />
 

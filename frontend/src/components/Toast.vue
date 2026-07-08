@@ -44,11 +44,11 @@ defineEmits<{
 .toast-item {
   display: flex; align-items: center; gap: 8px;
   padding: 10px 20px; border-radius: 8px; font-size: 13px;
-  box-shadow: 0 4px 24px rgba(0,0,0,0.45);
+  box-shadow: var(--shadow-toast);
   pointer-events: auto; cursor: pointer; white-space: nowrap;
   transition: box-shadow 0.15s;
 }
-.toast-item:hover { box-shadow: 0 6px 28px rgba(0,0,0,0.55); }
+.toast-item:hover { box-shadow: var(--shadow-toast-hover); }
 .toast-item.error {
   background: var(--color-toast-error-bg); color: var(--color-toast-error-text); border: 1px solid var(--color-toast-error-border);
 }

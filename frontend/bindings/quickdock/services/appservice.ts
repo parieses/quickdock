@@ -119,6 +119,13 @@ export function GetHotkeyConfig(): $CancellablePromise<$models.ApiResult | null>
     return $Call.ByID(2024743010);
 }
 
+/**
+ * GetLastCopiedText 返回最近一次复制的文本
+ */
+export function GetLastCopiedText(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(4290356633);
+}
+
 export function GetPaletteHotkeyConfig(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2693772577);
 }

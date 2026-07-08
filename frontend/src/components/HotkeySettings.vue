@@ -5,6 +5,7 @@ import { Keyboard, RotateCcw } from '@lucide/vue'
 import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import type { HotkeyConfig } from '../types'
 
 const { t } = useI18n()
 
@@ -113,16 +114,16 @@ function onGlobalKeyDown(e: KeyboardEvent) {
 onMounted(async () => {
   document.addEventListener('keydown', onGlobalKeyDown, true)
   try {
-    const c = unwrap(await GetHotkeyConfig())
-    if (c) { currentLabel.value = (c as any).label; currentModifiers.value = (c as any).modifiers; currentVk.value = (c as any).vk }
+    const c = unwrap<HotkeyConfig>(await GetHotkeyConfig())
+    if (c) { currentLabel.value = c.label; currentModifiers.value = c.modifiers; currentVk.value = c.vk }
   } catch {}
   try {
-    const c = unwrap(await GetClipboardHotkeyConfig())
-    if (c) { clipLabel.value = (c as any).label; clipModifiers.value = (c as any).modifiers; clipVk.value = (c as any).vk }
+    const c = unwrap<HotkeyConfig>(await GetClipboardHotkeyConfig())
+    if (c) { clipLabel.value = c.label; clipModifiers.value = c.modifiers; clipVk.value = c.vk }
   } catch {}
   try {
-    const c = unwrap(await GetPaletteHotkeyConfig())
-    if (c) { paletteLabel.value = (c as any).label; paletteModifiers.value = (c as any).modifiers; paletteVk.value = (c as any).vk }
+    const c = unwrap<HotkeyConfig>(await GetPaletteHotkeyConfig())
+    if (c) { paletteLabel.value = c.label; paletteModifiers.value = c.modifiers; paletteVk.value = c.vk }
   } catch {}
 })
 

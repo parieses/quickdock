@@ -20,8 +20,8 @@ const (
 	appHeight        = 700
 	clipWinWidth     = 480
 	clipWinHeight    = 420
-	paletteWinWidth  = 620
-	paletteWinHeight = 480
+	paletteWinWidth  = 680
+	paletteWinHeight = 460
 )
 
 // 全局状态标志（main/tray.go 与 services 共享）
@@ -122,7 +122,7 @@ func main() {
 		Height:           paletteWinHeight,
 		Frameless:        true,
 		AlwaysOnTop:      true,
-		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
+		BackgroundColour: application.RGBA{Red: 0, Green: 0, Blue: 0, Alpha: 1},
 		URL:              "/#/command-palette",
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: true,

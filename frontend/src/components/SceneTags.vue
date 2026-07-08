@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
+import type { Scene } from '../types'
 
 const store = useWorkspaceStore()
 const { t } = useI18n()
@@ -10,7 +11,7 @@ const { t } = useI18n()
 const openedTabs = computed(() => {
   return store.openedSceneIds
     .map(id => store.scenes.find(s => s.id === id))
-    .filter(Boolean) // 过滤已删除的场景
+    .filter((s): s is Scene => s !== undefined)
 })
 
 // 右键菜单状态
@@ -88,14 +89,14 @@ function onClickAway() {
     <div class="tabs-container">
       <button
         v-for="tab in openedTabs"
-        :key="tab!.id"
-        :class="['tab', { active: tab!.id === store.activeSceneId }]"
-        :title="tab!.name"
-        @click="selectTab(tab!.id)"
-        @contextmenu="onContextMenu(tab!.id, $event)"
+        :key="tab.id"
+        :class="['tab', { active: tab.id === store.activeSceneId }]"
+        :title="tab.name"
+        @click="selectTab(tab.id)"
+        @contextmenu="onContextMenu(tab.id, $event)"
       >
-        <span class="tab-label">{{ tab!.name }}</span>
-        <span class="tab-close" @click="closeTab(tab!.id, $event)">✕</span>
+        <span class="tab-label">{{ tab.name }}</span>
+        <span class="tab-close" @click="closeTab(tab.id, $event)">✕</span>
       </button>
     </div>
     <div class="tab-line" />
@@ -179,7 +180,7 @@ function onClickAway() {
   left: 1px;
   right: 1px;
   height: 2px;
-  background: linear-gradient(90deg, var(--color-accent), #6db3ff);
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-light));
   border-radius: 0 0 1px 1px;
 }
 

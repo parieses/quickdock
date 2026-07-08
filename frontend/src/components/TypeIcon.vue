@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import {
   Layers, Folder, FolderOpen, Globe, Terminal,
   File, Monitor, Briefcase, Building2, Wrench,
-  Palette, Star,
+  Palette, Star, Link,
 } from '@lucide/vue'
 
 const props = defineProps<{
@@ -39,6 +39,7 @@ const itemIconMap: Record<string, any> = {
   '命令': Terminal,
   '文件': File,
   '应用': Monitor,
+  '快速链接': Link,
 }
 
 const iconComponent = computed<any>(() => {

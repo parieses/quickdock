@@ -18,12 +18,14 @@ export default {
   workspace: 'Workspace',
   workspaces: 'Workspaces',
   addWorkspace: 'New Workspace',
+  workspaceNamePlaceholder: 'e.g. Daily Work',
   selectWorkspace: 'Select Workspace',
   confirmDeleteWorkspace: 'Delete this workspace? All scenes, collections and items will also be deleted.',
 
   // Sidebar - Scenes
   scenes: 'Scenes',
   sceneName: 'Scene Name',
+  sceneNamePlaceholder: 'e.g. Frontend Dev',
   sceneType: 'Scene Type',
   noScenes: 'No scenes yet',
   noMatchScenes: 'No matching scenes',
@@ -90,7 +92,12 @@ export default {
     '命令': 'Command',
     '文件': 'File',
     '应用': 'App',
+    '快速链接': 'Quicklink',
   },
+  quicklink: 'Quicklink',
+  quicklinkDesc: 'Template URL with {query} placeholder for dynamic replacement',
+  quicklinkUrlPlaceholder: 'e.g. https://google.com/search?q={query}',
+  quicklinkBadge: 'QL',
 
   // Item Editor
   itemEditorTitle: 'Edit Item',
@@ -270,10 +277,11 @@ export default {
   restore: 'Restore',
 
   // Command Palette
-  cmdPlaceholder: 'Search items, calculate, system commands...',
+  cmdPlaceholder: 'Search items, quicklinks, calculate, system commands...',
   cmdTipSearch: 'Type to search items (pinyin supported)',
   cmdTipCalc: 'Enter math expression to calculate (e.g. 12*34)',
   cmdTipSystem: 'Type system commands (lock/shutdown/sleep/empty trash)',
+  cmdTipQuicklink: 'Type any text to forward to Quicklinks (e.g. Google/Bing)',
   cmdNoResults: 'No results found',
   cmdLoadFailed: 'Failed to load items',
   calcHint: 'Press Enter to copy result',
@@ -289,4 +297,17 @@ export default {
   cmdsleepDesc: 'Sleep',
   cmdEmptyTrash: 'Empty Trash',
   cmdEmptyTrashDesc: 'Empty Recycle Bin',
+  // Command Palette — Group Headers
+  cmdGroupCalc: 'Calculator',
+  cmdGroupItems: 'Items',
+  cmdGroupQuicklink: 'Quicklinks',
+  cmdGroupSnippets: 'Snippets',
+  cmdGroupSystem: 'System',
+  cmdRecent: 'Recent',
+  // Command Palette — Empty State
+  cmdEmptyTitle: 'Start Searching',
+  cmdEmptyDesc: 'Type to search items, quicklinks, snippets, or enter a math expression',
+  // Command Palette — Footer Hints
+  cmdNavigate: 'Navigate',
+  cmdExecute: 'Select',
 };

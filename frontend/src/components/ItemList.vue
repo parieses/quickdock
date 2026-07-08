@@ -2,7 +2,7 @@
 import { ref, inject, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
-import { Plus, Pencil, Trash2, Play } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Play, Link } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import ItemEditor from './ItemEditor.vue'
 import { getErrorMessage } from '../utils/error'
@@ -121,6 +121,10 @@ function onDropItem(e: DragEvent, targetId: string) {
             <span class="item-name">{{ item.name }}</span>
             <span class="item-meta">{{ item.value }}</span>
           </div>
+          <span v-if="item.value && item.value.includes('{query}')" class="item-quicklink-badge" :title="t('quicklink')">
+            <Link :size="11" />
+            <span>{{ t('quicklinkBadge') }}</span>
+          </span>
           <span v-if="item.usageCount" class="item-usage" :title="t('openCount') + item.usageCount + t('times')">
             {{ item.usageCount }}
           </span>
@@ -193,6 +197,12 @@ function onDropItem(e: DragEvent, targetId: string) {
 .item-usage {
   font-size: 10px; color: var(--color-text-muted);
   background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: 8px;
+}
+.item-quicklink-badge {
+  display: flex; align-items: center; gap: 3px;
+  font-size: 10px; color: var(--color-accent, #4a9eff);
+  background: var(--color-accent-bg, rgba(74,158,255,0.1));
+  padding: 2px 6px; border-radius: 4px; flex-shrink: 0;
 }
 .item-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
 .item-body li:hover .item-actions { opacity: 1; }

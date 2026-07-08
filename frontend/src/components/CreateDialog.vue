@@ -61,7 +61,7 @@ function onConfirm() {
     if (f.type === 'text') {
       const val = (values[f.key] ?? '').trim()
       if (!val) {
-        validationMessage.value = `${f.label} 不能为空`
+        validationMessage.value = `${f.label}${t('inputCannotBeEmpty')}`
         return
       }
       values[f.key] = val // trim 后的值

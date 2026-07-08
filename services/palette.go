@@ -14,6 +14,11 @@ func (a *AppService) SearchAll(query string) *ApiResult {
 	return Ok(items)
 }
 
+// GetLastCopiedText 返回最近一次复制的文本
+func (a *AppService) GetLastCopiedText() *ApiResult {
+	return Ok(getLastClipboardText())
+}
+
 // HidePaletteWindow 隐藏命令面板窗口
 func (a *AppService) HidePaletteWindow() {
 	if a.PaletteMode != nil {

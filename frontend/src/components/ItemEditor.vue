@@ -40,7 +40,7 @@ const toolOptions = computed(() => {
 })
 
 const itemTypeOptions = computed(() => {
-  const types = ['目录', '网页', '命令', '文件', '应用']
+  const types = ['目录', '网页', '命令', '文件', '应用', '快速链接']
   const labels = tm('itemTypes') as Record<string, string>
   return types.map(v => ({ label: labels[v] || v, value: v }))
 })
@@ -62,7 +62,11 @@ watch(() => [props.visible, props.item], ([v]) => {
 });
 
 watch(type, (newType) => {
-  if (!props.item && !toolId.value) {
+  if (!props.item) {
+    if (newType === '快速链接' && !value.value.includes('{query}')) {
+      // 自动添加 {query} 占位符示例
+      value.value = 'https://' + value.value + '{query}'
+    }
     const suggested = store.getDefaultToolForType(newType)
     if (suggested) toolId.value = suggested.id
   }
@@ -120,8 +124,8 @@ function onKeydown(e: KeyboardEvent) {
             </label>
             <label class="field">
               <span class="field-label">{{ t('itemValue') }}</span>
-              <input v-model="value" type="text" :placeholder="type === '网页' ? 'https://...' : t('itemValue')" class="field-input" />
-              <p class="field-hint">{{ t('itemValueHint') }}</p>
+              <input v-model="value" type="text" :placeholder="type === '网页' ? 'https://...' : type === '快速链接' ? t('quicklinkUrlPlaceholder') : t('itemValue')" class="field-input" />
+              <p class="field-hint">{{ type === '快速链接' ? t('quicklinkDesc') : t('itemValueHint') }}</p>
             </label>
             <label class="field">
               <span class="field-label">{{ t('workingDir') }}</span>

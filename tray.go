@@ -454,19 +454,19 @@ func runMessageLoop() {
 					paletteMode.Store(false)
 					pw.Hide()
 				} else {
-					platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
-					paletteMode.Store(true)
-					pw.Show()
-					pw.Focus()
-					if a := getHotkeyApp(); a != nil {
-						a.Event.Emit("palette:toggle")
-					}
+				platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
+				paletteMode.Store(true)
+				pw.Show()
+				pw.Focus()
+				if a := getHotkeyApp(); a != nil {
+					a.Event.Emit("palette:toggle")
 				}
-			})
-		}
-		paletteAccel := modVKToAccelerator(paletteMods, paletteVk)
-		registeredPaletteAccel := paletteAccel
-		if err := registerPaletteShortcut(paletteAccel); err != nil {
+			}
+		})
+	}
+	paletteAccel := modVKToAccelerator(paletteMods, paletteVk)
+	registeredPaletteAccel := paletteAccel
+	if err := registerPaletteShortcut(paletteAccel); err != nil {
 			fmt.Printf("QuickDock: 命令面板热键 [%s] 注册失败: %v\n", paletteAccel, err)
 			registerPaletteShortcut("Ctrl+K")
 			registeredPaletteAccel = "Ctrl+K"
