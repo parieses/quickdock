@@ -1,0 +1,15 @@
+{
+	"fixed": {
+		"file_version": "0.2.0"
+	},
+	"info": {
+		"0000": {
+			"ProductVersion": "0.2.0",
+			"CompanyName": "My Company",
+			"FileDescription": "快启坞 QuickDock — 开发者资源集合与快速启动工具",
+			"LegalCopyright": "© 2026, My Company",
+			"ProductName": "快启坞",
+			"Comments": "This is a comment"
+		}
+	}
+}

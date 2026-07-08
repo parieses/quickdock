@@ -1,0 +1,47 @@
+# --- Go ---
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+*.test.exe
+*.syso
+vendor/
+
+# --- Wails ---
+bin/
+build/*.syso
+wails_windows_*.syso
+frontend/dist/
+
+# --- Node ---
+node_modules/
+frontend/node_modules/
+frontend/.vite/
+frontend/dist/
+
+# --- IDE ---
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+.DS_Store
+Thumbs.db
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Env ---
+.env
+.env.local
+
+# --- Build cache & personal ---
+.task/
+.workbuddy/
