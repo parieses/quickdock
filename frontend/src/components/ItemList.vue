@@ -169,18 +169,18 @@ function onDropItem(e: DragEvent, targetId: string) {
 }
 .item-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid var(--color-border);
+  padding: 12px 18px; box-shadow: var(--shadow-border);
 }
 .header-left { display: flex; align-items: center; gap: 10px; }
 .item-title { font-size: 14px; font-weight: 600; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-count { font-size: 11px; color: var(--color-text-disabled); }
-.header-actions { display: flex; gap: 4px; }
-.item-body { flex: 1; overflow-y: auto; padding: 8px 0; }
-.item-body ul { list-style: none; }
+.header-actions { display: flex; gap: var(--space-2); }
+.item-body { flex: 1; overflow-y: auto; padding: var(--space-2) 0; }
+.item-body ul { list-style: none; padding: 0; margin: 0; }
 .item-body li {
   display: flex; align-items: center; gap: 10px;
-  padding: 10px 18px; cursor: pointer; color: var(--color-text-secondary);
-  font-size: 13px; transition: all 0.12s;
+  padding: 8px 18px; cursor: pointer; color: var(--color-text-secondary);
+  font-size: 13px; transition: all var(--transition-fast); border-radius: 0;
 }
 .item-body li:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .item-icon {

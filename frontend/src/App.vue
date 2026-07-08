@@ -63,6 +63,17 @@ onMounted(async () => {
       i18n.global.locale.value = saved
     }
   } catch (_) {}
+
+  // 监听窗口焦点：当剪贴板/命令面板等独立窗口获得焦点时从 DB 同步主题
+  window.addEventListener('focus', async () => {
+    try {
+      const saved = unwrap<string>(await GetValue('theme'))
+      if (saved === 'dark' || saved === 'light' || saved === 'system') {
+        currentTheme.value = saved as Theme
+      }
+    } catch (_) {}
+    applyTheme(currentTheme.value)
+  })
 });
 
 provide('theme', { current: currentTheme, set: setTheme })
@@ -131,23 +142,13 @@ const isPaletteWindow = computed(() => window.location.hash === '#/command-palet
 </template>
 
 <style>
-*,
-*::before,
-*::after {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
 html, body, #app {
   height: 100%; width: 100%;
   overflow: hidden;
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC',
-    'Hiragino Sans GB', 'Microsoft YaHei', 'Helvetica Neue', Helvetica, Arial,
-    sans-serif;
+  font-family: var(--font-family);
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
@@ -155,10 +156,6 @@ body {
   user-select: none;
 }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--color-border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--color-text-disabled); }
 </style>
 
 <style scoped>

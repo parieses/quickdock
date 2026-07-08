@@ -1,46 +1,76 @@
-/* QuickDock - 全局样式
-   深色主题基础样式
-*/
+/* ===================================================================
+   QuickDock v3 - Design System
+   基于 DESIGN.md 的精简系统，8px 间距基准，阴影即边框
+   =================================================================== */
 
-/* ==================== CSS 变量 ==================== */
-/* 深色主题（默认） */
+/* 间距 & 尺寸（全局常量） */
+:root {
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+  --space-11: 48px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  --sidebar-width: 210px;
+  --collection-width: 300px;
+  --search-height: 46px;
+
+  --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', Consolas, monospace;
+
+  --transition-fast: 100ms ease;
+  --transition-base: 150ms ease;
+  --transition-slow: 200ms ease;
+}
+
+/* ==================== CSS 变量 — 深色主题 ==================== */
 :root,
 [data-theme="dark"] {
-  --color-bg-primary: #1b1b1b;
-  --color-bg-secondary: #1f1f1f;
-  --color-bg-tertiary: #252525;
-  --color-bg-hover: #2a2a2a;
-  --color-bg-active: #363636;
-  --color-bg-overlay: rgba(0, 0, 0, 0.6);
-  --color-surface: #2a2a2a;
-  --color-surface-elevated: #333;
-  --color-text-primary: #e0e0e0;
-  --color-text-secondary: #ccc;
-  --color-text-muted: #999;
-  --color-text-disabled: #666;
-  --color-border: #333;
-  --color-border-light: #444;
+  --color-bg-primary: #1a1a1a;
+  --color-bg-secondary: #1e1e1e;
+  --color-bg-tertiary: #242424;
+  --color-bg-hover: #282828;
+  --color-bg-active: #323232;
+  --color-bg-overlay: rgba(0, 0, 0, 0.55);
+  --color-surface: #262626;
+  --color-surface-elevated: #2e2e2e;
+  --color-text-primary: #e4e4e4;
+  --color-text-secondary: #b0b0b0;
+  --color-text-muted: #888;
+  --color-text-disabled: #555;
+  --color-border: #2e2e2e;
+  --color-border-light: #3a3a3a;
   --color-border-focus: #4a9eff;
   --color-accent: #4a9eff;
   --color-accent-hover: #3a8eef;
   --color-accent-text: #fff;
-  --color-danger: #ff4d4f;
-  --color-success: #52c41a;
-  --color-warning: #faad14;
-  --sidebar-width: 200px;
-  --collection-width: 300px;
-  --search-height: 48px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto,
-    'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', monospace;
-  --color-scrollbar-thumb: #444;
-  --color-scrollbar-hover: #555;
+  --color-danger: #e84c4c;
+  --color-success: #4caf50;
+  --color-warning: #ff9800;
+  --color-scrollbar-thumb: #3a3a3a;
+  --color-scrollbar-hover: #4a4a4a;
   --color-scrollbar-track: transparent;
   --color-accent-bg: rgba(74, 158, 255, 0.1);
-  --color-accent-border: rgba(74, 158, 255, 0.15);
+  --color-accent-border: rgba(74, 158, 255, 0.2);
+  --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.08);
+  --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.18);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.22);
+  --shadow-focus: 0 0 0 2px var(--color-border-focus);
   --color-toast-error-bg: #2d1818;
   --color-toast-error-text: #fca5a5;
   --color-toast-error-border: #5c1a1a;
@@ -49,22 +79,22 @@
   --color-toast-success-border: #1a5c1a;
 }
 
-/* 浅色主题 */
+/* ==================== CSS 变量 — 浅色主题 ==================== */
 [data-theme="light"] {
-  --color-bg-primary: #f5f5f5;
+  --color-bg-primary: #f7f7f5;
   --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #eaeaea;
-  --color-bg-hover: #e0e0e0;
-  --color-bg-active: #d4d4d4;
-  --color-bg-overlay: rgba(0, 0, 0, 0.15);
+  --color-bg-tertiary: #efefeb;
+  --color-bg-hover: #e8e8e4;
+  --color-bg-active: #e0e0dc;
+  --color-bg-overlay: rgba(0, 0, 0, 0.1);
   --color-surface: #ffffff;
-  --color-surface-elevated: #f0f0f0;
-  --color-text-primary: #1a1a1a;
-  --color-text-secondary: #333;
-  --color-text-muted: #666;
-  --color-text-disabled: #999;
-  --color-border: #ddd;
-  --color-border-light: #e8e8e8;
+  --color-surface-elevated: #f5f5f2;
+  --color-text-primary: #1a1a18;
+  --color-text-secondary: #4a4a48;
+  --color-text-muted: #888886;
+  --color-text-disabled: #b0b0ae;
+  --color-border: #e4e4e0;
+  --color-border-light: #d0d0cc;
   --color-border-focus: #4a9eff;
   --color-accent: #4a9eff;
   --color-accent-hover: #3a8eef;
@@ -72,11 +102,17 @@
   --color-danger: #e53935;
   --color-success: #43a047;
   --color-warning: #fb8c00;
-  --color-scrollbar-thumb: #ccc;
-  --color-scrollbar-hover: #aaa;
+  --color-scrollbar-thumb: #d0d0cc;
+  --color-scrollbar-hover: #b8b8b4;
   --color-scrollbar-track: transparent;
   --color-accent-bg: rgba(74, 158, 255, 0.08);
   --color-accent-border: rgba(74, 158, 255, 0.15);
+  --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.05);
+  --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-focus: 0 0 0 2px var(--color-border-focus);
   --color-toast-error-bg: #fff0f0;
   --color-toast-error-text: #d32f2f;
   --color-toast-error-border: #ffcdd2;
@@ -103,13 +139,14 @@ body {
   padding: 0;
   height: 100%;
   font-family: var(--font-family);
-  font-size: 14px;
+  font-size: 13px;
   line-height: 1.5;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   overflow: hidden;
+  user-select: none;
 }
 
 #app {
@@ -122,41 +159,41 @@ body {
   width: 6px;
   height: 6px;
 }
-
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--color-scrollbar-thumb);
   border-radius: 3px;
+  transition: background var(--transition-base);
 }
-
-::-webkit-scrollbar-thumb:hover {
-  background: var(--color-scrollbar-hover);
-}
+::-webkit-scrollbar-thumb:hover { background: var(--color-scrollbar-hover); }
 
 /* Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-scrollbar-thumb) transparent;
+* { scrollbar-width: thin; scrollbar-color: var(--color-scrollbar-thumb) transparent; }
+
+/* ==================== 焦点环（仅键盘导航） ==================== */
+:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 0;
 }
 
 /* ==================== 通用工具类 ==================== */
-.text-muted {
-  color: var(--color-text-muted);
-}
-
-.text-disabled {
-  color: var(--color-text-disabled);
-}
-
-.bg-hover:hover {
-  background: var(--color-bg-hover);
-}
+.text-muted { color: var(--color-text-muted); }
+.text-disabled { color: var(--color-text-disabled); }
+.text-accent { color: var(--color-accent); }
+.text-danger { color: var(--color-danger); }
 
 /* ==================== 选中文本 ==================== */
 ::selection {
   background: var(--color-accent);
   color: var(--color-accent-text);
 }
+
+/* ==================== 过渡辅助 ==================== */
+.fade-enter-active, .fade-leave-active { transition: opacity var(--transition-base); }
+.fade-enter-from, .fade-leave-to { opacity: 0; }

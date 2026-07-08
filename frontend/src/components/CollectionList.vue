@@ -173,10 +173,10 @@ function onDropCol(e: DragEvent, targetId: string) {
 }
 .collection-header {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 14px 14px 18px; border-bottom: 1px solid var(--color-border);
+  padding: 12px 14px 12px 18px; box-shadow: var(--shadow-border);
 }
 .collection-title {
-  font-size: 12px; font-weight: 700; color: var(--color-text-muted);
+  font-size: 11px; font-weight: 600; color: var(--color-text-muted);
   text-transform: uppercase; letter-spacing: 1px;
 }
 .icon-btn {
@@ -186,12 +186,12 @@ function onDropCol(e: DragEvent, targetId: string) {
 }
 .icon-btn:hover { color: var(--color-accent); background: var(--color-bg-hover); }
 .collection-body { flex: 1; overflow-y: auto; padding: 6px 8px; }
-.collection-body ul { list-style: none; }
+.collection-body ul { list-style: none; padding: 0; margin: 0; }
 .collection-body li {
   display: flex; align-items: center; gap: 12px;
-  padding: 11px 14px; cursor: pointer; color: var(--color-text-secondary);
-  font-size: 13px; transition: all 0.12s; border-radius: 8px;
-  margin-bottom: 2px;
+  padding: 10px 14px; cursor: pointer; color: var(--color-text-secondary);
+  font-size: 13px; transition: all var(--transition-fast); border-radius: var(--radius-md);
+  margin-bottom: var(--space-1);
 }
 .collection-body li:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .collection-body li.active {

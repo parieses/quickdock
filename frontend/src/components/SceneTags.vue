@@ -145,13 +145,12 @@ function onClickAway() {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-bottom: none;
-  border-radius: 8px 8px 0 0;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
   color: var(--color-text-muted);
   font-size: 12px;
-  font-weight: 400;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.12s ease;
+  transition: all var(--transition-fast);
   -webkit-app-region: no-drag;
 }
 
@@ -202,7 +201,7 @@ function onClickAway() {
   line-height: 1;
   color: var(--color-text-muted);
   opacity: 0;
-  transition: all 0.1s;
+  transition: all var(--transition-fast);
 }
 
 .tab-close:hover {
