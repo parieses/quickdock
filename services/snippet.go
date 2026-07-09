@@ -56,6 +56,20 @@ func (a *AppService) DeleteSnippet(id string) *ApiResult {
 	return Ok(nil)
 }
 
+func (a *AppService) UpdateSnippet(id, keyword, content, category string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if err := a.DB.UpdateSnippet(id, keyword, content, category); err != nil {
+		// 关键词唯一约束冲突
+		if strings.Contains(err.Error(), "UNIQUE constraint failed") {
+			return OkMsg(nil, "关键词已存在，请使用其他关键词")
+		}
+		return dberr(err)
+	}
+	return Ok(nil)
+}
+
 // PasteSnippet 将片段内容复制到剪贴板并粘贴
 func (a *AppService) PasteSnippet(content string) *ApiResult {
 	if content == "" {

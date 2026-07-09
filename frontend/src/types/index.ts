@@ -111,3 +111,25 @@ export interface Snapshot {
   size: number
   created_at: string
 }
+
+// 文本片段
+export interface Snippet {
+  id: string
+  keyword: string
+  content: string
+  category: string
+  createdAt: string
+}
+
+// 剪贴板条目
+export interface ClipboardEntry {
+  id: string
+  contentType: string
+  textContent: string
+  imagePath: string
+  imageHash: string
+  sourceApp: string
+  isPinned: number
+  copyCount: number
+  createdAt: number
+}

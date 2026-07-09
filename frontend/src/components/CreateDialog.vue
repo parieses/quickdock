@@ -9,7 +9,7 @@ const { t } = useI18n()
 export interface CreateField {
   key: string
   label: string
-  type: 'text' | 'select'
+  type: 'text' | 'select' | 'textarea'
   options?: { label: string; value: string }[]
   placeholder?: string
   default?: string
@@ -50,10 +50,10 @@ function resetValues() {
   validationMessage.value = ''
 }
 
-// 弹窗打开时重置表单
+// 弹窗打开时重置表单（immediate 处理 v-if + visible=true 首次挂载的情况）
 watch(() => [props.visible, props.editValues], ([v]) => {
   if (v) resetValues()
-})
+}, { immediate: true })
 
 function onConfirm() {
   // 找到第一个文本字段作为"名称"进行必填校验
@@ -105,6 +105,13 @@ function onKeydown(e: KeyboardEvent) {
                 class="field-input"
                 @keydown.enter="onConfirm"
               />
+              <textarea
+                v-else-if="f.type === 'textarea'"
+                v-model="values[f.key]"
+                :placeholder="f.placeholder ?? ''"
+                class="field-input field-textarea"
+                rows="3"
+              ></textarea>
               <select v-else v-model="values[f.key]" class="field-input">
                 <option v-for="o in f.options" :key="o.value" :value="o.value">
                   {{ o.label }}
@@ -161,6 +168,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px rgba(74,158,255,0.12); }
 .field-input::placeholder { color: var(--color-text-disabled); }
+.field-textarea { resize: vertical; min-height: 64px; font-family: var(--font-mono, monospace); }
 .field-error {
   font-size: 12px; color: var(--color-danger); margin: -8px 0 0; padding: 0;
 }

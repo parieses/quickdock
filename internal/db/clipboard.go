@@ -154,10 +154,13 @@ func (d *Database) ListClipboardEntries(limit int) ([]ClipboardEntry, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	var rows *sql.Rows
+	var err error
 	if limit <= 0 {
-		limit = 200
+		rows, err = d.conn.Query("SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, created_at FROM clipboard_entries ORDER BY created_at DESC")
+	} else {
+		rows, err = d.conn.Query("SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, created_at FROM clipboard_entries ORDER BY created_at DESC LIMIT ?", limit)
 	}
-	rows, err := d.conn.Query("SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, created_at FROM clipboard_entries ORDER BY created_at DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, err
 	}
@@ -237,7 +240,7 @@ func (d *Database) IncrementClipboardCopyCount(id string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.conn.Exec("UPDATE clipboard_entries SET copy_count = copy_count + 1 WHERE id = ?", id)
+	_, err := d.conn.Exec("UPDATE clipboard_entries SET copy_count = copy_count + 1, created_at = ? WHERE id = ?", time.Now().UnixMilli(), id)
 	return err
 }
 

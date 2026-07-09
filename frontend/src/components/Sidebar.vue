@@ -2,7 +2,7 @@
 import { ref, inject, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
-import { Plus, Pencil, Trash2, Search, X, Settings, ChevronDown, FolderKanban } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Search, X, Settings, ChevronDown, FolderKanban, FileText, Clipboard, Puzzle } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import CreateDialog from './CreateDialog.vue'
 import { getErrorMessage } from '../utils/error'
@@ -18,7 +18,13 @@ const displayScenes = computed(() => {
   }
   return store.sortedScenes
 })
-const emit = defineEmits<{ (e: 'open-settings'): void }>()
+const emit = defineEmits<{
+  (e: 'navigate', page: string): void
+  (e: 'open-settings'): void
+}>()
+const props = defineProps<{
+  currentPage: string
+}>()
 const toast = inject<ToastAPI>('toast')!
 
 // ---- 工作空间 ----
@@ -202,7 +208,29 @@ async function handleDeleteScene(sceneId: string) {
       </Transition>
     </div>
 
-    <!-- 搜索栏（置于场景列表上方） -->
+    <!-- 页面导航（新增） -->
+    <div class="sidebar-navigator">
+      <div class="navigator-header">{{ t('navigation') }}</div>
+      <button :class="['nav-item', { active: currentPage === 'workspace' }]" @click="emit('navigate', 'workspace')">
+        <FolderKanban :size="14" />
+        <span>{{ t('navWorkspace') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'snippets' }]" @click="emit('navigate', 'snippets')">
+        <FileText :size="14" />
+        <span>{{ t('navSnippets') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'clipboard' }]" @click="emit('navigate', 'clipboard')">
+        <Clipboard :size="14" />
+        <span>{{ t('navClipboard') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="emit('navigate', 'plugins')">
+        <Puzzle :size="14" />
+        <span>{{ t('navPlugins') }}</span>
+      </button>
+    </div>
+
+    <!-- 仅工作空间页显示场景相关 -->
+    <template v-if="currentPage === 'workspace'">
     <div class="sidebar-search">
       <div class="search-wrapper">
         <Search :size="14" class="search-icon" />
@@ -283,8 +311,10 @@ async function handleDeleteScene(sceneId: string) {
       :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: t('workspaceNamePlaceholder') }]"
       :editValues="{ name: editingWorkspaceName }"
       @confirm="handleEditWorkspace" @cancel="showEditWorkspaceDialog = false" />
+    </template>
 
-    <!-- 底部设置入口 -->
+    <!-- 非工作空间页的空白填充 -->
+    <div v-if="currentPage !== 'workspace'" class="sidebar-spacer"></div>
     <div class="sidebar-footer">
       <button class="settings-btn" @click="emit('open-settings')" :title="t('settings')">
         <Settings :size="16" />
@@ -323,6 +353,44 @@ async function handleDeleteScene(sceneId: string) {
 }
 .workspace-selector:hover { background: var(--color-bg-hover); }
 .ws-icon { color: var(--color-accent); flex-shrink: 0; }
+
+/* 导航菜单 */
+.sidebar-navigator {
+  flex-shrink: 0;
+  padding: 6px 10px 10px;
+  box-shadow: var(--shadow-border);
+}
+.navigator-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 4px 6px;
+  user-select: none;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 6px;
+  transition: all var(--transition-fast);
+  text-align: left;
+}
+.nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.nav-item.active { background: var(--color-bg-tertiary); color: var(--color-accent); font-weight: 500; }
+.nav-item.active svg { color: var(--color-accent); }
+
+.sidebar-spacer { flex: 1; }
+
 .ws-name {
   flex: 1;
   font-size: 13px;

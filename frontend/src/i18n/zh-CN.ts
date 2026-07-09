@@ -221,6 +221,31 @@ export default {
   deleted: '已删除',
   inputCannotBeEmpty: ' 不能为空',
 
+  // 页面导航
+  navigation: '导航',
+  navWorkspace: '工作空间',
+  navSnippets: '文本片段',
+  navClipboard: '剪贴板',
+  navPlugins: '插件',
+  pagePlaceholder: '此功能正在开发中...',
+
+  // 片段管理
+  snippetManager: '文本片段管理',
+  snippetKeyword: '关键词',
+  snippetContent: '内容',
+  snippetCategory: '分类',
+  snippetCreatedAt: '创建时间',
+  snippetNew: '新建片段',
+  snippetEdit: '编辑片段',
+  snippetKeywordPlaceholder: '例如：常用邮箱',
+  snippetContentPlaceholder: '输入片段内容...',
+  noSnippets: '暂无文本片段',
+  createFirstSnippet: '点击右上角按钮创建第一个片段',
+  selectAll: '全选',
+  selectedCount: '已选择 {count} 项',
+  confirmDeleteBatch: '确定删除选中的 {count} 个片段？',
+  paginationTotal: '共 {total} 条',
+
   // 引导页
   welcomeTitle: '欢迎使用快启坞',
   welcomeDesc: '轻量级应用启动与项目管理工具',

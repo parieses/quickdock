@@ -1,5 +1,6 @@
 <script lang="ts" setup>
 import { computed, onMounted, provide, ref, watch } from 'vue';
+import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace';
 import { useToast } from './composables/useToast';
 import { GetValue, SetValue } from '../bindings/quickdock/services/appservice';
@@ -15,6 +16,7 @@ import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import OnboardingPage from './components/OnboardingPage.vue';
 import CommandPalette from './components/CommandPalette.vue';
+import SnippetManagerPage from './components/SnippetManagerPage.vue';
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {
@@ -22,9 +24,16 @@ watch(() => i18n.global.locale.value, () => {
 });
 
 const store = useWorkspaceStore();
+const { t } = useI18n()
 const { items, remove, error, success, confirm, confirmItems, resolveConfirm } = useToast();
 const showSettings = ref(false);
 const settingsPage = ref<string | undefined>(undefined);
+
+// 页面路由
+const currentPage = ref('workspace')
+function setPage(page: string) {
+  currentPage.value = page
+}
 
 provide('toast', { error, success, confirm });
 
@@ -101,7 +110,7 @@ const isPaletteWindow = computed(() => window.location.hash === '#/command-palet
 <template>
   <!-- 独立剪贴板窗口：仅显示剪贴板列表 -->
   <div v-if="isClipboardWindow" class="clipboard-standalone">
-    <ClipboardPanel />
+    <ClipboardPanel compact />
   </div>
 
   <!-- 命令面板独立窗口 -->
@@ -113,20 +122,40 @@ const isPaletteWindow = computed(() => window.location.hash === '#/command-palet
   <div v-else class="app-container">
     <div class="app-body">
       <Sidebar class="app-sidebar"
+        :currentPage="currentPage"
+        @navigate="setPage"
         @open-settings="(page?: string) => { settingsPage = page; showSettings = true }"
       />
       <div class="app-content">
-        <!-- 空状态引导页（首次使用，无工作空间） -->
-        <OnboardingPage v-if="store.workspaces.length === 0" @open-settings="(page?: string) => { settingsPage = page; showSettings = true }" />
+        <!-- 工作空间页面 -->
+        <template v-if="currentPage === 'workspace'">
+          <!-- 空状态引导页（首次使用，无工作空间） -->
+          <OnboardingPage v-if="store.workspaces.length === 0" @open-settings="(page?: string) => { settingsPage = page; showSettings = true }" />
 
-        <!-- 常规内容 -->
-        <template v-else>
-          <SceneTags />
-          <div class="app-content-body">
-            <CollectionList class="app-collections" />
-            <ItemList class="app-items" />
-          </div>
+          <!-- 常规内容 -->
+          <template v-else>
+            <SceneTags />
+            <div class="app-content-body">
+              <CollectionList class="app-collections" />
+              <ItemList class="app-items" />
+            </div>
+          </template>
         </template>
+
+        <!-- 文本片段页面 -->
+        <SnippetManagerPage v-else-if="currentPage === 'snippets'" />
+
+        <!-- 剪贴板历史页面 -->
+        <div v-else-if="currentPage === 'clipboard'" class="clipboard-page">
+          <ClipboardPanel />
+        </div>
+
+        <!-- 插件页面（占位） -->
+        <div v-else-if="currentPage === 'plugins'" class="page-placeholder">
+          <p class="page-placeholder-icon">🔌</p>
+          <p class="page-placeholder-title">{{ t('navPlugins') }}</p>
+          <p class="page-placeholder-desc">{{ t('pagePlaceholder') }}</p>
+        </div>
       </div>
     </div>
 
@@ -188,4 +217,35 @@ body {
 }
 .app-collections { flex-shrink: 0; }
 .app-items { flex: 1; min-width: 0; }
+
+/* 页面占位（开发中页面） */
+.page-placeholder {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 32px;
+}
+.page-placeholder-icon { font-size: 36px; margin: 0; }
+.page-placeholder-title {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  margin: 0;
+}
+.page-placeholder-desc {
+  font-size: 13px;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+/* 剪贴板页面 */
+.clipboard-page {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
 </style>

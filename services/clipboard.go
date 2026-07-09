@@ -13,11 +13,10 @@ import (
 
 // ===== 剪贴板历史 =====
 
-func (a *AppService) ListClipboardEntries() *ApiResult {
+func (a *AppService) ListClipboardEntries(limit int) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	limit := 200
 	data, err := a.DB.ListClipboardEntries(limit)
 	if err != nil {
 		return dberr(err)

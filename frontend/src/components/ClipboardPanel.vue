@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ClipboardList, Search, X, RefreshCw, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote } from '@lucide/vue'
+import { ClipboardList, Search, X, RefreshCw, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight } from '@lucide/vue'
 import { ListClipboardEntries, PasteClipboardEntry, GetClipboardImageBase64, HideClipboardWindow, TogglePinClipboardEntry, CreateSnippet } from '../../bindings/quickdock/services/appservice'
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
@@ -10,6 +10,12 @@ import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
+
+const props = withDefaults(defineProps<{
+  compact?: boolean
+}>(), {
+  compact: false,
+})
 
 interface ClipboardEntry {
   id: string
@@ -93,6 +99,21 @@ const filteredEntries = computed(() => {
   return list
 })
 
+// ---- 剪贴板分页 ----
+const CLIPBOARD_PAGE_SIZE = 20
+const clipboardPage = ref(1)
+
+const displayEntries = computed(() => {
+  const start = (clipboardPage.value - 1) * CLIPBOARD_PAGE_SIZE
+  return filteredEntries.value.slice(start, start + CLIPBOARD_PAGE_SIZE)
+})
+
+const totalClipboardPages = computed(() =>
+  Math.max(1, Math.ceil(filteredEntries.value.length / CLIPBOARD_PAGE_SIZE))
+)
+
+watch(filteredEntries, () => { clipboardPage.value = 1 })
+
 function selectTag(tagId: string) {
   activeTag.value = tagId
   searchQuery.value = ''
@@ -140,7 +161,8 @@ watch(hasImages, (val) => {
 
 async function loadEntries() {
   try {
-    entries.value = unwrap(await ListClipboardEntries()) || []
+    const limit = props.compact ? 500 : 0
+    entries.value = unwrap(await ListClipboardEntries(limit)) || []
     // 不再预加载所有图片 — 由 IntersectionObserver 懒加载
   } catch (e) {
     const msg = getErrorMessage(e)
@@ -156,7 +178,10 @@ async function loadEntries() {
 async function handleCopy(entry: ClipboardEntry) {
   try {
     await PasteClipboardEntry(entry.id)
-    entry.copyCount = (entry.copyCount || 0) + 1
+    // 主页面模式下刷新列表，让条目因 created_at 更新而移到顶部
+    if (!props.compact) {
+      await loadEntries()
+    }
   } catch (e) {
     if (toast?.error) {
       toast.error(t('copyFailed') + ': ' + getErrorMessage(e))
@@ -253,7 +278,7 @@ function scrollToSelected() {
 }
 
 function onPanelKeydown(e: KeyboardEvent) {
-  const list = filteredEntries.value
+  const list = displayEntries.value
   if (list.length === 0) return
 
   if (e.key === 'Enter' && e.target === searchInputRef.value) {
@@ -350,7 +375,7 @@ onUnmounted(() => {
         <p class="empty-text">{{ searchQuery ? t('noMatchClipboard') : t('noClipboardRecords') }}</p>
       </div>
       <div
-        v-for="(entry, idx) in filteredEntries"
+        v-for="(entry, idx) in displayEntries"
         :key="entry.id"
         :class="['clipboard-item', {
           'is-image': entry.contentType === 'image',
@@ -416,7 +441,26 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-else class="clipboard-loading">
+    <!-- 剪贴板分页（弹窗模式不显示） -->
+    <div v-if="!compact && !loading && filteredEntries.length > CLIPBOARD_PAGE_SIZE" class="clipboard-pagination">
+      <button class="page-btn" :disabled="clipboardPage <= 1" @click="clipboardPage--">
+        <ChevronLeft :size="14" />
+      </button>
+      <template v-for="p in totalClipboardPages" :key="p">
+        <button
+          v-if="p === 1 || p === totalClipboardPages || Math.abs(p - clipboardPage) <= 1"
+          :class="['page-btn', { active: p === clipboardPage }]"
+          @click="clipboardPage = p"
+        >{{ p }}</button>
+        <span v-else-if="p === totalClipboardPages - 1 || p === 2" class="page-ellipsis">…</span>
+      </template>
+      <button class="page-btn" :disabled="clipboardPage >= totalClipboardPages" @click="clipboardPage++">
+        <ChevronRight :size="14" />
+      </button>
+      <span class="page-total">{{ t('paginationTotal', { total: filteredEntries.length }) }}</span>
+    </div>
+
+    <div v-if="loading" class="clipboard-loading">
       <p>{{ t('loading') }}</p>
     </div>
   </div>
@@ -612,4 +656,24 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: center;
   height: 100%; color: var(--color-text-disabled); font-size: 13px;
 }
+
+/* 剪贴板分页 */
+.clipboard-pagination {
+  display: flex; align-items: center; justify-content: center;
+  gap: 4px; padding: 8px; flex-shrink: 0;
+  border-top: 1px solid var(--color-border);
+}
+.clipboard-pagination .page-btn {
+  display: flex; align-items: center; justify-content: center;
+  min-width: 26px; height: 26px;
+  border: 1px solid var(--color-border); border-radius: 4px;
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+  font-size: 11px; font-family: inherit; cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.clipboard-pagination .page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
+.clipboard-pagination .page-btn:disabled { opacity: 0.35; cursor: default; }
+.clipboard-pagination .page-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+.clipboard-pagination .page-ellipsis { color: var(--color-text-disabled); font-size: 11px; width: 18px; text-align: center; }
+.clipboard-pagination .page-total { margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
 </style>

@@ -191,8 +191,8 @@ export function LaunchInstalledApp(path: string): $CancellablePromise<$models.Ap
     return $Call.ByID(2257915428, path);
 }
 
-export function ListClipboardEntries(): $CancellablePromise<$models.ApiResult | null> {
-    return $Call.ByID(2291752860);
+export function ListClipboardEntries(limit: number): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2291752860, limit);
 }
 
 export function ListCollections(sceneID: string): $CancellablePromise<$models.ApiResult | null> {
@@ -360,6 +360,10 @@ export function UpdateItem(id: string, updates: { [_ in string]?: any } | null):
 
 export function UpdateScene(id: string, updates: { [_ in string]?: any } | null): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(688719653, id, updates);
+}
+
+export function UpdateSnippet(id: string, keyword: string, content: string, category: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(4118751660, id, keyword, content, category);
 }
 
 export function UpdateWorkspace(id: string, name: string): $CancellablePromise<$models.ApiResult | null> {

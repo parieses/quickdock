@@ -221,6 +221,31 @@ export default {
   deleted: 'Deleted',
   inputCannotBeEmpty: ' cannot be empty',
 
+  // Page Navigation
+  navigation: 'Navigation',
+  navWorkspace: 'Workspace',
+  navSnippets: 'Snippets',
+  navClipboard: 'Clipboard',
+  navPlugins: 'Plugins',
+  pagePlaceholder: 'This feature is under development...',
+
+  // Snippet Manager
+  snippetManager: 'Snippet Manager',
+  snippetKeyword: 'Keyword',
+  snippetContent: 'Content',
+  snippetCategory: 'Category',
+  snippetCreatedAt: 'Created',
+  snippetNew: 'New Snippet',
+  snippetEdit: 'Edit Snippet',
+  snippetKeywordPlaceholder: 'e.g. Common Email',
+  snippetContentPlaceholder: 'Enter snippet content...',
+  noSnippets: 'No snippets yet',
+  createFirstSnippet: 'Click the + button above to create your first snippet',
+  selectAll: 'Select All',
+  selectedCount: '{count} selected',
+  confirmDeleteBatch: 'Delete {count} selected snippets?',
+  paginationTotal: '{total} items',
+
   // Onboarding
   welcomeTitle: 'Welcome to QuickDock',
   welcomeDesc: 'Lightweight app launcher & project management tool',

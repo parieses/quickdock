@@ -37,13 +37,24 @@ func (d *Database) CreateSnippet(keyword, content, category string) (*Snippet, e
 	return s, err
 }
 
-// ListSnippets 列出所有文本片段
+// ListSnippets 列出所有文本片段（按关键词升序）
 func (d *Database) ListSnippets() ([]Snippet, error) {
-	rows, err := d.ListTableWhere("snippets", "1=1 ORDER BY keyword ASC")
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rows, err := d.conn.Query("SELECT id, keyword, content, category, created_at FROM snippets ORDER BY keyword ASC")
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(rows, mapToSnippet), nil
+	defer rows.Close()
+	var snippets []Snippet
+	for rows.Next() {
+		var s Snippet
+		if err := rows.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt); err != nil {
+			return nil, err
+		}
+		snippets = append(snippets, s)
+	}
+	return snippets, rows.Err()
 }
 
 // SearchSnippets 按关键词搜索文本片段
@@ -73,6 +84,20 @@ func (d *Database) SearchSnippets(query string) ([]Snippet, error) {
 // DeleteSnippet 删除文本片段
 func (d *Database) DeleteSnippet(id string) error {
 	return d.DeleteWhere("snippets", "id = ?", id)
+}
+
+// UpdateSnippet 更新文本片段
+func (d *Database) UpdateSnippet(id, keyword, content, category string) error {
+	if keyword == "" || content == "" {
+		return fmt.Errorf("关键词和内容不能为空")
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec(
+		"UPDATE snippets SET keyword = ?, content = ?, category = ? WHERE id = ?",
+		keyword, content, category, id,
+	)
+	return err
 }
 
 func mapToSnippet(m map[string]interface{}) Snippet {
