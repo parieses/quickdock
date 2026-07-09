@@ -1,0 +1,130 @@
+package plugin
+
+import (
+	"encoding/json"
+	"io"
+	"os/exec"
+	"sync"
+)
+
+// ---- 插件清单结构 ----
+
+// PluginManifest 插件清单
+type PluginManifest struct {
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Version     string      `json:"version"`
+	Description string      `json:"description,omitempty"`
+	Author      string      `json:"author,omitempty"`
+	Icon        string      `json:"icon,omitempty"`
+	Category    string      `json:"category,omitempty"`
+	Backend     BackendConfig  `json:"backend"`
+	Frontend    FrontendConfig `json:"frontend,omitempty"`
+	Capabilities []string      `json:"capabilities,omitempty"`
+	Permissions  Permissions   `json:"permissions,omitempty"`
+	Commands     []Command     `json:"commands,omitempty"`
+}
+
+// BackendConfig 后端配置
+type BackendConfig struct {
+	Runtime string   `json:"runtime"` // native | node | python | powershell | wasm
+	Entry   string   `json:"entry"`
+	Args    []string `json:"args,omitempty"`
+}
+
+// FrontendConfig 前端配置
+type FrontendConfig struct {
+	Enabled bool   `json:"enabled,omitempty"`
+	Entry   string `json:"entry,omitempty"`
+	Width   int    `json:"width,omitempty"`
+	Height  int    `json:"height,omitempty"`
+}
+
+// Permissions 权限声明
+type Permissions struct {
+	Network    bool `json:"network,omitempty"`
+	Filesystem bool `json:"filesystem,omitempty"`
+	Clipboard  bool `json:"clipboard,omitempty"`
+}
+
+// Command 插件命令
+type Command struct {
+	ID     string `json:"id"`
+	Title  string `json:"title"`
+	Hotkey string `json:"hotkey,omitempty"`
+}
+
+// ---- JSON-RPC 通信结构 ----
+
+// RPCRequest JSON-RPC 2.0 请求
+type RPCRequest struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int64           `json:"id,omitempty"`
+	Method  string          `json:"method"`
+	Params  json.RawMessage `json:"params,omitempty"`
+}
+
+// RPCResponse JSON-RPC 2.0 响应
+type RPCResponse struct {
+	JSONRPC string          `json:"jsonrpc"`
+	ID      int64           `json:"id,omitempty"`
+	Result  json.RawMessage `json:"result,omitempty"`
+	Error   *RPCError       `json:"error,omitempty"`
+}
+
+// RPCError JSON-RPC 错误
+type RPCError struct {
+	Code    int    `json:"code"`
+	Message string `json:"message"`
+}
+
+func (e *RPCError) Error() string {
+	return e.Message
+}
+
+// ---- 插件运行时实例 ----
+
+// PluginInstance 运行中的插件实例
+type PluginInstance struct {
+	Manifest PluginManifest
+	Cmd      *exec.Cmd
+	Stdin    io.WriteCloser
+	Stdout   io.ReadCloser
+
+	sendMu   sync.Mutex                // 串行化 stdin 写入 ← P0 修复
+	readMu   sync.Mutex
+	NextID   int64
+	Pending  map[int64]chan *RPCResponse
+
+	readyCh  chan struct{}             // readLoop 就绪信号 ← P0 修复
+	doneCh   chan struct{}             // 进程退出信号
+	closeOnce sync.Once               // 确保 doneCh 只关闭一次 ← P1 修复
+	Dir      string                    // 插件安装目录
+	Status   string                    // running | stopped | crashed
+}
+
+// NewPluginInstance 创建插件实例
+func NewPluginInstance(manifest PluginManifest, dir string) *PluginInstance {
+	return &PluginInstance{
+		Manifest: manifest,
+		Pending:  make(map[int64]chan *RPCResponse),
+		readyCh:  make(chan struct{}),
+		doneCh:   make(chan struct{}),
+		Dir:      dir,
+		Status:   "created",
+	}
+}
+
+// ---- 管理者查询结构 ----
+
+// PluginInfo 暴露给前端的插件信息
+type PluginInfo struct {
+	ID          string    `json:"id"`
+	Name        string    `json:"name"`
+	Version     string    `json:"version"`
+	Description string    `json:"description"`
+	Author      string    `json:"author"`
+	Status      string    `json:"status"`      // running | stopped | crashed
+	HasFrontend bool      `json:"hasFrontend"`
+	Commands    []Command `json:"commands"`
+}

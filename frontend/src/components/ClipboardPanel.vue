@@ -104,6 +104,8 @@ const CLIPBOARD_PAGE_SIZE = 20
 const clipboardPage = ref(1)
 
 const displayEntries = computed(() => {
+  // 紧凑模式（快捷弹窗）不分页，显示全部
+  if (props.compact) return filteredEntries.value
   const start = (clipboardPage.value - 1) * CLIPBOARD_PAGE_SIZE
   return filteredEntries.value.slice(start, start + CLIPBOARD_PAGE_SIZE)
 })
@@ -161,7 +163,7 @@ watch(hasImages, (val) => {
 
 async function loadEntries() {
   try {
-    const limit = props.compact ? 500 : 0
+    const limit = props.compact ? 300 : 0
     entries.value = unwrap(await ListClipboardEntries(limit)) || []
     // 不再预加载所有图片 — 由 IntersectionObserver 懒加载
   } catch (e) {

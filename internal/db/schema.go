@@ -136,6 +136,27 @@ var baseTables = []string{
 		category TEXT DEFAULT '',
 		created_at TEXT NOT NULL
 	)`,
+
+	`CREATE TABLE IF NOT EXISTS plugins (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		version TEXT NOT NULL,
+		author TEXT DEFAULT '',
+		description TEXT DEFAULT '',
+		enabled INTEGER DEFAULT 1,
+		capabilities TEXT DEFAULT '[]',
+		permissions TEXT DEFAULT '{}',
+		config TEXT DEFAULT '{}',
+		installed_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS plugin_data (
+		plugin_id TEXT NOT NULL,
+		key TEXT NOT NULL,
+		value TEXT,
+		PRIMARY KEY (plugin_id, key)
+	)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
@@ -207,6 +228,34 @@ func (d *Database) migrate() error {
 	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('clipboard_entries') WHERE name = 'image_hash'`).Scan(&count)
 	if err == nil && count == 0 {
 		_, err = d.conn.Exec(`ALTER TABLE clipboard_entries ADD COLUMN image_hash TEXT`)
+	}
+
+	// 安全兜底：检查 plugins 表是否有 installed_at 列
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'installed_at'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN installed_at TEXT NOT NULL DEFAULT ''`)
+	}
+	// 检查 plugins 表是否有 updated_at 列
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'updated_at'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''`)
+	}
+	// 检查 plugins 表是否有 category 列
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'category'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN category TEXT DEFAULT ''`)
+	}
+
+	// 检查 plugins 表是否有 capabilities 列（旧表迁移）
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'capabilities'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN capabilities TEXT DEFAULT '[]'`)
+	}
+
+	// 检查 plugins 表是否有 permissions 列（旧表迁移）
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'permissions'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN permissions TEXT DEFAULT '{}'`)
 	}
 
 	return err

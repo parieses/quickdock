@@ -89,11 +89,30 @@ export function DeleteWorkspace(id: string): $CancellablePromise<$models.ApiResu
     return $Call.ByID(1133673306, id);
 }
 
+export function DisablePlugin(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3188936753, id);
+}
+
+export function EnablePlugin(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2515910434, id);
+}
+
+export function ExecutePluginCommand(pluginID: string, commandID: string, input: { [_ in string]?: any } | null): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1257077587, pluginID, commandID, input);
+}
+
 /**
  * ExecuteSystemCommand executes a system command (lock/shutdown/restart/sleep/emptytrash)
  */
 export function ExecuteSystemCommand(cmd: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(289709581, cmd);
+}
+
+/**
+ * GetAndClearPendingPluginPage 获取并清除待跳转的插件页面（已废弃，保留兼容）
+ */
+export function GetAndClearPendingPluginPage(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1133987935);
 }
 
 export function GetAutoStart(): $CancellablePromise<$models.ApiResult | null> {
@@ -137,6 +156,31 @@ export function GetPaletteHotkeyConfig(): $CancellablePromise<$models.ApiResult 
     return $Call.ByID(2693772577);
 }
 
+/**
+ * GetPluginFrontendPage 获取插件前端页面（内联 CSS/JS 的单 HTML 文件）
+ */
+export function GetPluginFrontendPage(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2755477758, pluginID);
+}
+
+export function GetPluginFrontendURL(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2407518182, pluginID);
+}
+
+/**
+ * GetPluginIcon 获取插件图标（返回 base64 data URI）
+ */
+export function GetPluginIcon(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2284800544, pluginID);
+}
+
+/**
+ * GetPluginWindowPluginID 获取当前插件窗口显示的插件 ID
+ */
+export function GetPluginWindowPluginID(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(90077567);
+}
+
 export function GetSnapshot(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1988116934, id);
 }
@@ -174,6 +218,13 @@ export function HidePaletteWindow(): $CancellablePromise<void> {
 }
 
 /**
+ * HidePluginWindow 隐藏插件独立窗口（关闭按钮）
+ */
+export function HidePluginWindow(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1422908057);
+}
+
+/**
  * HideWindow 隐藏主窗口
  */
 export function HideWindow(): $CancellablePromise<void> {
@@ -182,6 +233,17 @@ export function HideWindow(): $CancellablePromise<void> {
 
 export function InsertClipboardEntry(text: string, sourceApp: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2229753297, text, sourceApp);
+}
+
+export function InstallPlugin(zipPath: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3107899418, zipPath);
+}
+
+/**
+ * InstallPluginFromBytes 接受前端上传的文件字节安装插件（拖拽 fallback）
+ */
+export function InstallPluginFromBytes(fileName: string, fileData: string | null): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1056078213, fileName, fileData);
 }
 
 /**
@@ -203,6 +265,10 @@ export function ListItems(collectionID: string): $CancellablePromise<$models.Api
     return $Call.ByID(3764977142, collectionID);
 }
 
+export function ListPlugins(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(442808626);
+}
+
 export function ListScenes(workspaceID: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(3351845611, workspaceID);
 }
@@ -221,6 +287,13 @@ export function ListTools(): $CancellablePromise<$models.ApiResult | null> {
 
 export function ListWorkspaces(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1048839064);
+}
+
+/**
+ * MinimizePluginWindow 最小化插件独立窗口
+ */
+export function MinimizePluginWindow(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3074352793);
 }
 
 /**
@@ -302,6 +375,13 @@ export function SearchSnippets(query: string): $CancellablePromise<$models.ApiRe
 }
 
 /**
+ * SelectAndInstallPlugin 打开原生文件对话框选择 .zip 并安装
+ */
+export function SelectAndInstallPlugin(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(910879761);
+}
+
+/**
  * SetApp 设置 App 引用（由 main.go 在创建后调用）
  */
 export function SetApp(app: application$0.App | null): $CancellablePromise<void> {
@@ -329,6 +409,13 @@ export function SetPaletteHotkeyConfig(modifiers: number, vk: number): $Cancella
 }
 
 /**
+ * SetPendingPluginPage 设置待跳转的插件页面（已废弃，保留兼容）
+ */
+export function SetPendingPluginPage(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1741174149, pluginID);
+}
+
+/**
  * SetValue 写入键值
  */
 export function SetValue(key: string, value: string): $CancellablePromise<$models.ApiResult | null> {
@@ -342,12 +429,30 @@ export function SetWebDAVConfig(config: $models.WebDAVConfig | null): $Cancellab
     return $Call.ByID(1434230337, config);
 }
 
+/**
+ * ShowPluginWindow 打开插件独立窗口（或切换插件 ID）
+ */
+export function ShowPluginWindow(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3008209844, pluginID);
+}
+
 export function SuspendHotkeys(): $CancellablePromise<void> {
     return $Call.ByID(1551644173);
 }
 
+/**
+ * ToggleMaximizePluginWindow 切换插件窗口最大化/还原
+ */
+export function ToggleMaximizePluginWindow(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(31433991);
+}
+
 export function TogglePinClipboardEntry(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1629693783, id);
+}
+
+export function UninstallPlugin(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3980100571, id);
 }
 
 export function UpdateCollection(id: string, updates: { [_ in string]?: any } | null): $CancellablePromise<$models.ApiResult | null> {

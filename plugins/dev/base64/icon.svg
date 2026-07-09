@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect x="6" y="6" width="36" height="36" rx="6" fill="#4a9eff" opacity="0.15"/>
+  <rect x="6" y="6" width="36" height="36" rx="6" stroke="#4a9eff" stroke-width="2"/>
+  <text x="24" y="20" text-anchor="middle" font-size="9" fill="#4a9eff" font-family="monospace">Base</text>
+  <text x="24" y="36" text-anchor="middle" font-size="9" fill="#4a9eff" font-family="monospace">64</text>
+  <path d="M12 28 L20 16 L28 28" stroke="#4a9eff" stroke-width="1.5" fill="none"/>
+  <path d="M20 28 L20 16" stroke="#4a9eff" stroke-width="1.5" fill="none"/>
+</svg>

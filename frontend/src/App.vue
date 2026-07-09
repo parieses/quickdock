@@ -16,7 +16,9 @@ import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import OnboardingPage from './components/OnboardingPage.vue';
 import CommandPalette from './components/CommandPalette.vue';
+import PluginManagerPage from './components/PluginManagerPage.vue';
 import SnippetManagerPage from './components/SnippetManagerPage.vue';
+import PluginPage from './components/PluginPage.vue';
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {
@@ -37,7 +39,22 @@ function setPage(page: string) {
 
 provide('toast', { error, success, confirm });
 
-// ---- 主题管理 ----
+// ---- 窗口类型检测 ----
+// 使用 ref 来使 hash 变化可响应
+const hashRef = ref(window.location.hash)
+window.addEventListener('hashchange', () => {
+  hashRef.value = window.location.hash
+})
+
+const isClipboardWindow = computed(() => hashRef.value === '#/clipboard')
+const isPaletteWindow = computed(() => hashRef.value === '#/command-palette')
+const isPluginWindow = computed(() => {
+  return hashRef.value.startsWith('#/plugin')
+})
+const pluginWindowId = computed(() => {
+  const m = hashRef.value.match(/^#\/plugin\/([^?]+)/)
+  return m ? m[1] : null
+})
 type Theme = 'dark' | 'light' | 'system'
 const currentTheme = ref<Theme>('system')
 const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
@@ -101,10 +118,6 @@ watch(confirmItems, (items) => {
     activeConfirm.value = null
   }
 }, { immediate: true })
-
-// 检测是否为独立剪贴板窗口
-const isClipboardWindow = computed(() => window.location.hash === '#/clipboard')
-const isPaletteWindow = computed(() => window.location.hash === '#/command-palette')
 </script>
 
 <template>
@@ -116,6 +129,14 @@ const isPaletteWindow = computed(() => window.location.hash === '#/command-palet
   <!-- 命令面板独立窗口 -->
   <div v-else-if="isPaletteWindow" class="palette-standalone">
     <CommandPalette />
+  </div>
+
+  <!-- 插件独立窗口 -->
+  <div v-else-if="isPluginWindow" class="plugin-standalone">
+    <PluginPage v-if="pluginWindowId" :key="pluginWindowId" :pluginId="pluginWindowId" />
+    <div v-else class="plugin-standalone-empty">
+      <p>{{ t('loading') }}</p>
+    </div>
   </div>
 
   <!-- 主窗口：完整 UI -->
@@ -150,12 +171,8 @@ const isPaletteWindow = computed(() => window.location.hash === '#/command-palet
           <ClipboardPanel />
         </div>
 
-        <!-- 插件页面（占位） -->
-        <div v-else-if="currentPage === 'plugins'" class="page-placeholder">
-          <p class="page-placeholder-icon">🔌</p>
-          <p class="page-placeholder-title">{{ t('navPlugins') }}</p>
-          <p class="page-placeholder-desc">{{ t('pagePlaceholder') }}</p>
-        </div>
+        <!-- 插件页面 -->
+        <PluginManagerPage v-else-if="currentPage === 'plugins'" />
       </div>
     </div>
 
@@ -201,6 +218,15 @@ body {
   background: transparent;
 }
 
+.plugin-standalone {
+  height: 100vh; width: 100vw; overflow: hidden;
+  background: var(--color-bg-primary);
+}
+.plugin-standalone-empty {
+  height: 100%; display: flex; align-items: center; justify-content: center;
+  color: var(--color-text-disabled); font-size: 13px;
+}
+
 .app-container {
   display: flex; flex-direction: column;
   height: 100vh; width: 100vw; overflow: hidden;
@@ -217,29 +243,6 @@ body {
 }
 .app-collections { flex-shrink: 0; }
 .app-items { flex: 1; min-width: 0; }
-
-/* 页面占位（开发中页面） */
-.page-placeholder {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  padding: 32px;
-}
-.page-placeholder-icon { font-size: 36px; margin: 0; }
-.page-placeholder-title {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--color-text-secondary);
-  margin: 0;
-}
-.page-placeholder-desc {
-  font-size: 13px;
-  color: var(--color-text-muted);
-  margin: 0;
-}
 
 /* 剪贴板页面 */
 .clipboard-page {

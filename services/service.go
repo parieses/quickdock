@@ -4,6 +4,7 @@ import (
 	"sync/atomic"
 
 	"quickdock/internal/db"
+	"quickdock/internal/plugin"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -19,6 +20,7 @@ type AppService struct {
 	MainWindow      *application.WebviewWindow
 	ClipboardWindow *application.WebviewWindow
 	PaletteWindow   *application.WebviewWindow
+	PluginWindow    *application.WebviewWindow
 
 	// 状态标志（注入 main 包的 atomic.Bool 指针，共享状态）
 	WindowVisible *atomic.Bool
@@ -32,6 +34,13 @@ type AppService struct {
 	StartHotkeyListenerFn func(app *application.App, svc *AppService)
 	SuspendHotkeysFn      func()
 	ResumeHotkeysFn       func()
+
+	// 插件管理器
+	PluginMgr    *plugin.Manager
+	PluginHotkeys *PluginHotkeyRegistry
+
+	// 内置插件自动安装（由 main.go 注入，含 embed.FS）
+	InstallBuiltinPluginsFn func(mgr *plugin.Manager, database *db.Database)
 }
 
 // NewAppService 创建应用服务实例

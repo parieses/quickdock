@@ -133,3 +133,21 @@ export interface ClipboardEntry {
   copyCount: number
   createdAt: number
 }
+
+// 插件系统
+export interface PluginCommand {
+  id: string
+  title: string
+  hotkey?: string
+}
+
+export interface PluginInfo {
+  id: string
+  name: string
+  version: string
+  description?: string
+  author?: string
+  status: string
+  hasFrontend: boolean
+  commands: PluginCommand[]
+}

@@ -78,6 +78,9 @@ var (
 
 	paletteWin     *application.WebviewWindow
 	paletteWinLock sync.Mutex
+
+	pluginWin     *application.WebviewWindow
+	pluginWinLock sync.Mutex
 )
 
 func SetClipboardWindow(win *application.WebviewWindow) {
@@ -102,6 +105,20 @@ func getPaletteWindow() *application.WebviewWindow {
 	paletteWinLock.Lock()
 	defer paletteWinLock.Unlock()
 	return paletteWin
+}
+
+// ---- 插件窗口 ----
+
+func SetPluginWindow(win *application.WebviewWindow) {
+	pluginWinLock.Lock()
+	defer pluginWinLock.Unlock()
+	pluginWin = win
+}
+
+func getPluginWindow() *application.WebviewWindow {
+	pluginWinLock.Lock()
+	defer pluginWinLock.Unlock()
+	return pluginWin
 }
 
 type NOTIFYICONDATAW struct {

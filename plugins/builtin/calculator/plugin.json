@@ -1,0 +1,48 @@
+{
+  "id": "com.quickdock.calculator",
+  "name": "快速计算",
+  "version": "1.0.0",
+  "description": "在命令面板中快速计算数学表达式",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "实用工具",
+
+  "backend": {
+    "runtime": "python",
+    "entry": "main.py",
+    "args": []
+  },
+
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 420,
+    "height": 480
+  },
+
+  "capabilities": ["command"],
+
+  "permissions": {
+    "network": false,
+    "filesystem": false,
+    "clipboard": false
+  },
+
+  "commands": [
+    {
+      "id": "eval",
+      "title": "计算表达式 ...",
+      "hotkey": ""
+    },
+    {
+      "id": "calc-pi",
+      "title": "圆周率 π",
+      "hotkey": ""
+    },
+    {
+      "id": "calc-e",
+      "title": "自然常数 e",
+      "hotkey": ""
+    }
+  ]
+}

@@ -71,6 +71,29 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		fmt.Printf("QuickDock: 已清理 %d 条过期剪贴板记录\n", count)
 	}
 
+	// 自动安装内置插件（main.go 注入的回调，需在 DB 就绪后执行）
+	if a.InstallBuiltinPluginsFn != nil {
+		a.InstallBuiltinPluginsFn(a.PluginMgr, a.DB)
+	}
+
+	// 同步插件状态：DiscoverAndLoad 加载了所有磁盘上的插件，
+	// 但 DB 中可能有些是禁用的。需要停止它们并保留在列表中。
+	if a.PluginMgr != nil {
+		enabledIDs, err := a.DB.ListEnabledPlugins()
+		if err == nil {
+			enabledSet := make(map[string]bool, len(enabledIDs))
+			for _, id := range enabledIDs {
+				enabledSet[id] = true
+			}
+			for _, p := range a.PluginMgr.ListPlugins() {
+				if !enabledSet[p.ID] {
+					fmt.Printf("QuickDock: 插件 %s 已禁用，停止进程\n", p.ID)
+					a.PluginMgr.StopPlugin(p.ID)
+				}
+			}
+		}
+	}
+
 	// 设置全局 App 引用（供 SetClipboardText 等函数使用）
 	AppRef.Store(a.app)
 

@@ -1,0 +1,466 @@
+package services
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"sync"
+	"time"
+
+	"quickdock/internal/plugin"
+)
+
+// ===== 插件热键注册管理 =====
+
+func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	dir, err := a.PluginMgr.InstallFromZip(zipPath)
+	if err != nil {
+		return Fail(err)
+	}
+	// 读取 manifest 以获取插件元信息
+	manifest, err := plugin.LoadManifest(dir + "/plugin.json")
+	if err != nil {
+		return Ok(map[string]interface{}{
+			"dir": dir,
+			"note": "安装完成但读取 manifest 失败: " + err.Error(),
+		})
+	}
+	// 写入数据库记录（含 capabilities / permissions / category）
+	permissions := make(map[string]interface{})
+	if manifest.Permissions.Network || manifest.Permissions.Filesystem || manifest.Permissions.Clipboard {
+		permissions["network"] = manifest.Permissions.Network
+		permissions["filesystem"] = manifest.Permissions.Filesystem
+		permissions["clipboard"] = manifest.Permissions.Clipboard
+	}
+	if err := a.DB.InsertPluginFull(manifest.ID, manifest.Name, manifest.Version, manifest.Author, manifest.Description, manifest.Category, manifest.Capabilities, permissions); err != nil {
+		fmt.Printf("QuickDock: 插件 %s 写入数据库记录失败: %v\n", manifest.ID, err)
+	}
+	return Ok(map[string]interface{}{
+		"id":      manifest.ID,
+		"name":    manifest.Name,
+		"version": manifest.Version,
+		"dir":     dir,
+	})
+}
+
+// SelectAndInstallPlugin 打开原生文件对话框选择 .zip 并安装
+func (a *AppService) SelectAndInstallPlugin() *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	if a.app == nil {
+		return FailMsg("app not initialized")
+	}
+
+	filePath, err := a.app.Dialog.OpenFile().
+		SetTitle("选择插件包 (.zip)").
+		AddFilter("插件包", "*.zip").
+		PromptForSingleSelection()
+	if err != nil {
+		return Fail(err)
+	}
+	if filePath == "" {
+		return Ok(nil) // 用户取消了选择
+	}
+	return a.InstallPlugin(filePath)
+}
+
+// InstallPluginFromBytes 接受前端上传的文件字节安装插件（拖拽 fallback）
+func (a *AppService) InstallPluginFromBytes(fileName string, fileData []byte) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	// 写入临时文件
+	tmpDir := filepath.Join(os.TempDir(), "quickdock-plugin-install")
+	os.MkdirAll(tmpDir, 0755)
+	tmpPath := filepath.Join(tmpDir, fileName)
+	if err := os.WriteFile(tmpPath, fileData, 0644); err != nil {
+		return Fail(fmt.Errorf("写入临时文件失败: %w", err))
+	}
+	defer os.Remove(tmpPath)
+
+	// 调用标准的 InstallFromZip
+	return a.InstallPlugin(tmpPath)
+}
+
+// PluginHotkeyRegistry 管理插件声明的全局热键
+type PluginHotkeyRegistry struct {
+	mu       sync.Mutex
+	accelMap map[string]string // "Ctrl+Shift+T" → "pluginID.commandID"
+	byPlugin map[string][]string // pluginID → []accel （便于卸载时批量清理）
+}
+
+func NewPluginHotkeyRegistry() *PluginHotkeyRegistry {
+	return &PluginHotkeyRegistry{
+		accelMap: make(map[string]string),
+		byPlugin: make(map[string][]string),
+	}
+}
+
+// Register 注册插件热键，返回错误如果冲突
+func (r *PluginHotkeyRegistry) Register(accel, pluginID, commandID string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	// 冲突检测
+	if existing, ok := r.accelMap[accel]; ok {
+		return fmt.Errorf("热键 %s 已被 %s 占用: %w", accel, existing, plugin.ErrHotkeyConflict)
+	}
+
+	r.accelMap[accel] = pluginID + "." + commandID
+	r.byPlugin[pluginID] = append(r.byPlugin[pluginID], accel)
+	return nil
+}
+
+// UnregisterAll 卸载插件时清理所有热键
+func (r *PluginHotkeyRegistry) UnregisterAll(pluginID string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	for _, accel := range r.byPlugin[pluginID] {
+		delete(r.accelMap, accel)
+	}
+	delete(r.byPlugin, pluginID)
+}
+
+// ===== 插件系统 API =====
+
+func (a *AppService) ListPlugins() *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	return Ok(a.PluginMgr.ListPlugins())
+}
+
+func (a *AppService) ExecutePluginCommand(pluginID, commandID string, input map[string]interface{}) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	result, err := a.PluginMgr.ExecuteCommand(pluginID, commandID, input)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(result)
+}
+
+func (a *AppService) EnablePlugin(id string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	// 启用：更新数据库状态后加载插件
+	if err := a.DB.SetPluginEnabled(id, 1); err != nil {
+		return dberr(err)
+	}
+	// 从插件目录重新加载
+	manifest, err := a.PluginMgr.ReloadPlugin(id)
+	if err != nil {
+		return Fail(err)
+	}
+
+	// 注册插件声明的热键
+	if a.PluginHotkeys != nil && manifest != nil {
+		for _, cmd := range manifest.Commands {
+			if cmd.Hotkey == "" {
+				continue
+			}
+			accel := hotkeyStringToAccel(cmd.Hotkey)
+			if err := a.PluginHotkeys.Register(accel, id, cmd.ID); err != nil {
+				fmt.Printf("QuickDock: 插件 %s 热键 %s 注册失败: %v\n", id, accel, err)
+			} else if a.app != nil {
+				_ = a.app.GlobalShortcut.Register(accel, func() {
+					a.executePluginCommand(id, cmd.ID)
+				})
+			}
+		}
+	}
+
+	return Ok(manifest)
+}
+
+func (a *AppService) DisablePlugin(id string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	// StopPlugin 停止进程但保留在列表中，禁用后仍然能看到并重新启用
+	if err := a.PluginMgr.StopPlugin(id); err != nil {
+		// 插件可能不在内存中（初次启动时 DB 禁用但未加载），这不是错误
+		_ = err
+	}
+	if err := a.DB.SetPluginEnabled(id, 0); err != nil {
+		return dberr(err)
+	}
+
+	// 清理插件热键
+	if a.PluginHotkeys != nil {
+		a.PluginHotkeys.UnregisterAll(id)
+	}
+
+	return Ok(nil)
+}
+
+// executePluginCommand 内部调用插件命令（供热键回调使用）
+func (a *AppService) executePluginCommand(pluginID, commandID string) {
+	result, err := a.PluginMgr.ExecuteCommand(pluginID, commandID, nil)
+	if err != nil {
+		fmt.Printf("QuickDock: 插件 %s 命令 %s 执行失败: %v\n", pluginID, commandID, err)
+	} else if result != nil {
+		fmt.Printf("QuickDock: 插件 %s 命令 %s 执行成功\n", pluginID, commandID)
+	}
+}
+
+// hotkeyStringToAccel 将 "Ctrl+Shift+T" 转为 Wails Accelerator 格式 "Ctrl+Shift+T"
+// Wails 的 Accelerator 格式与标准表示法一致
+func hotkeyStringToAccel(hotkey string) string {
+	parts := strings.Split(hotkey, "+")
+	for i, p := range parts {
+		switch strings.ToLower(p) {
+		case "ctrl":
+			parts[i] = "Ctrl"
+		case "alt":
+			parts[i] = "Alt"
+		case "shift":
+			parts[i] = "Shift"
+		case "win", "super", "cmd":
+			parts[i] = "Super"
+		}
+	}
+	return strings.Join(parts, "+")
+}
+
+func (a *AppService) UninstallPlugin(id string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	a.PluginMgr.UnloadPlugin(id)
+	if err := a.PluginMgr.UninstallPlugin(id); err != nil {
+		return Fail(err)
+	}
+	// 清理数据库记录和数据
+	if err := a.DB.DeletePlugin(id); err != nil {
+		return dberr(err)
+	}
+	if err := a.DB.CleanPluginData(id); err != nil {
+		return dberr(err)
+	}
+	return Ok(nil)
+}
+
+func (a *AppService) GetPluginFrontendURL(pluginID string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	path, err := a.PluginMgr.GetFrontendPath(pluginID)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(path)
+}
+
+// GetPluginIcon 获取插件图标（返回 base64 data URI）
+func (a *AppService) GetPluginIcon(pluginID string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	inst := a.PluginMgr.GetPlugin(pluginID)
+	if inst == nil {
+		return FailMsg("插件未加载")
+	}
+	if inst.Manifest.Icon == "" {
+		return Ok(nil)
+	}
+	iconPath := filepath.Join(inst.Dir, inst.Manifest.Icon)
+	data, err := os.ReadFile(iconPath)
+	if err != nil {
+		return Ok(nil) // 图标文件不存在不是致命错误
+	}
+	// 根据扩展名推断 MIME
+	ext := strings.ToLower(filepath.Ext(inst.Manifest.Icon))
+	var mime string
+	switch ext {
+	case ".svg":
+		mime = "image/svg+xml"
+	case ".png":
+		mime = "image/png"
+	case ".ico":
+		mime = "image/x-icon"
+	case ".jpg", ".jpeg":
+		mime = "image/jpeg"
+	default:
+		mime = "image/png"
+	}
+	dataURI := fmt.Sprintf("data:%s;base64,%s", mime, base64Encode(data))
+	return Ok(dataURI)
+}
+
+// GetPluginFrontendPage 获取插件前端页面（内联 CSS/JS 的单 HTML 文件）
+func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	inst := a.PluginMgr.GetPlugin(pluginID)
+	if inst == nil {
+		return FailMsg("插件未加载")
+	}
+	if !inst.Manifest.Frontend.Enabled {
+		return FailMsg("插件未启用前端")
+	}
+	entryPath := filepath.Join(inst.Dir, inst.Manifest.Frontend.Entry)
+	htmlData, err := os.ReadFile(entryPath)
+	if err != nil {
+		return Fail(err)
+	}
+	html := string(htmlData)
+	baseDir := filepath.Dir(entryPath)
+
+	// 内联 CSS
+	html = inlineFileRefs(html, baseDir, `<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"[^>]*>`, func(path string) string {
+		data, err := os.ReadFile(filepath.Join(baseDir, path))
+		if err != nil {
+			return ""
+		}
+		return "<style>\n" + string(data) + "\n</style>"
+	})
+
+	// 内联 JS
+	html = inlineFileRefs(html, baseDir, `<script[^>]+src="([^"]+)"[^>]*>`, func(path string) string {
+		data, err := os.ReadFile(filepath.Join(baseDir, path))
+		if err != nil {
+			return ""
+		}
+		return "<script>\n" + string(data) + "\n</script>"
+	})
+
+	return Ok(html)
+}
+
+// inlineFileRefs 替换 HTML 中引用的外部文件为内联内容
+func inlineFileRefs(html, baseDir, pattern string, loader func(string) string) string {
+	re := regexp.MustCompile(pattern)
+	return re.ReplaceAllStringFunc(html, func(match string) string {
+		sub := re.FindStringSubmatch(match)
+		if len(sub) < 2 {
+			return match
+		}
+		inlined := loader(sub[1])
+		if inlined == "" {
+			return match // 保留原引用
+		}
+		return inlined
+	})
+}
+
+// base64Encode 辅助函数
+func base64Encode(data []byte) string {
+	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	var result []byte
+	for i := 0; i < len(data); i += 3 {
+		var val uint32
+		remaining := len(data) - i
+		if remaining >= 3 {
+			val = uint32(data[i])<<16 | uint32(data[i+1])<<8 | uint32(data[i+2])
+			result = append(result, chars[(val>>18)&0x3F], chars[(val>>12)&0x3F], chars[(val>>6)&0x3F], chars[val&0x3F])
+		} else if remaining == 2 {
+			val = uint32(data[i])<<16 | uint32(data[i+1])<<8
+			result = append(result, chars[(val>>18)&0x3F], chars[(val>>12)&0x3F], chars[(val>>6)&0x3F], '=')
+		} else {
+			val = uint32(data[i]) << 16
+			result = append(result, chars[(val>>18)&0x3F], chars[(val>>12)&0x3F], '=', '=')
+		}
+	}
+	return string(result)
+}
+
+
+// ===== 插件独立窗口 =====
+// 插件前端页面在独立窗口中打开（使用 iframe 嵌入）
+
+// ShowPluginWindow 打开插件独立窗口（或切换插件 ID）
+func (a *AppService) ShowPluginWindow(pluginID string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	inst := a.PluginMgr.GetPlugin(pluginID)
+	if inst == nil {
+		return FailMsg("插件未加载")
+	}
+	if !inst.Manifest.Frontend.Enabled {
+		return FailMsg("插件未启用前端")
+	}
+
+	win := a.PluginWindow
+	if win == nil {
+		return FailMsg("plugin window not initialized")
+	}
+
+	// 先显示窗口激活 webview，再通过 JS 切换 hash（带时间戳确保每次 hash 都变化）
+	win.SetTitle("快启坞 - " + inst.Manifest.Name)
+	win.Show()
+	win.Focus()
+	win.ExecJS("window.location.hash = '#/plugin/" + pluginID + "?t=" + fmt.Sprintf("%d", time.Now().UnixNano()) + "'")
+	return Ok(nil)
+}
+
+// MinimizePluginWindow 最小化插件独立窗口
+func (a *AppService) MinimizePluginWindow() *ApiResult {
+	if win := a.PluginWindow; win != nil {
+		win.Minimise()
+	}
+	return Ok(nil)
+}
+
+// ToggleMaximizePluginWindow 切换插件窗口最大化/还原
+func (a *AppService) ToggleMaximizePluginWindow() *ApiResult {
+	if win := a.PluginWindow; win != nil {
+		if win.IsMaximised() {
+			win.Restore()
+		} else {
+			win.Maximise()
+		}
+	}
+	return Ok(nil)
+}
+
+// HidePluginWindow 隐藏插件独立窗口（关闭按钮）
+func (a *AppService) HidePluginWindow() *ApiResult {
+	if win := a.PluginWindow; win != nil {
+		win.Hide()
+	}
+	return Ok(nil)
+}
+
+// GetPluginWindowPluginID 获取当前插件窗口显示的插件 ID
+func (a *AppService) GetPluginWindowPluginID() *ApiResult {
+	return Ok(nil) // 由前端通过 hash 自行判断
+}
+
+// ===== 跨窗口插件页面导航（已废弃，改用 ShowPluginWindow）=====
+
+var (
+	pendingPluginPage   string
+	pendingPluginPageMu sync.Mutex
+)
+
+// SetPendingPluginPage 设置待跳转的插件页面（已废弃，保留兼容）
+func (a *AppService) SetPendingPluginPage(pluginID string) *ApiResult {
+	pendingPluginPageMu.Lock()
+	pendingPluginPage = pluginID
+	pendingPluginPageMu.Unlock()
+	return Ok(nil)
+}
+
+// GetAndClearPendingPluginPage 获取并清除待跳转的插件页面（已废弃，保留兼容）
+func (a *AppService) GetAndClearPendingPluginPage() *ApiResult {
+	pendingPluginPageMu.Lock()
+	id := pendingPluginPage
+	pendingPluginPage = ""
+	pendingPluginPageMu.Unlock()
+	if id == "" {
+		return Ok(nil)
+	}
+	return Ok(id)
+}

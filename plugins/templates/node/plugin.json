@@ -1,0 +1,33 @@
+{
+  "id": "com.quickdock.my-node-plugin",
+  "name": "Node.js 插件示例",
+  "version": "1.0.0",
+  "description": "使用 Node.js 开发的 QuickDock 插件",
+  "author": "Your Name",
+
+  "backend": {
+    "runtime": "node",
+    "entry": "index.js",
+    "args": []
+  },
+
+  "frontend": {
+    "enabled": false
+  },
+
+  "capabilities": ["command"],
+
+  "permissions": {
+    "network": false,
+    "filesystem": false,
+    "clipboard": true
+  },
+
+  "commands": [
+    {
+      "id": "hello",
+      "title": "Hello World",
+      "hotkey": ""
+    }
+  ]
+}

@@ -10,6 +10,59 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+// dbConn 接口化 *sql.DB，允许包装日志拦截器
+type dbConn interface {
+	Exec(query string, args ...interface{}) (sql.Result, error)
+	Query(query string, args ...interface{}) (*sql.Rows, error)
+	QueryRow(query string, args ...interface{}) *sql.Row
+	Prepare(query string) (*sql.Stmt, error)
+	Begin() (*sql.Tx, error)
+	Close() error
+}
+
+// sqlLogger 包装 *sql.DB 并在执行前打印 SQL
+type sqlLogger struct {
+	inner *sql.DB
+}
+
+func (l *sqlLogger) Exec(query string, args ...interface{}) (sql.Result, error) {
+	logSQL(query, args...)
+	return l.inner.Exec(query, args...)
+}
+
+func (l *sqlLogger) Query(query string, args ...interface{}) (*sql.Rows, error) {
+	logSQL(query, args...)
+	return l.inner.Query(query, args...)
+}
+
+func (l *sqlLogger) QueryRow(query string, args ...interface{}) *sql.Row {
+	logSQL(query, args...)
+	return l.inner.QueryRow(query, args...)
+}
+
+func (l *sqlLogger) Prepare(query string) (*sql.Stmt, error) {
+	logSQL(query)
+	return l.inner.Prepare(query)
+}
+
+func (l *sqlLogger) Begin() (*sql.Tx, error) {
+	fmt.Println("[SQL] BEGIN TRANSACTION")
+	return l.inner.Begin()
+}
+
+func (l *sqlLogger) Close() error {
+	return l.inner.Close()
+}
+
+// logSQL 打印 SQL 语句和参数
+func logSQL(query string, args ...interface{}) {
+	if len(args) > 0 {
+		fmt.Printf("[SQL] %s | args: %v\n", query, args)
+	} else {
+		fmt.Printf("[SQL] %s\n", query)
+	}
+}
+
 // 已知表的白名单（所有允许在 SQL 拼接中出现的表名）
 var validTables = map[string]bool{
 	"workspaces":        true,
@@ -84,7 +137,7 @@ func validateColumns(columns []string) error {
 // Database 包装 SQLite 连接，提供互斥锁保护
 type Database struct {
 	mu   sync.Mutex
-	conn *sql.DB
+	conn dbConn
 	path string
 }
 
@@ -115,7 +168,7 @@ func Open(path string) (*Database, error) {
 		return nil, fmt.Errorf("启用外键约束失败: %w", err)
 	}
 
-	db := &Database{conn: conn, path: path}
+	db := &Database{conn: &sqlLogger{inner: conn}, path: path}
 	if err := db.migrate(); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)

@@ -1,25 +1,28 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   Search, Hash, Command, ArrowRight, Lock, Power, Moon, Trash2, RotateCcw,
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, X,
-  MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera
+  MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle
 } from '@lucide/vue'
-import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp } from '../../bindings/quickdock/services/appservice'
+import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, ShowPluginWindow } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import type { CollectionItem } from '../types'
+import type { CollectionItem, PluginInfo } from '../types'
+import type { ToastAPI } from '../types'
 import { evaluate, format } from '../utils/calc'
 import { pinyin } from 'pinyin-pro'
 const { t } = useI18n()
+const toast = inject<ToastAPI>('toast')
 
-// ---- 关闭面板（清空搜索框）----
+// ---- 关闭面板（清空搜索框和结果缓存）----
 function closePalette() {
   query.value = ''
   selectedIndex.value = 0
   inlineQuicklink.value = null
   inlineQuery.value = ''
+  pluginResultCache.value = null
   try { HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
 }
 
@@ -82,7 +85,7 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
 ]
 
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin'
 
 interface InstalledApp {
   name: string
@@ -105,6 +108,11 @@ interface SearchResult {
   frecencyScore?: number
   appPath?: string
   appCategory?: string
+  pluginId?: string
+  pluginCommandId?: string
+  pluginHasFrontend?: boolean
+  inlineInput?: string           // 从查询中提取的内联输入文本
+  pluginResult?: string          // 插件执行结果文本（执行后缓存）
 }
 
 interface SystemCmd {
@@ -164,9 +172,13 @@ const query = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
 const items = ref<CollectionItem[]>([])
 const installedApps = ref<InstalledApp[]>([])
+const installedPlugins = ref<PluginInfo[]>([])
 const loading = ref(false)
 const selectedIndex = ref(0)
 const listRef = ref<HTMLElement | null>(null)
+
+// 插件执行结果缓存（留在结果列表中，直到关闭面板或输入新内容）
+const pluginResultCache = ref<{ result: string; pluginName: string } | null>(null)
 
 // Quicklink 内联输入模式
 const inlineQuicklink = ref<CollectionItem | null>(null)
@@ -378,6 +390,65 @@ const groupedResults = computed<ResultGroup[]>(() => {
     groups.push({ type: 'system', label: t('cmdGroupSystem'), results: sysResults })
   }
 
+  // 7. 插件命令（支持内联输入：查询文本中自动提取输入参数）
+  const pluginResults: SearchResult[] = []
+  for (const plugin of installedPlugins.value) {
+    if (plugin.status !== 'running') continue
+    for (const cmd of plugin.commands) {
+      // 检查命令标题或关键字是否匹配
+      const titleLC = cmd.title.toLowerCase()
+      if (!(titleLC.includes(qLC) || pinyinMatch(cmd.title, qLC))) continue
+
+      // 尝试从查询中提取内联输入
+      // 如果查询词比命令标题长，多余的部分作为输入参数
+      let inlineInput: string | undefined
+      const titleWords = cmd.title.split(/[\s:：]+/)
+      const qWords = qLC.split(/\s+/)
+      // 查找：查询的第一个词是否匹配命令标题的关键词
+      let matchedPrefix = ''
+      for (const tw of titleWords) {
+        if (tw.length < 2) continue
+        if (qLC.startsWith(tw)) {
+          matchedPrefix = tw
+          break
+        }
+      }
+      if (matchedPrefix && qLC.length > matchedPrefix.length) {
+        // 去掉匹配的前缀，剩余部分作为内联输入
+        inlineInput = query.value.slice(matchedPrefix.length).trim()
+        if (inlineInput.startsWith(':') || inlineInput.startsWith('：')) {
+          inlineInput = inlineInput.slice(1).trim()
+        }
+      }
+
+      pluginResults.push({
+        type: 'plugin',
+        label: inlineInput ? `${cmd.title}: ${inlineInput}` : cmd.title,
+        desc: plugin.name,
+        icon: Puzzle,
+        pluginId: plugin.id,
+        pluginCommandId: cmd.id,
+        pluginHasFrontend: plugin.hasFrontend,
+        inlineInput,
+        frecencyScore: frecencyScore('plugin:' + plugin.id + '.' + cmd.id),
+      })
+    }
+  }
+  // 加上之前执行的结果缓存（始终显示在插件分组顶部）
+  if (pluginResultCache.value) {
+    pluginResults.unshift({
+      type: 'plugin',
+      label: pluginResultCache.value.result,
+      desc: '← ' + pluginResultCache.value.pluginName,
+      icon: Puzzle,
+      frecencyScore: 9999, // 置顶
+    })
+  }
+  pluginResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
+  if (pluginResults.length > 0) {
+    groups.push({ type: 'plugin', label: t('cmdGroupPlugins'), results: pluginResults })
+  }
+
   return groups
 })
 
@@ -520,6 +591,41 @@ async function executeSelected() {
     recordUsage('app:' + result.label)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }
     closePalette()
+  } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
+    recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId)
+    try {
+      // 统一输入：优先用内联输入的文本，否则用搜索框的查询文本
+      const inputText = result.inlineInput || query.value.trim()
+      const input: any = inputText ? { text: inputText } : null
+      const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, input)
+      const pluginResult = unwrap<string | any>(raw)
+
+      if (pluginResult) {
+        // 统一结果提取
+        const displayText = typeof pluginResult === 'object'
+          ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult))
+          : String(pluginResult)
+        const copyText = typeof pluginResult === 'object'
+          ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText)
+          : displayText
+
+        // 复制到剪贴板
+        try { await navigator.clipboard.writeText(copyText) } catch {}
+        // 缓存到结果列表顶部
+        pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label }
+        // Toast 提示
+        toast?.success?.(t('pluginResultCopied'))
+      }
+
+      // 如果有前端页面，在新窗口打开
+      if (result.pluginHasFrontend || result.pluginId) {
+        try { await ShowPluginWindow(result.pluginId) } catch {}
+      }
+    } catch (e) {
+      toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
+    }
+    // 不清空 query，保留面板供查看结果
+    // 用户按 Esc 关闭
   }
 }
 
@@ -591,6 +697,13 @@ async function loadMostUsedItems() {
     snippets.value = snips || []
   } catch (e) {
     console.error('[CmdPalette] SearchSnippets:', getErrorMessage(e))
+  }
+  // 加载运行中的插件命令
+  try {
+    const plugins = unwrap<PluginInfo[]>(await ListPlugins())
+    if (gen === itemsLoadGen) installedPlugins.value = plugins?.filter(p => p.status === 'running') || []
+  } catch (e) {
+    console.error('[CmdPalette] ListPlugins:', getErrorMessage(e))
   } finally {
     if (gen === itemsLoadGen) loading.value = false
   }
