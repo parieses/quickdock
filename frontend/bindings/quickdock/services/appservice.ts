@@ -219,6 +219,7 @@ export function HidePaletteWindow(): $CancellablePromise<void> {
 
 /**
  * HidePluginWindow 隐藏插件独立窗口（关闭按钮）
+ * 隐藏前清理 iframe 的 hash，使 PluginPage 组件卸载并释放 iframe 资源
  */
 export function HidePluginWindow(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1422908057);

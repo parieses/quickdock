@@ -111,7 +111,8 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 		// 再尝试解析为响应
 		var resp RPCResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
-			// 无法解析的 stdout 行，忽略（可能是插件自己的日志）
+			// 无法解析的 stdout 行，以调试日志输出（非 JSON 行可能是插件自己的调试打印）
+			fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, string(line))
 			continue
 		}
 

@@ -15,7 +15,8 @@ rl.on('line', (line) => {
         break
 
       case 'plugin.execute':
-        const { command, input } = req.params
+        const params = req.params || {}
+        const { command, input } = params
         switch (command) {
           case 'hello':
             const name = (input && input.name) || 'World'

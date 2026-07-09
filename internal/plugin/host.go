@@ -127,7 +127,9 @@ func (m *Manager) handleCallback(inst *PluginInstance, req *RPCRequest) {
 		return
 	}
 
+	m.mu.RLock()
 	handler, ok := m.hostMethods[req.Method]
+	m.mu.RUnlock()
 	if !ok {
 		resp := MakeError(req.ID, -32601, fmt.Sprintf("未知的 host 方法: %s", req.Method))
 		inst.sendMu.Lock()

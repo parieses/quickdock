@@ -16,6 +16,7 @@ const loading = ref(true)
 const error = ref('')
 const pluginName = ref('')
 let messageHandler: ((e: MessageEvent) => void) | null = null
+let iframeWindow: Window | null = null
 
 onMounted(async () => {
   try {
@@ -37,17 +38,26 @@ onMounted(async () => {
   }
 
   messageHandler = async (event: MessageEvent) => {
+    // 验证消息来源：只接受插件 iframe 的消息
+    if (event.source !== iframeWindow) return
+
     if (event.data?.type === 'plugin:execute') {
       const { id, command, input } = event.data
       try {
         const result = await ExecutePluginCommand(props.pluginId, command, input || null)
         const data = unwrap(result)
         if (event.source && 'postMessage' in (event.source as any)) {
-          ;(event.source as any).postMessage({ type: 'plugin:result', id, data }, '*')
+          ;(event.source as any).postMessage(
+            { type: 'plugin:result', id, data },
+            window.location.origin
+          )
         }
       } catch (e: any) {
         if (event.source && 'postMessage' in (event.source as any)) {
-          ;(event.source as any).postMessage({ type: 'plugin:result', id, error: e?.message || String(e) }, '*')
+          ;(event.source as any).postMessage(
+            { type: 'plugin:result', id, error: e?.message || String(e) },
+            window.location.origin
+          )
         }
       }
     }
@@ -59,6 +69,10 @@ onUnmounted(() => {
   if (iframeSrc.value) URL.revokeObjectURL(iframeSrc.value)
   if (messageHandler) window.removeEventListener('message', messageHandler)
 })
+
+function onIframeLoad(event: Event) {
+  iframeWindow = (event.target as HTMLIFrameElement)?.contentWindow
+}
 
 function closeWindow() {
   HidePluginWindow()
@@ -91,8 +105,9 @@ function closeWindow() {
         v-else
         :src="iframeSrc"
         class="pw-iframe"
-        sandbox="allow-scripts allow-same-origin"
+        sandbox="allow-scripts"
         frameborder="0"
+        @load="onIframeLoad"
       />
     </div>
   </div>

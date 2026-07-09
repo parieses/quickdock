@@ -1,10 +1,12 @@
 package services
 
 import (
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -118,14 +120,25 @@ func (r *PluginHotkeyRegistry) Register(accel, pluginID, commandID string) error
 }
 
 // UnregisterAll 卸载插件时清理所有热键
-func (r *PluginHotkeyRegistry) UnregisterAll(pluginID string) {
+func (r *PluginHotkeyRegistry) UnregisterAll(pluginID string) []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	for _, accel := range r.byPlugin[pluginID] {
+	accels := r.byPlugin[pluginID]
+	for _, accel := range accels {
 		delete(r.accelMap, accel)
 	}
 	delete(r.byPlugin, pluginID)
+	return accels
+}
+
+// GetPluginAccels 返回插件注册的所有热键（用于外部注销系统快捷键）
+func (r *PluginHotkeyRegistry) GetPluginAccels(pluginID string) []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]string, len(r.byPlugin[pluginID]))
+	copy(result, r.byPlugin[pluginID])
+	return result
 }
 
 // ===== 插件系统 API =====
@@ -162,8 +175,17 @@ func (a *AppService) EnablePlugin(id string) *ApiResult {
 		return Fail(err)
 	}
 
-	// 注册插件声明的热键
+	// 注册插件声明的热键：先清理旧的热键避免自冲突
 	if a.PluginHotkeys != nil && manifest != nil {
+		// 先注销该插件之前注册的所有热键（系统级 + 内部注册表）
+		if a.app != nil {
+			for _, accel := range a.PluginHotkeys.GetPluginAccels(id) {
+				_ = a.app.GlobalShortcut.Unregister(accel)
+			}
+		}
+		a.PluginHotkeys.UnregisterAll(id)
+
+		// 重新注册
 		for _, cmd := range manifest.Commands {
 			if cmd.Hotkey == "" {
 				continue
@@ -195,9 +217,14 @@ func (a *AppService) DisablePlugin(id string) *ApiResult {
 		return dberr(err)
 	}
 
-	// 清理插件热键
+	// 清理插件热键（内部注册表 + 系统全局快捷键）
 	if a.PluginHotkeys != nil {
-		a.PluginHotkeys.UnregisterAll(id)
+		accels := a.PluginHotkeys.UnregisterAll(id)
+		if a.app != nil {
+			for _, accel := range accels {
+				_ = a.app.GlobalShortcut.Unregister(accel)
+			}
+		}
 	}
 
 	return Ok(nil)
@@ -227,6 +254,9 @@ func hotkeyStringToAccel(hotkey string) string {
 			parts[i] = "Shift"
 		case "win", "super", "cmd":
 			parts[i] = "Super"
+		default:
+			// 非修饰键统一小写，确保 "Ctrl+T" 和 "Ctrl+t" 被视为同一热键
+			parts[i] = strings.ToLower(p)
 		}
 	}
 	return strings.Join(parts, "+")
@@ -239,6 +269,15 @@ func (a *AppService) UninstallPlugin(id string) *ApiResult {
 	a.PluginMgr.UnloadPlugin(id)
 	if err := a.PluginMgr.UninstallPlugin(id); err != nil {
 		return Fail(err)
+	}
+	// 清理热键（内部注册表 + 系统全局快捷键）
+	if a.PluginHotkeys != nil {
+		accels := a.PluginHotkeys.UnregisterAll(id)
+		if a.app != nil {
+			for _, accel := range accels {
+				_ = a.app.GlobalShortcut.Unregister(accel)
+			}
+		}
 	}
 	// 清理数据库记录和数据
 	if err := a.DB.DeletePlugin(id); err != nil {
@@ -310,6 +349,15 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 		return FailMsg("插件未启用前端")
 	}
 	entryPath := filepath.Join(inst.Dir, inst.Manifest.Frontend.Entry)
+	// 限制插件 HTML 文件最大 10MB
+	const maxHTMLSize = 10 << 20
+	fi, err := os.Stat(entryPath)
+	if err != nil {
+		return Fail(err)
+	}
+	if fi.Size() > maxHTMLSize {
+		return Fail(fmt.Errorf("插件前端文件过大 (%d bytes)", fi.Size()))
+	}
 	htmlData, err := os.ReadFile(entryPath)
 	if err != nil {
 		return Fail(err)
@@ -317,18 +365,26 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	html := string(htmlData)
 	baseDir := filepath.Dir(entryPath)
 
-	// 内联 CSS
-	html = inlineFileRefs(html, baseDir, `<link[^>]+rel="stylesheet"[^>]+href="([^"]+)"[^>]*>`, func(path string) string {
-		data, err := os.ReadFile(filepath.Join(baseDir, path))
+	// 内联 CSS：匹配 <link ... href="..." rel="stylesheet" .../> 无论属性顺序和引号类型
+	html = inlineFileRefs(html, baseDir, `<link\s[^>]*?(?:rel="stylesheet"|rel='stylesheet')[^>]*?>`, func(match string) string {
+		href := extractAttrValue(match, "href")
+		if href == "" {
+			return match
+		}
+		data, err := os.ReadFile(filepath.Join(baseDir, href))
 		if err != nil {
 			return ""
 		}
 		return "<style>\n" + string(data) + "\n</style>"
 	})
 
-	// 内联 JS
-	html = inlineFileRefs(html, baseDir, `<script[^>]+src="([^"]+)"[^>]*>`, func(path string) string {
-		data, err := os.ReadFile(filepath.Join(baseDir, path))
+	// 内联 JS：匹配 <script ... src="..." ...></script>
+	html = inlineFileRefs(html, baseDir, `<script[^>]*src\s*=\s*["'][^"']*["'][^>]*>`, func(match string) string {
+		src := extractAttrValue(match, "src")
+		if src == "" {
+			return match
+		}
+		data, err := os.ReadFile(filepath.Join(baseDir, src))
 		if err != nil {
 			return ""
 		}
@@ -339,14 +395,11 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 }
 
 // inlineFileRefs 替换 HTML 中引用的外部文件为内联内容
+// pattern 应匹配整个标签，由 loader 从 match 中自行提取路径
 func inlineFileRefs(html, baseDir, pattern string, loader func(string) string) string {
 	re := regexp.MustCompile(pattern)
 	return re.ReplaceAllStringFunc(html, func(match string) string {
-		sub := re.FindStringSubmatch(match)
-		if len(sub) < 2 {
-			return match
-		}
-		inlined := loader(sub[1])
+		inlined := loader(match)
 		if inlined == "" {
 			return match // 保留原引用
 		}
@@ -354,25 +407,24 @@ func inlineFileRefs(html, baseDir, pattern string, loader func(string) string) s
 	})
 }
 
+// extractAttrValue 从 HTML 标签中提取属性值（支持单引号和双引号）
+func extractAttrValue(tag, attrName string) string {
+	// 尝试双引号: attr="value"
+	re := regexp.MustCompile(attrName + `\s*=\s*"([^"]*)"`)
+	if m := re.FindStringSubmatch(tag); len(m) >= 2 {
+		return m[1]
+	}
+	// 尝试单引号: attr='value'
+	re = regexp.MustCompile(attrName + `\s*=\s*'([^']*)'`)
+	if m := re.FindStringSubmatch(tag); len(m) >= 2 {
+		return m[1]
+	}
+	return ""
+}
+
 // base64Encode 辅助函数
 func base64Encode(data []byte) string {
-	const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-	var result []byte
-	for i := 0; i < len(data); i += 3 {
-		var val uint32
-		remaining := len(data) - i
-		if remaining >= 3 {
-			val = uint32(data[i])<<16 | uint32(data[i+1])<<8 | uint32(data[i+2])
-			result = append(result, chars[(val>>18)&0x3F], chars[(val>>12)&0x3F], chars[(val>>6)&0x3F], chars[val&0x3F])
-		} else if remaining == 2 {
-			val = uint32(data[i])<<16 | uint32(data[i+1])<<8
-			result = append(result, chars[(val>>18)&0x3F], chars[(val>>12)&0x3F], chars[(val>>6)&0x3F], '=')
-		} else {
-			val = uint32(data[i]) << 16
-			result = append(result, chars[(val>>18)&0x3F], chars[(val>>12)&0x3F], '=', '=')
-		}
-	}
-	return string(result)
+	return base64.StdEncoding.EncodeToString(data)
 }
 
 
@@ -401,7 +453,9 @@ func (a *AppService) ShowPluginWindow(pluginID string) *ApiResult {
 	win.SetTitle("快启坞 - " + inst.Manifest.Name)
 	win.Show()
 	win.Focus()
-	win.ExecJS("window.location.hash = '#/plugin/" + pluginID + "?t=" + fmt.Sprintf("%d", time.Now().UnixNano()) + "'")
+	// 使用 strconv.Quote 安全转义 pluginID，防止 JS 注入
+	hashValue := "#/plugin/" + pluginID + "?t=" + fmt.Sprintf("%d", time.Now().UnixNano())
+	win.ExecJS("window.location.hash = " + strconv.Quote(hashValue))
 	return Ok(nil)
 }
 
@@ -426,8 +480,10 @@ func (a *AppService) ToggleMaximizePluginWindow() *ApiResult {
 }
 
 // HidePluginWindow 隐藏插件独立窗口（关闭按钮）
+// 隐藏前清理 iframe 的 hash，使 PluginPage 组件卸载并释放 iframe 资源
 func (a *AppService) HidePluginWindow() *ApiResult {
 	if win := a.PluginWindow; win != nil {
+		win.ExecJS("window.location.hash = ''")
 		win.Hide()
 	}
 	return Ok(nil)

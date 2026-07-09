@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -111,8 +112,8 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		cmd = exec.Command("python", entryPath)
 	case "powershell":
 		cmd = exec.Command("powershell", "-File", entryPath)
-	default:
-		return ErrUnsupportedRuntime
+	case "wasm":
+		return fmt.Errorf("wasm runtime 尚在开发中，暂不支持")
 	}
 
 	cmd.Dir = dir
@@ -141,6 +142,16 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 
 	// 加入插件列表（只加写锁很短时间）
 	m.mu.Lock()
+	if existing, ok := m.plugins[manifest.ID]; ok && existing != inst {
+		// 并发冲突：在上次解锁后另一个 goroutine 已加载了同一插件
+		// 停止当前实例，保留已有实例
+		m.mu.Unlock()
+		inst.Close()
+		if inst.Cmd != nil && inst.Cmd.Process != nil {
+			inst.Cmd.Process.Kill()
+		}
+		return fmt.Errorf("插件 %s 并发加载冲突，另一个实例已优先注册", manifest.ID)
+	}
 	m.plugins[manifest.ID] = inst
 	m.mu.Unlock()
 
@@ -160,16 +171,25 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	}, 15*time.Second)
 	if err != nil {
 		m.mu.Lock()
+		// 只删除自己的实例（避免并发场景下误删其他 goroutine 的实例）
+		if current, ok := m.plugins[manifest.ID]; ok && current == inst {
+			delete(m.plugins, manifest.ID)
+		}
 		m.stopPlugin(inst)
-		delete(m.plugins, manifest.ID)
 		m.mu.Unlock()
 		return fmt.Errorf("插件初始化失败: %w", err)
 	}
 
 	inst.Status = "running"
 
-	// 写入 PID 文件（使用快照数据，避免在写锁内获取读锁）
-	m.safeWritePidFile()
+	// 写入 PID 文件（取快照，避免在无锁状态下直接读 map）
+	m.mu.RLock()
+	pidSnapshot := make(map[string]*PluginInstance, len(m.plugins))
+	for k, v := range m.plugins {
+		pidSnapshot[k] = v
+	}
+	m.mu.RUnlock()
+	m.safeWritePidFile(pidSnapshot)
 
 	return nil
 }
@@ -211,8 +231,8 @@ func (m *Manager) stopPlugin(inst *PluginInstance) {
 		inst.Cmd.Wait()
 	}
 
-	// 更新 PID 文件
-	m.safeWritePidFile()
+	// 更新 PID 文件（调用者持有写锁，直接传 m.plugins 安全）
+	m.safeWritePidFile(m.plugins)
 }
 
 // PluginsDir 返回插件安装目录
@@ -329,11 +349,14 @@ func (m *Manager) cleanupOrphans() {
 		if pid <= 0 {
 			continue
 		}
+		if !processExists(pid) {
+			continue
+		}
+		// 尝试终止进程
 		proc, err := os.FindProcess(pid)
 		if err != nil {
-			continue // 进程不存在
+			continue
 		}
-		// 尝试终止进程（避免误杀，先发 SIGTERM）
 		if err := proc.Kill(); err == nil {
 			fmt.Printf("QuickDock: 清理孤儿进程 %q (PID %d)\n", pluginID, pid)
 		}
@@ -344,16 +367,26 @@ func (m *Manager) cleanupOrphans() {
 	os.Remove(pidFile)
 }
 
-// safeWritePidFile 将当前所有运行中插件的 PID 写入文件
-// 注意：不获取 m.mu 锁，避免在已持有写锁的上下文中调用导致死锁。
-// 适合在 LoadPlugin/stopPlugin 等已持有锁或对数据一致性要求不高的场景调用。
-func (m *Manager) safeWritePidFile() {
+// processExists 验证 PID 对应的进程是否真实存在
+// Windows 上 os.FindProcess 始终成功，需要额外验证避免误杀 PID 被重用的问题
+func processExists(pid int) bool {
+	// 先用 tasklist 验证进程是否存在（Windows）
+	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV").Output()
+	if err != nil {
+		return false
+	}
+	return bytes.Contains(out, []byte(fmt.Sprintf(`"%d"`, pid)))
+}
+
+// safeWritePidFile 将指定插件快照的 PID 写入文件
+// plugins: 已正确加锁保护的插件 map 快照
+// 调用者必须确保传入的 map 在合适的锁保护下
+func (m *Manager) safeWritePidFile(plugins map[string]*PluginInstance) {
 	m.pidMu.Lock()
 	defer m.pidMu.Unlock()
 
 	pids := make(map[string]int)
-	// 直接读取 map，不通过 RLock（调用者可能已持有写锁）
-	for id, inst := range m.plugins {
+	for id, inst := range plugins {
 		if inst.Status == "running" && inst.Cmd != nil && inst.Cmd.Process != nil {
 			pids[id] = inst.Cmd.Process.Pid
 		}

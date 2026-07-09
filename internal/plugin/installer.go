@@ -10,6 +10,13 @@ import (
 	"strings"
 )
 
+// 安全限制
+const (
+	maxPluginJSONSize     = 1 << 20  // plugin.json 最大 1MB
+	maxDecompressedSize   = 100 << 20 // 解压总大小上限 100MB
+	maxSingleFileSize     = 50 << 20  // 单文件解压大小上限 50MB
+)
+
 // InstallFromZip 从 zip 包安装插件
 // zipPath: zip 文件路径
 // 返回安装目录路径
@@ -25,13 +32,13 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 	var pluginID string
 	var manifest *PluginManifest
 
-	for _, f := range zipReader.File {
+		for _, f := range zipReader.File {
 		if f.Name == "plugin.json" || f.Name == "./plugin.json" {
 			rc, err := f.Open()
 			if err != nil {
 				return "", fmt.Errorf("读取 plugin.json 失败: %w", err)
 			}
-			data, err := io.ReadAll(rc)
+			data, err := io.ReadAll(io.LimitReader(rc, maxPluginJSONSize))
 			rc.Close()
 			if err != nil {
 				return "", fmt.Errorf("读取 plugin.json 失败: %w", err)
@@ -54,7 +61,7 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 
 			// 校验 runtime
 			switch mf.Backend.Runtime {
-			case "native", "node", "python", "powershell":
+			case "native", "node", "python", "powershell", "wasm":
 				// 合法
 			default:
 				return "", fmt.Errorf("%w: 不支持的 runtime %q", ErrInvalidManifest, mf.Backend.Runtime)
@@ -103,7 +110,9 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		}
 	}
 
-	// ---- 解压所有文件 ----
+	// ---- 解压所有文件（含 zip bomb 防护）----
+	var totalExtracted int64
+
 	for _, f := range zipReader.File {
 		// 清理路径并拼接
 		cleanName := filepath.Clean(f.Name)
@@ -122,6 +131,24 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		if f.FileInfo().IsDir() {
 			os.MkdirAll(targetPath, 0755)
 			continue
+		}
+
+		// 检查单文件解压大小
+		if f.UncompressedSize64 > maxSingleFileSize {
+			os.RemoveAll(targetDir)
+			if backupDir != "" {
+				os.Rename(backupDir, targetDir)
+			}
+			return "", fmt.Errorf("文件 %q 过大（%d bytes）", f.Name, f.UncompressedSize64)
+		}
+
+		// 检查总解压大小
+		if totalExtracted+int64(f.UncompressedSize64) > maxDecompressedSize {
+			os.RemoveAll(targetDir)
+			if backupDir != "" {
+				os.Rename(backupDir, targetDir)
+			}
+			return "", fmt.Errorf("解压总大小超出限制（%d bytes）", maxDecompressedSize)
 		}
 
 		// 创建父目录
@@ -147,16 +174,17 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 			return "", fmt.Errorf("读取 zip 条目 %s 失败: %w", f.Name, err)
 		}
 
-		_, err = io.Copy(dst, src)
+		written, err := io.CopyN(dst, src, maxSingleFileSize)
 		src.Close()
 		dst.Close()
-		if err != nil {
+		if err != nil && err != io.EOF {
 			os.RemoveAll(targetDir)
 			if backupDir != "" {
 				os.Rename(backupDir, targetDir)
 			}
 			return "", fmt.Errorf("写入文件 %s 失败: %w", targetPath, err)
 		}
+		totalExtracted += written
 
 		// native runtime 的入口文件加可执行权限（仅 Unix，Windows 不适用但无害）
 		if manifest.Backend.Runtime == "native" && cleanName == manifest.Backend.Entry {

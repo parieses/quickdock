@@ -70,7 +70,8 @@ def main():
                 respond_error(req_id, -1, str(e))
 
         elif method == 'shutdown':
-            respond(req_id, {'status': 'bye'})
+            if req_id != 0:
+                respond(req_id, {'status': 'bye'})
             sys.exit(0)
 
 
