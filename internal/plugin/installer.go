@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // 安全限制
@@ -79,13 +80,27 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 
 	targetDir := filepath.Join(m.pluginsDir, pluginID)
 
-	// 检查插件是否已安装（备份旧版本）
-	backupDir := ""
+	// 检查插件是否已安装：先卸载旧插件释放文件句柄，再备份目录
+	var backupDir string
 	if _, err := os.Stat(targetDir); err == nil {
+		// 卸载正在运行的旧实例，释放文件句柄（忽略"未加载"错误）
+		m.UnloadPlugin(pluginID)
+
 		backupDir = targetDir + ".bak." + manifest.Version
 		os.RemoveAll(backupDir) // 清理旧的备份
-		if err := os.Rename(targetDir, backupDir); err != nil {
-			return "", fmt.Errorf("备份旧版本插件失败: %w", err)
+
+		// Windows 上进程退出后文件句柄释放可能有短暂延迟，最多重试 3 次
+		var err error
+		for retry := 0; retry < 3; retry++ {
+			if err = os.Rename(targetDir, backupDir); err == nil {
+				break
+			}
+			if retry < 2 {
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+		if err != nil {
+			return "", fmt.Errorf("备份旧版本插件失败（进程可能未完全退出）: %w", err)
 		}
 	}
 
