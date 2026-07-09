@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Minus, Square, X } from '@lucide/vue'
-import { GetPluginFrontendPage, ExecutePluginCommand, HidePluginWindow, MinimizePluginWindow, ToggleMaximizePluginWindow } from '../../bindings/quickdock/services/appservice'
+import { GetPluginFrontendPage, ExecutePluginCommand, HidePluginWindow, MinimizePluginWindow, ToggleMaximizePluginWindow, GetAndClearPendingPluginInit } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import type { ToastAPI } from '../types'
 
@@ -63,32 +63,23 @@ onMounted(async () => {
     }
   }
   window.addEventListener('message', messageHandler)
-
-  // 监听命令面板传入的计算文本
-  window.addEventListener('plugin:init', onPluginInitEvent as EventListener)
 })
 
 onUnmounted(() => {
   if (iframeSrc.value) URL.revokeObjectURL(iframeSrc.value)
   if (messageHandler) window.removeEventListener('message', messageHandler)
-  window.removeEventListener('plugin:init', onPluginInitEvent as EventListener)
 })
 
-function onIframeLoad(event: Event) {
+async function onIframeLoad(event: Event) {
   iframeWindow = (event.target as HTMLIFrameElement)?.contentWindow
-  // 检查有没有待传递的初始数据（从命令面板来）
-  const initData = (window as any).__pluginInitData
-  if (initData && iframeWindow) {
-    iframeWindow.postMessage({ type: 'plugin:init', data: initData }, window.location.origin)
-    ;(window as any).__pluginInitData = null
-  }
-}
-
-// 监听后续的 init 事件（插件窗口已打开，从命令面板再次传入数据）
-function onPluginInitEvent(e: CustomEvent) {
-  if (iframeWindow && e.detail) {
-    iframeWindow.postMessage({ type: 'plugin:init', data: e.detail }, window.location.origin)
-  }
+  // 从 Go 后端检查有没有待传递的初始文本（从命令面板来）
+  try {
+    const raw = await GetAndClearPendingPluginInit()
+    const text = raw?.data || raw
+    if (text && iframeWindow) {
+      iframeWindow.postMessage({ type: 'plugin:init', data: { text } }, window.location.origin)
+    }
+  } catch {}
 }
 
 function closeWindow() {

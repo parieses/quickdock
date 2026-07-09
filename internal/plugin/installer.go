@@ -51,8 +51,12 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 			}
 
 			// 校验必填字段
-			if mf.ID == "" || mf.Name == "" || mf.Version == "" || mf.Backend.Runtime == "" || mf.Backend.Entry == "" {
-				return "", fmt.Errorf("%w: id/name/version/backend.runtime/backend.entry 为必填字段", ErrInvalidManifest)
+			if mf.ID == "" || mf.Name == "" || mf.Version == "" || mf.Backend.Runtime == "" {
+				return "", fmt.Errorf("%w: id/name/version/backend.runtime 为必填字段", ErrInvalidManifest)
+			}
+			// none runtime 不需要 entry
+			if mf.Backend.Runtime != "none" && mf.Backend.Entry == "" {
+				return "", fmt.Errorf("%w: backend.entry 为必填字段（none runtime 除外）", ErrInvalidManifest)
 			}
 
 			// 校验 ID 格式
@@ -62,7 +66,7 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 
 			// 校验 runtime
 			switch mf.Backend.Runtime {
-			case "native", "node", "python", "powershell", "wasm":
+			case "native", "node", "python", "powershell", "wasm", "none":
 				// 合法
 			default:
 				return "", fmt.Errorf("%w: 不支持的 runtime %q", ErrInvalidManifest, mf.Backend.Runtime)

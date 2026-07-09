@@ -473,6 +473,26 @@ func (a *AppService) ShowPluginWindow(pluginID string) *ApiResult {
 	return Ok(nil)
 }
 
+// SetPendingPluginInit 设置待传递给插件窗口的初始文本（从命令面板→插件窗口跨窗口传递）
+func (a *AppService) SetPendingPluginInit(text string) *ApiResult {
+	a.pendingInitTextMu.Lock()
+	a.pendingInitText = text
+	a.pendingInitTextMu.Unlock()
+	return Ok(nil)
+}
+
+// GetAndClearPendingPluginInit 获取并清除待传递的初始文本
+func (a *AppService) GetAndClearPendingPluginInit() *ApiResult {
+	a.pendingInitTextMu.Lock()
+	text := a.pendingInitText
+	a.pendingInitText = ""
+	a.pendingInitTextMu.Unlock()
+	if text == "" {
+		return Ok(nil)
+	}
+	return Ok(text)
+}
+
 // MinimizePluginWindow 最小化插件独立窗口
 func (a *AppService) MinimizePluginWindow() *ApiResult {
 	if win := a.PluginWindow; win != nil {

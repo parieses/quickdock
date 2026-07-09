@@ -47,6 +47,10 @@ type AppService struct {
 	// 插件前端页面 HTML 缓存
 	frontendCache   map[string]*frontendCacheEntry
 	frontendCacheMu sync.RWMutex
+
+	// 跨窗口传递：命令面板→插件窗口的初始计算文本
+	pendingInitText   string
+	pendingInitTextMu sync.Mutex
 }
 
 type frontendCacheEntry struct {

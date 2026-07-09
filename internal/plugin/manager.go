@@ -97,17 +97,27 @@ func (m *Manager) DiscoverAndLoad() error {
 	return nil
 }
 
-// LoadPlugin 启动一个插件的子进程
+// LoadPlugin 启动一个插件的子进程（none runtime 不启动进程，纯前端）
 func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	// 先获取插件ID并检查是否需要停止旧实例
-	// 注意：这里不能长时间持有写锁，因为后续 readLoop 和 initialize 会阻塞
 	m.mu.Lock()
 	if inst, ok := m.plugins[manifest.ID]; ok {
 		m.stopPlugin(inst)
 	}
 	m.mu.Unlock()
 
-	// 根据 runtime 构建启动命令（不涉及共享数据）
+	// none runtime：纯前端插件，不启动子进程
+	if manifest.Backend.Runtime == "none" {
+		inst := NewPluginInstance(manifest, dir)
+		inst.Status = "running"
+		close(inst.readyCh) // 无需等待
+		m.mu.Lock()
+		m.plugins[manifest.ID] = inst
+		m.mu.Unlock()
+		return nil
+	}
+
+	// 根据 runtime 构建启动命令
 	var cmd *exec.Cmd
 	entryPath := filepath.Join(dir, manifest.Backend.Entry)
 
@@ -305,7 +315,7 @@ func (m *Manager) pingAll() {
 	m.mu.RLock()
 	ids := make([]string, 0, len(m.plugins))
 	for id, inst := range m.plugins {
-		if inst.Status == "running" {
+		if inst.Status == "running" && inst.Manifest.Backend.Runtime != "none" {
 			ids = append(ids, id)
 		}
 	}
@@ -361,6 +371,11 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 	m.mu.RUnlock()
 	if !ok {
 		return nil, ErrPluginNotFound
+	}
+
+	// none runtime：纯前端插件，无后端 RPC
+	if inst.Manifest.Backend.Runtime == "none" {
+		return json.RawMessage(`{"status":"ok","frontendOnly":true}`), nil
 	}
 
 	return inst.Call("plugin.execute", map[string]interface{}{

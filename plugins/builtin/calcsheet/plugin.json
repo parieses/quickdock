@@ -1,16 +1,14 @@
 {
   "id": "com.quickdock.calcsheet",
   "name": "计算稿纸",
-  "version": "2.1.0",
+  "version": "0.1.0",
   "description": "兼具草稿纸自由度与电子表格智能的多行计算工具，支持行号引用、变量定义、函数计算",
   "author": "QuickDock",
   "icon": "icon.svg",
   "category": "实用工具",
 
   "backend": {
-    "runtime": "python",
-    "entry": "main.py",
-    "args": []
+    "runtime": "none"
   },
 
   "frontend": {

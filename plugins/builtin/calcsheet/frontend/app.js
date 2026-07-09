@@ -1,21 +1,8 @@
 /** 计算稿纸 — 前端核心引擎 */
 const $ = s => document.querySelector(s)
 
-// ---- 插件 postMessage 桥接 ----
-let _nextId = 1, _pending = {}
-function pluginExec(command, input) {
-  return new Promise((resolve, reject) => {
-    const id = _nextId++; _pending[id] = { resolve, reject }
-    window.parent.postMessage({ type: 'plugin:execute', id, command, input }, '*')
-  })
-}
+// 从命令面板传入的计算文本
 window.addEventListener('message', (e) => {
-  const p = _pending[e.data?.id]
-  if (e.data?.type === 'plugin:result' && p) {
-    if (e.data.error) p.reject(new Error(e.data.error)); else p.resolve(e.data.data)
-    delete _pending[e.data.id]
-  }
-  // 从命令面板传入的计算文本：创建新行并计算
   if (e.data?.type === 'plugin:init' && e.data?.data?.text) {
     if (typeof app !== 'undefined' && app && app.activeSheet) {
       commitEdit()
@@ -106,24 +93,8 @@ class CalcSheetApp {
   }
 
   /** 首次渲染（构造之后调用，确保 DOM 和全局 app 就绪） */
-  async init() {
+  init() {
     this._load()
-    // 从 Python 后端加载远程稿纸并合入本地
-    try {
-      const remote = await pluginExec('list-sheets', {})
-      if (remote && remote.sheets && remote.sheets.length > 0) {
-        const localIds = new Set(this.sheets.map(s => s.id))
-        for (const rs of remote.sheets) {
-          if (!localIds.has(rs.id)) {
-            // 补齐可能缺失的字段
-            if (!rs.lines) rs.lines = []
-            if (rs.pinned === undefined) rs.pinned = false
-            this.sheets.push(rs)
-            localIds.add(rs.id)
-          }
-        }
-      }
-    } catch(e) { /* 后端不可用，仅用本地数据 */ }
     if (!this.activeId && this.sheets.length > 0) this.activeId = this.sheets[0].id
     if (this.sheets.length === 0) this._create('计算稿纸 1')
     this._bindEvents()
@@ -135,9 +106,7 @@ class CalcSheetApp {
   }
   _save() {
     try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ sheets:this.sheets, activeId:this.activeId })) } catch(e) {}
-    this._syncBackend()
   }
-  async _syncBackend() { const s=this.activeSheet; if(!s) return; try { await pluginExec('save-sheet',{sheet:s}) } catch(_) {} }
 
   get activeSheet() { return this.sheets.find(s=>s.id===this.activeId)||null }
   get sortedSheets() {
@@ -153,7 +122,7 @@ class CalcSheetApp {
   _delete(id) {
     const i=this.sheets.findIndex(s=>s.id===id); if(i<0) return
     this.sheets.splice(i,1); if(this.activeId===id) this.activeId=this.sheets[0]?.id||null
-    this._save(); pluginExec('delete-sheet',{id}).catch(()=>{}); renderAll(this)
+    this._save(); renderAll(this)
   }
   _select(id) {
     if(id===this.activeId) return
@@ -197,8 +166,6 @@ class CalcSheetApp {
     s.updatedAt=new Date().toISOString(); this._save()
   }
 
-  _export() { const s=this.activeSheet; if(!s) return ''; const l=['# '+s.name]; for (const x of s.lines) { const {comment}=splitComment(x.raw); let r=''; if (x.error) r='  ['+x.error+']'; else if (x.result!==null) r='  = '+fmtNum(x.result); l.push('\t'.repeat(x.indentLevel)+'#'+x.id+(x.remark?' ['+x.remark+']':'')+'  '+x.raw+r+(comment?'  // '+comment:'')) } return l.join('\n') }
-  _download(fn,c) { const b=new Blob([c],{type:'text/plain'}); const u=URL.createObjectURL(b); const a=document.createElement('a'); a.href=u;a.download=fn;document.body.appendChild(a);a.click();setTimeout(()=>{document.body.removeChild(a);URL.revokeObjectURL(u)},200) }
 
   _bindEvents() {
     const self = this
@@ -225,7 +192,6 @@ class CalcSheetApp {
     $('#btnClear').addEventListener('click', () => { if(!self.activeSheet||!self.activeSheet.lines.length) return; if(!confirm('清空所有行？')) return; commitEdit(); self._clear(); renderAll(self) })
     $('#btnUndo').addEventListener('click', () => { self._undo(); renderAll(self) })
     $('#btnRedo').addEventListener('click', () => { self._redo(); renderAll(self) })
-    $('#btnExport').addEventListener('click', () => { const s=self.activeSheet; if(!s) return; self._download(s.name.replace(/[^a-zA-Z0-9\u4e00-\u9fa5_-]/g,'_')+'.txt',self._export()) })
     $('#sheetSelect').addEventListener('change', (e) => { commitEdit(); self._select(e.target.value) })
   }
 }

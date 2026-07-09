@@ -210,10 +210,12 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 		}
 		pluginID := entry.Name()
 
-		// 检查是否已安装
+		// 检查是否已安装（已安装则先删除旧版本，确保内置插件始终最新）
 		targetDir := filepath.Join(mgr.PluginsDir(), pluginID)
 		if _, err := os.Stat(targetDir); err == nil {
-			continue // 已安装，跳过
+			// 先卸载旧插件（停止进程、释放文件句柄）
+			mgr.UnloadPlugin(pluginID)
+			os.RemoveAll(targetDir)
 		}
 
 		// 读取 plugin.json

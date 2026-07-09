@@ -6,7 +6,7 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle
 } from '@lucide/vue'
-import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, ShowPluginWindow } from '../../bindings/quickdock/services/appservice'
+import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, ShowPluginWindow, SetPendingPluginInit } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import type { CollectionItem, PluginInfo } from '../types'
@@ -622,10 +622,9 @@ async function executeSelected() {
         toast?.success?.(t('pluginResultCopied'))
       }
 
-      // 如果有前端页面且用户输入了文本，把输入传给插件窗口
+      // 如果有前端页面且用户输入了文本，把输入传给插件窗口（跨窗口传递）
       if ((result.pluginHasFrontend || result.pluginId) && inputText) {
-        (window as any).__pluginInitData = { text: inputText }
-        window.dispatchEvent(new CustomEvent('plugin:init', { detail: { text: inputText } }))
+        try { await SetPendingPluginInit(inputText) } catch {}
       }
 
       // 如果有前端页面，在新窗口打开

@@ -108,6 +108,13 @@ export function ExecuteSystemCommand(cmd: string): $CancellablePromise<$models.A
     return $Call.ByID(289709581, cmd);
 }
 
+/**
+ * GetAndClearPendingPluginInit 获取并清除待传递的初始文本
+ */
+export function GetAndClearPendingPluginInit(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2879713414);
+}
+
 export function GetAutoStart(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(3655302239);
 }
@@ -400,6 +407,13 @@ export function SetHotkeyConfig(modifiers: number, vk: number): $CancellableProm
 
 export function SetPaletteHotkeyConfig(modifiers: number, vk: number): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(189880149, modifiers, vk);
+}
+
+/**
+ * SetPendingPluginInit 设置待传递给插件窗口的初始文本（从命令面板→插件窗口跨窗口传递）
+ */
+export function SetPendingPluginInit(text: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(4124006564, text);
 }
 
 /**

@@ -14,6 +14,7 @@ html,body,#app { height: 100%; width: 100%; overflow: hidden; background: var(--
 .tb-btn { display: inline-flex; align-items: center; gap: 3px; padding: 3px 8px; border: 1px solid var(--border); border-radius: var(--radius); background: transparent; color: var(--text2); font-size: 11px; font-family: inherit; cursor: pointer; white-space: nowrap; transition: background .15s,color .15s; }
 .tb-btn:hover { background: var(--bg3); color: var(--text); border-color: var(--accent); }
 .tb-btn-sm { padding: 2px 5px; font-size: 10px; }
+.tb-btn-del:hover { background: rgba(232,76,76,0.15); color: var(--danger); border-color: var(--danger); }
 .tb-sep { width: 1px; height: 16px; background: var(--border); flex-shrink: 0; }
 .table-header { display: flex; padding: 4px 10px; font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
 .col-line { width: 44px; min-width: 44px; flex-shrink: 0; }
