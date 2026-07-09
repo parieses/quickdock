@@ -263,7 +263,7 @@ const groupedResults = computed<ResultGroup[]>(() => {
     } catch {}
   }
 
-  // 2. 项目 + Quicklink — items.value 已由后端 FTS5 筛选
+  // 3. 项目 + Quicklink — items.value 已由后端 FTS5 筛选
   // 前端补充拼音匹配 + 文本匹配（用户可能输入中文或拼音）
   const itemResults: SearchResult[] = []
   for (const item of items.value) {
@@ -395,35 +395,26 @@ const groupedResults = computed<ResultGroup[]>(() => {
   for (const plugin of installedPlugins.value) {
     if (plugin.status !== 'running') continue
     for (const cmd of plugin.commands) {
-      // 检查命令标题或关键字是否匹配
+      // 检查命令标题、关键字或 matchPattern 正则是否匹配
       const titleLC = cmd.title.toLowerCase()
       const idLC = cmd.id.toLowerCase()
       const kwLC = (cmd.keywords || []).map(k => k.toLowerCase())
       const isCalcExpr = /^[0-9+\-*/().%^, ]+$/.test(qLC)
-      // 匹配条件：标题/ID/关键字包含查询；或查询以关键字+空格开头（用于内联输入）；或纯数学表达式；或拼音匹配
+      // matchPattern：插件自声明正则，命中则自动匹配并传入输入文本
+      let matchPatternMatch: RegExpExecArray | null = null
+      if (cmd.matchPattern) {
+        try { matchPatternMatch = new RegExp(cmd.matchPattern).exec(q) } catch {}
+      }
+      const matchesPattern = matchPatternMatch !== null
+      // 匹配条件：标题/ID/关键字包含查询；或查询以关键字+空格开头（用于内联输入）；或纯数学表达式；或 matchPattern 命中；或拼音匹配
       const kwMatch = kwLC.some(k => k.includes(qLC) || qLC.startsWith(k + ' '))
-      const matchesPlugin = titleLC.includes(qLC) || idLC.includes(qLC) || kwMatch || pinyinMatch(cmd.title, qLC) || isCalcExpr
+      const matchesPlugin = titleLC.includes(qLC) || idLC.includes(qLC) || kwMatch || pinyinMatch(cmd.title, qLC) || isCalcExpr || matchesPattern
       if (!matchesPlugin) continue
 
-      // 尝试从查询中提取内联输入
-      // 如果查询词比命令标题长，多余的部分作为输入参数
+      // matchPattern 命中时，用全部查询文本作为内联输入（keywords 不传输入）
       let inlineInput: string | undefined
-      // 先用 keywords 匹配前缀（如 "计算 3500*0.8" → "计算" 是 keyword，提取 "3500*0.8"）
-      let matchedPrefix = ''
-      for (const kw of [cmd.title, ...(cmd.keywords || [])]) {
-        const kwLower = kw.toLowerCase()
-        if (kwLower.length < 2) continue
-        if (qLC.startsWith(kwLower + ' ')) {
-          matchedPrefix = kw
-          break
-        }
-      }
-      if (matchedPrefix && qLC.length > matchedPrefix.length) {
-        // 去掉匹配的前缀，剩余部分作为内联输入
-        inlineInput = query.value.slice(matchedPrefix.length).trim()
-        if (inlineInput.startsWith(':') || inlineInput.startsWith('：')) {
-          inlineInput = inlineInput.slice(1).trim()
-        }
+      if (matchesPattern) {
+        inlineInput = q
       }
 
       pluginResults.push({

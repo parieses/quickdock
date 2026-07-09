@@ -11,11 +11,9 @@ import (
 
 // 支持的 runtime 类型
 var supportedRuntimes = map[string]bool{
-	"native":      true,
-	"node":        true,
-	"python":      true,
-	"powershell":  true,
-	"wasm":        true,
+	"none":   true,
+	"goja":   true,
+	"native": true,
 }
 
 // 插件 ID 格式：com.xxx.xxx
@@ -68,10 +66,11 @@ func validateManifest(m *PluginManifest) error {
 		return fmt.Errorf("%w: backend.runtime 不能为空", ErrInvalidManifest)
 	}
 	if !supportedRuntimes[m.Backend.Runtime] {
-		return fmt.Errorf("%w: 不支持的 runtime %q，仅支持: native/node/python/powershell/wasm", ErrUnsupportedRuntime, m.Backend.Runtime)
+		return fmt.Errorf("%w: 不支持的 runtime %q，仅支持: none/goja/native", ErrUnsupportedRuntime, m.Backend.Runtime)
 	}
-	if strings.TrimSpace(m.Backend.Entry) == "" {
-		return fmt.Errorf("%w: backend.entry 不能为空", ErrInvalidManifest)
+	// none runtime 不需要 entry
+	if m.Backend.Runtime != "none" && strings.TrimSpace(m.Backend.Entry) == "" {
+		return fmt.Errorf("%w: backend.entry 不能为空（none runtime 除外）", ErrInvalidManifest)
 	}
 
 	return nil

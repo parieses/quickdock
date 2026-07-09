@@ -1,0 +1,25 @@
+{
+  "id": "com.example.myplugin",
+  "name": "我的插件",
+  "version": "0.1.0",
+  "description": "一个 Goja JS 插件示例",
+  "author": "",
+  "category": "工具",
+
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+
+  "frontend": {
+    "enabled": false
+  },
+
+  "commands": [
+    {
+      "id": "hello",
+      "title": "Hello World",
+      "keywords": ["hello", "hi", "你好"]
+    }
+  ]
+}

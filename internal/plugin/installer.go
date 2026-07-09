@@ -66,10 +66,10 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 
 			// 校验 runtime
 			switch mf.Backend.Runtime {
-			case "native", "node", "python", "powershell", "wasm", "none":
+			case "native", "goja", "none":
 				// 合法
 			default:
-				return "", fmt.Errorf("%w: 不支持的 runtime %q", ErrInvalidManifest, mf.Backend.Runtime)
+				return "", fmt.Errorf("%w: 不支持的 runtime %q（支持: native, goja, none）", ErrInvalidManifest, mf.Backend.Runtime)
 			}
 
 			manifest = &mf
@@ -189,12 +189,6 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 	}
 
 	os.Chmod(targetDir, 0755)
-	if manifest.Backend.Runtime == "python" {
-		entryPath := filepath.Join(targetDir, manifest.Backend.Entry)
-		if _, err := os.Stat(entryPath); err == nil {
-			os.Chmod(entryPath, 0644)
-		}
-	}
 
 	// 安装成功，提交（defer 不再回滚）
 	committed = true

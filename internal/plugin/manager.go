@@ -3,6 +3,7 @@ package plugin
 import (
 	"bufio"
 	"bytes"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,9 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/dop251/goja"
+	_ "modernc.org/sqlite"
 )
 
 // pidFileVersion 用于兼容未来格式变更
@@ -124,14 +128,98 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	switch manifest.Backend.Runtime {
 	case "native":
 		cmd = exec.Command(entryPath, manifest.Backend.Args...)
-	case "node":
-		cmd = exec.Command("node", entryPath)
-	case "python":
-		cmd = exec.Command("python", entryPath)
-	case "powershell":
-		cmd = exec.Command("powershell", "-File", entryPath)
-	case "wasm":
-		return fmt.Errorf("wasm runtime 尚在开发中，暂不支持")
+	case "goja":
+		// 读取并执行 JS 文件
+		jsCode, err := os.ReadFile(entryPath)
+		if err != nil {
+			return fmt.Errorf("读取插件 JS 文件失败: %w", err)
+		}
+		vm := goja.New()
+		vm.Set("__pluginId", manifest.ID)
+		vm.Set("__pluginDir", dir)
+
+		// 初始化插件专属 SQLite 数据库
+		homeDir, _ := os.UserHomeDir()
+		dataDir := filepath.Join(homeDir, ".quickdock", "data", manifest.ID)
+		os.MkdirAll(dataDir, 0755)
+		dbPath := filepath.Join(dataDir, "data.db")
+		pluginDB, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL")
+		if err != nil {
+			return fmt.Errorf("打开插件数据库失败: %w", err)
+		}
+		pluginDB.SetMaxOpenConns(1) // goja 单线程执行，无需多连接
+
+		vm.Set("api", map[string]interface{}{
+			"log": func(msg string) { fmt.Printf("[plugin %s] %s\n", manifest.ID, msg) },
+			"db": map[string]interface{}{
+				"exec": func(sql string) (map[string]interface{}, error) {
+					res, e := pluginDB.Exec(sql)
+					if e != nil {
+						return nil, e
+					}
+					id, _ := res.LastInsertId()
+					ra, _ := res.RowsAffected()
+					return map[string]interface{}{"lastId": id, "rowsAffected": ra}, nil
+				},
+				"query": func(sql string) ([]map[string]interface{}, error) {
+					rows, e := pluginDB.Query(sql)
+					if e != nil {
+						return nil, e
+					}
+					defer rows.Close()
+					cols, _ := rows.Columns()
+					var results []map[string]interface{}
+					for rows.Next() {
+						vals := make([]interface{}, len(cols))
+						valPtrs := make([]interface{}, len(cols))
+						for i := range vals {
+							valPtrs[i] = &vals[i]
+						}
+						rows.Scan(valPtrs...)
+						row := make(map[string]interface{})
+						for i, c := range cols {
+							switch v := vals[i].(type) {
+							case []byte:
+								row[c] = string(v)
+							default:
+								row[c] = v
+							}
+						}
+						results = append(results, row)
+					}
+					return results, nil
+				},
+			},
+		})
+
+		_, err = vm.RunString(string(jsCode))
+		if err != nil {
+			return fmt.Errorf("执行插件 JS 失败: %w", err)
+		}
+
+		// 检查是否导出了必要函数
+		hasInit := vm.Get("handleInitialize") != nil && !goja.IsUndefined(vm.Get("handleInitialize"))
+		hasExec := vm.Get("handleExecute") != nil && !goja.IsUndefined(vm.Get("handleExecute"))
+		if !hasExec {
+			return fmt.Errorf("插件需要导出 handleExecute 函数")
+		}
+
+		inst := NewPluginInstance(manifest, dir)
+		inst.VM = vm
+		inst.DB = pluginDB
+		inst.Status = "running"
+		close(inst.readyCh)
+		m.mu.Lock()
+		m.plugins[manifest.ID] = inst
+		m.mu.Unlock()
+
+		// goja 插件不需要子进程通信，直接完成
+		if hasInit {
+			inst.callGojaJS("handleInitialize", map[string]interface{}{})
+		}
+		return nil
+	default:
+		return ErrUnsupportedRuntime
 	}
 
 	cmd.Dir = dir
@@ -247,11 +335,18 @@ func (m *Manager) StopPlugin(id string) error {
 // stopPlugin 停止插件子进程
 func (m *Manager) stopPlugin(inst *PluginInstance) {
 	inst.stopped.Store(true)
-	// 发送 shutdown（允许失败，可能已经崩溃）
-	inst.SendNotification("shutdown", nil)
+	// 发送 shutdown（goja/none 运行时无 stdin pipe，跳过）
+	if inst.Stdin != nil {
+		inst.SendNotification("shutdown", nil)
+	}
 
 	inst.Status = "stopped"
 	inst.Close()
+
+	// 关闭 goja 插件数据库
+	if inst.DB != nil {
+		inst.DB.Close()
+	}
 
 	// 终止进程
 	if inst.Cmd != nil && inst.Cmd.Process != nil {
@@ -315,7 +410,7 @@ func (m *Manager) pingAll() {
 	m.mu.RLock()
 	ids := make([]string, 0, len(m.plugins))
 	for id, inst := range m.plugins {
-		if inst.Status == "running" && inst.Manifest.Backend.Runtime != "none" {
+		if inst.Status == "running" && inst.Stdin != nil {
 			ids = append(ids, id)
 		}
 	}
@@ -331,7 +426,7 @@ func (m *Manager) pingOne(pluginID string) {
 	m.mu.RLock()
 	inst, ok := m.plugins[pluginID]
 	m.mu.RUnlock()
-	if !ok || inst.Status != "running" {
+	if !ok || inst.Status != "running" || inst.Stdin == nil {
 		return
 	}
 
@@ -364,6 +459,26 @@ func (m *Manager) PluginsDir() string {
 	return m.pluginsDir
 }
 
+// callGojaJS 调用 goja 插件中导出的 JS 函数
+func (inst *PluginInstance) callGojaJS(fnName string, params map[string]interface{}) (interface{}, error) {
+	if inst.VM == nil {
+		return nil, fmt.Errorf("goja VM 未初始化")
+	}
+	fnVal := inst.VM.Get(fnName)
+	if fnVal == nil || goja.IsUndefined(fnVal) {
+		return nil, fmt.Errorf("插件未导出函数 %s", fnName)
+	}
+	fn, ok := goja.AssertFunction(fnVal)
+	if !ok {
+		return nil, fmt.Errorf("函数 %s 不可调用", fnName)
+	}
+	result, err := fn(goja.Undefined(), inst.VM.ToValue(params))
+	if err != nil {
+		return nil, err
+	}
+	return result.Export(), nil
+}
+
 // ExecuteCommand 执行插件命令（供 Wails 前端调用）
 func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]interface{}) (json.RawMessage, error) {
 	m.mu.RLock()
@@ -376,6 +491,19 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 	// none runtime：纯前端插件，无后端 RPC
 	if inst.Manifest.Backend.Runtime == "none" {
 		return json.RawMessage(`{"status":"ok","frontendOnly":true}`), nil
+	}
+
+	// goja runtime：直接调用 JS 函数
+	if inst.Manifest.Backend.Runtime == "goja" {
+		result, err := inst.callGojaJS("handleExecute", map[string]interface{}{
+			"command": commandID,
+			"input":   input,
+		})
+		if err != nil {
+			return nil, err
+		}
+		data, _ := json.Marshal(result)
+		return data, nil
 	}
 
 	return inst.Call("plugin.execute", map[string]interface{}{
@@ -543,7 +671,9 @@ func (m *Manager) ShutdownAll() {
 
 	for id, inst := range m.plugins {
 		fmt.Printf("QuickDock: 停止插件 %q\n", id)
-		inst.SendNotification("shutdown", nil)
+		if inst.Stdin != nil {
+			inst.SendNotification("shutdown", nil)
+		}
 		inst.Status = "stopped"
 		inst.Close()
 		if inst.Cmd != nil && inst.Cmd.Process != nil {

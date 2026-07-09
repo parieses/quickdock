@@ -140,6 +140,7 @@ export interface PluginCommand {
   title: string
   hotkey?: string
   keywords?: string[]
+  matchPattern?: string  // 命令面板正则匹配：命中时自动传入输入文本
 }
 
 export interface PluginInfo {

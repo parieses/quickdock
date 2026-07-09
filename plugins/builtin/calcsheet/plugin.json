@@ -1,14 +1,15 @@
 {
   "id": "com.quickdock.calcsheet",
   "name": "计算稿纸",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "兼具草稿纸自由度与电子表格智能的多行计算工具，支持行号引用、变量定义、函数计算",
   "author": "QuickDock",
   "icon": "icon.svg",
   "category": "实用工具",
 
   "backend": {
-    "runtime": "none"
+    "runtime": "goja",
+    "entry": "main.js"
   },
 
   "frontend": {
@@ -30,8 +31,8 @@
     {
       "id": "open-calc",
       "title": "计算稿纸",
-      "hotkey": "",
-      "keywords": ["eval", "calc", "计算", "稿纸", "求值", "calcsheet", "算"]
+      "keywords": ["eval", "calc", "计算", "稿纸", "求值", "calcsheet", "算"],
+      "matchPattern": "^[0-9+\\-*/().%^, ]+$"
     }
   ]
 }
