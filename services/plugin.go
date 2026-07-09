@@ -349,7 +349,8 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 		return FailMsg("插件未启用前端")
 	}
 	entryPath := filepath.Join(inst.Dir, inst.Manifest.Frontend.Entry)
-	// 限制插件 HTML 文件最大 10MB
+
+	// 检查缓存（以文件 mtime 为缓存 key）
 	const maxHTMLSize = 10 << 20
 	fi, err := os.Stat(entryPath)
 	if err != nil {
@@ -358,6 +359,14 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	if fi.Size() > maxHTMLSize {
 		return Fail(fmt.Errorf("插件前端文件过大 (%d bytes)", fi.Size()))
 	}
+
+	a.frontendCacheMu.RLock()
+	entry, cached := a.frontendCache[pluginID]
+	a.frontendCacheMu.RUnlock()
+	if cached && entry.mtime.Equal(fi.ModTime()) {
+		return Ok(entry.html)
+	}
+
 	htmlData, err := os.ReadFile(entryPath)
 	if err != nil {
 		return Fail(err)
@@ -390,6 +399,11 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 		}
 		return "<script>\n" + string(data) + "\n</script>"
 	})
+
+	// 写入缓存
+	a.frontendCacheMu.Lock()
+	a.frontendCache[pluginID] = &frontendCacheEntry{html: html, mtime: fi.ModTime()}
+	a.frontendCacheMu.Unlock()
 
 	return Ok(html)
 }
@@ -492,31 +506,4 @@ func (a *AppService) HidePluginWindow() *ApiResult {
 // GetPluginWindowPluginID 获取当前插件窗口显示的插件 ID
 func (a *AppService) GetPluginWindowPluginID() *ApiResult {
 	return Ok(nil) // 由前端通过 hash 自行判断
-}
-
-// ===== 跨窗口插件页面导航（已废弃，改用 ShowPluginWindow）=====
-
-var (
-	pendingPluginPage   string
-	pendingPluginPageMu sync.Mutex
-)
-
-// SetPendingPluginPage 设置待跳转的插件页面（已废弃，保留兼容）
-func (a *AppService) SetPendingPluginPage(pluginID string) *ApiResult {
-	pendingPluginPageMu.Lock()
-	pendingPluginPage = pluginID
-	pendingPluginPageMu.Unlock()
-	return Ok(nil)
-}
-
-// GetAndClearPendingPluginPage 获取并清除待跳转的插件页面（已废弃，保留兼容）
-func (a *AppService) GetAndClearPendingPluginPage() *ApiResult {
-	pendingPluginPageMu.Lock()
-	id := pendingPluginPage
-	pendingPluginPage = ""
-	pendingPluginPageMu.Unlock()
-	if id == "" {
-		return Ok(nil)
-	}
-	return Ok(id)
 }

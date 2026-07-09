@@ -242,9 +242,9 @@ const groupedResults = computed<ResultGroup[]>(() => {
   const groups: ResultGroup[] = []
   const seen = new Set<string>()
 
-  // 1. 计算器
-  if (/^[0-9+\-*/().%^, ]+$/.test(q) || q.startsWith('=')) {
-    const expr = q.startsWith('=') ? q.slice(1) : q
+  // 1. 计算器（仅 = 前缀触发，避免拦截插件输入）
+  if (q.startsWith('=')) {
+    const expr = q.slice(1)
     try {
       const result = evaluate(expr)
       if (result !== undefined && result !== null) {
@@ -397,19 +397,24 @@ const groupedResults = computed<ResultGroup[]>(() => {
     for (const cmd of plugin.commands) {
       // 检查命令标题或关键字是否匹配
       const titleLC = cmd.title.toLowerCase()
-      if (!(titleLC.includes(qLC) || pinyinMatch(cmd.title, qLC))) continue
+      const idLC = cmd.id.toLowerCase()
+      const kwLC = (cmd.keywords || []).map(k => k.toLowerCase())
+      const isCalcExpr = /^[0-9+\-*/().%^, ]+$/.test(qLC)
+      // 匹配条件：标题/ID/关键字包含查询；或查询以关键字+空格开头（用于内联输入）；或纯数学表达式；或拼音匹配
+      const kwMatch = kwLC.some(k => k.includes(qLC) || qLC.startsWith(k + ' '))
+      const matchesPlugin = titleLC.includes(qLC) || idLC.includes(qLC) || kwMatch || pinyinMatch(cmd.title, qLC) || isCalcExpr
+      if (!matchesPlugin) continue
 
       // 尝试从查询中提取内联输入
       // 如果查询词比命令标题长，多余的部分作为输入参数
       let inlineInput: string | undefined
-      const titleWords = cmd.title.split(/[\s:：]+/)
-      const qWords = qLC.split(/\s+/)
-      // 查找：查询的第一个词是否匹配命令标题的关键词
+      // 先用 keywords 匹配前缀（如 "计算 3500*0.8" → "计算" 是 keyword，提取 "3500*0.8"）
       let matchedPrefix = ''
-      for (const tw of titleWords) {
-        if (tw.length < 2) continue
-        if (qLC.startsWith(tw)) {
-          matchedPrefix = tw
+      for (const kw of [cmd.title, ...(cmd.keywords || [])]) {
+        const kwLower = kw.toLowerCase()
+        if (kwLower.length < 2) continue
+        if (qLC.startsWith(kwLower + ' ')) {
+          matchedPrefix = kw
           break
         }
       }
@@ -591,7 +596,7 @@ async function executeSelected() {
     recordUsage('app:' + result.label)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }
     closePalette()
-  } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
+    } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId)
     try {
       // 统一输入：优先用内联输入的文本，否则用搜索框的查询文本
@@ -615,6 +620,12 @@ async function executeSelected() {
         pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label }
         // Toast 提示
         toast?.success?.(t('pluginResultCopied'))
+      }
+
+      // 如果有前端页面且用户输入了文本，把输入传给插件窗口
+      if ((result.pluginHasFrontend || result.pluginId) && inputText) {
+        (window as any).__pluginInitData = { text: inputText }
+        window.dispatchEvent(new CustomEvent('plugin:init', { detail: { text: inputText } }))
       }
 
       // 如果有前端页面，在新窗口打开

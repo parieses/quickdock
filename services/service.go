@@ -1,7 +1,9 @@
 package services
 
 import (
+	"sync"
 	"sync/atomic"
+	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/plugin"
@@ -41,11 +43,22 @@ type AppService struct {
 
 	// 内置插件自动安装（由 main.go 注入，含 embed.FS）
 	InstallBuiltinPluginsFn func(mgr *plugin.Manager, database *db.Database)
+
+	// 插件前端页面 HTML 缓存
+	frontendCache   map[string]*frontendCacheEntry
+	frontendCacheMu sync.RWMutex
+}
+
+type frontendCacheEntry struct {
+	html  string
+	mtime time.Time
 }
 
 // NewAppService 创建应用服务实例
 func NewAppService() *AppService {
-	return &AppService{}
+	return &AppService{
+		frontendCache: make(map[string]*frontendCacheEntry),
+	}
 }
 
 // SetApp 设置 App 引用（由 main.go 在创建后调用）

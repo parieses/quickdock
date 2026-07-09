@@ -61,7 +61,8 @@ my-plugin/
     {
       "id": "hello",
       "title": "Hello World",
-      "hotkey": ""
+      "hotkey": "",
+      "keywords": ["hw", "greet"]
     }
   ]
 }
@@ -78,6 +79,7 @@ my-plugin/
 | `backend.entry` | 入口文件名（相对插件根目录）|
 | `permissions` | 权限声明，影响插件能调用的 Host API |
 | `commands` | 注册到命令面板的命令列表 |
+| `commands[].keywords` | 搜索别名数组，用户输入这些词也能匹配到该命令（如 `["eval","calc","求值"]`）|
 
 ### Runtime 说明
 

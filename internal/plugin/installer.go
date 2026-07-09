@@ -104,23 +104,31 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		}
 	}
 
+	// 标记文件：记录备份路径，解压完成后删除。若存在此文件说明安装中断，下次启动时自动回滚
+	rollbackMark := targetDir + ".rollback"
+	if backupDir != "" {
+		os.WriteFile(rollbackMark, []byte(backupDir), 0644)
+	}
+
 	// 创建目标目录
 	if err := os.MkdirAll(targetDir, 0755); err != nil {
+		_ = rollbackInstall(targetDir, backupDir, rollbackMark)
 		return "", fmt.Errorf("创建插件目录失败: %w", err)
 	}
 
+	// 统一延迟回滚：如果未调用 commit，任何 return 都会触发清理+还原
+	committed := false
+	defer func() {
+		if !committed {
+			_ = rollbackInstall(targetDir, backupDir, rollbackMark)
+		}
+	}()
+
 	// ---- Zip Slip 防护：检查所有文件名是否包含 .. ----
 	for _, f := range zipReader.File {
-		// 清理路径，检查是否包含 ..
 		sanitized := filepath.Clean(f.Name)
-		// 去掉 ./ 前缀
 		sanitized = strings.TrimPrefix(sanitized, "./")
 		if strings.Contains(sanitized, "..") || strings.HasPrefix(sanitized, "/") || strings.HasPrefix(sanitized, "\\") {
-			// Zip Slip 攻击！回滚
-			os.RemoveAll(targetDir)
-			if backupDir != "" {
-				os.Rename(backupDir, targetDir)
-			}
 			return "", fmt.Errorf("%w: 文件名 %q 包含非法路径", ErrZipSlipDetected, f.Name)
 		}
 	}
@@ -129,17 +137,11 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 	var totalExtracted int64
 
 	for _, f := range zipReader.File {
-		// 清理路径并拼接
 		cleanName := filepath.Clean(f.Name)
 		cleanName = strings.TrimPrefix(cleanName, "./")
 		targetPath := filepath.Join(targetDir, cleanName)
 
-		// 确保目标路径在插件目录内（二次防护）
 		if !strings.HasPrefix(filepath.Clean(targetPath), filepath.Clean(targetDir)+string(os.PathSeparator)) {
-			os.RemoveAll(targetDir)
-			if backupDir != "" {
-				os.Rename(backupDir, targetDir)
-			}
 			return "", fmt.Errorf("%w: 文件 %q 试图跳出插件目录", ErrZipSlipDetected, f.Name)
 		}
 
@@ -148,44 +150,24 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 			continue
 		}
 
-		// 检查单文件解压大小
 		if f.UncompressedSize64 > maxSingleFileSize {
-			os.RemoveAll(targetDir)
-			if backupDir != "" {
-				os.Rename(backupDir, targetDir)
-			}
 			return "", fmt.Errorf("文件 %q 过大（%d bytes）", f.Name, f.UncompressedSize64)
 		}
 
-		// 检查总解压大小
 		if totalExtracted+int64(f.UncompressedSize64) > maxDecompressedSize {
-			os.RemoveAll(targetDir)
-			if backupDir != "" {
-				os.Rename(backupDir, targetDir)
-			}
 			return "", fmt.Errorf("解压总大小超出限制（%d bytes）", maxDecompressedSize)
 		}
 
-		// 创建父目录
 		os.MkdirAll(filepath.Dir(targetPath), 0755)
 
-		// 写入文件
 		dst, err := os.OpenFile(targetPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
 		if err != nil {
-			os.RemoveAll(targetDir)
-			if backupDir != "" {
-				os.Rename(backupDir, targetDir)
-			}
 			return "", fmt.Errorf("创建文件 %s 失败: %w", targetPath, err)
 		}
 
 		src, err := f.Open()
 		if err != nil {
 			dst.Close()
-			os.RemoveAll(targetDir)
-			if backupDir != "" {
-				os.Rename(backupDir, targetDir)
-			}
 			return "", fmt.Errorf("读取 zip 条目 %s 失败: %w", f.Name, err)
 		}
 
@@ -193,24 +175,16 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		src.Close()
 		dst.Close()
 		if err != nil && err != io.EOF {
-			os.RemoveAll(targetDir)
-			if backupDir != "" {
-				os.Rename(backupDir, targetDir)
-			}
 			return "", fmt.Errorf("写入文件 %s 失败: %w", targetPath, err)
 		}
 		totalExtracted += written
 
-		// native runtime 的入口文件加可执行权限（仅 Unix，Windows 不适用但无害）
 		if manifest.Backend.Runtime == "native" && cleanName == manifest.Backend.Entry {
 			os.Chmod(targetPath, 0755)
 		}
 	}
 
-	// 设置文件权限
 	os.Chmod(targetDir, 0755)
-
-	// 确保 python 插件入口有执行权限
 	if manifest.Backend.Runtime == "python" {
 		entryPath := filepath.Join(targetDir, manifest.Backend.Entry)
 		if _, err := os.Stat(entryPath); err == nil {
@@ -218,13 +192,39 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		}
 	}
 
+	// 安装成功，提交（defer 不再回滚）
+	committed = true
+	os.Remove(rollbackMark)
+
 	// 加载插件
 	if err := m.LoadPlugin(*manifest, targetDir); err != nil {
-		// 加载失败但安装成功，返回目录路径和错误
 		return targetDir, fmt.Errorf("插件安装成功但加载失败（可手动重启）: %w", err)
 	}
 
 	return targetDir, nil
+}
+
+// rollbackInstall 清理新安装目录并恢复备份（失败时仅日志）
+func rollbackInstall(targetDir, backupDir, markFile string) error {
+	// 清理 rollback 标记
+	os.Remove(markFile)
+	// 删除残缺的新安装
+	os.RemoveAll(targetDir)
+	// 恢复备份
+	if backupDir != "" {
+		// 最多重试 3 次，避免 Windows 文件句柄延迟
+		var err error
+		for retry := 0; retry < 3; retry++ {
+			if err = os.Rename(backupDir, targetDir); err == nil {
+				return nil
+			}
+			if retry < 2 {
+				time.Sleep(200 * time.Millisecond)
+			}
+		}
+		return fmt.Errorf("恢复备份目录失败（残留目录: %s, 原目录: %s）: %w", backupDir, targetDir, err)
+	}
+	return nil
 }
 
 // isValidPluginID 校验插件 ID 格式：至少要包含一个点号

@@ -5,6 +5,8 @@ import (
 	"io"
 	"os/exec"
 	"sync"
+	"sync/atomic"
+	"time"
 )
 
 // ---- 插件清单结构 ----
@@ -49,9 +51,10 @@ type Permissions struct {
 
 // Command 插件命令
 type Command struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Hotkey string `json:"hotkey,omitempty"`
+	ID       string   `json:"id"`
+	Title    string   `json:"title"`
+	Hotkey   string   `json:"hotkey,omitempty"`
+	Keywords []string `json:"keywords,omitempty"` // 搜索别名，用于命令面板快速查找
 }
 
 // ---- JSON-RPC 通信结构 ----
@@ -99,8 +102,13 @@ type PluginInstance struct {
 	readyCh  chan struct{}             // readLoop 就绪信号 ← P0 修复
 	doneCh   chan struct{}             // 进程退出信号
 	closeOnce sync.Once               // 确保 doneCh 只关闭一次 ← P1 修复
+	stopped  atomic.Bool              // 用户主动停止标记（避免崩溃重启循环）
 	Dir      string                    // 插件安装目录
-	Status   string                    // running | stopped | crashed
+	Status   string                    // running | stopped | crashed | unresponsive
+
+	// 健康检查
+	MissedPings    int       // 连续 ping 失败次数
+	UnresponsiveAt time.Time  // 标记为 unresponsive 的时间
 }
 
 // NewPluginInstance 创建插件实例

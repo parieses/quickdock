@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -32,6 +33,9 @@ type Manager struct {
 	hostMethods map[string]HostMethod
 	pidFilePath string
 	pidMu       sync.Mutex
+
+	healthCheckStopCh chan struct{}
+	healthCheckWg     sync.WaitGroup
 }
 
 // NewManager 创建插件管理器
@@ -47,6 +51,10 @@ func NewManager(pluginsDir string) *Manager {
 
 	// 启动时清理上一次残留的插件进程
 	m.cleanupOrphans()
+
+	// 启动后台健康检查
+	m.healthCheckStopCh = make(chan struct{})
+	m.startHealthCheck()
 
 	return m
 }
@@ -127,8 +135,17 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		return fmt.Errorf("创建 stdout pipe 失败: %w", err)
 	}
 
-	// stderr 直接打到主程序 stderr（可做日志）
-	cmd.Stderr = os.Stderr
+	// stderr 通过 pipe 加插件 ID 前缀后输出，便于识别各插件日志
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return fmt.Errorf("创建 stderr pipe 失败: %w", err)
+	}
+	go func() {
+		scanner := bufio.NewScanner(stderr)
+		for scanner.Scan() {
+			fmt.Printf("[plugin %s] %s\n", manifest.ID, scanner.Text())
+		}
+	}()
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("插件进程启动失败: %w", err)
@@ -158,8 +175,8 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	// 后台读取 stdout（启动后立即开始，先于 initialize 发送）
 	go inst.readLoop(m)
 
-	// 后台等待进程退出 ← P1 修复
-	go inst.waitForExit()
+	// 后台等待进程退出并监控崩溃自动重启
+	go m.watchPlugin(inst)
 
 	// 等待 readLoop 就绪 ← P0 修复
 	<-inst.readyCh
@@ -219,6 +236,7 @@ func (m *Manager) StopPlugin(id string) error {
 
 // stopPlugin 停止插件子进程
 func (m *Manager) stopPlugin(inst *PluginInstance) {
+	inst.stopped.Store(true)
 	// 发送 shutdown（允许失败，可能已经崩溃）
 	inst.SendNotification("shutdown", nil)
 
@@ -233,6 +251,102 @@ func (m *Manager) stopPlugin(inst *PluginInstance) {
 
 	// 更新 PID 文件（调用者持有写锁，直接传 m.plugins 安全）
 	m.safeWritePidFile(m.plugins)
+}
+
+// watchPlugin 等待插件退出，崩溃时自动重启（最多 3 次指数退避）
+func (m *Manager) watchPlugin(inst *PluginInstance) {
+	<-inst.doneCh
+
+	if inst.stopped.Load() {
+		return // 用户主动停止，不重启
+	}
+
+	fmt.Printf("QuickDock: 插件 %s 崩溃，尝试自动重启...\n", inst.Manifest.ID)
+	for attempt := 1; attempt <= 3; attempt++ {
+		time.Sleep(time.Duration(attempt*2) * time.Second) // 2s, 4s, 6s
+
+		// 重新加载插件
+		if err := m.LoadPlugin(inst.Manifest, inst.Dir); err != nil {
+			fmt.Printf("QuickDock: 插件 %s 重启第 %d 次失败: %v\n", inst.Manifest.ID, attempt, err)
+			continue
+		}
+		fmt.Printf("QuickDock: 插件 %s 自动重启成功\n", inst.Manifest.ID)
+		return
+	}
+	fmt.Printf("QuickDock: 插件 %s 已达最大重启次数，放弃\n", inst.Manifest.ID)
+}
+
+// startHealthCheck 启动后台健康检查协程（每 30 秒 ping 所有运行中插件）
+func (m *Manager) startHealthCheck() {
+	m.healthCheckWg.Add(1)
+	go func() {
+		defer m.healthCheckWg.Done()
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-m.healthCheckStopCh:
+				return
+			case <-ticker.C:
+				m.pingAll()
+			}
+		}
+	}()
+}
+
+// stopHealthCheck 停止后台健康检查
+func (m *Manager) stopHealthCheck() {
+	close(m.healthCheckStopCh)
+	m.healthCheckWg.Wait()
+}
+
+// pingAll 对所有运行中的插件发送 ping
+func (m *Manager) pingAll() {
+	m.mu.RLock()
+	ids := make([]string, 0, len(m.plugins))
+	for id, inst := range m.plugins {
+		if inst.Status == "running" {
+			ids = append(ids, id)
+		}
+	}
+	m.mu.RUnlock()
+
+	for _, id := range ids {
+		m.pingOne(id)
+	}
+}
+
+// pingOne 对单个插件发送 ping，超过 3 次标记为 unresponsive
+func (m *Manager) pingOne(pluginID string) {
+	m.mu.RLock()
+	inst, ok := m.plugins[pluginID]
+	m.mu.RUnlock()
+	if !ok || inst.Status != "running" {
+		return
+	}
+
+	_, err := inst.Call("host.ping", nil, 5*time.Second)
+	if err == nil {
+		// ping 成功，重置计数器
+		m.mu.Lock()
+		inst.MissedPings = 0
+		if inst.Status == "unresponsive" {
+			inst.Status = "running"
+			fmt.Printf("QuickDock: 插件 %s 恢复响应\n", pluginID)
+		}
+		m.mu.Unlock()
+		return
+	}
+
+	// ping 失败，递增计数器
+	m.mu.Lock()
+	inst.MissedPings++
+	if inst.MissedPings >= 3 && inst.Status == "running" {
+		inst.Status = "unresponsive"
+		inst.UnresponsiveAt = time.Now()
+		fmt.Printf("QuickDock: 插件 %s 连续 %d 次无响应，标记为 unresponsive\n", pluginID, inst.MissedPings)
+	}
+	m.mu.Unlock()
 }
 
 // PluginsDir 返回插件安装目录

@@ -108,13 +108,6 @@ export function ExecuteSystemCommand(cmd: string): $CancellablePromise<$models.A
     return $Call.ByID(289709581, cmd);
 }
 
-/**
- * GetAndClearPendingPluginPage 获取并清除待跳转的插件页面（已废弃，保留兼容）
- */
-export function GetAndClearPendingPluginPage(): $CancellablePromise<$models.ApiResult | null> {
-    return $Call.ByID(1133987935);
-}
-
 export function GetAutoStart(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(3655302239);
 }
@@ -407,13 +400,6 @@ export function SetHotkeyConfig(modifiers: number, vk: number): $CancellableProm
 
 export function SetPaletteHotkeyConfig(modifiers: number, vk: number): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(189880149, modifiers, vk);
-}
-
-/**
- * SetPendingPluginPage 设置待跳转的插件页面（已废弃，保留兼容）
- */
-export function SetPendingPluginPage(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
-    return $Call.ByID(1741174149, pluginID);
 }
 
 /**

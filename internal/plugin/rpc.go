@@ -111,8 +111,9 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 		// 再尝试解析为响应
 		var resp RPCResponse
 		if err := json.Unmarshal(line, &resp); err != nil {
-			// 无法解析的 stdout 行，以调试日志输出（非 JSON 行可能是插件自己的调试打印）
-			fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, string(line))
+			// 无法解析的 stdout 行，静默忽略（插件自己的调试打印不应干扰通信协议）
+			// 如需调试可取消下行注释：
+			// fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, string(line))
 			continue
 		}
 
@@ -129,21 +130,14 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	inst.closeOnce.Do(func() {
 		close(inst.doneCh)
 	})
-	inst.Status = "crashed"
+	if !inst.stopped.Load() {
+		inst.Status = "crashed"
+	}
 }
 
-// waitForExit 等待子进程退出，确保 doneCh 被关闭
-// 必须在子进程启动后以 goroutine 方式运行
+// waitForExit 等待子进程退出（通过 doneCh 信号，不自行调用 Cmd.Wait 避免双重 Wait）
 func (inst *PluginInstance) waitForExit() {
-	if inst.Cmd == nil {
-		return
-	}
-	_ = inst.Cmd.Wait()
-
-	inst.closeOnce.Do(func() {
-		close(inst.doneCh)
-	})
-	inst.Status = "crashed"
+	<-inst.doneCh
 }
 
 // SendNotification 发送 JSON-RPC 通知（无需响应）

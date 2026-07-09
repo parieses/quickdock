@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>计算稿纸</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div class="toolbar">
+      <div class="tb-left">
+        <select id="sheetSelect" class="tb-select"></select>
+        <button class="tb-btn tb-btn-sm" id="btnRename" title="重命名稿纸">✏️</button>
+        <span id="lineCount" class="tb-count">0 行</span>
+      </div>
+      <div class="tb-right">
+        <button class="tb-btn" id="btnNew" title="新建稿纸">＋ 新建</button>
+        <button class="tb-btn" id="btnSave" title="保存稿纸">💾 保存</button>
+        <button class="tb-btn" id="btnDel" title="删除稿纸">🗑</button>
+        <span class="tb-sep"></span>
+        <button class="tb-btn" id="btnUndo" title="撤销 (Ctrl+Z)">↩</button>
+        <button class="tb-btn" id="btnRedo" title="重做 (Ctrl+Y)">↪</button>
+        <span class="tb-sep"></span>
+        <button class="tb-btn" id="btnClear" title="清空全部">✕ 清空</button>
+        <button class="tb-btn" id="btnExport" title="导出文本">📄 导出</button>
+      </div>
+    </div>
+
+    <div class="table-header">
+      <span class="col-line">行号</span>
+      <span class="col-remark">备注</span>
+      <span class="col-input">算式</span>
+      <span class="col-result">结果</span>
+    </div>
+
+    <div id="linesContainer" class="lines-container">
+      <div class="empty-hint" id="emptyHint">点击此处开始输入...</div>
+    </div>
+
+    <div class="footer">
+      <span>Enter=新增行</span><span>Tab=缩进</span><span>↑↓=导航</span>
+      <span>Ctrl+Z/Y=撤销重做</span>
+      <span class="footer-hint">点击结果复制</span>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

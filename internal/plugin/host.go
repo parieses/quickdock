@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 )
 
 // ---- 权限校验 ----
@@ -100,6 +101,11 @@ func (m *Manager) registerDefaultHostMethods() {
 	m.RegisterHostMethod("db.set", func(pluginID string, params json.RawMessage) (interface{}, error) {
 		return nil, fmt.Errorf("db.set 尚未注册实际实现")
 	})
+	// 健康检查 ping
+	m.RegisterHostMethod("host.ping", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		return map[string]interface{}{"pong": true, "time": time.Now().Unix()}, nil
+	})
+
 	m.RegisterHostMethod("ui.show", func(pluginID string, params json.RawMessage) (interface{}, error) {
 		return map[string]interface{}{"status": "ok"}, nil
 	})

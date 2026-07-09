@@ -139,6 +139,7 @@ export interface PluginCommand {
   id: string
   title: string
   hotkey?: string
+  keywords?: string[]
 }
 
 export interface PluginInfo {
