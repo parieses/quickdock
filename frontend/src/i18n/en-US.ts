@@ -391,6 +391,7 @@ export default {
   cmdGroupSystem: 'System',
   cmdGroupApps: 'Apps',
   cmdGroupPlugins: 'Plugin Commands',
+  cmdBestMatch: 'Best Match',
   cmdRecent: 'Recent',
   // Command Palette — Empty State
   cmdEmptyTitle: 'Start Searching',

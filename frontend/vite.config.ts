@@ -10,4 +10,14 @@ export default defineConfig({
     strictPort: true,
   },
   plugins: [vue(), wails("./bindings")],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id: string) {
+          if (id.includes('pinyin-pro')) return 'pinyin-pro'
+          if (id.includes('@lucide/vue') || id.includes('lucide-vue')) return 'lucide'
+        },
+      },
+    },
+  },
 });

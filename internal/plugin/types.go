@@ -58,6 +58,8 @@ type Command struct {
 	Title        string   `json:"title"`
 	Hotkey       string   `json:"hotkey,omitempty"`
 	Keywords     []string `json:"keywords,omitempty"`     // 搜索别名，用于命令面板快速查找
+	Aliases      []string `json:"aliases,omitempty"`      // 中文别名，如 ["计算器", "jsq"]，扩展搜索覆盖
+	Prefix       string   `json:"prefix,omitempty"`       // Slash 命令前缀，如 "/translate"，输入 /tr 时只匹配该插件
 	MatchPattern string   `json:"matchPattern,omitempty"` // 命令面板正则匹配：命中时自动传入输入文本
 }
 

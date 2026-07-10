@@ -21,9 +21,9 @@ Unicode true
 ####
 ## !define INFO_PROJECTNAME    "my-project" # Default "quickdock-v3"
 ## !define INFO_COMPANYNAME    "My Company" # Default "My Company"
-## !define INFO_PRODUCTNAME    "My Product Name" # Default "快启坞"
+## !define INFO_PRODUCTNAME    "My Product Name" # Default "QuickDock"
 ## !define INFO_PRODUCTVERSION "1.0.0"     # Default "0.1.0"
-## !define INFO_COPYRIGHT      "(c) Now, My Company" # Default "© 2026, My Company"
+## !define INFO_COPYRIGHT      "(c) Now, My Company" # Default "(c) 2026, My Company"
 ###
 ## !define PRODUCT_EXECUTABLE  "Application.exe"      # Default "${INFO_PROJECTNAME}.exe"
 ## !define UNINST_KEY_NAME     "UninstKeyInRegistry"  # Default "${INFO_COMPANYNAME}${INFO_PRODUCTNAME}"

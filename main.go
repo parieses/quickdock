@@ -4,7 +4,6 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
-	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -83,6 +82,12 @@ func main() {
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
 		},
+		// WebView2 全局优化：减少内存占用 + 设置正确的用户数据路径
+		Windows: application.WindowsOptions{
+			WebviewUserDataPath: EnsureConfigDir() + "\\WebView2",
+			AdditionalBrowserArgs: memoryOptimizedArgs,
+			DisabledFeatures:      disabledFeatures,
+		},
 	})
 
 	// 传入 App 引用给 AppService
@@ -114,8 +119,7 @@ func main() {
 		}
 	})
 
-	// 同步窗口可见状态：用户点击最小化/恢复时，让 windowVisible 反映真实状态。
-	// 否则“最小化后按热键仍走 Hide 分支、主窗口无法重新打开”的 bug 会发生。
+	// 同步窗口可见状态
 	mainWindow.RegisterHook(events.Common.WindowMinimise, func(event *application.WindowEvent) {
 		windowVisible.Store(false)
 	})
@@ -123,74 +127,15 @@ func main() {
 		windowVisible.Store(true)
 	})
 
-	// 创建剪贴板独立窗口
-	clipboardWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "快启坞 - 剪贴板",
-		Width:            clipWinWidth,
-		Height:           clipWinHeight,
-		Frameless:        true,
-		AlwaysOnTop:      true,
-		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
-		URL:              "/#/clipboard",
-		Windows: application.WindowsWindow{
-			HiddenOnTaskbar: true,
-		},
-	})
-	clipboardWindow.Hide()
-	clipboardWindow.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
-		clipboardMode.Store(false)
-		clipboardWindow.Hide()
-	})
-	SetClipboardWindow(clipboardWindow)
-	appService.ClipboardWindow = clipboardWindow
-
-	// 创建命令面板窗口
-	paletteWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "快启坞 - 命令面板",
-		Width:            paletteWinWidth,
-		Height:           paletteWinHeight,
-		Frameless:        true,
-		AlwaysOnTop:      true,
-		BackgroundColour: application.RGBA{Red: 0, Green: 0, Blue: 0, Alpha: 1},
-		URL:              "/#/command-palette",
-		Windows: application.WindowsWindow{
-			HiddenOnTaskbar: true,
-		},
-	})
-	paletteWindow.Hide()
-	paletteWindow.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
-		paletteMode.Store(false)
-		paletteWindow.Hide()
-	})
-	SetPaletteWindow(paletteWindow)
-	appService.PaletteWindow = paletteWindow
-
-	// 创建插件独立窗口（初始隐藏，首次打开时导航到具体插件）
-	pluginWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "快启坞 - 插件",
-		Width:            800,
-		Height:           600,
-		MinWidth:         600,
-		MinHeight:        400,
-		Frameless:        true,
-		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
-		URL:              "/#/plugin",
-		Windows: application.WindowsWindow{
-			HiddenOnTaskbar: true,
-		},
-	})
-	pluginWindow.Hide()
-	pluginWindow.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		pluginWindow.Hide()
-		event.Cancel()
-	})
-	SetPluginWindow(pluginWindow)
-	appService.PluginWindow = pluginWindow
+	// 剪贴板/命令面板/插件窗口使用延迟创建（按需初始化，减少启动内存占用）
+	// 将延迟工厂函数注入 AppService，供前端 Wails 绑定调用
+	InjectWindowGetters(appService, app)
 
 	// 运行应用
 	err = app.Run()
 	if err != nil {
-		log.Fatal(err)
+		fmt.Fprintf(os.Stderr, "QuickDock: 应用运行失败: %v\n", err)
+		// 不调用 log.Fatal，确保下面的 ShutdownAll 执行
 	}
 
 	// 应用退出时停止所有插件并清理 PID 文件

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite"
@@ -77,6 +78,7 @@ var validTables = map[string]bool{
 	"schema_version":    true,
 	"clipboard_entries": true,
 	"snippets":          true,
+	"usage_frecency":    true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）
@@ -105,6 +107,8 @@ var validColumns = map[string]bool{
 	"keyword":    true,
 	"content":    true,
 	"image_hash": true,
+	"count":      true,
+	"last_used":  true,
 	"created_at": true, "updated_at": true, "deleted_at": true,
 }
 
@@ -452,12 +456,5 @@ func scanRows(rows *sql.Rows) ([]map[string]interface{}, error) {
 
 // joinStrings 拼接字符串切片
 func joinStrings(strs []string, sep string) string {
-	result := ""
-	for i, s := range strs {
-		if i > 0 {
-			result += sep
-		}
-		result += s
-	}
-	return result
+	return strings.Join(strs, sep)
 }

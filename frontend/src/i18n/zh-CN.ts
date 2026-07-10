@@ -391,6 +391,7 @@ export default {
   cmdGroupSystem: '系统命令',
   cmdGroupApps: '应用程序',
   cmdGroupPlugins: '插件命令',
+  cmdBestMatch: '最佳匹配',
   cmdRecent: '最近使用',
   // 命令面板 — 空状态
   cmdEmptyTitle: '开始搜索',

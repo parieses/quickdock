@@ -31,7 +31,8 @@ var (
 	lastClipboardTextMu sync.Mutex
 
 	// ClipboardEmitter fires clipboard change events (set by tray.go)
-	ClipboardEmitter func()
+	ClipboardEmitter   func()
+	ClipboardEmitterMu sync.RWMutex
 )
 
 // SetClipboardText writes text to the system clipboard via Wails API
@@ -140,6 +141,7 @@ func (a *AppService) OnClipboardChange() {
 			sourceApp := platform.GetActiveWindowTitle()
 			setLastClipboardText(joined)
 			go func() {
+				defer recoverPanic("clipboard processImage (file)")
 				if a.DB == nil {
 					fmt.Println("QuickDock: clipboard: database closed, skipping image+file")
 					return
@@ -186,12 +188,20 @@ handleText:
 	if len(imageData) > 0 {
 		sourceApp := platform.GetActiveWindowTitle()
 		go func() {
+			defer recoverPanic("clipboard processImage (image-only)")
 			if a.DB == nil {
 				fmt.Println("QuickDock: clipboard: database closed, skipping image")
 				return
 			}
 			processImage(a.DB, imageData, "", sourceApp, a.emitClipboardEvent)
 		}()
+	}
+}
+
+// recoverPanic 恢复 goroutine panic 防止整个应用崩溃
+func recoverPanic(context string) {
+	if r := recover(); r != nil {
+		fmt.Printf("QuickDock: [PANIC] %s: %v\n", context, r)
 	}
 }
 

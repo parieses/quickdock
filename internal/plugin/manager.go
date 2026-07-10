@@ -139,9 +139,14 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		vm.Set("__pluginDir", dir)
 
 		// 初始化插件专属 SQLite 数据库
-		homeDir, _ := os.UserHomeDir()
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Errorf("获取用户目录失败: %w", err)
+		}
 		dataDir := filepath.Join(homeDir, ".quickdock", "data", manifest.ID)
-		os.MkdirAll(dataDir, 0755)
+		if err := os.MkdirAll(dataDir, 0755); err != nil {
+			return fmt.Errorf("创建插件数据目录失败: %w", err)
+		}
 		dbPath := filepath.Join(dataDir, "data.db")
 		pluginDB, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL")
 		if err != nil {
@@ -192,7 +197,15 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 			},
 		})
 
-		_, err = vm.RunString(string(jsCode))
+		// goja 可能在执行 JS 时 panic（如栈溢出、类型错误），用 recover 保护
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					err = fmt.Errorf("执行插件 JS 时 panic: %v", r)
+				}
+			}()
+			_, err = vm.RunString(string(jsCode))
+		}()
 		if err != nil {
 			return fmt.Errorf("执行插件 JS 失败: %w", err)
 		}
@@ -360,6 +373,11 @@ func (m *Manager) stopPlugin(inst *PluginInstance) {
 
 // watchPlugin 等待插件退出，崩溃时自动重启（最多 3 次指数退避）
 func (m *Manager) watchPlugin(inst *PluginInstance) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("QuickDock: [PANIC] watchPlugin %s: %v\n", inst.Manifest.ID, r)
+		}
+	}()
 	<-inst.doneCh
 
 	if inst.stopped.Load() {
@@ -649,11 +667,15 @@ func (m *Manager) safeWritePidFile(plugins map[string]*PluginInstance) {
 		}
 	}
 
-	data, _ := json.Marshal(pidFileData{
+	data, err := json.Marshal(pidFileData{
 		Version:   pidFileVersion,
 		PIDs:      pids,
 		CreatedAt: time.Now().Format(time.RFC3339),
 	})
+	if err != nil {
+		fmt.Printf("QuickDock: 序列化 PID 文件数据失败: %v\n", err)
+		return
+	}
 	os.WriteFile(m.pidFilePath, data, 0644)
 }
 
@@ -666,6 +688,9 @@ func (m *Manager) removePidFile() {
 
 // ShutdownAll 停止所有插件并清理 PID 文件（主程序退出时调用）
 func (m *Manager) ShutdownAll() {
+	// 先停止健康检查，避免 goroutine 在持有 RLock 时与下方的 Lock 死锁
+	m.stopHealthCheck()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

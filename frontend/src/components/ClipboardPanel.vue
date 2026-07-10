@@ -122,6 +122,14 @@ function selectTag(tagId: string) {
   selectedIndex.value = 0
 }
 
+// 每次窗口打开时清除搜索状态
+function clearSearch() {
+  searchQuery.value = ''
+  activeTag.value = 'all'
+  selectedIndex.value = 0
+  clipboardPage.value = 1
+}
+
 // ---- 懒加载图片 ----
 function observeImage(el: HTMLElement | null, entryId: string) {
   if (!el || !observerRef.value) return
@@ -318,6 +326,7 @@ onMounted(() => {
   loadEntries()
   refreshTimer.value = window.setInterval(loadEntries, 30000)
   Events.On('clipboard:updated', loadEntries)
+  Events.On('clipboard:shown', clearSearch)
   document.addEventListener('keydown', onPanelKeydown)
 })
 
@@ -326,6 +335,7 @@ onUnmounted(() => {
     clearInterval(refreshTimer.value)
   }
   Events.Off('clipboard:updated')
+  Events.Off('clipboard:shown')
   document.removeEventListener('keydown', onPanelKeydown)
   observerRef.value?.disconnect()
 })

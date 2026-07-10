@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, onMounted, provide, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, onMounted, provide, ref, watch } from 'vue';
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace';
 import { useToast } from './composables/useToast';
@@ -9,16 +9,18 @@ import { unwrap } from './utils/api';
 import Sidebar from './components/Sidebar.vue';
 import CollectionList from './components/CollectionList.vue';
 import ItemList from './components/ItemList.vue';
-import SceneTags from './components/SceneTags.vue';
 import ClipboardPanel from './components/ClipboardPanel.vue';
-import SettingsModal from './components/SettingsModal.vue';
+import SceneTags from './components/SceneTags.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import OnboardingPage from './components/OnboardingPage.vue';
-import CommandPalette from './components/CommandPalette.vue';
-import PluginManagerPage from './components/PluginManagerPage.vue';
-import SnippetManagerPage from './components/SnippetManagerPage.vue';
-import PluginPage from './components/PluginPage.vue';
+
+// 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
+const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
+const OnboardingPage = defineAsyncComponent(() => import('./components/OnboardingPage.vue'))
+const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
+const PluginManagerPage = defineAsyncComponent(() => import('./components/PluginManagerPage.vue'))
+const SnippetManagerPage = defineAsyncComponent(() => import('./components/SnippetManagerPage.vue'))
+const PluginPage = defineAsyncComponent(() => import('./components/PluginPage.vue'))
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {

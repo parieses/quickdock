@@ -6,10 +6,10 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle
 } from '@lucide/vue'
-import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, ShowPluginWindow, SetPendingPluginInit } from '../../bindings/quickdock/services/appservice'
+import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, ShowPluginWindow, SetPendingPluginInit, RecordUsage, GetAllUsage } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import type { CollectionItem, PluginInfo } from '../types'
+import type { CollectionItem, PluginInfo, PluginCommand } from '../types'
 import type { ToastAPI } from '../types'
 import { evaluate, format } from '../utils/calc'
 import { pinyin } from 'pinyin-pro'
@@ -113,6 +113,8 @@ interface SearchResult {
   pluginHasFrontend?: boolean
   inlineInput?: string           // 从查询中提取的内联输入文本
   pluginResult?: string          // 插件执行结果文本（执行后缓存）
+  score?: number                 // 匹配质量分数 0-100（用于跨组排序）
+  matchType?: string             // 匹配类型标签（"精确" "正则" "拼音" "模糊" 等）
 }
 
 interface SystemCmd {
@@ -126,45 +128,217 @@ interface SystemCmd {
 
 interface CmdSnippet { id: string; keyword: string; content: string; category: string; createdAt: string }
 
-// ---- Frecency ----
+// ---- Frecency（后端 SQLite 存储，跨窗口共享）----
 interface FrecencyEntry { count: number; lastUsed: number }
-const FRECENCY_KEY = 'quickdock:frecency'
 
-// 内存缓存 — 启动时从 localStorage 加载一次，避免每次搜索都 JSON.parse
+// 内存缓存 — 启动时从后端 GetAllUsage 一次性加载
 let frecencyCache: Record<string, FrecencyEntry> = {}
-let frecencyLoaded = false
+const frecencyTick = ref(0) // 递增以触发 computed 重新计算
 
-function loadFrecency(): Record<string, FrecencyEntry> {
-  if (frecencyLoaded) return frecencyCache
+async function loadFrecency(): Promise<void> {
+  if (frecencyTick.value > 0) return // 已经加载过
   try {
-    const raw = localStorage.getItem(FRECENCY_KEY)
-    frecencyCache = raw ? JSON.parse(raw) : {}
+    const raw = await GetAllUsage()
+    const entries = unwrap<{ key: string; count: number; lastUsed: number }[]>(raw)
+    frecencyCache = {}
+    if (entries) {
+      for (const e of entries) {
+        frecencyCache[e.key] = { count: e.count, lastUsed: e.lastUsed }
+      }
+    }
   } catch {
     frecencyCache = {}
   }
-  frecencyLoaded = true
-  return frecencyCache
-}
-
-function saveFrecency(data: Record<string, FrecencyEntry>) {
-  frecencyCache = data
-  try { localStorage.setItem(FRECENCY_KEY, JSON.stringify(data)) } catch {}
+  frecencyTick.value++ // 触发所有依赖 frecency 的 computed 重算
 }
 
 function recordUsage(key: string) {
-  const data = { ...loadFrecency() }
+  // 立即更新本地缓存（乐观更新）
   const now = Date.now()
-  data[key] = { count: (data[key]?.count || 0) + 1, lastUsed: now }
-  saveFrecency(data)
+  frecencyCache[key] = { count: (frecencyCache[key]?.count || 0) + 1, lastUsed: now }
+  // 异步写后端（跨窗口共享）
+  try { RecordUsage(key).catch(e => console.warn('[CmdPalette] RecordUsage:', e)) } catch {}
 }
 
 function frecencyScore(key: string): number {
-  const data = loadFrecency()
-  const entry = data[key]
+  if (frecencyTick.value === 0) return 0
+  const entry = frecencyCache[key]
   if (!entry) return 0
   const now = Date.now()
   const recencyDays = (now - entry.lastUsed) / 86400000
   return entry.count * 10 + Math.max(0, 30 - recencyDays)
+}
+
+// ---- 插件命令预编译索引（缓存 regex + 拼音，避免每次击键重复计算）----
+interface PluginCmdIndex {
+  plugin: PluginInfo
+  cmd: PluginCommand
+  regex: RegExp | null        // 预编译 matchPattern
+  regexValid: boolean         // 正则是否有效
+  pinyinTitleFull: string     // 预计算标题全拼
+  pinyinTitleInit: string     // 预计算标题首字母
+  pinyinKwFull: string[]      // 预计算各关键字全拼
+  pinyinKwInit: string[]      // 预计算各关键字首字母
+  pinyinAliasFull: string[]   // 预计算各别名全拼
+  pinyinAliasInit: string[]   // 预计算各别名首字母
+}
+let pluginCmdIndex = ref<PluginCmdIndex[]>([])
+
+function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
+  const idx: PluginCmdIndex[] = []
+  for (const plugin of plugins) {
+    if (plugin.status !== 'running') continue
+    for (const cmd of plugin.commands) {
+      let regex: RegExp | null = null
+      let regexValid = true
+      if (cmd.matchPattern) {
+        try {
+          regex = new RegExp(cmd.matchPattern)
+        } catch (e) {
+          console.warn(`[CmdPalette] Invalid matchPattern in plugin "${plugin.id}" cmd "${cmd.id}":`, (e as Error).message)
+          regexValid = false
+        }
+      }
+      // 预计算拼音
+      const titlePy = pinyin(cmd.title, { toneType: 'none', type: 'array' })
+      const pinyinTitleFull = titlePy.join('').toLowerCase()
+      const pinyinTitleInit = titlePy.map(p => p[0]).join('').toLowerCase()
+      const pinyinKwFull: string[] = []
+      const pinyinKwInit: string[] = []
+      for (const kw of (cmd.keywords || [])) {
+        const kwPy = pinyin(kw, { toneType: 'none', type: 'array' })
+        pinyinKwFull.push(kwPy.join('').toLowerCase())
+        pinyinKwInit.push(kwPy.map(p => p[0]).join('').toLowerCase())
+      }
+      // 预计算别名拼音
+      const pinyinAliasFull: string[] = []
+      const pinyinAliasInit: string[] = []
+      for (const alias of (cmd.aliases || [])) {
+        const aPy = pinyin(alias, { toneType: 'none', type: 'array' })
+        pinyinAliasFull.push(aPy.join('').toLowerCase())
+        pinyinAliasInit.push(aPy.map(p => p[0]).join('').toLowerCase())
+      }
+      idx.push({ plugin, cmd, regex, regexValid, pinyinTitleFull, pinyinTitleInit, pinyinKwFull, pinyinKwInit, pinyinAliasFull, pinyinAliasInit })
+    }
+  }
+  return idx
+}
+
+// ---- Levenshtein 编辑距离（用于模糊匹配）----
+function levenshtein(a: string, b: string): number {
+  const alen = a.length, blen = b.length
+  if (alen === 0) return blen
+  if (blen === 0) return alen
+  // 只比较前 min(alen, 20) 个字符，避免大矩阵
+  const limit = Math.min(Math.max(alen, blen), 20)
+  const s1 = a.slice(0, limit), s2 = b.slice(0, limit)
+  const m = s1.length, n = s2.length
+  const dp: number[] = Array(n + 1).fill(0).map((_, i) => i)
+  for (let i = 1; i <= m; i++) {
+    let prev = i
+    for (let j = 1; j <= n; j++) {
+      const tmp = dp[j]
+      dp[j] = s1[i - 1] === s2[j - 1] ? prev : 1 + Math.min(prev, dp[j], dp[j - 1])
+      prev = tmp
+    }
+  }
+  return dp[n]
+}
+
+// ---- 插件命令加权评分 ----
+function calcPluginScore(
+  idx: PluginCmdIndex, q: string, qLC: string
+): { score: number; matchType: string; inlineInput?: string } {
+  let bestScore = 0
+  let bestType = ''
+  let inlineInput: string | undefined
+
+  if (!q) return { score: 0, matchType: '' }
+
+  // 1) Slash 命令前缀精确匹配 (最高优先级)
+  if (idx.cmd.prefix && qLC.startsWith(idx.cmd.prefix.toLowerCase())) {
+    bestScore = 95; bestType = 'slash'
+    inlineInput = q.slice(idx.cmd.prefix.length).trim() || undefined
+  }
+
+  // 2) matchPattern 命中
+  if (idx.regex && idx.regexValid) {
+    try {
+      if (idx.regex.test(q)) {
+        if (idx.cmd.prefix && qLC.startsWith(idx.cmd.prefix.toLowerCase())) {
+          // slash + matchPattern 一起用时不重复加分
+        } else if (bestScore < 85) {
+          bestScore = 85; bestType = 'match pattern'; inlineInput = q
+        }
+      }
+    } catch {}
+  }
+
+  const titleLC = idx.cmd.title.toLowerCase()
+
+  // 3) 标题精确匹配
+  if (titleLC === qLC && bestScore < 100) { bestScore = 100; bestType = 'exact' }
+
+  // 4) 关键字精确匹配
+  if ((idx.cmd.keywords || []).some(k => k.toLowerCase() === qLC) && bestScore < 90) { bestScore = 90; bestType = 'keyword' }
+
+  // 5) 别名精确匹配
+  if ((idx.cmd.aliases || []).some(a => a.toLowerCase() === qLC) && bestScore < 85) { bestScore = 85; bestType = 'alias' }
+
+  // 6) 标题前缀匹配
+  if (titleLC.startsWith(qLC) && bestScore < 75) { bestScore = 75; bestType = 'prefix' }
+
+  // 7) 关键字前缀 (输入以 "关键字 " 开头，自动传参)
+  if ((idx.cmd.keywords || []).some(k => qLC.startsWith(k.toLowerCase() + ' ')) && bestScore < 55) { bestScore = 55; bestType = 'kw inline' }
+
+  // 8) 标题包含
+  if (titleLC.includes(qLC) && bestScore < 60) { bestScore = 60; bestType = 'fuzzy' }
+
+  // 9) 关键字包含
+  if ((idx.cmd.keywords || []).slice(0, 20).some(k => k.toLowerCase().includes(qLC)) && bestScore < 40) { bestScore = 40; bestType = 'kw match' }
+
+  // 10) 别名包含
+  if ((idx.cmd.aliases || []).some(a => a.toLowerCase().includes(qLC)) && bestScore < 50) { bestScore = 50; bestType = 'alias' }
+
+  // 11) 插件名包含
+  if (idx.plugin.name.toLowerCase().includes(qLC) && bestScore < 35) { bestScore = 35; bestType = 'plugin' }
+
+  // 12) 插件描述包含
+  if ((idx.plugin.description || '').toLowerCase().includes(qLC) && bestScore < 35) { bestScore = 35; bestType = 'desc' }
+
+  // 13) ID 包含
+  if (idx.cmd.id.toLowerCase().includes(qLC) && bestScore < 30) { bestScore = 30; bestType = 'id' }
+
+  // 14) 拼音匹配标题 (用缓存)
+  if ((idx.pinyinTitleFull.includes(qLC) || idx.pinyinTitleInit.includes(qLC)) && bestScore < 20) { bestScore = 20; bestType = 'pinyin' }
+
+  // 15) 拼音匹配关键字
+  if (bestScore < 15) {
+    for (let i = 0; i < idx.pinyinKwFull.length; i++) {
+      if (idx.pinyinKwFull[i].includes(qLC) || idx.pinyinKwInit[i].includes(qLC)) {
+        bestScore = Math.max(bestScore, 15); bestType = 'kw pinyin'; break
+      }
+    }
+  }
+
+  // 16) 别名拼音（用缓存）
+  if (bestScore < 12) {
+    if (idx.pinyinAliasFull.some(p => p.includes(qLC)) || idx.pinyinAliasInit.some(p => p.includes(qLC))) {
+      bestScore = Math.max(bestScore, 12); bestType = 'alias py'
+    }
+  }
+
+  // 17) 模糊匹配 (编辑距离，仅当没有其他匹配且查询 ≥ 3 字符)
+  if (bestScore === 0 && qLC.length >= 3) {
+    // 中文查询：每个汉字权重高，放宽阈值到 3
+    const hasChinese = /[\u4e00-\u9fff]/.test(qLC)
+    const threshold = hasChinese ? 3 : 2
+    const qLen = qLC.length
+    if (levenshtein(titleLC.slice(0, Math.max(titleLC.length, qLen)), qLC) <= threshold) { bestScore = 10; bestType = 'fuzzy' }
+    else if ((idx.cmd.keywords || []).some(k => levenshtein(k.toLowerCase().slice(0, Math.max(k.length, qLen)), qLC) <= threshold)) { bestScore = 8; bestType = 'fuzzy' }
+  }
+
+  return { score: bestScore, matchType: bestType, inlineInput }
 }
 
 // ---- 状态 ----
@@ -235,6 +409,7 @@ interface ResultGroup {
 }
 
 const groupedResults = computed<ResultGroup[]>(() => {
+  void frecencyTick.value // 依赖 frecencyTick，加载完毕后重算
   const q = query.value.trim()
   if (!q) return []
 
@@ -390,59 +565,76 @@ const groupedResults = computed<ResultGroup[]>(() => {
     groups.push({ type: 'system', label: t('cmdGroupSystem'), results: sysResults })
   }
 
-  // 7. 插件命令（支持内联输入：查询文本中自动提取输入参数）
+  // 7. 插件命令 — 加权评分 + 预编译索引 + 模糊匹配
   const pluginResults: SearchResult[] = []
-  for (const plugin of installedPlugins.value) {
-    if (plugin.status !== 'running') continue
-    for (const cmd of plugin.commands) {
-      // 检查命令标题、关键字或 matchPattern 正则是否匹配
-      const titleLC = cmd.title.toLowerCase()
-      const idLC = cmd.id.toLowerCase()
-      const kwLC = (cmd.keywords || []).map(k => k.toLowerCase())
-      const isCalcExpr = /^[0-9+\-*/().%^, ]+$/.test(qLC)
-      // matchPattern：插件自声明正则，命中则自动匹配并传入输入文本
-      let matchPatternMatch: RegExpExecArray | null = null
-      if (cmd.matchPattern) {
-        try { matchPatternMatch = new RegExp(cmd.matchPattern).exec(q) } catch {}
-      }
-      const matchesPattern = matchPatternMatch !== null
-      // 匹配条件：标题/ID/关键字包含查询；或查询以关键字+空格开头（用于内联输入）；或纯数学表达式；或 matchPattern 命中；或拼音匹配
-      const kwMatch = kwLC.some(k => k.includes(qLC) || qLC.startsWith(k + ' '))
-      const matchesPlugin = titleLC.includes(qLC) || idLC.includes(qLC) || kwMatch || pinyinMatch(cmd.title, qLC) || isCalcExpr || matchesPattern
-      if (!matchesPlugin) continue
+  for (const idx of pluginCmdIndex.value) {
+    const { score, matchType, inlineInput } = calcPluginScore(idx, q, qLC)
+    if (score <= 0) continue
 
-      // matchPattern 命中时，用全部查询文本作为内联输入（keywords 不传输入）
-      let inlineInput: string | undefined
-      if (matchesPattern) {
-        inlineInput = q
-      }
-
-      pluginResults.push({
-        type: 'plugin',
-        label: inlineInput ? `${cmd.title}: ${inlineInput}` : cmd.title,
-        desc: plugin.name,
-        icon: Puzzle,
-        pluginId: plugin.id,
-        pluginCommandId: cmd.id,
-        pluginHasFrontend: plugin.hasFrontend,
-        inlineInput,
-        frecencyScore: frecencyScore('plugin:' + plugin.id + '.' + cmd.id),
-      })
-    }
+    pluginResults.push({
+      type: 'plugin',
+      label: inlineInput ? `${idx.cmd.title}: ${inlineInput}` : idx.cmd.title,
+      desc: idx.plugin.name + (idx.cmd.hotkey ? `  ${idx.cmd.hotkey}` : ''),
+      icon: Puzzle,
+      pluginId: idx.plugin.id,
+      pluginCommandId: idx.cmd.id,
+      pluginHasFrontend: idx.plugin.hasFrontend,
+      inlineInput,
+      score,
+      matchType,
+      frecencyScore: frecencyScore('plugin:' + idx.plugin.id + '.' + idx.cmd.id),
+    })
   }
   // 加上之前执行的结果缓存（始终显示在插件分组顶部）
   if (pluginResultCache.value) {
     pluginResults.unshift({
       type: 'plugin',
       label: pluginResultCache.value.result,
-      desc: '← ' + pluginResultCache.value.pluginName,
+      desc: '\u2190 ' + pluginResultCache.value.pluginName,
       icon: Puzzle,
+      score: 99,
       frecencyScore: 9999, // 置顶
     })
   }
-  pluginResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
+  // 按统一分数排序
+  pluginResults.sort((a, b) => {
+    const sa = (a.score || 0) * 0.7 + Math.min(30, a.frecencyScore || 0) * 0.3
+    const sb = (b.score || 0) * 0.7 + Math.min(30, b.frecencyScore || 0) * 0.3
+    return sb - sa
+  })
   if (pluginResults.length > 0) {
     groups.push({ type: 'plugin', label: t('cmdGroupPlugins'), results: pluginResults })
+  }
+
+  // ---- 跨组最佳匹配注入 (#8, #14) ----
+  // 从所有分组中收集 score >= 70 的结果，注入顶部 "最佳匹配" 分组
+  const bestMatch: SearchResult[] = []
+  for (const g of groups) {
+    if (g.type === 'calculator') continue // 计算器单结果不抢
+    for (const r of g.results) {
+      if ((r.score || 0) >= 70) bestMatch.push(r)
+    }
+  }
+  if (bestMatch.length >= 1) {
+    bestMatch.sort((a, b) => (b.score || 0) - (a.score || 0))
+    // 最多展示 6 个
+    const show = bestMatch.slice(0, 6)
+    // 生成带类型前缀的去重键，避免 pluginId 与 item.id 冲突
+    function dedupKey(r: SearchResult): string {
+      if (r.pluginId && r.pluginCommandId) return 'plugin:' + r.pluginId + '.' + r.pluginCommandId
+      if (r.item?.id) return 'item:' + r.item.id
+      if (r.snippet?.id) return 'snippet:' + r.snippet.id
+      if (r.cmd?.id) return 'cmd:' + r.cmd.id
+      if (r.appPath) return 'app:' + r.appPath
+      return r.label
+    }
+    const dedupIds = new Set(show.map(dedupKey))
+    for (const g of groups) {
+      if (g.type === 'plugin' || g.type === 'item') {
+        g.results = g.results.filter(r => !dedupIds.has(dedupKey(r)))
+      }
+    }
+    groups.unshift({ type: 'item', label: t('cmdBestMatch'), results: show })
   }
 
   return groups
@@ -455,6 +647,7 @@ const allResults = computed<SearchResult[]>(() => {
 
 // ---- 空状态：最近使用 ----
 const recentResults = computed<SearchResult[]>(() => {
+  void frecencyTick.value // 依赖 frecencyTick，加载完毕后重算
   if (query.value.trim()) return []
   const scored: SearchResult[] = []
   for (const item of items.value) {
@@ -483,8 +676,25 @@ const recentResults = computed<SearchResult[]>(() => {
       })
     }
   }
+  // 最近使用的插件命令
+  for (const idx of pluginCmdIndex.value) {
+    const key = 'plugin:' + idx.plugin.id + '.' + idx.cmd.id
+    const score = frecencyScore(key)
+    if (score > 0) {
+      scored.push({
+        type: 'plugin',
+        label: idx.cmd.title,
+        desc: idx.plugin.name,
+        icon: Puzzle,
+        pluginId: idx.plugin.id,
+        pluginCommandId: idx.cmd.id,
+        pluginHasFrontend: idx.plugin.hasFrontend,
+        frecencyScore: score,
+      })
+    }
+  }
   scored.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
-  return scored.slice(0, 6)
+  return scored.slice(0, 8) // 从 6 扩到 8，给插件留空间
 })
 
 // 实际显示的分组（有查询时用搜索结果，无查询时用最近使用）
@@ -590,8 +800,9 @@ async function executeSelected() {
     } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId)
     try {
-      // 统一输入：优先用内联输入的文本，否则用搜索框的查询文本
-      const inputText = result.inlineInput || query.value.trim()
+      // 仅当 matchPattern/slash 前缀命中时才传输入文本
+      // 纯关键字匹配时不传（避免 "时间" "计算" 等无意义文本传到后端）
+      const inputText = result.inlineInput
       const input: any = inputText ? { text: inputText } : null
       const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, input)
       const pluginResult = unwrap<string | any>(raw)
@@ -678,6 +889,8 @@ let itemsLoadGen = 0
 async function loadMostUsedItems() {
   loading.value = true
   const gen = ++itemsLoadGen
+  // 预加载 frecency 数据（后端存储，跨窗口共享）
+  await loadFrecency()
   try {
     const result = unwrap<CollectionItem[]>(await GetMostUsedItems(30))
     if (gen !== itemsLoadGen) return
@@ -702,7 +915,10 @@ async function loadMostUsedItems() {
   // 加载运行中的插件命令
   try {
     const plugins = unwrap<PluginInfo[]>(await ListPlugins())
-    if (gen === itemsLoadGen) installedPlugins.value = plugins?.filter(p => p.status === 'running') || []
+    if (gen === itemsLoadGen) {
+      installedPlugins.value = plugins?.filter(p => p.status === 'running') || []
+      pluginCmdIndex.value = buildPluginIndex(installedPlugins.value) // 构建预编译索引
+    }
   } catch (e) {
     console.error('[CmdPalette] ListPlugins:', getErrorMessage(e))
   } finally {
@@ -710,7 +926,7 @@ async function loadMostUsedItems() {
   }
 }
 
-// 用户输入搜索词时 → 后端 FTS5 搜索
+// 用户输入搜索词时 → 后端 FTS5 搜索 + 刷新插件列表
 async function searchItems(query: string) {
   if (!query.trim()) {
     // 无查询时加载 Top 常用
@@ -735,6 +951,16 @@ async function searchItems(query: string) {
   } catch (e) {
     console.error('[CmdPalette] SearchSnippets:', getErrorMessage(e))
     if (gen === itemsLoadGen) loading.value = false
+  }
+  // 刷新插件列表（面板打开期间插件可能启动/崩溃/禁用）(#1)
+  try {
+    const plugins = unwrap<PluginInfo[]>(await ListPlugins())
+    if (gen === itemsLoadGen) {
+      installedPlugins.value = plugins?.filter(p => p.status === 'running') || []
+      pluginCmdIndex.value = buildPluginIndex(installedPlugins.value) // 重建索引
+    }
+  } catch (e) {
+    console.error('[CmdPalette] ListPlugins(refresh):', getErrorMessage(e))
   } finally {
     if (gen === itemsLoadGen) loading.value = false
   }
@@ -851,6 +1077,9 @@ onUnmounted(() => {
             </template>
             <template v-else-if="result.type === 'snippet' && result.snippet?.category">
               <span class="meta-tag">{{ result.snippet.category }}</span>
+            </template>
+            <template v-else-if="result.type === 'plugin' && result.matchType">
+              <span class="meta-tag">{{ result.matchType }}</span>
             </template>
           </div>
         </div>

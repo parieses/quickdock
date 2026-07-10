@@ -217,8 +217,10 @@ func (a *AppService) HideClipboardWindow() {
 	if a.ClipboardMode != nil {
 		a.ClipboardMode.Store(false)
 	}
-	if win := a.ClipboardWindow; win != nil {
-		win.Hide()
+	if fn := a.GetClipboardWindow; fn != nil {
+		if win := fn(); win != nil {
+			win.Hide()
+		}
 	}
 }
 

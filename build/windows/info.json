@@ -5,11 +5,11 @@
 	"info": {
 		"0000": {
 			"ProductVersion": "0.2.0",
-			"CompanyName": "My Company",
+			"CompanyName": "QuickDock",
 			"FileDescription": "快启坞 QuickDock — 开发者资源集合与快速启动工具",
-			"LegalCopyright": "© 2026, My Company",
+			"LegalCopyright": "(c) 2024, QuickDock",
 			"ProductName": "快启坞",
-			"Comments": "This is a comment"
+			"Comments": "快启坞 QuickDock — 开发者桌面效率工具"
 		}
 	}
 }

@@ -157,6 +157,12 @@ var baseTables = []string{
 		value TEXT,
 		PRIMARY KEY (plugin_id, key)
 	)`,
+
+	`CREATE TABLE IF NOT EXISTS usage_frecency (
+		key TEXT PRIMARY KEY,
+		count INTEGER NOT NULL DEFAULT 1,
+		last_used TEXT NOT NULL
+	)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）

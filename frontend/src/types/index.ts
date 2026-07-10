@@ -139,8 +139,10 @@ export interface PluginCommand {
   id: string
   title: string
   hotkey?: string
-  keywords?: string[]
-  matchPattern?: string  // 命令面板正则匹配：命中时自动传入输入文本
+  keywords?: string[]        // 搜索别名，用于命令面板快速查找
+  aliases?: string[]         // 中文别名，如 ["计算器", "jsq"]，扩展搜索覆盖
+  prefix?: string            // Slash 命令前缀，如 "/translate"，输入 /tr 时只匹配该插件
+  matchPattern?: string      // 命令面板正则匹配：命中时自动传入输入文本
 }
 
 export interface PluginInfo {

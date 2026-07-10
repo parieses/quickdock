@@ -28,7 +28,13 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 	inst.readMu.Unlock()
 
 	// 构建请求
-	paramsJSON, _ := json.Marshal(params)
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		inst.readMu.Lock()
+		delete(inst.Pending, id)
+		inst.readMu.Unlock()
+		return nil, fmt.Errorf("序列化参数失败: %w", err)
+	}
 	req := RPCRequest{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -142,7 +148,10 @@ func (inst *PluginInstance) waitForExit() {
 
 // SendNotification 发送 JSON-RPC 通知（无需响应）
 func (inst *PluginInstance) SendNotification(method string, params interface{}) error {
-	paramsJSON, _ := json.Marshal(params)
+	paramsJSON, err := json.Marshal(params)
+	if err != nil {
+		return fmt.Errorf("序列化通知参数失败: %w", err)
+	}
 	req := RPCRequest{
 		JSONRPC: "2.0",
 		Method:  method,

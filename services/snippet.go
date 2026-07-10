@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -77,6 +78,11 @@ func (a *AppService) PasteSnippet(content string) *ApiResult {
 	}
 	SetClipboardText(content)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: [PANIC] snippet paste: %v\n", r)
+			}
+		}()
 		time.Sleep(80 * time.Millisecond)
 		platform.SimulatePaste()
 	}()

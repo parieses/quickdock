@@ -16,6 +16,12 @@ import (
 
 // ===== 插件热键注册管理 =====
 
+// 预编译的正则表达式（用于插件前端 HTML 内联）
+var (
+	inlineCSSRe = regexp.MustCompile(`<link\s[^>]*?(?:rel="stylesheet"|rel='stylesheet')[^>]*?>`)
+	inlineJSRe  = regexp.MustCompile(`<script[^>]*src\s*=\s*["'][^"']*["'][^>]*>`)
+)
+
 func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
@@ -375,7 +381,7 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	baseDir := filepath.Dir(entryPath)
 
 	// 内联 CSS：匹配 <link ... href="..." rel="stylesheet" .../> 无论属性顺序和引号类型
-	html = inlineFileRefs(html, baseDir, `<link\s[^>]*?(?:rel="stylesheet"|rel='stylesheet')[^>]*?>`, func(match string) string {
+	html = inlineFileRefs(html, baseDir, inlineCSSRe, func(match string) string {
 		href := extractAttrValue(match, "href")
 		if href == "" {
 			return match
@@ -388,7 +394,7 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	})
 
 	// 内联 JS：匹配 <script ... src="..." ...></script>
-	html = inlineFileRefs(html, baseDir, `<script[^>]*src\s*=\s*["'][^"']*["'][^>]*>`, func(match string) string {
+	html = inlineFileRefs(html, baseDir, inlineJSRe, func(match string) string {
 		src := extractAttrValue(match, "src")
 		if src == "" {
 			return match
@@ -409,9 +415,8 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 }
 
 // inlineFileRefs 替换 HTML 中引用的外部文件为内联内容
-// pattern 应匹配整个标签，由 loader 从 match 中自行提取路径
-func inlineFileRefs(html, baseDir, pattern string, loader func(string) string) string {
-	re := regexp.MustCompile(pattern)
+// re 应匹配整个标签，由 loader 从 match 中自行提取路径
+func inlineFileRefs(html, baseDir string, re *regexp.Regexp, loader func(string) string) string {
 	return re.ReplaceAllStringFunc(html, func(match string) string {
 		inlined := loader(match)
 		if inlined == "" {
@@ -458,9 +463,13 @@ func (a *AppService) ShowPluginWindow(pluginID string) *ApiResult {
 		return FailMsg("插件未启用前端")
 	}
 
-	win := a.PluginWindow
-	if win == nil {
+	winFn := a.GetPluginWindow
+	if winFn == nil {
 		return FailMsg("plugin window not initialized")
+	}
+	win := winFn()
+	if win == nil {
+		return FailMsg("failed to create plugin window")
 	}
 
 	// 先显示窗口激活 webview，再通过 JS 切换 hash（带时间戳确保每次 hash 都变化）
@@ -495,19 +504,23 @@ func (a *AppService) GetAndClearPendingPluginInit() *ApiResult {
 
 // MinimizePluginWindow 最小化插件独立窗口
 func (a *AppService) MinimizePluginWindow() *ApiResult {
-	if win := a.PluginWindow; win != nil {
-		win.Minimise()
+	if fn := a.GetPluginWindow; fn != nil {
+		if win := fn(); win != nil {
+			win.Minimise()
+		}
 	}
 	return Ok(nil)
 }
 
 // ToggleMaximizePluginWindow 切换插件窗口最大化/还原
 func (a *AppService) ToggleMaximizePluginWindow() *ApiResult {
-	if win := a.PluginWindow; win != nil {
-		if win.IsMaximised() {
-			win.Restore()
-		} else {
-			win.Maximise()
+	if fn := a.GetPluginWindow; fn != nil {
+		if win := fn(); win != nil {
+			if win.IsMaximised() {
+				win.Restore()
+			} else {
+				win.Maximise()
+			}
 		}
 	}
 	return Ok(nil)
@@ -516,9 +529,11 @@ func (a *AppService) ToggleMaximizePluginWindow() *ApiResult {
 // HidePluginWindow 隐藏插件独立窗口（关闭按钮）
 // 隐藏前清理 iframe 的 hash，使 PluginPage 组件卸载并释放 iframe 资源
 func (a *AppService) HidePluginWindow() *ApiResult {
-	if win := a.PluginWindow; win != nil {
-		win.ExecJS("window.location.hash = ''")
-		win.Hide()
+	if fn := a.GetPluginWindow; fn != nil {
+		if win := fn(); win != nil {
+			win.ExecJS("window.location.hash = ''")
+			win.Hide()
+		}
 	}
 	return Ok(nil)
 }

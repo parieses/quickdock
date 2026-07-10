@@ -109,6 +109,13 @@ export function ExecuteSystemCommand(cmd: string): $CancellablePromise<$models.A
 }
 
 /**
+ * GetAllUsage 返回全部 frecency 记录（前端初始化一次性加载）
+ */
+export function GetAllUsage(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(4257927220);
+}
+
+/**
  * GetAndClearPendingPluginInit 获取并清除待传递的初始文本
  */
 export function GetAndClearPendingPluginInit(): $CancellablePromise<$models.ApiResult | null> {
@@ -183,6 +190,13 @@ export function GetPluginWindowPluginID(): $CancellablePromise<$models.ApiResult
 
 export function GetSnapshot(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1988116934, id);
+}
+
+/**
+ * GetTopUsage 返回使用次数最多的 N 条记录
+ */
+export function GetTopUsage(limit: number): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(989274272, limit);
 }
 
 /**
@@ -324,6 +338,14 @@ export function PasteClipboardEntry(id: string): $CancellablePromise<$models.Api
  */
 export function PasteSnippet(content: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2289619634, content);
+}
+
+/**
+ * RecordUsage 记录一次使用（跨窗口共享的 frecency 追踪）
+ * key 格式：item:{id} | snippet:{id} | app:{name} | plugin:{pluginId}.{cmdId}
+ */
+export function RecordUsage(key: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(591933050, key);
 }
 
 export function ReorderCollections(orderedIDs: string[] | null): $CancellablePromise<$models.ApiResult | null> {

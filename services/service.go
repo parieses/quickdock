@@ -18,11 +18,13 @@ type AppService struct {
 	app *application.App
 	DB  *db.Database
 
-	// 窗口引用（由 main.go 在创建窗口后设置）
-	MainWindow      *application.WebviewWindow
-	ClipboardWindow *application.WebviewWindow
-	PaletteWindow   *application.WebviewWindow
-	PluginWindow    *application.WebviewWindow
+	// 主窗口引用（由 main.go 在创建窗口后设置）
+	MainWindow *application.WebviewWindow
+
+	// 次要窗口延迟创建（由 main.go 注入工厂函数，避免启动时创建所有 WebView2 实例）
+	GetClipboardWindow func() *application.WebviewWindow
+	GetPaletteWindow   func() *application.WebviewWindow
+	GetPluginWindow    func() *application.WebviewWindow
 
 	// 状态标志（注入 main 包的 atomic.Bool 指针，共享状态）
 	WindowVisible *atomic.Bool

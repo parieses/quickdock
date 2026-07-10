@@ -83,43 +83,8 @@ var (
 	pluginWinLock sync.Mutex
 )
 
-func SetClipboardWindow(win *application.WebviewWindow) {
-	clipboardWinLock.Lock()
-	defer clipboardWinLock.Unlock()
-	clipboardWin = win
-}
+// ---- 主窗口 ----
 
-func getClipboardWindow() *application.WebviewWindow {
-	clipboardWinLock.Lock()
-	defer clipboardWinLock.Unlock()
-	return clipboardWin
-}
-
-func SetPaletteWindow(win *application.WebviewWindow) {
-	paletteWinLock.Lock()
-	defer paletteWinLock.Unlock()
-	paletteWin = win
-}
-
-func getPaletteWindow() *application.WebviewWindow {
-	paletteWinLock.Lock()
-	defer paletteWinLock.Unlock()
-	return paletteWin
-}
-
-// ---- 插件窗口 ----
-
-func SetPluginWindow(win *application.WebviewWindow) {
-	pluginWinLock.Lock()
-	defer pluginWinLock.Unlock()
-	pluginWin = win
-}
-
-func getPluginWindow() *application.WebviewWindow {
-	pluginWinLock.Lock()
-	defer pluginWinLock.Unlock()
-	return pluginWin
-}
 
 type NOTIFYICONDATAW struct {
 	CbSize           uint32
@@ -408,7 +373,7 @@ func runMessageLoop() {
 					cw.Show()
 					cw.Focus()
 					if a := getHotkeyApp(); a != nil {
-						a.Event.Emit("clipboard:toggle")
+						a.Event.Emit("clipboard:shown")
 					}
 				}
 			})
@@ -831,7 +796,7 @@ func ReregisterClipboardHotkey(modifiers, vk uintptr) {
 			cw.Show()
 			cw.Focus()
 			if a := getHotkeyApp(); a != nil {
-				a.Event.Emit("clipboard:toggle")
+				a.Event.Emit("clipboard:shown")
 			}
 		}
 	}
@@ -916,7 +881,7 @@ func ResumeHotkeys() {
 				cw.Show()
 				cw.Focus()
 				if a := getHotkeyApp(); a != nil {
-					a.Event.Emit("clipboard:toggle")
+					a.Event.Emit("clipboard:shown")
 				}
 			}
 		})

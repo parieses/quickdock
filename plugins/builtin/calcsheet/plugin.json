@@ -32,6 +32,7 @@
       "id": "open-calc",
       "title": "计算稿纸",
       "keywords": ["eval", "calc", "计算", "稿纸", "求值", "calcsheet", "算"],
+      "aliases": ["计算器", "jsq", "草稿纸"],
       "matchPattern": "^[0-9+\\-*/().%^, ]+$"
     }
   ]

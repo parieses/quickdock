@@ -19,7 +19,9 @@
     {
       "id": "hello",
       "title": "Hello World",
-      "keywords": ["hello", "hi", "你好"]
+      "keywords": ["hello", "hi", "你好"],
+      "aliases": ["打招呼", "测试"],
+      "prefix": "/hello"
     }
   ]
 }

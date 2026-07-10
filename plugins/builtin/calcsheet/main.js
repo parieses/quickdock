@@ -21,6 +21,11 @@ function handleExecute(params) {
   var command = params.command || ''
   var input = params.input || {}
 
+  // open-calc: 仅打开前端窗口，无需后端操作
+  if (command === 'open-calc') {
+    return { status: 'ok', frontendOnly: true }
+  }
+
   if (command === 'list-sheets') {
     var rows = api.db.query('SELECT id, name, created_at, updated_at FROM sheets ORDER BY updated_at DESC')
     return { sheets: rows || [] }

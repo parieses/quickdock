@@ -36,7 +36,9 @@ func (a *AppService) HidePaletteWindow() {
 	if a.PaletteMode != nil {
 		a.PaletteMode.Store(false)
 	}
-	if win := a.PaletteWindow; win != nil {
-		win.Hide()
+	if fn := a.GetPaletteWindow; fn != nil {
+		if win := fn(); win != nil {
+			win.Hide()
+		}
 	}
 }

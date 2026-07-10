@@ -17,7 +17,7 @@ var supportedRuntimes = map[string]bool{
 }
 
 // 插件 ID 格式：com.xxx.xxx
-var pluginIDRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9]*(\.[a-zA-Z][a-zA-Z0-9]*)+$`)
+var pluginIDRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z][a-zA-Z0-9-]*)+$`)
 
 // LoadManifest 读取并校验 plugin.json
 func LoadManifest(path string) (*PluginManifest, error) {
