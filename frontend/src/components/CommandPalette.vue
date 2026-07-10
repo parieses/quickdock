@@ -6,7 +6,8 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle
 } from '@lucide/vue'
-import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, ShowPluginWindow, SetPendingPluginInit, RecordUsage, GetAllUsage } from '../../bindings/quickdock/services/appservice'
+import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, ShowPluginWindow, SetPendingPluginInit, RecordUsage, RecordUsageEx, GetRecentUsage, GetAllUsage } from '../../bindings/quickdock/services/appservice'
+import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import type { CollectionItem, PluginInfo, PluginCommand } from '../types'
@@ -85,7 +86,7 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
 ]
 
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url'
 
 interface InstalledApp {
   name: string
@@ -115,6 +116,7 @@ interface SearchResult {
   pluginResult?: string          // 插件执行结果文本（执行后缓存）
   score?: number                 // 匹配质量分数 0-100（用于跨组排序）
   matchType?: string             // 匹配类型标签（"精确" "正则" "拼音" "模糊" 等）
+  url?: string                   // URL 直接打开
 }
 
 interface SystemCmd {
@@ -152,12 +154,16 @@ async function loadFrecency(): Promise<void> {
   frecencyTick.value++ // 触发所有依赖 frecency 的 computed 重算
 }
 
-function recordUsage(key: string) {
+function recordUsage(key: string, type_?: string, label?: string, desc?: string) {
   // 立即更新本地缓存（乐观更新）
   const now = Date.now()
   frecencyCache[key] = { count: (frecencyCache[key]?.count || 0) + 1, lastUsed: now }
-  // 异步写后端（跨窗口共享）
-  try { RecordUsage(key).catch(e => console.warn('[CmdPalette] RecordUsage:', e)) } catch {}
+  // 异步写后端（跨窗口共享），同时存储展示信息
+  if (type_) {
+    try { RecordUsageEx(key, type_, label || '', desc || '').catch(e => console.warn('[CmdPalette] RecordUsageEx:', e)) } catch {}
+  } else {
+    try { RecordUsage(key).catch(e => console.warn('[CmdPalette] RecordUsage:', e)) } catch {}
+  }
 }
 
 function frecencyScore(key: string): number {
@@ -186,9 +192,13 @@ let pluginCmdIndex = ref<PluginCmdIndex[]>([])
 
 function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
   const idx: PluginCmdIndex[] = []
+  const seen = new Set<string>()
   for (const plugin of plugins) {
     if (plugin.status !== 'running') continue
     for (const cmd of plugin.commands) {
+      const key = plugin.id + '|' + cmd.id
+      if (seen.has(key)) continue
+      seen.add(key)
       let regex: RegExp | null = null
       let regexValid = true
       if (cmd.matchPattern) {
@@ -292,7 +302,7 @@ function calcPluginScore(
   if ((idx.cmd.keywords || []).some(k => qLC.startsWith(k.toLowerCase() + ' ')) && bestScore < 55) { bestScore = 55; bestType = 'kw inline' }
 
   // 8) 标题包含
-  if (titleLC.includes(qLC) && bestScore < 60) { bestScore = 60; bestType = 'fuzzy' }
+  if (titleLC.includes(qLC) && bestScore < 60) { bestScore = 60; bestType = 'contains' }
 
   // 9) 关键字包含
   if ((idx.cmd.keywords || []).slice(0, 20).some(k => k.toLowerCase().includes(qLC)) && bestScore < 40) { bestScore = 40; bestType = 'kw match' }
@@ -339,6 +349,26 @@ function calcPluginScore(
   }
 
   return { score: bestScore, matchType: bestType, inlineInput }
+}
+
+// 匹配类型 → 中文标签
+const matchTypeLabels: Record<string, string> = {
+  'exact':       '精确',
+  'keyword':     '关键字',
+  'alias':       '别名',
+  'prefix':      '前缀',
+  'contains':    '包含',
+  'fuzzy':       '模糊',
+  'match pattern': '正则',
+  'kw inline':   '内联',
+  'kw match':    '关键字',
+  'kw pinyin':   '拼音',
+  'alias py':    '拼音',
+  'pinyin':      '拼音',
+  'plugin':      '插件',
+  'desc':        '描述',
+  'id':          'ID',
+  'slash':       '命令',
 }
 
 // ---- 状态 ----
@@ -436,6 +466,29 @@ const groupedResults = computed<ResultGroup[]>(() => {
         })
       }
     } catch {}
+  }
+
+  // 2. URL 检测：检测到网页链接时添加直接打开选项
+  var isUrl = false
+  var urlStr = q
+  if (/^https?:\/\//i.test(q)) {
+    isUrl = true
+  } else if (/^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(\/|$)/i.test(q) && !/^[\d+\-*/().%^, ]+$/.test(q)) {
+    isUrl = true
+    urlStr = 'https://' + q
+  }
+  if (isUrl) {
+    groups.push({
+      type: 'url',
+      label: '🌐 ' + t('cmdGroupWeb'),
+      results: [{
+        type: 'url',
+        label: t('cmdOpenUrl'),
+        desc: urlStr,
+        icon: Globe,
+        url: urlStr,
+      }]
+    })
   }
 
   // 3. 项目 + Quicklink — items.value 已由后端 FTS5 筛选
@@ -646,56 +699,103 @@ const allResults = computed<SearchResult[]>(() => {
 })
 
 // ---- 空状态：最近使用 ----
+// 后端直接返回最近使用的记录（含 type/label/desc/count），前端仅做对象引用解析
+interface RecentEntry {
+  key: string; type: string; label: string; description: string; count: number; lastUsed: number
+}
+
 const recentResults = computed<SearchResult[]>(() => {
-  void frecencyTick.value // 依赖 frecencyTick，加载完毕后重算
   if (query.value.trim()) return []
-  const scored: SearchResult[] = []
-  for (const item of items.value) {
-    const score = frecencyScore('item:' + item.id)
-    if (score > 0) {
-      scored.push({
+  // 从后端获取最近使用的记录
+  const raw = recentCache.value
+  if (!raw || raw.length === 0) return []
+
+  // 构建查询表
+  const itemByKey: Record<string, CollectionItem> = {}
+  for (const it of items.value) itemByKey['item:' + it.id] = it
+  const snippetByKey: Record<string, CmdSnippet> = {}
+  for (const s of snippets.value) snippetByKey['snippet:' + s.id] = s
+  const cmdByKey: Record<string, SystemCmd> = {}
+  for (const c of systemCommands.value) cmdByKey['system:' + c.id] = c
+
+  const results: SearchResult[] = []
+  // 已经有 icon 映射的函数可用
+  for (const entry of raw) {
+    if (entry.type === 'item' || entry.type === 'quicklink') {
+      const item = itemByKey[entry.key]
+      if (!item) continue
+      results.push({
         type: item.value?.includes('{query}') ? 'quicklink' : 'item',
-        label: item.name,
-        desc: item.value || '',
+        label: entry.label,
+        desc: entry.description,
         icon: itemIcon(item),
         item,
-        frecencyScore: score,
+        frecencyScore: entry.count,
       })
-    }
-  }
-  for (const s of snippets.value) {
-    const score = frecencyScore('snippet:' + s.id)
-    if (score > 0) {
-      scored.push({
+    } else if (entry.type === 'snippet') {
+      const snippet = snippetByKey[entry.key]
+      if (!snippet) continue
+      results.push({
         type: 'snippet',
-        label: s.keyword,
-        desc: s.content.slice(0, 80),
+        label: entry.label,
+        desc: entry.description,
         icon: Clipboard,
-        snippet: s,
-        frecencyScore: score,
+        snippet,
+        frecencyScore: entry.count,
       })
-    }
-  }
-  // 最近使用的插件命令
-  for (const idx of pluginCmdIndex.value) {
-    const key = 'plugin:' + idx.plugin.id + '.' + idx.cmd.id
-    const score = frecencyScore(key)
-    if (score > 0) {
-      scored.push({
+    } else if (entry.type === 'plugin') {
+      const keyWithoutPrefix = entry.key.replace(/^plugin:/, '')
+      // pluginCmdIndex 里每个插件的完整 id（如 com.quickdock.calcsheet）已知，遍历匹配
+      let idx: PluginCmdIndex | undefined
+      let matchedPluginId = ''
+      let matchedCmdId = ''
+      for (const cand of pluginCmdIndex.value) {
+        const prefix = cand.plugin.id + '.'
+        if (keyWithoutPrefix.startsWith(prefix)) {
+          const cid = keyWithoutPrefix.slice(prefix.length)
+          if (cid === cand.cmd.id) {
+            idx = cand; matchedPluginId = cand.plugin.id; matchedCmdId = cid; break
+          }
+        }
+      }
+      if (!idx) continue
+      results.push({
         type: 'plugin',
-        label: idx.cmd.title,
-        desc: idx.plugin.name,
+        label: entry.label,
+        desc: entry.description,
         icon: Puzzle,
-        pluginId: idx.plugin.id,
-        pluginCommandId: idx.cmd.id,
+        pluginId: matchedPluginId,
+        pluginCommandId: matchedCmdId,
         pluginHasFrontend: idx.plugin.hasFrontend,
-        frecencyScore: score,
+        frecencyScore: entry.count,
+      })
+    } else if (entry.type === 'system') {
+      const cmd = cmdByKey[entry.key.replace(/^system:/, '')]
+      if (!cmd) continue
+      results.push({
+        type: 'system',
+        label: entry.label,
+        desc: entry.description,
+        icon: cmd.icon,
+        cmd,
+        frecencyScore: entry.count,
+      })
+    } else if (entry.type === 'app') {
+      results.push({
+        type: 'app',
+        label: entry.label,
+        desc: entry.description,
+        icon: AppWindow,
+        appPath: entry.key.replace(/^app:/, ''),
+        frecencyScore: entry.count,
       })
     }
   }
-  scored.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
-  return scored.slice(0, 8) // 从 6 扩到 8，给插件留空间
+  return results.slice(0, 8)
 })
+
+// 最近使用缓存（由 loadMostUsedItems 填充）
+const recentCache = ref<RecentEntry[]>([])
 
 // 实际显示的分组（有查询时用搜索结果，无查询时用最近使用）
 const displayGroups = computed<ResultGroup[]>(() => {
@@ -765,6 +865,7 @@ async function executeSelected() {
   if (!result) return
 
   if (result.type === 'system' && result.cmd) {
+    recordUsage('system:' + result.cmd.id, 'system', result.label, result.desc)
     await result.cmd.action()
   } else if (result.type === 'quicklink-inline' && result.item) {
     const item = { ...result.item }
@@ -773,7 +874,7 @@ async function executeSelected() {
       value = value.replace(/\{query\}/g, result.inlineQuery)
     }
     item.value = value
-    recordUsage('item:' + item.id)
+    recordUsage('item:' + item.id, 'item', item.name, item.value || '')
     try { await OpenItem(item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
     closePalette()
   } else if (result.type === 'quicklink' && result.item) {
@@ -783,26 +884,30 @@ async function executeSelected() {
     await nextTick()
     inlineInputRef.value?.focus()
   } else if (result.type === 'item' && result.item) {
-    recordUsage('item:' + result.item.id)
+    recordUsage('item:' + result.item.id, 'item', result.label, result.desc)
     try { await OpenItem(result.item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
+    closePalette()
+  } else if (result.type === 'url' && result.url) {
+    try { await Browser.OpenURL(result.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }
     closePalette()
   } else if (result.type === 'calculator' && result.calcResult) {
     try { await navigator.clipboard.writeText(result.calcResult) } catch {}
     closePalette()
   } else if (result.type === 'snippet' && result.snippet) {
-    recordUsage('snippet:' + result.snippet.id)
+    recordUsage('snippet:' + result.snippet.id, 'snippet', result.label, result.desc)
     try { await PasteSnippet(result.snippet.content) } catch (e) { console.error('[CmdPalette] PasteSnippet:', e) }
     closePalette()
   } else if (result.type === 'app' && result.appPath) {
-    recordUsage('app:' + result.label)
+    recordUsage('app:' + result.label, 'app', result.label, result.desc)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }
     closePalette()
     } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
-    recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId)
+    recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc)
     try {
       // 仅当 matchPattern/slash 前缀命中时才传输入文本
-      // 纯关键字匹配时不传（避免 "时间" "计算" 等无意义文本传到后端）
-      const inputText = result.inlineInput
+      // 纯关键字/别名/包含等匹配时不传
+      const matchType = result.matchType
+      const inputText = (matchType === 'match pattern' || matchType === 'slash') ? result.inlineInput : undefined
       const input: any = inputText ? { text: inputText } : null
       const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, input)
       const pluginResult = unwrap<string | any>(raw)
@@ -849,7 +954,7 @@ async function commitInlineQuicklink() {
     value = value.replace(/\{query\}/g, inlineQuery.value)
   }
   item.value = value
-  recordUsage('item:' + item.id)
+  recordUsage('item:' + item.id, 'item', item.name, item.value || '')
   try { await OpenItem(item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
   inlineQuicklink.value = null
   inlineQuery.value = ''
@@ -922,6 +1027,15 @@ async function loadMostUsedItems() {
   } catch (e) {
     console.error('[CmdPalette] ListPlugins:', getErrorMessage(e))
   } finally {
+    // 加载最近使用记录（后端按 last_used DESC 排序）
+    try {
+      const raw = await GetRecentUsage(20)
+      if (gen === itemsLoadGen) {
+        recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.label)
+      }
+    } catch (e) {
+      console.error('[CmdPalette] GetRecentUsage:', getErrorMessage(e))
+    }
     if (gen === itemsLoadGen) loading.value = false
   }
 }
@@ -967,25 +1081,40 @@ async function searchItems(query: string) {
 }
 
 // ---- 窗口打开 ----
+let lastClipboardUpdate = 0
+
 onMounted(async () => {
-  // 每次打开面板时清空搜索框
-  query.value = ''
-  selectedIndex.value = 0
-  inlineQuicklink.value = null
-  inlineQuery.value = ''
+  // 监听剪贴板更新事件，记录时间戳
+  Events.On('clipboard:updated', () => {
+    lastClipboardUpdate = Date.now()
+  })
+
   await loadMostUsedItems()
-  try {
-    const copied = unwrap<string>(await GetLastCopiedText())
-    if (copied && copied.trim() && copied.trim().length < 200) {
-      query.value = copied.trim()
-      // 如果有预填文本，直接用后端搜索
-      searchItems(query.value.trim())
+
+  // 每次窗口打开时：清空搜索框 + 3秒内剪贴板内容自动填充 + 聚焦输入
+  Events.On('palette:shown', () => {
+    query.value = ''
+    selectedIndex.value = 0
+    inlineQuicklink.value = null
+    inlineQuery.value = ''
+    pluginResultCache.value = null
+
+    // 仅当 3 秒内有新复制的内容才自动填充
+    if (Date.now() - lastClipboardUpdate < 3000) {
+      GetLastCopiedText().then(raw => {
+        const copied = unwrap<string>(raw)
+        if (copied && copied.trim() && copied.trim().length < 200) {
+          query.value = copied.trim()
+          searchItems(query.value.trim())
+        }
+      }).catch(() => {})
     }
-  } catch {}
-  setTimeout(() => {
-    inputRef.value?.focus()
-    inputRef.value?.select()
-  }, 100)
+
+    setTimeout(() => {
+      inputRef.value?.focus()
+      inputRef.value?.select()
+    }, 50)
+  })
 })
 
 // Reset selectedIndex when results change
@@ -1010,6 +1139,8 @@ watch(inlineQuicklink, (v) => {
 // 组件卸载时清理定时器
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  Events.Off('palette:shown')
+  Events.Off('clipboard:updated')
 })
 </script>
 
@@ -1052,7 +1183,7 @@ onUnmounted(() => {
         <div class="group-header">{{ group.label }}</div>
         <div
           v-for="(result, iIdx) in group.results"
-          :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.snippet?.id || iIdx)"
+          :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.snippet?.id || result.url || iIdx)"
           :class="['result-item', { active: getFlatIndex(gIdx, iIdx) === selectedIndex }]"
           @click="selectResult(gIdx, iIdx); executeSelected()"
           @mousemove="selectResult(gIdx, iIdx)"
@@ -1079,7 +1210,7 @@ onUnmounted(() => {
               <span class="meta-tag">{{ result.snippet.category }}</span>
             </template>
             <template v-else-if="result.type === 'plugin' && result.matchType">
-              <span class="meta-tag">{{ result.matchType }}</span>
+              <span class="meta-tag">{{ matchTypeLabels[result.matchType!] || result.matchType }}</span>
             </template>
           </div>
         </div>

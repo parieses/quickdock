@@ -160,6 +160,9 @@ var baseTables = []string{
 
 	`CREATE TABLE IF NOT EXISTS usage_frecency (
 		key TEXT PRIMARY KEY,
+		type TEXT NOT NULL DEFAULT '',
+		label TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
 		count INTEGER NOT NULL DEFAULT 1,
 		last_used TEXT NOT NULL
 	)`,
@@ -262,6 +265,20 @@ func (d *Database) migrate() error {
 	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'permissions'`).Scan(&count)
 	if err == nil && count == 0 {
 		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN permissions TEXT DEFAULT '{}'`)
+	}
+
+	// 安全兜底：检查 usage_frecency 表是否有 type 列（旧表迁移）
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('usage_frecency') WHERE name = 'type'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE usage_frecency ADD COLUMN type TEXT NOT NULL DEFAULT ''`)
+	}
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('usage_frecency') WHERE name = 'label'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE usage_frecency ADD COLUMN label TEXT NOT NULL DEFAULT ''`)
+	}
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('usage_frecency') WHERE name = 'description'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE usage_frecency ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
 	}
 
 	return err

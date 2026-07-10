@@ -441,7 +441,7 @@ func runMessageLoop() {
 				pw.Show()
 				pw.Focus()
 				if a := getHotkeyApp(); a != nil {
-					a.Event.Emit("palette:toggle")
+					a.Event.Emit("palette:shown")
 				}
 			}
 		})
@@ -912,7 +912,7 @@ func ResumeHotkeys() {
 				pw.Show()
 				pw.Focus()
 				if a := getHotkeyApp(); a != nil {
-					a.Event.Emit("palette:toggle")
+					a.Event.Emit("palette:shown")
 				}
 			}
 		})

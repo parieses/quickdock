@@ -188,6 +188,13 @@ export function GetPluginWindowPluginID(): $CancellablePromise<$models.ApiResult
     return $Call.ByID(90077567);
 }
 
+/**
+ * GetRecentUsage 返回最近使用的 N 条记录（命令面板「最近使用」专用）
+ */
+export function GetRecentUsage(limit: number): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2751728964, limit);
+}
+
 export function GetSnapshot(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1988116934, id);
 }
@@ -346,6 +353,13 @@ export function PasteSnippet(content: string): $CancellablePromise<$models.ApiRe
  */
 export function RecordUsage(key: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(591933050, key);
+}
+
+/**
+ * RecordUsageEx 记录一次使用并附带展示信息（type/label/desc 用于「最近使用」直接展示）
+ */
+export function RecordUsageEx(key: string, type_: string, label: string, desc: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3173203151, key, type_, label, desc);
 }
 
 export function ReorderCollections(orderedIDs: string[] | null): $CancellablePromise<$models.ApiResult | null> {

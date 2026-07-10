@@ -22,8 +22,16 @@ window.addEventListener('message', (e) => {
   }
   // 从命令面板传入的文本
   if (e.data?.type === 'plugin:init' && e.data?.data?.text) {
-    $('#timeInput').value = e.data.data.text
-    doConvert(e.data.data.text)
+    // 只处理符合时间格式的数据，非匹配文本不转换
+    var initText = e.data.data.text
+    var expectedRE = /^(\d{4}[-/]\d{2}[-/]\d{2}(?:\s+\d{1,2}:\d{2}(:\d{2})?)?|\d{10}|\d{13}|\d{8}(?:\d{6})?|\d{4}年\d{1,2}月\d{1,2}日|now)$/i
+    if (expectedRE.test(initText.trim())) {
+      $('#timeInput').value = initText
+      doConvert(initText)
+    } else {
+      $('#timeInput').value = ''
+      $('#results').innerHTML = ''
+    }
   }
 })
 

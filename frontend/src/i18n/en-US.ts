@@ -385,6 +385,8 @@ export default {
   cmdEmptyTrashDesc: 'Empty Recycle Bin',
   // Command Palette — Group Headers
   cmdGroupCalc: 'Calculator',
+  cmdGroupWeb: 'Web',
+  cmdOpenUrl: 'Open in Browser',
   cmdGroupItems: 'Items',
   cmdGroupQuicklink: 'Quicklinks',
   cmdGroupSnippets: 'Snippets',

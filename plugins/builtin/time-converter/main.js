@@ -166,8 +166,16 @@ function handleExecute(params) {
     }
 
     var text = input.text || ''
+
+    // 只处理 matchPattern 命中的输入（由命令面板保证），非匹配的文本直接忽略
     if (!text.trim()) {
         return { error: '请输入时间', hint: '支持: now / Unix时间戳 / 2024-01-15 / 2024-01-15 14:30:00 / 2024年1月15日' }
+    }
+
+    // 后端额外校验：仅当输入符合预期格式时才处理
+    var expectedRE = /^(\d{4}[-/]\d{2}[-/]\d{2}(?:\s+\d{1,2}:\d{2}(:\d{2})?)?|\d{10}|\d{13}|\d{8}(?:\d{6})?|\d{4}年\d{1,2}月\d{1,2}日|now)$/i
+    if (!expectedRE.test(text.trim())) {
+        return { error: '参数格式不匹配: ' + text, hint: '支持: now / Unix时间戳 / 2024-01-15 / 2024-01-15 14:30:00 / 2024年1月15日' }
     }
 
     var d = parseTime(text)

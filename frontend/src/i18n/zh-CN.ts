@@ -385,6 +385,8 @@ export default {
   cmdEmptyTrashDesc: 'Empty Recycle Bin',
   // 命令面板 — 分组标题
   cmdGroupCalc: '计算器',
+  cmdGroupWeb: '网页',
+  cmdOpenUrl: '在浏览器中打开',
   cmdGroupItems: '项目',
   cmdGroupQuicklink: '快速链接',
   cmdGroupSnippets: '文本片段',

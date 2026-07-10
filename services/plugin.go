@@ -479,6 +479,21 @@ func (a *AppService) ShowPluginWindow(pluginID string) *ApiResult {
 	// 使用 strconv.Quote 安全转义 pluginID，防止 JS 注入
 	hashValue := "#/plugin/" + pluginID + "?t=" + fmt.Sprintf("%d", time.Now().UnixNano())
 	win.ExecJS("window.location.hash = " + strconv.Quote(hashValue))
+
+	// 检查是否有待传递的初始文本，直接注入 iframe（解决窗口复用时不重载 iframe 的问题）
+	a.pendingInitTextMu.Lock()
+	initText := a.pendingInitText
+	a.pendingInitText = ""
+	a.pendingInitTextMu.Unlock()
+	if initText != "" {
+		safeText := strconv.Quote(initText)
+		win.ExecJS(fmt.Sprintf(
+			`setTimeout(function(){
+				var ifr = document.querySelector('iframe');
+				if (ifr && ifr.contentWindow) ifr.contentWindow.postMessage({type:'plugin:init', data:{text:%s}}, '*');
+			}, 400)`, safeText))
+	}
+
 	return Ok(nil)
 }
 
