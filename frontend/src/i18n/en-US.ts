@@ -255,6 +255,7 @@ export default {
   pluginUninstallFailed: 'Failed to uninstall plugin',
   pluginOpFailed: 'Operation failed',
   pluginResultCopied: 'Result copied',
+  pluginDetach: 'Detach to Window',
   pluginOpen: 'Open',
   pluginBack: 'Back to Plugin List',
   pluginCalcTitle: 'Calculator',

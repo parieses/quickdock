@@ -1,0 +1,47 @@
+{
+  "id": "com.quickdock.regex-extractor",
+  "name": "正则提取工具",
+  "version": "0.1.0",
+  "description": "输入文本和正则表达式，一键提取所有匹配项，支持分组捕获、高亮显示、导出结果",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 680,
+    "height": 540
+  },
+  "commands": [
+    {
+      "id": "open-regex",
+      "title": "正则提取工具",
+      "keywords": [
+        "regex",
+        "regular",
+        "extract",
+        "正则",
+        "提取",
+        "匹配"
+      ],
+      "aliases": [
+        "正则提取",
+        "正则匹配",
+        "regex提取",
+        "re提取"
+      ],
+      "prefix": "/re"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "id": "com.quickdock.sql-formatter",
+  "name": "SQL 格式化",
+  "version": "0.2.0",
+  "description": "美化 SQL 语句，支持 MySQL/PostgreSQL 方言，关键字大写、缩进对齐",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 640,
+    "height": 500
+  },
+  "commands": [
+    {
+      "id": "format-sql",
+      "title": "SQL 格式化",
+      "keywords": [
+        "sql",
+        "format",
+        "beautify",
+        "pretty"
+      ],
+      "aliases": [
+        "sql格式化",
+        "美化sql",
+        "sql美化",
+        "sql整理"
+      ],
+      "matchPattern": "^\\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|TRUNCATE|MERGE|CALL|EXEC|BEGIN|DECLARE|SET|SHOW|DESCRIBE|EXPLAIN)\\b",
+      "prefix": "/sql"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
+}

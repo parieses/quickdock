@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>文件/图片对比</title>
+<link rel="stylesheet" href="../common.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="fc-app">
+  <!-- 双拖拽区 -->
+  <div class="fc-zones">
+    <div class="fc-zone" id="zoneLeft" data-side="left">
+      <div class="fc-drop-hint" id="hintLeft">
+        <div class="fc-icon">📄</div>
+        <div class="fc-text">拖入第一个文件</div>
+        <div class="fc-sub">或点击选择</div>
+      </div>
+      <div class="fc-file-info" id="infoLeft" style="display:none"></div>
+    </div>
+    <div class="fc-vs">VS</div>
+    <div class="fc-zone" id="zoneRight" data-side="right">
+      <div class="fc-drop-hint" id="hintRight">
+        <div class="fc-icon">📄</div>
+        <div class="fc-text">拖入第二个文件</div>
+        <div class="fc-sub">或点击选择</div>
+      </div>
+      <div class="fc-file-info" id="infoRight" style="display:none"></div>
+    </div>
+  </div>
+
+  <!-- 对比结果 -->
+  <div class="fc-result" id="fcResult" style="display:none">
+    <div class="fc-result-header">对比结果</div>
+    <div class="fc-result-body" id="fcResultBody"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

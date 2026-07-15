@@ -182,13 +182,6 @@ export function GetPluginIcon(pluginID: string): $CancellablePromise<$models.Api
 }
 
 /**
- * GetPluginWindowPluginID 获取当前插件窗口显示的插件 ID
- */
-export function GetPluginWindowPluginID(): $CancellablePromise<$models.ApiResult | null> {
-    return $Call.ByID(90077567);
-}
-
-/**
  * GetRecentUsage 返回最近使用的 N 条记录（命令面板「最近使用」专用）
  */
 export function GetRecentUsage(limit: number): $CancellablePromise<$models.ApiResult | null> {
@@ -239,11 +232,10 @@ export function HidePaletteWindow(): $CancellablePromise<void> {
 }
 
 /**
- * HidePluginWindow 隐藏插件独立窗口（关闭按钮）
- * 隐藏前清理 iframe 的 hash，使 PluginPage 组件卸载并释放 iframe 资源
+ * HidePluginWindow 关闭并销毁指定插件的独立窗口
  */
-export function HidePluginWindow(): $CancellablePromise<$models.ApiResult | null> {
-    return $Call.ByID(1422908057);
+export function HidePluginWindow(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1422908057, pluginID);
 }
 
 /**
@@ -312,10 +304,10 @@ export function ListWorkspaces(): $CancellablePromise<$models.ApiResult | null> 
 }
 
 /**
- * MinimizePluginWindow 最小化插件独立窗口
+ * MinimizePluginWindow 最小化指定插件的独立窗口
  */
-export function MinimizePluginWindow(): $CancellablePromise<$models.ApiResult | null> {
-    return $Call.ByID(3074352793);
+export function MinimizePluginWindow(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3074352793, pluginID);
 }
 
 /**
@@ -467,7 +459,7 @@ export function SetWebDAVConfig(config: $models.WebDAVConfig | null): $Cancellab
 }
 
 /**
- * ShowPluginWindow 打开插件独立窗口（或切换插件 ID）
+ * ShowPluginWindow 打开插件独立窗口（每个插件拥有自己的独立窗口）
  */
 export function ShowPluginWindow(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(3008209844, pluginID);
@@ -478,10 +470,10 @@ export function SuspendHotkeys(): $CancellablePromise<void> {
 }
 
 /**
- * ToggleMaximizePluginWindow 切换插件窗口最大化/还原
+ * ToggleMaximizePluginWindow 切换指定插件的窗口最大化/还原
  */
-export function ToggleMaximizePluginWindow(): $CancellablePromise<$models.ApiResult | null> {
-    return $Call.ByID(31433991);
+export function ToggleMaximizePluginWindow(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(31433991, pluginID);
 }
 
 export function TogglePinClipboardEntry(id: string): $CancellablePromise<$models.ApiResult | null> {

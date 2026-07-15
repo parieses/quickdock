@@ -1,0 +1,48 @@
+{
+  "id": "com.quickdock.data-converter",
+  "name": "数据格式转换",
+  "icon": "icon.svg",
+  "version": "1.0.0",
+  "description": "JSON ↔ YAML ↔ TOML ↔ XML 多格式互转",
+  "author": "QuickDock",
+  "category": "开发者日常",
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "network": false,
+    "filesystem": false,
+    "clipboard": true
+  },
+  "commands": [
+    {
+      "id": "convert-data",
+      "title": "数据格式转换",
+      "keywords": [
+        "convert",
+        "json",
+        "yaml",
+        "toml",
+        "xml",
+        "数据转换",
+        "格式转换"
+      ],
+      "aliases": [
+        "数据转换",
+        "格式转换",
+        "json转yaml"
+      ],
+      "prefix": "/convert",
+      "matchPattern": "(^\\{.*\\}$|^\\[.*\\]$|^\\w+:\\s+|^\\<\\?xml|^\\[\\w+\\])"
+    }
+  ],
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html"
+  }
+}

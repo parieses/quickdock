@@ -1,0 +1,45 @@
+{
+  "id": "com.quickdock.http-status",
+  "name": "HTTP 状态码速查",
+  "version": "1.0.0",
+  "description": "查询 HTTP 状态码含义、描述和常见场景",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "network": false,
+    "filesystem": false,
+    "clipboard": true
+  },
+  "commands": [
+    {
+      "id": "lookup-status",
+      "title": "HTTP 状态码查询",
+      "keywords": [
+        "status",
+        "http",
+        "状态码",
+        "status code"
+      ],
+      "aliases": [
+        "状态码",
+        "http状态码",
+        "状态码查询"
+      ],
+      "prefix": "/status",
+      "matchPattern": "^\\d{3}$"
+    }
+  ],
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html"
+  }
+}

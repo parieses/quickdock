@@ -16,8 +16,8 @@ var supportedRuntimes = map[string]bool{
 	"native": true,
 }
 
-// 插件 ID 格式：com.xxx.xxx
-var pluginIDRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z][a-zA-Z0-9-]*)+$`)
+// 插件 ID 格式：com.xxx.xxx 或简单格式如 hosts-manager
+var pluginIDRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9._-]*$`)
 
 // LoadManifest 读取并校验 plugin.json
 func LoadManifest(path string) (*PluginManifest, error) {

@@ -1,0 +1,49 @@
+{
+  "id": "com.quickdock.case-converter",
+  "name": "变量命名转换",
+  "version": "0.1.0",
+  "description": "变量命名风格互转：camelCase、PascalCase、snake_case、kebab-case、UPPER_CASE、camel_Snake",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 520,
+    "height": 460
+  },
+  "commands": [
+    {
+      "id": "convert-case",
+      "title": "变量命名转换",
+      "keywords": [
+        "case",
+        "camel",
+        "snake",
+        "kebab",
+        "pascal",
+        "convert"
+      ],
+      "aliases": [
+        "变量命名",
+        "blmm",
+        "命名转换",
+        "驼峰",
+        "下划线",
+        "大小写"
+      ],
+      "matchPattern": "^[a-z]+[_-][a-z]+[a-z_0-9-]*$|^[a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z][a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z]+_[A-Z]+[A-Z_0-9]*$"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
+}

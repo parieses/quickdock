@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect x="4" y="6" width="40" height="36" rx="6" fill="#4a9eff" opacity="0.12"/>
+  <rect x="4" y="6" width="40" height="36" rx="6" stroke="#4a9eff" stroke-width="1.8"/>
+  <text x="24" y="19" text-anchor="middle" font-size="7" fill="#4a9eff" font-family="monospace">Aa</text>
+  <text x="14" y="30" text-anchor="middle" font-size="7" fill="#4a9eff" font-family="monospace">a_a</text>
+  <text x="34" y="30" text-anchor="middle" font-size="7" fill="#4a9eff" font-family="monospace">aA</text>
+  <text x="24" y="40" text-anchor="middle" font-size="5" fill="#666" font-family="monospace">userName</text>
+</svg>

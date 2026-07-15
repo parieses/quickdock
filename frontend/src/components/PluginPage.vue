@@ -8,7 +8,7 @@ import type { ToastAPI } from '../types'
 
 const props = defineProps<{ pluginId: string }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 const iframeSrc = ref('')
@@ -76,14 +76,20 @@ async function onIframeLoad(event: Event) {
   try {
     const raw = await GetAndClearPendingPluginInit()
     const text = raw?.data || raw
-    if (text && iframeWindow) {
-      iframeWindow.postMessage({ type: 'plugin:init', data: { text } }, window.location.origin)
+    if (iframeWindow) {
+      // 先发 theme 消息让插件 HTML 应用主题
+      iframeWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, window.location.origin)
+      // 再发 init 消息
+      iframeWindow.postMessage({
+        type: 'plugin:init',
+        data: { text, theme: 'dark', locale: locale.value }
+      }, window.location.origin)
     }
   } catch {}
 }
 
 function closeWindow() {
-  HidePluginWindow()
+  HidePluginWindow(props.pluginId)
 }
 </script>
 
@@ -93,10 +99,10 @@ function closeWindow() {
     <div class="pw-titlebar">
       <span class="pw-title">{{ pluginName || props.pluginId }}</span>
       <div class="pw-controls">
-        <button class="pw-btn pw-btn-min" @click="MinimizePluginWindow()" :title="t('minimize')">
+        <button class="pw-btn pw-btn-min" @click="MinimizePluginWindow(props.pluginId)" :title="t('minimize')">
           <Minus :size="13" />
         </button>
-        <button class="pw-btn pw-btn-max" @click="ToggleMaximizePluginWindow()" :title="t('maximize')">
+        <button class="pw-btn pw-btn-max" @click="ToggleMaximizePluginWindow(props.pluginId)" :title="t('maximize')">
           <Square :size="11" />
         </button>
         <button class="pw-btn pw-btn-close" @click="closeWindow" :title="t('close')">
@@ -128,20 +134,21 @@ function closeWindow() {
   background: var(--color-bg-primary);
 }
 
-/* 标题栏 */
+/* 标题栏：shadow-border 替代 solid border */
 .pw-titlebar {
   display: flex; align-items: center; justify-content: space-between;
-  height: 32px; flex-shrink: 0;
-  padding: 0 0 0 16px;
+  height: 36px; flex-shrink: 0;
+  padding: 0 0 0 14px;
   background: var(--color-bg-secondary);
-  border-bottom: 1px solid var(--color-border);
+  box-shadow: inset 0 -1px 0 0 var(--color-border);
   -webkit-app-region: drag;
   user-select: none;
 }
 .pw-title {
   font-size: 12px; font-weight: 500;
-  color: var(--color-text-secondary);
+  color: var(--color-text-muted);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  letter-spacing: 0.02em;
 }
 .pw-controls {
   display: flex; align-items: center;
@@ -149,22 +156,43 @@ function closeWindow() {
 }
 .pw-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 46px; height: 32px;
+  width: 46px; height: 36px;
   border: none; background: transparent;
   color: var(--color-text-muted);
   cursor: pointer;
   transition: background 0.1s, color 0.1s;
 }
-.pw-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.pw-btn-close:hover { background: #e81123; color: #fff; }
-.pw-btn-max svg { transform: rotate(180deg); }
+.pw-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.pw-btn:active {
+  background: var(--color-bg-active);
+}
+.pw-btn-close:hover {
+  background: var(--color-danger);
+  color: #fff;
+}
+.pw-btn-max svg {
+  transform: rotate(180deg);
+}
 
 /* 内容区 */
-.pw-body { flex: 1; display: flex; overflow: hidden; }
+.pw-body {
+  flex: 1; display: flex; overflow: hidden;
+}
 .pw-status {
   flex: 1; display: flex; align-items: center; justify-content: center;
   color: var(--color-text-disabled); font-size: 13px;
+  user-select: none;
 }
-.pw-error { color: #E24B4A; padding: 0 20px; text-align: center; }
-.pw-iframe { flex: 1; width: 100%; border: none; background: var(--color-bg-primary); }
+.pw-error {
+  color: var(--color-danger);
+  padding: 0 24px; text-align: center;
+  line-height: 1.6;
+}
+.pw-iframe {
+  flex: 1; width: 100%; border: none;
+  background: var(--color-bg-primary);
+}
 </style>

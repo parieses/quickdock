@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>正则提取工具</title>
+<link rel="stylesheet" href="../common.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="re-app">
+  <!-- 输入区 -->
+  <div class="re-input-area">
+    <div class="re-row">
+      <div class="re-field re-field-regex">
+        <label class="re-label">正则表达式</label>
+        <div class="re-regex-input">
+          <span class="re-regex-delim">/</span>
+          <input type="text" id="patternInput" class="re-input re-input-regex" placeholder="\d+\.\d+\.\d+\.\d+" spellcheck="false">
+          <span class="re-regex-delim">/</span>
+          <input type="text" id="flagsInput" class="re-input re-input-flags" value="g" placeholder="g" maxlength="5">
+        </div>
+      </div>
+      <div class="re-field re-field-actions">
+        <button class="re-btn re-btn-primary" id="btnExtract">▶ 提取</button>
+        <button class="re-btn" id="btnClear">✕ 清空</button>
+      </div>
+    </div>
+    <div class="re-row">
+      <div class="re-field re-field-full">
+        <label class="re-label">待匹配文本</label>
+        <textarea id="textInput" class="re-textarea" placeholder="在此粘贴要提取的文本…" spellcheck="false"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <!-- 结果区 -->
+  <div class="re-result-area" id="resultArea" style="display:none">
+    <div class="re-result-header">
+      <span>匹配结果</span>
+      <span class="re-result-stats" id="matchStats"></span>
+      <span class="re-spacer"></span>
+      <button class="re-btn re-btn-sm" id="btnCopyResult">复制</button>
+    </div>
+    <div class="re-result-body" id="matchResults"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

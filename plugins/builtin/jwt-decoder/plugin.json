@@ -1,0 +1,45 @@
+{
+  "id": "com.quickdock.jwt-decoder",
+  "name": "JWT 解码器",
+  "version": "1.0.0",
+  "description": "解码 JWT Token，查看 Header/Payload，验证过期时间",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "network": false,
+    "filesystem": false,
+    "clipboard": true
+  },
+  "commands": [
+    {
+      "id": "decode-jwt",
+      "title": "JWT 解码器",
+      "keywords": [
+        "jwt",
+        "token",
+        "decode",
+        "解码",
+        "jwt解码"
+      ],
+      "aliases": [
+        "jwt解码",
+        "token解码"
+      ],
+      "prefix": "/jwt",
+      "matchPattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+    }
+  ],
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html"
+  }
+}

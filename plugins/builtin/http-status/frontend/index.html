@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HTTP 状态码速查</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+.p-app{display:flex;flex-direction:column;height:100vh}
+.p-toolbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.p-input{flex:1;max-width:240px;height:28px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-primary);color:var(--text-primary);font-size:13px;font-family:var(--font-mono);outline:none;transition:border-color .15s}
+.p-input:focus{border-color:var(--accent)}
+.p-input::placeholder{color:var(--text-placeholder)}
+.p-tabs{display:flex;gap:4px}
+.p-tab{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border:1px solid transparent;border-radius:var(--radius);background:transparent;color:var(--text-muted);font-size:12px;font-family:inherit;cursor:pointer;transition:all .15s}
+.p-tab:hover{background:var(--bg-hover);color:var(--text-primary)}
+.p-tab-active{background:var(--bg-tertiary);border-color:var(--border);color:var(--text-primary)}
+.p-body{flex:1;overflow:auto;padding:8px}
+.p-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:6px}
+.p-card{border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;background:var(--bg-secondary);cursor:pointer;transition:border-color .15s,background .15s}
+.p-card:hover{background:var(--bg-hover);border-color:#3a3a3a}
+.p-card-info{border-left:3px solid #3b82f6}
+.p-card-success{border-left:3px solid #22c55e}
+.p-card-redirect{border-left:3px solid #f59e0b}
+.p-card-client{border-left:3px solid #f97316}
+.p-card-server{border-left:3px solid #ef4444}
+.p-card-code{font-size:18px;font-weight:700;font-family:var(--font-mono);color:var(--text-primary)}
+.p-card-label{font-size:12px;color:var(--text-secondary);margin:2px 0}
+.p-card-desc{font-size:12px;color:var(--text-muted)}
+.p-card-category{display:inline-block;font-size:10px;padding:1px 5px;border-radius:3px;margin-top:4px}
+.cat-info{background:rgba(59,130,246,0.12);color:#3b82f6}
+.cat-success{background:rgba(34,197,94,0.12);color:#22c55e}
+.cat-redirect{background:rgba(245,158,11,0.12);color:#f59e0b}
+.cat-client{background:rgba(249,115,22,0.12);color:#f97316}
+.cat-server{background:rgba(239,68,68,0.12);color:#ef4444}
+.p-detail{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:100}
+.p-detail-card{background:var(--bg-secondary);border:1px solid var(--border);border-radius:8px;padding:20px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.3)}
+.p-detail-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.p-detail-code{font-size:28px;font-weight:700;font-family:var(--font-mono)}
+.p-detail-close{width:28px;height:28px;display:flex;align-items:center;justify-content:center;border:none;border-radius:var(--radius);background:transparent;color:var(--text-muted);cursor:pointer;font-size:18px}
+.p-detail-close:hover{background:var(--bg-hover);color:var(--text-primary)}
+.p-detail-body{font-size:13px;line-height:1.6;color:var(--text-secondary)}
+.p-detail-body strong{color:var(--text-primary)}
+.p-empty-state{display:flex;align-items:center;justify-content:center;flex-direction:column;gap:8px;height:200px;color:var(--text-muted);font-size:14px}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <input type="text" id="searchInput" class="p-input" placeholder="搜索状态码或关键词 (如 404, not found)" spellcheck="false" oninput="filterCards()">
+    <div class="p-tabs" id="tabBar"></div>
+  </div>
+  <div class="p-body">
+    <div id="cardGrid" class="p-grid"></div>
+  </div>
+</div>
+<div id="detailModal" class="p-detail" style="display:none" onclick="if(event.target===this)closeDetail()">
+  <div class="p-detail-card">
+    <div class="p-detail-header">
+      <span class="p-detail-code" id="detailCode"></span>
+      <button class="p-detail-close" onclick="closeDetail()">&times;</button>
+    </div>
+    <div class="p-detail-body" id="detailBody"></div>
+  </div>
+</div>
+<script>
+var allStatusCodes = [
+  {code:100,label:"Continue",desc:"继续",category:"信息",detail:"服务器已收到请求头，客户端应继续发送请求体。"},
+  {code:101,label:"Switching Protocols",desc:"切换协议",category:"信息",detail:"服务器已理解客户端的请求，将切换到更合适的协议。"},
+  {code:102,label:"Processing",desc:"处理中",category:"信息",detail:"WebDAV 请求，服务器正在处理但尚无响应。"},
+  {code:103,label:"Early Hints",desc:"早期提示",category:"信息",detail:"服务器在最终响应前提前返回一些响应头，主要用于预加载资源。"},
+  {code:200,label:"OK",desc:"成功",category:"成功",detail:"请求成功。GET 返回资源，POST 返回操作结果。"},
+  {code:201,label:"Created",desc:"已创建",category:"成功",detail:"请求已被实现，新资源已创建。常用于 POST/PUT 响应。"},
+  {code:202,label:"Accepted",desc:"已接受",category:"成功",detail:"请求已接受但尚未处理完成，用于异步操作。"},
+  {code:204,label:"No Content",desc:"无内容",category:"成功",detail:"请求成功但无返回内容。常用于 DELETE 响应。"},
+  {code:301,label:"Moved Permanently",desc:"永久重定向",category:"重定向",detail:"请求的资源已被永久移动到新 URL，后续应使用新地址。"},
+  {code:302,label:"Found",desc:"临时重定向",category:"重定向",detail:"请求的资源临时位于另一个 URL，后续仍用原地址。"},
+  {code:304,label:"Not Modified",desc:"未修改",category:"重定向",detail:"资源未修改，客户端可使用缓存版本。用于条件请求。"},
+  {code:307,label:"Temporary Redirect",desc:"临时重定向",category:"重定向",detail:"类似 302 但要求客户端保持原 HTTP 方法不变。"},
+  {code:308,label:"Permanent Redirect",desc:"永久重定向",category:"重定向",detail:"类似 301 但要求客户端保持原 HTTP 方法不变。"},
+  {code:400,label:"Bad Request",desc:"错误请求",category:"客户端错误",detail:"服务器无法理解请求的格式，客户端不应不经修改重试。"},
+  {code:401,label:"Unauthorized",desc:"未授权",category:"客户端错误",detail:"请求需要身份验证。客户端应提供有效的认证凭据。"},
+  {code:403,label:"Forbidden",desc:"禁止访问",category:"客户端错误",detail:"服务器拒绝执行请求，即使有认证也无权限。"},
+  {code:404,label:"Not Found",desc:"未找到",category:"客户端错误",detail:"服务器找不到请求的资源。可能是 URL 错误或资源已删除。"},
+  {code:405,label:"Method Not Allowed",desc:"方法不允许",category:"客户端错误",detail:"请求方法不被该资源支持。例如不允许 DELETE。"},
+  {code:408,label:"Request Timeout",desc:"请求超时",category:"客户端错误",detail:"服务器等待客户端发送请求时超时。"},
+  {code:409,label:"Conflict",desc:"冲突",category:"客户端错误",detail:"请求与资源的当前状态冲突。常用于 PUT 版本冲突。"},
+  {code:410,label:"Gone",desc:"已删除",category:"客户端错误",detail:"请求的资源已永久删除，与 404 不同，410 明确表示资源曾存在。"},
+  {code:413,label:"Payload Too Large",desc:"请求实体过大",category:"客户端错误",detail:"请求体超过服务器允许的大小限制。"},
+  {code:415,label:"Unsupported Media Type",desc:"不支持的媒体类型",category:"客户端错误",detail:"请求的格式不被请求的资源支持。"},
+  {code:422,label:"Unprocessable Entity",desc:"不可处理的实体",category:"客户端错误",detail:"请求格式正确但语义错误。常用于表单验证失败。"},
+  {code:429,label:"Too Many Requests",desc:"请求过多",category:"客户端错误",detail:"客户端在指定时间内发送了太多请求（限流）。"},
+  {code:500,label:"Internal Server Error",desc:"服务器内部错误",category:"服务器错误",detail:"服务器遇到意外错误，无法完成请求。"},
+  {code:501,label:"Not Implemented",desc:"未实现",category:"服务器错误",detail:"服务器不支持请求的功能。"},
+  {code:502,label:"Bad Gateway",desc:"网关错误",category:"服务器错误",detail:"网关或代理从上游服务器收到无效响应。"},
+  {code:503,label:"Service Unavailable",desc:"服务不可用",category:"服务器错误",detail:"服务器暂时无法处理请求（过载或维护中）。"},
+  {code:504,label:"Gateway Timeout",desc:"网关超时",category:"服务器错误",detail:"网关或代理等待上游服务器响应超时。"},
+  {code:505,label:"HTTP Version Not Supported",desc:"HTTP 版本不支持",category:"服务器错误",detail:"服务器不支持请求中使用的 HTTP 协议版本。"}
+]
+
+var categories = ['全部','信息','成功','重定向','客户端错误','服务器错误']
+var activeCategory = '全部'
+
+var categoryColorMap = {
+  '信息':'info','成功':'success','重定向':'redirect','客户端错误':'client','服务器错误':'server'
+}
+
+function renderTabs() {
+  var bar = document.getElementById('tabBar')
+  bar.innerHTML = categories.map(function(c) {
+    var active = c === activeCategory ? ' p-tab-active' : ''
+    return '<button class="p-tab' + active + '" onclick="setCategory(\'' + c + '\')">' + c + '</button>'
+  }).join('')
+}
+
+function setCategory(cat) {
+  activeCategory = cat
+  document.getElementById('searchInput').value = ''
+  renderTabs()
+  renderCards()
+}
+
+function renderCards() {
+  var grid = document.getElementById('cardGrid')
+  var items = activeCategory === '全部' ? allStatusCodes : allStatusCodes.filter(function(s) { return s.category === activeCategory })
+  // 应用搜索
+  var q = document.getElementById('searchInput').value.trim().toLowerCase()
+  if (q) {
+    items = items.filter(function(s) {
+      return String(s.code).indexOf(q) >= 0 || s.label.toLowerCase().indexOf(q) >= 0 || s.desc.indexOf(q) >= 0
+    })
+  }
+  if (items.length === 0) {
+    grid.innerHTML = '<div class="p-empty-state"><span>未找到匹配的状态码</span></div>'
+    return
+  }
+  grid.innerHTML = items.map(function(s) {
+    var color = categoryColorMap[s.category] || 'info'
+    return '<div class="p-card p-card-' + color + '" onclick="showDetail(' + s.code + ')">' +
+      '<div class="p-card-code">' + s.code + '</div>' +
+      '<div class="p-card-label">' + s.label + '</div>' +
+      '<div class="p-card-desc">' + s.desc + '</div>' +
+      '<span class="p-card-category cat-' + color + '">' + s.category + '</span>' +
+      '</div>'
+  }).join('')
+}
+
+function filterCards() { renderCards() }
+
+function showDetail(code) {
+  var s = allStatusCodes.find(function(x){return x.code===code})
+  if (!s) return
+  document.getElementById('detailCode').textContent = s.code + ' ' + s.label
+  document.getElementById('detailBody').innerHTML =
+    '<strong>描述：</strong>' + s.desc + '<br><br>' +
+    '<strong>分类：</strong>' + s.category + '<br><br>' +
+    '<strong>详细说明：</strong><br>' + s.detail
+  document.getElementById('detailModal').style.display = 'flex'
+}
+
+function closeDetail() {
+  document.getElementById('detailModal').style.display = 'none'
+}
+
+renderTabs()
+renderCards()
+</script>
+</body>
+</html>

@@ -1,0 +1,44 @@
+{
+  "id": "com.quickdock.text-diff",
+  "name": "Diff 文本对比",
+  "version": "0.1.0",
+  "description": "两个文本块逐行对比，高亮显示增/删/改差异，支持行号与折叠",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 680,
+    "height": 520
+  },
+  "commands": [
+    {
+      "id": "open-diff",
+      "title": "Diff 文本对比",
+      "keywords": [
+        "diff",
+        "compare",
+        "对比",
+        "差异"
+      ],
+      "aliases": [
+        "文本对比",
+        "差异对比",
+        "diff对比"
+      ],
+      "prefix": "/diff"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
+}

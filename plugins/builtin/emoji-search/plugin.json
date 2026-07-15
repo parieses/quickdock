@@ -1,0 +1,22 @@
+{
+  "id": "com.quickdock.emoji-search",
+  "name": "Emoji 搜索",
+  "version": "1.0.0",
+  "description": "搜索 Emoji 并一键复制到剪贴板",
+  "author": "QuickDock",
+  "category": "开发者日常",
+  "icon": "icon.svg",
+  "backend": {
+    "runtime": "none"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html"
+  },
+  "permissions": {
+    "clipboard": true
+  },
+  "capabilities": [
+    "frontend"
+  ]
+}

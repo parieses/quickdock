@@ -506,6 +506,11 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 		return nil, ErrPluginNotFound
 	}
 
+	// 检查插件运行状态（前端已过滤，后端再做一层安全校验）
+	if inst.Status != "running" {
+		return nil, fmt.Errorf("插件 %s 未运行（状态: %s）", pluginID, inst.Status)
+	}
+
 	// none runtime：纯前端插件，无后端 RPC
 	if inst.Manifest.Backend.Runtime == "none" {
 		return json.RawMessage(`{"status":"ok","frontendOnly":true}`), nil
@@ -543,6 +548,7 @@ func (m *Manager) ListPlugins() []PluginInfo {
 			Version:     inst.Manifest.Version,
 			Description: inst.Manifest.Description,
 			Author:      inst.Manifest.Author,
+			Category:    inst.Manifest.Category,
 			Status:      inst.Status,
 			HasFrontend: inst.Manifest.Frontend.Enabled,
 			Commands:    inst.Manifest.Commands,

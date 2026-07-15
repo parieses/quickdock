@@ -143,7 +143,10 @@ var baseTables = []string{
 		version TEXT NOT NULL,
 		author TEXT DEFAULT '',
 		description TEXT DEFAULT '',
+		category TEXT DEFAULT '',
+		icon TEXT DEFAULT '',
 		enabled INTEGER DEFAULT 1,
+		usage_count INTEGER DEFAULT 0,
 		capabilities TEXT DEFAULT '[]',
 		permissions TEXT DEFAULT '{}',
 		config TEXT DEFAULT '{}',
@@ -265,6 +268,18 @@ func (d *Database) migrate() error {
 	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'permissions'`).Scan(&count)
 	if err == nil && count == 0 {
 		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN permissions TEXT DEFAULT '{}'`)
+	}
+
+	// 检查 plugins 表是否有 icon 列（旧表迁移）
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'icon'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN icon TEXT DEFAULT ''`)
+	}
+
+	// 检查 plugins 表是否有 usage_count 列（旧表迁移）
+	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'usage_count'`).Scan(&count)
+	if err == nil && count == 0 {
+		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN usage_count INTEGER DEFAULT 0`)
 	}
 
 	// 安全兜底：检查 usage_frecency 表是否有 type 列（旧表迁移）

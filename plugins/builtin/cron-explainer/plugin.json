@@ -1,0 +1,47 @@
+{
+  "id": "com.quickdock.cron-explainer",
+  "name": "Crontab 解释器",
+  "version": "0.2.0",
+  "description": "解析 cron 表达式，显示人类可读描述、下次执行时间和可视化时间表",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 560,
+    "height": 480
+  },
+  "commands": [
+    {
+      "id": "explain-cron",
+      "title": "Crontab 解释器",
+      "keywords": [
+        "cron",
+        "crontab",
+        "schedule",
+        "定时",
+        "job"
+      ],
+      "aliases": [
+        "cron表达式",
+        "定时任务",
+        "crond",
+        "计划任务"
+      ],
+      "matchPattern": "^\\s*\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s*$",
+      "prefix": "/cron"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
+}

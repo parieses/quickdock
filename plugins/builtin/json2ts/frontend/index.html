@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSON ↔ TypeScript / Go</title>
+<link rel="stylesheet" href="../common.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <button class="p-btn p-btn-primary" id="btnConvert">▶ 转换</button>
+    <div class="p-btn-group">
+      <button class="p-btn p-btn-toggle active" id="btnTs" data-type="typescript">TypeScript</button>
+      <button class="p-btn p-btn-toggle" id="btnGo" data-type="go">Go Struct</button>
+    </div>
+    <span class="p-spacer"></span>
+    <button class="p-btn" id="btnCopy" title="复制结果">📋 复制</button>
+    <button class="p-btn" id="btnClear" title="清空">✕ 清空</button>
+  </div>
+
+  <div class="p-body">
+    <div class="p-pane">
+      <div class="p-pane-header">JSON 输入</div>
+      <textarea id="inputArea" class="p-textarea p-textarea-input" placeholder='{"name": "张三", "age": 25, "tags": ["dev"]}' spellcheck="false"></textarea>
+    </div>
+    <div class="p-pane">
+      <div class="p-pane-header" id="outputLabel">TypeScript 输出</div>
+      <textarea id="outputArea" class="p-textarea p-textarea-output" readonly placeholder="转换结果会显示在这里…" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <div class="p-statusbar" id="statusBar">
+    <span id="statusText">等待输入…</span>
+  </div>
+</div>
+<script src="app.js"></script>
+</body>
+</html>

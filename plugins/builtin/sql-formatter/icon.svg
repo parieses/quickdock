@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect x="5" y="5" width="38" height="38" rx="6" fill="#28c864" opacity="0.12"/>
+  <rect x="5" y="5" width="38" height="38" rx="6" stroke="#28c864" stroke-width="1.8"/>
+  <text x="24" y="17" text-anchor="middle" font-size="6" fill="#28c864" font-family="monospace" font-weight="bold">SELECT</text>
+  <line x1="10" y1="22" x2="38" y2="22" stroke="#28c864" stroke-width="1" opacity="0.3"/>
+  <text x="24" y="31" text-anchor="middle" font-size="6" fill="#28c864" font-family="monospace">FROM</text>
+  <text x="24" y="40" text-anchor="middle" font-size="6" fill="#28c864" font-family="monospace">WHERE</text>
+</svg>

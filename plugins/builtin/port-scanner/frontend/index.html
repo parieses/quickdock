@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>端口检查器</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-check{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.p-check .p-input{width:100px;font-family:var(--font-mono);font-size:13px}
+.p-result{margin:0 10px;padding:6px 10px;border-radius:var(--radius);font-size:12px;flex-shrink:0}
+.p-free{background:rgba(40,200,100,.12);color:var(--success)}
+.p-inuse{background:rgba(226,75,74,.12);color:var(--danger)}
+.p-list{flex:1;overflow-y:auto}
+.p-item{display:flex;align-items:center;gap:8px;padding:4px 10px;border-bottom:1px solid var(--border);min-height:28px;font-size:12px}
+.p-item:hover{background:var(--bg-hover)}
+.p-port{font-family:var(--font-mono);color:var(--accent);min-width:60px}
+.p-proto{color:var(--text-muted);min-width:30px}
+.p-pid{font-family:var(--font-mono);color:var(--text-secondary);min-width:50px}
+.p-name{color:var(--text-primary);flex:1}
+.p-state{font-size:10px;padding:1px 6px;border-radius:4px;background:rgba(40,200,100,.12);color:var(--success)}
+.p-count{font-size:11px;color:var(--text-muted)}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <button class="p-btn p-btn-primary" id="btnRefresh">↻ 刷新列表</button>
+    <span class="p-muted" id="countLabel">0 个端口</span>
+    <span class="p-spacer"></span>
+    <button class="p-btn" id="btnKill">🔪 结束进程</button>
+  </div>
+  <div class="p-check">
+    <span class="p-label">检查端口：</span>
+    <input type="text" class="p-input" id="portInput" placeholder="如 8080" spellcheck="false">
+    <button class="p-btn" id="btnCheck">检查</button>
+    <span id="checkResult" class="p-result" style="display:none"></span>
+  </div>
+  <div class="p-list" id="portList"><div class="p-empty">点击刷新加载端口列表</div></div>
+</div>
+<script>
+var cmdQueue=[],cmdRunning=false,netstatData=[]
+function $(id){return document.getElementById(id)}
+function pluginExec(cmd,data){return new Promise(function(resolve,reject){cmdQueue.push({cmd:cmd,data:data||{},resolve:resolve,reject:reject});if(!cmdRunning)nextCmd()})}
+function nextCmd(){if(cmdQueue.length===0){cmdRunning=false;return}cmdRunning=true;var task=cmdQueue.shift(),timer=setTimeout(function(){window.removeEventListener('message',handler);cmdRunning=false;task.reject(new Error('响应超时，请检查插件状态'))},12000);window.parent.postMessage({type:'plugin:execute',id:Date.now(),command:task.cmd,input:{text:JSON.stringify(task.data)}},'*');var handler=function(e){if(e.data&&e.data.type==='plugin:result'){clearTimeout(timer);window.removeEventListener('message',handler);if(e.data.error){task.reject(new Error(e.data.error))}else{task.resolve(e.data.data)}setTimeout(nextCmd,50)}};window.addEventListener('message',handler)}
+function refreshPorts(){var list=$('portList');list.innerHTML='<div class="p-empty">扫描中…</div>';pluginExec('port-list',{}).then(function(data){try{var obj=typeof data==='string'?JSON.parse(data):data;netstatData=obj.ports||obj||[];renderPorts(netstatData)}catch(e){netstatData=[];list.innerHTML='<div class="p-empty">解析失败: '+e.message+'</div>'}}).catch(function(e){netstatData=[];list.innerHTML='<div class="p-empty">扫描失败: '+e.message+'</div>'})}
+function renderPorts(ports){var list=$('portList'),count=$('countLabel');if(!ports||ports.length===0){list.innerHTML='<div class="p-empty">没有找到监听端口</div>';count.textContent='0 个端口';return}
+count.textContent=ports.length+' 个端口';list.innerHTML=ports.map(function(p){return'<div class="p-item" data-pid="'+(p.pid||'')+'"><span class="p-port">'+p.port+'</span><span class="p-proto">'+(p.protocol||'')+'</span><span class="p-pid">'+(p.pid||'-')+'</span><span class="p-name">'+(p.process||p.name||'')+'</span><span class="p-state">'+(p.state||'LISTENING')+'</span></div>'}).join('')}
+function checkPort(){var port=$('portInput').value.trim(),result=$('checkResult');if(!port){result.style.display='none';return}
+result.style.display='flex'
+if(!netstatData||netstatData.length===0){result.className='p-result p-free';result.textContent='端口 '+port+' — 数据加载中，先点击刷新...';refreshPorts();return}
+var found=netstatData.some(function(p){return String(p.port)===port||String(p.port)===String(parseInt(port))})
+if(found){result.className='p-result p-inuse';result.textContent='端口 '+port+' — 已被占用'}else{result.className='p-result p-free';result.textContent='端口 '+port+' — 可用'}}
+$('btnRefresh').addEventListener('click',refreshPorts)
+$('btnCheck').addEventListener('click',checkPort)
+$('portInput').addEventListener('keydown',function(e){if(e.key==='Enter')checkPort()})
+$('btnKill').addEventListener('click',function(){var sel=document.querySelector('.p-item.selected');if(sel){var pid=sel.dataset.pid;if(pid&&confirm('确定结束 PID '+pid+' 的进程？')){pluginExec('port-kill',{pid:pid}).then(function(){refreshPorts()}).catch(function(e){alert('结束失败: '+e.message)})}}else{alert('请先点击选择一个端口')}})
+document.addEventListener('click',function(e){document.querySelectorAll('.p-item').forEach(function(el){el.classList.toggle('selected',el===e.target.closest('.p-item'))})})
+window.addEventListener('message',function(e){if(e.data&&e.data.type==='plugin:init'){refreshPorts();if(e.data.data&&e.data.data.text){var m=e.data.data.text.match(/(\d+)/);if(m){$('portInput').value=m[1];checkPort()}}}})
+if(!window.parent)setTimeout(refreshPorts,500) // fallback
+</script>
+</body>
+</html>

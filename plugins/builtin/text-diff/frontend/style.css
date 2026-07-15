@@ -1,0 +1,37 @@
+/* Diff 文本对比 — 使用 common.css 主题变量 */
+body{font-family:var(--font);font-size:13px;background:var(--bg-primary);color:var(--text-primary);height:100vh;overflow:hidden}
+.td-app{display:flex;flex-direction:column;height:100vh}
+.td-toolbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.td-btn{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:background .1s}
+.td-btn:hover{background:var(--bg-hover)}
+.td-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.td-btn-primary:hover{background:var(--accent-hover)}
+.td-sep{width:1px;height:20px;background:var(--border);margin:0 4px;flex-shrink:0}
+.td-opt{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--text-secondary);cursor:pointer}
+.td-opt input{accent-color:var(--accent)}
+.td-spacer{flex:1}
+.td-stats{font-size:12px;color:var(--text-muted);white-space:nowrap}
+.td-editors{display:flex;flex:1;min-height:0;gap:1px}
+.td-pane{display:flex;flex-direction:column;flex:1;min-width:0;background:var(--bg-secondary)}
+.td-pane-header{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;flex-shrink:0;font-size:11px;color:var(--text-muted);background:var(--bg-secondary);border-bottom:1px solid var(--border)}
+.td-linecount{color:var(--text-disabled);font-size:11px}
+.td-textarea{flex:1;resize:none;padding:10px;border:none;outline:none;background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;line-height:1.5;tab-size:2}
+.td-textarea::placeholder{color:var(--text-placeholder)}
+.td-result{flex-shrink:0;max-height:45vh;display:flex;flex-direction:column;border-top:1px solid var(--border)}
+.td-result-header{display:flex;align-items:center;gap:8px;padding:6px 10px;font-size:12px;font-weight:500;color:var(--text-secondary);background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.td-result-stats{font-weight:400;color:var(--text-muted);font-size:11px}
+.td-diff-output{flex:1;overflow:auto;padding:6px 0;background:var(--bg-primary);font-family:var(--font-mono);font-size:12px;line-height:1.6}
+.diff-line{display:flex;align-items:center;padding:0 10px;min-height:24px;white-space:pre;font-family:var(--font-mono);font-size:12px}
+.diff-add{background:rgba(40,200,100,0.15);border-left:3px solid var(--success)}
+.diff-add .diff-marker{color:var(--success)}
+.diff-del{background:rgba(226,75,74,0.15);border-left:3px solid var(--danger)}
+.diff-del .diff-marker{color:var(--danger)}
+.diff-mod{background:rgba(74,158,255,0.12);border-left:3px solid var(--accent)}
+.diff-mod .diff-marker{color:var(--accent)}
+.diff-eq{color:var(--text-muted);border-left:3px solid transparent}
+.diff-eq .diff-marker{color:var(--text-disabled)}
+.diff-linenum{display:inline-block;min-width:36px;color:var(--text-disabled);text-align:right;margin-right:8px;user-select:none}
+.diff-marker{display:inline-block;width:14px;font-weight:700;user-select:none}
+.diff-text{white-space:pre-wrap;word-break:break-all}
+.diff-char-add{background:rgba(40,200,100,0.3);border-radius:2px}
+.diff-char-del{background:rgba(226,75,74,0.3);border-radius:2px}

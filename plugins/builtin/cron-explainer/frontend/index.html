@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Crontab 解释器</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-app{display:flex;flex-direction:column;height:100vh;padding:10px;gap:8px}
+.p-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px}
+.p-row{display:flex;gap:8px}
+.p-input{flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none}
+.p-input:focus{border-color:var(--accent)}.p-input::placeholder{color:var(--text-placeholder)}
+.p-btn{height:32px;padding:0 14px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-size:12px;cursor:pointer}
+.p-btn:hover{background:var(--bg-hover)}
+.p-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.p-btn-primary:hover{background:var(--accent-hover)}
+.p-output{flex:1;overflow:auto;background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius);padding:10px;font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre-wrap;color:var(--text-primary)}
+.p-vis{display:flex;flex-wrap:wrap;gap:2px;margin-top:4px}
+.p-vis-bar{display:flex;align-items:center;gap:2px;font-size:11px;font-family:var(--font-mono);padding:1px 0}
+.p-vis-dot{width:10px;height:10px;border-radius:2px;flex-shrink:0}
+.p-vis-active{background:var(--accent)}
+.p-vis-inactive{background:var(--bg-tertiary)}
+.p-next{margin-top:4px;color:var(--text-secondary)}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-label">Cron 表达式</div>
+  <div class="p-row">
+    <input type="text" id="inputField" class="p-input" placeholder="*/5 * * * *" spellcheck="false" autofocus>
+    <button class="p-btn p-btn-primary" id="btnExplain">解释</button>
+  </div>
+  <div class="p-label">解释结果</div>
+  <div class="p-output" id="output">
+    <span style="color:var(--text-muted)">输入 cron 表达式查看解释…</span>
+  </div>
+</div>
+<script>
+(function(){
+  var input=document.getElementById('inputField'),output=document.getElementById('output')
+  var btn=document.getElementById('btnExplain')
+  btn.addEventListener('click',explain);input.addEventListener('keydown',function(e){if(e.key==='Enter')explain()})
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')input.focus()})
+  function explain(){
+    var text=input.value.trim().replace(/^\/cron\s+/,'')
+    if(!text){output.innerHTML='<span style="color:var(--text-muted)">输入 cron 表达式</span>';return}
+    var parts=text.split(/\s+/)
+    if(parts.length!==5){output.innerHTML='<span style="color:var(--danger)">需要 5 段（分 时 日 月 周）</span>';return}
+    var fields={minute:parts[0],hour:parts[1],dom:parts[2],month:parts[3],dow:parts[4]}
+    var desc=describe(fields)
+    var nextRuns=computeNext(fields,5)
+    var hours=expandField(fields.hour,0,23)
+    var html=''
+    html+='<div style="color:var(--accent);font-weight:500;margin-bottom:6px">📋 '+desc+'</div>'
+    html+='<div style="color:var(--text-muted);margin-bottom:4px">字段分解:</div>'
+    html+='<div>分 (0-59): <span style="color:var(--text-primary)">'+fields.minute+'</span></div>'
+    html+='<div>时 (0-23): <span style="color:var(--text-primary)">'+fields.hour+'</span></div>'
+    html+='<div>日 (1-31): <span style="color:var(--text-primary)">'+fields.dom+'</span></div>'
+    html+='<div>月 (1-12): <span style="color:var(--text-primary)">'+fields.month+'</span></div>'
+    html+='<div>周 (0-7): <span style="color:var(--text-primary)">'+fields.dow+'</span></div>'
+    html+='<div style="color:var(--text-muted);margin:6px 0 4px">⏰ 下次执行:</div>'
+    for(var i=0;i<nextRuns.length;i++)html+='<div style="color:var(--text-primary)">  '+(i+1)+'. '+nextRuns[i]+'</div>'
+    if(hours&&hours.length<12){
+      html+='<div style="color:var(--text-muted);margin:6px 0 4px">📊 小时分布:</div>'
+      for(var h=0;h<24;h++){
+        var active=hours.indexOf(h)>=0
+        html+='<div class="p-vis-bar"><span style="color:var(--text-muted);min-width:24px;text-align:right">'+(h<10?'0':'')+h+'</span>'+
+          '<span class="p-vis-dot '+(active?'p-vis-active':'p-vis-inactive')+'"></span></div>'
+      }
+    }
+    output.innerHTML=html
+  }
+  function describe(f){
+    var parts=[]
+    if(f.dow!=='*') parts.push('星期'+describeSimple(f.dow,['日','一','二','三','四','五','六','日']))
+    if(f.month!=='*') parts.push(describeSimple(f.month,['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月']))
+    if(f.dom!=='*') parts.push('每月'+describeSimple(f.dom,null)+'号')
+    if(f.hour!=='*'&&f.minute!=='*') parts.push(describeSimple(f.hour,null)+'点'+describeSimple(f.minute,null)+'分')
+    else if(f.hour!=='*') parts.push(describeSimple(f.hour,null)+'点')
+    else if(f.minute!=='*') parts.push('每小时的'+describeSimple(f.minute,null)+'分')
+    return parts.length?parts.join('，'):'每分钟执行一次'
+  }
+  function describeSimple(val,labels){
+    var res=[],parts=val.split(',')
+    for(var i=0;i<parts.length;i++){
+      var p=parts[i].trim()
+      if(p.indexOf('/')>=0){var sp=p.split('/');res.push(sp[0]==='*'?'每隔'+sp[1]:sp[0]+'起每'+sp[1])}
+      else if(p.indexOf('-')>=0){var dp=p.split('-');res.push((labels?labels[+dp[0]]:dp[0])+'-'+(labels?labels[+dp[1]]:dp[1]))}
+      else res.push(labels?labels[+p]:p)
+    }
+    return res.join('、')
+  }
+  function expandField(val,min,max){
+    if(val==='*')return null
+    var result=[],parts=val.split(',')
+    for(var i=0;i<parts.length;i++){
+      var p=parts[i].trim(),step=1,rs=min,re=max
+      var si=p.indexOf('/');if(si>=0){step=+p.slice(si+1);p=p.slice(0,si)}
+      if(p==='*'){for(var v=min;v<=max;v+=step)result.push(v);continue}
+      var di=p.indexOf('-');if(di>=0){rs=+p.slice(0,di);re=+p.slice(di+1)}else rs=re=+p
+      for(var vv=rs;vv<=re;vv+=step)result.push(vv)
+    }
+    return result
+  }
+  function computeNext(f,count){
+    var now=new Date(),results=[],current=new Date(now);current.setSeconds(0,0)
+    var mins=expandField(f.minute,0,59),hours=expandField(f.hour,0,23)
+    var doms=expandField(f.dom,1,31),months=expandField(f.month,1,12),dows=expandField(f.dow,0,7)
+    var dw={};if(dows)for(var di=0;di<dows.length;di++)dw[dows[di]]=true
+    var att=0;while(results.length<count&&att<10000){
+      att++;var cm=current.getMonth()+1,cd=current.getDate(),ch=current.getHours(),cmin=current.getMinutes()
+      var mOk=!months||months.indexOf(cm)>=0,dOk=!doms||doms.indexOf(cd)>=0
+      var wOk=Object.keys(dw).length===0||dw[current.getDay()]
+      if(mOk&&dOk&&wOk){if(!hours||hours.indexOf(ch)>=0){if(!mins||mins.indexOf(cmin)>=0){results.push(fmt(current));current.setMinutes(cmin+1);continue}current.setMinutes(cmin+1);continue}current.setHours(ch+1,0,0,0);continue}
+      current.setDate(cd+1);current.setHours(0,0,0,0)
+    }
+    return results.length?results:['无法计算（请检查表达式）']
+  }
+  function fmt(d){var p=function(n){return n<10?'0'+n:''+n};return d.getFullYear()+'-'+p(d.getMonth()+1)+'-'+p(d.getDate())+' '+p(d.getHours())+':'+p(d.getMinutes())}
+  input.focus()
+})()
+</script>
+</body>
+</html>

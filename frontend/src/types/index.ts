@@ -151,7 +151,9 @@ export interface PluginInfo {
   version: string
   description?: string
   author?: string
+  category?: string
   status: string
   hasFrontend: boolean
+  usageCount: number
   commands: PluginCommand[]
 }

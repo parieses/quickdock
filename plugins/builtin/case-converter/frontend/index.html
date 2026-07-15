@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>变量命名转换</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-app{display:flex;flex-direction:column;height:100vh;padding:10px;gap:8px}
+.p-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px}
+.p-input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;transition:border-color .15s}
+.p-input:focus{border-color:var(--accent)}.p-input::placeholder{color:var(--text-placeholder)}
+.p-results{flex:1;overflow:auto;display:flex;flex-direction:column;gap:4px;padding:4px 0}
+.p-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:var(--radius-sm);background:var(--bg-secondary);min-height:32px;transition:background .1s}
+.p-row:hover{background:var(--bg-hover)}
+.p-row-label{font-size:12px;color:var(--text-muted,#888);min-width:100px;flex-shrink:0;font-family:var(--font-mono)}
+.p-row-value{font-size:13px;color:var(--text-primary);font-family:var(--font-mono);word-break:break-all}
+.p-row-active .p-row-label{color:var(--accent)}
+.p-row-active .p-row-value{color:#fff;font-weight:500}
+.p-badge{font-size:10px;padding:1px 5px;border-radius:3px;background:var(--accent);color:#fff;margin-left:auto;flex-shrink:0}
+.p-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted,#888);font-size:13px}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-label">输入变量名</div>
+  <input type="text" id="inputField" class="p-input" placeholder="例如: user_name 或 userName" spellcheck="false" autofocus>
+  <div class="p-label" style="margin-top:4px">所有命名风格</div>
+  <div class="p-results" id="results"></div>
+</div>
+<script>
+(function(){
+  var input=document.getElementById('inputField'), results=document.getElementById('results')
+  input.addEventListener('input',convert)
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')input.focus()})
+  function convert(){
+    var text=input.value.trim()
+    if(!text){results.innerHTML='<div class="p-empty">输入变量名自动转换</div>';return}
+    text=text.replace(/^['"`]|['"`]$/g,'')
+    var words=tokenize(text)
+    if(!words||words.length===0){results.innerHTML='<div class="p-empty">无法识别命名风格</div>';return}
+    var items=[
+      {label:'camelCase',value:toCamel(words)},
+      {label:'PascalCase',value:toPascal(words)},
+      {label:'snake_case',value:toSnake(words)},
+      {label:'kebab-case',value:toKebab(words)},
+      {label:'UPPER_CASE',value:toUpper(words)},
+      {label:'camel_Snake',value:toCamelSnake(words)},
+      {label:'Train-Case',value:toTrain(words)},
+      {label:'dot.case',value:toDot(words)}
+    ]
+    var detected=detectStyle(text)
+    var html=''
+    for(var i=0;i<items.length;i++){
+      var isActive=detectStyle(items[i].value)===detected
+      html+='<div class="p-row'+(isActive?' p-row-active':'')+'">'+
+        '<span class="p-row-label">'+items[i].label+'</span>'+
+        '<span class="p-row-value">'+esc(items[i].value)+'</span>'+
+        (isActive?'<span class="p-badge">原始</span>':'')+'</div>'
+    }
+    results.innerHTML=html
+  }
+  function tokenize(str){
+    if(/[_-]/.test(str)) return str.split(/[_-]+/).filter(function(w){return w.length>0}).map(function(w){return w.toLowerCase()})
+    var parts=[],buf=''
+    for(var i=0;i<str.length;i++){
+      var ch=str[i]
+      if(ch>='A'&&ch<='Z'){
+        if(buf.length>0){parts.push(buf.toLowerCase());buf=''}
+        var j=i;while(j<str.length&&str[j]>='A'&&str[j]<='Z')j++
+        if(j-i>1&&j<str.length){parts.push(str.substring(i,j-1).toLowerCase());i=j-2;continue}
+        buf=ch
+      }else if(ch==='-'||ch==='_'){if(buf.length>0){parts.push(buf.toLowerCase());buf=''}}
+      else{buf+=ch}
+    }
+    if(buf.length>0)parts.push(buf.toLowerCase())
+    return parts
+  }
+  function toCamel(w){var s=w[0];for(var i=1;i<w.length;i++)s+=w[i].charAt(0).toUpperCase()+w[i].slice(1);return s}
+  function toPascal(w){var s='';for(var i=0;i<w.length;i++)s+=w[i].charAt(0).toUpperCase()+w[i].slice(1);return s}
+  function toSnake(w){return w.join('_')}
+  function toKebab(w){return w.join('-')}
+  function toUpper(w){var s='';for(var i=0;i<w.length;i++){if(i>0)s+='_';s+=w[i].toUpperCase()}return s}
+  function toCamelSnake(w){var s=w[0];for(var i=1;i<w.length;i++)s+='_'+w[i].charAt(0).toUpperCase()+w[i].slice(1);return s}
+  function toTrain(w){var s='';for(var i=0;i<w.length;i++){if(i>0)s+='-';s+=w[i].charAt(0).toUpperCase()+w[i].slice(1)}return s}
+  function toDot(w){return w.join('.')}
+  function detectStyle(str){
+    if(/^[a-z]+_[a-z]+/.test(str)) return 'snake_case'
+    if(/^[a-z]+-[a-z]+/.test(str)) return 'kebab-case'
+    if(/^[A-Z]+_[A-Z]+/.test(str)) return 'UPPER_CASE'
+    if(/^[a-z]+[A-Z]/.test(str)) return 'camelCase'
+    if(/^[A-Z][a-z]+[A-Z]/.test(str)) return 'PascalCase'
+    if(/^[A-Z][a-z]+-[A-Z]/.test(str)) return 'Train-Case'
+    return ''
+  }
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
+})()
+</script>
+</body>
+</html>

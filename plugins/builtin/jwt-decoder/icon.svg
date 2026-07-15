@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect x="5" y="4" width="38" height="40" rx="6" fill="#f59e0b" opacity="0.12"/>
+  <rect x="5" y="4" width="38" height="40" rx="6" stroke="#f59e0b" stroke-width="1.8"/>
+  <!-- Token 三段式 -->
+  <rect x="8" y="8" width="32" height="6" rx="2" fill="#f59e0b" opacity="0.15"/>
+  <rect x="8" y="8" width="32" height="6" rx="2" stroke="#f59e0b" stroke-width="1.2" opacity="0.5"/>
+  <!-- header 填充 -->
+  <rect x="10" y="9.5" width="8" height="3" rx="1" fill="#f59e0b" opacity="0.5"/>
+  <!-- payload 填充 -->
+  <rect x="20" y="9.5" width="12" height="3" rx="1" fill="#f59e0b" opacity="0.3"/>
+  <!-- signature 填充 -->
+  <rect x="29" y="9.5" width="9" height="3" rx="1" fill="#f59e0b" opacity="0.2"/>
+  <!-- 分隔点 -->
+  <circle cx="19" cy="11" r="0.8" fill="#f59e0b" opacity="0.6"/>
+  <circle cx="28" cy="11" r="0.8" fill="#f59e0b" opacity="0.6"/>
+  <!-- 解码结果 -->
+  <rect x="8" y="18" width="32" height="3" rx="1" fill="#f59e0b" opacity="0.2"/>
+  <rect x="8" y="24" width="28" height="3" rx="1" fill="#f59e0b" opacity="0.15"/>
+  <rect x="8" y="30" width="32" height="3" rx="1" fill="#f59e0b" opacity="0.2"/>
+  <rect x="8" y="36" width="18" height="3" rx="1" fill="#f59e0b" opacity="0.15"/>
+  <!-- 时间标记 -->
+  <circle cx="34" cy="37" r="3" fill="none" stroke="#f59e0b" stroke-width="1.2" opacity="0.6"/>
+  <path d="M34 35.5 V37.5 L36 38.5" stroke="#f59e0b" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/>
+</svg>

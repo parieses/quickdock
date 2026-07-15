@@ -1,0 +1,65 @@
+{
+  "id": "com.quickdock.json2ts",
+  "name": "JSON ↔ TypeScript / Go",
+  "version": "0.2.0",
+  "description": "JSON 粘贴 → 生成 TypeScript interface 或 Go Struct（带 json tag），支持嵌套对象和数组",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 680,
+    "height": 540
+  },
+  "commands": [
+    {
+      "id": "json-to-ts",
+      "title": "JSON → TypeScript",
+      "keywords": [
+        "json",
+        "typescript",
+        "interface",
+        "type",
+        "convert"
+      ],
+      "aliases": [
+        "json转ts",
+        "json2ts",
+        "ts类型",
+        "ts定义"
+      ],
+      "matchPattern": "^\\{[^]*\\}$|^\\[[^]*\\]$",
+      "prefix": "/ts"
+    },
+    {
+      "id": "json-to-go",
+      "title": "JSON → Go Struct",
+      "keywords": [
+        "json",
+        "golang",
+        "struct",
+        "convert",
+        "go"
+      ],
+      "aliases": [
+        "json转go",
+        "json2go",
+        "go结构体",
+        "go struct"
+      ],
+      "prefix": "/go"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
+}

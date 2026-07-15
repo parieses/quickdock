@@ -2,11 +2,13 @@ package main
 
 import (
 	"embed"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 
 	"quickdock/internal/db"
@@ -64,6 +66,7 @@ func main() {
 	pluginMgr := plugin.NewManager(pluginsDir)
 	appService.PluginMgr = pluginMgr
 	appService.PluginHotkeys = services.NewPluginHotkeyRegistry()
+	appService.PluginsDir = pluginsDir
 
 	// 注入内置插件自动安装回调（在 ServiceStartup DB 就绪后执行）
 	appService.InstallBuiltinPluginsFn = func(mgr *plugin.Manager, database *db.Database) {
@@ -92,6 +95,9 @@ func main() {
 
 	// 传入 App 引用给 AppService
 	appService.SetApp(app)
+
+	// 创建插件窗口管理器（需要 app 引用，只能放在 New 之后）
+	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app)
 
 	// 创建主窗口
 	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
@@ -138,8 +144,11 @@ func main() {
 		// 不调用 log.Fatal，确保下面的 ShutdownAll 执行
 	}
 
-	// 应用退出时停止所有插件并清理 PID 文件
+	// 应用退出时停止所有插件、清理 PID 文件、关闭所有插件窗口
 	pluginMgr.ShutdownAll()
+	if appService.PluginWindowMgr != nil {
+		appService.PluginWindowMgr.CloseAll()
+	}
 }
 
 // autoInstallBuiltins 提取内置插件到 ~/.quickdock/plugins/（启动时自动执行）
@@ -149,21 +158,25 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 		fmt.Println("QuickDock: 读取内置插件目录失败:", err)
 		return
 	}
+
+	// 确保 builtin 共享目录存在，提取 common.css（所有插件共享的主题样式）
+	builtinDir := filepath.Join(mgr.PluginsDir(), "builtin")
+	os.MkdirAll(builtinDir, 0755)
+	commonCSSData, err := builtinFS.ReadFile("plugins/builtin/common.css")
+	if err == nil {
+		os.WriteFile(filepath.Join(builtinDir, "common.css"), commonCSSData, 0644)
+	} else {
+		fmt.Println("QuickDock: 读取 common.css 失败:", err)
+	}
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		pluginID := entry.Name()
-
-		// 检查是否已安装（已安装则先删除旧版本，确保内置插件始终最新）
 		targetDir := filepath.Join(mgr.PluginsDir(), pluginID)
-		if _, err := os.Stat(targetDir); err == nil {
-			// 先卸载旧插件（停止进程、释放文件句柄）
-			mgr.UnloadPlugin(pluginID)
-			os.RemoveAll(targetDir)
-		}
 
-		// 读取 plugin.json
+		// 先读取 embedded plugin.json 获取插件 ID（用于卸载旧实例）
 		manifestPath := path.Join("plugins/builtin", pluginID, "plugin.json")
 		data, err := builtinFS.ReadFile(manifestPath)
 		if err != nil {
@@ -177,6 +190,14 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			continue
 		}
 
+		// 检查是否已安装
+		if _, err := os.Stat(targetDir); err == nil {
+			// 用 manifest.ID 卸载旧实例（兼容不同 ID 格式）
+			mgr.UnloadPlugin(pluginID)      // 也按目录名尝试卸载
+			mgr.UnloadPlugin(mf.ID)         // 按新 ID 卸载
+			os.RemoveAll(targetDir)
+		}
+
 		// 创建目标目录
 		os.MkdirAll(targetDir, 0755)
 
@@ -188,14 +209,30 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			continue
 		}
 
-		// 写入数据库记录（含 capabilities / permissions / category）
+		// 读取图标
+		iconData := ""
+		if mf.Icon != "" {
+			iconPath := filepath.Join(targetDir, mf.Icon)
+			if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
+				ext := strings.ToLower(filepath.Ext(mf.Icon))
+				mime := "image/svg+xml"
+				if ext == ".png" {
+					mime = "image/png"
+				} else if ext == ".ico" {
+					mime = "image/x-icon"
+				}
+				iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
+			}
+		}
+
+		// 写入数据库记录（含 capabilities / permissions / category / icon）
 		perms := make(map[string]interface{})
 		if mf.Permissions.Network || mf.Permissions.Filesystem || mf.Permissions.Clipboard {
 			perms["network"] = mf.Permissions.Network
 			perms["filesystem"] = mf.Permissions.Filesystem
 			perms["clipboard"] = mf.Permissions.Clipboard
 		}
-		if err := database.InsertPluginFull(mf.ID, mf.Name, mf.Version, mf.Author, mf.Description, mf.Category, mf.Capabilities, perms); err != nil {
+		if err := database.InsertPluginFull(mf.ID, mf.Name, mf.Version, mf.Author, mf.Description, mf.Category, iconData, mf.Capabilities, perms); err != nil {
 			fmt.Printf("QuickDock: 内置插件 %s 写入数据库失败: %v\n", pluginID, err)
 		}
 

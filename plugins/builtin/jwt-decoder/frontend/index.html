@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JWT 解码器</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-app{display:flex;flex-direction:column;height:100vh}
+.p-toolbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.p-label{font-size:12px;color:var(--text-secondary);white-space:nowrap}
+.p-input{flex:1;height:28px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:var(--font-mono);outline:none;transition:border-color .15s}
+.p-input:focus{border-color:var(--accent)}
+.p-input::placeholder{color:var(--text-placeholder)}
+.p-btn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:background .1s,border-color .1s}
+.p-btn:hover{background:var(--bg-hover);border-color:#3a3a3a}
+.p-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.p-btn-primary:hover{background:#3a8ae0}
+.p-body{flex:1;display:flex;overflow:hidden;padding:8px;gap:8px}
+.p-pane{flex:1;display:flex;flex-direction:column;background:var(--bg-secondary);border-radius:var(--radius);overflow:hidden}
+.p-pane-header{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;font-size:11px;color:var(--text-muted);background:var(--bg-tertiary);border-bottom:1px solid var(--border);flex-shrink:0}
+.p-code{flex:1;overflow:auto;padding:10px;font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;color:var(--text-primary)}
+.p-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted);font-size:13px}
+.p-info-bar{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-top:1px solid var(--border);flex-shrink:0;font-size:12px;flex-wrap:wrap}
+.info-tag{display:inline-flex;align-items:center;gap:4px;padding:2px 6px;border-radius:4px;font-size:11px}
+.info-ok{background:rgba(40,200,100,0.12);color:#28c864}
+.info-warn{background:rgba(226,75,74,0.12);color:#e24b4a}
+.info-neutral{background:rgba(74,158,255,0.12);color:#4a9eff}
+.p-error{display:flex;align-items:center;justify-content:center;gap:6px;padding:10px;color:#e24b4a;font-size:13px;background:rgba(226,75,74,0.08);border-top:1px solid var(--border)}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <span class="p-label">JWT Token</span>
+    <input type="text" id="tokenInput" class="p-input" placeholder="粘贴 eyJxxx.eyJxxx.xxx 或输入完整 token" spellcheck="false">
+    <button class="p-btn p-btn-primary" onclick="decode()">解码</button>
+    <button class="p-btn" onclick="clearAll()">清空</button>
+  </div>
+  <div class="p-body">
+    <div class="p-pane">
+      <div class="p-pane-header"><span>Header</span></div>
+      <pre id="headerOutput" class="p-code"><div class="p-empty">等待解码...</div></pre>
+    </div>
+    <div class="p-pane">
+      <div class="p-pane-header"><span>Payload</span></div>
+      <pre id="payloadOutput" class="p-code"><div class="p-empty">等待解码...</div></pre>
+    </div>
+  </div>
+  <div id="infoBar" class="p-info-bar"></div>
+  <div id="errorBar" class="p-error" style="display:none"></div>
+</div>
+<script>
+function $(id){return document.getElementById(id)}
+function decode() {
+  var input = $('tokenInput').value.trim()
+  $('errorBar').style.display = 'none'
+  if (!input) { showError('请输入 JWT Token'); return }
+
+  var match = input.match(/(eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)/)
+  var token = match ? match[1] : input
+  var parts = token.split('.')
+  if (parts.length !== 3) { showError('无效的 JWT Token，需要 3 段 (header.payload.signature)'); return }
+
+  try {
+    var header = JSON.parse(b64UrlDecode(parts[0]))
+    var payload = JSON.parse(b64UrlDecode(parts[1]))
+    $('headerOutput').textContent = JSON.stringify(header, null, 2)
+    $('payloadOutput').textContent = JSON.stringify(payload, null, 2)
+    showInfo(payload)
+    parent.postMessage({type:'plugin:copied', data:{text:JSON.stringify({header,payload},null,2)}}, '*')
+  } catch(e) {
+    showError('解码失败: ' + e.message)
+  }
+}
+
+function b64UrlDecode(str) {
+  var s = str.replace(/-/g, '+').replace(/_/g, '/')
+  while (s.length % 4) s += '='
+  return decodeURIComponent(escape(atob(s)))
+}
+
+function showInfo(payload) {
+  var bar = $('infoBar')
+  var html = ''
+  if (payload.exp !== undefined) {
+    var expDate = new Date(payload.exp * 1000)
+    var now = Date.now() / 1000
+    var expired = payload.exp < now
+    var cls = expired ? 'info-warn' : 'info-ok'
+    var label = expired ? '已过期' : '有效'
+    html += '<span class="info-tag ' + cls + '">' + label + ' · 到期: ' + expDate.toLocaleString() + '</span>'
+  }
+  if (payload.iat !== undefined) {
+    var iatDate = new Date(payload.iat * 1000)
+    html += '<span class="info-tag info-neutral">签发: ' + iatDate.toLocaleString() + '</span>'
+  }
+  if (payload.sub) html += '<span class="info-tag info-neutral">Subject: ' + payload.sub + '</span>'
+  if (payload.iss) html += '<span class="info-tag info-neutral">Issuer: ' + payload.iss + '</span>'
+  bar.innerHTML = html || '<span class="info-tag info-neutral">无额外信息</span>'
+}
+
+function showError(msg) {
+  var bar = $('errorBar')
+  bar.textContent = '⚠ ' + msg
+  bar.style.display = 'flex'
+  $('headerOutput').innerHTML = '<div class="p-empty">解码失败</div>'
+  $('payloadOutput').innerHTML = '<div class="p-empty">解码失败</div>'
+  $('infoBar').innerHTML = ''
+}
+
+function clearAll() {
+  $('tokenInput').value = ''
+  $('errorBar').style.display = 'none'
+  $('headerOutput').innerHTML = '<div class="p-empty">等待解码...</div>'
+  $('payloadOutput').innerHTML = '<div class="p-empty">等待解码...</div>'
+  $('infoBar').innerHTML = ''
+}
+
+// Ctrl+Enter 触发解码
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') decode()
+})
+
+// 监听来自宿主的初始化消息
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'plugin:init' && e.data.data && e.data.data.text) {
+    $('tokenInput').value = e.data.data.text
+    decode()
+  }
+})
+</script>
+</body>
+</html>

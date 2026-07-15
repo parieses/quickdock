@@ -1,0 +1,145 @@
+/* 文件/图片对比 — 随 common.css 主题变量 */
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  background: var(--bg-primary, #1a1a1a);
+  color: var(--text-primary, #e0e0e0);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.fc-app {
+  display: flex; flex-direction: column;
+  height: 100vh; padding: 12px;
+  gap: 12px;
+}
+
+/* 双拖拽区 */
+.fc-zones {
+  display: flex; align-items: stretch; gap: 12px;
+  flex: 1; min-height: 0;
+}
+
+.fc-zone {
+  flex: 1;
+  display: flex; align-items: center; justify-content: center;
+  border: 2px dashed var(--border, #2a2a2a);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-secondary, #1e1e1e);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+  position: relative;
+  overflow: auto;
+  min-height: 160px;
+}
+.fc-zone:hover { background: var(--bg-tertiary, #242424); }
+.fc-zone.drag-over { border-color: var(--accent, #4a9eff); background: rgba(74, 158, 255, 0.08); }
+.fc-zone.has-file { border-style: solid; }
+
+.fc-vs {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; font-weight: 800;
+  color: var(--text-muted, #888);
+  padding: 0 4px;
+  user-select: none;
+}
+
+/* 拖入提示 */
+.fc-drop-hint {
+  text-align: center; color: var(--text-muted, #888);
+  pointer-events: none;
+}
+.fc-icon { font-size: 36px; margin-bottom: 8px; }
+.fc-text { font-size: 14px; color: var(--text-secondary, #999); margin-bottom: 4px; }
+.fc-sub { font-size: 11px; }
+
+/* 文件信息 */
+.fc-file-info {
+  width: 100%; padding: 12px;
+  font-size: 12px;
+}
+.fc-file-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  gap: 8px;
+}
+.fc-file-row:last-child { border-bottom: none; }
+.fc-file-label { color: var(--text-muted, #888); flex-shrink: 0; }
+.fc-file-value {
+  color: var(--text-primary, #e0e0e0);
+  text-align: right;
+  word-break: break-all;
+  font-family: var(--font-mono, 'Cascadia Code', monospace);
+  font-size: 11px;
+}
+.fc-preview-container {
+  margin-top: 8px;
+  display: flex; justify-content: center;
+  max-height: 120px; overflow: hidden;
+  border-radius: 4px;
+}
+.fc-preview-container img {
+  max-width: 100%; max-height: 120px;
+  object-fit: contain;
+  border-radius: 4px;
+}
+
+/* 对比结果 */
+.fc-result {
+  flex-shrink: 0;
+  max-height: 35vh;
+  border: 1px solid var(--border, #2a2a2a);
+  border-radius: var(--radius, 8px);
+  background: var(--bg-secondary, #1e1e1e);
+  overflow: hidden;
+}
+.fc-result-header {
+  padding: 8px 12px;
+  font-size: 12px; font-weight: 500;
+  color: var(--text-secondary, #999);
+  background: var(--bg-tertiary, #242424);
+  border-bottom: 1px solid var(--border, #2a2a2a);
+}
+.fc-result-body {
+  padding: 8px 12px;
+  font-size: 12px; line-height: 1.6;
+  overflow: auto;
+  max-height: 30vh;
+}
+.fc-diff-item {
+  display: flex; justify-content: space-between;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  gap: 8px;
+}
+.fc-diff-item:last-child { border-bottom: none; }
+.fc-diff-label { color: var(--text-muted, #888); flex-shrink: 0; min-width: 70px; }
+.fc-diff-value { color: var(--text-primary, #e0e0e0); text-align: right; }
+.fc-diff-match { color: var(--success, #28c864); }
+.fc-diff-mismatch { color: var(--danger, #e24b4a); }
+
+/* 隐藏 file input */
+.fc-file-input { display: none; }
+
+/* 清除按钮 */
+.fc-clear-btn {
+  position: absolute; top: 6px; right: 6px;
+  width: 22px; height: 22px;
+  border: none; border-radius: 4px;
+  background: rgba(226, 75, 74, 0.15);
+  color: var(--danger, #e24b4a);
+  font-size: 12px;
+  cursor: pointer;
+  display: none; align-items: center; justify-content: center;
+}
+.fc-zone:hover .fc-clear-btn { display: flex; }
+.fc-clear-btn:hover { background: rgba(226, 75, 74, 0.3); }
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--text-disabled, #666); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted, #888); }

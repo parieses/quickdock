@@ -1,0 +1,55 @@
+{
+  "id": "com.quickdock.hosts-manager",
+  "name": "Hosts 管理器",
+  "version": "1.0.0",
+  "description": "管理系统 hosts 文件条目，一键启用/禁用/新增",
+  "author": "QuickDock",
+  "category": "效率工具",
+  "icon": "icon.svg",
+  "backend": {
+    "runtime": "native",
+    "entry": "system-tools.exe",
+    "args": []
+  },
+  "commands": [
+    {
+      "id": "hosts-list",
+      "title": "列出 hosts 条目",
+      "keywords": [
+        "hosts",
+        "host",
+        "hosts文件",
+        "hosts列表"
+      ],
+      "aliases": [
+        "hosts列表",
+        "hosts文件"
+      ],
+      "prefix": "/hosts"
+    },
+    {
+      "id": "hosts-toggle",
+      "title": "启用/禁用 hosts 条目",
+      "keywords": [
+        "hosts",
+        "hosts启用",
+        "hosts禁用"
+      ],
+      "aliases": [
+        "hosts开关"
+      ],
+      "prefix": "/hosts"
+    }
+  ],
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html"
+  },
+  "permissions": {
+    "filesystem": true
+  },
+  "capabilities": [
+    "command",
+    "frontend"
+  ]
+}

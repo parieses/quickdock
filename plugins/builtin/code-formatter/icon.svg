@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect x="6" y="4" width="36" height="40" rx="6" fill="#f97316" opacity="0.12"/>
+  <rect x="6" y="4" width="36" height="40" rx="6" stroke="#f97316" stroke-width="1.8"/>
+  <text x="24" y="14" text-anchor="middle" font-size="5" fill="#f97316" font-family="monospace">&lt;div&gt;</text>
+  <line x1="12" y1="19" x2="36" y2="19" stroke="#f97316" stroke-width="0.8" opacity="0.3"/>
+  <text x="24" y="28" text-anchor="middle" font-size="5" fill="#f97316" font-family="monospace">.class {}</text>
+  <line x1="12" y1="33" x2="36" y2="33" stroke="#f97316" stroke-width="0.8" opacity="0.3"/>
+  <text x="24" y="42" text-anchor="middle" font-size="5" fill="#f97316" font-family="monospace">function()</text>
+</svg>

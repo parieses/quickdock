@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Hosts 管理器</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.h-path{font-size:11px;color:var(--text-muted);padding:4px 10px;background:var(--bg-tertiary);border-bottom:1px solid var(--border);flex-shrink:0}
+.h-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);min-height:28px;font-size:12px}
+.h-item:hover{background:var(--bg-hover)}
+.h-toggle{width:18px;height:18px;border:1px solid var(--border);border-radius:4px;background:var(--bg-tertiary);cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:10px;flex-shrink:0;transition:all .1s}
+.h-toggle.enabled{background:var(--success);border-color:var(--success);color:#fff}
+.h-ip{font-family:var(--font-mono);font-size:12px;color:var(--accent);min-width:90px;flex-shrink:0}
+.h-host{font-family:var(--font-mono);font-size:12px;color:var(--text-primary);flex:1;word-break:break-all}
+.h-add-row{display:flex;align-items:center;gap:6px;padding:6px 10px;background:var(--bg-secondary);border-top:1px solid var(--border);flex-shrink:0}
+.h-add-row .p-input{flex:1;font-family:var(--font-mono)}
+.h-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted)}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <button class="p-btn p-btn-primary" id="btnRefresh">↻ 刷新</button>
+    <span class="p-spacer"></span>
+    <button class="p-btn" id="btnSave">💾 保存</button>
+  </div>
+  <div class="h-path" id="pathLabel">加载中…</div>
+  <div class="p-list" id="hostList"></div>
+  <div class="h-add-row">
+    <input type="text" class="p-input" id="ipInput" placeholder="IP 地址" spellcheck="false">
+    <input type="text" class="p-input" id="hostInput" placeholder="主机名" spellcheck="false">
+    <button class="p-btn p-btn-primary" id="btnAdd">添加</button>
+  </div>
+</div>
+<script>
+var hostsData=[],hostsPath=''
+function $(id){return document.getElementById(id)}
+function pluginExec(cmd,data){return new Promise(function(resolve,reject){window.parent.postMessage({type:'plugin:execute',id:Date.now(),command:cmd,input:{text:JSON.stringify(data||{})}},'*');var handler=function(e){if(e.data&&e.data.type==='plugin:result'){window.removeEventListener('message',handler);if(e.data.error)reject(new Error(e.data.error));else resolve(e.data.data)}};window.addEventListener('message',handler)})}
+function loadHosts(){pluginExec('hosts-list',{}).then(function(data){try{var d=typeof data==='string'?JSON.parse(data):data;hostsPath=d.path||'';$('pathLabel').textContent='📄 '+hostsPath;hostsData=d.entries||[];renderHosts()}catch(e){$('hostList').innerHTML='<div class="h-empty">解析失败: '+e.message+'</div>'}}).catch(function(e){$('hostList').innerHTML='<div class="h-empty">加载失败: '+e.message+'</div>'})}
+function renderHosts(){var list=$('hostList');if(!hostsData.length){list.innerHTML='<div class="h-empty">没有 hosts 条目</div>';return}
+list.innerHTML=hostsData.map(function(h,i){var enabled=h.enabled!==false;return'<div class="h-item" data-index="'+i+'"><button class="h-toggle'+(enabled?' enabled':'')+'" data-index="'+i+'">'+(enabled?'✓':'')+'</button><span class="h-ip">'+h.ip+'</span><span class="h-host">'+h.host+'</span></div>'}).join('')}
+function saveHosts(){pluginExec('hosts-save',{entries:hostsData}).then(function(){loadHosts()}).catch(function(e){alert('保存失败: '+e.message)})}
+$('btnRefresh').addEventListener('click',loadHosts)
+$('btnSave').addEventListener('click',saveHosts)
+$('btnAdd').addEventListener('click',function(){var ip=$('ipInput').value.trim(),host=$('hostInput').value.trim();if(!ip||!host){alert('请输入 IP 和主机名');return}
+hostsData.push({ip:ip,host:host,enabled:true});$('ipInput').value='';$('hostInput').value='';renderHosts();saveHosts()})
+$('hostList').addEventListener('click',function(e){var btn=e.target.closest('.h-toggle');if(btn){var idx=parseInt(btn.dataset.index);hostsData[idx].enabled=!hostsData[idx].enabled;renderHosts()}})
+window.addEventListener('message',function loadOnInit(e){if(e.data&&e.data.type==='plugin:init'){window.removeEventListener('message',loadOnInit);loadHosts()}})
+</script>
+</body>
+</html>

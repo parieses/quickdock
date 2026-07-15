@@ -1,0 +1,65 @@
+{
+  "id": "com.quickdock.code-formatter",
+  "name": "代码压缩/美化",
+  "version": "0.2.0",
+  "description": "JS / CSS / HTML 一键压缩（minify）或美化（prettify），自动检测语言",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 660,
+    "height": 520
+  },
+  "commands": [
+    {
+      "id": "code-minify",
+      "title": "代码压缩 (Minify)",
+      "keywords": [
+        "minify",
+        "compress",
+        "uglify",
+        "缩小",
+        "压缩代码"
+      ],
+      "aliases": [
+        "压缩",
+        "代码压缩",
+        "js压缩",
+        "css压缩",
+        "html压缩"
+      ],
+      "matchPattern": "^\\s*(function|var |let |const |import|export|<html|<div|<script|<style)",
+      "prefix": "/minify"
+    },
+    {
+      "id": "code-prettify",
+      "title": "代码美化 (Prettify)",
+      "keywords": [
+        "prettify",
+        "beautify",
+        "format",
+        "美化",
+        "格式化代码"
+      ],
+      "aliases": [
+        "美化",
+        "代码美化",
+        "格式化"
+      ],
+      "prefix": "/prettify"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
+}

@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect x="6" y="5" width="36" height="38" rx="6" fill="#ff8c00" opacity="0.12"/>
+  <rect x="6" y="5" width="36" height="38" rx="6" stroke="#ff8c00" stroke-width="1.8"/>
+  <text x="24" y="15" text-anchor="middle" font-size="6" fill="#ff8c00" font-family="monospace">{}</text>
+  <!-- 箭头示意 -->
+  <line x1="14" y1="26" x2="34" y2="26" stroke="#ff8c00" stroke-width="1.5"/>
+  <polygon points="34,26 30,23 30,29" fill="#ff8c00"/>
+  <text x="24" y="36" text-anchor="middle" font-size="7" fill="#ff8c00" font-family="monospace" font-weight="bold">TS/GO</text>
+</svg>

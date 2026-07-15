@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Diff 文本对比</title>
+<link rel="stylesheet" href="../common.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="td-app">
+  <!-- 工具栏 -->
+  <div class="td-toolbar">
+    <button class="td-btn td-btn-primary" id="btnCompare" title="对比 (Ctrl+Enter)">▶ 对比</button>
+    <button class="td-btn" id="btnSwap" title="交换左右">⇄ 交换</button>
+    <button class="td-btn" id="btnClear" title="清空">✕ 清空</button>
+    <span class="td-sep"></span>
+    <label class="td-opt"><input type="checkbox" id="chkIgnoreCase"> 忽略大小写</label>
+    <label class="td-opt"><input type="checkbox" id="chkTrim"> 去除首尾空格</label>
+    <span class="td-spacer"></span>
+    <span id="tdStats" class="td-stats">差异: 0 行</span>
+  </div>
+
+  <!-- 编辑器区域 -->
+  <div class="td-editors">
+    <div class="td-pane td-pane-left">
+      <div class="td-pane-header">原始文本 <span id="leftLines" class="td-linecount">0 行</span></div>
+      <textarea id="leftInput" class="td-textarea" placeholder="在此粘贴原始文本…" spellcheck="false"></textarea>
+    </div>
+    <div class="td-pane td-pane-right">
+      <div class="td-pane-header">新文本 <span id="rightLines" class="td-linecount">0 行</span></div>
+      <textarea id="rightInput" class="td-textarea" placeholder="在此粘贴新文本…" spellcheck="false"></textarea>
+    </div>
+  </div>
+
+  <!-- 结果区域 -->
+  <div class="td-result" id="tdResult" style="display:none;">
+    <div class="td-result-header">对比结果 <span class="td-result-stats" id="resultStats"></span></div>
+    <div class="td-diff-output" id="diffOutput"></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

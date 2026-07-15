@@ -1,0 +1,58 @@
+{
+  "id": "com.quickdock.wifi-manager",
+  "name": "WiFi 管理器",
+  "version": "1.0.0",
+  "description": "查看网络列表、WiFi 密码、连接状态",
+  "author": "QuickDock",
+  "category": "效率工具",
+  "icon": "icon.svg",
+  "backend": {
+    "runtime": "native",
+    "entry": "system-tools.exe",
+    "args": []
+  },
+  "commands": [
+    {
+      "id": "wifi-list",
+      "title": "列出 WiFi 网络",
+      "keywords": [
+        "wifi",
+        "网络",
+        "无线",
+        "wlan"
+      ],
+      "aliases": [
+        "wifi列表",
+        "网络列表",
+        "无线网络"
+      ],
+      "prefix": "/wifi"
+    },
+    {
+      "id": "wifi-status",
+      "title": "WiFi 连接状态",
+      "keywords": [
+        "wifi",
+        "状态",
+        "连接",
+        "信号"
+      ],
+      "aliases": [
+        "wifi状态",
+        "连接状态"
+      ],
+      "prefix": "/wifi"
+    }
+  ],
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html"
+  },
+  "permissions": {
+    "filesystem": true
+  },
+  "capabilities": [
+    "command",
+    "frontend"
+  ]
+}

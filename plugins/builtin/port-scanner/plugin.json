@@ -1,0 +1,58 @@
+{
+  "id": "com.quickdock.port-scanner",
+  "name": "端口检查器",
+  "version": "1.0.0",
+  "description": "检查端口占用，显示进程名和 PID",
+  "author": "QuickDock",
+  "category": "效率工具",
+  "icon": "icon.svg",
+  "backend": {
+    "runtime": "native",
+    "entry": "system-tools.exe",
+    "args": []
+  },
+  "commands": [
+    {
+      "id": "port-list",
+      "title": "列出本地监听端口",
+      "keywords": [
+        "port",
+        "端口",
+        "监听",
+        "netstat"
+      ],
+      "aliases": [
+        "端口列表",
+        "监听端口"
+      ],
+      "prefix": "/port"
+    },
+    {
+      "id": "port-check",
+      "title": "检查指定端口",
+      "keywords": [
+        "port",
+        "端口",
+        "检查",
+        "端口占用"
+      ],
+      "aliases": [
+        "端口检查",
+        "端口占用"
+      ],
+      "prefix": "/port",
+      "matchPattern": "^\\d{1,5}$"
+    }
+  ],
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html"
+  },
+  "permissions": {
+    "filesystem": true
+  },
+  "capabilities": [
+    "command",
+    "frontend"
+  ]
+}

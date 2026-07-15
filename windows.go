@@ -13,12 +13,13 @@ import (
 
 // memoryOptimizedArgs 减少 WebView2 内存占用的 Chromium 标志
 // 这些标志传递给全局 WebView2 浏览器进程，影响所有窗口
+// 注意：不传 --disable-renderer-backgrounding，让 WebView2 在
+// PutIsVisible(false) 时自动释放渲染/GPU 资源（后台窗口降级）
 var memoryOptimizedArgs = []string{
 	"--disable-features=msSmartScreenProtection,Printing,Translate,ReadingList,MediaSessionService,NotificationService,PasswordManager,ChromeWhatsNewUI",
 	"--disable-sync",
 	"--disable-background-networking",
 	"--disable-background-timer-throttling",
-	"--disable-renderer-backgrounding",
 	"--disable-extensions",
 	"--disable-component-update",
 	"--disable-default-apps",
@@ -55,6 +56,9 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 	win.Hide()
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
 		clipboardMode.Store(false)
+		if a := getHotkeyApp(); a != nil {
+			a.Event.Emit("clipboard:before-hide")
+		}
 		win.Hide()
 	})
 	return win
@@ -78,30 +82,6 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
 		paletteMode.Store(false)
 		win.Hide()
-	})
-	return win
-}
-
-// initPluginWindow 创建插件独立窗口（延迟初始化）
-func initPluginWindow(app *application.App) *application.WebviewWindow {
-	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
-		Title:            "快启坞 - 插件",
-		Width:            800,
-		Height:           600,
-		MinWidth:         600,
-		MinHeight:        400,
-		Frameless:        true,
-		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
-		URL:              "/#/plugin",
-		Windows: application.WindowsWindow{
-			HiddenOnTaskbar: true,
-		},
-	})
-	win.Hide()
-	// 插件窗口关闭时隐藏而非销毁
-	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		win.Hide()
-		event.Cancel()
 	})
 	return win
 }
@@ -139,26 +119,10 @@ func paletteWindowGetter(app *application.App) func() *application.WebviewWindow
 	}
 }
 
-// pluginWindowGetter 返回 AppService 使用的插件窗口 getter
-func pluginWindowGetter(app *application.App) func() *application.WebviewWindow {
-	return func() *application.WebviewWindow {
-		pluginWinLock.Lock()
-		defer pluginWinLock.Unlock()
-		if pluginWin == nil {
-			if app == nil {
-				return nil
-			}
-			pluginWin = initPluginWindow(app)
-		}
-		return pluginWin
-	}
-}
-
 // InjectWindowGetters 将延迟窗口创建函数注入到 AppService（由 main.go 调用）
 func InjectWindowGetters(svc *services.AppService, app *application.App) {
 	svc.GetClipboardWindow = clipboardWindowGetter(app)
 	svc.GetPaletteWindow = paletteWindowGetter(app)
-	svc.GetPluginWindow = pluginWindowGetter(app)
 }
 
 // ===== 热键回调用的窗口 getter（重写 tray.go 中的简单 getter）=====
@@ -187,20 +151,6 @@ func getPaletteWindow() *application.WebviewWindow {
 		paletteWin = initPaletteWindow(app)
 	}
 	return paletteWin
-}
-
-// getPluginWindow 供热键/插件调用使用（目前只有 AppService 使用，但保持一致性）
-func getPluginWindow() *application.WebviewWindow {
-	pluginWinLock.Lock()
-	defer pluginWinLock.Unlock()
-	if pluginWin == nil {
-		app := getHotkeyApp()
-		if app == nil {
-			return nil
-		}
-		pluginWin = initPluginWindow(app)
-	}
-	return pluginWin
 }
 
 // EnsureConfigDir 确保配置目录存在（用于 WebviewUserDataPath）

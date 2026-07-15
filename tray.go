@@ -78,9 +78,6 @@ var (
 
 	paletteWin     *application.WebviewWindow
 	paletteWinLock sync.Mutex
-
-	pluginWin     *application.WebviewWindow
-	pluginWinLock sync.Mutex
 )
 
 // ---- 主窗口 ----
@@ -366,6 +363,9 @@ func runMessageLoop() {
 				}
 				if clipboardMode.Load() {
 					clipboardMode.Store(false)
+					if a := getHotkeyApp(); a != nil {
+						a.Event.Emit("clipboard:before-hide")
+					}
 					cw.Hide()
 				} else {
 					platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
@@ -789,6 +789,9 @@ func ReregisterClipboardHotkey(modifiers, vk uintptr) {
 		}
 		if clipboardMode.Load() {
 			clipboardMode.Store(false)
+			if a := getHotkeyApp(); a != nil {
+				a.Event.Emit("clipboard:before-hide")
+			}
 			cw.Hide()
 		} else {
 			platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
@@ -874,6 +877,9 @@ func ResumeHotkeys() {
 			}
 			if clipboardMode.Load() {
 				clipboardMode.Store(false)
+				if a := getHotkeyApp(); a != nil {
+					a.Event.Emit("clipboard:before-hide")
+				}
 				cw.Hide()
 			} else {
 				platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)

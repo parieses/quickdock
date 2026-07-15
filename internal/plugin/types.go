@@ -142,7 +142,9 @@ type PluginInfo struct {
 	Version     string    `json:"version"`
 	Description string    `json:"description"`
 	Author      string    `json:"author"`
+	Category    string    `json:"category"`
 	Status      string    `json:"status"`      // running | stopped | crashed
 	HasFrontend bool      `json:"hasFrontend"`
+	UsageCount  int       `json:"usageCount"`
 	Commands    []Command `json:"commands"`
 }

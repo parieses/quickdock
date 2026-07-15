@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link rel="stylesheet" href="../common.css">
+  <style>
+    /* 插件专属样式：使用 common.css 的 CSS 变量 */
+    .p-output {
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+<div class="p-app">
+  <!-- ====== 工具栏 ====== -->
+  <div class="p-toolbar">
+    <button class="p-btn p-btn-primary" onclick="sayHello()">打招呼</button>
+    <div class="p-spacer"></div>
+    <span id="statusLabel" class="p-muted">就绪</span>
+  </div>
+
+  <!-- ====== 内容区 ====== -->
+  <div class="p-body" style="padding:10px;flex-direction:column;gap:8px">
+    <input id="nameInput" class="p-input" placeholder="输入你的名字…" value="World"
+           onkeydown="if(event.key==='Enter')sayHello()">
+    <div id="resultArea" class="p-output"></div>
+  </div>
+</div>
+<script>
+// ---- 后端通信 ----
+var $ = function(id) { return document.getElementById(id) }
+
+function pluginExec(command, data) {
+  return new Promise(function(resolve, reject) {
+    var id = Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+    var timeout = setTimeout(function() {
+      window.removeEventListener('message', handler)
+      reject(new Error('响应超时'))
+    }, 10000)
+    var handler = function(e) {
+      if (e.data && e.data.type === 'plugin:result') {
+        window.removeEventListener('message', handler)
+        clearTimeout(timeout)
+        if (e.data.error) { reject(new Error(e.data.error)) }
+        else { resolve(e.data.data) }
+      }
+    }
+    window.addEventListener('message', handler)
+    window.parent.postMessage({
+      type: 'plugin:execute',
+      id: id,
+      command: command,
+      input: { text: typeof data === 'string' ? data : JSON.stringify(data) }
+    }, '*')
+  })
+}
+
+// ---- 业务逻辑 ----
+function sayHello() {
+  var name = $('nameInput').value.trim() || 'World'
+  $('statusLabel').textContent = '执行中…'
+  pluginExec('hello', name).then(function(data) {
+    var text = data && (data.display || data.text || data.result || JSON.stringify(data))
+    $('resultArea').textContent = text
+    $('statusLabel').textContent = '✅ 完成'
+  }).catch(function(err) {
+    $('resultArea').textContent = '❌ ' + err.message
+    $('statusLabel').textContent = '❌ 失败'
+  })
+}
+
+// ---- 初始化：接收来自父窗口的剪贴板文本 ----
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'plugin:init' && e.data.data && e.data.data.text) {
+    $('nameInput').value = e.data.data.text
+    $('nameInput').focus()
+    $('nameInput').select()
+  }
+  // 主题和语言传递
+  if (e.data && e.data.type === 'plugin:init' && e.data.data) {
+    if (e.data.data.theme) document.documentElement.setAttribute('data-theme', e.data.data.theme)
+    if (e.data.data.locale) document.documentElement.setAttribute('lang', e.data.data.locale)
+  }
+})
+</script>
+</body>
+</html>

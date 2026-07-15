@@ -1,0 +1,38 @@
+{
+  "id": "com.example.native-plugin",
+  "name": "原生插件示例",
+  "version": "0.1.0",
+  "description": "原生子进程插件示例，使用 Go 编写，JSON-RPC stdin/stdout 通信",
+  "author": "YourName",
+  "icon": "icon.svg",
+  "category": "效率工具",
+
+  "backend": {
+    "runtime": "native",
+    "entry": "my-plugin.exe",
+    "args": []
+  },
+
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 640,
+    "height": 480
+  },
+
+  "commands": [
+    {
+      "id": "do-something",
+      "title": "执行任务",
+      "keywords": ["do", "run", "执行"],
+      "aliases": ["任务", "执行"],
+      "prefix": "/run"
+    }
+  ],
+
+  "capabilities": ["command", "frontend"],
+  "permissions": {
+    "filesystem": true,
+    "network": true
+  }
+}

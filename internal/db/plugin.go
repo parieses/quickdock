@@ -51,8 +51,9 @@ func (d *Database) InsertPlugin(id, name, version, author, description string) e
 	return nil
 }
 
-// InsertPluginFull 插入插件全部字段（含 capabilities / permissions / category）
-func (d *Database) InsertPluginFull(id, name, version, author, description, category string, capabilities []string, permissions map[string]interface{}) error {
+// InsertPluginFull 插入插件全部字段（含 capabilities / permissions / category / icon）
+// iconData 是 base64 data URI，由调用者从插件目录读取
+func (d *Database) InsertPluginFull(id, name, version, author, description, category, iconData string, capabilities []string, permissions map[string]interface{}) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
@@ -60,18 +61,20 @@ func (d *Database) InsertPluginFull(id, name, version, author, description, cate
 	permJSON, _ := json.Marshal(permissions)
 
 	_, err := d.conn.Exec(
-		`INSERT INTO plugins (id, name, version, author, description, category, capabilities, permissions, installed_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
+		`INSERT INTO plugins (id, name, version, author, description, category, icon, enabled, capabilities, permissions, installed_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, datetime('now'), datetime('now'))
 		 ON CONFLICT(id) DO UPDATE SET
 		   name = excluded.name,
 		   version = excluded.version,
 		   author = excluded.author,
 		   description = excluded.description,
 		   category = excluded.category,
+		   icon = excluded.icon,
+		   enabled = 1,
 		   capabilities = excluded.capabilities,
 		   permissions = excluded.permissions,
 		   updated_at = datetime('now')`,
-		id, name, version, author, description, category, string(capsJSON), string(permJSON),
+		id, name, version, author, description, category, iconData, string(capsJSON), string(permJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("写入插件记录失败: %w", err)

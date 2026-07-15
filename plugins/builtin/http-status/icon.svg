@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <rect x="5" y="4" width="38" height="40" rx="6" fill="#ef4444" opacity="0.12"/>
+  <rect x="5" y="4" width="38" height="40" rx="6" stroke="#ef4444" stroke-width="1.8"/>
+  <!-- 状态码数字 -->
+  <text x="24" y="22" text-anchor="middle" font-size="22" fill="#ef4444" font-weight="bold" font-family="monospace">404</text>
+  <!-- 分类色条 -->
+  <rect x="8" y="27" width="32" height="3" rx="1.5" fill="#22c55e" opacity="0.3"/>
+  <rect x="8" y="32" width="28" height="3" rx="1.5" fill="#f59e0b" opacity="0.3"/>
+  <rect x="8" y="37" width="32" height="3" rx="1.5" fill="#ef4444" opacity="0.3"/>
+  <!-- 分类标签 -->
+  <circle cx="12" cy="28.5" r="1.5" fill="#22c55e"/>
+  <circle cx="12" cy="33.5" r="1.5" fill="#f59e0b"/>
+  <circle cx="12" cy="38.5" r="1.5" fill="#ef4444"/>
+  <!-- 搜索标识 -->
+  <circle cx="36" cy="10" r="4" fill="none" stroke="#ef4444" stroke-width="1.2" opacity="0.4"/>
+  <line x1="39" y1="13" x2="42" y2="16" stroke="#ef4444" stroke-width="1.5" stroke-linecap="round" opacity="0.4"/>
+</svg>

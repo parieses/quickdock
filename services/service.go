@@ -24,7 +24,6 @@ type AppService struct {
 	// 次要窗口延迟创建（由 main.go 注入工厂函数，避免启动时创建所有 WebView2 实例）
 	GetClipboardWindow func() *application.WebviewWindow
 	GetPaletteWindow   func() *application.WebviewWindow
-	GetPluginWindow    func() *application.WebviewWindow
 
 	// 状态标志（注入 main 包的 atomic.Bool 指针，共享状态）
 	WindowVisible *atomic.Bool
@@ -40,8 +39,12 @@ type AppService struct {
 	ResumeHotkeysFn       func()
 
 	// 插件管理器
-	PluginMgr    *plugin.Manager
+	PluginMgr     *plugin.Manager
 	PluginHotkeys *PluginHotkeyRegistry
+	PluginsDir    string // 插件根目录（用于定位 common.css 等共享资源）
+
+	// 插件窗口管理器（每个插件独立窗口）
+	PluginWindowMgr *plugin.PluginWindowManager
 
 	// 内置插件自动安装（由 main.go 注入，含 embed.FS）
 	InstallBuiltinPluginsFn func(mgr *plugin.Manager, database *db.Database)
@@ -56,8 +59,9 @@ type AppService struct {
 }
 
 type frontendCacheEntry struct {
-	html  string
-	mtime time.Time
+	html        string
+	htmlMtime   time.Time
+	commonMtime time.Time // common.css 修改时间，变化时全部失效
 }
 
 // NewAppService 创建应用服务实例

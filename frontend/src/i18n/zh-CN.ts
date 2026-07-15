@@ -255,6 +255,7 @@ export default {
   pluginUninstallFailed: '插件卸载失败',
   pluginOpFailed: '操作失败',
   pluginResultCopied: '结果已复制',
+  pluginDetach: '分离为独立窗口',
   pluginOpen: '打开',
   pluginBack: '返回插件列表',
   pluginCalcTitle: '计算器',

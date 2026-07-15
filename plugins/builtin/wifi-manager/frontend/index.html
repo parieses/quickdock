@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>WiFi 管理器</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.w-status{display:flex;align-items:center;gap:8px;padding:6px 10px;background:var(--bg-tertiary);border-bottom:1px solid var(--border);flex-shrink:0;font-size:12px}
+.w-status-name{color:var(--accent);font-weight:500}
+.w-item{display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--border);min-height:32px;font-size:13px}
+.w-item:hover{background:var(--bg-hover)}
+.w-signal{font-size:10px;color:var(--text-muted);min-width:40px;flex-shrink:0}
+.w-ssid{flex:1;color:var(--text-primary)}
+.w-auth{font-size:10px;color:var(--text-muted);flex-shrink:0}
+.w-pwd{font-size:11px;color:var(--accent);font-family:var(--font-mono);background:var(--bg-tertiary);padding:2px 8px;border-radius:4px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.w-pwd-btn{height:24px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-muted);font-size:10px;cursor:pointer;font-family:inherit}
+.w-pwd-btn:hover{color:var(--text-primary)}
+.w-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted)}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <button class="p-btn p-btn-primary" id="btnScan">↻ 扫描网络</button>
+    <span class="p-spacer"></span>
+    <span class="p-muted" id="countLabel"></span>
+  </div>
+  <div class="w-status" id="statusBar">
+    <span class="p-label">当前连接：</span>
+    <span id="currentSSID" class="p-muted">检测中…</span>
+  </div>
+  <div class="p-list" id="wifiList"><div class="w-empty">点击扫描查看附近 WiFi</div></div>
+</div>
+<script>
+function $(id){return document.getElementById(id)}
+function pluginExec(cmd,data){return new Promise(function(resolve,reject){window.parent.postMessage({type:'plugin:execute',id:Date.now(),command:cmd,input:{text:JSON.stringify(data||{})}},'*');var handler=function(e){if(e.data&&e.data.type==='plugin:result'){window.removeEventListener('message',handler);if(e.data.error)reject(new Error(e.data.error));else resolve(e.data.data)}};window.addEventListener('message',handler)})}
+function showPwd(ssid,btn){pluginExec('wifi-pwd',{ssid:ssid}).then(function(data){try{var d=typeof data==='string'?JSON.parse(data):data;var pwd=d.password||d.key||'';if(pwd){var div=document.createElement('span');div.className='w-pwd';div.textContent=pwd;btn.parentNode.replaceChild(div,btn);navigator.clipboard.writeText(pwd).catch(function(){})}else{alert('无法获取密码')}}catch(e){alert('解析失败: '+e.message)}}).catch(function(e){alert('获取密码失败: '+e.message)})}
+function scan(){var list=$('wifiList'),count=$('countLabel');list.innerHTML='<div class="w-empty">扫描中…</div>';pluginExec('wifi-scan',{}).then(function(data){try{var networks=typeof data==='string'?JSON.parse(data):data;if(!networks||!networks.length){list.innerHTML='<div class="w-empty">未发现 WiFi 网络</div>';count.textContent='';return}
+count.textContent=networks.length+' 个网络';list.innerHTML=networks.map(function(n){var bars=n.signal>80?'▂▄▆█':n.signal>60?'▂▄▆':n.signal>40?'▂▄':'▂';return'<div class="w-item"><span class="w-signal">'+bars+'</span><span class="w-ssid">'+n.ssid+'</span><span class="w-auth">'+(n.auth||'')+'</span><button class="w-pwd-btn" onclick="showPwd(\''+n.ssid.replace(/'/g,"\\'")+'\',this)">密码</button></div>'}).join('')}catch(e){list.innerHTML='<div class="w-empty">解析失败: '+e.message+'</div>'}}).catch(function(e){list.innerHTML='<div class="w-empty">扫描失败: '+e.message+'</div>'})}
+$('btnScan').addEventListener('click',scan)
+window.addEventListener('message',function loadOnInit(e){if(e.data&&e.data.type==='plugin:init'){window.removeEventListener('message',loadOnInit);pluginExec('wifi-current',{}).then(function(data){try{var d=typeof data==='string'?JSON.parse(data):data;if(d.ssid)$('currentSSID').textContent=d.ssid;if(d.band)$('currentSSID').textContent+=' ('+d.band+')'}catch(e){}}).catch(function(){});scan()}})
+</script>
+</body>
+</html>

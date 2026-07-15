@@ -1,0 +1,98 @@
+{
+  "id": "com.quickdock.text-encoder",
+  "name": "文本编码/加密",
+  "version": "0.2.0",
+  "description": "Base64 / URL / HTML 编解码，MD5 / SHA256 哈希计算",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 620,
+    "height": 520
+  },
+  "commands": [
+    {
+      "id": "base64-encode",
+      "title": "Base64 编码",
+      "keywords": [
+        "base64",
+        "encode"
+      ],
+      "aliases": [
+        "base64编码"
+      ],
+      "prefix": "/b64e"
+    },
+    {
+      "id": "base64-decode",
+      "title": "Base64 解码",
+      "keywords": [
+        "base64",
+        "decode"
+      ],
+      "aliases": [
+        "base64解码"
+      ],
+      "prefix": "/b64d",
+      "matchPattern": "^[A-Za-z0-9+/]*={0,2}$"
+    },
+    {
+      "id": "url-encode",
+      "title": "URL 编码",
+      "prefix": "/urle"
+    },
+    {
+      "id": "url-decode",
+      "title": "URL 解码",
+      "prefix": "/urld"
+    },
+    {
+      "id": "html-encode",
+      "title": "HTML 编码",
+      "prefix": "/htmle"
+    },
+    {
+      "id": "html-decode",
+      "title": "HTML 解码",
+      "prefix": "/htmld"
+    },
+    {
+      "id": "md5-hash",
+      "title": "MD5 哈希",
+      "keywords": [
+        "md5",
+        "hash"
+      ],
+      "aliases": [
+        "md5加密",
+        "md5计算"
+      ],
+      "prefix": "/md5"
+    },
+    {
+      "id": "sha256-hash",
+      "title": "SHA256 哈希",
+      "keywords": [
+        "sha256",
+        "hash"
+      ],
+      "aliases": [
+        "sha256加密"
+      ],
+      "prefix": "/sha256"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
+}

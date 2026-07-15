@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -38,14 +37,29 @@ func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
 			"note": "安装完成但读取 manifest 失败: " + err.Error(),
 		})
 	}
-	// 写入数据库记录（含 capabilities / permissions / category）
+	// 读取图标
+	iconData := ""
+	if manifest.Icon != "" {
+		iconPath := filepath.Join(dir, manifest.Icon)
+		if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
+			ext := strings.ToLower(filepath.Ext(manifest.Icon))
+			mime := "image/svg+xml"
+			if ext == ".png" {
+				mime = "image/png"
+			} else if ext == ".ico" {
+				mime = "image/x-icon"
+			}
+			iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
+		}
+	}
+	// 写入数据库记录（含 capabilities / permissions / category / icon）
 	permissions := make(map[string]interface{})
 	if manifest.Permissions.Network || manifest.Permissions.Filesystem || manifest.Permissions.Clipboard {
 		permissions["network"] = manifest.Permissions.Network
 		permissions["filesystem"] = manifest.Permissions.Filesystem
 		permissions["clipboard"] = manifest.Permissions.Clipboard
 	}
-	if err := a.DB.InsertPluginFull(manifest.ID, manifest.Name, manifest.Version, manifest.Author, manifest.Description, manifest.Category, manifest.Capabilities, permissions); err != nil {
+	if err := a.DB.InsertPluginFull(manifest.ID, manifest.Name, manifest.Version, manifest.Author, manifest.Description, manifest.Category, iconData, manifest.Capabilities, permissions); err != nil {
 		fmt.Printf("QuickDock: 插件 %s 写入数据库记录失败: %v\n", manifest.ID, err)
 	}
 	return Ok(map[string]interface{}{
@@ -69,11 +83,9 @@ func (a *AppService) SelectAndInstallPlugin() *ApiResult {
 		SetTitle("选择插件包 (.zip)").
 		AddFilter("插件包", "*.zip").
 		PromptForSingleSelection()
-	if err != nil {
-		return Fail(err)
-	}
-	if filePath == "" {
-		return Ok(nil) // 用户取消了选择
+	if err != nil || filePath == "" {
+		// 用户取消（某些系统取消会返回错误而非空路径）
+		return Ok(nil)
 	}
 	return a.InstallPlugin(filePath)
 }
@@ -153,7 +165,16 @@ func (a *AppService) ListPlugins() *ApiResult {
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
 	}
-	return Ok(a.PluginMgr.ListPlugins())
+	plugins := a.PluginMgr.ListPlugins()
+	// 从 usage_frecency 表查询每个插件的使用次数
+	if a.DB != nil {
+		for i := range plugins {
+			if cnt, err := a.DB.GetPluginUsageCount(plugins[i].ID); err == nil && cnt > 0 {
+				plugins[i].UsageCount = cnt
+			}
+		}
+	}
+	return Ok(plugins)
 }
 
 func (a *AppService) ExecutePluginCommand(pluginID, commandID string, input map[string]interface{}) *ApiResult {
@@ -163,6 +184,11 @@ func (a *AppService) ExecutePluginCommand(pluginID, commandID string, input map[
 	result, err := a.PluginMgr.ExecuteCommand(pluginID, commandID, input)
 	if err != nil {
 		return Fail(err)
+	}
+	// 记录插件使用次数
+	if a.DB != nil {
+		usageKey := "plugin:" + pluginID + "." + commandID
+		a.DB.RecordUsage(usageKey) // 忽略错误，不影响主流程
 	}
 	return Ok(result)
 }
@@ -311,6 +337,14 @@ func (a *AppService) GetPluginIcon(pluginID string) *ApiResult {
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
 	}
+
+	// 优先从数据库读取图标
+	if a.DB != nil {
+		if iconData, err := a.DB.GetValue("plugin_icon_" + pluginID); err == nil && iconData != "" {
+			return Ok(iconData)
+		}
+	}
+
 	inst := a.PluginMgr.GetPlugin(pluginID)
 	if inst == nil {
 		return FailMsg("插件未加载")
@@ -339,6 +373,12 @@ func (a *AppService) GetPluginIcon(pluginID string) *ApiResult {
 		mime = "image/png"
 	}
 	dataURI := fmt.Sprintf("data:%s;base64,%s", mime, base64Encode(data))
+
+	// 写入数据库缓存
+	if a.DB != nil {
+		a.DB.SetValue("plugin_icon_"+pluginID, dataURI)
+	}
+
 	return Ok(dataURI)
 }
 
@@ -351,12 +391,15 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	if inst == nil {
 		return FailMsg("插件未加载")
 	}
+	if inst.Status != "running" {
+		return FailMsg("插件未运行，无法打开前端页面")
+	}
 	if !inst.Manifest.Frontend.Enabled {
 		return FailMsg("插件未启用前端")
 	}
 	entryPath := filepath.Join(inst.Dir, inst.Manifest.Frontend.Entry)
 
-	// 检查缓存（以文件 mtime 为缓存 key）
+	// 检查缓存（以文件 mtime 为缓存 key，含 common.css mtime）
 	const maxHTMLSize = 10 << 20
 	fi, err := os.Stat(entryPath)
 	if err != nil {
@@ -366,10 +409,17 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 		return Fail(fmt.Errorf("插件前端文件过大 (%d bytes)", fi.Size()))
 	}
 
+	// 读取 common.css 的 mtime（用于缓存失效判断）
+	var commonMtime time.Time
+	commonCSSPath := filepath.Join(a.PluginsDir, "builtin", "common.css")
+	if commonFi, err := os.Stat(commonCSSPath); err == nil {
+		commonMtime = commonFi.ModTime()
+	}
+
 	a.frontendCacheMu.RLock()
 	entry, cached := a.frontendCache[pluginID]
 	a.frontendCacheMu.RUnlock()
-	if cached && entry.mtime.Equal(fi.ModTime()) {
+	if cached && entry.htmlMtime.Equal(fi.ModTime()) && entry.commonMtime.Equal(commonMtime) {
 		return Ok(entry.html)
 	}
 
@@ -379,6 +429,38 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	}
 	html := string(htmlData)
 	baseDir := filepath.Dir(entryPath)
+
+	// 强制注入 common.css（QuickDock 插件通用主题），确保所有插件都有正确的暗色/浅色适配
+	if commonData, err := os.ReadFile(commonCSSPath); err == nil {
+		commonStyle := "<style id=\"quickdock-common-css\">\n" + string(commonData) + "\n</style>\n"
+		// 插入到 <head> 标签之后（或文档最前）
+		if idx := strings.Index(html, "<head>"); idx >= 0 {
+			html = html[:idx+6] + "\n" + commonStyle + html[idx+6:]
+		} else {
+			html = commonStyle + html
+		}
+	}
+
+	// 注入 QuickDock 运行时脚本（主题/语言等控制）
+	// 默认使用暗色主题 + 简体中文，父窗口可通过 plugin:theme 消息动态更新
+	runtimeScript := "<script id=\"quickdock-runtime\">\n" +
+		"(function(){" +
+		"var t=(document.querySelector('meta[name=\"qd-theme\"]')||{}).getAttribute('content')||'dark';" +
+		"var l=(document.querySelector('meta[name=\"qd-locale\"]')||{}).getAttribute('content')||'zh-CN';" +
+		"document.documentElement.setAttribute('data-theme',t);" +
+		"document.documentElement.setAttribute('lang',l);" +
+		"window.addEventListener('message',function(e){" +
+		"if(e.data&&e.data.type==='plugin:theme'){" +
+		"if(e.data.theme)document.documentElement.setAttribute('data-theme',e.data.theme);" +
+		"if(e.data.locale)document.documentElement.setAttribute('lang',e.data.locale);" +
+		"}});" +
+		"})();" +
+		"</script>\n"
+	if idx := strings.Index(html, "</head>"); idx >= 0 {
+		html = html[:idx] + runtimeScript + html[idx:]
+	} else {
+		html += runtimeScript
+	}
 
 	// 内联 CSS：匹配 <link ... href="..." rel="stylesheet" .../> 无论属性顺序和引号类型
 	html = inlineFileRefs(html, baseDir, inlineCSSRe, func(match string) string {
@@ -408,7 +490,7 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 
 	// 写入缓存
 	a.frontendCacheMu.Lock()
-	a.frontendCache[pluginID] = &frontendCacheEntry{html: html, mtime: fi.ModTime()}
+	a.frontendCache[pluginID] = &frontendCacheEntry{html: html, htmlMtime: fi.ModTime(), commonMtime: commonMtime}
 	a.frontendCacheMu.Unlock()
 
 	return Ok(html)
@@ -450,7 +532,7 @@ func base64Encode(data []byte) string {
 // ===== 插件独立窗口 =====
 // 插件前端页面在独立窗口中打开（使用 iframe 嵌入）
 
-// ShowPluginWindow 打开插件独立窗口（或切换插件 ID）
+// ShowPluginWindow 打开插件独立窗口（每个插件拥有自己的独立窗口）
 func (a *AppService) ShowPluginWindow(pluginID string) *ApiResult {
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
@@ -459,39 +541,26 @@ func (a *AppService) ShowPluginWindow(pluginID string) *ApiResult {
 	if inst == nil {
 		return FailMsg("插件未加载")
 	}
+	if inst.Status != "running" {
+		return FailMsg("插件未运行，无法打开独立窗口")
+	}
 	if !inst.Manifest.Frontend.Enabled {
 		return FailMsg("插件未启用前端")
 	}
-
-	winFn := a.GetPluginWindow
-	if winFn == nil {
-		return FailMsg("plugin window not initialized")
-	}
-	win := winFn()
-	if win == nil {
-		return FailMsg("failed to create plugin window")
+	if a.PluginWindowMgr == nil {
+		return FailMsg("plugin window manager not initialized")
 	}
 
-	// 先显示窗口激活 webview，再通过 JS 切换 hash（带时间戳确保每次 hash 都变化）
-	win.SetTitle("快启坞 - " + inst.Manifest.Name)
-	win.Show()
-	win.Focus()
-	// 使用 strconv.Quote 安全转义 pluginID，防止 JS 注入
-	hashValue := "#/plugin/" + pluginID + "?t=" + fmt.Sprintf("%d", time.Now().UnixNano())
-	win.ExecJS("window.location.hash = " + strconv.Quote(hashValue))
+	// 以独立窗口显示（任务栏可见，仅能通过 X 关闭）
+	a.PluginWindowMgr.ShowAsWindow(pluginID, inst.Manifest.Name)
 
-	// 检查是否有待传递的初始文本，直接注入 iframe（解决窗口复用时不重载 iframe 的问题）
+	// 检查是否有待传递的初始文本，注入到窗口 iframe
 	a.pendingInitTextMu.Lock()
 	initText := a.pendingInitText
 	a.pendingInitText = ""
 	a.pendingInitTextMu.Unlock()
 	if initText != "" {
-		safeText := strconv.Quote(initText)
-		win.ExecJS(fmt.Sprintf(
-			`setTimeout(function(){
-				var ifr = document.querySelector('iframe');
-				if (ifr && ifr.contentWindow) ifr.contentWindow.postMessage({type:'plugin:init', data:{text:%s}}, '*');
-			}, 400)`, safeText))
+		a.PluginWindowMgr.InjectInitText(pluginID, initText)
 	}
 
 	return Ok(nil)
@@ -517,43 +586,26 @@ func (a *AppService) GetAndClearPendingPluginInit() *ApiResult {
 	return Ok(text)
 }
 
-// MinimizePluginWindow 最小化插件独立窗口
-func (a *AppService) MinimizePluginWindow() *ApiResult {
-	if fn := a.GetPluginWindow; fn != nil {
-		if win := fn(); win != nil {
-			win.Minimise()
-		}
+// MinimizePluginWindow 最小化指定插件的独立窗口
+func (a *AppService) MinimizePluginWindow(pluginID string) *ApiResult {
+	if a.PluginWindowMgr != nil {
+		a.PluginWindowMgr.Minimize(pluginID)
 	}
 	return Ok(nil)
 }
 
-// ToggleMaximizePluginWindow 切换插件窗口最大化/还原
-func (a *AppService) ToggleMaximizePluginWindow() *ApiResult {
-	if fn := a.GetPluginWindow; fn != nil {
-		if win := fn(); win != nil {
-			if win.IsMaximised() {
-				win.Restore()
-			} else {
-				win.Maximise()
-			}
-		}
+// ToggleMaximizePluginWindow 切换指定插件的窗口最大化/还原
+func (a *AppService) ToggleMaximizePluginWindow(pluginID string) *ApiResult {
+	if a.PluginWindowMgr != nil {
+		a.PluginWindowMgr.ToggleMaximize(pluginID)
 	}
 	return Ok(nil)
 }
 
-// HidePluginWindow 隐藏插件独立窗口（关闭按钮）
-// 隐藏前清理 iframe 的 hash，使 PluginPage 组件卸载并释放 iframe 资源
-func (a *AppService) HidePluginWindow() *ApiResult {
-	if fn := a.GetPluginWindow; fn != nil {
-		if win := fn(); win != nil {
-			win.ExecJS("window.location.hash = ''")
-			win.Hide()
-		}
+// HidePluginWindow 关闭并销毁指定插件的独立窗口
+func (a *AppService) HidePluginWindow(pluginID string) *ApiResult {
+	if a.PluginWindowMgr != nil {
+		a.PluginWindowMgr.Hide(pluginID)
 	}
 	return Ok(nil)
-}
-
-// GetPluginWindowPluginID 获取当前插件窗口显示的插件 ID
-func (a *AppService) GetPluginWindowPluginID() *ApiResult {
-	return Ok(nil) // 由前端通过 hash 自行判断
 }

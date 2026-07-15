@@ -2,9 +2,10 @@
   "id": "com.example.myplugin",
   "name": "我的插件",
   "version": "0.1.0",
-  "description": "一个 Goja JS 插件示例",
-  "author": "",
-  "category": "工具",
+  "description": "一个 Goja JS 插件示例，包含前端交互面板",
+  "author": "YourName",
+  "icon": "icon.svg",
+  "category": "开发者日常",
 
   "backend": {
     "runtime": "goja",
@@ -12,7 +13,10 @@
   },
 
   "frontend": {
-    "enabled": false
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 520,
+    "height": 460
   },
 
   "commands": [
@@ -23,5 +27,10 @@
       "aliases": ["打招呼", "测试"],
       "prefix": "/hello"
     }
-  ]
+  ],
+
+  "capabilities": ["command", "frontend"],
+  "permissions": {
+    "clipboard": true
+  }
 }

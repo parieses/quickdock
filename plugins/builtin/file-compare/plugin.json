@@ -1,0 +1,47 @@
+{
+  "id": "com.quickdock.file-compare",
+  "name": "文件/图片对比",
+  "version": "0.1.0",
+  "description": "拖入两个文件，对比文件信息（名称/大小/类型/日期），图片可侧边预览，文本文件支持内容差异",
+  "author": "QuickDock",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 720,
+    "height": 560
+  },
+  "commands": [
+    {
+      "id": "open-file-compare",
+      "title": "文件/图片对比",
+      "keywords": [
+        "file",
+        "compare",
+        "diff",
+        "文件",
+        "对比文件",
+        "图片对比"
+      ],
+      "aliases": [
+        "文件对比",
+        "图片对比",
+        "文件差异"
+      ],
+      "prefix": "/fc"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true,
+    "filesystem": true
+  }
+}

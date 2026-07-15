@@ -4,26 +4,43 @@
   "version": "0.2.0",
   "description": "支持 Unix 时间戳、ISO 8601、相对时间等多种格式互转",
   "author": "QuickDock",
-
+  "icon": "icon.svg",
+  "category": "开发者日常",
   "backend": {
     "runtime": "goja",
     "entry": "main.js"
   },
-
   "frontend": {
     "enabled": true,
     "entry": "frontend/index.html",
     "width": 620,
     "height": 520
   },
-
   "commands": [
     {
       "id": "time-convert",
       "title": "时间转换",
-      "keywords": ["time", "时间", "timestamp", "unix", "日期", "format"],
-      "aliases": ["时间戳", "sjc", "日期转换"],
+      "keywords": [
+        "time",
+        "时间",
+        "timestamp",
+        "unix",
+        "日期",
+        "format"
+      ],
+      "aliases": [
+        "时间戳",
+        "sjc",
+        "日期转换"
+      ],
       "matchPattern": "^(\\d{4}[-/]\\d{2}[-/]\\d{2}(?:\\s+\\d{1,2}:\\d{2}(:\\d{2})?)?|\\d{10}|\\d{13}|\\d{8}(?:\\d{6})?|\\d{4}年\\d{1,2}月\\d{1,2}日|now)$"
     }
-  ]
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
+  "permissions": {
+    "clipboard": true
+  }
 }

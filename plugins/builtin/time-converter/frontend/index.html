@@ -2,24 +2,36 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>时间转换</title>
-<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-body{flex-direction:column;padding:12px 14px;gap:12px}
+.p-body .p-input{font-family:var(--font-mono);font-size:14px;height:34px}
+.result-row{display:flex;justify-content:space-between;align-items:center;padding:6px 10px;border-radius:var(--radius);background:var(--bg-secondary);cursor:pointer;transition:background .1s}
+.result-row:hover{background:var(--bg-hover)}
+.result-row .rk{font-size:12px;color:var(--text-secondary)}
+.result-row .rv{font-family:var(--font-mono);font-size:13px;color:var(--text-primary);user-select:all}
+.result-row .copied-tip{font-size:10px;color:var(--accent);opacity:0;transition:opacity .2s}
+.result-row .copied-tip.show{opacity:1}
+</style>
 </head>
 <body>
-<div id="app">
-  <div class="header">
-    <span id="pluginTitle">时间转换</span>
+<div class="p-app">
+  <div class="p-toolbar">
+    <span class="p-label">时间转换</span>
+    <span class="p-spacer"></span>
+    <span class="p-muted">支持: Unix 时间戳 / ISO 8601 / 相对时间</span>
   </div>
-  <div class="main">
-    <div class="input-row">
-      <input id="timeInput" type="text" placeholder="输入时间 / 时间戳 / now ..." spellcheck="false" />
-      <button id="btnConvert">转换</button>
+  <div class="p-body">
+    <div class="p-toolbar" style="border:none;padding:0;gap:8px;background:transparent">
+      <input id="timeInput" class="p-input p-input-mono" style="flex:1" placeholder="输入时间 / 时间戳 / now ..." spellcheck="false" />
+      <button id="btnConvert" class="p-btn p-btn-primary">转换</button>
     </div>
-    <div id="results" class="results"></div>
+    <div id="results" class="p-list" style="display:flex;flex-direction:column;gap:2px"></div>
   </div>
-  <div class="footer">
-    <span>支持: 2025-12-25 / 2025/12/25 / Unix 时间戳 / now / 2025年12月25日</span>
+  <div class="p-statusbar">
+    <span class="p-muted">支持: 2025-12-25 / 2025/12/25 / Unix 时间戳 / now / 2025年12月25日</span>
   </div>
 </div>
 <script src="app.js"></script>

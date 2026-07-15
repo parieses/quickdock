@@ -16,6 +16,20 @@ const icons = ref<Record<string, string>>({}) // pluginId → data URI
 const loading = ref(true)
 const operating = ref<Set<string>>(new Set())
 
+// ---- 分类筛选 ----
+const selectedCategory = ref('')
+const categories = computed(() => {
+  const cats = new Set<string>()
+  for (const p of plugins.value) {
+    if (p.category) cats.add(p.category)
+  }
+  return Array.from(cats).sort()
+})
+const filteredPlugins = computed(() => {
+  if (!selectedCategory.value) return sortedPlugins.value
+  return sortedPlugins.value.filter(p => p.category === selectedCategory.value)
+})
+
 // 卸载确认
 const showUninstallConfirm = ref(false)
 const uninstallingId = ref('')
@@ -116,7 +130,17 @@ function openPluginPage(p: PluginInfo) {
 // ---- 状态辅助 ----
 const statusOrder: Record<string, number> = { running: 0, crashed: 1, stopped: 2, starting: 3 }
 const sortedPlugins = computed(() => {
-  return [...plugins.value].sort((a, b) => (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99))
+  return [...plugins.value].sort((a, b) => {
+    // 先按 useCount 倒序
+    if ((b.usageCount || 0) !== (a.usageCount || 0)) {
+      return (b.usageCount || 0) - (a.usageCount || 0)
+    }
+    // 再按状态排序
+    const statusDiff = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99)
+    if (statusDiff !== 0) return statusDiff
+    // 最后按名称排序，保证顺序稳定
+    return (a.name || '').localeCompare(b.name || '')
+  })
 })
 function statusBadgeClass(status: string): string {
   switch (status) {
@@ -159,6 +183,20 @@ onMounted(loadPlugins)
       </div>
     </div>
 
+    <!-- 分类 Tabs -->
+    <div class="plugin-categories" v-if="plugins.length > 0">
+      <button
+        :class="['cat-tab', { active: selectedCategory === '' }]"
+        @click="selectedCategory = ''"
+      >全部 <span class="cat-count">{{ plugins.length }}</span></button>
+      <button
+        v-for="cat in categories"
+        :key="cat"
+        :class="['cat-tab', { active: selectedCategory === cat }]"
+        @click="selectedCategory = cat"
+      >{{ cat }} <span class="cat-count">{{ plugins.filter(p => p.category === cat).length }}</span></button>
+    </div>
+
     <!-- 加载中 -->
     <div v-if="loading" class="plugin-loading">
       <p>{{ t('loading') }}</p>
@@ -172,9 +210,14 @@ onMounted(loadPlugins)
     </div>
 
     <!-- 九宫格插件列表 -->
+    <div v-else-if="filteredPlugins.length === 0" class="plugin-empty">
+      <Puzzle :size="48" class="empty-icon" />
+      <p class="empty-title">该分类下暂无插件</p>
+    </div>
+
     <div v-else class="plugin-grid">
       <div
-        v-for="p in sortedPlugins"
+        v-for="p in filteredPlugins"
         :key="p.id"
         :class="['plugin-card', { 'card-running': p.status === 'running' }]"
       >
@@ -192,6 +235,10 @@ onMounted(loadPlugins)
         <!-- 名称和状态 -->
         <div class="card-name">{{ p.name }}</div>
         <div class="card-version">v{{ p.version }}</div>
+        <div class="card-usage" v-if="p.usageCount > 0">
+          <span class="usage-icon">▶</span>
+          <span class="usage-count">{{ p.usageCount }}</span>
+        </div>
         <span :class="['status-badge', statusBadgeClass(p.status)]">{{ statusLabel(p.status) }}</span>
 
         <!-- 描述 -->
@@ -210,8 +257,9 @@ onMounted(loadPlugins)
           <button
             v-if="p.hasFrontend"
             class="action-btn btn-open"
+            :disabled="p.status !== 'running' || operating.has(p.id)"
             @click.stop="openPluginPage(p)"
-            :title="t('pluginOpen')"
+            :title="p.status === 'running' ? t('pluginOpen') : '插件未运行'"
           >
             <ExternalLink :size="14" />
           </button>
@@ -324,6 +372,11 @@ onMounted(loadPlugins)
 .badge-crashed { background: rgba(226,75,74,0.15); color: #E24B4A; }
 .badge-created { background: rgba(55,138,221,0.15); color: #378ADD; }
 
+/* 使用次数 */
+.card-usage { display: flex; align-items: center; gap: 3px; font-size: 10px; color: var(--color-text-muted); }
+.usage-icon { font-size: 8px; }
+.usage-count { font-family: var(--font-mono, monospace); font-weight: 500; }
+
 /* 描述 */
 .card-desc {
   font-size: 11px; color: var(--color-text-muted);
@@ -355,4 +408,35 @@ onMounted(loadPlugins)
 .btn-stop:hover { border-color: #E2A04A; color: #E2A04A; }
 .btn-open:hover { border-color: var(--color-accent); color: var(--color-accent); }
 .btn-uninstall:hover { border-color: #E24B4A; color: #E24B4A; }
+
+/* ---- 分类 Tabs ---- */
+.plugin-categories {
+  display: flex; gap: 4px; flex-wrap: wrap;
+  margin-bottom: 16px; flex-shrink: 0;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+.cat-tab {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 5px 12px; border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px; font-family: inherit;
+  cursor: pointer; white-space: nowrap;
+  transition: all 0.1s;
+}
+.cat-tab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.cat-tab.active {
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent);
+  color: var(--color-accent);
+}
+.cat-count {
+  font-size: 11px; opacity: 0.6;
+}
+
 </style>

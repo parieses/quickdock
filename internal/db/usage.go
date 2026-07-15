@@ -1,6 +1,9 @@
 package db
 
-import "time"
+import (
+	"database/sql"
+	"time"
+)
 
 // FrecencyEntry 前端需要的 frecency 数据
 type FrecencyEntry struct {
@@ -109,4 +112,21 @@ func (d *Database) GetTopUsage(limit int) ([]FrecencyEntry, error) {
 		results = append(results, e)
 	}
 	return results, rows.Err()
+}
+
+// GetPluginUsageCount 返回插件的总使用次数（汇总所有 plugin:{id}.xxx 的记录）
+func (d *Database) GetPluginUsageCount(pluginID string) (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	prefix := "plugin:" + pluginID + "%"
+	var total sql.NullInt64
+	err := d.conn.QueryRow("SELECT SUM(count) FROM usage_frecency WHERE key LIKE ?", prefix).Scan(&total)
+	if err != nil {
+		return 0, err
+	}
+	if total.Valid {
+		return int(total.Int64), nil
+	}
+	return 0, nil
 }

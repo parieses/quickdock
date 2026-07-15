@@ -3,10 +3,10 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick, inject } from '
 import { useI18n } from 'vue-i18n'
 import {
   Search, Hash, Command, ArrowRight, Lock, Power, Moon, Trash2, RotateCcw,
-  Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, X,
-  MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle
+  Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, X,
+  MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink
 } from '@lucide/vue'
-import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, ShowPluginWindow, SetPendingPluginInit, RecordUsage, RecordUsageEx, GetRecentUsage, GetAllUsage } from '../../bindings/quickdock/services/appservice'
+import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, RecordUsage, RecordUsageEx, GetRecentUsage, GetAllUsage } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -14,11 +14,12 @@ import type { CollectionItem, PluginInfo, PluginCommand } from '../types'
 import type { ToastAPI } from '../types'
 import { evaluate, format } from '../utils/calc'
 import { pinyin } from 'pinyin-pro'
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')
 
 // ---- 关闭面板（清空搜索框和结果缓存）----
 function closePalette() {
+  closeInlinePlugin()
   query.value = ''
   selectedIndex.value = 0
   inlineQuicklink.value = null
@@ -383,6 +384,89 @@ const listRef = ref<HTMLElement | null>(null)
 
 // 插件执行结果缓存（留在结果列表中，直到关闭面板或输入新内容）
 const pluginResultCache = ref<{ result: string; pluginName: string } | null>(null)
+
+// Inline 插件模式：在同一个面板内展示插件内容（uTools 风格）
+const inlinePluginId = ref<string | null>(null)
+const inlinePluginHtml = ref('')
+const inlinePluginLoading = ref(false)
+const inlinePluginError = ref('')
+const inlinePluginName = ref('')
+const inlinePluginIframe = ref<HTMLIFrameElement | null>(null)
+let inlinePluginMsgHandler: ((e: MessageEvent) => void) | null = null
+
+function closeInlinePlugin() {
+  inlinePluginId.value = null
+  inlinePluginHtml.value = ''
+  inlinePluginLoading.value = false
+  inlinePluginError.value = ''
+  inlinePluginName.value = ''
+  // 清理消息监听
+  if (inlinePluginMsgHandler) {
+    window.removeEventListener('message', inlinePluginMsgHandler)
+    inlinePluginMsgHandler = null
+  }
+  // 聚焦输入框
+  nextTick(() => inputRef.value?.focus())
+}
+
+// 分离为独立窗口：弹出到任务栏可见的独立窗口，仅能通过 X 关闭
+async function detachPlugin() {
+  if (!inlinePluginId.value) return
+  const id = inlinePluginId.value
+  try {
+    await ShowPluginWindow(id)
+  } catch (e) {
+    toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
+    return
+  }
+  // 分离后回到搜索模式
+  closeInlinePlugin()
+}
+
+// 内联插件 iframe 加载完成时：传递初始文本
+async function onInlinePluginLoad() {
+  const iframe = inlinePluginIframe.value
+  if (!iframe?.contentWindow) return
+  inlinePluginMsgHandler = (event: MessageEvent) => {
+    if (event.source !== iframe.contentWindow) return
+    if (event.data?.type === 'plugin:execute') {
+      const { id, command, input } = event.data
+      if (!inlinePluginId.value) return
+      ExecutePluginCommand(inlinePluginId.value, command, input || null).then(raw => {
+        const result = unwrap(raw)
+        if (event.source) {
+          ;(event.source as any).postMessage(
+            { type: 'plugin:result', id, data: result },
+            window.location.origin
+          )
+        }
+      }).catch(e => {
+        if (event.source) {
+          ;(event.source as any).postMessage(
+            { type: 'plugin:result', id, error: e?.message || String(e) },
+            window.location.origin
+          )
+        }
+      })
+    }
+  }
+  window.addEventListener('message', inlinePluginMsgHandler)
+
+  // 传递初始文本 + 主题 + 语言
+  try {
+    const raw = await GetAndClearPendingPluginInit()
+    const text = raw?.data || raw
+    if (iframe.contentWindow) {
+      // 先发 theme 消息让插件 HTML 应用主题
+      iframe.contentWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, window.location.origin)
+      // 再发 init 消息（携带 text 和主题/语言）
+      iframe.contentWindow.postMessage({
+        type: 'plugin:init',
+        data: { text, theme: 'dark', locale: locale.value }
+      }, window.location.origin)
+    }
+  } catch {}
+}
 
 // Quicklink 内联输入模式
 const inlineQuicklink = ref<CollectionItem | null>(null)
@@ -854,7 +938,12 @@ function onKeydown(e: KeyboardEvent) {
       executeSelected()
       break
     case 'Escape':
-      closePalette()
+      if (inlinePluginId.value) {
+        // 在插件内联模式中：按 Esc 回到搜索模式
+        closeInlinePlugin()
+      } else {
+        closePalette()
+      }
       break
   }
 }
@@ -925,18 +1014,36 @@ async function executeSelected() {
         try { await navigator.clipboard.writeText(copyText) } catch {}
         // 缓存到结果列表顶部
         pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label }
-        // Toast 提示
-        toast?.success?.(t('pluginResultCopied'))
+        // 如果插件有前端（将被内联展示），不弹 Toast 打扰用户
+        if (!result.pluginHasFrontend) {
+          toast?.success?.(t('pluginResultCopied'))
+        }
       }
 
-      // 如果有前端页面且用户输入了文本，把输入传给插件窗口（跨窗口传递）
+      // 如果有前端页面且有输入文本，为 iframe 准备初始值
       if ((result.pluginHasFrontend || result.pluginId) && inputText) {
         try { await SetPendingPluginInit(inputText) } catch {}
       }
 
-      // 如果有前端页面，在新窗口打开
+      // 如果有前端页面，在面板内联展示（uTools 风格）
       if (result.pluginHasFrontend || result.pluginId) {
-        try { await ShowPluginWindow(result.pluginId) } catch {}
+        inlinePluginId.value = result.pluginId
+        inlinePluginLoading.value = true
+        inlinePluginError.value = ''
+        try {
+          const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId))
+          if (html) {
+            // 从 HTML 中提取 title
+            const titleMatch = html.match(/<title>([^<]*)<\/title>/)
+            inlinePluginName.value = titleMatch ? titleMatch[1] : result.label
+            inlinePluginHtml.value = html
+          } else {
+            inlinePluginError.value = t('pluginNoFrontend')
+          }
+        } catch (e: any) {
+          inlinePluginError.value = t('pluginLoadFailed') + ': ' + getErrorMessage(e)
+        }
+        inlinePluginLoading.value = false
       }
     } catch (e) {
       toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
@@ -1091,8 +1198,14 @@ onMounted(async () => {
 
   await loadMostUsedItems()
 
-  // 每次窗口打开时：清空搜索框 + 3秒内剪贴板内容自动填充 + 聚焦输入
+  // 每次窗口打开时：如果在 inline 插件模式则保持，否则重置搜索状态
   Events.On('palette:shown', () => {
+    if (inlinePluginId.value) {
+      // Inline 插件模式：保持当前插件显示，只聚焦
+      setTimeout(() => inputRef.value?.focus(), 50)
+      return
+    }
+
     query.value = ''
     selectedIndex.value = 0
     inlineQuicklink.value = null
@@ -1145,7 +1258,37 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="palette-root" @click.self="closePalette">
+  <!-- Inline 插件模式：面板内展示插件内容（uTools 风格） -->
+  <div v-if="inlinePluginId" class="palette-root palette-plugin-mode" @click.self="closeInlinePlugin">
+    <div class="palette-plugin-header">
+      <button class="plugin-back-btn" @click="closeInlinePlugin">
+        <ChevronLeft :size="16" />
+        <span>{{ t('back') }}</span>
+      </button>
+      <span class="plugin-title">{{ inlinePluginName }}</span>
+      <div class="plugin-header-actions">
+        <button class="plugin-detach-btn" @click="detachPlugin" :title="t('pluginDetach')">
+          <ExternalLink :size="14" />
+        </button>
+      </div>
+    </div>
+    <div class="palette-plugin-body">
+      <div v-if="inlinePluginLoading" class="palette-plugin-status">{{ t('loading') }}</div>
+      <div v-else-if="inlinePluginError" class="palette-plugin-status palette-plugin-error">{{ inlinePluginError }}</div>
+      <iframe
+        v-else-if="inlinePluginHtml"
+        ref="inlinePluginIframe"
+        :srcdoc="inlinePluginHtml"
+        class="palette-plugin-iframe"
+        sandbox="allow-scripts allow-same-origin allow-modals"
+        frameborder="0"
+        @load="onInlinePluginLoad"
+      />
+    </div>
+  </div>
+
+  <!-- 搜索模式 -->
+  <div v-else class="palette-root" @click.self="closePalette">
     <!-- 搜索栏 -->
     <div class="palette-searchbar">
       <Search :size="16" class="search-icon" />
@@ -1504,5 +1647,132 @@ onUnmounted(() => {
 }
 .palette-results::-webkit-scrollbar-thumb:hover {
   background: var(--color-scrollbar-hover);
+}
+
+/* ===== Inline 插件模式（uTools 风格） ===== */
+
+.palette-plugin-mode {
+  background: var(--color-bg-primary);
+}
+
+/* 标题栏：精准的层级感，shadow-border 替代 solid border */
+.palette-plugin-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 36px;
+  flex-shrink: 0;
+  padding: 0 6px;
+  background: var(--color-bg-secondary);
+  box-shadow: inset 0 -1px 0 0 var(--color-border);
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* 返回按钮：紧凑、清晰 */
+.plugin-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  padding: 0 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 0.1s, color 0.1s;
+}
+.plugin-back-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.plugin-back-btn:active {
+  background: var(--color-bg-active);
+}
+.plugin-back-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* 插件名称：居中，次级强调 */
+.plugin-title {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+
+/* 右上角操作区 */
+.plugin-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 分离按钮：安静存在，悬停显现 */
+.plugin-detach-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: background 0.12s, color 0.12s;
+}
+.plugin-detach-btn:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
+}
+.plugin-detach-btn:active {
+  background: var(--color-bg-active);
+}
+
+/* 内容区：占满剩余空间 */
+.palette-plugin-body {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+}
+
+/* 加载/错误状态 */
+.palette-plugin-status {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  color: var(--color-text-disabled);
+  user-select: none;
+}
+.palette-plugin-error {
+  color: var(--color-danger);
+  padding: 0 24px;
+  text-align: center;
+  line-height: 1.6;
+}
+
+/* iframe：干净无边框 */
+.palette-plugin-iframe {
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  border: none;
+  background: var(--color-bg-primary);
 }
 </style>

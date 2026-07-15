@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>SQL 格式化</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-app{display:flex;flex-direction:column;height:100vh}
+.p-toolbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.p-btn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap}
+.p-btn:hover{background:var(--bg-hover)}
+.p-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.p-btn-primary:hover{background:var(--accent-hover)}
+.p-spacer{flex:1}
+.p-body{display:flex;flex:1;min-height:0;gap:1px}
+.p-pane{display:flex;flex-direction:column;flex:1;min-width:0;background:var(--bg-secondary)}
+.p-pane-header{padding:6px 10px;flex-shrink:0;font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;background:var(--bg-secondary);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px}
+.p-textarea{flex:1;resize:none;padding:10px;border:none;outline:none;background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;line-height:1.5;tab-size:2}
+.p-textarea::placeholder{color:var(--text-placeholder)}
+.p-textarea-input:focus{background:var(--bg-tertiary)}
+.p-textarea-output{background:var(--bg-tertiary)}
+.p-statusbar{padding:4px 10px;font-size:11px;color:var(--text-muted);background:var(--bg-secondary);border-top:1px solid var(--border);flex-shrink:0;min-height:24px}
+.p-badge{padding:1px 6px;border-radius:3px;font-size:10px;background:var(--accent);color:#fff;margin-left:auto}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <button class="p-btn p-btn-primary" id="btnFormat">▶ 格式化</button>
+    <button class="p-btn" id="btnCopy">📋 复制</button>
+    <span class="p-spacer"></span>
+    <button class="p-btn" id="btnClear">✕ 清空</button>
+  </div>
+  <div class="p-body">
+    <div class="p-pane">
+      <div class="p-pane-header">SQL 输入</div>
+      <textarea id="inputArea" class="p-textarea p-textarea-input" placeholder="SELECT * FROM users WHERE id = 1" spellcheck="false"></textarea>
+    </div>
+    <div class="p-pane">
+      <div class="p-pane-header">格式化输出</div>
+      <textarea id="outputArea" class="p-textarea p-textarea-output" readonly placeholder="格式化结果…" spellcheck="false"></textarea>
+    </div>
+  </div>
+  <div class="p-statusbar" id="statusBar">等待输入…</div>
+</div>
+<script>
+(function(){
+  var inputArea=document.getElementById('inputArea'),outputArea=document.getElementById('outputArea')
+  var btnFormat=document.getElementById('btnFormat'),btnCopy=document.getElementById('btnCopy'),btnClear=document.getElementById('btnClear')
+  var statusText=document.getElementById('statusBar')
+  document.addEventListener('keydown',function(e){if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();doFormat()};if(e.key==='Escape')inputArea.focus()})
+  btnFormat.addEventListener('click',doFormat)
+  btnCopy.addEventListener('click',function(){if(outputArea.value){try{navigator.clipboard.writeText(outputArea.value);statusText.textContent='已复制！'}catch(e){}}})
+  btnClear.addEventListener('click',function(){inputArea.value='';outputArea.value='';statusText.textContent='等待输入…';inputArea.focus()})
+  var autoTimer;inputArea.addEventListener('input',function(){if(autoTimer)clearTimeout(autoTimer);if(inputArea.value.trim())autoTimer=setTimeout(doFormat,600);else{outputArea.value='';statusText.textContent='等待输入…'}})
+  function doFormat(){
+    var text=inputArea.value.trim()
+    if(!text){outputArea.value='';statusText.textContent='等待输入…';return}
+    var result=formatSQL(text)
+    outputArea.value=result
+    statusText.textContent='✅ 格式化完成 | '+(text.length-result.length>0?'压缩 '+(text.length-result.length)+' 字符':'大小不变')
+  }
+  // 后端函数复本
+  var MAJOR_KW=['SELECT','FROM','WHERE','AND','OR','SET','INSERT INTO','VALUES','UPDATE','DELETE FROM','CREATE TABLE','ALTER TABLE','DROP TABLE','ORDER BY','GROUP BY','HAVING','LIMIT','OFFSET','JOIN','INNER JOIN','LEFT JOIN','RIGHT JOIN','FULL JOIN','CROSS JOIN','ON','USING','UNION','UNION ALL','IN','EXISTS','NOT','BETWEEN','LIKE','IS NULL','IS NOT NULL','AS','DISTINCT','CASE','WHEN','THEN','ELSE','END','WITH','RECURSIVE','RETURNING','BEGIN','COMMIT','ROLLBACK']
+  function escRE(s){return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}
+  function formatSQL(sql){
+    sql=sql.toUpperCase()
+    var sorted=MAJOR_KW.slice().sort(function(a,b){return b.length-a.length})
+    for(var i=0;i<sorted.length;i++){var re=new RegExp('\\b'+escRE(sorted[i])+'\\b','g');sql=sql.replace(re,function(m){return m})}
+    var clauses=['SELECT','FROM','WHERE','ORDER BY','GROUP BY','HAVING','LIMIT','OFFSET','SET','VALUES','INSERT INTO','UPDATE','DELETE FROM','CREATE TABLE','ALTER TABLE','DROP TABLE','INNER JOIN','LEFT JOIN','RIGHT JOIN','FULL JOIN','CROSS JOIN','JOIN','UNION','UNION ALL','ON','USING','RETURNING']
+    for(var j=0;j<clauses.length;j++){var re2=new RegExp('\\b'+escRE(clauses[j])+'\\b','gi');sql=sql.replace(re2,'\n'+clauses[j])}
+    sql=sql.replace(/\nAND\b/gi,'\n  AND').replace(/\nOR\b/gi,'\n  OR')
+    sql=sql.replace(/\n{3,}/g,'\n').replace(/^\n+/,'').replace(/\n+$/,'')
+    var lines=sql.split('\n'),result=[]
+    for(var k=0;k<lines.length;k++){
+      var line=lines[k],depth=0,chars='',inComma=false
+      if(/^SELECT/.test(line.trim())||/^\s*,/.test(line)){
+        for(var ci=0;ci<line.length;ci++){
+          var ch=line[ci];if(ch==='(')depth++;if(ch===')')depth--
+          if(ch===','&&depth===0){chars+=',\n  ';inComma=true}else{chars+=ch}
+        }
+        result.push(chars)
+      }else result.push(line)
+    }
+    return result.join('\n').trim()
+  }
+  inputArea.focus()
+})()
+</script>
+</body>
+</html>

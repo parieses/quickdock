@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数据格式转换</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-app{display:flex;flex-direction:column;height:100vh}
+.p-toolbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
+.p-label{font-size:12px;color:var(--text-secondary);white-space:nowrap}
+.p-select{height:28px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-primary);color:var(--text-primary);font-size:12px;font-family:inherit;outline:none;cursor:pointer}
+.p-select:focus{border-color:var(--accent)}
+.p-btn{display:inline-flex;align-items:center;gap:4px;height:28px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:background .1s,border-color .1s}
+.p-btn:hover{background:var(--bg-hover);border-color:#3a3a3a}
+.p-btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.p-btn-primary:hover{background:#3a8ae0}
+.p-body{flex:1;display:flex;overflow:hidden;gap:1px;background:var(--border)}
+.p-pane{flex:1;display:flex;flex-direction:column;background:var(--bg-primary);min-width:0}
+.p-pane-header{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;font-size:11px;color:var(--text-muted);background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.p-textarea{flex:1;resize:none;padding:10px;border:none;outline:none;background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;line-height:1.5;tab-size:2}
+.p-textarea:focus{background:var(--bg-tertiary)}
+.p-textarea::placeholder{color:var(--text-placeholder)}
+.p-output{flex:1;overflow:auto;padding:10px;font-family:var(--font-mono);font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;color:var(--text-primary);background:var(--bg-tertiary)}
+.p-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted);font-size:13px}
+.p-stats{display:flex;align-items:center;gap:8px;padding:4px 10px;font-size:11px;color:var(--text-muted);background:var(--bg-secondary);border-top:1px solid var(--border);flex-shrink:0}
+.p-error{display:flex;align-items:center;gap:6px;padding:8px 10px;color:#e24b4a;font-size:12px;background:rgba(226,75,74,0.08);border-top:1px solid var(--border);flex-shrink:0}
+.p-swap-btn{display:flex;align-items:center;justify-content:center;width:28px;height:28px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);cursor:pointer;color:var(--text-muted);transition:background .1s,color .1s}
+.p-swap-btn:hover{background:var(--bg-hover);color:var(--accent)}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <span class="p-label">输入格式</span>
+    <select id="fromFormat" class="p-select">
+      <option value="json">JSON</option>
+      <option value="yaml">YAML</option>
+      <option value="toml">TOML</option>
+      <option value="xml">XML</option>
+    </select>
+    <button class="p-swap-btn" onclick="swapFormats()" title="交换格式">&harr;</button>
+    <span class="p-label">输出格式</span>
+    <select id="toFormat" class="p-select">
+      <option value="yaml">YAML</option>
+      <option value="json">JSON</option>
+      <option value="toml">TOML</option>
+      <option value="xml">XML</option>
+    </select>
+    <button class="p-btn p-btn-primary" onclick="convert()">转换</button>
+    <button class="p-btn" onclick="copyResult()">复制</button>
+    <button class="p-btn" onclick="clearAll()">清空</button>
+  </div>
+  <div class="p-body">
+    <div class="p-pane">
+      <div class="p-pane-header"><span id="inputLabel">输入</span></div>
+      <textarea id="inputArea" class="p-textarea" placeholder="粘贴数据..." spellcheck="false"></textarea>
+    </div>
+    <div class="p-pane">
+      <div class="p-pane-header"><span id="outputLabel">输出</span></div>
+      <pre id="outputArea" class="p-output"><div class="p-empty">等待转换...</div></pre>
+    </div>
+  </div>
+  <div id="statusBar" class="p-stats"></div>
+  <div id="errorBar" class="p-error" style="display:none"></div>
+</div>
+<script>
+function $(id){return document.getElementById(id)}
+function detectFormat(text) {
+  var t = text.trim()
+  if (t.startsWith('{') || t.startsWith('[')) return 'json'
+  if (t.startsWith('<')) return 'xml'
+  if (t.indexOf(':') > 0 && t.indexOf('\n') > 0) return 'yaml'
+  if (t.indexOf('=') > 0 && t.indexOf('\n') > 0 && t.indexOf('[') >= 0) return 'toml'
+  return 'json'
+}
+
+function convert() {
+  var input = $('inputArea').value
+  var from = $('fromFormat').value
+  var to = $('toFormat').value
+  $('errorBar').style.display = 'none'
+
+  if (!input.trim()) { showError('请输入待转换的数据'); return }
+
+  if (from === 'auto') from = detectFormat(input)
+  $('inputLabel').textContent = '输入 (' + from.toUpperCase() + ')'
+  $('outputLabel').textContent = '输出 (' + to.toUpperCase() + ')'
+
+  // 调用后端 goja
+  parent.postMessage({type:'plugin:execute', id:'convert', command:'convert-data', input:{text:input,fromFormat:from,toFormat:to}}, '*')
+}
+
+function copyResult() {
+  var text = $('outputArea').textContent
+  if (text && text !== '等待转换...') {
+    navigator.clipboard.writeText(text)
+    parent.postMessage({type:'plugin:toast', data:{message:'已复制'}}, '*')
+  }
+}
+
+function swapFormats() {
+  var from = $('fromFormat')
+  var to = $('toFormat')
+  var tmp = from.value
+  from.value = to.value
+  to.value = tmp
+}
+
+function clearAll() {
+  $('inputArea').value = ''
+  $('outputArea').innerHTML = '<div class="p-empty">等待转换...</div>'
+  $('errorBar').style.display = 'none'
+  $('statusBar').innerHTML = ''
+}
+
+function showError(msg) {
+  $('errorBar').innerHTML = '⚠ ' + msg
+  $('errorBar').style.display = 'flex'
+}
+
+// 监听宿主返回
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'plugin:result') {
+    var result = e.data.data
+    if (result.error) {
+      showError(result.error)
+      return
+    }
+    $('outputArea').textContent = result.text || result.display || ''
+    var lines = ($('outputArea').textContent || '').split('\n').length
+    $('statusBar').innerHTML = lines + ' 行'
+  }
+})
+
+// Ctrl+Enter 触发转换
+document.addEventListener('keydown', function(e) {
+  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') convert()
+})
+</script>
+</body>
+</html>

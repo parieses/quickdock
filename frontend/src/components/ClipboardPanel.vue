@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ClipboardList, Search, X, RefreshCw, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight } from '@lucide/vue'
 import { ListClipboardEntries, PasteClipboardEntry, GetClipboardImageBase64, HideClipboardWindow, TogglePinClipboardEntry, CreateSnippet } from '../../bindings/quickdock/services/appservice'
@@ -130,6 +130,11 @@ function clearSearch() {
   clipboardPage.value = 1
 }
 
+// 关闭时回到顶部（覆盖所有关闭路径）
+function resetScrollOnHide() {
+  listRef.value?.scrollTo(0, 0)
+}
+
 // ---- 懒加载图片 ----
 function observeImage(el: HTMLElement | null, entryId: string) {
   if (!el || !observerRef.value) return
@@ -187,6 +192,10 @@ async function loadEntries() {
 
 async function handleCopy(entry: ClipboardEntry) {
   try {
+    // 紧凑模式（独立窗口）粘贴后窗口关闭，先归零滚动避免下次打开卡顿
+    if (props.compact) {
+      listRef.value?.scrollTo(0, 0)
+    }
     await PasteClipboardEntry(entry.id)
     // 主页面模式下刷新列表，让条目因 created_at 更新而移到顶部
     if (!props.compact) {
@@ -317,6 +326,7 @@ function onPanelKeydown(e: KeyboardEvent) {
       handleCopy(list[selectedIndex.value])
       break
     case 'Escape':
+      resetScrollOnHide()
       try { HideClipboardWindow() } catch {}
       break
   }
@@ -327,6 +337,7 @@ onMounted(() => {
   refreshTimer.value = window.setInterval(loadEntries, 30000)
   Events.On('clipboard:updated', loadEntries)
   Events.On('clipboard:shown', clearSearch)
+  Events.On('clipboard:before-hide', resetScrollOnHide)
   document.addEventListener('keydown', onPanelKeydown)
 })
 
@@ -336,6 +347,7 @@ onUnmounted(() => {
   }
   Events.Off('clipboard:updated')
   Events.Off('clipboard:shown')
+  Events.Off('clipboard:before-hide')
   document.removeEventListener('keydown', onPanelKeydown)
   observerRef.value?.disconnect()
 })
