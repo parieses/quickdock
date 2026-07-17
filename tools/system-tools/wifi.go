@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os/exec"
 	"strings"
 )
 
@@ -34,7 +33,7 @@ func handleWifiCommand(id int64, cmd string, input map[string]interface{}) {
 }
 
 func wifiList(id int64) {
-	out, err := exec.Command("netsh", "wlan", "show", "networks", "mode=Bssid").Output()
+	out, err := hiddenCmd("netsh", "wlan", "show", "networks", "mode=Bssid").Output()
 	if err != nil {
 		respondError(id, -1, "执行 netsh 失败: "+err.Error())
 		return
@@ -84,7 +83,7 @@ func wifiList(id int64) {
 }
 
 func wifiStatus(id int64) {
-	out, err := exec.Command("netsh", "wlan", "show", "interfaces").Output()
+	out, err := hiddenCmd("netsh", "wlan", "show", "interfaces").Output()
 	if err != nil {
 		respondError(id, -1, "获取 WiFi 状态失败: "+err.Error())
 		return
@@ -127,7 +126,7 @@ func wifiPassword(id int64, input map[string]interface{}) {
 		return
 	}
 
-	out, err := exec.Command("netsh", "wlan", "show", "profile", "name="+ssid, "key=clear").Output()
+	out, err := hiddenCmd("netsh", "wlan", "show", "profile", "name="+ssid, "key=clear").Output()
 	if err != nil {
 		respondError(id, -1, "获取 WiFi 密码失败: "+err.Error())
 		return

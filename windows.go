@@ -3,13 +3,63 @@ package main
 import (
 	"os"
 	"sync"
+	"unsafe"
 
 	"quickdock/internal/platform"
 	"quickdock/services"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"golang.org/x/sys/windows"
 )
+
+var (
+	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
+	moduser32   = windows.NewLazySystemDLL("user32.dll")
+)
+
+// ensureSingleInstance 检查是否已有 QuickDock 实例在运行。
+// 如果已有实例，将其窗口提到前台并返回 true（主函数应退出）；
+// 否则返回 false 继续启动。
+func ensureSingleInstance() bool {
+	createMutex := modkernel32.NewProc("CreateMutexW")
+	mutexName, _ := windows.UTF16PtrFromString("Local\\QuickDock-Instance")
+
+	ret, _, err := createMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
+	if ret == 0 {
+		// 创建互斥体失败，放行（主程序继续启动）
+		return false
+	}
+
+	// 检查是否已经存在
+	if err == windows.ERROR_ALREADY_EXISTS {
+		// 已有实例运行，找到它的主窗口并提到前台
+		className, _ := windows.UTF16PtrFromString("Chrome_WidgetWin_0") // WebView2 窗口类
+		findWindow := moduser32.NewProc("FindWindowW")
+		hwnd, _, _ := findWindow.Call(uintptr(unsafe.Pointer(className)), 0)
+
+		if hwnd != 0 {
+			showWindow := moduser32.NewProc("ShowWindow")
+			showWindow.Call(hwnd, 9)      // SW_RESTORE
+			setFg := moduser32.NewProc("SetForegroundWindow")
+			setFg.Call(hwnd)
+		} else {
+			// 按标题搜索作为备选
+			title, _ := windows.UTF16PtrFromString("快启坞 QuickDock")
+			hwnd, _, _ = findWindow.Call(0, uintptr(unsafe.Pointer(title)))
+			if hwnd != 0 {
+				showWindow := moduser32.NewProc("ShowWindow")
+				showWindow.Call(hwnd, 9)
+				setFg := moduser32.NewProc("SetForegroundWindow")
+				setFg.Call(hwnd)
+			}
+		}
+		return true
+	}
+
+	// 首次启动，互斥体句柄会在进程退出时自动关闭
+	return false
+}
 
 // clipboardWinLock 保护剪贴板窗口的懒创建（与 paletteWinLock 同模式）
 var clipboardWinLock sync.Mutex

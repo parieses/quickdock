@@ -45,6 +45,11 @@ var (
 )
 
 func main() {
+	// 单实例检查：若已有实例运行，将其窗口提到前台并退出
+	if ensureSingleInstance() {
+		return
+	}
+
 	// 创建 AppService 实例
 	appService := services.NewAppService()
 
@@ -70,6 +75,10 @@ func main() {
 	appService.InstallBuiltinPluginsFn = func(mgr *plugin.Manager, database *db.Database) {
 		autoInstallBuiltins(mgr, database, &builtinPlugins)
 	}
+
+	// 先提取插件文件（确保 system-tools.exe 等最新版本已写入磁盘）
+	// 必须早于 DiscoverAndLoad，否则旧版 console 类型 system-tools.exe 会被启动，弹出 CMD 窗口
+	extractBuiltinPluginFiles(pluginMgr, &builtinPlugins)
 
 	// 扫描并加载已安装插件（非关键，失败不影响主程序启动）
 	pluginMgr.DiscoverAndLoad()
@@ -153,6 +162,64 @@ func main() {
 	pluginMgr.ShutdownAll()
 	if appService.PluginWindowMgr != nil {
 		appService.PluginWindowMgr.CloseAll()
+	}
+}
+
+// extractBuiltinPluginFiles 提取内置插件文件到 ~/.quickdock/plugins/（不含 DB 写入和 LoadPlugin）
+// 在 DiscoverAndLoad 之前调用，确保插件二进制文件（如 system-tools.exe）是最新版本
+func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
+	entries, err := builtinFS.ReadDir("plugins/builtin")
+	if err != nil {
+		fmt.Println("QuickDock: 读取内置插件目录失败:", err)
+		return
+	}
+
+	// 确保 builtin 共享目录存在，提取 common.css / common.js
+	builtinDir := filepath.Join(mgr.PluginsDir(), "builtin")
+	os.MkdirAll(builtinDir, 0755)
+	for _, name := range []string{"common.css", "common.js"} {
+		if data, cer := builtinFS.ReadFile(path.Join("plugins/builtin", name)); cer == nil {
+			os.WriteFile(filepath.Join(builtinDir, name), data, 0644)
+		}
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		pluginID := entry.Name()
+		targetDir := filepath.Join(mgr.PluginsDir(), pluginID)
+
+		// 读取 manifest 获取 ID（用于卸载旧实例）
+		manifestPath := path.Join("plugins/builtin", pluginID, "plugin.json")
+		data, err := builtinFS.ReadFile(manifestPath)
+		if err != nil {
+			continue
+		}
+		var mf plugin.PluginManifest
+		if err := json.Unmarshal(data, &mf); err != nil {
+			continue
+		}
+
+		// 卸载旧实例 + 删除旧目录
+		mgr.UnloadPlugin(pluginID)
+		mgr.UnloadPlugin(mf.ID)
+		os.RemoveAll(targetDir)
+
+		// 提取新文件
+		os.MkdirAll(targetDir, 0755)
+		if err := extractEmbeddedDir(builtinFS, path.Join("plugins/builtin", pluginID), targetDir); err != nil {
+			fmt.Printf("QuickDock: 提取内置插件 %s 失败: %v\n", pluginID, err)
+			os.RemoveAll(targetDir)
+			continue
+		}
+
+		// 把 common.css / common.js 拷贝到每个插件根目录
+		for _, name := range []string{"common.css", "common.js"} {
+			if cd, cer := builtinFS.ReadFile(path.Join("plugins/builtin", name)); cer == nil {
+				os.WriteFile(filepath.Join(targetDir, name), cd, 0644)
+			}
+		}
 	}
 }
 

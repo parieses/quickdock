@@ -1,7 +1,6 @@
 package main
 
 import (
-	"os/exec"
 	"strconv"
 	"strings"
 )
@@ -29,7 +28,7 @@ func handlePortCommand(id int64, cmd string, input map[string]interface{}) {
 
 func portList(id int64) {
 	// Use `netstat -ano` to list all listening ports
-	out, err := exec.Command("netstat", "-ano").Output()
+	out, err := hiddenCmd("netstat", "-ano").Output()
 	if err != nil {
 		respondError(id, -1, "执行 netstat 失败: "+err.Error())
 		return
@@ -130,7 +129,7 @@ func portCheck(id int64, input map[string]interface{}) {
 		return
 	}
 
-	out, err := exec.Command("netstat", "-ano").Output()
+	out, err := hiddenCmd("netstat", "-ano").Output()
 	if err != nil {
 		respondError(id, -1, "执行 netstat 失败: "+err.Error())
 		return
@@ -212,7 +211,7 @@ func getAllProcessNames() map[int]string {
 	if processNameCacheDone {
 		return processNameCache
 	}
-	out, err := exec.Command("tasklist", "/NH", "/FO", "CSV").Output()
+	out, err := hiddenCmd("tasklist", "/NH", "/FO", "CSV").Output()
 	if err != nil {
 		processNameCacheDone = true
 		processNameCache = make(map[int]string)
@@ -250,7 +249,7 @@ func portKill(id int64, input map[string]interface{}) {
 	// 先获取进程名
 	procName := getProcessName(pid)
 
-	err := exec.Command("taskkill", "/F", "/PID", strconv.Itoa(pid)).Run()
+	err := hiddenCmd("taskkill", "/F", "/PID", strconv.Itoa(pid)).Run()
 	if err != nil {
 		respondError(id, -1, "结束进程失败: "+err.Error())
 		return

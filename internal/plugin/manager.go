@@ -104,7 +104,7 @@ func (m *Manager) DiscoverAndLoad() error {
 	return nil
 }
 
-// LoadPlugin 启动一个插件的子进程（none runtime 不启动进程，纯前端）
+// LoadPlugin 注册一个插件（none/goja 立即初始化，native 延迟到首次使用）
 func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	// 先获取插件ID并检查是否需要停止旧实例
 	m.mu.Lock()
@@ -113,214 +113,173 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	}
 	m.mu.Unlock()
 
-	// none runtime：纯前端插件，不启动子进程
-	if manifest.Backend.Runtime == "none" {
-		inst := NewPluginInstance(manifest, dir)
-		inst.Status = "running"
-		close(inst.readyCh) // 无需等待
-		m.mu.Lock()
-		m.plugins[manifest.ID] = inst
-		m.mu.Unlock()
-		return nil
-	}
-
-	// 根据 runtime 构建启动命令
-	var cmd *exec.Cmd
-	entryPath := filepath.Join(dir, manifest.Backend.Entry)
-
 	switch manifest.Backend.Runtime {
-	case "native":
-		cmd = exec.Command(entryPath, manifest.Backend.Args...)
-		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	case "goja":
-		// 读取并执行 JS 文件
-		jsCode, err := os.ReadFile(entryPath)
-		if err != nil {
-			return fmt.Errorf("读取插件 JS 文件失败: %w", err)
-		}
-		vm := goja.New()
-		vm.Set("__pluginId", manifest.ID)
-		vm.Set("__pluginDir", dir)
-
-		// 初始化插件专属 SQLite 数据库
-		dataDir := filepath.Join(platform.DefaultDataDir(), "data", manifest.ID)
-		if err := os.MkdirAll(dataDir, 0755); err != nil {
-			return fmt.Errorf("创建插件数据目录失败: %w", err)
-		}
-		dbPath := filepath.Join(dataDir, "data.db")
-		pluginDB, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL")
-		if err != nil {
-			return fmt.Errorf("打开插件数据库失败: %w", err)
-		}
-		pluginDB.SetMaxOpenConns(1) // goja 单线程执行，无需多连接
-
-		vm.Set("api", map[string]interface{}{
-			"log": func(msg string) { fmt.Printf("[plugin %s] %s\n", manifest.ID, msg) },
-			"db": map[string]interface{}{
-				"exec": func(sql string, args ...interface{}) (map[string]interface{}, error) {
-					res, e := pluginDB.Exec(sql, args...)
-					if e != nil {
-						return nil, e
-					}
-					id, _ := res.LastInsertId()
-					ra, _ := res.RowsAffected()
-					return map[string]interface{}{"lastId": id, "rowsAffected": ra}, nil
-				},
-				"query": func(sql string, args ...interface{}) ([]map[string]interface{}, error) {
-					rows, e := pluginDB.Query(sql, args...)
-					if e != nil {
-						return nil, e
-					}
-					defer rows.Close()
-					cols, _ := rows.Columns()
-					var results []map[string]interface{}
-					for rows.Next() {
-						vals := make([]interface{}, len(cols))
-						valPtrs := make([]interface{}, len(cols))
-						for i := range vals {
-							valPtrs[i] = &vals[i]
-						}
-						rows.Scan(valPtrs...)
-						row := make(map[string]interface{})
-						for i, c := range cols {
-							switch v := vals[i].(type) {
-							case []byte:
-								row[c] = string(v)
-							default:
-								row[c] = v
-							}
-						}
-						results = append(results, row)
-					}
-					return results, nil
-				},
-			},
-			// crypto：由 Go 标准库实现，保证哈希/编解码正确性（含 UTF-8 / 多字节 / 4 字节代理对）
-			"crypto": newCryptoAPI(),
-		})
-
-		// goja 可能在执行 JS 时 panic（如栈溢出、类型错误），用 recover 保护
-		func() {
-			defer func() {
-				if r := recover(); r != nil {
-					err = fmt.Errorf("执行插件 JS 时 panic: %v", r)
-				}
-			}()
-			_, err = vm.RunString(string(jsCode))
-		}()
-		if err != nil {
-			return fmt.Errorf("执行插件 JS 失败: %w", err)
-		}
-
-		// 检查是否导出了必要函数
-		hasInit := vm.Get("handleInitialize") != nil && !goja.IsUndefined(vm.Get("handleInitialize"))
-		hasExec := vm.Get("handleExecute") != nil && !goja.IsUndefined(vm.Get("handleExecute"))
-		if !hasExec {
-			return fmt.Errorf("插件需要导出 handleExecute 函数")
-		}
-
+	case "none":
 		inst := NewPluginInstance(manifest, dir)
-		inst.VM = vm
-		inst.DB = pluginDB
 		inst.Status = "running"
 		close(inst.readyCh)
 		m.mu.Lock()
 		m.plugins[manifest.ID] = inst
 		m.mu.Unlock()
-
-		// goja 插件不需要子进程通信，直接完成
-		if hasInit {
-			inst.callGojaJS("handleInitialize", map[string]interface{}{})
+		return nil
+	case "goja":
+		return m.loadGojaPlugin(manifest, dir)
+	case "native":
+		entryPath := filepath.Join(dir, manifest.Backend.Entry)
+		cmd := exec.Command(entryPath, manifest.Backend.Args...)
+		// DETACHED_PROCESS + CREATE_NO_WINDOW 双重保证不弹 CMD 窗口
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			HideWindow:    true,
+			CreationFlags: 0x00000008 | 0x08000000,
 		}
+		cmd.Dir = dir
+
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			return fmt.Errorf("创建 stdin pipe 失败: %w", err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return fmt.Errorf("创建 stdout pipe 失败: %w", err)
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			return fmt.Errorf("创建 stderr pipe 失败: %w", err)
+		}
+		go func() {
+			scanner := bufio.NewScanner(stderr)
+			for scanner.Scan() {
+				fmt.Printf("[plugin %s] %s\n", manifest.ID, scanner.Text())
+			}
+		}()
+
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("插件进程启动失败: %w", err)
+		}
+
+		inst := NewPluginInstance(manifest, dir)
+		inst.Cmd = cmd
+		inst.Stdin = stdin
+		inst.Stdout = stdout
+		inst.Status = "starting"
+
+		m.mu.Lock()
+		m.plugins[manifest.ID] = inst
+		m.mu.Unlock()
+
+		go inst.readLoop(m)
+		go m.watchPlugin(inst)
+		<-inst.readyCh
+
+		_, err = inst.Call("initialize", map[string]interface{}{
+			"hostVersion": "3.0.0",
+			"pluginDir":   dir,
+		}, 15*time.Second)
+		if err != nil {
+			m.mu.Lock()
+			if current, ok := m.plugins[manifest.ID]; ok && current == inst {
+				delete(m.plugins, manifest.ID)
+			}
+			m.stopPlugin(inst)
+			m.mu.Unlock()
+			return fmt.Errorf("插件初始化失败: %w", err)
+		}
+
+		inst.Status = "running"
 		return nil
 	default:
 		return ErrUnsupportedRuntime
 	}
+}
 
-	cmd.Dir = dir
+// loadGojaPlugin 加载并执行 Goja JS 插件（在进程中运行，不启动子进程）
+func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir string) error {
+	entryPath := filepath.Join(dir, manifest.Backend.Entry)
+	jsCode, err := os.ReadFile(entryPath)
+	if err != nil {
+		return fmt.Errorf("读取插件 JS 文件失败: %w", err)
+	}
+	vm := goja.New()
+	vm.Set("__pluginId", manifest.ID)
+	vm.Set("__pluginDir", dir)
 
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		return fmt.Errorf("创建 stdin pipe 失败: %w", err)
+	dataDir := filepath.Join(platform.DefaultDataDir(), "data", manifest.ID)
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		return fmt.Errorf("创建插件数据目录失败: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
+	dbPath := filepath.Join(dataDir, "data.db")
+	pluginDB, err := sql.Open("sqlite", dbPath+"?_journal_mode=WAL&_synchronous=NORMAL")
 	if err != nil {
-		return fmt.Errorf("创建 stdout pipe 失败: %w", err)
+		return fmt.Errorf("打开插件数据库失败: %w", err)
 	}
+	pluginDB.SetMaxOpenConns(1)
 
-	// stderr 通过 pipe 加插件 ID 前缀后输出，便于识别各插件日志
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("创建 stderr pipe 失败: %w", err)
-	}
-	go func() {
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			fmt.Printf("[plugin %s] %s\n", manifest.ID, scanner.Text())
-		}
+	vm.Set("api", map[string]interface{}{
+		"log": func(msg string) { fmt.Printf("[plugin %s] %s\n", manifest.ID, msg) },
+		"db": map[string]interface{}{
+			"exec": func(sql string, args ...interface{}) (map[string]interface{}, error) {
+				res, e := pluginDB.Exec(sql, args...)
+				if e != nil { return nil, e }
+				id, _ := res.LastInsertId()
+				ra, _ := res.RowsAffected()
+				return map[string]interface{}{"lastId": id, "rowsAffected": ra}, nil
+			},
+			"query": func(sql string, args ...interface{}) ([]map[string]interface{}, error) {
+				rows, e := pluginDB.Query(sql, args...)
+				if e != nil { return nil, e }
+				defer rows.Close()
+				cols, _ := rows.Columns()
+				var results []map[string]interface{}
+				for rows.Next() {
+					vals := make([]interface{}, len(cols))
+					valPtrs := make([]interface{}, len(cols))
+					for i := range vals { valPtrs[i] = &vals[i] }
+					rows.Scan(valPtrs...)
+					row := make(map[string]interface{})
+					for i, c := range cols {
+						switch v := vals[i].(type) {
+						case []byte: row[c] = string(v)
+						default: row[c] = v
+						}
+					}
+					results = append(results, row)
+				}
+				return results, nil
+			},
+		},
+		"crypto": newCryptoAPI(),
+	})
+
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("执行插件 JS 时 panic: %v", r)
+			}
+		}()
+		_, err = vm.RunString(string(jsCode))
 	}()
+	if err != nil {
+		return fmt.Errorf("执行插件 JS 失败: %w", err)
+	}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("插件进程启动失败: %w", err)
+	hasInit := vm.Get("handleInitialize") != nil && !goja.IsUndefined(vm.Get("handleInitialize"))
+	hasExec := vm.Get("handleExecute") != nil && !goja.IsUndefined(vm.Get("handleExecute"))
+	if !hasExec {
+		return fmt.Errorf("插件需要导出 handleExecute 函数")
 	}
 
 	inst := NewPluginInstance(manifest, dir)
-	inst.Cmd = cmd
-	inst.Stdin = stdin
-	inst.Stdout = stdout
-	inst.Status = "starting"
-
-	// 加入插件列表（只加写锁很短时间）
+	inst.VM = vm
+	inst.DB = pluginDB
+	inst.Status = "running"
+	close(inst.readyCh)
 	m.mu.Lock()
-	if existing, ok := m.plugins[manifest.ID]; ok && existing != inst {
-		// 并发冲突：在上次解锁后另一个 goroutine 已加载了同一插件
-		// 停止当前实例，保留已有实例
-		m.mu.Unlock()
-		inst.Close()
-		if inst.Cmd != nil && inst.Cmd.Process != nil {
-			inst.Cmd.Process.Kill()
-		}
-		return fmt.Errorf("插件 %s 并发加载冲突，另一个实例已优先注册", manifest.ID)
-	}
 	m.plugins[manifest.ID] = inst
 	m.mu.Unlock()
 
-	// 后台读取 stdout（启动后立即开始，先于 initialize 发送）
-	go inst.readLoop(m)
-
-	// 后台等待进程退出并监控崩溃自动重启
-	go m.watchPlugin(inst)
-
-	// 等待 readLoop 就绪 ← P0 修复
-	<-inst.readyCh
-
-	// 发送 initialize 请求
-	_, err = inst.Call("initialize", map[string]interface{}{
-		"hostVersion": "3.0.0",
-		"pluginDir":   dir,
-	}, 15*time.Second)
-	if err != nil {
-		m.mu.Lock()
-		// 只删除自己的实例（避免并发场景下误删其他 goroutine 的实例）
-		if current, ok := m.plugins[manifest.ID]; ok && current == inst {
-			delete(m.plugins, manifest.ID)
-		}
-		m.stopPlugin(inst)
-		m.mu.Unlock()
-		return fmt.Errorf("插件初始化失败: %w", err)
+	if hasInit {
+		inst.callGojaJS("handleInitialize", map[string]interface{}{})
 	}
-
-	inst.Status = "running"
-
-	// 写入 PID 文件（取快照，避免在无锁状态下直接读 map）
-	m.mu.RLock()
-	pidSnapshot := make(map[string]*PluginInstance, len(m.plugins))
-	for k, v := range m.plugins {
-		pidSnapshot[k] = v
-	}
-	m.mu.RUnlock()
-	m.safeWritePidFile(pidSnapshot)
-
 	return nil
 }
 
@@ -508,18 +467,18 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 		return nil, ErrPluginNotFound
 	}
 
-	// 检查插件运行状态（前端已过滤，后端再做一层安全校验）
-	if inst.Status != "running" {
-		return nil, fmt.Errorf("插件 %s 未运行（状态: %s）", pluginID, inst.Status)
-	}
-
-	// none runtime：纯前端插件，无后端 RPC
-	if inst.Manifest.Backend.Runtime == "none" {
+	switch inst.Manifest.Backend.Runtime {
+	case "native":
+		if inst.Status != "running" {
+			return nil, fmt.Errorf("插件 %s 未在运行（状态: %s）", pluginID, inst.Status)
+		}
+		return inst.Call("plugin.execute", map[string]interface{}{
+			"command": commandID,
+			"input":   input,
+		}, 20*time.Second)
+	case "none":
 		return json.RawMessage(`{"status":"ok","frontendOnly":true}`), nil
-	}
-
-	// goja runtime：直接调用 JS 函数
-	if inst.Manifest.Backend.Runtime == "goja" {
+	case "goja":
 		result, err := inst.callGojaJS("handleExecute", map[string]interface{}{
 			"command": commandID,
 			"input":   input,
@@ -529,12 +488,9 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 		}
 		data, _ := json.Marshal(result)
 		return data, nil
+	default:
+		return nil, fmt.Errorf("不支持的运行类型: %s", inst.Manifest.Backend.Runtime)
 	}
-
-	return inst.Call("plugin.execute", map[string]interface{}{
-		"command": commandID,
-		"input":   input,
-	}, 20*time.Second)
 }
 
 // ListPlugins 列出所有插件（暴露给前端）
@@ -658,7 +614,10 @@ func (m *Manager) cleanupOrphans() {
 // Windows 上 os.FindProcess 始终成功，需要额外验证避免误杀 PID 被重用的问题
 func processExists(pid int) bool {
 	// 先用 tasklist 验证进程是否存在（Windows）
-	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV").Output()
+	// 注意：主进程是 GUI 类型，直接 exec.Command 启动 tasklist（控制台程序）会弹 CMD 窗口
+	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV")
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := cmd.Output()
 	if err != nil {
 		return false
 	}

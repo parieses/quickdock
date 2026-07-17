@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"strings"
+	"syscall"
 )
 
 // ---- JSON-RPC structures ----
@@ -130,4 +132,12 @@ func respondError(id int64, code int, msg string) {
 func mustMarshal(v interface{}) json.RawMessage {
 	data, _ := json.Marshal(v)
 	return data
+}
+
+// hiddenCmd 创建一个不弹 CMD 窗口的 exec.Command（父进程是 GUI 类型时，
+// 启动 netsh/netstat/tasklist/taskkill 等控制台子进程会弹出 CMD 窗口）
+func hiddenCmd(name string, arg ...string) *exec.Cmd {
+	cmd := exec.Command(name, arg...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	return cmd
 }
