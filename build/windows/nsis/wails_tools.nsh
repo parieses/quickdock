@@ -122,6 +122,9 @@ RequestExecutionLevel "${REQUEST_EXECUTION_LEVEL}"
 !macro wails.writeUninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
 
+    ; 持久保存安装路径到独立位置（卸载时也不删除，供下次安装自动回填）
+    WriteRegStr HKCU "Software\QuickDock" "InstallDir" "$INSTDIR"
+
     SetRegView 64
     !if "${WAILS_INSTALL_SCOPE}" == "user"
         WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${INFO_COMPANYNAME}"
