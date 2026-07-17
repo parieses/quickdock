@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync"
 
+	"quickdock/internal/platform"
 	"quickdock/services"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -181,11 +182,7 @@ func getPaletteWindow() *application.WebviewWindow {
 
 // EnsureConfigDir 确保配置目录存在（用于 WebviewUserDataPath）
 func EnsureConfigDir() string {
-	appData := os.Getenv("APPDATA")
-	if appData == "" {
-		appData = os.Getenv("LOCALAPPDATA")
-	}
-	dir := appData + "\\QuickDock"
+	dir := platform.DefaultConfigDir()
 	os.MkdirAll(dir, 0755)
 	return dir
 }

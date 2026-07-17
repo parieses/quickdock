@@ -262,11 +262,7 @@ func UTF16PtrToString(ptr uintptr, maxLen int) string {
 
 // GetImageDir returns the image storage directory
 func GetImageDir() string {
-	dir, err := os.UserHomeDir()
-	if err != nil {
-		return filepath.Join(os.TempDir(), "quickdock", "images")
-	}
-	imageDir := filepath.Join(dir, ".quickdock", "images")
+	imageDir := filepath.Join(DefaultDataDir(), "images")
 	os.MkdirAll(imageDir, 0755)
 	return imageDir
 }

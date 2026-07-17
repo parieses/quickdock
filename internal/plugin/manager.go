@@ -10,10 +10,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/dop251/goja"
 	_ "modernc.org/sqlite"
+
+	"quickdock/internal/platform"
 )
 
 // pidFileVersion 用于兼容未来格式变更
@@ -128,6 +131,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	switch manifest.Backend.Runtime {
 	case "native":
 		cmd = exec.Command(entryPath, manifest.Backend.Args...)
+		cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
 	case "goja":
 		// 读取并执行 JS 文件
 		jsCode, err := os.ReadFile(entryPath)
@@ -139,11 +143,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		vm.Set("__pluginDir", dir)
 
 		// 初始化插件专属 SQLite 数据库
-		homeDir, err := os.UserHomeDir()
-		if err != nil {
-			return fmt.Errorf("获取用户目录失败: %w", err)
-		}
-		dataDir := filepath.Join(homeDir, ".quickdock", "data", manifest.ID)
+		dataDir := filepath.Join(platform.DefaultDataDir(), "data", manifest.ID)
 		if err := os.MkdirAll(dataDir, 0755); err != nil {
 			return fmt.Errorf("创建插件数据目录失败: %w", err)
 		}

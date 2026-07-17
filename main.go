@@ -59,11 +59,7 @@ func main() {
 	appService.ResumeHotkeysFn = ResumeHotkeys
 
 	// 初始化插件管理器
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "."
-	}
-	pluginsDir := filepath.Join(homeDir, ".quickdock", "plugins")
+	pluginsDir := filepath.Join(platform.DefaultDataDir(), "plugins")
 	os.MkdirAll(pluginsDir, 0755)
 	pluginMgr := plugin.NewManager(pluginsDir)
 	appService.PluginMgr = pluginMgr
@@ -147,7 +143,7 @@ func main() {
 	InjectWindowGetters(appService, app)
 
 	// 运行应用
-	err = app.Run()
+	err := app.Run()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "QuickDock: 应用运行失败: %v\n", err)
 		// 不调用 log.Fatal，确保下面的 ShutdownAll 执行

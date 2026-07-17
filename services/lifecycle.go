@@ -15,11 +15,7 @@ import (
 // ServiceStartup 应用启动时调用（v3 生命周期）
 func (a *AppService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
 	// 打开数据库
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "."
-	}
-	dbDir := filepath.Join(homeDir, ".quickdock")
+	dbDir := platform.DefaultDataDir()
 	os.MkdirAll(dbDir, 0755)
 	dbPath := filepath.Join(dbDir, "quickdock.db")
 	fmt.Println("QuickDock: 正在打开数据库", dbPath)

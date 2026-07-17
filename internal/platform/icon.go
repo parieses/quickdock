@@ -98,8 +98,7 @@ func IconMIME(ext string) string {
 }
 // iconCacheDir 返回图标缓存目录
 func iconCacheDir() string {
-	home, _ := os.UserHomeDir()
-	dir := filepath.Join(home, ".quickdock", "icons")
+	dir := filepath.Join(DefaultDataDir(), "icons")
 	os.MkdirAll(dir, 0o755)
 	return dir
 }

@@ -106,11 +106,7 @@ func (a *AppService) GetClipboardImageBase64(id string) *ApiResult {
 		return FailMsg("该条目不是图片")
 	}
 
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		return Fail(fmt.Errorf("获取用户目录失败: %v", err))
-	}
-	allowedDir := filepath.Join(homeDir, ".quickdock", "images") + string(filepath.Separator)
+	allowedDir := filepath.Join(platform.DefaultDataDir(), "images") + string(filepath.Separator)
 	absPath, err := filepath.Abs(entry.ImagePath)
 	if err != nil {
 		return Fail(fmt.Errorf("路径解析失败: %v", err))
