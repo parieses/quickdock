@@ -1,6 +1,7 @@
 package platform
 
 import (
+	"net"
 	"sync"
 	"time"
 	"unsafe"
@@ -28,6 +29,7 @@ const (
 	ifOperStatusUp = 1
 
 	// MIB_IFROW field offsets (4-byte aligned; wszName[256]=512 bytes precedes them)
+	offIfIndex    = 512
 	offIfType     = 516
 	offOperStatus = 544
 	offInOctets   = 552
@@ -82,14 +84,23 @@ func sampleNet(getIfTable *windows.LazyProc) {
 
 	numEntries := *(*uint32)(unsafe.Pointer(&buf[0]))
 	rows := buf[4:] // table[1] immediately follows dwNumEntries
+
+	// 从 API 返回的 size 反推实际 MIB_IFROW 大小（跨 SDK 版本兼容）
+	entrySize := ifRowSize
+	if numEntries > 0 && size > 4 {
+		if c := int((size - 4) / numEntries); c > 0 && c <= 2048 {
+			entrySize = c
+		}
+	}
+
 	var totalIn, totalOut uint64
 	var iface string
 	for i := uint32(0); i < numEntries; i++ {
-		if int(i*ifRowSize) >= len(rows) {
+		if int(i)*entrySize >= len(rows) {
 			break
 		}
-		row := rows[i*ifRowSize:]
-		if len(row) < ifRowSize {
+		row := rows[int(i)*entrySize:]
+		if len(row) < entrySize {
 			break
 		}
 		ifType := *(*uint32)(unsafe.Pointer(&row[offIfType]))
@@ -100,8 +111,10 @@ func sampleNet(getIfTable *windows.LazyProc) {
 		totalIn += uint64(*(*uint32)(unsafe.Pointer(&row[offInOctets])))
 		totalOut += uint64(*(*uint32)(unsafe.Pointer(&row[offOutOctets])))
 		if iface == "" {
-			if n := UTF16PtrToString(uintptr(unsafe.Pointer(&row[0])), 256); n != "" {
-				iface = n
+			if idx := int(*(*uint32)(unsafe.Pointer(&row[offIfIndex]))); idx > 0 {
+				if ifi, err := net.InterfaceByIndex(idx); err == nil && ifi.Name != "" {
+					iface = ifi.Name
+				}
 			}
 		}
 	}

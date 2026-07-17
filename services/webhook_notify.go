@@ -95,10 +95,12 @@ func (a *AppService) sendWebhookNotify(title, body string) {
 
 // postWebhook 按各平台 text 消息格式构造 payload 并 POST，解析返回判定是否成功。
 func postWebhook(kind, url, title, body string) error {
+	ts := time.Now().Format("2006-01-02 15:04:05")
 	content := title
 	if body != "" {
 		content += "\n" + body
 	}
+	content += "\n—— " + ts
 
 	var payload []byte
 	switch kind {

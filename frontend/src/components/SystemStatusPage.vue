@@ -157,10 +157,10 @@ onUnmounted(() => {
         <span v-for="ip in status.ips" :key="ip" class="ss-ip-badge">{{ ip }}</span>
         <span v-if="status.ips.length === 0" class="ss-ip-none">—</span>
       </div>
-      <div v-if="status.netInterface" class="ss-net-speed">
+      <div class="ss-net-speed">
         <div class="ss-net-row"><ArrowDown :size="13" class="net-down" /> {{ fmtSpeed(status.netDownSpeedBps) }}</div>
         <div class="ss-net-row"><ArrowUp :size="13" class="net-up" /> {{ fmtSpeed(status.netUpSpeedBps) }}</div>
-        <div class="ss-net-iface">{{ status.netInterface }}</div>
+        <div class="ss-net-iface">{{ status.netInterface || '—' }}</div>
       </div>
     </div>
   </div>
