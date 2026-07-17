@@ -9,6 +9,7 @@ import (
 	"path"
 	"path/filepath"
 	"sync/atomic"
+	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/platform"
@@ -18,6 +19,8 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
+	"github.com/wailsapp/wails/v3/pkg/updater"
+	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 )
 
 //go:embed all:frontend/dist
@@ -25,6 +28,12 @@ var assets embed.FS
 
 //go:embed all:plugins/builtin
 var builtinPlugins embed.FS
+
+//go:embed updater.key.pub
+var updaterPublicKey []byte
+
+// appVersion 在编译时通过 -ldflags="-X main.appVersion=0.2.0" 注入版本号
+var appVersion = "0.0.0"
 
 const (
 	appTitle         = "快启坞 QuickDock"
@@ -107,6 +116,11 @@ func main() {
 	// 传入 App 引用给 AppService
 	appService.SetApp(app)
 
+	// 初始化自动更新器（GitHub Releases Provider）
+	if err := initUpdater(app, appVersion); err != nil {
+		fmt.Printf("QuickDock: 更新器初始化失败（非关键错误）: %v\n", err)
+	}
+
 	// 注入通知服务引用（供待办提醒调度器使用）
 	appService.Notifier = notifier
 
@@ -163,6 +177,23 @@ func main() {
 	if appService.PluginWindowMgr != nil {
 		appService.PluginWindowMgr.CloseAll()
 	}
+}
+
+// initUpdater 初始化 Wails 自动更新器（使用 GitHub Releases + Ed25519 签名验证）
+func initUpdater(app *application.App, version string) error {
+	gh, err := github.New(github.Config{
+		Repository: "parieses/quickdock",
+	})
+	if err != nil {
+		return fmt.Errorf("创建 GitHub provider 失败: %w", err)
+	}
+
+	return app.Updater.Init(updater.Config{
+		CurrentVersion: version,
+		Providers:      []updater.Provider{gh},
+		PublicKey:      updaterPublicKey,
+		CheckInterval:  24 * time.Hour, // 每 24 小时后台自动检查
+	})
 }
 
 // extractBuiltinPluginFiles 提取内置插件文件到 ~/.quickdock/plugins/（不含 DB 写入和 LoadPlugin）

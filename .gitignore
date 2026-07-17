@@ -48,3 +48,6 @@ desktop.ini
 # --- Build cache & personal ---
 .task/
 .workbuddy/
+
+# --- Updater ---
+updater.key
