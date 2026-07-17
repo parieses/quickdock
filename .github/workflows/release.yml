@@ -26,9 +26,13 @@ jobs:
         with:
           node-version: '22'
 
+      - name: Install Wails3 CLI
+        shell: pwsh
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+
       - name: Install NSIS
         shell: pwsh
-        run: choco install nsis -y
+        run: choco install nsis -y --no-progress
 
       - name: Extract version from tag
         shell: pwsh
@@ -39,50 +43,47 @@ jobs:
 
       - name: Build frontend
         shell: pwsh
+        working-directory: frontend
         run: |
-          cd frontend
           npm install
           npm run build
-        working-directory: ${{ github.workspace }}
 
-      - name: Build binary (production)
+      - name: Generate icon resource
         shell: pwsh
+        working-directory: ${{ github.workspace }}
         run: |
-          # Generate icon resource
           wails3 generate syso -arch amd64 `
             -icon build/windows/icon.ico `
             -manifest build/windows/wails.exe.manifest `
             -info build/windows/info.json `
             -out wails_windows_amd64.syso
 
-          # Build with version injection
+      - name: Build binary (production)
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
           go build -tags production `
             -trimpath -buildvcs=false `
             -ldflags="-w -s -H windowsgui -X main.appVersion=$env:VERSION" `
             -o bin/quickdock-v3.exe .
-
           Remove-Item wails_windows_amd64.syso
-        working-directory: ${{ github.workspace }}
 
       - name: Package NSIS installer
         shell: pwsh
-        run: |
-          $env:Path += ";${env:ProgramFiles(x86)}\NSIS"
-          Copy-Item bin/quickdock-v3.exe build/windows/nsis/
-          Set-Location build/windows/nsis
-          makensis -DARG_WAILS_AMD64_BINARY=quickdock-v3.exe project.nsi
-          Remove-Item quickdock-v3.exe
         working-directory: ${{ github.workspace }}
+        run: |
+          Copy-Item bin/quickdock-v3.exe build/windows/nsis/quickdock-v3.exe
+          & "C:\Program Files (x86)\NSIS\makensis.exe" `
+            -DARG_WAILS_AMD64_BINARY=quickdock-v3.exe `
+            "$pwd\build\windows\nsis\project.nsi"
+          Remove-Item build/windows/nsis/quickdock-v3.exe
 
       - name: Generate updater manifest
         shell: pwsh
+        working-directory: ${{ github.workspace }}
         run: |
-          $key = "${{ secrets.UPDATER_PRIVATE_KEY }}"
-          if ($key) {
-            # Write private key from secrets
-            Set-Content -Path updater.key -Value $key
-
-            # Generate manifest with signatures
+          if ("${{ secrets.UPDATER_PRIVATE_KEY }}" -ne "") {
+            Set-Content -Path updater.key -Value "${{ secrets.UPDATER_PRIVATE_KEY }}"
             $tag = "$env:GITHUB_REF_NAME"
             $urlPrefix = "https://github.com/parieses/quickdock/releases/download/$tag"
             wails3 updater manifest `
@@ -91,12 +92,10 @@ jobs:
               -url-prefix "$urlPrefix" `
               -output manifest.json `
               bin/quickdock-v3-amd64-installer.exe
-
             Remove-Item updater.key -ErrorAction SilentlyContinue
           } else {
-            echo "No UPDATER_PRIVATE_KEY secret set — skipping manifest signing"
+            echo "No UPDATER_PRIVATE_KEY secret set - skipping manifest signing"
           }
-        working-directory: ${{ github.workspace }}
 
       - name: Upload Release Assets
         uses: softprops/action-gh-release@v2
