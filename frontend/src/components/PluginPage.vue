@@ -49,14 +49,14 @@ onMounted(async () => {
         if (event.source && 'postMessage' in (event.source as any)) {
           ;(event.source as any).postMessage(
             { type: 'plugin:result', id, data },
-            window.location.origin
+            '*'
           )
         }
       } catch (e: any) {
         if (event.source && 'postMessage' in (event.source as any)) {
           ;(event.source as any).postMessage(
             { type: 'plugin:result', id, error: e?.message || String(e) },
-            window.location.origin
+            '*'
           )
         }
       }
@@ -72,22 +72,26 @@ onUnmounted(() => {
 
 async function onIframeLoad(event: Event) {
   iframeWindow = (event.target as HTMLIFrameElement)?.contentWindow
-  // 从 Go 后端检查有没有待传递的初始文本（从命令面板来）
+  if (!iframeWindow) return
+  // 先发 theme
+  iframeWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, '*')
+  // 再发 init（用 * 避免 blob 源窗口的 origin 不匹配导致消息被拦截）
   try {
     const raw = await GetAndClearPendingPluginInit()
     const init = raw?.data || raw
     const text = (init && typeof init === 'object') ? (init.text || '') : (typeof init === 'string' ? init : '')
     const command = (init && typeof init === 'object') ? (init.command || '') : ''
-    if (iframeWindow) {
-      // 先发 theme 消息让插件 HTML 应用主题
-      iframeWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, window.location.origin)
-      // 再发 init 消息（携带 text、command 和主题/语言）
-      iframeWindow.postMessage({
-        type: 'plugin:init',
-        data: { text, command, theme: 'dark', locale: locale.value }
-      }, window.location.origin)
-    }
-  } catch {}
+    iframeWindow.postMessage({
+      type: 'plugin:init',
+      data: { text, command, theme: 'dark', locale: locale.value }
+    }, '*')
+  } catch {
+    // GetAndClearPendingPluginInit 失败时仍发送 init（空 text/command）
+    iframeWindow.postMessage({
+      type: 'plugin:init',
+      data: { text: '', command: '', theme: 'dark', locale: locale.value }
+    }, '*')
+  }
 }
 
 function closeWindow() {

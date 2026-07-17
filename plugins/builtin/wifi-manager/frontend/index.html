@@ -16,6 +16,7 @@
 .w-pwd-btn{height:24px;padding:0 8px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-tertiary);color:var(--text-muted);font-size:10px;cursor:pointer;font-family:inherit}
 .w-pwd-btn:hover{color:var(--text-primary)}
 .w-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted)}
+.w-err{background:var(--bg-tertiary);color:var(--text-secondary);font-family:var(--font-mono);font-size:11px;padding:6px 10px;border-bottom:1px solid var(--border);user-select:text;white-space:pre-wrap;word-break:break-all}
 </style>
 </head>
 <body>
@@ -29,17 +30,22 @@
     <span class="p-label">当前连接：</span>
     <span id="currentSSID" class="p-muted">检测中…</span>
   </div>
+  <div class="w-err" id="errMsg" style="display:none"></div>
   <div class="p-list" id="wifiList"><div class="w-empty">点击扫描查看附近 WiFi</div></div>
 </div>
 <script>
 function $(id){return document.getElementById(id)}
 function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
 function pluginExec(cmd,data){return new Promise(function(resolve,reject){var id=Date.now()+'_'+Math.random().toString(36).slice(2,6),timer=setTimeout(function(){window.removeEventListener('message',handler);reject(new Error('响应超时，请检查插件状态'))},20000);window.parent.postMessage({type:'plugin:execute',id:id,command:cmd,input:{text:JSON.stringify(data||{})}},'*');var handler=function(e){if(e.data&&e.data.type==='plugin:result'){clearTimeout(timer);window.removeEventListener('message',handler);if(e.data.error)reject(new Error(e.data.error));else resolve(e.data.data)}};window.addEventListener('message',handler)})}
-function showPwd(ssid,btn){pluginExec('wifi-pwd',{ssid:ssid}).then(function(data){try{var d=typeof data==='string'?JSON.parse(data):data;var pwd=d.password||d.key||'';if(pwd){var div=document.createElement('span');div.className='w-pwd';div.textContent=pwd;btn.parentNode.replaceChild(div,btn);navigator.clipboard.writeText(pwd).catch(function(){})}else{alert('无法获取密码')}}catch(e){alert('解析失败: '+e.message)}}).catch(function(e){alert('获取密码失败: '+e.message)})}
+function showPwd(ssid,btn){pluginExec('wifi-pwd',{ssid:ssid}).then(function(data){try{var d=typeof data==='string'?JSON.parse(data):data;var pwd=d.password||d.key||'';if(pwd){var div=document.createElement('span');div.className='w-pwd';div.textContent=pwd;btn.parentNode.replaceChild(div,btn);navigator.clipboard.writeText(pwd).catch(function(){})}else{showErr(d.message||'无法获取密码')}}catch(e){showErr('解析失败: '+e.message)}}).catch(function(e){showErr('获取密码失败: '+e.message)})}
+function showErr(m){var e=$('errMsg');e.textContent=m;e.style.display='block';setTimeout(function(){e.style.display='none'},15000)}
 function scan(){var list=$('wifiList'),count=$('countLabel');list.innerHTML='<div class="w-empty">扫描中…</div>';pluginExec('wifi-scan',{}).then(function(data){try{var obj=typeof data==='string'?JSON.parse(data):data;var networks=obj.networks||obj||[];if(!networks||!networks.length){list.innerHTML='<div class="w-empty">未发现 WiFi 网络</div>';count.textContent='';return}
 count.textContent=networks.length+' 个网络';list.innerHTML='';networks.forEach(function(n){var bars=n.signal>80?'▂▄▆█':n.signal>60?'▂▄▆':n.signal>40?'▂▄':'▂';var item=document.createElement('div');item.className='w-item';var sig=document.createElement('span');sig.className='w-signal';sig.textContent=bars;var ssid=document.createElement('span');ssid.className='w-ssid';ssid.textContent=n.ssid||'';var auth=document.createElement('span');auth.className='w-auth';auth.textContent=n.auth||'';var btn=document.createElement('button');btn.className='w-pwd-btn';btn.textContent='密码';btn.addEventListener('click',function(){showPwd(n.ssid,btn)});item.appendChild(sig);item.appendChild(ssid);item.appendChild(auth);item.appendChild(btn);list.appendChild(item)})}catch(e){list.innerHTML='<div class="w-empty">解析失败: '+escapeHtml(e.message)+'</div>'}}).catch(function(e){list.innerHTML='<div class="w-empty">扫描失败: '+escapeHtml(e.message)+'</div>'})}
 $('btnScan').addEventListener('click',scan)
-window.addEventListener('message',function loadOnInit(e){if(e.data&&e.data.type==='plugin:init'){window.removeEventListener('message',loadOnInit);pluginExec('wifi-current',{}).then(function(data){try{var d=typeof data==='string'?JSON.parse(data):data;if(d.ssid)$('currentSSID').textContent=d.ssid;if(d.band)$('currentSSID').textContent+=' ('+d.band+')'}catch(e){}}).catch(function(){});scan()}})
+// 自动扫描（不依赖 plugin:init postMessage，Blob iframe 下 postMessage 可能被拦截）
+setTimeout(scan, 500)
+// 监听 plugin:init 消息获取当前连接状态
+window.addEventListener('message',function loadOnInit(e){if(e.data&&e.data.type==='plugin:init'){window.removeEventListener('message',loadOnInit);pluginExec('wifi-current',{}).then(function(data){try{var d=typeof data==='string'?JSON.parse(data):data;if(d.ssid)$('currentSSID').textContent=d.ssid;if(d.band)$('currentSSID').textContent+=' ('+d.band+')'}catch(e){}}).catch(function(){})}})
 </script>
 </body>
 </html>

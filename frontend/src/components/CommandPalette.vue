@@ -455,14 +455,14 @@ async function onInlinePluginLoad() {
         if (event.source) {
           ;(event.source as any).postMessage(
             { type: 'plugin:result', id, data: result },
-            window.location.origin
+            '*'
           )
         }
       }).catch(e => {
         if (event.source) {
           ;(event.source as any).postMessage(
             { type: 'plugin:result', id, error: e?.message || String(e) },
-            window.location.origin
+            '*'
           )
         }
       })
@@ -478,12 +478,12 @@ async function onInlinePluginLoad() {
     const command = (init && typeof init === 'object') ? (init.command || '') : ''
     if (iframe.contentWindow) {
       // 先发 theme 消息让插件 HTML 应用主题
-      iframe.contentWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, window.location.origin)
+      iframe.contentWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, '*')
       // 再发 init 消息（携带 text、command 和主题/语言）
       iframe.contentWindow.postMessage({
         type: 'plugin:init',
         data: { text, command, theme: 'dark', locale: locale.value }
-      }, window.location.origin)
+      }, '*')
     }
   } catch {}
 }

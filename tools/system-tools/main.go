@@ -136,6 +136,7 @@ func mustMarshal(v interface{}) json.RawMessage {
 
 // hiddenCmd 创建一个不弹 CMD 窗口的 exec.Command（父进程是 GUI 类型时，
 // 启动 netsh/netstat/tasklist/taskkill 等控制台子进程会弹出 CMD 窗口）
+// visibleCmd 创建一个正常显示的 exec.Command（用于需要显式控制台交互的命令）
 func hiddenCmd(name string, arg ...string) *exec.Cmd {
 	cmd := exec.Command(name, arg...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}

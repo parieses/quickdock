@@ -126,28 +126,18 @@ func wifiPassword(id int64, input map[string]interface{}) {
 		return
 	}
 
-	out, err := hiddenCmd("netsh", "wlan", "show", "profile", "name="+ssid, "key=clear").Output()
+	// 使用 Windows WlanGetProfile API 获取密码（netsh 在管道模式下隐藏安全设置段）
+	password, err := getWifiPassword(ssid)
 	if err != nil {
 		respondError(id, -1, "获取 WiFi 密码失败: "+err.Error())
 		return
-	}
-
-	lines := strings.Split(string(out), "\n")
-	password := ""
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, "Key Content") && strings.Contains(line, ":") {
-			if idx := strings.Index(line, ":"); idx >= 0 {
-				password = strings.TrimSpace(line[idx+1:])
-			}
-		}
 	}
 
 	if password == "" {
 		respond(id, map[string]interface{}{
 			"ssid":     ssid,
 			"password": "",
-			"message":  "未找到密码或需要管理员权限",
+			"message":  "配置文件中未找到密钥",
 		})
 		return
 	}
