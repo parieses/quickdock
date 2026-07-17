@@ -5,7 +5,7 @@
 !include "FileFunc.nsh"
 
 !ifndef INFO_PROJECTNAME
-    !define INFO_PROJECTNAME "quickdock-v3"
+    !define INFO_PROJECTNAME "quickdock"
 !endif
 !ifndef INFO_COMPANYNAME
     !define INFO_COMPANYNAME "My Company"

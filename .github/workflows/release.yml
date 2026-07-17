@@ -65,18 +65,16 @@ jobs:
           go build -tags production `
             -trimpath -buildvcs=false `
             -ldflags="-w -s -H windowsgui -X main.appVersion=$env:VERSION" `
-            -o bin/quickdock-v3.exe .
+            -o bin/quickdock.exe .
           Remove-Item wails_windows_amd64.syso
 
       - name: Package NSIS installer
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
-          Copy-Item bin/quickdock-v3.exe build/windows/nsis/quickdock-v3.exe
-          & "C:\Program Files (x86)\NSIS\makensis.exe" `
-            -DARG_WAILS_AMD64_BINARY=quickdock-v3.exe `
-            "$pwd\build\windows\nsis\project.nsi"
-          Remove-Item build/windows/nsis/quickdock-v3.exe
+          Copy-Item bin/quickdock.exe build/windows/nsis/quickdock.exe
+          & "C:\Program Files (x86)\NSIS\makensis.exe" '-DARG_WAILS_AMD64_BINARY=quickdock.exe' 'build\windows\nsis\project.nsi'
+          Remove-Item build/windows/nsis/quickdock.exe
 
       - name: Generate updater manifest
         shell: pwsh
@@ -91,7 +89,7 @@ jobs:
               -key updater.key `
               -url-prefix "$urlPrefix" `
               -output manifest.json `
-              bin/quickdock-v3-amd64-installer.exe
+              bin/quickdock-amd64-installer.exe
             Remove-Item updater.key -ErrorAction SilentlyContinue
           } else {
             echo "No UPDATER_PRIVATE_KEY secret set - skipping manifest signing"
