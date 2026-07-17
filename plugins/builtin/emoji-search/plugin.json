@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.emoji-search",
   "name": "Emoji 搜索",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "搜索 Emoji 并一键复制到剪贴板",
   "author": "QuickDock",
   "category": "开发者日常",
@@ -16,7 +16,27 @@
   "permissions": {
     "clipboard": true
   },
+  "commands": [
+    {
+      "id": "emoji-search",
+      "title": "Emoji 搜索",
+      "keywords": [
+        "emoji",
+        "表情",
+        "符号",
+        "smile",
+        "heart"
+      ],
+      "aliases": [
+        "表情搜索",
+        "emoji搜索",
+        "符号搜索"
+      ],
+      "prefix": "/emoji"
+    }
+  ],
   "capabilities": [
+    "command",
     "frontend"
   ]
 }

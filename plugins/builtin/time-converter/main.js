@@ -17,7 +17,7 @@ var WEEKDAY_CN = ['日', '一', '二', '三', '四', '五', '六']
 
 function handleInitialize(params) {
     api.log('时间转换插件已加载')
-    return { status: 'ready', version: '0.1.0' }
+    return { status: 'ready', version: '0.2.0' }
 }
 
 /**
@@ -39,17 +39,20 @@ function parseTime(text) {
         return new Date(num * 1000)
     }
 
-    // 3. ISO 日期格式: 2025-12-25 或 2025-12-25 14:30:00
-    var isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{1,2}):(\d{2}):(\d{2}))?$/)
-    if (isoMatch) {
-        return new Date(
-            parseInt(isoMatch[1], 10),
-            parseInt(isoMatch[2], 10) - 1,
-            parseInt(isoMatch[3], 10),
-            parseInt(isoMatch[4] || '0', 10),
-            parseInt(isoMatch[5] || '0', 10),
-            parseInt(isoMatch[6] || '0', 10)
-        )
+    // 3. ISO 日期: 2025-12-25（按本地时区解析，避免被当成 UTC 零点导致显示偏移）
+    var dateMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+    if (dateMatch) {
+        return new Date(+dateMatch[1], +dateMatch[2] - 1, +dateMatch[3])
+    }
+    // 3b. ISO 日期时间（空格分隔，本地时区）: 2025-12-25 14:30:00
+    var spMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})\s+(\d{1,2}):(\d{2}):(\d{2})$/)
+    if (spMatch) {
+        return new Date(+spMatch[1], +spMatch[2] - 1, +spMatch[3], +spMatch[4], +spMatch[5], +spMatch[6])
+    }
+    // 3c. ISO 8601（T 分隔，无时区 → 视为本地）: 2025-12-25T14:30:00
+    var tMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{1,2}):(\d{2}):(\d{2})$/)
+    if (tMatch) {
+        return new Date(+tMatch[1], +tMatch[2] - 1, +tMatch[3], +tMatch[4], +tMatch[5], +tMatch[6])
     }
 
     // 4. ISO 8601 带 T 分隔符: 2025-12-25T14:30:00Z 或 2025-12-25T14:30:00
@@ -172,8 +175,8 @@ function handleExecute(params) {
         return { error: '请输入时间', hint: '支持: now / Unix时间戳 / 2024-01-15 / 2024-01-15 14:30:00 / 2024年1月15日' }
     }
 
-    // 后端额外校验：仅当输入符合预期格式时才处理
-    var expectedRE = /^(\d{4}[-/]\d{2}[-/]\d{2}(?:\s+\d{1,2}:\d{2}(:\d{2})?)?|\d{10}|\d{13}|\d{8}(?:\d{6})?|\d{4}年\d{1,2}月\d{1,2}日|now)$/i
+    // 后端额外校验：仅当输入符合预期格式时才处理（含 ISO 8601 的 T 分隔与可选时区）
+    var expectedRE = /^(\d{4}[-/]\d{2}[-/]\d{2}(?:[T ]\d{1,2}:\d{2}(:\d{2})?(?:Z|[+-]\d{2}:?\d{2})?|\s+\d{1,2}:\d{2}(:\d{2})?)?|\d{10}|\d{13}|\d{8}(?:\d{6})?|\d{4}年\d{1,2}月\d{1,2}日|now)$/i
     if (!expectedRE.test(text.trim())) {
         return { error: '参数格式不匹配: ' + text, hint: '支持: now / Unix时间戳 / 2024-01-15 / 2024-01-15 14:30:00 / 2024年1月15日' }
     }

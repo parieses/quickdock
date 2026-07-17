@@ -289,6 +289,21 @@ watch(filteredEntries, () => {
   selectedIndex.value = 0
 })
 
+// displayEntries 随分页/筛选变化。若翻到较短的末页，selectedIndex 可能超出新列表长度，
+// 这里夹紧到 [0, len-1]，避免后续 list[selectedIndex] 为 undefined 而崩溃。
+watch(displayEntries, (list) => {
+  if (selectedIndex.value >= list.length) {
+    selectedIndex.value = Math.max(0, list.length - 1)
+  }
+})
+
+// 把 selectedIndex 夹紧到当前列表范围内，返回安全索引
+function safeIndex(listLen: number): number {
+  if (selectedIndex.value < 0) selectedIndex.value = 0
+  if (selectedIndex.value >= listLen) selectedIndex.value = Math.max(0, listLen - 1)
+  return selectedIndex.value
+}
+
 function scrollToSelected() {
   if (!listRef.value) return
   const items = listRef.value.querySelectorAll('.clipboard-item')
@@ -303,7 +318,7 @@ function onPanelKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter' && e.target === searchInputRef.value) {
     e.preventDefault()
     e.stopPropagation()
-    handleCopy(list[selectedIndex.value])
+    handleCopy(list[safeIndex(list.length)])
     return
   }
 
@@ -323,7 +338,7 @@ function onPanelKeydown(e: KeyboardEvent) {
     case 'Enter':
       e.preventDefault()
       e.stopPropagation()
-      handleCopy(list[selectedIndex.value])
+      handleCopy(list[safeIndex(list.length)])
       break
     case 'Escape':
       resetScrollOnHide()

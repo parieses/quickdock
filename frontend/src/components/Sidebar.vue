@@ -2,7 +2,6 @@
 import { ref, inject, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
-import { Plus, Pencil, Trash2, Search, X, Settings, ChevronDown, FolderKanban, FileText, Clipboard, Puzzle } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import CreateDialog from './CreateDialog.vue'
 import { getErrorMessage } from '../utils/error'
@@ -195,7 +194,7 @@ async function handleDeleteScene(sceneId: string) {
             <button class="ws-item-action" :title="t('edit')" @click="startEditWorkspace(ws)">
               <Pencil :size="11" />
             </button>
-            <button class="ws-item-action danger" :title="t('delete')" @click="handleDeleteWorkspace(ws.id, ws.name)">
+            <button class="ws-item-action danger" :title="t('delete')" :disabled="ws.name === '默认工作空间'" :class="{ 'ws-action-disabled': ws.name === '默认工作空间' }" @click="handleDeleteWorkspace(ws.id, ws.name)">
               <Trash2 :size="11" />
             </button>
           </div>
@@ -219,7 +218,23 @@ async function handleDeleteScene(sceneId: string) {
         <FileText :size="14" />
         <span>{{ t('navSnippets') }}</span>
       </button>
-      <button :class="['nav-item', { active: currentPage === 'clipboard' }]" @click="emit('navigate', 'clipboard')">
+      <button :class="['nav-item', { active: currentPage === 'systemstatus' }]" @click="emit('navigate', 'systemstatus')">
+        <Activity :size="14" />
+        <span>{{ t('navSystemStatus') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'todo' }]" @click="emit('navigate', 'todo')">
+        <ListTodo :size="14" />
+        <span>{{ t('navTodo') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'schedule' }]" @click="emit('navigate', 'schedule')">
+        <AlarmClock :size="14" />
+        <span>{{ t('navSchedule') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'monitor' }]" @click="emit('navigate', 'monitor')">
+        <Activity :size="14" />
+        <span>{{ t('navMonitor') }}</span>
+      </button>
+        <button :class="['nav-item', { active: currentPage === 'clipboard' }]" @click="emit('navigate', 'clipboard')">
         <Clipboard :size="14" />
         <span>{{ t('navClipboard') }}</span>
       </button>
@@ -465,6 +480,8 @@ async function handleDeleteScene(sceneId: string) {
 .ws-item-row:hover .ws-item-action { display: flex; }
 .ws-item-action:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .ws-item-action.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+.ws-item-action:disabled,
+.ws-item-action.ws-action-disabled { display: none; }
 .ws-create { border-top: 1px solid var(--color-border); color: var(--color-text-disabled); }
 .ws-create:hover { color: var(--color-accent); }
 .ws-dropdown-divider { height: 1px; background: var(--color-border); }

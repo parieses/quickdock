@@ -4,7 +4,7 @@
  * 支持 MySQL / PostgreSQL 常见语法
  */
 function handleInitialize(params) {
-  return { status: 'ready', version: '0.1.0' }
+  return { status: 'ready', version: '0.2.0' }
 }
 
 function handleExecute(params) {
@@ -111,7 +111,7 @@ function formatSQL(sql) {
     var trimmed = line.trim()
 
     // 检测是否在 SELECT / 逗号子句中
-    if (/^(SELECT|\\s*[,])/.test(trimmed) ||
+    if (/^(SELECT|\s*[,])/.test(trimmed) ||
         (result.length > 0 && /^\s*[,]/.test(line) && !/^\s*(FROM|WHERE|ORDER BY|GROUP BY|HAVING|LIMIT|OFFSET|JOIN|AND|OR)/.test(trimmed))) {
       // 替换逗号为逗号+换行+缩进
       var indent = /^\s*/.exec(line)[0]

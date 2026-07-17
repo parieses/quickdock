@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.text-diff",
   "name": "Diff 文本对比",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "两个文本块逐行对比，高亮显示增/删/改差异，支持行号与折叠",
   "author": "QuickDock",
   "icon": "icon.svg",

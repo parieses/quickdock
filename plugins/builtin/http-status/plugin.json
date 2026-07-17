@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.http-status",
   "name": "HTTP 状态码速查",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "查询 HTTP 状态码含义、描述和常见场景",
   "author": "QuickDock",
   "icon": "icon.svg",

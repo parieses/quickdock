@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -100,22 +99,36 @@ func portList(id int64) {
 	})
 }
 
-func portCheck(id int64, input map[string]interface{}) {
-	portRaw, ok := input["port"].(float64)
-	if !ok {
-		// Try string
-		if portStr, ok2 := input["port"].(string); ok2 {
-			if p, err := strconv.Atoi(portStr); err == nil {
-				portRaw = float64(p)
-				ok = true
+// resolvePositiveInt 从输入中解析正整数参数。
+// 依次尝试传入的 key（如 "port"/"pid"），并兼容命令面板内联匹配时
+// 前端把原始文本放在 input["text"]（例如输入 "1" 命中端口检查）。
+func resolvePositiveInt(input map[string]interface{}, keys ...string) (int, bool) {
+	for _, key := range keys {
+		if raw, ok := input[key].(float64); ok {
+			if p := int(raw); p > 0 {
+				return p, true
+			}
+		}
+		if s, ok := input[key].(string); ok {
+			if p, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && p > 0 {
+				return p, true
 			}
 		}
 	}
-	if !ok || portRaw <= 0 {
+	if s, ok := input["text"].(string); ok {
+		if p, err := strconv.Atoi(strings.TrimSpace(s)); err == nil && p > 0 {
+			return p, true
+		}
+	}
+	return 0, false
+}
+
+func portCheck(id int64, input map[string]interface{}) {
+	targetPort, ok := resolvePositiveInt(input, "port")
+	if !ok {
 		respondError(id, -1, "需要有效的 port 参数")
 		return
 	}
-	targetPort := int(portRaw)
 
 	out, err := exec.Command("netstat", "-ano").Output()
 	if err != nil {
@@ -185,38 +198,54 @@ func portCheck(id int64, input map[string]interface{}) {
 }
 
 func getProcessName(pid int) string {
-	out, err := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV").Output()
-	if err != nil {
-		return ""
-	}
-	lines := strings.Split(string(out), "\n")
-	for _, line := range lines {
-		parts := strings.Split(line, ",")
-		if len(parts) >= 1 {
-			name := strings.Trim(parts[0], "\"")
-			if name != "" && !strings.Contains(name, "INFO") {
-				return name
-			}
-		}
+	names := getAllProcessNames()
+	if name, ok := names[pid]; ok {
+		return name
 	}
 	return ""
 }
 
-func portKill(id int64, input map[string]interface{}) {
-	pidRaw, ok := input["pid"].(float64)
-	if !ok {
-		if pidStr, ok2 := input["pid"].(string); ok2 {
-			if p, err := strconv.Atoi(pidStr); err == nil {
-				pidRaw = float64(p)
-				ok = true
-			}
+var processNameCache map[int]string
+var processNameCacheDone bool
+
+func getAllProcessNames() map[int]string {
+	if processNameCacheDone {
+		return processNameCache
+	}
+	out, err := exec.Command("tasklist", "/NH", "/FO", "CSV").Output()
+	if err != nil {
+		processNameCacheDone = true
+		processNameCache = make(map[int]string)
+		return processNameCache
+	}
+	processNameCache = make(map[int]string)
+	lines := strings.Split(string(out), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		parts := strings.Split(line, ",")
+		if len(parts) < 2 {
+			continue
+		}
+		name := strings.Trim(parts[0], "\"")
+		pidStr := strings.Trim(parts[1], "\"")
+		pid, err := strconv.Atoi(pidStr)
+		if err == nil && name != "" && !strings.Contains(name, "INFO") {
+			processNameCache[pid] = name
 		}
 	}
-	if !ok || pidRaw <= 0 {
+	processNameCacheDone = true
+	return processNameCache
+}
+
+func portKill(id int64, input map[string]interface{}) {
+	pid, ok := resolvePositiveInt(input, "pid")
+	if !ok {
 		respondError(id, -1, "需要有效的 pid 参数")
 		return
 	}
-	pid := int(pidRaw)
 
 	// 先获取进程名
 	procName := getProcessName(pid)

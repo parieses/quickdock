@@ -60,6 +60,9 @@ var (
 	modShell32 = windows.NewLazySystemDLL("shell32.dll")
 	modUser32  = windows.NewLazySystemDLL("user32.dll")
 	modGdi32   = windows.NewLazySystemDLL("gdi32.dll")
+	modKernel32 = windows.NewLazySystemDLL("kernel32.dll")
+	modNtdll    = windows.NewLazySystemDLL("ntdll.dll")
+	modPowrprof = windows.NewLazySystemDLL("powrprof.dll")
 
 	procSHGetFileInfoW     = modShell32.NewProc("SHGetFileInfoW")
 	procDestroyIcon        = modUser32.NewProc("DestroyIcon")
@@ -76,6 +79,23 @@ const (
 	SHGFI_LARGEICON = 0x000000000
 )
 
+
+// IconMIME 根据扩展名返回图标 data URI 的 MIME 类型。
+// 支持 svg/png/ico/jpg/jpeg，未知扩展名默认 image/svg+xml（内置插件图标均为 SVG）。
+func IconMIME(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".svg":
+		return "image/svg+xml"
+	case ".png":
+		return "image/png"
+	case ".ico":
+		return "image/x-icon"
+	case ".jpg", ".jpeg":
+		return "image/jpeg"
+	default:
+		return "image/svg+xml"
+	}
+}
 // iconCacheDir 返回图标缓存目录
 func iconCacheDir() string {
 	home, _ := os.UserHomeDir()

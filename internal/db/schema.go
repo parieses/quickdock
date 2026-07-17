@@ -128,6 +128,8 @@ var baseTables = []string{
 	)`,
 
 	`CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_entries(created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_text ON clipboard_entries(content_type, text_content)`,
+	`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_image ON clipboard_entries(content_type, image_hash)`,
 
 	`CREATE TABLE IF NOT EXISTS snippets (
 		id TEXT PRIMARY KEY,
@@ -169,6 +171,96 @@ var baseTables = []string{
 		count INTEGER NOT NULL DEFAULT 1,
 		last_used TEXT NOT NULL
 	)`,
+
+	`CREATE TABLE IF NOT EXISTS todos (
+		id TEXT PRIMARY KEY,
+		title TEXT NOT NULL,
+		done INTEGER NOT NULL DEFAULT 0,
+		priority TEXT NOT NULL DEFAULT 'none',
+		due_date TEXT DEFAULT '',
+		note TEXT DEFAULT '',
+		sort INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		completed_at TEXT DEFAULT ''
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS scheduled_tasks (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		action TEXT NOT NULL DEFAULT 'app',
+		target TEXT NOT NULL DEFAULT '',
+		working_dir TEXT DEFAULT '',
+		http_method TEXT DEFAULT 'GET',
+		http_headers TEXT DEFAULT '',
+		http_body TEXT DEFAULT '',
+		schedule_kind TEXT NOT NULL DEFAULT 'once',
+		run_at TEXT DEFAULT '',
+		interval_sec INTEGER NOT NULL DEFAULT 0,
+		time_of_day TEXT DEFAULT '',
+		weekdays TEXT DEFAULT '',
+		enabled INTEGER NOT NULL DEFAULT 1,
+		notify INTEGER NOT NULL DEFAULT 1,
+		next_run TEXT DEFAULT '',
+		last_run TEXT DEFAULT '',
+		last_status TEXT DEFAULT '',
+		last_result TEXT DEFAULT '',
+		sort INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS monitors (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		url TEXT NOT NULL DEFAULT '',
+		method TEXT NOT NULL DEFAULT 'GET',
+		interval_sec INTEGER NOT NULL DEFAULT 60,
+		timeout_sec INTEGER NOT NULL DEFAULT 10,
+		expected_status TEXT NOT NULL DEFAULT '2xx',
+		follow_redirects INTEGER NOT NULL DEFAULT 1,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		notify_down INTEGER NOT NULL DEFAULT 1,
+		notify_up INTEGER NOT NULL DEFAULT 1,
+		last_status TEXT DEFAULT '',
+		last_checked_at TEXT DEFAULT '',
+		last_checked_ts INTEGER NOT NULL DEFAULT 0,
+		last_latency_ms INTEGER NOT NULL DEFAULT 0,
+		last_status_code INTEGER NOT NULL DEFAULT 0,
+		last_error TEXT DEFAULT '',
+		skip_tls_verify INTEGER NOT NULL DEFAULT 0,
+		cert_warn_days INTEGER NOT NULL DEFAULT 14,
+		cert_expires_at INTEGER NOT NULL DEFAULT 0,
+		last_cert_warned INTEGER NOT NULL DEFAULT 0,
+		content_match_type TEXT NOT NULL DEFAULT 'none',
+		content_match_pattern TEXT NOT NULL DEFAULT '',
+		sort INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`,
+
+	`CREATE TABLE IF NOT EXISTS monitor_logs (
+		id TEXT PRIMARY KEY,
+		monitor_id TEXT NOT NULL,
+		checked_at TEXT DEFAULT '',
+		checked_ts INTEGER NOT NULL DEFAULT 0,
+		status TEXT NOT NULL DEFAULT 'down',
+		status_code INTEGER NOT NULL DEFAULT 0,
+		latency_ms INTEGER NOT NULL DEFAULT 0,
+		error TEXT DEFAULT ''
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_monitor_logs_mid_ts ON monitor_logs(monitor_id, checked_ts)`,
+
+	`CREATE TABLE IF NOT EXISTS plugin_exec_logs (
+		id TEXT PRIMARY KEY,
+		plugin_id TEXT NOT NULL,
+		command_id TEXT NOT NULL,
+		executed_at TEXT DEFAULT '',
+		executed_ts INTEGER NOT NULL DEFAULT 0,
+		success INTEGER NOT NULL DEFAULT 0,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		result TEXT DEFAULT '',
+		error TEXT DEFAULT '',
+		trigger TEXT DEFAULT 'manual'
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_plugin_exec_logs_ts ON plugin_exec_logs(executed_ts)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
@@ -229,72 +321,80 @@ func (d *Database) migrate() error {
 		SELECT rowid, id, name, value FROM items
 		WHERE NOT EXISTS (SELECT 1 FROM items_fts WHERE items_fts.rowid = items.rowid)`)
 
-	// 安全兜底：检查 clipboard_entries 是否有 copy_count 列
-	// （仅对 2026-07-07 之前创建的旧数据库生效）
+	// 安全兜底：为旧数据库补齐新增列。
+	// 使用统一 helper，任何一步的"检查列"或"ALTER"失败都立即返回，
+	// 避免错误被后续步骤覆盖（原实现共用一个 err 变量，前一步错误会被后一步
+	// 成功的查询覆盖，导致不完整的 schema 被当作迁移成功）。
+	type colMig struct {
+		table, col, colType string
+	}
+	columnMigrations := []colMig{
+		{"clipboard_entries", "copy_count", "INTEGER DEFAULT 0"},
+		{"clipboard_entries", "image_hash", "TEXT"},
+		{"plugins", "installed_at", "TEXT NOT NULL DEFAULT ''"},
+		{"plugins", "updated_at", "TEXT NOT NULL DEFAULT ''"},
+		{"plugins", "category", "TEXT DEFAULT ''"},
+		{"plugins", "capabilities", "TEXT DEFAULT '[]'"},
+		{"plugins", "permissions", "TEXT DEFAULT '{}'"},
+		{"plugins", "icon", "TEXT DEFAULT ''"},
+		{"plugins", "usage_count", "INTEGER DEFAULT 0"},
+		{"usage_frecency", "type", "TEXT NOT NULL DEFAULT ''"},
+		{"usage_frecency", "label", "TEXT NOT NULL DEFAULT ''"},
+		{"usage_frecency", "description", "TEXT NOT NULL DEFAULT ''"},
+		{"todos", "start_time", "TEXT DEFAULT ''"},
+		{"todos", "end_time", "TEXT DEFAULT ''"},
+		{"todos", "reminder_time", "TEXT DEFAULT ''"},
+		{"todos", "reminder_sent", "INTEGER DEFAULT 0"},
+		// todos: 标签系统 + 重复任务
+		{"todos", "tags", "TEXT DEFAULT ''"},
+		{"todos", "recurrence", "TEXT DEFAULT ''"},
+		// monitors: 旧表只有 last_checked_at TEXT，新增 INTEGER 列供精确计算间隔
+		{"monitors", "last_checked_ts", "INTEGER NOT NULL DEFAULT 0"},
+		{"monitors", "last_checked_at", "TEXT DEFAULT ''"},
+	{"monitors", "skip_tls_verify", "INTEGER NOT NULL DEFAULT 0"},
+	// monitors: SSL 证书到期提醒 + 内容匹配检测
+	{"monitors", "cert_warn_days", "INTEGER NOT NULL DEFAULT 14"},
+	{"monitors", "cert_expires_at", "INTEGER NOT NULL DEFAULT 0"},
+	{"monitors", "last_cert_warned", "INTEGER NOT NULL DEFAULT 0"},
+	{"monitors", "content_match_type", "TEXT NOT NULL DEFAULT 'none'"},
+	{"monitors", "content_match_pattern", "TEXT NOT NULL DEFAULT ''"},
+	// todos: 子任务层级（单层级 checklist）+ 状态字段（status 权威，done 派生）
+	{"todos", "parent_id", "TEXT DEFAULT ''"},
+	{"todos", "status", "TEXT DEFAULT 'todo'"},
+}
+	for _, m := range columnMigrations {
+		if err := d.addColumnIfMissing(m.table, m.col, m.colType); err != nil {
+			return err
+		}
+	}
+
+	// 数据迁移：已有 completed(done=1) 待办同步 status='done'（status 为权威字段，done 派生）
+	if _, err := d.conn.Exec(`UPDATE todos SET status = 'done' WHERE done = 1 AND (status IS NULL OR status = '')`); err != nil {
+		return fmt.Errorf("同步待办 status 失败: %w", err)
+	}
+
+	// 数据迁移：CMD 终端工具参数 /c → /k，使命令型项目运行后窗口停留，
+	// 可见执行结果/报错，避免静默失败（"无感"）。仅匹配旧值，幂等可重复执行。
+	if _, err := d.conn.Exec(`UPDATE tools SET args = '/k {{command}}' WHERE path = 'cmd' AND args = '/c {{command}}'`); err != nil {
+		return fmt.Errorf("迁移 CMD 工具参数失败: %w", err)
+	}
+
+	return nil
+}
+
+// addColumnIfMissing 为已有表安全新增列（幂等）。
+// table/col 均为代码内置常量，非用户输入，故直接拼接 SQL（pragma 表名无法参数化）。
+func (d *Database) addColumnIfMissing(table, col, colType string) error {
 	var count int
-	err := d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('clipboard_entries') WHERE name = 'copy_count'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE clipboard_entries ADD COLUMN copy_count INTEGER DEFAULT 0`)
+	if err := d.conn.QueryRow(
+		`SELECT COUNT(*) FROM pragma_table_info('` + table + `') WHERE name = ?`, col,
+	).Scan(&count); err != nil {
+		return fmt.Errorf("检查列 %s.%s 失败: %w", table, col, err)
 	}
-	// 安全兜底：检查 image_hash 列
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('clipboard_entries') WHERE name = 'image_hash'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE clipboard_entries ADD COLUMN image_hash TEXT`)
+	if count == 0 {
+		if _, err := d.conn.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + col + ` ` + colType); err != nil {
+			return fmt.Errorf("新增列 %s.%s 失败: %w", table, col, err)
+		}
 	}
-
-	// 安全兜底：检查 plugins 表是否有 installed_at 列
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'installed_at'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN installed_at TEXT NOT NULL DEFAULT ''`)
-	}
-	// 检查 plugins 表是否有 updated_at 列
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'updated_at'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN updated_at TEXT NOT NULL DEFAULT ''`)
-	}
-	// 检查 plugins 表是否有 category 列
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'category'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN category TEXT DEFAULT ''`)
-	}
-
-	// 检查 plugins 表是否有 capabilities 列（旧表迁移）
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'capabilities'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN capabilities TEXT DEFAULT '[]'`)
-	}
-
-	// 检查 plugins 表是否有 permissions 列（旧表迁移）
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'permissions'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN permissions TEXT DEFAULT '{}'`)
-	}
-
-	// 检查 plugins 表是否有 icon 列（旧表迁移）
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'icon'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN icon TEXT DEFAULT ''`)
-	}
-
-	// 检查 plugins 表是否有 usage_count 列（旧表迁移）
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('plugins') WHERE name = 'usage_count'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE plugins ADD COLUMN usage_count INTEGER DEFAULT 0`)
-	}
-
-	// 安全兜底：检查 usage_frecency 表是否有 type 列（旧表迁移）
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('usage_frecency') WHERE name = 'type'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE usage_frecency ADD COLUMN type TEXT NOT NULL DEFAULT ''`)
-	}
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('usage_frecency') WHERE name = 'label'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE usage_frecency ADD COLUMN label TEXT NOT NULL DEFAULT ''`)
-	}
-	err = d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('usage_frecency') WHERE name = 'description'`).Scan(&count)
-	if err == nil && count == 0 {
-		_, err = d.conn.Exec(`ALTER TABLE usage_frecency ADD COLUMN description TEXT NOT NULL DEFAULT ''`)
-	}
-
-	return err
+	return nil
 }

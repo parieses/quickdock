@@ -15,6 +15,9 @@ bin/
 build/*.syso
 wails_windows_*.syso
 frontend/dist/
+frontend/bindings/
+build/android/.gradle/
+build/android/build/
 
 # --- Node ---
 node_modules/

@@ -1,5 +1,5 @@
 function handleInitialize(params) {
-  return { status: 'ready', version: '1.0.0' }
+  return { status: 'ready', version: '0.2.0' }
 }
 
 // ---------- JSON ↔ YAML 转换（轻量 YAML 子集解析/生成）----------
@@ -305,63 +305,65 @@ function xmlToJson(xml) {
   return Object.keys(result).length > 0 ? result : { _text: xml.trim() }
 }
 
+function detectFormat(text) {
+  var t = text.trim()
+  if (t.startsWith('{') || t.startsWith('[')) return 'json'
+  if (t.startsWith('<')) return 'xml'
+  if (t.indexOf(':') > 0 && t.indexOf('\n') > 0) return 'yaml'
+  if (t.indexOf('=') > 0 && t.indexOf('\n') > 0 && t.indexOf('[') >= 0) return 'toml'
+  return 'json'
+}
+
+function parseInput(text, format) {
+  switch (format) {
+    case 'yaml': return yamlToJson(text)
+    case 'toml': return tomlToJson(text)
+    case 'xml': return xmlToJson(text)
+    case 'json':
+    default: return JSON.parse(text)
+  }
+}
+
+function convertTo(parsed, format) {
+  switch (format) {
+    case 'yaml': return jsonToYaml(parsed, 0)
+    case 'toml': return jsonToToml(parsed, '')
+    case 'xml': return jsonToXml(parsed, 'root').trim()
+    case 'json':
+    default: return JSON.stringify(parsed, null, 2)
+  }
+}
+
 function handleExecute(params) {
   var command = params.command
-  var input = params.input ? (params.input.text || '') : ''
-  var text = input || ''
+  var inputObj = params.input || {}
+  var text = inputObj.text || ''
   if (!text) return { error: '请输入待转换的数据' }
 
-  // 自动检测输入格式
-  var trimmed = text.trim()
-  var fromFormat = 'json'
-  if (trimmed.startsWith('{') || trimmed.startsWith('[')) fromFormat = 'json'
-  else if (trimmed.startsWith('---') || trimmed.indexOf(': ') > 0 && trimmed.indexOf('\n') > 0) fromFormat = 'yaml'
-  else if (trimmed.startsWith('[') && trimmed.indexOf('=') > 0) fromFormat = 'toml'
-  else if (trimmed.startsWith('<')) fromFormat = 'xml'
+  // 优先使用前端指定的输入/输出格式，未指定时自动检测
+  var fromFormat = inputObj.fromFormat || detectFormat(text)
+  var toFormat = inputObj.toFormat || null
 
   try {
-    var parsed
-    switch (command) {
-      case 'to-yaml':
-        parsed = JSON.parse(text)
-        return { text: jsonToYaml(parsed, 0), display: jsonToYaml(parsed, 0) }
-      case 'to-toml':
-        parsed = JSON.parse(text)
-        return { text: jsonToToml(parsed, ''), display: jsonToToml(parsed, '') }
-      case 'to-xml':
-        parsed = JSON.parse(text)
-        return { text: jsonToXml(parsed, 'root').trim(), display: jsonToXml(parsed, 'root').trim() }
-      default:
-        // Auto-detect and convert
-        if (fromFormat === 'json') {
-          parsed = JSON.parse(text)
-          var yaml = jsonToYaml(parsed, 0)
-          var toml = jsonToToml(parsed, '')
-          var xml = jsonToXml(parsed, 'root').trim()
-          return {
-            text: yaml,
-            display: 'YAML:\n' + yaml + '\n\nTOML:\n' + toml + '\n\nXML:\n' + xml
-          }
-        } else if (fromFormat === 'yaml') {
-          parsed = yamlToJson(text)
-          return {
-            text: JSON.stringify(parsed, null, 2),
-            display: JSON.stringify(parsed, null, 2)
-          }
-        } else if (fromFormat === 'toml') {
-          parsed = tomlToJson(text)
-          return {
-            text: JSON.stringify(parsed, null, 2),
-            display: JSON.stringify(parsed, null, 2)
-          }
-        } else if (fromFormat === 'xml') {
-          parsed = xmlToJson(text)
-          return {
-            text: JSON.stringify(parsed, null, 2),
-            display: JSON.stringify(parsed, null, 2)
-          }
-        }
-        return { error: '无法自动检测输入格式' }
+    var parsed = parseInput(text, fromFormat)
+
+    // 指定了目标格式：精确转换为单一格式
+    if (toFormat) {
+      var single = convertTo(parsed, toFormat)
+      return { text: single, display: single }
+    }
+
+    // 未指定目标格式：按命令或默认输出全部
+    if (command === 'to-yaml') { var y = jsonToYaml(parsed, 0); return { text: y, display: y } }
+    if (command === 'to-toml') { var tl = jsonToToml(parsed, ''); return { text: tl, display: tl } }
+    if (command === 'to-xml') { var x = jsonToXml(parsed, 'root').trim(); return { text: x, display: x } }
+
+    var yaml = jsonToYaml(parsed, 0)
+    var toml = jsonToToml(parsed, '')
+    var xml = jsonToXml(parsed, 'root').trim()
+    return {
+      text: yaml,
+      display: 'YAML:\n' + yaml + '\n\nTOML:\n' + toml + '\n\nXML:\n' + xml
     }
   } catch (e) {
     return { error: '转换失败: ' + e.message }

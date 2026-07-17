@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Keyboard, RotateCcw } from '@lucide/vue'
-import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services/appservice'
+import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig, SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import type { HotkeyConfig } from '../types'
@@ -18,7 +18,10 @@ const clipVk = ref(0xC0)
 const paletteLabel = ref('Ctrl+K')
 const paletteModifiers = ref(2)
 const paletteVk = ref(0x4B)
-const capturing = ref<'app' | 'clipboard' | 'palette' | null>(null)
+const noteLabel = ref('Ctrl+Shift+N')
+const noteModifiers = ref(6)
+const noteVk = ref(0x4E)
+const capturing = ref<'app' | 'clipboard' | 'palette' | 'note' | null>(null)
 const message = ref('')
 const msgTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
@@ -106,6 +109,8 @@ function onGlobalKeyDown(e: KeyboardEvent) {
     clipVk.value = vk; clipModifiers.value = mods; clipLabel.value = toLabel(mods, vk)
   } else if (capturing.value === 'palette') {
     paletteVk.value = vk; paletteModifiers.value = mods; paletteLabel.value = toLabel(mods, vk)
+  } else if (capturing.value === 'note') {
+    noteVk.value = vk; noteModifiers.value = mods; noteLabel.value = toLabel(mods, vk)
   }
   capturing.value = null
   ResumeHotkeys()
@@ -125,6 +130,10 @@ onMounted(async () => {
     const c = unwrap<HotkeyConfig>(await GetPaletteHotkeyConfig())
     if (c) { paletteLabel.value = c.label; paletteModifiers.value = c.modifiers; paletteVk.value = c.vk }
   } catch {}
+  try {
+    const c = unwrap<HotkeyConfig>(await GetNoteHotkeyConfig())
+    if (c) { noteLabel.value = c.label; noteModifiers.value = c.modifiers; noteVk.value = c.vk }
+  } catch {}
 })
 
 onUnmounted(() => {
@@ -136,7 +145,7 @@ onUnmounted(() => {
   }
 })
 
-async function startCapture(type: 'app' | 'clipboard' | 'palette') {
+async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note') {
   if (capturing.value === type) {
     capturing.value = null
     await ResumeHotkeys()
@@ -150,11 +159,12 @@ async function startCapture(type: 'app' | 'clipboard' | 'palette') {
 async function saveAll() {
   message.value = ''
 
-  // 检查三个热键两两冲突
+  // 检查四个热键两两冲突
   const pairs = [
     [currentModifiers.value, currentVk.value],
     [clipModifiers.value, clipVk.value],
     [paletteModifiers.value, paletteVk.value],
+    [noteModifiers.value, noteVk.value],
   ]
   for (let i = 0; i < pairs.length; i++) {
     for (let j = i + 1; j < pairs.length; j++) {
@@ -169,23 +179,31 @@ async function saveAll() {
     await SetHotkeyConfig(currentModifiers.value, currentVk.value)
     await SetClipboardHotkeyConfig(clipModifiers.value, clipVk.value)
     await SetPaletteHotkeyConfig(paletteModifiers.value, paletteVk.value)
+    await SetNoteHotkeyConfig(noteModifiers.value, noteVk.value)
+    // 重新注册全局快捷键（含调色板/笔记），使新配置立即生效。
+    await ResumeHotkeys()
     setMsgAndClear(t('hotkeySaved'), 2000)
   } catch (e) { message.value = t('saveFailed2') + ': ' + getErrorMessage(e) }
 }
 
 async function resetAppDefault() {
   currentModifiers.value = 2; currentVk.value = 32; currentLabel.value = 'Ctrl+Space'
-  try { await SetHotkeyConfig(2, 32); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+  try { await SetHotkeyConfig(2, 32); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
 }
 
 async function resetClipDefault() {
   clipModifiers.value = 2; clipVk.value = 0xC0; clipLabel.value = 'Ctrl+`'
-  try { await SetClipboardHotkeyConfig(2, 0xC0); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+  try { await SetClipboardHotkeyConfig(2, 0xC0); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
 }
 
 async function resetPaletteDefault() {
   paletteModifiers.value = 2; paletteVk.value = 0x4B; paletteLabel.value = 'Ctrl+K'
-  try { await SetPaletteHotkeyConfig(2, 0x4B); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+  try { await SetPaletteHotkeyConfig(2, 0x4B); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+}
+
+async function resetNoteDefault() {
+  noteModifiers.value = 6; noteVk.value = 0x4E; noteLabel.value = 'Ctrl+Shift+N'
+  try { await SetNoteHotkeyConfig(6, 0x4E); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
 }
 
 // 暴露 capturing 状态给父组件（SettingsModal）
@@ -263,6 +281,29 @@ defineExpose({ capturing })
         </button>
       </div>
       <p class="hc-desc">{{ t('paletteHotkeyDesc') }}</p>
+    </div>
+
+    <div class="hotkey-card">
+      <div class="hc-title">{{ t('noteHotkey') }}</div>
+      <div class="hotkey-row">
+        <span class="hotkey-label">{{ t('shortcut') }}</span>
+        <div
+          :class="['hotkey-display', { capturing: capturing === 'note' }]"
+          @click="startCapture('note')"
+        >
+          <template v-if="capturing === 'note'">
+            <span class="capture-hint">{{ t('pressKeys') }}</span>
+          </template>
+          <template v-else>
+            <span class="hotkey-badge">{{ noteLabel }}</span>
+            <span class="hotkey-edit-hint">{{ t('clickToModify') }}</span>
+          </template>
+        </div>
+        <button class="reset-sm" @click="resetNoteDefault" :title="t('restoreDefault')">
+          <RotateCcw :size="12" />
+        </button>
+      </div>
+      <p class="hc-desc">{{ t('noteHotkeyDesc') }}</p>
     </div>
 
     <button class="save-btn" @click="saveAll">{{ t('saveAll') }}</button>

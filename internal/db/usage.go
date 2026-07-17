@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -45,12 +46,12 @@ func (d *Database) RecordUsageEx(key, type_, label, desc string) error {
 	return err
 }
 
-// GetAllUsage 返回全部 frecency 记录（用于前端初始化一次性加载）
-func (d *Database) GetAllUsage() ([]FrecencyEntry, error) {
+// queryUsage 执行 frecency 查询并扫描结果，消除三个 GetXxxUsage 中的重复循环
+func (d *Database) queryUsage(query string, args ...interface{}) ([]FrecencyEntry, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	rows, err := d.conn.Query("SELECT key, type, label, description, count, last_used FROM usage_frecency ORDER BY last_used DESC")
+	rows, err := d.conn.Query(query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -65,6 +66,11 @@ func (d *Database) GetAllUsage() ([]FrecencyEntry, error) {
 		results = append(results, e)
 	}
 	return results, rows.Err()
+}
+
+// GetAllUsage 返回全部 frecency 记录（用于前端初始化一次性加载）
+func (d *Database) GetAllUsage() ([]FrecencyEntry, error) {
+	return d.queryUsage("SELECT key, type, label, description, count, last_used FROM usage_frecency ORDER BY last_used DESC")
 }
 
 // GetRecentUsage 返回最近使用的 N 条记录（命令面板「最近使用」专用）
@@ -72,61 +78,42 @@ func (d *Database) GetRecentUsage(limit int) ([]FrecencyEntry, error) {
 	if limit <= 0 {
 		limit = 8
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	rows, err := d.conn.Query("SELECT key, type, label, description, count, last_used FROM usage_frecency ORDER BY last_used DESC LIMIT ?", limit)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-
-	var results []FrecencyEntry
-	for rows.Next() {
-		var e FrecencyEntry
-		if err := rows.Scan(&e.Key, &e.Type, &e.Label, &e.Description, &e.Count, &e.LastUsed); err != nil {
-			return nil, err
-		}
-		results = append(results, e)
-	}
-	return results, rows.Err()
+	return d.queryUsage("SELECT key, type, label, description, count, last_used FROM usage_frecency ORDER BY last_used DESC LIMIT ?", limit)
 }
 
 // GetTopUsage 返回使用次数最多的 N 条记录
 func (d *Database) GetTopUsage(limit int) ([]FrecencyEntry, error) {
+	return d.queryUsage("SELECT key, type, label, description, count, last_used FROM usage_frecency ORDER BY count DESC, last_used DESC LIMIT ?", limit)
+}
+
+// GetAllPluginUsageCounts 一条 SQL 查出所有插件的使用次数，返回 map[pluginID]sum
+// 替代原来 ListPlugins() 里对每个插件单独查 GetPluginUsageCount 的 N+1 模式
+func (d *Database) GetAllPluginUsageCounts() (map[string]int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	rows, err := d.conn.Query("SELECT key, type, label, description, count, last_used FROM usage_frecency ORDER BY count DESC, last_used DESC LIMIT ?", limit)
+	rows, err := d.conn.Query("SELECT key, SUM(count) FROM usage_frecency WHERE key LIKE 'plugin:%' GROUP BY key")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var results []FrecencyEntry
+	out := make(map[string]int)
 	for rows.Next() {
-		var e FrecencyEntry
-		if err := rows.Scan(&e.Key, &e.Type, &e.Label, &e.Description, &e.Count, &e.LastUsed); err != nil {
+		var key string
+		var total sql.NullInt64
+		if err := rows.Scan(&key, &total); err != nil {
 			return nil, err
 		}
-		results = append(results, e)
+		if !total.Valid {
+			continue
+		}
+		// key = "plugin:{pluginID}.{commandID}"，取 plugin: 之后、最后一个 . 之前的部分
+		k := strings.TrimPrefix(key, "plugin:")
+		if idx := strings.LastIndex(k, "."); idx > 0 {
+			pid := k[:idx]
+			out[pid] += int(total.Int64)
+		}
 	}
-	return results, rows.Err()
-}
-
-// GetPluginUsageCount 返回插件的总使用次数（汇总所有 plugin:{id}.xxx 的记录）
-func (d *Database) GetPluginUsageCount(pluginID string) (int, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	prefix := "plugin:" + pluginID + "%"
-	var total sql.NullInt64
-	err := d.conn.QueryRow("SELECT SUM(count) FROM usage_frecency WHERE key LIKE ?", prefix).Scan(&total)
-	if err != nil {
-		return 0, err
-	}
-	if total.Valid {
-		return int(total.Int64), nil
-	}
-	return 0, nil
+	return out, rows.Err()
 }

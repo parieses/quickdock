@@ -19,6 +19,11 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
+var (
+	modUser32   = syscall.NewLazyDLL("user32.dll")
+	modKernel32 = syscall.NewLazyDLL("kernel32.dll")
+)
+
 // ===== Global shared state (accessed by main package via get/set) =====
 
 var (
@@ -29,10 +34,6 @@ var (
 	// Clipboard text deduplication
 	lastClipboardText   string
 	lastClipboardTextMu sync.Mutex
-
-	// ClipboardEmitter fires clipboard change events (set by tray.go)
-	ClipboardEmitter   func()
-	ClipboardEmitterMu sync.RWMutex
 )
 
 // SetClipboardText writes text to the system clipboard via Wails API
@@ -55,8 +56,8 @@ func (a *AppService) OnClipboardChange() {
 	}
 
 	hwnd := uintptr(a.HiddenHWND.Load())
-	user32 := syscall.NewLazyDLL("user32.dll")
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	user32 := modUser32
+	kernel32 := modKernel32
 
 	openClipboard := user32.NewProc("OpenClipboard")
 	if ret, _, _ := openClipboard.Call(hwnd); ret == 0 {

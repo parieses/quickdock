@@ -1,5 +1,4 @@
-/* Diff 文本对比 — 使用 common.css 主题变量 */
-body{font-family:var(--font);font-size:13px;background:var(--bg-primary);color:var(--text-primary);height:100vh;overflow:hidden}
+/* Diff 文本对比 — 通用 reset / body 由 common.css 提供 */
 .td-app{display:flex;flex-direction:column;height:100vh}
 .td-toolbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
 .td-btn{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-size:12px;font-family:inherit;cursor:pointer;white-space:nowrap;transition:background .1s}

@@ -259,15 +259,46 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  // ---- 辅助函数 ----
+
+  // 在数组中按 id 查找并合并更新（自动设置 updatedAt）
+  function updateInArray(arr: any[], id: string, updates: Record<string, any>) {
+    const idx = arr.findIndex((item: any) => item.id === id)
+    if (idx >= 0) Object.assign(arr[idx], updates, { updatedAt: new Date().toISOString() })
+  }
+
+  // 更新数组中元素的 sort 字段并按 sort 排序
+  function sortByOrder(arr: any[], orderedIDs: string[]): any[] {
+    orderedIDs.forEach((id, idx) => {
+      const item = arr.find((x: any) => x.id === id)
+      if (item) item.sort = idx * 10
+    })
+    return [...arr].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
+  }
+
+  function normalizeRows(rows: any[] | null): any[] {
+    return (rows ?? []).map(row => {
+      const out: Record<string, any> = {}
+      for (const [k, v] of Object.entries(row)) {
+        const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
+        out[camel] = v
+      }
+      return out
+    })
+  }
+
+  function toSnake(obj: Record<string, any>): Record<string, any> {
+    const out: Record<string, any> = {}
+    for (const [k, v] of Object.entries(obj)) {
+      const snake = k.replace(/[A-Z]/g, c => '_' + c.toLowerCase())
+      out[snake] = v
+    }
+    return out
+  }
+
   // ---- 拖拽排序 ----
   async function reorderScenes(orderedIDs: string[]) {
-    // 先同步 sort 字段，使 sortedScenes computed 重算后得到正确顺序
-    orderedIDs.forEach((id, idx) => {
-      const scene = scenes.value.find(s => s.id === id)
-      if (scene) scene.sort = idx * 10
-    })
-    scenes.value = [...scenes.value].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
-
+    scenes.value = sortByOrder(scenes.value, orderedIDs)
     try {
       await ReorderScenes(orderedIDs)
     } catch (e) {
@@ -276,13 +307,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function reorderCollections(orderedIDs: string[]) {
-    // 先同步 sort 字段
-    orderedIDs.forEach((id, idx) => {
-      const col = collections.value.find(c => c.id === id)
-      if (col) col.sort = idx * 10
-    })
-    collections.value = [...collections.value].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
-
+    collections.value = sortByOrder(collections.value, orderedIDs)
     try {
       await ReorderCollections(orderedIDs)
     } catch (e) {
@@ -291,13 +316,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function reorderItems(orderedIDs: string[]) {
-    // 先同步 sort 字段
-    orderedIDs.forEach((id, idx) => {
-      const item = items.value.find(i => i.id === id)
-      if (item) item.sort = idx * 10
-    })
-    items.value = [...items.value].sort((a, b) => (a.sort ?? 0) - (b.sort ?? 0))
-
+    items.value = sortByOrder(items.value, orderedIDs)
     try {
       await ReorderItems(orderedIDs)
     } catch (e) {
@@ -409,20 +428,17 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function updateSceneAction(id: string, updates: Record<string, any>) {
     unwrap(await UpdateScene(id, toSnake(updates)))
-    const idx = scenes.value.findIndex(s => s.id === id)
-    if (idx >= 0) Object.assign(scenes.value[idx], updates, { updatedAt: new Date().toISOString() })
+    updateInArray(scenes.value, id, updates)
   }
 
   async function updateCollectionAction(id: string, updates: Record<string, any>) {
     unwrap(await UpdateCollection(id, toSnake(updates)))
-    const idx = collections.value.findIndex(c => c.id === id)
-    if (idx >= 0) Object.assign(collections.value[idx], updates, { updatedAt: new Date().toISOString() })
+    updateInArray(collections.value, id, updates)
   }
 
   async function updateItemAction(id: string, updates: Record<string, any>) {
     unwrap(await UpdateItem(id, toSnake(updates)))
-    const idx = items.value.findIndex(i => i.id === id)
-    if (idx >= 0) Object.assign(items.value[idx], updates, { updatedAt: new Date().toISOString() })
+    updateInArray(items.value, id, updates)
   }
 
   // ---- 删除 ----
@@ -467,28 +483,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   function clearSearch() {
     searchQuery.value = ''
-  }
-
-  // ---- 辅助函数 ----
-
-  function normalizeRows(rows: any[] | null): any[] {
-    return (rows ?? []).map(row => {
-      const out: Record<string, any> = {}
-      for (const [k, v] of Object.entries(row)) {
-        const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-        out[camel] = v
-      }
-      return out
-    })
-  }
-
-  function toSnake(obj: Record<string, any>): Record<string, any> {
-    const out: Record<string, any> = {}
-    for (const [k, v] of Object.entries(obj)) {
-      const snake = k.replace(/[A-Z]/g, c => '_' + c.toLowerCase())
-      out[snake] = v
-    }
-    return out
   }
 
   return {

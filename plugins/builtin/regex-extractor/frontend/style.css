@@ -1,14 +1,4 @@
-/* 正则提取工具 — 随 common.css 主题变量 */
-* { margin: 0; padding: 0; box-sizing: border-box; }
-
-body {
-  font-family: -apple-system, 'Segoe UI', system-ui, sans-serif;
-  font-size: 13px;
-  background: var(--bg-primary, #1a1a1a);
-  color: var(--text-primary, #e0e0e0);
-  height: 100vh;
-  overflow: hidden;
-}
+/* 正则提取工具 — 通用 reset / body 由 common.css 提供 */
 
 .re-app {
   display: flex; flex-direction: column;
@@ -29,35 +19,35 @@ body {
 .re-field-full { flex: 1; }
 
 .re-label {
-  font-size: 11px; color: var(--text-muted, #888);
+  font-size: 11px; color: var(--text-muted);
   text-transform: uppercase; letter-spacing: 0.5px;
 }
 
 /* 正则输入行 */
 .re-regex-input {
   display: flex; align-items: center;
-  background: var(--bg-tertiary, #242424);
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 6px);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   padding: 0 8px;
   transition: border-color 0.15s;
 }
-.re-regex-input:focus-within { border-color: var(--accent, #4a9eff); }
+.re-regex-input:focus-within { border-color: var(--accent); }
 .re-regex-delim {
-  color: var(--text-muted, #888);
-  font-family: var(--font-mono, 'Cascadia Code', monospace);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
   font-size: 16px;
   user-select: none;
 }
 .re-input {
   border: none; outline: none;
   background: transparent;
-  color: var(--text-primary, #e0e0e0);
-  font-family: var(--font-mono, 'Cascadia Code', monospace);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
   font-size: 14px;
   padding: 8px 0;
 }
-.re-input::placeholder { color: var(--text-placeholder, #555); }
+.re-input::placeholder { color: var(--text-placeholder); }
 .re-input-regex { flex: 1; padding: 8px 4px; }
 .re-input-flags {
   width: 40px;
@@ -67,58 +57,58 @@ body {
 .re-textarea {
   flex: 1; resize: none;
   padding: 8px 10px;
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 6px);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
   outline: none;
-  background: var(--bg-tertiary, #242424);
-  color: var(--text-primary, #e0e0e0);
-  font-family: var(--font-mono, 'Cascadia Code', monospace);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
   font-size: 13px; line-height: 1.5;
   min-height: 120px;
 }
-.re-textarea:focus { border-color: var(--accent, #4a9eff); }
-.re-textarea::placeholder { color: var(--text-placeholder, #555); }
+.re-textarea:focus { border-color: var(--accent); }
+.re-textarea::placeholder { color: var(--text-placeholder); }
 
 /* 按钮 */
 .re-btn {
   display: inline-flex; align-items: center; gap: 4px;
   height: 32px; padding: 0 14px;
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 6px);
-  background: var(--bg-tertiary, #242424);
-  color: var(--text-primary, #e0e0e0);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
   font-size: 12px; font-family: inherit;
   cursor: pointer;
 }
-.re-btn:hover { background: var(--bg-hover, #2a2a2a); }
-.re-btn-primary { background: var(--accent, #4a9eff); color: #fff; border-color: var(--accent, #4a9eff); }
-.re-btn-primary:hover { background: var(--accent-hover, #3a8ae0); }
+.re-btn:hover { background: var(--bg-hover); }
+.re-btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.re-btn-primary:hover { background: var(--accent-hover); }
 .re-btn-sm { height: 26px; padding: 0 10px; font-size: 11px; }
 
 /* 结果区 */
 .re-result-area {
   flex: 1; display: flex; flex-direction: column;
   min-height: 0;
-  border: 1px solid var(--border, #2a2a2a);
-  border-radius: var(--radius, 6px);
-  background: var(--bg-secondary, #1e1e1e);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-secondary);
   overflow: hidden;
 }
 .re-result-header {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 10px;
   font-size: 12px; font-weight: 500;
-  color: var(--text-secondary, #999);
-  background: var(--bg-tertiary, #242424);
-  border-bottom: 1px solid var(--border, #2a2a2a);
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
   flex-shrink: 0;
 }
 .re-spacer { flex: 1; }
-.re-result-stats { font-weight: 400; color: var(--text-muted, #888); font-size: 11px; }
+.re-result-stats { font-weight: 400; color: var(--text-muted); font-size: 11px; }
 .re-result-body {
   flex: 1; overflow: auto;
   padding: 6px 0;
-  font-family: var(--font-mono, 'Cascadia Code', monospace);
+  font-family: var(--font-mono);
   font-size: 12px; line-height: 1.6;
 }
 
@@ -128,12 +118,12 @@ body {
   padding: 3px 10px;
   gap: 8px;
 }
-.re-match-item:hover { background: var(--bg-hover, #2a2a2a); }
+.re-match-item:hover { background: var(--bg-hover); }
 .re-match-item:nth-child(even) { background: rgba(255,255,255,0.02); }
-.re-match-item:nth-child(even):hover { background: var(--bg-hover, #2a2a2a); }
+.re-match-item:nth-child(even):hover { background: var(--bg-hover); }
 .re-match-idx {
   min-width: 28px;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   text-align: right;
   user-select: none;
   flex-shrink: 0;
@@ -141,7 +131,7 @@ body {
 .re-match-text { flex: 1; white-space: pre-wrap; word-break: break-all; }
 .re-match-groups {
   flex-shrink: 0;
-  color: var(--text-muted, #888);
+  color: var(--text-muted);
   font-size: 11px;
   user-select: none;
 }
@@ -157,10 +147,10 @@ body {
 .re-highlight-match-alt { background: rgba(200, 100, 255, 0.15); }
 
 /* 错误信息 */
-.re-error { color: var(--danger, #e24b4a); padding: 8px 10px; font-size: 12px; }
+.re-error { color: var(--danger); padding: 8px 10px; font-size: 12px; }
 
 /* 滚动条 */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--text-disabled, #666); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-muted, #888); }
+::-webkit-scrollbar-thumb { background: var(--text-disabled); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }

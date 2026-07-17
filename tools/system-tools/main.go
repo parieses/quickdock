@@ -79,13 +79,29 @@ func handleExecute(req RPCRequest) {
 
 	cmd := params.Command
 
+	// 兼容前端 pluginExec 打包格式：input = {text: JSON.stringify(实际参数)}
+	// 自动解包，使各 handler 能直接访问 input["ssid"]、input["port"] 等
+	input := params.Input
+	if textRaw, ok := input["text"].(string); ok && textRaw != "" {
+		var nested map[string]interface{}
+		if strings.HasPrefix(textRaw, "{") || strings.HasPrefix(textRaw, "[") {
+			if err := json.Unmarshal([]byte(textRaw), &nested); err == nil {
+				for k, v := range nested {
+					if _, exists := input[k]; !exists {
+						input[k] = v
+					}
+				}
+			}
+		}
+	}
+
 	switch {
 	case strings.HasPrefix(cmd, "hosts-"):
-		handleHostsCommand(req.ID, cmd, params.Input)
+		handleHostsCommand(req.ID, cmd, input)
 	case strings.HasPrefix(cmd, "port-"):
-		handlePortCommand(req.ID, cmd, params.Input)
+		handlePortCommand(req.ID, cmd, input)
 	case strings.HasPrefix(cmd, "wifi-"):
-		handleWifiCommand(req.ID, cmd, params.Input)
+		handleWifiCommand(req.ID, cmd, input)
 	default:
 		respondError(req.ID, -32601, "unknown command: "+cmd)
 	}

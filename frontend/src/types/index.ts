@@ -157,3 +157,17 @@ export interface PluginInfo {
   usageCount: number
   commands: PluginCommand[]
 }
+
+// 插件命令执行日志（5.2）
+export interface PluginExecLog {
+  id: string
+  pluginId: string
+  commandId: string
+  executedAt: string
+  executedTs: number
+  success: boolean
+  durationMs: number
+  result: string
+  error: string
+  trigger: string // manual | hotkey | palette
+}

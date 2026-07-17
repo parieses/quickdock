@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.hosts-manager",
   "name": "Hosts 管理器",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "管理系统 hosts 文件条目，一键启用/禁用/新增",
   "author": "QuickDock",
   "category": "效率工具",

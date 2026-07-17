@@ -1,5 +1,5 @@
 function handleInitialize(params) {
-  return { status: 'ready', version: '1.0.0' }
+  return { status: 'ready', version: '0.2.0' }
 }
 
 var statusCodes = {

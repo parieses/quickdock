@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"quickdock/internal/db"
 	"quickdock/internal/platform"
 )
 
@@ -18,10 +19,7 @@ func (a *AppService) ListClipboardEntries(limit int) *ApiResult {
 		return r
 	}
 	data, err := a.DB.ListClipboardEntries(limit)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) InsertClipboardEntry(text, sourceApp string) *ApiResult {
@@ -29,10 +27,7 @@ func (a *AppService) InsertClipboardEntry(text, sourceApp string) *ApiResult {
 		return r
 	}
 	data, err := a.DB.InsertClipboardEntry(text, sourceApp)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) DeleteExpiredClipboardEntries() (int64, error) {
@@ -43,6 +38,25 @@ func (a *AppService) DeleteExpiredClipboardEntries() (int64, error) {
 	return a.DB.DeleteExpiredClipboardEntries(days)
 }
 
+// writeEntryToClipboard 将一条剪贴板条目写入系统剪贴板（image/file/text 三分支）。
+func (a *AppService) writeEntryToClipboard(entry *db.ClipboardEntry, hwnd uintptr) error {
+	switch {
+	case entry.ContentType == "image" && entry.ImagePath != "":
+		if entry.TextContent != "" {
+			_ = platform.SetClipboardFiles(hwnd, strings.Split(entry.TextContent, "\n"))
+		}
+		if err := platform.SetClipboardImage(hwnd, entry.ImagePath); err != nil {
+			return fmt.Errorf("图片写入剪贴板失败: %v", err)
+		}
+	case entry.ContentType == "file" && entry.TextContent != "":
+		if err := platform.SetClipboardFiles(hwnd, strings.Split(entry.TextContent, "\n")); err != nil {
+			return fmt.Errorf("文件写入剪贴板失败: %v", err)
+		}
+	default:
+		SetClipboardText(entry.TextContent)
+	}
+	return nil
+}
 func (a *AppService) CopyClipboardEntry(id string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
@@ -51,26 +65,12 @@ func (a *AppService) CopyClipboardEntry(id string) *ApiResult {
 	if err != nil {
 		return Fail(fmt.Errorf("获取剪贴板条目失败: %v", err))
 	}
-	if entry.ContentType == "image" && entry.ImagePath != "" {
-		hwnd := uintptr(a.HiddenHWND.Load())
-		if entry.TextContent != "" {
-			paths := strings.Split(entry.TextContent, "\n")
-			_ = platform.SetClipboardFiles(hwnd, paths)
-		}
-		if err := platform.SetClipboardImage(hwnd, entry.ImagePath); err != nil {
-			return Fail(fmt.Errorf("图片写入剪贴板失败: %v", err))
-		}
-	} else if entry.ContentType == "file" && entry.TextContent != "" {
-		hwnd := uintptr(a.HiddenHWND.Load())
-		paths := strings.Split(entry.TextContent, "\n")
-		if err := platform.SetClipboardFiles(hwnd, paths); err != nil {
-			return Fail(fmt.Errorf("文件写入剪贴板失败: %v", err))
-		}
-	} else {
-		SetClipboardText(entry.TextContent)
+	hwnd := uintptr(a.HiddenHWND.Load())
+	if err := a.writeEntryToClipboard(entry, hwnd); err != nil {
+		return Fail(err)
 	}
 	if err := a.DB.IncrementClipboardCopyCount(id); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -80,10 +80,7 @@ func (a *AppService) GetClipboardRetentionDays() *ApiResult {
 		return r
 	}
 	days, err := a.DB.GetClipboardRetentionDays()
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(days)
+	return wrap(days, err)
 }
 
 func (a *AppService) SetClipboardRetentionDays(days int) *ApiResult {
@@ -91,7 +88,7 @@ func (a *AppService) SetClipboardRetentionDays(days int) *ApiResult {
 		return r
 	}
 	if err := a.DB.SetClipboardRetentionDays(days); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -135,10 +132,7 @@ func (a *AppService) CleanupClipboardNow() *ApiResult {
 	}
 	days, _ := a.DB.GetClipboardRetentionDays()
 	count, err := a.DB.DeleteExpiredClipboardEntries(days)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(count)
+	return wrap(count, err)
 }
 
 func (a *AppService) TogglePinClipboardEntry(id string) *ApiResult {
@@ -146,10 +140,7 @@ func (a *AppService) TogglePinClipboardEntry(id string) *ApiResult {
 		return r
 	}
 	pinned, err := a.DB.TogglePinClipboardEntry(id)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(pinned)
+	return wrap(pinned, err)
 }
 
 func (a *AppService) DeleteClipboardEntry(id string) *ApiResult {
@@ -157,7 +148,7 @@ func (a *AppService) DeleteClipboardEntry(id string) *ApiResult {
 		return r
 	}
 	if err := a.DB.DeleteClipboardEntry(id); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -172,21 +163,8 @@ func (a *AppService) PasteClipboardEntry(id string) *ApiResult {
 		return Fail(fmt.Errorf("获取剪贴板条目失败: %v", err))
 	}
 	hwnd := uintptr(a.HiddenHWND.Load())
-	if entry.ContentType == "image" && entry.ImagePath != "" {
-		if entry.TextContent != "" {
-			paths := strings.Split(entry.TextContent, "\n")
-			_ = platform.SetClipboardFiles(hwnd, paths)
-		}
-		if err := platform.SetClipboardImage(hwnd, entry.ImagePath); err != nil {
-			return Fail(fmt.Errorf("图片写入剪贴板失败: %v", err))
-		}
-	} else if entry.ContentType == "file" && entry.TextContent != "" {
-		paths := strings.Split(entry.TextContent, "\n")
-		if err := platform.SetClipboardFiles(hwnd, paths); err != nil {
-			return Fail(fmt.Errorf("文件写入剪贴板失败: %v", err))
-		}
-	} else {
-		SetClipboardText(entry.TextContent)
+	if err := a.writeEntryToClipboard(entry, hwnd); err != nil {
+		return Fail(err)
 	}
 	a.HideClipboardWindow()
 	go func() {

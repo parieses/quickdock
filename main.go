@@ -8,15 +8,16 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"strings"
 	"sync/atomic"
 
 	"quickdock/internal/db"
+	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
 	"quickdock/services"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 //go:embed all:frontend/dist
@@ -40,6 +41,7 @@ var (
 	windowVisible atomic.Bool
 	clipboardMode atomic.Bool
 	paletteMode   atomic.Bool
+	noteMode      atomic.Bool
 )
 
 func main() {
@@ -76,11 +78,15 @@ func main() {
 	// 扫描并加载已安装插件（非关键，失败不影响主程序启动）
 	pluginMgr.DiscoverAndLoad()
 
+	// 系统通知服务（用于待办定时提醒）
+	notifier := notifications.New()
+
 	app := application.New(application.Options{
 		Name:        "快启坞",
 		Description: "快启坞 QuickDock — 开发者资源集合与快速启动工具",
 		Services: []application.Service{
 			application.NewService(appService),
+			application.NewService(notifier),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -95,6 +101,9 @@ func main() {
 
 	// 传入 App 引用给 AppService
 	appService.SetApp(app)
+
+	// 注入通知服务引用（供待办提醒调度器使用）
+	appService.Notifier = notifier
 
 	// 创建插件窗口管理器（需要 app 引用，只能放在 New 之后）
 	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app)
@@ -168,6 +177,13 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 	} else {
 		fmt.Println("QuickDock: 读取 common.css 失败:", err)
 	}
+	// 提取 common.js（所有插件共享的前端工具函数，由后端注入到插件页面）
+	commonJSData, err := builtinFS.ReadFile("plugins/builtin/common.js")
+	if err == nil {
+		os.WriteFile(filepath.Join(builtinDir, "common.js"), commonJSData, 0644)
+	} else {
+		fmt.Println("QuickDock: 读取 common.js 失败:", err)
+	}
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -209,18 +225,20 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			continue
 		}
 
+		// 把 common.css 和 common.js 拷贝到每个插件根目录，
+		// 确保插件 HTML 中的 <link href="../common.css"> 在文件系统层面也能正确解析
+		for _, name := range []string{"common.css", "common.js"} {
+			if data, cer := builtinFS.ReadFile(path.Join("plugins/builtin", name)); cer == nil {
+				os.WriteFile(filepath.Join(targetDir, name), data, 0644)
+			}
+		}
+
 		// 读取图标
 		iconData := ""
 		if mf.Icon != "" {
 			iconPath := filepath.Join(targetDir, mf.Icon)
 			if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
-				ext := strings.ToLower(filepath.Ext(mf.Icon))
-				mime := "image/svg+xml"
-				if ext == ".png" {
-					mime = "image/png"
-				} else if ext == ".ico" {
-					mime = "image/x-icon"
-				}
+				mime := platform.IconMIME(filepath.Ext(mf.Icon))
 				iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
 			}
 		}

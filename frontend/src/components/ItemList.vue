@@ -15,8 +15,13 @@ const toast = inject<ToastAPI>('toast')!
 const showEditor = ref(false)
 const editingItem = ref<CollectionItem | null>(null)
 
-function handleItemClick(item: CollectionItem) {
-  store.openItem(item)
+async function handleItemClick(item: CollectionItem) {
+  try {
+    await store.openItem(item)
+    toast.success('已启动：' + item.name)
+  } catch (e) {
+    toast.error('启动失败：' + item.name + ' — ' + getErrorMessage(e))
+  }
 }
 
 async function handleOpenAll() {

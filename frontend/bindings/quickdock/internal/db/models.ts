@@ -24,3 +24,172 @@ export interface CollectionItem {
     "createdAt": string;
     "updatedAt": string;
 }
+
+/**
+ * Monitor 网站运行状态监控（仿 UptimeRobot）
+ * expected_status 支持 "2xx"/"3xx"/"4xx"/"5xx" 或精确码如 "200"
+ */
+export interface Monitor {
+    "id": string;
+    "name": string;
+    "url": string;
+
+    /**
+     * GET/POST/HEAD...
+     */
+    "method": string;
+
+    /**
+     * 检测间隔（秒）
+     */
+    "intervalSec": number;
+
+    /**
+     * 单次请求超时（秒）
+     */
+    "timeoutSec": number;
+
+    /**
+     * 2xx | 3xx | 4xx | 5xx | 200 ...
+     */
+    "expectedStatus": string;
+    "followRedirects": boolean;
+    "enabled": boolean;
+    "notifyDown": boolean;
+    "notifyUp": boolean;
+
+    /**
+     * up | down | ''
+     */
+    "lastStatus": string;
+
+    /**
+     * YYYY-MM-DD HH:MM:SS
+     */
+    "lastCheckedAt": string;
+
+    /**
+     * unix 秒，供检查器精确计算间隔
+     */
+    "lastCheckedTs": number;
+    "lastLatencyMs": number;
+    "lastStatusCode": number;
+    "lastError": string;
+
+    /**
+     * 忽略证书错误（自签名/过期等），仅单条生效，默认关闭
+     */
+    "skipTLSVerify": boolean;
+
+    /**
+     * SSL 证书提前 N 天告警
+     */
+    "certWarnDays": number;
+
+    /**
+     * 证书过期时间（unix 秒，0=未知/非HTTPS）
+     */
+    "certExpiresAt": number;
+
+    /**
+     * 上次证书告警时间（unix 秒，去抖）
+     */
+    "lastCertWarned": number;
+
+    /**
+     * none | contains | not_contains | regex
+     */
+    "contentMatchType": string;
+    "contentMatchPattern": string;
+    "sort": number;
+    "createdAt": string;
+}
+
+/**
+ * ScheduledTask 定时任务
+ * 动作(action)：app=打开软件/文件  dir=打开目录  url=打开网页  command=执行命令  http=HTTP 请求
+ * 调度(scheduleKind)：once=一次性  interval=固定间隔  daily=每天  weekly=每周
+ */
+export interface ScheduledTask {
+    "id": string;
+    "name": string;
+
+    /**
+     * app | dir | url | command | http
+     */
+    "action": string;
+
+    /**
+     * 路径 / 网址 / 命令 / http url
+     */
+    "target": string;
+
+    /**
+     * app/command 的工作目录
+     */
+    "workingDir": string;
+
+    /**
+     * GET/POST/...
+     */
+    "httpMethod": string;
+
+    /**
+     * 每行 "Key: Value"
+     */
+    "httpHeaders": string;
+    "httpBody": string;
+
+    /**
+     * once | interval | daily | weekly
+     */
+    "scheduleKind": string;
+
+    /**
+     * once：YYYY-MM-DD HH:MM:SS
+     */
+    "runAt": string;
+
+    /**
+     * interval：间隔秒数
+     */
+    "intervalSec": number;
+
+    /**
+     * daily/weekly：HH:MM:SS
+     */
+    "timeOfDay": string;
+
+    /**
+     * weekly：CSV，0=周日..6=周六
+     */
+    "weekdays": string;
+    "enabled": boolean;
+
+    /**
+     * 执行后是否发系统通知
+     */
+    "notify": boolean;
+
+    /**
+     * 下次运行 YYYY-MM-DD HH:MM:SS（'' 表示不再运行）
+     */
+    "nextRun": string;
+
+    /**
+     * 上次运行 YYYY-MM-DD HH:MM:SS
+     */
+    "lastRun": string;
+
+    /**
+     * ok | fail | ''
+     */
+    "lastStatus": string;
+
+    /**
+     * 上次运行简要结果
+     */
+    "lastResult": string;
+    "sort": number;
+    "createdAt": string;
+}

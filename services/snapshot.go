@@ -7,10 +7,7 @@ func (a *AppService) CreateSnapshot(label, note string) *ApiResult {
 		return r
 	}
 	data, err := a.DB.CreateFullSnapshot(label, note)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) ListSnapshots() *ApiResult {
@@ -18,10 +15,7 @@ func (a *AppService) ListSnapshots() *ApiResult {
 		return r
 	}
 	data, err := a.DB.ListSnapshots()
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) GetSnapshot(id string) *ApiResult {
@@ -29,10 +23,7 @@ func (a *AppService) GetSnapshot(id string) *ApiResult {
 		return r
 	}
 	data, err := a.DB.GetSnapshot(id)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) DeleteSnapshot(id string) *ApiResult {
@@ -40,7 +31,7 @@ func (a *AppService) DeleteSnapshot(id string) *ApiResult {
 		return r
 	}
 	if err := a.DB.DeleteSnapshot(id); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -50,7 +41,7 @@ func (a *AppService) RestoreSnapshot(id string) *ApiResult {
 		return r
 	}
 	if err := a.DB.RestoreSnapshot(id); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }

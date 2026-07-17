@@ -8,10 +8,7 @@ func (a *AppService) SearchAll(query string) *ApiResult {
 		return r
 	}
 	items, err := a.DB.SearchAllItems(query)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(items)
+	return wrap(items, err)
 }
 
 // GetMostUsedItems 返回最常使用的项目（命令面板「最近使用」）
@@ -20,10 +17,19 @@ func (a *AppService) GetMostUsedItems(limit int) *ApiResult {
 		return r
 	}
 	items, err := a.DB.GetMostUsedItems(limit)
-	if err != nil {
-		return dberr(err)
+	return wrap(items, err)
+}
+
+// SaveUrlAsItem 将剪贴板中的 URL 保存为网页项目（命令面板智能路由用）
+func (a *AppService) SaveUrlAsItem(rawURL string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
 	}
-	return Ok(items)
+	item, err := a.DB.SaveUrlAsItem(rawURL)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(item)
 }
 
 // GetLastCopiedText 返回最近一次复制的文本

@@ -3,7 +3,7 @@
  * 大部分逻辑在前端（File API + 拖拽），后端仅占位
  */
 function handleInitialize(params) {
-  return { status: 'ready', version: '0.1.0' }
+  return { status: 'ready', version: '0.2.0' }
 }
 
 function handleExecute(params) {

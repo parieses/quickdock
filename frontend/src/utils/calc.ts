@@ -151,3 +151,77 @@ export function format(value: number, options?: { precision?: number }): string 
   }
   return raw
 }
+
+// ---- 单位换算 ----
+// 与四则运算共用 `=` 触发前缀；当算术求值失败时回退到单位换算。
+// 解析形如 `100kg = lb`、`100kg to lb`、`1024MB in GB`、`1h -> min`。
+// 不带目标单位（如 `100kg`）不触发，避免污染普通搜索（表达式必须以数字开头）。
+
+interface UnitCategory {
+  base: string
+  units: Record<string, number> // 各单位的换算系数（相对 base）
+}
+
+const UNIT_CATEGORIES: Record<string, UnitCategory> = {
+  mass: { base: 'kg', units: { kg: 1, g: 0.001, mg: 1e-6, t: 1000, lb: 0.45359237, oz: 0.028349523125, jin: 0.5, liang: 0.05 } },
+  data: { base: 'B', units: { b: 1, byte: 1, kb: 1024, mb: 1024 ** 2, gb: 1024 ** 3, tb: 1024 ** 4, kib: 1024, mib: 1024 ** 2, gib: 1024 ** 3 } },
+  length: { base: 'm', units: { m: 1, km: 1000, cm: 0.01, mm: 0.001, mile: 1609.344, mi: 1609.344, ft: 0.3048, foot: 0.3048, inch: 0.0254, in: 0.0254, yd: 0.9144, yard: 0.9144 } },
+  time: { base: 's', units: { s: 1, sec: 1, min: 60, h: 3600, hr: 3600, hour: 3600, day: 86400, d: 86400, week: 604800 } },
+}
+
+const TEMP_UNITS = new Set(['c', '°c', 'celsius', 'f', '°f', 'fahrenheit', 'k', 'kelvin'])
+
+function cleanUnit(token: string): string {
+  return token.toLowerCase().replace(/[?°]/g, '')
+}
+
+function findUnit(token: string): { category: string; factor: number } | null {
+  const t = cleanUnit(token)
+  for (const [cat, def] of Object.entries(UNIT_CATEGORIES)) {
+    if (def.units[t] !== undefined) return { category: cat, factor: def.units[t] }
+  }
+  return null
+}
+
+function convertTemp(value: number, from: string, to: string): number | null {
+  const f = cleanUnit(from)
+  const t = cleanUnit(to)
+  if (!TEMP_UNITS.has(f) || !TEMP_UNITS.has(t)) return null
+  let c: number
+  if (f === 'c' || f === 'celsius') c = value
+  else if (f === 'f' || f === 'fahrenheit') c = (value - 32) * 5 / 9
+  else if (f === 'k' || f === 'kelvin') c = value - 273.15
+  else return null
+  if (t === 'c' || t === 'celsius') return c
+  if (t === 'f' || t === 'fahrenheit') return c * 9 / 5 + 32
+  if (t === 'k' || t === 'kelvin') return c + 273.15
+  return null
+}
+
+/**
+ * convertExpression 解析单位换算表达式。
+ * @returns 成功时返回展示文本与数值；无法解析（非单位表达式）返回 null。
+ */
+export function convertExpression(expr: string): { text: string; value: number } | null {
+  // 必须以数字开头 + 源单位 + 分隔符(to/in/=/->/→) + 目标单位（可带 ? 占位）
+  const m = expr.trim().match(/^([\d.]+)\s*([a-zA-Zμ°]+?)\s*(?:to|in|=|->|→)\s*([a-zA-Zμ°?]+)$/i)
+  if (!m) return null
+  const value = parseFloat(m[1])
+  if (!isFinite(value)) return null
+  const fromTok = m[2]
+  const toTok = m[3]
+
+  if (TEMP_UNITS.has(cleanUnit(fromTok)) || TEMP_UNITS.has(cleanUnit(toTok))) {
+    const tv = convertTemp(value, fromTok, toTok)
+    if (tv === null) return null
+    return { text: `${m[1]}${fromTok} = ${format(tv)} ${toTok.replace(/\?/g, '')}`, value: tv }
+  }
+
+  const from = findUnit(fromTok)
+  const to = findUnit(toTok)
+  if (!from || !to || from.category !== to.category) return null
+
+  const base = value * from.factor
+  const result = base / to.factor
+  return { text: `${m[1]}${fromTok} = ${format(result)} ${toTok.replace(/\?/g, '')}`, value: result }
+}

@@ -39,6 +39,7 @@
 (function(){
   var input=document.getElementById('inputField'),output=document.getElementById('output')
   var btn=document.getElementById('btnExplain')
+  function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
   btn.addEventListener('click',explain);input.addEventListener('keydown',function(e){if(e.key==='Enter')explain()})
   document.addEventListener('keydown',function(e){if(e.key==='Escape')input.focus()})
   function explain(){
@@ -51,15 +52,15 @@
     var nextRuns=computeNext(fields,5)
     var hours=expandField(fields.hour,0,23)
     var html=''
-    html+='<div style="color:var(--accent);font-weight:500;margin-bottom:6px">📋 '+desc+'</div>'
+    html+='<div style="color:var(--accent);font-weight:500;margin-bottom:6px">📋 '+escapeHtml(desc)+'</div>'
     html+='<div style="color:var(--text-muted);margin-bottom:4px">字段分解:</div>'
-    html+='<div>分 (0-59): <span style="color:var(--text-primary)">'+fields.minute+'</span></div>'
-    html+='<div>时 (0-23): <span style="color:var(--text-primary)">'+fields.hour+'</span></div>'
-    html+='<div>日 (1-31): <span style="color:var(--text-primary)">'+fields.dom+'</span></div>'
-    html+='<div>月 (1-12): <span style="color:var(--text-primary)">'+fields.month+'</span></div>'
-    html+='<div>周 (0-7): <span style="color:var(--text-primary)">'+fields.dow+'</span></div>'
+    html+='<div>分 (0-59): <span style="color:var(--text-primary)">'+escapeHtml(fields.minute)+'</span></div>'
+    html+='<div>时 (0-23): <span style="color:var(--text-primary)">'+escapeHtml(fields.hour)+'</span></div>'
+    html+='<div>日 (1-31): <span style="color:var(--text-primary)">'+escapeHtml(fields.dom)+'</span></div>'
+    html+='<div>月 (1-12): <span style="color:var(--text-primary)">'+escapeHtml(fields.month)+'</span></div>'
+    html+='<div>周 (0-7): <span style="color:var(--text-primary)">'+escapeHtml(fields.dow)+'</span></div>'
     html+='<div style="color:var(--text-muted);margin:6px 0 4px">⏰ 下次执行:</div>'
-    for(var i=0;i<nextRuns.length;i++)html+='<div style="color:var(--text-primary)">  '+(i+1)+'. '+nextRuns[i]+'</div>'
+    for(var i=0;i<nextRuns.length;i++)html+='<div style="color:var(--text-primary)">  '+(i+1)+'. '+escapeHtml(nextRuns[i])+'</div>'
     if(hours&&hours.length<12){
       html+='<div style="color:var(--text-muted);margin:6px 0 4px">📊 小时分布:</div>'
       for(var h=0;h<24;h++){

@@ -4,15 +4,16 @@ import { useI18n } from 'vue-i18n'
 import {
   Search, Hash, Command, ArrowRight, Lock, Power, Moon, Trash2, RotateCcw,
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, X,
-  MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink
+  MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
+  Check, Bookmark
 } from '@lucide/vue'
-import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, RecordUsage, RecordUsageEx, GetRecentUsage, GetAllUsage } from '../../bindings/quickdock/services/appservice'
+import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, RecordUsage, RecordUsageEx, GetRecentUsage, GetAllUsage, SaveUrlAsItem } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import type { CollectionItem, PluginInfo, PluginCommand } from '../types'
 import type { ToastAPI } from '../types'
-import { evaluate, format } from '../utils/calc'
+import { evaluate, format, convertExpression } from '../utils/calc'
 import { pinyin } from 'pinyin-pro'
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')
@@ -22,9 +23,12 @@ function closePalette() {
   closeInlinePlugin()
   query.value = ''
   selectedIndex.value = 0
+  selectedSet.value = new Set()
+  lastAnchor.value = -1
   inlineQuicklink.value = null
   inlineQuery.value = ''
   pluginResultCache.value = null
+  clipboardUrlSource.value = ''
   try { HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
 }
 
@@ -87,7 +91,7 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
 ]
 
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action'
 
 interface InstalledApp {
   name: string
@@ -118,6 +122,7 @@ interface SearchResult {
   score?: number                 // 匹配质量分数 0-100（用于跨组排序）
   matchType?: string             // 匹配类型标签（"精确" "正则" "拼音" "模糊" 等）
   url?: string                   // URL 直接打开
+  clipAction?: string            // clipboard-action 类型的动作标识：open-url | save-url | encode-url
 }
 
 interface SystemCmd {
@@ -196,7 +201,7 @@ function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
   const seen = new Set<string>()
   for (const plugin of plugins) {
     if (plugin.status !== 'running') continue
-    for (const cmd of plugin.commands) {
+    for (const cmd of (plugin.commands || [])) {
       const key = plugin.id + '|' + cmd.id
       if (seen.has(key)) continue
       seen.add(key)
@@ -204,7 +209,7 @@ function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
       let regexValid = true
       if (cmd.matchPattern) {
         try {
-          regex = new RegExp(cmd.matchPattern)
+          regex = new RegExp('^(?:' + cmd.matchPattern + ')$')
         } catch (e) {
           console.warn(`[CmdPalette] Invalid matchPattern in plugin "${plugin.id}" cmd "${cmd.id}":`, (e as Error).message)
           regexValid = false
@@ -267,16 +272,19 @@ function calcPluginScore(
   if (!q) return { score: 0, matchType: '' }
 
   // 1) Slash 命令前缀精确匹配 (最高优先级)
-  if (idx.cmd.prefix && qLC.startsWith(idx.cmd.prefix.toLowerCase())) {
-    bestScore = 95; bestType = 'slash'
-    inlineInput = q.slice(idx.cmd.prefix.length).trim() || undefined
+  if (idx.cmd.prefix) {
+    const prefixLC = idx.cmd.prefix.toLowerCase()
+    if (qLC.startsWith(prefixLC) && (qLC.length === prefixLC.length || qLC[prefixLC.length] === ' ')) {
+      bestScore = 95; bestType = 'slash'
+      inlineInput = q.slice(prefixLC.length).trim() || undefined
+    }
   }
 
   // 2) matchPattern 命中
   if (idx.regex && idx.regexValid) {
     try {
       if (idx.regex.test(q)) {
-        if (idx.cmd.prefix && qLC.startsWith(idx.cmd.prefix.toLowerCase())) {
+        if (idx.cmd.prefix && qLC.startsWith(idx.cmd.prefix.toLowerCase()) && (qLC.length === idx.cmd.prefix.length || qLC[idx.cmd.prefix.length] === ' ')) {
           // slash + matchPattern 一起用时不重复加分
         } else if (bestScore < 85) {
           bestScore = 85; bestType = 'match pattern'; inlineInput = q
@@ -302,10 +310,13 @@ function calcPluginScore(
   // 7) 关键字前缀 (输入以 "关键字 " 开头，自动传参)
   if ((idx.cmd.keywords || []).some(k => qLC.startsWith(k.toLowerCase() + ' ')) && bestScore < 55) { bestScore = 55; bestType = 'kw inline' }
 
-  // 8) 标题包含
+  // 8) 关键字前缀匹配（输入以关键字开头）
+  if ((idx.cmd.keywords || []).some(k => k.toLowerCase().startsWith(qLC)) && bestScore < 65) { bestScore = 65; bestType = 'kw prefix' }
+
+  // 9) 标题包含
   if (titleLC.includes(qLC) && bestScore < 60) { bestScore = 60; bestType = 'contains' }
 
-  // 9) 关键字包含
+  // 10) 关键字包含
   if ((idx.cmd.keywords || []).slice(0, 20).some(k => k.toLowerCase().includes(qLC)) && bestScore < 40) { bestScore = 40; bestType = 'kw match' }
 
   // 10) 别名包含
@@ -321,12 +332,12 @@ function calcPluginScore(
   if (idx.cmd.id.toLowerCase().includes(qLC) && bestScore < 30) { bestScore = 30; bestType = 'id' }
 
   // 14) 拼音匹配标题 (用缓存)
-  if ((idx.pinyinTitleFull.includes(qLC) || idx.pinyinTitleInit.includes(qLC)) && bestScore < 20) { bestScore = 20; bestType = 'pinyin' }
+  if ((idx.pinyinTitleFull.includes(qLC) || idx.pinyinTitleInit.startsWith(qLC)) && bestScore < 20) { bestScore = 20; bestType = 'pinyin' }
 
   // 15) 拼音匹配关键字
   if (bestScore < 15) {
     for (let i = 0; i < idx.pinyinKwFull.length; i++) {
-      if (idx.pinyinKwFull[i].includes(qLC) || idx.pinyinKwInit[i].includes(qLC)) {
+      if (idx.pinyinKwFull[i].includes(qLC) || idx.pinyinKwInit[i].startsWith(qLC)) {
         bestScore = Math.max(bestScore, 15); bestType = 'kw pinyin'; break
       }
     }
@@ -334,7 +345,7 @@ function calcPluginScore(
 
   // 16) 别名拼音（用缓存）
   if (bestScore < 12) {
-    if (idx.pinyinAliasFull.some(p => p.includes(qLC)) || idx.pinyinAliasInit.some(p => p.includes(qLC))) {
+    if (idx.pinyinAliasFull.some(p => p.includes(qLC)) || idx.pinyinAliasInit.some(p => p.startsWith(qLC))) {
       bestScore = Math.max(bestScore, 12); bestType = 'alias py'
     }
   }
@@ -344,9 +355,9 @@ function calcPluginScore(
     // 中文查询：每个汉字权重高，放宽阈值到 3
     const hasChinese = /[\u4e00-\u9fff]/.test(qLC)
     const threshold = hasChinese ? 3 : 2
-    const qLen = qLC.length
-    if (levenshtein(titleLC.slice(0, Math.max(titleLC.length, qLen)), qLC) <= threshold) { bestScore = 10; bestType = 'fuzzy' }
-    else if ((idx.cmd.keywords || []).some(k => levenshtein(k.toLowerCase().slice(0, Math.max(k.length, qLen)), qLC) <= threshold)) { bestScore = 8; bestType = 'fuzzy' }
+    const fuzzyLimit = 20
+    if (levenshtein(titleLC.slice(0, fuzzyLimit), qLC.slice(0, fuzzyLimit)) <= threshold) { bestScore = 10; bestType = 'fuzzy' }
+    else if ((idx.cmd.keywords || []).some(k => levenshtein(k.toLowerCase().slice(0, fuzzyLimit), qLC.slice(0, fuzzyLimit)) <= threshold)) { bestScore = 8; bestType = 'fuzzy' }
   }
 
   return { score: bestScore, matchType: bestType, inlineInput }
@@ -362,6 +373,7 @@ const matchTypeLabels: Record<string, string> = {
   'fuzzy':       '模糊',
   'match pattern': '正则',
   'kw inline':   '内联',
+  'kw prefix':   '关键字前缀',
   'kw match':    '关键字',
   'kw pinyin':   '拼音',
   'alias py':    '拼音',
@@ -382,8 +394,14 @@ const loading = ref(false)
 const selectedIndex = ref(0)
 const listRef = ref<HTMLElement | null>(null)
 
+// ---- 多选（1.3）----
+const selectedSet = ref<Set<number>>(new Set())
+const lastAnchor = ref(-1)
+// ---- 剪贴板智能路由（1.4）：记录自动填充来源为剪贴板 URL ----
+const clipboardUrlSource = ref('')
+
 // 插件执行结果缓存（留在结果列表中，直到关闭面板或输入新内容）
-const pluginResultCache = ref<{ result: string; pluginName: string } | null>(null)
+const pluginResultCache = ref<{ result: string; pluginName: string; pluginId?: string; pluginCommandId?: string; pluginHasFrontend?: boolean } | null>(null)
 
 // Inline 插件模式：在同一个面板内展示插件内容（uTools 风格）
 const inlinePluginId = ref<string | null>(null)
@@ -452,17 +470,19 @@ async function onInlinePluginLoad() {
   }
   window.addEventListener('message', inlinePluginMsgHandler)
 
-  // 传递初始文本 + 主题 + 语言
+  // 传递初始文本 + 命中的子命令 + 主题 + 语言
   try {
     const raw = await GetAndClearPendingPluginInit()
-    const text = raw?.data || raw
+    const init = raw?.data || raw
+    const text = (init && typeof init === 'object') ? (init.text || '') : (typeof init === 'string' ? init : '')
+    const command = (init && typeof init === 'object') ? (init.command || '') : ''
     if (iframe.contentWindow) {
       // 先发 theme 消息让插件 HTML 应用主题
       iframe.contentWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, window.location.origin)
-      // 再发 init 消息（携带 text 和主题/语言）
+      // 再发 init 消息（携带 text、command 和主题/语言）
       iframe.contentWindow.postMessage({
         type: 'plugin:init',
-        data: { text, theme: 'dark', locale: locale.value }
+        data: { text, command, theme: 'dark', locale: locale.value }
       }, window.location.origin)
     }
   } catch {}
@@ -491,15 +511,50 @@ const systemCommands = computed<SystemCmd[]>(() => [
 ])
 
 // ---- 拼音匹配 ----
-function pinyinMatch(text: string, queryLC: string): boolean {
+function pinyinMatch(text: string, queryLC: string, cacheKey?: string): boolean {
   if (!text || !queryLC) return false
-  const py = pinyin(text, { pattern: 'first', toneType: 'none', type: 'array' })
-  const initials = py.map(p => p[0]).join('').toLowerCase()
-  if (initials.includes(queryLC)) return true
-  const full = pinyin(text, { toneType: 'none', type: 'array' }).join('').toLowerCase()
+  let initials: string, full: string
+  if (cacheKey) {
+    const cached = pinyinCache.get(cacheKey)
+    if (cached) { initials = cached.init; full = cached.full }
+    else {
+      const pyArr = pinyin(text, { pattern: 'first', toneType: 'none', type: 'array' })
+      initials = pyArr.map(p => p[0]).join('').toLowerCase()
+      full = pinyin(text, { toneType: 'none', type: 'array' }).join('').toLowerCase()
+    }
+  } else {
+    const pyArr = pinyin(text, { pattern: 'first', toneType: 'none', type: 'array' })
+    initials = pyArr.map(p => p[0]).join('').toLowerCase()
+    full = pinyin(text, { toneType: 'none', type: 'array' }).join('').toLowerCase()
+  }
+  if (initials.startsWith(queryLC)) return true
   if (full.includes(queryLC)) return true
   return false
 }
+
+// ---- 拼音缓存：避免每次击键重复计算 pinyin() ----
+const pinyinCache = new Map<string, { init: string; full: string }>()
+function rebuildPinyinCache() {
+  pinyinCache.clear()
+  for (const item of items.value) {
+    const py = pinyin(item.name, { toneType: 'none', type: 'array' })
+    pinyinCache.set('i:' + item.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
+  }
+  for (const s of snippets.value) {
+    const py = pinyin(s.keyword, { toneType: 'none', type: 'array' })
+    pinyinCache.set('s:' + s.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
+  }
+  for (const app of installedApps.value) {
+    const py = pinyin(app.name, { toneType: 'none', type: 'array' })
+    pinyinCache.set('a:' + app.name, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
+  }
+  for (const cmd of systemCommands.value) {
+    const py = pinyin(cmd.label, { toneType: 'none', type: 'array' })
+    pinyinCache.set('sys:' + cmd.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
+  }
+}
+watch([items, snippets, installedApps], () => { rebuildPinyinCache() })
+watch(systemCommands, () => { rebuildPinyinCache() })
 
 // ---- 项目类型图标 ----
 // type 值来自后端 DB（schema.go: items.type DEFAULT '目录'），是稳定的中文枚举
@@ -522,6 +577,21 @@ interface ResultGroup {
   results: SearchResult[]
 }
 
+// 应用图标 / 别名解析（顶层函数，供搜索结果与「最近使用」共用）
+function appIcon(name: string): any {
+  for (const [re, icon] of APP_ICON_MAP) {
+    if (re.test(name)) return icon
+  }
+  return AppWindow
+}
+
+function getAppAliases(name: string): string[] {
+  for (const [re, aliases] of APP_NAME_ALIASES) {
+    if (re.test(name)) return aliases
+  }
+  return []
+}
+
 const groupedResults = computed<ResultGroup[]>(() => {
   void frecencyTick.value // 依赖 frecencyTick，加载完毕后重算
   const q = query.value.trim()
@@ -530,6 +600,24 @@ const groupedResults = computed<ResultGroup[]>(() => {
   const qLC = q.toLowerCase()
   const groups: ResultGroup[] = []
   const seen = new Set<string>()
+
+  // 0. 单位换算（无需 = 前缀：以数字 + 源单位 + 分隔符 + 目标单位触发，避免污染文本搜索）
+  {
+    const conv = convertExpression(q)
+    if (conv) {
+      groups.push({
+        type: 'calculator',
+        label: t('cmdGroupCalc'),
+        results: [{
+          type: 'calculator',
+          label: conv.text,
+          desc: t('calcHint'),
+          icon: Hash,
+          calcResult: conv.text,
+        }]
+      })
+    }
+  }
 
   // 1. 计算器（仅 = 前缀触发，避免拦截插件输入）
   if (q.startsWith('=')) {
@@ -549,7 +637,23 @@ const groupedResults = computed<ResultGroup[]>(() => {
           }]
         })
       }
-    } catch {}
+    } catch {
+      // 算术失败 → 回退单位换算（如 =100kg to lb）
+      const conv = convertExpression(expr)
+      if (conv) {
+        groups.push({
+          type: 'calculator',
+          label: t('cmdGroupCalc'),
+          results: [{
+            type: 'calculator',
+            label: conv.text,
+            desc: t('calcHint'),
+            icon: Hash,
+            calcResult: conv.text,
+          }]
+        })
+      }
+    }
   }
 
   // 2. URL 检测：检测到网页链接时添加直接打开选项
@@ -584,9 +688,10 @@ const groupedResults = computed<ResultGroup[]>(() => {
     const valueLC = (item.value || '').toLowerCase()
     // FTS5 已确保文本匹配，但拼音可能编码不一致需要前端补充
     // 同时允许中文直输匹配（用户输入中文名直接筛选）
-    if (!(nameLC.includes(qLC) || valueLC.includes(qLC) || pinyinMatch(item.name, qLC))) continue
+    if (!(nameLC.includes(qLC) || valueLC.includes(qLC) || pinyinMatch(item.name, qLC, 'i:' + item.id))) continue
     seen.add(item.id)
     const isQuicklink = item.value && item.value.includes('{query}')
+    const itemScore = nameLC === qLC ? 100 : nameLC.startsWith(qLC) ? 75 : nameLC.includes(qLC) ? 60 : valueLC.includes(qLC) ? 55 : 0
     itemResults.push({
       type: isQuicklink ? 'quicklink' : 'item',
       label: item.name,
@@ -594,6 +699,7 @@ const groupedResults = computed<ResultGroup[]>(() => {
       icon: itemIcon(item),
       item,
       frecencyScore: frecencyScore('item:' + item.id),
+      score: itemScore,
     })
   }
   // Frecency 排序
@@ -630,9 +736,10 @@ const groupedResults = computed<ResultGroup[]>(() => {
   for (const s of snippets.value) {
     const kid = s.keyword.toLowerCase()
     const cid = s.content.toLowerCase()
-    if (kid.includes(qLC) || cid.includes(qLC) || pinyinMatch(s.keyword, qLC)) {
+    if (kid.includes(qLC) || cid.includes(qLC) || pinyinMatch(s.keyword, qLC, 's:' + s.id)) {
       if (!seen.has('snippet-' + s.id)) {
         seen.add('snippet-' + s.id)
+        const snippetScore = kid === qLC ? 100 : kid.startsWith(qLC) ? 75 : kid.includes(qLC) ? 60 : cid.includes(qLC) ? 55 : 0
         snippetResults.push({
           type: 'snippet',
           label: s.keyword,
@@ -640,6 +747,7 @@ const groupedResults = computed<ResultGroup[]>(() => {
           icon: Clipboard,
           snippet: s,
           frecencyScore: frecencyScore('snippet:' + s.id),
+          score: snippetScore,
         })
       }
     }
@@ -650,21 +758,6 @@ const groupedResults = computed<ResultGroup[]>(() => {
   }
 
   // 5. 已安装的应用
-  function appIcon(name: string): any {
-    for (const [re, icon] of APP_ICON_MAP) {
-      if (re.test(name)) return icon
-    }
-    return AppWindow
-  }
-
-  // 获取应用的中文别名
-  function getAppAliases(name: string): string[] {
-    for (const [re, aliases] of APP_NAME_ALIASES) {
-      if (re.test(name)) return aliases
-    }
-    return []
-  }
-
   const appResults: SearchResult[] = []
   for (const app of installedApps.value) {
     const nameLC = app.name.toLowerCase()
@@ -673,7 +766,8 @@ const groupedResults = computed<ResultGroup[]>(() => {
     const aliasMatch = aliases.some(a =>
       a.toLowerCase().includes(qLC) || pinyinMatch(a, qLC)
     )
-    if (nameLC.includes(qLC) || pinyinMatch(app.name, qLC) || aliasMatch) {
+    if (nameLC.includes(qLC) || pinyinMatch(app.name, qLC, 'a:' + app.name) || aliasMatch) {
+      const appScore = nameLC === qLC ? 100 : nameLC.startsWith(qLC) ? 75 : aliasMatch ? 60 : nameLC.includes(qLC) ? 60 : 0
       appResults.push({
         type: 'app',
         label: app.name,
@@ -683,6 +777,7 @@ const groupedResults = computed<ResultGroup[]>(() => {
         appPath: app.path,
         appCategory: app.category,
         frecencyScore: frecencyScore('app:' + app.name),
+        score: appScore,
       })
     }
   }
@@ -694,8 +789,10 @@ const groupedResults = computed<ResultGroup[]>(() => {
   // 6. 系统命令
   const sysResults: SearchResult[] = []
   for (const cmd of systemCommands.value) {
-    if (cmd.keywords.some(k => k.includes(qLC)) || cmd.label.toLowerCase().includes(qLC) || pinyinMatch(cmd.label, qLC)) {
-      sysResults.push({ type: 'system', label: cmd.label, desc: cmd.desc, icon: cmd.icon, cmd })
+    const labelLC = cmd.label.toLowerCase()
+    if (cmd.keywords.some(k => k.includes(qLC)) || labelLC.includes(qLC) || pinyinMatch(cmd.label, qLC, 'sys:' + cmd.id)) {
+      const sysScore = labelLC === qLC ? 100 : labelLC.startsWith(qLC) ? 75 : cmd.keywords.some(k => k === qLC) ? 90 : cmd.keywords.some(k => k.startsWith(qLC)) ? 65 : labelLC.includes(qLC) ? 60 : 0
+      sysResults.push({ type: 'system', label: cmd.label, desc: cmd.desc, icon: cmd.icon, cmd, score: sysScore })
     }
   }
   if (sysResults.length > 0) {
@@ -731,6 +828,9 @@ const groupedResults = computed<ResultGroup[]>(() => {
       icon: Puzzle,
       score: 99,
       frecencyScore: 9999, // 置顶
+      pluginId: pluginResultCache.value.pluginId,
+      pluginCommandId: pluginResultCache.value.pluginCommandId,
+      pluginHasFrontend: pluginResultCache.value.pluginHasFrontend,
     })
   }
   // 按统一分数排序
@@ -743,11 +843,22 @@ const groupedResults = computed<ResultGroup[]>(() => {
     groups.push({ type: 'plugin', label: t('cmdGroupPlugins'), results: pluginResults })
   }
 
+  // 0.6 剪贴板智能路由（1.4）：搜索框内容来自剪贴板且为 URL 时，注入建议组
+  if (clipboardUrlSource.value && q === clipboardUrlSource.value) {
+    const urlStr = clipboardUrlSource.value
+    const suggest: SearchResult[] = [
+      { type: 'clipboard-action', clipAction: 'open-url', label: t('cmdOpenUrl'), desc: urlStr, icon: Globe, url: urlStr, score: 100 },
+      { type: 'clipboard-action', clipAction: 'save-url', label: t('cmdSaveAsItem'), desc: urlStr, icon: Bookmark, url: urlStr, score: 99 },
+      { type: 'clipboard-action', clipAction: 'encode-url', label: t('cmdEncodeUrl'), desc: t('cmdEncodeUrlDesc'), icon: Code2, url: urlStr, score: 98 },
+    ]
+    groups.unshift({ type: 'clipboard-action', label: t('cmdGroupClipboard'), results: suggest })
+  }
+
   // ---- 跨组最佳匹配注入 (#8, #14) ----
   // 从所有分组中收集 score >= 70 的结果，注入顶部 "最佳匹配" 分组
   const bestMatch: SearchResult[] = []
   for (const g of groups) {
-    if (g.type === 'calculator') continue // 计算器单结果不抢
+    if (g.type === 'calculator' || g.type === 'clipboard-action') continue // 计算器/剪贴板建议单结果不抢
     for (const r of g.results) {
       if ((r.score || 0) >= 70) bestMatch.push(r)
     }
@@ -865,12 +976,15 @@ const recentResults = computed<SearchResult[]>(() => {
         frecencyScore: entry.count,
       })
     } else if (entry.type === 'app') {
+      const installed = installedApps.value.find(a => a.name === entry.label)
       results.push({
         type: 'app',
         label: entry.label,
         desc: entry.description,
-        icon: AppWindow,
-        appPath: entry.key.replace(/^app:/, ''),
+        icon: appIcon(entry.label),
+        iconBase64: installed?.iconBase64 || '',
+        appPath: installed?.path || entry.description,
+        appCategory: installed?.category,
         frecencyScore: entry.count,
       })
     }
@@ -894,6 +1008,37 @@ const displayGroups = computed<ResultGroup[]>(() => {
 
 const displayFlat = computed<SearchResult[]>(() => {
   return displayGroups.value.flatMap(g => g.results)
+})
+
+// ---- 结果预览（1.2）----
+const previewResult = computed<{ title: string; subtitle?: string; lines: string[]; kind: string } | null>(() => {
+  const r = displayFlat.value[selectedIndex.value]
+  if (!r) return null
+  if (r.type === 'item' && r.item) {
+    const lines = [r.item.value || '']
+    if (r.item.type === '目录' || r.item.type === '文件') {
+      const v = r.item.value || ''
+      const idx = Math.max(v.lastIndexOf('/'), v.lastIndexOf('\\'))
+      if (idx > 0) lines.push(t('previewParent') + ': ' + v.slice(0, idx))
+    }
+    return { title: r.label, subtitle: r.item.type, lines, kind: 'item' }
+  }
+  if (r.type === 'snippet' && r.snippet) {
+    return { title: r.label, subtitle: r.snippet.category, lines: [r.snippet.content], kind: 'snippet' }
+  }
+  if (r.type === 'plugin') {
+    const cached = pluginResultCache.value
+    return {
+      title: r.label,
+      subtitle: cached ? t('previewLast') : (r.desc || ''),
+      lines: cached ? [cached.result] : [r.desc || ''],
+      kind: 'plugin',
+    }
+  }
+  if (r.type === 'url' && r.url) return { title: r.label, subtitle: t('previewUrl'), lines: [r.url], kind: 'url' }
+  if (r.type === 'app' && r.appPath) return { title: r.label, subtitle: t('previewPath'), lines: [r.appPath], kind: 'app' }
+  if (r.type === 'clipboard-action' && r.url) return { title: r.label, subtitle: t('previewUrl'), lines: [r.url], kind: 'clipboard-action' }
+  return null
 })
 
 // ---- 键盘导航 ----
@@ -933,6 +1078,18 @@ function onKeydown(e: KeyboardEvent) {
       selectedIndex.value = (selectedIndex.value - 1 + list.length) % Math.max(list.length, 1)
       scrollToSelected()
       break
+    case 'a':
+    case 'A':
+      if (e.ctrlKey || e.metaKey) {
+        // 仅在已进入多选模式（已有选中）时拦截，避免覆盖输入框全选文本
+        if (selectedSet.value.size > 0) {
+          e.preventDefault()
+          const s = new Set<number>()
+          displayFlat.value.forEach((_, i) => s.add(i))
+          selectedSet.value = s
+        }
+      }
+      break
     case 'Enter':
       e.preventDefault()
       executeSelected()
@@ -948,8 +1105,70 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// ---- 辅助：判断结果是否可被批量"打开"（1.3）----
+function isOpenable(r: SearchResult): boolean {
+  return r.type === 'item' || r.type === 'url' || r.type === 'app' ||
+         r.type === 'quicklink' || r.type === 'quicklink-inline'
+}
+
+// ---- 仅执行"打开"动作（不关闭面板），供单选与批量复用 ----
+async function openResultOnly(r: SearchResult): Promise<boolean> {
+  if (r.type === 'quicklink' && r.item) {
+    inlineQuicklink.value = r.item
+    inlineQuery.value = ''
+    await nextTick()
+    inlineInputRef.value?.focus()
+    return true
+  }
+  if (r.type === 'quicklink-inline' && r.item) {
+    const item = { ...r.item }
+    let value = item.value || ''
+    if (r.inlineQuery) value = value.replace(/\{query\}/g, r.inlineQuery)
+    item.value = value
+    recordUsage('item:' + item.id, 'item', item.name, item.value || '')
+    try { await OpenItem(item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
+    return true
+  }
+  if (r.type === 'item' && r.item) {
+    recordUsage('item:' + r.item.id, 'item', r.label, r.desc)
+    try { await OpenItem(r.item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
+    return true
+  }
+  if (r.type === 'url' && r.url) {
+    try { await Browser.OpenURL(r.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }
+    return true
+  }
+  if (r.type === 'app' && r.appPath) {
+    recordUsage('app:' + r.label, 'app', r.label, r.desc)
+    try { await LaunchInstalledApp(r.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }
+    return true
+  }
+  return false
+}
+
+// ---- 批量执行（1.3）：仅打开类结果，不关闭面板 ----
+async function executeBatch() {
+  const indices = [...selectedSet.value].sort((a, b) => a - b)
+  let n = 0
+  for (const idx of indices) {
+    const r = displayFlat.value[idx]
+    if (r && isOpenable(r)) {
+      const ok = await openResultOnly(r)
+      if (ok) n++
+    }
+  }
+  selectedSet.value = new Set()
+  lastAnchor.value = -1
+  if (n > 0) toast?.success?.(t('openedCount', { n }))
+}
+
 // ---- 执行选中项 ----
 async function executeSelected() {
+  // 多选批量优先（1.3）
+  if (selectedSet.value.size > 0) {
+    await executeBatch()
+    return
+  }
   const result = displayFlat.value[selectedIndex.value]
   if (!result) return
 
@@ -1001,7 +1220,10 @@ async function executeSelected() {
       const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, input)
       const pluginResult = unwrap<string | any>(raw)
 
-      if (pluginResult) {
+      if (pluginResult && pluginResult.error) {
+        // 插件业务错误：仅提示，不写入剪贴板、不缓存
+        toast?.error?.(pluginResult.error)
+      } else if (pluginResult) {
         // 统一结果提取
         const displayText = typeof pluginResult === 'object'
           ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult))
@@ -1013,20 +1235,26 @@ async function executeSelected() {
         // 复制到剪贴板
         try { await navigator.clipboard.writeText(copyText) } catch {}
         // 缓存到结果列表顶部
-        pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label }
+        pluginResultCache.value = {
+          result: displayText.slice(0, 150),
+          pluginName: result.desc || result.label,
+          pluginId: result.pluginId,
+          pluginCommandId: result.pluginCommandId,
+          pluginHasFrontend: result.pluginHasFrontend,
+        }
         // 如果插件有前端（将被内联展示），不弹 Toast 打扰用户
         if (!result.pluginHasFrontend) {
           toast?.success?.(t('pluginResultCopied'))
         }
       }
 
-      // 如果有前端页面且有输入文本，为 iframe 准备初始值
-      if ((result.pluginHasFrontend || result.pluginId) && inputText) {
-        try { await SetPendingPluginInit(inputText) } catch {}
+      // 如果有前端页面且有输入文本，为 iframe 准备初始值（含命中的子命令，便于默认选中功能并回显文字）
+      if (result.pluginHasFrontend && inputText) {
+        try { await SetPendingPluginInit(inputText, result.pluginCommandId || '') } catch {}
       }
 
       // 如果有前端页面，在面板内联展示（uTools 风格）
-      if (result.pluginHasFrontend || result.pluginId) {
+      if (result.pluginHasFrontend) {
         inlinePluginId.value = result.pluginId
         inlinePluginLoading.value = true
         inlinePluginError.value = ''
@@ -1050,6 +1278,36 @@ async function executeSelected() {
     }
     // 不清空 query，保留面板供查看结果
     // 用户按 Esc 关闭
+  } else if (result.type === 'clipboard-action' && result.clipAction) {
+    // 剪贴板智能路由（1.4）
+    if (result.clipAction === 'open-url' && result.url) {
+      try { await Browser.OpenURL(result.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }
+      closePalette()
+    } else if (result.clipAction === 'save-url' && result.url) {
+      try {
+        const item = unwrap<CollectionItem>(await SaveUrlAsItem(result.url))
+        recordUsage('item:' + (item?.id || ''), 'item', result.url, result.url)
+        toast?.success?.(t('savedAsItem'))
+      } catch (e) {
+        toast?.error?.(getErrorMessage(e))
+      }
+      closePalette()
+    } else if (result.clipAction === 'encode-url' && result.url) {
+      try {
+        const raw = await ExecutePluginCommand('com.quickdock.text-encoder', 'url-encode', { text: result.url })
+        const res = unwrap<any>(raw)
+        if (res && res.error) {
+          toast?.error?.(res.error)
+        } else {
+          const text = typeof res === 'object' ? (res.translated || res.text || res.display || JSON.stringify(res)) : String(res)
+          try { await navigator.clipboard.writeText(text) } catch {}
+          toast?.success?.(t('pluginResultCopied'))
+        }
+      } catch (e) {
+        toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
+      }
+      closePalette()
+    }
   }
 }
 
@@ -1083,6 +1341,34 @@ function selectResult(groupIdx: number, itemIdx: number) {
   selectedIndex.value = flatIdx + itemIdx
 }
 
+// ---- 点击选中（含多选，1.3）----
+function onResultClick(gIdx: number, iIdx: number, ev: MouseEvent) {
+  const flat = getFlatIndex(gIdx, iIdx)
+  if (ev.ctrlKey || ev.metaKey) {
+    // Ctrl/⌘+Click：切换选中，不执行
+    const s = new Set(selectedSet.value)
+    if (s.has(flat)) s.delete(flat); else s.add(flat)
+    selectedSet.value = s
+    lastAnchor.value = flat
+    selectedIndex.value = flat
+    return
+  }
+  if (ev.shiftKey && lastAnchor.value >= 0) {
+    // Shift+Click：区间选中，不执行
+    const [a, b] = [lastAnchor.value, flat].sort((x, y) => x - y)
+    const s = new Set(selectedSet.value)
+    for (let i = a; i <= b; i++) s.add(i)
+    selectedSet.value = s
+    selectedIndex.value = flat
+    return
+  }
+  // 普通点击：清空多选并执行
+  selectedSet.value = new Set()
+  lastAnchor.value = flat
+  selectedIndex.value = flat
+  executeSelected()
+}
+
 // 全局 flat index
 function getFlatIndex(groupIdx: number, itemIdx: number): number {
   let flatIdx = 0
@@ -1097,6 +1383,21 @@ function getFlatIndex(groupIdx: number, itemIdx: number): number {
 // 1. 打开时加载 Top-N 最常用项目（用于最近使用面板）
 // 2. 用户输入搜索词时，后端 FTS5 精确匹配
 let itemsLoadGen = 0
+
+let lastPluginIndexLoad = 0
+async function loadPluginIndex() {
+  const now = Date.now()
+  if (now - lastPluginIndexLoad < 500) return
+  lastPluginIndexLoad = now
+  try {
+    const plugins = unwrap<PluginInfo[]>(await ListPlugins())
+    const running = plugins?.filter(p => p.status === 'running') || []
+    installedPlugins.value = running
+    pluginCmdIndex.value = buildPluginIndex(running)
+  } catch (e) {
+    console.error('[CmdPalette] ListPlugins:', getErrorMessage(e))
+  }
+}
 
 async function loadMostUsedItems() {
   loading.value = true
@@ -1124,33 +1425,22 @@ async function loadMostUsedItems() {
   } catch (e) {
     console.error('[CmdPalette] SearchSnippets:', getErrorMessage(e))
   }
-  // 加载运行中的插件命令
+  // 插件索引已在 loadPluginIndex 中独立加载，此处不再重复获取
+  // 最近使用记录
   try {
-    const plugins = unwrap<PluginInfo[]>(await ListPlugins())
+    const raw = await GetRecentUsage(20)
     if (gen === itemsLoadGen) {
-      installedPlugins.value = plugins?.filter(p => p.status === 'running') || []
-      pluginCmdIndex.value = buildPluginIndex(installedPlugins.value) // 构建预编译索引
+      recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.label)
     }
   } catch (e) {
-    console.error('[CmdPalette] ListPlugins:', getErrorMessage(e))
-  } finally {
-    // 加载最近使用记录（后端按 last_used DESC 排序）
-    try {
-      const raw = await GetRecentUsage(20)
-      if (gen === itemsLoadGen) {
-        recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.label)
-      }
-    } catch (e) {
-      console.error('[CmdPalette] GetRecentUsage:', getErrorMessage(e))
-    }
-    if (gen === itemsLoadGen) loading.value = false
+    console.error('[CmdPalette] GetRecentUsage:', getErrorMessage(e))
   }
+  if (gen === itemsLoadGen) loading.value = false
 }
 
-// 用户输入搜索词时 → 后端 FTS5 搜索 + 刷新插件列表
+// 用户输入搜索词时 → 后端 FTS5 搜索（插件索引已独立加载，不在此处刷新）
 async function searchItems(query: string) {
   if (!query.trim()) {
-    // 无查询时加载 Top 常用
     await loadMostUsedItems()
     return
   }
@@ -1162,29 +1452,19 @@ async function searchItems(query: string) {
     items.value = result || []
   } catch (e) {
     console.error('[CmdPalette] SearchAll:', getErrorMessage(e))
-    if (gen === itemsLoadGen) loading.value = false
   }
-  // 片段搜索（后端已有 LIKE 过滤）
+  // 片段搜索
   try {
     const snips = unwrap<CmdSnippet[]>(await SearchSnippets(query))
     if (gen !== itemsLoadGen) return
     snippets.value = snips || []
   } catch (e) {
     console.error('[CmdPalette] SearchSnippets:', getErrorMessage(e))
-    if (gen === itemsLoadGen) loading.value = false
   }
-  // 刷新插件列表（面板打开期间插件可能启动/崩溃/禁用）(#1)
-  try {
-    const plugins = unwrap<PluginInfo[]>(await ListPlugins())
-    if (gen === itemsLoadGen) {
-      installedPlugins.value = plugins?.filter(p => p.status === 'running') || []
-      pluginCmdIndex.value = buildPluginIndex(installedPlugins.value) // 重建索引
-    }
-  } catch (e) {
-    console.error('[CmdPalette] ListPlugins(refresh):', getErrorMessage(e))
-  } finally {
-    if (gen === itemsLoadGen) loading.value = false
-  }
+  // 每次搜索刷新插件命令索引：确保索引与运行中的插件同步。
+  // loadPluginIndex 不依赖 itemsLoadGen，独立更新 pluginCmdIndex，无竞态风险。
+  loadPluginIndex().catch(e => console.warn('[CmdPalette] loadPluginIndex:', e))
+  if (gen === itemsLoadGen) loading.value = false
 }
 
 // ---- 窗口打开 ----
@@ -1196,15 +1476,14 @@ onMounted(async () => {
     lastClipboardUpdate = Date.now()
   })
 
-  await loadMostUsedItems()
-
-  // 每次窗口打开时：如果在 inline 插件模式则保持，否则重置搜索状态
+  // 先注册窗口显示监听：避免首次打开时 palette:shown 早于本监听注册而丢失
+  // （onMounted 中的 await 可能耗时，若事件在注册前发出则重置逻辑失效）
   Events.On('palette:shown', () => {
     if (inlinePluginId.value) {
-      // Inline 插件模式：保持当前插件显示，只聚焦
-      setTimeout(() => inputRef.value?.focus(), 50)
-      return
+      closeInlinePlugin()
     }
+    // 每次打开刷新插件索引（状态可能变化）
+    loadPluginIndex()
 
     query.value = ''
     selectedIndex.value = 0
@@ -1217,27 +1496,57 @@ onMounted(async () => {
       GetLastCopiedText().then(raw => {
         const copied = unwrap<string>(raw)
         if (copied && copied.trim() && copied.trim().length < 200) {
-          query.value = copied.trim()
+          const c = copied.trim()
+          // 剪贴板智能路由（1.4）：若内容为 URL，规范化并同步 query 与来源标记
+          const isHttp = /^https?:\/\//i.test(c)
+          const looksDomain = /^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(\/|$)/i.test(c) && !/^[\d+\-*/().%^, ]+$/.test(c)
+          if (isHttp || looksDomain) {
+            const urlStr = isHttp ? c : 'https://' + c
+            query.value = urlStr
+            clipboardUrlSource.value = urlStr
+          } else {
+            query.value = c
+          }
           searchItems(query.value.trim())
         }
       }).catch(() => {})
     }
 
-    setTimeout(() => {
-      inputRef.value?.focus()
-      inputRef.value?.select()
-    }, 50)
+    // 聚焦输入框：先 nextTick 等 Vue 更新 DOM，再 requestAnimationFrame 等浏览器渲染完成
+    // 弃用 setTimeout(50) — 时序不可靠，经常焦点落空
+    nextTick(() => {
+      requestAnimationFrame(() => {
+        inputRef.value?.focus()
+        inputRef.value?.select()
+      })
+    })
   })
+
+  await loadMostUsedItems()
+  // 独立加载插件索引（与 searchItems 解耦，不受 gen 计数器干扰）
+  await loadPluginIndex()
 })
 
 // Reset selectedIndex when results change
 watch(displayFlat, () => {
   selectedIndex.value = 0
+  // 结果集变化后旧的 flat 索引失效，清空多选
+  selectedSet.value = new Set()
+  lastAnchor.value = -1
 })
 
 // 用户输入时触发后端搜索（100ms 防抖）
 let searchTimer: ReturnType<typeof setTimeout> | null = null
 watch(query, (val) => {
+  if (!val.trim()) {
+    pluginResultCache.value = null
+    inlineQuicklink.value = null
+    inlineQuery.value = ''
+  }
+  // 用户编辑后若内容与剪贴板 URL 来源不一致，撤销剪贴板建议组
+  if (val.trim() !== clipboardUrlSource.value) {
+    clipboardUrlSource.value = ''
+  }
   if (searchTimer) clearTimeout(searchTimer)
   searchTimer = setTimeout(() => {
     searchItems(val.trim())
@@ -1327,10 +1636,11 @@ onUnmounted(() => {
         <div
           v-for="(result, iIdx) in group.results"
           :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.snippet?.id || result.url || iIdx)"
-          :class="['result-item', { active: getFlatIndex(gIdx, iIdx) === selectedIndex }]"
-          @click="selectResult(gIdx, iIdx); executeSelected()"
+          :class="['result-item', { active: getFlatIndex(gIdx, iIdx) === selectedIndex, selected: selectedSet.has(getFlatIndex(gIdx, iIdx)) }]"
+          @click="onResultClick(gIdx, iIdx, $event)"
           @mousemove="selectResult(gIdx, iIdx)"
         >
+          <span v-if="selectedSet.has(getFlatIndex(gIdx, iIdx))" class="result-check"><Check :size="14" /></span>
           <div class="result-icon">
             <img v-if="result.iconBase64" :src="result.iconBase64" class="result-app-icon" alt="" />
             <component v-else :is="result.icon" :size="15" />
@@ -1358,6 +1668,17 @@ onUnmounted(() => {
           </div>
         </div>
       </template>
+    </div>
+
+    <!-- 结果预览（1.2） -->
+    <div class="palette-preview" v-if="previewResult && !inlineQuicklink">
+      <div class="preview-head">
+        <span class="preview-title">{{ previewResult.title }}</span>
+        <span class="preview-subtitle" v-if="previewResult.subtitle">{{ previewResult.subtitle }}</span>
+      </div>
+      <div class="preview-body">
+        <div v-for="(line, i) in previewResult.lines" :key="i" class="preview-line">{{ line }}</div>
+      </div>
     </div>
 
     <!-- 空状态：无查询且无最近使用 -->
@@ -1632,6 +1953,64 @@ onUnmounted(() => {
   font-size: 10px;
   font-family: var(--font-mono, monospace);
   font-weight: 500;
+}
+
+/* 多选选中态（1.3） */
+.result-item.selected {
+  background: var(--color-bg-active);
+}
+.result-check {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--color-accent);
+  color: #fff;
+  flex-shrink: 0;
+}
+
+/* 结果预览条（1.2） */
+.palette-preview {
+  flex-shrink: 0;
+  max-height: 96px;
+  overflow-y: auto;
+  padding: 8px 16px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+.preview-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.preview-title {
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.preview-subtitle {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  flex-shrink: 0;
+}
+.preview-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.preview-line {
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace);
+  white-space: pre-wrap;
+  word-break: break-all;
+  line-height: 1.45;
 }
 
 /* 滚动条 */

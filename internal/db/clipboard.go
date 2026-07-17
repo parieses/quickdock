@@ -21,40 +21,48 @@ type ClipboardEntry struct {
 	CreatedAt   int64  `json:"createdAt"`
 }
 
+// findAndBumpLocked 在 content_type=ct AND col=val 条件下查找已有剪贴板条目，
+// 若存在则递增 copy_count 并更新 created_at。
+// 调用方必须已持有 d.mu。
+// 返回 (existingID, newCount, createdAt, found, error)
+func (d *Database) findAndBumpLocked(ct, col, val string) (string, int, int64, bool, error) {
+	var existingID string
+	var existingCount int
+	err := d.conn.QueryRow(
+		fmt.Sprintf("SELECT id, copy_count FROM clipboard_entries WHERE content_type = ? AND %s = ?", col),
+		ct, val,
+	).Scan(&existingID, &existingCount)
+	if err == sql.ErrNoRows {
+		return "", 0, 0, false, nil
+	}
+	if err != nil {
+		return "", 0, 0, false, err
+	}
+
+	now := time.Now().UnixMilli()
+	_, err = d.conn.Exec(
+		"UPDATE clipboard_entries SET copy_count = ?, created_at = ? WHERE id = ?",
+		existingCount+1, now, existingID,
+	)
+	return existingID, existingCount + 1, now, true, err
+}
+
 // InsertClipboardEntry 插入或更新剪贴板记录（同文本合并：copy_count+1）
 func (d *Database) InsertClipboardEntry(text string, sourceApp string) (*ClipboardEntry, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	var existingID string
-	var existingCount int
-	err := d.conn.QueryRow("SELECT id, copy_count FROM clipboard_entries WHERE content_type = 'text' AND text_content = ?", text).Scan(&existingID, &existingCount)
-	if err == nil {
-		now := time.Now().UnixMilli()
-		_, err = d.conn.Exec(
-			"UPDATE clipboard_entries SET copy_count = ?, created_at = ? WHERE id = ?",
-			existingCount+1, now, existingID,
-		)
-		if err != nil {
-			return nil, err
-		}
-		return &ClipboardEntry{
-			ID:          existingID,
-			ContentType: "text",
-			TextContent: text,
-			SourceApp:   sourceApp,
-			CopyCount:   existingCount + 1,
-			CreatedAt:   now,
-		}, nil
+	id, count, now, found, err := d.findAndBumpLocked("text", "text_content", text)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return &ClipboardEntry{ID: id, ContentType: "text", TextContent: text, SourceApp: sourceApp, CopyCount: count, CreatedAt: now}, nil
 	}
 
 	entry := &ClipboardEntry{
-		ID:          uuid.New().String(),
-		ContentType: "text",
-		TextContent: text,
-		SourceApp:   sourceApp,
-		CopyCount:   1,
-		CreatedAt:   time.Now().UnixMilli(),
+		ID: uuid.New().String(), ContentType: "text", TextContent: text, SourceApp: sourceApp,
+		CopyCount: 1, CreatedAt: time.Now().UnixMilli(),
 	}
 	_, err = d.conn.Exec(
 		"INSERT INTO clipboard_entries (id, content_type, text_content, source_app, copy_count, created_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -68,37 +76,17 @@ func (d *Database) InsertClipboardImageEntry(id, imagePath, imageHash, textConte
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	now := time.Now().UnixMilli()
-
-	var existingID string
-	var existingCount int
-	err := d.conn.QueryRow("SELECT id, copy_count FROM clipboard_entries WHERE content_type = 'image' AND image_hash = ?", imageHash).Scan(&existingID, &existingCount)
-	if err == nil {
-		_, err = d.conn.Exec("UPDATE clipboard_entries SET copy_count = ?, created_at = ? WHERE id = ?", existingCount+1, now, existingID)
-		if err != nil {
-			return nil, err
-		}
-		return &ClipboardEntry{
-			ID:          existingID,
-			ContentType: "image",
-			TextContent: textContent,
-			ImagePath:   imagePath,
-			ImageHash:   imageHash,
-			SourceApp:   sourceApp,
-			CopyCount:   existingCount + 1,
-			CreatedAt:   now,
-		}, nil
+	eid, count, now, found, err := d.findAndBumpLocked("image", "image_hash", imageHash)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return &ClipboardEntry{ID: eid, ContentType: "image", TextContent: textContent, ImagePath: imagePath, ImageHash: imageHash, SourceApp: sourceApp, CopyCount: count, CreatedAt: now}, nil
 	}
 
 	entry := &ClipboardEntry{
-		ID:          id,
-		ContentType: "image",
-		TextContent: textContent,
-		ImagePath:   imagePath,
-		ImageHash:   imageHash,
-		SourceApp:   sourceApp,
-		CopyCount:   1,
-		CreatedAt:   now,
+		ID: id, ContentType: "image", TextContent: textContent, ImagePath: imagePath, ImageHash: imageHash, SourceApp: sourceApp,
+		CopyCount: 1, CreatedAt: now,
 	}
 	_, err = d.conn.Exec(
 		"INSERT INTO clipboard_entries (id, content_type, text_content, image_path, image_hash, source_app, copy_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -112,35 +100,17 @@ func (d *Database) InsertClipboardFileEntry(filePaths, sourceApp string) (*Clipb
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	var existingID string
-	var existingCount int
-	err := d.conn.QueryRow("SELECT id, copy_count FROM clipboard_entries WHERE content_type = 'file' AND text_content = ?", filePaths).Scan(&existingID, &existingCount)
-	if err == nil {
-		now := time.Now().UnixMilli()
-		_, err = d.conn.Exec(
-			"UPDATE clipboard_entries SET copy_count = ?, created_at = ? WHERE id = ?",
-			existingCount+1, now, existingID,
-		)
-		if err != nil {
-			return nil, err
-		}
-		return &ClipboardEntry{
-			ID:          existingID,
-			ContentType: "file",
-			TextContent: filePaths,
-			SourceApp:   sourceApp,
-			CopyCount:   existingCount + 1,
-			CreatedAt:   now,
-		}, nil
+	id, count, now, found, err := d.findAndBumpLocked("file", "text_content", filePaths)
+	if err != nil {
+		return nil, err
+	}
+	if found {
+		return &ClipboardEntry{ID: id, ContentType: "file", TextContent: filePaths, SourceApp: sourceApp, CopyCount: count, CreatedAt: now}, nil
 	}
 
 	entry := &ClipboardEntry{
-		ID:          uuid.New().String(),
-		ContentType: "file",
-		TextContent: filePaths,
-		SourceApp:   sourceApp,
-		CopyCount:   1,
-		CreatedAt:   time.Now().UnixMilli(),
+		ID: uuid.New().String(), ContentType: "file", TextContent: filePaths, SourceApp: sourceApp,
+		CopyCount: 1, CreatedAt: time.Now().UnixMilli(),
 	}
 	_, err = d.conn.Exec(
 		"INSERT INTO clipboard_entries (id, content_type, text_content, source_app, copy_count, created_at) VALUES (?, ?, ?, ?, ?, ?)",

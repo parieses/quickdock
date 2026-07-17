@@ -2,7 +2,7 @@
   "id": "com.quickdock.data-converter",
   "name": "数据格式转换",
   "icon": "icon.svg",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "JSON ↔ YAML ↔ TOML ↔ XML 多格式互转",
   "author": "QuickDock",
   "category": "开发者日常",
@@ -34,7 +34,7 @@
         "json转yaml"
       ],
       "prefix": "/convert",
-      "matchPattern": "(^\\{.*\\}$|^\\[.*\\]$|^\\w+:\\s+|^\\<\\?xml|^\\[\\w+\\])"
+      "matchPattern": "(^\\{[\\s\\S]*\\}$|^\\[[\\s\\S]*\\]$|^\\w+:\\s+|^\\<\\?xml|^\\[\\w+\\])"
     }
   ],
   "backend": {

@@ -52,7 +52,7 @@ func (a *AppService) SetWebDAVConfig(config *WebDAVConfig) *ApiResult {
 		return Fail(err)
 	}
 	if err := a.DB.SetValue("webdav_config", jsonStr); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -86,10 +86,7 @@ func (a *AppService) WebDAVExportBackup() *ApiResult {
 		return Fail(fmt.Errorf("获取 WebDAV 配置失败: %w", err))
 	}
 	name, err := webdav.UploadBackup(cfg, jsonData)
-	if err != nil {
-		return Fail(err)
-	}
-	return Ok(name)
+	return wrap(name, err)
 }
 
 // WebDAVListBackups 列出 WebDAV 服务器上的备份文件
@@ -130,7 +127,7 @@ func (a *AppService) WebDAVDownaloadAndRestore(filename string) *ApiResult {
 		return Fail(err)
 	}
 	if err := a.DB.RestoreFromJSON(jsonData); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }

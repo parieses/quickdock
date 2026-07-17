@@ -1,6 +1,6 @@
 package services
 
-import "fmt"
+import "log"
 
 // ApiResult 统一 API 返回结构
 // code: 0=成功, 1=失败
@@ -22,6 +22,7 @@ func Fail(err error) *ApiResult {
 	if err == nil {
 		return &ApiResult{Code: 1, Msg: "unknown error"}
 	}
+	log.Printf("[ERR] %v", err)
 	return &ApiResult{Code: 1, Msg: err.Error()}
 }
 
@@ -52,16 +53,21 @@ func (a *AppService) SetValue(key, value string) *ApiResult {
 	return Ok(nil)
 }
 
+// wrap 泛型包装：(值, 错误) → *ApiResult。
+// 用于消除 service 层 "val, err := ...; if err != nil { return Fail(err) }; return Ok(val)" 的重复模板。
+func wrap[T any](val T, err error) *ApiResult {
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(val)
+}
+
 // 确保 DB 初始化（批量前置检查）
 // 注意：不再需要手动加锁，db.Database 内部已加锁
 func (a *AppService) dbOK() *ApiResult {
 	if a.DB == nil {
+		log.Println("[ERR] database not initialized")
 		return FailMsg("database not initialized")
 	}
 	return nil
-}
-
-// error 工厂简化版
-func dberr(err error) *ApiResult {
-	return Fail(fmt.Errorf("数据库操作失败: %w", err))
 }

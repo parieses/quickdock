@@ -48,7 +48,7 @@ func hostsList(id int64) {
 	var entries []HostsEntry
 	var rawLines []string
 
-	re := regexp.MustCompile(`^\s*(#?)\s*(\S+)\s+(\S+)`)
+	re := regexp.MustCompile(`^\s*(#?)\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}|[0-9a-fA-F]*:[0-9a-fA-F:]*)\s+(\S+)`)
 
 	for i, line := range lines {
 		rawLines = append(rawLines, line)

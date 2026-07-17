@@ -21,8 +21,29 @@ import * as db$0 from "../internal/db/models.js";
 // @ts-ignore: Unused imports
 import * as $models from "./models.js";
 
+/**
+ * CheckMonitorNow 立即手动检测一次（不影响下次调度）
+ */
+export function CheckMonitorNow(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3374015592, id);
+}
+
 export function CleanupClipboardNow(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2613197776);
+}
+
+/**
+ * ClearCompletedTodos 清除已完成项
+ */
+export function ClearCompletedTodos(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3023679065);
+}
+
+/**
+ * ClearMonitorLogs 清空某监控的检测日志
+ */
+export function ClearMonitorLogs(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2018514900, id);
 }
 
 export function CopyClipboardEntry(id: string): $CancellablePromise<$models.ApiResult | null> {
@@ -37,8 +58,22 @@ export function CreateItem(workspaceID: string, collectionID: string, name: stri
     return $Call.ByID(1125639857, workspaceID, collectionID, name, itemType, value);
 }
 
+/**
+ * CreateMonitor 新建网站监控
+ */
+export function CreateMonitor(m: db$0.Monitor): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3784597404, m);
+}
+
 export function CreateScene(workspaceID: string, name: string, sceneType: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1525519562, workspaceID, name, sceneType);
+}
+
+/**
+ * CreateScheduledTask 新建定时任务，next_run 由后端根据调度规则计算
+ */
+export function CreateScheduledTask(t: db$0.ScheduledTask): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1896217520, t);
 }
 
 export function CreateSnapshot(label: string, note: string): $CancellablePromise<$models.ApiResult | null> {
@@ -47,6 +82,20 @@ export function CreateSnapshot(label: string, note: string): $CancellablePromise
 
 export function CreateSnippet(keyword: string, content: string, category: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(3593801203, keyword, content, category);
+}
+
+/**
+ * CreateSubtask 新建子任务（归属指定父待办）
+ */
+export function CreateSubtask(parentID: string, title: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1524722157, parentID, title);
+}
+
+/**
+ * CreateTodo 新建待办（含起止时间、提醒时间、标签与重复配置）
+ */
+export function CreateTodo(title: string, priority: string, dueDate: string, note: string, startTime: string, endTime: string, reminderTime: string, recurrence: string, tags: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3234546698, title, priority, dueDate, note, startTime, endTime, reminderTime, recurrence, tags);
 }
 
 export function CreateTool(name: string, toolType: string, path: string, args: string): $CancellablePromise<$models.ApiResult | null> {
@@ -73,8 +122,22 @@ export function DeleteItem(id: string): $CancellablePromise<$models.ApiResult | 
     return $Call.ByID(1723196642, id);
 }
 
+/**
+ * DeleteMonitor 删除监控及其日志
+ */
+export function DeleteMonitor(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(509872029, id);
+}
+
 export function DeleteScene(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2723283319, id);
+}
+
+/**
+ * DeleteScheduledTask 删除定时任务
+ */
+export function DeleteScheduledTask(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3509442289, id);
 }
 
 export function DeleteSnapshot(id: string): $CancellablePromise<$models.ApiResult | null> {
@@ -83,6 +146,13 @@ export function DeleteSnapshot(id: string): $CancellablePromise<$models.ApiResul
 
 export function DeleteSnippet(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1222531986, id);
+}
+
+/**
+ * DeleteTodo 删除待办（同时清理其重复调度记录）
+ */
+export function DeleteTodo(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(775653569, id);
 }
 
 export function DeleteWorkspace(id: string): $CancellablePromise<$models.ApiResult | null> {
@@ -116,7 +186,7 @@ export function GetAllUsage(): $CancellablePromise<$models.ApiResult | null> {
 }
 
 /**
- * GetAndClearPendingPluginInit 获取并清除待传递的初始文本
+ * GetAndClearPendingPluginInit 获取并清除待传递的初始文本与子命令
  */
 export function GetAndClearPendingPluginInit(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2879713414);
@@ -153,10 +223,35 @@ export function GetLastCopiedText(): $CancellablePromise<$models.ApiResult | nul
 }
 
 /**
+ * GetMonitorLogs 返回某监控最近 limit 条检测日志
+ */
+export function GetMonitorLogs(id: string, limit: number): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3720800551, id, limit);
+}
+
+/**
+ * GetMonitorLogsSince 返回某监控 checked_ts >= sinceTs 的检测日志（时间范围切换用）
+ */
+export function GetMonitorLogsSince(id: string, sinceTs: number, limit: number): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2587060783, id, sinceTs, limit);
+}
+
+/**
  * GetMostUsedItems 返回最常使用的项目（命令面板「最近使用」）
  */
 export function GetMostUsedItems(limit: number): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(174226976, limit);
+}
+
+/**
+ * GetNote 读取快捷笔记内容（find-or-create 固定关键词片段）
+ */
+export function GetNote(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1516142134);
+}
+
+export function GetNoteHotkeyConfig(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2040649190);
 }
 
 export function GetPaletteHotkeyConfig(): $CancellablePromise<$models.ApiResult | null> {
@@ -193,6 +288,20 @@ export function GetSnapshot(id: string): $CancellablePromise<$models.ApiResult |
 }
 
 /**
+ * GetSnippetByKeyword 按关键词查询片段（快捷笔记用）
+ */
+export function GetSnippetByKeyword(keyword: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3971639549, keyword);
+}
+
+/**
+ * GetSystemStatus 返回系统资源概览（CPU / 内存 / 磁盘 / IP）
+ */
+export function GetSystemStatus(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2470073925);
+}
+
+/**
  * GetTopUsage 返回使用次数最多的 N 条记录
  */
 export function GetTopUsage(limit: number): $CancellablePromise<$models.ApiResult | null> {
@@ -211,6 +320,13 @@ export function GetValue(key: string): $CancellablePromise<$models.ApiResult | n
  */
 export function GetWebDAVConfig(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2832353333);
+}
+
+/**
+ * GetWebhookConfig 读取机器人通知配置（供前端设置页回填）
+ */
+export function GetWebhookConfig(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1054365561);
 }
 
 export function GetWorkspace(id: string): $CancellablePromise<$models.ApiResult | null> {
@@ -279,6 +395,27 @@ export function ListItems(collectionID: string): $CancellablePromise<$models.Api
     return $Call.ByID(3764977142, collectionID);
 }
 
+/**
+ * ListMonitorStats 汇总所有监控近 24h 在线率等指标
+ */
+export function ListMonitorStats(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(4129737735);
+}
+
+/**
+ * ListMonitors 列出全部监控
+ */
+export function ListMonitors(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(227707149);
+}
+
+/**
+ * ListPluginExecLogs 返回最近 limit 条插件命令执行日志（前端历史展示，5.2）
+ */
+export function ListPluginExecLogs(limit: number): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1134931239, limit);
+}
+
 export function ListPlugins(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(442808626);
 }
@@ -287,12 +424,26 @@ export function ListScenes(workspaceID: string): $CancellablePromise<$models.Api
     return $Call.ByID(3351845611, workspaceID);
 }
 
+/**
+ * ListScheduledTasks 列出全部定时任务
+ */
+export function ListScheduledTasks(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1328995913);
+}
+
 export function ListSnapshots(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1489806735);
 }
 
 export function ListSnippets(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1439974928);
+}
+
+/**
+ * ListTodos 列出所有待办
+ */
+export function ListTodos(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(443272331);
 }
 
 export function ListTools(): $CancellablePromise<$models.ApiResult | null> {
@@ -386,6 +537,27 @@ export function ResumeHotkeys(): $CancellablePromise<void> {
 }
 
 /**
+ * RunScheduledTaskNow 立即手动执行一次（不影响下次排期）
+ */
+export function RunScheduledTaskNow(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2518119461, id);
+}
+
+/**
+ * SaveNote 保存快捷笔记内容（整段防抖保存，upsert 固定关键词片段）
+ */
+export function SaveNote(content: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(535265659, content);
+}
+
+/**
+ * SaveUrlAsItem 将剪贴板中的 URL 保存为网页项目（命令面板智能路由用）
+ */
+export function SaveUrlAsItem(rawURL: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2571322723, rawURL);
+}
+
+/**
  * ScanInstalledApps 扫描已安装应用（缓存，首次调用后复用）
  */
 export function ScanInstalledApps(): $CancellablePromise<$models.ApiResult | null> {
@@ -411,6 +583,13 @@ export function SelectAndInstallPlugin(): $CancellablePromise<$models.ApiResult 
 }
 
 /**
+ * SendTestNotification 发送一条测试通知（前端「发送测试提醒」按钮调用）
+ */
+export function SendTestNotification(title: string, body: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2317317471, title, body);
+}
+
+/**
  * SetApp 设置 App 引用（由 main.go 在创建后调用）
  */
 export function SetApp(app: application$0.App | null): $CancellablePromise<void> {
@@ -433,15 +612,41 @@ export function SetHotkeyConfig(modifiers: number, vk: number): $CancellableProm
     return $Call.ByID(3895446934, modifiers, vk);
 }
 
+/**
+ * SetMonitorEnabled 启用/停用监控
+ */
+export function SetMonitorEnabled(id: string, enabled: boolean): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(575565977, id, enabled);
+}
+
+export function SetNoteHotkeyConfig(modifiers: number, vk: number): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3071218858, modifiers, vk);
+}
+
 export function SetPaletteHotkeyConfig(modifiers: number, vk: number): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(189880149, modifiers, vk);
 }
 
 /**
- * SetPendingPluginInit 设置待传递给插件窗口的初始文本（从命令面板→插件窗口跨窗口传递）
+ * SetPendingPluginInit 设置待传递给插件窗口的初始文本 + 命中的子命令
+ * （从命令面板→插件窗口跨窗口传递，便于插件进入后默认选中对应功能并回显文字）
  */
-export function SetPendingPluginInit(text: string): $CancellablePromise<$models.ApiResult | null> {
-    return $Call.ByID(4124006564, text);
+export function SetPendingPluginInit(text: string, command: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(4124006564, text, command);
+}
+
+/**
+ * SetScheduledTaskEnabled 启用/停用定时任务；启用时重算 next_run
+ */
+export function SetScheduledTaskEnabled(id: string, enabled: boolean): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2943277933, id, enabled);
+}
+
+/**
+ * SetTodoStatus 设置待办状态（看板拖拽）
+ */
+export function SetTodoStatus(id: string, status: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3043231880, id, status);
 }
 
 /**
@@ -459,14 +664,57 @@ export function SetWebDAVConfig(config: $models.WebDAVConfig | null): $Cancellab
 }
 
 /**
+ * SetWebhookConfig 保存机器人通知配置（钉钉 / 企业微信 / 飞书 的 Webhook 地址）
+ */
+export function SetWebhookConfig(dingtalk: string, wecom: string, feishu: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1035468701, dingtalk, wecom, feishu);
+}
+
+/**
  * ShowPluginWindow 打开插件独立窗口（每个插件拥有自己的独立窗口）
  */
 export function ShowPluginWindow(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(3008209844, pluginID);
 }
 
+/**
+ * StartMonitorChecker 启动网站监控检查器（仿 UptimeRobot）。
+ * 同样采用精确定时器：每次检测后按 interval 计算最近待检监控的等待时长并精确 sleep，
+ * 监控增删改/启停时用 monitorWake 立即唤醒重排。
+ */
+export function StartMonitorChecker(): $CancellablePromise<void> {
+    return $Call.ByID(3149802367);
+}
+
+/**
+ * StartReminderScheduler 启动待办定时提醒调度器（常驻 goroutine）
+ * 每 10 秒轮询一次，对「已到提醒时间、未完成、未发送」的待办推送系统通知。
+ */
+export function StartReminderScheduler(): $CancellablePromise<void> {
+    return $Call.ByID(83997965);
+}
+
+/**
+ * StartScheduleRunner 启动定时任务调度器。
+ * 采用「精确定时器」而非固定 10s 轮询：每次执行后计算最近的 next_run，
+ * 用 time.Timer 精确 sleep 到该时刻（秒级精度，不再有最多 10s 的延迟触发），
+ * 任务被增删改/启停时用 schedWake 立即唤醒重排。这正是调度库内部的核心机制，
+ * 但无需引入额外依赖，且与进程内状态天然一致。
+ */
+export function StartScheduleRunner(): $CancellablePromise<void> {
+    return $Call.ByID(3855636353);
+}
+
 export function SuspendHotkeys(): $CancellablePromise<void> {
     return $Call.ByID(1551644173);
+}
+
+/**
+ * TestWebhook 向指定平台的 Webhook 地址发送一条测试消息（保存前即可验证配置是否正确）。
+ * kind: dingtalk | wecom | feishu
+ */
+export function TestWebhook(kind: string, url: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3897684719, kind, url);
 }
 
 /**
@@ -478,6 +726,13 @@ export function ToggleMaximizePluginWindow(pluginID: string): $CancellablePromis
 
 export function TogglePinClipboardEntry(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(1629693783, id);
+}
+
+/**
+ * ToggleTodo 切换完成状态
+ */
+export function ToggleTodo(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(2390775654, id);
 }
 
 export function UninstallPlugin(id: string): $CancellablePromise<$models.ApiResult | null> {
@@ -492,12 +747,33 @@ export function UpdateItem(id: string, updates: { [_ in string]?: any } | null):
     return $Call.ByID(3624550944, id, updates);
 }
 
+/**
+ * UpdateMonitor 更新监控配置
+ */
+export function UpdateMonitor(m: db$0.Monitor): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(832428983, m);
+}
+
 export function UpdateScene(id: string, updates: { [_ in string]?: any } | null): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(688719653, id, updates);
 }
 
+/**
+ * UpdateScheduledTask 更新定时任务并重算 next_run
+ */
+export function UpdateScheduledTask(t: db$0.ScheduledTask): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(810797915, t);
+}
+
 export function UpdateSnippet(id: string, keyword: string, content: string, category: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(4118751660, id, keyword, content, category);
+}
+
+/**
+ * UpdateTodo 更新待办（含起止时间、提醒时间、标签、重复配置与状态）
+ */
+export function UpdateTodo(id: string, title: string, priority: string, dueDate: string, note: string, startTime: string, endTime: string, reminderTime: string, recurrence: string, tags: string, status: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3979953559, id, title, priority, dueDate, note, startTime, endTime, reminderTime, recurrence, tags, status);
 }
 
 export function UpdateWorkspace(id: string, name: string): $CancellablePromise<$models.ApiResult | null> {

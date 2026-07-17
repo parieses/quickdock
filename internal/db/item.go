@@ -3,9 +3,12 @@ package db
 import (
 	"database/sql"
 	"fmt"
+	"net/url"
 	"os/exec"
 	goruntime "runtime"
+	"path/filepath"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/windows"
 )
@@ -24,12 +27,23 @@ func (d *Database) ListItems(collectionID string) ([]CollectionItem, error) {
 
 // fts5Escape 清理 FTS5 查询中的特殊字符（移除会导致 FTS5 解析错误的运算符和关键字）
 func fts5Escape(q string) string {
-	specials := []string{"\"", "*", "+", "-", "(", ")", "~", "^", "<", ">", ",", "AND", "OR", "NOT", "NEAR"}
+	// FTS5 保留关键字（AND/OR/NOT/NEAR）仅当以独立 token 出现时才剥离，
+	// 绝不能按子串替换——否则会把 COMMAND、SANDWICH、NOTE 等正常词里的子串误删。
+	reserved := map[string]bool{"AND": true, "OR": true, "NOT": true, "NEAR": true}
+	// 单字符运算符直接移除（unicode61 分词器本就会按这些符号切词；"-" 等若残留会破坏查询）。
+	specials := []string{"\"", "*", "+", "-", "(", ")", "~", "^", "<", ">", ","}
 	result := q
 	for _, s := range specials {
-		result = strings.ReplaceAll(result, s, "")
+		result = strings.ReplaceAll(result, s, " ")
 	}
-	return strings.TrimSpace(result)
+	var out []string
+	for _, tok := range strings.Fields(result) {
+		if reserved[strings.ToUpper(tok)] {
+			continue
+		}
+		out = append(out, tok)
+	}
+	return strings.Join(out, " ")
 }
 
 // SearchAllItems 跨全部工作空间搜索项目（使用 FTS5 全文索引）
@@ -54,7 +68,8 @@ func (d *Database) SearchAllItems(query string) ([]CollectionItem, error) {
 	}
 	ftsQuery := strings.Join(parts, " ")
 
-	rows, err := d.conn.Query(`SELECT `+itemCols+`
+	// items_fts 虚拟表自身含 id/name/value 列，与 items 表同名，SELECT 必须加 items. 前缀限定
+	rows, err := d.conn.Query(`SELECT `+("items."+strings.ReplaceAll(itemCols, ", ", ", items."))+`
 		FROM items_fts JOIN items ON items.rowid = items_fts.rowid
 		WHERE items_fts MATCH ?
 		ORDER BY rank
@@ -124,6 +139,85 @@ func (d *Database) CreateItem(workspaceID, collectionID, name, itemType, value s
 	return item, err
 }
 
+// SaveUrlAsItem 将 URL 保存为「网页」项目，落入专用「剪贴板收藏」工作空间/
+// 场景/集合（find-or-create）。命令面板为独立窗口，无法感知主窗口当前选中的
+// 工作空间，故使用固定落点，避免跨窗口状态传递。各辅助方法内部已加锁，此处不持锁。
+func (d *Database) SaveUrlAsItem(rawURL string) (*CollectionItem, error) {
+	u, err := url.Parse(rawURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("不是有效的 http/https URL")
+	}
+
+	wsID, err := d.ensureWorkspace("剪贴板收藏")
+	if err != nil {
+		return nil, err
+	}
+	sceneID, err := d.ensureScene(wsID, "默认")
+	if err != nil {
+		return nil, err
+	}
+	colID, err := d.ensureCollection(wsID, sceneID, "网页")
+	if err != nil {
+		return nil, err
+	}
+	return d.CreateItem(wsID, colID, u.Host, "网页", rawURL)
+}
+
+// 以下 ensure* 均为幂等 find-or-create：并发下若创建因重名失败，回退为查询已有记录。
+func (d *Database) ensureWorkspace(name string) (string, error) {
+	row, err := d.QueryOne("SELECT * FROM workspaces WHERE name = ?", name)
+	if err != nil {
+		return "", err
+	}
+	if row != nil {
+		return str(row["id"]), nil
+	}
+	ws, err := d.CreateWorkspace(name)
+	if err != nil {
+		if row2, e2 := d.QueryOne("SELECT * FROM workspaces WHERE name = ?", name); e2 == nil && row2 != nil {
+			return str(row2["id"]), nil
+		}
+		return "", err
+	}
+	return ws.ID, nil
+}
+
+func (d *Database) ensureScene(workspaceID, name string) (string, error) {
+	scenes, err := d.ListScenes(workspaceID)
+	if err != nil {
+		return "", err
+	}
+	if len(scenes) > 0 {
+		return scenes[0].ID, nil
+	}
+	sc, err := d.CreateScene(workspaceID, name, "通用")
+	if err != nil {
+		if scenes2, e2 := d.ListScenes(workspaceID); e2 == nil && len(scenes2) > 0 {
+			return scenes2[0].ID, nil
+		}
+		return "", err
+	}
+	return sc.ID, nil
+}
+
+func (d *Database) ensureCollection(workspaceID, sceneID, name string) (string, error) {
+	cols, err := d.ListCollections(sceneID)
+	if err != nil {
+		return "", err
+	}
+	if len(cols) > 0 {
+		return cols[0].ID, nil
+	}
+	col, err := d.CreateCollection(workspaceID, sceneID, name, "目录集合", "")
+	if err != nil {
+		if cols2, e2 := d.ListCollections(sceneID); e2 == nil && len(cols2) > 0 {
+			return cols2[0].ID, nil
+		}
+		return "", err
+	}
+	return col.ID, nil
+}
+
 func (d *Database) UpdateItem(id string, updates map[string]interface{}) error {
 	if id == "" {
 		return fmt.Errorf("id 不能为空")
@@ -139,17 +233,6 @@ func (d *Database) UpdateItem(id string, updates map[string]interface{}) error {
 
 func (d *Database) DeleteItem(id string) error {
 	return d.DeleteWhere("items", "id = ?", id)
-}
-
-func (d *Database) ReorderItems(orderedIDs []string) error {
-	return d.Transaction(func(tx *sql.Tx) error {
-		for i, id := range orderedIDs {
-			if _, err := tx.Exec("UPDATE items SET sort = ? WHERE id = ?", i*10, id); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }
 
 // ---- 打开项目 ----
@@ -202,6 +285,27 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 		args = strings.ReplaceAll(args, "{{url}}", value)
 		args = strings.ReplaceAll(args, "{{path}}", value)
 	} else if itemType == "命令" {
+		// 终端工具（cmd/powershell/wt/wsl）会重新解析 /c 之后的整条命令行，
+		// 路径里的空格、括号会被当成语法分组而静默失败。
+		// 解决：用 SysProcAttr.CmdLine 直接传递命令行，并对含空格/特殊字符的值
+		// 做 ""value"" 双重引号包裹（cmd 会剥掉最外层引号，保留内层引号当字面量）。
+		if isTerminalTool(tool.Path) {
+			tmpl := tool.Args
+			if tmpl == "" {
+				tmpl = "/c {{command}}"
+			}
+			quoted := value
+			if strings.ContainsAny(value, " \t()&|<>^") {
+				quoted = `""` + value + `""`
+			}
+			inner := strings.ReplaceAll(strings.ReplaceAll(tmpl, "{{command}}", quoted), "{{path}}", quoted)
+			c := exec.Command(tool.Path)
+			c.SysProcAttr = &syscall.SysProcAttr{CmdLine: tool.Path + " " + inner}
+			if item.WorkingDirectory != "" {
+				c.Dir = item.WorkingDirectory
+			}
+			return c.Start()
+		}
 		args = strings.ReplaceAll(args, "{{command}}", value)
 		args = strings.ReplaceAll(args, "{{path}}", value)
 	} else {
@@ -218,51 +322,85 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 	return cmd.Start()
 }
 
-func openWithSystemDefault(value, itemType string, workingDir string) error {
-	goos := goruntime.GOOS
+// validOpenSchemes 允许通过 ShellExecute 打开的 URL 协议白名单。
+var validOpenSchemes = map[string]bool{
+	"http": true, "https": true, "mailto": true, "ftp": true, "file": true,
+}
 
+// validateOpenTarget 校验用户存储的打开目标，防止 javascript:/ms-powershell: 等
+// 危险协议被 ShellExecute 直接触发（存储型协议注入）。
+func validateOpenTarget(itemType, value string) error {
+	if value == "" {
+		return fmt.Errorf("打开目标为空")
+	}
+	lower := strings.ToLower(value)
+	// 危险协议黑名单（直接拒绝）
+	dangerous := []string{
+		"javascript:", "vbscript:", "ms-powershell:", "powershell:",
+		"cmd:", "ms-msdt:", "msdt:", "wscript:", "cscript:",
+	}
+	for _, p := range dangerous {
+		if strings.HasPrefix(lower, p) {
+			return fmt.Errorf("拒绝危险协议: %s", p)
+		}
+	}
+	// 网页/快速链接只允许 http/https/mailto/ftp 协议；无协议的裸域名按 https 处理，
+	// 避免误拒用户已有的条目（如 github.com）。
 	if itemType == "网页" || itemType == "快速链接" {
-		if goos == "windows" {
-			return windows.ShellExecute(0,
-				windows.StringToUTF16Ptr("open"),
-				windows.StringToUTF16Ptr(value),
-				nil, nil, windows.SW_SHOWNORMAL)
-		} else if goos == "darwin" {
-			return exec.Command("open", value).Start()
-		} else {
-			return exec.Command("xdg-open", value).Start()
+		u, err := url.Parse(value)
+		if err != nil {
+			return fmt.Errorf("无效的链接: %s", value)
 		}
-	} else if itemType == "目录" || itemType == "文件" {
-		if goos == "windows" {
-			return windows.ShellExecute(0,
-				windows.StringToUTF16Ptr("open"),
-				windows.StringToUTF16Ptr(value),
-				nil, nil, windows.SW_SHOWNORMAL)
-		} else if goos == "darwin" {
-			return exec.Command("open", value).Start()
-		} else {
-			return exec.Command("xdg-open", value).Start()
+		if u.Scheme == "" {
+			if u, err = url.Parse("https://" + value); err != nil {
+				return fmt.Errorf("无效的链接: %s", value)
+			}
 		}
-	} else if itemType == "命令" {
-		if goos == "windows" {
-			argList := splitArgs(value)
-			if len(argList) == 0 {
-				return fmt.Errorf("命令内容为空")
-			}
-			cmd := exec.Command(argList[0], argList[1:]...)
-			if workingDir != "" {
-				cmd.Dir = workingDir
-			}
-			return cmd.Start()
-		} else {
-			cmd := exec.Command("sh", "-c", value)
-			if workingDir != "" {
-				cmd.Dir = workingDir
-			}
-			return cmd.Start()
+		if !validOpenSchemes[u.Scheme] {
+			return fmt.Errorf("不支持的链接协议: %s", u.Scheme)
 		}
-	} else {
-		if goos == "windows" {
+	}
+	return nil
+}
+
+func openWithOSDefault(value string) error {
+	switch goruntime.GOOS {
+	case "windows":
+		return windows.ShellExecute(0,
+			windows.StringToUTF16Ptr("open"),
+			windows.StringToUTF16Ptr(value),
+			nil, nil, windows.SW_SHOWNORMAL)
+	case "darwin":
+		return exec.Command("open", value).Start()
+	default:
+		return exec.Command("xdg-open", value).Start()
+	}
+}
+
+func openCommand(value, workingDir string) error {
+	argList := splitArgs(value)
+	if len(argList) == 0 {
+		return fmt.Errorf("命令内容为空")
+	}
+	cmd := exec.Command(argList[0], argList[1:]...)
+	if workingDir != "" {
+		cmd.Dir = workingDir
+	}
+	return cmd.Start()
+}
+
+func openWithSystemDefault(value, itemType string, workingDir string) error {
+	if err := validateOpenTarget(itemType, value); err != nil {
+		return err
+	}
+
+	switch itemType {
+	case "网页", "快速链接", "目录", "文件":
+		return openWithOSDefault(value)
+	case "命令":
+		return openCommand(value, workingDir)
+	default:
+		if goruntime.GOOS == "windows" {
 			return windows.ShellExecute(0,
 				windows.StringToUTF16Ptr("open"),
 				windows.StringToUTF16Ptr(value),
@@ -296,4 +434,16 @@ func splitArgs(args string) []string {
 		result = append(result, string(current))
 	}
 	return result
+}
+
+// isTerminalTool 判断某个可执行文件是否为终端类工具
+// （cmd/powershell/wt/wsl）。这些工具接收整条命令作为参数，
+// 调用方需自行对含空格/括号的命令加引号。
+func isTerminalTool(path string) bool {
+	switch strings.ToLower(filepath.Base(path)) {
+	case "cmd", "cmd.exe", "powershell", "powershell.exe",
+		"wt", "wt.exe", "wsl", "wsl.exe":
+		return true
+	}
+	return false
 }

@@ -2,6 +2,7 @@ package services
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -10,6 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"quickdock/internal/db"
+	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
 )
 
@@ -19,6 +22,8 @@ import (
 var (
 	inlineCSSRe = regexp.MustCompile(`<link\s[^>]*?(?:rel="stylesheet"|rel='stylesheet')[^>]*?>`)
 	inlineJSRe  = regexp.MustCompile(`<script[^>]*src\s*=\s*["'][^"']*["'][^>]*>`)
+	attrDblRe   = regexp.MustCompile(`([\w-]+)\s*=\s*"([^"]*)"`)
+	attrSglRe   = regexp.MustCompile(`([\w-]+)\s*=\s*'([^']*)'`)
 )
 
 func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
@@ -33,7 +38,7 @@ func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
 	manifest, err := plugin.LoadManifest(dir + "/plugin.json")
 	if err != nil {
 		return Ok(map[string]interface{}{
-			"dir": dir,
+			"dir":  dir,
 			"note": "安装完成但读取 manifest 失败: " + err.Error(),
 		})
 	}
@@ -42,13 +47,7 @@ func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
 	if manifest.Icon != "" {
 		iconPath := filepath.Join(dir, manifest.Icon)
 		if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
-			ext := strings.ToLower(filepath.Ext(manifest.Icon))
-			mime := "image/svg+xml"
-			if ext == ".png" {
-				mime = "image/png"
-			} else if ext == ".ico" {
-				mime = "image/x-icon"
-			}
+			mime := platform.IconMIME(filepath.Ext(manifest.Icon))
 			iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
 		}
 	}
@@ -111,7 +110,7 @@ func (a *AppService) InstallPluginFromBytes(fileName string, fileData []byte) *A
 // PluginHotkeyRegistry 管理插件声明的全局热键
 type PluginHotkeyRegistry struct {
 	mu       sync.Mutex
-	accelMap map[string]string // "Ctrl+Shift+T" → "pluginID.commandID"
+	accelMap map[string]string   // "Ctrl+Shift+T" → "pluginID.commandID"
 	byPlugin map[string][]string // pluginID → []accel （便于卸载时批量清理）
 }
 
@@ -166,11 +165,13 @@ func (a *AppService) ListPlugins() *ApiResult {
 		return FailMsg("plugin manager not initialized")
 	}
 	plugins := a.PluginMgr.ListPlugins()
-	// 从 usage_frecency 表查询每个插件的使用次数
+	// 从 usage_frecency 表查询每个插件的使用次数（一条 SQL 聚合全部，替代逐条查询）
 	if a.DB != nil {
-		for i := range plugins {
-			if cnt, err := a.DB.GetPluginUsageCount(plugins[i].ID); err == nil && cnt > 0 {
-				plugins[i].UsageCount = cnt
+		if counts, err := a.DB.GetAllPluginUsageCounts(); err == nil {
+			for i := range plugins {
+				if c, ok := counts[plugins[i].ID]; ok && c > 0 {
+					plugins[i].UsageCount = c
+				}
 			}
 		}
 	}
@@ -181,16 +182,63 @@ func (a *AppService) ExecutePluginCommand(pluginID, commandID string, input map[
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
 	}
+	start := time.Now()
 	result, err := a.PluginMgr.ExecuteCommand(pluginID, commandID, input)
-	if err != nil {
-		return Fail(err)
-	}
+	// 记录执行日志（5.2：忽略错误，不影响主流程）
+	a.recordPluginExecLog(pluginID, commandID, "manual", start, result, err)
 	// 记录插件使用次数
 	if a.DB != nil {
 		usageKey := "plugin:" + pluginID + "." + commandID
 		a.DB.RecordUsage(usageKey) // 忽略错误，不影响主流程
 	}
+	if err != nil {
+		return Fail(err)
+	}
 	return Ok(result)
+}
+
+// recordPluginExecLog 写入一条插件命令执行日志（5.2）
+func (a *AppService) recordPluginExecLog(pluginID, commandID, trigger string, start time.Time, result interface{}, execErr error) {
+	if a.DB == nil {
+		return
+	}
+	log := &db.PluginExecLog{
+		PluginID:   pluginID,
+		CommandID:  commandID,
+		Success:    execErr == nil,
+		DurationMs: int(time.Since(start).Milliseconds()),
+		Trigger:    trigger,
+	}
+	if execErr != nil {
+		log.Error = execErr.Error()
+	} else if result != nil {
+		if b, mErr := json.Marshal(result); mErr == nil {
+			log.Result = string(b)
+		} else {
+			log.Result = fmt.Sprintf("%v", result)
+		}
+	}
+	if len(log.Result) > 2000 {
+		log.Result = log.Result[:2000]
+	}
+	if len(log.Error) > 2000 {
+		log.Error = log.Error[:2000]
+	}
+	if err := a.DB.AddPluginExecLog(log); err != nil {
+		fmt.Printf("QuickDock: 写入插件执行日志失败: %v\n", err)
+	}
+}
+
+// ListPluginExecLogs 返回最近 limit 条插件命令执行日志（前端历史展示，5.2）
+func (a *AppService) ListPluginExecLogs(limit int) *ApiResult {
+	if a.DB == nil {
+		return FailMsg("database not initialized")
+	}
+	logs, err := a.DB.ListPluginExecLogs(limit)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(logs)
 }
 
 func (a *AppService) EnablePlugin(id string) *ApiResult {
@@ -199,7 +247,7 @@ func (a *AppService) EnablePlugin(id string) *ApiResult {
 	}
 	// 启用：更新数据库状态后加载插件
 	if err := a.DB.SetPluginEnabled(id, 1); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	// 从插件目录重新加载
 	manifest, err := a.PluginMgr.ReloadPlugin(id)
@@ -246,7 +294,7 @@ func (a *AppService) DisablePlugin(id string) *ApiResult {
 		_ = err
 	}
 	if err := a.DB.SetPluginEnabled(id, 0); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 
 	// 清理插件热键（内部注册表 + 系统全局快捷键）
@@ -264,7 +312,10 @@ func (a *AppService) DisablePlugin(id string) *ApiResult {
 
 // executePluginCommand 内部调用插件命令（供热键回调使用）
 func (a *AppService) executePluginCommand(pluginID, commandID string) {
+	start := time.Now()
 	result, err := a.PluginMgr.ExecuteCommand(pluginID, commandID, nil)
+	// 记录执行日志（5.2：忽略错误，不影响主流程）
+	a.recordPluginExecLog(pluginID, commandID, "hotkey", start, result, err)
 	if err != nil {
 		fmt.Printf("QuickDock: 插件 %s 命令 %s 执行失败: %v\n", pluginID, commandID, err)
 	} else if result != nil {
@@ -313,10 +364,10 @@ func (a *AppService) UninstallPlugin(id string) *ApiResult {
 	}
 	// 清理数据库记录和数据
 	if err := a.DB.DeletePlugin(id); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	if err := a.DB.CleanPluginData(id); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -326,10 +377,7 @@ func (a *AppService) GetPluginFrontendURL(pluginID string) *ApiResult {
 		return FailMsg("plugin manager not initialized")
 	}
 	path, err := a.PluginMgr.GetFrontendPath(pluginID)
-	if err != nil {
-		return Fail(err)
-	}
-	return Ok(path)
+	return wrap(path, err)
 }
 
 // GetPluginIcon 获取插件图标（返回 base64 data URI）
@@ -358,20 +406,7 @@ func (a *AppService) GetPluginIcon(pluginID string) *ApiResult {
 		return Ok(nil) // 图标文件不存在不是致命错误
 	}
 	// 根据扩展名推断 MIME
-	ext := strings.ToLower(filepath.Ext(inst.Manifest.Icon))
-	var mime string
-	switch ext {
-	case ".svg":
-		mime = "image/svg+xml"
-	case ".png":
-		mime = "image/png"
-	case ".ico":
-		mime = "image/x-icon"
-	case ".jpg", ".jpeg":
-		mime = "image/jpeg"
-	default:
-		mime = "image/png"
-	}
+	mime := platform.IconMIME(filepath.Ext(inst.Manifest.Icon))
 	dataURI := fmt.Sprintf("data:%s;base64,%s", mime, base64Encode(data))
 
 	// 写入数据库缓存
@@ -409,11 +444,13 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 		return Fail(fmt.Errorf("插件前端文件过大 (%d bytes)", fi.Size()))
 	}
 
-	// 读取 common.css 的 mtime（用于缓存失效判断）
+	// 读取 common.css / common.js 的最新 mtime（用于缓存失效判断，任一变更即失效）
 	var commonMtime time.Time
-	commonCSSPath := filepath.Join(a.PluginsDir, "builtin", "common.css")
-	if commonFi, err := os.Stat(commonCSSPath); err == nil {
-		commonMtime = commonFi.ModTime()
+	for _, name := range []string{"common.css", "common.js"} {
+		p := filepath.Join(a.PluginsDir, "builtin", name)
+		if fi, err := os.Stat(p); err == nil && fi.ModTime().After(commonMtime) {
+			commonMtime = fi.ModTime()
+		}
 	}
 
 	a.frontendCacheMu.RLock()
@@ -431,6 +468,7 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	baseDir := filepath.Dir(entryPath)
 
 	// 强制注入 common.css（QuickDock 插件通用主题），确保所有插件都有正确的暗色/浅色适配
+	commonCSSPath := filepath.Join(a.PluginsDir, "builtin", "common.css")
 	if commonData, err := os.ReadFile(commonCSSPath); err == nil {
 		commonStyle := "<style id=\"quickdock-common-css\">\n" + string(commonData) + "\n</style>\n"
 		// 插入到 <head> 标签之后（或文档最前）
@@ -438,6 +476,18 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 			html = html[:idx+6] + "\n" + commonStyle + html[idx+6:]
 		} else {
 			html = commonStyle + html
+		}
+	}
+
+	// 注入 common.js（插件共享的前端工具函数：escapeHtml / copyText 等）
+	// 注意：common.js 必须早于各插件 app.js 注入，保证全局函数可用
+	commonJSPath := filepath.Join(a.PluginsDir, "builtin", "common.js")
+	if commonJSData, err := os.ReadFile(commonJSPath); err == nil {
+		commonJS := "<script id=\"quickdock-common-js\">\n" + string(commonJSData) + "\n</script>\n"
+		if idx := strings.Index(html, "<head>"); idx >= 0 {
+			html = html[:idx+6] + "\n" + commonJS + html[idx+6:]
+		} else {
+			html = commonJS + html
 		}
 	}
 
@@ -466,11 +516,18 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	html = inlineFileRefs(html, baseDir, inlineCSSRe, func(match string) string {
 		href := extractAttrValue(match, "href")
 		if href == "" {
-			return match
+			return "<!-- quickdock: empty css href -->"
 		}
-		data, err := os.ReadFile(filepath.Join(baseDir, href))
+		var data []byte
+		var err error
+		// ../common.css 实际位于 builtin 共享目录，需从 PluginsDir/builtin 读取
+		if strings.HasSuffix(href, "common.css") {
+			data, err = os.ReadFile(filepath.Join(a.PluginsDir, "builtin", "common.css"))
+		} else {
+			data, err = os.ReadFile(filepath.Join(baseDir, href))
+		}
 		if err != nil {
-			return ""
+			return "<!-- quickdock: css inline failed: " + href + " -->"
 		}
 		return "<style>\n" + string(data) + "\n</style>"
 	})
@@ -479,11 +536,18 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	html = inlineFileRefs(html, baseDir, inlineJSRe, func(match string) string {
 		src := extractAttrValue(match, "src")
 		if src == "" {
-			return match
+			return "<!-- quickdock: empty js src -->"
 		}
-		data, err := os.ReadFile(filepath.Join(baseDir, src))
+		var data []byte
+		var err error
+		// ../common.js 同样位于 builtin 共享目录
+		if strings.HasSuffix(src, "common.js") {
+			data, err = os.ReadFile(filepath.Join(a.PluginsDir, "builtin", "common.js"))
+		} else {
+			data, err = os.ReadFile(filepath.Join(baseDir, src))
+		}
 		if err != nil {
-			return ""
+			return "<!-- quickdock: js inline failed: " + src + " -->"
 		}
 		return "<script>\n" + string(data) + "\n</script>"
 	})
@@ -508,17 +572,20 @@ func inlineFileRefs(html, baseDir string, re *regexp.Regexp, loader func(string)
 	})
 }
 
-// extractAttrValue 从 HTML 标签中提取属性值（支持单引号和双引号）
+// extractAttrValue 从 HTML 标签中提取指定属性的值（支持单引号和双引号）。
+// 注意：一个标签可能有多个属性（如 <link rel="stylesheet" href="x.css">），
+// 必须用 FindAllStringSubmatch 遍历所有匹配，返回属性名等于 attrName 的那一个，
+// 不能只取第一个匹配（否则会错把 rel 当成 href 导致提取为空）。
 func extractAttrValue(tag, attrName string) string {
-	// 尝试双引号: attr="value"
-	re := regexp.MustCompile(attrName + `\s*=\s*"([^"]*)"`)
-	if m := re.FindStringSubmatch(tag); len(m) >= 2 {
-		return m[1]
+	for _, m := range attrDblRe.FindAllStringSubmatch(tag, -1) {
+		if len(m) >= 3 && m[1] == attrName {
+			return m[2]
+		}
 	}
-	// 尝试单引号: attr='value'
-	re = regexp.MustCompile(attrName + `\s*=\s*'([^']*)'`)
-	if m := re.FindStringSubmatch(tag); len(m) >= 2 {
-		return m[1]
+	for _, m := range attrSglRe.FindAllStringSubmatch(tag, -1) {
+		if len(m) >= 3 && m[1] == attrName {
+			return m[2]
+		}
 	}
 	return ""
 }
@@ -527,7 +594,6 @@ func extractAttrValue(tag, attrName string) string {
 func base64Encode(data []byte) string {
 	return base64.StdEncoding.EncodeToString(data)
 }
-
 
 // ===== 插件独立窗口 =====
 // 插件前端页面在独立窗口中打开（使用 iframe 嵌入）
@@ -554,36 +620,41 @@ func (a *AppService) ShowPluginWindow(pluginID string) *ApiResult {
 	// 以独立窗口显示（任务栏可见，仅能通过 X 关闭）
 	a.PluginWindowMgr.ShowAsWindow(pluginID, inst.Manifest.Name)
 
-	// 检查是否有待传递的初始文本，注入到窗口 iframe
+	// 检查是否有待传递的初始文本 + 子命令，注入到窗口 iframe
 	a.pendingInitTextMu.Lock()
 	initText := a.pendingInitText
+	initCommand := a.pendingInitCommand
 	a.pendingInitText = ""
+	a.pendingInitCommand = ""
 	a.pendingInitTextMu.Unlock()
 	if initText != "" {
-		a.PluginWindowMgr.InjectInitText(pluginID, initText)
+		a.PluginWindowMgr.InjectInitText(pluginID, initText, initCommand)
 	}
 
 	return Ok(nil)
 }
 
-// SetPendingPluginInit 设置待传递给插件窗口的初始文本（从命令面板→插件窗口跨窗口传递）
-func (a *AppService) SetPendingPluginInit(text string) *ApiResult {
+// SetPendingPluginInit 设置待传递给插件窗口的初始文本 + 命中的子命令
+// （从命令面板→插件窗口跨窗口传递，便于插件进入后默认选中对应功能并回显文字）
+func (a *AppService) SetPendingPluginInit(text string, command string) *ApiResult {
 	a.pendingInitTextMu.Lock()
 	a.pendingInitText = text
+	a.pendingInitCommand = command
 	a.pendingInitTextMu.Unlock()
 	return Ok(nil)
 }
 
-// GetAndClearPendingPluginInit 获取并清除待传递的初始文本
+// GetAndClearPendingPluginInit 获取并清除待传递的初始文本与子命令
 func (a *AppService) GetAndClearPendingPluginInit() *ApiResult {
 	a.pendingInitTextMu.Lock()
 	text := a.pendingInitText
+	command := a.pendingInitCommand
 	a.pendingInitText = ""
 	a.pendingInitTextMu.Unlock()
-	if text == "" {
+	if text == "" && command == "" {
 		return Ok(nil)
 	}
-	return Ok(text)
+	return Ok(map[string]string{"text": text, "command": command})
 }
 
 // MinimizePluginWindow 最小化指定插件的独立窗口

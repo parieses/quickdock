@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.case-converter",
   "name": "变量命名转换",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "变量命名风格互转：camelCase、PascalCase、snake_case、kebab-case、UPPER_CASE、camel_Snake",
   "author": "QuickDock",
   "icon": "icon.svg",

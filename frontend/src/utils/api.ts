@@ -14,13 +14,3 @@ export function unwrap<T = any>(result: ApiResult | null): T | null {
   }
   return result.data as T
 }
-
-/**
- * 同步版本：用法 unwrapSync(r, defaultValue)
- */
-export function unwrapSync<T = any>(result: ApiResult | null, fallback: T): T {
-  if (!result || result.code !== 0) {
-    return fallback
-  }
-  return (result.data as T) ?? fallback
-}

@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.regex-extractor",
   "name": "正则提取工具",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "输入文本和正则表达式，一键提取所有匹配项，支持分组捕获、高亮显示、导出结果",
   "author": "QuickDock",
   "icon": "icon.svg",

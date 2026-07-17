@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 
 	"quickdock/internal/db"
+	"quickdock/internal/platform"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -105,11 +106,32 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		a.StartHotkeyListenerFn(a.app, a)
 	}
 
+	// 启动待办定时提醒调度器（常驻后台轮询，到期推送系统通知）
+	a.StartReminderScheduler()
+
+	// 启动定时任务调度器（精确定时器，到期执行 打开软件/目录/网址/命令/HTTP）
+	a.StartScheduleRunner()
+
+	// 启动网站监控检查器（仿 UptimeRobot，按 interval 定时探测并记录在线率）
+	a.StartMonitorChecker()
+
+	// 启动网络速度采样（后台 1s ticker，GetSystemStatus 读取最新速度）
+	platform.StartNetStats()
+
 	return nil
 }
 
 // ServiceShutdown 应用退出时调用（v3 生命周期）
 func (a *AppService) ServiceShutdown() error {
+	// 先停止所有插件并关闭插件窗口，避免它们在 DB 关闭后仍尝试写入，
+	// 导致 panic 或数据丢失（原顺序先关 DB，而插件子进程/goja 仍在运行）。
+	if a.PluginMgr != nil {
+		a.PluginMgr.ShutdownAll()
+	}
+	if a.PluginWindowMgr != nil {
+		a.PluginWindowMgr.CloseAll()
+	}
+	// 最后关闭数据库
 	if a.DB != nil {
 		a.DB.Close()
 	}

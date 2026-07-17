@@ -2,12 +2,16 @@ package main
 
 import (
 	"os"
+	"sync"
 
 	"quickdock/services"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
+
+// clipboardWinLock 保护剪贴板窗口的懒创建（与 paletteWinLock 同模式）
+var clipboardWinLock sync.Mutex
 
 // ===== WebView2 优化配置（全局，所有窗口共享）=====
 
@@ -25,8 +29,6 @@ var memoryOptimizedArgs = []string{
 	"--disable-default-apps",
 	"--mute-audio",
 	"--autoplay-policy=user-gesture-required",
-	"--js-flags=--max_old_space_size=64",
-	"--renderer-process-limit=2",
 }
 
 // disabledFeatures 禁用的 Chromium 特性
@@ -64,6 +66,28 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 	return win
 }
 
+// initNoteWindow 创建笔记独立窗口（延迟初始化，独立于剪贴板/命令面板）
+func initNoteWindow(app *application.App) *application.WebviewWindow {
+	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:            "快启坞 - 笔记",
+		Width:            clipWinWidth,
+		Height:           clipWinHeight,
+		Frameless:        true,
+		AlwaysOnTop:      true,
+		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
+		URL:              "/#/note",
+		Windows: application.WindowsWindow{
+			HiddenOnTaskbar: true,
+		},
+	})
+	win.Hide()
+	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+		noteMode.Store(false)
+		win.Hide()
+	})
+	return win
+}
+
 // initPaletteWindow 创建命令面板独立窗口（延迟初始化）
 func initPaletteWindow(app *application.App) *application.WebviewWindow {
 	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
@@ -88,6 +112,21 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 
 // ===== AppService 注入工厂函数 =====
 
+// paletteWindowGetter 返回 AppService 使用的命令面板窗口 getter
+func paletteWindowGetter(app *application.App) func() *application.WebviewWindow {
+	return func() *application.WebviewWindow {
+		paletteWinLock.Lock()
+		defer paletteWinLock.Unlock()
+		if paletteWin == nil {
+			if app == nil {
+				return nil
+			}
+			paletteWin = initPaletteWindow(app)
+		}
+		return paletteWin
+	}
+}
+
 // clipboardWindowGetter 返回 AppService 使用的剪贴板窗口 getter
 // 由 main.go 注入到 appService.GetClipboardWindow
 func clipboardWindowGetter(app *application.App) func() *application.WebviewWindow {
@@ -104,28 +143,15 @@ func clipboardWindowGetter(app *application.App) func() *application.WebviewWind
 	}
 }
 
-// paletteWindowGetter 返回 AppService 使用的命令面板窗口 getter
-func paletteWindowGetter(app *application.App) func() *application.WebviewWindow {
-	return func() *application.WebviewWindow {
-		paletteWinLock.Lock()
-		defer paletteWinLock.Unlock()
-		if paletteWin == nil {
-			if app == nil {
-				return nil
-			}
-			paletteWin = initPaletteWindow(app)
-		}
-		return paletteWin
-	}
-}
-
 // InjectWindowGetters 将延迟窗口创建函数注入到 AppService（由 main.go 调用）
+// 剪贴板/命令面板窗口均延迟创建，确保都在 app.Run() 之后初始化 WebView2 运行时，
+// 避免在主窗口之前预创建导致次级窗口白屏（Wails v3 已知约束）。
 func InjectWindowGetters(svc *services.AppService, app *application.App) {
 	svc.GetClipboardWindow = clipboardWindowGetter(app)
 	svc.GetPaletteWindow = paletteWindowGetter(app)
 }
 
-// ===== 热键回调用的窗口 getter（重写 tray.go 中的简单 getter）=====
+// ===== 热键回调用的窗口 getter =====
 
 func getClipboardWindow() *application.WebviewWindow {
 	clipboardWinLock.Lock()

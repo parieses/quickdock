@@ -3,7 +3,7 @@
  * 前端通过 postMessage 调用后端做正则匹配（也可在前端直接做）
  */
 function handleInitialize(params) {
-  return { status: 'ready', version: '0.1.0' }
+  return { status: 'ready', version: '0.2.0' }
 }
 
 function handleExecute(params) {

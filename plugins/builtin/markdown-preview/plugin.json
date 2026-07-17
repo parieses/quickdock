@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.markdown-preview",
   "name": "Markdown 渲染",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "实时渲染 Markdown，支持代码高亮，复制为 HTML",
   "author": "QuickDock",
   "category": "开发者日常",

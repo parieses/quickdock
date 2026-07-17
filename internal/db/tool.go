@@ -44,15 +44,13 @@ func (d *Database) EnsureDefaultTools() error {
 		{ID: newID(), Name: "VS Code", Type: "编辑器", Path: "code", Args: "{{path}}", IsDefault: 0},
 		{ID: newID(), Name: "Chrome", Type: "浏览器", Path: "chrome", Args: "{{url}}", IsDefault: 0},
 		{ID: newID(), Name: "Edge", Type: "浏览器", Path: "msedge", Args: "{{url}}", IsDefault: 0},
-		{ID: newID(), Name: "CMD", Type: "终端", Path: "cmd", Args: "/c {{command}}", IsDefault: 0},
+		{ID: newID(), Name: "CMD", Type: "终端", Path: "cmd", Args: "/k {{command}}", IsDefault: 0},
 		{ID: newID(), Name: "PowerShell", Type: "终端", Path: "powershell", Args: "-Command {{command}}", IsDefault: 0},
 		{ID: newID(), Name: "Office", Type: "Office", Path: "", Args: "", IsDefault: 0},
 	}
+	rows := make([]map[string]interface{}, 0, len(defaults))
 	for _, t := range defaults {
-		err := d.BulkInsert("tools", []map[string]interface{}{structToMap(&t)})
-		if err != nil {
-			return err
-		}
+		rows = append(rows, structToMap(&t))
 	}
-	return nil
+	return d.BulkInsert("tools", rows)
 }

@@ -15,3 +15,12 @@ func (a *AppService) ExecuteSystemCommand(cmd string) *ApiResult {
 	}
 	return Ok(nil)
 }
+
+// GetSystemStatus 返回系统资源概览（CPU / 内存 / 磁盘 / IP）
+func (a *AppService) GetSystemStatus() *ApiResult {
+	st, err := platform.GetSystemStatus()
+	if err != nil {
+		return Fail(fmt.Errorf("GetSystemStatus: %v", err))
+	}
+	return Ok(st)
+}

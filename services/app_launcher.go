@@ -9,10 +9,7 @@ import (
 // ScanInstalledApps 扫描已安装应用（缓存，首次调用后复用）
 func (a *AppService) ScanInstalledApps() *ApiResult {
 	apps, err := platform.GetCachedApps()
-	if err != nil {
-		return Fail(err)
-	}
-	return Ok(apps)
+	return wrap(apps, err)
 }
 
 // ResetInstalledAppsCache 清除应用缓存（下次搜索时重新扫描）

@@ -1,20 +1,11 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
 )
 
 func (d *Database) ListCollections(sceneID string) ([]Collection, error) {
 	rows, err := d.ListTableWhere("collections", "scene_id = ?", sceneID)
-	if err != nil {
-		return nil, err
-	}
-	return mapSlice(rows, mapToCollection), nil
-}
-
-func (d *Database) ListUnboundCollections(workspaceID string) ([]Collection, error) {
-	rows, err := d.ListTableWhere("collections", "workspace_id = ? AND scene_id IS NULL", workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -66,22 +57,6 @@ func (d *Database) UpdateCollection(id string, updates map[string]interface{}) e
 }
 
 func (d *Database) DeleteCollection(id string) error {
-	return d.Transaction(func(tx *sql.Tx) error {
-		if _, err := tx.Exec("DELETE FROM items WHERE collection_id = ?", id); err != nil {
-			return err
-		}
-		_, err := tx.Exec("DELETE FROM collections WHERE id = ?", id)
-		return err
-	})
+	return d.ExecuteParams("DELETE FROM collections WHERE id = ?", []interface{}{id})
 }
 
-func (d *Database) ReorderCollections(orderedIDs []string) error {
-	return d.Transaction(func(tx *sql.Tx) error {
-		for i, id := range orderedIDs {
-			if _, err := tx.Exec("UPDATE collections SET sort = ? WHERE id = ?", i*10, id); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}

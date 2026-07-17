@@ -1,7 +1,6 @@
 package db
 
 import (
-	"database/sql"
 	"fmt"
 )
 
@@ -52,19 +51,7 @@ func (d *Database) UpdateWorkspace(id, name string) error {
 }
 
 func (d *Database) DeleteWorkspace(id string) error {
-	return d.Transaction(func(tx *sql.Tx) error {
-		if _, err := tx.Exec("DELETE FROM items WHERE workspace_id = ?", id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec("DELETE FROM collections WHERE workspace_id = ?", id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec("DELETE FROM scenes WHERE workspace_id = ?", id); err != nil {
-			return err
-		}
-		_, err := tx.Exec("DELETE FROM workspaces WHERE id = ?", id)
-		return err
-	})
+	return d.ExecuteParams("DELETE FROM workspaces WHERE id = ?", []interface{}{id})
 }
 
 func (d *Database) GetWorkspace(id string) (*Workspace, error) {
@@ -77,17 +64,6 @@ func (d *Database) GetWorkspace(id string) (*Workspace, error) {
 	}
 	w := mapToWorkspace(row)
 	return &w, nil
-}
-
-func (d *Database) ReorderWorkspaces(orderedIDs []string) error {
-	return d.Transaction(func(tx *sql.Tx) error {
-		for i, id := range orderedIDs {
-			if _, err := tx.Exec("UPDATE workspaces SET sort = ? WHERE id = ?", i*10, id); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
 }
 
 // ---- 场景 ----
@@ -143,25 +119,6 @@ func (d *Database) UpdateScene(id string, updates map[string]interface{}) error 
 }
 
 func (d *Database) DeleteScene(id string) error {
-	return d.Transaction(func(tx *sql.Tx) error {
-		if _, err := tx.Exec("DELETE FROM items WHERE collection_id IN (SELECT id FROM collections WHERE scene_id = ?)", id); err != nil {
-			return err
-		}
-		if _, err := tx.Exec("DELETE FROM collections WHERE scene_id = ?", id); err != nil {
-			return err
-		}
-		_, err := tx.Exec("DELETE FROM scenes WHERE id = ?", id)
-		return err
-	})
+	return d.ExecuteParams("DELETE FROM scenes WHERE id = ?", []interface{}{id})
 }
 
-func (d *Database) ReorderScenes(orderedIDs []string) error {
-	return d.Transaction(func(tx *sql.Tx) error {
-		for i, id := range orderedIDs {
-			if _, err := tx.Exec("UPDATE scenes SET sort = ? WHERE id = ?", i*10, id); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}

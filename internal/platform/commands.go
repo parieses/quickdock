@@ -2,9 +2,17 @@ package platform
 
 import (
 	"fmt"
-	"syscall"
 
 	"golang.org/x/sys/windows"
+)
+
+
+
+// ExitWindowsEx 标志位（部分）
+const (
+	ewxShutdown    = 0x00000001
+	ewxReboot      = 0x00000002
+	ewxForceIfHung = 0x00000010 // 仅强制终止已挂起（无响应）的进程，避免误杀正常应用
 )
 
 // RunSystemCommand executes a system command: lock, shutdown, restart, sleep, emptytrash.
@@ -12,7 +20,7 @@ import (
 func RunSystemCommand(cmd string) error {
 	switch cmd {
 	case "lock":
-		user32 := syscall.NewLazyDLL("user32.dll")
+		user32 := modUser32
 		proc := user32.NewProc("LockWorkStation")
 		ret, _, err := proc.Call()
 		if ret == 0 {
@@ -22,9 +30,11 @@ func RunSystemCommand(cmd string) error {
 		if err := enableShutdownPrivilege(); err != nil {
 			return err
 		}
-		user32 := syscall.NewLazyDLL("user32.dll")
+		user32 := modUser32
 		proc := user32.NewProc("ExitWindowsEx")
-		ret, _, err := proc.Call(0x05, 0) // EWX_SHUTDOWN | EWX_FORCE
+		// EWX_FORCEIFHUNG 而非 EWX_FORCE：允许正常应用优雅保存退出，
+		// 仅当应用已无响应（挂起）时才强制终止，避免未保存数据丢失。
+		ret, _, err := proc.Call(ewxShutdown|ewxForceIfHung, 0)
 		if ret == 0 {
 			return fmt.Errorf("ExitWindowsEx failed: %v", err)
 		}
@@ -32,25 +42,27 @@ func RunSystemCommand(cmd string) error {
 		if err := enableShutdownPrivilege(); err != nil {
 			return err
 		}
-		user32 := syscall.NewLazyDLL("user32.dll")
+		user32 := modUser32
 		proc := user32.NewProc("ExitWindowsEx")
-		ret, _, err := proc.Call(0x06, 0) // EWX_REBOOT | EWX_FORCE
+		ret, _, err := proc.Call(ewxReboot|ewxForceIfHung, 0)
 		if ret == 0 {
 			return fmt.Errorf("ExitWindowsEx failed: %v", err)
 		}
 	case "sleep":
-		powrprof := syscall.NewLazyDLL("powrprof.dll")
+		powrprof := modPowrprof
 		proc := powrprof.NewProc("SetSuspendState")
 		ret, _, err := proc.Call(0, 0, 0)
 		if ret == 0 {
 			return fmt.Errorf("SetSuspendState failed: %v", err)
 		}
 	case "emptytrash":
-		shell32 := syscall.NewLazyDLL("shell32.dll")
+		shell32 := modShell32
 		proc := shell32.NewProc("SHEmptyRecycleBinW")
 		ret, _, err := proc.Call(0, 0, 0x07)
-		if ret == 0 {
-			return fmt.Errorf("SHEmptyRecycleBinW failed: %v", err)
+		// SHEmptyRecycleBinW 返回 HRESULT，S_OK(0) 表示成功。
+		// 原判断 ret==0 为失败是反向的：成功报失败、失败报成功。
+		if ret != 0 {
+			return fmt.Errorf("SHEmptyRecycleBinW failed: %v (hresult=0x%x)", err, uint32(ret))
 		}
 	default:
 		return fmt.Errorf("unknown system command: %s", cmd)

@@ -4,7 +4,6 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
-	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"sync"
@@ -57,27 +56,35 @@ var trayIcoEmbed []byte
 var (
 	hotkeyApp         *application.App
 	hotkeyAppLock     sync.Mutex
-	trayHICON         uintptr
+	trayHICON         atomic.Uintptr
 	trayQuitRequested atomic.Bool
 	trayRemoved       atomic.Bool
 
 	mainWin          *application.WebviewWindow
 	mainWinLock      sync.Mutex
 	clipboardWin     *application.WebviewWindow
-	clipboardWinLock sync.Mutex
-	nextClipboardViewer uintptr
+	nextClipboardViewer atomic.Uintptr
 
 	// 全局服务引用（供 windowProc 回调使用）
-	appSvc *services.AppService
+	appSvc atomic.Pointer[services.AppService]
 
 	// 当前注册的 GlobalShortcut 加速器
 	currentAppAccel     string
 	currentClipAccel    string
 	currentPaletteAccel string
+	currentNoteAccel    string
 	accelMu             sync.Mutex
+
+	noteWin      *application.WebviewWindow
+	noteWinLock  sync.Mutex
 
 	paletteWin     *application.WebviewWindow
 	paletteWinLock sync.Mutex
+
+	// Windows DLL 句柄（包级复用，避免反复创建）
+	modUser32   = syscall.NewLazyDLL("user32.dll")
+	modKernel32 = syscall.NewLazyDLL("kernel32.dll")
+	modShell32  = syscall.NewLazyDLL("shell32.dll")
 )
 
 // ---- 主窗口 ----
@@ -162,10 +169,10 @@ func StartHotkeyListener(app *application.App, svc *services.AppService) {
 	}
 
 	SetHotkeyApp(app)
-	appSvc = svc
+	appSvc.Store(svc)
 
-	trayHICON = loadIconFromEmbed()
-	if trayHICON == 0 {
+	trayHICON.Store(loadIconFromEmbed())
+	if trayHICON.Load() == 0 {
 		fmt.Println("QuickDock: 加载托盘图标失败，使用默认图标")
 	}
 
@@ -177,7 +184,7 @@ func loadIconFromEmbed() uintptr {
 		return 0
 	}
 
-	user32 := syscall.NewLazyDLL("user32.dll")
+	user32 := modUser32
 	count := int(trayIcoEmbed[4]) | int(trayIcoEmbed[5])<<8
 	if count == 0 {
 		return 0
@@ -271,23 +278,24 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		return 0
 
 	case WM_DRAWCLIPBOARD:
-		if appSvc != nil {
-			appSvc.OnClipboardChange()
+		if svc := appSvc.Load(); svc != nil {
+			svc.OnClipboardChange()
 		}
-		if nextClipboardViewer != 0 {
-			user32 := syscall.NewLazyDLL("user32.dll")
+		if nv := nextClipboardViewer.Load(); nv != 0 {
+			user32 := modUser32
 			postMsg := user32.NewProc("PostMessageW")
-			postMsg.Call(nextClipboardViewer, WM_DRAWCLIPBOARD, wParam, lParam)
+			postMsg.Call(nv, WM_DRAWCLIPBOARD, wParam, lParam)
 		}
 		return 0
 
 	case WM_CHANGECBCHAIN:
-		if wParam == nextClipboardViewer {
-			nextClipboardViewer = lParam
-		} else if nextClipboardViewer != 0 {
-			user32 := syscall.NewLazyDLL("user32.dll")
+		nv := nextClipboardViewer.Load()
+		if wParam == nv {
+			nextClipboardViewer.Store(lParam)
+		} else if nv != 0 {
+			user32 := modUser32
 			postMsg := user32.NewProc("PostMessageW")
-			postMsg.Call(nextClipboardViewer, WM_CHANGECBCHAIN, wParam, lParam)
+			postMsg.Call(nv, WM_CHANGECBCHAIN, wParam, lParam)
 		}
 		return 0
 	}
@@ -298,10 +306,10 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 func runMessageLoop() {
 	goruntime.LockOSThread()
 
-	user32 := syscall.NewLazyDLL("user32.dll")
+	user32 := modUser32
 	className := syscall.StringToUTF16Ptr("QuickDock_Hotkey_Window_v3")
 
-	kernel32 := syscall.NewLazyDLL("kernel32.dll")
+	kernel32 := modKernel32
 	hinstance, _, _ := kernel32.NewProc("GetModuleHandleW").Call(0)
 
 	wc := struct {
@@ -342,127 +350,21 @@ func runMessageLoop() {
 	}
 
 	// 将 HWND 存储到 AppService（供剪贴板 API 使用）
-	if appSvc != nil {
-		appSvc.HiddenHWND.Store(uint64(hwnd))
+	if svc := appSvc.Load(); svc != nil {
+		svc.HiddenHWND.Store(uint64(hwnd))
 	}
 	fmt.Println("QuickDock: 隐藏窗口已创建")
 
-	// 使用 Wails GlobalShortcut 注册全局快捷键
-	app := getHotkeyApp()
-	if app != nil {
-		registerAppShortcut := func(accel string) error {
-			return app.GlobalShortcut.Register(accel, func() {
-					toggleMainWindow()
-			})
-		}
-		registerClipShortcut := func(accel string) error {
-			return app.GlobalShortcut.Register(accel, func() {
-				cw := getClipboardWindow()
-				if cw == nil {
-					return
-				}
-				if clipboardMode.Load() {
-					clipboardMode.Store(false)
-					if a := getHotkeyApp(); a != nil {
-						a.Event.Emit("clipboard:before-hide")
-					}
-					cw.Hide()
-				} else {
-					platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
-					clipboardMode.Store(true)
-					cw.Show()
-					cw.Focus()
-					if a := getHotkeyApp(); a != nil {
-						a.Event.Emit("clipboard:shown")
-					}
-				}
-			})
-		}
-
-		// 从数据库读取热键配置
-		appMods, appVk := MOD_CONTROL, int(VK_SPACE)
-		clipMods, clipVk := MOD_CONTROL, int(VK_OEM_3)
-		if appSvc != nil && appSvc.DB != nil {
-			if raw, err := appSvc.DB.GetSetting("hotkey"); err == nil && raw != "" {
-				appMods, appVk = parseHotkeySetting(raw)
-			}
-			if raw, err := appSvc.DB.GetSetting("clipboard_hotkey"); err == nil && raw != "" {
-				clipMods, clipVk = parseHotkeySetting(raw)
-			}
-		}
-
-		appAccel := modVKToAccelerator(appMods, appVk)
-		clipAccel := modVKToAccelerator(clipMods, clipVk)
-
-		registeredAppAccel := appAccel
-		if err := registerAppShortcut(appAccel); err != nil {
-			fmt.Printf("QuickDock: 热键 [%s] 注册失败: %v，回退到 Ctrl+Space\n", appAccel, err)
-			registerAppShortcut("Ctrl+Space")
-			registeredAppAccel = "Ctrl+Space"
-			if appSvc != nil && appSvc.DB != nil {
-				appSvc.DB.SetSetting("hotkey", "2,32")
-			}
-		} else {
-			fmt.Printf("QuickDock: 全局快捷键 [%s] 已注册\n", appAccel)
-		}
-
-		registeredClipAccel := clipAccel
-		if err := registerClipShortcut(clipAccel); err != nil {
-			fmt.Printf("QuickDock: 剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+`\n", clipAccel, err)
-			registerClipShortcut("Ctrl+`")
-			registeredClipAccel = "Ctrl+`"
-			if appSvc != nil && appSvc.DB != nil {
-				appSvc.DB.SetSetting("clipboard_hotkey", "2,192")
-			}
-		} else {
-			fmt.Printf("QuickDock: 剪贴板快捷键 [%s] 已注册\n", clipAccel)
-		}
-		setAccelerators(registeredAppAccel, registeredClipAccel, "")
-
-		// 注册命令面板热键（默认 Ctrl+K）
-		paletteMods, paletteVk := MOD_CONTROL, int(0x4B)
-		if appSvc != nil && appSvc.DB != nil {
-			if raw, err := appSvc.DB.GetSetting("palette_hotkey"); err == nil && raw != "" {
-				paletteMods, paletteVk = parseHotkeySetting(raw)
-			}
-		}
-		registerPaletteShortcut := func(accel string) error {
-			return app.GlobalShortcut.Register(accel, func() {
-				pw := getPaletteWindow()
-				if pw == nil {
-					return
-				}
-				if paletteMode.Load() {
-					paletteMode.Store(false)
-					pw.Hide()
-				} else {
-				platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
-				paletteMode.Store(true)
-				pw.Show()
-				pw.Focus()
-				if a := getHotkeyApp(); a != nil {
-					a.Event.Emit("palette:shown")
-				}
-			}
-		})
-	}
-	paletteAccel := modVKToAccelerator(paletteMods, paletteVk)
-	registeredPaletteAccel := paletteAccel
-	if err := registerPaletteShortcut(paletteAccel); err != nil {
-			fmt.Printf("QuickDock: 命令面板热键 [%s] 注册失败: %v\n", paletteAccel, err)
-			registerPaletteShortcut("Ctrl+K")
-			registeredPaletteAccel = "Ctrl+K"
-		} else {
-			fmt.Printf("QuickDock: 命令面板快捷键 [%s] 已注册\n", paletteAccel)
-		}
-		setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel)
+	// 注册全局快捷键
+	if app := getHotkeyApp(); app != nil {
+		registerAllHotkeys(app)
 	}
 
 	createTrayIcon(hwnd)
 
 	setClipboardViewer := user32.NewProc("SetClipboardViewer")
 	nextViewer, _, _ := setClipboardViewer.Call(hwnd)
-	nextClipboardViewer = nextViewer
+	nextClipboardViewer.Store(nextViewer)
 	fmt.Println("QuickDock: 剪贴板监听已启动")
 
 	getMessage := user32.NewProc("GetMessageW")
@@ -495,11 +397,11 @@ func runMessageLoop() {
 }
 
 func createTrayIcon(hwnd uintptr) {
-	shell32 := syscall.NewLazyDLL("shell32.dll")
+	shell32 := modShell32
 
-	hIcon := trayHICON
+	hIcon := trayHICON.Load()
 	if hIcon == 0 {
-		user32 := syscall.NewLazyDLL("user32.dll")
+		user32 := modUser32
 		loadIcon := user32.NewProc("LoadIconW")
 		hIcon, _, _ = loadIcon.Call(0, uintptr(32512))
 	}
@@ -529,28 +431,28 @@ func removeTrayIcon() {
 	}
 
 	// 离开剪贴板监听链
-	if hwnd := uintptr(appSvc.HiddenHWND.Load()); hwnd != 0 && nextClipboardViewer != 0 {
-		user32 := syscall.NewLazyDLL("user32.dll")
+	if hwnd := uintptr(appSvc.Load().HiddenHWND.Load()); hwnd != 0 && nextClipboardViewer.Load() != 0 {
+		user32 := modUser32
 		changeChain := user32.NewProc("ChangeClipboardChain")
-		changeChain.Call(hwnd, nextClipboardViewer)
+		changeChain.Call(hwnd, nextClipboardViewer.Load())
 		fmt.Println("QuickDock: 已离开剪贴板监听链")
 	}
 
-	shell32 := syscall.NewLazyDLL("shell32.dll")
+	shell32 := modShell32
 	shellNotifyIcon := shell32.NewProc("Shell_NotifyIconW")
 	nid := &NOTIFYICONDATAW{
 		CbSize: uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
-		HWnd:   uintptr(appSvc.HiddenHWND.Load()),
+		HWnd:   uintptr(appSvc.Load().HiddenHWND.Load()),
 		UID:    1,
 	}
 	shellNotifyIcon.Call(NIM_DELETE, uintptr(unsafe.Pointer(nid)))
 	fmt.Println("QuickDock: 系统托盘图标已移除")
 
-	if trayHICON != 0 {
-		user32 := syscall.NewLazyDLL("user32.dll")
+	if th := trayHICON.Load(); th != 0 {
+		user32 := modUser32
 		destroyIcon := user32.NewProc("DestroyIcon")
-		destroyIcon.Call(trayHICON)
-		trayHICON = 0
+		destroyIcon.Call(th)
+		trayHICON.Store(0)
 	}
 
 	trayQuitRequested.Store(true)
@@ -562,16 +464,22 @@ func removeTrayIcon() {
 }
 
 func showTrayMenu(hwnd uintptr) {
-	user32 := syscall.NewLazyDLL("user32.dll")
+	user32 := modUser32
 
 	createPopupMenu := user32.NewProc("CreatePopupMenu")
 	hMenu, _, _ := createPopupMenu.Call()
 
+	// 菜单项文本必须保持存活直到 TrackPopupMenu 返回，否则 GC 可能回收
+	// StringToUTF16Ptr 分配的临时内存，导致菜单渲染时读取悬垂指针（Use-After-Free）。
+	labelShow := syscall.StringToUTF16Ptr("显示窗口")
+	labelHide := syscall.StringToUTF16Ptr("隐藏窗口")
+	labelExit := syscall.StringToUTF16Ptr("退出")
+
 	appendMenu := user32.NewProc("AppendMenuW")
-	appendMenu.Call(hMenu, 0, 1001, uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("显示窗口"))))
-	appendMenu.Call(hMenu, 0, 1003, uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("隐藏窗口"))))
+	appendMenu.Call(hMenu, 0, 1001, uintptr(unsafe.Pointer(labelShow)))
+	appendMenu.Call(hMenu, 0, 1003, uintptr(unsafe.Pointer(labelHide)))
 	appendMenu.Call(hMenu, 0x800, 0, 0)
-	appendMenu.Call(hMenu, 0, 1002, uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("退出"))))
+	appendMenu.Call(hMenu, 0, 1002, uintptr(unsafe.Pointer(labelExit)))
 
 	getCursorPos := user32.NewProc("GetCursorPos")
 	var pt struct{ x, y int32 }
@@ -588,29 +496,35 @@ func showTrayMenu(hwnd uintptr) {
 
 	destroyMenu := user32.NewProc("DestroyMenu")
 	destroyMenu.Call(hMenu)
+
+	// 确保菜单文本内存在 TrackPopupMenu 期间持续有效
+	goruntime.KeepAlive(labelShow)
+	goruntime.KeepAlive(labelHide)
+	goruntime.KeepAlive(labelExit)
 }
 
 func callDefWindowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
-	user32 := syscall.NewLazyDLL("user32.dll")
+	user32 := modUser32
 	defProc := user32.NewProc("DefWindowProcW")
 	ret, _, _ := defProc.Call(hwnd, uintptr(msg), wParam, lParam)
 	return ret
 }
 
 func postQuitMessage(exitCode int32) {
-	user32 := syscall.NewLazyDLL("user32.dll")
+	user32 := modUser32
 	postQuit := user32.NewProc("PostQuitMessage")
 	postQuit.Call(uintptr(exitCode))
 }
 
 // ===== GlobalShortcut 加速器 =====
 
-func setAccelerators(appAccel, clipAccel, paletteAccel string) {
+func setAccelerators(appAccel, clipAccel, paletteAccel, noteAccel string) {
 	accelMu.Lock()
 	defer accelMu.Unlock()
 	currentAppAccel = appAccel
 	currentClipAccel = clipAccel
 	currentPaletteAccel = paletteAccel
+	currentNoteAccel = noteAccel
 }
 
 func getAppAccel() string {
@@ -631,6 +545,12 @@ func getPaletteAccel() string {
 	return currentPaletteAccel
 }
 
+func getNoteAccel() string {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	return currentNoteAccel
+}
+
 func modVKToAccelerator(modifiers, vk int) string {
 	var parts []string
 	if modifiers&MOD_ALT != 0 {
@@ -645,76 +565,12 @@ func modVKToAccelerator(modifiers, vk int) string {
 	if modifiers&8 != 0 {
 		parts = append(parts, "Super")
 	}
-	parts = append(parts, vkToAccelKey(vk))
+	key := platform.VKToKeyName(vk)
+	if key == "" {
+		key = fmt.Sprintf("VK_%d", vk)
+	}
+	parts = append(parts, key)
 	return strings.Join(parts, "+")
-}
-
-func vkToAccelKey(vk int) string {
-	switch vk {
-	case 0x20:
-		return "Space"
-	case 0x0D:
-		return "Enter"
-	case 0x1B:
-		return "Escape"
-	case 0x09:
-		return "Tab"
-	case 0x08:
-		return "Backspace"
-	case 0x2E:
-		return "Delete"
-	case 0x2D:
-		return "Insert"
-	case 0x21:
-		return "PageUp"
-	case 0x22:
-		return "PageDown"
-	case 0x24:
-		return "Home"
-	case 0x23:
-		return "End"
-	case 0x25:
-		return "Left"
-	case 0x26:
-		return "Up"
-	case 0x27:
-		return "Right"
-	case 0x28:
-		return "Down"
-	case 0xC0:
-		return "`"
-	case 0x70:
-		return "F1"
-	case 0x71:
-		return "F2"
-	case 0x72:
-		return "F3"
-	case 0x73:
-		return "F4"
-	case 0x74:
-		return "F5"
-	case 0x75:
-		return "F6"
-	case 0x76:
-		return "F7"
-	case 0x77:
-		return "F8"
-	case 0x78:
-		return "F9"
-	case 0x79:
-		return "F10"
-	case 0x7A:
-		return "F11"
-	case 0x7B:
-		return "F12"
-	}
-	if vk >= 0x30 && vk <= 0x39 {
-		return string(rune('0' + vk - 0x30))
-	}
-	if vk >= 0x41 && vk <= 0x5A {
-		return string(rune('A' + vk - 0x41))
-	}
-	return fmt.Sprintf("VK_%d", vk)
 }
 
 func parseHotkeySetting(raw string) (int, int) {
@@ -724,18 +580,6 @@ func parseHotkeySetting(raw string) (int, int) {
 		return MOD_CONTROL, VK_SPACE
 	}
 	return mods, vk
-}
-
-func getConfigDir() string {
-	if goruntime.GOOS == "windows" {
-		appData := os.Getenv("APPDATA")
-		if appData == "" {
-			appData = os.Getenv("LOCALAPPDATA")
-		}
-		return filepath.Join(appData, "QuickDock")
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "quickdock")
 }
 
 func ReregisterHotkey(modifiers, vk uintptr) {
@@ -759,13 +603,13 @@ func ReregisterHotkey(modifiers, vk uintptr) {
 		app.GlobalShortcut.Register(fallbackAccel, func() {
 			toggleMainWindow()
 		})
-		if appSvc != nil && appSvc.DB != nil {
-			appSvc.DB.SetSetting("hotkey", "2,32")
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			svc.DB.SetSetting("hotkey", "2,32")
 		}
-		setAccelerators(fallbackAccel, getClipAccel(), getPaletteAccel())
+		setAccelerators(fallbackAccel, getClipAccel(), getPaletteAccel(), getNoteAccel())
 	} else {
 		fmt.Printf("QuickDock: 全局快捷键 [%s] 已更新\n", newAccel)
-		setAccelerators(newAccel, getClipAccel(), getPaletteAccel())
+		setAccelerators(newAccel, getClipAccel(), getPaletteAccel(), getNoteAccel())
 	}
 }
 
@@ -782,40 +626,80 @@ func ReregisterClipboardHotkey(modifiers, vk uintptr) {
 	}
 
 	newAccel := modVKToAccelerator(int(modifiers), int(vk))
-	cb := func() {
-		cw := getClipboardWindow()
-		if cw == nil {
-			return
-		}
-		if clipboardMode.Load() {
-			clipboardMode.Store(false)
-			if a := getHotkeyApp(); a != nil {
-				a.Event.Emit("clipboard:before-hide")
-			}
-			cw.Hide()
-		} else {
-			platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
-			clipboardMode.Store(true)
-			cw.Show()
-			cw.Focus()
-			if a := getHotkeyApp(); a != nil {
-				a.Event.Emit("clipboard:shown")
-			}
-		}
-	}
+	cb := toggleClipboardWindow
 
 	if err := app.GlobalShortcut.Register(newAccel, cb); err != nil {
 		fmt.Printf("QuickDock: 剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+`\n", newAccel, err)
 		fallbackAccel := "Ctrl+`"
 		app.GlobalShortcut.Register(fallbackAccel, cb)
-		if appSvc != nil && appSvc.DB != nil {
-			appSvc.DB.SetSetting("clipboard_hotkey", "2,192")
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			svc.DB.SetSetting("clipboard_hotkey", "2,192")
 		}
-		setAccelerators(getAppAccel(), fallbackAccel, getPaletteAccel())
+		setAccelerators(getAppAccel(), fallbackAccel, getPaletteAccel(), getNoteAccel())
 	} else {
 		fmt.Printf("QuickDock: 剪贴板快捷键 [%s] 已更新\n", newAccel)
-		setAccelerators(getAppAccel(), newAccel, getPaletteAccel())
+		setAccelerators(getAppAccel(), newAccel, getPaletteAccel(), getNoteAccel())
 	}
+}
+
+func ReregisterNoteHotkey(modifiers, vk uintptr) {
+	app := getHotkeyApp()
+	if app == nil {
+		fmt.Println("QuickDock: 应用未初始化，跳过热键重注册")
+		return
+	}
+
+	oldAccel := getNoteAccel()
+	if oldAccel != "" {
+		app.GlobalShortcut.Unregister(oldAccel)
+	}
+
+	newAccel := modVKToAccelerator(int(modifiers), int(vk))
+	cb := showNoteWindow
+
+	if err := app.GlobalShortcut.Register(newAccel, cb); err != nil {
+		fmt.Printf("QuickDock: 笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+N\n", newAccel, err)
+		fallbackAccel := "Ctrl+Shift+N"
+		app.GlobalShortcut.Register(fallbackAccel, cb)
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			svc.DB.SetSetting("note_hotkey", "6,78")
+		}
+		setAccelerators(getAppAccel(), getClipAccel(), getPaletteAccel(), fallbackAccel)
+	} else {
+		fmt.Printf("QuickDock: 笔记快捷键 [%s] 已注册\n", newAccel)
+		setAccelerators(getAppAccel(), getClipAccel(), getPaletteAccel(), newAccel)
+	}
+}
+
+// showNoteWindow 切换笔记独立窗口的显隐状态
+func showNoteWindow() {
+	nw := getNoteWindow()
+	if nw == nil {
+		return
+	}
+	if noteMode.Load() {
+		noteMode.Store(false)
+		nw.Hide()
+	} else {
+		platform.SetWindowToCursorScreen(nw, clipWinWidth, clipWinHeight)
+		noteMode.Store(true)
+		nw.Show()
+		nw.Focus()
+	}
+}
+
+// getNoteWindow 获取笔记窗口（延迟创建，独立于剪贴板）
+func getNoteWindow() *application.WebviewWindow {
+	noteWinLock.Lock()
+	defer noteWinLock.Unlock()
+	if noteWin == nil {
+		app := getHotkeyApp()
+		if app == nil {
+			return nil
+		}
+		noteWin = initNoteWindow(app)
+	}
+	return noteWin
 }
 
 func SuspendHotkeys() {
@@ -835,99 +719,153 @@ func SuspendHotkeys() {
 	if paletteAccel != "" {
 		app.GlobalShortcut.Unregister(paletteAccel)
 	}
+	noteAccel := getNoteAccel()
+	if noteAccel != "" {
+		app.GlobalShortcut.Unregister(noteAccel)
+	}
 	fmt.Println("QuickDock: 热键已暂停（设置页捕获中）")
 }
 
 func ResumeHotkeys() {
-	app := getHotkeyApp()
-	if app == nil {
+	if app := getHotkeyApp(); app != nil {
+		registerAllHotkeys(app)
+	}
+	fmt.Println("QuickDock: 热键已恢复")
+}
+
+// registerAllHotkeys 统一注册主窗口/剪贴板/命令面板三个全局快捷键
+// 从 DB 读取配置，注册失败时回退到默认值
+
+// toggleClipboardWindow 切换剪贴板独立窗口的显隐状态
+func toggleClipboardWindow() {
+	cw := getClipboardWindow()
+	if cw == nil {
 		return
 	}
+	if clipboardMode.Load() {
+		clipboardMode.Store(false)
+		if a := getHotkeyApp(); a != nil {
+			a.Event.Emit("clipboard:before-hide")
+		}
+		cw.Hide()
+	} else {
+		platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
+		clipboardMode.Store(true)
+		// 窗口创建时 URL 已固定为 /#/clipboard，无需重复 SetURL
+		cw.Show()
+		cw.Focus()
+		if a := getHotkeyApp(); a != nil {
+			a.Event.Emit("clipboard:shown")
+		}
+	}
+}
 
+func registerAllHotkeys(app *application.App) {
+	// 读取热键配置
 	appMods, appVk := MOD_CONTROL, int(VK_SPACE)
 	clipMods, clipVk := MOD_CONTROL, int(VK_OEM_3)
 	paletteMods, paletteVk := MOD_CONTROL, int(0x4B)
-
-	if appSvc != nil && appSvc.DB != nil {
-		if raw, err := appSvc.DB.GetSetting("hotkey"); err == nil && raw != "" {
+	noteMods, noteVk := MOD_CONTROL|MOD_SHIFT, int(0x4E)
+	if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+		if raw, err := svc.DB.GetSetting("hotkey"); err == nil && raw != "" {
 			appMods, appVk = parseHotkeySetting(raw)
 		}
-		if raw, err := appSvc.DB.GetSetting("clipboard_hotkey"); err == nil && raw != "" {
+		if raw, err := svc.DB.GetSetting("clipboard_hotkey"); err == nil && raw != "" {
 			clipMods, clipVk = parseHotkeySetting(raw)
 		}
-		if raw, err := appSvc.DB.GetSetting("palette_hotkey"); err == nil && raw != "" {
+		if raw, err := svc.DB.GetSetting("palette_hotkey"); err == nil && raw != "" {
 			paletteMods, paletteVk = parseHotkeySetting(raw)
+		}
+		if raw, err := svc.DB.GetSetting("note_hotkey"); err == nil && raw != "" {
+			noteMods, noteVk = parseHotkeySetting(raw)
 		}
 	}
 
 	appAccel := modVKToAccelerator(appMods, appVk)
 	clipAccel := modVKToAccelerator(clipMods, clipVk)
 	paletteAccel := modVKToAccelerator(paletteMods, paletteVk)
+	noteAccel := modVKToAccelerator(noteMods, noteVk)
 
-	registerAppShortcut := func(accel string) error {
-		return app.GlobalShortcut.Register(accel, func() {
-			toggleMainWindow()
-		})
-	}
-	registerClipShortcut := func(accel string) error {
-		return app.GlobalShortcut.Register(accel, func() {
-			cw := getClipboardWindow()
-			if cw == nil {
-				return
-			}
-			if clipboardMode.Load() {
-				clipboardMode.Store(false)
-				if a := getHotkeyApp(); a != nil {
-					a.Event.Emit("clipboard:before-hide")
-				}
-				cw.Hide()
-			} else {
-				platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
-				clipboardMode.Store(true)
-				cw.Show()
-				cw.Focus()
-				if a := getHotkeyApp(); a != nil {
-					a.Event.Emit("clipboard:shown")
-				}
-			}
-		})
-	}
-
+	// 主窗口热键回调
 	registeredAppAccel := appAccel
-	if err := registerAppShortcut(appAccel); err != nil {
-		registerAppShortcut("Ctrl+Space")
+	if err := app.GlobalShortcut.Register(appAccel, func() {
+		toggleMainWindow()
+	}); err != nil {
+		fmt.Printf("QuickDock: 热键 [%s] 注册失败: %v，回退到 Ctrl+Space\n", appAccel, err)
+		app.GlobalShortcut.Register("Ctrl+Space", func() { toggleMainWindow() })
 		registeredAppAccel = "Ctrl+Space"
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			svc.DB.SetSetting("hotkey", "2,32")
+		}
+	} else {
+		fmt.Printf("QuickDock: 全局快捷键 [%s] 已注册\n", appAccel)
 	}
+
+	// 剪贴板窗口热键回调
 	registeredClipAccel := clipAccel
-	if err := registerClipShortcut(clipAccel); err != nil {
-		registerClipShortcut("Ctrl+`")
-		registeredClipAccel = "Ctrl+`"
-	}
-	registerPaletteShortcut := func(accel string) error {
-		return app.GlobalShortcut.Register(accel, func() {
-			pw := getPaletteWindow()
-			if pw == nil {
-				return
-			}
-			if paletteMode.Load() {
-				paletteMode.Store(false)
-				pw.Hide()
-			} else {
-				platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
-				paletteMode.Store(true)
-				pw.Show()
-				pw.Focus()
-				if a := getHotkeyApp(); a != nil {
-					a.Event.Emit("palette:shown")
-				}
-			}
+	if err := app.GlobalShortcut.Register(clipAccel, toggleClipboardWindow); err != nil {
+		fmt.Printf("QuickDock: 剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+`\n", clipAccel, err)
+		app.GlobalShortcut.Register("Ctrl+`", func() {
+			cw := getClipboardWindow()
+			if cw == nil { return }
+			clipboardMode.Store(true)
+			platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
+			cw.Show()
+			cw.Focus()
+			if a := getHotkeyApp(); a != nil { a.Event.Emit("clipboard:shown") }
 		})
+		registeredClipAccel = "Ctrl+`"
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			svc.DB.SetSetting("clipboard_hotkey", "2,192")
+		}
+	} else {
+		fmt.Printf("QuickDock: 剪贴板快捷键 [%s] 已注册\n", clipAccel)
 	}
+
+	// 命令面板热键（默认 Ctrl+K），注册前先读取 palette 配置
 	registeredPaletteAccel := paletteAccel
-	if err := registerPaletteShortcut(paletteAccel); err != nil {
-		registerPaletteShortcut("Ctrl+K")
+	if err := app.GlobalShortcut.Register(paletteAccel, func() {
+		pw := getPaletteWindow()
+		if pw == nil { return }
+		if paletteMode.Load() {
+			paletteMode.Store(false)
+			pw.Hide()
+		} else {
+			platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
+			paletteMode.Store(true)
+			pw.Show()
+			pw.Focus()
+			if a := getHotkeyApp(); a != nil {
+				a.Event.Emit("palette:shown")
+			}
+		}
+	}); err != nil {
+		fmt.Printf("QuickDock: 命令面板热键 [%s] 注册失败: %v\n", paletteAccel, err)
+		app.GlobalShortcut.Register("Ctrl+K", func() {
+			pw := getPaletteWindow()
+			if pw == nil { return }
+			platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
+			paletteMode.Store(true)
+			pw.Show(); pw.Focus()
+			if a := getHotkeyApp(); a != nil { a.Event.Emit("palette:shown") }
+		})
 		registeredPaletteAccel = "Ctrl+K"
+	} else {
+		fmt.Printf("QuickDock: 命令面板快捷键 [%s] 已注册\n", paletteAccel)
 	}
-	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel)
-	fmt.Println("QuickDock: 热键已恢复")
+
+	// 快捷笔记热键（默认 Ctrl+Shift+N），复用剪贴板独立窗口导航到 #/note
+	registeredNoteAccel := noteAccel
+	if err := app.GlobalShortcut.Register(noteAccel, showNoteWindow); err != nil {
+		fmt.Printf("QuickDock: 笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+N\n", noteAccel, err)
+		app.GlobalShortcut.Register("Ctrl+Shift+N", showNoteWindow)
+		registeredNoteAccel = "Ctrl+Shift+N"
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			svc.DB.SetSetting("note_hotkey", "6,78")
+		}
+	} else {
+		fmt.Printf("QuickDock: 笔记快捷键 [%s] 已注册\n", noteAccel)
+	}
+
+	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel, registeredNoteAccel)
 }

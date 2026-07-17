@@ -37,9 +37,8 @@ function handleExecute(params) {
     var now = new Date().toISOString()
     var data = JSON.stringify({ lines: s.lines || [], pinned: !!s.pinned })
     api.db.exec(
-      "INSERT INTO sheets (id, name, data, created_at, updated_at) VALUES ('" +
-      s.id + "','" + s.name.replace(/'/g,"''") + "','" + data.replace(/'/g,"''") + "','" + now + "','" + now +
-      "') ON CONFLICT(id) DO UPDATE SET name=excluded.name, data=excluded.data, updated_at=excluded.updated_at"
+      "INSERT INTO sheets (id, name, data, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, data=excluded.data, updated_at=excluded.updated_at",
+      s.id, s.name, data, now, now
     )
     return { saved: true }
   }
@@ -47,7 +46,7 @@ function handleExecute(params) {
   if (command === 'load-sheet') {
     var id = input.id || ''
     if (!id) return { error: '缺少 id' }
-    var rows = api.db.query("SELECT * FROM sheets WHERE id='" + id.replace(/'/g,"''") + "'")
+    var rows = api.db.query("SELECT * FROM sheets WHERE id=?", id)
     if (rows && rows.length > 0) {
       var r = rows[0]
       var d = JSON.parse(r.data || '{}')
@@ -59,14 +58,15 @@ function handleExecute(params) {
   if (command === 'delete-sheet') {
     var id = input.id || ''
     if (!id) return { error: '缺少 id' }
-    api.db.exec("DELETE FROM sheets WHERE id='" + id.replace(/'/g,"''") + "'")
+    api.db.exec("DELETE FROM sheets WHERE id=?", id)
     return { deleted: true }
   }
 
   if (command === 'search-sheets') {
     var q = input.query || ''
     var rows = api.db.query(
-      "SELECT id, name, created_at, updated_at FROM sheets WHERE name LIKE '%" + q.replace(/'/g,"''") + "%' ORDER BY updated_at DESC"
+      "SELECT id, name, created_at, updated_at FROM sheets WHERE name LIKE ? ORDER BY updated_at DESC",
+      "%" + q + "%"
     )
     return { sheets: rows || [] }
   }

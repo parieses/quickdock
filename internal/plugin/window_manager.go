@@ -126,8 +126,8 @@ func (m *PluginWindowManager) ToggleMaximize(pluginID string) {
 	}
 }
 
-// InjectInitText 向指定插件窗口注入初始文本（从命令面板跨窗口传递）
-func (m *PluginWindowManager) InjectInitText(pluginID, text string) {
+// InjectInitText 向指定插件窗口注入初始文本 + 命中的子命令（从命令面板跨窗口传递）
+func (m *PluginWindowManager) InjectInitText(pluginID, text, command string) {
 	m.mu.Lock()
 	win, ok := m.windows[pluginID]
 	m.mu.Unlock()
@@ -135,9 +135,10 @@ func (m *PluginWindowManager) InjectInitText(pluginID, text string) {
 		return
 	}
 	safeText := fmt.Sprintf("%q", text)
+	safeCmd := fmt.Sprintf("%q", command)
 	win.ExecJS(fmt.Sprintf(
 		`setTimeout(function(){
 			var ifr = document.querySelector('iframe');
-			if (ifr && ifr.contentWindow) ifr.contentWindow.postMessage({type:'plugin:init', data:{text:%s}}, '*');
-		}, 400)`, safeText))
+			if (ifr && ifr.contentWindow) ifr.contentWindow.postMessage({type:'plugin:init', data:{text:%s, command:%s}}, '*');
+		}, 400)`, safeText, safeCmd))
 }

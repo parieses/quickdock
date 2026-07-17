@@ -9,6 +9,7 @@ import (
 	"quickdock/internal/plugin"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
 const DefaultWorkspaceName = "默认工作空间"
@@ -49,13 +50,21 @@ type AppService struct {
 	// 内置插件自动安装（由 main.go 注入，含 embed.FS）
 	InstallBuiltinPluginsFn func(mgr *plugin.Manager, database *db.Database)
 
+	// 系统通知服务（由 main.go 创建并注入，用于待办定时提醒）
+	Notifier *notifications.NotificationService
+
+	// 调度器唤醒通道（任务增删改时立即重排，避免空轮询/延迟触发）
+	schedWake   chan struct{} // 定时任务调度器
+	monitorWake chan struct{} // 网站监控检查器
+
 	// 插件前端页面 HTML 缓存
 	frontendCache   map[string]*frontendCacheEntry
 	frontendCacheMu sync.RWMutex
 
-	// 跨窗口传递：命令面板→插件窗口的初始计算文本
-	pendingInitText   string
-	pendingInitTextMu sync.Mutex
+	// 跨窗口传递：命令面板→插件窗口的初始计算文本 + 命中的子命令
+	pendingInitText    string
+	pendingInitCommand string
+	pendingInitTextMu  sync.Mutex
 }
 
 type frontendCacheEntry struct {

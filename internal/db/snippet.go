@@ -57,6 +57,42 @@ func (d *Database) ListSnippets() ([]Snippet, error) {
 	return snippets, rows.Err()
 }
 
+// GetSnippetByKeyword 按唯一关键词查询片段（用于快捷笔记 find-or-create）
+func (d *Database) GetSnippetByKeyword(keyword string) (*Snippet, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	row := d.conn.QueryRow("SELECT id, keyword, content, category, created_at FROM snippets WHERE keyword = ?", keyword)
+	var s Snippet
+	if err := row.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// GetOrCreateNoteSnippet 获取或创建快捷笔记片段（关键词固定，允许空内容）
+func (d *Database) GetOrCreateNoteSnippet(keyword string) (*Snippet, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	row := d.conn.QueryRow("SELECT id, keyword, content, category, created_at FROM snippets WHERE keyword = ?", keyword)
+	var s Snippet
+	if err := row.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt); err == nil {
+		return &s, nil
+	}
+	s = Snippet{ID: newID(), Keyword: keyword, Content: "", Category: "note", CreatedAt: time.Now().Format(time.RFC3339)}
+	if _, err := d.conn.Exec("INSERT INTO snippets (id, keyword, content, category, created_at) VALUES (?, ?, ?, ?, ?)", s.ID, s.Keyword, s.Content, s.Category, s.CreatedAt); err != nil {
+		return nil, err
+	}
+	return &s, nil
+}
+
+// UpdateNoteSnippet 更新快捷笔记内容（允许空内容）
+func (d *Database) UpdateNoteSnippet(id, content string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec("UPDATE snippets SET content = ? WHERE id = ?", content, id)
+	return err
+}
+
 // SearchSnippets 按关键词搜索文本片段
 func (d *Database) SearchSnippets(query string) ([]Snippet, error) {
 	// LIKE 中 % 和 _ 是通配符，需要转义
@@ -98,14 +134,4 @@ func (d *Database) UpdateSnippet(id, keyword, content, category string) error {
 		keyword, content, category, id,
 	)
 	return err
-}
-
-func mapToSnippet(m map[string]interface{}) Snippet {
-	return Snippet{
-		ID:        str(m["id"]),
-		Keyword:   str(m["keyword"]),
-		Content:   str(m["content"]),
-		Category:  str(m["category"]),
-		CreatedAt: str(m["created_at"]),
-	}
 }

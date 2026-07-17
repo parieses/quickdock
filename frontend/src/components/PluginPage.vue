@@ -29,7 +29,7 @@ onMounted(async () => {
     const match = html.match(/<title>([^<]*)<\/title>/)
     pluginName.value = match ? match[1] : props.pluginId
 
-    const blob = new Blob([html], { type: 'text/html' })
+    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
     iframeSrc.value = URL.createObjectURL(blob)
     loading.value = false
   } catch (e: any) {
@@ -75,14 +75,16 @@ async function onIframeLoad(event: Event) {
   // 从 Go 后端检查有没有待传递的初始文本（从命令面板来）
   try {
     const raw = await GetAndClearPendingPluginInit()
-    const text = raw?.data || raw
+    const init = raw?.data || raw
+    const text = (init && typeof init === 'object') ? (init.text || '') : (typeof init === 'string' ? init : '')
+    const command = (init && typeof init === 'object') ? (init.command || '') : ''
     if (iframeWindow) {
       // 先发 theme 消息让插件 HTML 应用主题
       iframeWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, window.location.origin)
-      // 再发 init 消息
+      // 再发 init 消息（携带 text、command 和主题/语言）
       iframeWindow.postMessage({
         type: 'plugin:init',
-        data: { text, theme: 'dark', locale: locale.value }
+        data: { text, command, theme: 'dark', locale: locale.value }
       }, window.location.origin)
     }
   } catch {}

@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.port-scanner",
   "name": "端口检查器",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "检查端口占用，显示进程名和 PID",
   "author": "QuickDock",
   "category": "效率工具",
@@ -42,6 +42,21 @@
       ],
       "prefix": "/port",
       "matchPattern": "^\\d{1,5}$"
+    },
+    {
+      "id": "port-kill",
+      "title": "结束占用端口的进程",
+      "keywords": [
+        "port",
+        "端口",
+        "结束",
+        "kill",
+        "进程"
+      ],
+      "aliases": [
+        "结束进程",
+        "杀进程"
+      ]
     }
   ],
   "frontend": {

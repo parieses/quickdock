@@ -10,6 +10,7 @@ import Sidebar from './components/Sidebar.vue';
 import CollectionList from './components/CollectionList.vue';
 import ItemList from './components/ItemList.vue';
 import ClipboardPanel from './components/ClipboardPanel.vue';
+import NotePanel from './components/NotePanel.vue';
 import SceneTags from './components/SceneTags.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
@@ -21,6 +22,10 @@ const CommandPalette = defineAsyncComponent(() => import('./components/CommandPa
 const PluginManagerPage = defineAsyncComponent(() => import('./components/PluginManagerPage.vue'))
 const SnippetManagerPage = defineAsyncComponent(() => import('./components/SnippetManagerPage.vue'))
 const PluginPage = defineAsyncComponent(() => import('./components/PluginPage.vue'))
+const SystemStatusPage = defineAsyncComponent(() => import('./components/SystemStatusPage.vue'))
+const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
+const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
+const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {
@@ -49,6 +54,7 @@ window.addEventListener('hashchange', () => {
 })
 
 const isClipboardWindow = computed(() => hashRef.value === '#/clipboard')
+const isNoteWindow = computed(() => hashRef.value === '#/note')
 const isPaletteWindow = computed(() => hashRef.value === '#/command-palette')
 const isPluginWindow = computed(() => {
   return hashRef.value.startsWith('#/plugin')
@@ -94,38 +100,29 @@ onMounted(async () => {
       i18n.global.locale.value = saved
     }
   } catch (_) {}
-
-  // 监听窗口焦点：当剪贴板/命令面板等独立窗口获得焦点时从 DB 同步主题
-  window.addEventListener('focus', async () => {
-    try {
-      const saved = unwrap<string>(await GetValue('theme'))
-      if (saved === 'dark' || saved === 'light' || saved === 'system') {
-        currentTheme.value = saved as Theme
-      }
-    } catch (_) {}
-    applyTheme(currentTheme.value)
-  })
 });
 
 provide('theme', { current: currentTheme, set: setTheme })
 
-// 当前待确认的对话框
-const activeConfirm = ref<{ id: number; message: string } | null>(null)
-
-// 当 confirmItems 变化时弹出对话框
-watch(confirmItems, (items) => {
-  if (items.length > 0) {
-    activeConfirm.value = { id: items[0].id, message: items[0].message }
-  } else {
-    activeConfirm.value = null
-  }
-}, { immediate: true })
+// 当前待确认的对话框：直接取确认队列头部。
+// 用 computed 取代「watch + ref 同步」的写法，避免 resolve 处理器与 watch 之间的竞态
+// （旧写法在快速连续 confirm 时可能漏掉某些条目 / 留下永不 resolve 的孤儿 Promise）。
+const activeConfirm = computed(() =>
+  confirmItems[0]
+    ? { id: confirmItems[0].id, message: confirmItems[0].message }
+    : null
+)
 </script>
 
 <template>
   <!-- 独立剪贴板窗口：仅显示剪贴板列表 -->
   <div v-if="isClipboardWindow" class="clipboard-standalone">
     <ClipboardPanel compact />
+  </div>
+
+  <!-- 快捷笔记独立窗口：复用剪贴板窗口，导航到 #/note -->
+  <div v-else-if="isNoteWindow" class="note-standalone">
+    <NotePanel />
   </div>
 
   <!-- 命令面板独立窗口 -->
@@ -175,6 +172,17 @@ watch(confirmItems, (items) => {
 
         <!-- 插件页面 -->
         <PluginManagerPage v-else-if="currentPage === 'plugins'" />
+
+        <!-- 系统状态页面 -->
+        <SystemStatusPage v-else-if="currentPage === 'systemstatus'" />
+
+        <!-- 待办任务页面 -->
+        <TodoPage v-else-if="currentPage === 'todo'" />
+
+        <!-- 定时任务页面 -->
+        <SchedulePage v-else-if="currentPage === 'schedule'" />
+        <!-- 网站监控页面 -->
+        <MonitorPage v-else-if="currentPage === 'monitor'" />
       </div>
     </div>
 
@@ -187,8 +195,8 @@ watch(confirmItems, (items) => {
     v-if="activeConfirm"
     :visible="true"
     :message="activeConfirm.message"
-    @confirm="resolveConfirm(activeConfirm.id, true); activeConfirm = null"
-    @cancel="resolveConfirm(activeConfirm.id, false); activeConfirm = null"
+    @confirm="resolveConfirm(activeConfirm.id, true)"
+    @cancel="resolveConfirm(activeConfirm.id, false)"
   />
 </template>
 

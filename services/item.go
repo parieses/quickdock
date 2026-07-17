@@ -7,10 +7,7 @@ func (a *AppService) ListItems(collectionID string) *ApiResult {
 		return r
 	}
 	data, err := a.DB.ListItems(collectionID)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) CreateItem(workspaceID, collectionID, name, itemType, value string) *ApiResult {
@@ -18,10 +15,7 @@ func (a *AppService) CreateItem(workspaceID, collectionID, name, itemType, value
 		return r
 	}
 	data, err := a.DB.CreateItem(workspaceID, collectionID, name, itemType, value)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) UpdateItem(id string, updates map[string]interface{}) *ApiResult {
@@ -29,7 +23,7 @@ func (a *AppService) UpdateItem(id string, updates map[string]interface{}) *ApiR
 		return r
 	}
 	if err := a.DB.UpdateItem(id, updates); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -39,7 +33,7 @@ func (a *AppService) DeleteItem(id string) *ApiResult {
 		return r
 	}
 	if err := a.DB.DeleteItem(id); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -48,8 +42,8 @@ func (a *AppService) ReorderItems(orderedIDs []string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.DB.ReorderItems(orderedIDs); err != nil {
-		return dberr(err)
+	if err := a.DB.Reorder("items", orderedIDs); err != nil {
+		return Fail(err)
 	}
 	return Ok(nil)
 }

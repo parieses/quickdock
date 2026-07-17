@@ -11,12 +11,20 @@ let _nextId = 1, _pending = {}
 function pluginExec(command, input) {
   return new Promise((resolve, reject) => {
     const id = _nextId++; _pending[id] = { resolve, reject }
+    const timer = setTimeout(() => {
+      if (_pending[id]) {
+        delete _pending[id]
+        reject(new Error('请求超时（后端未响应）'))
+      }
+    }, 10000)
+    _pending[id].timer = timer
     window.parent.postMessage({ type: 'plugin:execute', id, command, input }, '*')
   })
 }
 window.addEventListener('message', (e) => {
   const p = _pending[e.data?.id]
   if (e.data?.type === 'plugin:result' && p) {
+    if (p.timer) clearTimeout(p.timer)
     if (e.data.error) p.reject(new Error(e.data.error)); else p.resolve(e.data.data)
     delete _pending[e.data.id]
   }
@@ -24,7 +32,7 @@ window.addEventListener('message', (e) => {
   if (e.data?.type === 'plugin:init' && e.data?.data?.text) {
     // 只处理符合时间格式的数据，非匹配文本不转换
     var initText = e.data.data.text
-    var expectedRE = /^(\d{4}[-/]\d{2}[-/]\d{2}(?:\s+\d{1,2}:\d{2}(:\d{2})?)?|\d{10}|\d{13}|\d{8}(?:\d{6})?|\d{4}年\d{1,2}月\d{1,2}日|now)$/i
+    var expectedRE = /^(\d{4}[-/]\d{2}[-/]\d{2}(?:[T ]\d{1,2}:\d{2}(:\d{2})?(?:Z|[+-]\d{2}:?\d{2})?|\s+\d{1,2}:\d{2}(:\d{2})?)?|\d{10}|\d{13}|\d{8}(?:\d{6})?|\d{4}年\d{1,2}月\d{1,2}日|now)$/i
     if (expectedRE.test(initText.trim())) {
       $('#timeInput').value = initText
       doConvert(initText)
@@ -46,6 +54,9 @@ function parseTime(text) {
   }
   var iso = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:\s+(\d{1,2}):(\d{2}):?(\d{2})?)?$/)
   if (iso) return new Date(parseInt(iso[1],10), parseInt(iso[2],10)-1, parseInt(iso[3],10), parseInt(iso[4]||'0',10), parseInt(iso[5]||'0',10), parseInt(iso[6]||'0',10))
+  // ISO 8601（T 分隔，无时区 → 本地）: 2024-01-15T14:30:00
+  var tiso = text.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{1,2}):(\d{2})(:\d{2})?$/)
+  if (tiso) return new Date(parseInt(tiso[1],10), parseInt(tiso[2],10)-1, parseInt(tiso[3],10), parseInt(tiso[4],10), parseInt(tiso[5],10), parseInt(tiso[6]||'0',10))
   var slash = text.match(/^(\d{4})\/(\d{2})\/(\d{2})(?:\s+(\d{1,2}):(\d{2}):?(\d{2})?)?$/)
   if (slash) return new Date(parseInt(slash[1],10), parseInt(slash[2],10)-1, parseInt(slash[3],10), parseInt(slash[4]||'0',10), parseInt(slash[5]||'0',10), parseInt(slash[6]||'0',10))
   var cn = text.match(/^(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日?\s*(\d{1,2})?[:：]?\s*(\d{2})?[:：]?\s*(\d{2})?$/)

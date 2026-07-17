@@ -83,18 +83,6 @@ function splitComment(raw) {
 }
 function isVarDef(raw) { const m = raw.trim().match(/^([a-zA-Z_]\w*)\s*=\s*(.+)$/); return m ? { name:m[1], expr:m[2] } : null }
 
-// 复制到剪贴板（兼容 iframe sandbox）
-function copyText(t) {
-  try { navigator.clipboard.writeText(t).catch(()=>fallbackCopy(t)) } catch(e) { fallbackCopy(t) }
-}
-function fallbackCopy(t) {
-  const ta = document.createElement('textarea')
-  ta.value = t; ta.style.position='fixed'; ta.style.opacity='0'
-  document.body.appendChild(ta); ta.select()
-  try { document.execCommand('copy') } catch(e) {}
-  ta.remove()
-}
-
 // ---- 稿纸数据模型 ----
 const STORAGE_KEY = 'calc_sheets_plugin'
 

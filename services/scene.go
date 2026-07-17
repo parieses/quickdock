@@ -7,10 +7,7 @@ func (a *AppService) ListScenes(workspaceID string) *ApiResult {
 		return r
 	}
 	data, err := a.DB.ListScenes(workspaceID)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) CreateScene(workspaceID, name, sceneType string) *ApiResult {
@@ -18,10 +15,7 @@ func (a *AppService) CreateScene(workspaceID, name, sceneType string) *ApiResult
 		return r
 	}
 	data, err := a.DB.CreateScene(workspaceID, name, sceneType)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) UpdateScene(id string, updates map[string]interface{}) *ApiResult {
@@ -29,7 +23,7 @@ func (a *AppService) UpdateScene(id string, updates map[string]interface{}) *Api
 		return r
 	}
 	if err := a.DB.UpdateScene(id, updates); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -39,7 +33,7 @@ func (a *AppService) DeleteScene(id string) *ApiResult {
 		return r
 	}
 	if err := a.DB.DeleteScene(id); err != nil {
-		return dberr(err)
+		return Fail(err)
 	}
 	return Ok(nil)
 }
@@ -48,8 +42,8 @@ func (a *AppService) ReorderScenes(orderedIDs []string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.DB.ReorderScenes(orderedIDs); err != nil {
-		return dberr(err)
+	if err := a.DB.Reorder("scenes", orderedIDs); err != nil {
+		return Fail(err)
 	}
 	return Ok(nil)
 }

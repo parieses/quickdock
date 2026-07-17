@@ -6,7 +6,7 @@
  *   - 可视化时间分布
  */
 function handleInitialize(params) {
-  return { status: 'ready', version: '0.1.0' }
+  return { status: 'ready', version: '0.2.0' }
 }
 
 function handleExecute(params) {

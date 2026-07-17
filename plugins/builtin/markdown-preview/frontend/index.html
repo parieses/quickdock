@@ -56,7 +56,7 @@ function render(){var text=mdInput.value.trim();if(!text){mdPreview.innerHTML='<
 var html=''
 var lines=text.split('\n'),inCode=false,codeBuf='',codeLang=''
 for(var i=0;i<lines.length;i++){var line=lines[i]
-if(inCode){if(line.startsWith('```')){html+='<pre><code>'+(codeLang?'<span style="color:var(--text-muted);font-size:11px">'+codeLang+'</span>\n':'')+escapeHtml(codeBuf)+'</code></pre>\n';codeBuf='';inCode=false}else{codeBuf+=line+'\n'};continue}
+if(inCode){if(line.startsWith('```')){html+='<pre><code>'+(codeLang?'<span style="color:var(--text-muted);font-size:11px">'+escapeHtml(codeLang)+'</span>\n':'')+escapeHtml(codeBuf)+'</code></pre>\n';codeBuf='';inCode=false}else{codeBuf+=line+'\n'};continue}
 if(line.startsWith('```')){inCode=true;codeLang=line.slice(3).trim();continue}
 if(line.startsWith('#')){var level=1;while(line[level]==='#')level++;html+='<h'+level+'>'+escapeHtml(line.slice(level).trim())+'</h'+level+'>\n';continue}
 if(line.startsWith('> ')){html+='<blockquote>'+escapeHtml(line.slice(2))+'</blockquote>\n';continue}

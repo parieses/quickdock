@@ -171,8 +171,4 @@
     var idx = name.lastIndexOf('.')
     return idx >= 0 ? name.substring(idx + 1).toLowerCase() : ''
   }
-
-  function escapeHtml(str) {
-    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  }
 })()

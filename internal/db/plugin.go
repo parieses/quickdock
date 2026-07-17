@@ -29,28 +29,6 @@ func (d *Database) DeletePlugin(id string) error {
 	return nil
 }
 
-// InsertPlugin 插入插件记录（安装时调用）
-func (d *Database) InsertPlugin(id, name, version, author, description string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	_, err := d.conn.Exec(
-		`INSERT INTO plugins (id, name, version, author, description, installed_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-		 ON CONFLICT(id) DO UPDATE SET
-		   name = excluded.name,
-		   version = excluded.version,
-		   author = excluded.author,
-		   description = excluded.description,
-		   updated_at = datetime('now')`,
-		id, name, version, author, description,
-	)
-	if err != nil {
-		return fmt.Errorf("写入插件记录失败: %w", err)
-	}
-	return nil
-}
-
 // InsertPluginFull 插入插件全部字段（含 capabilities / permissions / category / icon）
 // iconData 是 base64 data URI，由调用者从插件目录读取
 func (d *Database) InsertPluginFull(id, name, version, author, description, category, iconData string, capabilities []string, permissions map[string]interface{}) error {

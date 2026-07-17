@@ -7,10 +7,7 @@ func (a *AppService) ListTools() *ApiResult {
 		return r
 	}
 	data, err := a.DB.ListTools()
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }
 
 func (a *AppService) CreateTool(name, toolType, path, args string) *ApiResult {
@@ -18,8 +15,5 @@ func (a *AppService) CreateTool(name, toolType, path, args string) *ApiResult {
 		return r
 	}
 	data, err := a.DB.CreateTool(name, toolType, path, args)
-	if err != nil {
-		return dberr(err)
-	}
-	return Ok(data)
+	return wrap(data, err)
 }

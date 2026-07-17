@@ -5,13 +5,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 
 	_ "modernc.org/sqlite"
 )
 
-// dbConn 接口化 *sql.DB，允许包装日志拦截器
+// dbConn 接口化 *sql.DB，方便测试替换
 type dbConn interface {
 	Exec(query string, args ...interface{}) (sql.Result, error)
 	Query(query string, args ...interface{}) (*sql.Rows, error)
@@ -19,49 +20,6 @@ type dbConn interface {
 	Prepare(query string) (*sql.Stmt, error)
 	Begin() (*sql.Tx, error)
 	Close() error
-}
-
-// sqlLogger 包装 *sql.DB 并在执行前打印 SQL
-type sqlLogger struct {
-	inner *sql.DB
-}
-
-func (l *sqlLogger) Exec(query string, args ...interface{}) (sql.Result, error) {
-	logSQL(query, args...)
-	return l.inner.Exec(query, args...)
-}
-
-func (l *sqlLogger) Query(query string, args ...interface{}) (*sql.Rows, error) {
-	logSQL(query, args...)
-	return l.inner.Query(query, args...)
-}
-
-func (l *sqlLogger) QueryRow(query string, args ...interface{}) *sql.Row {
-	logSQL(query, args...)
-	return l.inner.QueryRow(query, args...)
-}
-
-func (l *sqlLogger) Prepare(query string) (*sql.Stmt, error) {
-	logSQL(query)
-	return l.inner.Prepare(query)
-}
-
-func (l *sqlLogger) Begin() (*sql.Tx, error) {
-	fmt.Println("[SQL] BEGIN TRANSACTION")
-	return l.inner.Begin()
-}
-
-func (l *sqlLogger) Close() error {
-	return l.inner.Close()
-}
-
-// logSQL 打印 SQL 语句和参数
-func logSQL(query string, args ...interface{}) {
-	if len(args) > 0 {
-		fmt.Printf("[SQL] %s | args: %v\n", query, args)
-	} else {
-		fmt.Printf("[SQL] %s\n", query)
-	}
 }
 
 // 已知表的白名单（所有允许在 SQL 拼接中出现的表名）
@@ -79,6 +37,11 @@ var validTables = map[string]bool{
 	"clipboard_entries": true,
 	"snippets":          true,
 	"usage_frecency":    true,
+	"todos":             true,
+	"scheduled_tasks":   true,
+	"monitors":          true,
+	"monitor_logs":      true,
+	"plugin_exec_logs":  true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）
@@ -172,7 +135,7 @@ func Open(path string) (*Database, error) {
 		return nil, fmt.Errorf("启用外键约束失败: %w", err)
 	}
 
-	db := &Database{conn: &sqlLogger{inner: conn}, path: path}
+	db := &Database{conn: conn, path: path}
 	if err := db.migrate(); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("数据库迁移失败: %w", err)
@@ -224,6 +187,18 @@ func (d *Database) hasColumn(table, col string) bool {
 	return count > 0
 }
 
+// orderByClause 根据表是否有 sort/created_at 列生成 ORDER BY 子句
+func (d *Database) orderByClause(table string) string {
+	if d.hasColumn(table, "sort") && d.hasColumn(table, "created_at") {
+		return " ORDER BY sort ASC, created_at ASC"
+	} else if d.hasColumn(table, "created_at") {
+		return " ORDER BY created_at ASC"
+	} else if d.hasColumn(table, "sort") {
+		return " ORDER BY sort ASC"
+	}
+	return ""
+}
+
 // ListTable 返回表中所有行（检测可用列排序）
 func (d *Database) ListTable(table string) ([]map[string]interface{}, error) {
 	if err := validateTable(table); err != nil {
@@ -233,16 +208,7 @@ func (d *Database) ListTable(table string) ([]map[string]interface{}, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	orderBy := ""
-	if d.hasColumn(table, "sort") && d.hasColumn(table, "created_at") {
-		orderBy = " ORDER BY sort ASC, created_at ASC"
-	} else if d.hasColumn(table, "created_at") {
-		orderBy = " ORDER BY created_at ASC"
-	} else if d.hasColumn(table, "sort") {
-		orderBy = " ORDER BY sort ASC"
-	}
-
-	rows, err := d.conn.Query("SELECT * FROM " + table + orderBy)
+	rows, err := d.conn.Query("SELECT * FROM " + table + d.orderByClause(table))
 	if err != nil {
 		return nil, err
 	}
@@ -261,22 +227,29 @@ func (d *Database) ListTableWhere(table, where string, params ...interface{}) ([
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	orderBy := ""
-	if d.hasColumn(table, "sort") && d.hasColumn(table, "created_at") {
-		orderBy = " ORDER BY sort ASC, created_at ASC"
-	} else if d.hasColumn(table, "created_at") {
-		orderBy = " ORDER BY created_at ASC"
-	} else if d.hasColumn(table, "sort") {
-		orderBy = " ORDER BY sort ASC"
-	}
-
-	rows, err := d.conn.Query("SELECT * FROM "+table+" WHERE "+where+orderBy, params...)
+	rows, err := d.conn.Query("SELECT * FROM "+table+" WHERE "+where+d.orderByClause(table), params...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	return scanRows(rows)
+}
+
+// Reorder 批量更新表中记录的 sort 值（按 orderedIDs 顺序赋 i*10）。
+// 所有记录在同一个事务中更新。table 需在白名单中。
+func (d *Database) Reorder(table string, orderedIDs []string) error {
+	if err := validateTable(table); err != nil {
+		return err
+	}
+	return d.Transaction(func(tx *sql.Tx) error {
+		for i, id := range orderedIDs {
+			if _, err := tx.Exec("UPDATE "+table+" SET sort = ? WHERE id = ?", i*10, id); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 // BulkInsert 批量插入多行
@@ -302,17 +275,22 @@ func (d *Database) BulkInsert(table string, rows []map[string]interface{}) error
 		placeholders := make([]string, 0, len(row))
 		values := make([]interface{}, 0, len(row))
 
-		for col, val := range row {
+		cols := make([]string, 0, len(row))
+		for col := range row {
+			cols = append(cols, col)
+		}
+		sort.Strings(cols)
+		for _, col := range cols {
 			if err := validateColumn(col); err != nil {
 				return err
 			}
 			columns = append(columns, col)
 			placeholders = append(placeholders, "?")
-			values = append(values, val)
+			values = append(values, row[col])
 		}
 
 		query := fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
-			table, joinStrings(columns, ", "), joinStrings(placeholders, ", "))
+			table, strings.Join(columns, ", "), strings.Join(placeholders, ", "))
 
 		if _, err := tx.Exec(query, values...); err != nil {
 			return err
@@ -357,26 +335,18 @@ func (d *Database) Query(query string, params ...interface{}) ([]map[string]inte
 	return scanRows(rows)
 }
 
-// GetValue 从 app_state 表中读取值
+// GetValue 从 app_state 表中读取值（委托 GetSetting，ErrNoRows 时返回空字符串不报错）
 func (d *Database) GetValue(key string) (string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	var value string
-	err := d.conn.QueryRow("SELECT value FROM app_state WHERE key = ?", key).Scan(&value)
+	val, err := d.GetSetting(key)
 	if err == sql.ErrNoRows {
 		return "", nil
 	}
-	return value, err
+	return val, err
 }
 
-// SetValue 向 app_state 表中写入值
+// SetValue 向 app_state 表中写入值（委托 SetSetting）
 func (d *Database) SetValue(key, value string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
-	_, err := d.conn.Exec("INSERT OR REPLACE INTO app_state (key, value) VALUES (?, ?)", key, value)
-	return err
+	return d.SetSetting(key, value)
 }
 
 // CountWhere 返回符合 WHERE 条件的行数
@@ -452,9 +422,4 @@ func scanRows(rows *sql.Rows) ([]map[string]interface{}, error) {
 	}
 
 	return results, rows.Err()
-}
-
-// joinStrings 拼接字符串切片
-func joinStrings(strs []string, sep string) string {
-	return strings.Join(strs, sep)
 }

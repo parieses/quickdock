@@ -1,7 +1,7 @@
 {
   "id": "com.quickdock.jwt-decoder",
   "name": "JWT 解码器",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "description": "解码 JWT Token，查看 Header/Payload，验证过期时间",
   "author": "QuickDock",
   "icon": "icon.svg",

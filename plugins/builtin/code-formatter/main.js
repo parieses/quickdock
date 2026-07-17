@@ -4,7 +4,7 @@
  * 自动检测语言类型
  */
 function handleInitialize(params) {
-  return { status: 'ready', version: '0.1.0' }
+  return { status: 'ready', version: '0.2.0' }
 }
 
 function handleExecute(params) {
@@ -53,35 +53,70 @@ function minifyCode(code, lang) {
   return minifyJS(code)
 }
 
+// 字符串/模板字面量感知的注释剥离：仅在不处于字符串/模板内时才把 // 与 /* */ 当作注释。
+function stripJSComments(code) {
+  var out = ''
+  var i = 0
+  while (i < code.length) {
+    var c = code[i]
+    var n = code[i + 1]
+    if (c === '`' ) {
+      out += c; i++
+      while (i < code.length) {
+        out += code[i]
+        if (code[i] === '\\') { out += code[i + 1] || ''; i += 2; continue }
+        if (code[i] === '`') { i++; break }
+        i++
+      }
+      continue
+    }
+    if (c === '"' || c === "'") {
+      out += c; i++
+      while (i < code.length) {
+        out += code[i]
+        if (code[i] === '\\') { out += code[i + 1] || ''; i += 2; continue }
+        if (code[i] === c) { i++; break }
+        i++
+      }
+      continue
+    }
+    if (c === '/' && n === '/') {
+      while (i < code.length && code[i] !== '\n') i++
+      continue
+    }
+    if (c === '/' && n === '*') {
+      i += 2
+      while (i < code.length && !(code[i] === '*' && code[i + 1] === '/')) i++
+      i += 2
+      continue
+    }
+    out += c
+    i++
+  }
+  return out
+}
+
 function minifyJS(code) {
-  // 1. 移除单行注释
-  code = code.replace(/\/\/[^\n]*/g, '')
-  // 2. 移除多行注释
-  code = code.replace(/\/\*[\s\S]*?\*\//g, '')
-  // 3. 移除多余空白
+  // 1. 字符串感知地移除注释（不会误伤 "http://" 之类内容）
+  code = stripJSComments(code)
+  // 2. 折叠多余空白
   code = code.replace(/\s+/g, ' ')
-  // 4. 操作符周围去空格
-  code = code.replace(/\s*([=+\-*\/%&|^~!?:;{}()\[\],<>])\s*/g, '$1')
-  // 5. 恢复一些必要的空格（关键字后面）
-  code = code.replace(/\b(function|if|else|for|while|do|switch|case|return|throw|try|catch|finally|typeof|instanceof|new|delete|void|in)\b(?=[a-zA-Z0-9_])/g, '$1 ')
-  // 6. 去掉最后的分号前面的多余分号
-  code = code.replace(/;+/g, ';')
-  code = code.replace(/;}/g, '}')
+  // 3. 去除空白围绕“安全”分隔符（不改变语义）
+  code = code.replace(/\s*([{}();,:=])\s*/g, '$1')
+  // 4. 去除空白围绕逻辑/位运算符
+  code = code.replace(/\s*(&&|\|\||[&|])\s*/g, '$1')
   return code.trim()
 }
 
 function minifyCSS(code) {
-  // 1. 移除注释
+  // 1. 移除注释（CSS 字符串内极少出现 /*，按普通处理）
   code = code.replace(/\/\*[\s\S]*?\*\//g, '')
-  // 2. 移除多余空白
+  // 2. 折叠多余空白
   code = code.replace(/\s+/g, ' ')
-  // 3. 移除空格围绕的 { } : ; ,
-  code = code.replace(/\s*\{\s*/g, '{')
-  code = code.replace(/\s*\}\s*/g, '}')
-  code = code.replace(/\s*:\s*/g, ':')
-  code = code.replace(/\s*;\s*/g, ';')
-  code = code.replace(/\s*,\s*/g, ',')
-  // 4. 去掉最后一个分号前的空格
+  // 3. 去除空白围绕 { } : ; , =
+  code = code.replace(/\s*([{}:;,])\s*/g, '$1')
+  code = code.replace(/\s*=\s*/g, '=')
+  // 4. 去掉最后一个分号前的多余
   code = code.replace(/;}/g, '}')
   return code.trim()
 }
@@ -89,13 +124,12 @@ function minifyCSS(code) {
 function minifyHTML(code) {
   // 1. 移除 HTML 注释
   code = code.replace(/<!--[\s\S]*?-->/g, '')
-  // 2. 移除多余空白（保留标签间的必要空格）
+  // 2. 标签间换行压缩
   code = code.replace(/>\s+</g, '><')
-  // 3. 压缩行内空白
+  // 3. 压缩行内连续空白
   code = code.replace(/\s{2,}/g, ' ')
-  // 4. 移除属性值引号（简单情况）
-  code = code.replace(/\s*=\s*"/g, '=')
-  code = code.replace(/"\s*/g, '')
+  // 4. 仅压缩 = 两侧空白，保留属性引号（避免 class="a b" 被破坏）
+  code = code.replace(/\s*=\s*/g, '=')
   return code.trim()
 }
 
@@ -112,20 +146,19 @@ function prettifyJS(code) {
   var out = ''
   var inStr = false
   var strChar = ''
-  var inRegex = false
+  var parenDepth = 0
 
   for (var i = 0; i < code.length; i++) {
     var ch = code[i]
     var next = code[i + 1] || ''
 
-    // 处理字符串
+    // 处理字符串（含转义）
     if (inStr) {
       out += ch
       if (ch === '\\' && next) { out += next; i++ }
       else if (ch === strChar) inStr = false
       continue
     }
-
     if (ch === "'" || ch === '"' || ch === '`') {
       inStr = true
       strChar = ch
@@ -151,6 +184,18 @@ function prettifyJS(code) {
       continue
     }
 
+    // 圆括号 / 方括号深度（用于判断逗号、分号是否处于“行内”）
+    if (ch === '(' || ch === '[') {
+      parenDepth++
+      out += ch
+      continue
+    }
+    if (ch === ')' || ch === ']') {
+      parenDepth = Math.max(0, parenDepth - 1)
+      out += ch
+      continue
+    }
+
     // 大括号
     if (ch === '{') {
       out += ' {\n'
@@ -164,25 +209,27 @@ function prettifyJS(code) {
       continue
     }
 
-    // 分号
+    // 分号：仅在顶层（不在括号内）换行
     if (ch === ';') {
-      out += ';\n' + indentStr(indent)
+      if (parenDepth === 0) {
+        out += ';\n' + indentStr(indent)
+      } else {
+        out += '; '
+      }
       continue
     }
 
-    // 逗号（不在括号内时）
-    if (ch === ',' && i > 0) {
+    // 逗号：仅在顶层换行，括号内保持同行
+    if (ch === ',' && parenDepth === 0) {
       out += ',\n' + indentStr(indent)
       continue
     }
 
-    // 空白字符
-    if (ch === '\n' || ch === '\r') {
-      // 忽略，由我们控制换行
-      continue
-    }
+    // 换行符由我们控制，忽略原始换行
+    if (ch === '\n' || ch === '\r') continue
+
+    // 空白：仅在非连续时保留一个空格
     if (ch === ' ' || ch === '\t') {
-      // 只在非连续空白时保留一个空格
       if (out.length > 0 && out[out.length - 1] !== ' ' && out[out.length - 1] !== '\n') {
         out += ' '
       }
@@ -192,7 +239,6 @@ function prettifyJS(code) {
     out += ch
   }
 
-  // 清理多余空白行
   out = out.replace(/\n{3,}/g, '\n\n')
   return out.trim()
 }

@@ -3,7 +3,7 @@
  * 自动检测输入命名风格，转换到所有主流命名约定
  */
 function handleInitialize(params) {
-  return { status: 'ready', version: '0.1.0' }
+  return { status: 'ready', version: '0.2.0' }
 }
 
 function handleExecute(params) {

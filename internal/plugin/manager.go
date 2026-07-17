@@ -157,8 +157,8 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		vm.Set("api", map[string]interface{}{
 			"log": func(msg string) { fmt.Printf("[plugin %s] %s\n", manifest.ID, msg) },
 			"db": map[string]interface{}{
-				"exec": func(sql string) (map[string]interface{}, error) {
-					res, e := pluginDB.Exec(sql)
+				"exec": func(sql string, args ...interface{}) (map[string]interface{}, error) {
+					res, e := pluginDB.Exec(sql, args...)
 					if e != nil {
 						return nil, e
 					}
@@ -166,8 +166,8 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 					ra, _ := res.RowsAffected()
 					return map[string]interface{}{"lastId": id, "rowsAffected": ra}, nil
 				},
-				"query": func(sql string) ([]map[string]interface{}, error) {
-					rows, e := pluginDB.Query(sql)
+				"query": func(sql string, args ...interface{}) ([]map[string]interface{}, error) {
+					rows, e := pluginDB.Query(sql, args...)
 					if e != nil {
 						return nil, e
 					}
@@ -195,6 +195,8 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 					return results, nil
 				},
 			},
+			// crypto：由 Go 标准库实现，保证哈希/编解码正确性（含 UTF-8 / 多字节 / 4 字节代理对）
+			"crypto": newCryptoAPI(),
 		})
 
 		// goja 可能在执行 JS 时 panic（如栈溢出、类型错误），用 recover 保护
@@ -532,7 +534,7 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 	return inst.Call("plugin.execute", map[string]interface{}{
 		"command": commandID,
 		"input":   input,
-	}, 10*time.Second)
+	}, 20*time.Second)
 }
 
 // ListPlugins 列出所有插件（暴露给前端）
@@ -542,6 +544,10 @@ func (m *Manager) ListPlugins() []PluginInfo {
 
 	result := make([]PluginInfo, 0, len(m.plugins))
 	for _, inst := range m.plugins {
+		cmds := inst.Manifest.Commands
+		if cmds == nil {
+			cmds = []Command{}
+		}
 		result = append(result, PluginInfo{
 			ID:          inst.Manifest.ID,
 			Name:        inst.Manifest.Name,
@@ -551,7 +557,7 @@ func (m *Manager) ListPlugins() []PluginInfo {
 			Category:    inst.Manifest.Category,
 			Status:      inst.Status,
 			HasFrontend: inst.Manifest.Frontend.Enabled,
-			Commands:    inst.Manifest.Commands,
+			Commands:    cmds,
 		})
 	}
 	return result
