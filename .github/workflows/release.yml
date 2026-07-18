@@ -58,6 +58,11 @@ jobs:
             -info build/windows/info.json `
             -out wails_windows_amd64.syso
 
+      - name: Generate WebView2 bootstrapper
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: wails3 generate webview2bootstrapper -dir build/windows/nsis
+
       - name: Build binary (production)
         shell: pwsh
         working-directory: ${{ github.workspace }}
