@@ -108,4 +108,3 @@ jobs:
             manifest.json
           generate_release_notes: true
           fail_on_unmatched_files: false
-          overwrite: true
