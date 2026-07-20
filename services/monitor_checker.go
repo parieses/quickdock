@@ -97,6 +97,11 @@ func (a *AppService) nextMonitorWait() time.Duration {
 // checkOneMonitor 对单个监控执行一次检测，写入日志与状态，并在状态翻转时发通知
 // 返回 (status, summary)
 func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
+	// 用户可能在调度间隙停用了该监控，重查 enabled 状态
+	if current, err := a.DB.GetMonitor(m.ID); err != nil || !current.Enabled {
+		return "", ""
+	}
+
 	up, code, latency, errMsg := probeMonitor(m)
 	status := "down"
 	if up {
