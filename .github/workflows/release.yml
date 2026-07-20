@@ -106,15 +106,27 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # gh CLI 已预装在 GitHub Actions 运行器上
-          # 先检查 release 是否已存在（之前失败的构建可能已创建）
           $ref = "$env:GITHUB_REF_NAME"
-          $exists = gh release view $ref --json id 2>$null
-          if ($exists) {
-            gh release delete $ref -y
-          }
-          gh release create $ref `
-            --title $ref `
-            --generate-notes `
-            "bin/quickdock-amd64-installer.exe" `
-            "manifest.json"
+          # 尝试删除已存在的 release（忽略 503 等临时错误）
+          try {
+            gh release view $ref --json id 2>$null >$null
+            if ($LASTEXITCODE -eq 0) {
+              gh release delete $ref -y 2>$null
+            }
+          } catch {}
+          # 创建 release（带 5 次重试）
+          $assets = @("bin/quickdock-amd64-installer.exe", "manifest.json")
+          $attempts = 0
+          do {
+            $attempts++
+            if ($attempts -gt 1) { Start-Sleep -Seconds 3 }
+            $ok = $true
+            try {
+              gh release create $ref --title $ref --generate-notes $assets 2>&1 | Out-Null
+              $ok = $LASTEXITCODE -eq 0
+            } catch {
+              $ok = $false
+            }
+            if (-not $ok) { Write-Host "Attempt $attempts/5 failed, retrying..." }
+          } while (-not $ok -and $attempts -lt 5)
+          if (-not $ok) { throw "Failed to create release after 5 attempts" }
