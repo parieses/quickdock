@@ -101,11 +101,11 @@ jobs:
           }
 
       - name: Upload Release Assets
-        uses: softprops/action-gh-release@v2
+        uses: ncipollo/release-action@v1
         with:
-          files: |
-            bin/quickdock-amd64-installer.exe
-            manifest.json
-          generate_release_notes: true
-          fail_on_unmatched_files: false
-          overwrite_files: true
+          artifacts: "bin/quickdock-amd64-installer.exe,manifest.json"
+          generateReleaseNotes: true
+          allowUpdates: true
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          artifactErrorsFailBuild: false
