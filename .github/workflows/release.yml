@@ -103,6 +103,8 @@ jobs:
       - name: Create Release and Upload Assets
         shell: pwsh
         working-directory: ${{ github.workspace }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           # gh CLI 已预装在 GitHub Actions 运行器上
           # 先检查 release 是否已存在（之前失败的构建可能已创建）
