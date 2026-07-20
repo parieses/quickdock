@@ -100,43 +100,12 @@ jobs:
             echo "No UPDATER_PRIVATE_KEY secret set - skipping manifest signing"
           }
 
-      - name: Create Release and Upload Assets
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          $ref = "$env:GITHUB_REF_NAME"
-          # 如果 release 已存在（之前失败残留），删掉再重来
-          gh release delete $ref -y 2>$null
-          Start-Sleep -Seconds 2
-          # 创建 release（不带 asset），报错则重试 3 次
-          $attempts = 0
-          do {
-            $attempts++
-            Write-Host "Creating release $ref (attempt $attempts)..."
-            $output = gh release create $ref --title $ref --generate-notes 2>&1
-            $ok = $LASTEXITCODE -eq 0
-            if (-not $ok) {
-              Write-Host "Failed: $output"
-              Start-Sleep -Seconds 5
-            }
-          } while (-not $ok -and $attempts -lt 3)
-          if (-not $ok) { throw "Failed to create release" }
-          # 逐个上传 asset（带 5 次重试，应对 GitHub 上传服务器 502/503）
-          function Upload-Asset($file) {
-            $attempts = 0
-            do {
-              $attempts++
-              Write-Host "Uploading $file (attempt $attempts)..."
-              $output = gh release upload $ref $file --clobber 2>&1
-              $ok = $LASTEXITCODE -eq 0
-              if (-not $ok) {
-                Write-Host "Upload failed: $output"
-                Start-Sleep -Seconds 5
-              }
-            } while (-not $ok -and $attempts -lt 5)
-            if (-not $ok) { Write-Host "WARNING: Failed to upload $file after 5 attempts" }
-          }
-          Upload-Asset "bin/quickdock-amd64-installer.exe"
-          Upload-Asset "manifest.json"
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            bin/quickdock-amd64-installer.exe
+            manifest.json
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+          overwrite_files: true
