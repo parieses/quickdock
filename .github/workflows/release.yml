@@ -107,26 +107,24 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $ref = "$env:GITHUB_REF_NAME"
-          # 尝试删除已存在的 release（忽略 503 等临时错误）
-          try {
-            gh release view $ref --json id 2>$null >$null
-            if ($LASTEXITCODE -eq 0) {
-              gh release delete $ref -y 2>$null
-            }
-          } catch {}
-          # 创建 release（带 5 次重试）
-          $assets = @("bin/quickdock-amd64-installer.exe", "manifest.json")
+          # 如果 release 已存在（之前失败残留），删掉再重来
+          gh release delete $ref -y 2>$null
+          Start-Sleep -Seconds 2
+          # 创建 release（不带 asset），报错则重试 3 次
           $attempts = 0
           do {
             $attempts++
-            if ($attempts -gt 1) { Start-Sleep -Seconds 3 }
-            $ok = $true
-            try {
-              gh release create $ref --title $ref --generate-notes $assets 2>&1 | Out-Null
-              $ok = $LASTEXITCODE -eq 0
-            } catch {
-              $ok = $false
+            Write-Host "Creating release $ref (attempt $attempts)..."
+            $output = gh release create $ref --title $ref --generate-notes 2>&1
+            $ok = $LASTEXITCODE -eq 0
+            if (-not $ok) {
+              Write-Host "Failed: $output"
+              Start-Sleep -Seconds 5
             }
-            if (-not $ok) { Write-Host "Attempt $attempts/5 failed, retrying..." }
-          } while (-not $ok -and $attempts -lt 5)
-          if (-not $ok) { throw "Failed to create release after 5 attempts" }
+          } while (-not $ok -and $attempts -lt 3)
+          if (-not $ok) { throw "Failed to create release" }
+          # 逐个上传 asset（第一个出错不影响第二个）
+          Write-Host "Uploading bin/quickdock-amd64-installer.exe..."
+          gh release upload $ref "bin/quickdock-amd64-installer.exe" --clobber 2>&1
+          Write-Host "Uploading manifest.json..."
+          gh release upload $ref "manifest.json" --clobber 2>&1
