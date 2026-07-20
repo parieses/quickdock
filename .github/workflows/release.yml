@@ -108,12 +108,13 @@ jobs:
         run: |
           # gh CLI 已预装在 GitHub Actions 运行器上
           # 先检查 release 是否已存在（之前失败的构建可能已创建）
-          $exists = gh release view "$env:GITHUB_REF_NAME" --json id 2>$null
+          $ref = "$env:GITHUB_REF_NAME"
+          $exists = gh release view $ref --json id 2>$null
           if ($exists) {
-            gh release delete "$env:GITHUB_REF_NAME" -y
+            gh release delete $ref -y
           }
-          $assets = @("bin/quickdock-amd64-installer.exe", "manifest.json") -join ","
-          gh release create "$env:GITHUB_REF_NAME" `
-            --title "$env:GITHUB_REF_NAME" `
+          gh release create $ref `
+            --title $ref `
             --generate-notes `
-            $assets
+            "bin/quickdock-amd64-installer.exe" `
+            "manifest.json"
