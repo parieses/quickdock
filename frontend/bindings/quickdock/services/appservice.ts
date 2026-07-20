@@ -22,6 +22,13 @@ import * as db$0 from "../internal/db/models.js";
 import * as $models from "./models.js";
 
 /**
+ * CheckForUpdates 手动检查更新（阻塞直到检查完成）
+ */
+export function CheckForUpdates(): $CancellablePromise<$models.UpdateStatus | null> {
+    return $Call.ByID(3257391909);
+}
+
+/**
  * CheckMonitorNow 立即手动检测一次（不影响下次调度）
  */
 export function CheckMonitorNow(id: string): $CancellablePromise<$models.ApiResult | null> {
@@ -163,6 +170,13 @@ export function DisablePlugin(id: string): $CancellablePromise<$models.ApiResult
     return $Call.ByID(3188936753, id);
 }
 
+/**
+ * DownloadUpdate 下载发现的更新（阻塞直到下载完成）
+ */
+export function DownloadUpdate(): $CancellablePromise<$models.UpdateStatus | null> {
+    return $Call.ByID(2223297711);
+}
+
 export function EnablePlugin(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2515910434, id);
 }
@@ -190,6 +204,13 @@ export function GetAllUsage(): $CancellablePromise<$models.ApiResult | null> {
  */
 export function GetAndClearPendingPluginInit(): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2879713414);
+}
+
+/**
+ * GetAppVersion 返回当前应用版本号
+ */
+export function GetAppVersion(): $CancellablePromise<string> {
+    return $Call.ByID(3689300579);
 }
 
 export function GetAutoStart(): $CancellablePromise<$models.ApiResult | null> {
@@ -306,6 +327,13 @@ export function GetSystemStatus(): $CancellablePromise<$models.ApiResult | null>
  */
 export function GetTopUsage(limit: number): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(989274272, limit);
+}
+
+/**
+ * GetUpdateState 获取当前更新器状态
+ */
+export function GetUpdateState(): $CancellablePromise<$models.UpdateStatus | null> {
+    return $Call.ByID(2309909332);
 }
 
 /**
@@ -528,6 +556,13 @@ export function ResetInstalledAppsCache(): $CancellablePromise<$models.ApiResult
     return $Call.ByID(421562045);
 }
 
+/**
+ * RestartApp 重启应用以完成更新
+ */
+export function RestartApp(): $CancellablePromise<void> {
+    return $Call.ByID(1949245344);
+}
+
 export function RestoreSnapshot(id: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(2330421416, id);
 }
@@ -675,6 +710,13 @@ export function SetWebhookConfig(dingtalk: string, wecom: string, feishu: string
  */
 export function ShowPluginWindow(pluginID: string): $CancellablePromise<$models.ApiResult | null> {
     return $Call.ByID(3008209844, pluginID);
+}
+
+/**
+ * SkipUpdate 跳过指定版本的更新
+ */
+export function SkipUpdate(version: string): $CancellablePromise<void> {
+    return $Call.ByID(358606692, version);
 }
 
 /**

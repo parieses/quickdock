@@ -12,6 +12,26 @@ export interface ApiResult {
 }
 
 /**
+ * UpdateStatus 返回给前端的更新状态
+ */
+export interface UpdateStatus {
+    "currentVersion": string;
+
+    /**
+     * idle / checking / available / up-to-date / downloading / ready / error
+     */
+    "state": string;
+    "availableVersion"?: string;
+    "releaseNotes"?: string;
+
+    /**
+     * 0-100
+     */
+    "downloadProgress"?: number;
+    "error"?: string;
+}
+
+/**
  * WebDAVConfig WebDAV 同步配置
  */
 export interface WebDAVConfig {

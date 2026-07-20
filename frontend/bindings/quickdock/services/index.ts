@@ -8,5 +8,6 @@ export {
 
 export type {
     ApiResult,
+    UpdateStatus,
     WebDAVConfig
 } from "./models.js";

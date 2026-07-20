@@ -15,6 +15,8 @@ import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice
 import { SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services/appservice'
 import { CreateSnapshot, ListSnapshots, DeleteSnapshot, RestoreSnapshot } from '../../bindings/quickdock/services/appservice'
 import { GetWebDAVConfig, SetWebDAVConfig, WebDAVTestConnection, WebDAVExportBackup, WebDAVListBackups, WebDAVDownaloadAndRestore, WebDAVDeleteBackup } from '../../bindings/quickdock/services/appservice'
+import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/appservice'
+import type { UpdateStatus } from '../../bindings/quickdock/services/models'
 import type { Snapshot } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
@@ -38,6 +40,7 @@ const menuItems = computed(() => [
   { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
   { key: 'webdav',     label: 'WebDAV',              icon: Cloud,    desc: t('settings') },
   { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
+  { key: 'update',     label: t('update'),            icon: RotateCcw, desc: t('updateCheckingAuto') },
 ])
 
 function selectMenu(key: string) {
@@ -56,6 +59,64 @@ function onKeydown(e: KeyboardEvent) {
   }
   if (e.key === 'Escape') { close(); return }
   onKeydownTrap(e)
+}
+
+// ---- 更新检查 ----
+const appVersion = ref('')
+const updateStatus = ref<UpdateStatus | null>(null)
+const updateChecking = ref(false)
+const updateResult = ref('')
+
+onMounted(async () => {
+  try {
+    const ver = await GetAppVersion()
+    appVersion.value = ver
+    const state = await GetUpdateState()
+    if (state) updateStatus.value = state
+  } catch {}
+})
+
+async function checkForUpdates() {
+  updateChecking.value = true
+  updateResult.value = ''
+  try {
+    const result = await CheckForUpdates()
+    if (!result) { updateResult.value = t('updateError'); updateChecking.value = false; return }
+    updateStatus.value = result
+    if (result.state === 'up-to-date') {
+      updateResult.value = t('updateUpToDate')
+    } else if (result.state === 'available') {
+      updateResult.value = t('updateAvailable') + ' ' + (result.availableVersion || '')
+    } else if (result.state === 'error') {
+      updateResult.value = (result.error || t('updateError'))
+    }
+  } catch (e: any) {
+    updateResult.value = getErrorMessage(e)
+  } finally {
+    updateChecking.value = false
+  }
+}
+
+async function downloadUpdate() {
+  updateResult.value = t('updateDownloading')
+  try {
+    const result = await DownloadUpdate()
+    if (!result) { updateResult.value = t('updateError'); return }
+    updateStatus.value = result
+    if (result.state === 'ready') {
+      updateResult.value = t('updateReady')
+    } else if (result.state === 'error') {
+      updateResult.value = result.error || t('updateError')
+    }
+  } catch (e: any) {
+    updateResult.value = getErrorMessage(e)
+  }
+}
+
+async function restartApp() {
+  try {
+    await RestartApp()
+  } catch {}
 }
 
 // ---- 主题 / 语言 ----
@@ -429,7 +490,7 @@ async function deleteWebDAVBackup(name: string) {
           <div v-if="activePage === 'about'" class="content-page">
             <div class="about-logo">⚡</div>
             <h2>{{ t('appName') }}</h2>
-            <p class="about-version">{{ t('version') }} 0.2.0</p>
+            <p class="about-version">{{ t('version') }} {{ appVersion || '0.0.0' }}</p>
             <p class="about-desc">{{ t('appDesc') }}</p>
             <p class="about-tech">{{ t('aboutTech') }}</p>
             <p class="about-copy">{{ t('aboutCopyright') }}</p>
@@ -608,6 +669,45 @@ async function deleteWebDAVBackup(name: string) {
             </div>
           </div>
 
+          <!-- 检查更新 -->
+          <div v-else-if="activePage === 'update'" class="content-page content-left">
+            <div class="section">
+              <h3 class="section-title">{{ t('update') }}</h3>
+              <p class="section-desc">{{ t('updateCheckingAuto') }}</p>
+
+              <div class="setting-row">
+                <label class="setting-label">{{ t('version') }}</label>
+                <div class="setting-control">
+                  <span class="version-text">{{ appVersion || '—' }}</span>
+                </div>
+              </div>
+
+              <div class="action-row">
+                <button class="btn btn-primary" :disabled="updateChecking" @click="checkForUpdates">
+                  <RotateCcw :size="14" :class="{ spinning: updateChecking }" />
+                  {{ updateChecking ? t('updateChecking') : t('updateCheckNow') }}
+                </button>
+              </div>
+
+              <p v-if="updateResult" class="result-hint" :class="{ 'result-error': updateStatus?.state === 'error' }">{{ updateResult }}</p>
+
+              <div v-if="updateStatus?.state === 'available'" class="action-row" style="margin-top: 12px;">
+                <button class="btn btn-primary" @click="downloadUpdate">
+                  {{ t('updateDownload') }} {{ updateStatus.availableVersion }}
+                </button>
+                <button class="btn btn-secondary" @click="updateStatus.state = 'idle'">
+                  {{ t('updateSkip') }}
+                </button>
+              </div>
+
+              <div v-if="updateStatus?.state === 'ready'" class="action-row" style="margin-top: 12px;">
+                <button class="btn btn-primary update-restart-btn" @click="restartApp">
+                  {{ t('updateRestart') }}
+                </button>
+              </div>
+            </div>
+          </div>
+
           <!-- 通用设置 -->
           <div v-else-if="activePage === 'general'" class="content-page content-left">
             <div class="section">
@@ -738,6 +838,13 @@ async function deleteWebDAVBackup(name: string) {
 .about-desc { font-size: 14px; color: var(--color-text-muted); margin: 0 0 4px; }
 .about-tech { font-size: 12px; color: var(--color-text-disabled); margin: 0 0 20px; }
 .about-copy { font-size: 11px; color: var(--color-text-disabled); margin: 0; }
+
+/* 检查更新 */
+.version-text { font-size: 14px; font-weight: 500; color: var(--color-text-primary); font-family: var(--font-mono); }
+.update-restart-btn { background: var(--color-accent); color: #fff; font-weight: 500; }
+.update-restart-btn:hover { opacity: 0.9; }
+.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 
 /* 主题/语言选择器 */
 .theme-selector { display: flex; gap: 12px; }

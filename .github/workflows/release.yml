@@ -100,11 +100,18 @@ jobs:
             echo "No UPDATER_PRIVATE_KEY secret set - skipping manifest signing"
           }
 
-      - name: Upload Release Assets
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            bin/quickdock-amd64-installer.exe
-            manifest.json
-          generate_release_notes: true
-          fail_on_unmatched_files: false
+      - name: Create Release and Upload Assets
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          # gh CLI 已预装在 GitHub Actions 运行器上
+          # 先检查 release 是否已存在（之前失败的构建可能已创建）
+          $exists = gh release view "$env:GITHUB_REF_NAME" --json id 2>$null
+          if ($exists) {
+            gh release delete "$env:GITHUB_REF_NAME" -y
+          }
+          $assets = @("bin/quickdock-amd64-installer.exe", "manifest.json") -join ","
+          gh release create "$env:GITHUB_REF_NAME" `
+            --title "$env:GITHUB_REF_NAME" `
+            --generate-notes `
+            $assets

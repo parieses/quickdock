@@ -121,6 +121,9 @@ func main() {
 		fmt.Printf("QuickDock: 更新器初始化失败（非关键错误）: %v\n", err)
 	}
 
+	// 注入版本号到 AppService（供前端获取）
+	appService.AppVersion = appVersion
+
 	// 注入通知服务引用（供待办提醒调度器使用）
 	appService.Notifier = notifier
 
