@@ -1,71 +1,62 @@
-# QuickDock v3 插件系统架构设计
+# QuickDock v3 插件系统 — 实际实现文档
 
-## 一、核心问题：Go 能动态注入吗？
+> 本文档反映 v3 当前代码库的实际实现状态，非设计蓝图。
 
-| 方案 | Windows | 多语言 | 热加载 | 隔离性 | 结论 |
-|---|---|---|---|---|---|
-| Go `plugin` 包 | 不支持 | 仅 Go | 不支持 | 差 | 排除 |
-| Yaegi（Go 解释器）| 支持 | 仅 Go | 支持 | 差（同进程）| 仅内部脚本 |
-| Extism（Wasm）| 支持 | 多语言 | 支持 | 极好 | 高级插件 |
-| **子进程 + JSON-RPC** | **支持** | **任意语言** | **支持** | **好（进程隔离）** | **推荐主方案** |
-| HashiCorp go-plugin | 支持 | 主要 Go | 支持 | 好 | 偏重 |
-| 脚本执行 | 支持 | 多语言 | 支持 | 差 | 太简陋 |
+---
 
-**推荐：子进程 JSON-RPC 为主 + Extism Wasm 为高级选项**
+## 一、核心架构：三种 Runtime
 
-理由：子进程方案是 LSP（Language Server Protocol）验证过的成熟模式，Terraform、VSCode、Neovim 都用这种架构。插件崩溃不影响主程序，支持任意语言开发插件，热加载只需杀掉旧进程重启新进程。
+| Runtime | 说明 | 隔离性 | 使用场景 |
+|---|---|---|---|
+| `none` | 纯前端插件，无后端进程 | — | 只展示 UI 的工具（emoji-search、http-status） |
+| `goja` | Go 内嵌 JS 引擎执行 | 同进程，但沙箱隔离 | 内置轻量插件（json2ts、cron-explainer） |
+| `native` | 独立子进程 + JSON-RPC | 进程隔离，最佳 | 外置插件、需要系统权限的工具 |
+
+**设计决策：** Go `plugin` 包不支持 Windows 且无热加载，排除。Extism Wasm 保留为未来选项。
 
 ---
 
 ## 二、整体架构
 
 ```
-┌─────────────────────────────────────────────────────┐
-│                   QuickDock 主程序                    │
-│                                                      │
-│  ┌──────────┐  ┌──────────┐  ┌───────────────────┐  │
-│  │  Wails    │  │  Plugin   │  │   Plugin Frontend │  │
-│  │  前端     │←→│  Manager  │←→│   (iframe/Shadow  │  │
-│  │  (Vue 3)  │  │  (Go)    │  │    DOM 渲染)       │  │
-│  └──────────┘  └────┬─────┘  └───────────────────┘  │
-│                      │                               │
-│               JSON-RPC 2.0 (stdin/stdout)            │
-│                      │                               │
-├──────────────────────┼───────────────────────────────┤
-│                      │                               │
-│  ┌───────────┐  ┌────┴──────┐  ┌──────────────────┐ │
-│  │  Plugin A  │  │  Plugin B  │  │    Plugin C      │ │
-│  │  (Go)     │  │  (Node.js) │  │    (Python)      │ │
-│  │           │  │           │  │                  │ │
-│  │ 后端逻辑  │  │ 后端逻辑   │  │   后端逻辑       │ │
-│  │ + 前端资源 │  │ + 前端资源 │  │  + 前端资源      │ │
-│  └───────────┘  └───────────┘  └──────────────────┘ │
-│                                                      │
-│         ~/.quickdock/plugins/                        │
-│         ├── translator/plugin.json + dist/           │
-│         ├── code-runner/plugin.json + dist/          │
-│         └── pomodoro/plugin.json + dist/             │
-└─────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│                    QuickDock 主程序                       │
+│                                                          │
+│  ┌──────────┐  ┌──────────────┐  ┌───────────────────┐  │
+│  │  Wails    │  │  AppService   │  │  PluginManager    │  │
+│  │  前端     │←→│  (services/)  │←→│  (internal/plugin)│  │
+│  │  (Vue 3)  │  │  18 个绑定方法 │  │  Manager          │  │
+│  └──────────┘  └──────┬───────┘  │  PluginInstance[]  │  │
+│                        │          │  goja runtime       │  │
+│                        │          │  PluginWindowMgr   │  │
+│                        │          │  PluginHotkeyReg   │  │
+│                        │          └────────┬──────────┘  │
+│                        │                   │              │
+│                  JSON-RPC 2.0 (stdin/stdout)              │
+│                        │                   │              │
+│                        │          ┌────────┴──────────┐  │
+│                        │          │  native 子进程     │  │
+│                        │          │  (任意语言)        │  │
+│                        │          └───────────────────┘  │
+│                        │                                  │
+│                 ┌──────┴───────┐                          │
+│                 │  独立 WebviewWindow  (/#/plugin/{id})   │
+│                 │  PluginPage.vue  iframe + Blob URL     │
+│                 │  Nonce 握手安全                         │
+│                 └──────────────┘                          │
+│                                                          │
+│  plugins/builtin/          ~/.quickdock/plugins/         │
+│  ├── json2ts/              ├── my-plugin/                │
+│  ├── cron-explainer/       │   ├── plugin.json           │
+│  ├── port-scanner/         │   ├── main (可执行文件)      │
+│  ├── ... (共 19 个内置)     │   └── frontend/             │
+│  └── common.css/.js        └── ...                       │
+└─────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## 三、插件目录结构
-
-每个插件是一个独立文件夹，放在 `~/.quickdock/plugins/` 下：
-
-```
-my-plugin/
-├── plugin.json          # 插件清单（必须）
-├── main                 # 后端入口（可执行文件或脚本）
-├── frontend/            # 前端资源（可选）
-│   ├── index.html       # 插件 UI 入口
-│   ├── style.css
-│   └── app.js
-└── README.md
-```
-
-### plugin.json 清单格式
+## 三、插件清单 (plugin.json)
 
 ```json
 {
@@ -74,7 +65,8 @@ my-plugin/
   "version": "1.0.0",
   "description": "选中文字一键翻译",
   "author": "Your Name",
-  "icon": "icon.png",
+  "icon": "icon.svg",
+  "category": "tools",
 
   "backend": {
     "runtime": "native",
@@ -89,11 +81,7 @@ my-plugin/
     "height": 300
   },
 
-  "capabilities": [
-    "command",
-    "context-menu",
-    "clipboard-watch"
-  ],
+  "capabilities": ["command", "context-menu"],
 
   "permissions": {
     "network": true,
@@ -105,802 +93,420 @@ my-plugin/
     {
       "id": "translate",
       "title": "翻译选中文字",
-      "hotkey": "Ctrl+Shift+T"
+      "hotkey": "Ctrl+Shift+T",
+      "keywords": ["翻译", "translate", "翻"],
+      "aliases": ["fy", "翻"],
+      "prefix": "/tr",
+      "matchPattern": "^[a-zA-Z].*"
     }
   ]
 }
 ```
 
-**runtime 支持的值：**
+### runtime 支持的值
 
 | runtime | entry 含义 | 示例 |
 |---|---|---|
-| `native` | 可执行文件路径 | `"entry": "main"` (Go/Rust 编译产物) |
-| `node` | Node.js 脚本 | `"entry": "index.js"` |
-| `python` | Python 脚本 | `"entry": "main.py"` |
-| `powershell` | PowerShell 脚本 | `"entry": "plugin.ps1"` |
-| `wasm` | Wasm 文件 | `"entry": "plugin.wasm"` (高级) |
+| `none` | 无后端 | 纯前端插件，entry 可省略 |
+| `goja` | JavaScript 文件 | `"entry": "main.js"`（Go 内嵌引擎执行） |
+| `native` | 可执行文件 | `"entry": "main"` (Go/Rust 编译产物) |
+| `node` | (预留) | — |
+| `python` | (预留) | — |
+| `wasm` | (预留) | — |
+
+### Command 字段
+
+| 字段 | 说明 |
+|---|---|
+| `keywords` | 中文拼音搜索关键词（命令面板查找用） |
+| `aliases` | 短别名（如 "fy", "翻"） |
+| `prefix` | Slash 前缀触发（如 `/tr` 在命令面板输入 `/tr` 激活） |
+| `matchPattern` | 正则匹配模式（命令面板输入文本与该正则匹配时激活） |
 
 ---
 
-## 四、通信协议：JSON-RPC 2.0
+## 四、PluginManager
 
-主程序与插件通过 **stdin/stdout** 传输 JSON-RPC 2.0 消息，每行一个 JSON 对象。
+### Manager 结构
 
-### 4.1 主程序 → 插件（请求）
+`internal/plugin/manager.go` — 核心管理器，负责插件生命周期。
 
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "plugin.execute",
-  "params": {
-    "command": "translate",
-    "input": {
-      "text": "Hello World",
-      "sourceLang": "en",
-      "targetLang": "zh"
-    }
-  }
+```go
+type Manager struct {
+    plugins           map[string]*PluginInstance
+    mu                sync.RWMutex
+    pluginsDir        string
+    hostMethods       map[string]HostMethod     // 回调注册表
+    pidFilePath       string                     // 孤儿进程清理
+    pidMu             sync.Mutex
+    healthCheckStopCh chan struct{}
+    healthCheckWg     sync.WaitGroup
 }
 ```
 
-### 4.2 插件 → 主程序（响应）
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 1,
-  "result": {
-    "text": "你好世界",
-    "success": true
-  }
-}
-```
-
-### 4.3 插件 → 主程序（回调请求）
-
-插件可以反向调用主程序的能力：
-
-```json
-{
-  "jsonrpc": "2.0",
-  "id": 100,
-  "method": "host.clipboard.write",
-  "params": {
-    "text": "你好世界"
-  }
-}
-```
-
-### 4.4 主程序提供的 Host Methods（插件可调用的 API）
+### 主要方法
 
 | 方法 | 说明 |
 |---|---|
-| `host.clipboard.read` | 读取剪贴板 |
-| `host.clipboard.write` | 写入剪贴板 |
-| `host.notify` | 弹出系统通知 |
-| `host.dialog.open` | 打开文件对话框 |
-| `host.dialog.save` | 保存文件对话框 |
-| `http.get` / `http.post` | HTTP 请求（受 permissions.network 控制）|
-| `db.get` / `db.set` | 读写插件专属存储（plugin_data 表）|
-| `ui.show` | 显示插件前端面板 |
-| `ui.hide` | 隐藏插件前端面板 |
-| `log.info` / `log.error` | 日志 |
+| `NewManager(pluginsDir)` | 创建管理器，注册默认 HostMethod，清理孤儿进程，启动健康检查 |
+| `DiscoverAndLoad()` | 遍历 pluginsDir，加载所有含 plugin.json 的插件 |
+| `LoadPlugin(manifest, dir)` | 按 runtime 分支：none→就绪，goja→执行 JS，native→启动子进程+initialize |
+| `UnloadPlugin(id)` | 从内存移除（stop + delete） |
+| `StopPlugin(id)` | 停止但保留在列表中（禁用时调用） |
+| `ExecuteCommand(pluginID, commandID, input)` | 执行命令，按 runtime 分派 |
+| `ListPlugins()` | 列出所有插件信息 |
+| `GetFrontendPath(pluginID)` | 获取前端入口路径 |
+| `InstallFromZip(zipPath)` | 从 ZIP 安装（含安全校验）|
+| `UninstallPlugin(id)` | 删除插件目录 |
+| `ShutdownAll()` | 停止所有插件 + 健康检查 + 清理 PID 文件 |
 
----
-
-## 五、插件生命周期
-
-```
-安装                    加载                     运行
-  │                      │                       │
-  ▼                      ▼                       ▼
-┌──────┐  验证  ┌──────────┐  spawn  ┌───────────────┐
-│ 解压  │──────→│ 校验清单  │────────→│ 启动子进程     │
-│ 到目录│       │ 检查权限  │         │ 发 initialize │
-└──────┘       └──────────┘         └───────┬───────┘
-                                            │
-                                            ▼
-                                    ┌───────────────┐
-                                    │  plugin ready  │
-                                    │  等待请求      │◄──┐
-                                    └───────┬───────┘   │
-                                            │           │
-                                    收到请求 ▼           │
-                                    ┌───────────────┐   │
-                                    │  处理 + 响应   │───┘
-                                    └───────────────┘
-                                            │
-                                    卸载/关闭 ▼
-                                    ┌───────────────┐
-                                    │ 发 shutdown   │
-                                    │ kill 进程     │
-                                    └───────────────┘
-```
-
-### Go 代码核心实现
+### PluginInstance 运行时结构
 
 ```go
-// internal/plugin/manager.go
-
-package plugin
-
-import (
-    "bufio"
-    "encoding/json"
-    "fmt"
-    "os"
-    "os/exec"
-    "path/filepath"
-    "sync"
-)
-
-// PluginManifest 插件清单
-type PluginManifest struct {
-    ID          string   `json:"id"`
-    Name        string   `json:"name"`
-    Version     string   `json:"version"`
-    Description string   `json:"description"`
-    Author      string   `json:"author"`
-    Icon        string   `json:"icon"`
-    Backend     Backend  `json:"backend"`
-    Frontend    Frontend `json:"frontend"`
-    Capabilities []string `json:"capabilities"`
-    Permissions  Permissions `json:"permissions"`
-    Commands    []Command `json:"commands"`
-}
-
-type Backend struct {
-    Runtime string   `json:"runtime"` // native | node | python | powershell | wasm
-    Entry   string   `json:"entry"`
-    Args    []string `json:"args"`
-}
-
-type Frontend struct {
-    Enabled bool   `json:"enabled"`
-    Entry   string `json:"entry"`
-    Width   int    `json:"width"`
-    Height  int    `json:"height"`
-}
-
-type Permissions struct {
-    Network    bool `json:"network"`
-    Filesystem bool `json:"filesystem"`
-    Clipboard  bool `json:"clipboard"`
-}
-
-type Command struct {
-    ID     string `json:"id"`
-    Title  string `json:"title"`
-    Hotkey string `json:"hotkey"`
-}
-
-// PluginInstance 运行中的插件实例
 type PluginInstance struct {
     Manifest PluginManifest
-    Cmd      *exec.Cmd
+    Cmd      *exec.Cmd          // native 子进程
     Stdin    io.WriteCloser
     Stdout   io.ReadCloser
-    Mu       sync.Mutex
+    DB       *sql.DB            // goja 插件专用 SQLite
+    sendMu   sync.Mutex         // 串行化 stdin 写入
+    readMu   sync.Mutex
     NextID   int64
     Pending  map[int64]chan *RPCResponse
-    Dir      string // 插件目录
-    Status   string // running | stopped | error
-}
-
-// Manager 插件管理器
-type Manager struct {
-    plugins  map[string]*PluginInstance
-    mu       sync.RWMutex
-    pluginsDir string
-    db       *db.Database
-}
-
-// NewManager 创建插件管理器
-func NewManager(pluginsDir string, database *db.Database) *Manager {
-    return &Manager{
-        plugins:    make(map[string]*PluginInstance),
-        pluginsDir: pluginsDir,
-        db:         database,
-    }
-}
-
-// DiscoverAndLoad 扫描插件目录，加载所有已安装插件
-func (m *Manager) DiscoverAndLoad() error {
-    entries, err := os.ReadDir(m.pluginsDir)
-    if err != nil {
-        return err
-    }
-    for _, entry := range entries {
-        if !entry.IsDir() {
-            continue
-        }
-        manifestPath := filepath.Join(m.pluginsDir, entry.Name(), "plugin.json")
-        manifest, err := LoadManifest(manifestPath)
-        if err != nil {
-            fmt.Printf("插件 %s 清单加载失败: %v\n", entry.Name(), err)
-            continue
-        }
-        if err := m.LoadPlugin(manifest, filepath.Join(m.pluginsDir, entry.Name())); err != nil {
-            fmt.Printf("插件 %s 启动失败: %v\n", manifest.ID, err)
-        }
-    }
-    return nil
-}
-
-// LoadPlugin 启动一个插件的子进程
-func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
-    m.mu.Lock()
-    defer m.mu.Unlock()
-
-    // 如果已在运行，先卸载
-    if inst, ok := m.plugins[manifest.ID]; ok {
-        m.stopPlugin(inst)
-    }
-
-    // 根据 runtime 构建启动命令
-    var cmd *exec.Cmd
-    entryPath := filepath.Join(dir, manifest.Backend.Entry)
-
-    switch manifest.Backend.Runtime {
-    case "native":
-        cmd = exec.Command(entryPath, manifest.Backend.Args...)
-    case "node":
-        cmd = exec.Command("node", entryPath)
-    case "python":
-        cmd = exec.Command("python", entryPath)
-    case "powershell":
-        cmd = exec.Command("powershell", "-File", entryPath)
-    default:
-        return fmt.Errorf("不支持的 runtime: %s", manifest.Backend.Runtime)
-    }
-
-    cmd.Dir = dir
-
-    stdin, err := cmd.StdinPipe()
-    if err != nil {
-        return err
-    }
-    stdout, err := cmd.StdoutPipe()
-    if err != nil {
-        return err
-    }
-
-    // stderr 打到日志
-    cmd.Stderr = os.Stderr
-
-    if err := cmd.Start(); err != nil {
-        return fmt.Errorf("插件进程启动失败: %w", err)
-    }
-
-    inst := &PluginInstance{
-        Manifest: manifest,
-        Cmd:      cmd,
-        Stdin:    stdin,
-        Stdout:   stdout,
-        Pending:  make(map[int64]chan *RPCResponse),
-        Dir:      dir,
-        Status:   "running",
-    }
-
-    m.plugins[manifest.ID] = inst
-
-    // 后台读取 stdout
-    go inst.readLoop()
-
-    // 发送 initialize
-    _, err = inst.Call("initialize", map[string]interface{}{
-        "hostVersion": "3.0.0",
-        "pluginDir":   dir,
-    })
-    if err != nil {
-        m.stopPlugin(inst)
-        return fmt.Errorf("插件初始化失败: %w", err)
-    }
-
-    return nil
-}
-
-// UnloadPlugin 卸载插件
-func (m *Manager) UnloadPlugin(id string) {
-    m.mu.Lock()
-    defer m.mu.Unlock()
-    if inst, ok := m.plugins[id]; ok {
-        m.stopPlugin(inst)
-        delete(m.plugins, id)
-    }
-}
-
-// stopPlugin 停止插件子进程
-func (m *Manager) stopPlugin(inst *PluginInstance) {
-    inst.Call("shutdown", nil)
-    inst.Status = "stopped"
-    inst.Stdin.Close()
-    inst.Cmd.Process.Kill()
-    inst.Cmd.Wait()
-}
-
-// ExecuteCommand 执行插件命令（前端调用）
-func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]interface{}) (json.RawMessage, error) {
-    m.mu.RLock()
-    inst, ok := m.plugins[pluginID]
-    m.mu.RUnlock()
-    if !ok {
-        return nil, fmt.Errorf("插件未加载: %s", pluginID)
-    }
-    return inst.Call("plugin.execute", map[string]interface{}{
-        "command": commandID,
-        "input":   input,
-    })
-}
-
-// GetFrontendPath 获取插件前端资源路径（供 Wails 静态文件服务）
-func (m *Manager) GetFrontendPath(pluginID string) (string, error) {
-    m.mu.RLock()
-    inst, ok := m.plugins[pluginID]
-    m.mu.RUnlock()
-    if !ok {
-        return "", fmt.Errorf("插件未加载: %s", pluginID)
-    }
-    if !inst.Manifest.Frontend.Enabled {
-        return "", fmt.Errorf("插件无前端: %s", pluginID)
-    }
-    return filepath.Join(inst.Dir, inst.Manifest.Frontend.Entry), nil
-}
-
-// ListPlugins 列出所有插件（暴露给前端）
-func (m *Manager) ListPlugins() []PluginInfo {
-    m.mu.RLock()
-    defer m.mu.RUnlock()
-    var result []PluginInfo
-    for _, inst := range m.plugins {
-        result = append(result, PluginInfo{
-            ID:          inst.Manifest.ID,
-            Name:        inst.Manifest.Name,
-            Version:     inst.Manifest.Version,
-            Description: inst.Manifest.Description,
-            Status:      inst.Status,
-            HasFrontend: inst.Manifest.Frontend.Enabled,
-            Commands:    inst.Manifest.Commands,
-        })
-    }
-    return result
+    readyCh  chan struct{}       // readLoop 启动信号
+    doneCh   chan struct{}       // 关闭信号
+    closeOnce sync.Once
+    stopped  atomic.Bool
+    Dir      string
+    Status   string              // running | stopped | crashed | unresponsive
+    MissedPings    int
+    UnresponsiveAt time.Time
+    VM       *goja.Runtime       // goja JS 引擎
 }
 ```
 
-### JSON-RPC 通信层
+### 关键特性
+
+- **自动重启（watchPlugin）：** native 插件崩溃后自动重启，最多 3 次，指数退避 2s/4s/6s
+- **健康检查（startHealthCheck）：** 后台 30s ticker，ping 所有 running 插件，连续 3 次无响应标记 unresponsive
+- **孤儿进程清理（cleanupOrphans）：** 启动时检查上次残留 PID，通过 tasklist 验证并终止
+- **安全退出：** closeOnce 确保 doneCh 只关闭一次，防止重复 close panic
+
+---
+
+## 五、JSON-RPC 通信协议
+
+主程序与 native 插件通过 **stdin/stdout** 传输 JSON-RPC 2.0 消息，每行一个 JSON 对象。
+
+### 请求格式
+
+```json
+{"jsonrpc":"2.0","id":1,"method":"plugin.execute","params":{"command":"translate","input":{"text":"Hello"}}}
+```
+
+### 响应格式
+
+```json
+{"jsonrpc":"2.0","id":1,"result":{"text":"你好"}}
+```
+
+### 超时策略
+
+| 场景 | 超时 |
+|---|---|
+| 默认 Call | 30s |
+| `ExecuteCommand` | 20s |
+| `initialize` | 15s |
+| `health.ping` | 5s |
+
+### readLoop 实现要点
+
+- `sendMu` 互斥锁防止多协程写入 stdin 交错
+- `readyCh` 关闭信号确保 readLoop 已开始监听再发送 initialize
+- 1MB buffer 应对大响应
+- 先尝试解析为请求（含 Method），再解析为响应
+
+---
+
+## 六、Goja JS 引擎插件
+
+v3 内置 goja（纯 Go JavaScript 引擎），无需 Node.js 即可运行 JS 插件。
+
+### 注入的 API
+
+| 对象 | 方法 | 说明 |
+|---|---|---|
+| `api.log` | `info(msg)`, `error(msg)` | 日志 |
+| `api.db` | `get(key)`, `set(key, value)` | 插件专属 KV 存储 |
+| `api.crypto` | `md5()`, `sha256()`, `base64Encode()`, `base64Decode()`, `urlEncode()`, `urlDecode()`, `htmlEncode()`, `htmlDecode()` | 加解密工具 |
+
+### Goja 插件的优缺点
+
+**优点：** 零依赖、启动快（无需子进程）、内存共享（直接调 Go 函数）
+**缺点：** 同进程无隔离、JS 能力受限（无网络请求、无文件系统 API）、CPU 密集型任务阻塞主协程
+
+---
+
+## 七、Host Methods（插件回调主程序）
+
+插件（native 或 goja）可反向调用主程序能力。Manager 注册的默认 Host Method 共 13 个：
+
+| 方法 | 说明 | 实现状态 |
+|---|---|---|
+| `log.info` / `log.error` | 日志 | ✅ 已实现 |
+| `host.notify` | 系统通知 | ✅ 已实现（目前仅打日志） |
+| `host.ping` | 健康检查回执 | ✅ 已实现 |
+| `host.clipboard.read` / `host.clipboard.write` | 剪贴板读写 | ⏳ 占位 |
+| `host.dialog.open` / `host.dialog.save` | 文件对话框 | ⏳ 占位 |
+| `http.get` / `http.post` | HTTP 请求 | ⏳ 占位 |
+| `db.get` / `db.set` | 插件专属存储 | ⏳ 占位 |
+| `ui.show` / `ui.hide` | 显示/隐藏插件窗口 | ⏳ 占位 |
+
+### 权限校验
+
+Host Methods 在执行前检查 plugin.json 声明的 Permissions：
+
+- `host.clipboard.*` → 需要 `permissions.clipboard = true`
+- `http.*` → 需要 `permissions.network = true`
+- `host.dialog.*` → 需要 `permissions.filesystem = true`
+
+### 扩展点
+
+`Manager.InjectHostMethod(name, handler)` — 供 services 层覆盖默认实现。
+
+---
+
+## 八、插件窗口管理（PluginWindowManager）
+
+v3 不再使用 iframe 嵌入主窗口，每个插件拥有独立的 Wails `WebviewWindow`。
 
 ```go
-// internal/plugin/rpc.go
-
-type RPCRequest struct {
-    JSONRPC string      `json:"jsonrpc"`
-    ID      int64       `json:"id,omitempty"`
-    Method  string      `json:"method"`
-    Params  interface{} `json:"params,omitempty"`
-}
-
-type RPCResponse struct {
-    JSONRPC string          `json:"jsonrpc"`
-    ID      int64           `json:"id,omitempty"`
-    Result  json.RawMessage `json:"result,omitempty"`
-    Error   *RPCError       `json:"error,omitempty"`
-}
-
-type RPCError struct {
-    Code    int    `json:"code"`
-    Message string `json:"message"`
-}
-
-// Call 发送 JSON-RPC 请求并等待响应
-func (inst *PluginInstance) Call(method string, params interface{}) (json.RawMessage, error) {
-    inst.Mu.Lock()
-    inst.NextID++
-    id := inst.NextID
-    ch := make(chan *RPCResponse, 1)
-    inst.Pending[id] = ch
-    inst.Mu.Unlock()
-
-    req := RPCRequest{
-        JSONRPC: "2.0",
-        ID:      id,
-        Method:  method,
-        Params:  params,
-    }
-
-    data, _ := json.Marshal(req)
-    data = append(data, '\n')
-    if _, err := inst.Stdin.Write(data); err != nil {
-        inst.Mu.Lock()
-        delete(inst.Pending, id)
-        inst.Mu.Unlock()
-        return nil, err
-    }
-
-    // 等待响应（带超时）
-    select {
-    case resp := <-ch:
-        if resp.Error != nil {
-            return nil, fmt.Errorf("插件错误 [%d]: %s", resp.Error.Code, resp.Error.Message)
-        }
-        return resp.Result, nil
-    case <-time.After(30 * time.Second):
-        inst.Mu.Lock()
-        delete(inst.Pending, id)
-        inst.Mu.Unlock()
-        return nil, fmt.Errorf("插件响应超时")
-    }
-}
-
-// readLoop 后台循环读取插件 stdout
-func (inst *PluginInstance) readLoop() {
-    scanner := bufio.NewScanner(inst.Stdout)
-    scanner.Buffer(make([]byte, 1024*1024), 1024*1024) // 1MB buffer
-    for scanner.Scan() {
-        var resp RPCResponse
-        if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
-            continue
-        }
-
-        // 匹配 pending request
-        inst.Mu.Lock()
-        if ch, ok := inst.Pending[resp.ID]; ok {
-            ch <- &resp
-            delete(inst.Pending, resp.ID)
-        }
-        inst.Mu.Unlock()
-    }
+type PluginWindowManager struct {
+    mu         sync.Mutex
+    windows    map[string]*application.WebviewWindow
+    app        *application.App
+    baseWidth  int    // 800
+    baseHeight int    // 600
 }
 ```
+
+| 方法 | 说明 |
+|---|---|
+| `Show(pluginID, title, showInTaskbar)` | 显示/创建插件窗口 |
+| `ShowInPanel(pluginID, title)` | 在内嵌面板窗口显示 |
+| `ShowAsWindow(pluginID, title)` | 在独立窗口显示 |
+| `Hide(pluginID)` | 隐藏窗口 |
+| `CloseAll()` | 关闭所有插件窗口 |
+| `InjectInitText(pluginID, text, command)` | 跨窗口传递初始文本（命令面板→插件窗口） |
+
+窗口 URL 为 `/#/plugin/{id}`，路由到 PluginPage.vue 渲染。
+
+### 前端通信安全（Nonce 握手）
+
+PluginPage.vue 与插件 iframe 之间使用 nonce 机制防止跨源消息伪造：
+
+1. 后端通过 `GetPluginFrontendPage(pluginId)` 返回服务端处理过的 HTML（内联 CSS/JS）
+2. HTML 转为 Blob URL 加载到 iframe
+3. 生成随机 `pluginNonce`（`Math.random().toString(36).slice(2, 12)`）
+4. `onIframeLoad` → postMessage 发送 `plugin:theme` + `plugin:init`，均携带 nonce
+5. `messageHandler` 验证 nonce 后才处理 `plugin:execute` 消息
+6. 回复 `plugin:result` 也携带 nonce
 
 ---
 
-## 六、前端集成
+## 九、数据库
 
-### 6.1 插件 UI 渲染方式
-
-插件的前端资源通过 **iframe** 隔离渲染，避免污染主应用 DOM：
-
-```vue
-<!-- PluginPanel.vue -->
-<template>
-  <div class="plugin-panel">
-    <iframe
-      :src="pluginUrl"
-      :style="{ width: width + 'px', height: height + 'px' }"
-      sandbox="allow-scripts allow-same-origin"
-      ref="iframeRef"
-    />
-  </div>
-</template>
-
-<script setup>
-// pluginUrl 指向 Wails 静态文件服务提供的插件前端入口
-// 例如: http://wails.localhost/plugins/translator/frontend/index.html
-</script>
-```
-
-### 6.2 插件与前端通信（postMessage）
-
-iframe 内的插件前端通过 `postMessage` 与主应用通信：
-
-```javascript
-// 插件前端代码 (plugin frontend/index.html)
-// 调用后端
-function callBackend(command, input) {
-  window.parent.postMessage({
-    type: 'plugin:call',
-    pluginId: 'com.quickdock.translator',
-    command: command,
-    input: input
-  }, '*')
-}
-
-// 监听响应
-window.addEventListener('message', (event) => {
-  if (event.data.type === 'plugin:result') {
-    // 处理结果
-    document.getElementById('result').textContent = event.data.result
-  }
-})
-```
-
-```javascript
-// 主应用 PluginPanel.vue
-window.addEventListener('message', async (event) => {
-  if (event.data.type === 'plugin:call') {
-    const result = await PluginManager.ExecuteCommand(
-      event.data.pluginId,
-      event.data.command,
-      event.data.input
-    )
-    iframeRef.value.contentWindow.postMessage({
-      type: 'plugin:result',
-      result: result
-    }, '*')
-  }
-})
-```
-
----
-
-## 七、数据库变更
-
-在现有 schema 基础上新增 `plugins` 表：
+### plugins 表
 
 ```sql
-CREATE TABLE IF NOT EXISTS plugins (
-    id TEXT PRIMARY KEY,              -- com.quickdock.translator
-    name TEXT NOT NULL,               -- 翻译助手
-    version TEXT NOT NULL,            -- 1.0.0
+CREATE TABLE plugins (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    version TEXT NOT NULL,
     author TEXT DEFAULT '',
     description TEXT DEFAULT '',
-    enabled INTEGER DEFAULT 1,        -- 用户是否启用
-    config TEXT DEFAULT '{}',         -- 用户配置 JSON
+    category TEXT DEFAULT '',
+    icon TEXT DEFAULT '',
+    enabled INTEGER DEFAULT 1,
+    usage_count INTEGER DEFAULT 0,
+    capabilities TEXT DEFAULT '[]',
+    permissions TEXT DEFAULT '{}',
+    config TEXT DEFAULT '{}',
     installed_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-
--- plugin_data 表（已有，用于插件专属键值存储）
--- 每个插件只能读写自己的 key
--- CREATE TABLE IF NOT EXISTS plugin_data (
---     plugin_id TEXT NOT NULL,
---     key TEXT NOT NULL,
---     value TEXT,
---     PRIMARY KEY (plugin_id, key)
--- );
 ```
+
+### plugin_data 表（KV 存储）
+
+```sql
+CREATE TABLE plugin_data (
+    plugin_id TEXT NOT NULL,
+    key TEXT NOT NULL,
+    value TEXT,
+    PRIMARY KEY (plugin_id, key)
+);
+```
+
+### plugin_exec_logs 表（执行日志）
+
+```sql
+CREATE TABLE plugin_exec_logs (
+    id TEXT PRIMARY KEY,
+    plugin_id TEXT NOT NULL,
+    command_id TEXT NOT NULL,
+    executed_at TEXT DEFAULT '',
+    executed_ts INTEGER NOT NULL DEFAULT 0,
+    success INTEGER NOT NULL DEFAULT 0,
+    duration_ms INTEGER NOT NULL DEFAULT 0,
+    result TEXT DEFAULT '',
+    error TEXT DEFAULT '',
+    trigger TEXT DEFAULT 'manual'
+);
+```
+
+最大保留 500 条记录，超限时删除最旧记录。
+
+### 使用计数
+
+`RecordUsage("plugin:{id}.{cmdID}")` — 通过 frecency 表记录插件命令使用频次，`GetAllPluginUsageCounts()` 一条 SQL 聚合所有次数。
 
 ---
 
-## 八、插件开发示例
+## 十、前端集成
 
-### 8.1 最简单的 Go 插件（翻译助手）
+### 10.1 AppService 暴露的绑定方法（共 18 个）
+
+| 方法 | 说明 |
+|---|---|
+| `ListPlugins()` | 列出所有插件 + 补充 UsageCount |
+| `InstallPlugin(zipPath)` | 从 ZIP 路径安装 |
+| `SelectAndInstallPlugin()` | 原生文件对话框选 ZIP |
+| `InstallPluginFromBytes(fileName, fileData)` | 拖拽安装 |
+| `EnablePlugin(id)` / `DisablePlugin(id)` | 启用/禁用 + 热键注册/注销 |
+| `UninstallPlugin(id)` | 卸载 + 清理热键 + 清理 DB |
+| `ExecutePluginCommand(pluginID, commandID, input)` | 执行命令 + 记录日志 + 使用次数 |
+| `GetPluginFrontendURL(pluginID)` | 获取前端路径 |
+| `GetPluginIcon(pluginID)` | 获取图标 base64（DB 缓存） |
+| `GetPluginFrontendPage(pluginID)` | 获取内联 HTML（mtime 缓存） |
+| `ShowPluginWindow(pluginID)` / `HidePluginWindow(pluginID)` | 窗口控制 |
+| `MinimizePluginWindow(pluginID)` / `ToggleMaximizePluginWindow(pluginID)` | 窗口操作 |
+| `SetPendingPluginInit(text, command)` / `GetAndClearPendingPluginInit()` | 跨窗口传参 |
+| `ListPluginExecLogs(limit)` | 执行日志查询 |
+
+### 10.2 命令面板集成（CommandPalette.vue）
+
+插件命令深度集成到命令面板：
+
+- **索引构建：** 遍历 `PluginInfo.commands`，按 title/keywords/aliases 建立搜索索引
+- **评分算法：** `calcPluginScore()` 按匹配程度给分，最高 100
+- **Slash 前缀：** 输入 `/xxx` 直接激活匹配插件
+- **内联模式：** 命令面板内嵌入 iframe 显示插件 UI（`inlinePluginId`）
+- **分离模式：** `detachPlugin()` 从内联转为独立窗口
+- **执行缓存：** `pluginResultCache` 显示最近一次执行结果
+
+### 10.3 热键注册（PluginHotkeyRegistry）
 
 ```go
-// main.go
-package main
-
-import (
-    "bufio"
-    "encoding/json"
-    "fmt"
-    "io"
-    "net/http"
-    "os"
-    "net/url"
-)
-
-type RPCRequest struct {
-    JSONRPC string          `json:"jsonrpc"`
-    ID      int64           `json:"id,omitempty"`
-    Method  string          `json:"method"`
-    Params  json.RawMessage `json:"params,omitempty"`
-}
-
-type RPCResponse struct {
-    JSONRPC string      `json:"jsonrpc"`
-    ID      int64       `json:"id,omitempty"`
-    Result  interface{} `json:"result,omitempty"`
-}
-
-func main() {
-    scanner := bufio.NewScanner(os.Stdin)
-    for scanner.Scan() {
-        var req RPCRequest
-        json.Unmarshal(scanner.Bytes(), &req)
-
-        switch req.Method {
-        case "initialize":
-            respond(req.ID, map[string]string{"status": "ready"})
-
-        case "plugin.execute":
-            var params struct {
-                Command string `json:"command"`
-                Input   struct {
-                    Text string `json:"text"`
-                } `json:"input"`
-            }
-            json.Unmarshal(req.Params, &params)
-
-            if params.Command == "translate" {
-                result := translate(params.Input.Text)
-                respond(req.ID, map[string]string{"text": result})
-            }
-
-        case "shutdown":
-            respond(req.ID, map[string]string{"status": "bye"})
-            os.Exit(0)
-        }
-    }
-}
-
-func translate(text string) string {
-    resp, err := http.Get("https://api.example.com/translate?text=" + url.QueryEscape(text))
-    if err != nil {
-        return "翻译失败: " + err.Error()
-    }
-    defer resp.Body.Close()
-    body, _ := io.ReadAll(resp.Body)
-    return string(body)
-}
-
-func respond(id int64, result interface{}) {
-    resp := RPCResponse{JSONRPC: "2.0", ID: id, Result: result}
-    data, _ := json.Marshal(resp)
-    fmt.Fprintln(os.Stdout, string(data))
+type PluginHotkeyRegistry struct {
+    mu       sync.Mutex
+    accelMap map[string]string    // "Ctrl+Shift+T" → "pluginID.commandID"
+    byPlugin map[string][]string  // pluginID → []accel
 }
 ```
 
-### 8.2 Node.js 插件（更简单）
-
-```javascript
-// index.js
-const readline = require('readline')
-const https = require('https')
-
-const rl = readline.createInterface({ input: process.stdin })
-
-rl.on('line', (line) => {
-    const req = JSON.parse(line)
-
-    switch (req.method) {
-        case 'initialize':
-            respond(req.id, { status: 'ready' })
-            break
-
-        case 'plugin.execute':
-            const { command, input } = req.params
-            if (command === 'translate') {
-                // 调用翻译 API...
-                respond(req.id, { text: '翻译结果: ' + input.text })
-            }
-            break
-
-        case 'shutdown':
-            respond(req.id, { status: 'bye' })
-            process.exit(0)
-    }
-})
-
-function respond(id, result) {
-    process.stdout.write(JSON.stringify({
-        jsonrpc: '2.0', id, result
-    }) + '\n')
-}
-```
-
-### 8.3 Python 插件
-
-```python
-# main.py
-import sys, json
-
-for line in sys.stdin:
-    req = json.loads(line.strip())
-
-    if req['method'] == 'initialize':
-        respond(req['id'], {'status': 'ready'})
-
-    elif req['method'] == 'plugin.execute':
-        params = req['params']
-        if params['command'] == 'translate':
-            respond(req['id'], {'text': f"翻译: {params['input']['text']}"})
-
-    elif req['method'] == 'shutdown':
-        respond(req['id'], {'status': 'bye'})
-        sys.exit(0)
-
-def respond(id, result):
-    print(json.dumps({'jsonrpc': '2.0', 'id': id, 'result': result}), flush=True)
-```
+- `Register(accel, pluginID, commandID)` — 冲突检测，已占用则返回错误
+- `UnregisterAll(pluginID)` — 禁用/卸载时批量注销
+- Windows 全局热键通过 tray.go 的 `RegisterHotKey` 实现
 
 ---
 
-## 九、安全模型
+## 十一、内置插件（19 个）
 
-```
-┌────────────────────────────────────┐
-│            权限控制层               │
-│                                     │
-│  plugin.json 声明 permissions:       │
-│    network: true/false              │
-│    filesystem: true/false           │
-│    clipboard: true/false            │
-│                                     │
-│  Host Methods 在执行前检查权限:      │
-│    http.get → 需要 network          │
-│    host.clipboard → 需要 clipboard  │
-│    host.dialog → 需要 filesystem    │
-└────────────────────────────────────┘
-```
+### Goja 插件（有后端逻辑）
 
-1. **进程隔离**：插件运行在独立进程，崩溃不影响主程序
-2. **权限声明**：plugin.json 声明所需权限，主程序在 Host Method 层校验
-3. **存储隔离**：每个插件只能读写 `plugin_data` 表中自己 `plugin_id` 前缀的数据
-4. **网络限制**：无 `network` 权限的插件，Host 拒绝 `http.*` 调用
-5. **前端沙箱**：iframe 的 `sandbox` 属性限制脚本权限
+| 插件 ID | 功能 | 前端 |
+|---|---|---|
+| json2ts | JSON ↔ TypeScript 类型 | index.html + app.js |
+| case-converter | 大小写/命名风格转换 | index.html |
+| code-formatter | 代码格式化 | index.html |
+| cron-explainer | Cron 表达式解析 | index.html |
+| sql-formatter | SQL 格式化 | index.html |
+| text-encoder | 文本编码转换 | index.html |
+| data-converter | 数据格式转换 | index.html |
+| text-diff | 文本差异对比 | index.html + app.js |
+| regex-extractor | 正则提取 | index.html + app.js |
+| file-compare | 文件对比 | index.html + app.js |
+| time-converter | 时间戳/时区转换 | index.html + app.js |
+| calcsheet | 计算表格 | index.html + app.js |
 
----
+### Pure Frontend 插件（runtime: none）
 
-## 十、Go 端暴露给 Wails 的 API
+| 插件 ID | 功能 | 依赖 |
+|---|---|---|
+| emoji-search | Emoji 搜索 | — |
+| http-status | HTTP 状态码查询 | — |
+| jwt-decoder | JWT 解码 | — |
+| markdown-preview | Markdown 预览 | — |
+| hosts-manager | hosts 文件管理 | system-tools.exe |
+| port-scanner | 端口扫描 | system-tools.exe |
+| wifi-manager | WiFi 管理 | system-tools.exe |
 
-```go
-// app.go 新增方法
+### 共享资源
 
-// ListPlugins 列出所有已安装插件
-func (a *AppService) ListPlugins() ([]plugin.PluginInfo, error) {
-    return a.pluginMgr.ListPlugins(), nil
-}
-
-// InstallPlugin 从目录安装插件
-func (a *AppService) InstallPlugin(dir string) error {
-    return a.pluginMgr.InstallPlugin(dir)
-}
-
-// UninstallPlugin 卸载插件
-func (a *AppService) UninstallPlugin(id string) error {
-    return a.pluginMgr.UninstallPlugin(id)
-}
-
-// EnablePlugin 启用插件
-func (a *AppService) EnablePlugin(id string) error {
-    return a.pluginMgr.EnablePlugin(id)
-}
-
-// DisablePlugin 禁用插件
-func (a *AppService) DisablePlugin(id string) error {
-    return a.pluginMgr.DisablePlugin(id)
-}
-
-// ExecutePluginCommand 执行插件命令
-func (a *AppService) ExecutePluginCommand(pluginID, commandID string, input map[string]interface{}) (string, error) {
-    result, err := a.pluginMgr.ExecuteCommand(pluginID, commandID, input)
-    return string(result), err
-}
-
-// GetPluginFrontendURL 获取插件前端 URL
-func (a *AppService) GetPluginFrontendURL(pluginID string) (string, error) {
-    return a.pluginMgr.GetFrontendURL(pluginID)
-}
-```
+`plugins/builtin/common.css` — 主题变量、布局类（`.p-app`/`.p-toolbar`/`.p-btn`）、浅色深色适配
+`plugins/builtin/common.js` — 挂载到 `window.QD`：`escapeHtml`、`copyText`、`fallbackCopy`
 
 ---
 
-## 十一、实施路线图
+## 十二、安全模型
 
-### Phase 1：核心骨架（2-3天）
-- 创建 `internal/plugin/` 包（manager.go + rpc.go + manifest.go）
-- 实现插件发现、加载、JSON-RPC 通信、生命周期管理
-- 新增 `plugins` 数据库表
-- app.go 新增 ListPlugins / ExecutePluginCommand 等方法
-
-### Phase 2：前端集成（1-2天）
-- 创建 PluginPanel.vue（iframe 渲染）
-- 设置页新增"插件管理"面板（列表、安装、启用/禁用）
-- 实现 postMessage 通信桥
-
-### Phase 3：插件开发工具（1天）
-- 提供 `quickdock-plugin-init` 模板项目（Go / Node / Python 各一个）
-- 编写插件开发文档
-- 创建 2-3 个内置插件作为示例（翻译、取色、计算）
-
-### Phase 4：高级特性（可选）
-- Wasm 插件支持（Extism 集成）
-- 插件市场（远程 JSON 索引）
-- 插件热更新（文件监控自动重载）
-- 插件间通信
+| 层级 | 防护措施 |
+|---|---|
+| **进程隔离** | native 插件运行在独立子进程，崩溃不影响主程序 |
+| **JS 沙箱** | goja 引擎纯 Go 实现，无文件系统/网络能力，仅暴露受限 API |
+| **权限声明** | plugin.json 声明所需权限，Host Method 层运行时校验 |
+| **Nonce 握手** | iframe postMessage 携带随机 nonce，防止跨源消息伪造 |
+| **存储隔离** | 每个插件只能读写 `plugin_data` 中自己 plugin_id 的数据 |
+| **ZIP 安全** | Zip Slip 路径穿越防护、100MB 解压上限、50MB 单文件上限、回滚机制 |
+| **前端沙箱** | iframe `sandbox="allow-scripts allow-same-origin allow-modals"` |
+| **孤儿清理** | PID 文件 + tasklist 验证，防止上次崩溃残留进程 |
+| **崩溃恢复** | watchPlugin 最多重启 3 次 + 指数退避，防止无限重启 |
+| **执行日志** | 记录每次执行的命令、耗时、结果、错误，便于审计 |
 
 ---
 
-## 十二、与现有代码的衔接
+## 十三、与现有代码的衔接
 
 | 现有代码 | 衔接方式 |
 |---|---|
-| `collections.plugin_id` | 集合关联插件，`plugin_id` 匹配 `plugins.id` |
+| `collections.plugin_id` | 集合关联插件 |
 | `items.plugin_data` | 项存储插件自定义数据（JSON 字符串） |
-| `plugin_data` 表 | 插件专属键值存储（每个插件隔离读写） |
-| `validColumns` 中的预留字段 | `version`/`capability`/`permissions` 等 → 用于 `plugins` 表 |
-| 命令面板窗口（paletteWindow）| 插件命令注册到命令面板的搜索结果中 |
-| 全局热键系统（tray.go）| 插件声明的 `commands[].hotkey` 注册到全局热键 |
+| 命令面板窗口 | 插件命令注册到命令面板搜索索引，支持 slash 前缀 |
+| 全局热键系统 (tray.go) | PluginHotkeyRegistry 管理插件热键注册/注销 |
+| 内置插件 (plugins/builtin/) | `go:embed` 编译期嵌入，首次启动自动安装 |
+| system-tools.exe | 被 hosts-manager/port-scanner/wifi-manager 共享的系统工具子进程 |
+
+---
+
+## 十四、实施状态
+
+| 模块 | 状态 | 备注 |
+|---|---|---|
+| Manager 核心（发现/加载/卸载） | ✅ 已完成 | 含 watchPlugin 自动重启 |
+| JSON-RPC 通信 | ✅ 已完成 | 含超时/P0 锁修复/readyCh |
+| Goja JS 引擎集成 | ✅ 已完成 | 含 crypto/db/log API |
+| Host Methods | ✅ 已完成 | 13 个已注册（部分占位）|
+| 插件窗口管理 | ✅ 已完成 | 独立 WebviewWindow |
+| 安全（Nonce/ZIP/权限） | ✅ 已完成 | 全链路安全 |
+| 数据库（plugins/plugin_data/logs） | ✅ 已完成 | 含自动迁移 |
+| 前端管理页面 | ✅ 已完成 | PluginManagerPage.vue |
+| 前端命令面板集成 | ✅ 已完成 | 评分/内联/分离模式 |
+| 热键注册 | ✅ 已完成 | PluginHotkeyRegistry |
+| 19 个内置插件 | ✅ 已完成 | goja + pure frontend |
+| 健康检查 | ✅ 已完成 | 30s ticker + ping |
+| 孤儿进程清理 | ✅ 已完成 | PID 文件 + tasklist |
+| 执行日志追踪 | ✅ 已完成 | 500 条上限 + 自动裁剪 |
+| Wasm 插件支持 | ❌ 未实现 | Extism 预留 |
+| 插件市场 | ❌ 未实现 | 远程 JSON 索引 |
+| 插件间通信 | ❌ 未实现 | 未来考虑 |

@@ -501,10 +501,11 @@ func (a *AppService) AIStreamInfo() *ApiResult {
 // ctx 取消时立即返回已收集内容（用于前端停止生成）。onUsage 在收到 usage 数据时调用（通常为最后一段）。
 func (a *AppService) streamAIChat(ctx context.Context, cfg AIProfile, messages []map[string]string, convID string, onToken func(text string), onReasoning func(text string), onUsage func(promptTokens, completionTokens int)) (string, error) {
 	body := map[string]interface{}{
-		"model":       cfg.Model,
-		"messages":    messages,
-		"temperature": cfg.Temperature,
-		"stream":      true,
+		"model":          cfg.Model,
+		"messages":       messages,
+		"temperature":    cfg.Temperature,
+		"stream":         true,
+		"stream_options": map[string]interface{}{"include_usage": true},
 	}
 	if cfg.MaxTokens > 0 {
 		body["max_tokens"] = cfg.MaxTokens
