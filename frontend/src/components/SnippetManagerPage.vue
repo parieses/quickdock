@@ -168,7 +168,7 @@ async function handleBatchDelete() {
     if (failed === 0) {
       toast.success(t('deleted') + ` (${ids.length})`)
     } else {
-      toast.warning(t('deleted') + ` (${ids.length - failed}/${ids.length})`)
+      toast.success(t('deleted') + ` (${ids.length - failed}/${ids.length})`)
     }
     await loadSnippets()
   } catch (e) {
