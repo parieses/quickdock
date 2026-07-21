@@ -2,11 +2,9 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 和 **VS Code 的开发者体验**。它帮助你统一管理项目、目录、网页链接、常用命令和应用，搭配剪贴板历史、代码片段、命令面板和丰富的内置插件，让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 和 **VS Code 的开发者体验**。它帮助你统一管理项目、目录、网页链接、常用命令和应用，搭配 AI 助手、剪贴板历史、代码片段、命令面板和丰富的内置插件，让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
-
-
 
 ---
 
@@ -16,9 +14,15 @@
   - [目录](#目录)
   - [功能特性](#功能特性)
     - [📦 工作空间与资源管理](#-工作空间与资源管理)
+    - [🤖 AI 助手](#-ai-助手)
     - [📋 剪贴板历史](#-剪贴板历史)
     - [🔍 命令面板](#-命令面板)
     - [📝 文本片段（Snippets）](#-文本片段snippets)
+    - [✅ 待办任务（Todos）](#-待办任务todos)
+    - [⏰ 定时任务（Scheduler）](#-定时任务scheduler)
+    - [📡 网站监控（Monitor）](#-网站监控monitor)
+    - [🗒️ 快捷笔记](#️-快捷笔记)
+    - [📊 系统状态](#-系统状态)
     - [🔌 插件系统](#-插件系统)
     - [☁️ WebDAV 云同步](#️-webdav-云同步)
     - [📸 快照备份](#-快照备份)
@@ -44,9 +48,6 @@
     - [插件目录结构](#插件目录结构)
     - [plugin.json 完整字段](#pluginjson-完整字段)
     - [三种运行时](#三种运行时)
-      - [快速开始：纯前端插件（runtime: none）](#快速开始纯前端插件runtime-none)
-      - [快速开始：Goja 插件（runtime: goja）](#快速开始goja-插件runtime-goja)
-      - [快速开始：原生插件（runtime: native）](#快速开始原生插件runtime-native)
     - [标准 UI 样式（common.css）](#标准-ui-样式commoncss)
     - [前端通信协议（postMessage）](#前端通信协议postmessage)
     - [安装与测试](#安装与测试)
@@ -68,8 +69,8 @@
 ### 📦 工作空间与资源管理
 
 - **工作空间（Workspace）** — 顶级容器，隔离不同项目上下文
-- **场景（Scene）** — 工作空间下的视图分组，快速切换关注点
-- **集合（Collection）** — 资源的逻辑分组，可按项目或类型归类
+- **场景（Scene）** — 工作空间下的视图分组，快速切换关注点，支持标签/图标/颜色
+- **集合（Collection）** — 资源的逻辑分组，可按项目或类型归类，支持四种打开策略
 - **项目（Item）** — 支持 6 种类型：
   - `directory` — 目录，用系统/终端打开
   - `file` — 文件，用系统默认程序打开
@@ -78,55 +79,77 @@
   - `app` — 应用程序路径
   - `quicklink` — 快速链接，带参数的快捷方式
 
+全层级支持拖拽排序、FTS5 全文搜索。
+
+### 🤖 AI 助手
+
+- **多配置档案** — 支持 OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口
+- **四种对话模式** — 聊天 / 解释代码 / 翻译 / 总结，模式 prompt 可叠加自定义 System Prompt
+- **SSE 流式输出** — 本地 HTTP 流式服务（127.0.0.1:随机端口），token 到达即显示，非传统轮询
+- **思考过程折叠** — 模型思考内容（reasoning_content）以 `<details>` 折叠展示，默认收起
+- **思考模式开关** — 可在设置页开启/关闭思考过程显示
+- **Markdown 渲染** — 使用 `marked` + `DOMPurify` 安全渲染 AI 回复
+- **参数可配** — Temperature / MaxTokens / TopP / FrequencyPenalty / PresencePenalty
+- **自定义 System Prompt** — 设置页 textarea，非空时覆盖默认模式提示
+- **会话管理** — 多会话 / 标题自动生成 / 重新生成标题 / 清空上下文 / 删除会话
+- **Token 用量统计** — 每次对话自动记录 prompt 和 completion token 数，会话列表可见
+- **摘要压缩** — 长对话自动压缩历史摘要（3000 token 阈值），保留最近 12 条完整消息
+- **API Key 安全存储** — Windows 下 DPAPI 加密，前端不接触密文
+- **测试连接** — 一键验证 API Key 和模型是否可用
+
 ### 📋 剪贴板历史
 
 - 自动监听并记录文本、图片、文件剪贴板内容
 - 支持固定、搜索、复制粘贴、批量删除
-- 浮动窗口，失焦自动隐藏，`Ctrl+`` ` 一键唤出
+- 过期自动清理（可配保留天数）
+- 浮动窗口，失焦自动隐藏，`` Ctrl+` `` 一键唤出
 
 ### 🔍 命令面板
 
 - 全局搜索：工作空间 / 场景 / 集合 / 项目统一搜索
 - 快速执行：选中即操作，支持键盘导航、多选批量
-- 单位换算、剪贴板URL智能路由、搜索结果预览
+- FTS5 全文搜索，URL 智能识别存为项目
+- 最近使用 / 最常使用列表
 - 浮动窗口，`Ctrl+K` 即时唤出
 
 ### 📝 文本片段（Snippets）
 
-- 预定义的常用文本模板
+- 预定义的常用文本模板，关键词 + 内容 + 分类
 - 一键复制或粘贴到当前活动窗口
 - 支持 `{date}` / `{time}` / `{username}` / `{clipboard}` 变量替换
+- 搜索、快捷笔记自动保存
 
 ### ✅ 待办任务（Todos）
 
-- 待办列表 + 看板视图（待办/进行中/已完成三列）
+- 待办列表 + 看板视图（待办 / 进行中 / 已完成三列）
 - 子任务（单层级 checklist）、标签分类
-- 重复待办（每日/每周/每月）、到期定时提醒（系统通知）
+- 重复待办（每日 / 每周 / 每月）、到期定时提醒（系统通知）
 
 ### ⏰ 定时任务（Scheduler）
 
-- 支持一次性/每天/每周/每月重复执行
-- 动作类型：打开软件/目录/网页/命令/HTTP 请求
-- 到期系统通知提醒
+- 五种动作类型：打开软件 / 目录 / 网页 / 命令 / HTTP 请求
+- 五种调度方式：一次性 / 间隔 / 每天 / 每周 / 每月
+- 执行后系统通知，支持手动立即执行
 
 ### 📡 网站监控（Monitor）
 
-- 定时探测 HTTP 状态码与响应时间
+- 定时探测 HTTP 状态码与响应时间（GET / HEAD / POST）
 - SSL 证书到期预警（可自定义提前天数）
-- 关键字/正则内容匹配检测
+- 关键字 / 正则内容匹配检测
+- 在线率统计、检测日志、状态翻转通知（桌面 + 钉钉 / 企微 / 飞书）
 - 响应时间趋势图（24h / 7d / 全部）
-
-### 📊 系统状态
-
-- CPU / 内存 / 磁盘 / 进程数实时概览
-- 下行/上行实时网速监测
-- 每 3 秒自动刷新
 
 ### 🗒️ 快捷笔记
 
 - 浮动笔记窗口，`Ctrl+Shift+N` 即时唤出
 - 自动保存（500ms 防抖），存为文本片段
 - 失焦自动隐藏
+
+### 📊 系统状态
+
+- CPU / 内存 / 磁盘 / 进程数 / IP 实时概览
+- 下行 / 上行实时网速监测
+- 每 3 秒自动刷新
 
 ### 🔌 插件系统
 
@@ -153,10 +176,8 @@
 - 运行时动态重注册
 - 捕获新热键时自动暂停全局监听以避免冲突
 
-### 🖥️ 系统状态与命令
+### 🖥️ 系统命令
 
-- CPU / 内存 / 磁盘 / 进程数 / IP / 操作系统实时概览
-- 下行/上行实时网速监测（每 3 秒自动刷新）
 - 锁屏、关机、重启、睡眠、清空回收站
 
 ---
@@ -171,7 +192,7 @@
 
 ### 下载安装
 
-1. 从 [Releases](https://github.com/parieses/quickdock-v3/releases) 下载最新版本
+1. 从 [Releases](https://github.com/parieses/quickdock/releases) 下载最新版本
 2. 解压到任意目录（推荐 `%LOCALAPPDATA%\QuickDock`）
 3. 运行 `QuickDock.exe`
 4. 任务栏托盘出现 QuickDock 图标即启动成功
@@ -195,23 +216,24 @@
 go install github.com/wailsapp/wails/v3/cmd/wails3@latest
 
 # 安装前端依赖
-cd frontend && pnpm install
+cd frontend && npm install
 ```
 
 ### 常用命令
 
 | 命令 | 说明 |
 |------|------|
-| `task dev` | 开发模式（前后端热重载，端口 9245） |
-| `wails3 dev` | 同上，直接调用 Wails3 |
-| `wails3 build` | 生产构建 |
+| `wails3 dev` | 开发模式（前后端热重载） |
+| `go build -o quickdock.exe .` | 直接 Go 构建（需先 `npm run build`） |
+| `wails3 build` | 生产构建（含前端构建 + 绑定生成） |
 | `task build` | 通过 Taskfile 构建 |
-| `task package` | 打包生产版本 |
 | `task run` | 直接运行已构建的应用 |
+
+**注意**：裸 `go build`（无 `-tags production`）会落入 dev 单实例锁，与正式版冲突。正式发布须走 `wails3 build`（自动加 production tag）。
 
 ### 数据库
 
-- SQLite 数据库文件：`~/.quickdock/quickdock.db`
+- SQLite 数据库文件：`~/.quickdock/quickdock.db`（WAL + 外键 + 5s busy timeout）
 - 剪贴板图片：`~/.quickdock/images/`
 - 应用配置：`%APPDATA%/QuickDock/`
 
@@ -228,17 +250,20 @@ cd frontend && pnpm install
 | **modernc.org/sqlite** | 纯 Go SQLite（无 CGO） |
 | **golang.org/x/sys** | Windows 系统 API 调用 |
 | **dop251/goja** | JavaScript 沙箱（插件执行） |
+| **google/uuid** | UUID 生成 |
+| **DPAPI** | Windows 数据保护 API（API Key 加密） |
 
 ### 前端
 
 | 技术 | 说明 |
 |------|------|
 | **Vue 3 + TypeScript** | UI 框架 |
-| **Vite 8** | 构建工具 |
+| **Vite 6** | 构建工具 |
 | **Pinia 3** | 状态管理 |
 | **vue-i18n** | 国际化（简体中文 / English） |
 | **Lucide Vue** | 图标库 |
 | **pinyin-pro** | 拼音搜索支持 |
+| **marked + DOMPurify** | Markdown 安全渲染（AI 回复） |
 | **@wailsio/runtime** | Wails 前端运行时绑定 |
 
 ---
@@ -246,11 +271,12 @@ cd frontend && pnpm install
 ## 项目结构
 
 ```
-quickdock-v3/
+quickdock/
 ├── main.go              # 入口：三窗口创建 + 应用配置
-├── tray.go              # 系统托盘 + 全局热键 + 剪贴板监听
-├── windows.go           # 窗口辅助函数
-├── services/            # Wails 服务层（前端绑定方法）
+├── main_common.go       # 跨平台通用入口逻辑
+├── main_windows.go      # Windows 专属入口（单实例锁等）
+├── dragdrop.go          # 拖放支持
+├── services/            # Wails 服务层（199+ 前端绑定方法）
 │   ├── service.go       # AppService 核心
 │   ├── lifecycle.go     # 生命周期管理
 │   ├── workspace.go     # 工作空间 CRUD
@@ -276,30 +302,59 @@ quickdock-v3/
 │   ├── tool.go          # 打开工具管理
 │   ├── autostart.go     # 开机自启
 │   ├── api_result.go    # 统一 API 返回
-│   └── types.go         # 配置类型定义
+│   ├── types.go         # 配置类型定义
+│   ├── ai.go            # AI 对话核心（streamAIChat / callAIOnce / buildAIMessages）
+│   ├── ai_stream.go     # AI 本地 HTTP SSE 流式服务
+│   └── update.go        # 软件更新检查与下载
 ├── internal/
-│   ├── db/              # SQLite 数据层（含安全白名单）
-│   ├── platform/        # Windows API 封装
+│   ├── db/              # SQLite 数据层
+│   │   ├── db.go        # Database 封装 + 安全白名单
+│   │   ├── schema.go    # 表结构 + 自动迁移
+│   │   ├── ai.go        # ai_conversations / ai_messages CRUD
+│   │   ├── workspace.go # 工作空间数据层
+│   │   ├── scene.go     # 场景数据层
+│   │   ├── collection.go# 集合数据层
+│   │   ├── item.go      # 项目数据层
+│   │   ├── clipboard.go # 剪贴板数据层
+│   │   ├── snippet.go   # 文本片段数据层
+│   │   ├── todo.go      # 待办数据层
+│   │   ├── schedule.go  # 定时任务数据层
+│   │   ├── monitor.go   # 监控数据层
+│   │   ├── tool.go      # 打开工具数据层
+│   │   ├── settings.go  # 设置数据层
+│   │   ├── snapshot.go  # 快照数据层
+│   │   ├── repository.go# 仓库层
+│   │   └── helpers.go   # 辅助函数
+│   ├── platform/        # 平台 API 封装
+│   │   ├── crypto_windows.go # DPAPI 加密（API Key）
 │   │   ├── clipboard.go # 剪贴板读写
 │   │   ├── commands.go  # 系统命令
 │   │   ├── monitor.go   # 多显示器定位
-│   │   ├── sysinfo.go   # 系统信息（CPU/内存/磁盘/网速）
-│   │   ├── netstats.go  # 网络速度采样（GetIfTable）
+│   │   ├── sysinfo.go   # 系统信息
+│   │   ├── netstats.go  # 网络速度采样
 │   │   └── icon.go      # 图标处理
 │   ├── plugin/          # 插件管理器
 │   └── webdav/          # WebDAV HTTP 客户端
 ├── frontend/
 │   ├── src/
-│   │   ├── components/  # 26 个 Vue 组件
+│   │   ├── components/  # 24 个 Vue 组件
+│   │   │   ├── AIPage.vue         # AI 对话页面
+│   │   │   ├── TodoPage.vue       # 待办任务页面
+│   │   │   ├── SchedulePage.vue   # 定时任务页面
+│   │   │   ├── MonitorPage.vue    # 网站监控页面
+│   │   │   ├── SystemStatusPage.vue # 系统状态页面
+│   │   │   ├── NotePanel.vue      # 快捷笔记面板
+│   │   │   ├── PluginManagerPage.vue # 插件管理页面
+│   │   │   └── ...（更多组件）
 │   │   ├── stores/      # Pinia 状态管理
-│   │   ├── types/       # TypeScript 类型
+│   │   ├── types/       # TypeScript 类型（含 ai.ts）
 │   │   ├── utils/       # 工具函数
 │   │   ├── i18n/        # 国际化（zh-CN / en-US）
 │   │   └── composables/ # 组合式函数
 │   └── vite.config.ts
 ├── plugins/builtin/     # 19 个内置插件
 ├── plugins/templates/   # 插件开发模板（none / goja / native）
-├── build/               # 多平台构建配置
+├── build/               # 构建配置
 ├── docs/                # 设计文档
 ├── DESIGN.md            # 设计系统规范
 ├── Taskfile.yml         # 构建任务定义
@@ -312,8 +367,8 @@ quickdock-v3/
 
 ```
 Workspace（工作空间）
-  └── Scene（场景）
-       └── Collection（集合）
+  └── Scene（场景）— 标签/类型/图标/颜色
+       └── Collection（集合）— 类型/打开策略/关联工具
             └── Item（项目）
                   ├── directory   — 目录
                   ├── file        — 文件
@@ -323,12 +378,19 @@ Workspace（工作空间）
                   └── quicklink   — 快速链接
 ```
 
-- Item 通过 `tool_id` 关联 **OpenTool**（系统 / 浏览器 / 终端 等打开方式）
-- **ClipboardEntry**（剪贴板条目）和 **Snippet**（文本片段）独立于层级
-- **Todo**（待办任务）支持子任务(parent_id)、标签(tags)、状态(status)、重复(recurrence)
-- **Schedule**（定时任务）支持一次性/每日/每周/每月，动作打开/HTTP/命令
-- **Monitor**（网站监控）支持状态码检查、SSL 到期预警、关键字/正则内容匹配
-- 数据库表通过白名单机制防止 SQL 注入
+**独立模型：**
+
+| 模型 | 说明 |
+|------|------|
+| **ClipboardEntry** | 剪贴板条目（文本/图片/文件） |
+| **Snippet** | 文本片段 |
+| **Todo** | 待办任务（子任务、标签、状态、重复） |
+| **Schedule** | 定时任务（五种调度、五种动作） |
+| **Monitor** | 网站监控（状态码/SSL/内容匹配） |
+| **AIConversation** | AI 对话会话（标题、摘要、token 统计） |
+| **AIMessage** | AI 消息（角色、内容、思考过程） |
+
+所有数据库表通过白名单机制防止 SQL 注入。
 
 ---
 
@@ -337,7 +399,7 @@ Workspace（工作空间）
 | 功能 | 默认快捷键 | 说明 |
 |------|-----------|------|
 | 切换主窗口 | `Ctrl+Space` | 显示 / 隐藏主界面 |
-| 剪贴板历史 | `Ctrl+`` `（反引号） | 显示 / 隐藏剪贴板浮动窗口 |
+| 剪贴板历史 | `` Ctrl+` ``（反引号） | 显示 / 隐藏剪贴板浮动窗口 |
 | 命令面板 | `Ctrl+K` | 显示 / 隐藏命令面板浮动窗口 |
 | 快捷笔记 | `Ctrl+Shift+N` | 显示 / 隐藏笔记浮动窗口 |
 
@@ -357,6 +419,7 @@ Workspace（工作空间）
 - **150ms 过渡** — 少动效，仅状态变化时使用动画
 - **键盘优先** — 所有交互均支持键鼠操作
 - **Shadow-border 技术** — `box-shadow` 替代 CSS `border`，消除布局偏移
+- **4 种色调层次** — `bg-primary(#1a1a1a)` → `bg-secondary(#1e1e1e)` → `bg-tertiary(#242424)` → `bg-active(#2a2a2a)`
 
 详细设计规范请参阅 [DESIGN.md](./DESIGN.md)。
 
@@ -836,33 +899,38 @@ window.addEventListener('message', function(e) {
 
 ```bash
 # 开发模式（热重载）
-task dev
+wails3 dev
 
 # 生产构建
 wails3 build
 
-# 通过 Taskfile
-task build
+# 直接 Go 构建（需先 npm run build）
+cd frontend && npm run build
+cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
 
-# 打包
-task package
+# 运行
+./quickdock.exe
 ```
 
 ### 平台支持
 
-> **当前仅支持 Windows**。macOS 和 Linux 的构建配置已预留，尚未适配。
+> **当前仅支持 Windows 10 1809+/Windows 11**。macOS 适配已做平台层抽象（`mac` 分支），但 `.app` 必须在 Mac 上构建（Wails 依赖 CGO 和 macOS 框架）。
 
 ---
 
 ## 架构亮点
 
-- **四窗口架构**：主窗口 (1100×700) + 剪贴板浮动窗口 (480×420) + 命令面板浮动窗口 (680×460) + 笔记浮动窗口 (480×420)
+- **三窗口架构**：主窗口 (1100×700) + 剪贴板浮动窗口 (480×420) + 命令面板浮动窗口 (680×460)
 - **所有次级窗口延迟创建**：在首次热键触发时才创建 WebView2，确保运行时完全初始化，避免白屏
 - **窗口即隐藏**：关闭主窗口时隐藏到系统托盘而非退出，通过 `atomic.Bool` 标志区分真实退出
 - **多显示器支持**：浮动窗口自动定位到鼠标所在屏幕
 - **纯 Go SQLite**：使用 modernc.org/sqlite，零 CGO 依赖，简化交叉编译
 - **回调注入解耦**：热键函数通过注入方式避免 main 和 services 包之间的循环依赖
 - **SQL 白名单**：表名和列名校验防止 SQL 注入
+- **AI 真流式架构**：本地 `127.0.0.1` HTTP SSE 流式服务（随机端口 + 随机 token），避免 Wails 事件框架的缓冲限制，实现逐 token 即时显示
+- **API Key 安全加密**：Windows 下 DPAPI 加密存储（`CryptProtectData`），macOS 下 base64 编码，前端全程不接触密文
+- **单实例锁**：通过 `-tags production` 区分生产/开发锁名，避免冲突
+- **后台服务**：SQLite WAL 模式 + 定时器调度器 (10s) + 监控检查器 + 网站 SSL 检测 + 网速采样 (1s) + AI 流式 HTTP 服务 + 插件健康检查
 
 ---
 
@@ -902,3 +970,5 @@ SOFTWARE.
 - [Vue.js](https://vuejs.org/) — 渐进式前端框架
 - [Lucide](https://lucide.dev/) — 优雅的开源图标库
 - [modernc.org/sqlite](https://modernc.org/sqlite) — 纯 Go SQLite 实现
+- [marked](https://marked.js.org/) — 快速 Markdown 解析
+- [DOMPurify](https://github.com/cure53/DOMPurify) — XSS 安全过滤

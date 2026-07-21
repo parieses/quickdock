@@ -42,7 +42,7 @@ function targetLabel(a: string) { return t('sched_target_' + a) }
 function targetPlaceholder(a: string) {
   switch (a) {
     case 'app': return 'C:\\Program Files\\App\\app.exe'
-    case 'dir': return 'D:\\project\\quickdock-v3'
+    case 'dir': return 'D:\\project\\quickdock'
     case 'url': return 'https://example.com'
     case 'command': return 'ping -n 1 example.com'
     case 'http': return 'https://api.example.com/webhook'

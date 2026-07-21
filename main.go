@@ -116,6 +116,9 @@ func main() {
 	// 传入 App 引用给 AppService
 	appService.SetApp(app)
 
+	// 启动本地 AI 流式服务（127.0.0.1 随机端口，供前端 fetch 流式读取）
+	appService.StartAIStreamServer()
+
 	// 初始化自动更新器（GitHub Releases Provider）
 	if err := initUpdater(app, appVersion); err != nil {
 		fmt.Printf("QuickDock: 更新器初始化失败（非关键错误）: %v\n", err)
@@ -176,6 +179,7 @@ func main() {
 	}
 
 	// 应用退出时停止所有插件、清理 PID 文件、关闭所有插件窗口
+	appService.StopAIStreamServer()
 	pluginMgr.ShutdownAll()
 	if appService.PluginWindowMgr != nil {
 		appService.PluginWindowMgr.CloseAll()

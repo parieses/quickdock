@@ -42,6 +42,8 @@ var validTables = map[string]bool{
 	"monitors":          true,
 	"monitor_logs":      true,
 	"plugin_exec_logs":  true,
+	"ai_conversations":  true,
+	"ai_messages":       true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）
@@ -65,12 +67,18 @@ var validColumns = map[string]bool{
 	"key": true,
 	"text": true, "content_type": true, "text_content": true, "image_path": true,
 	"source_app": true,
+	"title":       true,
+	"summary":     true,
+	"conv_id":     true,
+	"role":        true,
 	"copy_count": true,
 	"category": true,
 	"keyword":    true,
 	"content":    true,
+	"reasoning_content": true,
 	"image_hash": true,
 	"count":      true,
+	"prompt_tokens": true, "completion_tokens": true,
 	"last_used":  true,
 	"created_at": true, "updated_at": true, "deleted_at": true,
 }
@@ -217,17 +225,28 @@ func (d *Database) ListTable(table string) ([]map[string]interface{}, error) {
 	return scanRows(rows)
 }
 
+// whereHasOrderBy 判断 where 条件是否已自带 ORDER BY，避免重复拼接导致语法错误
+func whereHasOrderBy(where string) bool {
+	return strings.Contains(strings.ToUpper(where), "ORDER BY")
+}
+
 // ListTableWhere 返回符合 WHERE 条件的行（检测可用列排序）
 // where 参数经 params 参数化，不会导致注入。
+// 若 where 已包含 ORDER BY（如 AI 模块自定义排序），则不再追加默认排序。
 func (d *Database) ListTableWhere(table, where string, params ...interface{}) ([]map[string]interface{}, error) {
 	if err := validateTable(table); err != nil {
 		return nil, err
 	}
 
+	orderClause := ""
+	if !whereHasOrderBy(where) {
+		orderClause = d.orderByClause(table)
+	}
+
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	rows, err := d.conn.Query("SELECT * FROM "+table+" WHERE "+where+d.orderByClause(table), params...)
+	rows, err := d.conn.Query("SELECT * FROM "+table+" WHERE "+where+orderClause, params...)
 	if err != nil {
 		return nil, err
 	}

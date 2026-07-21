@@ -22,6 +22,100 @@ import * as db$0 from "../internal/db/models.js";
 import * as $models from "./models.js";
 
 /**
+ * AIClearMessages 清空某会话的上下文（消息与摘要）
+ */
+export function AIClearMessages(convID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3444167825, convID);
+}
+
+/**
+ * AICreateConversation 新建会话
+ */
+export function AICreateConversation(title: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(308772527, title);
+}
+
+/**
+ * AIDeleteConversation 删除会话
+ */
+export function AIDeleteConversation(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3073238696, id);
+}
+
+/**
+ * AIGetConfig 兼容旧接口：返回当前激活档案（API Key 已解密）
+ */
+export function AIGetConfig(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1566209782);
+}
+
+/**
+ * AIGetMessages 读取某会话的消息
+ */
+export function AIGetMessages(convID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3385408564, convID);
+}
+
+/**
+ * AIListConversations 列出会话
+ */
+export function AIListConversations(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1634142192);
+}
+
+/**
+ * AIListProfiles 列出所有档案（API Key 已解密）与当前激活项
+ */
+export function AIListProfiles(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(1812690326);
+}
+
+/**
+ * AIRegenerateTitle 调用模型，根据对话内容生成短标题
+ */
+export function AIRegenerateTitle(convID: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(4028519516, convID);
+}
+
+/**
+ * AISaveProfiles 保存完整档案列表与激活项（API Key 留空则保留原密文）
+ */
+export function AISaveProfiles(req: $models.AISaveProfilesRequest): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3153383435, req);
+}
+
+/**
+ * AISetActiveProfile 设置当前激活的档案（聊天中切换模型用）
+ */
+export function AISetActiveProfile(id: string): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(3702274987, id);
+}
+
+/**
+ * AISetConfig 兼容旧接口：写入单个默认档案
+ */
+export function AISetConfig(cfg: $models.AIConfig): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(4144179170, cfg);
+}
+
+/**
+ * AIStreamInfo 返回本地 AI 流式服务的端口与随机令牌。
+ * 前端据此构造 http://127.0.0.1:<port>/ai/stream?token=<token> 并用 fetch 读取
+ * 分块（NDJSON）响应，实现真正的逐字流式，而非依赖 Wails 事件。
+ */
+export function AIStreamInfo(): $CancellablePromise<$models.ApiResult | null> {
+    return $Call.ByID(799378472);
+}
+
+/**
+ * AITestConnection 发送一条简单的用户消息验证 API Key 和模型是否可用。
+ * 使用非流式单次调用，超时 15 秒。
+ */
+export function AITestConnection(profileID: string): $CancellablePromise<{ [_ in string]?: any } | null> {
+    return $Call.ByID(3906599712, profileID);
+}
+
+/**
  * CheckForUpdates 手动检查更新（阻塞直到检查完成）
  */
 export function CheckForUpdates(): $CancellablePromise<$models.UpdateStatus | null> {
@@ -720,6 +814,13 @@ export function SkipUpdate(version: string): $CancellablePromise<void> {
 }
 
 /**
+ * StartAIStreamServer 启动本地流式服务（绑定 127.0.0.1:0 随机端口）
+ */
+export function StartAIStreamServer(): $CancellablePromise<void> {
+    return $Call.ByID(1302344967);
+}
+
+/**
  * StartMonitorChecker 启动网站监控检查器（仿 UptimeRobot）。
  * 同样采用精确定时器：每次检测后按 interval 计算最近待检监控的等待时长并精确 sleep，
  * 监控增删改/启停时用 monitorWake 立即唤醒重排。
@@ -745,6 +846,13 @@ export function StartReminderScheduler(): $CancellablePromise<void> {
  */
 export function StartScheduleRunner(): $CancellablePromise<void> {
     return $Call.ByID(3855636353);
+}
+
+/**
+ * StopAIStreamServer 关闭本地流式服务（应用退出时调用）
+ */
+export function StopAIStreamServer(): $CancellablePromise<void> {
+    return $Call.ByID(4164354063);
 }
 
 export function SuspendHotkeys(): $CancellablePromise<void> {

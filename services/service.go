@@ -68,6 +68,9 @@ type AppService struct {
 	pendingInitText    string
 	pendingInitCommand string
 	pendingInitTextMu  sync.Mutex
+
+	// 本地 AI 流式服务（127.0.0.1 随机端口，前端 fetch 读取分块响应）
+	aiStream *aiStreamServer
 }
 
 type frontendCacheEntry struct {

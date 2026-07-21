@@ -11,7 +11,10 @@
   },
   "dependencies": {
     "@lucide/vue": "^1.23.0",
+    "@types/dompurify": "^3.0.5",
     "@wailsio/runtime": "3.0.0-alpha.96",
+    "dompurify": "^3.4.12",
+    "marked": "^18.0.6",
     "pinia": "^3.0.4",
     "pinyin-pro": "^3.28.1",
     "vue": "^3.2.45",

@@ -3,7 +3,7 @@
 #
 # The lines below are called `modelines`. See `:help modeline`
 
-name: "quickdock-v3"
+name: "quickdock"
 arch: ${GOARCH}
 platform: "linux"
 version: "0.2.0"
@@ -17,12 +17,12 @@ license: "MIT"
 release: "1"
 
 contents:
-  - src: "./bin/quickdock-v3"
-    dst: "/usr/local/bin/quickdock-v3"
+  - src: "./bin/quickdock"
+    dst: "/usr/local/bin/quickdock"
   - src: "./build/appicon.png"
-    dst: "/usr/share/icons/hicolor/128x128/apps/quickdock-v3.png"
-  - src: "./build/linux/quickdock-v3.desktop"
-    dst: "/usr/share/applications/quickdock-v3.desktop"
+    dst: "/usr/share/icons/hicolor/128x128/apps/quickdock.png"
+  - src: "./build/linux/quickdock.desktop"
+    dst: "/usr/share/applications/quickdock.desktop"
 
 # Default dependencies for the GTK4 + WebKitGTK 6.0 stack (Ubuntu 24.04+ / Debian 13+)
 depends:

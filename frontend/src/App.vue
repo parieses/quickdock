@@ -26,6 +26,7 @@ const SystemStatusPage = defineAsyncComponent(() => import('./components/SystemS
 const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
 const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
 const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
+const AIPage = defineAsyncComponent(() => import('./components/AIPage.vue'))
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {
@@ -183,6 +184,9 @@ const activeConfirm = computed(() =>
         <SchedulePage v-else-if="currentPage === 'schedule'" />
         <!-- 网站监控页面 -->
         <MonitorPage v-else-if="currentPage === 'monitor'" />
+
+        <!-- AI 助手页面 -->
+        <AIPage v-else-if="currentPage === 'ai'" @open-settings="(page?: string) => { settingsPage = page; showSettings = true }" />
       </div>
     </div>
 

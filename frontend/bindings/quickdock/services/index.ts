@@ -7,6 +7,9 @@ export {
 };
 
 export type {
+    AIConfig,
+    AIProfile,
+    AISaveProfilesRequest,
     ApiResult,
     UpdateStatus,
     WebDAVConfig

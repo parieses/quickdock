@@ -6,6 +6,10 @@ import TypeIcon from './TypeIcon.vue'
 import CreateDialog from './CreateDialog.vue'
 import { getErrorMessage } from '../utils/error'
 import type { Scene, ToastAPI } from '../types'
+import {
+  Bot, FolderKanban, FileText, Activity, ListTodo, AlarmClock,
+  Clipboard, Puzzle, ChevronDown, Plus, Pencil, Trash2, Search, X, Settings,
+} from '@lucide/vue'
 
 const store = useWorkspaceStore()
 const { t, tm } = useI18n()
@@ -241,6 +245,10 @@ async function handleDeleteScene(sceneId: string) {
       <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="emit('navigate', 'plugins')">
         <Puzzle :size="14" />
         <span>{{ t('navPlugins') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'ai' }]" @click="emit('navigate', 'ai')">
+        <Bot :size="14" />
+        <span>{{ t('navAi') }}</span>
       </button>
     </div>
 
