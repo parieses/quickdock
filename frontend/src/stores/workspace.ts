@@ -447,7 +447,14 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     unwrap(await DeleteScene(id))
     scenes.value = scenes.value.filter(s => s.id !== id)
     openedSceneIds.value = openedSceneIds.value.filter(sid => sid !== id)
-    if (activeSceneId.value === id) activeSceneId.value = ''
+    // 清理该场景下的 collections 和 items 的缓存
+    const removedColIds = collections.value.filter(c => c.sceneId === id).map(c => c.id)
+    collections.value = collections.value.filter(c => c.sceneId !== id)
+    items.value = items.value.filter(i => !removedColIds.includes(i.collectionId))
+    if (activeSceneId.value === id) {
+      activeSceneId.value = ''
+      activeCollectionId.value = ''
+    }
   }
 
   async function removeCollection(id: string) {

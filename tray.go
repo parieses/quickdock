@@ -85,6 +85,22 @@ var (
 	modUser32   = syscall.NewLazyDLL("user32.dll")
 	modKernel32 = syscall.NewLazyDLL("kernel32.dll")
 	modShell32  = syscall.NewLazyDLL("shell32.dll")
+
+	// 缓存常用 Windows API proc（避免消息循环内反复 NewProc）
+	procPostMessageW     = modUser32.NewProc("PostMessageW")
+	procCreateIcon       = modUser32.NewProc("CreateIconFromResourceEx")
+	procLoadIconW        = modUser32.NewProc("LoadIconW")
+	procRegisterClassW   = modUser32.NewProc("RegisterClassW")
+	procCreateWindowExW  = modUser32.NewProc("CreateWindowExW")
+	procGetMessageW      = modUser32.NewProc("GetMessageW")
+	procTranslateMessage = modUser32.NewProc("TranslateMessage")
+	procDispatchMessageW = modUser32.NewProc("DispatchMessageW")
+	procDefWindowProcW   = modUser32.NewProc("DefWindowProcW")
+	procPostQuitMessage  = modUser32.NewProc("PostQuitMessage")
+	procDestroyIcon      = modUser32.NewProc("DestroyIcon")
+	procChangeClipboardChain = modUser32.NewProc("ChangeClipboardChain")
+	procSetClipboardViewer   = modUser32.NewProc("SetClipboardViewer")
+	procShellNotifyIconW     = modShell32.NewProc("Shell_NotifyIconW")
 )
 
 // ---- 主窗口 ----
@@ -226,8 +242,7 @@ func loadIconFromEmbed() uintptr {
 	}
 
 	imageData := trayIcoEmbed[imageOffset : imageOffset+imageSize]
-	createIcon := user32.NewProc("CreateIconFromResourceEx")
-	hIcon, _, _ := createIcon.Call(
+	hIcon, _, _ := procCreateIcon.Call(
 		uintptr(unsafe.Pointer(&imageData[0])),
 		uintptr(imageSize),
 		1,
@@ -236,8 +251,7 @@ func loadIconFromEmbed() uintptr {
 	)
 
 	if hIcon == 0 {
-		loadIcon := user32.NewProc("LoadIconW")
-		hIcon, _, _ = loadIcon.Call(0, uintptr(32512))
+		hIcon, _, _ = procLoadIconW.Call(0, uintptr(32512))
 	}
 
 	return hIcon
@@ -282,9 +296,7 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 			svc.OnClipboardChange()
 		}
 		if nv := nextClipboardViewer.Load(); nv != 0 {
-			user32 := modUser32
-			postMsg := user32.NewProc("PostMessageW")
-			postMsg.Call(nv, WM_DRAWCLIPBOARD, wParam, lParam)
+			procPostMessageW.Call(nv, WM_DRAWCLIPBOARD, wParam, lParam)
 		}
 		return 0
 
@@ -293,9 +305,7 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		if wParam == nv {
 			nextClipboardViewer.Store(lParam)
 		} else if nv != 0 {
-			user32 := modUser32
-			postMsg := user32.NewProc("PostMessageW")
-			postMsg.Call(nv, WM_CHANGECBCHAIN, wParam, lParam)
+			procPostMessageW.Call(nv, WM_CHANGECBCHAIN, wParam, lParam)
 		}
 		return 0
 	}
@@ -331,11 +341,9 @@ func runMessageLoop() {
 		lpszClassName: className,
 	}
 
-	regClass := user32.NewProc("RegisterClassW")
-	_, _, _ = regClass.Call(uintptr(unsafe.Pointer(&wc)))
+	procRegisterClassW.Call(uintptr(unsafe.Pointer(&wc)))
 
-	createWindow := user32.NewProc("CreateWindowExW")
-	hwnd, _, _ := createWindow.Call(
+	hwnd, _, _ := procCreateWindowExW.Call(
 		WS_EX_TOOLWINDOW,
 		uintptr(unsafe.Pointer(className)),
 		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("QuickDockHotkey"))),
@@ -362,12 +370,9 @@ func runMessageLoop() {
 
 	createTrayIcon(hwnd)
 
-	setClipboardViewer := user32.NewProc("SetClipboardViewer")
-	nextViewer, _, _ := setClipboardViewer.Call(hwnd)
+	nextViewer, _, _ := procSetClipboardViewer.Call(hwnd)
 	nextClipboardViewer.Store(nextViewer)
 	fmt.Println("QuickDock: 剪贴板监听已启动")
-
-	getMessage := user32.NewProc("GetMessageW")
 
 	var msg struct {
 		hwnd    uintptr
@@ -379,7 +384,7 @@ func runMessageLoop() {
 	}
 
 	for {
-		ret, _, _ := getMessage.Call(
+		ret, _, _ := procGetMessageW.Call(
 			uintptr(unsafe.Pointer(&msg)),
 			0, 0, 0,
 		)
@@ -387,10 +392,8 @@ func runMessageLoop() {
 			break
 		}
 
-		translateMessage := user32.NewProc("TranslateMessage")
-		dispatchMessage := user32.NewProc("DispatchMessageW")
-		translateMessage.Call(uintptr(unsafe.Pointer(&msg)))
-		dispatchMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
+		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
 
 	fmt.Println("QuickDock: 消息循环已停止")
@@ -401,9 +404,7 @@ func createTrayIcon(hwnd uintptr) {
 
 	hIcon := trayHICON.Load()
 	if hIcon == 0 {
-		user32 := modUser32
-		loadIcon := user32.NewProc("LoadIconW")
-		hIcon, _, _ = loadIcon.Call(0, uintptr(32512))
+		hIcon, _, _ = procLoadIconW.Call(0, uintptr(32512))
 	}
 
 	nid := &NOTIFYICONDATAW{
@@ -416,8 +417,7 @@ func createTrayIcon(hwnd uintptr) {
 	}
 	copy(nid.SzTip[:], syscall.StringToUTF16("快启坞 QuickDock"))
 
-	shellNotifyIcon := shell32.NewProc("Shell_NotifyIconW")
-	ret, _, _ := shellNotifyIcon.Call(NIM_ADD, uintptr(unsafe.Pointer(nid)))
+	ret, _, _ := procShellNotifyIconW.Call(NIM_ADD, uintptr(unsafe.Pointer(nid)))
 	if ret != 0 {
 		fmt.Println("QuickDock: 系统托盘图标已创建")
 	} else {
@@ -431,27 +431,26 @@ func removeTrayIcon() {
 	}
 
 	// 离开剪贴板监听链
-	if hwnd := uintptr(appSvc.Load().HiddenHWND.Load()); hwnd != 0 && nextClipboardViewer.Load() != 0 {
-		user32 := modUser32
-		changeChain := user32.NewProc("ChangeClipboardChain")
-		changeChain.Call(hwnd, nextClipboardViewer.Load())
+	svc := appSvc.Load()
+	var hwnd uintptr
+	if svc != nil {
+		hwnd = uintptr(svc.HiddenHWND.Load())
+	}
+	if hwnd != 0 && nextClipboardViewer.Load() != 0 {
+		procChangeClipboardChain.Call(hwnd, nextClipboardViewer.Load())
 		fmt.Println("QuickDock: 已离开剪贴板监听链")
 	}
 
-	shell32 := modShell32
-	shellNotifyIcon := shell32.NewProc("Shell_NotifyIconW")
 	nid := &NOTIFYICONDATAW{
 		CbSize: uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
-		HWnd:   uintptr(appSvc.Load().HiddenHWND.Load()),
+		HWnd:   hwnd,
 		UID:    1,
 	}
-	shellNotifyIcon.Call(NIM_DELETE, uintptr(unsafe.Pointer(nid)))
+	procShellNotifyIconW.Call(NIM_DELETE, uintptr(unsafe.Pointer(nid)))
 	fmt.Println("QuickDock: 系统托盘图标已移除")
 
 	if th := trayHICON.Load(); th != 0 {
-		user32 := modUser32
-		destroyIcon := user32.NewProc("DestroyIcon")
-		destroyIcon.Call(th)
+		procDestroyIcon.Call(th)
 		trayHICON.Store(0)
 	}
 
@@ -504,16 +503,12 @@ func showTrayMenu(hwnd uintptr) {
 }
 
 func callDefWindowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
-	user32 := modUser32
-	defProc := user32.NewProc("DefWindowProcW")
-	ret, _, _ := defProc.Call(hwnd, uintptr(msg), wParam, lParam)
+	ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
 	return ret
 }
 
 func postQuitMessage(exitCode int32) {
-	user32 := modUser32
-	postQuit := user32.NewProc("PostQuitMessage")
-	postQuit.Call(uintptr(exitCode))
+	procPostQuitMessage.Call(uintptr(exitCode))
 }
 
 // ===== GlobalShortcut 加速器 =====

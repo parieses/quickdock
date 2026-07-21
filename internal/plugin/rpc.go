@@ -91,6 +91,12 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 // readLoop 后台循环读取插件 stdout
 // 必须在子进程启动后以 goroutine 方式运行
 func (inst *PluginInstance) readLoop(manager *Manager) {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[plugin %s] readLoop panic: %v\n", inst.Manifest.ID, r)
+			inst.Status = "crashed"
+		}
+	}()
 	// 就绪信号 ← P0 修复：确保 readLoop 已开始监听再发送 initialize
 	close(inst.readyCh)
 

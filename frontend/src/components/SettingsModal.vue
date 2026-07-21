@@ -159,8 +159,19 @@ watch(() => props.visible, async (val) => {
   }
 }, { immediate: false })
 
+// 只在弹窗可见时监听全局按键，避免隐藏后 keydown 常驻
+watch(() => props.visible, (v) => {
+  if (v) {
+    document.addEventListener('keydown', onGlobalKeydown)
+  } else {
+    document.removeEventListener('keydown', onGlobalKeydown)
+  }
+}, { immediate: false })
+
 onMounted(async () => {
-  document.addEventListener('keydown', onGlobalKeydown)
+  if (props.visible) {
+    document.addEventListener('keydown', onGlobalKeydown)
+  }
   try {
     const saved = unwrap<string>(await GetValue('locale'))
     if (saved) currentLocale.value = saved

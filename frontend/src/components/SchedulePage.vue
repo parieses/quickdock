@@ -9,6 +9,7 @@ import {
 } from '../../bindings/quickdock/services/appservice'
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import WebhookSettingsModal from './WebhookSettingsModal.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import {
   Plus, Play, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle,
@@ -228,8 +229,20 @@ async function runNow(t0: ScheduledTask) {
 }
 
 async function remove(t0: ScheduledTask) {
+  delTask.value = t0
+  showDelConfirm.value = true
+}
+
+const delTask = ref<ScheduledTask | null>(null)
+const showDelConfirm = ref(false)
+
+async function confirmDel() {
+  const t = delTask.value
+  if (!t) return
+  showDelConfirm.value = false
+  delTask.value = null
   try {
-    await unwrap(await DeleteScheduledTask(t0.id))
+    await unwrap(await DeleteScheduledTask(t.id))
     await refresh()
   } catch (e) { error.value = getErrorMessage(e) }
 }
@@ -402,6 +415,13 @@ onMounted(refresh)
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      :visible="showDelConfirm"
+      :message="t('sched_delete') + '?'"
+      @confirm="confirmDel"
+      @cancel="showDelConfirm = false"
+    />
   </div>
 </template>
 

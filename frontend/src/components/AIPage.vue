@@ -31,6 +31,15 @@ const input = ref('')
 const mode = ref('chat')
 const streaming = ref(false)
 const streamingText = ref('')
+const renderedStreamHtml = ref('')
+let renderTimer: ReturnType<typeof setTimeout> | null = null
+watch(streamingText, (val) => {
+  if (renderTimer) return
+  renderTimer = setTimeout(() => {
+    renderTimer = null
+    renderedStreamHtml.value = renderMarkdown(val)
+  }, 60)
+})
 const reasoningText = ref('')  // 思考过程（reasoning_content），折叠显示
 const errorMsg = ref('')
 
@@ -303,6 +312,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   Events.Off('ai:conv')
+  if (streamCtrl) streamCtrl.abort()
 })
 </script>
 
@@ -394,7 +404,7 @@ onUnmounted(() => {
           </div>
           <div v-if="streamingText" class="ai-msg assistant">
             <div class="ai-msg-role">AI</div>
-            <div class="ai-msg-content ai-md" v-html="renderMarkdown(streamingText)"></div>
+            <div class="ai-msg-content ai-md" v-html="renderedStreamHtml"></div>
             <span class="ai-cursor">▋</span>
           </div>
 

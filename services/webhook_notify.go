@@ -88,6 +88,7 @@ func (a *AppService) sendWebhookNotify(title, body string) {
 			continue
 		}
 		go func(kind, url string) {
+			defer recoverPanic("webhook:" + kind)
 			_ = postWebhook(kind, url, title, body)
 		}(tg.kind, tg.url)
 	}

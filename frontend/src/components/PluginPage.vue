@@ -17,6 +17,13 @@ const error = ref('')
 const pluginName = ref('')
 let messageHandler: ((e: MessageEvent) => void) | null = null
 let iframeWindow: Window | null = null
+// 随机 nonce 防止跨源消息伪造（blob URL 下无法指定 targetOrigin）
+const pluginNonce = Math.random().toString(36).slice(2, 12)
+
+function iframePostMessage(data: any) {
+  if (!iframeWindow) return
+  iframeWindow.postMessage({ ...data, nonce: pluginNonce }, '*')
+}
 
 onMounted(async () => {
   try {
@@ -40,6 +47,8 @@ onMounted(async () => {
   messageHandler = async (event: MessageEvent) => {
     // 验证消息来源：只接受插件 iframe 的消息
     if (event.source !== iframeWindow) return
+    // 验证 nonce 防止伪造消息
+    if (event.data?.nonce !== pluginNonce) return
 
     if (event.data?.type === 'plugin:execute') {
       const { id, command, input } = event.data
@@ -47,17 +56,11 @@ onMounted(async () => {
         const result = await ExecutePluginCommand(props.pluginId, command, input || null)
         const data = unwrap(result)
         if (event.source && 'postMessage' in (event.source as any)) {
-          ;(event.source as any).postMessage(
-            { type: 'plugin:result', id, data },
-            '*'
-          )
+          iframePostMessage({ type: 'plugin:result', id, data })
         }
       } catch (e: any) {
         if (event.source && 'postMessage' in (event.source as any)) {
-          ;(event.source as any).postMessage(
-            { type: 'plugin:result', id, error: e?.message || String(e) },
-            '*'
-          )
+          iframePostMessage({ type: 'plugin:result', id, error: e?.message || String(e) })
         }
       }
     }
@@ -74,23 +77,22 @@ async function onIframeLoad(event: Event) {
   iframeWindow = (event.target as HTMLIFrameElement)?.contentWindow
   if (!iframeWindow) return
   // 先发 theme
-  iframeWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, '*')
-  // 再发 init（用 * 避免 blob 源窗口的 origin 不匹配导致消息被拦截）
+  iframePostMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } })
+  // 再发 init（使用 nonce 消息代替裸 *）
   try {
     const raw = await GetAndClearPendingPluginInit()
     const init = raw?.data || raw
     const text = (init && typeof init === 'object') ? (init.text || '') : (typeof init === 'string' ? init : '')
     const command = (init && typeof init === 'object') ? (init.command || '') : ''
-    iframeWindow.postMessage({
+    iframePostMessage({
       type: 'plugin:init',
       data: { text, command, theme: 'dark', locale: locale.value }
-    }, '*')
+    })
   } catch {
-    // GetAndClearPendingPluginInit 失败时仍发送 init（空 text/command）
-    iframeWindow.postMessage({
+    iframePostMessage({
       type: 'plugin:init',
       data: { text: '', command: '', theme: 'dark', locale: locale.value }
-    }, '*')
+    })
   }
 }
 

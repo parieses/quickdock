@@ -3,6 +3,7 @@ package platform
 import (
 	"bytes"
 	"encoding/base64"
+	"fmt"
 	"image"
 	"image/png"
 	"os"
@@ -99,7 +100,9 @@ func IconMIME(ext string) string {
 // iconCacheDir 返回图标缓存目录
 func iconCacheDir() string {
 	dir := filepath.Join(DefaultDataDir(), "icons")
-	os.MkdirAll(dir, 0o755)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		fmt.Println("QuickDock: 图标缓存目录创建失败:", err)
+	}
 	return dir
 }
 

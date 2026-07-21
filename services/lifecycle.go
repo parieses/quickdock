@@ -114,6 +114,9 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	// 启动网络速度采样（后台 1s ticker，GetSystemStatus 读取最新速度）
 	platform.StartNetStats()
 
+	// 启动 CPU 百分比后台采样（避免 GetSystemStatus 同步阻塞 150ms）
+	platform.StartCPUPercentSampler()
+
 	return nil
 }
 

@@ -41,7 +41,14 @@ function scheduleSave() {
 watch(note, scheduleSave)
 
 onMounted(load)
-onUnmounted(() => { if (timer) clearTimeout(timer) })
+onUnmounted(() => {
+  if (timer) {
+    clearTimeout(timer)
+    timer = null
+    // flush 防抖 pending 内容
+    SaveNote(note.value).catch(() => {})
+  }
+})
 </script>
 
 <template>

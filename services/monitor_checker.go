@@ -37,6 +37,7 @@ func (a *AppService) wakeMonitorChecker() {
 }
 
 func (a *AppService) monitorLoop() {
+	defer recoverPanic("monitor checker")
 	time.Sleep(3 * time.Second)
 	for {
 		a.runDueMonitors()
@@ -97,6 +98,7 @@ func (a *AppService) nextMonitorWait() time.Duration {
 // checkOneMonitor 对单个监控执行一次检测，写入日志与状态，并在状态翻转时发通知
 // 返回 (status, summary)
 func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
+	defer recoverPanic("monitor check:" + m.ID)
 	// 用户可能在调度间隙停用了该监控，重查 enabled 状态
 	if current, err := a.DB.GetMonitor(m.ID); err != nil || !current.Enabled {
 		return "", ""
@@ -203,17 +205,21 @@ func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg strin
 	}
 	req.Header.Set("User-Agent", "QuickDock-Monitor/1.0")
 
+	// 默认复用 http.DefaultTransport，仅在需要跳过 TLS 校验时创建自定义 Transport
+	var transport http.RoundTripper = http.DefaultTransport
+	if m.SkipTLSVerify {
+		transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
+		}
+	}
 	client := &http.Client{
-		Timeout: time.Duration(m.TimeoutSec) * time.Second,
+		Timeout:       time.Duration(m.TimeoutSec) * time.Second,
+		Transport:     transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if m.FollowRedirects {
 				return nil
 			}
 			return http.ErrUseLastResponse
-		},
-		Transport: &http.Transport{
-			// 仅当该监控显式开启「忽略证书错误」时跳过 TLS 校验（自签名/过期/域名不匹配）
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: m.SkipTLSVerify},
 		},
 	}
 	resp, err := client.Do(req)

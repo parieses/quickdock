@@ -60,6 +60,11 @@ func StartNetStats() {
 		return
 	}
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: [PANIC] netstats: %v\n", r)
+			}
+		}()
 		ticker := time.NewTicker(1 * time.Second)
 		defer ticker.Stop()
 		sampleNet(getIfTable) // prime baseline

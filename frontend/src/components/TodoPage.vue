@@ -3,12 +3,14 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import ConfirmDialog from './ConfirmDialog.vue'
 import {
   CreateTodo, ListTodos, UpdateTodo, ToggleTodo, DeleteTodo, ClearCompletedTodos, SendTestNotification,
   CreateSubtask, SetTodoStatus,
 } from '../../bindings/quickdock/services/appservice'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
+  RefreshCw, ListTree,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -48,10 +50,10 @@ const error = ref('')
 const viewYear = ref(new Date().getFullYear())
 const viewMonth = ref(new Date().getMonth()) // 0-based
 const selectedDate = ref('')                  // '' = 未排期；否则 YYYY-MM-DD
-const todayStr = (() => {
+const todayStr = computed(() => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-})()
+})
 
 const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
 
@@ -214,7 +216,7 @@ const cells = computed(() => {
       date: ds,
       day: d.getDate(),
       inMonth: d.getMonth() === viewMonth.value,
-      isToday: ds === todayStr,
+      isToday: ds === todayStr.value,
       isSelected: ds === selectedDate.value,
       items,
       hasReminder: items.some(x => x.reminderTime !== '' && !x.reminderSent),
@@ -266,7 +268,7 @@ function nextMonth() {
 function goToday() {
   const d = new Date()
   viewYear.value = d.getFullYear(); viewMonth.value = d.getMonth()
-  selectedDate.value = todayStr
+  selectedDate.value = todayStr.value
 }
 function selectDate(ds: string) {
   selectedDate.value = ds
@@ -382,9 +384,26 @@ async function toggle(todo: Todo) {
   try { await unwrap(await ToggleTodo(todo.id)); await refresh() } catch (e) { error.value = getErrorMessage(e) }
 }
 async function remove(todo: Todo) {
-  try { await unwrap(await DeleteTodo(todo.id)); await refresh() } catch (e) { error.value = getErrorMessage(e) }
+  delTodo.value = todo
+  showDelConfirm.value = true
 }
 async function clearCompleted() {
+  showClearConfirm.value = true
+}
+
+const delTodo = ref<Todo | null>(null)
+const showDelConfirm = ref(false)
+const showClearConfirm = ref(false)
+
+async function confirmDel() {
+  const todo = delTodo.value
+  if (!todo) return
+  showDelConfirm.value = false
+  delTodo.value = null
+  try { await unwrap(await DeleteTodo(todo.id)); await refresh() } catch (e) { error.value = getErrorMessage(e) }
+}
+async function confirmClear() {
+  showClearConfirm.value = false
   try { await unwrap(await ClearCompletedTodos()); await refresh() } catch (e) { error.value = getErrorMessage(e) }
 }
 
@@ -402,11 +421,11 @@ async function testReminder() {
 }
 
 function isOverdue(todo: Todo) {
-  return todo.dueDate !== '' && todo.dueDate < todayStr && !todo.done
+  return todo.dueDate !== '' && todo.dueDate < todayStr.value && !todo.done
 }
 
 onMounted(() => {
-  selectedDate.value = todayStr
+  selectedDate.value = todayStr.value
   refresh()
 })
 </script>
@@ -727,6 +746,19 @@ onMounted(() => {
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      :visible="showDelConfirm"
+      :message="t('todoDelete') + '?'"
+      @confirm="confirmDel"
+      @cancel="showDelConfirm = false"
+    />
+    <ConfirmDialog
+      :visible="showClearConfirm"
+      :message="t('todoClearCompleted') + '?'"
+      @confirm="confirmClear"
+      @cancel="showClearConfirm = false"
+    />
   </div>
 </template>
 

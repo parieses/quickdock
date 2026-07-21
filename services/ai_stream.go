@@ -50,7 +50,10 @@ func (a *AppService) StartAIStreamServer() {
 	mux.HandleFunc("/ai/stream", s.handle)
 	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	a.aiStream = s
-	go func() { _ = s.srv.Serve(ln) }()
+	go func() {
+		defer recoverPanic("ai stream server")
+		_ = s.srv.Serve(ln)
+	}()
 	fmt.Printf("QuickDock: AI 流式服务已启动 http://127.0.0.1:%d/ai/stream\n", s.port)
 }
 
@@ -65,7 +68,12 @@ func (a *AppService) StopAIStreamServer() {
 }
 
 func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	// CORS: 限制为请求来源或默认 127.0.0.1（不设通配符，防止本机其他页面随意访问）
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		origin = "http://127.0.0.1"
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Stream-Token")
 	if r.Method == http.MethodOptions {

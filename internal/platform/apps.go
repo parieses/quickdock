@@ -225,6 +225,20 @@ func ResetAppsCache() {
 
 // LaunchApp 通过 ShellExecute 启动应用
 func LaunchApp(appPath string) error {
+	if appPath == "" {
+		return fmt.Errorf("应用路径不能为空")
+	}
+	// 基本安全验证：拒绝 URL 或命令行注入特征
+	if strings.Contains(appPath, "http://") || strings.Contains(appPath, "https://") {
+		return fmt.Errorf("拒绝 URL 路径，请使用 OpenURL")
+	}
+	if strings.ContainsAny(appPath, "|&;<>`$") {
+		return fmt.Errorf("应用路径包含非法字符")
+	}
+	// 文件存在性检查（不是必需的，但可以提供更好的错误提示）
+	if _, err := os.Stat(appPath); err != nil {
+		return fmt.Errorf("应用路径不存在: %s", appPath)
+	}
 	return windows.ShellExecute(0,
 		windows.StringToUTF16Ptr("open"),
 		windows.StringToUTF16Ptr(appPath),

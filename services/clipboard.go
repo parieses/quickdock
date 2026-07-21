@@ -164,6 +164,7 @@ func (a *AppService) PasteClipboardEntry(id string) *ApiResult {
 	}
 	a.HideClipboardWindow()
 	go func() {
+		defer recoverPanic("clipboard paste")
 		time.Sleep(80 * time.Millisecond)
 		platform.SimulatePaste()
 		_ = a.DB.IncrementClipboardCopyCount(id)

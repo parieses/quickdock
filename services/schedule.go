@@ -121,7 +121,7 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 		return fmt.Errorf("未知的动作类型: %s", t.Action)
 	}
 	switch t.ScheduleKind {
-	case "once", "interval", "daily", "weekly":
+	case "once", "interval", "daily", "weekly", "monthly":
 	default:
 		return fmt.Errorf("未知的调度类型: %s", t.ScheduleKind)
 	}

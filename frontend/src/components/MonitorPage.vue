@@ -10,6 +10,7 @@ import {
 } from '../../bindings/quickdock/services/appservice'
 import type { Monitor } from '../../bindings/quickdock/internal/db/models'
 import WebhookSettingsModal from './WebhookSettingsModal.vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 // 以下两个结构仅作为返回值中的元素出现，Wails 绑定生成器不会为其单独生成类型，
 // 故在前端本地声明（运行时为普通 JSON，字段与后端 json tag 一致）。
@@ -229,6 +230,18 @@ async function checkNow(m: Monitor) {
 }
 
 async function remove(m: Monitor) {
+  delTarget.value = m
+  showDelConfirm.value = true
+}
+
+const delTarget = ref<Monitor | null>(null)
+const showDelConfirm = ref(false)
+
+async function confirmDel() {
+  const m = delTarget.value
+  if (!m) return
+  showDelConfirm.value = false
+  delTarget.value = null
   try { await unwrap(await DeleteMonitor(m.id)); expanded.value.delete(m.id); await refresh() } catch (e) { error.value = getErrorMessage(e) }
 }
 
@@ -708,6 +721,13 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
+
+    <ConfirmDialog
+      :visible="showDelConfirm"
+      :message="t('mon_delete') + '?'"
+      @confirm="confirmDel"
+      @cancel="showDelConfirm = false"
+    />
   </div>
 </template>
 

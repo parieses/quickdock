@@ -1,6 +1,7 @@
 package services
 
 import (
+	"net/http"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -71,6 +72,9 @@ type AppService struct {
 
 	// 本地 AI 流式服务（127.0.0.1 随机端口，前端 fetch 读取分块响应）
 	aiStream *aiStreamServer
+
+	// 共享 HTTP 客户端（连接复用，避免每次 AI 请求新建 TLS 握手）
+	aiHTTPClient *http.Client
 }
 
 type frontendCacheEntry struct {
@@ -83,6 +87,14 @@ type frontendCacheEntry struct {
 func NewAppService() *AppService {
 	return &AppService{
 		frontendCache: make(map[string]*frontendCacheEntry),
+		aiHTTPClient: &http.Client{
+			Timeout: 5 * time.Minute,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				IdleConnTimeout:     90 * time.Second,
+				TLSHandshakeTimeout: 10 * time.Second,
+			},
+		},
 	}
 }
 

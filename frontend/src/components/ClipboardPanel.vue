@@ -40,6 +40,9 @@ const selectedIndex = ref(0)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const activeTag = ref<string>('all')
 const observerRef = ref<IntersectionObserver | null>(null)
+let cbUpdatedHandler: (() => void) | null = null
+let cbShownHandler: (() => void) | null = null
+let cbBeforeHideHandler: (() => void) | null = null
 
 const IMAGE_CACHE_MAX = 60
 function cacheImage(id: string, dataUri: string) {
@@ -354,15 +357,18 @@ onMounted(() => {
   Events.On('clipboard:shown', clearSearch)
   Events.On('clipboard:before-hide', resetScrollOnHide)
   document.addEventListener('keydown', onPanelKeydown)
+  cbUpdatedHandler = loadEntries
+  cbShownHandler = clearSearch
+  cbBeforeHideHandler = resetScrollOnHide
 })
 
 onUnmounted(() => {
   if (refreshTimer.value !== null) {
     clearInterval(refreshTimer.value)
   }
-  Events.Off('clipboard:updated')
-  Events.Off('clipboard:shown')
-  Events.Off('clipboard:before-hide')
+  if (cbUpdatedHandler) Events.Off('clipboard:updated', cbUpdatedHandler)
+  if (cbShownHandler) Events.Off('clipboard:shown', cbShownHandler)
+  if (cbBeforeHideHandler) Events.Off('clipboard:before-hide', cbBeforeHideHandler)
   document.removeEventListener('keydown', onPanelKeydown)
   observerRef.value?.disconnect()
 })

@@ -3,6 +3,7 @@ package services
 import (
 	"fmt"
 
+	"quickdock/internal/platform"
 	"quickdock/internal/webdav"
 )
 
@@ -15,7 +16,14 @@ func (a *AppService) getWebdavCfg() (*webdav.Config, error) {
 	if err != nil {
 		return &webdav.Config{}, nil
 	}
-	return webdav.UnmarshalConfig(val), nil
+	cfg := webdav.UnmarshalConfig(val)
+	if cfg.Password != "" {
+		if dec, e := platform.DecryptSecret(cfg.Password); e == nil {
+			cfg.Password = dec
+		}
+		// 解密失败时保留原始值（兼容迁移期的明文密码）
+	}
+	return cfg, nil
 }
 
 // GetWebDAVConfig 获取 WebDAV 同步配置
@@ -42,10 +50,18 @@ func (a *AppService) SetWebDAVConfig(config *WebDAVConfig) *ApiResult {
 	if config == nil {
 		return Fail(fmt.Errorf("配置不能为空"))
 	}
+	password := config.Password
+	if password != "" {
+		enc, err := platform.EncryptSecret(password)
+		if err != nil {
+			return Fail(fmt.Errorf("密码加密失败: %w", err))
+		}
+		password = enc
+	}
 	inner := &webdav.Config{
 		URL:      config.URL,
 		Username: config.Username,
-		Password: config.Password,
+		Password: password,
 	}
 	jsonStr, err := webdav.MarshalConfig(inner)
 	if err != nil {

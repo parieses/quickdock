@@ -161,10 +161,15 @@ function confirmBatchDelete() {
 async function handleBatchDelete() {
   try {
     const ids = Array.from(selectedIds.value)
-    await Promise.all(ids.map(id => DeleteSnippet(id)))
+    const results = await Promise.allSettled(ids.map(id => DeleteSnippet(id)))
+    const failed = results.filter(r => r.status === 'rejected').length
     showBatchDeleteConfirm.value = false
     selectedIds.value = new Set()
-    toast.success(t('deleted') + ` (${ids.length})`)
+    if (failed === 0) {
+      toast.success(t('deleted') + ` (${ids.length})`)
+    } else {
+      toast.warning(t('deleted') + ` (${ids.length - failed}/${ids.length})`)
+    }
     await loadSnippets()
   } catch (e) {
     toast.error(t('deleteFailed') + ': ' + getErrorMessage(e))

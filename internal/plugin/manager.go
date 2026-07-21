@@ -147,6 +147,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 			return fmt.Errorf("创建 stderr pipe 失败: %w", err)
 		}
 		go func() {
+			defer func() { if r := recover(); r != nil { fmt.Printf("[plugin %s] stderr reader panic: %v\n", manifest.ID, r) } }()
 			scanner := bufio.NewScanner(stderr)
 			for scanner.Scan() {
 				fmt.Printf("[plugin %s] %s\n", manifest.ID, scanner.Text())
@@ -365,6 +366,11 @@ func (m *Manager) startHealthCheck() {
 	m.healthCheckWg.Add(1)
 	go func() {
 		defer m.healthCheckWg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("[plugin] healthCheck panic: %v\n", r)
+			}
+		}()
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
 		for {

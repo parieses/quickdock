@@ -191,6 +191,7 @@ func (a *AppService) wakeScheduler() {
 }
 
 func (a *AppService) scheduleLoop() {
+	defer recoverPanic("schedule runner")
 	time.Sleep(3 * time.Second)
 	for {
 		a.checkScheduledTasks()

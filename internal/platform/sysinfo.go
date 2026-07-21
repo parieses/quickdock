@@ -5,10 +5,14 @@ import (
 	"net"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unsafe"
 )
+
+// CPU 百分比缓存（后台定时采样，避免 GetSystemStatus 同步阻塞 150ms）
+var cpuPercentCache atomic.Value // float64
 
 
 
@@ -41,7 +45,7 @@ type DiskInfo struct {
 // GetSystemStatus 采集系统资源概览
 func GetSystemStatus() (*SystemStatus, error) {
 	st := &SystemStatus{}
-	st.CPUPercent = cpuPercent()
+	st.CPUPercent = loadCPUPercent()
 	used, total := memoryInfo()
 	st.MemUsedGB = used
 	st.MemTotalGB = total
@@ -73,6 +77,31 @@ func cpuPercent() float64 {
 		return 0
 	}
 	return (1 - float64(idl)/float64(total)) * 100
+}
+
+// StartCPUPercentSampler 启动后台 CPU 采样器（每 2 秒采样一次缓存结果）
+func StartCPUPercentSampler() {
+	cpuPercentCache.Store(0.0)
+	// 首次采样
+	go func() {
+		first := cpuPercent()
+		cpuPercentCache.Store(first)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			v := cpuPercent()
+			cpuPercentCache.Store(v)
+		}
+	}()
+}
+
+// loadCPUPercent 读取缓存的 CPU 百分比（非阻塞，毫秒级返回）
+func loadCPUPercent() float64 {
+	v, ok := cpuPercentCache.Load().(float64)
+	if !ok {
+		return 0
+	}
+	return v
 }
 
 func sysTimes() (idle, kernel, user uint64) {

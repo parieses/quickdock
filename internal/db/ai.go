@@ -117,14 +117,9 @@ func (d *Database) UpdateAIConversationUsage(id string, promptTokens, completion
 	if promptTokens <= 0 && completionTokens <= 0 {
 		return nil
 	}
-	existing := 0
-	_ = d.conn.QueryRow("SELECT prompt_tokens FROM ai_conversations WHERE id = ?", id).Scan(&existing)
-	// 累加（多次对话追加统计）
-	newPrompt := promptTokens
-	newCompletion := completionTokens
 	return d.ExecuteParams(
 		"UPDATE ai_conversations SET prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?, updated_at = ? WHERE id = ?",
-		[]interface{}{newPrompt, newCompletion, now(), id},
+		[]interface{}{promptTokens, completionTokens, now(), id},
 	)
 }
 

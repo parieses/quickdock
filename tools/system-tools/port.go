@@ -1,6 +1,7 @@
 package main
 
 import (
+	"os"
 	"strconv"
 	"strings"
 )
@@ -246,8 +247,23 @@ func portKill(id int64, input map[string]interface{}) {
 		return
 	}
 
-	// 先获取进程名
+	// 安全检查：拒绝系统关键进程
+	if pid <= 4 {
+		respondError(id, -1, "拒绝操作：系统关键进程 (PID ≤ 4)")
+		return
+	}
+	// 拒绝杀死自身
+	if pid == os.Getpid() {
+		respondError(id, -1, "拒绝操作：不能结束自身进程")
+		return
+	}
+
+	// 获取进程名，检查是否属于已知系统进程
 	procName := getProcessName(pid)
+	if isSystemProcess(procName) {
+		respondError(id, -1, "拒绝操作：系统关键进程: "+procName)
+		return
+	}
 
 	err := hiddenCmd("taskkill", "/F", "/PID", strconv.Itoa(pid)).Run()
 	if err != nil {
@@ -260,4 +276,19 @@ func portKill(id int64, input map[string]interface{}) {
 		"pid":     pid,
 		"name":    procName,
 	})
+}
+
+// isSystemProcess 检查是否是 Windows 系统关键进程
+func isSystemProcess(name string) bool {
+	switch strings.ToLower(strings.TrimSuffix(name, ".exe")) {
+	case "system", "smss", "csrss", "wininit", "winlogon",
+		"services", "lsass", "svchost", "lsm",
+		"explorer", "taskhost", "taskhostw",
+		"runtimebroker", "sihost", "ctfmon",
+		"dwm", "conhost", "fontdrvhost",
+		"spoolsv", "securityhealthservice",
+		"trustedinstaller", "ntoskrnl":
+		return true
+	}
+	return false
 }

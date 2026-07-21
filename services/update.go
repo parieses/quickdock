@@ -86,8 +86,9 @@ func (a *AppService) DownloadUpdate() *UpdateStatus {
 		}
 	}
 
-	// 启动内置更新窗口进行下载和安装
-	ctx := context.Background()
+	// 启动内置更新窗口进行下载和安装（设 5 分钟超时防止永久挂起）
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
 	if err := a.app.Updater.DownloadAndInstall(ctx); err != nil {
 		return &UpdateStatus{
 			CurrentVersion: a.GetAppVersion(),

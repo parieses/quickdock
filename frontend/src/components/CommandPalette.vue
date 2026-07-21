@@ -1561,6 +1561,7 @@ watch(inlineQuicklink, (v) => {
 // 组件卸载时清理定时器
 onUnmounted(() => {
   if (searchTimer) clearTimeout(searchTimer)
+  closeInlinePlugin()
   Events.Off('palette:shown')
   Events.Off('clipboard:updated')
 })

@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -82,11 +83,12 @@ func hostsList(id int64) {
 }
 
 func hostsToggle(id int64, input map[string]interface{}) {
-	lineIdx, _ := input["line"].(float64)
-	if lineIdx == 0 {
+	lv, ok := input["line"]
+	if !ok {
 		respondError(id, -1, "缺少 line 参数")
 		return
 	}
+	lineIdx, _ := lv.(float64)
 
 	path := hostsPath()
 	data, err := os.ReadFile(path)
@@ -129,6 +131,23 @@ func hostsAdd(id int64, input map[string]interface{}) {
 
 	if ip == "" || host == "" {
 		respondError(id, -1, "需要 ip 和 host 参数")
+		return
+	}
+
+	// 输入验证：IP 必须是合法 IP 地址
+	if net.ParseIP(ip) == nil {
+		respondError(id, -1, "无效的 IP 地址: "+ip)
+		return
+	}
+	// host 不能包含换行/制表符等注入字符
+	if strings.ContainsAny(host, "\n\r\t#|&") || strings.HasPrefix(host, "#") {
+		respondError(id, -1, "host 包含非法字符")
+		return
+	}
+	// 拒绝本地回环/广播地址等异常 DNS 指向
+	parsedIP := net.ParseIP(ip)
+	if parsedIP.IsUnspecified() || parsedIP.IsMulticast() {
+		respondError(id, -1, "拒绝操作：不允许的 IP 类型")
 		return
 	}
 

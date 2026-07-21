@@ -533,7 +533,7 @@ func (a *AppService) streamAIChat(ctx context.Context, cfg AIProfile, messages [
 	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("Cache-Control", "no-store")
 
-	client := &http.Client{Timeout: 5 * time.Minute}
+	client := a.aiHTTPClient
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
@@ -707,7 +707,7 @@ func (a *AppService) callAIOnce(ctx context.Context, cfg AIProfile, messages []m
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(authKey, authVal)
 
-	client := &http.Client{Timeout: 60 * time.Second}
+	client := a.aiHTTPClient
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", err
