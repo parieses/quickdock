@@ -88,7 +88,7 @@ async function loadAIProfiles() {
   }
 }
 
-watch(() => props.visible, (v) => { if (v) loadAIProfiles() }, { immediate: false })
+watch(() => props.visible, (v) => { if (v) loadAIProfiles() }, { immediate: true })
 
 function selectAIProfile(id: string) { aiActive.value = id }
 function editAIProfile(id: string) { aiActive.value = id; openAIEditor() }

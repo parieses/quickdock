@@ -36,7 +36,7 @@ async function loadSnapshots() {
   }
 }
 
-watch(() => props.visible, (v) => { if (v) loadSnapshots() }, { immediate: false })
+watch(() => props.visible, (v) => { if (v) loadSnapshots() }, { immediate: true })
 
 async function handleCreateSnapshot() {
   try {

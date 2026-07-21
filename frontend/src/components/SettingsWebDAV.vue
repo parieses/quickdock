@@ -96,7 +96,7 @@ async function deleteWebDAVBackup(name: string) {
 
 watch(() => props.visible, (v) => {
   if (v) { loadWebDAVConfig(); listWebDAVBackups() }
-}, { immediate: false })
+}, { immediate: true })
 </script>
 
 <template>
