@@ -200,7 +200,6 @@ func loadIconFromEmbed() uintptr {
 		return 0
 	}
 
-	user32 := modUser32
 	count := int(trayIcoEmbed[4]) | int(trayIcoEmbed[5])<<8
 	if count == 0 {
 		return 0
@@ -316,7 +315,6 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 func runMessageLoop() {
 	goruntime.LockOSThread()
 
-	user32 := modUser32
 	className := syscall.StringToUTF16Ptr("QuickDock_Hotkey_Window_v3")
 
 	kernel32 := modKernel32
@@ -400,7 +398,6 @@ func runMessageLoop() {
 }
 
 func createTrayIcon(hwnd uintptr) {
-	shell32 := modShell32
 
 	hIcon := trayHICON.Load()
 	if hIcon == 0 {
