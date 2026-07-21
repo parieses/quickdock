@@ -42,7 +42,6 @@ const menuItems = computed(() => [
   { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
   { key: 'webdav',     label: 'WebDAV',              icon: Cloud,    desc: t('settings') },
   { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
-  { key: 'update',     label: t('update'),            icon: RotateCcw, desc: t('updateCheckingAuto') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
 ])
 
@@ -656,14 +655,44 @@ function saveAIModal() {
 
         <!-- 右侧内容 -->
         <div class="settings-content">
-          <!-- 关于 -->
-          <div v-if="activePage === 'about'" class="content-page">
-            <div class="about-logo">⚡</div>
-            <h2>{{ t('appName') }}</h2>
-            <p class="about-version">{{ t('version') }} {{ appVersion || '0.0.0' }}</p>
-            <p class="about-desc">{{ t('appDesc') }}</p>
-            <p class="about-tech">{{ t('aboutTech') }}</p>
-            <p class="about-copy">{{ t('aboutCopyright') }}</p>
+          <!-- 关于（含版本信息和更新检查） -->
+          <div v-if="activePage === 'about'" class="content-page content-left">
+            <div class="section">
+              <h3>{{ t('appName') }}</h3>
+              <p class="about-version">{{ t('version') }} {{ appVersion || '0.0.0' }}</p>
+              <p class="about-desc">{{ t('appDesc') }}</p>
+              <p class="about-tech">{{ t('aboutTech') }}</p>
+              <p class="about-copy">{{ t('aboutCopyright') }}</p>
+            </div>
+
+            <div class="section" style="margin-top:24px">
+              <h3 class="section-title">{{ t('update') }}</h3>
+              <p class="section-desc">{{ t('updateCheckingAuto') }}</p>
+
+              <div class="action-row" style="margin-top:12px">
+                <button class="btn btn-primary" :disabled="updateChecking" @click="checkForUpdates">
+                  <RotateCcw :size="14" :class="{ spinning: updateChecking }" />
+                  {{ updateChecking ? t('updateChecking') : t('updateCheckNow') }}
+                </button>
+              </div>
+
+              <p v-if="updateResult" class="result-hint" :class="{ 'result-error': updateStatus?.state === 'error' }">{{ updateResult }}</p>
+
+              <div v-if="updateStatus?.state === 'available'" class="action-row" style="margin-top:12px">
+                <button class="btn btn-primary" @click="downloadUpdate">
+                  {{ t('updateDownload') }} {{ updateStatus.availableVersion }}
+                </button>
+                <button class="btn btn-secondary" @click="updateStatus.state = 'idle'">
+                  {{ t('updateSkip') }}
+                </button>
+              </div>
+
+              <div v-if="updateStatus?.state === 'ready'" class="action-row" style="margin-top:12px">
+                <button class="btn btn-primary update-restart-btn" @click="restartApp">
+                  {{ t('updateRestart') }}
+                </button>
+              </div>
+            </div>
           </div>
 
           <!-- 外观设置 -->
@@ -835,45 +864,6 @@ function saveAIModal() {
                     </button>
                   </div>
                 </div>
-              </div>
-            </div>
-          </div>
-
-          <!-- 检查更新 -->
-          <div v-else-if="activePage === 'update'" class="content-page content-left">
-            <div class="section">
-              <h3 class="section-title">{{ t('update') }}</h3>
-              <p class="section-desc">{{ t('updateCheckingAuto') }}</p>
-
-              <div class="setting-row">
-                <label class="setting-label">{{ t('version') }}</label>
-                <div class="setting-control">
-                  <span class="version-text">{{ appVersion || '—' }}</span>
-                </div>
-              </div>
-
-              <div class="action-row">
-                <button class="btn btn-primary" :disabled="updateChecking" @click="checkForUpdates">
-                  <RotateCcw :size="14" :class="{ spinning: updateChecking }" />
-                  {{ updateChecking ? t('updateChecking') : t('updateCheckNow') }}
-                </button>
-              </div>
-
-              <p v-if="updateResult" class="result-hint" :class="{ 'result-error': updateStatus?.state === 'error' }">{{ updateResult }}</p>
-
-              <div v-if="updateStatus?.state === 'available'" class="action-row" style="margin-top: 12px;">
-                <button class="btn btn-primary" @click="downloadUpdate">
-                  {{ t('updateDownload') }} {{ updateStatus.availableVersion }}
-                </button>
-                <button class="btn btn-secondary" @click="updateStatus.state = 'idle'">
-                  {{ t('updateSkip') }}
-                </button>
-              </div>
-
-              <div v-if="updateStatus?.state === 'ready'" class="action-row" style="margin-top: 12px;">
-                <button class="btn btn-primary update-restart-btn" @click="restartApp">
-                  {{ t('updateRestart') }}
-                </button>
               </div>
             </div>
           </div>
@@ -1125,16 +1115,13 @@ function saveAIModal() {
 .content-empty .empty-icon { font-size: 48px; margin-bottom: 16px; }
 .content-empty .empty-text { font-size: 14px; }
 
-/* 关于 */
-.about-logo { font-size: 48px; margin-bottom: 16px; }
-.about-content h2 { font-size: 20px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 4px; }
+/* 关于（含版本信息） */
 .about-version { font-size: 13px; color: var(--color-accent); margin: 0 0 16px; }
 .about-desc { font-size: 14px; color: var(--color-text-muted); margin: 0 0 4px; }
 .about-tech { font-size: 12px; color: var(--color-text-disabled); margin: 0 0 20px; }
 .about-copy { font-size: 11px; color: var(--color-text-disabled); margin: 0; }
 
-/* 检查更新 */
-.version-text { font-size: 14px; font-weight: 500; color: var(--color-text-primary); font-family: var(--font-mono); }
+/* 更新按钮 */
 .update-restart-btn { background: var(--color-accent); color: #fff; font-weight: 500; }
 .update-restart-btn:hover { opacity: 0.9; }
 .spinning { animation: spin 1s linear infinite; }

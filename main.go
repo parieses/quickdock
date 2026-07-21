@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -188,8 +189,28 @@ func main() {
 
 // initUpdater 初始化 Wails 自动更新器（使用 GitHub Releases + Ed25519 签名验证）
 func initUpdater(app *application.App, version string) error {
+	// 自定义 AssetMatcher：先试默认规则（文件名含 platform+arch），
+	// 不匹配时补充检查 .exe 后缀，支持 quickdock-amd64-installer.exe 这类不含"windows"的命名。
+	assetMatcher := func(req updater.CheckRequest, assets []github.ReleaseAsset) int {
+		idx := github.DefaultAssetMatcher(req, assets)
+		if idx >= 0 {
+			return idx
+		}
+		// 对于 windows/amd64，文件名含 "amd64" 且以 .exe 结尾即为匹配
+		if req.Platform == "windows" && req.Arch == "amd64" {
+			for i, a := range assets {
+				name := strings.ToLower(a.Name)
+				if strings.HasSuffix(name, ".exe") && strings.Contains(name, "amd64") {
+					return i
+				}
+			}
+		}
+		return -1
+	}
+
 	gh, err := github.New(github.Config{
-		Repository: "parieses/quickdock",
+		Repository:    "parieses/quickdock",
+		AssetMatcher:  assetMatcher,
 	})
 	if err != nil {
 		return fmt.Errorf("创建 GitHub provider 失败: %w", err)

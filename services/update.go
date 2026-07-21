@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
@@ -44,7 +45,7 @@ func (a *AppService) CheckForUpdates() *UpdateStatus {
 		return &UpdateStatus{
 			CurrentVersion: a.GetAppVersion(),
 			State:          "error",
-			Error:          fmt.Sprintf("检查更新失败: %v", err),
+			Error:          friendlyError(err),
 		}
 	}
 
@@ -91,7 +92,7 @@ func (a *AppService) DownloadUpdate() *UpdateStatus {
 		return &UpdateStatus{
 			CurrentVersion: a.GetAppVersion(),
 			State:          "error",
-			Error:          fmt.Sprintf("下载安装失败: %v", err),
+			Error:          friendlyError(err),
 		}
 	}
 
@@ -134,4 +135,21 @@ func (a *AppService) SkipUpdate(version string) error {
 	}
 	a.app.Updater.SkipVersion(version)
 	return nil
+}
+
+// friendlyError 将底层网络错误转为用户友好的中文提示
+func friendlyError(err error) string {
+	msg := err.Error()
+	lower := strings.ToLower(msg)
+	switch {
+	case strings.Contains(lower, "connectex") || strings.Contains(lower, "connection refused") ||
+		strings.Contains(lower, "i/o timeout") || strings.Contains(lower, "no route to host"):
+		return "网络连接失败，无法访问 GitHub。请检查网络或配置代理（HTTPS_PROXY），也可手动从 GitHub Releases 下载。"
+	case strings.Contains(lower, "no such host") || strings.Contains(lower, "dns lookup failed"):
+		return "DNS 解析失败，无法解析 GitHub 域名。请检查网络连接或 DNS 配置。"
+	case strings.Contains(lower, "tls") || strings.Contains(lower, "certificate"):
+		return "TLS/SSL 连接错误。请检查系统时间或网络环境。"
+	default:
+		return msg
+	}
 }
