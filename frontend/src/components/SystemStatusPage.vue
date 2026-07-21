@@ -189,7 +189,7 @@ onUnmounted(() => {
   border: none; border-radius: 6px;
   background: var(--color-bg-tertiary);
   color: var(--color-text-muted);
-  cursor: pointer; transition: all var(--transition-fast);
+  cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ss-refresh:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .ss-refresh.spinning { animation: ss-spin 0.8s linear infinite; }

@@ -57,8 +57,8 @@ defineEmits<{
 }
 
 /* transition */
-.toast-enter-active { transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
-.toast-leave-active { transition: all 0.2s ease-in; }
+.toast-enter-active { transition: opacity 0.3s cubic-bezier(0.16, 1, 0.3, 1), transform 0.3s cubic-bezier(0.16, 1, 0.3, 1); }
+.toast-leave-active { transition: opacity 0.2s ease-in, transform 0.2s ease-in; }
 .toast-enter-from { opacity: 0; transform: translateY(-20px) scale(0.95); }
 .toast-leave-to { opacity: 0; transform: translateY(-12px) scale(0.95); }
 .toast-move { transition: transform 0.3s ease; }

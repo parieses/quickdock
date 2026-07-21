@@ -506,7 +506,7 @@ onMounted(refresh)
 .act {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--color-text-disabled);
-  border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition-fast);
+  border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
 .act:disabled { opacity: 0.4; cursor: default; }
@@ -539,7 +539,7 @@ onMounted(refresh)
   display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 12px;
-  cursor: pointer; font-family: inherit; transition: all var(--transition-fast);
+  cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .seg-btn:hover { color: var(--color-text-primary); }
 .seg-btn.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
@@ -548,7 +548,7 @@ onMounted(refresh)
 .wd-btn {
   width: 34px; height: 32px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 12px;
-  cursor: pointer; font-family: inherit; transition: all var(--transition-fast);
+  cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .wd-btn:hover { color: var(--color-text-primary); }
 .wd-btn.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }

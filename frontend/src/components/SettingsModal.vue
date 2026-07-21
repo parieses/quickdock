@@ -1,25 +1,26 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Trash2, Plus, Bot, Pen } from '@lucide/vue'
+import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { unwrap } from '../utils/api'
 import { i18n } from '../i18n'
+import { Events } from '@wailsio/runtime'
 
 const { t } = useI18n()
+const toast = inject<ToastAPI>('toast')!
 const store = useWorkspaceStore()
 import HotkeySettings from './HotkeySettings.vue'
+import SettingsAI from './SettingsAI.vue'
+import SettingsSnapshot from './SettingsSnapshot.vue'
+import SettingsWebDAV from './SettingsWebDAV.vue'
 import { GetClipboardRetentionDays, SetClipboardRetentionDays, CleanupClipboardNow } from '../../bindings/quickdock/services/appservice'
 import { GetAutoStart, SetAutoStart } from '../../bindings/quickdock/services/appservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services/appservice'
-import { CreateSnapshot, ListSnapshots, DeleteSnapshot, RestoreSnapshot } from '../../bindings/quickdock/services/appservice'
-import { GetWebDAVConfig, SetWebDAVConfig, WebDAVTestConnection, WebDAVExportBackup, WebDAVListBackups, WebDAVDownaloadAndRestore, WebDAVDeleteBackup } from '../../bindings/quickdock/services/appservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/appservice'
-import { AIListProfiles, AISaveProfiles, AITestConnection } from '../../bindings/quickdock/services/appservice'
 import type { UpdateStatus, AIProfile } from '../../bindings/quickdock/services/models'
-import type { AIProfilesResult } from '../types/ai'
-import type { Snapshot } from '../types'
+import type { ToastAPI } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
 
@@ -191,25 +192,6 @@ onMounted(async () => {
   } catch (_) {}
 })
 
-// 进入快照页面时加载列表
-watch(activePage, async (page) => {
-  if (page === 'snapshot') {
-    await loadSnapshots()
-  }
-})
-
-// 进入 WebDAV 页面自动加载配置和备份列表
-watch(activePage, (page) => {
-  if (page === 'webdav') {
-    loadWebDAVConfig()
-    listWebDAVBackups()
-  }
-})
-
-watch(activePage, (page) => {
-  if (page === 'ai') loadAIProfiles()
-})
-
 // ---- 剪贴板设置 ----
 const clipboardRetentionDays = ref(30)
 const cleanupResult = ref('')
@@ -237,9 +219,6 @@ function onGlobalKeydown(e: KeyboardEvent) {
 onUnmounted(() => {
   document.removeEventListener('keydown', onGlobalKeydown)
   clearCleanupTimer()
-  if (snapshotMsgTimer.value) clearTimeout(snapshotMsgTimer.value)
-  if (webdavTimer !== null) clearTimeout(webdavTimer)
-  if (aiMsgTimer !== null) clearTimeout(aiMsgTimer)
 })
 
 async function saveRetentionDays() {
@@ -272,347 +251,6 @@ async function toggleAutoStart() {
   } catch (e) {
     autoStartResult.value = t('saveFailed2') + ': ' + getErrorMessage(e)
   }
-}
-
-// ---- 快照 ----
-const snapshots = ref<Snapshot[]>([])
-const snapshotLabel = ref('')
-const snapshotNote = ref('')
-const showCreateSnapshotForm = ref(false)
-const snapshotMsg = ref('')
-const snapshotMsgTimer = ref<ReturnType<typeof setTimeout> | null>(null)
-
-function showSnapshotMsg(msg: string, duration = 3000) {
-  if (snapshotMsgTimer.value) clearTimeout(snapshotMsgTimer.value)
-  snapshotMsg.value = msg
-  snapshotMsgTimer.value = setTimeout(() => { snapshotMsg.value = ''; snapshotMsgTimer.value = null }, duration)
-}
-
-async function loadSnapshots() {
-  try {
-    const result = unwrap(await ListSnapshots())
-    snapshots.value = result ?? []
-  } catch (e) {
-    showSnapshotMsg(t('snapshotRestoreFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-async function handleCreateSnapshot() {
-  try {
-    unwrap(await CreateSnapshot(snapshotLabel.value, snapshotNote.value))
-    snapshotLabel.value = ''
-    snapshotNote.value = ''
-    showCreateSnapshotForm.value = false
-    showSnapshotMsg(t('snapshotCreated'))
-    await loadSnapshots()
-  } catch (e) {
-    showSnapshotMsg(t('snapshotCreateFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-async function handleRestoreSnapshot(id: string) {
-  if (!window.confirm(t('confirmRestore'))) return
-  try {
-    unwrap(await RestoreSnapshot(id))
-    showSnapshotMsg(t('restoreSuccess'))
-    // 关闭设置后重新加载 store 数据
-    setTimeout(async () => {
-      close()
-      await store.initialize()
-    }, 800)
-  } catch (e) {
-    showSnapshotMsg(t('snapshotRestoreFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-async function handleDeleteSnapshot(id: string) {
-  if (!window.confirm(t('confirmDeleteSnapshot'))) return
-  try {
-    unwrap(await DeleteSnapshot(id))
-    showSnapshotMsg(t('snapshotDeleted'))
-    await loadSnapshots()
-  } catch (e) {
-    showSnapshotMsg(t('snapshotRestoreFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return bytes + ' B'
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB'
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB'
-}
-
-function formatDate(iso: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  const pad = (n: number) => n.toString().padStart(2, '0')
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
-}
-
-// ---- WebDAV 同步 ----
-const webdavURL = ref('')
-const webdavUser = ref('')
-const webdavPass = ref('')
-const webdavMsg = ref('')
-let webdavTimer: ReturnType<typeof setTimeout> | null = null
-const webdavBackups = ref<{ name: string; size: number; time: string }[]>([])
-const webdavLoading = ref(false)
-
-function showWebdavMsg(msg: string, duration = 3000) {
-  if (webdavTimer !== null) clearTimeout(webdavTimer)
-  webdavMsg.value = msg
-  if (duration > 0) webdavTimer = setTimeout(() => { webdavMsg.value = ''; webdavTimer = null }, duration)
-}
-
-async function loadWebDAVConfig() {
-  try {
-    const cfg = unwrap(await GetWebDAVConfig())
-    webdavURL.value = cfg?.url ?? ''
-    webdavUser.value = cfg?.username ?? ''
-    webdavPass.value = cfg?.password ?? ''
-  } catch (_) {}
-}
-
-async function saveWebDAVConfig() {
-  try {
-    unwrap(await SetWebDAVConfig({ url: webdavURL.value, username: webdavUser.value, password: webdavPass.value }))
-    showWebdavMsg(t('saved'))
-  } catch (e) {
-    showWebdavMsg(t('saveFailed2') + ': ' + getErrorMessage(e))
-  }
-}
-
-async function testWebDAVConnection() {
-  if (!webdavURL.value.trim()) {
-    showWebdavMsg('❌ ' + t('webdavUrl') + t('inputCannotBeEmpty'))
-    return
-  }
-  webdavLoading.value = true
-  try {
-    await saveWebDAVConfig()
-    unwrap(await WebDAVTestConnection())
-    showWebdavMsg('✅ ' + t('webdavTestSuccess'))
-  } catch (e) {
-    showWebdavMsg('❌ ' + t('webdavTestFailed') + ': ' + getErrorMessage(e))
-  } finally {
-    webdavLoading.value = false
-  }
-}
-
-async function uploadWebDAVBackup() {
-  if (!webdavURL.value.trim()) {
-    showWebdavMsg('❌ ' + t('webdavUrl') + t('inputCannotBeEmpty'))
-    return
-  }
-  webdavLoading.value = true
-  try {
-    await saveWebDAVConfig()
-    const name = unwrap<string>(await WebDAVExportBackup())
-    showWebdavMsg('✅ ' + t('webdavUploadSuccess') + ': ' + name)
-    await listWebDAVBackups()
-  } catch (e) {
-    showWebdavMsg('❌ ' + t('webdavUploadFailed') + ': ' + getErrorMessage(e))
-  } finally {
-    webdavLoading.value = false
-  }
-}
-
-async function listWebDAVBackups() {
-  try {
-    const list = unwrap(await WebDAVListBackups())
-    webdavBackups.value = list ?? []
-  } catch (e) {
-    showWebdavMsg(t('webdavListFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-async function restoreWebDAVBackup(name: string) {
-  if (!window.confirm(t('confirmRestore'))) return
-  webdavLoading.value = true
-  try {
-    unwrap(await WebDAVDownaloadAndRestore(name))
-    showWebdavMsg('✅ ' + t('restoreSuccess'))
-    setTimeout(async () => {
-      close()
-      await store.initialize()
-    }, 800)
-  } catch (e) {
-    showWebdavMsg('❌ ' + t('snapshotRestoreFailed') + ': ' + getErrorMessage(e))
-  } finally {
-    webdavLoading.value = false
-  }
-}
-
-async function deleteWebDAVBackup(name: string) {
-  if (!window.confirm(t('confirmDelete'))) return
-  try {
-    unwrap(await WebDAVDeleteBackup(name))
-    showWebdavMsg(t('deleted'))
-    await listWebDAVBackups()
-  } catch (e) {
-    showWebdavMsg(t('saveFailed2') + ': ' + getErrorMessage(e))
-  }
-}
-
-// ---- AI 助手配置 ----
-const aiPresets: Record<string, string> = {
-  openai: 'https://api.openai.com/v1',
-  deepseek: 'https://api.deepseek.com/v1',
-  kimi: 'https://api.moonshot.cn/v1',
-  qwen: 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-  ollama: 'http://localhost:11434/v1',
-  azure: 'https://{resource}.openai.azure.com',
-  custom: '',
-}
-const aiProviders = [
-  { value: 'openai', label: 'OpenAI' },
-  { value: 'deepseek', label: 'DeepSeek' },
-  { value: 'kimi', label: 'Kimi (Moonshot)' },
-  { value: 'qwen', label: '通义千问 (Qwen)' },
-  { value: 'ollama', label: 'Ollama (本地)' },
-  { value: 'azure', label: 'Azure OpenAI' },
-  { value: 'custom', label: '自定义 / 其他' },
-]
-const aiProfiles = ref<AIProfile[]>([])
-const aiActive = ref('')
-const aiMsg = ref('')
-const aiMsgError = ref(false)
-const aiTesting = ref(false)
-const aiEditDraft = ref<AIProfile | null>(null)
-let aiMsgTimer: ReturnType<typeof setTimeout> | null = null
-
-const aiCurrent = computed<AIProfile | null>(() =>
-  aiProfiles.value.find((p) => p.id === aiActive.value) || null,
-)
-
-function showAIMsg(text: string, isError = false) {
-  aiMsg.value = text
-  aiMsgError.value = isError
-  if (aiMsgTimer !== null) clearTimeout(aiMsgTimer)
-  aiMsgTimer = setTimeout(() => { aiMsg.value = ''; aiMsgError.value = false }, 4000)
-}
-
-function newAIProfile(): AIProfile {
-  const provider = 'openai'
-  return {
-    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()),
-    name: '',
-    provider,
-    baseURL: aiPresets[provider] || '',
-    apiKey: '',
-    model: 'gpt-4o-mini',
-    temperature: 0.7,
-    maxTokens: 8192,
-    systemPrompt: '',
-    topP: 0,
-    frequencyPenalty: 0,
-    presencePenalty: 0,
-    thinkingEnabled: true,
-  }
-}
-
-async function loadAIProfiles() {
-  try {
-    const res = unwrap<AIProfilesResult>(await AIListProfiles())
-    if (!res) return
-    aiProfiles.value = res.profiles ?? []
-    aiActive.value = res.active || (aiProfiles.value[0]?.id ?? '')
-    if (aiProfiles.value.length === 0) {
-      const p = newAIProfile()
-      aiProfiles.value = [p]
-      aiActive.value = p.id
-    }
-  } catch (e) {
-    showAIMsg(t('loadFailed') + ': ' + getErrorMessage(e), true)
-  }
-}
-
-function selectAIProfile(id: string) {
-  aiActive.value = id
-}
-
-function editAIProfile(id: string) {
-  aiActive.value = id
-  openAIEditor()
-}
-
-function addAIProfile() {
-  const p = newAIProfile()
-  aiProfiles.value.push(p)
-  aiActive.value = p.id
-  openAIEditor()
-}
-
-function delAIProfile(id: string) {
-  aiProfiles.value = aiProfiles.value.filter((p) => p.id !== id)
-  if (aiActive.value === id) {
-    aiActive.value = aiProfiles.value[0]?.id ?? ''
-  }
-}
-
-function onAIProviderChange() {
-  const cur = aiCurrent.value
-  if (!cur) return
-  const url = aiPresets[cur.provider]
-  if (url) cur.baseURL = url
-}
-
-async function saveAIProfiles() {
-  try {
-    unwrap(await AISaveProfiles({ active: aiActive.value, profiles: aiProfiles.value }))
-    showAIMsg(t('saved'))
-  } catch (e) {
-    showAIMsg(t('saveFailed2') + ': ' + getErrorMessage(e), true)
-  }
-}
-
-async function testAIConnection() {
-  const cur = aiCurrent.value
-  if (!cur || !cur.apiKey || !cur.baseURL || !cur.model) {
-    showAIMsg('请先填写 API Key、Base URL 和 Model', true)
-    return
-  }
-  // 先保存当前档案，确保后端拿到最新数据
-  await saveAIProfiles()
-  aiTesting.value = true
-  showAIMsg('测试中…')
-  try {
-    const res = await AITestConnection(cur.id)
-    if (!res) throw new Error('无响应')
-    showAIMsg(res.message || '未知', res.success !== true)
-  } catch (e: any) {
-    showAIMsg('测试失败: ' + (e?.message || String(e)), true)
-  } finally {
-    aiTesting.value = false
-  }
-}
-
-// 配置编辑模态框
-function openAIEditor() {
-  const cur = aiCurrent.value
-  if (!cur) return
-  aiEditDraft.value = { ...cur } // clone
-}
-
-function onAIProviderChangeDraft() {
-  const d = aiEditDraft.value
-  if (!d) return
-  const url = aiPresets[d.provider]
-  if (url) d.baseURL = url
-}
-
-function closeAIEditor() {
-  aiEditDraft.value = null
-}
-
-function saveAIModal() {
-  const draft = aiEditDraft.value
-  if (!draft) return
-  // 回写到 profiles 数组
-  const idx = aiProfiles.value.findIndex((p) => p.id === draft.id)
-  if (idx >= 0) aiProfiles.value[idx] = { ...draft }
-  aiEditDraft.value = null
-  saveAIProfiles()
 }
 
 </script>
@@ -762,121 +400,12 @@ function saveAIModal() {
 
           <!-- WebDAV 同步 -->
           <div v-else-if="activePage === 'webdav'" class="content-page content-left">
-            <div class="section">
-              <h3 class="section-title">{{ t('webdavConfig') }}</h3>
-              <p class="section-desc">{{ t('webdavDesc') }}</p>
-
-              <div class="webdav-form">
-                <label class="field">
-                  <span class="field-label">{{ t('webdavUrl') }}</span>
-                  <input v-model="webdavURL" type="text" class="field-input" placeholder="https://example.com/remote.php/dav/files/user/" />
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('webdavUsername') }}</span>
-                  <input v-model="webdavUser" type="text" class="field-input" />
-                </label>
-                <label class="field">
-                  <span class="field-label">{{ t('webdavPassword') }}</span>
-                  <input v-model="webdavPass" type="password" class="field-input" />
-                </label>
-
-                <div class="webdav-actions">
-                  <button class="btn btn-primary" :disabled="webdavLoading" @click="saveWebDAVConfig">
-                    {{ t('save') }}
-                  </button>
-                  <button class="btn btn-secondary" :disabled="webdavLoading" @click="testWebDAVConnection">
-                    {{ t('webdavTest') }}
-                  </button>
-                </div>
-
-                <div class="webdav-actions" style="margin-top: 12px;">
-                  <button class="btn btn-primary" :disabled="webdavLoading" @click="uploadWebDAVBackup">
-                    <Plus :size="14" /> {{ t('webdavUpload') }}
-                  </button>
-                  <button class="btn btn-secondary" :disabled="webdavLoading" @click="listWebDAVBackups">
-                    <RotateCcw :size="14" /> {{ t('refresh') }}
-                  </button>
-                </div>
-
-                <p v-if="webdavMsg" class="result-hint" :class="{ 'result-error': webdavMsg.startsWith('❌') }">{{ webdavMsg }}</p>
-              </div>
-            </div>
-
-            <!-- 备份文件列表 -->
-            <div class="section" style="margin-top: 24px;">
-              <h3 class="section-title">{{ t('webdavBackups') }}</h3>
-              <div v-if="webdavBackups.length === 0" class="snapshot-empty">
-                {{ t('webdavNoBackups') }}
-              </div>
-              <div v-else class="snapshot-list">
-                <div v-for="b in webdavBackups" :key="b.name" class="snapshot-item">
-                  <div class="snapshot-item-info">
-                    <span class="snapshot-item-label">{{ b.name }}</span>
-                    <span class="snapshot-item-meta">
-                      {{ formatSize(b.size) }}
-                      <template v-if="b.time"> · {{ b.time }}</template>
-                    </span>
-                  </div>
-                  <div class="snapshot-item-actions">
-                    <button class="action-btn" @click="restoreWebDAVBackup(b.name)" :disabled="webdavLoading" :title="t('restore')">
-                      <RotateCcw :size="14" />
-                    </button>
-                    <button class="action-btn danger" @click="deleteWebDAVBackup(b.name)" :disabled="webdavLoading" :title="t('delete')">
-                      <Trash2 :size="14" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <SettingsWebDAV :visible="activePage === 'webdav'" @close="close" />
           </div>
 
           <!-- 快照备份 -->
           <div v-else-if="activePage === 'snapshot'" class="content-page content-left">
-            <div class="section">
-              <h3 class="section-title">{{ t('snapshot') }}</h3>
-              <p class="section-desc">{{ t('snapshotDesc') }}</p>
-
-              <!-- 创建快照 -->
-              <div class="snapshot-create-area">
-                <button v-if="!showCreateSnapshotForm" class="btn btn-primary" @click="showCreateSnapshotForm = true">
-                  <Plus :size="14" /> {{ t('createSnapshot') }}
-                </button>
-                <div v-else class="snapshot-create-form">
-                  <input v-model="snapshotLabel" class="snapshot-input" :placeholder="t('snapshotLabelPlaceholder')" />
-                  <input v-model="snapshotNote" class="snapshot-input" :placeholder="t('snapshotNotePlaceholder')" />
-                  <div class="snapshot-create-actions">
-                    <button class="btn btn-primary" @click="handleCreateSnapshot">{{ t('create') }}</button>
-                    <button class="btn btn-secondary" @click="showCreateSnapshotForm = false; snapshotLabel = ''; snapshotNote = ''">{{ t('cancel') }}</button>
-                  </div>
-                </div>
-              </div>
-
-              <p v-if="snapshotMsg" class="result-hint">{{ snapshotMsg }}</p>
-
-              <!-- 快照列表 -->
-              <div v-if="snapshots.length === 0" class="snapshot-empty">
-                <HardDrive :size="36" class="empty-icon" />
-                <p class="empty-text">{{ t('emptySnapshots') }}</p>
-                <p class="empty-hint">{{ t('createFirstSnapshot') }}</p>
-              </div>
-              <div v-else class="snapshot-list">
-                <div v-for="s in snapshots" :key="s.id" class="snapshot-item">
-                  <div class="snapshot-item-info">
-                    <span class="snapshot-item-label">{{ s.label || t('snapshot') }}</span>
-                    <span v-if="s.note" class="snapshot-item-note">{{ s.note }}</span>
-                    <span class="snapshot-item-meta">{{ formatDate(s.created_at) }} · {{ formatSize(s.size) }}</span>
-                  </div>
-                  <div class="snapshot-item-actions">
-                    <button class="action-btn restore-btn" @click="handleRestoreSnapshot(s.id)" :title="t('restoreSnapshot')">
-                      <RotateCcw :size="14" />
-                    </button>
-                    <button class="action-btn danger" @click="handleDeleteSnapshot(s.id)" :title="t('deleteSnapshot')">
-                      <Trash2 :size="14" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </div>
+            <SettingsSnapshot :visible="activePage === 'snapshot'" @close="close" />
           </div>
 
           <!-- 通用设置 -->
@@ -901,126 +430,7 @@ function saveAIModal() {
 
           <!-- AI 助手 -->
           <div v-else-if="activePage === 'ai'" class="content-page content-left">
-            <div class="section">
-              <h3 class="section-title">{{ t('navAi') }}</h3>
-              <p class="section-desc">{{ t('aiSettingsDesc') }}</p>
-
-              <div class="ai-profiles">
-                <div
-                  v-for="p in aiProfiles"
-                  :key="p.id"
-                  :class="['ai-profile-item', { active: p.id === aiActive }]"
-                >
-                  <div class="ai-profile-info" @click="selectAIProfile(p.id)">
-                    <span class="ai-profile-name">{{ p.name || t('aiProfileDefault') }}</span>
-                    <span class="ai-profile-model">{{ p.model || '—' }}</span>
-                  </div>
-                  <div class="ai-profile-actions">
-                    <button class="ai-profile-edit" :title="t('aiEditProfile')" @click.stop="editAIProfile(p.id)">
-                      <Pen :size="13" />
-                    </button>
-                    <button
-                      v-if="aiProfiles.length > 1"
-                      class="ai-profile-del"
-                      :title="t('delete')"
-                      @click.stop="delAIProfile(p.id)"
-                    >
-                      <Trash2 :size="13" />
-                    </button>
-                  </div>
-                </div>
-                <button class="ai-profile-add" @click="addAIProfile">
-                  <Plus :size="13" /> {{ t('aiAddProfile') }}
-                </button>
-              </div>
-
-              <!-- 编辑配置按钮 -->
-              <div v-if="!aiEditDraft" class="ai-edit-bar">
-                <button v-if="aiCurrent" class="btn btn-primary" @click="openAIEditor">
-                  <Pen :size="13" /> {{ t('aiEditProfile') }}
-                </button>
-                <button class="btn btn-secondary" @click="testAIConnection" :disabled="aiTesting">
-                  {{ aiTesting ? t('aiTesting') : t('aiTestConnection') }}
-                </button>
-                <button class="btn btn-primary" @click="saveAIProfiles">{{ t('save') }}</button>
-              </div>
-
-              <!-- 配置编辑模态框 -->
-              <Teleport to="body">
-                <div v-if="aiEditDraft" class="ai-modal-overlay" @mousedown.self="closeAIEditor">
-                  <div class="ai-modal">
-                    <div class="ai-modal-header">
-                      <h3>{{ t('aiEditProfile') }}</h3>
-                      <button class="ai-modal-close" @click="closeAIEditor">&times;</button>
-                    </div>
-                    <div class="ai-modal-body">
-                      <label class="field">
-                        <span class="field-label">{{ t('aiProfileName') }}</span>
-                        <input v-model="aiEditDraft.name" type="text" class="field-input" :placeholder="t('aiProfileNamePh')" />
-                      </label>
-                      <label class="field">
-                        <span class="field-label">{{ t('aiProvider') }}</span>
-                        <select v-model="aiEditDraft.provider" class="field-input" @change="onAIProviderChangeDraft">
-                          <option v-for="p in aiProviders" :key="p.value" :value="p.value">{{ p.label }}</option>
-                        </select>
-                      </label>
-                      <label class="field">
-                        <span class="field-label">{{ t('aiBaseURL') }}</span>
-                        <input v-model="aiEditDraft.baseURL" type="text" class="field-input" placeholder="https://api.openai.com/v1" />
-                      </label>
-                      <label class="field">
-                        <span class="field-label">{{ t('aiAPIKey') }}</span>
-                        <input v-model="aiEditDraft.apiKey" type="password" class="field-input" placeholder="sk-..." />
-                      </label>
-                      <label class="field">
-                        <span class="field-label">{{ t('aiModel') }}</span>
-                        <input v-model="aiEditDraft.model" type="text" class="field-input" placeholder="gpt-4o-mini / deepseek-chat" />
-                      </label>
-                      <div class="field-row">
-                        <label class="field field-half">
-                          <span class="field-label">{{ t('aiTemperature') }}</span>
-                          <input v-model.number="aiEditDraft.temperature" type="number" min="0" max="2" step="0.1" class="num-input" />
-                        </label>
-                        <label class="field field-half">
-                          <span class="field-label">{{ t('aiMaxTokens') }}</span>
-                          <input v-model.number="aiEditDraft.maxTokens" type="number" min="0" max="131072" step="1" class="num-input" placeholder="0" />
-                        </label>
-                      </div>
-                      <label class="field field-textarea">
-                        <span class="field-label">{{ t('aiSystemPrompt') }}</span>
-                        <textarea v-model="aiEditDraft.systemPrompt" class="field-input" rows="3" :placeholder="t('aiSystemPromptPh')"></textarea>
-                      </label>
-                      <div class="field-row">
-                        <label class="field field-half">
-                          <span class="field-label">top_p</span>
-                          <input v-model.number="aiEditDraft.topP" type="number" min="0" max="1" step="0.05" class="num-input" placeholder="0" />
-                        </label>
-                        <label class="field field-half">
-                          <span class="field-label">frequency_penalty</span>
-                          <input v-model.number="aiEditDraft.frequencyPenalty" type="number" min="-2" max="2" step="0.1" class="num-input" placeholder="0" />
-                        </label>
-                      </div>
-                      <div class="field-row">
-                        <label class="field field-half">
-                          <span class="field-label">presence_penalty</span>
-                          <input v-model.number="aiEditDraft.presencePenalty" type="number" min="-2" max="2" step="0.1" class="num-input" placeholder="0" />
-                        </label>
-                        <label class="field field-half toggle-field">
-                          <span class="field-label">思考模式 (thinking)</span>
-                          <button :class="['toggle-btn-sm', { active: aiEditDraft.thinkingEnabled }]" @click="aiEditDraft.thinkingEnabled = !aiEditDraft.thinkingEnabled">
-                            <span class="toggle-knob" />
-                          </button>
-                        </label>
-                      </div>
-                    </div>
-                    <div class="ai-modal-footer">
-                      <button class="btn btn-secondary" @click="closeAIEditor">{{ t('cancel') }}</button>
-                      <button class="btn btn-primary" @click="saveAIModal">{{ t('save') }}</button>
-                    </div>
-                  </div>
-                </div>
-              </Teleport>
-            </div>
+            <SettingsAI :visible="activePage === 'ai'" />
           </div>
 
           <!-- 其他设置页占位（旧路由兼容） -->
@@ -1075,7 +485,7 @@ function saveAIModal() {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
   width: 30px; height: 30px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  transition: all 0.12s;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .close-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 
@@ -1088,7 +498,7 @@ function saveAIModal() {
   padding: 12px 20px; border: none; background: transparent;
   color: var(--color-text-muted); font-size: 13px; cursor: pointer;
   text-align: left; font-family: inherit;
-  transition: all 0.12s;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .menu-row:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .menu-row.active { background: var(--color-bg-hover); color: var(--color-accent); }
@@ -1144,7 +554,7 @@ function saveAIModal() {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;
   padding: 16px 12px; border: 1px solid var(--color-border); border-radius: 10px;
   background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer;
-  font-family: inherit; transition: all 0.12s;
+  font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .theme-card:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
 .theme-card.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
@@ -1152,7 +562,7 @@ function saveAIModal() {
 .locale-btn {
   padding: 8px 20px; border: 1px solid var(--color-border); border-radius: 8px;
   background: transparent; color: var(--color-text-muted); font-size: 13px; cursor: pointer;
-  font-family: inherit; transition: all 0.12s;
+  font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .locale-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
 .locale-btn.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
@@ -1175,7 +585,7 @@ function saveAIModal() {
 .btn {
   padding: 6px 14px; border: none; border-radius: 6px;
   font-size: 12px; cursor: pointer; font-family: inherit;
-  transition: all 0.12s;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .btn-primary { background: var(--color-accent); color: var(--color-accent-text); }
 .btn-primary:hover { background: var(--color-accent-hover); }
@@ -1227,7 +637,7 @@ function saveAIModal() {
 .ai-profile-item {
   display: flex; align-items: center; gap: 8px;
   padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px;
-  cursor: pointer; background: var(--color-bg-tertiary); transition: all var(--transition-fast);
+  cursor: pointer; background: var(--color-bg-tertiary); transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-profile-item:hover { border-color: var(--color-border-light); }
 .ai-profile-item.active { border-color: var(--color-accent); background: var(--color-accent-bg); }
@@ -1251,7 +661,7 @@ function saveAIModal() {
   display: flex; align-items: center; justify-content: center; gap: 4px;
   padding: 7px; border: 1px dashed var(--color-border); background: transparent;
   color: var(--color-text-secondary); border-radius: 8px; cursor: pointer;
-  font-family: inherit; font-size: 12px; transition: all var(--transition-fast);
+  font-family: inherit; font-size: 12px; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-profile-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
 
@@ -1330,7 +740,7 @@ function saveAIModal() {
 .snapshot-item-actions .action-btn {
   width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--color-text-muted); border-radius: 6px;
-  cursor: pointer; transition: all 0.12s;
+  cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .snapshot-item-actions .action-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .snapshot-item-actions .restore-btn:hover { color: var(--color-accent); }

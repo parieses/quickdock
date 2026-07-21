@@ -754,7 +754,7 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 5px; padding: 0 10px;
   height: 32px; background: transparent; color: var(--color-text-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  font-size: 13px; cursor: pointer; transition: all var(--transition-fast);
+  font-size: 13px; cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .refresh-control:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .refresh-select {
@@ -828,7 +828,7 @@ onUnmounted(() => {
 .act {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--color-text-disabled);
-  border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition-fast);
+  border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
 .act:disabled { opacity: 0.4; cursor: default; }
@@ -838,7 +838,7 @@ onUnmounted(() => {
 .expand-btn {
   width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--color-text-disabled);
-  border-radius: var(--radius-sm); cursor: pointer; flex-shrink: 0; transition: all var(--transition-fast);
+  border-radius: var(--radius-sm); cursor: pointer; flex-shrink: 0; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .expand-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 
@@ -850,7 +850,7 @@ onUnmounted(() => {
 .range-tab {
   font-size: 11px; padding: 2px 9px; border: none; background: transparent;
   color: var(--color-text-muted); border-radius: 4px; cursor: pointer; font-family: inherit;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .range-tab:hover { color: var(--color-text-primary); }
 .range-tab.active { background: var(--color-accent); color: #fff; }

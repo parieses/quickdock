@@ -785,14 +785,14 @@ onMounted(() => {
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); cursor: pointer; transition: all var(--transition-fast);
+  border-radius: var(--radius-md); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .cal-btn:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
 .cal-month { font-size: 14px; font-weight: 600; color: var(--color-text-primary); min-width: 88px; text-align: center; }
 .cal-today {
   margin-left: var(--space-2); padding: 5px 12px; border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); font-size: 12px; cursor: pointer; transition: all var(--transition-fast);
+  border-radius: var(--radius-md); font-size: 12px; cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .cal-today:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
 
@@ -844,7 +844,7 @@ onMounted(() => {
   display: flex; align-items: center; gap: 6px; margin-top: var(--space-3);
   padding: 8px 10px; border: 1px solid var(--color-border); background: var(--color-bg-primary);
   color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 12px;
-  cursor: pointer; font-family: inherit; transition: all var(--transition-fast);
+  cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .unscheduled-chip:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .unscheduled-chip.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
@@ -863,7 +863,7 @@ onMounted(() => {
 .vt-btn {
   padding: 4px 10px; border: none; background: var(--color-bg-tertiary);
   color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .vt-btn + .vt-btn { border-left: 1px solid var(--color-border); }
 .vt-btn.active { background: var(--color-accent); color: #fff; }
@@ -871,7 +871,7 @@ onMounted(() => {
 /* 状态徽章（4.3）*/
 .status-pill {
   font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: 8px; cursor: pointer;
-  border: 1px solid transparent; font-family: inherit; transition: all var(--transition-fast);
+  border: 1px solid transparent; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .status-pill.st-todo { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .status-pill.st-doing { background: rgba(245, 166, 35, 0.15); color: #f5a623; border-color: rgba(245, 166, 35, 0.35); }
@@ -918,7 +918,7 @@ onMounted(() => {
 .tag-fbtn {
   font-size: 11px; padding: 2px 10px; border-radius: 8px; cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-muted); font-family: inherit; transition: all var(--transition-fast);
+  color: var(--color-text-muted); font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .tag-fbtn:hover { color: var(--color-text-primary); border-color: var(--color-border-focus); }
 .tag-fbtn.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
@@ -945,7 +945,7 @@ onMounted(() => {
 .check {
   flex-shrink: 0; width: 18px; height: 18px; border: 1.5px solid var(--color-border);
   background: transparent; border-radius: 5px; cursor: pointer; display: flex;
-  align-items: center; justify-content: center; color: #fff; transition: all var(--transition-fast);
+  align-items: center; justify-content: center; color: #fff; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .check:hover { border-color: var(--color-accent); }
 .check.checked { background: var(--color-accent); border-color: var(--color-accent); }
@@ -960,7 +960,7 @@ onMounted(() => {
 .tag-chip {
   font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: 8px;
   background: var(--color-accent-bg); color: var(--color-accent);
-  cursor: pointer; transition: all var(--transition-fast);
+  cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .tag-chip:hover { filter: brightness(1.15); }
 .rec-pill { color: var(--color-text-secondary); }
@@ -969,7 +969,7 @@ onMounted(() => {
 .act {
   width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--color-text-disabled);
-  border-radius: var(--radius-sm); cursor: pointer; transition: all var(--transition-fast);
+  border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .act.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
@@ -978,14 +978,14 @@ onMounted(() => {
 .clear-btn {
   padding: 6px 12px; border: 1px solid var(--color-border); background: transparent;
   color: var(--color-text-disabled); border-radius: var(--radius-md); font-size: 12px;
-  cursor: pointer; font-family: inherit; transition: all var(--transition-fast);
+  cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .clear-btn:hover { color: var(--color-danger); border-color: rgba(232, 76, 76, 0.3); }
 .test-btn {
   display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
   padding: 6px 12px; border: 1px solid var(--color-border); background: transparent;
   color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 12px;
-  cursor: pointer; font-family: inherit; transition: all var(--transition-fast);
+  cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .test-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
 .test-btn:disabled { opacity: 0.5; cursor: default; }

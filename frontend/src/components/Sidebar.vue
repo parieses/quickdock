@@ -198,7 +198,7 @@ async function handleDeleteScene(sceneId: string) {
             <button class="ws-item-action" :title="t('edit')" @click="startEditWorkspace(ws)">
               <Pencil :size="11" />
             </button>
-            <button class="ws-item-action danger" :title="t('delete')" :disabled="ws.name === '默认工作空间'" :class="{ 'ws-action-disabled': ws.name === '默认工作空间' }" @click="handleDeleteWorkspace(ws.id, ws.name)">
+            <button class="ws-item-action danger" :title="t('delete')" :disabled="store.workspaces.indexOf(ws) === 0" :class="{ 'ws-action-disabled': store.workspaces.indexOf(ws) === 0 }" @click="handleDeleteWorkspace(ws.id, ws.name)">
               <Trash2 :size="11" />
             </button>
           </div>
@@ -405,7 +405,7 @@ async function handleDeleteScene(sceneId: string) {
   cursor: pointer;
   font-family: inherit;
   border-radius: 6px;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
   text-align: left;
 }
 .nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
@@ -461,7 +461,7 @@ async function handleDeleteScene(sceneId: string) {
   font-size: 13px;
   cursor: pointer;
   font-family: inherit;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
   text-align: left;
 }
 .ws-option:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
@@ -483,7 +483,7 @@ async function handleDeleteScene(sceneId: string) {
   cursor: pointer;
   border-radius: var(--radius-sm);
   margin-right: var(--space-2);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ws-item-row:hover .ws-item-action { display: flex; }
 .ws-item-action:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
@@ -541,7 +541,7 @@ async function handleDeleteScene(sceneId: string) {
   width: 18px;
   height: 18px;
   border-radius: var(--radius-sm);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
   flex-shrink: 0;
 }
 .clear-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
@@ -580,7 +580,7 @@ async function handleDeleteScene(sceneId: string) {
   width: 26px;
   height: 26px;
   border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .icon-btn:hover { color: var(--color-accent); background: var(--color-bg-hover); }
 
@@ -599,7 +599,7 @@ async function handleDeleteScene(sceneId: string) {
   cursor: pointer;
   color: var(--color-text-secondary);
   font-size: 13px;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
   border-left: 2px solid transparent;
 }
 .sidebar-nav li:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
@@ -640,7 +640,7 @@ async function handleDeleteScene(sceneId: string) {
   width: 24px;
   height: 24px;
   border-radius: var(--radius-sm);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -694,7 +694,7 @@ async function handleDeleteScene(sceneId: string) {
   cursor: pointer;
   font-family: inherit;
   border-radius: var(--radius-md);
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .settings-btn:hover { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
 

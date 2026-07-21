@@ -152,7 +152,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .dialog-close {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  display: flex; padding: 3px; border-radius: 4px; transition: all 0.15s;
+  display: flex; padding: 3px; border-radius: 4px; transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
 }
 .dialog-close:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 .dialog-body {
@@ -179,7 +179,7 @@ function onKeydown(e: KeyboardEvent) {
 .btn {
   padding: 7px 18px; border-radius: 6px; font-size: 13px;
   cursor: pointer; border: none; font-family: inherit;
-  transition: all 0.15s; font-weight: 500;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s; font-weight: 500;
 }
 .btn-cancel { background: var(--color-bg-active); color: var(--color-text-muted); }
 .btn-cancel:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
@@ -187,8 +187,8 @@ function onKeydown(e: KeyboardEvent) {
 .btn-primary:hover { background: var(--color-accent-hover); }
 
 /* transition */
-.dialog-enter-active { transition: all 0.2s ease-out; }
-.dialog-leave-active { transition: all 0.15s ease-in; }
+.dialog-enter-active { transition: opacity 0.2s ease-out, transform 0.2s ease-out; }
+.dialog-leave-active { transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s ease-in; }
 .dialog-enter-from { opacity: 0; }
 .dialog-enter-from .dialog-panel { transform: scale(0.95) translateY(-8px); }
 .dialog-leave-to { opacity: 0; }

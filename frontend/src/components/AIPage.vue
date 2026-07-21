@@ -50,7 +50,14 @@ let streamCtrl: AbortController | null = null
 
 // 消息区 DOM 引用，有新内容时自动滚到底部
 const msgArea = ref<HTMLElement | null>(null)
-watch(streamingText, scrollToBottom)
+let scrollRaf: number | null = null
+watch(streamingText, () => {
+  if (scrollRaf) return
+  scrollRaf = requestAnimationFrame(() => {
+    scrollRaf = null
+    scrollToBottom()
+  })
+})
 
 // 多档案 / 模型切换
 const aiProfiles = ref<AIProfile[]>([])
@@ -80,8 +87,9 @@ async function loadProfiles() {
     if (!res) return
     aiProfiles.value = res.profiles ?? []
     aiActive.value = res.active || (aiProfiles.value[0]?.id ?? '')
-  } catch {
+  } catch (e) {
     aiProfiles.value = []
+    errorMsg.value = getErrorMessage(e)
   }
 }
 
@@ -89,7 +97,9 @@ async function loadConversations() {
   try {
     const list = unwrap<AIConversation[]>(await AIListConversations())
     conversations.value = list ?? []
-  } catch { /* ignore */ }
+  } catch (e) {
+    errorMsg.value = getErrorMessage(e)
+  }
 }
 
 async function loadMessages(convID: string) {
@@ -126,7 +136,7 @@ function newConv() {
 }
 
 async function delConv(id: string) {
-  if (!window.confirm(t('confirmDelete'))) return
+  if (!(await toast.confirm(t('confirmDelete')))) return
   try {
     unwrap(await AIDeleteConversation(id))
     if (activeId.value === id) newConv()
@@ -156,7 +166,7 @@ async function regenTitle() {
 
 async function clearContext() {
   if (!activeId.value) return
-  if (!window.confirm(t('aiClearConfirm'))) return
+  if (!(await toast.confirm(t('aiClearConfirm')))) return
   try {
     unwrap(await AIClearMessages(activeId.value))
     messages.value = []
@@ -308,11 +318,16 @@ onMounted(async () => {
       else loadConversations()
     }
   })
+  // 设置在 SettingsModal 中保存配置后刷新下拉列表
+  Events.On('ai:profiles-updated', loadProfiles)
 })
 
 onUnmounted(() => {
   Events.Off('ai:conv')
+  Events.Off('ai:profiles-updated')
   if (streamCtrl) streamCtrl.abort()
+  if (renderTimer) { clearTimeout(renderTimer); renderTimer = null }
+  if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null }
 })
 </script>
 
@@ -467,7 +482,7 @@ onUnmounted(() => {
   cursor: pointer;
   font-family: inherit;
   font-size: 13px;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-new-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
 .ai-conv-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
@@ -524,7 +539,7 @@ onUnmounted(() => {
   font-size: 12px;
   cursor: pointer;
   font-family: inherit;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-mode-tab:hover { color: var(--color-text-primary); }
 .ai-mode-tab.active { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-bg); }
@@ -546,7 +561,7 @@ onUnmounted(() => {
   width: 30px; height: 30px; border: 1px solid var(--color-border);
   background: transparent; color: var(--color-text-muted);
   border-radius: 8px; cursor: pointer; font-family: inherit;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-icon-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
 .ai-stop {

@@ -18,9 +18,9 @@ const editingItem = ref<CollectionItem | null>(null)
 async function handleItemClick(item: CollectionItem) {
   try {
     await store.openItem(item)
-    toast.success('已启动：' + item.name)
+    toast.success(t('itemLaunched') + ': ' + item.name)
   } catch (e) {
-    toast.error('启动失败：' + item.name + ' — ' + getErrorMessage(e))
+    toast.error(t('itemLaunchFailed') + ': ' + item.name + ' — ' + getErrorMessage(e))
   }
 }
 
@@ -195,7 +195,7 @@ function onDropItem(e: DragEvent, targetId: string) {
 .item-body li {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 18px; cursor: pointer; color: var(--color-text-secondary);
-  font-size: 13px; transition: all var(--transition-fast); border-radius: 0;
+  font-size: 13px; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast); border-radius: 0;
 }
 .item-body li:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .item-icon {
@@ -219,7 +219,7 @@ function onDropItem(e: DragEvent, targetId: string) {
 .item-body li:hover .item-actions { opacity: 1; }
 .action-btn {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  width: 26px; height: 26px; border-radius: 5px; transition: all 0.12s;
+  width: 26px; height: 26px; border-radius: 5px; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
   display: flex; align-items: center; justify-content: center;
 }
 .action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }

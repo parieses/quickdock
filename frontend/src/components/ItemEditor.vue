@@ -204,7 +204,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .btn {
   padding: 8px 18px; border: none; border-radius: 6px; font-size: 13px;
-  cursor: pointer; font-family: inherit; transition: all 0.12s;
+  cursor: pointer; font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .btn-cancel { background: var(--color-bg-active); color: var(--color-text-muted); }
 .btn-cancel:hover { background: var(--color-bg-active); color: var(--color-text-primary); }

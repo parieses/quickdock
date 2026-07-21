@@ -8,6 +8,8 @@ export default {
   delete: 'Delete',
   edit: 'Edit',
   create: 'New',
+  itemLaunched: 'Launched',
+  itemLaunchFailed: 'Launch failed',
   confirm: 'Confirm',
   close: 'Close',
   minimize: 'Minimize',

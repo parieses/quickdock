@@ -519,6 +519,9 @@ func (a *AppService) streamAIChat(ctx context.Context, cfg AIProfile, messages [
 	if cfg.PresencePenalty != 0 {
 		body["presence_penalty"] = cfg.PresencePenalty
 	}
+	if cfg.ThinkingEnabled {
+		body["enable_thinking"] = true
+	}
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return "", err
@@ -530,7 +533,7 @@ func (a *AppService) streamAIChat(ctx context.Context, cfg AIProfile, messages [
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(authKey, authVal)
-	// 导致逐字流式退化成“一次性整段”。强制 identity 让上游返回原始分块 SSE。
+	// 导致逐字流式退化成"一次性整段"。强制 identity 让上游返回原始分块 SSE。
 	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("Cache-Control", "no-store")
 
@@ -695,6 +698,9 @@ func (a *AppService) callAIOnce(ctx context.Context, cfg AIProfile, messages []m
 	}
 	if cfg.PresencePenalty != 0 {
 		body["presence_penalty"] = cfg.PresencePenalty
+	}
+	if cfg.ThinkingEnabled {
+		body["enable_thinking"] = true
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {

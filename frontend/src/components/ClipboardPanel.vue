@@ -557,7 +557,7 @@ onUnmounted(() => {
   width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
   background: transparent; border: none; color: var(--color-text-muted); border-radius: 6px;
   cursor: pointer; flex-shrink: 0;
-  transition: all 0.12s;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .icon-btn:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
 
@@ -584,7 +584,7 @@ onUnmounted(() => {
   font-family: inherit;
   cursor: pointer;
   white-space: nowrap;
-  transition: all 0.12s;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
   flex-shrink: 0;
 }
 
@@ -707,7 +707,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-border); border-radius: 4px;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   font-size: 11px; font-family: inherit; cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .clipboard-pagination .page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
 .clipboard-pagination .page-btn:disabled { opacity: 0.35; cursor: default; }

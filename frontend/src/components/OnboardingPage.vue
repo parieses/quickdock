@@ -147,7 +147,7 @@ function openSettings() {
   font-weight: 600;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
   margin-bottom: 40px;
 }
 .ob-start-btn:hover {
@@ -235,7 +235,7 @@ function openSettings() {
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.12s;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .ob-link-btn:hover {
   color: var(--color-accent);

@@ -553,7 +553,7 @@ onMounted(loadSnippets)
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .batch-cancel {
   background: var(--color-bg-active);
@@ -588,7 +588,7 @@ onMounted(loadSnippets)
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
 .page-btn:disabled { opacity: 0.35; cursor: default; }
@@ -608,7 +608,7 @@ onMounted(loadSnippets)
   border-radius: 5px;
   background: transparent;
   cursor: pointer;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
   margin-left: 2px;
 }
 .paste-btn { color: var(--color-accent); }

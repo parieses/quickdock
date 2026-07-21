@@ -188,7 +188,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 .icon-btn {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 6px; transition: all 0.15s;
+  width: 28px; height: 28px; border-radius: 6px; transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
 }
 .icon-btn:hover { color: var(--color-accent); background: var(--color-bg-hover); }
 .collection-body { flex: 1; overflow-y: auto; padding: 6px 8px; }
@@ -196,7 +196,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 .collection-body li {
   display: flex; align-items: center; gap: 12px;
   padding: 10px 14px; cursor: pointer; color: var(--color-text-secondary);
-  font-size: 13px; transition: all var(--transition-fast); border-radius: var(--radius-md);
+  font-size: 13px; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast); border-radius: var(--radius-md);
   margin-bottom: var(--space-1);
 }
 .collection-body li:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
@@ -225,7 +225,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 .collection-body li:hover .col-actions { opacity: 1; }
 .action-btn {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  width: 26px; height: 26px; border-radius: 5px; transition: all 0.12s;
+  width: 26px; height: 26px; border-radius: 5px; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
   display: flex; align-items: center; justify-content: center;
 }
 .action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }

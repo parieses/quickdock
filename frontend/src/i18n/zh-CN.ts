@@ -8,6 +8,8 @@ export default {
   delete: '删除',
   edit: '编辑',
   create: '新建',
+  itemLaunched: '已启动',
+  itemLaunchFailed: '启动失败',
   confirm: '确认',
   close: '关闭',
   minimize: '最小化',

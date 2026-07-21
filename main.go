@@ -282,29 +282,12 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 	}
 }
 
-// autoInstallBuiltins 提取内置插件到 ~/.quickdock/plugins/（启动时自动执行）
+// autoInstallBuiltins 注册内置插件到数据库并加载（文件已由 extractBuiltinPluginFiles 提取到磁盘）
 func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *embed.FS) {
 	entries, err := builtinFS.ReadDir("plugins/builtin")
 	if err != nil {
 		fmt.Println("QuickDock: 读取内置插件目录失败:", err)
 		return
-	}
-
-	// 确保 builtin 共享目录存在，提取 common.css（所有插件共享的主题样式）
-	builtinDir := filepath.Join(mgr.PluginsDir(), "builtin")
-	os.MkdirAll(builtinDir, 0755)
-	commonCSSData, err := builtinFS.ReadFile("plugins/builtin/common.css")
-	if err == nil {
-		os.WriteFile(filepath.Join(builtinDir, "common.css"), commonCSSData, 0644)
-	} else {
-		fmt.Println("QuickDock: 读取 common.css 失败:", err)
-	}
-	// 提取 common.js（所有插件共享的前端工具函数，由后端注入到插件页面）
-	commonJSData, err := builtinFS.ReadFile("plugins/builtin/common.js")
-	if err == nil {
-		os.WriteFile(filepath.Join(builtinDir, "common.js"), commonJSData, 0644)
-	} else {
-		fmt.Println("QuickDock: 读取 common.js 失败:", err)
 	}
 
 	for _, entry := range entries {
@@ -314,9 +297,8 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 		pluginID := entry.Name()
 		targetDir := filepath.Join(mgr.PluginsDir(), pluginID)
 
-		// 先读取 embedded plugin.json 获取插件 ID（用于卸载旧实例）
-		manifestPath := path.Join("plugins/builtin", pluginID, "plugin.json")
-		data, err := builtinFS.ReadFile(manifestPath)
+		// 读取 plugin.json 获取 ID
+		data, err := builtinFS.ReadFile(path.Join("plugins/builtin", pluginID, "plugin.json"))
 		if err != nil {
 			fmt.Printf("QuickDock: 读取内置插件 %s plugin.json 失败: %v\n", pluginID, err)
 			continue
@@ -328,31 +310,10 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			continue
 		}
 
-		// 检查是否已安装
-		if _, err := os.Stat(targetDir); err == nil {
-			// 用 manifest.ID 卸载旧实例（兼容不同 ID 格式）
-			mgr.UnloadPlugin(pluginID)      // 也按目录名尝试卸载
-			mgr.UnloadPlugin(mf.ID)         // 按新 ID 卸载
-			os.RemoveAll(targetDir)
-		}
-
-		// 创建目标目录
-		os.MkdirAll(targetDir, 0755)
-
-		// 提取所有文件
-		err = extractEmbeddedDir(builtinFS, path.Join("plugins/builtin", pluginID), targetDir)
-		if err != nil {
-			fmt.Printf("QuickDock: 提取内置插件 %s 失败: %v\n", pluginID, err)
-			os.RemoveAll(targetDir)
+		// 目录不存在说明 extractBuiltinPluginFiles 失败，跳过
+		if _, err := os.Stat(targetDir); os.IsNotExist(err) {
+			fmt.Printf("QuickDock: 内置插件 %s 目录不存在，跳过\n", pluginID)
 			continue
-		}
-
-		// 把 common.css 和 common.js 拷贝到每个插件根目录，
-		// 确保插件 HTML 中的 <link href="../common.css"> 在文件系统层面也能正确解析
-		for _, name := range []string{"common.css", "common.js"} {
-			if data, cer := builtinFS.ReadFile(path.Join("plugins/builtin", name)); cer == nil {
-				os.WriteFile(filepath.Join(targetDir, name), data, 0644)
-			}
 		}
 
 		// 读取图标
@@ -380,7 +341,7 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 		if err := mgr.LoadPlugin(mf, targetDir); err != nil {
 			fmt.Printf("QuickDock: 加载内置插件 %s 失败: %v\n", pluginID, err)
 		} else {
-			fmt.Printf("QuickDock: 内置插件 %s (%s) 已安装并加载\n", mf.Name, mf.Version)
+			fmt.Printf("[plugin %s] %s (%s) 已安装并加载\n", mf.ID, mf.Name, mf.Version)
 		}
 	}
 }

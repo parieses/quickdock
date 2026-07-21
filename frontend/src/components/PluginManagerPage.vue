@@ -446,7 +446,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
   width: 22px; height: 22px; border-radius: 4px;
   border: none; background: var(--color-bg-tertiary);
   color: var(--color-text-muted); cursor: pointer;
-  font-size: 10px; transition: all 100ms;
+  font-size: 10px; transition: background-color 100ms, color 100ms, border-color 100ms;
 }
 .action-top-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .action-top-btn.btn-stop-top:hover { color: #E2A04A; }
@@ -502,7 +502,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
   color: var(--color-text-secondary);
   font-size: 11px; font-family: inherit;
   cursor: pointer; white-space: nowrap;
-  transition: all 0.1s;
+  transition: background-color 0.1s, color 0.1s, border-color 0.1s;
 }
 .cat-tab:hover {
   background: var(--color-bg-hover);

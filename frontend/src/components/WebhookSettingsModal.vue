@@ -106,7 +106,7 @@ async function test(kind: 'dingtalk' | 'wecom' | 'feishu') {
   display: inline-flex; align-items: center; gap: 5px; padding: 7px 12px;
   background: transparent; color: var(--color-text-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  font-size: 13px; cursor: pointer; font-family: inherit; transition: all var(--transition-fast);
+  font-size: 13px; cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .nf-trigger:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
@@ -134,7 +134,7 @@ async function test(kind: 'dingtalk' | 'wecom' | 'feishu') {
   flex-shrink: 0; height: 34px; padding: 0 14px; border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border-radius: var(--radius-md); font-size: 12px; cursor: pointer; font-family: inherit;
-  transition: all var(--transition-fast);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .nf-test:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .nf-test:disabled { opacity: 0.5; cursor: default; }

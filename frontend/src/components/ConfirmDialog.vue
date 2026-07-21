@@ -63,15 +63,15 @@ function onKeydown(e: KeyboardEvent) {
 .btn {
   padding: 8px 24px; border-radius: 6px; font-size: 13px;
   cursor: pointer; border: none; font-family: inherit;
-  transition: all 0.12s; font-weight: 500;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s; font-weight: 500;
 }
 .btn-cancel { background: var(--color-bg-active); color: var(--color-text-muted); }
 .btn-cancel:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
 .btn-danger { background: var(--color-danger); color: var(--color-accent-text); }
 .btn-danger:hover { background: var(--color-danger); opacity: 0.85; }
 
-.dialog-enter-active { transition: all 0.2s ease-out; }
-.dialog-leave-active { transition: all 0.15s ease-in; }
+.dialog-enter-active { transition: opacity 0.2s ease-out, transform 0.2s ease-out; }
+.dialog-leave-active { transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s ease-in; }
 .dialog-enter-from, .dialog-leave-to { opacity: 0; }
 .dialog-enter-from .confirm-panel { transform: scale(0.95) translateY(-8px); }
 .dialog-leave-to .confirm-panel { transform: scale(0.95); }
