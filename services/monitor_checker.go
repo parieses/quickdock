@@ -64,7 +64,16 @@ func (a *AppService) runDueMonitors() {
 	}
 	for i := range monitors {
 		m := &monitors[i]
-		go a.checkOneMonitor(m)
+		// 在检标记：慢探针（超时/连接挂起）未更新 last_checked_ts 期间，本监控会在下一周期
+		// 再次被选为「待检」并启动第二个重叠协程，两个协程都会读到旧 last_status 而重复发通知。
+		// LoadOrStore 原子保证同一时刻仅一个检查协程通过，避免宕机时重复通知。
+		if _, loaded := a.monitorInflight.LoadOrStore(m.ID, struct{}{}); loaded {
+			continue
+		}
+		go func(m *db.Monitor) {
+			defer a.monitorInflight.Delete(m.ID)
+			a.checkOneMonitor(m)
+		}(m)
 	}
 }
 
@@ -99,8 +108,9 @@ func (a *AppService) nextMonitorWait() time.Duration {
 // 返回 (status, summary)
 func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	defer recoverPanic("monitor check:" + m.ID)
-	// 用户可能在调度间隙停用了该监控，重查 enabled 状态
-	if current, err := a.DB.GetMonitor(m.ID); err != nil || !current.Enabled {
+	// 用户可能在调度间隙停用了该监控，重查 enabled 状态与最新 last_status
+	current, err := a.DB.GetMonitor(m.ID)
+	if err != nil || !current.Enabled {
 		return "", ""
 	}
 
@@ -158,7 +168,8 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	}
 
 	// 仅在状态翻转时通知（桌面通知 + 机器人 Webhook 共用同一套 down/up 开关）
-	prev := m.LastStatus
+	// 用刚重查的 current.LastStatus 作为翻转基准，避免沿用过期的 m 副本
+	prev := current.LastStatus
 	switch {
 	case status == "down" && prev != "down" && m.NotifyDown:
 		title := "🔴 监控告警：" + m.Name

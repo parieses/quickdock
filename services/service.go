@@ -61,6 +61,10 @@ type AppService struct {
 	schedWake   chan struct{} // 定时任务调度器
 	monitorWake chan struct{} // 网站监控检查器
 
+	// 监控在检标记：防止同一监控并发检测（慢探针未更新 last_checked_ts 时被重复选为待检）
+	// 导致宕机时重复发送通知。LoadOrStore 原子保证同一时刻仅一个检查协程通过。
+	monitorInflight sync.Map // monitorID -> struct{}
+
 	// 插件前端页面 HTML 缓存
 	frontendCache   map[string]*frontendCacheEntry
 	frontendCacheMu sync.RWMutex
