@@ -20,6 +20,15 @@ func (a *AppService) GetMostUsedItems(limit int) *ApiResult {
 	return wrap(items, err)
 }
 
+// ListAllItems 返回全部项目（命令面板前端拼音/子串匹配的全量池）
+func (a *AppService) ListAllItems() *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	items, err := a.DB.ListAllItems()
+	return wrap(items, err)
+}
+
 // SaveUrlAsItem 将剪贴板中的 URL 保存为网页项目（命令面板智能路由用）
 func (a *AppService) SaveUrlAsItem(rawURL string) *ApiResult {
 	if r := a.dbOK(); r != nil {

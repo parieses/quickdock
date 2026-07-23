@@ -14,6 +14,14 @@ import (
 
 // ===== 剪贴板历史 =====
 
+// CopyText 将文本写入系统剪贴板（命令面板结果复制用）。
+// 直接走 Wails Clipboard.SetText，避免 WebView2 中 navigator.clipboard
+// 在文档未聚焦时被静默拦截的问题。
+func (a *AppService) CopyText(text string) *ApiResult {
+	SetClipboardText(text)
+	return Ok(nil)
+}
+
 func (a *AppService) ListClipboardEntries(limit int) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r

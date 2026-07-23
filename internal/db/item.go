@@ -96,6 +96,20 @@ func (d *Database) GetMostUsedItems(limit int) ([]CollectionItem, error) {
 	return scanItems(rows)
 }
 
+// ListAllItems 返回全部工作空间的项目（不分页）。
+// 命令面板改用前端对全量池做拼音/子串权威匹配（见 useCommandSearch），
+// 避免后端 FTS5 前缀匹配导致拼音与子串搜索完全失效。
+func (d *Database) ListAllItems() ([]CollectionItem, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rows, err := d.conn.Query("SELECT " + itemCols + " FROM items ORDER BY usage_count DESC, updated_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanItems(rows)
+}
+
 // scanItems 通用 items 行扫描器
 func scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 	var items []CollectionItem

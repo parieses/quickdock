@@ -316,10 +316,10 @@ export function useCommandSearch(deps: SearchDeps) {
         return r.label
       }
       const dedupIds = new Set(show.map(dedupKey))
+      // 去重作用于所有分组：app/snippet/system/url 命中 ≥70 时也会进入最佳匹配，
+      // 若只在 plugin/item 分组里过滤，它们仍会同时出现在两组中造成重复。
       for (const g of groups) {
-        if (g.type === 'plugin' || g.type === 'item') {
-          g.results = g.results.filter(r => !dedupIds.has(dedupKey(r)))
-        }
+        g.results = g.results.filter(r => !dedupIds.has(dedupKey(r)))
       }
       groups.unshift({ type: 'item', label: t('cmdBestMatch'), results: show })
     }

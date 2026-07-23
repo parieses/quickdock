@@ -41,7 +41,9 @@ function parseAtom(expr: string, pos: number): { value: number; pos: number } {
   if (ch === '-') {
     const next = skipWS(expr, pos + 1)
     if (next < expr.length && (expr[next] >= '0' && expr[next] <= '9' || expr[next] === '.')) {
-      return parseNumber(expr, pos)
+      // 从数字/小数点位置解析（支持 -.5 这类「负号+小数点」写法），再取负
+      const num = parseNumber(expr, next)
+      return { value: -num.value, pos: num.pos }
     }
     // 负号后跟括号: -(expr)
     if (next < expr.length && expr[next] === '(') {

@@ -7,7 +7,7 @@ import {
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark
 } from '@lucide/vue'
-import { SearchAll, ExecuteSystemCommand, OpenItem, HidePaletteWindow, SearchSnippets, PasteSnippet, GetLastCopiedText, GetMostUsedItems, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem, CopyText } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -44,6 +44,11 @@ function closePalette() {
   pluginResultCache.value = null
   clipboardUrlSource.value = ''
   try { HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
+}
+
+// 写入系统剪贴板（优先 Go 侧 CopyText，规避 WebView2 中 navigator.clipboard 静默失败）
+async function writeClipboard(text: string) {
+  try { await CopyText(text) } catch (e) { console.error('[CmdPalette] CopyText:', e) }
 }
 
 // ---- 应用图标映射 ----
@@ -242,7 +247,7 @@ function onKeydown(e: KeyboardEvent) {
     case 'ArrowUp':
       e.preventDefault(); selectedIndex.value = (selectedIndex.value - 1 + list.length) % Math.max(list.length, 1); scrollToSelected(); break
     case 'a': case 'A':
-      if ((e.ctrlKey || e.metaKey) && selectedSet.value.size > 0) {
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault(); const s = new Set<number>(); displayFlat.value.forEach((_, i) => s.add(i)); selectedSet.value = s
       }
       break
@@ -315,7 +320,7 @@ async function executeSelected() {
   } else if (result.type === 'url' && result.url) {
     try { await Browser.OpenURL(result.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }; closePalette()
   } else if (result.type === 'calculator' && result.calcResult) {
-    try { await navigator.clipboard.writeText(result.calcResult) } catch {}; closePalette()
+    try { await writeClipboard(result.calcResult) } catch {}; closePalette()
   } else if (result.type === 'snippet' && result.snippet) {
     recordUsage('snippet:' + result.snippet.id, 'snippet', result.label, result.desc)
     try { await PasteSnippet(result.snippet.content) } catch (e) { console.error('[CmdPalette] PasteSnippet:', e) }; closePalette()
@@ -326,7 +331,7 @@ async function executeSelected() {
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc)
     try {
       const matchType = result.matchType; const inputText = (matchType === 'match pattern' || matchType === 'slash') ? result.inlineInput : undefined
-      const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, inputText ? { text: inputText } : null)
+      const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, inputText ? { text: inputText } : null as any)
       const pluginResult = unwrap<string | any>(raw)
       if (pluginResult && pluginResult.error) { toast?.error?.(pluginResult.error) }
       else if (pluginResult) {
@@ -334,7 +339,7 @@ async function executeSelected() {
           ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult)) : String(pluginResult)
         const copyText = typeof pluginResult === 'object'
           ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText) : displayText
-        try { await navigator.clipboard.writeText(copyText) } catch {}
+        try { await writeClipboard(copyText) } catch {}
         pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label, pluginId: result.pluginId, pluginCommandId: result.pluginCommandId, pluginHasFrontend: result.pluginHasFrontend }
         if (!result.pluginHasFrontend) toast?.success?.(t('pluginResultCopied'))
       }
@@ -355,7 +360,7 @@ async function executeSelected() {
     } else if (result.clipAction === 'save-url' && result.url) {
       try { const item = unwrap<CollectionItem>(await SaveUrlAsItem(result.url)); recordUsage('item:' + (item?.id || ''), 'item', result.url, result.url); toast?.success?.(t('savedAsItem')) } catch (e) { toast?.error?.(getErrorMessage(e)) }; closePalette()
     } else if (result.clipAction === 'encode-url' && result.url) {
-      try { const raw = await ExecutePluginCommand('com.quickdock.text-encoder', 'url-encode', { text: result.url }); const res = unwrap<any>(raw); const text = typeof res === 'object' ? (res.translated || res.text || res.display || JSON.stringify(res)) : String(res); try { await navigator.clipboard.writeText(text) } catch {}; toast?.success?.(t('pluginResultCopied')) } catch (e) { toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e)) }; closePalette()
+      try { const raw = await ExecutePluginCommand('com.quickdock.text-encoder', 'url-encode', { text: result.url }); const res = unwrap<any>(raw); const text = typeof res === 'object' ? (res.translated || res.text || res.display || JSON.stringify(res)) : String(res); try { await writeClipboard(text) } catch {}; toast?.success?.(t('pluginResultCopied')) } catch (e) { toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e)) }; closePalette()
     }
   }
 }
@@ -404,22 +409,15 @@ async function loadPluginIndex() {
   } catch (e) { console.error('[CmdPalette] ListPlugins:', getErrorMessage(e)) }
 }
 
-async function loadMostUsedItems() {
+// 一次性加载全量池（项目 + 应用 + 片段 + 最近使用），后续匹配完全在前端完成，
+// 从而支持拼音与子串搜索（后端 FTS5 前缀匹配无法覆盖这两类）。
+async function loadPaletteData() {
   loading.value = true; const gen = ++itemsLoadGen
   await loadFrecency()
-  try { const result = unwrap<CollectionItem[]>(await GetMostUsedItems(30)); if (gen !== itemsLoadGen) return; items.value = result || [] } catch (e) { console.error('[CmdPalette] GetMostUsedItems:', getErrorMessage(e)) }
+  try { const result = unwrap<CollectionItem[]>(await ListAllItems()); if (gen !== itemsLoadGen) return; items.value = result || [] } catch (e) { console.error('[CmdPalette] ListAllItems:', getErrorMessage(e)) }
   try { const apps = unwrap<InstalledApp[]>(await ScanInstalledApps()); if (gen === itemsLoadGen) installedApps.value = apps || [] } catch (e) { console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e)) }
-  try { const snips = unwrap<CmdSnippet[]>(await SearchSnippets('')); if (gen !== itemsLoadGen) return; snippets.value = snips || [] } catch (e) { console.error('[CmdPalette] SearchSnippets:', getErrorMessage(e)) }
+  try { const snips = unwrap<CmdSnippet[]>(await ListSnippets()); if (gen !== itemsLoadGen) return; snippets.value = snips || [] } catch (e) { console.error('[CmdPalette] ListSnippets:', getErrorMessage(e)) }
   try { const raw = await GetRecentUsage(20); if (gen === itemsLoadGen) recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.label) } catch (e) { console.error('[CmdPalette] GetRecentUsage:', getErrorMessage(e)) }
-  if (gen === itemsLoadGen) loading.value = false
-}
-
-async function searchItems(query: string) {
-  if (!query.trim()) { await loadMostUsedItems(); return }
-  loading.value = true; const gen = ++itemsLoadGen
-  try { const result = unwrap<CollectionItem[]>(await SearchAll(query)); if (gen !== itemsLoadGen) return; items.value = result || [] } catch (e) { console.error('[CmdPalette] SearchAll:', getErrorMessage(e)) }
-  try { const snips = unwrap<CmdSnippet[]>(await SearchSnippets(query)); if (gen !== itemsLoadGen) return; snippets.value = snips || [] } catch (e) { console.error('[CmdPalette] SearchSnippets:', getErrorMessage(e)) }
-  loadPluginIndex().catch(e => console.warn('[CmdPalette] loadPluginIndex:', e))
   if (gen === itemsLoadGen) loading.value = false
 }
 
@@ -431,6 +429,7 @@ onMounted(async () => {
   Events.On('palette:shown', () => {
     if (inlinePluginId.value) closeInlinePlugin()
     loadPluginIndex()
+    loadPaletteData().catch(e => console.warn('[CmdPalette] loadPaletteData:', e))
     query.value = ''; selectedIndex.value = 0; inlineQuicklink.value = null; inlineQuery.value = ''; pluginResultCache.value = null
     if (Date.now() - lastClipboardUpdate < 3000) {
       GetLastCopiedText().then(raw => {
@@ -441,30 +440,27 @@ onMounted(async () => {
           const looksDomain = /^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(\/|$)/i.test(c) && !/^[\d+\-*/().%^, ]+$/.test(c)
           if (isHttp || looksDomain) { const urlStr = isHttp ? c : 'https://' + c; query.value = urlStr; clipboardUrlSource.value = urlStr }
           else { query.value = c }
-          searchItems(query.value.trim())
         }
       }).catch(() => {})
     }
     nextTick(() => { requestAnimationFrame(() => { inputRef.value?.focus(); inputRef.value?.select() }) })
   })
-  await loadMostUsedItems()
+  await loadPaletteData()
   await loadPluginIndex()
 })
 
-watch(displayFlat, () => { selectedIndex.value = 0; selectedSet.value = new Set(); lastAnchor.value = -1 })
-
-let searchTimer: ReturnType<typeof setTimeout> | null = null
+// 仅在查询变化时重置选中（避免悬停/频次更新导致选中项跳回顶部）
 watch(query, (val) => {
   if (!val.trim()) { pluginResultCache.value = null; inlineQuicklink.value = null; inlineQuery.value = '' }
   if (val.trim() !== clipboardUrlSource.value) clipboardUrlSource.value = ''
-  if (searchTimer) clearTimeout(searchTimer)
-  searchTimer = setTimeout(() => searchItems(val.trim()), 100)
+  selectedIndex.value = 0
+  selectedSet.value = new Set()
+  lastAnchor.value = -1
 })
 
 watch(inlineQuicklink, (v) => { if (v) selectedIndex.value = 0 })
 
 onUnmounted(() => {
-  if (searchTimer) clearTimeout(searchTimer)
   closeInlinePlugin()
   Events.Off('palette:shown')
   Events.Off('clipboard:updated')
