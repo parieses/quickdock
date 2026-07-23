@@ -32,6 +32,8 @@
   var input=document.getElementById('inputField'), results=document.getElementById('results')
   input.addEventListener('input',convert)
   document.addEventListener('keydown',function(e){if(e.key==='Escape')input.focus()})
+  // 命令面板带参打开时，自动填入并转换
+  window.addEventListener('message',function(e){if(e.data&&e.data.type==='plugin:init'&&e.data.data&&e.data.data.text){input.value=e.data.data.text;convert()}})
   function convert(){
     var text=input.value.trim()
     if(!text){results.innerHTML='<div class="p-empty">输入变量名自动转换</div>';return}

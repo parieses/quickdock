@@ -117,7 +117,7 @@ interface SearchResult {
   type: ResultType; label: string; desc?: string; icon?: any; iconBase64?: string
   item?: CollectionItem; cmd?: SystemCmd; calcResult?: string; snippet?: CmdSnippet; inlineQuery?: string
   frecencyScore?: number; appPath?: string; appCategory?: string; pluginId?: string; pluginCommandId?: string
-  pluginHasFrontend?: boolean; inlineInput?: string; pluginResult?: string; score?: number; matchType?: string; url?: string; clipAction?: string
+  pluginHasFrontend?: boolean; inlineInput?: string; pluginResult?: string; score?: number; matchType?: string; url?: string; clipAction?: string; acceptsInput?: boolean
 }
 
 // ---- 状态 ----
@@ -133,7 +133,7 @@ const listRef = ref<HTMLElement | null>(null)
 const selectedSet = ref<Set<number>>(new Set())
 const lastAnchor = ref(-1)
 const clipboardUrlSource = ref('')
-const pluginResultCache = ref<{ result: string; pluginName: string; pluginId?: string; pluginCommandId?: string; pluginHasFrontend?: boolean } | null>(null)
+const pluginResultCache = ref<{ result: string; pluginName: string; pluginId?: string; pluginCommandId?: string; pluginHasFrontend?: boolean; input?: string; acceptsInput?: boolean } | null>(null)
 const inlineQuicklink = ref<CollectionItem | null>(null)
 const inlineQuery = ref('')
 const inlineInputRef = ref<HTMLInputElement | null>(null)
@@ -329,23 +329,22 @@ async function executeSelected() {
     recordUsage('app:' + result.label, 'app', result.label, result.desc)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }; closePalette()
   } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
-    recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc)
-    try {
-      const matchType = result.matchType; const inputText = (matchType === 'match pattern' || matchType === 'slash') ? result.inlineInput : undefined
-      const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, inputText ? { text: inputText } : null as any)
-      const pluginResult = unwrap<string | any>(raw)
-      if (pluginResult && pluginResult.error) { toast?.error?.(pluginResult.error) }
-      else if (pluginResult && !pluginResult.frontendOnly) {
-        const displayText = typeof pluginResult === 'object'
-          ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult)) : String(pluginResult)
-        const copyText = typeof pluginResult === 'object'
-          ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText) : displayText
-        try { await writeClipboard(copyText) } catch {}
-        pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label, pluginId: result.pluginId, pluginCommandId: result.pluginCommandId, pluginHasFrontend: result.pluginHasFrontend }
-        if (!result.pluginHasFrontend) toast?.success?.(t('pluginResultCopied'))
+    // 仅当命令声明 acceptsInput 时，才把 Ctrl+K 文本作为插件参数带入；否则不传（"不设置就不带"）
+    let inputText: string | undefined
+    if (result.acceptsInput) {
+      inputText = result.inlineInput || undefined
+      if (!inputText && result.label) {
+        const idx = pluginCmdIndex.value.find(c => c.plugin.id === result.pluginId && c.cmd.id === result.pluginCommandId)
+        if (idx && idx.cmd.title && result.label.startsWith(idx.cmd.title + ': ')) {
+          inputText = result.label.slice(idx.cmd.title.length + 2)
+        }
       }
-      if (result.pluginHasFrontend && inputText) { try { await SetPendingPluginInit(inputText, result.pluginCommandId || '') } catch {} }
+    }
+    recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, inputText || '')
+    try {
       if (result.pluginHasFrontend) {
+        // 前端插件：打开 UI，参数经 plugin:init 注入，由插件自身自动执行具体功能
+        if (inputText) { try { await SetPendingPluginInit(inputText, result.pluginCommandId || '') } catch {} }
         inlinePluginId.value = result.pluginId; inlinePluginLoading.value = true; inlinePluginError.value = ''
         try {
           const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId))
@@ -353,6 +352,20 @@ async function executeSelected() {
           else { inlinePluginError.value = t('pluginNoFrontend') }
         } catch (e: any) { inlinePluginError.value = t('pluginLoadFailed') + ': ' + getErrorMessage(e) }
         inlinePluginLoading.value = false
+      } else {
+        // 无前端插件（goja/native 无 UI）：后端执行并返回结果
+        const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, inputText ? { text: inputText } : null as any)
+        const pluginResult = unwrap<string | any>(raw)
+        if (pluginResult && pluginResult.error) { toast?.error?.(pluginResult.error) }
+        else if (pluginResult) {
+          const displayText = typeof pluginResult === 'object'
+            ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult)) : String(pluginResult)
+          const copyText = typeof pluginResult === 'object'
+            ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText) : displayText
+          try { await writeClipboard(copyText) } catch {}
+          pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label, pluginId: result.pluginId, pluginCommandId: result.pluginCommandId, pluginHasFrontend: false, input: inputText, acceptsInput: result.acceptsInput }
+          toast?.success?.(t('pluginResultCopied'))
+        }
       }
     } catch (e) { toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e)) }
   } else if (result.type === 'clipboard-action' && result.clipAction) {

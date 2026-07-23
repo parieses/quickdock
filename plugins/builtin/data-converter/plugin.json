@@ -34,7 +34,8 @@
         "json转yaml"
       ],
       "prefix": "/convert",
-      "matchPattern": "(^\\{[\\s\\S]*\\}$|^\\[[\\s\\S]*\\]$|^\\w+:\\s+|^\\<\\?xml|^\\[\\w+\\])"
+      "matchPattern": "(^\\{[\\s\\S]*\\}$|^\\[[\\s\\S]*\\]$|^\\w+:\\s+|^\\<\\?xml|^\\[\\w+\\])",
+      "acceptsInput": true
     }
   ],
   "backend": {

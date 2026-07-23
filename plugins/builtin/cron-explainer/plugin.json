@@ -34,7 +34,8 @@
         "计划任务"
       ],
       "matchPattern": "^\\s*\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s+\\S+\\s*$",
-      "prefix": "/cron"
+      "prefix": "/cron",
+      "acceptsInput": true
     }
   ],
   "capabilities": [

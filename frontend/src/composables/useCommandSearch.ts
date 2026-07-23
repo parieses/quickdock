@@ -26,6 +26,7 @@ export interface SearchResult {
   pluginHasFrontend?: boolean
   inlineInput?: string
   pluginResult?: string
+  acceptsInput?: boolean
   score?: number
   matchType?: string
   url?: string
@@ -43,7 +44,7 @@ interface ResultGroup {
 }
 
 export interface RecentEntry {
-  key: string; type: string; label: string; description: string; count: number; lastUsed: number
+  key: string; type: string; label: string; description: string; input?: string; count: number; lastUsed: number
 }
 
 // ---- Dependencies type ----
@@ -55,7 +56,7 @@ export interface SearchDeps {
   query: Ref<string>
   selectedIndex: Ref<number>
   pluginCmdIndex: Ref<PluginCmdIndex[]>
-  pluginResultCache: Ref<{ result: string; pluginName: string; pluginId?: string; pluginCommandId?: string; pluginHasFrontend?: boolean } | null>
+  pluginResultCache: Ref<{ result: string; pluginName: string; pluginId?: string; pluginCommandId?: string; pluginHasFrontend?: boolean; input?: string; acceptsInput?: boolean } | null>
   clipboardUrlSource: Ref<string>
   frecencyScore: (key: string) => number
   frecencyTick: Ref<number>
@@ -261,6 +262,7 @@ export function useCommandSearch(deps: SearchDeps) {
         pluginId: idx.plugin.id,
         pluginCommandId: idx.cmd.id,
         pluginHasFrontend: idx.plugin.hasFrontend,
+        acceptsInput: idx.cmd.acceptsInput,
         inlineInput,
         score,
         matchType,
@@ -280,6 +282,9 @@ export function useCommandSearch(deps: SearchDeps) {
         pluginId: pc.pluginId,
         pluginCommandId: pc.pluginCommandId,
         pluginHasFrontend: pc.pluginHasFrontend,
+        acceptsInput: pc.acceptsInput,
+        inlineInput: pc.input || undefined,
+        matchType: pc.input ? 'match pattern' : undefined,
       })
     }
     pluginResults.sort((a, b) => {
@@ -385,6 +390,20 @@ export function useCommandSearch(deps: SearchDeps) {
           }
         }
         if (!idx) continue
+        // 仅当命令声明 acceptsInput 时，才把参数带回插件；否则不传（符合"不设置就不带"的意图）
+        let recentInput: string | undefined
+        let recentMatchType: string | undefined
+        if (idx.cmd.acceptsInput) {
+          recentInput = entry.input || undefined
+          recentMatchType = entry.input ? 'match pattern' : undefined
+          if (!recentInput) {
+            const prefix = idx.cmd.title + ': '
+            if (entry.label.startsWith(prefix)) {
+              recentInput = entry.label.slice(prefix.length)
+              recentMatchType = 'match pattern'
+            }
+          }
+        }
         results.push({
           type: 'plugin',
           label: entry.label,
@@ -394,6 +413,9 @@ export function useCommandSearch(deps: SearchDeps) {
           pluginId: matchedPluginId,
           pluginCommandId: matchedCmdId,
           pluginHasFrontend: idx.plugin.hasFrontend,
+          acceptsInput: idx.cmd.acceptsInput,
+          inlineInput: recentInput,
+          matchType: recentMatchType,
           frecencyScore: entry.count,
         })
       } else if (entry.type === 'system') {

@@ -34,7 +34,8 @@
         "ts定义"
       ],
       "matchPattern": "^\\{[^]*\\}$|^\\[[^]*\\]$",
-      "prefix": "/ts"
+      "prefix": "/ts",
+      "acceptsInput": true
     },
     {
       "id": "json-to-go",
@@ -52,7 +53,8 @@
         "go结构体",
         "go struct"
       ],
-      "prefix": "/go"
+      "prefix": "/go",
+      "acceptsInput": true
     }
   ],
   "capabilities": [

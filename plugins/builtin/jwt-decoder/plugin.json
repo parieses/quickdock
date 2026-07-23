@@ -31,7 +31,8 @@
         "token解码"
       ],
       "prefix": "/jwt",
-      "matchPattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$"
+      "matchPattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+      "acceptsInput": true
     }
   ],
   "backend": {

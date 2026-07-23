@@ -42,6 +42,8 @@
   function escapeHtml(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;')}
   btn.addEventListener('click',explain);input.addEventListener('keydown',function(e){if(e.key==='Enter')explain()})
   document.addEventListener('keydown',function(e){if(e.key==='Escape')input.focus()})
+  // 命令面板带参打开时，自动填入并解释
+  window.addEventListener('message',function(e){if(e.data&&e.data.type==='plugin:init'&&e.data.data&&e.data.data.text){input.value=e.data.data.text;explain()}})
   function explain(){
     var text=input.value.trim().replace(/^\/cron\s+/,'')
     if(!text){output.innerHTML='<span style="color:var(--text-muted)">输入 cron 表达式</span>';return}

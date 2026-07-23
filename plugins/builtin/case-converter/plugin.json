@@ -36,7 +36,8 @@
         "下划线",
         "大小写"
       ],
-      "matchPattern": "^[a-z]+[_-][a-z]+[a-z_0-9-]*$|^[a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z][a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z]+_[A-Z]+[A-Z_0-9]*$"
+      "matchPattern": "^[a-z]+[_-][a-z]+[a-z_0-9-]*$|^[a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z][a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z]+_[A-Z]+[A-Z_0-9]*$",
+      "acceptsInput": true
     }
   ],
   "capabilities": [

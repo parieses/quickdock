@@ -14,12 +14,12 @@ func (a *AppService) RecordUsage(key string) *ApiResult {
 	return Ok(nil)
 }
 
-// RecordUsageEx 记录一次使用并附带展示信息（type/label/desc 用于「最近使用」直接展示）
-func (a *AppService) RecordUsageEx(key, type_, label, desc string) *ApiResult {
+// RecordUsageEx 记录一次使用并附带展示信息（type/label/desc/input 用于「最近使用」直接展示与回放）
+func (a *AppService) RecordUsageEx(key, type_, label, desc, input string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.DB.RecordUsageEx(key, type_, label, desc); err != nil {
+	if err := a.DB.RecordUsageEx(key, type_, label, desc, input); err != nil {
 		return Fail(err)
 	}
 	return Ok(nil)

@@ -358,6 +358,7 @@ func (d *Database) migrate() error {
 		{"usage_frecency", "type", "TEXT NOT NULL DEFAULT ''"},
 		{"usage_frecency", "label", "TEXT NOT NULL DEFAULT ''"},
 		{"usage_frecency", "description", "TEXT NOT NULL DEFAULT ''"},
+		{"usage_frecency", "input", "TEXT NOT NULL DEFAULT ''"},
 		{"todos", "start_time", "TEXT DEFAULT ''"},
 		{"todos", "end_time", "TEXT DEFAULT ''"},
 		{"todos", "reminder_time", "TEXT DEFAULT ''"},

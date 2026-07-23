@@ -84,6 +84,8 @@
     }
     return result.join('\n').trim()
   }
+  // 命令面板带参打开时，自动填入并格式化
+  window.addEventListener('message',function(e){if(e.data&&e.data.type==='plugin:init'&&e.data.data&&e.data.data.text){inputArea.value=e.data.data.text;doFormat()}})
   inputArea.focus()
 })()
 </script>

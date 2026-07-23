@@ -189,7 +189,14 @@ func (a *AppService) ExecutePluginCommand(pluginID, commandID string, input map[
 	// 记录插件使用次数
 	if a.DB != nil {
 		usageKey := "plugin:" + pluginID + "." + commandID
-		a.DB.RecordUsage(usageKey) // 忽略错误，不影响主流程
+		// 记录插件使用并保留命令面板传入的附加输入（如端口号），避免用空 input 覆盖前端已存的 input
+		inputText := ""
+		if input != nil {
+			if t, ok := input["text"].(string); ok {
+				inputText = t
+			}
+		}
+		a.DB.RecordUsageEx(usageKey, "plugin", "", "", inputText)
 	}
 	if err != nil {
 		return Fail(err)

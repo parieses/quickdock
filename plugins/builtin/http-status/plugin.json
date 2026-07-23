@@ -31,7 +31,8 @@
         "状态码查询"
       ],
       "prefix": "/status",
-      "matchPattern": "^\\d{3}$"
+      "matchPattern": "^\\d{3}$",
+      "acceptsInput": true
     }
   ],
   "backend": {

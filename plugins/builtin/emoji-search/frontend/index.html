@@ -59,6 +59,14 @@ function copyEmoji(el){var cps=(el.getAttribute('data-cps')||'').split(',').map(
 document.getElementById('emojiGrid').addEventListener('click',function(e){var el=e.target.closest('.em-item');if(el)copyEmoji(el)})
 document.getElementById('searchInput').addEventListener('input',renderEmojis)
 document.getElementById('catBar').addEventListener('click',function(e){var btn=e.target.closest('.em-cat');if(!btn)return;activeCat=btn.dataset.cat;renderCats();renderEmojis()})
+
+// 命令面板带参打开时（如 "/emoji smile"），自动填入并搜索
+window.addEventListener('message',function(e){
+  if(e.data&&e.data.type==='plugin:init'&&e.data.data&&e.data.data.text){
+    document.getElementById('searchInput').value=e.data.data.text
+    renderEmojis()
+  }
+})
 renderCats();renderEmojis()
 </script>
 </body>

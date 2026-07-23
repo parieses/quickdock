@@ -91,7 +91,8 @@ function calcPluginScore(
     const prefixLC = idx.cmd.prefix.toLowerCase()
     if (qLC.startsWith(prefixLC) && (qLC.length === prefixLC.length || qLC[prefixLC.length] === ' ')) {
       bestScore = 95; bestType = 'slash'
-      inlineInput = q.slice(prefixLC.length).trim() || undefined
+      // 仅当命令声明 acceptsInput 时，才把前缀后的文本作为插件参数带入
+      if (idx.cmd.acceptsInput) inlineInput = q.slice(prefixLC.length).trim() || undefined
     }
   }
   if (idx.regex && idx.regexValid) {
@@ -99,7 +100,9 @@ function calcPluginScore(
       if (idx.regex.test(q)) {
         if (idx.cmd.prefix && qLC.startsWith(idx.cmd.prefix.toLowerCase()) && (qLC.length === idx.cmd.prefix.length || qLC[idx.cmd.prefix.length] === ' ')) {
         } else if (bestScore < 85) {
-          bestScore = 85; bestType = 'match pattern'; inlineInput = q
+          bestScore = 85; bestType = 'match pattern'
+          // 仅当命令声明 acceptsInput 时，才把命中文本作为插件参数带入
+          if (idx.cmd.acceptsInput) inlineInput = q
         }
       }
     } catch {}

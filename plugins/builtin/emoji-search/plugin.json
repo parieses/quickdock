@@ -32,7 +32,8 @@
         "emoji搜索",
         "符号搜索"
       ],
-      "prefix": "/emoji"
+      "prefix": "/emoji",
+      "acceptsInput": true
     }
   ],
   "capabilities": [

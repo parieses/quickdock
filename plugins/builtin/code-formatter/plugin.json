@@ -35,7 +35,8 @@
         "html压缩"
       ],
       "matchPattern": "^\\s*(function|var |let |const |import|export|<html|<div|<script|<style)",
-      "prefix": "/minify"
+      "prefix": "/minify",
+      "acceptsInput": true
     },
     {
       "id": "code-prettify",
@@ -52,7 +53,8 @@
         "代码美化",
         "格式化"
       ],
-      "prefix": "/prettify"
+      "prefix": "/prettify",
+      "acceptsInput": true
     }
   ],
   "capabilities": [

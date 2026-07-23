@@ -33,7 +33,8 @@
         "sql整理"
       ],
       "matchPattern": "^\\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|TRUNCATE|MERGE|CALL|EXEC|BEGIN|DECLARE|SET|SHOW|DESCRIBE|EXPLAIN)\\b",
-      "prefix": "/sql"
+      "prefix": "/sql",
+      "acceptsInput": true
     }
   ],
   "capabilities": [

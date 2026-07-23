@@ -133,6 +133,14 @@ window.addEventListener('message', function(e) {
   }
 })
 
+// 命令面板带参打开时（如 "/convert {...}" 或粘贴 JSON），自动填入并转换
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'plugin:init' && e.data.data && e.data.data.text) {
+    $('inputArea').value = e.data.data.text
+    convert()
+  }
+})
+
 // Ctrl+Enter 触发转换
 document.addEventListener('keydown', function(e) {
   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') convert()

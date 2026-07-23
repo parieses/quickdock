@@ -223,5 +223,14 @@
     return 'type ' + name + ' struct {\n' + fields.join('\n') + '\n}\n'
   }
 
+  // 命令面板带参打开时（如 "/ts {...}" 或 "/go {...}"），自动填入并转换
+  window.addEventListener('message', function(e) {
+    if (e.data && e.data.type === 'plugin:init' && e.data.data && e.data.data.text) {
+      inputArea.value = e.data.data.text
+      if (e.data.data.command === 'json-to-go') setType('go')
+      else setType('typescript')
+    }
+  })
+
   inputArea.focus()
 })()

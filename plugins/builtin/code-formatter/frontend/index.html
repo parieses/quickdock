@@ -108,6 +108,15 @@
     }
     return out3.replace(/\n{3,}/g,'\n\n').trim()
   }
+  // 命令面板带参打开时，按命令选择压缩/美化并自动处理
+  window.addEventListener('message',function(e){
+    if(e.data&&e.data.type==='plugin:init'&&e.data.data&&e.data.data.text){
+      var cmd=e.data.data.command
+      if(cmd==='code-prettify'){mode='prettify';btnPrettify.classList.add('active');btnMinify.classList.remove('active')}
+      else{mode='minify';btnMinify.classList.add('active');btnPrettify.classList.remove('active')}
+      inputArea.value=e.data.data.text;processCode()
+    }
+  })
   inputArea.focus()
 })()
 </script>

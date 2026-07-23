@@ -25,11 +25,11 @@ async function loadFrecency(): Promise<void> {
   frecencyTick.value++ // 触发所有依赖 frecency 的 computed 重算
 }
 
-function recordUsage(key: string, type_?: string, label?: string, desc?: string) {
+function recordUsage(key: string, type_?: string, label?: string, desc?: string, input?: string) {
   const now = Date.now()
   frecencyCache[key] = { count: (frecencyCache[key]?.count || 0) + 1, lastUsed: now }
   if (type_) {
-    try { RecordUsageEx(key, type_, label || '', desc || '').catch(e => console.warn('[CmdPalette] RecordUsageEx:', e)) } catch {}
+    try { RecordUsageEx(key, type_, label || '', desc || '', input || '').catch(e => console.warn('[CmdPalette] RecordUsageEx:', e)) } catch {}
   } else {
     try { RecordUsage(key).catch(e => console.warn('[CmdPalette] RecordUsage:', e)) } catch {}
   }

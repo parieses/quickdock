@@ -18,12 +18,10 @@ var (
 	moduser32   = windows.NewLazySystemDLL("user32.dll")
 )
 
-// instanceMutexName 单实例锁名称，按构建标签区分：
-//   - production 标签（wails3 build 正式版）→ "Local\\QuickDock-Instance"
-//   - 无 production 标签（wails3 dev / 普通 go build）→ "Local\\QuickDock-Instance-Dev"
-// 这样正式版与开发版各自独立加锁，互不抢占，可同时运行。
-// 具体取值在 windows_prod.go / windows_dev.go 中定义。
-var instanceMutexName string
+// instanceMutexName 单实例锁名称。
+// 开发版与正式版共用同一数据库（~/.quickdock），因此共用同一把锁，
+// 保证同一机器上只运行一个 QuickDock 实例，避免多进程同时写同一 SQLite 库。
+var instanceMutexName = "Local\\QuickDock-Instance"
 
 // ensureSingleInstance 检查是否已有 QuickDock 实例在运行。
 // 如果已有实例，将其窗口提到前台并返回 true（主函数应退出）；

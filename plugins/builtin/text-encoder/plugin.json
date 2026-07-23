@@ -27,7 +27,8 @@
       "aliases": [
         "base64编码"
       ],
-      "prefix": "/b64e"
+      "prefix": "/b64e",
+      "acceptsInput": true
     },
     {
       "id": "base64-decode",
@@ -40,27 +41,32 @@
         "base64解码"
       ],
       "prefix": "/b64d",
-      "matchPattern": "^[A-Za-z0-9+/]*={0,2}$"
+      "matchPattern": "^[A-Za-z0-9+/]*={0,2}$",
+      "acceptsInput": true
     },
     {
       "id": "url-encode",
       "title": "URL 编码",
-      "prefix": "/urle"
+      "prefix": "/urle",
+      "acceptsInput": true
     },
     {
       "id": "url-decode",
       "title": "URL 解码",
-      "prefix": "/urld"
+      "prefix": "/urld",
+      "acceptsInput": true
     },
     {
       "id": "html-encode",
       "title": "HTML 编码",
-      "prefix": "/htmle"
+      "prefix": "/htmle",
+      "acceptsInput": true
     },
     {
       "id": "html-decode",
       "title": "HTML 解码",
-      "prefix": "/htmld"
+      "prefix": "/htmld",
+      "acceptsInput": true
     },
     {
       "id": "md5-hash",
@@ -73,7 +79,8 @@
         "md5加密",
         "md5计算"
       ],
-      "prefix": "/md5"
+      "prefix": "/md5",
+      "acceptsInput": true
     },
     {
       "id": "sha256-hash",
@@ -85,7 +92,8 @@
       "aliases": [
         "sha256加密"
       ],
-      "prefix": "/sha256"
+      "prefix": "/sha256",
+      "acceptsInput": true
     }
   ],
   "capabilities": [

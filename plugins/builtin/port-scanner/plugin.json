@@ -41,7 +41,8 @@
         "端口占用"
       ],
       "prefix": "/port",
-      "matchPattern": "^\\d{1,5}$"
+      "matchPattern": "^\\d{1,5}$",
+      "acceptsInput": true
     },
     {
       "id": "port-kill",

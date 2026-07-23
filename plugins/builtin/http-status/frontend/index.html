@@ -163,6 +163,14 @@ function closeDetail() {
   document.getElementById('detailModal').style.display = 'none'
 }
 
+// 命令面板传入参数（如 "500"）时自动定位并展示对应状态码
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'plugin:init' && e.data.data && e.data.data.text) {
+    var m = String(e.data.data.text).match(/(\d{3})/)
+    if (m) showDetail(parseInt(m[1], 10))
+  }
+})
+
 renderTabs()
 renderCards()
 </script>

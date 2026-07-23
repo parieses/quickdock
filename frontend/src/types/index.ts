@@ -143,6 +143,7 @@ export interface PluginCommand {
   aliases?: string[]         // 中文别名，如 ["计算器", "jsq"]，扩展搜索覆盖
   prefix?: string            // Slash 命令前缀，如 "/translate"，输入 /tr 时只匹配该插件
   matchPattern?: string      // 命令面板正则匹配：命中时自动传入输入文本
+  acceptsInput?: boolean     // 是否接收命令面板传入的参数（Ctrl+K 文本）
 }
 
 export interface PluginInfo {
