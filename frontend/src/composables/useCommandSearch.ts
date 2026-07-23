@@ -2,6 +2,7 @@ import { ref, computed, type Ref, type ComputedRef } from 'vue'
 import type { CollectionItem } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
 import { evaluate, format, convertExpression } from '../utils/calc'
+import { Puzzle } from '@lucide/vue'
 
 // ---- Types ----
 type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action'
@@ -64,13 +65,14 @@ export interface SearchDeps {
   getAppAliases: (name: string) => string[]
   itemIcon: (item: CollectionItem) => any
   t: (key: string) => string
+  pluginIcons: Ref<Record<string, string>>
 }
 
 export function useCommandSearch(deps: SearchDeps) {
   const { items, installedApps, snippets, systemCommands, query, selectedIndex,
           pluginCmdIndex, pluginResultCache, clipboardUrlSource,
           frecencyScore, frecencyTick, calcPluginScore,
-          pinyinMatch, appIcon, getAppAliases, itemIcon, t } = deps
+          pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons } = deps
 
   const recentCache = ref<RecentEntry[]>([])
 
@@ -254,6 +256,8 @@ export function useCommandSearch(deps: SearchDeps) {
         type: 'plugin',
         label: inlineInput ? `${idx.cmd.title}: ${inlineInput}` : idx.cmd.title,
         desc: idx.plugin.name + (idx.cmd.hotkey ? `  ${idx.cmd.hotkey}` : ''),
+        icon: Puzzle,
+        iconBase64: pluginIcons.value[idx.plugin.id],
         pluginId: idx.plugin.id,
         pluginCommandId: idx.cmd.id,
         pluginHasFrontend: idx.plugin.hasFrontend,
@@ -269,6 +273,8 @@ export function useCommandSearch(deps: SearchDeps) {
         type: 'plugin',
         label: pc.result,
         desc: '\u2190 ' + pc.pluginName,
+        icon: Puzzle,
+        iconBase64: pc.pluginId ? pluginIcons.value[pc.pluginId] : undefined,
         score: 99,
         frecencyScore: 9999,
         pluginId: pc.pluginId,
@@ -383,6 +389,8 @@ export function useCommandSearch(deps: SearchDeps) {
           type: 'plugin',
           label: entry.label,
           desc: entry.description,
+          icon: Puzzle,
+          iconBase64: pluginIcons.value[matchedPluginId],
           pluginId: matchedPluginId,
           pluginCommandId: matchedCmdId,
           pluginHasFrontend: idx.plugin.hasFrontend,

@@ -7,7 +7,7 @@ import {
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem, CopyText } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem, CopyText, GetPluginIcon } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -126,6 +126,7 @@ const inputRef = ref<HTMLInputElement | null>(null)
 const items = ref<CollectionItem[]>([])
 const installedApps = ref<InstalledApp[]>([])
 const installedPlugins = ref<PluginInfo[]>([])
+const pluginIcons = ref<Record<string, string>>({}) // pluginId → data URI（真实插件图标，来自 GetPluginIcon）
 const loading = ref(false)
 const selectedIndex = ref(0)
 const listRef = ref<HTMLElement | null>(null)
@@ -220,7 +221,7 @@ const {
   items, installedApps, snippets, systemCommands, query, selectedIndex,
   pluginCmdIndex, pluginResultCache, clipboardUrlSource,
   frecencyScore, frecencyTick, calcPluginScore,
-  pinyinMatch, appIcon, getAppAliases, itemIcon, t,
+  pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons,
 })
 
 // ---- 键盘导航 ----
@@ -334,7 +335,7 @@ async function executeSelected() {
       const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, inputText ? { text: inputText } : null as any)
       const pluginResult = unwrap<string | any>(raw)
       if (pluginResult && pluginResult.error) { toast?.error?.(pluginResult.error) }
-      else if (pluginResult) {
+      else if (pluginResult && !pluginResult.frontendOnly) {
         const displayText = typeof pluginResult === 'object'
           ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult)) : String(pluginResult)
         const copyText = typeof pluginResult === 'object'
@@ -406,6 +407,11 @@ async function loadPluginIndex() {
     const running = plugins?.filter(p => p.status === 'running') || []
     installedPlugins.value = running
     pluginCmdIndex.value = buildPluginIndex(running)
+    // 预加载插件真实图标（data URI），结果列表据此展示，无图标的插件回退到 Puzzle
+    const iconPromises = running.map(async (p) => {
+      try { const uri = unwrap<string | null>(await GetPluginIcon(p.id)); if (uri) pluginIcons.value[p.id] = uri } catch {}
+    })
+    await Promise.all(iconPromises)
   } catch (e) { console.error('[CmdPalette] ListPlugins:', getErrorMessage(e)) }
 }
 
@@ -530,7 +536,10 @@ onUnmounted(() => {
 
     <div ref="listRef" class="palette-results" v-if="displayGroups.length > 0 && !inlineQuicklink">
       <template v-for="(group, gIdx) in displayGroups" :key="group.type">
-        <div class="group-header">{{ group.label }}</div>
+        <div class="group-header">
+          <span class="group-title">{{ group.label }}</span>
+          <span class="group-count">{{ group.results.length }}</span>
+        </div>
         <div
           v-for="(result, iIdx) in group.results"
           :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.snippet?.id || result.url || iIdx)"
@@ -658,32 +667,74 @@ onUnmounted(() => {
 }
 .inline-cancel:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
-.palette-results { flex: 1; overflow-y: auto; padding: 4px 6px 8px; }
+.palette-results { flex: 1; overflow-y: auto; padding: 6px 8px 10px; }
 
 .group-header {
-  font-size: 11px; font-weight: 600; color: var(--color-text-muted);
-  text-transform: uppercase; letter-spacing: 0.06em;
-  padding: 10px 12px 4px; user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 10.5px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  padding: 14px 12px 6px;
+  user-select: none;
+}
+.group-header:not(:first-of-type) {
+  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
+}
+.group-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary);
+  padding: 1px 7px;
+  border-radius: var(--radius-full);
 }
 
 .result-item {
-  display: flex; align-items: center; gap: 10px; padding: 8px 10px;
-  border-radius: 8px; cursor: pointer; transition: background 0.08s;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-radius: var(--radius-lg);
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
-.result-item.active { background: var(--color-bg-active); }
+.result-item:hover { background: var(--color-bg-hover); }
+.result-item.active { background: var(--color-accent-bg); }
+.result-item.active::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 56%;
+  border-radius: 0 2px 2px 0;
+  background: var(--color-accent);
+}
 
 .result-icon {
-  width: 28px; height: 28px; border-radius: 6px;
+  width: 30px; height: 30px; border-radius: 7px;
   background: var(--color-bg-tertiary);
   display: flex; align-items: center; justify-content: center;
-  color: var(--color-text-muted); flex-shrink: 0;
-  transition: color 0.12s, background 0.12s;
+  color: var(--color-text-secondary); flex-shrink: 0;
+  transition: color var(--transition-fast), background var(--transition-fast);
 }
+.result-item:hover .result-icon { color: var(--color-text-primary); }
 .result-item.active .result-icon { color: var(--color-accent); background: var(--color-accent-bg); }
 
-.result-app-icon { width: 18px; height: 18px; object-fit: contain; border-radius: 2px; }
+.result-app-icon { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; }
 
-.result-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.result-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 
 .result-label {
   font-size: 13.5px; font-weight: 500; color: var(--color-text-primary);
@@ -695,14 +746,20 @@ onUnmounted(() => {
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.01em;
 }
 
-.result-meta { color: var(--color-text-muted); flex-shrink: 0; display: flex; align-items: center; }
+.result-meta { color: var(--color-text-muted); flex-shrink: 0; display: flex; align-items: center; gap: 4px; }
 .result-item.active .result-meta { color: var(--color-text-secondary); }
 
 .meta-tag {
-  font-size: 10px; background: var(--color-bg-tertiary); padding: 2px 6px;
-  border-radius: 4px; color: var(--color-text-muted); letter-spacing: 0.03em;
+  font-size: 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  color: var(--color-text-muted);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
 }
-.result-item.active .meta-tag { background: var(--color-bg-hover); color: var(--color-text-secondary); }
+.result-item.active .meta-tag { background: var(--color-bg-hover); border-color: var(--color-accent-border); color: var(--color-text-secondary); }
 
 .palette-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center;
@@ -724,10 +781,17 @@ onUnmounted(() => {
   font-size: 10px; font-family: var(--font-mono, monospace); font-weight: 500;
 }
 
-.result-item.selected { background: var(--color-bg-active); }
+.result-item.selected { background: var(--color-accent-bg); }
+.result-item.selected::before {
+  content: '';
+  position: absolute;
+  left: 3px; top: 50%; transform: translateY(-50%);
+  width: 3px; height: 56%; border-radius: 0 2px 2px 0;
+  background: var(--color-accent);
+}
 .result-check {
   display: flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border-radius: 5px; background: var(--color-accent); color: #fff; flex-shrink: 0;
+  width: 18px; height: 18px; border-radius: var(--radius-sm); background: var(--color-accent); color: #fff; flex-shrink: 0;
 }
 
 .palette-preview {
