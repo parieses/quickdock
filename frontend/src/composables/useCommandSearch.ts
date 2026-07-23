@@ -153,6 +153,7 @@ export function useCommandSearch(deps: SearchDeps) {
         label: item.name,
         desc: item.value || '',
         icon: itemIcon(item),
+        iconBase64: item.icon || undefined,
         item,
         frecencyScore: frecencyScore('item:' + item.id),
         score: itemScore,
@@ -175,6 +176,7 @@ export function useCommandSearch(deps: SearchDeps) {
           label: item.name,
           desc: resolved,
           icon: itemIcon(item),
+          iconBase64: item.icon || undefined,
           item,
           inlineQuery: qLC,
         } as SearchResult)
@@ -364,6 +366,7 @@ export function useCommandSearch(deps: SearchDeps) {
           label: entry.label,
           desc: entry.description,
           icon: itemIcon(item),
+          iconBase64: item.icon || undefined,
           item,
           frecencyScore: entry.count,
         })

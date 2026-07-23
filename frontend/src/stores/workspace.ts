@@ -439,6 +439,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   async function updateItemAction(id: string, updates: Record<string, any>) {
     unwrap(await UpdateItem(id, toSnake(updates)))
     updateInArray(items.value, id, updates)
+    // 后端可能已自动重新提取图标（应用 exe/lnk 路径变化），
+    // 重新拉取当前集合以把数据库中的最新字段（含 icon）同步到列表
+    if (activeCollectionId.value) {
+      await fetchItems(activeCollectionId.value)
+    }
   }
 
   // ---- 删除 ----

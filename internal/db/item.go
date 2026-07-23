@@ -11,6 +11,8 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/windows"
+
+	"quickdock/internal/platform"
 )
 
 const itemCols = "id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, usage_count, sort, created_at, updated_at"
@@ -149,6 +151,10 @@ func (d *Database) CreateItem(workspaceID, collectionID, name, itemType, value s
 		CreatedAt:    now(),
 		UpdatedAt:    now(),
 	}
+	// 应用/exe/lnk 类型：自动从文件提取图标（无图标资源则留空，渲染回退到默认图标）
+	if icon := platform.ExtractItemIcon(itemType, value); icon != "" {
+		item.Icon = icon
+	}
 	err = d.BulkInsert("items", []map[string]interface{}{structToMap(item)})
 	return item, err
 }
@@ -241,8 +247,48 @@ func (d *Database) UpdateItem(id string, updates map[string]interface{}) error {
 			return fmt.Errorf("项目名称不能为空")
 		}
 	}
+	// 应用/exe/lnk 类型：未显式设置图标且 value/type 变化时，尝试自动提取图标
+	if _, iconSet := updates["icon"]; !iconSet {
+		d.autoFillItemIcon(id, updates)
+	}
 	updates["updated_at"] = now()
 	return d.updateByID("items", id, updates)
+}
+
+// autoFillItemIcon 在编辑 item 时，按更新后的类型/值自动处理图标：
+//   - 路径(value)发生变化：按新路径重新提取；若不再是 exe/lnk 则清空图标回退默认图标
+//   - 路径未变且当前无图标：尝试补齐（历史/早期创建的 item）
+//   - 路径未变且已有图标：保留，不覆盖
+func (d *Database) autoFillItemIcon(id string, updates map[string]interface{}) {
+	row, err := d.QueryOne("SELECT type, value, icon FROM items WHERE id = ?", id)
+	if err != nil || row == nil {
+		return
+	}
+	itemType := str(row["type"])
+	oldValue := str(row["value"])
+	value := oldValue
+	if t, ok := updates["type"].(string); ok && t != "" {
+		itemType = t
+	}
+	newVal, valChanged := updates["value"].(string)
+	if valChanged && newVal != "" {
+		value = newVal
+	}
+	// 路径变化：以新路径为准重新提取图标（非 exe/lnk 则清空）
+	if valChanged && newVal != oldValue {
+		if icon := platform.ExtractItemIcon(itemType, value); icon != "" {
+			updates["icon"] = icon
+		} else {
+			updates["icon"] = ""
+		}
+		return
+	}
+	// 路径未变且无图标：尝试补齐
+	if str(row["icon"]) == "" {
+		if icon := platform.ExtractItemIcon(itemType, value); icon != "" {
+			updates["icon"] = icon
+		}
+	}
 }
 
 func (d *Database) DeleteItem(id string) error {

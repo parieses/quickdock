@@ -84,6 +84,23 @@ my-plugin/
 | `commands` | 注册到命令面板的命令列表 |
 | `commands[].keywords` | 搜索别名数组，用户输入这些词也能匹配到该命令 |
 
+### commands 字段
+
+每个命令对象支持的字段：
+
+| 字段 | 说明 |
+|---|---|
+| `id` | 命令唯一 ID（插件内唯一） |
+| `title` | 命令显示名称 |
+| `hotkey` | 全局热键（如 `Ctrl+Shift+T`），可选 |
+| `keywords` | 搜索别名数组，用户输入这些词也能匹配到该命令 |
+| `aliases` | 中文别名数组（如 `["计算器","jsq"]`），扩展中文搜索覆盖 |
+| `prefix` | Slash 前缀（如 `/tr`），命令面板输入 `/tr` 时仅该命令激活 |
+| `matchPattern` | 正则匹配模式，命令面板输入文本命中该正则时该命令会被推荐 |
+| `acceptsInput` | **声明该命令接收命令面板传入的参数**，详见「从命令面板接收输入」 |
+
+> ⚠️ **`matchPattern` / `prefix` 只负责「让命令被推荐/激活」，并不代表参数会自动传入插件。** 若要让命令面板输入框中的文本（如 `500`、`192.168.1.1`、`*/5 * * * *`）真正带进插件并执行，必须在命令上声明 `"acceptsInput": true`。
+
 ### Runtime 说明
 
 | runtime | entry 示例 | 说明 |
@@ -248,17 +265,68 @@ window.parent.postMessage(
 )
 ```
 
-### 从命令面板接收输入
+### 从命令面板接收输入（acceptsInput）
 
-当用户在命令面板中选中一个插件命令并输入了文本时，插件窗口打开后会收到 `plugin:init` 消息：
+当用户在命令面板选中某个插件命令，且输入框里有文本时，这些文本**默认不会**传给插件。只有命令在 `plugin.json` 中声明了 `"acceptsInput": true`，宿主才会把文本注入插件。
+
+典型场景：端口检查（输入 `8080`）、HTTP 状态码（输入 `500`）、时间戳转换（输入 `1700000000`）、Cron 解释（输入 `*/5 * * * *`）等「单一数据主体」类命令。
+
+#### 投递路径
+
+宿主按插件是否带前端分两条路径投递：
+
+**路径 A：插件带前端（none / goja / native 且配了 frontend）**
+
+宿主调用 `SetPendingPluginInit(text, commandID)` 暂存参数并打开插件窗口 / 内联 iframe，加载完成后向 iframe 发送 `plugin:init` 消息：
 
 ```javascript
+// 宿主发送（plugin:init）:
+// { type:'plugin:init', data: { text: '<用户输入>', command: '<命令ID>', theme:'dark', locale:'zh' } }
+
 window.addEventListener('message', (e) => {
-  if (e.data?.type === 'plugin:init' && e.data?.data?.text) {
-    // e.data.data.text 包含用户输入的文本
-    console.log('收到输入:', e.data.data.text)
+  if (e.data?.type === 'plugin:init') {
+    const { text, command } = e.data.data || {}
+    if (text) {
+      // 1. 把 text 填入插件输入框
+      // 2. 调用插件自身的转换/执行函数（如 showDetail(code) / convert()）
+    }
   }
 })
+```
+
+> 内置插件使用 Nonce 握手安全机制，`plugin:init` 由 PluginPage.vue 在 iframe `onload` 后自动发送，插件只需监听 `message` 事件即可。
+
+**路径 B：插件无前端（纯后端命令）**
+
+宿主直接调用 `ExecutePluginCommand(pluginID, commandID, { text })`，把文本作为 `input.text` 传给后端：
+
+```javascript
+// goja 后端 main.js
+function handleExecute(params) {
+    var command = params.command || ''
+    var input = params.input || {}
+    var text = input.text || ''   // ← 命令面板传入的文本
+    // ...
+}
+
+// native 后端（JSON-RPC plugin.execute）
+// params: { "command":"hello", "input": { "text": "用户输入" } }
+```
+
+#### 声明示例
+
+```json
+{
+  "commands": [
+    {
+      "id": "lookup-status",
+      "title": "HTTP 状态码查询",
+      "prefix": "/http",
+      "matchPattern": "^[1-5][0-9]{2}$",
+      "acceptsInput": true
+    }
+  ]
+}
 ```
 
 ---

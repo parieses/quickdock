@@ -126,7 +126,8 @@ function onDropItem(e: DragEvent, targetId: string) {
           @drop="onDropItem($event, item.id)"
         >
           <span class="item-icon">
-            <TypeIcon :type="item.type" :size="18" />
+            <img v-if="item.icon" :src="item.icon" class="item-app-icon-img" alt="" />
+            <TypeIcon v-else :type="item.type" :size="18" />
           </span>
           <div class="item-info">
             <span class="item-name">{{ item.name }}</span>
@@ -201,6 +202,9 @@ function onDropItem(e: DragEvent, targetId: string) {
 .item-icon {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; flex-shrink: 0; color: var(--color-text-muted);
+}
+.item-app-icon-img {
+  width: 20px; height: 20px; object-fit: contain; border-radius: 4px;
 }
 .item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
