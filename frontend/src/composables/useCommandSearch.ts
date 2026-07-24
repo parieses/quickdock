@@ -5,7 +5,7 @@ import { evaluate, format, convertExpression } from '../utils/calc'
 import { Puzzle } from '@lucide/vue'
 
 // ---- Types ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best'
 
 export interface SearchResult {
   type: ResultType
@@ -27,6 +27,7 @@ export interface SearchResult {
   inlineInput?: string
   pluginResult?: string
   acceptsInput?: boolean
+  isCachedResult?: boolean
   score?: number
   matchType?: string
   url?: string
@@ -285,6 +286,7 @@ export function useCommandSearch(deps: SearchDeps) {
         pluginCommandId: pc.pluginCommandId,
         pluginHasFrontend: pc.pluginHasFrontend,
         acceptsInput: pc.acceptsInput,
+        isCachedResult: true,
         inlineInput: pc.input || undefined,
         matchType: pc.input ? 'match pattern' : undefined,
       })
@@ -334,7 +336,7 @@ export function useCommandSearch(deps: SearchDeps) {
       for (const g of groups) {
         g.results = g.results.filter(r => !dedupIds.has(dedupKey(r)))
       }
-      groups.unshift({ type: 'item', label: t('cmdBestMatch'), results: show })
+      groups.unshift({ type: 'best', label: t('cmdBestMatch'), results: show })
     }
 
     return groups

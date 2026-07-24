@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/base64"
 	"fmt"
+	"hash/fnv"
 	"image"
 	"image/png"
 	"os"
@@ -106,10 +107,16 @@ func iconCacheDir() string {
 	return dir
 }
 
-// sanitizeIconName 将路径转为安全的文件名
+// sanitizeIconName 将路径转为安全的缓存文件名。
+// 同时纳入目录归一化哈希，避免不同目录下同名 exe（如两个 notepad.exe）共用同一缓存而串图。
 func sanitizeIconName(path string) string {
-	base := filepath.Base(path)
-	base = strings.TrimSuffix(base, filepath.Ext(base))
+	dir := filepath.Dir(path)
+	base := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return dirHash(dir) + "_" + safeBaseName(base)
+}
+
+// safeBaseName 仅保留文件名词中的安全字符
+func safeBaseName(base string) string {
 	result := strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
 			(r >= '0' && r <= '9') || r == '-' || r == '_' {
@@ -117,24 +124,41 @@ func sanitizeIconName(path string) string {
 		}
 		return '_'
 	}, base)
-	if len(result) > 50 {
-		result = result[:50]
+	if len(result) > 40 {
+		result = result[:40]
 	}
 	return result
 }
 
+// dirHash 对目录做 FNV-1a 哈希，得到稳定的短标识，用于区分同名文件的不同来源目录
+func dirHash(dir string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(strings.ToLower(filepath.Clean(dir))))
+	return fmt.Sprintf("%08x", h.Sum32())
+}
+
 // ExtractIconBase64 从文件（.lnk 或 .exe）提取图标，返回 base64 data URL。
-// 优先读取磁盘缓存，不存在则提取并缓存。
+// 优先读取磁盘缓存；若源文件比缓存更新则重新提取（避免图标永不刷新）。
 // 失败时返回空字符串。
 func ExtractIconBase64(filePath string) string {
 	cacheKey := sanitizeIconName(filePath)
 	cachePath := filepath.Join(iconCacheDir(), cacheKey+".png")
+
+	// 源文件比缓存新 → 跳过缓存，重新提取
+	if srcInfo, err := os.Stat(filePath); err == nil {
+		if cacheInfo, err := os.Stat(cachePath); err == nil {
+			if srcInfo.ModTime().After(cacheInfo.ModTime()) {
+				goto extract
+			}
+		}
+	}
 
 	// 1. 尝试读缓存
 	if data, err := os.ReadFile(cachePath); err == nil {
 		return "data:image/png;base64," + base64.StdEncoding.EncodeToString(data)
 	}
 
+extract:
 	// 2. 提取图标
 	dataURL := extractIconRaw(filePath)
 	if dataURL == "" {

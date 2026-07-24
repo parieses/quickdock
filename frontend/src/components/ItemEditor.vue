@@ -62,13 +62,15 @@ watch(() => [props.visible, props.item], ([v]) => {
 });
 
 watch(type, (newType) => {
-  if (!props.item) {
-    if (newType === '快速链接' && !value.value.includes('{query}')) {
-      // 自动添加 {query} 占位符示例
-      value.value = 'https://' + value.value + '{query}'
-    }
+  if (newType === '快速链接' && !value.value.includes('{query}')) {
+    // 自动添加 {query} 占位符示例
+    value.value = 'https://' + value.value + '{query}'
+  }
+  // 切换类型后，校验当前 toolId 是否仍属于新类型可选工具；不属于则回落默认
+  const valid = store.getToolsForType(newType).some(t => t.id === toolId.value)
+  if (!valid) {
     const suggested = store.getDefaultToolForType(newType)
-    if (suggested) toolId.value = suggested.id
+    toolId.value = suggested ? suggested.id : ''
   }
 })
 

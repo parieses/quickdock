@@ -1,6 +1,9 @@
 package db
 
-import "fmt"
+import (
+	"fmt"
+	"regexp"
+)
 
 // baseTables 所有表结构（首次初始化时全部创建）
 // 使用 CREATE TABLE IF NOT EXISTS 确保幂等
@@ -415,9 +418,23 @@ func (d *Database) addColumnIfMissing(table, col, colType string) error {
 		return fmt.Errorf("检查列 %s.%s 失败: %w", table, col, err)
 	}
 	if count == 0 {
+		if err := validateColumnType(colType); err != nil {
+			return err
+		}
 		if _, err := d.conn.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + col + ` ` + colType); err != nil {
 			return fmt.Errorf("新增列 %s.%s 失败: %w", table, col, err)
 		}
+	}
+	return nil
+}
+
+// validColTypeRE 严格约束 addColumnIfMissing 的 colType，防止 ALTER 语句注入。
+// 仅允许：基础类型 + 可选 NOT NULL + 可选 DEFAULT（字符串字面量或数字）。
+var validColTypeRE = regexp.MustCompile(`^(INTEGER|TEXT|REAL|BLOB)(\s+NOT\s+NULL)?(\s+DEFAULT\s+('[^']*'|[0-9]+))?$`)
+
+func validateColumnType(colType string) error {
+	if !validColTypeRE.MatchString(colType) {
+		return fmt.Errorf("非法列类型: %q（仅允许类型/NOT NULL/DEFAULT 组合）", colType)
 	}
 	return nil
 }

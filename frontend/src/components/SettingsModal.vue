@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot } from '@lucide/vue'
+import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { unwrap } from '../utils/api'
 import { i18n } from '../i18n'
@@ -14,6 +14,7 @@ import HotkeySettings from './HotkeySettings.vue'
 import SettingsAI from './SettingsAI.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsWebDAV from './SettingsWebDAV.vue'
+import SettingsTools from './SettingsTools.vue'
 import { GetClipboardRetentionDays, SetClipboardRetentionDays, CleanupClipboardNow } from '../../bindings/quickdock/services/appservice'
 import { GetAutoStart, SetAutoStart } from '../../bindings/quickdock/services/appservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
@@ -43,6 +44,7 @@ const menuItems = computed(() => [
   { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
   { key: 'webdav',     label: 'WebDAV',              icon: Cloud,    desc: t('settings') },
   { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
+  { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
 ])
 
@@ -431,6 +433,11 @@ async function toggleAutoStart() {
           <!-- AI 助手 -->
           <div v-else-if="activePage === 'ai'" class="content-page content-left">
             <SettingsAI :visible="activePage === 'ai'" />
+          </div>
+
+          <!-- 打开工具管理 -->
+          <div v-else-if="activePage === 'tools'" class="content-page content-left">
+            <SettingsTools :visible="activePage === 'tools'" />
           </div>
 
           <!-- 其他设置页占位（旧路由兼容） -->

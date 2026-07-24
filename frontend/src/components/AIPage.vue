@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser } from '@lucide/vue'
@@ -297,10 +297,74 @@ function stop() {
 }
 
 async function copy(text: string) {
+  const value = text ?? ''
   try {
-    await navigator.clipboard.writeText(text)
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(value)
+    } else {
+      const ta = document.createElement('textarea')
+      ta.value = value
+      ta.style.position = 'fixed'
+      ta.style.top = '-9999px'
+      ta.style.opacity = '0'
+      document.body.appendChild(ta)
+      ta.focus()
+      ta.select()
+      document.execCommand('copy')
+      document.body.removeChild(ta)
+    }
     toast.success(t('copied'))
-  } catch { /* ignore */ }
+  } catch {
+    toast.error(t('copyFailed') || '复制失败')
+  }
+}
+
+// —— 划词（选择文本）复制 ——
+const selPop = reactive({ visible: false, x: 0, y: 0, text: '' })
+
+function hideSelPop() {
+  selPop.visible = false
+  selPop.text = ''
+}
+
+function checkSelection() {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed || sel.rangeCount === 0) { hideSelPop(); return }
+  const text = sel.toString().trim()
+  if (!text) { hideSelPop(); return }
+  const range = sel.getRangeAt(0)
+  const container = msgArea.value
+  if (!container || !container.contains(range.commonAncestorContainer)) { hideSelPop(); return }
+  const rect = range.getBoundingClientRect()
+  selPop.text = text
+  let x = Math.round(rect.left + rect.width / 2)
+  let y = Math.round(rect.top - 8)
+  // 选区靠近顶部时改到选区下方显示，避免浮层超出视口
+  if (rect.top < 44) y = Math.round(rect.bottom + 12)
+  // 水平方向限制在视口内
+  x = Math.min(Math.max(x, 70), window.innerWidth - 70)
+  selPop.x = x
+  selPop.y = y
+  selPop.visible = true
+}
+
+function onMsgMouseUp() {
+  // 延迟到选择完成后再判定
+  setTimeout(checkSelection, 0)
+}
+
+async function copySelection() {
+  const text = selPop.text
+  hideSelPop()
+  const sel = window.getSelection()
+  if (sel) sel.removeAllRanges()
+  await copy(text)
+}
+
+function onDocMouseDown(e: MouseEvent) {
+  const pop = document.querySelector('.ai-sel-copy')
+  if (pop && pop.contains(e.target as Node)) return
+  hideSelPop()
 }
 
 onMounted(async () => {
@@ -320,11 +384,14 @@ onMounted(async () => {
   })
   // 设置在 SettingsModal 中保存配置后刷新下拉列表
   Events.On('ai:profiles-updated', loadProfiles)
+  // 点击消息区之外时隐藏划词复制浮层
+  document.addEventListener('mousedown', onDocMouseDown, true)
 })
 
 onUnmounted(() => {
   Events.Off('ai:conv')
   Events.Off('ai:profiles-updated')
+  document.removeEventListener('mousedown', onDocMouseDown, true)
   if (streamCtrl) streamCtrl.abort()
   if (renderTimer) { clearTimeout(renderTimer); renderTimer = null }
   if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null }
@@ -386,7 +453,7 @@ onUnmounted(() => {
       </div>
 
       <!-- 消息区 -->
-      <div ref="msgArea" class="ai-messages">
+      <div ref="msgArea" class="ai-messages" @mouseup="onMsgMouseUp" @keyup="onMsgMouseUp" @scroll="hideSelPop">
         <div v-if="!hasKey" class="ai-need-key">
           <Bot :size="40" />
           <p>{{ t('aiNeedKey') }}</p>
@@ -406,7 +473,7 @@ onUnmounted(() => {
             </details>
             <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md" v-html="renderMarkdown(m.content)"></div>
             <div v-else class="ai-msg-content">{{ m.content }}</div>
-            <button v-if="m.role === 'assistant' && m.id" class="ai-copy" @click="copy(m.content)">
+            <button v-if="m.content" class="ai-copy" @click="copy(m.content)" :title="t('copy')">
               <Copy :size="12" /> {{ t('copy') }}
             </button>
           </div>
@@ -431,6 +498,19 @@ onUnmounted(() => {
           </div>
         </template>
       </div>
+
+      <!-- 划词复制浮层（Teleport 到 body，避免被祖先 overflow/transform 裁剪定位错乱） -->
+      <Teleport to="body">
+        <button
+          v-if="selPop.visible"
+          class="ai-sel-copy"
+          :style="{ left: selPop.x + 'px', top: selPop.y + 'px' }"
+          @click="copySelection"
+          @mousedown.stop
+        >
+          <Copy :size="12" /> {{ t('copySelection') }}
+        </button>
+      </Teleport>
 
       <!-- 输入区 -->
       <div class="ai-input-area">
@@ -603,6 +683,9 @@ onUnmounted(() => {
   word-break: break-word;
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 .ai-msg.user .ai-msg-content { background: var(--color-accent); color: var(--color-accent-text); }
 .ai-copy {
@@ -612,6 +695,24 @@ onUnmounted(() => {
   font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 4px;
 }
 .ai-copy:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
+.ai-msg.user .ai-copy { align-self: flex-end; color: rgba(255,255,255,0.7); }
+.ai-msg.user .ai-copy:hover { color: #fff; background: rgba(255,255,255,0.18); }
+/* 划词复制浮层 */
+.ai-sel-copy {
+  position: fixed;
+  z-index: 50;
+  transform: translate(-50%, -100%);
+  display: flex; align-items: center; gap: 4px;
+  padding: 5px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-size: 12px; cursor: pointer; font-family: inherit;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.ai-sel-copy:hover { color: var(--color-accent); border-color: var(--color-accent); }
 .ai-cursor { animation: ai-blink 1s steps(1) infinite; color: var(--color-accent); }
 @keyframes ai-blink { 50% { opacity: 0; } }
 .ai-error {

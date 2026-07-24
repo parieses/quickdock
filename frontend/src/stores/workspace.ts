@@ -13,14 +13,21 @@ import type { Workspace, Scene, Collection, CollectionItem, OpenTool } from '../
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 
-// 资源类型 → 推荐打开工具类型映射
-const TYPE_TOOL_MAP: Record<string, string> = {
-  '目录': '系统',
-  '文件': '系统',
-  '网页': '浏览器',
-  '命令': '终端',
-  '应用': '系统',
-  '快速链接': '浏览器',
+// 资源类型 → 推荐打开工具类型（数组：第一项用于默认工具，全部用于下拉候选）
+// 目录额外把「编辑器」纳入候选，以便用 VSCode / Trae / Cursor 等打开目录
+const TYPE_TOOL_MAP: Record<string, string[]> = {
+  '目录': ['系统', '编辑器'],
+  '文件': ['系统'],
+  '网页': ['浏览器'],
+  '命令': ['终端'],
+  '应用': ['系统'],
+  '快速链接': ['浏览器'],
+}
+
+// 内置哨兵工具：名称为“系统默认”且为默认工具，代表“跟随系统打开”。
+// 编辑器中已有空选项（id=''）与之等价，故下拉列表中排除它，避免重复显示两个“系统默认”。
+function isSentinelTool(t: OpenTool): boolean {
+  return t.name === '系统默认' && t.isDefault === 1
 }
 
 export const useWorkspaceStore = defineStore('workspace', () => {
@@ -109,19 +116,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // ---- 打开工具 ----
 
   function getDefaultToolForType(itemType: string): OpenTool | null {
-    const preferredToolType = TYPE_TOOL_MAP[itemType] || '系统'
-    const candidates = tools.value.filter(t => t.type === preferredToolType)
-    if (candidates.length > 0) return candidates[0]
+    const preferred = TYPE_TOOL_MAP[itemType] || ['系统']
+    for (const pt of preferred) {
+      const candidates = tools.value.filter(t => t.type === pt)
+      if (candidates.length > 0) return candidates[0]
+    }
     // 回退：任意工具
     if (tools.value.length > 0) return tools.value.find(t => t.isDefault) || tools.value[0]
     return null
   }
 
   function getToolsForType(itemType: string): OpenTool[] {
-    const preferredType = TYPE_TOOL_MAP[itemType] || '系统'
-    const matched = tools.value.filter(t => t.type === preferredType)
-    // 同时包含系统默认工具
-    const systemTools = tools.value.filter(t => t.type === '系统' && !matched.includes(t))
+    const preferred = TYPE_TOOL_MAP[itemType] || ['系统']
+    const matched = tools.value.filter(t => preferred.includes(t.type) && !isSentinelTool(t))
+    // 同时包含系统默认工具（排除内置“系统默认”哨兵，空选项已代表系统默认）
+    const systemTools = tools.value.filter(t => t.type === '系统' && !matched.includes(t) && !isSentinelTool(t))
     return [...matched, ...systemTools]
   }
 

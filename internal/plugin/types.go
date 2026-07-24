@@ -113,6 +113,7 @@ type PluginInstance struct {
 	stopped  atomic.Bool              // 用户主动停止标记（避免崩溃重启循环）
 	Dir      string                    // 插件安装目录
 	Status   string                    // running | stopped | crashed | unresponsive
+	statusMu sync.RWMutex              // 保护 Status 的并发读写（readLoop 在无锁 goroutine 中写）
 
 	// 健康检查
 	MissedPings    int       // 连续 ping 失败次数
@@ -132,6 +133,20 @@ func NewPluginInstance(manifest PluginManifest, dir string) *PluginInstance {
 		Dir:      dir,
 		Status:   "created",
 	}
+}
+
+// GetStatus 线程安全地读取插件状态
+func (inst *PluginInstance) GetStatus() string {
+	inst.statusMu.RLock()
+	defer inst.statusMu.RUnlock()
+	return inst.Status
+}
+
+// SetStatus 线程安全地设置插件状态
+func (inst *PluginInstance) SetStatus(s string) {
+	inst.statusMu.Lock()
+	defer inst.statusMu.Unlock()
+	inst.Status = s
 }
 
 // ---- 管理者查询结构 ----

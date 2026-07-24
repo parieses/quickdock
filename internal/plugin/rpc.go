@@ -94,7 +94,7 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("[plugin %s] readLoop panic: %v\n", inst.Manifest.ID, r)
-			inst.Status = "crashed"
+			inst.SetStatus("crashed")
 		}
 	}()
 	// 就绪信号 ← P0 修复：确保 readLoop 已开始监听再发送 initialize
@@ -143,7 +143,7 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 		close(inst.doneCh)
 	})
 	if !inst.stopped.Load() {
-		inst.Status = "crashed"
+		inst.SetStatus("crashed")
 	}
 }
 

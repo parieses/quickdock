@@ -28,7 +28,7 @@ const toast = inject<ToastAPI>('toast')
 const { frecencyTick, loadFrecency, recordUsage, frecencyScore } = useFrecency()
 const { pluginCmdIndex, buildPluginIndex, calcPluginScore, matchTypeLabels } = usePluginIndex()
 const {
-  inlinePluginId, inlinePluginHtml, inlinePluginLoading, inlinePluginError,
+  inlinePluginId, inlinePluginHtml, bridgedInlinePluginHtml, inlinePluginLoading, inlinePluginError,
   inlinePluginName, inlinePluginIframe, closeInlinePlugin, detachPlugin, onInlinePluginLoad
 } = useInlinePlugin()
 
@@ -109,7 +109,7 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
 ]
 
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best'
 interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
 interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
 interface CmdSnippet { id: string; keyword: string; content: string; category: string; createdAt: string }
@@ -333,12 +333,28 @@ async function executeSelected() {
     let inputText: string | undefined
     if (result.acceptsInput) {
       inputText = result.inlineInput || undefined
-      if (!inputText && result.label) {
+      if (!inputText && result.label && !(result as any).isCachedResult) {
         const idx = pluginCmdIndex.value.find(c => c.plugin.id === result.pluginId && c.cmd.id === result.pluginCommandId)
         if (idx && idx.cmd.title && result.label.startsWith(idx.cmd.title + ': ')) {
           inputText = result.label.slice(idx.cmd.title.length + 2)
         }
       }
+    }
+    // 缓存的“上次结果”且无可靠输入：带参命令不应凭 label 猜测、也不应以空参数执行
+    if ((result as any).isCachedResult && result.acceptsInput && !inputText) {
+      if (result.pluginHasFrontend) {
+        recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, '')
+        try {
+          inlinePluginId.value = result.pluginId; inlinePluginLoading.value = true; inlinePluginError.value = ''
+          const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId))
+          if (html) { const tmatch = html.match(/<title>([^<]*)<\/title>/); inlinePluginName.value = tmatch ? tmatch[1] : result.label; inlinePluginHtml.value = html }
+          else { inlinePluginError.value = t('pluginNoFrontend') }
+        } catch (e: any) { inlinePluginError.value = t('pluginLoadFailed') + ': ' + getErrorMessage(e) }
+        inlinePluginLoading.value = false
+        return
+      }
+      toast?.error?.(t('pluginNeedInput') || '该命令需要输入参数')
+      return
     }
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, inputText || '')
     try {
@@ -507,7 +523,7 @@ onUnmounted(() => {
       <iframe
         v-else-if="inlinePluginHtml"
         ref="inlinePluginIframe"
-        :srcdoc="inlinePluginHtml"
+        :srcdoc="bridgedInlinePluginHtml"
         class="palette-plugin-iframe"
         sandbox="allow-scripts allow-same-origin allow-modals"
         frameborder="0"

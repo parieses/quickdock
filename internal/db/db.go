@@ -335,7 +335,7 @@ func (d *Database) QueryOne(query string, params ...interface{}) (map[string]int
 		return nil, err
 	}
 	if len(results) == 0 {
-		return nil, fmt.Errorf("无结果")
+		return nil, sql.ErrNoRows
 	}
 	return results[0], nil
 }

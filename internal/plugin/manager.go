@@ -116,7 +116,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	switch manifest.Backend.Runtime {
 	case "none":
 		inst := NewPluginInstance(manifest, dir)
-		inst.Status = "running"
+		inst.SetStatus("running")
 		close(inst.readyCh)
 		m.mu.Lock()
 		m.plugins[manifest.ID] = inst
@@ -162,7 +162,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		inst.Cmd = cmd
 		inst.Stdin = stdin
 		inst.Stdout = stdout
-		inst.Status = "starting"
+		inst.SetStatus("starting")
 
 		m.mu.Lock()
 		m.plugins[manifest.ID] = inst
@@ -186,7 +186,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 			return fmt.Errorf("插件初始化失败: %w", err)
 		}
 
-		inst.Status = "running"
+		inst.SetStatus("running")
 		return nil
 	default:
 		return ErrUnsupportedRuntime
@@ -272,7 +272,7 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir string) error {
 	inst := NewPluginInstance(manifest, dir)
 	inst.VM = vm
 	inst.DB = pluginDB
-	inst.Status = "running"
+	inst.SetStatus("running")
 	close(inst.readyCh)
 	m.mu.Lock()
 	m.plugins[manifest.ID] = inst
@@ -315,7 +315,7 @@ func (m *Manager) stopPlugin(inst *PluginInstance) {
 		inst.SendNotification("shutdown", nil)
 	}
 
-	inst.Status = "stopped"
+	inst.SetStatus("stopped")
 	inst.Close()
 
 	// 关闭 goja 插件数据库
@@ -395,7 +395,7 @@ func (m *Manager) pingAll() {
 	m.mu.RLock()
 	ids := make([]string, 0, len(m.plugins))
 	for id, inst := range m.plugins {
-		if inst.Status == "running" && inst.Stdin != nil {
+		if inst.GetStatus() == "running" && inst.Stdin != nil {
 			ids = append(ids, id)
 		}
 	}
@@ -411,7 +411,7 @@ func (m *Manager) pingOne(pluginID string) {
 	m.mu.RLock()
 	inst, ok := m.plugins[pluginID]
 	m.mu.RUnlock()
-	if !ok || inst.Status != "running" || inst.Stdin == nil {
+	if !ok || inst.GetStatus() != "running" || inst.Stdin == nil {
 		return
 	}
 
@@ -420,8 +420,8 @@ func (m *Manager) pingOne(pluginID string) {
 		// ping 成功，重置计数器
 		m.mu.Lock()
 		inst.MissedPings = 0
-		if inst.Status == "unresponsive" {
-			inst.Status = "running"
+		if inst.GetStatus() == "unresponsive" {
+			inst.SetStatus("running")
 			fmt.Printf("QuickDock: 插件 %s 恢复响应\n", pluginID)
 		}
 		m.mu.Unlock()
@@ -431,8 +431,8 @@ func (m *Manager) pingOne(pluginID string) {
 	// ping 失败，递增计数器
 	m.mu.Lock()
 	inst.MissedPings++
-	if inst.MissedPings >= 3 && inst.Status == "running" {
-		inst.Status = "unresponsive"
+	if inst.MissedPings >= 3 && inst.GetStatus() == "running" {
+		inst.SetStatus("unresponsive")
 		inst.UnresponsiveAt = time.Now()
 		fmt.Printf("QuickDock: 插件 %s 连续 %d 次无响应，标记为 unresponsive\n", pluginID, inst.MissedPings)
 	}
@@ -475,8 +475,8 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 
 	switch inst.Manifest.Backend.Runtime {
 	case "native":
-		if inst.Status != "running" {
-			return nil, fmt.Errorf("插件 %s 未在运行（状态: %s）", pluginID, inst.Status)
+		if inst.GetStatus() != "running" {
+			return nil, fmt.Errorf("插件 %s 未在运行（状态: %s）", pluginID, inst.GetStatus())
 		}
 		return inst.Call("plugin.execute", map[string]interface{}{
 			"command": commandID,
@@ -485,6 +485,9 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 	case "none":
 		return json.RawMessage(`{"status":"ok","frontendOnly":true}`), nil
 	case "goja":
+		if inst.GetStatus() != "running" {
+			return nil, fmt.Errorf("插件 %s 未在运行（状态: %s）", pluginID, inst.GetStatus())
+		}
 		result, err := inst.callGojaJS("handleExecute", map[string]interface{}{
 			"command": commandID,
 			"input":   input,
@@ -517,7 +520,7 @@ func (m *Manager) ListPlugins() []PluginInfo {
 			Description: inst.Manifest.Description,
 			Author:      inst.Manifest.Author,
 			Category:    inst.Manifest.Category,
-			Status:      inst.Status,
+			Status:      inst.GetStatus(),
 			HasFrontend: inst.Manifest.Frontend.Enabled,
 			Commands:    cmds,
 		})
@@ -639,7 +642,7 @@ func (m *Manager) safeWritePidFile(plugins map[string]*PluginInstance) {
 
 	pids := make(map[string]int)
 	for id, inst := range plugins {
-		if inst.Status == "running" && inst.Cmd != nil && inst.Cmd.Process != nil {
+		if inst.GetStatus() == "running" && inst.Cmd != nil && inst.Cmd.Process != nil {
 			pids[id] = inst.Cmd.Process.Pid
 		}
 	}
@@ -676,7 +679,7 @@ func (m *Manager) ShutdownAll() {
 		if inst.Stdin != nil {
 			inst.SendNotification("shutdown", nil)
 		}
-		inst.Status = "stopped"
+		inst.SetStatus("stopped")
 		inst.Close()
 		if inst.Cmd != nil && inst.Cmd.Process != nil {
 			inst.Cmd.Process.Kill()

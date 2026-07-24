@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -151,8 +152,8 @@ func (d *Database) CreateItem(workspaceID, collectionID, name, itemType, value s
 		CreatedAt:    now(),
 		UpdatedAt:    now(),
 	}
-	// 应用/exe/lnk 类型：自动从文件提取图标（无图标资源则留空，渲染回退到默认图标）
-	if icon := platform.ExtractItemIcon(itemType, value); icon != "" {
+	// 按类型解析图标：应用/exe/lnk 提取文件图标，网页/快速链接抓取 favicon
+	if icon := resolveItemIcon(itemType, value); icon != "" {
 		item.Icon = icon
 	}
 	err = d.BulkInsert("items", []map[string]interface{}{structToMap(item)})
@@ -186,7 +187,7 @@ func (d *Database) SaveUrlAsItem(rawURL string) (*CollectionItem, error) {
 // 以下 ensure* 均为幂等 find-or-create：并发下若创建因重名失败，回退为查询已有记录。
 func (d *Database) ensureWorkspace(name string) (string, error) {
 	row, err := d.QueryOne("SELECT * FROM workspaces WHERE name = ?", name)
-	if err != nil {
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
 	if row != nil {
@@ -255,40 +256,57 @@ func (d *Database) UpdateItem(id string, updates map[string]interface{}) error {
 	return d.updateByID("items", id, updates)
 }
 
-// autoFillItemIcon 在编辑 item 时，按更新后的类型/值自动处理图标：
-//   - 路径(value)发生变化：按新路径重新提取；若不再是 exe/lnk 则清空图标回退默认图标
-//   - 路径未变且当前无图标：尝试补齐（历史/早期创建的 item）
-//   - 路径未变且已有图标：保留，不覆盖
+// resolveItemIcon 按类型/值解析应填充的图标：
+//   - 网页 / 快速链接：抓取 favicon.ico
+//   - 应用 或 .exe/.lnk：提取文件图标
+//   - 其它类型：不设置（交由前端回退到类型默认图标）
+func resolveItemIcon(itemType, value string) string {
+	switch {
+	case itemType == "网页" || itemType == "快速链接":
+		return platform.FetchFavicon(value)
+	case isAppLike(itemType, value):
+		return platform.ExtractItemIcon(itemType, value)
+	default:
+		return ""
+	}
+}
+
+// isAppLike 判断是否为需要提取文件图标的类型（应用 或 exe/lnk 路径）
+func isAppLike(itemType, value string) bool {
+	if itemType == "应用" {
+		return true
+	}
+	ext := strings.ToLower(filepath.Ext(value))
+	return ext == ".exe" || ext == ".lnk"
+}
+
+// autoFillItemIcon 在编辑 item（且未显式设置 icon）时，按更新后的类型/值自动处理图标：
+//   - 类型或值发生变化：按最新类型/值重新确定（网页→favicon，应用/exe/lnk→文件图标，其它→清空）
+//   - 无变化且已有图标：保留，不覆盖
+//   - 无变化且无图标：尝试补齐（历史/早期创建的 item）
 func (d *Database) autoFillItemIcon(id string, updates map[string]interface{}) {
 	row, err := d.QueryOne("SELECT type, value, icon FROM items WHERE id = ?", id)
 	if err != nil || row == nil {
 		return
 	}
 	itemType := str(row["type"])
-	oldValue := str(row["value"])
-	value := oldValue
-	if t, ok := updates["type"].(string); ok && t != "" {
+	value := str(row["value"])
+	typeChanged := false
+	if t, ok := updates["type"].(string); ok && t != "" && t != itemType {
 		itemType = t
+		typeChanged = true
 	}
-	newVal, valChanged := updates["value"].(string)
-	if valChanged && newVal != "" {
-		value = newVal
+	valChanged := false
+	if v, ok := updates["value"].(string); ok && v != "" && v != value {
+		value = v
+		valChanged = true
 	}
-	// 路径变化：以新路径为准重新提取图标（非 exe/lnk 则清空）
-	if valChanged && newVal != oldValue {
-		if icon := platform.ExtractItemIcon(itemType, value); icon != "" {
-			updates["icon"] = icon
-		} else {
-			updates["icon"] = ""
-		}
+	// 无变化且已有图标：保留，不覆盖
+	if !typeChanged && !valChanged && str(row["icon"]) != "" {
 		return
 	}
-	// 路径未变且无图标：尝试补齐
-	if str(row["icon"]) == "" {
-		if icon := platform.ExtractItemIcon(itemType, value); icon != "" {
-			updates["icon"] = icon
-		}
-	}
+	// 按最新类型/值重新确定图标
+	updates["icon"] = resolveItemIcon(itemType, value)
 }
 
 func (d *Database) DeleteItem(id string) error {
@@ -303,6 +321,8 @@ func (d *Database) OpenItem(item *CollectionItem) error {
 		row, err := d.QueryOne("SELECT * FROM tools WHERE id = ?", item.ToolID)
 		if err == nil {
 			tool = mapToOpenTool(row)
+		} else if !errors.Is(err, sql.ErrNoRows) {
+			fmt.Printf("QuickDock: 读取自定义打开工具失败: %v\n", err)
 		}
 	}
 	if tool.ID == "" {
@@ -352,7 +372,14 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 		if isTerminalTool(tool.Path) {
 			tmpl := tool.Args
 			if tmpl == "" {
-				tmpl = "/c {{command}}"
+				switch strings.ToLower(filepath.Base(tool.Path)) {
+				case "wt", "wt.exe":
+					tmpl = "new-tab {{command}}"
+				case "wsl", "wsl.exe":
+					tmpl = "-- {{command}}"
+				default:
+					tmpl = "/c {{command}}"
+				}
 			}
 			quoted := value
 			if strings.ContainsAny(value, " \t()&|<>^") {
@@ -364,14 +391,11 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 			if item.WorkingDirectory != "" {
 				c.Dir = item.WorkingDirectory
 			}
-			return c.Start()
+			return startDetached(c)
 		}
-		args = strings.ReplaceAll(args, "{{command}}", value)
-		args = strings.ReplaceAll(args, "{{path}}", value)
+		args = expandToolArgs(args, value)
 	} else {
-		args = strings.ReplaceAll(args, "{{path}}", value)
-		args = strings.ReplaceAll(args, "{{command}}", value)
-		args = strings.ReplaceAll(args, "{{url}}", value)
+		args = expandToolArgs(args, value)
 	}
 
 	argList := splitArgs(args)
@@ -379,7 +403,7 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 	if item.WorkingDirectory != "" {
 		cmd.Dir = item.WorkingDirectory
 	}
-	return cmd.Start()
+	return startDetached(cmd)
 }
 
 // validOpenSchemes 允许通过 ShellExecute 打开的 URL 协议白名单。
@@ -446,7 +470,7 @@ func openCommand(value, workingDir string) error {
 	if workingDir != "" {
 		cmd.Dir = workingDir
 	}
-	return cmd.Start()
+	return startDetached(cmd)
 }
 
 func openWithSystemDefault(value, itemType string, workingDir string) error {
@@ -467,8 +491,32 @@ func openWithSystemDefault(value, itemType string, workingDir string) error {
 				nil, nil, windows.SW_SHOWNORMAL)
 		}
 		cmd := exec.Command(value)
-		return cmd.Start()
+		return startDetached(cmd)
 	}
+}
+
+// expandToolArgs 将工具参数模板中的 {{path}}/{{command}}/{{url}} 占位符替换为 value。
+// 仅当 value 含空白且模板未自行给占位符加引号时，才自动加双引号，
+// 避免「模板已带引号 + 自动加引号」造成双重引号被 splitArgs 拆错。
+func expandToolArgs(args, value string) string {
+	v := value
+	if strings.ContainsAny(v, " \t") && !placeholderAlreadyQuoted(args) {
+		v = `"` + v + `"`
+	}
+	args = strings.ReplaceAll(args, "{{path}}", v)
+	args = strings.ReplaceAll(args, "{{command}}", v)
+	args = strings.ReplaceAll(args, "{{url}}", v)
+	return args
+}
+
+// placeholderAlreadyQuoted 检测模板中占位符是否已被双引号包裹（如 "{{path}}"）
+func placeholderAlreadyQuoted(args string) bool {
+	for _, ph := range []string{"{{path}}", "{{command}}", "{{url}}"} {
+		if strings.Contains(args, `"`+ph+`"`) {
+			return true
+		}
+	}
+	return false
 }
 
 func splitArgs(args string) []string {
@@ -494,6 +542,16 @@ func splitArgs(args string) []string {
 		result = append(result, string(current))
 	}
 	return result
+}
+
+// startDetached 启动外部程序并异步回收进程句柄，避免僵尸/句柄泄漏
+// （exec.Command.Start 之后若不 Wait，Windows 上内核句柄不会被释放）
+func startDetached(cmd *exec.Cmd) error {
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() { _ = cmd.Wait() }()
+	return nil
 }
 
 // isTerminalTool 判断某个可执行文件是否为终端类工具

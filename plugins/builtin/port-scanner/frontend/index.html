@@ -54,7 +54,7 @@ if(found){result.className='p-result p-inuse';result.textContent='端口 '+port+
 $('btnRefresh').addEventListener('click',refreshPorts)
 $('btnCheck').addEventListener('click',checkPort)
 $('portInput').addEventListener('keydown',function(e){if(e.key==='Enter')checkPort()})
-$('btnKill').addEventListener('click',function(){var sel=document.querySelector('.p-item.selected');if(sel){var pid=sel.dataset.pid;if(pid&&confirm('确定结束 PID '+pid+' 的进程？')){pluginExec('port-kill',{pid:pid}).then(function(){refreshPorts()}).catch(function(e){alert('结束失败: '+e.message)})}}else{alert('请先点击选择一个端口')}})
+$('btnKill').addEventListener('click',function(){var sel=document.querySelector('.p-item.selected');if(sel){var pid=sel.dataset.pid;if(pid){qdConfirm('确定结束 PID '+pid+' 的进程？').then(function(ok){if(ok){pluginExec('port-kill',{pid:pid}).then(function(){refreshPorts()}).catch(function(e){qdAlert('结束失败: '+e.message)})}})}else{qdAlert('请先点击选择一个端口')}})
 document.addEventListener('click',function(e){document.querySelectorAll('.p-item').forEach(function(el){el.classList.toggle('selected',el===e.target.closest('.p-item'))})})
 window.addEventListener('message',function(e){if(e.data&&e.data.type==='plugin:init'){refreshPorts();if(e.data.data&&e.data.data.text){var m=e.data.data.text.match(/(\d+)/);if(m){$('portInput').value=m[1];checkPort()}}}})
 if(!window.parent)setTimeout(refreshPorts,500) // fallback

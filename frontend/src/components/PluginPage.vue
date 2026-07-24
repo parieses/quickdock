@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Minus, Square, X } from '@lucide/vue'
 import { GetPluginFrontendPage, ExecutePluginCommand, HidePluginWindow, MinimizePluginWindow, ToggleMaximizePluginWindow, GetAndClearPendingPluginInit } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
+import { injectPluginBridge } from '../utils/pluginBridge'
 import type { ToastAPI } from '../types'
 
 const props = defineProps<{ pluginId: string }>()
@@ -36,7 +37,7 @@ onMounted(async () => {
     const match = html.match(/<title>([^<]*)<\/title>/)
     pluginName.value = match ? match[1] : props.pluginId
 
-    const blob = new Blob([html], { type: 'text/html;charset=utf-8' })
+    const blob = new Blob([injectPluginBridge(html)], { type: 'text/html;charset=utf-8' })
     iframeSrc.value = URL.createObjectURL(blob)
     loading.value = false
   } catch (e: any) {
@@ -47,7 +48,26 @@ onMounted(async () => {
   messageHandler = async (event: MessageEvent) => {
     // 验证消息来源：只接受插件 iframe 的消息
     if (event.source !== iframeWindow) return
-    // 验证 nonce 防止伪造消息
+
+    // 插件对话框桥接（仅校验来源，不依赖 nonce）
+    if (event.data?.type === 'plugin:confirm') {
+      const { id, message } = event.data
+      try {
+        const ok = await toast.confirm(message || '')
+        iframePostMessage({ type: 'plugin:confirm-result', id, ok })
+      } catch {
+        iframePostMessage({ type: 'plugin:confirm-result', id, ok: false })
+      }
+      return
+    }
+    if (event.data?.type === 'plugin:alert') {
+      const { id, message } = event.data
+      toast.success(message || '')
+      iframePostMessage({ type: 'plugin:alert-result', id })
+      return
+    }
+
+    // 验证 nonce 防止伪造消息（命令执行需校验）
     if (event.data?.nonce !== pluginNonce) return
 
     if (event.data?.type === 'plugin:execute') {

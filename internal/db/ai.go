@@ -123,9 +123,12 @@ func (d *Database) UpdateAIConversationUsage(id string, promptTokens, completion
 	)
 }
 
-// ListAIMessages 某会话的全部消息（按时间正序）
+// ListAIMessages 某会话的全部消息（按插入顺序正序）
+// 注意：同一次问答里 user 与 assistant 的 created_at 往往落在同一秒，再用随机 UUID 作为
+// tiebreaker 会导致顺序不确定（偶发 assistant 排在 user 前面）。改用 rowid（插入顺序）可
+// 精确保证 user 消息始终先于其 assistant 回复，且对已存的乱序历史记录无需迁移即可正确展示。
 func (d *Database) ListAIMessages(convID string) ([]AIMessage, error) {
-	rows, err := d.ListTableWhere("ai_messages", "conv_id = ? ORDER BY created_at ASC, id ASC", convID)
+	rows, err := d.ListTableWhere("ai_messages", "conv_id = ? ORDER BY rowid ASC", convID)
 	if err != nil {
 		return nil, err
 	}
@@ -172,6 +175,8 @@ func (d *Database) ClearAIConversation(convID string) error {
 }
 
 // DeleteOldAIMessages 仅保留最近 keep 条，删除更早的消息（摘要压缩后清理冗余上下文）
+// 用 rowid 代替 created_at 判定"最新"，避免同秒消息按随机 UUID 误删（可能把同一对问答中的
+// user 留下而删掉 assistant，或反之）。rowid 即插入顺序，保留的是最近插入的 keep 条。
 func (d *Database) DeleteOldAIMessages(convID string, keep int) error {
 	if keep <= 0 {
 		return nil
@@ -184,7 +189,7 @@ func (d *Database) DeleteOldAIMessages(convID string, keep int) error {
 		return nil
 	}
 	sql := `DELETE FROM ai_messages WHERE conv_id = ? AND id NOT IN (
-		SELECT id FROM ai_messages WHERE conv_id = ? ORDER BY created_at DESC, id DESC LIMIT ?
+		SELECT id FROM ai_messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT ?
 	)`
 	return d.ExecuteParams(sql, []interface{}{convID, convID, keep})
 }
