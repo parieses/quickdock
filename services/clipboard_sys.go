@@ -10,6 +10,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"quickdock/internal/db"
@@ -59,8 +60,7 @@ func (a *AppService) OnClipboardChange() {
 	user32 := modUser32
 	kernel32 := modKernel32
 
-	openClipboard := user32.NewProc("OpenClipboard")
-	if ret, _, _ := openClipboard.Call(hwnd); ret == 0 {
+	if !openClipboardRetry(hwnd) {
 		fmt.Println("QuickDock: OpenClipboard failed (another app may be holding it)")
 		return
 	}
@@ -107,24 +107,34 @@ func (a *AppService) OnClipboardChange() {
 		}
 	}
 
-	// 3. Image (CF_DIB)
+	// 3. Image — 探测顺序：PNG(注册格式) → CF_DIBV5(17) → CF_DIB(8)
+	//    Win+Shift+S 等截图工具常以 DIBV5(带 alpha，biCompression=6) 或 PNG 存放；
+	//    旧逻辑只认 CF_DIB(8)，且 DibToImage 曾拒绝 BI_ALPHABITFIELDS(6)，导致截图静默漏抓。
 	var imageData []byte
-	imageHandle, _, _ := getClipboardData.Call(8) // CF_DIB
-	if imageHandle != 0 {
-		ptr, _, _ := globalLock.Call(imageHandle)
-		if ptr != 0 {
-			globalSize := kernel32.NewProc("GlobalSize")
-			sz, _, _ := globalSize.Call(imageHandle)
-			if sz > 0 && sz < 50*1024*1024 {
-				imageData = make([]byte, int(sz))
-				copy(imageData, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(sz)))
-			} else {
-				fmt.Printf("QuickDock: DIB size out of range: %d\n", sz)
+	imageIsPNG := false
+	if pngFmt := getPngClipboardFormat(); pngFmt != 0 {
+		if h, _, _ := getClipboardData.Call(uintptr(pngFmt)); h != 0 {
+			if b := readGlobalMem(h); len(b) >= 8 &&
+				b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G' {
+				imageData = b
+				imageIsPNG = true
 			}
-			globalUnlock.Call(imageHandle)
-		} else {
-			fmt.Println("QuickDock: GlobalLock(CF_DIB) failed")
 		}
+	}
+	if imageData == nil {
+		for _, imgFmt := range []uintptr{17, 8} { // 17=CF_DIBV5, 8=CF_DIB
+			if h, _, _ := getClipboardData.Call(imgFmt); h != 0 {
+				if b := readGlobalMem(h); len(b) > 0 {
+					imageData = b
+					break
+				}
+			}
+		}
+	}
+	if imageData == nil {
+		fmt.Printf("QuickDock: no image format found; available clipboard formats=%v\n", listClipboardFormats())
+	} else {
+		fmt.Printf("QuickDock: clipboard image detected (PNG=%v, %d bytes) db=%s\n", imageIsPNG, len(imageData), a.DB.Path())
 	}
 
 	// 4. Handle files/images
@@ -147,7 +157,7 @@ func (a *AppService) OnClipboardChange() {
 					fmt.Println("QuickDock: clipboard: database closed, skipping image+file")
 					return
 				}
-				processImage(a.DB, imageData, joined, sourceApp, a.emitClipboardEvent)
+				processImage(a.DB, imageData, joined, sourceApp, a.emitClipboardEvent, imageIsPNG)
 			}()
 			return
 		}
@@ -194,9 +204,74 @@ handleText:
 				fmt.Println("QuickDock: clipboard: database closed, skipping image")
 				return
 			}
-			processImage(a.DB, imageData, "", sourceApp, a.emitClipboardEvent)
+			processImage(a.DB, imageData, "", sourceApp, a.emitClipboardEvent, imageIsPNG)
 		}()
 	}
+}
+
+// ===== Clipboard helpers =====
+
+// openClipboardRetry 打开剪贴板，被其他进程短暂持有时重试若干次。
+// 剪贴板监控里最容易被忽略的一类“静默丢数据”就是 OpenClipboard 偶发失败。
+func openClipboardRetry(hwnd uintptr) bool {
+	openClipboard := modUser32.NewProc("OpenClipboard")
+	for i := 0; i < 5; i++ {
+		if ret, _, _ := openClipboard.Call(hwnd); ret != 0 {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+// readGlobalMem 锁定并复制全局内存句柄内容（带 50MB 安全上限）。
+func readGlobalMem(h uintptr) []byte {
+	if h == 0 {
+		return nil
+	}
+	ptr, _, _ := modKernel32.NewProc("GlobalLock").Call(h)
+	if ptr == 0 {
+		return nil
+	}
+	defer modKernel32.NewProc("GlobalUnlock").Call(h)
+	sz, _, _ := modKernel32.NewProc("GlobalSize").Call(h)
+	if sz == 0 || sz > 50*1024*1024 {
+		return nil
+	}
+	b := make([]byte, int(sz))
+	copy(b, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(sz)))
+	return b
+}
+
+// pngClipFmt 缓存 "PNG" 注册剪贴板格式号（部分截图工具直接以此存放图像）。
+var pngClipFmt atomic.Uint32
+
+func getPngClipboardFormat() uint32 {
+	if v := pngClipFmt.Load(); v != 0 {
+		return v
+	}
+	f, _, _ := modUser32.NewProc("RegisterClipboardFormatW").Call(
+		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("PNG"))))
+	if f != 0 {
+		pngClipFmt.Store(uint32(f))
+	}
+	return uint32(f)
+}
+
+// listClipboardFormats 诊断用：枚举当前剪贴板所有可用格式号。
+func listClipboardFormats() []int {
+	enumFmt := modUser32.NewProc("EnumClipboardFormats")
+	var out []int
+	fmtCode := uintptr(0)
+	for {
+		next, _, _ := enumFmt.Call(fmtCode)
+		if next == 0 {
+			break
+		}
+		out = append(out, int(next))
+		fmtCode = next
+	}
+	return out
 }
 
 // recoverPanic 恢复 goroutine panic 防止整个应用崩溃
@@ -228,20 +303,26 @@ func setLastClipboardText(s string) {
 
 // ===== Internal processing functions (run in goroutines) =====
 
-// processImage 处理剪贴板图片数据：DIB→PNG→去重→写入磁盘→入库
+// processImage 处理剪贴板图片数据：DIB→PNG（或 PNG 原样）→去重→写入磁盘→入库
 // paths 参数：非空时表示图片附带文件路径，空字符串时表示纯图片
-func processImage(database *db.Database, imageData []byte, paths, src string, emit func()) {
-	img, err := platform.DibToImage(imageData)
-	if err != nil {
-		fmt.Printf("QuickDock: DIB to image failed: %v\n", err)
-		return
+// isPNG：剪贴板原始数据已是 PNG，直接落盘，免去 DIB 解码再编码的损失与开销
+func processImage(database *db.Database, imageData []byte, paths, src string, emit func(), isPNG bool) {
+	var pngBytes []byte
+	if isPNG {
+		pngBytes = imageData
+	} else {
+		img, err := platform.DibToImage(imageData)
+		if err != nil {
+			fmt.Printf("QuickDock: DIB to image failed: %v\n", err)
+			return
+		}
+		var pngBuf bytes.Buffer
+		if err := png.Encode(&pngBuf, img); err != nil {
+			fmt.Printf("QuickDock: PNG encode failed: %v\n", err)
+			return
+		}
+		pngBytes = pngBuf.Bytes()
 	}
-	var pngBuf bytes.Buffer
-	if err := png.Encode(&pngBuf, img); err != nil {
-		fmt.Printf("QuickDock: PNG encode failed: %v\n", err)
-		return
-	}
-	pngBytes := pngBuf.Bytes()
 	hashHex := platform.MD5Hash(pngBytes)
 
 	imageID := uuid.New().String()
@@ -251,6 +332,13 @@ func processImage(database *db.Database, imageData []byte, paths, src string, em
 	if err != nil {
 		fmt.Printf("QuickDock: image clipboard save failed: %v\n", err)
 		return
+	}
+	// 诊断：确认入库真实生效，并打印 DB 绝对路径（核对与外部查看工具是否同一文件）
+	fmt.Printf("QuickDock >> image entry saved: id=%s db=%s\n", entry.ID, database.Path())
+	if chk, e := database.GetClipboardEntry(entry.ID); e != nil {
+		fmt.Printf("QuickDock: WARN self-check read-back failed: %v\n", e)
+	} else {
+		fmt.Printf("QuickDock: self-check ok: contentType=%s hasImagePath=%v\n", chk.ContentType, chk.ImagePath != "")
 	}
 	if entry.CopyCount == 1 {
 		if err := os.WriteFile(imagePath, pngBytes, 0644); err != nil {

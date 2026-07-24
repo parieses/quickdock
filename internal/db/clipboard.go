@@ -86,7 +86,7 @@ func (d *Database) InsertClipboardImageEntry(id, imagePath, imageHash, textConte
 
 	entry := &ClipboardEntry{
 		ID: id, ContentType: "image", TextContent: textContent, ImagePath: imagePath, ImageHash: imageHash, SourceApp: sourceApp,
-		CopyCount: 1, CreatedAt: now,
+		CopyCount: 1, CreatedAt: time.Now().UnixMilli(),
 	}
 	_, err = d.conn.Exec(
 		"INSERT INTO clipboard_entries (id, content_type, text_content, image_path, image_hash, source_app, copy_count, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",

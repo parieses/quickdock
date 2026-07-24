@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build:dev": "vue-tsc && vite build --minify false --mode development",
-    "build": "vue-tsc && vite build --mode production",
+    "bindings": "cd .. && wails3 generate bindings",
+    "build:dev": "npm run bindings && vue-tsc && vite build --minify false --mode development",
+    "build": "npm run bindings && vue-tsc && vite build --mode production",
     "preview": "vite preview"
   },
   "dependencies": {

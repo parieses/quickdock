@@ -41,8 +41,7 @@ const (
 	LR_LOADFROMFILE  = 0x0010
 	LR_DEFAULTSIZE   = 0x0040
 
-	WM_DRAWCLIPBOARD = 0x0308
-	WM_CHANGECBCHAIN = 0x030D
+	WM_CLIPBOARDUPDATE  = 0x031D
 	CF_TEXT          = 1
 	CF_DIB           = 8
 	CF_HDROP         = 15
@@ -63,7 +62,6 @@ var (
 	mainWin          *application.WebviewWindow
 	mainWinLock      sync.Mutex
 	clipboardWin     *application.WebviewWindow
-	nextClipboardViewer atomic.Uintptr
 
 	// 全局服务引用（供 windowProc 回调使用）
 	appSvc atomic.Pointer[services.AppService]
@@ -98,8 +96,6 @@ var (
 	procDefWindowProcW   = modUser32.NewProc("DefWindowProcW")
 	procPostQuitMessage  = modUser32.NewProc("PostQuitMessage")
 	procDestroyIcon      = modUser32.NewProc("DestroyIcon")
-	procChangeClipboardChain = modUser32.NewProc("ChangeClipboardChain")
-	procSetClipboardViewer   = modUser32.NewProc("SetClipboardViewer")
 	procShellNotifyIconW     = modShell32.NewProc("Shell_NotifyIconW")
 )
 
@@ -290,21 +286,11 @@ func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
 		postQuitMessage(0)
 		return 0
 
-	case WM_DRAWCLIPBOARD:
+	case WM_CLIPBOARDUPDATE:
+		// 使用 AddClipboardFormatListener（而非传统剪贴板链），
+		// 避免链中任一环节断裂导致 QuickDock 收不到任何剪贴板变更通知。
 		if svc := appSvc.Load(); svc != nil {
 			svc.OnClipboardChange()
-		}
-		if nv := nextClipboardViewer.Load(); nv != 0 {
-			procPostMessageW.Call(nv, WM_DRAWCLIPBOARD, wParam, lParam)
-		}
-		return 0
-
-	case WM_CHANGECBCHAIN:
-		nv := nextClipboardViewer.Load()
-		if wParam == nv {
-			nextClipboardViewer.Store(lParam)
-		} else if nv != 0 {
-			procPostMessageW.Call(nv, WM_CHANGECBCHAIN, wParam, lParam)
 		}
 		return 0
 	}
@@ -368,9 +354,13 @@ func runMessageLoop() {
 
 	createTrayIcon(hwnd)
 
-	nextViewer, _, _ := procSetClipboardViewer.Call(hwnd)
-	nextClipboardViewer.Store(nextViewer)
-	fmt.Println("QuickDock: 剪贴板监听已启动")
+	// 注册剪贴板格式监听（现代 API，比 SetClipboardViewer 链更可靠）
+	addClipFmtListener := modUser32.NewProc("AddClipboardFormatListener")
+	if ret, _, _ := addClipFmtListener.Call(hwnd); ret != 0 {
+		fmt.Println("QuickDock: 剪贴板监听已启动 (AddClipboardFormatListener)")
+	} else {
+		fmt.Println("QuickDock: AddClipboardFormatListener 失败")
+	}
 
 	var msg struct {
 		hwnd    uintptr
@@ -427,15 +417,16 @@ func removeTrayIcon() {
 		return
 	}
 
-	// 离开剪贴板监听链
+	// 离开剪贴板格式监听
 	svc := appSvc.Load()
 	var hwnd uintptr
 	if svc != nil {
 		hwnd = uintptr(svc.HiddenHWND.Load())
 	}
-	if hwnd != 0 && nextClipboardViewer.Load() != 0 {
-		procChangeClipboardChain.Call(hwnd, nextClipboardViewer.Load())
-		fmt.Println("QuickDock: 已离开剪贴板监听链")
+	if hwnd != 0 {
+		removeClipFmtListener := modUser32.NewProc("RemoveClipboardFormatListener")
+		removeClipFmtListener.Call(hwnd)
+		fmt.Println("QuickDock: 已移除剪贴板格式监听")
 	}
 
 	nid := &NOTIFYICONDATAW{

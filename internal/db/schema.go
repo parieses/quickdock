@@ -3,6 +3,7 @@ package db
 import (
 	"fmt"
 	"regexp"
+	"time"
 )
 
 // baseTables 所有表结构（首次初始化时全部创建）
@@ -403,6 +404,19 @@ func (d *Database) migrate() error {
 	// 可见执行结果/报错，避免静默失败（"无感"）。仅匹配旧值，幂等可重复执行。
 	if _, err := d.conn.Exec(`UPDATE tools SET args = '/k {{command}}' WHERE path = 'cmd' AND args = '/c {{command}}'`); err != nil {
 		return fmt.Errorf("迁移 CMD 工具参数失败: %w", err)
+	}
+
+	// 数据迁移：修复图片条目 created_at 缺失。
+	// 历史 bug：InsertClipboardImageEntry 新插入时复用了 findAndBumpLocked 返回的 now，
+	// 而该值在“未命中（新插入）”时为 0，导致图片 created_at 被写成 0，
+	// ORDER BY created_at DESC 时永远垫底，且会被 DeleteExpiredClipboardEntries
+	// 按 created_at < cutoff 误删。此处回填 created_at<=0 的行，按 rowid 保留相对顺序，
+	// 幂等可重复执行。
+	if _, err := d.conn.Exec(
+		`UPDATE clipboard_entries SET created_at = ? + rowid WHERE created_at <= 0`,
+		time.Now().UnixMilli(),
+	); err != nil {
+		return fmt.Errorf("回填 clipboard_entries.created_at 失败: %w", err)
 	}
 
 	return nil
