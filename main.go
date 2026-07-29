@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -208,9 +209,19 @@ func initUpdater(app *application.App, version string) error {
 		return -1
 	}
 
+	// 自定义 HTTP 客户端：
+	// 1) 沿用 Go 默认传输层各项超时（连接/TLS 握手等），但允许通过
+	//    环境变量 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 走代理访问 GitHub。
+	// 2) 不设整体 Timeout（默认 30s 会把大体积安装包下载直接掐断），
+	//    真正的超时由调用方传入的 ctx 控制（见 services/update.go）。
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = http.ProxyFromEnvironment
+	httpClient := &http.Client{Transport: transport, Timeout: 0}
+
 	gh, err := github.New(github.Config{
 		Repository:    "parieses/quickdock",
 		AssetMatcher:  assetMatcher,
+		HTTPClient:    httpClient,
 	})
 	if err != nil {
 		return fmt.Errorf("创建 GitHub provider 失败: %w", err)

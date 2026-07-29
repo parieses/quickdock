@@ -160,7 +160,12 @@ export function useCommandSearch(deps: SearchDeps) {
         score: itemScore,
       })
     }
-    itemResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
+    // 应用类型条目优先；同权重时按相关度与频次排序
+    itemResults.sort((a, b) => {
+      const wa = (a.item?.type === '应用' ? 1000 : 0) + (a.score || 0) + Math.min(30, a.frecencyScore || 0)
+      const wb = (b.item?.type === '应用' ? 1000 : 0) + (b.score || 0) + Math.min(30, b.frecencyScore || 0)
+      return wb - wa
+    })
     if (itemResults.length > 0) {
       groups.push({ type: 'item', label: t('cmdGroupItems'), results: itemResults })
     }
@@ -338,6 +343,13 @@ export function useCommandSearch(deps: SearchDeps) {
       }
       groups.unshift({ type: 'best', label: t('cmdBestMatch'), results: show })
     }
+
+    // 应用分组优先于其它内容分组展示（应用排在前面）
+    const GROUP_PRIORITY: Record<string, number> = {
+      best: 0, 'clipboard-action': 1, calculator: 2, url: 3,
+      app: 4, item: 5, 'quicklink-inline': 6, snippet: 7, system: 8, plugin: 9,
+    }
+    groups.sort((a, b) => (GROUP_PRIORITY[a.type] ?? 99) - (GROUP_PRIORITY[b.type] ?? 99))
 
     return groups
   })

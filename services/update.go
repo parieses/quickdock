@@ -86,8 +86,10 @@ func (a *AppService) DownloadUpdate() *UpdateStatus {
 		}
 	}
 
-	// 启动内置更新窗口进行下载和安装（设 5 分钟超时防止永久挂起）
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	// 启动内置更新窗口进行下载和安装。整体超时由 ctx 控制：
+	// HTTP 客户端已不设 30s 硬上限（否则大安装包会被掐断），这里给足
+	// 30 分钟的余量以适配慢速/代理网络，同时避免永久挂起。
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 	if err := a.app.Updater.DownloadAndInstall(ctx); err != nil {
 		return &UpdateStatus{
@@ -150,6 +152,9 @@ func friendlyError(err error) string {
 		return "DNS 解析失败，无法解析 GitHub 域名。请检查网络连接或 DNS 配置。"
 	case strings.Contains(lower, "tls") || strings.Contains(lower, "certificate"):
 		return "TLS/SSL 连接错误。请检查系统时间或网络环境。"
+	case strings.Contains(lower, "context deadline exceeded") ||
+		strings.Contains(lower, "client.timeout") || strings.Contains(lower, "exceeded while reading"):
+		return "下载超时：安装包体积较大或网络连接较慢导致下载未完成。请检查网络，配置代理（HTTPS_PROXY 环境变量），或手动从 GitHub Releases 下载安装。"
 	default:
 		return msg
 	}
