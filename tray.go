@@ -201,8 +201,18 @@ func loadIconFromEmbed() uintptr {
 		return 0
 	}
 
+	// 系统托盘推荐尺寸（小图标）。高 DPI 下 GetSystemMetrics 已返回缩放后逻辑像素，
+	// 用它做目标，避免把 256x256 大图直接当托盘图标导致显示过大/错位。
+	smcx := 16
+	if gsm, _, _ := modUser32.NewProc("GetSystemMetrics").Call(25 /*SM_CXSMICON*/); gsm != 0 {
+		smcx = int(gsm)
+	}
+
+	// 选与目标尺寸最接近（优先 ≥ 目标）的帧，而非面积最大的帧。
+	// 旧逻辑选最大帧(256)传给 CreateIconFromResourceEx 且未指定目标尺寸/缩放标志，
+	// 导致实际创建了 256x256 的 HICON，托盘显示异常过大。
 	bestIdx := 0
-	bestSize := 0
+	bestDiff := int(^uint(0) >> 1)
 	for i := 0; i < count; i++ {
 		entryOffset := 6 + i*16
 		if entryOffset+16 > len(trayIcoEmbed) {
@@ -216,8 +226,18 @@ func loadIconFromEmbed() uintptr {
 		if h == 0 {
 			h = 256
 		}
-		if w*h > bestSize {
-			bestSize = w * h
+		size := w
+		if h > size {
+			size = h
+		}
+		var diff int
+		if size >= smcx {
+			diff = size - smcx
+		} else {
+			diff = (smcx - size) + 1<<20 // 惩罚：小于目标的帧排后面
+		}
+		if diff < bestDiff {
+			bestDiff = diff
 			bestIdx = i
 		}
 	}
@@ -237,12 +257,16 @@ func loadIconFromEmbed() uintptr {
 	}
 
 	imageData := trayIcoEmbed[imageOffset : imageOffset+imageSize]
+	// 明确指定目标尺寸为系统小图标尺寸，并加 LR_DEFAULTSIZE 标志，
+	// 让系统将所选帧精确缩放到托盘尺寸（而非原样 256x256）。
 	hIcon, _, _ := procCreateIcon.Call(
 		uintptr(unsafe.Pointer(&imageData[0])),
 		uintptr(imageSize),
 		1,
 		0x00030000,
-		0, 0, 0,
+		uintptr(smcx),
+		uintptr(smcx),
+		LR_DEFAULTSIZE,
 	)
 
 	if hIcon == 0 {

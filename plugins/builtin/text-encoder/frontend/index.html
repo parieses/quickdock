@@ -19,6 +19,12 @@
 .p-textarea{flex:1;resize:none;padding:10px;border:none;outline:none;background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-mono);font-size:13px;line-height:1.5;tab-size:2}
 .p-textarea::placeholder{color:var(--text-placeholder)}.p-textarea-input:focus{background:var(--bg-tertiary)}.p-textarea-output{background:var(--bg-tertiary)}
 .p-statusbar{padding:4px 10px;font-size:11px;color:var(--text-muted);background:var(--bg-secondary);border-top:1px solid var(--border);flex-shrink:0;min-height:24px}
+.p-image-preview{flex:1;display:none;flex-direction:column;min-height:0;background:var(--bg-tertiary)}
+.p-image-info{padding:6px 12px;font-size:11px;color:var(--text-muted);background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0;display:flex;flex-wrap:wrap;gap:14px}
+.p-image-info b{color:var(--accent);font-weight:500}
+.p-image-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;min-height:0;overflow:auto;background:var(--bg-tertiary)}
+.p-image-wrap img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;box-shadow:0 2px 12px rgba(0,0,0,.4)}
+.p-image-actions{display:flex;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-top:1px solid var(--border);flex-shrink:0}
 </style>
 </head>
 <body>
@@ -47,6 +53,14 @@
     <div class="p-pane">
       <div class="p-pane-header">输出</div>
       <textarea id="outputArea" class="p-textarea p-textarea-output" readonly placeholder="结果…" spellcheck="false"></textarea>
+      <div id="imagePreview" class="p-image-preview">
+        <div class="p-image-info" id="imageInfo"></div>
+        <div class="p-image-wrap"><img id="previewImg" alt="预览" /></div>
+        <div class="p-image-actions">
+          <button class="p-btn" id="btnDownload">💾 下载图片</button>
+          <button class="p-btn" id="btnCopyDataUri">📋 复制 Data URI</button>
+        </div>
+      </div>
     </div>
   </div>
   <div class="p-statusbar" id="statusBar">等待输入…</div>
@@ -56,9 +70,97 @@
   var inputArea=document.getElementById('inputArea'),outputArea=document.getElementById('outputArea')
   var opSelect=document.getElementById('opSelect'),btnProcess=document.getElementById('btnProcess')
   var btnCopy=document.getElementById('btnCopy'),btnClear=document.getElementById('btnClear'),statusText=document.getElementById('statusBar')
+  var imagePreview=document.getElementById('imagePreview'),previewImg=document.getElementById('previewImg')
+  var imageInfo=document.getElementById('imageInfo'),btnDownload=document.getElementById('btnDownload')
+  var btnCopyDataUri=document.getElementById('btnCopyDataUri')
+  var currentMime='',currentDataUri=''
 
   var reqSeq=0
   var pending={}
+
+  // ── Base64 图片识别 ──
+  // 通过 magic bytes 判断 base64 字符串是否为图片，返回 mime 或 null
+  function detectImageFromBase64(b64){
+    // SVG 是文本格式，base64('<svg') === 'PHN2Zw=='
+    if(b64.substr(0,6).toUpperCase()==='PHN2ZW')return 'image/svg+xml'
+    try{
+      var bin=atob(b64.substr(0,24))
+      var b=[]
+      for(var i=0;i<bin.length;i++)b.push(bin.charCodeAt(i)&0xFF)
+      if(b[0]===0x89&&b[1]===0x50&&b[2]===0x4E&&b[3]===0x47)return 'image/png'
+      if(b[0]===0xFF&&b[1]===0xD8&&b[2]===0xFF)return 'image/jpeg'
+      if(b[0]===0x47&&b[1]===0x49&&b[2]===0x46&&b[3]===0x38)return 'image/gif'
+      if(b[0]===0x42&&b[1]===0x4D)return 'image/bmp'
+      if(b[0]===0x52&&b[1]===0x49&&b[2]===0x46&&b[3]===0x46&&b.length>11&&b[8]===0x57&&b[9]===0x45&&b[10]===0x42&&b[11]===0x50)return 'image/webp'
+      if(b[0]===0x00&&b[1]===0x00&&(b[2]===0x01||b[2]===0x02)&&b[3]===0x00)return 'image/x-icon'
+    }catch(e){}
+    return null
+  }
+
+  // 解析输入，提取图片 mime 和 base64 数据（兼容 data URI 和裸 base64）
+  function tryExtractImage(text){
+    // data:image/png;base64,xxxx
+    var m=text.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)/i)
+    if(m)return {mime:m[1].toLowerCase(), base64:m[2].replace(/\s/g,'')}
+    // 裸 base64
+    var clean=text.replace(/\s/g,'')
+    if(!/^[A-Za-z0-9+/]*={0,2}$/.test(clean)||clean.length<16)return null
+    var mime=detectImageFromBase64(clean)
+    if(mime)return {mime:mime, base64:clean}
+    return null
+  }
+
+  function formatSize(bytes){
+    if(bytes<1024)return bytes+' B'
+    if(bytes<1048576)return (bytes/1024).toFixed(1)+' KB'
+    return (bytes/1048576).toFixed(2)+' MB'
+  }
+
+  function mimeToExt(mime){
+    var ext=mime.split('/')[1]
+    if(ext==='jpeg')return 'jpg'
+    if(ext==='svg+xml')return 'svg'
+    if(ext==='x-icon')return 'ico'
+    return ext
+  }
+
+  function showImagePreview(dataUri,mime,base64Str){
+    outputArea.style.display='none'
+    imagePreview.style.display='flex'
+    previewImg.src=dataUri
+    var pad=(base64Str.match(/=+$/)||[''])[0].length
+    var sizeBytes=Math.floor(base64Str.length*3/4)-pad
+    imageInfo.innerHTML='<span>类型: <b>'+mime+'</b></span><span>大小: <b>'+formatSize(sizeBytes)+'</b></span><span id="dimInfo">尺寸: <b>加载中…</b></span>'
+    currentMime=mime;currentDataUri=dataUri
+    statusText.textContent='🖼️ 检测到 Base64 图片 | '+mime+' | '+formatSize(sizeBytes)
+  }
+
+  function hideImagePreview(){
+    if(imagePreview.style.display!=='none'){
+      outputArea.style.display=''
+      imagePreview.style.display='none'
+      previewImg.src=''
+    }
+  }
+
+  previewImg.addEventListener('load',function(){
+    var dim=document.getElementById('dimInfo')
+    if(dim)dim.innerHTML='尺寸: <b>'+previewImg.naturalWidth+' × '+previewImg.naturalHeight+'</b>'
+  })
+
+  btnDownload.addEventListener('click',function(){
+    if(!currentDataUri)return
+    var a=document.createElement('a')
+    a.href=currentDataUri
+    a.download='image_'+Date.now()+'.'+mimeToExt(currentMime)
+    document.body.appendChild(a);a.click();a.remove()
+    statusText.textContent='💾 已触发下载'
+  })
+
+  btnCopyDataUri.addEventListener('click',function(){
+    if(!currentDataUri)return
+    try{navigator.clipboard.writeText(currentDataUri);statusText.textContent='📋 已复制 Data URI！'}catch(e){statusText.textContent='❌ 复制失败'}
+  })
 
   // 通过宿主桥接调用后端（Go 标准库实现的 crypto，保证中文/emoji/多字节全部正确）
   function pluginExec(command, input){
@@ -82,10 +184,10 @@
 
   btnProcess.addEventListener('click', process)
   btnCopy.addEventListener('click',function(){if(outputArea.value){try{navigator.clipboard.writeText(outputArea.value);statusText.textContent='已复制！'}catch(e){}}})
-  btnClear.addEventListener('click',function(){inputArea.value='';outputArea.value='';statusText.textContent='等待输入…';inputArea.focus()})
+  btnClear.addEventListener('click',function(){inputArea.value='';outputArea.value='';hideImagePreview();statusText.textContent='等待输入…';inputArea.focus()})
   document.addEventListener('keydown',function(e){if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();process()};if(e.key==='Escape')inputArea.focus()})
-  var autoTimer;inputArea.addEventListener('input',function(){if(autoTimer)clearTimeout(autoTimer);if(inputArea.value.trim())autoTimer=setTimeout(process,500);else{outputArea.value='';statusText.textContent='等待输入…'}})
-  opSelect.addEventListener('change',function(){if(inputArea.value.trim())process()})
+  var autoTimer;inputArea.addEventListener('input',function(){if(autoTimer)clearTimeout(autoTimer);if(inputArea.value.trim())autoTimer=setTimeout(process,500);else{outputArea.value='';hideImagePreview();statusText.textContent='等待输入…'}})
+  opSelect.addEventListener('change',function(){hideImagePreview();if(inputArea.value.trim())process()})
 
   // 接收来自命令面板的初始数据：自动选中命中的功能并回显文字、立即计算
   window.addEventListener('message',function(e){
@@ -106,8 +208,22 @@
 
   function process(){
     var text=inputArea.value.trim()
-    if(!text){outputArea.value='';statusText.textContent='等待输入…';return}
+    if(!text){outputArea.value='';hideImagePreview();statusText.textContent='等待输入…';return}
     var op=opSelect.value
+
+    // Base64 图片识别：操作为 base64-decode 时，检测输入是否为图片
+    if(op==='base64-decode'){
+      var img=tryExtractImage(text)
+      if(img){
+        // 补齐 padding
+        var pad=img.base64.length%4
+        if(pad)img.base64+='===='.substring(0,4-pad)
+        showImagePreview('data:'+img.mime+';base64,'+img.base64, img.mime, img.base64)
+        return
+      }
+    }
+
+    hideImagePreview()
     statusText.textContent='计算中…'
     pluginExec(op, {text:text}).then(function(res){
       var r = (res && typeof res==='object' && res.text!==undefined) ? res.text : (typeof res==='string'?res:'')

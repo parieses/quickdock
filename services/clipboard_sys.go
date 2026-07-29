@@ -100,7 +100,17 @@ func (a *AppService) OnClipboardChange() {
 	if handle != 0 {
 		ptr, _, _ := globalLock.Call(handle)
 		if ptr != 0 {
-			text = platform.UTF16PtrToString(ptr, 4096)
+			// 基于 GlobalSize 计算实际 UTF-16 单元数，避免硬编码上限截断超长文本
+			// （如 base64 编码的图片，长度远超旧上限 4096 字符）。
+			// UTF16PtrToString 遇到 \0 即停，故传入真实大小是安全精确的。
+			if sz, _, _ := kernel32.NewProc("GlobalSize").Call(handle); sz > 0 {
+				maxUnits := int(sz) / 2
+				const maxSafeUnits = 1 << 22 // ~4MB UTF-16 安全上限
+				if maxUnits > maxSafeUnits {
+					maxUnits = maxSafeUnits
+				}
+				text = platform.UTF16PtrToString(ptr, maxUnits)
+			}
 			globalUnlock.Call(handle)
 		} else {
 			fmt.Println("QuickDock: GlobalLock(CF_UNICODETEXT) failed")
@@ -176,7 +186,10 @@ func (a *AppService) OnClipboardChange() {
 
 handleText:
 	// 5. Text
-	if text != "" && text != getLastClipboardText() && len(strings.TrimSpace(text)) > 0 && len(text) <= 65536 {
+	// 上限对齐 GetClipboardText 的安全上限（1MB 文本），足以容纳绝大多数
+	// base64 编码的图片/文件；再长的纯文本剪贴板内容实践意义极低，且避免无界入库。
+	const maxClipboardTextLen = 1 << 20
+	if text != "" && text != getLastClipboardText() && len(strings.TrimSpace(text)) > 0 && len(text) <= maxClipboardTextLen {
 		setLastClipboardText(text)
 		sourceApp := platform.GetActiveWindowTitle()
 

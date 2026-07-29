@@ -2,7 +2,7 @@
   "id": "com.quickdock.text-encoder",
   "name": "文本编码/加密",
   "version": "0.2.0",
-  "description": "Base64 / URL / HTML 编解码，MD5 / SHA256 哈希计算",
+  "description": "Base64 / URL / HTML 编解码，MD5 / SHA256 哈希，Base64 图片识别预览",
   "author": "QuickDock",
   "icon": "icon.svg",
   "category": "开发者日常",
@@ -41,7 +41,7 @@
         "base64解码"
       ],
       "prefix": "/b64d",
-      "matchPattern": "^[A-Za-z0-9+/]*={0,2}$",
+      "matchPattern": "^(data:image/[a-zA-Z0-9.+-]+;base64,)?[A-Za-z0-9+/]*={0,2}$",
       "acceptsInput": true
     },
     {
