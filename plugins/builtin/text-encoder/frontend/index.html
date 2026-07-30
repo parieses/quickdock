@@ -2,10 +2,17 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>文本编码/加密</title>
+<title>文本工具箱</title>
 <link rel="stylesheet" href="../common.css">
 <style>
-.p-app{display:flex;flex-direction:column;height:100vh}
+.cmp-app{display:flex;flex-direction:column;height:100vh}
+.cmp-tabs{display:flex;gap:4px;padding:6px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0}
+.cmp-tab{height:30px;padding:0 16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-size:13px;cursor:pointer;font-family:inherit}
+.cmp-tab.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+.cmp-pane{flex:1;min-height:0;display:flex;flex-direction:column;overflow:auto}
+.cmp-pane[hidden]{display:none}
+/* 编解码/哈希（原 text-encoder） */
+.p-app{display:flex;flex-direction:column;height:100%}
 .p-toolbar{display:flex;align-items:center;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-bottom:1px solid var(--border);flex-shrink:0;flex-wrap:wrap}
 .p-btn{height:28px;padding:0 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-size:12px;cursor:pointer;font-family:inherit;white-space:nowrap}
 .p-btn:hover{background:var(--bg-hover)}
@@ -25,46 +32,98 @@
 .p-image-wrap{flex:1;display:flex;align-items:center;justify-content:center;padding:16px;min-height:0;overflow:auto;background:var(--bg-tertiary)}
 .p-image-wrap img{max-width:100%;max-height:100%;object-fit:contain;border-radius:4px;box-shadow:0 2px 12px rgba(0,0,0,.4)}
 .p-image-actions{display:flex;gap:6px;padding:8px 10px;background:var(--bg-secondary);border-top:1px solid var(--border);flex-shrink:0}
+/* 命名转换（原 case-converter，.cc- 前缀避免与 .p- 冲突） */
+.cc-app{display:flex;flex-direction:column;height:100%;padding:10px;gap:8px}
+.cc-label{font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px}
+.cc-input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius);background:var(--bg-tertiary);color:var(--text-primary);font-family:var(--font-mono);font-size:14px;outline:none;transition:border-color .15s}
+.cc-input:focus{border-color:var(--accent)}.cc-input::placeholder{color:var(--text-placeholder)}
+.cc-results{flex:1;overflow:auto;display:flex;flex-direction:column;gap:4px;padding:4px 0}
+.cc-row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:var(--radius-sm);background:var(--bg-secondary);min-height:32px;transition:background .1s}
+.cc-row:hover{background:var(--bg-hover)}
+.cc-row-label{font-size:12px;color:var(--text-muted,#888);min-width:100px;flex-shrink:0;font-family:var(--font-mono)}
+.cc-row-value{font-size:13px;color:var(--text-primary);font-family:var(--font-mono);word-break:break-all}
+.cc-row-active .cc-row-label{color:var(--accent)}
+.cc-row-active .cc-row-value{color:#fff;font-weight:500}
+.cc-badge{font-size:10px;padding:1px 5px;border-radius:3px;background:var(--accent);color:#fff;margin-left:auto;flex-shrink:0}
+.cc-empty{display:flex;align-items:center;justify-content:center;flex:1;color:var(--text-muted,#888);font-size:13px}
 </style>
 </head>
 <body>
-<div class="p-app">
-  <div class="p-toolbar">
-    <select class="p-select" id="opSelect">
-      <option value="base64-encode">Base64 编码</option>
-      <option value="base64-decode">Base64 解码</option>
-      <option value="url-encode">URL 编码</option>
-      <option value="url-decode">URL 解码</option>
-      <option value="html-encode">HTML 编码</option>
-      <option value="html-decode">HTML 解码</option>
-      <option value="md5-hash">MD5 哈希</option>
-      <option value="sha256-hash">SHA256 哈希</option>
-    </select>
-    <button class="p-btn p-btn-primary" id="btnProcess">▶ 执行</button>
-    <button class="p-btn" id="btnCopy">📋 复制</button>
-    <span class="p-spacer"></span>
-    <button class="p-btn" id="btnClear">✕ 清空</button>
+<div class="cmp-app">
+  <div class="cmp-tabs">
+    <button class="cmp-tab" data-tab="codec" id="tabCodec">🔤 编解码 / 哈希</button>
+    <button class="cmp-tab" data-tab="case" id="tabCase">🔡 命名转换</button>
   </div>
-  <div class="p-body">
-    <div class="p-pane">
-      <div class="p-pane-header">输入</div>
-      <textarea id="inputArea" class="p-textarea p-textarea-input" placeholder="请输入要处理的文本…" spellcheck="false"></textarea>
+
+  <!-- 编解码 / 哈希 -->
+  <div class="cmp-pane" id="paneCodec">
+  <div class="p-app">
+    <div class="p-toolbar">
+      <select class="p-select" id="opSelect">
+        <option value="base64-encode">Base64 编码</option>
+        <option value="base64-decode">Base64 解码</option>
+        <option value="url-encode">URL 编码</option>
+        <option value="url-decode">URL 解码</option>
+        <option value="html-encode">HTML 编码</option>
+        <option value="html-decode">HTML 解码</option>
+        <option value="md5-hash">MD5 哈希</option>
+        <option value="sha256-hash">SHA256 哈希</option>
+      </select>
+      <button class="p-btn p-btn-primary" id="btnProcess">▶ 执行</button>
+      <button class="p-btn" id="btnCopy">📋 复制</button>
+      <span class="p-spacer"></span>
+      <button class="p-btn" id="btnClear">✕ 清空</button>
     </div>
-    <div class="p-pane">
-      <div class="p-pane-header">输出</div>
-      <textarea id="outputArea" class="p-textarea p-textarea-output" readonly placeholder="结果…" spellcheck="false"></textarea>
-      <div id="imagePreview" class="p-image-preview">
-        <div class="p-image-info" id="imageInfo"></div>
-        <div class="p-image-wrap"><img id="previewImg" alt="预览" /></div>
-        <div class="p-image-actions">
-          <button class="p-btn" id="btnDownload">💾 下载图片</button>
-          <button class="p-btn" id="btnCopyDataUri">📋 复制 Data URI</button>
+    <div class="p-body">
+      <div class="p-pane">
+        <div class="p-pane-header">输入</div>
+        <textarea id="inputArea" class="p-textarea p-textarea-input" placeholder="请输入要处理的文本…" spellcheck="false"></textarea>
+      </div>
+      <div class="p-pane">
+        <div class="p-pane-header">输出</div>
+        <textarea id="outputArea" class="p-textarea p-textarea-output" readonly placeholder="结果…" spellcheck="false"></textarea>
+        <div id="imagePreview" class="p-image-preview">
+          <div class="p-image-info" id="imageInfo"></div>
+          <div class="p-image-wrap"><img id="previewImg" alt="预览" /></div>
+          <div class="p-image-actions">
+            <button class="p-btn" id="btnDownload">💾 下载图片</button>
+            <button class="p-btn" id="btnCopyDataUri">📋 复制 Data URI</button>
+          </div>
         </div>
       </div>
     </div>
+    <div class="p-statusbar" id="statusBar">等待输入…</div>
   </div>
-  <div class="p-statusbar" id="statusBar">等待输入…</div>
+  </div>
+
+  <!-- 命名转换 -->
+  <div class="cmp-pane" id="paneCase" hidden>
+    <div class="cc-app">
+      <div class="cc-label">输入变量名</div>
+      <input type="text" id="ccInput" class="cc-input" placeholder="例如: user_name 或 userName" spellcheck="false" autofocus>
+      <div class="cc-label" style="margin-top:4px">所有命名风格</div>
+      <div class="cc-results" id="ccResults"></div>
+    </div>
+  </div>
 </div>
+
+<!-- tab 切换（必须早于下方 codec/case 脚本，供其 plugin:init 调用） -->
+<script>
+(function(){
+  var tabCodec=document.getElementById('tabCodec'),tabCase=document.getElementById('tabCase')
+  var paneCodec=document.getElementById('paneCodec'),paneCase=document.getElementById('paneCase')
+  function showTextTab(which){
+    if(which==='case'){tabCase.classList.add('active');tabCodec.classList.remove('active');paneCase.hidden=false;paneCodec.hidden=true}
+    else{tabCodec.classList.add('active');tabCase.classList.remove('active');paneCodec.hidden=false;paneCase.hidden=true}
+  }
+  tabCodec.addEventListener('click',function(){showTextTab('codec')})
+  tabCase.addEventListener('click',function(){showTextTab('case')})
+  window.showTextTab=showTextTab
+  showTextTab('codec')
+})()
+</script>
+
+<!-- 编解码 / 哈希（原 text-encoder 逻辑，保持不变） -->
 <script>
 (function(){
   var inputArea=document.getElementById('inputArea'),outputArea=document.getElementById('outputArea')
@@ -78,10 +137,7 @@
   var reqSeq=0
   var pending={}
 
-  // ── Base64 图片识别 ──
-  // 通过 magic bytes 判断 base64 字符串是否为图片，返回 mime 或 null
   function detectImageFromBase64(b64){
-    // SVG 是文本格式，base64('<svg') === 'PHN2Zw=='
     if(b64.substr(0,6).toUpperCase()==='PHN2ZW')return 'image/svg+xml'
     try{
       var bin=atob(b64.substr(0,24))
@@ -97,12 +153,9 @@
     return null
   }
 
-  // 解析输入，提取图片 mime 和 base64 数据（兼容 data URI 和裸 base64）
   function tryExtractImage(text){
-    // data:image/png;base64,xxxx
     var m=text.match(/^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)/i)
     if(m)return {mime:m[1].toLowerCase(), base64:m[2].replace(/\s/g,'')}
-    // 裸 base64
     var clean=text.replace(/\s/g,'')
     if(!/^[A-Za-z0-9+/]*={0,2}$/.test(clean)||clean.length<16)return null
     var mime=detectImageFromBase64(clean)
@@ -159,10 +212,9 @@
 
   btnCopyDataUri.addEventListener('click',function(){
     if(!currentDataUri)return
-    try{navigator.clipboard.writeText(currentDataUri);statusText.textContent='📋 已复制 Data URI！'}catch(e){statusText.textContent='❌ 复制失败'}
+    pluginCopy(currentDataUri).then(function(ok){statusText.textContent=ok?'📋 已复制 Data URI！':'❌ 复制失败'})
   })
 
-  // 通过宿主桥接调用后端（Go 标准库实现的 crypto，保证中文/emoji/多字节全部正确）
   function pluginExec(command, input){
     return new Promise(function(resolve, reject){
       var id='te_'+(++reqSeq)
@@ -171,7 +223,6 @@
     })
   }
 
-  // 接收后端返回结果
   window.addEventListener('message', function(e){
     var d=e&&e.data
     if(!d||d.type!=='plugin:result'||!d.id) return
@@ -182,14 +233,32 @@
     else p.resolve(d.data)
   })
 
+  function pluginCopy(text){
+    return new Promise(function(resolve){
+      var id='cp_'+(++reqSeq)
+      var done=false
+      function onMsg(e){var d=e&&e.data;if(!d||d.type!=='plugin:copy-result'||d.id!==id)return;done=true;window.removeEventListener('message',onMsg);resolve(!!d.ok)}
+      window.addEventListener('message',onMsg)
+      parent.postMessage({type:'plugin:copy', id:id, text:text}, '*')
+      setTimeout(function(){if(!done){window.removeEventListener('message',onMsg);fallbackCopy(text).then(resolve)}},300)
+    })
+  }
+  function fallbackCopy(text){
+    return new Promise(function(resolve){
+      try{ if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(function(){resolve(true)}).catch(function(){resolve(execCopy(text))});return} }catch(e){}
+      resolve(execCopy(text))
+    })
+  }
+  function execCopy(text){
+    try{var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';ta.style.top='0';document.body.appendChild(ta);ta.select();var ok=document.execCommand('copy');document.body.removeChild(ta);return ok}catch(e){return false}
+  }
   btnProcess.addEventListener('click', process)
-  btnCopy.addEventListener('click',function(){if(outputArea.value){try{navigator.clipboard.writeText(outputArea.value);statusText.textContent='已复制！'}catch(e){}}})
+  btnCopy.addEventListener('click',function(){if(outputArea.value){pluginCopy(outputArea.value).then(function(ok){statusText.textContent=ok?'已复制！':'❌ 复制失败'})}})
   btnClear.addEventListener('click',function(){inputArea.value='';outputArea.value='';hideImagePreview();statusText.textContent='等待输入…';inputArea.focus()})
-  document.addEventListener('keydown',function(e){if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();process()};if(e.key==='Escape')inputArea.focus()})
+  document.addEventListener('keydown',function(e){if(e.ctrlKey&&e.key==='Enter'){e.preventDefault();process()};if(e.key==='Escape'&&!paneCodec.hidden)inputArea.focus()})
   var autoTimer;inputArea.addEventListener('input',function(){if(autoTimer)clearTimeout(autoTimer);if(inputArea.value.trim())autoTimer=setTimeout(process,500);else{outputArea.value='';hideImagePreview();statusText.textContent='等待输入…'}})
   opSelect.addEventListener('change',function(){hideImagePreview();if(inputArea.value.trim())process()})
 
-  // 接收来自命令面板的初始数据：自动选中命中的功能并回显文字、立即计算
   window.addEventListener('message',function(e){
     var d=e&&e.data
     if(!d||d.type!=='plugin:init'||!d.data)return
@@ -198,6 +267,7 @@
       for(var i=0;i<opSelect.options.length;i++){
         if(opSelect.options[i].value===pd.command){opSelect.selectedIndex=i;break}
       }
+      if(window.showTextTab)window.showTextTab(pd.command==='convert-case'?'case':'codec')
     }
     if(pd.text){
       inputArea.value=pd.text
@@ -211,11 +281,9 @@
     if(!text){outputArea.value='';hideImagePreview();statusText.textContent='等待输入…';return}
     var op=opSelect.value
 
-    // Base64 图片识别：操作为 base64-decode 时，检测输入是否为图片
     if(op==='base64-decode'){
       var img=tryExtractImage(text)
       if(img){
-        // 补齐 padding
         var pad=img.base64.length%4
         if(pad)img.base64+='===='.substring(0,4-pad)
         showImagePreview('data:'+img.mime+';base64,'+img.base64, img.mime, img.base64)
@@ -235,6 +303,82 @@
     })
   }
   inputArea.focus()
+})()
+</script>
+
+<!-- 命名转换（原 case-converter 逻辑，.cc- 前缀避免样式冲突） -->
+<script>
+(function(){
+  var ccInput=document.getElementById('ccInput'), ccResults=document.getElementById('ccResults')
+  ccInput.addEventListener('input',convert)
+  document.addEventListener('keydown',function(e){if(e.key==='Escape'&&!document.getElementById('paneCase').hidden)ccInput.focus()})
+  window.addEventListener('message',function(e){
+    var d=e&&e.data
+    if(!d||d.type!=='plugin:init'||!d.data)return
+    var pd=d.data
+    if(pd.command==='convert-case'&&pd.text){ccInput.value=pd.text;convert();try{ccInput.focus();ccInput.select()}catch(_){}}
+  })
+  function convert(){
+    var text=ccInput.value.trim()
+    if(!text){ccResults.innerHTML='<div class="cc-empty">输入变量名自动转换</div>';return}
+    text=text.replace(/^['"`]|['"`]$/g,'')
+    var words=tokenize(text)
+    if(!words||words.length===0){ccResults.innerHTML='<div class="cc-empty">无法识别命名风格</div>';return}
+    var items=[
+      {label:'camelCase',value:toCamel(words)},
+      {label:'PascalCase',value:toPascal(words)},
+      {label:'snake_case',value:toSnake(words)},
+      {label:'kebab-case',value:toKebab(words)},
+      {label:'UPPER_CASE',value:toUpper(words)},
+      {label:'camel_Snake',value:toCamelSnake(words)},
+      {label:'Train-Case',value:toTrain(words)},
+      {label:'dot.case',value:toDot(words)}
+    ]
+    var detected=detectStyle(text)
+    var html=''
+    for(var i=0;i<items.length;i++){
+      var isActive=detectStyle(items[i].value)===detected
+      html+='<div class="cc-row'+(isActive?' cc-row-active':'')+'">'+
+        '<span class="cc-row-label">'+items[i].label+'</span>'+
+        '<span class="cc-row-value">'+esc(items[i].value)+'</span>'+
+        (isActive?'<span class="cc-badge">原始</span>':'')+'</div>'
+    }
+    ccResults.innerHTML=html
+  }
+  function tokenize(str){
+    if(/[_-]/.test(str)) return str.split(/[_-]+/).filter(function(w){return w.length>0}).map(function(w){return w.toLowerCase()})
+    var parts=[],buf=''
+    for(var i=0;i<str.length;i++){
+      var ch=str[i]
+      if(ch>='A'&&ch<='Z'){
+        if(buf.length>0){parts.push(buf.toLowerCase());buf=''}
+        var j=i;while(j<str.length&&str[j]>='A'&&str[j]<='Z')j++
+        if(j-i>1&&j<str.length){parts.push(str.substring(i,j-1).toLowerCase());i=j-2;continue}
+        buf=ch
+      }else if(ch==='-'||ch==='_'){if(buf.length>0){parts.push(buf.toLowerCase());buf=''}}
+      else{buf+=ch}
+    }
+    if(buf.length>0)parts.push(buf.toLowerCase())
+    return parts
+  }
+  function toCamel(w){var s=w[0];for(var i=1;i<w.length;i++)s+=w[i].charAt(0).toUpperCase()+w[i].slice(1);return s}
+  function toPascal(w){var s='';for(var i=0;i<w.length;i++)s+=w[i].charAt(0).toUpperCase()+w[i].slice(1);return s}
+  function toSnake(w){return w.join('_')}
+  function toKebab(w){return w.join('-')}
+  function toUpper(w){var s='';for(var i=0;i<w.length;i++){if(i>0)s+='_';s+=w[i].toUpperCase()}return s}
+  function toCamelSnake(w){var s=w[0];for(var i=1;i<w.length;i++)s+='_'+w[i].charAt(0).toUpperCase()+w[i].slice(1);return s}
+  function toTrain(w){var s='';for(var i=0;i<w.length;i++){if(i>0)s+='-';s+=w[i].charAt(0).toUpperCase()+w[i].slice(1)}return s}
+  function toDot(w){return w.join('.')}
+  function detectStyle(str){
+    if(/^[a-z]+_[a-z]+/.test(str)) return 'snake_case'
+    if(/^[a-z]+-[a-z]+/.test(str)) return 'kebab-case'
+    if(/^[A-Z]+_[A-Z]+/.test(str)) return 'UPPER_CASE'
+    if(/^[a-z]+[A-Z]/.test(str)) return 'camelCase'
+    if(/^[A-Z][a-z]+[A-Z]/.test(str)) return 'PascalCase'
+    if(/^[A-Z][a-z]+-[A-Z]/.test(str)) return 'Train-Case'
+    return ''
+  }
+  function esc(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}
 })()
 </script>
 </body>

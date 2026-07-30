@@ -253,6 +253,14 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 		}
 	}
 
+	// 当前仍内置的插件目录名集合（用于清理已删除插件的残留）
+	currentBuiltin := make(map[string]bool)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			currentBuiltin[entry.Name()] = true
+		}
+	}
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -291,6 +299,42 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 			}
 		}
 	}
+
+	// 清理已删除内置插件的残留目录：磁盘上仍存在、但已不在嵌入集中、且 ID 属于内置命名空间
+	pruneStaleBuiltins(mgr, currentBuiltin)
+}
+
+// pruneStaleBuiltins 删除 pluginsDir 下残留的、已不在内置集合中的旧内置插件目录
+func pruneStaleBuiltins(mgr *plugin.Manager, currentBuiltin map[string]bool) {
+	dirEntries, err := os.ReadDir(mgr.PluginsDir())
+	if err != nil {
+		return
+	}
+	for _, e := range dirEntries {
+		if !e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if name == "builtin" || currentBuiltin[name] {
+			continue
+		}
+		mfPath := filepath.Join(mgr.PluginsDir(), name, "plugin.json")
+		data, rerr := os.ReadFile(mfPath)
+		if rerr != nil {
+			continue
+		}
+		var mf plugin.PluginManifest
+		if jerr := json.Unmarshal(data, &mf); jerr != nil {
+			continue
+		}
+		// 仅清理内置命名空间，避免误删用户自行安装的插件
+		if !strings.HasPrefix(mf.ID, "com.quickdock.") {
+			continue
+		}
+		fmt.Printf("QuickDock: 清理已删除的内置插件 %s (%s)\n", name, mf.ID)
+		mgr.UnloadPlugin(mf.ID)
+		os.RemoveAll(filepath.Join(mgr.PluginsDir(), name))
+	}
 }
 
 // autoInstallBuiltins 注册内置插件到数据库并加载（文件已由 extractBuiltinPluginFiles 提取到磁盘）
@@ -300,6 +344,9 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 		fmt.Println("QuickDock: 读取内置插件目录失败:", err)
 		return
 	}
+
+	// 当前有效的内置插件 ID 集合，用于清理残留的数据库记录
+	validBuiltinIDs := make(map[string]bool)
 
 	for _, entry := range entries {
 		if !entry.IsDir() {
@@ -320,6 +367,9 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			fmt.Printf("QuickDock: 解析内置插件 %s plugin.json 失败: %v\n", pluginID, err)
 			continue
 		}
+
+		// 记录当前有效的内置插件 ID，用于清理残留数据库记录
+		validBuiltinIDs[mf.ID] = true
 
 		// 目录不存在说明 extractBuiltinPluginFiles 失败，跳过
 		if _, err := os.Stat(targetDir); os.IsNotExist(err) {
@@ -353,6 +403,20 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			fmt.Printf("QuickDock: 加载内置插件 %s 失败: %v\n", pluginID, err)
 		} else {
 			fmt.Printf("[plugin %s] %s (%s) 已安装并加载\n", mf.ID, mf.Name, mf.Version)
+		}
+	}
+
+	// 清理已删除内置插件的残留数据库记录（磁盘目录已由 pruneStaleBuiltins 移除，
+	// 但历史版本的数据库记录可能残留，需按内置命名空间 + 不在有效集合中删除）
+	if allIDs, derr := database.ListAllPluginIDs(); derr == nil {
+		for _, id := range allIDs {
+			if strings.HasPrefix(id, "com.quickdock.") && !validBuiltinIDs[id] {
+				if rerr := database.DeletePlugin(id); rerr != nil {
+					fmt.Printf("QuickDock: 删除残留内置插件记录 %s 失败: %v\n", id, rerr)
+				} else {
+					fmt.Printf("QuickDock: 已删除残留内置插件记录 %s\n", id)
+				}
+			}
 		}
 	}
 }

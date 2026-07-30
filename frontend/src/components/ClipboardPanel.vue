@@ -72,6 +72,7 @@ function detectType(text: string): DetectedType {
 
 const tags = computed<SmartTag[]>(() => [
   { id: 'all', label: t('tagAll'), icon: Tag, match: () => true },
+  { id: 'favorite', label: t('tagFavorite'), icon: Star, match: (e) => e.isPinned === 1 },
   { id: 'url', label: t('tagUrl'), icon: Globe, match: (e) => detectType(e.textContent || '') === 'url' },
   { id: 'email', label: t('tagEmail'), icon: Mail, match: (e) => detectType(e.textContent || '') === 'email' },
   { id: 'json', label: t('tagJson'), icon: Braces, match: (e) => detectType(e.textContent || '') === 'json' },
@@ -84,7 +85,11 @@ const filteredEntries = computed(() => {
   // 按标签筛选
   const tag = tags.value.find(t => t.id === activeTag.value)
   if (tag && tag.id !== 'all') {
-    list = list.filter(e => e.contentType === 'text' && tag.match(e))
+    if (tag.id === 'favorite') {
+      list = list.filter(e => e.isPinned === 1)
+    } else {
+      list = list.filter(e => e.contentType === 'text' && tag.match(e))
+    }
   }
   // 按搜索词筛选
   const q = searchQuery.value.toLowerCase().trim()

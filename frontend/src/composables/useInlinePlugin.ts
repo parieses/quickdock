@@ -2,7 +2,7 @@ import { ref, computed, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { inject } from 'vue'
 import {
-  ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow
+  ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, CopyText
 } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -69,6 +69,18 @@ export function useInlinePlugin() {
         const { id, message } = event.data
         toast?.success?.(message || '')
         ;(event.source as any).postMessage({ type: 'plugin:alert-result', id }, '*')
+        return
+      }
+
+      // 插件复制：走宿主 CopyText，规避 WebView2 中 navigator.clipboard 静默失败
+      if (event.data?.type === 'plugin:copy') {
+        const { id, text } = event.data
+        try {
+          await CopyText(text || '')
+          ;(event.source as any).postMessage({ type: 'plugin:copy-result', id, ok: true }, '*')
+        } catch {
+          ;(event.source as any).postMessage({ type: 'plugin:copy-result', id, ok: false }, '*')
+        }
         return
       }
 

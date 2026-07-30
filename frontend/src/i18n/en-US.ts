@@ -559,6 +559,7 @@ export default {
   tagJson: 'JSON',
   tagCode: 'Code',
   tagPhone: 'Phone',
+  tagFavorite: 'Pinned',
 
   // Clipboard → Snippet
   addToSnippet: 'Save as Snippet',

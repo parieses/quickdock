@@ -1,6 +1,6 @@
 {
   "id": "com.quickdock.text-encoder",
-  "name": "文本编码/加密",
+  "name": "文本工具箱",
   "version": "0.2.0",
   "description": "Base64 / URL / HTML 编解码，MD5 / SHA256 哈希，Base64 图片识别预览",
   "author": "QuickDock",
@@ -28,7 +28,8 @@
         "base64编码"
       ],
       "prefix": "/b64e",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "matchPattern": "[\\s\\S]+"
     },
     {
       "id": "base64-decode",
@@ -48,25 +49,29 @@
       "id": "url-encode",
       "title": "URL 编码",
       "prefix": "/urle",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "matchPattern": "[\\s\\S]+"
     },
     {
       "id": "url-decode",
       "title": "URL 解码",
       "prefix": "/urld",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "matchPattern": "[\\s\\S]+"
     },
     {
       "id": "html-encode",
       "title": "HTML 编码",
       "prefix": "/htmle",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "matchPattern": "[\\s\\S]+"
     },
     {
       "id": "html-decode",
       "title": "HTML 解码",
       "prefix": "/htmld",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "matchPattern": "[\\s\\S]+"
     },
     {
       "id": "md5-hash",
@@ -80,7 +85,8 @@
         "md5计算"
       ],
       "prefix": "/md5",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "matchPattern": "[\\s\\S]+"
     },
     {
       "id": "sha256-hash",
@@ -93,6 +99,29 @@
         "sha256加密"
       ],
       "prefix": "/sha256",
+      "acceptsInput": true,
+      "matchPattern": "[\\s\\S]+"
+    },
+    {
+      "id": "convert-case",
+      "title": "变量命名转换",
+      "keywords": [
+        "case",
+        "camel",
+        "snake",
+        "kebab",
+        "pascal",
+        "convert"
+      ],
+      "aliases": [
+        "变量命名",
+        "blmm",
+        "命名转换",
+        "驼峰",
+        "下划线",
+        "大小写"
+      ],
+      "matchPattern": "^[a-z]+[_-][a-z]+[a-z_0-9-]*$|^[a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z][a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z]+_[A-Z]+[A-Z_0-9]*$",
       "acceptsInput": true
     }
   ],

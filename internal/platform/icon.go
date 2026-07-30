@@ -65,8 +65,10 @@ var (
 	modKernel32 = windows.NewLazySystemDLL("kernel32.dll")
 	modNtdll    = windows.NewLazySystemDLL("ntdll.dll")
 	modPowrprof = windows.NewLazySystemDLL("powrprof.dll")
+	modOle32    = windows.NewLazySystemDLL("ole32.dll")
 
 	procSHGetFileInfoW     = modShell32.NewProc("SHGetFileInfoW")
+	procExtractIconExW     = modShell32.NewProc("ExtractIconExW")
 	procDestroyIcon        = modUser32.NewProc("DestroyIcon")
 	procGetIconInfo        = modUser32.NewProc("GetIconInfo")
 	procCreateCompatibleDC = modGdi32.NewProc("CreateCompatibleDC")
@@ -74,11 +76,16 @@ var (
 	procDeleteObject       = modGdi32.NewProc("DeleteObject")
 	procGetDIBits          = modGdi32.NewProc("GetDIBits")
 	procGetObject          = modGdi32.NewProc("GetObjectW")
+	procCoInitializeEx     = modOle32.NewProc("CoInitializeEx")
+	procCoUninitialize     = modOle32.NewProc("CoUninitialize")
 )
 
 const (
 	SHGFI_ICON      = 0x000000100
 	SHGFI_LARGEICON = 0x000000000
+
+	COINIT_APARTMENTTHREADED = 0x2
+	COINIT_DISABLE_OLE1DDE   = 0x4
 )
 
 
@@ -177,7 +184,14 @@ extract:
 
 // extractIconRaw 通过 SHGetFileInfoW + GetDIBits 提取图标为 base64 PNG data URL
 func extractIconRaw(filePath string) string {
-	// 1. SHGetFileInfoW 获取 HICON
+	// 确保调用线程已初始化 COM 单线程公寓。SHGetFileInfoW(SHGFI_ICON) 在
+	// 未初始化 COM 的线程（如 Wails JS→Go 回调所在的 goroutine）上可能偶发返回 0，
+	// 导致图标提取失败。仅在我们真正完成初始化时才配对 CoUninitialize。
+	if hr, _, _ := procCoInitializeEx.Call(0, uintptr(COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE)); hr == 0 {
+		defer procCoUninitialize.Call()
+	}
+
+	// 1. SHGetFileInfoW 获取 HICON；失败则回退到直接从 exe 资源提取图标
 	pathPtr, err := windows.UTF16PtrFromString(filePath)
 	if err != nil {
 		return ""
@@ -191,14 +205,18 @@ func extractIconRaw(filePath string) string {
 		unsafe.Sizeof(fi),
 		SHGFI_ICON|SHGFI_LARGEICON,
 	)
-	if ret == 0 || fi.hIcon == 0 {
+	hIcon := fi.hIcon
+	if ret == 0 || hIcon == 0 {
+		hIcon = extractFirstIconFromExe(pathPtr)
+	}
+	if hIcon == 0 {
 		return ""
 	}
-	defer procDestroyIcon.Call(uintptr(fi.hIcon))
+	defer procDestroyIcon.Call(uintptr(hIcon))
 
 	// 2. GetIconInfo 获取位图句柄
 	var ii iconinfo
-	ret, _, _ = procGetIconInfo.Call(uintptr(fi.hIcon), uintptr(unsafe.Pointer(&ii)))
+	ret, _, _ = procGetIconInfo.Call(uintptr(hIcon), uintptr(unsafe.Pointer(&ii)))
 	if ret == 0 {
 		return ""
 	}
@@ -296,4 +314,24 @@ func extractIconRaw(filePath string) string {
 	}
 
 	return "data:image/png;base64," + base64.StdEncoding.EncodeToString(buf.Bytes())
+}
+
+// extractFirstIconFromExe 回退方案：直接用 ExtractIconExW 从 exe/lnk 资源中读取
+// 第一个图标（大图标），不依赖文件类型关联的 Shell 解析，确定性更高。
+func extractFirstIconFromExe(pathPtr *uint16) windows.Handle {
+	var hLarge, hSmall windows.Handle
+	ret, _, _ := procExtractIconExW.Call(
+		uintptr(unsafe.Pointer(pathPtr)),
+		0, // 图标索引 0 = 第一个
+		uintptr(unsafe.Pointer(&hLarge)),
+		uintptr(unsafe.Pointer(&hSmall)),
+		1, // 提取 1 个图标
+	)
+	if ret == 0 {
+		return 0
+	}
+	if hSmall != 0 {
+		procDestroyIcon.Call(uintptr(hSmall))
+	}
+	return hLarge
 }

@@ -60,6 +60,28 @@ func (d *Database) InsertPluginFull(id, name, version, author, description, cate
 	return nil
 }
 
+// ListAllPluginIDs 列出所有插件记录 ID（含已禁用），用于清理残留记录
+func (d *Database) ListAllPluginIDs() ([]string, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	rows, err := d.conn.Query("SELECT id FROM plugins")
+	if err != nil {
+		return nil, fmt.Errorf("查询插件记录失败: %w", err)
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
 // ListEnabledPlugins 列出所有已启用插件 ID
 func (d *Database) ListEnabledPlugins() ([]string, error) {
 	d.mu.Lock()

@@ -46,6 +46,13 @@ function closePalette() {
   try { HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
 }
 
+// 聚焦搜索输入框；仅在搜索模式（非内联插件 / 内联快速链接）下生效
+function focusInput() {
+  if (inlinePluginId.value || inlineQuicklink.value) return
+  const el = inputRef.value
+  if (el) { el.focus(); el.select() }
+}
+
 // 写入系统剪贴板（优先 Go 侧 CopyText，规避 WebView2 中 navigator.clipboard 静默失败）
 async function writeClipboard(text: string) {
   try { await CopyText(text) } catch (e) { console.error('[CmdPalette] CopyText:', e) }
@@ -478,8 +485,15 @@ onMounted(async () => {
         }
       }).catch(() => {})
     }
-    nextTick(() => { requestAnimationFrame(() => { inputRef.value?.focus(); inputRef.value?.select() }) })
+    // 聚焦输入框：单次 rAF 偶发因窗口激活竞态而失效，改为主动多次重试 + 绑定窗口获得焦点事件兜底
+    nextTick(() => {
+      requestAnimationFrame(focusInput)
+      setTimeout(focusInput, 60)
+      setTimeout(focusInput, 180)
+    })
   })
+  // 窗口真正获得 OS 焦点时再补一次聚焦，规避 Show/Focus 异步激活导致的首次聚焦丢失
+  window.addEventListener('focus', focusInput)
   await loadPaletteData()
   await loadPluginIndex()
 })
@@ -499,6 +513,7 @@ onUnmounted(() => {
   closeInlinePlugin()
   Events.Off('palette:shown')
   Events.Off('clipboard:updated')
+  window.removeEventListener('focus', focusInput)
 })
 </script>
 

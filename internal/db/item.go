@@ -121,6 +121,7 @@ func scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.CollectionID, &item.Name, &item.Type, &item.Value, &item.WorkingDirectory, &item.ToolID, &item.Tool, &item.Args, &item.Icon, &item.Color, &item.Remark, &item.PluginData, &item.UsageCount, &item.Sort, &item.CreatedAt, &item.UpdatedAt); err != nil {
 			return nil, err
 		}
+		enrichItemIcon(&item)
 		items = append(items, item)
 	}
 	return items, rows.Err()
@@ -268,6 +269,18 @@ func resolveItemIcon(itemType, value string) string {
 		return platform.ExtractItemIcon(itemType, value)
 	default:
 		return ""
+	}
+}
+
+// enrichItemIcon 读取时自愈：item 无图标且为应用/exe/lnk 类型时，尝试补提取一次。
+// 仅对缺失图标的条目生效；ExtractIconBase64 内部有磁盘缓存，二次读取几乎零成本。
+// 用于修复「保存时图标提取偶发失败导致 icon 字段永久为空」的历史数据。
+func enrichItemIcon(item *CollectionItem) {
+	if item.Icon != "" || !isAppLike(item.Type, item.Value) {
+		return
+	}
+	if icon := platform.ExtractItemIcon(item.Type, item.Value); icon != "" {
+		item.Icon = icon
 	}
 }
 

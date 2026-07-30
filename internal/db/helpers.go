@@ -120,7 +120,7 @@ func mapToCollection(m map[string]interface{}) Collection {
 }
 
 func mapToItem(m map[string]interface{}) CollectionItem {
-	return CollectionItem{
+	item := CollectionItem{
 		ID:               str(m["id"]),
 		WorkspaceID:      str(m["workspace_id"]),
 		CollectionID:     str(m["collection_id"]),
@@ -140,6 +140,8 @@ func mapToItem(m map[string]interface{}) CollectionItem {
 		CreatedAt:        str(m["created_at"]),
 		UpdatedAt:        str(m["updated_at"]),
 	}
+	enrichItemIcon(&item)
+	return item
 }
 
 func mapToOpenTool(m map[string]interface{}) OpenTool {

@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Minus, Square, X } from '@lucide/vue'
-import { GetPluginFrontendPage, ExecutePluginCommand, HidePluginWindow, MinimizePluginWindow, ToggleMaximizePluginWindow, GetAndClearPendingPluginInit } from '../../bindings/quickdock/services/appservice'
+import { GetPluginFrontendPage, ExecutePluginCommand, HidePluginWindow, MinimizePluginWindow, ToggleMaximizePluginWindow, GetAndClearPendingPluginInit, CopyText } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { injectPluginBridge } from '../utils/pluginBridge'
 import type { ToastAPI } from '../types'
@@ -67,8 +67,17 @@ onMounted(async () => {
       return
     }
 
-    // 验证 nonce 防止伪造消息（命令执行需校验）
-    if (event.data?.nonce !== pluginNonce) return
+    // 插件复制：走宿主 CopyText，规避 WebView2 中 navigator.clipboard 静默失败
+    if (event.data?.type === 'plugin:copy') {
+      const { id, text } = event.data
+      try {
+        await CopyText(text || '')
+        iframePostMessage({ type: 'plugin:copy-result', id, ok: true })
+      } catch {
+        iframePostMessage({ type: 'plugin:copy-result', id, ok: false })
+      }
+      return
+    }
 
     if (event.data?.type === 'plugin:execute') {
       const { id, command, input } = event.data

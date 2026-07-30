@@ -561,6 +561,7 @@ export default {
   tagJson: 'JSON',
   tagCode: '代码',
   tagPhone: '手机号',
+  tagFavorite: '已收藏',
 
   // 剪贴板添加到片段
   addToSnippet: '保存为片段',

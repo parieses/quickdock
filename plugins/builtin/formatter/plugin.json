@@ -1,8 +1,8 @@
 {
-  "id": "com.quickdock.code-formatter",
-  "name": "代码压缩/美化",
+  "id": "com.quickdock.formatter",
+  "name": "代码格式化",
   "version": "0.2.0",
-  "description": "JS / CSS / HTML 一键压缩（minify）或美化（prettify），自动检测语言",
+  "description": "通用代码压缩/美化（JS / CSS / HTML 自动检测）与 SQL 格式化合二为一",
   "author": "QuickDock",
   "icon": "icon.svg",
   "category": "开发者日常",
@@ -13,7 +13,7 @@
   "frontend": {
     "enabled": true,
     "entry": "frontend/index.html",
-    "width": 660,
+    "width": 680,
     "height": 520
   },
   "commands": [
@@ -54,6 +54,25 @@
         "格式化"
       ],
       "prefix": "/prettify",
+      "acceptsInput": true
+    },
+    {
+      "id": "format-sql",
+      "title": "SQL 格式化",
+      "keywords": [
+        "sql",
+        "format",
+        "beautify",
+        "pretty"
+      ],
+      "aliases": [
+        "sql格式化",
+        "美化sql",
+        "sql美化",
+        "sql整理"
+      ],
+      "matchPattern": "^\\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|TRUNCATE|MERGE|CALL|EXEC|BEGIN|DECLARE|SET|SHOW|DESCRIBE|EXPLAIN)\\b",
+      "prefix": "/sql",
       "acceptsInput": true
     }
   ],

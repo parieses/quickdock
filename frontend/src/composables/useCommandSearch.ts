@@ -319,7 +319,8 @@ export function useCommandSearch(deps: SearchDeps) {
     // 最佳匹配注入
     const bestMatch: SearchResult[] = []
     for (const g of groups) {
-      if (g.type === 'calculator' || g.type === 'clipboard-action') continue
+      // 计算器/剪贴板为特殊交互项、插件恒排最后，均不进入最佳匹配置顶（插件不得出现在应用之前）
+      if (g.type === 'calculator' || g.type === 'clipboard-action' || g.type === 'plugin') continue
       for (const r of g.results) {
         if ((r.score || 0) >= 70) bestMatch.push(r)
       }
