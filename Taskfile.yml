@@ -22,12 +22,24 @@ tasks:
   build:
     summary: Builds the application
     cmds:
+      - task: build:system-tools
       - task: "{{.GOOS}}:build"
 
   package:
     summary: Packages a production build of the application
     cmds:
+      - task: build:system-tools
       - task: "{{.GOOS}}:package"
+
+  # 构建内置插件共享的 native 二进制（hosts-manager/port-scanner/wifi-manager 共用）。
+  # 该文件被 go:embed 进产物但被 .gitignore 忽略，必须作为 build/package 的前置步骤，
+  # 否则全新 clone 后三个 native 插件会静默失效。
+  build:system-tools:
+    summary: Builds the system-tools.exe binary shared by native builtin plugins
+    dir: tools/system-tools
+    platforms: [windows]
+    cmds:
+      - go build -trimpath -ldflags="-s -w" -o ../../plugins/builtin/_shared/system-tools.exe .
 
   run:
     summary: Runs the application

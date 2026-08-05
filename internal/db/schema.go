@@ -78,6 +78,7 @@ var baseTables = []string{
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
+	`CREATE INDEX IF NOT EXISTS idx_items_collection ON items(collection_id)`,
 
 	`CREATE TABLE IF NOT EXISTS tools (
 		id TEXT PRIMARY KEY,

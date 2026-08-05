@@ -157,10 +157,20 @@ async function setStatus(todo: Todo, status: string) {
 }
 
 // ---- 4.1 子任务（单层级 checklist）----
+// 索引：parentId → 子任务（已排序）；避免模板每行多次全量 filter
+const subtasksByParent = computed(() => {
+  const m = new Map<string, Todo[]>()
+  for (const x of todos.value) {
+    if (!x.parentId) continue
+    if (!m.has(x.parentId)) m.set(x.parentId, [])
+    m.get(x.parentId)!.push(x)
+  }
+  for (const arr of m.values()) arr.sort((a, b) => Number(a.done) - Number(b.done) || a.sort - b.sort)
+  return m
+})
+
 function subtasksOf(parentId: string): Todo[] {
-  return todos.value
-    .filter(x => x.parentId === parentId)
-    .sort((a, b) => Number(a.done) - Number(b.done) || a.sort - b.sort)
+  return subtasksByParent.value.get(parentId) || []
 }
 const addingSubFor = ref('')
 const newSubTitle = ref('')
@@ -181,11 +191,21 @@ async function addSubtask(parent: Todo) {
 }
 
 // 看板：顶层待办按状态分组（忽略日期，按工作流状态；受标签筛选影响）
+// 索引：status → 顶层待办（已排序、已过滤标签），模板每列多次调用只做 O(1) 查找
+const topTodosByStatus = computed(() => {
+  const m = new Map<string, Todo[]>()
+  for (const x of todos.value) {
+    if (x.parentId !== '') continue
+    if (activeTag.value && !parseTags(x.tags).includes(activeTag.value)) continue
+    if (!m.has(x.status)) m.set(x.status, [])
+    m.get(x.status)!.push(x)
+  }
+  for (const arr of m.values()) arr.sort((a, b) => a.sort - b.sort)
+  return m
+})
+
 function statusTodos(status: string): Todo[] {
-  return todos.value.filter(x =>
-    x.parentId === '' && x.status === status &&
-    (!activeTag.value || parseTags(x.tags).includes(activeTag.value)),
-  ).sort((a, b) => a.sort - b.sort)
+  return topTodosByStatus.value.get(status) || []
 }
 const dragId = ref('')
 function onDragStart(id: string) { dragId.value = id }
@@ -199,6 +219,17 @@ async function moveToStatus(status: string) {
 }
 
 // 构建 6×7 共 42 个单元格（周一为起始列）
+// 索引：dueDate → 待办，避免 42 格逐格全量 filter
+const todosByDate = computed(() => {
+  const m = new Map<string, Todo[]>()
+  for (const x of todos.value) {
+    const key = x.dueDate || ''
+    if (!m.has(key)) m.set(key, [])
+    m.get(key)!.push(x)
+  }
+  return m
+})
+
 const cells = computed(() => {
   const first = new Date(viewYear.value, viewMonth.value, 1)
   let lead = first.getDay() - 1
@@ -211,7 +242,7 @@ const cells = computed(() => {
   for (let i = 0; i < 42; i++) {
     const d = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i)
     const ds = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    const items = todos.value.filter(x => x.dueDate === ds)
+    const items = todosByDate.value.get(ds) || []
     out.push({
       date: ds,
       day: d.getDate(),

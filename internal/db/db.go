@@ -114,6 +114,11 @@ type Database struct {
 	mu   sync.Mutex
 	conn dbConn
 	path string
+
+	// colCache 表结构列名缓存：避免每次查询都执行 pragma_table_info
+	// （orderByClause 每次调用 2 次 pragma，快照/列表高频调用时开销放大）。
+	// 仅在 d.mu 持锁时访问，无需额外同步。
+	colCache map[string]map[string]bool
 }
 
 // Open 创建或打开指定路径的 SQLite 数据库
@@ -181,7 +186,7 @@ func (d *Database) ExecuteParams(sqlStr string, params []interface{}) error {
 	return err
 }
 
-// hasColumn 通过参数化查询安全检测列是否存在
+// hasColumn 通过参数化查询安全检测列是否存在（结果缓存，仅首次查 pragma）
 func (d *Database) hasColumn(table, col string) bool {
 	// 白名单校验：表名和列名都必须是已知的
 	if err := validateTable(table); err != nil {
@@ -190,9 +195,25 @@ func (d *Database) hasColumn(table, col string) bool {
 	if err := validateColumn(col); err != nil {
 		return false
 	}
-	var count int
-	d.conn.QueryRow(`SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?`, table, col).Scan(&count)
-	return count > 0
+	if d.colCache == nil {
+		d.colCache = make(map[string]map[string]bool)
+	}
+	cols, ok := d.colCache[table]
+	if !ok {
+		cols = make(map[string]bool)
+		rows, err := d.conn.Query(`SELECT name FROM pragma_table_info(?)`, table)
+		if err == nil {
+			defer rows.Close()
+			for rows.Next() {
+				var name string
+				if rows.Scan(&name) == nil {
+					cols[name] = true
+				}
+			}
+		}
+		d.colCache[table] = cols
+	}
+	return cols[col]
 }
 
 // orderByClause 根据表是否有 sort/created_at 列生成 ORDER BY 子句
@@ -290,7 +311,6 @@ func (d *Database) BulkInsert(table string, rows []map[string]interface{}) error
 	defer tx.Rollback()
 
 	for _, row := range rows {
-		columns := make([]string, 0, len(row))
 		placeholders := make([]string, 0, len(row))
 		values := make([]interface{}, 0, len(row))
 
@@ -303,13 +323,12 @@ func (d *Database) BulkInsert(table string, rows []map[string]interface{}) error
 			if err := validateColumn(col); err != nil {
 				return err
 			}
-			columns = append(columns, col)
 			placeholders = append(placeholders, "?")
 			values = append(values, row[col])
 		}
 
 		query := fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
-			table, strings.Join(columns, ", "), strings.Join(placeholders, ", "))
+			table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
 
 		if _, err := tx.Exec(query, values...); err != nil {
 			return err

@@ -130,6 +130,7 @@ func addBuiltinApps(apps []InstalledApp, seen map[string]bool) []InstalledApp {
 // 收集 .lnk 快捷方式，使用文件名（不含扩展名）作为应用名
 // 子目录名作为分类（如 "Accessories", "Administrative Tools"）
 // 同时添加内置 Windows 应用（记事本/计算器等）
+// 图标提取并发执行（冷缓存时逐个 Shell 提取较慢，串行会卡顿数秒）
 func ScanInstalledApps() ([]InstalledApp, error) {
 	dirs := getStartMenuDirs()
 	if len(dirs) == 0 {
@@ -137,8 +138,12 @@ func ScanInstalledApps() ([]InstalledApp, error) {
 	}
 
 	seen := make(map[string]bool) // 按名称去重（不区分大小写）
-	var apps []InstalledApp
 
+	// 第一步：walk 收集所有 .lnk（不提取图标）
+	type lnkInfo struct {
+		name, path, category string
+	}
+	var lnks []lnkInfo
 	for _, root := range dirs {
 		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -167,16 +172,7 @@ func ScanInstalledApps() ([]InstalledApp, error) {
 			if rel != "." && rel != "" {
 				category = rel
 			}
-
-			// 提取真实应用图标
-			icon := ExtractIconBase64(path)
-
-			apps = append(apps, InstalledApp{
-				Name:       name,
-				Path:       path,
-				Category:   category,
-				IconBase64: icon,
-			})
+			lnks = append(lnks, lnkInfo{name: name, path: path, category: category})
 			return nil
 		})
 		if err != nil {
@@ -184,7 +180,38 @@ func ScanInstalledApps() ([]InstalledApp, error) {
 		}
 	}
 
-	// 添加内置 Windows 应用
+	// 第二步：固定 worker 池并发提取图标（ExtractIconBase64 内部有磁盘缓存 + 每调用独立 COM 初始化）
+	const iconWorkers = 8
+	jobs := make(chan lnkInfo, len(lnks))
+	results := make(chan InstalledApp, len(lnks))
+	var wg sync.WaitGroup
+	for i := 0; i < iconWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				results <- InstalledApp{
+					Name:       j.name,
+					Path:       j.path,
+					Category:   j.category,
+					IconBase64: ExtractIconBase64(j.path),
+				}
+			}
+		}()
+	}
+	for _, l := range lnks {
+		jobs <- l
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	apps := make([]InstalledApp, 0, len(lnks))
+	for r := range results {
+		apps = append(apps, r)
+	}
+
+	// 添加内置 Windows 应用（数量少，串行即可）
 	apps = addBuiltinApps(apps, seen)
 
 	sort.Slice(apps, func(i, j int) bool {

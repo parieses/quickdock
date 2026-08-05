@@ -156,6 +156,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const result = unwrap(await ListTools())
       tools.value = normalizeRows(result) as OpenTool[]
     } catch (e) {
+      error.value = getErrorMessage(e)
       console.error('工具列表加载失败:', e)
     }
   }
@@ -167,6 +168,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const result = unwrap(await ListWorkspaces())
       workspaces.value = normalizeRows(result) as Workspace[]
     } catch (e) {
+      error.value = getErrorMessage(e)
       console.error('工作空间加载失败:', e)
     } finally {
       loading.value = false
@@ -195,6 +197,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (gen !== undefined && gen !== workspaceGen) return
       scenes.value = normalizeRows(result) as Scene[]
     } catch (e) {
+      error.value = getErrorMessage(e)
       console.error('场景加载失败:', e)
     }
   }
@@ -340,6 +343,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (gen !== undefined && gen !== sceneGen) return
       collections.value = normalizeRows(result) as Collection[]
     } catch (e) {
+      error.value = getErrorMessage(e)
       console.error('集合加载失败:', e)
     }
   }
@@ -360,6 +364,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       if (gen !== undefined && gen !== collectionGen) return
       items.value = normalizeRows(result) as CollectionItem[]
     } catch (e) {
+      error.value = getErrorMessage(e)
       console.error('项目加载失败:', e)
     }
   }

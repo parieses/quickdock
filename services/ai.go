@@ -261,7 +261,8 @@ func (a *AppService) AIListProfiles() *ApiResult {
 		}
 		if s.APIKey != "" {
 			if dec, e := platform.DecryptSecret(s.APIKey); e == nil {
-				p.APIKey = dec
+				// 只回填掩码，明文 Key 不暴露给前端 WebView（防注入脚本窃取）
+				p.APIKey = maskAPIKey(dec)
 			}
 		}
 		if p.MaxTokens <= 0 {
@@ -311,6 +312,11 @@ func (a *AppService) AISaveProfiles(req AISaveProfilesRequest) *ApiResult {
 			if e, ok := existing[id]; ok {
 				s.APIKey = e.APIKey
 			}
+		} else if strings.Contains(p.APIKey, "***") {
+			// 前端回传的是掩码（AIListProfiles 返回的形态），不是新 Key：保留原密文
+			if e, ok := existing[id]; ok {
+				s.APIKey = e.APIKey
+			}
 		} else {
 			enc, err := platform.EncryptSecret(p.APIKey)
 			if err != nil {
@@ -346,7 +352,7 @@ func (a *AppService) AISetActiveProfile(id string) *ApiResult {
 	return Ok(nil)
 }
 
-// AIGetConfig 兼容旧接口：返回当前激活档案（API Key 已解密）
+// AIGetConfig 兼容旧接口：返回当前激活档案（API Key 以掩码形式返回）
 func (a *AppService) AIGetConfig() *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
@@ -358,11 +364,23 @@ func (a *AppService) AIGetConfig() *ApiResult {
 	return Ok(AIConfig{
 		Provider:    cfg.Provider,
 		BaseURL:     cfg.BaseURL,
-		APIKey:      cfg.APIKey,
+		APIKey:      maskAPIKey(cfg.APIKey),
 		Model:       cfg.Model,
 		Temperature: cfg.Temperature,
 		MaxTokens:   cfg.MaxTokens,
 	})
+}
+
+// maskAPIKey 将 API Key 掩码为 "前4***后4"（短 Key 全掩码），
+// 前端 WebView 只能拿到掩码，无法窃取明文；保存时后端识别掩码形态并保留原密文
+func maskAPIKey(key string) string {
+	if key == "" {
+		return ""
+	}
+	if len(key) <= 8 {
+		return "******"
+	}
+	return key[:4] + "***" + key[len(key)-4:]
 }
 
 // AISetConfig 兼容旧接口：写入单个默认档案
@@ -798,7 +816,7 @@ func (a *AppService) AITestConnection(profileID string) (map[string]interface{},
 	req.Header.Set(authKey, authVal)
 	req.Header.Set("Accept-Encoding", "identity")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := a.aiHTTPClient.Do(req)
 	if err != nil {
 		return map[string]interface{}{"success": false, "message": "网络错误: " + err.Error()}, nil
 	}

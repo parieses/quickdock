@@ -26,11 +26,13 @@ type AppService struct {
 	// 次要窗口延迟创建（由 main.go 注入工厂函数，避免启动时创建所有 WebView2 实例）
 	GetClipboardWindow func() *application.WebviewWindow
 	GetPaletteWindow   func() *application.WebviewWindow
+	GetNoteWindow      func() *application.WebviewWindow
 
 	// 状态标志（注入 main 包的 atomic.Bool 指针，共享状态）
 	WindowVisible *atomic.Bool
 	ClipboardMode *atomic.Bool
 	PaletteMode   *atomic.Bool
+	NoteMode      *atomic.Bool
 
 	// 隐藏窗口 HWND（给剪贴板系统 API 用）
 	HiddenHWND atomic.Uint64
@@ -64,6 +66,10 @@ type AppService struct {
 	// 监控在检标记：防止同一监控并发检测（慢探针未更新 last_checked_ts 时被重复选为待检）
 	// 导致宕机时重复发送通知。LoadOrStore 原子保证同一时刻仅一个检查协程通过。
 	monitorInflight sync.Map // monitorID -> struct{}
+
+	// 定时任务在运行标记：防止慢任务（http 阻塞 / command·open 挂起）重排前被重复选中并发执行。
+	// 与 monitorInflight 同款 LoadOrStore 模式。
+	schedInflight sync.Map // taskID -> struct{}
 
 	// 插件前端页面 HTML 缓存
 	frontendCache   map[string]*frontendCacheEntry

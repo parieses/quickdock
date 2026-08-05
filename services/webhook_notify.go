@@ -10,6 +10,9 @@ import (
 	"time"
 )
 
+// webhookClient 共享 HTTP 客户端（通知投递，连接复用）
+var webhookClient = &http.Client{Timeout: 10 * time.Second}
+
 // WebhookConfig 机器人 Webhook 通知配置（钉钉 / 企业微信 / 飞书）。
 // 三个字段各存对应平台自定义机器人的 Webhook 地址，留空即为未启用。
 type WebhookConfig struct {
@@ -126,8 +129,7 @@ func postWebhook(kind, url, title, body string) error {
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 10 * time.Second}
-	resp, err := client.Do(req)
+	resp, err := webhookClient.Do(req)
 	if err != nil {
 		return err
 	}

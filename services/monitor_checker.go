@@ -11,12 +11,22 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"quickdock/internal/db"
 
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
+
+// 共享 HTTP Transport（连接池复用）：普通探测用默认传输，跳过 TLS 校验用独立单例
+var (
+	monitorDefaultTransport = http.DefaultTransport
+	monitorSkipTLSTransport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+)
+
+// monitorRegexCache 按 pattern 缓存编译后的正则（探测是定时高频操作，避免每次重编译）
+var monitorRegexCache sync.Map // pattern → *regexp.Regexp
 
 // StartMonitorChecker 启动网站监控检查器（仿 UptimeRobot）。
 // 同样采用精确定时器：每次检测后按 interval 计算最近待检监控的等待时长并精确 sleep，
@@ -216,16 +226,13 @@ func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg strin
 	}
 	req.Header.Set("User-Agent", "QuickDock-Monitor/1.0")
 
-	// 默认复用 http.DefaultTransport，仅在需要跳过 TLS 校验时创建自定义 Transport
-	var transport http.RoundTripper = http.DefaultTransport
+	// 复用共享 Transport（连接池），不每探测新建；超时由 ctx 控制
+	transport := http.RoundTripper(monitorDefaultTransport)
 	if m.SkipTLSVerify {
-		transport = &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		}
+		transport = monitorSkipTLSTransport
 	}
 	client := &http.Client{
-		Timeout:       time.Duration(m.TimeoutSec) * time.Second,
-		Transport:     transport,
+		Transport: transport,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if m.FollowRedirects {
 				return nil
@@ -268,11 +275,16 @@ func matchesContent(body []byte, m *db.Monitor) bool {
 	case "not_contains":
 		return !strings.Contains(s, m.ContentMatchPattern)
 	case "regex":
-		matched, err := regexp.MatchString(m.ContentMatchPattern, s)
-		if err != nil {
-			return false // 非法正则：判定为不匹配
+		re, ok := monitorRegexCache.Load(m.ContentMatchPattern)
+		if !ok {
+			r, err := regexp.Compile(m.ContentMatchPattern)
+			if err != nil {
+				return false // 非法正则：判定为不匹配
+			}
+			re = r
+			monitorRegexCache.Store(m.ContentMatchPattern, r)
 		}
-		return matched
+		return re.(*regexp.Regexp).MatchString(s)
 	}
 	return true
 }

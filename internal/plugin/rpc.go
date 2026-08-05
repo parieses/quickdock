@@ -100,42 +100,53 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	// 就绪信号 ← P0 修复：确保 readLoop 已开始监听再发送 initialize
 	close(inst.readyCh)
 
-	scanner := bufio.NewScanner(inst.Stdout)
-	// 1MB buffer 应对大响应
-	scanner.Buffer(make([]byte, 1024*1024), 1024*1024)
+	// 用 bufio.Reader 替代 Scanner：Scanner 即使放大 buffer 仍有 1MB 单行硬上限，
+	// 插件返回大 base64/文件内容（>1MB）会触发 ErrTooLong → readLoop 退出 → 实例被标 crashed → 重启循环。
+	// ReadString 按需增长内部缓冲，单行无大小上限。
+	reader := bufio.NewReaderSize(inst.Stdout, 64*1024)
 
-	for scanner.Scan() {
-		line := scanner.Bytes()
-		if len(line) == 0 {
-			continue
-		}
-
-		// 先尝试解析为请求（包含 method 字段）
-		var req RPCRequest
-		if err := json.Unmarshal(line, &req); err == nil && req.Method != "" {
-			// 这是插件发起的回调请求或通知
-			if manager != nil {
-				manager.handleCallback(inst, &req)
+	for {
+		line, err := reader.ReadString('\n')
+		if len(line) > 0 {
+			// 去掉行尾换行（兼容 \r\n）
+			lb := line
+			if n := len(lb); n > 0 && lb[n-1] == '\n' {
+				lb = lb[:n-1]
+				if n = len(lb); n > 0 && lb[n-1] == '\r' {
+					lb = lb[:n-1]
+				}
 			}
-			continue
+			if len(lb) > 0 {
+				b := []byte(lb)
+				// 先尝试解析为请求（包含 method 字段）
+				var req RPCRequest
+				if jerr := json.Unmarshal(b, &req); jerr == nil && req.Method != "" {
+					// 这是插件发起的回调请求或通知
+					if manager != nil {
+						manager.handleCallback(inst, &req)
+					}
+				} else {
+					// 再尝试解析为响应
+					var resp RPCResponse
+					if jerr := json.Unmarshal(b, &resp); jerr != nil {
+						// 无法解析的 stdout 行，静默忽略（插件自己的调试打印不应干扰通信协议）
+						// 如需调试可取消下行注释：
+						// fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, lb)
+					} else {
+						// 匹配 pending 请求
+						inst.readMu.Lock()
+						if ch, ok := inst.Pending[resp.ID]; ok {
+							ch <- &resp
+							delete(inst.Pending, resp.ID)
+						}
+						inst.readMu.Unlock()
+					}
+				}
+			}
 		}
-
-		// 再尝试解析为响应
-		var resp RPCResponse
-		if err := json.Unmarshal(line, &resp); err != nil {
-			// 无法解析的 stdout 行，静默忽略（插件自己的调试打印不应干扰通信协议）
-			// 如需调试可取消下行注释：
-			// fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, string(line))
-			continue
+		if err != nil {
+			break
 		}
-
-		// 匹配 pending 请求
-		inst.readMu.Lock()
-		if ch, ok := inst.Pending[resp.ID]; ok {
-			ch <- &resp
-			delete(inst.Pending, resp.ID)
-		}
-		inst.readMu.Unlock()
 	}
 
 	// scanner 退出说明进程结束或 stdout 关闭
@@ -172,11 +183,22 @@ func (inst *PluginInstance) SendNotification(method string, params interface{}) 
 
 	inst.sendMu.Lock()
 	defer inst.sendMu.Unlock()
-	_, err = inst.Stdin.Write(data)
-	if err != nil {
-		return fmt.Errorf("写入插件 stdin 失败: %w", err)
+	// 写入带超时：插件挂死不读 stdin 时管道写满会永久阻塞，
+	// 而 stopPlugin 在持有管理器锁时调用本方法，无超时会导致整个插件管理器（含 ShutdownAll）死锁
+	writeDone := make(chan error, 1)
+	go func() {
+		_, err := inst.Stdin.Write(data)
+		writeDone <- err
+	}()
+	select {
+	case err := <-writeDone:
+		if err != nil {
+			return fmt.Errorf("写入插件 stdin 失败: %w", err)
+		}
+		return nil
+	case <-time.After(2 * time.Second):
+		return fmt.Errorf("写入插件 stdin 超时（插件无响应，将强制终止）")
 	}
-	return nil
 }
 
 // Close 关闭插件通信管道

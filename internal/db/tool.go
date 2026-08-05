@@ -1,6 +1,9 @@
 package db
 
-import "fmt"
+import (
+	"database/sql"
+	"fmt"
+)
 
 // ---- 打开工具 ----
 
@@ -31,24 +34,23 @@ func (d *Database) CreateTool(name, toolType, path, args string) (*OpenTool, err
 }
 
 // UpdateTool 更新已存在打开工具的字段；isDefault=1 时清除其它默认工具。
+// 清默认与更新在同一事务内完成，避免并发设置默认时出现多个默认工具（data race）。
 func (d *Database) UpdateTool(id, name, toolType, path, args string, isDefault int) error {
 	name = validateName(name)
 	if name == "" {
 		return fmt.Errorf("工具名称不能为空")
 	}
-	if isDefault == 1 {
-		if _, err := d.conn.Exec(`UPDATE tools SET is_default = 0 WHERE id != ?`, id); err != nil {
-			return err
+	return d.Transaction(func(tx *sql.Tx) error {
+		if isDefault == 1 {
+			if _, err := tx.Exec(`UPDATE tools SET is_default = 0 WHERE id != ?`, id); err != nil {
+				return err
+			}
 		}
-	}
-	updates := map[string]interface{}{
-		"name":       name,
-		"type":       toolType,
-		"path":       path,
-		"args":       args,
-		"is_default": isDefault,
-	}
-	return d.updateByID("tools", id, updates)
+		setClause := "name = ?, type = ?, path = ?, args = ?, is_default = ?"
+		_, err := tx.Exec(`UPDATE tools SET `+setClause+` WHERE id = ?`,
+			name, toolType, path, args, isDefault, id)
+		return err
+	})
 }
 
 // DeleteTool 删除打开工具

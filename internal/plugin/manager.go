@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -74,6 +75,7 @@ func (m *Manager) RegisterHostMethod(name string, handler HostMethod) {
 }
 
 // DiscoverAndLoad 扫描插件目录，加载所有已安装插件
+// 并发加载：native 插件初始化最坏 15s，串行会 N×15s 阻塞主程序启动
 func (m *Manager) DiscoverAndLoad() error {
 	entries, err := os.ReadDir(m.pluginsDir)
 	if err != nil {
@@ -83,6 +85,11 @@ func (m *Manager) DiscoverAndLoad() error {
 		return err
 	}
 
+	type pluginJob struct {
+		manifest PluginManifest
+		dir      string
+	}
+	jobs := make([]pluginJob, 0, len(entries))
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -97,10 +104,20 @@ func (m *Manager) DiscoverAndLoad() error {
 			fmt.Printf("QuickDock: 插件 %s 清单加载失败: %v\n", entry.Name(), err)
 			continue
 		}
-		if err := m.LoadPlugin(*manifest, filepath.Join(m.pluginsDir, entry.Name())); err != nil {
-			fmt.Printf("QuickDock: 插件 %s 启动失败: %v\n", manifest.ID, err)
-		}
+		jobs = append(jobs, pluginJob{manifest: *manifest, dir: filepath.Join(m.pluginsDir, entry.Name())})
 	}
+
+	var wg sync.WaitGroup
+	for _, job := range jobs {
+		wg.Add(1)
+		go func(j pluginJob) {
+			defer wg.Done()
+			if err := m.LoadPlugin(j.manifest, j.dir); err != nil {
+				fmt.Printf("QuickDock: 插件 %s 启动失败: %v\n", j.manifest.ID, err)
+			}
+		}(job)
+	}
+	wg.Wait()
 	return nil
 }
 
@@ -123,9 +140,16 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		m.mu.Unlock()
 		return nil
 	case "goja":
-		return m.loadGojaPlugin(manifest, dir)
+		entryPath, err := safePluginEntry(dir, manifest.Backend.Entry)
+		if err != nil {
+			return err
+		}
+		return m.loadGojaPlugin(manifest, dir, entryPath)
 	case "native":
-		entryPath := filepath.Join(dir, manifest.Backend.Entry)
+		entryPath, err := safePluginEntry(dir, manifest.Backend.Entry)
+		if err != nil {
+			return err
+		}
 		cmd := exec.Command(entryPath, manifest.Backend.Args...)
 		// DETACHED_PROCESS + CREATE_NO_WINDOW 双重保证不弹 CMD 窗口
 		cmd.SysProcAttr = &syscall.SysProcAttr{
@@ -193,9 +217,23 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	}
 }
 
+// safePluginEntry 校验插件 backend.entry 为插件目录内的相对路径（防 .. 路径穿越逃逸到任意可执行文件）
+func safePluginEntry(dir, entry string) (string, error) {
+	if entry == "" {
+		return "", fmt.Errorf("backend.entry 不能为空")
+	}
+	if filepath.IsAbs(entry) {
+		return "", fmt.Errorf("backend.entry 必须是相对路径: %s", entry)
+	}
+	clean := filepath.Clean(entry)
+	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("backend.entry 包含非法路径片段: %s", entry)
+	}
+	return filepath.Join(dir, clean), nil
+}
+
 // loadGojaPlugin 加载并执行 Goja JS 插件（在进程中运行，不启动子进程）
-func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir string) error {
-	entryPath := filepath.Join(dir, manifest.Backend.Entry)
+func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string) error {
 	jsCode, err := os.ReadFile(entryPath)
 	if err != nil {
 		return fmt.Errorf("读取插件 JS 文件失败: %w", err)
@@ -257,6 +295,9 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir string) error {
 				err = fmt.Errorf("执行插件 JS 时 panic: %v", r)
 			}
 		}()
+		// 顶层执行加超时：死循环/重型计算的插件脚本会卡死整个应用主线程
+		timer := time.AfterFunc(10*time.Second, func() { vm.Interrupt("插件顶层脚本执行超时") })
+		defer timer.Stop()
 		_, err = vm.RunString(string(jsCode))
 	}()
 	if err != nil {
@@ -279,7 +320,7 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir string) error {
 	m.mu.Unlock()
 
 	if hasInit {
-		inst.callGojaJS("handleInitialize", map[string]interface{}{})
+		inst.callGojaJS("handleInitialize", map[string]interface{}{}, 10*time.Second)
 	}
 	return nil
 }
@@ -431,7 +472,16 @@ func (m *Manager) pingOne(pluginID string) {
 	// ping 失败，递增计数器
 	m.mu.Lock()
 	inst.MissedPings++
-	if inst.MissedPings >= 3 && inst.GetStatus() == "running" {
+	if inst.MissedPings >= 6 {
+		// 连续 3 轮（约 90s）无响应：强制终止进程，由 watchPlugin 自动重启。
+		// 不能走 stopPlugin（会置 stopped=true，watchPlugin 将放弃重启）
+		inst.MissedPings = 0
+		inst.SetStatus("unresponsive")
+		fmt.Printf("QuickDock: 插件 %s 长时间无响应，强制终止并重启\n", pluginID)
+		if inst.Cmd != nil && inst.Cmd.Process != nil {
+			inst.Cmd.Process.Kill()
+		}
+	} else if inst.MissedPings >= 3 && inst.GetStatus() == "running" {
 		inst.SetStatus("unresponsive")
 		inst.UnresponsiveAt = time.Now()
 		fmt.Printf("QuickDock: 插件 %s 连续 %d 次无响应，标记为 unresponsive\n", pluginID, inst.MissedPings)
@@ -444,8 +494,8 @@ func (m *Manager) PluginsDir() string {
 	return m.pluginsDir
 }
 
-// callGojaJS 调用 goja 插件中导出的 JS 函数
-func (inst *PluginInstance) callGojaJS(fnName string, params map[string]interface{}) (interface{}, error) {
+// callGojaJS 调用 goja 插件中导出的 JS 函数（带超时，防死循环卡死应用）
+func (inst *PluginInstance) callGojaJS(fnName string, params map[string]interface{}, timeout time.Duration) (interface{}, error) {
 	if inst.VM == nil {
 		return nil, fmt.Errorf("goja VM 未初始化")
 	}
@@ -457,6 +507,10 @@ func (inst *PluginInstance) callGojaJS(fnName string, params map[string]interfac
 	if !ok {
 		return nil, fmt.Errorf("函数 %s 不可调用", fnName)
 	}
+	// 清除上一次超时可能残留的中断信号，避免误伤本次调用
+	inst.VM.ClearInterrupt()
+	timer := time.AfterFunc(timeout, func() { inst.VM.Interrupt("插件函数执行超时") })
+	defer timer.Stop()
 	result, err := fn(goja.Undefined(), inst.VM.ToValue(params))
 	if err != nil {
 		return nil, err
@@ -491,7 +545,7 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 		result, err := inst.callGojaJS("handleExecute", map[string]interface{}{
 			"command": commandID,
 			"input":   input,
-		})
+		}, 20*time.Second)
 		if err != nil {
 			return nil, err
 		}

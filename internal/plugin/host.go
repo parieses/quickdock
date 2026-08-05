@@ -16,11 +16,9 @@ func (m *Manager) checkPermission(pluginID string, method string) error {
 		return ErrPluginNotFound
 	}
 
-	// 内部方法不需要权限
-	if strings.HasPrefix(method, "log.") || strings.HasPrefix(method, "host.") {
-		// 具体权限按方法细分
-	}
-
+	// log.* / host.ping 等内部方法无需额外权限
+	// 未实现的能力（http.* / db.* / host.clipboard.* / host.dialog.*）由 handleCallback 的
+	// "未知的 host 方法"分支拒绝；待 services 层注入实现后，这里的权限检查才实际生效
 	switch {
 	case method == "host.clipboard.read" || method == "host.clipboard.write":
 		if !inst.Manifest.Permissions.Clipboard {
@@ -42,6 +40,9 @@ func (m *Manager) checkPermission(pluginID string, method string) error {
 // ---- Host Method 注册 ----
 
 // registerDefaultHostMethods 注册所有内置 Host Method
+// 注意：http.* / db.* / host.clipboard.* / host.dialog.* 能力目前尚未实现，
+// 不注册占位方法——插件调用时由 handleCallback 返回"未知的 host 方法"错误，
+// 避免用"尚未注册实际实现"的假占位误导。待 services 层通过 InjectHostMethod 注入后自动可用。
 func (m *Manager) registerDefaultHostMethods() {
 	// 日志
 	m.RegisterHostMethod("log.info", func(pluginID string, params json.RawMessage) (interface{}, error) {
@@ -76,31 +77,6 @@ func (m *Manager) registerDefaultHostMethods() {
 		return nil, nil
 	})
 
-	// 占位：以下方法由 services 层注册实际实现
-	m.RegisterHostMethod("host.clipboard.read", func(pluginID string, params json.RawMessage) (interface{}, error) {
-		return nil, fmt.Errorf("host.clipboard.read 尚未注册实际实现")
-	})
-	m.RegisterHostMethod("host.clipboard.write", func(pluginID string, params json.RawMessage) (interface{}, error) {
-		return nil, fmt.Errorf("host.clipboard.write 尚未注册实际实现")
-	})
-	m.RegisterHostMethod("host.dialog.open", func(pluginID string, params json.RawMessage) (interface{}, error) {
-		return nil, fmt.Errorf("host.dialog.open 尚未注册实际实现")
-	})
-	m.RegisterHostMethod("host.dialog.save", func(pluginID string, params json.RawMessage) (interface{}, error) {
-		return nil, fmt.Errorf("host.dialog.save 尚未注册实际实现")
-	})
-	m.RegisterHostMethod("http.get", func(pluginID string, params json.RawMessage) (interface{}, error) {
-		return nil, fmt.Errorf("http.get 尚未注册实际实现")
-	})
-	m.RegisterHostMethod("http.post", func(pluginID string, params json.RawMessage) (interface{}, error) {
-		return nil, fmt.Errorf("http.post 尚未注册实际实现")
-	})
-	m.RegisterHostMethod("db.get", func(pluginID string, params json.RawMessage) (interface{}, error) {
-		return nil, fmt.Errorf("db.get 尚未注册实际实现")
-	})
-	m.RegisterHostMethod("db.set", func(pluginID string, params json.RawMessage) (interface{}, error) {
-		return nil, fmt.Errorf("db.set 尚未注册实际实现")
-	})
 	// 健康检查 ping
 	m.RegisterHostMethod("host.ping", func(pluginID string, params json.RawMessage) (interface{}, error) {
 		return map[string]interface{}{"pong": true, "time": time.Now().Unix()}, nil

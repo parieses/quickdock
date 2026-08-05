@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
@@ -43,8 +44,8 @@ const (
 	appHeight        = 700
 	clipWinWidth     = 480
 	clipWinHeight    = 420
-	paletteWinWidth  = 680
-	paletteWinHeight = 460
+	paletteWinWidth  = 900
+	paletteWinHeight = 600
 )
 
 // 全局状态标志（main/tray.go 与 services 共享）
@@ -68,6 +69,7 @@ func main() {
 	appService.WindowVisible = &windowVisible
 	appService.ClipboardMode = &clipboardMode
 	appService.PaletteMode = &paletteMode
+	appService.NoteMode = &noteMode
 
 	// 注入热键监听回调（避免循环依赖）
 	appService.StartHotkeyListenerFn = StartHotkeyListener
@@ -235,8 +237,9 @@ func initUpdater(app *application.App, version string) error {
 	})
 }
 
-// extractBuiltinPluginFiles 提取内置插件文件到 ~/.quickdock/plugins/（不含 DB 写入和 LoadPlugin）
-// 在 DiscoverAndLoad 之前调用，确保插件二进制文件（如 system-tools.exe）是最新版本
+// extractBuiltinPluginFiles 增量同步内置插件文件到 ~/.quickdock/plugins/（不含 DB 写入和 LoadPlugin）
+// 在 DiscoverAndLoad 之前调用，确保插件二进制文件（如 system-tools.exe）是最新版本。
+// 采用增量同步：仅覆盖内容变化的文件，保留插件目录内的本地运行状态（如 sqlite、日志）。
 func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 	entries, err := builtinFS.ReadDir("plugins/builtin")
 	if err != nil {
@@ -244,16 +247,23 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 		return
 	}
 
-	// 确保 builtin 共享目录存在，提取 common.css / common.js
+	// 确保 builtin 共享目录存在，同步 common.css / common.js
 	builtinDir := filepath.Join(mgr.PluginsDir(), "builtin")
 	os.MkdirAll(builtinDir, 0755)
 	for _, name := range []string{"common.css", "common.js"} {
 		if data, cer := builtinFS.ReadFile(path.Join("plugins/builtin", name)); cer == nil {
-			os.WriteFile(filepath.Join(builtinDir, name), data, 0644)
+			syncEmbeddedFile(filepath.Join(builtinDir, name), data)
 		}
 	}
 
-	// 当前仍内置的插件目录名集合（用于清理已删除插件的残留）
+	// 提取共享二进制目录（如 system-tools.exe），embed 中仅保留一份，避免产物膨胀
+	sharedDir := filepath.Join(mgr.PluginsDir(), "_shared")
+	os.MkdirAll(sharedDir, 0755)
+	if err := syncEmbeddedDir(builtinFS, path.Join("plugins/builtin", "_shared"), sharedDir); err != nil {
+		fmt.Printf("QuickDock: 同步共享插件资源失败: %v\n", err)
+	}
+
+	// 当前仍内置的插件目录名集合（含 _shared，用于清理已删除插件的残留）
 	currentBuiltin := make(map[string]bool)
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -262,13 +272,13 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == "_shared" {
 			continue
 		}
 		pluginID := entry.Name()
 		targetDir := filepath.Join(mgr.PluginsDir(), pluginID)
 
-		// 读取 manifest 获取 ID（用于卸载旧实例）
+		// 读取 manifest
 		manifestPath := path.Join("plugins/builtin", pluginID, "plugin.json")
 		data, err := builtinFS.ReadFile(manifestPath)
 		if err != nil {
@@ -279,23 +289,27 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 			continue
 		}
 
-		// 卸载旧实例 + 删除旧目录
-		mgr.UnloadPlugin(pluginID)
-		mgr.UnloadPlugin(mf.ID)
-		os.RemoveAll(targetDir)
-
-		// 提取新文件
+		// 增量同步插件文件（不删除本地目录，保留插件运行状态）
 		os.MkdirAll(targetDir, 0755)
-		if err := extractEmbeddedDir(builtinFS, path.Join("plugins/builtin", pluginID), targetDir); err != nil {
-			fmt.Printf("QuickDock: 提取内置插件 %s 失败: %v\n", pluginID, err)
-			os.RemoveAll(targetDir)
+		if err := syncEmbeddedDir(builtinFS, path.Join("plugins/builtin", pluginID), targetDir); err != nil {
+			fmt.Printf("QuickDock: 同步内置插件 %s 失败: %v\n", pluginID, err)
 			continue
 		}
 
-		// 把 common.css / common.js 拷贝到每个插件根目录
+		// 分发共享二进制到引用它的插件目录（manifest.Backend.Entry 命中 _shared 内文件时）
+		if mf.Backend.Entry != "" {
+			entryBase := filepath.Base(mf.Backend.Entry)
+			if sdata, ser := builtinFS.ReadFile(path.Join("plugins/builtin", "_shared", entryBase)); ser == nil {
+				if err := syncEmbeddedFile(filepath.Join(targetDir, entryBase), sdata); err != nil {
+					fmt.Printf("QuickDock: 分发共享资源 %s 到 %s 失败: %v\n", entryBase, pluginID, err)
+				}
+			}
+		}
+
+		// 把 common.css / common.js 同步到每个插件根目录
 		for _, name := range []string{"common.css", "common.js"} {
 			if cd, cer := builtinFS.ReadFile(path.Join("plugins/builtin", name)); cer == nil {
-				os.WriteFile(filepath.Join(targetDir, name), cd, 0644)
+				syncEmbeddedFile(filepath.Join(targetDir, name), cd)
 			}
 		}
 	}
@@ -349,7 +363,7 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 	validBuiltinIDs := make(map[string]bool)
 
 	for _, entry := range entries {
-		if !entry.IsDir() {
+		if !entry.IsDir() || entry.Name() == "_shared" {
 			continue
 		}
 		pluginID := entry.Name()
@@ -398,7 +412,11 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			fmt.Printf("QuickDock: 内置插件 %s 写入数据库失败: %v\n", pluginID, err)
 		}
 
-		// 加载插件
+		// 加载插件（DiscoverAndLoad 已加载运行中实例则跳过，避免 stop→重启 双重加载）
+		if inst := mgr.GetPlugin(mf.ID); inst != nil && inst.GetStatus() == "running" {
+			fmt.Printf("[plugin %s] %s (%s) 已加载，跳过重复加载\n", mf.ID, mf.Name, mf.Version)
+			continue
+		}
 		if err := mgr.LoadPlugin(mf, targetDir); err != nil {
 			fmt.Printf("QuickDock: 加载内置插件 %s 失败: %v\n", pluginID, err)
 		} else {
@@ -421,8 +439,9 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 	}
 }
 
-// extractEmbeddedDir 将 embed.FS 中的目录提取到本地文件系统
-func extractEmbeddedDir(fs *embed.FS, embedPath, targetDir string) error {
+// syncEmbeddedDir 将 embed.FS 中的目录增量同步到本地文件系统：
+// 仅写入不存在或内容变化的文件，保留本地已有的其他文件（如插件运行状态）
+func syncEmbeddedDir(fs *embed.FS, embedPath, targetDir string) error {
 	entries, err := fs.ReadDir(embedPath)
 	if err != nil {
 		return err
@@ -433,7 +452,7 @@ func extractEmbeddedDir(fs *embed.FS, embedPath, targetDir string) error {
 
 		if entry.IsDir() {
 			os.MkdirAll(dstPath, 0755)
-			if err := extractEmbeddedDir(fs, srcPath, dstPath); err != nil {
+			if err := syncEmbeddedDir(fs, srcPath, dstPath); err != nil {
 				return err
 			}
 			continue
@@ -443,9 +462,17 @@ func extractEmbeddedDir(fs *embed.FS, embedPath, targetDir string) error {
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(dstPath, data, 0644); err != nil {
+		if err := syncEmbeddedFile(dstPath, data); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// syncEmbeddedFile 写入文件，内容与本地一致时跳过（避免每次启动全量重写磁盘）
+func syncEmbeddedFile(dstPath string, data []byte) error {
+	if cur, err := os.ReadFile(dstPath); err == nil && bytes.Equal(cur, data) {
+		return nil
+	}
+	return os.WriteFile(dstPath, data, 0644)
 }

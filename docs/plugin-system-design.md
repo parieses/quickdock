@@ -9,7 +9,7 @@
 | Runtime | 说明 | 隔离性 | 使用场景 |
 |---|---|---|---|
 | `none` | 纯前端插件，无后端进程 | — | 只展示 UI 的工具（emoji-search、http-status） |
-| `goja` | Go 内嵌 JS 引擎执行 | 同进程，但沙箱隔离 | 内置轻量插件（json2ts、cron-explainer） |
+| `goja` | Go 内嵌 JS 引擎执行 | 同进程，但沙箱隔离 | 内置轻量插件（cron-explainer、json-toolbox） |
 | `native` | 独立子进程 + JSON-RPC | 进程隔离，最佳 | 外置插件、需要系统权限的工具 |
 
 **设计决策：** Go `plugin` 包不支持 Windows 且无热加载，排除。Extism Wasm 保留为未来选项。
@@ -46,10 +46,11 @@
 │                 └──────────────┘                          │
 │                                                          │
 │  plugins/builtin/          ~/.quickdock/plugins/         │
-│  ├── json2ts/              ├── my-plugin/                │
+│  ├── calcsheet/            ├── my-plugin/                │
 │  ├── cron-explainer/       │   ├── plugin.json           │
 │  ├── port-scanner/         │   ├── main (可执行文件)      │
-│  ├── ... (共 19 个内置)     │   └── frontend/             │
+│  ├── ... (共 15 个内置)     │   └── frontend/             │
+│  ├── _shared/system-tools  │   └── ...                   │
 │  └── common.css/.js        └── ...                       │
 └─────────────────────────────────────────────────────────┘
 ```
@@ -425,24 +426,20 @@ type PluginHotkeyRegistry struct {
 
 ---
 
-## 十一、内置插件（19 个）
+## 十一、内置插件（15 个）
 
 ### Goja 插件（有后端逻辑）
 
 | 插件 ID | 功能 | 前端 |
 |---|---|---|
-| json2ts | JSON ↔ TypeScript 类型 | index.html + app.js |
-| case-converter | 大小写/命名风格转换 | index.html |
-| code-formatter | 代码格式化 | index.html |
-| cron-explainer | Cron 表达式解析 | index.html |
-| sql-formatter | SQL 格式化 | index.html |
-| text-encoder | 文本编码转换 | index.html |
-| data-converter | 数据格式转换 | index.html |
-| text-diff | 文本差异对比 | index.html + app.js |
-| regex-extractor | 正则提取 | index.html + app.js |
-| file-compare | 文件对比 | index.html + app.js |
-| time-converter | 时间戳/时区转换 | index.html + app.js |
 | calcsheet | 计算表格 | index.html + app.js |
+| compare | 文本差异对比 | index.html + app.js |
+| cron-explainer | Cron 表达式解析 | index.html + app.js |
+| formatter | 代码格式化 | index.html + app.js |
+| json-toolbox | JSON 处理（格式化/校验/转换） | index.html + app.js |
+| regex-extractor | 正则提取 | index.html + app.js |
+| text-encoder | 文本编码转换 | index.html + app.js |
+| time-converter | 时间戳/时区转换 | index.html + app.js |
 
 ### Pure Frontend 插件（runtime: none）
 
@@ -507,7 +504,7 @@ type PluginHotkeyRegistry struct {
 | 前端管理页面 | ✅ 已完成 | PluginManagerPage.vue |
 | 前端命令面板集成 | ✅ 已完成 | 评分/内联/分离模式 |
 | 热键注册 | ✅ 已完成 | PluginHotkeyRegistry |
-| 19 个内置插件 | ✅ 已完成 | goja + pure frontend |
+| 15 个内置插件 | ✅ 已完成 | goja + pure frontend + native |
 | 健康检查 | ✅ 已完成 | 30s ticker + ping |
 | 孤儿进程清理 | ✅ 已完成 | PID 文件 + tasklist |
 | 执行日志追踪 | ✅ 已完成 | 500 条上限 + 自动裁剪 |

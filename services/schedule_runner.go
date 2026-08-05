@@ -15,6 +15,9 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
 
+// scheduleHTTPClient 共享 HTTP 客户端（定时任务 HTTP 请求，连接复用）
+var scheduleHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 const schedTimeLayout = "2006-01-02 15:04:05"
 
 func nowStr() string {
@@ -248,34 +251,43 @@ func (a *AppService) checkScheduledTasks() {
 	}
 	for i := range tasks {
 		t := &tasks[i]
-		status, result := a.executeTask(t)
-
-		// 计算下次运行时间与启用状态
-		nextRun := computeNextRun(t, now)
-		enabled := t.Enabled
-		if t.ScheduleKind == "once" || nextRun == "" {
-			// 一次性任务或无法再排期 → 自动停用
-			nextRun = ""
-			enabled = false
+		// inflight 标记：慢任务（http 阻塞 30s / command·open 挂起）在 SetTaskRunResult 重排前，
+		// 可能被下一轮调度循环再次选为「到期」并启动第二个重叠协程。LoadOrStore 原子保证同一时刻
+		// 仅一个执行协程通过，避免重复执行与重复通知（参照 monitor_checker 的 monitorInflight）。
+		if _, loaded := a.schedInflight.LoadOrStore(t.ID, struct{}{}); loaded {
+			continue
 		}
-		_ = a.DB.SetTaskRunResult(t.ID, now, status, result, nextRun, enabled)
+		go func(t *db.ScheduledTask) {
+			defer a.schedInflight.Delete(t.ID)
+			status, result := a.executeTask(t)
 
-		// 可选：执行后发系统通知 + 机器人 Webhook（钉钉/企业微信/飞书，全局共用配置）
-		if t.Notify {
-			icon := "✅"
-			if status != "ok" {
-				icon = "⚠️"
+			// 计算下次运行时间与启用状态
+			nextRun := computeNextRun(t, now)
+			enabled := t.Enabled
+			if t.ScheduleKind == "once" || nextRun == "" {
+				// 一次性任务或无法再排期 → 自动停用
+				nextRun = ""
+				enabled = false
 			}
-			title := icon + " 定时任务：" + t.Name
-			if a.Notifier != nil {
-				_ = a.Notifier.SendNotification(notifications.NotificationOptions{
-					ID:    "schedtask-" + t.ID + "-" + time.Now().Format("150405"),
-					Title: title,
-					Body:  result,
-				})
+			_ = a.DB.SetTaskRunResult(t.ID, now, status, result, nextRun, enabled)
+
+			// 可选：执行后发系统通知 + 机器人 Webhook（钉钉/企业微信/飞书，全局共用配置）
+			if t.Notify {
+				icon := "✅"
+				if status != "ok" {
+					icon = "⚠️"
+				}
+				title := icon + " 定时任务：" + t.Name
+				if a.Notifier != nil {
+					_ = a.Notifier.SendNotification(notifications.NotificationOptions{
+						ID:    "schedtask-" + t.ID + "-" + time.Now().Format("150405"),
+						Title: title,
+						Body:  result,
+					})
+				}
+				a.sendWebhookNotify(title, result)
 			}
-			a.sendWebhookNotify(title, result)
-		}
+		}(t)
 	}
 }
 
@@ -417,7 +429,7 @@ func (a *AppService) executeHTTP(t *db.ScheduledTask) (string, string) {
 		}
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := scheduleHTTPClient
 	resp, err := client.Do(req)
 	if err != nil {
 		return "fail", "请求失败：" + err.Error()

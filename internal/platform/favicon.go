@@ -12,8 +12,18 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 )
+
+// 共享 HTTP 客户端：favicon 抓取复用连接（连接级 Timeout 仍生效）
+var faviconClient = &http.Client{Timeout: 2500 * time.Millisecond}
+
+// 预编译正则：避免每次抓取 favicon 时重新编译
+var linkTagRe = regexp.MustCompile(`(?i)<link\b[^>]*>`)
+
+// attrReCache 按属性名缓存编译后的正则（attr 每调用都会拼正则，抓取多个 link 标签时反复编译）
+var attrReCache sync.Map // name → *regexp.Regexp（两种模式各存一份）
 
 // FetchFavicon 抓取网页 URL 站点的 favicon，返回 base64 data URL（PNG/JPEG/ICO/SVG）。
 // 用于「网页」类型 item 自动填充图标。失败或超时返回空字符串。
@@ -125,13 +135,12 @@ func sniffImage(data []byte) (string, bool) {
 
 // fetchHTML 抓取首页 HTML 文本（仅要求 200，不限 MIME）
 func fetchHTML(urlStr string) (string, bool) {
-	client := &http.Client{Timeout: 2500 * time.Millisecond}
 	req, err := http.NewRequest("GET", urlStr, nil)
 	if err != nil {
 		return "", false
 	}
 	req.Header.Set("User-Agent", "QuickDock/1.0")
-	resp, err := client.Do(req)
+	resp, err := faviconClient.Do(req)
 	if err != nil {
 		return "", false
 	}
@@ -148,8 +157,7 @@ func fetchHTML(urlStr string) (string, bool) {
 
 // findIconHref 从 HTML 中找出图标 link 的 href。优先级：icon/shortcut icon > apple-touch-icon
 func findIconHref(html string) string {
-	linkRe := regexp.MustCompile(`(?i)<link\b[^>]*>`)
-	links := linkRe.FindAllString(html, -1)
+	links := linkTagRe.FindAllString(html, -1)
 	var fallback string
 	for _, tag := range links {
 		rel := attr(tag, "rel")
@@ -172,15 +180,31 @@ func findIconHref(html string) string {
 	return fallback
 }
 
-// attr 从单个 HTML 标签中取出某属性的值（支持带引号与无引号）
+// attr 从单个 HTML 标签中取出某属性的值（支持带引号与无引号），正则按属性名缓存
 func attr(tag, name string) string {
-	re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `=["']([^"']*)["']`)
-	if m := re.FindStringSubmatch(tag); m != nil {
-		return m[1]
+	cacheKey := "q_" + name // quoted
+	if v, ok := attrReCache.Load(cacheKey); ok {
+		if m := v.(*regexp.Regexp).FindStringSubmatch(tag); m != nil {
+			return m[1]
+		}
+	} else {
+		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `=["']([^"']*)["']`)
+		attrReCache.Store(cacheKey, re)
+		if m := re.FindStringSubmatch(tag); m != nil {
+			return m[1]
+		}
 	}
-	re2 := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `=([^\s>]+)`)
-	if m := re2.FindStringSubmatch(tag); m != nil {
-		return m[1]
+	cacheKey = "u_" + name // unquoted
+	if v, ok := attrReCache.Load(cacheKey); ok {
+		if m := v.(*regexp.Regexp).FindStringSubmatch(tag); m != nil {
+			return m[1]
+		}
+	} else {
+		re := regexp.MustCompile(`(?i)\b` + regexp.QuoteMeta(name) + `=([^\s>]+)`)
+		attrReCache.Store(cacheKey, re)
+		if m := re.FindStringSubmatch(tag); m != nil {
+			return m[1]
+		}
 	}
 	return ""
 }
@@ -223,15 +247,14 @@ func parseSiteURL(raw string) (*url.URL, error) {
 	return u, nil
 }
 
-// fetchWithTimeout 带 2.5s 超时的 GET 请求，读取最多 512KB
+// fetchWithTimeout 带 2.5s 超时的 GET 请求，读取最多 512KB（复用 faviconClient 连接池）
 func fetchWithTimeout(urlStr string) ([]byte, string, bool) {
-	client := &http.Client{Timeout: 2500 * time.Millisecond}
 	req, err := http.NewRequest("GET", urlStr, nil)
 	if err != nil {
 		return nil, "", false
 	}
 	req.Header.Set("User-Agent", "QuickDock/1.0")
-	resp, err := client.Do(req)
+	resp, err := faviconClient.Do(req)
 	if err != nil {
 		return nil, "", false
 	}

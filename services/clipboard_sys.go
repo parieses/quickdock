@@ -174,13 +174,21 @@ func (a *AppService) OnClipboardChange() {
 
 		setLastClipboardText(joined)
 		sourceApp := platform.GetActiveWindowTitle()
-		entry, err := a.DB.InsertClipboardFileEntry(joined, sourceApp)
-		if err != nil {
-			fmt.Printf("QuickDock: file clipboard save failed: %v\n", err)
-		} else {
-			fmt.Printf("QuickDock >> clipboard captured [%s] (%d files) from [%s]\n", entry.ID[:8], len(filePaths), sourceApp)
-			a.emitClipboardEvent()
-		}
+		// 异步入库：DB 繁忙（如快照恢复）时避免阻塞 Win32 消息循环线程，影响全局热键/托盘
+		go func() {
+			defer recoverPanic("clipboard saveFile")
+			if a.DB == nil {
+				fmt.Println("QuickDock: clipboard: database closed, skipping file")
+				return
+			}
+			entry, err := a.DB.InsertClipboardFileEntry(joined, sourceApp)
+			if err != nil {
+				fmt.Printf("QuickDock: file clipboard save failed: %v\n", err)
+			} else {
+				fmt.Printf("QuickDock >> clipboard captured [%s] (%d files) from [%s]\n", entry.ID[:8], len(filePaths), sourceApp)
+				a.emitClipboardEvent()
+			}
+		}()
 		return
 	}
 
@@ -193,18 +201,26 @@ handleText:
 		setLastClipboardText(text)
 		sourceApp := platform.GetActiveWindowTitle()
 
-		entry, err := a.DB.InsertClipboardEntry(text, sourceApp)
-		if err != nil {
-			fmt.Printf("QuickDock: clipboard save failed: %v\n", err)
-		} else {
-			preview := text
-			runes := []rune(preview)
-			if len(runes) > 80 {
-				preview = string(runes[:80]) + "..."
+		// 异步入库：避免 DB 繁忙时阻塞 Win32 消息循环线程（同图片路径）
+		go func() {
+			defer recoverPanic("clipboard saveText")
+			if a.DB == nil {
+				fmt.Println("QuickDock: clipboard: database closed, skipping text")
+				return
 			}
-			fmt.Printf("QuickDock >> clipboard captured [%s] from [%s] → %s\n", entry.ID[:8], sourceApp, preview)
-			a.emitClipboardEvent()
-		}
+			entry, err := a.DB.InsertClipboardEntry(text, sourceApp)
+			if err != nil {
+				fmt.Printf("QuickDock: clipboard save failed: %v\n", err)
+			} else {
+				preview := text
+				runes := []rune(preview)
+				if len(runes) > 80 {
+					preview = string(runes[:80]) + "..."
+				}
+				fmt.Printf("QuickDock >> clipboard captured [%s] from [%s] → %s\n", entry.ID[:8], sourceApp, preview)
+				a.emitClipboardEvent()
+			}
+		}()
 		return
 	}
 

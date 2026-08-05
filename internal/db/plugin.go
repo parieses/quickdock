@@ -37,10 +37,11 @@ func (d *Database) InsertPluginFull(id, name, version, author, description, cate
 
 	capsJSON, _ := json.Marshal(capabilities)
 	permJSON, _ := json.Marshal(permissions)
+	ts := now() // 本地时区 RFC3339，与全库其他表的时间格式保持一致（勿用 SQLite 的 UTC datetime('now')）
 
 	_, err := d.conn.Exec(
 		`INSERT INTO plugins (id, name, version, author, description, category, icon, enabled, capabilities, permissions, installed_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, datetime('now'), datetime('now'))
+		 VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   name = excluded.name,
 		   version = excluded.version,
@@ -51,8 +52,8 @@ func (d *Database) InsertPluginFull(id, name, version, author, description, cate
 		   enabled = 1,
 		   capabilities = excluded.capabilities,
 		   permissions = excluded.permissions,
-		   updated_at = datetime('now')`,
-		id, name, version, author, description, category, iconData, string(capsJSON), string(permJSON),
+		   updated_at = excluded.updated_at`,
+		id, name, version, author, description, category, iconData, string(capsJSON), string(permJSON), ts, ts,
 	)
 	if err != nil {
 		return fmt.Errorf("写入插件记录失败: %w", err)

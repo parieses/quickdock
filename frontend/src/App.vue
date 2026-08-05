@@ -155,6 +155,10 @@ const activeConfirm = computed(() =>
 
           <!-- 常规内容 -->
           <template v-else>
+            <div v-if="store.error" class="ws-error-bar">
+              <span class="ws-error-text">{{ store.error }}</span>
+              <button class="ws-error-close" @click="store.error = ''" :title="t('close')">✕</button>
+            </div>
             <SceneTags />
             <div class="app-content-body">
               <CollectionList class="app-collections" />
@@ -255,6 +259,22 @@ body {
 .app-content-body {
   flex: 1; display: flex; overflow: hidden;
 }
+.ws-error-bar {
+  display: flex; align-items: center; gap: 8px;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(244, 67, 54, 0.12);
+  border: 1px solid rgba(244, 67, 54, 0.4);
+  color: #ef5350;
+  font-size: 12px;
+}
+.ws-error-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-error-close {
+  background: none; border: none; cursor: pointer;
+  color: inherit; font-size: 12px; padding: 2px 4px; opacity: 0.7;
+}
+.ws-error-close:hover { opacity: 1; }
 .app-collections { flex-shrink: 0; }
 .app-items { flex: 1; min-width: 0; }
 

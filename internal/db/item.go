@@ -81,7 +81,7 @@ func (d *Database) SearchAllItems(query string) ([]CollectionItem, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanItems(rows)
+	return d.scanItems(rows)
 }
 
 // GetMostUsedItems 返回最常使用的项目（按 usage_count 降序，用于命令面板「最近使用」）
@@ -96,7 +96,7 @@ func (d *Database) GetMostUsedItems(limit int) ([]CollectionItem, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanItems(rows)
+	return d.scanItems(rows)
 }
 
 // ListAllItems 返回全部工作空间的项目（不分页）。
@@ -110,11 +110,14 @@ func (d *Database) ListAllItems() ([]CollectionItem, error) {
 		return nil, err
 	}
 	defer rows.Close()
-	return scanItems(rows)
+	return d.scanItems(rows)
 }
 
-// scanItems 通用 items 行扫描器
-func scanItems(rows *sql.Rows) ([]CollectionItem, error) {
+// scanItems 通用 items 行扫描器。
+// 调用方必须已持有 d.mu（本方法只被持锁的查询方法调用）。
+// 提取成功的图标回填 DB：enrichItemIcon 仅在 icon 为空时提取，此处非空即新提取，
+// 写回后后续查询直接命中 icon 字段，避免命令面板每次全量池扫描都重复走磁盘提取。
+func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 	var items []CollectionItem
 	for rows.Next() {
 		var item CollectionItem
@@ -123,6 +126,12 @@ func scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 		}
 		enrichItemIcon(&item)
 		items = append(items, item)
+	}
+	for i := range items {
+		if items[i].Icon != "" {
+			// 条件 icon = '' 防止并发写入覆盖用户手动设置的图标
+			_, _ = d.conn.Exec("UPDATE items SET icon = ? WHERE id = ? AND icon = ''", items[i].Icon, items[i].ID)
+		}
 	}
 	return items, rows.Err()
 }
@@ -350,16 +359,40 @@ func (d *Database) OpenItem(item *CollectionItem) error {
 	return execOpen(item, tool)
 }
 
+// OpenAllInCollection 批量打开集合内全部项目。
+// 优化点：默认工具只查一次 + usage_count 单条批量累加（原实现 N 项 = 3N 次串行查库）。
 func (d *Database) OpenAllInCollection(collectionID string) error {
+	// 一次性查询默认工具，循环内复用
+	var defaultTool OpenTool
+	if row, err := d.QueryOne("SELECT * FROM tools WHERE is_default = 1 LIMIT 1"); err == nil {
+		defaultTool = mapToOpenTool(row)
+	}
+
 	rows, err := d.Query("SELECT * FROM items WHERE collection_id = ? ORDER BY sort, created_at", collectionID)
 	if err != nil {
 		return err
 	}
+
+	// 批量累加 usage_count：单条 UPDATE 替代 N 次逐项更新
+	if len(rows) > 0 {
+		d.ExecuteParams("UPDATE items SET usage_count = usage_count + 1 WHERE collection_id = ?", []interface{}{collectionID})
+	}
+
+	var firstErr error
 	for _, row := range rows {
 		item := mapToItem(row)
-		_ = d.OpenItem(&item)
+		// 仅当 item 指定自定义工具时才查库（命中），否则直接用默认工具
+		tool := defaultTool
+		if item.ToolID != "" {
+			if trow, terr := d.QueryOne("SELECT * FROM tools WHERE id = ?", item.ToolID); terr == nil {
+				tool = mapToOpenTool(trow)
+			}
+		}
+		if err := execOpen(&item, tool); err != nil && firstErr == nil {
+			firstErr = err
+		}
 	}
-	return nil
+	return firstErr
 }
 
 func execOpen(item *CollectionItem, tool OpenTool) error {

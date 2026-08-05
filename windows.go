@@ -199,12 +199,29 @@ func clipboardWindowGetter(app *application.App) func() *application.WebviewWind
 	}
 }
 
+// noteWindowGetter 返回 AppService 使用的快捷笔记窗口 getter
+// 由 main.go 注入到 appService.GetNoteWindow
+func noteWindowGetter(app *application.App) func() *application.WebviewWindow {
+	return func() *application.WebviewWindow {
+		noteWinLock.Lock()
+		defer noteWinLock.Unlock()
+		if noteWin == nil {
+			if app == nil {
+				return nil
+			}
+			noteWin = initNoteWindow(app)
+		}
+		return noteWin
+	}
+}
+
 // InjectWindowGetters 将延迟窗口创建函数注入到 AppService（由 main.go 调用）
 // 剪贴板/命令面板窗口均延迟创建，确保都在 app.Run() 之后初始化 WebView2 运行时，
 // 避免在主窗口之前预创建导致次级窗口白屏（Wails v3 已知约束）。
 func InjectWindowGetters(svc *services.AppService, app *application.App) {
 	svc.GetClipboardWindow = clipboardWindowGetter(app)
 	svc.GetPaletteWindow = paletteWindowGetter(app)
+	svc.GetNoteWindow = noteWindowGetter(app)
 }
 
 // ===== 热键回调用的窗口 getter =====

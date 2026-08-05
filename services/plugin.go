@@ -94,10 +94,14 @@ func (a *AppService) InstallPluginFromBytes(fileName string, fileData []byte) *A
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
 	}
-	// 写入临时文件
+	// 写入临时文件。fileName 来自前端，仅取 Base 防路径穿越（..\..\ 逃逸临时目录）
+	baseName := filepath.Base(fileName)
+	if baseName == "" || baseName == "." || baseName == string(filepath.Separator) {
+		return FailMsg("非法的文件名")
+	}
 	tmpDir := filepath.Join(os.TempDir(), "quickdock-plugin-install")
 	os.MkdirAll(tmpDir, 0755)
-	tmpPath := filepath.Join(tmpDir, fileName)
+	tmpPath := filepath.Join(tmpDir, baseName)
 	if err := os.WriteFile(tmpPath, fileData, 0644); err != nil {
 		return Fail(fmt.Errorf("写入临时文件失败: %w", err))
 	}

@@ -498,20 +498,34 @@ if (typeof localStorage !== 'undefined') {
   }
 }
 
-let pollTimer: ReturnType<typeof setInterval> | undefined
+let pollTimer: ReturnType<typeof setTimeout> | undefined
+let polling = false
+
+// setTimeout 链式轮询：上一次 refresh 完成后才排下一次，
+// 避免 setInterval 在慢请求时回调叠加（且 polling 标志兜底防重入）
+async function pollTick() {
+  if (polling) { scheduleNext(); return }
+  polling = true
+  try {
+    await refresh()
+    // 重新加载展开的监控日志并重绘图表
+    for (const id of expanded.value) {
+      await loadLogs(id)
+      drawChart(id)
+    }
+  } catch (_) { /* refresh/loadLogs 内部已处理错误，此处仅兜底 */ }
+  polling = false
+  scheduleNext()
+}
+
+function scheduleNext() {
+  if (refreshSec.value <= 0) return
+  pollTimer = setTimeout(pollTick, refreshSec.value * 1000)
+}
 
 function applyAutoRefresh() {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined }
-  if (refreshSec.value > 0) {
-    pollTimer = setInterval(async () => {
-      await refresh()
-      // 重新加载展开的监控日志并重绘图表
-      for (const id of expanded.value) {
-        await loadLogs(id)
-        drawChart(id)
-      }
-    }, refreshSec.value * 1000)
-  }
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
+  if (refreshSec.value > 0) scheduleNext()
 }
 
 watch(refreshSec, (v) => {
@@ -525,7 +539,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-  if (pollTimer) { clearInterval(pollTimer); pollTimer = undefined }
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
 })
 </script>
 

@@ -207,6 +207,18 @@ func (a *AppService) HideClipboardWindow() {
 	}
 }
 
+// HideNoteWindow 隐藏快捷笔记独立窗口（并复位置 noteMode 标志，保证热键开关正确）
+func (a *AppService) HideNoteWindow() {
+	if a.NoteMode != nil {
+		a.NoteMode.Store(false)
+	}
+	if fn := a.GetNoteWindow; fn != nil {
+		if win := fn(); win != nil {
+			win.Hide()
+		}
+	}
+}
+
 // ===== 热键控制 =====
 
 func (a *AppService) SuspendHotkeys() {

@@ -1,4 +1,4 @@
-import { ref, computed, type Ref, type ComputedRef } from 'vue'
+import { ref, computed, watch, onScopeDispose, type Ref, type ComputedRef } from 'vue'
 import type { CollectionItem } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
 import { evaluate, format, convertExpression } from '../utils/calc'
@@ -78,9 +78,19 @@ export function useCommandSearch(deps: SearchDeps) {
 
   const recentCache = ref<RecentEntry[]>([])
 
+  // 搜索防抖：逐键触发全量扫描（含 pinyinMatch/Levenshtein）在数据量大时卡顿，
+  // 80ms 内停顿才真正重算，键盘快速打字时结果滞后几乎不可感知
+  const debouncedQuery = ref(query.value)
+  let debounceTimer: ReturnType<typeof setTimeout> | null = null
+  watch(query, (v) => {
+    if (debounceTimer) clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => { debouncedQuery.value = v }, 80)
+  }, { immediate: true })
+  onScopeDispose(() => { if (debounceTimer) clearTimeout(debounceTimer) })
+
   const groupedResults = computed<ResultGroup[]>(() => {
     void frecencyTick.value
-    const q = query.value.trim()
+    const q = debouncedQuery.value.trim()
     if (!q) return []
 
     const qLC = q.toLowerCase()
@@ -360,7 +370,7 @@ export function useCommandSearch(deps: SearchDeps) {
   })
 
   const recentResults = computed<SearchResult[]>(() => {
-    if (query.value.trim()) return []
+    if (debouncedQuery.value.trim()) return []
     const raw = recentCache.value
     if (!raw || raw.length === 0) return []
 
@@ -465,7 +475,7 @@ export function useCommandSearch(deps: SearchDeps) {
   })
 
   const displayGroups = computed<ResultGroup[]>(() => {
-    if (query.value.trim()) return groupedResults.value
+    if (debouncedQuery.value.trim()) return groupedResults.value
     if (recentResults.value.length > 0) {
       return [{ type: 'item', label: t('cmdRecent'), results: recentResults.value }]
     }

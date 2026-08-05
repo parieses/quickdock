@@ -3,7 +3,7 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick, inject } from '
 import { useI18n } from 'vue-i18n'
 import {
   Search, Hash, Command, ArrowRight, Lock, Power, Moon, Trash2, RotateCcw,
-  Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, X,
+  Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark
 } from '@lucide/vue'
@@ -232,6 +232,8 @@ const {
 })
 
 // ---- 键盘导航 ----
+const GRID_COLUMNS = 3 // 结果区每行卡片数（网格列数）
+
 function scrollToSelected() {
   nextTick(() => {
     const list = listRef.value
@@ -251,8 +253,12 @@ function onKeydown(e: KeyboardEvent) {
   if (list.length === 0 && e.key !== 'Escape') return
   switch (e.key) {
     case 'ArrowDown':
-      e.preventDefault(); selectedIndex.value = (selectedIndex.value + 1) % Math.max(list.length, 1); scrollToSelected(); break
+      e.preventDefault(); selectedIndex.value = (selectedIndex.value + GRID_COLUMNS) % Math.max(list.length, 1); scrollToSelected(); break
     case 'ArrowUp':
+      e.preventDefault(); selectedIndex.value = (selectedIndex.value - GRID_COLUMNS + list.length) % Math.max(list.length, 1); scrollToSelected(); break
+    case 'ArrowRight':
+      e.preventDefault(); selectedIndex.value = (selectedIndex.value + 1) % Math.max(list.length, 1); scrollToSelected(); break
+    case 'ArrowLeft':
       e.preventDefault(); selectedIndex.value = (selectedIndex.value - 1 + list.length) % Math.max(list.length, 1); scrollToSelected(); break
     case 'a': case 'A':
       if (e.ctrlKey || e.metaKey) {
@@ -279,22 +285,18 @@ async function openResultOnly(r: SearchResult): Promise<boolean> {
     const item = { ...r.item }; let value = item.value || ''
     if (r.inlineQuery) value = value.replace(/\{query\}/g, r.inlineQuery)
     item.value = value; recordUsage('item:' + item.id, 'item', item.name, item.value || '')
-    try { await OpenItem(item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
-    return true
+    try { await OpenItem(item as any); return true } catch (e) { console.error('[CmdPalette] OpenItem:', e); toast?.error?.(getErrorMessage(e)); return false }
   }
   if (r.type === 'item' && r.item) {
     recordUsage('item:' + r.item.id, 'item', r.label, r.desc)
-    try { await OpenItem(r.item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }
-    return true
+    try { await OpenItem(r.item as any); return true } catch (e) { console.error('[CmdPalette] OpenItem:', e); toast?.error?.(getErrorMessage(e)); return false }
   }
   if (r.type === 'url' && r.url) {
-    try { await Browser.OpenURL(r.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }
-    return true
+    try { await Browser.OpenURL(r.url); return true } catch (e) { console.error('[CmdPalette] OpenURL:', e); toast?.error?.(getErrorMessage(e)); return false }
   }
   if (r.type === 'app' && r.appPath) {
     recordUsage('app:' + r.label, 'app', r.label, r.desc)
-    try { await LaunchInstalledApp(r.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }
-    return true
+    try { await LaunchInstalledApp(r.appPath); return true } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e); toast?.error?.(getErrorMessage(e)); return false }
   }
   return false
 }
@@ -639,6 +641,8 @@ onUnmounted(() => {
 
     <div class="palette-footer" v-if="!inlineQuicklink">
       <div class="footer-hint">
+        <kbd><ChevronLeft :size="11" /></kbd>
+        <kbd><ChevronRight :size="11" /></kbd>
         <kbd><ChevronUp :size="11" /></kbd>
         <kbd><ChevronDown :size="11" /></kbd>
         <span>{{ t('cmdNavigate') }}</span>
@@ -711,9 +715,18 @@ onUnmounted(() => {
 }
 .inline-cancel:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
-.palette-results { flex: 1; overflow-y: auto; padding: 6px 8px 10px; }
+.palette-results {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px 8px;
+  align-content: start;
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px 10px;
+}
 
 .group-header {
+  grid-column: 1 / -1;
   display: flex;
   align-items: center;
   justify-content: space-between;
