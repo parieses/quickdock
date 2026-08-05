@@ -542,7 +542,7 @@ onUnmounted(() => {
         ref="inlinePluginIframe"
         :srcdoc="bridgedInlinePluginHtml"
         class="palette-plugin-iframe"
-        sandbox="allow-scripts allow-same-origin allow-modals"
+        sandbox="allow-scripts allow-modals"
         frameborder="0"
         @load="onInlinePluginLoad"
       />

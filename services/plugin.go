@@ -503,11 +503,13 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	}
 
 	// 注入 QuickDock 运行时脚本（主题/语言等控制）
-	// 默认使用暗色主题 + 简体中文，父窗口可通过 plugin:theme 消息动态更新
+	// 默认使用暗色主题 + 简体中文，父窗口可通过 plugin:theme 消息动态更新。
+	// 注意：querySelector 可能返回 null（插件未声明 qd-theme meta），必须判空，
+	// 不能写成 (querySelector(...)||{}).getAttribute —— {} 没有 getAttribute 会抛 TypeError
 	runtimeScript := "<script id=\"quickdock-runtime\">\n" +
 		"(function(){" +
-		"var t=(document.querySelector('meta[name=\"qd-theme\"]')||{}).getAttribute('content')||'dark';" +
-		"var l=(document.querySelector('meta[name=\"qd-locale\"]')||{}).getAttribute('content')||'zh-CN';" +
+		"var m=document.querySelector('meta[name=\"qd-theme\"]');var t=m&&m.getAttribute('content')||'dark';" +
+		"var ml=document.querySelector('meta[name=\"qd-locale\"]');var l=ml&&ml.getAttribute('content')||'zh-CN';" +
 		"document.documentElement.setAttribute('data-theme',t);" +
 		"document.documentElement.setAttribute('lang',l);" +
 		"window.addEventListener('message',function(e){" +
