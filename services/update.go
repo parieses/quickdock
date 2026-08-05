@@ -155,6 +155,8 @@ func friendlyError(err error) string {
 	case strings.Contains(lower, "context deadline exceeded") ||
 		strings.Contains(lower, "client.timeout") || strings.Contains(lower, "exceeded while reading"):
 		return "下载超时：安装包体积较大或网络连接较慢导致下载未完成。请检查网络，配置代理（HTTPS_PROXY 环境变量），或手动从 GitHub Releases 下载安装。"
+	case strings.Contains(lower, "github: download"):
+		return "下载安装包失败：直连 GitHub 与加速镜像均无法访问。请检查网络或配置代理（HTTPS_PROXY），也可手动从 GitHub Releases 页面下载安装。"
 	default:
 		return msg
 	}

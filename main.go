@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sys/windows/registry"
 
 	"quickdock/internal/db"
 	"quickdock/internal/platform"
@@ -190,6 +193,64 @@ func main() {
 	}
 }
 
+// updaterProxyFunc 优先使用环境变量代理（HTTP_PROXY/HTTPS_PROXY/NO_PROXY），
+// 未配置时回退读取 Windows 系统代理注册表（WinINET）——兼容 Clash/v2rayN 等
+// 工具的"系统代理"模式（它们只写注册表，不设环境变量）。
+func updaterProxyFunc(req *http.Request) (*url.URL, error) {
+	u, err := http.ProxyFromEnvironment(req)
+	if u != nil || err != nil {
+		return u, err
+	}
+	return windowsSystemProxy(req)
+}
+
+// windowsSystemProxy 读取 HKCU 系统代理注册表（ProxyEnable/ProxyServer）。
+// 支持 "host:port" 与 "http=host:port;https=host:port" 两种 ProxyServer 格式。
+// 未启用或无法解析时返回 nil（直连）。PAC（AutoConfigURL）不支持，返回直连。
+func windowsSystemProxy(req *http.Request) (*url.URL, error) {
+	k, err := registry.OpenKey(registry.CURRENT_USER,
+		`Software\Microsoft\Windows\CurrentVersion\Internet Settings`, registry.QUERY_VALUE)
+	if err != nil {
+		return nil, nil
+	}
+	defer k.Close()
+
+	enable, _, err := k.GetIntegerValue("ProxyEnable")
+	if err != nil || enable == 0 {
+		return nil, nil
+	}
+	server, _, err := k.GetStringValue("ProxyServer")
+	if err != nil || strings.TrimSpace(server) == "" {
+		return nil, nil
+	}
+	server = strings.TrimSpace(server)
+
+	// ProxyServer 可能按协议分号分隔（http=...;https=...），此时按请求 scheme 选择
+	proxy := server
+	if strings.Contains(server, "=") {
+		proxy = ""
+		for _, part := range strings.Split(server, ";") {
+			kv := strings.SplitN(strings.TrimSpace(part), "=", 2)
+			if len(kv) == 2 && strings.EqualFold(strings.TrimSpace(kv[0]), req.URL.Scheme) {
+				proxy = strings.TrimSpace(kv[1])
+				break
+			}
+		}
+		if proxy == "" {
+			return nil, nil
+		}
+	}
+
+	if !strings.Contains(proxy, "://") {
+		proxy = "http://" + proxy
+	}
+	u, err := url.Parse(proxy)
+	if err != nil {
+		return nil, nil
+	}
+	return u, nil
+}
+
 // initUpdater 初始化 Wails 自动更新器（使用 GitHub Releases + Ed25519 签名验证）
 func initUpdater(app *application.App, version string) error {
 	// 自定义 AssetMatcher：先试默认规则（文件名含 platform+arch），
@@ -212,12 +273,14 @@ func initUpdater(app *application.App, version string) error {
 	}
 
 	// 自定义 HTTP 客户端：
-	// 1) 沿用 Go 默认传输层各项超时（连接/TLS 握手等），但允许通过
-	//    环境变量 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 走代理访问 GitHub。
-	// 2) 不设整体 Timeout（默认 30s 会把大体积安装包下载直接掐断），
+	// 1) 沿用 Go 默认传输层各项超时（连接/TLS 握手等）。
+	// 2) 代理优先级：环境变量 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 优先；
+	//    未配置时回退读取 Windows 系统代理注册表（Clash/v2rayN 等工具的"系统代理"模式
+	//    只写 WinINET 注册表、不设环境变量，Go 的 ProxyFromEnvironment 默认读不到）。
+	// 3) 不设整体 Timeout（默认 30s 会把大体积安装包下载直接掐断），
 	//    真正的超时由调用方传入的 ctx 控制（见 services/update.go）。
 	transport := http.DefaultTransport.(*http.Transport).Clone()
-	transport.Proxy = http.ProxyFromEnvironment
+	transport.Proxy = updaterProxyFunc
 	httpClient := &http.Client{Transport: transport, Timeout: 0}
 
 	gh, err := github.New(github.Config{
@@ -229,9 +292,13 @@ func initUpdater(app *application.App, version string) error {
 		return fmt.Errorf("创建 GitHub provider 失败: %w", err)
 	}
 
+	// 用镜像 provider 包装：直连 GitHub 下载失败时自动尝试加速镜像（国内网络）。
+	// 安装包 Ed25519 签名验证不受影响（镜像只改传输 URL，无法篡改内容）。
+	provider := updater.Provider(services.NewMirrorUpdaterProvider(gh, httpClient))
+
 	return app.Updater.Init(updater.Config{
 		CurrentVersion: version,
-		Providers:      []updater.Provider{gh},
+		Providers:      []updater.Provider{provider},
 		PublicKey:      updaterPublicKey,
 		CheckInterval:  24 * time.Hour, // 每 24 小时后台自动检查
 	})
