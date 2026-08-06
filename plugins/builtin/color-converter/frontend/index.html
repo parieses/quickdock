@@ -5,98 +5,66 @@
 <title>颜色转换</title>
 <link rel="stylesheet" href="../common.css">
 <style>
-.p-app{display:flex;flex-direction:column;height:100%}
-.p-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
-.p-toolbar .p-title{font-size:14px;font-weight:600;color:var(--text-primary)}
-.p-toolbar .p-spacer{flex:1}
-.p-body{flex:1;display:flex;flex-direction:column;padding:14px;gap:16px;overflow-y:auto}
+/* ===== 颜色转换页（复用 common.css 设计令牌） ===== */
+.p-swatch{width:80px;height:80px;border-radius:var(--radius-lg);border:1px solid var(--border);flex-shrink:0;box-shadow:var(--shadow-1)}
+.p-hero-meta{display:flex;flex-direction:column;gap:6px;min-width:0}
+.p-hero-hex{font-size:var(--fs-2xl);font-family:var(--font-mono);color:var(--text-primary);letter-spacing:.5px}
+.p-hero-name{font-size:var(--fs-sm);color:var(--text-muted)}
 
-.p-preview{display:flex;align-items:center;gap:14px}
-.p-swatch{width:74px;height:74px;border-radius:10px;border:1px solid var(--border);flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
-.p-preview-meta{display:flex;flex-direction:column;gap:4px;min-width:0}
-.p-preview-hex{font-size:20px;font-family:var(--font-mono);color:var(--text-primary);letter-spacing:.5px}
-.p-preview-name{font-size:12px;color:var(--text-muted)}
+.p-picker-row{display:flex;align-items:center;gap:var(--sp-3)}
+.p-picker-row .p-label{color:var(--text-muted)}
 
-.p-picker-row{display:flex;align-items:center;gap:10px}
-.p-picker-row label{font-size:13px;color:var(--text-muted)}
-.p-native-color{width:46px;height:30px;padding:0;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer}
+.p-channels{display:flex;flex-direction:column;gap:var(--sp-2)}
+.p-channel{display:flex;align-items:center;gap:var(--sp-3)}
+.p-channel-tag{width:18px;font-size:var(--fs-sm);font-weight:var(--fw-semibold);color:var(--text-muted);text-align:center}
+.p-channel input[type=number]{width:64px;box-sizing:border-box;padding:6px 8px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:var(--fs-sm);font-family:var(--font-mono);text-align:center;outline:none;transition:border-color var(--transition),box-shadow var(--transition)}
+.p-channel input[type=number]:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 
-.p-group{display:flex;flex-direction:column;gap:8px}
-.p-group-head{display:flex;align-items:center;gap:8px}
-.p-group-label{font-size:13px;font-weight:600;color:var(--text-primary);width:42px}
-.p-group .p-spacer{flex:1}
-.p-channels{display:flex;flex-direction:column;gap:8px}
-.p-channel{display:flex;align-items:center;gap:10px}
-.p-channel-tag{width:18px;font-size:12px;font-weight:600;color:var(--text-muted);text-align:center}
-.p-channel input[type=range]{flex:1;accent-color:var(--accent)}
-.p-channel input[type=number]{width:60px;box-sizing:border-box;padding:5px 6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;font-family:var(--font-mono);text-align:center}
-.p-channel input[type=number]:focus{outline:none;border-color:var(--accent)}
-
-.p-hex-input{width:100%;box-sizing:border-box;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:14px;font-family:var(--font-mono);text-transform:uppercase}
-.p-hex-input:focus{outline:none;border-color:var(--accent)}
-
-.p-btn{background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);font-size:12px;padding:5px 10px;border-radius:6px;cursor:pointer}
-.p-btn:hover{border-color:var(--accent)}
-.p-btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
-.p-btn-primary:hover{filter:brightness(1.08);border-color:var(--accent)}
-.p-btn:disabled{opacity:.5;cursor:not-allowed}
-.p-tip{font-size:12px;color:var(--text-muted);line-height:1.6}
+.p-hex-input{width:100%;box-sizing:border-box;padding:10px 12px;background:var(--bg-primary);border:1px solid var(--border);border-radius:var(--radius);color:var(--text-primary);font-size:var(--fs-lg);font-family:var(--font-mono);text-transform:uppercase;outline:none;transition:border-color var(--transition),box-shadow var(--transition)}
+.p-hex-input:focus{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
 </style>
 </head>
 <body>
 <div class="p-app">
-  <div class="p-toolbar">
-    <span class="p-title">颜色转换</span>
-    <span class="p-spacer"></span>
+  <div class="p-head">
+    <span class="p-head-title">颜色转换</span>
   </div>
 
-  <div class="p-body">
-    <div class="p-preview">
+  <div class="p-content">
+    <div class="p-hero">
       <div class="p-swatch" id="swatch"></div>
-      <div class="p-preview-meta">
-        <span class="p-preview-hex" id="hexLabel">#000000</span>
-        <span class="p-preview-name" id="nameLabel">—</span>
+      <div class="p-hero-meta">
+        <span class="p-hero-hex" id="hexLabel">#000000</span>
+        <span class="p-hero-name" id="nameLabel">—</span>
       </div>
     </div>
 
     <div class="p-picker-row">
-      <label>拾色器</label>
+      <span class="p-label">拾色器</span>
       <input type="color" class="p-native-color" id="nativeColor" value="#000000">
-      <span class="p-tip">拖动选取任意颜色，下方三栏实时同步</span>
+      <span class="p-muted">拖动选取任意颜色，下方三栏实时同步</span>
     </div>
 
-    <div class="p-group">
-      <div class="p-group-head">
-        <span class="p-group-label">HEX</span>
-        <span class="p-spacer"></span>
-        <button class="p-btn" id="copyHex">复制</button>
-      </div>
+    <div class="p-section">
+      <div class="p-section-label"><span>HEX</span><span class="p-spacer"></span><button class="p-copy" id="copyHex">复制</button></div>
       <input type="text" class="p-hex-input" id="hexInput" spellcheck="false" placeholder="#RRGGBB">
     </div>
 
-    <div class="p-group">
-      <div class="p-group-head">
-        <span class="p-group-label">RGB</span>
-        <span class="p-spacer"></span>
-        <button class="p-btn" id="copyRgb">复制</button>
-      </div>
+    <div class="p-section">
+      <div class="p-section-label"><span>RGB</span><span class="p-spacer"></span><button class="p-copy" id="copyRgb">复制</button></div>
       <div class="p-channels">
-        <div class="p-channel"><span class="p-channel-tag">R</span><input type="range" id="rRange" min="0" max="255" value="0"><input type="number" id="rNum" min="0" max="255" value="0"></div>
-        <div class="p-channel"><span class="p-channel-tag">G</span><input type="range" id="gRange" min="0" max="255" value="0"><input type="number" id="gNum" min="0" max="255" value="0"></div>
-        <div class="p-channel"><span class="p-channel-tag">B</span><input type="range" id="bRange" min="0" max="255" value="0"><input type="number" id="bNum" min="0" max="255" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">R</span><input type="range" class="p-range" id="rRange" min="0" max="255" value="0"><input type="number" id="rNum" min="0" max="255" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">G</span><input type="range" class="p-range" id="gRange" min="0" max="255" value="0"><input type="number" id="gNum" min="0" max="255" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">B</span><input type="range" class="p-range" id="bRange" min="0" max="255" value="0"><input type="number" id="bNum" min="0" max="255" value="0"></div>
       </div>
     </div>
 
-    <div class="p-group">
-      <div class="p-group-head">
-        <span class="p-group-label">HSL</span>
-        <span class="p-spacer"></span>
-        <button class="p-btn" id="copyHsl">复制</button>
-      </div>
+    <div class="p-section">
+      <div class="p-section-label"><span>HSL</span><span class="p-spacer"></span><button class="p-copy" id="copyHsl">复制</button></div>
       <div class="p-channels">
-        <div class="p-channel"><span class="p-channel-tag">H</span><input type="range" id="hRange" min="0" max="360" value="0"><input type="number" id="hNum" min="0" max="360" value="0"></div>
-        <div class="p-channel"><span class="p-channel-tag">S</span><input type="range" id="sRange" min="0" max="100" value="0"><input type="number" id="sNum" min="0" max="100" value="0"></div>
-        <div class="p-channel"><span class="p-channel-tag">L</span><input type="range" id="lRange" min="0" max="100" value="0"><input type="number" id="lNum" min="0" max="100" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">H</span><input type="range" class="p-range" id="hRange" min="0" max="360" value="0"><input type="number" id="hNum" min="0" max="360" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">S</span><input type="range" class="p-range" id="sRange" min="0" max="100" value="0"><input type="number" id="sNum" min="0" max="100" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">L</span><input type="range" class="p-range" id="lRange" min="0" max="100" value="0"><input type="number" id="lNum" min="0" max="100" value="0"></div>
       </div>
     </div>
   </div>

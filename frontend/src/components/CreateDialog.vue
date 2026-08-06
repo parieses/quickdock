@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, ref, watch, toRef } from 'vue'
+import { reactive, ref, watch, toRef, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
@@ -31,6 +31,10 @@ const values = reactive<Record<string, string>>({})
 const validationMessage = ref('')
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
+
+// 是否包含 textarea 字段：含多行文本的弹框（如文本片段）自动加宽加高，
+// 纯文本字段的弹框（场景/工作区/集合名）保持原有紧凑尺寸。
+const hasTextarea = computed(() => props.fields.some(f => f.type === 'textarea'))
 
 // 根据 visible / editValues / fields 推导初始值
 function resetValues() {
@@ -87,7 +91,7 @@ function onKeydown(e: KeyboardEvent) {
   <Teleport to="body">
     <Transition name="dialog">
       <div v-if="visible" class="dialog-overlay" @mousedown.self="emit('cancel')" @keydown="onKeydown">
-        <div ref="panelRef" class="dialog-panel" @mousedown.stop>
+        <div ref="panelRef" class="dialog-panel" :class="{ 'dialog-panel--wide': hasTextarea }" @mousedown.stop>
           <div class="dialog-header">
             <span class="dialog-title">{{ title }}</span>
             <button class="dialog-close" @click="emit('cancel')">
@@ -110,7 +114,7 @@ function onKeydown(e: KeyboardEvent) {
                 v-model="values[f.key]"
                 :placeholder="f.placeholder ?? ''"
                 class="field-input field-textarea"
-                rows="3"
+                rows="10"
               ></textarea>
               <select v-else v-model="values[f.key]" class="field-input">
                 <option v-for="o in f.options" :key="o.value" :value="o.value">
@@ -141,7 +145,10 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--color-surface); border: 1px solid var(--color-border);
   border-radius: 10px; width: 380px; max-width: 92vw;
   box-shadow: 0 12px 48px var(--color-bg-overlay);
-  overflow: hidden;
+  overflow: hidden; max-height: 86vh;
+}
+.dialog-panel--wide {
+  width: 560px; max-width: 94vw;
 }
 .dialog-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -157,6 +164,7 @@ function onKeydown(e: KeyboardEvent) {
 .dialog-close:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 .dialog-body {
   padding: 20px; display: flex; flex-direction: column; gap: 16px;
+  overflow-y: auto;
 }
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 12px; color: var(--color-text-muted); font-weight: 500; }
@@ -168,7 +176,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px rgba(74,158,255,0.12); }
 .field-input::placeholder { color: var(--color-text-disabled); }
-.field-textarea { resize: vertical; min-height: 64px; font-family: var(--font-mono, monospace); }
+.field-textarea { resize: vertical; min-height: 220px; font-family: var(--font-mono, monospace); line-height: 1.5; }
 .field-error {
   font-size: 12px; color: var(--color-danger); margin: -8px 0 0; padding: 0;
 }

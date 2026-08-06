@@ -429,7 +429,9 @@ func (a *AppService) GetPluginIcon(pluginID string) *ApiResult {
 }
 
 // GetPluginFrontendPage 获取插件前端页面（内联 CSS/JS 的单 HTML 文件）
-func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
+// theme/locale 为宿主当前生效值（已由前端解析 system → light/dark），用于在生成 HTML 时
+// 直接写入初始 data-theme / lang，避免「加载后靠 postMessage 补主题」失败时插件页停留在暗色。
+func (a *AppService) GetPluginFrontendPage(pluginID string, theme string, locale string) *ApiResult {
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
 	}
@@ -503,19 +505,29 @@ func (a *AppService) GetPluginFrontendPage(pluginID string) *ApiResult {
 	}
 
 	// 注入 QuickDock 运行时脚本（主题/语言等控制）
-	// 默认使用暗色主题 + 简体中文，父窗口可通过 plugin:theme 消息动态更新。
-	// 注意：querySelector 可能返回 null（插件未声明 qd-theme meta），必须判空，
-	// 不能写成 (querySelector(...)||{}).getAttribute —— {} 没有 getAttribute 会抛 TypeError
+	// 直接用宿主传入的 theme/locale 写入初始 data-theme / lang，确保插件页加载即正确主题，
+	// 不依赖「加载后再靠 postMessage 补主题」（blob + 沙箱环境下该消息偶发不可达）。
+	// 同时监听 plugin:theme 消息以支持宿主主题实时切换；兼容嵌套(data.theme)与顶层(theme)两种格式。
+	safeTheme := "dark"
+	if theme == "light" {
+		safeTheme = "light"
+	}
+	safeLocale := locale
+	if safeLocale == "" {
+		safeLocale = "zh-CN"
+	}
 	runtimeScript := "<script id=\"quickdock-runtime\">\n" +
 		"(function(){" +
-		"var m=document.querySelector('meta[name=\"qd-theme\"]');var t=m&&m.getAttribute('content')||'dark';" +
-		"var ml=document.querySelector('meta[name=\"qd-locale\"]');var l=ml&&ml.getAttribute('content')||'zh-CN';" +
+		"var t='" + safeTheme + "';" +
+		"var l='" + safeLocale + "';" +
 		"document.documentElement.setAttribute('data-theme',t);" +
 		"document.documentElement.setAttribute('lang',l);" +
 		"window.addEventListener('message',function(e){" +
 		"if(e.data&&e.data.type==='plugin:theme'){" +
-		"if(e.data.theme)document.documentElement.setAttribute('data-theme',e.data.theme);" +
-		"if(e.data.locale)document.documentElement.setAttribute('lang',e.data.locale);" +
+		"var dt=(e.data.data&&e.data.data.theme)||e.data.theme;" +
+		"var dl=(e.data.data&&e.data.data.locale)||e.data.locale;" +
+		"if(dt)document.documentElement.setAttribute('data-theme',dt);" +
+		"if(dl)document.documentElement.setAttribute('lang',dl);" +
 		"}});" +
 		"})();" +
 		"</script>\n"

@@ -5,54 +5,50 @@
 <title>二维码工具</title>
 <link rel="stylesheet" href="../common.css">
 <style>
-.p-app{display:flex;flex-direction:column;height:100%}
-.p-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
-.p-tab{background:none;border:none;color:var(--text-muted);font-size:13px;padding:4px 10px;border-radius:6px;cursor:pointer}
-.p-tab.active{background:var(--bg-active);color:var(--accent)}
-.p-body{flex:1;display:flex;flex-direction:column;padding:12px;gap:10px;overflow-y:auto}
-.p-input{width:100%;box-sizing:border-box;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;font-family:var(--font-mono)}
-.p-input:focus{outline:none;border-color:var(--accent)}
-.p-actions{display:flex;gap:8px;align-items:center}
-.p-qr-box{display:flex;justify-content:center;padding:16px;background:var(--bg-secondary);border-radius:8px;min-height:200px;align-items:center}
+/* ===== 二维码页专属（其余复用 common.css） ===== */
+.p-actions{display:flex;gap:var(--sp-2);align-items:center;flex-wrap:wrap}
+.p-qr-box{display:flex;justify-content:center;align-items:center;min-height:220px;padding:var(--sp-4);background:var(--bg-secondary);border:1px solid var(--border);border-radius:var(--radius-lg)}
 .p-qr-box svg{image-rendering:pixelated}
-.p-tip{font-size:12px;color:var(--text-muted);line-height:1.6}
-.p-result{margin:0;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font-mono);color:var(--text-primary);word-break:break-all;white-space:pre-wrap;min-height:40px}
-.p-file-row{display:flex;gap:8px;align-items:center}
-.p-img-preview{max-width:180px;max-height:180px;border-radius:6px;border:1px solid var(--border)}
-.p-btn:disabled{opacity:.5;cursor:not-allowed}
+.p-img-preview{max-width:180px;max-height:180px;border-radius:var(--radius);border:1px solid var(--border)}
 </style>
 </head>
 <body>
 <div class="p-app">
-  <div class="p-toolbar">
-    <button class="p-tab active" id="tabGen">生成</button>
-    <button class="p-tab" id="tabScan">识别</button>
-    <span class="p-spacer"></span>
+  <div class="p-head">
+    <span class="p-head-title">二维码工具</span>
   </div>
 
-  <div class="p-body" id="genPane">
-    <input type="text" class="p-input" id="qrText" placeholder="输入文本或 URL，如 https://github.com/parieses/quickdock" spellcheck="false">
+  <div class="p-tabs">
+    <button class="p-tab active" id="tabGen">生成</button>
+    <button class="p-tab" id="tabScan">识别</button>
+  </div>
+
+  <div class="p-content" id="genPane">
+    <div class="p-field">
+      <input type="text" class="p-input" id="qrText" placeholder="输入文本或 URL，如 https://github.com/parieses/quickdock" spellcheck="false">
+    </div>
     <div class="p-actions">
       <button class="p-btn p-btn-primary" id="btnGen">生成二维码</button>
       <button class="p-btn" id="btnSave" disabled>保存 PNG</button>
-      <span class="p-tip">支持 URL / 文本 / 联系人信息，最大 512 字符</span>
+      <span class="p-muted">支持 URL / 文本 / 联系人信息，最大 512 字符</span>
     </div>
-    <div class="p-qr-box" id="qrBox"><span class="p-tip">输入内容后点击生成</span></div>
+    <div class="p-hero" style="justify-content:center;min-height:240px">
+      <div class="p-qr-box" id="qrBox"><span class="p-muted">输入内容后点击生成</span></div>
+    </div>
   </div>
 
-  <div class="p-body" id="scanPane" style="display:none">
-    <div class="p-file-row">
+  <div class="p-content" id="scanPane" style="display:none">
+    <div class="p-field">
       <input type="file" id="qrFile" accept="image/*" class="p-btn" style="padding:6px 10px">
-      <span class="p-tip">选择包含二维码的图片（PNG/JPG/WebP）</span>
+      <span class="p-muted">选择包含二维码的图片（PNG/JPG/WebP）</span>
     </div>
     <div class="p-actions">
       <img id="scanPreview" class="p-img-preview" style="display:none" alt="">
-      <div id="scanLoading" style="display:none" class="p-tip">识别中…</div>
+      <span id="scanLoading" style="display:none" class="p-muted">识别中…</span>
     </div>
-    <pre class="p-result" id="scanResult">识别结果将显示在这里</pre>
-    <div class="p-actions">
-      <button class="p-btn" id="btnCopy" disabled>复制结果</button>
-      <button class="p-btn" id="btnOpenResult" disabled>打开链接</button>
+    <div class="p-section">
+      <div class="p-section-label"><span>识别结果</span><span class="p-spacer"></span><button class="p-copy" id="btnCopy" disabled>复制</button><button class="p-btn p-btn-sm" id="btnOpenResult" disabled>打开链接</button></div>
+      <pre class="p-output" id="scanResult" style="margin:0">识别结果将显示在这里</pre>
     </div>
   </div>
 </div>
@@ -73,7 +69,7 @@ function genQR() {
   try {
     qrInstance = new QRCode(box, { text: text, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M })
     $('btnSave').disabled = false
-  } catch (e) { box.innerHTML = '<span class="p-tip">生成失败: ' + e.message + '</span>' }
+  } catch (e) { box.innerHTML = '<span class="p-muted">生成失败: ' + e.message + '</span>' }
 }
 
 function savePNG() {

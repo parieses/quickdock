@@ -22,6 +22,10 @@ import { useCommandSearch } from '../composables/useCommandSearch'
 import type { RecentEntry } from '../composables/useCommandSearch'
 
 const { t, locale } = useI18n()
+// 读取宿主当前生效主题（与 PluginPage 一致），传给插件页后端以生成即主题化的 HTML
+function currentThemeName(): string {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+}
 const toast = inject<ToastAPI>('toast')
 
 // ---- 初始化 composables ----
@@ -355,7 +359,7 @@ async function executeSelected() {
         recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, '')
         try {
           inlinePluginId.value = result.pluginId; inlinePluginLoading.value = true; inlinePluginError.value = ''
-          const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId))
+          const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId, currentThemeName(), locale.value))
           if (html) { const tmatch = html.match(/<title>([^<]*)<\/title>/); inlinePluginName.value = tmatch ? tmatch[1] : result.label; inlinePluginHtml.value = html }
           else { inlinePluginError.value = t('pluginNoFrontend') }
         } catch (e: any) { inlinePluginError.value = t('pluginLoadFailed') + ': ' + getErrorMessage(e) }
@@ -371,7 +375,7 @@ async function executeSelected() {
         // 前端插件且无输入：打开 UI 面板；带输入时仍走后端即时转换（保持现状）
         inlinePluginId.value = result.pluginId; inlinePluginLoading.value = true; inlinePluginError.value = ''
         try {
-          const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId))
+          const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId, currentThemeName(), locale.value))
           if (html) { const tmatch = html.match(/<title>([^<]*)<\/title>/); inlinePluginName.value = tmatch ? tmatch[1] : result.label; inlinePluginHtml.value = html }
           else { inlinePluginError.value = t('pluginNoFrontend') }
         } catch (e: any) { inlinePluginError.value = t('pluginLoadFailed') + ': ' + getErrorMessage(e) }

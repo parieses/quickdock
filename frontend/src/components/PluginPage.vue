@@ -18,6 +18,7 @@ const error = ref('')
 const pluginName = ref('')
 let messageHandler: ((e: MessageEvent) => void) | null = null
 let iframeWindow: Window | null = null
+let themeObserver: MutationObserver | null = null
 // 随机 nonce 防止跨源消息伪造（blob URL 下无法指定 targetOrigin）
 const pluginNonce = Math.random().toString(36).slice(2, 12)
 
@@ -26,9 +27,14 @@ function iframePostMessage(data: any) {
   iframeWindow.postMessage({ ...data, nonce: pluginNonce }, '*')
 }
 
+// 读取宿主（父文档）当前生效主题，避免写死 'dark' 导致浅色主题失效
+function currentThemeName(): string {
+  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+}
+
 onMounted(async () => {
   try {
-    const html = unwrap<string>(await GetPluginFrontendPage(props.pluginId))
+    const html = unwrap<string>(await GetPluginFrontendPage(props.pluginId, currentThemeName(), locale.value))
     if (!html) {
       error.value = t('pluginNoFrontend')
       loading.value = false
@@ -95,18 +101,25 @@ onMounted(async () => {
     }
   }
   window.addEventListener('message', messageHandler)
+
+  // 宿主主题切换时，实时重发 theme 给插件 iframe（浅色/深色跟随）
+  themeObserver = new MutationObserver(() => {
+    iframePostMessage({ type: 'plugin:theme', data: { theme: currentThemeName(), locale: locale.value } })
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 })
 
 onUnmounted(() => {
   if (iframeSrc.value) URL.revokeObjectURL(iframeSrc.value)
   if (messageHandler) window.removeEventListener('message', messageHandler)
+  if (themeObserver) { themeObserver.disconnect(); themeObserver = null }
 })
 
 async function onIframeLoad(event: Event) {
   iframeWindow = (event.target as HTMLIFrameElement)?.contentWindow
   if (!iframeWindow) return
   // 先发 theme
-  iframePostMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } })
+  iframePostMessage({ type: 'plugin:theme', data: { theme: currentThemeName(), locale: locale.value } })
   // 再发 init（使用 nonce 消息代替裸 *）
   try {
     const raw = await GetAndClearPendingPluginInit()
@@ -115,12 +128,12 @@ async function onIframeLoad(event: Event) {
     const command = (init && typeof init === 'object') ? (init.command || '') : ''
     iframePostMessage({
       type: 'plugin:init',
-      data: { text, command, theme: 'dark', locale: locale.value }
+      data: { text, command, theme: currentThemeName(), locale: locale.value }
     })
   } catch {
     iframePostMessage({
       type: 'plugin:init',
-      data: { text: '', command: '', theme: 'dark', locale: locale.value }
+      data: { text: '', command: '', theme: currentThemeName(), locale: locale.value }
     })
   }
 }

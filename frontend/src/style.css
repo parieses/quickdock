@@ -39,20 +39,20 @@
 /* ==================== CSS 变量 — 深色主题 ==================== */
 :root,
 [data-theme="dark"] {
-  --color-bg-primary: #1a1a1a;
-  --color-bg-secondary: #1e1e1e;
-  --color-bg-tertiary: #242424;
-  --color-bg-hover: #282828;
-  --color-bg-active: #323232;
+  --color-bg-primary: #17181b;
+  --color-bg-secondary: #1e1f23;
+  --color-bg-tertiary: #26282d;
+  --color-bg-hover: #2f3137;
+  --color-bg-active: #3a3d44;
   --color-bg-overlay: rgba(0, 0, 0, 0.55);
-  --color-surface: #262626;
-  --color-surface-elevated: #2e2e2e;
-  --color-text-primary: #e4e4e4;
-  --color-text-secondary: #b0b0b0;
-  --color-text-muted: #888;
-  --color-text-disabled: #555;
-  --color-border: #2e2e2e;
-  --color-border-light: #3a3a3a;
+  --color-surface: #26282d;
+  --color-surface-elevated: #2f3137;
+  --color-text-primary: #e9eaec;
+  --color-text-secondary: #a9adb5;
+  --color-text-muted: #7c818b;
+  --color-text-disabled: #5c606a;
+  --color-border: #2b2d33;
+  --color-border-light: #3a3d44;
   --color-border-focus: #4a9eff;
   --color-accent: #4a9eff;
   --color-accent-hover: #3a8eef;
@@ -86,20 +86,20 @@
 
 /* ==================== CSS 变量 — 浅色主题 ==================== */
 [data-theme="light"] {
-  --color-bg-primary: #f7f7f5;
+  --color-bg-primary: #f5f6f8;
   --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #efefeb;
-  --color-bg-hover: #e8e8e4;
-  --color-bg-active: #e0e0dc;
+  --color-bg-tertiary: #eef0f3;
+  --color-bg-hover: #e7e9ee;
+  --color-bg-active: #dde0e7;
   --color-bg-overlay: rgba(0, 0, 0, 0.1);
   --color-surface: #ffffff;
-  --color-surface-elevated: #f5f5f2;
-  --color-text-primary: #1a1a18;
-  --color-text-secondary: #4a4a48;
-  --color-text-muted: #888886;
-  --color-text-disabled: #b0b0ae;
-  --color-border: #e4e4e0;
-  --color-border-light: #d0d0cc;
+  --color-surface-elevated: #f0f2f5;
+  --color-text-primary: #1f2329;
+  --color-text-secondary: #51565e;
+  --color-text-muted: #888d96;
+  --color-text-disabled: #aab0b8;
+  --color-border: #e3e6ec;
+  --color-border-light: #d0d4dc;
   --color-border-focus: #4a9eff;
   --color-accent: #4a9eff;
   --color-accent-hover: #3a8eef;

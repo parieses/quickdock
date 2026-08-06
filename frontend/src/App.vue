@@ -3,7 +3,7 @@ import { computed, defineAsyncComponent, onMounted, provide, ref, watch } from '
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace';
 import { useToast } from './composables/useToast';
-import { GetValue, SetValue } from '../bindings/quickdock/services/appservice';
+import { GetValue, SetValue, ApplyTheme } from '../bindings/quickdock/services/appservice';
 import { i18n } from './i18n';
 import { unwrap } from './utils/api';
 import Sidebar from './components/Sidebar.vue';
@@ -71,6 +71,8 @@ const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
 function applyTheme(theme: Theme) {
   const isDark = theme === 'dark' || (theme === 'system' && prefersDark.matches)
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
+  // 同步到原生窗口：主窗口（系统原生标题栏）跟随 App 主题，插件窗口底色跟随主题
+  try { ApplyTheme(isDark) } catch (_) {}
 }
 
 async function setTheme(theme: Theme) {

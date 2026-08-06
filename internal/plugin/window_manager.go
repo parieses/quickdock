@@ -16,6 +16,7 @@ type PluginWindowManager struct {
 	app        *application.App
 	baseWidth  int
 	baseHeight int
+	themeDark  bool // 当前 App 主题是否为深色（用于窗口底色，避免浅色下露黑底）
 }
 
 // NewPluginWindowManager 创建窗口管理器
@@ -25,6 +26,31 @@ func NewPluginWindowManager(app *application.App) *PluginWindowManager {
 		app:        app,
 		baseWidth:  800,
 		baseHeight: 600,
+		themeDark:  true, // 默认深色（与窗口初始 BackgroundColour 一致）
+	}
+}
+
+// pluginWindowBackground 返回与主题匹配的底色：深 #17181b / 浅 #f5f6f8。
+func pluginWindowBackground(dark bool) application.RGBA {
+	if dark {
+		return application.RGBA{Red: 23, Green: 24, Blue: 27, Alpha: 255}
+	}
+	return application.RGBA{Red: 245, Green: 246, Blue: 248, Alpha: 255}
+}
+
+// SetDarkMode 记录 App 主题并应用到所有已存在的插件窗口底色。
+// 新建窗口在 Show 时也会沿用当前 themeDark，避免浅色下露出黑底。
+func (m *PluginWindowManager) SetDarkMode(dark bool) {
+	m.mu.Lock()
+	m.themeDark = dark
+	wins := make([]*application.WebviewWindow, 0, len(m.windows))
+	for _, w := range m.windows {
+		wins = append(wins, w)
+	}
+	m.mu.Unlock()
+	bg := pluginWindowBackground(dark)
+	for _, w := range wins {
+		w.SetBackgroundColour(bg)
 	}
 }
 
@@ -50,7 +76,7 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		MinWidth:         400,
 		MinHeight:        300,
 		Frameless:        true,
-		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
+		BackgroundColour: pluginWindowBackground(m.themeDark),
 		URL:              "/#/plugin/" + pluginID,
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: !showInTaskbar,
