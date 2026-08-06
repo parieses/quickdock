@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>颜色转换</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-app{display:flex;flex-direction:column;height:100%}
+.p-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+.p-toolbar .p-title{font-size:14px;font-weight:600;color:var(--text-primary)}
+.p-toolbar .p-spacer{flex:1}
+.p-body{flex:1;display:flex;flex-direction:column;padding:14px;gap:16px;overflow-y:auto}
+
+.p-preview{display:flex;align-items:center;gap:14px}
+.p-swatch{width:74px;height:74px;border-radius:10px;border:1px solid var(--border);flex-shrink:0;box-shadow:inset 0 0 0 1px rgba(255,255,255,.06)}
+.p-preview-meta{display:flex;flex-direction:column;gap:4px;min-width:0}
+.p-preview-hex{font-size:20px;font-family:var(--font-mono);color:var(--text-primary);letter-spacing:.5px}
+.p-preview-name{font-size:12px;color:var(--text-muted)}
+
+.p-picker-row{display:flex;align-items:center;gap:10px}
+.p-picker-row label{font-size:13px;color:var(--text-muted)}
+.p-native-color{width:46px;height:30px;padding:0;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer}
+
+.p-group{display:flex;flex-direction:column;gap:8px}
+.p-group-head{display:flex;align-items:center;gap:8px}
+.p-group-label{font-size:13px;font-weight:600;color:var(--text-primary);width:42px}
+.p-group .p-spacer{flex:1}
+.p-channels{display:flex;flex-direction:column;gap:8px}
+.p-channel{display:flex;align-items:center;gap:10px}
+.p-channel-tag{width:18px;font-size:12px;font-weight:600;color:var(--text-muted);text-align:center}
+.p-channel input[type=range]{flex:1;accent-color:var(--accent)}
+.p-channel input[type=number]{width:60px;box-sizing:border-box;padding:5px 6px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;font-family:var(--font-mono);text-align:center}
+.p-channel input[type=number]:focus{outline:none;border-color:var(--accent)}
+
+.p-hex-input{width:100%;box-sizing:border-box;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:14px;font-family:var(--font-mono);text-transform:uppercase}
+.p-hex-input:focus{outline:none;border-color:var(--accent)}
+
+.p-btn{background:var(--bg-secondary);border:1px solid var(--border);color:var(--text-primary);font-size:12px;padding:5px 10px;border-radius:6px;cursor:pointer}
+.p-btn:hover{border-color:var(--accent)}
+.p-btn-primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.p-btn-primary:hover{filter:brightness(1.08);border-color:var(--accent)}
+.p-btn:disabled{opacity:.5;cursor:not-allowed}
+.p-tip{font-size:12px;color:var(--text-muted);line-height:1.6}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <span class="p-title">颜色转换</span>
+    <span class="p-spacer"></span>
+  </div>
+
+  <div class="p-body">
+    <div class="p-preview">
+      <div class="p-swatch" id="swatch"></div>
+      <div class="p-preview-meta">
+        <span class="p-preview-hex" id="hexLabel">#000000</span>
+        <span class="p-preview-name" id="nameLabel">—</span>
+      </div>
+    </div>
+
+    <div class="p-picker-row">
+      <label>拾色器</label>
+      <input type="color" class="p-native-color" id="nativeColor" value="#000000">
+      <span class="p-tip">拖动选取任意颜色，下方三栏实时同步</span>
+    </div>
+
+    <div class="p-group">
+      <div class="p-group-head">
+        <span class="p-group-label">HEX</span>
+        <span class="p-spacer"></span>
+        <button class="p-btn" id="copyHex">复制</button>
+      </div>
+      <input type="text" class="p-hex-input" id="hexInput" spellcheck="false" placeholder="#RRGGBB">
+    </div>
+
+    <div class="p-group">
+      <div class="p-group-head">
+        <span class="p-group-label">RGB</span>
+        <span class="p-spacer"></span>
+        <button class="p-btn" id="copyRgb">复制</button>
+      </div>
+      <div class="p-channels">
+        <div class="p-channel"><span class="p-channel-tag">R</span><input type="range" id="rRange" min="0" max="255" value="0"><input type="number" id="rNum" min="0" max="255" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">G</span><input type="range" id="gRange" min="0" max="255" value="0"><input type="number" id="gNum" min="0" max="255" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">B</span><input type="range" id="bRange" min="0" max="255" value="0"><input type="number" id="bNum" min="0" max="255" value="0"></div>
+      </div>
+    </div>
+
+    <div class="p-group">
+      <div class="p-group-head">
+        <span class="p-group-label">HSL</span>
+        <span class="p-spacer"></span>
+        <button class="p-btn" id="copyHsl">复制</button>
+      </div>
+      <div class="p-channels">
+        <div class="p-channel"><span class="p-channel-tag">H</span><input type="range" id="hRange" min="0" max="360" value="0"><input type="number" id="hNum" min="0" max="360" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">S</span><input type="range" id="sRange" min="0" max="100" value="0"><input type="number" id="sNum" min="0" max="100" value="0"></div>
+        <div class="p-channel"><span class="p-channel-tag">L</span><input type="range" id="lRange" min="0" max="100" value="0"><input type="number" id="lNum" min="0" max="100" value="0"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- 颜色名 → HEX（与后端 main.js 保持一致）----
+var NAMED_COLORS = {
+  red:'#ff0000', green:'#008000', blue:'#0000ff', black:'#000000', white:'#ffffff',
+  gray:'#808080', grey:'#808080', yellow:'#ffff00', orange:'#ffa500', purple:'#800080',
+  pink:'#ffc0cb', cyan:'#00ffff', magenta:'#ff00ff', brown:'#a52a2a', lime:'#00ff00',
+  teal:'#008080', navy:'#000080', silver:'#c0c0c0', gold:'#ffd700', indigo:'#4b0082',
+  violet:'#ee82ee', coral:'#ff7f50', crimson:'#dc143c', salmon:'#fa8072', turquoise:'#40e0d0',
+  beige:'#f5f5dc', khaki:'#f0e68c', olive:'#808000'
+}
+var HEX_TO_NAME = {}
+for (var nk in NAMED_COLORS) { HEX_TO_NAME[NAMED_COLORS[nk].toLowerCase()] = nk }
+
+var $ = function (id) { return document.getElementById(id) }
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)) }
+
+// ---- 转换 ----
+function hexToRgb(hex) {
+  hex = hex.replace('#', '')
+  if (hex.length === 3) hex = hex.split('').map(function (c) { return c + c }).join('')
+  if (hex.length !== 6) return null
+  var n = parseInt(hex, 16)
+  if (isNaN(n)) return null
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 }
+}
+function rgbToHex(r, g, b) {
+  function p(v) { var s = clamp(Math.round(v), 0, 255).toString(16); return s.length === 1 ? '0' + s : s }
+  return '#' + p(r) + p(g) + p(b)
+}
+function rgbToHsl(r, g, b) {
+  r /= 255; g /= 255; b /= 255
+  var max = Math.max(r, g, b), min = Math.min(r, g, b)
+  var h = 0, s = 0, l = (max + min) / 2
+  if (max !== min) {
+    var d = max - min
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min)
+    if (max === r) h = (g - b) / d + (g < b ? 6 : 0)
+    else if (max === g) h = (b - r) / d + 2
+    else h = (r - g) / d + 4
+    h *= 60
+  }
+  return { h: Math.round(h), s: Math.round(s * 100), l: Math.round(l * 100) }
+}
+function hslToRgb(h, s, l) {
+  h = ((h % 360) + 360) % 360
+  s = clamp(s, 0, 100) / 100
+  l = clamp(l, 0, 100) / 100
+  function f(n) {
+    var k = (n + h / 30) % 12
+    var a = s * Math.min(l, 1 - l)
+    return l - a * Math.max(-1, Math.min(k - 3, Math.min(9 - k, 1)))
+  }
+  return { r: Math.round(f(0) * 255), g: Math.round(f(8) * 255), b: Math.round(f(4) * 255) }
+}
+
+// ---- 状态源：以 RGB 为唯一真值，其它格式由它派生 ----
+var state = { r: 0, g: 0, b: 0 }
+
+function render() {
+  var hex = rgbToHex(state.r, state.g, state.b)
+  var hsl = rgbToHsl(state.r, state.g, state.b)
+
+  // 预览
+  $('swatch').style.background = hex
+  $('hexLabel').textContent = hex.toUpperCase()
+  $('nameLabel').textContent = HEX_TO_NAME[hex.toLowerCase()] ? ('色名: ' + HEX_TO_NAME[hex.toLowerCase()]) : '—'
+  $('nativeColor').value = hex
+
+  // HEX 输入
+  if (document.activeElement !== $('hexInput')) $('hexInput').value = hex.toUpperCase()
+
+  // RGB 控件
+  if (document.activeElement !== $('rRange')) $('rRange').value = state.r
+  if (document.activeElement !== $('rNum')) $('rNum').value = state.r
+  if (document.activeElement !== $('gRange')) $('gRange').value = state.g
+  if (document.activeElement !== $('gNum')) $('gNum').value = state.g
+  if (document.activeElement !== $('bRange')) $('bRange').value = state.b
+  if (document.activeElement !== $('bNum')) $('bNum').value = state.b
+
+  // HSL 控件
+  if (document.activeElement !== $('hRange')) $('hRange').value = hsl.h
+  if (document.activeElement !== $('hNum')) $('hNum').value = hsl.h
+  if (document.activeElement !== $('sRange')) $('sRange').value = hsl.s
+  if (document.activeElement !== $('sNum')) $('sNum').value = hsl.s
+  if (document.activeElement !== $('lRange')) $('lRange').value = hsl.l
+  if (document.activeElement !== $('lNum')) $('lNum').value = hsl.l
+}
+
+function setFromRgb(r, g, b) {
+  state.r = clamp(r, 0, 255); state.g = clamp(g, 0, 255); state.b = clamp(b, 0, 255)
+  render()
+}
+
+// ---- 事件 ----
+$('nativeColor').addEventListener('input', function () {
+  var rgb = hexToRgb(this.value)
+  if (rgb) setFromRgb(rgb.r, rgb.g, rgb.b)
+})
+
+$('hexInput').addEventListener('input', function () {
+  var rgb = hexToRgb(this.value.trim())
+  if (rgb) setFromRgb(rgb.r, rgb.g, rgb.b)
+})
+
+function bindChannel(rangeId, numId, key) {
+  $(rangeId).addEventListener('input', function () { setFromRgb(key === 'r' ? +this.value : state.r, key === 'g' ? +this.value : state.g, key === 'b' ? +this.value : state.b) })
+  $(numId).addEventListener('input', function () {
+    var v = clamp(parseInt(this.value || '0', 10) || 0, 0, (key === 'h' ? 360 : 255))
+    setFromRgb(key === 'r' ? v : state.r, key === 'g' ? v : state.g, key === 'b' ? v : state.b)
+  })
+}
+bindChannel('rRange', 'rNum', 'r')
+bindChannel('gRange', 'gNum', 'g')
+bindChannel('bRange', 'bNum', 'b')
+
+function bindHsl(rangeId, numId, key) {
+  $(rangeId).addEventListener('input', function () { applyHsl(key, +this.value) })
+  $(numId).addEventListener('input', function () { applyHsl(key, clamp(parseInt(this.value || '0', 10) || 0, 0, (key === 'h' ? 360 : 100))) })
+}
+function applyHsl(key, val) {
+  var hsl = rgbToHsl(state.r, state.g, state.b)
+  if (key === 'h') hsl.h = val
+  if (key === 's') hsl.s = val
+  if (key === 'l') hsl.l = val
+  var rgb = hslToRgb(hsl.h, hsl.s, hsl.l)
+  setFromRgb(rgb.r, rgb.g, rgb.b)
+}
+bindHsl('hRange', 'hNum', 'h')
+bindHsl('sRange', 'sNum', 's')
+bindHsl('lRange', 'lNum', 'l')
+
+// ---- 复制（优先走宿主桥接，失败降级本地）----
+function copyText(text) {
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'plugin:copy', id: 'color' + Date.now(), text: text }, '*')
+      flash('已复制 ' + text)
+      return
+    }
+  } catch (e) {}
+  try { navigator.clipboard.writeText(text).then(function () { flash('已复制 ' + text) }) } catch (e) { alert('复制失败') }
+}
+function flash(msg) {
+  var el = $('nameLabel')
+  var old = el.textContent
+  el.textContent = msg
+  setTimeout(function () { render() }, 1200)
+}
+$('copyHex').addEventListener('click', function () { copyText(rgbToHex(state.r, state.g, state.b).toUpperCase()) })
+$('copyRgb').addEventListener('click', function () { copyText('rgb(' + state.r + ', ' + state.g + ', ' + state.b + ')') })
+$('copyHsl').addEventListener('click', function () {
+  var hsl = rgbToHsl(state.r, state.g, state.b)
+  copyText('hsl(' + hsl.h + ', ' + hsl.s + '%, ' + hsl.l + '%)')
+})
+
+// ---- 宿主传入初始值 ----
+window.addEventListener('message', function (e) {
+  if (e.data && e.data.type === 'plugin:init') {
+    var text = e.data.data && e.data.data.text
+    if (text) {
+      var rgb = hexToRgb(text.trim())
+      if (rgb) setFromRgb(rgb.r, rgb.g, rgb.b)
+    }
+  }
+})
+
+render()
+</script>
+</body>
+</html>

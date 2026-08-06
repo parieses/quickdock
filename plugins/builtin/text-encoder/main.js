@@ -50,6 +50,10 @@ function handleExecute(params) {
       result = api.crypto.sha256(text)
       label = 'SHA256 哈希'
       break
+    case 'sha1-hash':
+      result = api.crypto.sha1(text)
+      label = 'SHA1 哈希'
+      break
     default:
       return { error: '未知命令: ' + command }
   }

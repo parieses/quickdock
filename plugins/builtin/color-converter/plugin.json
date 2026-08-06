@@ -1,0 +1,46 @@
+{
+  "id": "com.quickdock.color-converter",
+  "name": "颜色转换",
+  "version": "0.2.0",
+  "description": "颜色格式互转（HEX / RGB / HSL），支持常见英文色名识别",
+  "author": "QuickDock",
+  "category": "开发者日常",
+  "icon": "icon.svg",
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 520,
+    "height": 620
+  },
+  "commands": [
+    {
+      "id": "color-convert",
+      "title": "颜色转换",
+      "keywords": [
+        "color",
+        "colour",
+        "hex",
+        "rgb",
+        "hsl",
+        "颜色",
+        "色值"
+      ],
+      "aliases": [
+        "颜色转换",
+        "色值转换",
+        "yszh"
+      ],
+      "prefix": "/color",
+      "acceptsInput": true,
+      "matchPattern": "^(#[0-9a-fA-F]{3,8}|rgb[a]?\\([^)]*\\)|hsl[a]?\\([^)]*\\)|[a-zA-Z]+)$"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ]
+}

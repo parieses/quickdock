@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ClipboardList, Search, X, RefreshCw, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight } from '@lucide/vue'
-import { ListClipboardEntries, PasteClipboardEntry, GetClipboardImageBase64, HideClipboardWindow, TogglePinClipboardEntry, CreateSnippet } from '../../bindings/quickdock/services/appservice'
+import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight } from '@lucide/vue'
+import { ListClipboardEntries, PasteClipboardEntry, GetClipboardImageBase64, HideClipboardWindow, TogglePinClipboardEntry, CreateSnippet, ExportClipboard, ClearClipboardHistory } from '../../bindings/quickdock/services/appservice'
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -223,6 +223,35 @@ async function handleTogglePin(entry: ClipboardEntry) {
   }
 }
 
+// ---- 导出 / 清空 ----
+async function exportClipboard() {
+  try {
+    const data = unwrap<any[]>(await ExportClipboard())
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `quickdock-clipboard-${new Date().toISOString().slice(0, 10)}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+    if (toast?.success) toast.success(t('clipboardExported'))
+  } catch (e) {
+    if (toast?.error) toast.error(t('exportFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+async function clearClipboard() {
+  const ok = await toast?.confirm?.(t('confirmClearClipboard'))
+  if (!ok) return
+  try {
+    unwrap(await ClearClipboardHistory())
+    await loadEntries()
+    if (toast?.success) toast.success(t('clipboardCleared'))
+  } catch (e) {
+    if (toast?.error) toast.error(getErrorMessage(e))
+  }
+}
+
 // ---- 自动分类 & 添加到片段 ----
 function autoCategorize(text: string): string {
   const type = detectType(text)
@@ -395,6 +424,12 @@ onUnmounted(() => {
       </div>
       <button class="icon-btn" @click="loadEntries" :title="t('refresh')">
         <RefreshCw :size="14" />
+      </button>
+      <button class="icon-btn" @click="exportClipboard" :title="t('exportClipboard')">
+        <Download :size="14" />
+      </button>
+      <button class="icon-btn" @click="clearClipboard" :title="t('clearClipboard')">
+        <Trash2 :size="14" />
       </button>
     </div>
 

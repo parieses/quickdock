@@ -205,6 +205,18 @@ func (d *Database) DeleteClipboardEntry(id string) error {
 	return err
 }
 
+// ClearClipboardHistory 清空剪贴板历史（保留固定的条目），返回删除条数
+func (d *Database) ClearClipboardHistory() (int64, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	res, err := d.conn.Exec("DELETE FROM clipboard_entries WHERE is_pinned = 0")
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
+}
+
 // IncrementClipboardCopyCount 增加指定条目的复制次数
 func (d *Database) IncrementClipboardCopyCount(id string) error {
 	d.mu.Lock()

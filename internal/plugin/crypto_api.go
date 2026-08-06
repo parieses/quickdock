@@ -3,6 +3,7 @@ package plugin
 import (
 	"bytes"
 	"crypto/md5"
+	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
@@ -20,6 +21,10 @@ func newCryptoAPI() map[string]interface{} {
 		},
 		"sha256": func(s string) string {
 			sum := sha256.Sum256([]byte(s))
+			return hex.EncodeToString(sum[:])
+		},
+		"sha1": func(s string) string {
+			sum := sha1.Sum([]byte(s))
 			return hex.EncodeToString(sum[:])
 		},
 		"base64Encode": func(s string) string {

@@ -103,6 +103,20 @@
       "matchPattern": "[\\s\\S]+"
     },
     {
+      "id": "sha1-hash",
+      "title": "SHA1 哈希",
+      "keywords": [
+        "sha1",
+        "hash"
+      ],
+      "aliases": [
+        "sha1加密"
+      ],
+      "prefix": "/sha1",
+      "acceptsInput": true,
+      "matchPattern": "[\\s\\S]+"
+    },
+    {
       "id": "convert-case",
       "title": "变量命名转换",
       "keywords": [

@@ -1,0 +1,40 @@
+{
+  "id": "com.quickdock.qrcode",
+  "name": "二维码工具",
+  "version": "0.2.0",
+  "description": "文本/URL 生成二维码，支持保存 PNG；从图片识别二维码内容",
+  "author": "QuickDock",
+  "category": "开发者日常",
+  "icon": "icon.svg",
+  "backend": {
+    "runtime": "none"
+  },
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 520,
+    "height": 620
+  },
+  "commands": [
+    {
+      "id": "open-qrcode",
+      "title": "二维码工具",
+      "keywords": [
+        "qrcode",
+        "qr",
+        "二维码",
+        "ewm"
+      ],
+      "aliases": [
+        "二维码生成",
+        "生成二维码",
+        "扫码"
+      ],
+      "prefix": "/qr"
+    }
+  ],
+  "capabilities": [
+    "command",
+    "frontend"
+  ]
+}

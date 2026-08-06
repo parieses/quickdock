@@ -157,6 +157,60 @@ func (a *AppService) DeleteClipboardEntry(id string) *ApiResult {
 	return Ok(nil)
 }
 
+// exportClipboardItem 导出单条剪贴板条目（文本内联、图片附 base64）
+type exportClipboardItem struct {
+	ID          string `json:"id"`
+	ContentType string `json:"contentType"`
+	Text        string `json:"text,omitempty"`
+	ImageBase64 string `json:"imageBase64,omitempty"`
+	SourceApp   string `json:"sourceApp,omitempty"`
+	IsPinned    int    `json:"isPinned"`
+	CopyCount   int    `json:"copyCount"`
+	CreatedAt   int64  `json:"createdAt"`
+}
+
+// ExportClipboard 导出全部剪贴板历史为 JSON 数组（图片条目含 base64，前端可下载为文件）
+func (a *AppService) ExportClipboard() *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	entries, err := a.DB.ListClipboardEntries(0)
+	if err != nil {
+		return Fail(err)
+	}
+	out := make([]exportClipboardItem, 0, len(entries))
+	for _, e := range entries {
+		item := exportClipboardItem{
+			ID:          e.ID,
+			ContentType: e.ContentType,
+			Text:        e.TextContent,
+			SourceApp:   e.SourceApp,
+			IsPinned:    e.IsPinned,
+			CopyCount:   e.CopyCount,
+			CreatedAt:   e.CreatedAt,
+		}
+		if e.ContentType == "image" && e.ImagePath != "" {
+			if data, rerr := os.ReadFile(e.ImagePath); rerr == nil {
+				item.ImageBase64 = base64.StdEncoding.EncodeToString(data)
+			}
+		}
+		out = append(out, item)
+	}
+	return Ok(out)
+}
+
+// ClearClipboardHistory 清空剪贴板历史（保留固定的条目）
+func (a *AppService) ClearClipboardHistory() *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	n, err := a.DB.ClearClipboardHistory()
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(map[string]interface{}{"deleted": n})
+}
+
 // PasteClipboardEntry 复制剪贴板条目并模拟 Ctrl+V 粘贴
 func (a *AppService) PasteClipboardEntry(id string) *ApiResult {
 	if r := a.dbOK(); r != nil {

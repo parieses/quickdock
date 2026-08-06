@@ -367,9 +367,8 @@ async function executeSelected() {
     }
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, inputText || '')
     try {
-      if (result.pluginHasFrontend) {
-        // 前端插件：打开 UI，参数经 plugin:init 注入，由插件自身自动执行具体功能
-        if (inputText) { try { await SetPendingPluginInit(inputText, result.pluginCommandId || '') } catch {} }
+      if (result.pluginHasFrontend && !inputText) {
+        // 前端插件且无输入：打开 UI 面板；带输入时仍走后端即时转换（保持现状）
         inlinePluginId.value = result.pluginId; inlinePluginLoading.value = true; inlinePluginError.value = ''
         try {
           const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId))
@@ -388,7 +387,7 @@ async function executeSelected() {
           const copyText = typeof pluginResult === 'object'
             ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText) : displayText
           try { await writeClipboard(copyText) } catch {}
-          pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label, pluginId: result.pluginId, pluginCommandId: result.pluginCommandId, pluginHasFrontend: false, input: inputText, acceptsInput: result.acceptsInput }
+          pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label, pluginId: result.pluginId, pluginCommandId: result.pluginCommandId, pluginHasFrontend: result.pluginHasFrontend, input: inputText, acceptsInput: result.acceptsInput }
           toast?.success?.(t('pluginResultCopied'))
         }
       }
@@ -542,7 +541,7 @@ onUnmounted(() => {
         ref="inlinePluginIframe"
         :srcdoc="bridgedInlinePluginHtml"
         class="palette-plugin-iframe"
-        sandbox="allow-scripts allow-modals"
+        sandbox="allow-scripts allow-modals allow-downloads"
         frameborder="0"
         @load="onInlinePluginLoad"
       />

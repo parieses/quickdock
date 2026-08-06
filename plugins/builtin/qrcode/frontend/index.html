@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>二维码工具</title>
+<link rel="stylesheet" href="../common.css">
+<style>
+.p-app{display:flex;flex-direction:column;height:100%}
+.p-toolbar{display:flex;align-items:center;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
+.p-tab{background:none;border:none;color:var(--text-muted);font-size:13px;padding:4px 10px;border-radius:6px;cursor:pointer}
+.p-tab.active{background:var(--bg-active);color:var(--accent)}
+.p-body{flex:1;display:flex;flex-direction:column;padding:12px;gap:10px;overflow-y:auto}
+.p-input{width:100%;box-sizing:border-box;padding:8px 10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;color:var(--text-primary);font-size:13px;font-family:var(--font-mono)}
+.p-input:focus{outline:none;border-color:var(--accent)}
+.p-actions{display:flex;gap:8px;align-items:center}
+.p-qr-box{display:flex;justify-content:center;padding:16px;background:var(--bg-secondary);border-radius:8px;min-height:200px;align-items:center}
+.p-qr-box svg{image-rendering:pixelated}
+.p-tip{font-size:12px;color:var(--text-muted);line-height:1.6}
+.p-result{margin:0;padding:10px;background:var(--bg-secondary);border:1px solid var(--border);border-radius:6px;font-size:13px;font-family:var(--font-mono);color:var(--text-primary);word-break:break-all;white-space:pre-wrap;min-height:40px}
+.p-file-row{display:flex;gap:8px;align-items:center}
+.p-img-preview{max-width:180px;max-height:180px;border-radius:6px;border:1px solid var(--border)}
+.p-btn:disabled{opacity:.5;cursor:not-allowed}
+</style>
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <button class="p-tab active" id="tabGen">生成</button>
+    <button class="p-tab" id="tabScan">识别</button>
+    <span class="p-spacer"></span>
+  </div>
+
+  <div class="p-body" id="genPane">
+    <input type="text" class="p-input" id="qrText" placeholder="输入文本或 URL，如 https://github.com/parieses/quickdock" spellcheck="false">
+    <div class="p-actions">
+      <button class="p-btn p-btn-primary" id="btnGen">生成二维码</button>
+      <button class="p-btn" id="btnSave" disabled>保存 PNG</button>
+      <span class="p-tip">支持 URL / 文本 / 联系人信息，最大 512 字符</span>
+    </div>
+    <div class="p-qr-box" id="qrBox"><span class="p-tip">输入内容后点击生成</span></div>
+  </div>
+
+  <div class="p-body" id="scanPane" style="display:none">
+    <div class="p-file-row">
+      <input type="file" id="qrFile" accept="image/*" class="p-btn" style="padding:6px 10px">
+      <span class="p-tip">选择包含二维码的图片（PNG/JPG/WebP）</span>
+    </div>
+    <div class="p-actions">
+      <img id="scanPreview" class="p-img-preview" style="display:none" alt="">
+      <div id="scanLoading" style="display:none" class="p-tip">识别中…</div>
+    </div>
+    <pre class="p-result" id="scanResult">识别结果将显示在这里</pre>
+    <div class="p-actions">
+      <button class="p-btn" id="btnCopy" disabled>复制结果</button>
+      <button class="p-btn" id="btnOpenResult" disabled>打开链接</button>
+    </div>
+  </div>
+</div>
+
+<script src="qrcode.min.js"></script>
+<script src="jsqr.js"></script>
+<script>
+var $ = function (id) { return document.getElementById(id) }
+var qrInstance = null
+
+// ---- 生成 ----
+function genQR() {
+  var text = $('qrText').value.trim()
+  if (!text) { alert('请输入要生成二维码的内容'); return }
+  if (text.length > 512) { alert('内容过长（最多 512 字符）'); return }
+  var box = $('qrBox')
+  box.innerHTML = ''
+  try {
+    qrInstance = new QRCode(box, { text: text, width: 200, height: 200, correctLevel: QRCode.CorrectLevel.M })
+    $('btnSave').disabled = false
+  } catch (e) { box.innerHTML = '<span class="p-tip">生成失败: ' + e.message + '</span>' }
+}
+
+function savePNG() {
+  var svg = $('qrBox').querySelector('svg')
+  if (!svg) return
+  var xml = new XMLSerializer().serializeToString(svg)
+  var svg64 = 'data:image/svg+xml;base64,' + btoa(unescape(encodeURIComponent(xml)))
+  var img = new Image()
+  img.onload = function () {
+    var canvas = document.createElement('canvas')
+    canvas.width = img.width * 3; canvas.height = img.height * 3
+    var ctx = canvas.getContext('2d')
+    ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, canvas.width, canvas.height)
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height)
+    var a = document.createElement('a')
+    a.download = 'qrcode.png'
+    a.href = canvas.toDataURL('image/png')
+    a.click()
+  }
+  img.src = svg64
+}
+
+// ---- 识别 ----
+function scanQR(file) {
+  if (!file) return
+  var reader = new FileReader()
+  reader.onload = function (e) {
+    var img = $('scanPreview')
+    img.src = e.target.result
+    img.style.display = 'block'
+    $('scanLoading').style.display = 'block'
+    $('scanResult').textContent = '识别中…'
+    $('btnCopy').disabled = true; $('btnOpenResult').disabled = true
+    img.onload = function () {
+      try {
+        var canvas = document.createElement('canvas')
+        canvas.width = img.naturalWidth; canvas.height = img.naturalHeight
+        var ctx = canvas.getContext('2d')
+        ctx.drawImage(img, 0, 0)
+        var data = ctx.getImageData(0, 0, canvas.width, canvas.height)
+        var code = jsQR(data.data, data.width, data.height)
+        if (code && code.data) {
+          $('scanResult').textContent = code.data
+          $('btnCopy').disabled = false
+          if (/^https?:\/\//i.test(code.data)) $('btnOpenResult').disabled = false
+        } else {
+          $('scanResult').textContent = '未识别到二维码，请换一张清晰的图片试试'
+        }
+      } catch (err) {
+        $('scanResult').textContent = '识别失败: ' + err.message
+      } finally {
+        $('scanLoading').style.display = 'none'
+      }
+    }
+  }
+  reader.readAsDataURL(file)
+}
+
+function copyResult() {
+  var text = $('scanResult').textContent
+  if (!text || text.indexOf('未识别') >= 0 || text.indexOf('识别中') >= 0) return
+  // 优先走宿主桥接（规避 WebView2 剪贴板限制），失败则本地降级
+  try {
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: 'plugin:copy', id: 'qr' + Date.now(), text: text }, '*')
+      alert('已复制到剪贴板')
+      return
+    }
+  } catch (e) {}
+  try { navigator.clipboard.writeText(text).then(function () { alert('已复制到剪贴板') }) } catch (e) { alert('复制失败') }
+}
+
+function openResult() {
+  var text = $('scanResult').textContent
+  if (!/^https?:\/\//i.test(text)) return
+  window.parent.postMessage({ type: 'plugin:execute', id: 'qr-open', command: 'open-url', input: { text: text } }, '*')
+}
+
+// ---- 事件 ----
+$('tabGen').addEventListener('click', function () { $('tabGen').classList.add('active'); $('tabScan').classList.remove('active'); $('genPane').style.display = 'flex'; $('scanPane').style.display = 'none' })
+$('tabScan').addEventListener('click', function () { $('tabScan').classList.add('active'); $('tabGen').classList.remove('active'); $('genPane').style.display = 'none'; $('scanPane').style.display = 'flex' })
+$('btnGen').addEventListener('click', genQR)
+$('btnSave').addEventListener('click', savePNG)
+$('qrText').addEventListener('keydown', function (e) { if (e.key === 'Enter') genQR() })
+$('qrFile').addEventListener('change', function () { scanQR(this.files && this.files[0]) })
+$('btnCopy').addEventListener('click', copyResult)
+$('btnOpenResult').addEventListener('click', openResult)
+
+window.addEventListener('message', function (e) {
+  if (e.data && e.data.type === 'plugin:init') {
+    var text = e.data.data && e.data.data.text
+    if (text) { $('qrText').value = text; genQR() }
+  }
+})
+</script>
+</body>
+</html>

@@ -156,7 +156,7 @@ function closeWindow() {
         v-else
         :src="iframeSrc"
         class="pw-iframe"
-        sandbox="allow-scripts allow-modals"
+        sandbox="allow-scripts allow-modals allow-downloads"
         frameborder="0"
         @load="onIframeLoad"
       />

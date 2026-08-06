@@ -426,19 +426,20 @@ type PluginHotkeyRegistry struct {
 
 ---
 
-## 十一、内置插件（15 个）
+## 十一、内置插件（17 个）
 
 ### Goja 插件（有后端逻辑）
 
 | 插件 ID | 功能 | 前端 |
 |---|---|---|
 | calcsheet | 计算表格 | index.html + app.js |
+| color-converter | 颜色格式互转（HEX/RGB/HSL + 色名识别） | — |
 | compare | 文本差异对比 | index.html + app.js |
 | cron-explainer | Cron 表达式解析 | index.html + app.js |
 | formatter | 代码格式化 | index.html + app.js |
 | json-toolbox | JSON 处理（格式化/校验/转换） | index.html + app.js |
 | regex-extractor | 正则提取 | index.html + app.js |
-| text-encoder | 文本编码转换 | index.html + app.js |
+| text-encoder | 文本编码/哈希（Base64/URL/HTML/MD5/SHA1/SHA256） | index.html + app.js |
 | time-converter | 时间戳/时区转换 | index.html + app.js |
 
 ### Pure Frontend 插件（runtime: none）
@@ -449,6 +450,7 @@ type PluginHotkeyRegistry struct {
 | http-status | HTTP 状态码查询 | — |
 | jwt-decoder | JWT 解码 | — |
 | markdown-preview | Markdown 预览 | — |
+| qrcode | 二维码生成/识别 | qrcode.min.js + jsqr.js |
 | hosts-manager | hosts 文件管理 | system-tools.exe |
 | port-scanner | 端口扫描 | system-tools.exe |
 | wifi-manager | WiFi 管理 | system-tools.exe |
@@ -504,7 +506,7 @@ type PluginHotkeyRegistry struct {
 | 前端管理页面 | ✅ 已完成 | PluginManagerPage.vue |
 | 前端命令面板集成 | ✅ 已完成 | 评分/内联/分离模式 |
 | 热键注册 | ✅ 已完成 | PluginHotkeyRegistry |
-| 15 个内置插件 | ✅ 已完成 | goja + pure frontend + native |
+| 17 个内置插件 | ✅ 已完成 | goja + pure frontend + native |
 | 健康检查 | ✅ 已完成 | 30s ticker + ping |
 | 孤儿进程清理 | ✅ 已完成 | PID 文件 + tasklist |
 | 执行日志追踪 | ✅ 已完成 | 500 条上限 + 自动裁剪 |
