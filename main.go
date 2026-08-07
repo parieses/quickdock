@@ -27,7 +27,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 	"github.com/wailsapp/wails/v3/pkg/updater"
-	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
+	"github.com/wailsapp/wails/v3/pkg/updater/providers/endpoint"
 )
 
 // ---- 主窗口尺寸/位置记忆 ----
@@ -339,35 +339,18 @@ func windowsSystemProxy(req *http.Request) (*url.URL, error) {
 	return u, nil
 }
 
-// initUpdater 初始化 Wails 自动更新器（使用 GitHub Releases + SHA256 校验和验证完整性）
+// initUpdater 初始化 Wails 自动更新器（endpoint provider + Ed25519 签名验证）
+//
+// 安全模型：
+//   CI 用 Ed25519 私钥（仓库 Secret UPDATER_PRIVATE_KEY）对裸二进制签名，
+//   产出 manifest.json（含 sha512 摘要 + ed25519ph 签名），随每个 release 发布。
+//   应用经 GitHub 稳定地址 releases/latest/download/manifest.json 拉取该 manifest，
+//   用编译期内嵌的公钥（updater.key.pub，见文件顶部 //go:embed）验签——
+//   fail closed：签名或摘要不符直接报错、不安装。
+//   这能防"发布账号 / CI 被攻破"级别的供应链攻击：攻击者即便替换了 release 资产，
+//   没有私钥也伪造不出有效签名，更新会被拒绝。（相较于此前的 SHA256 校验和，
+//   校验和只能防传输损坏 / 下错文件，挡不住发布者被冒充。）
 func initUpdater(app *application.App, version string) error {
-	// 自定义 AssetMatcher：先试默认规则（文件名含 platform+arch），
-	// 不匹配时补充检查 .exe 后缀，支持 quickdock-amd64-installer.exe 这类不含"windows"的命名。
-	assetMatcher := func(req updater.CheckRequest, assets []github.ReleaseAsset) int {
-		idx := github.DefaultAssetMatcher(req, assets)
-		if idx >= 0 {
-			return idx
-		}
-		// 对于 windows/amd64，CI 同时发布两种产物：
-		//   - quickdock-amd64.exe            裸二进制（供更新器原地重命名覆盖）
-		//   - quickdock-amd64-installer.exe  NSIS 安装包（供首次手动安装）
-		// Wails updater 的语义是“把下载文件直接 rename 成应用 exe”，
-		// 若选到 NSIS 安装包，替换后 quickdock.exe 会变成安装器而非应用（致命损坏）。
-		// 因此这里只挑裸二进制：含 "amd64"、以 .exe 结尾，且不能是 installer/uninstall。
-		if req.Platform == "windows" && req.Arch == "amd64" {
-			for i, a := range assets {
-				name := strings.ToLower(a.Name)
-				if strings.HasSuffix(name, ".exe") &&
-					strings.Contains(name, "amd64") &&
-					!strings.Contains(name, "installer") &&
-					!strings.Contains(name, "uninstall") {
-					return i
-				}
-			}
-		}
-		return -1
-	}
-
 	// 自定义 HTTP 客户端：
 	// 1) 沿用 Go 默认传输层各项超时（连接/TLS 握手等）。
 	// 2) 代理优先级：环境变量 HTTP_PROXY/HTTPS_PROXY/NO_PROXY 优先；
@@ -379,19 +362,19 @@ func initUpdater(app *application.App, version string) error {
 	transport.Proxy = updaterProxyFunc
 	httpClient := &http.Client{Transport: transport, Timeout: 0}
 
-	gh, err := github.New(github.Config{
-		Repository:    "parieses/quickdock",
-		AssetMatcher:  assetMatcher,
-		ChecksumAsset: "checksums.txt", // 拉取同版本 release 的校验和 sidecar，下载后做 SHA256 比对（fail closed）
-		HTTPClient:    httpClient,
+	// endpoint provider：从签名 manifest 拉取更新信息并验签。
+	// 镜像重试由 NewMirrorUpdaterProvider 包装（国内网络加速），它透传 Check/Download。
+	ep, err := endpoint.New(endpoint.Config{
+		URL:        "https://github.com/parieses/quickdock/releases/latest/download/manifest.json",
+		HTTPClient: httpClient,
 	})
 	if err != nil {
-		return fmt.Errorf("创建 GitHub provider 失败: %w", err)
+		return fmt.Errorf("创建 endpoint provider 失败: %w", err)
 	}
 
 	// 用镜像 provider 包装：直连 GitHub 下载失败时自动尝试加速镜像（国内网络）。
-	// 安装包 Ed25519 签名验证不受影响（镜像只改传输 URL，无法篡改内容）。
-	provider := updater.Provider(services.NewMirrorUpdaterProvider(gh, httpClient))
+	// 签名验证不受影响（镜像只改传输 URL，无法篡改内容）。
+	provider := updater.Provider(services.NewMirrorUpdaterProvider(ep, httpClient))
 
 	return app.Updater.Init(updater.Config{
 		CurrentVersion: version,

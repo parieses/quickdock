@@ -113,45 +113,33 @@ jobs:
         run: |
           Copy-Item bin/quickdock.exe bin/quickdock-amd64.exe
 
-      - name: Generate updater manifest
+      - name: Generate signed updater manifest
+        # 真正的安全机制：用 Ed25519 私钥对裸二进制签名，产出 manifest.json
+        # （含 sha512 摘要 + ed25519ph 签名）。应用端 endpoint provider 拉取此文件，
+        # 用内嵌的公钥验签（fail closed：签名不符直接报错、不安装）。
+        # 这能防"发布账号 / CI 被攻破"级别的供应链攻击，比单纯 SHA256 校验和更强。
+        # 必须设置仓库 Secret UPDATER_PRIVATE_KEY（私钥 PEM 全文），否则不生成 manifest、更新链路失效。
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
-          if ("${{ secrets.UPDATER_PRIVATE_KEY }}" -ne "") {
-            Set-Content -Path updater.key -Value "${{ secrets.UPDATER_PRIVATE_KEY }}"
-            $tag = "$env:GITHUB_REF_NAME"
-            $urlPrefix = "https://github.com/parieses/quickdock/releases/download/$tag"
-            wails3 updater manifest `
-              -version "$env:VERSION" `
-              -key updater.key `
-              -url-prefix "$urlPrefix" `
-              -output manifest.json `
-              bin/quickdock-amd64.exe
-            Remove-Item updater.key -ErrorAction SilentlyContinue
-          } else {
-            echo "No UPDATER_PRIVATE_KEY secret set - skipping manifest signing"
+          if ("${{ secrets.UPDATER_PRIVATE_KEY }}" -eq "") {
+            echo "ERROR: UPDATER_PRIVATE_KEY secret 未设置，无法生成签名 manifest，更新链路将失效。" ; exit 1
           }
-
-      - name: Generate checksum sidecar
-        # 更新器经 github provider 的 ChecksumAsset 拉取此文件，对下载的裸二进制做
-        # SHA256 完整性校验（fail closed：摘要不符直接报错、不安装）。
-        # 注意：校验和只防"传输损坏 / 下错文件"，防不了"发布账号被攻破"——
-        # 真要防供应链攻击需另上 Ed25519 签名。
-        # 行内文件名必须精确等于 release 资产名（quickdock-amd64.exe），故在 bin/ 目录内生成。
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-        run: |
-          Push-Location bin
-          $raw = (Get-FileHash quickdock-amd64.exe -Algorithm SHA256).Hash.ToLower()
-          $inst = (Get-FileHash quickdock-amd64-installer.exe -Algorithm SHA256).Hash.ToLower()
-          "$raw  quickdock-amd64.exe" | Out-File -Encoding ascii -FilePath checksums.txt
-          "$inst  quickdock-amd64-installer.exe" | Add-Content -Encoding ascii -FilePath checksums.txt
-          Pop-Location
+          Set-Content -Path updater.key -Value "${{ secrets.UPDATER_PRIVATE_KEY }}"
+          $tag = "$env:GITHUB_REF_NAME"
+          $urlPrefix = "https://github.com/parieses/quickdock/releases/download/$tag"
+          wails3 updater manifest `
+            -version "$env:VERSION" `
+            -key updater.key `
+            -url-prefix "$urlPrefix" `
+            -output manifest.json `
+            bin/quickdock-amd64.exe
+          Remove-Item updater.key -ErrorAction SilentlyContinue
 
       - name: Upload Release Assets
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "bin/quickdock-amd64-installer.exe,bin/quickdock-amd64.exe,bin/checksums.txt,manifest.json"
+          artifacts: "bin/quickdock-amd64-installer.exe,bin/quickdock-amd64.exe,manifest.json"
           generateReleaseNotes: true
           allowUpdates: true
           omitBodyDuringUpdate: true

@@ -51,7 +51,12 @@ func (p *mirrorProvider) Check(ctx context.Context, req updater.CheckRequest) (*
 }
 
 func (p *mirrorProvider) Download(ctx context.Context, rel *updater.Release, dst io.Writer, onProgress func(written, total int64)) error {
-	urlStr, _ := rel.Metadata["github.asset.url"].(string)
+	// endpoint provider 把下载地址放在 endpoint.artifact.url；github provider 用 github.asset.url。
+	// 两边都要认，切换 provider 后镜像重试才不会失效。
+	urlStr, _ := rel.Metadata["endpoint.artifact.url"].(string)
+	if urlStr == "" {
+		urlStr, _ = rel.Metadata["github.asset.url"].(string)
+	}
 	if urlStr == "" {
 		return p.inner.Download(ctx, rel, dst, onProgress)
 	}
