@@ -12,6 +12,7 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +29,60 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/github"
 )
+
+// ---- 主窗口尺寸/位置记忆 ----
+// 启动时 DB 尚未初始化（ServiceStartup 在 app.Run 内执行），故用独立的 JSON 文件
+// 持久化窗口矩形，避免依赖数据库时序。启动时 loadWindowState 恢复，移动/缩放后防抖写回。
+type windowState struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+func windowStatePath() string {
+	return filepath.Join(EnsureConfigDir(), "window_state.json")
+}
+
+func loadWindowState() *windowState {
+	data, err := os.ReadFile(windowStatePath())
+	if err != nil {
+		return nil
+	}
+	var s windowState
+	if err := json.Unmarshal(data, &s); err != nil {
+		return nil
+	}
+	// 基本合理性校验：小于最小尺寸或越界视为无效
+	if s.Width < 800 || s.Height < 500 {
+		return nil
+	}
+	return &s
+}
+
+var (
+	windowStateMu        sync.Mutex
+	windowStateSaveTimer *time.Timer
+)
+
+// scheduleSaveWindowState 防抖保存窗口矩形。最大化/最小化态不记录，避免恢复成畸形窗口。
+func scheduleSaveWindowState(w *application.WebviewWindow) {
+	if w == nil || w.IsMaximised() || w.IsMinimised() {
+		return
+	}
+	windowStateMu.Lock()
+	if windowStateSaveTimer != nil {
+		windowStateSaveTimer.Stop()
+	}
+	windowStateSaveTimer = time.AfterFunc(400*time.Millisecond, func() {
+		b := w.Bounds()
+		s := windowState{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height}
+		if data, err := json.Marshal(s); err == nil {
+			_ = os.WriteFile(windowStatePath(), data, 0644)
+		}
+	})
+	windowStateMu.Unlock()
+}
 
 //go:embed all:frontend/dist
 var assets embed.FS
@@ -60,6 +115,19 @@ var (
 )
 
 func main() {
+	// 更新助手模式：必须放在**单实例检查之前**。
+	//
+	// Updater.Restart() 会以「同一个二进制 + WAILS_UPDATER_HELPER 环境变量」spawn 一个
+	// 子进程，由它等待父进程退出后替换 exe 并重新拉起应用。Wails 默认在 application.New()
+	// 内部调用 HandleHelperMode()，但那已经在 main() 的中后段——helper 子进程会先撞上
+	// ensureSingleInstance()：此刻父进程尚未退出、仍持有命名互斥体，于是 helper 被判定为
+	// 重复实例直接 return，application.New() 永远执行不到，二进制替换和重启自然都不会发生
+	// （现象：点「重启」后毫无反应，安装包滞留在 %TEMP%\wails-update-*\ 且没有 helper 日志；
+	// 更糟的是 ensureSingleInstance 退出前还会 SetForegroundWindow，看起来像"窗口闪了一下"）。
+	//
+	// 这里提前调用：非 helper 模式立即返回，helper 模式完成替换后 os.Exit，永不返回。
+	updater.HandleHelperMode()
+
 	// 单实例检查：若已有实例运行，将其窗口提到前台并退出
 	if ensureSingleInstance() {
 		return
@@ -78,6 +146,9 @@ func main() {
 	appService.StartHotkeyListenerFn = StartHotkeyListener
 	appService.SuspendHotkeysFn = SuspendHotkeys
 	appService.ResumeHotkeysFn = ResumeHotkeys
+
+	// 真退出标记：与托盘"退出"走同一路径，让 WindowClosing 钩子放行
+	appService.PrepareQuitFn = func() { trayQuitRequested.Store(true) }
 
 	// 初始化插件管理器
 	pluginsDir := filepath.Join(platform.DefaultDataDir(), "plugins")
@@ -140,8 +211,9 @@ func main() {
 	// 创建插件窗口管理器（需要 app 引用，只能放在 New 之后）
 	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app)
 
-	// 创建主窗口
-	mainWindow := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	// 创建主窗口（启动时恢复上次记住的尺寸/位置）
+	mainRect := loadWindowState()
+	mainOpts := application.WebviewWindowOptions{
 		Title:            appTitle,
 		Width:            appWidth,
 		Height:           appHeight,
@@ -150,11 +222,27 @@ func main() {
 		Frameless:        false,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/",
-	})
+	}
+	if mainRect != nil {
+		mainOpts.Width = mainRect.Width
+		mainOpts.Height = mainRect.Height
+		mainOpts.X = mainRect.X
+		mainOpts.Y = mainRect.Y
+	}
+	mainWindow := app.Window.NewWithOptions(mainOpts)
 
 	// 保存主窗口引用供 tray.go 使用
 	SetMainWindow(mainWindow)
 	appService.MainWindow = mainWindow
+
+	// 窗口尺寸/位置记忆：移动或缩放结束后（防抖）把矩形写入配置文件，
+	// 下次启动 loadWindowState() 恢复。最大化/最小化态不记录，避免恢复成畸形窗口。
+	mainWindow.RegisterHook(events.Common.WindowDidResize, func(*application.WindowEvent) {
+		scheduleSaveWindowState(mainWindow)
+	})
+	mainWindow.RegisterHook(events.Common.WindowDidMove, func(*application.WindowEvent) {
+		scheduleSaveWindowState(mainWindow)
+	})
 
 	// 窗口关闭时隐藏到托盘（而不是退出）
 	mainWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
@@ -251,7 +339,7 @@ func windowsSystemProxy(req *http.Request) (*url.URL, error) {
 	return u, nil
 }
 
-// initUpdater 初始化 Wails 自动更新器（使用 GitHub Releases + Ed25519 签名验证）
+// initUpdater 初始化 Wails 自动更新器（使用 GitHub Releases + SHA256 校验和验证完整性）
 func initUpdater(app *application.App, version string) error {
 	// 自定义 AssetMatcher：先试默认规则（文件名含 platform+arch），
 	// 不匹配时补充检查 .exe 后缀，支持 quickdock-amd64-installer.exe 这类不含"windows"的命名。
@@ -260,11 +348,19 @@ func initUpdater(app *application.App, version string) error {
 		if idx >= 0 {
 			return idx
 		}
-		// 对于 windows/amd64，文件名含 "amd64" 且以 .exe 结尾即为匹配
+		// 对于 windows/amd64，CI 同时发布两种产物：
+		//   - quickdock-amd64.exe            裸二进制（供更新器原地重命名覆盖）
+		//   - quickdock-amd64-installer.exe  NSIS 安装包（供首次手动安装）
+		// Wails updater 的语义是“把下载文件直接 rename 成应用 exe”，
+		// 若选到 NSIS 安装包，替换后 quickdock.exe 会变成安装器而非应用（致命损坏）。
+		// 因此这里只挑裸二进制：含 "amd64"、以 .exe 结尾，且不能是 installer/uninstall。
 		if req.Platform == "windows" && req.Arch == "amd64" {
 			for i, a := range assets {
 				name := strings.ToLower(a.Name)
-				if strings.HasSuffix(name, ".exe") && strings.Contains(name, "amd64") {
+				if strings.HasSuffix(name, ".exe") &&
+					strings.Contains(name, "amd64") &&
+					!strings.Contains(name, "installer") &&
+					!strings.Contains(name, "uninstall") {
 					return i
 				}
 			}
@@ -286,6 +382,7 @@ func initUpdater(app *application.App, version string) error {
 	gh, err := github.New(github.Config{
 		Repository:    "parieses/quickdock",
 		AssetMatcher:  assetMatcher,
+		ChecksumAsset: "checksums.txt", // 拉取同版本 release 的校验和 sidecar，下载后做 SHA256 比对（fail closed）
 		HTTPClient:    httpClient,
 	})
 	if err != nil {

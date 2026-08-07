@@ -8,11 +8,12 @@ import (
 
 // Snippet 文本片段
 type Snippet struct {
-	ID        string `json:"id"`
-	Keyword   string `json:"keyword"`
-	Content   string `json:"content"`
-	Category  string `json:"category"`
-	CreatedAt string `json:"createdAt"`
+	ID           string `json:"id"`
+	Keyword      string `json:"keyword"`
+	Content      string `json:"content"`
+	Category     string `json:"category"`
+	CreatedAt    string `json:"createdAt"`
+	ExpandEnabled int   `json:"expandEnabled"`
 }
 
 // CreateSnippet 创建文本片段
@@ -41,7 +42,7 @@ func (d *Database) CreateSnippet(keyword, content, category string) (*Snippet, e
 func (d *Database) ListSnippets() ([]Snippet, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rows, err := d.conn.Query("SELECT id, keyword, content, category, created_at FROM snippets ORDER BY keyword ASC")
+	rows, err := d.conn.Query("SELECT id, keyword, content, category, created_at, expand_enabled FROM snippets ORDER BY keyword ASC")
 	if err != nil {
 		return nil, err
 	}
@@ -49,7 +50,7 @@ func (d *Database) ListSnippets() ([]Snippet, error) {
 	var snippets []Snippet
 	for rows.Next() {
 		var s Snippet
-		if err := rows.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt, &s.ExpandEnabled); err != nil {
 			return nil, err
 		}
 		snippets = append(snippets, s)
@@ -61,9 +62,9 @@ func (d *Database) ListSnippets() ([]Snippet, error) {
 func (d *Database) GetSnippetByKeyword(keyword string) (*Snippet, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	row := d.conn.QueryRow("SELECT id, keyword, content, category, created_at FROM snippets WHERE keyword = ?", keyword)
+	row := d.conn.QueryRow("SELECT id, keyword, content, category, created_at, expand_enabled FROM snippets WHERE keyword = ?", keyword)
 	var s Snippet
-	if err := row.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt); err != nil {
+	if err := row.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt, &s.ExpandEnabled); err != nil {
 		return nil, err
 	}
 	return &s, nil
@@ -73,9 +74,9 @@ func (d *Database) GetSnippetByKeyword(keyword string) (*Snippet, error) {
 func (d *Database) GetOrCreateNoteSnippet(keyword string) (*Snippet, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	row := d.conn.QueryRow("SELECT id, keyword, content, category, created_at FROM snippets WHERE keyword = ?", keyword)
+	row := d.conn.QueryRow("SELECT id, keyword, content, category, created_at, expand_enabled FROM snippets WHERE keyword = ?", keyword)
 	var s Snippet
-	if err := row.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt); err == nil {
+	if err := row.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt, &s.ExpandEnabled); err == nil {
 		return &s, nil
 	}
 	s = Snippet{ID: newID(), Keyword: keyword, Content: "", Category: "note", CreatedAt: time.Now().Format(time.RFC3339)}
@@ -101,7 +102,7 @@ func (d *Database) SearchSnippets(query string) ([]Snippet, error) {
 	like := "%" + escaped + "%"
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rows, err := d.conn.Query("SELECT id, keyword, content, category, created_at FROM snippets WHERE keyword LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' ORDER BY keyword ASC", like, like)
+	rows, err := d.conn.Query("SELECT id, keyword, content, category, created_at, expand_enabled FROM snippets WHERE keyword LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' ORDER BY keyword ASC", like, like)
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +110,7 @@ func (d *Database) SearchSnippets(query string) ([]Snippet, error) {
 	var snippets []Snippet
 	for rows.Next() {
 		var s Snippet
-		if err := rows.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt); err != nil {
+		if err := rows.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt, &s.ExpandEnabled); err != nil {
 			return nil, err
 		}
 		snippets = append(snippets, s)
@@ -134,4 +135,32 @@ func (d *Database) UpdateSnippet(id, keyword, content, category string) error {
 		keyword, content, category, id,
 	)
 	return err
+}
+
+// SetSnippetExpand 设置片段的自动展开开关（Text Expansion）
+func (d *Database) SetSnippetExpand(id string, enabled int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec("UPDATE snippets SET expand_enabled = ? WHERE id = ?", enabled, id)
+	return err
+}
+
+// ListEnabledExpansionSnippets 返回所有开启自动展开的片段（keyword→content 映射用）
+func (d *Database) ListEnabledExpansionSnippets() ([]Snippet, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rows, err := d.conn.Query("SELECT id, keyword, content, category, created_at, expand_enabled FROM snippets WHERE expand_enabled = 1 ORDER BY keyword ASC")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var snippets []Snippet
+	for rows.Next() {
+		var s Snippet
+		if err := rows.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.CreatedAt, &s.ExpandEnabled); err != nil {
+			return nil, err
+		}
+		snippets = append(snippets, s)
+	}
+	return snippets, rows.Err()
 }

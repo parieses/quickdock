@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Clipboard, Plus, Pencil, Trash2, Search, X, CornerDownLeft, CheckSquare, Square, ChevronLeft, ChevronRight } from '@lucide/vue'
-import { ListSnippets, CreateSnippet, UpdateSnippet, DeleteSnippet, PasteSnippet } from '../../bindings/quickdock/services/appservice'
+import { ListSnippets, CreateSnippet, UpdateSnippet, DeleteSnippet, PasteSnippet, SetSnippetExpand } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import CreateDialog from './CreateDialog.vue'
@@ -62,7 +62,7 @@ function goToPage(p: number) {
 const showCreateDialog = ref(false)
 const createFields = computed(() => [
   { key: 'keyword', label: t('snippetKeyword'), type: 'text' as const, placeholder: t('snippetKeywordPlaceholder') },
-  { key: 'content', label: t('snippetContent'), type: 'textarea' as const, placeholder: t('snippetContentPlaceholder') },
+  { key: 'content', label: t('snippetContent'), type: 'textarea' as const, placeholder: t('snippetContentPlaceholder'), hint: t('snippetContentHint') },
   { key: 'category', label: t('snippetCategory'), type: 'select' as const, options: [
     { label: t('snippetCatOther'), value: '' },
     { label: t('snippetCatEmail'), value: '邮箱' },
@@ -123,6 +123,17 @@ async function handleDelete() {
     await loadSnippets()
   } catch (e) {
     toast.error(t('deleteFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+// ---- 自动展开开关 ----
+async function toggleExpand(s: Snippet) {
+  const newVal = s.expandEnabled ? 0 : 1
+  try {
+    await SetSnippetExpand(s.id, newVal === 1)
+    s.expandEnabled = newVal
+  } catch (e) {
+    toast.error(t('updateFailed') + ': ' + getErrorMessage(e))
   }
 }
 
@@ -253,6 +264,7 @@ onMounted(loadSnippets)
         </span>
         <span class="col-kw">{{ t('snippetKeyword') }}</span>
         <span class="col-content">{{ t('snippetContent') }}</span>
+        <span class="col-expand">{{ t('snippetAutoExpand') }}</span>
         <span class="col-cat">{{ t('snippetCategory') }}</span>
         <span class="col-date">{{ t('snippetCreatedAt') }}</span>
         <span class="col-actions">{{ t('open') }}</span>
@@ -272,6 +284,16 @@ onMounted(loadSnippets)
         </span>
         <span class="col-kw kw-text">{{ s.keyword }}</span>
         <span class="col-content content-preview" :title="s.content">{{ contentPreview(s.content) }}</span>
+        <span class="col-expand">
+          <button
+            class="expand-switch"
+            :class="{ active: s.expandEnabled === 1 }"
+            :title="s.expandEnabled === 1 ? t('expandEnabled') : t('expandDisabled')"
+            @click="toggleExpand(s)"
+          >
+            <span class="expand-knob" />
+          </button>
+        </span>
         <span class="col-cat">
           <span class="cat-badge" v-if="s.category">{{ s.category }}</span>
           <span v-else class="cat-none">-</span>
@@ -473,6 +495,35 @@ onMounted(loadSnippets)
 .col-cat { width: 80px; flex-shrink: 0; text-align: center; }
 .col-date { width: 100px; flex-shrink: 0; text-align: center; }
 .col-actions { width: 100px; flex-shrink: 0; text-align: right; }
+.col-expand { width: 70px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+
+/* 自动展开开关 */
+.expand-switch {
+  width: 30px;
+  height: 16px;
+  border-radius: 8px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  position: relative;
+  cursor: pointer;
+  padding: 0;
+  transition: background var(--transition-fast), border-color var(--transition-fast);
+}
+.expand-switch.active {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+}
+.expand-knob {
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform var(--transition-fast);
+}
+.expand-switch.active .expand-knob { transform: translateX(14px); }
 
 .kw-text {
   font-size: 13px;

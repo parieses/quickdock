@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -106,12 +107,29 @@ func (a *AppService) DownloadUpdate() *UpdateStatus {
 	}
 }
 
-// RestartApp 重启应用以完成更新
+// RestartApp 重启应用以完成更新。
+//
+// Updater.Restart 会先 spawn 一个 helper 子进程（同一个二进制 + WAILS_UPDATER_HELPER 环境变量），
+// 再调用 host.Quit()；helper 等本进程退出后替换 exe 并重新拉起。因此这里必须先打上"真退出"标记，
+// 否则主窗口的 WindowClosing 钩子会 event.Cancel() 掉关闭动作、把窗口藏进托盘，
+// 进程不干净退出，helper 只能干等到超时。
 func (a *AppService) RestartApp() error {
 	if a.app == nil || a.app.Updater == nil {
 		return fmt.Errorf("更新器未初始化")
 	}
-	return a.app.Updater.Restart(context.Background())
+
+	// 让 WindowClosing 钩子放行（与托盘"退出"同一路径）
+	if a.PrepareQuitFn != nil {
+		a.PrepareQuitFn()
+	}
+
+	if err := a.app.Updater.Restart(context.Background()); err != nil {
+		if errors.Is(err, updater.ErrNotReady) {
+			return fmt.Errorf("更新尚未就绪：请先完成下载，再点击重启")
+		}
+		return fmt.Errorf("重启失败: %w", err)
+	}
+	return nil
 }
 
 // GetUpdateState 获取当前更新器状态

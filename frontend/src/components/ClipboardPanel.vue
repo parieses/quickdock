@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight } from '@lucide/vue'
-import { ListClipboardEntries, PasteClipboardEntry, GetClipboardImageBase64, HideClipboardWindow, TogglePinClipboardEntry, CreateSnippet, ExportClipboard, ClearClipboardHistory } from '../../bindings/quickdock/services/appservice'
+import { ListClipboardEntries, PasteClipboardEntry, GetClipboardImageBase64, HideClipboardWindow, TogglePinClipboardEntry, CreateSnippet, ExportClipboard, ClearClipboardHistory, DeleteClipboardEntry } from '../../bindings/quickdock/services/appservice'
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -220,6 +220,19 @@ async function handleTogglePin(entry: ClipboardEntry) {
     if (toast?.error) {
       toast.error(getErrorMessage(e))
     }
+  }
+}
+
+async function handleDelete(entry: ClipboardEntry) {
+  const ok = await toast?.confirm?.(t('confirmDeleteClipboard'))
+  if (!ok) return
+  try {
+    unwrap(await DeleteClipboardEntry(entry.id))
+    const idx = entries.value.findIndex(e => e.id === entry.id)
+    if (idx >= 0) entries.value.splice(idx, 1)
+    if (toast?.success) toast.success(t('clipboardEntryDeleted'))
+  } catch (e) {
+    if (toast?.error) toast.error(getErrorMessage(e))
   }
 }
 
@@ -516,6 +529,13 @@ onUnmounted(() => {
         >
           <Star :size="13" />
         </button>
+        <button
+          class="delete-btn"
+          :title="t('delete')"
+          @click.stop="handleDelete(entry)"
+        >
+          <Trash2 :size="13" />
+        </button>
       </div>
     </div>
 
@@ -686,6 +706,18 @@ onUnmounted(() => {
 .clipboard-item:hover .snippet-btn,
 .clipboard-item.selected .snippet-btn { opacity: 0.4; }
 .snippet-btn:hover { opacity: 0.8 !important; color: var(--color-accent); }
+
+.delete-btn {
+  flex-shrink: 0; margin-top: 3px;
+  background: none; border: none; cursor: pointer;
+  padding: 2px; border-radius: 4px;
+  color: var(--color-text-disabled); opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.clipboard-item:hover .delete-btn,
+.clipboard-item.selected .delete-btn { opacity: 0.4; }
+.delete-btn:hover { opacity: 0.8 !important; color: var(--color-danger, #e5484d); }
 
 .item-content { flex: 1; min-width: 0; }
 .item-text {

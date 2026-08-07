@@ -13,6 +13,7 @@ export interface CreateField {
   options?: { label: string; value: string }[]
   placeholder?: string
   default?: string
+  hint?: string
 }
 
 const props = defineProps<{
@@ -55,7 +56,9 @@ function resetValues() {
 }
 
 // 弹窗打开时重置表单（immediate 处理 v-if + visible=true 首次挂载的情况）
-watch(() => [props.visible, props.editValues], ([v]) => {
+// 只监听 visible 的 false→true 边沿：父组件任意重渲染（toast/加载/locale）
+// 都会让 editValues 产生新引用，若把它放进依赖会误触发 resetValues 清空输入。
+watch(() => props.visible, (v) => {
   if (v) resetValues()
 }, { immediate: true })
 
@@ -121,6 +124,7 @@ function onKeydown(e: KeyboardEvent) {
                   {{ o.label }}
                 </option>
               </select>
+              <p v-if="f.hint" class="field-hint">{{ f.hint }}</p>
             </label>
             <p v-if="validationMessage" class="field-error">{{ validationMessage }}</p>
           </div>
@@ -179,6 +183,10 @@ function onKeydown(e: KeyboardEvent) {
 .field-textarea { resize: vertical; min-height: 220px; font-family: var(--font-mono, monospace); line-height: 1.5; }
 .field-error {
   font-size: 12px; color: var(--color-danger); margin: -8px 0 0; padding: 0;
+}
+.field-hint {
+  font-size: 11px; color: var(--color-text-muted); margin: 2px 0 0; padding: 0;
+  line-height: 1.5;
 }
 .dialog-footer {
   display: flex; justify-content: flex-end; gap: 10px;

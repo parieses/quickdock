@@ -5,9 +5,10 @@ import {
   Search, Hash, Command, ArrowRight, Lock, Power, Moon, Trash2, RotateCcw,
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
-  Check, Bookmark
+  Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
+  Copy, FolderSearch, Play, ClipboardPaste, Save
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem, CopyText, GetPluginIcon } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -39,6 +40,7 @@ const {
 // ---- 关闭面板 ----
 function closePalette() {
   closeInlinePlugin()
+  actionMenuOpen.value = false
   query.value = ''
   selectedIndex.value = 0
   selectedSet.value = new Set()
@@ -162,6 +164,20 @@ const systemCommands = computed<SystemCmd[]>(() => [
     action: async () => { await ExecuteSystemCommand('sleep'); closePalette() } },
   { id: 'emptytrash', label: t('cmdEmptyTrash'), desc: t('cmdEmptyTrashDesc'), keywords: ['trash', '回收站', '清空', '垃圾', 'hui shou zhan', 'qing kong', '系统'], icon: Trash2,
     action: async () => { await ExecuteSystemCommand('emptytrash'); closePalette() } },
+  { id: 'window-left', label: t('cmdWindowLeft'), desc: t('cmdWindowLeftDesc'), keywords: ['window', 'left', '左半屏', '左半', '窗口', 'ban ping', 'zuo ban ping', '系统'], icon: PanelLeft,
+    action: async () => { await ExecuteSystemCommand('window-left'); closePalette() } },
+  { id: 'window-right', label: t('cmdWindowRight'), desc: t('cmdWindowRightDesc'), keywords: ['window', 'right', '右半屏', '右半', '窗口', 'ban ping', 'you ban ping', '系统'], icon: PanelRight,
+    action: async () => { await ExecuteSystemCommand('window-right'); closePalette() } },
+  { id: 'volume-up', label: t('cmdVolumeUp'), desc: t('cmdVolumeUpDesc'), keywords: ['volume', 'up', '音量', '增大', '声音', 'yin liang', 'sheng yin', '系统'], icon: Volume2,
+    action: async () => { await ExecuteSystemCommand('volume-up'); closePalette() } },
+  { id: 'volume-down', label: t('cmdVolumeDown'), desc: t('cmdVolumeDownDesc'), keywords: ['volume', 'down', '音量', '减小', '声音', 'yin liang', 'sheng yin', '系统'], icon: Volume1,
+    action: async () => { await ExecuteSystemCommand('volume-down'); closePalette() } },
+  { id: 'volume-mute', label: t('cmdVolumeMute'), desc: t('cmdVolumeMuteDesc'), keywords: ['volume', 'mute', '音量', '静音', '声音', 'jing yin', '系统'], icon: VolumeX,
+    action: async () => { await ExecuteSystemCommand('volume-mute'); closePalette() } },
+  { id: 'wifi-toggle', label: t('cmdWifiToggle'), desc: t('cmdWifiToggleDesc'), keywords: ['wifi', '无线', '网络', '开关', 'wang luo', 'kai guan', '系统'], icon: Wifi,
+    action: async () => { await ExecuteSystemCommand('wifi-toggle'); closePalette() } },
+  { id: 'kill-foreground', label: t('cmdKillForeground'), desc: t('cmdKillForegroundDesc'), keywords: ['kill', 'process', '结束', '进程', '终止', 'jin cheng', 'zhong zhi', '系统'], icon: XCircle,
+    action: async () => { await ExecuteSystemCommand('kill-foreground'); closePalette() } },
 ])
 
 // ---- 拼音匹配 ----
@@ -248,6 +264,22 @@ function scrollToSelected() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 二级动作菜单打开时独占键盘，避免与结果列表导航冲突
+  if (actionMenuOpen.value) {
+    const acts = contextActions.value
+    const n = Math.max(acts.length, 1)
+    switch (e.key) {
+      case 'ArrowDown': e.preventDefault(); actionMenuIndex.value = (actionMenuIndex.value + 1) % n; break
+      case 'ArrowUp': e.preventDefault(); actionMenuIndex.value = (actionMenuIndex.value - 1 + n) % n; break
+      case 'Enter': e.preventDefault(); { const a = acts[actionMenuIndex.value]; if (a) runAction(a) } break
+      case 'Escape': e.preventDefault(); closeActionMenu(); break
+      case 'k': case 'K': if (e.ctrlKey || e.metaKey) { e.preventDefault(); closeActionMenu() } break
+      default:
+        // 菜单期间输入框仍持有焦点：吞掉可打印字符，避免误改搜索词
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) e.preventDefault()
+    }
+    return
+  }
   if (inlineQuicklink.value) {
     if (e.key === 'Enter') { e.preventDefault(); commitInlineQuicklink() }
     else if (e.key === 'Escape') { e.preventDefault(); cancelInlineQuicklink() }
@@ -268,6 +300,9 @@ function onKeydown(e: KeyboardEvent) {
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault(); const s = new Set<number>(); displayFlat.value.forEach((_, i) => s.add(i)); selectedSet.value = s
       }
+      break
+    case 'k': case 'K':
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); openActionMenu() }
       break
     case 'Enter': e.preventDefault(); executeSelected(); break
     case 'Escape':
@@ -435,6 +470,140 @@ function getFlatIndex(groupIdx: number, itemIdx: number): number {
   return flatIdx + itemIdx
 }
 
+// ---- Ctrl+K 二级动作菜单 ----
+interface PaletteAction { id: string; label: string; icon: any; danger?: boolean; run: () => void | Promise<void> }
+
+const actionMenuOpen = ref(false)
+const actionMenuIndex = ref(0)
+const actionTarget = computed<SearchResult | undefined>(() => displayFlat.value[selectedIndex.value])
+
+// 结果的"主值"：文件/应用路径、链接、片段内容等，用于复制 / 资源管理器定位
+function targetValue(r: SearchResult): string {
+  switch (r.type) {
+    case 'item': case 'quicklink': case 'quicklink-inline': return r.item?.value || ''
+    case 'app': return r.appPath || ''
+    case 'url': case 'clipboard-action': return r.url || ''
+    case 'snippet': return r.snippet?.content || ''
+    case 'calculator': return r.calcResult || ''
+    case 'plugin': return r.label || ''
+    default: return ''
+  }
+}
+
+// 是否为可在资源管理器中定位的本地路径（排除 http/自定义协议与纯命令行）
+function isLocalPath(v: string): boolean {
+  if (!v) return false
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return false
+  return /^[a-zA-Z]:[\\/]/.test(v) || v.startsWith('\\\\')
+}
+
+const contextActions = computed<PaletteAction[]>(() => {
+  const r = actionTarget.value
+  if (!r) return []
+  const acts: PaletteAction[] = []
+  const value = targetValue(r)
+
+  // 主操作（等价于直接回车）
+  const primaryLabel =
+    r.type === 'app' ? t('actLaunch')
+      : r.type === 'snippet' ? t('actPasteSnippet')
+        : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
+          : r.type === 'calculator' ? t('actCopyResult')
+            : t('actOpen')
+  const primaryIcon = r.type === 'snippet' ? ClipboardPaste : r.type === 'calculator' ? Copy : Play
+  acts.push({ id: 'primary', label: primaryLabel, icon: primaryIcon, run: () => executeSelected() })
+
+  if (r.label) acts.push({ id: 'copy-name', label: t('actCopyName'), icon: Copy, run: () => copyAndClose(r.label) })
+
+  if (value && value !== r.label) {
+    const label = isLocalPath(value) ? t('actCopyPath') : /^https?:/i.test(value) ? t('actCopyLink') : t('actCopyValue')
+    acts.push({ id: 'copy-value', label, icon: Copy, run: () => copyAndClose(value) })
+  }
+
+  if (isLocalPath(value)) acts.push({ id: 'reveal', label: t('actReveal'), icon: FolderSearch, run: () => revealAndClose(value) })
+
+  if ((r.type === 'url' || r.type === 'clipboard-action') && r.url) {
+    acts.push({ id: 'save-url', label: t('cmdSaveAsItem'), icon: Save, run: () => saveUrlAndClose(r.url!) })
+  }
+
+  if ((r.type === 'item' || r.type === 'quicklink' || r.type === 'quicklink-inline') && r.item?.id) {
+    const id = r.item.id
+    acts.push({ id: 'delete-item', label: t('actDeleteItem'), icon: Trash2, danger: true, run: () => deleteItemAndRefocus(id) })
+  }
+  if (r.type === 'snippet' && r.snippet?.id) {
+    const id = r.snippet.id
+    acts.push({ id: 'delete-snippet', label: t('actDeleteSnippet'), icon: Trash2, danger: true, run: () => deleteSnippetAndRefocus(id) })
+  }
+  return acts
+})
+
+function openActionMenu() {
+  if (!actionTarget.value || contextActions.value.length === 0) return
+  actionMenuIndex.value = 0
+  actionMenuOpen.value = true
+}
+
+function closeActionMenu(refocus = true) {
+  if (!actionMenuOpen.value) return
+  actionMenuOpen.value = false
+  if (refocus) nextTick(focusInput)
+}
+
+async function runAction(a: PaletteAction) {
+  actionMenuOpen.value = false
+  await a.run()
+}
+
+async function copyAndClose(text: string) {
+  await writeClipboard(text)
+  toast?.success?.(t('copied'))
+  closePalette()
+}
+
+async function revealAndClose(path: string) {
+  try { unwrap(await RevealInExplorer(path)) }
+  catch (e) { toast?.error?.(getErrorMessage(e)); nextTick(focusInput); return }
+  closePalette()
+}
+
+async function saveUrlAndClose(url: string) {
+  try {
+    const item = unwrap<CollectionItem>(await SaveUrlAsItem(url))
+    recordUsage('item:' + (item?.id || ''), 'item', url, url)
+    toast?.success?.(t('savedAsItem'))
+  } catch (e) { toast?.error?.(getErrorMessage(e)) }
+  closePalette()
+}
+
+// 删除后不关闭面板：保持在结果列表里继续操作，仅同步本地缓存避免"幽灵条目"
+async function deleteItemAndRefocus(id: string) {
+  const ok = await toast?.confirm?.(t('confirmDeleteItem'))
+  if (!ok) { nextTick(focusInput); return }
+  try {
+    unwrap(await DeleteItem(id))
+    const idx = items.value.findIndex(i => i.id === id)
+    if (idx >= 0) items.value.splice(idx, 1)
+    recentCache.value = recentCache.value.filter(e => e.key !== 'item:' + id)
+    selectedIndex.value = 0
+    toast?.success?.(t('actItemDeleted'))
+  } catch (e) { toast?.error?.(getErrorMessage(e)) }
+  nextTick(focusInput)
+}
+
+async function deleteSnippetAndRefocus(id: string) {
+  const ok = await toast?.confirm?.(t('confirmDeleteSnippetOne'))
+  if (!ok) { nextTick(focusInput); return }
+  try {
+    unwrap(await DeleteSnippet(id))
+    const idx = snippets.value.findIndex(s => s.id === id)
+    if (idx >= 0) snippets.value.splice(idx, 1)
+    recentCache.value = recentCache.value.filter(e => e.key !== 'snippet:' + id)
+    selectedIndex.value = 0
+    toast?.success?.(t('actSnippetDeleted'))
+  } catch (e) { toast?.error?.(getErrorMessage(e)) }
+  nextTick(focusInput)
+}
+
 // ---- 加载数据 ----
 let itemsLoadGen = 0
 let lastPluginIndexLoad = 0
@@ -478,6 +647,7 @@ onMounted(async () => {
     loadPluginIndex()
     loadPaletteData().catch(e => console.warn('[CmdPalette] loadPaletteData:', e))
     query.value = ''; selectedIndex.value = 0; inlineQuicklink.value = null; inlineQuery.value = ''; pluginResultCache.value = null
+    actionMenuOpen.value = false
     if (Date.now() - lastClipboardUpdate < 3000) {
       GetLastCopiedText().then(raw => {
         const copied = unwrap<string>(raw)
@@ -507,6 +677,7 @@ onMounted(async () => {
 watch(query, (val) => {
   if (!val.trim()) { pluginResultCache.value = null; inlineQuicklink.value = null; inlineQuery.value = '' }
   if (val.trim() !== clipboardUrlSource.value) clipboardUrlSource.value = ''
+  actionMenuOpen.value = false
   selectedIndex.value = 0
   selectedSet.value = new Set()
   lastAnchor.value = -1
@@ -642,6 +813,28 @@ onUnmounted(() => {
       <p class="empty-desc">{{ t('cmdEmptyDesc') }}</p>
     </div>
 
+    <!-- Ctrl+K 二级动作菜单 -->
+    <div v-if="actionMenuOpen" class="action-backdrop" @click="closeActionMenu()">
+      <div class="action-menu" @click.stop>
+        <div class="action-menu-head">
+          <span class="action-menu-target">{{ actionTarget?.label }}</span>
+        </div>
+        <div class="action-menu-list">
+          <button
+            v-for="(a, i) in contextActions"
+            :key="a.id"
+            :class="['action-menu-item', { active: i === actionMenuIndex, danger: a.danger }]"
+            @click="runAction(a)"
+            @mousemove="actionMenuIndex = i"
+          >
+            <component :is="a.icon" :size="14" class="action-menu-icon" />
+            <span class="action-menu-label">{{ a.label }}</span>
+            <CornerDownLeft v-if="i === actionMenuIndex" :size="11" class="action-menu-enter" />
+          </button>
+        </div>
+      </div>
+    </div>
+
     <div class="palette-footer" v-if="!inlineQuicklink">
       <div class="footer-hint">
         <kbd><ChevronLeft :size="11" /></kbd>
@@ -654,6 +847,10 @@ onUnmounted(() => {
         <kbd><CornerDownLeft :size="11" /></kbd>
         <span>{{ t('cmdExecute') }}</span>
       </div>
+      <div class="footer-hint" v-if="contextActions.length > 0">
+        <kbd>Ctrl</kbd><kbd>K</kbd>
+        <span>{{ t('cmdActions') }}</span>
+      </div>
       <div class="footer-hint">
         <kbd>Esc</kbd>
         <span>{{ t('close') }}</span>
@@ -664,6 +861,7 @@ onUnmounted(() => {
 
 <style scoped>
 .palette-root {
+  position: relative;
   width: 100%;
   height: 100%;
   display: flex;
@@ -868,6 +1066,93 @@ onUnmounted(() => {
 .palette-results::-webkit-scrollbar-track { background: transparent; }
 .palette-results::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 3px; }
 .palette-results::-webkit-scrollbar-thumb:hover { background: var(--color-scrollbar-hover); }
+
+/* ---- Ctrl+K 二级动作菜单 ---- */
+.action-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 0 10px 42px;
+  background: rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(1.5px);
+}
+
+.action-menu {
+  width: 268px;
+  max-height: 74%;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  animation: action-menu-in 0.12s ease-out;
+}
+
+@keyframes action-menu-in {
+  from { opacity: 0; transform: translateY(6px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.action-menu-head {
+  flex-shrink: 0;
+  padding: 8px 12px 6px;
+  border-bottom: 1px solid var(--color-border);
+}
+.action-menu-target {
+  display: block;
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.action-menu-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.action-menu-list::-webkit-scrollbar { width: 5px; }
+.action-menu-list::-webkit-scrollbar-track { background: transparent; }
+.action-menu-list::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 3px; }
+
+.action-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 7px 9px;
+  border: none;
+  border-radius: var(--radius-md, 6px);
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px;
+  font-family: inherit;
+  font-weight: 450;
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--transition-fast), color var(--transition-fast);
+}
+.action-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.action-menu-item.active { background: var(--color-accent-bg); color: var(--color-text-primary); }
+.action-menu-item.danger { color: var(--color-danger); }
+.action-menu-item.danger.active,
+.action-menu-item.danger:hover { background: var(--color-danger-bg, rgba(239, 68, 68, 0.12)); color: var(--color-danger); }
+
+.action-menu-icon { flex-shrink: 0; opacity: 0.85; }
+.action-menu-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.action-menu-enter { flex-shrink: 0; opacity: 0.5; }
 
 .palette-plugin-mode { background: var(--color-bg-primary); }
 

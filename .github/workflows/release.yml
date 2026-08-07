@@ -103,6 +103,16 @@ jobs:
           & "C:\Program Files (x86)\NSIS\makensis.exe" '-DARG_WAILS_AMD64_BINARY=quickdock.exe' 'build\windows\nsis\project.nsi'
           Remove-Item build/windows/nsis/quickdock.exe
 
+      - name: Stage raw binary for in-place updater
+        # Wails updater 的语义是“把下载文件直接 rename 成应用 exe”。
+        # 若让它下载 NSIS 安装包（quickdock-amd64-installer.exe）并覆盖，
+        # 应用会被替换成一个安装器（致命损坏）。因此单独发布一份裸二进制，
+        # 供更新器原地重命名覆盖；安装包只用于首次手动安装。
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          Copy-Item bin/quickdock.exe bin/quickdock-amd64.exe
+
       - name: Generate updater manifest
         shell: pwsh
         working-directory: ${{ github.workspace }}
@@ -116,16 +126,32 @@ jobs:
               -key updater.key `
               -url-prefix "$urlPrefix" `
               -output manifest.json `
-              bin/quickdock-amd64-installer.exe
+              bin/quickdock-amd64.exe
             Remove-Item updater.key -ErrorAction SilentlyContinue
           } else {
             echo "No UPDATER_PRIVATE_KEY secret set - skipping manifest signing"
           }
 
+      - name: Generate checksum sidecar
+        # 更新器经 github provider 的 ChecksumAsset 拉取此文件，对下载的裸二进制做
+        # SHA256 完整性校验（fail closed：摘要不符直接报错、不安装）。
+        # 注意：校验和只防"传输损坏 / 下错文件"，防不了"发布账号被攻破"——
+        # 真要防供应链攻击需另上 Ed25519 签名。
+        # 行内文件名必须精确等于 release 资产名（quickdock-amd64.exe），故在 bin/ 目录内生成。
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          Push-Location bin
+          $raw = (Get-FileHash quickdock-amd64.exe -Algorithm SHA256).Hash.ToLower()
+          $inst = (Get-FileHash quickdock-amd64-installer.exe -Algorithm SHA256).Hash.ToLower()
+          "$raw  quickdock-amd64.exe" | Out-File -Encoding ascii -FilePath checksums.txt
+          "$inst  quickdock-amd64-installer.exe" | Add-Content -Encoding ascii -FilePath checksums.txt
+          Pop-Location
+
       - name: Upload Release Assets
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "bin/quickdock-amd64-installer.exe,manifest.json"
+          artifacts: "bin/quickdock-amd64-installer.exe,bin/quickdock-amd64.exe,bin/checksums.txt,manifest.json"
           generateReleaseNotes: true
           allowUpdates: true
           omitBodyDuringUpdate: true

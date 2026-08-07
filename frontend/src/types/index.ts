@@ -119,6 +119,7 @@ export interface Snippet {
   content: string
   category: string
   createdAt: string
+  expandEnabled: number
 }
 
 // 剪贴板条目

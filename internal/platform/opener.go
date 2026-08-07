@@ -2,7 +2,9 @@ package platform
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -43,6 +45,46 @@ func ShellOpen(target, workingDir string) error {
 		windows.StringToUTF16Ptr("open"),
 		windows.StringToUTF16Ptr(target),
 		nil, dirPtr, windows.SW_SHOWNORMAL)
+}
+
+// RevealInExplorer 在文件资源管理器中定位并选中目标路径。
+// 目录 → 直接打开该目录；文件 → explorer /select 高亮选中；路径不存在 → 退回打开父目录。
+func RevealInExplorer(target string) error {
+	target = strings.TrimSpace(strings.Trim(strings.TrimSpace(target), `"`))
+	if target == "" {
+		return fmt.Errorf("路径为空")
+	}
+	if err := rejectDangerous(target); err != nil {
+		return err
+	}
+	abs, err := filepath.Abs(target)
+	if err != nil {
+		abs = target
+	}
+	info, statErr := os.Stat(abs)
+	if statErr != nil {
+		parent := filepath.Dir(abs)
+		if _, e := os.Stat(parent); e != nil {
+			return fmt.Errorf("路径不存在: %s", target)
+		}
+		return ShellOpen(parent, "")
+	}
+	if info.IsDir() {
+		return ShellOpen(abs, "")
+	}
+	// explorer 对 /select 参数的解析不遵循标准 argv 规则，必须手写完整命令行，
+	// 否则含空格的路径会被 Go 的自动引用规则拆散。
+	cmd := exec.Command("explorer.exe")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		HideWindow: true,
+		CmdLine:    `explorer.exe /select,"` + abs + `"`,
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// explorer.exe 即使成功也常返回退出码 1，不能据此判定失败，直接释放句柄。
+	go func() { _ = cmd.Wait() }()
+	return nil
 }
 
 // RunCommand 执行一条命令行（按 argv 拆词，避免直接交给 shell 解释导致注入）。
