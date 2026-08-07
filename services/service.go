@@ -43,8 +43,8 @@ type AppService struct {
 	ResumeHotkeysFn       func()
 
 	// 标记"这是一次真退出"，令主窗口的 WindowClosing 钩子放行而不是取消关闭并隐藏到托盘。
-	// 更新重启（Updater.Restart → host.Quit）必须先调用，否则 cleanup() 里的 window.Close()
-	// 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净，helper 只能干等到超时。
+	// 更新时（RestartApp 拉起安装器 → app.Quit）必须先调用，否则 cleanup() 里的
+	// window.Close() 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净。
 	PrepareQuitFn func()
 
 	// 插件管理器

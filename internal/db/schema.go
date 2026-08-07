@@ -141,8 +141,7 @@ var baseTables = []string{
 		keyword TEXT NOT NULL UNIQUE,
 		content TEXT NOT NULL,
 		category TEXT DEFAULT '',
-		created_at TEXT NOT NULL,
-		expand_enabled INTEGER NOT NULL DEFAULT 0
+		created_at TEXT NOT NULL
 	)`,
 
 	`CREATE TABLE IF NOT EXISTS plugins (
@@ -387,8 +386,6 @@ func (d *Database) migrate() error {
 	{"todos", "status", "TEXT DEFAULT 'todo'"},
 	// ai_messages: reasoning_content（思考过程）
 	{"ai_messages", "reasoning_content", "TEXT DEFAULT ''"},
-	// snippets: 片段自动展开（Text Expansion）开关，默认关闭避免误触发
-	{"snippets", "expand_enabled", "INTEGER NOT NULL DEFAULT 0"},
 	// ai_conversations: token 用量统计
 	{"ai_conversations", "prompt_tokens", "INTEGER DEFAULT 0"},
 	{"ai_conversations", "completion_tokens", "INTEGER DEFAULT 0"},

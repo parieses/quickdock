@@ -72,10 +72,6 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	// 必须早于内置插件安装与启动，否则先跑起来的插件调用会撞上"未知的 host 方法"
 	a.RegisterPluginHostMethods()
 
-	// 片段自动展开（Text Expansion）：设置变量解析器（{date}{time}…）并加载已启用片段
-	platform.TextExpansionSetResolver(resolveSnippetVars)
-	a.reloadTextExpansion()
-
 	// 自动安装内置插件（main.go 注入的回调，需在 DB 就绪后执行）
 	if a.InstallBuiltinPluginsFn != nil {
 		a.InstallBuiltinPluginsFn(a.PluginMgr, a.DB)

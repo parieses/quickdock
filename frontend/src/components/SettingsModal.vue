@@ -18,7 +18,6 @@ import SettingsTools from './SettingsTools.vue'
 import { GetClipboardRetentionDays, SetClipboardRetentionDays, CleanupClipboardNow } from '../../bindings/quickdock/services/appservice'
 import { GetAutoStart, SetAutoStart } from '../../bindings/quickdock/services/appservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
-import { GetTextExpansionEnabled, SetTextExpansionEnabled } from '../../bindings/quickdock/services/appservice'
 import { SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services/appservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/appservice'
 import type { UpdateStatus, AIProfile } from '../../bindings/quickdock/services/models'
@@ -198,9 +197,6 @@ onMounted(async () => {
   try {
     autoStart.value = unwrap<boolean>(await GetAutoStart()) ?? false
   } catch (_) {}
-  try {
-    textExpansion.value = unwrap<boolean>(await GetTextExpansionEnabled()) ?? false
-  } catch (_) {}
 })
 
 // ---- 剪贴板设置 ----
@@ -208,8 +204,6 @@ const clipboardRetentionDays = ref(30)
 const cleanupResult = ref('')
 const autoStartResult = ref('')
 const autoStart = ref(false)
-const textExpansion = ref(false)
-const textExpansionResult = ref('')
 const cleanupTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 function clearCleanupTimer() {
@@ -263,17 +257,6 @@ async function toggleAutoStart() {
     autoStart.value = newVal
   } catch (e) {
     autoStartResult.value = t('saveFailed2') + ': ' + getErrorMessage(e)
-  }
-}
-
-async function toggleTextExpansion() {
-  const newVal = !textExpansion.value
-  try {
-    unwrap(await SetTextExpansionEnabled(newVal))
-    textExpansion.value = newVal
-    textExpansionResult.value = ''
-  } catch (e) {
-    textExpansionResult.value = t('saveFailed2') + ': ' + getErrorMessage(e)
   }
 }
 
@@ -448,20 +431,6 @@ async function toggleTextExpansion() {
                   <span class="toggle-label">{{ autoStart ? t('autoStartOn') : t('autoStartOff') }}</span>
                 </div>
                 <p v-if="autoStartResult" class="result-hint error">{{ autoStartResult }}</p>
-              </div>
-              <div class="setting-row">
-                <label class="setting-label">{{ t('textExpansion') }}</label>
-                <div class="setting-control">
-                  <button
-                    :class="['toggle-btn', { active: textExpansion }]"
-                    @click="toggleTextExpansion"
-                  >
-                    <span class="toggle-knob" />
-                  </button>
-                  <span class="toggle-label">{{ textExpansion ? t('textExpansionOn') : t('textExpansionOff') }}</span>
-                </div>
-                <p class="result-hint muted">{{ t('textExpansionDesc') }}</p>
-                <p v-if="textExpansionResult" class="result-hint error">{{ textExpansionResult }}</p>
               </div>
             </div>
           </div>

@@ -75,7 +75,6 @@ var validColumns = map[string]bool{
 	"category": true,
 	"keyword":        true,
 	"content":        true,
-	"expand_enabled": true,
 	"reasoning_content": true,
 	"image_hash": true,
 	"count":      true,

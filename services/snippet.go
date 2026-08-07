@@ -23,7 +23,6 @@ func (a *AppService) CreateSnippet(keyword, content, category string) *ApiResult
 		}
 		return Fail(err)
 	}
-	a.reloadTextExpansion()
 	return Ok(s)
 }
 
@@ -91,7 +90,6 @@ func (a *AppService) DeleteSnippet(id string) *ApiResult {
 	if err := a.DB.DeleteSnippet(id); err != nil {
 		return Fail(err)
 	}
-	a.reloadTextExpansion()
 	return Ok(nil)
 }
 
@@ -106,82 +104,9 @@ func (a *AppService) UpdateSnippet(id, keyword, content, category string) *ApiRe
 		}
 		return Fail(err)
 	}
-	a.reloadTextExpansion()
 	return Ok(nil)
 }
 
-const textExpansionSettingKey = "textexpand_enabled"
-
-// reloadTextExpansion 根据设置加载/启动/停止片段自动展开引擎。
-// 仅当 textexpand_enabled=1 时安装键盘钩子，并把已开启的片段写入映射。
-func (a *AppService) reloadTextExpansion() {
-	if a.DB == nil {
-		return
-	}
-	enabled := false
-	if v, err := a.DB.GetSetting(textExpansionSettingKey); err == nil && v == "1" {
-		enabled = true
-	}
-	if !enabled {
-		platform.TextExpansionStop()
-		return
-	}
-	snips, err := a.DB.ListEnabledExpansionSnippets()
-	if err != nil {
-		platform.TextExpansionStop()
-		return
-	}
-	m := make(map[string]string, len(snips))
-	for _, s := range snips {
-		m[s.Keyword] = s.Content
-	}
-	platform.TextExpansionSetSnippets(m)
-	platform.TextExpansionStart(m)
-}
-
-// GetTextExpansionEnabled 返回自动展开总开关状态。
-func (a *AppService) GetTextExpansionEnabled() *ApiResult {
-	if r := a.dbOK(); r != nil {
-		return r
-	}
-	v, err := a.DB.GetSetting(textExpansionSettingKey)
-	if err != nil {
-		return Fail(err)
-	}
-	return Ok(v == "1")
-}
-
-// SetTextExpansionEnabled 设置自动展开总开关。
-func (a *AppService) SetTextExpansionEnabled(enabled bool) *ApiResult {
-	if r := a.dbOK(); r != nil {
-		return r
-	}
-	v := "0"
-	if enabled {
-		v = "1"
-	}
-	if err := a.DB.SetSetting(textExpansionSettingKey, v); err != nil {
-		return Fail(err)
-	}
-	a.reloadTextExpansion()
-	return Ok(nil)
-}
-
-// SetSnippetExpand 设置单个片段的自动展开开关。
-func (a *AppService) SetSnippetExpand(id string, enabled bool) *ApiResult {
-	if r := a.dbOK(); r != nil {
-		return r
-	}
-	e := 0
-	if enabled {
-		e = 1
-	}
-	if err := a.DB.SetSnippetExpand(id, e); err != nil {
-		return Fail(err)
-	}
-	a.reloadTextExpansion()
-	return Ok(nil)
-}
 
 // resolveSnippetVars replaces built-in placeholders in snippet content:
 // {date} {time} {username} {clipboard}. Clipboard is read live; on failure

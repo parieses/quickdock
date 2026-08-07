@@ -103,20 +103,19 @@ jobs:
           & "C:\Program Files (x86)\NSIS\makensis.exe" '-DARG_WAILS_AMD64_BINARY=quickdock.exe' 'build\windows\nsis\project.nsi'
           Remove-Item build/windows/nsis/quickdock.exe
 
-      - name: Stage raw binary for in-place updater
-        # Wails updater 的语义是“把下载文件直接 rename 成应用 exe”。
-        # 若让它下载 NSIS 安装包（quickdock-amd64-installer.exe）并覆盖，
-        # 应用会被替换成一个安装器（致命损坏）。因此单独发布一份裸二进制，
-        # 供更新器原地重命名覆盖；安装包只用于首次手动安装。
+      - name: Stage portable raw binary
+        # 供手动使用的便携版裸二进制（不写入注册表/开始菜单）。
+        # 注意：自动更新走的是下方签名的 NSIS 安装器，不再使用此文件做原地替换。
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
           Copy-Item bin/quickdock.exe bin/quickdock-amd64.exe
 
       - name: Generate signed updater manifest
-        # 真正的安全机制：用 Ed25519 私钥对裸二进制签名，产出 manifest.json
+        # 真正的安全机制：用 Ed25519 私钥对 NSIS 安装器签名，产出 manifest.json
         # （含 sha512 摘要 + ed25519ph 签名）。应用端 endpoint provider 拉取此文件，
-        # 用内嵌的公钥验签（fail closed：签名不符直接报错、不安装）。
+        # 用内嵌的公钥验签（fail closed：签名不符直接报错、不安装），
+        # 下载完成后静默运行安装器（/S）完成原地升级。
         # 这能防"发布账号 / CI 被攻破"级别的供应链攻击，比单纯 SHA256 校验和更强。
         # 必须设置仓库 Secret UPDATER_PRIVATE_KEY（私钥 PEM 全文），否则不生成 manifest、更新链路失效。
         shell: pwsh
@@ -133,7 +132,7 @@ jobs:
             -key updater.key `
             -url-prefix "$urlPrefix" `
             -output manifest.json `
-            bin/quickdock-amd64.exe
+            bin/quickdock-amd64-installer.exe
           Remove-Item updater.key -ErrorAction SilentlyContinue
 
       - name: Upload Release Assets

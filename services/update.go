@@ -2,12 +2,14 @@ package services
 
 import (
 	"context"
-	"errors"
 	"fmt"
+	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
+	"golang.org/x/sys/windows"
 )
 
 // UpdateStatus 返回给前端的更新状态
@@ -107,28 +109,43 @@ func (a *AppService) DownloadUpdate() *UpdateStatus {
 	}
 }
 
-// RestartApp 重启应用以完成更新。
+// RestartApp 下载完成后拉起 NSIS 安装器以完成更新。
 //
-// Updater.Restart 会先 spawn 一个 helper 子进程（同一个二进制 + WAILS_UPDATER_HELPER 环境变量），
-// 再调用 host.Quit()；helper 等本进程退出后替换 exe 并重新拉起。因此这里必须先打上"真退出"标记，
-// 否则主窗口的 WindowClosing 钩子会 event.Cancel() 掉关闭动作、把窗口藏进托盘，
-// 进程不干净退出，helper 只能干等到超时。
+// 流程：Updater.DownloadAndInstall 已把安装器下载并验签到本地临时路径（通过 DownloadedPath 取得），
+// 这里直接拉起安装器（非静默，展示安装向导）。安装器的 .onInit 阶段会 taskkill 仍在运行的
+// quickdock.exe，向导完成后提供"运行 QuickDock"勾选项，用户点完成即可重新打开应用。
+//
+// 安装器用 DETACHED_PROCESS 脱离主程序作业对象独立存活——否则主程序退出时作业对象会连带杀掉它，
+// 向导就弹不出来了。同时先打上"真退出"标记（PrepareQuitFn），让主窗口的 WindowClosing 钩子放行，
+// 主程序走"退出"路径干净清理，再由安装器覆盖文件。
 func (a *AppService) RestartApp() error {
 	if a.app == nil || a.app.Updater == nil {
 		return fmt.Errorf("更新器未初始化")
 	}
 
-	// 让 WindowClosing 钩子放行（与托盘"退出"同一路径）
+	// 取已下载并验签的安装器本地路径
+	installerPath := a.app.Updater.DownloadedPath()
+	if installerPath == "" {
+		return fmt.Errorf("更新尚未就绪：请先完成下载，再点击重启")
+	}
+
+	// 让 WindowClosing 钩子放行（与托盘"退出"同一路径），主程序走干净退出流程
 	if a.PrepareQuitFn != nil {
 		a.PrepareQuitFn()
 	}
 
-	if err := a.app.Updater.Restart(context.Background()); err != nil {
-		if errors.Is(err, updater.ErrNotReady) {
-			return fmt.Errorf("更新尚未就绪：请先完成下载，再点击重启")
-		}
-		return fmt.Errorf("重启失败: %w", err)
+	// 拉起 NSIS 安装器（非静默，展示安装向导）。安装器 .onInit 会自行关闭正在运行的
+	// QuickDock，并在完成后提供"运行"勾选项。DETACHED_PROCESS 保证它不随主程序退出而被杀。
+	cmd := exec.Command(installerPath)
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,
 	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("启动更新安装器失败: %w", err)
+	}
+
+	// 退出主程序；安装器接管后续的安装向导与重新运行
+	a.app.Quit()
 	return nil
 }
 

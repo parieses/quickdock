@@ -115,19 +115,6 @@ var (
 )
 
 func main() {
-	// 更新助手模式：必须放在**单实例检查之前**。
-	//
-	// Updater.Restart() 会以「同一个二进制 + WAILS_UPDATER_HELPER 环境变量」spawn 一个
-	// 子进程，由它等待父进程退出后替换 exe 并重新拉起应用。Wails 默认在 application.New()
-	// 内部调用 HandleHelperMode()，但那已经在 main() 的中后段——helper 子进程会先撞上
-	// ensureSingleInstance()：此刻父进程尚未退出、仍持有命名互斥体，于是 helper 被判定为
-	// 重复实例直接 return，application.New() 永远执行不到，二进制替换和重启自然都不会发生
-	// （现象：点「重启」后毫无反应，安装包滞留在 %TEMP%\wails-update-*\ 且没有 helper 日志；
-	// 更糟的是 ensureSingleInstance 退出前还会 SetForegroundWindow，看起来像"窗口闪了一下"）。
-	//
-	// 这里提前调用：非 helper 模式立即返回，helper 模式完成替换后 os.Exit，永不返回。
-	updater.HandleHelperMode()
-
 	// 单实例检查：若已有实例运行，将其窗口提到前台并退出
 	if ensureSingleInstance() {
 		return
