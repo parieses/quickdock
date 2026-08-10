@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
+	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 	"golang.org/x/sys/windows"
 )
 
@@ -30,7 +31,60 @@ func (a *AppService) GetAppVersion() string {
 	return "0.0.0"
 }
 
-// CheckForUpdates 手动检查更新（阻塞直到检查完成）
+// runCheck 执行一次更新探测（阻塞，串行于 updateCheckMu）。
+// 手动"检测更新"与后台定时检查共用此方法，保证两条路径返回完全一致的
+// UpdateStatus（含版本号与更新说明），从而消除自动/手动流程不一致的问题。
+func (a *AppService) runCheck(ctx context.Context) *UpdateStatus {
+	a.updateCheckMu.Lock()
+	defer a.updateCheckMu.Unlock()
+
+	release, err := a.app.Updater.Check(ctx)
+	if err != nil {
+		st := &UpdateStatus{
+			CurrentVersion: a.GetAppVersion(),
+			State:          "error",
+			Error:          friendlyError(err),
+		}
+		a.setLastCheck(st)
+		return st
+	}
+	if release == nil {
+		st := &UpdateStatus{CurrentVersion: a.GetAppVersion(), State: "up-to-date"}
+		a.setLastCheck(st)
+		return st
+	}
+
+	st := &UpdateStatus{
+		CurrentVersion:   a.GetAppVersion(),
+		State:            "available",
+		AvailableVersion: release.Version,
+		ReleaseNotes:     release.Notes,
+	}
+	a.setLastCheck(st)
+	return st
+}
+
+func (a *AppService) setLastCheck(st *UpdateStatus) {
+	a.lastUpdateCheckMu.Lock()
+	a.lastUpdateCheck = st
+	a.lastUpdateCheckMu.Unlock()
+}
+
+func (a *AppService) getLastCheck() *UpdateStatus {
+	a.lastUpdateCheckMu.RLock()
+	defer a.lastUpdateCheckMu.RUnlock()
+	return a.lastUpdateCheck
+}
+
+// emitUpdateStatus 把检测结果推给前端，复用 SettingsModal 里手动检测那套 UI。
+func (a *AppService) emitUpdateStatus(st *UpdateStatus) {
+	if a.app == nil {
+		return
+	}
+	a.app.Event.Emit("quickdock:update:status", st)
+}
+
+// CheckForUpdates 手动检查更新（阻塞直到检查完成）。与后台定时检查共用 runCheck。
 func (a *AppService) CheckForUpdates() *UpdateStatus {
 	if a.app == nil || a.app.Updater == nil {
 		return &UpdateStatus{
@@ -42,32 +96,7 @@ func (a *AppService) CheckForUpdates() *UpdateStatus {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-
-	release, err := a.app.Updater.Check(ctx)
-	if err != nil {
-		return &UpdateStatus{
-			CurrentVersion: a.GetAppVersion(),
-			State:          "error",
-			Error:          friendlyError(err),
-		}
-	}
-
-	if release == nil {
-		return &UpdateStatus{
-			CurrentVersion: a.GetAppVersion(),
-			State:          "up-to-date",
-		}
-	}
-
-	// 发现新版本——触发下载和安装
-	status := &UpdateStatus{
-		CurrentVersion:   a.GetAppVersion(),
-		State:            "available",
-		AvailableVersion: release.Version,
-		ReleaseNotes:     release.Notes,
-	}
-
-	return status
+	return a.runCheck(ctx)
 }
 
 // DownloadUpdate 下载发现的更新（阻塞直到下载完成）
@@ -149,7 +178,8 @@ func (a *AppService) RestartApp() error {
 	return nil
 }
 
-// GetUpdateState 获取当前更新器状态
+// GetUpdateState 获取当前更新器状态。当已探测到新版本时回填版本号与更新说明，
+// 否则 UI 只会拿到一个光秃秃的 "available" 状态而看不到任何内容。
 func (a *AppService) GetUpdateState() *UpdateStatus {
 	if a.app == nil || a.app.Updater == nil {
 		return &UpdateStatus{
@@ -158,12 +188,18 @@ func (a *AppService) GetUpdateState() *UpdateStatus {
 		}
 	}
 
-	state := a.app.Updater.State()
-
-	return &UpdateStatus{
+	live := a.app.Updater.State()
+	st := &UpdateStatus{
 		CurrentVersion: a.GetAppVersion(),
-		State:          string(state),
+		State:          string(live),
 	}
+	if live == updater.StateAvailable {
+		if lc := a.getLastCheck(); lc != nil {
+			st.AvailableVersion = lc.AvailableVersion
+			st.ReleaseNotes = lc.ReleaseNotes
+		}
+	}
+	return st
 }
 
 // SkipUpdate 跳过指定版本的更新
@@ -194,5 +230,56 @@ func friendlyError(err error) string {
 		return "下载安装包失败：直连 GitHub 与加速镜像均无法访问。请检查网络或配置代理（HTTPS_PROXY），也可手动从 GitHub Releases 页面下载安装。"
 	default:
 		return msg
+	}
+}
+
+// StartAutoUpdateChecker 启动后台定时检查（取代 Wails 内置的 CheckInterval 自动下载）。
+//
+// 为什么不用 Wails 的 CheckInterval：它的周期检查走 CheckAndInstall —— 会自动把安装包
+// 下载并暂存，但永远不会主动重启应用（Restart 仅由 Wails 内置窗口的"重启"按钮触发，而
+// 我们用的是自定义 UI，不挂内置窗口）。结果就是自动下载了一堆安装包却永远不生效，且与手动
+// "检测更新"的下载/重启路径完全脱节。
+//
+// 这里只做"检查 + 通知"：发现新版本后通过 quickdock:update:status 事件把同一份 UpdateStatus
+// 推给前端，复用 SettingsModal 里手动检测那套 UI 与下载/重启逻辑，两条路径完全一致。
+func (a *AppService) StartAutoUpdateChecker() {
+	if a.app == nil || a.app.Updater == nil {
+		return
+	}
+	go func() {
+		// 启动后延迟 30s 首检，避免拖慢冷启动；之后每 24h 一次。
+		time.Sleep(30 * time.Second)
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			a.backgroundCheck()
+		}
+	}()
+}
+
+// backgroundCheck 单次后台检查：仅在空闲/已最新/出错时探测，避免重复网络请求与弹窗；
+// 已处于"有更新/下载中/就绪"状态时跳过，保持现状不骚扰用户。
+func (a *AppService) backgroundCheck() {
+	u := a.app.Updater
+	switch u.State() {
+	case updater.StateReady, updater.StateDownloading, updater.StateVerifying,
+		updater.StateInstalling, updater.StateAvailable:
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	status := a.runCheck(ctx)
+	if status == nil {
+		return
+	}
+	a.emitUpdateStatus(status)
+
+	// 自动发现新版本时发一条系统通知，让更新真正"被看见"（点击仍走设置页的下载/重启）。
+	if status.State == "available" && a.Notifier != nil {
+		_ = a.Notifier.SendNotification(notifications.NotificationOptions{
+			Title: "QuickDock 更新可用",
+			Body:  "发现新版本 " + status.AvailableVersion + "，打开设置即可下载安装。",
+		})
 	}
 }

@@ -8,7 +8,7 @@ import { getErrorMessage } from '../utils/error'
 import type { Scene, ToastAPI } from '../types'
 import {
   Bot, FolderKanban, FileText, Activity, ListTodo, AlarmClock,
-  Clipboard, Puzzle, ChevronDown, Plus, Pencil, Trash2, Search, X, Settings,
+  Clipboard, Puzzle, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Search, X, Settings, Globe, Database,
 } from '@lucide/vue'
 
 const store = useWorkspaceStore()
@@ -29,6 +29,13 @@ const props = defineProps<{
   currentPage: string
 }>()
 const toast = inject<ToastAPI>('toast')!
+
+// ---- 侧栏收起（仅显示图标） ----
+const collapsed = ref(localStorage.getItem('qd_sidebar_collapsed') === '1')
+function toggleCollapse() {
+  collapsed.value = !collapsed.value
+  try { localStorage.setItem('qd_sidebar_collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
+}
 
 // ---- 工作空间 ----
 const showWorkspaceMenu = ref(false)
@@ -178,7 +185,7 @@ async function handleDeleteScene(sceneId: string) {
 </script>
 
 <template>
-  <aside class="sidebar">
+  <aside class="sidebar" :class="{ collapsed }">
     <!-- 工作空间切换器 -->
     <div class="workspace-selector" @click.stop="toggleWorkspaceMenu">
       <FolderKanban :size="16" class="ws-icon" />
@@ -242,13 +249,21 @@ async function handleDeleteScene(sceneId: string) {
         <Clipboard :size="14" />
         <span>{{ t('navClipboard') }}</span>
       </button>
-      <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="emit('navigate', 'plugins')">
-        <Puzzle :size="14" />
-        <span>{{ t('navPlugins') }}</span>
+      <button :class="['nav-item', { active: currentPage === 'httpclient' }]" @click="emit('navigate', 'httpclient')">
+        <Globe :size="14" />
+        <span>{{ t('navHttpClient') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'database' }]" @click="emit('navigate', 'database')">
+        <Database :size="14" />
+        <span>{{ t('navDatabase') }}</span>
       </button>
       <button :class="['nav-item', { active: currentPage === 'ai' }]" @click="emit('navigate', 'ai')">
         <Bot :size="14" />
         <span>{{ t('navAi') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="emit('navigate', 'plugins')">
+        <Puzzle :size="14" />
+        <span>{{ t('navPlugins') }}</span>
       </button>
     </div>
 
@@ -343,6 +358,10 @@ async function handleDeleteScene(sceneId: string) {
         <Settings :size="16" />
         <span>{{ t('settings') }}</span>
       </button>
+      <button class="collapse-btn" @click="toggleCollapse" :title="collapsed ? t('expandSidebar') : t('collapseSidebar')">
+        <ChevronLeft v-if="!collapsed" :size="16" />
+        <ChevronRight v-else :size="16" />
+      </button>
     </div>
   </aside>
 </template>
@@ -358,7 +377,25 @@ async function handleDeleteScene(sceneId: string) {
   flex-direction: column;
   overflow: hidden;
   z-index: 10;
+  transition: width var(--transition-base), min-width var(--transition-base);
 }
+
+/* 收起态：仅显示图标 */
+.sidebar.collapsed { width: 54px; min-width: 54px; }
+.sidebar.collapsed .ws-name,
+.sidebar.collapsed .ws-arrow,
+.sidebar.collapsed .navigator-header,
+.sidebar.collapsed .nav-item span,
+.sidebar.collapsed .sidebar-search,
+.sidebar.collapsed .sidebar-header,
+.sidebar.collapsed .search-hint,
+.sidebar.collapsed .sidebar-nav,
+.sidebar.collapsed .sidebar-spacer,
+.sidebar.collapsed .settings-btn span { display: none; }
+.sidebar.collapsed .workspace-selector { justify-content: center; padding: 10px 0; }
+.sidebar.collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
+.sidebar.collapsed .sidebar-footer { justify-content: center; gap: 4px; }
+.sidebar.collapsed .ws-dropdown { left: 6px; right: auto; width: 200px; }
 
 /* 工作空间切换器 */
 .workspace-selector {
@@ -697,6 +734,21 @@ async function handleDeleteScene(sceneId: string) {
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .settings-btn:hover { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
+.collapse-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.collapse-btn:hover { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
 
 /* 工作空间下拉动画 */
 .dropdown-enter-active, .dropdown-leave-active {

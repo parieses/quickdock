@@ -72,6 +72,8 @@ const updateStatus = ref<UpdateStatus | null>(null)
 const updateChecking = ref(false)
 const updateResult = ref('')
 
+let offUpdateStatus: (() => void) | null = null
+
 onMounted(async () => {
   try {
     const ver = await GetAppVersion()
@@ -79,22 +81,37 @@ onMounted(async () => {
     const state = await GetUpdateState()
     if (state) updateStatus.value = state
   } catch {}
+  // 订阅后台自动检查结果：与手动"检测更新"复用同一套渲染，保证流程一致。
+  offUpdateStatus = Events.On('quickdock:update:status', (payload: any) => {
+    applyUpdateStatus(payload as UpdateStatus)
+  })
 })
+
+onUnmounted(() => {
+  offUpdateStatus?.()
+})
+
+// 手动检测与后台自动检查共用同一渲染逻辑，保证两条路径展示完全一致。
+function applyUpdateStatus(result: UpdateStatus | null) {
+  if (!result) { updateResult.value = t('updateError'); return }
+  updateStatus.value = result
+  if (result.state === 'up-to-date') {
+    updateResult.value = t('updateUpToDate')
+  } else if (result.state === 'available') {
+    updateResult.value = t('updateAvailable') + ' ' + (result.availableVersion || '')
+  } else if (result.state === 'ready') {
+    updateResult.value = t('updateReady')
+  } else if (result.state === 'error') {
+    updateResult.value = (result.error || t('updateError'))
+  }
+}
 
 async function checkForUpdates() {
   updateChecking.value = true
   updateResult.value = ''
   try {
     const result = await CheckForUpdates()
-    if (!result) { updateResult.value = t('updateError'); updateChecking.value = false; return }
-    updateStatus.value = result
-    if (result.state === 'up-to-date') {
-      updateResult.value = t('updateUpToDate')
-    } else if (result.state === 'available') {
-      updateResult.value = t('updateAvailable') + ' ' + (result.availableVersion || '')
-    } else if (result.state === 'error') {
-      updateResult.value = (result.error || t('updateError'))
-    }
+    applyUpdateStatus(result)
   } catch (e: any) {
     updateResult.value = getErrorMessage(e)
   } finally {
@@ -343,6 +360,11 @@ async function toggleAutoStart() {
                 </button>
               </div>
 
+              <div v-if="updateStatus?.state === 'available' && updateStatus.releaseNotes" class="update-notes">
+                <div class="update-notes-title">{{ t('updateNotes') }}</div>
+                <pre class="update-notes-body">{{ updateStatus.releaseNotes }}</pre>
+              </div>
+
               <div v-if="updateStatus?.state === 'ready'" class="action-row" style="margin-top:12px">
                 <button class="btn btn-primary update-restart-btn" @click="restartApp">
                   {{ t('updateRestart') }}
@@ -557,6 +579,31 @@ async function toggleAutoStart() {
 /* 更新按钮 */
 .update-restart-btn { background: var(--color-accent); color: #fff; font-weight: 500; }
 .update-restart-btn:hover { opacity: 0.9; }
+
+.update-notes {
+  margin-top: 14px;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 8px;
+  background: var(--surface-2, #1e1e1e);
+  padding: 10px 12px;
+}
+.update-notes-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #aaa);
+  margin-bottom: 6px;
+}
+.update-notes-body {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary, #e6e6e6);
+}
 .spinning { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
 

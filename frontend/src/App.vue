@@ -27,6 +27,8 @@ const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
 const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
 const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
 const AIPage = defineAsyncComponent(() => import('./components/AIPage.vue'))
+const HttpClientPage = defineAsyncComponent(() => import('./components/HttpClientPage.vue'))
+const DatabasePage = defineAsyncComponent(() => import('./components/DatabasePage.vue'))
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {
@@ -190,6 +192,12 @@ const activeConfirm = computed(() =>
         <SchedulePage v-else-if="currentPage === 'schedule'" />
         <!-- 网站监控页面 -->
         <MonitorPage v-else-if="currentPage === 'monitor'" />
+
+        <!-- HTTP 客户端页面 -->
+        <HttpClientPage v-else-if="currentPage === 'httpclient'" />
+
+        <!-- 数据库连接查询页面 -->
+        <DatabasePage v-else-if="currentPage === 'database'" />
 
         <!-- AI 助手页面 -->
         <AIPage v-else-if="currentPage === 'ai'" @open-settings="(page?: string) => { settingsPage = page; showSettings = true }" />

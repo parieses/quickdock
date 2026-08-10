@@ -44,6 +44,12 @@ var validTables = map[string]bool{
 	"plugin_exec_logs":  true,
 	"ai_conversations":  true,
 	"ai_messages":       true,
+	"api_requests":      true,
+	"http_projects":     true,
+	"http_environments": true,
+	"http_folders":      true,
+	"http_docs":         true,
+	"db_connections":    true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）
@@ -81,6 +87,13 @@ var validColumns = map[string]bool{
 	"prompt_tokens": true, "completion_tokens": true,
 	"last_used":  true,
 	"created_at": true, "updated_at": true, "deleted_at": true,
+	"method": true, "url": true, "headers": true, "body": true,
+	"body_type": true, "auth_type": true, "auth_token": true,
+	"auth_user": true, "auth_pass": true,
+	"project_id": true, "variables": true,
+	"parent_id": true, "folder_id": true,
+	"db_type": true, "host": true, "port": true, "username": true,
+	"password": true, "database": true, "file_path": true,
 }
 
 // validateTable 检查表名是否在白名单中

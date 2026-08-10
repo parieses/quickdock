@@ -15,6 +15,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # 需要完整历史，才能生成"相对上个 tag 的更新说明"
 
       - name: Setup Go
         uses: actions/setup-go@v6
@@ -127,13 +129,27 @@ jobs:
           Set-Content -Path updater.key -Value "${{ secrets.UPDATER_PRIVATE_KEY }}"
           $tag = "$env:GITHUB_REF_NAME"
           $urlPrefix = "https://github.com/parieses/quickdock/releases/download/$tag"
+
+          # 生成更新说明（写入文件，失败不影响流水线）：取上一个 tag 到当前 tag 的提交主题。
+          # 说明不参与签名（签名仅覆盖安装包 sha512 摘要），因此即使为空也只是"无内容"，不会破坏更新。
+          $notesFile = "release_notes.md"
+          $notes = ""
+          try {
+            $prev = (git describe --tags --abbrev=0 HEAD~1 2>$null)
+            if ($prev) { $notes = (git log "$prev..HEAD" --pretty=format:"- %s`n") }
+            else { $notes = (git log --pretty=format:"- %s`n" -n 30) }
+          } catch { $notes = "" }
+          Set-Content -Path $notesFile -Value $notes -Encoding utf8
+
           wails3 updater manifest `
             -version "$env:VERSION" `
             -key updater.key `
             -url-prefix "$urlPrefix" `
+            -notes-file $notesFile `
             -output manifest.json `
             bin/quickdock-amd64-installer.exe
           Remove-Item updater.key -ErrorAction SilentlyContinue
+          Remove-Item $notesFile -ErrorAction SilentlyContinue
 
       - name: Upload Release Assets
         uses: ncipollo/release-action@v1

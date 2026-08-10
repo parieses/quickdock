@@ -90,6 +90,13 @@ type AppService struct {
 
 	// 共享 HTTP 客户端（连接复用，避免每次 AI 请求新建 TLS 握手）
 	aiHTTPClient *http.Client
+
+	// 更新检查：最近一次检测结果缓存（供 GetUpdateState 回填版本号与更新说明，
+	// 因为 Wails Updater 不对外暴露 pending release）。updateCheckMu 串行化
+	// Check，避免手动"检测更新"与后台定时检查并发探测。
+	lastUpdateCheck   *UpdateStatus
+	lastUpdateCheckMu sync.RWMutex
+	updateCheckMu     sync.Mutex
 }
 
 type frontendCacheEntry struct {

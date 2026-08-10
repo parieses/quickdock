@@ -121,6 +121,143 @@ export interface Snippet {
   createdAt: string
 }
 
+// HTTP 客户端：保存的请求
+export interface ApiRequest {
+  id: string
+  name: string
+  projectId: string
+  folderId: string
+  method: string
+  url: string
+  headers: string
+  body: string
+  bodyType: string
+  authType: string
+  authToken: string
+  authUser: string
+  authPass: string
+  sort: number
+  createdAt: string
+  updatedAt: string
+}
+
+// HTTP 客户端：项目（Postman Collection 式分组）
+export interface HttpProject {
+  id: string
+  name: string
+  headers: string // JSON map：项目共享请求头
+  sort: number
+  createdAt: string
+  updatedAt: string
+}
+
+// HTTP 客户端：环境（项目下变量集合）
+export interface HttpEnvironment {
+  id: string
+  projectId: string
+  name: string
+  variables: string // JSON 数组：[{ key, value, enabled }]
+  sort: number
+  createdAt: string
+  updatedAt: string
+}
+
+export interface HttpEnvVar {
+  key: string
+  value: string
+  enabled: boolean
+}
+
+// HTTP 客户端：目录（项目下多级嵌套，folderId 关联请求）
+export interface HttpFolder {
+  id: string
+  projectId: string
+  parentId: string
+  name: string
+  sort: number
+  createdAt: string
+  updatedAt: string
+}
+
+// HTTP 客户端：目录下的 Markdown 文档（轻量笔记）
+export interface HttpDoc {
+  id: string
+  projectId: string
+  folderId: string
+  name: string
+  content: string
+  sort: number
+  createdAt: string
+  updatedAt: string
+}
+
+// HTTP 客户端：树拖拽类型
+export type HttpDragItem = { kind: 'request' | 'folder' | 'doc'; id: string }
+export type HttpDropTarget =
+  | { kind: 'into-folder'; id: string }
+  | { kind: 'after-folder'; id: string }
+  | { kind: 'before-request'; id: string }
+  | { kind: 'project-root'; projectId: string }
+
+// HTTP 客户端：发送响应
+export interface ApiResponse {
+  status: number
+  ok: boolean
+  headers: Record<string, string>
+  body: string
+  durationMs: number
+  size: number
+  truncated: boolean
+}
+
+// 数据库连接
+export interface DbConnection {
+  id: string
+  name: string
+  dbType: string // mysql | redis | sqlite
+  host: string
+  port: number
+  username: string
+  password: string
+  database: string
+  filePath: string
+  createdAt: string
+}
+
+// 数据库查询结果
+export interface DbQueryResult {
+  success: boolean
+  columns: string[]
+  rows: string[][]
+  nulls: boolean[][] // 与 rows 同维度，标记单元格是否为 NULL
+  rowCount: number
+  affected: number
+  message: string
+  error: string
+  durationMs: number
+  editable?: boolean // 单表 SELECT 且含主键列时可内联编辑
+  tableName?: string
+  primaryKey?: string
+  editReason?: string // 不可编辑时的原因，便于前端诊断
+}
+
+// 单行修改提交（主键定位 + 列值/置空）
+export interface DbRowUpdateInput {
+  tableName: string
+  pkColumn: string
+  pkValue: string
+  sets: Record<string, string>
+  nulls: string[]
+}
+
+// 库表浏览器树节点
+export interface DbTreeNode {
+  name: string
+  kind: string // folder | table | view | column | key
+  detail?: string // 字段类型 / Redis 类型
+  children?: DbTreeNode[]
+}
+
 // 剪贴板条目
 export interface ClipboardEntry {
   id: string

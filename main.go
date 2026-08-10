@@ -189,6 +189,9 @@ func main() {
 		fmt.Printf("QuickDock: 更新器初始化失败（非关键错误）: %v\n", err)
 	}
 
+	// 启动后台定时检查（仅"检查+通知"，下载/重启复用手动检测路径）
+	appService.StartAutoUpdateChecker()
+
 	// 注入版本号到 AppService（供前端获取）
 	appService.AppVersion = appVersion
 
@@ -367,7 +370,10 @@ func initUpdater(app *application.App, version string) error {
 		CurrentVersion: version,
 		Providers:      []updater.Provider{provider},
 		PublicKey:      updaterPublicKey,
-		CheckInterval:  24 * time.Hour, // 每 24 小时后台自动检查
+		// 不启用 Wails 内置周期检查：它会走 CheckAndInstall 自动下载却永不重启
+		// （Restart 仅由 Wails 内置窗口触发，本项目用自定义 UI）。后台"检查+通知"
+		// 改由 AppService.StartAutoUpdateChecker 驱动，复用手动检测的同一套 UI 与重启逻辑。
+		CheckInterval: 0,
 	})
 }
 
