@@ -2,7 +2,7 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 和 **VS Code 的开发者体验**。它帮助你统一管理项目、目录、网页链接、常用命令和应用，搭配 AI 助手、剪贴板历史、代码片段、命令面板和丰富的内置插件，让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段、命令面板、待办、定时任务、网站监控、HTTP 客户端、数据库连接与 19 个开箱即用插件（含可选的 AI 助手），让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
 
@@ -14,7 +14,6 @@
   - [目录](#目录)
   - [功能特性](#功能特性)
     - [📦 工作空间与资源管理](#-工作空间与资源管理)
-    - [🤖 AI 助手](#-ai-助手)
     - [📋 剪贴板历史](#-剪贴板历史)
     - [🔍 命令面板](#-命令面板)
     - [📝 文本片段（Snippets）](#-文本片段snippets)
@@ -23,6 +22,9 @@
     - [📡 网站监控（Monitor）](#-网站监控monitor)
     - [🗒️ 快捷笔记](#️-快捷笔记)
     - [📊 系统状态](#-系统状态)
+    - [🌐 HTTP 客户端](#-http-客户端)
+    - [🗄️ 数据库连接](#️-数据库连接)
+    - [💬 AI 助手](#-ai-助手)
     - [🔌 插件系统](#-插件系统)
     - [☁️ WebDAV 云同步](#️-webdav-云同步)
     - [📸 快照备份](#-快照备份)
@@ -81,22 +83,6 @@
 
 全层级支持拖拽排序、FTS5 全文搜索。
 
-### 🤖 AI 助手
-
-- **多配置档案** — 支持 OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口
-- **四种对话模式** — 聊天 / 解释代码 / 翻译 / 总结，模式 prompt 可叠加自定义 System Prompt
-- **SSE 流式输出** — 本地 HTTP 流式服务（127.0.0.1:随机端口），token 到达即显示，非传统轮询
-- **思考过程折叠** — 模型思考内容（reasoning_content）以 `<details>` 折叠展示，默认收起
-- **思考模式开关** — 可在设置页开启/关闭思考过程显示
-- **Markdown 渲染** — 使用 `marked` + `DOMPurify` 安全渲染 AI 回复
-- **参数可配** — Temperature / MaxTokens / TopP / FrequencyPenalty / PresencePenalty
-- **自定义 System Prompt** — 设置页 textarea，非空时覆盖默认模式提示
-- **会话管理** — 多会话 / 标题自动生成 / 重新生成标题 / 清空上下文 / 删除会话
-- **Token 用量统计** — 每次对话自动记录 prompt 和 completion token 数，会话列表可见
-- **摘要压缩** — 长对话自动压缩历史摘要（3000 token 阈值），保留最近 12 条完整消息
-- **API Key 安全存储** — Windows 下 DPAPI 加密，前端不接触密文
-- **测试连接** — 一键验证 API Key 和模型是否可用
-
 ### 📋 剪贴板历史
 
 - 自动监听并记录文本、图片、文件剪贴板内容
@@ -150,6 +136,45 @@
 - CPU / 内存 / 磁盘 / 进程数 / IP 实时概览
 - 下行 / 上行实时网速监测
 - 每 3 秒自动刷新
+
+### 🌐 HTTP 客户端
+
+类 Postman 的接口管理与调试工具，内置于左侧导航：
+
+- **多项目隔离** — 按项目组织 API 集合，每个项目拥有独立的环境变量
+- **多层级目录** — 项目下可无限嵌套子目录，支持拖拽排序、跨目录拖拽移动（自动修复子树归属）
+- **请求管理** — 每个请求保存方法 / URL / 查询参数 / 请求头 / 请求体，支持历史记录
+- **Markdown 文档** — 目录内可新建 Markdown 文档，实时预览编辑（`marked` + `DOMPurify`）
+- **环境变量** — 项目级环境变量，可在请求中引用，便于多环境切换
+- **右键操作** — 项目 / 目录 / 请求 / 文档统一通过右键菜单操作（新建 / 重命名 / 删除），列表无冗余图标
+- **CSV 导入导出** — 请求支持复制 / 导出为 CSV
+
+### 🗄️ 数据库连接
+
+内置多数据库管理与查询工具：
+
+- **多数据库支持** — MySQL / Redis / SQLite，连接密码经 DPAPI 加密存储
+- **对象浏览** — 左侧树浏览库 / 表 / 字段（MySQL、SQLite），或 DB 索引 / 键（Redis）
+- **Redis 多库** — 连接可指定 DB 索引（0–15），左侧树以 `DB N` 区分不同库
+- **SQL 查询** — 执行任意 SQL，结果以表格展示，支持 CSV 复制 / 导出
+- **内联编辑（Navicat 风格）** — 单表 `SELECT` 且为单列主键时，结果网格可直接修改单元格；底部「确认 / 丢弃 / 刷新」按钮提交或回滚改动。视图 / JOIN / 聚合 / 复合主键 / 无主键结果为只读，并显示具体原因
+- **MySQL 默认库兜底** — 连接未指定默认库时自动用 `SELECT DATABASE()` 解析当前库，确保主键检测可用
+
+### 💬 AI 助手
+
+- **多配置档案** — 支持 OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口
+- **四种对话模式** — 聊天 / 解释代码 / 翻译 / 总结，模式 prompt 可叠加自定义 System Prompt
+- **SSE 流式输出** — 本地 HTTP 流式服务（127.0.0.1:随机端口），token 到达即显示，非传统轮询
+- **思考过程折叠** — 模型思考内容（reasoning_content）以 `<details>` 折叠展示，默认收起
+- **思考模式开关** — 可在设置页开启/关闭思考过程显示
+- **Markdown 渲染** — 使用 `marked` + `DOMPurify` 安全渲染对话内容
+- **参数可配** — Temperature / MaxTokens / TopP / FrequencyPenalty / PresencePenalty
+- **自定义 System Prompt** — 设置页 textarea，非空时覆盖默认模式提示
+- **会话管理** — 多会话 / 标题自动生成 / 重新生成标题 / 清空上下文 / 删除会话
+- **Token 用量统计** — 每次对话自动记录 prompt 和 completion token 数，会话列表可见
+- **摘要压缩** — 长对话自动压缩历史摘要（3000 token 阈值），保留最近 12 条完整消息
+- **API Key 安全存储** — Windows 下 DPAPI 加密，前端不接触密文
+- **测试连接** — 一键验证 API Key 和模型是否可用
 
 ### 🔌 插件系统
 
@@ -263,7 +288,7 @@ cd frontend && npm install
 | **vue-i18n** | 国际化（简体中文 / English） |
 | **Lucide Vue** | 图标库 |
 | **pinyin-pro** | 拼音搜索支持 |
-| **marked + DOMPurify** | Markdown 安全渲染（AI 回复） |
+| **marked + DOMPurify** | Markdown 安全渲染 |
 | **@wailsio/runtime** | Wails 前端运行时绑定 |
 
 ---
@@ -305,6 +330,8 @@ quickdock/
 │   ├── types.go         # 配置类型定义
 │   ├── ai.go            # AI 对话核心（streamAIChat / callAIOnce / buildAIMessages）
 │   ├── ai_stream.go     # AI 本地 HTTP SSE 流式服务
+│   ├── httpclient.go    # HTTP 客户端（项目/目录/请求/文档/环境）
+│   ├── database.go      # 数据库连接与查询（MySQL/Redis/SQLite）
 │   └── update.go        # 软件更新检查与下载
 ├── internal/
 │   ├── db/              # SQLite 数据层
@@ -323,6 +350,10 @@ quickdock/
 │   │   ├── tool.go      # 打开工具数据层
 │   │   ├── settings.go  # 设置数据层
 │   │   ├── snapshot.go  # 快照数据层
+│   │   ├── httpproject.go # HTTP 客户端项目数据层
+│   │   ├── httpdoc.go    # HTTP 目录/文档数据层
+│   │   ├── httprequest.go # HTTP 请求数据层
+│   │   ├── database.go  # 数据库连接数据层
 │   │   ├── repository.go# 仓库层
 │   │   └── helpers.go   # 辅助函数
 │   ├── platform/        # 平台 API 封装
@@ -345,6 +376,8 @@ quickdock/
 │   │   │   ├── SystemStatusPage.vue # 系统状态页面
 │   │   │   ├── NotePanel.vue      # 快捷笔记面板
 │   │   │   ├── PluginManagerPage.vue # 插件管理页面
+│   │   │   ├── HttpClientPage.vue # HTTP 客户端页面
+│   │   │   ├── DatabasePage.vue   # 数据库连接页面
 │   │   │   └── ...（更多组件）
 │   │   ├── stores/      # Pinia 状态管理
 │   │   ├── types/       # TypeScript 类型（含 ai.ts）
@@ -389,6 +422,11 @@ Workspace（工作空间）
 | **Monitor** | 网站监控（状态码/SSL/内容匹配） |
 | **AIConversation** | AI 对话会话（标题、摘要、token 统计） |
 | **AIMessage** | AI 消息（角色、内容、思考过程） |
+| **HttpProject** | HTTP 客户端项目（名称、环境变量） |
+| **HttpFolder** | HTTP 目录（多层级、归属项目） |
+| **HttpDoc** | HTTP Markdown 文档（归属目录） |
+| **ApiRequest** | HTTP 请求（方法 / URL / 头 / 体 / 归属目录） |
+| **DbConnection** | 数据库连接（MySQL / Redis / SQLite，密码加密） |
 
 所有数据库表通过白名单机制防止 SQL 注入。
 
@@ -927,10 +965,10 @@ cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
 - **纯 Go SQLite**：使用 modernc.org/sqlite，零 CGO 依赖，简化交叉编译
 - **回调注入解耦**：热键函数通过注入方式避免 main 和 services 包之间的循环依赖
 - **SQL 白名单**：表名和列名校验防止 SQL 注入
-- **AI 真流式架构**：本地 `127.0.0.1` HTTP SSE 流式服务（随机端口 + 随机 token），避免 Wails 事件框架的缓冲限制，实现逐 token 即时显示
+- **本地流式架构**：内置 `127.0.0.1` HTTP SSE 流式服务（随机端口 + 随机 token），避免 Wails 事件框架的缓冲限制，实现逐 token 即时显示（用于 AI 对话等场景）
 - **API Key 安全加密**：Windows 下 DPAPI 加密存储（`CryptProtectData`），macOS 下 base64 编码，前端全程不接触密文
 - **单实例锁**：通过 `-tags production` 区分生产/开发锁名，避免冲突
-- **后台服务**：SQLite WAL 模式 + 定时器调度器 (10s) + 监控检查器 + 网站 SSL 检测 + 网速采样 (1s) + AI 流式 HTTP 服务 + 插件健康检查
+- **后台服务**：SQLite WAL 模式 + 定时器调度器 (10s) + 监控检查器 + 网站 SSL 检测 + 网速采样 (1s) + 流式 HTTP 服务 + 插件健康检查
 
 ---
 
