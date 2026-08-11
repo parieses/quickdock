@@ -24,6 +24,7 @@ import type { UpdateStatus, AIProfile } from '../../bindings/quickdock/services/
 import type { ToastAPI } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
+import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{
   visible: boolean
@@ -135,7 +136,26 @@ async function downloadUpdate() {
   }
 }
 
+// 更新需要管理员权限（NSIS 安装器 REQUEST_EXECUTION_LEVEL=admin 会触发 UAC）。
+// 首次点击"立即重启"先弹一次提示，确认后记忆(localStorage)，避免被 UAC 弹窗突兀打断。
+const UPDATE_ADMIN_ACK = 'quickdock_update_admin_ack'
+const showUpdateAdminConfirm = ref(false)
+
 async function restartApp() {
+  if (!localStorage.getItem(UPDATE_ADMIN_ACK)) {
+    showUpdateAdminConfirm.value = true
+    return
+  }
+  doRestart()
+}
+
+function onUpdateAdminConfirm() {
+  localStorage.setItem(UPDATE_ADMIN_ACK, '1')
+  showUpdateAdminConfirm.value = false
+  doRestart()
+}
+
+async function doRestart() {
   updateResult.value = t('updateRestarting')
   try {
     await RestartApp()
@@ -483,6 +503,13 @@ async function toggleAutoStart() {
       </div>
     </Transition>
   </Teleport>
+
+  <ConfirmDialog
+    :visible="showUpdateAdminConfirm"
+    :message="t('updateAdminRequired')"
+    @confirm="onUpdateAdminConfirm"
+    @cancel="showUpdateAdminConfirm = false"
+  />
 </template>
 
 <style>

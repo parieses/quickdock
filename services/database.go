@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -487,7 +488,7 @@ func (a *AppService) ListDbTree(id string) *ApiResult {
 		}
 		return Ok(tree)
 	case "redis":
-		keys, e := listRedisKeys(conn.redis)
+		keys, e := listRedisKeys(conn.redis, parseRedisDB(saved.Database))
 		if e != nil {
 			return Fail(fmt.Errorf("读取键失败: %w", e))
 		}
@@ -570,7 +571,7 @@ func toDbConn(input DbConnectionInput) (*dbConnAdapter, error) {
 		opts := &redis.Options{
 			Addr:        fmt.Sprintf("%s:%d", input.Host, port),
 			Password:    input.Password,
-			DB:          0,
+			DB:          parseRedisDB(input.Database),
 			DialTimeout: 10 * time.Second,
 			ReadTimeout: dbQueryTimeout,
 		}
@@ -590,6 +591,23 @@ func defaultPort(t string) int {
 		return 0
 	}
 	return 0
+}
+
+// parseRedisDB 从连接配置的 Database 字段解析 Redis 库索引（0-15，默认 0）。
+// Redis 连接用该字段承载「第几个库」，与 SQL 的库名语义不同但复用同一列，故在此单独解析。
+func parseRedisDB(s string) int {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0
+	}
+	if n > 15 {
+		n = 15
+	}
+	return n
 }
 
 // isSelectLike 判断 SQL 是否返回结果集。
@@ -781,7 +799,8 @@ func (a *AppService) ListDbObjects(id string, dbName string) *ApiResult {
 }
 
 // listRedisKeys 用 SCAN 列出键（上限 300，避免大库卡死），并附带类型。
-func listRedisKeys(client *redis.Client) ([]DbTreeNode, error) {
+// dbIndex 用于树顶层节点标注当前所在的 Redis 库，便于区分多库场景。
+func listRedisKeys(client *redis.Client, dbIndex int) ([]DbTreeNode, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), dbQueryTimeout)
 	defer cancel()
 	var keys []DbTreeNode
@@ -802,7 +821,7 @@ func listRedisKeys(client *redis.Client) ([]DbTreeNode, error) {
 	if err := iter.Err(); err != nil {
 		return keys, err
 	}
-	tree := []DbTreeNode{{Name: "keys", Kind: "folder", Children: keys}}
+	tree := []DbTreeNode{{Name: "DB " + strconv.Itoa(dbIndex), Kind: "folder", Children: keys}}
 	return tree, nil
 }
 

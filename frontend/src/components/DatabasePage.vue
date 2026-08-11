@@ -144,8 +144,10 @@ function toggleKey(key: string) {
 // 切换数据库类型时自动填默认端口
 function onTypeChange() {
   if (form.value.dbType === 'mysql') form.value.port = 3306
-  else if (form.value.dbType === 'redis') form.value.port = 6379
-  else form.value.port = 0
+  else if (form.value.dbType === 'redis') {
+    form.value.port = 6379
+    if (!form.value.database) form.value.database = '0'
+  } else form.value.port = 0
 }
 
 async function load() {
@@ -610,9 +612,10 @@ onMounted(load)
               <label>{{ t('dbPassword') }}</label>
               <input v-model="form.password" class="f-input" type="password" :placeholder="configMode === 'edit' ? '••••••' : t('dbPassword')" />
             </div>
-            <div v-if="!isRedis" class="field">
-              <label>{{ t('dbDatabase') }}</label>
-              <input v-model="form.database" class="f-input" type="text" :placeholder="t('dbDatabase')" />
+            <div v-if="form.dbType !== 'sqlite'" class="field">
+              <label>{{ isRedis ? t('dbRedisDb') : t('dbDatabase') }}</label>
+              <input v-model="form.database" class="f-input" type="text"
+                :placeholder="isRedis ? t('dbRedisDbPlaceholder') : t('dbDatabase')" />
             </div>
           </template>
           <div v-if="isSqlite" class="field field-wide">
