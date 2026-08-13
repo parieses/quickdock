@@ -2,7 +2,7 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段、命令面板、待办、定时任务、网站监控、HTTP 客户端、数据库连接与 19 个开箱即用插件（含可选的 AI 助手），让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段、命令面板、待办、定时任务、网站监控、HTTP 客户端、数据库连接与 17 个开箱即用插件（含可选的 AI 助手），让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
 
@@ -178,7 +178,7 @@
 
 ### 🔌 插件系统
 
-- 19 个开箱即用的内置插件（计算表格、JSON2TS、JWT 解码、正则提取、Markdown 预览……）
+- 17 个开箱即用的内置插件（计算稿纸、JSON 工具箱、JWT 解码、正则提取、Markdown 预览……）
 - 支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native）
 - 基于 JSON-RPC 2.0 的前端 ↔ 后端通信协议
 - 支持运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定
@@ -328,10 +328,10 @@ quickdock/
 │   ├── autostart.go     # 开机自启
 │   ├── api_result.go    # 统一 API 返回
 │   ├── types.go         # 配置类型定义
-│   ├── ai.go            # AI 对话核心（streamAIChat / callAIOnce / buildAIMessages）
+│   ├── ai_*.go          # AI 对话核心（ai_config / ai_conversation / ai_stream / ai_chat）
 │   ├── ai_stream.go     # AI 本地 HTTP SSE 流式服务
-│   ├── httpclient.go    # HTTP 客户端（项目/目录/请求/文档/环境）
-│   ├── database.go      # 数据库连接与查询（MySQL/Redis/SQLite）
+│   ├── httpclient_*.go  # HTTP 客户端（7 文件：项目/目录/请求/环境/发送/文档/类型）
+│   ├── database*.go     # 数据库连接与查询（MySQL/Redis/SQLite，含 conn/query/tree 拆分）
 │   └── update.go        # 软件更新检查与下载
 ├── internal/
 │   ├── db/              # SQLite 数据层
@@ -368,7 +368,7 @@ quickdock/
 │   └── webdav/          # WebDAV HTTP 客户端
 ├── frontend/
 │   ├── src/
-│   │   ├── components/  # 24 个 Vue 组件
+│   │   ├── components/  # 30 个 Vue 组件
 │   │   │   ├── AIPage.vue         # AI 对话页面
 │   │   │   ├── TodoPage.vue       # 待办任务页面
 │   │   │   ├── SchedulePage.vue   # 定时任务页面
@@ -385,7 +385,7 @@ quickdock/
 │   │   ├── i18n/        # 国际化（zh-CN / en-US）
 │   │   └── composables/ # 组合式函数
 │   └── vite.config.ts
-├── plugins/builtin/     # 19 个内置插件
+├── plugins/builtin/     # 17 个内置插件（含 1 个 _shared 共享资源目录）
 ├── plugins/templates/   # 插件开发模板（none / goja / native）
 ├── build/               # 构建配置
 ├── docs/                # 设计文档
@@ -465,26 +465,24 @@ Workspace（工作空间）
 
 ## 内置插件
 
-QuickDock 内置 19 个即开即用的开发小工具：
+QuickDock 内置 17 个即开即用的开发小工具：
 
 | 插件 | 功能 |
 |------|------|
-| `calcsheet` | 计算表格 |
-| `case-converter` | 大小写转换 |
-| `code-formatter` | 代码格式化 |
+| `calcsheet` | 计算稿纸（表达式计算） |
+| `color-converter` | 颜色 / 色值转换 |
+| `compare` | 文件 / 文本对比 |
 | `cron-explainer` | Cron 表达式解析 |
-| `data-converter` | 数据格式转换 |
 | `emoji-search` | Emoji 搜索 |
-| `file-compare` | 文件对比 |
+| `formatter` | 代码 / SQL 等格式化 |
 | `hosts-manager` | Hosts 文件管理 |
 | `http-status` | HTTP 状态码查询 |
-| `json2ts` | JSON 转 TypeScript 类型 |
+| `json-toolbox` | JSON 工具箱（格式化 / 校验 / 转换） |
 | `jwt-decoder` | JWT 解码 |
 | `markdown-preview` | Markdown 预览 |
 | `port-scanner` | 端口扫描 |
+| `qrcode` | 二维码生成 / 识别 |
 | `regex-extractor` | 正则提取 |
-| `sql-formatter` | SQL 格式化 |
-| `text-diff` | 文本差异对比 |
 | `text-encoder` | 文本编码转换 |
 | `time-converter` | 时间戳转换 |
 | `wifi-manager` | WiFi 管理 |
