@@ -22,12 +22,11 @@ const CommandPalette = defineAsyncComponent(() => import('./components/CommandPa
 const PluginManagerPage = defineAsyncComponent(() => import('./components/PluginManagerPage.vue'))
 const SnippetManagerPage = defineAsyncComponent(() => import('./components/SnippetManagerPage.vue'))
 const PluginPage = defineAsyncComponent(() => import('./components/PluginPage.vue'))
-const SystemStatusPage = defineAsyncComponent(() => import('./components/SystemStatusPage.vue'))
 const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
 const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
 const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
 const AIPage = defineAsyncComponent(() => import('./components/AIPage.vue'))
-const HttpClientPage = defineAsyncComponent(() => import('./components/HttpClientPage.vue'))
+const HttpClientPage = defineAsyncComponent(() => import('./http-client/HttpClientPage.vue'))
 const DatabasePage = defineAsyncComponent(() => import('./components/DatabasePage.vue'))
 
 document.title = i18n.global.t('appName');
@@ -181,9 +180,6 @@ const activeConfirm = computed(() =>
 
         <!-- 插件页面 -->
         <PluginManagerPage v-else-if="currentPage === 'plugins'" />
-
-        <!-- 系统状态页面 -->
-        <SystemStatusPage v-else-if="currentPage === 'systemstatus'" />
 
         <!-- 待办任务页面 -->
         <TodoPage v-else-if="currentPage === 'todo'" />

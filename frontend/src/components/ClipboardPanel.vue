@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight } from '@lucide/vue'
-import { ListClipboardEntries, PasteClipboardEntry, GetClipboardImageBase64, HideClipboardWindow, TogglePinClipboardEntry, CreateSnippet, ExportClipboard, ClearClipboardHistory, DeleteClipboardEntry } from '../../bindings/quickdock/services/appservice'
+import { ListClipboardEntries, PasteClipboardEntry, GetClipboardImageBase64, HideClipboardWindow, TogglePinClipboardEntry, CreateSnippet, ExportClipboard, ClearClipboardHistory, DeleteClipboardEntry, UpdateClipboardNote } from '../../bindings/quickdock/services/appservice'
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -26,6 +26,7 @@ interface ClipboardEntry {
   sourceApp: string
   isPinned: number
   copyCount: number
+  note: string
   createdAt: number
 }
 
@@ -41,6 +42,9 @@ const searchInputRef = ref<HTMLInputElement | null>(null)
 const activeTag = ref<string>('all')
 const observerRef = ref<IntersectionObserver | null>(null)
 const IMAGE_CACHE_MAX = 60
+const NOTE_INPUT = ref<string>('')
+const noteEditingId = ref<string | null>(null)
+
 function cacheImage(id: string, dataUri: string) {
   const keys = Object.keys(imageCache.value)
   if (keys.length >= IMAGE_CACHE_MAX && !imageCache.value[id]) {
@@ -216,6 +220,32 @@ async function handleTogglePin(entry: ClipboardEntry) {
   try {
     const nowPinned = unwrap<boolean>(await TogglePinClipboardEntry(entry.id))
     entry.isPinned = nowPinned ? 1 : 0
+  } catch (e) {
+    if (toast?.error) {
+      toast.error(getErrorMessage(e))
+    }
+  }
+}
+
+// ---- 备注功能 ----
+function openNoteEditor(entry: ClipboardEntry) {
+  noteEditingId.value = entry.id
+  NOTE_INPUT.value = entry.note || ''
+}
+
+function closeNoteEditor() {
+  noteEditingId.value = null
+  NOTE_INPUT.value = ''
+}
+
+async function saveNote(entry: ClipboardEntry) {
+  if (!noteEditingId.value) return
+  try {
+    await UpdateClipboardNote(noteEditingId.value, NOTE_INPUT.value)
+    entry.note = NOTE_INPUT.value
+    noteEditingId.value = null
+    NOTE_INPUT.value = ''
+    toast?.success?.(t('clipboardNoteSaved'))
   } catch (e) {
     if (toast?.error) {
       toast.error(getErrorMessage(e))
@@ -512,6 +542,10 @@ onUnmounted(() => {
             <span v-if="entry.sourceApp" class="item-source">{{ entry.sourceApp }}</span>
             <span v-if="entry.copyCount > 1" class="item-count">{{ entry.copyCount }} {{ t('count') }}</span>
           </div>
+          <div v-if="entry.note" class="item-note">
+            <svg class="item-note-icon" xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            <span>{{ entry.note }}</span>
+          </div>
         </div>
         <button
           v-if="entry.contentType === 'text'"
@@ -530,12 +564,40 @@ onUnmounted(() => {
           <Star :size="13" />
         </button>
         <button
+          v-if="entry.isPinned === 1"
+          class="note-btn"
+          :class="{ 'note-editing': noteEditingId === entry.id }"
+          :title="t('clipboardEditNote')"
+          @click.stop="openNoteEditor(entry)"
+        >
+          <StickyNote :size="13" />
+        </button>
+        <button
           class="delete-btn"
           :title="t('delete')"
           @click.stop="handleDelete(entry)"
         >
           <Trash2 :size="13" />
         </button>
+      </div>
+      <!-- 备注编辑弹窗 -->
+      <div v-if="noteEditingId" class="note-editor-mask" @click.self="closeNoteEditor">
+        <div class="note-editor">
+          <div class="note-editor-head">
+            <span>{{ t('clipboardEditNote') }}</span>
+            <button class="icon-btn" @click="closeNoteEditor"><X :size="14" /></button>
+          </div>
+          <textarea
+            v-model="NOTE_INPUT"
+            class="note-textarea"
+            :placeholder="t('clipboardNotePlaceholder')"
+            rows="3"
+          />
+          <div class="note-editor-footer">
+            <button class="cancel-btn" @click="closeNoteEditor">{{ t('cancel') }}</button>
+            <button class="save-btn" @click="saveNote(entries.find(e => e.id === noteEditingId)!)">{{ t('save') }}</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -786,4 +848,86 @@ onUnmounted(() => {
 .clipboard-pagination .page-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
 .clipboard-pagination .page-ellipsis { color: var(--color-text-disabled); font-size: 11px; width: 18px; text-align: center; }
 .clipboard-pagination .page-total { margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
+
+/* 备注按钮 */
+.note-btn {
+  flex-shrink: 0; margin-top: 3px;
+  background: none; border: none; cursor: pointer;
+  padding: 2px; border-radius: 4px;
+  color: var(--color-text-disabled); opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.clipboard-item:hover .note-btn,
+.clipboard-item.selected .note-btn { opacity: 0.4; }
+.note-btn:hover { opacity: 0.8 !important; color: var(--color-accent); }
+.note-btn.note-editing { opacity: 1 !important; color: var(--color-accent); }
+
+/* 备注编辑弹窗 */
+.note-editor-mask {
+  position: absolute; inset: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45);
+  animation: fadeIn 0.12s ease;
+}
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+
+.note-editor {
+  width: 320px; max-width: 90vw;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+  animation: slideUp 0.15s ease;
+}
+@keyframes slideUp { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+.note-editor-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 14px; border-bottom: 1px solid var(--color-border);
+  font-size: 13px; font-weight: 500; color: var(--color-text-primary);
+}
+.note-editor-head .icon-btn { width: 24px; height: 24px; }
+
+.note-textarea {
+  flex: 1; min-height: 80px; padding: 10px 14px;
+  border: none; outline: none; resize: none;
+  background: transparent; color: var(--color-text-primary);
+  font-size: 13px; font-family: inherit; line-height: 1.6;
+}
+.note-textarea::placeholder { color: var(--color-text-disabled); }
+
+.note-editor-footer {
+  display: flex; align-items: center; justify-content: flex-end;
+  gap: 8px; padding: 10px 14px;
+  border-top: 1px solid var(--color-border);
+}
+.cancel-btn, .save-btn {
+  padding: 5px 14px; border-radius: 6px;
+  font-size: 12px; font-family: inherit; font-weight: 500;
+  cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+}
+.cancel-btn:hover { background: var(--color-bg-hover); }
+.save-btn {
+  background: var(--color-accent); color: #fff; border-color: var(--color-accent);
+}
+.save-btn:hover { filter: brightness(1.1); }
+
+/* 备注行 */
+.item-note {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 11px; color: var(--color-text-muted);
+  margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.item-note-icon {
+  flex-shrink: 0; opacity: 0.6;
+  color: var(--color-accent);
+}
+.item-note span {
+  overflow: hidden; text-overflow: ellipsis;
+}
 </style>

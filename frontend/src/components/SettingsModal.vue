@@ -856,4 +856,7 @@ async function toggleAutoStart() {
 .panel-slide-leave-to .settings-sidebar {
   transform: translateX(-100%);
 }
+.field-row { display: flex; gap: 12px; align-items: center; }
+.field-hint { font-size: 11px; color: var(--color-text-disabled); }
+.field-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--color-accent); }
 </style>

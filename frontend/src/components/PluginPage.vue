@@ -123,9 +123,7 @@ async function onIframeLoad(event: Event) {
   // 再发 init（使用 nonce 消息代替裸 *）
   try {
     const raw = await GetAndClearPendingPluginInit()
-    const init = raw?.data || raw
-    const text = (init && typeof init === 'object') ? (init.text || '') : (typeof init === 'string' ? init : '')
-    const command = (init && typeof init === 'object') ? (init.command || '') : ''
+    const [text, command] = raw ?? ['', '']
     iframePostMessage({
       type: 'plugin:init',
       data: { text, command, theme: currentThemeName(), locale: locale.value }

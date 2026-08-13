@@ -268,6 +268,7 @@ export interface ClipboardEntry {
   sourceApp: string
   isPinned: number
   copyCount: number
+  note: string
   createdAt: number
 }
 

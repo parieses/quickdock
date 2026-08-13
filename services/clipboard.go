@@ -286,3 +286,14 @@ func (a *AppService) ResumeHotkeys() {
 		a.ResumeHotkeysFn()
 	}
 }
+
+// UpdateClipboardNote 更新剪贴板条目的备注
+func (a *AppService) UpdateClipboardNote(id, note string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if err := a.DB.UpdateClipboardNote(id, note); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
+}

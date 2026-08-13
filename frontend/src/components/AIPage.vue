@@ -66,7 +66,6 @@ const hasKey = computed(() => {
   const p = aiProfiles.value.find((x) => x.id === aiActive.value)
   return !!(p && p.apiKey)
 })
-
 const modes = [
   { key: 'chat', label: 'aiModeChat' },
   { key: 'explain', label: 'aiModeExplain' },
@@ -198,7 +197,11 @@ async function send() {
   }
   const convId = activeId.value
   // 立即把用户消息显示出来，随后在消息区内等待 AI 流式回复
-  messages.value.push({ id: '', conv_id: convId, role: 'user', content: text, created_at: new Date().toISOString() })
+  const msg: AIMessage = {
+    id: '', conv_id: convId, role: 'user', content: text,
+    created_at: new Date().toISOString(),
+  }
+  messages.value.push(msg)
   scrollToBottom()
   input.value = ''
   streaming.value = true
@@ -798,4 +801,5 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 .ai-send:disabled { opacity: 0.5; cursor: not-allowed; }
+
 </style>

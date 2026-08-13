@@ -129,6 +129,7 @@ var baseTables = []string{
 		source_app TEXT DEFAULT '',
 		is_pinned INTEGER DEFAULT 0,
 		copy_count INTEGER DEFAULT 0,
+		note TEXT DEFAULT '',
 		created_at INTEGER NOT NULL
 	)`,
 
@@ -431,6 +432,7 @@ func (d *Database) migrate() error {
 	columnMigrations := []colMig{
 		{"clipboard_entries", "copy_count", "INTEGER DEFAULT 0"},
 		{"clipboard_entries", "image_hash", "TEXT"},
+		{"clipboard_entries", "note", "TEXT DEFAULT ''"},
 		{"plugins", "installed_at", "TEXT NOT NULL DEFAULT ''"},
 		{"plugins", "updated_at", "TEXT NOT NULL DEFAULT ''"},
 		{"plugins", "category", "TEXT DEFAULT ''"},

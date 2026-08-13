@@ -229,10 +229,6 @@ async function handleDeleteScene(sceneId: string) {
         <FileText :size="14" />
         <span>{{ t('navSnippets') }}</span>
       </button>
-      <button :class="['nav-item', { active: currentPage === 'systemstatus' }]" @click="emit('navigate', 'systemstatus')">
-        <Activity :size="14" />
-        <span>{{ t('navSystemStatus') }}</span>
-      </button>
       <button :class="['nav-item', { active: currentPage === 'todo' }]" @click="emit('navigate', 'todo')">
         <ListTodo :size="14" />
         <span>{{ t('navTodo') }}</span>

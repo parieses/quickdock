@@ -109,9 +109,7 @@ export function useInlinePlugin() {
     window.addEventListener('message', inlinePluginMsgHandler)
     try {
       const raw = await GetAndClearPendingPluginInit()
-      const init = raw?.data || raw
-      const text = (init && typeof init === 'object') ? (init.text || '') : (typeof init === 'string' ? init : '')
-      const command = (init && typeof init === 'object') ? (init.command || '') : ''
+      const [text, command] = raw ?? ['', '']
       if (iframe.contentWindow) {
         iframe.contentWindow.postMessage({ type: 'plugin:theme', data: { theme: 'dark', locale: locale.value } }, '*')
         iframe.contentWindow.postMessage({

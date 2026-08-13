@@ -277,22 +277,10 @@ export default {
   navSnippets: 'Snippets',
   navClipboard: 'Clipboard',
   navPlugins: 'Plugins',
-  navSystemStatus: 'System Status',
   navTodo: 'Todo',
   navSchedule: 'Scheduler',
   navMonitor: 'Uptime Monitor',
   pagePlaceholder: 'This feature is under development...',
-
-  // System Status
-  sysStatusTitle: 'System Status',
-  statCPU: 'CPU',
-  statMemory: 'Memory',
-  statDisk: 'Disk',
-  statNetwork: 'Network',
-  statUsed: 'Used',
-  statTotal: 'Total',
-  statIP: 'IP Address',
-  statRefreshing: 'Refreshing...',
 
   // Todo
   todoTitle: 'Todo',
@@ -574,6 +562,12 @@ export default {
   tagCode: 'Code',
   tagPhone: 'Phone',
   tagFavorite: 'Pinned',
+
+  // Clipboard note
+  clipboardNote: 'Note',
+  clipboardNotePlaceholder: 'What is this content about?',
+  clipboardNoteSaved: 'Note saved',
+  clipboardEditNote: 'Edit note',
 
   // Clipboard → Snippet
   addToSnippet: 'Save as Snippet',

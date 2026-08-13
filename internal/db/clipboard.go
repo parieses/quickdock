@@ -18,6 +18,7 @@ type ClipboardEntry struct {
 	SourceApp   string `json:"sourceApp"`
 	IsPinned    int    `json:"isPinned"`
 	CopyCount   int    `json:"copyCount"`
+	Note        string `json:"note"`
 	CreatedAt   int64  `json:"createdAt"`
 }
 
@@ -127,9 +128,9 @@ func (d *Database) ListClipboardEntries(limit int) ([]ClipboardEntry, error) {
 	var rows *sql.Rows
 	var err error
 	if limit <= 0 {
-		rows, err = d.conn.Query("SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, created_at FROM clipboard_entries ORDER BY created_at DESC")
+		rows, err = d.conn.Query("SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, note, created_at FROM clipboard_entries ORDER BY created_at DESC")
 	} else {
-		rows, err = d.conn.Query("SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, created_at FROM clipboard_entries ORDER BY created_at DESC LIMIT ?", limit)
+		rows, err = d.conn.Query("SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, note, created_at FROM clipboard_entries ORDER BY created_at DESC LIMIT ?", limit)
 	}
 	if err != nil {
 		return nil, err
@@ -142,12 +143,14 @@ func (d *Database) ListClipboardEntries(limit int) ([]ClipboardEntry, error) {
 		var imgPath sql.NullString
 		var txtContent sql.NullString
 		var imgHash sql.NullString
-		if err := rows.Scan(&e.ID, &e.ContentType, &txtContent, &imgPath, &imgHash, &e.SourceApp, &e.IsPinned, &e.CopyCount, &e.CreatedAt); err != nil {
+		var note sql.NullString
+		if err := rows.Scan(&e.ID, &e.ContentType, &txtContent, &imgPath, &imgHash, &e.SourceApp, &e.IsPinned, &e.CopyCount, &note, &e.CreatedAt); err != nil {
 			return nil, err
 		}
 		e.TextContent = txtContent.String
 		e.ImagePath = imgPath.String
 		e.ImageHash = imgHash.String
+		e.Note = note.String
 		entries = append(entries, e)
 	}
 	return entries, rows.Err()
@@ -162,15 +165,17 @@ func (d *Database) GetClipboardEntry(id string) (*ClipboardEntry, error) {
 	var imgPath sql.NullString
 	var txtContent sql.NullString
 	var imgHash sql.NullString
+	var note sql.NullString
 	err := d.conn.QueryRow(
-		"SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, created_at FROM clipboard_entries WHERE id = ?", id,
-	).Scan(&e.ID, &e.ContentType, &txtContent, &imgPath, &imgHash, &e.SourceApp, &e.IsPinned, &e.CopyCount, &e.CreatedAt)
+		"SELECT id, content_type, text_content, image_path, image_hash, source_app, is_pinned, copy_count, note, created_at FROM clipboard_entries WHERE id = ?", id,
+	).Scan(&e.ID, &e.ContentType, &txtContent, &imgPath, &imgHash, &e.SourceApp, &e.IsPinned, &e.CopyCount, &note, &e.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
 	e.TextContent = txtContent.String
 	e.ImagePath = imgPath.String
 	e.ImageHash = imgHash.String
+	e.Note = note.String
 	return &e, nil
 }
 
@@ -223,6 +228,15 @@ func (d *Database) IncrementClipboardCopyCount(id string) error {
 	defer d.mu.Unlock()
 
 	_, err := d.conn.Exec("UPDATE clipboard_entries SET copy_count = copy_count + 1, created_at = ? WHERE id = ?", time.Now().UnixMilli(), id)
+	return err
+}
+
+// UpdateClipboardNote 更新剪贴板条目的备注
+func (d *Database) UpdateClipboardNote(id, note string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	_, err := d.conn.Exec("UPDATE clipboard_entries SET note = ? WHERE id = ?", note, id)
 	return err
 }
 

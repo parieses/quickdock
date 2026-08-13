@@ -311,6 +311,16 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// 文档级 Esc 兜底：frameless 窗口激活竞态下输入框可能未获得键盘焦点，
+// 仅 @keydown 绑在 <input> 上时 Esc 会丢失，故在 document 上再兜一层（capture 保证不被子组件吞掉）。
+function onGlobalEsc(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  e.preventDefault()
+  if (actionMenuOpen.value) { closeActionMenu(); return }
+  if (inlineQuicklink.value) { cancelInlineQuicklink(); return }
+  closePalette()
+}
+
 // ---- 执行 ----
 function isOpenable(r: SearchResult): boolean {
   return r.type === 'item' || r.type === 'url' || r.type === 'app' || r.type === 'quicklink' || r.type === 'quicklink-inline'
@@ -642,6 +652,8 @@ let lastClipboardUpdate = 0
 
 onMounted(async () => {
   Events.On('clipboard:updated', () => { lastClipboardUpdate = Date.now() })
+  // 文档级 Esc 兜底（capture 阶段），确保输入框未获焦点时也能关闭面板
+  document.addEventListener('keydown', onGlobalEsc, true)
   Events.On('palette:shown', () => {
     if (inlinePluginId.value) closeInlinePlugin()
     loadPluginIndex()
@@ -689,6 +701,7 @@ onUnmounted(() => {
   closeInlinePlugin()
   Events.Off('palette:shown')
   Events.Off('clipboard:updated')
+  document.removeEventListener('keydown', onGlobalEsc, true)
   window.removeEventListener('focus', focusInput)
 })
 </script>

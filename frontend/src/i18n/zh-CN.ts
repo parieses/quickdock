@@ -277,22 +277,10 @@ export default {
   navSnippets: '文本片段',
   navClipboard: '剪贴板',
   navPlugins: '插件',
-  navSystemStatus: '系统状态',
   navTodo: '待办任务',
   navSchedule: '定时任务',
   navMonitor: '网站监控',
   pagePlaceholder: '此功能正在开发中...',
-
-  // 系统状态
-  sysStatusTitle: '系统状态',
-  statCPU: 'CPU',
-  statMemory: '内存',
-  statDisk: '磁盘',
-  statNetwork: '网络',
-  statUsed: '已用',
-  statTotal: '总计',
-  statIP: 'IP 地址',
-  statRefreshing: '刷新中...',
 
   // 待办任务
   todoTitle: '待办任务',
@@ -576,6 +564,12 @@ export default {
   tagCode: '代码',
   tagPhone: '手机号',
   tagFavorite: '已收藏',
+
+  // 剪贴板备注
+  clipboardNote: '备注',
+  clipboardNotePlaceholder: '输入备注说明此内容是什么...',
+  clipboardNoteSaved: '备注已保存',
+  clipboardEditNote: '编辑备注',
 
   // 剪贴板添加到片段
   addToSnippet: '保存为片段',
