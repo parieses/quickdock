@@ -14,9 +14,30 @@ import (
 )
 
 var (
-	modkernel32 = windows.NewLazySystemDLL("kernel32.dll")
-	moduser32   = windows.NewLazySystemDLL("user32.dll")
+	modkernel32  = windows.NewLazySystemDLL("kernel32.dll")
+	moduser32    = windows.NewLazySystemDLL("user32.dll")
+	procGetWindow = moduser32.NewProc("GetWindow")
 )
+
+// foregroundIsOwnedModal 判断当前前台窗口是否为被本应用窗口拥有的模态对话框
+// （例如命令面板内插件 <input type="file"> 弹出的系统文件选择框）。
+// 命令面板等窗口在失焦时会隐藏自身；若失焦是自家模态框打开所致，则不应隐藏，
+// 否则会出现"在插件里选文件时页面被关掉"的问题。
+func foregroundIsOwnedModal() bool {
+	hwnd := windows.GetForegroundWindow()
+	if hwnd == 0 {
+		return false
+	}
+	// GW_OWNER = 4 / GW_PARENT = 1：取窗口的拥有者/父窗口。
+	// 顶层无主窗口（如其它应用窗口、本应用主窗口）两者均为 0；
+	// 被本窗口拥有的模态对话框（如系统文件选择框，WebView2 可能以 owner 或 child 形式挂载）返回非零。
+	owner, _, _ := procGetWindow.Call(uintptr(hwnd), 4)
+	if owner != 0 {
+		return true
+	}
+	parent, _, _ := procGetWindow.Call(uintptr(hwnd), 1)
+	return parent != 0
+}
 
 // instanceMutexName 单实例锁名称。
 // 开发版与正式版共用同一数据库（~/.quickdock），因此共用同一把锁，
@@ -160,6 +181,9 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 	})
 	win.Hide()
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+		if foregroundIsOwnedModal() {
+			return // 自家模态对话框（文件选择框等）导致失焦，不隐藏
+		}
 		paletteMode.Store(false)
 		win.Hide()
 	})

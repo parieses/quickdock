@@ -296,11 +296,6 @@ function onKeydown(e: KeyboardEvent) {
       e.preventDefault(); selectedIndex.value = (selectedIndex.value + 1) % Math.max(list.length, 1); scrollToSelected(); break
     case 'ArrowLeft':
       e.preventDefault(); selectedIndex.value = (selectedIndex.value - 1 + list.length) % Math.max(list.length, 1); scrollToSelected(); break
-    case 'a': case 'A':
-      if (e.ctrlKey || e.metaKey) {
-        e.preventDefault(); const s = new Set<number>(); displayFlat.value.forEach((_, i) => s.add(i)); selectedSet.value = s
-      }
-      break
     case 'k': case 'K':
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); openActionMenu() }
       break
@@ -416,8 +411,9 @@ async function executeSelected() {
     }
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, inputText || '')
     try {
-      if (result.pluginHasFrontend && !inputText) {
-        // 前端插件且无输入：打开 UI 面板；带输入时仍走后端即时转换（保持现状）
+      if (result.pluginHasFrontend) {
+        // 前端插件：始终打开 UI 面板；若通过正则/前缀匹配到输入，把输入作为待初始化参数传给插件
+        if (inputText) { try { await SetPendingPluginInit(inputText, result.pluginCommandId || '') } catch {} }
         inlinePluginId.value = result.pluginId; inlinePluginLoading.value = true; inlinePluginError.value = ''
         try {
           const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId, currentThemeName(), locale.value))

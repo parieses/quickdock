@@ -325,9 +325,11 @@ onMounted(() => { loadActiveEnvs(); load() })
       @drag-over="onDragOver"
       @drop="onDrop"
       @open-proj-menu="openProjMenu"
+      @open-req-menu="openReqMenu"
     />
 
-    <!-- 右：请求编辑 + 响应 -->
+    <!-- 右列：请求编辑(上) + 响应(下) -->
+    <div class="main-col">
     <template v-if="!currentDocId">
       <RequestForm
         :method="method"
@@ -399,6 +401,7 @@ onMounted(() => { loadActiveEnvs(); load() })
         </div>
       </div>
     </template>
+    </div>
 
     <!-- 弹窗 -->
     <CreateDialog :visible="showProjectDialog" :title="t('httpNewProject')"
@@ -504,9 +507,10 @@ onMounted(() => { loadActiveEnvs(); load() })
 </template>
 
 <style scoped>
-.http-client { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
-.req-main { flex: 0 0 auto; overflow-y: auto; display: flex; flex-direction: column; }
-.resp-pane { flex: 1; min-height: 0; }
+/* 两列：左=项目树(250px) | 右=请求编辑(上)+响应(下) */
+.http-client { display: flex; flex-direction: row; height: 100%; overflow: hidden; }
+/* 右列容器：占满剩余宽度，纵向排列「请求表单」与「响应面板」 */
+.main-col { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
 
 /* 弹窗 */
 .modal-mask { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.45); display: flex; align-items: center; justify-content: center; z-index: 200; }
@@ -532,6 +536,40 @@ onMounted(() => { loadActiveEnvs(); load() })
 .env-card-head { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
 .env-name-input { flex: 1; }
 .env-add { margin-top: 2px; }
+
+/* 弹窗内共享表单工具类（拆分前在单文件作用域，拆分后需在本组件作用域补回，否则无样式） */
+.field-label { font-size: 13px; color: var(--color-text-muted); margin-top: 4px; }
+.mini-select, .text-input {
+  padding: 5px 8px; border-radius: 5px; border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary); color: var(--color-text-primary);
+  font-size: 13px; font-family: inherit; outline: none;
+}
+.text-input { width: 100%; }
+.text-input:focus, .mini-select:focus { border-color: var(--color-border-focus); }
+.kv-hint { font-size: 12px; color: var(--color-text-disabled); margin: 0; }
+.kv-editor { display: flex; flex-direction: column; gap: 5px; }
+.kv-row { display: flex; align-items: center; gap: 6px; }
+.kv-check { width: 15px; height: 15px; flex-shrink: 0; accent-color: var(--color-accent); cursor: pointer; }
+.kv-key, .kv-val {
+  flex: 1; min-width: 0; padding: 5px 8px; border-radius: 5px;
+  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+  color: var(--color-text-primary); font-size: 13px; font-family: 'Consolas', 'Monaco', monospace; outline: none;
+}
+.kv-key:focus, .kv-val:focus { border-color: var(--color-border-focus); }
+.kv-del {
+  background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: 4px; flex-shrink: 0;
+}
+.kv-del:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+.kv-add {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 5px; border: 1px dashed var(--color-border); border-radius: 5px; background: none;
+  color: var(--color-text-muted); font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.kv-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.proj-empty { padding: 8px; text-align: center; color: var(--color-text-disabled); font-size: 12px; }
 
 /* 右键上下文菜单 */
 .ctx-menu-mask { position: fixed; inset: 0; z-index: 300; }

@@ -41,6 +41,7 @@ const emit = defineEmits<{
   (e: 'drag-over', target: HttpDropTarget): void
   (e: 'drop', target: HttpDropTarget): void
   (e: 'open-proj-menu', event: MouseEvent, projectId: string): void
+  (e: 'open-req-menu', event: MouseEvent, req: ApiRequest): void
 }>()
 
 const { t } = useI18n()
@@ -96,6 +97,7 @@ function setActiveEnv(pid: string, eid: string) {
             @dragend="$emit('drag-end')"
             @dragover.prevent="$emit('drag-over', { kind: 'before-request', id: r.id })"
             @drop.prevent="$emit('drop', { kind: 'before-request', id: r.id })"
+            @contextmenu.prevent="$emit('open-req-menu', $event, r)"
           >
             <span :class="['req-method', 'method-' + (r.method || 'GET').toLowerCase()]">{{ r.method || 'GET' }}</span>
             <span class="req-name" :title="r.name || r.url">{{ r.name || r.url }}</span>
@@ -149,10 +151,10 @@ function setActiveEnv(pid: string, eid: string) {
           @dragover.prevent="$emit('drag-over', { kind: 'project-root', projectId: '' })"
           @drop.prevent="$emit('drop', { kind: 'project-root', projectId: '' })"
         >
-          <component :is="uncategorized ? ChevronDown : ChevronRight" :size="13" class="proj-caret" />
+          <component :is="uncatExpanded ? ChevronDown : ChevronRight" :size="13" class="proj-caret" />
           <span class="proj-name uncat">{{ t('httpUncategorized') }}</span>
         </div>
-        <div v-if="uncategorized" class="proj-children">
+        <div v-if="uncatExpanded" class="proj-children">
           <div
             v-for="r in uncategorized"
             :key="r.id"
@@ -163,6 +165,7 @@ function setActiveEnv(pid: string, eid: string) {
             @dragend="$emit('drag-end')"
             @dragover.prevent="$emit('drag-over', { kind: 'before-request', id: r.id })"
             @drop.prevent="$emit('drop', { kind: 'before-request', id: r.id })"
+            @contextmenu.prevent="$emit('open-req-menu', $event, r)"
           >
             <span :class="['req-method', 'method-' + (r.method || 'GET').toLowerCase()]">{{ r.method || 'GET' }}</span>
             <span class="req-name" :title="r.name || r.url">{{ r.name || r.url }}</span>
