@@ -55,3 +55,4 @@ updater.key
 # 本地 Ed25519 验签回归测试：仅本地保留用于守护更新签名链路，不纳入版本库
 services/update_verify_test.go
 docs/project-scan-report.md
+scripts/ReTag.ps1
