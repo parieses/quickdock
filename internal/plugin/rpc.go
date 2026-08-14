@@ -88,6 +88,54 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 	}
 }
 
+// maxPluginLineBytes 限制单条插件 stdout 行的最大字节数。
+// 用 bufio.Reader 而非 Scanner（Scanner 即使放大 buffer 仍有 1MB 单行硬上限，
+// 插件返回大 base64/文件内容 >1MB 会触发 ErrTooLong → readLoop 退出 → 实例被标 crashed → 重启循环），
+// 但同时给出一个较大但有限的上限，防止异常/恶意插件无限输出导致宿主机内存无界增长。
+const maxPluginLineBytes = 64 << 20 // 64 MiB
+
+// boundedReadLine 从 r 读取一行（含行尾的 '\n'），但把单行累计长度限制在 limit 内。
+// 若单行长度超过 limit，返回已读到的前缀（截断）以保证调用方不阻塞，同时避免无界内存增长。
+// 返回 (数据, 是否截断, error)；err 语义与 bufio.ReadString 一致。
+func boundedReadLine(r *bufio.Reader, limit int) ([]byte, bool, error) {
+	var buf []byte
+	for {
+		chunk, err := r.ReadBytes('\n')
+		if len(chunk) > 0 {
+			// 本行累计已超过上限 → 截断丢弃行的剩余部分直到读走换行，返回已积累的前缀
+			if len(buf)+len(chunk) > limit {
+				// 丢弃完整行，避免在该行剩余部分反复分配
+				if err == nil {
+					// chunk 以换行结尾，说明该行已完整读入，只需保留前缀
+					maxCopy := limit - len(buf)
+					if maxCopy > len(chunk) {
+						maxCopy = len(chunk)
+					}
+					buf = append(buf, chunk[:maxCopy]...)
+					return buf, true, nil
+				}
+				// err != nil 且还没读到换行，保留前缀后返回截断标志
+				maxCopy := limit - len(buf)
+				if maxCopy > len(chunk) {
+					maxCopy = len(chunk)
+				}
+				buf = append(buf, chunk[:maxCopy]...)
+				return buf, true, err
+			}
+			buf = append(buf, chunk...)
+			// 已读到换行 → 正常单行返回
+			if err == nil {
+				return buf, false, nil
+			}
+			// 读到 EOF 但仍有数据（最后一行无换行），ReadBytes 返回数据 + io.EOF
+			return buf, false, err
+		}
+		if err != nil {
+			return buf, false, err
+		}
+	}
+}
+
 // readLoop 后台循环读取插件 stdout
 // 必须在子进程启动后以 goroutine 方式运行
 func (inst *PluginInstance) readLoop(manager *Manager) {
@@ -100,13 +148,14 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	// 就绪信号 ← P0 修复：确保 readLoop 已开始监听再发送 initialize
 	close(inst.readyCh)
 
-	// 用 bufio.Reader 替代 Scanner：Scanner 即使放大 buffer 仍有 1MB 单行硬上限，
-	// 插件返回大 base64/文件内容（>1MB）会触发 ErrTooLong → readLoop 退出 → 实例被标 crashed → 重启循环。
-	// ReadString 按需增长内部缓冲，单行无大小上限。
 	reader := bufio.NewReaderSize(inst.Stdout, 64*1024)
 
 	for {
-		line, err := reader.ReadString('\n')
+		line, truncated, err := boundedReadLine(reader, maxPluginLineBytes)
+		if truncated {
+			fmt.Printf("[plugin %s] stdout 单行超过 %d 字节，已截断\n", inst.Manifest.ID, maxPluginLineBytes)
+			// 截断后的行无法解析为合法 JSON-RPC，直接走到 err 分支继续循环
+		}
 		if len(line) > 0 {
 			// 去掉行尾换行（兼容 \r\n）
 			lb := line
@@ -117,7 +166,7 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 				}
 			}
 			if len(lb) > 0 {
-				b := []byte(lb)
+				b := lb
 				// 先尝试解析为请求（包含 method 字段）
 				var req RPCRequest
 				if jerr := json.Unmarshal(b, &req); jerr == nil && req.Method != "" {
@@ -131,7 +180,7 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 					if jerr := json.Unmarshal(b, &resp); jerr != nil {
 						// 无法解析的 stdout 行，静默忽略（插件自己的调试打印不应干扰通信协议）
 						// 如需调试可取消下行注释：
-						// fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, lb)
+						// fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, string(lb))
 					} else {
 						// 匹配 pending 请求
 						inst.readMu.Lock()

@@ -2,7 +2,9 @@ package main
 
 import (
 	"os"
+	"strings"
 	"sync"
+	"syscall"
 	"unsafe"
 
 	"quickdock/internal/platform"
@@ -59,32 +61,60 @@ func ensureSingleInstance() bool {
 
 	// 检查是否已经存在
 	if err == windows.ERROR_ALREADY_EXISTS {
-		// 已有实例运行，找到它的主窗口并提到前台
-		className, _ := windows.UTF16PtrFromString("Chrome_WidgetWin_0") // WebView2 窗口类
-		findWindow := moduser32.NewProc("FindWindowW")
-		hwnd, _, _ := findWindow.Call(uintptr(unsafe.Pointer(className)), 0)
-
-		if hwnd != 0 {
+		// 已有实例运行，找到它的主窗口并提到前台。
+		// 注意：不能只用 FindWindowW("Chrome_WidgetWin_0")—— 该窗口类被大量其它
+		// Chromium/WebView2/Electron 应用共用，直接命中会把无关应用错误顶到前台
+		//（尤其本应用常隐藏到托盘时）。因此用 EnumWindows + 类名 + 标题双重匹配
+		// 精确定位到 QuickDock 自己的窗口。
+		if hwnd := findQuickDockWindow(); hwnd != 0 {
 			showWindow := moduser32.NewProc("ShowWindow")
 			showWindow.Call(hwnd, 9)      // SW_RESTORE
 			setFg := moduser32.NewProc("SetForegroundWindow")
 			setFg.Call(hwnd)
-		} else {
-			// 按标题搜索作为备选
-			title, _ := windows.UTF16PtrFromString("快启坞 QuickDock")
-			hwnd, _, _ = findWindow.Call(0, uintptr(unsafe.Pointer(title)))
-			if hwnd != 0 {
-				showWindow := moduser32.NewProc("ShowWindow")
-				showWindow.Call(hwnd, 9)
-				setFg := moduser32.NewProc("SetForegroundWindow")
-				setFg.Call(hwnd)
-			}
 		}
 		return true
 	}
 
 	// 首次启动，互斥体句柄会在进程退出时自动关闭
 	return false
+}
+
+// findQuickDockWindow 使用的 Win32 API proc（缓存，避免每次调用 NewProc）
+var procEnumWindows = moduser32.NewProc("EnumWindows")
+var procGetWindowTextW = moduser32.NewProc("GetWindowTextW")
+var procGetClassNameW = moduser32.NewProc("GetClassNameW")
+
+// findQuickDockWindow 遍历所有顶层窗口，返回第一个「类名为常见 WebView2/Chromium 类
+// 且标题包含 QuickDock/快启坞」的窗口句柄；找不到返回 0。
+func findQuickDockWindow() uintptr {
+	var found uintptr
+	// EnumWindows 回调（syscall.NewCallback 需要保持存活到调用结束）
+	cb := syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
+		// 过滤窗口类：仅接受 WebView2/Chromium 使用的类名
+		var cls [64]uint16
+		r1, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&cls[0])), uintptr(len(cls)))
+		if r1 == 0 {
+			return 1 // 继续枚举
+		}
+		className := windows.UTF16ToString(cls[:])
+		if className != "Chrome_WidgetWin_0" && className != "Chrome_WidgetWin_1" {
+			return 1
+		}
+		// 标题必须包含本应用标识，避免把其它 Chromium/WebView2 应用误判为自家窗口
+		var title [256]uint16
+		r2, _, _ := procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&title[0])), uintptr(len(title)))
+		if r2 == 0 {
+			return 1
+		}
+		t := windows.UTF16ToString(title[:])
+		if strings.Contains(t, "QuickDock") || strings.Contains(t, "快启坞") {
+			found = hwnd
+			return 0 // 停止枚举
+		}
+		return 1
+	})
+	procEnumWindows.Call(cb, 0)
+	return found
 }
 
 // clipboardWinLock 保护剪贴板窗口的懒创建（与 paletteWinLock 同模式）

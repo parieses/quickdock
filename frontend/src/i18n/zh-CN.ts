@@ -585,7 +585,16 @@ export default {
   snippetCatTemplate: '模板',
   snippetCatOther: '其他',
 
-  // WebDAV 同步
+  // 统一同步（同步后端抽象：WebDAV 是一种实现，未来可加 Git / 对象存储）
+  sync: '同步',
+  syncDesc: '将数据备份到同步后端。当前支持 WebDAV，未来可扩展 Git / 对象存储等后端，核心导出/恢复逻辑不变。',
+  syncBackend: '同步后端',
+  syncSelectBackend: '选择同步后端',
+  syncNoBackend: '请先选择并配置同步后端',
+  syncCreateBackup: '创建备份',
+  syncRestoring: '恢复中…',
+
+  // WebDAV 同步（作为同步后端的一种实现）
   webdavConfig: 'WebDAV 配置',
   webdavDesc: '配置 WebDAV 服务器地址，用于同步备份数据。支持 Nextcloud、ownCloud 等兼容服务。',
   webdavUrl: '服务器地址',

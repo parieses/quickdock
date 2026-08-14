@@ -13,7 +13,7 @@ const store = useWorkspaceStore()
 import HotkeySettings from './HotkeySettings.vue'
 import SettingsAI from './SettingsAI.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
-import SettingsWebDAV from './SettingsWebDAV.vue'
+import SettingsSync from './SettingsSync.vue'
 import SettingsTools from './SettingsTools.vue'
 import { GetClipboardRetentionDays, SetClipboardRetentionDays, CleanupClipboardNow } from '../../bindings/quickdock/services/appservice'
 import { GetAutoStart, SetAutoStart } from '../../bindings/quickdock/services/appservice'
@@ -43,7 +43,7 @@ const menuItems = computed(() => [
   { key: 'appearance', label: t('appearance'),      icon: Palette,  desc: t('theme') + ' / ' + t('language') },
   { key: 'hotkeys',    label: t('hotkeySettings'),  icon: Keyboard, desc: t('shortcut') },
   { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
-  { key: 'webdav',     label: 'WebDAV',              icon: Cloud,    desc: t('settings') },
+  { key: 'sync',      label: t('sync'),              icon: Cloud,    desc: t('syncDesc') },
   { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
   { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
@@ -447,9 +447,9 @@ async function toggleAutoStart() {
             </div>
           </div>
 
-          <!-- WebDAV 同步 -->
-          <div v-else-if="activePage === 'webdav'" class="content-page content-left">
-            <SettingsWebDAV :visible="activePage === 'webdav'" @close="close" />
+          <!-- 统一同步（同步后端抽象：WebDAV 是一种实现） -->
+          <div v-else-if="activePage === 'sync'" class="content-page content-left">
+            <SettingsSync :visible="activePage === 'sync'" @close="close" />
           </div>
 
           <!-- 快照备份 -->

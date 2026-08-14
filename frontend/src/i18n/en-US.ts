@@ -583,7 +583,16 @@ export default {
   snippetCatTemplate: 'Template',
   snippetCatOther: 'Other',
 
-  // WebDAV Sync
+  // Unified Sync (sync backend abstraction: WebDAV is one impl, Git / object storage can be added)
+  sync: 'Sync',
+  syncDesc: 'Back up data to a sync backend. WebDAV is supported now; Git / object storage backends can be added later without changing the core export/restore logic.',
+  syncBackend: 'Sync Backend',
+  syncSelectBackend: 'Select sync backend',
+  syncNoBackend: 'Please select and configure a sync backend first',
+  syncCreateBackup: 'Create Backup',
+  syncRestoring: 'Restoring…',
+
+  // WebDAV Sync (as one implementation of the sync backend)
   webdavConfig: 'WebDAV Configuration',
   webdavDesc: 'Configure WebDAV server for backup sync. Compatible with Nextcloud, ownCloud, etc.',
   webdavUrl: 'Server URL',

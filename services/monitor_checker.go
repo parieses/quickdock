@@ -124,7 +124,7 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 		return "", ""
 	}
 
-	up, code, latency, errMsg := probeMonitor(m)
+	up, code, latency, errMsg := probeMonitor(current)
 	status := "down"
 	if up {
 		status = "up"
@@ -149,17 +149,18 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	}
 
 	// SSL 证书到期检查（仅 HTTPS 监控）
-	if u, perr := url.Parse(m.URL); perr == nil && strings.EqualFold(u.Scheme, "https") {
+	// 用刚重查的 current 副本读取证书配置，避免使用探测期间已过期的 m 副本值
+	if u, perr := url.Parse(current.URL); perr == nil && strings.EqualFold(u.Scheme, "https") {
 		host := u.Hostname()
 		port := 443
 		if p, e := strconv.Atoi(u.Port()); e == nil {
 			port = p
 		}
-		if expiresAt, cerr := fetchCertExpiry(host, port, m.TimeoutSec); cerr == nil && expiresAt > 0 {
+		if expiresAt, cerr := fetchCertExpiry(host, port, current.TimeoutSec); cerr == nil && expiresAt > 0 {
 			now := time.Now().Unix()
-			warnWindow := int64(m.CertWarnDays) * 86400
-			newLastWarned := m.LastCertWarned
-			if expiresAt-now <= warnWindow && m.LastCertWarned == 0 {
+			warnWindow := int64(current.CertWarnDays) * 86400
+			newLastWarned := current.LastCertWarned
+			if expiresAt-now <= warnWindow && current.LastCertWarned == 0 {
 				daysLeft := (expiresAt - now) / 86400
 				title := "🔐 证书即将过期：" + m.Name
 				body := fmt.Sprintf("%s\n证书将于 %s 过期（剩 %d 天）", m.URL, time.Unix(expiresAt, 0).Format("2006-01-02"), daysLeft)
@@ -178,10 +179,11 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	}
 
 	// 仅在状态翻转时通知（桌面通知 + 机器人 Webhook 共用同一套 down/up 开关）
-	// 用刚重查的 current.LastStatus 作为翻转基准，避免沿用过期的 m 副本
+	// 用刚重查的 current.LastStatus 作为翻转基准，同时开关也读 current——
+	// 探针期间用户停用开关后不应再补发陈旧的告警/恢复通知。
 	prev := current.LastStatus
 	switch {
-	case status == "down" && prev != "down" && m.NotifyDown:
+	case status == "down" && prev != "down" && current.NotifyDown:
 		title := "🔴 监控告警：" + m.Name
 		body := m.URL
 		if errMsg != "" {
@@ -195,7 +197,7 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 			})
 		}
 		a.sendWebhookNotify(title, body)
-	case status == "up" && prev == "down" && m.NotifyUp:
+	case status == "up" && prev == "down" && current.NotifyUp:
 		title := "🟢 已恢复：" + m.Name
 		body := fmt.Sprintf("%s\n响应 %d · %dms", m.URL, code, latency)
 		if a.Notifier != nil {

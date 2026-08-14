@@ -31,6 +31,9 @@ var userHTTPClient = &http.Client{
 // SendApiRequest 执行一次请求并返回响应（不保存）。
 // 发送前应用项目共享头 + 环境变量（{{var}} 替换），请求头覆盖项目头同名 key。
 func (a *AppService) SendApiRequest(input ApiRequestInput) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
 	if err := a.applyProjectAndEnv(&input); err != nil {
 		return Fail(err)
 	}
