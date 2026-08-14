@@ -127,13 +127,48 @@ func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 		enrichItemIcon(&item)
 		items = append(items, item)
 	}
+	// 批量写回新提取的图标：单条 `CASE id WHEN ? THEN ?` UPDATE 替代逐行 UPDATE，
+	// 只在 icon 仍为空时写（WHERE icon = '' 防止并发覆盖用户手动设置的图标）。
+	var (
+		ids      []string
+		iconVals []string
+	)
 	for i := range items {
-		if items[i].Icon != "" {
-			// 条件 icon = '' 防止并发写入覆盖用户手动设置的图标
-			_, _ = d.conn.Exec("UPDATE items SET icon = ? WHERE id = ? AND icon = ''", items[i].Icon, items[i].ID)
+		if items[i].Icon == "" {
+			continue
 		}
+		ids = append(ids, items[i].ID)
+		iconVals = append(iconVals, items[i].Icon)
+	}
+	if len(ids) > 0 {
+		qs := strings.Repeat("?,", len(ids))
+		qs = qs[:len(qs)-1]
+		// CASE id WHEN id1 THEN icon1 WHEN id2 THEN icon2 ... → 参数 interleave (id1,icon1,id2,icon2,...)
+		// 末尾再补 IN (id1,id2,...) 的 id 列表
+		_, _ = d.conn.Exec(
+			`UPDATE items SET icon = CASE id `+strings.Repeat("WHEN ? THEN ? ", len(ids))+`ELSE icon END
+			 WHERE id IN (`+qs+`) AND icon = ''`,
+			append(iconValsArgs(ids, iconVals), toIFaceSlice(ids)...)...)
 	}
 	return items, rows.Err()
+}
+
+// iconValsArgs 生成 `CASE id WHEN id THEN icon ...` 的展开参数（interleave id,icon,...）。
+func iconValsArgs(ids, icons []string) []interface{} {
+	out := make([]interface{}, 0, len(ids)*2)
+	for i := range ids {
+		out = append(out, ids[i], icons[i])
+	}
+	return out
+}
+
+// toIFaceSlice 把 []string 转为 []interface{}。
+func toIFaceSlice(s []string) []interface{} {
+	out := make([]interface{}, len(s))
+	for i := range s {
+		out[i] = s[i]
+	}
+	return out
 }
 
 func (d *Database) CreateItem(workspaceID, collectionID, name, itemType, value string) (*CollectionItem, error) {

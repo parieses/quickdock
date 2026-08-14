@@ -122,10 +122,16 @@ var clipboardWinLock sync.Mutex
 
 // ===== WebView2 优化配置（全局，所有窗口共享）=====
 
-// memoryOptimizedArgs 减少 WebView2 内存占用的 Chromium 标志
-// 这些标志传递给全局 WebView2 浏览器进程，影响所有窗口
-// 注意：不传 --disable-renderer-backgrounding，让 WebView2 在
-// PutIsVisible(false) 时自动释放渲染/GPU 资源（后台窗口降级）
+// memoryOptimizedArgs 减少 WebView2 内存/进程数量的 Chromium 标志
+// 这些标志传递给全局 WebView2 浏览器进程，影响所有窗口。
+//
+// 注意：
+//  - 不传 --disable-renderer-backgrounding：让 WebView2 在 PutIsVisible(false) 时
+//    自动释放渲染/GPU 资源（后台窗口降级）。
+//  - --in-process-gpu：把 GPU 进程合并进浏览器进程，省掉一个独立子进程。
+//  - --renderer-process-limit=N：限制渲染进程数量，主窗口 + 剪贴板/命令面板等
+//    小窗尽量共用渲染进程，显著减少任务管理器里的 msedgewebview2 进程数，
+//    同时保留 WebView2 的站点/进程隔离（不用破坏性的 --single-process）。
 var memoryOptimizedArgs = []string{
 	"--disable-features=msSmartScreenProtection,Printing,Translate,ReadingList,MediaSessionService,NotificationService,PasswordManager,ChromeWhatsNewUI",
 	"--disable-sync",
@@ -136,6 +142,8 @@ var memoryOptimizedArgs = []string{
 	"--disable-default-apps",
 	"--mute-audio",
 	"--autoplay-policy=user-gesture-required",
+	"--in-process-gpu",
+	"--renderer-process-limit=4",
 }
 
 // disabledFeatures 禁用的 Chromium 特性

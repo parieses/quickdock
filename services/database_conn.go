@@ -66,7 +66,11 @@ func toDbConn(input DbConnectionInput) (*dbConnAdapter, error) {
 		if err != nil {
 			return nil, err
 		}
-		d.SetMaxOpenConns(1)
+		// MySQL 可由服务端并发处理，开放一个小的连接池（4），提升 DatabasePage 多查询吞吐；
+		// SQLite 保持单连接（WAL + 事务一致性需要）。
+		d.SetMaxOpenConns(4)
+		d.SetMaxIdleConns(4)
+		d.SetConnMaxLifetime(5 * time.Minute)
 		return &dbConnAdapter{sqlDB: d, kind: "mysql"}, nil
 	case "sqlite":
 		path := strings.TrimSpace(input.FilePath)

@@ -29,6 +29,17 @@ func hostsPath() string {
 	return filepath.Join(os.Getenv("SystemRoot"), "System32", "drivers", "etc", "hosts")
 }
 
+// uncommentHostsLine 移除一行动态 hosts 条目最前面的单个 '#' 及其后紧跟的空白，
+// 恢复为可用条目。只删第一个 '#'（+ 紧随的空格/制表符），保留行内其余内容原样，
+// 避免用 strings.TrimLeft(line, "# \t") 把行首有含义的 '#' 也一并剥掉。
+func uncommentHostsLine(line string) string {
+	s := strings.TrimLeft(line, " \t") // 去掉行首仅空白
+	if strings.HasPrefix(s, "#") {
+		s = s[1:] // 去掉第一个 '#'
+	}
+	return strings.TrimLeft(s, " \t") // 去掉 '#' 后的空白
+}
+
 type HostsEntry struct {
 	Line    int    `json:"line"`
 	IP      string `json:"ip"`
@@ -108,7 +119,7 @@ func hostsToggle(id int64, input map[string]interface{}) {
 	trimmed := strings.TrimSpace(line)
 
 	if strings.HasPrefix(trimmed, "#") {
-		lines[idx] = strings.TrimLeft(line, "# \t")
+		lines[idx] = uncommentHostsLine(line)
 	} else {
 		lines[idx] = "# " + line
 	}
@@ -196,7 +207,7 @@ func hostsSave(id int64, input map[string]interface{}) {
 		}
 		trimmed := strings.TrimSpace(lines[lineIdx])
 		if enabled && strings.HasPrefix(trimmed, "#") {
-			lines[lineIdx] = strings.TrimLeft(lines[lineIdx], "# \t")
+			lines[lineIdx] = uncommentHostsLine(lines[lineIdx])
 		} else if !enabled && !strings.HasPrefix(trimmed, "#") {
 			lines[lineIdx] = "# " + lines[lineIdx]
 		}

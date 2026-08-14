@@ -50,6 +50,8 @@ var validTables = map[string]bool{
 	"http_folders":      true,
 	"http_docs":         true,
 	"db_connections":    true,
+	"plugins":           true,
+	"plugin_data":       true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）
@@ -94,6 +96,22 @@ var validColumns = map[string]bool{
 	"parent_id": true, "folder_id": true,
 	"db_type": true, "host": true, "port": true, "username": true,
 	"password": true, "database": true, "file_path": true,
+	// schedule 任务表列
+	"working_dir": true, "http_method": true, "http_headers": true, "http_body": true,
+	"schedule_kind": true, "run_at": true, "interval_sec": true, "time_of_day": true,
+	"weekdays": true, "notify": true, "next_run": true,
+	"last_run": true, "last_status": true, "last_result": true,
+	// 监控表列
+	"timeout_sec": true, "expected_status": true,
+	// 待办表列
+	"done": true, "priority": true, "due_date": true,
+	"start_time": true, "end_time": true, "reminder_time": true, "reminder_sent": true,
+	"tags": true, "recurrence": true, "completed_at": true,
+	// 插件执行日志列
+	"command_id": true, "executed_at": true, "executed_ts": true,
+	"success": true, "duration_ms": true, "result": true, "error": true, "trigger": true,
+	// frecency 附加列
+	"input": true,
 }
 
 // validateTable 检查表名是否在白名单中

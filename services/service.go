@@ -97,6 +97,12 @@ type AppService struct {
 	lastUpdateCheck   *UpdateStatus
 	lastUpdateCheckMu sync.RWMutex
 	updateCheckMu     sync.Mutex
+
+	// 当前激活 AI 档案缓存：聊天流式请求会高频调用 getActiveAIProfile（读库+DPAPI 解密）。
+	// 保存档案时通过 invalidateAICache 失效。mu 保护可重入。
+	aiCacheMu    sync.RWMutex
+	aiCachedCfg  AIProfile
+	aiCachedOK   bool
 }
 
 type frontendCacheEntry struct {

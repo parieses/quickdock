@@ -141,6 +141,10 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	var conv *db.AIConversation
+	if s.svc.DB == nil {
+		s.writeSSE(w, flusher, "error", map[string]string{"message": "数据库尚未就绪，请稍后重试"})
+		return
+	}
 	if convID == "" {
 		created, err := s.svc.DB.CreateAIConversation("")
 		if err != nil {
@@ -196,8 +200,13 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		},
 	)
 
-	// 统一落库用户消息 + 助手回复（无论正常结束还是取消，有 assistant 就存）
+	// 统一落库用户消息 + 助手回复（无论正常结束还是取消，有 assistant 就存）。
+	// 若模型未产出任何内容（assistant 为空），不写入空回复，避免污染对话历史。
 	saveBoth := func(asst string) {
+		asst = strings.TrimSpace(asst)
+		if asst == "" {
+			return
+		}
 		if _, e := s.svc.DB.AddAIMessage(convID, "user", message); e != nil {
 			s.writeSSE(w, flusher, "error", map[string]string{"message": e.Error()})
 			return

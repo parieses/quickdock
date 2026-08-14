@@ -42,22 +42,10 @@ type AIProfile struct {
 	ThinkingEnabled  bool    `json:"thinkingEnabled"`
 }
 
-// aiProfileStored 落库结构（API Key 为密文）
-type aiProfileStored struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	Provider         string  `json:"provider"`
-	BaseURL          string  `json:"baseURL"`
-	APIKey           string  `json:"apiKey"`
-	Model            string  `json:"model"`
-	Temperature      float64 `json:"temperature"`
-	MaxTokens        int     `json:"maxTokens"`
-	SystemPrompt     string  `json:"systemPrompt"`
-	TopP             float64 `json:"topP"`
-	FrequencyPenalty float64 `json:"frequencyPenalty"`
-	PresencePenalty  float64 `json:"presencePenalty"`
-	ThinkingEnabled  bool    `json:"thinkingEnabled"`
-}
+// aiProfileStored 落库结构（API Key 为密文）。
+// 与 AIProfile 字段完全一致，为免重复维护直接用类型别名；区别仅在语义上——
+// AIProfile.APIKey 在 API 层是明文/掩码，落库时写入的是 DPAPI 密文。
+type aiProfileStored = AIProfile
 
 // AIProfilesResult 返回给前端的档案列表与当前激活项
 type AIProfilesResult struct {
@@ -146,14 +134,23 @@ func (a *AppService) loadActiveProfileID(profiles []aiProfileStored) string {
 	return ""
 }
 
-// getActiveAIProfile 返回解密后的当前激活档案；无档案时返回 (cfg, false)
+// getActiveAIProfile 返回解密后的当前激活档案；无档案时返回 (cfg, false)。
+// 结果带内存缓存（聊天高频调用时避免反复读库 + DPAPI 解密）；保存档案会失效。
 func (a *AppService) getActiveAIProfile() (AIProfile, bool) {
+	a.aiCacheMu.RLock()
+	ok := a.aiCachedOK
+	cfg := a.aiCachedCfg
+	a.aiCacheMu.RUnlock()
+	if ok {
+		return cfg, true
+	}
+
 	stored := a.loadAIProfiles()
 	if len(stored) == 0 {
 		return AIProfile{}, false
 	}
 	id := a.loadActiveProfileID(stored)
-	var s aiProfileStored
+	var s AIProfile
 	found := false
 	for _, p := range stored {
 		if p.ID == id {
@@ -165,7 +162,7 @@ func (a *AppService) getActiveAIProfile() (AIProfile, bool) {
 	if !found {
 		s = stored[0]
 	}
-	cfg := AIProfile{
+	cfg = AIProfile{
 		ID:               s.ID,
 		Name:             s.Name,
 		Provider:         s.Provider,
@@ -190,7 +187,18 @@ func (a *AppService) getActiveAIProfile() (AIProfile, bool) {
 	if cfg.Temperature == 0 {
 		cfg.Temperature = aiDefaultTemp
 	}
+	a.aiCacheMu.Lock()
+	a.aiCachedCfg = cfg
+	a.aiCachedOK = true
+	a.aiCacheMu.Unlock()
 	return cfg, true
+}
+
+// invalidateAICache 使激活档案缓存失效（保存/删除/切换档案后调用）。
+func (a *AppService) invalidateAICache() {
+	a.aiCacheMu.Lock()
+	a.aiCachedOK = false
+	a.aiCacheMu.Unlock()
 }
 
 // AIListProfiles 列出所有档案（API Key 已解密）与当前激活项
@@ -295,6 +303,7 @@ func (a *AppService) AISaveProfiles(req AISaveProfilesRequest) *ApiResult {
 		return Fail(err)
 	}
 	_ = a.DB.SetSetting(aiLegacyKey, "")
+	a.invalidateAICache()
 	return Ok(nil)
 }
 
@@ -306,6 +315,7 @@ func (a *AppService) AISetActiveProfile(id string) *ApiResult {
 	if err := a.DB.SetSetting(aiActiveKey, id); err != nil {
 		return Fail(err)
 	}
+	a.invalidateAICache()
 	return Ok(nil)
 }
 

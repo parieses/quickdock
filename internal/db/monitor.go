@@ -285,15 +285,18 @@ func (d *Database) AddMonitorLog(l *MonitorLog) error {
 	); err != nil {
 		return err
 	}
-	// 裁剪：超出上限时删除最早的一批
+	// 裁剪：超出上限时删除最早的一批。
+	// 用「保留第 maxLogsPerMonitor 新的那条 checked_ts」作为阈值，删除所有比它更旧的行，
+	// 复用 idx_monitor_logs_mid_ts 索引，避免原先 `id NOT IN (SELECT ... LIMIT 1000)` 每次
+	// 都物化一整份 id 列表的 O(n) 开销（该索引 ORDER BY checked_ts DESC 可直接命中）。
 	var cnt int
 	if err := d.conn.QueryRow("SELECT COUNT(*) FROM monitor_logs WHERE monitor_id = ?", l.MonitorID).Scan(&cnt); err != nil {
 		return err
 	}
 	if cnt > maxLogsPerMonitor {
 		if _, err := d.conn.Exec(
-			`DELETE FROM monitor_logs WHERE monitor_id = ? AND id NOT IN (
-				SELECT id FROM monitor_logs WHERE monitor_id = ? ORDER BY checked_ts DESC LIMIT ?)`,
+			`DELETE FROM monitor_logs WHERE monitor_id = ? AND checked_ts < (
+				SELECT checked_ts FROM monitor_logs WHERE monitor_id = ? ORDER BY checked_ts DESC LIMIT 1 OFFSET ?)`,
 			l.MonitorID, l.MonitorID, maxLogsPerMonitor); err != nil {
 			return err
 		}

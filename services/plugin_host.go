@@ -34,6 +34,7 @@ const (
 	pluginDataMaxValue  = 256 << 10        // 单条存储值上限 256 KiB
 	pluginDataMaxList   = 500              // db.list 返回条数上限
 	pluginHTTPMaxRedirs = 5
+	pluginURLMaxLen     = 8 << 10 // url 长度上限 8 KiB，防超长 URL 拖慢 / 触发异常
 )
 
 // pluginHTTPClient 插件专用 HTTP 客户端：独立超时与重定向上限，不复用宿主的其它 client。
@@ -307,6 +308,12 @@ func doPluginHTTP(pluginID, method, rawURL string, headers map[string]string, bo
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return nil, fmt.Errorf("url 不能为空")
+	}
+	if len(rawURL) > pluginURLMaxLen {
+		return nil, fmt.Errorf("url 过长（超过 %d 字符）", pluginURLMaxLen)
+	}
+	if strings.ContainsAny(rawURL, "\r\n") {
+		return nil, fmt.Errorf("url 包含非法换行字符")
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
