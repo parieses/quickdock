@@ -3,10 +3,9 @@ package services
 import (
 	"context"
 	"fmt"
-	"os/exec"
 	"strings"
-	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -163,18 +162,43 @@ func (a *AppService) RestartApp() error {
 		a.PrepareQuitFn()
 	}
 
-	// 拉起 NSIS 安装器（非静默，展示安装向导）。安装器 .onInit 会自行关闭正在运行的
-	// QuickDock，并在完成后提供"运行"勾选项。DETACHED_PROCESS 保证它不随主程序退出而被杀。
-	cmd := exec.Command(installerPath)
-	cmd.SysProcAttr = &syscall.SysProcAttr{
-		CreationFlags: windows.CREATE_NEW_PROCESS_GROUP | windows.DETACHED_PROCESS,
-	}
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("启动更新安装器失败: %w", err)
+	// 以管理员权限（UAC 提权）拉起 NSIS 安装器。
+	// QuickDock 平时以普通权限运行；只有装到 Program Files / 覆盖程序文件这一步需要
+	// 管理员权限，故通过 ShellExecute(verb="runas") 触发 Windows UAC 确认框，用户点是
+	// 即以管理员身份启动安装器。安装器 .onInit 会自行关闭 QuickDock，完成后提供"运行"勾选项。
+	//
+	// 为什么不用 exec.Command：exec 不会提权，直接启动需管理员权限的安装器会返回
+	// "The requested operation requires elevation"。
+	if err := launchElevated(installerPath); err != nil {
+		return fmt.Errorf("启动更新安装器失败（需要管理员权限，请在 UAC 弹窗中点「是」）: %w", err)
 	}
 
 	// 退出主程序；安装器接管后续的安装向导与重新运行
 	a.app.Quit()
+	return nil
+}
+
+// launchElevated 通过 ShellExecuteW(verb="runas") 以管理员权限拉起程序（触发 UAC 确认）。
+// 不依赖额外的依赖库，直接用 shell32 的 ShellExecuteW。
+func launchElevated(path string) error {
+	procShellExecuteW := windows.NewLazySystemDLL("shell32.dll").NewProc("ShellExecuteW")
+	verb, _ := windows.UTF16PtrFromString("runas")
+	file, _ := windows.UTF16PtrFromString(path)
+	params, _ := windows.UTF16PtrFromString("")
+	dir, _ := windows.UTF16PtrFromString("")
+	const (
+		swShowNormal   = 1
+		errorCancelled = 1223 // ERROR_CANCELLED：用户点了 UAC 的"否"
+	)
+	r1, _, callErr := procShellExecuteW.Call(0, uintptr(unsafe.Pointer(verb)), uintptr(unsafe.Pointer(file)),
+		uintptr(unsafe.Pointer(params)), uintptr(unsafe.Pointer(dir)), swShowNormal)
+	// ShellExecuteW 成功时返回 >32；失败返回 <=32 的错误代码。
+	if int(uintptr(r1)) <= 32 {
+		if int(uintptr(r1)) == errorCancelled {
+			return fmt.Errorf("已取消提权（未授予管理员权限）")
+		}
+		return fmt.Errorf("ShellExecute 失败 (code=%d): %v", uint32(r1), callErr)
+	}
 	return nil
 }
 
