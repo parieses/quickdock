@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { SendApiRequest, UpdateApiRequest, CreateApiRequest } from '../../bindings/quickdock/services/appservice'
+import { SendApiRequest, UpdateApiRequest, CreateApiRequest, BuildCurlCommand } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { ref, reactive, computed, onMounted, inject, provide } from 'vue'
@@ -11,6 +11,7 @@ import type { ApiRequest, ApiResponse, HttpProject, HttpFolder, HttpDoc, ToastAP
 import ProjectTree from './ProjectTree.vue'
 import RequestForm from './RequestForm.vue'
 import ResponsePanel from './ResponsePanel.vue'
+import HistoryPanel from './HistoryPanel.vue'
 import CreateDialog from '../components/CreateDialog.vue'
 import { useHttpData } from './composables/useHttpData'
 import { useHttpDrag } from './composables/useHttpDrag'
@@ -62,6 +63,7 @@ const authUser = ref('')
 const authPass = ref('')
 const activeTab = ref<'params' | 'headers' | 'body' | 'auth'>('headers')
 const responseTab = ref<'body' | 'headers'>('body')
+const showHistory = ref(false)
 const sending = ref(false)
 const response = ref<ApiResponse | null>(null)
 const jsonExpandAll = ref<boolean | null>(null)
@@ -231,6 +233,43 @@ async function copyHeaderValue(v: string) {
   catch { toast.error(t('copyFailed')) }
 }
 
+// 复制当前表单为 curl 命令
+async function copyCurlForm() {
+  if (!url.value.trim()) { toast.error(t('httpUrlRequired')); return }
+  try {
+    const r = unwrap<{ command: string }>(await BuildCurlCommand(buildInput()))
+    if (!r) throw new Error('no curl')
+    await navigator.clipboard.writeText(r.command)
+    toast.success(t('httpCurlCopied'))
+  } catch (e) {
+    toast.error(t('copyFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+// 从历史载入为表单请求
+function loadFromHistory(input: any) {
+  currentId.value = null
+  currentProjectId.value = input.projectId || currentProjectId.value
+  currentFolderId.value = input.folderId || ''
+  currentDocId.value = ''
+  name.value = input.name || ''
+  method.value = input.method || 'GET'
+  const { base, rows } = (() => { try { const u = new URL(input.url); const r: KV[] = []; u.searchParams.forEach((v, k) => r.push({ enabled: true, key: k, value: v })); return { base: u.origin + u.pathname + u.hash, rows: r } } catch { return { base: input.url || '', rows: [] as KV[] } } })()
+  url.value = base
+  paramRows.value = rows
+  try { headerRows.value = Object.entries(JSON.parse(input.headers || '{}')).map(([k, v]) => ({ enabled: true, key: k, value: String(v) })) } catch { headerRows.value = [] }
+  bodyType.value = input.bodyType || 'none'
+  if (bodyType.value === 'form') formRows.value = queryToForm(input.body || '')
+  else body.value = input.body || ''
+  authType.value = input.authType || 'none'
+  authToken.value = input.authToken || ''
+  authUser.value = input.authUser || ''
+  authPass.value = input.authPass || ''
+  response.value = null
+  showHistory.value = false
+}
+
+
 const prettyBody = computed(() => {
   const b = response.value?.body
   if (!b) return ''
@@ -368,6 +407,8 @@ onMounted(() => { loadActiveEnvs(); load() })
         @update:active-tab="activeTab = $event"
         @send="send"
         @save="save"
+        @copy-curl="copyCurlForm"
+        @toggle-history="showHistory = !showHistory"
         @add-param="addParam"
         @remove-param="(i) => paramRows.splice(i, 1)"
         @add-header="addHeader"
@@ -402,6 +443,15 @@ onMounted(() => { loadActiveEnvs(); load() })
       </div>
     </template>
     </div>
+
+    <!-- 请求历史 / Postman 导入弹窗 -->
+    <HistoryPanel
+      v-if="showHistory && !currentDocId"
+      :project-id="currentProjectId"
+      :toast="toast"
+      @loaded="loadFromHistory"
+      @close="showHistory = false"
+    />
 
     <!-- 弹窗 -->
     <CreateDialog :visible="showProjectDialog" :title="t('httpNewProject')"

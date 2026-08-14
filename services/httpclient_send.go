@@ -34,13 +34,16 @@ func (a *AppService) SendApiRequest(input ApiRequestInput) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.applyProjectAndEnv(&input); err != nil {
+	cp := input
+	if err := a.applyProjectAndEnv(&cp); err != nil {
 		return Fail(err)
 	}
-	resp, err := doUserHTTP(input)
+	resp, err := doUserHTTP(cp)
 	if err != nil {
 		return Fail(err)
 	}
+	// 记录一条请求历史（异步，避免阻塞；DB 已内部加锁）
+	go a.RecordHttpRequestHistory(&cp, resp)
 	return Ok(resp)
 }
 

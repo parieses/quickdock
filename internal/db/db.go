@@ -50,6 +50,7 @@ var validTables = map[string]bool{
 	"http_folders":      true,
 	"http_docs":         true,
 	"db_connections":    true,
+	"http_request_history": true,
 	"plugins":           true,
 	"plugin_data":       true,
 }
@@ -103,6 +104,10 @@ var validColumns = map[string]bool{
 	"last_run": true, "last_status": true, "last_result": true,
 	// 监控表列
 	"timeout_sec": true, "expected_status": true,
+	"down_alert_threshold": true, "consecutive_down": true,
+	// HTTP 请求历史列
+	"status_code": true, "created_ts": true,
+	"ok": true,
 	// 待办表列
 	"done": true, "priority": true, "due_date": true,
 	"start_time": true, "end_time": true, "reminder_time": true, "reminder_sent": true,

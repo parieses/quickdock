@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Save, Send, X, Plus } from '@lucide/vue'
+import { Save, Send, X, Plus, Copy as CopyIcon, History as HistoryIcon } from '@lucide/vue'
 
 interface Props {
   method: string
@@ -44,6 +44,8 @@ const emit = defineEmits<{
   (e: 'update:active-tab', v: 'params' | 'headers' | 'body' | 'auth'): void
   (e: 'send'): void
   (e: 'save'): void
+  (e: 'copy-curl'): void
+  (e: 'toggle-history'): void
   (e: 'add-param'): void
   (e: 'remove-param', i: number): void
   (e: 'add-header'): void
@@ -89,6 +91,8 @@ const headerCount = computed(() => props.headerRows.filter(r => r.enabled && r.k
         <Save :size="14" />
         <span>{{ t('save') }}</span>
       </button>
+      <button class="icon-btn-line" :title="t('httpCopyCurl')" @click="emit('copy-curl')"><CopyIcon :size="14" /></button>
+      <button class="icon-btn-line" :title="t('httpHistory')" @click="emit('toggle-history')"><HistoryIcon :size="14" /></button>
     </div>
 
     <!-- 名称行 -->
@@ -233,6 +237,12 @@ const headerCount = computed(() => props.headerRows.filter(r => r.enabled && r.k
 .send-btn:disabled { opacity: 0.6; cursor: default; }
 .save-btn { background: var(--color-bg-tertiary); color: var(--color-text-secondary); border: 1px solid var(--color-border); }
 .save-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.icon-btn-line {
+  flex-shrink: 0; display: flex; align-items: center; padding: 7px 9px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+  transition: color var(--transition-fast), background-color var(--transition-fast);
+}
+.icon-btn-line:hover { background: var(--color-bg-hover); color: var(--color-accent); }
 
 .name-line { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-bottom: 1px solid var(--color-border); }
 .name-label { font-size: 13px; color: var(--color-text-muted); flex-shrink: 0; }

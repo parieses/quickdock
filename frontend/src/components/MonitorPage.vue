@@ -118,6 +118,7 @@ const fEnabled = ref(true)
 const fNotifyDown = ref(true)
 const fNotifyUp = ref(true)
 const fSkipTLS = ref(false) // 忽略证书错误（默认关闭）
+const fDownAlertThreshold = ref(1) // 误报抑制：连续 N 次失败才告警
 
 // 6.1 SSL 证书告警提前天数；6.2 内容匹配
 const fCertWarnDays = ref(14)
@@ -147,6 +148,7 @@ function openCreate() {
   fNotifyUp.value = true
   fSkipTLS.value = false
   fCertWarnDays.value = 14
+  fDownAlertThreshold.value = 1
   fContentMatchType.value = 'none'
   fContentMatchPattern.value = ''
   showModal.value = true
@@ -168,6 +170,7 @@ function openEdit(m: Monitor) {
   fCertWarnDays.value = m.certWarnDays > 0 ? m.certWarnDays : 14
   fContentMatchType.value = m.contentMatchType || 'none'
   fContentMatchPattern.value = m.contentMatchPattern || ''
+  fDownAlertThreshold.value = m.downAlertThreshold > 0 ? m.downAlertThreshold : 1
   showModal.value = true
 }
 
@@ -190,6 +193,8 @@ function buildPayload(): Monitor {
     lastCertWarned: 0,
     contentMatchType: fContentMatchType.value,
     contentMatchPattern: fContentMatchPattern.value.trim(),
+    downAlertThreshold: Math.max(1, Math.floor(fDownAlertThreshold.value || 1)),
+    consecutiveDown: 0,
     lastStatus: '', lastCheckedAt: '', lastCheckedTs: 0, lastLatencyMs: 0,
     lastStatusCode: 0, lastError: '', sort: 0, createdAt: '',
   } as Monitor
@@ -727,6 +732,13 @@ onUnmounted(() => {
           <label class="toggle-label"><input type="checkbox" v-model="fNotifyDown" /> {{ t('mon_notify_down') }}</label>
           <label class="toggle-label"><input type="checkbox" v-model="fNotifyUp" /> {{ t('mon_notify_up') }}</label>
           <label class="toggle-label"><input type="checkbox" v-model="fEnabled" /> {{ t('mon_enable_now') }}</label>
+        </div>
+
+        <!-- 误报抑制：连续 N 次失败才告警 -->
+        <div class="interval-row" style="margin-top: var(--space-2);">
+          <label>{{ t('mon_suppress_threshold') }}</label>
+          <input v-model.number="fDownAlertThreshold" type="number" min="1" max="20" class="modal-input interval-num" style="flex:0 0 72px;" />
+          <span class="unit-suffix">{{ t('mon_suppress_unit') }}</span>
         </div>
 
         <div class="modal-actions">

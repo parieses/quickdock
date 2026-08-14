@@ -238,6 +238,8 @@ var baseTables = []string{
 		last_cert_warned INTEGER NOT NULL DEFAULT 0,
 		content_match_type TEXT NOT NULL DEFAULT 'none',
 		content_match_pattern TEXT NOT NULL DEFAULT '',
+		down_alert_threshold INTEGER NOT NULL DEFAULT 1,
+		consecutive_down INTEGER NOT NULL DEFAULT 0,
 		sort INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL
 	)`,
@@ -302,6 +304,27 @@ var baseTables = []string{
 		updated_at TEXT NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_api_requests_sort ON api_requests(sort, created_at)`,
+
+	`CREATE TABLE IF NOT EXISTS http_request_history (
+		id TEXT PRIMARY KEY,
+		project_id TEXT NOT NULL DEFAULT '',
+		name TEXT NOT NULL DEFAULT '',
+		method TEXT NOT NULL DEFAULT 'GET',
+		url TEXT NOT NULL DEFAULT '',
+		headers TEXT NOT NULL DEFAULT '{}',
+		body TEXT NOT NULL DEFAULT '',
+		body_type TEXT NOT NULL DEFAULT 'json',
+		auth_type TEXT NOT NULL DEFAULT '',
+		auth_token TEXT NOT NULL DEFAULT '',
+		auth_user TEXT NOT NULL DEFAULT '',
+		auth_pass TEXT NOT NULL DEFAULT '',
+		status_code INTEGER NOT NULL DEFAULT 0,
+		ok INTEGER NOT NULL DEFAULT 0,
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		size INTEGER NOT NULL DEFAULT 0,
+		created_ts INTEGER NOT NULL DEFAULT 0
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_http_history_project_ts ON http_request_history(project_id, created_ts)`,
 
 	`CREATE TABLE IF NOT EXISTS http_projects (
 		id TEXT PRIMARY KEY,
@@ -461,6 +484,9 @@ func (d *Database) migrate() error {
 	{"monitors", "last_cert_warned", "INTEGER NOT NULL DEFAULT 0"},
 	{"monitors", "content_match_type", "TEXT NOT NULL DEFAULT 'none'"},
 	{"monitors", "content_match_pattern", "TEXT NOT NULL DEFAULT ''"},
+	// monitors: 误报抑制（连续 N 次失败才告警）
+	{"monitors", "down_alert_threshold", "INTEGER NOT NULL DEFAULT 1"},
+	{"monitors", "consecutive_down", "INTEGER NOT NULL DEFAULT 0"},
 	// todos: 子任务层级（单层级 checklist）+ 状态字段（status 权威，done 派生）
 	{"todos", "parent_id", "TEXT DEFAULT ''"},
 	{"todos", "status", "TEXT DEFAULT 'todo'"},

@@ -143,6 +143,17 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	})
 	_ = a.DB.UpdateMonitorStatus(m.ID, status, checkedAt, checkedTs, latency, code, errMsg)
 
+	// 维护连续失败计数（误报抑制用）：失败 +1，成功清零。
+	threshold := current.DownAlertThreshold
+	if threshold < 1 {
+		threshold = 1
+	}
+	newDownCount := 0
+	if !up {
+		newDownCount = current.ConsecutiveDown + 1
+	}
+	_ = a.DB.UpdateMonitorConsecutiveDown(m.ID, newDownCount)
+
 	summary := fmt.Sprintf("%s · %d · %dms", status, code, latency)
 	if !up && errMsg != "" {
 		summary = errMsg
@@ -178,16 +189,20 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 		}
 	}
 
-	// 仅在状态翻转时通知（桌面通知 + 机器人 Webhook 共用同一套 down/up 开关）
-	// 用刚重查的 current.LastStatus 作为翻转基准，同时开关也读 current——
-	// 探针期间用户停用开关后不应再补发陈旧的告警/恢复通知。
+	// 状态翻转通知（桌面 + Webhook）。
+	// 误报抑制：宕机告警仅在连续失败达到阈值（downAlertThreshold）的那一次发出；
+	// 恢复通知在首次探活成功时立即发出。用 current 副本避免探针期间读到过期开关。
 	prev := current.LastStatus
+	downAlertTriggered := !up && (newDownCount == threshold) && (current.ConsecutiveDown == threshold-1)
 	switch {
-	case status == "down" && prev != "down" && current.NotifyDown:
+	case downAlertTriggered && current.NotifyDown:
 		title := "🔴 监控告警：" + m.Name
 		body := m.URL
 		if errMsg != "" {
 			body += "\n" + errMsg
+		}
+		if threshold > 1 {
+			body += fmt.Sprintf("\n（连续 %d 次失败）", newDownCount)
 		}
 		if a.Notifier != nil {
 			_ = a.Notifier.SendNotification(notifications.NotificationOptions{
