@@ -567,6 +567,12 @@ export default {
   tagPhone: '手机号',
   tagFavorite: '已收藏',
 
+  // 剪贴板时间过滤
+  timeAll: '全部',
+  timeToday: '今天',
+  timeWeek: '本周',
+  timeMonth: '近30天',
+
   // 剪贴板备注
   clipboardNote: '备注',
   clipboardNotePlaceholder: '输入备注说明此内容是什么...',

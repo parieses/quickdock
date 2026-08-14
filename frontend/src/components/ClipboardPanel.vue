@@ -32,6 +32,8 @@ interface ClipboardEntry {
 
 const entries = ref<ClipboardEntry[]>([])
 const searchQuery = ref('')
+// 时间过滤：all | today | week | month（默认今天）
+const timeFilter = ref<'all' | 'today' | 'week' | 'month'>('today')
 const loading = ref(true)
 const refreshTimer = ref<number | null>(null)
 const imageCache = ref<Record<string, string>>({})
@@ -86,6 +88,20 @@ const tags = computed<SmartTag[]>(() => [
 
 const filteredEntries = computed(() => {
   let list = entries.value
+  // 按时间过滤
+  const tf = timeFilter.value
+  if (tf !== 'all') {
+    const now = new Date()
+    const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const startOfWeek = (() => {
+      const d = new Date(startOfToday)
+      const day = (d.getDay() + 6) % 7 // 0=周一
+      d.setDate(d.getDate() - day)
+      return d.getTime()
+    })()
+    const cutoff = tf === 'today' ? startOfToday : tf === 'week' ? startOfWeek : startOfToday - 29 * 86400000
+    list = list.filter(e => e.createdAt >= cutoff)
+  }
   // 按标签筛选
   const tag = tags.value.find(t => t.id === activeTag.value)
   if (tag && tag.id !== 'all') {
@@ -106,6 +122,26 @@ const filteredEntries = computed(() => {
   }
   return list
 })
+
+// 搜索命中高亮：把 text 中命中 query 的部分切分为片段数组 [{text, hit}]
+function highlight(text: string, query: string): { text: string; hit: boolean }[] {
+  const q = (query || '').toLowerCase().trim()
+  const out: { text: string; hit: boolean }[] = []
+  if (!q || !text) return [{ text: text || '', hit: false }]
+  const lower = text.toLowerCase()
+  let i = 0
+  while (i < text.length) {
+    const idx = lower.indexOf(q, i)
+    if (idx < 0) {
+      if (i < text.length) out.push({ text: text.slice(i), hit: false })
+      break
+    }
+    if (idx > i) out.push({ text: text.slice(i, idx), hit: false })
+    out.push({ text: text.slice(idx, idx + q.length), hit: true })
+    i = idx + q.length
+  }
+  return out
+}
 
 // ---- 剪贴板分页 ----
 const CLIPBOARD_PAGE_SIZE = 20
@@ -134,6 +170,7 @@ function selectTag(tagId: string) {
 function clearSearch() {
   searchQuery.value = ''
   activeTag.value = 'all'
+  timeFilter.value = 'today'
   selectedIndex.value = 0
   clipboardPage.value = 1
 }
@@ -476,7 +513,7 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- 智能分类标签栏 -->
+    <!-- 智能分类标签栏 + 时间过滤（合成一行，右侧时间分段） -->
     <div class="clipboard-tags">
       <button
         v-for="tag in tags"
@@ -486,6 +523,15 @@ onUnmounted(() => {
       >
         <component :is="tag.icon" :size="12" />
         <span>{{ tag.label }}</span>
+      </button>
+      <div class="tags-divider"></div>
+      <button
+        v-for="tf in ([{id:'all'},{id:'today'},{id:'week'},{id:'month'}] as const)"
+        :key="'time-' + tf.id"
+        :class="['time-btn', { active: timeFilter === tf.id }]"
+        @click="timeFilter = tf.id; selectedIndex = 0; clipboardPage = 1"
+      >
+        {{ t('time' + tf.id.charAt(0).toUpperCase() + tf.id.slice(1)) }}
       </button>
     </div>
 
@@ -535,7 +581,12 @@ onUnmounted(() => {
           </template>
           <!-- 文本条目 -->
           <template v-else>
-            <div class="item-text">{{ textPreview(entry.textContent) }}</div>
+            <div class="item-text item-text-hl">
+              <template v-for="(seg, si) in highlight(entry.textContent || '', searchQuery)" :key="si">
+                <mark v-if="seg.hit" class="hl-hit">{{ seg.text }}</mark>
+                <template v-else>{{ seg.text }}</template>
+              </template>
+            </div>
           </template>
           <div class="item-meta">
             <span class="item-time">{{ timeAgo(entry.createdAt) }}</span>
@@ -683,14 +734,44 @@ onUnmounted(() => {
 }
 .icon-btn:hover { background: var(--color-bg-hover); color: var(--color-text-secondary); }
 
-/* 智能分类标签栏 */
+/* 智能分类标签栏：横向滚动，允许换行；时间筛选同排展示，右侧分隔 */
 .clipboard-tags {
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--color-border);
   overflow-x: auto;
   flex-shrink: 0;
+}
+.tags-divider {
+  width: 1px;
+  height: 16px;
+  margin: 0 4px;
+  background: var(--color-border);
+  flex-shrink: 0;
+}
+
+/* 时间筛选：同排的轻量分段，选中用蓝字+淡蓝底 */
+.time-btn {
+  padding: 3px 9px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  white-space: nowrap;
+  flex-shrink: 0;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s;
+}
+.time-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.time-btn.active {
+  color: var(--color-accent);
+  background: var(--color-accent-bg, rgba(74, 158, 255, 0.1));
+  border-color: var(--color-accent-border, rgba(74, 158, 255, 0.2));
 }
 
 .tag-btn {
@@ -719,6 +800,26 @@ onUnmounted(() => {
   color: var(--color-accent);
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
+}
+
+/* 搜索命中高亮：明显区分 —— 主题蓝字 + 半粗 + 极淡蓝底，
+   一眼能看清命中词，又不刺眼 */
+.hl-hit {
+  background: var(--color-accent-bg, rgba(74, 158, 255, 0.14));
+  color: var(--color-accent, #4a9eff);
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* 文本条目：限制高度 + 溢出省略，避免高亮显示长文本撑爆列表 */
+.item-text-hl {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .clipboard-list {

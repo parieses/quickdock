@@ -101,7 +101,7 @@ const (
 	appWidth         = 1100
 	appHeight        = 700
 	clipWinWidth     = 480
-	clipWinHeight    = 420
+	clipWinHeight    = 540
 	paletteWinWidth  = 900
 	paletteWinHeight = 600
 )
@@ -172,7 +172,7 @@ func main() {
 		},
 		// WebView2 全局优化：减少内存占用 + 设置正确的用户数据路径
 		Windows: application.WindowsOptions{
-			WebviewUserDataPath: EnsureConfigDir() + "\\WebView2",
+			WebviewUserDataPath:   EnsureConfigDir() + "\\WebView2",
 			AdditionalBrowserArgs: memoryOptimizedArgs,
 			DisabledFeatures:      disabledFeatures,
 		},
@@ -332,14 +332,15 @@ func windowsSystemProxy(req *http.Request) (*url.URL, error) {
 // initUpdater 初始化 Wails 自动更新器（endpoint provider + Ed25519 签名验证）
 //
 // 安全模型：
-//   CI 用 Ed25519 私钥（仓库 Secret UPDATER_PRIVATE_KEY）对裸二进制签名，
-//   产出 manifest.json（含 sha512 摘要 + ed25519ph 签名），随每个 release 发布。
-//   应用经 GitHub 稳定地址 releases/latest/download/manifest.json 拉取该 manifest，
-//   用编译期内嵌的公钥（updater.key.pub，见文件顶部 //go:embed）验签——
-//   fail closed：签名或摘要不符直接报错、不安装。
-//   这能防"发布账号 / CI 被攻破"级别的供应链攻击：攻击者即便替换了 release 资产，
-//   没有私钥也伪造不出有效签名，更新会被拒绝。（相较于此前的 SHA256 校验和，
-//   校验和只能防传输损坏 / 下错文件，挡不住发布者被冒充。）
+//
+//	CI 用 Ed25519 私钥（仓库 Secret UPDATER_PRIVATE_KEY）对裸二进制签名，
+//	产出 manifest.json（含 sha512 摘要 + ed25519ph 签名），随每个 release 发布。
+//	应用经 GitHub 稳定地址 releases/latest/download/manifest.json 拉取该 manifest，
+//	用编译期内嵌的公钥（updater.key.pub，见文件顶部 //go:embed）验签——
+//	fail closed：签名或摘要不符直接报错、不安装。
+//	这能防"发布账号 / CI 被攻破"级别的供应链攻击：攻击者即便替换了 release 资产，
+//	没有私钥也伪造不出有效签名，更新会被拒绝。（相较于此前的 SHA256 校验和，
+//	校验和只能防传输损坏 / 下错文件，挡不住发布者被冒充。）
 func initUpdater(app *application.App, version string) error {
 	// 自定义 HTTP 客户端：
 	// 1) 沿用 Go 默认传输层各项超时（连接/TLS 握手等）。

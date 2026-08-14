@@ -565,6 +565,12 @@ export default {
   tagPhone: 'Phone',
   tagFavorite: 'Pinned',
 
+  // Clipboard time filter
+  timeAll: 'All',
+  timeToday: 'Today',
+  timeWeek: 'Week',
+  timeMonth: '30d',
+
   // Clipboard note
   clipboardNote: 'Note',
   clipboardNotePlaceholder: 'What is this content about?',
