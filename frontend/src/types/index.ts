@@ -118,6 +118,13 @@ export interface Snippet {
   keyword: string
   content: string
   category: string
+  name: string
+  parentId: string
+  isFolder: boolean
+  sort: number
+  tags: string
+  isNote: boolean
+  format: string
   createdAt: string
 }
 

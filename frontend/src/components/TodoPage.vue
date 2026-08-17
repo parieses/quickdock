@@ -1,16 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import ConfirmDialog from './ConfirmDialog.vue'
 import {
   CreateTodo, ListTodos, UpdateTodo, ToggleTodo, DeleteTodo, ClearCompletedTodos, SendTestNotification,
-  CreateSubtask, SetTodoStatus,
+  CreateSubtask, SetTodoStatus, NotifyFocusComplete, NotifyFocusStart,
 } from '../../bindings/quickdock/services/appservice'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
-  RefreshCw, ListTree,
+  RefreshCw, ListTree, Timer, X,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -45,6 +45,59 @@ interface RecurrenceForm {
 const todos = ref<Todo[]>([])
 const loading = ref(false)
 const error = ref('')
+
+// ---- 番茄钟 / 专注计时 ----
+const FOCUS_DEFAULTS = [25, 45, 60]
+const focusMinutes = ref(25)          // 本次专注时长（分钟）
+const focusTodoId = ref('')           // 正在专注的待办 id（''=无）
+const focusRemaining = ref(0)         // 剩余秒数
+const focusRunning = ref(false)       // 是否在倒计时
+let focusTimer: number | null = null  // setInterval id
+
+function focusTitle(id: string): string {
+  return todos.value.find(t => t.id === id)?.title || ''
+}
+function startFocus(todo: Todo) {
+  if (todo.done) return
+  // 若在专注别条，先清掉旧的
+  stopFocusTimer()
+  focusTodoId.value = todo.id
+  focusRemaining.value = Math.max(1, Math.floor(focusMinutes.value)) * 60
+  focusRunning.value = true
+  try { NotifyFocusStart(focusTitle(todo.id), focusMinutes.value) } catch {}
+  focusTimer = window.setInterval(() => {
+    if (!focusRunning.value) return
+    focusRemaining.value--
+    if (focusRemaining.value <= 0) {
+      focusRemaining.value = 0
+      const title = focusTitle(focusTodoId.value) || '专注计时'
+      try { NotifyFocusComplete(title, focusMinutes.value) } catch {}
+      stopFocusTimer()
+      focusTodoId.value = ''
+    }
+  }, 1000)
+}
+function stopFocusTimer() {
+  if (focusTimer !== null) { clearInterval(focusTimer); focusTimer = null }
+}
+function endFocus() {
+  if (focusTodoId.value) { try { NotifyFocusComplete(focusTitle(focusTodoId.value), Math.round((focusMinutes.value * 60 - focusRemaining.value) / 60) || 1) } catch {} }
+  stopFocusTimer()
+  focusTodoId.value = ''
+  focusRunning.value = false
+  focusRemaining.value = 0
+}
+function pauseFocus() {
+  if (focusRunning.value) { focusRunning.value = false; return true }
+  focusRunning.value = true
+  return false
+}
+function fmtFocus(sec: number): string {
+  const m = Math.floor(sec / 60); const s = sec % 60
+  return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`
+}
+onUnmounted(stopFocusTimer)
+
 
 // ---- 日历状态 ----
 const viewYear = ref(new Date().getFullYear())
@@ -475,6 +528,13 @@ onMounted(() => {
         <button class="cal-btn" @click="nextMonth" :title="t('nextMonth')"><ChevronRight :size="16" /></button>
         <button class="cal-today" @click="goToday">{{ t('todoToday') }}</button>
       </div>
+      <div class="focus-dur" :title="t('todoFocusDur')">
+        <button v-for="d in FOCUS_DEFAULTS" :key="d"
+          :class="['focus-dur-btn', { active: focusMinutes === d }]"
+          @click="focusMinutes = d">
+          {{ d }}
+        </button>
+      </div>
     </div>
 
     <div v-if="error" class="todo-error">{{ error }}</div>
@@ -576,6 +636,16 @@ onMounted(() => {
                 </div>
               </div>
               <div class="todo-actions">
+                <template v-if="focusTodoId === todo.id">
+                  <button :class="['act focus-act', { running: focusRunning }]" @click="pauseFocus()"
+                    :title="focusRunning ? t('todoFocusPause') : t('todoFocusResume')">
+                    {{ fmtFocus(focusRemaining) }}
+                  </button>
+                  <button class="act danger" @click="endFocus()" :title="t('todoFocusEnd')"><X :size="13" /></button>
+                </template>
+                <template v-else>
+                  <button class="act" @click="startFocus(todo)" :title="t('todoFocusStart')"><Timer :size="13" /></button>
+                </template>
                 <button class="act" @click="toggleSubInput(todo)" :title="t('todoSubtaskAdd')"><ListTree :size="13" /></button>
                 <button class="act" @click="startEdit(todo)" :title="t('todoEdit')"><Pencil :size="13" /></button>
                 <button class="act danger" @click="remove(todo)" :title="t('todoDelete')"><Trash2 :size="13" /></button>
@@ -812,6 +882,14 @@ onMounted(() => {
 .todo-title { font-size: 18px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
 .todo-sub { font-size: 12px; color: var(--color-text-disabled); }
 .cal-nav { display: flex; align-items: center; gap: var(--space-2); }
+.focus-dur { display: flex; align-items: center; gap: 2px; margin-left: var(--space-3); }
+.focus-dur-btn {
+  min-width: 30px; height: 26px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+  color: var(--color-text-muted); border-radius: var(--radius-sm); font-size: 11px; cursor: pointer; font-family: inherit;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.focus-dur-btn:hover { color: var(--color-text-primary); }
+.focus-dur-btn.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .cal-btn {
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border: 1px solid var(--color-border);
@@ -1004,6 +1082,8 @@ onMounted(() => {
 }
 .act:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .act.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+.focus-act { font-size: 11px; font-weight: 600; color: var(--color-accent); min-width: 34px; }
+.focus-act.running { background: var(--color-accent-bg); color: var(--color-accent); }
 
 .panel-foot { margin-top: var(--space-3); flex-shrink: 0; display: flex; align-items: center; gap: var(--space-3); }
 .clear-btn {

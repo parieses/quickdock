@@ -1,643 +1,359 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Clipboard, Plus, Pencil, Trash2, Search, X, CornerDownLeft, CheckSquare, Square, ChevronLeft, ChevronRight } from '@lucide/vue'
-import { ListSnippets, CreateSnippet, UpdateSnippet, DeleteSnippet, PasteSnippet } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import CreateDialog from './CreateDialog.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
-import type { Snippet, ToastAPI } from '../types'
+import NoteTreeNode from './NoteTreeNode.vue'
+import { marked } from 'marked'
+import DOMPurify from 'dompurify'
+import {
+  ListNotesTree, SearchNotesTree, CreateNoteFolder, CreateNoteDoc, RenameNoteNode,
+  UpdateNoteDoc, MoveNoteNode, DeleteNoteNode, CopyText, SetNoteDocFormat,
+} from '../../bindings/quickdock/services/appservice'
+import {
+  Trash2, Search, X, FolderPlus, FileText, Folder,
+  Copy as CopyIcon, PanelLeft,
+} from '@lucide/vue'
+import type { ToastAPI, Snippet } from '../types'
+
+marked.setOptions({ breaks: true, gfm: true })
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 // ---- 数据 ----
-const snippets = ref<Snippet[]>([])
+const nodes = ref<Snippet[]>([])
 const loading = ref(true)
+const expanded = ref<Set<string>>(new Set())
 const searchQuery = ref('')
+const activeTag = ref('')
+const selectedDocId = ref('')
+const editingId = ref('')
+const editName = ref('')
+const selectedFolderId = ref('')
 
-async function loadSnippets() {
+const docContent = ref('')
+const docTagsText = ref('')
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+
+interface TreeNode extends Snippet { children: TreeNode[] }
+
+function buildTree(list: Snippet[]): TreeNode[] {
+  const map = new Map<string, TreeNode>()
+  const roots: TreeNode[] = []
+  for (const s of list) map.set(s.id, { ...s, children: [] })
+  for (const n of map.values()) {
+    if (n.parentId && map.has(n.parentId)) map.get(n.parentId)!.children.push(n)
+    else roots.push(n)
+  }
+  const sortRec = (arr: TreeNode[]) => {
+    arr.sort((a, b) => (a.isFolder === b.isFolder ? (a.sort || 0) - (b.sort || 0) : a.isFolder ? -1 : 1))
+    arr.forEach(c => sortRec(c.children))
+  }
+  sortRec(roots)
+  return roots
+}
+
+const tree = computed<TreeNode[]>(() => buildTree(nodes.value))
+
+// 扁平化（供搜索/标签结果铺平展示）
+function flatten(arr: TreeNode[]): TreeNode[] {
+  const out: TreeNode[] = []
+  for (const n of arr) { out.push(n); out.push(...flatten(n.children)) }
+  return out
+}
+const flatResults = computed<TreeNode[]>(() => flatten(tree.value))
+
+function parseTagsS(json: string): string[] {
+  try { const a = JSON.parse(json || '[]'); return Array.isArray(a) ? a.filter((x: unknown) => typeof x === 'string') : [] } catch { return [] }
+}
+
+async function load() {
   loading.value = true
   try {
-    const result = unwrap<Snippet[]>(await ListSnippets())
-    snippets.value = result || []
-  } catch (e) {
-    console.error('[SnippetManager] ListSnippets:', getErrorMessage(e))
-  } finally {
-    loading.value = false
-  }
-}
-
-// ---- 搜索过滤 ----
-const filteredSnippets = computed(() => {
-  if (!searchQuery.value.trim()) return snippets.value
-  const q = searchQuery.value.toLowerCase()
-  return snippets.value.filter(s =>
-    s.keyword.toLowerCase().includes(q) ||
-    s.content.toLowerCase().includes(q) ||
-    s.category.toLowerCase().includes(q)
-  )
-})
-
-// ---- 分页 ----
-const pageSize = 15
-const currentPage = ref(1)
-
-const totalPages = computed(() => Math.max(1, Math.ceil(filteredSnippets.value.length / pageSize)))
-
-const pagedSnippets = computed(() => {
-  const start = (currentPage.value - 1) * pageSize
-  return filteredSnippets.value.slice(start, start + pageSize)
-})
-
-// 搜索或数据变化时回到第一页
-watch(filteredSnippets, () => { currentPage.value = 1 })
-
-function goToPage(p: number) {
-  if (p >= 1 && p <= totalPages.value) currentPage.value = p
-}
-
-// ---- 新建 ----
-const showCreateDialog = ref(false)
-const createFields = computed(() => [
-  { key: 'keyword', label: t('snippetKeyword'), type: 'text' as const, placeholder: t('snippetKeywordPlaceholder') },
-  { key: 'content', label: t('snippetContent'), type: 'textarea' as const, placeholder: t('snippetContentPlaceholder'), hint: t('snippetContentHint') },
-  { key: 'category', label: t('snippetCategory'), type: 'select' as const, options: [
-    { label: t('snippetCatOther'), value: '' },
-    { label: t('snippetCatEmail'), value: '邮箱' },
-    { label: t('snippetCatUrl'), value: '链接' },
-    { label: t('snippetCatCode'), value: '代码' },
-    { label: t('snippetCatPhone'), value: '手机号' },
-    { label: t('snippetCatTemplate'), value: '模板' },
-  ]},
-])
-
-async function handleCreate(values: Record<string, string>) {
-  try {
-    await CreateSnippet(values.keyword, values.content, values.category || '')
-    showCreateDialog.value = false
-    toast.success(t('saved'))
-    await loadSnippets()
-  } catch (e) {
-    toast.error(t('createFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-// ---- 编辑 ----
-const showEditDialog = ref(false)
-const editingSnippet = ref<Snippet | null>(null)
-
-function startEdit(s: Snippet) {
-  editingSnippet.value = s
-  showEditDialog.value = true
-}
-
-async function handleEdit(values: Record<string, string>) {
-  if (!editingSnippet.value) return
-  try {
-    await UpdateSnippet(editingSnippet.value.id, values.keyword, values.content, values.category || '')
-    showEditDialog.value = false
-    editingSnippet.value = null
-    toast.success(t('saved'))
-    await loadSnippets()
-  } catch (e) {
-    toast.error(t('updateFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-// ---- 删除 ----
-const showDeleteConfirm = ref(false)
-const deletingId = ref('')
-
-async function confirmDelete(id: string) {
-  deletingId.value = id
-  showDeleteConfirm.value = true
-}
-
-async function handleDelete() {
-  try {
-    await DeleteSnippet(deletingId.value)
-    showDeleteConfirm.value = false
-    toast.success(t('deleted'))
-    await loadSnippets()
-  } catch (e) {
-    toast.error(t('deleteFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-// ---- 多选删除 ----
-const selectedIds = ref(new Set<string>())
-
-const isAllSelected = computed(() =>
-  filteredSnippets.value.length > 0 &&
-  filteredSnippets.value.every(s => selectedIds.value.has(s.id))
-)
-
-function toggleSelect(id: string) {
-  const next = new Set(selectedIds.value)
-  if (next.has(id)) {
-    next.delete(id)
-  } else {
-    next.add(id)
-  }
-  selectedIds.value = next
-}
-
-function toggleSelectAll() {
-  if (isAllSelected.value) {
-    selectedIds.value = new Set()
-  } else {
-    selectedIds.value = new Set(filteredSnippets.value.map(s => s.id))
-  }
-}
-
-const showBatchDeleteConfirm = ref(false)
-
-function confirmBatchDelete() {
-  showBatchDeleteConfirm.value = true
-}
-
-async function handleBatchDelete() {
-  try {
-    const ids = Array.from(selectedIds.value)
-    const results = await Promise.allSettled(ids.map(id => DeleteSnippet(id)))
-    const failed = results.filter(r => r.status === 'rejected').length
-    showBatchDeleteConfirm.value = false
-    selectedIds.value = new Set()
-    if (failed === 0) {
-      toast.success(t('deleted') + ` (${ids.length})`)
-    } else {
-      toast.success(t('deleted') + ` (${ids.length - failed}/${ids.length})`)
+    const r = unwrap<Snippet[]>(await ListNotesTree())
+    nodes.value = r || []
+    if (selectedDocId.value && !nodes.value.find(n => n.id === selectedDocId.value)) {
+      selectedDocId.value = ''; docContent.value = ''; docTagsText.value = ''
     }
-    await loadSnippets()
-  } catch (e) {
-    toast.error(t('deleteFailed') + ': ' + getErrorMessage(e))
-  }
+  } catch (e) { toast.error(getErrorMessage(e)) } finally { loading.value = false }
 }
 
-function clearSelection() {
-  selectedIds.value = new Set()
+async function doSearch() {
+  const q = searchQuery.value.trim()
+  if (!q) { await load(); return }
+  try { nodes.value = unwrap<Snippet[]>(await SearchNotesTree(q)) || [] } catch (e) { toast.error(getErrorMessage(e)) }
 }
+watch(searchQuery, () => doSearch())
+function clearSearch() { searchQuery.value = ''; load() }
 
-// ---- 粘贴 ----
-async function handlePaste(s: Snippet) {
+// ---- 标签 ----
+const allTags = computed<string[]>(() => {
+  const set = new Set<string>()
+  for (const n of nodes.value) for (const tg of parseTagsS(n.tags)) set.add(tg)
+  return [...set].sort()
+})
+
+// ---- 左侧树 ----
+function toggleFolder(id: string) {
+  const s = new Set(expanded.value); s.has(id) ? s.delete(id) : s.add(id); expanded.value = s
+}
+function expandAllOpen() {}
+function collapseAll() { expanded.value = new Set() }
+function selectNodeIntoFolder(folderId: string) { selectedFolderId.value = folderId || '' }
+
+// 新建（直接在目标文件夹下创建，无弹菜单）
+async function newFolderAt(folderId: string) {
   try {
-    await PasteSnippet(s.content)
-    toast.success(t('copied'))
-  } catch (e) {
-    toast.error(t('copyFailed') + ': ' + getErrorMessage(e))
+    const r = unwrap<Snippet>(await CreateNoteFolder(folderId, '新文件夹'))
+    if (r) { if (folderId) expanded.value.add(folderId); expanded.value.add(r.id) }
+    await load()
+    // 创建后进入重命名，方便直接命名
+    setTimeout(() => { if (r) startRename(r) }, 100)
+  } catch (e) { toast.error(getErrorMessage(e)) }
+}
+async function newDocAt(folderId: string) {
+  try {
+    const r = unwrap<Snippet>(await CreateNoteDoc(folderId, '未命名笔记', '', 'markdown'))
+    if (folderId) expanded.value.add(folderId)
+    await load()
+    if (r) { const found = nodes.value.find(x => x.id === r.id); if (found) onDoc(found) }
+  } catch (e) { toast.error(getErrorMessage(e)) }
+}
+
+// 切换笔记渲染格式（markdown | text）
+async function setFormat(fmt: string) {
+  if (!selectedDocId.value || !selectedDoc.value || selectedDoc.value.format === fmt) return
+  try {
+    await SetNoteDocFormat(selectedDocId.value, fmt)
+    selectedDoc.value.format = fmt
+  } catch (e) { toast.error(getErrorMessage(e)) }
+}
+
+// 重命名
+function startRename(n: Snippet) { editingId.value = n.id; editName.value = n.name || n.keyword || '' }
+async function commitRename(id: string) {
+  const name = editName.value.trim()
+  if (!name) { editingId.value = ''; return }
+  try { await RenameNoteNode(id, name); await load() } catch (e) { toast.error(getErrorMessage(e)) }
+  editingId.value = ''
+}
+
+// 删除
+const deletingNode = ref<Snippet | null>(null)
+const showDel = ref(false)
+function askDelete(n: Snippet) { deletingNode.value = n; showDel.value = true }
+async function confirmDeleteNode() {
+  if (!deletingNode.value) return
+  try {
+    await DeleteNoteNode(deletingNode.value.id)
+    if (selectedDocId.value === deletingNode.value.id) { selectedDocId.value = ''; docContent.value = ''; docTagsText.value = '' }
+    toast.success(t('deleted')); showDel.value = false; await load()
+  } catch (e) { toast.error(getErrorMessage(e)) }
+}
+
+// 移动（拖拽）
+async function handleDrop(dragId: string, targetId: string) {
+  if (!dragId) return
+  try { await MoveNoteNode(dragId, targetId || ''); await load() } catch (e) { toast.error(getErrorMessage(e)) }
+}
+
+// ---- 右侧文档编辑/预览 ----
+const selectedDoc = computed<Snippet | null>(() => (selectedDocId.value ? nodes.value.find(n => n.id === selectedDocId.value) || null : null))
+const previewHtml = computed(() => (docContent.value ? DOMPurify.sanitize(marked.parse(docContent.value, { async: false }) as string) : ''))
+
+function onDoc(d: Snippet) {
+  if (d.isFolder) return
+  selectedDocId.value = d.id
+  selectedFolderId.value = d.parentId || ''
+  docContent.value = d.content || ''
+  docTagsText.value = parseTagsS(d.tags).join(', ')
+  // 展开祖先
+  let cur = d.parentId
+  const s = new Set(expanded.value)
+  while (cur) {
+    s.add(cur)
+    const par = nodes.value.find(x => x.id === cur)
+    cur = par?.parentId ?? ''
   }
+  expanded.value = s
+}
+function onDocInput() {
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(saveDoc, 800)
+}
+async function saveDoc() {
+  if (!selectedDocId.value) return
+  const tags = '["' + docTagsText.value.split(',').map(x => x.trim()).filter(Boolean).join('","') + '"]'
+  try { await UpdateNoteDoc(selectedDocId.value, docContent.value, tags); await load() } catch { /* 自动保存静默 */ }
+}
+async function copyDoc() {
+  if (!docContent.value) return
+  try { await CopyText(docContent.value); toast.success(t('copied')) } catch (e) { toast.error(getErrorMessage(e)) }
+}
+async function renameCurrent() {
+  if (!selectedDoc.value) return
+  try { await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name); await load() } catch (e) { toast.error(getErrorMessage(e)) }
 }
 
-// ---- 格式化时间 ----
-function formatDate(iso: string): string {
-  if (!iso) return ''
-  const d = new Date(iso)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-}
-
-function contentPreview(text: string, max = 60): string {
-  if (!text) return ''
-  const single = text.replace(/\s+/g, ' ')
-  return single.length > max ? single.slice(0, max) + '...' : single
-}
-
-onMounted(loadSnippets)
+onMounted(() => load())
 </script>
 
 <template>
-  <div class="snippet-page">
-    <!-- 页面头部 -->
-    <div class="snippet-header">
-      <div class="snippet-title-row">
-        <h2 class="snippet-title">{{ t('snippetManager') }}</h2>
-        <button class="snippet-add-btn" @click="showCreateDialog = true">
-          <Plus :size="15" />
-          <span>{{ t('snippetNew') }}</span>
-        </button>
+  <div class="notes-page">
+    <!-- 顶部 -->
+    <div class="notes-header">
+      <div class="notes-title">
+        <h2 class="notes-h2">{{ t('notesTitle') }}</h2>
+        <span class="notes-sub">{{ t('notesSubtitle') }}</span>
       </div>
-      <div class="snippet-search">
-        <Search :size="14" class="search-icon" />
-        <input
-          v-model="searchQuery"
-          type="text"
-          class="search-input"
-          :placeholder="t('search')"
-        />
-        <button v-if="searchQuery" class="clear-btn" @click="searchQuery = ''" :title="t('clear')">
-          <X :size="12" />
-        </button>
+      <div class="notes-search">
+        <Search :size="14" class="ns-icon" />
+        <input v-model="searchQuery" class="ns-input" :placeholder="t('notesSearchPh')" />
+        <button v-if="searchQuery" class="ns-clear" @click="clearSearch"><X :size="13" /></button>
+      </div>
+      <div class="notes-tags">
+        <button class="nt-chip" :class="{ active: activeTag === '' }" @click="activeTag = ''">{{ t('notesAllTags') }}</button>
+        <button v-for="tg in allTags" :key="tg" class="nt-chip" :class="{ active: activeTag === tg }" @click="activeTag = activeTag === tg ? '' : tg">{{ tg }}</button>
       </div>
     </div>
 
-    <!-- 列表 -->
-    <div class="snippet-list">
-      <!-- 空状态 -->
-      <div v-if="!loading && filteredSnippets.length === 0" class="snippet-empty">
-        <Clipboard :size="36" class="empty-icon" />
-        <p class="empty-text">{{ t('noSnippets') }}</p>
-        <p class="empty-hint">{{ t('createFirstSnippet') }}</p>
-      </div>
-
-      <!-- 加载中 -->
-      <div v-if="loading" class="snippet-loading">{{ t('loading') }}</div>
-
-      <!-- 表头 -->
-      <div v-if="filteredSnippets.length > 0" class="snippet-table-header">
-        <span class="col-check">
-          <button class="check-btn" @click="toggleSelectAll" :title="t('selectAll')">
-            <CheckSquare :size="14" v-if="isAllSelected" />
-            <Square :size="14" v-else />
-          </button>
-        </span>
-        <span class="col-kw">{{ t('snippetKeyword') }}</span>
-        <span class="col-content">{{ t('snippetContent') }}</span>
-        <span class="col-cat">{{ t('snippetCategory') }}</span>
-        <span class="col-date">{{ t('snippetCreatedAt') }}</span>
-        <span class="col-actions">{{ t('open') }}</span>
-      </div>
-
-      <!-- 行 -->
-      <div
-        v-for="s in pagedSnippets"
-        :key="s.id"
-        :class="['snippet-row', { 'row-selected': selectedIds.has(s.id) }]"
-      >
-        <span class="col-check">
-          <button class="check-btn" @click="toggleSelect(s.id)">
-            <CheckSquare :size="14" v-if="selectedIds.has(s.id)" class="check-on" />
-            <Square :size="14" v-else class="check-off" />
-          </button>
-        </span>
-        <span class="col-kw kw-text">{{ s.keyword }}</span>
-        <span class="col-content content-preview" :title="s.content">{{ contentPreview(s.content) }}</span>
-        <span class="col-cat">
-          <span class="cat-badge" v-if="s.category">{{ s.category }}</span>
-          <span v-else class="cat-none">-</span>
-        </span>
-        <span class="col-date date-text">{{ formatDate(s.createdAt) }}</span>
-        <span class="col-actions">
-          <button class="action-btn paste-btn" :title="t('open')" @click="handlePaste(s)">
-            <CornerDownLeft :size="13" />
-          </button>
-          <button class="action-btn edit-btn" :title="t('edit')" @click="startEdit(s)">
-            <Pencil :size="13" />
-          </button>
-          <button class="action-btn del-btn" :title="t('delete')" @click="confirmDelete(s.id)">
-            <Trash2 :size="13" />
-          </button>
-        </span>
-      </div>
-
-      <!-- 批量操作栏 -->
-      <div v-if="selectedIds.size > 0" class="batch-bar">
-        <span class="batch-count">{{ t('selectedCount', { count: selectedIds.size }) }}</span>
-        <div class="batch-actions">
-          <button class="batch-btn batch-cancel" @click="clearSelection">{{ t('cancel') }}</button>
-          <button class="batch-btn batch-delete" @click="confirmBatchDelete">
-            <Trash2 :size="13" />
-            <span>{{ t('delete') }} ({{ selectedIds.size }})</span>
-          </button>
+    <div class="notes-body">
+      <!-- 左：树 -->
+      <div class="notes-tree">
+        <div class="tree-toolbar">
+          <button class="tt-btn" :title="t('notesNewFolder')" @click="newFolderAt('')"><FolderPlus :size="13" /></button>
+          <button class="tt-btn" :title="t('notesNewDoc')" @click="newDocAt('')"><FileText :size="13" /></button>
+          <span class="tt-sep"></span>
+          <button class="tt-btn" :title="t('notesCollapseAll')" @click="collapseAll"><PanelLeft :size="13" /></button>
+        </div>
+        <div class="tree-wrap">
+          <template v-if="!searchQuery && !activeTag">
+            <div v-for="root in tree" :key="root.id">
+              <NoteTreeNode
+                :node="root" :depth="0"
+                :expanded="expanded" :editing-id="editingId" :edit-name="editName"
+                :selected-doc="selectedDocId" :selected-folder="selectedFolderId"
+                @toggle="toggleFolder" @select="onDoc"
+                @rename-start="startRename" @rename-commit="commitRename"
+                @del="askDelete" @create-folder="newFolderAt" @create-doc="newDocAt"
+                @drop-node="handleDrop"
+              />
+            </div>
+            <div v-if="!tree.length && !loading" class="tree-empty">{{ t('notesEmpty') }}</div>
+          </template>
+          <!-- 搜索/标签结果：扁平展示 -->
+          <template v-else>
+            <div v-for="n in flatResults" :key="'res-'+n.id" class="sr-row" @click="n.isFolder ? toggleFolder(n.id) : onDoc(n)">
+              <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
+              <span class="tn-name">{{ n.name || n.keyword }}</span>
+            </div>
+          </template>
         </div>
       </div>
 
-      <!-- 分页 -->
-      <div v-if="filteredSnippets.length > pageSize" class="pagination">
-        <button class="page-btn" :disabled="currentPage <= 1" @click="goToPage(currentPage - 1)">
-          <ChevronLeft :size="14" />
-        </button>
-        <template v-for="p in totalPages" :key="p">
-          <button
-            v-if="p === 1 || p === totalPages || Math.abs(p - currentPage) <= 1"
-            :class="['page-btn page-num', { active: p === currentPage }]"
-            @click="goToPage(p)"
-          >{{ p }}</button>
-          <span v-else-if="p === totalPages - 1 || p === 2" class="page-ellipsis">…</span>
+      <!-- 右：文档编辑 -->
+      <div class="notes-editor">
+        <div v-if="!selectedDoc" class="ne-empty"><FileText :size="32" /><p>{{ t('notesSelectHint') }}</p></div>
+        <template v-else-if="selectedDoc.isFolder">
+          <div class="ne-empty ne-folder"><Folder :size="32" /><p>{{ t('notesIsFolder') }}</p></div>
         </template>
-        <button class="page-btn" :disabled="currentPage >= totalPages" @click="goToPage(currentPage + 1)">
-          <ChevronRight :size="14" />
-        </button>
-        <span class="page-total">{{ t('paginationTotal', { total: filteredSnippets.length }) }}</span>
+        <template v-else>
+          <div class="ne-head">
+            <input v-model="selectedDoc.name" class="ne-name" @change="renameCurrent" />
+            <div class="ne-format">
+              <button :class="{ active: selectedDoc.format !== 'text' }" @click="setFormat('markdown')">{{ t('notesFormatMd') }}</button>
+              <button :class="{ active: selectedDoc.format === 'text' }" @click="setFormat('text')">{{ t('notesFormatText') }}</button>
+            </div>
+            <button class="ne-copy" :title="t('copy')" @click="copyDoc"><CopyIcon :size="13" /></button>
+          </div>
+          <div class="ne-tags">
+            <span class="ne-tags-label">{{ t('notesTag') }}</span>
+            <input v-model="docTagsText" class="ne-tags-input" :placeholder="t('notesTagsPh')" @change="saveDoc" />
+          </div>
+          <!-- markdown：分栏编辑+预览；纯文本：仅单编辑区 -->
+          <div v-if="selectedDoc.format !== 'text'" class="ne-split">
+            <textarea v-model="docContent" class="ne-input" spellcheck="false"
+              :placeholder="t('notesMarkdownPh')" @input="onDocInput"></textarea>
+            <div class="ne-preview markdown-body" v-html="previewHtml"></div>
+          </div>
+          <div v-else class="ne-split">
+            <textarea v-model="docContent" class="ne-input ne-textonly" spellcheck="false"
+              :placeholder="t('notesTextPh')" @input="onDocInput"></textarea>
+          </div>
+        </template>
       </div>
     </div>
-    <CreateDialog
-      :visible="showCreateDialog"
-      :title="t('snippetNew')"
-      :fields="createFields"
-      @confirm="handleCreate"
-      @cancel="showCreateDialog = false"
-    />
 
-    <!-- 编辑对话框 -->
-    <CreateDialog
-      v-if="editingSnippet"
-      :visible="showEditDialog"
-      :title="t('snippetEdit')"
-      :fields="createFields"
-      :editValues="{ keyword: editingSnippet.keyword, content: editingSnippet.content, category: editingSnippet.category }"
-      @confirm="handleEdit"
-      @cancel="showEditDialog = false; editingSnippet = null"
-    />
-
-    <!-- 删除确认 -->
-    <ConfirmDialog
-      :visible="showDeleteConfirm"
-      :message="t('confirmDelete')"
-      @confirm="handleDelete"
-      @cancel="showDeleteConfirm = false"
-    />
-
-    <!-- 批量删除确认 -->
-    <ConfirmDialog
-      :visible="showBatchDeleteConfirm"
-      :message="t('confirmDeleteBatch', { count: selectedIds.size })"
-      @confirm="handleBatchDelete"
-      @cancel="showBatchDeleteConfirm = false"
-    />
+    <ConfirmDialog :visible="showDel" :message="(deletingNode?.isFolder ? t('notesDelFolder') : t('notesDelDoc')) + '?'"
+      @confirm="confirmDeleteNode" @cancel="showDel = false" />
   </div>
 </template>
 
 <style scoped>
-.snippet-page {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  padding: 20px 24px;
-  background: var(--color-bg-primary);
-}
+.notes-page { height: 100%; display: flex; flex-direction: column; background: var(--color-bg-primary); }
+.notes-header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--color-border); }
+.notes-title { display: flex; flex-direction: column; flex-shrink: 0; }
+.notes-h2 { margin: 0; font-size: 15px; color: var(--color-text-primary); }
+.notes-sub { font-size: 11px; color: var(--color-text-muted); }
+.notes-search { position: relative; width: 260px; flex-shrink: 0; display: flex; align-items: center; }
+.ns-icon { position: absolute; left: 8px; color: var(--color-text-disabled); }
+.ns-input { width: 100%; padding: 6px 28px 6px 28px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px; outline: none; font-family: inherit; }
+.ns-input:focus { border-color: var(--color-accent); }
+.ns-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; }
+.notes-tags { flex: 1; min-width: 0; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: 8px; }
+.nt-chip { padding: 2px 6px; border: none; background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; flex-shrink: 0; line-height: 1; transition: color var(--transition-fast), font-weight var(--transition-fast); }
+.nt-chip:hover { color: var(--color-text-primary); }
+.nt-chip.active { color: var(--color-accent); font-weight: 600; }
 
-/* 头部 */
-.snippet-header {
-  flex-shrink: 0;
-  margin-bottom: 16px;
-}
-.snippet-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 12px;
-}
-.snippet-title {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--color-text-primary);
-  margin: 0;
-}
-.snippet-add-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  padding: 6px 12px;
-  border: none;
-  border-radius: 6px;
-  background: var(--color-accent);
-  color: #fff;
-  font-size: 13px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: opacity var(--transition-fast);
-}
-.snippet-add-btn:hover { opacity: 0.85; }
+.notes-body { flex: 1; display: flex; min-height: 0; }
+.notes-tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border); display: flex; flex-direction: column; background: var(--color-bg-secondary); }
+.tree-toolbar { display: flex; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--color-border); }
+.tt-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: none; background: none; color: var(--color-text-muted); cursor: pointer; border-radius: 5px; }
+.tt-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.tt-sep { width: 1px; background: var(--color-border); margin: 0 4px; }
+.tree-wrap { flex: 1; overflow-y: auto; padding: 4px; }
+.tree-empty { color: var(--color-text-disabled); font-size: 12px; padding: 20px; text-align: center; }
+.sr-row { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.sr-row:hover { background: var(--color-bg-hover); }
 
-/* 搜索 */
-.snippet-search {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  padding: 0 10px;
-  height: 34px;
-}
-.snippet-search:focus-within {
-  border-color: var(--color-border-focus);
-  box-shadow: 0 0 0 2px var(--color-accent-bg);
-}
-.snippet-search .search-input {
-  flex: 1;
-  background: none;
-  border: none;
-  outline: none;
-  color: var(--color-text-primary);
-  font-size: 13px;
-  font-family: inherit;
-}
-.snippet-search .clear-btn {
-  background: none;
-  border: none;
-  color: var(--color-text-disabled);
-  cursor: pointer;
-  display: flex;
-  padding: 2px;
-  border-radius: 4px;
-}
-.snippet-search .clear-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
+.notes-editor { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.ne-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--color-text-disabled); gap: 6px; }
+.ne-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
+.ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 14px; font-weight: 600; outline: none; font-family: inherit; }
+.ne-name:focus { border-color: var(--color-accent); }
+.ne-format { display: flex; gap: 2px; flex-shrink: 0; }
+.ne-format button { padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
+.ne-format button:first-child { border-radius: 6px 0 0 6px; }
+.ne-format button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.ne-format button:hover:not(.active) { color: var(--color-text-primary); }
+.ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: 6px; border-radius: 5px; }
+.ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+.ne-tags { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); }
+.ne-tags-label { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
+.ne-tags-input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: 5px; background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
+.ne-tags-input:focus { border-color: var(--color-accent); }
+.ne-split { flex: 1; display: flex; min-height: 0; }
+.ne-input { flex: 1; min-width: 0; resize: none; padding: 12px; border: none; border-right: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); font-size: 13px; font-family: 'Consolas','Monaco',monospace; line-height: 1.6; outline: none; box-sizing: border-box; }
+.ne-input.ne-textonly { border-right: none; }
+.ne-preview { flex: 1; min-width: 0; overflow: auto; padding: 12px 16px; background: var(--color-bg-primary); }
 
-/* 列表 */
-.snippet-list {
-  flex: 1;
-  overflow-y: auto;
-}
-
-/* 表头 */
-.snippet-table-header {
-  display: flex;
-  align-items: center;
-  padding: 8px 12px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-  border-bottom: 1px solid var(--color-border);
-  user-select: none;
-}
-
-/* 行 */
-.snippet-row {
-  display: flex;
-  align-items: center;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--color-border);
-  transition: background var(--transition-fast);
-}
-.snippet-row:hover { background: var(--color-bg-hover); }
-.snippet-row.row-selected { background: var(--color-accent-bg); }
-
-.col-check { width: 32px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-.col-kw { width: 130px; flex-shrink: 0; }
-.col-content { flex: 1; min-width: 0; }
-.col-cat { width: 80px; flex-shrink: 0; text-align: center; }
-.col-date { width: 100px; flex-shrink: 0; text-align: center; }
-.col-actions { width: 100px; flex-shrink: 0; text-align: right; }
-.kw-text {
-  font-size: 13px;
-  font-weight: 500;
-  color: var(--color-text-primary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.content-preview {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono, monospace);
-}
-.date-text {
-  font-size: 12px;
-  color: var(--color-text-muted);
-}
-.cat-badge {
-  display: inline-block;
-  padding: 1px 8px;
-  border-radius: 4px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-muted);
-  font-size: 11px;
-}
-.cat-none { color: var(--color-text-disabled); font-size: 12px; }
-
-/* 复选框 */
-.check-btn {
-  background: none;
-  border: none;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 2px;
-  border-radius: 3px;
-  transition: color var(--transition-fast);
-}
-.check-btn .check-on { color: var(--color-accent); }
-.check-btn .check-off { color: var(--color-text-disabled); }
-.check-btn:hover .check-off { color: var(--color-text-muted); }
-
-/* 批量操作栏 */
-.batch-bar {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 16px;
-  background: var(--color-bg-tertiary);
-  border-top: 1px solid var(--color-border);
-  border-radius: 8px 8px 0 0;
-  margin-top: 4px;
-}
-.batch-count {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  font-weight: 500;
-}
-.batch-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-.batch-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 6px 14px;
-  border: none;
-  border-radius: 6px;
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.batch-cancel {
-  background: var(--color-bg-active);
-  color: var(--color-text-muted);
-}
-.batch-cancel:hover { color: var(--color-text-primary); }
-.batch-delete {
-  background: var(--color-danger);
-  color: #fff;
-}
-.batch-delete:hover { opacity: 0.85; }
-
-/* 分页 */
-.pagination {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 12px 0 4px;
-  flex-shrink: 0;
-}
-.page-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 28px;
-  height: 28px;
-  border: 1px solid var(--color-border);
-  border-radius: 5px;
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-  font-size: 12px;
-  font-family: inherit;
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
-.page-btn:disabled { opacity: 0.35; cursor: default; }
-.page-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
-.page-num { font-weight: 500; }
-.page-ellipsis { color: var(--color-text-disabled); font-size: 12px; width: 20px; text-align: center; }
-.page-total { margin-left: 8px; font-size: 11px; color: var(--color-text-muted); }
-
-/* 操作按钮 */
-.action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 26px;
-  height: 26px;
-  border: none;
-  border-radius: 5px;
-  background: transparent;
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-  margin-left: 2px;
-}
-.paste-btn { color: var(--color-accent); }
-.edit-btn { color: var(--color-text-muted); }
-.del-btn { color: var(--color-text-disabled); }
-.paste-btn:hover { background: var(--color-accent-bg); }
-.edit-btn:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
-.del-btn:hover { background: rgba(232, 76, 76, 0.1); color: var(--color-danger); }
-
-/* 空状态 */
-.snippet-empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 60px 24px;
-  gap: 8px;
-}
-.empty-icon { color: var(--color-text-disabled); }
-.empty-text { font-size: 14px; color: var(--color-text-secondary); margin: 0; }
-.empty-hint { font-size: 12px; color: var(--color-text-muted); margin: 0; }
-.snippet-loading {
-  text-align: center;
-  padding: 40px;
-  color: var(--color-text-muted);
-  font-size: 13px;
-}
-
-/* 滚动条 */
-.snippet-list::-webkit-scrollbar { width: 5px; }
-.snippet-list::-webkit-scrollbar-track { background: transparent; }
-.snippet-list::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 3px; }
+/* Markdown 渲染（复用 HttpClientPage 样式） */
+.markdown-body { color: var(--color-text-primary); font-size: 13px; line-height: 1.7; word-break: break-word; }
+.markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3), .markdown-body :deep(h4) { margin: 12px 0 8px; line-height: 1.3; }
+.markdown-body :deep(h1) { font-size: 20px; border-bottom: 1px solid var(--color-border); padding-bottom: 6px; }
+.markdown-body :deep(h2) { font-size: 17px; border-bottom: 1px solid var(--color-border); padding-bottom: 4px; }
+.markdown-body :deep(h3) { font-size: 15px; }
+.markdown-body :deep(p) { margin: 8px 0; }
+.markdown-body :deep(a) { color: var(--color-accent); }
+.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: 4px; font-family: 'Consolas','Monaco',monospace; font-size: 13px; }
+.markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: 10px 12px; border-radius: 6px; overflow: auto; }
+.markdown-body :deep(pre code) { background: none; padding: 0; }
+.markdown-body :deep(blockquote) { border-left: 3px solid var(--color-border-focus); margin: 8px 0; padding: 2px 12px; color: var(--color-text-muted); }
+.markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 22px; margin: 8px 0; }
+.markdown-body :deep(table) { border-collapse: collapse; margin: 8px 0; }
+.markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--color-border); padding: 4px 8px; }
+.markdown-body :deep(img) { max-width: 100%; }
 </style>

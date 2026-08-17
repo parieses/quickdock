@@ -13,17 +13,35 @@ const show = ref(false)
 const dingtalk = ref('')
 const wecom = ref('')
 const feishu = ref('')
+const serverchan = ref('')
+const pushplus = ref('')
+const telegram = ref('')
 const saving = ref(false)
 const testing = ref('') // 正在测试的平台 kind（''=空闲）
 const msg = ref('')
 
+type WebhookKind = 'dingtalk' | 'wecom' | 'feishu' | 'serverchan' | 'pushplus' | 'telegram'
+const kinds = ['dingtalk', 'wecom', 'feishu', 'serverchan', 'pushplus', 'telegram'] as const
+
+const fields: Record<WebhookKind, { ref: typeof dingtalk }> = {
+  dingtalk: { ref: dingtalk },
+  wecom: { ref: wecom },
+  feishu: { ref: feishu },
+  serverchan: { ref: serverchan },
+  pushplus: { ref: pushplus },
+  telegram: { ref: telegram },
+}
+
 async function open() {
   msg.value = ''
   try {
-    const cfg = unwrap<{ dingtalk: string; wecom: string; feishu: string }>(await GetWebhookConfig())
+    const cfg = unwrap<{ dingtalk: string; wecom: string; feishu: string; serverchan: string; pushplus: string; telegram: string }>(await GetWebhookConfig())
     dingtalk.value = cfg?.dingtalk || ''
     wecom.value = cfg?.wecom || ''
     feishu.value = cfg?.feishu || ''
+    serverchan.value = cfg?.serverchan || ''
+    pushplus.value = cfg?.pushplus || ''
+    telegram.value = cfg?.telegram || ''
   } catch {
     // 读取失败则打开空表单
   }
@@ -34,7 +52,10 @@ async function save() {
   saving.value = true
   msg.value = ''
   try {
-    await unwrap(await SetWebhookConfig(dingtalk.value.trim(), wecom.value.trim(), feishu.value.trim()))
+    await unwrap(await SetWebhookConfig(
+      dingtalk.value.trim(), wecom.value.trim(), feishu.value.trim(),
+      serverchan.value.trim(), pushplus.value.trim(), telegram.value.trim(),
+    ))
     show.value = false
   } catch (e) {
     msg.value = getErrorMessage(e)
@@ -43,8 +64,8 @@ async function save() {
   }
 }
 
-async function test(kind: 'dingtalk' | 'wecom' | 'feishu') {
-  const url = (kind === 'dingtalk' ? dingtalk.value : kind === 'wecom' ? wecom.value : feishu.value).trim()
+async function test(kind: WebhookKind) {
+  const url = fields[kind].ref.value.trim()
   if (!url) { msg.value = t('mon_nf_empty'); return }
   testing.value = kind
   msg.value = ''
@@ -88,6 +109,30 @@ async function test(kind: 'dingtalk' | 'wecom' | 'feishu') {
         <input v-model="feishu" class="modal-input" placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." />
         <button class="nf-test" :disabled="testing === 'feishu'" @click="test('feishu')">
           {{ testing === 'feishu' ? '…' : t('mon_nf_test') }}
+        </button>
+      </div>
+
+      <label>{{ t('mon_nf_serverchan') }}</label>
+      <div class="nf-row">
+        <input v-model="serverchan" class="modal-input" placeholder="https://sctapi.ftqq.com/<SENDKEY>.send" />
+        <button class="nf-test" :disabled="testing === 'serverchan'" @click="test('serverchan')">
+          {{ testing === 'serverchan' ? '…' : t('mon_nf_test') }}
+        </button>
+      </div>
+
+      <label>{{ t('mon_nf_pushplus') }}</label>
+      <div class="nf-row">
+        <input v-model="pushplus" class="modal-input" :placeholder="t('mon_nf_pushplus_ph')" />
+        <button class="nf-test" :disabled="testing === 'pushplus'" @click="test('pushplus')">
+          {{ testing === 'pushplus' ? '…' : t('mon_nf_test') }}
+        </button>
+      </div>
+
+      <label>{{ t('mon_nf_telegram') }}</label>
+      <div class="nf-row">
+        <input v-model="telegram" class="modal-input" :placeholder="t('mon_nf_telegram_ph')" />
+        <button class="nf-test" :disabled="testing === 'telegram'" @click="test('telegram')">
+          {{ testing === 'telegram' ? '…' : t('mon_nf_test') }}
         </button>
       </div>
 

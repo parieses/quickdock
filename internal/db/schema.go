@@ -142,6 +142,13 @@ var baseTables = []string{
 		keyword TEXT NOT NULL UNIQUE,
 		content TEXT NOT NULL,
 		category TEXT DEFAULT '',
+		name TEXT DEFAULT '',
+		parent_id TEXT DEFAULT '',
+		is_folder INTEGER DEFAULT 0,
+		sort INTEGER DEFAULT 0,
+		tags TEXT DEFAULT '',
+		is_note INTEGER DEFAULT 0,
+		format TEXT DEFAULT 'markdown',
 		created_at TEXT NOT NULL
 	)`,
 
@@ -499,11 +506,24 @@ func (d *Database) migrate() error {
 		{"api_requests", "project_id", "TEXT DEFAULT ''"},
 		// api_requests: 归属目录（项目下的功能模块分组，支持多级嵌套）
 		{"api_requests", "folder_id", "TEXT DEFAULT ''"},
+		// snippets → 笔记树：新增树形/标题/标签字段
+		{"snippets", "name", "TEXT DEFAULT ''"},
+		{"snippets", "parent_id", "TEXT DEFAULT ''"},
+		{"snippets", "is_folder", "INTEGER DEFAULT 0"},
+		{"snippets", "sort", "INTEGER DEFAULT 0"},
+		{"snippets", "tags", "TEXT DEFAULT ''"},
+		{"snippets", "is_note", "INTEGER DEFAULT 0"},
+		{"snippets", "format", "TEXT DEFAULT 'markdown'"},
 	}
 	for _, m := range columnMigrations {
 		if err := d.addColumnIfMissing(m.table, m.col, m.colType); err != nil {
 			return err
 		}
+	}
+
+	// 数据迁移：snippets 升级为笔记树，用 keyword 回填 name（幂等）
+	if _, err := d.conn.Exec(`UPDATE snippets SET name = keyword WHERE (name IS NULL OR name = '')`); err != nil {
+		return fmt.Errorf("回填 snippets.name 失败: %w", err)
 	}
 
 	// 数据迁移：已有 completed(done=1) 待办同步 status='done'（status 为权威字段，done 派生）

@@ -117,6 +117,8 @@ var validColumns = map[string]bool{
 	"success": true, "duration_ms": true, "result": true, "error": true, "trigger": true,
 	// frecency 附加列
 	"input": true,
+	// snippets 笔记树列
+	"is_folder": true, "is_note": true, "format": true,
 }
 
 // validateTable 检查表名是否在白名单中

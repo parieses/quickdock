@@ -6,13 +6,38 @@ import (
 	"time"
 )
 
-// Snippet 文本片段
+// Snippet 文本片段 / 笔记节点（升级为树形后：文件夹 = is_folder=1，文档 = is_folder=0）
 type Snippet struct {
-	ID           string `json:"id"`
-	Keyword      string `json:"keyword"`
-	Content      string `json:"content"`
-	Category     string `json:"category"`
-	CreatedAt    string `json:"createdAt"`
+	ID        string `json:"id"`
+	Keyword   string `json:"keyword"`
+	Content   string `json:"content"`
+	Category  string `json:"category"`
+	Name      string `json:"name"`     // 树形节点的标题（文件夹/文档名）
+	ParentID  string `json:"parentId"` // 父文件夹 ID；空=根
+	IsFolder  bool   `json:"isFolder"`
+	Sort      int    `json:"sort"`
+	Tags      string `json:"tags"`   // 标签 JSON 数组字符串
+	IsNote    bool   `json:"isNote"` // 是否笔记/文档（源自快捷笔记等）
+	Format    string `json:"format"` // markdown | text（渲染方式）
+	CreatedAt string `json:"createdAt"`
+}
+
+// snippetCols 含树形字段的完整列（供树操作与前端读取）
+const snippetCols = `id, keyword, content, category, name, parent_id, is_folder, sort, tags, is_note, format, created_at`
+
+func scanSnippetNode(rows interface {
+	Scan(dest ...interface{}) error
+}) (*Snippet, error) {
+	var s Snippet
+	var isFolder, isNote int
+	err := rows.Scan(&s.ID, &s.Keyword, &s.Content, &s.Category, &s.Name, &s.ParentID,
+		&isFolder, &s.Sort, &s.Tags, &isNote, &s.Format, &s.CreatedAt)
+	s.IsFolder = isFolder != 0
+	s.IsNote = isNote != 0
+	if s.Format == "" {
+		s.Format = "markdown"
+	}
+	return &s, err
 }
 
 // CreateSnippet 创建文本片段
