@@ -292,6 +292,12 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 	}
 	logf("info", fmt.Sprintf("安装插件 %s（dsh plugin --profile web add %s）…", plugin, plugin))
 
+	// 确保 pnpm 可用：dsh plugin add 内部用 pnpm 管理依赖，新电脑可能没装
+	if err := m.ensurePnpm(ctx, logf); err != nil {
+		logf("error", fmt.Sprintf("pnpm 不可用且自动安装失败: %v", err))
+		return err
+	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -324,6 +330,74 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 	finished = true
 	m.emitPluginDone(true)
 	return nil
+}
+
+// ensurePnpm 检查 pnpm 是否可用，不可用则用当前 node/npm 补装。
+// dsh plugin add 内部调 pnpm 管理插件依赖，全新电脑无 pnpm 会报
+// 'pnpm' 不是内部或外部命令。
+func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, string)) error {
+	// 先检查 PATH 上是否有 pnpm
+	if _, err := exec.LookPath("pnpm"); err == nil {
+		return nil
+	}
+	// 便携 node 全局目录里可能有（SetupDSH 已装但 PATH 未刷新）
+	nodeDir := m.nodeEnv.runtimeDir
+	if nodeDir != "" {
+		pnpmExe := nodeDir + string(os.PathSeparator) + "pnpm" + exeExt()
+		if _, err := os.Stat(pnpmExe); err == nil {
+			return nil
+		}
+	}
+	// 没有 pnpm，用 npm 装
+	node := m.nodeEnv.NodePath()
+	npmCli := m.nodeEnv.npmCli()
+	if node == "" || npmCli == "" {
+		return fmt.Errorf("node 或 npm 不可用，无法自动安装 pnpm")
+	}
+	logf("info", "pnpm 未检测到，正在自动安装…")
+	installCtx, cancel := context.WithTimeout(ctx, 3*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(installCtx, node, npmCli, "install", "-g", "pnpm")
+	cmd.Dir = m.nodeEnv.DshHome()
+	env := cleanNodeEnv(os.Environ())
+	env = append(env, "DSH_HOME="+m.nodeEnv.DshHome(),
+		"npm_config_registry=https://registry.npmmirror.com/")
+	if nodeDir != "" {
+		if _, err := os.Stat(nodeDir); err == nil {
+			env = append(env, "PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
+	}
+	cmd.Env = env
+	cmd.SysProcAttr = hideWindowAttr()
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			logf("info", sc.Text())
+		}
+	}()
+	go func() {
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			logf("info", sc.Text())
+		}
+	}()
+	if err := cmd.Wait(); err != nil {
+		return err
+	}
+	logf("info", "pnpm 安装完成")
+	return nil
+}
+
+func exeExt() string {
+	if runtime.GOOS == "windows" {
+		return ".cmd"
+	}
+	return ""
 }
 
 // emitPluginDone 通知前端插件命令执行结束（quickdock:dsh:plugin 事件）

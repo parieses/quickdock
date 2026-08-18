@@ -773,7 +773,42 @@ func (m *NodeEnvManager) runNpmInstall(ctx context.Context, latest bool, onMsg f
 	if _, err := os.Stat(m.DshMainJS()); err != nil {
 		return fmt.Errorf("dsh 安装完成但找不到入口，期望路径: %s", m.DshMainJS())
 	}
+	// 安装 pnpm：dsh plugin add 内部用 pnpm 管理插件依赖，新电脑无 pnpm 会失败
+	if err := m.installPnpm(ctx, node, npmCli, env, onMsg); err != nil {
+		if onMsg != nil {
+			onMsg(fmt.Sprintf("[warn] pnpm 安装失败（不影响 dsh 本体，但插件安装可能需要）: %v", err))
+		}
+		// 不 return err：pnpm 失败不应阻断 dsh 安装流程
+	}
 	return nil
+}
+
+// installPnpm 全局安装 pnpm（dsh plugin add 依赖它）
+func (m *NodeEnvManager) installPnpm(ctx context.Context, node, npmCli string, env []string, onMsg func(string)) error {
+	if onMsg != nil {
+		onMsg("正在安装 pnpm（dsh 插件管理依赖）…")
+	}
+	args := []string{npmCli, "install", "-g", "pnpm"}
+	cmd := exec.CommandContext(ctx, node, args...)
+	cmd.Dir = m.DshHome()
+	cmd.Env = env
+	cmd.SysProcAttr = hideWindowAttr()
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	consume := func(r io.Reader) {
+		sc := bufio.NewScanner(r)
+		for sc.Scan() {
+			if onMsg != nil {
+				onMsg(sc.Text())
+			}
+		}
+	}
+	go consume(stdout)
+	go consume(stderr)
+	return cmd.Wait()
 }
 
 // proxyTransport 返回代理感知的 http transport：优先环境变量，回退 WinINET 系统代理
