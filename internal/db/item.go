@@ -627,7 +627,11 @@ func splitArgs(args string) []string {
 
 // startDetached 启动外部程序并异步回收进程句柄，避免僵尸/句柄泄漏
 // （exec.Command.Start 之后若不 Wait，Windows 上内核句柄不会被释放）
+// Windows 上用 CREATE_NO_WINDOW 隐藏控制台：GUI 主进程直接拉起控制台程序会弹 cmd 窗。
 func startDetached(cmd *exec.Cmd) error {
+	if goruntime.GOOS == "windows" {
+		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	}
 	if err := cmd.Start(); err != nil {
 		return err
 	}

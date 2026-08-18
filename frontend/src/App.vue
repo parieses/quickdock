@@ -55,40 +55,48 @@ function setPage(page: string) {
 // 从侧边栏点 DeepSeek：先探测环境——缺 node/dsh 自动安装并打开设置页展示进度；已就绪直接开原生窗口
 interface EnvProbe { nodeFound?: boolean; dshInstalled?: boolean }
 const dshOpening = ref(false)
+// 本会话内已确认 node+dsh 就绪后不再重复探测：DetectNodeEnv() 每次会 spawn node/npx 子进程
+// 测版本（~1s），dsh 已装好的情况下纯属浪费。后端 Start() 仍会兜底检查入口存在。
+let dshEnvReady = false
 async function openDSH() {
   if (dshOpening.value) return // 防连点：首启可能耗时数秒，避免开多个窗口
   dshOpening.value = true
   try {
-    const st = unwrap<EnvProbe | null>(await DetectNodeEnv())
-    if (!st?.nodeFound || !st.dshInstalled) {
-      // 新电脑：node+dsh 一起自动装；装了 node 没装 dsh：只补 dsh
-      settingsPage.value = 'dsh'
-      showSettings.value = true
-      success(t('dshSettingUp'))
-      await new Promise(r => setTimeout(r, 150)) // 等设置页挂载并订阅进度事件
-      unwrap(await SetupDSH())
-      // 装完自动打开：监听本次安装进度，done 后直接拉起 DSH 窗口（done/error 后取消监听）
-      let off: (() => void) | null = null
-      off = Events.On('quickdock:dsh:progress', async (payload: any) => {
-        const p = (payload?.data ?? payload) as { stage: string; message?: string }
-        if (p?.stage === 'done') {
-          off?.()
-          success(t('dshLaunching'))
-          try {
-            unwrap(await OpenDSHWindow())
-          } catch (e: any) {
-            error(getErrorMessage(e))
+    if (!dshEnvReady) {
+      const st = unwrap<EnvProbe | null>(await DetectNodeEnv())
+      if (!st?.nodeFound || !st.dshInstalled) {
+        // 新电脑：node+dsh 一起自动装；装了 node 没装 dsh：只补 dsh
+        settingsPage.value = 'dsh'
+        showSettings.value = true
+        success(t('dshSettingUp'))
+        await new Promise(r => setTimeout(r, 150)) // 等设置页挂载并订阅进度事件
+        unwrap(await SetupDSH())
+        // 装完自动打开：监听本次安装进度，done 后直接拉起 DSH 窗口（done/error 后取消监听）
+        let off: (() => void) | null = null
+        off = Events.On('quickdock:dsh:progress', async (payload: any) => {
+          const p = (payload?.data ?? payload) as { stage: string; message?: string }
+          if (p?.stage === 'done') {
+            off?.()
+            dshEnvReady = true
+            success(t('dshLaunching'))
+            try {
+              unwrap(await OpenDSHWindow())
+            } catch (e: any) {
+              error(getErrorMessage(e))
+            }
+          } else if (p?.stage === 'error') {
+            off?.()
+            error(p.message || t('dshError'))
           }
-        } else if (p?.stage === 'error') {
-          off?.()
-          error(p.message || t('dshError'))
-        }
-      })
-      return
+        })
+        return
+      }
+      dshEnvReady = true
     }
     success(t('dshLaunching'))
     unwrap(await OpenDSHWindow())
   } catch (e: any) {
+    dshEnvReady = false // 环境可能已变化（如 dsh 被卸载），下次点击重新探测
     error(getErrorMessage(e))
     settingsPage.value = 'dsh'
     showSettings.value = true

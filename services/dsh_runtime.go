@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	neturl "net/url"
 	"os"
 	"os/exec"
 	"runtime"
@@ -29,8 +30,25 @@ type DSHProcessManager struct {
 	url     string
 	port    int
 	exit    chan struct{} // reaper 通知：进程已退出（nil=未启动）
+	ready   chan struct{} // 冷启动就绪通知：waitReady 完成后 close（nil=无进行中的冷启动）
+	starting bool         // 冷启动进行中（窗口已开但 dsh 未就绪）；连点/关窗时避免误判"进程已退出"而重启
 	window  *application.WebviewWindow
+
+	// aliveCache 缓存 isDSHAlive 结果：连续点击时避免每次 spawn netstat/tasklist（各 ~300ms）
+	aliveCache struct {
+		port int
+		ok   bool
+		at   time.Time
+	}
 }
+
+// dshLoadingPage 冷启动期间窗口先展示的加载页（暗色，避免用户面对空白/错误页干等）
+var dshLoadingPage = "data:text/html;charset=utf-8," + neturl.QueryEscape(`<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><style>
+html,body{height:100%;margin:0;background:#17181b;color:#e8eaed;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px}
+.spinner{width:36px;height:36px;border:3px solid rgba(74,158,255,.25);border-top-color:#4a9eff;border-radius:50%;animation:spin .9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.t{font-size:15px;letter-spacing:.3px}.s{font-size:12px;color:#8b919c}
+</style></head><body><div class="spinner"></div><div class="t">正在启动 dsh…</div><div class="s">首次启动需初始化 profile，可能需要 10~30 秒</div></body></html>`)
 
 func NewDSHProcessManager(app *application.App, nodeEnv *NodeEnvManager) *DSHProcessManager {
 	return &DSHProcessManager{app: app, nodeEnv: nodeEnv}
@@ -62,17 +80,48 @@ func (m *DSHProcessManager) Start() (string, error) {
 	if _, err := os.Stat(mainJS); err != nil {
 		return "", fmt.Errorf("dsh 未安装，请先在设置中安装运行环境")
 	}
-	// 固定官方默认端口 3080，软件内窗口与浏览器访问同一地址；
-	// 仅当 3080 被占用（如用户已手动起了 dsh）才退回随机端口并提示。
+	// 固定官方默认端口 3080，软件内窗口与浏览器访问同一地址。
 	port := DefaultDSHPort
 	if ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(DefaultDSHPort)); err != nil {
-		free, ferr := FindFreePort()
-		if ferr != nil {
-			return "", ferr
+		// 端口被占用。dsh 的 task-board ledger 是 per-profile 单实例锁——换端口也绕不开，
+		// 另起进程会报 "ledger is already owned by process <pid>" 直接崩溃。因此分三步处理：
+		// 1) 若 3080 上已是健康 dsh 服务（node 监听 + HTTP 可达）→ 直接复用，不再启动新进程；
+		// 2) 若占用者是残留 node（半死/启动失败的旧实例）→ taskkill 清理后重新绑定 3080；
+		// 3) 仍失败（无关进程占用）→ 才退回随机端口并提示。
+		if m.isDSHAlive(DefaultDSHPort) {
+			u := "http://127.0.0.1:" + strconv.Itoa(DefaultDSHPort)
+			m.url = u
+			m.port = DefaultDSHPort
+			if m.app != nil {
+				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "info", Message: "检测到端口 3080 已有 dsh 服务，直接复用（不启动新进程）"})
+			}
+			return u, nil
 		}
-		port = free
-		if m.app != nil {
-			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: fmt.Sprintf("默认端口 %d 已被占用，本次改用随机端口 %d", DefaultDSHPort, free)})
+		if pid := findPortPID(DefaultDSHPort); pid > 0 {
+			if m.app != nil {
+				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: fmt.Sprintf("端口 3080 被残留进程 %d 占用，正在清理…", pid)})
+			}
+			killProcessTree(pid)
+			// 等待端口真正释放（最多 3s），确保下面能重新绑定 3080
+			for i := 0; i < 30; i++ {
+				if ln2, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(DefaultDSHPort)); err == nil {
+					ln2.Close()
+					break
+				}
+				time.Sleep(100 * time.Millisecond)
+			}
+		}
+		if ln2, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(DefaultDSHPort)); err != nil {
+			free, ferr := FindFreePort()
+			if ferr != nil {
+				return "", ferr
+			}
+			port = free
+			if m.app != nil {
+				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: fmt.Sprintf("端口 %d 被非 dsh 进程占用且无法清理，本次改用随机端口 %d", DefaultDSHPort, free)})
+			}
+		} else {
+			ln2.Close()
 		}
 	} else {
 		ln.Close()
@@ -138,9 +187,12 @@ func (m *DSHProcessManager) Start() (string, error) {
 	}()
 
 	exit := make(chan struct{})
+	ready := make(chan struct{})
 	m.cmd = cmd
 	m.port = port
 	m.exit = exit
+	m.ready = ready
+	m.starting = true
 	// reaper：进程自行退出（崩溃/被杀）后清理状态，避免后续 Start() 复用一个死进程
 	go func() {
 		_ = cmd.Wait()
@@ -151,19 +203,129 @@ func (m *DSHProcessManager) Start() (string, error) {
 			m.url = ""
 			m.port = 0
 			m.exit = nil
+			m.ready = nil
+			m.starting = false
 		}
 		m.mu.Unlock()
 	}()
 
-	// 就绪检查：监听端口是我们自己选的，直接构造 URL 轮询
+	// 就绪检查：监听端口是我们自己选的，直接构造 URL 轮询。
+	// 异步执行——窗口先以 loading 页打开，就绪后由 OpenDSHWindow 的 goroutine Navigate 过去，
+	// 避免冷启动（首次初始化 profile 可长达 30s）期间用户对着空白 toast 干等。
 	u := "http://127.0.0.1:" + strconv.Itoa(port)
-	if err := m.waitReady(u, exit); err != nil {
-		// 注意：此处已持有 m.mu，绝不能调 m.Stop()（非重入锁二次加锁），走内部 stopLocked()
-		m.stopLocked()
-		return "", err
-	}
-	m.url = u
+	go func() {
+		err := m.waitReady(u, exit)
+		if err != nil {
+			m.Stop() // 内部 stopLocked：进程已死则无副作用；活着的半死实例会被 taskkill 清理
+			if m.app != nil {
+				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "error", Message: err.Error()})
+			}
+			m.mu.Lock()
+			m.starting = false
+			m.mu.Unlock()
+			close(ready) // 窗口 goroutine 收到后仍 Navigate（端口已死显示连接错误页，日志已说明原因）
+			return
+		}
+		m.mu.Lock()
+		if m.cmd == cmd {
+			m.url = u
+		}
+		m.starting = false
+		m.mu.Unlock()
+		close(ready)
+	}()
 	return u, nil
+}
+
+// isDSHAlive 探测端口上是否已有健康的 dsh 服务：占用者必须是 node 进程且 HTTP 可达
+// （与 waitReady 相同的就绪判定，404/5xx 不算）。命中后 Start() 直接复用该端口，
+// 不再另起进程——dsh 的 task-board ledger 是 per-profile 单实例锁，换端口也绕不开，
+// 多实例同时启动会互相抢锁崩溃（"ledger is already owned by process <pid>"）。
+func (m *DSHProcessManager) isDSHAlive(port int) bool {
+	// 缓存：成功 10s、失败 3s（失败时端口/进程状态可能很快变化，如清理中）。
+	// 命中成功缓存时复用路径零子进程秒回——"端口存在应直接起来"。
+	ttl := 10 * time.Second
+	if !m.aliveCache.ok {
+		ttl = 3 * time.Second
+	}
+	if time.Since(m.aliveCache.at) < ttl && m.aliveCache.port == port {
+		return m.aliveCache.ok
+	}
+	// HTTP GET 优先：端口上有 dsh 服务（健康）时一次 ~10ms 请求即可判定，
+	// 不再 spawn netstat/tasklist（各 ~300ms）。3080 是 dsh 官方默认端口，
+	// 被其他 HTTP 服务占用且返回 200 的概率极低，可接受该极小误判。
+	ok := false
+	client := &http.Client{Timeout: 1500 * time.Millisecond}
+	if resp, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/"); err == nil {
+		resp.Body.Close()
+		ok = resp.StatusCode >= 200 && resp.StatusCode < 400 && resp.StatusCode != 404
+	}
+	// GET 失败（端口占用者不是健康服务）→ 保持 false，由 Start() 走
+	// findPortPID + killProcessTree 清理残留 node 后重绑 3080 的路径。
+	// 注意：绝不能把"占用者是 node 但 HTTP 不通"判为 alive，否则窗口打开是死页面。
+	m.aliveCache.port = port
+	m.aliveCache.ok = ok
+	m.aliveCache.at = time.Now()
+	return ok
+}
+
+// findPortPID 返回 127.0.0.1:<port> 上 LISTENING 进程的 PID；无占用返回 0。
+// netstat 是控制台程序，GUI 主进程（-H windowsgui）直接拉起会弹 cmd，必须隐藏窗口。
+func findPortPID(port int) int {
+	cmd := exec.Command("netstat", "-ano")
+	cmd.SysProcAttr = hideWindowAttr()
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	target := ":" + strconv.Itoa(port)
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.Contains(line, "LISTENING") || !strings.Contains(line, target) {
+			continue
+		}
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		pid, err := strconv.Atoi(fields[len(fields)-1])
+		if err == nil && pid > 0 {
+			return pid
+		}
+	}
+	return 0
+}
+
+// isNodeProcess 判断 PID 对应进程是否为 node.exe（dsh 由 node 拉起，残留实例也是 node）。
+// tasklist 是控制台程序，同样必须隐藏窗口。
+func isNodeProcess(pid int) bool {
+	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
+	cmd.SysProcAttr = hideWindowAttr()
+	out, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// CSV 首字段是镜像名（可能带引号），如 "node.exe","8216","Console",...
+		name := strings.Trim(line, `"`)
+		if idx := strings.Index(name, ","); idx > 0 {
+			name = name[:idx]
+		}
+		if strings.EqualFold(name, "node.exe") {
+			return true
+		}
+	}
+	return false
+}
+
+// killProcessTree 用 taskkill /T /F 强杀进程树（隐藏窗口），返回是否成功发出。
+func killProcessTree(pid int) bool {
+	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
+	cmd.SysProcAttr = hideWindowAttr()
+	return cmd.Run() == nil
 }
 
 // waitReady 轮询 GET / 直到服务真正就绪（45s，新机器首次启动需初始化 profile，20s 内常常起不来）。
@@ -209,6 +371,8 @@ func (m *DSHProcessManager) stopLocked() {
 	if m.cmd == nil || m.cmd.Process == nil {
 		m.cmd = nil
 		m.url = ""
+		m.starting = false
+		m.ready = nil
 		return
 	}
 	cmd := m.cmd
@@ -217,6 +381,8 @@ func (m *DSHProcessManager) stopLocked() {
 	m.url = ""
 	m.port = 0
 	m.exit = nil
+	m.starting = false
+	m.ready = nil
 	if exit == nil {
 		// 防御：理论上 Start 一定先建 exit；万一没有就强杀
 		_ = cmd.Process.Kill()
@@ -231,6 +397,16 @@ func (m *DSHProcessManager) stopLocked() {
 		kill := exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F")
 		kill.SysProcAttr = hideWindowAttr()
 		kill.Run()
+		// 等待端口释放：dsh 关闭后 TCP TIME_WAIT 短暂存在，轮询 30 次（3s）确保下次
+		// OpenDSHWindow() 能重新绑定 3080 而不是开随机端口。
+		for i := 0; i < 30; i++ {
+			ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(DefaultDSHPort))
+			if err == nil {
+				ln.Close()
+				break
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
 		return
 	}
 	_ = cmd.Process.Signal(os.Interrupt)
@@ -478,15 +654,21 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 	m.openMu.Lock()
 	defer m.openMu.Unlock()
 
-	// 已有窗口：直接复用（含首次点击尚在启动中、用户连点的情况）
+	// 已有窗口：直接复用（含首次点击尚在启动中、用户连点的情况）。
+	// starting=true 说明冷启动进行中（窗口显示 loading，dsh 尚未就绪）——此时也必须复用
+	// 窗口而不是销毁重建，否则会 Stop() 杀掉正在启动的 dsh 再重来一遍。
 	m.mu.Lock()
 	win, url := m.window, m.url
+	starting := m.starting
 	m.mu.Unlock()
 	if win != nil {
-		if url != "" {
+		if url != "" || starting {
 			win.Show()
 			win.Focus()
-			return url, nil
+			if url != "" {
+				return url, nil
+			}
+			return dshLoadingPage, nil // 启动中：返回 loading 页地址，前端仅作提示
 		}
 		// 进程已退出（reaper 已清空 url）但窗口残留：销毁旧窗口走下方重建流程，
 		// 否则返回空 URL 且窗口显示死页面，前端无任何提示。
@@ -502,6 +684,17 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 		return "", err
 	}
 
+	// 冷启动先展示 loading 页，dsh 就绪后自动跳转真实地址——用户点击后立即看到窗口，
+	// 而不是在 toast 上干等 dsh web（首次初始化 profile 可达 30s）慢慢起来。
+	pageURL := dshLoadingPage
+	m.mu.Lock()
+	starting = m.starting
+	ready := m.ready // Start() 冷启动路径创建；复用路径为 nil
+	m.mu.Unlock()
+	if !starting || url != "" {
+		pageURL = url
+	}
+
 	win = m.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "快启坞 - DeepSeek Harness",
 		Width:            1200,
@@ -509,7 +702,7 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 		MinWidth:         600,
 		MinHeight:        400,
 		BackgroundColour: application.RGBA{Red: 23, Green: 24, Blue: 27, Alpha: 255},
-		URL:              url,
+		URL:              pageURL,
 		Windows:          application.WindowsWindow{HiddenOnTaskbar: false},
 	})
 	// 关闭窗口（Wails 内部 handler 负责真正销毁）时清引用并停掉 dsh 子进程（避免端口残留）
@@ -524,5 +717,18 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 	m.window = win
 	m.mu.Unlock()
 	win.Show()
+
+	// 冷启动：等 waitReady goroutine 通知后 Navigate 到真实 dsh 地址
+	if starting && ready != nil {
+		go func(w *application.WebviewWindow, target string, rd <-chan struct{}) {
+			select {
+			case <-rd:
+				// dsh 就绪（或启动失败已 close）：跳到最终地址；窗口若已销毁则 no-op
+				w.SetURL(target)
+			case <-time.After(50 * time.Second): // 兜底 > waitReady 45s 上限
+				w.SetURL(target)
+			}
+		}(win, url, ready)
+	}
 	return url, nil
 }
