@@ -128,6 +128,10 @@ func (a *AppService) ServiceShutdown() error {
 	if a.PluginWindowMgr != nil {
 		a.PluginWindowMgr.CloseAll()
 	}
+	// 停止 dsh 子进程（若正在运行），防止残留 Node 占用端口
+	if a.DSH != nil {
+		a.DSH.Stop()
+	}
 	// 最后关闭数据库
 	if a.DB != nil {
 		a.DB.Close()

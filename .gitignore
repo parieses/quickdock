@@ -49,6 +49,9 @@ desktop.ini
 .task/
 .workbuddy/
 
+# --- Marketing 公众号/CSDN 文章与配图 ---
+marketing/
+
 # --- Updater ---
 updater.key
 

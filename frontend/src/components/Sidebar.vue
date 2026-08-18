@@ -8,7 +8,7 @@ import { getErrorMessage } from '../utils/error'
 import type { Scene, ToastAPI } from '../types'
 import {
   Bot, FolderKanban, FileText, Activity, ListTodo, AlarmClock,
-  Clipboard, Puzzle, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Search, X, Settings, Globe, Database,
+  Clipboard, Puzzle, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Search, X, Settings, Globe, Database, Terminal,
 } from '@lucide/vue'
 
 const store = useWorkspaceStore()
@@ -256,6 +256,10 @@ async function handleDeleteScene(sceneId: string) {
       <button :class="['nav-item', { active: currentPage === 'ai' }]" @click="emit('navigate', 'ai')">
         <Bot :size="14" />
         <span>{{ t('navAi') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'dsh' }]" @click="emit('navigate', 'dsh')">
+        <Terminal :size="14" />
+        <span>{{ t('navDsh') }}</span>
       </button>
       <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="emit('navigate', 'plugins')">
         <Puzzle :size="14" />

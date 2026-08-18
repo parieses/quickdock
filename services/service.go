@@ -1,7 +1,10 @@
 package services
 
 import (
+	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -88,6 +91,10 @@ type AppService struct {
 	// 本地 AI 流式服务（127.0.0.1 随机端口，前端 fetch 读取分块响应）
 	aiStream *aiStreamServer
 
+	// DeepSeek Harness 运行环境（检测/下载便携 Node + 安装 dsh）与进程管理
+	NodeEnv *NodeEnvManager
+	DSH     *DSHProcessManager
+
 	// 共享 HTTP 客户端（连接复用，避免每次 AI 请求新建 TLS 握手）
 	aiHTTPClient *http.Client
 
@@ -113,8 +120,11 @@ type frontendCacheEntry struct {
 
 // NewAppService 创建应用服务实例
 func NewAppService() *AppService {
+	nodeEnv := NewNodeEnvManager()
 	return &AppService{
 		frontendCache: make(map[string]*frontendCacheEntry),
+		NodeEnv:       nodeEnv,
+		DSH:           NewDSHProcessManager(nil, nodeEnv),
 		aiHTTPClient: &http.Client{
 			Timeout: 5 * time.Minute,
 			Transport: &http.Transport{
@@ -129,4 +139,90 @@ func NewAppService() *AppService {
 // SetApp 设置 App 引用（由 main.go 在创建后调用）
 func (a *AppService) SetApp(app *application.App) {
 	a.app = app
+	a.NodeEnv.SetApp(app)
+	a.DSH.app = app
+}
+
+// DetectNodeEnv 检测 node/npx/dsh 运行状态
+func (a *AppService) DetectNodeEnv() *ApiResult {
+	if a.NodeEnv == nil {
+		return FailMsg("node env 未初始化")
+	}
+	return Ok(a.NodeEnv.Detect())
+}
+
+// SetupDSH 一键安装运行环境（缺失时下载便携 Node + 安装 dsh），进度经事件推送前端。
+// 异步执行：立即返回，前端订阅 quickdock:dsh:progress 展示进度。
+func (a *AppService) SetupDSH() *ApiResult {
+	if a.NodeEnv == nil {
+		return FailMsg("node env 未初始化")
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				msg := fmt.Sprintf("安装 DeepSeek Harness 异常: %v", r)
+				a.NodeEnv.EmitLog("error", msg)
+				// panic 也必须补发 error 事件，否则前端 settingUp 永远无法复位，按钮永久禁用
+				if a.app != nil {
+					a.app.Event.Emit("quickdock:dsh:progress", setupProgress{Stage: "error", Message: msg})
+				}
+			}
+		}()
+		_ = a.NodeEnv.SetupDSH(context.Background(), nil)
+	}()
+	return Ok(nil)
+}
+
+// DSHInstallPlugin 安装指定插件（执行 dsh plugin --profile web add <plugin>）。
+// 异步执行，输出经 quickdock:dsh:log 事件推送到前端日志面板。
+func (a *AppService) DSHInstallPlugin(plugin string) *ApiResult {
+	if a.DSH == nil {
+		return FailMsg("DSH 未初始化")
+	}
+	plugin = strings.TrimSpace(plugin)
+	if plugin == "" {
+		return FailMsg("插件名不能为空")
+	}
+	go func() { _ = a.DSH.InstallPlugin(plugin) }()
+	return Ok(nil)
+}
+
+// OpenDSHWindow 拉起 dsh web 并在原生窗口加载其 URL（dsh 未安装时返回错误）
+func (a *AppService) OpenDSHWindow() *ApiResult {
+	if a.DSH == nil {
+		return FailMsg("DSH 未初始化")
+	}
+	url, err := a.DSH.OpenDSHWindow()
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(map[string]string{"url": url})
+}
+
+// CheckDSHUpdate 检测已安装 dsh 是否有新版本（联网查 latest；查询失败静默返回当前状态，不阻塞 UI）
+func (a *AppService) CheckDSHUpdate() *ApiResult {
+	if a.NodeEnv == nil {
+		return FailMsg("node env 未初始化")
+	}
+	return Ok(a.NodeEnv.DetectWithUpdate())
+}
+
+// UpdateDSH 将 dsh 更新到最新版（异步执行；进度经 quickdock:dsh:progress/log 事件推送前端）
+func (a *AppService) UpdateDSH() *ApiResult {
+	if a.NodeEnv == nil {
+		return FailMsg("node env 未初始化")
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				msg := fmt.Sprintf("更新 DeepSeek Harness 异常: %v", r)
+				a.NodeEnv.EmitLog("error", msg)
+				if a.app != nil {
+					a.app.Event.Emit("quickdock:dsh:progress", setupProgress{Stage: "error", Message: msg})
+				}
+			}
+		}()
+		_ = a.NodeEnv.UpdateDSH(context.Background())
+	}()
+	return Ok(nil)
 }
