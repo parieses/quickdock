@@ -30,8 +30,9 @@ type DSHProcessManager struct {
 	url     string
 	port    int
 	exit    chan struct{} // reaper 通知：进程已退出（nil=未启动）
-	ready   chan struct{} // 冷启动就绪通知：waitReady 完成后 close（nil=无进行中的冷启动）
-	starting bool         // 冷启动进行中（窗口已开但 dsh 未就绪）；连点/关窗时避免误判"进程已退出"而重启
+	ready    chan struct{} // 冷启动就绪通知：waitReady 完成后 close（nil=无进行中的冷启动）
+	readyErr error         // 配合 ready：就绪结果；nil=成功，非 nil=失败原因（窗口 goroutine 据此显示友好错误页而非死地址）
+	starting bool          // 冷启动进行中（窗口已开但 dsh 未就绪）；连点/关窗时避免误判"进程已退出"而重启
 	window  *application.WebviewWindow
 
 	// aliveCache 缓存 isDSHAlive 结果：连续点击时避免每次 spawn netstat/tasklist（各 ~300ms）
@@ -48,7 +49,17 @@ html,body{height:100%;margin:0;background:#17181b;color:#e8eaed;font-family:syst
 .spinner{width:36px;height:36px;border:3px solid rgba(74,158,255,.25);border-top-color:#4a9eff;border-radius:50%;animation:spin .9s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
 .t{font-size:15px;letter-spacing:.3px}.s{font-size:12px;color:#8b919c}
-</style></head><body><div class="spinner"></div><div class="t">正在启动 dsh…</div><div class="s">首次启动需初始化 profile，可能需要 10~30 秒</div></body></html>`)
+</style></head><body><div class="spinner"></div><div class="t">正在启动 dsh…</div><div class="s">首次启动需初始化 profile，可能需要 10~30 秒（已等待 <span id="w">0</span> 秒）</div><script>var s=0;setInterval(function(){s++;document.getElementById("w").textContent=s;},1000)</script></body></html>`)
+
+// dshErrorPage 冷启动失败时的内置错误页（暗色，与 loading 页同风格）。
+// 避免把窗口 SetURL 到一个没在监听的死端口，让用户直面浏览器"无法访问此网站"。
+// 完整日志在主界面「设置 → DeepSeek」面板，关闭窗口后重新点击导航可重试。
+func dshErrorPage(reason string) string {
+	return "data:text/html;charset=utf-8," + neturl.QueryEscape(fmt.Sprintf(`<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><style>
+html,body{height:100%%;margin:0;background:#17181b;color:#e8eaed;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}
+.ico{font-size:34px}.t{font-size:15px;font-weight:600}.r{font-size:12px;color:#f28b82;max-width:540px;word-break:break-all}.s{font-size:12px;color:#8b919c}
+</style></head><body><div class="ico">⚠️</div><div class="t">dsh 启动失败</div><div class="r">%s</div><div class="s">完整日志见主界面「设置 → DeepSeek」，关闭本窗口后重新点击导航可重试</div></body></html>`, neturl.PathEscape(reason)))
+}
 
 func NewDSHProcessManager(app *application.App, nodeEnv *NodeEnvManager) *DSHProcessManager {
 	return &DSHProcessManager{app: app, nodeEnv: nodeEnv}
@@ -169,6 +180,8 @@ func (m *DSHProcessManager) Start() (string, error) {
 		}
 	}
 	logf("info", "正在启动 dsh web（首次启动需初始化 profile，可能较慢）…")
+	// 就绪判定用 HTTP 壳 200 即可（简单可靠）；dsh 官方前端未就绪时自带「定时常量刷新」，
+	// 不会出现「无法打开」。这里只负责把 stdout/stderr 转发到日志面板。
 	go func() {
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
@@ -192,6 +205,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	m.port = port
 	m.exit = exit
 	m.ready = ready
+	m.readyErr = nil
 	m.starting = true
 	// reaper：进程自行退出（崩溃/被杀）后清理状态，避免后续 Start() 复用一个死进程
 	go func() {
@@ -204,6 +218,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 			m.port = 0
 			m.exit = nil
 			m.ready = nil
+			m.readyErr = nil
 			m.starting = false
 		}
 		m.mu.Unlock()
@@ -220,17 +235,13 @@ func (m *DSHProcessManager) Start() (string, error) {
 			if m.app != nil {
 				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "error", Message: err.Error()})
 			}
-			m.mu.Lock()
-			m.starting = false
-			m.mu.Unlock()
-			close(ready) // 窗口 goroutine 收到后仍 Navigate（端口已死显示连接错误页，日志已说明原因）
-			return
 		}
 		m.mu.Lock()
-		if m.cmd == cmd {
+		m.starting = false
+		m.readyErr = err // nil=就绪；非 nil=失败原因（窗口 goroutine 据此显示友好错误页，而非死地址）
+		if err == nil && m.cmd == cmd {
 			m.url = u
 		}
-		m.starting = false
 		m.mu.Unlock()
 		close(ready)
 	}()
@@ -373,6 +384,7 @@ func (m *DSHProcessManager) stopLocked() {
 		m.url = ""
 		m.starting = false
 		m.ready = nil
+		m.readyErr = nil
 		return
 	}
 	cmd := m.cmd
@@ -383,6 +395,7 @@ func (m *DSHProcessManager) stopLocked() {
 	m.exit = nil
 	m.starting = false
 	m.ready = nil
+	m.readyErr = nil
 	if exit == nil {
 		// 防御：理论上 Start 一定先建 exit；万一没有就强杀
 		_ = cmd.Process.Kill()
@@ -723,10 +736,17 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 		go func(w *application.WebviewWindow, target string, rd <-chan struct{}) {
 			select {
 			case <-rd:
-				// dsh 就绪（或启动失败已 close）：跳到最终地址；窗口若已销毁则 no-op
+				m.mu.Lock()
+				err := m.readyErr
+				m.mu.Unlock()
+				if err != nil {
+					// 启动失败：不把窗口甩到死地址（浏览器"无法访问此网站"），显示内置友好错误页
+					w.SetURL(dshErrorPage(err.Error()))
+					return
+				}
 				w.SetURL(target)
 			case <-time.After(50 * time.Second): // 兜底 > waitReady 45s 上限
-				w.SetURL(target)
+				w.SetURL(dshErrorPage("dsh 启动超时（超过 50 秒），请关闭窗口后重新点击导航重试，或在「设置 → DeepSeek」查看日志"))
 			}
 		}(win, url, ready)
 	}
