@@ -226,7 +226,11 @@ func (m *DSHProcessManager) stopLocked() {
 		// Windows 不支持 os.Interrupt 信号（Signal 必然报错），旧实现每次 Stop 都白等
 		// 3s 超时才 taskkill，关 DSH 窗口有明显延迟。这里直接 taskkill /T /F 杀进程树
 		// （dsh 的 node 子进程一并清理，不残留占端口）；reaper 的 cmd.Wait() 随之返回并清状态。
-		exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F").Run()
+		// taskkill.exe 是控制台程序：GUI 主进程（正式版 -H windowsgui）直接拉起会弹 cmd 窗，
+		// 必须带 CREATE_NO_WINDOW，与 Start()/node_env.go 的其他隐藏控制台调用保持一致。
+		kill := exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F")
+		kill.SysProcAttr = hideWindowAttr()
+		kill.Run()
 		return
 	}
 	_ = cmd.Process.Signal(os.Interrupt)

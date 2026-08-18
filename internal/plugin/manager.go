@@ -151,10 +151,10 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 			return err
 		}
 		cmd := exec.Command(entryPath, manifest.Backend.Args...)
-		// DETACHED_PROCESS + CREATE_NO_WINDOW 双重保证不弹 CMD 窗口
+		// CREATE_NO_WINDOW 让 node 进程获得隐藏控制台；子进程继承，整棵进程树连到同一隐藏控制台。
+		// 注意：不能用 DETACHED_PROCESS(0x00000008)——它让 node 脱离控制台，孙进程各自弹窗。
 		cmd.SysProcAttr = &syscall.SysProcAttr{
-			HideWindow:    true,
-			CreationFlags: 0x00000008 | 0x08000000,
+			CreationFlags: 0x08000000,
 		}
 		cmd.Dir = dir
 

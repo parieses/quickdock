@@ -194,7 +194,9 @@ func npmGlobalRoot() string {
 	if npmGlobalRootCached {
 		return npmGlobalRootVal
 	}
-	out, err := exec.Command("npm", "root", "-g").Output()
+	cmd := exec.Command("npm", "root", "-g")
+	cmd.SysProcAttr = hideWindowAttr()
+	out, err := cmd.Output()
 	if err == nil {
 		npmGlobalRootVal = strings.TrimSpace(string(out))
 		npmGlobalRootCached = true
@@ -466,7 +468,9 @@ func (m *NodeEnvManager) UpdateDSH(ctx context.Context) error {
 func runVersion(exe string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, exe, args...).Output()
+	cmd := exec.CommandContext(ctx, exe, args...)
+	cmd.SysProcAttr = hideWindowAttr()
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}

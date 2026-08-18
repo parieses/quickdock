@@ -126,7 +126,10 @@ func sendMediaKey(vk uint16) {
 
 // toggleWifi 切换 Wi-Fi 适配器开关（需要管理员权限；netsh 失败会返回错误）。
 func toggleWifi() error {
-	out, err := exec.Command("netsh", "interface", "show", "interface").Output()
+	// netsh 是控制台程序：GUI 主进程（正式版 -H windowsgui）直接拉起会弹 cmd 窗，须隐藏控制台
+	q := exec.Command("netsh", "interface", "show", "interface")
+	q.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	out, err := q.Output()
 	if err != nil {
 		return fmt.Errorf("查询网络接口失败: %v", err)
 	}
