@@ -15,7 +15,11 @@ func (a *AppService) CreateScheduledTask(t db.ScheduledTask) *ApiResult {
 		return Fail(err)
 	}
 	t.NextRun = computeNextRun(&t, nowStr())
-	// 一次性任务若计算不出有效时间（如时间已过），仍允许保存但保持禁用/无 next_run
+	// 一次性任务若计算不出有效时间（如时间已过）：仍允许保存，但必须置 enabled=false
+	// 避免产出「enabled=1 且 next_run=''」的假启用任务（调度器永不触发、UI 显示已启用）
+	if t.NextRun == "" {
+		t.Enabled = false
+	}
 	created, err := a.DB.CreateScheduledTask(&t)
 	if err != nil {
 		return Fail(err)
@@ -46,6 +50,9 @@ func (a *AppService) UpdateScheduledTask(t db.ScheduledTask) *ApiResult {
 	}
 	if t.Enabled {
 		t.NextRun = computeNextRun(&t, nowStr())
+		if t.NextRun == "" {
+			t.Enabled = false // 一次性任务时间已过：不启用
+		}
 	} else {
 		t.NextRun = ""
 	}
@@ -80,6 +87,9 @@ func (a *AppService) SetScheduledTaskEnabled(id string, enabled bool) *ApiResult
 			return Fail(err)
 		}
 		nextRun = computeNextRun(t, nowStr())
+		if nextRun == "" {
+			enabled = false // 一次性任务时间已过：拒绝启用
+		}
 	}
 	if err := a.DB.SetTaskEnabled(id, enabled, nextRun); err != nil {
 		return Fail(err)

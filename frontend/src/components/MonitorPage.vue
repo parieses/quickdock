@@ -354,7 +354,7 @@ function drawChart(id: string) {
     ctx.fillStyle = '#666'
     ctx.font = '12px sans-serif'
     ctx.textAlign = 'center'
-    ctx.fillText('需要至少 2 次检测数据', W / 2, H / 2)
+    ctx.fillText(t('monitorNeedMoreData'), W / 2, H / 2)
     return
   }
 
@@ -387,7 +387,7 @@ function drawChart(id: string) {
     ctx.fillStyle = '#666'
     ctx.font = '10px sans-serif'
     ctx.textAlign = 'right'
-    ctx.fillText(y + 'ms', PL - 6, yy + 3)
+    ctx.fillText(y + t('monitorMsSuffix'), PL - 6, yy + 3)
   }
 
   // 超时线
@@ -400,7 +400,7 @@ function drawChart(id: string) {
     ctx.fillStyle = 'rgba(232,76,76,0.6)'
     ctx.font = '9px sans-serif'
     ctx.textAlign = 'left'
-    ctx.fillText('timeout ' + timeout + 's', PL + 4, timeoutY - 3)
+    ctx.fillText(t('monitorTimeoutLabel', { seconds: timeout }), PL + 4, timeoutY - 3)
   }
 
   // ---- X 轴标签（最多显示 6 个） ----
@@ -461,11 +461,11 @@ function drawChart(id: string) {
   ctx.font = '10px sans-serif'
   ctx.textAlign = 'left'
   ctx.fillStyle = '#aaa'
-  ctx.fillText('检测 ' + total + ' 次', W - PR - 102, PT + 14)
+  ctx.fillText(t('monitorChecks', { count: total }), W - PR - 102, PT + 14)
   ctx.fillStyle = '#46b17b'
-  ctx.fillText('正常 ' + upCnt, W - PR - 102, PT + 27)
+  ctx.fillText(t('monitorHealthy', { count: upCnt }), W - PR - 102, PT + 27)
   ctx.fillStyle = '#e84c4c'
-  ctx.fillText('故障 ' + (total - upCnt), W - PR - 50, PT + 27)
+  ctx.fillText(t('monitorFaults', { count: total - upCnt }), W - PR - 50, PT + 27)
   // 存储像素坐标供 tooltip 悬停检测
   const pts: Array<{ x: number; y: number; data: MonitorLog }> = []
   for (let i = 0; i < n; i++) {

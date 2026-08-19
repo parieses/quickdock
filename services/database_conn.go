@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 
-	_ "github.com/go-sql-driver/mysql"
+	"github.com/go-sql-driver/mysql"
 	_ "modernc.org/sqlite"
 
 	"github.com/redis/go-redis/v9"
@@ -60,9 +62,18 @@ func toDbConn(input DbConnectionInput) (*dbConnAdapter, error) {
 		if port == 0 {
 			port = 3306
 		}
-		dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?parseTime=true&timeout=10s&readTimeout=30s",
-			input.Username, input.Password, input.Host, port, input.Database)
-		d, err := sql.Open("mysql", dsn)
+		// 用 mysql.Config.FormatDSN 构建 DSN：密码/库名含 @ : / 等特殊字符时自动转义，避免拼错
+		mc := mysql.NewConfig()
+		mc.User = input.Username
+		mc.Passwd = input.Password
+		mc.Net = "tcp"
+		mc.Addr = net.JoinHostPort(input.Host, strconv.Itoa(port))
+		mc.DBName = input.Database
+		mc.ParseTime = true
+		mc.Timeout = 10 * time.Second
+		mc.ReadTimeout = 30 * time.Second
+		mc.AllowNativePasswords = true
+		d, err := sql.Open("mysql", mc.FormatDSN())
 		if err != nil {
 			return nil, err
 		}
@@ -77,7 +88,9 @@ func toDbConn(input DbConnectionInput) (*dbConnAdapter, error) {
 		if path == "" {
 			return nil, fmt.Errorf("SQLite 需要指定数据库文件路径")
 		}
-		dsn := fmt.Sprintf("file:%s?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)", path)
+		// Windows/含特殊字符路径：% ? # 会干扰 SQLite 的 file: DSN 解析，做转义；/ 与盘符冒号保留
+		esc := strings.NewReplacer("%", "%25", "?", "%3F", "#", "%23").Replace(filepath.ToSlash(path))
+		dsn := "file:" + esc + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)"
 		d, err := sql.Open("sqlite", dsn)
 		if err != nil {
 			return nil, err

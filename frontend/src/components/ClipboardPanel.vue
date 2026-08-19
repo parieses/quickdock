@@ -219,19 +219,22 @@ watch(hasImages, (val) => {
   }
 }, { immediate: true })
 
+let entriesLoadGen = 0
 async function loadEntries() {
+  const gen = ++entriesLoadGen
   try {
     const limit = props.compact ? 300 : 0
-    entries.value = unwrap(await ListClipboardEntries(limit)) || []
+    const r = unwrap(await ListClipboardEntries(limit)) || []
+    if (gen !== entriesLoadGen) return // 已有更新的刷新，丢弃过期响应
     // 不再预加载所有图片 — 由 IntersectionObserver 懒加载
+    entries.value = r
   } catch (e) {
+    if (gen !== entriesLoadGen) return
     const msg = getErrorMessage(e)
     console.error('QuickDock: 加载剪贴板历史失败:', msg)
     if (toast?.error) {
       toast.error(t('loadFailed') + ': ' + msg)
     }
-  } finally {
-    loading.value = false
   }
 }
 

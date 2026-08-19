@@ -49,7 +49,7 @@ func (d *Database) InsertPluginFull(id, name, version, author, description, cate
 		   description = excluded.description,
 		   category = excluded.category,
 		   icon = excluded.icon,
-		   enabled = 1,
+		   enabled = plugins.enabled, -- 保留用户当前的启用/禁用状态，避免下次启动把用户禁用改回启用
 		   capabilities = excluded.capabilities,
 		   permissions = excluded.permissions,
 		   updated_at = excluded.updated_at`,

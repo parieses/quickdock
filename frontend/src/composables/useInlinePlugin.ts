@@ -49,6 +49,11 @@ export function useInlinePlugin() {
   }
 
   async function onInlinePluginLoad() {
+    // 防泄漏：每次加载新 iframe 前移除旧的 message 监听（旧 iframe 已被替换，旧 handler 闭包引用它且从不移除）
+    if (inlinePluginMsgHandler) {
+      window.removeEventListener('message', inlinePluginMsgHandler)
+      inlinePluginMsgHandler = null
+    }
     const iframe = inlinePluginIframe.value
     if (!iframe?.contentWindow) return
     inlinePluginMsgHandler = async (event: MessageEvent) => {

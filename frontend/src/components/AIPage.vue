@@ -101,12 +101,17 @@ async function loadConversations() {
   }
 }
 
+let messagesGen = 0
 async function loadMessages(convID: string) {
+  const gen = ++messagesGen
   try {
     const msgs = unwrap<AIMessage[]>(await AIGetMessages(convID))
+    if (gen !== messagesGen) return // 已有更新的会话选择，丢弃过期响应
     messages.value = msgs ?? []
   } catch (e) {
+    if (gen !== messagesGen) return
     toast.error(getErrorMessage(e))
+    return
   }
   scrollToBottom()
 }
@@ -318,7 +323,7 @@ async function copy(text: string) {
     }
     toast.success(t('copied'))
   } catch {
-    toast.error(t('copyFailed') || '复制失败')
+    toast.error(t('copyFailed'))
   }
 }
 

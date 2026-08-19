@@ -70,13 +70,12 @@ async function openDSH() {
         showSettings.value = true
         success(t('dshSettingUp'))
         await new Promise(r => setTimeout(r, 150)) // 等设置页挂载并订阅进度事件
-        unwrap(await SetupDSH())
-        // 装完自动打开：监听本次安装进度，done 后直接拉起 DSH 窗口（done/error 后取消监听）
-        let off: (() => void) | null = null
-        off = Events.On('quickdock:dsh:progress', async (payload: any) => {
+        // 先注册监听再触发安装：避免安装极快完成时错过 done（窗口不自动打开）；done/error 后 off 防泄漏
+        Events.Off('quickdock:dsh:progress')
+        const off = Events.On('quickdock:dsh:progress', async (payload: any) => {
           const p = (payload?.data ?? payload) as { stage: string; message?: string }
           if (p?.stage === 'done') {
-            off?.()
+            off()
             dshEnvReady = true
             success(t('dshLaunching'))
             try {
@@ -85,10 +84,11 @@ async function openDSH() {
               error(getErrorMessage(e))
             }
           } else if (p?.stage === 'error') {
-            off?.()
+            off()
             error(p.message || t('dshError'))
           }
         })
+        unwrap(await SetupDSH())
         return
       }
       dshEnvReady = true

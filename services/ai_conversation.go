@@ -1,9 +1,10 @@
 package services
 
 import (
+	"context"
 	"strings"
+	"time"
 	"unicode/utf8"
-
 )
 
 // ---- 会话 CRUD（委托 db） ----
@@ -87,7 +88,9 @@ func (a *AppService) AIRegenerateTitle(convID string) *ApiResult {
 	for _, m := range msgs {
 		b.WriteString(m.Role + ": " + m.Content + "\n")
 	}
-	title, err := a.callAIOnce(nil, cfg, []map[string]string{
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	title, err := a.callAIOnce(ctx, cfg, []map[string]string{
 		{"role": "system", "content": "你是标题生成器，输出极简。"},
 		{"role": "user", "content": b.String()},
 	})

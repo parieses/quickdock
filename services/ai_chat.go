@@ -197,6 +197,10 @@ func (a *AppService) summarizeAndStore(ctx context.Context, cfg AIProfile, conv 
 
 // callAIOnce 一次性（非流式）调用，用于摘要压缩 / 标题生成
 func (a *AppService) callAIOnce(ctx context.Context, cfg AIProfile, messages []map[string]string) (string, error) {
+	// 兜底：调用方漏传/传 nil ctx 时避免 http.NewRequestWithContext panic（如旧版标题生成）
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	body := map[string]interface{}{
 		"model":       cfg.Model,
 		"messages":    messages,

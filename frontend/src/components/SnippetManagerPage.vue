@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -163,8 +163,19 @@ async function handleDrop(dragId: string, targetId: string) {
 const selectedDoc = computed<Snippet | null>(() => (selectedDocId.value ? nodes.value.find(n => n.id === selectedDocId.value) || null : null))
 const previewHtml = computed(() => (docContent.value ? DOMPurify.sanitize(marked.parse(docContent.value, { async: false }) as string) : ''))
 
+// 落盘当前文档（切文档/离开前调用）。先同步快照再 await，避免调用后被切换污染把内容存错文档。
+async function flushPendingSave() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
+  const id = selectedDocId.value
+  if (!id) return
+  const content = docContent.value
+  const tags = '["' + docTagsText.value.split(',').map(x => x.trim()).filter(Boolean).join('","') + '"]'
+  try { await UpdateNoteDoc(id, content, tags); await load() } catch { /* 自动保存静默 */ }
+}
+
 function onDoc(d: Snippet) {
   if (d.isFolder) return
+  void flushPendingSave() // 切文档前先落盘当前文档，避免防抖窗口内切换丢失内容
   selectedDocId.value = d.id
   selectedFolderId.value = d.parentId || ''
   docContent.value = d.content || ''
@@ -198,6 +209,7 @@ async function renameCurrent() {
 }
 
 onMounted(() => load())
+onBeforeUnmount(() => { void flushPendingSave() })
 </script>
 
 <template>

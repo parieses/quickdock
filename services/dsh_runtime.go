@@ -183,6 +183,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	// 就绪判定用 HTTP 壳 200 即可（简单可靠）；dsh 官方前端未就绪时自带「定时常量刷新」，
 	// 不会出现「无法打开」。这里只负责把 stdout/stderr 转发到日志面板。
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r) } }()
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
 			if l := sc.Text(); l != "" {
@@ -191,6 +192,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 		}
 	}()
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r) } }()
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			if l := sc.Text(); l != "" {
@@ -209,6 +211,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	m.starting = true
 	// reaper：进程自行退出（崩溃/被杀）后清理状态，避免后续 Start() 复用一个死进程
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH reaper goroutine panic: %v\n", r) } }()
 		_ = cmd.Wait()
 		close(exit)
 		m.mu.Lock()
@@ -229,6 +232,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	// 避免冷启动（首次初始化 profile 可长达 30s）期间用户对着空白 toast 干等。
 	u := "http://127.0.0.1:" + strconv.Itoa(port)
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH waitReady goroutine panic: %v\n", r) } }()
 		err := m.waitReady(u, exit)
 		if err != nil {
 			m.Stop() // 内部 stopLocked：进程已死则无副作用；活着的半死实例会被 taskkill 清理
@@ -424,6 +428,7 @@ func (m *DSHProcessManager) stopLocked() {
 	}
 	_ = cmd.Process.Signal(os.Interrupt)
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH signal-fallback goroutine panic: %v\n", r) } }()
 		select {
 		case <-exit: // reaper 已确认退出
 		case <-time.After(3 * time.Second):
@@ -503,12 +508,14 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 		return err
 	}
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r) } }()
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
 	}()
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r) } }()
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
@@ -568,12 +575,14 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 		return err
 	}
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r) } }()
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
 	}()
 	go func() {
+		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r) } }()
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
@@ -734,6 +743,7 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 	// 冷启动：等 waitReady goroutine 通知后 Navigate 到真实 dsh 地址
 	if starting && ready != nil {
 		go func(w *application.WebviewWindow, target string, rd <-chan struct{}) {
+			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH navigate goroutine panic: %v\n", r) } }()
 			select {
 			case <-rd:
 				m.mu.Lock()

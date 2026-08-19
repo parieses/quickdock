@@ -126,7 +126,7 @@ async function testAIConnection() {
     if (!res) throw new Error('无响应')
     showAIMsg(res.message || '未知', res.success !== true)
   } catch (e: any) {
-    showAIMsg('测试失败: ' + (e?.message || String(e)), true)
+    showAIMsg(t('testFailed') + ': ' + (e?.message || String(e)), true)
   } finally { aiTesting.value = false }
 }
 function openAIEditor() {

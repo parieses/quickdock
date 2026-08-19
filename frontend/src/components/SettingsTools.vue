@@ -14,11 +14,11 @@ const props = defineProps<{ visible: boolean }>()
 
 // 可选的工具类型（与后端 EnsureDefaultTools 及 TYPE_TOOL_MAP 保持一致）
 const TOOL_TYPES = [
-  { value: '系统', label: '系统（跟随系统打开）' },
-  { value: '编辑器', label: '编辑器（如 VS Code / Trae）' },
-  { value: '浏览器', label: '浏览器（如 Chrome / Edge）' },
-  { value: '终端', label: '终端（CMD / PowerShell）' },
-  { value: 'Office', label: 'Office' },
+  { value: '系统', label: t('toolType_system') },
+  { value: '编辑器', label: t('toolType_editor') },
+  { value: '浏览器', label: t('toolType_browser') },
+  { value: '终端', label: t('toolType_terminal') },
+  { value: 'Office', label: t('toolType_office') },
 ]
 
 const tools = ref<OpenTool[]>([])

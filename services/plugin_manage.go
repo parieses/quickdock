@@ -10,13 +10,14 @@ func (a *AppService) EnablePlugin(id string) *ApiResult {
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
 	}
-	// 启用：更新数据库状态后加载插件
-	if err := a.DB.SetPluginEnabled(id, 1); err != nil {
-		return Fail(err)
-	}
-	// 从插件目录重新加载
+	// 先加载插件：成功后再更新数据库，避免「库已启用但插件未加载」的状态不一致
 	manifest, err := a.PluginMgr.ReloadPlugin(id)
 	if err != nil {
+		return Fail(err)
+	}
+	if err := a.DB.SetPluginEnabled(id, 1); err != nil {
+		// 数据库更新失败：回滚已加载的插件进程
+		_ = a.PluginMgr.StopPlugin(id)
 		return Fail(err)
 	}
 

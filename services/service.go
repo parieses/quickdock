@@ -89,7 +89,9 @@ type AppService struct {
 	pendingInitTextMu  sync.Mutex
 
 	// 本地 AI 流式服务（127.0.0.1 随机端口，前端 fetch 读取分块响应）
-	aiStream *aiStreamServer
+	// aiStreamMu 保护 aiStream 字段（启动/停止/查询可并发调用）
+	aiStreamMu sync.Mutex
+	aiStream   *aiStreamServer
 
 	// DeepSeek Harness 运行环境（检测/下载便携 Node + 安装 dsh）与进程管理
 	NodeEnv *NodeEnvManager
@@ -183,7 +185,19 @@ func (a *AppService) DSHInstallPlugin(plugin string) *ApiResult {
 	if plugin == "" {
 		return FailMsg("插件名不能为空")
 	}
-	go func() { _ = a.DSH.InstallPlugin(plugin) }()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// 与 SetupDSH/UpdateDSH 相同：goroutine 内 panic 必须消化，否则会崩掉整个应用
+				msg := fmt.Sprintf("安装插件异常: %v", r)
+				a.NodeEnv.EmitLog("error", msg)
+				if a.app != nil {
+					a.app.Event.Emit("quickdock:dsh:plugin", map[string]bool{"ok": false})
+				}
+			}
+		}()
+		_ = a.DSH.InstallPlugin(plugin)
+	}()
 	return Ok(nil)
 }
 

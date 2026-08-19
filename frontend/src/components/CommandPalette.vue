@@ -406,7 +406,7 @@ async function executeSelected() {
         inlinePluginLoading.value = false
         return
       }
-      toast?.error?.(t('pluginNeedInput') || '该命令需要输入参数')
+      toast?.error?.(t('pluginNeedInput'))
       return
     }
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, inputText || '')

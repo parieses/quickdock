@@ -60,11 +60,38 @@ func NewManager(pluginsDir string) *Manager {
 	// 启动时清理上一次残留的插件进程
 	m.cleanupOrphans()
 
+	// 启动时恢复被中断的插件安装（解压中途崩溃留下的 *.rollback 标记）
+	m.recoverInterruptedInstalls()
+
 	// 启动后台健康检查
 	m.healthCheckStopCh = make(chan struct{})
 	m.startHealthCheck()
 
 	return m
+}
+
+// recoverInterruptedInstalls 启动时扫描 *.rollback 标记，恢复上一次被中断的插件安装。
+// 安装器会在解压前写 rollback 标记（内容是备份目录路径），defer/失败统一回滚；若进程在
+// 解压中途崩溃（来不及走回滚），下次启动靠这里兜底：删除残缺新目录 + 还原备份。
+func (m *Manager) recoverInterruptedInstalls() {
+	marks, err := filepath.Glob(filepath.Join(m.pluginsDir, "*.rollback"))
+	if err != nil {
+		return
+	}
+	for _, mark := range marks {
+		targetDir := strings.TrimSuffix(mark, ".rollback")
+		data, rerr := os.ReadFile(mark)
+		if rerr != nil {
+			fmt.Printf("QuickDock: 无法读取 rollback 标记 %s，跳过: %v\n", mark, rerr)
+			continue
+		}
+		backupDir := strings.TrimSpace(string(data))
+		if rerr := rollbackInstall(targetDir, backupDir, mark); rerr != nil {
+			fmt.Printf("QuickDock: 恢复中断安装 %s 失败: %v\n", targetDir, rerr)
+		} else {
+			fmt.Printf("QuickDock: 已恢复中断的插件安装：%s\n", targetDir)
+		}
+	}
 }
 
 // RegisterHostMethod 注册 Host Method
@@ -112,6 +139,7 @@ func (m *Manager) DiscoverAndLoad() error {
 		wg.Add(1)
 		go func(j pluginJob) {
 			defer wg.Done()
+			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: plugin load worker panic: %v\n", r) } }()
 			if err := m.LoadPlugin(j.manifest, j.dir); err != nil {
 				fmt.Printf("QuickDock: 插件 %s 启动失败: %v\n", j.manifest.ID, err)
 			}
@@ -607,8 +635,13 @@ func (m *Manager) ReloadPlugin(id string) (*PluginManifest, error) {
 
 // UninstallPlugin 卸载插件（删除目录）
 func (m *Manager) UninstallPlugin(id string) error {
+	// 先停进程并从内存移除：否则 Windows 上驻留的 native exe 会占用文件句柄，删除静默失败并留下孤儿进程
+	m.UnloadPlugin(id)
 	dir := filepath.Join(m.pluginsDir, id)
-	return os.RemoveAll(dir)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("删除插件目录失败: %w", err)
+	}
+	return nil
 }
 
 // GetFrontendPath 获取插件前端资源入口路径
@@ -730,6 +763,8 @@ func (m *Manager) ShutdownAll() {
 
 	for id, inst := range m.plugins {
 		fmt.Printf("QuickDock: 停止插件 %q\n", id)
+		// 置 stopped：进程退出后 watchPlugin 读到 stopped=true 才不会把插件自动重启成孤儿进程
+		inst.stopped.Store(true)
 		if inst.Stdin != nil {
 			inst.SendNotification("shutdown", nil)
 		}

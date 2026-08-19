@@ -272,6 +272,7 @@ func (a *AppService) StartAutoUpdateChecker() {
 	}
 	go func() {
 		// 启动后延迟 30s 首检，避免拖慢冷启动；之后每 24h 一次。
+		defer recoverPanic("auto update checker") // 长驻循环内 panic 会崩进程，必须兜底
 		time.Sleep(30 * time.Second)
 		ticker := time.NewTicker(24 * time.Hour)
 		defer ticker.Stop()

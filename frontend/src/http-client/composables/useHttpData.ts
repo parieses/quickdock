@@ -100,9 +100,12 @@ export function useHttpData(toast: ToastAPI) {
   }
 
   // ---- 加载数据 ----
+  let loadGen = 0
   async function load() {
+    const gen = ++loadGen
     try {
       const projs = unwrap<HttpProject[]>(await ListHttpProjects()) ?? []
+      if (gen !== loadGen) return // 已有更新的加载，丢弃过期响应
       projects.value = projs
       const [reqs, ...rest] = await Promise.all([
         ListApiRequests(),
@@ -110,6 +113,7 @@ export function useHttpData(toast: ToastAPI) {
         ...projs.map(p => ListHttpEnvironments(p.id)),
         ...projs.map(p => ListHttpDocs(p.id)),
       ])
+      if (gen !== loadGen) return
       requests.value = unwrap<ApiRequest[]>(reqs) ?? []
       const third = projs.length
       const folderLists = rest.slice(0, third)
@@ -119,6 +123,7 @@ export function useHttpData(toast: ToastAPI) {
       environments.value = envLists.flatMap(e => unwrap<HttpEnvironment[]>(e) ?? [])
       docs.value = docLists.flatMap(d => unwrap<HttpDoc[]>(d) ?? [])
     } catch (e) {
+      if (gen !== loadGen) return
       toast.error(t('httpLoadFailed') + ': ' + getErrorMessage(e))
     }
   }
@@ -189,7 +194,7 @@ export function useHttpData(toast: ToastAPI) {
     renameTarget.value = f
   }
   async function confirmFolder(values: Record<string, string>) {
-    const folderName = (values.name || '').trim() || '目录'
+    const folderName = (values.name || '').trim() || t('unnamedFolder')
     try {
       let created: HttpFolder | null = null
       if (folderDialog.isRename && renameTarget.value) {
@@ -231,7 +236,7 @@ export function useHttpData(toast: ToastAPI) {
   // ---- 文档 CRUD ----
   async function newDocUnderProject(pid: string) {
     try {
-      const r = unwrap<HttpDoc>(await CreateHttpDoc({ id: '', projectId: pid, folderId: '', name: '未命名文档', content: '', sort: 0 })) ?? null
+      const r = unwrap<HttpDoc>(await CreateHttpDoc({ id: '', projectId: pid, folderId: '', name: t('unnamedDoc'), content: '', sort: 0 })) ?? null
       if (r) { docs.value.push(r); await loadDoc(r) }
     } catch (e) {
       toast.error(t('createFailed') + ': ' + getErrorMessage(e))
@@ -240,7 +245,7 @@ export function useHttpData(toast: ToastAPI) {
   async function openNewDoc(folderId: string) {
     const pid = folders.value.find(f => f.id === folderId)?.projectId || currentProjectId.value
     try {
-      const r = unwrap<HttpDoc>(await CreateHttpDoc({ id: '', projectId: pid, folderId, name: '未命名文档', content: '', sort: 0 })) ?? null
+      const r = unwrap<HttpDoc>(await CreateHttpDoc({ id: '', projectId: pid, folderId, name: t('unnamedDoc'), content: '', sort: 0 })) ?? null
       if (r) {
         docs.value.push(r)
         await loadDoc(r)
@@ -265,7 +270,7 @@ export function useHttpData(toast: ToastAPI) {
   async function saveDoc(showToast = true) {
     if (!currentDocId.value) return
     const id = currentDocId.value
-    const input = { id, projectId: currentProjectId.value, folderId: currentFolderId.value, name: docName.value.trim() || '未命名文档', content: docContent.value, sort: 0 }
+    const input = { id, projectId: currentProjectId.value, folderId: currentFolderId.value, name: docName.value.trim() || t('unnamedDoc'), content: docContent.value, sort: 0 }
     try {
       const r = unwrap<HttpDoc>(await UpdateHttpDoc(id, input))
       if (r) {

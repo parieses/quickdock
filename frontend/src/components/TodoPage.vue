@@ -70,7 +70,7 @@ function startFocus(todo: Todo) {
     focusRemaining.value--
     if (focusRemaining.value <= 0) {
       focusRemaining.value = 0
-      const title = focusTitle(focusTodoId.value) || '专注计时'
+      const title = focusTitle(focusTodoId.value) || t('focusTimerTitle')
       try { NotifyFocusComplete(title, focusMinutes.value) } catch {}
       stopFocusTimer()
       focusTodoId.value = ''
@@ -108,9 +108,9 @@ const todayStr = computed(() => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 })
 
-const WEEKDAYS = ['一', '二', '三', '四', '五', '六', '日']
+const WEEKDAY_NAMES = computed(() => ['日', '一', '二', '三', '四', '五', '六'].map(w => t('toDoWeekday_' + w)))
 
-const monthLabel = computed(() => `${viewYear.value}年${viewMonth.value + 1}月`)
+const monthLabel = computed(() => t('toDoMonthYear', { y: viewYear.value, m: viewMonth.value + 1 }))
 
 // 时间显示：YYYY-MM-DD HH:MM:SS -> HH:MM（或带日期）
 function shortTime(s: string): string {
@@ -331,15 +331,20 @@ const selectedTodos = computed(() => {
 const remainingCount = computed(() => selectedTodos.value.filter(x => !x.done).length)
 
 // ---- 操作 ----
+let refreshGen = 0
 async function refresh() {
+  const gen = ++refreshGen
   loading.value = true
   error.value = ''
   try {
-    todos.value = unwrap<Todo[]>(await ListTodos()) ?? []
+    const r = unwrap<Todo[]>(await ListTodos()) ?? []
+    if (gen !== refreshGen) return
+    todos.value = r
   } catch (e) {
+    if (gen !== refreshGen) return
     error.value = getErrorMessage(e)
   } finally {
-    loading.value = false
+    if (gen === refreshGen) loading.value = false
   }
 }
 
@@ -543,7 +548,7 @@ onMounted(() => {
       <!-- 左侧：月历 -->
       <div class="cal-card">
         <div class="cal-weekdays">
-          <span v-for="w in WEEKDAYS" :key="w" class="cal-weekday">{{ w }}</span>
+          <span v-for="w in WEEKDAY_NAMES" :key="w" class="cal-weekday">{{ w }}</span>
         </div>
         <div class="cal-grid">
           <button

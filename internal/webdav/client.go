@@ -178,7 +178,8 @@ func ListBackups(cfg *Config) ([]BackupFile, error) {
 
 	var files []BackupFile
 	for _, r := range ms.Response {
-		if r.Propstat.Prop.ResourceType != nil && r.Propstat.Prop.ResourceType.Collection != "" {
+		// 集合目录：XML 中 <collection/> 是空元素，解码后 Collection==""；只判断 ResourceType 非 nil 即是集合
+		if r.Propstat.Prop.ResourceType != nil {
 			continue
 		}
 		name := strings.TrimRight(r.Href, "/")

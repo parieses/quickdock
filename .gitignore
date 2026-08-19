@@ -59,3 +59,4 @@ updater.key
 services/update_verify_test.go
 docs/project-scan-report.md
 scripts/ReTag.ps1
+docs/audit-2026-08.md

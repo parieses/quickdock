@@ -177,9 +177,13 @@ func (a *AppService) getActiveAIProfile() (AIProfile, bool) {
 		ThinkingEnabled:  s.ThinkingEnabled,
 	}
 	if s.APIKey != "" {
-		if dec, e := platform.DecryptSecret(s.APIKey); e == nil {
-			cfg.APIKey = dec
+		dec, e := platform.DecryptSecret(s.APIKey)
+		if e != nil {
+			// DPAPI 解密失败（如凭据被其他用户/机器替换）：不缓存空 Key 配置，
+			// 下次调用会重新解密重试，而不是永远拿到空 Key 直到用户手动保存档案。
+			return AIProfile{}, false
 		}
+		cfg.APIKey = dec
 	}
 	if cfg.MaxTokens <= 0 {
 		cfg.MaxTokens = aiDefaultMax
@@ -406,10 +410,13 @@ func (a *AppService) emitAI(name string, data map[string]interface{}) {
 
 // AIStreamInfo 返回本地 AI 流式服务的端口与随机令牌。
 func (a *AppService) AIStreamInfo() *ApiResult {
-	if a.aiStream == nil {
+	a.aiStreamMu.Lock()
+	s := a.aiStream
+	a.aiStreamMu.Unlock()
+	if s == nil {
 		return FailMsg("流式服务未启动")
 	}
-	return Ok(map[string]interface{}{"port": a.aiStream.port, "token": a.aiStream.token})
+	return Ok(map[string]interface{}{"port": s.port, "token": s.token})
 }
 func (a *AppService) AITestConnection(profileID string) (map[string]interface{}, error) {
 	stored := a.loadAIProfiles()

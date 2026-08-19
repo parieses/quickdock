@@ -169,7 +169,10 @@ async function doRestart() {
 }
 
 // ---- 主题 / 语言 ----
-const currentTheme = ref('system')
+// 主题状态由 App 统一管理（App.vue provide('theme')）：此处不再各存一份，否则用户切主题后
+// 系统深/浅色变化会覆盖（App 的 currentTheme 仍是 system），主题无法持久生效。
+const themeCtl = inject<{ current: any; set: (t: string) => Promise<void> } | null>('theme', null)
+const currentTheme = themeCtl ? themeCtl.current : ref('system')
 const themeOptions = computed(() => [
   { value: 'dark',   label: t('dark'), icon: Moon },
   { value: 'light',  label: t('light'), icon: Sun },
@@ -183,6 +186,8 @@ function applyTheme(theme: string) {
 }
 
 async function setTheme(theme: string) {
+  // 优先走宿主统一入口（同步 App.currentTheme + applyTheme + 持久化），无注入时退化到本地实现
+  if (themeCtl) { await themeCtl.set(theme); return }
   currentTheme.value = theme
   applyTheme(theme)
   try { await SetValue('theme', theme) } catch (_) {}

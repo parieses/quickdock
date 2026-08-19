@@ -40,11 +40,7 @@ function toggleLogDetail(id: string) {
   expandedLog.value = expandedLog.value === id ? null : id
 }
 function triggerLabel(trigger: string): string {
-  switch (trigger) {
-    case 'hotkey': return '热键'
-    case 'palette': return '面板'
-    default: return '手动'
-  }
+  return t('trigger_' + trigger) || t('trigger_manual')
 }
 
 // ---- 分类筛选 ----
@@ -243,7 +239,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
     <!-- 九宫格插件列表 -->
     <div v-else-if="filteredPlugins.length === 0" class="plugin-empty">
       <Puzzle :size="48" class="empty-icon" />
-      <p class="empty-title">该分类下暂无插件</p>
+      <p class="empty-title">{{ t('pluginEmptyCategory') }}</p>
     </div>
 
     <div v-else class="plugin-grid">
@@ -267,7 +263,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
             class="action-top-btn btn-open-top"
             :disabled="p.status !== 'running' || operating.has(p.id)"
             @click.stop="openPluginPage(p)"
-            :title="p.status === 'running' ? t('pluginOpen') : '插件未运行'"
+            :title="p.status === 'running' ? t('pluginOpen') : t('pluginNotRunning')"
           >
             <ExternalLink :size="12" />
           </button>

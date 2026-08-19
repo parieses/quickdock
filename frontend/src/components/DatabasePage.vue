@@ -233,16 +233,22 @@ async function testConn() {
   }
 }
 
+let treeGen = 0
 async function loadTree() {
-  if (!activeId.value) { tree.value = []; return }
+  const id = activeId.value
+  if (!id) { tree.value = []; return }
+  const gen = ++treeGen
   treeLoading.value = true
   treeError.value = ''
   try {
-    tree.value = unwrap<DbTreeNode[]>(await ListDbTree(activeId.value)) ?? []
+    const r = unwrap<DbTreeNode[]>(await ListDbTree(id)) ?? []
+    if (gen !== treeGen || activeId.value !== id) return // 已切换连接，丢弃过期响应
+    tree.value = r
   } catch (e) {
+    if (gen !== treeGen || activeId.value !== id) return
     treeError.value = getErrorMessage(e)
   } finally {
-    treeLoading.value = false
+    if (gen === treeGen) treeLoading.value = false
   }
 }
 

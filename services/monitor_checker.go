@@ -82,6 +82,7 @@ func (a *AppService) runDueMonitors() {
 		}
 		go func(m *db.Monitor) {
 			defer a.monitorInflight.Delete(m.ID)
+			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: monitor checker panic: %v\n", r) } }()
 			a.checkOneMonitor(m)
 		}(m)
 	}

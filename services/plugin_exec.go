@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"time"
+	"unicode/utf8"
 
 	"quickdock/internal/db"
 )
@@ -73,11 +74,11 @@ func (a *AppService) recordPluginExecLog(pluginID, commandID, trigger string, st
 			log.Result = fmt.Sprintf("%v", result)
 		}
 	}
-	if len(log.Result) > 2000 {
-		log.Result = log.Result[:2000]
+	if utf8.RuneCountInString(log.Result) > 2000 {
+		log.Result = string([]rune(log.Result)[:2000])
 	}
-	if len(log.Error) > 2000 {
-		log.Error = log.Error[:2000]
+	if utf8.RuneCountInString(log.Error) > 2000 {
+		log.Error = string([]rune(log.Error)[:2000])
 	}
 	if err := a.DB.AddPluginExecLog(log); err != nil {
 		fmt.Printf("QuickDock: 写入插件执行日志失败: %v\n", err)

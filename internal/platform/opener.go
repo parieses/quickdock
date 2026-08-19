@@ -104,7 +104,12 @@ func RunCommand(command, workingDir string) error {
 	}
 	// 隐藏子进程控制台窗口，避免定时命令弹黑框。
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	return cmd.Start()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	// 异步 Wait 回收 Windows 进程句柄（与 explorer 分支一致），避免每次执行泄漏句柄
+	go func() { _ = cmd.Wait() }()
+	return nil
 }
 
 // splitArgs 按空格拆词，支持双引号包裹保留空格。

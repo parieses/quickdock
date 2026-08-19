@@ -78,7 +78,7 @@ async function saveConfig() {
 
 async function testConnection() {
   if (!webdavURL.value.trim()) {
-    showMsg('❌ ' + t('webdavUrl') + ' 不能为空')
+    showMsg('❌ ' + t('webdavUrl') + ' ' + t('cannotBeEmpty'))
     return
   }
   loading.value = true

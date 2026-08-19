@@ -31,6 +31,11 @@ type aiStreamServer struct {
 
 // StartAIStreamServer 启动本地流式服务（绑定 127.0.0.1:0 随机端口）
 func (a *AppService) StartAIStreamServer() {
+	a.aiStreamMu.Lock()
+	defer a.aiStreamMu.Unlock()
+	if a.aiStream != nil {
+		return // 已启动：幂等，避免重复监听泄漏 listener
+	}
 	s := &aiStreamServer{svc: a}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -59,7 +64,10 @@ func (a *AppService) StartAIStreamServer() {
 
 // StopAIStreamServer 关闭本地流式服务（应用退出时调用）
 func (a *AppService) StopAIStreamServer() {
+	a.aiStreamMu.Lock()
 	s := a.aiStream
+	a.aiStream = nil
+	a.aiStreamMu.Unlock()
 	if s != nil && s.srv != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()

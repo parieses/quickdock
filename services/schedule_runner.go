@@ -259,6 +259,7 @@ func (a *AppService) checkScheduledTasks() {
 		}
 		go func(t *db.ScheduledTask) {
 			defer a.schedInflight.Delete(t.ID)
+			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: schedule runner panic: %v\n", r) } }()
 			status, result := a.executeTask(t)
 
 			// 计算下次运行时间与启用状态

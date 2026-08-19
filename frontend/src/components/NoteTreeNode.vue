@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Folder, FileText, ChevronRight, ChevronDown, Plus, FolderPlus, Pencil, Trash2 } from '@lucide/vue'
 import type { Snippet } from '../types'
 
@@ -25,6 +26,7 @@ const emit = defineEmits<{
   (e: 'drop-node', dragId: string, targetId: string): void
 }>()
 
+const { t } = useI18n()
 const n = computed<any>(() => props.node)
 const isFolder = computed(() => n.value.isFolder)
 const isOpen = computed(() => props.expanded.has(n.value.id))
@@ -64,10 +66,10 @@ function onDragStart(e: DragEvent) {
       </template>
       <span v-if="isFolder && hasKids" class="tn-count">{{ node.children.length }}</span>
       <span class="tn-actions" @click.stop>
-        <button v-if="isFolder" class="tn-act" title="+ 新建子文件夹" @click="emit('create-folder', node.id)"><FolderPlus :size="12" /></button>
-        <button v-if="isFolder" class="tn-act" title="+ 新建笔记" @click="emit('create-doc', node.id)"><Plus :size="12" /></button>
-        <button class="tn-act" title="Rename" @click="emit('rename-start', node)"><Pencil :size="12" /></button>
-        <button class="tn-act danger" title="Delete" @click="emit('del', node)"><Trash2 :size="12" /></button>
+        <button v-if="isFolder" class="tn-act" :title="'+ ' + t('notesNewFolder')" @click="emit('create-folder', node.id)"><FolderPlus :size="12" /></button>
+        <button v-if="isFolder" class="tn-act" :title="'+ ' + t('notesNewDoc')" @click="emit('create-doc', node.id)"><Plus :size="12" /></button>
+        <button class="tn-act" :title="t('rename')" @click="emit('rename-start', node)"><Pencil :size="12" /></button>
+        <button class="tn-act danger" :title="t('delete')" @click="emit('del', node)"><Trash2 :size="12" /></button>
       </span>
     </div>
     <template v-if="isFolder && isOpen && hasKids">

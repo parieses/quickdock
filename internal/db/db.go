@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -297,13 +298,14 @@ func (d *Database) ListTableWhere(table, where string, params ...interface{}) ([
 		return nil, err
 	}
 
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// orderByClause 会访问 colCache，注释明确要求只能在持锁时访问；不能放在加锁前
 	orderClause := ""
 	if !whereHasOrderBy(where) {
 		orderClause = d.orderByClause(table)
 	}
-
-	d.mu.Lock()
-	defer d.mu.Unlock()
 
 	rows, err := d.conn.Query("SELECT * FROM "+table+" WHERE "+where+orderClause, params...)
 	if err != nil {
@@ -411,8 +413,23 @@ func (d *Database) Query(query string, params ...interface{}) ([]map[string]inte
 	return scanRows(rows)
 }
 
+// appStateKeyValid 校验 key 是否允许读写 app_state 表，防止覆盖内置配置或误写。
+// 只允许已知前缀的 key：theme/locale 等用户设置、plugin_icon_* 插件图标、
+// 以及内部服务用的 ai_* / sync_config / notify_webhook 等。
+var appStateKeyValid = regexp.MustCompile(`^(theme|locale|lastWorkspaceId|lastSceneId|plugin_icon_|webdav_config|sync_config|ai_profiles|ai_active_profile|ai_config|notify_webhook|qd_)`)
+
+func validateAppStateKey(key string) error {
+	if !appStateKeyValid.MatchString(key) {
+		return fmt.Errorf("invalid app_state key: %q", key)
+	}
+	return nil
+}
+
 // GetValue 从 app_state 表中读取值（委托 GetSetting，ErrNoRows 时返回空字符串不报错）
 func (d *Database) GetValue(key string) (string, error) {
+	if err := validateAppStateKey(key); err != nil {
+		return "", err
+	}
 	val, err := d.GetSetting(key)
 	if err == sql.ErrNoRows {
 		return "", nil
@@ -422,6 +439,9 @@ func (d *Database) GetValue(key string) (string, error) {
 
 // SetValue 向 app_state 表中写入值（委托 SetSetting）
 func (d *Database) SetValue(key, value string) error {
+	if err := validateAppStateKey(key); err != nil {
+		return err
+	}
 	return d.SetSetting(key, value)
 }
 
