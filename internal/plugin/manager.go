@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -129,6 +130,11 @@ func (m *Manager) DiscoverAndLoad() error {
 		manifest, err := LoadManifest(manifestPath)
 		if err != nil {
 			fmt.Printf("QuickDock: 插件 %s 清单加载失败: %v\n", entry.Name(), err)
+			continue
+		}
+		// 跳过当前平台不支持的插件
+		if !IsPlatformSupported(manifest) {
+			fmt.Printf("QuickDock: 跳过插件 %s（不支持当前平台 %s）\n", manifest.ID, runtime.GOOS)
 			continue
 		}
 		jobs = append(jobs, pluginJob{manifest: *manifest, dir: filepath.Join(m.pluginsDir, entry.Name())})

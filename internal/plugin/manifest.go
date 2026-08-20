@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 )
 
@@ -73,5 +74,30 @@ func validateManifest(m *PluginManifest) error {
 		return fmt.Errorf("%w: backend.entry 不能为空（none runtime 除外）", ErrInvalidManifest)
 	}
 
+	// 校验 platforms 字段（如果声明了的话）
+	if len(m.Platforms) > 0 {
+		validPlatforms := map[string]bool{"windows": true, "darwin": true, "linux": true}
+		for _, p := range m.Platforms {
+			if !validPlatforms[strings.ToLower(p)] {
+				return fmt.Errorf("%w: 不支持的平台 %q，仅支持: windows/darwin/linux", ErrInvalidManifest, p)
+			}
+		}
+	}
+
 	return nil
+}
+
+// IsPlatformSupported 检查当前系统是否支持该插件
+func IsPlatformSupported(m *PluginManifest) bool {
+	if len(m.Platforms) == 0 {
+		// 未声明 platforms → 默认支持所有平台
+		return true
+	}
+	currentOS := runtime.GOOS
+	for _, p := range m.Platforms {
+		if strings.ToLower(p) == currentOS {
+			return true
+		}
+	}
+	return false
 }

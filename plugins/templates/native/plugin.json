@@ -6,6 +6,7 @@
   "author": "YourName",
   "icon": "icon.svg",
   "category": "效率工具",
+  "platforms": ["windows"],
 
   "backend": {
     "runtime": "native",

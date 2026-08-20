@@ -228,6 +228,7 @@ async function loadEntries() {
     if (gen !== entriesLoadGen) return // 已有更新的刷新，丢弃过期响应
     // 不再预加载所有图片 — 由 IntersectionObserver 懒加载
     entries.value = r
+     loading.value = false
   } catch (e) {
     if (gen !== entriesLoadGen) return
     const msg = getErrorMessage(e)

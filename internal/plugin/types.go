@@ -23,6 +23,7 @@ type PluginManifest struct {
 	Author      string      `json:"author,omitempty"`
 	Icon        string      `json:"icon,omitempty"`
 	Category    string      `json:"category,omitempty"`
+	Platforms   []string    `json:"platforms,omitempty"` // 支持的平台: windows/darwin/linux
 	Backend     BackendConfig  `json:"backend"`
 	Frontend    FrontendConfig `json:"frontend,omitempty"`
 	Capabilities []string      `json:"capabilities,omitempty"`

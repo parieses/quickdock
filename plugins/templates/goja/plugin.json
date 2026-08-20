@@ -6,6 +6,7 @@
   "author": "YourName",
   "icon": "icon.svg",
   "category": "开发者日常",
+  "platforms": ["windows"],
 
   "backend": {
     "runtime": "goja",
