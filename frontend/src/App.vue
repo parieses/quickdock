@@ -206,6 +206,7 @@ const activeConfirm = computed(() =>
     <div class="app-body">
       <Sidebar class="app-sidebar"
         :currentPage="currentPage"
+        :dshOpening="dshOpening"
         @navigate="setPage"
         @open-settings="(page?: string) => { settingsPage = page; showSettings = true }"
       />

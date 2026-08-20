@@ -8,7 +8,7 @@ import {
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
   Copy, FolderSearch, Play, ClipboardPaste, Save
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, GetPluginFrontendPage, SetPendingPluginInit, GetAndClearPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -18,24 +18,49 @@ import { evaluate, format, convertExpression } from '../utils/calc'
 import { pinyin } from 'pinyin-pro'
 import { useFrecency } from '../composables/useFrecency'
 import { usePluginIndex } from '../composables/usePluginIndex'
-import { useInlinePlugin } from '../composables/useInlinePlugin'
 import { useCommandSearch } from '../composables/useCommandSearch'
+import PluginFrame from './PluginFrame.vue'
 import type { RecentEntry } from '../composables/useCommandSearch'
 
-const { t, locale } = useI18n()
-// 读取宿主当前生效主题（与 PluginPage 一致），传给插件页后端以生成即主题化的 HTML
-function currentThemeName(): string {
-  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
-}
+const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')
 
 // ---- 初始化 composables ----
 const { frecencyTick, loadFrecency, recordUsage, frecencyScore } = useFrecency()
 const { pluginCmdIndex, buildPluginIndex, calcPluginScore, matchTypeLabels } = usePluginIndex()
-const {
-  inlinePluginId, inlinePluginHtml, bridgedInlinePluginHtml, inlinePluginLoading, inlinePluginError,
-  inlinePluginName, inlinePluginIframe, closeInlinePlugin, detachPlugin, onInlinePluginLoad
-} = useInlinePlugin()
+
+// ---- 内联插件状态（统一走 PluginFrame 宿主；内联传参不走全局 pending init，避免跨消费竞态）----
+const inlinePluginId = ref<string | null>(null)
+const inlinePluginName = ref<string>('')
+const inlinePluginInit = ref<{ text: string; command: string }>({ text: '', command: '' })
+
+// PluginFrame 在 iframe 挂载时调用此 getter 获取 init（同窗口直接传参，不经 Go 全局槽位）
+function inlinePluginInitGetter() {
+  return inlinePluginInit.value
+}
+
+// 主动退出插件页（返回搜索 / 关闭），区别于「隐藏窗口再重开」的临时收起
+function closeInlinePlugin() {
+  inlinePluginId.value = null
+  inlinePluginName.value = ''
+  inlinePluginInit.value = { text: '', command: '' }
+}
+
+// 分离为独立窗口：把当前插件的 init 交给独立窗口的全局 pending init 槽位后再打开
+async function detachPlugin() {
+  const id = inlinePluginId.value
+  if (!id) return
+  try {
+    if (inlinePluginInit.value.text || inlinePluginInit.value.command) {
+      try { await SetPendingPluginInit(id, inlinePluginInit.value.text, inlinePluginInit.value.command) } catch {}
+    }
+    await ShowPluginWindow(id)
+  } catch (e) {
+    toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
+    return
+  }
+  closeInlinePlugin()
+}
 
 // ---- 关闭面板 ----
 function closePalette() {
@@ -397,13 +422,9 @@ async function executeSelected() {
     if ((result as any).isCachedResult && result.acceptsInput && !inputText) {
       if (result.pluginHasFrontend) {
         recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, '')
-        try {
-          inlinePluginId.value = result.pluginId; inlinePluginLoading.value = true; inlinePluginError.value = ''
-          const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId, currentThemeName(), locale.value))
-          if (html) { const tmatch = html.match(/<title>([^<]*)<\/title>/); inlinePluginName.value = tmatch ? tmatch[1] : result.label; inlinePluginHtml.value = html }
-          else { inlinePluginError.value = t('pluginNoFrontend') }
-        } catch (e: any) { inlinePluginError.value = t('pluginLoadFailed') + ': ' + getErrorMessage(e) }
-        inlinePluginLoading.value = false
+        inlinePluginName.value = ''
+        inlinePluginInit.value = { text: '', command: result.pluginCommandId || '' }
+        inlinePluginId.value = result.pluginId
         return
       }
       toast?.error?.(t('pluginNeedInput'))
@@ -412,15 +433,10 @@ async function executeSelected() {
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, inputText || '')
     try {
       if (result.pluginHasFrontend) {
-        // 前端插件：始终打开 UI 面板；若通过正则/前缀匹配到输入，把输入作为待初始化参数传给插件
-        if (inputText) { try { await SetPendingPluginInit(inputText, result.pluginCommandId || '') } catch {} }
-        inlinePluginId.value = result.pluginId; inlinePluginLoading.value = true; inlinePluginError.value = ''
-        try {
-          const html = unwrap<string>(await GetPluginFrontendPage(result.pluginId, currentThemeName(), locale.value))
-          if (html) { const tmatch = html.match(/<title>([^<]*)<\/title>/); inlinePluginName.value = tmatch ? tmatch[1] : result.label; inlinePluginHtml.value = html }
-          else { inlinePluginError.value = t('pluginNoFrontend') }
-        } catch (e: any) { inlinePluginError.value = t('pluginLoadFailed') + ': ' + getErrorMessage(e) }
-        inlinePluginLoading.value = false
+        // 前端插件：交由统一 PluginFrame 宿主打开 UI；init 通过同窗口 getter 直接传入（不走全局 pending init 单例）
+        inlinePluginName.value = ''
+        inlinePluginInit.value = { text: inputText || '', command: result.pluginCommandId || '' }
+        inlinePluginId.value = result.pluginId
       } else {
         // 无前端插件（goja/native 无 UI）：后端执行并返回结果
         const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, inputText ? { text: inputText } : null as any)
@@ -613,8 +629,13 @@ async function deleteSnippetAndRefocus(id: string) {
 // ---- 加载数据 ----
 let itemsLoadGen = 0
 let lastPluginIndexLoad = 0
+// #6 按需刷新：插件索引 500ms 节流；插件图标（每个插件一次 DB 读取）改为长 TTL 缓存，避免每次 show 全量重拉
+const PLUGIN_ICON_TTL = 30_000
+let lastPluginIconLoad = 0
+const APP_SCAN_TTL = 60_000 // 应用扫描（启动器 start-menu 扫描较慢）长 TTL 缓存
+let lastAppScan = 0
 
-async function loadPluginIndex() {
+async function loadPluginIndex(forceIcons = false) {
   const now = Date.now()
   if (now - lastPluginIndexLoad < 500) return
   lastPluginIndexLoad = now
@@ -624,10 +645,13 @@ async function loadPluginIndex() {
     installedPlugins.value = running
     pluginCmdIndex.value = buildPluginIndex(running)
     // 预加载插件真实图标（data URI），结果列表据此展示，无图标的插件回退到 Puzzle
-    const iconPromises = running.map(async (p) => {
-      try { const uri = unwrap<string | null>(await GetPluginIcon(p.id)); if (uri) pluginIcons.value[p.id] = uri } catch {}
-    })
-    await Promise.all(iconPromises)
+    if (forceIcons || now - lastPluginIconLoad >= PLUGIN_ICON_TTL) {
+      lastPluginIconLoad = now
+      const iconPromises = running.map(async (p) => {
+        try { const uri = unwrap<string | null>(await GetPluginIcon(p.id)); if (uri) pluginIcons.value[p.id] = uri } catch {}
+      })
+      await Promise.all(iconPromises)
+    }
   } catch (e) { console.error('[CmdPalette] ListPlugins:', getErrorMessage(e)) }
 }
 
@@ -637,7 +661,14 @@ async function loadPaletteData() {
   loading.value = true; const gen = ++itemsLoadGen
   await loadFrecency()
   try { const result = unwrap<CollectionItem[]>(await ListAllItems()); if (gen !== itemsLoadGen) return; items.value = result || [] } catch (e) { console.error('[CmdPalette] ListAllItems:', getErrorMessage(e)) }
-  try { const apps = unwrap<InstalledApp[]>(await ScanInstalledApps()); if (gen === itemsLoadGen) installedApps.value = apps || [] } catch (e) { console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e)) }
+  // #6 按需刷新：应用扫描（start-menu 较慢）在 TTL 内复用已加载数据，避免每次 show 全量重拉
+  try {
+    const now = Date.now()
+    if (gen === itemsLoadGen && (now - lastAppScan >= APP_SCAN_TTL || installedApps.value.length === 0)) {
+      const apps = unwrap<InstalledApp[]>(await ScanInstalledApps())
+      if (gen === itemsLoadGen) { installedApps.value = apps || []; lastAppScan = now }
+    }
+  } catch (e) { console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e)) }
   try { const snips = unwrap<CmdSnippet[]>(await ListSnippets()); if (gen !== itemsLoadGen) return; snippets.value = snips || [] } catch (e) { console.error('[CmdPalette] ListSnippets:', getErrorMessage(e)) }
   try { const raw = await GetRecentUsage(20); if (gen === itemsLoadGen) recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.label) } catch (e) { console.error('[CmdPalette] GetRecentUsage:', getErrorMessage(e)) }
   if (gen === itemsLoadGen) loading.value = false
@@ -651,8 +682,12 @@ onMounted(async () => {
   // 文档级 Esc 兜底（capture 阶段），确保输入框未获焦点时也能关闭面板
   document.addEventListener('keydown', onGlobalEsc, true)
   Events.On('palette:shown', () => {
-    if (inlinePluginId.value) closeInlinePlugin()
     loadPluginIndex()
+    // 核心修复：若隐藏前仍停留在内联插件页，重开时保持插件页（「临时收起」而非「主动退出」）。
+    // 只有当用户点「返回」/ Esc 触发 closeInlinePlugin 清空 inlinePluginId 后，重开才回到输入框。
+    if (inlinePluginId.value) {
+      return
+    }
     loadPaletteData().catch(e => console.warn('[CmdPalette] loadPaletteData:', e))
     query.value = ''; selectedIndex.value = 0; inlineQuicklink.value = null; inlineQuery.value = ''; pluginResultCache.value = null
     actionMenuOpen.value = false
@@ -718,16 +753,11 @@ onUnmounted(() => {
       </div>
     </div>
     <div class="palette-plugin-body">
-      <div v-if="inlinePluginLoading" class="palette-plugin-status">{{ t('loading') }}</div>
-      <div v-else-if="inlinePluginError" class="palette-plugin-status palette-plugin-error">{{ inlinePluginError }}</div>
-      <iframe
-        v-else-if="inlinePluginHtml"
-        ref="inlinePluginIframe"
-        :srcdoc="bridgedInlinePluginHtml"
-        class="palette-plugin-iframe"
-        sandbox="allow-scripts allow-modals allow-downloads"
-        frameborder="0"
-        @load="onInlinePluginLoad"
+      <PluginFrame
+        :key="inlinePluginId"
+        :plugin-id="inlinePluginId"
+        :get-init="inlinePluginInitGetter"
+        @title="inlinePluginName = $event || inlinePluginName"
       />
     </div>
   </div>

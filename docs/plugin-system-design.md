@@ -282,6 +282,12 @@ Host Methods 在执行前检查 plugin.json 声明的 Permissions：
 
 v3 不再使用 iframe 嵌入主窗口，每个插件拥有独立的 Wails `WebviewWindow`。
 
+> **统一插件宿主（v3 现状）**：插件的 iframe 渲染统一收敛到 `PluginFrame.vue` + `usePluginHost.ts`。
+> 命令面板的「内联模式」与「独立插件窗口」共用同一桥接路径（confirm/alert/copy/execute、
+> nonce、init、主题 MutationObserver 动态跟随），不再各自实现一份。内联模式在同窗口内通过
+> `getInit` 直接传参；独立窗口（含「分离」）走带插件归属的全局 pending init（见 §10.1），
+> 消费方须匹配 pluginID 才取用，避免跨插件错配。
+
 ```go
 type PluginWindowManager struct {
     mu         sync.Mutex
@@ -314,7 +320,7 @@ PluginPage.vue 与插件 iframe 之间使用 nonce 机制防止跨源消息伪�
 5. `messageHandler` 验证 nonce 后才处理 `plugin:execute` 消息
 6. 回复 `plugin:result` 也携带 nonce
 
-> **`plugin:init` 的数据结构：** `{ text, command, theme, locale }`。其中 `text` 仅当该命令在 `plugin.json` 声明了 `acceptsInput: true` 时，才由宿主通过 `SetPendingPluginInit(text, command)` 注入；未声明的命令 `text` 恒为空字符串。宿主侧逻辑：`CommandPalette.executeSelected` 根据 `result.acceptsInput` 决定走「打开前端 + SetPendingPluginInit」还是「ExecutePluginCommand(..., {text})」路径。
+> **`plugin:init` 的数据结构：** `{ text, command, theme, locale }`。其中 `text` 仅当该命令在 `plugin.json` 声明了 `acceptsInput: true` 时，才由宿主注入（内联同窗口经 `PluginFrame` 的 `getInit` 直接传入；独立窗口经 `SetPendingPluginInit(pluginID, text, command)` 写入带归属的 pending init）；未声明的命令 `text` 恒为空字符串。宿主侧逻辑：`CommandPalette.executeSelected` 根据 `result.acceptsInput` 决定走「打开前端 + init 传递」还是「ExecutePluginCommand(..., {text})」路径。
 
 ---
 
@@ -395,7 +401,7 @@ CREATE TABLE plugin_exec_logs (
 | `GetPluginFrontendPage(pluginID)` | 获取内联 HTML（mtime 缓存） |
 | `ShowPluginWindow(pluginID)` / `HidePluginWindow(pluginID)` | 窗口控制 |
 | `MinimizePluginWindow(pluginID)` / `ToggleMaximizePluginWindow(pluginID)` | 窗口操作 |
-| `SetPendingPluginInit(text, command)` / `GetAndClearPendingPluginInit()` | 跨窗口传参 |
+| `SetPendingPluginInit(pluginID, text, command)` / `GetAndClearPendingPluginInit(pluginID)` | 跨窗口传参（带插件归属，消费须匹配，防错配） |
 | `ListPluginExecLogs(limit)` | 执行日志查询 |
 
 ### 10.2 命令面板集成（CommandPalette.vue）
@@ -405,8 +411,10 @@ CREATE TABLE plugin_exec_logs (
 - **索引构建：** 遍历 `PluginInfo.commands`，按 title/keywords/aliases 建立搜索索引
 - **评分算法：** `calcPluginScore()` 按匹配程度给分，最高 100
 - **Slash 前缀：** 输入 `/xxx` 直接激活匹配插件
-- **内联模式：** 命令面板内嵌入 iframe 显示插件 UI（`inlinePluginId`）
-- **分离模式：** `detachPlugin()` 从内联转为独立窗口
+- **内联模式：** 命令面板内嵌入 iframe 显示插件 UI（`inlinePluginId` → 统一 `PluginFrame` 宿主）
+- **分离模式：** `detachPlugin()` 从内联转为独立窗口（把当前 init 写入带归属的 pending init 后打开）
+- **面板状态保持：** 内联插件页把「临时收起（Ctrl+K 隐藏）」与「主动退出（返回/Esc）」分离。窗口隐藏重开时保持插件页；
+  仅当用户点「返回」/ Esc 触发 `closeInlinePlugin` 清空 `inlinePluginId` 后，重开才回到输入框。
 - **执行缓存：** `pluginResultCache` 显示最近一次执行结果
 - **参数注入（`acceptsInput`）：** 命令在 `plugin.json` 声明 `acceptsInput: true` 后，命令面板输入框文本会经 `plugin:init`（`text` 字段）注入前端插件，或经 `ExecutePluginCommand(..., {text})` 传给纯后端命令；`calcPluginScore()` 仅在 `acceptsInput` 为真时才把输入文本作为 `inlineInput` 门控条件，最近使用记录也据此保留/清空 `recentInput`
 

@@ -22,18 +22,18 @@ import (
 // DSHProcessManager 启动并管理 dsh web 子进程（独立 Node 进程，127.0.0.1 随机端口）。
 // 与现有 AI 助手互不干扰：DSH 是完整 Agent 入口（工具/文件/终端/会话），AI 助手是轻量聊天。
 type DSHProcessManager struct {
-	app     *application.App
-	nodeEnv *NodeEnvManager
-	mu      sync.Mutex
-	openMu  sync.Mutex // 串行化 OpenDSHWindow，防止连点开出多个窗口
-	cmd     *exec.Cmd
-	url     string
-	port    int
-	exit    chan struct{} // reaper 通知：进程已退出（nil=未启动）
+	app      *application.App
+	nodeEnv  *NodeEnvManager
+	mu       sync.Mutex
+	openMu   sync.Mutex // 串行化 OpenDSHWindow，防止连点开出多个窗口
+	cmd      *exec.Cmd
+	url      string
+	port     int
+	exit     chan struct{} // reaper 通知：进程已退出（nil=未启动）
 	ready    chan struct{} // 冷启动就绪通知：waitReady 完成后 close（nil=无进行中的冷启动）
 	readyErr error         // 配合 ready：就绪结果；nil=成功，非 nil=失败原因（窗口 goroutine 据此显示友好错误页而非死地址）
 	starting bool          // 冷启动进行中（窗口已开但 dsh 未就绪）；连点/关窗时避免误判"进程已退出"而重启
-	window  *application.WebviewWindow
+	window   *application.WebviewWindow
 
 	// aliveCache 缓存 isDSHAlive 结果：连续点击时避免每次 spawn netstat/tasklist（各 ~300ms）
 	aliveCache struct {
@@ -183,7 +183,11 @@ func (m *DSHProcessManager) Start() (string, error) {
 	// 就绪判定用 HTTP 壳 200 即可（简单可靠）；dsh 官方前端未就绪时自带「定时常量刷新」，
 	// 不会出现「无法打开」。这里只负责把 stdout/stderr 转发到日志面板。
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r)
+			}
+		}()
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
 			if l := sc.Text(); l != "" {
@@ -192,7 +196,11 @@ func (m *DSHProcessManager) Start() (string, error) {
 		}
 	}()
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r)
+			}
+		}()
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			if l := sc.Text(); l != "" {
@@ -211,7 +219,11 @@ func (m *DSHProcessManager) Start() (string, error) {
 	m.starting = true
 	// reaper：进程自行退出（崩溃/被杀）后清理状态，避免后续 Start() 复用一个死进程
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH reaper goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH reaper goroutine panic: %v\n", r)
+			}
+		}()
 		_ = cmd.Wait()
 		close(exit)
 		m.mu.Lock()
@@ -232,7 +244,11 @@ func (m *DSHProcessManager) Start() (string, error) {
 	// 避免冷启动（首次初始化 profile 可长达 30s）期间用户对着空白 toast 干等。
 	u := "http://127.0.0.1:" + strconv.Itoa(port)
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH waitReady goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH waitReady goroutine panic: %v\n", r)
+			}
+		}()
 		err := m.waitReady(u, exit)
 		if err != nil {
 			m.Stop() // 内部 stopLocked：进程已死则无副作用；活着的半死实例会被 taskkill 清理
@@ -282,6 +298,38 @@ func (m *DSHProcessManager) isDSHAlive(port int) bool {
 	m.aliveCache.ok = ok
 	m.aliveCache.at = time.Now()
 	return ok
+}
+
+// dshReachable 实时探测 dsh 是否真正可达（与 waitReady 相同的就绪语义：2xx/3xx/401/403，
+// 404 与 5xx 视为未就绪）。与 isDSHAlive 不同，这里不依赖 aliveCache，用于两次判断之间的
+// 竞态窗口（就绪判定后、WebView 实际导航前 dsh 可能抖动/崩溃），避免把窗口导航到死地址
+// 而让用户直面浏览器"无法访问此网站"。探测很快（~ms 级），命中即返回。
+func (m *DSHProcessManager) dshReachable(url string) bool {
+	client := &http.Client{Timeout: 800 * time.Millisecond}
+	resp, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 400 && resp.StatusCode != 404
+}
+
+// waitReachableThenNavigate 在给定时限内轮询 dsh 可达性，一达成就把 WebView 导航到 target。
+// 若始终不可达返回 false（调用方据此显示友好错误页而不是把窗口甩到死地址）。
+// 为冷启动"就绪→导航"的竞态提供兜底：waitReady 判定就绪后到 SetURL 之间 dsh 若抖动/崩溃，
+// 这里会重试而不是立刻触发浏览器的"无法访问此网站"页。
+func (m *DSHProcessManager) waitReachableThenNavigate(w *application.WebviewWindow, target string, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		if m.dshReachable(target) {
+			w.SetURL(target)
+			return true
+		}
+		if time.Now().After(deadline) {
+			return false
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
 }
 
 // findPortPID 返回 127.0.0.1:<port> 上 LISTENING 进程的 PID；无占用返回 0。
@@ -428,7 +476,11 @@ func (m *DSHProcessManager) stopLocked() {
 	}
 	_ = cmd.Process.Signal(os.Interrupt)
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH signal-fallback goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH signal-fallback goroutine panic: %v\n", r)
+			}
+		}()
 		select {
 		case <-exit: // reaper 已确认退出
 		case <-time.After(3 * time.Second):
@@ -508,14 +560,22 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 		return err
 	}
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r)
+			}
+		}()
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
 	}()
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r)
+			}
+		}()
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
@@ -575,14 +635,22 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 		return err
 	}
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r)
+			}
+		}()
 		sc := bufio.NewScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
 	}()
 	go func() {
-		defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r) } }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r)
+			}
+		}()
 		sc := bufio.NewScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
@@ -684,20 +752,35 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 	starting := m.starting
 	m.mu.Unlock()
 	if win != nil {
-		if url != "" || starting {
+		if starting {
+			// 冷启动进行中（窗口已显示 loading）：直接复用，绝不能销毁重建——否则 Stop()
+			// 会杀掉正在启动的 dsh 再重来一遍。
 			win.Show()
 			win.Focus()
-			if url != "" {
-				return url, nil
-			}
 			return dshLoadingPage, nil // 启动中：返回 loading 页地址，前端仅作提示
 		}
-		// 进程已退出（reaper 已清空 url）但窗口残留：销毁旧窗口走下方重建流程，
-		// 否则返回空 URL 且窗口显示死页面，前端无任何提示。
-		m.mu.Lock()
-		m.window = nil
-		m.mu.Unlock()
-		win.Close() // 触发 WindowClosing handler（内部 Stop() 对已死进程无副作用）
+		if url != "" {
+			// 有可用地址：先实时确认 dsh 仍真正可达（m.url 可能因进程崩溃/外部 dsh 退出而
+			// 过期，reaper 与窗口关闭未必及时清空）。若已死还直接 Show()，窗口会卡在浏览器
+			// "无法访问此网站"；因此先探测，不可达则销毁旧窗口并同步清空过期 url 走重建流程。
+			if m.dshReachable(url) {
+				win.Show()
+				win.Focus()
+				return url, nil
+			}
+			m.mu.Lock()
+			m.window = nil
+			m.url = "" // 同步清空过期地址，避免后续又把死地址误判为"已有服务"
+			m.mu.Unlock()
+			win.Close() // 触发 WindowClosing handler（内部 Stop() 对已死进程无副作用）
+		} else {
+			// 进程已退出（reaper 已清空 url）但窗口残留：销毁旧窗口走下方重建流程，
+			// 否则返回空 URL 且窗口显示死页面，前端无任何提示。
+			m.mu.Lock()
+			m.window = nil
+			m.mu.Unlock()
+			win.Close()
+		}
 	}
 
 	// Start 内部已做「进程在跑则复用」，此处无需额外判断
@@ -743,7 +826,11 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 	// 冷启动：等 waitReady goroutine 通知后 Navigate 到真实 dsh 地址
 	if starting && ready != nil {
 		go func(w *application.WebviewWindow, target string, rd <-chan struct{}) {
-			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: DSH navigate goroutine panic: %v\n", r) } }()
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("QuickDock: DSH navigate goroutine panic: %v\n", r)
+				}
+			}()
 			select {
 			case <-rd:
 				m.mu.Lock()
@@ -754,7 +841,12 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 					w.SetURL(dshErrorPage(err.Error()))
 					return
 				}
-				w.SetURL(target)
+				// 就绪后到实际导航之间存在竞态窗口：dsh 可能刚响应完就抖动/崩溃。先做一次
+				// 可达性重试（≤10s），确认真正可达才导航；否则显示友好错误页，绝不把窗口
+				// 甩到死地址而让用户直面浏览器"无法访问此网站"。
+				if !m.waitReachableThenNavigate(w, target, 10*time.Second) {
+					w.SetURL(dshErrorPage("dsh 启动后无法访问（服务不可达），请关闭本窗口后重新点击导航重试，或在「设置 → DeepSeek」查看日志"))
+				}
 			case <-time.After(50 * time.Second): // 兜底 > waitReady 45s 上限
 				w.SetURL(dshErrorPage("dsh 启动超时（超过 50 秒），请关闭窗口后重新点击导航重试，或在「设置 → DeepSeek」查看日志"))
 			}

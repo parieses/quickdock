@@ -2,20 +2,28 @@ package services
 
 // ===== 插件窗口管理 =====
 
-// SetPendingPluginInit 保存待注入的初始文本和命令（从命令面板跨窗口传递）
-func (a *AppService) SetPendingPluginInit(text, command string) {
-	a.pendingInitTextMu.Lock()
-	a.pendingInitText = text
-	a.pendingInitCommand = command
-	a.pendingInitTextMu.Unlock()
-}
-
-// GetAndClearPendingPluginInit 取出并清除待注入的初始文本和命令
-func (a *AppService) GetAndClearPendingPluginInit() (text, command string) {
+// SetPendingPluginInit 保存待注入的初始文本和命令（从命令面板跨窗口传递），带插件 id 归属。
+// 归属随 init 一起记录，避免独立窗口/内联在快速连开时跨插件错配。
+func (a *AppService) SetPendingPluginInit(pluginID, text, command string) {
 	a.pendingInitTextMu.Lock()
 	defer a.pendingInitTextMu.Unlock()
+	a.pendingInitPlugin = pluginID
+	a.pendingInitText = text
+	a.pendingInitCommand = command
+}
+
+// GetAndClearPendingPluginInit 取出并清除待注入的初始文本和命令。
+// 仅当归属插件与传入的 pluginID 匹配时才取用并清除；不匹配则返回空、保留待注入数据，
+// 供正确的插件窗口日后消费。
+func (a *AppService) GetAndClearPendingPluginInit(pluginID string) (text, command string) {
+	a.pendingInitTextMu.Lock()
+	defer a.pendingInitTextMu.Unlock()
+	if a.pendingInitPlugin != pluginID {
+		return "", ""
+	}
 	text = a.pendingInitText
 	command = a.pendingInitCommand
+	a.pendingInitPlugin = ""
 	a.pendingInitText = ""
 	a.pendingInitCommand = ""
 	return

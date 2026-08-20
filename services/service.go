@@ -84,6 +84,8 @@ type AppService struct {
 	frontendCacheMu sync.RWMutex
 
 	// 跨窗口传递：命令面板→插件窗口的初始计算文本 + 命中的子命令
+	// pendingInitPlugin 记录归属插件 id，消费方须匹配才取用，防止快速连开时跨插件错配。
+	pendingInitPlugin  string
 	pendingInitText    string
 	pendingInitCommand string
 	pendingInitTextMu  sync.Mutex

@@ -1,141 +1,16 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, inject } from 'vue'
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Minus, Square, X } from '@lucide/vue'
-import { GetPluginFrontendPage, ExecutePluginCommand, HidePluginWindow, MinimizePluginWindow, ToggleMaximizePluginWindow, GetAndClearPendingPluginInit, CopyText } from '../../bindings/quickdock/services/appservice'
-import { unwrap } from '../utils/api'
-import { injectPluginBridge } from '../utils/pluginBridge'
-import type { ToastAPI } from '../types'
+import { HidePluginWindow, MinimizePluginWindow, ToggleMaximizePluginWindow } from '../../bindings/quickdock/services/appservice'
+import PluginFrame from './PluginFrame.vue'
 
 const props = defineProps<{ pluginId: string }>()
 
-const { t, locale } = useI18n()
-const toast = inject<ToastAPI>('toast')!
+const { t } = useI18n()
+const pluginName = ref(props.pluginId)
 
-const iframeSrc = ref('')
-const loading = ref(true)
-const error = ref('')
-const pluginName = ref('')
-let messageHandler: ((e: MessageEvent) => void) | null = null
-let iframeWindow: Window | null = null
-let themeObserver: MutationObserver | null = null
-// 随机 nonce 防止跨源消息伪造（blob URL 下无法指定 targetOrigin）
-const pluginNonce = Math.random().toString(36).slice(2, 12)
-
-function iframePostMessage(data: any) {
-  if (!iframeWindow) return
-  iframeWindow.postMessage({ ...data, nonce: pluginNonce }, '*')
-}
-
-// 读取宿主（父文档）当前生效主题，避免写死 'dark' 导致浅色主题失效
-function currentThemeName(): string {
-  return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
-}
-
-onMounted(async () => {
-  try {
-    const html = unwrap<string>(await GetPluginFrontendPage(props.pluginId, currentThemeName(), locale.value))
-    if (!html) {
-      error.value = t('pluginNoFrontend')
-      loading.value = false
-      return
-    }
-    const match = html.match(/<title>([^<]*)<\/title>/)
-    pluginName.value = match ? match[1] : props.pluginId
-
-    const blob = new Blob([injectPluginBridge(html)], { type: 'text/html;charset=utf-8' })
-    iframeSrc.value = URL.createObjectURL(blob)
-    loading.value = false
-  } catch (e: any) {
-    error.value = t('pluginLoadFailed') + ': ' + (e?.message || String(e))
-    loading.value = false
-  }
-
-  messageHandler = async (event: MessageEvent) => {
-    // 验证消息来源：只接受插件 iframe 的消息
-    if (event.source !== iframeWindow) return
-
-    // 插件对话框桥接（仅校验来源，不依赖 nonce）
-    if (event.data?.type === 'plugin:confirm') {
-      const { id, message } = event.data
-      try {
-        const ok = await toast.confirm(message || '')
-        iframePostMessage({ type: 'plugin:confirm-result', id, ok })
-      } catch {
-        iframePostMessage({ type: 'plugin:confirm-result', id, ok: false })
-      }
-      return
-    }
-    if (event.data?.type === 'plugin:alert') {
-      const { id, message } = event.data
-      toast.success(message || '')
-      iframePostMessage({ type: 'plugin:alert-result', id })
-      return
-    }
-
-    // 插件复制：走宿主 CopyText，规避 WebView2 中 navigator.clipboard 静默失败
-    if (event.data?.type === 'plugin:copy') {
-      const { id, text } = event.data
-      try {
-        await CopyText(text || '')
-        iframePostMessage({ type: 'plugin:copy-result', id, ok: true })
-      } catch {
-        iframePostMessage({ type: 'plugin:copy-result', id, ok: false })
-      }
-      return
-    }
-
-    if (event.data?.type === 'plugin:execute') {
-      const { id, command, input } = event.data
-      try {
-        const result = await ExecutePluginCommand(props.pluginId, command, input || null)
-        const data = unwrap(result)
-        if (event.source && 'postMessage' in (event.source as any)) {
-          iframePostMessage({ type: 'plugin:result', id, data })
-        }
-      } catch (e: any) {
-        if (event.source && 'postMessage' in (event.source as any)) {
-          iframePostMessage({ type: 'plugin:result', id, error: e?.message || String(e) })
-        }
-      }
-    }
-  }
-  window.addEventListener('message', messageHandler)
-
-  // 宿主主题切换时，实时重发 theme 给插件 iframe（浅色/深色跟随）
-  themeObserver = new MutationObserver(() => {
-    iframePostMessage({ type: 'plugin:theme', data: { theme: currentThemeName(), locale: locale.value } })
-  })
-  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
-})
-
-onUnmounted(() => {
-  if (iframeSrc.value) URL.revokeObjectURL(iframeSrc.value)
-  if (messageHandler) window.removeEventListener('message', messageHandler)
-  if (themeObserver) { themeObserver.disconnect(); themeObserver = null }
-})
-
-async function onIframeLoad(event: Event) {
-  iframeWindow = (event.target as HTMLIFrameElement)?.contentWindow
-  if (!iframeWindow) return
-  // 先发 theme
-  iframePostMessage({ type: 'plugin:theme', data: { theme: currentThemeName(), locale: locale.value } })
-  // 再发 init（使用 nonce 消息代替裸 *）
-  try {
-    const raw = await GetAndClearPendingPluginInit()
-    const [text, command] = raw ?? ['', '']
-    iframePostMessage({
-      type: 'plugin:init',
-      data: { text, command, theme: currentThemeName(), locale: locale.value }
-    })
-  } catch {
-    iframePostMessage({
-      type: 'plugin:init',
-      data: { text: '', command: '', theme: currentThemeName(), locale: locale.value }
-    })
-  }
-}
-
+// 独立窗口：init 走全局 pending init（跨窗口传入），前端在此页不主动注入
 function closeWindow() {
   HidePluginWindow(props.pluginId)
 }
@@ -145,7 +20,7 @@ function closeWindow() {
   <div class="plugin-window">
     <!-- 标题栏 -->
     <div class="pw-titlebar">
-      <span class="pw-title">{{ pluginName || props.pluginId }}</span>
+      <span class="pw-title">{{ pluginName }}</span>
       <div class="pw-controls">
         <button class="pw-btn pw-btn-min" @click="MinimizePluginWindow(props.pluginId)" :title="t('minimize')">
           <Minus :size="13" />
@@ -159,19 +34,8 @@ function closeWindow() {
       </div>
     </div>
 
-    <!-- 内容区 -->
-    <div class="pw-body">
-      <div v-if="loading" class="pw-status">{{ t('loading') }}</div>
-      <div v-else-if="error" class="pw-status pw-error">{{ error }}</div>
-      <iframe
-        v-else
-        :src="iframeSrc"
-        class="pw-iframe"
-        sandbox="allow-scripts allow-modals allow-downloads"
-        frameborder="0"
-        @load="onIframeLoad"
-      />
-    </div>
+    <!-- 内容区：统一插件宿主 -->
+    <PluginFrame :plugin-id="props.pluginId" use-pending-init @title="pluginName = $event || pluginName" />
   </div>
 </template>
 
@@ -223,24 +87,5 @@ function closeWindow() {
 }
 .pw-btn-max svg {
   transform: rotate(180deg);
-}
-
-/* 内容区 */
-.pw-body {
-  flex: 1; display: flex; overflow: hidden;
-}
-.pw-status {
-  flex: 1; display: flex; align-items: center; justify-content: center;
-  color: var(--color-text-disabled); font-size: 13px;
-  user-select: none;
-}
-.pw-error {
-  color: var(--color-danger);
-  padding: 0 24px; text-align: center;
-  line-height: 1.6;
-}
-.pw-iframe {
-  flex: 1; width: 100%; border: none;
-  background: var(--color-bg-primary);
 }
 </style>

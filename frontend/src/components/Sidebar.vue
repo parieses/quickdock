@@ -27,6 +27,8 @@ const emit = defineEmits<{
 }>()
 const props = defineProps<{
   currentPage: string
+  // 点击 dsh 导航后正在启动 DeepSeek Harness（原生窗口打开中），导航项显示加载态
+  dshOpening?: boolean
 }>()
 const toast = inject<ToastAPI>('toast')!
 
@@ -257,9 +259,15 @@ async function handleDeleteScene(sceneId: string) {
         <Bot :size="14" />
         <span>{{ t('navAi') }}</span>
       </button>
-      <button :class="['nav-item', { active: currentPage === 'dsh' }]" @click="emit('navigate', 'dsh')">
-        <Terminal :size="14" />
-        <span>{{ t('navDsh') }}</span>
+      <button
+        :class="['nav-item', { active: currentPage === 'dsh', opening: dshOpening }]"
+        @click="emit('navigate', 'dsh')"
+        :disabled="dshOpening"
+        :title="dshOpening ? t('dshLaunching') : undefined"
+      >
+        <span v-if="dshOpening" class="nav-spinner"></span>
+        <Terminal v-else :size="14" />
+        <span>{{ dshOpening ? t('dshLaunching') : t('navDsh') }}</span>
       </button>
       <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="emit('navigate', 'plugins')">
         <Puzzle :size="14" />
@@ -448,6 +456,16 @@ async function handleDeleteScene(sceneId: string) {
 .nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .nav-item.active { background: var(--color-bg-tertiary); color: var(--color-accent); font-weight: 500; }
 .nav-item.active svg { color: var(--color-accent); }
+.nav-item.opening { cursor: default; opacity: .7; }
+.nav-item.opening:hover { background: transparent; color: var(--color-text-secondary); }
+.nav-spinner {
+  width: 14px; height: 14px; flex-shrink: 0;
+  border: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: nav-spin .8s linear infinite;
+}
+@keyframes nav-spin { to { transform: rotate(360deg); } }
 
 .sidebar-spacer { flex: 1; }
 
