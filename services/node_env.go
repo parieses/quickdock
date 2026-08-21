@@ -424,10 +424,119 @@ func (m *NodeEnvManager) LatestDshVersion() string {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&info); err != nil {
 		return ""
 	}
-	if v := info.DistTags["latest"]; v != "" {
-		return v
+	// 取 dist-tags 中各标签里语义化版本最大者：dsh 的预发布版本发在 next/rc 等非
+	// latest 标签上（当前 latest=0.1.0-rc.7，next=0.1.0-rc.8），只读 latest 会漏掉最新 rc。
+	best := ""
+	for _, v := range info.DistTags {
+		if v != "" && compareSemver(best, v) < 0 {
+			best = v
+		}
 	}
-	return info.Version
+	if best == "" {
+		best = info.Version
+	}
+	return best
+}
+
+// compareSemver 比较两个 npm 版本号（major.minor.patch[-pre]），返回 -1/0/1。
+// Go 无标准库，这里只覆盖 dsh dist-tags 需要的范围（如 0.1.0-rc.7 vs 0.1.0-rc.8），
+// 未处理 build metadata(+x)。
+func compareSemver(a, b string) int {
+	if a == "" && b == "" {
+		return 0
+	}
+	if a == "" {
+		return -1
+	}
+	if b == "" {
+		return 1
+	}
+	pa := strings.SplitN(a, "-", 2)
+	pb := strings.SplitN(b, "-", 2)
+	if c := compareCore(pa[0], pb[0]); c != 0 {
+		return c
+	}
+	// 无 prerelease = 正式版，语义上大于同级 prerelease
+	if len(pa) == 1 && len(pb) == 1 {
+		return 0
+	}
+	if len(pa) == 1 {
+		return 1
+	}
+	if len(pb) == 1 {
+		return -1
+	}
+	return comparePre(pa[1], pb[1])
+}
+
+func compareCore(a, b string) int {
+	av := strings.Split(a, ".")
+	bv := strings.Split(b, ".")
+	for i := 0; i < 3; i++ {
+		an, bn := 0, 0
+		if i < len(av) {
+			an, _ = strconv.Atoi(av[i])
+		}
+		if i < len(bv) {
+			bn, _ = strconv.Atoi(bv[i])
+		}
+		if an != bn {
+			if an < bn {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
+}
+
+func comparePre(a, b string) int {
+	as := strings.Split(a, ".")
+	bs := strings.Split(b, ".")
+	n := len(as)
+	if len(bs) > n {
+		n = len(bs)
+	}
+	for i := 0; i < n; i++ {
+		var x, y string
+		if i < len(as) {
+			x = as[i]
+		}
+		if i < len(bs) {
+			y = bs[i]
+		}
+		if x == y {
+			continue
+		}
+		if x == "" {
+			return -1
+		}
+		if y == "" {
+			return 1
+		}
+		// 数字标识符 < 字母标识符；纯数字按数值比较，否则字典序
+		xn, xerr := strconv.Atoi(x)
+		yn, yerr := strconv.Atoi(y)
+		switch {
+		case xerr == nil && yerr == nil:
+			if xn != yn {
+				if xn < yn {
+					return -1
+				}
+				return 1
+			}
+		case xerr == nil && yerr != nil:
+			return -1
+		case xerr != nil && yerr == nil:
+			return 1
+		default:
+			if x < y {
+				return -1
+			}
+			return 1
+		}
+	}
+	return 0
 }
 
 // UpdateDSH 将 dsh 更新到最新版（stage: update-dsh）。与安装共用 installing 锁防并发。
@@ -451,8 +560,12 @@ func (m *NodeEnvManager) UpdateDSH(ctx context.Context) error {
 		return fmt.Errorf("运行环境未就绪，无法更新")
 	}
 	emit(setupProgress{Stage: "update-dsh", Message: "正在更新 DeepSeek Harness…"})
-	logf("info", "更新 "+dshPkg+"@latest（registry: npmmirror）")
-	if err := m.runNpmInstall(ctx, true, func(msg string) {
+	target := m.LatestDshVersion()
+	if target == "" {
+		target = "latest"
+	}
+	logf("info", "更新 "+dshPkg+"@"+target+"（registry: npmmirror）")
+	if err := m.runNpmInstall(ctx, target, func(msg string) {
 		emit(setupProgress{Stage: "update-dsh", Message: msg})
 		logf("info", msg)
 	}); err != nil {
@@ -707,15 +820,16 @@ func extractNodeZip(zipPath, dest string) error {
 	return nil
 }
 
-// installDSH 安装最新发布的 dsh（等价 npm install -g @deepseek-ai/dsh --prefix <installDir>）
+// installDSH 安装最新发布的 dsh（等价 npm install -g @deepseek-ai/dsh --prefix <installDir>）。
+// 目标版本取 LatestDshVersion（含 next/rc 等非 latest 标签），装到当前实际最新，而非 latest 标签。
 func (m *NodeEnvManager) installDSH(ctx context.Context, onMsg func(string)) error {
-	return m.runNpmInstall(ctx, false, onMsg)
+	return m.runNpmInstall(ctx, m.LatestDshVersion(), onMsg)
 }
 
 // runNpmInstall 用当前 node 的 npm 将 dsh 安装到 installDir()（--prefix），国内走 npmmirror 镜像。
-// latest=true 时显式安装 @latest（更新场景）。DSH_HOME 指向数据目录（DshHome），
-// 让 dsh 的 postinstall 在数据目录初始化 profile。
-func (m *NodeEnvManager) runNpmInstall(ctx context.Context, latest bool, onMsg func(string)) error {
+// target 非空时显式安装 @<target>（更新/安装到指定版本）；为空时装默认 latest（npm 解析 latest 标签）。
+// DSH_HOME 指向数据目录（DshHome），让 dsh 的 postinstall 在数据目录初始化 profile。
+func (m *NodeEnvManager) runNpmInstall(ctx context.Context, target string, onMsg func(string)) error {
 	node := m.NodePath()
 	if node == "" {
 		return fmt.Errorf("node 未就绪")
@@ -730,8 +844,8 @@ func (m *NodeEnvManager) runNpmInstall(ctx context.Context, latest bool, onMsg f
 		onMsg("使用 npm: " + npmCli)
 	}
 	pkgArg := dshPkg
-	if latest {
-		pkgArg = dshPkg + "@latest"
+	if target != "" && target != "latest" {
+		pkgArg = dshPkg + "@" + target
 	}
 	// 不指定 --prefix：npm install -g 装到 npm 默认全局位置（node 所在环境内），
 	// 符合用户「装到默认位置、不装软件目录」的要求。便携 node 的默认全局即 runtimeDir。
