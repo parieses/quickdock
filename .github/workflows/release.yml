@@ -98,11 +98,23 @@ jobs:
           Remove-Item wails_windows_amd64.syso
 
       - name: Package NSIS installer
+        # 注意：NSIS 3.09 起默认安装目录从 "C:\Program Files (x86)\NSIS" 改为
+        # "C:\Program Files\NSIS"，choco 拉新版时会装到 64 位路径，
+        # 硬编码 (x86) 路径会导致 makensis.exe 找不到。这里动态探测。
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
           Copy-Item bin/quickdock.exe build/windows/nsis/quickdock.exe
-          & "C:\Program Files (x86)\NSIS\makensis.exe" '-DARG_WAILS_AMD64_BINARY=quickdock.exe' 'build\windows\nsis\project.nsi'
+          $mk = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
+          if (-not $mk) {
+            foreach ($p in @("C:\Program Files\NSIS\makensis.exe", "C:\Program Files (x86)\NSIS\makensis.exe")) {
+              if (Test-Path $p) { $mk = $p; break }
+            }
+          }
+          if (-not $mk) { throw "makensis.exe not found. Install NSIS: choco install nsis -y" }
+          Write-Host "Using makensis: $mk"
+          & $mk '-DARG_WAILS_AMD64_BINARY=quickdock.exe' 'build\windows\nsis\project.nsi'
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
           Remove-Item build/windows/nsis/quickdock.exe
 
       - name: Stage portable raw binary
