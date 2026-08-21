@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -213,6 +214,77 @@ func (a *AppService) OpenDSHWindow() *ApiResult {
 		return Fail(err)
 	}
 	return Ok(map[string]string{"url": url})
+}
+
+// dshAutoStartKey dsh web 自动启动配置（app_state 键，"1"=开启，默认开启）
+const dshAutoStartKey = "dsh_auto_start"
+
+// DSHStatus 返回 dsh web 服务运行状态与自动启动配置（供设置页状态展示与开关）
+func (a *AppService) DSHStatus() *ApiResult {
+	st := map[string]any{
+		"running":   false,
+		"autoStart": a.dshAutoStartEnabled(),
+		"port":      DefaultDSHPort,
+		"url":       "",
+	}
+	if a.DSH != nil {
+		port := a.DSH.Port()
+		st["running"] = a.DSH.Running()
+		st["port"] = port
+		if a.DSH.Running() {
+			st["url"] = "http://127.0.0.1:" + strconv.Itoa(port)
+		}
+	}
+	return Ok(st)
+}
+
+// DSHStart 启动 dsh web 服务（只起进程，不开窗口；进程已运行则直接复用返回）
+func (a *AppService) DSHStart() *ApiResult {
+	if a.DSH == nil {
+		return FailMsg("DSH 未初始化")
+	}
+	url, err := a.DSH.Start()
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(map[string]string{"url": url})
+}
+
+// DSHStop 停止 dsh web 服务（杀进程树，释放 3080 端口；不主动关窗口，
+// 已打开的 dsh 窗口会在下次复用/导航时探测到服务不可达而重建或显示错误页）
+func (a *AppService) DSHStop() *ApiResult {
+	if a.DSH == nil {
+		return FailMsg("DSH 未初始化")
+	}
+	a.DSH.Stop()
+	return Ok(nil)
+}
+
+// DSHSetAutoStart 开关 dsh web 随 QuickDock 启动延迟自动开启（默认开启）
+func (a *AppService) DSHSetAutoStart(enabled bool) *ApiResult {
+	if a.DB == nil {
+		return FailMsg("database not initialized")
+	}
+	v := "0"
+	if enabled {
+		v = "1"
+	}
+	if err := a.DB.SetValue(dshAutoStartKey, v); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
+}
+
+// dshAutoStartEnabled 读取 dsh web 自动启动配置（默认开启）
+func (a *AppService) dshAutoStartEnabled() bool {
+	if a.DB == nil {
+		return true
+	}
+	v, err := a.DB.GetValue(dshAutoStartKey)
+	if err != nil || v == "" {
+		return true
+	}
+	return v == "1"
 }
 
 // CheckDSHUpdate 检测已安装 dsh 是否有新版本（联网查 latest；查询失败静默返回当前状态，不阻塞 UI）

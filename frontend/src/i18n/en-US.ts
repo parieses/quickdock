@@ -1002,4 +1002,12 @@ export default {
   dshUpdateNow: 'Update now',
   dshUpdating: 'Updating…',
   dshLatestVersion: 'Latest version',
+  dshServiceRunning: 'dsh web running',
+  dshServiceStopped: 'dsh web stopped',
+  dshServiceStart: 'Start service',
+  dshServiceStop: 'Stop service',
+  dshServiceStarting: 'Starting…',
+  dshServiceStopping: 'Stopping…',
+  dshAutoStart: 'Auto-start with QuickDock (delayed a few seconds)',
+  dshAutoStartHint: 'When enabled, QuickDock starts dsh web in the background on launch — click dsh in the sidebar to use it directly.',
 };

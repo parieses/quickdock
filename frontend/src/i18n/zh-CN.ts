@@ -1003,4 +1003,12 @@ export default {
   dshUpdateNow: '立即更新',
   dshUpdating: '正在更新…',
   dshLatestVersion: '最新版本',
+  dshServiceRunning: 'dsh web 运行中',
+  dshServiceStopped: 'dsh web 未运行',
+  dshServiceStart: '启动服务',
+  dshServiceStop: '停止服务',
+  dshServiceStarting: '启动中…',
+  dshServiceStopping: '停止中…',
+  dshAutoStart: '随 QuickDock 启动自动开启（延迟数秒）',
+  dshAutoStartHint: '开启后，QuickDock 每次启动会自动在后台拉起 dsh web，点侧边栏 dsh 即可直接使用',
 };

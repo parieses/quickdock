@@ -5,7 +5,7 @@ import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle } fro
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { DetectNodeEnv, SetupDSH, OpenDSHWindow, DSHInstallPlugin, CheckDSHUpdate, UpdateDSH } from '../../bindings/quickdock/services/appservice'
+import { DetectNodeEnv, SetupDSH, OpenDSHWindow, DSHInstallPlugin, CheckDSHUpdate, UpdateDSH, DSHStatus, DSHStart, DSHStop, DSHSetAutoStart } from '../../bindings/quickdock/services/appservice'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -37,10 +37,19 @@ interface DshProgress {
   message: string
 }
 
+interface DSHStatusInfo {
+  running: boolean
+  autoStart: boolean
+  port: number
+  url: string
+}
+
 const status = ref<NodeEnvStatus | null>(null)
 const settingUp = ref(false)
 const updating = ref(false)
 const checkingUpdate = ref(false)
+const dshSvc = ref<DSHStatusInfo | null>(null)
+const svcBusy = ref(false) // 启动/停止操作进行中
 const progress = ref<DshProgress | null>(null)
 const logs = ref<{ level: string; message: string }[]>([])
 const logBox = ref<HTMLElement | null>(null)
@@ -141,6 +150,47 @@ async function openDSH() {
   }
 }
 
+// —— dsh web 服务运行状态 / 开关 / 自动启动 ——
+
+async function loadDSHStatus() {
+  try {
+    const res = unwrap<DSHStatusInfo | null>(await DSHStatus())
+    if (res) dshSvc.value = res
+  } catch (e) {
+    // 查询失败静默（如后端未就绪），不影响其余 UI
+  }
+}
+
+async function toggleService(start: boolean) {
+  if (svcBusy.value) return
+  svcBusy.value = true
+  try {
+    if (start) {
+      unwrap(await DSHStart())
+    } else {
+      unwrap(await DSHStop())
+    }
+    showMsg(start ? t('dshServiceRunning') : t('dshServiceStopped'))
+    // dsh 进程启动/停止是异步的，延迟刷新一次状态
+    setTimeout(loadDSHStatus, start ? 2500 : 1200)
+  } catch (e) {
+    showMsg(getErrorMessage(e), true)
+    loadDSHStatus()
+  } finally {
+    svcBusy.value = false
+  }
+}
+
+async function setAutoStart(enabled: boolean) {
+  try {
+    unwrap(await DSHSetAutoStart(enabled))
+    if (dshSvc.value) dshSvc.value.autoStart = enabled
+  } catch (e: any) {
+    showMsg(getErrorMessage(e), true)
+    if (dshSvc.value) dshSvc.value.autoStart = !enabled // 回滚 UI
+  }
+}
+
 const pluginName = ref('')
 const installingPlugin = ref(false)
 async function installPlugin() {
@@ -215,6 +265,7 @@ watch(() => props.visible, async (v) => {
     // 重新进入本页时复位插件安装状态，避免上次卡死的事件遗漏导致按钮永久禁用
     installingPlugin.value = false
     await refresh()
+    loadDSHStatus()
     if (!checkRanOnce && dshReady.value) {
       checkRanOnce = true
       checkUpdate() // 进入页面静默自动检测一次新版本
@@ -266,14 +317,52 @@ watch(() => props.visible, async (v) => {
     <!-- 检测到的问题提示 -->
     <p v-if="status?.message" class="result-hint" style="margin-top:8px">{{ status.message }}</p>
 
-    <!-- 版本与更新（dsh 已安装时显示） -->
-    <div v-if="status?.dshInstalled" class="update-row" style="margin-top:12px">
-      <div class="dsh-status-left" style="flex:1; min-width:0">
-        <span class="dsh-status-label">{{ t('dshLatestVersion') }}: {{ status?.latestDshVersion || '—' }}</span>
-        <span v-if="status?.dshUpdateAvailable" class="dsh-update-badge">{{ t('dshUpdateNew') }}</span>
-        <span v-else-if="status?.latestDshVersion" class="dsh-update-badge ok">{{ t('dshUpToDate') }}</span>
+    <!-- dsh web 服务运行状态 / 开关 / 自动启动（dsh 已安装时显示） -->
+    <div v-if="status?.dshInstalled" class="dsh-status" style="margin-top:12px">
+      <div class="dsh-status-row">
+        <div class="dsh-status-left">
+          <span class="dsh-status-label">{{ t('dshLatestVersion') }}: {{ status?.latestDshVersion || '—' }}</span>
+          <span
+            :class="['dsh-update-badge', { ok: dshSvc?.running }]"
+            style="font-weight:600"
+          >
+            <span class="dsh-dot" :class="{ on: dshSvc?.running }" />
+            {{ dshSvc && dshSvc.running ? t('dshServiceRunning') : t('dshServiceStopped') }}
+          </span>
+          <span v-if="dshSvc?.running && dshSvc.url" class="dsh-status-path">{{ dshSvc.url }}</span>
+        </div>
+        <div class="action-row" style="flex-shrink:0">
+          <button
+            v-if="dshSvc && dshSvc.running"
+            class="btn btn-secondary"
+            :disabled="svcBusy || settingUp || updating"
+            @click="toggleService(false)"
+          >
+            {{ svcBusy ? t('dshServiceStopping') : t('dshServiceStop') }}
+          </button>
+          <button
+            v-else
+            class="btn btn-secondary"
+            :disabled="svcBusy || settingUp || updating || !dshReady"
+            @click="toggleService(true)"
+          >
+            {{ svcBusy ? t('dshServiceStarting') : t('dshServiceStart') }}
+          </button>
+        </div>
       </div>
-      <div class="action-row" style="margin-top:8px">
+      <label class="dsh-auto-start" :title="t('dshAutoStartHint')">
+        <input
+          type="checkbox"
+          :checked="!!dshSvc?.autoStart"
+          @change="(e: any) => setAutoStart(!!e.target.checked)"
+        />
+        <span>{{ t('dshAutoStart') }}</span>
+      </label>
+    </div>
+
+    <!-- 版本更新（dsh 已安装时显示） -->
+    <div v-if="status?.dshInstalled" class="update-row" style="margin-top:12px">
+      <div class="action-row">
         <button class="btn btn-secondary" :disabled="checkingUpdate || updating || settingUp" @click="checkUpdate">
           {{ checkingUpdate ? t('dshCheckingUpdate') : t('dshCheckUpdate') }}
         </button>
@@ -393,6 +482,33 @@ watch(() => props.visible, async (v) => {
 .dsh-update-badge.ok {
   background: rgba(76, 175, 80, 0.16);
   color: #4caf50;
+}
+.dsh-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: 1px;
+  background: #8b919c;
+}
+.dsh-dot.on {
+  background: #4caf50;
+  box-shadow: 0 0 6px rgba(76, 175, 80, 0.8);
+}
+.dsh-auto-start {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.dsh-auto-start input {
+  accent-color: var(--color-accent);
+  cursor: pointer;
 }
 .plugin-row {
   display: flex;

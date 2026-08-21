@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/platform"
@@ -114,6 +115,26 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 
 	// 启动网站监控检查器（仿 UptimeRobot，按 interval 定时探测并记录在线率）
 	a.StartMonitorChecker()
+
+	// dsh web 自动启动：QuickDock 起来后延迟 5s 在后台拉起 dsh 服务（默认开启，
+	// 可在「设置 → DeepSeek」用开关关闭）。只起服务不开窗口，用户点侧边栏 dsh
+	// 时 OpenDSHWindow 直接复用。失败静默（如未安装/运行环境未就绪），不打扰 UI。
+	if a.DSH != nil && a.dshAutoStartEnabled() {
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					fmt.Printf("QuickDock: dsh 自动启动 goroutine panic: %v\n", r)
+				}
+			}()
+			time.Sleep(5 * time.Second)
+			if a.DSH.Running() {
+				return // 已有服务（复用外部 dsh / 启动极快），无需再拉
+			}
+			if _, err := a.DSH.Start(); err != nil {
+				fmt.Println("QuickDock: dsh 自动启动失败:", err.Error())
+			}
+		}()
+	}
 
 	return nil
 }

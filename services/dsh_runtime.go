@@ -150,7 +150,10 @@ func (m *DSHProcessManager) Start() (string, error) {
 
 	// 直接用 node 拉起 dsh 的 JS 入口（不走 dsh.cmd/cmd.exe），
 	// 配合 CREATE_NO_WINDOW 彻底隐藏控制台窗口；stdout 进入管道，便于解析端口 URL。
-	args := []string{mainJS, "web", "--host", "127.0.0.1", "--port", strconv.Itoa(port)}
+	// 必须带 --no-open：dsh web 默认会在启动后自行打开系统默认浏览器访问 127.0.0.1:3080
+	// （"opening the default browser"），而 QuickDock 已有原生 WebviewWindow 承载 dsh 界面，
+	// 不让它额外弹浏览器。
+	args := []string{mainJS, "web", "--no-open", "--host", "127.0.0.1", "--port", strconv.Itoa(port)}
 	cmd := exec.Command(node, args...)
 	cmd.Dir = dshHome
 	// 由 os.Environ 过滤掉 WorkBuddy 的 genie-safe-delete NODE_OPTIONS 注入，
@@ -298,6 +301,33 @@ func (m *DSHProcessManager) isDSHAlive(port int) bool {
 	m.aliveCache.ok = ok
 	m.aliveCache.at = time.Now()
 	return ok
+}
+
+// Running 返回 dsh web 服务当前是否在运行。优先看本管理器拉起的进程；进程不在时
+// 探测端口上是否有健康 dsh 服务（覆盖"复用外部已启动的 dsh"场景，Start() 复用路径
+// m.cmd 为 nil 但服务实际在跑）。供设置页「dsh web 运行状态」与自动启动判断使用。
+func (m *DSHProcessManager) Running() bool {
+	m.mu.Lock()
+	if m.cmd != nil && m.cmd.Process != nil {
+		m.mu.Unlock()
+		return true
+	}
+	port := m.port
+	m.mu.Unlock()
+	if port == 0 {
+		port = DefaultDSHPort
+	}
+	return m.isDSHAlive(port)
+}
+
+// Port 返回当前实际绑定的端口（带锁读取；未启动或默认端口场景返回 3080）。
+func (m *DSHProcessManager) Port() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.port != 0 {
+		return m.port
+	}
+	return DefaultDSHPort
 }
 
 // dshReachable 实时探测 dsh 是否真正可达（与 waitReady 相同的就绪语义：2xx/3xx/401/403，
@@ -772,7 +802,7 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 			m.window = nil
 			m.url = "" // 同步清空过期地址，避免后续又把死地址误判为"已有服务"
 			m.mu.Unlock()
-			win.Close() // 触发 WindowClosing handler（内部 Stop() 对已死进程无副作用）
+			win.Close() // 销毁旧窗口（WindowClosing handler 仅清引用，服务停止由上层负责）
 		} else {
 			// 进程已退出（reaper 已清空 url）但窗口残留：销毁旧窗口走下方重建流程，
 			// 否则返回空 URL 且窗口显示死页面，前端无任何提示。
@@ -810,12 +840,14 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 		URL:              pageURL,
 		Windows:          application.WindowsWindow{HiddenOnTaskbar: false},
 	})
-	// 关闭窗口（Wails 内部 handler 负责真正销毁）时清引用并停掉 dsh 子进程（避免端口残留）
+	// 关闭窗口（Wails 内部 handler 负责真正销毁）时只清窗口引用，不停 dsh 服务：
+	// dsh web 进程独立于窗口运行（自动启动/设置里手动启停负责生命周期），关窗口后
+	// 服务继续在后台跑，下次点击侧边栏 dsh 秒开。真正的停止只发生在设置了手动停止
+	// 或 QuickDock 退出（ServiceShutdown）。
 	win.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		m.mu.Lock()
 		m.window = nil
 		m.mu.Unlock()
-		m.Stop()
 	})
 
 	m.mu.Lock()
