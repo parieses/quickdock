@@ -1,11 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle } from '@lucide/vue'
+import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe } from '@lucide/vue'
 import { ListPlugins, DisablePlugin, EnablePlugin, UninstallPlugin, SelectAndInstallPlugin, GetPluginIcon, ShowPluginWindow, ListPluginExecLogs } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
+import PluginMarketPage from './PluginMarketPage.vue'
 import type { ToastAPI, PluginInfo, PluginExecLog } from '../types'
 
 const { t } = useI18n()
@@ -15,6 +16,14 @@ const plugins = ref<PluginInfo[]>([])
 const icons = ref<Record<string, string>>({}) // pluginId → data URI
 const loading = ref(true)
 const operating = ref<Set<string>>(new Set())
+
+// 视图切换：本地管理 / 在线市场（PluginMarketPage 子组件）
+const activeView = ref<'local' | 'market'>('local')
+
+// 市场安装成功后刷新本地插件列表
+async function onMarketInstalled() {
+  await loadPlugins()
+}
 
 // ---- 执行历史（5.2） ----
 const execLogs = ref<PluginExecLog[]>([])
@@ -200,6 +209,10 @@ onMounted(() => { loadPlugins(); loadLogs() })
         <span v-if="plugins.length" class="plugin-count">{{ plugins.length }}</span>
       </div>
       <div class="plugin-header-actions">
+        <button :class="['view-toggle-btn', { active: activeView === 'market' }]" @click="activeView = activeView === 'local' ? 'market' : 'local'" :title="t('pluginMarket')">
+          <Globe :size="14" />
+          <span>{{ t('pluginMarket') }}</span>
+        </button>
         <button class="install-btn" @click="selectAndInstall" :title="t('pluginInstallFromFile')">
           <Upload :size="14" />
           <span>{{ t('pluginInstallFromFile') }}</span>
@@ -210,6 +223,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
       </div>
     </div>
 
+    <div v-if="activeView === 'local'">
     <!-- 分类 Tabs -->
     <div class="plugin-categories" v-if="plugins.length > 0">
       <button
@@ -358,6 +372,9 @@ onMounted(() => { loadPlugins(); loadLogs() })
         </div>
       </div>
     </div>
+    </div>
+
+    <PluginMarketPage v-else @installed="onMarketInstalled" />
   </div>
 </template>
 
@@ -583,5 +600,15 @@ onMounted(() => { loadPlugins(); loadLogs() })
   white-space: pre-wrap; word-break: break-all;
 }
 .detail-pre-err { color: #E24B4A; }
+
+.view-toggle-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 10px; border-radius: 6px;
+  border: 1px solid var(--color-border); background: var(--color-bg-secondary);
+  color: var(--color-text-secondary); font-size: 12px; cursor: pointer;
+  transition: all .15s;
+}
+.view-toggle-btn:hover { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); }
+.view-toggle-btn.active { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); background: rgba(74, 158, 255, 0.08); }
 
 </style>

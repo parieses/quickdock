@@ -84,27 +84,39 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 
 	targetDir := filepath.Join(m.pluginsDir, pluginID)
 
-	// 检查插件是否已安装：先卸载旧插件释放文件句柄，再备份目录
+	// 检查插件是否已安装：先停止旧实例释放文件句柄，再备份目录
 	var backupDir string
 	if _, err := os.Stat(targetDir); err == nil {
-		// 卸载正在运行的旧实例，释放文件句柄（忽略"未加载"错误）
-		m.UnloadPlugin(pluginID)
+		// 停止正在运行的旧实例，并记录 PID（用于兜底强杀进程树）
+		var oldPID int
+		m.mu.Lock()
+		if inst, ok := m.plugins[pluginID]; ok {
+			if inst.Cmd != nil && inst.Cmd.Process != nil {
+				oldPID = inst.Cmd.Process.Pid
+			}
+			m.stopPlugin(inst)
+			delete(m.plugins, pluginID)
+		}
+		m.mu.Unlock()
 
 		backupDir = targetDir + ".bak." + manifest.Version
 		os.RemoveAll(backupDir) // 清理旧的备份
 
-		// Windows 上进程退出后文件句柄释放可能有短暂延迟，最多重试 3 次
+		// Windows 上 TerminateProcess 后文件句柄异步释放，且 Process.Kill 不杀子进程树；
+		// 用递增间隔重试 rename，倒数第二次失败时按 PID 兜底强杀进程树再试。
+		waits := []time.Duration{100, 200, 300, 500, 800, 1200} // ms，总 ~3.1s
 		var err error
-		for retry := 0; retry < 3; retry++ {
+		for i, w := range waits {
 			if err = os.Rename(targetDir, backupDir); err == nil {
 				break
 			}
-			if retry < 2 {
-				time.Sleep(200 * time.Millisecond)
+			if i == len(waits)-2 && oldPID > 0 {
+				killProcessTree(oldPID) // 兜底：杀整棵进程树释放子进程持有的句柄
 			}
+			time.Sleep(w * time.Millisecond)
 		}
 		if err != nil {
-			return "", fmt.Errorf("备份旧版本插件失败（进程可能未完全退出）: %w", err)
+			return "", fmt.Errorf("备份旧版本插件失败（进程可能未完全退出，可手动结束插件进程后重试）: %w", err)
 		}
 	}
 

@@ -563,6 +563,17 @@ export default {
   pluginInstallSuccess: 'Plugin installed',
   pluginInstallFromFile: 'Install Plugin',
   pluginSelectZip: 'Select Plugin Package',
+  // Online plugin market
+  pluginMarket: 'Online Market',
+  pluginMarketLoadFailed: 'Failed to load market',
+  pluginMarketNoDownload: 'No download available',
+  pluginMarketUpdated: 'Updated',
+  pluginMarketEmpty: 'No plugins in market',
+  pluginInstallFromMarket: 'Install',
+  pluginUpgrade: 'Upgrade',
+  pluginHasUpdate: 'Update available',
+  pluginInstalled: 'Installed',
+  pluginNotSupportedPlatform: 'Not supported on this platform',
 
   // Snippet Manager
   snippetManager: 'Snippet Manager',

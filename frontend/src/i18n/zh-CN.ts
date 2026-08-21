@@ -564,6 +564,17 @@ export default {
   pluginInstallSuccess: '插件安装成功',
   pluginInstallFromFile: '安装插件',
   pluginSelectZip: '选择插件包',
+  // 在线插件市场
+  pluginMarket: '在线市场',
+  pluginMarketLoadFailed: '加载市场失败',
+  pluginMarketNoDownload: '无可用下载链接',
+  pluginMarketUpdated: '更新于',
+  pluginMarketEmpty: '市场暂无插件',
+  pluginInstallFromMarket: '安装',
+  pluginUpgrade: '升级',
+  pluginHasUpdate: '有新版',
+  pluginInstalled: '已安装',
+  pluginNotSupportedPlatform: '不支持当前平台',
 
   // 片段管理
   snippetManager: '文本片段管理',
