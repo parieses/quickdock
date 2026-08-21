@@ -235,6 +235,8 @@ onMounted(() => {
       updating.value = false
       progress.value = null
       showMsg(t('dshReady'))
+      // 更新完成后服务可能被自动重启（新版本生效），延迟刷新运行状态
+      setTimeout(loadDSHStatus, 1200)
       refresh().then(() => { if (dshReady.value) checkUpdate() })
     } else if (p.stage === 'error') {
       settingUp.value = false

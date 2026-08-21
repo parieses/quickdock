@@ -250,13 +250,13 @@ func (a *AppService) DSHStart() *ApiResult {
 	return Ok(map[string]string{"url": url})
 }
 
-// DSHStop 停止 dsh web 服务（杀进程树，释放 3080 端口；不主动关窗口，
-// 已打开的 dsh 窗口会在下次复用/导航时探测到服务不可达而重建或显示错误页）
+// DSHStop 停止 dsh web 服务（杀进程树，释放 3080 端口；窗口若开着会导航到"已停止"提示页）
 func (a *AppService) DSHStop() *ApiResult {
 	if a.DSH == nil {
 		return FailMsg("DSH 未初始化")
 	}
 	a.DSH.Stop()
+	a.DSH.NotifyStopped()
 	return Ok(nil)
 }
 
@@ -310,7 +310,17 @@ func (a *AppService) UpdateDSH() *ApiResult {
 				}
 			}
 		}()
-		_ = a.NodeEnv.UpdateDSH(context.Background())
+		err := a.NodeEnv.UpdateDSH(context.Background())
+		if err == nil && a.DSH != nil && a.DSH.Running() {
+			// dsh 包已更新，但正在运行的进程仍是旧代码——自动重启服务让新版本生效，
+			// 否则用户点完"更新"以为升级了，实际跑的还是旧版。
+			a.NodeEnv.EmitLog("info", "dsh 更新完成，正在重启服务使新版本生效…")
+			a.DSH.Stop()
+			time.Sleep(500 * time.Millisecond) // 兜底等端口完全释放（Stop 内部已等）
+			if _, err2 := a.DSH.Start(); err2 != nil {
+				a.NodeEnv.EmitLog("error", "dsh 更新完成，但重启服务失败: "+err2.Error()+"（可在设置中手动启动）")
+			}
+		}
 	}()
 	return Ok(nil)
 }

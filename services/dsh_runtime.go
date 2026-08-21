@@ -330,6 +330,19 @@ func (m *DSHProcessManager) Port() int {
 	return DefaultDSHPort
 }
 
+// NotifyStopped 服务被手动停止时调用：若 dsh 窗口还开着，把窗口导航到"服务已停止"
+// 提示页，避免用户面对浏览器"无法访问此网站"式的死地址。窗口引用保留，下次点击侧边栏
+// dsh 时会因探测到服务不可达而自动销毁重建。
+func (m *DSHProcessManager) NotifyStopped() {
+	m.mu.Lock()
+	w := m.window
+	m.mu.Unlock()
+	if w == nil {
+		return
+	}
+	w.SetURL(dshErrorPage("dsh web 服务已停止。可在「设置 → DeepSeek」重新启动，或直接点击侧边栏 dsh 自动拉起。"))
+}
+
 // dshReachable 实时探测 dsh 是否真正可达（与 waitReady 相同的就绪语义：2xx/3xx/401/403，
 // 404 与 5xx 视为未就绪）。与 isDSHAlive 不同，这里不依赖 aliveCache，用于两次判断之间的
 // 竞态窗口（就绪判定后、WebView 实际导航前 dsh 可能抖动/崩溃），避免把窗口导航到死地址
