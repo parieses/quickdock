@@ -463,7 +463,12 @@ async function executeSelected() {
     } else if (result.clipAction === 'save-url' && result.url) {
       try { const item = unwrap<CollectionItem>(await SaveUrlAsItem(result.url)); recordUsage('item:' + (item?.id || ''), 'item', result.url, result.url); toast?.success?.(t('savedAsItem')) } catch (e) { toast?.error?.(getErrorMessage(e)) }; closePalette()
     } else if (result.clipAction === 'encode-url' && result.url) {
-      try { const raw = await ExecutePluginCommand('com.quickdock.text-encoder', 'url-encode', { text: result.url }); const res = unwrap<any>(raw); const text = typeof res === 'object' ? (res.translated || res.text || res.display || JSON.stringify(res)) : String(res); try { await writeClipboard(text) } catch {}; toast?.success?.(t('pluginResultCopied')) } catch (e) { toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e)) }; closePalette()
+      // 纯本地编码，不依赖任何插件：与宿主 api.crypto.urlEncode / 外部 text-encoder 的
+      // urlEncode 实现完全一致（encodeURIComponent 语义），核心功能零插件耦合
+      let encoded = ''
+      try { encoded = encodeURIComponent(result.url) } catch { encoded = result.url }
+      try { await writeClipboard(encoded) } catch {}
+      toast?.success?.(t('pluginResultCopied')); closePalette()
     }
   }
 }

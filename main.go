@@ -389,6 +389,8 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 	}
 
 	// 确保 builtin 共享目录存在，同步 common.css / common.js
+	//（兼容历史已安装的外部插件：它们的前端仍引用 ../common.css，由宿主注入；
+	// 新版外部插件均已自带 qd-theme.css 自包含样式，不再依赖此注入）
 	builtinDir := filepath.Join(mgr.PluginsDir(), "builtin")
 	os.MkdirAll(builtinDir, 0755)
 	for _, name := range []string{"common.css", "common.js"} {
@@ -397,14 +399,7 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 		}
 	}
 
-	// 提取共享二进制目录（如 system-tools.exe），embed 中仅保留一份，避免产物膨胀
-	sharedDir := filepath.Join(mgr.PluginsDir(), "_shared")
-	os.MkdirAll(sharedDir, 0755)
-	if err := syncEmbeddedDir(builtinFS, path.Join("plugins/builtin", "_shared"), sharedDir); err != nil {
-		fmt.Printf("QuickDock: 同步共享插件资源失败: %v\n", err)
-	}
-
-	// 当前仍内置的插件目录名集合（含 _shared，用于清理已删除插件的残留）
+	// 当前仍内置的插件目录名集合（用于清理已删除插件的残留）
 	currentBuiltin := make(map[string]bool)
 	for _, entry := range entries {
 		if entry.IsDir() {
@@ -419,32 +414,11 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 		pluginID := entry.Name()
 		targetDir := filepath.Join(mgr.PluginsDir(), pluginID)
 
-		// 读取 manifest
-		manifestPath := path.Join("plugins/builtin", pluginID, "plugin.json")
-		data, err := builtinFS.ReadFile(manifestPath)
-		if err != nil {
-			continue
-		}
-		var mf plugin.PluginManifest
-		if err := json.Unmarshal(data, &mf); err != nil {
-			continue
-		}
-
 		// 增量同步插件文件（不删除本地目录，保留插件运行状态）
 		os.MkdirAll(targetDir, 0755)
 		if err := syncEmbeddedDir(builtinFS, path.Join("plugins/builtin", pluginID), targetDir); err != nil {
 			fmt.Printf("QuickDock: 同步内置插件 %s 失败: %v\n", pluginID, err)
 			continue
-		}
-
-		// 分发共享二进制到引用它的插件目录（manifest.Backend.Entry 命中 _shared 内文件时）
-		if mf.Backend.Entry != "" {
-			entryBase := filepath.Base(mf.Backend.Entry)
-			if sdata, ser := builtinFS.ReadFile(path.Join("plugins/builtin", "_shared", entryBase)); ser == nil {
-				if err := syncEmbeddedFile(filepath.Join(targetDir, entryBase), sdata); err != nil {
-					fmt.Printf("QuickDock: 分发共享资源 %s 到 %s 失败: %v\n", entryBase, pluginID, err)
-				}
-			}
 		}
 
 		// 把 common.css / common.js 同步到每个插件根目录

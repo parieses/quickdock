@@ -203,7 +203,11 @@ onMounted(() => {
 }
 .empty-icon { color: var(--color-text-disabled); }
 .empty-title { font-size: 13px; }
-.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding-right: 2px; }
+.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding-right: 2px; }
+/* 最小三列；主窗口加宽时逐级增加列数 */
+@media (min-width: 1440px) { .market-grid { grid-template-columns: repeat(4, 1fr); } }
+@media (min-width: 1800px) { .market-grid { grid-template-columns: repeat(5, 1fr); } }
+@media (min-width: 2160px) { .market-grid { grid-template-columns: repeat(6, 1fr); } }
 .market-card {
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
