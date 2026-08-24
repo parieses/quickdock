@@ -189,6 +189,7 @@
 - 支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native）
 - 基于 JSON-RPC 2.0 的前端 ↔ 后端通信协议
 - 支持运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定
+- **在线市场**：插件管理页内置「在线市场」标签，一键浏览并安装官方维护的第三方插件（[quickdock-plugins](https://github.com/parieses/quickdock-plugins)），支持版本检测与升级，拒绝降级
 - [开放第三方插件开发](#第三方插件开发)，打包为 ZIP 即可分发
 
 ### ☁️ WebDAV 云同步
@@ -907,10 +908,10 @@ window.addEventListener('message', function(e) {
 ### 安装与测试
 
 1. **打包插件**：将插件目录打包为 ZIP 文件，文件名不限
-2. **安装插件**：
-   - 打开 QuickDock，进入 **插件管理** 页面
-   - 点击 **从文件安装**，选择 ZIP 包
-   - 或直接将 ZIP 拖拽到插件管理页面
+2. **安装插件**（三种方式）：
+   - **在线市场一键安装（推荐）**：进入 **插件管理** 页面，切到 **在线市场** 标签，自动拉取官方插件列表，点「安装」即可，无需手动下载；已装插件显示「升级」按钮
+   - **从文件安装**：点击 **从文件安装**，选择 ZIP 包
+   - **拖拽安装**：直接将 ZIP 拖拽到插件管理页面
 3. **验证**：安装成功后，插件出现在管理页面列表中，状态应为 `running`
 4. **调试**：
    - `none` / 前端部分：使用浏览器 DevTools 调试 iframe
@@ -922,6 +923,7 @@ window.addEventListener('message', function(e) {
 1. 将插件目录打包为 `{your-plugin-id}.zip`
 2. 分发 ZIP 文件，用户安装即可使用
 3. （可选）在 GitHub 上发布插件，供社区下载
+4. （推荐）提交到官方插件市场 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)，经 CI 自动打包并上线「在线市场」，用户可一键安装 / 升级
 
 > **安全提示**：`permissions` 字段声明了插件的权限需求，用户安装时可见。请按最小权限原则声明，如无需网络功能则不声明 `network`。
 
