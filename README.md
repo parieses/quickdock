@@ -497,18 +497,14 @@ Workspace（工作空间）
 
 ## 内置插件
 
-QuickDock 内置 17 个即开即用的开发小工具：
+QuickDock 内置 13 个即开即用的开发小工具：
 
 | 插件 | 功能 |
 |------|------|
 | `calcsheet` | 计算稿纸（表达式计算） |
-| `color-converter` | 颜色 / 色值转换 |
-| `compare` | 文件 / 文本对比 |
-| `cron-explainer` | Cron 表达式解析 |
 | `emoji-search` | Emoji 搜索 |
 | `formatter` | 代码 / SQL 等格式化 |
 | `hosts-manager` | Hosts 文件管理 |
-| `http-status` | HTTP 状态码查询 |
 | `json-toolbox` | JSON 工具箱（格式化 / 校验 / 转换） |
 | `jwt-decoder` | JWT 解码 |
 | `markdown-preview` | Markdown 预览 |
