@@ -765,6 +765,8 @@ export default {
   cmdGroupPlugins: '插件命令',
   cmdBestMatch: '最佳匹配',
   cmdRecent: '最近使用',
+  cmdRecentExpand: '展开全部',
+  cmdRecentCollapse: '收起',
   // 命令面板 — 空状态
   cmdEmptyTitle: '开始搜索',
   cmdEmptyDesc: '输入关键词搜索项目、快速链接、文本片段，或输入数学表达式计算',

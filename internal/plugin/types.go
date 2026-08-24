@@ -16,19 +16,21 @@ import (
 
 // PluginManifest 插件清单
 type PluginManifest struct {
-	ID          string      `json:"id"`
-	Name        string      `json:"name"`
-	Version     string      `json:"version"`
-	Description string      `json:"description,omitempty"`
-	Author      string      `json:"author,omitempty"`
-	Icon        string      `json:"icon,omitempty"`
-	Category    string      `json:"category,omitempty"`
-	Platforms   []string    `json:"platforms,omitempty"` // 支持的平台: windows/darwin/linux
-	Backend     BackendConfig  `json:"backend"`
-	Frontend    FrontendConfig `json:"frontend,omitempty"`
-	Capabilities []string      `json:"capabilities,omitempty"`
-	Permissions  Permissions   `json:"permissions,omitempty"`
-	Commands     []Command     `json:"commands,omitempty"`
+	ID             string            `json:"id"`
+	Name           string            `json:"name"`
+	NameI18n       map[string]string `json:"name_i18n,omitempty"` // 多语言名称: {locale: 名称}，如 {"en-US": "HTTP Status Codes"}
+	Version        string            `json:"version"`
+	Description    string            `json:"description,omitempty"`
+	DescriptionI18n map[string]string `json:"description_i18n,omitempty"` // 多语言描述
+	Author         string            `json:"author,omitempty"`
+	Icon           string            `json:"icon,omitempty"`
+	Category       string            `json:"category,omitempty"`
+	Platforms      []string          `json:"platforms,omitempty"` // 支持的平台: windows/darwin/linux
+	Backend        BackendConfig     `json:"backend"`
+	Frontend       FrontendConfig    `json:"frontend,omitempty"`
+	Capabilities   []string          `json:"capabilities,omitempty"`
+	Permissions    Permissions       `json:"permissions,omitempty"`
+	Commands       []Command         `json:"commands,omitempty"`
 }
 
 // BackendConfig 后端配置
@@ -55,14 +57,15 @@ type Permissions struct {
 
 // Command 插件命令
 type Command struct {
-	ID           string   `json:"id"`
-	Title        string   `json:"title"`
-	Hotkey       string   `json:"hotkey,omitempty"`
-	Keywords     []string `json:"keywords,omitempty"`     // 搜索别名，用于命令面板快速查找
-	Aliases      []string `json:"aliases,omitempty"`      // 中文别名，如 ["计算器", "jsq"]，扩展搜索覆盖
-	Prefix       string   `json:"prefix,omitempty"`       // Slash 命令前缀，如 "/translate"，输入 /tr 时只匹配该插件
-	MatchPattern string   `json:"matchPattern,omitempty"` // 命令面板正则匹配：命中时自动传入输入文本
-	AcceptsInput bool     `json:"acceptsInput,omitempty"` // 是否接收命令面板传入的参数（如端口号/状态码/算式），开启后 Ctrl+K 的文本会带入插件
+	ID           string            `json:"id"`
+	Title        string            `json:"title"`
+	TitleI18n    map[string]string `json:"title_i18n,omitempty"` // 多语言标题: {locale: 标题}
+	Hotkey       string            `json:"hotkey,omitempty"`
+	Keywords     []string          `json:"keywords,omitempty"`     // 搜索别名，用于命令面板快速查找
+	Aliases      []string          `json:"aliases,omitempty"`      // 中文别名，如 ["计算器", "jsq"]，扩展搜索覆盖
+	Prefix       string            `json:"prefix,omitempty"`       // Slash 命令前缀，如 "/translate"，输入 /tr 时只匹配该插件
+	MatchPattern string            `json:"matchPattern,omitempty"` // 命令面板正则匹配：命中时自动传入输入文本
+	AcceptsInput bool              `json:"acceptsInput,omitempty"` // 是否接收命令面板传入的参数（如端口号/状态码/算式），开启后 Ctrl+K 的文本会带入插件
 }
 
 // ---- JSON-RPC 通信结构 ----
@@ -154,14 +157,16 @@ func (inst *PluginInstance) SetStatus(s string) {
 
 // PluginInfo 暴露给前端的插件信息
 type PluginInfo struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Version     string    `json:"version"`
-	Description string    `json:"description"`
-	Author      string    `json:"author"`
-	Category    string    `json:"category"`
-	Status      string    `json:"status"`      // running | stopped | crashed
-	HasFrontend bool      `json:"hasFrontend"`
-	UsageCount  int       `json:"usageCount"`
-	Commands    []Command `json:"commands"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	NameI18n        map[string]string `json:"nameI18n,omitempty"`
+	Version         string            `json:"version"`
+	Description     string            `json:"description"`
+	DescriptionI18n map[string]string `json:"descriptionI18n,omitempty"`
+	Author          string            `json:"author"`
+	Category        string            `json:"category"`
+	Status          string            `json:"status"` // running | stopped | crashed
+	HasFrontend     bool              `json:"hasFrontend"`
+	UsageCount      int               `json:"usageCount"`
+	Commands        []Command         `json:"commands"`
 }

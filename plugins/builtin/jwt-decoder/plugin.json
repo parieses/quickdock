@@ -32,7 +32,11 @@
       ],
       "prefix": "/jwt",
       "matchPattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "JWT 解码器",
+        "en-US": "JWT Decoder"
+      }
     }
   ],
   "backend": {
@@ -42,5 +46,13 @@
   "frontend": {
     "enabled": true,
     "entry": "frontend/index.html"
+  },
+  "name_i18n": {
+    "zh-CN": "JWT 解码器",
+    "en-US": "JWT Decoder"
+  },
+  "description_i18n": {
+    "zh-CN": "解码 JWT Token，查看 Header/Payload，验证过期时间",
+    "en-US": "Decode JWT tokens, inspect Header/Payload, and verify expiration."
   }
 }

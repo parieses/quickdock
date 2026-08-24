@@ -36,7 +36,11 @@
       ],
       "matchPattern": "^\\s*(function|var |let |const |import|export|<html|<div|<script|<style)",
       "prefix": "/minify",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "代码压缩 (Minify)",
+        "en-US": "Minify Code"
+      }
     },
     {
       "id": "code-prettify",
@@ -54,7 +58,11 @@
         "格式化"
       ],
       "prefix": "/prettify",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "代码美化 (Prettify)",
+        "en-US": "Prettify Code"
+      }
     },
     {
       "id": "format-sql",
@@ -73,7 +81,11 @@
       ],
       "matchPattern": "^\\s*(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|WITH|TRUNCATE|MERGE|CALL|EXEC|BEGIN|DECLARE|SET|SHOW|DESCRIBE|EXPLAIN)\\b",
       "prefix": "/sql",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "SQL 格式化",
+        "en-US": "Format SQL"
+      }
     }
   ],
   "capabilities": [
@@ -82,5 +94,13 @@
   ],
   "permissions": {
     "clipboard": true
+  },
+  "name_i18n": {
+    "zh-CN": "代码格式化",
+    "en-US": "Code Formatter"
+  },
+  "description_i18n": {
+    "zh-CN": "通用代码压缩/美化（JS / CSS / HTML 自动检测）与 SQL 格式化合二为一",
+    "en-US": "Universal code minify/beautify (JS/CSS/HTML auto-detect) plus SQL formatting in one tool."
   }
 }

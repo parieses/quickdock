@@ -74,7 +74,7 @@ func (a *AppService) GetPluginFrontendPage(pluginID string, theme string, locale
 	if inst == nil {
 		return FailMsg("插件未加载")
 	}
-	if inst.Status != "running" {
+	if inst.GetStatus() != "running" {
 		return FailMsg("插件未运行，无法打开前端页面")
 	}
 	if !inst.Manifest.Frontend.Enabled {
@@ -178,7 +178,10 @@ func (a *AppService) GetPluginFrontendPage(pluginID string, theme string, locale
 		if strings.HasSuffix(href, "common.css") {
 			data, err = os.ReadFile(filepath.Join(a.PluginsDir, "builtin", "common.css"))
 		} else {
-			data, err = os.ReadFile(filepath.Join(baseDir, href))
+			var p string
+			if p, err = safeInlinePath(baseDir, href); err == nil {
+				data, err = os.ReadFile(p)
+			}
 		}
 		if err != nil {
 			return "<!-- quickdock: css inline failed: " + href + " -->"
@@ -197,7 +200,10 @@ func (a *AppService) GetPluginFrontendPage(pluginID string, theme string, locale
 		if strings.HasSuffix(src, "common.js") {
 			data, err = os.ReadFile(filepath.Join(a.PluginsDir, "builtin", "common.js"))
 		} else {
-			data, err = os.ReadFile(filepath.Join(baseDir, src))
+			var p string
+			if p, err = safeInlinePath(baseDir, src); err == nil {
+				data, err = os.ReadFile(p)
+			}
 		}
 		if err != nil {
 			return "<!-- quickdock: js inline failed: " + src + " -->"
@@ -222,6 +228,21 @@ func inlineFileRefs(html, baseDir string, re *regexp.Regexp, loader func(string)
 		}
 		return inlined
 	})
+}
+
+// safeInlinePath 解析插件页面内引用的相对资源路径，并强制其落在插件目录内。
+// 防 href/src 形如 "../../" 的路径穿越：否则恶意插件可让宿主读取任意本地文件、
+// 内联进自己的 iframe 页面后经 postMessage 外传（backend.entry 已有 safePluginEntry，
+// 前端资源此前缺失同等防护）。仅接受本地相对路径，拒绝 URL/协议前缀形式。
+func safeInlinePath(baseDir, ref string) (string, error) {
+	if strings.Contains(ref, "://") || strings.HasPrefix(ref, "//") {
+		return "", fmt.Errorf("内联资源不支持 URL 引用: %s", ref)
+	}
+	p := filepath.Clean(filepath.Join(baseDir, ref))
+	if !strings.HasPrefix(p, filepath.Clean(baseDir)+string(os.PathSeparator)) {
+		return "", fmt.Errorf("资源路径越出插件目录: %s", ref)
+	}
+	return p, nil
 }
 
 // extractAttrValue 从 HTML 标签中提取指定属性的值

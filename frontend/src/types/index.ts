@@ -283,6 +283,7 @@ export interface ClipboardEntry {
 export interface PluginCommand {
   id: string
   title: string
+  titleI18n?: Record<string, string>  // 多语言标题: {locale: 标题}
   hotkey?: string
   keywords?: string[]        // 搜索别名，用于命令面板快速查找
   aliases?: string[]         // 中文别名，如 ["计算器", "jsq"]，扩展搜索覆盖
@@ -294,8 +295,10 @@ export interface PluginCommand {
 export interface PluginInfo {
   id: string
   name: string
+  nameI18n?: Record<string, string>
   version: string
   description?: string
+  descriptionI18n?: Record<string, string>
   author?: string
   category?: string
   status: string

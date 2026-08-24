@@ -7,6 +7,7 @@ export interface PluginCmdIndex {
   cmd: PluginCommand
   regex: RegExp | null
   regexValid: boolean
+  titleLc: string[]           // 原始标题 + titleI18n 各语言值（小写），供多语言搜索
   pinyinTitleFull: string
   pinyinTitleInit: string
   pinyinKwFull: string[]
@@ -39,6 +40,8 @@ function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
       const titlePy = pinyin(cmd.title, { toneType: 'none', type: 'array' })
       const pinyinTitleFull = titlePy.join('').toLowerCase()
       const pinyinTitleInit = titlePy.map(p => p[0]).join('').toLowerCase()
+      // 多语言标题搜索键：原始标题 + title_i18n 所有语言值
+      const titleLc = [cmd.title, ...Object.values(cmd.titleI18n || {})].map(s => s.toLowerCase())
       const pinyinKwFull: string[] = []
       const pinyinKwInit: string[] = []
       for (const kw of (cmd.keywords || [])) {
@@ -53,7 +56,7 @@ function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
         pinyinAliasFull.push(aPy.join('').toLowerCase())
         pinyinAliasInit.push(aPy.map(p => p[0]).join('').toLowerCase())
       }
-      idx.push({ plugin, cmd, regex, regexValid, pinyinTitleFull, pinyinTitleInit, pinyinKwFull, pinyinKwInit, pinyinAliasFull, pinyinAliasInit })
+      idx.push({ plugin, cmd, regex, regexValid, titleLc, pinyinTitleFull, pinyinTitleInit, pinyinKwFull, pinyinKwInit, pinyinAliasFull, pinyinAliasInit })
     }
   }
   return idx
@@ -107,14 +110,15 @@ function calcPluginScore(
       }
     } catch {}
   }
-  const titleLC = idx.cmd.title.toLowerCase()
-  if (titleLC === qLC && bestScore < 100) { bestScore = 100; bestType = 'exact' }
+  // 标题命中辅助：原始标题与 title_i18n 各语言任一命中即可（支持多语言搜索）
+  const titleHits = (fn: (s: string) => boolean) => idx.titleLc.some(fn)
+  if (titleHits(s => s === qLC) && bestScore < 100) { bestScore = 100; bestType = 'exact' }
   if ((idx.cmd.keywords || []).some(k => k.toLowerCase() === qLC) && bestScore < 90) { bestScore = 90; bestType = 'keyword' }
   if ((idx.cmd.aliases || []).some(a => a.toLowerCase() === qLC) && bestScore < 85) { bestScore = 85; bestType = 'alias' }
-  if (titleLC.startsWith(qLC) && bestScore < 75) { bestScore = 75; bestType = 'prefix' }
+  if (titleHits(s => s.startsWith(qLC)) && bestScore < 75) { bestScore = 75; bestType = 'prefix' }
   if ((idx.cmd.keywords || []).some(k => qLC.startsWith(k.toLowerCase() + ' ')) && bestScore < 55) { bestScore = 55; bestType = 'kw inline' }
   if ((idx.cmd.keywords || []).some(k => k.toLowerCase().startsWith(qLC)) && bestScore < 65) { bestScore = 65; bestType = 'kw prefix' }
-  if (titleLC.includes(qLC) && bestScore < 60) { bestScore = 60; bestType = 'contains' }
+  if (titleHits(s => s.includes(qLC)) && bestScore < 60) { bestScore = 60; bestType = 'contains' }
   if ((idx.cmd.keywords || []).slice(0, 20).some(k => k.toLowerCase().includes(qLC)) && bestScore < 40) { bestScore = 40; bestType = 'kw match' }
   if ((idx.cmd.aliases || []).some(a => a.toLowerCase().includes(qLC)) && bestScore < 50) { bestScore = 50; bestType = 'alias' }
   if (idx.plugin.name.toLowerCase().includes(qLC) && bestScore < 35) { bestScore = 35; bestType = 'plugin' }
@@ -137,7 +141,8 @@ function calcPluginScore(
     const hasChinese = /[\u4e00-\u9fff]/.test(qLC)
     const threshold = hasChinese ? 3 : 2
     const fuzzyLimit = 20
-    if (levenshtein(titleLC.slice(0, fuzzyLimit), qLC.slice(0, fuzzyLimit)) <= threshold) { bestScore = 10; bestType = 'fuzzy' }
+    if (levenshtein(idx.titleLc[0].slice(0, fuzzyLimit), qLC.slice(0, fuzzyLimit)) <= threshold
+        || idx.titleLc.some(s => levenshtein(s.slice(0, fuzzyLimit), qLC.slice(0, fuzzyLimit)) <= threshold)) { bestScore = 10; bestType = 'fuzzy' }
     else if ((idx.cmd.keywords || []).some(k => levenshtein(k.toLowerCase().slice(0, fuzzyLimit), qLC.slice(0, fuzzyLimit)) <= threshold)) { bestScore = 8; bestType = 'fuzzy' }
   }
   return { score: bestScore, matchType: bestType, inlineInput }

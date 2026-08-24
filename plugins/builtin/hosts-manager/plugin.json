@@ -25,7 +25,11 @@
         "hosts列表",
         "hosts文件"
       ],
-      "prefix": "/hosts"
+      "prefix": "/hosts",
+      "title_i18n": {
+        "zh-CN": "列出 hosts 条目",
+        "en-US": "List Hosts Entries"
+      }
     },
     {
       "id": "hosts-toggle",
@@ -38,7 +42,11 @@
       "aliases": [
         "hosts开关"
       ],
-      "prefix": "/hosts"
+      "prefix": "/hosts",
+      "title_i18n": {
+        "zh-CN": "启用/禁用 hosts 条目",
+        "en-US": "Enable/Disable Hosts Entries"
+      }
     }
   ],
   "frontend": {
@@ -51,5 +59,16 @@
   "capabilities": [
     "command",
     "frontend"
+  ],
+  "name_i18n": {
+    "zh-CN": "Hosts 管理器",
+    "en-US": "Hosts Manager"
+  },
+  "description_i18n": {
+    "zh-CN": "管理系统 hosts 文件条目，一键启用/禁用/新增",
+    "en-US": "Manage system hosts entries: enable/disable/add in one click."
+  },
+  "platforms": [
+    "windows"
   ]
 }

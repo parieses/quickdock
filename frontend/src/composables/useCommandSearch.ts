@@ -1,6 +1,8 @@
 import { ref, computed, watch, onScopeDispose, type Ref, type ComputedRef } from 'vue'
+import { useI18n } from 'vue-i18n'
 import type { CollectionItem } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
+import { commandTitle, pluginName } from '../utils/localize'
 import { evaluate, format, convertExpression } from '../utils/calc'
 import { Puzzle } from '@lucide/vue'
 
@@ -42,6 +44,7 @@ interface ResultGroup {
   type: ResultType
   label: string
   results: SearchResult[]
+  totalCount?: number // 「最近使用」折叠时的全量条数（徽标展示用）
 }
 
 export interface RecentEntry {
@@ -71,6 +74,7 @@ export interface SearchDeps {
 }
 
 export function useCommandSearch(deps: SearchDeps) {
+  const { locale } = useI18n()
   const { items, installedApps, snippets, systemCommands, query, selectedIndex,
           pluginCmdIndex, pluginResultCache, clipboardUrlSource,
           frecencyScore, frecencyTick, calcPluginScore,
@@ -273,8 +277,8 @@ export function useCommandSearch(deps: SearchDeps) {
       if (score <= 0) continue
       pluginResults.push({
         type: 'plugin',
-        label: inlineInput ? `${idx.cmd.title}: ${inlineInput}` : idx.cmd.title,
-        desc: idx.plugin.name + (idx.cmd.hotkey ? `  ${idx.cmd.hotkey}` : ''),
+        label: inlineInput ? `${commandTitle(idx.cmd, locale)}: ${inlineInput}` : commandTitle(idx.cmd, locale),
+        desc: pluginName(idx.plugin, locale) + (idx.cmd.hotkey ? `  ${idx.cmd.hotkey}` : ''),
         icon: Puzzle,
         iconBase64: pluginIcons.value[idx.plugin.id],
         pluginId: idx.plugin.id,
@@ -425,7 +429,7 @@ export function useCommandSearch(deps: SearchDeps) {
           recentInput = entry.input || undefined
           recentMatchType = entry.input ? 'match pattern' : undefined
           if (!recentInput) {
-            const prefix = idx.cmd.title + ': '
+            const prefix = commandTitle(idx.cmd, locale) + ': '
             if (entry.label.startsWith(prefix)) {
               recentInput = entry.label.slice(prefix.length)
               recentMatchType = 'match pattern'
@@ -471,13 +475,20 @@ export function useCommandSearch(deps: SearchDeps) {
         })
       }
     }
-    return results.slice(0, 8)
+    return results
   })
+
+  // 「最近使用」默认只显示前 9 条，其余通过展开/收起按钮切换查看
+  const RECENT_VISIBLE = 9
+  const recentExpanded = ref(false)
+  function toggleRecentExpanded() { recentExpanded.value = !recentExpanded.value }
 
   const displayGroups = computed<ResultGroup[]>(() => {
     if (debouncedQuery.value.trim()) return groupedResults.value
-    if (recentResults.value.length > 0) {
-      return [{ type: 'item', label: t('cmdRecent'), results: recentResults.value }]
+    const all = recentResults.value
+    if (all.length > 0) {
+      const shown = recentExpanded.value ? all : all.slice(0, RECENT_VISIBLE)
+      return [{ type: 'item', label: t('cmdRecent'), results: shown, totalCount: all.length }]
     }
     return []
   })
@@ -516,5 +527,6 @@ export function useCommandSearch(deps: SearchDeps) {
     return null
   })
 
-  return { groupedResults, allResults, recentResults, displayGroups, displayFlat, previewResult, recentCache }
+  return { groupedResults, allResults, recentResults, displayGroups, displayFlat, previewResult, recentCache,
+           RECENT_VISIBLE, recentExpanded, toggleRecentExpanded }
 }

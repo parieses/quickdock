@@ -1,4 +1,4 @@
-import { inject, onUnmounted } from 'vue'
+import { inject, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ExecutePluginCommand, CopyText, GetAndClearPendingPluginInit } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
@@ -197,7 +197,14 @@ export function usePluginHost(opts: PluginHostOptions) {
   })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
 
+  // 切换界面语言时同步重发 locale：语言变更不产生 DOM 属性变化，
+  // MutationObserver 感知不到，已打开的插件页（如 pdf-toolkit 的 onChange 重渲染）会停留在旧语言
+  const stopLocaleWatch = watch(locale, () => {
+    iframePostMessage({ type: 'plugin:theme', data: { theme: currentThemeName(), locale: locale.value } })
+  })
+
   function cleanup() {
+    stopLocaleWatch()
     if (messageHandler) {
       window.removeEventListener('message', messageHandler)
       messageHandler = null

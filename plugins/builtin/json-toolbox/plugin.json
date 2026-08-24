@@ -39,7 +39,11 @@
       ],
       "prefix": "/json",
       "matchPattern": "[\\s]*[\\[{][\\s\\S]*",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "JSON 编辑器",
+        "en-US": "JSON Editor"
+      }
     },
     {
       "id": "json-to-ts",
@@ -59,7 +63,11 @@
       ],
       "prefix": "/ts",
       "matchPattern": "^\\{[^]*\\}$|^\\[[^]*\\]$",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "JSON → TypeScript",
+        "en-US": "JSON to TypeScript"
+      }
     },
     {
       "id": "json-to-go",
@@ -78,7 +86,11 @@
         "go struct"
       ],
       "prefix": "/go",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "JSON → Go Struct",
+        "en-US": "JSON to Go Struct"
+      }
     },
     {
       "id": "convert-data",
@@ -99,7 +111,11 @@
       ],
       "prefix": "/convert",
       "matchPattern": "(^\\{[\\s\\S]*\\}$|^\\[[\\s\\S]*\\]$|^\\w+:\\s+|^\\<\\?xml|^\\[\\w+\\])",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "数据格式转换",
+        "en-US": "Data Format Conversion"
+      }
     }
   ],
   "capabilities": [
@@ -108,5 +124,13 @@
   ],
   "permissions": {
     "clipboard": true
+  },
+  "name_i18n": {
+    "zh-CN": "JSON 工具箱",
+    "en-US": "JSON Toolbox"
+  },
+  "description_i18n": {
+    "zh-CN": "JSON 编辑器（格式化/折叠/编辑）、JSON → TypeScript / Go、JSON ↔ YAML / TOML / XML 互转",
+    "en-US": "JSON editor (format/collapse/edit), JSON to TypeScript/Go, and JSON <-> YAML/TOML/XML conversion."
   }
 }

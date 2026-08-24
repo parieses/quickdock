@@ -18,5 +18,13 @@
   ],
   "permissions": {
     "clipboard": true
+  },
+  "name_i18n": {
+    "zh-CN": "Markdown 渲染",
+    "en-US": "Markdown Renderer"
+  },
+  "description_i18n": {
+    "zh-CN": "实时渲染 Markdown，支持代码高亮，复制为 HTML",
+    "en-US": "Live Markdown rendering with syntax highlight; copy output as HTML."
   }
 }

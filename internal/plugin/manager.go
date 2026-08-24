@@ -335,12 +335,14 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string)
 		_, err = vm.RunString(string(jsCode))
 	}()
 	if err != nil {
+		pluginDB.Close() // 失败路径关闭数据库，避免泄漏
 		return fmt.Errorf("执行插件 JS 失败: %w", err)
 	}
 
 	hasInit := vm.Get("handleInitialize") != nil && !goja.IsUndefined(vm.Get("handleInitialize"))
 	hasExec := vm.Get("handleExecute") != nil && !goja.IsUndefined(vm.Get("handleExecute"))
 	if !hasExec {
+		pluginDB.Close() // 失败路径关闭数据库，避免泄漏
 		return fmt.Errorf("插件需要导出 handleExecute 函数")
 	}
 
@@ -602,15 +604,17 @@ func (m *Manager) ListPlugins() []PluginInfo {
 			cmds = []Command{}
 		}
 		result = append(result, PluginInfo{
-			ID:          inst.Manifest.ID,
-			Name:        inst.Manifest.Name,
-			Version:     inst.Manifest.Version,
-			Description: inst.Manifest.Description,
-			Author:      inst.Manifest.Author,
-			Category:    inst.Manifest.Category,
-			Status:      inst.GetStatus(),
-			HasFrontend: inst.Manifest.Frontend.Enabled,
-			Commands:    cmds,
+			ID:              inst.Manifest.ID,
+			Name:            inst.Manifest.Name,
+			NameI18n:        inst.Manifest.NameI18n,
+			Version:         inst.Manifest.Version,
+			Description:     inst.Manifest.Description,
+			DescriptionI18n: inst.Manifest.DescriptionI18n,
+			Author:          inst.Manifest.Author,
+			Category:        inst.Manifest.Category,
+			Status:          inst.GetStatus(),
+			HasFrontend:     inst.Manifest.Frontend.Enabled,
+			Commands:        cmds,
 		})
 	}
 	return result
@@ -625,6 +629,10 @@ func (m *Manager) GetPlugin(id string) *PluginInstance {
 
 // ReloadPlugin 重新加载插件（启用时调用）
 func (m *Manager) ReloadPlugin(id string) (*PluginManifest, error) {
+	// id 直接参与路径拼接，必须过格式校验，防 "../" 穿越加载任意位置的 plugin.json
+	if !pluginIDRe.MatchString(id) {
+		return nil, fmt.Errorf("%w: 非法插件 ID: %q", ErrInvalidManifest, id)
+	}
 	dir := filepath.Join(m.pluginsDir, id)
 	manifestPath := filepath.Join(dir, "plugin.json")
 
@@ -641,6 +649,11 @@ func (m *Manager) ReloadPlugin(id string) (*PluginManifest, error) {
 
 // UninstallPlugin 卸载插件（删除目录）
 func (m *Manager) UninstallPlugin(id string) error {
+	// id 直接参与路径拼接（Join + RemoveAll），必须过格式校验，
+	// 防前端传入 "../x" 之类的 id 穿越删除插件目录之外的任意目录
+	if !pluginIDRe.MatchString(id) {
+		return fmt.Errorf("%w: 非法插件 ID: %q", ErrInvalidManifest, id)
+	}
 	// 先停进程并从内存移除：否则 Windows 上驻留的 native exe 会占用文件句柄，删除静默失败并留下孤儿进程
 	m.UnloadPlugin(id)
 	dir := filepath.Join(m.pluginsDir, id)

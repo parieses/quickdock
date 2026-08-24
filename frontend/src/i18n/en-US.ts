@@ -764,6 +764,8 @@ export default {
   cmdGroupPlugins: 'Plugin Commands',
   cmdBestMatch: 'Best Match',
   cmdRecent: 'Recent',
+  cmdRecentExpand: 'Show All',
+  cmdRecentCollapse: 'Collapse',
   // Command Palette — Empty State
   cmdEmptyTitle: 'Start Searching',
   cmdEmptyDesc: 'Type to search items, quicklinks, snippets, or enter a math expression',

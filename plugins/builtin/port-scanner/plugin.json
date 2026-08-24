@@ -25,7 +25,11 @@
         "端口列表",
         "监听端口"
       ],
-      "prefix": "/port"
+      "prefix": "/port",
+      "title_i18n": {
+        "zh-CN": "列出本地监听端口",
+        "en-US": "List Listening Ports"
+      }
     },
     {
       "id": "port-check",
@@ -42,7 +46,11 @@
       ],
       "prefix": "/port",
       "matchPattern": "^\\d{1,5}$",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "检查指定端口",
+        "en-US": "Check Port"
+      }
     },
     {
       "id": "port-kill",
@@ -57,7 +65,11 @@
       "aliases": [
         "结束进程",
         "杀进程"
-      ]
+      ],
+      "title_i18n": {
+        "zh-CN": "结束占用端口的进程",
+        "en-US": "Kill Port Process"
+      }
     }
   ],
   "frontend": {
@@ -70,5 +82,16 @@
   "capabilities": [
     "command",
     "frontend"
+  ],
+  "name_i18n": {
+    "zh-CN": "端口检查器",
+    "en-US": "Port Checker"
+  },
+  "description_i18n": {
+    "zh-CN": "检查端口占用，显示进程名和 PID",
+    "en-US": "Check port usage, show owning process name and PID."
+  },
+  "platforms": [
+    "windows"
   ]
 }

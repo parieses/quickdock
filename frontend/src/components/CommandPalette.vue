@@ -8,13 +8,14 @@ import {
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
   Copy, FolderSearch, Play, ClipboardPaste, Save
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetRecentUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import type { CollectionItem, PluginInfo } from '../types'
 import type { ToastAPI } from '../types'
 import { evaluate, format, convertExpression } from '../utils/calc'
+import { commandTitle } from '../utils/localize'
 import { pinyin } from 'pinyin-pro'
 import { useFrecency } from '../composables/useFrecency'
 import { usePluginIndex } from '../composables/usePluginIndex'
@@ -22,7 +23,7 @@ import { useCommandSearch } from '../composables/useCommandSearch'
 import PluginFrame from './PluginFrame.vue'
 import type { RecentEntry } from '../composables/useCommandSearch'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')
 
 // ---- 初始化 composables ----
@@ -268,7 +269,7 @@ function getAppAliases(name: string): string[] {
 // ---- 搜索结果（useCommandSearch）----
 const {
   groupedResults, allResults, recentResults, displayGroups, displayFlat,
-  previewResult, recentCache
+  previewResult, recentCache, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
 } = useCommandSearch({
   items, installedApps, snippets, systemCommands, query, selectedIndex,
   pluginCmdIndex, pluginResultCache, clipboardUrlSource,
@@ -413,8 +414,11 @@ async function executeSelected() {
       inputText = result.inlineInput || undefined
       if (!inputText && result.label && !(result as any).isCachedResult) {
         const idx = pluginCmdIndex.value.find(c => c.plugin.id === result.pluginId && c.cmd.id === result.pluginCommandId)
-        if (idx && idx.cmd.title && result.label.startsWith(idx.cmd.title + ': ')) {
-          inputText = result.label.slice(idx.cmd.title.length + 2)
+        if (idx) {
+          const title = commandTitle(idx.cmd, locale)
+          if (title && result.label.startsWith(title + ': ')) {
+            inputText = result.label.slice(title.length + 2)
+          }
         }
       }
     }
@@ -670,7 +674,7 @@ async function loadPaletteData() {
     }
   } catch (e) { console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e)) }
   try { const snips = unwrap<CmdSnippet[]>(await ListSnippets()); if (gen !== itemsLoadGen) return; snippets.value = snips || [] } catch (e) { console.error('[CmdPalette] ListSnippets:', getErrorMessage(e)) }
-  try { const raw = await GetRecentUsage(20); if (gen === itemsLoadGen) recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.label) } catch (e) { console.error('[CmdPalette] GetRecentUsage:', getErrorMessage(e)) }
+  try { const raw = await GetAllUsage(); if (gen === itemsLoadGen) recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.label) } catch (e) { console.error('[CmdPalette] GetAllUsage:', getErrorMessage(e)) }
   if (gen === itemsLoadGen) loading.value = false
 }
 
@@ -690,6 +694,7 @@ onMounted(async () => {
     }
     loadPaletteData().catch(e => console.warn('[CmdPalette] loadPaletteData:', e))
     query.value = ''; selectedIndex.value = 0; inlineQuicklink.value = null; inlineQuery.value = ''; pluginResultCache.value = null
+    recentExpanded.value = false
     actionMenuOpen.value = false
     if (Date.now() - lastClipboardUpdate < 3000) {
       GetLastCopiedText().then(raw => {
@@ -797,7 +802,17 @@ onUnmounted(() => {
       <template v-for="(group, gIdx) in displayGroups" :key="group.type">
         <div class="group-header">
           <span class="group-title">{{ group.label }}</span>
-          <span class="group-count">{{ group.results.length }}</span>
+          <button
+            v-if="group.totalCount !== undefined && group.totalCount > RECENT_VISIBLE"
+            class="group-expand"
+            :title="recentExpanded ? t('cmdRecentCollapse') : t('cmdRecentExpand')"
+            @click.stop="toggleRecentExpanded()"
+            @mousemove.stop
+          >
+            <ChevronUp v-if="recentExpanded" :size="12" />
+            <ChevronDown v-else :size="12" />
+          </button>
+          <span class="group-count">{{ group.totalCount ?? group.results.length }}</span>
         </div>
         <div
           v-for="(result, iIdx) in group.results"
@@ -984,6 +999,21 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 .group-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.group-expand {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border: none;
+  border-radius: var(--radius-full, 999px);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+}
+.group-expand:hover { background: var(--color-bg-tertiary); color: var(--color-text); }
 .group-count {
   flex-shrink: 0;
   font-size: 10px;

@@ -93,11 +93,14 @@ func (m *Manager) registerDefaultHostMethods() {
 // ---- handleCallback 的安全版本 ----
 
 // handleCallback 处理插件发起的回调请求/通知（带权限校验）
-// 由 readLoop goroutine 调用
-func (m *Manager) handleCallback(inst *PluginInstance, req *RPCRequest) {
-	// 通知（无 ID）不需要响应
-	if req.ID == 0 {
-		return
+// 由 readLoop goroutine 调用；rawLine 为该行原始 JSON，用于区分"无 id 的通知"
+// 与"id 恰好为 0 的请求"（JSON-RPC 规范中 id=0 是合法请求 ID）
+func (m *Manager) handleCallback(inst *PluginInstance, req *RPCRequest, rawLine []byte) {
+	var probe struct {
+		ID *int64 `json:"id"`
+	}
+	if json.Unmarshal(rawLine, &probe) == nil && probe.ID == nil {
+		return // 通知（无 ID 字段）不需要响应
 	}
 
 	// 权限检查

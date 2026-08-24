@@ -38,12 +38,14 @@ type marketIndex struct {
 type marketPlugin struct {
 	ID      string                 `json:"id"`
 	Name    string                 `json:"name"`
+	NameI18n map[string]string     `json:"name_i18n,omitempty"`
 	Version string                 `json:"version"`
 	// 展示信息
-	Description string `json:"description"`
-	Author      string `json:"author"`
-	Category    string `json:"category"`
-	Icon        string `json:"icon"`
+	Description    string            `json:"description"`
+	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
+	Author         string            `json:"author"`
+	Category       string            `json:"category"`
+	Icon           string            `json:"icon"`
 	// 约束信息（与 plugin.json 对齐）
 	Platforms    []string               `json:"platforms"`
 	Permissions  map[string]interface{} `json:"permissions"`
@@ -231,11 +233,42 @@ func readZipManifestIDVersion(zipPath string) (id, version string, err error) {
 
 // compareVersions 比较 semver 风格版本字符串 a 与 b：
 // 返回 -1 (a<b) / 0 (a==b) / 1 (a>b)。
-// 按 . 和 - 分段；数字段比数值（保证 0.10.0 > 0.9.0），非数字段按字符串比较。
-// 例：0.1.0 < 0.2.0 < 0.10.0 < 1.0.0；0.1.0-beta < 0.1.0。
+// 按 . 分段；数字段比数值（保证 0.10.0 > 0.9.0），非数字段按字符串比较。
+// semver 规范：prerelease 低于同版本正式版，如 0.1.0-beta < 0.1.0。
+// 例：0.1.0-beta < 0.1.0 < 0.2.0 < 0.10.0 < 1.0.0。
 func compareVersions(a, b string) int {
+	aMain, aPre := splitVersionPrerelease(a)
+	bMain, bPre := splitVersionPrerelease(b)
+
+	// 主版本部分比较
+	if c := compareVersionSegments(aMain, bMain); c != 0 {
+		return c
+	}
+	// prerelease 部分：无 prerelease 者更新（semver 规范）
+	switch {
+	case aPre == "" && bPre == "":
+		return 0
+	case aPre == "":
+		return 1
+	case bPre == "":
+		return -1
+	}
+	return compareVersionSegments(aPre, bPre)
+}
+
+// splitVersionPrerelease 把 "0.1.0-beta.1" 拆成主版本 "0.1.0" 与 prerelease "beta.1"
+// （以第一个 '-' 为界）
+func splitVersionPrerelease(v string) (main, pre string) {
+	if i := strings.Index(v, "-"); i >= 0 {
+		return v[:i], v[i+1:]
+	}
+	return v, ""
+}
+
+// compareVersionSegments 按 . 分段比较（数字段比数值，非数字段比字符串）
+func compareVersionSegments(a, b string) int {
 	split := func(s string) []string {
-		return strings.FieldsFunc(s, func(r rune) bool { return r == '.' || r == '-' })
+		return strings.FieldsFunc(s, func(r rune) bool { return r == '.' })
 	}
 	sa, sb := split(a), split(b)
 	for i := 0; i < len(sa) && i < len(sb); i++ {

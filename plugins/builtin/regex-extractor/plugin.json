@@ -34,7 +34,11 @@
         "regex提取",
         "re提取"
       ],
-      "prefix": "/re"
+      "prefix": "/re",
+      "title_i18n": {
+        "zh-CN": "正则提取工具",
+        "en-US": "Regex Extractor"
+      }
     }
   ],
   "capabilities": [
@@ -43,5 +47,13 @@
   ],
   "permissions": {
     "clipboard": true
+  },
+  "name_i18n": {
+    "zh-CN": "正则提取工具",
+    "en-US": "Regex Extractor"
+  },
+  "description_i18n": {
+    "zh-CN": "输入文本和正则表达式，一键提取所有匹配项，支持分组捕获、高亮显示、导出结果",
+    "en-US": "Extract all matches of a regex from text with group capture, highlighting, and export."
   }
 }

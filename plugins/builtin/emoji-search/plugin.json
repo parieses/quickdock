@@ -33,11 +33,23 @@
         "符号搜索"
       ],
       "prefix": "/emoji",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "Emoji 搜索",
+        "en-US": "Emoji Search"
+      }
     }
   ],
   "capabilities": [
     "command",
     "frontend"
-  ]
+  ],
+  "name_i18n": {
+    "zh-CN": "Emoji 搜索",
+    "en-US": "Emoji Search"
+  },
+  "description_i18n": {
+    "zh-CN": "搜索 Emoji 并一键复制到剪贴板",
+    "en-US": "Search emoji and copy them to the clipboard in one click."
+  }
 }

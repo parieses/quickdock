@@ -5,16 +5,19 @@ import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban } from '@l
 import { GetPluginMarket, InstallPluginFromURL } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import { pluginName, pluginDesc } from '../utils/localize'
 import type { ToastAPI } from '../types'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 interface MarketPlugin {
   id: string
   name: string
+  name_i18n?: Record<string, string>
   version: string
   description: string
+  description_i18n?: Record<string, string>
   author: string
   category: string
   icon: string
@@ -106,14 +109,14 @@ onMounted(loadMarket)
           <img v-if="p.icon" :src="p.icon" class="card-icon" alt="" />
           <Store v-else :size="34" class="card-icon-fallback" />
           <div class="card-title-wrap">
-            <span class="card-title">{{ p.name }}</span>
+            <span class="card-title">{{ pluginName({ name: p.name, nameI18n: p.name_i18n }, locale) }}</span>
             <span class="badge">v{{ p.version }}</span>
             <span v-if="p.installed && p.has_update" class="badge badge-upgrade">{{ t('pluginHasUpdate') }}</span>
             <span v-else-if="p.installed" class="badge badge-installed">{{ t('pluginInstalled') }}</span>
             <div class="card-id">{{ p.id }}</div>
           </div>
         </div>
-        <p class="card-desc">{{ p.description }}</p>
+        <p class="card-desc">{{ pluginDesc({ description: p.description, descriptionI18n: p.description_i18n }, locale) }}</p>
         <div class="card-meta">
           <span v-if="p.author" class="meta-item">{{ p.author }}</span>
           <span v-if="p.category" class="meta-item">{{ p.category }}</span>

@@ -29,7 +29,11 @@
       ],
       "prefix": "/b64e",
       "acceptsInput": true,
-      "matchPattern": "[\\s\\S]+"
+      "matchPattern": "[\\s\\S]+",
+      "title_i18n": {
+        "zh-CN": "Base64 编码",
+        "en-US": "Base64 Encode"
+      }
     },
     {
       "id": "base64-decode",
@@ -43,35 +47,55 @@
       ],
       "prefix": "/b64d",
       "matchPattern": "^(data:image/[a-zA-Z0-9.+-]+;base64,)?[A-Za-z0-9+/]*={0,2}$",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "Base64 解码",
+        "en-US": "Base64 Decode"
+      }
     },
     {
       "id": "url-encode",
       "title": "URL 编码",
       "prefix": "/urle",
       "acceptsInput": true,
-      "matchPattern": "[\\s\\S]+"
+      "matchPattern": "[\\s\\S]+",
+      "title_i18n": {
+        "zh-CN": "URL 编码",
+        "en-US": "URL Encode"
+      }
     },
     {
       "id": "url-decode",
       "title": "URL 解码",
       "prefix": "/urld",
       "acceptsInput": true,
-      "matchPattern": "[\\s\\S]+"
+      "matchPattern": "[\\s\\S]+",
+      "title_i18n": {
+        "zh-CN": "URL 解码",
+        "en-US": "URL Decode"
+      }
     },
     {
       "id": "html-encode",
       "title": "HTML 编码",
       "prefix": "/htmle",
       "acceptsInput": true,
-      "matchPattern": "[\\s\\S]+"
+      "matchPattern": "[\\s\\S]+",
+      "title_i18n": {
+        "zh-CN": "HTML 编码",
+        "en-US": "HTML Encode"
+      }
     },
     {
       "id": "html-decode",
       "title": "HTML 解码",
       "prefix": "/htmld",
       "acceptsInput": true,
-      "matchPattern": "[\\s\\S]+"
+      "matchPattern": "[\\s\\S]+",
+      "title_i18n": {
+        "zh-CN": "HTML 解码",
+        "en-US": "HTML Decode"
+      }
     },
     {
       "id": "md5-hash",
@@ -86,7 +110,11 @@
       ],
       "prefix": "/md5",
       "acceptsInput": true,
-      "matchPattern": "[\\s\\S]+"
+      "matchPattern": "[\\s\\S]+",
+      "title_i18n": {
+        "zh-CN": "MD5 哈希",
+        "en-US": "MD5 Hash"
+      }
     },
     {
       "id": "sha256-hash",
@@ -100,7 +128,11 @@
       ],
       "prefix": "/sha256",
       "acceptsInput": true,
-      "matchPattern": "[\\s\\S]+"
+      "matchPattern": "[\\s\\S]+",
+      "title_i18n": {
+        "zh-CN": "SHA256 哈希",
+        "en-US": "SHA256 Hash"
+      }
     },
     {
       "id": "sha1-hash",
@@ -114,7 +146,11 @@
       ],
       "prefix": "/sha1",
       "acceptsInput": true,
-      "matchPattern": "[\\s\\S]+"
+      "matchPattern": "[\\s\\S]+",
+      "title_i18n": {
+        "zh-CN": "SHA1 哈希",
+        "en-US": "SHA1 Hash"
+      }
     },
     {
       "id": "convert-case",
@@ -136,7 +172,11 @@
         "大小写"
       ],
       "matchPattern": "^[a-z]+[_-][a-z]+[a-z_0-9-]*$|^[a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z][a-z]+[A-Z][a-z]*[A-Za-z0-9]*$|^[A-Z]+_[A-Z]+[A-Z_0-9]*$",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "变量命名转换",
+        "en-US": "Variable Name Conversion"
+      }
     }
   ],
   "capabilities": [
@@ -145,5 +185,13 @@
   ],
   "permissions": {
     "clipboard": true
+  },
+  "name_i18n": {
+    "zh-CN": "文本工具箱",
+    "en-US": "Text Toolbox"
+  },
+  "description_i18n": {
+    "zh-CN": "Base64 / URL / HTML 编解码，MD5 / SHA256 哈希，Base64 图片识别预览",
+    "en-US": "Base64/URL/HTML encode-decode, MD5/SHA256 hashes, Base64 image preview."
   }
 }

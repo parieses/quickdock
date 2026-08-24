@@ -172,7 +172,7 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 				if jerr := json.Unmarshal(b, &req); jerr == nil && req.Method != "" {
 					// 这是插件发起的回调请求或通知
 					if manager != nil {
-						manager.handleCallback(inst, &req)
+						manager.handleCallback(inst, &req, b)
 					}
 				} else {
 					// 再尝试解析为响应

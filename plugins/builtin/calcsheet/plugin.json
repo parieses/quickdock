@@ -6,35 +6,57 @@
   "author": "QuickDock",
   "icon": "icon.svg",
   "category": "开发者日常",
-
   "backend": {
     "runtime": "goja",
     "entry": "main.js"
   },
-
   "frontend": {
     "enabled": true,
     "entry": "frontend/index.html",
     "width": 780,
     "height": 560
   },
-
-  "capabilities": ["command", "frontend"],
-
+  "capabilities": [
+    "command",
+    "frontend"
+  ],
   "permissions": {
     "network": false,
     "filesystem": true,
     "clipboard": true
   },
-
   "commands": [
     {
       "id": "open-calc",
       "title": "计算稿纸",
-      "keywords": ["eval", "calc", "计算", "稿纸", "求值", "calcsheet", "算"],
-      "aliases": ["计算器", "jsq", "草稿纸"],
+      "keywords": [
+        "eval",
+        "calc",
+        "计算",
+        "稿纸",
+        "求值",
+        "calcsheet",
+        "算"
+      ],
+      "aliases": [
+        "计算器",
+        "jsq",
+        "草稿纸"
+      ],
       "matchPattern": "^[0-9+*/().%^, -]+$",
-      "acceptsInput": true
+      "acceptsInput": true,
+      "title_i18n": {
+        "zh-CN": "计算稿纸",
+        "en-US": "Calc Sheet"
+      }
     }
-  ]
+  ],
+  "name_i18n": {
+    "zh-CN": "计算稿纸",
+    "en-US": "Calc Sheet"
+  },
+  "description_i18n": {
+    "zh-CN": "兼具草稿纸自由度与电子表格智能的多行计算工具，支持行号引用、变量定义、函数计算",
+    "en-US": "Multi-line calculation tool combining scratchpad freedom with spreadsheet smarts: row references, variables, functions."
+  }
 }

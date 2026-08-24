@@ -7,9 +7,10 @@ import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
 import PluginMarketPage from './PluginMarketPage.vue'
+import { pluginName, pluginDesc } from '../utils/localize'
 import type { ToastAPI, PluginInfo, PluginExecLog } from '../types'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 const plugins = ref<PluginInfo[]>([])
@@ -116,7 +117,7 @@ async function togglePlugin(p: PluginInfo) {
 // ---- 卸载 ----
 function onUninstall(p: PluginInfo) {
   uninstallingId.value = p.id
-  uninstallingName.value = p.name
+  uninstallingName.value = pluginName(p, locale)
   showUninstallConfirm.value = true
 }
 
@@ -303,7 +304,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
         </div>
 
         <!-- 名称 -->
-        <div class="card-name">{{ p.name }}</div>
+        <div class="card-name">{{ pluginName(p, locale) }}</div>
 
         <!-- 元信息行 -->
         <div class="card-meta">
@@ -317,7 +318,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
         <span :class="['status-badge', statusBadgeClass(p.status)]">{{ statusLabel(p.status) }}</span>
 
         <!-- 描述 -->
-        <p v-if="p.description" class="card-desc">{{ p.description }}</p>
+        <p v-if="p.description" class="card-desc">{{ pluginDesc(p, locale) }}</p>
       </div>
     </div>
 
