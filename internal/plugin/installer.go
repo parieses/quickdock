@@ -99,19 +99,29 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		}
 		m.mu.Unlock()
 
+		// 立即按路径清理一次：崩溃自动重启（watchPlugin 的 2s/4s/6s 退避）可能已把
+		// 新进程拉起（其 PID 在 manager 尚未注册、stopPlugin 管不到），或存在主程序
+		// 重启前残留的孤儿实例——它们都锁着目录。配合 watchPlugin 的 stopped 复查双保险。
+		killProcessesLockingDir(targetDir)
+
 		backupDir = targetDir + ".bak." + manifest.Version
 		os.RemoveAll(backupDir) // 清理旧的备份
 
 		// Windows 上 TerminateProcess 后文件句柄异步释放，且 Process.Kill 不杀子进程树；
-		// 用递增间隔重试 rename，倒数第二次失败时按 PID 兜底强杀进程树再试。
-		waits := []time.Duration{100, 200, 300, 500, 800, 1200} // ms，总 ~3.1s
+		// 用递增间隔重试 rename，倒数第二次失败时兜底强杀：
+		// ① 已知 PID 的整棵进程树 ② 可执行路径位于目标目录内的孤儿进程（manager 未跟踪，
+		// 如主程序重启前残留/手动调试实例），它们的 PID 记录不到但同样锁目录。
+		waits := []time.Duration{100, 200, 300, 500, 800, 1200, 1600, 2000} // ms，总 ~6.7s
 		var err error
 		for i, w := range waits {
 			if err = os.Rename(targetDir, backupDir); err == nil {
 				break
 			}
-			if i == len(waits)-2 && oldPID > 0 {
-				killProcessTree(oldPID) // 兜底：杀整棵进程树释放子进程持有的句柄
+			if i == len(waits)-2 {
+				if oldPID > 0 {
+					killProcessTree(oldPID)
+				}
+				killProcessesLockingDir(targetDir)
 			}
 			time.Sleep(w * time.Millisecond)
 		}

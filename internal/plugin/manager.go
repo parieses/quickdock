@@ -427,6 +427,13 @@ func (m *Manager) watchPlugin(inst *PluginInstance) {
 	for attempt := 1; attempt <= 3; attempt++ {
 		time.Sleep(time.Duration(attempt*2) * time.Second) // 2s, 4s, 6s
 
+		// 退避期间可能已被用户主动停止或触发安装/卸载（stopPlugin 置 stopped=true）：
+		// 此时绝不能重启——否则新进程会锁住插件目录，导致安装备份 rename 失败
+		//（"The process cannot access the file because it is being used by another process"）。
+		if inst.stopped.Load() {
+			return
+		}
+
 		// 重新加载插件
 		if err := m.LoadPlugin(inst.Manifest, inst.Dir); err != nil {
 			fmt.Printf("QuickDock: 插件 %s 重启第 %d 次失败: %v\n", inst.Manifest.ID, attempt, err)

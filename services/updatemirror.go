@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
@@ -109,27 +110,48 @@ func (p *mirrorProvider) downloadURL(ctx context.Context, urlStr string, rel *up
 	}
 
 	total := resp.ContentLength
+	// 单流路径的进度显示需要总量：Content-Length 缺失时回退 manifest 里记录的大小
 	if total <= 0 {
 		total = rel.Artifact.Size
 	}
-	written := int64(0)
-	buf := make([]byte, 64*1024)
-	for {
-		n, rerr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, werr := tmp.Write(buf[:n]); werr != nil {
-				return werr
-			}
-			written += int64(n)
+
+	// 服务器明确返回 Content-Length 且支持 Range、包体超阈值时，4 连接分块并行下载
+	// （与插件市场 downloadParallelTo 同一实现）。GitHub Releases 单连接常被限速到
+	// 几十 KB/s，分块可显著提速；ghfast.top 等镜像 CDN 通常也支持 Range，天然兼容。
+	// 不满足条件（chunked 传输/小包/不支持 Range）自动回退下方单流。
+	if resp.ContentLength > parallelMinSize && strings.Contains(resp.Header.Get("Accept-Ranges"), "bytes") {
+		resp.Body.Close()
+		if err := tmp.Truncate(total); err != nil {
+			return err
+		}
+		tracker := &progressTracker{total: total, lastPct: -1, emit: func(done, t int64, _ int) {
 			if onProgress != nil {
-				onProgress(written, total)
+				onProgress(done, t)
 			}
+		}}
+		if err := downloadParallelTo(p.client, urlStr, tmp, total, tracker.add); err != nil {
+			return err
 		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			return rerr
+	} else {
+		written := int64(0)
+		buf := make([]byte, 64*1024)
+		for {
+			n, rerr := resp.Body.Read(buf)
+			if n > 0 {
+				if _, werr := tmp.Write(buf[:n]); werr != nil {
+					return werr
+				}
+				written += int64(n)
+				if onProgress != nil {
+					onProgress(written, total)
+				}
+			}
+			if rerr == io.EOF {
+				break
+			}
+			if rerr != nil {
+				return rerr
+			}
 		}
 	}
 

@@ -74,8 +74,13 @@ const appVersion = ref('')
 const updateStatus = ref<UpdateStatus | null>(null)
 const updateChecking = ref(false)
 const updateResult = ref('')
+// 更新下载实时进度：Wails updater 内部发 wails:updater:download-progress（~10次/秒），
+// payload 为 {written, total, rate}；驱动「正在下载 X%」文案与进度条。
+const updateDlActive = ref(false)
+const updateProgress = ref(0)
 
 let offUpdateStatus: (() => void) | null = null
+let offDlProgress: (() => void) | null = null
 
 onMounted(async () => {
   try {
@@ -88,10 +93,19 @@ onMounted(async () => {
   offUpdateStatus = Events.On('quickdock:update:status', (payload: any) => {
     applyUpdateStatus((payload?.data ?? payload) as UpdateStatus)
   })
+  // 订阅更新包下载进度（Wails updater 内部事件，后端并发/镜像下载的进度会汇入其中）
+  offDlProgress = Events.On('wails:updater:download-progress', (payload: any) => {
+    const d = (payload?.data ?? payload) as { written?: number; total?: number } | undefined
+    if (!d || !d.total || typeof d.written !== 'number') return
+    updateDlActive.value = true
+    updateProgress.value = Math.min(100, Math.max(1, Math.round((d.written / d.total) * 100)))
+    updateResult.value = t('updateDownloadingPct', { pct: updateProgress.value })
+  })
 })
 
 onUnmounted(() => {
   offUpdateStatus?.()
+  offDlProgress?.()
 })
 
 // 手动检测与后台自动检查共用同一渲染逻辑，保证两条路径展示完全一致。
@@ -123,10 +137,13 @@ async function checkForUpdates() {
 }
 
 async function downloadUpdate() {
+  updateDlActive.value = true
+  updateProgress.value = 0
   updateResult.value = t('updateDownloading')
   try {
     const result = await DownloadUpdate()
     if (!result) { updateResult.value = t('updateError'); return }
+    updateDlActive.value = false
     updateStatus.value = result
     if (result.state === 'ready') {
       updateResult.value = t('updateReady')
@@ -134,6 +151,7 @@ async function downloadUpdate() {
       updateResult.value = result.error || t('updateError')
     }
   } catch (e: any) {
+    updateDlActive.value = false
     updateResult.value = getErrorMessage(e)
   }
 }
@@ -378,11 +396,17 @@ async function toggleAutoStart() {
 
               <p v-if="updateResult" class="result-hint" :class="{ 'result-error': updateStatus?.state === 'error' }">{{ updateResult }}</p>
 
+              <div v-if="updateDlActive" class="update-dl-bar">
+                <div class="update-dl-fill" :style="{ width: updateProgress + '%' }"></div>
+              </div>
+
               <div v-if="updateStatus?.state === 'available'" class="action-row" style="margin-top:12px">
-                <button class="btn btn-primary" @click="downloadUpdate">
-                  {{ t('updateDownload') }} {{ updateStatus.availableVersion }}
+                <button class="btn btn-primary" @click="downloadUpdate" :disabled="updateDlActive">
+                  {{ updateDlActive
+                    ? t('updateDownloadingPct', { pct: updateProgress })
+                    : t('updateDownload') + ' ' + updateStatus.availableVersion }}
                 </button>
-                <button class="btn btn-secondary" @click="updateStatus.state = 'idle'">
+                <button class="btn btn-secondary" :disabled="updateDlActive" @click="updateStatus.state = 'idle'">
                   {{ t('updateSkip') }}
                 </button>
               </div>
@@ -618,6 +642,14 @@ async function toggleAutoStart() {
 /* 更新按钮 */
 .update-restart-btn { background: var(--color-accent); color: #fff; font-weight: 500; }
 .update-restart-btn:hover { opacity: 0.9; }
+.update-dl-bar {
+  height: 4px; margin-top: 10px; border-radius: 2px; overflow: hidden;
+  background: var(--color-bg-tertiary);
+}
+.update-dl-fill {
+  height: 100%; border-radius: 2px;
+  background: var(--color-accent, #4a9eff); transition: width .2s ease;
+}
 
 .update-notes {
   margin-top: 14px;

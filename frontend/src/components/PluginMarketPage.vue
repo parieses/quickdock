@@ -2,6 +2,7 @@
 import { ref, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban } from '@lucide/vue'
+import { Events } from '@wailsio/runtime'
 import { GetPluginMarket, InstallPluginFromURL } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -44,6 +45,24 @@ const loading = ref(true)
 const installing = ref<Set<string>>(new Set())
 const updated = ref('')
 
+// 下载进度（key = 下载 URL，与卡片 p.downloads.windows 匹配）
+interface DownloadProgress { url: string; downloaded: number; total: number; percent: number; stage?: string }
+const progressMap = ref<Record<string, DownloadProgress>>({})
+
+function dlState(p: MarketPlugin): DownloadProgress | undefined {
+  const url = p.downloads?.windows
+  return url ? progressMap.value[url] : undefined
+}
+
+// 按钮文案：下载中显示百分比；无 Content-Length 时显示已下载 MB；下载完切「安装中」
+function dlLabel(p: MarketPlugin): string {
+  const st = dlState(p)
+  if (!st) return t('pluginDownloading', { p: 0 })
+  if (st.stage === 'installing' || (st.total > 0 && st.percent >= 100)) return t('pluginInstalling')
+  if (st.total > 0) return t('pluginDownloading', { p: st.percent })
+  return t('pluginDownloadedSize', { mb: (st.downloaded / 1048576).toFixed(1) })
+}
+
 async function loadMarket() {
   loading.value = true
   try {
@@ -67,8 +86,9 @@ async function install(p: MarketPlugin) {
     return
   }
   installing.value.add(p.id)
+  delete progressMap.value[url]
   try {
-    await InstallPluginFromURL(url)
+    await unwrap(await InstallPluginFromURL(url)) // code!=0 抛错，防止下载失败误报成功
     toast?.success?.(t('pluginInstallSuccess'))
     await loadMarket() // 刷新 installed/has_update 状态
     emit('installed')              // 通知父页刷新本地插件列表
@@ -76,10 +96,18 @@ async function install(p: MarketPlugin) {
     toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
   } finally {
     installing.value.delete(p.id)
+    delete progressMap.value[url]
   }
 }
 
-onMounted(loadMarket)
+onMounted(() => {
+  loadMarket()
+  // Wails v3 事件 payload 在 .data（非 e.data 直接展开的细节见 WailsEvent 包装）
+  Events.On('plugin:download-progress', (e: any) => {
+    const d = (e as any)?.data as DownloadProgress | undefined
+    if (d?.url) progressMap.value[d.url] = d
+  })
+})
 </script>
 
 <template>
@@ -125,19 +153,29 @@ onMounted(loadMarket)
           <span v-for="k in Object.keys(p.permissions)" :key="k" class="perm-tag">{{ k }}</span>
         </div>
         <div class="card-actions">
+          <div v-if="dlState(p)" class="dl-bar">
+            <div
+              :class="['dl-bar-fill', { indeterminate: !dlState(p)!.total }]"
+              :style="{ width: dlState(p)!.total ? dlState(p)!.percent + '%' : '40%' }"
+            ></div>
+          </div>
           <button v-if="!p.supported" class="action-btn btn-disabled" disabled>
             <Ban :size="14" /><span>{{ t('pluginNotSupportedPlatform') }}</span>
           </button>
           <button v-else-if="p.installed && p.has_update" class="action-btn btn-upgrade"
             :disabled="installing.has(p.id)" @click="install(p)">
-            <ArrowUpCircle :size="14" /><span>{{ t('pluginUpgrade') }}</span>
+            <RefreshCw v-if="installing.has(p.id)" :size="14" class="spin" />
+            <ArrowUpCircle v-else :size="14" />
+            <span>{{ installing.has(p.id) ? dlLabel(p) : t('pluginUpgrade') }}</span>
           </button>
           <button v-else-if="p.installed" class="action-btn btn-done" disabled>
             <CheckCircle2 :size="14" /><span>{{ t('pluginInstalled') }}</span>
           </button>
           <button v-else class="action-btn btn-install"
             :disabled="installing.has(p.id)" @click="install(p)">
-            <Download :size="14" /><span>{{ t('pluginInstallFromMarket') }}</span>
+            <RefreshCw v-if="installing.has(p.id)" :size="14" class="spin" />
+            <Download v-else :size="14" />
+            <span>{{ installing.has(p.id) ? dlLabel(p) : t('pluginInstallFromMarket') }}</span>
           </button>
         </div>
       </div>
@@ -146,7 +184,7 @@ onMounted(loadMarket)
 </template>
 
 <style scoped>
-.market-page { flex: 1; display: flex; flex-direction: column; gap: 12px; }
+.market-page { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
 .market-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
 .market-header-left { display: flex; align-items: center; gap: 8px; }
 .market-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
@@ -165,7 +203,7 @@ onMounted(loadMarket)
 }
 .empty-icon { color: var(--color-text-disabled); }
 .empty-title { font-size: 13px; }
-.market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; padding-right: 2px; }
 .market-card {
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
@@ -184,6 +222,22 @@ onMounted(loadMarket)
 .card-perms { display: flex; gap: 4px; flex-wrap: wrap; }
 .perm-tag { font-size: 9px; padding: 1px 6px; border-radius: 6px; background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .card-actions { margin-top: auto; }
+.dl-bar {
+  height: 3px; margin-bottom: 6px; border-radius: 2px;
+  background: var(--color-bg-tertiary); overflow: hidden;
+}
+.dl-bar-fill {
+  height: 100%; border-radius: 2px;
+  background: var(--color-accent, #4a9eff);
+  transition: width .2s ease;
+}
+.dl-bar-fill.indeterminate { animation: dl-slide 1.2s ease-in-out infinite; }
+@keyframes dl-slide {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(350%); }
+}
+.spin { animation: dl-spin 1s linear infinite; }
+@keyframes dl-spin { to { transform: rotate(360deg); } }
 .action-btn {
   display: inline-flex; align-items: center; gap: 5px; width: 100%; justify-content: center;
   padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border);

@@ -127,7 +127,7 @@ async function handleUninstall() {
   if (operating.value.has(id)) return
   operating.value.add(id)
   try {
-    await UninstallPlugin(id)
+    await unwrap(await UninstallPlugin(id)) // code!=0 抛错，防止卸载失败误报成功
     toast?.success?.(t('deleted'))
     await loadPlugins()
   } catch (e) {

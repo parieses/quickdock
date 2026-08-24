@@ -2,6 +2,7 @@ package services
 
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -11,8 +12,10 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"quickdock/internal/plugin"
 )
 
@@ -32,6 +35,145 @@ type marketIndex struct {
 	Name    string         `json:"name"`
 	Updated string         `json:"updated"`
 	Plugins []marketPlugin `json:"plugins"`
+}
+
+// dlProgressWriter / progressTracker：下载进度节流上报（plugin:download-progress 事件）。
+// 至少间隔 minInterval 且（total 已知时）百分比变化才触发，避免事件风暴。
+// total<=0（chunked 传输无 Content-Length）时 percent 恒 0，前端回退显示已下载 MB。
+type progressTracker struct {
+	mu       sync.Mutex
+	total    int64
+	done     int64
+	lastPct  int
+	lastEmit time.Time
+	emit     func(downloaded, total int64, percent int)
+}
+
+const progressMinInterval = 150 * time.Millisecond
+
+// add 并发安全地累计 n 字节并按节流规则决定是否发事件
+func (t *progressTracker) add(n int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.done += n
+	pct := 0
+	if t.total > 0 {
+		pct = int(t.done * 100 / t.total)
+		if pct > 100 {
+			pct = 100
+		}
+	}
+	if time.Since(t.lastEmit) < progressMinInterval {
+		return
+	}
+	if t.total > 0 && pct == t.lastPct {
+		return
+	}
+	t.lastPct = pct
+	t.lastEmit = time.Now()
+	if t.emit != nil {
+		t.emit(t.done, t.total, pct)
+	}
+}
+
+// dlProgressWriter 单流下载用：包装目标 writer 并把字节数计入 tracker
+type dlProgressWriter struct {
+	dst io.Writer
+	tr  *progressTracker
+}
+
+func (w *dlProgressWriter) Write(p []byte) (int, error) {
+	n, err := w.dst.Write(p)
+	if n > 0 {
+		w.tr.add(int64(n))
+	}
+	return n, err
+}
+
+// 并发分块下载参数：仅对支持 Accept-Ranges 且体积超阈值的包启用，
+// 小包/不支持 Range 的源自动回退单流（避免小包并发握手开销与兼容性问题）
+const (
+	downloadConcurrency = 4
+	parallelMinSize     = 2 << 20 // 2MB
+)
+
+// downloadParallelTo 把 url 按 Range 切 downloadConcurrency 段并行下载，
+// 各段 WriteAt 写入已按 total 预分配的文件的对应偏移（不同偏移无写竞争）；
+// 每段最多重试 3 次，任一段最终失败即整体失败并 cancel 其余段。
+// progress 每收到一个数据块回调一次（n 为本次写入字节数），由调用方决定
+// 是否节流与如何上报——插件市场走 progressTracker.add（节流 + 事件），
+// 设置页"检查更新"走同样逻辑转发 Wails onProgress。共用同一实现避免两处分叉。
+func downloadParallelTo(client *http.Client, url string, f *os.File, total int64, progress func(downloaded int64)) error {
+	chunk := (total + downloadConcurrency - 1) / downloadConcurrency
+	g, ctx := errgroup.WithContext(context.Background())
+	for i := 0; i < downloadConcurrency; i++ {
+		start := int64(i) * chunk
+		end := start + chunk - 1
+		if end >= total {
+			end = total - 1
+		}
+		if start > end {
+			continue // 尾部空段
+		}
+		g.Go(func() error {
+			var lastErr error
+			for attempt := 0; attempt < 3; attempt++ {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				case <-time.After(time.Duration(attempt) * 500 * time.Millisecond): // 退避 0/500ms/1s
+				}
+				req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+				if err != nil {
+					return err
+				}
+				req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
+				resp, err := client.Do(req)
+				if err != nil {
+					lastErr = err
+					continue
+				}
+				if resp.StatusCode != http.StatusPartialContent {
+					io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
+					resp.Body.Close()
+					lastErr = fmt.Errorf("Range 请求返回 HTTP %d", resp.StatusCode)
+					continue
+				}
+				buf := make([]byte, 64*1024)
+				offset := start
+				var werr error
+				for {
+					n, rerr := resp.Body.Read(buf)
+					if n > 0 {
+						if _, e := f.WriteAt(buf[:n], offset); e != nil {
+							werr = e
+							break
+						}
+						offset += int64(n)
+						if progress != nil {
+							progress(int64(n))
+						}
+					}
+					if rerr != nil {
+						if rerr != io.EOF {
+							werr = rerr
+						}
+						break
+					}
+				}
+				resp.Body.Close()
+				if werr == nil && offset == end+1 {
+					return nil
+				}
+				if werr == nil {
+					werr = fmt.Errorf("分段 %d-%d 数据不完整", start, end)
+				}
+				lastErr = werr
+			}
+			return lastErr
+		})
+	}
+	return g.Wait()
 }
 
 // marketPlugin 市场中单个插件的描述
@@ -105,6 +247,10 @@ func (a *AppService) GetPluginMarket() *ApiResult {
 // InstallPluginFromURL 从 HTTPS URL 下载插件 zip 并安装。
 // 下载完成后复用 InstallPlugin（InstallFromZip + manifest 读取 + DB 记录），
 // 即与"从文件安装"走完全相同的校验与加载链路。
+//
+// GitHub Releases 直连在国内常超时（与设置页更新遇到的问题一致），故直连失败时
+// 自动改用 ghfast.top 等镜像前缀重试（复用 updateMirrorDefaults，与更新链路同一套）。
+// 进度事件统一用原始 url 标识，镜像切换不影响前端按 url 匹配卡片。
 func (a *AppService) InstallPluginFromURL(url string) *ApiResult {
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
@@ -112,16 +258,6 @@ func (a *AppService) InstallPluginFromURL(url string) *ApiResult {
 	// 强制 HTTPS：防止下载链路被中间人篡改（供应链攻击防护）
 	if !strings.HasPrefix(url, "https://") {
 		return FailMsg("仅支持 HTTPS 下载链接")
-	}
-
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Get(url)
-	if err != nil {
-		return Fail(fmt.Errorf("下载插件包失败: %w", err))
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return FailMsg(fmt.Sprintf("下载失败: HTTP %d", resp.StatusCode))
 	}
 
 	tmpDir := filepath.Join(os.TempDir(), "quickdock-market-install")
@@ -138,19 +274,34 @@ func (a *AppService) InstallPluginFromURL(url string) *ApiResult {
 		fname += ".zip"
 	}
 	tmpPath := filepath.Join(tmpDir, fname)
-
-	f, err := os.Create(tmpPath)
-	if err != nil {
-		return Fail(fmt.Errorf("创建临时文件失败: %w", err))
-	}
-	// 限制下载体积 100MB（与 InstallFromZip 解压上限一致，防恶意大包）
-	if _, err := io.Copy(f, io.LimitReader(resp.Body, maxPluginZipSize)); err != nil {
-		f.Close()
-		os.Remove(tmpPath)
-		return Fail(fmt.Errorf("写入临时文件失败: %w", err))
-	}
-	f.Close()
 	defer os.Remove(tmpPath)
+
+	// 下载源列表：直连优先；仅 GitHub 资源（github.com / githubusercontent.com）
+	// 追加镜像前缀（ghfast.top 等反代 GitHub 资源，与设置页更新同一套镜像）。
+	// 非 GitHub 源保持直连，不加前缀。
+	client := &http.Client{Timeout: 5 * time.Minute}
+	var lastErr error
+	for _, u := range pluginDownloadCandidates(url) {
+		if err := a.tryDownloadPluginZip(client, u, url, tmpPath); err == nil {
+			lastErr = nil
+			break
+		} else {
+			lastErr = err
+		}
+	}
+	if lastErr != nil {
+		return Fail(lastErr)
+	}
+
+	// 下载完成 → 进入解压安装阶段（无细粒度进度，通知前端切「安装中」态）
+	if a.app != nil {
+		if f, err := os.Stat(tmpPath); err == nil {
+			a.app.Event.Emit("plugin:download-progress", map[string]any{
+				"url": url, "downloaded": f.Size(), "total": f.Size(),
+				"percent": 100, "stage": "installing",
+			})
+		}
+	}
 
 	// 版本检查：只允许安装"新的"或"更新的"，拒绝同版本重装与降级
 	if err := a.checkPluginVersion(tmpPath); err != nil {
@@ -159,6 +310,88 @@ func (a *AppService) InstallPluginFromURL(url string) *ApiResult {
 
 	// 复用标准安装链路：InstallFromZip(zip slip/bomb 防护 + 回滚) + manifest + DB
 	return a.InstallPlugin(tmpPath)
+}
+
+// pluginDownloadCandidates 返回插件 zip 下载尝试顺序：直连优先，
+// GitHub 资源（github.com / githubusercontent.com）追加镜像前缀
+// （复用 updateMirrorDefaults，与设置页更新同一套镜像）；其他源只直连。
+func pluginDownloadCandidates(url string) []string {
+	urls := []string{url}
+	if strings.Contains(url, "github.com/") || strings.Contains(url, "githubusercontent.com/") {
+		for _, m := range updateMirrorDefaults {
+			urls = append(urls, m+url)
+		}
+	}
+	return urls
+}
+
+// tryDownloadPluginZip 尝试从单个 URL 下载插件 zip 到 tmpPath（成功时 tmpPath 为完整文件，
+// 失败时清理临时文件并返回错误）。进度事件统一用 eventURL 标识——镜像重试时保持
+// 前端按 url 匹配卡片不变。支持 Range 且 >2MB 时 4 连接分块并行下载，否则单流。
+func (a *AppService) tryDownloadPluginZip(client *http.Client, u, eventURL, tmpPath string) error {
+	// 限制下载体积 100MB（与 InstallFromZip 解压上限一致，防恶意大包）
+	// 连接级失败（如国内直连 GitHub 的 connectex/wsarecv 超时）多为瞬时抖动，立即重试一次
+	var resp *http.Response
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		if attempt > 0 {
+			time.Sleep(800 * time.Millisecond)
+		}
+		resp, err = client.Get(u)
+		if err == nil {
+			break
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("下载插件包失败: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("下载失败: HTTP %d", resp.StatusCode)
+	}
+
+	f, err := os.Create(tmpPath)
+	if err != nil {
+		return fmt.Errorf("创建临时文件失败: %w", err)
+	}
+
+	total := resp.ContentLength
+	tracker := &progressTracker{total: total, lastPct: -1, emit: func(downloaded, total int64, percent int) {
+		if a.app == nil {
+			return
+		}
+		a.app.Event.Emit("plugin:download-progress", map[string]any{
+			"url": eventURL, "downloaded": downloaded, "total": total, "percent": percent,
+		})
+	}}
+	// 探测成功、开始下载前立即发 0% 事件，让前端进度条/百分比立刻就位——
+	// 否则下载很快时（镜像/CDN）用户只看到「安装中」而看不到下载进度。
+	if a.app != nil {
+		a.app.Event.Emit("plugin:download-progress", map[string]any{
+			"url": eventURL, "downloaded": 0, "total": total, "percent": 0,
+		})
+	}
+
+	var derr error
+	if strings.Contains(resp.Header.Get("Accept-Ranges"), "bytes") && total > parallelMinSize && total <= maxPluginZipSize {
+		resp.Body.Close() // 关闭探测响应，改用带 Range 的分段请求
+		if err := f.Truncate(total); err != nil {
+			f.Close()
+			os.Remove(tmpPath)
+			return fmt.Errorf("预分配临时文件失败: %w", err)
+		}
+		derr = downloadParallelTo(client, u, f, total, tracker.add)
+	} else {
+		_, derr = io.Copy(&dlProgressWriter{dst: f, tr: tracker}, io.LimitReader(resp.Body, maxPluginZipSize))
+		resp.Body.Close()
+	}
+	if derr != nil {
+		f.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("写入临时文件失败: %w", derr)
+	}
+	f.Close()
+	return nil
 }
 
 // isPlatformSupported 判断当前系统是否支持该插件的平台声明。
