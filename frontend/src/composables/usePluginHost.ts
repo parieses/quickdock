@@ -2,6 +2,7 @@ import { inject, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ExecutePluginCommand, CopyText, GetAndClearPendingPluginInit } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
+import { Dialogs } from '@wailsio/runtime'
 import type { ToastAPI } from '../types'
 
 export interface PluginHostOptions {
@@ -106,6 +107,75 @@ export function usePluginHost(opts: PluginHostOptions) {
 
     if (event.data?.type === 'plugin:execute') {
       const { id, command, input } = event.data
+
+      // 拦截宿主 dialog 命令，直接在 frontend 调用 Wails Dialog API
+      if (command === 'host.dialog.open') {
+        try {
+          const p = input || {}
+          const multiple = !!p.multiple
+          const filters = (p.filters || []).map((f: any) => ({
+            DisplayName: f.name || f.pattern,
+            Pattern: f.pattern || '*.*'
+          }))
+          const result = await Dialogs.OpenFile({
+            Title: p.title || '选择文件',
+            Filters: filters.length > 0 ? filters : undefined,
+            AllowsMultipleSelection: multiple
+          })
+          if (multiple) {
+            const paths = Array.isArray(result) ? result : (result ? [result] : [])
+            iframePostMessage({
+              type: 'plugin:result',
+              id,
+              data: { canceled: paths.length === 0, multiple: true, paths }
+            })
+          } else {
+            const paths = typeof result === 'string' ? [result] : (result || [])
+            iframePostMessage({
+              type: 'plugin:result',
+              id,
+              data: paths.length > 0 ? { canceled: false, path: paths[0] } : { canceled: true, path: '' }
+            })
+          }
+          return
+        } catch (e: any) {
+          iframePostMessage({
+            type: 'plugin:result',
+            id,
+            data: { canceled: true, path: '' }
+          })
+          return
+        }
+      }
+
+      if (command === 'host.dialog.save') {
+        try {
+          const p = input || {}
+          const filters = (p.filters || []).map((f: any) => ({
+            DisplayName: f.name || f.pattern,
+            Pattern: f.pattern || '*.*'
+          }))
+          const result = await Dialogs.SaveFile({
+            Title: p.title || '保存文件',
+            Filename: p.defaultName || '',
+            Filters: filters.length > 0 ? filters : undefined
+          })
+          iframePostMessage({
+            type: 'plugin:result',
+            id,
+            data: result ? { canceled: false, path: result } : { canceled: true, path: '' }
+          })
+          return
+        } catch (e: any) {
+          iframePostMessage({
+            type: 'plugin:result',
+            id,
+            data: { canceled: true, path: '' }
+          })
+          return
+        }
+      }
+
       try {
         const raw = await ExecutePluginCommand(pluginId, command, input || null)
         const result = unwrap(raw)
