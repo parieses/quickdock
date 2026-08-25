@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/windows/registry"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
 	"quickdock/services"
@@ -115,6 +116,11 @@ var (
 )
 
 func main() {
+	// 全局日志：先于一切初始化，之后所有包（services/plugin/tray）的关键事件统一落盘
+	// ~/.quickdock/logs/quickdock-YYYYMMDD.log
+	logger.Init(filepath.Join(platform.DefaultDataDir(), "logs"))
+	logger.I("QuickDock 启动 -------------------------------------------------------------")
+
 	// 单实例检查：若已有实例运行，将其窗口提到前台并退出
 	if ensureSingleInstance() {
 		return

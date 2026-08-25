@@ -1,9 +1,10 @@
 package services
 
 import (
-	"fmt"
 	"strings"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 func (a *AppService) EnablePlugin(id string) *ApiResult {
@@ -38,7 +39,7 @@ func (a *AppService) EnablePlugin(id string) *ApiResult {
 			}
 			accel := hotkeyStringToAccel(cmd.Hotkey)
 			if err := a.PluginHotkeys.Register(accel, id, cmd.ID); err != nil {
-				fmt.Printf("QuickDock: 插件 %s 热键 %s 注册失败: %v\n", id, accel, err)
+				logger.W("插件 %s 热键 %s 注册失败: %v", id, accel, err)
 			} else if a.app != nil {
 				_ = a.app.GlobalShortcut.Register(accel, func() {
 					a.executePluginCommand(id, cmd.ID)
@@ -83,9 +84,9 @@ func (a *AppService) executePluginCommand(pluginID, commandID string) {
 	// 记录执行日志（5.2：忽略错误，不影响主流程）
 	a.recordPluginExecLog(pluginID, commandID, "hotkey", start, result, err)
 	if err != nil {
-		fmt.Printf("QuickDock: 插件 %s 命令 %s 执行失败: %v\n", pluginID, commandID, err)
+		logger.E("插件 %s 命令 %s 执行失败: %v", pluginID, commandID, err)
 	} else if result != nil {
-		fmt.Printf("QuickDock: 插件 %s 命令 %s 执行成功\n", pluginID, commandID)
+		logger.I("插件 %s 命令 %s 执行成功", pluginID, commandID)
 	}
 }
 

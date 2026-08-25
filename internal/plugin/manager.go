@@ -18,6 +18,7 @@ import (
 	"github.com/dop251/goja"
 	_ "modernc.org/sqlite"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
 
@@ -136,12 +137,12 @@ func (m *Manager) DiscoverAndLoad() error {
 
 		manifest, err := LoadManifest(manifestPath)
 		if err != nil {
-			fmt.Printf("QuickDock: 插件 %s 清单加载失败: %v\n", entry.Name(), err)
+			logger.W("插件 %s 清单加载失败: %v", entry.Name(), err)
 			continue
 		}
 		// 跳过当前平台不支持的插件
 		if !IsPlatformSupported(manifest) {
-			fmt.Printf("QuickDock: 跳过插件 %s（不支持当前平台 %s）\n", manifest.ID, runtime.GOOS)
+			logger.W("跳过插件 %s（不支持当前平台 %s）", manifest.ID, runtime.GOOS)
 			continue
 		}
 		jobs = append(jobs, pluginJob{manifest: *manifest, dir: filepath.Join(m.pluginsDir, entry.Name())})
@@ -154,7 +155,7 @@ func (m *Manager) DiscoverAndLoad() error {
 			defer wg.Done()
 			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: plugin load worker panic: %v\n", r) } }()
 			if err := m.LoadPlugin(j.manifest, j.dir); err != nil {
-				fmt.Printf("QuickDock: 插件 %s 启动失败: %v\n", j.manifest.ID, err)
+				logger.E("插件 %s 启动失败: %v", j.manifest.ID, err)
 			}
 		}(job)
 	}
@@ -421,7 +422,7 @@ func (m *Manager) stopPlugin(inst *PluginInstance) {
 func (m *Manager) watchPlugin(inst *PluginInstance) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("QuickDock: [PANIC] watchPlugin %s: %v\n", inst.Manifest.ID, r)
+			logger.E("[PANIC] watchPlugin %s: %v", inst.Manifest.ID, r)
 		}
 	}()
 	<-inst.doneCh
@@ -430,7 +431,7 @@ func (m *Manager) watchPlugin(inst *PluginInstance) {
 		return // 用户主动停止，不重启
 	}
 
-	fmt.Printf("QuickDock: 插件 %s 崩溃，尝试自动重启...\n", inst.Manifest.ID)
+	logger.W("插件 %s 崩溃，尝试自动重启...", inst.Manifest.ID)
 	for attempt := 1; attempt <= 3; attempt++ {
 		time.Sleep(time.Duration(attempt*2) * time.Second) // 2s, 4s, 6s
 
@@ -443,10 +444,10 @@ func (m *Manager) watchPlugin(inst *PluginInstance) {
 
 		// 重新加载插件
 		if err := m.LoadPlugin(inst.Manifest, inst.Dir); err != nil {
-			fmt.Printf("QuickDock: 插件 %s 重启第 %d 次失败: %v\n", inst.Manifest.ID, attempt, err)
+			logger.E("插件 %s 重启第 %d 次失败: %v", inst.Manifest.ID, attempt, err)
 			continue
 		}
-		fmt.Printf("QuickDock: 插件 %s 自动重启成功\n", inst.Manifest.ID)
+		logger.I("插件 %s 自动重启成功", inst.Manifest.ID)
 		return
 	}
 	fmt.Printf("QuickDock: 插件 %s 已达最大重启次数，放弃\n", inst.Manifest.ID)
@@ -513,7 +514,7 @@ func (m *Manager) pingOne(pluginID string) {
 		inst.MissedPings = 0
 		if inst.GetStatus() == "unresponsive" {
 			inst.SetStatus("running")
-			fmt.Printf("QuickDock: 插件 %s 恢复响应\n", pluginID)
+			logger.I("插件 %s 恢复响应", pluginID)
 		}
 		m.mu.Unlock()
 		return
@@ -522,20 +523,20 @@ func (m *Manager) pingOne(pluginID string) {
 	// ping 失败，递增计数器，并记录失败原因（区分超时未回 / 返回 RPC 错误 / 进程已死）
 	m.mu.Lock()
 	inst.MissedPings++
-	fmt.Printf("QuickDock: 插件 %s ping 失败（已连续 %d 次）: %v\n", pluginID, inst.MissedPings, err)
+	logger.W("插件 %s ping 失败（已连续 %d 次）: %v", pluginID, inst.MissedPings, err)
 	if inst.MissedPings >= 6 {
 		// 连续 3 轮（约 90s）无响应：强制终止进程，由 watchPlugin 自动重启。
 		// 不能走 stopPlugin（会置 stopped=true，watchPlugin 将放弃重启）
 		inst.MissedPings = 0
 		inst.SetStatus("unresponsive")
-		fmt.Printf("QuickDock: 插件 %s 长时间无响应，强制终止并重启\n", pluginID)
+		logger.E("插件 %s 长时间无响应，强制终止并重启", pluginID)
 		if inst.Cmd != nil && inst.Cmd.Process != nil {
 			inst.Cmd.Process.Kill()
 		}
 	} else if inst.MissedPings >= 3 && inst.GetStatus() == "running" {
 		inst.SetStatus("unresponsive")
 		inst.UnresponsiveAt = time.Now()
-		fmt.Printf("QuickDock: 插件 %s 连续 %d 次无响应，标记为 unresponsive\n", pluginID, inst.MissedPings)
+		logger.E("插件 %s 连续 %d 次无响应，标记为 unresponsive", pluginID, inst.MissedPings)
 	}
 	m.mu.Unlock()
 }

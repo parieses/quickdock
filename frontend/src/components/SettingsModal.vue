@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, Terminal } from '@lucide/vue'
+import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, Terminal, FolderOpen } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { unwrap } from '../utils/api'
 import { i18n } from '../i18n'
@@ -20,7 +20,7 @@ import { GetClipboardRetentionDays, SetClipboardRetentionDays, CleanupClipboardN
 import { GetAutoStart, SetAutoStart } from '../../bindings/quickdock/services/appservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services/appservice'
-import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/appservice'
+import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState, OpenLogsDir, GetLogsInfo } from '../../bindings/quickdock/services/appservice'
 import type { UpdateStatus, AIProfile } from '../../bindings/quickdock/services/models'
 import type { ToastAPI } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
@@ -134,6 +134,37 @@ async function checkForUpdates() {
   } finally {
     updateChecking.value = false
   }
+}
+
+// ---- 日志卡片：路径 + 打开目录 + 最近 50 行预览（带 I/W/E 色标）----
+const logsInfo = ref<{ dir: string; currentFile: string; recentLines: string[] } | null>(null)
+const logsExpanded = ref(false)
+const logsLoading = ref(false)
+
+async function loadLogs() {
+  if (logsInfo.value && logsInfo.value.recentLines.length > 0) return
+  logsLoading.value = true
+  try {
+    logsInfo.value = unwrap<any>(await GetLogsInfo(50)) || null
+  } catch (e: any) {
+    toast?.error?.(getErrorMessage(e))
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+async function toggleLogsPreview() {
+  logsExpanded.value = !logsExpanded.value
+  if (logsExpanded.value) await loadLogs()
+}
+
+async function openLogsDir() {
+  try { await OpenLogsDir() } catch (e: any) { toast?.error?.(getErrorMessage(e)) }
+}
+
+function logLineClass(line: string): string {
+  const m = line.match(/\[([IWE])\]/)
+  return 'log-line log-' + (m ? m[1].toLowerCase() : 'i')
 }
 
 async function downloadUpdate() {
@@ -421,6 +452,34 @@ async function toggleAutoStart() {
                   {{ t('updateRestart') }}
                 </button>
               </div>
+            </div>
+
+            <!-- 日志（全局排障入口） -->
+            <div class="section" style="margin-top:24px">
+              <h3 class="section-title">{{ t('logsTitle') }}</h3>
+              <p class="section-desc">{{ t('logsDesc') }}</p>
+              <div class="action-row" style="margin-top:12px">
+                <button class="btn btn-secondary" @click="openLogsDir">
+                  <FolderOpen :size="14" />
+                  {{ t('logsOpenDir') }}
+                </button>
+                <button class="btn btn-secondary" @click="toggleLogsPreview" :disabled="logsLoading">
+                  <RotateCcw v-if="logsLoading" :size="14" class="spinning" />
+                  {{ logsExpanded ? t('logsCollapse') : t('logsShowLines') }}
+                </button>
+              </div>
+              <div v-if="logsExpanded" class="logs-preview">
+                <div v-if="logsLoading">{{ t('loading') }}</div>
+                <template v-else>
+                  <div
+                    v-for="(ln, i) in logsInfo?.recentLines || []"
+                    :key="i"
+                    :class="logLineClass(ln)"
+                  >{{ ln }}</div>
+                  <p v-if="!logsInfo || logsInfo.recentLines.length === 0" class="section-desc logs-empty">{{ t('logsEmpty') }}</p>
+                </template>
+              </div>
+              <p v-if="logsInfo?.currentFile" class="logs-path">{{ logsInfo.currentFile }}</p>
             </div>
           </div>
 
@@ -723,6 +782,22 @@ async function toggleAutoStart() {
 .btn-secondary:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
 .action-row { margin-top: 8px; }
 .result-hint { font-size: 12px; color: var(--color-accent); margin: 8px 0 0; }
+
+/* 日志卡片 */
+.logs-preview {
+  margin-top: 10px; max-height: 300px; overflow: auto;
+  font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.55;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border); border-radius: 8px;
+  padding: 10px 12px; white-space: pre-wrap; word-break: break-all;
+  user-select: text;
+}
+.log-line { margin: 0; }
+.log-i { color: var(--color-text-secondary); }
+.log-w { color: var(--color-warning, #d97706); }
+.log-e { color: var(--color-danger); font-weight: 600; }
+.logs-path { margin-top: 8px; font-size: 11px; color: var(--color-text-disabled); word-break: break-all; user-select: text; }
+.logs-empty { margin: 4px 0; }
 
 /* 切换开关 */
 .toggle-btn {

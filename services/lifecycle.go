@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/db"
 	"quickdock/internal/platform"
 
@@ -19,22 +20,22 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	dbDir := platform.DefaultDataDir()
 	os.MkdirAll(dbDir, 0755)
 	dbPath := filepath.Join(dbDir, "quickdock.db")
-	fmt.Println("QuickDock: 正在打开数据库", dbPath)
+	logger.I("正在打开数据库 %s", dbPath)
 
 	database, err := db.Open(dbPath)
 	if err != nil {
-		fmt.Println("QuickDock: 数据库打开失败:", err.Error())
+		logger.E("数据库打开失败: %s", err.Error())
 		return err
 	}
 	a.DB = database
-	fmt.Println("QuickDock: 数据库已打开")
+	logger.I("数据库已打开")
 
 	// 检查 PRAGMA 状态
 	fkRow, err := database.QueryOne("PRAGMA foreign_keys")
 	if err != nil {
-		fmt.Println("QuickDock: PRAGMA 检查失败:", err.Error())
+		logger.W("PRAGMA 检查失败: %s", err.Error())
 	} else {
-		fmt.Println("QuickDock: PRAGMA foreign_keys =", fmt.Sprintf("%v", fkRow["foreign_keys"]))
+		logger.I("PRAGMA foreign_keys = %v", fkRow["foreign_keys"])
 	}
 
 	// 确保默认工作空间存在

@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"unsafe"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/services"
 
@@ -798,20 +799,20 @@ func registerAllHotkeys(app *application.App) {
 	if err := app.GlobalShortcut.Register(appAccel, func() {
 		toggleMainWindow()
 	}); err != nil {
-		fmt.Printf("QuickDock: 热键 [%s] 注册失败: %v，回退到 Ctrl+Space\n", appAccel, err)
+		logger.W("热键 [%s] 注册失败: %v，回退到 Ctrl+Space", appAccel, err)
 		app.GlobalShortcut.Register("Ctrl+Space", func() { toggleMainWindow() })
 		registeredAppAccel = "Ctrl+Space"
 		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
 			svc.DB.SetSetting("hotkey", "2,32")
 		}
 	} else {
-		fmt.Printf("QuickDock: 全局快捷键 [%s] 已注册\n", appAccel)
+		logger.I("全局快捷键 [%s] 已注册", appAccel)
 	}
 
 	// 剪贴板窗口热键回调
 	registeredClipAccel := clipAccel
 	if err := app.GlobalShortcut.Register(clipAccel, toggleClipboardWindow); err != nil {
-		fmt.Printf("QuickDock: 剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+`\n", clipAccel, err)
+		logger.W("剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+`", clipAccel, err)
 		app.GlobalShortcut.Register("Ctrl+`", func() {
 			cw := getClipboardWindow()
 			if cw == nil { return }
@@ -826,7 +827,7 @@ func registerAllHotkeys(app *application.App) {
 			svc.DB.SetSetting("clipboard_hotkey", "2,192")
 		}
 	} else {
-		fmt.Printf("QuickDock: 剪贴板快捷键 [%s] 已注册\n", clipAccel)
+		logger.I("剪贴板快捷键 [%s] 已注册", clipAccel)
 	}
 
 	// 命令面板热键（默认 Ctrl+K），注册前先读取 palette 配置
@@ -854,24 +855,24 @@ func registerAllHotkeys(app *application.App) {
 		}
 	}
 	if err := app.GlobalShortcut.Register(paletteAccel, handlePaletteHotkey); err != nil {
-		fmt.Printf("QuickDock: 命令面板热键 [%s] 注册失败: %v\n", paletteAccel, err)
+		logger.W("命令面板热键 [%s] 注册失败: %v", paletteAccel, err)
 		app.GlobalShortcut.Register("Ctrl+K", handlePaletteHotkey)
 		registeredPaletteAccel = "Ctrl+K"
 	} else {
-		fmt.Printf("QuickDock: 命令面板快捷键 [%s] 已注册\n", paletteAccel)
+		logger.I("命令面板快捷键 [%s] 已注册", paletteAccel)
 	}
 
 	// 快捷笔记热键（默认 Ctrl+Shift+N），复用剪贴板独立窗口导航到 #/note
 	registeredNoteAccel := noteAccel
 	if err := app.GlobalShortcut.Register(noteAccel, showNoteWindow); err != nil {
-		fmt.Printf("QuickDock: 笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+N\n", noteAccel, err)
+		logger.W("笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+N", noteAccel, err)
 		app.GlobalShortcut.Register("Ctrl+Shift+N", showNoteWindow)
 		registeredNoteAccel = "Ctrl+Shift+N"
 		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
 			svc.DB.SetSetting("note_hotkey", "6,78")
 		}
 	} else {
-		fmt.Printf("QuickDock: 笔记快捷键 [%s] 已注册\n", noteAccel)
+		logger.I("笔记快捷键 [%s] 已注册", noteAccel)
 	}
 
 	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel, registeredNoteAccel)
