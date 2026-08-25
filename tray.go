@@ -42,6 +42,51 @@ const CTRL_BACKQUOTE = "Ctrl+" + ctrlBackquote
 //go:embed build/tray.ico
 var trayIcoEmbed []byte
 
+// trayIconData 从内嵌 ICO 中抽出最适合作托盘小图标的一帧的资源载荷（PNG/DIB）。
+//
+// 背景：框架 w32.CreateSmallHIconFromImage 会把传入的整份 .ico（含 ICONDIR 头）
+// 直接交给 Windows CreateIconFromResourceEx，而该 API 期望的是"去掉 ICONDIR 头的
+// 帧内资源数据"；整份文件传入会创建失败，并留下误导性的
+// "The operation completed successfully."（ERROR_SUCCESS 残留）警告。
+// 此函数先按面积最小抽出一帧，再交给框架转换——与旧版手工 loadIconFromEmbed 等价，
+// 但保持本文件纯净（零 Win32 调用，跨平台可编译）。解析失败时回退原字节。
+func trayIconData() []byte {
+	data := trayIcoEmbed
+	if len(data) < 6+16 {
+		return data
+	}
+	count := int(data[4]) | int(data[5])<<8
+	if count == 0 {
+		return data
+	}
+	// 选面积最小的一帧（托盘小图标，缩放损耗最小；同面积取首个）
+	best, bestArea := 0, 1<<30
+	for i := 0; i < count; i++ {
+		off := 6 + i*16
+		if off+16 > len(data) {
+			break
+		}
+		w, h := int(data[off]), int(data[off+1])
+		if w == 0 {
+			w = 256
+		}
+		if h == 0 {
+			h = 256
+		}
+		if a := w * h; a < bestArea {
+			bestArea = a
+			best = i
+		}
+	}
+	eOff := 6 + best*16
+	imgOff := int(data[eOff+12]) | int(data[eOff+13])<<8 | int(data[eOff+14])<<16 | int(data[eOff+15])<<24
+	imgSize := int(data[eOff+8]) | int(data[eOff+9])<<8 | int(data[eOff+10])<<16 | int(data[eOff+11])<<24
+	if imgSize == 0 || imgOff+imgSize > len(data) {
+		return data
+	}
+	return data[imgOff : imgOff+imgSize]
+}
+
 // 全局状态
 var (
 	hotkeyApp     *application.App
@@ -168,11 +213,12 @@ func createSystemTray(app *application.App) {
 		requestQuit()
 	})
 
-	// SetIcon 直接接收 .ico/.png 字节（内部 CreateSmallHIconFromImage 会按
-	// SM_CXSMICON 缩放到系统托盘标准尺寸，替代旧 loadIconFromEmbed 的手工选帧逻辑）
+	// SetIcon 接收一帧资源数据（见 trayIconData）：框架 CreateSmallHIconFromImage
+	// 会按 SM_CXSMICON 缩放到托盘标准尺寸。注意不能传整份 .ico 文件，否则框架会
+	// 把含 ICONDIR 头的整包交给 CreateIconFromResourceEx 而创建失败（误导性 WARN）。
 	trayLock.Lock()
 	tray := app.SystemTray.New()
-	tray.SetIcon(trayIcoEmbed)
+	tray.SetIcon(trayIconData())
 	tray.SetTooltip("快启坞 QuickDock")
 	tray.SetMenu(menu)
 	tray.OnClick(func() {
