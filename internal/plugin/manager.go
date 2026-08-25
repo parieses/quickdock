@@ -662,13 +662,38 @@ func (m *Manager) UninstallPlugin(id string) error {
 	if !pluginIDRe.MatchString(id) {
 		return fmt.Errorf("%w: 非法插件 ID: %q", ErrInvalidManifest, id)
 	}
+	// 停进程前先记下 PID：stopPlugin 的 Process.Kill 只杀主进程，
+	// 兜底再用 taskkill /F /T 杀整棵进程树，防止子进程残留占用 exe 句柄
+	var pid int
+	m.mu.RLock()
+	if inst, ok := m.plugins[id]; ok && inst.Cmd != nil && inst.Cmd.Process != nil {
+		pid = inst.Cmd.Process.Pid
+	}
+	m.mu.RUnlock()
 	// 先停进程并从内存移除：否则 Windows 上驻留的 native exe 会占用文件句柄，删除静默失败并留下孤儿进程
 	m.UnloadPlugin(id)
-	dir := filepath.Join(m.pluginsDir, id)
-	if err := os.RemoveAll(dir); err != nil {
-		return fmt.Errorf("删除插件目录失败: %w", err)
+	if pid > 0 {
+		killProcessTree(pid)
 	}
-	return nil
+
+	dir := filepath.Join(m.pluginsDir, id)
+	// Windows 上进程退出后文件句柄释放有延迟/残留（杀软扫描、WER、SearchIndexer 等），
+	// 删除失败时按目录强杀残留进程并带退避重试；仍失败则给出明确操作指引
+	var lastErr error
+	for attempt := 0; attempt < 5; attempt++ {
+		if err := os.RemoveAll(dir); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if attempt < 4 {
+			if runtime.GOOS == "windows" {
+				killProcessesLockingDir(dir)
+			}
+			time.Sleep(time.Duration(attempt+1) * 250 * time.Millisecond) // 250ms, 500ms, 750ms, 1s
+		}
+	}
+	return fmt.Errorf("删除插件目录失败（可能仍有进程占用）: %w；请退出 QuickDock（托盘图标→退出）后重试卸载", lastErr)
 }
 
 // GetFrontendPath 获取插件前端资源入口路径
