@@ -415,9 +415,8 @@ quickdock/
 │   │   ├── i18n/         # 国际化（zh-CN / en-US）
 │   │   └── composables/  # 组合式函数（useHttpData / useHttpDrag / useFrecency …）
 │   └── vite.config.ts
-├── plugins/builtin/     # 17 个内置插件（含 1 个 _shared 共享资源目录）
+├── plugins/builtin/     # 仅存 common.css/js 骨架（宿主注入兼容用，勿删）
 ├── plugins/templates/   # 插件开发模板（none / goja / native）
-├── tools/system-tools/  # 共享原生工具（端口扫描 / Hosts / WiFi 插件共用）
 ├── build/               # 构建配置
 ├── docs/                # 设计文档
 ├── DESIGN.md            # 设计系统规范

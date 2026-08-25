@@ -77,6 +77,18 @@ func (a *AppService) DisablePlugin(id string) *ApiResult {
 	return Ok(nil)
 }
 
+// KillPlugin 强制终止插件进程（进程树 + 目录内孤儿），并停止其自动重启。
+// 插件管理页「停止进程」用：插件锁住目录导致更新/卸载失败时，一键结束。
+func (a *AppService) KillPlugin(id string) *ApiResult {
+	if a.PluginMgr == nil {
+		return FailMsg("plugin manager not initialized")
+	}
+	if err := a.PluginMgr.KillPlugin(id); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
+}
+
 // executePluginCommand 内部调用插件命令（供热键回调使用）
 func (a *AppService) executePluginCommand(pluginID, commandID string) {
 	start := time.Now()

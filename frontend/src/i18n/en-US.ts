@@ -520,6 +520,8 @@ export default {
   pluginExecResult: 'Result',
   pluginEnable: 'Enable',
   pluginDisable: 'Disable',
+  pluginKilled: 'Plugin process terminated',
+  pluginKillTitle: 'Force kill process (stop first if it locks the folder, then update/uninstall)',
   pluginStatusRunning: 'Running',
   pluginStatusStopped: 'Stopped',
   pluginStatusCrashed: 'Crashed',

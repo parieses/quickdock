@@ -1,191 +1,121 @@
+//go:build windows
+
 package platform
+
+// 多显示器定位。
+//
+// 屏幕几何数据全部来自框架 ScreenManager（app.Screen.GetAll() 的
+// PhysicalBounds / PhysicalWorkArea / Bounds），不再手写 MONITORINFO 结构与
+// MonitorFromPoint/GetMonitorInfoW 调用；仅保留三个无法跨平台的最小 Win32
+// 操作（取光标坐标 / 取窗口物理矩形 / 物理坐标移动窗口），且统一复用框架公开的
+// pkg/w32 封装，不再自带 unsafe proc 声明。
+//
+// 注意：不要用 w32.MonitorFromPoint——该封装把 x/y 当两个独立 uintptr 传参，
+// 而 API 期望打包成 POINT（两个 int32 合一个 8 字节），64 位下会传错 dwFlags。
+// 本实现改为遍历框架屏幕数据做命中判定，从根上绕开该问题。
 
 import (
 	"fmt"
-	"syscall"
-	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/w32"
 )
 
-var (
-	user32DLL          = syscall.NewLazyDLL("user32.dll")
-	procGetCursorPos   = user32DLL.NewProc("GetCursorPos")
-	procMonitorFromPt  = user32DLL.NewProc("MonitorFromPoint")
-	procGetMonitorInfo = user32DLL.NewProc("GetMonitorInfoW")
-	procGetWindowRect  = user32DLL.NewProc("GetWindowRect")
-	procSetWindowPos   = user32DLL.NewProc("SetWindowPos")
-)
-
-// SetWindowToCursorScreen repositions the window to be centered on the monitor
-// where the mouse cursor is currently located (multi-monitor support).
-// winWidth/winHeight are the desired DIP size (used only as fallback when
-// the window's current physical size cannot be determined).
-//
-// All Windows API calls here operate in physical pixel coordinates.
-// We bypass Wails' SetPosition() (which expects DIP and internally
-// converts DIP→physical) to avoid double-scaling on high-DPI displays.
-//
-// IMPORTANT: We do NOT use w32.MonitorFromPoint() because that wrapper
-// passes x and y as separate uintptr arguments, but the Windows API
-// expects a POINT struct (two int32 packed into one 8-byte value).
-// On 64-bit Windows this causes dwFlags to receive the y coordinate,
-// making the function return NULL.
-// getCursorMonitorWorkArea returns the work area (physical pixels) of the
-// monitor nearest to the mouse cursor. Returns false on failure.
-func getCursorMonitorWorkArea() (workLeft, workTop, workWidth, workHeight int, ok bool) {
-	var cursorPt struct{ X, Y int32 }
-	ret, _, _ := procGetCursorPos.Call(uintptr(unsafe.Pointer(&cursorPt)))
-	if ret == 0 {
+// cursorScreen 返回鼠标光标所在的屏幕：
+// 优先命中 PhysicalBounds，未命中（光标在屏幕间隙等）取中心最近者。
+func cursorScreen() *application.Screen {
+	app := application.Get()
+	if app == nil {
+		return nil
+	}
+	x, y, ok := w32.GetCursorPos()
+	if !ok {
 		fmt.Println("QuickDock: GetCursorPos failed, keeping default position")
-		return 0, 0, 0, 0, false
+		return nil
 	}
 
-	pointPacked := uintptr(uint32(cursorPt.X)) | (uintptr(uint32(cursorPt.Y)) << 32)
-	const MONITOR_DEFAULTTONEAREST = 0x00000002
-	hMonitor, _, _ := procMonitorFromPt.Call(pointPacked, uintptr(MONITOR_DEFAULTTONEAREST))
-	if hMonitor == 0 {
-		fmt.Println("QuickDock: MonitorFromPoint failed, keeping default position")
-		return 0, 0, 0, 0, false
+	screens := app.Screen.GetAll()
+	if len(screens) == 0 {
+		return nil
 	}
 
-	var mi struct {
-		CbSize    uint32
-		RcMonitor struct{ Left, Top, Right, Bottom int32 }
-		RcWork    struct{ Left, Top, Right, Bottom int32 }
-		DwFlags   uint32
+	var best *application.Screen
+	var bestDist int64 = 1 << 62
+	for _, s := range screens {
+		b := s.PhysicalBounds
+		if x >= b.X && x < b.X+b.Width && y >= b.Y && y < b.Y+b.Height {
+			return s
+		}
+		dx := b.X + b.Width/2 - x
+		dy := b.Y + b.Height/2 - y
+		d := int64(dx)*int64(dx) + int64(dy)*int64(dy)
+		if d < bestDist {
+			bestDist, best = d, s
+		}
 	}
-	mi.CbSize = uint32(unsafe.Sizeof(mi))
-	ret, _, _ = procGetMonitorInfo.Call(hMonitor, uintptr(unsafe.Pointer(&mi)))
-	if ret == 0 {
-		fmt.Println("QuickDock: GetMonitorInfo failed, keeping default position")
-		return 0, 0, 0, 0, false
-	}
-
-	return int(mi.RcWork.Left), int(mi.RcWork.Top),
-		int(mi.RcWork.Right - mi.RcWork.Left), int(mi.RcWork.Bottom - mi.RcWork.Top),
-		true
+	return best
 }
 
-// setWindowPosPhysical moves the window using SetWindowPos with physical
-// pixel coordinates, bypassing Wails' DIP conversion to avoid double-scaling.
+// windowPhysicalSize 取窗口当前物理尺寸（隐藏窗口也返回最后已知值）。
+func windowPhysicalSize(win *application.WebviewWindow) (w, h int, ok bool) {
+	nw := win.NativeWindow()
+	if nw == nil {
+		return 0, 0, false
+	}
+	rect := w32.GetWindowRect(w32.HWND(uintptr(nw)))
+	if rect == nil || rect.Right <= rect.Left || rect.Bottom <= rect.Top {
+		return 0, 0, false
+	}
+	return int(rect.Right - rect.Left), int(rect.Bottom - rect.Top), true
+}
+
+// setWindowPosPhysical 用物理像素坐标移动窗口。
+// 绕过 Wails SetPosition 的 DIP 转换，避免高 DPI 下二次缩放。
 func setWindowPosPhysical(win *application.WebviewWindow, x, y int) {
-	hwnd := win.NativeWindow()
-	if hwnd == nil {
+	nw := win.NativeWindow()
+	if nw == nil {
 		win.SetPosition(x, y)
 		return
 	}
-	const SWP_NOSIZE = 0x0001
-	const SWP_NOZORDER = 0x0004
-	procSetWindowPos.Call(
-		uintptr(hwnd),
-		0,
-		uintptr(x), uintptr(y),
-		0, 0,
-		uintptr(SWP_NOSIZE|SWP_NOZORDER),
-	)
+	w32.SetWindowPos(w32.HWND(uintptr(nw)), 0, x, y, 0, 0,
+		w32.SWP_NOSIZE|w32.SWP_NOZORDER)
 }
 
-// SetWindowToScreenTopCenter positions the window at the top-center of the
-// monitor where the mouse cursor is located (Spotlight style).
-// topMargin is the gap from the top of the work area, in physical pixels.
-func SetWindowToScreenTopCenter(win *application.WebviewWindow, winWidth, winHeight, topMargin int) {
-	if win == nil {
-		return
-	}
-
-	workLeft, workTop, workWidth, _, ok := getCursorMonitorWorkArea()
-	if !ok {
-		return
-	}
-
-	// Get window physical size
-	var physW int
-	hwnd := win.NativeWindow()
-	if hwnd != nil {
-		var winRect struct{ Left, Top, Right, Bottom int32 }
-		ret, _, _ := procGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&winRect)))
-		if ret != 0 && winRect.Right > winRect.Left {
-			physW = int(winRect.Right - winRect.Left)
-		}
-	}
-	if physW == 0 {
-		physW = winWidth
-	}
-
-	x := workLeft + (workWidth-physW)/2
-	y := workTop + topMargin
-
-	setWindowPosPhysical(win, x, y)
-}
-
+// SetWindowToCursorScreen 将窗口居中到鼠标光标所在显示器的工作区。
 func SetWindowToCursorScreen(win *application.WebviewWindow, winWidth, winHeight int) {
 	if win == nil {
 		return
 	}
-
-	workLeft, workTop, workWidth, workHeight, ok := getCursorMonitorWorkArea()
-	if !ok {
+	screen := cursorScreen()
+	if screen == nil {
 		return
 	}
+	work := screen.PhysicalWorkArea
 
-	// 4. Try to use SetWindowPos directly with physical coordinates
-	hwnd := win.NativeWindow()
-	if hwnd != nil {
-		// Get the window's current physical size via GetWindowRect.
-		// This works even on hidden windows (returns last known position/size).
-		var winRect struct{ Left, Top, Right, Bottom int32 }
-		ret, _, _ := procGetWindowRect.Call(uintptr(hwnd), uintptr(unsafe.Pointer(&winRect)))
-
-		var physW, physH int
-		if ret != 0 && winRect.Right > winRect.Left && winRect.Bottom > winRect.Top {
-			physW = int(winRect.Right - winRect.Left)
-			physH = int(winRect.Bottom - winRect.Top)
-		} else {
-			// Window not yet sized — use DIP dimensions as approximation.
-			physW = winWidth
-			physH = winHeight
+	if physW, physH, ok := windowPhysicalSize(win); ok {
+		x := work.X + (work.Width-physW)/2
+		y := work.Y + (work.Height-physH)/2
+		// 收敛到工作区边界内
+		if x < work.X {
+			x = work.X
 		}
-
-		// 5. Calculate centered position (all physical coordinates)
-		x := workLeft + (workWidth-physW)/2
-		y := workTop + (workHeight-physH)/2
-
-		// Clamp to work area bounds
-		if x < workLeft {
-			x = workLeft
+		if y < work.Y {
+			y = work.Y
 		}
-		if y < workTop {
-			y = workTop
+		if x+physW > work.X+work.Width {
+			x = work.X + work.Width - physW
 		}
-		if x+physW > workLeft+workWidth {
-			x = workLeft + workWidth - physW
+		if y+physH > work.Y+work.Height {
+			y = work.Y + work.Height - physH
 		}
-		if y+physH > workTop+workHeight {
-			y = workTop + workHeight - physH
-		}
-
 		setWindowPosPhysical(win, x, y)
 		return
 	}
 
-	// 7. Fallback: use Wails SetPosition (DIP coordinates).
-	// This path is only hit if NativeWindow() returns nil (shouldn't happen on Windows).
-	x := workLeft + (workWidth-winWidth)/2
-	y := workTop + (workHeight-winHeight)/2
-
-	if x < workLeft {
-		x = workLeft
-	}
-	if y < workTop {
-		y = workTop
-	}
-	if x+winWidth > workLeft+workWidth {
-		x = workLeft + workWidth - winWidth
-	}
-	if y+winHeight > workTop+workHeight {
-		y = workTop + workHeight - winHeight
-	}
-
+	// 兜底：无原生句柄时用框架 DIP 几何数据居中
+	// （旧实现此处误把物理坐标当 DIP 传给 SetPosition，高 DPI 下位置偏差）
+	b := screen.Bounds
+	x := b.X + (b.Width-winWidth)/2
+	y := b.Y + (b.Height-winHeight)/2
 	win.SetPosition(x, y)
 }

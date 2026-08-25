@@ -9,6 +9,8 @@ import (
 	"syscall"
 
 	"golang.org/x/sys/windows"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // dangerousSchemes 拒绝直接通过 ShellExecute 触发的危险协议（存储型协议注入防护）。
@@ -29,6 +31,11 @@ func rejectDangerous(target string) error {
 
 // ShellOpen 使用系统默认关联程序打开软件/文件/目录/网址（等价于双击/在浏览器打开）。
 // workingDir 为空时使用进程默认目录。
+//
+// 路由策略（优先框架 Browser，跨平台；失败或不适配时回退 ShellExecute 直连）：
+//   - http/https 网址、真实存在的本地路径 → app.Browser.OpenURL / OpenFile
+//   - workingDir 非空（quicklink 需要工作目录，Browser 不支持）→ 直连
+//   - 自定义协议（vscode:// 等）、不存在的裸目标 → 直连，维持旧的系统关联解析行为
 func ShellOpen(target, workingDir string) error {
 	target = strings.TrimSpace(target)
 	if target == "" {
@@ -37,6 +44,43 @@ func ShellOpen(target, workingDir string) error {
 	if err := rejectDangerous(target); err != nil {
 		return err
 	}
+
+	if strings.TrimSpace(workingDir) == "" {
+		lower := strings.ToLower(target)
+		switch {
+		case strings.HasPrefix(lower, "http://") || strings.HasPrefix(lower, "https://"):
+			// 网址：无空格歧义，直接走框架
+			return browserOpen(target, true)
+		case !strings.Contains(lower, "://"):
+			// 仅真实存在且不含空白的本地路径走框架；
+			// 含空白路径 rundll32 的参数解析不可靠，交 ShellExecute（对空格/引号最稳）
+			if _, err := os.Stat(target); err == nil && !strings.ContainsAny(target, " \t") {
+				return browserOpen(target, false)
+			}
+		}
+	}
+	return shellOpenDirect(target, workingDir)
+}
+
+// browserOpen 经框架 Browser 打开（Windows= rundll32 FileProtocolHandler，
+// darwin=open，linux=xdg-open）；框架未就绪或调用失败时回退直连保持可用性。
+func browserOpen(target string, isURL bool) error {
+	if app := application.Get(); app != nil && app.Browser != nil {
+		var err error
+		if isURL {
+			err = app.Browser.OpenURL(target)
+		} else {
+			err = app.Browser.OpenFile(target)
+		}
+		if err == nil {
+			return nil
+		}
+	}
+	return shellOpenDirect(target, "")
+}
+
+// shellOpenDirect 直接经 ShellExecute 打开（支持 workingDir）。
+func shellOpenDirect(target, workingDir string) error {
 	var dirPtr *uint16
 	if strings.TrimSpace(workingDir) != "" {
 		dirPtr = windows.StringToUTF16Ptr(workingDir)

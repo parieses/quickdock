@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe } from '@lucide/vue'
-import { ListPlugins, DisablePlugin, EnablePlugin, UninstallPlugin, SelectAndInstallPlugin, GetPluginIcon, ShowPluginWindow, ListPluginExecLogs } from '../../bindings/quickdock/services/appservice'
+import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square } from '@lucide/vue'
+import { ListPlugins, DisablePlugin, EnablePlugin, UninstallPlugin, SelectAndInstallPlugin, GetPluginIcon, ShowPluginWindow, ListPluginExecLogs, KillPlugin } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -91,6 +91,21 @@ async function loadPlugins() {
     toast?.error?.(t('pluginLoadFailed') + ': ' + getErrorMessage(e))
   } finally {
     loading.value = false
+  }
+}
+
+// ---- 强制终止进程（进程锁目录导致更新/卸载失败时用）----
+async function killPlugin(p: PluginInfo) {
+  if (operating.value.has(p.id)) return
+  operating.value.add(p.id)
+  try {
+    await KillPlugin(p.id)
+    p.status = 'stopped'
+    toast?.success?.(t('pluginKilled'))
+  } catch (e) {
+    toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
+  } finally {
+    operating.value.delete(p.id)
   }
 }
 
@@ -272,6 +287,15 @@ onMounted(() => { loadPlugins(); loadLogs() })
             :title="p.status === 'running' ? t('pluginDisable') : t('pluginEnable')"
           >
             <component :is="p.status === 'running' ? PowerOff : Power" :size="12" />
+          </button>
+          <button
+            v-if="p.status === 'running' || p.status === 'crashed'"
+            class="action-top-btn btn-kill-top"
+            :disabled="operating.has(p.id)"
+            @click.stop="killPlugin(p)"
+            :title="t('pluginKillTitle')"
+          >
+            <Square :size="11" />
           </button>
           <button
             v-if="p.hasFrontend"
@@ -464,6 +488,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 }
 .action-top-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .action-top-btn.btn-stop-top:hover { color: #E2A04A; }
+.action-top-btn.btn-kill-top:hover { color: #E24B4A; }
 .action-top-btn.btn-open-top:hover { color: var(--color-accent); }
 .action-top-btn.btn-uninstall-top:hover { color: #E24B4A; }
 

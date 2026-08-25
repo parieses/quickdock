@@ -12,6 +12,7 @@ import (
 
 	"quickdock/internal/db"
 	"quickdock/internal/plugin"
+	"quickdock/services/dsh"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -37,9 +38,6 @@ type AppService struct {
 	ClipboardMode *atomic.Bool
 	PaletteMode   *atomic.Bool
 	NoteMode      *atomic.Bool
-
-	// 隐藏窗口 HWND（给剪贴板系统 API 用）
-	HiddenHWND atomic.Uint64
 
 	// main 包注入的回调（避免循环依赖）
 	StartHotkeyListenerFn func(app *application.App, svc *AppService)
@@ -97,8 +95,8 @@ type AppService struct {
 	aiStream   *aiStreamServer
 
 	// DeepSeek Harness 运行环境（检测/下载便携 Node + 安装 dsh）与进程管理
-	NodeEnv *NodeEnvManager
-	DSH     *DSHProcessManager
+	NodeEnv *dsh.NodeEnvManager
+	DSH     *dsh.DSHProcessManager
 
 	// 共享 HTTP 客户端（连接复用，避免每次 AI 请求新建 TLS 握手）
 	aiHTTPClient *http.Client
@@ -112,9 +110,9 @@ type AppService struct {
 
 	// 当前激活 AI 档案缓存：聊天流式请求会高频调用 getActiveAIProfile（读库+DPAPI 解密）。
 	// 保存档案时通过 invalidateAICache 失效。mu 保护可重入。
-	aiCacheMu    sync.RWMutex
-	aiCachedCfg  AIProfile
-	aiCachedOK   bool
+	aiCacheMu   sync.RWMutex
+	aiCachedCfg AIProfile
+	aiCachedOK  bool
 }
 
 type frontendCacheEntry struct {
@@ -125,11 +123,11 @@ type frontendCacheEntry struct {
 
 // NewAppService 创建应用服务实例
 func NewAppService() *AppService {
-	nodeEnv := NewNodeEnvManager()
+	nodeEnv := dsh.NewNodeEnvManager()
 	return &AppService{
 		frontendCache: make(map[string]*frontendCacheEntry),
 		NodeEnv:       nodeEnv,
-		DSH:           NewDSHProcessManager(nil, nodeEnv),
+		DSH:           dsh.NewDSHProcessManager(nil, nodeEnv),
 		aiHTTPClient: &http.Client{
 			Timeout: 5 * time.Minute,
 			Transport: &http.Transport{
@@ -145,7 +143,7 @@ func NewAppService() *AppService {
 func (a *AppService) SetApp(app *application.App) {
 	a.app = app
 	a.NodeEnv.SetApp(app)
-	a.DSH.app = app
+	a.DSH.SetApp(app)
 }
 
 // DetectNodeEnv 检测 node/npx/dsh 运行状态
@@ -169,7 +167,7 @@ func (a *AppService) SetupDSH() *ApiResult {
 				a.NodeEnv.EmitLog("error", msg)
 				// panic 也必须补发 error 事件，否则前端 settingUp 永远无法复位，按钮永久禁用
 				if a.app != nil {
-					a.app.Event.Emit("quickdock:dsh:progress", setupProgress{Stage: "error", Message: msg})
+					a.app.Event.Emit("quickdock:dsh:progress", dsh.SetupProgress{Stage: "error", Message: msg})
 				}
 			}
 		}()
@@ -224,7 +222,7 @@ func (a *AppService) DSHStatus() *ApiResult {
 	st := map[string]any{
 		"running":   false,
 		"autoStart": a.dshAutoStartEnabled(),
-		"port":      DefaultDSHPort,
+		"port":      dsh.DefaultDSHPort,
 		"url":       "",
 	}
 	if a.DSH != nil {
@@ -306,7 +304,7 @@ func (a *AppService) UpdateDSH() *ApiResult {
 				msg := fmt.Sprintf("更新 DeepSeek Harness 异常: %v", r)
 				a.NodeEnv.EmitLog("error", msg)
 				if a.app != nil {
-					a.app.Event.Emit("quickdock:dsh:progress", setupProgress{Stage: "error", Message: msg})
+					a.app.Event.Emit("quickdock:dsh:progress", dsh.SetupProgress{Stage: "error", Message: msg})
 				}
 			}
 		}()

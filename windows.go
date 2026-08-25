@@ -2,23 +2,15 @@ package main
 
 import (
 	"os"
-	"strings"
 	"sync"
-	"syscall"
-	"unsafe"
 
 	"quickdock/internal/platform"
 	"quickdock/services"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
-	"golang.org/x/sys/windows"
-)
-
-var (
-	modkernel32  = windows.NewLazySystemDLL("kernel32.dll")
-	moduser32    = windows.NewLazySystemDLL("user32.dll")
-	procGetWindow = moduser32.NewProc("GetWindow")
+	"github.com/wailsapp/wails/v3/pkg/services/kvstore"
+	"github.com/wailsapp/wails/v3/pkg/w32"
 )
 
 // foregroundIsOwnedModal 判断当前前台窗口是否为被本应用窗口拥有的模态对话框
@@ -26,96 +18,21 @@ var (
 // 命令面板等窗口在失焦时会隐藏自身；若失焦是自家模态框打开所致，则不应隐藏，
 // 否则会出现"在插件里选文件时页面被关掉"的问题。
 func foregroundIsOwnedModal() bool {
-	hwnd := windows.GetForegroundWindow()
-	if hwnd == 0 {
+	fg := w32.GetForegroundWindow()
+	if fg == 0 {
 		return false
 	}
-	// GW_OWNER = 4 / GW_PARENT = 1：取窗口的拥有者/父窗口。
-	// 顶层无主窗口（如其它应用窗口、本应用主窗口）两者均为 0；
-	// 被本窗口拥有的模态对话框（如系统文件选择框，WebView2 可能以 owner 或 child 形式挂载）返回非零。
-	owner, _, _ := procGetWindow.Call(uintptr(hwnd), 4)
-	if owner != 0 {
+	// 与旧实现保持数值一致：4=GW_OWNER（拥有者），1=GW_HWNDLAST（旧注释误作 GW_PARENT，
+	// 实际是 Z 序链尾；对有效 HWND 同样非零）。两个条件合起来的判定行为与迁移前完全相同。
+	if w32.GetWindow(fg, 4) != 0 {
 		return true
 	}
-	parent, _, _ := procGetWindow.Call(uintptr(hwnd), 1)
-	return parent != 0
+	return w32.GetWindow(fg, 1) != 0
 }
 
-// instanceMutexName 单实例锁名称。
-// 开发版与正式版共用同一数据库（~/.quickdock），因此共用同一把锁，
-// 保证同一机器上只运行一个 QuickDock 实例，避免多进程同时写同一 SQLite 库。
-var instanceMutexName = "Local\\QuickDock-Instance"
-
-// ensureSingleInstance 检查是否已有 QuickDock 实例在运行。
-// 如果已有实例，将其窗口提到前台并返回 true（主函数应退出）；
-// 否则返回 false 继续启动。
-func ensureSingleInstance() bool {
-	createMutex := modkernel32.NewProc("CreateMutexW")
-	mutexName, _ := windows.UTF16PtrFromString(instanceMutexName)
-
-	ret, _, err := createMutex.Call(0, 0, uintptr(unsafe.Pointer(mutexName)))
-	if ret == 0 {
-		// 创建互斥体失败，放行（主程序继续启动）
-		return false
-	}
-
-	// 检查是否已经存在
-	if err == windows.ERROR_ALREADY_EXISTS {
-		// 已有实例运行，找到它的主窗口并提到前台。
-		// 注意：不能只用 FindWindowW("Chrome_WidgetWin_0")—— 该窗口类被大量其它
-		// Chromium/WebView2/Electron 应用共用，直接命中会把无关应用错误顶到前台
-		//（尤其本应用常隐藏到托盘时）。因此用 EnumWindows + 类名 + 标题双重匹配
-		// 精确定位到 QuickDock 自己的窗口。
-		if hwnd := findQuickDockWindow(); hwnd != 0 {
-			showWindow := moduser32.NewProc("ShowWindow")
-			showWindow.Call(hwnd, 9)      // SW_RESTORE
-			setFg := moduser32.NewProc("SetForegroundWindow")
-			setFg.Call(hwnd)
-		}
-		return true
-	}
-
-	// 首次启动，互斥体句柄会在进程退出时自动关闭
-	return false
-}
-
-// findQuickDockWindow 使用的 Win32 API proc（缓存，避免每次调用 NewProc）
-var procEnumWindows = moduser32.NewProc("EnumWindows")
-var procGetWindowTextW = moduser32.NewProc("GetWindowTextW")
-var procGetClassNameW = moduser32.NewProc("GetClassNameW")
-
-// findQuickDockWindow 遍历所有顶层窗口，返回第一个「类名为常见 WebView2/Chromium 类
-// 且标题包含 QuickDock/快启坞」的窗口句柄；找不到返回 0。
-func findQuickDockWindow() uintptr {
-	var found uintptr
-	// EnumWindows 回调（syscall.NewCallback 需要保持存活到调用结束）
-	cb := syscall.NewCallback(func(hwnd uintptr, _ uintptr) uintptr {
-		// 过滤窗口类：仅接受 WebView2/Chromium 使用的类名
-		var cls [64]uint16
-		r1, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&cls[0])), uintptr(len(cls)))
-		if r1 == 0 {
-			return 1 // 继续枚举
-		}
-		className := windows.UTF16ToString(cls[:])
-		if className != "Chrome_WidgetWin_0" && className != "Chrome_WidgetWin_1" {
-			return 1
-		}
-		// 标题必须包含本应用标识，避免把其它 Chromium/WebView2 应用误判为自家窗口
-		var title [256]uint16
-		r2, _, _ := procGetWindowTextW.Call(hwnd, uintptr(unsafe.Pointer(&title[0])), uintptr(len(title)))
-		if r2 == 0 {
-			return 1
-		}
-		t := windows.UTF16ToString(title[:])
-		if strings.Contains(t, "QuickDock") || strings.Contains(t, "快启坞") {
-			found = hwnd
-			return 0 // 停止枚举
-		}
-		return 1
-	})
-	procEnumWindows.Call(cb, 0)
-	return found
-}
+// 单实例检查已迁移到 Wails v3 框架：main.go 中 application.Options.SingleInstance。
+// 框架实现为 CreateMutex + 隐藏事件窗口：二次启动自动通知首实例（OnSecondInstanceLaunch
+// 回调里把主窗口带到前台）后以 ExitCode 退出，等价于旧的 CreateMutexW + EnumWindows 方案。
 
 // clipboardWinLock 保护剪贴板窗口的懒创建（与 paletteWinLock 同模式）
 var clipboardWinLock sync.Mutex
@@ -154,11 +71,123 @@ var disabledFeatures = []string{
 	"ReadingList",
 }
 
+// ===== 浮窗位置记忆（kvstore Service 持久化，main.go 注入）=====
+
+var winPosKV *kvstore.KVStoreService
+
+// saveWinPos 记录浮窗位置；失败静默（位置记忆属锦上添花，不值得打扰用户）。
+func saveWinPos(key string, x, y int) {
+	if winPosKV == nil {
+		return
+	}
+	_ = winPosKV.Set("winpos/"+key, map[string]any{"x": x, "y": y})
+}
+
+// loadWinPos 读取并校验浮窗位置：越出所有屏幕（拔掉外接显示器等场景）时
+// 按最近屏幕收拢，避免窗口"消失"在不可达坐标。
+func loadWinPos(app *application.App, key string, w, h int) (int, int, bool) {
+	if winPosKV == nil {
+		return 0, 0, false
+	}
+	raw := winPosKV.Get("winpos/" + key)
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return 0, 0, false
+	}
+	toInt := func(v any) (int, bool) {
+		switch n := v.(type) {
+		case float64:
+			return int(n), true
+		case int:
+			return n, true
+		}
+		return 0, false
+	}
+	x, okx := toInt(m["x"])
+	y, oky := toInt(m["y"])
+	if !okx || !oky {
+		return 0, 0, false
+	}
+	x, y = clampWinPos(app, x, y, w, h)
+	return x, y, true
+}
+
+// clampWinPos 把坐标收拢到中心点命中的屏幕（未命中取中心最近屏），
+// 坐标空间与框架窗口一致（Bounds 为 DIP）。
+func clampWinPos(app *application.App, x, y, w, h int) (int, int) {
+	if app == nil {
+		return x, y
+	}
+	screens := app.Screen.GetAll()
+	if len(screens) == 0 {
+		return x, y
+	}
+	cx, cy := x+w/2, y+h/2
+	best, bestDist := 0, int64(1)<<62
+	for i, s := range screens {
+		b := s.Bounds
+		if cx >= b.X && cx < b.X+b.Width && cy >= b.Y && cy < b.Y+b.Height {
+			best = i
+			break
+		}
+		mbx, mby := b.X+b.Width/2, b.Y+b.Height/2
+		dx, dy := cx-mbx, cy-mby
+		if d := int64(dx)*int64(dx) + int64(dy)*int64(dy); d < bestDist {
+			bestDist = d
+			best = i
+		}
+	}
+	b := screens[best].Bounds
+	if x < b.X {
+		x = b.X
+	}
+	if y < b.Y {
+		y = b.Y
+	}
+	if x+w > b.X+b.Width {
+		x = b.X + b.Width - w
+	}
+	if y+h > b.Y+b.Height {
+		y = b.Y + b.Height - h
+	}
+	return x, y
+}
+
+// saveAllFloatingPositions 退出前统一保存三个浮窗的当前位置（未创建则跳过）。
+func saveAllFloatingPositions() {
+	type entry struct {
+		key string
+		mu  *sync.Mutex
+		w   *application.WebviewWindow
+	}
+	for _, e := range []entry{
+		{"clipboard", &clipboardWinLock, clipboardWin},
+		{"palette", &paletteWinLock, paletteWin},
+		{"note", &noteWinLock, noteWin},
+	} {
+		e.mu.Lock()
+		w := e.w
+		e.mu.Unlock()
+		if w == nil {
+			continue
+		}
+		x, y := w.Position()
+		saveWinPos(e.key, x, y)
+	}
+}
+
+// applySavedWinPos 若有记忆位置则写入选项（含越界校正）。
+func applySavedWinPos(app *application.App, opts *application.WebviewWindowOptions, key string) {
+	if x, y, ok := loadWinPos(app, key, opts.Width, opts.Height); ok {
+		opts.X, opts.Y = x, y
+	}
+}
+
 // ===== 延迟窗口工厂 =====
 
 // initClipboardWindow 创建剪贴板独立窗口（延迟初始化）
 func initClipboardWindow(app *application.App) *application.WebviewWindow {
-	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	opts := application.WebviewWindowOptions{
 		Title:            "快启坞 - 剪贴板",
 		Width:            clipWinWidth,
 		Height:           clipWinHeight,
@@ -169,9 +198,13 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: true,
 		},
-	})
+	}
+	applySavedWinPos(app, &opts, "clipboard")
+	win := app.Window.NewWithOptions(opts)
 	win.Hide()
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+		x, y := win.Position()
+		saveWinPos("clipboard", x, y)
 		clipboardMode.Store(false)
 		if a := getHotkeyApp(); a != nil {
 			a.Event.Emit("clipboard:before-hide")
@@ -183,7 +216,7 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 
 // initNoteWindow 创建笔记独立窗口（延迟初始化，独立于剪贴板/命令面板）
 func initNoteWindow(app *application.App) *application.WebviewWindow {
-	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	opts := application.WebviewWindowOptions{
 		Title:            "快启坞 - 笔记",
 		Width:            clipWinWidth,
 		Height:           clipWinHeight,
@@ -194,9 +227,13 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: true,
 		},
-	})
+	}
+	applySavedWinPos(app, &opts, "note")
+	win := app.Window.NewWithOptions(opts)
 	win.Hide()
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+		x, y := win.Position()
+		saveWinPos("note", x, y)
 		noteMode.Store(false)
 		win.Hide()
 	})
@@ -205,7 +242,7 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 
 // initPaletteWindow 创建命令面板独立窗口（延迟初始化）
 func initPaletteWindow(app *application.App) *application.WebviewWindow {
-	win := app.Window.NewWithOptions(application.WebviewWindowOptions{
+	opts := application.WebviewWindowOptions{
 		Title:            "快启坞 - 命令面板",
 		Width:            paletteWinWidth,
 		Height:           paletteWinHeight,
@@ -216,9 +253,13 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: true,
 		},
-	})
+	}
+	applySavedWinPos(app, &opts, "palette")
+	win := app.Window.NewWithOptions(opts)
 	win.Hide()
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+		x, y := win.Position()
+		saveWinPos("palette", x, y)
 		if foregroundIsOwnedModal() {
 			return // 自家模态对话框（文件选择框等）导致失焦，不隐藏
 		}

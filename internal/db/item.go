@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"net/url"
 	"os/exec"
-	goruntime "runtime"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"syscall"
 
@@ -467,8 +467,9 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 				quoted = `""` + value + `""`
 			}
 			inner := strings.ReplaceAll(strings.ReplaceAll(tmpl, "{{command}}", quoted), "{{path}}", quoted)
-			c := exec.Command(tool.Path)
-			c.SysProcAttr = &syscall.SysProcAttr{CmdLine: tool.Path + " " + inner}
+			toolPath := resolveExecutable(tool.Path)
+			c := exec.Command(toolPath)
+			c.SysProcAttr = &syscall.SysProcAttr{CmdLine: toolPath + " " + inner}
 			if item.WorkingDirectory != "" {
 				c.Dir = item.WorkingDirectory
 			}
@@ -480,7 +481,11 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 	}
 
 	argList := splitArgs(args)
-	cmd := exec.Command(tool.Path, argList...)
+	// 裸名工具（chrome/code…）先经 PATH/App Paths/安装目录解析成绝对路径：
+	// Windows 桌面程序安装后不写 PATH，直接 exec 裸名必然报 not found in %PATH%。
+	// 解析失败返回原名，保持旧报错行为不变。
+	toolPath := resolveExecutable(tool.Path)
+	cmd := exec.Command(toolPath, argList...)
 	if item.WorkingDirectory != "" {
 		cmd.Dir = item.WorkingDirectory
 	}

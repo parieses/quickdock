@@ -99,34 +99,37 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		}
 		m.mu.Unlock()
 
-		// 立即按路径清理一次：崩溃自动重启（watchPlugin 的 2s/4s/6s 退避）可能已把
-		// 新进程拉起（其 PID 在 manager 尚未注册、stopPlugin 管不到），或存在主程序
-		// 重启前残留的孤儿实例——它们都锁着目录。配合 watchPlugin 的 stopped 复查双保险。
+		// 立即兜底杀：① 已知 PID 的整棵进程树（stopPlugin 的 Kill 只杀主进程，
+		// 子进程如 pdfcpu.exe 会变孤儿并以其 CWD 锁住整个目录）② 可执行路径位于
+		// 目标目录内的孤儿进程（manager 未跟踪，如崩溃重启飞行中的实例/残留）。
+		// 顺序：先杀树再按路径，避免路径扫描漏掉读取不到 Path 的受限进程。
+		if oldPID > 0 {
+			killProcessTree(oldPID)
+		}
 		killProcessesLockingDir(targetDir)
 
 		backupDir = targetDir + ".bak." + manifest.Version
 		os.RemoveAll(backupDir) // 清理旧的备份
 
-		// Windows 上 TerminateProcess 后文件句柄异步释放，且 Process.Kill 不杀子进程树；
-		// 用递增间隔重试 rename，倒数第二次失败时兜底强杀：
-		// ① 已知 PID 的整棵进程树 ② 可执行路径位于目标目录内的孤儿进程（manager 未跟踪，
-		// 如主程序重启前残留/手动调试实例），它们的 PID 记录不到但同样锁目录。
-		waits := []time.Duration{100, 200, 300, 500, 800, 1200, 1600, 2000} // ms，总 ~6.7s
+		// Windows 上 TerminateProcess 后文件句柄/CWD 锁异步释放（且可能被 Defender
+		// 实时扫描短暂独占），重试窗口拉长到 ~18s，期间持续兜底强杀：
+		waits := 45 // 45 × 400ms ≈ 18s
 		var err error
-		for i, w := range waits {
+		for i := 0; i < waits; i++ {
 			if err = os.Rename(targetDir, backupDir); err == nil {
 				break
 			}
-			if i == len(waits)-2 {
+			// 每 8 次（前 4 次不杀，给正常退出留时间）补一轮强杀
+			if i > 4 && i%8 == 0 {
 				if oldPID > 0 {
 					killProcessTree(oldPID)
 				}
 				killProcessesLockingDir(targetDir)
 			}
-			time.Sleep(w * time.Millisecond)
+			time.Sleep(400 * time.Millisecond)
 		}
 		if err != nil {
-			return "", fmt.Errorf("备份旧版本插件失败（进程可能未完全退出，可手动结束插件进程后重试）: %w", err)
+			return "", fmt.Errorf("备份旧版本插件失败（进程可能未完全退出，请在插件管理页点击「停止进程」后重试）: %w", err)
 		}
 	}
 

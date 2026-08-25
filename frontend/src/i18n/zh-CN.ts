@@ -521,6 +521,8 @@ export default {
   pluginExecResult: '返回结果',
   pluginEnable: '启用',
   pluginDisable: '禁用',
+  pluginKilled: '插件进程已结束',
+  pluginKillTitle: '强制结束进程（锁目录时可先停止再更新/卸载）',
   pluginStatusRunning: '运行中',
   pluginStatusStopped: '已停止',
   pluginStatusCrashed: '已崩溃',

@@ -26,6 +26,7 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+	"github.com/wailsapp/wails/v3/pkg/services/kvstore"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/updater/providers/endpoint"
@@ -119,12 +120,9 @@ func main() {
 	// 全局日志：先于一切初始化，之后所有包（services/plugin/tray）的关键事件统一落盘
 	// ~/.quickdock/logs/quickdock-YYYYMMDD.log
 	logger.Init(filepath.Join(platform.DefaultDataDir(), "logs"))
+	// 第三方库日志汇入统一日志面板：slog 默认记录器与标准库 log 都桥接到 logger
+	logger.EnableSlogBridge()
 	logger.I("QuickDock 启动 -------------------------------------------------------------")
-
-	// 单实例检查：若已有实例运行，将其窗口提到前台并退出
-	if ensureSingleInstance() {
-		return
-	}
 
 	// 创建 AppService 实例
 	appService := services.NewAppService()
@@ -156,22 +154,31 @@ func main() {
 		autoInstallBuiltins(mgr, database, &builtinPlugins)
 	}
 
-	// 先提取插件文件（确保 system-tools.exe 等最新版本已写入磁盘）
-	// 必须早于 DiscoverAndLoad，否则旧版 console 类型 system-tools.exe 会被启动，弹出 CMD 窗口
-	extractBuiltinPluginFiles(pluginMgr, &builtinPlugins)
-
-	// 扫描并加载已安装插件（非关键，失败不影响主程序启动）
-	pluginMgr.DiscoverAndLoad()
-
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()
+
+	// KV 持久化服务（浮窗位置记忆等轻量状态；ServiceStartup/Shutdown 自动 Load/Save）
+	kvStore := kvstore.New()
 
 	app := application.New(application.Options{
 		Name:        "快启坞",
 		Description: "快启坞 QuickDock — 开发者资源集合与快速启动工具",
+		// 单实例：框架内置实现（CreateMutex + 隐藏事件窗口）。二次启动时框架先通知
+		// 首实例（OnSecondInstanceLaunch 把主窗口带到前台），再以 ExitCode 退出本进程。
+		// UniqueID 与旧 Local\\QuickDock-Instance 同义：dev/prod 共用数据目录与同一把锁。
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "QuickDock-Instance",
+			ExitCode: 0,
+			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
+				if win := GetMainWindow(); win != nil {
+					showMainWindow(win)
+				}
+			},
+		},
 		Services: []application.Service{
 			application.NewService(appService),
 			application.NewService(notifier),
+			application.NewService(kvStore),
 		},
 		Assets: application.AssetOptions{
 			Handler: application.AssetFileServerFS(assets),
@@ -183,6 +190,14 @@ func main() {
 			DisabledFeatures:      disabledFeatures,
 		},
 	})
+
+	// 先提取内置插件骨架文件（common.css / common.js）到 ~/.quickdock/plugins/
+	// 必须早于 DiscoverAndLoad，确保宿主注入的兼容样式/脚本是最新版本。
+	// 放在 application.New 之后：二次启动已在 New 内部退出，避免与首实例并发写插件目录。
+	extractBuiltinPluginFiles(pluginMgr, &builtinPlugins)
+
+	// 扫描并加载已安装插件（非关键，失败不影响主程序启动）
+	pluginMgr.DiscoverAndLoad()
 
 	// 传入 App 引用给 AppService
 	appService.SetApp(app)
@@ -203,6 +218,11 @@ func main() {
 
 	// 注入通知服务引用（供待办提醒调度器使用）
 	appService.Notifier = notifier
+
+	// 浮窗位置记忆：windows.go 的延迟工厂在创建窗口时读取、失焦/退出时保存。
+	// 必须在 app.Run() 前赋值——kvstore 的数据在 ServiceStartup 时才加载，
+	// 而浮窗均为懒创建（Run 之后），时序安全。
+	winPosKV = kvStore
 
 	// 创建插件窗口管理器（需要 app 引用，只能放在 New 之后）
 	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app)
@@ -385,7 +405,7 @@ func initUpdater(app *application.App, version string) error {
 }
 
 // extractBuiltinPluginFiles 增量同步内置插件文件到 ~/.quickdock/plugins/（不含 DB 写入和 LoadPlugin）
-// 在 DiscoverAndLoad 之前调用，确保插件二进制文件（如 system-tools.exe）是最新版本。
+// 在 DiscoverAndLoad 之前调用，确保宿主注入的兼容样式/脚本是最新版本。
 // 采用增量同步：仅覆盖内容变化的文件，保留插件目录内的本地运行状态（如 sqlite、日志）。
 func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 	entries, err := builtinFS.ReadDir("plugins/builtin")
@@ -414,7 +434,7 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 	}
 
 	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == "_shared" {
+		if !entry.IsDir() {
 			continue
 		}
 		pluginID := entry.Name()
@@ -484,7 +504,7 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 	validBuiltinIDs := make(map[string]bool)
 
 	for _, entry := range entries {
-		if !entry.IsDir() || entry.Name() == "_shared" {
+		if !entry.IsDir() {
 			continue
 		}
 		pluginID := entry.Name()

@@ -18,12 +18,20 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v3/pkg/application"
+	"github.com/wailsapp/wails/v3/pkg/w32"
 )
 
+// w32 未导出的两个 API：全局内存大小查询 与 "PNG" 注册剪贴板格式号。
 var (
-	modUser32   = syscall.NewLazyDLL("user32.dll")
-	modKernel32 = syscall.NewLazyDLL("kernel32.dll")
+	procGlobalSize               = syscall.NewLazyDLL("kernel32.dll").NewProc("GlobalSize")
+	procRegisterClipboardFormatW = syscall.NewLazyDLL("user32.dll").NewProc("RegisterClipboardFormatW")
 )
+
+// globalSize 返回全局内存块实际大小（字节）。
+func globalSize(h uintptr) uintptr {
+	sz, _, _ := procGlobalSize.Call(h)
+	return sz
+}
 
 // ===== Global shared state (accessed by main package via get/set) =====
 
@@ -56,39 +64,29 @@ func (a *AppService) OnClipboardChange() {
 		return
 	}
 
-	hwnd := uintptr(a.HiddenHWND.Load())
-	user32 := modUser32
-	kernel32 := modKernel32
+	hwnd := platform.ClipboardWindowHandle()
 
 	if !openClipboardRetry(hwnd) {
 		fmt.Println("QuickDock: OpenClipboard failed (another app may be holding it)")
 		return
 	}
-	defer func() {
-		closeClipboard := user32.NewProc("CloseClipboard")
-		closeClipboard.Call()
-	}()
-
-	getClipboardData := user32.NewProc("GetClipboardData")
-	globalLock := kernel32.NewProc("GlobalLock")
-	globalUnlock := kernel32.NewProc("GlobalUnlock")
+	defer w32.CloseClipboard()
 
 	// 1. CF_HDROP
 	var filePaths []string
-	hdropHandle, _, _ := getClipboardData.Call(15)
+	hdropHandle := w32.GetClipboardData(15)
 	if hdropHandle != 0 {
-		ptr, _, _ := globalLock.Call(hdropHandle)
-		if ptr != 0 {
-			globalSize := kernel32.NewProc("GlobalSize")
-			sz, _, _ := globalSize.Call(hdropHandle)
+		ptr := w32.GlobalLock(hdropHandle)
+		if ptr != nil {
+			sz := globalSize(uintptr(hdropHandle))
 			if sz > 0 && sz < 1*1024*1024 {
 				rawData := make([]byte, int(sz))
-				copy(rawData, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(sz)))
+				copy(rawData, unsafe.Slice((*byte)(ptr), int(sz)))
 				filePaths = platform.ParseHDROP(rawData)
 			} else {
 				fmt.Printf("QuickDock: HDROP size out of range: %d\n", sz)
 			}
-			globalUnlock.Call(hdropHandle)
+			w32.GlobalUnlock(hdropHandle)
 		} else {
 			fmt.Println("QuickDock: GlobalLock(HDROP) failed")
 		}
@@ -96,22 +94,22 @@ func (a *AppService) OnClipboardChange() {
 
 	// 2. Text
 	var text string
-	handle, _, _ := getClipboardData.Call(13) // CF_UNICODETEXT
+	handle := w32.GetClipboardData(13) // CF_UNICODETEXT
 	if handle != 0 {
-		ptr, _, _ := globalLock.Call(handle)
-		if ptr != 0 {
+		ptr := w32.GlobalLock(handle)
+		if ptr != nil {
 			// 基于 GlobalSize 计算实际 UTF-16 单元数，避免硬编码上限截断超长文本
 			// （如 base64 编码的图片，长度远超旧上限 4096 字符）。
 			// UTF16PtrToString 遇到 \0 即停，故传入真实大小是安全精确的。
-			if sz, _, _ := kernel32.NewProc("GlobalSize").Call(handle); sz > 0 {
+			if sz := globalSize(uintptr(handle)); sz > 0 {
 				maxUnits := int(sz) / 2
 				const maxSafeUnits = 1 << 22 // ~4MB UTF-16 安全上限
 				if maxUnits > maxSafeUnits {
 					maxUnits = maxSafeUnits
 				}
-				text = platform.UTF16PtrToString(ptr, maxUnits)
+				text = platform.UTF16PtrToString(uintptr(unsafe.Pointer(ptr)), maxUnits)
 			}
-			globalUnlock.Call(handle)
+			w32.GlobalUnlock(handle)
 		} else {
 			fmt.Println("QuickDock: GlobalLock(CF_UNICODETEXT) failed")
 		}
@@ -123,7 +121,7 @@ func (a *AppService) OnClipboardChange() {
 	var imageData []byte
 	imageIsPNG := false
 	if pngFmt := getPngClipboardFormat(); pngFmt != 0 {
-		if h, _, _ := getClipboardData.Call(uintptr(pngFmt)); h != 0 {
+		if h := w32.GetClipboardData(uint(pngFmt)); h != 0 {
 			if b := readGlobalMem(h); len(b) >= 8 &&
 				b[0] == 0x89 && b[1] == 'P' && b[2] == 'N' && b[3] == 'G' {
 				imageData = b
@@ -132,8 +130,8 @@ func (a *AppService) OnClipboardChange() {
 		}
 	}
 	if imageData == nil {
-		for _, imgFmt := range []uintptr{17, 8} { // 17=CF_DIBV5, 8=CF_DIB
-			if h, _, _ := getClipboardData.Call(imgFmt); h != 0 {
+		for _, imgFmt := range []uint{17, 8} { // 17=CF_DIBV5, 8=CF_DIB
+			if h := w32.GetClipboardData(imgFmt); h != 0 {
 				if b := readGlobalMem(h); len(b) > 0 {
 					imageData = b
 					break
@@ -243,9 +241,8 @@ handleText:
 // openClipboardRetry 打开剪贴板，被其他进程短暂持有时重试若干次。
 // 剪贴板监控里最容易被忽略的一类“静默丢数据”就是 OpenClipboard 偶发失败。
 func openClipboardRetry(hwnd uintptr) bool {
-	openClipboard := modUser32.NewProc("OpenClipboard")
 	for i := 0; i < 5; i++ {
-		if ret, _, _ := openClipboard.Call(hwnd); ret != 0 {
+		if w32.OpenClipboard(w32.HWND(hwnd)) {
 			return true
 		}
 		time.Sleep(10 * time.Millisecond)
@@ -254,21 +251,21 @@ func openClipboardRetry(hwnd uintptr) bool {
 }
 
 // readGlobalMem 锁定并复制全局内存句柄内容（带 50MB 安全上限）。
-func readGlobalMem(h uintptr) []byte {
+func readGlobalMem(h w32.HANDLE) []byte {
 	if h == 0 {
 		return nil
 	}
-	ptr, _, _ := modKernel32.NewProc("GlobalLock").Call(h)
-	if ptr == 0 {
+	ptr := w32.GlobalLock(h)
+	if ptr == nil {
 		return nil
 	}
-	defer modKernel32.NewProc("GlobalUnlock").Call(h)
-	sz, _, _ := modKernel32.NewProc("GlobalSize").Call(h)
+	defer w32.GlobalUnlock(h)
+	sz := globalSize(uintptr(h))
 	if sz == 0 || sz > 50*1024*1024 {
 		return nil
 	}
 	b := make([]byte, int(sz))
-	copy(b, unsafe.Slice((*byte)(unsafe.Pointer(ptr)), int(sz)))
+	copy(b, unsafe.Slice((*byte)(ptr), int(sz)))
 	return b
 }
 
@@ -279,7 +276,7 @@ func getPngClipboardFormat() uint32 {
 	if v := pngClipFmt.Load(); v != 0 {
 		return v
 	}
-	f, _, _ := modUser32.NewProc("RegisterClipboardFormatW").Call(
+	f, _, _ := procRegisterClipboardFormatW.Call(
 		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("PNG"))))
 	if f != 0 {
 		pngClipFmt.Store(uint32(f))
@@ -289,11 +286,10 @@ func getPngClipboardFormat() uint32 {
 
 // listClipboardFormats 诊断用：枚举当前剪贴板所有可用格式号。
 func listClipboardFormats() []int {
-	enumFmt := modUser32.NewProc("EnumClipboardFormats")
 	var out []int
-	fmtCode := uintptr(0)
+	fmtCode := uint(0)
 	for {
-		next, _, _ := enumFmt.Call(fmtCode)
+		next := w32.EnumClipboardFormats(fmtCode)
 		if next == 0 {
 			break
 		}

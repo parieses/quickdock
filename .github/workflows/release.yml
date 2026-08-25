@@ -76,17 +76,6 @@ jobs:
         working-directory: ${{ github.workspace }}
         run: wails3 generate webview2bootstrapper -dir build/windows/nsis
 
-      - name: Build system-tools (native plugin binary)
-        # system-tools.exe 被 go:embed 进产物且被 .gitignore 忽略，
-        # 必须在 go build 之前构建，否则 hosts-manager/port-scanner/wifi-manager 三个内置插件失效。
-        # 注意：tools/system-tools 是独立 Go module（自带 go.mod），必须 cd 进去构建，
-        # 不能从仓库根用 ./tools/system-tools 路径（会被当成 quickdock 子包解析而失败）
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-        run: |
-          Set-Location tools/system-tools
-          go build -trimpath -ldflags="-s -w" -o ../../plugins/builtin/_shared/system-tools.exe .
-
       - name: Build binary (production)
         shell: pwsh
         working-directory: ${{ github.workspace }}

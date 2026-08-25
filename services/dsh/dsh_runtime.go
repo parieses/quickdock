@@ -1,4 +1,4 @@
-package services
+package dsh
 
 import (
 	"bufio"
@@ -64,6 +64,10 @@ html,body{height:100%%;margin:0;background:#17181b;color:#e8eaed;font-family:sys
 func NewDSHProcessManager(app *application.App, nodeEnv *NodeEnvManager) *DSHProcessManager {
 	return &DSHProcessManager{app: app, nodeEnv: nodeEnv}
 }
+
+// SetApp 延迟注入应用实例：AppService 构造早于 application.New，
+// 拿到 app 后由 service.go 补挂（与旧同包直赋字段等价）。
+func (m *DSHProcessManager) SetApp(app *application.App) { m.app = app }
 
 // DefaultDSHPort dsh 官方默认端口，固定使用以便软件窗口与浏览器访问同一地址
 const DefaultDSHPort = 3080

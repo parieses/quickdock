@@ -1,6 +1,6 @@
 //go:build !windows
 
-package services
+package dsh
 
 import "syscall"
 

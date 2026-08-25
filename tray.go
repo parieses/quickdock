@@ -1,15 +1,21 @@
 package main
 
+// 托盘 / 全局热键 / 窗口显隐调度。
+//
+// 本文件全部基于 Wails v3 框架 API 实现（app.SystemTray / app.GlobalShortcut），
+// 不含任何 Win32 调用，可跨平台编译：
+//   - 托盘：SystemTray.SetIcon/SetMenu/OnClick，右键默认弹出菜单（框架 smart default）
+//   - 全局热键：GlobalShortcut.Register，支持 Win/macOS/Linux(X11+Wayland portal)
+//   - 剪贴板监听：平台相关，拆分至 clipboard_listener_windows.go（Win32 消息窗口）
+//     与 clipboard_listener_other.go（非 Windows no-op 占位）
+
 import (
 	_ "embed"
 	"fmt"
 	"os"
-	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
-	"syscall"
-	"unsafe"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -18,108 +24,57 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-// Windows API 常量
+// 热键修饰位与虚拟键码常量（与 DB 中 "modifiers,vk" 存储格式兼容）
 const (
-	MOD_ALT          = 0x0001
-	MOD_CONTROL      = 0x0002
-	MOD_SHIFT        = 0x0004
-	VK_SPACE         = 0x20
-	VK_OEM_3         = 0xC0
-	WM_DESTROY       = 0x0002
-	WM_COMMAND       = 0x0111
-	WS_EX_TOOLWINDOW = 0x00000080
-	WS_POPUP         = 0x80000000
-	WM_TRAYICON      = 0x0400 + 100
-	NIM_ADD          = 0
-	NIM_DELETE       = 2
-	NIF_MESSAGE      = 1
-	NIF_ICON         = 2
-	NIF_TIP          = 4
-	WM_LBUTTONUP     = 0x0202
-	WM_RBUTTONUP     = 0x0205
-	WM_LBUTTONDBLCLK = 0x0203
-	IMAGE_ICON       = 1
-	LR_LOADFROMFILE  = 0x0010
-	LR_DEFAULTSIZE   = 0x0040
-
-	WM_CLIPBOARDUPDATE  = 0x031D
-	CF_TEXT          = 1
-	CF_DIB           = 8
-	CF_HDROP         = 15
-	CF_UNICODETEXT   = 13
+	MOD_ALT     = 0x0001
+	MOD_CONTROL = 0x0002
+	MOD_SHIFT   = 0x0004
+	VK_SPACE    = 0x20
+	VK_OEM_3    = 0xC0
 )
+
+// ctrlBackquote 反引号字符：Go 源码中反引号是 raw string 定界符，只能拼接生成。
+const ctrlBackquote = "`"
+
+// CTRL_BACKQUOTE 剪贴板热键回退加速器（Ctrl+`）
+const CTRL_BACKQUOTE = "Ctrl+" + ctrlBackquote
 
 //go:embed build/tray.ico
 var trayIcoEmbed []byte
 
-// 全局状态（tray/message loop 专用）
+// 全局状态
 var (
-	hotkeyApp         *application.App
-	hotkeyAppLock     sync.Mutex
-	trayHICON         atomic.Uintptr
+	hotkeyApp     *application.App
+	hotkeyAppLock sync.Mutex
+
+	// trayQuitRequested 标记「真退出」：托盘菜单退出时置位，
+	// 主窗口 WindowClosing 钩子据此放行关闭（否则隐藏到托盘）。
 	trayQuitRequested atomic.Bool
-	trayRemoved       atomic.Bool
 
-	mainWin          *application.WebviewWindow
-	mainWinLock      sync.Mutex
-	clipboardWin     *application.WebviewWindow
+	trayInstance *application.SystemTray
+	trayLock     sync.Mutex
 
-	// 全局服务引用（供 windowProc 回调使用）
+	mainWin     *application.WebviewWindow
+	mainWinLock sync.Mutex
+
+	clipboardWin *application.WebviewWindow
+
+	// appSvc 全局服务引用（热键/托盘回调使用）
 	appSvc atomic.Pointer[services.AppService]
 
-	// 当前注册的 GlobalShortcut 加速器
+	// 当前注册的 GlobalShortcut 加速器（供 Suspend/Resume/Reregister 使用）
 	currentAppAccel     string
 	currentClipAccel    string
 	currentPaletteAccel string
 	currentNoteAccel    string
 	accelMu             sync.Mutex
 
-	noteWin      *application.WebviewWindow
-	noteWinLock  sync.Mutex
+	noteWin     *application.WebviewWindow
+	noteWinLock sync.Mutex
 
 	paletteWin     *application.WebviewWindow
 	paletteWinLock sync.Mutex
-
-	// Windows DLL 句柄（包级复用，避免反复创建）
-	modUser32   = syscall.NewLazyDLL("user32.dll")
-	modKernel32 = syscall.NewLazyDLL("kernel32.dll")
-	modShell32  = syscall.NewLazyDLL("shell32.dll")
-
-	// 缓存常用 Windows API proc（避免消息循环内反复 NewProc）
-	procPostMessageW     = modUser32.NewProc("PostMessageW")
-	procCreateIcon       = modUser32.NewProc("CreateIconFromResourceEx")
-	procLoadIconW        = modUser32.NewProc("LoadIconW")
-	procRegisterClassW   = modUser32.NewProc("RegisterClassW")
-	procCreateWindowExW  = modUser32.NewProc("CreateWindowExW")
-	procGetMessageW      = modUser32.NewProc("GetMessageW")
-	procTranslateMessage = modUser32.NewProc("TranslateMessage")
-	procDispatchMessageW = modUser32.NewProc("DispatchMessageW")
-	procDefWindowProcW   = modUser32.NewProc("DefWindowProcW")
-	procPostQuitMessage  = modUser32.NewProc("PostQuitMessage")
-	procDestroyIcon      = modUser32.NewProc("DestroyIcon")
-	procShellNotifyIconW     = modShell32.NewProc("Shell_NotifyIconW")
 )
-
-// ---- 主窗口 ----
-
-
-type NOTIFYICONDATAW struct {
-	CbSize           uint32
-	HWnd             uintptr
-	UID              uint32
-	UFlags           uint32
-	UCallbackMessage uint32
-	HIcon            uintptr
-	SzTip            [128]uint16
-	DwState          uint32
-	DwStateMask      uint32
-	SzInfo           [256]uint16
-	UVersion         uint32
-	SzInfoTitle      [64]uint16
-	DwInfoFlags      uint32
-	GuidItem         [16]byte
-	HBalloonIcon     uintptr
-}
 
 func SetHotkeyApp(app *application.App) {
 	hotkeyAppLock.Lock()
@@ -175,353 +130,73 @@ func toggleMainWindow() {
 	}
 }
 
-// StartHotkeyListener 启动热键和托盘（由 services.ServiceStartup 回调）
+// StartHotkeyListener 启动托盘、全局热键与剪贴板监听（由 services.ServiceStartup 回调）。
+//
+// 托盘与热键均为框架跨平台实现，不再限制 GOOS；
+// 剪贴板监听依赖平台消息机制，见 internal/platform/clipboard_listener_*.go。
 func StartHotkeyListener(app *application.App, svc *services.AppService) {
-	if goruntime.GOOS != "windows" {
-		return
-	}
-
 	SetHotkeyApp(app)
 	appSvc.Store(svc)
 
-	trayHICON.Store(loadIconFromEmbed())
-	if trayHICON.Load() == 0 {
-		fmt.Println("QuickDock: 加载托盘图标失败，使用默认图标")
-	}
+	createSystemTray(app)
+	registerAllHotkeys(app)
 
-	go runMessageLoop()
-}
-
-func loadIconFromEmbed() uintptr {
-	if len(trayIcoEmbed) < 6+16 {
-		return 0
-	}
-
-	count := int(trayIcoEmbed[4]) | int(trayIcoEmbed[5])<<8
-	if count == 0 {
-		return 0
-	}
-
-	// 系统托盘推荐尺寸（小图标）。高 DPI 下 GetSystemMetrics 已返回缩放后逻辑像素，
-	// 用它做目标，避免把 256x256 大图直接当托盘图标导致显示过大/错位。
-	smcx := 16
-	if gsm, _, _ := modUser32.NewProc("GetSystemMetrics").Call(25 /*SM_CXSMICON*/); gsm != 0 {
-		smcx = int(gsm)
-	}
-
-	// 选与目标尺寸最接近（优先 ≥ 目标）的帧，而非面积最大的帧。
-	// 旧逻辑选最大帧(256)传给 CreateIconFromResourceEx 且未指定目标尺寸/缩放标志，
-	// 导致实际创建了 256x256 的 HICON，托盘显示异常过大。
-	bestIdx := 0
-	bestDiff := int(^uint(0) >> 1)
-	for i := 0; i < count; i++ {
-		entryOffset := 6 + i*16
-		if entryOffset+16 > len(trayIcoEmbed) {
-			break
-		}
-		w := int(trayIcoEmbed[entryOffset])
-		h := int(trayIcoEmbed[entryOffset+1])
-		if w == 0 {
-			w = 256
-		}
-		if h == 0 {
-			h = 256
-		}
-		size := w
-		if h > size {
-			size = h
-		}
-		var diff int
-		if size >= smcx {
-			diff = size - smcx
-		} else {
-			diff = (smcx - size) + 1<<20 // 惩罚：小于目标的帧排后面
-		}
-		if diff < bestDiff {
-			bestDiff = diff
-			bestIdx = i
-		}
-	}
-
-	entryOffset := 6 + bestIdx*16
-	imageOffset := int(trayIcoEmbed[entryOffset+12]) |
-		int(trayIcoEmbed[entryOffset+13])<<8 |
-		int(trayIcoEmbed[entryOffset+14])<<16 |
-		int(trayIcoEmbed[entryOffset+15])<<24
-	imageSize := int(trayIcoEmbed[entryOffset+8]) |
-		int(trayIcoEmbed[entryOffset+9])<<8 |
-		int(trayIcoEmbed[entryOffset+10])<<16 |
-		int(trayIcoEmbed[entryOffset+11])<<24
-
-	if imageOffset+imageSize > len(trayIcoEmbed) || imageSize == 0 {
-		return 0
-	}
-
-	imageData := trayIcoEmbed[imageOffset : imageOffset+imageSize]
-	// 明确指定目标尺寸为系统小图标尺寸，并加 LR_DEFAULTSIZE 标志，
-	// 让系统将所选帧精确缩放到托盘尺寸（而非原样 256x256）。
-	hIcon, _, _ := procCreateIcon.Call(
-		uintptr(unsafe.Pointer(&imageData[0])),
-		uintptr(imageSize),
-		1,
-		0x00030000,
-		uintptr(smcx),
-		uintptr(smcx),
-		LR_DEFAULTSIZE,
-	)
-
-	if hIcon == 0 {
-		hIcon, _, _ = procLoadIconW.Call(0, uintptr(32512))
-	}
-
-	return hIcon
-}
-
-// windowProc 隐藏窗口的回调函数
-func windowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
-	switch msg {
-	case WM_TRAYICON:
-		switch lParam {
-		case WM_LBUTTONDBLCLK, WM_LBUTTONUP:
-			if win := GetMainWindow(); win != nil {
-				showMainWindow(win)
-			}
-		case WM_RBUTTONUP:
-			showTrayMenu(hwnd)
-		}
-		return 0
-
-	case WM_COMMAND:
-		switch wParam {
-		case 1001:
-			if win := GetMainWindow(); win != nil {
-				showMainWindow(win)
-			}
-		case 1003:
-			if win := GetMainWindow(); win != nil {
-				hideMainWindow(win)
-			}
-		case 1002:
-			removeTrayIcon()
-		}
-		return 0
-
-	case WM_DESTROY:
-		removeTrayIcon()
-		postQuitMessage(0)
-		return 0
-
-	case WM_CLIPBOARDUPDATE:
-		// 使用 AddClipboardFormatListener（而非传统剪贴板链），
-		// 避免链中任一环节断裂导致 QuickDock 收不到任何剪贴板变更通知。
+	// 回调在 Win32 消息线程上触发，OnClipboardChange 内部的入库逻辑自行异步。
+	platform.StartClipboardListener(func() {
 		if svc := appSvc.Load(); svc != nil {
 			svc.OnClipboardChange()
 		}
-		return 0
-	}
-
-	return callDefWindowProc(hwnd, msg, wParam, lParam)
+	})
 }
 
-func runMessageLoop() {
-	goruntime.LockOSThread()
-
-	className := syscall.StringToUTF16Ptr("QuickDock_Hotkey_Window_v3")
-
-	kernel32 := modKernel32
-	hinstance, _, _ := kernel32.NewProc("GetModuleHandleW").Call(0)
-
-	wc := struct {
-		style         uint32
-		lpfnWndProc   uintptr
-		cbClsExtra    int32
-		cbWndExtra    int32
-		hinstance     uintptr
-		hIcon         uintptr
-		hCursor       uintptr
-		hbrBackground uintptr
-		lpszMenuName  *uint16
-		lpszClassName *uint16
-	}{
-		style:         0,
-		lpfnWndProc:   syscall.NewCallback(windowProc),
-		hinstance:     hinstance,
-		hCursor:       0,
-		lpszClassName: className,
-	}
-
-	procRegisterClassW.Call(uintptr(unsafe.Pointer(&wc)))
-
-	hwnd, _, _ := procCreateWindowExW.Call(
-		WS_EX_TOOLWINDOW,
-		uintptr(unsafe.Pointer(className)),
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("QuickDockHotkey"))),
-		WS_POPUP,
-		0, 0, 0, 0,
-		0, 0, hinstance, 0,
-	)
-
-	if hwnd == 0 {
-		fmt.Println("QuickDock: 创建隐藏窗口失败")
-		return
-	}
-
-	// 将 HWND 存储到 AppService（供剪贴板 API 使用）
-	if svc := appSvc.Load(); svc != nil {
-		svc.HiddenHWND.Store(uint64(hwnd))
-	}
-	fmt.Println("QuickDock: 隐藏窗口已创建")
-
-	// 注册全局快捷键
-	if app := getHotkeyApp(); app != nil {
-		registerAllHotkeys(app)
-	}
-
-	createTrayIcon(hwnd)
-
-	// 注册剪贴板格式监听（现代 API，比 SetClipboardViewer 链更可靠）
-	addClipFmtListener := modUser32.NewProc("AddClipboardFormatListener")
-	if ret, _, _ := addClipFmtListener.Call(hwnd); ret != 0 {
-		fmt.Println("QuickDock: 剪贴板监听已启动 (AddClipboardFormatListener)")
-	} else {
-		fmt.Println("QuickDock: AddClipboardFormatListener 失败")
-	}
-
-	var msg struct {
-		hwnd    uintptr
-		message uint32
-		wParam  uintptr
-		lParam  uintptr
-		time    uint32
-		pt      struct{ x, y int32 }
-	}
-
-	for {
-		ret, _, _ := procGetMessageW.Call(
-			uintptr(unsafe.Pointer(&msg)),
-			0, 0, 0,
-		)
-		if ret == 0 {
-			break
+// createSystemTray 用框架 SystemTray 创建托盘图标与菜单。
+// 左键显示主窗口；右键未设置回调时框架自动弹出菜单（applySmartDefaults）。
+func createSystemTray(app *application.App) {
+	menu := app.Menu.New()
+	menu.Add("显示窗口").OnClick(func(*application.Context) {
+		if win := GetMainWindow(); win != nil {
+			showMainWindow(win)
 		}
+	})
+	menu.Add("隐藏窗口").OnClick(func(*application.Context) {
+		if win := GetMainWindow(); win != nil {
+			hideMainWindow(win)
+		}
+	})
+	menu.AddSeparator()
+	menu.Add("退出").OnClick(func(*application.Context) {
+		requestQuit()
+	})
 
-		procTranslateMessage.Call(uintptr(unsafe.Pointer(&msg)))
-		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
-	}
+	// SetIcon 直接接收 .ico/.png 字节（内部 CreateSmallHIconFromImage 会按
+	// SM_CXSMICON 缩放到系统托盘标准尺寸，替代旧 loadIconFromEmbed 的手工选帧逻辑）
+	trayLock.Lock()
+	tray := app.SystemTray.New()
+	tray.SetIcon(trayIcoEmbed)
+	tray.SetTooltip("快启坞 QuickDock")
+	tray.SetMenu(menu)
+	tray.OnClick(func() {
+		if win := GetMainWindow(); win != nil {
+			showMainWindow(win)
+		}
+	})
+	trayInstance = tray
+	trayLock.Unlock()
 
-	fmt.Println("QuickDock: 消息循环已停止")
+	tray.Show()
+	fmt.Println("QuickDock: 系统托盘已创建 (Wails SystemTray)")
 }
 
-func createTrayIcon(hwnd uintptr) {
-
-	hIcon := trayHICON.Load()
-	if hIcon == 0 {
-		hIcon, _, _ = procLoadIconW.Call(0, uintptr(32512))
-	}
-
-	nid := &NOTIFYICONDATAW{
-		CbSize:           uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
-		HWnd:             hwnd,
-		UID:              1,
-		UFlags:           NIF_MESSAGE | NIF_ICON | NIF_TIP,
-		UCallbackMessage: WM_TRAYICON,
-		HIcon:            hIcon,
-	}
-	copy(nid.SzTip[:], syscall.StringToUTF16("快启坞 QuickDock"))
-
-	ret, _, _ := procShellNotifyIconW.Call(NIM_ADD, uintptr(unsafe.Pointer(nid)))
-	if ret != 0 {
-		fmt.Println("QuickDock: 系统托盘图标已创建")
-	} else {
-		fmt.Println("QuickDock: 系统托盘图标创建失败")
-	}
-}
-
-func removeTrayIcon() {
-	if trayRemoved.Swap(true) {
-		return
-	}
-
-	// 离开剪贴板格式监听
-	svc := appSvc.Load()
-	var hwnd uintptr
-	if svc != nil {
-		hwnd = uintptr(svc.HiddenHWND.Load())
-	}
-	if hwnd != 0 {
-		removeClipFmtListener := modUser32.NewProc("RemoveClipboardFormatListener")
-		removeClipFmtListener.Call(hwnd)
-		fmt.Println("QuickDock: 已移除剪贴板格式监听")
-	}
-
-	nid := &NOTIFYICONDATAW{
-		CbSize: uint32(unsafe.Sizeof(NOTIFYICONDATAW{})),
-		HWnd:   hwnd,
-		UID:    1,
-	}
-	procShellNotifyIconW.Call(NIM_DELETE, uintptr(unsafe.Pointer(nid)))
-	fmt.Println("QuickDock: 系统托盘图标已移除")
-
-	if th := trayHICON.Load(); th != 0 {
-		procDestroyIcon.Call(th)
-		trayHICON.Store(0)
-	}
-
+// requestQuit 统一退出路径：置真退出标记 → 移除剪贴板监听 → app.Quit()。
+func requestQuit() {
 	trayQuitRequested.Store(true)
+	saveAllFloatingPositions()
+	platform.StopClipboardListener()
 	if app := getHotkeyApp(); app != nil {
 		app.Quit()
 	} else {
 		os.Exit(0)
 	}
-}
-
-func showTrayMenu(hwnd uintptr) {
-	user32 := modUser32
-
-	createPopupMenu := user32.NewProc("CreatePopupMenu")
-	hMenu, _, _ := createPopupMenu.Call()
-
-	// 菜单项文本必须保持存活直到 TrackPopupMenu 返回，否则 GC 可能回收
-	// StringToUTF16Ptr 分配的临时内存，导致菜单渲染时读取悬垂指针（Use-After-Free）。
-	labelShow := syscall.StringToUTF16Ptr("显示窗口")
-	labelHide := syscall.StringToUTF16Ptr("隐藏窗口")
-	labelExit := syscall.StringToUTF16Ptr("退出")
-
-	appendMenu := user32.NewProc("AppendMenuW")
-	appendMenu.Call(hMenu, 0, 1001, uintptr(unsafe.Pointer(labelShow)))
-	appendMenu.Call(hMenu, 0, 1003, uintptr(unsafe.Pointer(labelHide)))
-	appendMenu.Call(hMenu, 0x800, 0, 0)
-	appendMenu.Call(hMenu, 0, 1002, uintptr(unsafe.Pointer(labelExit)))
-
-	getCursorPos := user32.NewProc("GetCursorPos")
-	var pt struct{ x, y int32 }
-	getCursorPos.Call(uintptr(unsafe.Pointer(&pt)))
-
-	setForegroundWindow := user32.NewProc("SetForegroundWindow")
-	setForegroundWindow.Call(hwnd)
-
-	trackPopupMenu := user32.NewProc("TrackPopupMenu")
-	trackPopupMenu.Call(hMenu, 0, uintptr(pt.x), uintptr(pt.y), 0, hwnd, 0)
-
-	postMessage := user32.NewProc("PostMessageW")
-	postMessage.Call(hwnd, 0x0100, 0, 0)
-
-	destroyMenu := user32.NewProc("DestroyMenu")
-	destroyMenu.Call(hMenu)
-
-	// 确保菜单文本内存在 TrackPopupMenu 期间持续有效
-	goruntime.KeepAlive(labelShow)
-	goruntime.KeepAlive(labelHide)
-	goruntime.KeepAlive(labelExit)
-}
-
-func callDefWindowProc(hwnd uintptr, msg uint32, wParam, lParam uintptr) uintptr {
-	ret, _, _ := procDefWindowProcW.Call(hwnd, uintptr(msg), wParam, lParam)
-	return ret
-}
-
-func postQuitMessage(exitCode int32) {
-	procPostQuitMessage.Call(uintptr(exitCode))
 }
 
 // ===== GlobalShortcut 加速器 =====
@@ -559,6 +234,7 @@ func getNoteAccel() string {
 	return currentNoteAccel
 }
 
+// modVKToAccelerator 把 DB 存储的 (modifiers,vk) 转为框架加速器字符串（如 "Ctrl+Space"）。
 func modVKToAccelerator(modifiers, vk int) string {
 	var parts []string
 	if modifiers&MOD_ALT != 0 {
@@ -637,8 +313,8 @@ func ReregisterClipboardHotkey(modifiers, vk uintptr) {
 	cb := toggleClipboardWindow
 
 	if err := app.GlobalShortcut.Register(newAccel, cb); err != nil {
-		fmt.Printf("QuickDock: 剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+`\n", newAccel, err)
-		fallbackAccel := "Ctrl+`"
+		fmt.Printf("QuickDock: 剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+backquote\n", newAccel, err)
+		fallbackAccel := CTRL_BACKQUOTE
 		app.GlobalShortcut.Register(fallbackAccel, cb)
 		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
 			svc.DB.SetSetting("clipboard_hotkey", "2,192")
@@ -741,9 +417,6 @@ func ResumeHotkeys() {
 	fmt.Println("QuickDock: 热键已恢复")
 }
 
-// registerAllHotkeys 统一注册主窗口/剪贴板/命令面板三个全局快捷键
-// 从 DB 读取配置，注册失败时回退到默认值
-
 // toggleClipboardWindow 切换剪贴板独立窗口的显隐状态
 func toggleClipboardWindow() {
 	cw := getClipboardWindow()
@@ -759,7 +432,6 @@ func toggleClipboardWindow() {
 	} else {
 		platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
 		clipboardMode.Store(true)
-		// 窗口创建时 URL 已固定为 /#/clipboard，无需重复 SetURL
 		cw.Show()
 		cw.Focus()
 		if a := getHotkeyApp(); a != nil {
@@ -768,8 +440,9 @@ func toggleClipboardWindow() {
 	}
 }
 
+// registerAllHotkeys 统一注册主窗口/剪贴板/命令面板/快捷笔记四个全局快捷键。
+// 从 DB 读取配置，注册失败时回退到默认值并写回 DB。
 func registerAllHotkeys(app *application.App) {
-	// 读取热键配置
 	appMods, appVk := MOD_CONTROL, int(VK_SPACE)
 	clipMods, clipVk := MOD_CONTROL, int(VK_OEM_3)
 	paletteMods, paletteVk := MOD_CONTROL, int(0x4B)
@@ -812,17 +485,21 @@ func registerAllHotkeys(app *application.App) {
 	// 剪贴板窗口热键回调
 	registeredClipAccel := clipAccel
 	if err := app.GlobalShortcut.Register(clipAccel, toggleClipboardWindow); err != nil {
-		logger.W("剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+`", clipAccel, err)
-		app.GlobalShortcut.Register("Ctrl+`", func() {
+		logger.W("剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+backquote", clipAccel, err)
+		app.GlobalShortcut.Register(CTRL_BACKQUOTE, func() {
 			cw := getClipboardWindow()
-			if cw == nil { return }
+			if cw == nil {
+				return
+			}
 			clipboardMode.Store(true)
 			platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
 			cw.Show()
 			cw.Focus()
-			if a := getHotkeyApp(); a != nil { a.Event.Emit("clipboard:shown") }
+			if a := getHotkeyApp(); a != nil {
+				a.Event.Emit("clipboard:shown")
+			}
 		})
-		registeredClipAccel = "Ctrl+`"
+		registeredClipAccel = CTRL_BACKQUOTE
 		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
 			svc.DB.SetSetting("clipboard_hotkey", "2,192")
 		}
@@ -830,8 +507,7 @@ func registerAllHotkeys(app *application.App) {
 		logger.I("剪贴板快捷键 [%s] 已注册", clipAccel)
 	}
 
-	// 命令面板热键（默认 Ctrl+K），注册前先读取 palette 配置
-	registeredPaletteAccel := paletteAccel
+	// 命令面板热键（默认 Ctrl+K）
 	// 面板打开后 Ctrl+K 不再关闭窗口：系统级热键永远优先于页面 keydown 触发，
 	// 若在这里 Hide，面板内的「Ctrl+K 打开动作菜单」在默认配置下将永远不可达。
 	// 改为转发 palette:hotkey 事件给前端，由前端切换选中项的动作菜单（Esc 关闭菜单/面板）。
@@ -854,6 +530,7 @@ func registerAllHotkeys(app *application.App) {
 			a.Event.Emit("palette:shown")
 		}
 	}
+	registeredPaletteAccel := paletteAccel
 	if err := app.GlobalShortcut.Register(paletteAccel, handlePaletteHotkey); err != nil {
 		logger.W("命令面板热键 [%s] 注册失败: %v", paletteAccel, err)
 		app.GlobalShortcut.Register("Ctrl+K", handlePaletteHotkey)

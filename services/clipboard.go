@@ -73,7 +73,7 @@ func (a *AppService) CopyClipboardEntry(id string) *ApiResult {
 	if err != nil {
 		return Fail(fmt.Errorf("获取剪贴板条目失败: %v", err))
 	}
-	hwnd := uintptr(a.HiddenHWND.Load())
+	hwnd := platform.ClipboardWindowHandle()
 	if err := a.writeEntryToClipboard(entry, hwnd); err != nil {
 		return Fail(err)
 	}
@@ -220,7 +220,7 @@ func (a *AppService) PasteClipboardEntry(id string) *ApiResult {
 	if err != nil {
 		return Fail(fmt.Errorf("获取剪贴板条目失败: %v", err))
 	}
-	hwnd := uintptr(a.HiddenHWND.Load())
+	hwnd := platform.ClipboardWindowHandle()
 	if err := a.writeEntryToClipboard(entry, hwnd); err != nil {
 		return Fail(err)
 	}

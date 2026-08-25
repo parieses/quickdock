@@ -1,6 +1,6 @@
 import { inject, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ExecutePluginCommand, CopyText, GetAndClearPendingPluginInit } from '../../bindings/quickdock/services/appservice'
+import { ExecutePluginCommand, CopyText, GetAndClearPendingPluginInit, PickFilePath, ReadPickedFile } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { Dialogs } from '@wailsio/runtime'
 import type { ToastAPI } from '../types'
@@ -96,6 +96,31 @@ export function usePluginHost(opts: PluginHostOptions) {
       const { id, message } = event.data
       toast?.success?.(message || '')
       event.source?.postMessage({ type: 'plugin:alert-result', id }, '*')
+      return
+    }
+
+    // 插件原生选文件：走宿主 PickFilePath（Wails Dialog），规避 iframe 沙箱
+    // 与宿主窗口失焦问题；取消或失败回传 null
+    if (event.data?.type === 'plugin:pickfile') {
+      const { id, title, filter, pattern } = event.data
+      try {
+        const path = unwrap<string>(await PickFilePath(title || '', filter || '', pattern || ''))
+        event.source?.postMessage({ type: 'plugin:pickfile-result', id, path: path || null }, '*')
+      } catch {
+        event.source?.postMessage({ type: 'plugin:pickfile-result', id, path: null }, '*')
+      }
+      return
+    }
+
+    // 插件读取选中文件内容（配合 qdPickFile；文本/图片文本自动嗅探）
+    if (event.data?.type === 'plugin:readfile') {
+      const { id, path } = event.data
+      try {
+        const payload = unwrap<{ type: string; content: string }>(await ReadPickedFile(path || ''))
+        event.source?.postMessage({ type: 'plugin:readfile-result', id, payload }, '*')
+      } catch {
+        event.source?.postMessage({ type: 'plugin:readfile-result', id, payload: null }, '*')
+      }
       return
     }
 

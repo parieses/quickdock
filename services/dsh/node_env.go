@@ -1,4 +1,4 @@
-package services
+package dsh
 
 import (
 	"archive/zip"
@@ -56,8 +56,8 @@ type NodeEnvStatus struct {
 	Message            string `json:"message"` // 未就绪时的可读原因
 }
 
-// setupProgress 一键安装进度（经 quickdock:dsh:progress 事件推前端）
-type setupProgress struct {
+// SetupProgress 一键安装进度（经 quickdock:dsh:progress 事件推前端）
+type SetupProgress struct {
 	Stage   string `json:"stage"` // download-node | extract-node | install-dsh | update-dsh | done | error
 	Written int64  `json:"written"`
 	Total   int64  `json:"total"`
@@ -541,7 +541,7 @@ func comparePre(a, b string) int {
 
 // UpdateDSH 将 dsh 更新到最新版（stage: update-dsh）。与安装共用 installing 锁防并发。
 func (m *NodeEnvManager) UpdateDSH(ctx context.Context) error {
-	emit := func(sp setupProgress) {
+	emit := func(sp SetupProgress) {
 		if m.app != nil {
 			m.app.Event.Emit("quickdock:dsh:progress", sp)
 		}
@@ -550,31 +550,31 @@ func (m *NodeEnvManager) UpdateDSH(ctx context.Context) error {
 
 	if m.installing.Swap(true) {
 		// 锁被占用也补发 error 事件，前端 installingPlugin/settingUp/updating 才能复位
-		emit(setupProgress{Stage: "error", Message: "安装/更新正在进行中，请稍候"})
+		emit(SetupProgress{Stage: "error", Message: "安装/更新正在进行中，请稍候"})
 		return fmt.Errorf("安装/更新正在进行中")
 	}
 	defer m.installing.Store(false)
 
 	if m.NodePath() == "" {
-		emit(setupProgress{Stage: "error", Message: "运行环境未就绪，无法更新"})
+		emit(SetupProgress{Stage: "error", Message: "运行环境未就绪，无法更新"})
 		return fmt.Errorf("运行环境未就绪，无法更新")
 	}
-	emit(setupProgress{Stage: "update-dsh", Message: "正在更新 DeepSeek Harness…"})
+	emit(SetupProgress{Stage: "update-dsh", Message: "正在更新 DeepSeek Harness…"})
 	target := m.LatestDshVersion()
 	if target == "" {
 		target = "latest"
 	}
 	logf("info", "更新 "+dshPkg+"@"+target+"（registry: npmmirror）")
 	if err := m.runNpmInstall(ctx, target, func(msg string) {
-		emit(setupProgress{Stage: "update-dsh", Message: msg})
+		emit(SetupProgress{Stage: "update-dsh", Message: msg})
 		logf("info", msg)
 	}); err != nil {
-		emit(setupProgress{Stage: "error", Message: "更新 dsh 失败: " + err.Error()})
+		emit(SetupProgress{Stage: "error", Message: "更新 dsh 失败: " + err.Error()})
 		logf("error", "更新 dsh 失败: "+err.Error())
 		return err
 	}
 	logf("info", "DeepSeek Harness 更新完成（版本 "+m.DshVersion()+"）")
-	emit(setupProgress{Stage: "done", Message: "更新完成"})
+	emit(SetupProgress{Stage: "done", Message: "更新完成"})
 	return nil
 }
 
@@ -592,8 +592,8 @@ func runVersion(exe string, args ...string) string {
 
 // SetupDSH 一键安装：node 缺失则下载便携版，dsh 缺失则 npm 安装；分阶段回调进度。
 // 进度同时经 a.app.Event.Emit("quickdock:dsh:progress", ...) 推前端，故 onProgress 可为 nil。
-func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(setupProgress)) error {
-	emit := func(sp setupProgress) {
+func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(SetupProgress)) error {
+	emit := func(sp SetupProgress) {
 		if onProgress != nil {
 			onProgress(sp)
 		}
@@ -610,7 +610,7 @@ func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(setupProg
 	if m.installing.Swap(true) {
 		// 锁被占用（并发安装/更新）也补发 error 事件，前端 settingUp/updating 才能复位，
 		// 否则按钮会永久禁用（前端只能靠 done/error 事件复位）
-		emit(setupProgress{Stage: "error", Message: "安装正在进行中，请稍候"})
+		emit(SetupProgress{Stage: "error", Message: "安装正在进行中，请稍候"})
 		return fmt.Errorf("安装正在进行中")
 	}
 	defer m.installing.Store(false)
@@ -619,26 +619,26 @@ func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(setupProg
 
 	// 1. 确保 node
 	if m.NodePath() == "" {
-		emit(setupProgress{Stage: "download-node", Message: "正在下载 Node 运行时…"})
+		emit(SetupProgress{Stage: "download-node", Message: "正在下载 Node 运行时…"})
 		zipPath := filepath.Join(os.TempDir(), "quickdock-node.zip")
 		if err := m.downloadNode(ctx, zipPath, func(w, t int64) {
-			emit(setupProgress{Stage: "download-node", Written: w, Total: t, Message: "正在下载 Node 运行时…"})
+			emit(SetupProgress{Stage: "download-node", Written: w, Total: t, Message: "正在下载 Node 运行时…"})
 		}, func(msg string) { logf("info", msg) }); err != nil {
-			emit(setupProgress{Stage: "error", Message: "下载 Node 失败: " + err.Error()})
+			emit(SetupProgress{Stage: "error", Message: "下载 Node 失败: " + err.Error()})
 			logf("error", "下载 Node 失败: "+err.Error())
 			return err
 		}
-		emit(setupProgress{Stage: "extract-node", Message: "正在解压 Node…"})
+		emit(SetupProgress{Stage: "extract-node", Message: "正在解压 Node…"})
 		logf("info", "解压 Node 到 "+m.runtimeDir)
 		if err := extractNodeZip(zipPath, m.runtimeDir); err != nil {
-			emit(setupProgress{Stage: "error", Message: "解压 Node 失败: " + err.Error()})
+			emit(SetupProgress{Stage: "error", Message: "解压 Node 失败: " + err.Error()})
 			logf("error", "解压 Node 失败: "+err.Error())
 			return err
 		}
 		// 强制校验：解压后 node.exe 必须落在预期位置，否则后续 fork/exec 报"目录名无效"
 		if _, err := os.Stat(m.nodeExe()); err != nil {
 			msg := fmt.Sprintf("解压完成但未找到 %s，请删除 %s 后重试", m.nodeExe(), m.runtimeDir)
-			emit(setupProgress{Stage: "error", Message: msg})
+			emit(SetupProgress{Stage: "error", Message: msg})
 			logf("error", msg)
 			return fmt.Errorf("%s", msg)
 		}
@@ -650,13 +650,13 @@ func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(setupProg
 
 	// 2. 确保 dsh（任意来源已安装即跳过：便携安装 / 全局 npm / ~/.dsh 手动初始化过）
 	if !m.dshInstalledAnywhere() {
-		emit(setupProgress{Stage: "install-dsh", Message: "正在安装 DeepSeek Harness…"})
+		emit(SetupProgress{Stage: "install-dsh", Message: "正在安装 DeepSeek Harness…"})
 		logf("info", "安装 "+dshPkg+"（registry: npmmirror）")
 		if err := m.installDSH(ctx, func(msg string) {
-			emit(setupProgress{Stage: "install-dsh", Message: msg})
+			emit(SetupProgress{Stage: "install-dsh", Message: msg})
 			logf("info", msg)
 		}); err != nil {
-			emit(setupProgress{Stage: "error", Message: "安装 dsh 失败: " + err.Error()})
+			emit(SetupProgress{Stage: "error", Message: "安装 dsh 失败: " + err.Error()})
 			logf("error", "安装 dsh 失败: "+err.Error())
 			return err
 		}
@@ -665,7 +665,7 @@ func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(setupProg
 		logf("info", "DeepSeek Harness 已安装（跳过安装）")
 	}
 
-	emit(setupProgress{Stage: "done", Message: "运行环境已就绪"})
+	emit(SetupProgress{Stage: "done", Message: "运行环境已就绪"})
 	logf("info", "运行环境已就绪，可打开 DeepSeek Harness")
 	return nil
 }

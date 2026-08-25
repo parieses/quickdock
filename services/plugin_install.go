@@ -1,10 +1,15 @@
 package services
 
 import (
+	"bytes"
 	"encoding/base64"
 	"fmt"
+	"mime"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
+	"unicode/utf8"
 
 	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
@@ -51,6 +56,79 @@ func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
 		"version": manifest.Version,
 		"dir":     dir,
 	})
+}
+
+// PickFilePath 打开原生文件选择对话框，返回所选路径（取消返回 null）。
+// 供插件桥接 qdPickFile 使用：插件 iframe 内的 <input type=file> 受沙箱限制
+// 且会触发宿主窗口失焦问题，统一引导走原生对话框。
+func (a *AppService) PickFilePath(title, filterName, pattern string) *ApiResult {
+	if a.app == nil {
+		return FailMsg("应用未初始化")
+	}
+	if title == "" {
+		title = "选择文件"
+	}
+	if filterName == "" || pattern == "" {
+		filterName, pattern = "所有文件", "*.*"
+	}
+	filePath, err := a.app.Dialog.OpenFile().
+		SetTitle(title).
+		AddFilter(filterName, pattern).
+		PromptForSingleSelection()
+	if err != nil || filePath == "" {
+		return Ok(nil)
+	}
+	return Ok(filePath)
+}
+
+// pickedFileMaxSize 单个文件读取上限：插件场景（配置/文本/二维码图）足够，
+// 同时防住超大文件把 WebView2 桥接消息撑爆。
+const pickedFileMaxSize = 20 << 20
+
+// ReadPickedFile 读取插件经 qdPickFile 选中的文件，返回内容载荷：
+//   - 可无损 UTF-8 解码且不含 NUL 的文件 → {"type":"text","content":原文}
+//   - 其余（图片/二进制）→ {"type":"dataurl","content":"data:<mime>;base64,..."}
+//
+// 仅供桥接 qdReadFile 使用；路径须为绝对路径且不带 URL scheme。
+// 信任边界说明：external 插件为本仓库第一方构建产物，与宿主同信任级；
+// 若未来引入第三方市场分发，此绑定必须改为按“本次会话 qdPickFile 返回的路径”白名单校验。
+func (a *AppService) ReadPickedFile(path string) *ApiResult {
+	if a.app == nil {
+		return FailMsg("应用未初始化")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || !filepath.IsAbs(path) || strings.Contains(path, "://") {
+		return FailMsg("路径无效")
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return FailMsg("文件不存在")
+	}
+	if fi.Size() > pickedFileMaxSize {
+		return FailMsg("文件超过 20MB 上限")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return FailMsg("读取失败")
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	imageExts := map[string]bool{
+		".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+		".webp": true, ".bmp": true, ".ico": true,
+	}
+	probe := data
+	if len(probe) > 8192 {
+		probe = probe[:8192]
+	}
+	textual := !imageExts[ext] && !bytes.Contains(probe, []byte{0}) && utf8.Valid(data)
+	if textual {
+		return Ok(map[string]string{"type": "text", "content": string(data)})
+	}
+	m := mime.TypeByExtension(ext)
+	if m == "" {
+		m = http.DetectContentType(data)
+	}
+	return Ok(map[string]string{"type": "dataurl", "content": "data:" + m + ";base64," + base64.StdEncoding.EncodeToString(data)})
 }
 
 // SelectAndInstallPlugin 打开原生文件对话框选择 .zip 并安装

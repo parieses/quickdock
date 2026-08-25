@@ -12,12 +12,22 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 	"unicode/utf16"
 	"unsafe"
+
+	"github.com/wailsapp/wails/v3/pkg/w32"
 )
 
+// procGlobalSize w32 未导出 GlobalSize，保留手写声明（仅此处使用）。
+var procGlobalSize = syscall.NewLazyDLL("kernel32.dll").NewProc("GlobalSize")
 
+// globalSize 返回全局内存块实际大小（字节）。
+func globalSize(h uintptr) uintptr {
+	sz, _, _ := procGlobalSize.Call(h)
+	return sz
+}
 
 // SimulatePaste sends Ctrl+V keystroke via keybd_event
 func SimulatePaste() {
@@ -47,9 +57,6 @@ func SetClipboardFiles(hwnd uintptr, paths []string) error {
 		return nil
 	}
 
-	user32 := modUser32
-	kernel32 := modKernel32
-
 	var u16buf []uint16
 	for _, p := range paths {
 		u16buf = append(u16buf, utf16.Encode([]rune(p))...)
@@ -68,33 +75,29 @@ func SetClipboardFiles(hwnd uintptr, paths []string) error {
 		binary.LittleEndian.PutUint16(data[drophdrSize+i*2:], ch)
 	}
 
-	openClipboard := user32.NewProc("OpenClipboard")
-	if ret, _, _ := openClipboard.Call(hwnd); ret == 0 {
+	if !w32.OpenClipboard(w32.HWND(hwnd)) {
 		return fmt.Errorf("OpenClipboard failed")
 	}
-	defer func() {
-		closeClipboard := user32.NewProc("CloseClipboard")
-		closeClipboard.Call()
-	}()
+	defer w32.CloseClipboard()
 
-	user32.NewProc("EmptyClipboard").Call()
+	w32.EmptyClipboard()
 
-	handle, _, _ := kernel32.NewProc("GlobalAlloc").Call(0x0042, uintptr(len(data)))
+	handle := w32.GlobalAlloc(0x0042, uint32(len(data)))
 	if handle == 0 {
 		return fmt.Errorf("GlobalAlloc failed")
 	}
-	ptr, _, _ := kernel32.NewProc("GlobalLock").Call(handle)
-	if ptr == 0 {
+	ptr := w32.GlobalLock(handle)
+	if ptr == nil {
 		// GlobalLock 失败：内存从未被写入，绝不能提交给系统剪贴板，
 		// 否则会把未初始化（清零）数据当成真实内容，且需释放句柄避免泄漏。
-		kernel32.NewProc("GlobalFree").Call(handle)
+		w32.GlobalFree(handle)
 		return fmt.Errorf("GlobalLock failed")
 	}
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(ptr)), len(data)), data)
-	kernel32.NewProc("GlobalUnlock").Call(handle)
-	if ret, _, _ := user32.NewProc("SetClipboardData").Call(15, handle); ret == 0 {
+	copy(unsafe.Slice((*byte)(ptr), len(data)), data)
+	w32.GlobalUnlock(handle)
+	if w32.SetClipboardData(15, handle) == 0 {
 		// 设置失败 → 释放已分配的内存
-		kernel32.NewProc("GlobalFree").Call(handle)
+		w32.GlobalFree(handle)
 		return fmt.Errorf("SetClipboardData failed")
 	}
 
@@ -150,34 +153,27 @@ func SetClipboardImage(hwnd uintptr, imagePath string) error {
 		}
 	}
 
-	user32 := modUser32
-	kernel32 := modKernel32
-
-	openClipboard := user32.NewProc("OpenClipboard")
-	if ret, _, _ := openClipboard.Call(hwnd); ret == 0 {
+	if !w32.OpenClipboard(w32.HWND(hwnd)) {
 		return fmt.Errorf("OpenClipboard failed")
 	}
-	defer func() {
-		closeClipboard := user32.NewProc("CloseClipboard")
-		closeClipboard.Call()
-	}()
+	defer w32.CloseClipboard()
 
-	user32.NewProc("EmptyClipboard").Call()
+	w32.EmptyClipboard()
 
-	handle, _, _ := kernel32.NewProc("GlobalAlloc").Call(0x0042, uintptr(len(dibData)))
+	handle := w32.GlobalAlloc(0x0042, uint32(len(dibData)))
 	if handle == 0 {
 		return fmt.Errorf("GlobalAlloc failed")
 	}
-	ptr, _, _ := kernel32.NewProc("GlobalLock").Call(handle)
-	if ptr == 0 {
-		kernel32.NewProc("GlobalFree").Call(handle)
+	ptr := w32.GlobalLock(handle)
+	if ptr == nil {
+		w32.GlobalFree(handle)
 		return fmt.Errorf("GlobalLock failed")
 	}
-	copy(unsafe.Slice((*byte)(unsafe.Pointer(ptr)), len(dibData)), dibData)
-	kernel32.NewProc("GlobalUnlock").Call(handle)
-	if ret, _, _ := user32.NewProc("SetClipboardData").Call(8, handle); ret == 0 {
+	copy(unsafe.Slice((*byte)(ptr), len(dibData)), dibData)
+	w32.GlobalUnlock(handle)
+	if w32.SetClipboardData(8, handle) == 0 {
 		// 设置失败 → 释放已分配的内存
-		kernel32.NewProc("GlobalFree").Call(handle)
+		w32.GlobalFree(handle)
 		return fmt.Errorf("SetClipboardData failed")
 	}
 
@@ -188,28 +184,22 @@ func SetClipboardImage(hwnd uintptr, imagePath string) error {
 // Used by snippet variable {clipboard}. Returns "" on any failure
 // (e.g. another app holds the clipboard open) — never errors.
 func GetClipboardText() string {
-	user32 := modUser32
-	kernel32 := modKernel32
-
-	openClipboard := user32.NewProc("OpenClipboard")
-	if ret, _, _ := openClipboard.Call(0); ret == 0 {
+	if !w32.OpenClipboard(0) {
 		return ""
 	}
-	defer user32.NewProc("CloseClipboard").Call()
+	defer w32.CloseClipboard()
 
-	getClipboardData := user32.NewProc("GetClipboardData")
-	handle, _, _ := getClipboardData.Call(13) // CF_UNICODETEXT
+	handle := w32.GetClipboardData(13) // CF_UNICODETEXT
 	if handle == 0 {
 		return ""
 	}
-	globalLock := kernel32.NewProc("GlobalLock")
-	ptr, _, _ := globalLock.Call(handle)
-	if ptr == 0 {
+	ptr := w32.GlobalLock(handle)
+	if ptr == nil {
 		return ""
 	}
-	defer kernel32.NewProc("GlobalUnlock").Call(handle)
+	defer w32.GlobalUnlock(handle)
 
-	size, _, _ := kernel32.NewProc("GlobalSize").Call(handle)
+	size := globalSize(uintptr(handle))
 	if size == 0 {
 		return ""
 	}
@@ -217,7 +207,7 @@ func GetClipboardText() string {
 	if n > 1<<20 {
 		n = 1 << 20 // 安全上限 1MB
 	}
-	buf := unsafe.Slice((*uint16)(unsafe.Pointer(ptr)), n)
+	buf := unsafe.Slice((*uint16)(ptr), n)
 	for i := 0; i < len(buf); i++ {
 		if buf[i] == 0 {
 			buf = buf[:i]
@@ -229,16 +219,11 @@ func GetClipboardText() string {
 
 // GetActiveWindowTitle returns the title of the foreground window
 func GetActiveWindowTitle() string {
-	user32 := modUser32
-	getForeground := user32.NewProc("GetForegroundWindow")
-	hwnd, _, _ := getForeground.Call()
+	hwnd := w32.GetForegroundWindow()
 	if hwnd == 0 {
 		return ""
 	}
-	getText := user32.NewProc("GetWindowTextW")
-	var buf [256]uint16
-	getText.Call(hwnd, uintptr(unsafe.Pointer(&buf)), 256)
-	return UTF16PtrToString(uintptr(unsafe.Pointer(&buf)), 256)
+	return w32.GetWindowText(hwnd)
 }
 
 // UTF16PtrToString converts a UTF-16 pointer to a Go string

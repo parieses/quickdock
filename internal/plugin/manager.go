@@ -392,6 +392,31 @@ func (m *Manager) StopPlugin(id string) error {
 	return nil
 }
 
+// KillPlugin 强制终止插件（插件管理页「停止进程」入口）：
+// 停进程并断自动重启（stopPlugin 置 stopped，watchPlugin 不会复活），
+// 再补杀整棵进程树与目录内孤儿进程，覆盖「进程锁住目录导致更新/卸载失败」。
+func (m *Manager) KillPlugin(id string) error {
+	if !pluginIDRe.MatchString(id) {
+		return fmt.Errorf("%w: 非法插件 ID: %q", ErrInvalidManifest, id)
+	}
+	m.mu.Lock()
+	var pid int
+	if inst, ok := m.plugins[id]; ok {
+		if inst.Cmd != nil && inst.Cmd.Process != nil {
+			pid = inst.Cmd.Process.Pid
+		}
+		m.stopPlugin(inst)
+		delete(m.plugins, id)
+	}
+	m.mu.Unlock()
+
+	if pid > 0 {
+		killProcessTree(pid)
+	}
+	killProcessesLockingDir(filepath.Join(m.pluginsDir, id))
+	return nil
+}
+
 // stopPlugin 停止插件子进程
 func (m *Manager) stopPlugin(inst *PluginInstance) {
 	inst.stopped.Store(true)
