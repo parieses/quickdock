@@ -328,7 +328,6 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string)
 				return results, nil
 			},
 		},
-		"crypto": newCryptoAPI(),
 	})
 
 	func() {

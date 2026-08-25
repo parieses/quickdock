@@ -540,7 +540,7 @@ async function executeSelected() {
     } else if (result.clipAction === 'save-url' && result.url) {
       try { const item = unwrap<CollectionItem>(await SaveUrlAsItem(result.url)); recordUsage('item:' + (item?.id || ''), 'item', result.url, result.url); toast?.success?.(t('savedAsItem')) } catch (e) { toast?.error?.(getErrorMessage(e)) }; closePalette()
     } else if (result.clipAction === 'encode-url' && result.url) {
-      // 纯本地编码，不依赖任何插件：与宿主 api.crypto.urlEncode / 外部 text-encoder 的
+      // 纯本地编码，不依赖任何插件：与 text-encoder 内置的
       // urlEncode 实现完全一致（encodeURIComponent 语义），核心功能零插件耦合
       let encoded = ''
       try { encoded = encodeURIComponent(result.url) } catch { encoded = result.url }
