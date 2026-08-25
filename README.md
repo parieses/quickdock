@@ -243,14 +243,19 @@
 
 - Go 1.25+
 - Node.js 22+
-- Wails3 CLI
+- Wails3 CLI（**版本须与 `go.mod` 中 wails 模块一致**，见下）
 
 ```bash
-# 安装 Wails3 CLI
-go install github.com/wailsapp/wails/v3/cmd/wails3@latest
+# 安装 Wails3 CLI —— 版本要与 go.mod 里的 github.com/wailsapp/wails/v3 完全一致
+# （当前为 alpha2.115；CLI 与模块版本不一致会导致 bindings 生成格式/内容差异）
+go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.115
 
 # 安装前端依赖
 cd frontend && npm install
+
+# 重新生成前端 bindings（新增/修改 Go 绑定后必须执行；-ts 输出 TS，-clean 先清旧文件）
+wails3 generate bindings -ts -i -clean
+#   等价于：cd frontend && npm run bindings
 ```
 
 ### 常用命令
@@ -281,7 +286,7 @@ cd frontend && npm install
 | 技术 | 说明 |
 |------|------|
 | **Go 1.25** | 主语言 |
-| **Wails3 v3.0.0-alpha2.114** | 桌面应用框架 |
+| **Wails3 v3.0.0-alpha2.115** | 桌面应用框架 |
 | **modernc.org/sqlite** | 纯 Go SQLite（无 CGO） |
 | **go-sql-driver/mysql + go-redis/v9** | MySQL / Redis 客户端 |
 | **golang.org/x/sys** | Windows 系统 API 调用 |
@@ -346,10 +351,9 @@ quickdock/
 │   ├── httpclient_*.go  # HTTP 客户端（8 文件：项目/目录/请求/环境/发送/文档/历史/类型）
 │   ├── database*.go     # 数据库连接与查询（MySQL/Redis/SQLite，conn/query/tree 拆分）
 │   ├── webhook_notify.go# 多渠道 Webhook 通知
-│   ├── dsh_runtime.go   # DeepSeek Harness 进程管理（dsh web + 原生窗口）
-│   ├── node_env.go      # Node / dsh 环境检测与便携安装
 │   ├── updatemirror.go  # 更新下载镜像回退（ghfast.top 等）
-│   └── update.go        # 软件更新检查与下载（Ed25519 签名）
+│   ├── update.go        # 软件更新检查与下载（Ed25519 签名）
+│   └── dsh/             # 独立包：node_env.go(Node 便携) + dsh_runtime.go(dsh web 进程) + sysattr_*.go
 ├── internal/
 │   ├── db/              # SQLite 数据层
 │   │   ├── db.go        # Database 封装 + 安全白名单
@@ -377,11 +381,14 @@ quickdock/
 │   │   ├── httprequest.go # HTTP 请求数据层
 │   │   ├── database.go  # 数据库连接数据层
 │   │   ├── repository.go# 仓库层
-│   │   └── helpers.go   # 辅助函数
+│   │   ├── helpers.go   # 辅助函数
+│   │   └── toolexec_*.go # 工具裸名解析（PATH/App Paths/安装目录；_windows/_other）
 │   ├── platform/        # 平台 API 封装
 │   │   ├── crypto_windows.go # DPAPI 加密（API Key）
 │   │   ├── crypto_darwin.go  # macOS 加密兜底
 │   │   ├── clipboard.go # 剪贴板读写
+│   │   ├── clipboard_listener_*.go # 剪贴板变更监听（隐藏消息窗口 + AddClipboardFormatListener）
+│   │   ├── monitor_other.go # 非 Windows 显示器定位占位
 │   │   ├── commands.go  # 系统命令
 │   │   ├── monitor.go   # 多显示器定位
 │   │   ├── hotkey.go    # 全局热键
@@ -871,6 +878,10 @@ func main() {
 | `plugin:theme` | 主应用→插件 | 主题/语言变更通知 |
 | `plugin:execute` | 插件→主应用 | 向后端发送执行命令请求 |
 | `plugin:result` | 主应用→插件 | 命令执行结果响应 |
+| `plugin:pickfile` | 插件→主应用 | 原生文件选择 `{id, title?, filter?, pattern?}` → 回 `plugin:pickfile-result {id, path\|null}` |
+| `plugin:readfile` | 插件→主应用 | 读取选中文件 `{id, path}` → 回 `plugin:readfile-result {id, payload\|null}`，`payload={type:'text'\|'dataurl', content}` |
+
+> **推荐直接用宿主注入的桥接 API**（无需手写 postMessage）：`window.qdPickFile(opts?)` 打开原生文件对话框返回路径（取消为 `null`）；`window.qdReadFile(path)` 读取文件内容（文本→`{type:'text',content}`，图片/二进制→`{type:'dataurl',content}`）。选文件务必走 `qdPickFile`——iframe 沙箱内 `<input type=file>` 会触发宿主窗口失焦问题。
 
 **通信示例：**
 
@@ -989,12 +1000,14 @@ cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
 - **WebView2 内存优化**：`--in-process-gpu` + `--renderer-process-limit=4` 等参数限制渲染进程数，任务管理器更清爽
 - **窗口即隐藏**：关闭主窗口时隐藏到系统托盘而非退出，通过 `atomic.Bool` 标志区分真实退出
 - **多显示器支持**：浮动窗口自动定位到鼠标所在屏幕
+- **浮窗位置记忆**：剪贴板 / 命令面板 / 笔记浮窗位置经 kvstore 服务持久化，重启后原位恢复；拔出外接屏后自动收拢回窗口所在屏幕工作区
+- **框架原生底座**：托盘 / 全局热键 / 单实例 / 开机自启 / 自动更新 / 系统通知均基于 Wails v3 框架 API；系统日志汇入统一面板（`slog.SetDefault` 桥接）；仅剪贴板富内容、图标提取、系统命令等原理性 Win32 调用保留手写
 - **纯 Go SQLite**：使用 modernc.org/sqlite，零 CGO 依赖，简化交叉编译
 - **回调注入解耦**：热键函数通过注入方式避免 main 和 services 包之间的循环依赖
 - **SQL 白名单**：表名和列名校验防止 SQL 注入
 - **本地流式架构**：内置 `127.0.0.1` HTTP SSE 流式服务（随机端口 + 随机 token），避免 Wails 事件框架的缓冲限制，实现逐 token 即时显示（用于 AI 对话等场景）
 - **API Key 安全加密**：Windows 下 DPAPI 加密存储（`CryptProtectData`），macOS 下 base64 编码，前端全程不接触密文
-- **单实例锁**：开发与正式版共用同一锁名（`Local\QuickDock-Instance`），同一机器只允许一个实例，避免多进程并发写同一 SQLite 库
+- **单实例锁**：框架 `Options.SingleInstance`（UniqueID `QuickDock-Instance`，开发/正式共用）——二次启动自动通知首实例把主窗口带到前台后退出，避免多进程并发写同一 SQLite 库
 - **后台服务**：SQLite WAL 模式 + 待办提醒调度器 (10s) + 定时任务调度器 + 监控检查器（含 SSL 检测）+ 流式 HTTP 服务（AI）+ 插件健康检查 + DSH 隐藏进程管理
 
 ---
