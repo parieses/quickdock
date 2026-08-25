@@ -122,7 +122,14 @@ func (m *Manager) DiscoverAndLoad() error {
 		if !entry.IsDir() {
 			continue
 		}
-		manifestPath := filepath.Join(m.pluginsDir, entry.Name(), "plugin.json")
+		name := entry.Name()
+		// 跳过备份/残留目录：安装升级时会生成 `<id>.bak.<version>` / `<id>.broken-<v>.bak`
+		// 等含完整 plugin.json 的副本，不过滤会被当成新插件加载——卸载后重启又"复活"
+		if strings.Contains(name, ".bak.") || strings.HasSuffix(name, ".bak") ||
+			strings.Contains(name, ".broken") || strings.HasSuffix(name, ".old") {
+			continue
+		}
+		manifestPath := filepath.Join(m.pluginsDir, name, "plugin.json")
 		if _, err := os.Stat(manifestPath); os.IsNotExist(err) {
 			continue
 		}
@@ -682,7 +689,7 @@ func (m *Manager) UninstallPlugin(id string) error {
 	var lastErr error
 	for attempt := 0; attempt < 5; attempt++ {
 		if err := os.RemoveAll(dir); err == nil {
-			return nil
+			break
 		} else {
 			lastErr = err
 		}
@@ -693,7 +700,26 @@ func (m *Manager) UninstallPlugin(id string) error {
 			time.Sleep(time.Duration(attempt+1) * 250 * time.Millisecond) // 250ms, 500ms, 750ms, 1s
 		}
 	}
-	return fmt.Errorf("删除插件目录失败（可能仍有进程占用）: %w；请退出 QuickDock（托盘图标→退出）后重试卸载", lastErr)
+	if lastErr != nil {
+		return fmt.Errorf("删除插件目录失败（可能仍有进程占用）: %w；请退出 QuickDock（托盘图标→退出）后重试卸载", lastErr)
+	}
+	// 联动清理同插件的备份/残留目录（<id>.bak.<ver> / <id>.broken-<ver>.bak）：
+	// 它们是升级时留下的完整副本，含 plugin.json；不清理的话 DiscoverAndLoad 已过滤不加载，
+	// 但残留目录会一直占磁盘，且手动放回/改名又会复活插件——卸载应同步清掉
+	if entries, err2 := os.ReadDir(m.pluginsDir); err2 == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			n := e.Name()
+			if strings.HasPrefix(n, id+".bak") || strings.HasPrefix(n, id+".broken") {
+				if rerr := os.RemoveAll(filepath.Join(m.pluginsDir, n)); rerr == nil {
+					fmt.Printf("QuickDock: 已清理插件 %s 的残留备份目录 %s\n", id, n)
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // GetFrontendPath 获取插件前端资源入口路径

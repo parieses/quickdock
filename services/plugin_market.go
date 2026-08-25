@@ -235,8 +235,9 @@ func (a *AppService) GetPluginMarket() *ApiResult {
 			if mf, err := plugin.LoadManifest(filepath.Join(pluginsDir, p.ID, "plugin.json")); err == nil {
 				p.Installed = true
 				p.InstalledVersion = mf.Version
-				// 版本不一致即视为有更新（不做 semver 比较，简单可靠）
-				p.HasUpdate = mf.Version != p.Version
+				// 仅当远程版本【高于】本地版本时才提示更新：!= 会把「本地比远程新」
+				//（如本地 0.1.7 / 远程索引尚未推送 0.1.6）误判成可升级
+				p.HasUpdate = compareVersions(p.Version, mf.Version) > 0
 			}
 		}
 	}
