@@ -2,7 +2,7 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、HTTP 客户端、数据库连接、Webhook 通知与 17 个开箱即用插件（含可选的 AI 助手），并原生集成 DeepSeek Harness，让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、HTTP 客户端、数据库连接、Webhook 通知与 23 个开箱即用插件（含可选的 AI 助手），并原生集成 DeepSeek Harness，让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
 
@@ -45,7 +45,7 @@
   - [数据模型](#数据模型)
   - [全局热键](#全局热键)
   - [设计哲学](#设计哲学)
-  - [内置插件](#内置插件)
+  - [随附插件](#随附插件)
   - [第三方插件开发](#第三方插件开发)
     - [插件目录结构](#插件目录结构)
     - [plugin.json 完整字段](#pluginjson-完整字段)
@@ -186,7 +186,7 @@
 
 ### 🔌 插件系统
 
-- 17 个开箱即用的内置插件（计算稿纸、JSON 工具箱、JWT 解码、正则提取、Markdown 预览……）
+- 23 个开箱即用插件（计算稿纸、JSON 工具箱、JWT 解码、正则提取、Markdown 预览……），随应用维护于官方仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)，经内置「在线市场」统一安装 / 升级
 - 支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native）
 - 基于 JSON-RPC 2.0 的前端 ↔ 后端通信协议
 - 支持运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定
@@ -503,27 +503,11 @@ Workspace（工作空间）
 
 ---
 
-## 内置插件
+## 随附插件
 
-QuickDock 内置 13 个即开即用的开发小工具：
+QuickDock 随应用提供 23 个开箱即用的官方插件（计算稿纸、JSON 工具箱、JWT 解码、正则提取、Markdown 预览、API 压测、PDF 工具箱、垃圾清理……），源码维护于 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)，经插件管理页「在线市场」统一安装 / 升级。
 
-| 插件 | 功能 |
-|------|------|
-| `calcsheet` | 计算稿纸（表达式计算） |
-| `emoji-search` | Emoji 搜索 |
-| `formatter` | 代码 / SQL 等格式化 |
-| `hosts-manager` | Hosts 文件管理 |
-| `json-toolbox` | JSON 工具箱（格式化 / 校验 / 转换） |
-| `jwt-decoder` | JWT 解码 |
-| `markdown-preview` | Markdown 预览 |
-| `port-scanner` | 端口扫描 |
-| `qrcode` | 二维码生成 / 识别 |
-| `regex-extractor` | 正则提取 |
-| `text-encoder` | 文本编码转换 |
-| `time-converter` | 时间戳转换 |
-| `wifi-manager` | WiFi 管理 |
-
-插件启动时自动从 `plugins/builtin/` 安装至 `~/.quickdock/plugins/`，同时将 `common.css` 和 `common.js` 拷贝到每个插件根目录，确保直接文件访问也能加载共享样式。
+插件窗口由宿主注入共享样式脚本（`common.css` / `common.js`）以兼容旧版插件；新插件页面自带 `qd-theme.css` 自包含样式，不再依赖注入。
 
 ---
 
