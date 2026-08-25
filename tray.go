@@ -831,31 +831,31 @@ func registerAllHotkeys(app *application.App) {
 
 	// 命令面板热键（默认 Ctrl+K），注册前先读取 palette 配置
 	registeredPaletteAccel := paletteAccel
-	if err := app.GlobalShortcut.Register(paletteAccel, func() {
+	// 面板打开后 Ctrl+K 不再关闭窗口：系统级热键永远优先于页面 keydown 触发，
+	// 若在这里 Hide，面板内的「Ctrl+K 打开动作菜单」在默认配置下将永远不可达。
+	// 改为转发 palette:hotkey 事件给前端，由前端切换选中项的动作菜单（Esc 关闭菜单/面板）。
+	handlePaletteHotkey := func() {
 		pw := getPaletteWindow()
-		if pw == nil { return }
-		if paletteMode.Load() {
-			paletteMode.Store(false)
-			pw.Hide()
-		} else {
-			platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
-			paletteMode.Store(true)
-			pw.Show()
-			pw.Focus()
-			if a := getHotkeyApp(); a != nil {
-				a.Event.Emit("palette:shown")
-			}
+		if pw == nil {
+			return
 		}
-	}); err != nil {
+		if paletteMode.Load() {
+			if a := getHotkeyApp(); a != nil {
+				a.Event.Emit("palette:hotkey")
+			}
+			return
+		}
+		platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
+		paletteMode.Store(true)
+		pw.Show()
+		pw.Focus()
+		if a := getHotkeyApp(); a != nil {
+			a.Event.Emit("palette:shown")
+		}
+	}
+	if err := app.GlobalShortcut.Register(paletteAccel, handlePaletteHotkey); err != nil {
 		fmt.Printf("QuickDock: 命令面板热键 [%s] 注册失败: %v\n", paletteAccel, err)
-		app.GlobalShortcut.Register("Ctrl+K", func() {
-			pw := getPaletteWindow()
-			if pw == nil { return }
-			platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
-			paletteMode.Store(true)
-			pw.Show(); pw.Focus()
-			if a := getHotkeyApp(); a != nil { a.Event.Emit("palette:shown") }
-		})
+		app.GlobalShortcut.Register("Ctrl+K", handlePaletteHotkey)
 		registeredPaletteAccel = "Ctrl+K"
 	} else {
 		fmt.Printf("QuickDock: 命令面板快捷键 [%s] 已注册\n", paletteAccel)

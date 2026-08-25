@@ -512,9 +512,10 @@ func (m *Manager) pingOne(pluginID string) {
 		return
 	}
 
-	// ping 失败，递增计数器
+	// ping 失败，递增计数器，并记录失败原因（区分超时未回 / 返回 RPC 错误 / 进程已死）
 	m.mu.Lock()
 	inst.MissedPings++
+	fmt.Printf("QuickDock: 插件 %s ping 失败（已连续 %d 次）: %v\n", pluginID, inst.MissedPings, err)
 	if inst.MissedPings >= 6 {
 		// 连续 3 轮（约 90s）无响应：强制终止进程，由 watchPlugin 自动重启。
 		// 不能走 stopPlugin（会置 stopped=true，watchPlugin 将放弃重启）

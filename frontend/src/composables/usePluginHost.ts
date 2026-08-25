@@ -76,6 +76,12 @@ export function usePluginHost(opts: PluginHostOptions) {
     if (!pluginId) return
 
     // 插件对话框桥接（仅校验来源，不依赖 nonce）
+    if (event.data?.type === 'plugin:esc') {
+      // iframe 内 Esc 经桥转发到此：iframe 抢焦点后父级收不到 keydown，
+      // 用宿主级 CustomEvent 通知所在上下文（命令面板内联插件 → 关闭插件页）。
+      window.dispatchEvent(new CustomEvent('qd:plugin-esc'))
+      return
+    }
     if (event.data?.type === 'plugin:confirm') {
       const { id, message } = event.data
       try {

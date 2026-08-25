@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import type { CollectionItem } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
 import { commandTitle, pluginName } from '../utils/localize'
+import { getPluginLastResult } from '../utils/pluginLastResult'
 import { evaluate, format, convertExpression } from '../utils/calc'
 import { Puzzle } from '@lucide/vue'
 
@@ -26,10 +27,10 @@ export interface SearchResult {
   pluginId?: string
   pluginCommandId?: string
   pluginHasFrontend?: boolean
+  pluginNotRunning?: boolean
   inlineInput?: string
   pluginResult?: string
   acceptsInput?: boolean
-  isCachedResult?: boolean
   score?: number
   matchType?: string
   url?: string
@@ -60,7 +61,6 @@ export interface SearchDeps {
   query: Ref<string>
   selectedIndex: Ref<number>
   pluginCmdIndex: Ref<PluginCmdIndex[]>
-  pluginResultCache: Ref<{ result: string; pluginName: string; pluginId?: string; pluginCommandId?: string; pluginHasFrontend?: boolean; input?: string; acceptsInput?: boolean } | null>
   clipboardUrlSource: Ref<string>
   frecencyScore: (key: string) => number
   frecencyTick: Ref<number>
@@ -76,7 +76,7 @@ export interface SearchDeps {
 export function useCommandSearch(deps: SearchDeps) {
   const { locale } = useI18n()
   const { items, installedApps, snippets, systemCommands, query, selectedIndex,
-          pluginCmdIndex, pluginResultCache, clipboardUrlSource,
+          pluginCmdIndex, clipboardUrlSource,
           frecencyScore, frecencyTick, calcPluginScore,
           pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons } = deps
 
@@ -278,36 +278,18 @@ export function useCommandSearch(deps: SearchDeps) {
       pluginResults.push({
         type: 'plugin',
         label: inlineInput ? `${commandTitle(idx.cmd, locale)}: ${inlineInput}` : commandTitle(idx.cmd, locale),
-        desc: pluginName(idx.plugin, locale) + (idx.cmd.hotkey ? `  ${idx.cmd.hotkey}` : ''),
+        desc: pluginName(idx.plugin, locale) + (idx.cmd.hotkey ? `  ${idx.cmd.hotkey}` : '') + (idx.notRunning ? `  · ${t('pluginNotRunning')}` : ''),
         icon: Puzzle,
         iconBase64: pluginIcons.value[idx.plugin.id],
         pluginId: idx.plugin.id,
         pluginCommandId: idx.cmd.id,
         pluginHasFrontend: idx.plugin.hasFrontend,
+        pluginNotRunning: idx.notRunning,
         acceptsInput: idx.cmd.acceptsInput,
         inlineInput,
         score,
         matchType,
         frecencyScore: frecencyScore('plugin:' + idx.plugin.id + '.' + idx.cmd.id),
-      })
-    }
-    if (pluginResultCache.value) {
-      const pc = pluginResultCache.value
-      pluginResults.unshift({
-        type: 'plugin',
-        label: pc.result,
-        desc: '\u2190 ' + pc.pluginName,
-        icon: Puzzle,
-        iconBase64: pc.pluginId ? pluginIcons.value[pc.pluginId] : undefined,
-        score: 99,
-        frecencyScore: 9999,
-        pluginId: pc.pluginId,
-        pluginCommandId: pc.pluginCommandId,
-        pluginHasFrontend: pc.pluginHasFrontend,
-        acceptsInput: pc.acceptsInput,
-        isCachedResult: true,
-        inlineInput: pc.input || undefined,
-        matchType: pc.input ? 'match pattern' : undefined,
       })
     }
     pluginResults.sort((a, b) => {
@@ -438,8 +420,10 @@ export function useCommandSearch(deps: SearchDeps) {
         }
         results.push({
           type: 'plugin',
-          label: entry.label,
-          desc: entry.description,
+          // label/desc 空兜底：某些路径写入的 plugin 记录 label 为空，
+          // 用命令标题 / 插件名补上，保证「最近使用」可读可执行
+          label: entry.label || commandTitle(idx.cmd, locale),
+          desc: entry.description || pluginName(idx.plugin, locale),
           icon: Puzzle,
           iconBase64: pluginIcons.value[matchedPluginId],
           pluginId: matchedPluginId,
@@ -513,11 +497,12 @@ export function useCommandSearch(deps: SearchDeps) {
       return { title: r.label, subtitle: (r as any).snippet.category, lines: [(r as any).snippet.content], kind: 'snippet' }
     }
     if (r.type === 'plugin') {
-      const cached = pluginResultCache.value
+      const last = r.pluginId && r.pluginCommandId ? getPluginLastResult(r.pluginId, r.pluginCommandId) : null
       return {
         title: r.label,
-        subtitle: cached ? t('previewLast') : (r.desc || ''),
-        lines: cached ? [cached.result] : [r.desc || ''],
+        subtitle: last ? t('previewLast') : (r.desc || ''),
+        // 结果正文进右侧 preview 面板，列表只留命令本体
+        lines: last ? [last.result] : [r.desc || ''],
         kind: 'plugin',
       }
     }

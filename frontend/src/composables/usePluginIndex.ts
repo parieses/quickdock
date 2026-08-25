@@ -7,6 +7,8 @@ export interface PluginCmdIndex {
   cmd: PluginCommand
   regex: RegExp | null
   regexValid: boolean
+  /** 插件当前未运行（status !== 'running'）：命令仍保留在索引中，带此标记供列表标注/执行前自动拉起 */
+  notRunning: boolean
   titleLc: string[]           // 原始标题 + titleI18n 各语言值（小写），供多语言搜索
   pinyinTitleFull: string
   pinyinTitleInit: string
@@ -22,7 +24,9 @@ function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
   const idx: PluginCmdIndex[] = []
   const seen = new Set<string>()
   for (const plugin of plugins) {
-    if (plugin.status !== 'running') continue
+    // 非 running 插件不静默丢弃：命令保留（notRunning 标记），列表标注「未运行」，
+    // 选中执行前由面板自动 EnablePlugin 拉起，避免「命令从面板里消失」的困惑
+    const notRunning = plugin.status !== 'running'
     for (const cmd of (plugin.commands || [])) {
       const key = plugin.id + '|' + cmd.id
       if (seen.has(key)) continue
@@ -56,7 +60,7 @@ function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
         pinyinAliasFull.push(aPy.join('').toLowerCase())
         pinyinAliasInit.push(aPy.map(p => p[0]).join('').toLowerCase())
       }
-      idx.push({ plugin, cmd, regex, regexValid, titleLc, pinyinTitleFull, pinyinTitleInit, pinyinKwFull, pinyinKwInit, pinyinAliasFull, pinyinAliasInit })
+      idx.push({ plugin, cmd, regex, regexValid, notRunning, titleLc, pinyinTitleFull, pinyinTitleInit, pinyinKwFull, pinyinKwInit, pinyinAliasFull, pinyinAliasInit })
     }
   }
   return idx
@@ -93,9 +97,21 @@ function calcPluginScore(
   if (idx.cmd.prefix) {
     const prefixLC = idx.cmd.prefix.toLowerCase()
     if (qLC.startsWith(prefixLC) && (qLC.length === prefixLC.length || qLC[prefixLC.length] === ' ')) {
-      bestScore = 95; bestType = 'slash'
-      // 仅当命令声明 acceptsInput 时，才把前缀后的文本作为插件参数带入
-      if (idx.cmd.acceptsInput) inlineInput = q.slice(prefixLC.length).trim() || undefined
+      // 同前缀多命令分流（2026-08-25 P3）：
+      //   - 带参查询（'/port 8080'）：只有 acceptsInput 命令才配得上参数 → 加权 98；
+      //     无参命令（如打开工具面板类）直接不匹配，避免 '/port 8080' 时 port-list 也并列 95 分
+      //   - 纯前缀查询（'/port'）：无参命令保持 95 直达；acceptsInput 命令降权 88（参数未就绪，稍等输入）
+      const hasArg = qLC.length > prefixLC.length
+      if (idx.cmd.acceptsInput) {
+        if (hasArg) {
+          bestScore = 98; bestType = 'slash'
+          inlineInput = q.slice(prefixLC.length).trim() || undefined
+        } else {
+          bestScore = 88; bestType = 'slash'
+        }
+      } else if (!hasArg) {
+        bestScore = 95; bestType = 'slash'
+      }
     }
   }
   if (idx.regex && idx.regexValid) {
@@ -148,14 +164,15 @@ function calcPluginScore(
   return { score: bestScore, matchType: bestType, inlineInput }
 }
 
-const matchTypeLabels: Record<string, string> = {
-  'exact': '精确', 'keyword': '关键字', 'alias': '别名', 'prefix': '前缀',
-  'contains': '包含', 'fuzzy': '模糊', 'match pattern': '正则', 'kw inline': '内联',
-  'kw prefix': '关键字前缀', 'kw match': '关键字', 'kw pinyin': '拼音',
-  'alias py': '拼音', 'pinyin': '拼音', 'plugin': '插件', 'desc': '描述',
-  'id': 'ID', 'slash': '命令',
+// 命中类型 → i18n key（文案在 i18n/zh-CN.ts 的 命令面板 分组 mt* 键，en-US 同步）
+const matchTypeI18nKeys: Record<string, string> = {
+  'exact': 'mtExact', 'keyword': 'mtKeyword', 'alias': 'mtAlias', 'prefix': 'mtPrefix',
+  'contains': 'mtContains', 'fuzzy': 'mtFuzzy', 'match pattern': 'mtMatchPattern', 'kw inline': 'mtKwInline',
+  'kw prefix': 'mtKwPrefix', 'kw match': 'mtKwMatch', 'kw pinyin': 'mtKwPinyin',
+  'alias py': 'mtAliasPy', 'pinyin': 'mtPinyin', 'plugin': 'mtPlugin', 'desc': 'mtDesc',
+  'id': 'mtId', 'slash': 'mtSlash',
 }
 
 export function usePluginIndex() {
-  return { pluginCmdIndex, buildPluginIndex, calcPluginScore, levenshtein, matchTypeLabels }
+  return { pluginCmdIndex, buildPluginIndex, calcPluginScore, levenshtein, matchTypeI18nKeys }
 }

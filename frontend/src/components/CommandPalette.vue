@@ -8,7 +8,7 @@ import {
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
   Copy, FolderSearch, Play, ClipboardPaste, Save
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer, EnablePlugin } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -16,6 +16,7 @@ import type { CollectionItem, PluginInfo } from '../types'
 import type { ToastAPI } from '../types'
 import { evaluate, format, convertExpression } from '../utils/calc'
 import { commandTitle } from '../utils/localize'
+import { getPluginLastResult, savePluginLastResult, pluginCmdKey } from '../utils/pluginLastResult'
 import { pinyin } from 'pinyin-pro'
 import { useFrecency } from '../composables/useFrecency'
 import { usePluginIndex } from '../composables/usePluginIndex'
@@ -28,7 +29,7 @@ const toast = inject<ToastAPI>('toast')
 
 // ---- 初始化 composables ----
 const { frecencyTick, loadFrecency, recordUsage, frecencyScore } = useFrecency()
-const { pluginCmdIndex, buildPluginIndex, calcPluginScore, matchTypeLabels } = usePluginIndex()
+const { pluginCmdIndex, buildPluginIndex, calcPluginScore, matchTypeI18nKeys } = usePluginIndex()
 
 // ---- 内联插件状态（统一走 PluginFrame 宿主；内联传参不走全局 pending init，避免跨消费竞态）----
 const inlinePluginId = ref<string | null>(null)
@@ -45,6 +46,24 @@ function closeInlinePlugin() {
   inlinePluginId.value = null
   inlinePluginName.value = ''
   inlinePluginInit.value = { text: '', command: '' }
+}
+
+// 动作菜单版「分离为独立窗口」：选中列表中的前端插件命令，带最近输入/命令打开独立窗口。
+// 与内联插件页头的 detach 同一机制（SetPendingPluginInit + ShowPluginWindow）。
+async function detachPluginFor(r: SearchResult) {
+  const pid = r.pluginId
+  if (!pid) return
+  try {
+    const last = r.pluginCommandId ? getPluginLastResult(pid, r.pluginCommandId) : null
+    const input = r.inlineInput || last?.input || ''
+    if (r.pluginCommandId) {
+      try { await SetPendingPluginInit(pid, input, r.pluginCommandId) } catch {}
+    }
+    await ShowPluginWindow(pid)
+    closePalette()
+  } catch (e) {
+    toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
+  }
 }
 
 // 分离为独立窗口：把当前插件的 init 交给独立窗口的全局 pending init 槽位后再打开
@@ -73,7 +92,6 @@ function closePalette() {
   lastAnchor.value = -1
   inlineQuicklink.value = null
   inlineQuery.value = ''
-  pluginResultCache.value = null
   clipboardUrlSource.value = ''
   try { HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
 }
@@ -172,7 +190,6 @@ const listRef = ref<HTMLElement | null>(null)
 const selectedSet = ref<Set<number>>(new Set())
 const lastAnchor = ref(-1)
 const clipboardUrlSource = ref('')
-const pluginResultCache = ref<{ result: string; pluginName: string; pluginId?: string; pluginCommandId?: string; pluginHasFrontend?: boolean; input?: string; acceptsInput?: boolean } | null>(null)
 const inlineQuicklink = ref<CollectionItem | null>(null)
 const inlineQuery = ref('')
 const inlineInputRef = ref<HTMLInputElement | null>(null)
@@ -272,7 +289,7 @@ const {
   previewResult, recentCache, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
 } = useCommandSearch({
   items, installedApps, snippets, systemCommands, query, selectedIndex,
-  pluginCmdIndex, pluginResultCache, clipboardUrlSource,
+  pluginCmdIndex, clipboardUrlSource,
   frecencyScore, frecencyTick, calcPluginScore,
   pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons,
 })
@@ -294,6 +311,14 @@ function onKeydown(e: KeyboardEvent) {
   if (actionMenuOpen.value) {
     const acts = contextActions.value
     const n = Math.max(acts.length, 1)
+    // 数字 1-9 直达对应动作、Home/End 跳首尾——长菜单不用纯方向键遍历
+    if (/^[1-9]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const i = parseInt(e.key, 10) - 1
+      if (i < acts.length) { e.preventDefault(); runAction(acts[i]) }
+      return
+    }
+    if (e.key === 'Home') { e.preventDefault(); actionMenuIndex.value = 0; return }
+    if (e.key === 'End') { e.preventDefault(); actionMenuIndex.value = n - 1; return }
     switch (e.key) {
       case 'ArrowDown': e.preventDefault(); actionMenuIndex.value = (actionMenuIndex.value + 1) % n; break
       case 'ArrowUp': e.preventDefault(); actionMenuIndex.value = (actionMenuIndex.value - 1 + n) % n; break
@@ -332,6 +357,12 @@ function onKeydown(e: KeyboardEvent) {
   }
 }
 
+// 插件 iframe 的 Esc：关内联插件页（回到输入框）；若已在非插件态则退化为关面板
+function escFromPlugin() {
+  if (inlinePluginId.value) closeInlinePlugin()
+  else closePalette()
+}
+
 // 文档级 Esc 兜底：frameless 窗口激活竞态下输入框可能未获得键盘焦点，
 // 仅 @keydown 绑在 <input> 上时 Esc 会丢失，故在 document 上再兜一层（capture 保证不被子组件吞掉）。
 function onGlobalEsc(e: KeyboardEvent) {
@@ -340,6 +371,21 @@ function onGlobalEsc(e: KeyboardEvent) {
   if (actionMenuOpen.value) { closeActionMenu(); return }
   if (inlineQuicklink.value) { cancelInlineQuicklink(); return }
   closePalette()
+}
+
+// 方向键/数字直达等导航键是否握在输入框手里（避免与 input @keydown 双处理）
+function navFocused(): boolean {
+  const el = document.activeElement
+  return el === inputRef.value || el === inlineInputRef.value
+}
+
+// 文档级导航兜底（capture）：焦点不在输入框时（窗口激活竞态、点过结果/菜单项后）
+// 方向键、1-9、Home/End、Enter 依然可靠——与 onGlobalEsc 同思路，根治「方向键时灵时不灵」。
+// Escape 专由 onGlobalEsc 处理，这里跳过避免双触发。
+function onGlobalKey(e: KeyboardEvent) {
+  if (e.key === 'Escape') return
+  if (navFocused()) return
+  onKeydown(e)
 }
 
 // ---- 执行 ----
@@ -408,11 +454,22 @@ async function executeSelected() {
     recordUsage('app:' + result.label, 'app', result.label, result.desc)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }; closePalette()
   } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
+    // 插件未运行时先自动拉起（EnablePlugin = Reload 加载 + DB 置启用）：
+    // 面板不静默丢弃这类命令，而是「执行前自动启动」；失败则明示原因停在面板
+    if (result.pluginNotRunning) {
+      try {
+        await EnablePlugin(result.pluginId)
+      } catch (e) {
+        toast?.error?.(t('pluginStartFailed') + ': ' + getErrorMessage(e))
+        return
+      }
+      await loadPluginIndex()
+    }
     // 仅当命令声明 acceptsInput 时，才把 Ctrl+K 文本作为插件参数带入；否则不传（"不设置就不带"）
     let inputText: string | undefined
     if (result.acceptsInput) {
       inputText = result.inlineInput || undefined
-      if (!inputText && result.label && !(result as any).isCachedResult) {
+      if (!inputText && result.label) {
         const idx = pluginCmdIndex.value.find(c => c.plugin.id === result.pluginId && c.cmd.id === result.pluginCommandId)
         if (idx) {
           const title = commandTitle(idx.cmd, locale)
@@ -422,10 +479,23 @@ async function executeSelected() {
         }
       }
     }
-    // 缓存的“上次结果”且无可靠输入：带参命令不应凭 label 猜测、也不应以空参数执行
-    if ((result as any).isCachedResult && result.acceptsInput && !inputText) {
+    // acceptsInput 命令未带输入：回退「最近一次输入」实现一键重跑——
+    // 持久化 store（跨应用重启）优先，其次 usage 表 recentCache（input 字段自 v1 起就有）
+    if (result.acceptsInput && !inputText) {
+      const last = result.pluginId && result.pluginCommandId
+        ? getPluginLastResult(result.pluginId, result.pluginCommandId) : null
+      if (last?.input) {
+        inputText = last.input
+      } else {
+        const k = pluginCmdKey(result.pluginId, result.pluginCommandId)
+        const re = recentCache.value.find((e) => e.key === k && !!e.input)
+        if (re?.input) inputText = re.input
+      }
+    }
+    // 仍无输入：绝不空参执行——空跑 + 必报错 + 空输入写坏历史记录三害齐发。
+    // 有前端则打开页面让用户补输入；无前端则提示后停在面板，不动历史。
+    if (result.acceptsInput && !inputText) {
       if (result.pluginHasFrontend) {
-        recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, '')
         inlinePluginName.value = ''
         inlinePluginInit.value = { text: '', command: result.pluginCommandId || '' }
         inlinePluginId.value = result.pluginId
@@ -435,6 +505,8 @@ async function executeSelected() {
       return
     }
     recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, inputText || '')
+    // 即时刷新「最近使用」：运行完立刻能看到，不必等下次重开面板
+    refreshRecentCache().catch(() => {})
     try {
       if (result.pluginHasFrontend) {
         // 前端插件：交由统一 PluginFrame 宿主打开 UI；init 通过同窗口 getter 直接传入（不走全局 pending init 单例）
@@ -452,7 +524,12 @@ async function executeSelected() {
           const copyText = typeof pluginResult === 'object'
             ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText) : displayText
           try { await writeClipboard(copyText) } catch {}
-          pluginResultCache.value = { result: displayText.slice(0, 150), pluginName: result.desc || result.label, pluginId: result.pluginId, pluginCommandId: result.pluginCommandId, pluginHasFrontend: result.pluginHasFrontend, input: inputText, acceptsInput: result.acceptsInput }
+          // 持久化「每命令最近一次结果」：重开面板/重启后 preview 仍可展示、动作菜单可复制、acceptsInput 命令可一键重跑
+          savePluginLastResult(result.pluginId, result.pluginCommandId, {
+            result: displayText, pluginName: result.desc || result.label,
+            pluginId: result.pluginId, pluginCommandId: result.pluginCommandId,
+            pluginHasFrontend: result.pluginHasFrontend, input: inputText, acceptsInput: result.acceptsInput,
+          })
           toast?.success?.(t('pluginResultCopied'))
         }
       }
@@ -549,6 +626,19 @@ const contextActions = computed<PaletteAction[]>(() => {
   if (value && value !== r.label) {
     const label = isLocalPath(value) ? t('actCopyPath') : /^https?:/i.test(value) ? t('actCopyLink') : t('actCopyValue')
     acts.push({ id: 'copy-value', label, icon: Copy, run: () => copyAndClose(value) })
+  }
+
+  // 插件专属动作：原生 tab 里的动作菜单太薄——补「分离为独立窗口」与「复制上次结果」
+  if (r.type === 'plugin' && r.pluginId) {
+    if (r.pluginHasFrontend) {
+      acts.push({ id: 'plugin-detach-window', label: t('actPluginDetach'), icon: ExternalLink, run: () => detachPluginFor(r) })
+    }
+    if (r.pluginCommandId) {
+      const last = getPluginLastResult(r.pluginId, r.pluginCommandId)
+      if (last?.result) {
+        acts.push({ id: 'plugin-copy-last', label: t('actCopyLastResult'), icon: Copy, run: () => copyAndClose(last.result) })
+      }
+    }
   }
 
   if (isLocalPath(value)) acts.push({ id: 'reveal', label: t('actReveal'), icon: FolderSearch, run: () => revealAndClose(value) })
@@ -679,8 +769,20 @@ async function loadPaletteData() {
     }
   } catch (e) { console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e)) }
   try { const snips = unwrap<CmdSnippet[]>(await ListSnippets()); if (gen !== itemsLoadGen) return; snippets.value = snips || [] } catch (e) { console.error('[CmdPalette] ListSnippets:', getErrorMessage(e)) }
-  try { const raw = await GetAllUsage(); if (gen === itemsLoadGen) recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.label) } catch (e) { console.error('[CmdPalette] GetAllUsage:', getErrorMessage(e)) }
+  await refreshRecentCache(gen)
   if (gen === itemsLoadGen) loading.value = false
+}
+
+// 刷新「最近使用」缓存：运行命令/打开项目后实时拉取，否则要等下次重开面板才出现
+async function refreshRecentCache(gen?: number) {
+  try {
+    const raw = await GetAllUsage()
+    if (gen === undefined || gen === itemsLoadGen) {
+      // plugin 记录 label 可能为空（某些热键/自动执行路径），但近期有 plugin 记录本身
+      // 就值得留在「最近使用」——组装时用命令标题/插件名兜底，故放宽过滤
+      recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && (e.label || e.type === 'plugin'))
+    }
+  } catch (e) { console.error('[CmdPalette] GetAllUsage:', getErrorMessage(e)) }
 }
 
 // ---- 生命周期 ----
@@ -688,8 +790,16 @@ let lastClipboardUpdate = 0
 
 onMounted(async () => {
   Events.On('clipboard:updated', () => { lastClipboardUpdate = Date.now() })
+  // 面板打开时宿主把全局 Ctrl+K 转发为 palette:hotkey（不再关窗），
+  // 前端在此切换选中项的动作菜单——系统级热键优先于页面 keydown，只能由宿主转达
+  Events.On('palette:hotkey', () => { if (actionMenuOpen.value) closeActionMenu(); else openActionMenu() })
+  // 插件 iframe 内的 Esc 经插件桥转发（qd:plugin-esc）：iframe 抢占焦点后
+  // 父级 document 收不到 keydown，这是唯一的 Esc 通路
+  window.addEventListener('qd:plugin-esc', escFromPlugin)
   // 文档级 Esc 兜底（capture 阶段），确保输入框未获焦点时也能关闭面板
   document.addEventListener('keydown', onGlobalEsc, true)
+  // 文档级导航兜底：焦点不在输入框时方向键/数字/Home/End/Enter 依然可用
+  document.addEventListener('keydown', onGlobalKey, true)
   Events.On('palette:shown', () => {
     loadPluginIndex()
     // 核心修复：若隐藏前仍停留在内联插件页，重开时保持插件页（「临时收起」而非「主动退出」）。
@@ -698,7 +808,7 @@ onMounted(async () => {
       return
     }
     loadPaletteData().catch(e => console.warn('[CmdPalette] loadPaletteData:', e))
-    query.value = ''; selectedIndex.value = 0; inlineQuicklink.value = null; inlineQuery.value = ''; pluginResultCache.value = null
+    query.value = ''; selectedIndex.value = 0; inlineQuicklink.value = null; inlineQuery.value = ''
     recentExpanded.value = false
     actionMenuOpen.value = false
     if (Date.now() - lastClipboardUpdate < 3000) {
@@ -728,7 +838,7 @@ onMounted(async () => {
 
 // 仅在查询变化时重置选中（避免悬停/频次更新导致选中项跳回顶部）
 watch(query, (val) => {
-  if (!val.trim()) { pluginResultCache.value = null; inlineQuicklink.value = null; inlineQuery.value = '' }
+  if (!val.trim()) { inlineQuicklink.value = null; inlineQuery.value = '' }
   if (val.trim() !== clipboardUrlSource.value) clipboardUrlSource.value = ''
   actionMenuOpen.value = false
   selectedIndex.value = 0
@@ -741,8 +851,11 @@ watch(inlineQuicklink, (v) => { if (v) selectedIndex.value = 0 })
 onUnmounted(() => {
   closeInlinePlugin()
   Events.Off('palette:shown')
+  Events.Off('palette:hotkey')
   Events.Off('clipboard:updated')
+  window.removeEventListener('qd:plugin-esc', escFromPlugin)
   document.removeEventListener('keydown', onGlobalEsc, true)
+  document.removeEventListener('keydown', onGlobalKey, true)
   window.removeEventListener('focus', focusInput)
 })
 </script>
@@ -849,7 +962,7 @@ onUnmounted(() => {
               <span class="meta-tag">{{ result.snippet.category }}</span>
             </template>
             <template v-else-if="result.type === 'plugin' && result.matchType">
-              <span class="meta-tag">{{ matchTypeLabels[result.matchType!] || result.matchType }}</span>
+              <span class="meta-tag">{{ matchTypeI18nKeys[result.matchType] ? t(matchTypeI18nKeys[result.matchType]) : result.matchType }}</span>
             </template>
           </div>
         </div>
@@ -886,6 +999,7 @@ onUnmounted(() => {
             @click="runAction(a)"
             @mousemove="actionMenuIndex = i"
           >
+            <span class="action-menu-index" v-if="i < 9">{{ i + 1 }}</span>
             <component :is="a.icon" :size="14" class="action-menu-icon" />
             <span class="action-menu-label">{{ a.label }}</span>
             <CornerDownLeft v-if="i === actionMenuIndex" :size="11" class="action-menu-enter" />
@@ -1225,6 +1339,13 @@ onUnmounted(() => {
 .action-menu-item.danger:hover { background: var(--color-danger-bg, rgba(239, 68, 68, 0.12)); color: var(--color-danger); }
 
 .action-menu-icon { flex-shrink: 0; opacity: 0.85; }
+.action-menu-index {
+  flex-shrink: 0; min-width: 14px; text-align: center;
+  font-size: 10px; line-height: 14px; font-weight: 600;
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: 4px; padding: 0 3px; opacity: 0.8;
+}
 .action-menu-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .action-menu-enter { flex-shrink: 0; opacity: 0.5; }
 
