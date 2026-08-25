@@ -306,6 +306,7 @@ wails3 generate bindings -ts -i -clean
 | **Lucide Vue** | 图标库 |
 | **pinyin-pro** | 拼音搜索支持 |
 | **marked 18 + DOMPurify** | Markdown 安全渲染 |
+| **@floating-ui/vue 2** | 浮层定位（右键菜单 / 划词浮层 / 图表 tooltip，自动防溢出与翻转） |
 | **@wailsio/runtime** | Wails 前端运行时绑定 |
 
 ---
@@ -421,7 +422,7 @@ quickdock/
 │   │   ├── types/        # TypeScript 类型（含 ai.ts）
 │   │   ├── utils/        # 工具函数（api.ts / pluginBridge.ts / calc.ts …）
 │   │   ├── i18n/         # 国际化（zh-CN / en-US）
-│   │   └── composables/  # 组合式函数（useHttpData / useHttpDrag / useFrecency …）
+│   │   └── composables/  # 组合式函数（useHttpData / useHttpDrag / useFloatMenu / useFrecency …）
 │   └── vite.config.ts
 ├── plugins/builtin/     # 仅存 common.css/js 骨架（宿主注入兼容用，勿删）
 ├── plugins/templates/   # 插件开发模板（none / goja / native）
@@ -1047,6 +1048,7 @@ SOFTWARE.
 
 - [Wails](https://wails.io/) — 强大的 Go 桌面应用框架
 - [Vue.js](https://vuejs.org/) — 渐进式前端框架
+- [Floating UI](https://floating-ui.com/) — 浮层定位引擎（防溢出 / 自动翻转）
 - [Lucide](https://lucide.dev/) — 优雅的开源图标库
 - [modernc.org/sqlite](https://modernc.org/sqlite) — 纯 Go SQLite 实现
 - [marked](https://marked.js.org/) — 快速 Markdown 解析

@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
+import { useFloatMenu } from '../composables/useFloatMenu'
 import type { Scene } from '../types'
 
 const store = useWorkspaceStore()
@@ -14,13 +15,9 @@ const openedTabs = computed(() => {
     .filter((s): s is Scene => s !== undefined)
 })
 
-// 右键菜单状态
-const contextMenu = ref({
-  visible: false,
-  x: 0,
-  y: 0,
-  sceneId: '',
-})
+// 右键菜单（floating-ui：跟随鼠标 + 防溢出翻转）
+const ctxMenu = useFloatMenu({ offset: 0 })
+const menuSceneId = ref('')
 
 // 点击标签切换场景
 function selectTab(sceneId: string) {
@@ -38,41 +35,33 @@ function closeTab(sceneId: string, event: Event) {
 // 右键菜单
 function onContextMenu(sceneId: string, event: MouseEvent) {
   event.preventDefault()
-  contextMenu.value = {
-    visible: true,
-    x: event.clientX,
-    y: event.clientY,
-    sceneId,
-  }
-}
-
-function hideContextMenu() {
-  contextMenu.value.visible = false
+  menuSceneId.value = sceneId
+  ctxMenu.showAt(event.clientX, event.clientY)
 }
 
 function menuClose() {
-  store.closeSceneTab(contextMenu.value.sceneId)
-  hideContextMenu()
+  store.closeSceneTab(menuSceneId.value)
+  ctxMenu.hide()
 }
 
 function menuCloseLeft() {
-  store.closeTabsToLeft(contextMenu.value.sceneId)
-  hideContextMenu()
+  store.closeTabsToLeft(menuSceneId.value)
+  ctxMenu.hide()
 }
 
 function menuCloseRight() {
-  store.closeTabsToRight(contextMenu.value.sceneId)
-  hideContextMenu()
+  store.closeTabsToRight(menuSceneId.value)
+  ctxMenu.hide()
 }
 
 function menuCloseOthers() {
-  store.closeOtherTabs(contextMenu.value.sceneId)
-  hideContextMenu()
+  store.closeOtherTabs(menuSceneId.value)
+  ctxMenu.hide()
 }
 
 // 菜单项是否可用
 const menuSceneIdx = computed(() => {
-  return store.openedSceneIds.indexOf(contextMenu.value.sceneId)
+  return store.openedSceneIds.indexOf(menuSceneId.value)
 })
 const canCloseLeft = computed(() => menuSceneIdx.value > 0)
 const canCloseRight = computed(() => menuSceneIdx.value >= 0 && menuSceneIdx.value < store.openedSceneIds.length - 1)
@@ -80,7 +69,7 @@ const canCloseOthers = computed(() => store.openedSceneIds.length > 1)
 
 // 点击任意位置关闭菜单
 function onClickAway() {
-  hideContextMenu()
+  ctxMenu.hide()
 }
 </script>
 
@@ -103,10 +92,11 @@ function onClickAway() {
 
     <!-- 右键菜单 -->
     <Teleport to="body">
-      <div v-if="contextMenu.visible" class="context-overlay" @click="onClickAway" @contextmenu.prevent="onClickAway">
+      <div v-if="ctxMenu.visible.value" class="context-overlay" @click="onClickAway" @contextmenu.prevent="onClickAway">
         <div
+          :ref="el => (ctxMenu.floatingRef.value = el as HTMLElement | null)"
           class="context-menu"
-          :style="{ left: contextMenu.x + 'px', top: contextMenu.y + 'px' }"
+          :style="ctxMenu.floatingStyles.value"
         >
           <button class="menu-item" @click="menuClose">{{ t('closeTab') }}</button>
           <button class="menu-item" :disabled="!canCloseLeft" @click="menuCloseLeft">{{ t('closeLeft') }}</button>

@@ -15,6 +15,7 @@ import HistoryPanel from './HistoryPanel.vue'
 import CreateDialog from '../components/CreateDialog.vue'
 import { useHttpData } from './composables/useHttpData'
 import { useHttpDrag } from './composables/useHttpDrag'
+import { useFloatMenu } from '../composables/useFloatMenu'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -295,15 +296,16 @@ const bodyPlaceholder = computed(() => {
   }
 })
 
-// ---- 右键菜单 ----
-const projMenu = reactive({ visible: false, x: 0, y: 0, projectId: '' })
+// ---- 右键菜单（floating-ui：跟随鼠标 + 防溢出翻转）----
+const projMenu = reactive({ projectId: '' })
+const projCtx = useFloatMenu()
 function openProjMenu(e: MouseEvent, projectId: string) {
   e.preventDefault()
-  projMenu.x = e.clientX; projMenu.y = e.clientY
-  projMenu.projectId = projectId; projMenu.visible = true
+  projMenu.projectId = projectId
+  projCtx.showAt(e.clientX, e.clientY)
 }
 function runProjMenu(action: 'add-request' | 'add-folder' | 'add-doc' | 'manage-env' | 'settings' | 'delete') {
-  projMenu.visible = false
+  projCtx.hide()
   const pid = projMenu.projectId
   const p = projects.value.find(x => x.id === pid)
   if (action === 'add-request') newRequest(pid)
@@ -314,14 +316,15 @@ function runProjMenu(action: 'add-request' | 'add-folder' | 'add-doc' | 'manage-
   else if (action === 'delete' && p) deleteProject(p)
 }
 
-const reqMenu = reactive({ visible: false, x: 0, y: 0, req: null as ApiRequest | null })
+const reqMenu = reactive({ req: null as ApiRequest | null })
+const reqCtx = useFloatMenu()
 function openReqMenu(e: MouseEvent, req: ApiRequest) {
   e.preventDefault()
-  reqMenu.x = e.clientX; reqMenu.y = e.clientY
-  reqMenu.req = req; reqMenu.visible = true
+  reqMenu.req = req
+  reqCtx.showAt(e.clientX, e.clientY)
 }
 function deleteReqFromMenu() {
-  reqMenu.visible = false
+  reqCtx.hide()
   if (reqMenu.req) remove(reqMenu.req)
 }
 
@@ -459,8 +462,8 @@ onMounted(() => { loadActiveEnvs(); load() })
       @confirm="handleNewProject" @cancel="showProjectDialog = false" />
 
     <!-- 项目右键菜单 -->
-    <div v-if="projMenu.visible" class="ctx-menu-mask" @click="projMenu.visible = false" @contextmenu.prevent="projMenu.visible = false">
-      <div class="ctx-menu" :style="{ left: projMenu.x + 'px', top: projMenu.y + 'px' }" @click.stop>
+    <div v-if="projCtx.visible.value" class="ctx-menu-mask" @click="projCtx.hide" @contextmenu.prevent="projCtx.hide">
+      <div class="ctx-menu" :ref="el => (projCtx.floatingRef.value = el as HTMLElement | null)" :style="projCtx.floatingStyles.value" @click.stop>
         <button class="ctx-item" @click="runProjMenu('add-request')"><Plus :size="13" /> {{ t('httpNewRequest') }}</button>
         <template v-if="projMenu.projectId">
           <button class="ctx-item" @click="runProjMenu('add-folder')"><FolderPlus :size="13" /> {{ t('httpNewFolder') }}</button>
@@ -474,8 +477,8 @@ onMounted(() => { loadActiveEnvs(); load() })
     </div>
 
     <!-- 请求右键菜单 -->
-    <div v-if="reqMenu.visible" class="ctx-menu-mask" @click="reqMenu.visible = false" @contextmenu.prevent="reqMenu.visible = false">
-      <div class="ctx-menu" :style="{ left: reqMenu.x + 'px', top: reqMenu.y + 'px' }" @click.stop>
+    <div v-if="reqCtx.visible.value" class="ctx-menu-mask" @click="reqCtx.hide" @contextmenu.prevent="reqCtx.hide">
+      <div class="ctx-menu" :ref="el => (reqCtx.floatingRef.value = el as HTMLElement | null)" :style="reqCtx.floatingStyles.value" @click.stop>
         <button class="ctx-item danger" @click="deleteReqFromMenu"><Trash2 :size="13" /> {{ t('httpDeleteRequest') }}</button>
       </div>
     </div>

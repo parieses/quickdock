@@ -8,6 +8,7 @@ import {
   DeleteMonitor, SetMonitorEnabled, CheckMonitorNow,
   GetMonitorLogs, GetMonitorLogsSince, ClearMonitorLogs, ListMonitorStats,
 } from '../../bindings/quickdock/services/appservice'
+import { useFloatMenu } from '../composables/useFloatMenu'
 import type { Monitor } from '../../bindings/quickdock/internal/db/models'
 import WebhookSettingsModal from './WebhookSettingsModal.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -296,13 +297,15 @@ function certWarn(m: Monitor): boolean {
 // ---- 曲线图 tooltip ----
 // 存储每个图的数据点像素位置，用于鼠标悬停检测
 const chartPoints = new Map<string, Array<{ x: number; y: number; data: MonitorLog }>>()
-const tooltip = ref<{ show: boolean; x: number; y: number; data: MonitorLog | null }>({
-  show: false, x: 0, y: 0, data: null,
+const tooltip = ref<{ show: boolean; data: MonitorLog | null }>({
+  show: false, data: null,
 })
+// floating-ui：跟随鼠标位置（偏移到右下方），靠边自动内收
+const tipCtx = useFloatMenu({ placement: 'right-start', offset: { mainAxis: 14, crossAxis: -8 } })
 
 function onChartMove(e: MouseEvent, id: string) {
   const pts = chartPoints.get(id)
-  if (!pts || pts.length === 0) { tooltip.value.show = false; return }
+  if (!pts || pts.length === 0) { tooltip.value.show = false; tipCtx.hide(); return }
   const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect()
   const mx = e.clientX - rect.left
   const my = e.clientY - rect.top
@@ -314,13 +317,17 @@ function onChartMove(e: MouseEvent, id: string) {
     if (d < minDist && d < threshold) { minDist = d; nearest = p }
   }
   if (nearest) {
-    tooltip.value = { show: true, x: e.clientX, y: e.clientY, data: nearest.data }
+    tooltip.value = { show: true, data: nearest.data }
+    if (tipCtx.visible.value) tipCtx.updateAt(e.clientX, e.clientY)
+    else tipCtx.showAt(e.clientX, e.clientY)
   } else {
     tooltip.value.show = false
+    tipCtx.hide()
   }
 }
 function onChartLeave() {
   tooltip.value.show = false
+  tipCtx.hide()
 }
 
 function drawChart(id: string) {
@@ -650,7 +657,8 @@ onUnmounted(() => {
     </div>
 
     <!-- 曲线图 tooltip -->
-    <div v-if="tooltip.show && tooltip.data" class="chart-tooltip" :style="{ left: tooltip.x + 12 + 'px', top: tooltip.y - 10 + 'px' }">
+    <div v-if="tooltip.show && tooltip.data" class="chart-tooltip"
+      :ref="el => (tipCtx.floatingRef.value = el as HTMLElement | null)" :style="tipCtx.floatingStyles.value">
       <div class="tip-line">
         <span :class="['tip-dot', tooltip.data.status]"></span>
         <span class="tip-status">{{ tooltip.data.status === 'up' ? t('mon_up') : t('mon_down') }}</span>

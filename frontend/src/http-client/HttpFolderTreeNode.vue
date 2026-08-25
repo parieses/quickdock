@@ -2,6 +2,7 @@
 import { computed, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronRight, Folder, Plus, FolderPlus, Pencil, Trash2, FileText } from '@lucide/vue'
+import { useFloatMenu } from '../composables/useFloatMenu'
 import type { ApiRequest, HttpFolder, HttpDoc, HttpDragItem, HttpDropTarget } from '../types'
 
 const props = defineProps<{
@@ -96,18 +97,17 @@ function folderDrop(e: DragEvent) {
 
 // 右键上下文菜单（目录 / 请求 / 文档 的删除等）
 type MenuKind = 'folder' | 'request' | 'doc'
-const menu = reactive({ visible: false, x: 0, y: 0, kind: '' as MenuKind | '', payload: null as ApiRequest | HttpDoc | HttpFolder | null })
+const menu = reactive({ kind: '' as MenuKind | '', payload: null as ApiRequest | HttpDoc | HttpFolder | null })
+const ctxMenu = useFloatMenu()
 function openMenu(e: MouseEvent, kind: MenuKind, payload: ApiRequest | HttpDoc | HttpFolder) {
   e.preventDefault()
-  menu.x = e.clientX
-  menu.y = e.clientY
   menu.kind = kind
   menu.payload = payload
-  menu.visible = true
+  ctxMenu.showAt(e.clientX, e.clientY)
 }
-function closeMenu() { menu.visible = false }
+function closeMenu() { ctxMenu.hide() }
 function run(action: string) {
-  menu.visible = false
+  ctxMenu.hide()
   if (menu.kind === 'folder') {
     const f = menu.payload as HttpFolder
     if (action === 'add-folder') emit('add-folder', f.id)
@@ -202,8 +202,8 @@ function run(action: string) {
     </div>
 
     <!-- 右键上下文菜单 -->
-    <div v-if="menu.visible" class="ctx-menu-mask" @click="closeMenu" @contextmenu.prevent="closeMenu">
-      <div class="ctx-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
+    <div v-if="ctxMenu.visible.value" class="ctx-menu-mask" @click="closeMenu" @contextmenu.prevent="closeMenu">
+      <div class="ctx-menu" :ref="el => (ctxMenu.floatingRef.value = el as HTMLElement | null)" :style="ctxMenu.floatingStyles.value" @click.stop>
         <template v-if="menu.kind === 'folder'">
           <button class="ctx-item" @click="run('add-folder')"><FolderPlus :size="13" /> {{ t('httpNewSubFolder') }}</button>
           <button class="ctx-item" @click="run('add-request')"><Plus :size="13" /> {{ t('httpNewRequest') }}</button>

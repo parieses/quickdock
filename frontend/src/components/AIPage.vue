@@ -7,6 +7,7 @@ import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { useFloatMenu } from '../composables/useFloatMenu'
 import type { ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/models'
 import type { AIProfilesResult } from '../types/ai'
@@ -328,10 +329,12 @@ async function copy(text: string) {
 }
 
 // —— 划词（选择文本）复制 ——
-const selPop = reactive({ visible: false, x: 0, y: 0, text: '' })
+const selPop = reactive({ text: '' })
+// floating-ui：跟随选区矩形，选区上方显示，放不下自动翻到下方，靠边自动内收
+const selCtx = useFloatMenu({ placement: 'top', offset: 8 })
 
 function hideSelPop() {
-  selPop.visible = false
+  selCtx.hide()
   selPop.text = ''
 }
 
@@ -343,17 +346,8 @@ function checkSelection() {
   const range = sel.getRangeAt(0)
   const container = msgArea.value
   if (!container || !container.contains(range.commonAncestorContainer)) { hideSelPop(); return }
-  const rect = range.getBoundingClientRect()
   selPop.text = text
-  let x = Math.round(rect.left + rect.width / 2)
-  let y = Math.round(rect.top - 8)
-  // 选区靠近顶部时改到选区下方显示，避免浮层超出视口
-  if (rect.top < 44) y = Math.round(rect.bottom + 12)
-  // 水平方向限制在视口内
-  x = Math.min(Math.max(x, 70), window.innerWidth - 70)
-  selPop.x = x
-  selPop.y = y
-  selPop.visible = true
+  selCtx.showRect(range.getBoundingClientRect())
 }
 
 function onMsgMouseUp() {
@@ -507,12 +501,13 @@ onUnmounted(() => {
         </template>
       </div>
 
-      <!-- 划词复制浮层（Teleport 到 body，避免被祖先 overflow/transform 裁剪定位错乱） -->
+      <!-- 划词复制浮层（Teleport 到 body，floating-ui 负责定位与防溢出） -->
       <Teleport to="body">
         <button
-          v-if="selPop.visible"
+          v-if="selCtx.visible.value"
           class="ai-sel-copy"
-          :style="{ left: selPop.x + 'px', top: selPop.y + 'px' }"
+          :ref="el => (selCtx.floatingRef.value = el as HTMLElement | null)"
+          :style="selCtx.floatingStyles.value"
           @click="copySelection"
           @mousedown.stop
         >
@@ -705,11 +700,9 @@ onUnmounted(() => {
 .ai-copy:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .ai-msg.user .ai-copy { align-self: flex-end; color: rgba(255,255,255,0.7); }
 .ai-msg.user .ai-copy:hover { color: #fff; background: rgba(255,255,255,0.18); }
-/* 划词复制浮层 */
+/* 划词复制浮层（position/left/top 由 floating-ui 注入） */
 .ai-sel-copy {
-  position: fixed;
   z-index: 50;
-  transform: translate(-50%, -100%);
   display: flex; align-items: center; gap: 4px;
   padding: 5px 10px;
   border: 1px solid var(--color-border);
