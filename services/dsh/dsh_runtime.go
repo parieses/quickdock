@@ -438,6 +438,19 @@ func killProcessTree(pid int) bool {
 	return cmd.Run() == nil
 }
 
+// ensurePortReleased 轮询直到端口可重新绑定（最多 3s）；dsh 关闭后 TCP TIME_WAIT
+// 短暂存在，Start()/stopLocked() 都靠它确保下次能重新绑定默认端口 3080。
+func (m *DSHProcessManager) ensurePortReleased(port int) {
+	for i := 0; i < 30; i++ {
+		ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(port))
+		if err == nil {
+			ln.Close()
+			break
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
 // waitReady 轮询 GET / 直到服务真正就绪（45s，新机器首次启动需初始化 profile，20s 内常常起不来）。
 // 判定条件：2xx/3xx/401/403 视为就绪；404（页面资源未就绪）与 5xx 继续等待，
 // 避免把「端口已监听但服务尚未初始化完成」误判为就绪。
@@ -467,11 +480,23 @@ func (m *DSHProcessManager) waitReady(url string, exit <-chan struct{}) error {
 	return fmt.Errorf("健康检查超时: %s", url)
 }
 
-// Stop 优雅停止；Windows 下用 taskkill /T 杀进程树兜底，防止残留 Node 占端口
+// Stop 优雅停止；Windows 下用 taskkill /T 杀进程树兜底，防止残留 Node 占端口。
+// stopLocked 之外统一失效 aliveCache：刚停止时绝不能再报告"正在运行"
+//（旧成功缓存会让 Stop 后 10s 内 Running()/状态页误判，看起来像"没停掉/又启动"）。
 func (m *DSHProcessManager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.stopLocked()
+	m.aliveCache.port = 0
+	m.aliveCache.ok = false
+	m.aliveCache.at = time.Time{}
+}
+
+// logf 转发诊断日志到「设置 → DeepSeek」日志面板（quickdock:dsh:log 事件）
+func (m *DSHProcessManager) logf(level, msg string) {
+	if m.app != nil {
+		m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
+	}
 }
 
 // stopLocked 停止逻辑的带锁实现，调用方必须已持有 m.mu。
@@ -479,6 +504,26 @@ func (m *DSHProcessManager) Stop() {
 // 避免与 reaper 对同一 cmd 重复 Wait。
 func (m *DSHProcessManager) stopLocked() {
 	if m.cmd == nil || m.cmd.Process == nil {
+		// 无进程句柄 ≠ 服务不在跑：Start() 的"复用路径"（检测到 3080 已有健康 dsh
+		// 直接复用，m.cmd 保持 nil）下服务由外部/残留 node 提供。此时必须按端口兜底
+		// 清理，否则设置里点"停止"什么都不做，服务继续跑、状态过一会又显示运行。
+		if runtime.GOOS == "windows" {
+			m.logf("info", "DSHStop: 无托管进程句柄（复用/外部服务），按端口兜底清理 127.0.0.1:3080")
+			if pid := findPortPID(DefaultDSHPort); pid > 0 {
+				if isNodeProcess(pid) {
+					m.logf("info", fmt.Sprintf("DSHStop: 端口 3080 由 node PID %d 监听，taskkill /T /F 清理", pid))
+				} else {
+					// 复用路径的成立前提（Start 时 isDSHAlive 判定"3080 是健康 dsh 服务"）
+					// 已把该进程当作 dsh——用户点"停止"意图就是停掉它，非 node 也强制清理，
+					// 否则停止永远失效（曾遇 3080 由非 node 名进程监听的场景）。记录进程名供追溯。
+					m.logf("warn", fmt.Sprintf("DSHStop: 端口 3080 由非 node 进程 PID %d 监听，按停止意图强制清理", pid))
+				}
+				killProcessTree(pid)
+				m.ensurePortReleased(DefaultDSHPort)
+			} else {
+				m.logf("info", "DSHStop: 端口 3080 无监听，无需清理")
+			}
+		}
 		m.cmd = nil
 		m.url = ""
 		m.starting = false
@@ -490,7 +535,8 @@ func (m *DSHProcessManager) stopLocked() {
 	exit := m.exit
 	m.cmd = nil
 	m.url = ""
-	m.port = 0
+	// 保留 m.port：Running() 停止后按"最后实际使用的端口"探测。若清零回退回默认端口 3080，
+	// 随机端口场景（3080 被无关进程占用时 Start 才退避）会把 3080 上的无关服务误判为 dsh。
 	m.exit = nil
 	m.starting = false
 	m.ready = nil
@@ -508,17 +554,22 @@ func (m *DSHProcessManager) stopLocked() {
 		// 必须带 CREATE_NO_WINDOW，与 Start()/node_env.go 的其他隐藏控制台调用保持一致。
 		kill := exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F")
 		kill.SysProcAttr = hideWindowAttr()
-		kill.Run()
+		if err := kill.Run(); err != nil {
+			m.logf("warn", fmt.Sprintf("DSHStop: taskkill 进程树 PID %d 返回错误: %v（继续按端口验证）", cmd.Process.Pid, err))
+		}
+		// 验证端口是否真正释放。仍被占用（taskkill 未生效 / 锁定的 cmd 进程已退、
+		// 3080 实际由树外残留进程提供）→ 按端口兜底再清一次，确保"停止"一定生效。
+		if pid := findPortPID(DefaultDSHPort); pid > 0 {
+			if isNodeProcess(pid) {
+				m.logf("warn", fmt.Sprintf("DSHStop: taskkill 后 3080 仍由 node PID %d 监听，再次清理", pid))
+			} else {
+				m.logf("warn", fmt.Sprintf("DSHStop: taskkill 后 3080 仍由非 node 进程 PID %d 监听，按停止意图强制清理", pid))
+			}
+			killProcessTree(pid)
+		}
 		// 等待端口释放：dsh 关闭后 TCP TIME_WAIT 短暂存在，轮询 30 次（3s）确保下次
 		// OpenDSHWindow() 能重新绑定 3080 而不是开随机端口。
-		for i := 0; i < 30; i++ {
-			ln, err := net.Listen("tcp", "127.0.0.1:"+strconv.Itoa(DefaultDSHPort))
-			if err == nil {
-				ln.Close()
-				break
-			}
-			time.Sleep(100 * time.Millisecond)
-		}
+		m.ensurePortReleased(DefaultDSHPort)
 		return
 	}
 	_ = cmd.Process.Signal(os.Interrupt)

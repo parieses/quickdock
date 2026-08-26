@@ -5,16 +5,37 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"os/exec"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
 	"syscall"
+	"time"
 
 	"golang.org/x/sys/windows"
 
 	"quickdock/internal/platform"
 )
+
+// expandItemVars 打开 item 前替换值/参数中的内置占位符（与文本片段变量一致）：
+// {date} {time} {username} {clipboard}。剪贴板读取失败时置空，不阻塞打开。
+// 作用范围：命令的 value、网页/快速链接的 URL 等一切进入打开链路的目标文本。
+func expandItemVars(s string) string {
+	if !strings.Contains(s, "{") {
+		return s
+	}
+	now := time.Now()
+	s = strings.NewReplacer(
+		"{date}", now.Format("2006-01-02"),
+		"{time}", now.Format("15:04:05"),
+		"{username}", os.Getenv("USERNAME"),
+	).Replace(s)
+	if strings.Contains(s, "{clipboard}") {
+		s = strings.ReplaceAll(s, "{clipboard}", platform.GetClipboardText())
+	}
+	return s
+}
 
 const itemCols = "id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, usage_count, sort, created_at, updated_at"
 
@@ -431,7 +452,7 @@ func (d *Database) OpenAllInCollection(collectionID string) error {
 }
 
 func execOpen(item *CollectionItem, tool OpenTool) error {
-	value := item.Value
+	value := expandItemVars(item.Value)
 	itemType := item.Type
 
 	if tool.Path == "" || tool.Name == "系统默认" {

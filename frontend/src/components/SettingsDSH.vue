@@ -169,6 +169,8 @@ async function toggleService(start: boolean) {
       unwrap(await DSHStart())
     } else {
       unwrap(await DSHStop())
+      // 即时反馈：先置为已停止，避免后端状态刷新（1.2s 后）前仍显示"运行中"
+      if (dshSvc.value) dshSvc.value.running = false
     }
     showMsg(start ? t('dshServiceRunning') : t('dshServiceStopped'))
     // dsh 进程启动/停止是异步的，延迟刷新一次状态

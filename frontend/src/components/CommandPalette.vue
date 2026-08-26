@@ -8,7 +8,7 @@ import {
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
   Copy, FolderSearch, Play, ClipboardPaste, Save
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer, EnablePlugin } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer, EnablePlugin, GetPathQuickInfo } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -93,6 +93,7 @@ function closePalette() {
   inlineQuicklink.value = null
   inlineQuery.value = ''
   clipboardUrlSource.value = ''
+  quickInfo.value = null
   try { HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
 }
 
@@ -294,8 +295,111 @@ const {
   pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons,
 })
 
+// ---- QuickLook 详情预览（选中即自动展示，无需按键）----
+interface PathQuickInfo { exists: boolean; isDir?: boolean; path?: string; sizeText?: string; modified?: string }
+const quickInfo = ref<PathQuickInfo | null>(null)
+let quickInfoTimer: ReturnType<typeof setTimeout> | null = null
+
+// 拉取文件/目录元数据（本地 stat，防抖 200ms 防切项风暴）
+async function loadQuickInfo(item: CollectionItem) {
+  if (quickInfoTimer) { clearTimeout(quickInfoTimer); quickInfoTimer = null }
+  if (item.type !== '文件' && item.type !== '目录') { quickInfo.value = null; return }
+  quickInfoTimer = setTimeout(async () => {
+    quickInfoTimer = null
+    try {
+      const res = unwrap<PathQuickInfo | null>(await GetPathQuickInfo(item.value || ''))
+      quickInfo.value = res || null
+    } catch { quickInfo.value = null }
+  }, 200)
+}
+
+// 选中项变化：跟随刷新元数据
+function refreshQuickInfoForSelection() {
+  const r = displayFlat.value[selectedIndex.value]
+  const item = r?.type === 'item' ? r.item : null
+  if (item) loadQuickInfo(item)
+  else quickInfo.value = null
+}
+watch(selectedIndex, refreshQuickInfoForSelection)
+watch(displayFlat, () => { if (previewResult.value) refreshQuickInfoForSelection() })
+
+// 预览正文：基础行 + 详情行（文件元数据 / 命令工作目录）
+const previewLines = computed(() => {
+  const base = previewResult.value?.lines || []
+  const r = displayFlat.value[selectedIndex.value]
+  if (r?.type !== 'item' || !r.item) return base
+  const it = r.item
+  const extra: string[] = []
+  if ((it.type === '文件' || it.type === '目录') && quickInfo.value) {
+    const q = quickInfo.value
+    if (!q.exists) extra.push('⚠ 路径不存在')
+    else {
+      if (!q.isDir) extra.push('大小: ' + (q.sizeText || '-'))
+      extra.push('修改时间: ' + (q.modified || '-'))
+      extra.push(q.isDir ? '类型: 文件夹' : '类型: 文件')
+    }
+  } else if (it.type === '命令') {
+    if (it.workingDirectory) extra.push('工作目录: ' + it.workingDirectory)
+    if (it.tool) extra.push('工具: ' + it.tool)
+  }
+  return [...base, ...extra]
+})
+
 // ---- 键盘导航 ----
 const GRID_COLUMNS = 3 // 结果区每行卡片数（网格列数）
+
+/**
+ * 视觉网格导航：结果区是 3 列 grid（每组带跨行 header），若用线性索引 ± GRID_COLUMNS 跳转，
+ * 组与组衔接处会错位——某个短分组可能永远点不中（如"na"搜索时的文本片段/系统命令）。
+ * 这里按「组 header 占一行」重建每项的视觉行列坐标，↑↓ 走同列上下相邻，保证所见即所得。
+ */
+function moveVertical(dir: 1 | -1) {
+  const flat = displayFlat.value
+  const len = flat.length
+  if (len <= 1) return
+  const groups = displayGroups.value
+  // 计算每个 flat 索引的视觉 (row, col)
+  // 行语义：header 占据"当前光标行"，本组 items 从下一行开始；
+  // 组内每 3 项换一行；下一组的 header 再从 items 结束行之后开始。
+  const pos: { row: number; col: number }[] = []
+  let row = 0
+  for (const g of groups) {
+    const itemsStart = row + 1 // header 占 row 行，items 从 row+1 起
+    for (let i = 0; i < g.results.length; i++) {
+      pos.push({ row: itemsStart + Math.floor(i / GRID_COLUMNS), col: i % GRID_COLUMNS })
+    }
+    row = itemsStart + Math.ceil(g.results.length / GRID_COLUMNS)
+  }
+  // 防御：displayGroups 与 displayFlat 时序不一致导致坐标缺失 → 回退线性导航
+  if (pos.length !== len) {
+    selectedIndex.value = dir === 1
+      ? (selectedIndex.value + 1) % Math.max(len, 1)
+      : (selectedIndex.value - 1 + len) % Math.max(len, 1)
+    scrollToSelected()
+    return
+  }
+  const cur = pos[selectedIndex.value]
+  if (!cur) return
+  // 语义：↓/↑ 走到"视觉下一行/上一行"（跳开组 header 行），在该行优先选同列项，
+  // 同列不存在（短组没到该列）则选最近列——避免"贴着列越过大段空白跨到很远的分组"。
+  let targetRow = -1
+  for (let i = 0; i < len; i++) {
+    if (dir === 1 && pos[i].row > cur.row && (targetRow === -1 || pos[i].row < targetRow)) targetRow = pos[i].row
+    if (dir === -1 && pos[i].row < cur.row && pos[i].row > targetRow) targetRow = pos[i].row
+  }
+  if (targetRow === -1) return // 顶部/底部边界，停住
+  let best = -1
+  let minColDist = Infinity
+  for (let i = 0; i < len; i++) {
+    if (pos[i].row !== targetRow) continue
+    const cd = Math.abs(pos[i].col - cur.col)
+    if (cd < minColDist) { minColDist = cd; best = i } // 同列(0)优先，其次最近列
+  }
+  if (best >= 0 && best !== selectedIndex.value) {
+    selectedIndex.value = best
+    scrollToSelected()
+  }
+}
 
 function scrollToSelected() {
   nextTick(() => {
@@ -340,9 +444,9 @@ function onKeydown(e: KeyboardEvent) {
   if (list.length === 0 && e.key !== 'Escape') return
   switch (e.key) {
     case 'ArrowDown':
-      e.preventDefault(); selectedIndex.value = (selectedIndex.value + GRID_COLUMNS) % Math.max(list.length, 1); scrollToSelected(); break
+      e.preventDefault(); moveVertical(1); break
     case 'ArrowUp':
-      e.preventDefault(); selectedIndex.value = (selectedIndex.value - GRID_COLUMNS + list.length) % Math.max(list.length, 1); scrollToSelected(); break
+      e.preventDefault(); moveVertical(-1); break
     case 'ArrowRight':
       e.preventDefault(); selectedIndex.value = (selectedIndex.value + 1) % Math.max(list.length, 1); scrollToSelected(); break
     case 'ArrowLeft':
@@ -914,6 +1018,9 @@ onUnmounted(() => {
           <X :size="13" />
         </button>
       </template>
+      <button class="palette-close" @click="closePalette" :title="t('close')">
+        <X :size="14" />
+      </button>
     </div>
 
     <div ref="listRef" class="palette-results" v-if="displayGroups.length > 0 && !inlineQuicklink">
@@ -975,7 +1082,7 @@ onUnmounted(() => {
         <span class="preview-subtitle" v-if="previewResult.subtitle">{{ previewResult.subtitle }}</span>
       </div>
       <div class="preview-body">
-        <div v-for="(line, i) in previewResult.lines" :key="i" class="preview-line">{{ line }}</div>
+        <div v-for="(line, i) in previewLines" :key="i" class="preview-line">{{ line }}</div>
       </div>
     </div>
 
@@ -1240,8 +1347,17 @@ onUnmounted(() => {
   width: 18px; height: 18px; border-radius: var(--radius-sm); background: var(--color-accent); color: #fff; flex-shrink: 0;
 }
 
+.palette-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; margin-left: 2px; flex-shrink: 0;
+  border: none; background: transparent; border-radius: 5px;
+  color: var(--color-text-muted); cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.palette-close:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
+
 .palette-preview {
-  flex-shrink: 0; max-height: 96px; overflow-y: auto;
+  flex-shrink: 0; max-height: 170px; overflow-y: auto;
   padding: 8px 16px; border-top: 1px solid var(--color-border); background: var(--color-bg-secondary);
 }
 .preview-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
