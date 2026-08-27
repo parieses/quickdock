@@ -1,6 +1,6 @@
 import { inject, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ExecutePluginCommand, CopyText, GetAndClearPendingPluginInit, PickFilePath, ReadPickedFile } from '../../bindings/quickdock/services/appservice'
+import { ExecutePluginCommand, CopyText, GetAndClearPendingPluginInit, PickFilePath, PickFolderPath, ReadPickedFile } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
 import { Dialogs } from '@wailsio/runtime'
 import type { ToastAPI } from '../types'
@@ -108,6 +108,19 @@ export function usePluginHost(opts: PluginHostOptions) {
         event.source?.postMessage({ type: 'plugin:pickfile-result', id, path: path || null }, '*')
       } catch {
         event.source?.postMessage({ type: 'plugin:pickfile-result', id, path: null }, '*')
+      }
+      return
+    }
+
+    // 插件原生选目录：走宿主 PickFolderPath（Wails Dialog 目录模式，CanChooseDirectories），
+    // 与 qdPickFile 同源；规避插件自行 spawn PowerShell/AppleScript 的脆弱实现；取消/失败回传 null
+    if (event.data?.type === 'plugin:pickfolder') {
+      const { id, title } = event.data
+      try {
+        const path = unwrap<string>(await PickFolderPath(title || ''))
+        event.source?.postMessage({ type: 'plugin:pickfolder-result', id, path: path || null }, '*')
+      } catch {
+        event.source?.postMessage({ type: 'plugin:pickfolder-result', id, path: null }, '*')
       }
       return
     }

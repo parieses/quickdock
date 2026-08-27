@@ -81,6 +81,27 @@ func (a *AppService) PickFilePath(title, filterName, pattern string) *ApiResult 
 	return Ok(filePath)
 }
 
+// PickFolderPath 打开原生目录选择对话框，返回所选目录路径（取消返回 null）。
+// 供插件桥接 qdPickFolder 使用：复用 Wails v3 OpenFile 的 CanChooseDirectories(true)，
+// 走与 qdPickFile 一致的原生对话框，规避插件自行 spawn PowerShell/AppleScript 的脆弱实现。
+func (a *AppService) PickFolderPath(title string) *ApiResult {
+	if a.app == nil {
+		return FailMsg("应用未初始化")
+	}
+	if title == "" {
+		title = "选择目录"
+	}
+	folderPath, err := a.app.Dialog.OpenFile().
+		SetTitle(title).
+		CanChooseDirectories(true).
+		CanChooseFiles(false).
+		PromptForSingleSelection()
+	if err != nil || folderPath == "" {
+		return Ok(nil)
+	}
+	return Ok(folderPath)
+}
+
 // pickedFileMaxSize 单个文件读取上限：插件场景（配置/文本/二维码图）足够，
 // 同时防住超大文件把 WebView2 桥接消息撑爆。
 const pickedFileMaxSize = 20 << 20
