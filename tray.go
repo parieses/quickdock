@@ -208,6 +208,14 @@ func createSystemTray(app *application.App) {
 			hideMainWindow(win)
 		}
 	})
+	menu.Add("打开设置").OnClick(func(*application.Context) {
+		if win := GetMainWindow(); win != nil {
+			showMainWindow(win)
+			if a := getHotkeyApp(); a != nil {
+				a.Event.Emit("app:open-settings")
+			}
+		}
+	})
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(*application.Context) {
 		requestQuit()
@@ -553,18 +561,18 @@ func registerAllHotkeys(app *application.App) {
 		logger.I("剪贴板快捷键 [%s] 已注册", clipAccel)
 	}
 
-	// 命令面板热键（默认 Ctrl+K）
-	// 面板打开后 Ctrl+K 不再关闭窗口：系统级热键永远优先于页面 keydown 触发，
-	// 若在这里 Hide，面板内的「Ctrl+K 打开动作菜单」在默认配置下将永远不可达。
-	// 改为转发 palette:hotkey 事件给前端，由前端切换选中项的动作菜单（Esc 关闭菜单/面板）。
+	// 命令面板热键（默认 Ctrl+K）：纯开 / 关切换。
+	// 打开后再次按下 → 直接 HidePaletteWindow 关闭面板（不再转发 palette:hotkey）。
+	// 面板内的「动作菜单」改用 Ctrl+Enter 触发（见 CommandPalette.vue），
+	// 避免系统级热键与页面 keydown 抢焦点、导致菜单永远不可达的问题。
 	handlePaletteHotkey := func() {
 		pw := getPaletteWindow()
 		if pw == nil {
 			return
 		}
 		if paletteMode.Load() {
-			if a := getHotkeyApp(); a != nil {
-				a.Event.Emit("palette:hotkey")
+			if svc := appSvc.Load(); svc != nil {
+				svc.HidePaletteWindow()
 			}
 			return
 		}

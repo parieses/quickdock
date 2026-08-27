@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square } from '@lucide/vue'
-import { ListPlugins, DisablePlugin, EnablePlugin, UninstallPlugin, SelectAndInstallPlugin, GetPluginIcon, ShowPluginWindow, ListPluginExecLogs, KillPlugin } from '../../bindings/quickdock/services/appservice'
+import { ListPlugins, DisablePlugin, EnablePlugin, UninstallPlugin, SelectAndInstallPlugin, GetPluginIcon, ShowPluginWindow, ListPluginExecLogs, KillPlugin, GetPluginNewFlags, MarkPluginSeen } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -17,6 +17,9 @@ const plugins = ref<PluginInfo[]>([])
 const icons = ref<Record<string, string>>({}) // pluginId → data URI
 const loading = ref(true)
 const operating = ref<Set<string>>(new Set())
+
+// 插件「新安装/更新」角标：首次打开后清除
+const newFlags = ref<Set<string>>(new Set())
 
 // 视图切换：本地管理 / 在线市场（PluginMarketPage 子组件）
 const activeView = ref<'local' | 'market'>('local')
@@ -87,6 +90,11 @@ async function loadPlugins() {
         } catch {}
       })
     await Promise.all(iconPromises)
+    // 加载「新」角标集合
+    try {
+      const flags = await GetPluginNewFlags()
+      if (Array.isArray(flags)) newFlags.value = new Set(flags as string[])
+    } catch {}
   } catch (e) {
     toast?.error?.(t('pluginLoadFailed') + ': ' + getErrorMessage(e))
   } finally {
@@ -174,7 +182,13 @@ const emit = defineEmits<{ (e: 'navigate-plugin', pluginId: string): void }>()
 
 function openPluginPage(p: PluginInfo) {
   // 在新窗口中打开插件前端页面
-  ShowPluginWindow(p.id).catch(e => {
+  ShowPluginWindow(p.id).then(() => {
+    // 首次打开 → 清除「新」角标
+    if (newFlags.value.has(p.id)) {
+      newFlags.value.delete(p.id)
+      MarkPluginSeen(p.id).catch(() => {})
+    }
+  }).catch(e => {
     toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
   })
 }
@@ -239,7 +253,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
       </div>
     </div>
 
-    <div v-if="activeView === 'local'">
+    <div v-if="activeView === 'local'" class="plugin-local">
     <!-- 分类 Tabs -->
     <div class="plugin-categories" v-if="plugins.length > 0">
       <button
@@ -278,6 +292,9 @@ onMounted(() => { loadPlugins(); loadLogs() })
         :key="p.id"
         :class="['plugin-card', { 'card-running': p.status === 'running' }]"
       >
+        <!-- 「新」角标 -->
+        <span v-if="newFlags.has(p.id)" class="new-badge">新</span>
+
         <!-- 悬停操作按钮 -->
         <div class="card-actions-top">
           <button
@@ -404,9 +421,19 @@ onMounted(() => { loadPlugins(); loadLogs() })
 </template>
 
 <style scoped>
+/* 中间包装层：v-if="activeView==='local'" 的块级 div 会打断 flex 链，
+   使 .plugin-grid 的 flex:1/overflow 失效（grid 撑满内容高度后被 overflow:hidden 裁掉）。
+   这里把它也纳入 flex column，grid 才能获得受限高度并内部滚动。 */
+.plugin-local {
+  flex: 1; min-height: 0;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
 .plugin-page {
   flex: 1; display: flex; flex-direction: column;
   overflow: hidden; padding: 16px 20px;
+  min-height: 0; /* flex 子项默认 min-height:auto 会按内容撑高，插件多时整页超出被裁、无法滚动 */
 }
 
 /* ---- 头部 ---- */
@@ -448,6 +475,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 /* ---- 网格 ---- */
 .plugin-grid {
   flex: 1; overflow-y: auto;
+  min-height: 0; /* 同上：允许网格收缩到可视高度，超出才滚动 */
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   gap: 8px;
@@ -471,6 +499,15 @@ onMounted(() => { loadPlugins(); loadLogs() })
 }
 .plugin-card:hover { border-color: var(--color-accent); box-shadow: 0 0 0 1px rgba(74,158,255,0.15); }
 .plugin-card.card-running { border-color: rgba(29,158,117,0.25); }
+
+/* 「新」角标 */
+.new-badge {
+  position: absolute; top: 4px; left: 4px;
+  font-size: 9px; line-height: 14px; font-weight: 600;
+  padding: 0 5px; border-radius: 7px;
+  background: var(--color-accent, #4a9eff); color: #fff;
+  z-index: 1; letter-spacing: 0.5px;
+}
 
 /* 顶部操作悬停 */
 .card-actions-top {

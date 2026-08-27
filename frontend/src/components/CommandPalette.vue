@@ -8,7 +8,7 @@ import {
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
   Copy, FolderSearch, Play, ClipboardPaste, Save
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer, EnablePlugin, GetPathQuickInfo } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer, EnablePlugin, GetPathQuickInfo, GetPluginNewFlags, MarkPluginSeen } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -53,6 +53,7 @@ function closeInlinePlugin() {
 async function detachPluginFor(r: SearchResult) {
   const pid = r.pluginId
   if (!pid) return
+  markPluginSeen(pid)
   try {
     const last = r.pluginCommandId ? getPluginLastResult(pid, r.pluginCommandId) : null
     const input = r.inlineInput || last?.input || ''
@@ -70,6 +71,7 @@ async function detachPluginFor(r: SearchResult) {
 async function detachPlugin() {
   const id = inlinePluginId.value
   if (!id) return
+  markPluginSeen(id)
   try {
     if (inlinePluginInit.value.text || inlinePluginInit.value.command) {
       try { await SetPendingPluginInit(id, inlinePluginInit.value.text, inlinePluginInit.value.command) } catch {}
@@ -185,6 +187,20 @@ const items = ref<CollectionItem[]>([])
 const installedApps = ref<InstalledApp[]>([])
 const installedPlugins = ref<PluginInfo[]>([])
 const pluginIcons = ref<Record<string, string>>({}) // pluginId → data URI（真实插件图标，来自 GetPluginIcon）
+
+// 插件「新安装/更新」角标：首次运行/打开后清除
+const newFlags = ref<Set<string>>(new Set())
+async function loadPluginNewFlags() {
+  try {
+    const flags = await GetPluginNewFlags()
+    if (Array.isArray(flags)) newFlags.value = new Set(flags as string[])
+  } catch {}
+}
+function markPluginSeen(pid: string) {
+  if (!pid || !newFlags.value.has(pid)) return
+  newFlags.value.delete(pid)
+  MarkPluginSeen(pid).catch(() => {})
+}
 const loading = ref(false)
 const selectedIndex = ref(0)
 const listRef = ref<HTMLElement | null>(null)
@@ -426,7 +442,12 @@ function onKeydown(e: KeyboardEvent) {
     switch (e.key) {
       case 'ArrowDown': e.preventDefault(); actionMenuIndex.value = (actionMenuIndex.value + 1) % n; break
       case 'ArrowUp': e.preventDefault(); actionMenuIndex.value = (actionMenuIndex.value - 1 + n) % n; break
-      case 'Enter': e.preventDefault(); { const a = acts[actionMenuIndex.value]; if (a) runAction(a) } break
+      case 'Enter':
+        e.preventDefault()
+        // Ctrl/Cmd+Enter：菜单开关（再次按下关闭菜单）；纯 Enter 运行选中动作
+        if (e.ctrlKey || e.metaKey) { closeActionMenu(); break }
+        { const a = acts[actionMenuIndex.value]; if (a) runAction(a) }
+        break
       case 'Escape': e.preventDefault(); closeActionMenu(); break
       case 'k': case 'K': if (e.ctrlKey || e.metaKey) { e.preventDefault(); closeActionMenu() } break
       default:
@@ -451,10 +472,11 @@ function onKeydown(e: KeyboardEvent) {
       e.preventDefault(); selectedIndex.value = (selectedIndex.value + 1) % Math.max(list.length, 1); scrollToSelected(); break
     case 'ArrowLeft':
       e.preventDefault(); selectedIndex.value = (selectedIndex.value - 1 + list.length) % Math.max(list.length, 1); scrollToSelected(); break
-    case 'k': case 'K':
+    case 'Enter':
+      // Ctrl/Cmd+Enter 打开选中项的「动作菜单」；纯 Enter 执行选中项
       if (e.ctrlKey || e.metaKey) { e.preventDefault(); openActionMenu() }
+      else { e.preventDefault(); executeSelected() }
       break
-    case 'Enter': e.preventDefault(); executeSelected(); break
     case 'Escape':
       if (inlinePluginId.value) closeInlinePlugin(); else closePalette()
       break
@@ -558,6 +580,7 @@ async function executeSelected() {
     recordUsage('app:' + result.label, 'app', result.label, result.desc)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }; closePalette()
   } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
+    markPluginSeen(result.pluginId)
     // 插件未运行时先自动拉起（EnablePlugin = Reload 加载 + DB 置启用）：
     // 面板不静默丢弃这类命令，而是「执行前自动启动」；失败则明示原因停在面板
     if (result.pluginNotRunning) {
@@ -894,9 +917,6 @@ let lastClipboardUpdate = 0
 
 onMounted(async () => {
   Events.On('clipboard:updated', () => { lastClipboardUpdate = Date.now() })
-  // 面板打开时宿主把全局 Ctrl+K 转发为 palette:hotkey（不再关窗），
-  // 前端在此切换选中项的动作菜单——系统级热键优先于页面 keydown，只能由宿主转达
-  Events.On('palette:hotkey', () => { if (actionMenuOpen.value) closeActionMenu(); else openActionMenu() })
   // 插件 iframe 内的 Esc 经插件桥转发（qd:plugin-esc）：iframe 抢占焦点后
   // 父级 document 收不到 keydown，这是唯一的 Esc 通路
   window.addEventListener('qd:plugin-esc', escFromPlugin)
@@ -906,6 +926,7 @@ onMounted(async () => {
   document.addEventListener('keydown', onGlobalKey, true)
   Events.On('palette:shown', () => {
     loadPluginIndex()
+    loadPluginNewFlags().catch(() => {})
     // 核心修复：若隐藏前仍停留在内联插件页，重开时保持插件页（「临时收起」而非「主动退出」）。
     // 只有当用户点「返回」/ Esc 触发 closeInlinePlugin 清空 inlinePluginId 后，重开才回到输入框。
     if (inlinePluginId.value) {
@@ -955,7 +976,6 @@ watch(inlineQuicklink, (v) => { if (v) selectedIndex.value = 0 })
 onUnmounted(() => {
   closeInlinePlugin()
   Events.Off('palette:shown')
-  Events.Off('palette:hotkey')
   Events.Off('clipboard:updated')
   window.removeEventListener('qd:plugin-esc', escFromPlugin)
   document.removeEventListener('keydown', onGlobalEsc, true)
@@ -1053,6 +1073,7 @@ onUnmounted(() => {
           </div>
           <div class="result-body">
             <span class="result-label">{{ result.label }}</span>
+            <span v-if="result.type === 'plugin' && result.pluginId && newFlags.has(result.pluginId)" class="result-new-badge">新</span>
             <span class="result-desc" v-if="result.desc">{{ result.desc }}</span>
           </div>
           <div class="result-meta">
@@ -1128,7 +1149,7 @@ onUnmounted(() => {
         <span>{{ t('cmdExecute') }}</span>
       </div>
       <div class="footer-hint" v-if="contextActions.length > 0">
-        <kbd>Ctrl</kbd><kbd>K</kbd>
+        <kbd>Ctrl</kbd><kbd>Enter</kbd>
         <span>{{ t('cmdActions') }}</span>
       </div>
       <div class="footer-hint">
@@ -1292,6 +1313,15 @@ onUnmounted(() => {
 .result-label {
   font-size: 13.5px; font-weight: 500; color: var(--color-text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: 0.01em;
+}
+
+/* 「新」角标：内联在结果标签后 */
+.result-new-badge {
+  flex-shrink: 0;
+  font-size: 9px; line-height: 14px; font-weight: 600;
+  padding: 0 5px; border-radius: 7px;
+  background: var(--color-accent, #4a9eff); color: #fff;
+  letter-spacing: 0.5px; align-self: center;
 }
 
 .result-desc {

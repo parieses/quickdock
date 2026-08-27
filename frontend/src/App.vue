@@ -163,6 +163,11 @@ onMounted(async () => {
       i18n.global.locale.value = saved
     }
   } catch (_) {}
+  // 托盘「打开设置」：显示主窗口后由 Go 侧发事件，这里打开设置模态框
+  Events.On('app:open-settings', () => {
+    settingsPage.value = undefined
+    showSettings.value = true
+  })
 });
 
 provide('theme', { current: currentTheme, set: setTheme })
