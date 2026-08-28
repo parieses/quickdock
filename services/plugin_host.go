@@ -118,7 +118,7 @@ func (a *AppService) RegisterPluginHostMethods() {
 		if p.Title == "" {
 			p.Title = "选择文件"
 		}
-		dlg := a.app.Dialog.OpenFile().SetTitle(p.Title)
+		dlg := a.app.Dialog.OpenFile().SetTitle(p.Title).AttachToWindow(a.dialogParentWindow())
 		for _, f := range p.Filters {
 			if f.Pattern != "" {
 				name := f.Name
@@ -152,7 +152,7 @@ func (a *AppService) RegisterPluginHostMethods() {
 		if p.Title == "" {
 			p.Title = "保存文件"
 		}
-		dlg := a.app.Dialog.SaveFile().SetMessage(p.Title)
+		dlg := a.app.Dialog.SaveFile().SetMessage(p.Title).AttachToWindow(a.dialogParentWindow())
 		if p.DefaultName != "" {
 			dlg = dlg.SetFilename(p.DefaultName)
 		}

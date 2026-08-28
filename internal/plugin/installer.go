@@ -112,21 +112,21 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		os.RemoveAll(backupDir) // 清理旧的备份
 
 		// Windows 上 TerminateProcess 后文件句柄/CWD 锁异步释放（且可能被 Defender
-		// 实时扫描短暂独占），重试窗口拉长到 ~18s，期间持续兜底强杀：
-		waits := 45 // 45 × 400ms ≈ 18s
+		// 实时扫描短暂独占）。用更短间隔（150ms）高频重试，并在每次重试时兜底强杀
+		// 锁定进程，以更快地抢到目录释放窗口——把"安装更新"的等待从十秒级压到通常
+		// 1~3 秒；总上限约 9s，足以覆盖绝大多数场景，失败时仍给出明确操作指引。
+		waits := 60 // 60 × 150ms ≈ 9s
 		var err error
 		for i := 0; i < waits; i++ {
 			if err = os.Rename(targetDir, backupDir); err == nil {
 				break
 			}
-			// 每 8 次（前 4 次不杀，给正常退出留时间）补一轮强杀
-			if i > 4 && i%8 == 0 {
-				if oldPID > 0 {
-					killProcessTree(oldPID)
-				}
-				killProcessesLockingDir(targetDir)
+			// 每次重试都兜底强杀：清掉可能残留的锁定进程（含 Defender 之外的真实锁）
+			if oldPID > 0 {
+				killProcessTree(oldPID)
 			}
-			time.Sleep(400 * time.Millisecond)
+			killProcessesLockingDir(targetDir)
+			time.Sleep(150 * time.Millisecond)
 		}
 		if err != nil {
 			return "", fmt.Errorf("备份旧版本插件失败（进程可能未完全退出，请在插件管理页点击「停止进程」后重试）: %w", err)

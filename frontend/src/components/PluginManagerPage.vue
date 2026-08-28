@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square } from '@lucide/vue'
-import { ListPlugins, DisablePlugin, EnablePlugin, UninstallPlugin, SelectAndInstallPlugin, GetPluginIcon, ShowPluginWindow, ListPluginExecLogs, KillPlugin, GetPluginNewFlags, MarkPluginSeen } from '../../bindings/quickdock/services/appservice'
+import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2 } from '@lucide/vue'
+import { ListPlugins, DisablePlugin, EnablePlugin, UninstallPlugin, PickFilePath, InstallPlugin, GetPluginIcon, ShowPluginWindow, ListPluginExecLogs, KillPlugin, GetPluginNewFlags, MarkPluginSeen } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -163,9 +163,13 @@ async function handleUninstall() {
 // ---- 安装 ----
 async function selectAndInstall() {
   if (operating.value.has('_install_')) return
+  // 1. 先选文件：此时不显示遮罩，避免选文件期间「安装中」抢窗
+  const zipPath = unwrap(await PickFilePath('选择插件包 (.zip)', '插件包', '*.zip'))
+  if (!zipPath) return // 用户取消
+  // 2. 选完文件后才显示「安装中」遮罩并开始安装
   operating.value.add('_install_')
   try {
-    const result = unwrap(await SelectAndInstallPlugin())
+    const result = unwrap(await InstallPlugin(zipPath))
     if (result) {
       toast?.success?.(t('pluginInstallSuccess'))
       await loadPlugins()
@@ -243,9 +247,10 @@ onMounted(() => { loadPlugins(); loadLogs() })
           <Globe :size="14" />
           <span>{{ t('pluginMarket') }}</span>
         </button>
-        <button class="install-btn" @click="selectAndInstall" :title="t('pluginInstallFromFile')">
-          <Upload :size="14" />
-          <span>{{ t('pluginInstallFromFile') }}</span>
+        <button class="install-btn" @click="selectAndInstall" :title="t('pluginInstallFromFile')" :disabled="operating.has('_install_')">
+          <Loader2 v-if="operating.has('_install_')" :size="14" class="spin" />
+          <Upload v-else :size="14" />
+          <span>{{ operating.has('_install_') ? t('pluginInstalling') : t('pluginInstallFromFile') }}</span>
         </button>
         <button class="refresh-btn" @click="loadPlugins" :title="t('refresh')">
           <RefreshCw :size="14" />
@@ -417,6 +422,14 @@ onMounted(() => { loadPlugins(); loadLogs() })
     </div>
 
     <PluginMarketPage v-else @installed="onMarketInstalled" />
+
+    <!-- zip 安装遮罩动画：覆盖「选择 zip → 安装完成」全过程 -->
+    <div v-if="operating.has('_install_')" class="install-overlay">
+      <div class="install-overlay-box">
+        <Loader2 :size="28" class="install-overlay-spin" />
+        <div class="install-overlay-text">{{ t('pluginInstalling') }}</div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -434,6 +447,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
   flex: 1; display: flex; flex-direction: column;
   overflow: hidden; padding: 16px 20px;
   min-height: 0; /* flex 子项默认 min-height:auto 会按内容撑高，插件多时整页超出被裁、无法滚动 */
+  position: relative; /* 安装遮罩绝对定位的参照 */
 }
 
 /* ---- 头部 ---- */
@@ -673,5 +687,25 @@ onMounted(() => { loadPlugins(); loadLogs() })
 }
 .view-toggle-btn:hover { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); }
 .view-toggle-btn.active { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); background: rgba(74, 158, 255, 0.08); }
+
+/* ---- zip 安装遮罩动画 ---- */
+.install-overlay {
+  position: absolute; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(18, 18, 18, 0.55);
+  backdrop-filter: blur(1.5px);
+}
+.install-overlay-box {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  padding: 24px 34px;
+  background: var(--color-bg-secondary, #1e1e1e);
+  border: 1px solid var(--color-border, #2a2a2a);
+  border-radius: 10px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+}
+.install-overlay-spin { color: var(--color-accent, #4a9eff); animation: qd-spin 0.9s linear infinite; }
+.install-overlay-text { font-size: 13px; color: var(--color-text-secondary, #bdbdbd); }
+.spin { color: var(--color-accent, #4a9eff); animation: qd-spin 0.9s linear infinite; }
+@keyframes qd-spin { to { transform: rotate(360deg); } }
 
 </style>

@@ -120,6 +120,19 @@ func (m *PluginWindowManager) Hide(pluginID string) {
 	}
 }
 
+// FocusedWindow 返回当前持有焦点的插件窗口；无则 nil。
+// 供宿主原生对话框绑定父窗口使用（无父对话框在 AlwaysOnTop 面板下会跑到所有窗口后面）。
+func (m *PluginWindowManager) FocusedWindow() *application.WebviewWindow {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, win := range m.windows {
+		if win != nil && win.IsFocused() {
+			return win
+		}
+	}
+	return nil
+}
+
 // CloseAll 关闭所有插件窗口（应用退出时调用）
 func (m *PluginWindowManager) CloseAll() {
 	m.mu.Lock()

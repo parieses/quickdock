@@ -13,7 +13,32 @@ import (
 
 	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
+
+// dialogParentWindow 为原生文件/目录对话框挑选父窗口：
+//  1. 命令面板使用中（PaletteMode=true）→ 面板窗口。面板是 AlwaysOnTop，
+//     无父对话框会跑到所有窗口后面（用户反馈的「弹框在最后面」），
+//     绑定父窗口后对话框作为 owned 窗口始终显示在面板之上。
+//     （面板打开时窗口必然已创建，工厂调用无副作用）
+//  2. 否则优先当前聚焦的插件窗口（插件独立窗口场景）。
+//  3. 兜底主窗口。
+func (a *AppService) dialogParentWindow() *application.WebviewWindow {
+	if a.PaletteMode != nil && a.PaletteMode.Load() {
+		if fn := a.GetPaletteWindow; fn != nil {
+			if w := fn(); w != nil {
+				return w
+			}
+		}
+	}
+	if a.PluginWindowMgr != nil {
+		if w := a.PluginWindowMgr.FocusedWindow(); w != nil {
+			return w
+		}
+	}
+	return a.MainWindow
+}
 
 func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
 	if a.PluginMgr == nil {
@@ -77,6 +102,7 @@ func (a *AppService) PickFilePath(title, filterName, pattern string) *ApiResult 
 	filePath, err := a.app.Dialog.OpenFile().
 		SetTitle(title).
 		AddFilter(filterName, pattern).
+		AttachToWindow(a.dialogParentWindow()).
 		PromptForSingleSelection()
 	if err != nil || filePath == "" {
 		return Ok(nil)
@@ -98,6 +124,7 @@ func (a *AppService) PickFolderPath(title string) *ApiResult {
 		SetTitle(title).
 		CanChooseDirectories(true).
 		CanChooseFiles(false).
+		AttachToWindow(a.dialogParentWindow()).
 		PromptForSingleSelection()
 	if err != nil || folderPath == "" {
 		return Ok(nil)
@@ -167,6 +194,7 @@ func (a *AppService) SelectAndInstallPlugin() *ApiResult {
 	filePath, err := a.app.Dialog.OpenFile().
 		SetTitle("选择插件包 (.zip)").
 		AddFilter("插件包", "*.zip").
+		AttachToWindow(a.dialogParentWindow()).
 		PromptForSingleSelection()
 	if err != nil || filePath == "" {
 		// 用户取消（某些系统取消会返回错误而非空路径）

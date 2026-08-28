@@ -224,6 +224,9 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 			return fmt.Errorf("插件进程启动失败: %w", err)
 		}
 
+		// 挂入 Job Object：主进程异常退出时由内核一并回收，不留孤儿进程。
+		assignProcessToJob(uintptr(cmd.Process.Pid))
+
 		inst := NewPluginInstance(manifest, dir)
 		inst.Cmd = cmd
 		inst.Stdin = stdin
