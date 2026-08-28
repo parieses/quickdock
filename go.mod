@@ -7,7 +7,7 @@ require (
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/google/uuid v1.6.0
 	github.com/redis/go-redis/v9 v9.22.0
-	github.com/wailsapp/wails/v3 v3.0.0-alpha2.115
+	github.com/wailsapp/wails/v3 v3.0.0-alpha2.122
 	golang.org/x/sync v0.20.0
 	golang.org/x/sys v0.43.0
 	modernc.org/sqlite v1.44.3

@@ -92,6 +92,7 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	})
 
 	win.Show()
+	win.Focus() // 新建路径必须显式聚焦，否则新窗口 z-order 会被压在主窗口/面板之下
 
 	m.mu.Lock()
 	m.windows[pluginID] = win

@@ -60,8 +60,8 @@ async function detachPluginFor(r: SearchResult) {
     if (r.pluginCommandId) {
       try { await SetPendingPluginInit(pid, input, r.pluginCommandId) } catch {}
     }
+    await closePalette()       // 先隐藏 AlwaysOnTop 面板，避免新窗口被压在后面
     await ShowPluginWindow(pid)
-    closePalette()
   } catch (e) {
     toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
   }
@@ -76,16 +76,15 @@ async function detachPlugin() {
     if (inlinePluginInit.value.text || inlinePluginInit.value.command) {
       try { await SetPendingPluginInit(id, inlinePluginInit.value.text, inlinePluginInit.value.command) } catch {}
     }
+    await closePalette()       // 先隐藏 AlwaysOnTop 面板，再开独立窗口确保在最前
     await ShowPluginWindow(id)
   } catch (e) {
     toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
-    return
   }
-  closeInlinePlugin()
 }
 
 // ---- 关闭面板 ----
-function closePalette() {
+async function closePalette() {
   closeInlinePlugin()
   actionMenuOpen.value = false
   query.value = ''
@@ -96,7 +95,7 @@ function closePalette() {
   inlineQuery.value = ''
   clipboardUrlSource.value = ''
   quickInfo.value = null
-  try { HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
+  try { await HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
 }
 
 // 聚焦搜索输入框；仅在搜索模式（非内联插件 / 内联快速链接）下生效

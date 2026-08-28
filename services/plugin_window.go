@@ -29,7 +29,9 @@ func (a *AppService) GetAndClearPendingPluginInit(pluginID string) (text, comman
 	return
 }
 
-// ShowPluginWindow 在面板中显示插件窗口（任务栏隐藏）
+// ShowPluginWindow 显示插件窗口。
+// 在命令面板模式下（PaletteMode=true）使用面板浮层（任务栏隐藏，贴合启动器「随手一开」心智）；
+// 在主窗口/插件管理页等常规入口则使用独立窗口（任务栏可见、可最小化召回，避免「打开后点别的就丢」）。
 func (a *AppService) ShowPluginWindow(pluginID string) {
 	if a.PluginWindowMgr == nil {
 		return
@@ -40,7 +42,11 @@ func (a *AppService) ShowPluginWindow(pluginID string) {
 			title = inst.Manifest.Name
 		}
 	}
-	a.PluginWindowMgr.ShowInPanel(pluginID, title)
+	if a.PaletteMode != nil && a.PaletteMode.Load() {
+		a.PluginWindowMgr.ShowInPanel(pluginID, title)
+	} else {
+		a.PluginWindowMgr.ShowAsWindow(pluginID, title)
+	}
 }
 
 // HidePluginWindow 隐藏指定插件的窗口

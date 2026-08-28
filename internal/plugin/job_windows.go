@@ -18,6 +18,8 @@ var (
 // initPluginJob 创建全局 Job Object，并设 JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE：
 // 只要主进程退出（含崩溃/被强杀），内核关闭该 Job 句柄时，其中所有进程
 // （含其孙进程，默认会一起落入同一 Job）会被一并终止，避免残留孤儿插件进程。
+// 注意：KILL_ON_JOB_CLOSE 必须用 JobObjectExtendedLimitInformation（扩展结构），
+// 用 JobObjectBasicLimitInformation 在 Win11 上会返回 ERROR_INVALID_PARAMETER(87)。
 func initPluginJob() {
 	pluginJobOnce.Do(func() {
 		h, err := windows.CreateJobObject(nil, nil)
@@ -27,12 +29,14 @@ func initPluginJob() {
 		}
 		pluginJobHandle = h
 
-		info := windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
-			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+		info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+			BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+				LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+			},
 		}
 		if _, err := windows.SetInformationJobObject(
 			pluginJobHandle,
-			windows.JobObjectBasicLimitInformation,
+			windows.JobObjectExtendedLimitInformation,
 			uintptr(unsafe.Pointer(&info)),
 			uint32(unsafe.Sizeof(info)),
 		); err != nil {
