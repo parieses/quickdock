@@ -17,17 +17,17 @@ import (
 // （例如命令面板内插件 <input type="file"> 弹出的系统文件选择框）。
 // 命令面板等窗口在失焦时会隐藏自身；若失焦是自家模态框打开所致，则不应隐藏，
 // 否则会出现"在插件里选文件时页面被关掉"的问题。
+//
+// 判定方式：取前台窗口的拥有者（GW_OWNER=4）。其值为非 0 说明这是一个被其它窗口
+// 拥有的弹出式窗口（如文件选择框），通常正属于本应用——此时不应隐藏面板。
+// 注意：不可叠加 GW_HWNDLAST(=1) 判断——该值对任意有效 HWND 都返回非零（返回 Z 序链尾
+// 窗口，通常是桌面窗口），会导致本函数恒为 true、面板失焦后永不隐藏（已修复）。
 func foregroundIsOwnedModal() bool {
 	fg := w32.GetForegroundWindow()
 	if fg == 0 {
 		return false
 	}
-	// 与旧实现保持数值一致：4=GW_OWNER（拥有者），1=GW_HWNDLAST（旧注释误作 GW_PARENT，
-	// 实际是 Z 序链尾；对有效 HWND 同样非零）。两个条件合起来的判定行为与迁移前完全相同。
-	if w32.GetWindow(fg, 4) != 0 {
-		return true
-	}
-	return w32.GetWindow(fg, 1) != 0
+	return w32.GetWindow(fg, 4) != 0
 }
 
 // 单实例检查已迁移到 Wails v3 框架：main.go 中 application.Options.SingleInstance。
@@ -211,6 +211,22 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 		}
 		win.Hide()
 	})
+	// Alt+F4 / 系统关闭会触发真实销毁；若此时直接销毁，缓存的指针不会被清空，
+	// 之后对应热键仍返回已销毁的窗口、无法恢复，只能重启。因此默认取消关闭并改为隐藏，
+	// 仅当「真退出」标记置位（托盘退出/更新重启）时才放行。
+	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if trayQuitRequested.Load() {
+			return
+		}
+		event.Cancel()
+		clipboardMode.Store(false)
+		x, y := win.Position()
+		saveWinPos("clipboard", x, y)
+		if a := getHotkeyApp(); a != nil {
+			a.Event.Emit("clipboard:before-hide")
+		}
+		win.Hide()
+	})
 	return win
 }
 
@@ -235,6 +251,17 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 		x, y := win.Position()
 		saveWinPos("note", x, y)
 		noteMode.Store(false)
+		win.Hide()
+	})
+	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。
+	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if trayQuitRequested.Load() {
+			return
+		}
+		event.Cancel()
+		noteMode.Store(false)
+		x, y := win.Position()
+		saveWinPos("note", x, y)
 		win.Hide()
 	})
 	return win
@@ -264,6 +291,17 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 			return // 自家模态对话框（文件选择框等）导致失焦，不隐藏
 		}
 		paletteMode.Store(false)
+		win.Hide()
+	})
+	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。
+	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if trayQuitRequested.Load() {
+			return
+		}
+		event.Cancel()
+		paletteMode.Store(false)
+		x, y := win.Position()
+		saveWinPos("palette", x, y)
 		win.Hide()
 	})
 	return win

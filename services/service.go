@@ -70,6 +70,11 @@ type AppService struct {
 	schedWake   chan struct{} // 定时任务调度器
 	monitorWake chan struct{} // 网站监控检查器
 
+	// 调度器退出通道：ServiceShutdown 时关闭，令三个常驻 goroutine 干净退出，
+	// 避免 DB 已关闭后它们仍触发并访问导致 use-after-close panic。
+	schedulerQuit      chan struct{}
+	schedulerQuitOnce sync.Once
+
 	// 监控在检标记：防止同一监控并发检测（慢探针未更新 last_checked_ts 时被重复选为待检）
 	// 导致宕机时重复发送通知。LoadOrStore 原子保证同一时刻仅一个检查协程通过。
 	monitorInflight sync.Map // monitorID -> struct{}
@@ -129,11 +134,15 @@ func NewAppService() *AppService {
 		NodeEnv:       nodeEnv,
 		DSH:           dsh.NewDSHProcessManager(nil, nodeEnv),
 		aiHTTPClient: &http.Client{
-			Timeout: 5 * time.Minute,
+			// 不设总超时：流式响应可能持续数分钟，客户端总超时会在读取 body 中途强杀连接，
+			// 导致已流出的内容丢失（流式调用改由各自 ctx 控制生命周期）。
+			// 仅用 Transport 级别的响应头超时防御「连接成功但永不返回首字节」的挂死。
+			Timeout: 0,
 			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     90 * time.Second,
-				TLSHandshakeTimeout: 10 * time.Second,
+				MaxIdleConns:          10,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ResponseHeaderTimeout: 60 * time.Second,
 			},
 		},
 	}

@@ -48,7 +48,15 @@ func (a *AppService) GetPluginIcon(pluginID string) *ApiResult {
 	if inst.Manifest.Icon == "" {
 		return Ok(nil)
 	}
-	iconPath := filepath.Join(inst.Dir, inst.Manifest.Icon)
+	// 防路径穿越：manifest 声明的图标必须落在插件目录内
+	iconPath, err := safePluginPath(inst.Dir, inst.Manifest.Icon)
+	if err != nil {
+		return Fail(fmt.Errorf("图标路径非法: %w", err))
+	}
+	const maxIconSize = 2 << 20 // 2MB
+	if fi, serr := os.Stat(iconPath); serr == nil && fi.Size() > maxIconSize {
+		return Fail(fmt.Errorf("图标文件过大 (%d bytes)", fi.Size()))
+	}
 	data, err := os.ReadFile(iconPath)
 	if err != nil {
 		return Ok(nil) // 图标文件不存在不是致命错误
@@ -80,7 +88,11 @@ func (a *AppService) GetPluginFrontendPage(pluginID string, theme string, locale
 	if !inst.Manifest.Frontend.Enabled {
 		return FailMsg("插件未启用前端")
 	}
-	entryPath := filepath.Join(inst.Dir, inst.Manifest.Frontend.Entry)
+	// 防路径穿越：manifest 声明的前端入口必须落在插件目录内
+	entryPath, err := safePluginPath(inst.Dir, inst.Manifest.Frontend.Entry)
+	if err != nil {
+		return Fail(fmt.Errorf("前端入口路径非法: %w", err))
+	}
 
 	// 检查缓存（以文件 mtime 为缓存 key，含 common.css mtime）
 	const maxHTMLSize = 10 << 20
@@ -228,6 +240,23 @@ func inlineFileRefs(html, baseDir string, re *regexp.Regexp, loader func(string)
 		}
 		return inlined
 	})
+}
+
+// safePluginPath 解析插件清单中声明的相对路径（图标/前端入口），强制落在插件目录内，
+// 防止 icon/entry 声明为 "../../secret" 等路径穿越读取宿主任意文件。
+func safePluginPath(pluginDir, ref string) (string, error) {
+	if ref == "" {
+		return "", fmt.Errorf("资源路径为空")
+	}
+	if strings.Contains(ref, "://") || strings.HasPrefix(ref, "//") {
+		return "", fmt.Errorf("资源路径不支持 URL: %s", ref)
+	}
+	cleanDir := filepath.Clean(pluginDir)
+	p := filepath.Clean(filepath.Join(cleanDir, ref))
+	if p != cleanDir && !strings.HasPrefix(p, cleanDir+string(os.PathSeparator)) {
+		return "", fmt.Errorf("资源路径越出插件目录: %s", ref)
+	}
+	return p, nil
 }
 
 // safeInlinePath 解析插件页面内引用的相对资源路径，并强制其落在插件目录内。

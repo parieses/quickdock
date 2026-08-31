@@ -286,6 +286,10 @@ func (a *AppService) AISaveProfiles(req AISaveProfilesRequest) *ApiResult {
 			if e, ok := existing[id]; ok {
 				s.APIKey = e.APIKey
 			}
+		} else if e, ok := existing[id]; ok && p.APIKey == e.APIKey {
+			// 传入的密文与已存储的完全一致（档案更新时原样回传未改动 Key），
+			// 直接保留，避免对已有密文二次加密导致无法解密（AISetConfig 合并其它档案时触发）。
+			s.APIKey = e.APIKey
 		} else {
 			enc, err := platform.EncryptSecret(p.APIKey)
 			if err != nil {
@@ -353,22 +357,56 @@ func maskAPIKey(key string) string {
 	return key[:4] + "***" + key[len(key)-4:]
 }
 
-// AISetConfig 兼容旧接口：写入单个默认档案
+// AISetConfig 兼容旧接口：写入/更新单个默认档案。
+// 必须合并进现有档案列表，不能整体覆盖——否则会静默删除用户已有的其它 AI 档案。
 func (a *AppService) AISetConfig(cfg AIConfig) *ApiResult {
-	req := AISaveProfilesRequest{
-		Active: "default",
-		Profiles: []AIProfile{{
+	profiles := a.loadAIProfiles()
+	idx := -1
+	for i := range profiles {
+		if profiles[i].ID == "default" {
+			idx = i
+			break
+		}
+	}
+	if idx >= 0 {
+		// 仅覆盖非空字段，避免把已有档案清空（Key 留空表示不修改，由 AISaveProfiles 保留原密文）
+		cur := profiles[idx]
+		if cfg.Provider != "" {
+			cur.Provider = cfg.Provider
+		}
+		if cfg.BaseURL != "" {
+			cur.BaseURL = strings.TrimRight(cfg.BaseURL, "/")
+		}
+		if cfg.APIKey != "" {
+			cur.APIKey = cfg.APIKey
+		}
+		if cfg.Model != "" {
+			cur.Model = cfg.Model
+		}
+		if cfg.Temperature != 0 {
+			cur.Temperature = cfg.Temperature
+		}
+		if cfg.MaxTokens != 0 {
+			cur.MaxTokens = cfg.MaxTokens
+		}
+		profiles[idx] = cur
+	} else {
+		profiles = append(profiles, AIProfile{
 			ID:          "default",
 			Name:        "默认",
 			Provider:    cfg.Provider,
-			BaseURL:     cfg.BaseURL,
+			BaseURL:     strings.TrimRight(cfg.BaseURL, "/"),
 			APIKey:      cfg.APIKey,
 			Model:       cfg.Model,
 			Temperature: cfg.Temperature,
 			MaxTokens:   cfg.MaxTokens,
-		}},
+		})
 	}
-	return a.AISaveProfiles(req)
+	active := "default"
+	if cur := a.loadActiveProfileID(profiles); cur != "" {
+		active = cur
+	}
+	return a.AISaveProfiles(AISaveProfilesRequest{Active: active, Profiles: profiles})
 }
 
 // aiModePrompts 四种模式的 system prompt（仅切换提示，不另写接口）
@@ -421,7 +459,7 @@ func (a *AppService) AIStreamInfo() *ApiResult {
 func (a *AppService) AITestConnection(profileID string) (map[string]interface{}, error) {
 	stored := a.loadAIProfiles()
 	if len(stored) == 0 {
-		return map[string]interface{}{"success": false, "message": "无档案"}, nil
+		return nil, fmt.Errorf("无档案")
 	}
 	var s *aiProfileStored
 	for i := range stored {
@@ -431,16 +469,20 @@ func (a *AppService) AITestConnection(profileID string) (map[string]interface{},
 		}
 	}
 	if s == nil {
-		return map[string]interface{}{"success": false, "message": "Profile not found"}, nil
+		return nil, fmt.Errorf("Profile not found")
 	}
 	apiKey := s.APIKey
 	if apiKey != "" {
-		if dec, e := platform.DecryptSecret(apiKey); e == nil {
-			apiKey = dec
+		dec, e := platform.DecryptSecret(apiKey)
+		if e != nil {
+			// 解密失败绝不能再把密文当 Bearer 发出去（会泄露加密 blob 且误导为 401），
+			// 必须直接报错让用户重新输入。
+			return nil, fmt.Errorf("API Key 解密失败，请重新输入: %w", e)
 		}
+		apiKey = dec
 	}
 	if apiKey == "" {
-		return map[string]interface{}{"success": false, "message": "API Key 为空"}, nil
+		return nil, fmt.Errorf("API Key 为空")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
@@ -454,7 +496,7 @@ func (a *AppService) AITestConnection(profileID string) (map[string]interface{},
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return map[string]interface{}{"success": false, "message": "请求构建失败: " + err.Error()}, nil
+		return nil, fmt.Errorf("请求构建失败: %w", err)
 	}
 	// 用 s 构造临时 AIProfile 以复用 apiEndpoint
 	tmpCfg := AIProfile{
@@ -466,7 +508,7 @@ func (a *AppService) AITestConnection(profileID string) (map[string]interface{},
 	ep, authKey, authVal := apiEndpoint(tmpCfg)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep, bytes.NewReader(raw))
 	if err != nil {
-		return map[string]interface{}{"success": false, "message": "请求创建失败: " + err.Error()}, nil
+		return nil, fmt.Errorf("请求创建失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set(authKey, authVal)
@@ -474,17 +516,17 @@ func (a *AppService) AITestConnection(profileID string) (map[string]interface{},
 
 	resp, err := a.aiHTTPClient.Do(req)
 	if err != nil {
-		return map[string]interface{}{"success": false, "message": "网络错误: " + err.Error()}, nil
+		return nil, fmt.Errorf("网络错误: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		respBody, _ := io.ReadAll(resp.Body)
+		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		msg := fmt.Sprintf("HTTP %d: %s", resp.StatusCode, string(respBody))
-		if len(msg) > 200 {
-			msg = msg[:200]
+		if r := []rune(msg); len(r) > 200 {
+			msg = string(r[:200])
 		}
-		return map[string]interface{}{"success": false, "message": msg}, nil
+		return nil, fmt.Errorf("%s", msg)
 	}
 
 	var result struct {
@@ -494,11 +536,11 @@ func (a *AppService) AITestConnection(profileID string) (map[string]interface{},
 			} `json:"message"`
 		} `json:"choices"`
 	}
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
-		return map[string]interface{}{"success": false, "message": "响应解析失败: " + err.Error()}, nil
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&result); err != nil {
+		return nil, fmt.Errorf("响应解析失败: %w", err)
 	}
 	if len(result.Choices) == 0 {
-		return map[string]interface{}{"success": false, "message": "模型无返回"}, nil
+		return nil, fmt.Errorf("模型无返回")
 	}
 	return map[string]interface{}{"success": true, "message": "✅ 连接成功，模型回复: " + result.Choices[0].Message.Content}, nil
 }

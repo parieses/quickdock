@@ -497,6 +497,13 @@ func toggleClipboardWindow() {
 // registerAllHotkeys 统一注册主窗口/剪贴板/命令面板/快捷笔记四个全局快捷键。
 // 从 DB 读取配置，注册失败时回退到默认值并写回 DB。
 func registerAllHotkeys(app *application.App) {
+	// 重注册前先注销上一轮已注册的快捷键，避免修改设置保存后旧热键残留、
+	// 新旧热键同时生效直到进程重启。与 Reregister* 系列保持一致。
+	for _, old := range []string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel()} {
+		if old != "" {
+			app.GlobalShortcut.Unregister(old)
+		}
+	}
 	appMods, appVk := MOD_CONTROL, int(VK_SPACE)
 	clipMods, clipVk := MOD_CONTROL, int(VK_OEM_3)
 	paletteMods, paletteVk := MOD_CONTROL, int(0x4B)

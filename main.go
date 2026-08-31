@@ -282,6 +282,19 @@ func main() {
 	// 将延迟工厂函数注入 AppService，供前端 Wails 绑定调用
 	InjectWindowGetters(appService, app)
 
+	// 预创建三个浮窗：主窗口已创建、WebView2 运行时就绪，此处创建均在主线程进行，
+	// 避免首次按热键时在热键回调 goroutine 上跨线程创建 WebView2 窗口
+	// （跨线程创建可能导致死锁/崩溃）。预创建后热键只需 Show/Hide，不再触发创建。
+	if w := appService.GetClipboardWindow(); w != nil {
+		w.Hide()
+	}
+	if w := appService.GetPaletteWindow(); w != nil {
+		w.Hide()
+	}
+	if w := appService.GetNoteWindow(); w != nil {
+		w.Hide()
+	}
+
 	// 运行应用
 	err := app.Run()
 	if err != nil {

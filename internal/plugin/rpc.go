@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -19,25 +20,26 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 	default:
 	}
 
-	// 注册 pending 请求
+	// 注册 pending 请求（以 id 的 JSON 文本为键，兼容 string/number id）
 	inst.readMu.Lock()
 	inst.NextID++
 	id := inst.NextID
+	idKey := strconv.FormatInt(id, 10)
 	ch := make(chan *RPCResponse, 1)
-	inst.Pending[id] = ch
+	inst.Pending[idKey] = ch
 	inst.readMu.Unlock()
 
 	// 构建请求
 	paramsJSON, err := json.Marshal(params)
 	if err != nil {
 		inst.readMu.Lock()
-		delete(inst.Pending, id)
+		delete(inst.Pending, idKey)
 		inst.readMu.Unlock()
 		return nil, fmt.Errorf("序列化参数失败: %w", err)
 	}
 	req := RPCRequest{
 		JSONRPC: "2.0",
-		ID:      id,
+		ID:      json.RawMessage(idKey),
 		Method:  method,
 		Params:  paramsJSON,
 	}
@@ -45,22 +47,36 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 	data, err := json.Marshal(req)
 	if err != nil {
 		inst.readMu.Lock()
-		delete(inst.Pending, id)
+		delete(inst.Pending, idKey)
 		inst.readMu.Unlock()
 		return nil, fmt.Errorf("序列化请求失败: %w", err)
 	}
 	data = append(data, '\n')
 
 	// 串行写入 stdin ← P0 修复：sendMu 防止多协程写入交错
+	// 写操作带超时：插件活着但不读 stdin 时管道写满会永久阻塞，而 select 里的
+	// 30s 超时根本到不了（Write 同步阻塞）。用 goroutine+select 复用 SendNotification 的做法。
 	inst.sendMu.Lock()
-	_, err = inst.Stdin.Write(data)
-	inst.sendMu.Unlock()
-
-	if err != nil {
+	writeDone := make(chan error, 1)
+	go func() {
+		_, werr := inst.Stdin.Write(data)
+		writeDone <- werr
+	}()
+	select {
+	case werr := <-writeDone:
+		inst.sendMu.Unlock()
+		if werr != nil {
+			inst.readMu.Lock()
+			delete(inst.Pending, idKey)
+			inst.readMu.Unlock()
+			return nil, fmt.Errorf("写入插件 stdin 失败: %w", werr)
+		}
+	case <-time.After(2 * time.Second):
+		inst.sendMu.Unlock()
 		inst.readMu.Lock()
-		delete(inst.Pending, id)
+		delete(inst.Pending, idKey)
 		inst.readMu.Unlock()
-		return nil, fmt.Errorf("写入插件 stdin 失败: %w", err)
+		return nil, fmt.Errorf("写入插件 stdin 超时（插件无响应）")
 	}
 
 	// 默认超时
@@ -77,12 +93,12 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 		return resp.Result, nil
 	case <-time.After(timeout):
 		inst.readMu.Lock()
-		delete(inst.Pending, id)
+		delete(inst.Pending, idKey)
 		inst.readMu.Unlock()
 		return nil, ErrResponseTimeout
 	case <-inst.doneCh:
 		inst.readMu.Lock()
-		delete(inst.Pending, id)
+		delete(inst.Pending, idKey)
 		inst.readMu.Unlock()
 		return nil, ErrPluginCrashed
 	}
@@ -182,11 +198,11 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 						// 如需调试可取消下行注释：
 						// fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, string(lb))
 					} else {
-						// 匹配 pending 请求
+						// 匹配 pending 请求（id 以 JSON 文本为键，兼容 string/number id）
 						inst.readMu.Lock()
-						if ch, ok := inst.Pending[resp.ID]; ok {
+						if ch, ok := inst.Pending[string(resp.ID)]; ok {
 							ch <- &resp
-							delete(inst.Pending, resp.ID)
+							delete(inst.Pending, string(resp.ID))
 						}
 						inst.readMu.Unlock()
 					}
@@ -204,6 +220,14 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	})
 	if !inst.stopped.Load() {
 		inst.SetStatus("crashed")
+	}
+
+	// 回收已退出的子进程句柄：崩溃场景下 readLoop 先于 stopPlugin 发现进程结束，
+	// 若不及时 Wait，句柄/僵尸会累积到下次 stopPlugin 才回收。进程已结束时 Wait 立即返回；
+	// 若 stdout 关闭但进程尚存（罕见），在独立 goroutine 中阻塞等待，由后续 stopPlugin(Kill+Wait) 兜底。
+	// 第二次 Wait（stopPlugin 中）返回 ErrProcessDone，安全。
+	if inst.Cmd != nil && inst.Cmd.Process != nil {
+		go func() { _ = inst.Cmd.Wait() }()
 	}
 }
 
@@ -263,7 +287,7 @@ func (inst *PluginInstance) Close() {
 // ---- 辅助函数 ----
 
 // MakeResponse 构建 JSON-RPC 成功响应（用于插件开发辅助）
-func MakeResponse(id int64, result interface{}) []byte {
+func MakeResponse(id json.RawMessage, result interface{}) []byte {
 	resp := RPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -274,7 +298,7 @@ func MakeResponse(id int64, result interface{}) []byte {
 }
 
 // MakeError 构建 JSON-RPC 错误响应（用于插件开发辅助）
-func MakeError(id int64, code int, message string) []byte {
+func MakeError(id json.RawMessage, code int, message string) []byte {
 	resp := RPCResponse{
 		JSONRPC: "2.0",
 		ID:      id,
@@ -292,7 +316,7 @@ func MakeRequest(method string, id int64, params interface{}) ([]byte, error) {
 	paramsJSON, _ := json.Marshal(params)
 	req := RPCRequest{
 		JSONRPC: "2.0",
-		ID:      id,
+		ID:      json.RawMessage(strconv.FormatInt(id, 10)),
 		Method:  method,
 		Params:  paramsJSON,
 	}

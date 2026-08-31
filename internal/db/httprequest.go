@@ -129,13 +129,13 @@ func (d *Database) DeleteApiRequest(id string) error {
 // ReorderApiRequests 将某容器（projectID + folderID）下的请求按 ids 顺序重排，
 // 并一并更新 project_id / folder_id（支持拖拽排序与跨目录、跨项目移动）。
 func (d *Database) ReorderApiRequests(projectID, folderID string, ids []string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for i, id := range ids {
-		if _, err := d.conn.Exec(`UPDATE api_requests SET project_id=?, folder_id=?, sort=? WHERE id=?`,
-			projectID, folderID, i, id); err != nil {
-			return err
+	return d.Transaction(func(tx *sql.Tx) error {
+		for i, id := range ids {
+			if _, err := tx.Exec(`UPDATE api_requests SET project_id=?, folder_id=?, sort=? WHERE id=?`,
+				projectID, folderID, i, id); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }

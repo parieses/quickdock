@@ -52,9 +52,14 @@ func (a *AppService) UpdateHttpFolder(id string, input HttpFolderInput) *ApiResu
 	if id == "" {
 		return FailMsg("缺少目录 ID")
 	}
-	// 防环：不允许把目录挂到自己的子孙下（前端已限制，此处再兜底）
-	if input.ParentID != "" && input.ParentID == id {
-		return FailMsg("目录不能移动到自身下")
+	// 防环：不允许把目录挂到自身或自己的子孙下（前端已限制，此处再兜底）
+	if input.ParentID != "" {
+		if input.ParentID == id {
+			return FailMsg("目录不能移动到自身下")
+		}
+		if anc, err := a.DB.IsFolderAncestorOf(id, input.ParentID); err == nil && anc {
+			return FailMsg("目录不能移动到其子孙目录下")
+		}
 	}
 	rec := &db.HttpFolder{ID: id, ParentID: input.ParentID, Name: strings.TrimSpace(input.Name), Sort: input.Sort}
 	if rec.Name == "" {
@@ -82,6 +87,14 @@ func (a *AppService) DeleteHttpFolder(id string) *ApiResult {
 func (a *AppService) ReorderHttpFolders(projectID, parentID string, ids []string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
+	}
+	// 防环：parentID 不能是任一被移动目录的子孙（否则批量设置 parent_id 会成环）
+	if parentID != "" {
+		for _, id := range ids {
+			if anc, err := a.DB.IsFolderAncestorOf(id, parentID); err == nil && anc {
+				return FailMsg("目录不能移动到其子孙目录下")
+			}
+		}
 	}
 	if err := a.DB.ReorderHttpFolders(projectID, parentID, ids); err != nil {
 		return Fail(err)

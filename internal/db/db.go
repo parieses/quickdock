@@ -367,8 +367,26 @@ func (d *Database) BulkInsert(table string, rows []map[string]interface{}) error
 			values = append(values, row[col])
 		}
 
-		query := fmt.Sprintf("INSERT OR REPLACE INTO %s (%s) VALUES (%s)",
-			table, strings.Join(cols, ", "), strings.Join(placeholders, ", "))
+		// 用 ON CONFLICT(id) DO UPDATE SET 替代 INSERT OR REPLACE：
+		// OR REPLACE 会在主键冲突时整行替换，若 row map 未包含全部列（如 workspaces 无 sort），
+		// 缺失列会被置为默认值（sort=0），造成数据被意外清零。改只更新传入的列。
+		colList := strings.Join(cols, ", ")
+		placeholderList := strings.Join(placeholders, ", ")
+		updateParts := make([]string, 0, len(cols))
+		for _, col := range cols {
+			if col == "id" {
+				continue // 不更新主键自身
+			}
+			updateParts = append(updateParts, col+" = excluded."+col)
+		}
+		var query string
+		if len(updateParts) == 0 {
+			query = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT(id) DO NOTHING",
+				table, colList, placeholderList)
+		} else {
+			query = fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) ON CONFLICT(id) DO UPDATE SET %s",
+				table, colList, placeholderList, strings.Join(updateParts, ", "))
+		}
 
 		if _, err := tx.Exec(query, values...); err != nil {
 			return err

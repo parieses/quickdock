@@ -71,9 +71,11 @@ type Command struct {
 // ---- JSON-RPC 通信结构 ----
 
 // RPCRequest JSON-RPC 2.0 请求
+// ID 使用 json.RawMessage 而非 int64：JSON-RPC 规范允许 id 为 string | number | null，
+// 部分 JS/第三方插件会以字符串 id 通信，强类型 int64 会导致这类请求/响应被静默丢弃。
 type RPCRequest struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id,omitempty"`
+	ID      json.RawMessage `json:"id,omitempty"`
 	Method  string          `json:"method"`
 	Params  json.RawMessage `json:"params,omitempty"`
 }
@@ -81,7 +83,7 @@ type RPCRequest struct {
 // RPCResponse JSON-RPC 2.0 响应
 type RPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id,omitempty"`
+	ID      json.RawMessage `json:"id,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *RPCError       `json:"error,omitempty"`
 }
@@ -109,7 +111,7 @@ type PluginInstance struct {
 	sendMu   sync.Mutex                // 串行化 stdin 写入 ← P0 修复
 	readMu   sync.Mutex
 	NextID   int64
-	Pending  map[int64]chan *RPCResponse
+	Pending  map[string]chan *RPCResponse // 以 id 的 JSON 文本为键，兼容 string/number id
 
 	readyCh  chan struct{}             // readLoop 就绪信号 ← P0 修复
 	doneCh   chan struct{}             // 进程退出信号
@@ -131,7 +133,7 @@ type PluginInstance struct {
 func NewPluginInstance(manifest PluginManifest, dir string) *PluginInstance {
 	return &PluginInstance{
 		Manifest: manifest,
-		Pending:  make(map[int64]chan *RPCResponse),
+		Pending:  make(map[string]chan *RPCResponse),
 		readyCh:  make(chan struct{}),
 		doneCh:   make(chan struct{}),
 		Dir:      dir,

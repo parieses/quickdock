@@ -422,9 +422,12 @@ func (m *Manager) KillPlugin(id string) error {
 // stopPlugin 停止插件子进程
 func (m *Manager) stopPlugin(inst *PluginInstance) {
 	inst.stopped.Store(true)
-	// 发送 shutdown（goja/none 运行时无 stdin pipe，跳过）
+	// 发送 shutdown（goja/none 运行时无 stdin pipe，跳过）。
+	// 非阻塞 best-effort：在独立 goroutine 中尝试，避免持有管理器锁期间被插件挂死
+	//（SendNotification 内部虽有 2s 超时，但 stopPlugin 总在调用方持 m.mu 时执行，
+	// 同步等待会给整把锁带来最长 2s 阻塞，冻结所有插件操作）。graceful shutdown 本身即尽力而为。
 	if inst.Stdin != nil {
-		inst.SendNotification("shutdown", nil)
+		go func() { _ = inst.SendNotification("shutdown", nil) }()
 	}
 
 	inst.SetStatus("stopped")
@@ -800,6 +803,11 @@ func (m *Manager) cleanupOrphans() {
 		// 尝试终止进程
 		proc, err := os.FindProcess(pid)
 		if err != nil {
+			continue
+		}
+		// 二次确认：processExists 与 Kill 之间存在 PID 复用窗口（旧进程已退出、PID 被无关
+		// 进程复用），仅再次校验仍存在以缩小误杀概率（仍非绝对，但显著降低风险）。
+		if !processExists(pid) {
 			continue
 		}
 		if err := proc.Kill(); err == nil {

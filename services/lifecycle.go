@@ -154,6 +154,10 @@ func (a *AppService) ServiceShutdown() error {
 	if a.DSH != nil {
 		a.DSH.Stop()
 	}
+	// 先停三个常驻调度 goroutine（提醒/定时任务/网站监控），避免 DB 关闭后它们仍触发访问
+	if a.schedulerQuit != nil {
+		a.StopSchedulers()
+	}
 	// 最后关闭数据库
 	if a.DB != nil {
 		a.DB.Close()

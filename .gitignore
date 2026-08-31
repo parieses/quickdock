@@ -16,6 +16,7 @@ build/*.syso
 wails_windows_*.syso
 frontend/dist/
 frontend/bindings/
+frontend/.bindings-tmp-*/
 build/android/.gradle/
 build/android/build/
 

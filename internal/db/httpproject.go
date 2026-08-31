@@ -311,11 +311,39 @@ func (d *Database) UpdateHttpFolder(r *HttpFolder) error {
 	return err
 }
 
+// IsFolderAncestorOf 判断 folderID 是否为 candidateParentID 的祖先（沿 parent_id 链上溯）。
+// 用于防环：把目录移动到自己的子孙下会形成环。最多上溯 64 层，防止异常数据导致死循环。
+func (d *Database) IsFolderAncestorOf(folderID, candidateParentID string) (bool, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	cur := candidateParentID
+	for i := 0; i < 64 && cur != "" && cur != folderID; i++ {
+		var pid string
+		err := d.conn.QueryRow(`SELECT parent_id FROM http_folders WHERE id = ?`, cur).Scan(&pid)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return false, nil
+			}
+			return false, err
+		}
+		if pid == folderID {
+			return true, nil
+		}
+		cur = pid
+	}
+	return cur == folderID, nil
+}
+
 // folderSubtreeIDs 收集以 roots 为根的整棵目录子树 ID（含 roots 自身）。
 // 调用方须已持锁（d.mu）。
 func (d *Database) folderSubtreeIDs(roots []string) ([]string, error) {
 	out := append([]string{}, roots...)
 	queue := append([]string{}, roots...)
+	// visited 去重 + 环检测：即使历史数据已成环，删除/移动也不会无限循环卡死 d.mu
+	seen := map[string]bool{}
+	for _, r := range roots {
+		seen[r] = true
+	}
 	for len(queue) > 0 {
 		cur := queue[0]
 		queue = queue[1:]
@@ -330,7 +358,10 @@ func (d *Database) folderSubtreeIDs(roots []string) ([]string, error) {
 				rows.Close()
 				return nil, err
 			}
-			children = append(children, cid)
+			if !seen[cid] {
+				seen[cid] = true
+				children = append(children, cid)
+			}
 		}
 		rows.Close()
 		out = append(out, children...)
@@ -377,15 +408,15 @@ func (d *Database) DeleteHttpFolder(id string) error {
 // ReorderHttpFolders 将某父目录（projectID + parentID）下的子目录按 ids 顺序重排，
 // 并一并更新 project_id / parent_id（支持拖拽排序与跨目录、跨项目移动）。
 func (d *Database) ReorderHttpFolders(projectID, parentID string, ids []string) error {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	for i, id := range ids {
-		if _, err := d.conn.Exec(`UPDATE http_folders SET project_id=?, parent_id=?, sort=? WHERE id=?`,
-			projectID, parentID, i, id); err != nil {
-			return err
+	return d.Transaction(func(tx *sql.Tx) error {
+		for i, id := range ids {
+			if _, err := tx.Exec(`UPDATE http_folders SET project_id=?, parent_id=?, sort=? WHERE id=?`,
+				projectID, parentID, i, id); err != nil {
+				return err
+			}
 		}
-	}
-	return nil
+		return nil
+	})
 }
 
 // UpdateFolderSubtreeProject 将整棵目录子树（含自身）的 project_id 及子请求/子文档的
@@ -402,12 +433,13 @@ func (d *Database) UpdateFolderSubtreeProject(rootID, projectID string) error {
 	}
 	ph := make([]string, len(ids))
 	args := make([]interface{}, 0, len(ids)+1)
+	// 注意顺序：第一个占位符对应 SET project_id=?，必须先放 projectID，再放 IN 列表
+	args = append(args, projectID)
 	for i, id := range ids {
 		ph[i] = "?"
 		args = append(args, id)
 	}
 	q := strings.Join(ph, ",")
-	args = append(args, projectID)
 	if _, err := d.conn.Exec(`UPDATE http_folders SET project_id=? WHERE id IN (`+q+`)`, args...); err != nil {
 		return err
 	}

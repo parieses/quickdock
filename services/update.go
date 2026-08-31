@@ -157,11 +157,6 @@ func (a *AppService) RestartApp() error {
 		return fmt.Errorf("更新尚未就绪：请先完成下载，再点击重启")
 	}
 
-	// 让 WindowClosing 钩子放行（与托盘"退出"同一路径），主程序走干净退出流程
-	if a.PrepareQuitFn != nil {
-		a.PrepareQuitFn()
-	}
-
 	// 以管理员权限（UAC 提权）拉起 NSIS 安装器。
 	// QuickDock 平时以普通权限运行；只有装到 Program Files / 覆盖程序文件这一步需要
 	// 管理员权限，故通过 ShellExecute(verb="runas") 触发 Windows UAC 确认框，用户点是
@@ -173,7 +168,13 @@ func (a *AppService) RestartApp() error {
 		return fmt.Errorf("启动更新安装器失败（需要管理员权限，请在 UAC 弹窗中点「是」）: %w", err)
 	}
 
-	// 退出主程序；安装器接管后续的安装向导与重新运行
+	// 提权成功后再打「真退出」标记（与托盘"退出"同一路径），让主窗口的 WindowClosing
+	// 钩子放行，随后干净退出；安装器接管后续的安装向导与重新运行。
+	// 注意：必须放在 launchElevated 成功之后——若用户拒绝 UAC，不应把应用留在
+	// "已请求退出"状态（否则之后点主窗口 X 会直接退出而非隐藏到托盘）。
+	if a.PrepareQuitFn != nil {
+		a.PrepareQuitFn()
+	}
 	a.app.Quit()
 	return nil
 }

@@ -139,14 +139,18 @@ func (a *AppService) buildAIMessages(ctx context.Context, cfg AIProfile, convID,
 		return n
 	}
 
-	// 摘要压缩：历史超阈值且足够长时，总结最旧部分并清理
+	// 摘要压缩：历史超阈值且足够长时，总结最旧部分并清理。
+	// 仅当待压缩的旧消息达到足够数量（>=aiKeepRecent）才执行，避免「保留 recent 条 +
+	// 每轮新增 1 条」导致每轮都重算摘要、无谓消耗 token。
 	if estTokens(hist) > aiTokenBudget && len(hist) > aiKeepRecent {
 		toSum := hist[:len(hist)-aiKeepRecent]
-		recent := hist[len(hist)-aiKeepRecent:]
-		if summary, serr := a.summarizeAndStore(ctx, cfg, conv, toSum); serr == nil {
-			_ = a.DB.DeleteOldAIMessages(convID, aiKeepRecent)
-			hist = recent
-			conv.Summary = summary
+		if len(toSum) >= aiKeepRecent {
+			recent := hist[len(hist)-aiKeepRecent:]
+			if summary, serr := a.summarizeAndStore(ctx, cfg, conv, toSum); serr == nil {
+				_ = a.DB.DeleteOldAIMessages(convID, aiKeepRecent)
+				hist = recent
+				conv.Summary = summary
+			}
 		}
 	}
 
@@ -188,6 +192,11 @@ func (a *AppService) summarizeAndStore(ctx context.Context, cfg AIProfile, conv 
 	combined := summary
 	if conv.Summary != "" {
 		combined = conv.Summary + "\n" + summary
+	}
+	// 防止摘要只增不减、system prompt 单调膨胀最终超出上下文窗口（HTTP 400）：
+	// 合并后超过上限时仅保留最新一轮摘要。
+	if len([]rune(combined)) > 2000 {
+		combined = summary
 	}
 	if err := a.DB.UpdateAIConversationMeta(conv.ID, "", combined); err != nil {
 		return "", err

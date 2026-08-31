@@ -201,6 +201,9 @@ func (a *AppService) scheduleLoop() {
 		dur := a.nextScheduleWait()
 		timer := time.NewTimer(dur)
 		select {
+		case <-a.schedulerQuit:
+			timer.Stop()
+			return
 		case <-timer.C:
 		case <-a.schedWake:
 			timer.Stop()

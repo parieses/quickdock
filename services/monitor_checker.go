@@ -54,6 +54,9 @@ func (a *AppService) monitorLoop() {
 		dur := a.nextMonitorWait()
 		timer := time.NewTimer(dur)
 		select {
+		case <-a.schedulerQuit:
+			timer.Stop()
+			return
 		case <-timer.C:
 		case <-a.monitorWake:
 			timer.Stop()

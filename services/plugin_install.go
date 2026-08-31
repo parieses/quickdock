@@ -9,12 +9,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+// pickedPaths 记录本次会话内经 PickFilePath 确认过的文件路径（进程级白名单）。
+// ReadPickedFile 只放行该集合内的路径，防止插件 iframe 用任意绝对路径读取用户文件。
+var (
+	pickedPathsMu sync.Mutex
+	pickedPaths   = map[string]bool{}
 )
 
 // dialogParentWindow 为原生文件/目录对话框挑选父窗口：
@@ -56,13 +64,14 @@ func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
 			"note": "安装完成但读取 manifest 失败: " + err.Error(),
 		})
 	}
-	// 读取图标
+	// 读取图标（路径必须落在插件目录内，防 manifest.icon 路径穿越）
 	iconData := ""
 	if manifest.Icon != "" {
-		iconPath := filepath.Join(dir, manifest.Icon)
-		if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
-			mime := platform.IconMIME(filepath.Ext(manifest.Icon))
-			iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
+		if iconPath, perr := safePluginPath(dir, manifest.Icon); perr == nil {
+			if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
+				mime := platform.IconMIME(filepath.Ext(manifest.Icon))
+				iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
+			}
 		}
 	}
 	// 写入数据库记录（含 capabilities / permissions / category / icon）
@@ -107,6 +116,9 @@ func (a *AppService) PickFilePath(title, filterName, pattern string) *ApiResult 
 	if err != nil || filePath == "" {
 		return Ok(nil)
 	}
+	pickedPathsMu.Lock()
+	pickedPaths[filePath] = true
+	pickedPathsMu.Unlock()
 	return Ok(filePath)
 }
 
@@ -140,9 +152,9 @@ const pickedFileMaxSize = 20 << 20
 //   - 可无损 UTF-8 解码且不含 NUL 的文件 → {"type":"text","content":原文}
 //   - 其余（图片/二进制）→ {"type":"dataurl","content":"data:<mime>;base64,..."}
 //
-// 仅供桥接 qdReadFile 使用；路径须为绝对路径且不带 URL scheme。
-// 信任边界说明：external 插件为本仓库第一方构建产物，与宿主同信任级；
-// 若未来引入第三方市场分发，此绑定必须改为按“本次会话 qdPickFile 返回的路径”白名单校验。
+// 仅供桥接 qdReadFile 使用；安全边界：只放行本次会话内经 PickFilePath
+// 原生对话框确认过的路径（pickedPaths 白名单），插件 iframe 无法用任意
+// 绝对路径读取用户文件。
 func (a *AppService) ReadPickedFile(path string) *ApiResult {
 	if a.app == nil {
 		return FailMsg("应用未初始化")
@@ -150,6 +162,12 @@ func (a *AppService) ReadPickedFile(path string) *ApiResult {
 	path = strings.TrimSpace(path)
 	if path == "" || !filepath.IsAbs(path) || strings.Contains(path, "://") {
 		return FailMsg("路径无效")
+	}
+	pickedPathsMu.Lock()
+	authorized := pickedPaths[path]
+	pickedPathsMu.Unlock()
+	if !authorized {
+		return FailMsg("路径未经文件选择器授权")
 	}
 	fi, err := os.Stat(path)
 	if err != nil || fi.IsDir() {

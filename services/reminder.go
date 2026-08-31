@@ -12,16 +12,31 @@ import (
 // StartReminderScheduler 启动待办定时提醒调度器（常驻 goroutine）
 // 每 10 秒轮询一次，对「已到提醒时间、未完成、未发送」的待办推送系统通知。
 func (a *AppService) StartReminderScheduler() {
+	a.schedulerQuit = make(chan struct{})
 	go func() {
 		defer recoverPanic("reminder scheduler")
 		// 延迟 3 秒启动，确保通知服务已完成 ServiceStartup 初始化
 		time.Sleep(3 * time.Second)
 		ticker := time.NewTicker(10 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			a.checkReminders()
+		for {
+			select {
+			case <-a.schedulerQuit:
+				return
+			case <-ticker.C:
+				a.checkReminders()
+			}
 		}
 	}()
+}
+
+// StopSchedulers 关闭调度器退出通道，令常驻 goroutine 干净退出。
+// 必须在 ServiceShutdown 关闭数据库之前调用。
+func (a *AppService) StopSchedulers() {
+	if a.schedulerQuit == nil {
+		return
+	}
+	a.schedulerQuitOnce.Do(func() { close(a.schedulerQuit) })
 }
 
 // checkReminders 检查并发送到期的待办提醒

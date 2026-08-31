@@ -59,9 +59,10 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 				return "", fmt.Errorf("%w: backend.entry 为必填字段（none runtime 除外）", ErrInvalidManifest)
 			}
 
-			// 校验 ID 格式
-			if !isValidPluginID(mf.ID) {
-				return "", fmt.Errorf("%w: 插件 ID %q 格式无效，应类似 com.quickdock.xxx", ErrInvalidManifest, mf.ID)
+			// 校验 ID 格式：与 LoadManifest/validateManifest 同一白名单（pluginIDRe），
+			// 不允许 / \ 与以字母开头的约束天然阻止 "../" 等路径穿越
+			if !pluginIDRe.MatchString(mf.ID) {
+				return "", fmt.Errorf("%w: 插件 ID %q 格式无效（应匹配 com.quickdock.xxx 或 hosts-manager 形式）", ErrInvalidManifest, mf.ID)
 			}
 
 			// 校验 runtime
@@ -250,7 +251,6 @@ func rollbackInstall(targetDir, backupDir, markFile string) error {
 	return nil
 }
 
-// isValidPluginID 校验插件 ID 格式：至少要包含一个点号
-func isValidPluginID(id string) bool {
-	return strings.Count(id, ".") >= 1 && len(id) > 0
-}
+// isValidPluginID 已废弃：统一使用 manifest.go 的 pluginIDRe 白名单校验，
+// 避免两套规则不一致（旧规则仅要求含点号，曾导致 ".." 这类 ID 通过校验）。
+// 如发现仍引用 isValidPluginID 请改用 pluginIDRe.MatchString。
