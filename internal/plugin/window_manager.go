@@ -14,16 +14,18 @@ type PluginWindowManager struct {
 	mu         sync.Mutex
 	windows    map[string]*application.WebviewWindow // pluginID → 独立窗口
 	app        *application.App
+	mgr        *Manager // 插件管理器（用于「关窗即终止」时停止进程 / 按需惰性复活）
 	baseWidth  int
 	baseHeight int
 	themeDark  bool // 当前 App 主题是否为深色（用于窗口底色，避免浅色下露黑底）
 }
 
 // NewPluginWindowManager 创建窗口管理器
-func NewPluginWindowManager(app *application.App) *PluginWindowManager {
+func NewPluginWindowManager(app *application.App, mgr *Manager) *PluginWindowManager {
 	return &PluginWindowManager{
 		windows:    make(map[string]*application.WebviewWindow),
 		app:        app,
+		mgr:        mgr,
 		baseWidth:  800,
 		baseHeight: 600,
 		themeDark:  true, // 默认深色（与窗口初始 BackgroundColour 一致）
@@ -68,6 +70,13 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	}
 	m.mu.Unlock()
 
+	// 「关窗即终止」配套：首次打开或关闭后重开时，惰性确保插件进程已启动
+	if m.mgr != nil {
+		if err := m.mgr.EnsureLoaded(pluginID); err != nil {
+			fmt.Printf("[plugin-window] 打开插件 %s 前加载失败: %v\n", pluginID, err)
+		}
+	}
+
 	// 创建新窗口
 	win := m.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "快启坞 - " + title,
@@ -83,12 +92,15 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		},
 	})
 
-	// 用户点击关闭按钮 → 真正销毁窗口，并从注册表删除
+	// 用户点击关闭按钮 → 真正销毁窗口，并从注册表删除；同时停止插件进程（关窗即终止）
 	win.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		m.mu.Lock()
 		delete(m.windows, pluginID)
 		m.mu.Unlock()
 		// 不调用 Cancel()，让窗口正常关闭销毁
+		if m.mgr != nil {
+			_ = m.mgr.StopPlugin(pluginID)
+		}
 	})
 
 	win.Show()

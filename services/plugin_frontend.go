@@ -78,6 +78,8 @@ func (a *AppService) GetPluginFrontendPage(pluginID string, theme string, locale
 	if a.PluginMgr == nil {
 		return FailMsg("plugin manager not initialized")
 	}
+	// 「关窗即终止」后插件可能已停止，按需惰性复活再读页面（Show 已确保加载，这里兜底直接调用路径）
+	_ = a.PluginMgr.EnsureLoaded(pluginID)
 	inst := a.PluginMgr.GetPlugin(pluginID)
 	if inst == nil {
 		return FailMsg("插件未加载")

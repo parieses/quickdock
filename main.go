@@ -225,7 +225,7 @@ func main() {
 	winPosKV = kvStore
 
 	// 创建插件窗口管理器（需要 app 引用，只能放在 New 之后）
-	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app)
+	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app, pluginMgr)
 
 	// 创建主窗口（启动时恢复上次记住的尺寸/位置）
 	mainRect := loadWindowState()

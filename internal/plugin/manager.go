@@ -168,7 +168,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	// 先获取插件ID并检查是否需要停止旧实例
 	m.mu.Lock()
 	if inst, ok := m.plugins[manifest.ID]; ok {
-		m.stopPlugin(inst)
+		m.stopPlugin(inst, false)
 	}
 	m.mu.Unlock()
 
@@ -250,7 +250,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 			if current, ok := m.plugins[manifest.ID]; ok && current == inst {
 				delete(m.plugins, manifest.ID)
 			}
-			m.stopPlugin(inst)
+			m.stopPlugin(inst, false)
 			m.mu.Unlock()
 			return fmt.Errorf("插件初始化失败: %w", err)
 		}
@@ -376,7 +376,7 @@ func (m *Manager) UnloadPlugin(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if inst, ok := m.plugins[id]; ok {
-		m.stopPlugin(inst)
+		m.stopPlugin(inst, false)
 		delete(m.plugins, id)
 	}
 }
@@ -389,38 +389,36 @@ func (m *Manager) StopPlugin(id string) error {
 	if !ok {
 		return ErrPluginNotFound
 	}
-	m.stopPlugin(inst)
+	m.stopPlugin(inst, true)
 	// 注意：stopPlugin 已将 inst.Status 设置为 "stopped"
 	return nil
 }
 
 // KillPlugin 强制终止插件（插件管理页「停止进程」入口）：
 // 停进程并断自动重启（stopPlugin 置 stopped，watchPlugin 不会复活），
-// 再补杀整棵进程树与目录内孤儿进程，覆盖「进程锁住目录导致更新/卸载失败」。
+// 内部已连子进程树一并终止；再补杀目录内未被 m.plugins 跟踪的孤儿进程，
+// 覆盖「进程锁住目录导致更新/卸载失败」。
 func (m *Manager) KillPlugin(id string) error {
 	if !pluginIDRe.MatchString(id) {
 		return fmt.Errorf("%w: 非法插件 ID: %q", ErrInvalidManifest, id)
 	}
 	m.mu.Lock()
-	var pid int
 	if inst, ok := m.plugins[id]; ok {
-		if inst.Cmd != nil && inst.Cmd.Process != nil {
-			pid = inst.Cmd.Process.Pid
-		}
-		m.stopPlugin(inst)
+		m.stopPlugin(inst, true)
 		delete(m.plugins, id)
 	}
 	m.mu.Unlock()
 
-	if pid > 0 {
-		killProcessTree(pid)
-	}
 	killProcessesLockingDir(filepath.Join(m.pluginsDir, id))
 	return nil
 }
 
-// stopPlugin 停止插件子进程
-func (m *Manager) stopPlugin(inst *PluginInstance) {
+// stopPlugin 停止插件子进程（内部共享逻辑，调用方需持 m.mu）。
+// treeKill=true 时连其 spawn 的子进程（explorer / netsh / ping 等）一并终止，
+// 防止反复开关节点插件时孤儿进程在全局 Job 中累积（"任务管理器进程数越来越多"）。
+// 该参数仅在「用户关闭/禁用/强杀插件」这类明确的插件终止路径（StopPlugin / KillPlugin）
+// 置 true；内部的重载、初始化失败、卸载等路径只杀主进程，不扩散到子进程树。
+func (m *Manager) stopPlugin(inst *PluginInstance, treeKill bool) {
 	inst.stopped.Store(true)
 	// 发送 shutdown（goja/none 运行时无 stdin pipe，跳过）。
 	// 非阻塞 best-effort：在独立 goroutine 中尝试，避免持有管理器锁期间被插件挂死
@@ -438,10 +436,16 @@ func (m *Manager) stopPlugin(inst *PluginInstance) {
 		inst.DB.Close()
 	}
 
-	// 终止进程
+	// 终止进程：先置 stopped（阻止 watchPlugin 复活），再回收主进程。
+	// treeKill 必须主进程尚存活时调用，否则 taskkill /T 找不到父进程会漏杀子进程。
 	if inst.Cmd != nil && inst.Cmd.Process != nil {
-		inst.Cmd.Process.Kill()
-		inst.Cmd.Wait()
+		pid := inst.Cmd.Process.Pid
+		if treeKill {
+			killProcessTree(pid)
+		} else {
+			_ = inst.Cmd.Process.Kill()
+		}
+		_, _ = inst.Cmd.Process.Wait()
 	}
 
 	// 更新 PID 文件（调用者持有写锁，直接传 m.plugins 安全）
@@ -605,8 +609,17 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 	m.mu.RLock()
 	inst, ok := m.plugins[pluginID]
 	m.mu.RUnlock()
-	if !ok {
-		return nil, ErrPluginNotFound
+	if !ok || inst.GetStatus() != "running" {
+		// 「关窗即终止」后插件可能已停止：按需惰性复活，避免命令面板调用失败
+		if err := m.EnsureLoaded(pluginID); err != nil {
+			return nil, fmt.Errorf("插件 %s 未运行且无法加载: %w", pluginID, err)
+		}
+		m.mu.RLock()
+		inst = m.plugins[pluginID]
+		m.mu.RUnlock()
+		if inst == nil {
+			return nil, ErrPluginNotFound
+		}
 	}
 
 	switch inst.Manifest.Backend.Runtime {
@@ -671,6 +684,24 @@ func (m *Manager) GetPlugin(id string) *PluginInstance {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.plugins[id]
+}
+
+// EnsureLoaded 确保插件已加载并运行中；未加载或已停止则按磁盘 manifest 惰性拉起。
+// 用于「关窗即终止」后重新打开窗口 / 执行命令时按需复活，避免进程已停导致页面或命令失败。
+func (m *Manager) EnsureLoaded(pluginID string) error {
+	m.mu.RLock()
+	inst, ok := m.plugins[pluginID]
+	m.mu.RUnlock()
+	if ok && inst.GetStatus() == "running" && inst.Stdin != nil {
+		return nil
+	}
+	dir := filepath.Join(m.pluginsDir, pluginID)
+	manifestPath := filepath.Join(dir, "plugin.json")
+	manifest, err := LoadManifest(manifestPath)
+	if err != nil {
+		return err
+	}
+	return m.LoadPlugin(*manifest, dir)
 }
 
 // ReloadPlugin 重新加载插件（启用时调用）

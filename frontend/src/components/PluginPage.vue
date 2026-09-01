@@ -53,7 +53,12 @@ function closeWindow() {
   padding: 0 0 0 14px;
   background: var(--color-bg-secondary);
   box-shadow: inset 0 -1px 0 0 var(--color-border);
-  -webkit-app-region: drag;
+  /* 拖拽机制：Wails v3 运行时调度器识别 --wails-draggable（全局 body 同款），
+     在标题栏区域按下即可移动窗口。
+     注意：不要用 -webkit-app-region: drag —— 它在 Wails 中必须
+     NonClientRegionSupport:true 才生效（本程序未开启），且会让 Blink 把该
+     区域当成原生拖拽手柄、吞掉 mousedown，反而导致整扇窗口无法拖动。 */
+  --wails-draggable: drag;
   user-select: none;
 }
 .pw-title {
@@ -64,7 +69,8 @@ function closeWindow() {
 }
 .pw-controls {
   display: flex; align-items: center;
-  -webkit-app-region: no-drag;
+  /* 标题栏按钮区退出拖拽，点击按钮不会误触发移动 */
+  --wails-draggable: no-drag;
 }
 .pw-btn {
   display: flex; align-items: center; justify-content: center;

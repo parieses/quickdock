@@ -95,7 +95,7 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 			if inst.Cmd != nil && inst.Cmd.Process != nil {
 				oldPID = inst.Cmd.Process.Pid
 			}
-			m.stopPlugin(inst)
+			m.stopPlugin(inst, false)
 			delete(m.plugins, pluginID)
 		}
 		m.mu.Unlock()
