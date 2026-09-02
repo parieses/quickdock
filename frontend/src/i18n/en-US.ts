@@ -1118,6 +1118,8 @@ export default {
   dshPluginError: 'Plugin install failed',
   dshPluginPlaceholder: 'Plugin name, e.g. dshmarket',
   dshSameAsNode: 'Same dir as Node.js',
+  dshNodeInstallHint: 'Node.js is not installed. Please install it from the "Node.js" group:',
+  dshGotoNode: 'Go to install',
   dshNeedInstall: 'DeepSeek Harness not installed — click "Install runtime" above first',
   dshCheckUpdate: 'Check for updates',
   dshCheckingUpdate: 'Checking…',

@@ -560,7 +560,7 @@ onUnmounted(() => {
       <!-- 右侧：所选分类详情 -->
       <main class="env-detail">
         <!-- DeepSeek Harness 区块：复用 SettingsDSH 组件 -->
-        <SettingsDSH v-if="isHarness" :visible="isHarness" />
+        <SettingsDSH v-if="isHarness" :visible="isHarness" @goto="(id) => (selectedId = id)" />
 
         <!-- HTTP 服务区块：目录 → 可访问的静态服务 -->
         <template v-else-if="isHttp">

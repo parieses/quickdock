@@ -12,6 +12,7 @@ const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 const props = defineProps<{ visible: boolean }>()
+const emit = defineEmits<{ (e: 'goto', id: string): void }>()
 
 interface NodeEnvStatus {
   nodeFound: boolean
@@ -292,7 +293,7 @@ watch(() => props.visible, async (v) => {
         </div>
         <span :class="['dsh-badge', { ok: status?.nodeFound }]">
           <component :is="status?.nodeFound ? CheckCircle2 : AlertCircle" :size="13" />
-          {{ status?.nodeFound ? (status.nodeVersion || t('dshInstalled')) : t('dshNotInstalled') }}
+          {{ status?.nodeFound ? t('dshInstalled') : t('dshNotInstalled') }}
         </span>
       </div>
       <div class="dsh-status-row">
@@ -302,7 +303,7 @@ watch(() => props.visible, async (v) => {
         </div>
         <span :class="['dsh-badge', { ok: status?.npxFound }]">
           <component :is="status?.npxFound ? CheckCircle2 : AlertCircle" :size="13" />
-          {{ status?.npxFound ? (status.npxVersion || t('dshInstalled')) : t('dshNotInstalled') }}
+          {{ status?.npxFound ? t('dshInstalled') : t('dshNotInstalled') }}
         </span>
       </div>
       <div class="dsh-status-row">
@@ -317,6 +318,12 @@ watch(() => props.visible, async (v) => {
         </span>
       </div>
     </div>
+
+    <!-- Node 未安装：引导至 Node.js 分组安装 -->
+    <p v-if="!status?.nodeFound" class="dsh-node-hint">
+      {{ t('dshNodeInstallHint') }}
+      <a href="#" class="dsh-goto-link" @click.prevent="emit('goto', 'node')">{{ t('dshGotoNode') }}</a>
+    </p>
 
     <!-- 检测到的问题提示 -->
     <p v-if="status?.message" class="result-hint" style="margin-top:8px">{{ status.message }}</p>
@@ -463,6 +470,21 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-status-home {
   color: var(--color-text-muted);
+}
+.dsh-node-hint {
+  margin-top: 10px;
+  font-size: 12px;
+  color: #ffb020;
+  line-height: 1.5;
+}
+.dsh-goto-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  margin-left: 4px;
+  cursor: pointer;
+}
+.dsh-goto-link:hover {
+  text-decoration: underline;
 }
 .dsh-badge {
   display: inline-flex;

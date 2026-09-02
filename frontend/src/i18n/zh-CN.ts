@@ -1118,6 +1118,8 @@ export default {
   dshPluginError: '插件安装失败',
   dshPluginPlaceholder: '输入插件名，如 dshmarket',
   dshSameAsNode: '与 Node.js 同目录',
+  dshNodeInstallHint: 'Node.js 未安装，请前往「Node.js」分组中安装：',
+  dshGotoNode: '前往安装',
   dshNeedInstall: 'DeepSeek Harness 未安装，请先点击上方「一键安装运行环境」',
   dshCheckUpdate: '检测更新',
   dshCheckingUpdate: '检测中…',
