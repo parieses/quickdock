@@ -294,104 +294,6 @@ var baseTables = []string{
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
 
-	`CREATE TABLE IF NOT EXISTS api_requests (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL DEFAULT '',
-		method TEXT NOT NULL DEFAULT 'GET',
-		url TEXT NOT NULL DEFAULT '',
-		headers TEXT NOT NULL DEFAULT '{}',
-		body TEXT NOT NULL DEFAULT '',
-		body_type TEXT NOT NULL DEFAULT 'json',
-		auth_type TEXT NOT NULL DEFAULT '',
-		auth_token TEXT NOT NULL DEFAULT '',
-		auth_user TEXT NOT NULL DEFAULT '',
-		auth_pass TEXT NOT NULL DEFAULT '',
-		sort INTEGER NOT NULL DEFAULT 0,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_api_requests_sort ON api_requests(sort, created_at)`,
-
-	`CREATE TABLE IF NOT EXISTS http_request_history (
-		id TEXT PRIMARY KEY,
-		project_id TEXT NOT NULL DEFAULT '',
-		name TEXT NOT NULL DEFAULT '',
-		method TEXT NOT NULL DEFAULT 'GET',
-		url TEXT NOT NULL DEFAULT '',
-		headers TEXT NOT NULL DEFAULT '{}',
-		body TEXT NOT NULL DEFAULT '',
-		body_type TEXT NOT NULL DEFAULT 'json',
-		auth_type TEXT NOT NULL DEFAULT '',
-		auth_token TEXT NOT NULL DEFAULT '',
-		auth_user TEXT NOT NULL DEFAULT '',
-		auth_pass TEXT NOT NULL DEFAULT '',
-		status_code INTEGER NOT NULL DEFAULT 0,
-		ok INTEGER NOT NULL DEFAULT 0,
-		duration_ms INTEGER NOT NULL DEFAULT 0,
-		size INTEGER NOT NULL DEFAULT 0,
-		created_ts INTEGER NOT NULL DEFAULT 0
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_http_history_project_ts ON http_request_history(project_id, created_ts)`,
-
-	`CREATE TABLE IF NOT EXISTS http_projects (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL DEFAULT '',
-		headers TEXT NOT NULL DEFAULT '{}',
-		sort INTEGER NOT NULL DEFAULT 0,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_http_projects_sort ON http_projects(sort, created_at)`,
-
-	`CREATE TABLE IF NOT EXISTS http_environments (
-		id TEXT PRIMARY KEY,
-		project_id TEXT NOT NULL DEFAULT '',
-		name TEXT NOT NULL DEFAULT '',
-		variables TEXT NOT NULL DEFAULT '[]',
-		sort INTEGER NOT NULL DEFAULT 0,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_http_env_project ON http_environments(project_id, sort, created_at)`,
-
-	`CREATE TABLE IF NOT EXISTS http_folders (
-		id TEXT PRIMARY KEY,
-		project_id TEXT NOT NULL DEFAULT '',
-		parent_id TEXT DEFAULT '',
-		name TEXT NOT NULL DEFAULT '',
-		sort INTEGER NOT NULL DEFAULT 0,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_http_folders_project ON http_folders(project_id, sort, created_at)`,
-	`CREATE INDEX IF NOT EXISTS idx_http_folders_parent ON http_folders(parent_id, sort, created_at)`,
-
-	`CREATE TABLE IF NOT EXISTS http_docs (
-		id TEXT PRIMARY KEY,
-		project_id TEXT NOT NULL DEFAULT '',
-		folder_id TEXT DEFAULT '',
-		name TEXT NOT NULL DEFAULT '',
-		content TEXT NOT NULL DEFAULT '',
-		sort INTEGER NOT NULL DEFAULT 0,
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	)`,
-	`CREATE INDEX IF NOT EXISTS idx_http_docs_project ON http_docs(project_id, sort, created_at)`,
-	`CREATE INDEX IF NOT EXISTS idx_http_docs_folder ON http_docs(folder_id, sort, created_at)`,
-
-	`CREATE TABLE IF NOT EXISTS db_connections (
-		id TEXT PRIMARY KEY,
-		name TEXT NOT NULL DEFAULT '',
-		db_type TEXT NOT NULL DEFAULT 'mysql',
-		host TEXT NOT NULL DEFAULT '127.0.0.1',
-		port INTEGER NOT NULL DEFAULT 3306,
-		username TEXT NOT NULL DEFAULT '',
-		password TEXT NOT NULL DEFAULT '',
-		database TEXT NOT NULL DEFAULT '',
-		file_path TEXT NOT NULL DEFAULT '',
-		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
-	)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
@@ -502,10 +404,6 @@ func (d *Database) migrate() error {
 		// ai_conversations: token 用量统计
 		{"ai_conversations", "prompt_tokens", "INTEGER DEFAULT 0"},
 		{"ai_conversations", "completion_tokens", "INTEGER DEFAULT 0"},
-		// api_requests: 归属项目（Postman Collection 式分组）
-		{"api_requests", "project_id", "TEXT DEFAULT ''"},
-		// api_requests: 归属目录（项目下的功能模块分组，支持多级嵌套）
-		{"api_requests", "folder_id", "TEXT DEFAULT ''"},
 		// snippets → 笔记树：新增树形/标题/标签字段
 		{"snippets", "name", "TEXT DEFAULT ''"},
 		{"snippets", "parent_id", "TEXT DEFAULT ''"},

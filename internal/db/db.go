@@ -45,13 +45,6 @@ var validTables = map[string]bool{
 	"plugin_exec_logs":  true,
 	"ai_conversations":  true,
 	"ai_messages":       true,
-	"api_requests":      true,
-	"http_projects":     true,
-	"http_environments": true,
-	"http_folders":      true,
-	"http_docs":         true,
-	"db_connections":    true,
-	"http_request_history": true,
 	"plugins":           true,
 	"plugin_data":       true,
 }

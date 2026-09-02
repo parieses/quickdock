@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban } from '@lucide/vue'
+import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban, Search } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 import { GetPluginMarket, InstallPluginFromURL } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
@@ -44,6 +44,41 @@ const plugins = ref<MarketPlugin[]>([])
 const loading = ref(true)
 const installing = ref<Set<string>>(new Set())
 const updated = ref('')
+
+// 搜索与分组筛选（前端内存过滤，无需重新拉取市场索引）
+const searchText = ref('')
+const activeCat = ref('')
+
+// 分类选项（按插件数降序），未声明分类归入「未分类」
+const categories = computed(() => {
+  const m = new Map<string, number>()
+  for (const p of plugins.value) {
+    const c = p.category || t('pluginMarketUncategorized')
+    m.set(c, (m.get(c) || 0) + 1)
+  }
+  return [...m.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([cat, count]) => ({ cat, count }))
+})
+
+// 搜索 haystack：覆盖中英文名称、ID、描述、作者、分类，大小写不敏感
+function haystack(p: MarketPlugin): string {
+  const parts = [p.name, p.id, p.description, p.author, p.category]
+  if (p.name_i18n) parts.push(...Object.values(p.name_i18n))
+  if (p.description_i18n) parts.push(...Object.values(p.description_i18n))
+  return parts.filter(Boolean).join(' ').toLowerCase()
+}
+
+const filteredPlugins = computed(() => {
+  const kw = searchText.value.trim().toLowerCase()
+  const cat = activeCat.value
+  if (!kw && !cat) return plugins.value
+  return plugins.value.filter((p) => {
+    const okCat = !cat || (p.category || t('pluginMarketUncategorized')) === cat
+    const okKw = !kw || haystack(p).includes(kw)
+    return okCat && okKw
+  })
+})
 
 // 下载进度（key = 下载 URL，与卡片 p.downloads.windows 匹配）
 interface DownloadProgress { url: string; downloaded: number; total: number; percent: number; stage?: string }
@@ -116,12 +151,29 @@ onMounted(() => {
       <div class="market-header-left">
         <Store :size="20" />
         <h2 class="market-title">{{ t('pluginMarket') }}</h2>
-        <span v-if="plugins.length" class="market-count">{{ plugins.length }}</span>
+        <span v-if="plugins.length" class="market-count">{{ filteredPlugins.length }}</span>
         <span v-if="updated" class="market-updated">{{ t('pluginMarketUpdated') }}: {{ updated.slice(0, 10) }}</span>
       </div>
       <button class="refresh-btn" @click="loadMarket" :title="t('refresh')">
         <RefreshCw :size="14" />
       </button>
+    </div>
+
+    <div v-if="plugins.length" class="market-toolbar">
+      <div class="market-search">
+        <Search :size="14" class="search-icon" />
+        <input
+          v-model="searchText"
+          type="text"
+          class="market-search-input"
+          :placeholder="t('pluginMarketSearchPlaceholder')"
+        />
+      </div>
+      <select v-model="activeCat" class="market-cat-select">
+        <option value="">{{ t('pluginMarketAll') }}</option>
+        <option v-for="c in categories" :key="c.cat" :value="c.cat">{{ c.cat }} ({{ c.count }})</option>
+      </select>
+      <span class="market-result">{{ filteredPlugins.length }} / {{ plugins.length }}</span>
     </div>
 
     <div v-if="loading" class="market-loading"><p>{{ t('loading') }}</p></div>
@@ -131,8 +183,13 @@ onMounted(() => {
       <p class="empty-title">{{ t('pluginMarketEmpty') }}</p>
     </div>
 
+    <div v-else-if="filteredPlugins.length === 0" class="market-empty">
+      <Search :size="48" class="empty-icon" />
+      <p class="empty-title">{{ t('pluginMarketNoResult') }}</p>
+    </div>
+
     <div v-else class="market-grid">
-      <div v-for="p in plugins" :key="p.id" class="market-card">
+      <div v-for="p in filteredPlugins" :key="p.id" class="market-card">
         <div class="card-head">
           <img v-if="p.icon" :src="p.icon" class="card-icon" alt="" />
           <Store v-else :size="34" class="card-icon-fallback" />
@@ -197,13 +254,34 @@ onMounted(() => {
   color: var(--color-text-secondary); cursor: pointer;
 }
 .refresh-btn:hover { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); }
+.market-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.market-search {
+  display: flex; align-items: center; gap: 7px; flex: 1; min-width: 180px;
+  height: 32px; padding: 0 10px; border-radius: 6px;
+  border: 1px solid var(--color-border); background: var(--color-bg-secondary);
+  color: var(--color-text-muted);
+}
+.market-search:focus-within { border-color: var(--color-accent, #4a9eff); }
+.search-icon { flex: none; }
+.market-search-input {
+  flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
+  font: inherit; font-size: 13px; color: var(--color-text-primary);
+}
+.market-search-input::placeholder { color: var(--color-text-disabled); }
+.market-cat-select {
+  height: 32px; padding: 0 8px; border-radius: 6px; cursor: pointer;
+  border: 1px solid var(--color-border); background: var(--color-bg-secondary);
+  color: var(--color-text-primary); font: inherit; font-size: 13px;
+}
+.market-cat-select:focus { outline: none; border-color: var(--color-accent, #4a9eff); }
+.market-result { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
 .market-loading, .market-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; color: var(--color-text-muted);
 }
 .empty-icon { color: var(--color-text-disabled); }
 .empty-title { font-size: 13px; }
-.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding-right: 2px; }
+.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(3, 1fr); align-content: start; gap: 12px; padding-right: 2px; }
 /* 最小三列；主窗口加宽时逐级增加列数 */
 @media (min-width: 1440px) { .market-grid { grid-template-columns: repeat(4, 1fr); } }
 @media (min-width: 1800px) { .market-grid { grid-template-columns: repeat(5, 1fr); } }

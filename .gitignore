@@ -64,3 +64,4 @@ docs/audit-2026-08.md
 
 # --- 外部插件（独立开发，不在主仓库管理）---
 plugins/external/
+docs/env-manager-feasibility.md

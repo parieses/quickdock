@@ -352,7 +352,7 @@ onBeforeUnmount(() => { void flushPendingSave() })
 .ne-input.ne-textonly { border-right: none; }
 .ne-preview { flex: 1; min-width: 0; overflow: auto; padding: 12px 16px; background: var(--color-bg-primary); }
 
-/* Markdown 渲染（复用 HttpClientPage 样式） */
+/* Markdown 渲染（复用统一插件样式） */
 .markdown-body { color: var(--color-text-primary); font-size: 13px; line-height: 1.7; word-break: break-word; }
 .markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3), .markdown-body :deep(h4) { margin: 12px 0 8px; line-height: 1.3; }
 .markdown-body :deep(h1) { font-size: 20px; border-bottom: 1px solid var(--color-border); padding-bottom: 6px; }

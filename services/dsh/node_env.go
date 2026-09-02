@@ -1,14 +1,12 @@
 package dsh
 
 import (
-	"archive/zip"
 	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -20,9 +18,9 @@ import (
 	"time"
 
 	"quickdock/internal/platform"
+	"quickdock/services/env"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
-	"golang.org/x/sys/windows/registry"
 )
 
 const (
@@ -32,10 +30,6 @@ const (
 	dshPkg         = "@deepseek-ai/dsh"
 	// npm registry 元数据（与安装镜像一致，用于最新版本检测）
 	dshRegistryJSON = "https://registry.npmmirror.com/@deepseek-ai/dsh"
-	// 便携 Node 解压安全上限（Node v22 win-x64 解压后 ~200MB，node.exe 单文件 ~120MB，
-	// 旧值 80MB 会让 node.exe 误报「文件过大」，放大到足够容纳）
-	maxNodeZipSize  int64 = 600 << 20
-	maxNodeFileSize int64 = 300 << 20
 )
 
 // NodeEnvStatus 运行环境检测结果（返回前端）
@@ -70,11 +64,12 @@ type setupLog struct {
 	Message string `json:"message"`
 }
 
-// NodeEnvManager 检测并提供 Node 运行时；缺失时下载便携版并在其下安装 dsh。
+// NodeEnvManager 检测并提供 Node 运行时（委托 services/env）；缺失时下载便携版并在其下安装 dsh。
 // 不依赖系统 PATH、不写注册表、不请求管理员权限——纯用户态、随 QuickDock 清理。
 type NodeEnvManager struct {
 	app        *application.App
 	dataDir    string
+	node       *env.NodeRuntime
 	runtimeDir string
 	installing atomic.Bool
 	mu         sync.Mutex
@@ -82,9 +77,11 @@ type NodeEnvManager struct {
 
 func NewNodeEnvManager() *NodeEnvManager {
 	dataDir := platform.DefaultDataDir()
+	node := env.NewNodeRuntime()
 	return &NodeEnvManager{
 		dataDir:    dataDir,
-		runtimeDir: filepath.Join(dataDir, nodeRuntimeRel),
+		node:       node,
+		runtimeDir: node.RuntimeDir(),
 	}
 }
 
@@ -97,19 +94,8 @@ func (m *NodeEnvManager) EmitLog(level, msg string) {
 	}
 }
 
-func (m *NodeEnvManager) nodeExe() string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(m.runtimeDir, "node.exe")
-	}
-	return filepath.Join(m.runtimeDir, "node")
-}
-
-func (m *NodeEnvManager) npxExe() string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(m.runtimeDir, "npx.cmd")
-	}
-	return filepath.Join(m.runtimeDir, "npx")
-}
+func (m *NodeEnvManager) nodeExe() string  { return m.node.Exe() }
+func (m *NodeEnvManager) npxExe() string  { return m.node.NpxExe() }
 
 // npmCli 返回与当前 node 同目录下的 npm-cli.js（node 自带 npm）。
 // 关键：必须基于「实际检测到的 node 目录」推导，而非写死的便携目录——
@@ -290,44 +276,11 @@ func (m *NodeEnvManager) dshInstalledAnywhere() bool {
 	return err == nil
 }
 
-// nodeVersionOK 判断 node -v 输出是否满足 dsh 要求：^22.19.0 || >=24.0.0
-func nodeVersionOK(version string) bool {
-	v := strings.TrimPrefix(strings.TrimSpace(version), "v")
-	parts := strings.SplitN(v, ".", 3)
-	if len(parts) < 2 {
-		return false
-	}
-	major, err1 := strconv.Atoi(parts[0])
-	minor, err2 := strconv.Atoi(parts[1])
-	if err1 != nil || err2 != nil {
-		return false
-	}
-	if major == 22 {
-		return minor >= 19
-	}
-	return major >= 24
-}
-
-// nodeSupportPath 探测 exe 的 node 版本是否满足要求
-func nodeSupportPath(exe string) (string, bool) {
-	v := runVersion(exe, "--version")
-	return v, v != "" && nodeVersionOK(v)
-}
-
 // NodePath 返回实际可用的 node：优先系统 PATH（版本满足要求），其次便携目录。
 // 系统 node 版本过低时降级到便携版，避免把 dsh 装进一个跑不起来的旧环境。
 func (m *NodeEnvManager) NodePath() string {
-	if p, err := exec.LookPath("node"); err == nil {
-		if _, ok := nodeSupportPath(p); ok {
-			return p
-		}
-	}
-	if _, err := os.Stat(m.nodeExe()); err == nil {
-		if _, ok := nodeSupportPath(m.nodeExe()); ok {
-			return m.nodeExe()
-		}
-	}
-	return ""
+	p, _, _ := m.node.Detect()
+	return p
 }
 
 // DshVersion 读取已安装 dsh 的版本号（定位到 bin.js 所在包的 package.json）
@@ -354,14 +307,14 @@ func (m *NodeEnvManager) DshVersion() string {
 // Detect 检测 node/npx/dsh 状态（不发网络请求，快速返回）
 func (m *NodeEnvManager) Detect() NodeEnvStatus {
 	st := NodeEnvStatus{Installing: m.installing.Load()}
-	if p := m.NodePath(); p != "" {
+	if p, v, ok := m.node.Detect(); ok {
 		st.NodeFound = true
 		st.NodePath = p
-		st.NodeVersion = runVersion(p, "--version")
-		st.NodeSupport = nodeVersionOK(st.NodeVersion)
+		st.NodeVersion = v
+		st.NodeSupport = true
 	} else if p, err := exec.LookPath("node"); err == nil {
 		// 系统里有 node 但版本不满足——说明原因，安装会走内置 Node
-		if v := runVersion(p, "--version"); v != "" {
+		if v := env.RunVersion(p, "--version"); v != "" {
 			st.NodeFound = true
 			st.NodePath = p
 			st.NodeVersion = v
@@ -371,7 +324,7 @@ func (m *NodeEnvManager) Detect() NodeEnvStatus {
 	}
 	if p, err := exec.LookPath("npx"); err == nil {
 		st.NpxFound = true
-		st.NpxVersion = runVersion(p, "--version")
+		st.NpxVersion = env.RunVersion(p, "--version")
 	} else if _, err := os.Stat(m.npxExe()); err == nil {
 		st.NpxFound = true
 	}
@@ -409,7 +362,7 @@ func (m *NodeEnvManager) LatestDshVersion() string {
 		return ""
 	}
 	req.Header.Set("User-Agent", "QuickDock/1.0")
-	resp, err := (&http.Client{Transport: m.proxyTransport()}).Do(req)
+	resp, err := (&http.Client{Transport: env.ProxyTransport()}).Do(req)
 	if err != nil {
 		return ""
 	}
@@ -578,19 +531,7 @@ func (m *NodeEnvManager) UpdateDSH(ctx context.Context) error {
 	return nil
 }
 
-func runVersion(exe string, args ...string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.SysProcAttr = hideWindowAttr()
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// SetupDSH 一键安装：node 缺失则下载便携版，dsh 缺失则 npm 安装；分阶段回调进度。
+// SetupDSH 一键安装：node 缺失则下载便携版（经 env 可切换源），dsh 缺失则 npm 安装；分阶段回调进度。
 // 进度同时经 a.app.Event.Emit("quickdock:dsh:progress", ...) 推前端，故 onProgress 可为 nil。
 func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(SetupProgress)) error {
 	emit := func(sp SetupProgress) {
@@ -617,33 +558,26 @@ func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(SetupProg
 
 	logf("info", "开始准备运行环境（缺失 Node 将下载，缺失 dsh 将安装）")
 
-	// 1. 确保 node
+	// 1. 确保 node（委托 env 包，使用可切换下载源）
 	if m.NodePath() == "" {
 		emit(SetupProgress{Stage: "download-node", Message: "正在下载 Node 运行时…"})
-		zipPath := filepath.Join(os.TempDir(), "quickdock-node.zip")
-		if err := m.downloadNode(ctx, zipPath, func(w, t int64) {
-			emit(SetupProgress{Stage: "download-node", Written: w, Total: t, Message: "正在下载 Node 运行时…"})
-		}, func(msg string) { logf("info", msg) }); err != nil {
-			emit(SetupProgress{Stage: "error", Message: "下载 Node 失败: " + err.Error()})
-			logf("error", "下载 Node 失败: "+err.Error())
+		if err := m.node.Install(ctx, nodeVersion, env.InstallCallback{
+			OnProgress: func(w, t int64) {
+				emit(SetupProgress{Stage: "download-node", Written: w, Total: t, Message: "正在下载 Node 运行时…"})
+			},
+			OnLog: func(msg string) { logf("info", msg) },
+			OnStage: func(stage, msg string) {
+				if stage == "download" {
+					emit(SetupProgress{Stage: "download-node", Message: msg})
+				} else if stage == "extract" {
+					emit(SetupProgress{Stage: "extract-node", Message: msg})
+				}
+			},
+		}); err != nil {
+			emit(SetupProgress{Stage: "error", Message: err.Error()})
+			logf("error", err.Error())
 			return err
 		}
-		emit(SetupProgress{Stage: "extract-node", Message: "正在解压 Node…"})
-		logf("info", "解压 Node 到 "+m.runtimeDir)
-		if err := extractNodeZip(zipPath, m.runtimeDir); err != nil {
-			emit(SetupProgress{Stage: "error", Message: "解压 Node 失败: " + err.Error()})
-			logf("error", "解压 Node 失败: "+err.Error())
-			return err
-		}
-		// 强制校验：解压后 node.exe 必须落在预期位置，否则后续 fork/exec 报"目录名无效"
-		if _, err := os.Stat(m.nodeExe()); err != nil {
-			msg := fmt.Sprintf("解压完成但未找到 %s，请删除 %s 后重试", m.nodeExe(), m.runtimeDir)
-			emit(SetupProgress{Stage: "error", Message: msg})
-			logf("error", msg)
-			return fmt.Errorf("%s", msg)
-		}
-		logf("info", "Node 解压完成")
-		os.Remove(zipPath)
 	} else {
 		logf("info", "Node 已就绪: "+m.NodePath())
 	}
@@ -667,156 +601,6 @@ func (m *NodeEnvManager) SetupDSH(ctx context.Context, onProgress func(SetupProg
 
 	emit(SetupProgress{Stage: "done", Message: "运行环境已就绪"})
 	logf("info", "运行环境已就绪，可打开 DeepSeek Harness")
-	return nil
-}
-
-// downloadNode 依次尝试 npmmirror 镜像与 nodejs.org 官方源
-func (m *NodeEnvManager) downloadNode(ctx context.Context, dst string, onProgress func(int64, int64), onLog func(string)) error {
-	arch := "x64"
-	if runtime.GOARCH == "arm64" {
-		arch = "arm64"
-	}
-	urls := []string{
-		fmt.Sprintf("https://registry.npmmirror.com/-/binary/node/%s/node-%s-win-%s.zip", nodeVersion, nodeVersion, arch),
-		fmt.Sprintf("https://nodejs.org/dist/%s/node-%s-win-%s.zip", nodeVersion, nodeVersion, arch),
-	}
-	var lastErr error
-	for _, u := range urls {
-		if onLog != nil {
-			onLog("尝试下载源: " + u)
-		}
-		if err := downloadFile(ctx, m.proxyTransport(), u, dst, onProgress); err == nil {
-			if onLog != nil {
-				onLog("下载源可用: " + u)
-			}
-			return nil
-		} else {
-			lastErr = err
-			if onLog != nil {
-				onLog("下载源失败: " + err.Error() + "，尝试下一个")
-			}
-		}
-	}
-	return lastErr
-}
-
-// downloadFile 下载到临时文件，完整成功后才写入 dst（避免中途失败污染 dst）
-func downloadFile(ctx context.Context, transport http.RoundTripper, urlStr, dst string, onProgress func(int64, int64)) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("User-Agent", "QuickDock/1.0")
-	client := &http.Client{Transport: transport}
-	resp, err := client.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("下载失败 HTTP %d", resp.StatusCode)
-	}
-
-	tmp, err := os.CreateTemp("", "quickdock-dl-*")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() { tmp.Close(); os.Remove(tmpPath) }()
-
-	total := resp.ContentLength
-	written := int64(0)
-	buf := make([]byte, 64*1024)
-	for {
-		n, rerr := resp.Body.Read(buf)
-		if n > 0 {
-			if _, werr := tmp.Write(buf[:n]); werr != nil {
-				return werr
-			}
-			written += int64(n)
-			if onProgress != nil {
-				onProgress(written, total)
-			}
-		}
-		if rerr == io.EOF {
-			break
-		}
-		if rerr != nil {
-			return rerr
-		}
-	}
-	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	out, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer out.Close()
-	if _, err := io.Copy(out, tmp); err != nil {
-		return err
-	}
-	return nil
-}
-
-// extractNodeZip 解压 Node zip 到 dest，并扁平化顶层目录（node-vX-win-x64/）
-func extractNodeZip(zipPath, dest string) error {
-	if err := os.MkdirAll(dest, 0755); err != nil {
-		return err
-	}
-	r, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return err
-	}
-	defer r.Close()
-
-	var total int64
-	for _, f := range r.File {
-		// 去掉顶部目录 node-vX-win-x64/（兼容镜像 zip 可能用反斜杠分隔）
-		name := strings.ReplaceAll(f.Name, "\\", "/")
-		parts := strings.SplitN(name, "/", 2)
-		rel := parts[0]
-		if len(parts) == 2 {
-			rel = parts[1]
-		}
-		if rel == "" {
-			continue
-		}
-		target := filepath.Join(dest, rel)
-		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(dest)+string(os.PathSeparator)) {
-			return fmt.Errorf("非法路径: %s", f.Name)
-		}
-		if f.UncompressedSize64 > uint64(maxNodeFileSize) {
-			return fmt.Errorf("文件过大: %s", f.Name)
-		}
-		if total+int64(f.UncompressedSize64) > maxNodeZipSize {
-			return fmt.Errorf("解压总大小超出限制")
-		}
-		if f.FileInfo().IsDir() {
-			os.MkdirAll(target, 0755)
-			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
-			return err
-		}
-		rc, err := f.Open()
-		if err != nil {
-			return err
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, f.Mode())
-		if err != nil {
-			rc.Close()
-			return err
-		}
-		if _, err := io.CopyN(out, rc, maxNodeFileSize); err != nil && err != io.EOF {
-			out.Close()
-			rc.Close()
-			return err
-		}
-		out.Close()
-		rc.Close()
-		total += int64(f.UncompressedSize64)
-	}
 	return nil
 }
 
@@ -927,41 +711,4 @@ func (m *NodeEnvManager) installPnpm(ctx context.Context, node, npmCli string, e
 	go consume(stdout)
 	go consume(stderr)
 	return cmd.Wait()
-}
-
-// proxyTransport 返回代理感知的 http transport：优先环境变量，回退 WinINET 系统代理
-func (m *NodeEnvManager) proxyTransport() http.RoundTripper {
-	return &http.Transport{Proxy: systemProxyURL, TLSHandshakeTimeout: 10 * time.Second}
-}
-
-func systemProxyURL(req *http.Request) (*url.URL, error) {
-	if u, err := http.ProxyFromEnvironment(req); u != nil || err != nil {
-		return u, err
-	}
-	k, err := registry.OpenKey(registry.CURRENT_USER,
-		`Software\Microsoft\Windows\CurrentVersion\Internet Settings`, registry.QUERY_VALUE)
-	if err != nil {
-		return nil, nil
-	}
-	defer k.Close()
-	enabled, _, err := k.GetIntegerValue("ProxyEnable")
-	if err != nil || enabled == 0 {
-		return nil, nil
-	}
-	server, _, err := k.GetStringValue("ProxyServer")
-	if err != nil || server == "" {
-		return nil, nil
-	}
-	host := server
-	if i := strings.Index(server, "="); i >= 0 {
-		rest := server[i+1:]
-		if j := strings.Index(rest, ";"); j >= 0 {
-			rest = rest[:j]
-		}
-		host = rest
-	}
-	if !strings.Contains(host, "://") {
-		host = "http://" + host
-	}
-	return url.Parse(host)
 }

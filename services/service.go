@@ -13,6 +13,7 @@ import (
 	"quickdock/internal/db"
 	"quickdock/internal/plugin"
 	"quickdock/services/dsh"
+	"quickdock/services/env"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -103,6 +104,9 @@ type AppService struct {
 	NodeEnv *dsh.NodeEnvManager
 	DSH     *dsh.DSHProcessManager
 
+	// 环境管理：Node/PHP/Go/Redis/Nginx 便携运行时（参考 FlyEnv 的部署与版本切换）
+	Env *env.Manager
+
 	// 共享 HTTP 客户端（连接复用，避免每次 AI 请求新建 TLS 握手）
 	aiHTTPClient *http.Client
 
@@ -133,6 +137,7 @@ func NewAppService() *AppService {
 		frontendCache: make(map[string]*frontendCacheEntry),
 		NodeEnv:       nodeEnv,
 		DSH:           dsh.NewDSHProcessManager(nil, nodeEnv),
+		Env:           env.NewManager(),
 		aiHTTPClient: &http.Client{
 			// 不设总超时：流式响应可能持续数分钟，客户端总超时会在读取 body 中途强杀连接，
 			// 导致已流出的内容丢失（流式调用改由各自 ctx 控制生命周期）。

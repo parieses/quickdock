@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, Terminal, FolderOpen } from '@lucide/vue'
+import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, FolderOpen } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { unwrap } from '../utils/api'
 import { i18n } from '../i18n'
@@ -12,7 +12,6 @@ const toast = inject<ToastAPI>('toast')!
 const store = useWorkspaceStore()
 import HotkeySettings from './HotkeySettings.vue'
 import SettingsAI from './SettingsAI.vue'
-import SettingsDSH from './SettingsDSH.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsSync from './SettingsSync.vue'
 import SettingsTools from './SettingsTools.vue'
@@ -48,7 +47,6 @@ const menuItems = computed(() => [
   { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
   { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
-  { key: 'dsh',        label: t('navDsh'),            icon: Terminal, desc: t('dshDesc') },
 ])
 
 function selectMenu(key: string) {
@@ -570,11 +568,6 @@ async function toggleAutoStart() {
           <!-- AI 助手 -->
           <div v-else-if="activePage === 'ai'" class="content-page content-left">
             <SettingsAI :visible="activePage === 'ai'" />
-          </div>
-
-          <!-- DeepSeek Harness -->
-          <div v-else-if="activePage === 'dsh'" class="content-page content-left">
-            <SettingsDSH :visible="activePage === 'dsh'" />
           </div>
 
           <!-- 打开工具管理 -->

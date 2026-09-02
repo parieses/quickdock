@@ -1,5 +1,5 @@
 <script lang="ts" setup>
-import { computed, defineAsyncComponent, onMounted, provide, ref, watch } from 'vue';
+import { computed, defineAsyncComponent, nextTick, onMounted, provide, ref, watch } from 'vue';
 import { Events } from '@wailsio/runtime';
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace';
@@ -28,8 +28,7 @@ const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
 const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
 const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
 const AIPage = defineAsyncComponent(() => import('./components/AIPage.vue'))
-const HttpClientPage = defineAsyncComponent(() => import('./http-client/HttpClientPage.vue'))
-const DatabasePage = defineAsyncComponent(() => import('./components/DatabasePage.vue'))
+const EnvironmentPage = defineAsyncComponent(() => import('./components/EnvironmentPage.vue'))
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {
@@ -41,6 +40,8 @@ const { t } = useI18n()
 const { items, remove, error, success, confirm, confirmItems, resolveConfirm } = useToast();
 const showSettings = ref(false);
 const settingsPage = ref<string | undefined>(undefined);
+// 环境管理定位区块：侧边栏点击 harness 时，让 EnvironmentPage 自动选中 harness 区块
+const envInitialSection = ref<string | undefined>(undefined);
 
 // 页面路由
 const currentPage = ref('workspace')
@@ -66,10 +67,14 @@ async function openDSH() {
       const st = unwrap<EnvProbe | null>(await DetectNodeEnv())
       if (!st?.nodeFound || !st.dshInstalled) {
         // 新电脑：node+dsh 一起自动装；装了 node 没装 dsh：只补 dsh
-        settingsPage.value = 'dsh'
-        showSettings.value = true
+        // harness 安装配置已迁入「环境管理」，这里直接打开环境管理的 harness 区块展示进度
+        currentPage.value = 'environments'
+        // 先复位再置位，确保重复点击侧栏 harness 时 EnvironmentPage 的 watch 能再次触发定位
+        envInitialSection.value = undefined
+        await nextTick()
+        envInitialSection.value = 'harness'
         success(t('dshSettingUp'))
-        await new Promise(r => setTimeout(r, 150)) // 等设置页挂载并订阅进度事件
+        await new Promise(r => setTimeout(r, 150)) // 等环境管理 harness 区块挂载并订阅进度事件
         // 先注册监听再触发安装：避免安装极快完成时错过 done（窗口不自动打开）；done/error 后 off 防泄漏
         Events.Off('quickdock:dsh:progress')
         const off = Events.On('quickdock:dsh:progress', async (payload: any) => {
@@ -98,8 +103,11 @@ async function openDSH() {
   } catch (e: any) {
     dshEnvReady = false // 环境可能已变化（如 dsh 被卸载），下次点击重新探测
     error(getErrorMessage(e))
-    settingsPage.value = 'dsh'
-    showSettings.value = true
+    // 出错时同样回退到环境管理的 harness 区块，让用户手动重试
+    currentPage.value = 'environments'
+    envInitialSection.value = undefined
+    await nextTick()
+    envInitialSection.value = 'harness'
   } finally {
     dshOpening.value = false
   }
@@ -254,11 +262,8 @@ const activeConfirm = computed(() =>
         <!-- 网站监控页面 -->
         <MonitorPage v-else-if="currentPage === 'monitor'" />
 
-        <!-- HTTP 客户端页面 -->
-        <HttpClientPage v-else-if="currentPage === 'httpclient'" />
-
-        <!-- 数据库连接查询页面 -->
-        <DatabasePage v-else-if="currentPage === 'database'" />
+        <!-- 环境管理页面（Node/PHP/Go/Redis/Nginx 便携运行时） -->
+        <EnvironmentPage v-else-if="currentPage === 'environments'" :initial-section="envInitialSection" />
 
         <!-- AI 助手页面 -->
         <AIPage v-else-if="currentPage === 'ai'" @open-settings="(page?: string) => { settingsPage = page; showSettings = true }" />
