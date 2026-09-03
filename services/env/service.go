@@ -248,7 +248,9 @@ func runNginxStopSignal(exe, dir string) {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	_ = exec.Command(exe, "-s", "stop", "-p", dir).Run()
+	stopCmd := exec.Command(exe, "-s", "stop", "-p", dir)
+	stopCmd.SysProcAttr = hideWindowAttr()
+	_ = stopCmd.Run()
 }
 
 // runRedisStopSignal 通过同目录 redis-cli 优雅关闭 redis（SHUTDOWN NOSAVE）。
@@ -256,5 +258,7 @@ func runRedisStopSignal(cli string, port int) {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	_ = exec.Command(cli, "-p", strconv.Itoa(port), "shutdown", "nosave").Run()
+	shutdownCmd := exec.Command(cli, "-p", strconv.Itoa(port), "shutdown", "nosave")
+	shutdownCmd.SysProcAttr = hideWindowAttr()
+	_ = shutdownCmd.Run()
 }

@@ -68,8 +68,10 @@ var (
 			{ID: "golangcn", Name: "golang.google.cn (国内)", Build: goURL("https://golang.google.cn/dl/go{version}.{os}-{arch}.{ext}")},
 		}},
 		RuntimePHP: {display: "PHP", group: GroupLanguage, versions: []string{"8.3.20", "8.2.27", "8.1.31"}, versURL: "https://downloads.php.net/~windows/releases/archives/", versParse: parsePHPWinVersions, sources: []Source{
-			{ID: "windowsphpnet-archive", Name: "windows.php.net (archives)", Build: phpURL("https://downloads.php.net/~windows/releases/archives/php-{version}-Win32-vs16-x64.zip")},
-			{ID: "windowsphpnet", Name: "windows.php.net (releases)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs16-x64.zip")},
+			{ID: "windowsphpnet-archive-vs17", Name: "windows.php.net (archives VS17)", Build: phpURL("https://downloads.php.net/~windows/releases/archives/php-{version}-Win32-vs17-x64.zip")},
+			{ID: "windowsphpnet-archive", Name: "windows.php.net (archives VS16)", Build: phpURL("https://downloads.php.net/~windows/releases/archives/php-{version}-Win32-vs16-x64.zip")},
+			{ID: "windowsphpnet", Name: "windows.php.net (releases VS17)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs17-x64.zip")},
+			{ID: "windowsphpnet-rel", Name: "windows.php.net (releases VS16)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs16-x64.zip")},
 		}},
 		RuntimeRedis: {display: "Redis", group: GroupCache, versions: []string{"7.4.0", "7.2.5", "7.0.15"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, versHTMLFallbackParse: parseRedisVersionsHTML, sources: []Source{
 			{ID: "rediswindows", Name: "redis-windows/redis-windows (GitHub)", Build: redisURL("https://github.com/redis-windows/redis-windows/releases/download/{version}/Redis-{version}-Windows-x64-msys2.zip")},

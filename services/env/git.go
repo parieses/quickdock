@@ -250,6 +250,7 @@ func (g *GitRuntime) detectLFS() GitLFSInfo {
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", "lfs", "version")
+	cmd.SysProcAttr = hideWindowAttr()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		lfs.Output = strings.TrimSpace(string(out))

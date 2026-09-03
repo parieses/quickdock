@@ -103,6 +103,8 @@ func (a *AppService) EnvInstall(runtime, version, sourceID, custom string) *ApiR
 		if a.app != nil {
 			a.app.Event.Emit("quickdock:env:progress", envProgress{Runtime: runtime, Stage: "done", Message: "安装完成"})
 		}
+		// 安装成功后刷新检测结果缓存，让前端列表立即显示新版本
+		a.Env.RefreshDetected(rt)
 	}()
 	return Ok(nil)
 }
