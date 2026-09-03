@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 	"quickdock/services/env"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -509,9 +510,9 @@ func (m *NodeEnvManager) runNpmInstall(ctx context.Context, target string, onMsg
 		}
 	}
 	cmd.Env = env
-	// hideWindowAttr：Windows 用 CREATE_NO_WINDOW（0x08000000）让 npm/cmd 子进程继承隐藏控制台；
+	// sysutil.Hide：Windows 用 CREATE_NO_WINDOW（0x08000000）让 npm/cmd 子进程继承隐藏控制台；
 	// 非 Windows 返回 nil。切勿用 DETACHED_PROCESS(0x00000008)——孙进程会各自弹窗。
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
@@ -553,7 +554,7 @@ func (m *NodeEnvManager) installPnpm(ctx context.Context, node, npmCli string, e
 	cmd := exec.CommandContext(ctx, node, args...)
 	cmd.Dir = m.DshHome()
 	cmd.Env = env
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {

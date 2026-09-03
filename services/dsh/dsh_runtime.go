@@ -21,6 +21,8 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+
+	"quickdock/internal/sysutil"
 )
 
 // DSHProcessManager 启动并管理 dsh web 子进程（独立 Node 进程，127.0.0.1 随机端口）。
@@ -164,8 +166,8 @@ func (m *DSHProcessManager) Start() (string, error) {
 		}
 	}
 	cmd.Env = env
-	// hideWindowAttr：Windows 用 CREATE_NO_WINDOW(0x08000000)，切勿用 DETACHED_PROCESS(0x00000008)
-	cmd.SysProcAttr = hideWindowAttr()
+	// sysutil.Hide：Windows 用 CREATE_NO_WINDOW(0x08000000)，切勿用 DETACHED_PROCESS(0x00000008)
+	sysutil.Hide(cmd)
 
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
@@ -496,7 +498,7 @@ func (m *DSHProcessManager) stopLocked() {
 		// taskkill.exe 是控制台程序：GUI 主进程（正式版 -H windowsgui）直接拉起会弹 cmd 窗，
 		// 必须带 CREATE_NO_WINDOW，与 Start()/node_env.go 的其他隐藏控制台调用保持一致。
 		kill := exec.Command("taskkill", "/PID", strconv.Itoa(cmd.Process.Pid), "/T", "/F")
-		kill.SysProcAttr = hideWindowAttr()
+		sysutil.Hide(kill)
 		if err := kill.Run(); err != nil {
 			m.logf("warn", fmt.Sprintf("DSHStop: taskkill 进程树 PID %d 返回错误: %v（继续按端口验证）", cmd.Process.Pid, err))
 		}
@@ -574,7 +576,7 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 		}
 	}
 	cmd.Env = env
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 
 	logf := func(level, msg string) {
 		if m.app != nil {
@@ -699,7 +701,7 @@ func (m *DSHProcessManager) UpdateAllPlugins() error {
 		}
 	}
 	cmd.Env = env
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -807,7 +809,7 @@ func (m *DSHProcessManager) RollbackPlugins() (err error) {
 		}
 	}
 	cmd.Env = env
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {
@@ -861,7 +863,7 @@ func (m *DSHProcessManager) CheckPluginUpdates() ([]PluginUpdateInfo, error) {
 		}
 	}
 	cmd.Env = env
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	// pnpm outdated 有更新时 exit code=1（非错误），故用 Output 捕获 stdout 后尽力解析
 	out, _ := cmd.Output()
 	var raw map[string]map[string]string
@@ -1004,7 +1006,7 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 		}
 	}
 	cmd.Env = env
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	stdout, _ := cmd.StdoutPipe()
 	stderr, _ := cmd.StderrPipe()
 	if err := cmd.Start(); err != nil {

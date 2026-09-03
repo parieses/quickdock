@@ -16,6 +16,7 @@ import (
 	"golang.org/x/sys/windows"
 
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 )
 
 // expandItemVars 打开 item 前替换值/参数中的内置占位符（与文本片段变量一致）：
@@ -653,13 +654,13 @@ func splitArgs(args string) []string {
 
 // startDetached 启动外部程序并异步回收进程句柄，避免僵尸/句柄泄漏
 // （exec.Command.Start 之后若不 Wait，Windows 上内核句柄不会被释放）
-// Windows 上用 CREATE_NO_WINDOW 隐藏控制台 + DETACHED_PROCESS 脱离父进程进程组：
+// Windows 上隐藏控制台 + DETACHED_PROCESS 脱离父进程进程组：
 // 确保 QuickDock 退出时，用户通过它打开的第三方软件不会随之被杀。
+// sysutil 用 |= 合并属性（而非整体覆盖 SysProcAttr），保留调用方手写的 CmdLine 等字段。
 func startDetached(cmd *exec.Cmd) error {
 	if goruntime.GOOS == "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			CreationFlags: 0x08000008, // CREATE_NO_WINDOW | DETACHED_PROCESS
-		}
+		sysutil.Hide(cmd)
+		sysutil.Detach(cmd)
 	}
 	if err := cmd.Start(); err != nil {
 		return err

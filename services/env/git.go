@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 )
 
 const gitBaseRel = "runtime/git"
@@ -249,8 +250,7 @@ func (g *GitRuntime) detectLFS() GitLFSInfo {
 	lfs := GitLFSInfo{Command: "git lfs version"}
 	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", "lfs", "version")
-	cmd.SysProcAttr = hideWindowAttr()
+	cmd := sysutil.CommandContext(ctx, "git", "lfs", "version")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		lfs.Output = strings.TrimSpace(string(out))

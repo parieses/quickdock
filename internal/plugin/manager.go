@@ -7,12 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/dop251/goja"
@@ -20,6 +18,7 @@ import (
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 )
 
 // pidFileVersion 用于兼容未来格式变更
@@ -192,12 +191,9 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		if err != nil {
 			return err
 		}
-		cmd := exec.Command(entryPath, manifest.Backend.Args...)
-		// CREATE_NO_WINDOW 让 node 进程获得隐藏控制台；子进程继承，整棵进程树连到同一隐藏控制台。
+		// sysutil.Hide（Windows: CREATE_NO_WINDOW）让 node 进程获得隐藏控制台；子进程继承，整棵进程树连到同一隐藏控制台。
 		// 注意：不能用 DETACHED_PROCESS(0x00000008)——它让 node 脱离控制台，孙进程各自弹窗。
-		cmd.SysProcAttr = &syscall.SysProcAttr{
-			CreationFlags: 0x08000000,
-		}
+		cmd := sysutil.Command(entryPath, manifest.Backend.Args...)
 		cmd.Dir = dir
 
 		stdin, err := cmd.StdinPipe()
@@ -856,8 +852,7 @@ func (m *Manager) cleanupOrphans() {
 func processExists(pid int) bool {
 	// 先用 tasklist 验证进程是否存在（Windows）
 	// 注意：主进程是 GUI 类型，直接 exec.Command 启动 tasklist（控制台程序）会弹 CMD 窗口
-	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV")
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	cmd := sysutil.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV")
 	out, err := cmd.Output()
 	if err != nil {
 		return false

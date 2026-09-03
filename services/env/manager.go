@@ -5,13 +5,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
 
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 )
 
 // Install 一个已安装的运行时节（便携目录或系统 PATH 上检测到的）
@@ -588,24 +588,20 @@ func (m *Manager) ImportVersion(rt Runtime, dir string) (string, error) {
 
 // detectVersion 运行外部 exe 探测其版本号（不同运行时命令/输出格式不同）。
 func detectVersion(rt Runtime, exe string) (string, error) {
-	var out []byte
-	var err error
+	var args []string
 	switch rt {
-	case RuntimeNode:
-		out, err = exec.Command(exe, "-v").Output()
-	case RuntimePHP:
-		out, err = exec.Command(exe, "-v").Output()
+	case RuntimeNode, RuntimePHP, RuntimeNginx:
+		args = []string{"-v"}
 	case RuntimeGo:
-		out, err = exec.Command(exe, "version").Output()
-	case RuntimeRedis:
-		out, err = exec.Command(exe, "--version").Output()
-	case RuntimeNginx:
-		out, err = exec.Command(exe, "-v").Output()
-	case RuntimeGit:
-		out, err = exec.Command(exe, "--version").Output()
+		args = []string{"version"}
+	case RuntimeRedis, RuntimeGit:
+		args = []string{"--version"}
 	default:
 		return "", fmt.Errorf("不支持的运行时")
 	}
+	// Windows GUI 进程（正式版无控制台）拉起 console 子进程会闪出黑框，必须隐藏
+	cmd := sysutil.Command(exe, args...)
+	out, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("执行版本探测失败: %w", err)
 	}

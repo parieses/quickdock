@@ -4,10 +4,10 @@ package plugin
 
 import (
 	"fmt"
-	"os/exec"
 	"strconv"
 	"strings"
-	"syscall"
+
+	"quickdock/internal/sysutil"
 )
 
 // killProcessTree 强杀指定 PID 的整棵进程树（taskkill /F /T）。
@@ -19,13 +19,11 @@ func killProcessTree(pid int) {
 	if pid <= 0 {
 		return
 	}
-	cmd := exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	cmd := sysutil.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
 	if err := cmd.Run(); err != nil {
 		// 兜底：PowerShell Stop-Process（含子进程树需 taskkill，这里先做主进程+尝试全部同名）
 		ps := fmt.Sprintf("Get-Process -Id %d -ErrorAction SilentlyContinue | Stop-Process -Force", pid)
-		cmd2 := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
-		cmd2.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+		cmd2 := sysutil.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
 		_ = cmd2.Run()
 	}
 }
@@ -42,7 +40,6 @@ func killProcessesLockingDir(dir string) {
 		"Get-Process | Where-Object { $_.Path -like '%s*' } | Stop-Process -Force",
 		safe,
 	)
-	cmd := exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
-	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+	cmd := sysutil.Command("powershell", "-NoProfile", "-NonInteractive", "-Command", ps)
 	_ = cmd.Run()
 }

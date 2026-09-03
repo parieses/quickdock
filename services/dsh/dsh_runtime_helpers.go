@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+
+	"quickdock/internal/sysutil"
 )
 
 // dshErrorPage 返回 dsh 启动失败时的错误页（data URL），避免把窗口 SetURL 到一个没在监听的死端口，
@@ -33,7 +35,7 @@ func FindFreePort() (int, error) {
 // netstat 是控制台程序，GUI 主进程（-H windowsgui）直接拉起会弹 cmd，必须隐藏窗口。
 func findPortPID(port int) int {
 	cmd := exec.Command("netstat", "-ano")
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return 0
@@ -59,7 +61,7 @@ func findPortPID(port int) int {
 // tasklist 是控制台程序，同样必须隐藏窗口。
 func isNodeProcess(pid int) bool {
 	cmd := exec.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/FO", "CSV", "/NH")
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	out, err := cmd.Output()
 	if err != nil {
 		return false
@@ -84,7 +86,7 @@ func isNodeProcess(pid int) bool {
 // killProcessTree 用 taskkill /T /F 强杀进程树（隐藏窗口），返回是否成功发出。
 func killProcessTree(pid int) bool {
 	cmd := exec.Command("taskkill", "/PID", strconv.Itoa(pid), "/T", "/F")
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	return cmd.Run() == nil
 }
 

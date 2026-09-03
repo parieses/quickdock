@@ -11,6 +11,8 @@ import (
 	"golang.org/x/sys/windows"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"quickdock/internal/sysutil"
 )
 
 // dangerousSchemes 拒绝直接通过 ShellExecute 触发的危险协议（存储型协议注入防护）。
@@ -120,9 +122,10 @@ func RevealInExplorer(target string) error {
 	// 否则含空格的路径会被 Go 的自动引用规则拆散。
 	cmd := exec.Command("explorer.exe")
 	cmd.SysProcAttr = &syscall.SysProcAttr{
-		HideWindow: true,
-		CmdLine:    `explorer.exe /select,"` + abs + `"`,
+		CmdLine: `explorer.exe /select,"` + abs + `"`,
 	}
+	// sysutil.Hide 用 |= 合并，保留上面手写的 CmdLine（整体覆盖 SysProcAttr 会静默丢掉它）
+	sysutil.Hide(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}
@@ -147,7 +150,7 @@ func RunCommand(command, workingDir string) error {
 		cmd.Dir = workingDir
 	}
 	// 隐藏子进程控制台窗口，避免定时命令弹黑框。
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	sysutil.Hide(cmd)
 	if err := cmd.Start(); err != nil {
 		return err
 	}

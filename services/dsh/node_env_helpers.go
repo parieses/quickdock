@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"quickdock/internal/sysutil"
 )
 
 func npmGlobalRoot() string {
@@ -15,7 +17,7 @@ func npmGlobalRoot() string {
 		return npmGlobalRootVal
 	}
 	cmd := exec.Command("npm", "root", "-g")
-	cmd.SysProcAttr = hideWindowAttr()
+	sysutil.Hide(cmd)
 	out, err := cmd.Output()
 	if err == nil {
 		npmGlobalRootVal = strings.TrimSpace(string(out))

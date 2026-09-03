@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 )
 
 const (
@@ -143,8 +144,7 @@ func VersionOK(version string) bool {
 func RunVersion(exe string, args ...string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, exe, args...)
-	cmd.SysProcAttr = hideWindowAttr()
+	cmd := sysutil.CommandContext(ctx, exe, args...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return ""

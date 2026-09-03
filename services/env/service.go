@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"quickdock/internal/sysutil"
 )
 
 // serviceManager 维护各运行时当前由 QuickDock 拉起的后台服务进程句柄。
@@ -75,9 +77,8 @@ func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []strin
 		s.mu.Unlock()
 		return fmt.Errorf("服务已在运行")
 	}
-	cmd := exec.Command(exe, args...)
+	cmd := sysutil.Command(exe, args...)
 	cmd.Dir = wd
-	cmd.SysProcAttr = hideWindowAttr()
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		s.mu.Unlock()
@@ -130,12 +131,10 @@ func processExePath(pid int) string {
 		}
 		return ""
 	}
-	out, err := exec.Command("powershell", "-NoProfile", "-Command",
-		"(Get-Process -Id "+strconv.Itoa(pid)+" -ErrorAction SilentlyContinue).Path").Output()
-	if err != nil {
-		return ""
+	if p, err := processExePathWin(pid); err == nil {
+		return strings.TrimSpace(p)
 	}
-	return strings.TrimSpace(string(out))
+	return ""
 }
 
 // consumeLogs 逐行消费命令输出并回调（用于服务运行日志）；logF 非空时同时追加写入文件（日志查询）。
@@ -166,30 +165,7 @@ func isPortOpen(port int) bool {
 // findListenPID 返回正在 LISTEN 状态占用 port 的进程 PID（跨平台尽力实现）。
 func findListenPID(port int) int {
 	if runtime.GOOS == "windows" {
-		out, err := exec.Command("netstat", "-ano", "-p", "tcp").Output()
-		if err != nil {
-			return 0
-		}
-		want := ":" + strconv.Itoa(port) + " "
-		sc := bufio.NewScanner(strings.NewReader(string(out)))
-		for sc.Scan() {
-			line := sc.Text()
-			if !strings.Contains(line, want) {
-				continue
-			}
-			if !strings.Contains(line, "LISTENING") {
-				continue
-			}
-			fields := strings.Fields(line)
-			if len(fields) == 0 {
-				continue
-			}
-			pidStr := fields[len(fields)-1]
-			if pid, err := strconv.Atoi(pidStr); err == nil {
-				return pid
-			}
-		}
-		return 0
+		return findListenPIDWin(port)
 	}
 	// 非 Windows：使用 lsof/fuser 尽力探测
 	if out, err := exec.Command("lsof", "-ti", "tcp:"+strconv.Itoa(port), "-sTCP:LISTEN").Output(); err == nil {
@@ -204,7 +180,8 @@ func findListenPID(port int) int {
 // 用于端口兜底停止时，避免误杀其它占用同一端口的程序（如 IIS/Skype 占用 80）。
 func processImageMatches(pid int, expect string) bool {
 	if runtime.GOOS == "windows" {
-		out, err := exec.Command("tasklist", "/fi", "PID eq "+strconv.Itoa(pid), "/fo", "csv", "/nh").Output()
+		tasklistCmd := sysutil.Command("tasklist", "/fi", "PID eq "+strconv.Itoa(pid), "/fo", "csv", "/nh")
+		out, err := tasklistCmd.Output()
 		if err != nil {
 			return false
 		}
@@ -223,7 +200,8 @@ func killTree(pid int) {
 		return
 	}
 	if runtime.GOOS == "windows" {
-		_ = exec.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid)).Run()
+		killCmd := sysutil.Command("taskkill", "/F", "/T", "/PID", strconv.Itoa(pid))
+		_ = killCmd.Run()
 		return
 	}
 	_ = exec.Command("kill", "-9", strconv.Itoa(pid)).Run()
@@ -248,8 +226,7 @@ func runNginxStopSignal(exe, dir string) {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	stopCmd := exec.Command(exe, "-s", "stop", "-p", dir)
-	stopCmd.SysProcAttr = hideWindowAttr()
+	stopCmd := sysutil.Command(exe, "-s", "stop", "-p", dir)
 	_ = stopCmd.Run()
 }
 
@@ -258,7 +235,6 @@ func runRedisStopSignal(cli string, port int) {
 	if runtime.GOOS != "windows" {
 		return
 	}
-	shutdownCmd := exec.Command(cli, "-p", strconv.Itoa(port), "shutdown", "nosave")
-	shutdownCmd.SysProcAttr = hideWindowAttr()
+	shutdownCmd := sysutil.Command(cli, "-p", strconv.Itoa(port), "shutdown", "nosave")
 	_ = shutdownCmd.Run()
 }

@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"syscall"
 	"time"
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"quickdock/internal/sysutil"
 )
 
 // ExitWindowsEx 标志位（部分）
@@ -128,7 +129,7 @@ func sendMediaKey(vk uint16) {
 func toggleWifi() error {
 	// netsh 是控制台程序：GUI 主进程（正式版 -H windowsgui）直接拉起会弹 cmd 窗，须隐藏控制台
 	q := exec.Command("netsh", "interface", "show", "interface")
-	q.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	sysutil.Hide(q)
 	out, err := q.Output()
 	if err != nil {
 		return fmt.Errorf("查询网络接口失败: %v", err)
@@ -153,7 +154,7 @@ func toggleWifi() error {
 		action = "disable"
 	}
 	cmd := exec.Command("netsh", "interface", "set", "interface", "name="+name, "admin="+action)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	sysutil.Hide(cmd)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return fmt.Errorf("切换 Wi-Fi 失败(%s): %v %s", action, err, string(out))
 	}
