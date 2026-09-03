@@ -124,22 +124,40 @@ func (n *NginxRuntime) Install(ctx context.Context, version string, cb InstallCa
 func (n *NginxRuntime) DefaultPort() int { return nginxDefaultPort }
 
 func (n *NginxRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
+	installs := n.InstalledVersions()
 	if version == "" {
-		if vs := n.InstalledVersions(); len(vs) > 0 {
-			version = vs[0].Version
+		if len(installs) == 0 {
+			return fmt.Errorf("请先安装 Nginx 版本")
 		}
+		version = installs[0].Version
 	}
-	if version == "" {
-		return fmt.Errorf("请先安装 Nginx 版本")
+	// 系统 PATH 上的版本 Path 本身就是 nginx.exe；便携版本走 adapter.ExeFor。
+	var exe, wd string
+	for _, ins := range installs {
+		if ins.Version != version {
+			continue
+		}
+		if ins.Scope == "system" {
+			exe, wd = ins.Path, filepath.Dir(ins.Path)
+		} else {
+			exe, wd = n.ExeFor(version), n.versionDir(version)
+		}
+		break
 	}
-	exe := n.ExeFor(version)
+	if exe == "" {
+		return fmt.Errorf("未安装该版本: %s", version)
+	}
 	if _, err := os.Stat(exe); err != nil {
 		return fmt.Errorf("未安装该版本: %s", version)
+	}
+	// 多版本共用默认端口：已在运行其它版本时，明确提示先停止，避免误以为能并行跑两个实例
+	if running, _ := svcMgr.info(RuntimeNginx); running != "" && running != version {
+		return fmt.Errorf("Nginx 已在运行（%s），请先停止当前版本再启动 %s", running, version)
 	}
 	if onLog != nil {
 		onLog("启动 Nginx " + version + " …")
 	}
-	return svcMgr.start(RuntimeNginx, exe, n.versionDir(version), onLog)
+	return svcMgr.start(RuntimeNginx, version, exe, wd, nil, "", onLog)
 }
 
 func (n *NginxRuntime) Stop(version string) error {
@@ -154,16 +172,46 @@ func (n *NginxRuntime) Stop(version string) error {
 	return nil
 }
 
+// runningVersion 返回当前默认端口实际在跑的 Nginx 版本；无运行返回 ""。
+// 优先用本会话拉起的句柄（最准确），否则按监听进程的可执行文件路径反查到具体版本目录。
+func (n *NginxRuntime) runningVersion() string {
+	if v, _ := svcMgr.info(RuntimeNginx); v != "" {
+		return v
+	}
+	if !isPortOpen(nginxDefaultPort) {
+		return ""
+	}
+	pid := findListenPID(nginxDefaultPort)
+	if pid == 0 {
+		return ""
+	}
+	exe := processExePath(pid)
+	if exe == "" {
+		return ""
+	}
+	for _, ins := range n.InstalledVersions() {
+		target := ins.Path
+		if ins.Scope == "portable" {
+			target = n.ExeFor(ins.Version)
+		}
+		if strings.EqualFold(exe, target) {
+			return ins.Version
+		}
+	}
+	return ""
+}
+
 func (n *NginxRuntime) Status(version string) ServiceStatus {
-	running := isPortOpen(nginxDefaultPort)
-	st := ServiceStatus{Running: running, Port: nginxDefaultPort}
-	if running {
-		st.PID = svcMgr.pid(RuntimeNginx)
-		st.Version = version
-	} else if svcMgr.running(RuntimeNginx) {
+	port := nginxDefaultPort
+	st := ServiceStatus{Running: false, Port: port}
+	// 仅当实际运行的版本就是本次查询的版本时才标记运行中，避免多版本互相串状态
+	if n.runningVersion() == version {
 		st.Running = true
-		st.PID = svcMgr.pid(RuntimeNginx)
 		st.Version = version
+		st.PID = svcMgr.pid(RuntimeNginx)
+		if st.PID == 0 {
+			st.PID = findListenPID(port)
+		}
 	}
 	return st
 }

@@ -3,10 +3,12 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"math/rand"
 	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"time"
 
@@ -113,15 +115,25 @@ func (h *HTTPServeManager) List() []HTTPServer {
 }
 
 // Create 新增一个服务（校验端口/名称唯一与目录存在性）。
+// port<=0 表示**自动分配空闲端口**（默认：写死端口在多个服务之间必撞，且容易和本机已有服务冲突）；
+// 需要固定端口时才显式传具体值。
 func (h *HTTPServeManager) Create(name, dir string, port int) (*HTTPServer, error) {
 	dir = filepath.Clean(dir)
 	if dir == "" {
 		return nil, fmt.Errorf("目录为空")
 	}
-	if port <= 0 || port > 65535 {
+	if port > 65535 {
 		return nil, fmt.Errorf("端口无效（1-65535）")
 	}
 	h.mu.Lock()
+	if port <= 0 {
+		p, err := h.pickFreePortLocked()
+		if err != nil {
+			h.mu.Unlock()
+			return nil, err
+		}
+		port = p
+	}
 	for _, s := range h.servers {
 		if s.Port == port {
 			h.mu.Unlock()
@@ -148,6 +160,31 @@ func (h *HTTPServeManager) Create(name, dir string, port int) (*HTTPServer, erro
 		return nil, err
 	}
 	return &entry.HTTPServer, nil
+}
+
+// pickFreePortLocked 在 20000-60000 之间随机挑一个「本管理器未占用 + 当前可监听」的端口。
+// 随机而非递增扫描：多个服务同时创建时不会都挤在 20000 附近。
+func (h *HTTPServeManager) pickFreePortLocked() (int, error) {
+	for i := 0; i < 100; i++ {
+		p := 20000 + rand.Intn(40001)
+		taken := false
+		for _, s := range h.servers {
+			if s.Port == p {
+				taken = true
+				break
+			}
+		}
+		if taken {
+			continue
+		}
+		ln, err := net.Listen("tcp", ":"+strconv.Itoa(p))
+		if err != nil {
+			continue
+		}
+		ln.Close()
+		return p, nil
+	}
+	return 0, fmt.Errorf("未能自动分配空闲端口")
 }
 
 // Start 在指定端口启动静态文件服务（goroutine 中 Serve）。

@@ -63,7 +63,6 @@ var (
 	modUser32  = windows.NewLazySystemDLL("user32.dll")
 	modGdi32   = windows.NewLazySystemDLL("gdi32.dll")
 	modKernel32 = windows.NewLazySystemDLL("kernel32.dll")
-	modNtdll    = windows.NewLazySystemDLL("ntdll.dll")
 	modPowrprof = windows.NewLazySystemDLL("powrprof.dll")
 	modOle32    = windows.NewLazySystemDLL("ole32.dll")
 

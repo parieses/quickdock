@@ -4,12 +4,11 @@ includes:
   common: ../Taskfile.yml
 
 vars:
-  # Signing configuration - edit these values for your project
-  # SIGN_CERTIFICATE: "path/to/certificate.pfx"
-  # SIGN_THUMBPRINT: "certificate-thumbprint"  # Alternative to SIGN_CERTIFICATE
-  # TIMESTAMP_SERVER: "http://timestamp.digicert.com"
-  #
-  # Password is stored securely in system keychain. Run: wails3 setup signing
+  # 版本号唯一来源 = 本地 git tag（v0.4.0 → 0.4.0）。本地构建与 CI 走同一条路径，
+  # 不再在 Taskfile 里写死；无 tag 时兜底 0.0.0-dev，避免打出空版本号。
+  # 想改版本就打 tag：git tag v0.5.0 && git push --tags
+  APP_VERSION:
+    sh: 'v=$(git describe --tags --abbrev=0 2>/dev/null || true); v=${v#v}; echo "${v:-0.0.0-dev}"'
 
   # Docker image for cross-compilation with CGO (used when CGO_ENABLED=1 on non-Windows)
   CROSS_IMAGE: wails-cross
@@ -57,8 +56,8 @@ tasks:
       - cmd: rm -f *.syso
         platforms: [linux, darwin]
     vars:
-      # 注意：0.2.0 需与 build/config.yml / build/windows/info.json 同步（发布时三处一致）
-      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l" -ldflags="-X main.appVersion=0.2.0"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui -X main.appVersion=0.2.0"{{end}}'
+      # 版本号取自本地 git tag（见顶部 APP_VERSION），发布即 git tag，无需改文件
+      BUILD_FLAGS: '{{if eq .DEV "true"}}{{if or .EXTRA_TAGS (eq .OBFUSCATED "true")}}-tags {{if eq .OBFUSCATED "true"}}wails_obfuscated{{if .EXTRA_TAGS}},{{end}}{{end}}{{.EXTRA_TAGS}} {{end}}-buildvcs=false -gcflags=all="-l" -ldflags="-X main.appVersion={{.APP_VERSION}}"{{else}}-tags production{{if eq .OBFUSCATED "true"}},wails_obfuscated{{end}}{{if .EXTRA_TAGS}},{{.EXTRA_TAGS}}{{end}} -trimpath -buildvcs=false -ldflags="-w -s -H windowsgui -X main.appVersion={{.APP_VERSION}}"{{end}}'
     env:
       GOOS: windows
       CGO_ENABLED: '{{.CGO_ENABLED | default "0"}}'
@@ -126,9 +125,9 @@ tasks:
       - wails3 generate webview2bootstrapper -dir "{{.ROOT_DIR}}/build/windows/nsis"
       - |
         {{if eq OS "windows"}}
-        makensis {{if eq .INSTALL_SCOPE "user"}}-DWAILS_INSTALL_SCOPE=user -DREQUEST_EXECUTION_LEVEL=user {{end}}-DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" project.nsi
+        makensis {{if eq .INSTALL_SCOPE "user"}}-DWAILS_INSTALL_SCOPE=user -DREQUEST_EXECUTION_LEVEL=user {{end}}-DINFO_PROJECTNAME=quickdock -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}\{{.BIN_DIR}}\{{.APP_NAME}}.exe" project.nsi
         {{else}}
-        makensis {{if eq .INSTALL_SCOPE "user"}}-DWAILS_INSTALL_SCOPE=user -DREQUEST_EXECUTION_LEVEL=user {{end}}-DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
+        makensis {{if eq .INSTALL_SCOPE "user"}}-DWAILS_INSTALL_SCOPE=user -DREQUEST_EXECUTION_LEVEL=user {{end}}-DINFO_PROJECTNAME=quickdock -DARG_WAILS_{{.ARG_FLAG}}_BINARY="{{.ROOT_DIR}}/{{.BIN_DIR}}/{{.APP_NAME}}.exe" project.nsi
         {{end}}
     vars:
       ARCH: '{{.ARCH | default ARCH}}'

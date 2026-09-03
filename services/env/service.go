@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"os/exec"
 	"runtime"
 	"strconv"
@@ -17,42 +18,64 @@ import (
 // 状态查询优先走端口探测（isPortOpen），因此即使服务由外部启动也能被识别。
 // 注意：该句柄仅覆盖“当前 Go 进程会话”内拉起的进程。QuickDock 重启/重编译后
 // 原进程会变成孤儿，stop 必须依赖端口/原生信号兜底，不能只靠此句柄。
-type serviceManager struct {
-	mu   sync.Mutex
-	cmds map[Runtime]*exec.Cmd
+//
+// 多版本运行时（redis/nginx）共用同一默认端口，因此同一时刻只能有一个实例在跑。
+// 句柄记录「当前拉起的是哪个版本」，Status 据此精确判定每个版本各自的运行状态，
+// 避免出现「装了两个版本、启动一个两个都显示已启动」的误判。
+type runningService struct {
+	cmd     *exec.Cmd
+	version string
+	exe     string
 }
 
-var svcMgr = &serviceManager{cmds: make(map[Runtime]*exec.Cmd)}
+type serviceManager struct {
+	mu   sync.Mutex
+	svcs map[Runtime]*runningService
+}
+
+var svcMgr = &serviceManager{svcs: make(map[Runtime]*runningService)}
 
 func (s *serviceManager) running(rt Runtime) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	_, ok := s.cmds[rt]
+	_, ok := s.svcs[rt]
 	return ok
 }
 
 func (s *serviceManager) pid(rt Runtime) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if c, ok := s.cmds[rt]; ok && c.Process != nil {
-		return c.Process.Pid
+	if c, ok := s.svcs[rt]; ok && c.cmd.Process != nil {
+		return c.cmd.Process.Pid
 	}
 	return 0
 }
 
+// info 返回本会话拉起的服务版本与可执行文件路径（用于按版本精确判定运行状态）。
+func (s *serviceManager) info(rt Runtime) (version string, exe string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if c, ok := s.svcs[rt]; ok {
+		return c.version, c.exe
+	}
+	return "", ""
+}
+
 func (s *serviceManager) forget(rt Runtime) {
 	s.mu.Lock()
-	delete(s.cmds, rt)
+	delete(s.svcs, rt)
 	s.mu.Unlock()
 }
 
-func (s *serviceManager) start(rt Runtime, exe, wd string, onLog func(string)) error {
+// start 拉起后台服务进程。args 透传给可执行文件（如 redis 的 "redis.conf"、php-fpm 的 "-b host:port"）；
+// logPath 非空时把 stdout/stderr 追加写入该文件（用于日志查询），onLog 仍照常回调（通常为 nil）。
+func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []string, logPath string, onLog func(string)) error {
 	s.mu.Lock()
-	if _, ok := s.cmds[rt]; ok {
+	if _, ok := s.svcs[rt]; ok {
 		s.mu.Unlock()
 		return fmt.Errorf("服务已在运行")
 	}
-	cmd := exec.Command(exe)
+	cmd := exec.Command(exe, args...)
 	cmd.Dir = wd
 	cmd.SysProcAttr = hideWindowAttr()
 	stdout, err := cmd.StdoutPipe()
@@ -69,28 +92,62 @@ func (s *serviceManager) start(rt Runtime, exe, wd string, onLog func(string)) e
 		s.mu.Unlock()
 		return err
 	}
-	s.cmds[rt] = cmd
+	s.svcs[rt] = &runningService{cmd: cmd, version: version, exe: exe}
 	s.mu.Unlock()
 
-	go consumeLogs(stdout, onLog)
-	go consumeLogs(stderr, onLog)
+	var logF *os.File
+	if logPath != "" {
+		if f, e := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); e == nil {
+			logF = f
+		}
+	}
+
+	go consumeLogs(stdout, onLog, logF)
+	go consumeLogs(stderr, onLog, logF)
 	go func() {
 		cmd.Wait()
+		if logF != nil {
+			logF.Close()
+		}
 		s.mu.Lock()
-		if s.cmds[rt] == cmd {
-			delete(s.cmds, rt)
+		if s.svcs[rt] != nil && s.svcs[rt].cmd == cmd {
+			delete(s.svcs, rt)
 		}
 		s.mu.Unlock()
 	}()
 	return nil
 }
 
-// consumeLogs 逐行消费命令输出并回调（用于服务运行日志）。
-func consumeLogs(r io.Reader, onLog func(string)) {
+// processExePath 返回占用 pid 的进程完整可执行文件路径（用于把监听端口反查到具体版本目录）。
+func processExePath(pid int) string {
+	if pid <= 0 {
+		return ""
+	}
+	if runtime.GOOS != "windows" {
+		out, err := exec.Command("readlink", "-f", "/proc/"+strconv.Itoa(pid)+"/exe").Output()
+		if err == nil {
+			return strings.TrimSpace(string(out))
+		}
+		return ""
+	}
+	out, err := exec.Command("powershell", "-NoProfile", "-Command",
+		"(Get-Process -Id "+strconv.Itoa(pid)+" -ErrorAction SilentlyContinue).Path").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
+}
+
+// consumeLogs 逐行消费命令输出并回调（用于服务运行日志）；logF 非空时同时追加写入文件（日志查询）。
+func consumeLogs(r io.Reader, onLog func(string), logF *os.File) {
 	sc := bufio.NewScanner(r)
 	for sc.Scan() {
+		line := sc.Text()
 		if onLog != nil {
-			onLog(sc.Text())
+			onLog(line)
+		}
+		if logF != nil {
+			logF.WriteString(line + "\n")
 		}
 	}
 }

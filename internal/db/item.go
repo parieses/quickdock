@@ -653,10 +653,13 @@ func splitArgs(args string) []string {
 
 // startDetached 启动外部程序并异步回收进程句柄，避免僵尸/句柄泄漏
 // （exec.Command.Start 之后若不 Wait，Windows 上内核句柄不会被释放）
-// Windows 上用 CREATE_NO_WINDOW 隐藏控制台：GUI 主进程直接拉起控制台程序会弹 cmd 窗。
+// Windows 上用 CREATE_NO_WINDOW 隐藏控制台 + DETACHED_PROCESS 脱离父进程进程组：
+// 确保 QuickDock 退出时，用户通过它打开的第三方软件不会随之被杀。
 func startDetached(cmd *exec.Cmd) error {
 	if goruntime.GOOS == "windows" {
-		cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+		cmd.SysProcAttr = &syscall.SysProcAttr{
+			CreationFlags: 0x08000008, // CREATE_NO_WINDOW | DETACHED_PROCESS
+		}
 	}
 	if err := cmd.Start(); err != nil {
 		return err

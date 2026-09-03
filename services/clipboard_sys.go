@@ -276,8 +276,9 @@ func getPngClipboardFormat() uint32 {
 	if v := pngClipFmt.Load(); v != 0 {
 		return v
 	}
+	pngName, _ := syscall.UTF16PtrFromString("PNG")
 	f, _, _ := procRegisterClipboardFormatW.Call(
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("PNG"))))
+		uintptr(unsafe.Pointer(pngName)))
 	if f != 0 {
 		pngClipFmt.Store(uint32(f))
 	}

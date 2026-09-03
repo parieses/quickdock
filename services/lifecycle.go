@@ -118,7 +118,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	a.StartMonitorChecker()
 
 	// dsh web 自动启动：QuickDock 起来后延迟 5s 在后台拉起 dsh 服务（默认开启，
-	// 可在「设置 → DeepSeek」用开关关闭）。只起服务不开窗口，用户点侧边栏 dsh
+	// 可在「环境管理 → DeepSeek Harness」用开关关闭）。只起服务不开窗口，用户点侧边栏 dsh
 	// 时 OpenDSHWindow 直接复用。失败静默（如未安装/运行环境未就绪），不打扰 UI。
 	if a.DSH != nil && a.dshAutoStartEnabled() {
 		go func() {

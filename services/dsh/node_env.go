@@ -23,8 +23,7 @@ import (
 )
 
 const (
-	nodeVersion    = "v22.22.2" // LTS，匹配本机托管运行时；DSH 要求 ^22.19.0 || >=24.0.0
-	nodeRuntimeRel = "runtime/node"
+	nodeVersion    = "v22.22.2" // LTS，DSH 要求 ^22.19.0 || >=24.0.0
 	dshHomeRel     = "dsh"
 	dshPkg         = "@deepseek-ai/dsh"
 	// npm registry 元数据（与安装镜像一致，用于最新版本检测）
@@ -69,20 +68,21 @@ type NodeEnvManager struct {
 	app        *application.App
 	dataDir    string
 	node       *env.NodeRuntime
-	runtimeDir string
 	installing atomic.Bool
-	mu         sync.Mutex
 }
 
 func NewNodeEnvManager() *NodeEnvManager {
 	dataDir := platform.DefaultDataDir()
-	node := env.NewNodeRuntime()
 	return &NodeEnvManager{
-		dataDir:    dataDir,
-		node:       node,
-		runtimeDir: node.RuntimeDir(),
+		dataDir: dataDir,
+		node:    env.NewNodeRuntime(),
 	}
 }
+
+// runtimeDir 当前实际使用的 node 所在目录（npm 全局 prefix 与 PATH 拼装基准）。
+// Node 已改为多版本（runtime/node/<version>），必须每次动态解析，
+// 不能在构造时缓存——否则用户切换/新增版本后 dsh 仍指向旧目录。
+func (m *NodeEnvManager) runtimeDir() string { return m.node.RuntimeDir() }
 
 func (m *NodeEnvManager) SetApp(app *application.App) { m.app = app }
 
@@ -138,8 +138,8 @@ func (m *NodeEnvManager) DshBin() string {
 	if p, err := exec.LookPath("dsh"); err == nil {
 		dirs = append(dirs, filepath.Dir(p))
 	}
-	if m.runtimeDir != "" {
-		dirs = append(dirs, m.runtimeDir)
+	if m.runtimeDir() != "" {
+		dirs = append(dirs, m.runtimeDir())
 	}
 	dirs = append(dirs, m.installDir())
 	candidates := []string{}
@@ -190,9 +190,9 @@ func (m *NodeEnvManager) dshMainJSCandidates() []string {
 	}
 	cands = append(cands, npxCacheDshBins()...)
 	// 便携 node 的 npm 默认全局位置（npm -g 默认 prefix = node 所在目录 runtimeDir）
-	if m.runtimeDir != "" {
+	if m.runtimeDir() != "" {
 		cands = append(cands,
-			filepath.Join(m.runtimeDir, "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"))
+			filepath.Join(m.runtimeDir(), "node_modules", "@deepseek-ai", "dsh", "lib", "bin.js"))
 	}
 	// 旧版 QuickDock 自定义 --prefix 安装作为最低兜底（兼容历史残留）
 	cands = append(cands,
@@ -331,8 +331,15 @@ func (m *NodeEnvManager) LatestDshVersion() string {
 	}
 	// 取 dist-tags 中各标签里语义化版本最大者：dsh 的预发布版本发在 next/rc 等非
 	// latest 标签上（当前 latest=0.1.0-rc.7，next=0.1.0-rc.8），只读 latest 会漏掉最新 rc。
+	// 排除 alpha/beta 标签：alpha 通道（0.1.2-alpha.x）改了 @deepseek-ai/dsh-settings
+	// 的导出与 ctx.subagents 等内部 API，社区插件（dshmarket/@linxin666 全家桶等）未跟进，
+	// 装 alpha 会导致 dsh web profile 插件加载全崩、启动失败（2026-09-03 实测）。
 	best := ""
-	for _, v := range info.DistTags {
+	for tag, v := range info.DistTags {
+		switch tag {
+		case "alpha", "beta":
+			continue
+		}
 		if v != "" && compareSemver(best, v) < 0 {
 			best = v
 		}
@@ -496,7 +503,7 @@ func (m *NodeEnvManager) runNpmInstall(ctx context.Context, target string, onMsg
 	// 便携 node 目录前置到 PATH：npm 的 postinstall 脚本（如 koffi 的 cnoke.cjs）
 	// 会经 `cmd /c node ...` 调 node，PATH 里没有 node 时直接失败（新机器无系统 node）。
 	// 便携目录不存在（node 来自系统 PATH）时跳过，避免 PATH 出现空项。
-	if nodeDir := m.runtimeDir; nodeDir != "" {
+	if nodeDir := m.runtimeDir(); nodeDir != "" {
 		if _, err := os.Stat(nodeDir); err == nil {
 			env = append(env, "PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		}

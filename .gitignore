@@ -14,7 +14,7 @@ vendor/
 bin/
 build/*.syso
 wails_windows_*.syso
-frontend/dist/
+frontend/dist*/
 frontend/bindings/
 frontend/.bindings-tmp-*/
 build/android/.gradle/
@@ -24,7 +24,7 @@ build/android/build/
 node_modules/
 frontend/node_modules/
 frontend/.vite/
-frontend/dist/
+frontend/dist*/
 
 # --- IDE ---
 .idea/
@@ -55,6 +55,10 @@ marketing/
 
 # --- Updater ---
 updater.key
+
+# --- CI 发布流程生成物（不入版本库）---
+manifest.json
+release_notes.md
 
 # 本地 Ed25519 验签回归测试：仅本地保留用于守护更新签名链路，不纳入版本库
 services/update_verify_test.go

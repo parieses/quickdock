@@ -96,9 +96,6 @@ var (
 	// 主窗口 WindowClosing 钩子据此放行关闭（否则隐藏到托盘）。
 	trayQuitRequested atomic.Bool
 
-	trayInstance *application.SystemTray
-	trayLock     sync.Mutex
-
 	mainWin     *application.WebviewWindow
 	mainWinLock sync.Mutex
 
@@ -224,7 +221,6 @@ func createSystemTray(app *application.App) {
 	// SetIcon 接收一帧资源数据（见 trayIconData）：框架 CreateSmallHIconFromImage
 	// 会按 SM_CXSMICON 缩放到托盘标准尺寸。注意不能传整份 .ico 文件，否则框架会
 	// 把含 ICONDIR 头的整包交给 CreateIconFromResourceEx 而创建失败（误导性 WARN）。
-	trayLock.Lock()
 	tray := app.SystemTray.New()
 	tray.SetIcon(trayIconData())
 	tray.SetTooltip("快启坞 QuickDock")
@@ -234,8 +230,6 @@ func createSystemTray(app *application.App) {
 			showMainWindow(win)
 		}
 	})
-	trayInstance = tray
-	trayLock.Unlock()
 
 	tray.Show()
 	fmt.Println("QuickDock: 系统托盘已创建 (Wails SystemTray)")

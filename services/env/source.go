@@ -52,6 +52,8 @@ type runtimeDef struct {
 	sources   []Source
 	versURL   string // 上游全量版本列表地址（空=只用推荐列表）
 	versParse func(body []byte) []string // 解析版本列表（返回形如 "1.25.0" / "v22.22.2" 的版本号）
+	// versHTMLFallbackParse 当 API 失败时的 HTML 解析兜底；htmlFallbackURL 返回对应 HTML 页面地址
+	versHTMLFallbackParse func(body []byte) []string
 }
 
 var (
@@ -61,7 +63,7 @@ var (
 			{ID: "npmmirror", Name: "npmmirror 镜像", Build: nodeURL("https://registry.npmmirror.com/-/binary/node/{v}/node-{v}-{os}-{arch}.{ext}")},
 			{ID: "official", Name: "Node.js 官方", Build: nodeURL("https://nodejs.org/dist/{v}/node-{v}-{os}-{arch}.{ext}")},
 		}},
-		RuntimeGo: {display: "Go", group: GroupLanguage, versions: []string{"1.23.4", "1.22.10", "1.21.13"}, versURL: "https://go.dev/dl/?mode=json", versParse: parseGoVersions, sources: []Source{
+		RuntimeGo: {display: "Go", group: GroupLanguage, versions: []string{"1.23.4", "1.22.10", "1.21.13"}, versURL: "https://go.dev/dl/", versParse: parseGoVersionsFromHTML, sources: []Source{
 			{ID: "official", Name: "Go 官方", Build: goURL("https://go.dev/dl/go{version}.{os}-{arch}.{ext}")},
 			{ID: "golangcn", Name: "golang.google.cn (国内)", Build: goURL("https://golang.google.cn/dl/go{version}.{os}-{arch}.{ext}")},
 		}},
@@ -69,13 +71,13 @@ var (
 			{ID: "windowsphpnet-archive", Name: "windows.php.net (archives)", Build: phpURL("https://downloads.php.net/~windows/releases/archives/php-{version}-Win32-vs16-x64.zip")},
 			{ID: "windowsphpnet", Name: "windows.php.net (releases)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs16-x64.zip")},
 		}},
-		RuntimeRedis: {display: "Redis", group: GroupCache, versions: []string{"7.4.0", "7.2.5", "7.0.15"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, sources: []Source{
+		RuntimeRedis: {display: "Redis", group: GroupCache, versions: []string{"7.4.0", "7.2.5", "7.0.15"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, versHTMLFallbackParse: parseRedisVersionsHTML, sources: []Source{
 			{ID: "rediswindows", Name: "redis-windows/redis-windows (GitHub)", Build: redisURL("https://github.com/redis-windows/redis-windows/releases/download/{version}/Redis-{version}-Windows-x64-msys2.zip")},
 		}},
 		RuntimeNginx: {display: "Nginx", group: GroupWebServer, versions: []string{"1.27.5", "1.26.3", "1.25.5"}, versURL: "https://nginx.org/download/", versParse: parseNginxVersions, sources: []Source{
 			{ID: "nginxorg", Name: "nginx.org 官方", Build: nginxURL("https://nginx.org/download/nginx-{version}.zip")},
 		}},
-		RuntimeGit: {display: "Git", group: GroupTool, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, sources: []Source{
+		RuntimeGit: {display: "Git", group: GroupTool, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, sources: []Source{
 			{ID: "gfw", Name: "git-for-windows (GitHub)", Build: gitURL("https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}.windows.1-64-bit.zip")},
 		}},
 	}
@@ -293,32 +295,114 @@ func Versions(rt Runtime) []string {
 	return out
 }
 
+// ---- 版本列表缓存 ----
+//
+// AvailableVersions 每次调用都会请求上游，频繁切换运行时时会重复拉取。
+// 加一层内存缓存：TTL=1h，key=runtime+sourceID+custom，命中直接返回，
+// 同时 sourceID/custom 变化时自动失效（换源意味着要重新拉取对应列表）。
+type versCacheEntry struct {
+	vs      []string
+	expired time.Time
+	fetched bool // true=上游拉取成功, false=兜底列表(不应缓存,允许立即重试)
+}
+
+var (
+	versCacheMu sync.RWMutex
+	versCache   = make(map[string]versCacheEntry)
+	versTTLSec  = 1 * time.Hour
+)
+
+// htmlFallbackURL 返回某运行时 GitHub Releases 页面的 HTML 地址（用于 API 失败时的兜底解析）。
+func htmlFallbackURL(rt Runtime) string {
+	switch rt {
+	case RuntimeRedis:
+		return "https://github.com/redis-windows/redis-windows/releases"
+	case RuntimeGit:
+		return "https://github.com/git-for-windows/git/releases"
+	default:
+		return ""
+	}
+}
+
 // AvailableVersions 拉取某运行时的全量可下载版本（上游列表）；任何失败均兜底返回推荐列表。
+// 带 1h 内存缓存，sourceID/custom 变化时自动失效。
 // 返回的版本号格式与 CandidateURLs 的 version 参数一致（如 Go "1.25.0" / Node "v22.22.2"）。
 func AvailableVersions(rt Runtime, sourceID, custom string) []string {
+	cacheKey := string(rt) + "|" + sourceID + "|" + custom
+	now := time.Now()
+
+	versCacheMu.RLock()
+	entry, hit := versCache[cacheKey]
+	versCacheMu.RUnlock()
+
+	if hit && now.Before(entry.expired) && len(entry.vs) > 0 {
+		return entry.vs
+	}
+
 	def := registry[rt]
+	var vs []string
+	fetched := false
 	if def.versURL != "" && def.versParse != nil {
 		if body, err := fetchURL(def.versURL); err == nil {
-			if vs := def.versParse(body); len(vs) > 0 {
-				return sortVersionsDesc(vs)
+			if parsed := def.versParse(body); len(parsed) > 0 {
+				vs = sortVersionsDesc(parsed)
+				fetched = true
+				fmt.Printf("[AvailableVersions] %s: fetched=%d len(vs)=%d first=%s\n", rt, len(parsed), len(vs), vs[0])
+			} else {
+				fmt.Printf("[AvailableVersions] %s: parse returned 0 versions\n", rt)
+			}
+		} else {
+			fmt.Printf("[AvailableVersions] %s: fetch failed: %v\n", rt, err)
+		}
+	}
+	// HTML 兜底：GitHub API 限流或网络不通时，尝试解析 Releases 页面 HTML
+	if len(vs) == 0 && def.versHTMLFallbackParse != nil {
+		if htmlURL := htmlFallbackURL(rt); htmlURL != "" {
+			if body, err := fetchURL(htmlURL); err == nil {
+				if parsed := def.versHTMLFallbackParse(body); len(parsed) > 0 {
+					vs = sortVersionsDesc(parsed)
+					fetched = true
+				}
 			}
 		}
 	}
-	return Versions(rt)
+	if len(vs) == 0 {
+		vs = Versions(rt)
+	}
+	// Node.js: parseNodeVersions 内部已做智能筛选（LTS + 近 3 年，上限 60 条）
+
+	// 写缓存：仅上游拉取成功时缓存（TTL 1h）。
+	// 失败时不缓存，下次调用立即重试——避免网络抖动时用户长时间看到兜底列表。
+	if fetched {
+		versCacheMu.Lock()
+		versCache[cacheKey] = versCacheEntry{vs: vs, expired: now.Add(versTTLSec), fetched: true}
+		versCacheMu.Unlock()
+	}
+
+	return vs
 }
 
-// fetchURL 拉取 URL 内容（带代理与 10s 超时），最多 4MB。
+// fetchURL 拉取 URL 内容（带代理与 30s 超时），最多 4MB。
+// 若代理模式下失败，自动重试无代理直连（兼容部分场景下代理配置异常的情况）。
 func fetchURL(url string) ([]byte, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("User-Agent", "QuickDock/1.0")
+
+	// 先尝试带代理
 	resp, err := (&http.Client{Transport: ProxyTransport()}).Do(req)
 	if err != nil {
-		return nil, err
+		// 代理失败，尝试直连
+		req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+		req2.Header.Set("User-Agent", "QuickDock/1.0")
+		resp, err = (&http.Client{Transport: &http.Transport{}}).Do(req2)
+		if err != nil {
+			return nil, err
+		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
@@ -330,33 +414,85 @@ func fetchURL(url string) ([]byte, error) {
 // ---- 上游版本列表解析 ----
 
 func parseNodeVersions(body []byte) []string {
+	fmt.Printf("[parseNodeVersions] body size=%d first200=%s\n", len(body), string(body[:min(200, len(body))]))
 	var arr []struct {
 		Version string `json:"version"`
+		Date    string `json:"date"`
+		Lts     interface{} `json:"lts"`
 	}
 	if err := json.Unmarshal(body, &arr); err != nil {
+		fmt.Printf("[parseNodeVersions] unmarshal error: %v\n", err)
 		return nil
 	}
-	out := make([]string, 0, len(arr))
+	fmt.Printf("[parseNodeVersions] unmarshaled %d entries\n", len(arr))
+	// 智能筛选：LTS + 近 3 年发布版本，去重后按语义降序，上限 60 条
+	type item struct { ver string; date time.Time; lts bool }
+	var items []item
+	seen := map[string]bool{}
 	for _, it := range arr {
-		if it.Version != "" {
-			out = append(out, it.Version)
+		if it.Version == "" || seen[it.Version] {
+			continue
+		}
+		seen[it.Version] = true
+		var d time.Time
+		if it.Date != "" {
+			d, _ = time.Parse("2006-01-02", it.Date)
+		}
+		// lts 可能是 string("Jod") 或 number 或 bool
+		isLts := false
+		switch v := it.Lts.(type) {
+		case string:
+			isLts = v != ""
+		case bool:
+			isLts = v
+		case float64:
+			isLts = v != 0
+		}
+		items = append(items, item{ver: it.Version, date: d, lts: isLts})
+	}
+	fmt.Printf("[parseNodeVersions] unique versions=%d items=%d first3=%v\n", len(seen), len(items), func() []string{ r:=make([]string,0,min(3,len(items))); for i:=0;i<len(r)&&i<len(items);i++{r=append(r,items[i].ver)}; return r}())
+	now := time.Now()
+	cutoff := now.AddDate(-3, 0, 0)
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].lts != items[j].lts {
+			return items[i].lts
+		}
+		iR := !items[i].date.IsZero() && items[i].date.After(cutoff)
+		jR := !items[j].date.IsZero() && items[j].date.After(cutoff)
+		if iR != jR {
+			return iR
+		}
+		pi, pj := splitSemver(items[i].ver), splitSemver(items[j].ver)
+		for k := 0; k < 3; k++ {
+			if pi[k] != pj[k] {
+				return pi[k] > pj[k]
+			}
+		}
+		return false
+	})
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, it.ver)
+		if len(out) >= 60 {
+			break
 		}
 	}
 	return out
 }
 
-func parseGoVersions(body []byte) []string {
-	var arr []struct {
-		Version string `json:"version"`
-		Stable  bool   `json:"stable"`
-	}
-	if err := json.Unmarshal(body, &arr); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(arr))
-	for _, it := range arr {
-		v := strings.TrimPrefix(it.Version, "go")
-		if v != "" {
+// parseGoVersionsFromHTML 从 go.dev/dl/ 页面 HTML 提取所有稳定版版本号。
+// 该页面列出了所有已发布版本，无 API 配额限制，不受网络环境影响。
+func parseGoVersionsFromHTML(body []byte) []string {
+	html := string(body)
+	// go.dev/dl/ 中版本以 "go1.23.4" 形式出现在 <a> 标签和 <td> 文本中
+	re := regexp.MustCompile(`go(\d+\.\d+\.\d+)`)
+	matches := re.FindAllSubmatch([]byte(html), -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		v := string(m[1])
+		if !seen[v] {
+			seen[v] = true
 			out = append(out, v)
 		}
 	}
@@ -364,10 +500,11 @@ func parseGoVersions(body []byte) []string {
 }
 
 // parsePHPWinVersions 从 windows.php.net 发布目录（含 302 跳转到 downloads.php.net/~windows）
-// 解析形如 php-8.3.20-Win32-vs16-x64.zip 的文件名，提取完整版本号（如 8.3.20），
-// 可直接拼成 windows.php.net 的下载地址。php.net 官方 releases JSON 仅返回大版本（"8"），
-// 无法用于拼下载 URL，故改用 windows.php.net 目录页。
-var phpWinRe = regexp.MustCompile(`php-(\d+\.\d+\.\d+)-Win32-vs16-x64\.zip`)
+// 解析形如 php-8.3.20-Win32-vs16-x64.zip 或 php-7.4.33-Win32-vc15-x64.zip 的文件名，
+// 提取完整版本号（如 8.3.20 / 7.4.33），可直接拼成 windows.php.net 的下载地址。
+// 使用 vc?\d+ 兼容 VS（vs16）和 VC（vc14/vc15）编译器的所有二进制包。
+// php.net 官方 releases JSON 仅返回大版本（"8"），无法用于拼下载 URL，故改用目录页。
+var phpWinRe = regexp.MustCompile(`php-(\d+\.\d+\.\d+)-Win32-(?:vc|vs)\d+-x64\.zip`)
 
 func parsePHPWinVersions(body []byte) []string {
 	matches := phpWinRe.FindAllSubmatch(body, -1)
@@ -406,6 +543,23 @@ func parseNginxVersions(body []byte) []string {
 	return out
 }
 
+// parseRedisVersionsHTML 从 GitHub Releases 页面 HTML 提取版本号（API 不可用时兜底）。
+func parseRedisVersionsHTML(body []byte) []string {
+	html := string(body)
+	re := regexp.MustCompile(`/releases/tag/v?(\d+\.\d+\.\d+)`)
+	matches := re.FindAllSubmatch([]byte(html), -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		v := string(m[1])
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func parseGitVersions(body []byte) []string {
 	var arr []struct {
 		TagName string `json:"tag_name"`
@@ -418,6 +572,23 @@ func parseGitVersions(body []byte) []string {
 		v := strings.TrimPrefix(it.TagName, "v")
 		v = strings.TrimSuffix(v, ".windows.1")
 		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseGitVersionsHTML 从 GitHub Releases 页面 HTML 提取 MinGit 版本号（API 不可用时兜底）。
+func parseGitVersionsHTML(body []byte) []string {
+	html := string(body)
+	re := regexp.MustCompile(`/releases/tag/v?(\d+\.\d+\.\d+)\.windows\.\d+`)
+	matches := re.FindAllSubmatch([]byte(html), -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		v := string(m[1])
+		if !seen[v] {
+			seen[v] = true
 			out = append(out, v)
 		}
 	}

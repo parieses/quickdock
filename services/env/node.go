@@ -9,7 +9,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -17,51 +16,108 @@ import (
 )
 
 const (
-	nodeDefaultVersion = "v22.22.2" // LTS，匹配本机托管运行时；要求 ^22.19.0 || >=24.0.0
-	nodeRuntimeRel     = "runtime/node"
+	nodeDefaultVersion = "v22.22.2" // LTS，DSH 要求 ^22.19.0 || >=24.0.0
+	nodeBaseRel        = "runtime/node"
 )
 
 // InstallCallback Node 安装过程中的进度/日志回调
 type InstallCallback struct {
 	OnProgress func(written, total int64) // 字节进度（total 可能为 -1 表示未知）
 	OnLog      func(msg string)           // 可读日志行
-	OnStage    func(stage, msg string)   // 阶段：download | extract
+	OnStage    func(stage, msg string)    // 阶段：download | extract
 }
 
-// NodeRuntime 管理便携 Node 运行时：检测系统/便携 Node、按需从可切换下载源拉取并解压。
+// NodeRuntime 管理便携 Node 运行时：多版本共存于 runtime/node/<version>，
+// 同时探测系统 PATH 上已安装的 node。按需从可切换下载源拉取并解压。
 // 不依赖系统 PATH、不写注册表、不申请管理员权限——纯用户态、随 QuickDock 清理。
 type NodeRuntime struct {
-	dataDir    string
-	runtimeDir string
+	baseDir    string
 	installing atomic.Bool
-	mu         sync.Mutex
 }
 
 func NewNodeRuntime() *NodeRuntime {
-	dataDir := platform.DefaultDataDir()
-	return &NodeRuntime{
-		dataDir:    dataDir,
-		runtimeDir: filepath.Join(dataDir, nodeRuntimeRel),
-	}
+	return &NodeRuntime{baseDir: filepath.Join(platform.DefaultDataDir(), nodeBaseRel)}
 }
 
-// RuntimeDir 便携 Node 目录（DSH 等需引用以拼 PATH）
-func (n *NodeRuntime) RuntimeDir() string { return n.runtimeDir }
+// versionDir 便携 Node 的版本目录：runtime/node/<version>
+func (n *NodeRuntime) versionDir(version string) string {
+	return filepath.Join(n.baseDir, version)
+}
 
-// Exe 返回 node 可执行文件绝对路径
+// nodeExeIn 返回某目录下的 node 可执行文件（Windows 在根目录，其余在 bin/）。
+func nodeExeIn(dir string) string {
+	if runtime.GOOS == "windows" {
+		return filepath.Join(dir, "node.exe")
+	}
+	return filepath.Join(dir, "bin", "node")
+}
+
+// legacyExe 旧版单版本布局的可执行文件：runtime/node/node.exe。
+// 升级前安装的便携 node 落在这里，仍要能被 DSH 找到，否则升级后 DSH 直接失效。
+func (n *NodeRuntime) legacyExe() string { return nodeExeIn(n.baseDir) }
+
+// RuntimeDir 返回 DSH 应使用的 node 所在目录（npm 全局 prefix 与 PATH 拼装基准）。
+// 多版本下随 Exe() 一起解析，而非写死 baseDir。
+func (n *NodeRuntime) RuntimeDir() string { return filepath.Dir(n.Exe()) }
+
+// Exe 返回 DSH 应使用的 node 可执行文件，按优先级选择：
+//  1. 旧版单版本布局 runtime/node/node.exe（升级前的安装，保持 DSH 可用）
+//  2. 已装便携版本中满足 VersionOK 且版本最高的
+//  3. 默认版本目录（尚未安装时，Install 会写入这里）
 func (n *NodeRuntime) Exe() string {
-	if runtime.GOOS == "windows" {
-		return filepath.Join(n.runtimeDir, "node.exe")
+	if p := n.legacyExe(); fileExists(p) {
+		return p
 	}
-	return filepath.Join(n.runtimeDir, "node")
+	best, bestVer := "", ""
+	for _, it := range n.portableInstalls() {
+		if !VersionOK(it.version) {
+			continue
+		}
+		if bestVer == "" || semverLess(bestVer, it.version) {
+			bestVer, best = it.version, it.exe
+		}
+	}
+	if best != "" {
+		return best
+	}
+	return nodeExeIn(n.versionDir(nodeDefaultVersion))
 }
 
-// NpxExe 返回 npx 可执行文件绝对路径
+// NpxExe 返回与 Exe() 同目录下的 npx 可执行文件
 func (n *NodeRuntime) NpxExe() string {
+	dir := filepath.Dir(n.Exe())
 	if runtime.GOOS == "windows" {
-		return filepath.Join(n.runtimeDir, "npx.cmd")
+		return filepath.Join(dir, "npx.cmd")
 	}
-	return filepath.Join(n.runtimeDir, "npx")
+	return filepath.Join(dir, "npx")
+}
+
+// nodeInstall 一个已解压的便携版本
+type nodeInstall struct {
+	version string // 版本目录名（含 v 前缀，与下载/安装时传入的 version 一致）
+	dir     string // 版本目录（Windows 上 node.exe 直接在其中，即 bin 目录）
+	exe     string // node 可执行文件绝对路径
+}
+
+// portableInstalls 扫描 runtime/node/<version> 下的便携版本
+func (n *NodeRuntime) portableInstalls() []nodeInstall {
+	entries, err := os.ReadDir(n.baseDir)
+	if err != nil {
+		return nil
+	}
+	var out []nodeInstall
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		dir := n.versionDir(e.Name())
+		exe := nodeExeIn(dir)
+		if !fileExists(exe) {
+			continue
+		}
+		out = append(out, nodeInstall{version: e.Name(), dir: dir, exe: exe})
+	}
+	return out
 }
 
 // VersionOK 判断 node -v 输出是否满足要求：^22.19.0 || >=24.0.0
@@ -103,29 +159,35 @@ func (n *NodeRuntime) Detect() (string, string, bool) {
 			return p, v, true
 		}
 	}
-	if _, err := os.Stat(n.Exe()); err == nil {
-		if v := RunVersion(n.Exe(), "--version"); v != "" && VersionOK(v) {
-			return n.Exe(), v, true
+	if exe := n.Exe(); fileExists(exe) {
+		if v := RunVersion(exe, "--version"); v != "" && VersionOK(v) {
+			return exe, v, true
 		}
 	}
 	return "", "", false
 }
 
-// Install 一键安装便携 Node：从可切换下载源拉取并解压到 runtimeDir。已就绪则跳过。
+// Install 安装指定版本到 runtime/node/<version>。该版本已存在则跳过（换版本请指定 version）。
 func (n *NodeRuntime) Install(ctx context.Context, version string, cb InstallCallback) error {
 	if version == "" {
-		version = nodeDefaultVersion
+		version = Versions(RuntimeNode)[0]
 	}
 	if n.installing.Swap(true) {
 		return fmt.Errorf("Node 安装正在进行中，请稍候")
 	}
 	defer n.installing.Store(false)
 
-	if _, _, ok := n.Detect(); ok {
+	dir := n.versionDir(version)
+	exe := nodeExeIn(dir)
+	if fileExists(exe) {
 		if cb.OnLog != nil {
-			cb.OnLog("Node 已就绪: " + n.Exe())
+			cb.OnLog("Node " + version + " 已安装: " + exe)
 		}
 		return nil
+	}
+	// 残留的半成品目录先清掉再装
+	if _, err := os.Stat(dir); err == nil {
+		_ = os.RemoveAll(dir)
 	}
 
 	if cb.OnStage != nil {
@@ -138,7 +200,11 @@ func (n *NodeRuntime) Install(ctx context.Context, version string, cb InstallCal
 	if len(urls) == 0 {
 		return fmt.Errorf("无可用 Node 下载源")
 	}
-	zipPath := filepath.Join(os.TempDir(), "quickdock-node-"+version+".zip")
+	ext := ".zip"
+	if runtime.GOOS != "windows" {
+		ext = ".tar.gz"
+	}
+	zipPath := filepath.Join(os.TempDir(), "quickdock-node-"+version+ext)
 	if err := Download(ctx, zipPath, urls, cb.OnProgress); err != nil {
 		return fmt.Errorf("下载 Node 失败: %w", err)
 	}
@@ -148,16 +214,16 @@ func (n *NodeRuntime) Install(ctx context.Context, version string, cb InstallCal
 		cb.OnStage("extract", "正在解压 Node…")
 	}
 	if cb.OnLog != nil {
-		cb.OnLog("解压 Node 到 " + n.runtimeDir)
+		cb.OnLog("解压 Node 到 " + dir)
 	}
-	if err := Extract(zipPath, n.runtimeDir); err != nil {
+	if err := Extract(zipPath, dir); err != nil {
 		return fmt.Errorf("解压 Node 失败: %w", err)
 	}
-	if _, err := os.Stat(n.Exe()); err != nil {
-		return fmt.Errorf("解压完成但未找到 %s，请删除 %s 后重试", n.Exe(), n.runtimeDir)
+	if !fileExists(exe) {
+		return fmt.Errorf("解压完成但未找到 %s，请删除 %s 后重试", exe, dir)
 	}
 	if cb.OnLog != nil {
-		cb.OnLog("Node 解压完成")
+		cb.OnLog("Node " + version + " 解压完成")
 	}
 	return nil
 }
@@ -172,38 +238,48 @@ func (n *NodeRuntime) SupportedPlatforms() []string { return []string{"windows",
 
 func (n *NodeRuntime) Recommended() []string { return Versions(RuntimeNode) }
 
-// ExeFor 兼容 RuntimeAdapter 接口：node 为单版本目录（DSH 依赖 runtime/node 固定路径），忽略 version。
-func (n *NodeRuntime) ExeFor(version string) string { return n.Exe() }
+// ExeFor 返回指定版本的 node 可执行文件（未安装时也返回预期路径，供 PATH 计算使用）。
+func (n *NodeRuntime) ExeFor(version string) string {
+	if version == "" {
+		return n.Exe()
+	}
+	return nodeExeIn(n.versionDir(version))
+}
 
-// InstalledVersions 返回已装的 Node（优先系统 PATH，其次便携目录；不满足 dsh 版本要求的系统 node 也列出）。
+// InstalledVersions 返回已装的 Node：便携多版本目录 + 旧版单版本目录 + 系统 PATH。
+// 版本号保留 v 前缀（与下载源/安装时传入的格式一致），同版本只列一次。
 func (n *NodeRuntime) InstalledVersions() []Install {
 	var out []Install
-	if p, v, ok := n.Detect(); ok {
-		scope := "system"
-		if p == n.Exe() {
-			scope = "portable"
-		}
-		out = append(out, Install{Version: strings.TrimPrefix(v, "v"), Scope: scope, Path: p})
+	seen := map[string]bool{}
+	for _, it := range n.portableInstalls() {
+		seen[it.version] = true
+		out = append(out, Install{Version: it.version, Scope: "portable", Path: it.dir})
 	}
-	// 也识别版本不满足 dsh 要求的系统 node（仅用于展示，避免误报「未安装」）
+	// 旧版单版本布局（runtime/node/node.exe）：读出真实版本号列示，避免与新布局重复
+	if p := n.legacyExe(); fileExists(p) {
+		if v := RunVersion(p, "--version"); v != "" && !seen[v] {
+			seen[v] = true
+			out = append(out, Install{Version: v, Scope: "portable", Path: n.baseDir})
+		}
+	}
 	if p, err := exec.LookPath("node"); err == nil {
-		if v := RunVersion(p, "--version"); v != "" {
-			dup := false
-			for _, it := range out {
-				if it.Path == p {
-					dup = true
-					break
-				}
-			}
-			if !dup {
-				out = append(out, Install{Version: strings.TrimPrefix(v, "v"), Scope: "system", Path: p})
-			}
+		if v := RunVersion(p, "--version"); v != "" && !seen[v] {
+			out = append(out, Install{Version: v, Scope: "system", Path: p})
 		}
 	}
 	return out
 }
 
-// DeleteVersion Node 为单版本目录且被 DSH 依赖，不允许在此删除，交由系统/DSH 管理。
+// DeleteVersion 删除某便携 Node 版本目录（runtime/node/<version>）。
 func (n *NodeRuntime) DeleteVersion(version string) error {
-	return fmt.Errorf("Node 由系统/DSH 管理，不支持在此删除")
+	dir := n.versionDir(version)
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("未找到该版本: %s", version)
+	}
+	return os.RemoveAll(dir)
+}
+
+func fileExists(p string) bool {
+	_, err := os.Stat(p)
+	return err == nil
 }

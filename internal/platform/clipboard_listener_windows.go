@@ -83,7 +83,8 @@ func clipboardWndProc(onChange func()) func(hwnd uintptr, msg uint32, wParam, lP
 func runClipboardListener(onChange func()) {
 	goruntime.LockOSThread()
 
-	className := syscall.StringToUTF16Ptr("QuickDock_Clipboard_Window_v4")
+	// syscall.UTF16PtrFromString：StringToUTF16Ptr 已弃用（SA1019）；常量串无内嵌 NUL，error 必为 nil
+	className, _ := syscall.UTF16PtrFromString("QuickDock_Clipboard_Window_v4")
 
 	hinstance, _, _ := procGetModuleHandleW.Call(0)
 
@@ -108,10 +109,11 @@ func runClipboardListener(onChange func()) {
 
 	const wsExToolwindow = 0x00000080
 	const wsPopup = 0x80000000
+	wndTitle, _ := syscall.UTF16PtrFromString("QuickDockClipListener")
 	hwnd, _, _ := procCreateWindowExW.Call(
 		wsExToolwindow,
 		uintptr(unsafe.Pointer(className)),
-		uintptr(unsafe.Pointer(syscall.StringToUTF16Ptr("QuickDockClipListener"))),
+		uintptr(unsafe.Pointer(wndTitle)),
 		wsPopup,
 		0, 0, 0, 0,
 		0, 0, hinstance, 0,

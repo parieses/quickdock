@@ -1,3 +1,10 @@
+<script lang="ts">
+// 模块级缓存：组件卸载/重挂载时预填上次的检测结果，避免「空 → 加载」的闪烁。
+// 仅缓存只读检测结果，瞬态标志（installing/settingUp/updating）由组件实例自身复位。
+let cachedDshStatus: any = null
+let cachedDshSvc: any = null
+</script>
+
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -5,7 +12,7 @@ import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle } fro
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { DetectNodeEnv, SetupDSH, OpenDSHWindow, DSHInstallPlugin, CheckDSHUpdate, UpdateDSH, DSHStatus, DSHStart, DSHStop, DSHSetAutoStart } from '../../bindings/quickdock/services/appservice'
+import { DetectNodeEnv, SetupDSH, OpenDSHWindow, DSHInstallPlugin, CheckDSHUpdate, UpdateDSH, DSHStatus, DSHStart, DSHStop, DSHSetAutoStart, DSHUpdateAllPlugins, DSHRollbackPlugins, DSHCheckPluginUpdates, RevealInExplorer } from '../../bindings/quickdock/services/appservice'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -45,11 +52,17 @@ interface DSHStatusInfo {
   url: string
 }
 
-const status = ref<NodeEnvStatus | null>(null)
+interface PluginUpdateInfo {
+  name: string
+  current: string
+  latest: string
+}
+
+const status = ref<NodeEnvStatus | null>(cachedDshStatus)
 const settingUp = ref(false)
 const updating = ref(false)
 const checkingUpdate = ref(false)
-const dshSvc = ref<DSHStatusInfo | null>(null)
+const dshSvc = ref<DSHStatusInfo | null>(cachedDshSvc)
 const svcBusy = ref(false) // 启动/停止操作进行中
 const progress = ref<DshProgress | null>(null)
 const logs = ref<{ level: string; message: string }[]>([])
@@ -94,10 +107,21 @@ function showMsg(text: string, isError = false) {
   msgTimer = setTimeout(() => { msg.value = ''; msgError.value = false }, 5000)
 }
 
+// 在文件资源管理器中打开路径（目录直接打开，文件高亮选中）。
+async function reveal(path: string) {
+  if (!path) return
+  try {
+    unwrap(await RevealInExplorer(path))
+  } catch (e: any) {
+    showMsg(getErrorMessage(e), true)
+  }
+}
+
 async function refresh() {
   try {
     const res = unwrap<NodeEnvStatus>(await DetectNodeEnv())
     status.value = res
+    cachedDshStatus = res
   } catch (e) {
     showMsg(getErrorMessage(e), true)
   }
@@ -156,7 +180,7 @@ async function openDSH() {
 async function loadDSHStatus() {
   try {
     const res = unwrap<DSHStatusInfo | null>(await DSHStatus())
-    if (res) dshSvc.value = res
+    if (res) { dshSvc.value = res; cachedDshSvc = res }
   } catch (e) {
     // 查询失败静默（如后端未就绪），不影响其余 UI
   }
@@ -196,6 +220,10 @@ async function setAutoStart(enabled: boolean) {
 
 const pluginName = ref('')
 const installingPlugin = ref(false)
+const updatingPlugins = ref(false) // 一键更新全部插件进行中
+const checkingPluginUpdates = ref(false)
+const pluginUpdates = ref<PluginUpdateInfo[]>([]) // 预检：有可用更新的 registry 插件
+const pluginBackup = ref('') // 最近一次更新的备份路径（非空时回滚按钮可用）
 async function installPlugin() {
   if (installingPlugin.value) return
   // 兼容粘贴完整命令（`dsh plugin --profile web add <name>`）：提取末尾插件名；
@@ -215,6 +243,52 @@ async function installPlugin() {
   }
 }
 
+// 预检：查 registry 插件（git 依赖不纳入）是否有可用更新
+async function checkPluginUpdates() {
+  if (checkingPluginUpdates.value || !dshReady.value) return
+  checkingPluginUpdates.value = true
+  try {
+    const list = unwrap<PluginUpdateInfo[]>(await DSHCheckPluginUpdates())
+    pluginUpdates.value = list || []
+    if (pluginUpdates.value.length) {
+      showMsg(t('dshPluginUpdatesAvailable', { n: pluginUpdates.value.length }))
+    } else {
+      showMsg(t('dshNoPluginUpdates'))
+    }
+  } catch (e: any) {
+    showMsg(getErrorMessage(e), true)
+  } finally {
+    checkingPluginUpdates.value = false
+  }
+}
+
+// 一键更新全部插件（保守：按 semver 范围升级，固定版不动；升级前自动备份）
+async function updateAllPlugins() {
+  if (updatingPlugins.value) return
+  updatingPlugins.value = true
+  pluginUpdates.value = []
+  logs.value = []
+  try {
+    unwrap(await DSHUpdateAllPlugins())
+  } catch (e: any) {
+    updatingPlugins.value = false
+    showMsg(getErrorMessage(e), true)
+  }
+}
+
+// 一键回滚到最近一次更新前的备份
+async function rollbackPlugins() {
+  if (!pluginBackup.value || updatingPlugins.value) return
+  updatingPlugins.value = true
+  logs.value = []
+  try {
+    unwrap(await DSHRollbackPlugins())
+  } catch (e: any) {
+    updatingPlugins.value = false
+    showMsg(getErrorMessage(e), true)
+  }
+}
+
 async function copyLogs() {
   if (!logs.value.length) return
   const text = logs.value.map((l) => (l.level === 'error' ? '✗ ' : '› ') + l.message).join('\n')
@@ -229,6 +303,7 @@ async function copyLogs() {
 let offProgress: (() => void) | null = null
 let offLog: (() => void) | null = null
 let offPlugin: (() => void) | null = null
+let offRollback: (() => void) | null = null
 onMounted(() => {
   offProgress = Events.On('quickdock:dsh:progress', (payload: any) => {
     const p = (payload?.data ?? payload) as DshProgress
@@ -257,18 +332,38 @@ onMounted(() => {
     })
   })
   offPlugin = Events.On('quickdock:dsh:plugin', (payload: any) => {
+    const p = (payload?.data ?? payload) as { ok: boolean; backup?: string; kind?: string }
+    if (p?.kind === 'update') {
+      // 一键更新全部插件完成
+      updatingPlugins.value = false
+      if (p.ok && p.backup) pluginBackup.value = p.backup
+      if (!p.ok) showMsg(t('dshPluginError'), true)
+    } else {
+      // 安装单个插件完成
+      installingPlugin.value = false
+      if (!p?.ok) showMsg(t('dshPluginError'), true)
+    }
+  })
+  offRollback = Events.On('quickdock:dsh:plugin-rollback', (payload: any) => {
     const p = (payload?.data ?? payload) as { ok: boolean }
-    installingPlugin.value = false
-    if (!p?.ok) showMsg(t('dshPluginError'), true)
+    updatingPlugins.value = false
+    if (p?.ok) {
+      pluginBackup.value = ''
+      pluginUpdates.value = []
+      showMsg(t('dshRollbackDone'))
+    } else {
+      showMsg(t('dshRollbackFailed'), true)
+    }
   })
 })
-onUnmounted(() => { offProgress?.(); offLog?.(); offPlugin?.() })
+onUnmounted(() => { offProgress?.(); offLog?.(); offPlugin?.(); offRollback?.() })
 
 let checkRanOnce = false
 watch(() => props.visible, async (v) => {
   if (v) {
     // 重新进入本页时复位插件安装状态，避免上次卡死的事件遗漏导致按钮永久禁用
     installingPlugin.value = false
+    updatingPlugins.value = false
     await refresh()
     loadDSHStatus()
     if (!checkRanOnce && dshReady.value) {
@@ -289,7 +384,7 @@ watch(() => props.visible, async (v) => {
       <div class="dsh-status-row">
         <div class="dsh-status-left">
           <span class="dsh-status-label">Node.js</span>
-          <span v-if="status?.nodePath" class="dsh-status-path">{{ status.nodePath }}</span>
+          <span v-if="status?.nodePath" class="dsh-status-path clickable" :title="'在资源管理器中打开: ' + status.nodePath" @click="reveal(status.nodePath)">{{ status.nodePath }}</span>
         </div>
         <span :class="['dsh-badge', { ok: status?.nodeFound }]">
           <component :is="status?.nodeFound ? CheckCircle2 : AlertCircle" :size="13" />
@@ -309,8 +404,8 @@ watch(() => props.visible, async (v) => {
       <div class="dsh-status-row">
         <div class="dsh-status-left">
           <span class="dsh-status-label">DeepSeek Harness</span>
-          <span v-if="status?.dshPath" class="dsh-status-path">{{ status.dshPath }}</span>
-          <span v-if="status?.dshHome" class="dsh-status-path dsh-status-home">DSH_HOME: {{ status.dshHome }}</span>
+          <span v-if="status?.dshPath" class="dsh-status-path clickable" :title="'在资源管理器中打开: ' + status.dshPath" @click="reveal(status.dshPath)">{{ status.dshPath }}</span>
+          <span v-if="status?.dshHome" class="dsh-status-path dsh-status-home clickable" :title="'在资源管理器中打开: ' + status.dshHome" @click="reveal(status.dshHome)">DSH_HOME: {{ status.dshHome }}</span>
         </div>
         <span :class="['dsh-badge', { ok: status?.dshInstalled }]">
           <component :is="status?.dshInstalled ? CheckCircle2 : AlertCircle" :size="13" />
@@ -411,6 +506,29 @@ watch(() => props.visible, async (v) => {
       </button>
     </div>
 
+    <!-- 插件批量管理：检查更新 / 一键更新全部 / 回滚 -->
+    <div class="plugin-batch" style="margin-top:12px" v-if="status?.dshInstalled">
+      <div class="action-row">
+        <button class="btn btn-secondary" :disabled="!dshReady || checkingPluginUpdates || updatingPlugins" @click="checkPluginUpdates">
+          {{ checkingPluginUpdates ? t('dshCheckingPluginUpdates') : t('dshCheckPluginUpdates') }}
+        </button>
+        <button class="btn btn-primary" :disabled="!dshReady || updatingPlugins" @click="updateAllPlugins">
+          <Download :size="14" />
+          {{ updatingPlugins ? t('dshUpdatingPlugins') : t('dshUpdateAllPlugins') }}
+        </button>
+        <button class="btn btn-secondary" :disabled="!dshReady || updatingPlugins || !pluginBackup" @click="rollbackPlugins" :title="pluginBackup || ''">
+          {{ t('dshRollback') }}
+        </button>
+      </div>
+      <p class="dsh-update-hint">{{ t('dshUpdateAllHint') }}</p>
+      <ul v-if="pluginUpdates.length" class="plugin-update-list">
+        <li v-for="u in pluginUpdates" :key="u.name">
+          <span class="pu-name">{{ u.name }}</span>
+          <span class="pu-ver">{{ u.current }} → <b>{{ u.latest }}</b></span>
+        </li>
+      </ul>
+    </div>
+
     <!-- 进度 -->
     <div v-if="(settingUp || updating) && progress?.stage === 'download-node'" class="dsh-progress">
       <div class="dsh-progress-bar"><div class="dsh-progress-fill" :style="{ width: progressPercent + '%' }" /></div>
@@ -467,6 +585,14 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-disabled);
   word-break: break-all;
   line-height: 1.4;
+}
+.dsh-status-path.clickable {
+  cursor: pointer;
+  color: var(--color-text-secondary);
+}
+.dsh-status-path.clickable:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
 }
 .dsh-status-home {
   color: var(--color-text-muted);
@@ -557,6 +683,45 @@ watch(() => props.visible, async (v) => {
 }
 .plugin-input:disabled {
   opacity: 0.5;
+}
+.plugin-batch {
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border);
+}
+.dsh-update-hint {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  line-height: 1.5;
+}
+.plugin-update-list {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.plugin-update-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  background: var(--color-bg-tertiary);
+  font-size: 12px;
+}
+.pu-name {
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+.pu-ver {
+  color: var(--color-text-muted);
+  white-space: nowrap;
+}
+.pu-ver b {
+  color: var(--color-accent);
 }
 .dsh-progress {
   margin-top: 12px;

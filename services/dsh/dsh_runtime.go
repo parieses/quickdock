@@ -3,14 +3,19 @@ package dsh
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	neturl "net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,6 +39,10 @@ type DSHProcessManager struct {
 	starting bool          // 冷启动进行中（窗口已开但 dsh 未就绪）；连点/关窗时避免误判"进程已退出"而重启
 	window   *application.WebviewWindow
 
+	// lastPluginBackup 最近一次「更新全部插件」前的备份目录（DSH_HOME/backups/web-<ts>）。
+	// 用于一键回滚；内存指针为空时回退到 backups/ 下最新 web-* 目录（跨重启仍可用）。
+	lastPluginBackup string
+
 	// aliveCache 缓存 isDSHAlive 结果：连续点击时避免每次 spawn netstat/tasklist（各 ~300ms）
 	aliveCache struct {
 		port int
@@ -52,7 +61,7 @@ html,body{height:100%;margin:0;background:#17181b;color:#e8eaed;font-family:syst
 
 // dshErrorPage 冷启动失败时的内置错误页（暗色，与 loading 页同风格）。
 // 避免把窗口 SetURL 到一个没在监听的死端口，让用户直面浏览器"无法访问此网站"。
-// 完整日志在主界面「设置 → DeepSeek」面板，关闭窗口后重新点击导航可重试。
+// 完整日志在主界面「环境管理 → DeepSeek Harness」面板，关闭窗口后重新点击导航可重试。
 
 func NewDSHProcessManager(app *application.App, nodeEnv *NodeEnvManager) *DSHProcessManager {
 	return &DSHProcessManager{app: app, nodeEnv: nodeEnv}
@@ -149,7 +158,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	// 否则 dsh 启动时 heal profile 的文件删除操作会被劫持成 trash 而崩溃。
 	env := cleanNodeEnv(os.Environ())
 	env = append(env, "DSH_HOME="+dshHome)
-	if nodeDir := m.nodeEnv.runtimeDir; nodeDir != "" {
+	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
 		if _, err := os.Stat(nodeDir); err == nil {
 			env = append(env, "PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		}
@@ -329,7 +338,7 @@ func (m *DSHProcessManager) NotifyStopped() {
 	if w == nil {
 		return
 	}
-	w.SetURL(dshErrorPage("dsh web 服务已停止。可在「设置 → DeepSeek」重新启动，或直接点击侧边栏 dsh 自动拉起。"))
+	w.SetURL(dshErrorPage("dsh web 服务已停止。可在「环境管理 → DeepSeek Harness」重新启动，或直接点击侧边栏 dsh 自动拉起。"))
 }
 
 // dshReachable 实时探测 dsh 是否真正可达（与 waitReady 相同的就绪语义：2xx/3xx/401/403，
@@ -426,7 +435,7 @@ func (m *DSHProcessManager) Stop() {
 	m.aliveCache.at = time.Time{}
 }
 
-// logf 转发诊断日志到「设置 → DeepSeek」日志面板（quickdock:dsh:log 事件）
+// logf 转发诊断日志到「环境管理 → DeepSeek Harness」日志面板（quickdock:dsh:log 事件）
 func (m *DSHProcessManager) logf(level, msg string) {
 	if m.app != nil {
 		m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
@@ -559,7 +568,7 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 	// 便携 node 目录前置到 PATH：dsh 插件安装过程中可能 spawn `node` 子进程
 	// （npm 的 postinstall 如 koffi 的 cnoke.cjs 走 cmd /c node），新电脑无系统 node
 	// 时 PATH 里找不到 node 会直接失败。与 Start()/runNpmInstall() 保持一致。
-	if nodeDir := m.nodeEnv.runtimeDir; nodeDir != "" {
+	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
 		if _, err := os.Stat(nodeDir); err == nil {
 			env = append(env, "PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 		}
@@ -624,6 +633,341 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 	return nil
 }
 
+// PluginUpdateInfo 单个插件的「有可用更新」信息（供 CheckPluginUpdates 预检返回）。
+type PluginUpdateInfo struct {
+	Name    string `json:"name"`
+	Current string `json:"current"`
+	Latest  string `json:"latest"`
+}
+
+// UpdateAllPlugins 执行 dsh plugin --profile web update，将 profile 内所有插件升级到各自
+// semver 范围内的最新版（git 依赖拉默认分支最新提交；精确固定版本如 0.3.6 不动）。
+// 升级前自动备份 package.json + pnpm-lock.yaml 到 DSH_HOME/backups/web-<ts>/，便于失败时回滚。
+// 日志复用 quickdock:dsh:log；完成时 emit quickdock:dsh:plugin{ok,backup,kind:"update"}。
+func (m *DSHProcessManager) UpdateAllPlugins() error {
+	finished := false
+	defer func() {
+		if !finished {
+			m.emitPluginUpdateDone(false, "")
+		}
+	}()
+
+	node := m.nodeEnv.NodePath()
+	if node == "" {
+		return fmt.Errorf("node 未就绪，请先安装运行环境")
+	}
+	mainJS := m.nodeEnv.DshMainJS()
+	if _, err := os.Stat(mainJS); err != nil {
+		return fmt.Errorf("dsh 入口缺失，请重新安装: %s", mainJS)
+	}
+	dshHome := m.nodeEnv.DshHome()
+	profileDir := filepath.Join(dshHome, "profiles", "web")
+	if err := os.MkdirAll(dshHome, 0755); err != nil {
+		return err
+	}
+	logf := func(level, msg string) {
+		if m.app != nil {
+			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
+		}
+	}
+
+	// 1) 升级前备份（固定版/range 版都会改 package.json，备份保证可回滚）
+	backupDir, err := m.backupProfileDeps(profileDir, logf)
+	if err != nil {
+		logf("error", fmt.Sprintf("备份失败，已取消更新: %v", err))
+		return err
+	}
+	m.lastPluginBackup = backupDir
+
+	// 2) 确保 pnpm 可用（复用 InstallPlugin 的兜底逻辑）
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	if err := m.ensurePnpm(ctx, logf); err != nil {
+		logf("error", fmt.Sprintf("pnpm 不可用且自动安装失败: %v", err))
+		return err
+	}
+
+	// 3) dsh plugin 子命令会把剩余参数转发给 profile 目录里的 pnpm；无包名即更新全部
+	args := []string{mainJS, "plugin", "--profile", "web", "update"}
+	cmd := exec.CommandContext(ctx, node, args...)
+	cmd.Dir = dshHome
+	env := cleanNodeEnv(os.Environ())
+	env = append(env, "DSH_HOME="+dshHome)
+	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
+		if _, err := os.Stat(nodeDir); err == nil {
+			env = append(env, "PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
+	}
+	cmd.Env = env
+	cmd.SysProcAttr = hideWindowAttr()
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH update stdout log goroutine panic: %v\n", r)
+			}
+		}()
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			logf("info", sc.Text())
+		}
+	}()
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf("QuickDock: DSH update stderr log goroutine panic: %v\n", r)
+			}
+		}()
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			logf("info", sc.Text())
+		}
+	}()
+
+	if err := cmd.Wait(); err != nil {
+		logf("error", fmt.Sprintf("更新插件失败: %v（可点回滚恢复备份）", err))
+		return err // defer 统一补发 emitPluginUpdateDone(false)
+	}
+	logf("info", fmt.Sprintf("全部插件更新完成（旧配置已备份到 %s，异常可回滚）", backupDir))
+	finished = true
+	m.emitPluginUpdateDone(true, backupDir)
+	return nil
+}
+
+// RollbackPlugins 将 profile 插件回滚到最近一次「更新全部插件」之前的备份状态：
+// 删当前 node_modules 与 package.json/lock，从备份恢复 package.json+lock 后 pnpm install 重建。
+func (m *DSHProcessManager) RollbackPlugins() (err error) {
+	backupDir := m.latestBackupDir()
+	if backupDir == "" {
+		return fmt.Errorf("没有可用的插件备份")
+	}
+	profileDir := filepath.Join(m.nodeEnv.DshHome(), "profiles", "web")
+	logf := func(level, msg string) {
+		if m.app != nil {
+			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
+		}
+	}
+	// 统一在返回前 emit 完成事件（service.go 在另一包，无法直接调 unexported emit），
+	// 成功 err==nil → ok:true，任意失败路径 err!=nil → ok:false，前端据此复位回滚按钮。
+	defer func() {
+		if m.app != nil {
+			m.app.Event.Emit("quickdock:dsh:plugin-rollback", map[string]bool{"ok": err == nil})
+		}
+	}()
+	logf("info", fmt.Sprintf("开始回滚插件（备份: %s）…", backupDir))
+
+	// 重建前清场：删 node_modules（大目录）+ package.json/lock，避免旧依赖残留
+	if err := os.RemoveAll(filepath.Join(profileDir, "node_modules")); err != nil {
+		logf("error", fmt.Sprintf("清理 node_modules 失败: %v", err))
+	}
+	_ = os.Remove(filepath.Join(profileDir, "package.json"))
+	_ = os.Remove(filepath.Join(profileDir, "pnpm-lock.yaml"))
+	if err := copyFile(filepath.Join(backupDir, "package.json"), filepath.Join(profileDir, "package.json")); err != nil {
+		logf("error", fmt.Sprintf("恢复 package.json 失败: %v", err))
+		return err
+	}
+	if _, err := os.Stat(filepath.Join(backupDir, "pnpm-lock.yaml")); err == nil {
+		_ = copyFile(filepath.Join(backupDir, "pnpm-lock.yaml"), filepath.Join(profileDir, "pnpm-lock.yaml"))
+	}
+
+	node := m.nodeEnv.NodePath()
+	if node == "" {
+		return fmt.Errorf("node 未就绪，请先安装运行环境")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Minute)
+	defer cancel()
+	pnpm, err := m.pnpmBin()
+	if err != nil {
+		if err2 := m.ensurePnpm(ctx, logf); err2 != nil {
+			logf("error", fmt.Sprintf("pnpm 不可用且自动安装失败: %v", err2))
+			return err2
+		}
+		if pnpm, err = m.pnpmBin(); err != nil {
+			return err
+		}
+	}
+
+	cmd := exec.CommandContext(ctx, pnpm, "install")
+	cmd.Dir = profileDir
+	env := cleanNodeEnv(os.Environ())
+	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
+		if _, err := os.Stat(nodeDir); err == nil {
+			env = append(env, "PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
+	}
+	cmd.Env = env
+	cmd.SysProcAttr = hideWindowAttr()
+	stdout, _ := cmd.StdoutPipe()
+	stderr, _ := cmd.StderrPipe()
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	go func() {
+		sc := bufio.NewScanner(stdout)
+		for sc.Scan() {
+			logf("info", sc.Text())
+		}
+	}()
+	go func() {
+		sc := bufio.NewScanner(stderr)
+		for sc.Scan() {
+			logf("info", sc.Text())
+		}
+	}()
+	if err := cmd.Wait(); err != nil {
+		logf("error", fmt.Sprintf("回滚安装依赖失败: %v", err))
+		return err
+	}
+	m.lastPluginBackup = ""
+	logf("info", "插件已回滚到更新前状态")
+	return nil
+}
+
+// CheckPluginUpdates 预检 profile 内 registry 插件（git 依赖不纳入）是否有可用更新，
+// 返回 {name,current,latest} 列表。联网查 npm registry，可能耗时数秒。
+func (m *DSHProcessManager) CheckPluginUpdates() ([]PluginUpdateInfo, error) {
+	profileDir := filepath.Join(m.nodeEnv.DshHome(), "profiles", "web")
+	if _, err := os.Stat(filepath.Join(profileDir, "package.json")); err != nil {
+		return nil, fmt.Errorf("profile 未初始化")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	pnpm, err := m.pnpmBin()
+	if err != nil {
+		if err2 := m.ensurePnpm(ctx, func(string, string) {}); err2 != nil {
+			return nil, err2
+		}
+		if pnpm, err = m.pnpmBin(); err != nil {
+			return nil, err
+		}
+	}
+	cmd := exec.CommandContext(ctx, pnpm, "outdated", "--json")
+	cmd.Dir = profileDir
+	env := cleanNodeEnv(os.Environ())
+	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
+		if _, err := os.Stat(nodeDir); err == nil {
+			env = append(env, "PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
+	}
+	cmd.Env = env
+	cmd.SysProcAttr = hideWindowAttr()
+	// pnpm outdated 有更新时 exit code=1（非错误），故用 Output 捕获 stdout 后尽力解析
+	out, _ := cmd.Output()
+	var raw map[string]map[string]string
+	if err := json.Unmarshal(out, &raw); err != nil || len(raw) == 0 {
+		return []PluginUpdateInfo{}, nil
+	}
+	res := make([]PluginUpdateInfo, 0, len(raw))
+	for name, info := range raw {
+		res = append(res, PluginUpdateInfo{Name: name, Current: info["current"], Latest: info["latest"]})
+	}
+	sort.Slice(res, func(i, j int) bool { return res[i].Name < res[j].Name })
+	return res, nil
+}
+
+// emitPluginUpdateDone 更新全部插件完成事件（带 backup 路径供前端启用回滚）。
+func (m *DSHProcessManager) emitPluginUpdateDone(ok bool, backup string) {
+	if m.app != nil {
+		m.app.Event.Emit("quickdock:dsh:plugin", map[string]any{"ok": ok, "backup": backup, "kind": "update"})
+	}
+}
+
+// pnpmBin 返回可用 pnpm 可执行文件路径（PATH 优先，其次便携 node 目录），无则空串。
+func (m *DSHProcessManager) pnpmBin() (string, error) {
+	if p, err := exec.LookPath("pnpm"); err == nil {
+		return p, nil
+	}
+	nodeDir := m.nodeEnv.runtimeDir()
+	if nodeDir != "" {
+		cand := filepath.Join(nodeDir, "pnpm"+exeExt())
+		if _, err := os.Stat(cand); err == nil {
+			return cand, nil
+		}
+	}
+	return "", fmt.Errorf("pnpm 不可用")
+}
+
+// backupProfileDeps 将 profile 的 package.json(+pnpm-lock.yaml) 备份到
+// DSH_HOME/backups/web-<时间戳>/，返回备份目录。
+func (m *DSHProcessManager) backupProfileDeps(profileDir string, logf func(string, string)) (string, error) {
+	pkg := filepath.Join(profileDir, "package.json")
+	if _, err := os.Stat(pkg); err != nil {
+		return "", fmt.Errorf("找不到 profile package.json: %s", pkg)
+	}
+	backupDir := filepath.Join(m.nodeEnv.DshHome(), "backups", "web-"+time.Now().Format("20060102-150405"))
+	if err := os.MkdirAll(backupDir, 0755); err != nil {
+		return "", err
+	}
+	if err := copyFile(pkg, filepath.Join(backupDir, "package.json")); err != nil {
+		return "", err
+	}
+	if lock := filepath.Join(profileDir, "pnpm-lock.yaml"); statOk(lock) {
+		if err := copyFile(lock, filepath.Join(backupDir, "pnpm-lock.yaml")); err != nil {
+			return "", err
+		}
+	}
+	logf("info", fmt.Sprintf("已备份插件配置到 %s", backupDir))
+	return backupDir, nil
+}
+
+// latestBackupDir 返回最近一次备份目录：内存指针优先，否则 backups/ 下按名称（含时间戳）排序取最新。
+func (m *DSHProcessManager) latestBackupDir() string {
+	if m.lastPluginBackup != "" {
+		if statOk(m.lastPluginBackup) {
+			return m.lastPluginBackup
+		}
+	}
+	backupRoot := filepath.Join(m.nodeEnv.DshHome(), "backups")
+	entries, err := os.ReadDir(backupRoot)
+	if err != nil {
+		return ""
+	}
+	var dirs []string
+	for _, e := range entries {
+		if e.IsDir() && strings.HasPrefix(e.Name(), "web-") {
+			dirs = append(dirs, filepath.Join(backupRoot, e.Name()))
+		}
+	}
+	if len(dirs) == 0 {
+		return ""
+	}
+	sort.Strings(dirs) // 名称含时间戳，字典序即时间序
+	return dirs[len(dirs)-1]
+}
+
+// copyFile 文件逐字节复制（备份/回滚用，简单可靠）。
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+// statOk 文件/目录存在返回 true（封装 os.Stat 的 err 判断，避免重复啰嗦）。
+func statOk(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // ensurePnpm 检查 pnpm 是否可用，不可用则用当前 node/npm 补装。
 // dsh plugin add 内部调 pnpm 管理插件依赖，全新电脑无 pnpm 会报
 // 'pnpm' 不是内部或外部命令。
@@ -633,7 +977,7 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 		return nil
 	}
 	// 便携 node 全局目录里可能有（SetupDSH 已装但 PATH 未刷新）
-	nodeDir := m.nodeEnv.runtimeDir
+	nodeDir := m.nodeEnv.runtimeDir()
 	if nodeDir != "" {
 		pnpmExe := nodeDir + string(os.PathSeparator) + "pnpm" + exeExt()
 		if _, err := os.Stat(pnpmExe); err == nil {
@@ -820,10 +1164,10 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 				// 可达性重试（≤10s），确认真正可达才导航；否则显示友好错误页，绝不把窗口
 				// 甩到死地址而让用户直面浏览器"无法访问此网站"。
 				if !m.waitReachableThenNavigate(w, target, 10*time.Second) {
-					w.SetURL(dshErrorPage("dsh 启动后无法访问（服务不可达），请关闭本窗口后重新点击导航重试，或在「设置 → DeepSeek」查看日志"))
+					w.SetURL(dshErrorPage("dsh 启动后无法访问（服务不可达），请关闭本窗口后重新点击导航重试，或在「环境管理 → DeepSeek Harness」查看日志"))
 				}
 			case <-time.After(50 * time.Second): // 兜底 > waitReady 45s 上限
-				w.SetURL(dshErrorPage("dsh 启动超时（超过 50 秒），请关闭窗口后重新点击导航重试，或在「设置 → DeepSeek」查看日志"))
+				w.SetURL(dshErrorPage("dsh 启动超时（超过 50 秒），请关闭窗口后重新点击导航重试，或在「环境管理 → DeepSeek Harness」查看日志"))
 			}
 		}(win, url, ready)
 	}

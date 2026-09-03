@@ -131,16 +131,6 @@ func validateColumn(col string) error {
 	return nil
 }
 
-// validateColumns 批量检查列名
-func validateColumns(columns []string) error {
-	for _, col := range columns {
-		if !validColumns[col] {
-			return fmt.Errorf("非法列名: %s", col)
-		}
-	}
-	return nil
-}
-
 // Database 包装 SQLite 连接，提供互斥锁保护
 type Database struct {
 	mu   sync.Mutex

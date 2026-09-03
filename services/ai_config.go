@@ -69,16 +69,6 @@ type AIConfig struct {
 	MaxTokens   int     `json:"maxTokens"`
 }
 
-var aiProviderPresets = map[string]string{
-	"openai":   "https://api.openai.com/v1",
-	"deepseek": "https://api.deepseek.com/v1",
-	"kimi":     "https://api.moonshot.cn/v1",
-	"qwen":     "https://dashscope.aliyuncs.com/compatible-mode/v1",
-	"ollama":   "http://localhost:11434/v1",
-	"azure":    "",
-	"custom":   "",
-}
-
 // apiEndpoint 根据 provider 构建正确的 API URL 和认证头。
 func apiEndpoint(cfg AIProfile) (url string, authKey, authVal string) {
 	base := strings.TrimRight(cfg.BaseURL, "/")

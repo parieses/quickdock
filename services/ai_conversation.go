@@ -98,7 +98,7 @@ func (a *AppService) AIRegenerateTitle(convID string) *ApiResult {
 		return Fail(err)
 	}
 	title = strings.TrimSpace(title)
-	title = strings.Trim(title, "\"'\"")
+	title = strings.Trim(title, "\"'")
 	title = strings.Trim(title, "。！？.!?")
 	if utf8.RuneCountInString(title) > 30 {
 		title = string([]rune(title)[:30]) + "…"

@@ -231,11 +231,6 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	}
 }
 
-// waitForExit 等待子进程退出（通过 doneCh 信号，不自行调用 Cmd.Wait 避免双重 Wait）
-func (inst *PluginInstance) waitForExit() {
-	<-inst.doneCh
-}
-
 // SendNotification 发送 JSON-RPC 通知（无需响应）
 func (inst *PluginInstance) SendNotification(method string, params interface{}) error {
 	paramsJSON, err := json.Marshal(params)

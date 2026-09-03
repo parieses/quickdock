@@ -2,7 +2,7 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、HTTP 客户端、数据库连接、Webhook 通知与 23 个开箱即用插件（含可选的 AI 助手），并原生集成 DeepSeek Harness，让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、HTTP 客户端、数据库连接、Webhook 通知与 23 个开箱即用插件，以及多运行时环境管理（Node.js / PHP / Go / Nginx / Redis / Git 一键安装与版本切换）（含可选的 AI 助手），并原生集成 DeepSeek Harness，让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
 
@@ -217,6 +217,63 @@
 
 ---
 
+
+## 🔧 环境管理
+
+内置多运行时版本管理，支持一键安装 / 切换 / 启停，多版本共存于用户目录，不污染系统 PATH，纯用户态、清理时随 QuickDock 一并删除。
+
+### 支持的运行时
+
+| 运行时 | 分组 | 下载源 | 版本数量 | 平台 |
+|--------|------|--------|----------|------|
+| **Node.js** | 语言 | nodejs.org JSON feed + npmmirror 镜像 | ~60（LTS + 近 3 年） | Windows |
+| **PHP** | 语言 | windows.php.net archives（支持 VC14/VC15/VS16） | ~200（含 7.x 系列） | Windows |
+| **Go** | 语言 | go.dev/dl/ HTML 全量解析 | ~260 | Windows |
+| **Nginx** | Web 服务器 | nginx.org 官方 | ~20 | Windows |
+| **Redis** | 缓存 | redis-windows GitHub Releases | ~10 | Windows |
+| **Git** | 工具 | git-for-windows GitHub Releases | ~10 | Windows |
+
+### 核心设计
+
+- **便携优先**：所有版本安装至 `%APPDATA%\QuickDock\runtime\<name>\<version>`，不写注册表、不申请管理员权限
+- **多版本共存**：同一运行时可安装多个版本，通过「环境变量」切换当前激活版本
+- **下载源可切换**：每个运行时支持官方源 / 国内镜像 / 自定义 URL 模板（支持 `{version}` / `{os}` / `{arch}` 占位符）
+- **版本列表智能筛选**：
+  - Node.js：LTS 版本 + 近 3 年发布版本，去重后按语义降序，上限 60 条
+  - PHP：自动识别 VC14 / VC15 / VS16 编译器的二进制包
+  - Go / Redis / Git：GitHub Releases API 优先，HTML 兜底解析
+- **缓存策略**：版本列表内存缓存 1h（仅成功时缓存），失败立即重试，避免网络抖动后长时间看到旧数据
+- **代理容错**：fetchURL 代理请求失败时自动降级直连，超时 30s
+- **下载可靠性**：先写临时文件，完整成功后才落盘目标目录，避免中途失败留下半成品
+- **后台异步**：下载 / 解压 / 安装全程异步，进度通过 IPC 事件实时推送前端
+
+### UI 交互
+
+- 点击运行时标签 → 自动加载版本列表
+- 点击 `▾` 按钮或聚焦输入框 → 展开版本下拉列表（滚动、高亮当前选中版本）
+- 点击外部 → 自动收起列表
+- 加载失败 → 显示错误信息 + 「重试」按钮
+- 手动刷新 → 点「刷新列表」按钮（换源后重新拉取）
+- 有更新 → 显示「可更新：X.X.X → Y.Y.Y」提示，一键升级
+
+### 文件结构
+
+```
+services/env/
+├── source.go          # 版本列表解析（Node/PHP/Go/Redis/Nginx/Git）+ 缓存 + 下载源配置
+├── manager.go         # Manager 门面：List / AvailableVersions / SetSource 等
+├── node.go            # NodeRuntime：安装 / 删除 / 版本探测
+├── php.go             # PHPRuntime：安装 / 删除 / php-fpm 启停 / ini 配置
+├── go.go              # GoRuntime：安装 / 删除 / 版本探测
+├── nginx.go           # NginxRuntime：安装 / 删除 / 服务启停
+├── redis.go           # RedisRuntime：安装 / 删除 / redis.conf 编辑 / 日志
+├── git.go             # GitRuntime：版本探测 / SSH / LFS 状态
+├── detect_cache.go    # 检测结果持久化缓存（detected.json）
+├── download.go        # 下载器（多源回退 + 进度回调 + 代理感知）
+├── extract.go         # 解压（zip / tar.gz / tar.xz）
+├── meta.go            # 版本元数据（别名 / 备注 / 激活状态）
+└── service.go         # php-fpm / nginx / redis 服务生命周期管理
+```
 ## 快速开始
 
 ### 系统要求

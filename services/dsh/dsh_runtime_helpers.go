@@ -11,12 +11,12 @@ import (
 )
 
 // dshErrorPage 返回 dsh 启动失败时的错误页（data URL），避免把窗口 SetURL 到一个没在监听的死端口，
-// 让用户直面浏览器"无法访问此网站"。完整日志在主界面「设置 → DeepSeek」面板。
+// 让用户直面浏览器"无法访问此网站"。完整日志在主界面「环境管理 → DeepSeek Harness」面板。
 func dshErrorPage(reason string) string {
 	return "data:text/html;charset=utf-8," + neturl.QueryEscape(fmt.Sprintf(`<!DOCTYPE html><html lang="zh"><head><meta charset="utf-8"><style>
 html,body{height:100%%;margin:0;background:#17181b;color:#e8eaed;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;padding:24px}
 .ico{font-size:34px}.t{font-size:15px;font-weight:600}.r{font-size:12px;color:#f28b82;max-width:540px;word-break:break-all}.s{font-size:12px;color:#8b919c}
-</style></head><body><div class="ico">⚠️</div><div class="t">dsh 启动失败</div><div class="r">%s</div><div class="s">完整日志见主界面「设置 → DeepSeek」，关闭本窗口后重新点击导航可重试</div></body></html>`, neturl.PathEscape(reason)))
+</style></head><body><div class="ico">⚠️</div><div class="t">dsh 启动失败</div><div class="r">%s</div><div class="s">完整日志见主界面「环境管理 → DeepSeek Harness」，关闭本窗口后重新点击导航可重试</div></body></html>`, neturl.PathEscape(reason)))
 }
 
 // FindFreePort 在 127.0.0.1 上找空闲端口（默认端口被占用时兜底）

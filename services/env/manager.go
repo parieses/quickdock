@@ -87,7 +87,14 @@ type Manager struct {
 	// links 记录用户导入的外部安装目录（按运行时），loadLinks/saveLinks 持久化到 env/links.json
 	linksMu sync.RWMutex
 	links   map[Runtime][]linkEntry
+	// detectCache 缓存真实检测出的已装版本（detect_cache.go），List/InstalledVersions 读缓存
+	// 避免每次 spawn exe 探测版本；RefreshDetected 在触发点重扫并持久化到 env/detected.json
+	detectMu    sync.RWMutex
+	detectCache map[Runtime][]Install
 }
+
+// runtimeOrder 运行时固定展示顺序
+var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeRedis, RuntimeNginx, RuntimeGit}
 
 func NewManager() *Manager {
 	m := &Manager{
@@ -99,9 +106,12 @@ func NewManager() *Manager {
 			RuntimeNginx: NewNginxRuntime(),
 			RuntimeGit:   NewGitRuntime(),
 		},
-		links: map[Runtime][]linkEntry{},
+		links:       map[Runtime][]linkEntry{},
+		detectCache: map[Runtime][]Install{},
 	}
 	m.loadLinks()
+	m.loadDetected()
+	m.syncPHPLinks()
 	return m
 }
 
@@ -189,6 +199,12 @@ func (m *Manager) scopeFor(rt Runtime, version string) string {
 	if err != nil {
 		return ""
 	}
+	// 优先查检测结果缓存（无 spawn），缓存未命中（外部新装的版本）再兜底真实扫描
+	for _, ins := range m.cachedInstalls(rt) {
+		if ins.Version == version {
+			return ins.Scope
+		}
+	}
 	for _, ins := range a.InstalledVersions() {
 		if ins.Version == version {
 			return ins.Scope
@@ -208,6 +224,25 @@ func (m *Manager) mergeLinks(rt Runtime, installs []Install) []Install {
 	return installs
 }
 
+// linksToMap 把 linkEntry 列表压成 version→dir 映射，便于注入到具体运行时适配器。
+func linksToMap(entries []linkEntry) map[string]string {
+	m := make(map[string]string, len(entries))
+	for _, e := range entries {
+		m[e.Version] = e.Dir
+	}
+	return m
+}
+
+// syncPHPLinks 把导入版 PHP 目录同步给 PHPRuntime，使其也能以 php-fpm 方式启停。
+func (m *Manager) syncPHPLinks() {
+	if p, ok := m.adapters[RuntimePHP].(*PHPRuntime); ok {
+		m.linksMu.RLock()
+		entries := m.links[RuntimePHP]
+		m.linksMu.RUnlock()
+		p.SetLinkedDirs(linksToMap(entries))
+	}
+}
+
 func (m *Manager) adapter(rt Runtime) (RuntimeAdapter, error) {
 	a, ok := m.adapters[rt]
 	if !ok {
@@ -216,25 +251,29 @@ func (m *Manager) adapter(rt Runtime) (RuntimeAdapter, error) {
 	return a, nil
 }
 
-// List 返回所有运行时概览（顺序：Node → PHP → Go → Redis → Nginx → Git）
+// List 返回所有运行时概览（顺序：Node → PHP → Go → Redis → Nginx → Git）。
+// 已装版本读检测结果缓存（detect_cache.go），不做真实探测——真实探测由触发点
+// （启动后台扫描/导入/安装/删除）执行并重新保存，保证本方法毫秒级返回、前端列表不闪。
 func (m *Manager) List() []RuntimeInfo {
-	order := []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeRedis, RuntimeNginx, RuntimeGit}
+	// 系统 PATH 只读取一次（注册表读操作），供所有运行时复用，避免 List 遍历 6 个运行时时重复读注册表。
+	pathVal, _ := sysReadPath()
+	entries := splitSystemPath(pathVal)
 	var out []RuntimeInfo
-	for _, rt := range order {
+	for _, rt := range runtimeOrder {
 		a := m.adapters[rt]
 		var si []SourceInfo
 		for _, s := range ListSources(rt) {
 			si = append(si, SourceInfo{ID: s.ID, Name: s.Name})
 		}
 		_, hasSvc := a.(ServiceController)
-		installed := m.mergeLinks(rt, a.InstalledVersions())
+		installed := m.mergeLinks(rt, m.cachedInstalls(rt))
 		out = append(out, RuntimeInfo{
 			ID:           string(rt),
 			Name:         a.DisplayName(),
 			Group:        registry[rt].group,
 			Platforms:    orEmpty(a.SupportedPlatforms()),
 			Recommended:  orEmpty(a.Recommended()),
-			Installed:    orEmpty(mergeMeta(rt, installed)),
+			Installed:    orEmpty(mergeMeta(rt, installed, activeVersion(rt), entries)),
 			Sources:      orEmpty(si),
 			ActiveSource: ActiveSource(rt),
 			HasService:   hasSvc,
@@ -245,10 +284,9 @@ func (m *Manager) List() []RuntimeInfo {
 
 // mergeMeta 将用户元数据（激活版本/别名/备注）合并进已安装版本列表，
 // 并计算每个版本是否真正注册进系统 PATH（InSystemPath）。
-func mergeMeta(rt Runtime, installs []Install) []Install {
-	active := activeVersion(rt)
-	pathVal, _ := sysReadPath()
-	entries := splitSystemPath(pathVal)
+// active 为该运行时当前激活版本，entries 为已展开+Clean 的系统 PATH 目录集合（调用方一次性算好传入，
+// 避免 List 遍历 6 个运行时时重复读注册表）。
+func mergeMeta(rt Runtime, installs []Install, active string, entries map[string]bool) []Install {
 	for i := range installs {
 		vm := versionMetaOf(rt, installs[i].Version)
 		installs[i].Alias = vm.Alias
@@ -325,7 +363,12 @@ func (m *Manager) Install(rt Runtime, version, sourceID, custom string, cb Insta
 	if custom != "" {
 		SetCustomSource(rt, custom)
 	}
-	return a.Install(context.Background(), version, cb)
+	if err := a.Install(context.Background(), version, cb); err != nil {
+		return err
+	}
+	// 安装完成后重扫并重新保存检测结果，列表立即含新版本（触发点之一）
+	m.RefreshDetected(rt)
+	return nil
 }
 
 // SetSource 切换下载源 / 设置自定义源（custom=="" 且 sourceID!="custom" 时清除自定义源）
@@ -365,12 +408,14 @@ func (m *Manager) AvailableVersions(rt Runtime) []string {
 }
 
 // InstalledVersions 返回某运行时已安装的全部版本（便携 + 系统 + 导入目录，已合并别名/备注/激活状态）。
+// 读检测结果缓存，与 List 同源。
 func (m *Manager) InstalledVersions(rt Runtime) ([]Install, error) {
-	a, err := m.adapter(rt)
-	if err != nil {
+	if _, err := m.adapter(rt); err != nil {
 		return nil, err
 	}
-	return mergeMeta(rt, m.mergeLinks(rt, a.InstalledVersions())), nil
+	pathVal, _ := sysReadPath()
+	entries := splitSystemPath(pathVal)
+	return mergeMeta(rt, m.mergeLinks(rt, m.cachedInstalls(rt)), activeVersion(rt), entries), nil
 }
 
 // SetActive 设置某运行时的激活版本（其 bin 目录即“环境变量指向”的版本）。version=="" 清除激活。
@@ -452,7 +497,12 @@ func (m *Manager) DeleteVersion(rt Runtime, version string) error {
 	if err := a.DeleteVersion(version); err != nil {
 		return err
 	}
-	return ClearVersionMeta(rt, version)
+	if err := ClearVersionMeta(rt, version); err != nil {
+		return err
+	}
+	// 删除后重扫并重新保存检测结果，缓存与磁盘一致（避免已删版本从缓存复活）
+	m.RefreshDetected(rt)
+	return nil
 }
 
 // removeLink 从 links 中移除某运行时的某导入版本并持久化。
@@ -468,6 +518,7 @@ func (m *Manager) removeLink(rt Runtime, version string) {
 	}
 	m.links[rt] = out
 	_ = m.saveLinks()
+	m.syncPHPLinks()
 }
 
 // ImportVersion 导入一个已存在的外部安装目录：探测其版本号后登记为 linked 安装，
@@ -511,11 +562,27 @@ func (m *Manager) ImportVersion(rt Runtime, dir string) (string, error) {
 		return "", fmt.Errorf("无法识别 %s 的版本号", exeName)
 	}
 	m.linksMu.Lock()
-	m.links[rt] = append(m.links[rt], linkEntry{Version: version, Dir: dir})
+	// 去重：同版本已登记则跳过（避免重复列示与激活歧义），仅更新目录
+	dup := false
+	for i, l := range m.links[rt] {
+		if l.Version == version {
+			m.links[rt][i].Dir = dir
+			dup = true
+			break
+		}
+	}
+	if !dup {
+		m.links[rt] = append(m.links[rt], linkEntry{Version: version, Dir: dir})
+	}
 	m.linksMu.Unlock()
 	if err := m.saveLinks(); err != nil {
 		return "", err
 	}
+	// 导入后同步给 PHP 适配器，使其可被 php-fpm 启停
+	m.syncPHPLinks()
+	// 导入后触发一次真实检测并重新保存（用户要求的触发点之一），使系统 PATH 上的同运行时
+	// 版本、以及缓存与磁盘尽快对齐；导入的外部目录本身经 links.json 在 List 时合并展示。
+	m.RefreshDetected(rt)
 	return version, nil
 }
 
@@ -598,6 +665,54 @@ func (m *Manager) PHPConfigSet(rt Runtime, version string, patch PHPConfigPatch)
 	return writePHPConfig(dir, patch)
 }
 
+// RedisConfigGet 读取某已装 Redis 版本的 redis.conf 配置。
+func (m *Manager) RedisConfigGet(rt Runtime, version string) (*RedisConfig, error) {
+	if rt != RuntimeRedis {
+		return nil, fmt.Errorf("仅 Redis 支持配置编辑")
+	}
+	a, err := m.adapter(rt)
+	if err != nil {
+		return nil, err
+	}
+	r, ok := a.(*RedisRuntime)
+	if !ok {
+		return nil, fmt.Errorf("Redis 运行时类型异常")
+	}
+	return r.ConfigGet(version)
+}
+
+// RedisConfigSet 写回某已装 Redis 版本的 redis.conf（整体覆盖）。
+func (m *Manager) RedisConfigSet(rt Runtime, version, raw string) error {
+	if rt != RuntimeRedis {
+		return fmt.Errorf("仅 Redis 支持配置编辑")
+	}
+	a, err := m.adapter(rt)
+	if err != nil {
+		return err
+	}
+	r, ok := a.(*RedisRuntime)
+	if !ok {
+		return fmt.Errorf("Redis 运行时类型异常")
+	}
+	return r.ConfigSet(version, raw)
+}
+
+// RedisLogGet 读取某已装 Redis 版本的运行日志（redis.log 尾部）。
+func (m *Manager) RedisLogGet(rt Runtime, version string) (string, error) {
+	if rt != RuntimeRedis {
+		return "", fmt.Errorf("仅 Redis 支持日志查询")
+	}
+	a, err := m.adapter(rt)
+	if err != nil {
+		return "", err
+	}
+	r, ok := a.(*RedisRuntime)
+	if !ok {
+		return "", fmt.Errorf("Redis 运行时类型异常")
+	}
+	return r.LogGet(version)
+}
+
 // Start 启动某运行时的服务（仅 nginx/redis 支持）。
 func (m *Manager) Start(rt Runtime, version string, onLog func(string)) error {
 	a, err := m.adapter(rt)
@@ -635,4 +750,14 @@ func (m *Manager) Status(rt Runtime, version string) (ServiceStatus, error) {
 		return ServiceStatus{}, nil
 	}
 	return sc.Status(version), nil
+}
+
+// GitStatus 返回当前 Git 环境的综合状态（版本/路径/SSH/Git LFS），供环境管理页状态表展示。
+func (m *Manager) GitStatus() GitStatusInfo {
+	if a, err := m.adapter(RuntimeGit); err == nil {
+		if g, ok := a.(*GitRuntime); ok {
+			return g.Status()
+		}
+	}
+	return GitStatusInfo{}
 }

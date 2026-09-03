@@ -207,3 +207,86 @@ select:focus-visible {
 /* ==================== 过渡辅助 ==================== */
 .fade-enter-active, .fade-leave-active { transition: opacity var(--transition-base); }
 .fade-enter-from, .fade-leave-to { opacity: 0; }
+
+
+/* ---- 版本列表选择器 ---- */
+.install-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.version-input {
+  width: 100%;
+  padding-right: 36px;
+  padding-left: 10px;
+  box-sizing: border-box;
+}
+.version-toggle-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  z-index: 1;
+}
+.version-toggle-btn:hover:not(:disabled) { opacity: 0.85; }
+.version-toggle-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.version-list-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  margin-top: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--color-surface, #1e1e1e);
+  border: 1px solid var(--color-border, #333);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.version-list-loading,
+.version-list-error,
+.version-list-empty {
+  padding: 10px 12px;
+  text-align: center;
+  font-size: 13px;
+  cursor: default;
+}
+.version-list-loading { color: var(--color-muted, #888); }
+.version-list-error { color: var(--color-danger, #e06c75); }
+.version-list-empty { color: var(--color-accent, #4a9eff); cursor: pointer; }
+.version-list-empty:hover { opacity: 0.8; }
+.retry-link { color: var(--color-accent, #4a9eff); margin-left: 6px; }
+.version-item {
+  padding: 7px 12px;
+  font-size: 13px;
+  color: var(--color-text, #e0e0e0);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.1s;
+}
+.version-item:hover { background: var(--color-hover, #2a2a2a); }
+.version-item.active { background: var(--color-accent, #4a9eff); color: #fff; }
+.version-list-note {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--color-muted, #666);
+  text-align: center;
+  border-top: 1px solid var(--color-border, #2a2a2a);
+}

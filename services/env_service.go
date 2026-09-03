@@ -16,11 +16,26 @@ type envProgress struct {
 }
 
 // EnvList 返回所有受管运行时的概览：已装版本、可下载版本清单、可用下载源、当前活跃源。
+// 已装版本读检测结果缓存（启动扫描/导入/安装/删除时刷新并持久化），本方法毫秒级返回。
 func (a *AppService) EnvList() *ApiResult {
 	if a.Env == nil {
 		return FailMsg("env 未初始化")
 	}
 	return Ok(a.Env.List())
+}
+
+// EnvRefresh 强制重新扫描所有运行时（便携目录 + 系统 PATH），完成后重新保存检测结果，
+// 并经 quickdock:env:refreshed 事件通知前端刷新列表。供环境管理页的刷新按钮调用。
+func (a *AppService) EnvRefresh() *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	a.Env.RefreshAllAsync(func() {
+		if a.app != nil {
+			a.app.Event.Emit("quickdock:env:refreshed")
+		}
+	})
+	return Ok(nil)
 }
 
 // EnvSources 返回某运行时的可用下载源（含自定义源）。
@@ -136,6 +151,14 @@ func (a *AppService) EnvStatus(runtime, version string) *ApiResult {
 	return Ok(st)
 }
 
+// EnvGitStatus 返回当前 Git 环境的综合状态（版本/路径/SSH/Git LFS），供环境管理页状态表展示。
+func (a *AppService) EnvGitStatus() *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	return Ok(a.Env.GitStatus())
+}
+
 // EnvSetActive 设置某运行时的激活版本（其 bin 目录即“环境变量指向”的版本）。version=="" 表示清除激活。
 // 这会决定该运行时在 QuickDock 内的默认使用版本。
 func (a *AppService) EnvSetActive(runtime, version string) *ApiResult {
@@ -216,4 +239,39 @@ func (a *AppService) EnvPHPConfigSet(runtime, version string, patch env.PHPConfi
 		return Fail(err)
 	}
 	return Ok(nil)
+}
+
+// EnvRedisConfigGet 读取某已装 Redis 版本的 redis.conf 配置。
+func (a *AppService) EnvRedisConfigGet(runtime, version string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	cfg, err := a.Env.RedisConfigGet(env.Runtime(runtime), version)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(cfg)
+}
+
+// EnvRedisConfigSet 写回某已装 Redis 版本的 redis.conf（整体覆盖）。
+func (a *AppService) EnvRedisConfigSet(runtime, version, raw string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	if err := a.Env.RedisConfigSet(env.Runtime(runtime), version, raw); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
+}
+
+// EnvRedisLog 读取某已装 Redis 版本的运行日志（redis.log 尾部）。
+func (a *AppService) EnvRedisLog(runtime, version string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	log, err := a.Env.RedisLogGet(env.Runtime(runtime), version)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(log)
 }

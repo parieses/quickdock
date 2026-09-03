@@ -1,7 +1,6 @@
 package services
 
 import (
-	"encoding/json"
 	"strings"
 )
 
@@ -100,30 +99,4 @@ func (a *AppService) DeleteNoteNode(id string) *ApiResult {
 		return Fail(err)
 	}
 	return Ok(nil)
-}
-
-// parseTags 解析标签 JSON 数组字符串为 []string（供前端/测试用，前端可直接解析）
-func parseTags(jsonStr string) []string {
-	var out []string
-	if jsonStr == "" {
-		return out
-	}
-	_ = json.Unmarshal([]byte(jsonStr), &out)
-	return out
-}
-
-// extractNoteTags 从笔记中扫描 #标签 标记（供"快速加标签"用，可选）。
-func (a *AppService) extractNoteTags(content string) []string {
-	var tags []string
-	seen := map[string]bool{}
-	for _, field := range strings.Fields(content) {
-		if strings.HasPrefix(field, "#") && len(field) > 1 {
-			tag := strings.Trim(field, "#,.;:!?()[]")
-			if tag != "" && !seen[tag] {
-				seen[tag] = true
-				tags = append(tags, tag)
-			}
-		}
-	}
-	return tags
 }

@@ -158,6 +158,13 @@ func (a *AppService) SetApp(app *application.App) {
 	a.app = app
 	a.NodeEnv.SetApp(app)
 	a.DSH.SetApp(app)
+	// 启动后台扫描 PATH / 便携目录并重新保存检测结果（触发点之一：自动扫描 PATH），
+	// 完成后通知前端刷新——首次运行无缓存、或应用关闭期间系统 PATH 变化时在此对齐。
+	if a.Env != nil {
+		a.Env.RefreshAllAsync(func() {
+			app.Event.Emit("quickdock:env:refreshed")
+		})
+	}
 }
 
 // DetectNodeEnv 检测 node/npx/dsh 运行状态
@@ -214,6 +221,59 @@ func (a *AppService) DSHInstallPlugin(plugin string) *ApiResult {
 		_ = a.DSH.InstallPlugin(plugin)
 	}()
 	return Ok(nil)
+}
+
+// DSHUpdateAllPlugins 将 profile 内所有插件升级到各自 semver 范围内最新版（git 依赖拉最新提交；
+// 精确固定版不动）。异步执行，升级前自动备份 package.json+lock 便于回滚，进度经 quickdock:dsh:log
+// 推送，完成经 quickdock:dsh:plugin{ok,backup,kind:"update"} 通知前端（含备份路径以启用回滚）。
+func (a *AppService) DSHUpdateAllPlugins() *ApiResult {
+	if a.DSH == nil {
+		return FailMsg("DSH 未初始化")
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// 与 SetupDSH/UpdateDSH/InstallPlugin 相同：goroutine 内 panic 必须消化
+				msg := fmt.Sprintf("更新插件异常: %v", r)
+				a.NodeEnv.EmitLog("error", msg)
+			}
+		}()
+		// UpdateAllPlugins 内部已在成功/失败（含 panic 触发的 defer）时 emit 完成事件，
+		// 此处仅消费错误结果用于兜底日志，无需重复 emit。
+		_ = a.DSH.UpdateAllPlugins()
+	}()
+	return Ok(nil)
+}
+
+// DSHRollbackPlugins 将 profile 插件回滚到最近一次「更新全部插件」之前的备份。异步执行，
+// 完成经 quickdock:dsh:plugin-rollback{ok} 通知前端。
+func (a *AppService) DSHRollbackPlugins() *ApiResult {
+	if a.DSH == nil {
+		return FailMsg("DSH 未初始化")
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				msg := fmt.Sprintf("回滚插件异常: %v", r)
+				a.NodeEnv.EmitLog("error", msg)
+			}
+		}()
+		_ = a.DSH.RollbackPlugins()
+	}()
+	return Ok(nil)
+}
+
+// DSHCheckPluginUpdates 预检 registry 插件（git 依赖不纳入）是否有可用更新，返回列表。
+// 联网查 npm registry，可能耗时数秒（同步返回，前端 await 时展示 loading）。
+func (a *AppService) DSHCheckPluginUpdates() *ApiResult {
+	if a.DSH == nil {
+		return FailMsg("DSH 未初始化")
+	}
+	list, err := a.DSH.CheckPluginUpdates()
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(list)
 }
 
 // OpenDSHWindow 拉起 dsh web 并在原生窗口加载其 URL（dsh 未安装时返回错误）
