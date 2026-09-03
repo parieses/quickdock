@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -88,7 +89,7 @@ func (a *AppService) RegisterPluginHostMethods() {
 		}
 		if a.Notifier == nil {
 			// 通知服务不可用时退回日志，不让插件调用直接失败
-			fmt.Printf("QuickDock [plugin %s notify]: %s - %s\n", pluginID, p.Title, body)
+			logger.PluginW(pluginID, "notify 不可用（通知服务未初始化）: %s - %s", p.Title, body)
 			return map[string]interface{}{"success": false, "reason": "notifier unavailable"}, nil
 		}
 		err := a.Notifier.SendNotification(notifications.NotificationOptions{
@@ -276,7 +277,7 @@ func (a *AppService) RegisterPluginHostMethods() {
 		return map[string]interface{}{"data": all, "truncated": truncated}, nil
 	})
 
-	fmt.Println("QuickDock: 插件 Host API 已注入（clipboard / notify / dialog / http / db）")
+	logger.I("插件 Host API 已注入（clipboard / notify / dialog / http / db）；插件日志写入 plugin-YYYYMMDD.log")
 }
 
 // pluginDataKey 解析并校验只含 key 的参数体

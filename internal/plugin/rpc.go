@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // Call 发送 JSON-RPC 请求并等待响应
@@ -157,7 +159,7 @@ func boundedReadLine(r *bufio.Reader, limit int) ([]byte, bool, error) {
 func (inst *PluginInstance) readLoop(manager *Manager) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("[plugin %s] readLoop panic: %v\n", inst.Manifest.ID, r)
+			logger.PluginE(inst.Manifest.ID, "readLoop panic: %v", r)
 			inst.SetStatus("crashed")
 		}
 	}()
@@ -169,7 +171,7 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	for {
 		line, truncated, err := boundedReadLine(reader, maxPluginLineBytes)
 		if truncated {
-			fmt.Printf("[plugin %s] stdout 单行超过 %d 字节，已截断\n", inst.Manifest.ID, maxPluginLineBytes)
+			logger.PluginW(inst.Manifest.ID, "stdout 单行超过 %d 字节，已截断", maxPluginLineBytes)
 			// 截断后的行无法解析为合法 JSON-RPC，直接走到 err 分支继续循环
 		}
 		if len(line) > 0 {
@@ -188,15 +190,24 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 				if jerr := json.Unmarshal(b, &req); jerr == nil && req.Method != "" {
 					// 这是插件发起的回调请求或通知
 					if manager != nil {
-						manager.handleCallback(inst, &req, b)
+						// 在独立 goroutine 中执行 host 方法：其实现可能含网络/磁盘 IO，
+						// 若在 readLoop 内同步调用会阻塞 stdout 读取，导致插件其它响应/通知无法被处理、整条通信卡死。
+						// 复制到独立内存，避免与后续循环迭代复用同一变量产生数据竞争。
+						raw := make([]byte, len(b))
+						copy(raw, b)
+						var reqCopy RPCRequest
+						_ = json.Unmarshal(raw, &reqCopy)
+						go manager.handleCallback(inst, &reqCopy, raw)
 					}
 				} else {
 					// 再尝试解析为响应
 					var resp RPCResponse
 					if jerr := json.Unmarshal(b, &resp); jerr != nil {
-						// 无法解析的 stdout 行，静默忽略（插件自己的调试打印不应干扰通信协议）
-						// 如需调试可取消下行注释：
-						// fmt.Printf("QuickDock [plugin %s debug]: %s\n", inst.Manifest.ID, string(lb))
+						// 非 JSON-RPC 的原始 stdout 行（插件 SDK 之外的 console.log 类调试打印）：
+						// 不参与协议解析，也不回显宿主 UI；写入插件日志文件（[stdout] 前缀，
+						// 便于与 log.* 主动日志区分）。此前静默丢弃，插件作者的调试输出在
+						// GUI 子系统下完全不可见，排障困难。
+						logger.PluginI(inst.Manifest.ID, "[stdout] %s", string(lb))
 					} else {
 						// 匹配 pending 请求（id 以 JSON 文本为键，兼容 string/number id）
 						inst.readMu.Lock()
@@ -220,6 +231,7 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	})
 	if !inst.stopped.Load() {
 		inst.SetStatus("crashed")
+		logger.PluginE(inst.Manifest.ID, "stdout 关闭/进程退出，判定为崩溃（将由 watchPlugin 决定是否重启）")
 	}
 
 	// 回收已退出的子进程句柄：崩溃场景下 readLoop 先于 stopPlugin 发现进程结束，

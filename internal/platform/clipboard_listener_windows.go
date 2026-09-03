@@ -14,13 +14,14 @@ package platform
 // 需要一个窗口句柄。
 
 import (
-	"fmt"
 	goruntime "runtime"
 	"sync/atomic"
 	"syscall"
 	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/w32"
+
+	"quickdock/internal/logger"
 )
 
 const wmClipboardUpdate = 0x031D
@@ -31,6 +32,7 @@ var (
 	procRegisterClassW   = listenerUser32.NewProc("RegisterClassW")
 	procCreateWindowExW  = listenerUser32.NewProc("CreateWindowExW")
 	procDefWindowProcW   = listenerUser32.NewProc("DefWindowProcW")
+	procDestroyWindowW   = listenerUser32.NewProc("DestroyWindow")
 	procGetMessageW      = listenerUser32.NewProc("GetMessageW")
 	procTranslateMessage = listenerUser32.NewProc("TranslateMessage")
 	procDispatchMessageW = listenerUser32.NewProc("DispatchMessageW")
@@ -47,12 +49,20 @@ func StartClipboardListener(onChange func()) {
 	go runClipboardListener(onChange)
 }
 
-// StopClipboardListener 注销剪贴板格式监听（进程退出前调用；句柄随进程销毁）。
+// StopClipboardListener 注销剪贴板格式监听并退出消息泵。
+//
+// 仅 RemoveClipboardFormatListener 不够：消息泵的 GetMessage 循环运行在专属 OS 线程
+// （LockOSThread），若不发 WM_DESTROY 使其 PostQuitMessage(0) 退出循环，该线程会永久泄漏。
+// DestroyWindow 跨线程安全——它在窗口所属线程派发 WM_DESTROY，由 wndProc 触发退出。
 func StopClipboardListener() {
-	if hwnd := listenerHwnd.Load(); hwnd != 0 {
-		w32.RemoveClipboardFormatListener(w32.HWND(hwnd))
-		fmt.Println("QuickDock: 已移除剪贴板格式监听")
+	hwnd := listenerHwnd.Load()
+	if hwnd == 0 {
+		return
 	}
+	w32.RemoveClipboardFormatListener(w32.HWND(hwnd))
+	procDestroyWindowW.Call(hwnd)
+	listenerHwnd.Store(0)
+	logger.I("[platform] 剪贴板监听已停止")
 }
 
 // ClipboardWindowHandle 返回监听窗口句柄（供 OpenClipboard 等读取 API 使用），未启动时为 0。
@@ -120,15 +130,15 @@ func runClipboardListener(onChange func()) {
 	)
 
 	if hwnd == 0 {
-		fmt.Println("QuickDock: 创建剪贴板监听窗口失败")
+		logger.E("[platform] 创建剪贴板监听窗口失败")
 		return
 	}
 	listenerHwnd.Store(hwnd)
 
 	if w32.AddClipboardFormatListener(w32.HWND(hwnd)) {
-		fmt.Println("QuickDock: 剪贴板监听已启动 (AddClipboardFormatListener)")
+		logger.I("[platform] 剪贴板监听已启动 (AddClipboardFormatListener)")
 	} else {
-		fmt.Println("QuickDock: AddClipboardFormatListener 失败")
+		logger.E("[platform] AddClipboardFormatListener 失败")
 	}
 
 	var msg struct {
@@ -153,5 +163,5 @@ func runClipboardListener(onChange func()) {
 		procDispatchMessageW.Call(uintptr(unsafe.Pointer(&msg)))
 	}
 
-	fmt.Println("QuickDock: 剪贴板监听消息循环已停止")
+	logger.I("[platform] 剪贴板监听消息循环已停止")
 }

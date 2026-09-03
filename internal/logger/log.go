@@ -23,6 +23,10 @@ var (
 	logDir      string
 	curDay      string
 	size        int64
+	// 插件专属日志文件（与主日志分离，便于插件作者单独排查）
+	pf      *os.File
+	pCurDay string
+	pSize   int64
 	initialized bool
 )
 
@@ -46,6 +50,7 @@ func Init(dir string) {
 	logDir = dir
 	initialized = true
 	openLocked()
+	openPluginLocked() // 插件日志文件与主日志一同打开
 }
 
 // Close 关闭当前日志文件（应用优雅退出时调用；不调用也由 OS 回收）。
@@ -55,6 +60,10 @@ func Close() {
 	if f != nil {
 		_ = f.Close()
 		f = nil
+	}
+	if pf != nil {
+		_ = pf.Close()
+		pf = nil
 	}
 }
 
@@ -79,7 +88,7 @@ func openLocked() {
 	}
 }
 
-// cleanOld 清理 30 天前的旧日志文件
+// cleanOld 清理 30 天前的旧日志文件（含主日志 quickdock- 与插件日志 plugin-）
 func cleanOld(dir string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -87,7 +96,11 @@ func cleanOld(dir string) {
 	}
 	cutoff := time.Now().AddDate(0, 0, -30)
 	for _, e := range entries {
-		if e.IsDir() || !strings.HasPrefix(e.Name(), "quickdock-") {
+		if e.IsDir() {
+			continue
+		}
+		name := e.Name()
+		if !strings.HasPrefix(name, "quickdock-") && !strings.HasPrefix(name, "plugin-") {
 			continue
 		}
 		if info, ierr := e.Info(); ierr == nil && info.ModTime().Before(cutoff) {
@@ -127,3 +140,61 @@ func Logf(level, format string, args ...interface{}) {
 func I(format string, args ...interface{}) { Logf("I", format, args...) }
 func W(format string, args ...interface{}) { Logf("W", format, args...) }
 func E(format string, args ...interface{}) { Logf("E", format, args...) }
+
+// ===== 插件专属日志 =====
+//
+// 插件日志与主日志分离到独立文件 <dataDir>/logs/plugin-YYYYMMDD.log，
+// 并以 [plugin:<id>] 前缀标注来源，便于插件作者单独排查而不被宿主日志淹没。
+// 设计要点：
+//   - 复用同一把 mu，避免插件文件与主文件并发打开/滚动的竞态（日志写操作极短，性能影响可忽略）。
+//   - 未初始化时回退到 os.Stderr（与 Logf 一致），保证任何情况下调用不阻塞主流程。
+//   - 同样走 Sync 实时落盘，排障场景要实时可读。
+
+// openPluginLocked 打开/滚动插件日志文件；调用方须持有 mu。
+func openPluginLocked() {
+	if pf != nil {
+		_ = pf.Close()
+		pf = nil
+	}
+	now := time.Now()
+	day := now.Format("2006-01-02")
+	var err error
+	pf, err = os.OpenFile(filepath.Join(logDir, "plugin-"+day+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		pf = nil
+		return
+	}
+	pCurDay = day
+	if st, serr := pf.Stat(); serr == nil {
+		pSize = st.Size()
+	}
+}
+
+// PluginLog 写一条插件日志（level 由调用方给：I/W/E）。pluginID 作为前缀。
+func PluginLog(pluginID, level, format string, args ...interface{}) {
+	mu.Lock()
+	defer mu.Unlock()
+	msg := fmt.Sprintf(format, args...)
+	if !initialized || logDir == "" {
+		fmt.Fprintf(os.Stderr, "QuickDock[plugin %s]: %s\n", pluginID, msg)
+		return
+	}
+	now := time.Now()
+	if pf == nil || pCurDay != now.Format("2006-01-02") || pSize > MaxFileSize {
+		openPluginLocked()
+	}
+	if pf == nil {
+		fmt.Fprintf(os.Stderr, "QuickDock[plugin %s]: %s\n", pluginID, msg)
+		return
+	}
+	line := fmt.Sprintf("%s [%s] [plugin:%s] %s\n",
+		now.Format("2006-01-02 15:04:05.000"), level, pluginID, msg)
+	n, _ := pf.WriteString(line)
+	pSize += int64(n)
+	_ = pf.Sync()
+}
+
+// PluginI/PluginW/PluginE 插件日志便捷封装
+func PluginI(pluginID, format string, args ...interface{}) { PluginLog(pluginID, "I", format, args...) }
+func PluginW(pluginID, format string, args ...interface{}) { PluginLog(pluginID, "W", format, args...) }
+func PluginE(pluginID, format string, args ...interface{}) { PluginLog(pluginID, "E", format, args...) }

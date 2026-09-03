@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/sysutil"
 )
 
@@ -67,14 +68,16 @@ func (s *serviceManager) forget(rt Runtime) {
 	s.mu.Lock()
 	delete(s.svcs, rt)
 	s.mu.Unlock()
+	logger.I("[env] forget %s（清掉会话内进程句柄）", rt)
 }
 
 // start 拉起后台服务进程。args 透传给可执行文件（如 redis 的 "redis.conf"、php-fpm 的 "-b host:port"）；
 // logPath 非空时把 stdout/stderr 追加写入该文件（用于日志查询），onLog 仍照常回调（通常为 nil）。
 func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []string, logPath string, onLog func(string)) error {
 	s.mu.Lock()
-	if _, ok := s.svcs[rt]; ok {
+	if cur, ok := s.svcs[rt]; ok {
 		s.mu.Unlock()
+		logger.W("[env] start %s 拒绝：同类型服务已在运行 version=%s", rt, cur.version)
 		return fmt.Errorf("服务已在运行")
 	}
 	cmd := sysutil.Command(exe, args...)
@@ -82,39 +85,64 @@ func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []strin
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		s.mu.Unlock()
+		logger.E("[env] start %s StdoutPipe 失败: %v exe=%s", rt, err, exe)
 		return err
 	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		s.mu.Unlock()
+		logger.E("[env] start %s StderrPipe 失败: %v exe=%s", rt, err, exe)
 		return err
 	}
+	logger.I("[env] start %s version=%s exe=%s wd=%s args=%v logPath=%s", rt, version, exe, wd, args, logPath)
 	if err := cmd.Start(); err != nil {
 		s.mu.Unlock()
+		logger.E("[env] start %s 启动失败: %v (exe=%s wd=%s args=%v)", rt, err, exe, wd, args)
 		return err
 	}
+	pid := cmd.Process.Pid
 	s.svcs[rt] = &runningService{cmd: cmd, version: version, exe: exe}
 	s.mu.Unlock()
+	logger.I("[env] start %s 成功 pid=%d", rt, pid)
 
 	var logF *os.File
 	if logPath != "" {
 		if f, e := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); e == nil {
 			logF = f
+		} else {
+			logger.W("[env] start %s 打开运行日志失败: %v path=%s（仅回调，不落盘）", rt, e, logPath)
 		}
 	}
 
-	go consumeLogs(stdout, onLog, logF)
-	go consumeLogs(stderr, onLog, logF)
+	// 收集 stderr 近期输出，进程异常快速退出时回写主日志辅助排障（"启动不了"但无报错的关键来源）
+	collector := &stderrCollector{}
+	go consumeLogs(stdout, onLog, logF, nil)
+	go consumeLogs(stderr, onLog, logF, collector)
 	go func() {
-		cmd.Wait()
+		err := cmd.Wait()
 		if logF != nil {
 			logF.Close()
+		}
+		code := 0
+		if ee, ok := err.(*exec.ExitError); ok {
+			code = ee.ExitCode()
 		}
 		s.mu.Lock()
 		if s.svcs[rt] != nil && s.svcs[rt].cmd == cmd {
 			delete(s.svcs, rt)
 		}
 		s.mu.Unlock()
+		if err != nil {
+			logger.E("[env] %s 进程异常退出 pid=%d code=%d err=%v", rt, pid, code, err)
+			if lines := collector.drain(); len(lines) > 0 {
+				logger.E("[env] %s 启动失败 stderr（末 %d 行）:", rt, len(lines))
+				for _, l := range lines {
+					logger.E("[env]   %s", l)
+				}
+			}
+		} else {
+			logger.I("[env] %s 进程正常退出 pid=%d code=%d", rt, pid, code)
+		}
 	}()
 	return nil
 }
@@ -138,8 +166,10 @@ func processExePath(pid int) string {
 }
 
 // consumeLogs 逐行消费命令输出并回调（用于服务运行日志）；logF 非空时同时追加写入文件（日志查询）。
-func consumeLogs(r io.Reader, onLog func(string), logF *os.File) {
+// collect 非空时同步收集到 stderrCollector，供进程异常退出时回写主日志排障。
+func consumeLogs(r io.Reader, onLog func(string), logF *os.File, collect *stderrCollector) {
 	sc := bufio.NewScanner(r)
+	sc.Buffer(make([]byte, 0, 64*1024), 256*1024) // 允许较长输出行（如 redis 配置报错）
 	for sc.Scan() {
 		line := sc.Text()
 		if onLog != nil {
@@ -148,7 +178,32 @@ func consumeLogs(r io.Reader, onLog func(string), logF *os.File) {
 		if logF != nil {
 			logF.WriteString(line + "\n")
 		}
+		if collect != nil {
+			collect.add(line)
+		}
 	}
+}
+
+// stderrCollector 收集服务进程 stderr 的近期输出（上限 200 行），进程异常退出时回写主日志。
+type stderrCollector struct {
+	mu  sync.Mutex
+	buf []string
+}
+
+func (c *stderrCollector) add(line string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.buf) < 200 {
+		c.buf = append(c.buf, line)
+	}
+}
+
+func (c *stderrCollector) drain() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := c.buf
+	c.buf = nil
+	return out
 }
 
 // isPortOpen 探测本机 TCP 端口是否可连接（用于判断 nginx/redis 是否在服务中）。
@@ -215,8 +270,10 @@ func stopByPort(port int, expectImage string) {
 		return
 	}
 	if expectImage != "" && !processImageMatches(pid, expectImage) {
+		logger.W("[env] stopByPort %d 跳过 pid=%d：镜像名不匹配 %s", port, pid, expectImage)
 		return
 	}
+	logger.W("[env] stopByPort %d 杀掉 pid=%d 进程树（镜像=%s）", port, pid, expectImage)
 	killTree(pid)
 }
 
@@ -235,6 +292,9 @@ func runRedisStopSignal(cli string, port int) {
 	if runtime.GOOS != "windows" {
 		return
 	}
+	logger.I("[env] redis 优雅关闭：%s -p %d shutdown nosave", cli, port)
 	shutdownCmd := sysutil.Command(cli, "-p", strconv.Itoa(port), "shutdown", "nosave")
-	_ = shutdownCmd.Run()
+	if err := shutdownCmd.Run(); err != nil {
+		logger.W("[env] redis 优雅关闭失败（将由端口兜底接管）: %v", err)
+	}
 }

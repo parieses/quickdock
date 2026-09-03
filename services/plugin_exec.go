@@ -7,6 +7,7 @@ import (
 	"unicode/utf8"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 )
 
 func (a *AppService) ListPlugins() *ApiResult {
@@ -81,7 +82,7 @@ func (a *AppService) recordPluginExecLog(pluginID, commandID, trigger string, st
 		log.Error = string([]rune(log.Error)[:2000])
 	}
 	if err := a.DB.AddPluginExecLog(log); err != nil {
-		fmt.Printf("QuickDock: 写入插件执行日志失败: %v\n", err)
+		logger.E("写入插件执行日志失败: %v", err)
 	}
 }
 

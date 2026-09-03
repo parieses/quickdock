@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban, Search } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
@@ -138,10 +138,12 @@ async function install(p: MarketPlugin) {
 onMounted(() => {
   loadMarket()
   // Wails v3 事件 payload 在 .data（非 e.data 直接展开的细节见 WailsEvent 包装）
-  Events.On('plugin:download-progress', (e: any) => {
+  // 用返回的 off 在卸载时移除监听，避免反复进出市场页累积监听 + 旧组件实例内存泄漏。
+  const offProgress = Events.On('plugin:download-progress', (e: any) => {
     const d = (e as any)?.data as DownloadProgress | undefined
     if (d?.url) progressMap.value[d.url] = d
   })
+  onUnmounted(() => offProgress())
 })
 </script>
 

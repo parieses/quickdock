@@ -768,7 +768,9 @@ function handleExecute(params) {
 
 | API | 说明 | 所需权限 |
 |-----|------|---------|
-| `api.log(msg)` | 写日志到后端 | — |
+| `api.log(msg)` | 写 INFO 日志 | — |
+| `api.warn(msg)` | 写 WARN 日志 | — |
+| `api.error(msg)` | 写 ERROR 日志 | — |
 | `api.readFile(path)` | 读取文件 | `filesystem` |
 | `api.writeFile(path, data)` | 写入文件 | `filesystem` |
 | `api.httpGet(url)` | HTTP GET 请求 | `network` |
@@ -875,9 +877,13 @@ func main() {
 | `host.dialog.open` / `save` | 文件对话框 | `filesystem` |
 | `http.get` / `http.post` | HTTP 请求 | `network` |
 | `db.get` / `db.set` | 插件专属存储 | — |
-| `log.info` / `log.error` | 日志 | — |
+| `log.info` / `log.warn` / `log.error` | 日志（写插件日志文件） | — |
 | `ui.show` / `ui.hide` | 显示/隐藏前端面板 | — |
 | `host.notify` | 系统通知 | — |
+
+> **插件日志**：`log.*` 与 goja `api.log/api.warn/api.error` 统一写入 **`<dataDir>/logs/plugin-YYYYMMDD.log`**（按日滚动，与应用主日志 `quickdock-*.log` 分离），行首带 `[plugin:<id>]` 前缀便于按插件过滤。插件原生进程的 stderr（记 WARN）与未被 JSON-RPC 解析的 stdout 原始打印（记 `[stdout]`）也会进同一文件；协议外的 stdout 打印不会破坏通信，但建议调试输出统一走 `log.*`/`api.*`。
+
+> **native 插件用 RPC 写日志**：与调用 `host.clipboard.*` 是同一条通道——向 stdout 发回调请求即可精确控制级别：`{"jsonrpc":"2.0","id":1,"method":"log.info","params":{"message":"..."}}`（级别换 `log.warn`/`log.error`），参数仅 `message`、免权限，宿主先落盘后回响应。⚠️ **必须带 `id`**——宿主对不带 `id` 的通知（notification）会静默丢弃，不执行也不落盘。完整封装示例见 `plugins/external/plugin-dev-guide.md`「通过 RPC 写日志」。
 
 > 完整原生 Go 模板见 `plugins/templates/native/`，包含完整的请求分发和主机方法调用示例。
 

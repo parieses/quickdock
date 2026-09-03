@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"strings"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
 
@@ -151,8 +152,14 @@ func (n *NginxRuntime) Start(ctx context.Context, version string, onLog func(str
 		return fmt.Errorf("未安装该版本: %s", version)
 	}
 	// 多版本共用默认端口：已在运行其它版本时，明确提示先停止，避免误以为能并行跑两个实例
-	if running, _ := svcMgr.info(RuntimeNginx); running != "" && running != version {
+	running, _ := svcMgr.info(RuntimeNginx)
+	if running != "" && running != version {
 		return fmt.Errorf("Nginx 已在运行（%s），请先停止当前版本再启动 %s", running, version)
+	}
+	// 端口被本机其它程序占用（非本会话拉起）时，bind 会短暂误报 running，这里提前给清晰提示
+	if running == "" && isPortOpen(nginxDefaultPort) {
+		logger.W("[env][nginx] Start 拒绝：端口 %d 已被占用（可能是其它程序），无法启动 %s", nginxDefaultPort, version)
+		return fmt.Errorf("端口 %d 已被占用，请先释放该端口再启动 Nginx", nginxDefaultPort)
 	}
 	if onLog != nil {
 		onLog("启动 Nginx " + version + " …")

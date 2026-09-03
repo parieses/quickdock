@@ -45,6 +45,7 @@ type Manager struct {
 
 	healthCheckStopCh chan struct{}
 	healthCheckWg     sync.WaitGroup
+	healthCheckStopOnce sync.Once
 }
 
 // NewManager 创建插件管理器
@@ -83,14 +84,14 @@ func (m *Manager) recoverInterruptedInstalls() {
 		targetDir := strings.TrimSuffix(mark, ".rollback")
 		data, rerr := os.ReadFile(mark)
 		if rerr != nil {
-			fmt.Printf("QuickDock: 无法读取 rollback 标记 %s，跳过: %v\n", mark, rerr)
+			logger.W("无法读取 rollback 标记 %s，跳过: %v", mark, rerr)
 			continue
 		}
 		backupDir := strings.TrimSpace(string(data))
 		if rerr := rollbackInstall(targetDir, backupDir, mark); rerr != nil {
-			fmt.Printf("QuickDock: 恢复中断安装 %s 失败: %v\n", targetDir, rerr)
+			logger.E("恢复中断安装 %s 失败: %v", targetDir, rerr)
 		} else {
-			fmt.Printf("QuickDock: 已恢复中断的插件安装：%s\n", targetDir)
+			logger.I("已恢复中断的插件安装：%s", targetDir)
 		}
 	}
 }
@@ -152,7 +153,7 @@ func (m *Manager) DiscoverAndLoad() error {
 		wg.Add(1)
 		go func(j pluginJob) {
 			defer wg.Done()
-			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: plugin load worker panic: %v\n", r) } }()
+			defer func() { if r := recover(); r != nil { logger.E("plugin load worker panic: %v", r) } }()
 			if err := m.LoadPlugin(j.manifest, j.dir); err != nil {
 				logger.E("插件 %s 启动失败: %v", j.manifest.ID, err)
 			}
@@ -209,10 +210,14 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 			return fmt.Errorf("创建 stderr pipe 失败: %w", err)
 		}
 		go func() {
-			defer func() { if r := recover(); r != nil { fmt.Printf("[plugin %s] stderr reader panic: %v\n", manifest.ID, r) } }()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.PluginE(manifest.ID, "stderr reader panic: %v", r)
+				}
+			}()
 			scanner := bufio.NewScanner(stderr)
 			for scanner.Scan() {
-				fmt.Printf("[plugin %s] %s\n", manifest.ID, scanner.Text())
+				logger.PluginW(manifest.ID, "%s", scanner.Text())
 			}
 		}()
 
@@ -295,7 +300,10 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string)
 	pluginDB.SetMaxOpenConns(1)
 
 	vm.Set("api", map[string]interface{}{
-		"log": func(msg string) { fmt.Printf("[plugin %s] %s\n", manifest.ID, msg) },
+		// 日志：写插件专属日志文件 plugin-YYYYMMDD.log（[plugin:<id>] 前缀），与主日志分离
+		"log":   func(msg string) { logger.PluginI(manifest.ID, "%s", msg) },
+		"warn":  func(msg string) { logger.PluginW(manifest.ID, "%s", msg) },
+		"error": func(msg string) { logger.PluginE(manifest.ID, "%s", msg) },
 		"db": map[string]interface{}{
 			"exec": func(sql string, args ...interface{}) (map[string]interface{}, error) {
 				res, e := pluginDB.Exec(sql, args...)
@@ -362,7 +370,9 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string)
 	m.mu.Unlock()
 
 	if hasInit {
-		inst.callGojaJS("handleInitialize", map[string]interface{}{}, 10*time.Second)
+		if _, ierr := inst.callGojaJS("handleInitialize", map[string]interface{}{}, 10*time.Second); ierr != nil {
+			logger.PluginE(manifest.ID, "handleInitialize 执行失败: %v", ierr)
+		}
 	}
 	return nil
 }
@@ -415,6 +425,7 @@ func (m *Manager) KillPlugin(id string) error {
 // 该参数仅在「用户关闭/禁用/强杀插件」这类明确的插件终止路径（StopPlugin / KillPlugin）
 // 置 true；内部的重载、初始化失败、卸载等路径只杀主进程，不扩散到子进程树。
 func (m *Manager) stopPlugin(inst *PluginInstance, treeKill bool) {
+	logger.PluginI(inst.Manifest.ID, "宿主停止插件（treeKill=%v）", treeKill)
 	inst.stopped.Store(true)
 	// 发送 shutdown（goja/none 运行时无 stdin pipe，跳过）。
 	// 非阻塞 best-effort：在独立 goroutine 中尝试，避免持有管理器锁期间被插件挂死
@@ -480,17 +491,20 @@ func (m *Manager) watchPlugin(inst *PluginInstance) {
 		logger.I("插件 %s 自动重启成功", inst.Manifest.ID)
 		return
 	}
-	fmt.Printf("QuickDock: 插件 %s 已达最大重启次数，放弃\n", inst.Manifest.ID)
+	logger.W("插件 %s 已达最大重启次数，放弃", inst.Manifest.ID)
 }
 
 // startHealthCheck 启动后台健康检查协程（每 30 秒 ping 所有运行中插件）
 func (m *Manager) startHealthCheck() {
+	// 重置停止通道与关闭守卫，支持在 NewManager 之外被重复 start（如退出后重新初始化）
+	m.healthCheckStopCh = make(chan struct{})
+	m.healthCheckStopOnce = sync.Once{}
 	m.healthCheckWg.Add(1)
 	go func() {
 		defer m.healthCheckWg.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("[plugin] healthCheck panic: %v\n", r)
+				logger.E("[plugin] healthCheck panic: %v", r)
 			}
 		}()
 		ticker := time.NewTicker(30 * time.Second)
@@ -506,9 +520,12 @@ func (m *Manager) startHealthCheck() {
 	}()
 }
 
-// stopHealthCheck 停止后台健康检查
+// stopHealthCheck 停止后台健康检查。用 sync.Once 守卫 close，避免双退出路径（如应用退出 + 其它清理）
+// 二次 close 同一 channel 触发 panic（close of closed channel）。
 func (m *Manager) stopHealthCheck() {
-	close(m.healthCheckStopCh)
+	m.healthCheckStopOnce.Do(func() {
+		close(m.healthCheckStopCh)
+	})
 	m.healthCheckWg.Wait()
 }
 
@@ -638,6 +655,7 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 			"input":   input,
 		}, 20*time.Second)
 		if err != nil {
+			logger.PluginE(pluginID, "handleExecute 执行失败 command=%s: %v", commandID, err)
 			return nil, err
 		}
 		data, _ := json.Marshal(result)
@@ -697,6 +715,7 @@ func (m *Manager) EnsureLoaded(pluginID string) error {
 	if err != nil {
 		return err
 	}
+	logger.PluginI(pluginID, "按需惰性复活插件")
 	return m.LoadPlugin(*manifest, dir)
 }
 
@@ -772,7 +791,7 @@ func (m *Manager) UninstallPlugin(id string) error {
 			n := e.Name()
 			if strings.HasPrefix(n, id+".bak") || strings.HasPrefix(n, id+".broken") {
 				if rerr := os.RemoveAll(filepath.Join(m.pluginsDir, n)); rerr == nil {
-					fmt.Printf("QuickDock: 已清理插件 %s 的残留备份目录 %s\n", id, n)
+					logger.I("已清理插件 %s 的残留备份目录 %s", id, n)
 				}
 			}
 		}
@@ -807,14 +826,14 @@ func (m *Manager) cleanupOrphans() {
 
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
-		fmt.Printf("QuickDock: 读取 PID 文件失败: %v\n", err)
+		logger.W("读取 PID 文件失败: %v", err)
 		os.Remove(pidFile)
 		return
 	}
 
 	var pids pidFileData
 	if err := json.Unmarshal(data, &pids); err != nil {
-		fmt.Printf("QuickDock: 解析 PID 文件失败: %v\n", err)
+		logger.W("解析 PID 文件失败: %v", err)
 		os.Remove(pidFile)
 		return
 	}
@@ -838,7 +857,7 @@ func (m *Manager) cleanupOrphans() {
 			continue
 		}
 		if err := proc.Kill(); err == nil {
-			fmt.Printf("QuickDock: 清理孤儿进程 %q (PID %d)\n", pluginID, pid)
+			logger.W("清理孤儿进程 %q (PID %d)", pluginID, pid)
 		}
 		proc.Wait()
 	}
@@ -880,7 +899,7 @@ func (m *Manager) safeWritePidFile(plugins map[string]*PluginInstance) {
 		CreatedAt: time.Now().Format(time.RFC3339),
 	})
 	if err != nil {
-		fmt.Printf("QuickDock: 序列化 PID 文件数据失败: %v\n", err)
+		logger.E("序列化 PID 文件数据失败: %v", err)
 		return
 	}
 	os.WriteFile(m.pidFilePath, data, 0644)
@@ -902,7 +921,7 @@ func (m *Manager) ShutdownAll() {
 	defer m.mu.Unlock()
 
 	for id, inst := range m.plugins {
-		fmt.Printf("QuickDock: 停止插件 %q\n", id)
+		logger.I("停止插件 %q", id)
 		// 置 stopped：进程退出后 watchPlugin 读到 stopped=true 才不会把插件自动重启成孤儿进程
 		inst.stopped.Store(true)
 		if inst.Stdin != nil {

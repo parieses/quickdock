@@ -10,6 +10,8 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/updater"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 	"golang.org/x/sys/windows"
+
+	"quickdock/internal/logger"
 )
 
 // UpdateStatus 返回给前端的更新状态
@@ -147,6 +149,7 @@ func (a *AppService) DownloadUpdate() *UpdateStatus {
 // 向导就弹不出来了。同时先打上"真退出"标记（PrepareQuitFn），让主窗口的 WindowClosing 钩子放行，
 // 主程序走"退出"路径干净清理，再由安装器覆盖文件。
 func (a *AppService) RestartApp() error {
+	logger.I("[update] 重启应用以完成更新：准备拉起安装器（当前进程将随后干净退出，由安装器接管）")
 	if a.app == nil || a.app.Updater == nil {
 		return fmt.Errorf("更新器未初始化")
 	}
@@ -154,6 +157,7 @@ func (a *AppService) RestartApp() error {
 	// 取已下载并验签的安装器本地路径
 	installerPath := a.app.Updater.DownloadedPath()
 	if installerPath == "" {
+		logger.W("[update] 重启失败：安装器尚未就绪")
 		return fmt.Errorf("更新尚未就绪：请先完成下载，再点击重启")
 	}
 
@@ -167,6 +171,7 @@ func (a *AppService) RestartApp() error {
 	if err := launchElevated(installerPath); err != nil {
 		return fmt.Errorf("启动更新安装器失败（需要管理员权限，请在 UAC 弹窗中点「是」）: %w", err)
 	}
+	logger.I("[update] 安装器已提权拉起（PID 由 OS 分配），主程序即将走退出路径清理后交还控制权")
 
 	// 提权成功后再打「真退出」标记（与托盘"退出"同一路径），让主窗口的 WindowClosing
 	// 钩子放行，随后干净退出；安装器接管后续的安装向导与重新运行。

@@ -15,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // Runtime 受管运行时类型
@@ -346,16 +348,16 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 	fetched := false
 	if def.versURL != "" && def.versParse != nil {
 		if body, err := fetchURL(def.versURL); err == nil {
-			if parsed := def.versParse(body); len(parsed) > 0 {
-				vs = sortVersionsDesc(parsed)
-				fetched = true
-				fmt.Printf("[AvailableVersions] %s: fetched=%d len(vs)=%d first=%s\n", rt, len(parsed), len(vs), vs[0])
-			} else {
-				fmt.Printf("[AvailableVersions] %s: parse returned 0 versions\n", rt)
-			}
+		if parsed := def.versParse(body); len(parsed) > 0 {
+			vs = sortVersionsDesc(parsed)
+			fetched = true
+			logger.I("[env][source] %s 上游版本拉取成功 fetched=%d len(vs)=%d first=%s", rt, len(parsed), len(vs), vs[0])
 		} else {
-			fmt.Printf("[AvailableVersions] %s: fetch failed: %v\n", rt, err)
+			logger.W("[env][source] %s 上游版本解析返回 0 条", rt)
 		}
+	} else {
+		logger.E("[env][source] %s 上游版本拉取失败: %v", rt, err)
+	}
 	}
 	// HTML 兜底：GitHub API 限流或网络不通时，尝试解析 Releases 页面 HTML
 	if len(vs) == 0 && def.versHTMLFallbackParse != nil {
@@ -416,17 +418,17 @@ func fetchURL(url string) ([]byte, error) {
 // ---- 上游版本列表解析 ----
 
 func parseNodeVersions(body []byte) []string {
-	fmt.Printf("[parseNodeVersions] body size=%d first200=%s\n", len(body), string(body[:min(200, len(body))]))
+	logger.I("[env][source] parseNodeVersions body size=%d first200=%s", len(body), string(body[:min(200, len(body))]))
 	var arr []struct {
 		Version string `json:"version"`
 		Date    string `json:"date"`
 		Lts     interface{} `json:"lts"`
 	}
 	if err := json.Unmarshal(body, &arr); err != nil {
-		fmt.Printf("[parseNodeVersions] unmarshal error: %v\n", err)
+		logger.E("[env][source] parseNodeVersions unmarshal error: %v", err)
 		return nil
 	}
-	fmt.Printf("[parseNodeVersions] unmarshaled %d entries\n", len(arr))
+	logger.I("[env][source] parseNodeVersions unmarshaled %d entries", len(arr))
 	// 智能筛选：LTS + 近 3 年发布版本，去重后按语义降序，上限 60 条
 	type item struct { ver string; date time.Time; lts bool }
 	var items []item
@@ -452,7 +454,7 @@ func parseNodeVersions(body []byte) []string {
 		}
 		items = append(items, item{ver: it.Version, date: d, lts: isLts})
 	}
-	fmt.Printf("[parseNodeVersions] unique versions=%d items=%d first3=%v\n", len(seen), len(items), func() []string{ r:=make([]string,0,min(3,len(items))); for i:=0;i<len(r)&&i<len(items);i++{r=append(r,items[i].ver)}; return r}())
+	logger.I("[env][source] parseNodeVersions unique versions=%d items=%d first3=%v", len(seen), len(items), func() []string{ r := make([]string, 0, min(3, len(items))); for i := 0; i < len(r) && i < len(items); i++ { r = append(r, items[i].ver) }; return r }())
 	now := time.Now()
 	cutoff := now.AddDate(-3, 0, 0)
 	sort.SliceStable(items, func(i, j int) bool {

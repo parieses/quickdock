@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // ---- 权限校验 ----
@@ -44,13 +46,13 @@ func (m *Manager) checkPermission(pluginID string, method string) error {
 // services/plugin_host.go，由 ServiceStartup 通过 InjectHostMethod 覆盖注入；
 // 这里保留 host.notify 的日志版本作为注入前的兜底。
 func (m *Manager) registerDefaultHostMethods() {
-	// 日志
+	// 日志（路由到插件专属日志文件，与宿主主日志分离）
 	m.RegisterHostMethod("log.info", func(pluginID string, params json.RawMessage) (interface{}, error) {
 		var p struct {
 			Message string `json:"message"`
 		}
 		if err := json.Unmarshal(params, &p); err == nil && p.Message != "" {
-			fmt.Printf("QuickDock [plugin %s info]: %s\n", pluginID, p.Message)
+			logger.PluginI(pluginID, "%s", p.Message)
 		}
 		return nil, nil
 	})
@@ -60,19 +62,29 @@ func (m *Manager) registerDefaultHostMethods() {
 			Message string `json:"message"`
 		}
 		if err := json.Unmarshal(params, &p); err == nil && p.Message != "" {
-			fmt.Printf("QuickDock [plugin %s ERROR]: %s\n", pluginID, p.Message)
+			logger.PluginE(pluginID, "%s", p.Message)
 		}
 		return nil, nil
 	})
 
-	// 通知（通过标准输出打日志，实际通知由 services 层注册覆盖）
+	m.RegisterHostMethod("log.warn", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		var p struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(params, &p); err == nil && p.Message != "" {
+			logger.PluginW(pluginID, "%s", p.Message)
+		}
+		return nil, nil
+	})
+
+	// 通知（实际通知由 services 层注册覆盖；注入前兜底记到插件日志，不丢）
 	m.RegisterHostMethod("host.notify", func(pluginID string, params json.RawMessage) (interface{}, error) {
 		var p struct {
 			Title   string `json:"title"`
 			Message string `json:"message"`
 		}
 		if err := json.Unmarshal(params, &p); err == nil {
-			fmt.Printf("QuickDock [plugin %s notify]: %s - %s\n", pluginID, p.Title, p.Message)
+			logger.PluginI(pluginID, "notify: %s - %s", p.Title, p.Message)
 		}
 		return nil, nil
 	})
@@ -105,6 +117,7 @@ func (m *Manager) handleCallback(inst *PluginInstance, req *RPCRequest, rawLine 
 
 	// 权限检查
 	if err := m.checkPermission(inst.Manifest.ID, req.Method); err != nil {
+		logger.PluginW(inst.Manifest.ID, "host 方法 %s 被拒绝: %v", req.Method, err)
 		resp := MakeError(req.ID, -32001, err.Error())
 		inst.sendMu.Lock()
 		inst.Stdin.Write(resp)
@@ -116,6 +129,7 @@ func (m *Manager) handleCallback(inst *PluginInstance, req *RPCRequest, rawLine 
 	handler, ok := m.hostMethods[req.Method]
 	m.mu.RUnlock()
 	if !ok {
+		logger.PluginW(inst.Manifest.ID, "调用未知 host 方法: %s", req.Method)
 		resp := MakeError(req.ID, -32601, fmt.Sprintf("未知的 host 方法: %s", req.Method))
 		inst.sendMu.Lock()
 		inst.Stdin.Write(resp)
@@ -125,6 +139,7 @@ func (m *Manager) handleCallback(inst *PluginInstance, req *RPCRequest, rawLine 
 
 	result, err := handler(inst.Manifest.ID, req.Params)
 	if err != nil {
+		logger.PluginE(inst.Manifest.ID, "host 方法 %s 执行失败: %v", req.Method, err)
 		resp := MakeError(req.ID, -1, err.Error())
 		inst.sendMu.Lock()
 		inst.Stdin.Write(resp)

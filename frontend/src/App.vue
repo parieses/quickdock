@@ -75,8 +75,9 @@ async function openDSH() {
         envInitialSection.value = 'harness'
         success(t('dshSettingUp'))
         await new Promise(r => setTimeout(r, 150)) // 等环境管理 harness 区块挂载并订阅进度事件
-        // 先注册监听再触发安装：避免安装极快完成时错过 done（窗口不自动打开）；done/error 后 off 防泄漏
-        Events.Off('quickdock:dsh:progress')
+        // 注册监听（done/error 后用返回的 off 自行移除，防泄漏）。
+        // 注意：不要用 Events.Off('quickdock:dsh:progress') 全局移除——
+        // SettingsDSH 页也注册了同事件监听，全局 Off 会一并杀掉它导致 harness 安装进度丢失。
         const off = Events.On('quickdock:dsh:progress', async (payload: any) => {
           const p = (payload?.data ?? payload) as { stage: string; message?: string }
           if (p?.stage === 'done') {

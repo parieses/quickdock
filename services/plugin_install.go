@@ -12,6 +12,7 @@ import (
 	"sync"
 	"unicode/utf8"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
 
@@ -82,7 +83,7 @@ func (a *AppService) InstallPlugin(zipPath string) *ApiResult {
 		permissions["clipboard"] = manifest.Permissions.Clipboard
 	}
 	if err := a.DB.InsertPluginFull(manifest.ID, manifest.Name, manifest.Version, manifest.Author, manifest.Description, manifest.Category, iconData, manifest.Capabilities, permissions); err != nil {
-		fmt.Printf("QuickDock: 插件 %s 写入数据库记录失败: %v\n", manifest.ID, err)
+		logger.E("插件 %s 写入数据库记录失败: %v", manifest.ID, err)
 	} else {
 		// 安装 / 更新成功 → 标记「新」角标（首次打开后由前端清除）
 		a.MarkPluginNew(manifest.ID)

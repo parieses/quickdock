@@ -65,6 +65,7 @@ func loadWindowState() *windowState {
 var (
 	windowStateMu        sync.Mutex
 	windowStateSaveTimer *time.Timer
+	windowStateQuit      atomic.Bool // app.Run 返回后置位，阻止延迟 timer 回调操作已销毁窗口
 )
 
 // scheduleSaveWindowState 防抖保存窗口矩形。最大化/最小化态不记录，避免恢复成畸形窗口。
@@ -77,6 +78,9 @@ func scheduleSaveWindowState(w *application.WebviewWindow) {
 		windowStateSaveTimer.Stop()
 	}
 	windowStateSaveTimer = time.AfterFunc(400*time.Millisecond, func() {
+		if windowStateQuit.Load() {
+			return
+		}
 		b := w.Bounds()
 		s := windowState{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height}
 		if data, err := json.Marshal(s); err == nil {
@@ -207,7 +211,7 @@ func main() {
 
 	// 初始化自动更新器（GitHub Releases Provider）
 	if err := initUpdater(app, appVersion); err != nil {
-		fmt.Printf("QuickDock: 更新器初始化失败（非关键错误）: %v\n", err)
+		logger.E("更新器初始化失败（非关键错误，自动更新不可用）: %v", err)
 	}
 
 	// 启动后台定时检查（仅"检查+通知"，下载/重启复用手动检测路径）
@@ -298,9 +302,18 @@ func main() {
 	// 运行应用
 	err := app.Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "QuickDock: 应用运行失败: %v\n", err)
+		logger.E("应用运行失败: %v", err)
 		// 不调用 log.Fatal，确保下面的 ShutdownAll 执行
 	}
+
+	// 标记窗口态保存已停用：app.Run 返回后主窗口将被销毁，延迟的 timer 回调若仍触发
+	// 会操作已销毁窗口 → panic。Stop 双重保险（guard 已能挡住绝大多数情况）。
+	windowStateQuit.Store(true)
+	windowStateMu.Lock()
+	if windowStateSaveTimer != nil {
+		windowStateSaveTimer.Stop()
+	}
+	windowStateMu.Unlock()
 
 	// 应用退出时停止所有插件、清理 PID 文件、关闭所有插件窗口
 	appService.StopAIStreamServer()
@@ -388,7 +401,14 @@ func initUpdater(app *application.App, version string) error {
 	//    只写 WinINET 注册表、不设环境变量，Go 的 ProxyFromEnvironment 默认读不到）。
 	// 3) 不设整体 Timeout（默认 30s 会把大体积安装包下载直接掐断），
 	//    真正的超时由调用方传入的 ctx 控制（见 services/update.go）。
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	// 自定义 HTTP 传输层：沿用 Go 默认传输层的各项超时。
+	// http.DefaultTransport 默认为 *http.Transport，但可能被第三方库替换；用类型断言失败兜底新建，
+	// 避免非 *http.Transport 时断言 panic（此前若被替换会直接崩在启动期）。
+	baseTransport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		baseTransport = &http.Transport{}
+	}
+	transport := baseTransport.Clone()
 	transport.Proxy = updaterProxyFunc
 	httpClient := &http.Client{Transport: transport, Timeout: 0}
 

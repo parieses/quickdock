@@ -3,9 +3,10 @@
 package plugin
 
 import (
-	"fmt"
 	"sync"
 	"unsafe"
+
+	"quickdock/internal/logger"
 
 	"golang.org/x/sys/windows"
 )
@@ -24,7 +25,7 @@ func initPluginJob() {
 	pluginJobOnce.Do(func() {
 		h, err := windows.CreateJobObject(nil, nil)
 		if err != nil {
-			fmt.Printf("[plugin-job] 创建 Job Object 失败: %v\n", err)
+			logger.E("[plugin-job] 创建 Job Object 失败: %v", err)
 			return
 		}
 		pluginJobHandle = h
@@ -40,7 +41,7 @@ func initPluginJob() {
 			uintptr(unsafe.Pointer(&info)),
 			uint32(unsafe.Sizeof(info)),
 		); err != nil {
-			fmt.Printf("[plugin-job] 设置 Job Object 限制失败: %v\n", err)
+			logger.E("[plugin-job] 设置 Job Object 限制失败: %v", err)
 			windows.CloseHandle(pluginJobHandle)
 			pluginJobHandle = 0
 			return
@@ -61,14 +62,14 @@ func assignProcessToJob(pid uintptr) {
 	h, err := windows.OpenProcess(windows.PROCESS_ALL_ACCESS, false, uint32(pid))
 	if err != nil {
 		if err != windows.ERROR_ACCESS_DENIED {
-			fmt.Printf("[plugin-job] OpenProcess 失败: %v\n", err)
+			logger.E("[plugin-job] OpenProcess 失败: %v", err)
 		}
 		return
 	}
 	defer windows.CloseHandle(h)
 	if err := windows.AssignProcessToJobObject(pluginJobHandle, h); err != nil {
 		if err != windows.ERROR_ACCESS_DENIED {
-			fmt.Printf("[plugin-job] 加入 Job Object 失败: %v\n", err)
+			logger.E("[plugin-job] 加入 Job Object 失败: %v", err)
 		}
 	}
 }

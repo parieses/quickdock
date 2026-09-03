@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
 
@@ -159,6 +160,7 @@ func (r *RedisRuntime) Start(ctx context.Context, version string, onLog func(str
 		}
 		version = installs[0].Version
 	}
+	logger.I("[env][redis] Start 请求 version=%s 已安装=%v", version, installVersionsLog(installs))
 	// 系统 PATH 上的版本 Path 本身就是 redis-server.exe；便携版本走 adapter.ExeFor。
 	// 之前硬走 r.ExeFor(version) → 系统安装时 stat 不到报「未安装该版本」。
 	var exe, wd, scope string
@@ -174,14 +176,24 @@ func (r *RedisRuntime) Start(ctx context.Context, version string, onLog func(str
 		break
 	}
 	if exe == "" {
+		logger.E("[env][redis] Start 失败：未找到已安装版本 %s", version)
 		return fmt.Errorf("未安装该版本: %s", version)
 	}
 	if _, err := os.Stat(exe); err != nil {
+		logger.E("[env][redis] Start 失败：exe 不存在 %s err=%v", exe, err)
 		return fmt.Errorf("未安装该版本: %s", version)
 	}
 	// 多版本共用默认端口：已在运行其它版本时，明确提示先停止，避免误以为能并行跑两个实例
-	if running, _ := svcMgr.info(RuntimeRedis); running != "" && running != version {
+	running, _ := svcMgr.info(RuntimeRedis)
+	if running != "" && running != version {
+		logger.W("[env][redis] Start 拒绝：Redis 已在运行（%s），请求启动 %s", running, version)
 		return fmt.Errorf("Redis 已在运行（%s），请先停止当前版本再启动 %s", running, version)
+	}
+	// 端口被本机其它程序占用（非本会话拉起）时，bind 会短暂误报 running，这里提前给清晰提示
+	port := r.configPort(version)
+	if running == "" && isPortOpen(port) {
+		logger.W("[env][redis] Start 拒绝：端口 %d 已被占用（可能是其它程序），无法启动 %s", port, version)
+		return fmt.Errorf("端口 %d 已被占用，请先释放该端口或更改 Redis 配置端口", port)
 	}
 	if onLog != nil {
 		onLog("启动 Redis " + version + " …")
@@ -189,12 +201,24 @@ func (r *RedisRuntime) Start(ctx context.Context, version string, onLog func(str
 	// 便携版本：以 redis.conf 启动（相对路径，redis 按 cwd=版本目录解析），并把输出落盘到 redis.log 供日志查询。
 	// 系统 PATH 版本无托管目录，无法落配置文件/日志，直接裸启动。
 	if scope == "system" {
+		logger.I("[env][redis] 以系统 PATH 版本启动 exe=%s wd=%s scope=system", exe, wd)
 		return svcMgr.start(RuntimeRedis, version, exe, wd, nil, "", onLog)
 	}
 	if err := r.ensureConfig(version); err != nil {
+		logger.E("[env][redis] 生成 redis.conf 失败 version=%s err=%v", version, err)
 		return fmt.Errorf("生成 redis.conf 失败: %w", err)
 	}
+	logger.I("[env][redis] 以便携版本启动 exe=%s wd=%s scope=portable conf=redis.conf log=%s", exe, wd, r.LogPath(version))
 	return svcMgr.start(RuntimeRedis, version, exe, wd, []string{"redis.conf"}, r.LogPath(version), onLog)
+}
+
+// installVersionsLog 仅用于日志：把已安装版本列表压成短串。
+func installVersionsLog(installs []Install) string {
+	parts := make([]string, 0, len(installs))
+	for _, ins := range installs {
+		parts = append(parts, ins.Version+"("+ins.Scope+")")
+	}
+	return strings.Join(parts, ",")
 }
 
 // ConfigPath 返回某版本 redis.conf 绝对路径。
@@ -282,14 +306,19 @@ func (r *RedisRuntime) configPort(version string) int {
 }
 
 func (r *RedisRuntime) Stop(version string) error {
+	logger.I("[env][redis] Stop 请求 version=%s", version)
+	// 端口取自该版本 redis.conf 的 port 指令（解析失败回退默认），支持用户自定义端口；
+	// 此前写死 6379 会导致改端口后关不掉真实实例、还可能误杀占用 6379 的无关 redis。
+	port := r.configPort(version)
 	// 1) 对每个已装版本目录尝试原生优雅关闭（redis-cli SHUTDOWN NOSAVE，覆盖孤儿/多版本）
 	for _, ins := range r.InstalledVersions() {
-		runRedisStopSignal(filepath.Join(r.versionDir(ins.Version), "redis-cli.exe"), redisDefaultPort)
+		runRedisStopSignal(filepath.Join(r.versionDir(ins.Version), "redis-cli.exe"), port)
 	}
-	// 2) 端口兜底：杀掉占用默认端口且镜像确为 redis-server.exe 的进程树
-	stopByPort(redisDefaultPort, "redis-server.exe")
+	// 2) 端口兜底：杀掉占用该端口且镜像确为 redis-server.exe 的进程树
+	stopByPort(port, "redis-server.exe")
 	// 3) 清掉会话内记录的句柄
 	svcMgr.forget(RuntimeRedis)
+	logger.I("[env][redis] Stop 完成 version=%s port=%d", version, port)
 	return nil
 }
 

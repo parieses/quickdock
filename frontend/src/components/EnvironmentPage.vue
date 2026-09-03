@@ -636,21 +636,28 @@ function applyUpdate(to: string) {
   install(r)
 }
 
+let polling = false
 async function pollStatus() {
-  for (const r of runtimes.value) {
-    if (!r.hasService) continue
-    const s = ui[r.id]
-    if (!s) continue
-    for (const ins of r.installed) {
-      // linked（导入）版本一般不参与服务管理；PHP 例外——导入版 PHP 也能以 php-fpm 方式启停
-      if (ins.scope === 'linked' && r.id !== 'php') continue
-      try {
-        const st = unwrap<ServiceStatus>(await EnvStatus(r.id, ins.version))
-        if (st) s.svc[ins.version] = st
-      } catch {
-        /* 忽略单次轮询失败 */
+  if (polling) return // 上一次轮询（含多次 EnvStatus 调用）尚未返回时跳过，避免请求叠加导致状态闪烁
+  polling = true
+  try {
+    for (const r of runtimes.value) {
+      if (!r.hasService) continue
+      const s = ui[r.id]
+      if (!s) continue
+      for (const ins of r.installed) {
+        // linked（导入）版本一般不参与服务管理；PHP 例外——导入版 PHP 也能以 php-fpm 方式启停
+        if (ins.scope === 'linked' && r.id !== 'php') continue
+        try {
+          const st = unwrap<ServiceStatus>(await EnvStatus(r.id, ins.version))
+          if (st) s.svc[ins.version] = st
+        } catch {
+          /* 忽略单次轮询失败 */
+        }
       }
     }
+  } finally {
+    polling = false
   }
 }
 

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
 
@@ -188,29 +189,47 @@ func (h *HTTPServeManager) pickFreePortLocked() (int, error) {
 }
 
 // Start 在指定端口启动静态文件服务（goroutine 中 Serve）。
+// 关键字段（ln/srv/Running）的写入在持锁区间内完成，与 List/ResumeRunning 的持锁读构成一致视图，
+// 消除此前「释放锁后再写 entry」导致的数据竞争（-race 必报）。
 func (h *HTTPServeManager) Start(id string) error {
 	h.mu.Lock()
 	entry, ok := h.servers[id]
-	h.mu.Unlock()
 	if !ok {
+		h.mu.Unlock()
 		return fmt.Errorf("服务不存在")
 	}
 	if entry.srv != nil {
+		h.mu.Unlock()
 		return fmt.Errorf("已在运行")
 	}
 	if _, err := os.Stat(entry.Dir); err != nil {
+		h.mu.Unlock()
 		return fmt.Errorf("目录不存在: %s", entry.Dir)
 	}
 	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", entry.Port))
 	if err != nil {
+		h.mu.Unlock()
 		return fmt.Errorf("监听端口 %d 失败: %w", entry.Port, err)
 	}
 	srv := &http.Server{Handler: http.FileServer(http.Dir(entry.Dir))}
 	entry.ln = ln
 	entry.srv = srv
 	entry.HTTPServer.Running = true
-	_ = h.persist()
+	h.mu.Unlock()
+
+	// 持久化需在释放锁后进行：persist() 内部会再次取锁，持锁调用会死锁。
+	if err := h.persist(); err != nil {
+		h.mu.Lock()
+		ln.Close()
+		entry.ln = nil
+		entry.srv = nil
+		entry.HTTPServer.Running = false
+		h.mu.Unlock()
+		logger.E("[httpserve] 服务 %s 启动后持久化失败，已回滚: %v", id, err)
+		return err
+	}
 	go func() { _ = srv.Serve(ln) }()
+	logger.I("[httpserve] 已启动服务 %s port=%d", id, entry.Port)
 	return nil
 }
 
@@ -218,21 +237,30 @@ func (h *HTTPServeManager) Start(id string) error {
 func (h *HTTPServeManager) Stop(id string) error {
 	h.mu.Lock()
 	entry, ok := h.servers[id]
-	h.mu.Unlock()
 	if !ok {
+		h.mu.Unlock()
 		return fmt.Errorf("服务不存在")
 	}
 	if entry.srv == nil {
+		h.mu.Unlock()
 		return nil
 	}
-	_ = entry.srv.Close()
-	if entry.ln != nil {
-		_ = entry.ln.Close()
-	}
+	srv := entry.srv
+	ln := entry.ln
 	entry.srv = nil
 	entry.ln = nil
 	entry.HTTPServer.Running = false
-	_ = h.persist()
+	h.mu.Unlock()
+
+	// 关闭在锁外进行，避免阻塞其它调用；字段已在锁内清空，List 读到的始终是一致态。
+	_ = srv.Close()
+	if ln != nil {
+		_ = ln.Close()
+	}
+	if err := h.persist(); err != nil {
+		logger.E("[httpserve] 服务 %s 停止后持久化失败: %v", id, err)
+	}
+	logger.I("[httpserve] 已停止服务 %s", id)
 	return nil
 }
 

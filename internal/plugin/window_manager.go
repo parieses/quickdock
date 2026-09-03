@@ -6,6 +6,8 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
+
+	"quickdock/internal/logger"
 )
 
 // PluginWindowManager 管理每个插件的独立窗口（窗口注册表模式）
@@ -60,12 +62,12 @@ func (m *PluginWindowManager) SetDarkMode(dark bool) {
 // showInTaskbar: 是否在任务栏显示图标（分离模式 = true）
 // 返回 (窗口, 是否为新创建)
 func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (*application.WebviewWindow, bool) {
-	// 检查是否已有该插件的窗口
 	m.mu.Lock()
 	if win, ok := m.windows[pluginID]; ok {
 		m.mu.Unlock()
 		win.Show()
 		win.Focus()
+		logger.I("[plugin-window] 复用已存在窗口 %s（再次点击）", pluginID)
 		return win, false
 	}
 	m.mu.Unlock()
@@ -73,11 +75,21 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	// 「关窗即终止」配套：首次打开或关闭后重开时，惰性确保插件进程已启动
 	if m.mgr != nil {
 		if err := m.mgr.EnsureLoaded(pluginID); err != nil {
-			fmt.Printf("[plugin-window] 打开插件 %s 前加载失败: %v\n", pluginID, err)
+			logger.W("[plugin-window] 打开插件 %s 前加载失败: %v", pluginID, err)
 		}
 	}
 
-	// 创建新窗口
+	// 持锁内「二次检查 → 创建 → 登记」，避免并发 Show 同 pluginID 各自建窗：
+	// 后者会覆盖注册表、前者变孤儿（WebView2 进程泄漏 + 关窗时误删/误停）。
+	m.mu.Lock()
+	if win, ok := m.windows[pluginID]; ok {
+		m.mu.Unlock()
+		win.Show()
+		win.Focus()
+		logger.I("[plugin-window] 并发命中已存在窗口 %s（跳过重复新建）", pluginID)
+		return win, false
+	}
+	// 创建窗口（不触发其它事件钩子，无重入锁风险）
 	win := m.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "快启坞 - " + title,
 		Width:            m.baseWidth,
@@ -91,7 +103,6 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 			HiddenOnTaskbar: !showInTaskbar,
 		},
 	})
-
 	// 用户点击关闭按钮 → 真正销毁窗口，并从注册表删除；同时停止插件进程（关窗即终止）
 	win.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		m.mu.Lock()
@@ -99,17 +110,18 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		m.mu.Unlock()
 		// 不调用 Cancel()，让窗口正常关闭销毁
 		if m.mgr != nil {
-			_ = m.mgr.StopPlugin(pluginID)
+			if err := m.mgr.StopPlugin(pluginID); err != nil {
+				logger.W("[plugin-window] 窗口关闭 %s 后停止插件进程失败: %v", pluginID, err)
+			}
 		}
+		logger.I("[plugin-window] 窗口关闭 %s，已从注册表移除并停止插件进程", pluginID)
 	})
-
-	win.Show()
-	win.Focus() // 新建路径必须显式聚焦，否则新窗口 z-order 会被压在主窗口/面板之下
-
-	m.mu.Lock()
 	m.windows[pluginID] = win
 	m.mu.Unlock()
 
+	win.Show()
+	win.Focus() // 新建路径必须显式聚焦，否则新窗口 z-order 会被压在主窗口/面板之下
+	logger.I("[plugin-window] 创建插件窗口 %s title=%s taskbar=%v", pluginID, title, showInTaskbar)
 	return win, true
 }
 
@@ -123,13 +135,17 @@ func (m *PluginWindowManager) ShowAsWindow(pluginID, title string) (*application
 	return m.Show(pluginID, title, true)
 }
 
-// Hide 关闭并隐藏指定插件的窗口（从注册表移除，WebView2 进程保持以加速下次打开）
+// Hide 仅隐藏指定插件的窗口，保留注册表引用（WebView2 进程不销毁以加速下次打开）。
+// 关键：不调用 delete(m.windows, pluginID)。若移除引用，下次 Show 查不到注册表会
+// NewWithOptions 新建窗口，旧的隐藏窗口沦为孤儿（WebView2 进程泄漏，且其 WindowClosing
+// 日后仍会误删/误停）。保留引用后 Show 走正常复用路径（Show+Focus），无新建、无孤儿。
+// 真正销毁只在用户点 X 关闭时由 WindowClosing 钩子完成（删引用 + StopPlugin）。
 func (m *PluginWindowManager) Hide(pluginID string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if win, ok := m.windows[pluginID]; ok {
-		delete(m.windows, pluginID)
 		win.Hide()
+		logger.I("[plugin-window] 隐藏窗口 %s（保留注册表引用与 WebView2，待复用）", pluginID)
 	}
 }
 
@@ -150,10 +166,12 @@ func (m *PluginWindowManager) FocusedWindow() *application.WebviewWindow {
 func (m *PluginWindowManager) CloseAll() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	n := len(m.windows)
 	for id, win := range m.windows {
 		delete(m.windows, id)
 		win.Hide()
 	}
+	logger.I("[plugin-window] CloseAll 关闭 %d 个插件窗口", n)
 }
 
 // Minimize 最小化指定插件的窗口

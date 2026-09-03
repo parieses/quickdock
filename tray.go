@@ -144,6 +144,7 @@ func GetMainWindow() *application.WebviewWindow {
 
 // showMainWindow 显示主窗口：若处于最小化状态则先恢复，并定位到鼠标所在屏幕。
 func showMainWindow(win *application.WebviewWindow) {
+	logger.I("[tray] showMainWindow 触发（来源可能是热键/托盘/二次启动）")
 	if win.IsMinimised() {
 		win.Restore()
 	}

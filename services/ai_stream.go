@@ -14,6 +14,7 @@ import (
 	"unicode/utf8"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 )
 
 // aiStreamServer 本地 AI 流式服务。
@@ -164,6 +165,12 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		s.writeSSE(w, flusher, "conv", map[string]string{"id": conv.ID, "title": conv.Title})
 	} else {
 		conv, _ = s.svc.DB.GetAIConversation(convID)
+	}
+	// 会话可能被用户在流式进行中删除：此时继续写入会产生孤儿消息，直接终止并提示。
+	if conv == nil {
+		logger.E("[ai-stream] 会话不存在或已被删除，终止流式 convID=%s", convID)
+		s.writeSSE(w, flusher, "error", map[string]string{"message": "会话不存在或已被删除"})
+		return
 	}
 
 	// 组装上下文（含摘要压缩）

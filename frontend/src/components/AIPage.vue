@@ -76,9 +76,17 @@ const modes = [
 
 marked.setOptions({ breaks: true, gfm: true })
 
+// 渲染结果按原文缓存：每次重渲染（含流式 token 到达）都会触发模板重新计算，
+// 若不缓存会对历史消息重复跑 marked.parse + DOMPurify，长对话明显卡顿。
+const mdCache = new Map<string, string>()
 function renderMarkdown(src: string): string {
-  const html = marked.parse(src ?? '', { async: false }) as string
-  return DOMPurify.sanitize(html)
+  const key = src ?? ''
+  const cached = mdCache.get(key)
+  if (cached !== undefined) return cached
+  const html = DOMPurify.sanitize(marked.parse(key, { async: false }) as string)
+  if (mdCache.size > 300) mdCache.clear() // 防止长对话无限增长
+  mdCache.set(key, html)
+  return html
 }
 
 async function loadProfiles() {
