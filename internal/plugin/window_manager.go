@@ -58,6 +58,18 @@ func (m *PluginWindowManager) SetDarkMode(dark bool) {
 	}
 }
 
+// ensurePluginProcess 复用/新建窗口前确保插件进程存活（幂等：已 running 则 no-op）。
+// 失败仅记 W 不阻断显示：窗口是 UI 壳，进程由 EnsureLoaded 拉活失败时用户仍能看到错误页面。
+// 注意：调用方不得持有 m.mu——EnsureLoaded→LoadPlugin 会停旧实例/启动进程，不能在窗口锁内执行。
+func (m *PluginWindowManager) ensurePluginProcess(pluginID string) {
+	if m.mgr == nil {
+		return
+	}
+	if err := m.mgr.EnsureLoaded(pluginID); err != nil {
+		logger.W("[plugin-window] 打开插件 %s 前确保进程存活失败: %v", pluginID, err)
+	}
+}
+
 // Show 显示插件窗口。如果窗口不存在则创建新窗口。
 // showInTaskbar: 是否在任务栏显示图标（分离模式 = true）
 // 返回 (窗口, 是否为新创建)
@@ -65,6 +77,9 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	m.mu.Lock()
 	if win, ok := m.windows[pluginID]; ok {
 		m.mu.Unlock()
+		// 复用路径同样要确保插件进程存活：进程可能已被外部停止（禁用/手动停/崩溃放弃重启）
+		// 而窗口引用仍在注册表——不拉活会显示一个"页面在、进程无"的僵尸窗口。
+		m.ensurePluginProcess(pluginID)
 		win.Show()
 		win.Focus()
 		logger.I("[plugin-window] 复用已存在窗口 %s（再次点击）", pluginID)
@@ -73,17 +88,14 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	m.mu.Unlock()
 
 	// 「关窗即终止」配套：首次打开或关闭后重开时，惰性确保插件进程已启动
-	if m.mgr != nil {
-		if err := m.mgr.EnsureLoaded(pluginID); err != nil {
-			logger.W("[plugin-window] 打开插件 %s 前加载失败: %v", pluginID, err)
-		}
-	}
+	m.ensurePluginProcess(pluginID)
 
 	// 持锁内「二次检查 → 创建 → 登记」，避免并发 Show 同 pluginID 各自建窗：
 	// 后者会覆盖注册表、前者变孤儿（WebView2 进程泄漏 + 关窗时误删/误停）。
 	m.mu.Lock()
 	if win, ok := m.windows[pluginID]; ok {
 		m.mu.Unlock()
+		m.ensurePluginProcess(pluginID)
 		win.Show()
 		win.Focus()
 		logger.I("[plugin-window] 并发命中已存在窗口 %s（跳过重复新建）", pluginID)

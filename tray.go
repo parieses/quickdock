@@ -233,7 +233,7 @@ func createSystemTray(app *application.App) {
 	})
 
 	tray.Show()
-	fmt.Println("QuickDock: 系统托盘已创建 (Wails SystemTray)")
+	logger.I("QuickDock: 系统托盘已创建 (Wails SystemTray)")
 }
 
 // requestQuit 统一退出路径：置真退出标记 → 移除剪贴板监听 → app.Quit()。
@@ -318,7 +318,7 @@ func parseHotkeySetting(raw string) (int, int) {
 func ReregisterHotkey(modifiers, vk uintptr) {
 	app := getHotkeyApp()
 	if app == nil {
-		fmt.Println("QuickDock: 应用未初始化，跳过热键重注册")
+		logger.I("QuickDock: 应用未初始化，跳过热键重注册")
 		return
 	}
 
@@ -331,7 +331,7 @@ func ReregisterHotkey(modifiers, vk uintptr) {
 	if err := app.GlobalShortcut.Register(newAccel, func() {
 		toggleMainWindow()
 	}); err != nil {
-		fmt.Printf("QuickDock: 新热键 [%s] 注册失败: %v，回退到 Ctrl+Space\n", newAccel, err)
+		logger.W("QuickDock: 新热键 [%s] 注册失败: %v，回退到 Ctrl+Space", newAccel, err)
 		fallbackAccel := "Ctrl+Space"
 		app.GlobalShortcut.Register(fallbackAccel, func() {
 			toggleMainWindow()
@@ -341,7 +341,7 @@ func ReregisterHotkey(modifiers, vk uintptr) {
 		}
 		setAccelerators(fallbackAccel, getClipAccel(), getPaletteAccel(), getNoteAccel())
 	} else {
-		fmt.Printf("QuickDock: 全局快捷键 [%s] 已更新\n", newAccel)
+		logger.I("QuickDock: 全局快捷键 [%s] 已更新", newAccel)
 		setAccelerators(newAccel, getClipAccel(), getPaletteAccel(), getNoteAccel())
 	}
 }
@@ -349,7 +349,7 @@ func ReregisterHotkey(modifiers, vk uintptr) {
 func ReregisterClipboardHotkey(modifiers, vk uintptr) {
 	app := getHotkeyApp()
 	if app == nil {
-		fmt.Println("QuickDock: 应用未初始化，跳过热键重注册")
+		logger.I("QuickDock: 应用未初始化，跳过热键重注册")
 		return
 	}
 
@@ -362,7 +362,7 @@ func ReregisterClipboardHotkey(modifiers, vk uintptr) {
 	cb := toggleClipboardWindow
 
 	if err := app.GlobalShortcut.Register(newAccel, cb); err != nil {
-		fmt.Printf("QuickDock: 剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+backquote\n", newAccel, err)
+		logger.W("QuickDock: 剪贴板热键 [%s] 注册失败: %v，回退到 Ctrl+backquote", newAccel, err)
 		fallbackAccel := CTRL_BACKQUOTE
 		app.GlobalShortcut.Register(fallbackAccel, cb)
 		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
@@ -370,7 +370,7 @@ func ReregisterClipboardHotkey(modifiers, vk uintptr) {
 		}
 		setAccelerators(getAppAccel(), fallbackAccel, getPaletteAccel(), getNoteAccel())
 	} else {
-		fmt.Printf("QuickDock: 剪贴板快捷键 [%s] 已更新\n", newAccel)
+		logger.I("QuickDock: 剪贴板快捷键 [%s] 已更新", newAccel)
 		setAccelerators(getAppAccel(), newAccel, getPaletteAccel(), getNoteAccel())
 	}
 }
@@ -378,7 +378,7 @@ func ReregisterClipboardHotkey(modifiers, vk uintptr) {
 func ReregisterNoteHotkey(modifiers, vk uintptr) {
 	app := getHotkeyApp()
 	if app == nil {
-		fmt.Println("QuickDock: 应用未初始化，跳过热键重注册")
+		logger.I("QuickDock: 应用未初始化，跳过热键重注册")
 		return
 	}
 
@@ -391,7 +391,7 @@ func ReregisterNoteHotkey(modifiers, vk uintptr) {
 	cb := showNoteWindow
 
 	if err := app.GlobalShortcut.Register(newAccel, cb); err != nil {
-		fmt.Printf("QuickDock: 笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+N\n", newAccel, err)
+		logger.W("QuickDock: 笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+N", newAccel, err)
 		fallbackAccel := "Ctrl+Shift+N"
 		app.GlobalShortcut.Register(fallbackAccel, cb)
 		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
@@ -399,7 +399,7 @@ func ReregisterNoteHotkey(modifiers, vk uintptr) {
 		}
 		setAccelerators(getAppAccel(), getClipAccel(), getPaletteAccel(), fallbackAccel)
 	} else {
-		fmt.Printf("QuickDock: 笔记快捷键 [%s] 已注册\n", newAccel)
+		logger.I("QuickDock: 笔记快捷键 [%s] 已注册", newAccel)
 		setAccelerators(getAppAccel(), getClipAccel(), getPaletteAccel(), newAccel)
 	}
 }
@@ -456,14 +456,14 @@ func SuspendHotkeys() {
 	if noteAccel != "" {
 		app.GlobalShortcut.Unregister(noteAccel)
 	}
-	fmt.Println("QuickDock: 热键已暂停（设置页捕获中）")
+	logger.I("QuickDock: 热键已暂停（设置页捕获中）")
 }
 
 func ResumeHotkeys() {
 	if app := getHotkeyApp(); app != nil {
 		registerAllHotkeys(app)
 	}
-	fmt.Println("QuickDock: 热键已恢复")
+	logger.I("QuickDock: 热键已恢复")
 }
 
 // toggleClipboardWindow 切换剪贴板独立窗口的显隐状态

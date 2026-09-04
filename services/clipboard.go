@@ -56,6 +56,11 @@ func (a *AppService) writeEntryToClipboard(entry *db.ClipboardEntry, hwnd uintpt
 		if err := platform.SetClipboardImage(hwnd, entry.ImagePath); err != nil {
 			return fmt.Errorf("图片写入剪贴板失败: %v", err)
 		}
+		// 回环防护：记录刚写回剪贴板的图片哈希，使后续捕获能识别"从历史复制的图片"并跳过。
+		// 该哈希口径与 processImage 的 DIB→PNG MD5 一致（PNG 文件经 DIB 往返后重编码字节确定性相同）。
+		if data, e := os.ReadFile(entry.ImagePath); e == nil {
+			setLastClipboardImageHash(platform.MD5Hash(data))
+		}
 	case entry.ContentType == "file" && entry.TextContent != "":
 		if err := platform.SetClipboardFiles(hwnd, strings.Split(entry.TextContent, "\n")); err != nil {
 			return fmt.Errorf("文件写入剪贴板失败: %v", err)

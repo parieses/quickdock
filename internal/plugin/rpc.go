@@ -22,6 +22,11 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 	default:
 	}
 
+	// stdin 已判定写超时（悬挂写者未回收）：禁止再发起新写入，避免帧交错
+	if inst.writeBroken.Load() {
+		return nil, ErrStdinTimeout
+	}
+
 	// 注册 pending 请求（以 id 的 JSON 文本为键，兼容 string/number id）
 	inst.readMu.Lock()
 	inst.NextID++
@@ -78,7 +83,11 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 		inst.readMu.Lock()
 		delete(inst.Pending, idKey)
 		inst.readMu.Unlock()
-		return nil, fmt.Errorf("写入插件 stdin 超时（插件无响应）")
+		// 悬挂写 goroutine 仍阻塞在 Stdin.Write（管道满、插件不读），无法在此回收。
+		// 置 writeBroken 禁止后续新写入与之并发交错；悬挂写者随进程被杀/退出而终止。
+		inst.writeBroken.Store(true)
+		logger.PluginE(inst.Manifest.ID, "stdin 写入超时（2s），通信中断；实例不可再写，待 stopPlugin/进程退出回收悬挂写者")
+		return nil, ErrStdinTimeout
 	}
 
 	// 默认超时
@@ -261,6 +270,11 @@ func (inst *PluginInstance) SendNotification(method string, params interface{}) 
 	}
 	data = append(data, '\n')
 
+	// stdin 已判定写超时（悬挂写者未回收）：禁止再发起新写入，避免帧交错
+	if inst.writeBroken.Load() {
+		return ErrStdinTimeout
+	}
+
 	inst.sendMu.Lock()
 	defer inst.sendMu.Unlock()
 	// 写入带超时：插件挂死不读 stdin 时管道写满会永久阻塞，
@@ -277,7 +291,9 @@ func (inst *PluginInstance) SendNotification(method string, params interface{}) 
 		}
 		return nil
 	case <-time.After(2 * time.Second):
-		return fmt.Errorf("写入插件 stdin 超时（插件无响应，将强制终止）")
+		inst.writeBroken.Store(true)
+		logger.PluginE(inst.Manifest.ID, "stdin 通知写入超时（2s），通信中断；实例不可再写，待 stopPlugin/进程退出回收悬挂写者")
+		return ErrStdinTimeout
 	}
 }
 

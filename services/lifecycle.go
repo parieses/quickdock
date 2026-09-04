@@ -43,31 +43,31 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	if err != nil {
 		return fmt.Errorf("工作空间列表获取失败: %w", err)
 	}
-	fmt.Println("QuickDock: 找到", len(workspaces), "个工作空间")
+	logger.I("QuickDock: 找到 %d 个工作空间", len(workspaces))
 
 	if len(workspaces) == 0 {
 		ws, err := a.DB.CreateWorkspace(DefaultWorkspaceName)
 		if err != nil {
-			fmt.Println("QuickDock: 创建默认工作空间失败:", err.Error())
+			logger.W("QuickDock: 创建默认工作空间失败: %v", err)
 		} else {
-			fmt.Println("QuickDock: 默认工作空间已创建, id=", ws.ID)
+			logger.I("QuickDock: 默认工作空间已创建, id=%v", ws.ID)
 		}
 	} else {
 		for _, w := range workspaces {
-			fmt.Println("QuickDock: 工作空间 id=", w.ID, "名称=", w.Name)
+			logger.I("QuickDock: 工作空间 id=%v 名称=%v", w.ID, w.Name)
 		}
 	}
 
 	// 确保默认工具存在
 	if err := a.DB.EnsureDefaultTools(); err != nil {
-		fmt.Println("QuickDock: 默认工具初始化失败:", err.Error())
+		logger.W("QuickDock: 默认工具初始化失败: %v", err)
 	}
 
 	// 清理过期剪贴板条目
 	if count, err := a.DeleteExpiredClipboardEntries(); err != nil {
-		fmt.Println("QuickDock: 剪贴板过期清理失败:", err.Error())
+		logger.W("QuickDock: 剪贴板过期清理失败: %v", err)
 	} else if count > 0 {
-		fmt.Printf("QuickDock: 已清理 %d 条过期剪贴板记录\n", count)
+		logger.I("QuickDock: 已清理 %d 条过期剪贴板记录", count)
 	}
 
 	// 注入插件 Host API 真实实现（剪贴板/通知/对话框/HTTP/存储）
@@ -90,7 +90,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 			}
 			for _, p := range a.PluginMgr.ListPlugins() {
 				if !enabledSet[p.ID] {
-					fmt.Printf("QuickDock: 插件 %s 已禁用，停止进程\n", p.ID)
+					logger.I("QuickDock: 插件 %s 已禁用，停止进程", p.ID)
 					a.PluginMgr.StopPlugin(p.ID)
 				}
 			}
@@ -124,7 +124,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("QuickDock: dsh 自动启动 goroutine panic: %v\n", r)
+					logger.E("QuickDock: dsh 自动启动 goroutine panic: %v", r)
 				}
 			}()
 			time.Sleep(5 * time.Second)
@@ -132,7 +132,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 				return // 已有服务（复用外部 dsh / 启动极快），无需再拉
 			}
 			if _, err := a.DSH.Start(); err != nil {
-				fmt.Println("QuickDock: dsh 自动启动失败:", err.Error())
+				logger.W("QuickDock: dsh 自动启动失败: %v", err)
 			}
 		}()
 	}
@@ -144,6 +144,8 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 func (a *AppService) ServiceShutdown() error {
 	// 先停止所有插件并关闭插件窗口，避免它们在 DB 关闭后仍尝试写入，
 	// 导致 panic 或数据丢失（原顺序先关 DB，而插件子进程/goja 仍在运行）。
+	// 注意：main.go 的退出回调也会调用一次 ShutdownAll/CloseAll；此处为 v3 生命周期主路径，
+	// 二者互为安全网，ShutdownAll/CloseAll 幂等，重复调用无副作用（详见 main.go 退出清理注释）。
 	if a.PluginMgr != nil {
 		a.PluginMgr.ShutdownAll()
 	}

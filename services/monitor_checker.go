@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
@@ -72,7 +73,7 @@ func (a *AppService) runDueMonitors() {
 	now := time.Now().Unix()
 	monitors, err := a.DB.ListMonitorsDue(now)
 	if err != nil {
-		fmt.Println("QuickDock: 监控查询失败:", err)
+		logger.W("QuickDock: 监控查询失败: %v", err)
 		return
 	}
 	for i := range monitors {
@@ -85,7 +86,7 @@ func (a *AppService) runDueMonitors() {
 		}
 		go func(m *db.Monitor) {
 			defer a.monitorInflight.Delete(m.ID)
-			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: monitor checker panic: %v\n", r) } }()
+			defer func() { if r := recover(); r != nil { logger.E("QuickDock: monitor checker panic: %v", r) } }()
 			a.checkOneMonitor(m)
 		}(m)
 	}

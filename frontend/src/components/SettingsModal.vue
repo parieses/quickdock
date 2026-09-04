@@ -1,11 +1,11 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, FolderOpen } from '@lucide/vue'
+import { X, Monitor, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, FolderOpen, ExternalLink } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { unwrap } from '../utils/api'
 import { i18n } from '../i18n'
-import { Events } from '@wailsio/runtime'
+import { Events, Browser } from '@wailsio/runtime'
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
@@ -158,6 +158,12 @@ async function toggleLogsPreview() {
 
 async function openLogsDir() {
   try { await OpenLogsDir() } catch (e: any) { toast?.error?.(getErrorMessage(e)) }
+}
+
+function openUrl(url: string) {
+  Browser.OpenURL(url).catch((e: any) => {
+    console.error('[Settings] OpenURL:', e)
+  })
 }
 
 function logLineClass(line: string): string {
@@ -409,6 +415,18 @@ async function toggleAutoStart() {
               <p class="about-version">{{ t('version') }} {{ appVersion || '0.0.0' }}</p>
               <p class="about-desc">{{ t('appDesc') }}</p>
               <p class="about-tech">{{ t('aboutTech') }}</p>
+              <div class="about-links">
+                <a class="about-link" href="#" @click.prevent="openUrl('https://github.com/parieses/quickdock')">
+                  <ExternalLink :size="12" />
+                  <span class="about-link-tag">{{ t('aboutRepoMain') }}</span>
+                  github.com/parieses/quickdock
+                </a>
+                <a class="about-link" href="#" @click.prevent="openUrl('https://github.com/parieses/quickdock-plugins')">
+                  <ExternalLink :size="12" />
+                  <span class="about-link-tag">{{ t('aboutRepoPlugins') }}</span>
+                  github.com/parieses/quickdock-plugins
+                </a>
+              </div>
               <p class="about-copy">{{ t('aboutCopyright') }}</p>
             </div>
 
@@ -689,6 +707,26 @@ async function toggleAutoStart() {
 .about-version { font-size: 13px; color: var(--color-accent); margin: 0 0 16px; }
 .about-desc { font-size: 14px; color: var(--color-text-muted); margin: 0 0 4px; }
 .about-tech { font-size: 12px; color: var(--color-text-disabled); margin: 0 0 20px; }
+.about-links { display: flex; flex-direction: column; gap: 6px; margin: 0 0 16px; }
+.about-link {
+  align-self: flex-start; /* 收缩到内容宽度，避免点击行内空白也触发跳转 */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: opacity 150ms;
+}
+.about-link:hover { opacity: 0.8; text-decoration: underline; }
+.about-link svg { flex-shrink: 0; opacity: 0.7; }
+.about-link-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
 .about-copy { font-size: 11px; color: var(--color-text-disabled); margin: 0; }
 
 /* 更新按钮 */

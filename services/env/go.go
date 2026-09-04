@@ -43,6 +43,7 @@ func (g *GoRuntime) ExeFor(version string) string {
 // 这正是修复「本机已装 go 1.25 却提示未安装」的关键——不再只认便携目录。
 func (g *GoRuntime) InstalledVersions() []Install {
 	var out []Install
+	dirs := managedDirs{}
 	if entries, err := os.ReadDir(g.baseDir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
@@ -51,11 +52,17 @@ func (g *GoRuntime) InstalledVersions() []Install {
 			v := e.Name()
 			if _, err := os.Stat(g.ExeFor(v)); err == nil {
 				out = append(out, Install{Version: v, Scope: "portable", Path: g.versionDir(v)})
+				dirs.record(filepath.Dir(g.ExeFor(v)))
 			}
 		}
 	}
 	if p, err := exec.LookPath("go"); err == nil {
 		if v := parseGoVersion(RunVersion(p, "version")); v != "" {
+			// LookPath 可能命中本就由 QuickDock 托管并写入 PATH 的便携版（与上面 ReadDir 收录的是同一份），
+			// 此时不要重复登记为 system，否则同一版本出现两条“取消环境变量”。
+			if dirs.dedupeByDir(p) {
+				return out
+			}
 			out = append(out, Install{Version: v, Scope: "system", Path: p})
 		}
 	}

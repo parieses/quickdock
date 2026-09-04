@@ -2,7 +2,6 @@ package services
 
 import (
 	"bytes"
-	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"unsafe"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 
 	"github.com/google/uuid"
@@ -43,15 +43,25 @@ var (
 	// Clipboard text deduplication
 	lastClipboardText   string
 	lastClipboardTextMu sync.Mutex
+
+	// Clipboard image deduplication (防回环)：记录本程序刚写回剪贴板的图片哈希，
+	// 使后续捕获能识别"从历史复制的图片"并跳过，避免 CopyCount 失真与重复 DIB→PNG 编码。
+	lastClipboardImageHash   string
+	lastClipboardImageHashMu sync.Mutex
 )
+
+// clipboardLogContent 控制是否把剪贴板「内容」（文本预览/文件路径/图片 self-check）
+// 写入日志。默认关闭——剪贴板复制频繁且可能含敏感信息（密码/Token），写日志既膨胀
+// 又泄露隐私。排查时设环境变量 QUICKDOCK_LOG_CLIPBOARD=1 再启动即可开启。
+var clipboardLogContent = os.Getenv("QUICKDOCK_LOG_CLIPBOARD") == "1"
 
 // SetClipboardText writes text to the system clipboard via Wails API
 func SetClipboardText(text string) {
 	if app := AppRef.Load(); app != nil && app.Clipboard.SetText(text) {
 		setLastClipboardText(text)
-		fmt.Println("QuickDock: clipboard written (length:", len(text), ")")
+		logger.I("QuickDock: clipboard written (length: %d)", len(text))
 	} else {
-		fmt.Println("QuickDock: clipboard write failed")
+		logger.W("QuickDock: clipboard write failed")
 	}
 }
 
@@ -60,14 +70,14 @@ func SetClipboardText(text string) {
 // OnClipboardChange handles clipboard change events
 func (a *AppService) OnClipboardChange() {
 	if a.DB == nil {
-		fmt.Println("QuickDock: clipboard: database not initialized, skipping")
+		logger.W("QuickDock: clipboard: database not initialized, skipping")
 		return
 	}
 
 	hwnd := platform.ClipboardWindowHandle()
 
 	if !openClipboardRetry(hwnd) {
-		fmt.Println("QuickDock: OpenClipboard failed (another app may be holding it)")
+		logger.W("QuickDock: OpenClipboard failed (another app may be holding it)")
 		return
 	}
 	defer w32.CloseClipboard()
@@ -84,11 +94,11 @@ func (a *AppService) OnClipboardChange() {
 				copy(rawData, unsafe.Slice((*byte)(ptr), int(sz)))
 				filePaths = platform.ParseHDROP(rawData)
 			} else {
-				fmt.Printf("QuickDock: HDROP size out of range: %d\n", sz)
+				logger.W("QuickDock: HDROP size out of range: %d", sz)
 			}
 			w32.GlobalUnlock(hdropHandle)
 		} else {
-			fmt.Println("QuickDock: GlobalLock(HDROP) failed")
+			logger.W("QuickDock: GlobalLock(HDROP) failed")
 		}
 	}
 
@@ -111,7 +121,7 @@ func (a *AppService) OnClipboardChange() {
 			}
 			w32.GlobalUnlock(handle)
 		} else {
-			fmt.Println("QuickDock: GlobalLock(CF_UNICODETEXT) failed")
+			logger.W("QuickDock: GlobalLock(CF_UNICODETEXT) failed")
 		}
 	}
 
@@ -140,9 +150,19 @@ func (a *AppService) OnClipboardChange() {
 		}
 	}
 	if imageData == nil {
-		fmt.Printf("QuickDock: no image format found; available clipboard formats=%v\n", listClipboardFormats())
+		logger.W("QuickDock: no image format found; available clipboard formats=%v", listClipboardFormats())
 	} else {
-		fmt.Printf("QuickDock: clipboard image detected (PNG=%v, %d bytes) db=%s\n", imageIsPNG, len(imageData), a.DB.Path())
+		logger.I("QuickDock: clipboard image detected (PNG=%v, %d bytes) db=%s", imageIsPNG, len(imageData), a.DB.Path())
+	}
+
+	// 图片回环防护：若本次捕获的图片正是本程序刚写回剪贴板的那张（从历史复制图片），
+	// 其去重哈希与上次写入一致，后续分支直接跳过，避免 CopyCount 失真与重复 DIB→PNG 编码。
+	// 与 processImage 中的去重口径完全一致（PNG 原样取 MD5，DIB 解码后重编码 PNG 取 MD5）。
+	imageLoop := false
+	if len(imageData) > 0 {
+		if h, ok := imageDataHash(imageData, imageIsPNG); ok && h != "" && h == getLastClipboardImageHash() {
+			imageLoop = true
+		}
 	}
 
 	// 4. Handle files/images
@@ -157,12 +177,15 @@ func (a *AppService) OnClipboardChange() {
 		}
 
 		if len(imageData) > 0 {
+			if imageLoop {
+				return
+			}
 			sourceApp := platform.GetActiveWindowTitle()
 			setLastClipboardText(joined)
 			go func() {
 				defer recoverPanic("clipboard processImage (file)")
 				if a.DB == nil {
-					fmt.Println("QuickDock: clipboard: database closed, skipping image+file")
+					logger.W("QuickDock: clipboard: database closed, skipping image+file")
 					return
 				}
 				processImage(a.DB, imageData, joined, sourceApp, a.emitClipboardEvent, imageIsPNG)
@@ -176,14 +199,14 @@ func (a *AppService) OnClipboardChange() {
 		go func() {
 			defer recoverPanic("clipboard saveFile")
 			if a.DB == nil {
-				fmt.Println("QuickDock: clipboard: database closed, skipping file")
+				logger.W("QuickDock: clipboard: database closed, skipping file")
 				return
 			}
 			entry, err := a.DB.InsertClipboardFileEntry(joined, sourceApp)
 			if err != nil {
-				fmt.Printf("QuickDock: file clipboard save failed: %v\n", err)
+				logger.W("QuickDock: file clipboard save failed: %v", err)
 			} else {
-				fmt.Printf("QuickDock >> clipboard captured [%s] (%d files) from [%s]\n", entry.ID[:8], len(filePaths), sourceApp)
+				logger.I("QuickDock >> clipboard captured [%s] (%d files) from [%s]", entry.ID[:8], len(filePaths), sourceApp)
 				a.emitClipboardEvent()
 			}
 		}()
@@ -203,19 +226,23 @@ handleText:
 		go func() {
 			defer recoverPanic("clipboard saveText")
 			if a.DB == nil {
-				fmt.Println("QuickDock: clipboard: database closed, skipping text")
+				logger.W("QuickDock: clipboard: database closed, skipping text")
 				return
 			}
 			entry, err := a.DB.InsertClipboardEntry(text, sourceApp)
 			if err != nil {
-				fmt.Printf("QuickDock: clipboard save failed: %v\n", err)
+				logger.W("QuickDock: clipboard save failed: %v", err)
 			} else {
-				preview := text
-				runes := []rune(preview)
-				if len(runes) > 80 {
-					preview = string(runes[:80]) + "..."
+				if clipboardLogContent {
+					preview := text
+					runes := []rune(preview)
+					if len(runes) > 80 {
+						preview = string(runes[:80]) + "..."
+					}
+					logger.I("QuickDock >> clipboard captured [%s] from [%s] → %s", entry.ID[:8], sourceApp, preview)
+				} else {
+					logger.I("QuickDock >> clipboard captured text [%s] len=%d from [%s]", entry.ID[:8], len(text), sourceApp)
 				}
-				fmt.Printf("QuickDock >> clipboard captured [%s] from [%s] → %s\n", entry.ID[:8], sourceApp, preview)
 				a.emitClipboardEvent()
 			}
 		}()
@@ -224,11 +251,14 @@ handleText:
 
 	// 6. Image-only
 	if len(imageData) > 0 {
+		if imageLoop {
+			return
+		}
 		sourceApp := platform.GetActiveWindowTitle()
 		go func() {
 			defer recoverPanic("clipboard processImage (image-only)")
 			if a.DB == nil {
-				fmt.Println("QuickDock: clipboard: database closed, skipping image")
+				logger.W("QuickDock: clipboard: database closed, skipping image")
 				return
 			}
 			processImage(a.DB, imageData, "", sourceApp, a.emitClipboardEvent, imageIsPNG)
@@ -303,7 +333,7 @@ func listClipboardFormats() []int {
 // recoverPanic 恢复 goroutine panic 防止整个应用崩溃
 func recoverPanic(context string) {
 	if r := recover(); r != nil {
-		fmt.Printf("QuickDock: [PANIC] %s: %v\n", context, r)
+		logger.E("QuickDock: [PANIC] %s: %v", context, r)
 	}
 }
 
@@ -327,6 +357,36 @@ func setLastClipboardText(s string) {
 	lastClipboardText = s
 }
 
+func getLastClipboardImageHash() string {
+	lastClipboardImageHashMu.Lock()
+	defer lastClipboardImageHashMu.Unlock()
+	return lastClipboardImageHash
+}
+
+func setLastClipboardImageHash(h string) {
+	lastClipboardImageHashMu.Lock()
+	defer lastClipboardImageHashMu.Unlock()
+	lastClipboardImageHash = h
+}
+
+// imageDataHash 计算剪贴板图片的去重哈希，口径与 processImage 完全一致：
+// PNG 原样取 MD5，DIB 解码后重编码 PNG 取 MD5。用于在捕获入口同步判断
+// "是否为本程序刚写回的图片"（防回环）。返回 (hash, ok)，ok=false 表示无法计算。
+func imageDataHash(imageData []byte, isPNG bool) (string, bool) {
+	if isPNG {
+		return platform.MD5Hash(imageData), true
+	}
+	img, err := platform.DibToImage(imageData)
+	if err != nil {
+		return "", false
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		return "", false
+	}
+	return platform.MD5Hash(buf.Bytes()), true
+}
+
 // ===== Internal processing functions (run in goroutines) =====
 
 // processImage 处理剪贴板图片数据：DIB→PNG（或 PNG 原样）→去重→写入磁盘→入库
@@ -339,12 +399,12 @@ func processImage(database *db.Database, imageData []byte, paths, src string, em
 	} else {
 		img, err := platform.DibToImage(imageData)
 		if err != nil {
-			fmt.Printf("QuickDock: DIB to image failed: %v\n", err)
+			logger.W("QuickDock: DIB to image failed: %v", err)
 			return
 		}
 		var pngBuf bytes.Buffer
 		if err := png.Encode(&pngBuf, img); err != nil {
-			fmt.Printf("QuickDock: PNG encode failed: %v\n", err)
+			logger.W("QuickDock: PNG encode failed: %v", err)
 			return
 		}
 		pngBytes = pngBuf.Bytes()
@@ -356,28 +416,39 @@ func processImage(database *db.Database, imageData []byte, paths, src string, em
 
 	entry, err := database.InsertClipboardImageEntry(imageID, imagePath, hashHex, paths, src)
 	if err != nil {
-		fmt.Printf("QuickDock: image clipboard save failed: %v\n", err)
+		logger.W("QuickDock: image clipboard save failed: %v", err)
 		return
 	}
-	// 诊断：确认入库真实生效，并打印 DB 绝对路径（核对与外部查看工具是否同一文件）
-	fmt.Printf("QuickDock >> image entry saved: id=%s db=%s\n", entry.ID, database.Path())
-	if chk, e := database.GetClipboardEntry(entry.ID); e != nil {
-		fmt.Printf("QuickDock: WARN self-check read-back failed: %v\n", e)
-	} else {
-		fmt.Printf("QuickDock: self-check ok: contentType=%s hasImagePath=%v\n", chk.ContentType, chk.ImagePath != "")
+	// 诊断：确认入库真实生效。self-check 读回仅排查时开启（QUICKDOCK_LOG_CLIPBOARD=1），
+	// 默认只记一条极简入库确认，避免每次图片复制刷屏。
+	logger.I("QuickDock >> image entry saved: id=%s", entry.ID)
+	if clipboardLogContent {
+		if chk, e := database.GetClipboardEntry(entry.ID); e != nil {
+			logger.W("QuickDock: WARN self-check read-back failed: %v", e)
+		} else {
+			logger.I("QuickDock: self-check ok: contentType=%s hasImagePath=%v", chk.ContentType, chk.ImagePath != "")
+		}
 	}
 	if entry.CopyCount == 1 {
 		if err := os.WriteFile(imagePath, pngBytes, 0644); err != nil {
-			fmt.Printf("QuickDock: save image file failed: %v, removing entry %s\n", err, entry.ID[:8])
+			logger.W("QuickDock: save image file failed: %v, removing entry %s", err, entry.ID[:8])
 			// 文件写入失败 → 回滚数据库条目，避免悬挂记录
 			database.DeleteClipboardEntry(entry.ID)
 			return
 		}
 	}
-	if paths != "" {
-		fmt.Printf("QuickDock >> clipboard captured [%s] (image file: %s) hash=%s count=%d\n", entry.ID[:8], paths, hashHex[:8], entry.CopyCount)
+	if clipboardLogContent {
+		if paths != "" {
+			logger.I("QuickDock >> clipboard captured [%s] (image file: %s) hash=%s count=%d", entry.ID[:8], paths, hashHex[:8], entry.CopyCount)
+		} else {
+			logger.I("QuickDock >> clipboard captured [%s] (image) from [%s] hash=%s count=%d", entry.ID[:8], src, hashHex[:8], entry.CopyCount)
+		}
 	} else {
-		fmt.Printf("QuickDock >> clipboard captured [%s] (image) from [%s] hash=%s count=%d\n", entry.ID[:8], src, hashHex[:8], entry.CopyCount)
+		if paths != "" {
+			logger.I("QuickDock >> clipboard captured image [%s] (%d files) from [%s]", entry.ID[:8], strings.Count(paths, "\n")+1, src)
+		} else {
+			logger.I("QuickDock >> clipboard captured image [%s] from [%s]", entry.ID[:8], src)
+		}
 	}
 	if emit != nil {
 		emit()

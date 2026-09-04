@@ -153,6 +153,19 @@ func (a *AppService) EnvStatus(runtime, version string) *ApiResult {
 	return Ok(st)
 }
 
+// EnvPortConflict 查询某运行时默认服务端口是否被其它程序占用（启动前可视化提示）。
+// 非服务类运行时返回 occupied=false 的零值。
+func (a *AppService) EnvPortConflict(runtime, version string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	pc, err := a.Env.PortConflict(env.Runtime(runtime), version)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(pc)
+}
+
 // EnvGitStatus 返回当前 Git 环境的综合状态（版本/路径/SSH/Git LFS），供环境管理页状态表展示。
 func (a *AppService) EnvGitStatus() *ApiResult {
 	if a.Env == nil {

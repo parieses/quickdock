@@ -22,6 +22,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/sysutil"
 )
 
@@ -188,7 +189,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH stdout log goroutine panic: %v", r)
 			}
 		}()
 		sc := bufio.NewScanner(stdout)
@@ -201,7 +202,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH stderr log goroutine panic: %v", r)
 			}
 		}()
 		sc := bufio.NewScanner(stderr)
@@ -224,7 +225,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH reaper goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH reaper goroutine panic: %v", r)
 			}
 		}()
 		_ = cmd.Wait()
@@ -249,7 +250,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH waitReady goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH waitReady goroutine panic: %v", r)
 			}
 		}()
 		err := m.waitReady(u, exit)
@@ -521,7 +522,7 @@ func (m *DSHProcessManager) stopLocked() {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH signal-fallback goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH signal-fallback goroutine panic: %v", r)
 			}
 		}()
 		select {
@@ -605,7 +606,7 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH stdout log goroutine panic: %v", r)
 			}
 		}()
 		sc := bufio.NewScanner(stdout)
@@ -616,7 +617,7 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH stderr log goroutine panic: %v", r)
 			}
 		}()
 		sc := bufio.NewScanner(stderr)
@@ -717,7 +718,7 @@ func (m *DSHProcessManager) UpdateAllPlugins() error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH update stdout log goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH update stdout log goroutine panic: %v", r)
 			}
 		}()
 		sc := bufio.NewScanner(stdout)
@@ -728,7 +729,7 @@ func (m *DSHProcessManager) UpdateAllPlugins() error {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH update stderr log goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH update stderr log goroutine panic: %v", r)
 			}
 		}()
 		sc := bufio.NewScanner(stderr)
@@ -1015,7 +1016,7 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH stdout log goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH stdout log goroutine panic: %v", r)
 			}
 		}()
 		sc := bufio.NewScanner(stdout)
@@ -1026,7 +1027,7 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: DSH stderr log goroutine panic: %v\n", r)
+				logger.E("QuickDock: DSH stderr log goroutine panic: %v", r)
 			}
 		}()
 		sc := bufio.NewScanner(stderr)
@@ -1149,7 +1150,7 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 		go func(w *application.WebviewWindow, target string, rd <-chan struct{}) {
 			defer func() {
 				if r := recover(); r != nil {
-					fmt.Printf("QuickDock: DSH navigate goroutine panic: %v\n", r)
+					logger.E("QuickDock: DSH navigate goroutine panic: %v", r)
 				}
 			}()
 			select {

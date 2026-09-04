@@ -29,14 +29,29 @@ const (
 	RuntimeRedis Runtime = "redis"
 	RuntimeNginx Runtime = "nginx"
 	RuntimeGit   Runtime = "git"
+	RuntimeCaddy    Runtime = "caddy"
+	RuntimeComposer Runtime = "composer"
+
+	// 第二批扩展运行时（2026-09-04）：语言/工具/Web服务器/缓存/数据库
+	RuntimeFFmpeg     Runtime = "ffmpeg"
+	RuntimePython     Runtime = "python"
+	RuntimeApache     Runtime = "apache"
+	RuntimeMemcached  Runtime = "memcached"
+	RuntimeMariaDB    Runtime = "mariadb"
+	RuntimeMySQL      Runtime = "mysql"
+	RuntimePostgreSQL Runtime = "postgresql"
+	RuntimeMongoDB    Runtime = "mongodb"
+	RuntimeMailpit    Runtime = "mailpit"
+	RuntimeMinIO      Runtime = "minio"
 )
 
-// 环境管理分组（侧边栏按组归类：语言 / Web 服务器 / 缓存 / 工具）
+// 环境管理分组（侧边栏按组归类：语言 / Web 服务器 / 缓存 / 工具 / 数据库）
 const (
 	GroupLanguage  = "language"
 	GroupWebServer = "webserver"
 	GroupCache     = "cache"
 	GroupTool      = "tool"
+	GroupDatabase  = "database"
 )
 
 // Source 一个可切换的下载源
@@ -83,6 +98,48 @@ var (
 		}},
 		RuntimeGit: {display: "Git", group: GroupTool, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, sources: []Source{
 			{ID: "gfw", Name: "git-for-windows (GitHub)", Build: gitURL("https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}.windows.1-64-bit.zip")},
+		}},
+		RuntimeCaddy: {display: "Caddy", group: GroupWebServer, versions: []string{"2.8.4", "2.7.6", "2.6.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, sources: []Source{
+			{ID: "caddyserver", Name: "caddyserver/caddy (GitHub)", Build: caddyURL("https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_windows_amd64.zip")},
+		}},
+		RuntimeComposer: {display: "Composer", group: GroupTool, versions: []string{"2.7.7", "2.6.6", "2.5.8"}, versURL: "https://getcomposer.org/versions", versParse: parseComposerVersions, sources: []Source{
+			{ID: "getcomposer", Name: "getcomposer.org 官方", Build: composerURL("https://getcomposer.org/download/{version}/composer.phar")},
+		}},
+		RuntimeFFmpeg: {display: "FFmpeg", group: GroupTool, versions: []string{"7.1", "6.1", "5.1"}, sources: []Source{
+			{ID: "gyandev", Name: "gyan.dev 官方构建", Build: ffmpegURL("https://www.gyan.dev/ffmpeg/builds/ffmpeg-{version}-essentials_build.zip")},
+		}},
+		RuntimePython: {display: "Python", group: GroupLanguage, versions: []string{"3.12.7", "3.11.9", "3.10.14"}, versURL: "https://www.python.org/ftp/python/", versParse: parsePythonVersions, sources: []Source{
+			{ID: "pythonorg", Name: "python.org 官方", Build: pythonURL("https://www.python.org/ftp/python/{version}/python-{version}-embed-amd64.zip")},
+		}},
+		RuntimeApache: {display: "Apache", group: GroupWebServer, versions: []string{"2.4.62", "2.4.61"}, sources: []Source{
+			{ID: "apachelounge", Name: "Apache Lounge (VS17)", Build: apacheURL("https://www.apachelounge.com/download/VS17/binaries/httpd-{version}-win64-VS17.zip")},
+		}},
+		// Memcached：nono303 已停止发布 GitHub Releases，改用 adamyg/memcached-win32（含
+		// package-vc2022-x64.zip，内部可执行文件为 memcached_service.exe，需 -d run 以控制台模式运行）。
+		RuntimeMemcached: {display: "Memcached", group: GroupCache, versions: []string{"1.6.34.11"}, versURL: "https://api.github.com/repos/adamyg/memcached-win32/releases?per_page=100", versParse: parseGitVersions, sources: []Source{
+			{ID: "adamyg", Name: "adamyg/memcached-win32 (GitHub)", Build: memcachedURL("https://github.com/adamyg/memcached-win32/releases/download/{version}/package-vc2022-x64.zip")},
+		}},
+		RuntimeMariaDB: {display: "MariaDB", group: GroupDatabase, versions: []string{"11.6.2", "11.5.2", "10.11.10"}, sources: []Source{
+			{ID: "mariadborg", Name: "archive.mariadb.org 官方", Build: mariadbURL("https://archive.mariadb.org/mariadb-{version}/winx64-packages/mariadb-{version}-winx64.zip")},
+		}},
+		RuntimeMySQL: {display: "MySQL", group: GroupDatabase, versions: []string{"8.4.3", "8.0.40", "5.7.44"}, sources: []Source{
+			// cdn.mysql.com/Downloads/MySQL-{mm} 对 8.x 返回 404；改用官方归档镜像（按文件名直链，覆盖全版本）。
+			{ID: "mysqlarchive", Name: "MySQL 官方归档", Build: mysqlURL("https://downloads.mysql.com/archives/get/p/23/file/mysql-{version}-winx64.zip")},
+		}},
+		RuntimePostgreSQL: {display: "PostgreSQL", group: GroupDatabase, versions: []string{"16.4", "15.6", "14.13"}, sources: []Source{
+			// EDB 二进制包文件名含 build 号（固定 -1），缺则 404。
+			{ID: "edb", Name: "EnterpriseDB 二进制包", Build: postgresURL("https://get.enterprisedb.com/postgresql/postgresql-{version}-1-windows-x64-binaries.zip")},
+		}},
+		RuntimeMongoDB: {display: "MongoDB", group: GroupDatabase, versions: []string{"7.0.14", "6.0.16", "5.0.30"}, versURL: "https://api.github.com/repos/mongodb/mongo/releases?per_page=100", versParse: parseMongoVersions, sources: []Source{
+			{ID: "mongodb", Name: "fastdl.mongodb.org 官方", Build: mongoURL("https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-{version}.zip")},
+		}},
+		// Mailpit：本地 SMTP + Web 收件箱（SMTP 1025 / Web UI 8025）。GitHub releases 单文件 zip。
+		RuntimeMailpit: {display: "Mailpit", group: GroupTool, versions: []string{"1.31.0", "1.30.7", "1.30.6"}, versURL: "https://api.github.com/repos/axllent/mailpit/releases?per_page=100", versParse: parseMailpitVersions, sources: []Source{
+			{ID: "mailpit", Name: "axllent/mailpit (GitHub)", Build: ffmpegURL("https://github.com/axllent/mailpit/releases/download/v{version}/mailpit-windows-amd64.zip")},
+		}},
+		// MinIO：S3 兼容对象存储（API 9000 / Console 9001）。滚动发布（RELEASE 日期版本），单文件 minio.exe。
+		RuntimeMinIO: {display: "MinIO", group: GroupDatabase, versions: []string{"latest"}, sources: []Source{
+			{ID: "minio", Name: "dl.min.io 官方", Build: minioURL("https://dl.min.io/server/minio/release/windows-amd64/minio.exe")},
 		}},
 	}
 
@@ -158,6 +215,114 @@ func nginxURL(tmpl string) func(version, goos, arch string) string {
 // gitURL 构造 git-for-windows 的 MinGit 便携包地址。版本号内部存 "2.45.0"，
 // 真实发布标签为 v2.45.0.windows.1，故在模板外再补 .windows.1 后缀。
 func gitURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// caddyURL 构造 caddyserver/caddy 的 Windows 发行 zip 地址（单文件 caddy.exe）。
+// Caddy 跨平台均有构建，但本环境管理仅在 Windows 桌面提供，故非 Windows 返回空。
+func caddyURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// composerURL 构造 composer.phar 地址（跨平台单文件，依赖 PHP 运行）。
+func composerURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// ffmpegURL / pythonURL / apacheURL / memcachedURL / mariadbURL / postgresURL / mongoURL
+// 均为 Windows 桌面发行包（便携 zip），非 Windows 返回空。
+func ffmpegURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+func pythonURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+func apacheURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+func memcachedURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+func mariadbURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// mysqlURL 构造 MySQL 官方 CDN 地址：下载目录按 主.次 版本（{mm}）划分，
+// 例如 8.4.3 → https://cdn.mysql.com/Downloads/MySQL-8.4/mysql-8.4.3-winx64.zip
+func mysqlURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		mm := version
+		if i := strings.LastIndexByte(version, '.'); i > 0 {
+			mm = version[:i]
+		}
+		return strings.NewReplacer("{version}", version, "{mm}", mm).Replace(tmpl)
+	}
+}
+
+func postgresURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+func mongoURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// minioURL 构造 MinIO 官方地址。MinIO 为单文件 exe（无版本路径），模板忽略 {version}。
+func minioURL(tmpl string) func(version, goos, arch string) string {
 	return func(version, goos, arch string) string {
 		if goos != "windows" {
 			return ""
@@ -323,6 +488,8 @@ func htmlFallbackURL(rt Runtime) string {
 		return "https://github.com/redis-windows/redis-windows/releases"
 	case RuntimeGit:
 		return "https://github.com/git-for-windows/git/releases"
+	case RuntimeCaddy:
+		return "https://github.com/caddyserver/caddy/releases"
 	default:
 		return ""
 	}
@@ -593,6 +760,109 @@ func parseGitVersionsHTML(body []byte) []string {
 		v := string(m[1])
 		if !seen[v] {
 			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseCaddyVersions 从 GitHub Releases API 解析 caddyserver/caddy 的 tag_name（如 "v2.8.4"）。
+func parseCaddyVersions(body []byte) []string {
+	var arr []struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.Unmarshal(body, &arr); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, it := range arr {
+		v := strings.TrimPrefix(it.TagName, "v")
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseCaddyVersionsHTML 从 GitHub Releases 页面 HTML 提取版本号（API 不可用时兜底）。
+func parseCaddyVersionsHTML(body []byte) []string {
+	html := string(body)
+	re := regexp.MustCompile(`/releases/tag/v?(\d+\.\d+\.\d+)`)
+	matches := re.FindAllSubmatch([]byte(html), -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		v := string(m[1])
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseComposerVersions 从 getcomposer.org/versions 解析 stable 数组的 version 字段（如 "2.7.7"）。
+func parseComposerVersions(body []byte) []string {
+	var obj struct {
+		Stable []struct {
+			Version string `json:"version"`
+		} `json:"stable"`
+	}
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(obj.Stable))
+	for _, it := range obj.Stable {
+		v := strings.TrimSpace(it.Version)
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parsePythonVersions 从 python.org ftp 目录页解析形如 href="3.12.7/" 的子目录名（完整版本号）。
+var pythonRe = regexp.MustCompile(`href="(\d+\.\d+\.\d+)/"`)
+
+func parsePythonVersions(body []byte) []string {
+	matches := pythonRe.FindAllSubmatch(body, -1)
+	out := make([]string, 0, len(matches))
+	for _, m := range matches {
+		out = append(out, string(m[1]))
+	}
+	return out
+}
+
+// parseMongoVersions 从 mongodb/mongo GitHub Releases 解析 tag_name（如 "r7.0.14"），去掉前缀 r。
+func parseMongoVersions(body []byte) []string {
+	var arr []struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.Unmarshal(body, &arr); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, it := range arr {
+		v := strings.TrimPrefix(it.TagName, "r")
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseMailpitVersions 从 axllent/mailpit GitHub Releases 解析 tag_name（如 "v1.31.0"），去掉前缀 v。
+func parseMailpitVersions(body []byte) []string {
+	var arr []struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.Unmarshal(body, &arr); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, it := range arr {
+		v := strings.TrimPrefix(it.TagName, "v")
+		if v != "" {
 			out = append(out, v)
 		}
 	}

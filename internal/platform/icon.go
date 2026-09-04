@@ -13,6 +13,8 @@ import (
 	"unsafe"
 
 	"golang.org/x/sys/windows"
+
+	"quickdock/internal/logger"
 )
 
 // ===== Windows API 类型定义 =====
@@ -108,7 +110,7 @@ func IconMIME(ext string) string {
 func iconCacheDir() string {
 	dir := filepath.Join(DefaultDataDir(), "icons")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		fmt.Println("QuickDock: 图标缓存目录创建失败:", err)
+		logger.W("QuickDock: 图标缓存目录创建失败: %v", err)
 	}
 	return dir
 }

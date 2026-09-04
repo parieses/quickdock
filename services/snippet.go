@@ -1,11 +1,11 @@
 package services
 
 import (
-	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
 
@@ -133,7 +133,7 @@ func (a *AppService) PasteSnippet(content string) *ApiResult {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				fmt.Printf("QuickDock: [PANIC] snippet paste: %v\n", r)
+				logger.E("QuickDock: [PANIC] snippet paste: %v", r)
 			}
 		}()
 		time.Sleep(80 * time.Millisecond)

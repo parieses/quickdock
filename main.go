@@ -315,7 +315,10 @@ func main() {
 	}
 	windowStateMu.Unlock()
 
-	// 应用退出时停止所有插件、清理 PID 文件、关闭所有插件窗口
+	// 退出清理（安全网）：停止 AI 流式服务、关闭所有插件进程与窗口。
+	// 与 AppService.ServiceShutdown 中的 ShutdownAll/CloseAll 形成双重保险——
+	// 两条退出路径（托盘退出 vs v3 生命周期）各自兜底；ShutdownAll/CloseAll 内部
+	// 以 guard 保证幂等，重复调用安全无副作用，故此处与 ServiceShutdown 重复是有意设计。
 	appService.StopAIStreamServer()
 	pluginMgr.ShutdownAll()
 	if appService.PluginWindowMgr != nil {
@@ -443,7 +446,7 @@ func initUpdater(app *application.App, version string) error {
 func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 	entries, err := builtinFS.ReadDir("plugins/builtin")
 	if err != nil {
-		fmt.Println("QuickDock: 读取内置插件目录失败:", err)
+		logger.W("QuickDock: 读取内置插件目录失败: %v", err)
 		return
 	}
 
@@ -476,7 +479,7 @@ func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 		// 增量同步插件文件（不删除本地目录，保留插件运行状态）
 		os.MkdirAll(targetDir, 0755)
 		if err := syncEmbeddedDir(builtinFS, path.Join("plugins/builtin", pluginID), targetDir); err != nil {
-			fmt.Printf("QuickDock: 同步内置插件 %s 失败: %v\n", pluginID, err)
+			logger.W("QuickDock: 同步内置插件 %s 失败: %v", pluginID, err)
 			continue
 		}
 
@@ -519,7 +522,7 @@ func pruneStaleBuiltins(mgr *plugin.Manager, currentBuiltin map[string]bool) {
 		if !strings.HasPrefix(mf.ID, "com.quickdock.") {
 			continue
 		}
-		fmt.Printf("QuickDock: 清理已删除的内置插件 %s (%s)\n", name, mf.ID)
+		logger.I("QuickDock: 清理已删除的内置插件 %s (%s)", name, mf.ID)
 		mgr.UnloadPlugin(mf.ID)
 		os.RemoveAll(filepath.Join(mgr.PluginsDir(), name))
 	}
@@ -529,7 +532,7 @@ func pruneStaleBuiltins(mgr *plugin.Manager, currentBuiltin map[string]bool) {
 func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *embed.FS) {
 	entries, err := builtinFS.ReadDir("plugins/builtin")
 	if err != nil {
-		fmt.Println("QuickDock: 读取内置插件目录失败:", err)
+		logger.W("QuickDock: 读取内置插件目录失败: %v", err)
 		return
 	}
 
@@ -546,13 +549,13 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 		// 读取 plugin.json 获取 ID
 		data, err := builtinFS.ReadFile(path.Join("plugins/builtin", pluginID, "plugin.json"))
 		if err != nil {
-			fmt.Printf("QuickDock: 读取内置插件 %s plugin.json 失败: %v\n", pluginID, err)
+			logger.W("QuickDock: 读取内置插件 %s plugin.json 失败: %v", pluginID, err)
 			continue
 		}
 
 		var mf plugin.PluginManifest
 		if err := json.Unmarshal(data, &mf); err != nil {
-			fmt.Printf("QuickDock: 解析内置插件 %s plugin.json 失败: %v\n", pluginID, err)
+			logger.W("QuickDock: 解析内置插件 %s plugin.json 失败: %v", pluginID, err)
 			continue
 		}
 
@@ -561,7 +564,7 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 
 		// 目录不存在说明 extractBuiltinPluginFiles 失败，跳过
 		if _, err := os.Stat(targetDir); os.IsNotExist(err) {
-			fmt.Printf("QuickDock: 内置插件 %s 目录不存在，跳过\n", pluginID)
+			logger.I("QuickDock: 内置插件 %s 目录不存在，跳过", pluginID)
 			continue
 		}
 
@@ -583,18 +586,18 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			perms["clipboard"] = mf.Permissions.Clipboard
 		}
 		if err := database.InsertPluginFull(mf.ID, mf.Name, mf.Version, mf.Author, mf.Description, mf.Category, iconData, mf.Capabilities, perms); err != nil {
-			fmt.Printf("QuickDock: 内置插件 %s 写入数据库失败: %v\n", pluginID, err)
+			logger.W("QuickDock: 内置插件 %s 写入数据库失败: %v", pluginID, err)
 		}
 
 		// 加载插件（DiscoverAndLoad 已加载运行中实例则跳过，避免 stop→重启 双重加载）
 		if inst := mgr.GetPlugin(mf.ID); inst != nil && inst.GetStatus() == "running" {
-			fmt.Printf("[plugin %s] %s (%s) 已加载，跳过重复加载\n", mf.ID, mf.Name, mf.Version)
+			logger.I("[plugin %s] %s (%s) 已加载，跳过重复加载", mf.ID, mf.Name, mf.Version)
 			continue
 		}
 		if err := mgr.LoadPlugin(mf, targetDir); err != nil {
-			fmt.Printf("QuickDock: 加载内置插件 %s 失败: %v\n", pluginID, err)
+			logger.W("QuickDock: 加载内置插件 %s 失败: %v", pluginID, err)
 		} else {
-			fmt.Printf("[plugin %s] %s (%s) 已安装并加载\n", mf.ID, mf.Name, mf.Version)
+			logger.I("[plugin %s] %s (%s) 已安装并加载", mf.ID, mf.Name, mf.Version)
 		}
 	}
 
@@ -604,9 +607,9 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 		for _, id := range allIDs {
 			if strings.HasPrefix(id, "com.quickdock.") && !validBuiltinIDs[id] {
 				if rerr := database.DeletePlugin(id); rerr != nil {
-					fmt.Printf("QuickDock: 删除残留内置插件记录 %s 失败: %v\n", id, rerr)
+					logger.W("QuickDock: 删除残留内置插件记录 %s 失败: %v", id, rerr)
 				} else {
-					fmt.Printf("QuickDock: 已删除残留内置插件记录 %s\n", id)
+					logger.I("QuickDock: 已删除残留内置插件记录 %s", id)
 				}
 			}
 		}

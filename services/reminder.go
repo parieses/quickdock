@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
@@ -47,7 +48,7 @@ func (a *AppService) checkReminders() {
 	now := time.Now().Format("2006-01-02 15:04:05")
 	todos, err := a.DB.ListDueReminders(now)
 	if err != nil {
-		fmt.Println("QuickDock: 提醒查询失败:", err)
+		logger.W("QuickDock: 提醒查询失败: %v", err)
 		return
 	}
 	for _, t := range todos {
@@ -58,7 +59,7 @@ func (a *AppService) checkReminders() {
 			Body:  body,
 		})
 		if err != nil {
-			fmt.Println("QuickDock: 提醒发送失败:", err)
+			logger.W("QuickDock: 提醒发送失败: %v", err)
 			continue
 		}
 		_ = a.DB.MarkReminderSent(t.ID)

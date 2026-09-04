@@ -26,5 +26,6 @@ var (
 	ErrHotkeyConflict      = errors.New("热键冲突，已被其他插件占用")
 	ErrResponseTimeout     = errors.New("插件响应超时")
 	ErrStdinWriteFailed    = errors.New("插件 stdin 写入失败")
+	ErrStdinTimeout        = errors.New("插件 stdin 写入超时（通信中断，实例已标记不可写）")
 	ErrZipSlipDetected     = errors.New("检测到 Zip Slip 攻击")
 )

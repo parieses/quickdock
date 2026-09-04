@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -249,7 +250,7 @@ func (a *AppService) checkScheduledTasks() {
 	now := nowStr()
 	tasks, err := a.DB.ListDueTasks(now)
 	if err != nil {
-		fmt.Println("QuickDock: 定时任务查询失败:", err)
+		logger.W("QuickDock: 定时任务查询失败: %v", err)
 		return
 	}
 	for i := range tasks {
@@ -262,7 +263,7 @@ func (a *AppService) checkScheduledTasks() {
 		}
 		go func(t *db.ScheduledTask) {
 			defer a.schedInflight.Delete(t.ID)
-			defer func() { if r := recover(); r != nil { fmt.Printf("QuickDock: schedule runner panic: %v\n", r) } }()
+			defer func() { if r := recover(); r != nil { logger.E("QuickDock: schedule runner panic: %v", r) } }()
 			status, result := a.executeTask(t)
 
 			// 计算下次运行时间与启用状态

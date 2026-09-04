@@ -167,6 +167,8 @@ export default {
   appDesc: '轻量级应用启动与项目管理工具',
   aboutTech: '基于 Wails + Vue 3 + Go 构建',
   aboutCopyright: '© 2026 QuickDock',
+  aboutRepoMain: '主程序',
+  aboutRepoPlugins: '插件',
   // 更新检查
   update: '检查更新',
   updateChecking: '正在检查…',
@@ -280,6 +282,7 @@ export default {
   refreshList: '刷新列表',
   retry: '重试',
   selectVersion: '选择版本',
+  versionRequired: '请先选择版本',
   loading: '加载中',
   fetchFailed: '获取失败',
   versionListTruncated: '仅显示最近 60 个版本',
@@ -302,6 +305,7 @@ export default {
   svcStop: '停止',
   svcPort: '端口',
   svcStatus: '服务状态',
+  portConflict: '默认端口 {port} 已被其它程序占用（PID {pid}），请先释放再启动',
   envAlias: '别名',
   envNote: '备注',
   envNotePlaceholder: '备注信息（可选）',
@@ -324,6 +328,7 @@ export default {
   groupLanguage: '语言',
   groupWebserver: 'Web 服务器',
   groupCache: '缓存',
+  groupDatabase: '数据库',
   groupTool: '工具',
   // 导入已有安装
   importExisting: '导入已有安装',

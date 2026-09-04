@@ -46,6 +46,13 @@ type Manager struct {
 	healthCheckStopCh chan struct{}
 	healthCheckWg     sync.WaitGroup
 	healthCheckStopOnce sync.Once
+
+	// loadLocks 按 pluginID 串行化 LoadPlugin：崩溃自动重启(watchPlugin 退避 2-6s)与
+	// 用户手动触发(EnsureLoaded / ReloadPlugin 启用)可能并发加载同 ID——旧实现 Start
+	// 子进程与登记 map 之间无锁，后登记覆盖先登记，先启动的进程脱管泄漏。
+	// per-ID 锁保证同 ID 串行，不同 ID 仍可并行（DiscoverAndLoad 依赖并发提速）。
+	loadLocks   map[string]*sync.Mutex
+	loadLocksMu sync.Mutex
 }
 
 // NewManager 创建插件管理器
@@ -55,6 +62,7 @@ func NewManager(pluginsDir string) *Manager {
 		pluginsDir:  pluginsDir,
 		hostMethods: make(map[string]HostMethod),
 		pidFilePath: filepath.Join(filepath.Dir(pluginsDir), "plugin_pids.json"),
+		loadLocks:   make(map[string]*sync.Mutex),
 	}
 
 	m.registerDefaultHostMethods()
@@ -163,8 +171,38 @@ func (m *Manager) DiscoverAndLoad() error {
 	return nil
 }
 
+// loadLock 获取指定插件的 per-ID 加载锁，返回解锁函数。
+// 同 ID 的 LoadPlugin 串行执行；不同 ID 互不阻塞。
+func (m *Manager) loadLock(pluginID string) func() {
+	m.loadLocksMu.Lock()
+	if m.loadLocks == nil {
+		m.loadLocks = make(map[string]*sync.Mutex)
+	}
+	lk, ok := m.loadLocks[pluginID]
+	if !ok {
+		lk = &sync.Mutex{}
+		m.loadLocks[pluginID] = lk
+	}
+	m.loadLocksMu.Unlock()
+	lk.Lock()
+	return lk.Unlock
+}
+
 // LoadPlugin 注册一个插件（none/goja 立即初始化，native 延迟到首次使用）
 func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
+	// per-ID 串行化：崩溃重启 / 用户手动加载并发触发同 ID 时，先到者完成后再放行后者
+	unlock := m.loadLock(manifest.ID)
+	defer unlock()
+
+	// 双保险：若等待锁期间先行者已完成加载且实例健康，直接复用，不再停旧重启
+	m.mu.RLock()
+	if inst, ok := m.plugins[manifest.ID]; ok && inst.GetStatus() == "running" {
+		m.mu.RUnlock()
+		logger.I("插件 %s 已在运行，跳过重复加载", manifest.ID)
+		return nil
+	}
+	m.mu.RUnlock()
+
 	// 先获取插件ID并检查是否需要停止旧实例
 	m.mu.Lock()
 	if inst, ok := m.plugins[manifest.ID]; ok {

@@ -40,14 +40,14 @@ func (a *AppService) StartAIStreamServer() {
 	s := &aiStreamServer{svc: a}
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
-		fmt.Println("QuickDock: AI 流式令牌生成失败:", err)
+		logger.W("QuickDock: AI 流式令牌生成失败: %v", err)
 		return
 	}
 	s.token = hex.EncodeToString(b)
 
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
-		fmt.Println("QuickDock: AI 流式服务启动失败:", err)
+		logger.W("QuickDock: AI 流式服务启动失败: %v", err)
 		return
 	}
 	s.ln = ln
@@ -60,7 +60,7 @@ func (a *AppService) StartAIStreamServer() {
 		defer recoverPanic("ai stream server")
 		_ = s.srv.Serve(ln)
 	}()
-	fmt.Printf("QuickDock: AI 流式服务已启动 http://127.0.0.1:%d/ai/stream\n", s.port)
+	logger.I("QuickDock: AI 流式服务已启动 http://127.0.0.1:%d/ai/stream", s.port)
 }
 
 // StopAIStreamServer 关闭本地流式服务（应用退出时调用）

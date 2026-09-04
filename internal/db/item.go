@@ -15,6 +15,7 @@ import (
 
 	"golang.org/x/sys/windows"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/sysutil"
 )
@@ -401,7 +402,7 @@ func (d *Database) OpenItem(item *CollectionItem) error {
 		if err == nil {
 			tool = mapToOpenTool(row)
 		} else if !errors.Is(err, sql.ErrNoRows) {
-			fmt.Printf("QuickDock: 读取自定义打开工具失败: %v\n", err)
+			logger.W("QuickDock: 读取自定义打开工具失败: %v", err)
 		}
 	}
 	if tool.ID == "" {

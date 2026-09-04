@@ -26,6 +26,7 @@ import {
   EnvStart,
   EnvStop,
   EnvStatus,
+  EnvPortConflict,
   EnvGitStatus,
   EnvSetActive,
   EnvUnsetActive,
@@ -62,14 +63,33 @@ const HTTP_KEY = 'httpserve'
 const isHarness = computed(() => selectedId.value === HARNESS_KEY)
 const isHttp = computed(() => selectedId.value === HTTP_KEY)
 
-// 侧边栏分组：语言 / Web 服务器 / 缓存 / 工具。工具组追加 harness 与 HTTP 服务两个特殊入口。
-const GROUP_ORDER = ['language', 'webserver', 'cache', 'tool']
+// 侧边栏分组：语言 / Web 服务器 / 缓存 / 数据库 / 工具。工具组追加 harness 与 HTTP 服务两个特殊入口。
+const GROUP_ORDER = ['language', 'webserver', 'cache', 'database', 'tool']
 const GROUP_LABEL: Record<string, string> = {
   language: 'groupLanguage',
   webserver: 'groupWebserver',
   cache: 'groupCache',
+  database: 'groupDatabase',
   tool: 'groupTool',
 }
+
+// 分组展开/收起状态（持久化到 localStorage）
+const COLLAPSE_KEY = 'quickdock.env.collapsedGroups'
+const collapsedGroups = reactive<Record<string, boolean>>(loadCollapsedGroups())
+function loadCollapsedGroups(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(COLLAPSE_KEY)
+    if (raw) return JSON.parse(raw) as Record<string, boolean>
+  } catch {}
+  return {}
+}
+function toggleGroup(key: string) {
+  collapsedGroups[key] = !collapsedGroups[key]
+  try {
+    localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsedGroups))
+  } catch {}
+}
+
 interface SidebarItem {
   kind: 'runtime' | 'special'
   id: string
@@ -81,8 +101,13 @@ interface SidebarItem {
   active: boolean
 }
 const sidebarGroups = computed(() => {
-  const out: { key: string; labelKey: string; items: SidebarItem[] }[] = []
+  const out: { key: string; labelKey: string; items: SidebarItem[]; collapsed: boolean }[] = []
   for (const g of GROUP_ORDER) {
+    if (collapsedGroups[g]) {
+      // 折叠态：仅保留分组标题，列表项清空
+      out.push({ key: g, labelKey: GROUP_LABEL[g], items: [], collapsed: true })
+      continue
+    }
     const items: SidebarItem[] = runtimes.value
       .filter((r) => r.group === g)
       .map((r) => ({
@@ -99,7 +124,7 @@ const sidebarGroups = computed(() => {
       items.push({ kind: 'special', id: HARNESS_KEY, name: t('navDsh'), avatar: 'DS', color: 'var(--color-accent)', active: isHarness.value })
       items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: '#4a9eff', active: isHttp.value })
     }
-    if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items })
+    if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items, collapsed: false })
   }
   return out
 })
@@ -176,8 +201,20 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'php', name: 'PHP', group: 'language', hasService: false },
   { id: 'go', name: 'Go', group: 'language', hasService: false },
   { id: 'nginx', name: 'Nginx', group: 'webserver', hasService: true },
+  { id: 'caddy', name: 'Caddy', group: 'webserver', hasService: true },
   { id: 'redis', name: 'Redis', group: 'cache', hasService: true },
+  { id: 'memcached', name: 'Memcached', group: 'cache', hasService: true },
+  { id: 'mariadb', name: 'MariaDB', group: 'database', hasService: true },
+  { id: 'mysql', name: 'MySQL', group: 'database', hasService: true },
+  { id: 'postgresql', name: 'PostgreSQL', group: 'database', hasService: true },
+  { id: 'mongodb', name: 'MongoDB', group: 'database', hasService: true },
+  { id: 'minio', name: 'MinIO', group: 'database', hasService: true },
   { id: 'git', name: 'Git', group: 'tool', hasService: false },
+  { id: 'composer', name: 'Composer', group: 'tool', hasService: false },
+  { id: 'ffmpeg', name: 'FFmpeg', group: 'tool', hasService: false },
+  { id: 'mailpit', name: 'Mailpit', group: 'tool', hasService: true },
+  { id: 'python', name: 'Python', group: 'language', hasService: false },
+  { id: 'apache', name: 'Apache', group: 'webserver', hasService: true },
 ]
 function staticRuntime(s: typeof STATIC_CATALOG[number]): RuntimeInfo {
   return {
@@ -205,6 +242,7 @@ interface UiState {
   installing: boolean
   stage: string
   message: string
+  error: boolean          // message 是否为错误（红色样式 + 可复制）
   written: number
   total: number
   available: string[]      // 已获取的可选版本列表（加载后）
@@ -215,6 +253,21 @@ interface UiState {
 }
 const ui = reactive<Record<string, UiState>>({})
 
+// 端口冲突探测结果（按运行时 id 索引）：后端 EnvPortConflict 返回默认服务端口是否被其它程序占用。
+interface PortConflict {
+  occupied: boolean
+  port: number
+  pid: number
+  image: string
+  ours: boolean // 占用者是否就是本会话拉起的该运行时
+}
+const portConflicts = reactive<Record<string, PortConflict>>({})
+
+// 当前选中运行时的端口冲突（无探测结果时返回零值）
+const selectedConflict = computed<PortConflict | null>(() => {
+  return portConflicts[selectedId.value] || null
+})
+
 function stateFor(id: string, info: RuntimeInfo): UiState {
   if (!ui[id]) {
     ui[id] = {
@@ -224,6 +277,7 @@ function stateFor(id: string, info: RuntimeInfo): UiState {
       installing: false,
       stage: '',
       message: '',
+      error: false,
       written: 0,
       total: -1,
       available: [],
@@ -234,12 +288,21 @@ function stateFor(id: string, info: RuntimeInfo): UiState {
     }
   }
   const s = ui[id]
-  // 静态目录首建时 recommended/activeSource 还是空，EnvList 合并后回填一次
-  if (!s.version && info.recommended.length) s.version = info.recommended[0]
+  // 静态目录首建时 activeSource 还是空，EnvList 合并后回填一次。
+  // 版本号不在此默认（避免一进面板就显示推荐版本）：上游拉取成功后由 loadAvailable 填最新版本，拉取失败则保持空。
   if (!s.source && (info.activeSource || info.sources[0]?.id)) {
     s.source = info.activeSource || info.sources[0]?.id || ''
   }
   return s
+}
+
+// failState 把运行时的错误持久化到可复制的 .env-msg 区域（toast 仅作瞬时提示），避免报错一闪而过且无法复制。
+function failState(r: RuntimeInfo, e: any) {
+  const s = stateFor(r.id, r)
+  s.message = getErrorMessage(e)
+  s.error = true
+  s.installing = false
+  toast.error(s.message)
 }
 
 // versionInput: 绑定到当前选中运行时的版本号，读写都经过 ui[state] 保证一致性
@@ -314,7 +377,7 @@ async function toggleEnvVar(r: RuntimeInfo, ins: Install) {
     }
     await load()
   } catch (e: any) {
-    toast.error(getErrorMessage(e))
+    failState(r, e)
   }
 }
 
@@ -577,6 +640,8 @@ async function loadAvailable(id: string) {
     const vs = unwrap<string[]>(await EnvAvailableVersions(id))
     if (vs) {
       s.available = vs
+      // 拉取成功后默认填最新版本（available[0]）；拉取失败/为空时保持空，不回退到推荐版本
+      if (!s.version && vs.length) s.version = vs[0]
     }
   } catch (e: any) {
     s.loadError = getErrorMessage(e)
@@ -655,6 +720,15 @@ async function pollStatus() {
           /* 忽略单次轮询失败 */
         }
       }
+      // 端口冲突探测（启动前可视化提示）：仅对已装服务的运行时查询一次
+      if (r.installed.length) {
+        try {
+          const pc = unwrap<PortConflict>(await EnvPortConflict(r.id, r.installed[0].version))
+          if (pc) portConflicts[r.id] = pc
+        } catch {
+          /* 忽略单次探测失败 */
+        }
+      }
     }
   } finally {
     polling = false
@@ -675,13 +749,16 @@ function onProgress(payload: any) {
     s.written = 0
     s.total = -1
     s.message = ''
+    s.error = false
     toast.success(rt.toUpperCase() + ' ' + t('envInstalled'))
     load()
   } else if (p.stage === 'error') {
     s.installing = false
     s.written = 0
     s.total = -1
-    toast.error(rt.toUpperCase() + ': ' + (p.message || t('envInstallFailed')))
+    s.message = p.message || t('envInstallFailed')
+    s.error = true
+    toast.error(rt.toUpperCase() + ': ' + s.message)
   } else if (p.stage === 'download' || p.stage === 'extract') {
     s.installing = true
   }
@@ -691,16 +768,16 @@ async function install(r: RuntimeInfo) {
   const s = stateFor(r.id, r)
   if (s.installing) return
   s.installing = true
-  s.stage = 'download'
-  s.written = 0
-  s.total = -1
-  s.message = ''
+    s.stage = 'download'
+    s.written = 0
+    s.total = -1
+    s.message = ''
+    s.error = false
   try {
     const custom = s.source === 'custom' ? s.custom : ''
     unwrap(await EnvInstall(r.id, s.version, s.source, custom))
   } catch (e: any) {
-    s.installing = false
-    toast.error(getErrorMessage(e))
+    failState(r, e)
   }
 }
 
@@ -840,7 +917,10 @@ const s = currentRuntimeState
       <aside class="env-cats">
         <div class="cats-title">{{ t('envCategories') }}</div>
         <template v-for="grp in sidebarGroups" :key="grp.key">
-          <div class="cats-group-label">{{ t(grp.labelKey) }}</div>
+          <button class="cats-group-label" type="button" @click="toggleGroup(grp.key)">
+            <span>{{ t(grp.labelKey) }}</span>
+            <span class="cats-chevron">{{ grp.collapsed ? '▸' : '▾' }}</span>
+          </button>
           <button
             v-for="it in grp.items"
             :key="it.id"
@@ -989,6 +1069,15 @@ const s = currentRuntimeState
             <button v-if="selected.id !== 'git'" class="link-btn import-btn" @click="importExisting(selected)">{{ t('importExisting') }}</button>
           </div>
 
+          <!-- 端口冲突可视化提示：默认服务端口被其它程序占用时，启动会失败，提前给出明确警告 -->
+          <div
+            v-if="selected.hasService && selectedConflict && selectedConflict.occupied && !selectedConflict.ours"
+            class="port-conflict-banner"
+          >
+            <span class="pc-icon">⚠</span>
+            <span>{{ t('portConflict', { port: selectedConflict.port, pid: selectedConflict.pid }) }}</span>
+          </div>
+
           <div v-if="selected.installed.length" class="ver-table">
             <div class="ver-row ver-head">
               <span class="col-ver">{{ t('version') }}</span>
@@ -1134,7 +1223,8 @@ const s = currentRuntimeState
             <button
               class="env-install-btn"
               :class="{ busy: stateFor(selected.id, selected).installing }"
-              :disabled="stateFor(selected.id, selected).installing"
+              :disabled="stateFor(selected.id, selected).installing || !s.version"
+              :title="!s.version ? t('versionRequired') : ''"
               @click="install(selected)"
             >{{ stateFor(selected.id, selected).installing ? t('installing') : t('install') }}</button>
           </div>
@@ -1170,7 +1260,7 @@ const s = currentRuntimeState
               <span v-else-if="stateFor(selected.id, selected).written > 0">{{ (stateFor(selected.id, selected).written / 1048576).toFixed(1) }} MB</span>
             </div>
           </div>
-          <p v-else-if="stateFor(selected.id, selected).message" class="env-msg">{{ stateFor(selected.id, selected).message }}</p>
+          <p v-else-if="stateFor(selected.id, selected).message" class="env-msg" :class="{ error: stateFor(selected.id, selected).error }">{{ stateFor(selected.id, selected).message }}</p>
         </section>
         </template>
 
@@ -1486,6 +1576,22 @@ const s = currentRuntimeState
 .svc-btn.stop { background: var(--color-danger); }
 .svc-btn:hover { opacity: 0.9; }
 .svc-port { font-size: 11px; color: var(--color-text-disabled); }
+
+.port-conflict-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0 4px;
+  padding: 8px 12px;
+  border-radius: var(--radius);
+  background: rgba(255, 170, 0, 0.12);
+  border: 1px solid rgba(255, 170, 0, 0.4);
+  color: #e0a200;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.dark .port-conflict-banner { color: #f0b429; }
+.pc-icon { font-size: 14px; line-height: 1; }
 .svc-port-link { text-decoration: none; transition: color var(--transition-fast); }
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
 .svc-port-link.disabled { cursor: default; opacity: 0.5; }
@@ -1565,6 +1671,7 @@ const s = currentRuntimeState
 }
 .env-install-btn:hover { opacity: 0.9; }
 .env-install-btn.busy { opacity: 0.7; cursor: default; }
+.env-install-btn:disabled { opacity: 0.4; cursor: default; }
 
 .env-progress { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
 .env-progress-bar { height: 6px; background: var(--color-bg-tertiary); border-radius: 3px; overflow: hidden; }
@@ -1572,7 +1679,8 @@ const s = currentRuntimeState
 .env-progress-fill.indeterminate { animation: env-indet 1.1s ease-in-out infinite; }
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .env-progress-text { display: flex; justify-content: space-between; font-size: 11px; color: var(--color-text-muted); }
-.env-msg { font-size: 11px; color: var(--color-text-disabled); margin: 10px 0 0; word-break: break-all; }
+.env-msg { font-size: 11px; color: var(--color-text-disabled); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
+.env-msg.error { color: var(--color-danger); }
 .env-update-hint {
   display: flex; align-items: center; gap: 8px; margin-top: 12px;
   padding: 7px 10px; border-radius: var(--radius-sm);
@@ -1601,9 +1709,13 @@ const s = currentRuntimeState
 
 /* 分组侧栏 */
 .cats-group-label {
+  display: flex; align-items: center; justify-content: space-between;
+  width: 100%; text-align: left; background: none; border: 0; cursor: pointer;
   font-size: 10px; text-transform: uppercase; letter-spacing: 0.6px;
-  color: var(--color-text-disabled); padding: 10px 8px 4px;
+  color: var(--color-text-disabled); padding: 10px 8px 4px; font-family: inherit;
 }
+.cats-group-label:hover { color: var(--color-text-secondary); }
+.cats-chevron { font-size: 9px; line-height: 1; transition: transform 120ms ease; }
 .import-btn { margin-left: auto; font-size: 11px; padding: 3px 9px; }
 .op-sep { height: 1px; background: var(--color-border); margin: 3px 0; }
 

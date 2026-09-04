@@ -251,19 +251,27 @@ func (n *NodeRuntime) ExeFor(version string) string {
 func (n *NodeRuntime) InstalledVersions() []Install {
 	var out []Install
 	seen := map[string]bool{}
+	dirs := managedDirs{}
 	for _, it := range n.portableInstalls() {
 		seen[it.version] = true
 		out = append(out, Install{Version: it.version, Scope: "portable", Path: it.dir})
+		dirs.record(it.dir)
 	}
 	// 旧版单版本布局（runtime/node/node.exe）：读出真实版本号列示，避免与新布局重复
 	if p := n.legacyExe(); fileExists(p) {
 		if v := RunVersion(p, "--version"); v != "" && !seen[v] {
 			seen[v] = true
 			out = append(out, Install{Version: v, Scope: "portable", Path: n.baseDir})
+			dirs.record(n.baseDir)
 		}
 	}
 	if p, err := exec.LookPath("node"); err == nil {
-		if v := RunVersion(p, "--version"); v != "" && !seen[v] {
+		if v := RunVersion(p, "--version"); v != "" {
+			// LookPath 可能命中本就由 QuickDock 托管并写入 PATH 的便携版（与上面收录的是同一份），
+			// 此时不要重复登记为 system，否则同一版本出现两条“取消环境变量”。
+			if dirs.dedupeByDir(p) {
+				return out
+			}
 			out = append(out, Install{Version: v, Scope: "system", Path: p})
 		}
 	}

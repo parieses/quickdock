@@ -167,6 +167,8 @@ export default {
   appDesc: 'Lightweight app launcher & project management tool',
   aboutTech: 'Built with Wails + Vue 3 + Go',
   aboutCopyright: '© 2026 QuickDock',
+  aboutRepoMain: 'Main',
+  aboutRepoPlugins: 'Plugins',
   // Updates
   update: 'Check Updates',
   updateChecking: 'Checking…',
@@ -280,6 +282,7 @@ export default {
   refreshList: 'Refresh list',
   retry: 'Retry',
   selectVersion: 'Select version',
+  versionRequired: 'Select a version first',
   loading: 'Loading',
   fetchFailed: 'Fetch failed',
   versionListTruncated: 'Showing recent 60 versions only',
@@ -302,6 +305,7 @@ export default {
   svcStop: 'Stop',
   svcPort: 'Port',
   svcStatus: 'Service',
+  portConflict: 'Default port {port} is occupied by another program (PID {pid}). Release it before starting',
   envAlias: 'Alias',
   envNote: 'Note',
   envNotePlaceholder: 'Note (optional)',
@@ -324,6 +328,7 @@ export default {
   groupLanguage: 'Languages',
   groupWebserver: 'Web Servers',
   groupCache: 'Caches',
+  groupDatabase: 'Databases',
   groupTool: 'Tools',
   // Import existing install
   importExisting: 'Import existing',

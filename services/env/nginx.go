@@ -45,6 +45,7 @@ func (n *NginxRuntime) ExeFor(version string) string {
 
 func (n *NginxRuntime) InstalledVersions() []Install {
 	var out []Install
+	dirs := managedDirs{}
 	if entries, err := os.ReadDir(n.baseDir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
@@ -53,11 +54,16 @@ func (n *NginxRuntime) InstalledVersions() []Install {
 			v := e.Name()
 			if _, err := os.Stat(n.ExeFor(v)); err == nil {
 				out = append(out, Install{Version: v, Scope: "portable", Path: n.versionDir(v)})
+				dirs.record(filepath.Dir(n.ExeFor(v)))
 			}
 		}
 	}
 	if exe, err := exec.LookPath("nginx"); err == nil {
 		if v := parseNginxVersion(RunVersion(exe, "-v")); v != "" {
+			// LookPath 命中本就由 QuickDock 托管并写入 PATH 的便携版时，不再重复登记为 system。
+			if dirs.dedupeByDir(exe) {
+				return out
+			}
 			out = append(out, Install{Version: v, Scope: "system", Path: exe})
 		}
 	}

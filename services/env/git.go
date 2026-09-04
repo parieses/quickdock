@@ -63,10 +63,12 @@ func (g *GitRuntime) legacyExeFor(version string) string {
 func (g *GitRuntime) InstalledVersions() []Install {
 	var out []Install
 	seen := map[string]bool{}
+	dirs := managedDirs{}
 	if p := g.ExeFor(""); fileExists(p) {
 		if v := parseGitVersion(RunVersion(p, "--version")); v != "" {
 			seen[v] = true
 			out = append(out, Install{Version: v, Scope: "portable", Path: g.cmdDir()})
+			dirs.record(filepath.Dir(p))
 		}
 	}
 	if entries, err := os.ReadDir(g.dir); err == nil {
@@ -80,10 +82,15 @@ func (g *GitRuntime) InstalledVersions() []Install {
 			}
 			seen[e.Name()] = true
 			out = append(out, Install{Version: e.Name(), Scope: "portable", Path: filepath.Dir(exe)})
+			dirs.record(filepath.Dir(exe))
 		}
 	}
 	if p, err := exec.LookPath("git"); err == nil {
 		if v := parseGitVersion(RunVersion(p, "--version")); v != "" && !seen[v] {
+			// LookPath 命中本就由 QuickDock 托管并写入 PATH 的便携版时，不再重复登记为 system。
+			if dirs.dedupeByDir(p) {
+				return out
+			}
 			out = append(out, Install{Version: v, Scope: "system", Path: p})
 		}
 	}

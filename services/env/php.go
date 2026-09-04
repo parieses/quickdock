@@ -74,6 +74,7 @@ func (p *PHPRuntime) ExeFor(version string) string {
 
 func (p *PHPRuntime) InstalledVersions() []Install {
 	var out []Install
+	dirs := managedDirs{}
 	if entries, err := os.ReadDir(p.baseDir); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
@@ -82,11 +83,17 @@ func (p *PHPRuntime) InstalledVersions() []Install {
 			v := e.Name()
 			if _, err := os.Stat(p.ExeFor(v)); err == nil {
 				out = append(out, Install{Version: v, Scope: "portable", Path: p.versionDir(v)})
+				dirs.record(filepath.Dir(p.ExeFor(v)))
 			}
 		}
 	}
 	if exe, err := exec.LookPath("php"); err == nil {
 		if v := parsePHPVersion(RunVersion(exe, "-v")); v != "" {
+			// LookPath 可能命中本就由 QuickDock 托管并写入 PATH 的便携版（与上面 ReadDir 收录的是同一份），
+			// 此时不要重复登记为 system，否则同一版本出现两条“取消环境变量”。
+			if dirs.dedupeByDir(exe) {
+				return out
+			}
 			out = append(out, Install{Version: v, Scope: "system", Path: exe})
 		}
 	}

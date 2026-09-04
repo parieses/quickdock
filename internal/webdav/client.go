@@ -59,8 +59,14 @@ type resourceType struct {
 var (
 	httpClientOnce sync.Once
 	httpClient     *http.Client
+
+	// uploadClient 大文件上传专用。单例 30s Timeout 覆盖整个请求(含 body 传输)，
+	// 全量备份 JSON 可达数 MB~数十 MB，慢网络/镜像下容易整请求超时误报失败。
+	uploadClientOnce sync.Once
+	uploadClient     *http.Client
 )
 
+// newClient 常规操作客户端（列表/探测/删除/下载，响应体小，30s 足够）
 func newClient() *http.Client {
 	httpClientOnce.Do(func() {
 		httpClient = &http.Client{
@@ -71,6 +77,19 @@ func newClient() *http.Client {
 		}
 	})
 	return httpClient
+}
+
+// newUploadClient 上传专用客户端：10 分钟整体超时，仅用于 PUT 大文件。
+func newUploadClient() *http.Client {
+	uploadClientOnce.Do(func() {
+		uploadClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
+			},
+			Timeout: 10 * time.Minute,
+		}
+	})
+	return uploadClient
 }
 
 func newRequest(cfg *Config, method, urlPath string, body io.Reader) (*http.Request, error) {
@@ -86,8 +105,11 @@ func newRequest(cfg *Config, method, urlPath string, body io.Reader) (*http.Requ
 	return req, nil
 }
 
-// maxResponseSize 最大响应体大小：10MB
+// maxResponseSize 最大响应体大小：10MB（错误响应体 / 列表）
 const maxResponseSize int64 = 10 * 1024 * 1024
+
+// maxDownloadSize 备份恢复下载上限：200MB（全量备份 JSON 含剪贴板历史等可能远超 10MB）
+const maxDownloadSize int64 = 200 * 1024 * 1024
 
 // sanitizeFilename 校验备份文件名，防止路径穿越
 func sanitizeFilename(name string) error {
@@ -203,7 +225,7 @@ func UploadBackup(cfg *Config, jsonData string) (string, error) {
 	if cfg.URL == "" {
 		return "", fmt.Errorf("服务器地址不能为空")
 	}
-	client := newClient()
+	client := newUploadClient()
 
 	filename := fmt.Sprintf("quickdock-backup-%s.json", time.Now().Format("20060102-150405"))
 	req, err := newRequest(cfg, "PUT", "/"+filename, strings.NewReader(jsonData))
@@ -250,7 +272,7 @@ func DownloadBackup(cfg *Config, filename string) (string, error) {
 		return "", fmt.Errorf("下载失败 (HTTP %d)", resp.StatusCode)
 	}
 
-	body, err := readLimited(resp.Body, maxResponseSize)
+	body, err := readLimited(resp.Body, maxDownloadSize)
 	if err != nil {
 		return "", err
 	}

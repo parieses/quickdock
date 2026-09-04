@@ -9,6 +9,8 @@ import (
 	"sync"
 
 	"golang.org/x/sys/windows"
+
+	"quickdock/internal/logger"
 )
 
 // InstalledApp 已安装应用信息
@@ -176,7 +178,7 @@ func ScanInstalledApps() ([]InstalledApp, error) {
 			return nil
 		})
 		if err != nil {
-			fmt.Printf("QuickDock: 扫描开始菜单 %s 失败: %v\n", root, err)
+			logger.W("QuickDock: 扫描开始菜单 %s 失败: %v", root, err)
 		}
 	}
 

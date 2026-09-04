@@ -117,6 +117,10 @@ type PluginInstance struct {
 	doneCh   chan struct{}             // 进程退出信号
 	closeOnce sync.Once               // 确保 doneCh 只关闭一次 ← P1 修复
 	stopped  atomic.Bool              // 用户主动停止标记（避免崩溃重启循环）
+	// writeBroken stdin 写超时标记：悬挂写 goroutine 仍阻塞在 Write 上无法回收，
+	// 置位后禁止再发起新写入（避免与悬挂写者并发写管道导致 JSON-RPC 帧交错），
+	// 悬挂写者由 stopPlugin 杀进程 / 进程退出时回收。
+	writeBroken atomic.Bool
 	Dir      string                    // 插件安装目录
 	Status   string                    // running | stopped | crashed | unresponsive
 	statusMu sync.RWMutex              // 保护 Status 的并发读写（readLoop 在无锁 goroutine 中写）

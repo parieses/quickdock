@@ -26,9 +26,16 @@ import (
 // 句柄记录「当前拉起的是哪个版本」，Status 据此精确判定每个版本各自的运行状态，
 // 避免出现「装了两个版本、启动一个两个都显示已启动」的误判。
 type runningService struct {
-	cmd     *exec.Cmd
+	cmd *exec.Cmd
+	// pty 非空表示本服务走 Windows 伪控制台（ConPTY）拉起。
+	// 用于「标准句柄被重定向就立刻退出」的控制台程序（如 adamyg 版 memcached_service.exe）。
+	// 与 cmd 互斥：pty 非空时 cmd 为 nil。
+	pty     *sysutil.ConPty
 	version string
 	exe     string
+	// stopping 标记本次退出是宿主主动停止（killTracked/forget）而非崩溃，
+	// 用于避免把「用户点了停止」记成 error 级「进程异常退出」日志。
+	stopping bool
 }
 
 type serviceManager struct {
@@ -48,8 +55,13 @@ func (s *serviceManager) running(rt Runtime) bool {
 func (s *serviceManager) pid(rt Runtime) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if c, ok := s.svcs[rt]; ok && c.cmd.Process != nil {
-		return c.cmd.Process.Pid
+	if c, ok := s.svcs[rt]; ok {
+		if c.pty != nil {
+			return c.pty.Pid()
+		}
+		if c.cmd != nil && c.cmd.Process != nil {
+			return c.cmd.Process.Pid
+		}
 	}
 	return 0
 }
@@ -66,9 +78,35 @@ func (s *serviceManager) info(rt Runtime) (version string, exe string) {
 
 func (s *serviceManager) forget(rt Runtime) {
 	s.mu.Lock()
+	if c, ok := s.svcs[rt]; ok {
+		c.stopping = true // 记为主动停止，避免退出时刷 error 日志
+	}
 	delete(s.svcs, rt)
 	s.mu.Unlock()
 	logger.I("[env] forget %s（清掉会话内进程句柄）", rt)
+}
+
+// killTracked 结束本会话跟踪的服务进程（pty 或 exec.Cmd 两类都支持），但不清空记录。
+// 停止服务时应先调它（走句柄、精确），再做端口兜底（覆盖孤儿进程），最后 forget。
+func (s *serviceManager) killTracked(rt Runtime) {
+	s.mu.Lock()
+	c, ok := s.svcs[rt]
+	s.mu.Unlock()
+	if !ok || c == nil {
+		return
+	}
+	c.stopping = true // 主动停止：退出时按 info 记，不刷 error
+	if c.pty != nil {
+		if err := c.pty.Kill(); err != nil {
+			logger.W("[env] killTracked %s 伪控制台终止失败: %v", rt, err)
+		}
+		return
+	}
+	if c.cmd != nil && c.cmd.Process != nil {
+		if err := c.cmd.Process.Kill(); err != nil {
+			logger.W("[env] killTracked %s 终止失败: %v", rt, err)
+		}
+	}
 }
 
 // start 拉起后台服务进程。args 透传给可执行文件（如 redis 的 "redis.conf"、php-fpm 的 "-b host:port"）；
@@ -143,6 +181,87 @@ func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []strin
 		} else {
 			logger.I("[env] %s 进程正常退出 pid=%d code=%d", rt, pid, code)
 		}
+	}()
+	return nil
+}
+
+// startPTY 与 start 等价，但改用 Windows 伪控制台（ConPTY）拉起子进程。
+//
+// 适用场景：少数 Windows 控制台程序会检测自身 stdout/stderr 是否为「真实控制台句柄」，
+// 一旦被重定向到管道或文件就立刻退出（exit code 0、且无任何输出），
+// 表现为「日志显示启动成功，几十毫秒后进程正常退出」——即服务启动即关闭。
+// 典型：adamyg 版 memcached_service.exe 的 "-d run" 非服务模式。
+// ConPTY 让子进程视角的标准句柄仍是控制台（检测通过），宿主侧照常读取合并输出。
+// 非 Windows 平台自动回退到常规 start。
+func (s *serviceManager) startPTY(rt Runtime, version, exe, wd string, args []string, logPath string, onLog func(string)) error {
+	if runtime.GOOS != "windows" {
+		return s.start(rt, version, exe, wd, args, logPath, onLog)
+	}
+	s.mu.Lock()
+	if cur, ok := s.svcs[rt]; ok {
+		s.mu.Unlock()
+		logger.W("[env] startPTY %s 拒绝：同类型服务已在运行 version=%s", rt, cur.version)
+		return fmt.Errorf("服务已在运行")
+	}
+	pty, err := sysutil.StartConPty(exe, args, wd)
+	if err != nil {
+		s.mu.Unlock()
+		logger.E("[env] startPTY %s 伪控制台拉起失败: %v (exe=%s wd=%s args=%v)", rt, err, exe, wd, args)
+		return fmt.Errorf("以伪控制台启动失败: %w", err)
+	}
+	s.svcs[rt] = &runningService{pty: pty, version: version, exe: exe}
+	s.mu.Unlock()
+	pid := pty.Pid()
+	logger.I("[env] startPTY %s version=%s exe=%s wd=%s args=%v logPath=%s pid=%d（伪控制台）",
+		rt, version, exe, wd, args, logPath, pid)
+
+	var logF *os.File
+	if logPath != "" {
+		if f, e := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644); e == nil {
+			logF = f
+		} else {
+			logger.W("[env] startPTY %s 打开运行日志失败: %v path=%s（仅回调，不落盘）", rt, e, logPath)
+		}
+	}
+
+	collector := &stderrCollector{}
+	readDone := make(chan struct{})
+	go func() {
+		consumeLogs(pty, onLog, logF, collector)
+		close(readDone)
+	}()
+	go func() {
+		code, werr := pty.Wait()
+		// 进程已退出：先关伪控制台，让可能仍阻塞在 Read 上的读取端收到 EOF，
+		// 等它收尾后再关管道句柄——直接关闭带未完成 I/O 的句柄会损坏堆。
+		pty.ClosePty()
+		select {
+		case <-readDone:
+		case <-time.After(3 * time.Second):
+			logger.W("[env] %s 伪控制台读取端未及时结束，继续释放句柄 pid=%d", rt, pid)
+		}
+		if logF != nil {
+			logF.Close()
+		}
+		s.mu.Lock()
+		stopping := false
+		if c, ok := s.svcs[rt]; ok && c.pty == pty {
+			stopping = c.stopping
+			delete(s.svcs, rt)
+		}
+		s.mu.Unlock()
+		if !stopping && (werr != nil || code != 0) {
+			logger.E("[env] %s 进程异常退出 pid=%d code=%d err=%v", rt, pid, code, werr)
+			if lines := collector.drain(); len(lines) > 0 {
+				logger.E("[env] %s 退出前输出（末 %d 行）:", rt, len(lines))
+				for _, l := range lines {
+					logger.E("[env]   %s", l)
+				}
+			}
+		} else {
+			logger.I("[env] %s 进程正常退出 pid=%d code=%d", rt, pid, code)
+		}
+		pty.Close()
 	}()
 	return nil
 }

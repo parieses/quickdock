@@ -94,7 +94,9 @@ type Manager struct {
 }
 
 // runtimeOrder 运行时固定展示顺序
-var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeRedis, RuntimeNginx, RuntimeGit}
+var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeComposer,
+	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
+	RuntimeMailpit, RuntimeMinIO}
 
 func NewManager() *Manager {
 	m := &Manager{
@@ -105,6 +107,18 @@ func NewManager() *Manager {
 			RuntimeRedis: NewRedisRuntime(),
 			RuntimeNginx: NewNginxRuntime(),
 			RuntimeGit:   NewGitRuntime(),
+			RuntimeCaddy:    NewCaddyRuntime(),
+			RuntimeComposer: NewComposerRuntime(),
+			RuntimeFFmpeg:     NewFFmpegRuntime(),
+			RuntimePython:     NewPythonRuntime(),
+			RuntimeApache:     NewApacheRuntime(),
+			RuntimeMemcached:  NewMemcachedRuntime(),
+			RuntimeMariaDB:    NewMariaDBRuntime(),
+			RuntimeMySQL:      NewMySQLRuntime(),
+			RuntimePostgreSQL: NewPostgresRuntime(),
+			RuntimeMongoDB:    NewMongoRuntime(),
+			RuntimeMailpit:   NewMailpitRuntime(),
+			RuntimeMinIO:     NewMinioRuntime(),
 		},
 		links:       map[Runtime][]linkEntry{},
 		detectCache: map[Runtime][]Install{},
@@ -174,6 +188,28 @@ func importExeName(rt Runtime) string {
 		return "nginx.exe"
 	case RuntimeGit:
 		return "git.exe"
+	case RuntimeCaddy:
+		return "caddy.exe"
+	case RuntimeFFmpeg:
+		return "ffmpeg.exe"
+	case RuntimePython:
+		return "python.exe"
+	case RuntimeApache:
+		return "httpd.exe"
+	case RuntimeMemcached:
+		return "memcached.exe"
+	case RuntimeMariaDB:
+		return "mariadbd.exe"
+	case RuntimeMySQL:
+		return "mysqld.exe"
+	case RuntimePostgreSQL:
+		return "postgres.exe"
+	case RuntimeMongoDB:
+		return "mongod.exe"
+	case RuntimeMailpit:
+		return "mailpit.exe"
+	case RuntimeMinIO:
+		return "minio.exe"
 	}
 	return ""
 }
@@ -590,12 +626,14 @@ func (m *Manager) ImportVersion(rt Runtime, dir string) (string, error) {
 func detectVersion(rt Runtime, exe string) (string, error) {
 	var args []string
 	switch rt {
-	case RuntimeNode, RuntimePHP, RuntimeNginx:
+	case RuntimeNode, RuntimePHP, RuntimeNginx, RuntimeApache:
 		args = []string{"-v"}
 	case RuntimeGo:
 		args = []string{"version"}
-	case RuntimeRedis, RuntimeGit:
+	case RuntimeRedis, RuntimeGit, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB, RuntimePython, RuntimeMailpit, RuntimeMinIO:
 		args = []string{"--version"}
+	case RuntimeCaddy, RuntimeFFmpeg:
+		args = []string{"version"}
 	default:
 		return "", fmt.Errorf("不支持的运行时")
 	}
@@ -633,6 +671,27 @@ func detectVersion(rt Runtime, exe string) (string, error) {
 	case RuntimeNode:
 		// "v22.22.2"
 		return strings.TrimSpace(strings.TrimPrefix(s, "v")), nil
+	case RuntimeCaddy:
+		// "v2.8.4 h1:..." 或 "v2.8.4"
+		return parseCaddyVersion(s), nil
+	case RuntimeFFmpeg:
+		return parseFFmpegVersion(s), nil
+	case RuntimePython:
+		return parsePythonVersion(s), nil
+	case RuntimeApache:
+		return parseApacheVersion(s), nil
+	case RuntimeMemcached:
+		return parseMemcachedVersion(s), nil
+	case RuntimeMariaDB, RuntimeMySQL:
+		return parseSQLVersion(s), nil
+	case RuntimePostgreSQL:
+		return parsePostgresVersion(s), nil
+	case RuntimeMongoDB:
+		return parseMongoVersion(s), nil
+	case RuntimeMailpit:
+		return parseMailpitVersion(s), nil
+	case RuntimeMinIO:
+		return parseMinioVersion(s), nil
 	}
 	return "", nil
 }
@@ -756,4 +815,40 @@ func (m *Manager) GitStatus() GitStatusInfo {
 		}
 	}
 	return GitStatusInfo{}
+}
+
+// PortConflict 查询某运行时默认服务端口是否被「其它程序」占用（启动前可视化提示用）。
+// 仅服务类运行时有意义；非服务类返回零值。Occupied=true 且 Ours=false 表示端口被外部/孤儿进程占据，
+// 此时直接启动会因 bind 失败而误判 running，前端应给出明确冲突警告。
+type PortConflict struct {
+	Occupied bool   `json:"occupied"` // 端口是否被占用
+	Port     int    `json:"port"`     // 被探测的端口
+	PID      int    `json:"pid"`      // 占用者 PID（0=未知）
+	Image    string `json:"image"`    // 占用者可执行文件路径
+	Ours     bool   `json:"ours"`     // 占用者是否就是本会话拉起的该运行时（此时不算冲突）
+}
+
+func (m *Manager) PortConflict(rt Runtime, version string) (PortConflict, error) {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return PortConflict{}, err
+	}
+	sc, ok := a.(ServiceController)
+	if !ok {
+		return PortConflict{}, nil
+	}
+	port := sc.DefaultPort()
+	pc := PortConflict{Port: port}
+	if !isPortOpen(port) {
+		return pc, nil
+	}
+	pc.Occupied = true
+	if v, _ := svcMgr.info(rt); v != "" {
+		pc.Ours = true
+	}
+	if pid := findListenPID(port); pid != 0 {
+		pc.PID = pid
+		pc.Image = processExePath(pid)
+	}
+	return pc, nil
 }

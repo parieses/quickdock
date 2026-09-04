@@ -15,10 +15,10 @@ package platform
 // 本实现改为遍历框架屏幕数据做命中判定，从根上绕开该问题。
 
 import (
-	"fmt"
-
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/w32"
+
+	"quickdock/internal/logger"
 )
 
 // cursorScreen 返回鼠标光标所在的屏幕：
@@ -30,7 +30,7 @@ func cursorScreen() *application.Screen {
 	}
 	x, y, ok := w32.GetCursorPos()
 	if !ok {
-		fmt.Println("QuickDock: GetCursorPos failed, keeping default position")
+		logger.W("QuickDock: GetCursorPos failed, keeping default position")
 		return nil
 	}
 
