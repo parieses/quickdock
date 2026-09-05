@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -160,7 +161,10 @@ func (h *HTTPServeManager) Create(name, dir string, port int) (*HTTPServer, erro
 		h.mu.Unlock()
 		return nil, err
 	}
-	return &entry.HTTPServer, nil
+	// 返回值的拷贝而非 &entry.HTTPServer：entry 已加入 h.servers，直接返回其字段指针会让调用方
+	// 在锁外持有 map 内部对象，与后续 Stop/Start 的写并发（data race）。
+	cp := entry.HTTPServer
+	return &cp, nil
 }
 
 // pickFreePortLocked 在 20000-60000 之间随机挑一个「本管理器未占用 + 当前可监听」的端口。
@@ -206,12 +210,25 @@ func (h *HTTPServeManager) Start(id string) error {
 		h.mu.Unlock()
 		return fmt.Errorf("目录不存在: %s", entry.Dir)
 	}
-	ln, err := net.Listen("tcp", fmt.Sprintf(":%d", entry.Port))
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", entry.Port))
 	if err != nil {
 		h.mu.Unlock()
 		return fmt.Errorf("监听端口 %d 失败: %w", entry.Port, err)
 	}
-	srv := &http.Server{Handler: http.FileServer(http.Dir(entry.Dir))}
+	// 绑定 127.0.0.1 仅本机可访问；并用中间件禁用目录列举：请求指向目录且无 index.html 时返回 403，
+	// 避免本机/局域网任意程序遍历用户选定目录的文件结构。
+	fileServer := http.FileServer(http.Dir(entry.Dir))
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/") {
+			idx := filepath.Join(entry.Dir, filepath.Clean(r.URL.Path), "index.html")
+			if _, statErr := os.Stat(idx); statErr != nil {
+				http.Error(w, "directory listing disabled", http.StatusForbidden)
+				return
+			}
+		}
+		fileServer.ServeHTTP(w, r)
+	})
+	srv := &http.Server{Handler: handler}
 	entry.ln = ln
 	entry.srv = srv
 	entry.HTTPServer.Running = true

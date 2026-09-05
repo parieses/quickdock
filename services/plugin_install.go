@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	"quickdock/internal/logger"
@@ -23,7 +24,10 @@ import (
 // ReadPickedFile 只放行该集合内的路径，防止插件 iframe 用任意绝对路径读取用户文件。
 var (
 	pickedPathsMu sync.Mutex
-	pickedPaths   = map[string]bool{}
+	pickedPaths   = map[string]time.Time{} // path -> 授权时间戳；过期即失效，防白名单被永久复用
+	// pickedPathTTL 白名单有效期：选完文件后在此窗口内可重复读取，过期需重新选择。
+	// 缓解「进程级全局白名单永久有效」——恶意/闲置插件无法长期持有某路径的读取授权。
+	pickedPathTTL = 10 * time.Minute
 )
 
 // dialogParentWindow 为原生文件/目录对话框挑选父窗口：
@@ -118,7 +122,7 @@ func (a *AppService) PickFilePath(title, filterName, pattern string) *ApiResult 
 		return Ok(nil)
 	}
 	pickedPathsMu.Lock()
-	pickedPaths[filePath] = true
+	pickedPaths[filePath] = time.Now()
 	pickedPathsMu.Unlock()
 	return Ok(filePath)
 }
@@ -165,10 +169,10 @@ func (a *AppService) ReadPickedFile(path string) *ApiResult {
 		return FailMsg("路径无效")
 	}
 	pickedPathsMu.Lock()
-	authorized := pickedPaths[path]
+	ts, ok := pickedPaths[path]
 	pickedPathsMu.Unlock()
-	if !authorized {
-		return FailMsg("路径未经文件选择器授权")
+	if !ok || time.Since(ts) > pickedPathTTL {
+		return FailMsg("路径未经文件选择器授权或已过期，请重新选择")
 	}
 	fi, err := os.Stat(path)
 	if err != nil || fi.IsDir() {

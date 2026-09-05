@@ -46,6 +46,7 @@ type DSHProcessManager struct {
 	// 用于一键回滚；内存指针为空时回退到 backups/ 下最新 web-* 目录（跨重启仍可用）。
 	lastPluginBackup string
 
+	aliveMu   sync.Mutex      // 保护 aliveCache 字段，避免 isDSHAlive / invalidateAliveCache 并发读写撕裂
 	// aliveCache 缓存 isDSHAlive 结果：连续点击时避免每次 spawn netstat/tasklist（各 ~300ms）
 	aliveCache struct {
 		port int
@@ -109,9 +110,9 @@ func (m *DSHProcessManager) Start() (string, error) {
 			}
 			return u, nil
 		}
-		if pid := findPortPID(DefaultDSHPort); pid > 0 {
+		if pid := findPortPID(DefaultDSHPort); pid > 0 && isNodeProcess(pid) {
 			if m.app != nil {
-				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: fmt.Sprintf("端口 3080 被残留进程 %d 占用，正在清理…", pid)})
+				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: fmt.Sprintf("端口 3080 被残留 node 进程 %d 占用，正在清理…", pid)})
 			}
 			killProcessTree(pid)
 			// 等待端口真正释放（最多 3s），确保下面能重新绑定 3080
@@ -277,18 +278,22 @@ func (m *DSHProcessManager) Start() (string, error) {
 // 不再另起进程——dsh 的 task-board ledger 是 per-profile 单实例锁，换端口也绕不开，
 // 多实例同时启动会互相抢锁崩溃（"ledger is already owned by process <pid>"）。
 func (m *DSHProcessManager) isDSHAlive(port int) bool {
-	// 缓存：成功 10s、失败 3s（失败时端口/进程状态可能很快变化，如清理中）。
-	// 命中成功缓存时复用路径零子进程秒回——"端口存在应直接起来"。
+	// 先持锁读缓存：命中（且在 TTL 内）直接返回，零网络开销、零阻塞。
+	m.aliveMu.Lock()
 	ttl := 10 * time.Second
 	if !m.aliveCache.ok {
 		ttl = 3 * time.Second
 	}
 	if time.Since(m.aliveCache.at) < ttl && m.aliveCache.port == port {
-		return m.aliveCache.ok
+		ok := m.aliveCache.ok
+		m.aliveMu.Unlock()
+		return ok
 	}
-	// HTTP GET 优先：端口上有 dsh 服务（健康）时一次 ~10ms 请求即可判定，
-	// 不再 spawn netstat/tasklist（各 ~300ms）。3080 是 dsh 官方默认端口，
-	// 被其他 HTTP 服务占用且返回 200 的概率极低，可接受该极小误判。
+	m.aliveMu.Unlock()
+
+	// HTTP GET 探测（锁外执行，避免慢请求阻塞其它调用方）：端口上有 dsh 服务
+	// （健康）时一次 ~10ms 请求即可判定，不再 spawn netstat/tasklist（各 ~300ms）。
+	// 3080 是 dsh 官方默认端口，被其他 HTTP 服务占用且返回 200 的概率极低，可接受该极小误判。
 	ok := false
 	client := &http.Client{Timeout: 1500 * time.Millisecond}
 	if resp, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/"); err == nil {
@@ -298,9 +303,12 @@ func (m *DSHProcessManager) isDSHAlive(port int) bool {
 	// GET 失败（端口占用者不是健康服务）→ 保持 false，由 Start() 走
 	// findPortPID + killProcessTree 清理残留 node 后重绑 3080 的路径。
 	// 注意：绝不能把"占用者是 node 但 HTTP 不通"判为 alive，否则窗口打开是死页面。
+	// 探测结果写回缓存需重新持锁。
+	m.aliveMu.Lock()
 	m.aliveCache.port = port
 	m.aliveCache.ok = ok
 	m.aliveCache.at = time.Now()
+	m.aliveMu.Unlock()
 	return ok
 }
 
@@ -505,17 +513,24 @@ func (m *DSHProcessManager) stopLocked() {
 		}
 		// 验证端口是否真正释放。仍被占用（taskkill 未生效 / 锁定的 cmd 进程已退、
 		// 3080 实际由树外残留进程提供）→ 按端口兜底再清一次，确保"停止"一定生效。
-		if pid := findPortPID(DefaultDSHPort); pid > 0 {
+		// 兜底清理按"本进程实际绑定的端口"验证释放，而非硬编码 3080：
+		// 随机端口场景（3080 被无关进程占用时 Start 退避到 m.port）若写死 3080，
+		// 会误把 3080 上的无关进程当 dsh 清理，而真实 dsh 端口反而没验证。
+		actualPort := m.port
+		if actualPort == 0 {
+			actualPort = DefaultDSHPort
+		}
+		if pid := findPortPID(actualPort); pid > 0 {
 			if isNodeProcess(pid) {
-				m.logf("warn", fmt.Sprintf("DSHStop: taskkill 后 3080 仍由 node PID %d 监听，再次清理", pid))
+				m.logf("warn", fmt.Sprintf("DSHStop: taskkill 后 %d 仍由 node PID %d 监听，再次清理", actualPort, pid))
 			} else {
-				m.logf("warn", fmt.Sprintf("DSHStop: taskkill 后 3080 仍由非 node 进程 PID %d 监听，按停止意图强制清理", pid))
+				m.logf("warn", fmt.Sprintf("DSHStop: taskkill 后 %d 仍由非 node 进程 PID %d 监听，按停止意图强制清理", actualPort, pid))
 			}
 			killProcessTree(pid)
 		}
 		// 等待端口释放：dsh 关闭后 TCP TIME_WAIT 短暂存在，轮询 30 次（3s）确保下次
-		// OpenDSHWindow() 能重新绑定 3080 而不是开随机端口。
-		m.ensurePortReleased(DefaultDSHPort)
+		// OpenDSHWindow() 能重新绑定该端口而不是开随机端口。
+		m.ensurePortReleased(actualPort)
 		return
 	}
 	_ = cmd.Process.Signal(os.Interrupt)

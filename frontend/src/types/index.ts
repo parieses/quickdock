@@ -320,3 +320,33 @@ export interface PluginExecLog {
   error: string
   trigger: string // manual | hotkey | palette
 }
+
+// ---- 环境管理运行时类型（与后端 services/env/manager.go 的 RuntimeInfo/Install/ServiceStatus 对齐）----
+export interface EnvInstall {
+  version: string
+  scope: string // "portable" 便携目录 | "system" 系统 PATH | "linked" 导入目录
+  path: string
+  active: boolean // 是否为当前激活（环境变量指向）版本
+  inSystemPath: boolean // bin 目录是否真正出现在系统 PATH
+  alias: string
+  note: string
+}
+
+export interface EnvServiceStatus {
+  running: boolean
+  pid: number
+  port: number
+  version: string
+}
+
+export interface EnvRuntimeInfo {
+  id: string
+  name: string
+  group: string // language / webserver / cache / tool / database
+  platforms: string[]
+  recommended: string[]
+  installed: EnvInstall[]
+  sources: { id: string; name: string }[]
+  activeSource: string
+  hasService: boolean // 是否支持服务启停/状态监听
+}

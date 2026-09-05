@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"strings"
 
 	"quickdock/services/env"
 )
@@ -164,6 +165,47 @@ func (a *AppService) EnvPortConflict(runtime, version string) *ApiResult {
 		return Fail(err)
 	}
 	return Ok(pc)
+}
+
+// EnvRabbitMQEnableMgmt 针对运行中的 RabbitMQ 启用管理后台插件（rabbitmq_management，端口 15672）。
+// 返回命令完整输出；启用成功即可在浏览器访问 http://127.0.0.1:15672/ 。
+func (a *AppService) EnvRabbitMQEnableMgmt(version string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	var buf strings.Builder
+	err := a.Env.EnableRabbitMQManagement(version, func(s string) {
+		buf.WriteString(s)
+		buf.WriteString("\n")
+	})
+	if err != nil {
+		return FailMsg(err.Error() + "\n" + buf.String())
+	}
+	return Ok(buf.String())
+}
+
+// EnvRabbitMQDisableMgmt 关闭 RabbitMQ 管理后台插件（rabbitmq_management，端口 15672）。
+func (a *AppService) EnvRabbitMQDisableMgmt(version string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	var buf strings.Builder
+	err := a.Env.DisableRabbitMQManagement(version, func(s string) {
+		buf.WriteString(s)
+		buf.WriteString("\n")
+	})
+	if err != nil {
+		return FailMsg(err.Error() + "\n" + buf.String())
+	}
+	return Ok(buf.String())
+}
+
+// EnvRabbitMQIsMgmtEnabled 返回 RabbitMQ 管理后台是否已启用（决定是否显示「启用/关闭」）。
+func (a *AppService) EnvRabbitMQIsMgmtEnabled(version string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	return Ok(a.Env.IsRabbitMQManagementEnabled(version))
 }
 
 // EnvGitStatus 返回当前 Git 环境的综合状态（版本/路径/SSH/Git LFS），供环境管理页状态表展示。

@@ -147,8 +147,8 @@ func extractZip(archivePath, dest string) error {
 }
 
 func extractTarGz(archivePath, dest string) error {
-	// 第一遍：收集条目名以确定是否需要剥离顶层目录
-	names, headers, err := scanTar(archivePath)
+	// 第一遍：仅收集条目名以确定是否需要剥离顶层目录（轻量，不拷贝数据）
+	names, err := scanTarNames(archivePath)
 	if err != nil {
 		return err
 	}
@@ -157,9 +157,30 @@ func extractTarGz(archivePath, dest string) error {
 		return err
 	}
 
+	// 第二遍：单次流式遍历归档，边读边写出（O(n)）。原实现为每个文件重开归档重扫到目标
+	// 条目，N 个文件退化为 O(n²)，Node/Go 这类大归档解压会卡死。
+	f, err := os.Open(archivePath)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		return err
+	}
+	defer gz.Close()
+	tr := tar.NewReader(gz)
+
 	var total int64
-	for _, h := range headers {
-		rel := stripTop(h.Name, top)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+		rel := stripTop(hdr.Name, top)
 		if rel == "" {
 			continue
 		}
@@ -167,93 +188,61 @@ func extractTarGz(archivePath, dest string) error {
 		if err != nil {
 			return err
 		}
-		if h.Size > maxExtractFileSize {
-			return fmt.Errorf("文件过大: %s", h.Name)
+		if hdr.Size > maxExtractFileSize {
+			return fmt.Errorf("文件过大: %s", hdr.Name)
 		}
-		if total+h.Size > maxExtractTotal {
+		if total+hdr.Size > maxExtractTotal {
 			return fmt.Errorf("解压总大小超出限制")
 		}
-		switch h.Typeflag {
+		switch hdr.Typeflag {
 		case tar.TypeDir:
-			if err := os.MkdirAll(target, os.FileMode(h.Mode)); err != nil {
+			if err := os.MkdirAll(target, os.FileMode(hdr.Mode)); err != nil {
 				return err
 			}
 		case tar.TypeReg:
 			if err := os.MkdirAll(filepath.Dir(target), 0755); err != nil {
 				return err
 			}
-			if err := extractTarFile(archivePath, h, target); err != nil {
+			out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(hdr.Mode))
+			if err != nil {
 				return err
 			}
-			total += h.Size
+			if _, err := io.CopyN(out, tr, maxExtractFileSize); err != nil && err != io.EOF {
+				out.Close()
+				return err
+			}
+			out.Close()
+			total += hdr.Size
 		}
 	}
 	return nil
 }
 
-// scanTar 两遍读取：先收集名字与头信息（不拷贝数据），供剥离判定与解压复用。
-func scanTar(archivePath string) ([]string, []tar.Header, error) {
+// scanTarNames 单次扫描归档收集所有条目名（轻量，不拷贝数据），供剥离顶层目录判定使用。
+func scanTarNames(archivePath string) ([]string, error) {
 	f, err := os.Open(archivePath)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer f.Close()
 	gz, err := gzip.NewReader(f)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	defer gz.Close()
 	tr := tar.NewReader(gz)
 
 	var names []string
-	var headers []tar.Header
 	for {
 		hdr, err := tr.Next()
 		if err == io.EOF {
 			break
 		}
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		names = append(names, hdr.Name)
-		headers = append(headers, *hdr)
 	}
-	return names, headers, nil
+	return names, nil
 }
 
-// extractTarFile 重新打开归档并定位到指定头，将其内容写出到 target。
-func extractTarFile(archivePath string, h tar.Header, target string) error {
-	f, err := os.Open(archivePath)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	gz, err := gzip.NewReader(f)
-	if err != nil {
-		return err
-	}
-	defer gz.Close()
-	tr := tar.NewReader(gz)
-	for {
-		hdr, err := tr.Next()
-		if err == io.EOF {
-			return fmt.Errorf("未找到条目: %s", h.Name)
-		}
-		if err != nil {
-			return err
-		}
-		if hdr.Name != h.Name {
-			continue
-		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, os.FileMode(h.Mode))
-		if err != nil {
-			return err
-		}
-		if _, err := io.CopyN(out, tr, maxExtractFileSize); err != nil && err != io.EOF {
-			out.Close()
-			return err
-		}
-		out.Close()
-		return nil
-	}
-}

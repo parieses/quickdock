@@ -96,11 +96,14 @@ func (s *serviceManager) forget(rt Runtime) {
 func (s *serviceManager) killTracked(rt Runtime) {
 	s.mu.Lock()
 	c, ok := s.svcs[rt]
+	if ok && c != nil {
+		// 在锁内标记 stopping，与 forget 的写入互斥，避免二者并发写同一字段触发 data race
+		c.stopping = true // 主动停止：退出时按 info 记，不刷 error
+	}
 	s.mu.Unlock()
 	if !ok || c == nil {
 		return
 	}
-	c.stopping = true // 主动停止：退出时按 info 记，不刷 error
 	if c.pty != nil {
 		if err := c.pty.Kill(); err != nil {
 			logger.W("[env] killTracked %s 伪控制台终止失败: %v", rt, err)
@@ -122,6 +125,12 @@ func (s *serviceManager) killTracked(rt Runtime) {
 // start 拉起后台服务进程。args 透传给可执行文件（如 redis 的 "redis.conf"、php-fpm 的 "-b host:port"）；
 // logPath 非空时把 stdout/stderr 追加写入该文件（用于日志查询），onLog 仍照常回调（通常为 nil）。
 func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []string, logPath string, onLog func(string)) error {
+	return s.startWithEnv(rt, version, exe, wd, args, logPath, onLog, nil)
+}
+
+// startWithEnv 与 start 等价，但允许覆盖/追加子进程环境变量
+// （如 RabbitMQ 需注入 ERLANG_HOME 指向便携版 Erlang）。env 为 nil 时沿用进程环境。
+func (s *serviceManager) startWithEnv(rt Runtime, version, exe, wd string, args []string, logPath string, onLog func(string), env []string) error {
 	s.mu.Lock()
 	if cur, ok := s.svcs[rt]; ok {
 		s.mu.Unlock()
@@ -130,6 +139,9 @@ func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []strin
 	}
 	cmd := sysutil.Command(exe, args...)
 	cmd.Dir = wd
+	if env != nil {
+		cmd.Env = env
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		s.mu.Unlock()
@@ -164,11 +176,16 @@ func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []strin
 
 	// 收集 stderr 近期输出，进程异常快速退出时回写主日志辅助排障（"启动不了"但无报错的关键来源）
 	collector := &stderrCollector{}
-	go consumeLogs(stdout, onLog, logF, nil)
-	go consumeLogs(stderr, onLog, logF, collector)
+	// logWg 等待两个日志收集协程结束，确保 cmd.Wait 返回、文件关闭前不再有协程写 logF，
+	// 否则 Wait 协程 Close(logF) 与 consumeLogs 的 WriteString 并发会触发 use-after-close / data race。
+	var logWg sync.WaitGroup
+	logWg.Add(2)
+	go func() { consumeLogs(stdout, onLog, logF, nil); logWg.Done() }()
+	go func() { consumeLogs(stderr, onLog, logF, collector); logWg.Done() }()
 	go func() {
 		err := cmd.Wait()
 		if logF != nil {
+			logWg.Wait()
 			logF.Close()
 		}
 		code := 0
@@ -275,6 +292,31 @@ func (s *serviceManager) startPTY(rt Runtime, version, exe, wd string, args []st
 		pty.Close()
 	}()
 	return nil
+}
+
+// mergeEnv 以 base（通常 os.Environ()）为基础，应用 overrides（"KEY=VALUE"）覆盖同名变量，
+// 不区分大小写匹配（Windows 变量名大小写不敏感）。返回完整环境切片，供 exec.Cmd.Env 使用。
+func mergeEnv(base []string, overrides []string) []string {
+	out := append([]string{}, base...)
+	for _, o := range overrides {
+		idx := strings.IndexByte(o, '=')
+		if idx <= 0 {
+			continue
+		}
+		key := strings.ToUpper(o[:idx])
+		replaced := false
+		for j, e := range out {
+			if ei := strings.IndexByte(e, '='); ei > 0 && strings.ToUpper(e[:ei]) == key {
+				out[j] = o
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			out = append(out, o)
+		}
+	}
+	return out
 }
 
 // processExePath 返回占用 pid 的进程完整可执行文件路径（用于把监听端口反查到具体版本目录）。

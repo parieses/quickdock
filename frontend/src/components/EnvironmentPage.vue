@@ -40,6 +40,9 @@ import {
   EnvLogGet,
   EnvPHPConfigGet,
   EnvPHPConfigSet,
+  EnvRabbitMQEnableMgmt,
+  EnvRabbitMQDisableMgmt,
+  EnvRabbitMQIsMgmtEnabled,
   HTTPServeList,
   HTTPServeCreate,
   HTTPServeStart,
@@ -190,6 +193,12 @@ const RUNTIME_COLORS: Record<string, string> = {
   minio: '#c51d1d',
   frpc: '#3b82f6',
   ftp: '#64748b',
+  bun: '#f472b6',
+  erlang: '#A90533',
+  traefik: '#2393f3',
+  rabbitmq: '#ff6600',
+  gh: '#24292f',
+  mkcert: '#6b7280',
 }
 function avatarColor(id: string): string {
   return RUNTIME_COLORS[id] || 'var(--color-accent)'
@@ -215,12 +224,18 @@ const RUNTIME_ICONS: Record<string, string> = {
   mongodb: '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M17.2 9.6c-1.3-5.6-4.3-7.4-4.6-8.1-.28-.394-.53-.954-.735-1.4-.36.5-.55.7-.523 1.2-.723.6-4.4 3.7-4.7 10.0-.282 5.9 4.3 9.4 4.9 9.9l.7.0A73.5 73.5 0 111.9 24h.481c.114-1.0.284-2.1.51-3.1.417-.296.6-.463.9-.693a11.3 11.3 0 3.6-8.5c.01-.814-.103-1.7-.197-2.2zm-5.3 8.2s0-8.3.275-8.3c.213 0 .49 10.7.49 10.7-.381-.045-.765-1.8-.765-2.4z"/></svg>',
   git: '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M13.1 23.5a1.5 1.5 0 0 1-2.2 0L.451 13.1a1.5 1.5 0 0 1 0-2.2l7.2-7.2 2.7 2.7a1.9 1.9 0 0 0 .964 2.3v6.7a1.8 1.8 0 1 0 1.5 0V9.0l2.5 2.5a1.9 1.9 0 1 0 1.1-1.1l-2.6-2.6a1.9 1.9 0 0 0-2.4-2.4L8.7 2.6 10.9.451a1.5 1.5 0 0 1 2.2 0l10.5 10.5a1.5 1.5 0 0 1 0 2.2z"/></svg>',
   minio: '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M13.2.006c-.6216-.0478-1.2.1943-1.6.582a2.1 2.1 0 0 0-.0938 3.0l3.4 3.6a3.0 3.0 0 0 1-.664 4.7l-.463.2V7.3a15.4 15.4 0 0 0-8.0 10.5v.0176l6.5-3.3v7.6L13.8 24V13.7l.8965-.4629a4.4 4.4 0 0 0 1.2-7.0l-3.4-3.5a.7489.7 0 0 1 .037-1.1.7522.8 0 0 1 1.1.0371l.4668.5-.6.0 4.1 4.2a.566.1 0 0 0 .082 0 .6.1 0 0 0 0-.0703l-3.1-5.1-.1484.1.1484-.1445C14.5.3926 13.8.0538 13.2.006Zm-.9024 9.9v3.0l-4.2 2.1a14.0 14.0 0 0 1 2.8-3.9 14.2 14.2 0 0 1 1.4-1.2z"/></svg>',
+  gh: '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M12 .297c-6.6 0-12 5.4-12 12 0 5.3 3.4 9.8 8.2 11.4.6.1.82-.258.8-.577 0-.285-.01-1.0-.015-2.0-3.3.724-4.0-1.6-4.0-1.6C4.4 18.1 3.6 17.7 3.6 17.7c-1.1-.744.1-.729.1-.729 1.2.084 1.8 1.2 1.8 1.2 1.1 1.8 2.8 1.3 3.5.998.1-.776.4-1.3.76-1.6-2.7-.3-5.5-1.3-5.5-5.9 0-1.3.465-2.4 1.2-3.2-.135-.303-.54-1.5.105-3.2 0 0 1.0-.322 3.3 1.2.96-.267 2.0-.399 3-.405 1.0.006 2.0.138 3 .405 2.3-1.6 3.3-1.2 3.3-1.2.645 1.7.24 2.9.12 3.2.765.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.5 5.9.42.4.81 1.1.81 2.2 0 1.6-.015 2.9-.015 3.3 0 .315.2.69.8.57C20.6 22.1 24 17.6 24 12.3c0-6.6-5.4-12-12-12"/></svg>',
+  bun: '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M12 22.6c6.6 0 12-4.3 12-9.7 0-3.3-2.1-6.2-5.2-8.0-1.3-.715-2.3-1.4-3.1-1.9C14.1 2.0 13.1 1.4 12 1.4c-1.1 0-2.3.785-4.0 1.8a49.9 49.9 0 0 1-2.8 1.7C2.1 6.7 0 9.6 0 12.9c0 5.3 5.4 9.7 12 9.7v.001ZM10.6 4.7c.334-.759.5-1.6.498-2.4 0-.145.2-.187.2-.29.7 2.8-.902 4.2-2.1 4.6-.124.0-.199-.121-.103-.209a5.8 5.8 0 0 0 1.4-2.0Zm2.1-.102a5.8 5.8 0 0 0-.782-2.3v-.016c-.069-.123.1-.263.2-.172 2.0 2.1 1.3 4.1.556 5.1-.82.1-.23-.003-.189-.126a5.8 5.8 0 0 0 .23-2.4Zm1.8-.561a5.7 5.7 0 0 0-1.6-1.8v-.014c-.112-.085-.024-.274.1-.218 2.6 1.1 2.8 3.2 2.5 4.4a.116.1 0 0 1-.49.1.11.1 0 0 1-.153-.26.1.122 0 0 1-.022-.083 5.9 5.9 0 0 0-.737-2.3Zm-5.1.561c-.617.5-1.3.76-2.1 1-.117 0-.195-.078-.156-.181 1.8-.909 2.4-1.6 3.0-2.8 0 0 .155-.118.2.085 0 .304-.349 1.3-.968 1.9Zm4.9 11.2a3.0 3.0 0 0 1-.937 1.6c-.346.3-.8.6-1.3.62a2.2 2.2 0 0 1-1.3-.62 3.0 3.0 0 0 1-.925-1.6.244.2 0 0 1 .064-.198.2.234 0 0 1 .193-.069h4.0a.226.2 0 0 1 .19.1c.5.1.73.1.63.2Zm-5.5-2.2a1.9 1.9 0 0 1-2.4-.245 2.0 2.0 0 0 1-.233-2.4c.207-.319.5-.566.8-.713a1.8 1.8 0 0 1 1.1-.11c.366.1.703.3.967.5a2.0 2.0 0 0 1 .408 2.1 1.9 1.9 0 0 1-.698.9v.001Zm8.5.005a1.9 1.9 0 0 1-2.4-.253 2.0 2.0 0 0 1-.547-1.4c0-.384.1-.76.3-1.1.207-.319.5-.567.8-.713a1.8 1.8 0 0 1 1.1-.108c.367.1.704.3.968.5a2.0 2.0 0 0 1 .4 2.1 1.9 1.9 0 0 1-.702.9Z"/></svg>',
+  rabbitmq: '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M23.0 9.6h-7.7a.957.0 0 01-.962-.962V.962a.957.0 0 00-.962-.956H10.6a.957.0 0 00-.963.0V8.6a.957.0 0 01-.963.0H5.8a.957.0 0 01-.961-.962V.962A.957.0 0 3.8 0H.959a.957.0 0 00-.957.0v22.1A.957.0 0 1.0 24h22.1a.957.0 0 1.0-.962V10.6a.957.0 0 00-.962-.98zm-3.9 8.2a1.4 1.4 0 01-1.4 1.4h-1.9a1.4 1.4 0 01-1.4-1.4v-1.9a1.4 1.4 0 11.4-1.4h1.9a1.4 1.4 0 11.4 1.4z"/></svg>',
+  erlang: '<svg viewBox="0 0 24 24" fill="#fff" xmlns="http://www.w3.org/2000/svg"><path d="M8.859 7.889c.154-1.863 1.623-3.115 3.344-3.119 1.734.004 2.986 1.256 3.029 3.119zm12.11 11.707c.802-.86 1.52-1.872 2.172-3.03l-3.616-1.807c-1.27 2.064-3.127 3.965-5.694 3.977-3.738-.012-5.206-3.208-5.198-7.322h13.966c.019-.464.019-.68 0-.904.091-2.447-.558-4.504-1.737-6.106l-.007.005H24v15.186h-3.039zm-17.206-.001C1.901 17.62.811 14.894.813 11.64c-.002-2.877.902-5.35 2.456-7.232H0v15.187h3.761Z"/></svg>',
 
-  // 以下 4 个运行时无官方 simple-icons 品牌标志，使用风格一致的自绘描边图标
+  // 以下 6 个运行时无官方 simple-icons 品牌标志，使用风格一致的自绘描边图标
   ftp: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M12 10v7m0-7l-2.5 2.5M12 10l2.5 2.5"/></svg>',
   memcached: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/></svg>',
   mailpit: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></svg>',
   frp: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8 7l8 9"/></svg>',
+  traefik: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v4.3M12 17.2v4.3M2.5 12h4.3M17.2 12h4.3"/><path d="M5.2 5.2l2.6 2.6M16.2 16.2l2.6 2.6M18.8 5.2l-2.6 2.6M7.8 16.2l-2.6 2.6"/></svg>',
+  mkcert: '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 2l8 3v6c0 5-3.5 8.5-8 11-4.5-2.5-8-6-8-11V5z"/><path d="M9 12l2 2 4-4"/></svg>',
 }
 function avatarIcon(id: string): string {
   return RUNTIME_ICONS[id] || `<span style="font-size:13px">${(id[0] || '?').toUpperCase()}</span>`
@@ -233,8 +248,11 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'node', name: 'Node.js', group: 'language', hasService: false },
   { id: 'php', name: 'PHP', group: 'language', hasService: false },
   { id: 'go', name: 'Go', group: 'language', hasService: false },
+  { id: 'bun', name: 'Bun', group: 'language', hasService: false },
+  { id: 'erlang', name: 'Erlang', group: 'language', hasService: false },
   { id: 'nginx', name: 'Nginx', group: 'webserver', hasService: true },
   { id: 'caddy', name: 'Caddy', group: 'webserver', hasService: true },
+  { id: 'traefik', name: 'Traefik', group: 'webserver', hasService: true },
   { id: 'redis', name: 'Redis', group: 'storage', hasService: true },
   { id: 'memcached', name: 'Memcached', group: 'storage', hasService: true },
   { id: 'mariadb', name: 'MariaDB', group: 'database', hasService: true },
@@ -242,11 +260,14 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'postgresql', name: 'PostgreSQL', group: 'database', hasService: true },
   { id: 'mongodb', name: 'MongoDB', group: 'database', hasService: true },
   { id: 'minio', name: 'MinIO', group: 'storage', hasService: true },
+  { id: 'rabbitmq', name: 'RabbitMQ', group: 'storage', hasService: true },
   { id: 'git', name: 'Git', group: 'tool', hasService: false },
   { id: 'composer', name: 'Composer', group: 'tool', hasService: false },
   { id: 'ffmpeg', name: 'FFmpeg', group: 'tool', hasService: false },
   { id: 'mailpit', name: 'Mailpit', group: 'tool', hasService: true },
   { id: 'frpc', name: 'frpc', group: 'tool', hasService: false },
+  { id: 'gh', name: 'GitHub CLI', group: 'tool', hasService: false },
+  { id: 'mkcert', name: 'mkcert', group: 'tool', hasService: false },
   { id: 'python', name: 'Python', group: 'language', hasService: false },
   { id: 'apache', name: 'Apache', group: 'webserver', hasService: true },
   { id: 'ftp', name: 'FTP', group: 'webserver', hasService: true },
@@ -458,7 +479,13 @@ async function toggleEnvVar(r: RuntimeInfo, ins: Install) {
 // 操作列下拉菜单（设置别名 / 删除 收纳于此）
 const openMenu = ref<string | null>(null)
 function toggleMenu(v: string) {
-  openMenu.value = openMenu.value === v ? null : v
+  const willOpen = openMenu.value !== v
+  openMenu.value = willOpen ? v : null
+  // 展开 RabbitMQ 操作菜单时，拉取管理后台启用状态以决定显示「启用/关闭」
+  if (willOpen && selected.value?.id === 'rabbitmq') {
+    const ins = selected.value.installed.find(i => i.version === v)
+    if (ins) fetchMgmt(ins.version)
+  }
 }
 
 // 删除确认弹窗（替换原生 confirm，统一风格）
@@ -1121,6 +1148,53 @@ async function stopService(r: RuntimeInfo) {
   }
 }
 
+// 启用 RabbitMQ 管理后台插件（rabbitmq_management，端口 15672），针对运行中的节点在线启用。
+const mgmtEnabling = ref(false)
+// rabbitMgmt[version] = 管理后台是否已启用（决定是否显示「启用/关闭」以及端口是否显示两个）
+const rabbitMgmt = reactive<Record<string, boolean>>({})
+async function fetchMgmt(version: string) {
+  try {
+    rabbitMgmt[version] = !!unwrap<boolean>(await EnvRabbitMQIsMgmtEnabled(version))
+  } catch {
+    rabbitMgmt[version] = false
+  }
+}
+async function enableRabbitMgmt(r: RuntimeInfo, ins: Install) {
+  if (mgmtEnabling.value) return
+  mgmtEnabling.value = true
+  try {
+    const out = unwrap(await EnvRabbitMQEnableMgmt(ins.version))
+    toast.success(t('rabbitmqEnableMgmtDone'))
+    if (out) console.log('[RabbitMQ mgmt]', out)
+    rabbitMgmt[ins.version] = true
+    pollStatus()
+  } catch (e: any) {
+    toast.error(t('rabbitmqEnableMgmtFail') + ': ' + getErrorMessage(e))
+  } finally {
+    mgmtEnabling.value = false
+  }
+}
+async function disableRabbitMgmt(r: RuntimeInfo, ins: Install) {
+  if (mgmtEnabling.value) return
+  mgmtEnabling.value = true
+  try {
+    const out = unwrap(await EnvRabbitMQDisableMgmt(ins.version))
+    toast.success(t('rabbitmqDisableMgmtDone'))
+    if (out) console.log('[RabbitMQ mgmt]', out)
+    rabbitMgmt[ins.version] = false
+    pollStatus()
+  } catch (e: any) {
+    toast.error(t('rabbitmqDisableMgmtFail') + ': ' + getErrorMessage(e))
+  } finally {
+    mgmtEnabling.value = false
+  }
+}
+// 根据当前启用状态切换：已启用→关闭；未启用→启用
+async function toggleRabbitMgmt(r: RuntimeInfo, ins: Install) {
+  if (rabbitMgmt[ins.version]) await disableRabbitMgmt(r, ins)
+  else await enableRabbitMgmt(r, ins)
+}
+
 let off: (() => void) | null = null
 let offRefreshed: (() => void) | null = null
 let timer: number | null = null
@@ -1394,7 +1468,11 @@ const s = currentRuntimeState
                   @click="startService(selected, ins.version)"
                 >{{ t('svcStart') }}</button>
                 <button v-else class="svc-btn stop" @click="stopService(selected)">{{ t('svcStop') }}</button>
-                <span v-if="svcPort(selected, ins.version)" class="svc-port">{{ t('svcPort') }}: {{ svcPort(selected, ins.version) }}</span>
+                <span v-if="svcPort(selected, ins.version)" class="svc-port">
+                  {{ t('svcPort') }}:
+                  <template v-if="selected.id === 'rabbitmq' && rabbitMgmt[ins.version]">5672 / 15672</template>
+                  <template v-else>{{ svcPort(selected, ins.version) }}</template>
+                </span>
               </div>
               <div class="col-ops">
                 <button class="op-btn menu-trigger" @click.stop="toggleMenu(ins.version)">
@@ -1424,6 +1502,12 @@ const s = currentRuntimeState
                   <template v-if="configSupported && ins.scope !== 'system'">
                     <div class="op-sep"></div>
                     <button class="op-item" @click="openConfig(selected, ins); openMenu = null">{{ t('editConfig') }}</button>
+                  </template>
+                  <template v-if="selected.id === 'rabbitmq' && ins.scope !== 'system'">
+                    <div class="op-sep"></div>
+                    <button class="op-item" :disabled="mgmtEnabling" @click="toggleRabbitMgmt(selected, ins); openMenu = null">
+                      {{ mgmtEnabling ? '…' : (rabbitMgmt[ins.version] ? t('rabbitmqDisableMgmt') : t('rabbitmqEnableMgmt')) }}
+                    </button>
                   </template>
                   <div class="op-sep"></div>
                   <button class="op-item danger" :disabled="ins.scope === 'system'" @click="askDelete(selected, ins)">
@@ -2004,7 +2088,7 @@ const s = currentRuntimeState
 .menu-trigger { display: inline-flex; align-items: center; gap: 4px; }
 .caret { font-size: 9px; opacity: 0.7; }
 .op-menu {
-  position: absolute; z-index: 30; min-width: 132px;
+  position: absolute; z-index: 30; min-width: 160px;
   background: var(--color-surface); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); padding: 4px; margin-top: 4px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);

@@ -155,23 +155,30 @@ func clampWinPos(app *application.App, x, y, w, h int) (int, int) {
 
 // saveAllFloatingPositions 退出前统一保存三个浮窗的当前位置（未创建则跳过）。
 func saveAllFloatingPositions() {
+	// 构造 entry 切片前先各自持锁读取全局窗口指针：直接在切片字面量里读 clipboardWin 等全局变量
+	// 未持锁，会与窗口创建/销毁 goroutine 的写发生 data race（指针读/写非原子）。
+	clipboardWinLock.Lock()
+	clipboardW := clipboardWin
+	clipboardWinLock.Unlock()
+	paletteWinLock.Lock()
+	paletteW := paletteWin
+	paletteWinLock.Unlock()
+	noteWinLock.Lock()
+	noteW := noteWin
+	noteWinLock.Unlock()
 	type entry struct {
 		key string
-		mu  *sync.Mutex
 		w   *application.WebviewWindow
 	}
 	for _, e := range []entry{
-		{"clipboard", &clipboardWinLock, clipboardWin},
-		{"palette", &paletteWinLock, paletteWin},
-		{"note", &noteWinLock, noteWin},
+		{"clipboard", clipboardW},
+		{"palette", paletteW},
+		{"note", noteW},
 	} {
-		e.mu.Lock()
-		w := e.w
-		e.mu.Unlock()
-		if w == nil {
+		if e.w == nil {
 			continue
 		}
-		x, y := w.Position()
+		x, y := e.w.Position()
 		saveWinPos(e.key, x, y)
 	}
 }

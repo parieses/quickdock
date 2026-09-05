@@ -6,13 +6,13 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Copy, FolderSearch, Play, ClipboardPaste, Save
+  Copy, FolderSearch, Play, ClipboardPaste, Save, Gauge
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer, EnablePlugin, GetPathQuickInfo, GetPluginNewFlags, MarkPluginSeen } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, ListPlugins, ExecutePluginCommand, SetPendingPluginInit, ShowPluginWindow, GetAllUsage, SaveUrlAsItem, CopyText, GetPluginIcon, DeleteItem, DeleteSnippet, RevealInExplorer, EnablePlugin, GetPathQuickInfo, GetPluginNewFlags, MarkPluginSeen, EnvList, EnvStatus, EnvStart, EnvStop, EnvRabbitMQEnableMgmt, EnvRabbitMQDisableMgmt, EnvRabbitMQIsMgmtEnabled } from '../../bindings/quickdock/services/appservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import type { CollectionItem, PluginInfo } from '../types'
+import type { CollectionItem, PluginInfo, EnvRuntimeInfo, EnvServiceStatus } from '../types'
 import type { ToastAPI } from '../types'
 import { evaluate, format, convertExpression } from '../utils/calc'
 import { commandTitle } from '../utils/localize'
@@ -168,7 +168,7 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
 ]
 
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env'
 interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
 interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
 interface CmdSnippet { id: string; keyword: string; content: string; category: string; createdAt: string }
@@ -176,7 +176,8 @@ interface SearchResult {
   type: ResultType; label: string; desc?: string; icon?: any; iconBase64?: string
   item?: CollectionItem; cmd?: SystemCmd; calcResult?: string; snippet?: CmdSnippet; inlineQuery?: string
   frecencyScore?: number; appPath?: string; appCategory?: string; pluginId?: string; pluginCommandId?: string
-  pluginHasFrontend?: boolean; inlineInput?: string; pluginResult?: string; score?: number; matchType?: string; url?: string; clipAction?: string; acceptsInput?: boolean
+  pluginHasFrontend?: boolean; pluginNotRunning?: boolean; inlineInput?: string; pluginResult?: string; score?: number; matchType?: string; url?: string; clipAction?: string; acceptsInput?: boolean
+  envRuntimeId?: string; envVersion?: string; envAction?: 'start' | 'stop' | 'mgmt'
 }
 
 // ---- 状态 ----
@@ -300,6 +301,85 @@ function getAppAliases(name: string): string[] {
 }
 
 // ---- 搜索结果（useCommandSearch）----
+// ---- 环境管理运行时服务（Ctrl+K 直控启停 / 管理后台）----
+// 注意：ref 声明须早于下方 useCommandSearch 调用（其依赖这两个 ref）。
+const envRuntimes = ref<EnvRuntimeInfo[]>([])
+const envStatuses = ref<Record<string, EnvServiceStatus>>({})
+const envMgmt = ref<Record<string, boolean>>({}) // RabbitMQ 版本 → 管理后台是否启用
+let envPollGen = 0
+const envKeyOf = (id: string, v: string) => id + ':' + v
+
+async function loadEnvList() {
+  try {
+    const list = unwrap<EnvRuntimeInfo[]>(await EnvList())
+    envRuntimes.value = list || []
+  } catch (e) { console.error('[CmdPalette] EnvList:', e) }
+}
+
+// 轮询各服务运行时的安装版本状态，写入 envStatuses（key = runtimeId:version）；
+// 对 RabbitMQ 各版本额外查询管理后台启用状态，写入 envMgmt。
+async function pollEnvStatus() {
+  const gen = ++envPollGen
+  const next: Record<string, EnvServiceStatus> = {}
+  const nextMgmt: Record<string, boolean> = {}
+  for (const r of envRuntimes.value) {
+    if (!r.hasService || r.installed.length === 0) continue
+    for (const ins of r.installed) {
+      if (ins.scope === 'linked' && r.id !== 'php') continue
+      try {
+        const st = unwrap<EnvServiceStatus>(await EnvStatus(r.id, ins.version))
+        if (st) next[envKeyOf(r.id, ins.version)] = st
+      } catch { /* 单次失败忽略 */ }
+      if (r.id === 'rabbitmq') {
+        try {
+          nextMgmt[ins.version] = !!unwrap<boolean>(await EnvRabbitMQIsMgmtEnabled(ins.version))
+        } catch { /* 单次失败忽略 */ }
+      }
+    }
+  }
+  if (gen === envPollGen) {
+    envStatuses.value = next
+    envMgmt.value = nextMgmt
+  }
+}
+
+// 拉取列表 + 轮询状态（面板唤起时调用）
+async function refreshEnv() {
+  await loadEnvList()
+  await pollEnvStatus().catch(() => {})
+}
+
+async function executeEnvAction(r: SearchResult) {
+  if (!r.envRuntimeId || !r.envAction) return
+  try {
+    if (r.envAction === 'start') {
+      unwrap(await EnvStart(r.envRuntimeId, r.envVersion || ''))
+      toast?.success?.(t('envStarted') + ' ' + r.label)
+    } else if (r.envAction === 'stop') {
+      unwrap(await EnvStop(r.envRuntimeId))
+      toast?.success?.(t('envStopped') + ' ' + r.label)
+    } else if (r.envAction === 'mgmt') {
+      const ver = r.envVersion || ''
+      // 依据当前启用状态切换：已启用→关闭，未启用→启用
+      if (envMgmt.value[ver] === true) {
+        const out = unwrap(await EnvRabbitMQDisableMgmt(ver))
+        toast?.success?.(t('rabbitmqDisableMgmtDone'))
+        if (out) console.log('[RabbitMQ mgmt]', out)
+      } else {
+        const out = unwrap(await EnvRabbitMQEnableMgmt(ver))
+        toast?.success?.(t('envMgmtEnabled'))
+        if (out) console.log('[RabbitMQ mgmt]', out)
+      }
+    }
+    // 执行后重轮询状态，让结果即时翻转为相反动作（启动→停止），不关闭面板便于连续控制
+    await pollEnvStatus().catch(() => {})
+    setTimeout(() => pollEnvStatus().catch(() => {}), 1500)
+  } catch (e: any) {
+    const msg = r.envAction === 'mgmt' ? (t('envMgmtFailed') + ': ' + getErrorMessage(e)) : getErrorMessage(e)
+    toast?.error?.(msg)
+  }
+}
+
 const {
   groupedResults, allResults, recentResults, displayGroups, displayFlat,
   previewResult, recentCache, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
@@ -308,6 +388,7 @@ const {
   pluginCmdIndex, clipboardUrlSource,
   frecencyScore, frecencyTick, calcPluginScore,
   pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons,
+  envRuntimes, envStatuses, envMgmt,
 })
 
 // ---- QuickLook 详情预览（选中即自动展示，无需按键）----
@@ -578,6 +659,8 @@ async function executeSelected() {
   } else if (result.type === 'app' && result.appPath) {
     recordUsage('app:' + result.label, 'app', result.label, result.desc)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }; closePalette()
+  } else if (result.type === 'env') {
+    await executeEnvAction(result)
   } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
     markPluginSeen(result.pluginId)
     // 插件未运行时先自动拉起（EnablePlugin = Reload 加载 + DB 置启用）：
@@ -739,12 +822,14 @@ const contextActions = computed<PaletteAction[]>(() => {
 
   // 主操作（等价于直接回车）
   const primaryLabel =
-    r.type === 'app' ? t('actLaunch')
-      : r.type === 'snippet' ? t('actPasteSnippet')
-        : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
-          : r.type === 'calculator' ? t('actCopyResult')
-            : t('actOpen')
-  const primaryIcon = r.type === 'snippet' ? ClipboardPaste : r.type === 'calculator' ? Copy : Play
+    r.type === 'env' ? (r.envAction === 'stop' ? t('envStop') : r.envAction === 'mgmt' ? t('envEnableMgmt') : t('envStart'))
+      : r.type === 'app' ? t('actLaunch')
+        : r.type === 'snippet' ? t('actPasteSnippet')
+          : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
+            : r.type === 'calculator' ? t('actCopyResult')
+              : t('actOpen')
+  const primaryIcon = r.type === 'env' ? (r.envAction === 'stop' ? Power : r.envAction === 'mgmt' ? Gauge : Play)
+    : r.type === 'snippet' ? ClipboardPaste : r.type === 'calculator' ? Copy : Play
   acts.push({ id: 'primary', label: primaryLabel, icon: primaryIcon, run: () => executeSelected() })
 
   if (r.label) acts.push({ id: 'copy-name', label: t('actCopyName'), icon: Copy, run: () => copyAndClose(r.label) })
@@ -926,6 +1011,8 @@ onMounted(async () => {
   Events.On('palette:shown', () => {
     loadPluginIndex()
     loadPluginNewFlags().catch(() => {})
+    // 面板唤起即拉取环境运行时列表 + 服务状态，供 Ctrl+K 直控启停（独立于内联插件页，提前拉取）
+    refreshEnv().catch(e => console.warn('[CmdPalette] refreshEnv:', e))
     // 核心修复：若隐藏前仍停留在内联插件页，重开时保持插件页（「临时收起」而非「主动退出」）。
     // 只有当用户点「返回」/ Esc 触发 closeInlinePlugin 清空 inlinePluginId 后，重开才回到输入框。
     if (inlinePluginId.value) {

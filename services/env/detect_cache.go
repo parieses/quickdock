@@ -32,10 +32,22 @@ func (m *Manager) loadDetected() {
 	}
 }
 
+// snapshotDetectedLocked 在调用方已持有 detectMu（读或写）时返回缓存的深拷贝：
+// map 与每个版本的切片都不与 live 数据共享底层数组，使解锁后序列化不再触碰 live map，
+// 避免与 RefreshDetected/RefreshAllAsync 的写入并发触发 concurrent map read and map write
+// （该 panic 是 runtime fatal error，不可 recover）。
+func (m *Manager) snapshotDetectedLocked() map[Runtime][]Install {
+	out := make(map[Runtime][]Install, len(m.detectCache))
+	for rt, ins := range m.detectCache {
+		out[rt] = append([]Install(nil), ins...)
+	}
+	return out
+}
+
 // saveDetected 将检测结果缓存持久化到磁盘
 func (m *Manager) saveDetected() {
 	m.detectMu.RLock()
-	tmp := m.detectCache
+	tmp := m.snapshotDetectedLocked()
 	m.detectMu.RUnlock()
 	data, err := json.MarshalIndent(tmp, "", "  ")
 	if err != nil {

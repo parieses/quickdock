@@ -252,7 +252,13 @@ func ResetAppsCache() {
 	appsCache = nil
 }
 
-// LaunchApp 通过 ShellExecute 启动应用
+// LaunchApp 启动应用。
+// 关键修复：Ctrl+K 启动的「已安装应用」原先直接走 windows.ShellExecute，
+// 子进程未脱离 QuickDock 进程组，主程序重启/退出时会被一并带走
+// （与 services/app 下 item.go 的 startDetached 注释描述的现象一致）。
+// 现改为：.lnk 先解析为真实 exe+参数+工作目录，.exe 直接启动，两者均用
+// CreateProcess 并套 sysutil.Detach（DETACHED_PROCESS），使第三方软件
+// 在主程序退出后继续存活；COM 不可用/CreateProcess 失败时回退 ShellExecute。
 func LaunchApp(appPath string) error {
 	if appPath == "" {
 		return fmt.Errorf("应用路径不能为空")
@@ -268,8 +274,38 @@ func LaunchApp(appPath string) error {
 	if _, err := os.Stat(appPath); err != nil {
 		return fmt.Errorf("应用路径不存在: %s", appPath)
 	}
+
+	ext := strings.ToLower(filepath.Ext(appPath))
+	switch ext {
+	case ".lnk":
+		// 解析快捷方式 → 真实 exe + 参数 + 工作目录，脱离父进程组启动
+		if target, args, wd, err := ResolveLink(appPath); err == nil && target != "" {
+			if startErr := startResolved(target, args, wd); startErr == nil {
+				return nil
+			} else {
+				logger.W("QuickDock: 解析启动失败，回退 ShellExecute: %v", startErr)
+			}
+		} else if err != nil {
+			logger.W("QuickDock: 解析 .lnk 失败，回退 ShellExecute: %v", err)
+		}
+		return shellExecOpen(appPath)
+	case ".exe":
+		if err := startResolved(appPath, "", ""); err == nil {
+			return nil
+		} else {
+			logger.W("QuickDock: 直接启动失败，回退 ShellExecute: %v", err)
+			return shellExecOpen(appPath)
+		}
+	default:
+		// .msc/.bat/.cmd 等需关联程序启动，走 ShellExecute
+		return shellExecOpen(appPath)
+	}
+}
+
+// shellExecOpen 用 ShellExecute("open") 打开任意路径（解析/直启失败时的回退）。
+func shellExecOpen(path string) error {
 	return windows.ShellExecute(0,
 		windows.StringToUTF16Ptr("open"),
-		windows.StringToUTF16Ptr(appPath),
+		windows.StringToUTF16Ptr(path),
 		nil, nil, windows.SW_SHOWNORMAL)
 }

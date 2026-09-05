@@ -314,6 +314,18 @@ export default {
   envVarUnset: 'Unset',
   envVarSetTitle: "This version's bin directory is in the system PATH (HKCU); new terminals can call it directly.",
   envVarUnsetTitle: "This version's bin directory is NOT in the system PATH. Click \"Set env vars\" to register it.",
+  // Ctrl+K environment service control
+  cmdGroupEnv: 'Environment Services',
+  envStart: 'Start',
+  envStop: 'Stop',
+  envEnableMgmt: 'Enable Management',
+  envRunning: 'Running',
+  envNotRunning: 'Not running',
+  envStarted: 'Started',
+  envStopped: 'Stopped',
+  envMgmtEnabled: 'Management enabled',
+  envMgmtFailed: 'Failed to enable management',
+
   setEnvVar: 'Set env vars',
   unsetEnvVar: 'Unset env vars',
   setAlias: 'Set alias',
@@ -332,6 +344,14 @@ export default {
   pathClose: 'Close',
   confirmDeleteTitle: 'Delete version',
   operations: 'Actions',
+  // RabbitMQ management UI
+  rabbitmqEnableMgmt: 'Enable Management',
+  rabbitmqEnableMgmtDone: 'Management enabled. Open http://127.0.0.1:15672/ (default guest/guest)',
+  rabbitmqEnableMgmtFail: 'Enable failed',
+  rabbitmqDisableMgmt: 'Disable Management',
+  rabbitmqDisableMgmtDone: 'Management disabled. 15672 no longer listening',
+  rabbitmqDisableMgmtFail: 'Disable failed',
+  rabbitmqMgmtHint: 'Management plugin not enabled. Click "Actions → Enable Management" to access 15672',
   // Environment groups
   groupLanguage: 'Languages',
   groupWebserver: 'Web Servers',

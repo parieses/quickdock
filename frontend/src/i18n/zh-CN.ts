@@ -314,6 +314,18 @@ export default {
   envVarUnset: '未设置',
   envVarSetTitle: '该版本的 bin 目录已在系统 PATH（HKCU）中，新开的终端可直接调用。',
   envVarUnsetTitle: '该版本的 bin 目录不在系统 PATH 中；点右侧「设置环境变量」可注册到系统。',
+  // Ctrl+K 环境服务直控
+  cmdGroupEnv: '环境服务',
+  envStart: '启动',
+  envStop: '停止',
+  envEnableMgmt: '启用管理后台',
+  envRunning: '运行中',
+  envNotRunning: '未运行',
+  envStarted: '已启动',
+  envStopped: '已停止',
+  envMgmtEnabled: '管理后台已启用',
+  envMgmtFailed: '启用管理后台失败',
+
   setEnvVar: '设置环境变量',
   unsetEnvVar: '取消环境变量',
   setAlias: '设置别名',
@@ -332,6 +344,14 @@ export default {
   pathClose: '关闭',
   confirmDeleteTitle: '删除版本',
   operations: '操作',
+  // RabbitMQ 管理后台
+  rabbitmqEnableMgmt: '启用管理后台',
+  rabbitmqEnableMgmtDone: '管理后台已启用，浏览器访问 http://127.0.0.1:15672/（默认 guest/guest）',
+  rabbitmqEnableMgmtFail: '启用失败',
+  rabbitmqDisableMgmt: '关闭管理后台',
+  rabbitmqDisableMgmtDone: '管理后台已关闭，15672 不再监听',
+  rabbitmqDisableMgmtFail: '关闭失败',
+  rabbitmqMgmtHint: '未启用管理后台插件，点击「操作 → 启用管理后台」后即可访问 15672',
   // 环境管理分组
   groupLanguage: '语言',
   groupWebserver: 'Web 服务器',

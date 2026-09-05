@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"unsafe"
 
@@ -96,7 +97,7 @@ type ConPty struct {
 	proc     windows.Handle
 	pid      int
 	attrList []byte
-	closed   bool
+	closed   atomic.Bool
 	// ptyOnce 保证伪控制台只关闭一次：重复 ClosePseudoConsole 会损坏堆（实测 0xC0000374）。
 	ptyOnce   sync.Once
 	closeOnce sync.Once
@@ -238,7 +239,7 @@ func (c *ConPty) Pid() int { return c.pid }
 
 // Read 读取伪控制台的合并输出（stdout+stderr）。伪控制台关闭后返回 io.EOF。
 func (c *ConPty) Read(p []byte) (int, error) {
-	if c.closed {
+	if c.closed.Load() {
 		return 0, io.EOF
 	}
 	var done uint32
@@ -305,7 +306,7 @@ func (c *ConPty) ClosePty() {
 // 前置条件：读取端已结束（Read 返回 EOF），否则不得关闭仍阻塞在 Read 上的句柄。
 func (c *ConPty) Close() {
 	c.closeOnce.Do(func() {
-		c.closed = true
+		c.closed.Store(true)
 		c.ClosePty()
 		windows.CloseHandle(c.inW)
 		windows.CloseHandle(c.outR)

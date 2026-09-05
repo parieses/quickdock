@@ -45,6 +45,16 @@ const (
 	RuntimeMinIO      Runtime = "minio"
 	RuntimeFrpc       Runtime = "frpc"
 	RuntimeFTP        Runtime = "ftp"
+
+	// 第三批扩展运行时（2026-09-05）：GitHub CLI / Bun / Traefik / mkcert / RabbitMQ
+	RuntimeGh       Runtime = "gh"
+	RuntimeBun      Runtime = "bun"
+	RuntimeTraefik  Runtime = "traefik"
+	RuntimeMkcert   Runtime = "mkcert"
+	RuntimeRabbitMQ Runtime = "rabbitmq"
+
+	// Erlang：底层语言运行时（被 RabbitMQ 等依赖），作为「语言」分组里的独立可管理运行时。
+	RuntimeErlang Runtime = "erlang"
 )
 
 // 环境管理分组（侧边栏按组归类：语言 / Web 服务器 / 缓存与存储 / 工具 / 数据库）
@@ -166,7 +176,32 @@ var (
 	RuntimeFTP: {display: "FTP", group: GroupWebServer, versions: []string{"0.96"}, sources: []Source{
 		{ID: "ftpdmin", Name: "FTPDMIN (Sentex)", Build: ftpURL("https://www.sentex.net/~mwandel/ftpdmin/ftpdmin.exe")},
 	}},
-	}
+	// GitHub CLI (gh)：官方命令行工具，单文件 zip 内 gh.exe。无服务、无配置、无导入（DetectArgs 返回空 → 不可导入系统 exe）。
+	RuntimeGh: {display: "GitHub CLI", group: GroupTool, versions: []string{"2.100.0", "2.99.0", "2.98.0"}, versURL: "https://api.github.com/repos/cli/cli/releases?per_page=100", versParse: parseGhVersions, fallbackHTMLURL: "https://github.com/cli/cli/releases", sources: []Source{
+		{ID: "cli", Name: "cli/cli (GitHub)", Build: ghURL("https://github.com/cli/cli/releases/download/v{version}/gh_{version}_windows_amd64.zip")},
+	}},
+	// Bun：新兴 JS/TS 运行时（oven-sh/bun）。多版本并存，bun-windows-x64.zip 内含 bun.exe。无服务。
+	RuntimeBun: {display: "Bun", group: GroupLanguage, versions: []string{"1.4.1", "1.3.0", "1.2.0"}, versURL: "https://api.github.com/repos/oven-sh/bun/releases?per_page=100", versParse: parseBunVersions, fallbackHTMLURL: "https://github.com/oven-sh/bun/releases", sources: []Source{
+		{ID: "oven", Name: "oven-sh/bun (GitHub)", Build: bunURL("https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-windows-x64.zip")},
+	}},
+	// Traefik：Go 编写的边缘路由器，单文件 traefik.exe。服务型（serve），支持配置校验（validate --configFile）。
+	RuntimeTraefik: {display: "Traefik", group: GroupWebServer, versions: []string{"3.7.13", "3.6.4", "3.5.2"}, versURL: "https://api.github.com/repos/traefik/traefik/releases?per_page=100", versParse: parseTraefikVersions, fallbackHTMLURL: "https://github.com/traefik/traefik/releases", sources: []Source{
+		{ID: "traefik", Name: "traefik/traefik (GitHub)", Build: traefikURL("https://github.com/traefik/traefik/releases/download/v{version}/traefik_v{version}_windows_amd64.zip")},
+	}},
+	// mkcert：本地 HTTPS 自签名证书工具（FiloSottile/mkcert），单文件 exe（非 zip）。无服务、无配置。
+	RuntimeMkcert: {display: "mkcert", group: GroupTool, versions: []string{"1.4.4", "1.4.3"}, versURL: "https://api.github.com/repos/FiloSottile/mkcert/releases?per_page=100", versParse: parseMkcertVersions, fallbackHTMLURL: "https://github.com/FiloSottile/mkcert/releases", sources: []Source{
+		{ID: "mkcert", Name: "FiloSottile/mkcert (GitHub)", Build: mkcertURL("https://github.com/FiloSottile/mkcert/releases/download/v{version}/mkcert-v{version}-windows-amd64.exe")},
+	}},
+	// RabbitMQ：Erlang 消息代理（rabbitmq-server-windows 自带 Erlang 运行时，无需单独安装）。服务型（sbin/rabbitmq-server.bat）。
+	RuntimeRabbitMQ: {display: "RabbitMQ", group: GroupStorage, versions: []string{"4.3.5", "4.2.0", "3.13.7"}, versURL: "https://api.github.com/repos/rabbitmq/rabbitmq-server/releases?per_page=100", versParse: parseRabbitVersions, fallbackHTMLURL: "https://github.com/rabbitmq/rabbitmq-server/releases", sources: []Source{
+		{ID: "rabbitmq", Name: "rabbitmq/rabbitmq-server (GitHub)", Build: rabbitURL("https://github.com/rabbitmq/rabbitmq-server/releases/download/v{version}/rabbitmq-server-windows-{version}.zip")},
+	}},
+	// Erlang：底层语言运行时，多版本并存（erlang/otp 官方 GitHub 发布的 Windows 便携 zip）。
+	// 被 RabbitMQ 安装/启动时复用：RabbitMQ 优先复用本运行时已安装的 Erlang（或系统 ERLANG_HOME/PATH）。
+	RuntimeErlang: {display: "Erlang", group: GroupLanguage, versions: []string{"27.3.4", "26.2.5", "25.3.2.9"}, versURL: "https://api.github.com/repos/erlang/otp/releases?per_page=100", versParse: parseErlangVersions, fallbackHTMLURL: "https://github.com/erlang/otp/releases", sources: []Source{
+		{ID: "erlang", Name: "erlang/otp (GitHub)", Build: erlangURL("https://github.com/erlang/otp/releases/download/OTP-{version}/otp_win64_{version}.zip")},
+	}},
+}
 
 	activeMu     sync.RWMutex
 	activeSource = map[Runtime]string{} // 用户选定的活跃源（优先尝试）
@@ -458,6 +493,58 @@ func frpcURL(tmpl string) func(version, goos, arch string) string {
 // ftpURL 构造 FTPDMIN 的下载地址。FTPDMIN 为单文件 exe（无版本路径），模板忽略 {version}；
 // 仅 Windows 提供（GUI 桌面发行）。非 Windows 返回空。
 func ftpURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// ghURL / bunURL / traefikURL / mkcertURL / rabbitURL 均为 Windows 桌面发行包（便携 zip 或单 exe），非 Windows 返回空。
+func ghURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+func bunURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+func traefikURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+func mkcertURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+func rabbitURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// erlangURL 构造 Erlang/OTP 官方 Windows 便携 zip 地址（otp_win64_X.Y.Z.zip），仅 Windows。
+func erlangURL(tmpl string) func(version, goos, arch string) string {
 	return func(version, goos, arch string) string {
 		if goos != "windows" {
 			return ""
@@ -933,6 +1020,18 @@ func parseFrpcVersions(body []byte) []string { return parseTagVersions(body, "v"
 
 // parseFrpcVersionsHTML 从 GitHub Releases 页面 HTML 提取版本号（API 限流/不可用时兜底）。
 func parseFrpcVersionsHTML(body []byte) []string { return parseReleasesTagVersionsHTML(body) }
+
+// parseBunVersions 从 oven-sh/bun GitHub Releases 解析 tag_name（如 "bun-v1.4.1"），去掉前缀 "bun-v"。
+func parseBunVersions(body []byte) []string { return parseTagVersions(body, "bun-v") }
+
+// GitHub Releases 标签形如 "vX.Y.Z" 的运行时，统一委托（前缀 "v"）。
+func parseGhVersions(body []byte) []string       { return parseTagVersions(body, "v") }
+func parseTraefikVersions(body []byte) []string { return parseTagVersions(body, "v") }
+func parseMkcertVersions(body []byte) []string  { return parseTagVersions(body, "v") }
+func parseRabbitVersions(body []byte) []string  { return parseTagVersions(body, "v") }
+
+// parseErlangVersions 从 erlang/otp GitHub Releases 解析 tag_name（如 "OTP-27.3.4"），去掉前缀 "OTP-"。
+func parseErlangVersions(body []byte) []string { return parseTagVersions(body, "OTP-") }
 
 // sortVersionsDesc 按语义版本号降序排序（仅比较 major.minor.patch，忽略预发布）。
 func sortVersionsDesc(vs []string) []string {

@@ -5,10 +5,39 @@ import type { PluginCmdIndex } from './usePluginIndex'
 import { commandTitle, pluginName } from '../utils/localize'
 import { getPluginLastResult } from '../utils/pluginLastResult'
 import { evaluate, format, convertExpression } from '../utils/calc'
-import { Puzzle } from '@lucide/vue'
+import { Puzzle, Play, Power, Gauge } from '@lucide/vue'
+import type { EnvRuntimeInfo, EnvServiceStatus } from '../types'
+
+// 运行时的中文分类别名，用于 Ctrl+K 中文检索（如「数据库」「缓存」「消息队列」）。
+const ENV_GROUP_ALIASES: Record<string, string[]> = {
+  language: ['语言', '运行时', 'runtime', '开发'],
+  webserver: ['网页', 'web', 'web服务器', '服务器', '反向代理', '网关'],
+  cache: ['缓存', 'cache', '内存'],
+  database: ['数据库', 'database', 'db'],
+  tool: ['工具', 'tool', '实用'],
+  messagequeue: ['消息', '队列', 'mq', '消息队列'],
+}
+// 各运行时的中文/语义别名，补充英文 id/name 之外的检索入口。
+const ENV_RUNTIME_ALIASES: Record<string, string[]> = {
+  redis: ['缓存', 'redis', '内存数据库'],
+  memcached: ['缓存', 'memcache'],
+  nginx: ['网页', '反向代理', 'nginx', 'web服务器'],
+  caddy: ['网页', '反向代理', 'caddy'],
+  traefik: ['网页', '反向代理', '网关', 'traefik'],
+  apache: ['网页', 'apache', 'web服务器'],
+  postgresql: ['数据库', 'postgres', 'pg'],
+  mysql: ['数据库', 'mysql'],
+  mariadb: ['数据库', 'mariadb'],
+  mongodb: ['数据库', '文档数据库', 'mongo'],
+  rabbitmq: ['消息', '队列', 'mq', '消息队列', 'rabbit'],
+  minio: ['对象存储', '存储', 'minio', 's3'],
+  mailpit: ['邮件', 'mail', '邮件服务'],
+  frpc: ['内网穿透', '穿透', 'frp'],
+  ftp: ['ftp', '文件服务'],
+}
 
 // ---- Types ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env'
 
 export interface SearchResult {
   type: ResultType
@@ -35,6 +64,10 @@ export interface SearchResult {
   matchType?: string
   url?: string
   clipAction?: string
+  // 环境管理运行时服务（Ctrl+K 直控启停/管理后台）
+  envRuntimeId?: string
+  envVersion?: string
+  envAction?: 'start' | 'stop' | 'mgmt'
 }
 
 interface CmdSnippet { id: string; keyword: string; content: string; category: string; createdAt: string }
@@ -71,6 +104,9 @@ export interface SearchDeps {
   itemIcon: (item: CollectionItem) => any
   t: (key: string) => string
   pluginIcons: Ref<Record<string, string>>
+  envRuntimes: Ref<EnvRuntimeInfo[]>
+  envStatuses: Ref<Record<string, EnvServiceStatus>>
+  envMgmt: Ref<Record<string, boolean>> // RabbitMQ 各版本管理后台启用状态（version → enabled）
 }
 
 export function useCommandSearch(deps: SearchDeps) {
@@ -78,7 +114,7 @@ export function useCommandSearch(deps: SearchDeps) {
   const { items, installedApps, snippets, systemCommands, query, selectedIndex,
           pluginCmdIndex, clipboardUrlSource,
           frecencyScore, frecencyTick, calcPluginScore,
-          pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons } = deps
+          pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons, envRuntimes, envStatuses, envMgmt } = deps
 
   const recentCache = ref<RecentEntry[]>([])
 
@@ -301,6 +337,77 @@ export function useCommandSearch(deps: SearchDeps) {
       groups.push({ type: 'plugin', label: t('cmdGroupPlugins'), results: pluginResults })
     }
 
+    // 7.5 环境管理运行时服务（启动 / 停止 / 启用管理后台 15672）
+    // 仅在 query 命中时展示：避免面板一开就铺满服务项；空 query 时 groupedResults 已提前 return。
+    {
+      const envKeyOf = (id: string, v: string) => id + ':' + v
+      const statuses = envStatuses.value
+      const envResults: SearchResult[] = []
+      const startVerb = /启动|start|运行|开服|拉起/.test(qLC)
+      const stopVerb = /停止|stop|停服|关停|关掉/.test(qLC)
+      const mgmtVerb = /15672|管理后台|management|mgmt|管理面板/.test(qLC)
+      for (const r of envRuntimes.value) {
+        if (!r.hasService || r.installed.length === 0) continue
+        // 运行中的版本（按已装版本逐一比对状态）
+        const running = r.installed.find(ins => (ins.scope === 'linked' && r.id !== 'php') ? false : statuses[envKeyOf(r.id, ins.version)]?.running)
+        const runningVersion = running?.version
+        const startVersion = r.installed.find(i => i.active)?.version || r.installed[0].version
+        const nameLC = r.name.toLowerCase()
+        const idLC = r.id.toLowerCase()
+        const aliasHit = (ENV_RUNTIME_ALIASES[r.id] || []).concat(ENV_GROUP_ALIASES[r.group] || []).some(a => {
+          const aLC = a.toLowerCase()
+          return aLC.includes(qLC) || pinyinMatch(a, qLC)
+        })
+        const nameHit = nameLC.includes(qLC) || idLC.includes(qLC) || pinyinMatch(r.name, qLC) || aliasHit
+        if (!nameHit && !startVerb && !stopVerb && !mgmtVerb) continue
+
+        const baseScore = nameLC === qLC ? 100 : idLC === qLC ? 95
+          : nameLC.startsWith(qLC) ? 80 : idLC.startsWith(qLC) ? 75 : nameHit ? 60 : 50
+
+        if (!runningVersion && (nameHit || startVerb)) {
+          envResults.push({
+            type: 'env',
+            label: t('envStart') + ' ' + r.name,
+            desc: startVersion + ' · ' + t('envNotRunning'),
+            icon: Play,
+            envRuntimeId: r.id,
+            envVersion: startVersion,
+            envAction: 'start',
+            score: baseScore,
+          })
+        }
+        if (runningVersion && (nameHit || stopVerb)) {
+          envResults.push({
+            type: 'env',
+            label: t('envStop') + ' ' + r.name,
+            desc: runningVersion + ' · ' + t('envRunning'),
+            icon: Power,
+            envRuntimeId: r.id,
+            envVersion: runningVersion,
+            envAction: 'stop',
+            score: baseScore,
+          })
+        }
+        // RabbitMQ 专属：运行中对节点启用/关闭管理后台插件（rabbitmq_management，端口 15672）
+        if (r.id === 'rabbitmq' && runningVersion && (nameHit || mgmtVerb || (idLC === 'rabbitmq' && startVerb))) {
+          const mgmtOn = envMgmt.value[runningVersion] === true
+          envResults.push({
+            type: 'env',
+            label: mgmtOn ? t('rabbitmqDisableMgmt') : t('envEnableMgmt'),
+            desc: runningVersion + ' · http://127.0.0.1:15672/',
+            icon: Gauge,
+            envRuntimeId: r.id,
+            envVersion: runningVersion,
+            envAction: 'mgmt',
+            score: baseScore + 5,
+          })
+        }
+      }
+      if (envResults.length > 0) {
+        groups.push({ type: 'env', label: t('cmdGroupEnv'), results: envResults })
+      }
+    }
+
     // 剪贴板智能路由
     if (clipboardUrlSource.value && q === clipboardUrlSource.value) {
       const urlStr = clipboardUrlSource.value
@@ -344,7 +451,7 @@ export function useCommandSearch(deps: SearchDeps) {
     // 应用分组优先于其它内容分组展示（应用排在前面）
     const GROUP_PRIORITY: Record<string, number> = {
       best: 0, 'clipboard-action': 1, calculator: 2, url: 3,
-      app: 4, item: 5, 'quicklink-inline': 6, snippet: 7, system: 8, plugin: 9,
+      app: 4, item: 5, 'quicklink-inline': 6, snippet: 7, system: 8, env: 8.5, plugin: 9,
     }
     groups.sort((a, b) => (GROUP_PRIORITY[a.type] ?? 99) - (GROUP_PRIORITY[b.type] ?? 99))
 

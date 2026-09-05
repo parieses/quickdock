@@ -101,9 +101,9 @@ type Manager struct {
 }
 
 // runtimeOrder 运行时固定展示顺序
-var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeComposer,
+var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeBun, RuntimeErlang, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeTraefik, RuntimeComposer,
 	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
-	RuntimeMailpit, RuntimeMinIO, RuntimeFrpc, RuntimeFTP}
+	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeGh, RuntimeMkcert}
 
 func NewManager() *Manager {
 	m := &Manager{
@@ -128,6 +128,12 @@ func NewManager() *Manager {
 			RuntimeMinIO:     NewMinioRuntime(),
 			RuntimeFrpc:      NewFrpcRuntime(),
 			RuntimeFTP:       NewFTPRuntime(),
+			RuntimeGh:        NewGhRuntime(),
+			RuntimeBun:       NewBunRuntime(),
+			RuntimeErlang:    NewErlangRuntime(),
+			RuntimeTraefik:   NewTraefikRuntime(),
+			RuntimeMkcert:    NewMkcertRuntime(),
+			RuntimeRabbitMQ:  NewRabbitMQRuntime(),
 		},
 		links:       map[Runtime][]linkEntry{},
 		detectCache: map[Runtime][]Install{},
@@ -156,11 +162,29 @@ func (m *Manager) loadLinks() {
 	}
 }
 
+// snapshotLinksLocked 在调用方已持有 linksMu（读或写）时返回 links 的深拷贝：
+// map 与每个运行时的条目切片都不与 live 数据共享底层数组，使解锁后序列化/遍历不再触碰
+// live map，避免与持写锁的写入方（removeLink/ImportVersion）并发触发
+// concurrent map read and map write（runtime fatal error，不可 recover）。
+func (m *Manager) snapshotLinksLocked() map[Runtime][]linkEntry {
+	out := make(map[Runtime][]linkEntry, len(m.links))
+	for rt, entries := range m.links {
+		out[rt] = append([]linkEntry(nil), entries...)
+	}
+	return out
+}
+
+// saveLinks 持久化 links（自行取读锁）。未持锁时调用这个。
 func (m *Manager) saveLinks() error {
 	m.linksMu.RLock()
-	tmp := m.links
-	m.linksMu.RUnlock()
-	data, err := json.MarshalIndent(tmp, "", "  ")
+	defer m.linksMu.RUnlock()
+	return m.saveLinksLocked()
+}
+
+// saveLinksLocked 序列化并落盘。调用方必须已持有 linksMu（读或写均可）。
+// 单独拆出是因为 RWMutex 不可重入：removeLink 持写锁时不能再经 saveLinks 取读锁。
+func (m *Manager) saveLinksLocked() error {
+	data, err := json.MarshalIndent(m.snapshotLinksLocked(), "", "  ")
 	if err != nil {
 		return err
 	}
@@ -236,7 +260,9 @@ func (m *Manager) scopeFor(rt Runtime, version string) string {
 // mergeLinks 将用户导入的外部目录作为 installed 项追加（scope=linked）。
 func (m *Manager) mergeLinks(rt Runtime, installs []Install) []Install {
 	m.linksMu.RLock()
-	lk := m.links[rt]
+	// 持锁内拷贝出独立切片：解锁后再遍历会触碰 live 底层数组，
+	// 而 removeLink 可能同时持写锁改写它。
+	lk := append([]linkEntry(nil), m.links[rt]...)
 	m.linksMu.RUnlock()
 	for _, l := range lk {
 		installs = append(installs, Install{Version: l.Version, Scope: "linked", Path: l.Dir})
@@ -253,13 +279,18 @@ func linksToMap(entries []linkEntry) map[string]string {
 	return m
 }
 
-// syncPHPLinks 把导入版 PHP 目录同步给 PHPRuntime，使其也能以 php-fpm 方式启停。
+// syncPHPLinks 把导入版 PHP 目录同步给 PHPRuntime，使其也能以 php-fpm 方式启停（自行取读锁）。
 func (m *Manager) syncPHPLinks() {
+	m.linksMu.RLock()
+	defer m.linksMu.RUnlock()
+	m.syncPHPLinksLocked()
+}
+
+// syncPHPLinksLocked 同 syncPHPLinks，但调用方必须已持有 linksMu（读或写均可）。
+// 单独拆出是因为 RWMutex 不可重入：removeLink 持写锁时不能再经 syncPHPLinks 取读锁。
+func (m *Manager) syncPHPLinksLocked() {
 	if p, ok := m.adapters[RuntimePHP].(*PHPRuntime); ok {
-		m.linksMu.RLock()
-		entries := m.links[RuntimePHP]
-		m.linksMu.RUnlock()
-		p.SetLinkedDirs(linksToMap(entries))
+		p.SetLinkedDirs(linksToMap(m.links[RuntimePHP]))
 	}
 }
 
@@ -373,6 +404,9 @@ func orEmpty[T any](s []T) []T {
 
 // Install 安装指定运行时的指定版本（先切换下载源，再委托 adapter）。
 func (m *Manager) Install(rt Runtime, version, sourceID, custom string, cb InstallCallback) error {
+	if err := validateVersion(version); err != nil {
+		return err
+	}
 	a, err := m.adapter(rt)
 	if err != nil {
 		return err
@@ -489,6 +523,9 @@ func (m *Manager) SetVersionMeta(rt Runtime, version, alias, note string) error 
 // DeleteVersion 删除某已安装版本：便携目录直接删除；导入的外部目录仅移除登记（不删用户文件）。
 // 系统 PATH 上的版本无法在此删除。若删除的是当前激活的便携/导入版本，会先将其 bin 目录从系统 PATH 注销。
 func (m *Manager) DeleteVersion(rt Runtime, version string, removeData bool) error {
+	if err := validateVersion(version); err != nil {
+		return err
+	}
 	if dir, ok := m.linkedDir(rt, version); ok {
 		// 导入版本：仅移除登记，保留外部目录
 		m.removeLink(rt, version)
@@ -542,15 +579,18 @@ func (m *Manager) removeLink(rt Runtime, version string) {
 	m.linksMu.Lock()
 	defer m.linksMu.Unlock()
 	entries := m.links[rt]
-	out := entries[:0]
+	// 新建切片而非原地过滤（entries[:0]）：原地过滤会写 entries 的底层数组，
+	// 而该数组可能正被持读锁的读者遍历，造成读到撕裂数据。
+	out := make([]linkEntry, 0, len(entries))
 	for _, l := range entries {
 		if l.Version != version {
 			out = append(out, l)
 		}
 	}
 	m.links[rt] = out
-	_ = m.saveLinks()
-	m.syncPHPLinks()
+	// 已持写锁，走 Locked 版本：RWMutex 不可重入，此处再取读锁会永久死锁。
+	_ = m.saveLinksLocked()
+	m.syncPHPLinksLocked()
 }
 
 // ImportVersion 导入一个已存在的外部安装目录：探测其版本号后登记为 linked 安装，
@@ -560,8 +600,8 @@ func (m *Manager) ImportVersion(rt Runtime, dir string) (string, error) {
 		return "", err
 	}
 	dir = strings.TrimSpace(dir)
-	if dir == "" {
-		return "", fmt.Errorf("目录为空")
+	if err := validateImportDir(dir); err != nil {
+		return "", err
 	}
 	info, err := os.Stat(dir)
 	if err != nil || !info.IsDir() {
@@ -655,6 +695,9 @@ func (m *Manager) ConfigSupport(rt Runtime) bool {
 
 // ConfigGet 读取某 runtime 某版本的配置文件。
 func (m *Manager) ConfigGet(rt Runtime, version string) (*RuntimeConfig, error) {
+	if err := validateVersion(version); err != nil {
+		return nil, err
+	}
 	a, err := m.adapter(rt)
 	if err != nil {
 		return nil, err
@@ -668,6 +711,9 @@ func (m *Manager) ConfigGet(rt Runtime, version string) (*RuntimeConfig, error) 
 
 // ConfigSet 写回某 runtime 某版本的配置文件（整体覆盖）。
 func (m *Manager) ConfigSet(rt Runtime, version, raw string) error {
+	if err := validateVersion(version); err != nil {
+		return err
+	}
 	a, err := m.adapter(rt)
 	if err != nil {
 		return err
@@ -772,6 +818,9 @@ func (m *Manager) PathInfo() []PathEntry {
 
 // Start 启动某运行时的服务（仅 nginx/redis 支持）。
 func (m *Manager) Start(rt Runtime, version string, onLog func(string)) error {
+	if err := validateVersion(version); err != nil {
+		return err
+	}
 	logger.I("[env] Manager.Start rt=%s version=%s", rt, version)
 	a, err := m.adapter(rt)
 	if err != nil {
@@ -848,6 +897,46 @@ type PortConflict struct {
 	PID      int    `json:"pid"`      // 占用者 PID（0=未知）
 	Image    string `json:"image"`    // 占用者可执行文件路径
 	Ours     bool   `json:"ours"`     // 占用者是否就是本会话拉起的该运行时（此时不算冲突）
+}
+
+// EnableRabbitMQManagement 针对运行中的 RabbitMQ 节点启用管理后台插件（rabbitmq_management，端口 15672）。
+func (m *Manager) EnableRabbitMQManagement(version string, onLog func(string)) error {
+	a, ok := m.adapters[RuntimeRabbitMQ]
+	if !ok {
+		return fmt.Errorf("RabbitMQ 运行时未注册")
+	}
+	r, ok := a.(*RabbitMQRuntime)
+	if !ok {
+		return fmt.Errorf("RabbitMQ 运行时类型异常")
+	}
+	return r.EnableManagementPlugin(version, onLog)
+}
+
+// DisableRabbitMQManagement 关闭 RabbitMQ 管理后台插件（rabbitmq_management，端口 15672）。
+func (m *Manager) DisableRabbitMQManagement(version string, onLog func(string)) error {
+	a, ok := m.adapters[RuntimeRabbitMQ]
+	if !ok {
+		return fmt.Errorf("RabbitMQ 运行时未注册")
+	}
+	r, ok := a.(*RabbitMQRuntime)
+	if !ok {
+		return fmt.Errorf("RabbitMQ 运行时类型异常")
+	}
+	return r.DisableManagementPlugin(version, onLog)
+}
+
+// IsRabbitMQManagementEnabled 返回 RabbitMQ 管理后台是否已启用。
+func (m *Manager) IsRabbitMQManagementEnabled(version string) bool {
+	a, ok := m.adapters[RuntimeRabbitMQ]
+	if !ok {
+		return false
+	}
+	r, ok := a.(*RabbitMQRuntime)
+	if !ok {
+		return false
+	}
+	enabled, _ := r.IsManagementEnabled(version)
+	return enabled
 }
 
 func (m *Manager) PortConflict(rt Runtime, version string) (PortConflict, error) {

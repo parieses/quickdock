@@ -534,7 +534,9 @@ func (m *Manager) watchPlugin(inst *PluginInstance) {
 
 // startHealthCheck 启动后台健康检查协程（每 30 秒 ping 所有运行中插件）
 func (m *Manager) startHealthCheck() {
-	// 重置停止通道与关闭守卫，支持在 NewManager 之外被重复 start（如退出后重新初始化）
+	// 重复 start（如退出后重新初始化）前先停掉旧的健康检查协程：否则下面覆盖
+	// healthCheckStopCh / Once 会让旧 goroutine 永久阻塞在 select 中，造成 goroutine 泄漏。
+	m.stopHealthCheck()
 	m.healthCheckStopCh = make(chan struct{})
 	m.healthCheckStopOnce = sync.Once{}
 	m.healthCheckWg.Add(1)
@@ -561,10 +563,12 @@ func (m *Manager) startHealthCheck() {
 // stopHealthCheck 停止后台健康检查。用 sync.Once 守卫 close，避免双退出路径（如应用退出 + 其它清理）
 // 二次 close 同一 channel 触发 panic（close of closed channel）。
 func (m *Manager) stopHealthCheck() {
-	m.healthCheckStopOnce.Do(func() {
-		close(m.healthCheckStopCh)
-	})
-	m.healthCheckWg.Wait()
+	if m.healthCheckStopCh != nil {
+		m.healthCheckStopOnce.Do(func() {
+			close(m.healthCheckStopCh)
+		})
+		m.healthCheckWg.Wait()
+	}
 }
 
 // pingAll 对所有运行中的插件发送 ping
