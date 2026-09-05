@@ -73,8 +73,10 @@ type RuntimeInfo struct {
 	Recommended  []string     `json:"recommended"` // 兜底可下载版本（拉取失败时使用）
 	Installed    []Install    `json:"installed"`   // 已装版本列表（可多个）
 	Sources      []SourceInfo `json:"sources"`
-	ActiveSource string       `json:"activeSource"`
-	HasService   bool         `json:"hasService"` // 是否支持服务启停/状态监听
+	ActiveSource   string `json:"activeSource"`
+	HasService     bool   `json:"hasService"`     // 是否支持服务启停/状态监听
+	HasLog         bool   `json:"hasLog"`         // 是否支持运行日志查询（实现 LogProvider）
+	WebConsolePort int    `json:"webConsolePort"` // Web 管理后台端口（0=无，实现 WebConsoleProvider）
 }
 
 type SourceInfo struct {
@@ -317,17 +319,24 @@ func (m *Manager) List() []RuntimeInfo {
 			si = append(si, SourceInfo{ID: s.ID, Name: s.Name})
 		}
 		_, hasSvc := a.(ServiceController)
+		_, hasLog := a.(LogProvider)
+		wcPort := 0
+		if wp, ok := a.(WebConsoleProvider); ok {
+			wcPort = wp.WebConsolePort("")
+		}
 		installed := m.mergeLinks(rt, m.cachedInstalls(rt))
 		out = append(out, RuntimeInfo{
-			ID:           string(rt),
-			Name:         a.DisplayName(),
-			Group:        registry[rt].group,
-			Platforms:    orEmpty(a.SupportedPlatforms()),
-			Recommended:  orEmpty(a.Recommended()),
-			Installed:    orEmpty(mergeMeta(rt, installed, activeVersion(rt), entries)),
-			Sources:      orEmpty(si),
-			ActiveSource: ActiveSource(rt),
-			HasService:   hasSvc,
+			ID:             string(rt),
+			Name:           a.DisplayName(),
+			Group:          registry[rt].group,
+			Platforms:      orEmpty(a.SupportedPlatforms()),
+			Recommended:    orEmpty(a.Recommended()),
+			Installed:      orEmpty(mergeMeta(rt, installed, activeVersion(rt), entries)),
+			Sources:        orEmpty(si),
+			ActiveSource:   ActiveSource(rt),
+			HasService:     hasSvc,
+			HasLog:         hasLog,
+			WebConsolePort: wcPort,
 		})
 	}
 	return out
@@ -772,6 +781,24 @@ func (m *Manager) LogGet(rt Runtime, version string) (string, error) {
 	return p.LogGet(version)
 }
 
+// WebConsoleProvider 可选能力：返回该运行时 Web 管理后台端口（0=无）。
+// 实现后通过 RuntimeInfo.WebConsolePort 暴露给前端，运行时运行中且端口已知时显示「打开控制台」按钮。
+type WebConsoleProvider interface {
+	WebConsolePort(version string) int
+}
+
+// readLogTail 读取日志文件尾部最多 8KB，供各运行时实现 LogProvider 时复用（避免重复样板）。
+func readLogTail(path string) (string, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	if len(data) > 8192 {
+		data = data[len(data)-8192:]
+	}
+	return string(data), nil
+}
+
 // ConfigValidator 可选能力：启动前对配置文件做语法校验（如 nginx -t / apache -t / caddy validate）。
 // 实现后由 Manager.Start 在拉起服务前统一调用，校验失败则拦下并提示校验输出（含错误行号/原因）。
 type ConfigValidator interface {
@@ -863,6 +890,25 @@ func (m *Manager) Stop(rt Runtime, version string) error {
 		return fmt.Errorf("该运行时不支持服务管理")
 	}
 	return sc.Stop(version)
+}
+
+// Restart 重启某运行时的服务：先停止（忽略停止错误——可能本就未运行），再复用 Start 的端口冲突与配置校验重新拉起。
+func (m *Manager) Restart(rt Runtime, version string, onLog func(string)) error {
+	if err := validateVersion(version); err != nil {
+		return err
+	}
+	logger.I("[env] Manager.Restart rt=%s version=%s", rt, version)
+	a, err := m.adapter(rt)
+	if err != nil {
+		return err
+	}
+	if _, ok := a.(ServiceController); !ok {
+		return fmt.Errorf("该运行时不支持服务管理")
+	}
+	// 先停（忽略错误：未运行时 Stop 可能报“未在运行”，不应阻断重启）
+	_ = m.Stop(rt, version)
+	// 端口冲突检测与配置校验交由 Start 统一处理
+	return m.Start(rt, version, onLog)
 }
 
 // Status 查询某运行时服务状态。非服务类运行时返回 running=false。

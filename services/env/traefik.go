@@ -234,6 +234,9 @@ func (t *TraefikRuntime) LogGet(version string) (string, error) {
 	return strings.TrimSpace(string(data)), nil
 }
 
+// WebConsolePort 返回 Traefik 仪表盘（API/dashboard，insecure 模式）端口，固定 8080（实现 WebConsoleProvider）。
+func (t *TraefikRuntime) WebConsolePort(version string) int { return traefikWebPort }
+
 func (t *TraefikRuntime) Stop(version string) error {
 	stopByPort(traefikWebPort, "traefik.exe")
 	svcMgr.forget(RuntimeTraefik)

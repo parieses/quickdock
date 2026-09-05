@@ -329,6 +329,11 @@ func (s *SQLRuntime) LogPath(version string) string {
 	return filepath.Join(s.versionDir(version), string(s.flavor.kind)+".log")
 }
 
+// LogGet 读取某版本运行日志尾部（实现 LogProvider），供前端日志弹窗查询。
+func (s *SQLRuntime) LogGet(version string) (string, error) {
+	return readLogTail(s.LogPath(version))
+}
+
 func (s *SQLRuntime) Stop(version string) error {
 	logger.I("[env][%s] Stop version=%s", s.flavor.kind, version)
 	port := s.flavor.defPort

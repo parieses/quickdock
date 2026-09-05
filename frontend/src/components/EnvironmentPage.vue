@@ -25,6 +25,7 @@ import {
   EnvAvailableVersions,
   EnvStart,
   EnvStop,
+  EnvRestart,
   EnvStatus,
   EnvPortConflict,
   EnvGitStatus,
@@ -169,6 +170,8 @@ interface RuntimeInfo {
   sources: SourceInfo[]
   activeSource: string
   hasService: boolean
+  hasLog: boolean
+  webConsolePort: number
 }
 
 // 每个运行时的品牌色（用于头像背景，白填充的官方图标渲染其上）
@@ -277,7 +280,7 @@ function staticRuntime(s: typeof STATIC_CATALOG[number]): RuntimeInfo {
     id: s.id, name: s.name, group: s.group,
     platforms: [], recommended: [],
     installed: [], sources: [], activeSource: '',
-    hasService: s.hasService,
+    hasService: s.hasService, hasLog: false, webConsolePort: 0,
   }
 }
 const runtimes = ref<RuntimeInfo[]>(STATIC_CATALOG.map(staticRuntime))
@@ -339,6 +342,30 @@ const pathEntries = computed(() => {
       if (ins.active) {
         out.push({ id: r.id, name: r.name, version: ins.version, binDir: binDirOf(ins), inPath: !!ins.inSystemPath })
       }
+    }
+  }
+  return out
+})
+
+// 端口全景：聚合所有运行中服务的运行时 / 版本 / 服务端口 / 控制台端口。
+const panorama = reactive<{ open: boolean }>({ open: false })
+// 打开端口全景前，预取各 RabbitMQ 版本的管理后台状态，使「控制台」列准确（其余运行时端口为静态常量，无需探测）。
+function openPanorama() {
+  panorama.open = true
+  for (const r of runtimes.value) {
+    if (r.id !== 'rabbitmq') continue
+    for (const ins of (r.installed || [])) {
+      if (rabbitMgmt[ins.version] === undefined) fetchMgmt(ins.version)
+    }
+  }
+}
+const panoramaEntries = computed(() => {
+  const out: { id: string; name: string; version: string; port: number; consolePort: number }[] = []
+  for (const r of runtimes.value) {
+    if (!r.hasService) continue
+    for (const ins of (r.installed || [])) {
+      if (!svcOn(r, ins.version)) continue
+      out.push({ id: r.id, name: r.name, version: ins.version, port: svcPort(r, ins.version), consolePort: consolePort(r, ins) })
     }
   }
   return out
@@ -1148,6 +1175,85 @@ async function stopService(r: RuntimeInfo) {
   }
 }
 
+// restarting[rt+version] 标记某版本正在重启，期间禁用按钮避免重复点击
+const restarting = reactive<Record<string, boolean>>({})
+async function restartService(r: RuntimeInfo, ins: Install) {
+  const key = r.id + ins.version
+  restarting[key] = true
+  try {
+    unwrap(await EnvRestart(r.id, ins.version))
+    toast.success(r.name + ' ' + ins.version + ' ' + t('svcRestartDone'))
+    pollStatus()
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    restarting[key] = false
+  }
+}
+
+// consolePort 返回某运行时某版本的 Web 管理后台端口（0=无）。
+// RabbitMQ 仅在管理后台插件启用时才有控制台；其余运行时（MinIO 9001 / Mailpit 8025 / Traefik 8080）端口固定。
+function consolePort(r: RuntimeInfo, ins: Install): number {
+  if (r.id === 'rabbitmq') return rabbitMgmt[ins.version] ? 15672 : 0
+  return r.webConsolePort || 0
+}
+function openConsole(port: number) {
+  window.open('http://127.0.0.1:' + port + '/', '_blank')
+}
+
+// ---- 通用日志查看器（任意实现了 LogProvider 的运行时）----
+// 与 Redis 弹窗共用 filteredLog 的滚动逻辑（logEl 引用），但独立维护一份状态，避免互相干扰。
+const logModal = reactive<{
+  open: boolean; runtime: string; version: string; log: string
+  logFilter: string; logAuto: boolean
+}>({
+  open: false, runtime: '', version: '', log: '',
+  logFilter: '', logAuto: false,
+})
+const filteredLogModal = computed(() => {
+  const f = logModal.logFilter.trim().toLowerCase()
+  if (!f) return logModal.log
+  return logModal.log.split('\n').filter((l) => l.toLowerCase().includes(f)).join('\n')
+})
+let logModalTimer: ReturnType<typeof setInterval> | null = null
+async function openLog(r: RuntimeInfo, ins: Install) {
+  try {
+    logModal.runtime = r.id
+    logModal.version = ins.version
+    logModal.log = unwrap<string>(await EnvLogGet(r.id, ins.version)) || ''
+    logModal.logFilter = ''
+    logModal.logAuto = false
+    logModal.open = true
+    openMenu.value = null
+    nextTick(scrollLogBottom)
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  }
+}
+async function refreshLogModal() {
+  try {
+    logModal.log = unwrap<string>(await EnvLogGet(logModal.runtime, logModal.version)) || ''
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  }
+}
+function startLogModalAuto() {
+  if (logModalTimer || !logModal.logAuto) return
+  logModalTimer = setInterval(() => refreshLogModal(), 2000)
+}
+function stopLogModalAuto() {
+  if (logModalTimer) { clearInterval(logModalTimer); logModalTimer = null }
+}
+function toggleLogModalAuto() {
+  logModal.logAuto = !logModal.logAuto
+  if (logModal.logAuto) { refreshLogModal(); startLogModalAuto() }
+  else stopLogModalAuto()
+}
+function closeLogModal() {
+  stopLogModalAuto()
+  logModal.open = false
+}
+
 // 启用 RabbitMQ 管理后台插件（rabbitmq_management，端口 15672），针对运行中的节点在线启用。
 const mgmtEnabling = ref(false)
 // rabbitMgmt[version] = 管理后台是否已启用（决定是否显示「启用/关闭」以及端口是否显示两个）
@@ -1239,6 +1345,7 @@ onUnmounted(() => {
   if (offRefreshed) offRefreshed()
   if (timer) clearInterval(timer)
   if (logTimer) clearInterval(logTimer)
+  if (logModalTimer) clearInterval(logModalTimer)
 })
 
 // s = currentRuntimeState，模板中复用，避免反复调用 stateFor
@@ -1256,6 +1363,10 @@ const s = currentRuntimeState
         <button class="path-btn" @click="pathModal.open = true" :title="t('pathPanel')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0M15.5 18H10a4 4 0 0 1-4-4v0"/></svg>
           <span>PATH</span>
+        </button>
+        <button class="path-btn" @click="openPanorama" :title="t('portPanorama')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h2M8 17h2M14 14h2M14 17h2"/></svg>
+          <span>{{ t('portPanorama') }}</span>
         </button>
         <button class="env-refresh" @click="refresh" :title="t('refresh')">⟳</button>
       </div>
@@ -1467,7 +1578,19 @@ const s = currentRuntimeState
                   class="svc-btn start"
                   @click="startService(selected, ins.version)"
                 >{{ t('svcStart') }}</button>
-                <button v-else class="svc-btn stop" @click="stopService(selected)">{{ t('svcStop') }}</button>
+                <template v-else>
+                  <button class="svc-btn stop" @click="stopService(selected)">{{ t('svcStop') }}</button>
+                  <button
+                    class="svc-btn restart"
+                    :disabled="restarting[selected.id + ins.version]"
+                    @click="restartService(selected, ins)"
+                  >{{ restarting[selected.id + ins.version] ? t('svcRestarting') : t('svcRestart') }}</button>
+                  <button
+                    v-if="consolePort(selected, ins) > 0"
+                    class="svc-btn console"
+                    @click="openConsole(consolePort(selected, ins))"
+                  >{{ t('openConsole') }}</button>
+                </template>
                 <span v-if="svcPort(selected, ins.version)" class="svc-port">
                   {{ t('svcPort') }}:
                   <template v-if="selected.id === 'rabbitmq' && rabbitMgmt[ins.version]">5672 / 15672</template>
@@ -1493,7 +1616,6 @@ const s = currentRuntimeState
                   <template v-if="selected.id === 'redis' && ins.scope !== 'system'">
                     <div class="op-sep"></div>
                     <button class="op-item" @click="openRedisConfig(selected, ins, 'config'); openMenu = null">{{ t('redisConfig') }}</button>
-                    <button class="op-item" @click="openRedisConfig(selected, ins, 'log'); openMenu = null">{{ t('redisLog') }}</button>
                   </template>
                   <template v-if="selected.id === 'ftp' && ins.scope !== 'system'">
                     <div class="op-sep"></div>
@@ -1502,6 +1624,10 @@ const s = currentRuntimeState
                   <template v-if="configSupported && ins.scope !== 'system'">
                     <div class="op-sep"></div>
                     <button class="op-item" @click="openConfig(selected, ins); openMenu = null">{{ t('editConfig') }}</button>
+                  </template>
+                  <template v-if="selected.hasLog && ins.scope !== 'system'">
+                    <div class="op-sep"></div>
+                    <button class="op-item" @click="openLog(selected, ins); openMenu = null">{{ t('viewLog') }}</button>
                   </template>
                   <template v-if="selected.id === 'rabbitmq' && ins.scope !== 'system'">
                     <div class="op-sep"></div>
@@ -1667,6 +1793,72 @@ const s = currentRuntimeState
           <button class="op-btn" @click="confirmDelete.open = false">{{ t('cancel') }}</button>
           <button class="env-install-btn danger" @click="doDelete">{{ t('deleteVersion') }}</button>
         </div>
+      </div>
+    </div>
+
+    <!-- 通用日志弹窗：任意实现了 LogProvider 的运行时（nginx/redis/caddy/traefik/apache/postgresql/mysql/mariadb/mongodb/memcached/minio/mailpit…）-->
+    <div v-if="logModal.open" class="modal-overlay" @click.self="closeLogModal()">
+      <div class="modal php-modal">
+        <div class="modal-title">{{ t('viewLog') }} · {{ logModal.runtime }} · {{ logModal.version }}</div>
+        <div class="php-tab-body">
+          <div class="log-toolbar">
+            <input
+              v-model="logModal.logFilter"
+              class="log-filter"
+              :placeholder="t('logFilterPlaceholder')"
+              @input="nextTick(scrollLogBottom)"
+            />
+            <button class="log-btn" :class="{ active: logModal.logAuto }" @click="toggleLogModalAuto()">
+              {{ logModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
+            </button>
+            <button class="log-btn" @click="refreshLogModal()">{{ t('logManualRefresh') }}</button>
+            <span class="log-count" v-if="logModal.logFilter.trim()">
+              {{ filteredLogModal.split('\n').filter((x: string) => x !== '').length }} / {{ logModal.log.split('\n').filter((x: string) => x !== '').length }}
+            </span>
+          </div>
+          <pre class="php-log" ref="logEl">{{ filteredLogModal || t('logEmpty') }}</pre>
+        </div>
+        <div class="modal-actions">
+          <button class="op-btn" @click="closeLogModal()">{{ t('cancel') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 端口全景弹窗：所有运行中服务的端口与控制台一览 -->
+    <div v-if="panorama.open" class="modal-overlay" @click.self="panorama.open = false">
+      <div class="modal path-modal" style="max-width: 640px">
+        <div class="modal-actions-top">
+          <div>
+            <div class="modal-title">{{ t('portPanorama') }}</div>
+            <p class="modal-text">{{ t('portPanoramaDesc') }}</p>
+          </div>
+          <button class="cfg-close" type="button" :title="t('close')" @click="panorama.open = false">×</button>
+        </div>
+        <div v-if="!panoramaEntries.length" class="empty-state">
+          <div class="empty-icon">∅</div>
+          <div class="empty-text">{{ t('noRunningService') }}</div>
+        </div>
+        <table v-else class="panorama-table">
+          <thead>
+            <tr>
+              <th>{{ t('runtime') }}</th>
+              <th>{{ t('version') }}</th>
+              <th>{{ t('svcPort') }}</th>
+              <th>{{ t('console') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in panoramaEntries" :key="p.id + p.version">
+              <td><span class="pano-dot" :style="{ background: avatarColor(p.id) }"></span>{{ p.name }}</td>
+              <td>{{ p.version }}</td>
+              <td><span class="mono">{{ p.port || '—' }}</span></td>
+              <td>
+                <a v-if="p.consolePort" class="svc-port-link" @click="openConsole(p.consolePort)">:{{ p.consolePort }} ↗</a>
+                <span v-else class="muted">—</span>
+              </td>
+            </tr>
+          </tbody>
+        </table>
       </div>
     </div>
 
@@ -2049,7 +2241,10 @@ const s = currentRuntimeState
 }
 .svc-btn.start { background: var(--color-success); }
 .svc-btn.stop { background: var(--color-danger); }
+.svc-btn.restart { background: var(--color-accent); }
+.svc-btn.console { background: #6b7280; }
 .svc-btn:hover { opacity: 0.9; }
+.svc-btn:disabled { opacity: 0.55; cursor: default; }
 .svc-port { font-size: 11px; color: var(--color-text-disabled); }
 
 .port-conflict-banner {
@@ -2071,6 +2266,31 @@ const s = currentRuntimeState
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
 .svc-port-link.disabled { cursor: default; opacity: 0.5; }
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
+
+/* 端口全景弹窗 */
+.modal-actions-top {
+  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
+  margin-bottom: 14px;
+}
+.modal-actions-top .modal-text { margin: 4px 0 0; }
+.panorama-table {
+  width: 100%; border-collapse: collapse; font-size: 13px;
+}
+.panorama-table th {
+  text-align: left; font-weight: 600; color: var(--color-text-muted);
+  padding: 8px 10px; border-bottom: 1px solid var(--color-border);
+}
+.panorama-table td {
+  padding: 9px 10px; border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-primary);
+}
+.panorama-table tr:last-child td { border-bottom: none; }
+.pano-dot {
+  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+  margin-right: 8px; vertical-align: middle; flex: none;
+}
+.mono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
+.muted { color: var(--color-text-muted); }
 
 .col-ops { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .op-btn {

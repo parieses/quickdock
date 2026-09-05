@@ -269,6 +269,11 @@ func (p *PostgresRuntime) LogPath(version string) string {
 	return filepath.Join(p.versionDir(version), "postgresql.log")
 }
 
+// LogGet 读取某版本运行日志尾部（实现 LogProvider），供前端日志弹窗查询。
+func (p *PostgresRuntime) LogGet(version string) (string, error) {
+	return readLogTail(p.LogPath(version))
+}
+
 func (p *PostgresRuntime) Stop(version string) error {
 	logger.I("[env][postgresql] Stop version=%s", version)
 	if version == "" {

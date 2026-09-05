@@ -187,6 +187,11 @@ func (m *MemcachedRuntime) LogPath(version string) string {
 	return filepath.Join(m.versionDir(version), "memcached.log")
 }
 
+// LogGet 读取某版本运行日志尾部（实现 LogProvider），供前端日志弹窗查询。
+func (m *MemcachedRuntime) LogGet(version string) (string, error) {
+	return readLogTail(m.LogPath(version))
+}
+
 func (m *MemcachedRuntime) Stop(version string) error {
 	// 先经伪控制台句柄终止本会话跟踪的进程（精确），再做端口兜底（覆盖孤儿/残留进程）。
 	svcMgr.killTracked(RuntimeMemcached)

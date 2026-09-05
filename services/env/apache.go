@@ -287,6 +287,11 @@ func (a *ApacheRuntime) LogPath(version string) string {
 	return filepath.Join(a.versionDir(version), "logs", "apache.log")
 }
 
+// LogGet 读取某版本运行日志尾部（实现 LogProvider），供前端日志弹窗查询。
+func (a *ApacheRuntime) LogGet(version string) (string, error) {
+	return readLogTail(a.LogPath(version))
+}
+
 func (a *ApacheRuntime) ValidateConfig(version string) error {
 	exe := a.ExeFor(version)
 	for _, ins := range a.InstalledVersions() {

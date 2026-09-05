@@ -182,6 +182,14 @@ func (m *MinioRuntime) LogPath(version string) string {
 	return filepath.Join(m.versionDir(version), "minio.log")
 }
 
+// LogGet 读取某版本运行日志尾部（实现 LogProvider），供前端日志弹窗查询。
+func (m *MinioRuntime) LogGet(version string) (string, error) {
+	return readLogTail(m.LogPath(version))
+}
+
+// WebConsolePort 返回 MinIO Web 管理后台（Console）端口，固定 9001（实现 WebConsoleProvider）。
+func (m *MinioRuntime) WebConsolePort(version string) int { return minioConsolePort }
+
 func (m *MinioRuntime) Stop(version string) error {
 	stopByPort(minioDefaultPort, "minio.exe")
 	svcMgr.forget(RuntimeMinIO)

@@ -142,6 +142,17 @@ func (a *AppService) EnvStop(runtime string) *ApiResult {
 	return Ok(nil)
 }
 
+// EnvRestart 重启某运行时的服务（先停后启，复用 Start 的端口冲突与配置校验）。
+func (a *AppService) EnvRestart(runtime, version string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	if err := a.Env.Restart(env.Runtime(runtime), version, nil); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
+}
+
 // EnvStatus 查询某运行时服务运行状态（nginx/redis）。非服务类运行时返回 running=false。
 func (a *AppService) EnvStatus(runtime, version string) *ApiResult {
 	if a.Env == nil {

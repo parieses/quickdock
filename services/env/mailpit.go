@@ -192,6 +192,14 @@ func (m *MailpitRuntime) LogPath(version string) string {
 	return filepath.Join(m.versionDir(version), "mailpit.log")
 }
 
+// LogGet 读取某版本运行日志尾部（实现 LogProvider），供前端日志弹窗查询。
+func (m *MailpitRuntime) LogGet(version string) (string, error) {
+	return readLogTail(m.LogPath(version))
+}
+
+// WebConsolePort 返回 Mailpit Web 界面端口，固定 8025（实现 WebConsoleProvider）。
+func (m *MailpitRuntime) WebConsolePort(version string) int { return mailpitDefaultPort }
+
 func (m *MailpitRuntime) Stop(version string) error {
 	stopByPort(mailpitDefaultPort, "mailpit.exe")
 	svcMgr.forget(RuntimeMailpit)

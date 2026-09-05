@@ -173,6 +173,9 @@ func parseCaddyVersion(out string) string {
 
 func (c *CaddyRuntime) DefaultPort() int { return caddyAdminPort }
 
+// WebConsolePort 返回默认站点端口（80），运行时跑起来后打开即默认页（admin API 2019 非 UI，不用于控制台）。
+func (c *CaddyRuntime) WebConsolePort(version string) int { return 80 }
+
 // ConfigPath 返回某版本 Caddyfile 绝对路径。
 func (c *CaddyRuntime) ConfigPath(version string) string {
 	return filepath.Join(c.versionDir(version), "Caddyfile")

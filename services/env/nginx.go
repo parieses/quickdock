@@ -86,6 +86,16 @@ func (n *NginxRuntime) ConfigPath(version string) string {
 	return filepath.Join(n.versionDir(version), "conf", "nginx.conf")
 }
 
+// LogPath 返回某版本 nginx.log 绝对路径（运行日志落盘位置）。
+func (n *NginxRuntime) LogPath(version string) string {
+	return filepath.Join(n.versionDir(version), "nginx.log")
+}
+
+// LogGet 读取某版本运行日志尾部（实现 LogProvider），供前端日志弹窗查询。
+func (n *NginxRuntime) LogGet(version string) (string, error) {
+	return readLogTail(n.LogPath(version))
+}
+
 // DeleteVersion 删除某便携 Nginx 版本目录（系统 PATH 上的版本无目录可删，返回错误）。
 func (n *NginxRuntime) DeleteVersion(version string) error {
 	dir := n.versionDir(version)
@@ -146,6 +156,9 @@ func (n *NginxRuntime) Install(ctx context.Context, version string, cb InstallCa
 
 func (n *NginxRuntime) DefaultPort() int { return nginxDefaultPort }
 
+// WebConsolePort 返回默认站点端口（80），运行时跑起来后打开即默认页。
+func (n *NginxRuntime) WebConsolePort(version string) int { return nginxDefaultPort }
+
 func (n *NginxRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := n.InstalledVersions()
 	if version == "" {
@@ -186,7 +199,7 @@ func (n *NginxRuntime) Start(ctx context.Context, version string, onLog func(str
 	if onLog != nil {
 		onLog("启动 Nginx " + version + " …")
 	}
-	return svcMgr.start(RuntimeNginx, version, exe, wd, nil, "", onLog)
+	return svcMgr.start(RuntimeNginx, version, exe, wd, nil, n.LogPath(version), onLog)
 }
 
 func (n *NginxRuntime) ValidateConfig(version string) error {

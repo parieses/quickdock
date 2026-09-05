@@ -205,6 +205,11 @@ func (m *MongoRuntime) LogPath(version string) string {
 	return filepath.Join(m.versionDir(version), "mongodb.log")
 }
 
+// LogGet 读取某版本运行日志尾部（实现 LogProvider）。日志由 mongod 经 --logpath 管理，路径即 LogPath。
+func (m *MongoRuntime) LogGet(version string) (string, error) {
+	return readLogTail(m.LogPath(version))
+}
+
 func (m *MongoRuntime) Stop(version string) error {
 	logger.I("[env][mongodb] Stop version=%s", version)
 	stopByPort(mongoDefaultPort, "mongod.exe")

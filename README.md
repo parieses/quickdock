@@ -2,7 +2,7 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、HTTP 客户端、数据库连接、Webhook 通知与 23 个开箱即用插件，以及多运行时环境管理（Node.js / PHP / Go / Nginx / Redis / Git 一键安装与版本切换）（含可选的 AI 助手），并原生集成 DeepSeek Harness，让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、Webhook 通知，并随附 40+ 个开箱即用插件（含 HTTP 客户端、数据库连接等，经插件市场一键安装，详见 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)），以及多运行时环境管理（26 个运行时：Node.js / PHP / Python / Go / Bun 等语言，Nginx / Caddy / Apache / Traefik 等 Web 服务器，Redis / Memcached / MinIO / RabbitMQ 等缓存存储，MySQL / MariaDB / PostgreSQL / MongoDB 等数据库，一键安装、版本切换、启停、配置编辑、日志查看与 Web 控制台）（含可选的 AI 助手），并原生集成 DeepSeek Harness，让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
 
@@ -22,14 +22,13 @@
     - [📡 网站监控（Monitor）](#-网站监控monitor)
     - [🗒️ 快捷笔记](#️-快捷笔记)
     - [🧠 DeepSeek Harness 集成](#deepseek-harness-集成)
-    - [🌐 HTTP 客户端](#-http-客户端)
-    - [🗄️ 数据库连接](#️-数据库连接)
     - [💬 AI 助手](#-ai-助手)
     - [🔌 插件系统](#-插件系统)
     - [☁️ WebDAV 云同步](#️-webdav-云同步)
     - [📸 快照备份](#-快照备份)
     - [🔧 全局热键（可自定义）](#-全局热键可自定义)
     - [🖥️ 系统命令](#️-系统命令)
+  - [🔧 环境管理](#-环境管理)
   - [快速开始](#快速开始)
     - [系统要求](#系统要求)
     - [下载安装](#下载安装)
@@ -45,18 +44,7 @@
   - [数据模型](#数据模型)
   - [全局热键](#全局热键)
   - [设计哲学](#设计哲学)
-  - [随附插件](#随附插件)
-  - [第三方插件开发](#第三方插件开发)
-    - [插件目录结构](#插件目录结构)
-    - [plugin.json 完整字段](#pluginjson-完整字段)
-    - [三种运行时](#三种运行时)
-    - [标准 UI 样式（common.css）](#标准-ui-样式commoncss)
-    - [前端通信协议（postMessage）](#前端通信协议postmessage)
-    - [安装与测试](#安装与测试)
-    - [分发与发布](#分发与发布)
-  - [插件架构参考](#插件架构参考)
-    - [核心源码文件](#核心源码文件)
-    - [生命周期](#生命周期)
+  - [插件生态](#插件生态)
   - [构建与打包](#构建与打包)
     - [本地构建](#本地构建)
     - [平台支持](#平台支持)
@@ -145,29 +133,6 @@
 - **插件安装入口** — 设置页可直接安装 DSH 插件（默认 `dshmarket`，支持粘贴完整命令）；复用官方 `~/.dsh` 数据目录（皮肤 / 插件 / 会话）
 - **环境净化** — 过滤第三方注入的 `NODE_OPTIONS`（如 WorkBuddy shim），避免污染 dsh 进程
 
-### 🌐 HTTP 客户端
-
-类 Postman 的接口管理与调试工具，内置于左侧导航：
-
-- **多项目隔离** — 按项目组织 API 集合，每个项目拥有独立的环境变量
-- **多层级目录** — 项目下可无限嵌套子目录，支持拖拽排序、跨目录拖拽移动（自动修复子树归属）
-- **请求管理** — 每个请求保存方法 / URL / 查询参数 / 请求头 / 请求体，支持历史记录
-- **Markdown 文档** — 目录内可新建 Markdown 文档，实时预览编辑（`marked` + `DOMPurify`）
-- **环境变量** — 项目级环境变量，可在请求中引用，便于多环境切换
-- **右键操作** — 项目 / 目录 / 请求 / 文档统一通过右键菜单操作（新建 / 重命名 / 删除），列表无冗余图标
-- **CSV 导入导出** — 请求支持复制 / 导出为 CSV
-
-### 🗄️ 数据库连接
-
-内置多数据库管理与查询工具：
-
-- **多数据库支持** — MySQL / Redis / SQLite，连接密码经 DPAPI 加密存储
-- **对象浏览** — 左侧树浏览库 / 表 / 字段（MySQL、SQLite），或 DB 索引 / 键（Redis）
-- **Redis 多库** — 连接可指定 DB 索引（0–15），左侧树以 `DB N` 区分不同库
-- **SQL 查询** — 执行任意 SQL，结果以表格展示，支持 CSV 复制 / 导出
-- **内联编辑（Navicat 风格）** — 单表 `SELECT` 且为单列主键时，结果网格可直接修改单元格；底部「确认 / 丢弃 / 刷新」按钮提交或回滚改动。视图 / JOIN / 聚合 / 复合主键 / 无主键结果为只读，并显示具体原因
-- **MySQL 默认库兜底** — 连接未指定默认库时自动用 `SELECT DATABASE()` 解析当前库，确保主键检测可用
-
 ### 💬 AI 助手
 
 - **多配置档案** — 支持 OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口
@@ -186,12 +151,9 @@
 
 ### 🔌 插件系统
 
-- 23 个开箱即用插件（计算稿纸、JSON 工具箱、JWT 解码、正则提取、Markdown 预览……），随应用维护于官方仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)，经内置「在线市场」统一安装 / 升级
-- 支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native）
-- 基于 JSON-RPC 2.0 的前端 ↔ 后端通信协议
+- 开放插件架构，支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），基于 JSON-RPC 2.0 通信
+- 40+ 官方插件经「在线市场」一键安装 / 升级，插件列表、功能说明与开发文档统一维护在仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
 - 支持运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定
-- **在线市场**：插件管理页内置「在线市场」标签，一键浏览并安装官方维护的第三方插件（[quickdock-plugins](https://github.com/parieses/quickdock-plugins)），支持版本检测与升级，拒绝降级
-- [开放第三方插件开发](#第三方插件开发)，打包为 ZIP 即可分发
 
 ### ☁️ WebDAV 云同步
 
@@ -224,28 +186,60 @@
 
 ### 支持的运行时
 
-| 运行时 | 分组 | 下载源 | 版本数量 | 平台 |
-|--------|------|--------|----------|------|
-| **Node.js** | 语言 | nodejs.org JSON feed + npmmirror 镜像 | ~60（LTS + 近 3 年） | Windows |
-| **PHP** | 语言 | windows.php.net archives（支持 VC14/VC15/VS16） | ~200（含 7.x 系列） | Windows |
-| **Go** | 语言 | go.dev/dl/ HTML 全量解析 | ~260 | Windows |
-| **Nginx** | Web 服务器 | nginx.org 官方 | ~20 | Windows |
-| **Redis** | 缓存 | redis-windows GitHub Releases | ~10 | Windows |
-| **Git** | 工具 | git-for-windows GitHub Releases | ~10 | Windows |
+当前内置 **26 个**运行时，按分组在侧边栏归类（语言 / Web 服务器 / 缓存与存储 / 工具 / 数据库）。「类型」列标注是否支持服务化（一键启停 / 重启 / 日志 / 控制台）。
+
+| 运行时 | 分组 | 类型 | 下载源 | 版本来源 | 平台 |
+|--------|------|------|--------|----------|------|
+| **Node.js** | 语言 | 命令行 | npmmirror 镜像 / 官方 | 全量（LTS + 近 3 年） | Windows |
+| **Go** | 语言 | 命令行 | 官方 / golang.google.cn | 全量 | Windows |
+| **PHP** | 语言 | 服务型（php-fpm） | windows.php.net（VS16/VS17） | 全量 | Windows |
+| **Python** | 语言 | 命令行 | python.org | 全量 | Windows |
+| **Bun** | 语言 | 命令行 | oven-sh/bun | 全量 | Windows |
+| **Erlang** | 语言 | 命令行（被 RabbitMQ 依赖） | erlang/otp | 全量 | Windows |
+| **Nginx** | Web 服务器 | 服务型 | nginx.org | 全量 | Windows |
+| **Caddy** | Web 服务器 | 服务型 | caddyserver/caddy | 全量 | Windows |
+| **Apache** | Web 服务器 | 服务型 | Apache Lounge | 全量（目录页动态解析） | Windows |
+| **Traefik** | Web 服务器 | 服务型 | traefik/traefik | 全量 | Windows |
+| **FTP** | Web 服务器 | 服务型 | FTPDMIN（Sentex） | 单版本 0.96 | Windows |
+| **Redis** | 缓存/存储 | 服务型 | redis-windows | 全量 | Windows |
+| **Memcached** | 缓存/存储 | 服务型 | adamyg/memcached-win32 | 全量 | Windows |
+| **MinIO** | 存储 | 服务型 | dl.min.io | 滚动发布（latest） | Windows |
+| **RabbitMQ** | 消息队列 | 服务型 | rabbitmq-server | 全量 | Windows |
+| **Git** | 工具 | 命令行 | git-for-windows | 全量 | Windows |
+| **Composer** | 工具 | 命令行 | getcomposer.org | 全量 | Windows |
+| **FFmpeg** | 工具 | 命令行 | gyan.dev | 固定 3 个 | Windows |
+| **Mailpit** | 工具 | 服务型 | axllent/mailpit | 全量 | Windows |
+| **frpc** | 工具 | 命令行（可编辑配置） | fatedier/frp | 全量 | Windows |
+| **GitHub CLI** | 工具 | 命令行 | cli/cli | 全量 | Windows |
+| **mkcert** | 工具 | 命令行 | FiloSottile/mkcert | 全量 | Windows |
+| **MariaDB** | 数据库 | 服务型 | archive.mariadb.org | 固定 3 个 | Windows |
+| **MySQL** | 数据库 | 服务型 | cdn.mysql.com | 固定 3 个 | Windows |
+| **PostgreSQL** | 数据库 | 服务型 | EnterpriseDB 二进制包 | 固定 3 个 | Windows |
+| **MongoDB** | 数据库 | 服务型 | fastdl.mongodb.org | 全量 | Windows |
 
 ### 核心设计
 
 - **便携优先**：所有版本安装至 `%APPDATA%\QuickDock\runtime\<name>\<version>`，不写注册表、不申请管理员权限
 - **多版本共存**：同一运行时可安装多个版本，通过「环境变量」切换当前激活版本
-- **下载源可切换**：每个运行时支持官方源 / 国内镜像 / 自定义 URL 模板（支持 `{version}` / `{os}` / `{arch}` 占位符）
+- **下载源可切换**：每个运行时支持官方源 / 国内镜像 / 自定义 URL 模板（支持 `{version}` / `{v}` / `{os}` / `{arch}` / `{ext}` 占位符）
 - **版本列表智能筛选**：
-  - Node.js：LTS 版本 + 近 3 年发布版本，去重后按语义降序，上限 60 条
-  - PHP：自动识别 VC14 / VC15 / VS16 编译器的二进制包
-  - Go / Redis / Git：GitHub Releases API 优先，HTML 兜底解析
+  - Node.js：LTS 版本 + 近 3 年发布版本，去重后按语义降序
+  - PHP：自动识别 VS16 / VS17 编译器二进制包
+  - Go / Redis / Git / Caddy / Traefik / RabbitMQ 等：GitHub Releases API 优先，HTML 兜底解析
+  - Apache：动态抓取 Apache Lounge 目录页（VS17/VS18 两页，正则大小写不敏感）解析版本与下载地址
 - **缓存策略**：版本列表内存缓存 1h（仅成功时缓存），失败立即重试，避免网络抖动后长时间看到旧数据
 - **代理容错**：fetchURL 代理请求失败时自动降级直连，超时 30s
 - **下载可靠性**：先写临时文件，完整成功后才落盘目标目录，避免中途失败留下半成品
 - **后台异步**：下载 / 解压 / 安装全程异步，进度通过 IPC 事件实时推送前端
+
+### 服务管理能力
+
+- **启停与状态**：服务型运行时（Redis / Nginx / Apache / Caddy / Traefik / FTP / MySQL / MariaDB / PostgreSQL / MongoDB / Memcached / MinIO / Mailpit / RabbitMQ / PHP-fpm）一键启动、停止，实时显示 PID、端口与健康状态
+- **重启**：运行中版本提供「重启」按钮，先停后启，并复用启动时的端口冲突检测与配置校验，避免重启后出现端口占用
+- **配置编辑**：支持配置文件的运行时提供「编辑配置」入口（如 `Caddyfile` / `redis.conf` / `nginx.conf` / `traefik.yml` / `php.ini` / `frpc.toml`）；Nginx、Traefik 等支持启动前配置校验（`nginx -t` / `traefik validate`），校验失败阻止启动
+- **日志查看**：服务型运行时提供「查看日志」弹窗，实时滚动读取进程日志尾部 8KB（覆盖 PostgreSQL / MySQL·MariaDB / MongoDB / Memcached / MinIO / Mailpit / Apache / Nginx / Redis / RabbitMQ / Caddy / Traefik）
+- **Web 控制台一键打开**：运行时监听内置 Web UI 时，运行中显示「打开控制台」按钮，直接打开 `http://127.0.0.1:<port>`，覆盖 MinIO(9001) / Mailpit(8025) / Traefik(8080) / RabbitMQ(15672，仅管理插件启用时) / Nginx·Caddy(80)
+- **端口全景**：顶栏「端口全景」弹窗汇总所有运行服务的运行时 / 版本 / 端口 / 控制台入口，快速掌握本机开发服务占用情况
 
 ### UI 交互
 
@@ -255,24 +249,26 @@
 - 加载失败 → 显示错误信息 + 「重试」按钮
 - 手动刷新 → 点「刷新列表」按钮（换源后重新拉取）
 - 有更新 → 显示「可更新：X.X.X → Y.Y.Y」提示，一键升级
+- 运行中版本：显示「重启」/「停止」按钮，「打开控制台」「查看日志」按需出现
 
 ### 文件结构
 
 ```
 services/env/
-├── source.go          # 版本列表解析（Node/PHP/Go/Redis/Nginx/Git）+ 缓存 + 下载源配置
-├── manager.go         # Manager 门面：List / AvailableVersions / SetSource 等
-├── node.go            # NodeRuntime：安装 / 删除 / 版本探测
-├── php.go             # PHPRuntime：安装 / 删除 / php-fpm 启停 / ini 配置
-├── go.go              # GoRuntime：安装 / 删除 / 版本探测
-├── nginx.go           # NginxRuntime：安装 / 删除 / 服务启停
-├── redis.go           # RedisRuntime：安装 / 删除 / redis.conf 编辑 / 日志
-├── git.go             # GitRuntime：版本探测 / SSH / LFS 状态
-├── detect_cache.go    # 检测结果持久化缓存（detected.json）
+├── source.go          # 运行时注册表 + 版本列表解析（全量拉取/HTML 兜底）+ 缓存 + 多下载源
+├── manager.go         # Manager 门面：List / AvailableVersions / SetSource / Restart / LogGet / WebConsolePort
+├── meta.go            # 版本元数据（别名 / 备注 / 激活状态）
+├── detect_cache.go    # 系统已装版本检测结果持久化缓存（detected.json）
 ├── download.go        # 下载器（多源回退 + 进度回调 + 代理感知）
 ├── extract.go         # 解压（zip / tar.gz / tar.xz）
-├── meta.go            # 版本元数据（别名 / 备注 / 激活状态）
-└── service.go         # php-fpm / nginx / redis 服务生命周期管理
+├── config.go          # 通用配置文件读取/写入（ConfigProvider）
+├── validate.go        # 配置校验工具（nginx -t / traefik validate 等封装）
+├── service.go         # serviceManager：服务生命周期（start/stop/startPTY/startWithEnv）+ 端口探测
+├── node.go  go.go  php.go  python.go  bun.go  erlang*.go   # 语言运行时
+├── nginx.go  caddy.go  apache.go  traefik.go  ftp.go        # Web 服务器运行时
+├── redis.go  memcached.go  minio.go  rabbitmq.go  mongodb.go  # 缓存/存储/消息队列
+├── sql.go  postgresql*.go                            # 数据库（MySQL/MariaDB 共用 SQLRuntime）
+└── git.go  composer.go  ffmpeg.go  mailpit.go  frpc.go  gh.go  mkcert.go  # 工具类运行时
 ```
 ## 快速开始
 
@@ -407,8 +403,8 @@ quickdock/
 │   ├── api_result.go    # 统一 API 返回
 │   ├── types.go         # 配置类型定义
 │   ├── ai_*.go          # AI 对话核心（ai_config / ai_conversation / ai_stream / ai_chat）
-│   ├── httpclient_*.go  # HTTP 客户端（8 文件：项目/目录/请求/环境/发送/文档/历史/类型）
-│   ├── database*.go     # 数据库连接与查询（MySQL/Redis/SQLite，conn/query/tree 拆分）
+│   ├── env_service.go    # 环境管理 Wails 绑定（EnvList/EnvStart/EnvStop/EnvRestart/EnvLogGet/EnvConfig*…）
+│   └── env/             # 多运行时版本管理（26 个运行时 + 服务生命周期）
 │   ├── webhook_notify.go# 多渠道 Webhook 通知
 │   ├── updatemirror.go  # 更新下载镜像回退（ghfast.top 等）
 │   ├── update.go        # 软件更新检查与下载（Ed25519 签名）
@@ -427,7 +423,6 @@ quickdock/
 │   │   ├── todo.go      # 待办数据层
 │   │   ├── schedule.go  # 定时任务数据层
 │   │   ├── monitor.go   # 监控数据层
-│   │   ├── http_history.go # HTTP 请求历史数据层
 │   │   ├── tool.go      # 打开工具数据层
 │   │   ├── plugin.go    # 插件数据层
 │   │   ├── plugin_data.go # 插件专属存储
@@ -435,10 +430,6 @@ quickdock/
 │   │   ├── usage.go     # 使用频率统计
 │   │   ├── settings.go  # 设置数据层
 │   │   ├── snapshot.go  # 快照数据层
-│   │   ├── httpproject.go # HTTP 客户端项目数据层
-│   │   ├── httpdoc.go    # HTTP 目录/文档数据层
-│   │   ├── httprequest.go # HTTP 请求数据层
-│   │   ├── database.go  # 数据库连接数据层
 │   │   ├── repository.go# 仓库层
 │   │   ├── helpers.go   # 辅助函数
 │   │   └── toolexec_*.go # 工具裸名解析（PATH/App Paths/安装目录；_windows/_other）
@@ -470,16 +461,14 @@ quickdock/
 │   │   │   ├── NotePanel.vue      # 快捷笔记面板
 │   │   │   ├── NoteTreeNode.vue   # 笔记树节点
 │   │   │   ├── PluginManagerPage.vue # 插件管理页面
-│   │   │   ├── DatabasePage.vue   # 数据库连接页面
 │   │   │   ├── SettingsDSH.vue    # DeepSeek Harness 设置页
 │   │   │   ├── WebhookSettingsModal.vue # Webhook 通知配置
 │   │   │   └── ...（更多组件）
-│   │   ├── http-client/  # HTTP 客户端模块（页面 / 树 / 表单 / 响应 / 历史 + composables）
 │   │   ├── stores/       # Pinia 状态管理
 │   │   ├── types/        # TypeScript 类型（含 ai.ts）
 │   │   ├── utils/        # 工具函数（api.ts / pluginBridge.ts / calc.ts …）
 │   │   ├── i18n/         # 国际化（zh-CN / en-US）
-│   │   └── composables/  # 组合式函数（useHttpData / useHttpDrag / useFloatMenu / useFrecency …）
+│   │   └── composables/  # 组合式函数（useFloatMenu / useFrecency …）
 │   └── vite.config.ts
 ├── plugins/builtin/     # 仅存 common.css/js 骨架（宿主注入兼容用，勿删）
 ├── plugins/templates/   # 插件开发模板（none / goja / native）
@@ -518,11 +507,6 @@ Workspace（工作空间）
 | **Monitor** | 网站监控（状态码/SSL/内容匹配） |
 | **AIConversation** | AI 对话会话（标题、摘要、token 统计） |
 | **AIMessage** | AI 消息（角色、内容、思考过程） |
-| **HttpProject** | HTTP 客户端项目（名称、环境变量） |
-| **HttpFolder** | HTTP 目录（多层级、归属项目） |
-| **HttpDoc** | HTTP Markdown 文档（归属目录） |
-| **ApiRequest** | HTTP 请求（方法 / URL / 头 / 体 / 归属目录） |
-| **DbConnection** | 数据库连接（MySQL / Redis / SQLite，密码加密） |
 | **WebhookConfig** | 多渠道通知配置（钉钉 / 企微 / 飞书 / Server酱 / PushPlus / Telegram） |
 
 所有数据库表通过白名单机制防止 SQL 注入。
@@ -560,462 +544,13 @@ Workspace（工作空间）
 
 ---
 
-## 随附插件
+## 插件生态
 
-QuickDock 随应用提供 23 个开箱即用的官方插件（计算稿纸、JSON 工具箱、JWT 解码、正则提取、Markdown 预览、API 压测、PDF 工具箱、垃圾清理……），源码维护于 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)，经插件管理页「在线市场」统一安装 / 升级。
+QuickDock 采用开放的插件架构，官方插件（40+）统一在独立仓库维护与分发：
 
-插件窗口由宿主注入共享样式脚本（`common.css` / `common.js`）以兼容旧版插件；新插件页面自带 `qd-theme.css` 自包含样式，不再依赖注入。
+👉 **[quickdock-plugins](https://github.com/parieses/quickdock-plugins)** —— 插件列表、功能说明与完整开发文档（目录结构、`plugin.json` 字段、三种运行时快速开始、通信协议、调试与发布）均在该仓库 README 中。
 
----
-
-## 第三方插件开发
-
-QuickDock 提供开放的插件系统，任何人都可以为它开发第三方插件。插件本质上是包含 `plugin.json` 清单文件的一个目录，支持三种运行时模式。
-
-### 插件目录结构
-
-```
-my-plugin/
-├── plugin.json           # 插件清单（必须）
-├── main.js               # Goja 后端脚本（goja 运行时必须）
-├── my-plugin.exe         # 原生可执行文件（native 运行时必须）
-├── frontend/
-│   ├── index.html        # 前端 UI 入口（可选）
-│   ├── style.css         # 专属样式（可选）
-│   └── app.js            # 专属脚本（可选）
-├── icon.svg              # 插件图标（可选，支持 svg/png/ico/jpg）
-└── README.md             # 说明文档（推荐）
-```
-
-### plugin.json 完整字段
-
-```json
-{
-  "id": "com.example.myplugin",
-  "name": "我的插件",
-  "version": "1.0.0",
-  "description": "插件功能描述",
-  "author": "YourName",
-  "icon": "icon.svg",
-  "category": "开发者日常",
-
-  "backend": {
-    "runtime": "goja",
-    "entry": "main.js",
-    "args": []
-  },
-
-  "frontend": {
-    "enabled": true,
-    "entry": "frontend/index.html",
-    "width": 520,
-    "height": 460
-  },
-
-  "commands": [
-    {
-      "id": "hello",
-      "title": "Hello World",
-      "hotkey": "Ctrl+Shift+H",
-      "keywords": ["hello", "hi"],
-      "aliases": ["打招呼", "测试"],
-      "prefix": "/hello",
-      "matchPattern": "^[a-zA-Z]+$"
-    }
-  ],
-
-  "capabilities": ["command", "frontend"],
-  "permissions": {
-    "network": false,
-    "filesystem": false,
-    "clipboard": true
-  }
-}
-```
-
-| 字段 | 说明 |
-|------|------|
-| `id` | **必须**。反向域名格式，必须包含至少一个点号，如 `com.example.myplugin` |
-| `name` | **必须**。插件显示名称 |
-| `version` | **必须**。语义化版本号 |
-| `backend.runtime` | **必须**。运行模式：`none` / `goja` / `native` |
-| `backend.entry` | `none` 之外必须。入口文件路径 |
-| `frontend.enabled` | 是否启用前端面板。`true` 时需指定 `entry` |
-| `commands` | 注册到命令面板的命令列表 |
-| `capabilities` | 能力声明：`command`（支持命令面板）/ `frontend`（有 UI 面板）|
-| `permissions` | 权限声明：`network` / `filesystem` / `clipboard`，默认全 `false` |
-
-### 三种运行时
-
-| 运行时 | 适用场景 | 进程模型 | 开发语言 |
-|--------|---------|---------|---------|
-| `none` | 纯前端工具（计算器、编码转换） | 无后端进程，全部在 iframe 中运行 | HTML + CSS + JS |
-| `goja` | 轻量逻辑（数据转换、文本处理） | 同进程内嵌 JS 引擎，零外部依赖 | JavaScript（ES5） |
-| `native` | 系统级操作（文件管理、网络请求） | 独立子进程，JSON-RPC stdin/stdout 通信 | Go / Rust / Python 等任意语言 |
-
----
-
-#### 快速开始：纯前端插件（runtime: none）
-
-适合无需后端能力的工具类插件，如编码转换、正则测试、Markdown 预览等。
-
-**1. 创建项目结构**
-
-```
-my-tool/
-├── plugin.json
-├── frontend/
-│   └── index.html
-└── icon.svg
-```
-
-**2. plugin.json**
-
-```json
-{
-  "id": "com.example.my-tool",
-  "name": "我的工具",
-  "version": "1.0.0",
-  "description": "一个纯前端小工具",
-  "author": "YourName",
-  "icon": "icon.svg",
-  "category": "开发者日常",
-  "backend": { "runtime": "none" },
-  "frontend": {
-    "enabled": true,
-    "entry": "frontend/index.html"
-  },
-  "capabilities": ["frontend"]
-}
-```
-
-**3. 前端页面**使用 **common.css** 标准样式类构建 UI：
-
-```html
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <link rel="stylesheet" href="../common.css">
-</head>
-<body>
-<div class="p-app">
-  <div class="p-toolbar">
-    <span class="p-label">我的工具</span>
-    <div class="p-spacer"></div>
-    <span id="statusLabel" class="p-muted">就绪</span>
-  </div>
-  <div class="p-body" style="padding:10px;flex-direction:column;gap:8px">
-    <input id="input" class="p-input" placeholder="输入内容…">
-    <div id="output" class="p-card p-output">等待输入…</div>
-  </div>
-</div>
-<script>
-  // 后端通信不是必须的，纯前端可以直接操作 DOM
-  document.getElementById('input').addEventListener('input', function() {
-    var val = this.value
-    document.getElementById('output').textContent = val ? '你输入了: ' + val : '等待输入…'
-  })
-
-  // 接收主题和语言传递
-  window.addEventListener('message', function(e) {
-    if (e.data && e.data.type === 'plugin:init' && e.data.data) {
-      if (e.data.data.theme) document.documentElement.setAttribute('data-theme', e.data.data.theme)
-      if (e.data.data.locale) document.documentElement.setAttribute('lang', e.data.data.locale)
-    }
-  })
-</script>
-</body>
-</html>
-```
-
-> 完整模板见 `plugins/templates/none/`。
-
----
-
-#### 快速开始：Goja 插件（runtime: goja）
-
-适合需要轻量后端的插件，内嵌 JavaScript 引擎，无需外部进程。
-
-**1. plugin.json**（如上，`runtime` 设为 `goja`）
-
-**2. 后端 main.js** — 必须导出 `handleInitialize` 和 `handleExecute`：
-
-```javascript
-// handleInitialize — 插件启动时调用（可选）
-function handleInitialize(params) {
-  api.log('插件初始化完成')
-  return { status: 'ready', version: '1.0.0' }
-}
-
-// handleExecute — 处理命令执行（必须）
-function handleExecute(params) {
-  var command = params.command || ''
-  var input = params.input || {}
-  var text = input.text || ''
-
-  switch (command) {
-    case 'hello':
-      return { text: 'Hello, ' + text + '!', display: 'Hello, ' + text + '!' }
-    default:
-      return { error: '未知命令: ' + command }
-  }
-}
-```
-
-**可用 Goja API：**
-
-| API | 说明 | 所需权限 |
-|-----|------|---------|
-| `api.log(msg)` | 写 INFO 日志 | — |
-| `api.warn(msg)` | 写 WARN 日志 | — |
-| `api.error(msg)` | 写 ERROR 日志 | — |
-| `api.readFile(path)` | 读取文件 | `filesystem` |
-| `api.writeFile(path, data)` | 写入文件 | `filesystem` |
-| `api.httpGet(url)` | HTTP GET 请求 | `network` |
-| `api.httpPost(url, body)` | HTTP POST 请求 | `network` |
-| `api.db.exec(sql)` | 执行 SQL（插件专属 SQLite 数据库） | — |
-| `api.db.query(sql)` | 查询 SQL，返回数组 | — |
-
-**3. 前端与后端通信**：通过 `window.parent.postMessage` 发起 `plugin:execute`：
-
-```javascript
-function pluginExec(command, data) {
-  return new Promise(function(resolve, reject) {
-    var id = Date.now() + '_' + Math.random().toString(36).slice(2, 6)
-    var timeout = setTimeout(function() { reject(new Error('响应超时')) }, 10000)
-
-    var handler = function(e) {
-      if (e.data && e.data.type === 'plugin:result') {
-        window.removeEventListener('message', handler)
-        clearTimeout(timeout)
-        if (e.data.error) reject(new Error(e.data.error))
-        else resolve(e.data.data)
-      }
-    }
-    window.addEventListener('message', handler)
-    window.parent.postMessage({ type: 'plugin:execute', id: id, command: command, input: { text: data } }, '*')
-  })
-}
-
-// 调用后端
-pluginExec('hello', 'World').then(function(data) {
-  console.log('结果:', data)
-})
-```
-
-> 完整模板见 `plugins/templates/goja/`。
-
----
-
-#### 快速开始：原生插件（runtime: native）
-
-适合系统级操作，可以用任意语言编写独立子进程，通过 JSON-RPC 2.0 over stdin/stdout 通信。
-
-**1. plugin.json**（`runtime` 设为 `native`，`entry` 指向可执行文件）
-
-**2. 后端（Go 示例）**
-
-```go
-package main
-
-import (
-	"bufio"
-	"encoding/json"
-	"fmt"
-	"os"
-)
-
-type Request struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Method  string      `json:"method"`
-	Params  interface{} `json:"params,omitempty"`
-}
-
-type Response struct {
-	JSONRPC string      `json:"jsonrpc"`
-	ID      int         `json:"id"`
-	Result  interface{} `json:"result,omitempty"`
-	Error   interface{} `json:"error,omitempty"`
-}
-
-func main() {
-	scanner := bufio.NewScanner(os.Stdin)
-	for scanner.Scan() {
-		var req Request
-		if err := json.Unmarshal([]byte(scanner.Text()), &req); err != nil {
-			continue
-		}
-		switch req.Method {
-		case "initialize":
-			fmt.Println(`{"jsonrpc":"2.0","id":` + fmt.Sprint(req.ID) + `,"result":{"status":"ready"}}`)
-		case "host.ping":
-			fmt.Println(`{"jsonrpc":"2.0","id":` + fmt.Sprint(req.ID) + `,"result":{"pong":true}}`)
-		case "plugin.execute":
-			fmt.Println(`{"jsonrpc":"2.0","id":` + fmt.Sprint(req.ID) + `,"result":{"text":"Hello from native plugin!","success":true}}`)
-		}
-	}
-}
-```
-
-**JSON-RPC 协议：**
-
-| 方向 | 方法 | 说明 |
-|------|------|------|
-| 宿主→插件 | `initialize` | 插件初始化，返回 `{status: "ready"}` |
-| 宿主→插件 | `host.ping` | 健康检查，返回 `{pong: true}`（每 30 秒） |
-| 宿主→插件 | `plugin.execute` | 执行命令，`params = {command, input}` |
-| 插件→宿主 | `host.shutdown` | 插件请求退出 |
-
-**插件可调用的宿主方法（回调请求）：**
-
-| 方法 | 说明 | 所需权限 |
-|------|------|---------|
-| `host.clipboard.read` / `write` | 读写剪贴板 | `clipboard` |
-| `host.dialog.open` / `save` | 文件对话框 | `filesystem` |
-| `http.get` / `http.post` | HTTP 请求 | `network` |
-| `db.get` / `db.set` | 插件专属存储 | — |
-| `log.info` / `log.warn` / `log.error` | 日志（写插件日志文件） | — |
-| `ui.show` / `ui.hide` | 显示/隐藏前端面板 | — |
-| `host.notify` | 系统通知 | — |
-
-> **插件日志**：`log.*` 与 goja `api.log/api.warn/api.error` 统一写入 **`<dataDir>/logs/plugin-YYYYMMDD.log`**（按日滚动，与应用主日志 `quickdock-*.log` 分离），行首带 `[plugin:<id>]` 前缀便于按插件过滤。插件原生进程的 stderr（记 WARN）与未被 JSON-RPC 解析的 stdout 原始打印（记 `[stdout]`）也会进同一文件；协议外的 stdout 打印不会破坏通信，但建议调试输出统一走 `log.*`/`api.*`。
-
-> **native 插件用 RPC 写日志**：与调用 `host.clipboard.*` 是同一条通道——向 stdout 发回调请求即可精确控制级别：`{"jsonrpc":"2.0","id":1,"method":"log.info","params":{"message":"..."}}`（级别换 `log.warn`/`log.error`），参数仅 `message`、免权限，宿主先落盘后回响应。⚠️ **必须带 `id`**——宿主对不带 `id` 的通知（notification）会静默丢弃，不执行也不落盘。完整封装示例见 `plugins/external/plugin-dev-guide.md`「通过 RPC 写日志」。
-
-> 完整原生 Go 模板见 `plugins/templates/native/`，包含完整的请求分发和主机方法调用示例。
-
----
-
-### 标准 UI 样式（common.css）
-
-所有插件前端自动注入 `common.css`，提供统一的设计语言。插件开发时直接使用以下 CSS 变量和样式类：
-
-**CSS 变量：**
-
-```
---bg-primary: #1a1a1a   --bg-secondary: #1e1e1e   --bg-tertiary: #242424
---text-primary: #e8e8e8  --text-secondary: #aaa    --text-muted: #999
---accent: #4a9eff        --success: #28c864        --danger: #e24b4a
---warning: #f0a030       --radius: 6px             --font: 系统字体栈
---font-mono: 等宽字体     --transition: 0.1s        --border: #2a2a2a
-```
-
-**布局类：** `.p-app`（全屏容器）/ `.p-toolbar`（工具栏）/ `.p-body`（内容区）/ `.p-pane`（面板）/ `.p-statusbar`（状态栏）
-
-**按钮类：** `.p-btn` / `.p-btn-primary`（蓝色）/ `.p-btn-sm` / `.p-btn-group`
-
-**表单类：** `.p-input` / `.p-input-mono` / `.p-select` / `.p-textarea`
-
-**列表卡片类：** `.p-list` / `.p-item` / `.p-item-label` / `.p-item-desc` / `.p-card`
-
-**文本类：** `.p-output`（代码输出区）/ `.p-label` / `.p-muted` / `.p-empty` / `.p-error` / `.p-spacer` / `.p-sep`
-
-> 插件会自动适配 QuickDock 的明暗主题：通过 `plugin:init` 和 `plugin:theme` 消息传递 `data-theme` 属性，`common.css` 内置 `html[data-theme="light"]` 浅色适配规则。
-
----
-
-### 前端通信协议（postMessage）
-
-插件前端页面运行在 iframe 沙箱中，与主应用通过 `postMessage` 通信。
-
-| type | 方向 | 说明 |
-|------|------|------|
-| `plugin:init` | 主应用→插件 | 初始化通知，携带 `theme`、`locale`、`text`（剪贴板内容） |
-| `plugin:theme` | 主应用→插件 | 主题/语言变更通知 |
-| `plugin:execute` | 插件→主应用 | 向后端发送执行命令请求 |
-| `plugin:result` | 主应用→插件 | 命令执行结果响应 |
-| `plugin:pickfile` | 插件→主应用 | 原生文件选择 `{id, title?, filter?, pattern?}` → 回 `plugin:pickfile-result {id, path\|null}` |
-| `plugin:readfile` | 插件→主应用 | 读取选中文件 `{id, path}` → 回 `plugin:readfile-result {id, payload\|null}`，`payload={type:'text'\|'dataurl', content}` |
-
-> **推荐直接用宿主注入的桥接 API**（无需手写 postMessage）：`window.qdPickFile(opts?)` 打开原生文件对话框返回路径（取消为 `null`）；`window.qdReadFile(path)` 读取文件内容（文本→`{type:'text',content}`，图片/二进制→`{type:'dataurl',content}`）。选文件务必走 `qdPickFile`——iframe 沙箱内 `<input type=file>` 会触发宿主窗口失焦问题。
-
-**通信示例：**
-
-```javascript
-// 插件前端 → 主应用：执行命令
-window.parent.postMessage({
-  type: 'plugin:execute',
-  id: 'req_001',
-  command: 'hello',
-  input: { text: 'World' }
-}, '*')
-
-// 接收结果
-window.addEventListener('message', function(e) {
-  if (e.data && e.data.type === 'plugin:result') {
-    // e.data.id → 请求标识
-    // e.data.data → 结果数据
-    // e.data.error → 错误信息
-  }
-  // 初始化（主题/语言）
-  if (e.data && e.data.type === 'plugin:init' && e.data.data) {
-    if (e.data.data.theme) document.documentElement.setAttribute('data-theme', e.data.data.theme)
-    if (e.data.data.locale) document.documentElement.setAttribute('lang', e.data.data.locale)
-  }
-})
-```
-
----
-
-### 安装与测试
-
-1. **打包插件**：将插件目录打包为 ZIP 文件，文件名不限
-2. **安装插件**（三种方式）：
-   - **在线市场一键安装（推荐）**：进入 **插件管理** 页面，切到 **在线市场** 标签，自动拉取官方插件列表，点「安装」即可，无需手动下载；已装插件显示「升级」按钮
-   - **从文件安装**：点击 **从文件安装**，选择 ZIP 包
-   - **拖拽安装**：直接将 ZIP 拖拽到插件管理页面
-3. **验证**：安装成功后，插件出现在管理页面列表中，状态应为 `running`
-4. **调试**：
-   - `none` / 前端部分：使用浏览器 DevTools 调试 iframe
-   - `goja`：查看 QuickDock 后端日志
-   - `native`：插件 stdout/stderr 会被记录到 QuickDock 日志
-
-### 分发与发布
-
-1. 将插件目录打包为 `{your-plugin-id}.zip`
-2. 分发 ZIP 文件，用户安装即可使用
-3. （可选）在 GitHub 上发布插件，供社区下载
-4. （推荐）提交到官方插件市场 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)，经 CI 自动打包并上线「在线市场」，用户可一键安装 / 升级
-
-> **安全提示**：`permissions` 字段声明了插件的权限需求，用户安装时可见。请按最小权限原则声明，如无需网络功能则不声明 `network`。
-
----
-
-## 插件架构参考
-
-### 核心源码文件
-
-| 文件 | 作用 |
-|------|------|
-| `internal/plugin/types.go` | PluginManifest、PluginInfo 等类型定义 |
-| `internal/plugin/manifest.go` | plugin.json 加载与校验 |
-| `internal/plugin/manager.go` | 插件管理器（加载/卸载/健康检查/重启） |
-| `internal/plugin/rpc.go` | JSON-RPC 2.0 通信层 |
-| `internal/plugin/host.go` | 宿主方法注册与权限校验 |
-| `internal/plugin/installer.go` | ZIP 安装/校验/回滚 |
-| `internal/plugin/window_manager.go` | 插件独立窗口管理 |
-| `services/plugin.go` | Wails 前端绑定（安装/启用/禁用/卸载/执行） |
-| `plugins/templates/` | 三种运行时的完整开发模板 |
-
-### 生命周期
-
-```text
-安装 → 加载 plugin.json → 校验字段
-     → runtime=none:  就绪，无后端进程
-     → runtime=goja:  启动 goja VM，执行 main.js，调用 handleInitialize
-     → runtime=native: spawn 子进程，发送 initialize 请求
-     → 等待请求 → 处理命令 → 响应
-     → 卸载时: 停止进程/VM，清理热键，删除目录
-```
-
-- **崩溃自动重启**：native 子进程崩溃后自动重启，最多 3 次（指数退避 2s → 4s → 6s）
-- **健康检查**：每 30 秒 ping 一次，连续 3 次无响应标记为 `unresponsive`
-- **安全防护**：ZIP 安装时校验路径穿越攻击（Zip Slip），限制解压上限 100MB，单文件上限 50MB
-
----
+主仓库仅保留插件**宿主实现**（安装 / 启停 / 通信 / 热键 / 窗口管理），源码位于 `internal/plugin/`（类型 / 清单 / 管理器 / JSON-RPC / 宿主 / 安装器 / 窗口）与 `services/plugin_*.go`（Wails 前端绑定）；前端经「插件管理」页的「在线市场」标签一键安装 / 升级官方插件。
 
 ## 构建与打包
 

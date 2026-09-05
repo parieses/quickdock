@@ -425,6 +425,14 @@ func (r *RabbitMQRuntime) ensureManagementPlugin(version string, onLog func(stri
 
 func (r *RabbitMQRuntime) DefaultPort() int { return rabbitmqPort }
 
+// WebConsolePort 返回管理后台端口 15672（仅当管理插件启用时；否则无 Web 控制台）。
+func (r *RabbitMQRuntime) WebConsolePort(version string) int {
+	if enabled, _ := r.IsManagementEnabled(version); enabled {
+		return 15672
+	}
+	return 0
+}
+
 func (r *RabbitMQRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := r.InstalledVersions()
 	if version == "" {
