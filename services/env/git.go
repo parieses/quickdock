@@ -29,6 +29,16 @@ func NewGitRuntime() *GitRuntime {
 }
 
 func (g *GitRuntime) Kind() Runtime                 { return RuntimeGit }
+func (g *GitRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (g *GitRuntime) ParseVersion(out string) (string, error) {
+	const p = "git version "
+	if i := strings.Index(out, p); i >= 0 {
+		if v := strings.TrimSpace(out[i+len(p):]); v != "" {
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeGit))
+}
 func (g *GitRuntime) DisplayName() string          { return DisplayName(RuntimeGit) }
 func (g *GitRuntime) SupportedPlatforms() []string { return []string{"windows", "linux", "darwin"} }
 func (g *GitRuntime) Recommended() []string        { return Versions(RuntimeGit) }

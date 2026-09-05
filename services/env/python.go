@@ -25,6 +25,13 @@ func NewPythonRuntime() *PythonRuntime {
 }
 
 func (p *PythonRuntime) Kind() Runtime                 { return RuntimePython }
+func (p *PythonRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (p *PythonRuntime) ParseVersion(out string) (string, error) {
+	if v := parsePythonVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimePython))
+}
 func (p *PythonRuntime) DisplayName() string          { return DisplayName(RuntimePython) }
 func (p *PythonRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (p *PythonRuntime) Recommended() []string        { return Versions(RuntimePython) }

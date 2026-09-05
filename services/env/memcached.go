@@ -34,6 +34,13 @@ func NewMemcachedRuntime() *MemcachedRuntime {
 }
 
 func (m *MemcachedRuntime) Kind() Runtime                 { return RuntimeMemcached }
+func (m *MemcachedRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (m *MemcachedRuntime) ParseVersion(out string) (string, error) {
+	if v := parseMemcachedVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeMemcached))
+}
 func (m *MemcachedRuntime) DisplayName() string          { return DisplayName(RuntimeMemcached) }
 func (m *MemcachedRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (m *MemcachedRuntime) Recommended() []string        { return Versions(RuntimeMemcached) }

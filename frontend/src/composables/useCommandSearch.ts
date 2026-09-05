@@ -462,8 +462,8 @@ export function useCommandSearch(deps: SearchDeps) {
     return results
   })
 
-  // 「最近使用」默认只显示前 9 条，其余通过展开/收起按钮切换查看
-  const RECENT_VISIBLE = 9
+  // 「最近使用」默认只显示前 15 条，其余通过展开/收起按钮切换查看
+  const RECENT_VISIBLE = 15
   const recentExpanded = ref(false)
   function toggleRecentExpanded() { recentExpanded.value = !recentExpanded.value }
 

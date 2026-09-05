@@ -24,6 +24,11 @@ func NewComposerRuntime() *ComposerRuntime {
 }
 
 func (c *ComposerRuntime) Kind() Runtime                 { return RuntimeComposer }
+// Composer 通过 composer.phar 分发，不具备可探测版本号的独立可执行文件，故不可通过导入目录识别版本。
+func (c *ComposerRuntime) DetectArgs() []string { return nil }
+func (c *ComposerRuntime) ParseVersion(out string) (string, error) {
+	return "", fmt.Errorf("Composer 不支持通过目录导入")
+}
 func (c *ComposerRuntime) DisplayName() string          { return DisplayName(RuntimeComposer) }
 func (c *ComposerRuntime) SupportedPlatforms() []string { return []string{"windows", "linux", "darwin"} }
 func (c *ComposerRuntime) Recommended() []string        { return Versions(RuntimeComposer) }

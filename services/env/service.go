@@ -30,7 +30,9 @@ type runningService struct {
 	// pty 非空表示本服务走 Windows 伪控制台（ConPTY）拉起。
 	// 用于「标准句柄被重定向就立刻退出」的控制台程序（如 adamyg 版 memcached_service.exe）。
 	// 与 cmd 互斥：pty 非空时 cmd 为 nil。
-	pty     *sysutil.ConPty
+	pty *sysutil.ConPty
+	// pid 记录进程 pid；当 cmd/pty 为 nil（如外部/服务方式拉起）时作为兜底停止依据。
+	pid     int
 	version string
 	exe     string
 	// stopping 标记本次退出是宿主主动停止（killTracked/forget）而非崩溃，
@@ -61,6 +63,9 @@ func (s *serviceManager) pid(rt Runtime) int {
 		}
 		if c.cmd != nil && c.cmd.Process != nil {
 			return c.cmd.Process.Pid
+		}
+		if c.pid != 0 {
+			return c.pid
 		}
 	}
 	return 0
@@ -106,6 +111,11 @@ func (s *serviceManager) killTracked(rt Runtime) {
 		if err := c.cmd.Process.Kill(); err != nil {
 			logger.W("[env] killTracked %s 终止失败: %v", rt, err)
 		}
+		return
+	}
+	if c.pid != 0 {
+		killTree(c.pid)
+		return
 	}
 }
 
@@ -139,7 +149,7 @@ func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []strin
 		return err
 	}
 	pid := cmd.Process.Pid
-	s.svcs[rt] = &runningService{cmd: cmd, version: version, exe: exe}
+	s.svcs[rt] = &runningService{cmd: cmd, pid: pid, version: version, exe: exe}
 	s.mu.Unlock()
 	logger.I("[env] start %s 成功 pid=%d", rt, pid)
 
@@ -184,6 +194,7 @@ func (s *serviceManager) start(rt Runtime, version, exe, wd string, args []strin
 	}()
 	return nil
 }
+
 
 // startPTY 与 start 等价，但改用 Windows 伪控制台（ConPTY）拉起子进程。
 //

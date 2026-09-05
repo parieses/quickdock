@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"quickdock/internal/sysutil"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -20,7 +21,9 @@ const apacheDefaultPort = 80
 
 // apacheSrvRootRe 匹配 Apache Lounge 默认 httpd.conf 中的 `Define SRVROOT "c:/Apache24"` 指令，
 // 安装后改写为 QuickDock 的版本目录，使 modules/ 等相对路径正确解析（否则 httpd 会去 c:/Apache24 找模块）。
-var apacheSrvRootRe = regexp.MustCompile(`(?i)^(\s*Define\s+SRVROOT\s+").*(")`)
+// ⚠️ 必须带 (?m)：该指令不在文件首行，缺 multiline 时 ^ 只匹配整段文本开头导致整条替换失效、
+// SRVROOT 仍是 c:/Apache24，httpd 启动报 "ServerRoot must be a valid directory"。
+var apacheSrvRootRe = regexp.MustCompile(`(?im)^\s*Define\s+SRVROOT\s+".*"`)
 
 // ApacheRuntime 管理便携 Apache HTTP Server 运行时（Apache Lounge VS17 构建）。
 // 实现 ServiceController：以 `httpd -d <dir>`（前台阻塞）拉起，由 svcMgr 记录 PID 并捕获日志。
@@ -34,6 +37,13 @@ func NewApacheRuntime() *ApacheRuntime {
 }
 
 func (a *ApacheRuntime) Kind() Runtime                 { return RuntimeApache }
+func (a *ApacheRuntime) DetectArgs() []string          { return []string{"-v"} }
+func (a *ApacheRuntime) ParseVersion(out string) (string, error) {
+	if v := parseApacheVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeApache))
+}
 func (a *ApacheRuntime) DisplayName() string          { return DisplayName(RuntimeApache) }
 func (a *ApacheRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (a *ApacheRuntime) Recommended() []string        { return Versions(RuntimeApache) }
@@ -89,7 +99,11 @@ func (a *ApacheRuntime) Install(ctx context.Context, version string, cb InstallC
 		version = Versions(RuntimeApache)[0]
 	}
 	dir := a.versionDir(version)
-	if _, err := os.Stat(a.ExeFor(version)); err == nil {
+	// 部分解压保护：若 Apache24 子目录仍在，说明上次 lift 未成功（如大小写同名冲突中断），
+	// 视为无效安装，清理后重新解压。否则 ExeFor 已就位但 httpd.conf 未改 SRVROOT 的半残状态会被误判为已安装。
+	if _, err := os.Stat(filepath.Join(dir, "Apache24")); err == nil {
+		os.RemoveAll(dir)
+	} else if _, err := os.Stat(a.ExeFor(version)); err == nil {
 		if cb.OnLog != nil {
 			cb.OnLog("Apache " + version + " 已安装: " + a.ExeFor(version))
 		}
@@ -122,17 +136,29 @@ func (a *ApacheRuntime) Install(ctx context.Context, version string, cb InstallC
 	if err := Extract(zipPath, dir); err != nil {
 		return fmt.Errorf("解压 Apache 失败: %w", err)
 	}
+	// Apache Lounge 的 zip 顶层同时含 Apache24/、ReadMe.txt、-- Win64 VS17 --/ 三个条目，
+	// 不满足「单一顶层目录」条件，Extract 不会自动剥离。将 Apache24/ 内容提升到版本目录根，
+	// 使 ExeFor/ConfigPath 约定的 <版本>/bin/httpd.exe、<版本>/conf/httpd.conf 路径成立。
+	if err := a.liftApache24(dir); err != nil {
+		return fmt.Errorf("整理 Apache 目录失败: %w", err)
+	}
 	if _, err := os.Stat(a.ExeFor(version)); err != nil {
 		return fmt.Errorf("解压完成但未找到 %s", a.ExeFor(version))
 	}
 	// 改写 SRVROOT → 版本目录（Apache Lounge 默认指向 c:/Apache24），使模块/日志相对路径正确
 	if err := a.ensureConfig(version); err != nil {
-		logger.W("[env][apache] 改写 SRVROOT 失败（启动前需手动指定 -d）: %v", err)
+		return fmt.Errorf("改写 Apache httpd.conf 的 SRVROOT 失败: %w", err)
 	}
 	if cb.OnLog != nil {
 		cb.OnLog("Apache " + version + " 解压完成")
 	}
 	return nil
+}
+
+// ConfigPath 返回某版本 httpd.conf 的绝对路径（Apache Lounge 包为 <版本目录>/conf/httpd.conf）。
+// 实现通用 ConfigProvider 接口：读写由通用层统一提供，此处只需声明配置文件位置。
+func (a *ApacheRuntime) ConfigPath(version string) string {
+	return filepath.Join(a.versionDir(version), "conf", "httpd.conf")
 }
 
 // ensureConfig 把 httpd.conf 的 SRVROOT 改写为版本目录（正斜杠），失败返回错误（不影响安装本身）。
@@ -143,14 +169,71 @@ func (a *ApacheRuntime) ensureConfig(version string) error {
 		return err
 	}
 	srvroot := strings.ReplaceAll(a.versionDir(version), "\\", "/")
-	replaced := apacheSrvRootRe.ReplaceAllStringFunc(string(data), func(line string) string {
-		m := apacheSrvRootRe.FindStringSubmatch(line)
-		if len(m) < 3 {
-			return line
-		}
-		return m[1] + srvroot + m[2]
-	})
+	newLine := `Define SRVROOT "` + srvroot + `"`
+	replaced := apacheSrvRootRe.ReplaceAllString(string(data), newLine)
 	return os.WriteFile(p, []byte(replaced), 0644)
+}
+
+// liftApache24 将 Apache Lounge 包内的 Apache24/ 子目录内容提升到版本目录根，
+// 使 ExeFor/ConfigPath 约定的 <版本>/bin/httpd.exe、<版本>/conf/httpd.conf 路径成立。
+// 已扁平（无 Apache24/ 子目录）时直接返回，幂等可重复调用。
+//
+// 注意：Apache Lounge 的 zip 顶层同时含 Apache24/、ReadMe.txt、-- Win64 VS17 --/，
+// 其中 Apache24/README.txt 与顶层 ReadMe.txt 在 Windows 大小写不敏感文件系统上同名冲突。
+// 因此合并时对「同名重复文件」直接跳过（保留顶层那份），对目录则递归合并。
+func (a *ApacheRuntime) liftApache24(dir string) error {
+	src := filepath.Join(dir, "Apache24")
+	fi, err := os.Stat(src)
+	if err != nil || !fi.IsDir() {
+		return nil // 已经是扁平结构，无需处理
+	}
+	if err := mergeInto(src, dir); err != nil {
+		return err
+	}
+	// 清理顶层说明目录（部分构建包内存在，非必需）
+	os.RemoveAll(filepath.Join(dir, "-- Win64 VS17 --"))
+	if err := os.Remove(src); err != nil {
+		logger.W("[env][apache] 清理 Apache24 空目录失败: %v", err)
+	}
+	return nil
+}
+
+// mergeInto 将 src 下的条目移动/合并到 dst：
+//   - 目标不存在 → 直接移动；
+//   - 目标存在且同为目录 → 递归合并；
+//   - 目标存在且同为文件（含大小写差异的同名重复）→ 跳过源文件（保留目标已有那份）；
+//   - 其他冲突（文件 vs 目录）→ 返回错误。
+func mergeInto(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		from := filepath.Join(src, e.Name())
+		to := filepath.Join(dst, e.Name())
+		toFi, err := os.Lstat(to)
+		if err != nil {
+			if err := os.Rename(from, to); err != nil {
+				return fmt.Errorf("移动 %s 失败: %w", from, err)
+			}
+			continue
+		}
+		if e.IsDir() {
+			if !toFi.IsDir() {
+				return fmt.Errorf("合并冲突：%s 既是目录又是文件", to)
+			}
+			if err := mergeInto(from, to); err != nil {
+				return err
+			}
+			continue
+		}
+		// 文件同名（大小写不敏感 fs 上 ReadMe.txt 与 README.txt 视为同一）重复，跳过源文件
+		logger.W("[env][apache] 跳过重复文件 %s（顶层已存在同名文件）", to)
+		if err := os.Remove(from); err != nil {
+			logger.W("[env][apache] 删除重复源文件 %s 失败: %v", from, err)
+		}
+	}
+	return nil
 }
 
 // ---- ServiceController ----
@@ -202,6 +285,25 @@ func (a *ApacheRuntime) Start(ctx context.Context, version string, onLog func(st
 
 func (a *ApacheRuntime) LogPath(version string) string {
 	return filepath.Join(a.versionDir(version), "logs", "apache.log")
+}
+
+func (a *ApacheRuntime) ValidateConfig(version string) error {
+	exe := a.ExeFor(version)
+	for _, ins := range a.InstalledVersions() {
+		if ins.Version == version {
+			if ins.Scope == "system" {
+				exe = ins.Path
+			}
+			break
+		}
+	}
+	cmd := sysutil.Command(exe, "-t")
+	cmd.Dir = a.versionDir(version)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (a *ApacheRuntime) Stop(version string) error {

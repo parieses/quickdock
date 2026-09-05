@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"quickdock/internal/sysutil"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -28,6 +29,15 @@ func NewNginxRuntime() *NginxRuntime {
 }
 
 func (n *NginxRuntime) Kind() Runtime                 { return RuntimeNginx }
+func (n *NginxRuntime) DetectArgs() []string          { return []string{"-v"} }
+func (n *NginxRuntime) ParseVersion(out string) (string, error) {
+	if i := strings.Index(out, "nginx/"); i >= 0 {
+		if v := strings.TrimSpace(out[i+len("nginx/"):]); v != "" {
+			return v, nil
+		}
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeNginx))
+}
 func (n *NginxRuntime) DisplayName() string          { return DisplayName(RuntimeNginx) }
 func (n *NginxRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (n *NginxRuntime) Recommended() []string        { return Versions(RuntimeNginx) }
@@ -68,6 +78,12 @@ func (n *NginxRuntime) InstalledVersions() []Install {
 		}
 	}
 	return out
+}
+
+// ConfigPath 返回某版本 nginx.conf 的绝对路径（官方 Windows zip 解压后为 <版本目录>/conf/nginx.conf）。
+// 实现通用 ConfigProvider 接口：读写由通用层统一提供，此处只需声明配置文件位置。
+func (n *NginxRuntime) ConfigPath(version string) string {
+	return filepath.Join(n.versionDir(version), "conf", "nginx.conf")
 }
 
 // DeleteVersion 删除某便携 Nginx 版本目录（系统 PATH 上的版本无目录可删，返回错误）。
@@ -171,6 +187,25 @@ func (n *NginxRuntime) Start(ctx context.Context, version string, onLog func(str
 		onLog("启动 Nginx " + version + " …")
 	}
 	return svcMgr.start(RuntimeNginx, version, exe, wd, nil, "", onLog)
+}
+
+func (n *NginxRuntime) ValidateConfig(version string) error {
+	exe := n.ExeFor(version)
+	for _, ins := range n.InstalledVersions() {
+		if ins.Version == version {
+			if ins.Scope == "system" {
+				exe = ins.Path
+			}
+			break
+		}
+	}
+	cmd := sysutil.Command(exe, "-t")
+	cmd.Dir = n.versionDir(version)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func (n *NginxRuntime) Stop(version string) error {

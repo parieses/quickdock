@@ -52,8 +52,9 @@ func saveMeta(rt Runtime, m runtimeMeta) error {
 	return os.WriteFile(p, data, 0o644)
 }
 
-// SetActive 设置某运行时的激活版本（其 bin 目录即“环境变量指向”的版本）。version=="" 表示清除激活。
-func SetActive(rt Runtime, version string) error {
+// writeActiveMeta 将某运行时的激活版本写入元数据文件（其 bin 目录即“环境变量指向”的版本）。
+// version=="" 表示清除激活。与 Manager.SetActive 方法同名易混，故显式命名以区分。
+func writeActiveMeta(rt Runtime, version string) error {
 	m := loadMeta(rt)
 	m.Active = version
 	return saveMeta(rt, m)

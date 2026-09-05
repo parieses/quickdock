@@ -43,13 +43,17 @@ const (
 	RuntimeMongoDB    Runtime = "mongodb"
 	RuntimeMailpit    Runtime = "mailpit"
 	RuntimeMinIO      Runtime = "minio"
+	RuntimeFrpc       Runtime = "frpc"
+	RuntimeFTP        Runtime = "ftp"
 )
 
-// 环境管理分组（侧边栏按组归类：语言 / Web 服务器 / 缓存 / 工具 / 数据库）
+// 环境管理分组（侧边栏按组归类：语言 / Web 服务器 / 缓存与存储 / 工具 / 数据库）
+// 与前端 EnvironmentPage.vue 的 GROUP_ORDER / GROUP_LABEL 保持一致。
+// 后端 List() 会把这些值回填到 RuntimeInfo.Group，前端合并时以后端为准，避免两侧分组发散。
 const (
 	GroupLanguage  = "language"
 	GroupWebServer = "webserver"
-	GroupCache     = "cache"
+	GroupStorage   = "storage"
 	GroupTool      = "tool"
 	GroupDatabase  = "database"
 )
@@ -69,8 +73,11 @@ type runtimeDef struct {
 	sources   []Source
 	versURL   string // 上游全量版本列表地址（空=只用推荐列表）
 	versParse func(body []byte) []string // 解析版本列表（返回形如 "1.25.0" / "v22.22.2" 的版本号）
-	// versHTMLFallbackParse 当 API 失败时的 HTML 解析兜底；htmlFallbackURL 返回对应 HTML 页面地址
+	// versHTMLFallbackParse 当 API 失败时的 HTML 解析兜底；fallbackHTMLURL 返回对应 HTML 页面地址
 	versHTMLFallbackParse func(body []byte) []string
+	// fallbackHTMLURL 该运行时 GitHub Releases 页面的 HTML 地址（API 不可用时兜底解析版本）。
+	// 大多数 GitHub Releases 可共用默认 HTML tag 解析器，故直接作为自描述字段，新增运行时无需改中心 switch。
+	fallbackHTMLURL string
 }
 
 var (
@@ -90,16 +97,16 @@ var (
 			{ID: "windowsphpnet", Name: "windows.php.net (releases VS17)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs17-x64.zip")},
 			{ID: "windowsphpnet-rel", Name: "windows.php.net (releases VS16)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs16-x64.zip")},
 		}},
-		RuntimeRedis: {display: "Redis", group: GroupCache, versions: []string{"7.4.0", "7.2.5", "7.0.15"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, versHTMLFallbackParse: parseRedisVersionsHTML, sources: []Source{
+		RuntimeRedis: {display: "Redis", group: GroupStorage, versions: []string{"7.4.0", "7.2.5", "7.0.15"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, versHTMLFallbackParse: parseRedisVersionsHTML, fallbackHTMLURL: "https://github.com/redis-windows/redis-windows/releases", sources: []Source{
 			{ID: "rediswindows", Name: "redis-windows/redis-windows (GitHub)", Build: redisURL("https://github.com/redis-windows/redis-windows/releases/download/{version}/Redis-{version}-Windows-x64-msys2.zip")},
 		}},
 		RuntimeNginx: {display: "Nginx", group: GroupWebServer, versions: []string{"1.27.5", "1.26.3", "1.25.5"}, versURL: "https://nginx.org/download/", versParse: parseNginxVersions, sources: []Source{
 			{ID: "nginxorg", Name: "nginx.org 官方", Build: nginxURL("https://nginx.org/download/nginx-{version}.zip")},
 		}},
-		RuntimeGit: {display: "Git", group: GroupTool, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, sources: []Source{
+		RuntimeGit: {display: "Git", group: GroupTool, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, fallbackHTMLURL: "https://github.com/git-for-windows/git/releases", sources: []Source{
 			{ID: "gfw", Name: "git-for-windows (GitHub)", Build: gitURL("https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}.windows.1-64-bit.zip")},
 		}},
-		RuntimeCaddy: {display: "Caddy", group: GroupWebServer, versions: []string{"2.8.4", "2.7.6", "2.6.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, sources: []Source{
+		RuntimeCaddy: {display: "Caddy", group: GroupWebServer, versions: []string{"2.8.4", "2.7.6", "2.6.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, fallbackHTMLURL: "https://github.com/caddyserver/caddy/releases", sources: []Source{
 			{ID: "caddyserver", Name: "caddyserver/caddy (GitHub)", Build: caddyURL("https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_windows_amd64.zip")},
 		}},
 		RuntimeComposer: {display: "Composer", group: GroupTool, versions: []string{"2.7.7", "2.6.6", "2.5.8"}, versURL: "https://getcomposer.org/versions", versParse: parseComposerVersions, sources: []Source{
@@ -111,21 +118,26 @@ var (
 		RuntimePython: {display: "Python", group: GroupLanguage, versions: []string{"3.12.7", "3.11.9", "3.10.14"}, versURL: "https://www.python.org/ftp/python/", versParse: parsePythonVersions, sources: []Source{
 			{ID: "pythonorg", Name: "python.org 官方", Build: pythonURL("https://www.python.org/ftp/python/{version}/python-{version}-embed-amd64.zip")},
 		}},
-		RuntimeApache: {display: "Apache", group: GroupWebServer, versions: []string{"2.4.62", "2.4.61"}, sources: []Source{
-			{ID: "apachelounge", Name: "Apache Lounge (VS17)", Build: apacheURL("https://www.apachelounge.com/download/VS17/binaries/httpd-{version}-win64-VS17.zip")},
+		// ⚠️ Apache Lounge 文件名含构建日期且 VS 版本会升级（httpd-2.4.66-251206-Win64-VS17.zip / httpd-2.4.68-260827-Win64-VS18.zip），
+		// 构建日期无法由版本号推导，静态模板必然 404（且返回 HTTP 200 的 HTML 错误页，伪装成有效下载）。
+		// URL 与版本列表均由 apacheFetchIndex 抓取官方目录页动态解析（VS17/VS18 两页，正则大小写不敏感），
+		// 见下方 apacheURL / apacheVersParse。当前 2.4.66 在 VS17、2.4.68 在 VS18，均已实测可解析为有效 zip。
+		RuntimeApache: {display: "Apache", group: GroupWebServer, versions: []string{"2.4.68", "2.4.66"}, versURL: apacheLoungeBase + "/download/VS17/", versParse: apacheVersParse, sources: []Source{
+			{ID: "apachelounge", Name: "Apache Lounge (官方)", Build: apacheURL()},
 		}},
 		// Memcached：nono303 已停止发布 GitHub Releases，改用 adamyg/memcached-win32（含
 		// package-vc2022-x64.zip，内部可执行文件为 memcached_service.exe，需 -d run 以控制台模式运行）。
-		RuntimeMemcached: {display: "Memcached", group: GroupCache, versions: []string{"1.6.34.11"}, versURL: "https://api.github.com/repos/adamyg/memcached-win32/releases?per_page=100", versParse: parseGitVersions, sources: []Source{
+		RuntimeMemcached: {display: "Memcached", group: GroupStorage, versions: []string{"1.6.34.11"}, versURL: "https://api.github.com/repos/adamyg/memcached-win32/releases?per_page=100", versParse: parseGitVersions, sources: []Source{
 			{ID: "adamyg", Name: "adamyg/memcached-win32 (GitHub)", Build: memcachedURL("https://github.com/adamyg/memcached-win32/releases/download/{version}/package-vc2022-x64.zip")},
 		}},
 		RuntimeMariaDB: {display: "MariaDB", group: GroupDatabase, versions: []string{"11.6.2", "11.5.2", "10.11.10"}, sources: []Source{
 			{ID: "mariadborg", Name: "archive.mariadb.org 官方", Build: mariadbURL("https://archive.mariadb.org/mariadb-{version}/winx64-packages/mariadb-{version}-winx64.zip")},
 		}},
-		RuntimeMySQL: {display: "MySQL", group: GroupDatabase, versions: []string{"8.4.3", "8.0.40", "5.7.44"}, sources: []Source{
-			// cdn.mysql.com/Downloads/MySQL-{mm} 对 8.x 返回 404；改用官方归档镜像（按文件名直链，覆盖全版本）。
-			{ID: "mysqlarchive", Name: "MySQL 官方归档", Build: mysqlURL("https://downloads.mysql.com/archives/get/p/23/file/mysql-{version}-winx64.zip")},
-		}},
+	RuntimeMySQL: {display: "MySQL", group: GroupDatabase, versions: []string{"8.4.3", "8.0.40", "5.7.44"}, sources: []Source{
+		// downloads.mysql.com/archives/get/p/23/file/... 是归档页下载中转，直接拉会被 403（需 cookie）。
+		// 改用 CDN 直链 cdn.mysql.com/archives/mysql-{mm}/，8.x/5.7 均 200（已验证）。
+		{ID: "mysqlarchive", Name: "MySQL 官方归档", Build: mysqlURL("https://cdn.mysql.com/archives/mysql-{mm}/mysql-{version}-winx64.zip")},
+	}},
 		RuntimePostgreSQL: {display: "PostgreSQL", group: GroupDatabase, versions: []string{"16.4", "15.6", "14.13"}, sources: []Source{
 			// EDB 二进制包文件名含 build 号（固定 -1），缺则 404。
 			{ID: "edb", Name: "EnterpriseDB 二进制包", Build: postgresURL("https://get.enterprisedb.com/postgresql/postgresql-{version}-1-windows-x64-binaries.zip")},
@@ -138,9 +150,22 @@ var (
 			{ID: "mailpit", Name: "axllent/mailpit (GitHub)", Build: ffmpegURL("https://github.com/axllent/mailpit/releases/download/v{version}/mailpit-windows-amd64.zip")},
 		}},
 		// MinIO：S3 兼容对象存储（API 9000 / Console 9001）。滚动发布（RELEASE 日期版本），单文件 minio.exe。
-		RuntimeMinIO: {display: "MinIO", group: GroupDatabase, versions: []string{"latest"}, sources: []Source{
+		RuntimeMinIO: {display: "MinIO", group: GroupStorage, versions: []string{"latest"}, sources: []Source{
 			{ID: "minio", Name: "dl.min.io 官方", Build: minioURL("https://dl.min.io/server/minio/release/windows-amd64/minio.exe")},
 		}},
+		// frpc：frp 内网穿透客户端（fatedier/frp）。本地以 `frpc -c frpc.toml` 运行，
+		// 连接远端 frps 服务器；本身无固定监听端口（出站连接），故作为「工具型」运行时：
+		// 可安装 + 可编辑 frpc.toml（通用 ConfigProvider），不接入 ServiceController 启停。
+		RuntimeFrpc: {display: "frpc", group: GroupTool, versions: []string{"0.71.0", "0.70.1", "0.69.0"}, versURL: "https://api.github.com/repos/fatedier/frp/releases?per_page=100", versParse: parseFrpcVersions, versHTMLFallbackParse: parseFrpcVersionsHTML, fallbackHTMLURL: "https://github.com/fatedier/frp/releases", sources: []Source{
+			{ID: "fatedier", Name: "fatedier/frp (GitHub)", Build: frpcURL("https://github.com/fatedier/frp/releases/download/v{version}/frp_{version}_windows_amd64.zip")},
+		}},
+	// FTP：轻量开源控制台 FTP 服务器（FTPDMIN，Matthias Wandel，public domain）。
+	// 单文件 ftpdmin.exe（~65KB），无安装、无配置文件、匿名登录（设计如此），适合临时文件传输。
+	// 作为服务型运行时：端口 21、支持 -p 指定端口、-g 只读、位置参数指定根目录（即本版本 data 目录）。
+	// 下载源为作者个人站点（单文件 exe，非 zip），Install 直下 exe 到 ExeFor 不调用 Extract。
+	RuntimeFTP: {display: "FTP", group: GroupWebServer, versions: []string{"0.96"}, sources: []Source{
+		{ID: "ftpdmin", Name: "FTPDMIN (Sentex)", Build: ftpURL("https://www.sentex.net/~mwandel/ftpdmin/ftpdmin.exe")},
+	}},
 	}
 
 	activeMu     sync.RWMutex
@@ -261,12 +286,101 @@ func pythonURL(tmpl string) func(version, goos, arch string) string {
 	}
 }
 
-func apacheURL(tmpl string) func(version, goos, arch string) string {
+// ---- Apache Lounge 动态索引 ----
+//
+// Apache Lounge 的下载文件名含构建日期，且 VS 运行时版本会升级：
+//
+//	/download/VS17/binaries/httpd-2.4.66-251206-Win64-VS17.zip
+//	/download/VS18/binaries/httpd-2.4.68-260827-Win64-VS18.zip
+//	                                     ^^^^^^ 构建日期，不可由版本号推导
+//
+// 因此无法再用 "版本 → URL" 的静态模板拼装。更糟的是该站对不存在的路径返回
+// **HTTP 200 + text/html 的 404 页面**，下载器会以为成功、把 HTML 存成 .zip，
+// 最终在解压阶段才报 "zip: not a valid zip file"，掩盖了真实原因。
+// 改为抓取官方目录页，正则提取 Win64 包真实链接，建立 version → URL 映射。
+
+const apacheLoungeBase = "https://www.apachelounge.com"
+
+// apacheDirPages 需要扫描的下载目录页。VS18 在前，靠前的 VS 版本通常更新。
+var apacheDirPages = []string{"/download/VS18/", "/download/VS17/"}
+
+// apacheLinkRe 提取 Win64 包的链接与版本号；win32 包与 .zip.asc/.zip.txt 校验文件均不匹配。
+var apacheLinkRe = regexp.MustCompile(`(?i)href="(/download/vs\d+/binaries/httpd-(\d+\.\d+\.\d+)-\d+-win64-vs\d+\.zip)"`)
+
+var (
+	apacheIdxMu   sync.Mutex
+	apacheIdx     = map[string]string{} // version → 绝对下载 URL
+	apacheIdxTime time.Time
+	apacheIdxTTL  = 1 * time.Hour
+)
+
+// apacheFetchIndex 抓取目录页构建 version → URL 映射（带 TTL 缓存）。
+// force=true 时忽略缓存强制刷新。全部页面拉取失败时返回上一次的成功结果兜底（可能为空）。
+func apacheFetchIndex(force bool) map[string]string {
+	apacheIdxMu.Lock()
+	defer apacheIdxMu.Unlock()
+	if !force && len(apacheIdx) > 0 && time.Since(apacheIdxTime) < apacheIdxTTL {
+		return copyApacheIdx(apacheIdx)
+	}
+	merged := map[string]string{}
+	for _, page := range apacheDirPages {
+		body, err := fetchURL(apacheLoungeBase + page)
+		if err != nil {
+			logger.W("[env][source] apache 目录页拉取失败 %s: %v", page, err)
+			continue
+		}
+		for _, m := range apacheLinkRe.FindAllStringSubmatch(string(body), -1) {
+			if len(m) < 3 {
+				continue
+			}
+			merged[m[2]] = apacheLoungeBase + m[1]
+		}
+	}
+	if len(merged) == 0 {
+		logger.W("[env][source] apache 目录页未解析到任何 Win64 包")
+		return copyApacheIdx(apacheIdx) // 保留旧结果兜底
+	}
+	apacheIdx = merged
+	apacheIdxTime = time.Now()
+	logger.I("[env][source] apache 索引已更新 versions=%d", len(merged))
+	return copyApacheIdx(merged)
+}
+
+func copyApacheIdx(in map[string]string) map[string]string {
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+// apacheVersParse 返回 Apache Lounge 上可下载的 httpd 版本列表。
+// 版本来自目录索引而非入参 body（需同时扫描 VS17/VS18 两个目录页）。
+func apacheVersParse(body []byte) []string {
+	idx := apacheFetchIndex(false)
+	vs := make([]string, 0, len(idx))
+	for v := range idx {
+		vs = append(vs, v)
+	}
+	return vs
+}
+
+// apacheURL 返回按版本解析真实下载地址的函数（Windows 专用）。
+// 索引未命中时强制刷新一次再试；仍无结果返回空串（交给上层报"无可用下载源"，
+// 好过拼一个必然 404 的 URL 把 HTML 存成 zip）。
+func apacheURL() func(version, goos, arch string) string {
 	return func(version, goos, arch string) string {
 		if goos != "windows" {
 			return ""
 		}
-		return strings.NewReplacer("{version}", version).Replace(tmpl)
+		if u, ok := apacheFetchIndex(false)[version]; ok && u != "" {
+			return u
+		}
+		if u, ok := apacheFetchIndex(true)[version]; ok && u != "" {
+			return u
+		}
+		logger.W("[env][source] apache 索引中无版本 %s（可用: %d 个）", version, len(apacheIdx))
+		return ""
 	}
 }
 
@@ -323,6 +437,27 @@ func mongoURL(tmpl string) func(version, goos, arch string) string {
 
 // minioURL 构造 MinIO 官方地址。MinIO 为单文件 exe（无版本路径），模板忽略 {version}。
 func minioURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// frpcURL 构造 fatedier/frp 的 Windows 发行 zip 地址（含 frpc.exe / frps.exe / frpc.toml 等）。
+func frpcURL(tmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(tmpl)
+	}
+}
+
+// ftpURL 构造 FTPDMIN 的下载地址。FTPDMIN 为单文件 exe（无版本路径），模板忽略 {version}；
+// 仅 Windows 提供（GUI 桌面发行）。非 Windows 返回空。
+func ftpURL(tmpl string) func(version, goos, arch string) string {
 	return func(version, goos, arch string) string {
 		if goos != "windows" {
 			return ""
@@ -481,20 +616,6 @@ var (
 	versTTLSec  = 1 * time.Hour
 )
 
-// htmlFallbackURL 返回某运行时 GitHub Releases 页面的 HTML 地址（用于 API 失败时的兜底解析）。
-func htmlFallbackURL(rt Runtime) string {
-	switch rt {
-	case RuntimeRedis:
-		return "https://github.com/redis-windows/redis-windows/releases"
-	case RuntimeGit:
-		return "https://github.com/git-for-windows/git/releases"
-	case RuntimeCaddy:
-		return "https://github.com/caddyserver/caddy/releases"
-	default:
-		return ""
-	}
-}
-
 // AvailableVersions 拉取某运行时的全量可下载版本（上游列表）；任何失败均兜底返回推荐列表。
 // 带 1h 内存缓存，sourceID/custom 变化时自动失效。
 // 返回的版本号格式与 CandidateURLs 的 version 参数一致（如 Go "1.25.0" / Node "v22.22.2"）。
@@ -527,13 +648,11 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 	}
 	}
 	// HTML 兜底：GitHub API 限流或网络不通时，尝试解析 Releases 页面 HTML
-	if len(vs) == 0 && def.versHTMLFallbackParse != nil {
-		if htmlURL := htmlFallbackURL(rt); htmlURL != "" {
-			if body, err := fetchURL(htmlURL); err == nil {
-				if parsed := def.versHTMLFallbackParse(body); len(parsed) > 0 {
-					vs = sortVersionsDesc(parsed)
-					fetched = true
-				}
+	if len(vs) == 0 && def.versHTMLFallbackParse != nil && def.fallbackHTMLURL != "" {
+		if body, err := fetchURL(def.fallbackHTMLURL); err == nil {
+			if parsed := def.versHTMLFallbackParse(body); len(parsed) > 0 {
+				vs = sortVersionsDesc(parsed)
+				fetched = true
 			}
 		}
 	}
@@ -584,8 +703,66 @@ func fetchURL(url string) ([]byte, error) {
 
 // ---- 上游版本列表解析 ----
 
+// parseTagVersions 解析 GitHub Releases API 返回的 JSON（{ "tag_name": "..." } 列表），
+// 按 prefixes 顺序去除版本前缀（如 "v" / "r"），并兼容 git-for-windows 的 ".windows.N" 后缀。
+// 大多数运行时的版本列表解析都可复用本函数，避免每个运行时写一份近乎相同的实现。
+func parseTagVersions(body []byte, prefixes ...string) []string {
+	var arr []struct {
+		TagName string `json:"tag_name"`
+	}
+	if err := json.Unmarshal(body, &arr); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, it := range arr {
+		v := it.TagName
+		for _, p := range prefixes {
+			v = strings.TrimPrefix(v, p)
+		}
+		// git-for-windows 发布标签形如 "v2.45.0.windows.1"，去掉 .windows.N 后缀取纯版本号
+		if i := strings.LastIndex(v, ".windows."); i >= 0 {
+			v = v[:i]
+		}
+		if v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseReleasesTagVersionsHTML 从 GitHub Releases 页面 HTML 提取形如 v?1.2.3 的版本号（API 兜底）。
+func parseReleasesTagVersionsHTML(body []byte) []string {
+	re := regexp.MustCompile(`/releases/tag/v?(\d+\.\d+\.\d+)`)
+	matches := re.FindAllSubmatch(body, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		v := string(m[1])
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// parseGitReleasesTagVersionsHTML git-for-windows 专用：Releases 页面 HTML 的标签含 .windows.N 后缀。
+func parseGitReleasesTagVersionsHTML(body []byte) []string {
+	re := regexp.MustCompile(`/releases/tag/v?(\d+\.\d+\.\d+)\.windows\.\d+`)
+	matches := re.FindAllSubmatch(body, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		v := string(m[1])
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 func parseNodeVersions(body []byte) []string {
-	logger.I("[env][source] parseNodeVersions body size=%d first200=%s", len(body), string(body[:min(200, len(body))]))
 	var arr []struct {
 		Version string `json:"version"`
 		Date    string `json:"date"`
@@ -686,22 +863,7 @@ func parsePHPWinVersions(body []byte) []string {
 	return out
 }
 
-func parseRedisVersions(body []byte) []string {
-	var arr []struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.Unmarshal(body, &arr); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(arr))
-	for _, it := range arr {
-		v := strings.TrimPrefix(it.TagName, "v")
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
+func parseRedisVersions(body []byte) []string { return parseTagVersions(body, "v") }
 
 var nginxRe = regexp.MustCompile(`nginx-(\d+\.\d+\.\d+)\.zip`)
 
@@ -715,91 +877,18 @@ func parseNginxVersions(body []byte) []string {
 }
 
 // parseRedisVersionsHTML 从 GitHub Releases 页面 HTML 提取版本号（API 不可用时兜底）。
-func parseRedisVersionsHTML(body []byte) []string {
-	html := string(body)
-	re := regexp.MustCompile(`/releases/tag/v?(\d+\.\d+\.\d+)`)
-	matches := re.FindAllSubmatch([]byte(html), -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]bool{}
-	for _, m := range matches {
-		v := string(m[1])
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
-}
+func parseRedisVersionsHTML(body []byte) []string { return parseReleasesTagVersionsHTML(body) }
 
-func parseGitVersions(body []byte) []string {
-	var arr []struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.Unmarshal(body, &arr); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(arr))
-	for _, it := range arr {
-		v := strings.TrimPrefix(it.TagName, "v")
-		v = strings.TrimSuffix(v, ".windows.1")
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
+func parseGitVersions(body []byte) []string { return parseTagVersions(body, "v") }
 
 // parseGitVersionsHTML 从 GitHub Releases 页面 HTML 提取 MinGit 版本号（API 不可用时兜底）。
-func parseGitVersionsHTML(body []byte) []string {
-	html := string(body)
-	re := regexp.MustCompile(`/releases/tag/v?(\d+\.\d+\.\d+)\.windows\.\d+`)
-	matches := re.FindAllSubmatch([]byte(html), -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]bool{}
-	for _, m := range matches {
-		v := string(m[1])
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
-}
+func parseGitVersionsHTML(body []byte) []string { return parseGitReleasesTagVersionsHTML(body) }
 
 // parseCaddyVersions 从 GitHub Releases API 解析 caddyserver/caddy 的 tag_name（如 "v2.8.4"）。
-func parseCaddyVersions(body []byte) []string {
-	var arr []struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.Unmarshal(body, &arr); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(arr))
-	for _, it := range arr {
-		v := strings.TrimPrefix(it.TagName, "v")
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
+func parseCaddyVersions(body []byte) []string { return parseTagVersions(body, "v") }
 
 // parseCaddyVersionsHTML 从 GitHub Releases 页面 HTML 提取版本号（API 不可用时兜底）。
-func parseCaddyVersionsHTML(body []byte) []string {
-	html := string(body)
-	re := regexp.MustCompile(`/releases/tag/v?(\d+\.\d+\.\d+)`)
-	matches := re.FindAllSubmatch([]byte(html), -1)
-	out := make([]string, 0, len(matches))
-	seen := map[string]bool{}
-	for _, m := range matches {
-		v := string(m[1])
-		if !seen[v] {
-			seen[v] = true
-			out = append(out, v)
-		}
-	}
-	return out
-}
+func parseCaddyVersionsHTML(body []byte) []string { return parseReleasesTagVersionsHTML(body) }
 
 // parseComposerVersions 从 getcomposer.org/versions 解析 stable 数组的 version 字段（如 "2.7.7"）。
 func parseComposerVersions(body []byte) []string {
@@ -834,40 +923,16 @@ func parsePythonVersions(body []byte) []string {
 }
 
 // parseMongoVersions 从 mongodb/mongo GitHub Releases 解析 tag_name（如 "r7.0.14"），去掉前缀 r。
-func parseMongoVersions(body []byte) []string {
-	var arr []struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.Unmarshal(body, &arr); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(arr))
-	for _, it := range arr {
-		v := strings.TrimPrefix(it.TagName, "r")
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
+func parseMongoVersions(body []byte) []string { return parseTagVersions(body, "r") }
 
 // parseMailpitVersions 从 axllent/mailpit GitHub Releases 解析 tag_name（如 "v1.31.0"），去掉前缀 v。
-func parseMailpitVersions(body []byte) []string {
-	var arr []struct {
-		TagName string `json:"tag_name"`
-	}
-	if err := json.Unmarshal(body, &arr); err != nil {
-		return nil
-	}
-	out := make([]string, 0, len(arr))
-	for _, it := range arr {
-		v := strings.TrimPrefix(it.TagName, "v")
-		if v != "" {
-			out = append(out, v)
-		}
-	}
-	return out
-}
+func parseMailpitVersions(body []byte) []string { return parseTagVersions(body, "v") }
+
+// parseFrpcVersions 从 fatedier/frp GitHub Releases 解析 tag_name（如 "v0.61.0"），去掉前缀 v。
+func parseFrpcVersions(body []byte) []string { return parseTagVersions(body, "v") }
+
+// parseFrpcVersionsHTML 从 GitHub Releases 页面 HTML 提取版本号（API 限流/不可用时兜底）。
+func parseFrpcVersionsHTML(body []byte) []string { return parseReleasesTagVersionsHTML(body) }
 
 // sortVersionsDesc 按语义版本号降序排序（仅比较 major.minor.patch，忽略预发布）。
 func sortVersionsDesc(vs []string) []string {

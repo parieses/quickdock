@@ -211,11 +211,11 @@ func (a *AppService) EnvSetMeta(runtime, version, alias, note string) *ApiResult
 }
 
 // EnvDeleteVersion 删除某已安装版本（便携目录）及元数据；系统 PATH 上的版本无法在此删除。
-func (a *AppService) EnvDeleteVersion(runtime, version string) *ApiResult {
+func (a *AppService) EnvDeleteVersion(runtime, version string, removeData bool) *ApiResult {
 	if a.Env == nil {
 		return FailMsg("env 未初始化")
 	}
-	if err := a.Env.DeleteVersion(env.Runtime(runtime), version); err != nil {
+	if err := a.Env.DeleteVersion(env.Runtime(runtime), version, removeData); err != nil {
 		return Fail(err)
 	}
 	return Ok(nil)
@@ -231,6 +231,37 @@ func (a *AppService) EnvImportVersion(runtime, dir string) *ApiResult {
 		return Fail(err)
 	}
 	return Ok(version)
+}
+
+// EnvConfigSupport 判断某 runtime 是否支持通用配置编辑（实现了 ConfigProvider）。
+func (a *AppService) EnvConfigSupport(runtime string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	return Ok(a.Env.ConfigSupport(env.Runtime(runtime)))
+}
+
+// EnvConfigGet 读取某 runtime 某版本的配置文件（通用，适用于实现了 ConfigProvider 的运行时）。
+func (a *AppService) EnvConfigGet(runtime, version string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	cfg, err := a.Env.ConfigGet(env.Runtime(runtime), version)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(cfg)
+}
+
+// EnvConfigSet 写回某 runtime 某版本的配置文件（整体覆盖；需重启服务才生效）。
+func (a *AppService) EnvConfigSet(runtime, version, raw string) *ApiResult {
+	if a.Env == nil {
+		return FailMsg("env 未初始化")
+	}
+	if err := a.Env.ConfigSet(env.Runtime(runtime), version, raw); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
 }
 
 // EnvPHPConfigGet 读取某已装 PHP 版本的配置（php.ini 正文、禁用函数、错误日志、扩展列表）。
@@ -256,35 +287,13 @@ func (a *AppService) EnvPHPConfigSet(runtime, version string, patch env.PHPConfi
 	return Ok(nil)
 }
 
-// EnvRedisConfigGet 读取某已装 Redis 版本的 redis.conf 配置。
-func (a *AppService) EnvRedisConfigGet(runtime, version string) *ApiResult {
+// EnvLogGet 读取某运行时某版本的运行日志（通用，适用于实现了 LogProvider 的运行时，如 Redis）。
+// 取代原先仅 Redis 可用的 EnvRedisLog，所有服务型运行时均可复用。
+func (a *AppService) EnvLogGet(runtime, version string) *ApiResult {
 	if a.Env == nil {
 		return FailMsg("env 未初始化")
 	}
-	cfg, err := a.Env.RedisConfigGet(env.Runtime(runtime), version)
-	if err != nil {
-		return Fail(err)
-	}
-	return Ok(cfg)
-}
-
-// EnvRedisConfigSet 写回某已装 Redis 版本的 redis.conf（整体覆盖）。
-func (a *AppService) EnvRedisConfigSet(runtime, version, raw string) *ApiResult {
-	if a.Env == nil {
-		return FailMsg("env 未初始化")
-	}
-	if err := a.Env.RedisConfigSet(env.Runtime(runtime), version, raw); err != nil {
-		return Fail(err)
-	}
-	return Ok(nil)
-}
-
-// EnvRedisLog 读取某已装 Redis 版本的运行日志（redis.log 尾部）。
-func (a *AppService) EnvRedisLog(runtime, version string) *ApiResult {
-	if a.Env == nil {
-		return FailMsg("env 未初始化")
-	}
-	log, err := a.Env.RedisLogGet(env.Runtime(runtime), version)
+	log, err := a.Env.LogGet(env.Runtime(runtime), version)
 	if err != nil {
 		return Fail(err)
 	}

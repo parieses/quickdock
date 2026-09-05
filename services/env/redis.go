@@ -52,6 +52,13 @@ func NewRedisRuntime() *RedisRuntime {
 }
 
 func (r *RedisRuntime) Kind() Runtime                 { return RuntimeRedis }
+func (r *RedisRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (r *RedisRuntime) ParseVersion(out string) (string, error) {
+	if v := parseRedisVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeRedis))
+}
 func (r *RedisRuntime) DisplayName() string          { return DisplayName(RuntimeRedis) }
 func (r *RedisRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (r *RedisRuntime) Recommended() []string        { return Versions(RuntimeRedis) }

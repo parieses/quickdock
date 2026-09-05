@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '../stores/workspace'
 import TypeIcon from './TypeIcon.vue'
 import CreateDialog from './CreateDialog.vue'
 import { getErrorMessage } from '../utils/error'
+import { pluginUpdateBadge } from '../composables/usePluginUpdateBadge'
 import type { Scene, ToastAPI } from '../types'
 import {
   Bot, FolderKanban, FileText, Activity, ListTodo, AlarmClock,
@@ -37,6 +38,12 @@ const collapsed = ref(localStorage.getItem('qd_sidebar_collapsed') === '1')
 function toggleCollapse() {
   collapsed.value = !collapsed.value
   try { localStorage.setItem('qd_sidebar_collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
+}
+
+// 点击「插件」导航：先清掉「可更新」角标（打开后即视为已查看），再导航
+function goPlugins() {
+  pluginUpdateBadge.count = 0
+  emit('navigate', 'plugins')
 }
 
 // ---- 工作空间 ----
@@ -265,9 +272,10 @@ async function handleDeleteScene(sceneId: string) {
         <Terminal v-else :size="14" />
         <span>{{ dshOpening ? t('dshLaunching') : t('navDsh') }}</span>
       </button>
-      <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="emit('navigate', 'plugins')">
+      <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="goPlugins">
         <Puzzle :size="14" />
         <span>{{ t('navPlugins') }}</span>
+        <span v-if="pluginUpdateBadge.count > 0" class="nav-badge" :title="t('pluginUpdateBadge', { n: pluginUpdateBadge.count })">{{ pluginUpdateBadge.count > 99 ? '99+' : pluginUpdateBadge.count }}</span>
       </button>
     </div>
 
@@ -437,6 +445,7 @@ async function handleDeleteScene(sceneId: string) {
   display: flex;
   align-items: center;
   gap: 8px;
+  position: relative;
   width: 100%;
   padding: 7px 10px;
   border: none;
@@ -452,6 +461,11 @@ async function handleDeleteScene(sceneId: string) {
 .nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .nav-item.active { background: var(--color-bg-tertiary); color: var(--color-accent); font-weight: 500; }
 .nav-item.active svg { color: var(--color-accent); }
+.nav-badge {
+  margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: #e0533d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+}
+.sidebar.collapsed .nav-badge { position: absolute; top: 6px; right: 10px; margin: 0; }
 .nav-item.opening { cursor: default; opacity: .7; }
 .nav-item.opening:hover { background: transparent; color: var(--color-text-secondary); }
 .nav-spinner {

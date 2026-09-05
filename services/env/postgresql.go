@@ -29,6 +29,13 @@ func NewPostgresRuntime() *PostgresRuntime {
 }
 
 func (p *PostgresRuntime) Kind() Runtime                 { return RuntimePostgreSQL }
+func (p *PostgresRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (p *PostgresRuntime) ParseVersion(out string) (string, error) {
+	if v := parsePostgresVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimePostgreSQL))
+}
 func (p *PostgresRuntime) DisplayName() string          { return DisplayName(RuntimePostgreSQL) }
 func (p *PostgresRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (p *PostgresRuntime) Recommended() []string        { return Versions(RuntimePostgreSQL) }
@@ -44,6 +51,9 @@ func (p *PostgresRuntime) ExeFor(version string) string {
 func (p *PostgresRuntime) dataDir(version string) string {
 	return filepath.Join(p.versionDir(version), "data")
 }
+
+// DataDir 返回 PostgreSQL 数据目录（卸载时可选清理）。
+func (p *PostgresRuntime) DataDir(version string) string { return p.dataDir(version) }
 
 func (p *PostgresRuntime) InstalledVersions() []Install {
 	var out []Install
@@ -175,6 +185,7 @@ func (p *PostgresRuntime) Start(ctx context.Context, version string, onLog func(
 	if _, err := os.Stat(exe); err != nil {
 		return fmt.Errorf("未安装该版本: %s", version)
 	}
+	logger.I("[env][postgresql] Start version=%s exe=%s wd=%s", version, exe, wd)
 	running, _ := svcMgr.info(RuntimePostgreSQL)
 	if running != "" && running != version {
 		return fmt.Errorf("PostgreSQL 已在运行（%s），请先停止当前版本再启动 %s", running, version)
@@ -185,14 +196,73 @@ func (p *PostgresRuntime) Start(ctx context.Context, version string, onLog func(
 	}
 	if wd != "" {
 		if err := p.initDataDir(version, p.dataDir(version)); err != nil {
+			if onLog != nil {
+				onLog("PostgreSQL 初始化数据目录失败: " + err.Error())
+			}
 			return err
 		}
 	}
+	dataDir := p.dataDir(version)
+	logPath := p.LogPath(version)
+	if isElevated() {
+		// 提权（完整管理员）令牌：postgres 直接启动会被其管理员检测拒绝；
+		// 但本进程具备创建 Windows 服务的权限，故注册为服务、由 SCM 以 LocalSystem（非 Administrators 成员）拉起。
+		if onLog != nil {
+			onLog("检测到以管理员身份运行，PostgreSQL 将以 Windows 服务方式启动…")
+		}
+		if err := p.startService(version, dataDir, logPath, onLog); err != nil {
+			return err
+		}
+		return nil
+	}
+	// 过滤令牌 / 标准用户：Administrators SID 为 deny-only，postgres 的 CheckTokenMembership 返回 FALSE，
+	// 管理员检测通过，直接以前台子进程拉起即可（无需服务、也不依赖降权令牌特权）。
 	if onLog != nil {
 		onLog("启动 PostgreSQL " + version + " …")
 	}
-	return svcMgr.start(RuntimePostgreSQL, version, exe, wd,
-		[]string{"-D", p.dataDir(version)}, p.LogPath(version), onLog)
+	if err := p.startDirect(version, exe, wd, dataDir, logPath, onLog); err != nil {
+		return err
+	}
+	return nil
+}
+
+// startDirect 以普通子进程方式拉起 PostgreSQL（继承当前进程令牌）。
+// 仅用于非提权场景：过滤令牌下 Administrators 为 deny-only，postgres 不再拒绝启动。
+// 日志由 postgres 输出到 stderr，经 svcMgr.start 捕获并写入 logPath（前端读取该文件展示就绪状态）。
+func (p *PostgresRuntime) startDirect(version, exe, wd, dataDir, logPath string, onLog func(string)) error {
+	return svcMgr.start(RuntimePostgreSQL, version, exe, wd, []string{"-D", dataDir}, logPath, onLog)
+}
+
+// startService 以 Windows 服务方式拉起 PostgreSQL（仅用于「提权/完整管理员」场景）。
+// 提权令牌下 postgres 直接启动会被其管理员检测拒绝；但提权进程具备创建 Windows 服务的权限，
+// 注册为服务后由 SCM 以 LocalSystem（非 Administrators 成员）身份启动，postgres 不再拒绝。
+// 日志由 postgres 直接写入 logPath 文件（经由 pg_ctl -l 指定）。
+func (p *PostgresRuntime) startService(version, dataDir, logPath string, onLog func(string)) error {
+	name := "QuickDock_PgSQL_" + version
+	pgctl := filepath.Join(p.versionDir(version), "bin", "pg_ctl.exe")
+	// 清理同名旧服务（上次未正常停止 / QuickDock 崩溃残留）。忽略错误：可能不存在。
+	_ = sysutil.Command(pgctl, "stop", "-N", name, "-m", "fast", "-W").Run()
+	_ = sysutil.Command(pgctl, "unregister", "-N", name).Run()
+	// 注册为 Windows 服务：默认以 LocalSystem 运行（非 Administrators 成员），
+	// PostgreSQL 不再拒绝启动；日志写入 logPath 文件。
+	reg := sysutil.Command(pgctl, "register", "-N", name, "-D", dataDir, "-l", logPath)
+	reg.Dir = p.versionDir(version)
+	if out, err := reg.CombinedOutput(); err != nil {
+		return fmt.Errorf("注册 PostgreSQL 服务失败: %w (%s)", err, string(out))
+	}
+	// 非阻塞启动（-W）：服务就绪由前端端口探测判断；启动失败会记到 logPath。
+	start := sysutil.Command(pgctl, "start", "-N", name, "-W")
+	start.Dir = p.versionDir(version)
+	if out, err := start.CombinedOutput(); err != nil {
+		if onLog != nil {
+			onLog("PostgreSQL 启动失败: " + err.Error())
+		}
+		logger.E("[env][postgresql] pg_ctl start 失败: %v out=%s", err, string(out))
+		_ = sysutil.Command(pgctl, "unregister", "-N", name).Run()
+		return fmt.Errorf("启动 PostgreSQL 服务失败: %w (%s)", err, string(out))
+	}
+	logger.I("[env][postgresql] 服务已启动 name=%s version=%s", name, version)
+	return nil
 }
 
 func (p *PostgresRuntime) LogPath(version string) string {
@@ -200,17 +270,37 @@ func (p *PostgresRuntime) LogPath(version string) string {
 }
 
 func (p *PostgresRuntime) Stop(version string) error {
-	// 1) pg_ctl stop 优雅关闭（覆盖孤儿/外部实例）
-	for _, ins := range p.InstalledVersions() {
-		pgctl := filepath.Join(p.versionDir(ins.Version), "bin", "pg_ctl.exe")
-		if _, err := os.Stat(pgctl); err == nil {
-			cmd := sysutil.Command(pgctl, "stop", "-D", p.dataDir(ins.Version), "-m", "fast")
-			_ = cmd.Run()
+	logger.I("[env][postgresql] Stop version=%s", version)
+	if version == "" {
+		if ins := p.InstalledVersions(); len(ins) > 0 {
+			version = ins[0].Version
 		}
 	}
-	// 2) 端口兜底：杀掉占用默认端口且镜像确为 postgres.exe 的进程树
+	// 1) 停止并卸载 QuickDock 注册的服务（优雅关闭）
+	if version != "" {
+		name := "QuickDock_PgSQL_" + version
+		pgctl := filepath.Join(p.versionDir(version), "bin", "pg_ctl.exe")
+		if _, err := os.Stat(pgctl); err == nil {
+			stop := sysutil.Command(pgctl, "stop", "-N", name, "-m", "fast", "-W")
+			stop.Dir = p.versionDir(version)
+			if out, err := stop.CombinedOutput(); err != nil {
+				logger.W("[env][postgresql] pg_ctl stop 失败（将走端口兜底）: %v %s", err, string(out))
+			} else {
+				logger.I("[env][postgresql] pg_ctl stop 成功 version=%s", version)
+			}
+			unreg := sysutil.Command(pgctl, "unregister", "-N", name)
+			unreg.Dir = p.versionDir(version)
+			if out, err := unreg.CombinedOutput(); err != nil {
+				logger.W("[env][postgresql] pg_ctl unregister 失败: %v %s", err, string(out))
+			} else {
+				logger.I("[env][postgresql] pg_ctl unregister 成功 version=%s", version)
+			}
+		}
+	}
+	// 2) 端口兜底：杀掉占用默认端口且镜像确为 postgres.exe 的进程树（覆盖外部实例/残留）
 	stopByPort(postgresDefaultPort, "postgres.exe")
 	svcMgr.forget(RuntimePostgreSQL)
+	logger.I("[env][postgresql] Stop 完成")
 	return nil
 }
 

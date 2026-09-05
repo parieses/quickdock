@@ -149,9 +149,7 @@ func (a *AppService) OnClipboardChange() {
 			}
 		}
 	}
-	if imageData == nil {
-		logger.W("QuickDock: no image format found; available clipboard formats=%v", listClipboardFormats())
-	} else {
+	if imageData != nil {
 		logger.I("QuickDock: clipboard image detected (PNG=%v, %d bytes) db=%s", imageIsPNG, len(imageData), a.DB.Path())
 	}
 
@@ -240,9 +238,8 @@ handleText:
 						preview = string(runes[:80]) + "..."
 					}
 					logger.I("QuickDock >> clipboard captured [%s] from [%s] → %s", entry.ID[:8], sourceApp, preview)
-				} else {
-					logger.I("QuickDock >> clipboard captured text [%s] len=%d from [%s]", entry.ID[:8], len(text), sourceApp)
 				}
+				// 默认不记录文本捕获（复制频繁、无排查价值）；排查时设 QUICKDOCK_LOG_CLIPBOARD=1 重启。
 				a.emitClipboardEvent()
 			}
 		}()
@@ -313,21 +310,6 @@ func getPngClipboardFormat() uint32 {
 		pngClipFmt.Store(uint32(f))
 	}
 	return uint32(f)
-}
-
-// listClipboardFormats 诊断用：枚举当前剪贴板所有可用格式号。
-func listClipboardFormats() []int {
-	var out []int
-	fmtCode := uint(0)
-	for {
-		next := w32.EnumClipboardFormats(fmtCode)
-		if next == 0 {
-			break
-		}
-		out = append(out, int(next))
-		fmtCode = next
-	}
-	return out
 }
 
 // recoverPanic 恢复 goroutine panic 防止整个应用崩溃

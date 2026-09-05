@@ -24,6 +24,13 @@ func NewFFmpegRuntime() *FFmpegRuntime {
 }
 
 func (f *FFmpegRuntime) Kind() Runtime                 { return RuntimeFFmpeg }
+func (f *FFmpegRuntime) DetectArgs() []string          { return []string{"version"} }
+func (f *FFmpegRuntime) ParseVersion(out string) (string, error) {
+	if v := parseFFmpegVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeFFmpeg))
+}
 func (f *FFmpegRuntime) DisplayName() string          { return DisplayName(RuntimeFFmpeg) }
 func (f *FFmpegRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (f *FFmpegRuntime) Recommended() []string        { return Versions(RuntimeFFmpeg) }

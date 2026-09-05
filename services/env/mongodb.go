@@ -18,7 +18,8 @@ const mongoBaseRel = "runtime/mongodb"
 const mongoDefaultPort = 27017
 
 // MongoRuntime 管理便携 MongoDB 运行时（官方 Windows zip，含 bin/mongod.exe）。
-// 实现 ServiceController：以 `mongod --dbpath`（前台阻塞）拉起，数据目录不存在时由 mongod 自动创建，
+// 实现 ServiceController：以 `mongod --dbpath`（前台阻塞）拉起；
+// ⚠️ MongoDB 7.0 不会自动创建 data 目录（老版本会），故 Start 前必须显式 MkdirAll；
 // 由 svcMgr 记录 PID 并捕获日志。
 type MongoRuntime struct {
 	baseDir string
@@ -29,6 +30,13 @@ func NewMongoRuntime() *MongoRuntime {
 }
 
 func (m *MongoRuntime) Kind() Runtime                 { return RuntimeMongoDB }
+func (m *MongoRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (m *MongoRuntime) ParseVersion(out string) (string, error) {
+	if v := parseMongoVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeMongoDB))
+}
 func (m *MongoRuntime) DisplayName() string          { return DisplayName(RuntimeMongoDB) }
 func (m *MongoRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (m *MongoRuntime) Recommended() []string        { return Versions(RuntimeMongoDB) }
@@ -47,6 +55,9 @@ func (m *MongoRuntime) ExeFor(version string) string {
 func (m *MongoRuntime) dataDir(version string) string {
 	return filepath.Join(m.versionDir(version), "data")
 }
+
+// DataDir 返回 MongoDB 数据目录（卸载时可选清理）。
+func (m *MongoRuntime) DataDir(version string) string { return m.dataDir(version) }
 
 func (m *MongoRuntime) InstalledVersions() []Install {
 	var out []Install
@@ -160,6 +171,7 @@ func (m *MongoRuntime) Start(ctx context.Context, version string, onLog func(str
 	if _, err := os.Stat(exe); err != nil {
 		return fmt.Errorf("未安装该版本: %s", version)
 	}
+	logger.I("[env][mongodb] Start version=%s exe=%s wd=%s", version, exe, wd)
 	running, _ := svcMgr.info(RuntimeMongoDB)
 	if running != "" && running != version {
 		return fmt.Errorf("MongoDB 已在运行（%s），请先停止当前版本再启动 %s", running, version)
@@ -171,8 +183,22 @@ func (m *MongoRuntime) Start(ctx context.Context, version string, onLog func(str
 	if onLog != nil {
 		onLog("启动 MongoDB " + version + " …")
 	}
-	return svcMgr.start(RuntimeMongoDB, version, exe, wd,
-		[]string{"--dbpath=" + m.dataDir(version), "--logpath=" + m.LogPath(version), "--logappend"}, m.LogPath(version), onLog)
+	// MongoDB 7.0 不会自动创建 dbpath 目录（老版本会），必须显式建好，否则启动报 NonExistentPath → exitCode 100。
+	if err := os.MkdirAll(m.dataDir(version), 0755); err != nil {
+		return fmt.Errorf("创建 MongoDB 数据目录失败: %w", err)
+	}
+	// 注意：logPath 传空。mongod 自己通过 --logpath 管理 mongodb.log，
+	// 若 QuickDock 再用 os.OpenFile 打开同一文件会与 mongod 抢句柄
+	// （mongod 以更严格的共享标志打开 → SHARING_VIOLATION → "Failed to open" 启动失败）。
+	// 实时日志仍由 onLog 通过管道回调，不依赖此落盘文件。
+	if err := svcMgr.start(RuntimeMongoDB, version, exe, wd,
+		[]string{"--dbpath=" + m.dataDir(version), "--logpath=" + m.LogPath(version), "--logappend"}, "", onLog); err != nil {
+		if onLog != nil {
+			onLog("MongoDB 启动失败: " + err.Error())
+		}
+		return err
+	}
+	return nil
 }
 
 func (m *MongoRuntime) LogPath(version string) string {
@@ -180,8 +206,10 @@ func (m *MongoRuntime) LogPath(version string) string {
 }
 
 func (m *MongoRuntime) Stop(version string) error {
+	logger.I("[env][mongodb] Stop version=%s", version)
 	stopByPort(mongoDefaultPort, "mongod.exe")
 	svcMgr.forget(RuntimeMongoDB)
+	logger.I("[env][mongodb] Stop 完成")
 	return nil
 }
 

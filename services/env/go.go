@@ -24,6 +24,18 @@ func NewGoRuntime() *GoRuntime {
 }
 
 func (g *GoRuntime) Kind() Runtime                 { return RuntimeGo }
+func (g *GoRuntime) DetectArgs() []string          { return []string{"version"} }
+func (g *GoRuntime) ParseVersion(out string) (string, error) {
+	const p = "go version go"
+	if i := strings.Index(out, p); i >= 0 {
+		rest := out[i+len(p):]
+		if sp := strings.IndexByte(rest, ' '); sp > 0 {
+			return rest[:sp], nil
+		}
+		return strings.TrimSpace(rest), nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeGo))
+}
 func (g *GoRuntime) DisplayName() string          { return DisplayName(RuntimeGo) }
 func (g *GoRuntime) SupportedPlatforms() []string { return []string{"windows", "linux", "darwin"} }
 func (g *GoRuntime) Recommended() []string        { return Versions(RuntimeGo) }

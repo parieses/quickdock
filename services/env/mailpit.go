@@ -32,6 +32,13 @@ func NewMailpitRuntime() *MailpitRuntime {
 }
 
 func (m *MailpitRuntime) Kind() Runtime                 { return RuntimeMailpit }
+func (m *MailpitRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (m *MailpitRuntime) ParseVersion(out string) (string, error) {
+	if v := parseMailpitVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeMailpit))
+}
 func (m *MailpitRuntime) DisplayName() string          { return DisplayName(RuntimeMailpit) }
 func (m *MailpitRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (m *MailpitRuntime) Recommended() []string        { return Versions(RuntimeMailpit) }
@@ -50,6 +57,9 @@ func (m *MailpitRuntime) ExeFor(version string) string {
 func (m *MailpitRuntime) dataDir(version string) string {
 	return filepath.Join(m.versionDir(version), "mailpit.db")
 }
+
+// DataDir 返回 Mailpit 数据目录（卸载时可选清理）。
+func (m *MailpitRuntime) DataDir(version string) string { return m.dataDir(version) }
 
 func (m *MailpitRuntime) InstalledVersions() []Install {
 	var out []Install
@@ -175,7 +185,7 @@ func (m *MailpitRuntime) Start(ctx context.Context, version string, onLog func(s
 		onLog("启动 Mailpit " + version + " …")
 	}
 	return svcMgr.start(RuntimeMailpit, version, exe, wd,
-		[]string{"--smtp", fmt.Sprintf("%d", mailpitSmtpPort), "--listen", "127.0.0.1:" + fmt.Sprintf("%d", mailpitDefaultPort), "--data", m.dataDir(version)}, m.LogPath(version), onLog)
+		[]string{"--smtp", fmt.Sprintf("%d", mailpitSmtpPort), "--listen", "127.0.0.1:" + fmt.Sprintf("%d", mailpitDefaultPort), "--database", m.dataDir(version)}, m.LogPath(version), onLog)
 }
 
 func (m *MailpitRuntime) LogPath(version string) string {

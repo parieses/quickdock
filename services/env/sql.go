@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -28,6 +30,10 @@ type sqlFlavor struct {
 // 再以 `mysqld --datadir`（前台阻塞）拉起，由 svcMgr 记录 PID 并捕获日志。
 type SQLRuntime struct {
 	flavor sqlFlavor
+	// mu 串行化同一运行时的 Start（含初始化）。否则两次 Start 并发时，
+	// 第一次的 mysqld --initialize 仍锁着数据目录文件，第二次会尝试清空重建并删掉前者正在用的文件，
+	// 导致初始化崩溃（exit 0x80000003）。TryLock 在并发时立即返回，不阻塞等待。
+	mu sync.Mutex
 }
 
 func NewMySQLRuntime() *SQLRuntime {
@@ -45,6 +51,13 @@ func NewMariaDBRuntime() *SQLRuntime {
 }
 
 func (s *SQLRuntime) Kind() Runtime                 { return s.flavor.kind }
+func (s *SQLRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (s *SQLRuntime) ParseVersion(out string) (string, error) {
+	if v := parseSQLVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(s.flavor.kind))
+}
 func (s *SQLRuntime) DisplayName() string          { return s.flavor.display }
 func (s *SQLRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (s *SQLRuntime) Recommended() []string        { return Versions(s.flavor.kind) }
@@ -66,6 +79,9 @@ func (s *SQLRuntime) versionDir(version string) string {
 func (s *SQLRuntime) dataDir(version string) string {
 	return filepath.Join(s.versionDir(version), "data")
 }
+
+// DataDir 返回 SQL（MySQL/MariaDB）数据目录（卸载时可选清理）。
+func (s *SQLRuntime) DataDir(version string) string { return s.dataDir(version) }
 
 // serverPath 返回版本目录下的服务二进制；MariaDB 优先 mariadbd.exe、MySQL 优先 mysqld.exe，
 // 二者若存在其一即返回（兼容不同构建命名）。
@@ -176,25 +192,82 @@ func (s *SQLRuntime) Install(ctx context.Context, version string, cb InstallCall
 
 func (s *SQLRuntime) DefaultPort() int { return s.flavor.defPort }
 
-// initDataDir 首次启动前惰性初始化数据目录（--initialize-insecure，root 空密码），失败返回错误。
+// isInitialized 判断数据目录是否已完整初始化（含系统库）。
+// 不能仅判断 datadir 或 mysql/ 是否存在：初始化中途崩溃会留下 mysql/ 子目录及部分 InnoDB 文件，
+// 但 performance_schema / sys 等后续系统库尚未建出，此时拉起服务器会报数据损坏（MY-012960）直接 abort。
+// 故要求 mysql/ 与至少一个后续系统库目录同时存在，才视为初始化完成。
+func (s *SQLRuntime) isInitialized(datadir string) bool {
+	if _, err := os.Stat(filepath.Join(datadir, "mysql")); err != nil {
+		return false // 连系统库目录都没有
+	}
+	if _, err := os.Stat(filepath.Join(datadir, "performance_schema")); err == nil {
+		return true
+	}
+	if _, err := os.Stat(filepath.Join(datadir, "sys")); err == nil {
+		return true
+	}
+	return false
+}
+
+// initCommand 返回数据目录初始化所用的可执行文件与参数。
+// MariaDB 优先 mariadb-install-db.exe（Windows 官方推荐、最可靠；实测 mariadbd --initialize-insecure 在 MariaDB 11.x 上静默失败且不建 mysql 库）；
+// 缺失时回退到 mysqld/mariadbd --initialize-insecure。注意 mariadb-install-db.exe 不识别 --auth-root-authentication-method 等参数，仅传 --datadir 即可。
+func (s *SQLRuntime) initCommand(serverExe, datadir string) (string, []string) {
+	if s.flavor.kind == RuntimeMariaDB {
+		if p := filepath.Join(filepath.Dir(serverExe), "mariadb-install-db.exe"); fileExists(p) {
+			return p, []string{"--datadir=" + datadir}
+		}
+	}
+	return serverExe, []string{"--initialize-insecure", "--datadir=" + datadir}
+}
+
+// initDataDir 首次启动前惰性初始化数据目录（root 空密码），失败返回错误。
 func (s *SQLRuntime) initDataDir(version, serverExe, datadir string) error {
-	if _, err := os.Stat(datadir); err == nil {
-		return nil // 已初始化
+	if s.isInitialized(datadir) {
+		return nil
+	}
+	// datadir 存在但缺少系统库（脏数据）→ 清空重建。便携场景数据目录仅含系统库，无用户数据，清空安全。
+	if fi, err := os.Stat(datadir); err == nil && fi.IsDir() {
+		if entries, err := os.ReadDir(datadir); err == nil && len(entries) > 0 {
+			logger.W("[env][%s] initdb 发现 datadir 非空但缺少系统库，清空重建 version=%s datadir=%s", s.flavor.kind, version, datadir)
+			// 先解除可能的占用：首次初始化中途崩溃、或上一次残留的 mysqld/mariadbd 仍锁着
+			// #ib_16384_0.dblwr 等文件，直接 RemoveAll 会因「文件被另一进程占用」失败。
+			// 仅杀该版本目录下的镜像，不影响其他版本或独立实例。
+			killSQLHolders(s.versionDir(version), s.flavor.serverBin)
+			stopByPort(s.flavor.defPort, s.flavor.serverBin)
+			var rmErr error
+			for i := 0; i < 5; i++ {
+				if rmErr = os.RemoveAll(datadir); rmErr == nil {
+					break
+				}
+				time.Sleep(300 * time.Millisecond)
+			}
+			if rmErr != nil {
+				return fmt.Errorf("清理脏数据目录失败: %w", rmErr)
+			}
+		}
 	}
 	if err := os.MkdirAll(datadir, 0755); err != nil {
 		return err
 	}
-	cmd := sysutil.Command(serverExe, "--initialize-insecure", "--datadir="+datadir)
+	initExe, initArgs := s.initCommand(serverExe, datadir)
+	cmd := sysutil.Command(initExe, initArgs...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		logger.E("[env][%s] initdb 失败 version=%s err=%v out=%s", s.flavor.kind, version, err, string(out))
-		return fmt.Errorf("初始化数据目录失败: %w", err)
+		return fmt.Errorf("初始化数据目录失败: %w\n%s", err, string(out))
 	}
 	logger.I("[env][%s] initdb 完成 version=%s datadir=%s", s.flavor.kind, version, datadir)
 	return nil
 }
 
 func (s *SQLRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
+	// 串行化同运行时：初始化（mysqld --initialize，耗时数秒）期间进程尚未记入 svcMgr，
+	// 若无此锁，第二次 Start 会插进来清空数据目录，与正在跑的初始化互相破坏。
+	if !s.mu.TryLock() {
+		return fmt.Errorf("%s 正在启动或初始化中，请稍候再试", s.flavor.display)
+	}
+	defer s.mu.Unlock()
 	installs := s.InstalledVersions()
 	if version == "" {
 		if len(installs) == 0 {
@@ -220,6 +293,7 @@ func (s *SQLRuntime) Start(ctx context.Context, version string, onLog func(strin
 	if _, err := os.Stat(exe); err != nil {
 		return fmt.Errorf("未安装该版本: %s", version)
 	}
+	logger.I("[env][%s] Start version=%s exe=%s wd=%s", s.flavor.kind, version, exe, wd)
 	running, _ := svcMgr.info(s.flavor.kind)
 	if running != "" && running != version {
 		return fmt.Errorf("%s 已在运行（%s），请先停止当前版本再启动 %s", s.flavor.display, running, version)
@@ -232,14 +306,23 @@ func (s *SQLRuntime) Start(ctx context.Context, version string, onLog func(strin
 	if wd != "" && filepath.Dir(exe) != "" {
 		datadir := s.dataDir(version)
 		if err := s.initDataDir(version, exe, datadir); err != nil {
+			if onLog != nil {
+				onLog(s.flavor.display + " 初始化数据目录失败: " + err.Error())
+			}
 			return err
 		}
 	}
 	if onLog != nil {
 		onLog("启动 " + s.flavor.display + " " + version + " …")
 	}
-	return svcMgr.start(s.flavor.kind, version, exe, wd,
-		[]string{"--datadir=" + s.dataDir(version), "--console"}, s.LogPath(version), onLog)
+	if err := svcMgr.start(s.flavor.kind, version, exe, wd,
+		[]string{"--datadir=" + s.dataDir(version), "--console"}, s.LogPath(version), onLog); err != nil {
+		if onLog != nil {
+			onLog(s.flavor.display + " 启动失败: " + err.Error())
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *SQLRuntime) LogPath(version string) string {
@@ -247,18 +330,23 @@ func (s *SQLRuntime) LogPath(version string) string {
 }
 
 func (s *SQLRuntime) Stop(version string) error {
+	logger.I("[env][%s] Stop version=%s", s.flavor.kind, version)
 	port := s.flavor.defPort
 	// 1) 尝试原生优雅关闭（mysqladmin shutdown / mariadb-admin shutdown），覆盖孤儿/多版本
 	for _, ins := range s.InstalledVersions() {
 		admin := filepath.Join(filepath.Dir(s.serverPath(ins.Version)), strings.TrimSuffix(s.flavor.serverBin, "d.exe")+"admin.exe")
 		if _, err := os.Stat(admin); err == nil {
+			logger.I("[env][%s] Stop 调用 %s shutdown (port=%d)", s.flavor.kind, filepath.Base(admin), port)
 			cmd := sysutil.Command(admin, "-uroot", "-h", "127.0.0.1", "-P", fmt.Sprintf("%d", port), "shutdown")
-			_ = cmd.Run()
+			if err := cmd.Run(); err != nil {
+				logger.W("[env][%s] Stop %s shutdown 失败（将走端口兜底）: %v", s.flavor.kind, filepath.Base(admin), err)
+			}
 		}
 	}
 	// 2) 端口兜底：杀掉占用默认端口且镜像确为该服务二进制的进程树
 	stopByPort(port, s.flavor.serverBin)
 	svcMgr.forget(s.flavor.kind)
+	logger.I("[env][%s] Stop 完成", s.flavor.kind)
 	return nil
 }
 

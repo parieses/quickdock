@@ -47,6 +47,13 @@ func NewCaddyRuntime() *CaddyRuntime {
 }
 
 func (c *CaddyRuntime) Kind() Runtime                 { return RuntimeCaddy }
+func (c *CaddyRuntime) DetectArgs() []string          { return []string{"version"} }
+func (c *CaddyRuntime) ParseVersion(out string) (string, error) {
+	if v := parseCaddyVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeCaddy))
+}
 func (c *CaddyRuntime) DisplayName() string          { return DisplayName(RuntimeCaddy) }
 func (c *CaddyRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (c *CaddyRuntime) Recommended() []string        { return Versions(RuntimeCaddy) }
@@ -236,6 +243,20 @@ func (c *CaddyRuntime) Start(ctx context.Context, version string, onLog func(str
 
 // Stop 先 `caddy stop`（admin API 优雅关闭，覆盖孤儿/外部实例），端口兜底强杀镜像确为 caddy.exe 的进程树，
 // 最后清掉会话内句柄。
+func (c *CaddyRuntime) ValidateConfig(version string) error {
+	if err := c.ensureConfig(version); err != nil {
+		return fmt.Errorf("生成 Caddyfile 失败: %w", err)
+	}
+	exe := c.ExeFor(version)
+	cmd := sysutil.Command(exe, "validate", "--config", "Caddyfile", "--adapter", "caddyfile")
+	cmd.Dir = c.versionDir(version)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 func (c *CaddyRuntime) Stop(version string) error {
 	for _, ins := range c.InstalledVersions() {
 		stopCmd := sysutil.Command(c.ExeFor(ins.Version), "stop")

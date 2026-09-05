@@ -231,6 +231,16 @@ func (n *NodeRuntime) Install(ctx context.Context, version string, cb InstallCal
 // ---- RuntimeAdapter 接口实现 ----
 
 func (n *NodeRuntime) Kind() Runtime { return RuntimeNode }
+func (n *NodeRuntime) DetectArgs() []string {
+	return []string{"-v"}
+}
+func (n *NodeRuntime) ParseVersion(out string) (string, error) {
+	v := strings.TrimSpace(strings.TrimPrefix(out, "v"))
+	if v == "" {
+		return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeNode))
+	}
+	return v, nil
+}
 
 func (n *NodeRuntime) DisplayName() string { return DisplayName(RuntimeNode) }
 

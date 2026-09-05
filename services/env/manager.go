@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/sysutil"
 )
@@ -47,6 +48,12 @@ type RuntimeAdapter interface {
 	Install(ctx context.Context, version string, cb InstallCallback) error
 	// DeleteVersion 删除某已安装版本（便携目录）。系统 PATH 上的版本通常无法在此删除，返回错误。
 	DeleteVersion(version string) error
+	// DetectArgs 返回导入外部安装时探测版本号所用的命令行参数（如 []string{"--version"}）。
+	// 返回空切片表示该运行时不可通过版本探测导入（如 FTPDMIN 无 --version 且启动即服务）。
+	DetectArgs() []string
+	// ParseVersion 将 DetectArgs 探测到的标准输出解析为纯版本号（如 "7.4.0"）。
+	// 解析失败时返回 error（导入流程据此拒绝无法识别的目录）。
+	ParseVersion(output string) (string, error)
 }
 
 // ServiceController 可选能力：以服务方式启动/停止并查询运行状态（nginx/redis 实现）。
@@ -96,7 +103,7 @@ type Manager struct {
 // runtimeOrder 运行时固定展示顺序
 var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeComposer,
 	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
-	RuntimeMailpit, RuntimeMinIO}
+	RuntimeMailpit, RuntimeMinIO, RuntimeFrpc, RuntimeFTP}
 
 func NewManager() *Manager {
 	m := &Manager{
@@ -119,6 +126,8 @@ func NewManager() *Manager {
 			RuntimeMongoDB:    NewMongoRuntime(),
 			RuntimeMailpit:   NewMailpitRuntime(),
 			RuntimeMinIO:     NewMinioRuntime(),
+			RuntimeFrpc:      NewFrpcRuntime(),
+			RuntimeFTP:       NewFTPRuntime(),
 		},
 		links:       map[Runtime][]linkEntry{},
 		detectCache: map[Runtime][]Install{},
@@ -174,44 +183,19 @@ func (m *Manager) linkedDir(rt Runtime, version string) (string, bool) {
 }
 
 // importExeName 返回某运行时可执行文件名（用于拼接导入目录下的 exe 路径）。
-func importExeName(rt Runtime) string {
-	switch rt {
-	case RuntimeNode:
-		return "node.exe"
-	case RuntimePHP:
-		return "php.exe"
-	case RuntimeGo:
-		return "go.exe"
-	case RuntimeRedis:
-		return "redis-server.exe"
-	case RuntimeNginx:
-		return "nginx.exe"
-	case RuntimeGit:
-		return "git.exe"
-	case RuntimeCaddy:
-		return "caddy.exe"
-	case RuntimeFFmpeg:
-		return "ffmpeg.exe"
-	case RuntimePython:
-		return "python.exe"
-	case RuntimeApache:
-		return "httpd.exe"
-	case RuntimeMemcached:
-		return "memcached.exe"
-	case RuntimeMariaDB:
-		return "mariadbd.exe"
-	case RuntimeMySQL:
-		return "mysqld.exe"
-	case RuntimePostgreSQL:
-		return "postgres.exe"
-	case RuntimeMongoDB:
-		return "mongod.exe"
-	case RuntimeMailpit:
-		return "mailpit.exe"
-	case RuntimeMinIO:
-		return "minio.exe"
+// 直接由 adapter.ExeFor 推导可执行文件名，去掉了原先维护一份「运行时→exe 名」映射的巨型 switch：
+// 新增运行时只需在 adapter 实现 ExeFor 与 DetectArgs，无需再同步 importExeName。
+// 返回 "" 表示该运行时不可导入（DetectArgs 为空，如 FTPDMIN）。
+func (m *Manager) importExeName(rt Runtime) string {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return ""
 	}
-	return ""
+	if len(a.DetectArgs()) == 0 {
+		return ""
+	}
+	// ExeFor 需要一个版本占位符；可执行文件名与具体版本无关，任意非空占位即可。
+	return filepath.Base(a.ExeFor("0"))
 }
 
 // exeDirFor 返回某版本 bin 目录：导入版本取外部目录，其余取 adapter 约定目录。
@@ -477,7 +461,7 @@ func (m *Manager) SetActive(rt Runtime, version string) error {
 			_ = sysUnregisterPath(binOf(prev))
 		}
 	}
-	return SetActive(rt, version)
+	return writeActiveMeta(rt, version)
 }
 
 // UnsetActive 取消某版本的"环境变量指向"状态：直接把该版本 bin 目录从系统 PATH 注销
@@ -491,7 +475,7 @@ func (m *Manager) UnsetActive(rt Runtime, version string) error {
 	if scope != "system" {
 		_ = sysUnregisterPath(m.exeDirFor(rt, version))
 	}
-	return SetActive(rt, "")
+	return writeActiveMeta(rt, "")
 }
 
 // SetVersionMeta 更新某版本的别名与备注
@@ -504,13 +488,13 @@ func (m *Manager) SetVersionMeta(rt Runtime, version, alias, note string) error 
 
 // DeleteVersion 删除某已安装版本：便携目录直接删除；导入的外部目录仅移除登记（不删用户文件）。
 // 系统 PATH 上的版本无法在此删除。若删除的是当前激活的便携/导入版本，会先将其 bin 目录从系统 PATH 注销。
-func (m *Manager) DeleteVersion(rt Runtime, version string) error {
+func (m *Manager) DeleteVersion(rt Runtime, version string, removeData bool) error {
 	if dir, ok := m.linkedDir(rt, version); ok {
 		// 导入版本：仅移除登记，保留外部目录
 		m.removeLink(rt, version)
 		if activeVersion(rt) == version {
 			_ = sysUnregisterPath(dir)
-			SetActive(rt, "")
+			writeActiveMeta(rt, "")
 		}
 		return ClearVersionMeta(rt, version)
 	}
@@ -528,6 +512,18 @@ func (m *Manager) DeleteVersion(rt Runtime, version string) error {
 		}
 		if scope == "portable" {
 			_ = sysUnregisterPath(filepath.Dir(a.ExeFor(version)))
+		}
+	}
+	// 选择性清理数据目录（仅当用户勾选 removeData，且运行时实现了 DataDirProvider）
+	if removeData {
+		if dd, ok := a.(DataDirProvider); ok {
+			if dir := dd.DataDir(version); dir != "" {
+				if rerr := os.RemoveAll(dir); rerr != nil {
+					logger.W("[env] 删除数据目录失败 %s: %v", dir, rerr)
+				} else {
+					logger.I("[env] 已删除数据目录 %s", dir)
+				}
+			}
 		}
 	}
 	if err := a.DeleteVersion(version); err != nil {
@@ -571,7 +567,7 @@ func (m *Manager) ImportVersion(rt Runtime, dir string) (string, error) {
 	if err != nil || !info.IsDir() {
 		return "", fmt.Errorf("目录不存在: %s", dir)
 	}
-	exeName := importExeName(rt)
+	exeName := m.importExeName(rt)
 	if exeName == "" {
 		return "", fmt.Errorf("不支持导入该运行时: %s", rt)
 	}
@@ -590,7 +586,7 @@ func (m *Manager) ImportVersion(rt Runtime, dir string) (string, error) {
 	if exePath == "" {
 		return "", fmt.Errorf("在 %s 下未找到 %s", dir, exeName)
 	}
-	version, err := detectVersion(rt, exePath)
+	version, err := m.detectVersion(rt, exePath)
 	if err != nil {
 		return "", err
 	}
@@ -622,20 +618,17 @@ func (m *Manager) ImportVersion(rt Runtime, dir string) (string, error) {
 	return version, nil
 }
 
-// detectVersion 运行外部 exe 探测其版本号（不同运行时命令/输出格式不同）。
-func detectVersion(rt Runtime, exe string) (string, error) {
-	var args []string
-	switch rt {
-	case RuntimeNode, RuntimePHP, RuntimeNginx, RuntimeApache:
-		args = []string{"-v"}
-	case RuntimeGo:
-		args = []string{"version"}
-	case RuntimeRedis, RuntimeGit, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB, RuntimePython, RuntimeMailpit, RuntimeMinIO:
-		args = []string{"--version"}
-	case RuntimeCaddy, RuntimeFFmpeg:
-		args = []string{"version"}
-	default:
-		return "", fmt.Errorf("不支持的运行时")
+// detectVersion 运行外部 exe 探测其版本号。版本探测参数与输出解析已下沉到 adapter
+// （DetectArgs / ParseVersion），此处仅负责拉起进程并调用 adapter 的解析器，
+// 不再维护一份「运行时→参数/解析」的巨型 switch。
+func (m *Manager) detectVersion(rt Runtime, exe string) (string, error) {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return "", err
+	}
+	args := a.DetectArgs()
+	if len(args) == 0 {
+		return "", fmt.Errorf("不支持导入该运行时: %s", rt)
 	}
 	// Windows GUI 进程（正式版无控制台）拉起 console 子进程会闪出黑框，必须隐藏
 	cmd := sysutil.Command(exe, args...)
@@ -643,57 +636,47 @@ func detectVersion(rt Runtime, exe string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("执行版本探测失败: %w", err)
 	}
-	s := string(out)
-	switch rt {
-	case RuntimePHP:
-		return parsePHPVersion(s), nil
-	case RuntimeRedis:
-		return parseRedisVersion(s), nil
-	case RuntimeGo:
-		// "go version go1.23.4 windows/amd64"
-		if i := strings.Index(s, "go version go"); i >= 0 {
-			rest := s[i+len("go version go"):]
-			if sp := strings.IndexByte(rest, ' '); sp > 0 {
-				return rest[:sp], nil
-			}
-			return strings.TrimSpace(rest), nil
-		}
-	case RuntimeNginx:
-		// "nginx version: nginx/1.27.5"
-		if i := strings.Index(s, "nginx/"); i >= 0 {
-			return strings.TrimSpace(s[i+len("nginx/"):]), nil
-		}
-	case RuntimeGit:
-		// "git version 2.45.0.windows.1"
-		if i := strings.Index(s, "git version "); i >= 0 {
-			return strings.TrimSpace(s[i+len("git version "):]), nil
-		}
-	case RuntimeNode:
-		// "v22.22.2"
-		return strings.TrimSpace(strings.TrimPrefix(s, "v")), nil
-	case RuntimeCaddy:
-		// "v2.8.4 h1:..." 或 "v2.8.4"
-		return parseCaddyVersion(s), nil
-	case RuntimeFFmpeg:
-		return parseFFmpegVersion(s), nil
-	case RuntimePython:
-		return parsePythonVersion(s), nil
-	case RuntimeApache:
-		return parseApacheVersion(s), nil
-	case RuntimeMemcached:
-		return parseMemcachedVersion(s), nil
-	case RuntimeMariaDB, RuntimeMySQL:
-		return parseSQLVersion(s), nil
-	case RuntimePostgreSQL:
-		return parsePostgresVersion(s), nil
-	case RuntimeMongoDB:
-		return parseMongoVersion(s), nil
-	case RuntimeMailpit:
-		return parseMailpitVersion(s), nil
-	case RuntimeMinIO:
-		return parseMinioVersion(s), nil
+	return a.ParseVersion(string(out))
+}
+
+// ---- 通用配置读写（适用于实现了 ConfigProvider 的 runtime）----
+// 新增一个可编辑配置的 runtime 只需让它实现 ConfigProvider（声明配置文件路径），
+// 无需再各自加一对 API 与前端弹窗。
+
+// ConfigSupport 判断某 runtime 是否具备可编辑的配置文件。
+func (m *Manager) ConfigSupport(rt Runtime) bool {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return false
 	}
-	return "", nil
+	_, ok := a.(ConfigProvider)
+	return ok
+}
+
+// ConfigGet 读取某 runtime 某版本的配置文件。
+func (m *Manager) ConfigGet(rt Runtime, version string) (*RuntimeConfig, error) {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return nil, err
+	}
+	p, ok := a.(ConfigProvider)
+	if !ok {
+		return nil, fmt.Errorf("%s 不支持配置编辑", DisplayName(rt))
+	}
+	return ReadConfig(p, version)
+}
+
+// ConfigSet 写回某 runtime 某版本的配置文件（整体覆盖）。
+func (m *Manager) ConfigSet(rt Runtime, version, raw string) error {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return err
+	}
+	p, ok := a.(ConfigProvider)
+	if !ok {
+		return fmt.Errorf("%s 不支持配置编辑", DisplayName(rt))
+	}
+	return WriteConfig(p, version, raw)
 }
 
 // PHPConfigGet 读取某已装 PHP 版本的配置（php.ini 正文、禁用函数、错误日志、扩展列表）。
@@ -720,56 +703,76 @@ func (m *Manager) PHPConfigSet(rt Runtime, version string, patch PHPConfigPatch)
 	return writePHPConfig(dir, patch)
 }
 
-// RedisConfigGet 读取某已装 Redis 版本的 redis.conf 配置。
-func (m *Manager) RedisConfigGet(rt Runtime, version string) (*RedisConfig, error) {
-	if rt != RuntimeRedis {
-		return nil, fmt.Errorf("仅 Redis 支持配置编辑")
-	}
-	a, err := m.adapter(rt)
-	if err != nil {
-		return nil, err
-	}
-	r, ok := a.(*RedisRuntime)
-	if !ok {
-		return nil, fmt.Errorf("Redis 运行时类型异常")
-	}
-	return r.ConfigGet(version)
+// RedisConfigGet / RedisConfigSet 已废弃：Redis 实现了通用 ConfigProvider，
+// 统一走 Manager.ConfigGet / ConfigSet（EnvConfigGet / EnvConfigSet），无需特化 API。
+
+// LogProvider 可选能力：运行时可将自身运行日志（如 redis.log）提供给前端查询。
+// 实现后即通过通用 Manager.LogGet 暴露，无需为每个运行时单独加一对 API。
+type LogProvider interface {
+	// LogGet 读取某版本的运行日志（尾部内容），用于前端日志弹窗查询。
+	LogGet(version string) (string, error)
 }
 
-// RedisConfigSet 写回某已装 Redis 版本的 redis.conf（整体覆盖）。
-func (m *Manager) RedisConfigSet(rt Runtime, version, raw string) error {
-	if rt != RuntimeRedis {
-		return fmt.Errorf("仅 Redis 支持配置编辑")
-	}
-	a, err := m.adapter(rt)
-	if err != nil {
-		return err
-	}
-	r, ok := a.(*RedisRuntime)
-	if !ok {
-		return fmt.Errorf("Redis 运行时类型异常")
-	}
-	return r.ConfigSet(version, raw)
-}
-
-// RedisLogGet 读取某已装 Redis 版本的运行日志（redis.log 尾部）。
-func (m *Manager) RedisLogGet(rt Runtime, version string) (string, error) {
-	if rt != RuntimeRedis {
-		return "", fmt.Errorf("仅 Redis 支持日志查询")
-	}
+// LogGet 读取某运行时某版本的运行日志（仅实现了 LogProvider 的运行时可用）。
+func (m *Manager) LogGet(rt Runtime, version string) (string, error) {
 	a, err := m.adapter(rt)
 	if err != nil {
 		return "", err
 	}
-	r, ok := a.(*RedisRuntime)
+	p, ok := a.(LogProvider)
 	if !ok {
-		return "", fmt.Errorf("Redis 运行时类型异常")
+		return "", fmt.Errorf("%s 不支持日志查询", DisplayName(rt))
 	}
-	return r.LogGet(version)
+	return p.LogGet(version)
+}
+
+// ConfigValidator 可选能力：启动前对配置文件做语法校验（如 nginx -t / apache -t / caddy validate）。
+// 实现后由 Manager.Start 在拉起服务前统一调用，校验失败则拦下并提示校验输出（含错误行号/原因）。
+type ConfigValidator interface {
+	// ValidateConfig 校验指定版本的配置，合法返回 nil，否则返回可读性错误（含出错位置/原因）。
+	ValidateConfig(version string) error
+}
+
+// DataDirProvider 可选能力：返回指定版本的数据目录（如 PostgreSQL/MongoDB 的 data 目录）。
+// 实现后，卸载版本时若用户勾选「同时删除数据」，Manager.DeleteVersion 会一并清理该目录。
+type DataDirProvider interface {
+	DataDir(version string) string
+}
+
+// PathEntry 描述某运行时当前激活版本在系统 PATH 中的状态（供 PATH 可视化面板展示）。
+type PathEntry struct {
+	Runtime string `json:"runtime"` // 运行时 id
+	Version string `json:"version"` // 激活版本
+	BinDir  string `json:"binDir"`  // 该版本 bin 目录（即写入 PATH 的条目）
+	InPath  bool   `json:"inPath"`  // 该 bin 目录是否真实出现在系统 PATH 中
+}
+
+// PathInfo 返回所有已设置激活版本的运行时，其 bin 目录及是否真正注册进系统 PATH。
+func (m *Manager) PathInfo() []PathEntry {
+	out := make([]PathEntry, 0, len(runtimeOrder))
+	for _, rt := range runtimeOrder {
+		v := activeVersion(rt)
+		if v == "" {
+			continue
+		}
+		dir := m.exeDirFor(rt, v)
+		inPath := false
+		if a, err := m.adapter(rt); err == nil {
+			for _, ins := range a.InstalledVersions() {
+				if ins.Version == v && ins.InSystemPath {
+					inPath = true
+					break
+				}
+			}
+		}
+		out = append(out, PathEntry{Runtime: string(rt), Version: v, BinDir: dir, InPath: inPath})
+	}
+	return out
 }
 
 // Start 启动某运行时的服务（仅 nginx/redis 支持）。
 func (m *Manager) Start(rt Runtime, version string, onLog func(string)) error {
+	logger.I("[env] Manager.Start rt=%s version=%s", rt, version)
 	a, err := m.adapter(rt)
 	if err != nil {
 		return err
@@ -778,11 +781,30 @@ func (m *Manager) Start(rt Runtime, version string, onLog func(string)) error {
 	if !ok {
 		return fmt.Errorf("该运行时不支持服务管理")
 	}
+	// 启动前端口冲突检测：默认服务端口被「外部程序」占用时提前拦截，避免 bind 失败被误判 running。
+	// 本会话已拉起（Ours=true）的单例场景交由运行时内部的多版本互斥逻辑处理，这里不拦截。
+	if pc, perr := m.PortConflict(rt, version); perr == nil && pc.Occupied && !pc.Ours {
+		who := pc.Image
+		switch {
+		case pc.PID != 0:
+			who = fmt.Sprintf("PID %d · %s", pc.PID, pc.Image)
+		case who == "":
+			who = "未知程序"
+		}
+		return fmt.Errorf("端口 %d 已被占用（%s），无法启动 %s，请先释放该端口", pc.Port, who, a.DisplayName())
+	}
+	// 启动前配置校验（如 nginx -t / apache -t / caddy validate）；不通过则拦下并提示校验输出。
+	if v, ok := a.(ConfigValidator); ok {
+		if cerr := v.ValidateConfig(version); cerr != nil {
+			return fmt.Errorf("配置校验未通过: %w", cerr)
+		}
+	}
 	return sc.Start(context.Background(), version, onLog)
 }
 
 // Stop 停止某运行时的服务。
 func (m *Manager) Stop(rt Runtime, version string) error {
+	logger.I("[env] Manager.Stop rt=%s version=%s", rt, version)
 	a, err := m.adapter(rt)
 	if err != nil {
 		return err

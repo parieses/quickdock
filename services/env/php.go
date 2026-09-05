@@ -57,6 +57,13 @@ func NewPHPRuntime() *PHPRuntime {
 }
 
 func (p *PHPRuntime) Kind() Runtime                 { return RuntimePHP }
+func (p *PHPRuntime) DetectArgs() []string          { return []string{"-v"} }
+func (p *PHPRuntime) ParseVersion(out string) (string, error) {
+	if v := parsePHPVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimePHP))
+}
 func (p *PHPRuntime) DisplayName() string          { return DisplayName(RuntimePHP) }
 func (p *PHPRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (p *PHPRuntime) Recommended() []string        { return Versions(RuntimePHP) }

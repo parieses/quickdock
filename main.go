@@ -90,6 +90,26 @@ func scheduleSaveWindowState(w *application.WebviewWindow) {
 	windowStateMu.Unlock()
 }
 
+// logStartupDetail 在 app.Run() 前打印宿主侧 WebView2 启动细节，
+// 补足框架那行笼统的 "[WebView2] Environment created successfully"。
+func logStartupDetail(app *application.App, mainOpts application.WebviewWindowOptions, saved *windowState) {
+	wvPath := EnsureConfigDir() + "\\WebView2"
+	rect := "默认"
+	if saved != nil {
+		rect = fmt.Sprintf("%dx%d @(%d,%d)", saved.Width, saved.Height, saved.X, saved.Y)
+	} else {
+		rect = fmt.Sprintf("%dx%d @默认", mainOpts.Width, mainOpts.Height)
+	}
+	screens := 0
+	if app != nil {
+		screens = len(app.Screen.GetAll())
+	}
+	logger.I("[启动] 应用版本=%s | WebView2 数据目录=%s | 屏幕数=%d", appVersion, wvPath, screens)
+	logger.I("[启动] 窗口计划：主窗口=%s；浮窗=剪贴板/命令面板/笔记（懒创建，Run 后预创建并 Hide）", rect)
+	logger.I("[启动] WebView2 优化：附加参数 %d 项（--in-process-gpu / --renderer-process-limit=4 等），禁用特性 %d 项（%s）",
+		len(memoryOptimizedArgs), len(disabledFeatures), strings.Join(disabledFeatures, ","))
+}
+
 //go:embed all:frontend/dist
 var assets embed.FS
 
@@ -300,6 +320,11 @@ func main() {
 	}
 
 	// 运行应用
+	// 注意：Wails 框架在创建首个 WebView2 环境时会打印笼统的
+	// "[WebView2] Environment created successfully"，此处补充宿主侧细节日志，
+	// 让启动信息更具可读性（数据目录 / 版本 / 优化参数 / 窗口计划 / 屏幕数）。
+	logStartupDetail(app, mainOpts, mainRect)
+
 	err := app.Run()
 	if err != nil {
 		logger.E("应用运行失败: %v", err)

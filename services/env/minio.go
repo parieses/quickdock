@@ -33,6 +33,13 @@ func NewMinioRuntime() *MinioRuntime {
 }
 
 func (m *MinioRuntime) Kind() Runtime                 { return RuntimeMinIO }
+func (m *MinioRuntime) DetectArgs() []string          { return []string{"--version"} }
+func (m *MinioRuntime) ParseVersion(out string) (string, error) {
+	if v := parseMinioVersion(out); v != "" {
+		return v, nil
+	}
+	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeMinIO))
+}
 func (m *MinioRuntime) DisplayName() string          { return DisplayName(RuntimeMinIO) }
 func (m *MinioRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (m *MinioRuntime) Recommended() []string        { return Versions(RuntimeMinIO) }
@@ -51,6 +58,9 @@ func (m *MinioRuntime) ExeFor(version string) string {
 func (m *MinioRuntime) dataDir(version string) string {
 	return filepath.Join(m.versionDir(version), "data")
 }
+
+// DataDir 返回 MinIO 数据目录（卸载时可选清理）。
+func (m *MinioRuntime) DataDir(version string) string { return m.dataDir(version) }
 
 func (m *MinioRuntime) InstalledVersions() []Install {
 	var out []Install
