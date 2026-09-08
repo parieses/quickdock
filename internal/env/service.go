@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -403,6 +404,35 @@ func processImageMatches(pid int, expect string) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(string(out)), strings.ToLower(expect))
+}
+
+// processIsExe 双重校验：同时用镜像名（tasklist/ps）与完整路径（QueryFullProcessImageNameW /
+// /proc/pid/exe / lsof）确认 pid 对应的进程是 expect 期望的镜像。两者都可用时必须同时命中，
+// 才能认定该端口确实被目标运行时占用（防端口被同名/伪装进程误报）；任一探测手段不可用时
+// 回退到另一手段（path 拉不到就信 name，name 拉不到就信 path）。
+func processIsExe(pid int, expect string) bool {
+	if pid <= 0 {
+		return false
+	}
+	exe := processExePath(pid)
+	if exe == "" {
+		return processImageMatches(pid, expect)
+	}
+	return processImageMatches(pid, expect) && strings.EqualFold(filepath.Base(exe), expect)
+}
+
+// processIsExeAny 任一候选镜像名通过 processIsExe 双重校验即返回 true（用于多镜像名的运行时，
+// 如 RabbitMQ 实际由 Erlang VM 的 beam.smp.exe / erl.exe 监听）。
+func processIsExeAny(pid int, expects ...string) bool {
+	if pid <= 0 {
+		return false
+	}
+	for _, e := range expects {
+		if processIsExe(pid, e) {
+			return true
+		}
+	}
+	return false
 }
 
 // killTree 强制杀掉 pid 及其子进程树（Windows: taskkill /T；非 Windows: kill -9）。

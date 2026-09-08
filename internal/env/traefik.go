@@ -166,6 +166,11 @@ func (t *TraefikRuntime) ensureConfig(version string) error {
 
 func (t *TraefikRuntime) DefaultPort() int { return traefikWebPort }
 
+// ConfiguredPorts 从 traefik.yml 解析 entryPoints 的 address 端口（如 ":80" / ":8080"）。
+func (t *TraefikRuntime) ConfiguredPorts(version string) []int {
+	return firstPortOrDefault(portsInConf(t.ConfigPath(version), reTraefikAddr), traefikWebPort)
+}
+
 func (t *TraefikRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := t.InstalledVersions()
 	if version == "" {
@@ -244,10 +249,14 @@ func (t *TraefikRuntime) Status(version string) ServiceStatus {
 		return st
 	}
 	if isPortOpen(port) {
-		st.Running = true
-		st.Version = version
 		if pid := findListenPID(port); pid != 0 {
-			st.PID = pid
+			// 双重校验：镜像名(processImageMatches) + 完整路径(QueryFullProcessImageNameW) 都命中 traefik.exe 才认作运行，
+			// 避免与其它占用同端口的程序（如监听 8080 的 caddy）互相误报
+			if processIsExe(pid, "traefik.exe") {
+				st.Running = true
+				st.Version = version
+				st.PID = pid
+			}
 		}
 	}
 	return st

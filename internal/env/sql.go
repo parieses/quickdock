@@ -192,6 +192,16 @@ func (s *SQLRuntime) Install(ctx context.Context, version string, cb InstallCall
 
 func (s *SQLRuntime) DefaultPort() int { return s.flavor.defPort }
 
+// ConfiguredPorts 从 my.ini / my.cnf 解析 port（MySQL/MariaDB 便携版配置；无配置文件时回退默认端口）。
+func (s *SQLRuntime) ConfiguredPorts(version string) []int {
+	for _, name := range []string{"my.ini", "my.cnf"} {
+		if ports := portsInConf(filepath.Join(s.versionDir(version), name), reSQLPort); len(ports) > 0 {
+			return ports
+		}
+	}
+	return []int{s.flavor.defPort}
+}
+
 // isInitialized 判断数据目录是否已完整初始化（含系统库）。
 // 不能仅判断 datadir 或 mysql/ 是否存在：初始化中途崩溃会留下 mysql/ 子目录及部分 InnoDB 文件，
 // 但 performance_schema / sys 等后续系统库尚未建出，此时拉起服务器会报数据损坏（MY-012960）直接 abort。
@@ -369,8 +379,7 @@ func (s *SQLRuntime) Status(version string) ServiceStatus {
 	}
 	if isPortOpen(port) {
 		if pid := findListenPID(port); pid != 0 {
-			exe := processExePath(pid)
-			if exe == "" || strings.EqualFold(filepath.Base(exe), s.flavor.serverBin) {
+			if processIsExe(pid, s.flavor.serverBin) {
 				st.Running = true
 				st.Version = version
 				st.PID = pid

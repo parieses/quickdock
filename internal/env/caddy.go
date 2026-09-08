@@ -22,6 +22,10 @@ const caddyBaseRel = "runtime/caddy"
 // 作为比裸端口更语义化的健康探针（区分 running vs ready）；也是 Stop 端口兜底的识别端口。
 const caddyAdminPort = 2019
 
+// caddyDefaultSitePort 默认站点端口（避开 80 与 IIS/Skype 冲突）。
+// 实际端口以 Caddyfile 解析结果为准（见 ConfiguredPorts / WebConsolePort）。
+const caddyDefaultSitePort = 8080
+
 // defaultCaddyfile 首次启动前自动生成的默认配置：把 admin API 锁在 localhost:2019，
 // 站点默认开在 :8080（避开 80 与 IIS/Skype 冲突），用户可在环境页直接编辑 Caddyfile 托管自己的站点。
 const defaultCaddyfile = `{
@@ -173,8 +177,32 @@ func parseCaddyVersion(out string) string {
 
 func (c *CaddyRuntime) DefaultPort() int { return caddyAdminPort }
 
-// WebConsolePort 返回默认站点端口（80），运行时跑起来后打开即默认页（admin API 2019 非 UI，不用于控制台）。
-func (c *CaddyRuntime) WebConsolePort(version string) int { return 80 }
+// WebConsolePort 返回 Caddyfile 中实际配置的站点端口（默认 :8080），
+// 而非写死的 80——用户改了站点端口后「打开控制台」要跟着变。
+func (c *CaddyRuntime) WebConsolePort(version string) int {
+	if sites := caddySitePorts(c.ConfigPath(version)); len(sites) > 0 {
+		return sites[0]
+	}
+	return caddyDefaultSitePort
+}
+
+// ConfiguredPorts 返回 [admin 端口, 站点端口...]，供前端「两个一块显示」：
+// admin（Caddyfile 未配置时按默认 2019，admin off 则不列）+ Caddyfile 里的站点侦听端口。
+func (c *CaddyRuntime) ConfiguredPorts(version string) []int {
+	cf := c.ConfigPath(version)
+	admin := caddyAdminPortFromConf(cf)
+	if admin == 0 {
+		admin = caddyAdminPort
+	}
+	sites := caddySitePorts(cf)
+	if len(sites) == 0 {
+		sites = []int{caddyDefaultSitePort}
+	}
+	out := make([]int, 0, len(sites)+1)
+	out = append(out, admin)
+	out = append(out, sites...)
+	return out
+}
 
 // ConfigPath 返回某版本 Caddyfile 绝对路径。
 func (c *CaddyRuntime) ConfigPath(version string) string {

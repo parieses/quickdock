@@ -432,6 +432,26 @@ func (r *RabbitMQRuntime) ensureManagementPlugin(version string, onLog func(stri
 
 func (r *RabbitMQRuntime) DefaultPort() int { return rabbitmqPort }
 
+// ConfiguredPorts 从 etc/rabbitmq/rabbitmq.conf 解析 AMQP 端口（listeners.tcp.*）与管理后台端口
+// （management.tcp.port）；无配置文件时回退默认 5672，管理插件启用则附 15672。
+func (r *RabbitMQRuntime) ConfiguredPorts(version string) []int {
+	cf := filepath.Join(r.versionDir(version), "etc", "rabbitmq", "rabbitmq.conf")
+	out := portsInConf(cf, reRabbitPort)
+	if len(out) == 0 {
+		out = appendPort(out, rabbitmqPort)
+	}
+	mgmt := portsInConf(cf, reRabbitMgmt)
+	if len(mgmt) == 0 {
+		if enabled, _ := r.IsManagementEnabled(version); enabled {
+			mgmt = []int{15672}
+		}
+	}
+	for _, p := range mgmt {
+		out = appendPort(out, p)
+	}
+	return out
+}
+
 // WebConsolePort 返回管理后台端口 15672（仅当管理插件启用时；否则无 Web 控制台）。
 func (r *RabbitMQRuntime) WebConsolePort(version string) int {
 	if enabled, _ := r.IsManagementEnabled(version); enabled {
@@ -518,10 +538,13 @@ func (r *RabbitMQRuntime) Status(version string) ServiceStatus {
 		return st
 	}
 	if isPortOpen(rabbitmqPort) {
-		st.Running = true
-		st.Version = version
 		if pid := findListenPID(rabbitmqPort); pid != 0 {
-			st.PID = pid
+			// 双重校验：镜像名 + 完整路径都命中 Erlang VM 进程(beam.smp.exe/erl.exe) 才认作运行，避免端口被其它程序占用时误报
+			if processIsExeAny(pid, "beam.smp.exe", "erl.exe") {
+				st.Running = true
+				st.Version = version
+				st.PID = pid
+			}
 		}
 	}
 	return st

@@ -145,6 +145,16 @@ func (m *MongoRuntime) Install(ctx context.Context, version string, cb InstallCa
 
 func (m *MongoRuntime) DefaultPort() int { return mongoDefaultPort }
 
+// ConfiguredPorts 从 mongod.conf（YAML 的 net.port）解析端口；未配置该文件时回退默认 27017。
+func (m *MongoRuntime) ConfiguredPorts(version string) []int {
+	for _, name := range []string{"mongod.conf", filepath.Join("bin", "mongod.conf")} {
+		if ports := portsInConf(filepath.Join(m.versionDir(version), name), reMongoPort); len(ports) > 0 {
+			return ports
+		}
+	}
+	return []int{mongoDefaultPort}
+}
+
 func (m *MongoRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := m.InstalledVersions()
 	if version == "" {
@@ -232,8 +242,7 @@ func (m *MongoRuntime) Status(version string) ServiceStatus {
 	}
 	if isPortOpen(port) {
 		if pid := findListenPID(port); pid != 0 {
-			exe := processExePath(pid)
-			if exe == "" || strings.EqualFold(filepath.Base(exe), "mongod.exe") {
+			if processIsExe(pid, "mongod.exe") {
 				st.Running = true
 				st.Version = version
 				st.PID = pid

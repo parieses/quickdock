@@ -240,6 +240,11 @@ func mergeInto(src, dst string) error {
 
 func (a *ApacheRuntime) DefaultPort() int { return apacheDefaultPort }
 
+// ConfiguredPorts 从 httpd.conf 解析 Listen 端口（Listen 80 / Listen 127.0.0.1:8080）。
+func (a *ApacheRuntime) ConfiguredPorts(version string) []int {
+	return firstPortOrDefault(listenPortsInConf(a.ConfigPath(version)), apacheDefaultPort)
+}
+
 func (a *ApacheRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := a.InstalledVersions()
 	if version == "" {
@@ -331,8 +336,7 @@ func (a *ApacheRuntime) Status(version string) ServiceStatus {
 	}
 	if isPortOpen(port) {
 		if pid := findListenPID(port); pid != 0 {
-			exe := processExePath(pid)
-			if exe == "" || strings.EqualFold(filepath.Base(exe), "httpd.exe") {
+			if processIsExe(pid, "httpd.exe") {
 				st.Running = true
 				st.Version = version
 				st.PID = pid

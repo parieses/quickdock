@@ -19,6 +19,7 @@ let cachedGitInfo: GitStatusInfo | null = null
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
+import ConfigEditor from './ConfigEditor.vue'
 import {
   HTTPServeList,
   HTTPServeCreate,
@@ -31,8 +32,6 @@ import {
   EnvList,
   EnvInstall,
   EnvAvailableVersions,
-  EnvStart,
-  EnvStop,
   EnvRestart,
   EnvStatus,
   EnvPortConflict,
@@ -52,6 +51,7 @@ import {
   EnvRabbitMQEnableMgmt,
   EnvRabbitMQDisableMgmt,
   EnvRabbitMQIsMgmtEnabled,
+  EnvSetEnabled,
   EnvCertStatus,
   EnvCertInstallRoot,
   EnvCertIssue,
@@ -163,6 +163,8 @@ interface ServiceStatus {
   running: boolean
   pid: number
   port: number
+  // ports 后端按运行时配置文件解析出的全部侦听端口（caddy 首项为 admin 2019，其后为站点端口）
+  ports?: number[]
   version: string
 }
 interface RuntimeInfo {
@@ -177,6 +179,7 @@ interface RuntimeInfo {
   hasService: boolean
   hasLog: boolean
   webConsolePort: number
+  enabled: boolean // 常驻开关：期望态（true=随应用自启/崩溃自愈，false=停止）
 }
 
 // 每个运行时的品牌色（用于头像背景，白填充的官方图标渲染其上）
@@ -290,7 +293,7 @@ function staticRuntime(s: typeof STATIC_CATALOG[number]): RuntimeInfo {
     id: s.id, name: s.name, group: s.group,
     platforms: [], recommended: [],
     installed: [], sources: [], activeSource: '',
-    hasService: s.hasService, hasLog: false, webConsolePort: 0,
+    hasService: s.hasService, hasLog: false, webConsolePort: 0, enabled: false,
   }
 }
 const runtimes = ref<RuntimeInfo[]>(STATIC_CATALOG.map(staticRuntime))
@@ -370,12 +373,12 @@ function openPanorama() {
   }
 }
 const panoramaEntries = computed(() => {
-  const out: { id: string; name: string; version: string; port: number; consolePort: number }[] = []
+  const out: { id: string; name: string; version: string; port: number; ports: number[]; consolePort: number }[] = []
   for (const r of runtimes.value) {
     if (!r.hasService) continue
     for (const ins of (r.installed || [])) {
       if (!svcOn(r, ins.version)) continue
-      out.push({ id: r.id, name: r.name, version: ins.version, port: svcPort(r, ins.version), consolePort: consolePort(r, ins) })
+      out.push({ id: r.id, name: r.name, version: ins.version, port: svcPort(r, ins.version), ports: svcPorts(r, ins.version), consolePort: consolePort(r, ins) })
     }
   }
   return out
@@ -529,6 +532,15 @@ function svcOn(r: RuntimeInfo, version: string): boolean {
 }
 function svcPort(r: RuntimeInfo, version: string): number {
   return ui[r.id]?.svc?.[version]?.port || 0
+}
+
+// svcPorts 返回实际侦听端口列表：优先用后端按配置文件解析出的 ports，无则回退单 port。
+// 用户改了配置（nginx listen / caddy 站点端口等）后这里随之变化，而非写死的默认端口。
+function svcPorts(r: RuntimeInfo, version: string): number[] {
+  const st = ui[r.id]?.svc?.[version]
+  if (!st) return []
+  if (Array.isArray(st.ports) && st.ports.length) return st.ports
+  return st.port ? [st.port] : []
 }
 function anyRunning(r: RuntimeInfo): boolean {
   return r.installed.some((ins) => svcOn(r, ins.version))
@@ -819,9 +831,11 @@ async function openConfig(r: RuntimeInfo, ins: Install) {
     toast.error(getErrorMessage(e))
   }
 }
+const editorRef = ref<InstanceType<typeof ConfigEditor> | null>(null)
 async function saveConfig() {
   try {
     unwrap(await EnvConfigSet(configModal.runtime, configModal.version, configModal.raw))
+    editorRef.value?.markSaved() // 保存成功后刷新「已修改」基线
     toast.success(t('saved'))
     configModal.open = false
   } catch (e: any) {
@@ -973,6 +987,8 @@ async function load() {
         target.activeSource = info.activeSource
         target.name = info.name || target.name
         target.hasService = info.hasService
+        // 常驻开关：以前端持久化的期望态为准，后端 List 仅补充真实值（避免覆盖乐观更新）
+        if (typeof info.enabled === 'boolean') target.enabled = info.enabled
         // 分组以后端 registry 为准（如 redis/memcached/minio 归入 storage），
         // 避免前端 STATIC_CATALOG 与后端 Group 字段发散导致分类错乱。
         target.group = info.group || target.group
@@ -1234,23 +1250,24 @@ const gitRows = computed(() => {
   ]
 })
 
-async function startService(r: RuntimeInfo, version: string) {
+// 常驻开关：把运行时设为「期望态」。开=随应用自启/崩溃自愈，关=停止。
+// 不再暴露手动 start/stop 单次动作，由后端监督器对账拉起。
+const settingEnabled = reactive<Record<string, boolean>>({})
+async function toggleEnabled(r: RuntimeInfo, on: boolean) {
+  settingEnabled[r.id] = true
+  // 乐观更新，保证开关手感即时
+  const target = runtimes.value.find((x) => x.id === r.id)
+  if (target) target.enabled = on
   try {
-    unwrap(await EnvStart(r.id, version))
-    toast.success(r.name + ' ' + version + ' ' + t('svcStart'))
+    unwrap(await EnvSetEnabled(r.id, on))
+    toast.success(r.name + ' ' + (on ? t('svcWatchOn') : t('svcWatchOff')))
     pollStatus()
   } catch (e: any) {
+    // 失败回滚乐观状态
+    if (target) target.enabled = !on
     toast.error(getErrorMessage(e))
-  }
-}
-
-async function stopService(r: RuntimeInfo) {
-  try {
-    unwrap(await EnvStop(r.id))
-    toast.success(r.name + ' ' + t('svcStop'))
-    pollStatus()
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
+  } finally {
+    settingEnabled[r.id] = false
   }
 }
 
@@ -1565,6 +1582,16 @@ const s = currentRuntimeState
             <div class="detail-badges">
               <span v-if="selected.hasService" class="badge svc">{{ t('svcManage') }}</span>
               <span v-for="p in selected.platforms" :key="p" class="badge plat">{{ p }}</span>
+              <label v-if="selected.hasService" class="svc-switch" :class="{ on: selected.enabled, busy: settingEnabled[selected.id] }">
+                <input
+                  type="checkbox"
+                  :checked="selected.enabled"
+                  :disabled="settingEnabled[selected.id]"
+                  @change="toggleEnabled(selected, ($event.target as HTMLInputElement).checked)"
+                />
+                <span class="svc-switch-track"><span class="svc-switch-thumb"></span></span>
+                <span class="svc-switch-label">{{ selected.enabled ? t('svcWatchOn') : t('svcWatchOff') }}</span>
+              </label>
             </div>
           </div>
         </header>
@@ -1699,13 +1726,7 @@ const s = currentRuntimeState
                   <span class="status-dot"></span>
                   {{ svcOn(selected, ins.version) ? t('svcRunning') : t('svcStopped') }}
                 </span>
-                <button
-                  v-if="!svcOn(selected, ins.version)"
-                  class="svc-btn start"
-                  @click="startService(selected, ins.version)"
-                >{{ t('svcStart') }}</button>
-                <template v-else>
-                  <button class="svc-btn stop" @click="stopService(selected)">{{ t('svcStop') }}</button>
+                <template v-if="svcOn(selected, ins.version)">
                   <button
                     class="svc-btn restart"
                     :disabled="restarting[selected.id + ins.version]"
@@ -1717,10 +1738,10 @@ const s = currentRuntimeState
                     @click="openConsole(consolePort(selected, ins))"
                   >{{ t('openConsole') }}</button>
                 </template>
-                <span v-if="svcPort(selected, ins.version)" class="svc-port">
+                <span v-if="svcPorts(selected, ins.version).length" class="svc-port">
                   {{ t('svcPort') }}:
                   <template v-if="selected.id === 'rabbitmq' && rabbitMgmt[ins.version]">5672 / 15672</template>
-                  <template v-else>{{ svcPort(selected, ins.version) }}</template>
+                  <template v-else>{{ svcPorts(selected, ins.version).join(' / ') }}</template>
                 </span>
               </div>
               <div class="col-ops">
@@ -1977,7 +1998,7 @@ const s = currentRuntimeState
             <tr v-for="p in panoramaEntries" :key="p.id + p.version">
               <td><span class="pano-dot" :style="{ background: avatarColor(p.id) }"></span>{{ p.name }}</td>
               <td>{{ p.version }}</td>
-              <td><span class="mono">{{ p.port || '—' }}</span></td>
+              <td><span class="mono">{{ p.ports.length ? p.ports.join(' / ') : (p.port || '—') }}</span></td>
               <td>
                 <a v-if="p.consolePort" class="svc-port-link" @click="openConsole(p.consolePort)">:{{ p.consolePort }} ↗</a>
                 <span v-else class="muted">—</span>
@@ -2143,7 +2164,7 @@ const s = currentRuntimeState
           <svg class="cfg-path-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
           <code class="cfg-path-text">{{ configModal.path }}</code>
         </div>
-        <textarea v-model="configModal.raw" class="cfg-editor" rows="20" spellcheck="false"></textarea>
+        <ConfigEditor ref="editorRef" v-model="configModal.raw" @save="saveConfig" />
         <p class="cfg-hint">{{ t('configRestartHint') }}</p>
         <footer class="cfg-foot">
           <button class="cfg-btn ghost" @click="configModal.open = false">{{ t('cancel') }}</button>
@@ -2263,6 +2284,18 @@ const s = currentRuntimeState
 .detail-badges { display: flex; align-items: center; gap: 6px; }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .badge.svc { background: var(--color-accent-bg); color: var(--color-accent); }
+/* 常驻开关（服务类运行时）：开=随应用自启/崩溃自愈，关=停止 */
+.svc-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; cursor: pointer; user-select: none; -webkit-user-select: none; }
+.svc-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.svc-switch-track { position: relative; width: 34px; height: 18px; border-radius: 10px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border, transparent); transition: background .18s ease; flex: none; }
+.svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .18s ease; }
+.svc-switch.on .svc-switch-track { background: var(--color-accent, #2f9e44); }
+.svc-switch.on .svc-switch-thumb { transform: translateX(16px); }
+.svc-switch-label { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
+.svc-switch.on .svc-switch-label { color: var(--color-accent, #2f9e44); }
+.svc-switch.busy { opacity: .6; pointer-events: none; }
+.svc-switch.busy .svc-switch-thumb { animation: svc-thumb-pulse .8s ease-in-out infinite; }
+@keyframes svc-thumb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
 
 .detail-block {
   background: var(--color-surface);
@@ -2599,7 +2632,7 @@ const s = currentRuntimeState
 /* 通用配置编辑弹窗（现代化：分层头部 / 路径胶囊 / 等宽编辑器 / 分隔页脚） */
 .cfg-overlay { background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(2px); }
 .cfg-modal {
-  width: 660px; max-width: 94vw; max-height: 88vh;
+  width: 860px; max-width: 94vw; height: 82vh; max-height: 88vh;
   background: var(--color-surface); border: 1px solid var(--color-border);
   border-radius: var(--radius-lg); box-shadow: 0 18px 56px rgba(0, 0, 0, 0.5);
   display: flex; flex-direction: column; overflow: hidden;
@@ -2633,14 +2666,6 @@ const s = currentRuntimeState
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px;
   color: var(--color-text-secondary); word-break: break-all;
 }
-.cfg-editor {
-  flex: 1 1 auto; min-height: 230px; margin: 12px 18px 0; resize: none;
-  background: var(--color-bg-primary); border: 1px solid var(--color-border); color: var(--color-text-primary);
-  border-radius: var(--radius-sm); padding: 13px 14px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7;
-  outline: none; transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
-}
-.cfg-editor:focus { border-color: var(--color-border-focus); box-shadow: 0 0 0 2px var(--color-accent-bg); }
 .cfg-hint { margin: 9px 18px 0; font-size: 11px; color: var(--color-text-disabled); }
 .cfg-foot {
   display: flex; align-items: center; justify-content: flex-end; gap: 9px;

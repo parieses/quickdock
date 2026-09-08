@@ -147,6 +147,11 @@ func (m *MailpitRuntime) Install(ctx context.Context, version string, cb Install
 
 func (m *MailpitRuntime) DefaultPort() int { return mailpitDefaultPort }
 
+// ConfiguredPorts 返回 Web UI 端口与 SMTP 端口（Mailpit 由启动参数指定，无配置文件）。
+func (m *MailpitRuntime) ConfiguredPorts(version string) []int {
+	return []int{mailpitDefaultPort, mailpitSmtpPort}
+}
+
 func (m *MailpitRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := m.InstalledVersions()
 	if version == "" {
@@ -220,8 +225,7 @@ func (m *MailpitRuntime) Status(version string) ServiceStatus {
 	}
 	if isPortOpen(port) {
 		if pid := findListenPID(port); pid != 0 {
-			exe := processExePath(pid)
-			if exe == "" || strings.EqualFold(filepath.Base(exe), "mailpit.exe") {
+			if processIsExe(pid, "mailpit.exe") {
 				st.Running = true
 				st.Version = version
 				st.PID = pid

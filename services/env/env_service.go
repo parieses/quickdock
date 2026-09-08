@@ -1,6 +1,7 @@
 package env
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -164,6 +165,27 @@ func (s *EnvironmentService) EnvStatus(runtime, version string) *services.ApiRes
 		return services.Fail(err)
 	}
 	return services.Ok(st)
+}
+
+// EnvSetEnabled 设定某运行时的「常驻」期望状态（开/关）。on=true 立即拉起（用激活/首个版本），
+// on=false 立即停止。前端把原来的「运行/停止」按钮改为开关即调用此方法。
+func (s *EnvironmentService) EnvSetEnabled(runtime string, on bool) *services.ApiResult {
+	if s.App.Env == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	if err := s.App.Env.SetEnabled(envmgr.Runtime(runtime), on); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// EnvReconcile 手动触发一次对账：拉起所有「已开启但未运行」的常驻服务。应用启动时会由宿主自动调用。
+func (s *EnvironmentService) EnvReconcile() *services.ApiResult {
+	if s.App.Env == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	s.App.Env.ReconcileEnabled(context.Background())
+	return services.Ok(nil)
 }
 
 // EnvPortConflict 查询某运行时默认服务端口是否被其它程序占用（启动前可视化提示）。

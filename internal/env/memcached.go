@@ -142,6 +142,11 @@ func (m *MemcachedRuntime) Install(ctx context.Context, version string, cb Insta
 
 func (m *MemcachedRuntime) DefaultPort() int { return memcachedDefaultPort }
 
+// ConfiguredPorts Memcached 以启动参数 -p 指定端口（无配置文件），返回该端口。
+func (m *MemcachedRuntime) ConfiguredPorts(version string) []int {
+	return []int{memcachedDefaultPort}
+}
+
 func (m *MemcachedRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := m.InstalledVersions()
 	if version == "" {
@@ -215,8 +220,7 @@ func (m *MemcachedRuntime) Status(version string) ServiceStatus {
 	}
 	if isPortOpen(port) {
 		if pid := findListenPID(port); pid != 0 {
-			exe := processExePath(pid)
-			if exe == "" || strings.EqualFold(filepath.Base(exe), "memcached_service.exe") {
+			if processIsExe(pid, "memcached_service.exe") {
 				st.Running = true
 				st.Version = version
 				st.PID = pid

@@ -8,7 +8,6 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"strings"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -137,6 +136,11 @@ func (m *MinioRuntime) Install(ctx context.Context, version string, cb InstallCa
 
 func (m *MinioRuntime) DefaultPort() int { return minioDefaultPort }
 
+// ConfiguredPorts 返回实际启动参数中的 S3 API 端口与 Console 端口（MinIO 由启动参数指定，无配置文件）。
+func (m *MinioRuntime) ConfiguredPorts(version string) []int {
+	return []int{minioDefaultPort, minioConsolePort}
+}
+
 func (m *MinioRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := m.InstalledVersions()
 	if version == "" {
@@ -210,8 +214,7 @@ func (m *MinioRuntime) Status(version string) ServiceStatus {
 	}
 	if isPortOpen(port) {
 		if pid := findListenPID(port); pid != 0 {
-			exe := processExePath(pid)
-			if exe == "" || strings.EqualFold(filepath.Base(exe), "minio.exe") {
+			if processIsExe(pid, "minio.exe") {
 				st.Running = true
 				st.Version = version
 				st.PID = pid

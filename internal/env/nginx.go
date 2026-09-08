@@ -156,6 +156,13 @@ func (n *NginxRuntime) Install(ctx context.Context, version string, cb InstallCa
 
 func (n *NginxRuntime) DefaultPort() int { return nginxDefaultPort }
 
+// ConfiguredPorts 从 nginx.conf 解析所有 listen 端口（listen 80 / 127.0.0.1:8080 / [::]:80）。
+// 用户改了监听端口后界面显示的是真实端口，而非写死的默认 80。
+// 解析不到（配置文件缺失/无 listen 指令）时回退默认 80。
+func (n *NginxRuntime) ConfiguredPorts(version string) []int {
+	return firstPortOrDefault(listenPortsInConf(n.ConfigPath(version)), nginxDefaultPort)
+}
+
 // WebConsolePort 返回默认站点端口（80），运行时跑起来后打开即默认页。
 func (n *NginxRuntime) WebConsolePort(version string) int { return nginxDefaultPort }
 

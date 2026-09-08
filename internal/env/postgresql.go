@@ -145,6 +145,12 @@ func (p *PostgresRuntime) Install(ctx context.Context, version string, cb Instal
 
 func (p *PostgresRuntime) DefaultPort() int { return postgresDefaultPort }
 
+// ConfiguredPorts 从数据目录的 postgresql.conf 解析 port（改了端口后界面随之更新）。
+func (p *PostgresRuntime) ConfiguredPorts(version string) []int {
+	cf := filepath.Join(p.dataDir(version), "postgresql.conf")
+	return firstPortOrDefault(portsInConf(cf, rePgPort), postgresDefaultPort)
+}
+
 func (p *PostgresRuntime) initDataDir(version, datadir string) error {
 	if _, err := os.Stat(datadir); err == nil {
 		return nil
@@ -327,8 +333,7 @@ func (p *PostgresRuntime) Status(version string) ServiceStatus {
 	}
 	if isPortOpen(port) {
 		if pid := findListenPID(port); pid != 0 {
-			exe := processExePath(pid)
-			if exe == "" || strings.EqualFold(filepath.Base(exe), "postgres.exe") {
+			if processIsExe(pid, "postgres.exe") {
 				st.Running = true
 				st.Version = version
 				st.PID = pid

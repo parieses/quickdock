@@ -33,6 +33,10 @@ type ServiceStatus struct {
 	Running bool   `json:"running"`
 	PID     int    `json:"pid"`
 	Port    int    `json:"port"`
+	// Ports 运行时实际侦听的全部端口，由各运行时从自身配置文件解析（见 ConfigPortsProvider）。
+	// 端口不再写死为默认常量：用户改了配置（如 nginx 改 listen、caddy 改站点端口）后此处随之变化。
+	// Caddy 为「两个一块显示」：首项是 admin 端口（默认 2019），其后是 Caddyfile 的站点端口。
+	Ports   []int  `json:"ports"`
 	Version string `json:"version"`
 }
 
@@ -77,6 +81,7 @@ type RuntimeInfo struct {
 	HasService     bool         `json:"hasService"`     // 是否支持服务启停/状态监听
 	HasLog         bool         `json:"hasLog"`         // 是否支持运行日志查询（实现 LogProvider）
 	WebConsolePort int          `json:"webConsolePort"` // Web 管理后台端口（0=无，实现 WebConsoleProvider）
+	Enabled        bool         `json:"enabled"`        // 是否设为「常驻」（期望状态，由监督器保证运行）
 }
 
 type SourceInfo struct {
@@ -100,6 +105,10 @@ type Manager struct {
 	// 避免每次 spawn exe 探测版本；RefreshDetected 在触发点重扫并持久化到 env/detected.json
 	detectMu    sync.RWMutex
 	detectCache map[Runtime][]Install
+	// enabled 记录各运行时的「期望常驻状态」（opt-in，默认关闭），持久化到 env/states.json。
+	// 开启即表示用户希望该服务常驻：启动对账拉起 + 看门狗掉线自愈。
+	enabledMu sync.RWMutex
+	enabled   map[Runtime]bool
 }
 
 // runtimeOrder 运行时固定展示顺序
@@ -139,9 +148,11 @@ func NewManager() *Manager {
 		},
 		links:       map[Runtime][]linkEntry{},
 		detectCache: map[Runtime][]Install{},
+		enabled:     map[Runtime]bool{},
 	}
 	m.loadLinks()
 	m.loadDetected()
+	m.loadStates()
 	m.syncPHPLinks()
 	return m
 }
@@ -337,6 +348,7 @@ func (m *Manager) List() []RuntimeInfo {
 			HasService:     hasSvc,
 			HasLog:         hasLog,
 			WebConsolePort: wcPort,
+			Enabled:        m.Enabled(rt),
 		})
 	}
 	return out
@@ -921,7 +933,17 @@ func (m *Manager) Status(rt Runtime, version string) (ServiceStatus, error) {
 	if !ok {
 		return ServiceStatus{}, nil
 	}
-	return sc.Status(version), nil
+	st := sc.Status(version)
+	// 优先以配置文件解析出的实际端口覆盖写死的默认端口常量（未实现该能力则保持 Status 原值）
+	if cp, ok := a.(ConfigPortsProvider); ok {
+		if ports := cp.ConfiguredPorts(version); len(ports) > 0 {
+			st.Ports = ports
+		}
+	}
+	if len(st.Ports) == 0 && st.Port > 0 {
+		st.Ports = []int{st.Port}
+	}
+	return st, nil
 }
 
 // GitStatus 返回当前 Git 环境的综合状态（版本/路径/SSH/Git LFS），供环境管理页状态表展示。

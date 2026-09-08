@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 
@@ -114,6 +115,9 @@ func (a *AppService) SetApp(app *application.App) {
 		a.Env.RefreshAllAsync(func() {
 			app.Event.Emit("quickdock:env:refreshed")
 		})
+		// 服务常驻监督：启动即对已开启的运行时对账拉起，并启动崩溃自愈看门狗。
+		a.Env.ReconcileEnabled(context.Background())
+		a.Env.StartWatchdog(context.Background())
 	}
 }
 

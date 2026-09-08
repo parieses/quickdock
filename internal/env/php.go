@@ -202,6 +202,11 @@ func parsePHPVersion(out string) string {
 
 func (p *PHPRuntime) DefaultPort() int { return phpFpmPort }
 
+// ConfiguredPorts PHP-FPM（Windows 下为 php-cgi FastCGI）端口固定 9000，无配置文件可解析。
+func (p *PHPRuntime) ConfiguredPorts(version string) []int {
+	return []int{phpFpmPort}
+}
+
 // fpmExePath 返回某安装项对应的 php-cgi.exe 绝对路径（便携=版本目录，系统=php.exe 同级目录）。
 func fpmExePath(ins Install) string {
 	if ins.Scope == "system" {

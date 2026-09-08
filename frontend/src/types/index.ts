@@ -336,6 +336,8 @@ export interface EnvServiceStatus {
   running: boolean
   pid: number
   port: number
+  // ports 后端按运行时配置文件解析出的全部侦听端口（caddy 首项 admin 2019 + 站点端口）
+  ports?: number[]
   version: string
 }
 

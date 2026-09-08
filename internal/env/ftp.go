@@ -211,6 +211,19 @@ func (f *FTPRuntime) Install(ctx context.Context, version string, cb InstallCall
 
 func (f *FTPRuntime) DefaultPort() int { return ftpDefaultPort }
 
+// ConfiguredPorts 从启动参数文件（ftpdmin.args）解析 -p 后的监听端口；无参数文件时回退默认 21。
+func (f *FTPRuntime) ConfiguredPorts(version string) []int {
+	lines := readConfLines(f.ConfigPath(version))
+	for i, l := range lines {
+		if l == "-p" && i+1 < len(lines) {
+			if p, err := strconv.Atoi(lines[i+1]); err == nil && p > 0 {
+				return []int{p}
+			}
+		}
+	}
+	return []int{ftpDefaultPort}
+}
+
 func (f *FTPRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := f.InstalledVersions()
 	if version == "" {
@@ -276,8 +289,7 @@ func (f *FTPRuntime) Status(version string) ServiceStatus {
 	}
 	if isPortOpen(port) {
 		if pid := findListenPID(port); pid != 0 {
-			exe := processExePath(pid)
-			if exe == "" || strings.EqualFold(filepath.Base(exe), ftpExeName) {
+			if processIsExe(pid, ftpExeName) {
 				st.Running = true
 				st.Version = version
 				st.PID = pid

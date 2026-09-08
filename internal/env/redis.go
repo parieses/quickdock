@@ -165,6 +165,11 @@ func (r *RedisRuntime) Install(ctx context.Context, version string, cb InstallCa
 
 func (r *RedisRuntime) DefaultPort() int { return redisDefaultPort }
 
+// ConfiguredPorts 复用 configPort 从 redis.conf 解析 port 指令（解析失败回退默认端口）。
+func (r *RedisRuntime) ConfiguredPorts(version string) []int {
+	return []int{r.configPort(version)}
+}
+
 func (r *RedisRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	installs := r.InstalledVersions()
 	if version == "" {
