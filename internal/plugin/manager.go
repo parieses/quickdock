@@ -635,8 +635,11 @@ func (m *Manager) PluginsDir() string {
 	return m.pluginsDir
 }
 
-// callGojaJS 调用 goja 插件中导出的 JS 函数（带超时，防死循环卡死应用）
+// callGojaJS 调用 goja 插件中导出的 JS 函数（带超时，防死循环卡死应用）。
+// goja.Runtime 非线程安全，ExecuteCommand/handleInitialize 均可并发触发，故全程加 vmMu 串行化。
 func (inst *PluginInstance) callGojaJS(fnName string, params map[string]interface{}, timeout time.Duration) (interface{}, error) {
+	inst.vmMu.Lock()
+	defer inst.vmMu.Unlock()
 	if inst.VM == nil {
 		return nil, fmt.Errorf("goja VM 未初始化")
 	}
@@ -650,6 +653,8 @@ func (inst *PluginInstance) callGojaJS(fnName string, params map[string]interfac
 	}
 	// 清除上一次超时可能残留的中断信号，避免误伤本次调用
 	inst.VM.ClearInterrupt()
+	// Interrupt 是 goja 异步中断机制，可由定时器 goroutine 在 vmMu 之外触发，
+	// 用于打断阻塞在锁内的长任务；因此定时器不参与 vmMu 串行化。
 	timer := time.AfterFunc(timeout, func() { inst.VM.Interrupt("插件函数执行超时") })
 	defer timer.Stop()
 	result, err := fn(goja.Undefined(), inst.VM.ToValue(params))

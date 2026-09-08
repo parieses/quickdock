@@ -176,7 +176,12 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 			now := time.Now().Unix()
 			warnWindow := int64(current.CertWarnDays) * 86400
 			newLastWarned := current.LastCertWarned
-			if expiresAt-now <= warnWindow && current.LastCertWarned == 0 {
+			// 证书被续期：新证书过期时间明显晚于上次记录（向后推移超过 1 天）说明换发了新证书，
+			// 重置告警位，使新证书临近到期时能再次提醒（否则 LastCertWarned 置位后永不再告警）。
+			if current.CertExpiresAt > 0 && expiresAt > current.CertExpiresAt+86400 {
+				newLastWarned = 0
+			}
+			if expiresAt-now <= warnWindow && newLastWarned == 0 {
 				daysLeft := (expiresAt - now) / 86400
 				title := "🔐 证书即将过期：" + m.Name
 				body := fmt.Sprintf("%s\n证书将于 %s 过期（剩 %d 天）", m.URL, time.Unix(expiresAt, 0).Format("2006-01-02"), daysLeft)

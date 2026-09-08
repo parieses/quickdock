@@ -51,7 +51,15 @@ func Download(ctx context.Context, dst string, urls []string, onProgress func(wr
 }
 
 func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(written, total int64)) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, urlStr, nil)
+	// stall 保护：即便调用方 ctx 无 deadline（如 Manager.Install 传 context.Background()），
+	// 服务器返回 200 后 body 中途长时间无新字节也不得永久挂起。
+	// 派生一个可取消 ctx：stallTimer 在"持续无新数据超过 stallTimeout"时触发取消，
+	// 中断阻塞中的 resp.Body.Read（http.NewRequestWithContext 的 body 读会随 ctx 取消而中止）。
+	stallTimeout := 60 * time.Second
+	dlCtx, stallCancel := context.WithCancel(ctx)
+	defer stallCancel()
+
+	req, err := http.NewRequestWithContext(dlCtx, http.MethodGet, urlStr, nil)
 	if err != nil {
 		return err
 	}
@@ -84,6 +92,33 @@ func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(writte
 	total := resp.ContentLength
 	written := int64(0)
 	buf := make([]byte, 64*1024)
+
+	// stall 监控 goroutine：progress 收到一次"有新数据"即重置定时器；定时器到点（超时无数据）
+	// 调用 stallCancel 令 dlCtx 取消，从而中止阻塞中的 body 读。done 用于随函数退出回收 goroutine。
+	progress := make(chan struct{}, 1)
+	stallTimer := time.NewTimer(stallTimeout)
+	done := make(chan struct{})
+	defer func() { close(done); stallTimer.Stop() }()
+	go func() {
+		for {
+			select {
+			case <-stallTimer.C:
+				stallCancel()
+				return
+			case <-progress:
+				if !stallTimer.Stop() {
+					select {
+					case <-stallTimer.C:
+					default:
+					}
+				}
+				stallTimer.Reset(stallTimeout)
+			case <-done:
+				return
+			}
+		}
+	}()
+
 	for {
 		n, rerr := resp.Body.Read(buf)
 		if n > 0 {
@@ -94,11 +129,19 @@ func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(writte
 			if onProgress != nil {
 				onProgress(written, total)
 			}
+			select {
+			case progress <- struct{}{}:
+			default:
+			}
 		}
 		if rerr == io.EOF {
 			break
 		}
 		if rerr != nil {
+			// 区分"无数据停滞被取消"与真实错误，给用户可读提示
+			if ctxErr := dlCtx.Err(); ctxErr != nil && rerr == context.Canceled {
+				return fmt.Errorf("下载停滞（超过 %s 无新数据）已中断: %w", stallTimeout, ctxErr)
+			}
 			return rerr
 		}
 	}

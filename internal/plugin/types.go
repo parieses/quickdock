@@ -131,6 +131,9 @@ type PluginInstance struct {
 
 	// Goja VM（goja runtime 插件使用）
 	VM *goja.Runtime
+	// vmMu 串行化对 VM 的调用：goja.Runtime 非线程安全，ExecuteCommand 可被前端并发触发，
+	// 多条命令同时在同一 VM 上执行 fn() 会导致数据竞争/崩溃，故单实例并发命令须加锁排队。
+	vmMu sync.Mutex
 }
 
 // NewPluginInstance 创建插件实例

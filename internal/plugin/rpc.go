@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"strconv"
 	"time"
 
@@ -124,42 +125,50 @@ const maxPluginLineBytes = 64 << 20 // 64 MiB
 // boundedReadLine 从 r 读取一行（含行尾的 '\n'），但把单行累计长度限制在 limit 内。
 // 若单行长度超过 limit，返回已读到的前缀（截断）以保证调用方不阻塞，同时避免无界内存增长。
 // 返回 (数据, 是否截断, error)；err 语义与 bufio.ReadString 一致。
+//
+// 实现说明：用 ReadSlice 逐块拼装而非 ReadBytes 一次整行读入。ReadBytes 对「超长且无换行」的
+// 行会在内部无界缓冲整行后才返回，导致本函数的 limit 形同虚设（先撑爆内存再截断）。ReadSlice
+// 每次至多返回内部缓冲(64KB)大小的前缀，本函数逐块累积并实时检查 limit，超限立即截断丢弃，
+// 把峰值内存钳制在 limit + 一个内部缓冲以内。
 func boundedReadLine(r *bufio.Reader, limit int) ([]byte, bool, error) {
 	var buf []byte
 	for {
-		chunk, err := r.ReadBytes('\n')
-		if len(chunk) > 0 {
-			// 本行累计已超过上限 → 截断丢弃行的剩余部分直到读走换行，返回已积累的前缀
-			if len(buf)+len(chunk) > limit {
-				// 丢弃完整行，避免在该行剩余部分反复分配
-				if err == nil {
-					// chunk 以换行结尾，说明该行已完整读入，只需保留前缀
-					maxCopy := limit - len(buf)
-					if maxCopy > len(chunk) {
-						maxCopy = len(chunk)
-					}
-					buf = append(buf, chunk[:maxCopy]...)
-					return buf, true, nil
-				}
-				// err != nil 且还没读到换行，保留前缀后返回截断标志
+		frag, err := r.ReadSlice('\n')
+		gotNL := len(frag) > 0 && frag[len(frag)-1] == '\n'
+		if len(frag) > 0 {
+			if len(buf)+len(frag) > limit {
 				maxCopy := limit - len(buf)
-				if maxCopy > len(chunk) {
-					maxCopy = len(chunk)
+				if maxCopy > 0 {
+					buf = append(buf, frag[:maxCopy]...)
 				}
-				buf = append(buf, chunk[:maxCopy]...)
-				return buf, true, err
+				// 截断：丢弃本行剩余部分（本块未含换行则继续读），直到行结束或流结束，
+				// 避免残留半个 JSON 行污染后续协议解析。
+				hitEOF := false
+				for !gotNL {
+					frag2, e2 := r.ReadSlice('\n')
+					if len(frag2) > 0 && frag2[len(frag2)-1] == '\n' {
+						gotNL = true
+						break
+					}
+					if e2 == io.EOF {
+						hitEOF = true
+						break
+					}
+				}
+				if hitEOF {
+					return buf, true, io.EOF
+				}
+				return buf, true, nil
 			}
-			buf = append(buf, chunk...)
-			// 已读到换行 → 正常单行返回
-			if err == nil {
-				return buf, false, nil
-			}
-			// 读到 EOF 但仍有数据（最后一行无换行），ReadBytes 返回数据 + io.EOF
-			return buf, false, err
+			buf = append(buf, frag...)
 		}
-		if err != nil {
-			return buf, false, err
+		if gotNL {
+			return buf, false, nil
 		}
+		if err == io.EOF {
+			return buf, false, io.EOF
+		}
+		// err == bufio.ErrBufferFull：行超过内部缓冲但仍未到 limit，继续累积下一块
 	}
 }
 
