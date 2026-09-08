@@ -21,7 +21,7 @@
     - [⏰ 定时任务（Scheduler）](#-定时任务scheduler)
     - [📡 网站监控（Monitor）](#-网站监控monitor)
     - [🗒️ 快捷笔记](#️-快捷笔记)
-    - [🧠 DeepSeek Harness 集成](#deepseek-harness-集成)
+    - [🧠 DeepSeek Harness 集成](#-deepseek-harness-集成)
     - [💬 AI 助手](#-ai-助手)
     - [🔌 插件系统](#-插件系统)
     - [☁️ WebDAV 云同步](#️-webdav-云同步)
@@ -29,7 +29,16 @@
     - [🔧 全局热键（可自定义）](#-全局热键可自定义)
     - [🖥️ 系统命令](#️-系统命令)
   - [🔧 环境管理](#-环境管理)
+    - [支持的运行时](#支持的运行时)
+    - [核心设计](#核心设计)
+    - [服务管理能力](#服务管理能力)
+    - [UI 交互](#ui-交互)
+    - [文件结构](#文件结构)
   - [🔄 自动更新](#-自动更新)
+    - [更新流程（Windows：免安装器就地替换）](#更新流程windows免安装器就地替换)
+    - [前提与限制](#前提与限制)
+    - [相关文件](#相关文件)
+    - [版本号与发版纪律](#版本号与发版纪律)
   - [快速开始](#快速开始)
     - [系统要求](#系统要求)
     - [下载安装](#下载安装)
@@ -297,7 +306,20 @@ https://github.com/parieses/quickdock/releases/latest/download/manifest.json
 ### 前提与限制
 
 - **首次安装请保持默认用户目录**：NSIS 安装器默认 `INSTALL_SCOPE=user` → 落在 `%LOCALAPPDATA%\Programs\快启坞`（无需管理员即可被替换）。若改到 `C:\Program Files\...`，写文件受 UAC 保护，就地替换会失败（回退到手动下载安装包）。
-- **macOS**：当前仍走 DMG 手动覆盖安装（就地替换方案待接 Sparkle）。
+- **macOS（双架构）**：每个 release 同时产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64` 两个包（CI 用 matrix 在原生 runner 上各自编译，零交叉风险）。
+  - **首次安装**：下载对应架构的 `.dmg`，打开后把 `快启坞.app` 拖到 **`~/Applications`**（用户目录，普通权限可写——这是后续就地替换更新的前提，与 Windows 的 per-user 思路一致）。**不要**留在下载目录或从 dmg 直接运行（会触发 App Translocation，导致更新"假成功"）。
+  - **自动更新**：机制与 Windows 完全相同——manifest 里另含 `quickdock-darwin-<arch>.zip`（整包 `.app` 压缩），应用端发现新版本后**手动点「重启更新」**，由 Wails helper 退出后整包替换 `.app` 并重新拉起。无 Developer ID 证书时为 ad-hoc 签名，仅本机/信任设备可用；**正式分发需补 Developer ID 签名 + 公证**（详见 `docs/mac-update-sparkle-analysis.md`）。Sparkle 仅在与 Sparkle 生态 / delta 增量 / 提权替换 `/Applications` 有强需求时才引入，当前不采用。
+  - **首次安装后解除 Gatekeeper 拦截（无开发者账号时必做）**：从 Release 下载的 `.app` 默认带隔离属性，双击若提示「无法打开，因为无法验证开发者」，二选一：
+    ```bash
+    # 方式一：终端执行一次（推荐装到 ~/Applications 时无需 sudo）
+    xattr -dr com.apple.quarantine ~/Applications/快启坞.app
+    # 若你装到了 /Applications（需管理员密码）：
+    sudo xattr -dr com.apple.quarantine /Applications/快启坞.app
+    ```
+    ```bash
+    # 方式二：图形界面 —— 系统设置 → 隐私与安全性 → 看到被拦截的「快启坞」，点「仍要打开」
+    ```
+    > 已装用户后续由应用自身在启动时自动清除该属性（见 `internal/platform/quarantine_darwin.go`），无需每次手动处理；也可一行安装：`curl -fsSL https://raw.githubusercontent.com/parieses/quickdock/main/install.sh | bash`。
 - 更新只替换主程序 exe，**不会**改动 `~/.quickdock` 下任何数据；跨版本配置迁移由数据库迁移逻辑负责。
 
 ### 相关文件

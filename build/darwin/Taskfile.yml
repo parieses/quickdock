@@ -7,6 +7,12 @@ vars:
   # Docker image for cross-compilation (used when building on non-macOS)
   CROSS_IMAGE: wails-cross
 
+  # 版本号唯一来源 = git tag（v0.4.0 → 0.4.0）；可用环境变量 APP_VERSION 强制覆盖（CI 用触发 tag 显式传入）。
+  # 与 build/windows/Taskfile.yml 保持同源，避免"exe 注入版本 ≠ manifest 版本"的死循环。
+  # 本地无 tag 时兜底 0.0.0-dev。想改版本就打 tag：git tag v0.5.0 && git push --tags
+  APP_VERSION:
+    sh: 'v="${APP_VERSION:-$(git describe --tags --abbrev=0 2>/dev/null || true)}"; v=${v#v}; echo "${v:-0.0.0-dev}"'
+
 tasks:
   build:
     summary: Builds the application
@@ -22,6 +28,13 @@ tasks:
     vars:
       DEFAULT_OUTPUT: '{{.BIN_DIR}}/{{.APP_NAME}}'
       OUTPUT: '{{ .OUTPUT | default .DEFAULT_OUTPUT }}'
+
+  version:
+    # 供 CI 断言使用：task -s darwin:version → 输出最终注入到 .app 的版本号
+    summary: Prints the resolved application version (used by CI to assert it matches the release tag)
+    silent: true
+    cmds:
+      - echo '{{.APP_VERSION}}'
 
   build:native:
     summary: Builds the application natively on macOS
@@ -117,6 +130,8 @@ tasks:
     summary: Packages the application into a `.app` bundle
     deps:
       - task: build
+        vars:
+          ARCH: '{{.ARCH}}'
     cmds:
       - task: create:app:bundle
 
@@ -132,11 +147,28 @@ tasks:
   # 走 Wails DMG 库（封装 hdiutil），支持背景图/卷图标/窗口布局。仅 macOS 可执行（platforms: darwin）。
   # 对应官方文档 https://v3.wails.io/guides/build/macos/#dmg-installer 的 darwin:package:dmg / darwin:create:dmg。
   package:dmg:
-    summary: Packages the application into a styled `.dmg`
+    summary: Packages the application into a styled `.dmg` (per-arch)
     deps:
       - task: package
+        vars:
+          ARCH: '{{.ARCH}}'
     cmds:
       - task: create:dmg
+      # 按架构重命名为 release 资产名（manifest 据此推断 darwin/<arch>）
+      - mv "{{.BIN_DIR}}/{{.APP_NAME}}.dmg" "{{.BIN_DIR}}/{{.APP_NAME}}-darwin-{{.ARCH}}.dmg"
+    vars:
+      ARCH: '{{.ARCH | default ARCH}}'
+
+  package:zip:
+    summary: Zips the `.app` bundle as the in-place update payload (per-arch)
+    deps:
+      - task: package
+        vars:
+          ARCH: '{{.ARCH}}'
+    cmds:
+      - cd "{{.BIN_DIR}}" && zip -r -q "{{.APP_NAME}}-darwin-{{.ARCH}}.zip" "{{.APP_NAME}}.app"
+    vars:
+      ARCH: '{{.ARCH | default ARCH}}'
 
   create:dmg:
     summary: Creates a configurable `.dmg` from the `.app` bundle
@@ -171,6 +203,8 @@ tasks:
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
+      # 注入版本号（替换 Info.plist 里的占位 0.2.0）。sed -i '' 在 macOS 与 Linux 均作原地编辑。
+      - sed -i '' 's#<string>0\.2\.0</string>#<string>{{.APP_VERSION}}</string>#g' "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist"
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
 
   codesign:adhoc:

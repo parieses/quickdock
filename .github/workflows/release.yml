@@ -8,7 +8,14 @@ on:
 permissions:
   contents: write
 
+env:
+  # 全局版本号（= 触发工作流的 tag，去掉 v 前缀）。各 job 一致使用，避免"注入版本 ≠ manifest 版本"。
+  VERSION: ''
+
 jobs:
+  # ─────────────────────────────────────────────────────────────
+  # 1) Windows：构建 exe + NSIS 安装器，产物上传为 artifact（不生成 manifest、不上传 Release）
+  # ─────────────────────────────────────────────────────────────
   build-windows:
     runs-on: windows-latest
 
@@ -36,7 +43,7 @@ jobs:
           echo "$(go env GOPATH)/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
 
       - name: Install Wails3 CLI
-        # 版本从 go.mod 自动解析，与本地开发/构建严格一致（不再写死 alpha2.114）
+        # 版本从 go.mod 自动解析，与本地开发/构建严格一致
         shell: pwsh
         run: |
           $wailsVer = (Select-String -Path go.mod -Pattern 'wailsapp/wails/v3 ').Line.Trim().Split(' ')[1]
@@ -128,9 +135,8 @@ jobs:
         run: wails3 generate webview2bootstrapper -dir build/windows/nsis
 
       - name: Package NSIS installer
-        # 注意：NSIS 3.09 起默认安装目录从 "C:\Program Files (x86)\NSIS" 改为
-        # "C:\Program Files\NSIS"，choco 拉新版时会装到 64 位路径，
-        # 硬编码 (x86) 路径会导致 makensis.exe 找不到。这里动态探测。
+        # NSIS 3.09 起默认安装目录从 "C:\Program Files (x86)\NSIS" 改为
+        # "C:\Program Files\NSIS"，choco 拉新版时会装到 64 位路径，硬编码 (x86) 路径会导致 makensis.exe 找不到。
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
@@ -145,71 +151,39 @@ jobs:
           Write-Host "Using makensis: $mk"
           # per-user 安装（user scope）：默认装到 $LOCALAPPDATA\Programs\QuickDock，
           # 免 UAC，且程序目录普通权限可写 —— 是后续"就地替换免安装器"更新的前提。
-          # 与 build/windows/Taskfile.yml 的 INSTALL_SCOPE=user 默认值保持一致。
           & $mk '-DWAILS_INSTALL_SCOPE=user' '-DREQUEST_EXECUTION_LEVEL=user' '-DINFO_PROJECTNAME=quickdock' '-DARG_WAILS_AMD64_BINARY=quickdock.exe' 'build\windows\nsis\project.nsi'
           if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
           Remove-Item build/windows/nsis/quickdock.exe
 
       - name: Stage portable raw binary
-        # 便携裸 exe：既是手动分发的便携版，也是"就地替换更新"的 payload——
-        # 下方 manifest 签名的是此裸 exe（而非安装器）。per-user 安装下程序目录
-        # 普通权限可写，应用端拿到该裸 exe 后由 Wails 更新框架 helper 就地覆盖自身。
+        # 便携裸 exe：既是手动分发的便携版，也是"就地替换更新"的 payload（manifest 签名的是此裸 exe）。
         shell: pwsh
         working-directory: ${{ github.workspace }}
         run: |
           Copy-Item bin/quickdock.exe bin/quickdock-amd64.exe
 
-      - name: Generate signed updater manifest
-        # 真正的安全机制：用 Ed25519 私钥对【裸 exe】quickdock-amd64.exe 签名，产出 manifest.json
-        # （含 sha512 摘要 + ed25519ph 签名）。应用端 endpoint provider 拉取此文件，
-        # 用内嵌的公钥验签（fail closed：签名不符直接报错、不安装），
-        # 下载完成后由 Wails updater helper 就地覆盖程序目录里的 quickdock.exe 完成升级
-        # （免安装器、免 UAC，见 services/update/update.go RestartApp）。
-        # 这能防"发布账号 / CI 被攻破"级别的供应链攻击，比单纯 SHA256 校验和更强。
-        # 必须设置仓库 Secret UPDATER_PRIVATE_KEY（私钥 PEM 全文），否则不生成 manifest、更新链路失效。
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-        run: |
-          if ("${{ secrets.UPDATER_PRIVATE_KEY }}" -eq "") {
-            echo "ERROR: UPDATER_PRIVATE_KEY secret 未设置，无法生成签名 manifest，更新链路将失效。" ; exit 1
-          }
-          Set-Content -Path updater.key -Value "${{ secrets.UPDATER_PRIVATE_KEY }}"
-          $tag = "$env:GITHUB_REF_NAME"
-          $urlPrefix = "https://github.com/parieses/quickdock/releases/download/$tag"
-
-          # 生成更新说明（写入文件，失败不影响流水线）：取上一个 tag 到当前 tag 的提交主题。
-          # 说明不参与签名（签名仅覆盖裸 exe 的 sha512 摘要），因此即使为空也只是"无内容"，不会破坏更新。
-          $notesFile = "release_notes.md"
-          $notes = ""
-          try {
-            $prev = (git describe --tags --abbrev=0 HEAD~1 2>$null)
-            if ($prev) { $notes = (git log "$prev..HEAD" --pretty=format:"- %s`n") }
-            else { $notes = (git log --pretty=format:"- %s`n" -n 30) }
-          } catch { $notes = "" }
-          Set-Content -Path $notesFile -Value $notes -Encoding utf8
-
-          wails3 updater manifest `
-            -version "$env:VERSION" `
-            -key updater.key `
-            -url-prefix "$urlPrefix" `
-            -notes-file $notesFile `
-            -output manifest.json `
-            bin/quickdock-amd64.exe
-          Remove-Item updater.key -ErrorAction SilentlyContinue
-          Remove-Item $notesFile -ErrorAction SilentlyContinue
-
-      - name: Upload Release Assets
-        uses: ncipollo/release-action@v1
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
         with:
-          artifacts: "bin/quickdock-amd64-installer.exe,bin/quickdock-amd64.exe,manifest.json"
-          generateReleaseNotes: true
-          allowUpdates: true
-          omitBodyDuringUpdate: true
-          omitNameDuringUpdate: true
-          artifactErrorsFailBuild: false
+          name: win
+          path: |
+            bin/quickdock-amd64-installer.exe
+            bin/quickdock-amd64.exe
+          if-no-files-found: error
 
+  # ─────────────────────────────────────────────────────────────
+  # 2) macOS：matrix 双架构原生编译（arm64 → macos-15 / amd64 → macos-15-intel）
+  #    产物：.dmg（首装）+ .app 的 .zip（就地替换更新的 payload），上传为 artifact
+  # ─────────────────────────────────────────────────────────────
   build-macos:
-    runs-on: macos-latest
+    strategy:
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+          - arch: amd64
+            runner: macos-15-intel
+    runs-on: ${{ matrix.runner }}
 
     steps:
       - name: Checkout
@@ -228,13 +202,11 @@ jobs:
           node-version: '22'
 
       - name: Install Task runner
-        # CI 构建统一走仓库 Taskfile（单一事实来源）
         run: |
           go install github.com/go-task/task/v3/cmd/task@latest
           echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
 
       - name: Install Wails3 CLI
-        # 版本从 go.mod 自动解析，与本地开发/构建严格一致
         run: |
           wailsVer=$(grep 'wailsapp/wails/v3 ' go.mod | head -1 | awk '{print $2}')
           echo "Installing wails3 $wailsVer (resolved from go.mod)"
@@ -245,28 +217,127 @@ jobs:
         run: |
           ver="${GITHUB_REF_NAME#v}"
           echo "VERSION=$ver" >> "$GITHUB_ENV"
-          echo "Building version: $ver"
+          echo "Building version: $ver (arch=${{ matrix.arch }})"
 
-      - name: Build + package styled .dmg (official wails3 DMG task)
-        # macos-latest 自带 Xcode CLT（含 macOS SDK），CGO_ENABLED=1 + GOOS=darwin 原生编译可行。
-        # darwin:package:dmg 走官方 DMG 链路：build（真实验证 P0/P3 darwin 化能否编过）
-        # → package(.app, ad-hoc 签名) → create:dmg（wails3 tool package --format dmg + Wails DMG 库，
-        # 支持背景图/卷图标，见 https://v3.wails.io/guides/build/macos/#dmg-installer）。
-        # 说明：无 Developer ID 证书，.app 为 ad-hoc 签名，.dmg 仅本机/信任设备可用；正式分发需接
-        # Developer ID 签名 + notarization（docs/mac-support-plan.md）。mac 分发单元是 .dmg，不上传裸二进制。
+      - name: 校验构建注入版本号与 tag 一致
+        # 与 Windows 同源：.app 内 CFBundleShortVersionString 必须与 manifest version 相同。
         working-directory: ${{ github.workspace }}
-        run: task darwin:package:dmg
-
-      - name: Rename dmg for release
-        working-directory: ${{ github.workspace }}
+        env:
+          APP_VERSION: ${{ github.ref_name }}
         run: |
-          cd bin
-          mv quickdock.dmg "quickdock-darwin-arm64.dmg"
+          resolved=$(task -s darwin:version | tail -1 | sed 's/^v//')
+          echo "Taskfile 解析版本=$resolved / tag 版本=$VERSION"
+          [ "$resolved" = "$VERSION" ] || { echo "::error::构建注入版本号($resolved) 与 tag($VERSION) 不一致，已中止发布"; exit 1; }
+
+      - name: Build + package .dmg + .zip (native, per-arch)
+        # macos-15 / macos-15-intel 自带 Xcode CLT（含 macOS SDK），CGO_ENABLED=1 + GOOS=darwin 原生编译可行。
+        # 走官方 DMG 链路：build → package(.app, ad-hoc 签名) → create:dmg。
+        # 无 Developer ID 证书，.app 为 ad-hoc 签名，.dmg 仅本机/信任设备可用；正式分发需接
+        # Developer ID 签名 + notarization（docs/mac-support-plan.md）。
+        # 说明：当前 mac 首装需手动拖到 ~/Applications（详见 README）；就地替换更新链路已随 .zip 一并产出。
+        working-directory: ${{ github.workspace }}
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+        run: |
+          task darwin:package:dmg ARCH=${{ matrix.arch }}
+          task darwin:package:zip ARCH=${{ matrix.arch }}
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: mac-${{ matrix.arch }}
+          path: |
+            bin/quickdock-darwin-${{ matrix.arch }}.dmg
+            bin/quickdock-darwin-${{ matrix.arch }}.zip
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
+  # 3) publish-manifest：合并所有产物 → 生成签名 manifest.json → 上传到 Release
+  # ─────────────────────────────────────────────────────────────
+  publish-manifest:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Install Task runner
+        run: |
+          go install github.com/go-task/task/v3/cmd/task@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Wails3 CLI
+        run: |
+          wailsVer=$(grep 'wailsapp/wails/v3 ' go.mod | head -1 | awk '{print $2}')
+          echo "Installing wails3 $wailsVer (resolved from go.mod)"
+          go install github.com/wailsapp/wails/v3/cmd/wails3@$wailsVer
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Extract version from tag
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$ver" >> "$GITHUB_ENV"
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          # merge-multiple 把所有 artifact 摊平到同一目录（文件名无冲突）
+          path: dist
+          merge-multiple: true
+
+      - name: Generate signed updater manifest
+        # 真正的安全机制：用 Ed25519 私钥对【更新 payload】签名，产出 manifest.json
+        # （含 sha512 摘要 + ed25519ph 签名）。应用端 endpoint provider 拉取此文件验签
+        # （fail closed：签名不符直接报错、不安装），再由 Wails updater helper 就地覆盖完成升级。
+        # manifest 仅收录"更新 payload"（windows exe + 两个 mac .zip），dmg/安装器是首装用的，不进 manifest。
+        # 架构识别由文件名驱动：quickdock-amd64.exe → windows/amd64；
+        # quickdock-darwin-arm64.zip / quickdock-darwin-amd64.zip → darwin/{arm64,amd64}。
+        # 必须设置仓库 Secret UPDATER_PRIVATE_KEY（私钥 PEM 全文），否则不生成 manifest、更新链路失效。
+        env:
+          UPDATER_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          if [ -z "$UPDATER_PRIVATE_KEY" ]; then
+            echo "::error::UPDATER_PRIVATE_KEY secret 未设置，无法生成签名 manifest，更新链路将失效。"
+            exit 1
+          fi
+          printf '%s' "$UPDATER_PRIVATE_KEY" > updater.key
+
+          urlPrefix="https://github.com/parieses/quickdock/releases/download/${GITHUB_REF_NAME}"
+
+          # 更新说明（写入文件，不参与签名）：取上一个 tag 到当前 tag 的提交主题。
+          notesFile="release_notes.md"
+          prev=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            git log "${prev}..HEAD" --pretty=format="- %s%n" > "$notesFile"
+          else
+            git log --pretty=format="- %s%n" -n 30 > "$notesFile"
+          fi
+
+          wails3 updater manifest \
+            -version "$VERSION" \
+            -key updater.key \
+            -url-prefix "$urlPrefix" \
+            -notes-file "$notesFile" \
+            -output dist/manifest.json \
+            dist/quickdock-amd64.exe \
+            dist/quickdock-darwin-arm64.zip \
+            dist/quickdock-darwin-amd64.zip
+
+          rm -f updater.key "$notesFile"
 
       - name: Upload Release Assets
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "bin/quickdock-darwin-arm64.dmg"
+          artifacts: "dist/quickdock-amd64-installer.exe,dist/quickdock-amd64.exe,dist/quickdock-darwin-arm64.dmg,dist/quickdock-darwin-arm64.zip,dist/quickdock-darwin-amd64.dmg,dist/quickdock-darwin-amd64.zip,dist/manifest.json"
           generateReleaseNotes: true
           allowUpdates: true
           omitBodyDuringUpdate: true

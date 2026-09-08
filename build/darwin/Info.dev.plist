@@ -6,7 +6,7 @@
         <key>CFBundleName</key>
             <string>快启坞</string>
         <key>CFBundleExecutable</key>
-            <string>quickdock-v3.exe</string>
+            <string>quickdock</string>
         <key>CFBundleIdentifier</key>
             <string>com.quickdock.app</string>
         <key>CFBundleVersion</key>

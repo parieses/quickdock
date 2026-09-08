@@ -152,6 +152,10 @@ func main() {
 	logger.EnableSlogBridge()
 	logger.I("QuickDock 启动 -------------------------------------------------------------")
 
+	// macOS 无开发者账号时 ad-hoc 签名产物带 quarantine 隔离属性会被 Gatekeeper 拦截；
+	// 启动时自检并清除（仅 darwin 生效，其他平台 no-op）。
+	platform.ClearSelfQuarantine()
+
 	// 创建 AppService 实例
 	appService := services.NewAppService()
 
