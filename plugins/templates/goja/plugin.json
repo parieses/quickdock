@@ -1,0 +1,37 @@
+{
+  "id": "com.example.myplugin",
+  "name": "我的插件",
+  "version": "0.1.0",
+  "description": "一个 Goja JS 插件示例，包含前端交互面板",
+  "author": "YourName",
+  "icon": "icon.svg",
+  "category": "开发者日常",
+  "platforms": ["windows"],
+
+  "backend": {
+    "runtime": "goja",
+    "entry": "main.js"
+  },
+
+  "frontend": {
+    "enabled": true,
+    "entry": "frontend/index.html",
+    "width": 520,
+    "height": 460
+  },
+
+  "commands": [
+    {
+      "id": "hello",
+      "title": "Hello World",
+      "keywords": ["hello", "hi", "你好"],
+      "aliases": ["打招呼", "测试"],
+      "prefix": "/hello"
+    }
+  ],
+
+  "capabilities": ["command", "frontend"],
+  "permissions": {
+    "clipboard": true
+  }
+}

@@ -1,0 +1,789 @@
+<script setup lang="ts">
+import { ref, inject, computed, onMounted, onUnmounted } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { useWorkspaceStore } from '../stores/workspace'
+import TypeIcon from './TypeIcon.vue'
+import CreateDialog from './CreateDialog.vue'
+import { getErrorMessage } from '../utils/error'
+import { pluginUpdateBadge } from '../composables/usePluginUpdateBadge'
+import type { Scene, ToastAPI } from '../types'
+import {
+  Bot, FolderKanban, FileText, Activity, ListTodo, AlarmClock,
+  Clipboard, Puzzle, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Search, X, Settings, Terminal, Server,
+} from '@lucide/vue'
+
+const store = useWorkspaceStore()
+const { t, tm } = useI18n()
+
+// 搜索时过滤场景列表
+const displayScenes = computed(() => {
+  if (store.hasSearch && store.searchResults) {
+    return store.searchResults.scenes
+  }
+  return store.sortedScenes
+})
+const emit = defineEmits<{
+  (e: 'navigate', page: string): void
+  (e: 'open-settings'): void
+}>()
+const props = defineProps<{
+  currentPage: string
+  // 点击 dsh 导航后正在启动 DeepSeek Harness（原生窗口打开中），导航项显示加载态
+  dshOpening?: boolean
+}>()
+const toast = inject<ToastAPI>('toast')!
+
+// ---- 侧栏收起（仅显示图标） ----
+const collapsed = ref(localStorage.getItem('qd_sidebar_collapsed') === '1')
+function toggleCollapse() {
+  collapsed.value = !collapsed.value
+  try { localStorage.setItem('qd_sidebar_collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
+}
+
+// 点击「插件」导航：先清掉「可更新」角标（打开后即视为已查看），再导航
+function goPlugins() {
+  pluginUpdateBadge.count = 0
+  emit('navigate', 'plugins')
+}
+
+// ---- 工作空间 ----
+const showWorkspaceMenu = ref(false)
+const showCreateWorkspaceDialog = ref(false)
+const showEditWorkspaceDialog = ref(false)
+const editingWorkspaceId = ref('')
+const editingWorkspaceName = ref('')
+
+function toggleWorkspaceMenu() {
+  showWorkspaceMenu.value = !showWorkspaceMenu.value
+}
+
+function selectWorkspace(id: string) {
+  showWorkspaceMenu.value = false
+  store.selectWorkspace(id)
+}
+
+async function handleCreateWorkspace(values: Record<string, string>) {
+  try {
+    await store.addWorkspace(values.name)
+    showCreateWorkspaceDialog.value = false
+    showWorkspaceMenu.value = false
+  } catch (e) {
+    toast.error(t('createFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+function startEditWorkspace(ws: { id: string; name: string }) {
+  editingWorkspaceId.value = ws.id
+  editingWorkspaceName.value = ws.name
+  showWorkspaceMenu.value = false
+  showEditWorkspaceDialog.value = true
+}
+
+async function handleEditWorkspace(values: Record<string, string>) {
+  try {
+    await store.updateWorkspaceAction(editingWorkspaceId.value, values.name)
+    showEditWorkspaceDialog.value = false
+  } catch (e) {
+    toast.error(t('updateFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+async function handleDeleteWorkspace(wsId: string, wsName: string) {
+  showWorkspaceMenu.value = false
+  if (!(await toast.confirm(t('confirmDeleteWorkspace')))) return
+  try {
+    await store.removeWorkspace(wsId)
+  } catch (e) {
+    toast.error(t('deleteFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+// 点击外部关闭工作空间菜单
+function onDocumentClick() {
+  showWorkspaceMenu.value = false
+}
+
+onMounted(() => document.addEventListener('click', onDocumentClick))
+onUnmounted(() => document.removeEventListener('click', onDocumentClick))
+
+// 拖拽排序
+const dragSceneId = ref<string | null>(null)
+
+function onDragStartScene(e: DragEvent, sceneId: string) {
+  dragSceneId.value = sceneId
+  e.dataTransfer?.setData('text/plain', sceneId)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+function onDragOverScene(e: DragEvent) {
+  e.preventDefault()
+}
+function onDragEndScene() {
+  dragSceneId.value = null
+}
+function onDropScene(e: DragEvent, targetId: string) {
+  e.preventDefault()
+  const ids = displayScenes.value.map(s => s.id)
+  const from = ids.indexOf(dragSceneId.value!)
+  const to = ids.indexOf(targetId)
+  if (from < 0 || to < 0 || from === to) return
+  ids.splice(from, 1)
+  ids.splice(to, 0, dragSceneId.value!)
+  store.reorderScenes(ids)
+  dragSceneId.value = null
+}
+
+// 搜索
+const searchText = ref('')
+
+function handleInput() {
+  store.setSearch(searchText.value)
+}
+
+function clearSearch() {
+  searchText.value = ''
+  store.clearSearch()
+}
+
+// 场景对话框
+const showSceneDialog = ref(false)
+const sceneFields = computed(() => {
+  const st = tm('sceneTypes') as Record<string, string>
+  return [
+  { key: 'name', label: t('sceneName'), type: 'text' as const, placeholder: t('sceneNamePlaceholder') },
+  { key: 'type', label: t('sceneType'), type: 'select' as const, options: [
+    { label: st['项目'] || '项目', value: '项目' },
+    { label: st['办公'] || '办公', value: '办公' },
+    { label: st['工程'] || '工程', value: '工程' },
+    { label: st['设计'] || '设计', value: '设计' },
+    { label: st['通用'] || '通用', value: '通用' },
+    { label: st['自定义'] || '自定义', value: '自定义' },
+  ]},
+]})
+
+const editingScene = ref<Scene | null>(null)
+const showEditDialog = ref(false)
+
+function handleSceneClick(sceneId: string) {
+  store.selectScene(sceneId)
+}
+
+async function handleCreateScene(values: Record<string, string>) {
+  try {
+    await store.addScene(values.name, values.type)
+    showSceneDialog.value = false
+  } catch (e) {
+    toast.error(t('createFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+async function handleEditScene(values: Record<string, string>) {
+  if (!editingScene.value) return
+  try {
+    await store.updateSceneAction(editingScene.value.id, { name: values.name, type: values.type })
+    showEditDialog.value = false
+    editingScene.value = null
+  } catch (e) {
+    toast.error(t('updateFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+async function handleDeleteScene(sceneId: string) {
+  if (toast && !(await toast.confirm(t('confirmDeleteScene')))) return
+  try { await store.removeScene(sceneId) } catch (e) { toast?.error(t('deleteFailed') + ': ' + getErrorMessage(e)) }
+}
+</script>
+
+<template>
+  <aside class="sidebar" :class="{ collapsed }">
+    <!-- 工作空间切换器 -->
+    <div class="workspace-selector" @click.stop="toggleWorkspaceMenu">
+      <FolderKanban :size="16" class="ws-icon" />
+      <span class="ws-name">{{ store.activeWorkspace?.name || t('selectWorkspace') }}</span>
+      <ChevronDown :size="14" class="ws-arrow" />
+      <Transition name="dropdown">
+        <div v-if="showWorkspaceMenu" class="ws-dropdown" @click.stop>
+          <div class="ws-dropdown-header">{{ t('workspaces') }}</div>
+          <div v-for="ws in store.workspaces" :key="ws.id" class="ws-item-row">
+            <button
+              :class="['ws-option', { active: ws.id === store.activeWorkspaceId }]"
+              @click="selectWorkspace(ws.id)"
+            >
+              <FolderKanban :size="14" />
+              <span>{{ ws.name }}</span>
+            </button>
+            <button class="ws-item-action" :title="t('edit')" @click="startEditWorkspace(ws)">
+              <Pencil :size="11" />
+            </button>
+            <button class="ws-item-action danger" :title="t('delete')" :disabled="store.workspaces.indexOf(ws) === 0" :class="{ 'ws-action-disabled': store.workspaces.indexOf(ws) === 0 }" @click="handleDeleteWorkspace(ws.id, ws.name)">
+              <Trash2 :size="11" />
+            </button>
+          </div>
+          <div class="ws-dropdown-divider" />
+          <button class="ws-option ws-create" @click="showCreateWorkspaceDialog = true">
+            <Plus :size="14" />
+            <span>{{ t('addWorkspace') }}</span>
+          </button>
+        </div>
+      </Transition>
+    </div>
+
+    <!-- 页面导航（新增） -->
+    <div class="sidebar-navigator">
+      <div class="navigator-header">{{ t('navigation') }}</div>
+      <button :class="['nav-item', { active: currentPage === 'workspace' }]" @click="emit('navigate', 'workspace')">
+        <FolderKanban :size="14" />
+        <span>{{ t('navWorkspace') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'snippets' }]" @click="emit('navigate', 'snippets')">
+        <FileText :size="14" />
+        <span>{{ t('navSnippets') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'todo' }]" @click="emit('navigate', 'todo')">
+        <ListTodo :size="14" />
+        <span>{{ t('navTodo') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'schedule' }]" @click="emit('navigate', 'schedule')">
+        <AlarmClock :size="14" />
+        <span>{{ t('navSchedule') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'monitor' }]" @click="emit('navigate', 'monitor')">
+        <Activity :size="14" />
+        <span>{{ t('navMonitor') }}</span>
+      </button>
+        <button :class="['nav-item', { active: currentPage === 'clipboard' }]" @click="emit('navigate', 'clipboard')">
+        <Clipboard :size="14" />
+        <span>{{ t('navClipboard') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'environments' }]" @click="emit('navigate', 'environments')">
+        <Server :size="14" />
+        <span>{{ t('navEnvironments') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'ai' }]" @click="emit('navigate', 'ai')">
+        <Bot :size="14" />
+        <span>{{ t('navAi') }}</span>
+      </button>
+      <button
+        :class="['nav-item', { active: currentPage === 'dsh', opening: dshOpening }]"
+        @click="emit('navigate', 'dsh')"
+        :disabled="dshOpening"
+        :title="dshOpening ? t('dshLaunching') : undefined"
+      >
+        <span v-if="dshOpening" class="nav-spinner"></span>
+        <Terminal v-else :size="14" />
+        <span>{{ dshOpening ? t('dshLaunching') : t('navDsh') }}</span>
+      </button>
+      <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="goPlugins">
+        <Puzzle :size="14" />
+        <span>{{ t('navPlugins') }}</span>
+        <span v-if="pluginUpdateBadge.count > 0" class="nav-badge" :title="t('pluginUpdateBadge', { n: pluginUpdateBadge.count })">{{ pluginUpdateBadge.count > 99 ? '99+' : pluginUpdateBadge.count }}</span>
+      </button>
+    </div>
+
+    <!-- 仅工作空间页显示场景相关 -->
+    <template v-if="currentPage === 'workspace'">
+    <div class="sidebar-search">
+      <div class="search-wrapper">
+        <Search :size="14" class="search-icon" />
+        <input
+          v-model="searchText"
+          type="text"
+          class="search-input"
+          :placeholder="t('search')"
+          @input="handleInput"
+        />
+        <button v-if="searchText" class="clear-btn" @click="clearSearch" :title="t('clear')">
+          <X :size="12" />
+        </button>
+      </div>
+    </div>
+
+    <!-- 场景标题 -->
+    <div class="sidebar-header">
+      <span class="sidebar-title">{{ t('scenes') }}</span>
+      <button class="icon-btn" @click="showSceneDialog = true" :title="t('addScene')">
+        <Plus :size="16" />
+      </button>
+    </div>
+
+    <!-- 搜索结果提示 -->
+    <div v-if="store.hasSearch && store.searchResults" class="search-hint">
+      {{ t('searchResults') }} {{ store.searchResults.scenes.length }} {{ t('count') }}
+    </div>
+
+    <!-- 场景列表 -->
+    <nav class="sidebar-nav">
+      <ul v-if="displayScenes.length">
+        <li
+          v-for="scene in displayScenes"
+          :key="scene.id"
+          :class="{ active: scene.id === store.activeSceneId, dragging: dragSceneId === scene.id }"
+          :draggable="!store.hasSearch"
+          @click="handleSceneClick(scene.id)"
+          @dragstart="onDragStartScene($event, scene.id)"
+          @dragend="onDragEndScene"
+          @dragover="onDragOverScene"
+          @drop="onDropScene($event, scene.id)"
+        >
+          <span class="scene-icon">
+            <TypeIcon :type="scene.type ?? '通用'" :size="18" />
+          </span>
+          <span class="scene-name">{{ scene.name }}</span>
+          <span class="scene-actions" @click.stop>
+            <button class="action-btn" @click="editingScene = scene; showEditDialog = true" :title="t('edit')">
+              <Pencil :size="13" />
+            </button>
+            <button class="action-btn danger" @click="handleDeleteScene(scene.id)" :title="t('delete')">
+              <Trash2 :size="13" />
+            </button>
+          </span>
+        </li>
+      </ul>
+      <div v-else-if="store.hasSearch" class="sidebar-empty">
+        <p class="empty-text">{{ t('noMatchScenes') }}</p>
+        <p class="empty-hint">{{ t('tryOtherKeywords') }}</p>
+      </div>
+      <div v-else class="sidebar-empty">
+        <p class="empty-icon">+</p>
+        <p class="empty-text">{{ t('noScenes') }}</p>
+        <p class="empty-hint">{{ t('createFirstScene') }}</p>
+      </div>
+    </nav>
+
+    <CreateDialog :visible="showSceneDialog" :title="t('addScene')" :fields="sceneFields"
+      @confirm="handleCreateScene" @cancel="showSceneDialog = false" />
+    <CreateDialog :visible="showEditDialog" :title="t('editScene')" :fields="sceneFields"
+      :editValues="editingScene ? { name: editingScene.name, type: editingScene.type ?? '通用' } : undefined"
+      @confirm="handleEditScene" @cancel="showEditDialog = false; editingScene = null" />
+    <CreateDialog :visible="showCreateWorkspaceDialog" :title="t('addWorkspace')"
+      :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: t('workspaceNamePlaceholder') }]"
+      @confirm="handleCreateWorkspace" @cancel="showCreateWorkspaceDialog = false" />
+    <CreateDialog :visible="showEditWorkspaceDialog" :title="t('edit')"
+      :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: t('workspaceNamePlaceholder') }]"
+      :editValues="{ name: editingWorkspaceName }"
+      @confirm="handleEditWorkspace" @cancel="showEditWorkspaceDialog = false" />
+    </template>
+
+    <!-- 非工作空间页的空白填充 -->
+    <div v-if="currentPage !== 'workspace'" class="sidebar-spacer"></div>
+    <div class="sidebar-footer">
+      <button class="settings-btn" @click="emit('open-settings')" :title="t('settings')">
+        <Settings :size="16" />
+        <span>{{ t('settings') }}</span>
+      </button>
+      <button class="collapse-btn" @click="toggleCollapse" :title="collapsed ? t('expandSidebar') : t('collapseSidebar')">
+        <ChevronLeft v-if="!collapsed" :size="16" />
+        <ChevronRight v-else :size="16" />
+      </button>
+    </div>
+  </aside>
+</template>
+
+<style scoped>
+.sidebar {
+  width: var(--sidebar-width);
+  min-width: var(--sidebar-width);
+  height: 100%;
+  background: var(--color-bg-secondary);
+  box-shadow: var(--shadow-border-right);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 10;
+  transition: width var(--transition-base), min-width var(--transition-base);
+}
+
+/* 收起态：仅显示图标 */
+.sidebar.collapsed { width: 54px; min-width: 54px; }
+.sidebar.collapsed .ws-name,
+.sidebar.collapsed .ws-arrow,
+.sidebar.collapsed .navigator-header,
+.sidebar.collapsed .nav-item span,
+.sidebar.collapsed .sidebar-search,
+.sidebar.collapsed .sidebar-header,
+.sidebar.collapsed .search-hint,
+.sidebar.collapsed .sidebar-nav,
+.sidebar.collapsed .sidebar-spacer,
+.sidebar.collapsed .settings-btn span { display: none; }
+.sidebar.collapsed .workspace-selector { justify-content: center; padding: 10px 0; }
+.sidebar.collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
+.sidebar.collapsed .sidebar-footer { justify-content: center; gap: 4px; }
+.sidebar.collapsed .ws-dropdown { left: 6px; right: auto; width: 200px; }
+
+/* 工作空间切换器 */
+.workspace-selector {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 10px 14px;
+  min-height: 44px;
+  cursor: pointer;
+  user-select: none;
+  box-shadow: var(--shadow-border);
+  transition: background var(--transition-fast);
+}
+.workspace-selector:hover { background: var(--color-bg-hover); }
+.ws-icon { color: var(--color-accent); flex-shrink: 0; }
+
+/* 导航菜单 */
+.sidebar-navigator {
+  flex-shrink: 0;
+  padding: 6px 10px 10px;
+  box-shadow: var(--shadow-border);
+}
+.navigator-header {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 2px 4px 6px;
+  user-select: none;
+}
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  position: relative;
+  width: 100%;
+  padding: 7px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: 6px;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  text-align: left;
+}
+.nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.nav-item.active { background: var(--color-bg-tertiary); color: var(--color-accent); font-weight: 500; }
+.nav-item.active svg { color: var(--color-accent); }
+.nav-badge {
+  margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  background: #e0533d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+}
+.sidebar.collapsed .nav-badge { position: absolute; top: 6px; right: 10px; margin: 0; }
+.nav-item.opening { cursor: default; opacity: .7; }
+.nav-item.opening:hover { background: transparent; color: var(--color-text-secondary); }
+.nav-spinner {
+  width: 14px; height: 14px; flex-shrink: 0;
+  border: 2px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-top-color: var(--color-accent);
+  border-radius: 50%;
+  animation: nav-spin .8s linear infinite;
+}
+@keyframes nav-spin { to { transform: rotate(360deg); } }
+
+.sidebar-spacer { flex: 1; }
+
+.ws-name {
+  flex: 1;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-arrow {
+  color: var(--color-text-disabled);
+  flex-shrink: 0;
+  transition: transform var(--transition-base);
+}
+.ws-arrow.open { transform: rotate(180deg); }
+.ws-dropdown {
+  position: absolute;
+  top: 100%;
+  left: var(--space-4);
+  right: var(--space-4);
+  z-index: 100;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.ws-dropdown-header {
+  padding: var(--space-4) var(--space-5);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-disabled);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ws-option {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 8px 12px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  text-align: left;
+}
+.ws-option:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
+.ws-option.active { color: var(--color-accent); }
+
+/* 工作空间条目行 */
+.ws-item-row { display: flex; align-items: center; }
+.ws-item-row .ws-option { flex: 1; min-width: 0; }
+.ws-item-action {
+  flex-shrink: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  margin-right: var(--space-2);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+}
+.ws-item-row:hover .ws-item-action { display: flex; }
+.ws-item-action:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
+.ws-item-action.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+.ws-item-action:disabled,
+.ws-item-action.ws-action-disabled { display: none; }
+.ws-create { border-top: 1px solid var(--color-border); color: var(--color-text-disabled); }
+.ws-create:hover { color: var(--color-accent); }
+.ws-dropdown-divider { height: 1px; background: var(--color-border); }
+
+/* 搜索栏 */
+.sidebar-search {
+  flex-shrink: 0;
+  padding: var(--space-4) 10px;
+  box-shadow: var(--shadow-border);
+  -webkit-app-region: drag;
+}
+.search-wrapper {
+  display: flex;
+  align-items: center;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 0 var(--space-3) 0 10px;
+  width: 100%;
+  height: 30px;
+  gap: var(--space-3);
+  transition: border-color var(--transition-base), box-shadow var(--transition-base);
+  -webkit-app-region: no-drag;
+}
+.search-wrapper:focus-within {
+  border-color: var(--color-border-focus);
+  box-shadow: 0 0 0 2px var(--color-accent-bg);
+}
+.search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
+.search-input {
+  flex: 1;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-family: inherit;
+  min-width: 0;
+}
+.search-input::placeholder { color: var(--color-text-disabled); }
+.clear-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  flex-shrink: 0;
+}
+.clear-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
+
+/* 搜索结果提示 */
+.search-hint {
+  padding: var(--space-3) 18px;
+  font-size: 11px;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  box-shadow: var(--shadow-border);
+}
+
+/* 场景标题 */
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px 12px 18px;
+}
+.sidebar-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+.icon-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: var(--radius-md);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+}
+.icon-btn:hover { color: var(--color-accent); background: var(--color-bg-hover); }
+
+/* 场景列表 */
+.sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--space-2) 0;
+}
+.sidebar-nav ul { list-style: none; padding: 0; margin: 0; }
+.sidebar-nav li {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 7px 14px 7px 18px;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  border-left: 2px solid transparent;
+}
+.sidebar-nav li:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.sidebar-nav li.active {
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  border-left-color: var(--color-accent);
+}
+.scene-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+.sidebar-nav li.active .scene-icon { color: var(--color-accent); }
+.scene-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.scene-actions {
+  display: flex;
+  gap: var(--space-1);
+  opacity: 0;
+  transition: opacity var(--transition-fast);
+}
+.sidebar-nav li:hover .scene-actions { opacity: 1; }
+.action-btn {
+  background: none;
+  border: none;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
+.action-btn.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+
+/* 拖拽样式 */
+.sidebar-nav li.dragging { opacity: 0.4; }
+.sidebar-nav li[draggable="true"] { cursor: grab; }
+.sidebar-nav li[draggable="true"]:active { cursor: grabbing; }
+
+/* 空状态 */
+.sidebar-empty {
+  padding: var(--space-9) var(--space-6);
+  text-align: center;
+}
+.empty-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 2px dashed var(--color-border);
+  color: var(--color-text-disabled);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto var(--space-5);
+}
+.empty-text { font-size: 13px; color: var(--color-text-disabled); margin-bottom: var(--space-2); }
+.empty-hint { font-size: 11px; color: var(--color-text-muted); }
+
+/* 底部设置 */
+.sidebar-footer {
+  flex-shrink: 0;
+  box-shadow: var(--shadow-border);
+  display: flex;
+  align-items: center;
+  padding: var(--space-3) 10px;
+}
+.settings-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 6px 10px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-disabled);
+  font-size: 12px;
+  cursor: pointer;
+  font-family: inherit;
+  border-radius: var(--radius-md);
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+}
+.settings-btn:hover { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
+.collapse-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 32px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+  border-radius: var(--radius-md);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.collapse-btn:hover { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
+
+/* 工作空间下拉动画 */
+.dropdown-enter-active, .dropdown-leave-active {
+  transition: opacity var(--transition-base), transform var(--transition-base);
+}
+.dropdown-enter-from, .dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-4px);
+}
+</style>

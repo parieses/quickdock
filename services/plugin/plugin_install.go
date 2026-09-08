@@ -1,0 +1,251 @@
+package plugin
+
+import "quickdock/services"
+
+import (
+	"bytes"
+	"encoding/base64"
+	"fmt"
+	"mime"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
+	"time"
+	"unicode/utf8"
+
+	"quickdock/internal/logger"
+	"quickdock/internal/platform"
+	pluginmgr "quickdock/internal/plugin"
+
+	"github.com/wailsapp/wails/v3/pkg/application"
+)
+
+// pickedPaths 记录本次会话内经 PickFilePath 确认过的文件路径（进程级白名单）。
+// ReadPickedFile 只放行该集合内的路径，防止插件 iframe 用任意绝对路径读取用户文件。
+var (
+	pickedPathsMu sync.Mutex
+	pickedPaths   = map[string]time.Time{} // path -> 授权时间戳；过期即失效，防白名单被永久复用
+	// pickedPathTTL 白名单有效期：选完文件后在此窗口内可重复读取，过期需重新选择。
+	// 缓解「进程级全局白名单永久有效」——恶意/闲置插件无法长期持有某路径的读取授权。
+	pickedPathTTL = 10 * time.Minute
+)
+
+// dialogParentWindow 为原生文件/目录对话框挑选父窗口：
+//  1. 命令面板使用中（PaletteMode=true）→ 面板窗口。面板是 AlwaysOnTop，
+//     无父对话框会跑到所有窗口后面（用户反馈的「弹框在最后面」），
+//     绑定父窗口后对话框作为 owned 窗口始终显示在面板之上。
+//     （面板打开时窗口必然已创建，工厂调用无副作用）
+//  2. 否则优先当前聚焦的插件窗口（插件独立窗口场景）。
+//  3. 兜底主窗口。
+func (p *PluginService) dialogParentWindow() *application.WebviewWindow {
+	if p.App.PaletteMode != nil && p.App.PaletteMode.Load() {
+		if fn := p.App.GetPaletteWindow; fn != nil {
+			if w := fn(); w != nil {
+				return w
+			}
+		}
+	}
+	if p.App.PluginWindowMgr != nil {
+		if w := p.App.PluginWindowMgr.FocusedWindow(); w != nil {
+			return w
+		}
+	}
+	return p.App.MainWindow
+}
+
+func (p *PluginService) InstallPlugin(zipPath string) *services.ApiResult {
+	if p.App.PluginMgr == nil {
+		return services.FailMsg("plugin manager not initialized")
+	}
+	dir, err := p.App.PluginMgr.InstallFromZip(zipPath)
+	if err != nil {
+		return services.Fail(err)
+	}
+	// 读取 manifest 以获取插件元信息
+	manifest, err := pluginmgr.LoadManifest(dir + "/plugin.json")
+	if err != nil {
+		return services.Ok(map[string]interface{}{
+			"dir":  dir,
+			"note": "安装完成但读取 manifest 失败: " + err.Error(),
+		})
+	}
+	// 读取图标（路径必须落在插件目录内，防 manifest.icon 路径穿越）
+	iconData := ""
+	if manifest.Icon != "" {
+		if iconPath, perr := safePluginPath(dir, manifest.Icon); perr == nil {
+			if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
+				mime := platform.IconMIME(filepath.Ext(manifest.Icon))
+				iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
+			}
+		}
+	}
+	// 写入数据库记录（含 capabilities / permissions / category / icon）
+	permissions := make(map[string]interface{})
+	if manifest.Permissions.Network || manifest.Permissions.Filesystem || manifest.Permissions.Clipboard {
+		permissions["network"] = manifest.Permissions.Network
+		permissions["filesystem"] = manifest.Permissions.Filesystem
+		permissions["clipboard"] = manifest.Permissions.Clipboard
+	}
+	if err := p.App.DB.InsertPluginFull(manifest.ID, manifest.Name, manifest.Version, manifest.Author, manifest.Description, manifest.Category, iconData, manifest.Capabilities, permissions); err != nil {
+		logger.E("插件 %s 写入数据库记录失败: %v", manifest.ID, err)
+	} else {
+		// 安装 / 更新成功 → 标记「新」角标（首次打开后由前端清除）
+		p.MarkPluginNew(manifest.ID)
+	}
+	return services.Ok(map[string]interface{}{
+		"id":      manifest.ID,
+		"name":    manifest.Name,
+		"version": manifest.Version,
+		"dir":     dir,
+	})
+}
+
+// PickFilePath 打开原生文件选择对话框，返回所选路径（取消返回 null）。
+// 供插件桥接 qdPickFile 使用：插件 iframe 内的 <input type=file> 受沙箱限制
+// 且会触发宿主窗口失焦问题，统一引导走原生对话框。
+func (p *PluginService) PickFilePath(title, filterName, pattern string) *services.ApiResult {
+	if p.App.App() == nil {
+		return services.FailMsg("应用未初始化")
+	}
+	if title == "" {
+		title = "选择文件"
+	}
+	if filterName == "" || pattern == "" {
+		filterName, pattern = "所有文件", "*.*"
+	}
+	filePath, err := p.App.App().Dialog.OpenFile().
+		SetTitle(title).
+		AddFilter(filterName, pattern).
+		AttachToWindow(p.dialogParentWindow()).
+		PromptForSingleSelection()
+	if err != nil || filePath == "" {
+		return services.Ok(nil)
+	}
+	pickedPathsMu.Lock()
+	pickedPaths[filePath] = time.Now()
+	pickedPathsMu.Unlock()
+	return services.Ok(filePath)
+}
+
+// PickFolderPath 打开原生目录选择对话框，返回所选目录路径（取消返回 null）。
+// 供插件桥接 qdPickFolder 使用：复用 Wails v3 OpenFile 的 CanChooseDirectories(true)，
+// 走与 qdPickFile 一致的原生对话框，规避插件自行 spawn PowerShell/AppleScript 的脆弱实现。
+func (p *PluginService) PickFolderPath(title string) *services.ApiResult {
+	if p.App.App() == nil {
+		return services.FailMsg("应用未初始化")
+	}
+	if title == "" {
+		title = "选择目录"
+	}
+	folderPath, err := p.App.App().Dialog.OpenFile().
+		SetTitle(title).
+		CanChooseDirectories(true).
+		CanChooseFiles(false).
+		AttachToWindow(p.dialogParentWindow()).
+		PromptForSingleSelection()
+	if err != nil || folderPath == "" {
+		return services.Ok(nil)
+	}
+	return services.Ok(folderPath)
+}
+
+// pickedFileMaxSize 单个文件读取上限：插件场景（配置/文本/二维码图）足够，
+// 同时防住超大文件把 WebView2 桥接消息撑爆。
+const pickedFileMaxSize = 20 << 20
+
+// ReadPickedFile 读取插件经 qdPickFile 选中的文件，返回内容载荷：
+//   - 可无损 UTF-8 解码且不含 NUL 的文件 → {"type":"text","content":原文}
+//   - 其余（图片/二进制）→ {"type":"dataurl","content":"data:<mime>;base64,..."}
+//
+// 仅供桥接 qdReadFile 使用；安全边界：只放行本次会话内经 PickFilePath
+// 原生对话框确认过的路径（pickedPaths 白名单），插件 iframe 无法用任意
+// 绝对路径读取用户文件。
+func (p *PluginService) ReadPickedFile(path string) *services.ApiResult {
+	if p.App.App() == nil {
+		return services.FailMsg("应用未初始化")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" || !filepath.IsAbs(path) || strings.Contains(path, "://") {
+		return services.FailMsg("路径无效")
+	}
+	pickedPathsMu.Lock()
+	ts, ok := pickedPaths[path]
+	pickedPathsMu.Unlock()
+	if !ok || time.Since(ts) > pickedPathTTL {
+		return services.FailMsg("路径未经文件选择器授权或已过期，请重新选择")
+	}
+	fi, err := os.Stat(path)
+	if err != nil || fi.IsDir() {
+		return services.FailMsg("文件不存在")
+	}
+	if fi.Size() > pickedFileMaxSize {
+		return services.FailMsg("文件超过 20MB 上限")
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return services.FailMsg("读取失败")
+	}
+	ext := strings.ToLower(filepath.Ext(path))
+	imageExts := map[string]bool{
+		".png": true, ".jpg": true, ".jpeg": true, ".gif": true,
+		".webp": true, ".bmp": true, ".ico": true,
+	}
+	probe := data
+	if len(probe) > 8192 {
+		probe = probe[:8192]
+	}
+	textual := !imageExts[ext] && !bytes.Contains(probe, []byte{0}) && utf8.Valid(data)
+	if textual {
+		return services.Ok(map[string]string{"type": "text", "content": string(data)})
+	}
+	m := mime.TypeByExtension(ext)
+	if m == "" {
+		m = http.DetectContentType(data)
+	}
+	return services.Ok(map[string]string{"type": "dataurl", "content": "data:" + m + ";base64," + base64.StdEncoding.EncodeToString(data)})
+}
+
+// SelectAndInstallPlugin 打开原生文件对话框选择 .zip 并安装
+func (p *PluginService) SelectAndInstallPlugin() *services.ApiResult {
+	if p.App.PluginMgr == nil {
+		return services.FailMsg("plugin manager not initialized")
+	}
+	if p.App.App() == nil {
+		return services.FailMsg("app not initialized")
+	}
+
+	filePath, err := p.App.App().Dialog.OpenFile().
+		SetTitle("选择插件包 (.zip)").
+		AddFilter("插件包", "*.zip").
+		AttachToWindow(p.dialogParentWindow()).
+		PromptForSingleSelection()
+	if err != nil || filePath == "" {
+		// 用户取消（某些系统取消会返回错误而非空路径）
+		return services.Ok(nil)
+	}
+	return p.InstallPlugin(filePath)
+}
+
+// InstallPluginFromBytes 接受前端上传的文件字节安装插件（拖拽 fallback）
+func (p *PluginService) InstallPluginFromBytes(fileName string, fileData []byte) *services.ApiResult {
+	if p.App.PluginMgr == nil {
+		return services.FailMsg("plugin manager not initialized")
+	}
+	// 写入临时文件。fileName 来自前端，仅取 Base 防路径穿越（..\..\ 逃逸临时目录）
+	baseName := filepath.Base(fileName)
+	if baseName == "" || baseName == "." || baseName == string(filepath.Separator) {
+		return services.FailMsg("非法的文件名")
+	}
+	tmpDir := filepath.Join(os.TempDir(), "quickdock-plugin-install")
+	os.MkdirAll(tmpDir, 0755)
+	tmpPath := filepath.Join(tmpDir, baseName)
+	if err := os.WriteFile(tmpPath, fileData, 0644); err != nil {
+		return services.Fail(fmt.Errorf("写入临时文件失败: %w", err))
+	}
+	defer os.Remove(tmpPath)
+
+	// 调用标准的 InstallFromZip
+	return p.InstallPlugin(tmpPath)
+}

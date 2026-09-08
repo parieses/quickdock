@@ -1,0 +1,13 @@
+[Desktop Entry]
+Version=1.0
+Name=快启坞
+Comment=快启坞 QuickDock — 开发者资源集合与快速启动工具
+# The Exec line includes %u to pass the URL to the application
+Exec=/usr/local/bin/quickdock-v3 %u
+Terminal=false
+Type=Application
+Icon=quickdock-v3
+Categories=Utility;
+StartupWMClass=quickdock-v3
+
+ 

@@ -1,0 +1,251 @@
+/* QuickDock 插件通用样式 — 现代 · 简约 · 大气
+ * 所有插件页共用此文件，跟随宿主暗色 / 浅色主题（由 iframe 的 data-theme 控制）。
+ * 设计令牌：圆角刻度 / 间距刻度 / 排版层级 / 三级表面 / 克制的强调色。 */
+
+:root {
+  /* ===== 表面（暗色） ===== */
+  --bg-primary: #17181b;
+  --bg-secondary: #1e1f23;
+  --bg-tertiary: #26282d;
+  --bg-hover: #2f3137;
+  --bg-active: #3a3d44;
+
+  /* ===== 文字 ===== */
+  --text-primary: #e9eaec;
+  --text-secondary: #a9adb5;
+  --text-muted: #7c818b;
+  --text-disabled: #5c606a;
+  --text-placeholder: #646875;
+
+  /* ===== 描边 ===== */
+  --border: #2b2d33;
+  --border-strong: #3a3d44;
+
+  /* ===== 品牌 / 状态 ===== */
+  --accent: #4a9eff;
+  --accent-hover: #3a8ae0;
+  --accent-soft: rgba(74, 158, 255, 0.12);
+  --success: #28c864;
+  --success-soft: rgba(40, 200, 100, 0.12);
+  --danger: #e24b4a;
+  --danger-soft: rgba(226, 75, 74, 0.12);
+  --warning: #f0a030;
+  --warning-soft: rgba(240, 160, 48, 0.12);
+
+  /* ===== 圆角刻度 ===== */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-pill: 999px;
+
+  /* ===== 间距刻度 ===== */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+
+  /* ===== 排版 ===== */
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 14px;
+  --fs-xl: 16px;
+  --fs-2xl: 20px;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* ===== 字体 ===== */
+  --font: -apple-system, 'Segoe UI', system-ui, 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji', sans-serif;
+  --font-mono: 'Cascadia Code', 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+
+  /* ===== 动效 / 阴影 ===== */
+  --transition: 150ms;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.35);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+button, input, select, textarea { font-family: inherit; }
+
+body {
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  height: 100vh;
+  overflow: hidden;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: var(--radius-pill); }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ============================================================
+ * 布局骨架
+ * ========================================================== */
+.p-app { display: flex; flex-direction: column; height: 100vh; }
+.p-body { flex: 1; display: flex; overflow: hidden; }
+.p-body-col { flex: 1; display: flex; flex-direction: column; overflow: auto; }
+
+/* 标题栏（统一插件页头：标题 + 操作区） */
+.p-head { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-4); height: 44px; background: var(--bg-secondary); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.p-head-title { font-size: var(--fs-lg); font-weight: var(--fw-semibold); color: var(--text-primary); letter-spacing: 0.2px; }
+.p-head-actions { display: flex; align-items: center; gap: var(--sp-2); margin-left: auto; }
+
+/* 内容容器（统一内边距与滚动） */
+.p-content { flex: 1; display: flex; flex-direction: column; padding: var(--sp-4); gap: var(--sp-4); overflow-y: auto; }
+
+/* 分区卡片：label 行 + 内容，现代简约的主力容器 */
+.p-section { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--bg-secondary); }
+.p-section-label { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-xs); font-weight: var(--fw-medium); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.6px; }
+.p-section-label .p-spacer { flex: 1; }
+
+/* 大号预览区（Hero） */
+.p-hero { display: flex; align-items: center; gap: var(--sp-4); padding: var(--sp-4); border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--bg-secondary); }
+
+/* 字段行：label + 控件 */
+.p-field { display: flex; align-items: center; gap: var(--sp-3); }
+.p-field > .p-label { min-width: 64px; flex-shrink: 0; }
+
+/* ============================================================
+ * 工具栏 / 面板（保留旧类名，兼容既有页面）
+ * ========================================================== */
+.p-toolbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bg-secondary); border-bottom: 1px solid var(--border); flex-shrink: 0; flex-wrap: wrap; }
+.p-pane { flex: 1; display: flex; flex-direction: column; min-width: 0; background: var(--bg-secondary); }
+.p-pane-header { display: flex; align-items: center; justify-content: space-between; padding: var(--sp-2) var(--sp-3); font-size: var(--fs-xs); color: var(--text-muted); background: var(--bg-secondary); border-bottom: 1px solid var(--border); flex-shrink: 0; text-transform: uppercase; letter-spacing: 0.5px; }
+.p-statusbar { display: flex; align-items: center; gap: var(--sp-2); padding: var(--sp-2) var(--sp-3); font-size: var(--fs-xs); color: var(--text-muted); background: var(--bg-secondary); border-top: 1px solid var(--border); flex-shrink: 0; min-height: 26px; }
+
+/* ============================================================
+ * 按钮
+ * ========================================================== */
+.p-btn { display: inline-flex; align-items: center; gap: var(--sp-1); height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-tertiary); color: var(--text-primary); font-size: var(--fs-sm); cursor: pointer; white-space: nowrap; transition: background var(--transition), border-color var(--transition), color var(--transition); }
+.p-btn:hover { background: var(--bg-hover); border-color: var(--border-strong); }
+.p-btn:active { background: var(--bg-active); }
+.p-btn:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.p-btn-primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+.p-btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+.p-btn-ghost { background: transparent; border-color: transparent; }
+.p-btn-ghost:hover { background: var(--bg-hover); border-color: transparent; }
+.p-btn-sm { height: 26px; padding: 0 10px; font-size: var(--fs-xs); }
+.p-btn:disabled, .p-btn[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+.p-btn-group { display: inline-flex; gap: 1px; }
+.p-btn-group .p-btn { border-radius: 0; }
+.p-btn-group .p-btn:first-child { border-radius: var(--radius) 0 0 var(--radius); }
+.p-btn-group .p-btn:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
+.p-btn-group .p-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* 复制按钮（统一小图标按钮） */
+.p-copy { display: inline-flex; align-items: center; justify-content: center; height: 26px; min-width: 26px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-tertiary); color: var(--text-secondary); font-size: var(--fs-xs); cursor: pointer; transition: background var(--transition), color var(--transition), border-color var(--transition); }
+.p-copy:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+
+/* ============================================================
+ * 输入控件
+ * ========================================================== */
+.p-input { height: 30px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-primary); color: var(--text-primary); font-size: var(--fs-sm); outline: none; transition: border-color var(--transition), box-shadow var(--transition); }
+.p-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-soft); }
+.p-input::placeholder { color: var(--text-placeholder); }
+.p-input-mono { font-family: var(--font-mono); }
+
+.p-select { height: 30px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-primary); color: var(--text-primary); font-size: var(--fs-sm); outline: none; cursor: pointer; transition: border-color var(--transition); }
+.p-select:focus { border-color: var(--accent); }
+
+.p-textarea { flex: 1; resize: none; padding: 12px; border: none; outline: none; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-mono); font-size: var(--fs-md); line-height: 1.6; tab-size: 2; }
+.p-textarea:focus { background: var(--bg-tertiary); }
+.p-textarea::placeholder { color: var(--text-placeholder); }
+
+/* 输出区域 */
+.p-output { flex: 1; overflow: auto; padding: 12px; font-family: var(--font-mono); font-size: var(--fs-sm); line-height: 1.65; white-space: pre-wrap; word-break: break-all; color: var(--text-primary); background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: var(--radius); }
+
+/* 滑块（跨主题，强调色填充） */
+.p-range, input[type=range] { -webkit-appearance: none; appearance: none; width: 100%; height: 4px; border-radius: var(--radius-pill); background: var(--bg-active); outline: none; accent-color: var(--accent); cursor: pointer; }
+.p-range::-webkit-slider-thumb, input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-primary); box-shadow: var(--shadow-1); transition: transform var(--transition); }
+.p-range::-webkit-slider-thumb:hover, input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+.p-range::-moz-range-thumb, input[type=range]::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid var(--bg-primary); cursor: pointer; }
+
+/* 原生拾色器 */
+.p-native-color { width: 44px; height: 30px; padding: 0; border: 1px solid var(--border); border-radius: var(--radius); background: none; cursor: pointer; }
+.p-native-color::-webkit-color-swatch-wrapper { padding: 3px; }
+.p-native-color::-webkit-color-swatch { border: none; border-radius: var(--radius-sm); }
+
+/* ============================================================
+ * 标签栏（统一 .p-tab，兼容 qrcode 等）
+ * ========================================================== */
+.p-tabs { display: flex; gap: var(--sp-1); padding: var(--sp-2) var(--sp-3); background: var(--bg-secondary); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.p-tab { height: 30px; padding: 0 14px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-tertiary); color: var(--text-secondary); font-size: var(--fs-sm); cursor: pointer; white-space: nowrap; transition: background var(--transition), color var(--transition), border-color var(--transition); }
+.p-tab:hover { color: var(--text-primary); background: var(--bg-hover); }
+.p-tab.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+
+/* ============================================================
+ * 文本 / 列表 / 卡片
+ * ========================================================== */
+.p-label { font-size: var(--fs-sm); color: var(--text-secondary); white-space: nowrap; }
+.p-muted { color: var(--text-muted); font-size: var(--fs-sm); }
+.p-empty { display: flex; align-items: center; justify-content: center; flex: 1; color: var(--text-muted); font-size: var(--fs-md); }
+
+.p-spacer { flex: 1; }
+.p-sep { width: 1px; height: 20px; background: var(--border); flex-shrink: 0; margin: 0 4px; }
+
+.p-list { flex: 1; overflow: auto; }
+.p-item { display: flex; align-items: center; gap: var(--sp-2); padding: 8px 12px; border-bottom: 1px solid var(--border); min-height: 34px; cursor: pointer; transition: background var(--transition); }
+.p-item:hover { background: var(--bg-hover); }
+.p-item.selected { background: var(--accent-soft); }
+.p-item-label { flex: 1; font-size: var(--fs-md); color: var(--text-primary); }
+.p-item-desc { font-size: var(--fs-xs); color: var(--text-muted); }
+
+.p-card { border: 1px solid var(--border); border-radius: var(--radius-lg); padding: var(--sp-3); background: var(--bg-secondary); cursor: pointer; transition: border-color var(--transition), background var(--transition), box-shadow var(--transition); }
+.p-card:hover { background: var(--bg-hover); border-color: var(--border-strong); box-shadow: var(--shadow-1); }
+
+/* ============================================================
+ * 提示 / 状态
+ * ========================================================== */
+.p-error { display: flex; align-items: center; gap: 6px; padding: var(--sp-2) var(--sp-3); color: var(--danger); font-size: var(--fs-sm); background: var(--danger-soft); border-top: 1px solid var(--border); flex-shrink: 0; }
+.p-toast { position: fixed; top: 12px; right: 12px; padding: 8px 14px; border-radius: var(--radius); font-size: var(--fs-sm); z-index: 999; box-shadow: var(--shadow-2); }
+.p-toast-success { background: var(--success); color: #fff; }
+.p-toast-error { background: var(--danger); color: #fff; }
+
+/* 状态标签 */
+.p-tag { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: var(--radius-pill); font-size: var(--fs-xs); }
+.p-tag-ok { background: var(--success-soft); color: var(--success); }
+.p-tag-warn { background: var(--danger-soft); color: var(--danger); }
+.p-tag-info { background: var(--accent-soft); color: var(--accent); }
+.p-tag-neutral { background: var(--bg-tertiary); color: var(--text-secondary); }
+
+/* ============================================================
+ * 浅色主题适配 — 由父窗口通过 data-theme 控制
+ * 层级更干净（白 / 极浅灰 / 浅灰），描边更轻，强调色加深以保证对比度。
+ * ========================================================== */
+html[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f7f8fa;
+  --bg-tertiary: #eef0f3;
+  --bg-hover: #e9ebef;
+  --bg-active: #e0e3e8;
+
+  --text-primary: #16181d;
+  --text-secondary: #4b515c;
+  --text-muted: #7a8090;
+  --text-disabled: #aab0bb;
+  --text-placeholder: #b3b8c2;
+
+  --border: #e4e7ec;
+  --border-strong: #d3d7de;
+
+  --accent: #2f86f0;
+  --accent-hover: #2577db;
+  --accent-soft: rgba(47, 134, 240, 0.10);
+  --success: #1d9e75;
+  --success-soft: rgba(29, 158, 117, 0.12);
+  --danger: #d83b3a;
+  --danger-soft: rgba(216, 59, 58, 0.10);
+  --warning: #c9871a;
+  --warning-soft: rgba(201, 135, 26, 0.12);
+
+  --shadow-1: 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-2: 0 8px 24px rgba(16, 24, 40, 0.12);
+}

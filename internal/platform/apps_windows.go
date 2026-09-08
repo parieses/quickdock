@@ -1,0 +1,237 @@
+//go:build windows
+
+package platform
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+	"sort"
+	"strings"
+	"sync"
+
+	"golang.org/x/sys/windows"
+
+	"quickdock/internal/logger"
+)
+
+func getStartMenuDirs() []string {
+	var dirs []string
+	if progData := os.Getenv("ProgramData"); progData != "" {
+		dirs = append(dirs, filepath.Join(progData, "Microsoft", "Windows", "Start Menu", "Programs"))
+	}
+	if appData := os.Getenv("APPDATA"); appData != "" {
+		dirs = append(dirs, filepath.Join(appData, "Microsoft", "Windows", "Start Menu", "Programs"))
+	}
+	return dirs
+}
+
+// systemDir 返回 System32 目录路径
+func systemDir() string {
+	if root := os.Getenv("SystemRoot"); root != "" {
+		return filepath.Join(root, "System32")
+	}
+	return `C:\Windows\System32`
+}
+
+// builtinWindowsApps 内置 Windows 应用（中文名 + 英文 exe）
+// 确保记事本/计算器等常用系统应用始终可搜索到
+var builtinWindowsApps = []struct {
+	name    string
+	exeName string
+}{
+	{"记事本", "notepad.exe"},
+	{"计算器", "calc.exe"},
+	{"画图", "mspaint.exe"},
+	{"截图工具", "SnippingTool.exe"},
+	{"任务管理器", "taskmgr.exe"},
+	{"文件资源管理器", "explorer.exe"},
+	{"注册表编辑器", "regedit.exe"},
+	{"命令提示符", "cmd.exe"},
+	{"控制面板", "control.exe"},
+	{"资源监视器", "resmon.exe"},
+	{"磁盘清理", "cleanmgr.exe"},
+	{"字符映射表", "charmap.exe"},
+	{"远程桌面连接", "mstsc.exe"},
+	{"系统信息", "msinfo32.exe"},
+	{"任务计划程序", "taskschd.msc"},
+	{"服务管理器", "services.msc"},
+	{"事件查看器", "eventvwr.msc"},
+	{"设备管理器", "devmgmt.msc"},
+	{"磁盘管理", "diskmgmt.msc"},
+	{"组策略编辑器", "gpedit.msc"},
+	{"组件服务", "dcomcnfg.exe"},
+	{"性能监视器", "perfmon.msc"},
+	{"证书管理器", "certmgr.msc"},
+	{"数据源(ODBC)", "odbcad32.exe"},
+	{"Telnet 客户端", "telnet.exe"},
+	{"写字板", "write.exe"},
+	{"步骤记录器", "psr.exe"},
+	{"放大镜", "magnify.exe"},
+	{"屏幕键盘", "osk.exe"},
+	{"讲述人", "narrator.exe"},
+}
+
+// addBuiltinApps 添加内置 Windows 应用（去重：跳过开始菜单已有的同名应用）
+func addBuiltinApps(apps []InstalledApp, seen map[string]bool) []InstalledApp {
+	sysDir := systemDir()
+	for _, b := range builtinWindowsApps {
+		// 中文名和英文 exe 名都去重
+		if seen[strings.ToLower(b.name)] || seen[strings.ToLower(b.exeName)] {
+			continue
+		}
+		fullPath := filepath.Join(sysDir, b.exeName)
+		// 检查文件是否存在
+		if _, err := os.Stat(fullPath); err != nil {
+			continue
+		}
+		seen[strings.ToLower(b.name)] = true
+		seen[strings.ToLower(b.exeName)] = true
+
+		// 提取图标
+		icon := ExtractIconBase64(fullPath)
+
+		apps = append(apps, InstalledApp{
+			Name:       b.name,
+			Path:       fullPath,
+			Category:   "系统工具",
+			IconBase64: icon,
+		})
+	}
+	return apps
+}
+
+// ScanInstalledApps 扫描 Windows 开始菜单中的已安装应用
+// 收集 .lnk 快捷方式，使用文件名（不含扩展名）作为应用名
+// 子目录名作为分类（如 "Accessories", "Administrative Tools"）
+// 同时添加内置 Windows 应用（记事本/计算器等）
+// 图标提取并发执行（冷缓存时逐个 Shell 提取较慢，串行会卡顿数秒）
+func ScanInstalledApps() ([]InstalledApp, error) {
+	dirs := getStartMenuDirs()
+	if len(dirs) == 0 {
+		return nil, fmt.Errorf("无法定位开始菜单目录")
+	}
+
+	seen := make(map[string]bool) // 按名称去重（不区分大小写）
+
+	// 第一步：walk 收集所有 .lnk（不提取图标）
+	type lnkInfo struct {
+		name, path, category string
+	}
+	var lnks []lnkInfo
+	for _, root := range dirs {
+		err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return nil
+			}
+			if info.IsDir() {
+				return nil
+			}
+			ext := strings.ToLower(filepath.Ext(info.Name()))
+			if ext != ".lnk" {
+				return nil
+			}
+			name := strings.TrimSuffix(info.Name(), filepath.Ext(info.Name()))
+			if isNoise(name) {
+				return nil
+			}
+			key := strings.ToLower(name)
+			if seen[key] {
+				return nil
+			}
+			seen[key] = true
+
+			// 计算分类
+			rel, _ := filepath.Rel(root, filepath.Dir(path))
+			category := "其他"
+			if rel != "." && rel != "" {
+				category = rel
+			}
+			lnks = append(lnks, lnkInfo{name: name, path: path, category: category})
+			return nil
+		})
+		if err != nil {
+			logger.W("QuickDock: 扫描开始菜单 %s 失败: %v", root, err)
+		}
+	}
+
+	// 第二步：固定 worker 池并发提取图标（ExtractIconBase64 内部有磁盘缓存 + 每调用独立 COM 初始化）
+	const iconWorkers = 8
+	jobs := make(chan lnkInfo, len(lnks))
+	results := make(chan InstalledApp, len(lnks))
+	var wg sync.WaitGroup
+	for i := 0; i < iconWorkers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := range jobs {
+				results <- InstalledApp{
+					Name:       j.name,
+					Path:       j.path,
+					Category:   j.category,
+					IconBase64: ExtractIconBase64(j.path),
+				}
+			}
+		}()
+	}
+	for _, l := range lnks {
+		jobs <- l
+	}
+	close(jobs)
+	wg.Wait()
+	close(results)
+
+	apps := make([]InstalledApp, 0, len(lnks))
+	for r := range results {
+		apps = append(apps, r)
+	}
+
+	// 添加内置 Windows 应用（数量少，串行即可）
+	apps = addBuiltinApps(apps, seen)
+
+	sort.Slice(apps, func(i, j int) bool {
+		return strings.ToLower(apps[i].Name) < strings.ToLower(apps[j].Name)
+	})
+
+	return apps, nil
+}
+
+// launchAppPath Windows 侧启动策略：
+//   - .lnk 先解析为真实 exe+参数+工作目录（脱离父进程组启动），解析失败回退 ShellExecute
+//   - .exe 直接 CreateProcess + sysutil.Detach 脱离启动，失败回退 ShellExecute
+//   - 其余（.msc/.bat/.cmd 等）需关联程序启动，走 ShellExecute
+func launchAppPath(appPath string) error {
+	ext := strings.ToLower(filepath.Ext(appPath))
+	switch ext {
+	case ".lnk":
+		// 解析快捷方式 → 真实 exe + 参数 + 工作目录，脱离父进程组启动
+		if target, args, wd, err := ResolveLink(appPath); err == nil && target != "" {
+			if startErr := startResolved(target, args, wd); startErr == nil {
+				return nil
+			} else {
+				logger.W("QuickDock: 解析启动失败，回退 ShellExecute: %v", startErr)
+			}
+		} else if err != nil {
+			logger.W("QuickDock: 解析 .lnk 失败，回退 ShellExecute: %v", err)
+		}
+		return shellExecOpen(appPath)
+	case ".exe":
+		if err := startResolved(appPath, "", ""); err == nil {
+			return nil
+		} else {
+			logger.W("QuickDock: 直接启动失败，回退 ShellExecute: %v", err)
+			return shellExecOpen(appPath)
+		}
+	default:
+		// .msc/.bat/.cmd 等需关联程序启动，走 ShellExecute
+		return shellExecOpen(appPath)
+	}
+}
+
+// shellExecOpen 用 ShellExecute("open") 打开任意路径（解析/直启失败时的回退）。
+func shellExecOpen(path string) error {
+	return windows.ShellExecute(0,
+		windows.StringToUTF16Ptr("open"),
+		windows.StringToUTF16Ptr(path),
+		nil, nil, windows.SW_SHOWNORMAL)
+}

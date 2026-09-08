@@ -1,0 +1,292 @@
+/* ===================================================================
+   QuickDock v3 - Design System
+   基于 DESIGN.md 的精简系统，8px 间距基准，阴影即边框
+   =================================================================== */
+
+/* 间距 & 尺寸（全局常量） */
+:root {
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 6px;
+  --space-4: 8px;
+  --space-5: 12px;
+  --space-6: 16px;
+  --space-7: 20px;
+  --space-8: 24px;
+  --space-9: 32px;
+  --space-10: 40px;
+  --space-11: 48px;
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+  --radius-full: 9999px;
+
+  --sidebar-width: 210px;
+  --collection-width: 300px;
+  --search-height: 46px;
+
+  --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', Consolas, monospace;
+
+  --transition-fast: 100ms ease;
+  --transition-base: 150ms ease;
+  --transition-slow: 200ms ease;
+}
+
+/* ==================== CSS 变量 — 深色主题 ==================== */
+:root,
+[data-theme="dark"] {
+  --color-bg-primary: #17181b;
+  --color-bg-secondary: #1e1f23;
+  --color-bg-tertiary: #26282d;
+  --color-bg-hover: #2f3137;
+  --color-bg-active: #3a3d44;
+  --color-bg-overlay: rgba(0, 0, 0, 0.55);
+  --color-surface: #26282d;
+  --color-surface-elevated: #2f3137;
+  --color-text-primary: #e9eaec;
+  --color-text-secondary: #a9adb5;
+  --color-text-muted: #7c818b;
+  --color-text-disabled: #5c606a;
+  --color-border: #2b2d33;
+  --color-border-light: #3a3d44;
+  --color-border-focus: #4a9eff;
+  --color-accent: #4a9eff;
+  --color-accent-hover: #3a8eef;
+  --color-accent-text: #fff;
+  --color-danger: #e84c4c;
+  --color-success: #4caf50;
+  --color-warning: #ff9800;
+  --color-scrollbar-thumb: #3a3a3a;
+  --color-scrollbar-hover: #4a4a4a;
+  --color-scrollbar-track: transparent;
+  --color-accent-bg: rgba(74, 158, 255, 0.1);
+  --color-accent-border: rgba(74, 158, 255, 0.2);
+  --color-accent-muted: rgba(74, 158, 255, 0.5);
+  --color-accent-light: #6db3ff;
+  --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.08);
+  --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.06);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.18);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.22);
+  --shadow-focus: 0 0 0 2px var(--color-border-focus);
+  --color-toast-error-bg: #2d1818;
+  --color-toast-error-text: #fca5a5;
+  --color-toast-error-border: #5c1a1a;
+  --color-toast-success-bg: #182d18;
+  --color-toast-success-text: #6ee7b7;
+  --color-toast-success-border: #1a5c1a;
+  --color-star: #f59e0b;
+  --shadow-toast: 0 4px 24px rgba(0, 0, 0, 0.45);
+  --shadow-toast-hover: 0 6px 28px rgba(0, 0, 0, 0.55);
+}
+
+/* ==================== CSS 变量 — 浅色主题 ==================== */
+[data-theme="light"] {
+  --color-bg-primary: #f5f6f8;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #eef0f3;
+  --color-bg-hover: #e7e9ee;
+  --color-bg-active: #dde0e7;
+  --color-bg-overlay: rgba(0, 0, 0, 0.1);
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f0f2f5;
+  --color-text-primary: #1f2329;
+  --color-text-secondary: #51565e;
+  --color-text-muted: #888d96;
+  --color-text-disabled: #aab0b8;
+  --color-border: #e3e6ec;
+  --color-border-light: #d0d4dc;
+  --color-border-focus: #4a9eff;
+  --color-accent: #4a9eff;
+  --color-accent-hover: #3a8eef;
+  --color-accent-text: #fff;
+  --color-danger: #e53935;
+  --color-success: #43a047;
+  --color-warning: #fb8c00;
+  --color-scrollbar-thumb: #d0d0cc;
+  --color-scrollbar-hover: #b8b8b4;
+  --color-scrollbar-track: transparent;
+  --color-accent-bg: rgba(74, 158, 255, 0.08);
+  --color-accent-border: rgba(74, 158, 255, 0.15);
+  --color-accent-muted: rgba(74, 158, 255, 0.5);
+  --color-accent-light: #6db3ff;
+  --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.05);
+  --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.04);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-focus: 0 0 0 2px var(--color-border-focus);
+  --color-toast-error-bg: #fff0f0;
+  --color-toast-error-text: #d32f2f;
+  --color-toast-error-border: #ffcdd2;
+  --color-toast-success-bg: #f0fff0;
+  --color-toast-success-text: #2e7d32;
+  --color-toast-success-border: #c8e6c9;
+  --color-star: #f59e0b;
+  --shadow-toast: 0 4px 24px rgba(0, 0, 0, 0.15);
+  --shadow-toast-hover: 0 6px 28px rgba(0, 0, 0, 0.2);
+}
+
+/* ==================== 全局重置 ==================== */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  height: 100%;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: var(--font-family);
+  font-size: 13px;
+  line-height: 1.5;
+  background-color: var(--color-bg-primary);
+  color: var(--color-text-primary);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow: hidden;
+  user-select: none;
+}
+
+#app {
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ==================== 滚动条 ==================== */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar-thumb);
+  border-radius: 3px;
+  transition: background var(--transition-base);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-scrollbar-hover); }
+
+/* Firefox */
+* { scrollbar-width: thin; scrollbar-color: var(--color-scrollbar-thumb) transparent; }
+
+/* ==================== 焦点环（仅键盘导航） ==================== */
+:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 1px;
+}
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: 1px solid var(--color-accent);
+  outline-offset: 0;
+}
+
+/* ==================== 通用工具类 ==================== */
+.text-muted { color: var(--color-text-muted); }
+.text-disabled { color: var(--color-text-disabled); }
+.text-accent { color: var(--color-accent); }
+.text-danger { color: var(--color-danger); }
+
+/* ==================== 选中文本 ==================== */
+::selection {
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+}
+
+/* ==================== 过渡辅助 ==================== */
+.fade-enter-active, .fade-leave-active { transition: opacity var(--transition-base); }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+
+
+/* ---- 版本列表选择器 ---- */
+.install-input-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+}
+.version-input {
+  width: 100%;
+  padding-right: 36px;
+  padding-left: 10px;
+  box-sizing: border-box;
+}
+.version-toggle-btn {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 10px;
+  line-height: 1;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+  z-index: 1;
+}
+.version-toggle-btn:hover:not(:disabled) { opacity: 0.85; }
+.version-toggle-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.version-list-panel {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  margin-top: 4px;
+  max-height: 280px;
+  overflow-y: auto;
+  background: var(--color-surface, #1e1e1e);
+  border: 1px solid var(--color-border, #333);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+}
+.version-list-loading,
+.version-list-error,
+.version-list-empty {
+  padding: 10px 12px;
+  text-align: center;
+  font-size: 13px;
+  cursor: default;
+}
+.version-list-loading { color: var(--color-muted, #888); }
+.version-list-error { color: var(--color-danger, #e06c75); }
+.version-list-empty { color: var(--color-accent, #4a9eff); cursor: pointer; }
+.version-list-empty:hover { opacity: 0.8; }
+.retry-link { color: var(--color-accent, #4a9eff); margin-left: 6px; }
+.version-item {
+  padding: 7px 12px;
+  font-size: 13px;
+  color: var(--color-text, #e0e0e0);
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: background 0.1s;
+}
+.version-item:hover { background: var(--color-hover, #2a2a2a); }
+.version-item.active { background: var(--color-accent, #4a9eff); color: #fff; }
+.version-list-note {
+  padding: 6px 12px;
+  font-size: 11px;
+  color: var(--color-muted, #666);
+  text-align: center;
+  border-top: 1px solid var(--color-border, #2a2a2a);
+}

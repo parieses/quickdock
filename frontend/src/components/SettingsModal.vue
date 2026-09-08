@@ -1,0 +1,1046 @@
+<script setup lang="ts">
+import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, FolderOpen, ExternalLink } from '@lucide/vue'
+import { useFocusTrap } from '../utils/focusTrap'
+import { unwrap } from '../utils/api'
+import { i18n } from '../i18n'
+import { Events, Browser } from '@wailsio/runtime'
+
+const { t } = useI18n()
+const toast = inject<ToastAPI>('toast')!
+const store = useWorkspaceStore()
+import HotkeySettings from './HotkeySettings.vue'
+import SettingsAI from './SettingsAI.vue'
+import SettingsSnapshot from './SettingsSnapshot.vue'
+import SettingsSync from './SettingsSync.vue'
+import SettingsTools from './SettingsTools.vue'
+
+import {
+  GetClipboardRetentionDays,
+  SetClipboardRetentionDays,
+  CleanupClipboardNow,
+  SuspendHotkeys,
+  ResumeHotkeys,
+} from '../../bindings/quickdock/services/clipboard/clipboardservice'
+import { GetAutoStart, SetAutoStart } from '../../bindings/quickdock/services/appservice'
+import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
+
+import { OpenLogsDir, GetLogsInfo } from '../../bindings/quickdock/services/appservice'
+import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
+import type { UpdateStatus } from '../../bindings/quickdock/services/update/models'
+import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
+import type { ToastAPI } from '../types'
+import { useWorkspaceStore } from '../stores/workspace'
+import { getErrorMessage } from '../utils/error'
+import ConfirmDialog from './ConfirmDialog.vue'
+
+const props = defineProps<{
+  visible: boolean
+  initialPage?: string
+}>()
+
+const emit = defineEmits<{ close: [] }>()
+
+const activePage = ref<string | null>(null)
+const panelRef = ref<HTMLElement | null>(null)
+const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
+const hotkeyRef = ref<InstanceType<typeof HotkeySettings> | null>(null)
+
+const menuItems = computed(() => [
+  { key: 'preferences', label: t('preferences'), icon: Palette, desc: t('autoStart') + ' / ' + t('theme') + ' / ' + t('language') },
+  { key: 'hotkeys',    label: t('hotkeySettings'),  icon: Keyboard, desc: t('shortcut') },
+  { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
+  { key: 'sync',      label: t('sync'),              icon: Cloud,    desc: t('syncDesc') },
+  { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
+  { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
+  { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
+])
+
+// 左侧菜单分组：通用 / 数据与备份 / 服务与工具，扁平展示但用分组标题区分层级。
+const menuGroups = computed(() => {
+  const byKey = Object.fromEntries(menuItems.value.map((m) => [m.key, m]))
+  const defs: { title: string; keys: string[] }[] = [
+    { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys'] },
+    { title: t('menuGroupData'), keys: ['data', 'sync', 'snapshot'] },
+    { title: t('menuGroupService'), keys: ['tools', 'ai'] },
+  ]
+  return defs
+    .map((g) => ({ title: g.title, items: g.keys.map((k) => byKey[k]).filter(Boolean) }))
+    .filter((g) => g.items.length > 0)
+})
+
+function selectMenu(key: string) {
+  activePage.value = key
+}
+
+function close() {
+  activePage.value = null
+  emit('close')
+}
+
+function onKeydown(e: KeyboardEvent) {
+  // 如果快捷键页正在捕获，Escape 不关闭设置页
+  if (e.key === 'Escape' && activePage.value === 'hotkeys' && hotkeyRef.value?.capturing) {
+    return
+  }
+  if (e.key === 'Escape') { close(); return }
+  onKeydownTrap(e)
+}
+
+// ---- 更新检查 ----
+const appVersion = ref('')
+const updateStatus = ref<UpdateStatus | null>(null)
+const updateChecking = ref(false)
+const updateResult = ref('')
+// 更新下载实时进度：Wails updater 内部发 wails:updater:download-progress（~10次/秒），
+// payload 为 {written, total, rate}；驱动「正在下载 X%」文案与进度条。
+const updateDlActive = ref(false)
+const updateProgress = ref(0)
+
+let offUpdateStatus: (() => void) | null = null
+let offDlProgress: (() => void) | null = null
+
+onMounted(async () => {
+  try {
+    const ver = await GetAppVersion()
+    appVersion.value = ver
+    const state = await GetUpdateState()
+    if (state) updateStatus.value = state
+  } catch {}
+  // 订阅后台自动检查结果：与手动"检测更新"复用同一套渲染，保证流程一致。
+  offUpdateStatus = Events.On('quickdock:update:status', (payload: any) => {
+    applyUpdateStatus((payload?.data ?? payload) as UpdateStatus)
+  })
+  // 订阅更新包下载进度（Wails updater 内部事件，后端并发/镜像下载的进度会汇入其中）
+  offDlProgress = Events.On('wails:updater:download-progress', (payload: any) => {
+    const d = (payload?.data ?? payload) as { written?: number; total?: number } | undefined
+    if (!d || !d.total || typeof d.written !== 'number') return
+    updateDlActive.value = true
+    updateProgress.value = Math.min(100, Math.max(1, Math.round((d.written / d.total) * 100)))
+    updateResult.value = t('updateDownloadingPct', { pct: updateProgress.value })
+  })
+})
+
+onUnmounted(() => {
+  offUpdateStatus?.()
+  offDlProgress?.()
+})
+
+// 手动检测与后台自动检查共用同一渲染逻辑，保证两条路径展示完全一致。
+function applyUpdateStatus(result: UpdateStatus | null) {
+  if (!result) { updateResult.value = t('updateError'); return }
+  updateStatus.value = result
+  if (result.state === 'up-to-date') {
+    updateResult.value = t('updateUpToDate')
+  } else if (result.state === 'available') {
+    updateResult.value = t('updateAvailable') + ' ' + (result.availableVersion || '')
+  } else if (result.state === 'ready') {
+    updateResult.value = t('updateReady')
+  } else if (result.state === 'error') {
+    updateResult.value = (result.error || t('updateError'))
+  }
+}
+
+async function checkForUpdates() {
+  updateChecking.value = true
+  updateResult.value = ''
+  try {
+    const result = await CheckForUpdates()
+    applyUpdateStatus(result)
+  } catch (e: any) {
+    updateResult.value = getErrorMessage(e)
+  } finally {
+    updateChecking.value = false
+  }
+}
+
+// ---- 日志卡片：路径 + 打开目录 + 最近 50 行预览（带 I/W/E 色标）----
+const logsInfo = ref<{ dir: string; currentFile: string; recentLines: string[] } | null>(null)
+const logsExpanded = ref(false)
+const logsLoading = ref(false)
+
+async function loadLogs() {
+  if (logsInfo.value && logsInfo.value.recentLines.length > 0) return
+  logsLoading.value = true
+  try {
+    logsInfo.value = unwrap<any>(await GetLogsInfo(50)) || null
+  } catch (e: any) {
+    toast?.error?.(getErrorMessage(e))
+  } finally {
+    logsLoading.value = false
+  }
+}
+
+async function toggleLogsPreview() {
+  logsExpanded.value = !logsExpanded.value
+  if (logsExpanded.value) await loadLogs()
+}
+
+async function openLogsDir() {
+  try { await OpenLogsDir() } catch (e: any) { toast?.error?.(getErrorMessage(e)) }
+}
+
+function openUrl(url: string) {
+  Browser.OpenURL(url).catch((e: any) => {
+    console.error('[Settings] OpenURL:', e)
+  })
+}
+
+function logLineClass(line: string): string {
+  const m = line.match(/\[([IWE])\]/)
+  return 'log-line log-' + (m ? m[1].toLowerCase() : 'i')
+}
+
+async function downloadUpdate() {
+  updateDlActive.value = true
+  updateProgress.value = 0
+  updateResult.value = t('updateDownloading')
+  try {
+    const result = await DownloadUpdate()
+    if (!result) { updateResult.value = t('updateError'); return }
+    updateDlActive.value = false
+    updateStatus.value = result
+    if (result.state === 'ready') {
+      updateResult.value = t('updateReady')
+    } else if (result.state === 'error') {
+      updateResult.value = result.error || t('updateError')
+    }
+  } catch (e: any) {
+    updateDlActive.value = false
+    updateResult.value = getErrorMessage(e)
+  }
+}
+
+// 更新需要管理员权限（NSIS 安装器 REQUEST_EXECUTION_LEVEL=admin 会触发 UAC）。
+// 首次点击"立即重启"先弹一次提示，确认后记忆(localStorage)，避免被 UAC 弹窗突兀打断。
+const UPDATE_ADMIN_ACK = 'quickdock_update_admin_ack'
+const showUpdateAdminConfirm = ref(false)
+
+async function restartApp() {
+  if (!localStorage.getItem(UPDATE_ADMIN_ACK)) {
+    showUpdateAdminConfirm.value = true
+    return
+  }
+  doRestart()
+}
+
+function onUpdateAdminConfirm() {
+  localStorage.setItem(UPDATE_ADMIN_ACK, '1')
+  showUpdateAdminConfirm.value = false
+  doRestart()
+}
+
+async function doRestart() {
+  updateResult.value = t('updateRestarting')
+  try {
+    await RestartApp()
+    // 成功时进程会在助手接管后异步退出，这里不会再有后续 UI 更新
+  } catch (e: any) {
+    // 以前这里是 catch {}，任何失败都被静默吞掉，用户只能看到"点了没反应"
+    updateResult.value = getErrorMessage(e)
+  }
+}
+
+// ---- 主题 / 语言 ----
+// 主题状态由 App 统一管理（App.vue provide('theme')）：此处不再各存一份，否则用户切主题后
+// 系统深/浅色变化会覆盖（App 的 currentTheme 仍是 system），主题无法持久生效。
+const themeCtl = inject<{ current: any; set: (t: string) => Promise<void> } | null>('theme', null)
+const currentTheme = themeCtl ? themeCtl.current : ref('system')
+const themeOptions = computed(() => [
+  { value: 'dark',   label: t('dark'), icon: Moon },
+  { value: 'light',  label: t('light'), icon: Sun },
+  { value: 'system', label: t('system'), icon: MonitorIcon },
+])
+
+function applyTheme(theme: string) {
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)')
+  const isDark = theme === 'dark' || (theme === 'system' && prefersDark.matches)
+  document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
+}
+
+async function setTheme(theme: string) {
+  // 优先走宿主统一入口（同步 App.currentTheme + applyTheme + 持久化），无注入时退化到本地实现
+  if (themeCtl) { await themeCtl.set(theme); return }
+  currentTheme.value = theme
+  applyTheme(theme)
+  try { await SetValue('theme', theme) } catch (_) {}
+}
+const currentLocale = ref('zh-CN')
+
+async function setLocale(newLocale: string) {
+  currentLocale.value = newLocale
+  i18n.global.locale.value = newLocale as 'zh-CN' | 'en-US'
+  try {
+    await SetValue('locale', newLocale)
+  } catch (_) {}
+}
+
+// 打开设置页时如有初始页面则导航，不再全局挂起热键
+watch(() => props.visible, async (val) => {
+  if (val) {
+    if (props.initialPage) {
+      activePage.value = props.initialPage
+    }
+  }
+}, { immediate: false })
+
+// 只在弹窗可见时监听全局按键，避免隐藏后 keydown 常驻
+watch(() => props.visible, (v) => {
+  if (v) {
+    document.addEventListener('keydown', onGlobalKeydown)
+  } else {
+    document.removeEventListener('keydown', onGlobalKeydown)
+  }
+}, { immediate: false })
+
+onMounted(async () => {
+  if (props.visible) {
+    document.addEventListener('keydown', onGlobalKeydown)
+  }
+  try {
+    const saved = unwrap<string>(await GetValue('locale'))
+    if (saved) currentLocale.value = saved
+  } catch (_) {}
+  try {
+    const saved = unwrap<string>(await GetValue('theme'))
+    if (saved === 'dark' || saved === 'light' || saved === 'system') {
+      currentTheme.value = saved
+    }
+  } catch (_) {}
+  try {
+    const days = unwrap<number>(await GetClipboardRetentionDays())
+    clipboardRetentionDays.value = days ?? 30
+  } catch (_) {}
+  try {
+    autoStart.value = unwrap<boolean>(await GetAutoStart()) ?? false
+  } catch (_) {}
+})
+
+// ---- 剪贴板设置 ----
+const clipboardRetentionDays = ref(30)
+const cleanupResult = ref('')
+const autoStartResult = ref('')
+const autoStart = ref(false)
+const cleanupTimer = ref<ReturnType<typeof setTimeout> | null>(null)
+
+function clearCleanupTimer() {
+  if (cleanupTimer.value !== null) {
+    clearTimeout(cleanupTimer.value)
+    cleanupTimer.value = null
+  }
+}
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key !== 'Escape') return
+  if (activePage.value === 'hotkeys' && hotkeyRef.value?.capturing) {
+    return
+  }
+  // 全局 handler 和模板 @keydown 可能同时触发，跳过已关闭状态
+  if (activePage.value === null) return
+  close()
+}
+
+onUnmounted(() => {
+  document.removeEventListener('keydown', onGlobalKeydown)
+  clearCleanupTimer()
+})
+
+async function saveRetentionDays() {
+  try {
+    unwrap(await SetClipboardRetentionDays(clipboardRetentionDays.value))
+    clearCleanupTimer()
+    cleanupResult.value = t('saveSuccess')
+    cleanupTimer.value = setTimeout(() => { cleanupResult.value = ''; cleanupTimer.value = null }, 2000)
+  } catch (e) {
+    cleanupResult.value = t('saveFailed2') + ': ' + getErrorMessage(e)
+  }
+}
+
+async function cleanNow() {
+  try {
+    const count = unwrap<number>(await CleanupClipboardNow())
+    clearCleanupTimer()
+    cleanupResult.value = t('cleanupResult') + ' ' + count + ' ' + t('count')
+    cleanupTimer.value = setTimeout(() => { cleanupResult.value = ''; cleanupTimer.value = null }, 3000)
+  } catch (e) {
+    cleanupResult.value = t('cleanupResult') + ': ' + getErrorMessage(e)
+  }
+}
+
+async function toggleAutoStart() {
+  const newVal = !autoStart.value
+  try {
+    unwrap(await SetAutoStart(newVal))
+    autoStart.value = newVal
+  } catch (e) {
+    autoStartResult.value = t('saveFailed2') + ': ' + getErrorMessage(e)
+  }
+}
+
+</script>
+
+<template>
+  <Teleport to="body">
+    <Transition name="panel-slide">
+      <div v-if="visible" class="settings-overlay" @mousedown.self="close" @keydown="onKeydown">
+        <div ref="panelRef" class="settings-panel" @mousedown.stop>
+        <!-- 左侧菜单 -->
+        <div class="settings-sidebar">
+          <div class="settings-sidebar-header">
+            <span class="sidebar-header-title">{{ t('settings') }}</span>
+            <button class="close-btn" @click="close">
+              <X :size="18" />
+            </button>
+          </div>
+
+          <div class="settings-menu">
+            <template v-for="group in menuGroups" :key="group.title">
+              <div class="menu-group-title">{{ group.title }}</div>
+              <button
+                v-for="item in group.items"
+                :key="item.key"
+                :class="['menu-row', { active: activePage === item.key }]"
+                @click="selectMenu(item.key)"
+              >
+                <component :is="item.icon" :size="18" class="menu-row-icon" />
+                <div class="menu-row-text">
+                  <span class="menu-row-label">{{ item.label }}</span>
+                  <span class="menu-row-desc">{{ item.desc }}</span>
+                </div>
+                <ChevronRight :size="14" class="menu-row-arrow" />
+              </button>
+            </template>
+
+            <!-- 关于（含更新与日志，置底独立） -->
+            <div class="about-row-wrap">
+              <button
+                :class="['menu-row about-row', { active: activePage === 'about' }]"
+                @click="selectMenu('about')"
+              >
+                <Info :size="18" class="menu-row-icon" />
+                <div class="menu-row-text">
+                  <span class="menu-row-label">{{ t('appName') }}</span>
+                  <span class="menu-row-desc">{{ t('aboutDesc') }}</span>
+                </div>
+                <ChevronRight :size="14" class="menu-row-arrow" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 右侧内容 -->
+        <div class="settings-content">
+          <!-- 关于（含版本信息和更新检查） -->
+          <div v-if="activePage === 'about'" class="content-page content-left">
+            <div class="section">
+              <h3>{{ t('appName') }}</h3>
+              <p class="about-version">{{ t('version') }} {{ appVersion || '0.0.0' }}</p>
+              <p class="about-desc">{{ t('appDesc') }}</p>
+              <p class="about-tech">{{ t('aboutTech') }}</p>
+              <div class="about-links">
+                <a class="about-link" href="#" @click.prevent="openUrl('https://github.com/parieses/quickdock')">
+                  <ExternalLink :size="12" />
+                  <span class="about-link-tag">{{ t('aboutRepoMain') }}</span>
+                  github.com/parieses/quickdock
+                </a>
+                <a class="about-link" href="#" @click.prevent="openUrl('https://github.com/parieses/quickdock-plugins')">
+                  <ExternalLink :size="12" />
+                  <span class="about-link-tag">{{ t('aboutRepoPlugins') }}</span>
+                  github.com/parieses/quickdock-plugins
+                </a>
+              </div>
+              <p class="about-copy">{{ t('aboutCopyright') }}</p>
+            </div>
+
+            <div class="section">
+              <h3 class="section-title">{{ t('update') }}</h3>
+              <p class="section-desc">{{ t('updateCheckingAuto') }}</p>
+
+              <div class="action-row" style="margin-top:12px">
+                <button class="btn btn-primary" :disabled="updateChecking" @click="checkForUpdates">
+                  <RotateCcw :size="14" :class="{ spinning: updateChecking }" />
+                  {{ updateChecking ? t('updateChecking') : t('updateCheckNow') }}
+                </button>
+              </div>
+
+              <p v-if="updateResult" class="result-hint" :class="{ 'result-error': updateStatus?.state === 'error' }">{{ updateResult }}</p>
+
+              <div v-if="updateDlActive" class="update-dl-bar">
+                <div class="update-dl-fill" :style="{ width: updateProgress + '%' }"></div>
+              </div>
+
+              <div v-if="updateStatus?.state === 'available'" class="action-row" style="margin-top:12px">
+                <button class="btn btn-primary" @click="downloadUpdate" :disabled="updateDlActive">
+                  {{ updateDlActive
+                    ? t('updateDownloadingPct', { pct: updateProgress })
+                    : t('updateDownload') + ' ' + updateStatus.availableVersion }}
+                </button>
+                <button class="btn btn-secondary" :disabled="updateDlActive" @click="updateStatus.state = 'idle'">
+                  {{ t('updateSkip') }}
+                </button>
+              </div>
+
+              <div v-if="updateStatus?.state === 'available' && updateStatus.releaseNotes" class="update-notes">
+                <div class="update-notes-title">{{ t('updateNotes') }}</div>
+                <pre class="update-notes-body">{{ updateStatus.releaseNotes }}</pre>
+              </div>
+
+              <div v-if="updateStatus?.state === 'ready'" class="action-row" style="margin-top:12px">
+                <button class="btn btn-primary update-restart-btn" @click="restartApp">
+                  {{ t('updateRestart') }}
+                </button>
+              </div>
+            </div>
+
+            <!-- 日志（全局排障入口） -->
+            <div class="section">
+              <h3 class="section-title">{{ t('logsTitle') }}</h3>
+              <p class="section-desc">{{ t('logsDesc') }}</p>
+              <div class="action-row" style="margin-top:12px">
+                <button class="btn btn-secondary" @click="openLogsDir">
+                  <FolderOpen :size="14" />
+                  {{ t('logsOpenDir') }}
+                </button>
+                <button class="btn btn-secondary" @click="toggleLogsPreview" :disabled="logsLoading">
+                  <RotateCcw v-if="logsLoading" :size="14" class="spinning" />
+                  {{ logsExpanded ? t('logsCollapse') : t('logsShowLines') }}
+                </button>
+              </div>
+              <div v-if="logsExpanded" class="logs-preview">
+                <div v-if="logsLoading">{{ t('loading') }}</div>
+                <template v-else>
+                  <div
+                    v-for="(ln, i) in logsInfo?.recentLines || []"
+                    :key="i"
+                    :class="logLineClass(ln)"
+                  >{{ ln }}</div>
+                  <p v-if="!logsInfo || logsInfo.recentLines.length === 0" class="section-desc logs-empty">{{ t('logsEmpty') }}</p>
+                </template>
+              </div>
+              <p v-if="logsInfo?.currentFile" class="logs-path">{{ logsInfo.currentFile }}</p>
+            </div>
+          </div>
+
+          <!-- 通用设置（开机自启 + 外观主题/语言） -->
+          <div v-else-if="activePage === 'preferences'" class="content-page content-left">
+            <div class="section">
+              <h3 class="section-title">{{ t('general') }}</h3>
+              <div class="setting-row">
+                <label class="setting-label">{{ t('autoStart') }}</label>
+                <div class="setting-control">
+                  <button
+                    :class="['toggle-btn', { active: autoStart }]"
+                    @click="toggleAutoStart"
+                  >
+                    <span class="toggle-knob" />
+                  </button>
+                  <span class="toggle-label">{{ autoStart ? t('autoStartOn') : t('autoStartOff') }}</span>
+                </div>
+                <p v-if="autoStartResult" class="result-hint error">{{ autoStartResult }}</p>
+              </div>
+            </div>
+            <div class="section">
+              <h3 class="section-title">{{ t('theme') }}</h3>
+              <p class="section-desc">{{ t('themeDesc') }}</p>
+              <div class="theme-selector">
+                <button
+                  v-for="opt in themeOptions"
+                  :key="opt.value"
+                  :class="['theme-card', { active: currentTheme === opt.value }]"
+                  @click="setTheme(opt.value)"
+                >
+                  <component :is="opt.icon" :size="24" />
+                  <span>{{ opt.label }}</span>
+                </button>
+              </div>
+            </div>
+            <div class="section">
+              <h3 class="section-title">{{ t('language') }}</h3>
+              <p class="section-desc">{{ t('languageDesc') }}</p>
+              <div class="locale-selector">
+                <button
+                  :class="['locale-btn', { active: currentLocale === 'zh-CN' }]"
+                  @click="setLocale('zh-CN')"
+                >简体中文</button>
+                <button
+                  :class="['locale-btn', { active: currentLocale === 'en-US' }]"
+                  @click="setLocale('en-US')"
+                >English</button>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="activePage === 'hotkeys'" class="content-page content-left">
+            <HotkeySettings ref="hotkeyRef" />
+          </div>
+
+          <!-- 数据与备份 -->
+          <div v-else-if="activePage === 'data'" class="content-page content-left">
+            <div class="section">
+              <h3 class="section-title">{{ t('clipboardHistory') }}</h3>
+              <p class="section-desc">{{ t('clipboardDesc') }}</p>
+              <div class="setting-row">
+                <label class="setting-label">{{ t('retentionDays') }}</label>
+                <div class="setting-control">
+                  <input v-model.number="clipboardRetentionDays" type="number" min="1" max="365" class="num-input" />
+                  <span class="input-suffix">{{ t('days') }}</span>
+                  <button class="btn btn-primary" @click="saveRetentionDays">{{ t('save') }}</button>
+                </div>
+              </div>
+              <div class="action-row">
+                <button class="btn btn-secondary" @click="cleanNow">{{ t('cleanupNow') }}</button>
+              </div>
+              <p v-if="cleanupResult" class="result-hint">{{ cleanupResult }}</p>
+            </div>
+          </div>
+
+          <!-- 统一同步（同步后端抽象：WebDAV 是一种实现） -->
+          <div v-else-if="activePage === 'sync'" class="content-page content-left">
+            <SettingsSync :visible="activePage === 'sync'" @close="close" />
+          </div>
+
+          <!-- 快照备份 -->
+          <div v-else-if="activePage === 'snapshot'" class="content-page content-left">
+            <SettingsSnapshot :visible="activePage === 'snapshot'" @close="close" />
+          </div>
+
+          <!-- AI 助手 -->
+          <div v-else-if="activePage === 'ai'" class="content-page content-left">
+            <SettingsAI :visible="activePage === 'ai'" />
+          </div>
+
+          <!-- 打开工具管理 -->
+          <div v-else-if="activePage === 'tools'" class="content-page content-left">
+            <SettingsTools :visible="activePage === 'tools'" />
+          </div>
+
+          <!-- 其他设置页占位（旧路由兼容） -->
+          <div v-else-if="activePage && activePage !== 'about' && activePage !== 'hotkeys'" class="content-page">
+            <p class="placeholder-title">{{ menuItems.find(m => m.key === activePage)?.label }}</p>
+            <p class="placeholder-hint">{{ t('comingSoon') }}</p>
+          </div>
+
+          <!-- 空状态 -->
+          <div v-else class="content-page content-empty">
+            <p class="empty-icon">⚙</p>
+            <p class="empty-text">{{ t('selectMenuHint') }}</p>
+          </div>
+        </div>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
+
+  <ConfirmDialog
+    :visible="showUpdateAdminConfirm"
+    :message="t('updateAdminRequired')"
+    @confirm="onUpdateAdminConfirm"
+    @cancel="showUpdateAdminConfirm = false"
+  />
+</template>
+
+<style>
+/* === 全屏覆盖层 === */
+.settings-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: var(--color-bg-overlay);
+}
+
+/* === 全屏面板 === */
+.settings-panel {
+  position: fixed; inset: 0; z-index: 10001;
+  display: flex;
+  background: var(--color-bg-primary);
+}
+
+/* === 左侧菜单 === */
+.settings-sidebar {
+  width: 240px; min-width: 240px;
+  background: var(--color-bg-secondary); border-right: 1px solid var(--color-border);
+  display: flex; flex-direction: column;
+}
+
+.settings-sidebar-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.sidebar-header-title {
+  font-size: 16px; font-weight: 600; color: var(--color-text-primary);
+}
+.close-btn {
+  background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
+  width: 30px; height: 30px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.close-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
+
+.settings-menu {
+  flex: 1; overflow-y: auto; padding: 8px 0 12px;
+}
+
+/* 菜单分组小标题（uppercase 弱化 + 左侧小竖条不强求，保持克制） */
+.menu-group-title {
+  padding: 14px 20px 4px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-disabled);
+  user-select: none;
+}
+.menu-group-title:first-child { padding-top: 8px; }
+
+.menu-row {
+  width: 100%; display: flex; align-items: center; gap: 12px;
+  padding: 10px 20px; border: none; background: transparent;
+  color: var(--color-text-muted); font-size: 13px; cursor: pointer;
+  text-align: left; font-family: inherit;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.menu-row:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.menu-row.active { background: var(--color-bg-hover); color: var(--color-accent); }
+.menu-row-icon { flex-shrink: 0; opacity: 0.7; color: inherit; }
+.menu-row.active .menu-row-icon { opacity: 1; }
+.menu-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.menu-row-label { font-size: 13px; font-weight: 500; }
+.menu-row-desc { font-size: 11px; color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu-row.active .menu-row-desc { color: var(--color-accent-muted); }
+.menu-row-arrow { color: var(--color-text-disabled); flex-shrink: 0; }
+.menu-row.active .menu-row-arrow { color: var(--color-accent); }
+
+/* 「关于」置底：sticky 在滚动区底部，与上方分组用分隔线区隔 */
+.about-row-wrap {
+  position: sticky; bottom: 0; background: var(--color-bg-secondary);
+  border-top: 1px solid var(--color-border); margin-top: 12px;
+}
+.about-row-wrap .menu-row { padding-top: 12px; }
+
+/* === 右侧内容 === */
+.settings-content {
+  flex: 1; overflow-y: auto;
+}
+
+.content-page {
+  height: 100%; display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  padding: 48px 32px;
+}
+
+.content-empty {
+  color: var(--color-text-disabled);
+}
+.content-empty .empty-icon { font-size: 48px; margin-bottom: 16px; }
+.content-empty .empty-text { font-size: 14px; }
+
+/* 关于（含版本信息） */
+.about-version { font-size: 13px; color: var(--color-accent); margin: 0 0 16px; }
+.about-desc { font-size: 14px; color: var(--color-text-muted); margin: 0 0 4px; }
+.about-tech { font-size: 12px; color: var(--color-text-disabled); margin: 0 0 20px; }
+.about-links { display: flex; flex-direction: column; gap: 6px; margin: 0 0 16px; }
+.about-link {
+  align-self: flex-start; /* 收缩到内容宽度，避免点击行内空白也触发跳转 */
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-accent);
+  text-decoration: none;
+  transition: opacity 150ms;
+}
+.about-link:hover { opacity: 0.8; text-decoration: underline; }
+.about-link svg { flex-shrink: 0; opacity: 0.7; }
+.about-link-tag {
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-hover);
+  color: var(--color-text-muted);
+  font-size: 11px;
+}
+.about-copy { font-size: 11px; color: var(--color-text-disabled); margin: 0; }
+
+/* 更新按钮 */
+.update-restart-btn { background: var(--color-accent); color: #fff; font-weight: 500; }
+.update-restart-btn:hover { opacity: 0.9; }
+.update-dl-bar {
+  height: 4px; margin-top: 10px; border-radius: 2px; overflow: hidden;
+  background: var(--color-bg-tertiary);
+}
+.update-dl-fill {
+  height: 100%; border-radius: 2px;
+  background: var(--color-accent, #4a9eff); transition: width .2s ease;
+}
+
+.update-notes {
+  margin-top: 14px;
+  border: 1px solid var(--border-color, #333);
+  border-radius: 8px;
+  background: var(--surface-2, #1e1e1e);
+  padding: 10px 12px;
+}
+.update-notes-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary, #aaa);
+  margin-bottom: 6px;
+}
+.update-notes-body {
+  margin: 0;
+  max-height: 200px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-primary, #e6e6e6);
+}
+.spinning { animation: spin 1s linear infinite; }
+@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+
+/* 主题/语言选择器 */
+.theme-selector { display: flex; gap: 12px; }
+.theme-card {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;
+  padding: 16px 12px; border: 1px solid var(--color-border); border-radius: 10px;
+  background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer;
+  font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.theme-card:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+.theme-card.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
+.locale-selector { display: flex; gap: 8px; }
+.locale-btn {
+  padding: 8px 20px; border: 1px solid var(--color-border); border-radius: 8px;
+  background: transparent; color: var(--color-text-muted); font-size: 13px; cursor: pointer;
+  font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.locale-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+.locale-btn.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
+
+/* 数据与备份 */
+.content-left { align-items: flex-start; justify-content: flex-start; }
+.content-inner { width: 100%; max-width: 600px; }
+.section { width: 100%; max-width: 600px; }
+.section + .section { margin-top: 28px; }
+.section-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 4px; }
+.section-desc { font-size: 12px; color: var(--color-text-disabled); margin: 0 0 20px; }
+.setting-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+.setting-label { font-size: 13px; color: var(--color-text-muted); min-width: 80px; }
+.setting-control { display: flex; align-items: center; gap: 8px; }
+.num-input {
+  width: 80px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px; font-family: inherit;
+  outline: none;
+}
+.num-input:focus { border-color: var(--color-accent); }
+.input-suffix { font-size: 12px; color: var(--color-text-disabled); }
+.btn {
+  padding: 6px 14px; border: none; border-radius: 6px;
+  font-size: 12px; cursor: pointer; font-family: inherit;
+  transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.btn-primary { background: var(--color-accent); color: var(--color-accent-text); }
+.btn-primary:hover { background: var(--color-accent-hover); }
+.btn-secondary { background: var(--color-bg-active); color: var(--color-text-secondary); }
+.btn-secondary:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
+.action-row { margin-top: 8px; }
+.result-hint { font-size: 12px; color: var(--color-accent); margin: 8px 0 0; }
+
+/* 日志卡片 */
+.logs-preview {
+  margin-top: 10px; max-height: 300px; overflow: auto;
+  font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.55;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border); border-radius: 8px;
+  padding: 10px 12px; white-space: pre-wrap; word-break: break-all;
+  user-select: text;
+}
+.log-line { margin: 0; }
+.log-i { color: var(--color-text-secondary); }
+.log-w { color: var(--color-warning, #d97706); }
+.log-e { color: var(--color-danger); font-weight: 600; }
+.logs-path { margin-top: 8px; font-size: 11px; color: var(--color-text-disabled); word-break: break-all; user-select: text; }
+.logs-empty { margin: 4px 0; }
+
+/* 切换开关 */
+.toggle-btn {
+  width: 40px; height: 22px; border-radius: 11px; border: none;
+  background: var(--color-bg-active); cursor: pointer; position: relative;
+  transition: background 0.2s; padding: 0;
+}
+.toggle-btn.active { background: var(--color-accent); }
+.toggle-knob {
+  position: absolute; top: 2px; left: 2px;
+  width: 18px; height: 18px; border-radius: 50%;
+  background: var(--color-accent-text); transition: transform 0.2s;
+}
+.toggle-btn.active .toggle-knob { transform: translateX(18px); }
+.toggle-label { font-size: 12px; color: var(--color-text-muted); }
+
+/* 快照备份 */
+.snapshot-create-area { margin-bottom: 16px; }
+.snapshot-create-form { display: flex; flex-direction: column; gap: 8px; }
+.snapshot-input {
+  width: 100%; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px;
+  font-family: inherit; outline: none; box-sizing: border-box;
+}
+.snapshot-input:focus { border-color: var(--color-accent); }
+.snapshot-create-actions { display: flex; gap: 8px; }
+.snapshot-empty { text-align: center; padding: 32px 0; }
+.snapshot-empty .empty-icon { color: var(--color-text-muted); margin-bottom: 12px; }
+.snapshot-empty .empty-text { font-size: 13px; color: var(--color-text-disabled); margin: 0 0 4px; }
+.snapshot-empty .empty-hint { font-size: 11px; color: var(--color-text-muted); margin: 0; }
+
+/* WebDAV 表单 */
+.webdav-form { display: flex; flex-direction: column; gap: 14px; margin-top: 16px; }
+.webdav-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+.webdav-actions .btn { flex: 0 0 auto; }
+.result-error { color: var(--color-danger) !important; }
+
+.ai-hint { font-size: 12px; color: var(--color-text-disabled); margin: 10px 0 0; line-height: 1.5; }
+
+/* 多档案列表 */
+.ai-profiles { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 16px; }
+.ai-profile-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px;
+  cursor: pointer; background: var(--color-bg-tertiary); transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+}
+.ai-profile-item:hover { border-color: var(--color-border-light); }
+.ai-profile-item.active { border-color: var(--color-accent); background: var(--color-accent-bg); }
+.ai-profile-info { flex: 1; cursor: pointer; min-width: 0; }
+.ai-profile-actions { display: flex; gap: 2px; align-items: center; flex-shrink: 0; }
+.ai-profile-edit {
+  background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: 6px; flex-shrink: 0;
+}
+.ai-profile-edit:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.ai-profile-name { flex: 1; font-size: 13px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-profile-model { font-size: 11px; color: var(--color-text-muted); }
+.ai-profile-del {
+  background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
+  display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
+  border-radius: 6px; flex-shrink: 0;
+}
+.ai-profile-del:hover { color: var(--color-danger); background: rgba(232,76,76,0.1); }
+.ai-profile-add {
+  display: flex; align-items: center; justify-content: center; gap: 4px;
+  padding: 7px; border: 1px dashed var(--color-border); background: transparent;
+  color: var(--color-text-secondary); border-radius: 8px; cursor: pointer;
+  font-family: inherit; font-size: 12px; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+}
+.ai-profile-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
+
+/* 配置编辑模态框 */
+.ai-modal-overlay {
+  position: fixed; inset: 0; z-index: 20000;
+  background: rgba(0,0,0,0.45); display: flex;
+  align-items: center; justify-content: center;
+}
+.ai-modal {
+  background: var(--color-bg-primary); border: 1px solid var(--color-border);
+  border-radius: 12px; width: 520px; max-width: 90vw; max-height: 85vh;
+  display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,0.25);
+}
+.ai-modal-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--color-border); flex-shrink: 0;
+}
+.ai-modal-header h3 { font-size: 15px; font-weight: 600; margin: 0; color: var(--color-text-primary); }
+.ai-modal-close {
+  background: none; border: none; color: var(--color-text-muted);
+  font-size: 20px; cursor: pointer; width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center; border-radius: 6px;
+}
+.ai-modal-close:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
+.ai-modal-body { padding: 14px 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
+.ai-modal-footer {
+  display: flex; gap: 8px; justify-content: flex-end;
+  padding: 12px 18px; border-top: 1px solid var(--color-border); flex-shrink: 0;
+}
+.ai-edit-bar { display: flex; gap: 8px; margin: 4px 0; }
+
+/* 小型 toggle 开关（思考模式） */
+.toggle-btn-sm {
+  position: relative; width: 36px; height: 20px; border-radius: 10px;
+  border: none; background: var(--color-bg-active); cursor: pointer;
+  transition: background 0.15s; padding: 0; flex-shrink: 0;
+}
+.toggle-btn-sm.active { background: var(--color-accent); }
+.toggle-btn-sm .toggle-knob {
+  position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+  border-radius: 50%; background: var(--color-text-secondary);
+  transition: transform 0.15s, background 0.15s;
+}
+.toggle-btn-sm.active .toggle-knob {
+  transform: translateX(16px); background: var(--color-accent-text);
+}
+.toggle-field { flex-direction: row !important; align-items: center; gap: 8px; }
+
+/* 表单字段（AI 配置与 WebDAV 复用） */
+.field { display: flex; flex-direction: column; gap: 6px; }
+.field-label { font-size: 12px; color: var(--color-text-muted); font-weight: 500; }
+.field-input {
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: 6px;
+  padding: 9px 12px; color: var(--color-text-primary); font-size: 13px;
+  outline: none; transition: border-color 0.15s;
+  font-family: inherit;
+}
+.field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-border); }
+.field-input::placeholder { color: var(--color-text-disabled); }
+.field-textarea textarea { resize: vertical; min-height: 60px; font-family: inherit; }
+.field-row { display: flex; gap: 12px; }
+.field-half { flex: 1; min-width: 0; }
+.snapshot-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.snapshot-item {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 14px; background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: 8px; transition: border-color 0.12s;
+}
+.snapshot-item:hover { border-color: var(--color-border-light); }
+.snapshot-item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.snapshot-item-label { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
+.snapshot-item-note { font-size: 11px; color: var(--color-text-muted); }
+.snapshot-item-meta { font-size: 11px; color: var(--color-text-disabled); }
+.snapshot-item-actions { display: flex; gap: 4px; flex-shrink: 0; }
+.snapshot-item-actions .action-btn {
+  width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+  border: none; background: transparent; color: var(--color-text-muted); border-radius: 6px;
+  cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+}
+.snapshot-item-actions .action-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.snapshot-item-actions .restore-btn:hover { color: var(--color-accent); }
+.snapshot-item-actions .action-btn.danger:hover { color: var(--color-danger); background: rgba(255,77,79,0.1); }
+.snapshot-item-actions .action-btn.enabled-btn { color: var(--color-accent); }
+
+/* 占位 */
+.placeholder-title { font-size: 16px; color: var(--color-text-primary); margin: 0 0 8px; }
+.placeholder-hint { font-size: 13px; color: var(--color-text-disabled); margin: 0; }
+
+
+
+/* 滑入动画 */
+.panel-slide-enter-active,
+.panel-slide-leave-active {
+  transition: opacity 0.2s ease;
+}
+.panel-slide-enter-active .settings-sidebar,
+.panel-slide-leave-active .settings-sidebar {
+  transition: transform 0.2s ease;
+}
+.panel-slide-enter-from,
+.panel-slide-leave-to {
+  opacity: 0;
+}
+.panel-slide-enter-from .settings-sidebar,
+.panel-slide-leave-to .settings-sidebar {
+  transform: translateX(-100%);
+}
+.field-row { display: flex; gap: 12px; align-items: center; }
+.field-hint { font-size: 11px; color: var(--color-text-disabled); }
+.field-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--color-accent); }
+</style>

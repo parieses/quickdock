@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link rel="stylesheet" href="../common.css">
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <span class="p-label">纯前端插件</span>
+    <div class="p-spacer"></div>
+    <span id="statusLabel" class="p-muted">就绪</span>
+  </div>
+
+  <div class="p-body" style="padding:10px;flex-direction:column;gap:8px">
+    <p class="p-muted">此插件无后端代码。所有 JS 直接在 iframe 中运行，无需与 QuickDock 通信即可完成功能。</p>
+    <input id="textInput" class="p-input" placeholder="输入文字试试…" oninput="updateOutput()">
+    <div class="p-card" id="outputArea">等待输入…</div>
+  </div>
+</div>
+<script>
+function $(id) { return document.getElementById(id) }
+
+function updateOutput() {
+  var val = $('textInput').value
+  $('outputArea').textContent = val ? '你输入了: ' + val : '等待输入…'
+  $('statusLabel').textContent = val.length + ' 字符'
+}
+
+// 初始化：接收主题/语言
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'plugin:init' && e.data.data) {
+    if (e.data.data.theme) document.documentElement.setAttribute('data-theme', e.data.data.theme)
+    if (e.data.data.locale) document.documentElement.setAttribute('lang', e.data.data.locale)
+  }
+})
+</script>
+</body>
+</html>

@@ -1,0 +1,243 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0  # 需要完整历史，才能生成"相对上个 tag 的更新说明"
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Task runner
+        # CI 构建统一走仓库 Taskfile（单一事实来源），避免构建参数在 CI 与 Taskfile 间漂移
+        shell: pwsh
+        run: |
+          go install github.com/go-task/task/v3/cmd/task@latest
+          echo "$(go env GOPATH)/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+
+      - name: Install Wails3 CLI
+        # 版本从 go.mod 自动解析，与本地开发/构建严格一致（不再写死 alpha2.114）
+        shell: pwsh
+        run: |
+          $wailsVer = (Select-String -Path go.mod -Pattern 'wailsapp/wails/v3 ').Line.Trim().Split(' ')[1]
+          Write-Host "Installing wails3 $wailsVer (resolved from go.mod)"
+          go install github.com/wailsapp/wails/v3/cmd/wails3@$wailsVer
+          echo "$(go env GOPATH)/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8
+
+      - name: Install NSIS
+        shell: pwsh
+        run: choco install nsis -y --no-progress
+
+      - name: Extract version from tag
+        shell: pwsh
+        run: |
+          $ver = "$env:GITHUB_REF_NAME" -replace '^v', ''
+          echo "VERSION=$ver" >> $env:GITHUB_ENV
+          echo "Building version: $ver"
+
+      - name: 检查 tag 是否指向新提交
+        # 同一 commit 上挂多个 tag 时 git describe 只返回其中一个（v0.4.3/v0.4.4 同 commit → 返回 v0.4.3），
+        # 会导致 manifest 写 0.4.4 而 exe 里注入 0.4.3：更新后版本号不变、反复提示更新。
+        # 这里只告警不阻断（重跑同一 tag 的工作流是合法场景，版本号已由下方 APP_VERSION 显式指定）。
+        shell: pwsh
+        run: |
+          $prev = (git describe --tags --abbrev=0 "$env:GITHUB_REF^" 2>$null)
+          if ($prev) {
+            $cur = (git rev-list -n 1 $env:GITHUB_REF)
+            $pre = (git rev-list -n 1 $prev)
+            if ($cur -eq $pre) {
+              Write-Warning "当前 tag $env:GITHUB_REF_NAME 与上一个 tag $prev 指向同一提交($cur)：建议先提交新变更再打 tag"
+            }
+          }
+
+      - name: Build (via Taskfile)
+        # 前端/后端/syso/图标均由 Taskfile 驱动；版本号由 APP_VERSION 显式传入（= 触发工作流的 tag），
+        # 不再依赖 git describe（多 tag 同 commit 时会取错），保证与 manifest 的 $env:VERSION 同源。
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+        run: task build
+
+      - name: 校验构建注入版本号与 tag 一致
+        # 兜底断言：exe 内 main.appVersion 与 manifest version 必须相同，否则客户端会陷入
+        # "检测到新版本→下载→替换→重启后版本没变→再检测到新版本" 的死循环。
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          $resolved = ((task -s windows:version).Trim() -replace '^v', '')
+          Write-Host "Taskfile 解析版本=$resolved / tag 版本=$env:VERSION"
+          if ($resolved -ne $env:VERSION) {
+            throw "构建注入版本号($resolved) 与 tag($env:VERSION) 不一致，已中止发布，避免产出无法收敛的更新包"
+          }
+
+      - name: Generate WebView2 bootstrapper
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: wails3 generate webview2bootstrapper -dir build/windows/nsis
+
+      - name: Package NSIS installer
+        # 注意：NSIS 3.09 起默认安装目录从 "C:\Program Files (x86)\NSIS" 改为
+        # "C:\Program Files\NSIS"，choco 拉新版时会装到 64 位路径，
+        # 硬编码 (x86) 路径会导致 makensis.exe 找不到。这里动态探测。
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          Copy-Item bin/quickdock.exe build/windows/nsis/quickdock.exe
+          $mk = (Get-Command makensis.exe -ErrorAction SilentlyContinue).Source
+          if (-not $mk) {
+            foreach ($p in @("C:\Program Files\NSIS\makensis.exe", "C:\Program Files (x86)\NSIS\makensis.exe")) {
+              if (Test-Path $p) { $mk = $p; break }
+            }
+          }
+          if (-not $mk) { throw "makensis.exe not found. Install NSIS: choco install nsis -y" }
+          Write-Host "Using makensis: $mk"
+          # per-user 安装（user scope）：默认装到 $LOCALAPPDATA\Programs\QuickDock，
+          # 免 UAC，且程序目录普通权限可写 —— 是后续"就地替换免安装器"更新的前提。
+          # 与 build/windows/Taskfile.yml 的 INSTALL_SCOPE=user 默认值保持一致。
+          & $mk '-DWAILS_INSTALL_SCOPE=user' '-DREQUEST_EXECUTION_LEVEL=user' '-DINFO_PROJECTNAME=quickdock' '-DARG_WAILS_AMD64_BINARY=quickdock.exe' 'build\windows\nsis\project.nsi'
+          if ($LASTEXITCODE -ne 0) { throw "makensis failed with exit code $LASTEXITCODE" }
+          Remove-Item build/windows/nsis/quickdock.exe
+
+      - name: Stage portable raw binary
+        # 便携裸 exe：既是手动分发的便携版，也是"就地替换更新"的 payload——
+        # 下方 manifest 签名的是此裸 exe（而非安装器）。per-user 安装下程序目录
+        # 普通权限可写，应用端拿到该裸 exe 后由 Wails 更新框架 helper 就地覆盖自身。
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          Copy-Item bin/quickdock.exe bin/quickdock-amd64.exe
+
+      - name: Generate signed updater manifest
+        # 真正的安全机制：用 Ed25519 私钥对【裸 exe】quickdock-amd64.exe 签名，产出 manifest.json
+        # （含 sha512 摘要 + ed25519ph 签名）。应用端 endpoint provider 拉取此文件，
+        # 用内嵌的公钥验签（fail closed：签名不符直接报错、不安装），
+        # 下载完成后由 Wails updater helper 就地覆盖程序目录里的 quickdock.exe 完成升级
+        # （免安装器、免 UAC，见 services/update/update.go RestartApp）。
+        # 这能防"发布账号 / CI 被攻破"级别的供应链攻击，比单纯 SHA256 校验和更强。
+        # 必须设置仓库 Secret UPDATER_PRIVATE_KEY（私钥 PEM 全文），否则不生成 manifest、更新链路失效。
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        run: |
+          if ("${{ secrets.UPDATER_PRIVATE_KEY }}" -eq "") {
+            echo "ERROR: UPDATER_PRIVATE_KEY secret 未设置，无法生成签名 manifest，更新链路将失效。" ; exit 1
+          }
+          Set-Content -Path updater.key -Value "${{ secrets.UPDATER_PRIVATE_KEY }}"
+          $tag = "$env:GITHUB_REF_NAME"
+          $urlPrefix = "https://github.com/parieses/quickdock/releases/download/$tag"
+
+          # 生成更新说明（写入文件，失败不影响流水线）：取上一个 tag 到当前 tag 的提交主题。
+          # 说明不参与签名（签名仅覆盖裸 exe 的 sha512 摘要），因此即使为空也只是"无内容"，不会破坏更新。
+          $notesFile = "release_notes.md"
+          $notes = ""
+          try {
+            $prev = (git describe --tags --abbrev=0 HEAD~1 2>$null)
+            if ($prev) { $notes = (git log "$prev..HEAD" --pretty=format:"- %s`n") }
+            else { $notes = (git log --pretty=format:"- %s`n" -n 30) }
+          } catch { $notes = "" }
+          Set-Content -Path $notesFile -Value $notes -Encoding utf8
+
+          wails3 updater manifest `
+            -version "$env:VERSION" `
+            -key updater.key `
+            -url-prefix "$urlPrefix" `
+            -notes-file $notesFile `
+            -output manifest.json `
+            bin/quickdock-amd64.exe
+          Remove-Item updater.key -ErrorAction SilentlyContinue
+          Remove-Item $notesFile -ErrorAction SilentlyContinue
+
+      - name: Upload Release Assets
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "bin/quickdock-amd64-installer.exe,bin/quickdock-amd64.exe,manifest.json"
+          generateReleaseNotes: true
+          allowUpdates: true
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          artifactErrorsFailBuild: false
+
+  build-macos:
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25'
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Install Task runner
+        # CI 构建统一走仓库 Taskfile（单一事实来源）
+        run: |
+          go install github.com/go-task/task/v3/cmd/task@latest
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Install Wails3 CLI
+        # 版本从 go.mod 自动解析，与本地开发/构建严格一致
+        run: |
+          wailsVer=$(grep 'wailsapp/wails/v3 ' go.mod | head -1 | awk '{print $2}')
+          echo "Installing wails3 $wailsVer (resolved from go.mod)"
+          go install github.com/wailsapp/wails/v3/cmd/wails3@$wailsVer
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Extract version from tag
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          echo "VERSION=$ver" >> "$GITHUB_ENV"
+          echo "Building version: $ver"
+
+      - name: Build + package styled .dmg (official wails3 DMG task)
+        # macos-latest 自带 Xcode CLT（含 macOS SDK），CGO_ENABLED=1 + GOOS=darwin 原生编译可行。
+        # darwin:package:dmg 走官方 DMG 链路：build（真实验证 P0/P3 darwin 化能否编过）
+        # → package(.app, ad-hoc 签名) → create:dmg（wails3 tool package --format dmg + Wails DMG 库，
+        # 支持背景图/卷图标，见 https://v3.wails.io/guides/build/macos/#dmg-installer）。
+        # 说明：无 Developer ID 证书，.app 为 ad-hoc 签名，.dmg 仅本机/信任设备可用；正式分发需接
+        # Developer ID 签名 + notarization（docs/mac-support-plan.md）。mac 分发单元是 .dmg，不上传裸二进制。
+        working-directory: ${{ github.workspace }}
+        run: task darwin:package:dmg
+
+      - name: Rename dmg for release
+        working-directory: ${{ github.workspace }}
+        run: |
+          cd bin
+          mv quickdock.dmg "quickdock-darwin-arm64.dmg"
+
+      - name: Upload Release Assets
+        uses: ncipollo/release-action@v1
+        with:
+          artifacts: "bin/quickdock-darwin-arm64.dmg"
+          generateReleaseNotes: true
+          allowUpdates: true
+          omitBodyDuringUpdate: true
+          omitNameDuringUpdate: true
+          artifactErrorsFailBuild: false

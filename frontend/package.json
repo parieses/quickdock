@@ -1,0 +1,31 @@
+{
+  "name": "frontend",
+  "private": true,
+  "version": "0.2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "bindings": "cd .. && wails3 generate bindings -ts -i -clean",
+    "build:dev": "vue-tsc && vite build --minify false --mode development",
+    "build": "vue-tsc && vite build --mode production",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@floating-ui/vue": "^2.0.1",
+    "@lucide/vue": "^1.23.0",
+    "@types/dompurify": "^3.0.5",
+    "@wailsio/runtime": "3.0.0-alpha.96",
+    "dompurify": "^3.4.12",
+    "marked": "^18.0.6",
+    "pinia": "^3.0.4",
+    "pinyin-pro": "^3.28.1",
+    "vue": "^3.2.45",
+    "vue-i18n": "^11.1.10"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "typescript": "~5.9.3",
+    "vite": "^8.0.5",
+    "vue-tsc": "~2.2.12"
+  }
+}

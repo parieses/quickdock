@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link rel="stylesheet" href="../common.css">
+</head>
+<body>
+<div class="p-app">
+  <div class="p-toolbar">
+    <button class="p-btn p-btn-primary" onclick="execTask()">执行</button>
+    <div class="p-spacer"></div>
+    <span id="statusLabel" class="p-muted">就绪</span>
+  </div>
+
+  <div class="p-body" style="padding:10px;flex-direction:column;gap:8px">
+    <input id="cmdInput" class="p-input" placeholder="输入命令参数…" onkeydown="if(event.key==='Enter')execTask()">
+    <div id="outputArea" class="p-card p-output" style="flex:1;overflow:auto;white-space:pre-wrap;font-family:var(--font-mono);font-size:12px">等待执行…</div>
+  </div>
+</div>
+<script>
+var $ = function(id) { return document.getElementById(id) }
+
+function pluginExec(command, data) {
+  return new Promise(function(resolve, reject) {
+    var id = Date.now() + '_' + Math.random().toString(36).slice(2, 6)
+    var timeout = setTimeout(function() {
+      window.removeEventListener('message', handler)
+      reject(new Error('响应超时，请检查插件状态'))
+    }, 10000)
+    var handler = function(e) {
+      if (e.data && e.data.type === 'plugin:result') {
+        window.removeEventListener('message', handler)
+        clearTimeout(timeout)
+        if (e.data.error) { reject(new Error(e.data.error)) }
+        else { resolve(e.data.data) }
+      }
+    }
+    window.addEventListener('message', handler)
+    window.parent.postMessage({
+      type: 'plugin:execute',
+      id: id,
+      command: command,
+      input: { text: $('cmdInput').value || '' }
+    }, '*')
+  })
+}
+
+function execTask() {
+  $('statusLabel').textContent = '执行中…'
+  $('outputArea').textContent = '请求中…'
+  pluginExec('do-something', {}).then(function(data) {
+    var text = data && (data.display || data.text || data.result || JSON.stringify(data, null, 2))
+    $('outputArea').textContent = text
+    $('statusLabel').textContent = '✅ 完成'
+  }).catch(function(err) {
+    $('outputArea').textContent = '❌ ' + err.message
+    $('statusLabel').textContent = '❌ 失败'
+  })
+}
+
+// 初始化
+window.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'plugin:init' && e.data.data) {
+    if (e.data.data.theme) document.documentElement.setAttribute('data-theme', e.data.data.theme)
+    if (e.data.data.locale) document.documentElement.setAttribute('lang', e.data.data.locale)
+    if (e.data.data.text) $('cmdInput').value = e.data.data.text
+  }
+})
+</script>
+</body>
+</html>
