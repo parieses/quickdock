@@ -58,16 +58,59 @@ jobs:
       - name: 检查 tag 是否指向新提交
         # 同一 commit 上挂多个 tag 时 git describe 只返回其中一个（v0.4.3/v0.4.4 同 commit → 返回 v0.4.3），
         # 会导致 manifest 写 0.4.4 而 exe 里注入 0.4.3：更新后版本号不变、反复提示更新。
-        # 这里只告警不阻断（重跑同一 tag 的工作流是合法场景，版本号已由下方 APP_VERSION 显式指定）。
+        # 这里只做告警：重跑同一 tag 的工作流、历史重置后首个提交打 tag 都是合法场景，
+        # 真正的版本号正确性由下方「校验构建注入版本号与 tag 一致」步骤断言。
+        #
+        # 踩过的坑（勿回退）：
+        #  1. 根提交没有父提交，`git describe "refs/tags/x^"` 报 bad revision 返回 128；
+        #  2. GitHub 的 pwsh 包装默认 $ErrorActionPreference='Stop'，PS7 下原生命令非 0 退出
+        #     会直接抛终止错误（PSNativeCommandUseErrorActionPreference）→ 整步 exit 1；
+        #  3. 包装脚本末尾还会 `exit $LASTEXITCODE`，所以光捕获不够，必须显式把退出码归零。
+        # 因此：步骤级 continue-on-error + 内部降级 Continue + 末尾显式 exit 0，三重保险。
         shell: pwsh
+        continue-on-error: true
         run: |
-          $prev = (git describe --tags --abbrev=0 "$env:GITHUB_REF^" 2>$null)
-          if ($prev) {
-            $cur = (git rev-list -n 1 $env:GITHUB_REF)
-            $pre = (git rev-list -n 1 $prev)
-            if ($cur -eq $pre) {
-              Write-Warning "当前 tag $env:GITHUB_REF_NAME 与上一个 tag $prev 指向同一提交($cur)：建议先提交新变更再打 tag"
-            }
+          $ErrorActionPreference = 'Continue'
+          if (Test-Path variable:\PSNativeCommandUseErrorActionPreference) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+          $global:LASTEXITCODE = 0
+
+          # 用 --parents 取父提交列表，避免 "<ref>^" 在根提交上报 bad revision。
+          # 输出格式：<自身sha> [<父sha> ...]
+          $parts = @((git rev-list --parents -n 1 "$env:GITHUB_REF" 2>$null) -split '\s+' | Where-Object { $_ })
+          if ($parts.Count -lt 2) {
+            Write-Host "当前 tag $env:GITHUB_REF_NAME 位于根提交（无父提交），跳过同 commit 多 tag 检查。"
+            exit 0
+          }
+          $cur = $parts[0]
+          $prev = (git describe --tags --abbrev=0 $parts[1] 2>$null)
+          if (-not $prev) {
+            Write-Host "父提交 $($parts[1]) 之前没有历史 tag，跳过同 commit 多 tag 检查。"
+            exit 0
+          }
+          $pre = (git rev-list -n 1 $prev 2>$null)
+          if ($cur -and $pre -and ($cur -eq $pre)) {
+            Write-Warning "当前 tag $env:GITHUB_REF_NAME 与上一个 tag $prev 指向同一提交($cur)：建议先提交新变更再打 tag"
+          } else {
+            Write-Host "tag $env:GITHUB_REF_NAME → $cur（上一个 tag $prev → $pre），无同 commit 叠 tag 问题"
+          }
+          $global:LASTEXITCODE = 0
+          exit 0
+
+      - name: 校验构建注入版本号与 tag 一致
+        # 兜底断言：exe 内 main.appVersion 必须与 manifest version 相同，否则客户端会陷入
+        # "检测到新版本→下载→替换→重启后版本没变→再检测到新版本" 的死循环。
+        # 放在 Build 之前，不一致就直接中止，不浪费十来分钟构建时间。
+        shell: pwsh
+        working-directory: ${{ github.workspace }}
+        env:
+          APP_VERSION: ${{ github.ref_name }}
+        run: |
+          $resolved = ((task -s windows:version) | Select-Object -Last 1).Trim() -replace '^v', ''
+          Write-Host "Taskfile 解析版本=$resolved / tag 版本=$env:VERSION"
+          if ($resolved -ne $env:VERSION) {
+            throw "构建注入版本号($resolved) 与 tag($env:VERSION) 不一致，已中止发布，避免产出无法收敛的更新包"
           }
 
       - name: Build (via Taskfile)
@@ -78,18 +121,6 @@ jobs:
         env:
           APP_VERSION: ${{ github.ref_name }}
         run: task build
-
-      - name: 校验构建注入版本号与 tag 一致
-        # 兜底断言：exe 内 main.appVersion 与 manifest version 必须相同，否则客户端会陷入
-        # "检测到新版本→下载→替换→重启后版本没变→再检测到新版本" 的死循环。
-        shell: pwsh
-        working-directory: ${{ github.workspace }}
-        run: |
-          $resolved = ((task -s windows:version).Trim() -replace '^v', '')
-          Write-Host "Taskfile 解析版本=$resolved / tag 版本=$env:VERSION"
-          if ($resolved -ne $env:VERSION) {
-            throw "构建注入版本号($resolved) 与 tag($env:VERSION) 不一致，已中止发布，避免产出无法收敛的更新包"
-          }
 
       - name: Generate WebView2 bootstrapper
         shell: pwsh

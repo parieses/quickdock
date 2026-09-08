@@ -29,6 +29,7 @@
     - [🔧 全局热键（可自定义）](#-全局热键可自定义)
     - [🖥️ 系统命令](#️-系统命令)
   - [🔧 环境管理](#-环境管理)
+  - [🔄 自动更新](#-自动更新)
   - [快速开始](#快速开始)
     - [系统要求](#系统要求)
     - [下载安装](#下载安装)
@@ -271,6 +272,50 @@ internal/env/          # 引擎层（纯库，跨平台 _windows / _darwin / _un
 ├── sql*.go  postgresql*.go                                       # 数据库（MySQL/MariaDB 共用 SQLRuntime）
 └── git.go  composer.go  ffmpeg.go  mailpit.go  frpc.go  gh.go  mkcert.go  # 工具类运行时
 ```
+
+---
+
+## 🔄 自动更新
+
+### 更新流程（Windows：免安装器就地替换）
+
+应用启动后按 GitHub 稳定地址拉取**签名更新清单**并验签：
+
+```
+https://github.com/parieses/quickdock/releases/latest/download/manifest.json
+```
+
+| 阶段 | 行为 |
+|------|------|
+| 检查 | 拉取 manifest.json，ed25519ph 验签 + sha512 摘要校验；版本号比当前高才提示 |
+| 下载 | 下载清单里的裸 `quickdock-amd64.exe` 并校验摘要（走内置多源镜像回退） |
+| 重启 | 点击「重启更新」→ `Updater.Restart()` 派生 helper 进程 → 主进程退出 |
+| 替换 | helper 在父进程退出后备份旧 exe → 覆盖新 exe（失败自动回滚）→ 重新拉起应用 |
+
+整个过程**不弹 UAC、不跑安装器**，用户数据、数据库、插件、运行时目录全部保留（单文件应用，前端资源已 `go:embed` 进 exe）。
+
+### 前提与限制
+
+- **首次安装请保持默认用户目录**：NSIS 安装器默认 `INSTALL_SCOPE=user` → 落在 `%LOCALAPPDATA%\Programs\快启坞`（无需管理员即可被替换）。若改到 `C:\Program Files\...`，写文件受 UAC 保护，就地替换会失败（回退到手动下载安装包）。
+- **macOS**：当前仍走 DMG 手动覆盖安装（就地替换方案待接 Sparkle）。
+- 更新只替换主程序 exe，**不会**改动 `~/.quickdock` 下任何数据；跨版本配置迁移由数据库迁移逻辑负责。
+
+### 相关文件
+
+| 路径 | 说明 |
+|------|------|
+| `~/.quickdock/update-guard.json` | 更新守卫：记录「已替换但版本号未变化」的目标版本，连续 2 次未生效则自动忽略该版本；删除此文件可强制重试 |
+| `~/.quickdock/logs/quickdock-YYYY-MM-DD.log` | 主日志（含 `[update]` 前缀的更新链路记录） |
+| `%TEMP%\wails-update-<pid>.log` | helper 替换日志（备份 / 覆盖 / 回滚结果） |
+
+### 版本号与发版纪律
+
+- `main.appVersion` 由 **Taskfile 的 `APP_VERSION`** 注入（本地取 `git describe --tags --abbrev=0`，CI 由 `release.yml` 显式传触发 tag）。
+- **必须先有新 commit 再打 tag**：同一 commit 叠多个 tag 时 `git describe` 只返回其中一个，会导致 manifest 版本号 > exe 内注入版本号 → 客户端反复提示同一个更新（CI 已在构建前断言两者一致，不一致直接中止发布）。
+- 本地自检：`task windows:version` 输出的版本号必须等于你要发布的 tag。
+
+---
+
 ## 快速开始
 
 ### 系统要求
@@ -281,10 +326,13 @@ internal/env/          # 引擎层（纯库，跨平台 _windows / _darwin / _un
 
 ### 下载安装
 
-1. 从 [Releases](https://github.com/parieses/quickdock/releases) 下载最新版本
-2. 解压到任意目录（推荐 `%LOCALAPPDATA%\QuickDock`）
+1. 从 [Releases](https://github.com/parieses/quickdock/releases) 下载 `quickdock-amd64-installer.exe`
+2. 双击安装（免管理员权限，默认装到用户目录 `%LOCALAPPDATA%\Programs\快启坞`）
 3. 运行 `QuickDock.exe`
 4. 任务栏托盘出现 QuickDock 图标即启动成功
+
+> **建议保持默认安装路径**：就地替换更新需要对该目录有写权限。若改到 `C:\Program Files\...`，每次更新都要过 UAC，自动更新会失败（只能手动下载安装包覆盖）。
+> 也可以直接下载 `quickdock-amd64.exe` 当便携版用：只要放在**当前用户可写**的目录（非 `Program Files`），同样支持就地替换更新。
 
 ### 首次使用
 
@@ -322,6 +370,7 @@ wails3 generate bindings -ts -i -clean
 | `wails3 build` | 生产构建（含前端构建 + 绑定生成） |
 | `task build` | 通过 Taskfile 构建 |
 | `task run` | 直接运行已构建的应用 |
+| `task windows:version` | 输出最终注入到 `main.appVersion` 的版本号（发版前自检用） |
 
 **注意**：开发版与正式版共用同一 SQLite 数据库与单实例锁，同一时刻一台机器只能运行一个 QuickDock 实例；正式发布仍走 `wails3 build`（生产 tag 注入版本号与图标 / 清单）。
 
@@ -332,6 +381,8 @@ wails3 generate bindings -ts -i -clean
 - 已安装插件：`~/.quickdock/plugins/`
 - 应用配置：`%APPDATA%/QuickDock/`
 - Node / DSH 运行时：便携 Node 与 dsh 安装于 `~/.quickdock/runtime/node`、`~/.quickdock/dsh`，数据与用户 profile 复用 `~/.dsh`
+- 更新守卫：`~/.quickdock/update-guard.json`（连续 2 次替换后版本号未变化则忽略该版本，删除可强制重试）
+- 日志：`~/.quickdock/logs/quickdock-YYYY-MM-DD.log`（helper 替换日志在 `%TEMP%\wails-update-<pid>.log`）
 
 ---
 
