@@ -164,8 +164,8 @@ var (
 			{ID: "minio", Name: "dl.min.io 官方", Build: minioURL("https://dl.min.io/server/minio/release/windows-amd64/minio.exe", "https://dl.min.io/server/minio/release/darwin-{arch}/minio", "")},
 		}},
 		// frpc：frp 内网穿透客户端（fatedier/frp）。本地以 `frpc -c frpc.toml` 运行，
-		// 连接远端 frps 服务器；本身无固定监听端口（出站连接），故作为「工具型」运行时：
-		// 可安装 + 可编辑 frpc.toml（通用 ConfigProvider），不接入 ServiceController 启停。
+		// 连接远端 frps 服务器；本身无固定监听端口（出站连接），运行状态按子进程存活判定
+		// （svcMgr），已接入 ServiceController 启停 + ConfigProvider 编辑 + LogProvider 日志。
 		RuntimeFrpc: {display: "frpc", group: GroupTool, versions: []string{"0.71.0", "0.70.1", "0.69.0"}, versURL: "https://api.github.com/repos/fatedier/frp/releases?per_page=100", versParse: parseFrpcVersions, versHTMLFallbackParse: parseFrpcVersionsHTML, fallbackHTMLURL: "https://github.com/fatedier/frp/releases", sources: []Source{
 			{ID: "fatedier", Name: "fatedier/frp (GitHub)", Build: frpcURL("https://github.com/fatedier/frp/releases/download/v{version}/frp_{version}_windows_amd64.zip", "https://github.com/fatedier/frp/releases/download/v{version}/frp_{version}_darwin_{arch}.tar.gz", "")},
 		}},

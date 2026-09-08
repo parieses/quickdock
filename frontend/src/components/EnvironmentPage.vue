@@ -52,6 +52,9 @@ import {
   EnvRabbitMQEnableMgmt,
   EnvRabbitMQDisableMgmt,
   EnvRabbitMQIsMgmtEnabled,
+  EnvCertStatus,
+  EnvCertInstallRoot,
+  EnvCertIssue,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import SettingsDSH from './SettingsDSH.vue'
@@ -207,6 +210,11 @@ const RUNTIME_COLORS: Record<string, string> = {
 }
 function avatarColor(id: string): string {
   return RUNTIME_COLORS[id] || 'var(--color-accent)'
+}
+// 资源面板里把运行时 key 映射为展示名（runtimes 列表未加载时回退原 key）
+function runtimeName(id: string): string {
+  const r = runtimes.value.find((x) => x.id === id)
+  return r ? r.name : id
 }
 // 每个运行时的官方品牌图标（内联 SVG，白色填充，配合上方品牌色圆形背景）。
 // 32×32 viewBox；cat-avatar 28px / detail-avatar 40px 都可直接缩放。
@@ -416,6 +424,75 @@ function failState(r: RuntimeInfo, e: any) {
   s.installing = false
   toast.error(s.message)
 }
+
+
+// ---- 证书一键签发（mkcert）：内联区块（状态 + 信任根 + 签发）。
+// 证书是 mkcert 运行时的专属能力，区块随选中 mkcert 时展示（见模板 selected.id==='mkcert'）。
+const certModal = reactive<{
+  status: { exe: boolean; rootTrusted: boolean; message: string } | null
+  hosts: string
+  name: string
+  outDir: string
+  busy: boolean
+  result: string
+  error: string
+}>({
+  status: null,
+  hosts: 'localhost',
+  name: 'localhost',
+  outDir: '',
+  busy: false,
+  result: '',
+  error: '',
+})
+async function loadCertStatus() {
+  try {
+    certModal.status = unwrap(await EnvCertStatus())
+  } catch (e) {
+    certModal.error = getErrorMessage(e)
+  }
+}
+// 切到 mkcert 分类时刷新证书区块状态（含根 CA 信任情况）
+function ensureCertLoaded() {
+  if (selectedId.value === 'mkcert') loadCertStatus()
+}
+async function certInstallRoot() {
+  certModal.busy = true
+  certModal.error = ''
+  try {
+    unwrap(await EnvCertInstallRoot())
+    toast.success(t('certRootInstalled'))
+    await loadCertStatus()
+  } catch (e) {
+    certModal.error = getErrorMessage(e)
+  } finally {
+    certModal.busy = false
+  }
+}
+async function certPickDir() {
+  const dir = unwrap<string | null>(await PickFolderPath(t('certPickDir')))
+  if (dir) certModal.outDir = dir
+}
+async function certIssue() {
+  const hosts = certModal.hosts.split(/[\s,，]+/).filter(Boolean)
+  if (!certModal.outDir) {
+    toast.error(t('certNeedDir'))
+    return
+  }
+  certModal.busy = true
+  certModal.result = ''
+  certModal.error = ''
+  try {
+    const res = unwrap<{ cert: string; key: string }>(await EnvCertIssue(certModal.outDir, certModal.name || 'localhost', hosts))
+    if (res) certModal.result = res.cert + '\n' + res.key
+    toast.success(t('certIssued'))
+  } catch (e) {
+    certModal.error = getErrorMessage(e)
+  } finally {
+    certModal.busy = false
+  }
+}
+
 
 // versionInput: 绑定到当前选中运行时的版本号，读写都经过 ui[state] 保证一致性
 const versionInput = computed({
@@ -1319,10 +1396,11 @@ onMounted(() => {
   load()
   loadHTTPServers()
   loadConfigSupport(selectedId.value) // 初始选中运行时的配置编辑入口
+  ensureCertLoaded()                   // 若初始选中即 mkcert，预载证书区块状态
   document.addEventListener('click', onDocClick)
   off = Events.On('quickdock:env:progress', onProgress)
-  // 后台重扫完成（启动扫描 / 手动刷新按钮）→ 重新读取持久化缓存
-  offRefreshed = Events.On('quickdock:env:refreshed', () => load())
+  // 后台重扫完成（启动扫描 / 手动刷新按钮 / 安装完成后）→ 重新读取持久化缓存
+  offRefreshed = Events.On('quickdock:env:refreshed', () => { load(); ensureCertLoaded() })
   timer = window.setInterval(pollStatus, 3000)
   pollStatus()
 })
@@ -1334,6 +1412,8 @@ watch(selectedId, (id) => {
   } else {
     configSupported.value = false
   }
+  // 切到 mkcert 时拉取证书区块状态
+  if (id === 'mkcert') ensureCertLoaded()
   // Git 区块切换时拉取状态表
   loadGitInfo()
 })
@@ -1488,6 +1568,50 @@ const s = currentRuntimeState
             </div>
           </div>
         </header>
+
+        <!-- 本地可信证书签发（mkcert 专属能力）：随 mkcert 分类内联展示 -->
+        <section v-if="selected.id === 'mkcert'" class="detail-block cert-panel">
+          <div class="block-head">
+            <span class="block-title">{{ t('certTitle') }}</span>
+            <span class="block-count cert-sub">{{ t('certSubtitle') }}</span>
+          </div>
+
+          <div v-if="!certModal.status?.exe" class="env-msg error cert-msg">{{ certModal.status?.message || t('certExeMissing') }}</div>
+          <template v-else>
+            <div class="cert-root-line">
+              <span>{{ t('certRootStatus') }}</span>
+              <span v-if="certModal.status?.rootTrusted" class="badge ok">{{ t('certRootTrusted') }}</span>
+              <span v-else class="badge warn">{{ t('certRootUntrusted') }}</span>
+              <button v-if="!certModal.status?.rootTrusted" class="op-btn small" :disabled="certModal.busy" @click="certInstallRoot()">
+                {{ certModal.busy ? t('certTrusting') : t('certTrustBtn') }}
+              </button>
+            </div>
+
+            <div class="cert-grid">
+              <label class="cert-label">{{ t('certHosts') }}</label>
+              <input v-model="certModal.hosts" class="env-input" :placeholder="t('certHostsPh')" />
+              <label class="cert-label">{{ t('certName') }}</label>
+              <input v-model="certModal.name" class="env-input" placeholder="localhost" />
+              <label class="cert-label">{{ t('certOutDir') }}</label>
+              <div class="cert-dir-row">
+                <input v-model="certModal.outDir" class="env-input" placeholder="C:\path\to\certs" />
+                <button class="op-btn" @click="certPickDir()">{{ t('certPick') }}</button>
+              </div>
+            </div>
+
+            <p v-if="certModal.error" class="env-msg error cert-msg">{{ certModal.error }}</p>
+            <div class="cert-actions">
+              <button class="env-install-btn" :class="{ busy: certModal.busy }" :disabled="certModal.busy" @click="certIssue()">
+                {{ certModal.busy ? t('certIssuing') : t('certIssueBtn') }}
+              </button>
+              <template v-if="certModal.result">
+                <span class="cert-result-label">{{ t('certResult') }}</span>
+                <textarea readonly class="env-textarea mono cert-result" rows="2" :value="certModal.result"></textarea>
+              </template>
+            </div>
+            <p class="cert-hint">{{ t('certHint') }}</p>
+          </template>
+        </section>
 
         <!-- Git 状态表：版本 / 路径 / SSH / Git LFS -->
         <section v-if="selected.id === 'git'" class="detail-block">
@@ -1863,6 +1987,7 @@ const s = currentRuntimeState
         </table>
       </div>
     </div>
+
 
     <!-- PHP 配置弹窗：php.ini / 禁用函数 / 错误日志 / 扩展 -->
     <div v-if="phpModal.open" class="modal-overlay" @click.self="phpModal.open = false">
@@ -2305,6 +2430,29 @@ const s = currentRuntimeState
 .op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
 .op-btn.danger:hover { background: rgba(216, 44, 32, 0.12); color: var(--color-danger); border-color: var(--color-danger); }
 .op-btn:disabled { opacity: 0.4; cursor: default; }
+.op-btn.small { padding: 2px 9px; font-size: 11px; }
+.op-btn.primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
+.op-btn.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
+.badge.ok { background: rgba(67, 160, 71, 0.12); color: var(--color-success); }
+.badge.warn { background: rgba(251, 140, 0, 0.12); color: var(--color-warning); }
+
+
+/* ---- 证书签发面板 ---- */
+.cert-root-line { display: flex; align-items: center; gap: 10px; margin: 10px 0; font-size: 13px; color: var(--color-text-secondary); }
+.cert-root-line .badge { flex: none; }
+.cert-root-line .op-btn { margin-left: auto; }
+.cert-dir-row { display: flex; gap: 6px; margin-bottom: 10px; }
+.cert-dir-row .env-input { flex: 1; }
+.cert-msg { margin: 8px 0; word-break: break-all; }
+.cert-hint { font-size: 11px; color: var(--color-text-muted); margin: 10px 0 0; }
+.cert-sub { font-weight: 400; color: var(--color-text-muted); font-size: 12px; }
+.cert-grid { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px 12px; margin: 10px 0 4px; }
+.cert-label { font-size: 12px; color: var(--color-text-secondary); text-align: right; white-space: nowrap; }
+.cert-actions { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.cert-result { flex: 1; min-width: 220px; }
+.cert-result-label { font-size: 12px; color: var(--color-text-secondary); align-self: center; white-space: nowrap; }
+.cert-grid .cert-dir-row { margin: 0; min-width: 0; }
+
 
 /* 操作列下拉菜单 */
 .menu-trigger { display: inline-flex; align-items: center; gap: 4px; }

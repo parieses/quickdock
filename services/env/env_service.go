@@ -353,3 +353,48 @@ func (s *EnvironmentService) EnvLogGet(runtime, version string) *services.ApiRes
 	}
 	return services.Ok(log)
 }
+
+// EnvCertStatus 返回 mkcert 一键签发的前置状态：
+//   - ExeAvailable：是否已装可用 mkcert（决定前端提示先安装还是可直接签发）
+//   - RootTrusted：本地根 CA 是否已安装到系统信任（决定「信任根」按钮是否需要）
+func (s *EnvironmentService) EnvCertStatus() *services.ApiResult {
+	if s.App.Env == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	exeOK := false
+	rootOK := false
+	var msg string
+	if _, err := s.App.Env.MkcertExe(); err == nil {
+		exeOK = true
+		if ok, rerr := s.App.Env.CertCARootTrusted(); rerr == nil && ok {
+			rootOK = true
+		}
+	} else {
+		msg = err.Error()
+	}
+	return services.Ok(map[string]interface{}{"exe": exeOK, "rootTrusted": rootOK, "message": msg})
+}
+
+// EnvCertInstallRoot 信任 mkcert 本地根 CA（等价 mkcert -install，幂等）。
+func (s *EnvironmentService) EnvCertInstallRoot() *services.ApiResult {
+	if s.App.Env == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	if err := s.App.Env.CertInstallRoot(); err != nil {
+		return services.FailMsg(err.Error())
+	}
+	return services.Ok(nil)
+}
+
+// EnvCertIssue 用 mkcert 为 hosts 一键签发本地可信证书到 outDir。
+// name 为证书名（产 <name>-cert.pem / <name>-key.pem）；返回含 cert/key 绝对路径的 map。
+func (s *EnvironmentService) EnvCertIssue(outDir, name string, hosts []string) *services.ApiResult {
+	if s.App.Env == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	res, err := s.App.Env.CertIssue(outDir, name, hosts)
+	if err != nil {
+		return services.FailMsg(err.Error())
+	}
+	return services.Ok(res)
+}

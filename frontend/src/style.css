@@ -86,14 +86,14 @@
 
 /* ==================== CSS 变量 — 浅色主题 ==================== */
 [data-theme="light"] {
-  --color-bg-primary: #f5f6f8;
-  --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #eef0f3;
-  --color-bg-hover: #e7e9ee;
-  --color-bg-active: #dde0e7;
-  --color-bg-overlay: rgba(0, 0, 0, 0.1);
-  --color-surface: #ffffff;
-  --color-surface-elevated: #f0f2f5;
+  --color-bg-primary: #f4f3f0;
+  --color-bg-secondary: #fbfaf7;
+  --color-bg-tertiary: #ebe9e5;
+  --color-bg-hover: #e7e4df;
+  --color-bg-active: #ddd9d3;
+  --color-bg-overlay: rgba(40, 38, 33, 0.12);
+  --color-surface: #faf9f6;
+  --color-surface-elevated: #f0eeea;
   --color-text-primary: #1f2329;
   --color-text-secondary: #51565e;
   --color-text-muted: #888d96;

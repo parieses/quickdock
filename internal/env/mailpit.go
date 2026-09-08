@@ -185,7 +185,7 @@ func (m *MailpitRuntime) Start(ctx context.Context, version string, onLog func(s
 		onLog("启动 Mailpit " + version + " …")
 	}
 	return svcMgr.start(RuntimeMailpit, version, exe, wd,
-		[]string{"--smtp", fmt.Sprintf("%d", mailpitSmtpPort), "--listen", "127.0.0.1:" + fmt.Sprintf("%d", mailpitDefaultPort), "--database", m.dataDir(version)}, m.LogPath(version), onLog)
+		[]string{"--smtp", "127.0.0.1:" + fmt.Sprintf("%d", mailpitSmtpPort), "--listen", "127.0.0.1:" + fmt.Sprintf("%d", mailpitDefaultPort), "--database", m.dataDir(version)}, m.LogPath(version), onLog)
 }
 
 func (m *MailpitRuntime) LogPath(version string) string {
