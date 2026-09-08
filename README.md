@@ -307,14 +307,15 @@ https://github.com/parieses/quickdock/releases/latest/download/manifest.json
 
 - **首次安装请保持默认用户目录**：NSIS 安装器默认 `INSTALL_SCOPE=user` → 落在 `%LOCALAPPDATA%\Programs\快启坞`（无需管理员即可被替换）。若改到 `C:\Program Files\...`，写文件受 UAC 保护，就地替换会失败（回退到手动下载安装包）。
 - **macOS（双架构）**：每个 release 同时产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64` 两个包（CI 用 matrix 在原生 runner 上各自编译，零交叉风险）。
-  - **首次安装**：下载对应架构的 `.dmg`，打开后把 `快启坞.app` 拖到 **`~/Applications`**（用户目录，普通权限可写——这是后续就地替换更新的前提，与 Windows 的 per-user 思路一致）。**不要**留在下载目录或从 dmg 直接运行（会触发 App Translocation，导致更新"假成功"）。
+  - **首次安装**：下载对应架构的 `.dmg`，打开后把 `quickdock.app` 拖到 **`~/Applications`**（用户目录，普通权限可写——这是后续就地替换更新的前提，与 Windows 的 per-user 思路一致）。**不要**留在下载目录或从 dmg 直接运行（会触发 App Translocation，导致更新"假成功"）。
+    > 磁盘上的 bundle 名是 `quickdock.app`（取自 Taskfile 的 `APP_NAME`）；「快启坞」只是 `Info.plist` 里的显示名，访达中看到的名字与文件名不同属正常现象。Windows 侧相反，安装目录用的是产品名：`%LOCALAPPDATA%\Programs\快启坞`。
   - **自动更新**：机制与 Windows 完全相同——manifest 里另含 `quickdock-darwin-<arch>.zip`（整包 `.app` 压缩），应用端发现新版本后**手动点「重启更新」**，由 Wails helper 退出后整包替换 `.app` 并重新拉起。无 Developer ID 证书时为 ad-hoc 签名，仅本机/信任设备可用；**正式分发需补 Developer ID 签名 + 公证**（详见 `docs/mac-update-sparkle-analysis.md`）。Sparkle 仅在与 Sparkle 生态 / delta 增量 / 提权替换 `/Applications` 有强需求时才引入，当前不采用。
   - **首次安装后解除 Gatekeeper 拦截（无开发者账号时必做）**：从 Release 下载的 `.app` 默认带隔离属性，双击若提示「无法打开，因为无法验证开发者」，二选一：
     ```bash
     # 方式一：终端执行一次（推荐装到 ~/Applications 时无需 sudo）
-    xattr -dr com.apple.quarantine ~/Applications/快启坞.app
+    xattr -dr com.apple.quarantine ~/Applications/quickdock.app
     # 若你装到了 /Applications（需管理员密码）：
-    sudo xattr -dr com.apple.quarantine /Applications/快启坞.app
+    sudo xattr -dr com.apple.quarantine /Applications/quickdock.app
     ```
     ```bash
     # 方式二：图形界面 —— 系统设置 → 隐私与安全性 → 看到被拦截的「快启坞」，点「仍要打开」

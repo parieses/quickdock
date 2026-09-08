@@ -256,7 +256,17 @@ jobs:
   # ─────────────────────────────────────────────────────────────
   publish-manifest:
     needs: [build-windows, build-macos]
-    runs-on: ubuntu-latest
+    # ⚠️ 勿改回 ubuntu-latest：本 job 需要 wails3 CLI（`wails3 updater manifest` 签名生成 manifest.json），
+    # 而 `go install .../cmd/wails3` 在 Linux 上会连带编译 internal/operatingsystem，
+    # 该包用 cgo + pkg-config 依赖 gtk4 / webkitgtk-6.0：
+    #   Package gtk4 was not found in the pkg-config search path → go install 直接 exit 1。
+    # Windows/macOS runner 上 CLI 无此依赖，故这里选 windows-latest（比 mac runner 便宜、与 build-windows 同环境已验证）。
+    # 若确要回到 ubuntu，必须先 `sudo apt-get install -y libgtk-4-dev libwebkitgtk-6.0-dev`（多一步 apt，且依赖包名稳定性）。
+    runs-on: windows-latest
+    defaults:
+      run:
+        # 沿用 bash（Windows runner 自带 Git Bash），保持脚本与 mac job 写法一致
+        shell: bash
 
     steps:
       - name: Checkout
@@ -269,17 +279,21 @@ jobs:
         with:
           go-version: '1.25'
 
-      - name: Install Task runner
-        run: |
-          go install github.com/go-task/task/v3/cmd/task@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+      # 注意：本 job 不需要 Task runner（不跑 Taskfile，只调用 wails3 updater manifest）
 
       - name: Install Wails3 CLI
         run: |
+          set -euo pipefail
           wailsVer=$(grep 'wailsapp/wails/v3 ' go.mod | head -1 | awk '{print $2}')
           echo "Installing wails3 $wailsVer (resolved from go.mod)"
           go install github.com/wailsapp/wails/v3/cmd/wails3@$wailsVer
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+          # Windows runner + Git Bash：GITHUB_PATH 里的 "C:\...\go/bin" 混合分隔符转换不可靠，
+          # 因此额外导出绝对路径 $WAILS3 供后续步骤直接调用（双保险，不依赖 PATH 生效）。
+          gopath="$(go env GOPATH)"
+          if command -v cygpath >/dev/null 2>&1; then gopath="$(cygpath -u "$gopath")"; fi
+          echo "$gopath/bin" >> "$GITHUB_PATH"
+          echo "WAILS3=$gopath/bin/wails3.exe" >> "$GITHUB_ENV"
+          "$gopath/bin/wails3.exe" version || true
 
       - name: Extract version from tag
         run: |
@@ -322,7 +336,7 @@ jobs:
             git log --pretty=format="- %s%n" -n 30 > "$notesFile"
           fi
 
-          wails3 updater manifest \
+          "${WAILS3:-wails3}" updater manifest \
             -version "$VERSION" \
             -key updater.key \
             -url-prefix "$urlPrefix" \

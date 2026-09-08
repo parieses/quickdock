@@ -161,12 +161,17 @@ tasks:
 
   package:zip:
     summary: Zips the `.app` bundle as the in-place update payload (per-arch)
+    platforms: [darwin]
     deps:
       - task: package
         vars:
           ARCH: '{{.ARCH}}'
     cmds:
-      - cd "{{.BIN_DIR}}" && zip -r -q "{{.APP_NAME}}-darwin-{{.ARCH}}.zip" "{{.APP_NAME}}.app"
+      # 必须用 ditto 而非 `zip -r`：ditto 保留符号链接、扩展属性与 ad-hoc 签名结构，
+      # `zip -r` 会解引用符号链接并丢弃 xattr，解包后 Gatekeeper/codesign 校验可能直接失败
+      # （Sparkle 官方同样要求 ditto 打包 .app）。这个 zip 是 macOS 就地替换更新的 payload，不能凑合。
+      - cd "{{.BIN_DIR}}" && rm -f "{{.APP_NAME}}-darwin-{{.ARCH}}.zip"
+      - cd "{{.BIN_DIR}}" && ditto -c -k --sequesterRsrc --keepParent "{{.APP_NAME}}.app" "{{.APP_NAME}}-darwin-{{.ARCH}}.zip"
     vars:
       ARCH: '{{.ARCH | default ARCH}}'
 
@@ -203,8 +208,17 @@ tasks:
         fi
       - cp "{{.BIN_DIR}}/{{.APP_NAME}}" "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/MacOS"
       - cp build/darwin/Info.plist "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents"
-      # 注入版本号（替换 Info.plist 里的占位 0.2.0）。sed -i '' 在 macOS 与 Linux 均作原地编辑。
-      - sed -i '' 's#<string>0\.2\.0</string>#<string>{{.APP_VERSION}}</string>#g' "{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist"
+      # 注入版本号（替换 Info.plist 里的占位 0.2.0）。
+      # 注意：BSD sed（macOS）原地编辑要求 `-i ''`，GNU sed（Linux/交叉编译场景）则会把 '' 当文件名报错，
+      # 因此按 `sed --version` 探测分流，两边都能跑。
+      - |
+        PLIST="{{.BIN_DIR}}/{{.APP_NAME}}.app/Contents/Info.plist"
+        EXPR='s#<string>0\.2\.0</string>#<string>{{.APP_VERSION}}</string>#g'
+        if sed --version >/dev/null 2>&1; then
+          sed -i "$EXPR" "$PLIST"
+        else
+          sed -i '' "$EXPR" "$PLIST"
+        fi
       - task: '{{if eq OS "darwin"}}codesign:adhoc{{else}}codesign:skip{{end}}'
 
   codesign:adhoc:
