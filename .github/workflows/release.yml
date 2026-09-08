@@ -288,12 +288,15 @@ jobs:
           echo "Installing wails3 $wailsVer (resolved from go.mod)"
           go install github.com/wailsapp/wails/v3/cmd/wails3@$wailsVer
           # Windows runner + Git Bash：GITHUB_PATH 里的 "C:\...\go/bin" 混合分隔符转换不可靠，
-          # 因此额外导出绝对路径 $WAILS3 供后续步骤直接调用（双保险，不依赖 PATH 生效）。
-          gopath="$(go env GOPATH)"
-          if command -v cygpath >/dev/null 2>&1; then gopath="$(cygpath -u "$gopath")"; fi
-          echo "$gopath/bin" >> "$GITHUB_PATH"
-          echo "WAILS3=$gopath/bin/wails3.exe" >> "$GITHUB_ENV"
-          "$gopath/bin/wails3.exe" version || true
+          # 因此额外导出绝对路径 $WAILS3 供后续步骤直接调用（双保险，不依赖 PATH 是否生效）。
+          # 注意两者路径风格不同：GITHUB_PATH 要 Windows 风格（runner 拼进系统 PATH），
+          # $WAILS3 要 POSIX 风格（后续步骤都在 bash 里执行）。
+          winGopath="$(go env GOPATH)"
+          posixGopath="$winGopath"
+          if command -v cygpath >/dev/null 2>&1; then posixGopath="$(cygpath -u "$winGopath")"; fi
+          echo "${winGopath}\\bin" >> "$GITHUB_PATH"
+          echo "WAILS3=$posixGopath/bin/wails3.exe" >> "$GITHUB_ENV"
+          "$posixGopath/bin/wails3.exe" version || true
 
       - name: Extract version from tag
         run: |
