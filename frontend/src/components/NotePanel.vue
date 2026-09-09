@@ -1,15 +1,17 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { StickyNote, Check, Loader2 } from '@lucide/vue'
+import { StickyNote, Check, Loader2, MessageCircleQuestion } from '@lucide/vue'
 import { GetNote, SaveNote } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
+import { aiDraft, navigateTo } from '../composables/bridge'
 
 const { t } = useI18n()
 
 const note = ref('')
 const loaded = ref(false)
 const status = ref<'idle' | 'saving' | 'saved'>('idle')
+const areaRef = ref<HTMLTextAreaElement | null>(null)
 let timer: ReturnType<typeof setTimeout> | null = null
 let pending = ''
 
@@ -49,6 +51,19 @@ onUnmounted(() => {
     SaveNote(note.value).catch(() => {})
   }
 })
+
+// 问 AI：优先取划选文本，否则取整篇笔记，注入 AI 输入框并跳转
+function askAI() {
+  const ta = areaRef.value
+  let text = ''
+  if (ta && ta.selectionStart !== ta.selectionEnd) {
+    text = ta.value.slice(ta.selectionStart, ta.selectionEnd)
+  }
+  if (!text.trim()) text = note.value
+  if (!text.trim()) return
+  aiDraft.value = text
+  navigateTo.value?.('ai')
+}
 </script>
 
 <template>
@@ -58,14 +73,21 @@ onUnmounted(() => {
         <StickyNote :size="14" />
         {{ t('noteTitle') }}
       </span>
-      <span :class="['note-status', status]">
-        <Loader2 v-if="status === 'saving'" :size="12" class="spin" />
-        <Check v-else-if="status === 'saved'" :size="12" />
-        <template v-if="status === 'saving'">{{ t('noteSaving') }}</template>
-        <template v-else-if="status === 'saved'">{{ t('noteSaved') }}</template>
-      </span>
+      <div class="note-actions">
+        <button class="note-ask" :disabled="!note.trim()" :title="t('noteAskAI')" @click="askAI">
+          <MessageCircleQuestion :size="13" />
+          {{ t('noteAskAI') }}
+        </button>
+        <span :class="['note-status', status]">
+          <Loader2 v-if="status === 'saving'" :size="12" class="spin" />
+          <Check v-else-if="status === 'saved'" :size="12" />
+          <template v-if="status === 'saving'">{{ t('noteSaving') }}</template>
+          <template v-else-if="status === 'saved'">{{ t('noteSaved') }}</template>
+        </span>
+      </div>
     </div>
     <textarea
+      ref="areaRef"
       v-model="note"
       class="note-area"
       :placeholder="t('notePlaceholder')"
@@ -86,6 +108,13 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .note-title { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.note-actions { display: flex; align-items: center; gap: 10px; }
+.note-ask {
+  display: flex; align-items: center; gap: 4px;
+  font-size: 12px; padding: 3px 8px; border-radius: 6px; cursor: pointer;
+  background: var(--color-accent); color: var(--color-accent-text); border: none;
+}
+.note-ask:disabled { opacity: 0.4; cursor: not-allowed; }
 .note-status { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-text-disabled); }
 .note-status.saved { color: var(--color-success); }
 .spin { animation: note-spin 1s linear infinite; }

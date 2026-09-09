@@ -17,6 +17,14 @@ func StartConPty(exe string, args []string, dir string) (*ConPty, error) {
 	return nil, errors.New("ConPTY 仅支持 Windows")
 }
 
+// StartConPtyWithEnv 非 Windows 平台返回错误，调用方应回退到常规启动。
+func StartConPtyWithEnv(exe string, args []string, dir string, env []string) (*ConPty, error) {
+	return nil, errors.New("ConPTY 仅支持 Windows")
+}
+
+// Resize 非 Windows 为空操作。
+func (c *ConPty) Resize(cols, rows int) error { return nil }
+
 // Pid 始终返回 0（非 Windows 不会真正创建伪控制台进程）。
 func (c *ConPty) Pid() int { return 0 }
 

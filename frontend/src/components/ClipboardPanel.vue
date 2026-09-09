@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight } from '@lucide/vue'
-import { CreateSnippet } from '../../bindings/quickdock/services/appservice'
+import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus } from '@lucide/vue'
+import { CreateTodo, CreateNoteDoc } from '../../bindings/quickdock/services/appservice'
 import {
   ListClipboardEntries,
   PasteClipboardEntry,
@@ -347,48 +347,47 @@ async function clearClipboard() {
   }
 }
 
-// ---- 自动分类 & 添加到片段 ----
-function autoCategorize(text: string): string {
-  const type = detectType(text)
-  if (type) return type
-  if (text.trim().length > 100) return 'template'
-  return 'other'
+// ---- 一键转存：剪贴板条目 → 待办 / 笔记 ----
+
+const saveMenuId = ref('')
+
+function toggleSaveMenu(entry: ClipboardEntry) {
+  saveMenuId.value = saveMenuId.value === entry.id ? '' : entry.id
 }
 
-const catLabels: Record<string, string> = {
-  email: 'snippetCatEmail',
-  url: 'snippetCatUrl',
-  phone: 'snippetCatPhone',
-  json: 'snippetCatJson',
-  code: 'snippetCatCode',
-  template: 'snippetCatTemplate',
-  other: 'snippetCatOther',
+function closeSaveMenu() { saveMenuId.value = '' }
+
+// 用首行非空内容做标题，避免把整段长文本塞进待办/笔记标题
+function firstLineAsTitle(text: string, max = 40): string {
+  const line = (text || '').split('\n').map(s => s.trim()).find(Boolean) || ''
+  return line.length > max ? line.slice(0, max) + '…' : line
 }
 
-function guessKeyword(text: string, length = 20): string {
-  const line = text.trim().split('\n')[0].replace(/\s+/g, ' ')
-  if (line.length <= length) return line
-  return line.substring(0, length)
+function feedback(res: any, fallbackMsg: string) {
+  if (res && res.code === 0) toast?.success?.(res.msg || fallbackMsg)
+  else if (res) toast?.error?.(getErrorMessage(res))
 }
 
-async function handleAddToSnippet(entry: ClipboardEntry) {
+async function saveAsTodo(entry: ClipboardEntry) {
+  closeSaveMenu()
   if (entry.contentType !== 'text' || !entry.textContent) return
   const content = entry.textContent.trim()
-  const catId = autoCategorize(content)
-  const category = t(catLabels[catId] || 'snippetCatOther')
-  const keyword = guessKeyword(content)
   try {
-    const res = await CreateSnippet(keyword, content, category)
-    if (res && res.code === 0) {
-      // 后端可能返回友好提示（如重复保存），优先使用
-      toast?.success?.(res.msg || t('snippetAddedMsg'))
-    } else if (res) {
-      toast?.error?.(getErrorMessage(res))
-    }
+    // 标题取首行，全文放备注，避免标题栏塞满长文本
+    feedback(await CreateTodo(firstLineAsTitle(content), 'medium', '', content, '', '', '', '', ''), t('clipboardSavedTodo'))
   } catch (e) {
-    if (toast?.error) {
-      toast.error(getErrorMessage(e))
-    }
+    toast?.error?.(getErrorMessage(e))
+  }
+}
+
+async function saveAsNote(entry: ClipboardEntry) {
+  closeSaveMenu()
+  if (entry.contentType !== 'text' || !entry.textContent) return
+  const content = entry.textContent.trim()
+  try {
+    feedback(await CreateNoteDoc('', firstLineAsTitle(content, 30), content, 'markdown'), t('clipboardSavedNote'))
+  } catch (e) {
+    toast?.error?.(getErrorMessage(e))
   }
 }
 
@@ -482,9 +481,12 @@ onMounted(() => {
   Events.On('clipboard:shown', clearSearch)
   Events.On('clipboard:before-hide', resetScrollOnHide)
   document.addEventListener('keydown', onPanelKeydown)
+  // 转存菜单：点击面板任意位置即收起（按钮自身用 @click.stop 拦截）
+  document.addEventListener('click', closeSaveMenu)
 })
 
 onUnmounted(() => {
+  document.removeEventListener('click', closeSaveMenu)
   if (refreshTimer.value !== null) {
     clearInterval(refreshTimer.value)
   }
@@ -613,14 +615,25 @@ onUnmounted(() => {
             <span>{{ entry.note }}</span>
           </div>
         </div>
-        <button
-          v-if="entry.contentType === 'text'"
-          class="snippet-btn"
-          :title="t('addToSnippet')"
-          @click.stop="handleAddToSnippet(entry)"
-        >
-          <StickyNote :size="13" />
-        </button>
+        <div class="save-wrap">
+          <button
+            v-if="entry.contentType === 'text'"
+            class="snippet-btn"
+            :class="{ active: saveMenuId === entry.id }"
+            :title="t('clipboardSaveAs')"
+            @click.stop="toggleSaveMenu(entry)"
+          >
+            <StickyNote :size="13" />
+          </button>
+          <div v-if="saveMenuId === entry.id" class="save-menu" @click.stop>
+            <button class="save-menu-item" @click="saveAsTodo(entry)">
+              <ListTodo :size="13" /><span>{{ t('clipboardSaveTodo') }}</span>
+            </button>
+            <button class="save-menu-item" @click="saveAsNote(entry)">
+              <FilePlus :size="13" /><span>{{ t('clipboardSaveNote') }}</span>
+            </button>
+          </div>
+        </div>
         <button
           class="pin-btn"
           :class="{ pinned: entry.isPinned === 1 }"
@@ -873,6 +886,22 @@ onUnmounted(() => {
 }
 .pin-btn.pinned:hover { opacity: 1 !important; }
 
+.save-wrap { position: relative; display: inline-flex; }
+.save-menu {
+  position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
+  min-width: 132px; padding: 4px;
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+}
+.save-menu-item {
+  display: flex; align-items: center; gap: 8px; width: 100%;
+  padding: 6px 8px; font-size: 12px; cursor: pointer;
+  background: transparent; border: 0; border-radius: calc(var(--radius) - 2px);
+  color: var(--color-text-secondary); text-align: left;
+}
+.save-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .snippet-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;

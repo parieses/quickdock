@@ -225,6 +225,13 @@ const subtasksByParent = computed(() => {
 function subtasksOf(parentId: string): Todo[] {
   return subtasksByParent.value.get(parentId) || []
 }
+function subProgress(parentId: string): { done: number; total: number; pct: number } {
+  const subs = subtasksOf(parentId)
+  const total = subs.length
+  const done = subs.filter(s => s.done).length
+  const pct = total === 0 ? 0 : Math.round((done / total) * 100)
+  return { done, total, pct }
+}
 const addingSubFor = ref('')
 const newSubTitle = ref('')
 function toggleSubInput(todo: Todo) {
@@ -385,7 +392,8 @@ const cRecWeekdays = ref('')
 function openCreate() {
   cTitle.value = ''
   cPriority.value = 'none'
-  cDueDate.value = selectedDate.value
+  // 未指定日期时默认落在今天，避免新建的待办静默掉进「未排期」
+  cDueDate.value = selectedDate.value || todayStr.value
   cNote.value = ''
   cStart.value = ''
   cEnd.value = ''
@@ -658,6 +666,10 @@ onMounted(() => {
 
               <!-- 4.1 子任务（单层级 checklist）-->
               <div v-if="subtasksOf(todo.id).length || addingSubFor === todo.id" class="subtasks">
+                <div v-if="subtasksOf(todo.id).length" class="sub-progress">
+                  <div class="sub-progress-bar"><div class="sub-progress-fill" :style="{ width: subProgress(todo.id).pct + '%' }"></div></div>
+                  <span class="sub-progress-text">{{ subProgress(todo.id).done }}/{{ subProgress(todo.id).total }} ({{ subProgress(todo.id).pct }}%)</span>
+                </div>
                 <div v-for="st in subtasksOf(todo.id)" :key="st.id" :class="['sub-item', { done: st.done }]">
                   <button class="check sub-check" :class="{ checked: st.done }" @click="toggle(st)">
                     <Check v-if="st.done" :size="11" />
@@ -702,7 +714,7 @@ onMounted(() => {
                   <template v-for="tg in parseTags(card.tags)" :key="tg">
                     <span class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>
                   </template>
-                  <span v-if="subtasksOf(card.id).length" class="sub-badge">▸{{ subtasksOf(card.id).length }}</span>
+                  <span v-if="subtasksOf(card.id).length" class="sub-badge">▸{{ subProgress(card.id).done }}/{{ subProgress(card.id).total }}</span>
                 </div>
               </div>
               <div v-if="statusTodos(st).length === 0" class="kanban-empty">{{ t('todoKanbanEmpty') }}</div>
@@ -993,6 +1005,10 @@ onMounted(() => {
 
 /* 子任务（4.1）*/
 .todo-item { flex-wrap: wrap; }
+.sub-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+.sub-progress-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--color-bg-tertiary); overflow: hidden; }
+.sub-progress-fill { height: 100%; background: var(--color-accent); border-radius: 2px; transition: width var(--transition-fast); }
+.sub-progress-text { font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .subtasks { flex-basis: 100%; margin: 6px 0 2px 26px; display: flex; flex-direction: column; gap: 3px; }
 .sub-item { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
 .sub-item.done .sub-name { text-decoration: line-through; color: var(--color-text-disabled); }

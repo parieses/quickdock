@@ -2,12 +2,14 @@
 import { ref, computed, reactive, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser } from '@lucide/vue'
+import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote } from '@lucide/vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useFloatMenu } from '../composables/useFloatMenu'
+import { CreateNoteDoc } from '../../bindings/quickdock/services/appservice'
+import { aiDraft } from '../composables/bridge'
 import type { ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIProfilesResult } from '../types/ai'
@@ -377,6 +379,35 @@ async function copySelection() {
   await copy(text)
 }
 
+// 笔记 ↔ AI：AI 回复转存为笔记树里的一篇文档（与剪贴板「存为笔记」一致）。
+// 之前写的是「快捷笔记」（独立窗口那一份），主界面看不到，所以表现为「转存没生效」。
+function noteTitleOf(text: string, max = 30): string {
+  const line = (text || '').split('\n').map(s => s.trim()).find(Boolean) || ''
+  return line.length > max ? line.slice(0, max) + '…' : (line || t('aiSaveToNote'))
+}
+
+async function saveAsNote(content: string) {
+  if (!content || !content.trim()) return
+  try {
+    unwrap(await CreateNoteDoc('', noteTitleOf(content), content.trim(), 'markdown'))
+    toast.success(t('aiSavedToNote'))
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// 笔记 → AI：监听来自笔记面板的草稿，注入输入框并聚焦
+watch(aiDraft, (v) => {
+  if (v && v.trim()) {
+    input.value = v
+    aiDraft.value = ''
+    nextTick(() => {
+      const ta = document.querySelector('.ai-input') as HTMLTextAreaElement | null
+      ta?.focus()
+    })
+  }
+})
+
 function onDocMouseDown(e: MouseEvent) {
   const pop = document.querySelector('.ai-sel-copy')
   if (pop && pop.contains(e.target as Node)) return
@@ -489,9 +520,15 @@ onUnmounted(() => {
             </details>
             <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md" v-html="renderMarkdown(m.content)"></div>
             <div v-else class="ai-msg-content">{{ m.content }}</div>
-            <button v-if="m.content" class="ai-copy" @click="copy(m.content)" :title="t('copy')">
-              <Copy :size="12" /> {{ t('copy') }}
-            </button>
+            <!-- 操作按钮同一行：.ai-msg 是纵向 flex，不包一层的话每个按钮都会各占一行 -->
+            <div class="ai-msg-actions">
+              <button v-if="m.content" class="ai-copy" @click="copy(m.content)" :title="t('copy')">
+                <Copy :size="12" /> {{ t('copy') }}
+              </button>
+              <button v-if="m.role === 'assistant' && m.content" class="ai-copy" @click="saveAsNote(m.content)" :title="t('aiSaveToNote')">
+                <StickyNote :size="12" /> {{ t('aiSaveToNote') }}
+              </button>
+            </div>
           </div>
 
           <div v-if="reasoningText" class="ai-reasoning">
@@ -705,14 +742,18 @@ onUnmounted(() => {
   cursor: text;
 }
 .ai-msg.user .ai-msg-content { background: var(--color-accent); color: var(--color-accent-text); }
+.ai-msg-actions {
+  display: flex; align-items: center; gap: 6px;
+  flex-wrap: wrap;
+}
+.ai-msg.user .ai-msg-actions { justify-content: flex-end; }
 .ai-copy {
-  align-self: flex-start;
   display: flex; align-items: center; gap: 3px;
   background: none; border: none; color: var(--color-text-disabled);
   font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 4px;
 }
 .ai-copy:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.ai-msg.user .ai-copy { align-self: flex-end; color: rgba(255,255,255,0.7); }
+.ai-msg.user .ai-copy { color: rgba(255,255,255,0.7); }
 .ai-msg.user .ai-copy:hover { color: #fff; background: rgba(255,255,255,0.18); }
 /* 划词复制浮层（position/left/top 由 floating-ui 注入） */
 .ai-sel-copy {

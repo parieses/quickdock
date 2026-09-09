@@ -62,9 +62,8 @@ function scheduleDesc(t0: ScheduledTask): string {
   return ''
 }
 function humanInterval(sec: number): string {
-  if (sec % 3600 === 0) return (sec / 3600) + ' ' + t('sched_unit_hour')
-  if (sec % 60 === 0) return (sec / 60) + ' ' + t('sched_unit_min')
-  return sec + ' ' + t('sched_unit_sec')
+  const [v, u] = splitInterval(sec)
+  return v + ' ' + t('sched_unit_' + u)
 }
 function weekdayText(csv: string): string {
   if (!csv) return ''
@@ -101,7 +100,8 @@ const fHttpHeaders = ref('')
 const fHttpBody = ref('')
 const fKind = ref<string>('once')
 const fRunAt = ref('')               // datetime-local
-const fIntervalVal = ref(300)         // 秒
+const fIntervalVal = ref(5)           // 数值，配合 fIntervalUnit 换算成秒
+const fIntervalUnit = ref<'sec' | 'min' | 'hour' | 'day'>('min')
 const fTimeOfDay = ref('09:00')
 const fWeekdays = ref<number[]>([1, 2, 3, 4, 5])
 const fEnabled = ref(true)
@@ -121,7 +121,8 @@ function openCreate() {
   fHttpBody.value = ''
   fKind.value = 'once'
   fRunAt.value = ''
-  fIntervalVal.value = 300
+  fIntervalVal.value = 5
+  fIntervalUnit.value = 'min'
   fTimeOfDay.value = '09:00'
   fWeekdays.value = [1, 2, 3, 4, 5]
   fEnabled.value = true
@@ -140,9 +141,10 @@ function openEdit(t0: ScheduledTask) {
   fHttpBody.value = t0.httpBody
   fKind.value = t0.scheduleKind
   fRunAt.value = toInput(t0.runAt)
-  // 反解间隔
-  const sec = t0.intervalSec || 1800
-  fIntervalVal.value = Math.max(5, sec || 300)
+  // 反解间隔：优先落到能整除的最大单位，避免 86400 秒显示成 86400
+  const [v, u] = splitInterval(t0.intervalSec || 1800)
+  fIntervalVal.value = v
+  fIntervalUnit.value = u
   fTimeOfDay.value = (t0.timeOfDay || '09:00').slice(0, 5)
   fWeekdays.value = t0.weekdays ? t0.weekdays.split(',').filter(Boolean).map(Number) : []
   fEnabled.value = t0.enabled
@@ -156,8 +158,31 @@ function toggleWeekday(v: number) {
   else fWeekdays.value.push(v)
 }
 
+const INTERVAL_UNITS = [
+  { v: 'sec', mul: 1, min: 5 },
+  { v: 'min', mul: 60, min: 1 },
+  { v: 'hour', mul: 3600, min: 1 },
+  { v: 'day', mul: 86400, min: 1 },
+] as const
+
+// splitInterval 把秒拆成 (数值, 单位)：优先取能整除的最大单位
+function splitInterval(sec: number): [number, 'sec' | 'min' | 'hour' | 'day'] {
+  const s = Math.max(5, Math.floor(sec || 300))
+  for (let i = INTERVAL_UNITS.length - 1; i >= 0; i--) {
+    const u = INTERVAL_UNITS[i]
+    if (s % u.mul === 0) return [s / u.mul, u.v]
+  }
+  return [s, 'sec']
+}
+
+function unitMeta() {
+  return INTERVAL_UNITS.find(u => u.v === fIntervalUnit.value) ?? INTERVAL_UNITS[0]
+}
+
 function intervalVal(): number {
-  return Math.max(5, Math.floor(fIntervalVal.value || 300))
+  const n = Math.floor(fIntervalVal.value || 1)
+  const u = unitMeta()
+  return Math.max(5, n * u.mul)
 }
 
 function buildPayload(): ScheduledTask {
@@ -376,8 +401,13 @@ onMounted(refresh)
 
         <!-- interval -->
         <template v-else-if="fKind === 'interval'">
-          <label>{{ t('sched_interval') }}{{ t('sched_unit_sec') }}</label>
-          <input v-model.number="fIntervalVal" type="number" min="5" class="modal-input" />
+          <label>{{ t('sched_interval') }}</label>
+          <div class="interval-row">
+            <input v-model.number="fIntervalVal" type="number" :min="unitMeta().min" class="modal-input interval-num" />
+            <select v-model="fIntervalUnit" class="modal-input interval-unit">
+              <option v-for="u in INTERVAL_UNITS" :key="u.v" :value="u.v">{{ t('sched_unit_' + u.v) }}</option>
+            </select>
+          </div>
         </template>
 
         <!-- daily -->
@@ -435,6 +465,9 @@ onMounted(refresh)
   margin-bottom: var(--space-5); flex-shrink: 0;
 }
 .sched-header-actions { display: flex; align-items: center; gap: var(--space-2); }
+.interval-row { display: flex; align-items: center; gap: var(--space-2); }
+.interval-num { flex: 1 1 auto; min-width: 0; }
+.interval-unit { flex: 0 0 96px; width: 96px; }
 .sched-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
 .sched-title { font-size: 18px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
 .sched-sub { font-size: 12px; color: var(--color-text-disabled); }

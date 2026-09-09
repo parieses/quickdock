@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, FolderOpen, ExternalLink } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { unwrap } from '../utils/api'
 import { i18n } from '../i18n'
@@ -15,6 +15,7 @@ import SettingsAI from './SettingsAI.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsSync from './SettingsSync.vue'
 import SettingsTools from './SettingsTools.vue'
+import LogViewer from './LogViewer.vue'
 
 import {
   GetClipboardRetentionDays,
@@ -25,8 +26,6 @@ import {
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { GetAutoStart, SetAutoStart } from '../../bindings/quickdock/services/appservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
-
-import { OpenLogsDir, GetLogsInfo } from '../../bindings/quickdock/services/appservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
 import type { UpdateStatus } from '../../bindings/quickdock/services/update/models'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
@@ -55,6 +54,7 @@ const menuItems = computed(() => [
   { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
   { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
+  { key: 'logs',       label: t('navLogs'),           icon: ScrollText, desc: t('logsDesc') },
 ])
 
 // 左侧菜单分组：通用 / 数据与备份 / 服务与工具，扁平展示但用分组标题区分层级。
@@ -63,7 +63,7 @@ const menuGroups = computed(() => {
   const defs: { title: string; keys: string[] }[] = [
     { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys'] },
     { title: t('menuGroupData'), keys: ['data', 'sync', 'snapshot'] },
-    { title: t('menuGroupService'), keys: ['tools', 'ai'] },
+    { title: t('menuGroupService'), keys: ['tools', 'ai', 'logs'] },
   ]
   return defs
     .map((g) => ({ title: g.title, items: g.keys.map((k) => byKey[k]).filter(Boolean) }))
@@ -155,41 +155,10 @@ async function checkForUpdates() {
   }
 }
 
-// ---- 日志卡片：路径 + 打开目录 + 最近 50 行预览（带 I/W/E 色标）----
-const logsInfo = ref<{ dir: string; currentFile: string; recentLines: string[] } | null>(null)
-const logsExpanded = ref(false)
-const logsLoading = ref(false)
-
-async function loadLogs() {
-  if (logsInfo.value && logsInfo.value.recentLines.length > 0) return
-  logsLoading.value = true
-  try {
-    logsInfo.value = unwrap<any>(await GetLogsInfo(50)) || null
-  } catch (e: any) {
-    toast?.error?.(getErrorMessage(e))
-  } finally {
-    logsLoading.value = false
-  }
-}
-
-async function toggleLogsPreview() {
-  logsExpanded.value = !logsExpanded.value
-  if (logsExpanded.value) await loadLogs()
-}
-
-async function openLogsDir() {
-  try { await OpenLogsDir() } catch (e: any) { toast?.error?.(getErrorMessage(e)) }
-}
-
 function openUrl(url: string) {
   Browser.OpenURL(url).catch((e: any) => {
     console.error('[Settings] OpenURL:', e)
   })
-}
-
-function logLineClass(line: string): string {
-  const m = line.match(/\[([IWE])\]/)
-  return 'log-line log-' + (m ? m[1].toLowerCase() : 'i')
 }
 
 async function downloadUpdate() {
@@ -431,11 +400,14 @@ async function toggleAutoStart() {
 
         <!-- 右侧内容 -->
         <div class="settings-content">
-          <!-- 关于（含版本信息和更新检查） -->
+          <!-- 关于（版本信息 / 更新 / 诊断） -->
           <div v-if="activePage === 'about'" class="content-page content-left">
-            <div class="section">
-              <h3>{{ t('appName') }}</h3>
-              <p class="about-version">{{ t('version') }} {{ appVersion || '0.0.0' }}</p>
+            <!-- 产品信息 Hero -->
+            <div class="about-hero">
+              <div class="about-hero-main">
+                <h3 class="about-name">{{ t('appName') }}</h3>
+                <span class="about-badge">{{ t('version') }} {{ appVersion || '0.0.0' }}</span>
+              </div>
               <p class="about-desc">{{ t('appDesc') }}</p>
               <p class="about-tech">{{ t('aboutTech') }}</p>
               <div class="about-links">
@@ -453,6 +425,7 @@ async function toggleAutoStart() {
               <p class="about-copy">{{ t('aboutCopyright') }}</p>
             </div>
 
+            <!-- 更新 -->
             <div class="section">
               <h3 class="section-title">{{ t('update') }}</h3>
               <p class="section-desc">{{ t('updateCheckingAuto') }}</p>
@@ -491,34 +464,6 @@ async function toggleAutoStart() {
                   {{ t('updateRestart') }}
                 </button>
               </div>
-            </div>
-
-            <!-- 日志（全局排障入口） -->
-            <div class="section">
-              <h3 class="section-title">{{ t('logsTitle') }}</h3>
-              <p class="section-desc">{{ t('logsDesc') }}</p>
-              <div class="action-row" style="margin-top:12px">
-                <button class="btn btn-secondary" @click="openLogsDir">
-                  <FolderOpen :size="14" />
-                  {{ t('logsOpenDir') }}
-                </button>
-                <button class="btn btn-secondary" @click="toggleLogsPreview" :disabled="logsLoading">
-                  <RotateCcw v-if="logsLoading" :size="14" class="spinning" />
-                  {{ logsExpanded ? t('logsCollapse') : t('logsShowLines') }}
-                </button>
-              </div>
-              <div v-if="logsExpanded" class="logs-preview">
-                <div v-if="logsLoading">{{ t('loading') }}</div>
-                <template v-else>
-                  <div
-                    v-for="(ln, i) in logsInfo?.recentLines || []"
-                    :key="i"
-                    :class="logLineClass(ln)"
-                  >{{ ln }}</div>
-                  <p v-if="!logsInfo || logsInfo.recentLines.length === 0" class="section-desc logs-empty">{{ t('logsEmpty') }}</p>
-                </template>
-              </div>
-              <p v-if="logsInfo?.currentFile" class="logs-path">{{ logsInfo.currentFile }}</p>
             </div>
           </div>
 
@@ -612,6 +557,11 @@ async function toggleAutoStart() {
           <!-- 打开工具管理 -->
           <div v-else-if="activePage === 'tools'" class="content-page content-left">
             <SettingsTools :visible="activePage === 'tools'" />
+          </div>
+
+          <!-- 日志查看器（从导航栏迁入的专属设置项） -->
+          <div v-else-if="activePage === 'logs'" class="content-page content-logs">
+            <LogViewer />
           </div>
 
           <!-- 其他设置页占位（旧路由兼容） -->
@@ -735,8 +685,19 @@ async function toggleAutoStart() {
 .content-empty .empty-icon { font-size: 48px; margin-bottom: 16px; }
 .content-empty .empty-text { font-size: 14px; }
 
-/* 关于（含版本信息） */
-.about-version { font-size: 13px; color: var(--color-accent); margin: 0 0 16px; }
+/* 关于 */
+.about-hero {
+  padding: 18px 18px 16px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-secondary);
+}
+.about-hero-main { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.about-name { margin: 0; font-size: 18px; font-weight: 700; color: var(--color-text-primary); }
+.about-badge {
+  font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px;
+  background: var(--color-accent); color: var(--color-accent-text);
+}
 .about-desc { font-size: 14px; color: var(--color-text-muted); margin: 0 0 4px; }
 .about-tech { font-size: 12px; color: var(--color-text-disabled); margin: 0 0 20px; }
 .about-links { display: flex; flex-direction: column; gap: 6px; margin: 0 0 16px; }
@@ -821,6 +782,8 @@ async function toggleAutoStart() {
 
 /* 数据与备份 */
 .content-left { align-items: flex-start; justify-content: flex-start; }
+/* 日志查看器：撑满设置内容区，由查看器自身管理滚动 */
+.content-logs { height: 100%; padding: 0; align-items: stretch; justify-content: flex-start; }
 .content-inner { width: 100%; max-width: 600px; }
 .section { width: 100%; max-width: 600px; }
 .section + .section { margin-top: 28px; }
@@ -847,22 +810,6 @@ async function toggleAutoStart() {
 .btn-secondary:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
 .action-row { margin-top: 8px; }
 .result-hint { font-size: 12px; color: var(--color-accent); margin: 8px 0 0; }
-
-/* 日志卡片 */
-.logs-preview {
-  margin-top: 10px; max-height: 300px; overflow: auto;
-  font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.55;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border); border-radius: 8px;
-  padding: 10px 12px; white-space: pre-wrap; word-break: break-all;
-  user-select: text;
-}
-.log-line { margin: 0; }
-.log-i { color: var(--color-text-secondary); }
-.log-w { color: var(--color-warning, #d97706); }
-.log-e { color: var(--color-danger); font-weight: 600; }
-.logs-path { margin-top: 8px; font-size: 11px; color: var(--color-text-disabled); word-break: break-all; user-select: text; }
-.logs-empty { margin: 4px 0; }
 
 /* 切换开关 */
 .toggle-btn {

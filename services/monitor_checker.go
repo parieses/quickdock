@@ -34,7 +34,8 @@ var monitorRegexCache sync.Map // pattern → *regexp.Regexp
 // 监控增删改/启停时用 monitorWake 立即唤醒重排。
 func (a *AppService) StartMonitorChecker() {
 	a.monitorWake = make(chan struct{}, 1)
-	go a.monitorLoop()
+	// 常驻循环：panic 落盘后不重抛，避免一次异常让整个监控静默停摆
+	go logger.CapturePanicInGo("monitor:loop", a.monitorLoop)()
 }
 
 func (a *AppService) wakeMonitorChecker() {

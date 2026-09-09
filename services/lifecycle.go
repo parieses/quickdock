@@ -161,6 +161,10 @@ func (a *AppService) ServiceShutdown() error {
 	if a.DSH != nil {
 		a.DSH.Stop()
 	}
+	// 关闭内嵌终端会话，避免 shell 子进程残留
+	if a.Term != nil {
+		a.Term.KillAll()
+	}
 	// 先停三个常驻调度 goroutine（提醒/定时任务/网站监控），避免 DB 关闭后它们仍触发访问
 	if a.schedulerQuit != nil {
 		a.StopSchedulers()

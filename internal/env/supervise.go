@@ -137,6 +137,8 @@ func (m *Manager) ReconcileEnabled(ctx context.Context) {
 // 随应用生命周期运行；ctx 取消即退出。
 func (m *Manager) StartWatchdog(ctx context.Context) {
 	go func() {
+		// 常驻循环：panic 落盘后不重抛，避免一次异常让服务自愈整体停摆
+		defer logger.RecoverToLog("env:watchdog")
 		failCount := map[Runtime]int{}
 		lastAttempt := map[Runtime]time.Time{}
 		ticker := time.NewTicker(watchdogInterval)

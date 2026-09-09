@@ -58,6 +58,7 @@ import {
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import SettingsDSH from './SettingsDSH.vue'
+import PortPage from './PortPage.vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 
@@ -70,8 +71,10 @@ const props = defineProps<{ initialSection?: string }>()
 // 直接在环境管理内复用 SettingsDSH 组件承载安装/配置/服务/插件/更新。
 const HARNESS_KEY = 'harness'
 const HTTP_KEY = 'httpserve'
+const PORTS_KEY = 'ports'
 const isHarness = computed(() => selectedId.value === HARNESS_KEY)
 const isHttp = computed(() => selectedId.value === HTTP_KEY)
+const isPorts = computed(() => selectedId.value === PORTS_KEY)
 
 // 侧边栏分组（按功能合并）：语言运行时 / Web 服务 / 数据库 / 缓存与存储 / 开发工具。
 // 缓存与存储组聚合原「缓存」(redis/memcached) 与对象存储 (minio)；工具组追加 harness 与 HTTP 服务两个特殊入口。
@@ -116,11 +119,11 @@ interface SidebarItem {
   active: boolean
 }
 const sidebarGroups = computed(() => {
-  const out: { key: string; labelKey: string; items: SidebarItem[]; collapsed: boolean }[] = []
+  const out: { key: string; labelKey: string; items: SidebarItem[]; collapsed: boolean; running: boolean }[] = []
   for (const g of GROUP_ORDER) {
     if (collapsedGroups[g]) {
-      // 折叠态：仅保留分组标题，列表项清空
-      out.push({ key: g, labelKey: GROUP_LABEL[g], items: [], collapsed: true })
+      // 折叠态：仅保留分组标题，列表项清空（运行标识仍按全量运行时计算，折叠也能看到）
+      out.push({ key: g, labelKey: GROUP_LABEL[g], items: [], collapsed: true, running: groupRunning(g) })
       continue
     }
     const items: SidebarItem[] = runtimes.value
@@ -132,19 +135,33 @@ const sidebarGroups = computed(() => {
         avatar: avatarIcon(r.id),
         color: avatarColor(r.id),
         count: r.installed.length,
-        running: r.hasService && anyRunning(r),
+        running: r.hasService && (runningCache[r.id] ?? false),
         active: selectedId.value === r.id,
       }))
       // 各分类下按名称首字母排序，保证展示稳定有序
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
     if (g === 'tool') {
       items.push({ kind: 'special', id: HARNESS_KEY, name: t('navDsh'), avatar: 'DS', color: 'var(--color-accent)', active: isHarness.value })
-      items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: '#4a9eff', active: isHttp.value })
+      items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: '#4a9eff', active: isHttp.value, running: httpAnyRunning.value })
+      items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: '#3ecf8e', active: isPorts.value })
     }
-    if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items, collapsed: false })
+    if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items, collapsed: false, running: groupRunning(g) })
   }
   return out
 })
+
+// 分组级运行标识：该分组内任意「有服务」的运行时正在运行即点亮；
+// 工具组额外纳入 HTTP 服务的运行态（harness 为集成入口，无独立运行态）。
+// 即便分组被折叠，也依据全量运行时实时计算，不依赖已折叠隐藏的子项。
+function groupRunning(key: string): boolean {
+  for (const r of runtimes.value) {
+    if (r.group === key && r.hasService && (runningCache[r.id] ?? false)) return true
+  }
+  if (key === 'tool') {
+    for (const v of Object.values(httpRunning)) if (v) return true
+  }
+  return false
+}
 
 interface SourceInfo {
   id: string
@@ -381,6 +398,13 @@ const panoramaEntries = computed(() => {
       out.push({ id: r.id, name: r.name, version: ins.version, port: svcPort(r, ins.version), ports: svcPorts(r, ins.version), consolePort: consolePort(r, ins) })
     }
   }
+  // 内置 HTTP 静态服务（目录 → 静态站点）同样占用端口，必须计入全景：
+  // 此前只遍历 runtimes，导致开启 HTTP 服务后「端口全景」里根本看不到它。
+  // 控制台列直接给服务端口：openConsole 打开 127.0.0.1:<port>，正好就是该站点。
+  for (const s of httpServers.value) {
+    if (!httpRunning[s.id]) continue
+    out.push({ id: HTTP_KEY, name: t('httpServe'), version: s.name, port: s.port, ports: [s.port], consolePort: s.port })
+  }
   return out
 })
 
@@ -544,6 +568,42 @@ function svcPorts(r: RuntimeInfo, version: string): number[] {
 }
 function anyRunning(r: RuntimeInfo): boolean {
   return r.installed.some((ins) => svcOn(r, ins.version))
+}
+
+// ---- 运行状态缓存 ----
+// 绿点展示读缓存，而非每次轮询的实时 svc：避免轮询间隙 / 单次 EnvStatus 检测抖动导致绿点反复闪烁。
+// 缓存采用「两拍确认」防抖：与当前展示值不同的新状态需连续两次轮询一致才翻转；
+// 启动/停止/重启后通过 refreshRuntimeCacheNow 立即同步，绕过防抖。
+const runningCache = reactive<Record<string, boolean>>({})
+const runningPending = reactive<Record<string, boolean | null>>({})
+
+function runtimeIsRunning(r: RuntimeInfo): boolean {
+  return anyRunning(r)
+}
+
+function commitRuntimeCache(r: RuntimeInfo) {
+  const key = r.id
+  const now = runtimeIsRunning(r)
+  if (!(key in runningCache)) {
+    runningCache[key] = now
+    runningPending[key] = null
+    return
+  }
+  const prev = runningCache[key]
+  if (now === prev) { runningPending[key] = null; return }
+  // 与当前展示值不同：需下一次轮询再次确认（过滤瞬时误判），避免绿点闪烁
+  if (runningPending[key] === now) {
+    runningCache[key] = now
+    runningPending[key] = null
+  } else {
+    runningPending[key] = now
+  }
+}
+
+// 启动/停止/重启后调用：立即同步缓存，不等待两拍防抖
+function refreshRuntimeCacheNow(r: RuntimeInfo) {
+  runningCache[r.id] = runtimeIsRunning(r)
+  runningPending[r.id] = null
 }
 
 // 别名/备注编辑弹窗
@@ -921,6 +981,8 @@ const httpServers = ref<HTTPServerItem[]>([])
 // 端口留空/0 = 自动分配空闲端口（写死端口必然在多服务间互撞）
 const httpForm = reactive<{ name: string; dir: string; port: number }>({ name: '', dir: '', port: 0 })
 const httpRunning = reactive<Record<string, boolean>>({})
+// 是否存在运行中的 HTTP 服务：侧栏入口此前没带 running，导致服务跑着也不显示小绿点。
+const httpAnyRunning = computed(() => Object.values(httpRunning).some(Boolean))
 
 async function loadHTTPServers() {
   try {
@@ -998,8 +1060,8 @@ async function load() {
       if (props.initialSection) selectedId.value = props.initialSection
       if (!selectedId.value) selectedId.value = runtimes.value[0]?.id || ''
       // 自动拉取当前选中运行时的可下载版本，避免用户必须手动点「获取版本」
-      // （harness / http 不是运行时，跳过版本拉取）
-      if (selectedId.value && selectedId.value !== HARNESS_KEY && selectedId.value !== HTTP_KEY) loadAvailable(selectedId.value)
+      // （harness / http / ports 不是运行时，跳过版本拉取）
+      if (selectedId.value && selectedId.value !== HARNESS_KEY && selectedId.value !== HTTP_KEY && selectedId.value !== PORTS_KEY) loadAvailable(selectedId.value)
       // Git 状态表（版本/路径/SSH/LFS）按需拉取
       loadGitInfo()
     }
@@ -1094,9 +1156,9 @@ async function pollStatus() {
   polling = true
   try {
     for (const r of runtimes.value) {
-      if (!r.hasService) continue
+      if (!r.hasService) { commitRuntimeCache(r); continue }
       const s = ui[r.id]
-      if (!s) continue
+      if (!s) { commitRuntimeCache(r); continue }
       for (const ins of r.installed) {
         // linked（导入）版本一般不参与服务管理；PHP 例外——导入版 PHP 也能以 php-fpm 方式启停
         if (ins.scope === 'linked' && r.id !== 'php') continue
@@ -1116,6 +1178,7 @@ async function pollStatus() {
           /* 忽略单次探测失败 */
         }
       }
+      commitRuntimeCache(r)
     }
   } finally {
     polling = false
@@ -1261,7 +1324,8 @@ async function toggleEnabled(r: RuntimeInfo, on: boolean) {
   try {
     unwrap(await EnvSetEnabled(r.id, on))
     toast.success(r.name + ' ' + (on ? t('svcWatchOn') : t('svcWatchOff')))
-    pollStatus()
+    await pollStatus()
+    refreshRuntimeCacheNow(r)
   } catch (e: any) {
     // 失败回滚乐观状态
     if (target) target.enabled = !on
@@ -1279,7 +1343,8 @@ async function restartService(r: RuntimeInfo, ins: Install) {
   try {
     unwrap(await EnvRestart(r.id, ins.version))
     toast.success(r.name + ' ' + ins.version + ' ' + t('svcRestartDone'))
-    pollStatus()
+    await pollStatus()
+    refreshRuntimeCacheNow(r)
   } catch (e: any) {
     toast.error(getErrorMessage(e))
   } finally {
@@ -1410,20 +1475,21 @@ function onDocClick(e: MouseEvent) {
   }
 }
 onMounted(() => {
-  load()
+  // 首次轮询必须在运行列表就绪后执行：否则 pollStatus 会空跑（runtimes 为空），
+  // 绿点缓存要等到 3s 定时器那轮才填充，导致刚进环境管理绿点不显示。
+  load().finally(() => pollStatus())
   loadHTTPServers()
   loadConfigSupport(selectedId.value) // 初始选中运行时的配置编辑入口
   ensureCertLoaded()                   // 若初始选中即 mkcert，预载证书区块状态
   document.addEventListener('click', onDocClick)
   off = Events.On('quickdock:env:progress', onProgress)
   // 后台重扫完成（启动扫描 / 手动刷新按钮 / 安装完成后）→ 重新读取持久化缓存
-  offRefreshed = Events.On('quickdock:env:refreshed', () => { load(); ensureCertLoaded() })
+  offRefreshed = Events.On('quickdock:env:refreshed', () => { load(); ensureCertLoaded(); pollStatus() })
   timer = window.setInterval(pollStatus, 3000)
-  pollStatus()
 })
-// 切换运行时时自动拉取对应可下载版本列表（harness / http 区块不触发）
+// 切换运行时时自动拉取对应可下载版本列表（harness / http / ports 区块不触发）
 watch(selectedId, (id) => {
-  if (id && id !== HARNESS_KEY && id !== HTTP_KEY) {
+  if (id && id !== HARNESS_KEY && id !== HTTP_KEY && id !== PORTS_KEY) {
     loadAvailable(id)
     loadConfigSupport(id) // 通用「编辑配置」入口是否显示
   } else {
@@ -1477,6 +1543,7 @@ const s = currentRuntimeState
         <div class="cats-title">{{ t('envCategories') }}</div>
         <template v-for="grp in sidebarGroups" :key="grp.key">
           <button class="cats-group-label" type="button" @click="toggleGroup(grp.key)">
+            <span v-if="grp.running" class="cat-dot" :title="t('svcRunning')"></span>
             <span>{{ t(grp.labelKey) }}</span>
             <span class="cats-chevron">{{ grp.collapsed ? '▸' : '▾' }}</span>
           </button>
@@ -1570,6 +1637,9 @@ const s = currentRuntimeState
             </div>
           </section>
         </template>
+
+        <!-- 端口占用区块：复用 PortPage 组件（从独立导航页迁入环境管理） -->
+        <PortPage v-else-if="isPorts" />
 
         <template v-else-if="selected">
         <header class="detail-head">

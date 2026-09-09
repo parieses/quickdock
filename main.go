@@ -15,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -150,6 +149,8 @@ func main() {
 	logger.Init(filepath.Join(platform.DefaultDataDir(), "logs"))
 	// 第三方库日志汇入统一日志面板：slog 默认记录器与标准库 log 都桥接到 logger
 	logger.EnableSlogBridge()
+	// 顶层兜底：panic 落盘完整堆栈后原样重抛（不吞异常），崩溃现场留在 <logs>/crash/
+	defer logger.CapturePanic("main")
 	logger.I("QuickDock 启动 -------------------------------------------------------------")
 
 	// macOS 无开发者账号时 ad-hoc 签名产物带 quarantine 隔离属性会被 Gatekeeper 拦截；
@@ -291,7 +292,7 @@ func main() {
 		Width:            appWidth,
 		Height:           appHeight,
 		MinWidth:         800,
-		MinHeight:        500,
+		MinHeight:        600,
 		Frameless:        false,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/",
@@ -383,7 +384,6 @@ func main() {
 		appService.PluginWindowMgr.CloseAll()
 	}
 }
-
 
 // initUpdater 初始化 Wails 自动更新器（endpoint provider + Ed25519 签名验证）
 //

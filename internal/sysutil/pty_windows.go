@@ -3,6 +3,7 @@
 package sysutil
 
 import (
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -30,7 +31,10 @@ const (
 	procThreadAttrPseudoConsole = 0x00020016
 	// EXTENDED_STARTUPINFO_PRESENT：CreateProcess 需配合 STARTUPINFOEX 使用。
 	extendedStartupInfoPresent = 0x00080000
-	infinite                   = 0xFFFFFFFF
+	// CREATE_UNICODE_ENVIRONMENT：lpEnvironment 传的是 UTF-16 块时必须置此位，
+	// 否则系统按 ANSI 解析该块（每条被当成单字节串），会触发 ERROR_INVALID_PARAMETER(87)。
+	createUnicodeEnvironment = 0x00000400
+	infinite                = 0xFFFFFFFF
 )
 
 var (
@@ -38,6 +42,7 @@ var (
 
 	pCreatePseudoConsole               = kernel32DLL.NewProc("CreatePseudoConsole")
 	pClosePseudoConsole                = kernel32DLL.NewProc("ClosePseudoConsole")
+	pResizePseudoConsole               = kernel32DLL.NewProc("ResizePseudoConsole")
 	pInitializeProcThreadAttributeList = kernel32DLL.NewProc("InitializeProcThreadAttributeList")
 	pUpdateProcThreadAttribute         = kernel32DLL.NewProc("UpdateProcThreadAttribute")
 	pDeleteProcThreadAttributeList     = kernel32DLL.NewProc("DeleteProcThreadAttributeList")
@@ -50,6 +55,29 @@ func callErr(err error) error {
 		return err
 	}
 	return nil
+}
+
+// envBlock 把 []string{"K=V", ...} 编成 CreateProcessW 需要的环境块：
+// 每项以 UTF16 编码并自带结尾 0，整体再补一个空串（两个字节的 0）表示结束。
+func envBlock(env []string) (*uint16, error) {
+	if len(env) == 0 {
+		return nil, nil
+	}
+	buf := make([]byte, 0, len(env)*64)
+	for _, kv := range env {
+		if kv == "" {
+			continue
+		}
+		u, err := windows.UTF16FromString(kv)
+		if err != nil {
+			return nil, err
+		}
+		for _, c := range u {
+			buf = binary.LittleEndian.AppendUint16(buf, c)
+		}
+	}
+	buf = append(buf, 0, 0) // 结尾空串
+	return (*uint16)(unsafe.Pointer(&buf[0])), nil
 }
 
 // startupInfoW 对应 Win32 STARTUPINFOW（x/sys 的 StartupInfo 无法扩展成 EX 版，故自带一份）。
@@ -103,10 +131,21 @@ type ConPty struct {
 	closeOnce sync.Once
 }
 
-// StartConPty 以伪控制台拉起 exe。
+// StartConPty 以伪控制台拉起 exe，子进程继承宿主环境变量。
+func StartConPty(exe string, args []string, dir string) (*ConPty, error) {
+	return startConPty(exe, args, dir, nil)
+}
+
+// StartConPtyWithEnv 同 StartConPty，但用 env 完全替换子进程环境（nil 表示继承）。
+// 内嵌终端据此注入指定运行时的 PATH。
+func StartConPtyWithEnv(exe string, args []string, dir string, env []string) (*ConPty, error) {
+	return startConPty(exe, args, dir, env)
+}
+
+// startConPty 实际实现。
 // 子进程的标准输入/输出/错误全部接到伪控制台（对它而言就是控制台），
 // 宿主通过返回的 *ConPty.Read 读取合并输出。dir 为空时继承当前工作目录。
-func StartConPty(exe string, args []string, dir string) (*ConPty, error) {
+func startConPty(exe string, args []string, dir string, env []string) (*ConPty, error) {
 	if exe == "" {
 		return nil, errors.New("StartConPty: exe 为空")
 	}
@@ -201,14 +240,30 @@ func StartConPty(exe string, args []string, dir string) (*ConPty, error) {
 		}
 	}
 
+	// 环境块：UTF16 的 "K=V\0" 序列 + 结尾空串，传 nil 表示继承宿主环境。
+	envPtr, err := envBlock(env)
+	if err != nil {
+		pDeleteProcThreadAttributeList.Call(attrPtr)
+		pClosePseudoConsole.Call(pc)
+		windows.CloseHandle(inW)
+		windows.CloseHandle(outR)
+		return nil, fmt.Errorf("构造环境块失败: %w", err)
+	}
+
 	var pi processInformation
 	// 注意：句柄继承传 0——子进程通过属性表连上伪控制台，不靠句柄继承。
+	// 环境块是 UTF-16（envBlock 生成），因此只要传了 envPtr 就必须带上
+	// CREATE_UNICODE_ENVIRONMENT，否则 Windows 按 ANSI 解析 → ERROR_INVALID_PARAMETER(87)。
+	createFlags := uintptr(extendedStartupInfoPresent)
+	if envPtr != nil {
+		createFlags |= createUnicodeEnvironment
+	}
 	_, _, err = pCreateProcessW.Call(
 		uintptr(unsafe.Pointer(pExe)),
 		uintptr(unsafe.Pointer(pCmd)),
 		0, 0, 0,
-		extendedStartupInfoPresent,
-		0,
+		createFlags,
+		uintptr(unsafe.Pointer(envPtr)),
 		uintptr(unsafe.Pointer(pDir)),
 		uintptr(unsafe.Pointer(&si)),
 		uintptr(unsafe.Pointer(&pi)),
@@ -236,6 +291,29 @@ func StartConPty(exe string, args []string, dir string) (*ConPty, error) {
 
 // Pid 返回子进程 PID。
 func (c *ConPty) Pid() int { return c.pid }
+
+// Resize 调整伪控制台窗口尺寸（列数 × 行数）。
+// 终端前端尺寸变化时调用，否则子进程仍按 120×50 换行，长行会被截断折行。
+func (c *ConPty) Resize(cols, rows int) error {
+	if c.closed.Load() {
+		return nil
+	}
+	if cols <= 0 {
+		cols = 80
+	}
+	if rows <= 0 {
+		rows = 24
+	}
+	if cols > 0xFFFF {
+		cols = 0xFFFF
+	}
+	if rows > 0xFFFF {
+		rows = 0xFFFF
+	}
+	size := uint32(uint16(cols)) | uint32(uint16(rows))<<16
+	_, _, err := pResizePseudoConsole.Call(c.pc, uintptr(size))
+	return callErr(err)
+}
 
 // Read 读取伪控制台的合并输出（stdout+stderr）。伪控制台关闭后返回 io.EOF。
 func (c *ConPty) Read(p []byte) (int, error) {

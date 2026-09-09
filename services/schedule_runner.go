@@ -180,7 +180,8 @@ func parseWeekdays(csv string) map[int]bool {
 // 但无需引入额外依赖，且与进程内状态天然一致。
 func (a *AppService) StartScheduleRunner() {
 	a.schedWake = make(chan struct{}, 1)
-	go a.scheduleLoop()
+	// 常驻循环：panic 落盘后不重抛，避免一次异常让整个调度器静默停摆
+	go logger.CapturePanicInGo("schedule:loop", a.scheduleLoop)()
 }
 
 // wakeScheduler 非阻塞唤醒调度循环，使其立即重新计算并扫描到期任务

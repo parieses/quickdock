@@ -13,6 +13,7 @@ import {
 import { i18n } from './i18n';
 import { unwrap } from './utils/api';
 import { getErrorMessage } from './utils/error';
+import { navigateTo } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
 import CollectionList from './components/CollectionList.vue';
 import ItemList from './components/ItemList.vue';
@@ -55,6 +56,12 @@ function setPage(page: string) {
     openDSH()
     return
   }
+  currentPage.value = page
+}
+
+// 注册跨页面导航（笔记/剪贴板等独立视图 → 侧边栏页面），供 bridge 使用
+navigateTo.value = (page: string) => {
+  if (window.location.hash) window.location.hash = ''
   currentPage.value = page
 }
 
