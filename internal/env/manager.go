@@ -114,7 +114,7 @@ type Manager struct {
 // runtimeOrder 运行时固定展示顺序
 var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeBun, RuntimeErlang, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeTraefik, RuntimeComposer,
 	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
-	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeGh, RuntimeMkcert}
+	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeGh, RuntimeMkcert, RuntimeMCP}
 
 func NewManager() *Manager {
 	m := &Manager{
@@ -145,6 +145,7 @@ func NewManager() *Manager {
 			RuntimeTraefik:    NewTraefikRuntime(),
 			RuntimeMkcert:     NewMkcertRuntime(),
 			RuntimeRabbitMQ:   NewRabbitMQRuntime(),
+			RuntimeMCP:        NewMCPRuntime(),
 		},
 		links:       map[Runtime][]linkEntry{},
 		detectCache: map[Runtime][]Install{},
@@ -1028,6 +1029,34 @@ func (m *Manager) PortConflict(rt Runtime, version string) (PortConflict, error)
 	if pid := findListenPID(port); pid != 0 {
 		pc.PID = pid
 		pc.Image = processExePath(pid)
+		// 占用默认端口的进程本身就是该运行时的可执行文件（导入/后台运行的实例也算"自己的"），
+		// 此时端口被自己占用不算冲突，前端不应弹"端口被占用"警告。
+		if m.portOccupiedByOwnRuntime(a, rt, pc.Image) {
+			pc.Ours = true
+		}
 	}
 	return pc, nil
+}
+
+// portOccupiedByOwnRuntime 判断占用某运行时默认端口的进程是否属于该运行时自身。
+// 覆盖两类"自己的"进程：①本会话经 svcMgr 拉起的；②导入/后台运行的（svcMgr 无记录，
+// 但进程 exe 名或路径与该运行时一致）。命中则返回 true，调用方据此将 PortConflict.Ours 置真，
+// 避免已正常运行的服务误报"端口被占用"。
+func (m *Manager) portOccupiedByOwnRuntime(a RuntimeAdapter, rt Runtime, image string) bool {
+	if image == "" {
+		return false
+	}
+	base := strings.ToLower(filepath.Base(image))
+	// 1) 可执行文件名匹配（覆盖便携版与系统 PATH 导入版，如 redis-server.exe / nginx.exe）
+	if want := strings.ToLower(m.importExeName(rt)); want != "" && base == want {
+		return true
+	}
+	// 2) 进程路径落在某个已安装版本目录/导入目录下（覆盖 linked 目录匹配）
+	for _, ins := range a.InstalledVersions() {
+		dir := filepath.Dir(ins.Path)
+		if dir != "" && strings.Contains(strings.ToLower(image), strings.ToLower(dir)) {
+			return true
+		}
+	}
+	return false
 }

@@ -340,48 +340,32 @@ func (r *RedisRuntime) Stop(version string) error {
 	return nil
 }
 
-// runningVersion 返回当前（该 version 配置端口上）实际在跑的 Redis 版本；无运行返回 ""。
-// 优先用本会话拉起的句柄（最准确），否则按监听进程的可执行文件路径反查到具体版本目录。
-// 端口取自 redis.conf 的 port 指令（解析失败回退默认），从而支持用户在配置中修改端口。
-func (r *RedisRuntime) runningVersion(version string) string {
-	port := r.configPort(version)
-	if v, _ := svcMgr.info(RuntimeRedis); v != "" {
-		return v
-	}
-	if !isPortOpen(port) {
-		return ""
-	}
-	pid := findListenPID(port)
-	if pid == 0 {
-		return ""
-	}
-	exe := processExePath(pid)
-	if exe == "" {
-		return ""
-	}
-	for _, ins := range r.InstalledVersions() {
-		target := ins.Path
-		if ins.Scope == "portable" {
-			target = r.ExeFor(ins.Version)
-		}
-		if strings.EqualFold(exe, target) {
-			return ins.Version
-		}
-	}
-	return ""
-}
+// runningVersion 已拆除：版本归属逻辑统一收敛到包级 Probe（见 probe.go），
+// redis 的 Status 直接复用，端口取自 redis.conf 的 port 指令以支持自定义端口。
 
 func (r *RedisRuntime) Status(version string) ServiceStatus {
 	port := r.configPort(version)
 	st := ServiceStatus{Running: false, Port: port}
-	// 仅当实际运行的版本就是本次查询的版本时才标记运行中，避免多版本互相串状态
-	if r.runningVersion(version) == version {
+	installs := r.InstalledVersions()
+	res := Probe(RuntimeRunningProbe{
+		Kind:     RuntimeRedis,
+		Port:     port,
+		ExeNames: []string{"redis-server.exe", "redis-server"},
+		Installs: installs,
+	})
+	if !res.Running {
+		return st
+	}
+	st.PID = res.PID
+	// 仅当实际运行版本与查询版本一致才标记运行中，避免多版本互相串状态（多版本全亮）。
+	if res.Version == version {
 		st.Running = true
 		st.Version = version
-		st.PID = svcMgr.pid(RuntimeRedis)
-		if st.PID == 0 {
-			st.PID = findListenPID(port)
-		}
+	} else if res.Version == "" && len(installs) == 1 {
+		// 软件名已匹配但路径未落在已登记版本下（外部/系统安装且未登记）：
+		// 仅当只有一个已装版本时归该版本，多版本不归因以免全亮。
+		st.Running = true
+		st.Version = version
 	}
 	return st
 }

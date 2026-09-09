@@ -234,9 +234,9 @@ async function handleDeleteScene(sceneId: string) {
         <FolderKanban :size="14" />
         <span>{{ t('navWorkspace') }}</span>
       </button>
-      <button :class="['nav-item', { active: currentPage === 'snippets' }]" @click="emit('navigate', 'snippets')">
+      <button :class="['nav-item', { active: currentPage === 'notes' }]" @click="emit('navigate', 'notes')">
         <FileText :size="14" />
-        <span>{{ t('navSnippets') }}</span>
+        <span>{{ t('navNotes') }}</span>
       </button>
       <button :class="['nav-item', { active: currentPage === 'todo' }]" @click="emit('navigate', 'todo')">
         <ListTodo :size="14" />

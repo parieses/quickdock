@@ -618,7 +618,7 @@ onUnmounted(() => {
         <div class="save-wrap">
           <button
             v-if="entry.contentType === 'text'"
-            class="snippet-btn"
+            class="note-btn"
             :class="{ active: saveMenuId === entry.id }"
             :title="t('clipboardSaveAs')"
             @click.stop="toggleSaveMenu(entry)"
@@ -902,7 +902,7 @@ onUnmounted(() => {
   color: var(--color-text-secondary); text-align: left;
 }
 .save-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.snippet-btn {
+.note-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
   padding: 2px; border-radius: 4px;
@@ -910,9 +910,9 @@ onUnmounted(() => {
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
 }
-.clipboard-item:hover .snippet-btn,
-.clipboard-item.selected .snippet-btn { opacity: 0.4; }
-.snippet-btn:hover { opacity: 0.8 !important; color: var(--color-accent); }
+.clipboard-item:hover .note-btn,
+.clipboard-item.selected .note-btn { opacity: 0.4; }
+.note-btn:hover { opacity: 0.8 !important; color: var(--color-accent); }
 
 .delete-btn {
   flex-shrink: 0; margin-top: 3px;

@@ -322,23 +322,24 @@ func (p *PostgresRuntime) Stop(version string) error {
 func (p *PostgresRuntime) Status(version string) ServiceStatus {
 	port := postgresDefaultPort
 	st := ServiceStatus{Running: false, Port: port}
-	if v, _ := svcMgr.info(RuntimePostgreSQL); v != "" {
-		st.Running = true
-		st.Version = v
-		st.PID = svcMgr.pid(RuntimePostgreSQL)
-		if st.PID == 0 {
-			st.PID = findListenPID(port)
-		}
+	installs := p.InstalledVersions()
+	r := Probe(RuntimeRunningProbe{
+		Kind:     RuntimePostgreSQL,
+		Port:     port,
+		ExeNames: []string{"postgres.exe", "postgres"},
+		Installs: installs,
+	})
+	if !r.Running {
 		return st
 	}
-	if isPortOpen(port) {
-		if pid := findListenPID(port); pid != 0 {
-			if processIsExe(pid, "postgres.exe") {
-				st.Running = true
-				st.Version = version
-				st.PID = pid
-			}
-		}
+	st.PID = r.PID
+	// 仅当实际运行版本与查询版本一致才标记运行中，避免多版本互相串状态（多版本全亮）。
+	if r.Version == version {
+		st.Running = true
+		st.Version = version
+	} else if r.Version == "" && len(installs) == 1 {
+		st.Running = true
+		st.Version = version
 	}
 	return st
 }

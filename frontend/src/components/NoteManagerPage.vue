@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { pendingOpenNoteId } from '../composables/bridge'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -23,7 +24,7 @@ import {
   Trash2, Search, X, FolderPlus, FileText, Folder,
   Copy as CopyIcon, PanelLeft,
 } from '@lucide/vue'
-import type { ToastAPI, Snippet } from '../types'
+import type { ToastAPI, Note } from '../types'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -31,7 +32,7 @@ const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 // ---- 数据 ----
-const nodes = ref<Snippet[]>([])
+const nodes = ref<Note[]>([])
 const loading = ref(true)
 const expanded = ref<Set<string>>(new Set())
 const searchQuery = ref('')
@@ -45,9 +46,9 @@ const docContent = ref('')
 const docTagsText = ref('')
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
-interface TreeNode extends Snippet { children: TreeNode[] }
+interface TreeNode extends Note { children: TreeNode[] }
 
-function buildTree(list: Snippet[]): TreeNode[] {
+function buildTree(list: Note[]): TreeNode[] {
   const map = new Map<string, TreeNode>()
   const roots: TreeNode[] = []
   for (const s of list) map.set(s.id, { ...s, children: [] })
@@ -80,10 +81,16 @@ function parseTagsS(json: string): string[] {
 async function load() {
   loading.value = true
   try {
-    const r = unwrap<Snippet[]>(await ListNotesTree())
+    const r = unwrap<Note[]>(await ListNotesTree())
     nodes.value = r || []
     if (selectedDocId.value && !nodes.value.find(n => n.id === selectedDocId.value)) {
       selectedDocId.value = ''; docContent.value = ''; docTagsText.value = ''
+    }
+    // 命令面板深链：打开指定笔记（pendingOpenNoteId 由命令面板写入）
+    if (pendingOpenNoteId.value) {
+      const n = nodes.value.find(x => x.id === pendingOpenNoteId.value)
+      if (n) onDoc(n)
+      pendingOpenNoteId.value = ''
     }
   } catch (e) { toast.error(getErrorMessage(e)) } finally { loading.value = false }
 }
@@ -91,7 +98,7 @@ async function load() {
 async function doSearch() {
   const q = searchQuery.value.trim()
   if (!q) { await load(); return }
-  try { nodes.value = unwrap<Snippet[]>(await SearchNotesTree(q)) || [] } catch (e) { toast.error(getErrorMessage(e)) }
+  try { nodes.value = unwrap<Note[]>(await SearchNotesTree(q)) || [] } catch (e) { toast.error(getErrorMessage(e)) }
 }
 watch(searchQuery, () => doSearch())
 function clearSearch() { searchQuery.value = ''; load() }
@@ -114,16 +121,16 @@ function selectNodeIntoFolder(folderId: string) { selectedFolderId.value = folde
 // 新建（直接在目标文件夹下创建，无弹菜单）
 async function newFolderAt(folderId: string) {
   try {
-    const r = unwrap<Snippet>(await CreateNoteFolder(folderId, '新文件夹'))
+    const r = unwrap<Note>(await CreateNoteFolder(folderId, '新文件夹'))
     if (r) { if (folderId) expanded.value.add(folderId); expanded.value.add(r.id) }
     await load()
-    // 创建后进入重命名，方便直接命名
-    setTimeout(() => { if (r) startRename(r) }, 100)
+    // 创建后进入重命名，方便直接命名（load 完成后再 startRename，确保节点已在树中，自动聚焦可用）
+    if (r) startRename(r)
   } catch (e) { toast.error(getErrorMessage(e)) }
 }
 async function newDocAt(folderId: string) {
   try {
-    const r = unwrap<Snippet>(await CreateNoteDoc(folderId, '未命名笔记', '', 'markdown'))
+    const r = unwrap<Note>(await CreateNoteDoc(folderId, '未命名笔记', '', 'markdown'))
     if (folderId) expanded.value.add(folderId)
     await load()
     if (r) { const found = nodes.value.find(x => x.id === r.id); if (found) onDoc(found) }
@@ -140,18 +147,23 @@ async function setFormat(fmt: string) {
 }
 
 // 重命名
-function startRename(n: Snippet) { editingId.value = n.id; editName.value = n.name || n.keyword || '' }
+function startRename(n: Note) { editingId.value = n.id; editName.value = n.name || n.keyword || '' }
+function onRenameInput(v: string) { editName.value = v }
+function cancelRename() { editingId.value = ''; editName.value = '' }
 async function commitRename(id: string) {
+  // 防重复提交（Enter 与 blur 会先后触发）；只处理当前正在编辑的节点
+  if (editingId.value === '' || editingId.value !== id) return
   const name = editName.value.trim()
-  if (!name) { editingId.value = ''; return }
-  try { await RenameNoteNode(id, name); await load() } catch (e) { toast.error(getErrorMessage(e)) }
   editingId.value = ''
+  editName.value = ''
+  if (!name) return
+  try { await RenameNoteNode(id, name); await load() } catch (e) { toast.error(getErrorMessage(e)) }
 }
 
 // 删除
-const deletingNode = ref<Snippet | null>(null)
+const deletingNode = ref<Note | null>(null)
 const showDel = ref(false)
-function askDelete(n: Snippet) { deletingNode.value = n; showDel.value = true }
+function askDelete(n: Note) { deletingNode.value = n; showDel.value = true }
 async function confirmDeleteNode() {
   if (!deletingNode.value) return
   try {
@@ -168,7 +180,7 @@ async function handleDrop(dragId: string, targetId: string) {
 }
 
 // ---- 右侧文档编辑/预览 ----
-const selectedDoc = computed<Snippet | null>(() => (selectedDocId.value ? nodes.value.find(n => n.id === selectedDocId.value) || null : null))
+const selectedDoc = computed<Note | null>(() => (selectedDocId.value ? nodes.value.find(n => n.id === selectedDocId.value) || null : null))
 const previewHtml = computed(() => (docContent.value ? DOMPurify.sanitize(marked.parse(docContent.value, { async: false }) as string) : ''))
 
 // 落盘当前文档（切文档/离开前调用）。先同步快照再 await，避免调用后被切换污染把内容存错文档。
@@ -181,7 +193,7 @@ async function flushPendingSave() {
   try { await UpdateNoteDoc(id, content, tags); await load() } catch { /* 自动保存静默 */ }
 }
 
-function onDoc(d: Snippet) {
+function onDoc(d: Note) {
   if (d.isFolder) return
   void flushPendingSave() // 切文档前先落盘当前文档，避免防抖窗口内切换丢失内容
   selectedDocId.value = d.id
@@ -218,6 +230,15 @@ async function renameCurrent() {
 
 onMounted(() => load())
 onBeforeUnmount(() => { void flushPendingSave() })
+
+// 命令面板导航到本页后再写入 pendingOpenNoteId 的场景：load 完成后补开
+watch(pendingOpenNoteId, (id) => {
+  if (id && nodes.value.length) {
+    const n = nodes.value.find(x => x.id === id)
+    if (n) onDoc(n)
+    pendingOpenNoteId.value = ''
+  }
+})
 </script>
 
 <template>
@@ -256,7 +277,7 @@ onBeforeUnmount(() => { void flushPendingSave() })
                 :expanded="expanded" :editing-id="editingId" :edit-name="editName"
                 :selected-doc="selectedDocId" :selected-folder="selectedFolderId"
                 @toggle="toggleFolder" @select="onDoc"
-                @rename-start="startRename" @rename-commit="commitRename"
+                @rename-start="startRename" @rename-commit="commitRename" @rename-input="onRenameInput" @rename-cancel="cancelRename"
                 @del="askDelete" @create-folder="newFolderAt" @create-doc="newDocAt"
                 @drop-node="handleDrop"
               />

@@ -368,23 +368,27 @@ func (s *SQLRuntime) Stop(version string) error {
 func (s *SQLRuntime) Status(version string) ServiceStatus {
 	port := s.flavor.defPort
 	st := ServiceStatus{Running: false, Port: port}
-	if v, _ := svcMgr.info(s.flavor.kind); v != "" {
-		st.Running = true
-		st.Version = v
-		st.PID = svcMgr.pid(s.flavor.kind)
-		if st.PID == 0 {
-			st.PID = findListenPID(port)
-		}
+	installs := s.InstalledVersions()
+	r := Probe(RuntimeRunningProbe{
+		Kind:     s.flavor.kind,
+		Port:     port,
+		ExeNames: []string{s.flavor.serverBin, strings.TrimSuffix(s.flavor.serverBin, ".exe")},
+		Installs: installs,
+	})
+	if !r.Running {
 		return st
 	}
-	if isPortOpen(port) {
-		if pid := findListenPID(port); pid != 0 {
-			if processIsExe(pid, s.flavor.serverBin) {
-				st.Running = true
-				st.Version = version
-				st.PID = pid
-			}
-		}
+	st.PID = r.PID
+	// 仅当实际运行版本与查询版本一致才标记运行中，避免多版本互相串状态（多版本全亮）：
+	// 例如 8.0.36 在跑、查询 5.7 时 r.Version="8.0.36"≠"5.7" → 5.7 不亮。
+	if r.Version == version {
+		st.Running = true
+		st.Version = version
+	} else if r.Version == "" && len(installs) == 1 {
+		// 软件名已匹配但路径未落在已登记版本下（外部/系统安装且未登记）：
+		// 仅当只有一个已装版本时归该版本，多版本不归因以免全亮。
+		st.Running = true
+		st.Version = version
 	}
 	return st
 }

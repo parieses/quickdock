@@ -137,7 +137,7 @@ var baseTables = []string{
 	`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_text ON clipboard_entries(content_type, text_content)`,
 	`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_image ON clipboard_entries(content_type, image_hash)`,
 
-	`CREATE TABLE IF NOT EXISTS snippets (
+	`CREATE TABLE IF NOT EXISTS notes (
 		id TEXT PRIMARY KEY,
 		keyword TEXT NOT NULL UNIQUE,
 		content TEXT NOT NULL,
@@ -328,6 +328,13 @@ func (d *Database) migrate() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	// 数据迁移：snippets 表重命名为 notes（一次性，幂等；兼容旧版本库）
+	if d.tableExists("snippets") {
+		if _, err := d.conn.Exec(`ALTER TABLE snippets RENAME TO notes`); err != nil {
+			return fmt.Errorf("重命名 snippets→notes 失败: %w", err)
+		}
+	}
+
 	// 创建所有表
 	for _, sql := range baseTables {
 		if _, err := d.conn.Exec(sql); err != nil {
@@ -404,14 +411,14 @@ func (d *Database) migrate() error {
 		// ai_conversations: token 用量统计
 		{"ai_conversations", "prompt_tokens", "INTEGER DEFAULT 0"},
 		{"ai_conversations", "completion_tokens", "INTEGER DEFAULT 0"},
-		// snippets → 笔记树：新增树形/标题/标签字段
-		{"snippets", "name", "TEXT DEFAULT ''"},
-		{"snippets", "parent_id", "TEXT DEFAULT ''"},
-		{"snippets", "is_folder", "INTEGER DEFAULT 0"},
-		{"snippets", "sort", "INTEGER DEFAULT 0"},
-		{"snippets", "tags", "TEXT DEFAULT ''"},
-		{"snippets", "is_note", "INTEGER DEFAULT 0"},
-		{"snippets", "format", "TEXT DEFAULT 'markdown'"},
+		// notes 笔记树：新增树形/标题/标签字段
+		{"notes", "name", "TEXT DEFAULT ''"},
+		{"notes", "parent_id", "TEXT DEFAULT ''"},
+		{"notes", "is_folder", "INTEGER DEFAULT 0"},
+		{"notes", "sort", "INTEGER DEFAULT 0"},
+		{"notes", "tags", "TEXT DEFAULT ''"},
+		{"notes", "is_note", "INTEGER DEFAULT 0"},
+		{"notes", "format", "TEXT DEFAULT 'markdown'"},
 	}
 	for _, m := range columnMigrations {
 		if err := d.addColumnIfMissing(m.table, m.col, m.colType); err != nil {
@@ -419,14 +426,32 @@ func (d *Database) migrate() error {
 		}
 	}
 
-	// 数据迁移：snippets 升级为笔记树，用 keyword 回填 name（幂等）
-	if _, err := d.conn.Exec(`UPDATE snippets SET name = keyword WHERE (name IS NULL OR name = '')`); err != nil {
-		return fmt.Errorf("回填 snippets.name 失败: %w", err)
+	// 数据迁移：notes 用 keyword 回填 name（幂等；旧 snippets 表已重命名为 notes）
+	if _, err := d.conn.Exec(`UPDATE notes SET name = keyword WHERE (name IS NULL OR name = '')`); err != nil {
+		return fmt.Errorf("回填 notes.name 失败: %w", err)
 	}
 
-	// 数据迁移：已有 completed(done=1) 待办同步 status='done'（status 为权威字段，done 派生）
-	if _, err := d.conn.Exec(`UPDATE todos SET status = 'done' WHERE done = 1 AND (status IS NULL OR status = '')`); err != nil {
-		return fmt.Errorf("同步待办 status 失败: %w", err)
+	// 数据迁移：待办状态口径归一 —— status 为权威字段，done/completed_at 全部由它派生。
+	// 历史 bug：早期版本两字段各自写入（ToggleTodo 只改 done、看板拖拽只改 status），
+	// 出现过 status='done' 但 done=0、或 done=1 但 status 为空的行，列表与筛选结果互相矛盾。
+	// 三步全幂等，可重复执行：① status 缺失/非法 → 按 done 回填；② 按 status 重算 done；③ completed_at 对齐。
+	if _, err := d.conn.Exec(
+		`UPDATE todos SET status = CASE WHEN done = 1 THEN 'done' ELSE 'todo' END
+		 WHERE status IS NULL OR status NOT IN ('todo','doing','done')`); err != nil {
+		return fmt.Errorf("回填待办 status 失败: %w", err)
+	}
+	if _, err := d.conn.Exec(
+		`UPDATE todos SET done = CASE WHEN status = 'done' THEN 1 ELSE 0 END`); err != nil {
+		return fmt.Errorf("按 status 重算待办 done 失败: %w", err)
+	}
+	now := time.Now().Format(time.RFC3339)
+	if _, err := d.conn.Exec(
+		`UPDATE todos SET completed_at = '' WHERE status <> 'done' AND completed_at <> ''`); err != nil {
+		return fmt.Errorf("清理待办 completed_at 失败: %w", err)
+	}
+	if _, err := d.conn.Exec(
+		`UPDATE todos SET completed_at = ? WHERE status = 'done' AND (completed_at IS NULL OR completed_at = '')`, now); err != nil {
+		return fmt.Errorf("回填待办 completed_at 失败: %w", err)
 	}
 
 	// 数据迁移：CMD 终端工具参数 /c → /k，使命令型项目运行后窗口停留，
@@ -469,6 +494,15 @@ func (d *Database) addColumnIfMissing(table, col, colType string) error {
 		}
 	}
 	return nil
+}
+
+// tableExists 判断表是否存在（用于幂等迁移，如 snippets→notes 重命名）。
+func (d *Database) tableExists(name string) bool {
+	var cnt int
+	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name = ?`, name).Scan(&cnt); err != nil {
+		return false
+	}
+	return cnt > 0
 }
 
 // validColTypeRE 严格约束 addColumnIfMissing 的 colType，防止 ALTER 语句注入。

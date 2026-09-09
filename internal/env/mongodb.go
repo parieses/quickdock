@@ -231,23 +231,24 @@ func (m *MongoRuntime) Stop(version string) error {
 func (m *MongoRuntime) Status(version string) ServiceStatus {
 	port := mongoDefaultPort
 	st := ServiceStatus{Running: false, Port: port}
-	if v, _ := svcMgr.info(RuntimeMongoDB); v != "" {
-		st.Running = true
-		st.Version = v
-		st.PID = svcMgr.pid(RuntimeMongoDB)
-		if st.PID == 0 {
-			st.PID = findListenPID(port)
-		}
+	installs := m.InstalledVersions()
+	r := Probe(RuntimeRunningProbe{
+		Kind:     RuntimeMongoDB,
+		Port:     port,
+		ExeNames: []string{"mongod.exe", "mongod"},
+		Installs: installs,
+	})
+	if !r.Running {
 		return st
 	}
-	if isPortOpen(port) {
-		if pid := findListenPID(port); pid != 0 {
-			if processIsExe(pid, "mongod.exe") {
-				st.Running = true
-				st.Version = version
-				st.PID = pid
-			}
-		}
+	st.PID = r.PID
+	// 仅当实际运行版本与查询版本一致才标记运行中，避免多版本互相串状态（多版本全亮）。
+	if r.Version == version {
+		st.Running = true
+		st.Version = version
+	} else if r.Version == "" && len(installs) == 1 {
+		st.Running = true
+		st.Version = version
 	}
 	return st
 }

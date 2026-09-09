@@ -3,7 +3,7 @@ package services
 import "quickdock/internal/db"
 
 // RecordUsage 记录一次使用（跨窗口共享的 frecency 追踪）
-// key 格式：item:{id} | snippet:{id} | app:{name} | plugin:{pluginId}.{cmdId}
+// key 格式：item:{id} | note:{id} | app:{name} | plugin:{pluginId}.{cmdId}
 func (a *AppService) RecordUsage(key string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r

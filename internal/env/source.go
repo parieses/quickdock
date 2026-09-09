@@ -55,6 +55,10 @@ const (
 
 	// Erlang：底层语言运行时（被 RabbitMQ 等依赖），作为「语言」分组里的独立可管理运行时。
 	RuntimeErlang Runtime = "erlang"
+
+	// RuntimeMCP：QuickDock 内置的 MCP 服务（让 AI 工具操作本应用）。
+	// 不是外部程序，无下载源/无版本，只在环境管理页提供启停与配置。
+	RuntimeMCP Runtime = "mcp"
 )
 
 // 环境管理分组（侧边栏按组归类：语言 / Web 服务器 / 缓存与存储 / 工具 / 数据库）
@@ -192,6 +196,8 @@ var (
 		RuntimeMkcert: {display: "mkcert", group: GroupTool, versions: []string{"1.4.4", "1.4.3"}, versURL: "https://api.github.com/repos/FiloSottile/mkcert/releases?per_page=100", versParse: parseMkcertVersions, fallbackHTMLURL: "https://github.com/FiloSottile/mkcert/releases", sources: []Source{
 			{ID: "mkcert", Name: "FiloSottile/mkcert (GitHub)", Build: mkcertURL("https://github.com/FiloSottile/mkcert/releases/download/v{version}/mkcert-v{version}-windows-amd64.exe", "https://github.com/FiloSottile/mkcert/releases/download/v{version}/mkcert-v{version}-darwin-{arch}", "")},
 		}},
+		// MCP：内置服务，无下载源、无可下载版本（versions/sources 留空）
+		RuntimeMCP: {display: "MCP 服务", group: GroupTool},
 		// RabbitMQ：Erlang 消息代理（rabbitmq-server-windows 自带 Erlang 运行时，无需单独安装）。服务型（sbin/rabbitmq-server.bat）。
 		RuntimeRabbitMQ: {display: "RabbitMQ", group: GroupStorage, versions: []string{"4.3.5", "4.2.0", "3.13.7"}, versURL: "https://api.github.com/repos/rabbitmq/rabbitmq-server/releases?per_page=100", versParse: parseRabbitVersions, fallbackHTMLURL: "https://github.com/rabbitmq/rabbitmq-server/releases", sources: []Source{
 			{ID: "rabbitmq", Name: "rabbitmq/rabbitmq-server (GitHub)", Build: rabbitURL("https://github.com/rabbitmq/rabbitmq-server/releases/download/v{version}/rabbitmq-server-windows-{version}.zip", "https://github.com/rabbitmq/rabbitmq-server/releases/download/v{version}/rabbitmq-server-{version}.tar.xz", "")},

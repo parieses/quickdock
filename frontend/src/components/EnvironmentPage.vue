@@ -57,7 +57,14 @@ import {
   EnvCertIssue,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
+import {
+  MCPStatus,
+  MCPTools,
+  MCPClientConfig,
+  MCPSetLevel,
+} from '../../bindings/quickdock/services/mcp/mcpservice'
 import SettingsDSH from './SettingsDSH.vue'
+import { DSHStatus } from '../../bindings/quickdock/services/dsh/dshservice'
 import PortPage from './PortPage.vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -141,7 +148,7 @@ const sidebarGroups = computed(() => {
       // 各分类下按名称首字母排序，保证展示稳定有序
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
     if (g === 'tool') {
-      items.push({ kind: 'special', id: HARNESS_KEY, name: t('navDsh'), avatar: 'DS', color: 'var(--color-accent)', active: isHarness.value })
+      items.push({ kind: 'special', id: HARNESS_KEY, name: t('navDsh'), avatar: 'DS', color: 'var(--color-accent)', active: isHarness.value, running: dshRunning.value })
       items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: '#4a9eff', active: isHttp.value, running: httpAnyRunning.value })
       items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: '#3ecf8e', active: isPorts.value })
     }
@@ -151,7 +158,7 @@ const sidebarGroups = computed(() => {
 })
 
 // 分组级运行标识：该分组内任意「有服务」的运行时正在运行即点亮；
-// 工具组额外纳入 HTTP 服务的运行态（harness 为集成入口，无独立运行态）。
+// 工具组额外纳入 HTTP 服务与 dsh（harness）的运行态。
 // 即便分组被折叠，也依据全量运行时实时计算，不依赖已折叠隐藏的子项。
 function groupRunning(key: string): boolean {
   for (const r of runtimes.value) {
@@ -304,6 +311,7 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'python', name: 'Python', group: 'language', hasService: false },
   { id: 'apache', name: 'Apache', group: 'webserver', hasService: true },
   { id: 'ftp', name: 'FTP', group: 'webserver', hasService: true },
+  { id: 'mcp', name: 'MCP 服务', group: 'tool', hasService: true },
 ]
 function staticRuntime(s: typeof STATIC_CATALOG[number]): RuntimeInfo {
   return {
@@ -404,6 +412,12 @@ const panoramaEntries = computed(() => {
   for (const s of httpServers.value) {
     if (!httpRunning[s.id]) continue
     out.push({ id: HTTP_KEY, name: t('httpServe'), version: s.name, port: s.port, ports: [s.port], consolePort: s.port })
+  }
+  // dsh（harness）web 服务同样占用端口，必须计入全景：
+  // 此前只遍历 runtimes + HTTP 服务，导致 dsh 跑着在「端口全景」里也看不到。
+  // 用 DSHStatus 返回的真实端口（可能是兜底随机端口，而非写死的 3080），避免错标。
+  if (dshRunning.value && dshPort.value) {
+    out.push({ id: HARNESS_KEY, name: t('navDsh'), version: '', port: dshPort.value, ports: [dshPort.value], consolePort: dshPort.value })
   }
   return out
 })
@@ -520,6 +534,55 @@ async function certIssue() {
   }
 }
 
+
+// ---- MCP 服务（内置）：监听地址、客户端配置与已开放工具 ----
+interface MCPToolInfo { name: string; description: string; level: number }
+const mcpInfo = reactive({ running: false, endpoint: '', port: 0, maxLevel: 1, toolCount: 0 })
+const mcpTools = ref<MCPToolInfo[]>([])
+const mcpCfg = reactive({ url: '', json: '', cli: '' })
+const mcpLoading = ref(false)
+
+// loadMCP 拉取 MCP 状态/工具/客户端配置。服务启停后需重新调用（版本表的启停按钮走 Env 通用接口，
+// 不经过本面板，故额外在 selectedId 变化与本面板刷新按钮时各拉一次）。
+async function loadMCP() {
+  mcpLoading.value = true
+  try {
+    const [st, tools, cfg] = await Promise.all([MCPStatus(), MCPTools(), MCPClientConfig()])
+    const s = unwrap<{ running: boolean; endpoint: string; port: number; maxLevel: number; tools: number }>(st)
+    if (s) Object.assign(mcpInfo, s)
+    mcpTools.value = unwrap<MCPToolInfo[]>(tools) || []
+    const c = unwrap<{ url: string; json: string; cli: string; running: boolean }>(cfg)
+    if (c) Object.assign(mcpCfg, { url: c.url || '', json: c.json || '', cli: c.cli || '' })
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    mcpLoading.value = false
+  }
+}
+
+async function copyMCP(text: string) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(t('copied'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// setMCPLevel 切换工具权限等级（0=只读，1=只读+低危写），后端立即对注册表生效，
+// 已在运行的服务需重启后 tools/list 才变化（工具集在服务启动时按等级注册）。
+async function setMCPLevel() {
+  try {
+    unwrap(await MCPSetLevel(mcpInfo.maxLevel))
+    toast.success(t('saved'))
+    await loadMCP()
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+watch(selectedId, (id) => { if (id === 'mcp') loadMCP() })
 
 // versionInput: 绑定到当前选中运行时的版本号，读写都经过 ui[state] 保证一致性
 const versionInput = computed({
@@ -984,6 +1047,18 @@ const httpRunning = reactive<Record<string, boolean>>({})
 // 是否存在运行中的 HTTP 服务：侧栏入口此前没带 running，导致服务跑着也不显示小绿点。
 const httpAnyRunning = computed(() => Object.values(httpRunning).some(Boolean))
 
+// dsh（harness）运行态：侧栏入口此前没带 running，导致 dsh 服务跑着也不显示小绿点。
+const dshRunning = ref(false)
+const dshPort = ref(0)
+async function loadDshRunning() {
+  try {
+    const st = unwrap<{ running: boolean; port: number }>(await DSHStatus())
+    if (st) { dshRunning.value = st.running; dshPort.value = st.port || 0 }
+  } catch (e) {
+    console.warn('[env] 加载 dsh 运行状态失败', e)
+  }
+}
+
 async function loadHTTPServers() {
   try {
     const list = unwrap<HTTPServerItem[]>(await HTTPServeList())
@@ -1180,6 +1255,7 @@ async function pollStatus() {
       }
       commitRuntimeCache(r)
     }
+    await loadDshRunning()
   } finally {
     polling = false
   }
@@ -1479,6 +1555,7 @@ onMounted(() => {
   // 绿点缓存要等到 3s 定时器那轮才填充，导致刚进环境管理绿点不显示。
   load().finally(() => pollStatus())
   loadHTTPServers()
+  loadDshRunning()
   loadConfigSupport(selectedId.value) // 初始选中运行时的配置编辑入口
   ensureCertLoaded()                   // 若初始选中即 mkcert，预载证书区块状态
   document.addEventListener('click', onDocClick)
@@ -1497,6 +1574,8 @@ watch(selectedId, (id) => {
   }
   // 切到 mkcert 时拉取证书区块状态
   if (id === 'mkcert') ensureCertLoaded()
+  // 切到 harness（dsh）时同步其运行态，保证侧栏绿点即时刷新
+  if (id === HARNESS_KEY) loadDshRunning()
   // Git 区块切换时拉取状态表
   loadGitInfo()
 })
@@ -1868,8 +1947,61 @@ const s = currentRuntimeState
           </div>
         </section>
 
-        <!-- 安装新版本（Git 不展示：Git 为单版本，检测不到时由上方空状态提供一键安装） -->
-        <section v-if="selected.id !== 'git' && s" class="detail-block install-card">
+        <!-- MCP 接入（MCP 专属）：监听地址、客户端配置、已开放工具 -->
+        <section v-if="selected.id === 'mcp'" class="detail-block mcp-panel">
+          <div class="block-head">
+            <span class="block-title">MCP 接入</span>
+            <span class="block-count">{{ mcpInfo.running ? '运行中' : '未启动' }}</span>
+            <button class="link-btn import-btn" :disabled="mcpLoading" @click="loadMCP">刷新</button>
+          </div>
+
+          <div v-if="mcpInfo.running" class="mcp-url-row">
+            <code class="mcp-url">{{ mcpInfo.endpoint }}</code>
+            <button class="op-btn small" @click="copyMCP(mcpInfo.endpoint)">复制地址</button>
+          </div>
+          <div v-else class="env-msg">
+            服务未启动：在上方版本表点「启动」后，AI 工具（Claude Code / Cursor / 其它 MCP 客户端）即可通过本地址操作 QuickDock。
+          </div>
+
+          <div class="mcp-level-row">
+            <span class="mcp-label">工具权限</span>
+            <select v-model.number="mcpInfo.maxLevel" class="env-input mcp-select" @change="setMCPLevel">
+              <option :value="0">只读（查询/状态/搜索）</option>
+              <option :value="1">只读 + 低危写（启停服务、建待办、写剪贴板）</option>
+            </select>
+            <span class="mcp-hint">高危操作（执行命令、杀进程、删除数据）不开放</span>
+          </div>
+
+          <template v-if="mcpInfo.running">
+            <div class="mcp-cfg-head">
+              <span>Claude Code 命令</span>
+              <button class="op-btn small" @click="copyMCP(mcpCfg.cli)">复制</button>
+            </div>
+            <pre class="mcp-code">{{ mcpCfg.cli }}</pre>
+
+            <div class="mcp-cfg-head">
+              <span>Claude Desktop / 其它客户端（mcpServers JSON）</span>
+              <button class="op-btn small" @click="copyMCP(mcpCfg.json)">复制</button>
+            </div>
+            <pre class="mcp-code">{{ mcpCfg.json }}</pre>
+          </template>
+
+          <div class="mcp-cfg-head">
+            <span>已开放工具 {{ mcpTools.length }}</span>
+          </div>
+          <div class="mcp-tools">
+            <div v-for="tool in mcpTools" :key="tool.name" class="mcp-tool-row">
+              <span class="mcp-tool-name">{{ tool.name }}</span>
+              <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">{{ tool.level > 0 ? '可写' : '只读' }}</span>
+              <span class="mcp-tool-desc">{{ tool.description }}</span>
+            </div>
+            <div v-if="!mcpTools.length" class="mcp-hint">暂无</div>
+          </div>
+        </section>
+
+        <!-- 安装新版本（Git 不展示：Git 为单版本，检测不到时由上方空状态提供一键安装；
+             MCP 为内置服务，无版本可装，后端 Install 直接返回错误，故一并隐藏） -->
+        <section v-if="selected.id !== 'git' && selected.id !== 'mcp' && s" class="detail-block install-card">
           <div class="block-head">
             <span class="block-title">{{ t('installNewVersion') }}</span>
           </div>
@@ -2548,6 +2680,31 @@ const s = currentRuntimeState
 .cert-dir-row .env-input { flex: 1; }
 .cert-msg { margin: 8px 0; word-break: break-all; }
 .cert-hint { font-size: 11px; color: var(--color-text-muted); margin: 10px 0 0; }
+
+/* ---- MCP 接入面板 ---- */
+.mcp-url-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+.mcp-url {
+  flex: 1; padding: 6px 10px; border-radius: 6px; font-size: 12px;
+  background: var(--color-bg-secondary); color: var(--color-text-primary);
+  border: 1px solid var(--color-border); overflow-x: auto; white-space: nowrap;
+}
+.mcp-level-row { display: flex; align-items: center; gap: 10px; margin: 12px 0; flex-wrap: wrap; }
+.mcp-label { font-size: 13px; color: var(--color-text-secondary); flex: none; }
+.mcp-select { flex: none; min-width: 300px; }
+.mcp-hint { font-size: 11px; color: var(--color-text-muted); }
+.mcp-cfg-head {
+  display: flex; align-items: center; justify-content: space-between;
+  margin: 14px 0 6px; font-size: 13px; color: var(--color-text-secondary);
+}
+.mcp-code {
+  margin: 0; padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;
+  background: var(--color-bg-secondary); color: var(--color-text-primary);
+  border: 1px solid var(--color-border); overflow-x: auto; white-space: pre-wrap; word-break: break-all;
+}
+.mcp-tools { display: flex; flex-direction: column; gap: 4px; }
+.mcp-tool-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; }
+.mcp-tool-name { font-family: var(--font-mono, monospace); color: var(--color-text-primary); flex: none; min-width: 140px; }
+.mcp-tool-desc { color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cert-sub { font-weight: 400; color: var(--color-text-muted); font-size: 12px; }
 .cert-grid { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px 12px; margin: 10px 0 4px; }
 .cert-label { font-size: 12px; color: var(--color-text-secondary); text-align: right; white-space: nowrap; }

@@ -37,7 +37,8 @@ func (d *Database) CreateTodo(title, priority, dueDate, note, startTime, endTime
 	defer d.mu.Unlock()
 
 	var maxSort int
-	_ = d.conn.QueryRow("SELECT COALESCE(MAX(sort), 0) FROM todos WHERE done = 0").Scan(&maxSort)
+	// 排序基准用 status（权威字段）而非 done 列，避免两字段不一致时新待办插到错误位置
+	_ = d.conn.QueryRow("SELECT COALESCE(MAX(sort), 0) FROM todos WHERE status <> 'done'").Scan(&maxSort)
 
 	t := &Todo{
 		ID:           newID(),
@@ -106,7 +107,7 @@ func (d *Database) ListTodos() ([]Todo, error) {
 	defer d.mu.Unlock()
 	rows, err := d.conn.Query(
 		`SELECT id, title, done, priority, due_date, note, start_time, end_time, reminder_time, reminder_sent, tags, recurrence, parent_id, status, sort, created_at, completed_at
-		 FROM todos ORDER BY done ASC, sort ASC, created_at DESC`,
+		 FROM todos ORDER BY CASE WHEN status = 'done' THEN 1 ELSE 0 END ASC, sort ASC, created_at DESC`,
 	)
 	if err != nil {
 		return nil, err
@@ -120,7 +121,7 @@ func (d *Database) ListTodos() ([]Todo, error) {
 			&t.StartTime, &t.EndTime, &t.ReminderTime, &reminderSent, &t.Tags, &t.Recurrence, &t.ParentID, &t.Status, &t.Sort, &t.CreatedAt, &t.CompletedAt); err != nil {
 			return nil, err
 		}
-		t.Done = done != 0
+		t.Done = t.Status == "done" // 由 status 派生，避免与 done 列口径不一致
 		t.ReminderSent = reminderSent != 0
 		todos = append(todos, t)
 	}
@@ -140,7 +141,7 @@ func (d *Database) GetTodo(id string) (*Todo, error) {
 		&t.StartTime, &t.EndTime, &t.ReminderTime, &reminderSent, &t.Tags, &t.Recurrence, &t.ParentID, &t.Status, &t.Sort, &t.CreatedAt, &t.CompletedAt); err != nil {
 		return nil, err
 	}
-	t.Done = done != 0
+	t.Done = t.Status == "done" // 由 status 派生，避免与 done 列口径不一致
 	t.ReminderSent = reminderSent != 0
 	return &t, nil
 }
@@ -180,8 +181,9 @@ func (d *Database) SetTodoStatus(id, status string) error {
 	if status == "done" {
 		done = 1
 	}
+	// completed_at 与 status 严格绑定：改为非完成态时清空，避免出现「未完成但有完成时间」
 	_, err := d.conn.Exec(
-		`UPDATE todos SET status = ?, done = ?, completed_at = CASE WHEN ? = 'done' THEN ? ELSE completed_at END WHERE id = ?`,
+		`UPDATE todos SET status = ?, done = ?, completed_at = CASE WHEN ? = 'done' THEN ? ELSE '' END WHERE id = ?`,
 		status, done, status, time.Now().Format(time.RFC3339), id,
 	)
 	return err
@@ -219,7 +221,7 @@ func (d *Database) DeleteTodo(id string) error {
 func (d *Database) ClearCompletedTodos() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	_, err := d.conn.Exec("DELETE FROM todos WHERE done = 1")
+	_, err := d.conn.Exec("DELETE FROM todos WHERE status = 'done'")
 	return err
 }
 
@@ -230,7 +232,7 @@ func (d *Database) ListDueReminders(now string) ([]Todo, error) {
 	rows, err := d.conn.Query(
 		`SELECT id, title, done, priority, due_date, note, start_time, end_time, reminder_time, reminder_sent, tags, recurrence, parent_id, status, sort, created_at, completed_at
 		 FROM todos
-		 WHERE reminder_time <> '' AND reminder_sent = 0 AND done = 0 AND reminder_time <= ?
+		 WHERE reminder_time <> '' AND reminder_sent = 0 AND status <> 'done' AND reminder_time <= ?
 		 ORDER BY reminder_time ASC`,
 		now,
 	)
@@ -246,7 +248,7 @@ func (d *Database) ListDueReminders(now string) ([]Todo, error) {
 			&t.StartTime, &t.EndTime, &t.ReminderTime, &reminderSent, &t.Tags, &t.Recurrence, &t.ParentID, &t.Status, &t.Sort, &t.CreatedAt, &t.CompletedAt); err != nil {
 			return nil, err
 		}
-		t.Done = done != 0
+		t.Done = t.Status == "done" // 由 status 派生，避免与 done 列口径不一致
 		t.ReminderSent = reminderSent != 0
 		todos = append(todos, t)
 	}

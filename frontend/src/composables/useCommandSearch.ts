@@ -37,7 +37,7 @@ const ENV_RUNTIME_ALIASES: Record<string, string[]> = {
 }
 
 // ---- Types ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env'
 
 export interface SearchResult {
   type: ResultType
@@ -48,7 +48,7 @@ export interface SearchResult {
   item?: CollectionItem
   cmd?: any
   calcResult?: string
-  snippet?: CmdSnippet
+  note?: CmdNote
   inlineQuery?: string
   frecencyScore?: number
   appPath?: string
@@ -70,7 +70,7 @@ export interface SearchResult {
   envAction?: 'start' | 'stop' | 'mgmt'
 }
 
-interface CmdSnippet { id: string; keyword: string; content: string; category: string; createdAt: string }
+interface CmdNote { id: string; name: string; content: string; isFolder: boolean; parentId: string; keyword: string }
 interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
 interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
 
@@ -89,7 +89,7 @@ export interface RecentEntry {
 export interface SearchDeps {
   items: Ref<CollectionItem[]>
   installedApps: Ref<InstalledApp[]>
-  snippets: Ref<CmdSnippet[]>
+  notes: Ref<CmdNote[]>
   systemCommands: ComputedRef<SystemCmd[]>
   query: Ref<string>
   selectedIndex: Ref<number>
@@ -111,7 +111,7 @@ export interface SearchDeps {
 
 export function useCommandSearch(deps: SearchDeps) {
   const { locale } = useI18n()
-  const { items, installedApps, snippets, systemCommands, query, selectedIndex,
+  const { items, installedApps, notes, systemCommands, query, selectedIndex,
           pluginCmdIndex, clipboardUrlSource,
           frecencyScore, frecencyTick, calcPluginScore,
           pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons, envRuntimes, envStatuses, envMgmt } = deps
@@ -242,29 +242,29 @@ export function useCommandSearch(deps: SearchDeps) {
       }
     }
 
-    // 4. 文本片段
-    const snippetResults: SearchResult[] = []
-    for (const s of snippets.value) {
-      const kid = s.keyword.toLowerCase()
-      const cid = s.content.toLowerCase()
-      if (kid.includes(qLC) || cid.includes(qLC) || pinyinMatch(s.keyword, qLC, 's:' + s.id)) {
-        if (!seen.has('snippet-' + s.id)) {
-          seen.add('snippet-' + s.id)
-          const snippetScore = kid === qLC ? 100 : kid.startsWith(qLC) ? 75 : kid.includes(qLC) ? 60 : cid.includes(qLC) ? 55 : 0
-          snippetResults.push({
-            type: 'snippet',
-            label: s.keyword,
-            desc: s.content.slice(0, 80),
-            snippet: s,
-            frecencyScore: frecencyScore('snippet:' + s.id),
-            score: snippetScore,
+    // 4. 笔记
+    const noteResults: SearchResult[] = []
+    for (const n of notes.value) {
+      const nameLC = (n.name || n.keyword || '').toLowerCase()
+      const cid = (n.content || '').toLowerCase()
+      if (nameLC.includes(qLC) || cid.includes(qLC) || pinyinMatch(n.name || n.keyword || '', qLC, 'n:' + n.id)) {
+        if (!seen.has('note-' + n.id)) {
+          seen.add('note-' + n.id)
+          const score = nameLC === qLC ? 100 : nameLC.startsWith(qLC) ? 75 : nameLC.includes(qLC) ? 60 : cid.includes(qLC) ? 55 : 0
+          noteResults.push({
+            type: 'note',
+            label: n.name || n.keyword,
+            desc: (n.content || '').slice(0, 80),
+            note: n,
+            frecencyScore: frecencyScore('note:' + n.id),
+            score,
           })
         }
       }
     }
-    snippetResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
-    if (snippetResults.length > 0) {
-      groups.push({ type: 'snippet', label: t('cmdGroupSnippets'), results: snippetResults })
+    noteResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
+    if (noteResults.length > 0) {
+      groups.push({ type: 'note', label: t('cmdGroupNotes'), results: noteResults })
     }
 
     // 5. 已安装应用
@@ -434,13 +434,13 @@ export function useCommandSearch(deps: SearchDeps) {
       function dedupKey(r: SearchResult): string {
         if (r.pluginId && r.pluginCommandId) return 'plugin:' + r.pluginId + '.' + r.pluginCommandId
         if (r.item?.id) return 'item:' + r.item.id
-        if ((r as any).snippet?.id) return 'snippet:' + (r as any).snippet.id
+        if ((r as any).note?.id) return 'note:' + (r as any).note.id
         if ((r as any).cmd?.id) return 'cmd:' + (r as any).cmd.id
         if (r.appPath) return 'app:' + r.appPath
         return r.label
       }
       const dedupIds = new Set(show.map(dedupKey))
-      // 去重作用于所有分组：app/snippet/system/url 命中 ≥70 时也会进入最佳匹配，
+      // 去重作用于所有分组：app/note/system/url 命中 ≥70 时也会进入最佳匹配，
       // 若只在 plugin/item 分组里过滤，它们仍会同时出现在两组中造成重复。
       for (const g of groups) {
         g.results = g.results.filter(r => !dedupIds.has(dedupKey(r)))
@@ -451,7 +451,7 @@ export function useCommandSearch(deps: SearchDeps) {
     // 应用分组优先于其它内容分组展示（应用排在前面）
     const GROUP_PRIORITY: Record<string, number> = {
       best: 0, 'clipboard-action': 1, calculator: 2, url: 3,
-      app: 4, item: 5, 'quicklink-inline': 6, snippet: 7, system: 8, env: 8.5, plugin: 9,
+      app: 4, item: 5, 'quicklink-inline': 6, note: 7, system: 8, env: 8.5, plugin: 9,
     }
     groups.sort((a, b) => (GROUP_PRIORITY[a.type] ?? 99) - (GROUP_PRIORITY[b.type] ?? 99))
 
@@ -469,8 +469,8 @@ export function useCommandSearch(deps: SearchDeps) {
 
     const itemByKey: Record<string, CollectionItem> = {}
     for (const it of items.value) itemByKey['item:' + it.id] = it
-    const snippetByKey: Record<string, CmdSnippet> = {}
-    for (const s of snippets.value) snippetByKey['snippet:' + s.id] = s
+    const noteByKey: Record<string, CmdNote> = {}
+    for (const n of notes.value) noteByKey['note:' + n.id] = n
     const cmdByKey: Record<string, SystemCmd> = {}
     for (const c of systemCommands.value) cmdByKey['system:' + c.id] = c
 
@@ -488,14 +488,14 @@ export function useCommandSearch(deps: SearchDeps) {
           item,
           frecencyScore: entry.count,
         })
-      } else if (entry.type === 'snippet') {
-        const snippet = snippetByKey[entry.key]
-        if (!snippet) continue
+      } else if (entry.type === 'note') {
+        const note = noteByKey[entry.key]
+        if (!note) continue
         results.push({
-          type: 'snippet',
+          type: 'note',
           label: entry.label,
           desc: entry.description,
-          snippet,
+          note,
           frecencyScore: entry.count,
         })
       } else if (entry.type === 'plugin') {
@@ -600,8 +600,8 @@ export function useCommandSearch(deps: SearchDeps) {
       }
       return { title: r.label, subtitle: r.item.type, lines, kind: 'item' }
     }
-    if (r.type === 'snippet' && (r as any).snippet) {
-      return { title: r.label, subtitle: (r as any).snippet.category, lines: [(r as any).snippet.content], kind: 'snippet' }
+    if (r.type === 'note' && (r as any).note) {
+      return { title: r.label, subtitle: (r as any).note.isFolder ? '📁' : '', lines: [(r as any).note.content], kind: 'note' }
     }
     if (r.type === 'plugin') {
       const last = r.pluginId && r.pluginCommandId ? getPluginLastResult(r.pluginId, r.pluginCommandId) : null

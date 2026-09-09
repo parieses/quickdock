@@ -6,9 +6,10 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Copy, FolderSearch, Play, ClipboardPaste, Save, Gauge
+  Copy, FolderSearch, Play, Save, Gauge
 } from '@lucide/vue'
-import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListSnippets, PasteSnippet, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, GetAllUsage, SaveUrlAsItem, DeleteItem, DeleteSnippet, RevealInExplorer, GetPathQuickInfo } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, ExecuteSystemCommand, OpenItem, HidePaletteWindow, ListNotesTree, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, GetAllUsage, SaveUrlAsItem, DeleteItem, RevealInExplorer, GetPathQuickInfo } from '../../bindings/quickdock/services/appservice'
+import { navigateTo, pendingOpenNoteId } from '../composables/bridge'
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import {
   EnvList,
@@ -188,13 +189,13 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
 ]
 
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'snippet' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env'
 interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
 interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
-interface CmdSnippet { id: string; keyword: string; content: string; category: string; createdAt: string }
+interface CmdNote { id: string; name: string; content: string; isFolder: boolean; parentId: string; keyword: string }
 interface SearchResult {
   type: ResultType; label: string; desc?: string; icon?: any; iconBase64?: string
-  item?: CollectionItem; cmd?: SystemCmd; calcResult?: string; snippet?: CmdSnippet; inlineQuery?: string
+  item?: CollectionItem; cmd?: SystemCmd; calcResult?: string; note?: CmdNote; inlineQuery?: string
   frecencyScore?: number; appPath?: string; appCategory?: string; pluginId?: string; pluginCommandId?: string
   pluginHasFrontend?: boolean; pluginNotRunning?: boolean; inlineInput?: string; pluginResult?: string; score?: number; matchType?: string; url?: string; clipAction?: string; acceptsInput?: boolean
   envRuntimeId?: string; envVersion?: string; envAction?: 'start' | 'stop' | 'mgmt'
@@ -230,7 +231,7 @@ const clipboardUrlSource = ref('')
 const inlineQuicklink = ref<CollectionItem | null>(null)
 const inlineQuery = ref('')
 const inlineInputRef = ref<HTMLInputElement | null>(null)
-const snippets = ref<CmdSnippet[]>([])
+const notes = ref<CmdNote[]>([])
 
 // ---- 系统命令 ----
 const systemCommands = computed<SystemCmd[]>(() => [
@@ -290,9 +291,9 @@ function rebuildPinyinCache() {
     const py = pinyin(item.name, { toneType: 'none', type: 'array' })
     pinyinCache.set('i:' + item.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
   }
-  for (const s of snippets.value) {
-    const py = pinyin(s.keyword, { toneType: 'none', type: 'array' })
-    pinyinCache.set('s:' + s.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
+  for (const n of notes.value) {
+    const py = pinyin(n.name || n.keyword || '', { toneType: 'none', type: 'array' })
+    pinyinCache.set('n:' + n.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
   }
   for (const app of installedApps.value) {
     const py = pinyin(app.name, { toneType: 'none', type: 'array' })
@@ -303,7 +304,7 @@ function rebuildPinyinCache() {
     pinyinCache.set('sys:' + cmd.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
   }
 }
-watch([items, snippets, installedApps], () => { rebuildPinyinCache() })
+watch([items, notes, installedApps], () => { rebuildPinyinCache() })
 watch(systemCommands, () => { rebuildPinyinCache() })
 
 // ---- 项目类型图标 ----
@@ -404,7 +405,7 @@ const {
   groupedResults, allResults, recentResults, displayGroups, displayFlat,
   previewResult, recentCache, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
 } = useCommandSearch({
-  items, installedApps, snippets, systemCommands, query, selectedIndex,
+  items, installedApps, notes, systemCommands, query, selectedIndex,
   pluginCmdIndex, clipboardUrlSource,
   frecencyScore, frecencyTick, calcPluginScore,
   pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons,
@@ -466,7 +467,7 @@ const GRID_COLUMNS = 3 // 结果区每行卡片数（网格列数）
 
 /**
  * 视觉网格导航：结果区是 3 列 grid（每组带跨行 header），若用线性索引 ± GRID_COLUMNS 跳转，
- * 组与组衔接处会错位——某个短分组可能永远点不中（如"na"搜索时的文本片段/系统命令）。
+ * 组与组衔接处会错位——某个短分组可能永远点不中（如"na"搜索时的笔记/系统命令）。
  * 这里按「组 header 占一行」重建每项的视觉行列坐标，↑↓ 走同列上下相邻，保证所见即所得。
  */
 function moveVertical(dir: 1 | -1) {
@@ -673,9 +674,11 @@ async function executeSelected() {
     try { await Browser.OpenURL(result.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }; closePalette()
   } else if (result.type === 'calculator' && result.calcResult) {
     try { await writeClipboard(result.calcResult) } catch {}; closePalette()
-  } else if (result.type === 'snippet' && result.snippet) {
-    recordUsage('snippet:' + result.snippet.id, 'snippet', result.label, result.desc)
-    try { await PasteSnippet(result.snippet.content) } catch (e) { console.error('[CmdPalette] PasteSnippet:', e) }; closePalette()
+  } else if (result.type === 'note' && result.note) {
+    recordUsage('note:' + result.note.id, 'note', result.label, result.desc)
+    pendingOpenNoteId.value = result.note.id
+    navigateTo.value?.('notes')
+    closePalette()
   } else if (result.type === 'app' && result.appPath) {
     recordUsage('app:' + result.label, 'app', result.label, result.desc)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }; closePalette()
@@ -814,13 +817,13 @@ const actionMenuOpen = ref(false)
 const actionMenuIndex = ref(0)
 const actionTarget = computed<SearchResult | undefined>(() => displayFlat.value[selectedIndex.value])
 
-// 结果的"主值"：文件/应用路径、链接、片段内容等，用于复制 / 资源管理器定位
+// 结果的"主值"：文件/应用路径、链接、笔记内容等，用于复制 / 资源管理器定位
 function targetValue(r: SearchResult): string {
   switch (r.type) {
     case 'item': case 'quicklink': case 'quicklink-inline': return r.item?.value || ''
     case 'app': return r.appPath || ''
     case 'url': case 'clipboard-action': return r.url || ''
-    case 'snippet': return r.snippet?.content || ''
+    case 'note': return r.note?.content || ''
     case 'calculator': return r.calcResult || ''
     case 'plugin': return r.label || ''
     default: return ''
@@ -844,12 +847,12 @@ const contextActions = computed<PaletteAction[]>(() => {
   const primaryLabel =
     r.type === 'env' ? (r.envAction === 'stop' ? t('envStop') : r.envAction === 'mgmt' ? t('envEnableMgmt') : t('envStart'))
       : r.type === 'app' ? t('actLaunch')
-        : r.type === 'snippet' ? t('actPasteSnippet')
+        : r.type === 'note' ? t('actOpenNote')
           : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
             : r.type === 'calculator' ? t('actCopyResult')
               : t('actOpen')
   const primaryIcon = r.type === 'env' ? (r.envAction === 'stop' ? Power : r.envAction === 'mgmt' ? Gauge : Play)
-    : r.type === 'snippet' ? ClipboardPaste : r.type === 'calculator' ? Copy : Play
+    : r.type === 'note' ? FileText : r.type === 'calculator' ? Copy : Play
   acts.push({ id: 'primary', label: primaryLabel, icon: primaryIcon, run: () => executeSelected() })
 
   if (r.label) acts.push({ id: 'copy-name', label: t('actCopyName'), icon: Copy, run: () => copyAndClose(r.label) })
@@ -881,10 +884,6 @@ const contextActions = computed<PaletteAction[]>(() => {
   if ((r.type === 'item' || r.type === 'quicklink' || r.type === 'quicklink-inline') && r.item?.id) {
     const id = r.item.id
     acts.push({ id: 'delete-item', label: t('actDeleteItem'), icon: Trash2, danger: true, run: () => deleteItemAndRefocus(id) })
-  }
-  if (r.type === 'snippet' && r.snippet?.id) {
-    const id = r.snippet.id
-    acts.push({ id: 'delete-snippet', label: t('actDeleteSnippet'), icon: Trash2, danger: true, run: () => deleteSnippetAndRefocus(id) })
   }
   return acts
 })
@@ -942,20 +941,6 @@ async function deleteItemAndRefocus(id: string) {
   nextTick(focusInput)
 }
 
-async function deleteSnippetAndRefocus(id: string) {
-  const ok = await toast?.confirm?.(t('confirmDeleteSnippetOne'))
-  if (!ok) { nextTick(focusInput); return }
-  try {
-    unwrap(await DeleteSnippet(id))
-    const idx = snippets.value.findIndex(s => s.id === id)
-    if (idx >= 0) snippets.value.splice(idx, 1)
-    recentCache.value = recentCache.value.filter(e => e.key !== 'snippet:' + id)
-    selectedIndex.value = 0
-    toast?.success?.(t('actSnippetDeleted'))
-  } catch (e) { toast?.error?.(getErrorMessage(e)) }
-  nextTick(focusInput)
-}
-
 // ---- 加载数据 ----
 let itemsLoadGen = 0
 let lastPluginIndexLoad = 0
@@ -985,7 +970,7 @@ async function loadPluginIndex(forceIcons = false) {
   } catch (e) { console.error('[CmdPalette] ListPlugins:', getErrorMessage(e)) }
 }
 
-// 一次性加载全量池（项目 + 应用 + 片段 + 最近使用），后续匹配完全在前端完成，
+// 一次性加载全量池（项目 + 应用 + 笔记 + 最近使用），后续匹配完全在前端完成，
 // 从而支持拼音与子串搜索（后端 FTS5 前缀匹配无法覆盖这两类）。
 async function loadPaletteData() {
   loading.value = true; const gen = ++itemsLoadGen
@@ -999,7 +984,7 @@ async function loadPaletteData() {
       if (gen === itemsLoadGen) { installedApps.value = apps || []; lastAppScan = now }
     }
   } catch (e) { console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e)) }
-  try { const snips = unwrap<CmdSnippet[]>(await ListSnippets()); if (gen !== itemsLoadGen) return; snippets.value = snips || [] } catch (e) { console.error('[CmdPalette] ListSnippets:', getErrorMessage(e)) }
+  try { const notesData = unwrap<CmdNote[]>(await ListNotesTree()); if (gen !== itemsLoadGen) return; notes.value = notesData || [] } catch (e) { console.error('[CmdPalette] ListNotesTree:', getErrorMessage(e)) }
   await refreshRecentCache(gen)
   if (gen === itemsLoadGen) loading.value = false
 }
@@ -1167,7 +1152,7 @@ onUnmounted(() => {
         </div>
         <div
           v-for="(result, iIdx) in group.results"
-          :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.snippet?.id || result.url || iIdx)"
+          :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.note?.id || result.url || iIdx)"
           :class="['result-item', { active: getFlatIndex(gIdx, iIdx) === selectedIndex, selected: selectedSet.has(getFlatIndex(gIdx, iIdx)) }]"
           @click="onResultClick(gIdx, iIdx, $event)"
           @mousemove="selectResult(gIdx, iIdx)"
@@ -1192,8 +1177,8 @@ onUnmounted(() => {
             <template v-else-if="result.type === 'system'">
               <span class="meta-tag">cmd</span>
             </template>
-            <template v-else-if="result.type === 'snippet' && result.snippet?.category">
-              <span class="meta-tag">{{ result.snippet.category }}</span>
+            <template v-else-if="result.type === 'note' && result.note?.name">
+              <span class="meta-tag">{{ result.note.isFolder ? t('notesFolder') : t('notesDoc') }}</span>
             </template>
             <template v-else-if="result.type === 'plugin' && result.matchType">
               <span class="meta-tag">{{ matchTypeI18nKeys[result.matchType] ? t(matchTypeI18nKeys[result.matchType]) : result.matchType }}</span>

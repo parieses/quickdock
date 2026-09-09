@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"quickdock/internal/db"
+	envengine "quickdock/internal/env"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
@@ -24,6 +25,7 @@ import (
 	clipboardsvc "quickdock/services/clipboard"
 	dshsvc "quickdock/services/dsh"
 	envsvc "quickdock/services/env"
+	mcpsvc "quickdock/services/mcp"
 	pluginsvc "quickdock/services/plugin"
 	updatesvc "quickdock/services/update"
 
@@ -201,6 +203,11 @@ func main() {
 	// 剪贴板服务门面：承载剪贴板历史领域方法（宿主保留系统监听层），单独绑定为独立 Wails service
 	clipSvc := clipboardsvc.NewClipboardService(appService)
 
+	// MCP 服务门面：协议/传输在 internal/mcp，本门面注册业务工具并提供前端启停接口。
+	// 依赖剪贴板门面（历史查询工具），故在其后创建。
+	envengine.SetMCPAppVersion(appVersion)
+	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, appVersion)
+
 	// 注入内置插件自动安装回调（在 ServiceStartup DB 就绪后执行）
 	appService.InstallBuiltinPluginsFn = func(mgr *plugin.Manager, database *db.Database) {
 		autoInstallBuiltins(mgr, database, &builtinPlugins)
@@ -234,6 +241,7 @@ func main() {
 			application.NewService(aiSvc),
 			application.NewService(updateSvc),
 			application.NewService(clipSvc),
+			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),
 			application.NewService(notifier),
 			application.NewService(kvStore),

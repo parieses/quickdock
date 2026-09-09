@@ -9,7 +9,7 @@ import (
 // FrecencyEntry 前端需要的 frecency 数据
 type FrecencyEntry struct {
 	Key         string `json:"key"`
-	Type        string `json:"type"`        // item | snippet | plugin | system | app
+	Type        string `json:"type"`        // item | note | plugin | system | app
 	Label       string `json:"label"`       // 显示标题
 	Description string `json:"description"` // 副标题
 	Input       string `json:"input"`       // 插件命令的附加输入（如端口号），供「最近使用」回放

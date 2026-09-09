@@ -136,12 +136,6 @@ func StartConPty(exe string, args []string, dir string) (*ConPty, error) {
 	return startConPty(exe, args, dir, nil)
 }
 
-// StartConPtyWithEnv 同 StartConPty，但用 env 完全替换子进程环境（nil 表示继承）。
-// 内嵌终端据此注入指定运行时的 PATH。
-func StartConPtyWithEnv(exe string, args []string, dir string, env []string) (*ConPty, error) {
-	return startConPty(exe, args, dir, env)
-}
-
 // startConPty 实际实现。
 // 子进程的标准输入/输出/错误全部接到伪控制台（对它而言就是控制台），
 // 宿主通过返回的 *ConPty.Read 读取合并输出。dir 为空时继承当前工作目录。

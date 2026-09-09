@@ -36,7 +36,7 @@ var validTables = map[string]bool{
 	"app_state":         true,
 	"schema_version":    true,
 	"clipboard_entries": true,
-	"snippets":          true,
+	"notes":             true,
 	"usage_frecency":    true,
 	"todos":             true,
 	"scheduled_tasks":   true,
@@ -111,7 +111,7 @@ var validColumns = map[string]bool{
 	"success": true, "duration_ms": true, "result": true, "error": true, "trigger": true,
 	// frecency 附加列
 	"input": true,
-	// snippets 笔记树列
+	// notes 笔记树列
 	"is_folder": true, "is_note": true, "format": true,
 }
 

@@ -710,6 +710,7 @@ onMounted(() => {
               >
                 <span class="kanban-card-name">{{ card.title }}</span>
                 <div class="kanban-card-meta">
+                  <button class="status-pill" :class="'st-' + (card.status || 'todo')" @click.stop="cycleStatus(card)">{{ statusLabel(card.status) }}</button>
                   <i :class="['pri-dot', 'p-' + card.priority]"></i>
                   <template v-for="tg in parseTags(card.tags)" :key="tg">
                     <span class="tag-chip" @click.stop="activeTag = tg">{{ tg }}</span>

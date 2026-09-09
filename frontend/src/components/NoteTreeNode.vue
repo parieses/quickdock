@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Folder, FileText, ChevronRight, ChevronDown, Plus, FolderPlus, Pencil, Trash2 } from '@lucide/vue'
-import type { Snippet } from '../types'
+import type { Note } from '../types'
 
 interface Props {
   node: any
@@ -20,6 +20,8 @@ const emit = defineEmits<{
   (e: 'select', node: any): void
   (e: 'rename-start', node: any): void
   (e: 'rename-commit', id: string): void
+  (e: 'rename-input', value: string): void
+  (e: 'rename-cancel'): void
   (e: 'del', node: any): void
   (e: 'create-folder', folderId: string): void
   (e: 'create-doc', folderId: string): void
@@ -31,6 +33,14 @@ const n = computed<any>(() => props.node)
 const isFolder = computed(() => n.value.isFolder)
 const isOpen = computed(() => props.expanded.has(n.value.id))
 const hasKids = computed(() => n.value.children?.length > 0)
+
+// 进入编辑态时自动聚焦并全选，否则焦点未进入输入框，点走不会触发 blur → 编辑态卡死去不掉
+const inputRef = ref<HTMLInputElement | null>(null)
+watch(
+  () => props.editingId === props.node.id,
+  (active) => { if (active) nextTick(() => { inputRef.value?.focus(); inputRef.value?.select() }) },
+  { immediate: true },
+)
 
 function onDrop(e: DragEvent) {
   e.preventDefault(); e.stopPropagation()
@@ -59,7 +69,16 @@ function onDragStart(e: DragEvent) {
       <span v-else class="tn-spacer"></span>
       <component :is="isFolder ? Folder : FileText" :size="13" class="tn-icon" />
       <template v-if="editingId === node.id">
-        <input :value="editName" class="tn-input" @keyup.enter="emit('rename-commit', node.id)" @blur="emit('rename-commit', node.id)" @click.stop />
+        <input
+          ref="inputRef"
+          :value="editName"
+          class="tn-input"
+          @input="emit('rename-input', ($event.target as HTMLInputElement).value)"
+          @keyup.enter="emit('rename-commit', node.id)"
+          @keyup.esc="emit('rename-cancel')"
+          @blur="emit('rename-commit', node.id)"
+          @click.stop
+        />
       </template>
       <template v-else>
         <span class="tn-name">{{ node.name || node.keyword }}</span>
@@ -80,6 +99,7 @@ function onDragStart(e: DragEvent) {
         :selected-doc="selectedDoc" :selected-folder="selectedFolder"
         @toggle="emit('toggle', $event)" @select="emit('select', $event)"
         @rename-start="emit('rename-start', $event)" @rename-commit="emit('rename-commit', $event)"
+        @rename-input="(v: string) => emit('rename-input', v)" @rename-cancel="emit('rename-cancel')"
         @del="emit('del', $event)" @create-folder="emit('create-folder', $event)" @create-doc="emit('create-doc', $event)"
         @drop-node="(d: string, t: string) => emit('drop-node', d, t)"
       />

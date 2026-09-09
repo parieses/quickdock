@@ -4,7 +4,36 @@ import (
 	"strings"
 )
 
-// ---- 笔记树（由文本片段升级：文件夹 + Markdown 文档）----
+// ---- 笔记树（文件夹 + Markdown 文档）----
+
+const quickNoteKeyword = "__quicknote__"
+
+// GetNote 读取快捷笔记内容（find-or-create 固定关键词笔记）
+func (a *AppService) GetNote() *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	n, err := a.DB.GetOrCreateNote(quickNoteKeyword)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(n)
+}
+
+// SaveNote 保存快捷笔记内容（整段防抖保存，upsert 固定关键词笔记）
+func (a *AppService) SaveNote(content string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	n, err := a.DB.GetOrCreateNote(quickNoteKeyword)
+	if err != nil {
+		return Fail(err)
+	}
+	if err := a.DB.UpdateNote(n.ID, content); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
+}
 
 // ListNotesTree 返回全部笔记节点（文件夹 + 文档），前端拼树。
 func (a *AppService) ListNotesTree() *ApiResult {
@@ -51,7 +80,7 @@ func (a *AppService) RenameNoteNode(id, name string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.DB.RenameSnippetNode(id, name); err != nil {
+	if err := a.DB.RenameNoteNode(id, name); err != nil {
 		return Fail(err)
 	}
 	return Ok(nil)
@@ -84,7 +113,7 @@ func (a *AppService) MoveNoteNode(id, newParentId string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.DB.MoveSnippetNode(id, newParentId); err != nil {
+	if err := a.DB.MoveNoteNode(id, newParentId); err != nil {
 		return Fail(err)
 	}
 	return Ok(nil)
@@ -95,7 +124,7 @@ func (a *AppService) DeleteNoteNode(id string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.DB.DeleteSnippetNode(id); err != nil {
+	if err := a.DB.DeleteNoteNode(id); err != nil {
 		return Fail(err)
 	}
 	return Ok(nil)

@@ -33,7 +33,7 @@ const validationMessage = ref('')
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
 
-// 是否包含 textarea 字段：含多行文本的弹框（如文本片段）自动加宽加高，
+// 是否包含 textarea 字段：含多行文本的弹框（如笔记内容）自动加宽加高，
 // 纯文本字段的弹框（场景/工作区/集合名）保持原有紧凑尺寸。
 const hasTextarea = computed(() => props.fields.some(f => f.type === 'textarea'))
 

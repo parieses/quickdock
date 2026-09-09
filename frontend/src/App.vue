@@ -28,7 +28,7 @@ const SettingsModal = defineAsyncComponent(() => import('./components/SettingsMo
 const OnboardingPage = defineAsyncComponent(() => import('./components/OnboardingPage.vue'))
 const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
 const PluginManagerPage = defineAsyncComponent(() => import('./components/PluginManagerPage.vue'))
-const SnippetManagerPage = defineAsyncComponent(() => import('./components/SnippetManagerPage.vue'))
+const NoteManagerPage = defineAsyncComponent(() => import('./components/NoteManagerPage.vue'))
 const PluginPage = defineAsyncComponent(() => import('./components/PluginPage.vue'))
 const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
 const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
@@ -256,8 +256,8 @@ const activeConfirm = computed(() =>
           </template>
         </template>
 
-        <!-- 文本片段页面 -->
-        <SnippetManagerPage v-else-if="currentPage === 'snippets'" />
+        <!-- 笔记页面 -->
+        <NoteManagerPage v-else-if="currentPage === 'notes'" />
 
         <!-- 剪贴板历史页面 -->
         <div v-else-if="currentPage === 'clipboard'" class="clipboard-page">

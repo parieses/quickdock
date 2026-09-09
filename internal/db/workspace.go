@@ -1,7 +1,10 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
+
+	"quickdock/internal/logger"
 )
 
 // ---- 工作空间 ----
@@ -51,7 +54,66 @@ func (d *Database) UpdateWorkspace(id, name string) error {
 }
 
 func (d *Database) DeleteWorkspace(id string) error {
-	return d.ExecuteParams("DELETE FROM workspaces WHERE id = ?", []interface{}{id})
+	// 级联删除：先删 items → collections → scenes，最后删 workspace
+	// 使用事务确保原子性
+	return d.Transaction(func(tx *sql.Tx) error {
+		// 1. 获取该工作空间下所有 scene IDs
+		rows, err := tx.Query("SELECT id FROM scenes WHERE workspace_id = ?", id)
+		if err != nil {
+			return err
+		}
+		sceneIDs := make([]string, 0)
+		for rows.Next() {
+			var sid string
+			if err := rows.Scan(&sid); err != nil {
+				continue
+			}
+			sceneIDs = append(sceneIDs, sid)
+		}
+		rows.Close()
+
+		// 2. 收集所有 collection IDs（通过 scene IDs）
+		collectionIDs := make([]string, 0)
+		for _, sid := range sceneIDs {
+			crows, err := tx.Query("SELECT id FROM collections WHERE scene_id = ?", sid)
+			if err != nil {
+				continue
+			}
+			for crows.Next() {
+				var cid string
+				if err := crows.Scan(&cid); err != nil {
+					continue
+				}
+				collectionIDs = append(collectionIDs, cid)
+			}
+			crows.Close()
+		}
+
+		// 3. 删除 items
+		for _, cid := range collectionIDs {
+			if _, err := tx.Exec("DELETE FROM items WHERE collection_id = ?", cid); err != nil {
+				logger.W("QuickDock: 删除 items 失败 (collection=%s): %v", cid, err)
+			}
+		}
+
+		// 4. 删除 collections
+		for _, sid := range sceneIDs {
+			if _, err := tx.Exec("DELETE FROM collections WHERE scene_id = ?", sid); err != nil {
+				logger.W("QuickDock: 删除 collections 失败 (scene=%s): %v", sid, err)
+			}
+		}
+
+		// 5. 删除 scenes
+		for _, sid := range sceneIDs {
+			if _, err := tx.Exec("DELETE FROM scenes WHERE id = ?", sid); err != nil {
+				logger.W("QuickDock: 删除 scene 失败: %v", err)
+			}
+		}
+
+		// 6. 删除 workspace
+		_, err = tx.Exec("DELETE FROM workspaces WHERE id = ?", id)
+		return err
+	})
 }
 
 func (d *Database) GetWorkspace(id string) (*Workspace, error) {
@@ -119,6 +181,40 @@ func (d *Database) UpdateScene(id string, updates map[string]interface{}) error 
 }
 
 func (d *Database) DeleteScene(id string) error {
-	return d.ExecuteParams("DELETE FROM scenes WHERE id = ?", []interface{}{id})
+	// 级联删除：先删该 scene 下的 collections → items，最后删 scene
+	return d.Transaction(func(tx *sql.Tx) error {
+		// 1. 获取该 scene 下的所有 collection IDs
+		rows, err := tx.Query("SELECT id FROM collections WHERE scene_id = ?", id)
+		if err != nil {
+			return err
+		}
+		collectionIDs := make([]string, 0)
+		for rows.Next() {
+			var cid string
+			if err := rows.Scan(&cid); err != nil {
+				continue
+			}
+			collectionIDs = append(collectionIDs, cid)
+		}
+		rows.Close()
+
+		// 2. 删除 items
+		for _, cid := range collectionIDs {
+			if _, err := tx.Exec("DELETE FROM items WHERE collection_id = ?", cid); err != nil {
+				logger.W("QuickDock: 删除 items 失败 (collection=%s): %v", cid, err)
+			}
+		}
+
+		// 3. 删除 collections
+		for _, cid := range collectionIDs {
+			if _, err := tx.Exec("DELETE FROM collections WHERE id = ?", cid); err != nil {
+				logger.W("QuickDock: 删除 collection 失败: %v", err)
+			}
+		}
+
+		// 4. 删除 scene
+		_, err = tx.Exec("DELETE FROM scenes WHERE id = ?", id)
+		return err
+	})
 }
 

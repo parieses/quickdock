@@ -112,8 +112,8 @@ export interface Snapshot {
   created_at: string
 }
 
-// 文本片段
-export interface Snippet {
+// 笔记节点
+export interface Note {
   id: string
   keyword: string
   content: string

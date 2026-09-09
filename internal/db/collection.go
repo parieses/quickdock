@@ -1,7 +1,10 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
+
+	"quickdock/internal/logger"
 )
 
 func (d *Database) ListCollections(sceneID string) ([]Collection, error) {
@@ -57,6 +60,13 @@ func (d *Database) UpdateCollection(id string, updates map[string]interface{}) e
 }
 
 func (d *Database) DeleteCollection(id string) error {
-	return d.ExecuteParams("DELETE FROM collections WHERE id = ?", []interface{}{id})
+	// 级联删除 items
+	return d.Transaction(func(tx *sql.Tx) error {
+		if _, err := tx.Exec("DELETE FROM items WHERE collection_id = ?", id); err != nil {
+			logger.W("QuickDock: 删除 items 失败 (collection=%s): %v", id, err)
+		}
+		_, err := tx.Exec("DELETE FROM collections WHERE id = ?", id)
+		return err
+	})
 }
 

@@ -9,6 +9,22 @@ export default defineConfig({
     port: Number(process.env.WAILS_VITE_PORT) || 9245,
     strictPort: true,
   },
+  // Vite 8 (rolldown) dev 模式下，运行时发现新依赖会触发二次预构建（re-optimize），
+  // 该路径有已知的 `browserHash` 崩溃（error while updating dependencies）。
+  // 预先声明依赖，让优化器在启动时一次性完成，避免中途 re-optimize。
+  optimizeDeps: {
+    include: [
+      "vue",
+      "vue-i18n",
+      "pinia",
+      "marked",
+      "dompurify",
+      "pinyin-pro",
+      "@lucide/vue",
+      "@floating-ui/vue",
+      "@wailsio/runtime",
+    ],
+  },
   plugins: [
     vue(),
     wails("./bindings"),

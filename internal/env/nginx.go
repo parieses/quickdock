@@ -240,46 +240,30 @@ func (n *NginxRuntime) Stop(version string) error {
 	return nil
 }
 
-// runningVersion 返回当前默认端口实际在跑的 Nginx 版本；无运行返回 ""。
-// 优先用本会话拉起的句柄（最准确），否则按监听进程的可执行文件路径反查到具体版本目录。
-func (n *NginxRuntime) runningVersion() string {
-	if v, _ := svcMgr.info(RuntimeNginx); v != "" {
-		return v
-	}
-	if !isPortOpen(nginxDefaultPort) {
-		return ""
-	}
-	pid := findListenPID(nginxDefaultPort)
-	if pid == 0 {
-		return ""
-	}
-	exe := processExePath(pid)
-	if exe == "" {
-		return ""
-	}
-	for _, ins := range n.InstalledVersions() {
-		target := ins.Path
-		if ins.Scope == "portable" {
-			target = n.ExeFor(ins.Version)
-		}
-		if strings.EqualFold(exe, target) {
-			return ins.Version
-		}
-	}
-	return ""
-}
+// runningVersion 已拆除：版本归属逻辑统一收敛到包级 Probe（见 probe.go），
+// nginx 的 Status 直接复用默认端口探测。
 
 func (n *NginxRuntime) Status(version string) ServiceStatus {
 	port := nginxDefaultPort
 	st := ServiceStatus{Running: false, Port: port}
-	// 仅当实际运行的版本就是本次查询的版本时才标记运行中，避免多版本互相串状态
-	if n.runningVersion() == version {
+	installs := n.InstalledVersions()
+	res := Probe(RuntimeRunningProbe{
+		Kind:     RuntimeNginx,
+		Port:     port,
+		ExeNames: []string{"nginx.exe", "nginx"},
+		Installs: installs,
+	})
+	if !res.Running {
+		return st
+	}
+	st.PID = res.PID
+	// 仅当实际运行版本与查询版本一致才标记运行中，避免多版本互相串状态（多版本全亮）。
+	if res.Version == version {
 		st.Running = true
 		st.Version = version
-		st.PID = svcMgr.pid(RuntimeNginx)
-		if st.PID == 0 {
-			st.PID = findListenPID(port)
-		}
+	} else if res.Version == "" && len(installs) == 1 {
+		st.Running = true
+		st.Version = version
 	}
 	return st
 }

@@ -9,7 +9,6 @@ import (
 	dshcore "quickdock/internal/dsh"
 	"quickdock/internal/env"
 	"quickdock/internal/plugin"
-	"quickdock/internal/terminal"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
@@ -88,9 +87,6 @@ type AppService struct {
 
 	// 环境管理：Node/PHP/Go/Redis/Nginx 便携运行时（参考 FlyEnv 的部署与版本切换）
 	Env *env.Manager
-
-	// 内嵌终端会话管理（懒创建：未打开终端页时不占资源）
-	Term *terminal.Manager
 }
 
 // App 返回底层 Wails 应用实例（供拆分到子包的服务通过回指访问未导出字段）。
