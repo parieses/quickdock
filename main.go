@@ -23,12 +23,19 @@ import (
 	"quickdock/services"
 	aisvc "quickdock/services/ai"
 	clipboardsvc "quickdock/services/clipboard"
+	collectionsvc "quickdock/services/collection"
 	diagsvc "quickdock/services/diag"
 	dshsvc "quickdock/services/dsh"
 	envsvc "quickdock/services/env"
+	frecencysvc "quickdock/services/frecency"
+	itemsvc "quickdock/services/item"
 	mcpsvc "quickdock/services/mcp"
 	monitorsvc "quickdock/services/monitor"
+	notesvc "quickdock/services/note"
 	pluginsvc "quickdock/services/plugin"
+	portsvc "quickdock/services/port"
+	scenesvc "quickdock/services/scene"
+	snapshotsvc "quickdock/services/snapshot"
 	systemsvc "quickdock/services/system"
 	todosvc "quickdock/services/todo"
 	updatesvc "quickdock/services/update"
@@ -215,10 +222,19 @@ func main() {
 	todoSvc := todosvc.NewTodoService(appService)
 	monitorSvc := monitorsvc.NewMonitorService(appService)
 
+	// 笔记/收藏/场景/快照/项目/端口/频率 门面：承载剩余纯 CRUD 领域方法，单独绑定为独立 Wails service
+	noteSvc := notesvc.NewNoteService(appService)
+	collectionSvc := collectionsvc.NewCollectionService(appService)
+	frecencySvc := frecencysvc.NewFrecencyService(appService)
+	sceneSvc := scenesvc.NewSceneService(appService)
+	snapshotSvc := snapshotsvc.NewSnapshotService(appService)
+	itemSvc := itemsvc.NewItemService(appService)
+	portSvc := portsvc.NewPortService(appService)
+
 	// MCP 服务门面：协议/传输在 internal/mcp，本门面注册业务工具并提供前端启停接口。
-	// 依赖剪贴板/工作空间/待办/诊断/系统门面（工具复用其能力），故在其后创建。
+	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合门面（工具复用其能力），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
-	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, appVersion)
+	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, appVersion)
 
 	// 注入内置插件自动安装回调（在 ServiceStartup DB 就绪后执行）
 	appService.InstallBuiltinPluginsFn = func(mgr *plugin.Manager, database *db.Database) {
@@ -258,6 +274,13 @@ func main() {
 			application.NewService(workspaceSvc),
 			application.NewService(todoSvc),
 			application.NewService(monitorSvc),
+			application.NewService(noteSvc),
+			application.NewService(collectionSvc),
+			application.NewService(frecencySvc),
+			application.NewService(sceneSvc),
+			application.NewService(snapshotSvc),
+			application.NewService(itemSvc),
+			application.NewService(portSvc),
 			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),
 			application.NewService(notifier),
@@ -453,7 +476,7 @@ func initUpdater(app *application.App, version string) error {
 
 	// 用镜像 provider 包装：直连 GitHub 下载失败时自动尝试加速镜像（国内网络）。
 	// 签名验证不受影响（镜像只改传输 URL，无法篡改内容）。
-	provider := updater.Provider(services.NewMirrorUpdaterProvider(ep, httpClient))
+	provider := updater.Provider(updatesvc.NewMirrorUpdaterProvider(ep, httpClient))
 
 	return app.Updater.Init(updater.Config{
 		CurrentVersion: version,

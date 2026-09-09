@@ -17,8 +17,12 @@ import (
 	"quickdock/internal/platform"
 	"quickdock/services"
 	clipboardsvc "quickdock/services/clipboard"
+	collectionsvc "quickdock/services/collection"
 	diagsvc "quickdock/services/diag"
+	frecencysvc "quickdock/services/frecency"
+	notesvc "quickdock/services/note"
 	pluginsvc "quickdock/services/plugin"
+	portsvc "quickdock/services/port"
 	systemsvc "quickdock/services/system"
 	todosvc "quickdock/services/todo"
 	workspacesvc "quickdock/services/workspace"
@@ -29,19 +33,23 @@ const builtinVersion = "builtin"
 
 // MCPService 前端绑定服务：MCP 的启停、状态、工具清单与客户端配置。
 type MCPService struct {
-	App       *services.AppService
-	Clip      *clipboardsvc.ClipboardService
-	Plugin    *pluginsvc.PluginService
-	Workspace *workspacesvc.WorkspaceService
-	Todo      *todosvc.TodoService
-	Diag      *diagsvc.DiagService
-	System    *systemsvc.SystemService
-	version   string
+	App        *services.AppService
+	Clip       *clipboardsvc.ClipboardService
+	Plugin     *pluginsvc.PluginService
+	Workspace  *workspacesvc.WorkspaceService
+	Todo       *todosvc.TodoService
+	Diag       *diagsvc.DiagService
+	System     *systemsvc.SystemService
+	Note       *notesvc.NoteService
+	Frecency   *frecencysvc.FrecencyService
+	Port       *portsvc.PortService
+	Collection *collectionsvc.CollectionService
+	version    string
 }
 
 // NewMCPService 创建 MCP 绑定服务，并注册业务工具。
-func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, version string) *MCPService {
-	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, version: version}
+func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, note *notesvc.NoteService, frecency *frecencysvc.FrecencyService, port *portsvc.PortService, collection *collectionsvc.CollectionService, version string) *MCPService {
+	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, Note: note, Frecency: frecency, Port: port, Collection: collection, version: version}
 	s.registerTools()
 	return s
 }
@@ -247,7 +255,7 @@ func (s *MCPService) registerTools() {
 		map[string]any{"query": str("关键词，留空返回全部")})
 
 	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.App.GetRecentUsage(mcpsrv.ArgInt(args, "limit", 10)))
+		return unwrap(s.Frecency.GetRecentUsage(mcpsrv.ArgInt(args, "limit", 10)))
 	}, read, "recent_items", "列出最近使用过的快捷项", nil,
 		map[string]any{"limit": intp("返回条数，默认 10")})
 
@@ -256,7 +264,7 @@ func (s *MCPService) registerTools() {
 	}, read, "todo_list", "列出所有待办", nil, nil)
 
 	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.App.SearchNotesTree(mcpsrv.Arg(args, "query")))
+		return unwrap(s.Note.SearchNotesTree(mcpsrv.Arg(args, "query")))
 	}, read, "note_search", "搜索笔记（标题与正文）", []string{"query"},
 		map[string]any{"query": str("搜索关键词")})
 
@@ -269,7 +277,7 @@ func (s *MCPService) registerTools() {
 		map[string]any{"limit": intp("返回条数，默认 20")})
 
 	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.App.ListListeningPorts())
+		return unwrap(s.Port.ListListeningPorts())
 	}, read, "port_list", "列出本机正在监听的端口与对应进程", nil, nil)
 
 	// ---- 低危写 ----
@@ -314,7 +322,7 @@ func (s *MCPService) registerTools() {
 		}
 		for _, it := range items {
 			if it.ID == id {
-				if r := s.App.OpenItem(it); r != nil && r.Code != 0 {
+				if r := s.Collection.OpenItem(it); r != nil && r.Code != 0 {
 					return nil, errors.New(r.Msg)
 				}
 				return "已打开 " + it.Name, nil
@@ -368,7 +376,7 @@ func (s *MCPService) registerTools() {
 		if name == "" {
 			return nil, errors.New("缺少参数 name")
 		}
-		return unwrap(s.App.CreateNoteDoc(
+		return unwrap(s.Note.CreateNoteDoc(
 			mcpsrv.Arg(args, "parentId"),
 			name,
 			mcpsrv.Arg(args, "content"),
@@ -387,7 +395,7 @@ func (s *MCPService) registerTools() {
 		if id == "" {
 			return nil, errors.New("缺少参数 id（用 note_search 获取）")
 		}
-		return unwrap(s.App.UpdateNoteDoc(id, mcpsrv.Arg(args, "content"), mcpsrv.Arg(args, "tags")))
+		return unwrap(s.Note.UpdateNoteDoc(id, mcpsrv.Arg(args, "content"), mcpsrv.Arg(args, "tags")))
 	}, write, "note_update", "更新笔记正文与标签。tags 为 JSON 数组字符串（如 [\"a\",\"b\"]），留空则清空", []string{"id"},
 		map[string]any{
 			"id":      str("笔记 id"),
@@ -400,7 +408,7 @@ func (s *MCPService) registerTools() {
 		if content == "" {
 			return nil, errors.New("缺少参数 content")
 		}
-		return unwrap(s.App.SaveNote(content))
+		return unwrap(s.Note.SaveNote(content))
 	}, write, "note_quick", "把一段文本写入固定「快捷笔记」（覆盖式 upsert）。适合让 AI 把产出直接塞回 QuickDock 当草稿", []string{"content"},
 		map[string]any{"content": str("要保存的文本内容")})
 
@@ -451,7 +459,7 @@ func (s *MCPService) registerTools() {
 		if pid <= 0 {
 			return nil, errors.New("缺少或无效的参数 pid")
 		}
-		return unwrap(s.App.KillProcess(pid))
+		return unwrap(s.Port.KillProcess(pid))
 	}, mcpsrv.LevelRisk, "process_kill", "结束指定 PID 的进程（高危：误杀会导致数据丢失）。需先在环境管理页开启高危等级", []string{"pid"},
 		map[string]any{"pid": intp("要结束的进程 PID")})
 

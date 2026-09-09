@@ -2,7 +2,7 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Network, RefreshCw, Search, Trash2 } from '@lucide/vue'
-import { ListListeningPorts, KillProcess } from '../../bindings/quickdock/services/appservice'
+import { ListListeningPorts, KillProcess } from '../../bindings/quickdock/services/port/portservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import ConfirmDialog from './ConfirmDialog.vue'

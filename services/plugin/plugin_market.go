@@ -4,6 +4,8 @@ import dlutil "quickdock/internal/dl"
 
 import "quickdock/services"
 
+import updatesvc "quickdock/services/update"
+
 import (
 	"archive/zip"
 	"encoding/json"
@@ -181,7 +183,7 @@ func (p *PluginService) InstallPluginFromURL(url string) *services.ApiResult {
 func pluginDownloadCandidates(url string) []string {
 	urls := []string{url}
 	if strings.Contains(url, "github.com/") || strings.Contains(url, "githubusercontent.com/") {
-		for _, m := range services.UpdateMirrorDefaults {
+		for _, m := range updatesvc.UpdateMirrorDefaults {
 			urls = append(urls, m+url)
 		}
 	}

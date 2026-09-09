@@ -8,8 +8,12 @@ import {
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
   Copy, FolderSearch, Play, Save, Gauge
 } from '@lucide/vue'
-import { ListAllItems, OpenItem, HidePaletteWindow, ListNotesTree, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, GetAllUsage, SaveUrlAsItem, DeleteItem, GetPathQuickInfo } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, SaveUrlAsItem } from '../../bindings/quickdock/services/appservice'
 import { ExecuteSystemCommand, RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
+import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
+import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
+import { GetAllUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
+import { DeleteItem, GetPathQuickInfo } from '../../bindings/quickdock/services/item/itemservice'
 import { navigateTo, pendingOpenNoteId } from '../composables/bridge'
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import {

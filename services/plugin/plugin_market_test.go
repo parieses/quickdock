@@ -13,22 +13,22 @@ import (
 	"testing"
 
 	dlutil "quickdock/internal/dl"
-	"quickdock/services"
+	updatesvc "quickdock/services/update"
 )
 
 // TestPluginDownloadCandidates 锁定镜像候选规则：GitHub URL 直连优先 + 镜像追加，
-// 非 GitHub 源保持单一直连。镜像列表要与设置页更新共用（services.UpdateMirrorDefaults）。
+// 非 GitHub 源保持单一直连。镜像列表要与设置页更新共用（updatesvc.UpdateMirrorDefaults）。
 func TestPluginDownloadCandidates(t *testing.T) {
 	gh := "https://github.com/parieses/quickdock-plugins/releases/latest/download/x.zip"
 	got := pluginDownloadCandidates(gh)
-	want := len(services.UpdateMirrorDefaults) + 1
+	want := len(updatesvc.UpdateMirrorDefaults) + 1
 	if len(got) != want {
 		t.Fatalf("GitHub URL 候选数: got %d, want %d", len(got), want)
 	}
 	if got[0] != gh {
 		t.Fatalf("首位应为直连: got %s", got[0])
 	}
-	for i, m := range services.UpdateMirrorDefaults {
+	for i, m := range updatesvc.UpdateMirrorDefaults {
 		if got[i+1] != m+gh {
 			t.Fatalf("镜像 %d 拼接错误: got %s, want %s", i, got[i+1], m+gh)
 		}

@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { HardDrive, RotateCcw, Trash2, Plus } from '@lucide/vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { CreateSnapshot, ListSnapshots, DeleteSnapshot, RestoreSnapshot } from '../../bindings/quickdock/services/appservice'
+import { CreateSnapshot, ListSnapshots, DeleteSnapshot, RestoreSnapshot } from '../../bindings/quickdock/services/snapshot/snapshotservice'
 import type { Snapshot, ToastAPI } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 

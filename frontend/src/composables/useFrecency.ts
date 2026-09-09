@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { RecordUsage, RecordUsageEx, GetAllUsage } from '../../bindings/quickdock/services/appservice'
+import { RecordUsage, RecordUsageEx, GetAllUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
 import { unwrap } from '../utils/api'
 import { logWarn } from '../utils/logger'
 

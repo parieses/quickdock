@@ -1,4 +1,4 @@
-﻿package services
+package services
 
 import (
 	"context"
@@ -177,4 +177,3 @@ func (a *AppService) ServiceShutdown() error {
 	}
 	return nil
 }
-

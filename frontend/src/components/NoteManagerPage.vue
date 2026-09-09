@@ -18,7 +18,7 @@ import {
   MoveNoteNode,
   DeleteNoteNode,
   SetNoteDocFormat,
-} from '../../bindings/quickdock/services/appservice'
+} from '../../bindings/quickdock/services/note/noteservice'
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import {
   Trash2, Search, X, FolderPlus, FileText, Folder,

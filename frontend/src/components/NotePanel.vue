@@ -2,7 +2,7 @@
 import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { StickyNote, Check, Loader2, MessageCircleQuestion } from '@lucide/vue'
-import { GetNote, SaveNote } from '../../bindings/quickdock/services/appservice'
+import { GetNote, SaveNote } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
 import { aiDraft, navigateTo } from '../composables/bridge'
 
