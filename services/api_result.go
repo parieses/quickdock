@@ -1,6 +1,6 @@
 package services
 
-import "log"
+import "quickdock/internal/logger"
 
 // ApiResult 统一 API 返回结构
 // code: 0=成功, 1=失败
@@ -22,7 +22,7 @@ func Fail(err error) *ApiResult {
 	if err == nil {
 		return &ApiResult{Code: 1, Msg: "unknown error"}
 	}
-	log.Printf("[ERR] %v", err)
+	logger.E("[ERR] %v", err)
 	return &ApiResult{Code: 1, Msg: err.Error()}
 }
 
@@ -71,7 +71,7 @@ func Wrap[T any](val T, err error) *ApiResult {
 // 注意：不再需要手动加锁，db.Database 内部已加锁
 func (a *AppService) dbOK() *ApiResult {
 	if a.DB == nil {
-		log.Println("[ERR] database not initialized")
+		logger.E("[ERR] database not initialized")
 		return FailMsg("database not initialized")
 	}
 	return nil

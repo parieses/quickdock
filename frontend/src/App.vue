@@ -70,12 +70,12 @@ interface EnvProbe { nodeFound?: boolean; dshInstalled?: boolean }
 const dshOpening = ref(false)
 // 本会话内已确认 node+dsh 就绪后不再重复探测：DetectNodeEnv() 每次会 spawn node/npx 子进程
 // 测版本（~1s），dsh 已装好的情况下纯属浪费。后端 Start() 仍会兜底检查入口存在。
-let dshEnvReady = false
+const dshEnvReady = ref(false)
 async function openDSH() {
   if (dshOpening.value) return // 防连点：首启可能耗时数秒，避免开多个窗口
   dshOpening.value = true
   try {
-    if (!dshEnvReady) {
+    if (!dshEnvReady.value) {
       const st = unwrap<EnvProbe | null>(await DetectNodeEnv())
       if (!st?.nodeFound || !st.dshInstalled) {
         // 新电脑：node+dsh 一起自动装；装了 node 没装 dsh：只补 dsh
@@ -94,7 +94,7 @@ async function openDSH() {
           const p = (payload?.data ?? payload) as { stage: string; message?: string }
           if (p?.stage === 'done') {
             off()
-            dshEnvReady = true
+            dshEnvReady.value = true
             success(t('dshLaunching'))
             try {
               unwrap(await OpenDSHWindow())
@@ -109,12 +109,12 @@ async function openDSH() {
         unwrap(await SetupDSH())
         return
       }
-      dshEnvReady = true
+      dshEnvReady.value = true
     }
     success(t('dshLaunching'))
     unwrap(await OpenDSHWindow())
   } catch (e: any) {
-    dshEnvReady = false // 环境可能已变化（如 dsh 被卸载），下次点击重新探测
+    dshEnvReady.value = false // 环境可能已变化（如 dsh 被卸载），下次点击重新探测
     error(getErrorMessage(e))
     // 出错时同样回退到环境管理的 harness 区块，让用户手动重试
     currentPage.value = 'environments'
@@ -375,3 +375,4 @@ body {
   overflow: hidden;
 }
 </style>
+

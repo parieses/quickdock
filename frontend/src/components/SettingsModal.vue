@@ -32,6 +32,7 @@ import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { ToastAPI } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{
@@ -157,7 +158,7 @@ async function checkForUpdates() {
 
 function openUrl(url: string) {
   Browser.OpenURL(url).catch((e: any) => {
-    console.error('[Settings] OpenURL:', e)
+    logErr('Settings', e)
   })
 }
 
@@ -991,3 +992,4 @@ async function toggleAutoStart() {
 .field-hint { font-size: 11px; color: var(--color-text-disabled); }
 .field-checkbox { width: 16px; height: 16px; cursor: pointer; accent-color: var(--color-accent); }
 </style>
+

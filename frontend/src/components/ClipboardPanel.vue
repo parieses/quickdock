@@ -17,6 +17,7 @@ import {
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import { logErr } from '../utils/logger'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -243,7 +244,7 @@ async function loadEntries() {
   } catch (e) {
     if (gen !== entriesLoadGen) return
     const msg = getErrorMessage(e)
-    console.error('QuickDock: 加载剪贴板历史失败:', msg)
+    logErr('ClipboardPanel', msg)
     if (toast?.error) {
       toast.error(t('loadFailed') + ': ' + msg)
     }
@@ -1076,3 +1077,4 @@ onUnmounted(() => {
   overflow: hidden; text-overflow: ellipsis;
 }
 </style>
+

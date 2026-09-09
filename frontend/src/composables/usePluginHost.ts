@@ -231,11 +231,13 @@ export function usePluginHost(opts: PluginHostOptions) {
       try {
         const raw = await ExecutePluginCommand(pluginId, command, input || null)
         const result = unwrap(raw)
-        if (event.source && 'postMessage' in (event.source as any)) {
+        const src = event.source
+        if (src && typeof (src as any).postMessage === 'function') {
           iframePostMessage({ type: 'plugin:result', id, data: result })
         }
       } catch (e: any) {
-        if (event.source && 'postMessage' in (event.source as any)) {
+        const src = event.source
+        if (src && typeof (src as any).postMessage === 'function') {
           iframePostMessage({ type: 'plugin:result', id, error: e?.message || String(e) })
         }
       }
@@ -271,3 +273,4 @@ export function usePluginHost(opts: PluginHostOptions) {
 
   return { onLoad, currentThemeName, cleanup }
 }
+

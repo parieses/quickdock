@@ -11,14 +11,13 @@ import (
 	"runtime"
 	"strings"
 
-	clipboardsvc "quickdock/services/clipboard"
-	pluginsvc "quickdock/services/plugin"
-
 	"quickdock/internal/db"
 	envmgr "quickdock/internal/env"
 	mcpsrv "quickdock/internal/mcp"
 	"quickdock/internal/platform"
 	"quickdock/services"
+	clipboardsvc "quickdock/services/clipboard"
+	pluginsvc "quickdock/services/plugin"
 )
 
 // builtinVersion MCP 在环境管理里的固定版本号（内置服务，无真实版本概念）
@@ -257,7 +256,7 @@ func (s *MCPService) registerTools() {
 		if s.Clip == nil {
 			return nil, errors.New("剪贴板服务未就绪")
 		}
-		return unwrap(s.Clip.ListClipboardEntries(mcpsrv.ArgInt(args, "limit", 20)))
+		return s.Clip.ListClipboardEntries(mcpsrv.ArgInt(args, "limit", 20)), nil
 	}, read, "clipboard_recent", "列出最近的剪贴板历史（文本条目）", nil,
 		map[string]any{"limit": intp("返回条数，默认 20")})
 
@@ -349,9 +348,7 @@ func (s *MCPService) registerTools() {
 		if text == "" {
 			return nil, errors.New("缺少参数 text")
 		}
-		if r := s.Clip.CopyText(text); r != nil && r.Code != 0 {
-			return nil, errors.New(r.Msg)
-		}
+		s.Clip.CopyText(text)
 		return "已写入剪贴板", nil
 	}, write, "clipboard_copy", "把文本写入系统剪贴板", []string{"text"},
 		map[string]any{"text": str("要写入的文本")})

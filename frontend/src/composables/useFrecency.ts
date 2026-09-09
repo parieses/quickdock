@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { RecordUsage, RecordUsageEx, GetAllUsage } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
+import { logWarn } from '../utils/logger'
 
 interface FrecencyEntry { count: number; lastUsed: number }
 
@@ -29,9 +30,9 @@ function recordUsage(key: string, type_?: string, label?: string, desc?: string,
   const now = Date.now()
   frecencyCache[key] = { count: (frecencyCache[key]?.count || 0) + 1, lastUsed: now }
   if (type_) {
-    try { RecordUsageEx(key, type_, label || '', desc || '', input || '').catch(e => console.warn('[CmdPalette] RecordUsageEx:', e)) } catch {}
+    try { RecordUsageEx(key, type_, label || '', desc || '', input || '').catch(e => logWarn('RecordUsageEx', e)) } catch {}
   } else {
-    try { RecordUsage(key).catch(e => console.warn('[CmdPalette] RecordUsage:', e)) } catch {}
+    try { RecordUsage(key).catch(e => logWarn('RecordUsage', e)) } catch {}
   }
 }
 

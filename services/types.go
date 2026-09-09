@@ -1,4 +1,4 @@
-package services
+﻿package services
 
 // HotkeyConfig 热键配置（前端用）
 type HotkeyConfig struct {

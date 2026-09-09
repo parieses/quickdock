@@ -73,6 +73,10 @@ type AppService struct {
 	schedulerQuit     chan struct{}
 	schedulerQuitOnce sync.Once
 
+	// 剪贴板监听上下文：用于取消正在进行的剪贴板处理 goroutine
+	ClipboardCtx    context.Context
+	ClipboardCancel func()
+
 	// 监控在检标记：防止同一监控并发检测（慢探针未更新 last_checked_ts 时被重复选为待检）
 	// 导致宕机时重复发送通知。LoadOrStore 原子保证同一时刻仅一个检查协程通过。
 	monitorInflight sync.Map // monitorID -> struct{}
@@ -87,6 +91,7 @@ type AppService struct {
 
 	// 环境管理：Node/PHP/Go/Redis/Nginx 便携运行时（参考 FlyEnv 的部署与版本切换）
 	Env *env.Manager
+
 }
 
 // App 返回底层 Wails 应用实例（供拆分到子包的服务通过回指访问未导出字段）。

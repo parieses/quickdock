@@ -1,4 +1,4 @@
-package services
+﻿package services
 
 import (
 	"context"
@@ -16,6 +16,8 @@ import (
 
 // ServiceStartup 应用启动时调用（v3 生命周期）
 func (a *AppService) ServiceStartup(ctx context.Context, options application.ServiceOptions) error {
+	// 创建剪贴板监听上下文，用于管理剪贴板处理 goroutine 的生命周期
+	a.ClipboardCtx, a.ClipboardCancel = context.WithCancel(ctx)
 	// 打开数据库
 	dbDir := platform.DefaultDataDir()
 	os.MkdirAll(dbDir, 0755)
@@ -165,9 +167,14 @@ func (a *AppService) ServiceShutdown() error {
 	if a.schedulerQuit != nil {
 		a.StopSchedulers()
 	}
+	// 取消剪贴板监听上下文，终止正在进行的剪贴板处理 goroutine
+	if a.ClipboardCancel != nil {
+		a.ClipboardCancel()
+	}
 	// 最后关闭数据库
 	if a.DB != nil {
 		a.DB.Close()
 	}
 	return nil
 }
+

@@ -107,11 +107,11 @@ func computeNextRun(t *db.ScheduledTask, fromStr string) string {
 				continue
 			}
 			cand := time.Date(day.Year(), day.Month(), day.Day(), h, m, s, 0, time.Local)
-		if cand.After(from) {
-			return cand.Format(schedTimeLayout)
+			if cand.After(from) {
+				return cand.Format(schedTimeLayout)
+			}
 		}
-	}
-	return ""
+		return ""
 
 	case "monthly":
 		h, m, s, ok := parseTimeOfDay(t.TimeOfDay)
@@ -196,7 +196,7 @@ func (a *AppService) wakeScheduler() {
 }
 
 func (a *AppService) scheduleLoop() {
-	defer recoverPanic("schedule runner")
+	defer logger.RecoverPanic("schedule runner")
 	time.Sleep(3 * time.Second)
 	for {
 		a.checkScheduledTasks()
@@ -264,7 +264,11 @@ func (a *AppService) checkScheduledTasks() {
 		}
 		go func(t *db.ScheduledTask) {
 			defer a.schedInflight.Delete(t.ID)
-			defer func() { if r := recover(); r != nil { logger.E("QuickDock: schedule runner panic: %v", r) } }()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.E("QuickDock: schedule runner panic: %v", r)
+				}
+			}()
 			status, result := a.executeTask(t)
 
 			// 计算下次运行时间与启用状态
@@ -325,11 +329,11 @@ func (a *AppService) executeTask(t *db.ScheduledTask) (string, string) {
 // executeRecurringTodo 由重复待办触发生成一条具体待办
 func (a *AppService) executeRecurringTodo(t *db.ScheduledTask) (string, string) {
 	var p struct {
-		TodoID  string `json:"todoId"`
-		Title   string `json:"title"`
+		TodoID   string `json:"todoId"`
+		Title    string `json:"title"`
 		Priority string `json:"priority"`
-		DueDate string `json:"dueDate"`
-		Note    string `json:"note"`
+		DueDate  string `json:"dueDate"`
+		Note     string `json:"note"`
 	}
 	if err := json.Unmarshal([]byte(t.Target), &p); err != nil {
 		return "fail", "解析待办负载失败：" + err.Error()
@@ -371,11 +375,11 @@ func (a *AppService) syncTodoSchedule(m *db.Todo) {
 		rc.TimeOfDay = "09:00"
 	}
 	payload, _ := json.Marshal(map[string]string{
-		"todoId":  m.ID,
-		"title":   m.Title,
+		"todoId":   m.ID,
+		"title":    m.Title,
 		"priority": m.Priority,
-		"dueDate": m.DueDate,
-		"note":    m.Note,
+		"dueDate":  m.DueDate,
+		"note":     m.Note,
 	})
 	nextRun := computeNextRun(&db.ScheduledTask{
 		ScheduleKind: rc.Kind,

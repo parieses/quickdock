@@ -34,9 +34,10 @@ type httpServerEntry struct {
 
 // HTTPServeManager 管理多个静态文件服务（创建/启停/删除/列表），持久化到 httpserve/servers.json。
 type HTTPServeManager struct {
-	mu      sync.Mutex
-	file    string
-	servers map[string]*httpServerEntry
+	mu       sync.Mutex
+	file     string
+	baseDir  string // 数据目录，用于路径穿越防护
+	servers  map[string]*httpServerEntry
 }
 
 // 包级单例：随 AppService 一起被引用，懒初始化到用户数据目录。
@@ -53,6 +54,7 @@ func newHTTPServeManagerAt(dir string) *HTTPServeManager {
 	_ = os.MkdirAll(dir, 0755)
 	m := &HTTPServeManager{
 		file:    filepath.Join(dir, "servers.json"),
+		baseDir: dir,
 		servers: map[string]*httpServerEntry{},
 	}
 	m.load()
@@ -123,6 +125,16 @@ func (h *HTTPServeManager) Create(name, dir string, port int) (*HTTPServer, erro
 	dir = filepath.Clean(dir)
 	if dir == "" {
 		return nil, fmt.Errorf("目录为空")
+	}
+	// 路径穿越防护：确保目录是绝对路径且规范化后有效
+	absDir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, fmt.Errorf("目录路径解析失败: %w", err)
+	}
+	// 检查是否是合法目录（存在且是目录）
+	info, err := os.Stat(absDir)
+	if err != nil || !info.IsDir() {
+		return nil, fmt.Errorf("目录不存在或不是有效目录: %s", dir)
 	}
 	if port > 65535 {
 		return nil, fmt.Errorf("端口无效（1-65535）")

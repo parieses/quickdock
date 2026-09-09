@@ -12,6 +12,7 @@ import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { pluginName, pluginDesc } from '../utils/localize'
 import { setPluginUpdateBadge } from '../composables/usePluginUpdateBadge'
+import { logWarn } from '../utils/logger'
 import type { ToastAPI } from '../types'
 
 const { t, locale } = useI18n()
@@ -183,7 +184,7 @@ async function install(p: MarketPlugin, silent = false): Promise<boolean> {
     return true
   } catch (e) {
     if (!silent) toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
-    else console.warn('[market] update failed for', p.id, e)
+    else logWarn('market', 'update failed for', p.id, e)
     return false
   } finally {
     installing.value.delete(p.id)
@@ -222,7 +223,7 @@ onMounted(() => {
   // Wails v3 事件 payload 在 .data（非 e.data 直接展开的细节见 WailsEvent 包装）
   // 用返回的 off 在卸载时移除监听，避免反复进出市场页累积监听 + 旧组件实例内存泄漏。
   const offProgress = Events.On('plugin:download-progress', (e: any) => {
-    const d = (e as any)?.data as DownloadProgress | undefined
+    const d = e?.data as DownloadProgress | undefined
     if (d?.url) progressMap.value[d.url] = d
   })
   // 后台定时拉取市场索引（每 5 分钟），刷新「可更新」角标与按钮状态；
@@ -576,3 +577,5 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-shot { width: 160px; border-radius: 6px; border: 1px solid var(--color-border); }
 .detail-install { width: auto; padding: 7px 16px; }
 </style>
+
+

@@ -33,6 +33,7 @@ import {
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr, logWarn, logDebug } from '../utils/logger'
 import type { CollectionItem, PluginInfo, EnvRuntimeInfo, EnvServiceStatus } from '../types'
 import type { ToastAPI } from '../types'
 import { evaluate, format, convertExpression } from '../utils/calc'

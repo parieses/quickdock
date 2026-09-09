@@ -68,6 +68,7 @@ import { DSHStatus } from '../../bindings/quickdock/services/dsh/dshservice'
 import PortPage from './PortPage.vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr, logWarn, logDebug } from '../utils/logger'
 
 const { t } = useI18n()
 const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!

@@ -1,6 +1,7 @@
 import { ref } from 'vue'
 import { pinyin } from 'pinyin-pro'
 import type { PluginInfo, PluginCommand } from '../types'
+import { logWarn } from '../utils/logger'
 
 export interface PluginCmdIndex {
   plugin: PluginInfo
@@ -37,7 +38,7 @@ function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
         try {
           regex = new RegExp('^(?:' + cmd.matchPattern + ')$')
         } catch (e) {
-          console.warn(`[CmdPalette] Invalid matchPattern in plugin "${plugin.id}" cmd "${cmd.id}":`, (e as Error).message)
+          logWarn('matchPattern', `plugin="${plugin.id}" cmd="${cmd.id}" error:`, (e as Error).message)
           regexValid = false
         }
       }

@@ -60,9 +60,7 @@ func (a *AIService) dbOK() *services.ApiResult {
 	return nil
 }
 
-// recoverPanic 兜底 recover 打日志（原宿主包级函数，跨包不可见故包内复刻；宿主保留同名函数）
+// recoverPanic 兜底 recover 打日志（委托给 logger.RecoverPanic）
 func recoverPanic(context string) {
-	if r := recover(); r != nil {
-		logger.E("QuickDock: [PANIC] %s: %v", context, r)
-	}
+	logger.RecoverPanic(context)
 }

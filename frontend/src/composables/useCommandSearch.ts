@@ -1,4 +1,4 @@
-import { ref, computed, watch, onScopeDispose, type Ref, type ComputedRef } from 'vue'
+﻿import { ref, computed, watch, onScopeDispose, type Ref, type ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CollectionItem } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
@@ -434,8 +434,8 @@ export function useCommandSearch(deps: SearchDeps) {
       function dedupKey(r: SearchResult): string {
         if (r.pluginId && r.pluginCommandId) return 'plugin:' + r.pluginId + '.' + r.pluginCommandId
         if (r.item?.id) return 'item:' + r.item.id
-        if ((r as any).note?.id) return 'note:' + (r as any).note.id
-        if ((r as any).cmd?.id) return 'cmd:' + (r as any).cmd.id
+        if (r.note?.id) return 'note:' + r.note?.id
+        if (r.cmd?.id) return 'cmd:' + r.cmd?.id
         if (r.appPath) return 'app:' + r.appPath
         return r.label
       }
@@ -600,8 +600,8 @@ export function useCommandSearch(deps: SearchDeps) {
       }
       return { title: r.label, subtitle: r.item.type, lines, kind: 'item' }
     }
-    if (r.type === 'note' && (r as any).note) {
-      return { title: r.label, subtitle: (r as any).note.isFolder ? '📁' : '', lines: [(r as any).note.content], kind: 'note' }
+    if (r.type === 'note' && r.note) {
+      return { title: r.label, subtitle: r.note.isFolder ? '📁' : '', lines: [r.note.content], kind: 'note' }
     }
     if (r.type === 'plugin') {
       const last = r.pluginId && r.pluginCommandId ? getPluginLastResult(r.pluginId, r.pluginCommandId) : null
@@ -622,3 +622,4 @@ export function useCommandSearch(deps: SearchDeps) {
   return { groupedResults, allResults, recentResults, displayGroups, displayFlat, previewResult, recentCache,
            RECENT_VISIBLE, recentExpanded, toggleRecentExpanded }
 }
+

@@ -15,7 +15,7 @@ import (
 func (a *AppService) StartReminderScheduler() {
 	a.schedulerQuit = make(chan struct{})
 	go func() {
-		defer recoverPanic("reminder scheduler")
+		defer logger.RecoverPanic("reminder scheduler")
 		// 延迟 3 秒启动，确保通知服务已完成 ServiceStartup 初始化
 		time.Sleep(3 * time.Second)
 		ticker := time.NewTicker(10 * time.Second)

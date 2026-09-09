@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // webhookClient 共享 HTTP 客户端（通知投递，连接复用）
@@ -20,12 +22,12 @@ var webhookClient = &http.Client{Timeout: 10 * time.Second}
 //   - pushplus:   PushPlus 的 token
 //   - telegram:   "botToken|chatId" 或完整 sendMessage 地址
 type WebhookConfig struct {
-	Dingtalk  string `json:"dingtalk"`
-	Wecom     string `json:"wecom"`
-	Feishu    string `json:"feishu"`
+	Dingtalk   string `json:"dingtalk"`
+	Wecom      string `json:"wecom"`
+	Feishu     string `json:"feishu"`
 	ServerChan string `json:"serverchan"`
-	PushPlus  string `json:"pushplus"`
-	Telegram  string `json:"telegram"`
+	PushPlus   string `json:"pushplus"`
+	Telegram   string `json:"telegram"`
 }
 
 const webhookSettingKey = "notify_webhook"
@@ -58,12 +60,12 @@ func (a *AppService) SetWebhookConfig(dingtalk, wecom, feishu, serverchan, pushp
 		return r
 	}
 	cfg := WebhookConfig{
-		Dingtalk:  strings.TrimSpace(dingtalk),
-		Wecom:     strings.TrimSpace(wecom),
-		Feishu:    strings.TrimSpace(feishu),
+		Dingtalk:   strings.TrimSpace(dingtalk),
+		Wecom:      strings.TrimSpace(wecom),
+		Feishu:     strings.TrimSpace(feishu),
 		ServerChan: strings.TrimSpace(serverchan),
-		PushPlus:  strings.TrimSpace(pushplus),
-		Telegram:  strings.TrimSpace(telegram),
+		PushPlus:   strings.TrimSpace(pushplus),
+		Telegram:   strings.TrimSpace(telegram),
 	}
 	b, _ := json.Marshal(cfg)
 	if err := a.DB.SetSetting(webhookSettingKey, string(b)); err != nil {
@@ -104,7 +106,7 @@ func (a *AppService) sendWebhookNotify(title, body string) {
 			continue
 		}
 		go func(kind, url string) {
-			defer recoverPanic("webhook:" + kind)
+			defer logger.RecoverPanic("webhook:" + kind)
 			_ = postWebhook(kind, url, title, body)
 		}(tg.kind, tg.url)
 	}
@@ -189,14 +191,14 @@ func postWebhook(kind, url, title, body string) error {
 
 	// 各平台都会在 HTTP 200 的响应体里用业务码报错。
 	var r struct {
-		ErrCode    int    `json:"errcode"`       // 钉钉 / 企业微信
-		ErrMsg     string `json:"errmsg"`        //
-		Code       int    `json:"code"`          // 飞书（新版）/ ServerChan / PushPlus
-		Msg        string `json:"msg"`           //
-		StatusCode int    `json:"StatusCode"`    // 飞书（旧版）
-		StatusMsg  string `json:"StatusMessage"` //
-		OK         bool   `json:"ok"`            // Telegram
-		Description string `json:"description"`  // Telegram 错误描述
+		ErrCode     int    `json:"errcode"`       // 钉钉 / 企业微信
+		ErrMsg      string `json:"errmsg"`        //
+		Code        int    `json:"code"`          // 飞书（新版）/ ServerChan / PushPlus
+		Msg         string `json:"msg"`           //
+		StatusCode  int    `json:"StatusCode"`    // 飞书（旧版）
+		StatusMsg   string `json:"StatusMessage"` //
+		OK          bool   `json:"ok"`            // Telegram
+		Description string `json:"description"`   // Telegram 错误描述
 	}
 	_ = json.Unmarshal(respBody, &r)
 	// Telegram 成功时 {"ok":true}，失败时 {"ok":false,"description":"..."}

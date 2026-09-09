@@ -49,7 +49,7 @@ func (a *AppService) wakeMonitorChecker() {
 }
 
 func (a *AppService) monitorLoop() {
-	defer recoverPanic("monitor checker")
+	defer logger.RecoverPanic("monitor checker")
 	time.Sleep(3 * time.Second)
 	for {
 		a.runDueMonitors()
@@ -87,7 +87,11 @@ func (a *AppService) runDueMonitors() {
 		}
 		go func(m *db.Monitor) {
 			defer a.monitorInflight.Delete(m.ID)
-			defer func() { if r := recover(); r != nil { logger.E("QuickDock: monitor checker panic: %v", r) } }()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.E("QuickDock: monitor checker panic: %v", r)
+				}
+			}()
 			a.checkOneMonitor(m)
 		}(m)
 	}
@@ -123,7 +127,7 @@ func (a *AppService) nextMonitorWait() time.Duration {
 // checkOneMonitor 对单个监控执行一次检测，写入日志与状态，并在状态翻转时发通知
 // 返回 (status, summary)
 func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
-	defer recoverPanic("monitor check:" + m.ID)
+	defer logger.RecoverPanic("monitor check:" + m.ID)
 	// 用户可能在调度间隙停用了该监控，重查 enabled 状态与最新 last_status
 	current, err := a.DB.GetMonitor(m.ID)
 	if err != nil || !current.Enabled {

@@ -2,7 +2,7 @@
 // 管理场景、集合、项、打开工具、搜索的全局状态
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { ListWorkspaces, CreateWorkspace, DeleteWorkspace, UpdateWorkspace, GetWorkspace, ReorderWorkspaces } from '../../bindings/quickdock/services/appservice'
 import { ListScenes, CreateScene, UpdateScene, DeleteScene, ReorderScenes } from '../../bindings/quickdock/services/appservice'
 import { ListCollections, CreateCollection, UpdateCollection, DeleteCollection, ReorderCollections } from '../../bindings/quickdock/services/appservice'
@@ -12,6 +12,9 @@ import type { CollectionItem as BindingCollectionItem } from '../../bindings/qui
 import type { Workspace, Scene, Collection, CollectionItem, OpenTool } from '../types'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import { toSnakeCase, toCamelCase } from '../utils/caseConversion'
+import { debounce } from '../utils/debounce'
+import { logErr } from '../utils/logger'
 
 // 资源类型 → 推荐打开工具类型（数组：第一项用于默认工具，全部用于下拉候选）
 // 目录额外把「编辑器」纳入候选，以便用 VSCode / Trae / Cursor 等打开目录
@@ -54,24 +57,46 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   // ---- 搜索 ----
   const searchQuery = ref('')
+  const searchResults = ref<{ scenes: Scene[]; collections: Collection[]; items: CollectionItem[] } | null>(null)
+  const searchLoading = ref(false)
 
-  const searchResults = computed(() => {
-    const q = searchQuery.value.trim().toLowerCase()
-    if (!q) return null
-    const matchedScenes: Scene[] = []
-    const matchedCollections: Collection[] = []
-    const matchedItems: CollectionItem[] = []
-    for (const s of scenes.value) {
-      if (s.name.toLowerCase().includes(q)) matchedScenes.push(s)
+  // 防抖搜索：用户输入时延迟计算，避免频繁重算
+  const debouncedSearch = debounce((query: string) => {
+    searchLoading.value = true
+    // 使用 setTimeout 让 UI 有机会更新 loading 状态
+    setTimeout(() => {
+      const q = query.trim().toLowerCase()
+      if (!q) {
+        searchResults.value = null
+        searchLoading.value = false
+        return
+      }
+      const matchedScenes: Scene[] = []
+      const matchedCollections: Collection[] = []
+      const matchedItems: CollectionItem[] = []
+      for (const s of scenes.value) {
+        if (s.name.toLowerCase().includes(q)) matchedScenes.push(s)
+      }
+      for (const c of collections.value) {
+        if (c.name.toLowerCase().includes(q)) matchedCollections.push(c)
+      }
+      for (const i of items.value) {
+        if (i.name.toLowerCase().includes(q) || (i.value && i.value.toLowerCase().includes(q)))
+          matchedItems.push(i)
+      }
+      searchResults.value = { scenes: matchedScenes, collections: matchedCollections, items: matchedItems }
+      searchLoading.value = false
+    }, 50)
+  }, 150)
+
+  // 监听搜索查询变化，触发防抖搜索
+  watch(searchQuery, (newQuery) => {
+    if (!newQuery || newQuery.trim() === '') {
+      searchResults.value = null
+      searchLoading.value = false
+    } else {
+      debouncedSearch(newQuery)
     }
-    for (const c of collections.value) {
-      if (c.name.toLowerCase().includes(q)) matchedCollections.push(c)
-    }
-    for (const i of items.value) {
-      if (i.name.toLowerCase().includes(q) || (i.value && i.value.toLowerCase().includes(q)))
-        matchedItems.push(i)
-    }
-    return { scenes: matchedScenes, collections: matchedCollections, items: matchedItems }
   })
 
   const hasSearch = computed(() => searchQuery.value.trim().length > 0)
@@ -157,7 +182,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       tools.value = normalizeRows(result) as OpenTool[]
     } catch (e) {
       error.value = getErrorMessage(e)
-      console.error('工具列表加载失败:', e)
+      logErr('fetchTools', e)
     }
   }
 
@@ -169,7 +194,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       workspaces.value = normalizeRows(result) as Workspace[]
     } catch (e) {
       error.value = getErrorMessage(e)
-      console.error('工作空间加载失败:', e)
+      logErr('fetchWorkspaces', e)
     } finally {
       loading.value = false
     }
@@ -198,7 +223,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       scenes.value = normalizeRows(result) as Scene[]
     } catch (e) {
       error.value = getErrorMessage(e)
-      console.error('场景加载失败:', e)
+      logErr('fetchScenes', e)
     }
   }
 
@@ -289,24 +314,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   function normalizeRows(rows: any[] | null): any[] {
-    return (rows ?? []).map(row => {
-      const out: Record<string, any> = {}
-      for (const [k, v] of Object.entries(row)) {
-        const camel = k.replace(/_([a-z])/g, (_, c) => c.toUpperCase())
-        out[camel] = v
-      }
-      return out
-    })
+    return (rows ?? []).map(row => toCamelCase(row))
   }
 
-  function toSnake(obj: Record<string, any>): Record<string, any> {
-    const out: Record<string, any> = {}
-    for (const [k, v] of Object.entries(obj)) {
-      const snake = k.replace(/[A-Z]/g, c => '_' + c.toLowerCase())
-      out[snake] = v
-    }
-    return out
-  }
+  // 使用统一转换函数，确保前后端字段名映射一致
+  const toSnake = toSnakeCase
 
   // ---- 拖拽排序 ----
   async function reorderScenes(orderedIDs: string[]) {
@@ -344,7 +356,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       collections.value = normalizeRows(result) as Collection[]
     } catch (e) {
       error.value = getErrorMessage(e)
-      console.error('集合加载失败:', e)
+      logErr('fetchCollections', e)
     }
   }
 
@@ -365,7 +377,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       items.value = normalizeRows(result) as CollectionItem[]
     } catch (e) {
       error.value = getErrorMessage(e)
-      console.error('项目加载失败:', e)
+      logErr('fetchItems', e)
     }
   }
 
@@ -515,7 +527,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeWorkspaceId, activeSceneId, activeCollectionId, openedSceneIds,
     workspaces, scenes, collections, items, tools,
     loading, error,
-    searchQuery, hasSearch, searchResults,
+    searchQuery, hasSearch, searchResults, searchLoading,
     activeWorkspace, activeScene, activeCollection,
     sortedScenes, filteredCollections, filteredItems,
     initialize, fetchTools, fetchWorkspaces, fetchScenes, fetchCollections, fetchItems,
@@ -533,3 +545,4 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     getDefaultToolForType, getToolsForType,
   }
 })
+

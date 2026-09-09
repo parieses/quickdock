@@ -2,8 +2,10 @@ package services
 
 import (
 	"fmt"
+	"strings"
 
 	"quickdock/internal/db"
+	"quickdock/internal/validators"
 )
 
 // CreateScheduledTask 新建定时任务，next_run 由后端根据调度规则计算
@@ -125,21 +127,94 @@ func (a *AppService) RunScheduledTaskNow(id string) *ApiResult {
 
 // validateScheduledTask 基础字段校验
 func validateScheduledTask(t *db.ScheduledTask) error {
+	// 验证名称
+	if err := validators.ValidateName(t.Name, 1, 100); err != nil {
+		return err
+	}
+
+	// 验证动作类型
 	switch t.Action {
 	case "app", "dir", "url", "command", "http":
 	default:
 		return fmt.Errorf("未知的动作类型: %s", t.Action)
 	}
+
+	// 验证调度类型
 	switch t.ScheduleKind {
 	case "once", "interval", "daily", "weekly", "monthly":
 	default:
 		return fmt.Errorf("未知的调度类型: %s", t.ScheduleKind)
 	}
-	if t.ScheduleKind == "interval" && t.IntervalSec < 5 {
-		return fmt.Errorf("间隔不能小于 5 秒")
+
+	// 验证间隔时间
+	if t.ScheduleKind == "interval" {
+		if t.IntervalSec < 5 {
+			return fmt.Errorf("间隔不能小于 5 秒")
+		}
+		if t.IntervalSec > 86400 {
+			return fmt.Errorf("间隔不能大于 24 小时")
+		}
 	}
+
+	// 验证目标路径/URL
+	switch t.Action {
+	case "app", "dir":
+		if t.Target == "" {
+			return fmt.Errorf("目标路径不能为空")
+		}
+		if err := validators.ValidatePath(t.Target); err != nil {
+			return err
+		}
+	case "url":
+		if t.Target == "" {
+			return fmt.Errorf("URL 不能为空")
+		}
+		if err := validators.ValidateURL(t.Target); err != nil {
+			return err
+		}
+	case "command":
+		if t.Target == "" {
+			return fmt.Errorf("命令不能为空")
+		}
+		if len(t.Target) > 1000 {
+			return fmt.Errorf("命令长度不能超过 1000 字符")
+		}
+	}
+
+	// 验证工作时间
+	if t.TimeOfDay != "" {
+		if _, err := validators.ParseTimeOfDay(t.TimeOfDay); err != nil {
+			return err
+		}
+	}
+
+	// 验证星期
+	if t.Weekdays != "" {
+		validDays := map[string]bool{
+			"mon": true, "tue": true, "wed": true, "thu": true,
+			"fri": true, "sat": true, "sun": true,
+		}
+		for _, day := range strings.Split(t.Weekdays, ",") {
+			day = strings.TrimSpace(strings.ToLower(day))
+			if day != "" && !validDays[day] {
+				return fmt.Errorf("无效的星期: %s", day)
+			}
+		}
+	}
+
+	// 验证 HTTP 方法
 	if t.Action == "http" && t.HTTPMethod == "" {
 		t.HTTPMethod = "GET"
 	}
+	if t.Action == "http" {
+		validMethods := map[string]bool{
+			"GET": true, "POST": true, "PUT": true, "DELETE": true,
+			"PATCH": true, "HEAD": true, "OPTIONS": true,
+		}
+		if !validMethods[strings.ToUpper(t.HTTPMethod)] {
+			return fmt.Errorf("无效的 HTTP 方法: %s", t.HTTPMethod)
+		}
+	}
+
 	return nil
 }
