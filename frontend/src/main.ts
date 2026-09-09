@@ -2,7 +2,7 @@ import { createApp } from 'vue'
 import { createPinia } from 'pinia'
 import App from './App.vue'
 import { i18n } from './i18n'
-import { ReportFrontendError } from '../bindings/quickdock/services/appservice'
+import { ReportFrontendError } from '../bindings/quickdock/services/diag/diagservice'
 import './style.css'
 
 // 前端异常落盘：白屏 / 交互报错时，用户可在「设置 > 关于」的崩溃记录里看到现场，

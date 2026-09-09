@@ -12,7 +12,7 @@ import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle } fro
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { RevealInExplorer } from '../../bindings/quickdock/services/appservice'
+import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import {
   DetectNodeEnv,
   SetupDSH,

@@ -3,7 +3,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed, watch } from 'vue'
-import { ListWorkspaces, CreateWorkspace, DeleteWorkspace, UpdateWorkspace, GetWorkspace, ReorderWorkspaces } from '../../bindings/quickdock/services/appservice'
+import { ListWorkspaces, CreateWorkspace, DeleteWorkspace, UpdateWorkspace, GetWorkspace, ReorderWorkspaces } from '../../bindings/quickdock/services/workspace/workspaceservice'
 import { ListScenes, CreateScene, UpdateScene, DeleteScene, ReorderScenes } from '../../bindings/quickdock/services/appservice'
 import { ListCollections, CreateCollection, UpdateCollection, DeleteCollection, ReorderCollections } from '../../bindings/quickdock/services/appservice'
 import { ListItems, CreateItem, UpdateItem, DeleteItem, OpenItem, OpenAllInCollection, ReorderItems } from '../../bindings/quickdock/services/appservice'

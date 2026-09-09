@@ -48,6 +48,11 @@ func (a *AppService) wakeMonitorChecker() {
 	}
 }
 
+// WakeMonitorChecker 导出转发：供 services/monitor 门面在增删改/启停监控后唤醒检测循环重排。
+func (a *AppService) WakeMonitorChecker() {
+	a.wakeMonitorChecker()
+}
+
 func (a *AppService) monitorLoop() {
 	defer logger.RecoverPanic("monitor checker")
 	time.Sleep(3 * time.Second)
@@ -240,6 +245,11 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 		a.sendWebhookNotify(title, body)
 	}
 	return status, summary
+}
+
+// CheckOneMonitor 导出转发：供 services/monitor 门面在「立即检测」时复用常驻检测逻辑。
+func (a *AppService) CheckOneMonitor(m *db.Monitor) (string, string) {
+	return a.checkOneMonitor(m)
 }
 
 // probeMonitor 实际发起 HTTP 请求并判定 up/down

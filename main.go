@@ -23,11 +23,16 @@ import (
 	"quickdock/services"
 	aisvc "quickdock/services/ai"
 	clipboardsvc "quickdock/services/clipboard"
+	diagsvc "quickdock/services/diag"
 	dshsvc "quickdock/services/dsh"
 	envsvc "quickdock/services/env"
 	mcpsvc "quickdock/services/mcp"
+	monitorsvc "quickdock/services/monitor"
 	pluginsvc "quickdock/services/plugin"
+	systemsvc "quickdock/services/system"
+	todosvc "quickdock/services/todo"
 	updatesvc "quickdock/services/update"
+	workspacesvc "quickdock/services/workspace"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -203,10 +208,17 @@ func main() {
 	// 剪贴板服务门面：承载剪贴板历史领域方法（宿主保留系统监听层），单独绑定为独立 Wails service
 	clipSvc := clipboardsvc.NewClipboardService(appService)
 
+	// 诊断/系统/工作空间/待办/监控 门面：承载对应领域 CRUD（宿主保留常驻循环），单独绑定为独立 Wails service
+	diagSvc := diagsvc.NewDiagService(appService)
+	systemSvc := systemsvc.NewSystemService(appService)
+	workspaceSvc := workspacesvc.NewWorkspaceService(appService)
+	todoSvc := todosvc.NewTodoService(appService)
+	monitorSvc := monitorsvc.NewMonitorService(appService)
+
 	// MCP 服务门面：协议/传输在 internal/mcp，本门面注册业务工具并提供前端启停接口。
-	// 依赖剪贴板门面（历史查询工具），故在其后创建。
+	// 依赖剪贴板/工作空间/待办/诊断/系统门面（工具复用其能力），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
-	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, appVersion)
+	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, appVersion)
 
 	// 注入内置插件自动安装回调（在 ServiceStartup DB 就绪后执行）
 	appService.InstallBuiltinPluginsFn = func(mgr *plugin.Manager, database *db.Database) {
@@ -241,6 +253,11 @@ func main() {
 			application.NewService(aiSvc),
 			application.NewService(updateSvc),
 			application.NewService(clipSvc),
+			application.NewService(diagSvc),
+			application.NewService(systemSvc),
+			application.NewService(workspaceSvc),
+			application.NewService(todoSvc),
+			application.NewService(monitorSvc),
 			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),
 			application.NewService(notifier),

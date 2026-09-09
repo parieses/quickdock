@@ -17,7 +17,11 @@ import (
 	"quickdock/internal/platform"
 	"quickdock/services"
 	clipboardsvc "quickdock/services/clipboard"
+	diagsvc "quickdock/services/diag"
 	pluginsvc "quickdock/services/plugin"
+	systemsvc "quickdock/services/system"
+	todosvc "quickdock/services/todo"
+	workspacesvc "quickdock/services/workspace"
 )
 
 // builtinVersion MCP 在环境管理里的固定版本号（内置服务，无真实版本概念）
@@ -25,15 +29,19 @@ const builtinVersion = "builtin"
 
 // MCPService 前端绑定服务：MCP 的启停、状态、工具清单与客户端配置。
 type MCPService struct {
-	App     *services.AppService
-	Clip    *clipboardsvc.ClipboardService
-	Plugin  *pluginsvc.PluginService
-	version string
+	App       *services.AppService
+	Clip      *clipboardsvc.ClipboardService
+	Plugin    *pluginsvc.PluginService
+	Workspace *workspacesvc.WorkspaceService
+	Todo      *todosvc.TodoService
+	Diag      *diagsvc.DiagService
+	System    *systemsvc.SystemService
+	version   string
 }
 
 // NewMCPService 创建 MCP 绑定服务，并注册业务工具。
-func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, version string) *MCPService {
-	s := &MCPService{App: app, Clip: clip, Plugin: plugin, version: version}
+func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, version string) *MCPService {
+	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, version: version}
 	s.registerTools()
 	return s
 }
@@ -226,7 +234,7 @@ func (s *MCPService) registerTools() {
 		map[string]any{"runtime": str("运行时 id")})
 
 	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.App.ListWorkspaces())
+		return unwrap(s.Workspace.ListWorkspaces())
 	}, read, "workspace_list", "列出所有工作空间", nil, nil)
 
 	s.register(func(args map[string]any) (any, error) {
@@ -244,7 +252,7 @@ func (s *MCPService) registerTools() {
 		map[string]any{"limit": intp("返回条数，默认 10")})
 
 	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.App.ListTodos())
+		return unwrap(s.Todo.ListTodos())
 	}, read, "todo_list", "列出所有待办", nil, nil)
 
 	s.register(func(args map[string]any) (any, error) {
@@ -321,7 +329,7 @@ func (s *MCPService) registerTools() {
 		if title == "" {
 			return nil, errors.New("缺少参数 title")
 		}
-		return unwrap(s.App.CreateTodo(title, mcpsrv.Arg(args, "priority"), mcpsrv.Arg(args, "dueDate"),
+		return unwrap(s.Todo.CreateTodo(title, mcpsrv.Arg(args, "priority"), mcpsrv.Arg(args, "dueDate"),
 			mcpsrv.Arg(args, "note"), "", "", "", "", ""))
 	}, write, "todo_create", "新建待办", []string{"title"},
 		map[string]any{
@@ -336,7 +344,7 @@ func (s *MCPService) registerTools() {
 		if id == "" {
 			return nil, errors.New("缺少参数 id（用 todo_list 获取）")
 		}
-		return unwrap(s.App.SetTodoStatus(id, "done"))
+		return unwrap(s.Todo.SetTodoStatus(id, "done"))
 	}, write, "todo_done", "把某待办标记为已完成", []string{"id"},
 		map[string]any{"id": str("待办 id")})
 
@@ -399,7 +407,7 @@ func (s *MCPService) registerTools() {
 	// ---- P1 诊断日志（对话式排障）----
 
 	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.App.ListLogFiles())
+		return unwrap(s.Diag.ListLogFiles())
 	}, read, "log_list", "列出应用日志文件（含 crash/ 子目录的崩溃记录），返回文件名、大小、修改时间", nil, nil)
 
 	s.register(func(args map[string]any) (any, error) {
@@ -407,7 +415,7 @@ func (s *MCPService) registerTools() {
 		if name == "" {
 			return nil, errors.New("缺少参数 name（用 log_list 获取）")
 		}
-		return unwrap(s.App.ReadLogFile(name, mcpsrv.ArgInt(args, "tail", 0)))
+		return unwrap(s.Diag.ReadLogFile(name, mcpsrv.ArgInt(args, "tail", 0)))
 	}, read, "log_read", "读取日志文件内容；tail>0 只返回末尾 N 行，适合「给我最后 200 行」式排障", []string{"name"},
 		map[string]any{
 			"name": str("日志文件名，如 quickdock-2026-09-09.log 或 crash/panic-xxx.log"),
@@ -415,7 +423,7 @@ func (s *MCPService) registerTools() {
 		})
 
 	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.App.ListCrashFiles())
+		return unwrap(s.Diag.ListCrashFiles())
 	}, read, "crash_list", "列出崩溃/异常记录（Go panic 与前端 JS 异常），新的在前", nil, nil)
 
 	s.register(func(args map[string]any) (any, error) {
@@ -423,7 +431,7 @@ func (s *MCPService) registerTools() {
 		if name == "" {
 			return nil, errors.New("缺少参数 name（用 crash_list 获取）")
 		}
-		return unwrap(s.App.ReadCrashFile(name))
+		return unwrap(s.Diag.ReadCrashFile(name))
 	}, read, "crash_read", "读取单个崩溃文件内容（供 AI 分析 panic/JS 异常栈）", []string{"name"},
 		map[string]any{"name": str("崩溃文件名")})
 
@@ -452,7 +460,7 @@ func (s *MCPService) registerTools() {
 		if cmd == "" {
 			return nil, errors.New("缺少参数 cmd")
 		}
-		return unwrap(s.App.ExecuteSystemCommand(cmd))
+		return unwrap(s.System.ExecuteSystemCommand(cmd))
 	}, mcpsrv.LevelRisk, "system_command", "执行系统指令（lock/shutdown/restart/sleep/emptytrash，高危）。需先在环境管理页开启高危等级", []string{"cmd"},
 		map[string]any{"cmd": str("系统指令，如 shutdown / restart / lock / sleep / emptytrash")})
 }

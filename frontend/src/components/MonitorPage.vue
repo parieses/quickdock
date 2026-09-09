@@ -7,7 +7,7 @@ import {
   CreateMonitor, ListMonitors, UpdateMonitor,
   DeleteMonitor, SetMonitorEnabled, CheckMonitorNow,
   GetMonitorLogs, GetMonitorLogsSince, ClearMonitorLogs, ListMonitorStats,
-} from '../../bindings/quickdock/services/appservice'
+} from '../../bindings/quickdock/services/monitor/monitorservice'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import type { Monitor } from '../../bindings/quickdock/internal/db/models'
 import WebhookSettingsModal from './WebhookSettingsModal.vue'

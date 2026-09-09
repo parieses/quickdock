@@ -5,8 +5,11 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import ConfirmDialog from './ConfirmDialog.vue'
 import {
-  CreateTodo, ListTodos, UpdateTodo, ToggleTodo, DeleteTodo, ClearCompletedTodos, SendTestNotification,
-  CreateSubtask, SetTodoStatus, NotifyFocusComplete, NotifyFocusStart,
+  CreateTodo, ListTodos, UpdateTodo, ToggleTodo, DeleteTodo, ClearCompletedTodos,
+  CreateSubtask, SetTodoStatus,
+} from '../../bindings/quickdock/services/todo/todoservice'
+import {
+  SendTestNotification, NotifyFocusComplete, NotifyFocusStart,
 } from '../../bindings/quickdock/services/appservice'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,

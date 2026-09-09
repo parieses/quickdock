@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ScrollText, FolderOpen, RefreshCw, Search, Copy, Check } from '@lucide/vue'
-import { ListLogFiles, ReadLogFile, OpenLogsDir } from '../../bindings/quickdock/services/appservice'
+import { ListLogFiles, ReadLogFile } from '../../bindings/quickdock/services/diag/diagservice'
+import { OpenLogsDir } from '../../bindings/quickdock/services/system/systemservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 

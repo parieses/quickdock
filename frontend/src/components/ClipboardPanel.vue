@@ -2,7 +2,8 @@
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus } from '@lucide/vue'
-import { CreateTodo, CreateNoteDoc } from '../../bindings/quickdock/services/appservice'
+import { CreateNoteDoc } from '../../bindings/quickdock/services/appservice'
+import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
 import {
   ListClipboardEntries,
   PasteClipboardEntry,

@@ -26,8 +26,8 @@ import {
   HTTPServeStart,
   HTTPServeStop,
   HTTPServeDelete,
-  RevealInExplorer,
 } from '../../bindings/quickdock/services/appservice'
+import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import {
   EnvList,
   EnvInstall,

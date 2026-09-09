@@ -408,6 +408,11 @@ func (a *AppService) syncTodoSchedule(m *db.Todo) {
 	}
 }
 
+// SyncTodoSchedule 导出转发：供 services/todo 门面在新建/更新待办后同步重复调度记录。
+func (a *AppService) SyncTodoSchedule(m *db.Todo) {
+	a.syncTodoSchedule(m)
+}
+
 // executeHTTP 发起 HTTP 请求（curl 能力），返回状态码与简要正文
 func (a *AppService) executeHTTP(t *db.ScheduledTask) (string, string) {
 	method := strings.ToUpper(strings.TrimSpace(t.HTTPMethod))
