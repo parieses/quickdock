@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Minus, Square, X } from '@lucide/vue'
+import { Minus, Square, X, RotateCw } from '@lucide/vue'
 
 import {
   HidePluginWindow,
@@ -15,9 +15,16 @@ const props = defineProps<{ pluginId: string }>()
 const { t } = useI18n()
 const pluginName = ref(props.pluginId)
 
+const frameRef = ref<InstanceType<typeof PluginFrame> | null>(null)
+
 // 独立窗口：init 走全局 pending init（跨窗口传入），前端在此页不主动注入
 function closeWindow() {
   HidePluginWindow(props.pluginId)
+}
+
+// 刷新/重置：重建 iframe 让插件页回到初始状态（窗口与进程保持复用）
+function refreshWindow() {
+  frameRef.value?.reload()
 }
 </script>
 
@@ -33,6 +40,9 @@ function closeWindow() {
         <button class="pw-btn pw-btn-max" @click="ToggleMaximizePluginWindow(props.pluginId)" :title="t('maximize')">
           <Square :size="11" />
         </button>
+        <button class="pw-btn pw-btn-refresh" @click="refreshWindow" :title="t('refresh')">
+          <RotateCw :size="13" />
+        </button>
         <button class="pw-btn pw-btn-close" @click="closeWindow" :title="t('close')">
           <X :size="14" />
         </button>
@@ -40,7 +50,7 @@ function closeWindow() {
     </div>
 
     <!-- 内容区：统一插件宿主 -->
-    <PluginFrame :plugin-id="props.pluginId" use-pending-init @title="pluginName = $event || pluginName" />
+    <PluginFrame ref="frameRef" :plugin-id="props.pluginId" use-pending-init @title="pluginName = $event || pluginName" />
   </div>
 </template>
 
@@ -98,5 +108,9 @@ function closeWindow() {
 }
 .pw-btn-max svg {
   transform: rotate(180deg);
+}
+.pw-btn-refresh:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
 }
 </style>

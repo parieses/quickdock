@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref, defineExpose } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GetPluginFrontendPage } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { unwrap } from '../utils/api'
@@ -33,7 +33,14 @@ function currentThemeName(): string {
   return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
 }
 
-onMounted(async () => {
+async function loadFrontend() {
+  loading.value = true
+  error.value = ''
+  // 重置前先释放旧 blob URL，避免内存泄漏（旧 iframe 即将被替换）
+  if (blobUrl) {
+    URL.revokeObjectURL(blobUrl)
+    blobUrl = null
+  }
   try {
     const html = unwrap<string>(await GetPluginFrontendPage(props.pluginId, currentThemeName(), locale.value))
     if (!html) {
@@ -51,12 +58,22 @@ onMounted(async () => {
     error.value = t('pluginLoadFailed') + ': ' + (e?.message || String(e))
     loading.value = false
   }
-})
+}
+
+// 刷新/重置：重新拉取前端页并重建 iframe，使插件页回到初始状态
+// （窗口与后端进程保持复用，符合隐藏-复用设计）。
+function reload() {
+  loadFrontend()
+}
+
+onMounted(loadFrontend)
 
 onUnmounted(() => {
   if (blobUrl) URL.revokeObjectURL(blobUrl)
   blobUrl = null
 })
+
+defineExpose({ reload })
 </script>
 
 <template>
