@@ -1829,7 +1829,7 @@ const s = currentRuntimeState
           <div class="block-head">
             <span class="block-title">{{ t('installedVersions') }}</span>
             <span class="block-count">{{ selected.installed.length }}</span>
-            <button v-if="selected.id !== 'git'" class="link-btn import-btn" @click="importExisting(selected)">{{ t('importExisting') }}</button>
+            <button v-if="selected.id !== 'git' && selected.id !== 'mcp'" class="link-btn import-btn" @click="importExisting(selected)">{{ t('importExisting') }}</button>
           </div>
 
           <!-- 端口冲突可视化提示：默认服务端口被其它程序占用时，启动会失败，提前给出明确警告 -->
