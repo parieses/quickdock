@@ -11,6 +11,7 @@ import {
   AISaveProfiles,
   AITestConnection,
 } from '../../bindings/quickdock/services/ai/aiservice'
+import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environmentservice'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIProfilesResult } from '../types/ai'
 import type { ToastAPI } from '../types'
@@ -46,6 +47,44 @@ const aiMsgError = ref(false)
 const aiTesting = ref(false)
 const aiEditDraft = ref<AIProfile | null>(null)
 let aiMsgTimer: ReturnType<typeof setTimeout> | null = null
+
+// ollamaLocalModels 本机 Ollama 已下载模型名，用于编辑档案时给「模型」输入框做联想。
+// 只在编辑 Ollama 档案时按需拉取；拉不到（未装/未启动）就静默降级为普通文本输入。
+const ollamaLocalModels = ref<string[]>([])
+const ollamaModelsLoading = ref(false)
+const ollamaModelOpen = ref(false)
+
+// filteredOllamaModels 下拉列表内容：已输入则按子串过滤（大小写不敏感），未输入则全列。
+// 这样「点箭头看全部、边打边缩」两种用法都成立。
+const filteredOllamaModels = computed(() => {
+  const kw = (aiEditDraft.value?.model || '').trim().toLowerCase()
+  if (!kw || ollamaLocalModels.value.includes(aiEditDraft.value?.model || '')) {
+    return ollamaLocalModels.value
+  }
+  return ollamaLocalModels.value.filter((m) => m.toLowerCase().includes(kw))
+})
+
+function onModelFocus() {
+  if (aiEditDraft.value?.provider === 'ollama') ollamaModelOpen.value = true
+}
+
+function pickOllamaModel(name: string) {
+  if (aiEditDraft.value) aiEditDraft.value.model = name
+  ollamaModelOpen.value = false
+}
+
+async function loadOllamaLocalModels() {
+  if (ollamaModelsLoading.value) return
+  ollamaModelsLoading.value = true
+  try {
+    const ms = unwrap<{ name: string }[]>(await EnvOllamaModels()) || []
+    ollamaLocalModels.value = ms.map((m) => m.name).filter(Boolean)
+  } catch {
+    ollamaLocalModels.value = []
+  } finally {
+    ollamaModelsLoading.value = false
+  }
+}
 
 const aiCurrent = computed<AIProfile | null>(() =>
   aiProfiles.value.find((p) => p.id === aiActive.value) || null,
@@ -121,8 +160,11 @@ async function saveAIProfiles() {
 }
 async function testAIConnection() {
   const cur = aiCurrent.value
-  if (!cur || !cur.apiKey || !cur.baseURL || !cur.model) {
-    showAIMsg('请先填写 API Key、Base URL 和 Model', true); return
+  if (!cur) return
+  // Ollama 本地服务无需 API Key，只校 Base URL 与 Model。
+  const needKey = cur.provider !== 'ollama'
+  if (!cur.baseURL || !cur.model || (needKey && !cur.apiKey)) {
+    showAIMsg(t(needKey ? 'aiFillRequired' : 'aiFillRequiredNoKey'), true); return
   }
   await saveAIProfiles()
   aiTesting.value = true; showAIMsg('测试中…')
@@ -138,14 +180,16 @@ function openAIEditor() {
   const cur = aiCurrent.value
   if (!cur) return
   aiEditDraft.value = { ...cur }
+  if (cur.provider === 'ollama') loadOllamaLocalModels()
 }
 function onAIProviderChangeDraft() {
   const d = aiEditDraft.value
   if (!d) return
   const url = aiPresets[d.provider]
   if (url) d.baseURL = url
+  if (d.provider === 'ollama') loadOllamaLocalModels()
 }
-function closeAIEditor() { aiEditDraft.value = null }
+function closeAIEditor() { aiEditDraft.value = null; ollamaModelOpen.value = false }
 function saveAIModal() {
   const draft = aiEditDraft.value
   if (!draft) return
@@ -227,12 +271,62 @@ function saveAIModal() {
             </label>
             <label class="field">
               <span class="field-label">{{ t('aiAPIKey') }}</span>
-              <input v-model="aiEditDraft.apiKey" type="password" class="field-input" placeholder="sk-..." />
+              <input
+                v-model="aiEditDraft.apiKey"
+                type="password"
+                class="field-input"
+                :placeholder="aiEditDraft.provider === 'ollama' ? t('aiAPIKeyOptional') : 'sk-...'"
+              />
             </label>
             <label class="field">
               <span class="field-label">{{ t('aiModel') }}</span>
-              <input v-model="aiEditDraft.model" type="text" class="field-input" placeholder="gpt-4o-mini / deepseek-chat" />
+              <!-- Ollama：输入框 + 显式下拉。原生 datalist 必须聚焦后输入才过滤，
+                   WebView2 上体验不可靠，故自己做一个「点箭头即出全部」的列表。 -->
+              <div class="model-input-wrap">
+                <input
+                  v-model="aiEditDraft.model"
+                  type="text"
+                  class="field-input"
+                  :placeholder="aiEditDraft.provider === 'ollama' ? t('aiModelPlaceholderOllama') : 'gpt-4o-mini / deepseek-chat'"
+                  @focus="onModelFocus"
+                />
+                <button
+                  v-if="aiEditDraft.provider === 'ollama' && ollamaLocalModels.length"
+                  type="button"
+                  class="model-caret"
+                  :title="t('aiOllamaLocalModels')"
+                  @click.prevent="ollamaModelOpen = !ollamaModelOpen"
+                >▾</button>
+                <div v-if="ollamaModelOpen && aiEditDraft.provider === 'ollama'" class="model-dropdown">
+                  <div
+                    v-for="m in filteredOllamaModels"
+                    :key="m"
+                    class="model-option"
+                    :class="{ on: aiEditDraft.model === m }"
+                    @mousedown.prevent="pickOllamaModel(m)"
+                  >{{ m }}</div>
+                  <div v-if="!filteredOllamaModels.length" class="model-option-empty">
+                    {{ t('aiOllamaNoModels') }}
+                  </div>
+                </div>
+              </div>
             </label>
+            <!-- Ollama：chip 快捷选择（与下拉等价，鼠标不用移来移去） -->
+            <div v-if="aiEditDraft.provider === 'ollama'" class="ollama-model-picks">
+              <template v-if="ollamaLocalModels.length">
+                <span class="picks-label">{{ t('aiOllamaLocalModels') }}</span>
+                <button
+                  v-for="m in ollamaLocalModels"
+                  :key="m"
+                  type="button"
+                  class="pick-chip"
+                  :class="{ on: aiEditDraft.model === m }"
+                  @click="aiEditDraft.model = m"
+                >{{ m }}</button>
+              </template>
+              <span v-else-if="ollamaModelsLoading" class="picks-hint">{{ t('aiOllamaLoading') }}</span>
+              <span v-else class="picks-hint">{{ t('aiOllamaNoModels') }}</span>
+            </div>
             <div class="field-row">
               <label class="field field-half">
                 <span class="field-label">{{ t('aiTemperature') }}</span>

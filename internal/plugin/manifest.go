@@ -84,6 +84,19 @@ func validateManifest(m *PluginManifest) error {
 		}
 	}
 
+	// 校验 filesystem scope 条目（必须能展开为绝对路径），
+	// 避免插件带着写错的 scope 静默失败——那些文件能力会一直返回权限拒绝。
+	if err := m.Permissions.Filesystem.Validate(); err != nil {
+		return err
+	}
+	// 网络 / shell 白名单条目非空校验（bool 写法无需校验）。
+	if err := m.Permissions.Network.Validate(); err != nil {
+		return err
+	}
+	if err := m.Permissions.Shell.Validate(); err != nil {
+		return err
+	}
+
 	return nil
 }
 

@@ -77,7 +77,12 @@ func apiEndpoint(cfg AIProfile) (url string, authKey, authVal string) {
 		ep := base + "/openai/deployments/" + cfg.Model + "/chat/completions?api-version=2024-02-15-preview"
 		return ep, "api-key", cfg.APIKey
 	}
-	return base + "/chat/completions", "Authorization", "Bearer " + cfg.APIKey
+	// 无 API Key 时不产出空 "Bearer "（本地 Ollama / 免鉴权自建网关属正常场景）。
+	auth := ""
+	if cfg.APIKey != "" {
+		auth = "Bearer " + cfg.APIKey
+	}
+	return base + "/chat/completions", "Authorization", auth
 }
 
 // ---- 多档案配置存储 ----
@@ -472,7 +477,7 @@ func (a *AIService) AITestConnection(profileID string) (map[string]interface{}, 
 		}
 		apiKey = dec
 	}
-	if apiKey == "" {
+	if apiKey == "" && s.Provider != "ollama" {
 		return nil, fmt.Errorf("API Key 为空")
 	}
 
@@ -502,7 +507,10 @@ func (a *AIService) AITestConnection(profileID string) (map[string]interface{}, 
 		return nil, fmt.Errorf("请求创建失败: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(authKey, authVal)
+	// 本地 Ollama 无需鉴权，留空 API Key 时不要发空 Bearer（部分网关会因空 token 直接 401）。
+	if authVal != "" {
+		req.Header.Set(authKey, authVal)
+	}
 	req.Header.Set("Accept-Encoding", "identity")
 
 	resp, err := a.aiHTTPClient.Do(req)

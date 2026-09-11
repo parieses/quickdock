@@ -29,7 +29,9 @@ interface MarketPlugin {
   category: string
   icon: string
   platforms: string[]
-  permissions: Record<string, boolean>
+  // 后端市场索引原样透传 plugin.json 的 permissions：
+  // 可能是 bool（如 clipboard:true）也可能是对象（如 filesystem:{read,write} / network:["..."]）。
+  permissions: Record<string, any>
   capabilities: string[]
   downloads: Record<string, string>
   // 后端 GetPluginMarket 填充
@@ -121,6 +123,41 @@ function detailChangelog(p: MarketPlugin): string {
   if (p.changelog_i18n && p.changelog_i18n[locale.value]) return p.changelog_i18n[locale.value]
   return p.changelog || ''
 }
+// 权限明细：把 permissions 展开成「能力 → 范围」列表，安装前让用户看清插件能碰什么。
+// bool 值（clipboard:true）只说明「已授权」；对象值（filesystem:{read,write} / network:["..."])
+// 展开其白名单，让用户装前就能看到具体路径或域名。
+function permDetails(p: MarketPlugin): { label: string; values: string[] }[] {
+  const perms = p.permissions
+  if (!perms || Object.keys(perms).length === 0) return []
+  const out: { label: string; values: string[] }[] = []
+  for (const [k, v] of Object.entries(perms)) {
+    if (v === true || v === false) {
+      if (v) out.push({ label: k, values: [] })
+      continue
+    }
+    if (k === 'filesystem' && v && typeof v === 'object') {
+      const read: string[] = Array.isArray(v.read) ? v.read : []
+      const write: string[] = Array.isArray(v.write) ? v.write : []
+      if (read.length) out.push({ label: t('pluginPermRead'), values: read })
+      if (write.length) out.push({ label: t('pluginPermWrite'), values: write })
+      if (!read.length && !write.length) out.push({ label: t('pluginPermDialog'), values: [] })
+      continue
+    }
+    if (k === 'network' && Array.isArray(v)) {
+      out.push({ label: t('pluginPermNetwork'), values: v })
+      continue
+    }
+    if (Array.isArray(v)) {
+      out.push({ label: k, values: v })
+    } else if (v && typeof v === 'object') {
+      out.push({ label: k, values: Object.values(v).flat().filter((x: any) => typeof x === 'string') })
+    } else if (v) {
+      out.push({ label: k, values: [] })
+    }
+  }
+  return out
+}
+
 // 一键更新全局状态
 const updatingAll = ref(false)
 const updateAllDone = ref(0)
@@ -400,6 +437,19 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
             </div>
           </section>
 
+          <section class="detail-section" v-if="permDetails(detail).length">
+            <h4 class="detail-h">{{ t('pluginDetailPermissions') }}</h4>
+            <div class="detail-perms">
+              <div v-for="(grp, gi) in permDetails(detail)" :key="gi" class="detail-perm">
+                <span class="detail-perm-label">{{ grp.label }}</span>
+                <div v-if="grp.values.length" class="detail-tags">
+                  <span v-for="(val, vi) in grp.values" :key="vi" class="detail-tag detail-tag-path">{{ val }}</span>
+                </div>
+                <span v-else class="detail-perm-on">{{ t('pluginPermGranted') }}</span>
+              </div>
+            </div>
+          </section>
+
           <section class="detail-section" v-if="detailChangelog(detail)">
             <h4 class="detail-h">{{ t('pluginDetailChangelog') }}</h4>
             <pre class="detail-changelog">{{ detailChangelog(detail) }}</pre>
@@ -568,6 +618,11 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-muted { color: var(--color-text-disabled); }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 5px; }
 .detail-tag { font-size: 10px; padding: 2px 8px; border-radius: 6px; background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
+.detail-perms { display: flex; flex-direction: column; gap: 8px; }
+.detail-perm { display: flex; flex-direction: column; gap: 4px; }
+.detail-perm-label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
+.detail-perm-on { font-size: 11px; color: #1D9E75; }
+.detail-tag-path { font-family: var(--font-mono, monospace); word-break: break-all; }
 .detail-changelog {
   font-size: 11px; line-height: 1.5; color: var(--color-text-secondary);
   background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: 6px;

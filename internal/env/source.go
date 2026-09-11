@@ -59,17 +59,26 @@ const (
 	// RuntimeMCP：QuickDock 内置的 MCP 服务（让 AI 工具操作本应用）。
 	// 不是外部程序，无下载源/无版本，只在环境管理页提供启停与配置。
 	RuntimeMCP Runtime = "mcp"
+
+	// RuntimeOllama：本地大模型推理服务（ollama/ollama 官方 GitHub 发布的 Windows 便携 zip）。
+	// 服务型且独占 11434，语义同 redis/nginx：允许多版本并存安装，但同一时刻只能跑一个 serve。
+	RuntimeOllama Runtime = "ollama"
 )
 
-// 环境管理分组（侧边栏按组归类：语言 / Web 服务器 / 缓存与存储 / 工具 / 数据库）
+// 环境管理分组（侧边栏按职责归类：语言 / 网络服务 / 数据库 / 中间件 / AI / 开发工具）
 // 与前端 EnvironmentPage.vue 的 GROUP_ORDER / GROUP_LABEL 保持一致。
 // 后端 List() 会把这些值回填到 RuntimeInfo.Group，前端合并时以后端为准，避免两侧分组发散。
 const (
-	GroupLanguage  = "language"
-	GroupWebServer = "webserver"
-	GroupStorage   = "storage"
-	GroupTool      = "tool"
-	GroupDatabase  = "database"
+	GroupLanguage = "language"
+	// GroupNetwork 原 GroupWebServer：含 FTP（文件传输），故不再叫 webserver。
+	GroupNetwork = "network"
+	GroupDatabase = "database"
+	// GroupMiddleware 原 GroupStorage：容纳 RabbitMQ（消息队列）与 MinIO（对象存储），
+	// 它们都不是「缓存」，旧名会名不副实。
+	GroupMiddleware = "middleware"
+	// GroupAI 本地大模型与工具协议服务。
+	GroupAI   = "ai"
+	GroupTool = "tool"
 )
 
 // Source 一个可切换的下载源
@@ -82,7 +91,7 @@ type Source struct {
 
 type runtimeDef struct {
 	display   string   // 展示名，如 "Node.js"
-	group     string   // 分组：GroupLanguage / GroupWebServer / GroupCache / GroupTool
+	group     string   // 分组：GroupLanguage / GroupNetwork / GroupDatabase / GroupMiddleware / GroupAI / GroupTool
 	versions  []string // 推荐可下载版本清单（拉取失败时的兜底）
 	sources   []Source
 	versURL   string                     // 上游全量版本列表地址（空=只用推荐列表）
@@ -111,16 +120,16 @@ var (
 			{ID: "windowsphpnet", Name: "windows.php.net (releases VS17)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs17-x64.zip", "https://www.php.net/distributions/php-{version}.tar.gz", "")},
 			{ID: "windowsphpnet-rel", Name: "windows.php.net (releases VS16)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs16-x64.zip", "https://www.php.net/distributions/php-{version}.tar.gz", "")},
 		}},
-		RuntimeRedis: {display: "Redis", group: GroupStorage, versions: []string{"7.4.0", "7.2.5", "7.0.15"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, versHTMLFallbackParse: parseRedisVersionsHTML, fallbackHTMLURL: "https://github.com/redis-windows/redis-windows/releases", sources: []Source{
+		RuntimeRedis: {display: "Redis", group: GroupMiddleware, versions: []string{"7.4.0", "7.2.5", "7.0.15"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, versHTMLFallbackParse: parseRedisVersionsHTML, fallbackHTMLURL: "https://github.com/redis-windows/redis-windows/releases", sources: []Source{
 			{ID: "rediswindows", Name: "redis-windows/redis-windows (GitHub)", Build: redisURL("https://github.com/redis-windows/redis-windows/releases/download/{version}/Redis-{version}-Windows-x64-msys2.zip", "https://download.redis.io/releases/redis-{version}.tar.gz", "")},
 		}},
-		RuntimeNginx: {display: "Nginx", group: GroupWebServer, versions: []string{"1.27.5", "1.26.3", "1.25.5"}, versURL: "https://nginx.org/download/", versParse: parseNginxVersions, sources: []Source{
+		RuntimeNginx: {display: "Nginx", group: GroupNetwork, versions: []string{"1.27.5", "1.26.3", "1.25.5"}, versURL: "https://nginx.org/download/", versParse: parseNginxVersions, sources: []Source{
 			{ID: "nginxorg", Name: "nginx.org 官方", Build: nginxURL("https://nginx.org/download/nginx-{version}.zip", "https://nginx.org/download/nginx-{version}.tar.gz", "")},
 		}},
 		RuntimeGit: {display: "Git", group: GroupTool, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, fallbackHTMLURL: "https://github.com/git-for-windows/git/releases", sources: []Source{
 			{ID: "gfw", Name: "git-for-windows (GitHub)", Build: gitURL("https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}.windows.1-64-bit.zip", "https://github.com/git/git/archive/refs/tags/v{version}.tar.gz", "")},
 		}},
-		RuntimeCaddy: {display: "Caddy", group: GroupWebServer, versions: []string{"2.8.4", "2.7.6", "2.6.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, fallbackHTMLURL: "https://github.com/caddyserver/caddy/releases", sources: []Source{
+		RuntimeCaddy: {display: "Caddy", group: GroupNetwork, versions: []string{"2.8.4", "2.7.6", "2.6.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, fallbackHTMLURL: "https://github.com/caddyserver/caddy/releases", sources: []Source{
 			{ID: "caddyserver", Name: "caddyserver/caddy (GitHub)", Build: caddyURL("https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_windows_amd64.zip", "https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_darwin_{arch}.tar.gz", "")},
 		}},
 		RuntimeComposer: {display: "Composer", group: GroupTool, versions: []string{"2.7.7", "2.6.6", "2.5.8"}, versURL: "https://getcomposer.org/versions", versParse: parseComposerVersions, sources: []Source{
@@ -136,12 +145,12 @@ var (
 		// 构建日期无法由版本号推导，静态模板必然 404（且返回 HTTP 200 的 HTML 错误页，伪装成有效下载）。
 		// URL 与版本列表均由 apacheFetchIndex 抓取官方目录页动态解析（VS17/VS18 两页，正则大小写不敏感），
 		// 见下方 apacheURL / apacheVersParse。当前 2.4.66 在 VS17、2.4.68 在 VS18，均已实测可解析为有效 zip。
-		RuntimeApache: {display: "Apache", group: GroupWebServer, versions: []string{"2.4.68", "2.4.66"}, versURL: apacheLoungeBase + "/download/VS17/", versParse: apacheVersParse, sources: []Source{
+		RuntimeApache: {display: "Apache", group: GroupNetwork, versions: []string{"2.4.68", "2.4.66"}, versURL: apacheLoungeBase + "/download/VS17/", versParse: apacheVersParse, sources: []Source{
 			{ID: "apachelounge", Name: "Apache Lounge (官方)", Build: apacheURL("https://archive.apache.org/dist/httpd/httpd-{version}.tar.gz")},
 		}},
 		// Memcached：nono303 已停止发布 GitHub Releases，改用 adamyg/memcached-win32（含
 		// package-vc2022-x64.zip，内部可执行文件为 memcached_service.exe，需 -d run 以控制台模式运行）。
-		RuntimeMemcached: {display: "Memcached", group: GroupStorage, versions: []string{"1.6.34.11"}, versURL: "https://api.github.com/repos/adamyg/memcached-win32/releases?per_page=100", versParse: parseGitVersions, sources: []Source{
+		RuntimeMemcached: {display: "Memcached", group: GroupMiddleware, versions: []string{"1.6.34.11"}, versURL: "https://api.github.com/repos/adamyg/memcached-win32/releases?per_page=100", versParse: parseGitVersions, sources: []Source{
 			{ID: "adamyg", Name: "adamyg/memcached-win32 (GitHub)", Build: memcachedURL("https://github.com/adamyg/memcached-win32/releases/download/{version}/package-vc2022-x64.zip", "https://github.com/memcached/memcached/archive/refs/tags/{version}.tar.gz", "")},
 		}},
 		RuntimeMariaDB: {display: "MariaDB", group: GroupDatabase, versions: []string{"11.6.2", "11.5.2", "10.11.10"}, sources: []Source{
@@ -164,7 +173,7 @@ var (
 			{ID: "mailpit", Name: "axllent/mailpit (GitHub)", Build: mailpitURL("https://github.com/axllent/mailpit/releases/download/v{version}/mailpit-windows-amd64.zip", "https://github.com/axllent/mailpit/releases/download/v{version}/mailpit-darwin-{arch}.zip", "")},
 		}},
 		// MinIO：S3 兼容对象存储（API 9000 / Console 9001）。滚动发布（RELEASE 日期版本），单文件 minio.exe。
-		RuntimeMinIO: {display: "MinIO", group: GroupStorage, versions: []string{"latest"}, sources: []Source{
+		RuntimeMinIO: {display: "MinIO", group: GroupMiddleware, versions: []string{"latest"}, sources: []Source{
 			{ID: "minio", Name: "dl.min.io 官方", Build: minioURL("https://dl.min.io/server/minio/release/windows-amd64/minio.exe", "https://dl.min.io/server/minio/release/darwin-{arch}/minio", "")},
 		}},
 		// frpc：frp 内网穿透客户端（fatedier/frp）。本地以 `frpc -c frpc.toml` 运行，
@@ -177,7 +186,7 @@ var (
 		// 单文件 ftpdmin.exe（~65KB），无安装、无配置文件、匿名登录（设计如此），适合临时文件传输。
 		// 作为服务型运行时：端口 21、支持 -p 指定端口、-g 只读、位置参数指定根目录（即本版本 data 目录）。
 		// 下载源为作者个人站点（单文件 exe，非 zip），Install 直下 exe 到 ExeFor 不调用 Extract。
-		RuntimeFTP: {display: "FTP", group: GroupWebServer, versions: []string{"0.96"}, sources: []Source{
+		RuntimeFTP: {display: "FTP", group: GroupNetwork, versions: []string{"0.96"}, sources: []Source{
 			{ID: "ftpdmin", Name: "FTPDMIN (Sentex)", Build: ftpURL("https://www.sentex.net/~mwandel/ftpdmin/ftpdmin.exe", "", "")},
 		}},
 		// GitHub CLI (gh)：官方命令行工具，单文件 zip 内 gh.exe。无服务、无配置、无导入（DetectArgs 返回空 → 不可导入系统 exe）。
@@ -189,7 +198,7 @@ var (
 			{ID: "oven", Name: "oven-sh/bun (GitHub)", Build: bunURL("https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-windows-x64.zip", "https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-darwin-{arch}.zip", "x64")},
 		}},
 		// Traefik：Go 编写的边缘路由器，单文件 traefik.exe。服务型（serve），支持配置校验（validate --configFile）。
-		RuntimeTraefik: {display: "Traefik", group: GroupWebServer, versions: []string{"3.7.13", "3.6.4", "3.5.2"}, versURL: "https://api.github.com/repos/traefik/traefik/releases?per_page=100", versParse: parseTraefikVersions, fallbackHTMLURL: "https://github.com/traefik/traefik/releases", sources: []Source{
+		RuntimeTraefik: {display: "Traefik", group: GroupNetwork, versions: []string{"3.7.13", "3.6.4", "3.5.2"}, versURL: "https://api.github.com/repos/traefik/traefik/releases?per_page=100", versParse: parseTraefikVersions, fallbackHTMLURL: "https://github.com/traefik/traefik/releases", sources: []Source{
 			{ID: "traefik", Name: "traefik/traefik (GitHub)", Build: traefikURL("https://github.com/traefik/traefik/releases/download/v{version}/traefik_v{version}_windows_amd64.zip", "https://github.com/traefik/traefik/releases/download/v{version}/traefik_v{version}_darwin_{arch}.tar.gz", "")},
 		}},
 		// mkcert：本地 HTTPS 自签名证书工具（FiloSottile/mkcert），单文件 exe（非 zip）。无服务、无配置。
@@ -197,9 +206,17 @@ var (
 			{ID: "mkcert", Name: "FiloSottile/mkcert (GitHub)", Build: mkcertURL("https://github.com/FiloSottile/mkcert/releases/download/v{version}/mkcert-v{version}-windows-amd64.exe", "https://github.com/FiloSottile/mkcert/releases/download/v{version}/mkcert-v{version}-darwin-{arch}", "")},
 		}},
 		// MCP：内置服务，无下载源、无可下载版本（versions/sources 留空）
-		RuntimeMCP: {display: "MCP 服务", group: GroupTool},
+		RuntimeMCP: {display: "MCP 服务", group: GroupAI},
+		// Ollama：本地大模型推理服务，体积巨大（1.4 GB/版本，其中 1.36 GB 是 CUDA v12/v13 双轨 dll），
+		// 故虽为多版本骨架，实际按「单活跃版本 + 可保留旧版回退」使用。
+		// 下载：官方 ollama.com/download 只做 307 跳转到 GitHub Releases（不托管文件），
+		// 1.4 GB 资产国内直连不可用，故默认给 gh-proxy 加速源（实测唯一能完整透传的镜像）。
+		RuntimeOllama: {display: "Ollama", group: GroupAI, versions: []string{"0.34.0", "0.33.3", "0.32.15", "0.30.11"}, versURL: "https://api.github.com/repos/ollama/ollama/releases?per_page=100", versParse: parseOllamaVersions, versHTMLFallbackParse: parseReleasesTagVersionsHTML, fallbackHTMLURL: "https://github.com/ollama/ollama/releases", sources: []Source{
+			{ID: "ghproxy", Name: "GitHub 加速 (gh-proxy.com)", Build: ollamaURL("https://gh-proxy.com/https://github.com/ollama/ollama/releases/download/v{version}/ollama-windows-amd64.zip")},
+			{ID: "official", Name: "Ollama 官方 (ollama.com)", Build: ollamaURL("https://ollama.com/download/ollama-windows-amd64.zip?version={version}")},
+		}},
 		// RabbitMQ：Erlang 消息代理（rabbitmq-server-windows 自带 Erlang 运行时，无需单独安装）。服务型（sbin/rabbitmq-server.bat）。
-		RuntimeRabbitMQ: {display: "RabbitMQ", group: GroupStorage, versions: []string{"4.3.5", "4.2.0", "3.13.7"}, versURL: "https://api.github.com/repos/rabbitmq/rabbitmq-server/releases?per_page=100", versParse: parseRabbitVersions, fallbackHTMLURL: "https://github.com/rabbitmq/rabbitmq-server/releases", sources: []Source{
+		RuntimeRabbitMQ: {display: "RabbitMQ", group: GroupMiddleware, versions: []string{"4.3.5", "4.2.0", "3.13.7"}, versURL: "https://api.github.com/repos/rabbitmq/rabbitmq-server/releases?per_page=100", versParse: parseRabbitVersions, fallbackHTMLURL: "https://github.com/rabbitmq/rabbitmq-server/releases", sources: []Source{
 			{ID: "rabbitmq", Name: "rabbitmq/rabbitmq-server (GitHub)", Build: rabbitURL("https://github.com/rabbitmq/rabbitmq-server/releases/download/v{version}/rabbitmq-server-windows-{version}.zip", "https://github.com/rabbitmq/rabbitmq-server/releases/download/v{version}/rabbitmq-server-{version}.tar.xz", "")},
 		}},
 		// Erlang：底层语言运行时，多版本并存（erlang/otp 官方 GitHub 发布的 Windows 便携 zip）。
@@ -317,6 +334,19 @@ func caddyURL(winTmpl, darwinTmpl, style string) func(version, goos, arch string
 			return buildDarwin(darwinTmpl, version, arch, style, mm)
 		}
 		return ""
+	}
+}
+
+// ollamaURL 仅提供 Windows 便携 zip。非 Windows 返回空串（该平台不支持下载）：
+// macOS 资产 Ollama-darwin.zip 解出来是 .app bundle（exe 在 Ollama.app/Contents/MacOS/），
+// Linux 资产 ollama-linux-amd64.tar.zst 需要 zstd 解压而 extract.go 目前只认 zip/tar.gz。
+// 两者路径与解压链路都要单独适配，故一期只做 Windows（同 MongoRuntime 只给 windows/darwin 的先例）。
+func ollamaURL(winTmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(winTmpl)
 	}
 }
 
@@ -1122,6 +1152,35 @@ func parseGitVersionsHTML(body []byte) []string { return parseGitReleasesTagVers
 
 // parseCaddyVersions 从 GitHub Releases API 解析 caddyserver/caddy 的 tag_name（如 "v2.8.4"）。
 func parseCaddyVersions(body []byte) []string { return parseTagVersions(body, "v") }
+
+// reOllamaVersion 纯三段式版本号（0.34.0）。ollama 的预发布 tag 形如 v0.30.12-rc0 / v0.32.10-beta.1，
+// 需排除，否则 rc 版会混进可下载列表。
+var reOllamaVersion = regexp.MustCompile(`^\d+\.\d+\.\d+$`)
+
+// parseOllamaVersions 解析 ollama/ollama 的 GitHub Releases（tag_name 形如 "v0.34.0"）。
+// 双重过滤预发布：prerelease/draft 字段 + tag 后缀形态（该仓库个别 rc tag 未打 prerelease 标记）。
+func parseOllamaVersions(body []byte) []string {
+	var arr []struct {
+		TagName    string `json:"tag_name"`
+		Prerelease bool   `json:"prerelease"`
+		Draft      bool   `json:"draft"`
+	}
+	if err := json.Unmarshal(body, &arr); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, it := range arr {
+		if it.Prerelease || it.Draft {
+			continue
+		}
+		v := strings.TrimPrefix(it.TagName, "v")
+		if !reOllamaVersion.MatchString(v) {
+			continue
+		}
+		out = append(out, v)
+	}
+	return out
+}
 
 // parseCaddyVersionsHTML 从 GitHub Releases 页面 HTML 提取版本号（API 不可用时兜底）。
 func parseCaddyVersionsHTML(body []byte) []string { return parseReleasesTagVersionsHTML(body) }

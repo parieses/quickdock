@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import {
+  CallPluginHostMethod,
   ExecutePluginCommand,
   GetAndClearPendingPluginInit,
   PickFilePath,
@@ -27,7 +28,7 @@ export interface PluginHostOptions {
  *
  * 同时承载「内联（命令面板内）」与「独立插件窗口」两种形态，收敛原先散落在
  * useInlinePlugin.ts 与 PluginPage.vue 中的重复逻辑：
- *  - postMessage 桥接（confirm / alert / copy / execute）
+ *  - postMessage 桥接（confirm / alert / copy / execute / pickfile / pickfolder / readfile / host）
  *  - nonce 防跨源伪造
  *  - init（含 pending init 或直接传入）+ theme 下发
  *  - 主题 MutationObserver 动态跟随（移除写死的 dark）
@@ -153,6 +154,21 @@ export function usePluginHost(opts: PluginHostOptions) {
         event.source?.postMessage({ type: 'plugin:copy-result', id, ok: true }, '*')
       } catch {
         event.source?.postMessage({ type: 'plugin:copy-result', id, ok: false }, '*')
+      }
+      return
+    }
+
+    // 插件通用宿主代发（qdHostCall / qdHttp）：iframe 内 fetch 被 CORS 拦死，
+    // 网络与宿主能力一律经此转发，宿主侧走与 native / goja 相同的 Host Method 注册表。
+    // ⚠️ pluginId 取自宿主侧 opts.pluginId()（当前打开的插件），绝不可从 payload 读取，
+    //    否则插件可冒充其它插件调用 db.* 越权读写。
+    if (event.data?.type === 'plugin:host') {
+      const { id, method, params } = event.data
+      try {
+        const raw = await CallPluginHostMethod(pluginId, String(method || ''), JSON.stringify(params ?? {}))
+        event.source?.postMessage({ type: 'plugin:host-result', id, data: unwrap(raw) }, '*')
+      } catch (e: any) {
+        event.source?.postMessage({ type: 'plugin:host-result', id, error: e?.message || String(e) }, '*')
       }
       return
     }

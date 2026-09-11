@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref, defineExpose } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GetPluginFrontendPage } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { unwrap } from '../utils/api'

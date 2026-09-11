@@ -940,6 +940,38 @@ async function toggleAutoStart() {
 }
 .field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-border); }
 .field-input::placeholder { color: var(--color-text-disabled); }
+/* Ollama 本机已下载模型快捷选择（SettingsAI 复用） */
+.model-input-wrap { position: relative; display: flex; align-items: center; }
+.model-input-wrap .field-input { flex: 1; padding-right: 30px; }
+.model-caret {
+  position: absolute; right: 6px; background: transparent; border: none;
+  color: var(--color-text-muted); cursor: pointer; font-size: 12px; padding: 2px 6px;
+  border-radius: 4px; line-height: 1;
+}
+.model-caret:hover { color: var(--color-text-primary); background: var(--color-bg-primary); }
+.model-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
+  max-height: 200px; overflow-y: auto; padding: 4px;
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+}
+.model-option {
+  padding: 6px 9px; border-radius: 4px; font-size: 12px;
+  color: var(--color-text-secondary); cursor: pointer; white-space: nowrap;
+}
+.model-option:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.model-option.on { color: var(--color-accent); }
+.model-option-empty { padding: 8px 9px; font-size: 11px; color: var(--color-text-disabled); }
+.ollama-model-picks { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: -2px; }
+.picks-label { font-size: 11px; color: var(--color-text-muted); }
+.picks-hint { font-size: 11px; color: var(--color-text-disabled); }
+.pick-chip {
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: 999px;
+  padding: 3px 10px; font-size: 11px; color: var(--color-text-secondary);
+  cursor: pointer; font-family: inherit; transition: all 0.12s;
+}
+.pick-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
+.pick-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
 .field-textarea textarea { resize: vertical; min-height: 60px; font-family: inherit; }
 .field-row { display: flex; gap: 12px; }
 .field-half { flex: 1; min-width: 0; }

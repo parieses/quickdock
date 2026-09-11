@@ -21,6 +21,7 @@ var (
 	ErrPluginNotFound      = errors.New("插件未加载")
 	ErrPluginCrashed       = errors.New("插件进程已崩溃")
 	ErrPermissionDenied    = errors.New("权限不足")
+	ErrUnknownHostMethod   = errors.New("未知的 host 方法")
 	ErrInvalidManifest     = errors.New("插件清单格式无效")
 	ErrUnsupportedRuntime  = errors.New("不支持的 runtime")
 	ErrHotkeyConflict      = errors.New("热键冲突，已被其他插件占用")

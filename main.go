@@ -629,10 +629,12 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 
 		// 写入数据库记录（含 capabilities / permissions / category / icon）
 		perms := make(map[string]interface{})
-		if mf.Permissions.Network || mf.Permissions.Filesystem || mf.Permissions.Clipboard {
+		if mf.Permissions.Network.Granted() || mf.Permissions.Filesystem.Granted() || mf.Permissions.Clipboard || mf.Permissions.Shell.Granted() || mf.Permissions.ProcessKill {
 			perms["network"] = mf.Permissions.Network
 			perms["filesystem"] = mf.Permissions.Filesystem
 			perms["clipboard"] = mf.Permissions.Clipboard
+			perms["shell"] = mf.Permissions.Shell
+			perms["processKill"] = mf.Permissions.ProcessKill
 		}
 		if err := database.InsertPluginFull(mf.ID, mf.Name, mf.Version, mf.Author, mf.Description, mf.Category, iconData, mf.Capabilities, perms); err != nil {
 			logger.W("QuickDock: 内置插件 %s 写入数据库失败: %v", pluginID, err)

@@ -46,7 +46,9 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(authKey, authVal)
+	if authVal != "" {
+		req.Header.Set(authKey, authVal)
+	}
 	// 导致逐字流式退化成"一次性整段"。强制 identity 让上游返回原始分块 SSE。
 	req.Header.Set("Accept-Encoding", "identity")
 	req.Header.Set("Cache-Control", "no-store")
@@ -239,7 +241,9 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 		return "", err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set(authKey, authVal)
+	if authVal != "" {
+		req.Header.Set(authKey, authVal)
+	}
 
 	client := a.aiHTTPClient
 	resp, err := client.Do(req)

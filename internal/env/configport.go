@@ -38,6 +38,9 @@ var (
 	// Caddyfile: admin localhost:2019 / admin :2019 / admin 2019
 	reCaddyAdmin = regexp.MustCompile(`(?i)^admin\s+(?:[\w.]+:|:)?(\d+)\s*$`)
 	reCaddyAdminOff = regexp.MustCompile(`(?i)^admin\s+off\s*$`)
+	// ollama.env: OLLAMA_HOST=127.0.0.1:11434。取最后一个冒号后的端口，兼容
+	// host:port / :port / [::1]:port / 纯端口四种写法（故用贪婪 .*: 吃掉地址部分）。
+	reOllamaHostPort = regexp.MustCompile(`(?i)^OLLAMA_HOST\s*=\s*(?:.*:)?(\d+)$`)
 )
 
 // readConfRawLines 读取配置文件，返回去注释后的原始行（保留行首缩进，便于

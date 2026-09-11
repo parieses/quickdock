@@ -55,6 +55,12 @@ import {
   EnvCertStatus,
   EnvCertInstallRoot,
   EnvCertIssue,
+  EnvOllamaModels,
+  EnvOllamaSearchLibrary,
+  EnvOllamaCheckUpdate,
+  EnvOllamaRunningModels,
+  EnvOllamaPullModel,
+  EnvOllamaDeleteModel,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import {
@@ -84,15 +90,19 @@ const isHarness = computed(() => selectedId.value === HARNESS_KEY)
 const isHttp = computed(() => selectedId.value === HTTP_KEY)
 const isPorts = computed(() => selectedId.value === PORTS_KEY)
 
-// 侧边栏分组（按功能合并）：语言运行时 / Web 服务 / 数据库 / 缓存与存储 / 开发工具。
-// 缓存与存储组聚合原「缓存」(redis/memcached) 与对象存储 (minio)；工具组追加 harness 与 HTTP 服务两个特殊入口。
-const GROUP_ORDER = ['language', 'webserver', 'database', 'storage', 'tool']
+// 侧边栏分组（按职责划分）：语言运行时 / 网络服务 / 数据库 / 中间件 / AI 服务 / 开发工具 / 内置工具。
+// 网络服务含 FTP（文件传输），故不复用旧名 webserver；中间件同时容纳 Redis/Memcached（缓存）
+// 与 RabbitMQ/MinIO，旧名「缓存与存储」对它们名不副实；AI 服务收拢 Ollama 与 MCP 服务。
+// 内置工具组承载 harness / HTTP 服务 / 端口三个「非可安装运行时」的页面入口。
+const GROUP_ORDER = ['language', 'network', 'database', 'middleware', 'ai', 'tool', 'special']
 const GROUP_LABEL: Record<string, string> = {
   language: 'groupLanguage',
-  webserver: 'groupWebserver',
+  network: 'groupNetwork',
   database: 'groupDatabase',
-  storage: 'groupStorage',
+  middleware: 'groupMiddleware',
+  ai: 'groupAI',
   tool: 'groupTool',
+  special: 'groupSpecial',
 }
 
 // 分组展开/收起状态（持久化到 localStorage）
@@ -148,8 +158,12 @@ const sidebarGroups = computed(() => {
       }))
       // 各分类下按名称首字母排序，保证展示稳定有序
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
-    if (g === 'tool') {
+    // DSH（DeepSeek Harness）是 AI Agent 入口，归入 AI 服务组；它和 HTTP 服务/端口一样是页面入口而非可安装运行时，
+    // 故以 kind: 'special' 注入，不参与上面的 runtime 列表与排序。
+    if (g === 'ai') {
       items.push({ kind: 'special', id: HARNESS_KEY, name: t('navDsh'), avatar: 'DS', color: 'var(--color-accent)', active: isHarness.value, running: dshRunning.value })
+    }
+    if (g === 'special') {
       items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: '#4a9eff', active: isHttp.value, running: httpAnyRunning.value })
       items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: '#3ecf8e', active: isPorts.value })
     }
@@ -159,13 +173,14 @@ const sidebarGroups = computed(() => {
 })
 
 // 分组级运行标识：该分组内任意「有服务」的运行时正在运行即点亮；
-// 工具组额外纳入 HTTP 服务与 dsh（harness）的运行态。
+// AI 组额外纳入 DSH，内置工具组额外纳入 HTTP 服务的运行态。
 // 即便分组被折叠，也依据全量运行时实时计算，不依赖已折叠隐藏的子项。
 function groupRunning(key: string): boolean {
   for (const r of runtimes.value) {
     if (r.group === key && r.hasService && (runningCache[r.id] ?? false)) return true
   }
-  if (key === 'tool') {
+  if (key === 'ai' && dshRunning.value) return true
+  if (key === 'special') {
     for (const v of Object.values(httpRunning)) if (v) return true
   }
   return false
@@ -291,17 +306,17 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'go', name: 'Go', group: 'language', hasService: false },
   { id: 'bun', name: 'Bun', group: 'language', hasService: false },
   { id: 'erlang', name: 'Erlang', group: 'language', hasService: false },
-  { id: 'nginx', name: 'Nginx', group: 'webserver', hasService: true },
-  { id: 'caddy', name: 'Caddy', group: 'webserver', hasService: true },
-  { id: 'traefik', name: 'Traefik', group: 'webserver', hasService: true },
-  { id: 'redis', name: 'Redis', group: 'storage', hasService: true },
-  { id: 'memcached', name: 'Memcached', group: 'storage', hasService: true },
+  { id: 'nginx', name: 'Nginx', group: 'network', hasService: true },
+  { id: 'caddy', name: 'Caddy', group: 'network', hasService: true },
+  { id: 'traefik', name: 'Traefik', group: 'network', hasService: true },
+  { id: 'redis', name: 'Redis', group: 'middleware', hasService: true },
+  { id: 'memcached', name: 'Memcached', group: 'middleware', hasService: true },
   { id: 'mariadb', name: 'MariaDB', group: 'database', hasService: true },
   { id: 'mysql', name: 'MySQL', group: 'database', hasService: true },
   { id: 'postgresql', name: 'PostgreSQL', group: 'database', hasService: true },
   { id: 'mongodb', name: 'MongoDB', group: 'database', hasService: true },
-  { id: 'minio', name: 'MinIO', group: 'storage', hasService: true },
-  { id: 'rabbitmq', name: 'RabbitMQ', group: 'storage', hasService: true },
+  { id: 'minio', name: 'MinIO', group: 'middleware', hasService: true },
+  { id: 'rabbitmq', name: 'RabbitMQ', group: 'middleware', hasService: true },
   { id: 'git', name: 'Git', group: 'tool', hasService: false },
   { id: 'composer', name: 'Composer', group: 'tool', hasService: false },
   { id: 'ffmpeg', name: 'FFmpeg', group: 'tool', hasService: false },
@@ -309,10 +324,11 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'frpc', name: 'frpc', group: 'tool', hasService: false },
   { id: 'gh', name: 'GitHub CLI', group: 'tool', hasService: false },
   { id: 'mkcert', name: 'mkcert', group: 'tool', hasService: false },
+  { id: 'ollama', name: 'Ollama', group: 'ai', hasService: true },
   { id: 'python', name: 'Python', group: 'language', hasService: false },
-  { id: 'apache', name: 'Apache', group: 'webserver', hasService: true },
-  { id: 'ftp', name: 'FTP', group: 'webserver', hasService: true },
-  { id: 'mcp', name: 'MCP 服务', group: 'tool', hasService: true },
+  { id: 'apache', name: 'Apache', group: 'network', hasService: true },
+  { id: 'ftp', name: 'FTP', group: 'network', hasService: true },
+  { id: 'mcp', name: 'MCP 服务', group: 'ai', hasService: true },
 ]
 function staticRuntime(s: typeof STATIC_CATALOG[number]): RuntimeInfo {
   return {
@@ -584,6 +600,202 @@ async function setMCPLevel() {
 }
 
 watch(selectedId, (id) => { if (id === 'mcp') loadMCP() })
+
+// ---- Ollama 模型管理（/api/tags|ps|pull|delete）----
+// 模型与程序版本是两件事：这里动的是模型库（几十 GB，全局共享一份，默认 ~/.ollama/models），
+// 不碰 runtime/ollama/<version> 下的程序目录；反之删除程序版本也不碰模型。
+interface OllamaModel {
+  name: string
+  size: number
+  modified_at: string
+  details: { family: string; parameter_size: string; quantization_level: string }
+}
+interface OllamaRunningModel { name: string; size: number; size_vram: number; expires_at: string }
+
+const ollamaModels = ref<OllamaModel[]>([])
+const ollamaRunning = ref<OllamaRunningModel[]>([])
+const ollamaLoading = ref(false)
+const ollamaErr = ref('')
+const ollamaPullName = ref('')
+const ollamaPulling = ref(false)
+// ollamaProgress 拉取进度。status 是 Ollama 的协议文案（pulling manifest / downloading…），
+// 与界面语言无关，原样展示不做翻译。
+const ollamaProgress = ref<{ percent: number; completed: number; total: number; status: string } | null>(null)
+const ollamaDelTarget = ref<OllamaModel | null>(null)
+
+// ---- Ollama 版本更新检测（单版本语义）----
+// 只在切到 Ollama 分类时静默查一次；发现新版显示徽标 + 更新按钮，由用户确认才替换。
+const ollamaUpdate = ref<{ installed: string; latest: string; hasUpdate: boolean } | null>(null)
+const ollamaUpdateChecking = ref(false)
+
+async function checkOllamaUpdate() {
+  if (ollamaUpdateChecking.value) return
+  ollamaUpdateChecking.value = true
+  try {
+    ollamaUpdate.value = unwrap<{ installed: string; latest: string; hasUpdate: boolean }>(
+      await EnvOllamaCheckUpdate(),
+    )
+  } catch {
+    ollamaUpdate.value = null
+  } finally {
+    ollamaUpdateChecking.value = false
+  }
+}
+
+// ---- 拉取输入框的官方模型库联想 ----
+// 数据源 ollama.com/api/tags（支持 ?q=），非本机已装模型——已装的不需要再拉。
+const ollamaLibModels = ref<{ name: string; size: number }[]>([])
+const ollamaLibOpen = ref(false)
+const ollamaLibLoading = ref(false)
+let ollamaLibTimer: ReturnType<typeof setTimeout> | null = null
+// 请求序号：慢的旧响应回来时若已发起新请求，直接丢弃，避免候选列表被旧结果覆盖。
+let ollamaLibSeq = 0
+
+// searchOllamaLibrary 拉取候选。空关键字返回官方热门（默认排序）。
+async function searchOllamaLibrary(kw: string) {
+  const seq = ++ollamaLibSeq
+  ollamaLibLoading.value = true
+  try {
+    const ms = unwrap<{ name: string; size: number }[]>(await EnvOllamaSearchLibrary(kw)) || []
+    if (seq !== ollamaLibSeq) return // 已有更新的请求，丢弃本次结果
+    ollamaLibModels.value = ms
+  } catch {
+    if (seq === ollamaLibSeq) ollamaLibModels.value = []
+  } finally {
+    if (seq === ollamaLibSeq) ollamaLibLoading.value = false
+  }
+}
+
+// onOllamaPullInput 输入防抖 300ms 后查询，避免逐字符打满官方接口。
+function onOllamaPullInput() {
+  if (ollamaLibTimer) clearTimeout(ollamaLibTimer)
+  ollamaLibTimer = setTimeout(() => searchOllamaLibrary(ollamaPullName.value.trim()), 300)
+}
+
+// openOllamaLib 聚焦即展开；首次展开时拉一次热门，让空输入也有候选可点。
+function openOllamaLib() {
+  ollamaLibOpen.value = true
+  if (!ollamaLibModels.value.length) searchOllamaLibrary(ollamaPullName.value.trim())
+}
+
+function pickOllamaLib(name: string) {
+  ollamaPullName.value = name
+  ollamaLibOpen.value = false
+}
+
+function closeOllamaLibSoon() {
+  // 延迟关闭：否则 mousedown 选中项时列表已被 blur 收起，点击落空。
+  setTimeout(() => { ollamaLibOpen.value = false }, 150)
+}
+
+// ollamaBaseURL 提供给 OpenAI 兼容客户端填的 Base URL。
+// 端口取实际侦听端口（用户可能在 ollama.env 改过 OLLAMA_HOST），
+// 未取到时回退 11434；末尾带 /v1 是因为 AI 助手等客户端按 OpenAI 协议接入。
+const ollamaBaseURL = computed(() => {
+  const r = selected.value
+  const running = r ? r.installed.find((ins) => svcOn(r, ins.version)) : undefined
+  const ports = r && running ? svcPorts(r, running.version) : []
+  return `http://127.0.0.1:${ports[0] || 11434}/v1`
+})
+
+async function copyOllamaText(text: string) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(t('copied'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+function copyOllamaModel(name: string) { copyOllamaText(name) }
+
+// ollamaSize 把字节格式化成人类可读体积。模型都以 GB 计，小于 1 GB 才降到 MB。
+function ollamaSize(n: number): string {
+  if (!n) return '—'
+  const gb = n / 1024 ** 3
+  return gb >= 1 ? gb.toFixed(2) + ' GB' : (n / 1024 ** 2).toFixed(0) + ' MB'
+}
+function ollamaTime(s: string): string {
+  if (!s) return '—'
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? s : d.toLocaleString()
+}
+
+// loadOllama 拉取模型列表与运行中模型。未装/未启动时后端返回明确文案，
+// 落在 ollamaErr 里就地展示，不弹 toast 打扰（切到这个分类就会看到，属预期状态而非异常）。
+async function loadOllama() {
+  ollamaLoading.value = true
+  ollamaErr.value = ''
+  try {
+    const [ms, rs] = await Promise.all([EnvOllamaModels(), EnvOllamaRunningModels()])
+    ollamaModels.value = unwrap<OllamaModel[]>(ms) || []
+    ollamaRunning.value = unwrap<OllamaRunningModel[]>(rs) || []
+  } catch (e) {
+    ollamaModels.value = []
+    ollamaRunning.value = []
+    ollamaErr.value = getErrorMessage(e)
+  } finally {
+    ollamaLoading.value = false
+  }
+}
+
+// pullOllamaModel 拉取模型：后端异步执行、立即返回，进度经事件推送。
+async function pullOllamaModel() {
+  const name = ollamaPullName.value.trim()
+  if (!name || ollamaPulling.value) return
+  ollamaPulling.value = true
+  ollamaErr.value = ''
+  ollamaProgress.value = { percent: 0, completed: 0, total: 0, status: '' }
+  try {
+    unwrap(await EnvOllamaPullModel(name))
+  } catch (e) {
+    // 请求本身没发出去（如服务未启动）才算失败；发出去了就等事件收尾。
+    ollamaPulling.value = false
+    ollamaProgress.value = null
+    ollamaErr.value = getErrorMessage(e)
+  }
+}
+
+async function deleteOllamaModel() {
+  const m = ollamaDelTarget.value
+  if (!m) return
+  try {
+    unwrap(await EnvOllamaDeleteModel(m.name))
+    toast.success(t('ollamaDeleted', { name: m.name }))
+    ollamaDelTarget.value = null
+    await loadOllama()
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// onOllamaPull 拉取进度事件。Wails v3 的 payload 在 e.data。
+function onOllamaPull(e: any) {
+  const p = e?.data ?? e
+  if (!p || typeof p !== 'object') return
+  if (p.stage === 'progress') {
+    ollamaProgress.value = {
+      percent: p.percent || 0,
+      completed: p.completed || 0,
+      total: p.total || 0,
+      status: p.status || '',
+    }
+    return
+  }
+  // done / error 都是本次拉取的终态
+  ollamaPulling.value = false
+  ollamaProgress.value = null
+  if (p.stage === 'done') {
+    toast.success(t('ollamaPullDone', { name: p.model || '' }))
+    ollamaPullName.value = ''
+    loadOllama()
+  } else {
+    toast.error(p.message || t('ollamaPullFailed'))
+  }
+}
+
+watch(selectedId, (id) => { if (id === 'ollama') { loadOllama(); checkOllamaUpdate() } })
 
 // versionInput: 绑定到当前选中运行时的版本号，读写都经过 ui[state] 保证一致性
 const versionInput = computed({
@@ -1332,6 +1544,18 @@ async function install(r: RuntimeInfo) {
   }
 }
 
+// updateOllama 更新到检测到的最新版。
+// 走既有 install 流程（EnvInstall → OllamaRuntime.Install 原地替换，配置保留），
+// 只是先把目标版本写进 ui state——版本下拉在单版本语义下不展示，用户只能从这里触发。
+function updateOllama() {
+  const r = selected.value
+  const latest = ollamaUpdate.value?.latest
+  if (!r || r.id !== 'ollama' || !latest) return
+  const s = stateFor('ollama', r)
+  s.version = latest
+  install(r)
+}
+
 // Git 未检测到本地安装时的一键安装：用推荐版本（第一个）直接装，避开手输版本号。
 function installGitLatest() {
   const r = selected.value
@@ -1541,6 +1765,7 @@ async function toggleRabbitMgmt(r: RuntimeInfo, ins: Install) {
 
 let off: (() => void) | null = null
 let offRefreshed: (() => void) | null = null
+let offOllamaPull: (() => void) | null = null
 let timer: number | null = null
 // 点击外部时收起版本列表
 function onDocClick(e: MouseEvent) {
@@ -1563,6 +1788,7 @@ onMounted(() => {
   off = Events.On('quickdock:env:progress', onProgress)
   // 后台重扫完成（启动扫描 / 手动刷新按钮 / 安装完成后）→ 重新读取持久化缓存
   offRefreshed = Events.On('quickdock:env:refreshed', () => { load(); ensureCertLoaded(); pollStatus() })
+  offOllamaPull = Events.On('quickdock:env:ollama:pull', onOllamaPull)
   timer = window.setInterval(pollStatus, 3000)
 })
 // 切换运行时时自动拉取对应可下载版本列表（harness / http / ports 区块不触发）
@@ -1588,6 +1814,7 @@ onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
   if (off) off()
   if (offRefreshed) offRefreshed()
+  if (offOllamaPull) offOllamaPull()
   if (timer) clearInterval(timer)
   if (logTimer) clearInterval(logTimer)
   if (logModalTimer) clearInterval(logModalTimer)
@@ -1649,8 +1876,25 @@ const s = currentRuntimeState
 
       <!-- 右侧：所选分类详情 -->
       <main class="env-detail">
-        <!-- DeepSeek Harness 区块：复用 SettingsDSH 组件 -->
-        <SettingsDSH v-if="isHarness" :visible="isHarness" @goto="(id) => (selectedId = id)" />
+        <!-- DeepSeek Harness 区块：复用 SettingsDSH 组件，外壳（detail-head + detail-block）与其它区块保持同构 -->
+        <template v-if="isHarness">
+          <header class="detail-head">
+            <span class="detail-avatar" style="background:var(--color-accent)">DS</span>
+            <div class="detail-titles">
+              <div class="detail-title-row">
+                <span class="detail-name">{{ t('navDsh') }}</span>
+                <span class="detail-id">harness</span>
+              </div>
+              <div class="detail-badges">
+                <span class="badge svc">{{ t('dshDesc') }}</span>
+                <span v-if="dshRunning" class="badge ok">{{ t('dshServiceRunning') }}</span>
+              </div>
+            </div>
+          </header>
+          <section class="detail-block">
+            <SettingsDSH :visible="isHarness" embedded @goto="(id) => (selectedId = id)" />
+          </section>
+        </template>
 
         <!-- HTTP 服务区块：目录 → 可访问的静态服务 -->
         <template v-else-if="isHttp">
@@ -1746,6 +1990,120 @@ const s = currentRuntimeState
           </div>
         </header>
 
+        <!-- Ollama 模型管理：管的是模型库（全局共享、几十 GB），与上方程序版本互不越界 -->
+        <section v-if="selected.id === 'ollama'" class="detail-block">
+          <div class="block-head">
+            <span class="block-title">{{ t('ollamaModelsTitle') }}</span>
+            <span class="block-count">{{ ollamaModels.length }}</span>
+            <button class="link-btn import-btn" :disabled="ollamaLoading" @click="loadOllama">{{ t('refresh') }}</button>
+          </div>
+
+          <div class="ollama-pull-row">
+            <div class="lib-picker">
+              <input
+                v-model="ollamaPullName"
+                class="env-input"
+                :placeholder="t('ollamaPullPlaceholder')"
+                :disabled="ollamaPulling"
+                @input="onOllamaPullInput"
+                @focus="openOllamaLib"
+                @blur="closeOllamaLibSoon"
+                @keyup.enter="pullOllamaModel"
+              />
+              <!-- 官方模型库候选：输入即过滤，聚焦即展开（首次拉热门） -->
+              <div v-if="ollamaLibOpen && (ollamaLibModels.length || ollamaLibLoading)" class="lib-dropdown">
+                <div v-if="ollamaLibLoading && !ollamaLibModels.length" class="lib-loading">{{ t('ollamaLibLoading') }}</div>
+                <div
+                  v-for="m in ollamaLibModels"
+                  :key="m.name"
+                  class="lib-option"
+                  @mousedown.prevent="pickOllamaLib(m.name)"
+                >
+                  <span class="lib-name">{{ m.name }}</span>
+                  <span v-if="m.size" class="lib-size">{{ ollamaSize(m.size) }}</span>
+                </div>
+              </div>
+            </div>
+            <button class="op-btn" :disabled="ollamaPulling || !ollamaPullName.trim()" @click="pullOllamaModel">
+              {{ ollamaPulling ? t('ollamaPulling') : t('ollamaPullBtn') }}
+            </button>
+          </div>
+
+          <div v-if="ollamaProgress" class="ollama-prog">
+            <div class="ollama-prog-bar">
+              <div
+                class="ollama-prog-fill"
+                :class="{ unknown: !ollamaProgress.total }"
+                :style="{ width: ollamaProgress.total ? ollamaProgress.percent + '%' : '40%' }"
+              ></div>
+            </div>
+            <div class="ollama-prog-meta">
+              <span class="ollama-prog-pct">{{ ollamaProgress.percent.toFixed(1) }}%</span>
+              <span v-if="ollamaProgress.total">{{ ollamaSize(ollamaProgress.completed) }} / {{ ollamaSize(ollamaProgress.total) }}</span>
+              <span class="ollama-prog-status">{{ ollamaProgress.status }}</span>
+            </div>
+          </div>
+
+          <div v-if="ollamaErr" class="env-msg error">{{ ollamaErr }}</div>
+
+          <div v-if="ollamaModels.length" class="ver-table">
+            <div class="ver-row ver-head ollama-row">
+              <span class="col-ver">{{ t('ollamaColModel') }}</span>
+              <span class="col-env">{{ t('ollamaColSize') }}</span>
+              <span class="col-path">{{ t('ollamaColDetail') }}</span>
+              <span class="col-ops">{{ t('operations') }}</span>
+            </div>
+            <div v-for="m in ollamaModels" :key="m.name" class="ver-row ollama-row">
+              <div class="col-ver"><span class="ver-ver">{{ m.name }}</span></div>
+              <div class="col-env">{{ ollamaSize(m.size) }}</div>
+              <div class="col-path">
+                <span>{{ [m.details?.parameter_size, m.details?.quantization_level].filter(Boolean).join(' · ') || '—' }}</span>
+                <span class="ollama-time">{{ ollamaTime(m.modified_at) }}</span>
+              </div>
+              <div class="col-ops">
+                <button class="op-btn" @click="copyOllamaModel(m.name)">{{ t('copy') }}</button>
+                <button class="op-btn danger" @click="ollamaDelTarget = m">{{ t('delete') }}</button>
+              </div>
+            </div>
+          </div>
+          <div v-else-if="!ollamaLoading && !ollamaErr" class="empty-hint">{{ t('ollamaNoModels') }}</div>
+
+          <!-- 下载完只是第一步：说清模型怎么用，避免用户拉完不知道下一步 -->
+          <div v-if="ollamaModels.length" class="ollama-usage">
+            <div class="usage-title">{{ t('ollamaHowToUse') }}</div>
+            <div class="usage-row">
+              <span class="usage-k">{{ t('ollamaUsageEndpoint') }}</span>
+              <code class="usage-v">{{ ollamaBaseURL }}</code>
+              <button class="op-btn" @click="copyOllamaText(ollamaBaseURL)">{{ t('copy') }}</button>
+            </div>
+            <div class="usage-row">
+              <span class="usage-k">{{ t('ollamaUsageModel') }}</span>
+              <code class="usage-v">{{ ollamaModels[0].name }}</code>
+              <button class="op-btn" @click="copyOllamaText(ollamaModels[0].name)">{{ t('copy') }}</button>
+            </div>
+            <div class="usage-tip">{{ t('ollamaUsageTip') }}</div>
+          </div>
+
+          <template v-if="ollamaRunning.length">
+            <div class="block-head ollama-sub-head">
+              <span class="block-title">{{ t('ollamaRunningTitle') }}</span>
+              <span class="block-count">{{ ollamaRunning.length }}</span>
+            </div>
+            <div class="ver-table">
+              <div class="ver-row ver-head ollama-run-row">
+                <span class="col-ver">{{ t('ollamaColModel') }}</span>
+                <span class="col-env">{{ t('ollamaColVram') }}</span>
+                <span class="col-path">{{ t('ollamaColExpires') }}</span>
+              </div>
+              <div v-for="m in ollamaRunning" :key="m.name" class="ver-row ollama-run-row">
+                <div class="col-ver"><span class="ver-ver">{{ m.name }}</span></div>
+                <div class="col-env">{{ ollamaSize(m.size_vram) }}</div>
+                <div class="col-path">{{ ollamaTime(m.expires_at) }}</div>
+              </div>
+            </div>
+          </template>
+        </section>
+
         <!-- 本地可信证书签发（mkcert 专属能力）：随 mkcert 分类内联展示 -->
         <section v-if="selected.id === 'mkcert'" class="detail-block cert-panel">
           <div class="block-head">
@@ -1829,7 +2187,26 @@ const s = currentRuntimeState
           <div class="block-head">
             <span class="block-title">{{ t('installedVersions') }}</span>
             <span class="block-count">{{ selected.installed.length }}</span>
-            <button v-if="selected.id !== 'git' && selected.id !== 'mcp'" class="link-btn import-btn" @click="importExisting(selected)">{{ t('importExisting') }}</button>
+            <!-- Ollama 是单版本语义（目录固定、无版本共存），导入外部安装无意义，故不提供 -->
+            <button
+              v-if="selected.id !== 'git' && selected.id !== 'mcp' && selected.id !== 'ollama'"
+              class="link-btn import-btn"
+              @click="importExisting(selected)"
+            >{{ t('importExisting') }}</button>
+          </div>
+
+          <!-- Ollama 版本更新提示：检测到新版时显示，点「更新」走原地替换（保留配置） -->
+          <div v-if="selected.id === 'ollama' && ollamaUpdate?.hasUpdate" class="update-banner">
+            <span class="ub-icon">↑</span>
+            <div class="ub-text">
+              <span class="ub-title">{{ t('ollamaUpdateAvailable', { from: ollamaUpdate.installed, to: ollamaUpdate.latest }) }}</span>
+              <span class="ub-desc">{{ t('ollamaUpdateDesc') }}</span>
+            </div>
+            <button
+              class="env-install-btn"
+              :disabled="ui['ollama']?.installing || ollamaUpdateChecking"
+              @click="updateOllama"
+            >{{ ui['ollama']?.installing ? t('ollamaReplacing') : t('ollamaUpdateBtn') }}</button>
           </div>
 
           <!-- 端口冲突可视化提示：默认服务端口被其它程序占用时，启动会失败，提前给出明确警告 -->
@@ -2142,6 +2519,18 @@ const s = currentRuntimeState
         <div class="modal-actions">
           <button class="op-btn" @click="confirmDelete.open = false">{{ t('cancel') }}</button>
           <button class="env-install-btn danger" @click="doDelete">{{ t('deleteVersion') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 模型删除确认弹窗：与版本删除分开，避免误把「删模型」当成「删程序」 -->
+    <div v-if="ollamaDelTarget" class="modal-overlay" @click.self="ollamaDelTarget = null">
+      <div class="modal">
+        <div class="modal-title">{{ t('ollamaConfirmDeleteTitle') }}</div>
+        <p class="modal-text">{{ t('ollamaConfirmDelete', { name: ollamaDelTarget.name, size: ollamaSize(ollamaDelTarget.size) }) }}</p>
+        <div class="modal-actions">
+          <button class="op-btn" @click="ollamaDelTarget = null">{{ t('cancel') }}</button>
+          <button class="env-install-btn danger" @click="deleteOllamaModel">{{ t('delete') }}</button>
         </div>
       </div>
     </div>
@@ -2536,6 +2925,72 @@ const s = currentRuntimeState
 .ver-row.portable { border-left-color: var(--color-accent); }
 .ver-row.system { border-left-color: var(--color-text-disabled); }
 .ver-row.active { border-left-color: var(--color-success); }
+
+/* Ollama 模型表：4 列（模型 / 大小 / 参数·量化·时间 / 操作），比通用 6 列网格窄一档；
+   已加载模型表只有 3 列（无操作列）。通用网格按 span 顺序填充，不覆盖列定义会把操作按钮挤到中间列。 */
+.ollama-row { grid-template-columns: 1.6fr 0.8fr 2fr auto; }
+.ollama-run-row { grid-template-columns: 1.6fr 0.8fr 1.6fr; }
+.ollama-time { display: block; font-size: 10px; color: var(--color-text-disabled); }
+.ollama-sub-head { margin-top: 16px; }
+/* 官方模型库联想下拉：输入框选模型名，候选来自 ollama.com/api/tags */
+.lib-picker { position: relative; flex: 1; }
+.lib-picker .env-input { width: 100%; }
+.lib-dropdown {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
+  max-height: 220px; overflow-y: auto; padding: 4px;
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+.lib-option {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px;
+  padding: 6px 9px; border-radius: 4px; font-size: 12px;
+  color: var(--color-text-secondary); cursor: pointer;
+}
+.lib-option:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.lib-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lib-size { flex: 0 0 auto; font-size: 10.5px; color: var(--color-text-disabled); }
+.lib-loading { padding: 8px 9px; font-size: 11px; color: var(--color-text-disabled); }
+/* Ollama 更新提示横幅（检测到新版时出现，用户确认才替换） */
+.update-banner {
+  display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
+  padding: 11px 14px; border-radius: 8px;
+  background: var(--color-accent-bg, rgba(99, 102, 241, 0.08));
+  border: 1px solid var(--color-accent-border);
+}
+.ub-icon { font-size: 15px; color: var(--color-accent); flex: 0 0 auto; }
+.ub-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
+.ub-title { font-size: 12.5px; color: var(--color-text-primary); font-weight: 500; }
+.ub-desc { font-size: 11px; color: var(--color-text-muted); }
+/* 模型下载后的使用引导：给出可直接粘贴的 Base URL 与模型名 */
+.ollama-usage {
+  margin-top: 14px; padding: 12px 14px; border-radius: 8px;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  display: flex; flex-direction: column; gap: 7px;
+}
+.usage-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
+.usage-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.usage-k { flex: 0 0 96px; color: var(--color-text-muted); }
+.usage-v {
+  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+  color: var(--color-text-primary); background: var(--color-bg-primary);
+  padding: 2px 7px; border-radius: 4px; border: 1px solid var(--color-border);
+}
+.usage-tip { font-size: 11px; color: var(--color-text-disabled); line-height: 1.6; }
+.ollama-pull-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.ollama-pull-row .env-input { flex: 1; }
+.ollama-prog { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
+.ollama-prog-bar { height: 6px; border-radius: 3px; background: var(--color-bg-primary); overflow: hidden; }
+.ollama-prog-fill { height: 100%; background: var(--color-accent); transition: width 0.2s linear; }
+/* 尚未拿到总大小时（拉清单阶段）来回滑动，表示「在动但进度未知」 */
+.ollama-prog-fill.unknown { animation: ollama-slide 1.2s ease-in-out infinite; }
+.ollama-prog-meta { display: flex; align-items: center; gap: 10px; font-size: 11px; color: var(--color-text-secondary); }
+.ollama-prog-pct { font-variant-numeric: tabular-nums; color: var(--color-text-primary); }
+.ollama-prog-status { color: var(--color-text-disabled); }
+@keyframes ollama-slide {
+  0% { margin-left: 0; }
+  50% { margin-left: 60%; }
+  100% { margin-left: 0; }
+}
 
 /* Git 状态表：每行一个 Git 维度，列固定 Item / Status / Command / Path / Result */
 .git-table { display: flex; flex-direction: column; gap: 6px; }

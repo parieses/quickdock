@@ -13,7 +13,10 @@ import (
 	"time"
 
 	"quickdock/internal/logger"
+	mcpsrv "quickdock/internal/mcp"
 	"quickdock/internal/platform"
+	"quickdock/internal/plugin"
+	"quickdock/internal/sysutil"
 
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
@@ -26,8 +29,13 @@ import (
 // 已实现方法：
 //	host.clipboard.read / host.clipboard.write  （需 permissions.clipboard）
 //	host.notify                                  （无需权限）
-//	host.dialog.open / host.dialog.save          （需 permissions.filesystem）
-//	http.get / http.post                         （需 permissions.network）
+//	host.dialog.open / host.dialog.save          （需 permissions.filesystem 的对话框能力）
+//	host.fs.read/list/stat/exists/write/mkdir    （需 permissions.filesystem 的对应 read/write scope）
+//	http.get / http.post                         （需 permissions.network；域名白名单逐 host 校验 + 重定向二次校验）
+//	host.shell.open                              （需 permissions.shell；目标前缀白名单）
+//	host.process.list                            （无需权限，内置能力）
+//	host.process.kill                           （需 permissions.processKill；高危，默认拒绝）
+//	host.mcp.call                                （无需权限，等级门由 mcpsrv.Call 把关）
 //	db.get / db.set / db.delete / db.list        （无需权限，按 plugin_id 强隔离）
 
 const (
@@ -40,15 +48,26 @@ const (
 	pluginURLMaxLen     = 8 << 10 // url 长度上限 8 KiB，防超长 URL 拖慢 / 触发异常
 )
 
-// pluginHTTPClient 插件专用 HTTP 客户端：独立超时与重定向上限，不复用宿主的其它 client。
-var pluginHTTPClient = &http.Client{
-	Timeout: pluginHTTPTimeout,
-	CheckRedirect: func(req *http.Request, via []*http.Request) error {
-		if len(via) >= pluginHTTPMaxRedirs {
-			return fmt.Errorf("重定向次数超过 %d 次", pluginHTTPMaxRedirs)
-		}
-		return nil
-	},
+// pluginNetworkPerm 取插件声明的网络权限（用于 HTTP 域名白名单校验）。
+func (svc *PluginService) pluginNetworkPerm(pluginID string) plugin.NetworkPerm {
+	if svc.App.PluginMgr == nil {
+		return plugin.NetworkPerm{}
+	}
+	if inst := svc.App.PluginMgr.GetPlugin(pluginID); inst != nil {
+		return inst.Manifest.Permissions.Network
+	}
+	return plugin.NetworkPerm{}
+}
+
+// pluginShellPerm 取插件声明的 shell 权限（用于 host.shell.open 目标白名单校验）。
+func (svc *PluginService) pluginShellPerm(pluginID string) plugin.ShellPerm {
+	if svc.App.PluginMgr == nil {
+		return plugin.ShellPerm{}
+	}
+	if inst := svc.App.PluginMgr.GetPlugin(pluginID); inst != nil {
+		return inst.Manifest.Permissions.Shell
+	}
+	return plugin.ShellPerm{}
 }
 
 // RegisterPluginHostMethods 注入全部 Host API 实现。
@@ -176,6 +195,13 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 	})
 
 	// ---- HTTP ----
+	// allowHost 用于重定向二次校验：初始 URL 的 host 已在 checkPermission 校验，
+	// 但 302 可能把请求引到白名单外的域名，必须在每次跳转时再核一次。
+	netAllow := func(pluginID string) func(string) bool {
+		perm := svc.pluginNetworkPerm(pluginID)
+		return func(rawURL string) bool { return perm.AllowsHost(rawURL) }
+	}
+
 	svc.App.PluginMgr.InjectHostMethod("http.get", func(pluginID string, params json.RawMessage) (interface{}, error) {
 		var arg struct {
 			URL     string            `json:"url"`
@@ -184,7 +210,7 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 		if err := json.Unmarshal(params, &arg); err != nil {
 			return nil, fmt.Errorf("参数解析失败: %w", err)
 		}
-		return doPluginHTTP(pluginID, http.MethodGet, arg.URL, arg.Headers, "", "")
+		return doPluginHTTP(pluginID, http.MethodGet, arg.URL, arg.Headers, "", "", netAllow(pluginID))
 	})
 
 	svc.App.PluginMgr.InjectHostMethod("http.post", func(pluginID string, params json.RawMessage) (interface{}, error) {
@@ -197,7 +223,87 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 		if err := json.Unmarshal(params, &arg); err != nil {
 			return nil, fmt.Errorf("参数解析失败: %w", err)
 		}
-		return doPluginHTTP(pluginID, http.MethodPost, arg.URL, arg.Headers, arg.Body, arg.ContentType)
+		return doPluginHTTP(pluginID, http.MethodPost, arg.URL, arg.Headers, arg.Body, arg.ContentType, netAllow(pluginID))
+	})
+
+	// ---- 系统打开：以系统默认方式打开 URL / 文件 / 目录 ----
+	// 走 sysutil.OpenDetached（禁裸 exec），目标须命中插件声明的 shell 白名单。
+	svc.App.PluginMgr.InjectHostMethod("host.shell.open", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		var arg struct {
+			Target string `json:"target"`
+		}
+		if err := json.Unmarshal(params, &arg); err != nil {
+			return nil, fmt.Errorf("参数解析失败: %w", err)
+		}
+		if strings.TrimSpace(arg.Target) == "" {
+			return nil, fmt.Errorf("target 不能为空")
+		}
+		perm := svc.pluginShellPerm(pluginID)
+		if !perm.AllowsTarget(arg.Target) {
+			return nil, fmt.Errorf("目标 %q 不在 permissions.shell 白名单内", arg.Target)
+		}
+		if err := sysutil.OpenDetached(arg.Target, ""); err != nil {
+			return nil, fmt.Errorf("打开 %q 失败: %w", arg.Target, err)
+		}
+		return map[string]interface{}{"success": true}, nil
+	})
+
+	// ---- 进程列表（全量，按内存降序）----
+	svc.App.PluginMgr.InjectHostMethod("host.process.list", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		procs, err := sysutil.ListProcesses()
+		if err != nil {
+			return nil, fmt.Errorf("枚举进程失败: %w", err)
+		}
+		out := make([]map[string]interface{}, 0, len(procs))
+		for _, p := range procs {
+			out = append(out, map[string]interface{}{
+				"pid":      p.PID,
+				"name":     p.Name,
+				"memBytes": p.MemBytes,
+			})
+		}
+		return map[string]interface{}{"processes": out, "count": len(out)}, nil
+	})
+
+	// ---- 结束进程（高危，需显式声明 permissions.processKill）----
+	svc.App.PluginMgr.InjectHostMethod("host.process.kill", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		var arg struct {
+			PID int `json:"pid"`
+		}
+		if err := json.Unmarshal(params, &arg); err != nil {
+			return nil, fmt.Errorf("参数解析失败: %w", err)
+		}
+		if arg.PID <= 0 {
+			return nil, fmt.Errorf("pid 必须为正整数")
+		}
+		if err := sysutil.KillProcess(arg.PID); err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"success": true, "pid": arg.PID}, nil
+	})
+
+	// ---- MCP 工具 ----
+	// 复用宿主内置 MCP Server 已注册的工具（item/note/todo/clipboard/env/port…），
+	// 插件无需重复实现检索与业务能力，且与 AI 客户端共享同一能力面。
+	// 等级门由 mcpsrv.Call 统一把关：默认 maxLvl=LevelWrite，LevelRisk 工具
+	// （process_kill / system_command 等）自动被拒——插件侧无需额外权限声明。
+	// 未注册与等级不足都归类为执行失败（-1），错误文案本身已说明原因。
+	svc.App.PluginMgr.InjectHostMethod("host.mcp.call", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		var arg struct {
+			Tool string         `json:"tool"`
+			Args map[string]any `json:"args"`
+		}
+		if err := json.Unmarshal(params, &arg); err != nil {
+			return nil, fmt.Errorf("参数解析失败: %w", err)
+		}
+		if strings.TrimSpace(arg.Tool) == "" {
+			return nil, fmt.Errorf("tool 不能为空")
+		}
+		res, err := mcpsrv.Call(arg.Tool, arg.Args)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"tool": arg.Tool, "result": res}, nil
 	})
 
 	// ---- 插件专属存储（按 plugin_id 强隔离，插件无法跨插件读写）----
@@ -279,7 +385,44 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 		return map[string]interface{}{"data": all, "truncated": truncated}, nil
 	})
 
-	logger.I("插件 Host API 已注入（clipboard / notify / dialog / http / db）；插件日志写入 plugin-YYYYMMDD.log")
+	// ---- 文件系统（host.fs.*，实现在 plugin_fs.go）----
+	svc.registerFSHostMethods()
+
+	logger.I("插件 Host API 已注入（clipboard / notify / dialog / http / fs / mcp / db）；插件日志写入 plugin-YYYYMMDD.log")
+}
+
+// CallPluginHostMethod 供宿主前端（插件 iframe 桥接）按插件身份代发任意 host 方法。
+//
+// 存在的意义：none 运行时插件跑在 iframe 里，`fetch` 跨域被 CORS 拦死，也没有
+// 任何宿主能力；而 native / goja 各自有专属通道。与其为每个新能力加一个前端绑定，
+// 不如加这一个通用转发——三端从此收敛到同一个 invokeHostMethod 入口，
+// 后续新增 host 方法前端无需再改。
+//
+// ⚠️ 安全约定：pluginID 由宿主侧状态给出（usePluginHost 的 opts.pluginId() 取自
+// 当前打开的插件），**绝不可从 iframe 的 postMessage payload 读取**，否则插件可冒充
+// 其它插件调用 db.* 越权读写。
+func (svc *PluginService) CallPluginHostMethod(pluginID, method, params string) *services.ApiResult {
+	if svc.App.PluginMgr == nil {
+		return services.FailMsg("插件管理器未初始化")
+	}
+	if strings.TrimSpace(pluginID) == "" {
+		return services.FailMsg("pluginID 不能为空")
+	}
+	if strings.TrimSpace(method) == "" {
+		return services.FailMsg("method 不能为空")
+	}
+	raw := json.RawMessage(params)
+	if strings.TrimSpace(params) == "" {
+		raw = json.RawMessage("{}")
+	}
+	result, err := svc.App.PluginMgr.InvokeHostMethod(pluginID, method, raw)
+	if err != nil {
+		return services.Fail(err)
+	}
+	if result == nil {
+		result = map[string]interface{}{}
+	}
+	return services.Ok(result)
 }
 
 // pluginDataKey 解析并校验只含 key 的参数体
@@ -307,7 +450,9 @@ func validatePluginDataKey(key string) error {
 }
 
 // doPluginHTTP 执行插件发起的 HTTP 请求，限制协议、超时与响应体大小。
-func doPluginHTTP(pluginID, method, rawURL string, headers map[string]string, body, contentType string) (interface{}, error) {
+// allowHost 为可选回调：每次重定向时二次校验最终 URL 的域名，防止 302 把请求
+// 引到白名单外的站点（初始 URL 的 host 已在 checkPermission 校验过）。
+func doPluginHTTP(pluginID, method, rawURL string, headers map[string]string, body, contentType string, allowHost func(string) bool) (interface{}, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
 		return nil, fmt.Errorf("url 不能为空")
@@ -356,7 +501,20 @@ func doPluginHTTP(pluginID, method, rawURL string, headers map[string]string, bo
 		req.Header.Set("User-Agent", "QuickDock-Plugin/"+pluginID)
 	}
 
-	resp, err := pluginHTTPClient.Do(req)
+	client := &http.Client{
+		Timeout: pluginHTTPTimeout,
+		CheckRedirect: func(r *http.Request, via []*http.Request) error {
+			if len(via) >= pluginHTTPMaxRedirs {
+				return fmt.Errorf("重定向次数超过 %d 次", pluginHTTPMaxRedirs)
+			}
+			if allowHost != nil && !allowHost(r.URL.String()) {
+				return fmt.Errorf("重定向目标 %s 不在插件 network 白名单内", r.URL.String())
+			}
+			return nil
+		},
+	}
+
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("请求失败: %w", err)
 	}

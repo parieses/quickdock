@@ -33,7 +33,7 @@ import type { ToastAPI } from '../types'
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
-const props = defineProps<{ visible: boolean }>()
+const props = defineProps<{ visible: boolean; embedded?: boolean }>()
 const emit = defineEmits<{ (e: 'goto', id: string): void }>()
 
 interface NodeEnvStatus {
@@ -390,9 +390,9 @@ watch(() => props.visible, async (v) => {
 </script>
 
 <template>
-  <div class="section">
-    <h3 class="section-title"><Terminal :size="16" style="vertical-align:-3px;margin-right:6px" />{{ t('navDsh') }}</h3>
-    <p class="section-desc">{{ t('dshDesc') }}</p>
+  <div :class="['section', { embedded: !!props.embedded }]">
+    <!-- 非嵌入（设置页）时只保留标题；描述文案已去掉 -->
+    <h3 v-if="!props.embedded" class="section-title"><Terminal :size="16" style="vertical-align:-3px;margin-right:6px" />{{ t('navDsh') }}</h3>
 
     <!-- 状态卡（含检测到的安装位置） -->
     <div class="dsh-status">
@@ -569,6 +569,20 @@ watch(() => props.visible, async (v) => {
 </template>
 
 <style scoped>
+/* 嵌入环境管理页时：放开设置页 .section 的 600px 宽度限制，让内容铺满 detail 区 */
+.section.embedded { max-width: none; }
+/* 设置页形态：描述行已去掉，由标题自己补回原来 .section-desc 占的 20px 下间距 */
+.section:not(.embedded) .section-title { margin-bottom: 20px; }
+/* 嵌入时状态行改为卡片内的分区行：避免「detail-block 大卡片里再套一圈带框小卡片」 */
+.section.embedded .dsh-status { gap: 0; }
+.section.embedded .dsh-status-row {
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.section.embedded .dsh-status-row:last-child { border-bottom: none; }
 .dsh-status {
   display: flex;
   flex-direction: column;

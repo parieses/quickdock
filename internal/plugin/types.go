@@ -16,21 +16,21 @@ import (
 
 // PluginManifest 插件清单
 type PluginManifest struct {
-	ID             string            `json:"id"`
-	Name           string            `json:"name"`
-	NameI18n       map[string]string `json:"name_i18n,omitempty"` // 多语言名称: {locale: 名称}，如 {"en-US": "HTTP Status Codes"}
-	Version        string            `json:"version"`
-	Description    string            `json:"description,omitempty"`
+	ID              string            `json:"id"`
+	Name            string            `json:"name"`
+	NameI18n        map[string]string `json:"name_i18n,omitempty"` // 多语言名称: {locale: 名称}，如 {"en-US": "HTTP Status Codes"}
+	Version         string            `json:"version"`
+	Description     string            `json:"description,omitempty"`
 	DescriptionI18n map[string]string `json:"description_i18n,omitempty"` // 多语言描述
-	Author         string            `json:"author,omitempty"`
-	Icon           string            `json:"icon,omitempty"`
-	Category       string            `json:"category,omitempty"`
-	Platforms      []string          `json:"platforms,omitempty"` // 支持的平台: windows/darwin/linux
-	Backend        BackendConfig     `json:"backend"`
-	Frontend       FrontendConfig    `json:"frontend,omitempty"`
-	Capabilities   []string          `json:"capabilities,omitempty"`
-	Permissions    Permissions       `json:"permissions,omitempty"`
-	Commands       []Command         `json:"commands,omitempty"`
+	Author          string            `json:"author,omitempty"`
+	Icon            string            `json:"icon,omitempty"`
+	Category        string            `json:"category,omitempty"`
+	Platforms       []string          `json:"platforms,omitempty"` // 支持的平台: windows/darwin/linux
+	Backend         BackendConfig     `json:"backend"`
+	Frontend        FrontendConfig    `json:"frontend,omitempty"`
+	Capabilities    []string          `json:"capabilities,omitempty"`
+	Permissions     Permissions       `json:"permissions,omitempty"`
+	Commands        []Command         `json:"commands,omitempty"`
 }
 
 // BackendConfig 后端配置
@@ -50,9 +50,11 @@ type FrontendConfig struct {
 
 // Permissions 权限声明
 type Permissions struct {
-	Network    bool `json:"network,omitempty"`
-	Filesystem bool `json:"filesystem,omitempty"`
-	Clipboard  bool `json:"clipboard,omitempty"`
+	Network     NetworkPerm    `json:"network,omitempty"`    // 详见 netperm.go：bool（全放行）或域名数组白名单
+	Filesystem  FilesystemPerm `json:"filesystem,omitempty"` // 详见 fsperm.go：bool（仅对话框）或 {read,write} scope 对象
+	Clipboard   bool           `json:"clipboard,omitempty"`
+	Shell       ShellPerm      `json:"shell,omitempty"`       // 详见 shellperm.go：bool（全放行）或目标前缀数组
+	ProcessKill bool           `json:"processKill,omitempty"` // host.process.kill 专用；默认 false（风险操作，显式开启）
 }
 
 // Command 插件命令
@@ -106,28 +108,28 @@ type PluginInstance struct {
 	Cmd      *exec.Cmd
 	Stdin    io.WriteCloser
 	Stdout   io.ReadCloser
-	DB       *sql.DB   // goja 插件专属 SQLite 数据库
+	DB       *sql.DB // goja 插件专属 SQLite 数据库
 
-	sendMu   sync.Mutex                // 串行化 stdin 写入 ← P0 修复
-	readMu   sync.Mutex
-	NextID   int64
-	Pending  map[string]chan *RPCResponse // 以 id 的 JSON 文本为键，兼容 string/number id
+	sendMu  sync.Mutex // 串行化 stdin 写入 ← P0 修复
+	readMu  sync.Mutex
+	NextID  int64
+	Pending map[string]chan *RPCResponse // 以 id 的 JSON 文本为键，兼容 string/number id
 
-	readyCh  chan struct{}             // readLoop 就绪信号 ← P0 修复
-	doneCh   chan struct{}             // 进程退出信号
-	closeOnce sync.Once               // 确保 doneCh 只关闭一次 ← P1 修复
-	stopped  atomic.Bool              // 用户主动停止标记（避免崩溃重启循环）
+	readyCh   chan struct{} // readLoop 就绪信号 ← P0 修复
+	doneCh    chan struct{} // 进程退出信号
+	closeOnce sync.Once     // 确保 doneCh 只关闭一次 ← P1 修复
+	stopped   atomic.Bool   // 用户主动停止标记（避免崩溃重启循环）
 	// writeBroken stdin 写超时标记：悬挂写 goroutine 仍阻塞在 Write 上无法回收，
 	// 置位后禁止再发起新写入（避免与悬挂写者并发写管道导致 JSON-RPC 帧交错），
 	// 悬挂写者由 stopPlugin 杀进程 / 进程退出时回收。
 	writeBroken atomic.Bool
-	Dir      string                    // 插件安装目录
-	Status   string                    // running | stopped | crashed | unresponsive
-	statusMu sync.RWMutex              // 保护 Status 的并发读写（readLoop 在无锁 goroutine 中写）
+	Dir         string       // 插件安装目录
+	Status      string       // running | stopped | crashed | unresponsive
+	statusMu    sync.RWMutex // 保护 Status 的并发读写（readLoop 在无锁 goroutine 中写）
 
 	// 健康检查
 	MissedPings    int       // 连续 ping 失败次数
-	UnresponsiveAt time.Time  // 标记为 unresponsive 的时间
+	UnresponsiveAt time.Time // 标记为 unresponsive 的时间
 
 	// Goja VM（goja runtime 插件使用）
 	VM *goja.Runtime

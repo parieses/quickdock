@@ -337,43 +337,7 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string)
 	}
 	pluginDB.SetMaxOpenConns(1)
 
-	vm.Set("api", map[string]interface{}{
-		// 日志：写插件专属日志文件 plugin-YYYYMMDD.log（[plugin:<id>] 前缀），与主日志分离
-		"log":   func(msg string) { logger.PluginI(manifest.ID, "%s", msg) },
-		"warn":  func(msg string) { logger.PluginW(manifest.ID, "%s", msg) },
-		"error": func(msg string) { logger.PluginE(manifest.ID, "%s", msg) },
-		"db": map[string]interface{}{
-			"exec": func(sql string, args ...interface{}) (map[string]interface{}, error) {
-				res, e := pluginDB.Exec(sql, args...)
-				if e != nil { return nil, e }
-				id, _ := res.LastInsertId()
-				ra, _ := res.RowsAffected()
-				return map[string]interface{}{"lastId": id, "rowsAffected": ra}, nil
-			},
-			"query": func(sql string, args ...interface{}) ([]map[string]interface{}, error) {
-				rows, e := pluginDB.Query(sql, args...)
-				if e != nil { return nil, e }
-				defer rows.Close()
-				cols, _ := rows.Columns()
-				var results []map[string]interface{}
-				for rows.Next() {
-					vals := make([]interface{}, len(cols))
-					valPtrs := make([]interface{}, len(cols))
-					for i := range vals { valPtrs[i] = &vals[i] }
-					rows.Scan(valPtrs...)
-					row := make(map[string]interface{})
-					for i, c := range cols {
-						switch v := vals[i].(type) {
-						case []byte: row[c] = string(v)
-						default: row[c] = v
-						}
-					}
-					results = append(results, row)
-				}
-				return results, nil
-			},
-		},
-	})
+	vm.Set("api", m.gojaAPI(manifest, pluginDB))
 
 	func() {
 		defer func() {
@@ -413,6 +377,76 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string)
 		}
 	}
 	return nil
+}
+
+// gojaAPI 构造注入给 goja 插件的 api 对象。
+// 独立成方法而非内联在 loadGojaPlugin 中，便于单元测试直接断言绑定内容
+// （无需真正启动 goja VM 即可验证转发行为）。
+//
+// 能力面：
+//   - api.log / api.warn / api.error        写插件专属日志文件
+//   - api.host(method, params)              转发到宿主 hostMethods 注册表，与 native 的
+//     JSON-RPC 回调共用 invokeHostMethod，因此 http.get/post、host.notify、
+//     host.dialog.*、host.clipboard.*、db.* 对 goja 插件同样可用（此前一概不可达）
+//   - api.db.exec / api.db.query            插件私有 SQLite（data.db）的裸 SQL。
+//     注意这与 native 的 db.*（宿主库中按 plugin_id 隔离的 KV）不是同一套存储
+//
+// 约束：api.host 是同步阻塞调用，受 callGojaJS 的超时（handleExecute 20s）限制。
+// 需要用户交互的方法（host.dialog.open/save）在用户完成操作前就可能被 vm.Interrupt
+// 打断，goja 插件不宜依赖这类方法；长耗时任务应走 taskId + 轮询的异步范式。
+func (m *Manager) gojaAPI(manifest PluginManifest, pluginDB *sql.DB) map[string]interface{} {
+	return map[string]interface{}{
+		// 日志：写插件专属日志文件 plugin-YYYYMMDD.log（[plugin:<id>] 前缀），与主日志分离
+		"log":   func(msg string) { logger.PluginI(manifest.ID, "%s", msg) },
+		"warn":  func(msg string) { logger.PluginW(manifest.ID, "%s", msg) },
+		"error": func(msg string) { logger.PluginE(manifest.ID, "%s", msg) },
+
+		// 通用 host 转发：等价于 native 侧发起同名 JSON-RPC 请求，返回值/错误语义一致。
+		// 未传参数时按空对象 {} 处理，避免各 handler 收到 null 而解析失败。
+		"host": func(method string, params interface{}) (interface{}, error) {
+			raw := json.RawMessage("{}")
+			if params != nil {
+				b, err := json.Marshal(params)
+				if err != nil {
+					return nil, fmt.Errorf("host 参数序列化失败: %w", err)
+				}
+				raw = b
+			}
+			return m.invokeHostMethod(manifest.ID, method, raw)
+		},
+
+		"db": map[string]interface{}{
+			"exec": func(sql string, args ...interface{}) (map[string]interface{}, error) {
+				res, e := pluginDB.Exec(sql, args...)
+				if e != nil { return nil, e }
+				id, _ := res.LastInsertId()
+				ra, _ := res.RowsAffected()
+				return map[string]interface{}{"lastId": id, "rowsAffected": ra}, nil
+			},
+			"query": func(sql string, args ...interface{}) ([]map[string]interface{}, error) {
+				rows, e := pluginDB.Query(sql, args...)
+				if e != nil { return nil, e }
+				defer rows.Close()
+				cols, _ := rows.Columns()
+				var results []map[string]interface{}
+				for rows.Next() {
+					vals := make([]interface{}, len(cols))
+					valPtrs := make([]interface{}, len(cols))
+					for i := range vals { valPtrs[i] = &vals[i] }
+					rows.Scan(valPtrs...)
+					row := make(map[string]interface{})
+					for i, c := range cols {
+						switch v := vals[i].(type) {
+						case []byte: row[c] = string(v)
+						default: row[c] = v
+						}
+					}
+					results = append(results, row)
+				}
+				return results, nil
+			},
+		},
+	}
 }
 
 // UnloadPlugin 卸载插件（从内存移除）

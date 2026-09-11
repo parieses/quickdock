@@ -2,7 +2,7 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、Webhook 通知、端口全景，随附 **44 个**开箱即用外部插件（HTTP 客户端、数据库连接、OCR、端口检查等，经插件市场一键安装），多运行时环境管理（**26 个运行时**：Node.js / PHP / Python / Go / Bun 等语言，Nginx / Caddy / Apache / Traefik 等 Web 服务器，Redis / Memcached / MinIO / RabbitMQ 等缓存存储，MySQL / MariaDB / PostgreSQL / MongoDB 等数据库，一键安装、版本切换、启停、配置编辑、日志查看与 Web 控制台），内嵌 **DeepSeek Harness** 的 Agent 编程入口，并内置可选的 **AI 助手**（SSE 流式 / 多配置档案），让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、Webhook 通知、端口全景，随附 **47 个**开箱即用外部插件（HTTP 客户端、数据库连接、OCR、端口检查、批量重命名、本地文件搜索、图床上传等，经插件市场一键安装），多运行时环境管理（**27 个运行时**：Node.js / PHP / Python / Go / Bun 等语言，Nginx / Caddy / Apache / Traefik 等网络服务，Redis / Memcached / RabbitMQ / MinIO 等中间件，MySQL / MariaDB / PostgreSQL / MongoDB 等数据库，Ollama 本地大模型与 MCP 服务，一键安装、版本切换、启停、配置编辑、日志查看与 Web 控制台），内嵌 **DeepSeek Harness** 的 Agent 编程入口，并内置可选的 **AI 助手**（SSE 流式 / 多配置档案），让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
 
@@ -160,7 +160,8 @@
 ### 🔌 插件系统
 
 - 开放插件架构，支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），基于 JSON-RPC 2.0 通信
-- 44 个官方插件经「在线市场」一键安装 / 升级，插件列表、功能说明与开发文档统一维护在仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
+- 统一的插件 Host API（**27 个方法 / 11 组**）：日志、通知、剪贴板、对话框、按插件隔离的 KV 存储（`db.*`）、文件读写（`host.fs.*`，按 `permissions.filesystem` 声明的目录 scope 校验）、网络请求代发（`http.get/post`，按域名白名单）、Shell 打开（`host.shell.open`）、进程列表/结束（`host.process.list/kill`）、以及复用宿主 MCP 服务的 `host.mcp.call`；goja 经 `api.host(method, params)`、iframe 经注入的 `qdHostCall` 调用，三者能力面一致
+- 47 个官方插件经「在线市场」一键安装 / 升级，插件列表、功能说明与开发文档统一维护在仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
 - 支持运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定
 
 ### 🛠️ MCP 服务
@@ -168,7 +169,11 @@
 QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等外部 MCP 客户端调用，把本地能力开放给智能体：
 
 - **地址**：`http://127.0.0.1:9230/mcp`（Streamable HTTP，仅 POST；GET 返 405，DELETE 关会话返 204；协议 2025-06-18）
-- **工具集**：`app_info` / `clipboard_copy` / `clipboard_recent` / `env_{list,status,start,stop,restart,log,versions}` / `item_search` / `item_open` / `recent_items` / `workspace_list` / `note_search` / `snippet_search` / `todo_{create,done,list}` / `port_list`（20 个）
+- **工具集（29 个，分三级权限门）**：
+  - 只读（17）：`app_info` / `env_list` / `env_status` / `env_log` / `env_versions` / `workspace_list` / `item_search` / `recent_items` / `todo_list` / `note_search` / `clipboard_recent` / `port_list` / `log_list` / `log_read` / `crash_list` / `crash_read` / `plugin_list`
+  - 低危写（10）：`env_start` / `env_stop` / `env_restart` / `item_open` / `todo_create` / `todo_done` / `clipboard_copy` / `note_create` / `note_update` / `note_quick`
+  - 高危（2，需在环境管理页开启高危等级）：`process_kill` / `system_command`
+  - 插件经宿主 `host.mcp.call` 可复用全部 29 个工具（沿用 MCP 等级门，无需额外声明权限）
 - **生命周期**：随主进程，QuickDock 退出即失效，不作常驻依赖
 - **实现**：门面装配在 `services/mcp`，工具经 Wails 各领域门面转发到宿主
 
@@ -202,7 +207,7 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 
 ### 支持的运行时
 
-当前内置 **26 个**运行时，按分组在侧边栏归类（语言 / Web 服务器 / 缓存与存储 / 工具 / 数据库）。「类型」列标注是否支持服务化（一键启停 / 重启 / 日志 / 控制台）。
+当前内置 **27 个**运行时，按职责在侧边栏归类（语言 / 网络服务 / 数据库 / 中间件 / AI 服务 / 开发工具，另有「内置工具」组承载 HTTP 服务与端口两个页面入口；DeepSeek Harness Agent 入口归入 AI 服务组）。「类型」列标注是否支持服务化（一键启停 / 重启 / 日志 / 控制台）。
 
 | 运行时 | 分组 | 类型 | 下载源 | 版本来源 | 平台 |
 |--------|------|------|--------|----------|------|
@@ -212,26 +217,39 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 | **Python** | 语言 | 命令行 | python.org | 全量 | Windows |
 | **Bun** | 语言 | 命令行 | oven-sh/bun | 全量 | Windows |
 | **Erlang** | 语言 | 命令行（被 RabbitMQ 依赖） | erlang/otp | 全量 | Windows |
-| **Nginx** | Web 服务器 | 服务型 | nginx.org | 全量 | Windows |
-| **Caddy** | Web 服务器 | 服务型 | caddyserver/caddy | 全量 | Windows |
-| **Apache** | Web 服务器 | 服务型 | Apache Lounge | 全量（目录页动态解析） | Windows |
-| **Traefik** | Web 服务器 | 服务型 | traefik/traefik | 全量 | Windows |
-| **FTP** | Web 服务器 | 服务型 | FTPDMIN（Sentex） | 单版本 0.96 | Windows |
-| **Redis** | 缓存/存储 | 服务型 | redis-windows | 全量 | Windows |
-| **Memcached** | 缓存/存储 | 服务型 | adamyg/memcached-win32 | 全量 | Windows |
-| **MinIO** | 存储 | 服务型 | dl.min.io | 滚动发布（latest） | Windows |
-| **RabbitMQ** | 消息队列 | 服务型 | rabbitmq-server | 全量 | Windows |
-| **Git** | 工具 | 命令行 | git-for-windows | 全量 | Windows |
-| **Composer** | 工具 | 命令行 | getcomposer.org | 全量 | Windows |
-| **FFmpeg** | 工具 | 命令行 | gyan.dev | 固定 3 个 | Windows |
-| **Mailpit** | 工具 | 服务型 | axllent/mailpit | 全量 | Windows |
-| **frpc** | 工具 | 命令行（可编辑配置） | fatedier/frp | 全量 | Windows |
-| **GitHub CLI** | 工具 | 命令行 | cli/cli | 全量 | Windows |
-| **mkcert** | 工具 | 命令行 | FiloSottile/mkcert | 全量 | Windows |
+| **Nginx** | 网络服务 | 服务型 | nginx.org | 全量 | Windows |
+| **Caddy** | 网络服务 | 服务型 | caddyserver/caddy | 全量 | Windows |
+| **Apache** | 网络服务 | 服务型 | Apache Lounge | 全量（目录页动态解析） | Windows |
+| **Traefik** | 网络服务 | 服务型 | traefik/traefik | 全量 | Windows |
+| **FTP** | 网络服务 | 服务型 | FTPDMIN（Sentex） | 单版本 0.96 | Windows |
+| **Redis** | 中间件 | 服务型 | redis-windows | 全量 | Windows |
+| **Memcached** | 中间件 | 服务型 | adamyg/memcached-win32 | 全量 | Windows |
+| **MinIO** | 中间件 | 服务型 | dl.min.io | 滚动发布（latest） | Windows |
+| **RabbitMQ** | 中间件 | 服务型 | rabbitmq-server | 全量 | Windows |
+| **Git** | 开发工具 | 命令行 | git-for-windows | 全量 | Windows |
+| **Composer** | 开发工具 | 命令行 | getcomposer.org | 全量 | Windows |
+| **FFmpeg** | 开发工具 | 命令行 | gyan.dev | 固定 3 个 | Windows |
+| **Mailpit** | 开发工具 | 服务型 | axllent/mailpit | 全量 | Windows |
+| **frpc** | 开发工具 | 命令行（可编辑配置） | fatedier/frp | 全量 | Windows |
+| **GitHub CLI** | 开发工具 | 命令行 | cli/cli | 全量 | Windows |
+| **mkcert** | 开发工具 | 命令行 | FiloSottile/mkcert | 全量 | Windows |
+| **Ollama** | AI 服务 | 服务型（含模型管理） | gh-proxy 加速 / 官方 | 全量 | Windows |
 | **MariaDB** | 数据库 | 服务型 | archive.mariadb.org | 固定 3 个 | Windows |
 | **MySQL** | 数据库 | 服务型 | cdn.mysql.com | 固定 3 个 | Windows |
 | **PostgreSQL** | 数据库 | 服务型 | EnterpriseDB 二进制包 | 固定 3 个 | Windows |
 | **MongoDB** | 数据库 | 服务型 | fastdl.mongodb.org | 全量 | Windows |
+
+### Ollama 本地大模型
+
+- **单版本语义**：程序目录固定为 `runtime/ollama/`（不带版本号），不做多版本并存——单份约 1.4 GB（主要体积为 CUDA v12/v13 双轨 dll），且独占 `11434`、模型库全局共享，多版本是纯成本零收益；旧版 `runtime/ollama/<version>/` 布局会在首次访问时自动上提合并
+- **原地更新**：检测到新版本时侧栏版本区出现提示条，**只提示不自动更新**，由用户点「更新」触发；流程为下载 → 解压到同级 `.ollama-staging` → 校验可执行文件 → 才替换程序文件，任何一步失败当前版本都不受影响，`ollama.env` 配置保留
+- **系统安装版识别**：自动检测官方安装版（`scope: system`），提示"该版本开机自启，会抢占 11434"，不做自动禁用/卸载
+- **启动前检测**：显式检测外部实例与端口占用并给出可操作提示
+- **模型管理**（经 Ollama 本地 REST API，无需 external 工具）：已装模型列表与体积、已加载进显存的模型、模型拉取（流式进度条，按 digest 聚合避免多层并行时进度来回跳；输入框按官方模型库 `ollama.com/api/tags` 做联想）、删除模型
+- **模型库共享**：默认与系统安装版、命令行 `ollama` 共用 `~/.ollama/models`，避免重下数十 GB
+- **卸载只删程序**：删除整个 `runtime/ollama/`（约 1.4 GB），绝不触碰模型目录
+- **配置**：一份 `ollama.env`（`OLLAMA_MODELS` / `OLLAMA_HOST` / `OLLAMA_ORIGINS` / `OLLAMA_KEEP_ALIVE` / `OLLAMA_NUM_PARALLEL`），改端口后状态列同步显示
+- **平台**：一期仅 Windows（macOS 为 `.app` bundle、Linux 为 `.tar.zst`，解压链路未适配）
 
 ### 核心设计
 
@@ -250,10 +268,10 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 
 ### 服务管理能力
 
-- **启停与状态**：服务型运行时（Redis / Nginx / Apache / Caddy / Traefik / FTP / MySQL / MariaDB / PostgreSQL / MongoDB / Memcached / MinIO / Mailpit / RabbitMQ / PHP-fpm）一键启动、停止，实时显示 PID、端口与健康状态
+- **启停与状态**：服务型运行时（Redis / Nginx / Apache / Caddy / Traefik / FTP / MySQL / MariaDB / PostgreSQL / MongoDB / Memcached / MinIO / Mailpit / RabbitMQ / PHP-fpm / Ollama）一键启动、停止，实时显示 PID、端口与健康状态
 - **重启**：运行中版本提供「重启」按钮，先停后启，并复用启动时的端口冲突检测与配置校验，避免重启后出现端口占用
 - **配置编辑**：支持配置文件的运行时提供「编辑配置」入口（如 `Caddyfile` / `redis.conf` / `nginx.conf` / `traefik.yml` / `php.ini` / `frpc.toml`）；Nginx、Traefik 等支持启动前配置校验（`nginx -t` / `traefik validate`），校验失败阻止启动
-- **日志查看**：服务型运行时提供「查看日志」弹窗，实时滚动读取进程日志尾部 8KB（覆盖 PostgreSQL / MySQL·MariaDB / MongoDB / Memcached / MinIO / Mailpit / Apache / Nginx / Redis / RabbitMQ / Caddy / Traefik）
+- **日志查看**：服务型运行时提供「查看日志」弹窗，实时滚动读取进程日志尾部 8KB（覆盖 PostgreSQL / MySQL·MariaDB / MongoDB / Memcached / MinIO / Mailpit / Apache / Nginx / Redis / RabbitMQ / Caddy / Traefik / Ollama）
 - **Web 控制台一键打开**：运行时监听内置 Web UI 时，运行中显示「打开控制台」按钮，直接打开 `http://127.0.0.1:<port>`，覆盖 MinIO(9001) / Mailpit(8025) / Traefik(8080) / RabbitMQ(15672，仅管理插件启用时) / Nginx·Caddy(80)
 - **端口全景**：顶栏「端口全景」弹窗汇总所有运行服务的运行时 / 版本 / 端口 / 控制台入口，快速掌握本机开发服务占用情况
 
@@ -281,10 +299,11 @@ internal/env/          # 引擎层（纯库，跨平台 _windows / _darwin / _un
 ├── download.go  extract.go  config.go  validate.go  dedupe.go   # 下载(多源回退)/解压/配置/校验/版本去重
 ├── service.go         # serviceManager：服务生命周期（start/stop/startPTY/startWithEnv）+ 端口探测
 ├── node.go  go.go  php.go  python.go  bun.go  erlang*.go        # 语言运行时
-├── nginx.go  caddy.go  apache.go  traefik.go  ftp.go            # Web 服务器运行时
-├── redis.go  memcached.go  minio.go  rabbitmq.go  mongodb.go    # 缓存/存储/消息队列
-├── sql*.go  postgresql*.go                                       # 数据库（MySQL/MariaDB 共用 SQLRuntime）
-└── git.go  composer.go  ffmpeg.go  mailpit.go  frpc.go  gh.go  mkcert.go  # 工具类运行时
+├── nginx.go  caddy.go  apache.go  traefik.go  ftp.go            # 网络服务运行时
+├── redis.go  memcached.go  minio.go  rabbitmq.go                # 中间件（缓存 / 对象存储 / 消息队列）
+├── ollama.go  ollama_api.go                                      # Ollama（单版本）：版本管理 + 模型库 REST API（tags/ps/pull/delete）
+├── sql*.go  postgresql*.go  mongodb.go                           # 数据库（MySQL/MariaDB 共用 SQLRuntime）
+└── git.go  composer.go  ffmpeg.go  mailpit.go  frpc.go  gh.go  mkcert.go  # 开发工具
 ```
 
 ---
@@ -469,7 +488,7 @@ quickdock/
 │       mcp/  monitor/  note/  plugin/  port/  scene/  scheduler/  snapshot/
 │       system/  todo/  update/  workspace/   # 20 个领域门面子包（薄壳：NewXxxService(app) + 方法转发）
 │          ├── scheduler/   # 定时调度引擎子包（Service 独立承载，非 Wails 门面）
-│          └── mcp/         # 内置 MCP 服务装配（20 个工具，见「🛠️ MCP 服务」）
+│          └── mcp/         # 内置 MCP 服务装配（29 个工具，见「🛠️ MCP 服务」）
 ├── internal/            # 引擎层（被门面/宿主调用，不含 Wails 绑定）
 │   ├── db/              # SQLite 数据层（安全白名单 + schema 自动迁移；workspace/collection/item/clipboard/snippet/note_tree/todo/schedule/monitor/tool/plugin/usage/settings/snapshot…）
 │   ├── env/             # 多运行时引擎（26 运行时注册表 + 下载 + 解压 + 服务生命周期，跨平台分文件）
@@ -511,7 +530,7 @@ quickdock/
 ├── plugins/             # 插件（宿主骨架 + 开发模板；外部插件源码见下）
 │   ├── builtin/         # 内置插件骨架（仅 common.css/js，宿主注入兼容用，勿删）
 │   ├── templates/       # 插件开发模板（none / goja / native）
-│   └── external/        # 外部插件源码（44 个，独立 git 子仓库，已 gitignore，不随主仓分发；含 build.py 生成市场索引）
+│   └── external/        # 外部插件源码（47 个，独立 git 子仓库，已 gitignore，不随主仓分发；含 build.py 生成市场索引）
 ├── build/               # 构建配置（CI / 图标 / 平台产物）
 ├── docs/                # 设计文档（mac 支持 / 自动更新 / 服务拆分 / 首启引导 / 审计报告 …）
 ├── image/               # README 截图资源
@@ -590,7 +609,7 @@ Workspace（工作空间）
 
 ## 插件生态
 
-QuickDock 采用开放的插件架构，官方插件（44 个）统一在独立仓库维护与分发：
+QuickDock 采用开放的插件架构，官方插件（47 个）统一在独立仓库维护与分发：
 
 👉 **[quickdock-plugins](https://github.com/parieses/quickdock-plugins)** —— 插件列表、功能说明与完整开发文档（目录结构、`plugin.json` 字段、三种运行时快速开始、通信协议、调试与发布）均在该仓库 README 中。
 
@@ -598,7 +617,7 @@ QuickDock 采用开放的插件架构，官方插件（44 个）统一在独立�
 
 > 插件**源码**本体在独立仓库维护；本地开发时以 `plugins/external/` 子仓库形式挂载（自带 `.git`，已加入主仓 `.gitignore`，不随主仓分发），其中的 `build.py` 生成市场索引 `site/index.json`；用户安装的插件落在 `~/.quickdock/plugins/<plugin-id>/`。
 
-**已随仓库挂载的部分外部插件**：HTTP 客户端、数据库连接、OCR（PaddleOCR ONNX）、端口检查器、JSON 工具箱、正则提取、哈希计算、颜色转换、货币大写、JWT 解码、二维码、PDF 工具箱、图片工作室、代码对比、Hosts 管理、网络诊断、站点审计、磁盘分析、重复文件查找、邮件检测、速度测试、Wi-Fi 管理、子域名枚举、接口压测、指纹/目录扫描 等。
+**已随仓库挂载的部分外部插件**：HTTP 客户端、数据库连接、OCR（PaddleOCR ONNX）、端口检查器、JSON 工具箱、正则提取、哈希计算、颜色转换、货币大写、JWT 解码、二维码、PDF 工具箱、图片工作室、代码对比、Hosts 管理、网络诊断、站点审计、磁盘分析、重复文件查找、邮件检测、速度测试、Wi-Fi 管理、子域名枚举、接口压测、指纹/目录扫描、批量重命名、本地文件搜索、图床上传 等。
 
 ---
 
@@ -644,7 +663,7 @@ cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
 - **API Key 安全加密**：Windows 下 DPAPI 加密存储（`CryptProtectData`），macOS 下 base64 编码，前端全程不接触密文
 - **单实例锁**：框架 `Options.SingleInstance`（UniqueID `QuickDock-Instance`，开发/正式共用）——二次启动自动通知首实例把主窗口带到前台后退出，避免多进程并发写同一 SQLite 库
 - **后台服务**：SQLite WAL 模式 + 待办提醒调度器 (10s) + 定时任务调度器 + 监控检查器（含 SSL 检测）+ 流式 HTTP 服务（AI）+ 插件健康检查 + DSH 隐藏进程管理 + 内置 MCP 服务（9230）
-- **规模（2026-09）**：Go 约 233 文件 / 4.2w 行（主仓非 external），前端 src 63 个 ts/vue，36 个 Vue 页面组件，44 个外部插件，26 个环境运行时
+- **规模（2026-09）**：Go 约 233 文件 / 4.2w 行（主仓非 external），前端 src 63 个 ts/vue，36 个 Vue 页面组件，47 个外部插件，27 个环境运行时
 
 ---
 

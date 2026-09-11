@@ -83,10 +83,12 @@ func (p *PluginService) InstallPlugin(zipPath string) *services.ApiResult {
 	}
 	// 写入数据库记录（含 capabilities / permissions / category / icon）
 	permissions := make(map[string]interface{})
-	if manifest.Permissions.Network || manifest.Permissions.Filesystem || manifest.Permissions.Clipboard {
+	if manifest.Permissions.Network.Granted() || manifest.Permissions.Filesystem.Granted() || manifest.Permissions.Clipboard || manifest.Permissions.Shell.Granted() || manifest.Permissions.ProcessKill {
 		permissions["network"] = manifest.Permissions.Network
 		permissions["filesystem"] = manifest.Permissions.Filesystem
 		permissions["clipboard"] = manifest.Permissions.Clipboard
+		permissions["shell"] = manifest.Permissions.Shell
+		permissions["processKill"] = manifest.Permissions.ProcessKill
 	}
 	if err := p.App.DB.InsertPluginFull(manifest.ID, manifest.Name, manifest.Version, manifest.Author, manifest.Description, manifest.Category, iconData, manifest.Capabilities, permissions); err != nil {
 		logger.E("插件 %s 写入数据库记录失败: %v", manifest.ID, err)
