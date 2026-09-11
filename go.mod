@@ -8,6 +8,7 @@ require (
 	github.com/dop251/goja v0.0.0-20260701091749-b07b74453ea9
 	github.com/google/uuid v1.6.0
 	github.com/wailsapp/wails/v3 v3.0.0-alpha2.122
+	golang.org/x/net v0.53.0
 	golang.org/x/sync v0.21.0
 	golang.org/x/sys v0.43.0
 	gopkg.in/yaml.v3 v3.0.1

@@ -63,6 +63,10 @@ const (
 	// RuntimeOllama：本地大模型推理服务（ollama/ollama 官方 GitHub 发布的 Windows 便携 zip）。
 	// 服务型且独占 11434，语义同 redis/nginx：允许多版本并存安装，但同一时刻只能跑一个 serve。
 	RuntimeOllama Runtime = "ollama"
+
+	// RuntimeWebDAV：QuickDock 内置的 WebDAV 服务端（把本地目录以 WebDAV 协议共享出去）。
+	// 与 RuntimeMCP 同属「内置服务」：无下载源、无版本，只在环境管理页提供启停与配置。
+	RuntimeWebDAV Runtime = "webdav"
 )
 
 // 环境管理分组（侧边栏按职责归类：语言 / 网络服务 / 数据库 / 中间件 / AI / 开发工具）
@@ -207,6 +211,8 @@ var (
 		}},
 		// MCP：内置服务，无下载源、无可下载版本（versions/sources 留空）
 		RuntimeMCP: {display: "MCP 服务", group: GroupAI},
+		// WebDAV：内置文件共享服务端，与 FTP 同组（都是文件传输），无版本/无下载源。
+		RuntimeWebDAV: {display: "WebDAV", group: GroupNetwork},
 		// Ollama：本地大模型推理服务，体积巨大（1.4 GB/版本，其中 1.36 GB 是 CUDA v12/v13 双轨 dll），
 		// 故虽为多版本骨架，实际按「单活跃版本 + 可保留旧版回退」使用。
 		// 下载：官方 ollama.com/download 只做 307 跳转到 GitHub Releases（不托管文件），

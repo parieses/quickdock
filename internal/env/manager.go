@@ -114,7 +114,7 @@ type Manager struct {
 // runtimeOrder 运行时固定展示顺序
 var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeBun, RuntimeErlang, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeTraefik, RuntimeComposer,
 	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
-	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeMCP}
+	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeWebDAV, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeMCP}
 
 func NewManager() *Manager {
 	m := &Manager{
@@ -147,6 +147,7 @@ func NewManager() *Manager {
 			RuntimeRabbitMQ:   NewRabbitMQRuntime(),
 			RuntimeOllama:     NewOllamaRuntime(),
 			RuntimeMCP:        NewMCPRuntime(),
+			RuntimeWebDAV:     NewWebDAVRuntime(),
 		},
 		links:       map[Runtime][]linkEntry{},
 		detectCache: map[Runtime][]Install{},

@@ -328,6 +328,7 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'python', name: 'Python', group: 'language', hasService: false },
   { id: 'apache', name: 'Apache', group: 'network', hasService: true },
   { id: 'ftp', name: 'FTP', group: 'network', hasService: true },
+  { id: 'webdav', name: 'WebDAV', group: 'network', hasService: true },
   { id: 'mcp', name: 'MCP 服务', group: 'ai', hasService: true },
 ]
 function staticRuntime(s: typeof STATIC_CATALOG[number]): RuntimeInfo {
@@ -600,6 +601,54 @@ async function setMCPLevel() {
 }
 
 watch(selectedId, (id) => { if (id === 'mcp') loadMCP() })
+
+// ---- WebDAV 服务（内置）：连接信息与各平台挂载示例 ----
+// 服务端没有专属 API：配置直接读通用 ConfigProvider（config.json 全文），
+// 运行状态复用版本表已有的 EnvStatus 轮询结果（ui.webdav.svc.builtin）。
+const webdavInfo = reactive({ path: '', addr: '127.0.0.1', port: 9080, root: '', username: '', password: '', readOnly: false })
+
+async function loadWebDAV() {
+  try {
+    const cfg = unwrap<any>(await EnvConfigGet('webdav', 'builtin'))
+    if (!cfg?.raw) return
+    const c = JSON.parse(cfg.raw)
+    Object.assign(webdavInfo, {
+      path: cfg.path || '',
+      addr: c.addr || '127.0.0.1',
+      port: c.port || 9080,
+      root: c.root || '',
+      username: c.username || '',
+      password: c.password || '',
+      readOnly: !!c.readOnly,
+    })
+  } catch {
+    /* 配置尚未生成时忽略 */
+  }
+}
+
+// 0.0.0.0 表示对局域网开放，连接地址仍回落到回环地址，方便本机先自测。
+const webdavURL = computed(() => {
+  const host = webdavInfo.addr === '0.0.0.0' || webdavInfo.addr === '::' ? '127.0.0.1' : webdavInfo.addr
+  return `http://${host}:${webdavInfo.port}/`
+})
+const webdavExposed = computed(() => webdavInfo.addr === '0.0.0.0' || webdavInfo.addr === '::')
+const webdavCmds = computed(() => [
+  { label: 'Windows（映射为网络驱动器）', cmd: `net use Z: ${webdavURL.value} /user:${webdavInfo.username} ${webdavInfo.password}` },
+  { label: 'macOS（Finder → 前往 → 连接服务器）', cmd: webdavURL.value },
+  { label: 'Linux（davfs2）', cmd: `sudo mount -t davfs ${webdavURL.value} /mnt/webdav` },
+])
+
+async function copyWebDAV(text: string) {
+  if (!text) return
+  try {
+    await navigator.clipboard.writeText(text)
+    toast.success(t('copied'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+watch(selectedId, (id) => { if (id === 'webdav') loadWebDAV() })
 
 // ---- Ollama 模型管理（/api/tags|ps|pull|delete）----
 // 模型与程序版本是两件事：这里动的是模型库（几十 GB，全局共享一份，默认 ~/.ollama/models），
@@ -2189,7 +2238,7 @@ const s = currentRuntimeState
             <span class="block-count">{{ selected.installed.length }}</span>
             <!-- Ollama 是单版本语义（目录固定、无版本共存），导入外部安装无意义，故不提供 -->
             <button
-              v-if="selected.id !== 'git' && selected.id !== 'mcp' && selected.id !== 'ollama'"
+              v-if="selected.id !== 'git' && selected.id !== 'mcp' && selected.id !== 'webdav' && selected.id !== 'ollama'"
               class="link-btn import-btn"
               @click="importExisting(selected)"
             >{{ t('importExisting') }}</button>
@@ -2377,9 +2426,72 @@ const s = currentRuntimeState
           </div>
         </section>
 
+        <!-- WebDAV 共享（WebDAV 专属）：连接地址、账号、共享目录与各平台挂载命令。
+             布局沿用 mcp-* 那几个纯布局类（url-row / cfg-head / code），不新增 CSS。 -->
+        <section v-if="selected.id === 'webdav'" class="detail-block mcp-panel">
+          <div class="block-head">
+            <span class="block-title">WebDAV 共享</span>
+            <span class="block-count">{{ svcOn(selected, 'builtin') ? '运行中' : '未启动' }}</span>
+            <button class="link-btn import-btn" @click="loadWebDAV">刷新</button>
+          </div>
+
+          <div class="mcp-url-row">
+            <code class="mcp-url">{{ webdavURL }}</code>
+            <button class="op-btn small" @click="copyWebDAV(webdavURL)">复制地址</button>
+            <button class="op-btn small" :disabled="!svcOn(selected, 'builtin')" @click="openConsole(webdavInfo.port)">浏览器打开</button>
+          </div>
+
+          <div class="mcp-level-row">
+            <span class="mcp-label">账号</span>
+            <code class="mcp-url">{{ webdavInfo.username }} / {{ webdavInfo.password }}</code>
+            <button class="op-btn small" @click="copyWebDAV(webdavInfo.username + ' / ' + webdavInfo.password)">复制账号</button>
+          </div>
+
+          <div class="mcp-level-row">
+            <span class="mcp-label">共享目录</span>
+            <code class="mcp-url">{{ webdavInfo.root || '—' }}</code>
+            <button class="op-btn small" @click="copyWebDAV(webdavInfo.root)">复制路径</button>
+          </div>
+
+          <div class="mcp-level-row">
+            <span class="mcp-label">模式</span>
+            <span class="mcp-hint">{{ webdavInfo.readOnly ? '只读：客户端无法上传或删除' : '读写' }}</span>
+          </div>
+
+          <div v-if="!svcOn(selected, 'builtin')" class="env-msg">
+            服务未启动：在上方版本表点「启动」后即可连接。地址、端口、共享目录、账号密码与只读开关都在「编辑配置」里改，改动需重启服务生效。
+          </div>
+
+          <template v-if="webdavExposed">
+            <div class="mcp-cfg-head">
+              <span>监听地址为 0.0.0.0——局域网内任意设备都能访问</span>
+            </div>
+            <div class="env-msg error">
+              Basic Auth 走明文 HTTP：不可信网络下请改用回环地址，或前置 Caddy / Nginx 提供 TLS。
+            </div>
+          </template>
+
+          <div class="mcp-cfg-head">
+            <span>客户端接入</span>
+          </div>
+          <template v-for="c in webdavCmds" :key="c.label">
+            <div class="mcp-cfg-head">
+              <span>{{ c.label }}</span>
+              <button class="op-btn small" @click="copyWebDAV(c.cmd)">复制</button>
+            </div>
+            <pre class="mcp-code">{{ c.cmd }}</pre>
+          </template>
+
+          <div class="mcp-cfg-head">
+            <span>配置文件</span>
+            <button class="op-btn small" @click="copyWebDAV(webdavInfo.path)">复制</button>
+          </div>
+          <pre class="mcp-code">{{ webdavInfo.path || '—' }}</pre>
+        </section>
+
         <!-- 安装新版本（Git 不展示：Git 为单版本，检测不到时由上方空状态提供一键安装；
-             MCP 为内置服务，无版本可装，后端 Install 直接返回错误，故一并隐藏） -->
-        <section v-if="selected.id !== 'git' && selected.id !== 'mcp' && s" class="detail-block install-card">
+             MCP / WebDAV 为内置服务，无版本可装，后端 Install 直接返回错误，故一并隐藏） -->
+        <section v-if="selected.id !== 'git' && selected.id !== 'mcp' && selected.id !== 'webdav' && s" class="detail-block install-card">
           <div class="block-head">
             <span class="block-title">{{ t('installNewVersion') }}</span>
           </div>
