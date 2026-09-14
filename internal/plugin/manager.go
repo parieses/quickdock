@@ -111,9 +111,19 @@ func (m *Manager) RegisterHostMethod(name string, handler HostMethod) {
 	m.hostMethods[name] = handler
 }
 
-// DiscoverAndLoad 扫描插件目录，加载所有已安装插件
+// DiscoverAndLoad 扫描插件目录，加载「已启用」的插件。
+//
+// isEnabled 为启用判定回调：返回 false 的插件直接跳过——不启动后端进程、不进入插件列表。
+// 传 nil 表示不过滤，加载磁盘上全部插件。
+//
+// 主程序必须传启用判定。磁盘目录只代表「曾经被放到了这里」，真正的「已安装且已启用」
+// 只有数据库知道（插件页的启用开关、卸载都写 DB，磁盘目录可能残留）。此前这里无过滤
+// 全量加载、再由生命周期按 DB 逐个停掉，等于把每个禁用插件先点火再灭火：native 插件
+// 在 LoadPlugin 内会真的启动子进程，而停止要走 taskkill（单次约 0.9~1.3s）且全程串行，
+// 磁盘上 40 个未注册插件能拖出 25 秒启动延迟。
+//
 // 并发加载：native 插件初始化最坏 15s，串行会 N×15s 阻塞主程序启动
-func (m *Manager) DiscoverAndLoad() error {
+func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 	entries, err := os.ReadDir(m.pluginsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -151,6 +161,11 @@ func (m *Manager) DiscoverAndLoad() error {
 		// 跳过当前平台不支持的插件
 		if !IsPlatformSupported(manifest) {
 			logger.W("跳过插件 %s（不支持当前平台 %s）", manifest.ID, runtime.GOOS)
+			continue
+		}
+		// 数据库里未注册 / 已禁用的插件：完全不加载。
+		// 必须在 LoadPlugin 之前判断——native 插件的 LoadPlugin 内部会真的 cmd.Start()。
+		if isEnabled != nil && !isEnabled(manifest.ID) {
 			continue
 		}
 		jobs = append(jobs, pluginJob{manifest: *manifest, dir: filepath.Join(m.pluginsDir, entry.Name())})

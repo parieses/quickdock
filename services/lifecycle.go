@@ -81,27 +81,32 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		a.RegisterPluginHostFn()
 	}
 
-	// 自动安装内置插件（main.go 注入的回调，需在 DB 就绪后执行）
-	if a.InstallBuiltinPluginsFn != nil {
-		a.InstallBuiltinPluginsFn(a.PluginMgr, a.DB)
-	}
-
-	// 同步插件状态：DiscoverAndLoad 加载了所有磁盘上的插件，
-	// 但 DB 中可能有些是禁用的。需要停止它们并保留在列表中。
+	// 扫描并加载插件：只加载数据库中 enabled=1 的插件。
+	// 必须晚于 DB 就绪与 Host API 注入——native 插件在 LoadPlugin 内会真的启动子进程
+	// 并立刻回调 host 方法，未注入会撞「未知的 host 方法」。
+	// 放在这里（而不是 main.go 的 app.Run() 之前）是因为启用状态只有打开 DB 才知道：
+	// 磁盘目录只代表「曾经被放到这里」，未注册 / 已禁用的插件不该占用启动时间与内存。
+	// （此前是先全量加载、再在这里逐个 StopPlugin 同步禁用状态，native 插件要先起
+	// 子进程再 taskkill，磁盘上残留 40 个未注册插件时会拖出 25 秒启动延迟。）
 	if a.PluginMgr != nil {
 		enabledIDs, err := a.DB.ListEnabledPlugins()
-		if err == nil {
+		if err != nil {
+			logger.W("QuickDock: 读取已启用插件列表失败，本次跳过插件加载: %v", err)
+		} else {
 			enabledSet := make(map[string]bool, len(enabledIDs))
 			for _, id := range enabledIDs {
 				enabledSet[id] = true
 			}
-			for _, p := range a.PluginMgr.ListPlugins() {
-				if !enabledSet[p.ID] {
-					logger.I("QuickDock: 插件 %s 已禁用，停止进程", p.ID)
-					a.PluginMgr.StopPlugin(p.ID)
-				}
+			logger.I("QuickDock: 数据库已启用插件 %d 个，按此加载", len(enabledSet))
+			if err := a.PluginMgr.DiscoverAndLoad(func(id string) bool { return enabledSet[id] }); err != nil {
+				logger.W("QuickDock: 插件扫描加载失败（非关键）: %v", err)
 			}
 		}
+	}
+
+	// 自动安装内置插件（main.go 注入的回调，需在 DB 就绪后执行）
+	if a.InstallBuiltinPluginsFn != nil {
+		a.InstallBuiltinPluginsFn(a.PluginMgr, a.DB)
 	}
 
 	// 设置全局 App 引用（供 SetClipboardText 等函数使用）

@@ -293,12 +293,12 @@ func main() {
 	app := application.New(opts)
 
 	// 先提取内置插件骨架文件（common.css / common.js）到 ~/.quickdock/plugins/
-	// 必须早于 DiscoverAndLoad，确保宿主注入的兼容样式/脚本是最新版本。
+	// 必须早于插件加载，确保宿主注入的兼容样式/脚本是最新版本。
 	// 放在 application.New 之后：二次启动已在 New 内部退出，避免与首实例并发写插件目录。
 	extractBuiltinPluginFiles(pluginMgr, &builtinPlugins)
 
-	// 扫描并加载已安装插件（非关键，失败不影响主程序启动）
-	pluginMgr.DiscoverAndLoad()
+	// 插件扫描与加载不在这里：磁盘目录只代表「曾经被放到这里」，真正的启用状态在数据库里，
+	// 而数据库要到 ServiceStartup 才打开。改由 services/lifecycle.go 在 DB 就绪后按启用列表加载。
 
 	// 传入 App 引用给 AppService
 	appService.SetApp(app)
@@ -488,7 +488,7 @@ func initUpdater(app *application.App, version string) error {
 }
 
 // extractBuiltinPluginFiles 增量同步内置插件文件到 ~/.quickdock/plugins/（不含 DB 写入和 LoadPlugin）
-// 在 DiscoverAndLoad 之前调用，确保宿主注入的兼容样式/脚本是最新版本。
+// 在插件加载（services/lifecycle.go 按 DB 启用列表扫描）之前调用，确保宿主注入的兼容样式/脚本是最新版本。
 // 采用增量同步：仅覆盖内容变化的文件，保留插件目录内的本地运行状态（如 sqlite、日志）。
 func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
 	entries, err := builtinFS.ReadDir("plugins/builtin")
