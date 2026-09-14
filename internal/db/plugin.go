@@ -83,6 +83,30 @@ func (d *Database) ListAllPluginIDs() ([]string, error) {
 	return ids, rows.Err()
 }
 
+// ListPluginVersions 返回所有插件记录的 id → 安装版本（含已禁用）。
+// 供插件市场页判定「已安装 / 有新版」——判定源必须与本地插件列表一致（都是 DB 记录）；
+// 磁盘目录只代表「有文件」，不代表「已注册」。
+func (d *Database) ListPluginVersions() (map[string]string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	rows, err := d.conn.Query("SELECT id, version FROM plugins")
+	if err != nil {
+		return nil, fmt.Errorf("查询插件版本失败: %w", err)
+	}
+	defer rows.Close()
+
+	out := make(map[string]string)
+	for rows.Next() {
+		var id, version string
+		if err := rows.Scan(&id, &version); err != nil {
+			return nil, err
+		}
+		out[id] = version
+	}
+	return out, rows.Err()
+}
+
 // ListEnabledPlugins 列出所有已启用插件 ID
 func (d *Database) ListEnabledPlugins() ([]string, error) {
 	d.mu.Lock()

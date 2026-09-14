@@ -87,26 +87,36 @@ func (p *PluginService) GetPluginMarket() *services.ApiResult {
 		return services.Fail(fmt.Errorf("解析市场索引失败: %w", err))
 	}
 
-	// 标注已安装/版本/平台支持
-	pluginsDir := ""
-	if p.App.PluginMgr != nil {
-		pluginsDir = p.App.PluginMgr.PluginsDir()
-	}
-	for i := range idx.Plugins {
-		p := &idx.Plugins[i]
-		p.Supported = isPlatformSupported(p.Platforms)
-		if pluginsDir != "" {
-			if mf, err := pluginmgr.LoadManifest(filepath.Join(pluginsDir, p.ID, "plugin.json")); err == nil {
-				p.Installed = true
-				p.InstalledVersion = mf.Version
-				// 仅当远程版本【高于】本地版本时才提示更新：!= 会把「本地比远程新」
-				//（如本地 0.1.7 / 远程索引尚未推送 0.1.6）误判成可升级
-				p.HasUpdate = compareVersions(p.Version, mf.Version) > 0
-			}
+	// 本地安装状态以 DB 为准，与本地插件列表（ListPlugins）保持同一判定源。
+	// 不能用磁盘目录存在性判定：pluginsDir 下可能残留「有文件但未注册」的目录
+	//（如从 plugins/external 同步的开发产物），只看磁盘会把它们全部标成「已安装」。
+	installed := map[string]string{}
+	if p.App.DB != nil {
+		vs, err := p.App.DB.ListPluginVersions()
+		if err != nil {
+			return services.Fail(fmt.Errorf("读取插件安装记录失败: %w", err))
 		}
+		installed = vs
 	}
+	applyInstalledStatus(idx.Plugins, installed)
 
 	return services.Ok(idx)
+}
+
+// applyInstalledStatus 用本地已安装版本表（id → version）标注市场索引中每个插件的
+// 平台支持 / 已安装 / 可更新状态。抽为纯函数以便单测（GetPluginMarket 依赖网络与 DB）。
+func applyInstalledStatus(plugins []marketPlugin, installed map[string]string) {
+	for i := range plugins {
+		p := &plugins[i]
+		p.Supported = isPlatformSupported(p.Platforms)
+		if v, ok := installed[p.ID]; ok {
+			p.Installed = true
+			p.InstalledVersion = v
+			// 仅当远程版本【高于】本地版本时才提示更新：!= 会把「本地比远程新」
+			//（如本地 0.1.7 / 远程索引尚未推送 0.1.6）误判成可升级
+			p.HasUpdate = compareVersions(p.Version, v) > 0
+		}
+	}
 }
 
 // InstallPluginFromURL 从 HTTPS URL 下载插件 zip 并安装。
