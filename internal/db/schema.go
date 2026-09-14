@@ -330,10 +330,30 @@ func (d *Database) migrate() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	// 数据迁移：snippets 表重命名为 notes（一次性，幂等；兼容旧版本库）
+	// 数据迁移：snippets 表迁移为 notes（幂等；兼容旧版本库）。
+	// 旧库可能处于三种状态：
+	//   1) 只有 snippets —— 直接 RENAME；
+	//   2) snippets 与 notes 并存（重命名中途/重复迁移遗留）—— 把 snippets 中 notes 没有的
+	//      id 合并进 notes，再删除 snippets，避免 "already another table named notes"；
+	//   3) 只有 notes —— 跳过。
 	if d.tableExists("snippets") {
-		if _, err := d.conn.Exec(`ALTER TABLE snippets RENAME TO notes`); err != nil {
-			return fmt.Errorf("重命名 snippets→notes 失败: %w", err)
+		if d.tableExists("notes") {
+			if _, err := d.conn.Exec(`
+				INSERT OR IGNORE INTO notes
+					(id, keyword, content, category, name, parent_id, is_folder, sort, tags, is_note, format, created_at)
+				SELECT id, keyword, content, category, name, parent_id, is_folder, sort, tags, is_note, format, created_at
+				FROM snippets
+				WHERE id NOT IN (SELECT id FROM notes)
+			`); err != nil {
+				return fmt.Errorf("合并 snippets→notes 失败: %w", err)
+			}
+			if _, err := d.conn.Exec(`DROP TABLE snippets`); err != nil {
+				return fmt.Errorf("删除遗留 snippets 表失败: %w", err)
+			}
+		} else {
+			if _, err := d.conn.Exec(`ALTER TABLE snippets RENAME TO notes`); err != nil {
+				return fmt.Errorf("重命名 snippets→notes 失败: %w", err)
+			}
 		}
 	}
 
