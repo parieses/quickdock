@@ -432,3 +432,44 @@ func (s *EnvironmentService) EnvCertIssue(outDir, name string, hosts []string) *
 	}
 	return services.Ok(res)
 }
+
+// projectVersionStatus 一个运行时在某个项目目录下的版本现状，供前端逐行展示。
+type projectVersionStatus struct {
+	Runtime   string   `json:"runtime"`
+	Require   string   `json:"require"`   // 声明文件里的原始要求串，如 "^8.1"
+	Source    string   `json:"source"`    // 来源文件，如 ".nvmrc"
+	Matched   string   `json:"matched"`   // 匹配到的已装版本；"" = 该要求当前无对应已装版本
+	Active    string   `json:"active"`    // 当前激活版本；"" = 未激活
+	Installed []string `json:"installed"` // 该运行时全部已装版本，供手动改绑
+}
+
+// EnvProjectVersions 探测项目目录（及其祖先目录）内的版本声明文件——
+// .nvmrc / .node-version / .php-version / .python-version / .tool-versions /
+// package.json engines / composer.json require.php / go.mod——
+// 逐条返回「要求什么版本 → 匹配到哪个已装版本 → 当前激活哪个」。
+//
+// dir 为空、目录不存在、无任何声明文件时一律返回空数组而不是错误：
+// 条目可能是网页/命令，本就没有项目目录，把"没探测到"当失败会污染调用方逻辑。
+func (s *EnvironmentService) EnvProjectVersions(dir string) *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	hints := envmgr.DetectVersionHints(dir)
+	out := make([]projectVersionStatus, 0, len(hints))
+	for _, h := range hints {
+		st := projectVersionStatus{Runtime: string(h.Runtime), Require: h.Version, Source: h.Source}
+		installs, err := s.App.Env.InstalledVersions(h.Runtime)
+		if err == nil {
+			st.Installed = make([]string, 0, len(installs))
+			for _, ins := range installs {
+				st.Installed = append(st.Installed, ins.Version)
+				if ins.Active {
+					st.Active = ins.Version
+				}
+			}
+			st.Matched = envmgr.MatchInstalledVersion(h.Version, st.Installed)
+		}
+		out = append(out, st)
+	}
+	return services.Ok(out)
+}

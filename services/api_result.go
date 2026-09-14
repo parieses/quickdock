@@ -1,6 +1,9 @@
 package services
 
-import "quickdock/internal/logger"
+import (
+	"quickdock/internal/db"
+	"quickdock/internal/logger"
+)
 
 // ApiResult 统一 API 返回结构
 // code: 0=成功, 1=失败
@@ -70,8 +73,14 @@ func Wrap[T any](val T, err error) *ApiResult {
 // 确保 DB 初始化（批量前置检查）
 // 注意：不再需要手动加锁，db.Database 内部已加锁
 func (a *AppService) dbOK() *ApiResult {
-	if a.DB == nil {
-		logger.E("[ERR] database not initialized")
+	return CheckDB(a.DB)
+}
+
+// CheckDB 校验数据库是否已完成注入（Wails 在 ServiceStartup 阶段注入），未注入返回失败结果。
+// 各 service 的 dbOK() 统一委托至此：DB 未就绪时前端会拿到明确错误而非 nil 解引用崩溃。
+func CheckDB(d *db.Database) *ApiResult {
+	if d == nil {
+		logger.E("QuickDock: database not initialized")
 		return FailMsg("database not initialized")
 	}
 	return nil

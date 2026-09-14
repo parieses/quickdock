@@ -19,10 +19,7 @@ func NewWorkspaceService(app *services.AppService) *WorkspaceService {
 
 // dbOK 检查宿主 DB 是否就绪（原 AppService.dbOK 的包内副本，跨包不可访问宿主私有方法）
 func (s *WorkspaceService) dbOK() *services.ApiResult {
-	if s.App.DB == nil {
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(s.App.DB)
 }
 
 // ===== 工作空间 =====

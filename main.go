@@ -149,15 +149,16 @@ const (
 	paletteWinHeight = 600
 )
 
-// 全局状态标志（main/tray.go 与 services 共享）
-var (
-	windowVisible atomic.Bool
-	clipboardMode atomic.Bool
-	paletteMode   atomic.Bool
-	noteMode      atomic.Bool
-)
+// 主窗口与各浮窗的可见/模式标志：与 services 共享同一实例（见 services.WindowFlags）。
+// 此前是 4 个独立包级 atomic.Bool 逐个以裸指针注入 AppService，跨包共享裸指针，
+// 归属与生命周期都不清晰；收成单一对象后由 main 持有并显式交给 AppService。
+var windowFlags = &services.WindowFlags{}
 
 func main() {
+	// 提权子进程快速路径：必须早于 logger.Init 与 application.New（单实例互斥在 New 里），
+	// 详见 elevated_cli.go。
+	runElevatedCLI()
+
 	// 全局日志：先于一切初始化，之后所有包（services/plugin/tray）的关键事件统一落盘
 	// ~/.quickdock/logs/quickdock-YYYYMMDD.log
 	logger.Init(filepath.Join(platform.DefaultDataDir(), "logs"))
@@ -174,11 +175,8 @@ func main() {
 	// 创建 AppService 实例
 	appService := services.NewAppService()
 
-	// 注入共享状态（同一 atomic.Bool，main 包和 services 包共享）
-	appService.WindowVisible = &windowVisible
-	appService.ClipboardMode = &clipboardMode
-	appService.PaletteMode = &paletteMode
-	appService.NoteMode = &noteMode
+	// 共享窗口状态标志（main 与 AppService 持有同一实例）
+	appService.Flags = windowFlags
 
 	// 注入热键监听回调（避免循环依赖）
 	appService.StartHotkeyListenerFn = StartHotkeyListener
@@ -369,8 +367,8 @@ func main() {
 	// 窗口关闭时隐藏到托盘（而不是退出）
 	mainWindow.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		if !trayQuitRequested.Load() {
-			windowVisible.Store(false)
-			clipboardMode.Store(false)
+			windowFlags.Main.Store(false)
+			windowFlags.Clipboard.Store(false)
 			event.Cancel()
 			go mainWindow.Hide()
 		}
@@ -378,10 +376,10 @@ func main() {
 
 	// 同步窗口可见状态
 	mainWindow.RegisterHook(events.Common.WindowMinimise, func(event *application.WindowEvent) {
-		windowVisible.Store(false)
+		windowFlags.Main.Store(false)
 	})
 	mainWindow.RegisterHook(events.Common.WindowRestore, func(event *application.WindowEvent) {
-		windowVisible.Store(true)
+		windowFlags.Main.Store(true)
 	})
 
 	// 剪贴板/命令面板/插件窗口使用延迟创建（按需初始化，减少启动内存占用）

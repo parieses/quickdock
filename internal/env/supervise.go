@@ -71,9 +71,24 @@ func (m *Manager) Enabled(rt Runtime) bool {
 // resolveStartVersion 返回开启/对账时应启动的版本：优先激活版本，否则第一个已装版本。
 // 没有任何已装版本时返回错误（调用方应提示先安装/激活）。
 func (m *Manager) resolveStartVersion(rt Runtime) (string, error) {
+	return m.ResolveVersion(rt, activeVersion(rt))
+}
+
+// ResolveVersion 返回应使用（启动/停止）的版本：want 非空且确实已安装则优先用 want，
+// 否则回退到激活版本，仍无则取首个已装版本。
+// 供外部（如场景绑定）在持有「期望版本」时复用与常驻对账完全一致的版本决策，
+// 避免绑定里写死的版本被卸载后启停失败。
+func (m *Manager) ResolveVersion(rt Runtime, want string) (string, error) {
 	installed, err := m.InstalledVersions(rt)
 	if err != nil || len(installed) == 0 {
 		return "", fmt.Errorf("该运行时尚未安装任何版本，请先安装并激活")
+	}
+	if want != "" {
+		for _, i := range installed {
+			if i.Version == want {
+				return want, nil
+			}
+		}
 	}
 	if active := activeVersion(rt); active != "" {
 		for _, i := range installed {
@@ -104,6 +119,12 @@ func (m *Manager) SetEnabled(rt Runtime, on bool) error {
 		ver, err := m.resolveStartVersion(rt)
 		if err != nil {
 			return err
+		}
+		// 服务可能已由场景应用等路径启动（运行中但非常驻）：此时只需登记期望态。
+		// 若照常调 Start，svcMgr 会以「服务已在运行」拒绝，开关打开失败却被回滚成关闭，
+		// 而后端期望态已落盘 —— 前端显示关、看门狗却按开自愈，彻底停不掉。
+		if st, e := m.Status(rt, ver); e == nil && st.Running {
+			return nil
 		}
 		return m.Start(rt, ver, nil)
 	}

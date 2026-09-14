@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 
-	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -22,11 +21,7 @@ func NewItemService(app *services.AppService) *ItemService {
 }
 
 func (s *ItemService) dbOK() *services.ApiResult {
-	if s.App.DB == nil {
-		logger.E("QuickDock: database not initialized")
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(s.App.DB)
 }
 
 // GetPathQuickInfo 返回路径的文件系统元数据（命令面板 QuickLook 预览用）：

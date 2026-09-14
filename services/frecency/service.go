@@ -3,7 +3,6 @@ package frecency
 
 import (
 	"quickdock/internal/db"
-	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -18,11 +17,7 @@ func NewFrecencyService(app *services.AppService) *FrecencyService {
 }
 
 func (s *FrecencyService) dbOK() *services.ApiResult {
-	if s.App.DB == nil {
-		logger.E("QuickDock: database not initialized")
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(s.App.DB)
 }
 
 // usageResult 将 DB 查询结果包装为 ApiResult，消除重复的 err/nil/Ok 模板。

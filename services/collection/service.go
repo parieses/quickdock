@@ -3,7 +3,6 @@ package collection
 
 import (
 	"quickdock/internal/db"
-	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -18,11 +17,7 @@ func NewCollectionService(app *services.AppService) *CollectionService {
 }
 
 func (s *CollectionService) dbOK() *services.ApiResult {
-	if s.App.DB == nil {
-		logger.E("QuickDock: database not initialized")
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(s.App.DB)
 }
 
 // ListCollections 列出某场景下的全部集合。

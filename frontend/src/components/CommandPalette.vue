@@ -44,7 +44,7 @@ import type { ToastAPI } from '../types'
 import { evaluate, format, convertExpression } from '../utils/calc'
 import { commandTitle } from '../utils/localize'
 import { getPluginLastResult, savePluginLastResult, pluginCmdKey } from '../utils/pluginLastResult'
-import { pinyin } from 'pinyin-pro'
+import { pinyinMatch, pinyinOf, clearPinyinCache } from '../utils/pinyin'
 import { useFrecency } from '../composables/useFrecency'
 import { usePluginIndex } from '../composables/usePluginIndex'
 import { useCommandSearch } from '../composables/useCommandSearch'
@@ -267,48 +267,16 @@ const systemCommands = computed<SystemCmd[]>(() => [
     action: async () => { await ExecuteSystemCommand('kill-foreground'); closePalette() } },
 ])
 
-// ---- 拼音匹配 ----
-function pinyinMatch(text: string, queryLC: string, cacheKey?: string): boolean {
-  if (!text || !queryLC) return false
-  let initials: string, full: string
-  if (cacheKey) {
-    const cached = pinyinCache.get(cacheKey)
-    if (cached) { initials = cached.init; full = cached.full }
-    else {
-      const pyArr = pinyin(text, { pattern: 'first', toneType: 'none', type: 'array' })
-      initials = pyArr.map(p => p[0]).join('').toLowerCase()
-      full = pinyin(text, { toneType: 'none', type: 'array' }).join('').toLowerCase()
-    }
-  } else {
-    const pyArr = pinyin(text, { pattern: 'first', toneType: 'none', type: 'array' })
-    initials = pyArr.map(p => p[0]).join('').toLowerCase()
-    full = pinyin(text, { toneType: 'none', type: 'array' }).join('').toLowerCase()
-  }
-  if (initials.startsWith(queryLC)) return true
-  if (full.includes(queryLC)) return true
-  return false
-}
-
-// ---- 拼音缓存 ----
-const pinyinCache = new Map<string, { init: string; full: string }>()
+// ---- 拼音缓存预热 ----
+// 匹配实现已收敛到 utils/pinyin.ts（原先只有命令面板能用，其余搜索框够不着）。
+// 这里只保留预热：条目量大时若等到首次输入才逐条算拼音会有可感知卡顿，
+// 索性在数据源变化时一次性算完塞进缓存。
 function rebuildPinyinCache() {
-  pinyinCache.clear()
-  for (const item of items.value) {
-    const py = pinyin(item.name, { toneType: 'none', type: 'array' })
-    pinyinCache.set('i:' + item.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
-  }
-  for (const n of notes.value) {
-    const py = pinyin(n.name || n.keyword || '', { toneType: 'none', type: 'array' })
-    pinyinCache.set('n:' + n.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
-  }
-  for (const app of installedApps.value) {
-    const py = pinyin(app.name, { toneType: 'none', type: 'array' })
-    pinyinCache.set('a:' + app.name, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
-  }
-  for (const cmd of systemCommands.value) {
-    const py = pinyin(cmd.label, { toneType: 'none', type: 'array' })
-    pinyinCache.set('sys:' + cmd.id, { init: py.map(p => p[0]).join('').toLowerCase(), full: py.join('').toLowerCase() })
-  }
+  clearPinyinCache()
+  for (const item of items.value) pinyinOf(item.name, 'i:' + item.id)
+  for (const n of notes.value) pinyinOf(n.name || n.keyword || '', 'n:' + n.id)
+  for (const app of installedApps.value) pinyinOf(app.name, 'a:' + app.name)
+  for (const cmd of systemCommands.value) pinyinOf(cmd.label, 'sys:' + cmd.id)
 }
 watch([items, notes, installedApps], () => { rebuildPinyinCache() })
 watch(systemCommands, () => { rebuildPinyinCache() })
@@ -391,11 +359,11 @@ async function executeEnvAction(r: SearchResult) {
       if (envMgmt.value[ver] === true) {
         const out = unwrap(await EnvRabbitMQDisableMgmt(ver))
         toast?.success?.(t('rabbitmqDisableMgmtDone'))
-        if (out) console.log('[RabbitMQ mgmt]', out)
+        if (out) logDebug('[RabbitMQ mgmt]', out)
       } else {
         const out = unwrap(await EnvRabbitMQEnableMgmt(ver))
         toast?.success?.(t('envMgmtEnabled'))
-        if (out) console.log('[RabbitMQ mgmt]', out)
+        if (out) logDebug('[RabbitMQ mgmt]', out)
       }
     }
     // 执行后重轮询状态，让结果即时翻转为相反动作（启动→停止），不关闭面板便于连续控制

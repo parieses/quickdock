@@ -193,7 +193,7 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
 		x, y := win.Position()
 		saveWinPos("clipboard", x, y)
-		clipboardMode.Store(false)
+		windowFlags.Clipboard.Store(false)
 		if a := getHotkeyApp(); a != nil {
 			a.Event.Emit("clipboard:before-hide")
 		}
@@ -207,7 +207,7 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 			return
 		}
 		event.Cancel()
-		clipboardMode.Store(false)
+		windowFlags.Clipboard.Store(false)
 		x, y := win.Position()
 		saveWinPos("clipboard", x, y)
 		if a := getHotkeyApp(); a != nil {
@@ -236,7 +236,7 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
 		x, y := win.Position()
 		saveWinPos("note", x, y)
-		noteMode.Store(false)
+		windowFlags.Note.Store(false)
 		win.Hide()
 	})
 	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。
@@ -245,7 +245,7 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 			return
 		}
 		event.Cancel()
-		noteMode.Store(false)
+		windowFlags.Note.Store(false)
 		x, y := win.Position()
 		saveWinPos("note", x, y)
 		win.Hide()
@@ -274,7 +274,7 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 		if foregroundIsOwnedModal() {
 			return // 自家模态对话框（文件选择框等）导致失焦，不隐藏
 		}
-		paletteMode.Store(false)
+		windowFlags.Palette.Store(false)
 		win.Hide()
 	})
 	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。
@@ -283,7 +283,7 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 			return
 		}
 		event.Cancel()
-		paletteMode.Store(false)
+		windowFlags.Palette.Store(false)
 		x, y := win.Position()
 		saveWinPos("palette", x, y)
 		win.Hide()

@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"time"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -30,14 +31,23 @@ type Install struct {
 
 // ServiceStatus 服务运行状态（nginx/redis 等支持以服务方式启动的运行时）
 type ServiceStatus struct {
-	Running bool   `json:"running"`
-	PID     int    `json:"pid"`
-	Port    int    `json:"port"`
+	Running bool `json:"running"`
+	PID     int  `json:"pid"`
+	Port    int  `json:"port"`
 	// Ports 运行时实际侦听的全部端口，由各运行时从自身配置文件解析（见 ConfigPortsProvider）。
 	// 端口不再写死为默认常量：用户改了配置（如 nginx 改 listen、caddy 改站点端口）后此处随之变化。
 	// Caddy 为「两个一块显示」：首项是 admin 端口（默认 2019），其后是 Caddyfile 的站点端口。
 	Ports   []int  `json:"ports"`
 	Version string `json:"version"`
+	// CPUPercent 相邻两次采样间隔内的 CPU 占用率（%），100% 表示占满一个逻辑核。
+	// 前端每 3 秒轮询一次，故此处即「近 3 秒平均占用」。首次采样没有基线时为 null——
+	// 刻意不回退成「进程启动至今的平均值」，那对刚启动的服务是误导性数字。
+	CPUPercent *float64 `json:"cpuPercent"`
+	// MemBytes 整个服务进程树的常驻内存合计（字节）。含 nginx worker、Ollama runner 等子进程：
+	// 这类服务的实际内存大头在子进程上，只算主进程会严重低估。
+	MemBytes int64 `json:"memBytes"`
+	// ProcCount 进程树内的进程数，>1 表示服务派生了子进程。
+	ProcCount int `json:"procCount"`
 }
 
 // RuntimeAdapter 单一受管运行时的统一接口。支持多版本：安装落到 runtime/<rt>/<version>，
@@ -109,6 +119,14 @@ type Manager struct {
 	// 开启即表示用户希望该服务常驻：启动对账拉起 + 看门狗掉线自愈。
 	enabledMu sync.RWMutex
 	enabled   map[Runtime]bool
+	// usageMu/usageSamples 记录各服务上次的累计 CPU 时间，用于跨轮询间隔求占用率增量。
+	usageMu      sync.Mutex
+	usageSamples map[int]usageSample
+	// procSnap/procSnapAt 全机进程快照的短时缓存：同一轮轮询会逐运行时各查一次状态，
+	// 没有这层缓存就会把整张进程表重复枚举十几遍。
+	procSnapMu sync.Mutex
+	procSnap   []sysutil.ProcStat
+	procSnapAt time.Time
 }
 
 // runtimeOrder 运行时固定展示顺序
@@ -149,9 +167,10 @@ func NewManager() *Manager {
 			RuntimeMCP:        NewMCPRuntime(),
 			RuntimeWebDAV:     NewWebDAVRuntime(),
 		},
-		links:       map[Runtime][]linkEntry{},
-		detectCache: map[Runtime][]Install{},
-		enabled:     map[Runtime]bool{},
+		links:        map[Runtime][]linkEntry{},
+		detectCache:  map[Runtime][]Install{},
+		enabled:      map[Runtime]bool{},
+		usageSamples: map[int]usageSample{},
 	}
 	m.loadLinks()
 	m.loadDetected()
@@ -248,6 +267,39 @@ func (m *Manager) exeDirFor(rt Runtime, version string) string {
 		return ""
 	}
 	return filepath.Dir(a.ExeFor(version))
+}
+
+// BinDirFor 返回「项目级版本切换」在打开条目时应前置到 PATH 的 bin 目录：
+// want 已安装则用它，否则回退到 ResolveVersion 的决策（激活版本 → 首个已装版本）。
+// 与场景绑定复用同一套版本决策，避免绑定里写死的版本被卸载后注入一个不存在的目录。
+// 运行时未知或未装任何版本时返回 ""（调用方据此跳过注入，不视为错误）。
+func (m *Manager) BinDirFor(rt Runtime, want string) string {
+	if _, err := m.adapter(rt); err != nil {
+		return ""
+	}
+	ver, err := m.ResolveVersion(rt, want)
+	if err != nil {
+		return ""
+	}
+	return m.exeDirFor(rt, ver)
+}
+
+// ConfigPathFor 返回某运行时某版本的配置文件绝对路径；该运行时未实现 ConfigProvider 时返回错误。
+// 供站点配置生成（把 include 片段放到配置文件同级目录）定位落盘位置。
+func (m *Manager) ConfigPathFor(rt Runtime, version string) (string, error) {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return "", err
+	}
+	p, ok := a.(ConfigProvider)
+	if !ok {
+		return "", fmt.Errorf("%s 不支持配置文件", a.DisplayName())
+	}
+	path := p.ConfigPath(version)
+	if path == "" {
+		return "", fmt.Errorf("%s 未定义配置文件路径", a.DisplayName())
+	}
+	return path, nil
 }
 
 // scopeFor 返回某版本 scope：导入版本为 "linked"，其余取 adapter 判定。
@@ -946,6 +998,8 @@ func (m *Manager) Status(rt Runtime, version string) (ServiceStatus, error) {
 	if len(st.Ports) == 0 && st.Port > 0 {
 		st.Ports = []int{st.Port}
 	}
+	// 填充进程树资源占用（内存 / 进程数 / CPU 增量）
+	m.attachUsage(&st)
 	return st, nil
 }
 

@@ -40,7 +40,7 @@ var (
 //  2. 否则优先当前聚焦的插件窗口（插件独立窗口场景）。
 //  3. 兜底主窗口。
 func (p *PluginService) dialogParentWindow() *application.WebviewWindow {
-	if p.App.PaletteMode != nil && p.App.PaletteMode.Load() {
+	if p.App.Flags.Palette.Load() {
 		if fn := p.App.GetPaletteWindow; fn != nil {
 			if w := fn(); w != nil {
 				return w

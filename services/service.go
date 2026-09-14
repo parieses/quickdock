@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"sync"
-	"sync/atomic"
 
 	"quickdock/internal/db"
 	dshcore "quickdock/internal/dsh"
@@ -29,11 +28,10 @@ type AppService struct {
 	GetPaletteWindow   func() *application.WebviewWindow
 	GetNoteWindow      func() *application.WebviewWindow
 
-	// 状态标志（注入 main 包的 atomic.Bool 指针，共享状态）
-	WindowVisible *atomic.Bool
-	ClipboardMode *atomic.Bool
-	PaletteMode   *atomic.Bool
-	NoteMode      *atomic.Bool
+	// Flags 主窗口与各浮窗的可见/模式标志（见 WindowFlags）。
+	// 由 NewAppService 创建，main 包持有同一实例——不再是 4 个跨包注入的裸指针，
+	// 故使用点无需判 nil。
+	Flags *WindowFlags
 
 	// main 包注入的回调（避免循环依赖）
 	StartHotkeyListenerFn func(app *application.App, svc *AppService)
@@ -91,7 +89,6 @@ type AppService struct {
 
 	// 环境管理：Node/PHP/Go/Redis/Nginx 便携运行时（参考 FlyEnv 的部署与版本切换）
 	Env *env.Manager
-
 }
 
 // App 返回底层 Wails 应用实例（供拆分到子包的服务通过回指访问未导出字段）。
@@ -102,10 +99,20 @@ func (a *AppService) App() *application.App {
 // NewAppService 创建应用服务实例
 func NewAppService() *AppService {
 	nodeEnv := dshcore.NewNodeEnvManager()
+	envMgr := env.NewManager()
+	// 项目级版本切换：把「运行时 id + 期望版本 → bin 目录」的解析能力注入 db 层。
+	// db 是叶子包、不 import internal/env，故用回调注入而不是直接引用。
+	// 这里做一层 id 转换，让 db 的签名只认裸 string，不沾 env.Runtime 类型。
+	db.SetPathEnvResolver(func(rt, version string) string {
+		return envMgr.BinDirFor(env.Runtime(rt), version)
+	})
+	// 内置站点服务的证书由 mkcert 签发；sites 包只认 CertIssuer 接口，不 import env。
+	siteMgr.SetCertIssuer(envMgr)
 	return &AppService{
 		NodeEnv: nodeEnv,
 		DSH:     dshcore.NewDSHProcessManager(nil, nodeEnv),
-		Env:     env.NewManager(),
+		Env:     envMgr,
+		Flags:   &WindowFlags{},
 	}
 }
 
@@ -124,6 +131,10 @@ func (a *AppService) SetApp(app *application.App) {
 		a.Env.ReconcileEnabled(context.Background())
 		a.Env.StartWatchdog(context.Background())
 	}
+	// 站点服务：用户此前显式启用过站点则自动拉起。
+	// 失败只记日志不弹窗——开机就抛一个「443 绑定失败」没有意义，状态在 SitesList 里可见，
+	// 用户点「启动」即可拿到完整报错。
+	siteMgr.Resume()
 }
 
 // dshAutoStartEnabled 读取 dsh web 自动启动配置（默认开启）。

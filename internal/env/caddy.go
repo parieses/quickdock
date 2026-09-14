@@ -40,8 +40,9 @@ const defaultCaddyfile = `{
 // CaddyRuntime 管理便携 Caddy 运行时（caddyserver/caddy 的 Windows 发行 zip，含单文件 caddy.exe）。
 // 与 redis/nginx 同属「svcMgr PID 句柄」监控模型：以 `caddy run`（前台阻塞）拉起，由 svcMgr 记录 PID 与
 // 捕获日志；运行状态优先走 svcMgr.info()/pid()，端口仅作外部/孤儿进程的兜底探测。Caddy 默认监听 80/443，
-// 且恒暴露 admin API 于 :2019（localhost），可作为比 redis 端口更干净的健康探针；如需按 Caddyfile 的
-// listen 地址判定状态，可仿 redis.configPort() 解析 Caddyfile。因此完全可实现 ServiceController。
+// 且恒暴露 admin API 于 :2019（localhost），可作为比 redis 端口更干净的健康探针。
+// 站点端口不写死：已实现 ConfigPortsProvider（解析 Caddyfile 的 admin 与站点侦听端口），
+// Manager.Status 会注入 ServiceStatus.Ports，首项为 admin 端口、其后为站点端口。
 type CaddyRuntime struct {
 	baseDir string
 }

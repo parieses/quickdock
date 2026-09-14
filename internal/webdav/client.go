@@ -200,8 +200,10 @@ func ListBackups(cfg *Config) ([]BackupFile, error) {
 
 	var files []BackupFile
 	for _, r := range ms.Response {
-		// 集合目录：XML 中 <collection/> 是空元素，解码后 Collection==""；只判断 ResourceType 非 nil 即是集合
-		if r.Propstat.Prop.ResourceType != nil {
+		// 只跳过真正的集合目录：<resourcetype><collection/></resourcetype> 解码后
+		// ResourceType.Collection != ""。注意空 <resourcetype/> 解码后指针也非 nil 但
+		// Collection 为空，若只判非 nil 会把普通文件也一并跳过，导致列表恒为空。
+		if r.Propstat.Prop.ResourceType != nil && r.Propstat.Prop.ResourceType.Collection != "" {
 			continue
 		}
 		name := strings.TrimRight(r.Href, "/")

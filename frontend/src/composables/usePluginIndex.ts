@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { pinyin } from 'pinyin-pro'
+import { pinyinParts } from '../utils/pinyin'
 import type { PluginInfo, PluginCommand } from '../types'
 import { logWarn } from '../utils/logger'
 
@@ -42,24 +42,24 @@ function buildPluginIndex(plugins: PluginInfo[]): PluginCmdIndex[] {
           regexValid = false
         }
       }
-      const titlePy = pinyin(cmd.title, { toneType: 'none', type: 'array' })
-      const pinyinTitleFull = titlePy.join('').toLowerCase()
-      const pinyinTitleInit = titlePy.map(p => p[0]).join('').toLowerCase()
+      const titlePy = pinyinParts(cmd.title)
+      const pinyinTitleFull = titlePy.full
+      const pinyinTitleInit = titlePy.init
       // 多语言标题搜索键：原始标题 + title_i18n 所有语言值
       const titleLc = [cmd.title, ...Object.values(cmd.titleI18n || {})].map(s => s.toLowerCase())
       const pinyinKwFull: string[] = []
       const pinyinKwInit: string[] = []
       for (const kw of (cmd.keywords || [])) {
-        const kwPy = pinyin(kw, { toneType: 'none', type: 'array' })
-        pinyinKwFull.push(kwPy.join('').toLowerCase())
-        pinyinKwInit.push(kwPy.map(p => p[0]).join('').toLowerCase())
+        const kwPy = pinyinParts(kw)
+        pinyinKwFull.push(kwPy.full)
+        pinyinKwInit.push(kwPy.init)
       }
       const pinyinAliasFull: string[] = []
       const pinyinAliasInit: string[] = []
       for (const alias of (cmd.aliases || [])) {
-        const aPy = pinyin(alias, { toneType: 'none', type: 'array' })
-        pinyinAliasFull.push(aPy.join('').toLowerCase())
-        pinyinAliasInit.push(aPy.map(p => p[0]).join('').toLowerCase())
+        const aPy = pinyinParts(alias)
+        pinyinAliasFull.push(aPy.full)
+        pinyinAliasInit.push(aPy.init)
       }
       idx.push({ plugin, cmd, regex, regexValid, notRunning, titleLc, pinyinTitleFull, pinyinTitleInit, pinyinKwFull, pinyinKwInit, pinyinAliasFull, pinyinAliasInit })
     }

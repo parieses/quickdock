@@ -130,6 +130,18 @@ func (d *Database) GetWorkspace(id string) (*Workspace, error) {
 
 // ---- 场景 ----
 
+func (d *Database) GetScene(id string) (*Scene, error) {
+	row, err := d.QueryOne("SELECT * FROM scenes WHERE id = ?", id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, fmt.Errorf("场景不存在")
+	}
+	sc := mapToScene(row)
+	return &sc, nil
+}
+
 func (d *Database) ListScenes(workspaceID string) ([]Scene, error) {
 	rows, err := d.ListTableWhere("scenes", "workspace_id = ?", workspaceID)
 	if err != nil {

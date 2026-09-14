@@ -19,10 +19,7 @@ func NewTodoService(app *services.AppService) *TodoService {
 
 // dbOK 检查宿主 DB 是否就绪（原 AppService.dbOK 的包内副本）
 func (s *TodoService) dbOK() *services.ApiResult {
-	if s.App.DB == nil {
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(s.App.DB)
 }
 
 // CreateTodo 新建待办（含起止时间、提醒时间、标签与重复配置）

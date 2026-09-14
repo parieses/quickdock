@@ -53,11 +53,7 @@ func NewAIService(app *services.AppService) *AIService {
 
 // dbOK 检查宿主 DB 是否就绪（原 AppService.dbOK 的包内副本，跨包不可访问宿主私有方法）
 func (a *AIService) dbOK() *services.ApiResult {
-	if a.App.DB == nil {
-		logger.E("QuickDock: database not initialized")
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(a.App.DB)
 }
 
 // recoverPanic 兜底 recover 打日志（委托给 logger.RecoverPanic）

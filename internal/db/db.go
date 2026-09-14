@@ -64,6 +64,7 @@ var validColumns = map[string]bool{
 	"collection": true,
 	"working_directory": true, "args": true,
 	"path": true, "version": true, "capability": true,
+	"env": true, // scenes.env：场景绑定的环境服务 JSON
 	"permissions": true, "manifest": true, "configurable": true, "built_in": true,
 	"installed": true, "enabled": true,
 	"kind": true, "label": true, "note": true, "payload": true, "size": true,
@@ -131,17 +132,26 @@ func validateColumn(col string) error {
 	return nil
 }
 
-// Database 包装 SQLite 连接，提供互斥锁保护
+// Database 包装 SQLite 连接
+//
+// 并发模型：WAL 支持「多读 + 单写」，故这里用 RWMutex 而不是全程串行——
+// 读方法（Query/ListTable/…）持读锁可并发，写方法（Execute/Transaction/…）持写锁独占。
+// 连接池放开到 dbMaxOpenConns，让并发读真正落到不同连接上（WAL 下读写互不阻塞）。
 type Database struct {
-	mu   sync.Mutex
+	mu   sync.RWMutex
 	conn dbConn
 	path string
 
 	// colCache 表结构列名缓存：避免每次查询都执行 pragma_table_info
 	// （orderByClause 每次调用 2 次 pragma，快照/列表高频调用时开销放大）。
-	// 仅在 d.mu 持锁时访问，无需额外同步。
+	// 读方法只持 mu.RLock 也会写它，因此由 colMu 单独保护，不能依赖 mu。
+	colMu    sync.RWMutex
 	colCache map[string]map[string]bool
 }
+
+// dbMaxOpenConns 连接池上限。写操作被 mu 串行化，同一时刻最多一个写者；
+// 读操作可并发，池大小决定并发读的上限（超过则排队，不会失败）。
+const dbMaxOpenConns = 4
 
 // Open 创建或打开指定路径的 SQLite 数据库
 func Open(path string) (*Database, error) {
@@ -150,24 +160,21 @@ func Open(path string) (*Database, error) {
 		return nil, fmt.Errorf("创建数据库目录失败: %w", err)
 	}
 
-	// 所有 PRAGMA 必须在连接后显式执行
-	conn, err := sql.Open("sqlite", path)
+	// busy_timeout / foreign_keys 是「连接级」PRAGMA，只在执行它的那条连接上生效。
+	// 连接池放开后每次新建的连接都是全新的，必须用 DSN 下发，否则新连接会静默丢失
+	// 外键约束与写锁等待（后果：外键形同虚设、并发写直接报 SQLITE_BUSY）。
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库失败: %w", err)
 	}
 
-	conn.SetMaxOpenConns(1)
+	conn.SetMaxOpenConns(dbMaxOpenConns)
 
-	// 连接级 PRAGMA（SetMaxOpenConns(1) 保证始终同一连接）
-	// 显式检查错误，PRAGMA 失败时可能引发外键约束不生效等严重问题
+	// 显式连通性检查：sql.Open 是惰性的，DSN 错误（如路径特殊字符导致解析失败）
+	// 要在这里就暴露，而不是留到第一次业务查询才炸。
 	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		return nil, fmt.Errorf("设置 WAL 模式失败: %w", err)
-	}
-	if _, err := conn.Exec("PRAGMA busy_timeout=5000"); err != nil {
-		return nil, fmt.Errorf("设置 busy_timeout 失败: %w", err)
-	}
-	if _, err := conn.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		return nil, fmt.Errorf("启用外键约束失败: %w", err)
 	}
 
 	db := &Database{conn: conn, path: path}
@@ -208,7 +215,8 @@ func (d *Database) ExecuteParams(sqlStr string, params []interface{}) error {
 	return err
 }
 
-// hasColumn 通过参数化查询安全检测列是否存在（结果缓存，仅首次查 pragma）
+// hasColumn 通过参数化查询安全检测列是否存在（结果缓存，仅首次查 pragma）。
+// colCache 由 colMu 保护：调用方持 mu 的读锁或写锁都可能进入这里。
 func (d *Database) hasColumn(table, col string) bool {
 	// 白名单校验：表名和列名都必须是已知的
 	if err := validateTable(table); err != nil {
@@ -217,24 +225,34 @@ func (d *Database) hasColumn(table, col string) bool {
 	if err := validateColumn(col); err != nil {
 		return false
 	}
+
+	d.colMu.RLock()
+	cols, ok := d.colCache[table]
+	d.colMu.RUnlock()
+	if ok {
+		return cols[col]
+	}
+
+	d.colMu.Lock()
+	defer d.colMu.Unlock()
+	if cols, ok = d.colCache[table]; ok { // 双重检查：等锁期间可能已被别的 goroutine 填充
+		return cols[col]
+	}
+	cols = make(map[string]bool)
+	rows, err := d.conn.Query(`SELECT name FROM pragma_table_info(?)`, table)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var name string
+			if rows.Scan(&name) == nil {
+				cols[name] = true
+			}
+		}
+	}
 	if d.colCache == nil {
 		d.colCache = make(map[string]map[string]bool)
 	}
-	cols, ok := d.colCache[table]
-	if !ok {
-		cols = make(map[string]bool)
-		rows, err := d.conn.Query(`SELECT name FROM pragma_table_info(?)`, table)
-		if err == nil {
-			defer rows.Close()
-			for rows.Next() {
-				var name string
-				if rows.Scan(&name) == nil {
-					cols[name] = true
-				}
-			}
-		}
-		d.colCache[table] = cols
-	}
+	d.colCache[table] = cols
 	return cols[col]
 }
 
@@ -256,8 +274,8 @@ func (d *Database) ListTable(table string) ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query("SELECT * FROM " + table + d.orderByClause(table))
 	if err != nil {
@@ -281,10 +299,11 @@ func (d *Database) ListTableWhere(table, where string, params ...interface{}) ([
 		return nil, err
 	}
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
-	// orderByClause 会访问 colCache，注释明确要求只能在持锁时访问；不能放在加锁前
+	// orderByClause 内部按需查 pragma 并写 colCache，该缓存由 colMu 独立保护，
+	// 并发读安全；仍放在持锁后计算，避免表结构查询与结果查询之间出现语义空隙。
 	orderClause := ""
 	if !whereHasOrderBy(where) {
 		orderClause = d.orderByClause(table)
@@ -381,8 +400,8 @@ func (d *Database) BulkInsert(table string, rows []map[string]interface{}) error
 
 // QueryOne 返回查询结果的第一行
 func (d *Database) QueryOne(query string, params ...interface{}) (map[string]interface{}, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query(query, params...)
 	if err != nil {
@@ -402,8 +421,8 @@ func (d *Database) QueryOne(query string, params ...interface{}) (map[string]int
 
 // Query 返回查询结果的所有行
 func (d *Database) Query(query string, params ...interface{}) ([]map[string]interface{}, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query(query, params...)
 	if err != nil {
@@ -453,8 +472,8 @@ func (d *Database) CountWhere(table, where string, params ...interface{}) (int, 
 		return 0, err
 	}
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	var count int
 	err := d.conn.QueryRow(fmt.Sprintf("SELECT COUNT(*) FROM %s WHERE %s", table, where), params...).Scan(&count)

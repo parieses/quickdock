@@ -2,7 +2,6 @@
 package snapshot
 
 import (
-	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -17,11 +16,7 @@ func NewSnapshotService(app *services.AppService) *SnapshotService {
 }
 
 func (s *SnapshotService) dbOK() *services.ApiResult {
-	if s.App.DB == nil {
-		logger.E("QuickDock: database not initialized")
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(s.App.DB)
 }
 
 // CreateSnapshot 创建全量快照。

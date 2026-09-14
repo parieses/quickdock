@@ -150,14 +150,14 @@ func showMainWindow(win *application.WebviewWindow) {
 	}
 	platform.SetWindowToCursorScreen(win, appWidth, appHeight)
 	win.Show()
-	windowVisible.Store(true)
+	windowFlags.Main.Store(true)
 }
 
 // hideMainWindow 隐藏主窗口并同步状态标志。
 func hideMainWindow(win *application.WebviewWindow) {
 	win.Hide()
-	windowVisible.Store(false)
-	clipboardMode.Store(false)
+	windowFlags.Main.Store(false)
+	windowFlags.Clipboard.Store(false)
 }
 
 // toggleMainWindow 切换主窗口显隐，供热键/托盘回调统一调用。
@@ -166,7 +166,7 @@ func toggleMainWindow() {
 	if win == nil {
 		return
 	}
-	if windowVisible.Load() {
+	if windowFlags.Main.Load() {
 		hideMainWindow(win)
 	} else {
 		showMainWindow(win)
@@ -410,12 +410,12 @@ func showNoteWindow() {
 	if nw == nil {
 		return
 	}
-	if noteMode.Load() {
-		noteMode.Store(false)
+	if windowFlags.Note.Load() {
+		windowFlags.Note.Store(false)
 		nw.Hide()
 	} else {
 		platform.SetWindowToCursorScreen(nw, clipWinWidth, clipWinHeight)
-		noteMode.Store(true)
+		windowFlags.Note.Store(true)
 		nw.Show()
 		nw.Focus()
 	}
@@ -472,15 +472,15 @@ func toggleClipboardWindow() {
 	if cw == nil {
 		return
 	}
-	if clipboardMode.Load() {
-		clipboardMode.Store(false)
+	if windowFlags.Clipboard.Load() {
+		windowFlags.Clipboard.Store(false)
 		if a := getHotkeyApp(); a != nil {
 			a.Event.Emit("clipboard:before-hide")
 		}
 		cw.Hide()
 	} else {
 		platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
-		clipboardMode.Store(true)
+		windowFlags.Clipboard.Store(true)
 		cw.Show()
 		cw.Focus()
 		if a := getHotkeyApp(); a != nil {
@@ -547,7 +547,7 @@ func registerAllHotkeys(app *application.App) {
 			if cw == nil {
 				return
 			}
-			clipboardMode.Store(true)
+			windowFlags.Clipboard.Store(true)
 			platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
 			cw.Show()
 			cw.Focus()
@@ -572,14 +572,14 @@ func registerAllHotkeys(app *application.App) {
 		if pw == nil {
 			return
 		}
-		if paletteMode.Load() {
+		if windowFlags.Palette.Load() {
 			if svc := appSvc.Load(); svc != nil {
 				svc.HidePaletteWindow()
 			}
 			return
 		}
 		platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
-		paletteMode.Store(true)
+		windowFlags.Palette.Store(true)
 		pw.Show()
 		pw.Focus()
 		if a := getHotkeyApp(); a != nil {

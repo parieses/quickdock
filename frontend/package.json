@@ -9,7 +9,8 @@
     "build:dev": "vue-tsc && vite build --minify false --mode development",
     "build": "vue-tsc && vite build --mode production",
     "check:bridge": "node src/utils/pluginBridge.check.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run"
   },
   "dependencies": {
     "@floating-ui/vue": "^2.0.1",
@@ -27,6 +28,7 @@
     "@vitejs/plugin-vue": "^6.0.0",
     "typescript": "~5.9.3",
     "vite": "^8.0.5",
+    "vitest": "^5.0.0",
     "vue-tsc": "~2.2.12"
   }
 }

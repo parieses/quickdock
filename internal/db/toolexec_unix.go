@@ -9,6 +9,7 @@ func resolveExecutable(raw string) string { return raw }
 
 // tryTerminalTool 非 Windows 无 cmd/powershell/wt/wsl 终端类工具，
 // 恒返回 done=false，让调用方走通用参数展开路径。
-func tryTerminalTool(tool OpenTool, value, workingDir string) (bool, error) {
+// pathDirs 为条目绑定的运行时 bin 目录，仅 Windows 分支使用。
+func tryTerminalTool(tool OpenTool, value, workingDir string, pathDirs []string) (bool, error) {
 	return false, nil
 }

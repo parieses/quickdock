@@ -95,32 +95,3 @@ export function toCamelCase(obj: Record<string, any>): Record<string, any> {
   }
   return out
 }
-
-// 测试用例
-if (typeof window !== 'undefined') {
-  // 仅在前端环境运行测试
-  const tests = [
-    { input: 'createdAt', expected: 'created_at' },
-    { input: 'openStrategy', expected: 'open_strategy' },
-    { input: 'workspaceId', expected: 'workspace_id' },
-    { input: 'WorkspaceID', expected: 'workspace_id' },
-    { input: 'URL', expected: 'url' },
-    { input: 'HTTPServer', expected: 'http_server' },
-    { input: 'ID', expected: 'id' },
-    { input: 'name', expected: 'name' },
-    { input: 'firstName', expected: 'first_name' },
-  ]
-
-  let passed = 0
-  let failed = 0
-  for (const test of tests) {
-    const result = camelToSnake(test.input)
-    if (result === test.expected) {
-      passed++
-    } else {
-      console.error(`FAIL: camelToSnake('${test.input}') = '${result}', expected '${test.expected}'`)
-      failed++
-    }
-  }
-  console.log(`camelToSnake tests: ${passed} passed, ${failed} failed`)
-}

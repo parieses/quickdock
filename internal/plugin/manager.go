@@ -726,6 +726,10 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 			"input":   input,
 		}, 20*time.Second)
 	case "none":
+		// 无后端插件：命令由前端自行处理，宿主不执行任何 host 逻辑。
+		// 返回值仅表示「调用通道正常」，不等于「宿主已执行」——真实能力由 PluginInfo.Runtime 表达，
+		// 调用方（尤其是 MCP/AI）须据此判断，不可把此返回值当作插件真的做了事。
+		logger.PluginI(pluginID, "命令 %s 交由前端自处理（runtime=none，宿主未执行）", commandID)
 		return json.RawMessage(`{"status":"ok","frontendOnly":true}`), nil
 	case "goja":
 		if inst.GetStatus() != "running" {
@@ -768,6 +772,7 @@ func (m *Manager) ListPlugins() []PluginInfo {
 			Category:        inst.Manifest.Category,
 			Status:          inst.GetStatus(),
 			HasFrontend:     inst.Manifest.Frontend.Enabled,
+			Runtime:         inst.Manifest.Backend.Runtime,
 			Commands:        cmds,
 		})
 	}

@@ -41,11 +41,12 @@ func isTerminalTool(path string) bool {
 // tryTerminalTool 以“整条命令”方式启动终端类工具（cmd/powershell/wt/wsl）。
 // 返回 (true, err) 表示已处理（含启动结果）；返回 (false, nil) 表示非终端工具，
 // 调用方（item.go execOpen）应走通用参数展开路径。
+// pathDirs 为条目绑定的运行时 bin 目录，非空时前置到子进程 PATH（项目级版本切换）。
 //
 // 背景：终端工具会重新解析 /c 之后的整条命令行，路径里的空格、括号会被当成语法
 // 分组而静默失败。解决：用 SysProcAttr.CmdLine 直接传递命令行，并对含空格/特殊
 // 字符的值做 ""value"" 双重引号包裹（cmd 会剥掉最外层引号，保留内层引号当字面量）。
-func tryTerminalTool(tool OpenTool, value, workingDir string) (bool, error) {
+func tryTerminalTool(tool OpenTool, value, workingDir string, pathDirs []string) (bool, error) {
 	if !isTerminalTool(tool.Path) {
 		return false, nil
 	}
@@ -71,6 +72,7 @@ func tryTerminalTool(tool OpenTool, value, workingDir string) (bool, error) {
 	if workingDir != "" {
 		c.Dir = workingDir
 	}
+	applyPathDirs(c, pathDirs)
 	return true, startDetached(c)
 }
 

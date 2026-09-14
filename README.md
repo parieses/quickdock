@@ -2,9 +2,11 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、Webhook 通知、端口全景，随附 **47 个**开箱即用外部插件（HTTP 客户端、数据库连接、OCR、端口检查、批量重命名、本地文件搜索、图床上传等，经插件市场一键安装），多运行时环境管理（**28 个运行时**：Node.js / PHP / Python / Go / Bun 等语言，Nginx / Caddy / Apache / Traefik 等网络服务，Redis / Memcached / RabbitMQ / MinIO 等中间件，MySQL / MariaDB / PostgreSQL / MongoDB 等数据库，Ollama 本地大模型、MCP 服务与 WebDAV 文件共享，一键安装、版本切换、启停、配置编辑、日志查看与 Web 控制台），内嵌 **DeepSeek Harness** 的 Agent 编程入口，并内置可选的 **AI 助手**（SSE 流式 / 多配置档案），让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、Webhook 通知、端口全景、本地开发站点（自定义域名 + 自动 HTTPS），随附 **47 个**开箱即用外部插件（HTTP 客户端、数据库连接、OCR、端口检查、批量重命名、本地文件搜索、图床上传等，经插件市场一键安装），多运行时环境管理（**29 个运行时**：Node.js / PHP / Python / Go / Bun 等语言，Nginx / Caddy / Apache / Traefik 等网络服务，Redis / Memcached / RabbitMQ / MinIO 等中间件，MySQL / MariaDB / PostgreSQL / MongoDB 等数据库，Ollama 本地大模型、MCP 服务与 WebDAV 文件共享，一键安装、版本切换、启停、配置编辑、日志查看与 Web 控制台），内嵌 **DeepSeek Harness** 的 Agent 编程入口，并内置可选的 **AI 助手**（SSE 流式 / 多配置档案），让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
+
+🌐 **官网**：<https://parieses.github.io/quickdock/> —— 源码在 `website/`（纯静态无构建），含中英双语与明暗主题；push 到 `main` 且改动落在 `website/**` 时由 GitHub Actions 自动发布到 Pages。
 
 ---
 
@@ -169,11 +171,11 @@
 QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等外部 MCP 客户端调用，把本地能力开放给智能体：
 
 - **地址**：`http://127.0.0.1:9230/mcp`（Streamable HTTP，仅 POST；GET 返 405，DELETE 关会话返 204；协议 2025-06-18）
-- **工具集（29 个，分三级权限门）**：
+- **工具集（30 个，分三级权限门；默认只开放只读 + 低危写共 28 个）**：
   - 只读（17）：`app_info` / `env_list` / `env_status` / `env_log` / `env_versions` / `workspace_list` / `item_search` / `recent_items` / `todo_list` / `note_search` / `clipboard_recent` / `port_list` / `log_list` / `log_read` / `crash_list` / `crash_read` / `plugin_list`
-  - 低危写（10）：`env_start` / `env_stop` / `env_restart` / `item_open` / `todo_create` / `todo_done` / `clipboard_copy` / `note_create` / `note_update` / `note_quick`
+  - 低危写（11）：`env_start` / `env_stop` / `env_restart` / `item_open` / `todo_create` / `todo_done` / `clipboard_copy` / `note_create` / `note_update` / `note_quick` / `plugin_execute`
   - 高危（2，需在环境管理页开启高危等级）：`process_kill` / `system_command`
-  - 插件经宿主 `host.mcp.call` 可复用全部 29 个工具（沿用 MCP 等级门，无需额外声明权限）
+  - 插件经宿主 `host.mcp.call` 可复用全部 30 个工具（沿用 MCP 等级门，无需额外声明权限）
 - **生命周期**：随主进程，QuickDock 退出即失效，不作常驻依赖
 - **实现**：门面装配在 `services/mcp`，工具经 Wails 各领域门面转发到宿主
 
@@ -207,7 +209,7 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 
 ### 支持的运行时
 
-当前内置 **27 个**运行时，按职责在侧边栏归类（语言 / 网络服务 / 数据库 / 中间件 / AI 服务 / 开发工具，另有「内置工具」组承载 HTTP 服务与端口两个页面入口；DeepSeek Harness Agent 入口归入 AI 服务组）。「类型」列标注是否支持服务化（一键启停 / 重启 / 日志 / 控制台）。
+当前内置 **29 个**运行时，按职责在侧边栏归类（语言 / 网络服务 / 数据库 / 中间件 / AI 服务 / 开发工具，另有「内置工具」组承载 HTTP 服务、端口全景与本地开发站点三个页面入口；DeepSeek Harness Agent 入口归入 AI 服务组）。「类型」列标注是否支持服务化（一键启停 / 重启 / 日志 / 控制台）。其中 **MCP 服务**与 **WebDAV** 属「内置服务型」——无版本、无下载源，服务由宿主进程内直接承载。
 
 | 运行时 | 分组 | 类型 | 下载源 | 版本来源 | 平台 |
 |--------|------|------|--------|----------|------|
@@ -222,6 +224,7 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 | **Apache** | 网络服务 | 服务型 | Apache Lounge | 全量（目录页动态解析） | Windows |
 | **Traefik** | 网络服务 | 服务型 | traefik/traefik | 全量 | Windows |
 | **FTP** | 网络服务 | 服务型 | FTPDMIN（Sentex） | 单版本 0.96 | Windows |
+| **WebDAV** | 网络服务 | 服务型（宿主进程内，默认 9080） | 无（内置） | 单版本 `builtin` | Windows |
 | **Redis** | 中间件 | 服务型 | redis-windows | 全量 | Windows |
 | **Memcached** | 中间件 | 服务型 | adamyg/memcached-win32 | 全量 | Windows |
 | **MinIO** | 中间件 | 服务型 | dl.min.io | 滚动发布（latest） | Windows |
@@ -233,7 +236,8 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 | **frpc** | 开发工具 | 命令行（可编辑配置） | fatedier/frp | 全量 | Windows |
 | **GitHub CLI** | 开发工具 | 命令行 | cli/cli | 全量 | Windows |
 | **mkcert** | 开发工具 | 命令行 | FiloSottile/mkcert | 全量 | Windows |
-| **Ollama** | AI 服务 | 服务型（含模型管理） | gh-proxy 加速 / 官方 | 全量 | Windows |
+| **Ollama** | AI 服务 | 服务型（含模型管理） | gh-proxy 加速 / 官方 | 全量（单版本原地更新） | Windows |
+| **MCP 服务** | AI 服务 | 服务型（宿主进程内，默认 9230） | 无（内置） | 单版本 `builtin` | Windows |
 | **MariaDB** | 数据库 | 服务型 | archive.mariadb.org | 固定 3 个 | Windows |
 | **MySQL** | 数据库 | 服务型 | cdn.mysql.com | 固定 3 个 | Windows |
 | **PostgreSQL** | 数据库 | 服务型 | EnterpriseDB 二进制包 | 固定 3 个 | Windows |
@@ -268,12 +272,13 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 
 ### 服务管理能力
 
-- **启停与状态**：服务型运行时（Redis / Nginx / Apache / Caddy / Traefik / FTP / MySQL / MariaDB / PostgreSQL / MongoDB / Memcached / MinIO / Mailpit / RabbitMQ / PHP-fpm / Ollama）一键启动、停止，实时显示 PID、端口与健康状态
+- **启停与状态**：服务型运行时（Redis / Nginx / Apache / Caddy / Traefik / FTP / MySQL / MariaDB / PostgreSQL / MongoDB / Memcached / MinIO / Mailpit / RabbitMQ / PHP-fpm / Ollama / WebDAV / MCP）一键启动、停止，实时显示 PID、端口与健康状态
 - **重启**：运行中版本提供「重启」按钮，先停后启，并复用启动时的端口冲突检测与配置校验，避免重启后出现端口占用
-- **配置编辑**：支持配置文件的运行时提供「编辑配置」入口（如 `Caddyfile` / `redis.conf` / `nginx.conf` / `traefik.yml` / `php.ini` / `frpc.toml`）；Nginx、Traefik 等支持启动前配置校验（`nginx -t` / `traefik validate`），校验失败阻止启动
+- **配置编辑**：支持配置文件的运行时提供「编辑配置」入口（如 `Caddyfile` / `redis.conf` / `nginx.conf` / `traefik.yml` / `php.ini` / `frpc.toml`）；Nginx、Apache、Caddy 支持启动前配置校验（`nginx -t` / `apache -t` / `caddy validate`），校验失败阻止启动（Traefik 无独立 dry-run 子命令，不做启动前校验）
 - **日志查看**：服务型运行时提供「查看日志」弹窗，实时滚动读取进程日志尾部 8KB（覆盖 PostgreSQL / MySQL·MariaDB / MongoDB / Memcached / MinIO / Mailpit / Apache / Nginx / Redis / RabbitMQ / Caddy / Traefik / Ollama）
 - **Web 控制台一键打开**：运行时监听内置 Web UI 时，运行中显示「打开控制台」按钮，直接打开 `http://127.0.0.1:<port>`，覆盖 MinIO(9001) / Mailpit(8025) / Traefik(8080) / RabbitMQ(15672，仅管理插件启用时) / Nginx·Caddy(80)
 - **端口全景**：顶栏「端口全景」弹窗汇总所有运行服务的运行时 / 版本 / 端口 / 控制台入口，快速掌握本机开发服务占用情况
+- **本地开发站点**（内置工具组）：给本地项目一键绑定自定义域名 + 自动 HTTPS——内置单监听器签发一张覆盖全部启用域名的证书（mkcert），hosts 只改写 `# quickdock-sites begin/end` 标记区块；证书与端口就绪后向「站点配置文件同级 `quickdock-sites/`」写入片段并返回 `includeLine` 供自行引用，**绝不自动改写 nginx.conf / Caddyfile**
 
 ### UI 交互
 
@@ -302,6 +307,8 @@ internal/env/          # 引擎层（纯库，跨平台 _windows / _darwin / _un
 ├── nginx.go  caddy.go  apache.go  traefik.go  ftp.go            # 网络服务运行时
 ├── redis.go  memcached.go  minio.go  rabbitmq.go                # 中间件（缓存 / 对象存储 / 消息队列）
 ├── ollama.go  ollama_api.go                                      # Ollama（单版本）：版本管理 + 模型库 REST API（tags/ps/pull/delete）
+├── mcp.go  webdav.go                                             # 内置服务型（无版本/无下载源，服务由宿主进程内承载）
+├── versionfile.go                                                # 项目级版本切换（探测 .nvmrc / .php-version / go.mod 等并匹配已装版本）
 ├── sql*.go  postgresql*.go  mongodb.go                           # 数据库（MySQL/MariaDB 共用 SQLRuntime）
 └── git.go  composer.go  ffmpeg.go  mailpit.go  frpc.go  gh.go  mkcert.go  # 开发工具
 ```
@@ -471,6 +478,7 @@ quickdock/
 ├── main.go              # 入口：主窗口创建 + Wails 服务装配 + 更新检查
 ├── windows.go           # 浮动窗口（剪贴板 / 笔记 / 命令面板）+ 单实例锁
 ├── tray.go              # 托盘菜单与全局热键注册
+├── elevated_cli.go      # 提权自举子进程入口（把站点域名写入系统 hosts 标记区块后立即退出）
 ├── services/            # Wails 服务层（宿主 AppService + 领域门面子包，约 250 个绑定方法）
 │   ├── service.go       # AppService 宿主：配置/DB/窗口/热键等全导出字段（门面经 a.App.X 回指，62 方法）
 │   ├── api_result.go    # 统一 API 返回（Ok/Fail/OkMsg…）
@@ -488,15 +496,17 @@ quickdock/
 │       mcp/  monitor/  note/  plugin/  port/  scene/  scheduler/  snapshot/
 │       system/  todo/  update/  workspace/   # 20 个领域门面子包（薄壳：NewXxxService(app) + 方法转发）
 │          ├── scheduler/   # 定时调度引擎子包（Service 独立承载，非 Wails 门面）
-│          └── mcp/         # 内置 MCP 服务装配（29 个工具，见「🛠️ MCP 服务」）
+│          └── mcp/         # 内置 MCP 服务装配（30 个工具，见「🛠️ MCP 服务」）
 ├── internal/            # 引擎层（被门面/宿主调用，不含 Wails 绑定）
-│   ├── db/              # SQLite 数据层（安全白名单 + schema 自动迁移；workspace/collection/item/clipboard/snippet/note_tree/todo/schedule/monitor/tool/plugin/usage/settings/snapshot…）
-│   ├── env/             # 多运行时引擎（26 运行时注册表 + 下载 + 解压 + 服务生命周期，跨平台分文件）
+│   ├── db/              # SQLite 数据层（安全白名单 + schema 自动迁移；workspace/collection/item/clipboard/notes/todo/scheduled_tasks/monitor/tool/plugin/plugin_exec_logs/usage_frecency/activity/snapshot…）
+│   ├── env/             # 多运行时引擎（29 运行时注册表 + 下载 + 解压 + 服务生命周期 + 项目级版本探测，跨平台分文件）
+│   ├── sites/           # 本地开发站点（域名 + 自动 HTTPS 单监听器 + hosts 标记区块 + 配置片段生成，不接管 nginx/Caddy 配置）
 │   ├── dsh/             # DeepSeek Harness 引擎（node_env 便携 Node + dsh_runtime 进程管理）
 │   ├── plugin/          # 插件管理器引擎（manifest / manager / rpc / host / installer / window_manager…）
 │   ├── platform/        # 平台 API 封装（DPAPI / 剪贴板监听 / 热键 / 应用扫描 / 图标 / 系统命令 / 显示器）
 │   ├── sync/            # 统一同步后端（当前实现：WebDAV）
 │   ├── webdav/          # WebDAV HTTP 客户端
+│   ├── webdavsrv/       # 内置 WebDAV 服务端（宿主进程内，默认 9080）
 │   ├── mcp/             # MCP 服务器（Streamable HTTP，默认端口 9230）
 │   ├── dl/              # 下载工具（代理感知 + 多源回退）
 │   ├── logger/          # 统一日志（宿主 logger.I/W/E + 插件 logger.PluginI/W/E，slog 桥接）
@@ -505,7 +515,7 @@ quickdock/
 ├── frontend/
 │   ├── src/
 │   │   ├── App.vue  main.ts  style.css  # 应用根组件 / 入口 / 全局样式
-│   │   ├── components/  # 36 个 Vue 页面与组件
+│   │   ├── components/  # 39 个 Vue 页面与组件
 │   │   │   ├── AIPage.vue  SettingsAI.vue         # AI 对话与设置
 │   │   │   ├── ClipboardPanel.vue                 # 剪贴板历史浮动面板
 │   │   │   ├── CommandPalette.vue                 # 命令面板
@@ -533,13 +543,15 @@ quickdock/
 │   └── external/        # 外部插件源码（47 个，独立 git 子仓库，已 gitignore，不随主仓分发；含 build.py 生成市场索引）
 ├── build/               # 构建配置（CI / 图标 / 平台产物）
 ├── docs/                # 设计文档（mac 支持 / 自动更新 / 服务拆分 / 首启引导 / 审计报告 …）
+├── website/             # 官网（纯静态单页，中英双语 + 明暗主题，无需构建；Pages workflow 发布）
+├── scripts/             # 一次性维护脚本（ResetGit / ReTag）
 ├── image/               # README 截图资源
 ├── DESIGN.md            # 设计系统规范
+├── LICENSE              # MIT
 ├── Taskfile.yml         # 构建任务定义
 ├── go.mod  go.sum       # Go 依赖（module quickdock）
 ├── main_unix.go  main_windows.go     # 跨平台入口（平台差异装配）
-├── windows_unix.go  windows_windows.go  # 浮动窗口平台差异
-└── tray.go            # 托盘（单文件，平台中性）
+└── windows_unix.go  windows_windows.go  # 浮动窗口平台差异
 ```
 
 ---
@@ -648,7 +660,7 @@ cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
 
 ## 架构亮点
 
-- **服务门面分层（宿主 + 20 门面子包）**：领域能力按包边界下沉为 20 个门面子包（`ai`/`clipboard`/`collection`/`diag`/`dsh`/`env`/`frecency`/`item`/`monitor`/`note`/`plugin`/`port`/`scene`/`snapshot`/`system`/`todo`/`update`/`workspace` + 引擎子包 `scheduler` + MCP 装配 `mcp`），宿主核心留在 AppService（约 62 方法），子包薄壳经宿主**全导出字段** `a.App.X` 回指（约 190 方法），依赖方向单向无环；引擎层集中在 `internal/`（`db`/`env`/`dsh`/`plugin`/`platform`/`sync`/`webdav`/`mcp`/`dl`/`logger`/`sysutil`/`validators`）
+- **服务门面分层（宿主 + 20 门面子包）**：领域能力按包边界下沉为 20 个门面子包（`ai`/`clipboard`/`collection`/`diag`/`dsh`/`env`/`frecency`/`item`/`monitor`/`note`/`plugin`/`port`/`scene`/`snapshot`/`system`/`todo`/`update`/`workspace` + 引擎子包 `scheduler` + MCP 装配 `mcp`），宿主核心留在 AppService（约 62 方法），子包薄壳经宿主**全导出字段** `a.App.X` 回指（约 190 方法），依赖方向单向无环；引擎层集中在 `internal/`（`db`/`env`/`sites`/`dsh`/`plugin`/`platform`/`sync`/`webdav`/`webdavsrv`/`mcp`/`dl`/`logger`/`sysutil`/`validators`）
 - **四窗口架构**：主窗口 (1100×700) + 剪贴板 / 笔记浮动窗口 (480×420) + 命令面板浮动窗口 (680×460)，另有 DSH 原生长驻窗口
 - **所有次级窗口延迟创建**：在首次热键触发时才创建 WebView2，确保运行时完全初始化，避免白屏
 - **WebView2 内存优化**：`--in-process-gpu` + `--renderer-process-limit=4` 等参数限制渲染进程数，任务管理器更清爽
@@ -663,7 +675,7 @@ cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
 - **API Key 安全加密**：Windows 下 DPAPI 加密存储（`CryptProtectData`），macOS 下 base64 编码，前端全程不接触密文
 - **单实例锁**：框架 `Options.SingleInstance`（UniqueID `QuickDock-Instance`，开发/正式共用）——二次启动自动通知首实例把主窗口带到前台后退出，避免多进程并发写同一 SQLite 库
 - **后台服务**：SQLite WAL 模式 + 待办提醒调度器 (10s) + 定时任务调度器 + 监控检查器（含 SSL 检测）+ 流式 HTTP 服务（AI）+ 插件健康检查 + DSH 隐藏进程管理 + 内置 MCP 服务（9230）
-- **规模（2026-09）**：Go 约 233 文件 / 4.2w 行（主仓非 external），前端 src 63 个 ts/vue，36 个 Vue 页面组件，47 个外部插件，27 个环境运行时
+- **规模（2026-09）**：Go 约 251 文件 / 4.7w 行（主仓非 external，另含 40 个测试文件），前端 src 75 个 ts/vue（39 个 Vue 组件），47 个外部插件，29 个环境运行时，30 个 MCP 工具
 
 ---
 

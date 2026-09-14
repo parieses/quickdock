@@ -202,6 +202,11 @@ func parsePHPVersion(out string) string {
 
 func (p *PHPRuntime) DefaultPort() int { return phpFpmPort }
 
+// FPMAddr 返回 PHP-FPM 的监听地址。
+// 站点配置生成（nginx fastcgi_pass / caddy php_fastcgi）需要与这里同一个端口真相，
+// 故导出而非各自写死 9000。
+func FPMAddr() string { return fmt.Sprintf("127.0.0.1:%d", phpFpmPort) }
+
 // ConfiguredPorts PHP-FPM（Windows 下为 php-cgi FastCGI）端口固定 9000，无配置文件可解析。
 func (p *PHPRuntime) ConfiguredPorts(version string) []int {
 	return []int{phpFpmPort}

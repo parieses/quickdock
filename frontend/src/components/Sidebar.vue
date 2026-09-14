@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import TypeIcon from './TypeIcon.vue'
 import CreateDialog from './CreateDialog.vue'
+import SceneEnvDialog from './SceneEnvDialog.vue'
 import { getErrorMessage } from '../utils/error'
 import { pluginUpdateBadge } from '../composables/usePluginUpdateBadge'
 import type { Scene, ToastAPI } from '../types'
@@ -88,7 +89,7 @@ async function handleEditWorkspace(values: Record<string, string>) {
   }
 }
 
-async function handleDeleteWorkspace(wsId: string, wsName: string) {
+async function handleDeleteWorkspace(wsId: string) {
   showWorkspaceMenu.value = false
   if (!(await toast.confirm(t('confirmDeleteWorkspace')))) return
   try {
@@ -162,6 +163,8 @@ const sceneFields = computed(() => {
 
 const editingScene = ref<Scene | null>(null)
 const showEditDialog = ref(false)
+// 场景环境服务绑定弹窗（随场景启停哪些运行时）
+const envDialogScene = ref<Scene | null>(null)
 
 function handleSceneClick(sceneId: string) {
   store.selectScene(sceneId)
@@ -214,7 +217,7 @@ async function handleDeleteScene(sceneId: string) {
             <button class="ws-item-action" :title="t('edit')" @click="startEditWorkspace(ws)">
               <Pencil :size="11" />
             </button>
-            <button class="ws-item-action danger" :title="t('delete')" :disabled="store.workspaces.indexOf(ws) === 0" :class="{ 'ws-action-disabled': store.workspaces.indexOf(ws) === 0 }" @click="handleDeleteWorkspace(ws.id, ws.name)">
+            <button class="ws-item-action danger" :title="t('delete')" :disabled="store.workspaces.indexOf(ws) === 0" :class="{ 'ws-action-disabled': store.workspaces.indexOf(ws) === 0 }" @click="handleDeleteWorkspace(ws.id)">
               <Trash2 :size="11" />
             </button>
           </div>
@@ -329,6 +332,9 @@ async function handleDeleteScene(sceneId: string) {
           </span>
           <span class="scene-name">{{ scene.name }}</span>
           <span class="scene-actions" @click.stop>
+            <button class="action-btn" @click="envDialogScene = scene" :title="t('envServices')">
+              <Server :size="13" />
+            </button>
             <button class="action-btn" @click="editingScene = scene; showEditDialog = true" :title="t('edit')">
               <Pencil :size="13" />
             </button>
@@ -354,6 +360,12 @@ async function handleDeleteScene(sceneId: string) {
     <CreateDialog :visible="showEditDialog" :title="t('editScene')" :fields="sceneFields"
       :editValues="editingScene ? { name: editingScene.name, type: editingScene.type ?? '通用' } : undefined"
       @confirm="handleEditScene" @cancel="showEditDialog = false; editingScene = null" />
+    <SceneEnvDialog
+      :visible="!!envDialogScene"
+      :scene-id="envDialogScene?.id ?? ''"
+      :scene-name="envDialogScene?.name ?? ''"
+      @close="envDialogScene = null"
+    />
     <CreateDialog :visible="showCreateWorkspaceDialog" :title="t('addWorkspace')"
       :fields="[{ key: 'name', label: t('workspace'), type: 'text', placeholder: t('workspaceNamePlaceholder') }]"
       @confirm="handleCreateWorkspace" @cancel="showCreateWorkspaceDialog = false" />

@@ -47,7 +47,9 @@ function parseAtom(expr: string, pos: number): { value: number; pos: number } {
     }
     // 负号后跟括号: -(expr)
     if (next < expr.length && expr[next] === '(') {
-      const inner = parseExpr(expr, next)
+      // 必须跳过左括号再交给 parseExpr：传 next（指向 "(" 本身）会让内层再把
+      // "(" 当一次分组解析，外层随后找不到配对的 ")" 而误报 Expected ")"。
+      const inner = parseExpr(expr, next + 1)
       const end = skipWS(expr, inner.pos)
       if (end >= expr.length || expr[end] !== ')') throw new ParseError(`Expected ")" at position ${end}`)
       return { value: -inner.value, pos: end + 1 }

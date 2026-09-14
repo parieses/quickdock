@@ -178,6 +178,10 @@ type PluginInfo struct {
 	Category        string            `json:"category"`
 	Status          string            `json:"status"` // running | stopped | crashed
 	HasFrontend     bool              `json:"hasFrontend"`
+	// Runtime 后端运行类型：none | goja | native。
+	// none 表示插件无后端：命令由前端自行处理，宿主 ExecuteCommand 不执行任何 host 逻辑，
+	// 故不可被 MCP/AI 真实调用。暴露此字段供 UI 与 MCP 识别，避免把前端自处理误认为宿主已执行。
+	Runtime         string            `json:"runtime"`
 	UsageCount      int               `json:"usageCount"`
 	Commands        []Command         `json:"commands"`
 }

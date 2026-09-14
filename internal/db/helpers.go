@@ -138,6 +138,7 @@ func mapToScene(m map[string]interface{}) Scene {
 		Unbound:     integer(m["unbound"]),
 		UsageCount:  integer(m["usage_count"]),
 		Sort:        integer(m["sort"]),
+		Env:         str(m["env"]),
 		CreatedAt:   str(m["created_at"]),
 		UpdatedAt:   str(m["updated_at"]),
 	}
@@ -188,6 +189,7 @@ func mapToItem(m map[string]interface{}) CollectionItem {
 		Sort:             integer(m["sort"]),
 		CreatedAt:        str(m["created_at"]),
 		UpdatedAt:        str(m["updated_at"]),
+		Env:              str(m["env"]),
 	}
 	enrichItemIcon(&item)
 	return item

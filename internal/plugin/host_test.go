@@ -109,6 +109,60 @@ func TestInvokeHostMethod(t *testing.T) {
 	})
 }
 
+// TestInvokeHostMethodIdentityIsolation 锁定「身份与权限严格绑定，不可脱钩」。
+//
+// 宿主侧唯一能证明插件身份的就是 invokeHostMethod 的 pluginID 参数，权限全部按该身份
+// 查 manifest 判定。因此桥（CallPluginHostMethod）必须取自宿主侧状态，绝不可采信插件
+// 可伪造的 postMessage payload——否则插件传入他人 ID 即可借他人权限调用 db.* 越权读写。
+// 本用例确保：身份一变，权限面立刻随之变化，任何「身份与权限脱钩」的实现都会在此失败。
+func TestInvokeHostMethodIdentityIsolation(t *testing.T) {
+	const granted = "test.iso.granted" // 声明了 clipboard
+	const denied = "test.iso.denied"   // 未声明任何权限
+
+	m := newTestManager()
+	addTestPlugin(m, granted, Permissions{Clipboard: true})
+	addTestPlugin(m, denied, Permissions{})
+
+	// handler 回显身份，用于确认「权限判定的身份」与「执行时用的身份」是同一个
+	m.RegisterHostMethod("host.clipboard.read", func(pluginID string, _ json.RawMessage) (interface{}, error) {
+		return map[string]interface{}{"plugin": pluginID}, nil
+	})
+
+	t.Run("有权限身份放行且 handler 收到该身份", func(t *testing.T) {
+		got, err := m.invokeHostMethod(granted, "host.clipboard.read", nil)
+		if err != nil {
+			t.Fatalf("已授权却报错: %v", err)
+		}
+		if got.(map[string]interface{})["plugin"] != granted {
+			t.Errorf("handler 收到的身份不符: %v", got)
+		}
+	})
+
+	t.Run("无权限身份被拒", func(t *testing.T) {
+		_, err := m.invokeHostMethod(denied, "host.clipboard.read", nil)
+		if !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("期望 ErrPermissionDenied，得到: %v", err)
+		}
+	})
+
+	t.Run("身份不可借用：无权限插件传有权限插件的 ID 即可越权（故桥必须取自宿主状态）", func(t *testing.T) {
+		// 刻意以 granted 身份调用：权限判定完全跟随传入身份，本身不做来源校验。
+		// 这条用例把该事实固定下来——正因如此，桥传错/伪造身份的后果是直接的越权，
+		// 安全边界在调用方，任何改动都应先确认桥仍以宿主状态为准。
+		_, err := m.invokeHostMethod(granted, "host.clipboard.read", nil)
+		if err != nil {
+			t.Fatalf("身份即权限，granted 应放行: %v", err)
+		}
+	})
+
+	t.Run("空身份按未知插件处理，不放行", func(t *testing.T) {
+		_, err := m.invokeHostMethod("", "host.clipboard.read", nil)
+		if !errors.Is(err, ErrPluginNotFound) {
+			t.Fatalf("空身份期望 ErrPluginNotFound，得到: %v", err)
+		}
+	})
+}
+
 // TestInvokeHostMethodBridgeEntry 验证 iframe 代发桥走的导出入口。
 // PluginService.CallPluginHostMethod 经此转发，必须与 native 回调、goja api.host
 // 同源：权限校验生效、错误分类一致、pluginID 按调用方传入的身份透传。

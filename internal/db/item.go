@@ -36,7 +36,7 @@ func expandItemVars(s string) string {
 	return s
 }
 
-const itemCols = "id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, usage_count, sort, created_at, updated_at"
+const itemCols = "id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, usage_count, sort, created_at, updated_at, env"
 
 // ---- 项目 ----
 
@@ -141,7 +141,7 @@ func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 	var items []CollectionItem
 	for rows.Next() {
 		var item CollectionItem
-		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.CollectionID, &item.Name, &item.Type, &item.Value, &item.WorkingDirectory, &item.ToolID, &item.Tool, &item.Args, &item.Icon, &item.Color, &item.Remark, &item.PluginData, &item.UsageCount, &item.Sort, &item.CreatedAt, &item.UpdatedAt); err != nil {
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.CollectionID, &item.Name, &item.Type, &item.Value, &item.WorkingDirectory, &item.ToolID, &item.Tool, &item.Args, &item.Icon, &item.Color, &item.Remark, &item.PluginData, &item.UsageCount, &item.Sort, &item.CreatedAt, &item.UpdatedAt, &item.Env); err != nil {
 			return nil, err
 		}
 		enrichItemIcon(&item)
@@ -453,6 +453,9 @@ func (d *Database) OpenAllInCollection(collectionID string) error {
 func execOpen(item *CollectionItem, tool OpenTool) error {
 	value := expandItemVars(item.Value)
 	itemType := item.Type
+	// 项目级版本切换：条目绑定过运行时版本时，把对应 bin 目录前置到子进程 PATH。
+	// 由宿主注入的解析器算出实际目录（db 不认识 env 包）；未注入/未绑定则为空。
+	pathDirs := itemPathDirs(item)
 
 	if tool.Path == "" || tool.Name == "系统默认" {
 		return openWithSystemDefault(value, itemType, item.WorkingDirectory)
@@ -469,7 +472,7 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 		// 终端类工具（cmd/powershell/wt/wsl）需把整条命令经 Windows SysProcAttr.CmdLine
 		// 原样传给解释器（路径含空格/括号要二次引号），否则会被重新解析而静默失败。
 		// 平台差异隔离在 tryTerminalTool（_windows / _unix 文件）；非 Windows 恒返回 done=false。
-		if done, err := tryTerminalTool(tool, value, item.WorkingDirectory); done {
+		if done, err := tryTerminalTool(tool, value, item.WorkingDirectory, pathDirs); done {
 			return err
 		}
 		args = expandToolArgs(args, value)
@@ -486,6 +489,7 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 	if item.WorkingDirectory != "" {
 		cmd.Dir = item.WorkingDirectory
 	}
+	applyPathDirs(cmd, pathDirs)
 	return startDetached(cmd)
 }
 

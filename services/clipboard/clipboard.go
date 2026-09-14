@@ -244,12 +244,8 @@ func (a *ClipboardService) PasteClipboardEntry(id string) *services.ApiResult {
 
 // HideWindow 隐藏主窗口
 func (a *ClipboardService) HideWindow() {
-	if a.App.ClipboardMode != nil {
-		a.App.ClipboardMode.Store(false)
-	}
-	if a.App.WindowVisible != nil {
-		a.App.WindowVisible.Store(false)
-	}
+	a.App.Flags.Clipboard.Store(false)
+	a.App.Flags.Main.Store(false)
 	if win := a.App.MainWindow; win != nil {
 		win.Hide()
 	}
@@ -257,9 +253,7 @@ func (a *ClipboardService) HideWindow() {
 
 // HideClipboardWindow 隐藏剪贴板独立窗口
 func (a *ClipboardService) HideClipboardWindow() {
-	if a.App.ClipboardMode != nil {
-		a.App.ClipboardMode.Store(false)
-	}
+	a.App.Flags.Clipboard.Store(false)
 	if fn := a.App.GetClipboardWindow; fn != nil {
 		if win := fn(); win != nil {
 			win.Hide()
@@ -269,9 +263,7 @@ func (a *ClipboardService) HideClipboardWindow() {
 
 // HideNoteWindow 隐藏快捷笔记独立窗口（并复位置 noteMode 标志，保证热键开关正确）
 func (a *ClipboardService) HideNoteWindow() {
-	if a.App.NoteMode != nil {
-		a.App.NoteMode.Store(false)
-	}
+	a.App.Flags.Note.Store(false)
 	if fn := a.App.GetNoteWindow; fn != nil {
 		if win := fn(); win != nil {
 			win.Hide()

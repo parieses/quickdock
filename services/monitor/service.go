@@ -23,10 +23,7 @@ func NewMonitorService(app *services.AppService) *MonitorService {
 
 // dbOK 检查宿主 DB 是否就绪（原 AppService.dbOK 的包内副本）
 func (s *MonitorService) dbOK() *services.ApiResult {
-	if s.App.DB == nil {
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(s.App.DB)
 }
 
 // validateContentMatch 在保存前预编译校验正则，尽早暴露非法模式

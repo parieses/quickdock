@@ -48,9 +48,7 @@ func (a *AppService) GetLastCopiedText() *ApiResult {
 
 // HidePaletteWindow 隐藏命令面板窗口
 func (a *AppService) HidePaletteWindow() {
-	if a.PaletteMode != nil {
-		a.PaletteMode.Store(false)
-	}
+	a.Flags.Palette.Store(false)
 	if fn := a.GetPaletteWindow; fn != nil {
 		if win := fn(); win != nil {
 			win.Hide()

@@ -11,6 +11,7 @@ import {
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { pluginName, pluginDesc } from '../utils/localize'
+import { matchesTextOrPinyin } from '../utils/pinyin'
 import { setPluginUpdateBadge } from '../composables/usePluginUpdateBadge'
 import { logWarn } from '../utils/logger'
 import type { ToastAPI } from '../types'
@@ -76,12 +77,13 @@ const categories = computed(() => {
     .map(([cat, count]) => ({ cat, count }))
 })
 
-// 搜索 haystack：覆盖中英文名称、ID、描述、作者、分类，大小写不敏感
-function haystack(p: MarketPlugin): string {
-  const parts = [p.name, p.id, p.description, p.author, p.category]
+// 搜索字段覆盖中英文名称、ID、描述、作者、分类。逐字段喂给 matchesTextOrPinyin，
+// 而不是拼成整串再算拼音——整串连读的首字母会跨字段串联，产生大量假命中。
+function pinyinFields(p: MarketPlugin): string[] {
+  const parts: (string | undefined)[] = [p.name, p.id, p.description, p.author, p.category]
   if (p.name_i18n) parts.push(...Object.values(p.name_i18n))
   if (p.description_i18n) parts.push(...Object.values(p.description_i18n))
-  return parts.filter(Boolean).join(' ').toLowerCase()
+  return parts.filter((s): s is string => !!s)
 }
 
 const filteredPlugins = computed(() => {
@@ -91,7 +93,7 @@ const filteredPlugins = computed(() => {
   if (!kw && !cat && !onlyUpd) return plugins.value
   return plugins.value.filter((p) => {
     const okCat = !cat || (p.category || t('pluginMarketUncategorized')) === cat
-    const okKw = !kw || haystack(p).includes(kw)
+    const okKw = !kw || matchesTextOrPinyin(pinyinFields(p), kw, 'pm:' + p.id)
     const okUpd = !onlyUpd || (p.installed && p.has_update)
     return okCat && okKw && okUpd
   })

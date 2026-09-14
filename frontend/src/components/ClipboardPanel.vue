@@ -19,6 +19,7 @@ import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { logErr } from '../utils/logger'
+import { pinyinOf } from '../utils/pinyin'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -128,9 +129,12 @@ const filteredEntries = computed(() => {
   const q = searchQuery.value.toLowerCase().trim()
   if (q) {
     list = list.filter(e => {
-      if (e.contentType === 'image' && e.textContent) return e.textContent.toLowerCase().includes(q)
-      if (e.contentType === 'file') return e.textContent?.toLowerCase().includes(q)
-      return e.textContent?.toLowerCase().includes(q)
+      const text = e.textContent || ''
+      if (text.toLowerCase().includes(q)) return true
+      // 拼音命中：这是「纯过滤」列表（不像命令面板会按分数排序把弱命中压下去），
+      // 若用全拼 includes 判定，输入 "de" 会命中几乎所有含「的」的记录，噪音太大。
+      // 故只用首字母前缀规则：输入 hjgl 命中「环境管理」，误报率低。
+      return pinyinOf(text, 'cb:' + e.id).init.startsWith(q)
     })
   }
   return list

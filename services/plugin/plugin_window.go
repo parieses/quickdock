@@ -42,7 +42,7 @@ func (p *PluginService) ShowPluginWindow(pluginID string) {
 			title = inst.Manifest.Name
 		}
 	}
-	if p.App.PaletteMode != nil && p.App.PaletteMode.Load() {
+	if p.App.Flags.Palette.Load() {
 		p.App.PluginWindowMgr.ShowInPanel(pluginID, title)
 	} else {
 		p.App.PluginWindowMgr.ShowAsWindow(pluginID, title)

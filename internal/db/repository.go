@@ -25,6 +25,9 @@ type Scene struct {
 	Unbound     int    `json:"unbound"`
 	UsageCount  int    `json:"usageCount"`
 	Sort        int    `json:"sort"`
+	// Env 场景绑定的环境服务，JSON 数组：[{"runtime":"mysql","version":"8.4.3"}]。
+	// version 为空表示跟随激活版本（或首个已装版本）。空串/空数组=未绑定任何服务。
+	Env         string `json:"env"`
 	CreatedAt   string `json:"createdAt"`
 	UpdatedAt   string `json:"updatedAt"`
 }
@@ -73,6 +76,10 @@ type CollectionItem struct {
 	Sort             int    `json:"sort"`
 	CreatedAt        string `json:"createdAt"`
 	UpdatedAt        string `json:"updatedAt"`
+	// Env 条目绑定的运行时版本，JSON 数组 [{"runtime":"node","version":"18.20.0"}]，
+	// 与 scenes.env 同形。打开该条目时把这些版本的 bin 目录前置到子进程 PATH——
+	// 只影响本次打开，不改系统环境变量（那是全局激活 SetActive 的职责）。
+	Env string `json:"env"`
 }
 
 // OpenTool 打开工具

@@ -36,6 +36,7 @@ const webdavPass = ref('')
 const msg = ref('')
 const timer = ref<ReturnType<typeof setTimeout> | null>(null)
 const backups = ref<{ name: string; size: number; time: string }[]>([])
+const listError = ref('')
 const loading = ref(false)
 
 function showMsg(m: string, duration = 4000) {
@@ -101,10 +102,14 @@ async function createBackup() {
 }
 
 async function listBackups() {
+  listError.value = ''
   try {
     const list = unwrap<{ name: string; size: number; time: string }[]>(await SyncListBackups())
     backups.value = list ?? []
-  } catch { backups.value = [] }
+  } catch (e) {
+    backups.value = []
+    listError.value = getErrorMessage(e)
+  }
 }
 
 async function restoreBackup(name: string) {
@@ -168,8 +173,11 @@ watch(() => props.visible, (v) => {
 
     <p v-if="msg" class="result-hint">{{ msg }}</p>
 
-    <div v-if="syncType === 'webdav' && backups.length > 0" class="webdav-backup-list">
+    <div v-if="syncType === 'webdav'" class="webdav-backup-list">
       <h4>{{ t('webdavBackups') }}</h4>
+      <p v-if="listError" class="result-hint error">{{ listError }}</p>
+      <p v-else-if="!backups.length" class="result-hint">{{ t('webdavNoBackups') }}</p>
+      <template v-else>
       <div v-for="b in backups" :key="b.name" class="snapshot-item">
         <div class="snapshot-item-info">
           <span class="snapshot-item-label">{{ b.name }}</span>
@@ -187,6 +195,13 @@ watch(() => props.visible, (v) => {
           </button>
         </div>
       </div>
+      </template>
     </div>
   </div>
 </template>
+
+<style scoped>
+.result-hint.error {
+  color: var(--color-danger);
+}
+</style>

@@ -1,12 +1,79 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Dialogs } from '@wailsio/runtime'
 import { useWorkspaceStore } from '../stores/workspace'
 import { useFloatMenu } from '../composables/useFloatMenu'
-import type { Scene } from '../types'
+import { SceneExport, SceneImport } from '../../bindings/quickdock/services/scene/sceneservice'
+import { unwrap } from '../utils/api'
+import { getErrorMessage } from '../utils/error'
+import SceneEnvDialog from './SceneEnvDialog.vue'
+import type { Scene, ToastAPI } from '../types'
 
 const store = useWorkspaceStore()
 const { t } = useI18n()
+const toast = inject<ToastAPI>('toast')!
+
+// 场景环境服务绑定弹窗（随场景启停哪些运行时）
+const envDialogVisible = ref(false)
+const envDialogSceneId = ref('')
+const envDialogSceneName = ref('')
+
+function menuEnv() {
+  envDialogSceneId.value = menuSceneId.value
+  envDialogSceneName.value = store.scenes.find(s => s.id === menuSceneId.value)?.name ?? ''
+  envDialogVisible.value = true
+  ctxMenu.hide()
+}
+
+// ---- 场景声明式导入/导出 ----
+// 导出成 quickdock-scene.json（只含声明，不含 id 与本机统计），可放进项目仓库随代码走。
+async function menuExport() {
+  const id = menuSceneId.value
+  const sc = store.scenes.find(s => s.id === id)
+  ctxMenu.hide()
+  try {
+    const picked = await Dialogs.SaveFile({
+      Title: t('sceneExportTitle'),
+      Filename: (sc?.name || 'scene') + '.quickdock-scene.json',
+      Filters: [{ DisplayName: t('sceneFileFilter'), Pattern: '*.json' }],
+    })
+    if (!picked) return
+    const r = unwrap<{ collections: number; items: number }>(await SceneExport(id, picked))
+    if (r) toast.success(t('sceneExportDone', { collections: r.collections, items: r.items }))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// 导入总是新建场景（同名自动加「(导入)」后缀），不做合并——条目改名后按名字匹配
+// 必然对不上，静默合并比重名更危险。
+async function menuImport() {
+  ctxMenu.hide()
+  const wsId = store.activeWorkspaceId
+  if (!wsId) {
+    toast.error(t('sceneImportNoWorkspace'))
+    return
+  }
+  try {
+    const picked = await Dialogs.OpenFile({
+      Title: t('sceneImportTitle'),
+      Filters: [{ DisplayName: t('sceneFileFilter'), Pattern: '*.json' }],
+      AllowsMultipleSelection: false,
+    })
+    const paths = typeof picked === 'string' ? [picked] : (picked || [])
+    if (paths.length === 0) return
+    const r = unwrap<{ sceneName: string; collections: number; items: number; skippedEnv: string[] }>(
+      await SceneImport(wsId, paths[0]),
+    )
+    await store.fetchScenes(wsId)
+    if (!r) return
+    const skipped = r.skippedEnv?.length ? t('sceneImportSkipped', { n: r.skippedEnv.length }) : ''
+    toast.success(t('sceneImportDone', { name: r.sceneName, collections: r.collections, items: r.items }) + skipped)
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
 
 // 已打开的场景标签页列表
 const openedTabs = computed(() => {
@@ -102,10 +169,20 @@ function onClickAway() {
           <button class="menu-item" :disabled="!canCloseLeft" @click="menuCloseLeft">{{ t('closeLeft') }}</button>
           <button class="menu-item" :disabled="!canCloseRight" @click="menuCloseRight">{{ t('closeRight') }}</button>
           <button class="menu-item" :disabled="!canCloseOthers" @click="menuCloseOthers">{{ t('closeOthers') }}</button>
+          <button class="menu-item" @click="menuEnv">{{ t('envServices') }}…</button>
+          <button class="menu-item" @click="menuExport">{{ t('sceneExport') }}…</button>
+          <button class="menu-item" @click="menuImport">{{ t('sceneImport') }}…</button>
         </div>
       </div>
     </Teleport>
   </div>
+
+  <SceneEnvDialog
+    :visible="envDialogVisible"
+    :scene-id="envDialogSceneId"
+    :scene-name="envDialogSceneName"
+    @close="envDialogVisible = false"
+  />
 </template>
 
 <style scoped>

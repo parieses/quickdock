@@ -20,6 +20,7 @@ import ItemList from './components/ItemList.vue';
 import ClipboardPanel from './components/ClipboardPanel.vue';
 import NotePanel from './components/NotePanel.vue';
 import SceneTags from './components/SceneTags.vue';
+import SceneEnvBar from './components/SceneEnvBar.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 
@@ -249,6 +250,7 @@ const activeConfirm = computed(() =>
               <button class="ws-error-close" @click="store.error = ''" :title="t('close')">✕</button>
             </div>
             <SceneTags />
+            <SceneEnvBar />
             <div class="app-content-body">
               <CollectionList class="app-collections" />
               <ItemList class="app-items" />

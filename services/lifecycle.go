@@ -108,9 +108,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	AppRef.Store(a.app)
 
 	// 启动全局快捷键和系统托盘（由 main 包注入的回调）
-	if a.WindowVisible != nil {
-		a.WindowVisible.Store(true)
-	}
+	a.Flags.Main.Store(true)
 	if a.StartHotkeyListenerFn != nil {
 		a.StartHotkeyListenerFn(a.app, a)
 	}

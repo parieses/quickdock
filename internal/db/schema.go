@@ -31,6 +31,7 @@ var baseTables = []string{
 		unbound INTEGER DEFAULT 0,
 		usage_count INTEGER DEFAULT 0,
 		sort INTEGER DEFAULT 0,
+		env TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
@@ -76,7 +77,8 @@ var baseTables = []string{
 		usage_count INTEGER DEFAULT 0,
 		sort INTEGER DEFAULT 0,
 		created_at TEXT NOT NULL,
-		updated_at TEXT NOT NULL
+		updated_at TEXT NOT NULL,
+		env TEXT DEFAULT ''
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_items_collection ON items(collection_id)`,
 
@@ -419,6 +421,11 @@ func (d *Database) migrate() error {
 		{"notes", "tags", "TEXT DEFAULT ''"},
 		{"notes", "is_note", "INTEGER DEFAULT 0"},
 		{"notes", "format", "TEXT DEFAULT 'markdown'"},
+		// scenes: 场景绑定的环境服务（JSON 数组：[{"runtime":"mysql","version":"8.4.3"}]）
+		{"scenes", "env", "TEXT NOT NULL DEFAULT ''"},
+		// items: 条目绑定的运行时版本（JSON 数组，与 scenes.env 同形），
+		// 打开条目时把对应版本 bin 前置到子进程 PATH（项目级版本切换）
+		{"items", "env", "TEXT DEFAULT ''"},
 	}
 	for _, m := range columnMigrations {
 		if err := d.addColumnIfMissing(m.table, m.col, m.colType); err != nil {

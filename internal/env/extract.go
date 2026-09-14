@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"quickdock/internal/logger"
 )
 
 const (
@@ -244,4 +246,44 @@ func scanTarNames(archivePath string) ([]string, error) {
 		names = append(names, hdr.Name)
 	}
 	return names, nil
+}
+
+// mergeInto 将 src 下的条目移动/合并到 dst（解压后布局提升的公共工具）：
+//   - 目标不存在 → 直接移动；
+//   - 目标存在且同为目录 → 递归合并；
+//   - 目标存在且同为文件（含大小写差异的同名重复）→ 跳过源文件（保留目标已有那份）；
+//   - 其他冲突（文件 vs 目录）→ 返回错误。
+//
+// 调用方：apache（提升 Apache24/）、gh（提升 gh_*/ 子目录）等顶层多一层包裹的归档。
+func mergeInto(src, dst string) error {
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		from := filepath.Join(src, e.Name())
+		to := filepath.Join(dst, e.Name())
+		toFi, err := os.Lstat(to)
+		if err != nil {
+			if err := os.Rename(from, to); err != nil {
+				return fmt.Errorf("移动 %s 失败: %w", from, err)
+			}
+			continue
+		}
+		if e.IsDir() {
+			if !toFi.IsDir() {
+				return fmt.Errorf("合并冲突：%s 既是目录又是文件", to)
+			}
+			if err := mergeInto(from, to); err != nil {
+				return err
+			}
+			continue
+		}
+		// 文件同名（大小写不敏感 fs 上 ReadMe.txt 与 README.txt 视为同一）重复，跳过源文件
+		logger.W("[env][extract] 跳过重复文件 %s（目标已存在同名文件）", to)
+		if err := os.Remove(from); err != nil {
+			logger.W("[env][extract] 删除重复源文件 %s 失败: %v", from, err)
+		}
+	}
+	return nil
 }

@@ -26,6 +26,7 @@ import {
   HTTPServeStart,
   HTTPServeStop,
   HTTPServeDelete,
+  SitesList,
 } from '../../bindings/quickdock/services/appservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import {
@@ -33,6 +34,7 @@ import {
   EnvInstall,
   EnvAvailableVersions,
   EnvRestart,
+  EnvStop,
   EnvStatus,
   EnvPortConflict,
   EnvGitStatus,
@@ -72,9 +74,13 @@ import {
 import SettingsDSH from './SettingsDSH.vue'
 import { DSHStatus } from '../../bindings/quickdock/services/dsh/dshservice'
 import PortPage from './PortPage.vue'
+import SitesPanel from './SitesPanel.vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr, logWarn, logDebug } from '../utils/logger'
+import { useCertPanel } from '../composables/useCertPanel'
+import { useMCPPanel } from '../composables/useMCPPanel'
+import { useWebDAVPanel } from '../composables/useWebDAVPanel'
 
 const { t } = useI18n()
 const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!
@@ -86,9 +92,11 @@ const props = defineProps<{ initialSection?: string }>()
 const HARNESS_KEY = 'harness'
 const HTTP_KEY = 'httpserve'
 const PORTS_KEY = 'ports'
+const SITES_KEY = 'sites'
 const isHarness = computed(() => selectedId.value === HARNESS_KEY)
 const isHttp = computed(() => selectedId.value === HTTP_KEY)
 const isPorts = computed(() => selectedId.value === PORTS_KEY)
+const isSites = computed(() => selectedId.value === SITES_KEY)
 
 // 侧边栏分组（按职责划分）：语言运行时 / 网络服务 / 数据库 / 中间件 / AI 服务 / 开发工具 / 内置工具。
 // 网络服务含 FTP（文件传输），故不复用旧名 webserver；中间件同时容纳 Redis/Memcached（缓存）
@@ -165,6 +173,7 @@ const sidebarGroups = computed(() => {
     }
     if (g === 'special') {
       items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: '#4a9eff', active: isHttp.value, running: httpAnyRunning.value })
+      items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: '⌂', color: '#e8a33d', active: isSites.value, running: sitesStatus.value.running })
       items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: '#3ecf8e', active: isPorts.value })
     }
     if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items, collapsed: false, running: groupRunning(g) })
@@ -173,7 +182,7 @@ const sidebarGroups = computed(() => {
 })
 
 // 分组级运行标识：该分组内任意「有服务」的运行时正在运行即点亮；
-// AI 组额外纳入 DSH，内置工具组额外纳入 HTTP 服务的运行态。
+// AI 组额外纳入 DSH，内置工具组额外纳入 HTTP 服务与站点（HTTPS 监听器）的运行态。
 // 即便分组被折叠，也依据全量运行时实时计算，不依赖已折叠隐藏的子项。
 function groupRunning(key: string): boolean {
   for (const r of runtimes.value) {
@@ -182,6 +191,9 @@ function groupRunning(key: string): boolean {
   if (key === 'ai' && dshRunning.value) return true
   if (key === 'special') {
     for (const v of Object.values(httpRunning)) if (v) return true
+    // 站点服务是内置 HTTPS 监听器（非运行时），其运行态由 sitesStatus 单独维护，
+    // 必须纳入「内置工具」组的点亮判定，否则站点跑着该组绿点也不亮。
+    if (sitesStatus.value.running) return true
   }
   return false
 }
@@ -206,6 +218,13 @@ interface ServiceStatus {
   // ports 后端按运行时配置文件解析出的全部侦听端口（caddy 首项为 admin 2019，其后为站点端口）
   ports?: number[]
   version: string
+  // cpuPercent 近 3 秒（轮询间隔）内的 CPU 占用率，100% = 占满一个逻辑核。
+  // 首次采样没有基线时为 null，前端显示「采样中」而不是编一个 0。
+  cpuPercent?: number | null
+  // memBytes 服务进程树常驻内存合计（含 nginx worker / Ollama runner 等子进程）
+  memBytes?: number
+  // procCount 进程树内的进程数
+  procCount?: number
 }
 interface RuntimeInfo {
   id: string
@@ -485,170 +504,12 @@ function failState(r: RuntimeInfo, e: any) {
 }
 
 
-// ---- 证书一键签发（mkcert）：内联区块（状态 + 信任根 + 签发）。
-// 证书是 mkcert 运行时的专属能力，区块随选中 mkcert 时展示（见模板 selected.id==='mkcert'）。
-const certModal = reactive<{
-  status: { exe: boolean; rootTrusted: boolean; message: string } | null
-  hosts: string
-  name: string
-  outDir: string
-  busy: boolean
-  result: string
-  error: string
-}>({
-  status: null,
-  hosts: 'localhost',
-  name: 'localhost',
-  outDir: '',
-  busy: false,
-  result: '',
-  error: '',
-})
-async function loadCertStatus() {
-  try {
-    certModal.status = unwrap(await EnvCertStatus())
-  } catch (e) {
-    certModal.error = getErrorMessage(e)
-  }
-}
-// 切到 mkcert 分类时刷新证书区块状态（含根 CA 信任情况）
-function ensureCertLoaded() {
-  if (selectedId.value === 'mkcert') loadCertStatus()
-}
-async function certInstallRoot() {
-  certModal.busy = true
-  certModal.error = ''
-  try {
-    unwrap(await EnvCertInstallRoot())
-    toast.success(t('certRootInstalled'))
-    await loadCertStatus()
-  } catch (e) {
-    certModal.error = getErrorMessage(e)
-  } finally {
-    certModal.busy = false
-  }
-}
-async function certPickDir() {
-  const dir = unwrap<string | null>(await PickFolderPath(t('certPickDir')))
-  if (dir) certModal.outDir = dir
-}
-async function certIssue() {
-  const hosts = certModal.hosts.split(/[\s,，]+/).filter(Boolean)
-  if (!certModal.outDir) {
-    toast.error(t('certNeedDir'))
-    return
-  }
-  certModal.busy = true
-  certModal.result = ''
-  certModal.error = ''
-  try {
-    const res = unwrap<{ cert: string; key: string }>(await EnvCertIssue(certModal.outDir, certModal.name || 'localhost', hosts))
-    if (res) certModal.result = res.cert + '\n' + res.key
-    toast.success(t('certIssued'))
-  } catch (e) {
-    certModal.error = getErrorMessage(e)
-  } finally {
-    certModal.busy = false
-  }
-}
+// ---- 证书 / MCP / WebDAV：三块内置能力已抽到 composables（页面 script 过长，
+// 3589 行单文件难以维护）。模板引用保持同名，原样解构即可，模板无需改动。
+const { certModal, loadCertStatus, ensureCertLoaded, certInstallRoot, certPickDir, certIssue } = useCertPanel(selectedId)
+const { mcpInfo, mcpTools, mcpCfg, mcpLoading, loadMCP, copyMCP, setMCPLevel } = useMCPPanel(selectedId)
+const { webdavInfo, webdavURL, webdavExposed, webdavCmds, copyWebDAV, loadWebDAV } = useWebDAVPanel(selectedId)
 
-
-// ---- MCP 服务（内置）：监听地址、客户端配置与已开放工具 ----
-interface MCPToolInfo { name: string; description: string; level: number }
-const mcpInfo = reactive({ running: false, endpoint: '', port: 0, maxLevel: 1, toolCount: 0 })
-const mcpTools = ref<MCPToolInfo[]>([])
-const mcpCfg = reactive({ url: '', json: '', cli: '' })
-const mcpLoading = ref(false)
-
-// loadMCP 拉取 MCP 状态/工具/客户端配置。服务启停后需重新调用（版本表的启停按钮走 Env 通用接口，
-// 不经过本面板，故额外在 selectedId 变化与本面板刷新按钮时各拉一次）。
-async function loadMCP() {
-  mcpLoading.value = true
-  try {
-    const [st, tools, cfg] = await Promise.all([MCPStatus(), MCPTools(), MCPClientConfig()])
-    const s = unwrap<{ running: boolean; endpoint: string; port: number; maxLevel: number; tools: number }>(st)
-    if (s) Object.assign(mcpInfo, s)
-    mcpTools.value = unwrap<MCPToolInfo[]>(tools) || []
-    const c = unwrap<{ url: string; json: string; cli: string; running: boolean }>(cfg)
-    if (c) Object.assign(mcpCfg, { url: c.url || '', json: c.json || '', cli: c.cli || '' })
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-  } finally {
-    mcpLoading.value = false
-  }
-}
-
-async function copyMCP(text: string) {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.success(t('copied'))
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-  }
-}
-
-// setMCPLevel 切换工具权限等级（0=只读，1=只读+低危写），后端立即对注册表生效，
-// 已在运行的服务需重启后 tools/list 才变化（工具集在服务启动时按等级注册）。
-async function setMCPLevel() {
-  try {
-    unwrap(await MCPSetLevel(mcpInfo.maxLevel))
-    toast.success(t('saved'))
-    await loadMCP()
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-  }
-}
-
-watch(selectedId, (id) => { if (id === 'mcp') loadMCP() })
-
-// ---- WebDAV 服务（内置）：连接信息与各平台挂载示例 ----
-// 服务端没有专属 API：配置直接读通用 ConfigProvider（config.json 全文），
-// 运行状态复用版本表已有的 EnvStatus 轮询结果（ui.webdav.svc.builtin）。
-const webdavInfo = reactive({ path: '', addr: '127.0.0.1', port: 9080, root: '', username: '', password: '', readOnly: false })
-
-async function loadWebDAV() {
-  try {
-    const cfg = unwrap<any>(await EnvConfigGet('webdav', 'builtin'))
-    if (!cfg?.raw) return
-    const c = JSON.parse(cfg.raw)
-    Object.assign(webdavInfo, {
-      path: cfg.path || '',
-      addr: c.addr || '127.0.0.1',
-      port: c.port || 9080,
-      root: c.root || '',
-      username: c.username || '',
-      password: c.password || '',
-      readOnly: !!c.readOnly,
-    })
-  } catch {
-    /* 配置尚未生成时忽略 */
-  }
-}
-
-// 0.0.0.0 表示对局域网开放，连接地址仍回落到回环地址，方便本机先自测。
-const webdavURL = computed(() => {
-  const host = webdavInfo.addr === '0.0.0.0' || webdavInfo.addr === '::' ? '127.0.0.1' : webdavInfo.addr
-  return `http://${host}:${webdavInfo.port}/`
-})
-const webdavExposed = computed(() => webdavInfo.addr === '0.0.0.0' || webdavInfo.addr === '::')
-const webdavCmds = computed(() => [
-  { label: 'Windows（映射为网络驱动器）', cmd: `net use Z: ${webdavURL.value} /user:${webdavInfo.username} ${webdavInfo.password}` },
-  { label: 'macOS（Finder → 前往 → 连接服务器）', cmd: webdavURL.value },
-  { label: 'Linux（davfs2）', cmd: `sudo mount -t davfs ${webdavURL.value} /mnt/webdav` },
-])
-
-async function copyWebDAV(text: string) {
-  if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
-    toast.success(t('copied'))
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-  }
-}
-
-watch(selectedId, (id) => { if (id === 'webdav') loadWebDAV() })
 
 // ---- Ollama 模型管理（/api/tags|ps|pull|delete）----
 // 模型与程序版本是两件事：这里动的是模型库（几十 GB，全局共享一份，默认 ~/.ollama/models），
@@ -891,6 +752,41 @@ function svcPorts(r: RuntimeInfo, version: string): number[] {
   if (Array.isArray(st.ports) && st.ports.length) return st.ports
   return st.port ? [st.port] : []
 }
+// formatBytes 进程占用的可读格式：>1GB 用 GB，>100MB 取整，更小保留一位小数。
+function formatBytes(b: number): string {
+  if (!b || b <= 0) return '—'
+  if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB'
+  if (b >= 104857600) return Math.round(b / 1048576) + ' MB'
+  return (b / 1048576).toFixed(1) + ' MB'
+}
+
+// svcUsage 运行中服务的资源占用摘要（CPU 占用率 · 进程树常驻内存），未运行时返回空串。
+// CPU 需要两次采样才有基线，首次（后端给 null）只先显示内存。
+function svcUsage(r: RuntimeInfo, version: string): string {
+  const st = ui[r.id]?.svc?.[version]
+  if (!st || !st.running) return ''
+  const parts: string[] = []
+  if (typeof st.cpuPercent === 'number') parts.push(st.cpuPercent.toFixed(1) + '%')
+  if (st.memBytes) parts.push(formatBytes(st.memBytes))
+  return parts.join(' · ')
+}
+
+// svcUsageTitle 资源悬浮明细：补充精确内存/CPU 与进程树进程数（>1 说明含子进程，如 nginx worker）。
+// CPU 口径按「100% = 占满一个逻辑核」给出，与 top/htop 一致，多线程服务可能超过 100%，故附注说明。
+function svcUsageTitle(r: RuntimeInfo, version: string): string {
+  const st = ui[r.id]?.svc?.[version]
+  if (!st || !st.running) return ''
+  const cpu = typeof st.cpuPercent === 'number'
+    ? `${st.cpuPercent.toFixed(2)}% (${t('svcCPUSingle')})`
+    : t('svcSampling')
+  const lines = [
+    `${t('svcCPU')}: ${cpu}`,
+    `${t('svcMem')}: ${formatBytes(st.memBytes || 0)}`,
+  ]
+  if ((st.procCount || 0) > 1) lines.push(`${t('svcProcCount')}: ${st.procCount}`)
+  return lines.join('\n')
+}
+
 function anyRunning(r: RuntimeInfo): boolean {
   return r.installed.some((ins) => svcOn(r, ins.version))
 }
@@ -1332,6 +1228,17 @@ async function loadHTTPServers() {
     console.warn('[env] 加载 HTTP 服务列表失败', e)
   }
 }
+
+// 站点服务运行态：侧栏「站点」入口的小绿点依据它点亮（站点面板内部自行加载明细）。
+const sitesStatus = ref<{ running: boolean }>({ running: false })
+async function loadSitesStatus() {
+  try {
+    const res = unwrap<{ status: { running: boolean } }>(await SitesList())
+    if (res?.status) sitesStatus.value = res.status
+  } catch (e) {
+    console.warn('[env] 加载站点服务状态失败', e)
+  }
+}
 async function pickHTTPDir() {
   try {
     const dir = unwrap<string | null>(await PickFolderPath(t('pickDirTitle')))
@@ -1398,7 +1305,7 @@ async function load() {
       if (!selectedId.value) selectedId.value = runtimes.value[0]?.id || ''
       // 自动拉取当前选中运行时的可下载版本，避免用户必须手动点「获取版本」
       // （harness / http / ports 不是运行时，跳过版本拉取）
-      if (selectedId.value && selectedId.value !== HARNESS_KEY && selectedId.value !== HTTP_KEY && selectedId.value !== PORTS_KEY) loadAvailable(selectedId.value)
+      if (selectedId.value && selectedId.value !== HARNESS_KEY && selectedId.value !== HTTP_KEY && selectedId.value !== SITES_KEY && selectedId.value !== PORTS_KEY) loadAvailable(selectedId.value)
       // Git 状态表（版本/路径/SSH/LFS）按需拉取
       loadGitInfo()
     }
@@ -1518,6 +1425,11 @@ async function pollStatus() {
       commitRuntimeCache(r)
     }
     await loadDshRunning()
+    // 站点 / HTTP 服务的绿点此前只在点进对应标签页或首次挂载时刷新，
+    // 在面板里启动/停止后再回侧栏，绿点仍是陈旧状态。这里并入 3s 轮询，
+    // 与 dsh 同范式，保证侧栏入口的运行态始终反映真实情况。
+    await loadHTTPServers()
+    await loadSitesStatus()
   } finally {
     polling = false
   }
@@ -1685,6 +1597,32 @@ async function toggleEnabled(r: RuntimeInfo, on: boolean) {
   }
 }
 
+// stopping[rt+version] 标记某版本正在停止，期间禁用按钮避免重复点击
+const stopping = reactive<Record<string, boolean>>({})
+// stopService 停止服务。若该运行时处于「常驻」期望态，一并撤销该期望态——
+// 否则看门狗会在下一个巡检周期把它拉回来，用户会以为「停止无效」。
+// 场景应用拉起的服务本就非常驻（enabled=false），直接停即可。
+async function stopService(r: RuntimeInfo, ins: Install) {
+  const key = r.id + ins.version
+  stopping[key] = true
+  try {
+    if (r.enabled) {
+      unwrap(await EnvSetEnabled(r.id, false))
+      const target = runtimes.value.find((x) => x.id === r.id)
+      if (target) target.enabled = false
+    } else {
+      unwrap(await EnvStop(r.id))
+    }
+    toast.success(r.name + ' ' + t('svcStopped'))
+    await pollStatus()
+    refreshRuntimeCacheNow(r)
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    stopping[key] = false
+  }
+}
+
 // restarting[rt+version] 标记某版本正在重启，期间禁用按钮避免重复点击
 const restarting = reactive<Record<string, boolean>>({})
 async function restartService(r: RuntimeInfo, ins: Install) {
@@ -1776,13 +1714,13 @@ async function fetchMgmt(version: string) {
     rabbitMgmt[version] = false
   }
 }
-async function enableRabbitMgmt(r: RuntimeInfo, ins: Install) {
+async function enableRabbitMgmt(ins: Install) {
   if (mgmtEnabling.value) return
   mgmtEnabling.value = true
   try {
     const out = unwrap(await EnvRabbitMQEnableMgmt(ins.version))
     toast.success(t('rabbitmqEnableMgmtDone'))
-    if (out) console.log('[RabbitMQ mgmt]', out)
+    if (out) logDebug('[RabbitMQ mgmt]', out)
     rabbitMgmt[ins.version] = true
     pollStatus()
   } catch (e: any) {
@@ -1791,13 +1729,13 @@ async function enableRabbitMgmt(r: RuntimeInfo, ins: Install) {
     mgmtEnabling.value = false
   }
 }
-async function disableRabbitMgmt(r: RuntimeInfo, ins: Install) {
+async function disableRabbitMgmt(ins: Install) {
   if (mgmtEnabling.value) return
   mgmtEnabling.value = true
   try {
     const out = unwrap(await EnvRabbitMQDisableMgmt(ins.version))
     toast.success(t('rabbitmqDisableMgmtDone'))
-    if (out) console.log('[RabbitMQ mgmt]', out)
+    if (out) logDebug('[RabbitMQ mgmt]', out)
     rabbitMgmt[ins.version] = false
     pollStatus()
   } catch (e: any) {
@@ -1807,9 +1745,9 @@ async function disableRabbitMgmt(r: RuntimeInfo, ins: Install) {
   }
 }
 // 根据当前启用状态切换：已启用→关闭；未启用→启用
-async function toggleRabbitMgmt(r: RuntimeInfo, ins: Install) {
-  if (rabbitMgmt[ins.version]) await disableRabbitMgmt(r, ins)
-  else await enableRabbitMgmt(r, ins)
+async function toggleRabbitMgmt(ins: Install) {
+  if (rabbitMgmt[ins.version]) await disableRabbitMgmt(ins)
+  else await enableRabbitMgmt(ins)
 }
 
 let off: (() => void) | null = null
@@ -1830,6 +1768,7 @@ onMounted(() => {
   // 绿点缓存要等到 3s 定时器那轮才填充，导致刚进环境管理绿点不显示。
   load().finally(() => pollStatus())
   loadHTTPServers()
+  loadSitesStatus()
   loadDshRunning()
   loadConfigSupport(selectedId.value) // 初始选中运行时的配置编辑入口
   ensureCertLoaded()                   // 若初始选中即 mkcert，预载证书区块状态
@@ -1840,9 +1779,10 @@ onMounted(() => {
   offOllamaPull = Events.On('quickdock:env:ollama:pull', onOllamaPull)
   timer = window.setInterval(pollStatus, 3000)
 })
-// 切换运行时时自动拉取对应可下载版本列表（harness / http / ports 区块不触发）
+// 切换运行时时自动拉取对应可下载版本列表（harness / http / sites / ports 区块不触发）
 watch(selectedId, (id) => {
-  if (id && id !== HARNESS_KEY && id !== HTTP_KEY && id !== PORTS_KEY) {
+  if (id === SITES_KEY) loadSitesStatus()
+  if (id && id !== HARNESS_KEY && id !== HTTP_KEY && id !== SITES_KEY && id !== PORTS_KEY) {
     loadAvailable(id)
     loadConfigSupport(id) // 通用「编辑配置」入口是否显示
   } else {
@@ -2013,6 +1953,9 @@ const s = currentRuntimeState
 
         <!-- 端口占用区块：复用 PortPage 组件（从独立导航页迁入环境管理） -->
         <PortPage v-else-if="isPorts" />
+
+        <!-- 本地开发站点：域名 + 自动 HTTPS + hosts（实现在 SitesPanel） -->
+        <SitesPanel v-else-if="isSites" />
 
         <template v-else-if="selected">
         <header class="detail-head">
@@ -2309,6 +2252,11 @@ const s = currentRuntimeState
                     @click="restartService(selected, ins)"
                   >{{ restarting[selected.id + ins.version] ? t('svcRestarting') : t('svcRestart') }}</button>
                   <button
+                    class="svc-btn stop"
+                    :disabled="stopping[selected.id + ins.version]"
+                    @click="stopService(selected, ins)"
+                  >{{ stopping[selected.id + ins.version] ? t('svcStopping') : t('svcStop') }}</button>
+                  <button
                     v-if="consolePort(selected, ins) > 0"
                     class="svc-btn console"
                     @click="openConsole(consolePort(selected, ins))"
@@ -2319,6 +2267,11 @@ const s = currentRuntimeState
                   <template v-if="selected.id === 'rabbitmq' && rabbitMgmt[ins.version]">5672 / 15672</template>
                   <template v-else>{{ svcPorts(selected, ins.version).join(' / ') }}</template>
                 </span>
+                <span
+                  v-if="svcUsage(selected, ins.version)"
+                  class="svc-usage"
+                  :title="svcUsageTitle(selected, ins.version)"
+                >{{ svcUsage(selected, ins.version) }}</span>
               </div>
               <div class="col-ops">
                 <button class="op-btn menu-trigger" @click.stop="toggleMenu(ins.version)">
@@ -2354,7 +2307,7 @@ const s = currentRuntimeState
                   </template>
                   <template v-if="selected.id === 'rabbitmq' && ins.scope !== 'system'">
                     <div class="op-sep"></div>
-                    <button class="op-item" :disabled="mgmtEnabling" @click="toggleRabbitMgmt(selected, ins); openMenu = null">
+                    <button class="op-item" :disabled="mgmtEnabling" @click="toggleRabbitMgmt(ins); openMenu = null">
                       {{ mgmtEnabling ? '…' : (rabbitMgmt[ins.version] ? t('rabbitmqDisableMgmt') : t('rabbitmqEnableMgmt')) }}
                     </button>
                   </template>
@@ -3157,6 +3110,7 @@ const s = currentRuntimeState
 .env-badge.off { background: var(--color-bg-primary); color: var(--color-text-disabled); }
 
 .col-svc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.svc-usage { font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 .status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--color-text-muted); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-disabled); }
 .status.on { color: var(--color-success); }

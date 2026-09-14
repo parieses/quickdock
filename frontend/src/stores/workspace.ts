@@ -14,6 +14,7 @@ import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { toSnakeCase, toCamelCase } from '../utils/caseConversion'
 import { debounce } from '../utils/debounce'
+import { matchesTextOrPinyin } from '../utils/pinyin'
 import { logErr } from '../utils/logger'
 
 // 资源类型 → 推荐打开工具类型（数组：第一项用于默认工具，全部用于下拉候选）
@@ -75,14 +76,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const matchedCollections: Collection[] = []
       const matchedItems: CollectionItem[] = []
       for (const s of scenes.value) {
-        if (s.name.toLowerCase().includes(q)) matchedScenes.push(s)
+        if (matchesTextOrPinyin([s.name], q, 's:' + s.id)) matchedScenes.push(s)
       }
       for (const c of collections.value) {
-        if (c.name.toLowerCase().includes(q)) matchedCollections.push(c)
+        if (matchesTextOrPinyin([c.name], q, 'c:' + c.id)) matchedCollections.push(c)
       }
       for (const i of items.value) {
-        if (i.name.toLowerCase().includes(q) || (i.value && i.value.toLowerCase().includes(q)))
-          matchedItems.push(i)
+        if (matchesTextOrPinyin([i.name, i.value], q, 'i:' + i.id)) matchedItems.push(i)
       }
       searchResults.value = { scenes: matchedScenes, collections: matchedCollections, items: matchedItems }
       searchLoading.value = false

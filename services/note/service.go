@@ -4,7 +4,6 @@ package note
 import (
 	"strings"
 
-	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -22,11 +21,7 @@ func NewNoteService(app *services.AppService) *NoteService {
 const quickNoteKeyword = "__quicknote__"
 
 func (s *NoteService) dbOK() *services.ApiResult {
-	if s.App.DB == nil {
-		logger.E("QuickDock: database not initialized")
-		return services.FailMsg("database not initialized")
-	}
-	return nil
+	return services.CheckDB(s.App.DB)
 }
 
 // GetNote 读取快捷笔记内容（find-or-create 固定关键词笔记）。

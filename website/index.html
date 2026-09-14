@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+
+<html lang="zh-CN" data-page-node-id="DZgBAulTOFMIjGBIeLAToa">
+<head data-page-node-id="h9hMovtPwiGEehjSuljsBn">
+<meta charset="utf-8" data-page-node-id="bOXHvstH8XScAfP1sbjOBZ"/>
+<meta content="width=device-width, initial-scale=1" name="viewport" data-page-node-id="5b4SDMAhlvJHtqq7EBotiy"/>
+<title>快启坞 QuickDock — 一个坞，装下你的整个开发流</title>
+<meta content="快启坞 QuickDock 是面向 Windows 开发者的桌面效率工具：命令面板、工作空间管理、28 个运行时环境一键装切、47 个开箱即用插件、内置 MCP 服务与 AI 助手。" name="description" data-page-node-id="WmeMA45D7cMZWDoh7caoDF"/>
+<meta content="#08090a" name="theme-color" data-page-node-id="zNgzzd1UdMTIwLQEio5l5E"/>
+<meta content="快启坞 QuickDock" property="og:title" data-page-node-id="SnvW6BdtExPoPoICECwSWz"/>
+<meta content="命令面板 · 环境管理 · 插件生态 · MCP 服务 —— 一个坞，装下你的整个开发流。" property="og:description" data-page-node-id="Y9EmQLQD37Y4xHiS7yxn1T"/>
+<meta content="website" property="og:type" data-page-node-id="OUBUaFCTd1ZSy4XegwyXM5"/>
+<link href="https://fonts.googleapis.com" rel="preconnect" data-page-node-id="s0YK6SYQfy0UKi6DpqMiRh"/>
+<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect" data-page-node-id="70zUv3qETpnAuF7CAJrKtT"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet" data-page-node-id="JTPDoCWdBXCF9Zr7ib7ed4"/>
+<link href="assets/css/style.css" rel="stylesheet" data-page-node-id="ycG6dy44YYFqEqNjgCQLKc"/>
+<!-- 首屏前定主题，避免刷新时闪一下（localStorage 优先，其次跟随系统） -->
+<script>
+  (function () {
+    try {
+      var t = localStorage.getItem('qd-theme');
+      if (!t) t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    } catch (e) {}
+  })();
+</script>
+<link href="assets/img/favicon-64.png" rel="icon" sizes="64x64" type="image/png" data-page-node-id="YRUX6wgt2JFTsU8u5ntDD7"/>
+<link href="assets/img/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180" data-page-node-id="Ewt83h4tXSP9Q8jjQKXkmq"/>
+<meta content="assets/img/appicon-512.png" property="og:image" data-page-node-id="56ccRmftqlPizwL9eNGhRX"/>
+</head>
+<body data-page-node-id="ECqlP9UqbDqnMzznJbw2XD">
+<!-- ============================ NAV ============================ -->
+<header class="nav" id="nav" data-page-node-id="es9sW7itryurXHUO7rnNle">
+<div class="nav-inner" data-page-node-id="f4lFxp9p7hneaiOgZFXj3C">
+<a class="brand" href="#top" data-page-node-id="ERsSAbxLKebUSDqRtFmFjW">
+<span class="brand-mark" data-page-node-id="F5W1VoxBrXxbCv7tAodhKz">
+<img alt="QuickDock" src="assets/img/appicon-512.png" data-page-node-id="bQpcWMd25HJ47a8TmfxIee"/>
+</span>
+      快启坞 <span style="color:var(--text-4);font-weight:400" data-page-node-id="rYUhntvZmK72OS4zF4R1BY">QuickDock</span>
+</a>
+<nav class="nav-links" id="navLinks" data-page-node-id="azH0wkCS9ZoqS8EC0JbEZU">
+<a href="#features" data-page-node-id="v7zeShrvT9bD3mHJwTlOFW">功能</a>
+<a href="#runtime" data-page-node-id="HAoOFDmR0EPV5vHdCiPy23">环境管理</a>
+<a href="#plugins" data-page-node-id="GwFpBJ54WTVnBOAO2IFgb0">插件</a>
+<a href="#guide" data-page-node-id="iE0g0dJyhec7h3jNYaM0Of">使用说明</a>
+<a href="#mcp" data-page-node-id="jxCQeQ6tSGS9Cmn6SfkfZ9">MCP</a>
+<a href="#faq" data-page-node-id="yKQi7q40N2ncUzKg1plkzG">常见问题</a>
+</nav>
+<div class="nav-actions" data-page-node-id="iFICYKwAFnjKA98N6J5Yqg">
+<div aria-label="Language / 语言" class="tgl" role="group" data-page-node-id="KBNobW9Zbi30l3BPE9uxIa">
+<button aria-pressed="true" id="langZh" type="button" data-page-node-id="3OvNEJBzxrV2Nvlx6FzGMT">中</button>
+<button aria-pressed="false" id="langEn" type="button" data-page-node-id="jahewm0SXZmMf8LowtxsaL">EN</button>
+</div>
+<button aria-label="切换明暗主题" class="tgl" id="themeToggle" title="切换亮 / 暗主题" type="button" data-page-node-id="FcN7E3o1HriWh4DQhqB06e">
+<svg class="i-moon" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="OjDRSZAVjqX01rwy5RrxSP"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" data-page-node-id="YaGRRNflGEh8xY0n9QQEWF"></path></svg>
+<svg class="i-sun" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="81kxYMkX32X59GUsXcKU4J"><circle cx="12" cy="12" r="4" data-page-node-id="z7fpmATw3BEbrTVpg1FMOB"></circle><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" data-page-node-id="bPvqTMxze731uVFYVbWld7"></path></svg>
+</button>
+<a class="btn btn-ghost" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank" data-page-node-id="eR0NgP4GjJT28SSoXwQkMi">
+<svg fill="currentColor" viewBox="0 0 24 24" data-page-node-id="zFjGjxFqx97E9S6viNwjwj"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.42c.58.1.79-.25.79-.55v-2.1c-3.2.7-3.88-1.4-3.88-1.4-.53-1.34-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.79 1.2 1.79 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .3.2.66.8.55A11.5 11.5 0 0 0 12 .5Z" data-page-node-id="fGpHHkDayJpwEG9aMdgCpw"></path></svg>
+        GitHub
+      </a>
+<a class="btn btn-primary" href="#download" data-page-node-id="hgBdVmNym0ajQ3VV4OIvDo">下载</a>
+<button aria-expanded="false" aria-label="菜单" class="nav-toggle" id="navToggle" data-page-node-id="aYhgh3ZveJ1Jjps5umZSt0"><span data-page-node-id="FhikuIytStxWTPNFuAMcH9"></span><span data-page-node-id="6yMdWGp942Dhu8gVHiF7AM"></span></button>
+</div>
+</div>
+</header>
+<main id="top" data-page-node-id="GDHyNUJE8peuzkEDwjvCAD">
+<!-- ============================ HERO ============================ -->
+<section class="hero" data-page-node-id="o0BxAhGYFVzFaSt9BVp3lR">
+<div class="glow glow-a" data-page-node-id="e1SZnAc6H78rfQIbplCuYq"></div>
+<div class="glow glow-b" data-page-node-id="VIUciQkknjgEvJL7pqBCdJ"></div>
+<div class="wrap hero-inner" data-page-node-id="mxje4trzM4GsTuFOjyLDgt">
+<span class="pill" data-page-node-id="nrtyyYGswXaLDGCchyFFOu"><span class="dot" data-page-node-id="yDOWV4RdGiwKBJHAl4bGHE"></span>开源 · 免费 · Windows 优先</span>
+<h1 data-page-node-id="X4B9Yy7Cb3ufAPipwaV4A6">一个坞，装下<span class="grad" data-page-node-id="BdQghzZyD2TXJHUoGI9ooO">你的整个开发流</span></h1>
+<p class="hero-sub" data-page-node-id="1yMh0mwUpFU3poy6FFJdvV">
+      命令面板唤起一切，28 个运行时一键装切，47 个插件开箱即用，再顺手把本地能力通过 MCP 开放给 AI。
+      Raycast 的速度 + VS Code 的开发者体验，打包进一个不到 100MB 的桌面应用。
+    </p>
+<div class="hero-cta" data-page-node-id="NnKZgbyJPhKuLxddVpcWyC">
+<a class="btn btn-primary btn-lg" href="#download" data-page-node-id="TgZldUFcvfA5LrWXQiHGqk">
+<svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="IKwhEqn4mbWzCiZsGhhXwX"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16" data-page-node-id="GKz4HbyJLFmvv9mGhUV0tM"></path></svg>
+        下载 Windows 版
+      </a>
+<a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank" data-page-node-id="FxOZMhYxNGaZ5vD9zrftiR">查看源码</a>
+</div>
+<p class="hero-meta" data-page-node-id="FXenGzY51lGEQmntL1AGxX">v0.x 持续迭代中 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<figure class="shot" data-page-node-id="Xn6ZFHctbEkOM3zABO6NCR"><img src="assets/img/ui-main.png" alt="QuickDock 主界面" data-page-node-id="XYbJDPqccwrkxRjRLpl4wD"></figure> 
+<div class="stats reveal" data-page-node-id="Sloe2zhLd8tSELJQqAC0H2">
+<div class="stat" data-page-node-id="ONWTjJfdQMMJwdeETkUoIz"><b data-page-node-id="nr4FfQ3ZC4Fen984YLyFze">28</b><span data-page-node-id="699VESysoL5rJDiBoiCRqC">可管理运行时</span></div>
+<div class="stat" data-page-node-id="CFj4HqdQ52xWebjlWzxUFY"><b data-page-node-id="wrylVeoxECGwnlZcmtEVcE">47</b><span data-page-node-id="2Z2lVWHIGDpoGuDR3uYtrl">开箱插件</span></div>
+<div class="stat" data-page-node-id="L6Xa7b11RTIe6qjOOMmdMe"><b data-page-node-id="ShZpDGBLBL3FnudYWgBs9e">29</b><span data-page-node-id="ouC5BcXdxMihR1JGwmycfM">MCP 工具</span></div>
+<div class="stat" data-page-node-id="bhdtREW0tY9IvJ0WhxF7PO"><b data-page-node-id="Z5jK5xcx5faTCk0ErXt2St">&lt;100MB</b><span data-page-node-id="GDYdwouq53cOVuv6s1wp1K">安装包体积</span></div>
+</div>
+</div>
+</section>
+<hr class="divider" data-page-node-id="vcV4fbf4BHn67oYeE3JgHI"/>
+<!-- ============================ FEATURES ============================ -->
+<section id="features" data-page-node-id="oB0sRtNVLBRWeRLP1ne36C">
+<div class="wrap" data-page-node-id="cRLFQ4PfXLt9iwlakHkD3B">
+<div class="section-head reveal" data-page-node-id="cJEDaemJyVhTGDdcHcvk4b">
+<span class="eyebrow" data-page-node-id="20a8oabbUreRm2325FhADF">核心能力</span>
+<h2 data-page-node-id="PHqny1w8Ea7DgiYHPFusBU">每天要点的那几十下，收进一个面板</h2>
+<p data-page-node-id="slc9J105dEPJE5ZPC0jqk3">项目、目录、命令、网址、剪贴板、笔记、待办……不用再在开始菜单和文件夹之间来回横跳。</p>
+</div>
+<div class="grid-3" data-page-node-id="2zOjlqEEwvb48oTAUqktsH">
+<article class="card reveal" data-page-node-id="xaXDaCNVQcTl2tITivXQFJ">
+<div class="icon" data-page-node-id="xzRuEki8tdCVK9EG97jyNm"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24" data-page-node-id="2o1yJQwY1rrb5yMmdNpOUJ"><circle cx="11" cy="11" r="7" data-page-node-id="8eVcmQeiPIck3EGfi9MeJZ"></circle><path d="m20 20-3.5-3.5" data-page-node-id="rKHkjZiwlKOdbvUEOov1yf"></path></svg></div>
+<h3 data-page-node-id="Q1wNKytGnEC4qxkxaHjP8F">命令面板</h3>
+<p data-page-node-id="LNHGJzpLqAc9GAcEJLkWPm">一个 <kbd data-page-node-id="CK3L0AGkRxslfom9YNRTQq">Ctrl</kbd>+<kbd data-page-node-id="nyLbVyHsSzi7pFeEYZwSoi">K</kbd> 搜遍全部资源，FTS5 全文索引，键盘直达不用摸鼠标。</p>
+<ul data-page-node-id="QDwOiSU3Al8PiRgfmGgNpp"><li data-page-node-id="nef1XsobO3Uu2Tm8rJD6Ht">工作空间 / 场景 / 集合 / 项目统一搜索</li><li data-page-node-id="bIi8siGEzBkZEWaKmC1AE4">多选批量操作、最近与最常使用排序</li><li data-page-node-id="QOphtPYnfkXaMwWtyshPRY">粘贴 URL 自动识别并建档</li></ul>
+</article>
+<article class="card reveal" data-page-node-id="0CFoe9J7gvYY4Uzoi22ZzC">
+<div class="icon" data-page-node-id="bzmvnHUBBbHMlQLrhTLjLD"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24" data-page-node-id="oLEpu2FX16YSTWZFHlznMF"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" data-page-node-id="W1SaS7O4EHUQGEHQblzaDP"></path></svg></div>
+<h3 data-page-node-id="gVHH1767E5fXNhavHb4Z7l">工作空间与场景</h3>
+<p data-page-node-id="V8bX4v6sVSVAHG37mhHyp1">工作空间 → 场景 → 集合 → 项目四层结构，按项目上下文隔离，切换关注点只在一瞬。</p>
+<ul data-page-node-id="NeUn1L1p6vRD6JdpAcN0SR"><li data-page-node-id="SOQHF9A2H4gWwRkSJjwEq6">6 种项目类型：目录 / 文件 / 网址 / 命令 / 应用 / 快链</li><li data-page-node-id="t6cB0lyWwEn8K8raTjXur1">四种打开策略，全层级拖拽排序</li><li data-page-node-id="102vJvoGgYnzEqEjJjNwm8">场景支持图标、颜色与标签</li></ul>
+</article>
+<article class="card reveal" data-page-node-id="oRJGe5KZPnuCqJUjVst06e">
+<div class="icon" data-page-node-id="9ZgTSIFB4PsxA8yxru0RHz"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24" data-page-node-id="wDwHyNGhtXpqBrEmjBiQjN"><rect height="16" rx="2" width="12" x="6" y="4" data-page-node-id="fqFTBxOlflhHGHcMkADGy2"></rect><path d="M10 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1" data-page-node-id="3U5E82d3KxlJe8P2ADRh3y"></path></svg></div>
+<h3 data-page-node-id="SmRAwlRAAoeZ3sVmRlNkHC">剪贴板历史</h3>
+<p data-page-node-id="64PxKUjUM9P8LAgqFKHMGY">文本、图片、文件全记录，浮动窗口失焦即隐，<kbd data-page-node-id="WF0oQuW1sRA6Rg9fGHnbwA">Ctrl</kbd>+<kbd data-page-node-id="VgH2HCwGrafkD3CqxIs8Cb">`</kbd> 一键唤出。</p>
+<ul data-page-node-id="q6HEAFARf18bqVrf38MrbB"><li data-page-node-id="ShYSmYeBXkkHjMUAE73sSQ">固定 / 搜索 / 批量删除</li><li data-page-node-id="qD3Ayt4tkKrKGU1xKrtldD">按天数自动清理过期内容</li></ul>
+</article>
+<article class="card reveal" data-page-node-id="d4O3mwAIJiKGF6WhAu7UEu">
+<div class="icon" data-page-node-id="SUtzC6DAZ2p19d0uy1SsMo"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24" data-page-node-id="W7CbUJ2vVddvabBQNFrtmn"><path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" data-page-node-id="UwxAMMENEI5imZVfxCg0ge"></path><path d="M14 4v5h5M8 13h8M8 17h5" data-page-node-id="CG8RB4K8eDEzpgZFlOKYJU"></path></svg></div>
+<h3 data-page-node-id="KiKWktTzE74sCuCz3DgmeX">树形笔记库</h3>
+<p data-page-node-id="pumBZZidvZcZuz28VKBOK1"><kbd data-page-node-id="jFJWFj9IturRTa3Hoenz8X">Ctrl</kbd>+<kbd data-page-node-id="VK6etUp5kkXImMtoZg8MAd">Shift</kbd>+<kbd data-page-node-id="XeB3zTANHh9xe2wyCHSWsr">N</kbd> 唤起浮动笔记，文件夹 + Markdown 多层级组织，500ms 防抖自动保存。</p>
+</article>
+<article class="card reveal" data-page-node-id="s06mBs9Ce47QxlCP5ESY10">
+<div class="icon" data-page-node-id="fQol4Ta9rH32pKl5g91wCl"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24" data-page-node-id="HZZZUwHIwp8S7erWjSKlbB"><path d="m4 12 4 4L20 6" data-page-node-id="bEnTUQS4CETCrahW6T6ApJ"></path><path d="M4 19h16" data-page-node-id="Q4tGYjJCygxhtWdxqLJbOO"></path></svg></div>
+<h3 data-page-node-id="dC3XvhHKBun4FCEbOhFx6W">待办与番茄专注</h3>
+<p data-page-node-id="hNNcmGQkEArRgPQdXqXmS2">列表 + 看板双视图，子任务、标签、重复规则与到期提醒齐全，专注结束还能推 Webhook。</p>
+</article>
+<article class="card reveal" data-page-node-id="VLtz2bk0quLEnnP3yvnhNs">
+<div class="icon" data-page-node-id="zidUrUTaCMpC2UR99I6BpF"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24" data-page-node-id="J56BLsbLhqNlf8vDTqGZiR"><path d="M3 17l5-6 4 4 5-7 4 5" data-page-node-id="8QPnpyBnXwEdaIcPaXhWCb"></path><path d="M3 21h18" data-page-node-id="VlAbjTo6MjARxaHPKHHbGw"></path></svg></div>
+<h3 data-page-node-id="NIr62SExE1r6O63shAZGWD">网站监控</h3>
+<p data-page-node-id="5mDHWd1zknSFfXHJKEfOre">定时探测状态码与响应时间，SSL 到期预警、关键字匹配、在线率统计，异常走桌面通知和 Webhook。</p>
+<ul data-page-node-id="V7TmLILnbcCfbpX181oBFo"><li data-page-node-id="3zBXaBUDa33vLXGarPlTTU">钉钉 / 企微 / 飞书 / Server酱 / PushPlus / Telegram</li><li data-page-node-id="QOLNiWQANbQeF7V9dhMi6i">24h / 7d / 全部 响应趋势</li></ul>
+</article>
+<article class="card card-wide reveal" data-page-node-id="dA4YF5Xu98UvYvCHcyjRfH">
+<div class="icon" data-page-node-id="b4rQhcmyrvVpYXQpWWMvAr"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24" data-page-node-id="zgCGQBK29a0Y3DIxivlZQA"><path d="M12 3v18M3 12h18" data-page-node-id="7exr1iF29qZeoudAJFqi7v"></path><circle cx="12" cy="12" r="9" data-page-node-id="Dzw6HZ3SpfwcCUYRRo6BUu"></circle></svg></div>
+<h3 data-page-node-id="rynxYbXSKpdGQeHfEgUYzm">AI 助手 &amp; DeepSeek Harness</h3>
+<p data-page-node-id="eHS3O7SlSyilhCYGiTrClF">内置多档案 AI 助手（OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义），SSE 流式输出、思考过程折叠、Token 统计，API Key 在 Windows 下用 DPAPI 加密存储。同时内嵌 DeepSeek Harness —— 一键装填 node + dsh 环境，原生窗口承载完整 Agent 编程入口，关窗不停服务。</p>
+</article>
+</div>
+</div>
+</section>
+<hr class="divider" data-page-node-id="f2FHpfGkhqk0ank98NHinO"/>
+<!-- ============================ RUNTIME ============================ -->
+<section id="runtime" data-page-node-id="kFFUWvWtSrrNuCWkNQz5ju">
+<div class="wrap" data-page-node-id="L8hbnRQeTqXlA4eOmOYptJ">
+<div class="section-head reveal" data-page-node-id="vzeCFOJnDoDBUICeGhCZ3l">
+<span class="eyebrow" data-page-node-id="M34NjGRZs21fIf9aJ3HkNz">环境管理</span>
+<h2 data-page-node-id="tywiXJG0Vv9XgyaulCI0Iv">28 个运行时，装在一个侧栏里</h2>
+<p data-page-node-id="TbMEWFwe2w5mGi3u6tUxxD">不写注册表、不申请管理员、不污染系统 PATH。多版本共存于用户目录，切换只是一点，删掉 QuickDock 就全没了。</p>
+</div>
+<div aria-label="运行时分组" class="tabs" id="rtTabs" role="tablist" data-page-node-id="b4wHPCOnklzGuRIWKhqs4C">
+<button aria-selected="true" class="tab" data-panel="p-lang" role="tab" data-page-node-id="7Dclzl00tgDGQMKuhGaLFF">语言</button>
+<button aria-selected="false" class="tab" data-panel="p-web" role="tab" data-page-node-id="GfO92ddwYD9lf5tBvXVakE">网络服务</button>
+<button aria-selected="false" class="tab" data-panel="p-db" role="tab" data-page-node-id="SnHYQvJPe9pRFoiAEmq9DL">数据库</button>
+<button aria-selected="false" class="tab" data-panel="p-mw" role="tab" data-page-node-id="VjwqOTzbbPTEIeNt0EvKBU">中间件</button>
+<button aria-selected="false" class="tab" data-panel="p-ai" role="tab" data-page-node-id="9gNYK1GHTF3qdE2TRWnzso">AI 服务</button>
+<button aria-selected="false" class="tab" data-panel="p-tool" role="tab" data-page-node-id="u09WzY4Tg9wyU5Ro98xqX1">开发工具</button>
+</div>
+<div class="panel" id="p-lang" role="tabpanel" data-page-node-id="4N8rNZdnMOFuzsCFUmg7i0">
+<div class="chips" data-page-node-id="iDxKOzvHRAr7hTbEa6uCf2">
+<span class="chip" data-page-node-id="GkDTjCoL9jMBcHaA9uXKDh">Node.js <small data-page-node-id="vJqJ9UMceL4reoqWgwSDjP">LTS + 近 3 年</small></span>
+<span class="chip" data-page-node-id="TxwqYQPjP9g975DnlTIXNN">Go <small data-page-node-id="C8O8brxri4gnFnHQO6oIWQ">全量</small></span>
+<span class="chip" data-page-node-id="P7lVzAnFfp1KpvBjT2RCIL">PHP <small data-page-node-id="IsWFMesdTGhDUMKC8HlTh3">VS16 / VS17</small></span>
+<span class="chip" data-page-node-id="HUjRAToDVUpbvPYpEEmEoC">Python <small data-page-node-id="yxfyTtKWdBsGxWP17yMN04">全量</small></span>
+<span class="chip" data-page-node-id="vikCq76sx0CdvkCUM6afjr">Bun <small data-page-node-id="pYtNT4uka6cTasCLrYraXZ">全量</small></span>
+<span class="chip" data-page-node-id="FCdigIotox6iOfIsLZzwyH">Erlang <small data-page-node-id="gCAgiAMJmkkhG0DtVu69UJ">RabbitMQ 依赖</small></span>
+</div>
+</div>
+<div class="panel" hidden="" id="p-web" role="tabpanel" data-page-node-id="fKaWh2a4aOKpsyppOcsfNt">
+<div class="chips" data-page-node-id="uTcIn3CGvqQckR4R5ddrWr">
+<span class="chip" data-page-node-id="Nt1Rqyh4wpgLGsruxUTCY8">Nginx <small data-page-node-id="cDjqQHEgyKmWhyh7UzqZkF">服务型</small></span>
+<span class="chip" data-page-node-id="tJbFglwgfiumJCQWzkzltA">Caddy <small data-page-node-id="XOoDuyfmQVHMGlpiLnlvyK">服务型</small></span>
+<span class="chip" data-page-node-id="a1EebS5F31y2cQ51UmzHOI">Apache <small data-page-node-id="Y3nF7zFIPcUzH9JTFXCDD5">服务型</small></span>
+<span class="chip" data-page-node-id="OFn11p0yAD0xlhwXHY4ncT">Traefik <small data-page-node-id="AE4RsXFja8kgeJXh3VwMbC">服务型</small></span>
+<span class="chip" data-page-node-id="7FNoP6AYyUmn7SS2Wsf8FT">FTP <small data-page-node-id="O8jrmrdmV2lmkpRE4QY0qz">FTPDMIN</small></span>
+</div>
+</div>
+<div class="panel" hidden="" id="p-db" role="tabpanel" data-page-node-id="9VaevLcrDFhvT1QVbftdhs">
+<div class="chips" data-page-node-id="gjH1gVuWnnL6kV8ZrBLEDb">
+<span class="chip" data-page-node-id="fHdDCEeExHZYdaG509jwIi">MySQL <small data-page-node-id="EsiLolXEVNKYqG3p2TQ3te">服务型</small></span>
+<span class="chip" data-page-node-id="UkpxZfOctHy3yUOuqVNmk3">MariaDB <small data-page-node-id="VT6bunfwl511vxTqMIylXH">服务型</small></span>
+<span class="chip" data-page-node-id="Er0Y72CpNTijnDmFQ1ds7e">PostgreSQL <small data-page-node-id="OnDcdhvGMRgbr1LwKa8ELd">服务型</small></span>
+<span class="chip" data-page-node-id="bFaYnmJsGpSG8fBXMBNJWT">MongoDB <small data-page-node-id="oJJG8uWKSo5WWw0oL1QjHs">服务型</small></span>
+</div>
+</div>
+<div class="panel" hidden="" id="p-mw" role="tabpanel" data-page-node-id="rkMUbFZNUqqo4gmkEEbsxK">
+<div class="chips" data-page-node-id="LsWHwe7vtdO249ED5W1uWW">
+<span class="chip" data-page-node-id="w5a4ia3ZT5kboXd8XX4mHz">Redis <small data-page-node-id="Y868D2DGdrd4KsyoaAO7hj">服务型</small></span>
+<span class="chip" data-page-node-id="CzsNb8dHTgIVNVrGFkaR0A">Memcached <small data-page-node-id="xrjlJZnW7JDzICCXipjx22">服务型</small></span>
+<span class="chip" data-page-node-id="0CpEtMsSmgwaF4WAF3xW0W">MinIO <small data-page-node-id="JTYEioMhTqJvCDSlBrJHQX">对象存储</small></span>
+<span class="chip" data-page-node-id="U6iB5CpzGCEGGc5PAE3WYR">RabbitMQ <small data-page-node-id="qB5EWGLE97sGreVHHb4FFh">消息队列</small></span>
+</div>
+</div>
+<div class="panel" hidden="" id="p-ai" role="tabpanel" data-page-node-id="NgKu9VuARr6Dljr3eSl84U">
+<div class="chips" data-page-node-id="MMyEVCpO0Nppi3KTOvYkNa">
+<span class="chip" data-page-node-id="QsOWYIxkouF4Z2aEFbH2Q5">Ollama <small data-page-node-id="apYavkIcdJaFWBcvfU7BNw">本地大模型</small></span>
+<span class="chip" data-page-node-id="Q1zQtqa4tws85zRdixcXVs">MCP 服务 <small data-page-node-id="3k8qKpNiIF9WdxMBE7wEex">内置 · 9230</small></span>
+<span class="chip" data-page-node-id="mUBv8z1o4rkEGOqbjCOWEL">WebDAV <small data-page-node-id="5cmgmEeIxXTkatQH207wEe">内置 · 9080</small></span>
+<span class="chip" data-page-node-id="sMoQAn3WtF2GgQnkcC2emz">DeepSeek Harness <small data-page-node-id="1djxdqJnFNAsfEsLFGbkuf">Agent 入口</small></span>
+</div>
+</div>
+<div class="panel" hidden="" id="p-tool" role="tabpanel" data-page-node-id="OptiHCAsx3gbv3O06e4jZB">
+<div class="chips" data-page-node-id="tGk6pNxV9ymW3c4DsZxr8C">
+<span class="chip" data-page-node-id="h1dNQGNF1RWqVWD1JgRWEL">Git <small data-page-node-id="VWr5HdoNsLwq46HqCaWMgW">全量</small></span>
+<span class="chip" data-page-node-id="HH63vzXD1Isb1GKNqcIzxh">Composer <small data-page-node-id="QkoYGZEwDl0dyu9ECGOpu8">全量</small></span>
+<span class="chip" data-page-node-id="2ObYsuIBydEWMlZBGiFIFx">FFmpeg <small data-page-node-id="i7LGjRf2lQoDn9sYpCLugF">固定 3 版</small></span>
+<span class="chip" data-page-node-id="YEp1ISm7Y0YwTvjEzGXD0e">Mailpit <small data-page-node-id="79xt4nYJDVNzR9ooXAXi8S">邮件捕获</small></span>
+<span class="chip" data-page-node-id="4nzuraXGGDOdcnoepX4DcY">frpc <small data-page-node-id="B4Dcvy6ni48wK1v7VVQ110">内网穿透</small></span>
+<span class="chip" data-page-node-id="5A0MtUEMtCIeSkI6pgzGYf">GitHub CLI <small data-page-node-id="5iD8kvljSAmEnqe3JPQ14E">gh</small></span>
+<span class="chip" data-page-node-id="X3Cs3XMEkgnBzG6qb1LdzU">mkcert <small data-page-node-id="XD5hyjcJVCxbWoEcAEb9cK">本地证书</small></span>
+</div>
+</div>
+<div class="grid-3" style="margin-top:var(--s-6)" data-page-node-id="tVDK1fM33Bm3n3HQpVhLBa">
+<article class="card reveal" data-page-node-id="IGnRna3vd0mdGkYPP2CvsB">
+<h3 data-page-node-id="8a8XqAP0R6wsrNILuaEmxK">一键装切</h3>
+<p data-page-node-id="j7MTRQQHyAQDUAcG8r48wF">版本列表来自官方源或国内镜像，GitHub Releases API 优先、HTML 兜底，换源后一键重拉。</p>
+</article>
+<article class="card reveal" data-page-node-id="13OgcgYEgiFIy4YfqFa3s1">
+<h3 data-page-node-id="mni0Ctury9glXJPxYGVhHR">启停与校验</h3>
+<p data-page-node-id="s9scbG4ABoVEvm539q3MMp">服务型运行时支持启动 / 停止 / 重启，Nginx、Caddy、Apache 等启动前先跑配置校验，失败直接拦住。</p>
+</article>
+<article class="card reveal" data-page-node-id="Rog6OB319pjANhPf5HIGbl">
+<h3 data-page-node-id="3HjLOEV1Mpae6GBDb8Q9cM">日志与控制台</h3>
+<p data-page-node-id="bSKaW1Ds1jJDZ3aBD9De21">实时滚动查看进程日志尾部，MinIO / Mailpit / Traefik / RabbitMQ 等提供 Web 控制台一键直达。</p>
+</article>
+</div>
+<figure class="shot" data-page-node-id="WIqarqQCDnJLgAvVZ7w3jd"><img src="assets/img/ui-env.png" alt="环境管理" data-page-node-id="L9I2EvHFXAsQyX2det9RIL"></figure>
+</div>
+</section>
+<hr class="divider" data-page-node-id="sZoBrCBVwPfvcbsmmQQZCN"/>
+<!-- ============================ PLUGINS ============================ -->
+<section id="plugins" data-page-node-id="Q0QHI0Yq3QEju3d928Rnfq">
+<div class="wrap" data-page-node-id="66ACTgiYICE6fvatZv2xgE">
+<div class="section-head reveal" data-page-node-id="G6ftJOYQOWIHgHm2SoPp0p">
+<span class="eyebrow" data-page-node-id="sZIolCGSWrTZjbx2lYQkRu">插件生态</span>
+<h2 data-page-node-id="OFNJwt3FM8Efoxn98LzhkO">47 个插件，一个市场装完</h2>
+<p data-page-node-id="3mGTHSNblEPxO9Bwvn91Ds">三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 27 个 Host API，从文件读写到 MCP 复用，能力面三者一致。</p>
+</div>
+<div class="grid-3" data-page-node-id="J4HjgmCH48ajviaKNrB2Qu">
+<article class="card reveal" data-page-node-id="PsDOhdNKZbKyRDxUGxRjGp">
+<h3 data-page-node-id="rkHjqq8thwrcgUcniDzMwa">开发者向</h3>
+<ul data-page-node-id="fZAdBnFi2htADIU0OAmQFg"><li data-page-node-id="GjnEhyXsCswbDs8hyXfa2I">HTTP 客户端</li><li data-page-node-id="s94rUm61L3UwCmZkIkRuLI">数据库连接</li><li data-page-node-id="VOlMYrfWUrz7j4nAw7kkXV">端口检查器</li><li data-page-node-id="7MvQj7nHQnICSDUCkSo7OL">Cron 表达式解释</li><li data-page-node-id="tgvVjpptfdfvZVCKFk24fe">代码卡片美化</li><li data-page-node-id="q2siaBHp8b3wUIfO5ppc6E">批量重命名</li></ul>
+</article>
+<article class="card reveal" data-page-node-id="BCqAaCLAN9ricTHbn2vOGl">
+<h3 data-page-node-id="PeaoZIdE74qDsMUHOQMj7u">系统向</h3>
+<ul data-page-node-id="rqxQ4YcptMZ7QgW3U5nBqD"><li data-page-node-id="eEdmrRsuI2mjFaLjOUh2DM">磁盘分析</li><li data-page-node-id="zGA0pSIRCRgA38BmjQFW6B">本地文件搜索</li><li data-page-node-id="Pa0ErS14150pHZKuycXhIc">垃圾清理</li><li data-page-node-id="fHPXmw7XZCEkPxdxSTczVx">进程与端口全景</li><li data-page-node-id="mHudAcTavDXY8xuAnaf3LV">系统命令</li></ul>
+</article>
+<article class="card reveal" data-page-node-id="6epmu0rAptg4lFnnghJIkr">
+<h3 data-page-node-id="NBH3tdPUYqmMCwDsp5iRng">内容向</h3>
+<ul data-page-node-id="xSAaHdCQciK9oHFSgAj4Jg"><li data-page-node-id="sZNN0zzeiggyzvEC1cwT33">OCR 文字识别</li><li data-page-node-id="FaD94P3vpBuW6g2OoheTIC">图床上传</li><li data-page-node-id="hv5zerXlxDtlqn9A7EssYq">剪贴板增强</li><li data-page-node-id="4s0jakesB2HJ5K6j9geZi4">文本处理工具集</li></ul>
+</article>
+</div>
+<figure class="shot" data-page-node-id="lIdOXPT2BqPDiCuo4ttoXz"><img src="assets/img/ui-plugins.png" alt="插件市场" data-page-node-id="7NmyaAY9VuyPUKdBpVvYor"></figure>
+
+</div>
+</section>
+<hr class="divider" data-page-node-id="MC3TbPzBw1jwT4uomcuyAH"/>
+<!-- ============================ GUIDE 使用说明 ============================ -->
+<section id="guide" data-page-node-id="aI0jhUwV7Wi2xIBK2yA2gT">
+<div class="wrap" data-page-node-id="DeRCtw9t5325y9Z2QZDhP5">
+<div class="section-head reveal" data-page-node-id="IPIH6nwvRbcO2HwWOELCeH">
+<span class="eyebrow" data-page-node-id="z7IWJShL1I1weJcaBQ9Ezl">使用说明</span>
+<h2 data-page-node-id="WCJ1qJCtN6Dlv2X3EQ8RKv">从装上到用顺手</h2>
+<p data-page-node-id="AGX9Hb26oFa55outBjl5b5">16 节完整教程：前 3 节跑通基础，4—10 节覆盖日常功能，11—14 节是进阶玩法，最后两节讲数据备份和出问题怎么查。按顺序走一遍，或者用左侧目录直接跳。</p>
+</div>
+<div class="guide" data-page-node-id="NUfChXBAUoHLSqCLFsVzf2">
+<!-- 侧栏目录 -->
+<aside class="guide-nav" id="guideNav" data-page-node-id="xIyFOqsa3rGXNRo9OUT6Il">
+<h4 data-page-node-id="sNQ29MQvlqys0NsQbdaHXU">快速上手</h4>
+<ul data-page-node-id="FrpQTgTqMt1xV7TQvg4Kob">
+<li data-page-node-id="25Jznaz1C0hcmzlCv0lCaa"><a href="#g-install" data-page-node-id="G3T7kQxubIOj2q6X8yNtRo">1. 安装与首次启动</a></li>
+<li data-page-node-id="E79pmEx59sfibm6swjiGmr"><a href="#g-ui" data-page-node-id="8IoGzuXWlXCOvnAEjjFP8c">2. 界面速览</a></li>
+<li data-page-node-id="PmttprUwZHgvEv8Smjxzcj"><a href="#g-hotkey" data-page-node-id="u2gJJ4e54cA3S3HvfltL59">3. 快捷键</a></li>
+</ul>
+<h4 data-page-node-id="KiJCMsezMTw333TIwfpT3a">日常使用</h4>
+<ul data-page-node-id="opHEAuPHzxnirtJaFU4hNB">
+<li data-page-node-id="IAlpPa2k4HACQ8JxwhzWOg"><a href="#g-workspace" data-page-node-id="PtmIPucQGgevcixtlsBkh1">4. 工作空间与项目</a></li>
+<li data-page-node-id="PBmVa62rDg0Ax09xlTVQqy"><a href="#g-palette" data-page-node-id="XBU7ReZ3lmYhJIdhe0pXR7">5. 命令面板</a></li>
+<li data-page-node-id="EZN7gd3U4cL6vsIdu8yRil"><a href="#g-clipboard" data-page-node-id="QIdFy0HY5WvLXFWoa709pm">6. 剪贴板历史</a></li>
+<li data-page-node-id="vFkDG1yJfiZAsay17NyfbB"><a href="#g-notes" data-page-node-id="wNlarwLo3Ru2Tm1pyATinh">7. 笔记库</a></li>
+<li data-page-node-id="Z9Qsy6YoVsyZ7emRT5Nhco"><a href="#g-todo" data-page-node-id="Dc6Iw3Ct4sdzzcGjd9s6VR">8. 待办与番茄专注</a></li>
+<li data-page-node-id="2ieyOCDcCByVBECxjIvPgi"><a href="#g-monitor" data-page-node-id="6QmKDy2KOtz5Akkn9m5Kn6">9. 网站监控与通知</a></li>
+<li data-page-node-id="QXWlNtzMiaIQwDg0OHxb7z"><a href="#g-schedule" data-page-node-id="xunXsGgDEwzjxCouyFpJ1N">10. 定时任务</a></li>
+</ul>
+<h4 data-page-node-id="wmFpqXuAA6ndjIZ7poBZSd">进阶</h4>
+<ul data-page-node-id="4pmm1B8082E5wuOjL352ix">
+<li data-page-node-id="DqcCOQW0ysDwl5wJCnvGzy"><a href="#g-env" data-page-node-id="7l1bI2UGEhhhonO5ZYg6ki">11. 环境管理</a></li>
+<li data-page-node-id="xX3dPVyLNVZCz9S0xME8BM"><a href="#g-plugin" data-page-node-id="LnDlIJsJzBWGQwt69oe8Aq">12. 插件</a></li>
+<li data-page-node-id="Zp91ysPuX7SXLp5DE2rHkw"><a href="#g-ai" data-page-node-id="4ZnT3rvF8J3thnXvLr5qVB">13. AI 助手与 DSH</a></li>
+<li data-page-node-id="0GLoEwIA5eXw3gmM33Xfol"><a href="#g-mcp" data-page-node-id="AanJFbHEhzeyzmnfoX6kkH">14. MCP 服务</a></li>
+</ul>
+<h4 data-page-node-id="8CyD5t2IoQHCNaiVAfG9RA">运维</h4>
+<ul data-page-node-id="UmmeRPpxIzSSsyeRJz8aib">
+<li data-page-node-id="wcCtK9yhVxjANm0HjkcwNZ"><a href="#g-backup" data-page-node-id="jey7RygX9VoM3T19ZJcHYE">15. 备份 · 同步 · 快照</a></li>
+<li data-page-node-id="JbUYkesDJGbpSSjaa5m9gG"><a href="#g-trouble" data-page-node-id="JVZMfDPLre16l0fXxtgND1">16. 更新与排错</a></li>
+</ul>
+</aside>
+<div data-page-node-id="9BYu8lCEYHIGoC1Gopnc5g">
+<!-- ============ 1 ============ -->
+<article class="step reveal" id="g-install" data-page-node-id="rkxRIwwzX8gUEA7VQfDv40">
+<span class="step-no" data-page-node-id="oRBvIgVQwLGzkAfHmlXJQL">STEP 01</span>
+<h3 data-page-node-id="Y0qlO0iHQycnoGoPR0lvP2">安装与首次启动</h3>
+<h4 data-page-node-id="zGSUpuHfhErIzSAIGSythk">系统要求</h4>
+<div class="tbl wide" data-page-node-id="TwdvxTAh9RsUZfXYgJUE6i">
+<div class="tbl-row" data-page-node-id="0Ic1AUwmhDSCh8cSDDAjBb"><span class="k" data-page-node-id="XEVMiDlc7oJ8B2PhUekWId">操作系统</span><span data-page-node-id="9tpYH7l7nyYQRI2GXddJNj">Windows 10 1809+ 或 Windows 11（macOS 提供 arm64 / amd64 的 .dmg）</span></div>
+<div class="tbl-row" data-page-node-id="lYQLbHSbAJryEyD4A7CsIi"><span class="k" data-page-node-id="OkDmRq5fA4SZ5Yb53dX98v">运行时</span><span data-page-node-id="FwLKrZAqkczDH3K0nCJb1H">WebView2 Runtime（Windows 一般系统自带，缺了会提示下载）</span></div>
+<div class="tbl-row" data-page-node-id="jUrWCF6edtpbGIxfTsUeW6"><span class="k" data-page-node-id="UmvAswOGznzaO2mNpE1Eg8">磁盘</span><span data-page-node-id="uH1pCLZDCBMeSKeN8Lopx1">约 100MB（不含后续安装的运行时，那些按需要下）</span></div>
+<div class="tbl-row" data-page-node-id="3Y7CvxKEwhxXc8APf30Hbx"><span class="k" data-page-node-id="EhNMCLC7MULS8WlrwWg6hJ">权限</span><span data-page-node-id="ph4IcEwexXPWfBxCNOj85d"><b style="color:var(--text-1);font-weight:510" data-page-node-id="Dy2qfi2TJMMsdt2MNbDiCh">不需要管理员</b>，不写注册表</span></div>
+</div>
+<h4 data-page-node-id="IfJC9zbEJmagTNVTjNS6P3">三种装法，选一个</h4>
+<div class="tbl wide" data-page-node-id="JTgSM0fvfzoxojsURF5H0m">
+<div class="tbl-row" data-page-node-id="hhZ25o9azRKbstw6FaJU9z"><span class="k" data-page-node-id="7qg3gFyyGCPZSJOWLHPSVi">安装版</span><span data-page-node-id="9Pv94B5ePZfRK0rHMyBYxk"><code data-page-node-id="AaOjl3isaEGKy5XNhItCcQ">quickdock-amd64-installer.exe</code> — 推荐。默认落到 <code data-page-node-id="7gMuwX1SqmsgAoNRHi80aD">%LOCALAPPDATA%\Programs\快启坞</code>，自动更新最省事</span></div>
+<div class="tbl-row" data-page-node-id="30kyYx4Cavr4ISEXCSeh1c"><span class="k" data-page-node-id="FcXPRCO51c58pkfDtc8lrE">便携版</span><span data-page-node-id="tZS1tPbdh0nlwBtJR8gKaa"><code data-page-node-id="kPN00MXmywgrAevHmLw8IB">quickdock-amd64.exe</code> — 单文件直接跑。只要放在<b style="color:var(--text-1);font-weight:510" data-page-node-id="7BUqVpthpuabf1PkNTXuB5">当前用户可写</b>的目录（别放 Program Files），同样支持就地更新</span></div>
+<div class="tbl-row" data-page-node-id="LdmFeDeEgwivOVR9INRPew"><span class="k" data-page-node-id="iBQEOEmDM6cISmUmPKx7R5">macOS</span><span data-page-node-id="4cZtV74YPgqL7FAxfax0te"><code data-page-node-id="2n5e4shCoqcITetHSMt3l7">quickdock-darwin-arm64.dmg</code>（Apple 芯片）/ <code data-page-node-id="sgRgT8GAOkzbkc2MOJX4sH">-amd64.dmg</code>（Intel）</span></div>
+</div>
+<h4 data-page-node-id="ZLqFrtxja8GCS9ict71iR8">Windows 安装步骤</h4>
+<ol class="install" data-page-node-id="cLntw82X9wEk31XflaKj5t">
+<li data-page-node-id="1na6roW1MsWcFnS9w6opFT">下载 <code data-page-node-id="Si7YqF4E2wJXNqpF1ITR7T">quickdock-amd64-installer.exe</code> 并双击，<b style="color:var(--text-1);font-weight:510" data-page-node-id="faNWqUB70x502z3CCTcrtx">一路默认不要改安装路径</b>。</li>
+<li data-page-node-id="7zE27F9yM1OPJFekjEW4qr">装完运行 QuickDock，任务栏托盘出现图标即启动成功。</li>
+<li data-page-node-id="yjueRRdoD4dBxgOyXY0O9B">按 <kbd data-page-node-id="pJslHkwcioUNACJqFFciL0">Ctrl</kbd>+<kbd data-page-node-id="BjKPH4BxAv5GUFGQ4ahkzZ">Space</kbd> 唤出主窗口，跟着首启引导页点几下（主题、开机自启、要不要示例数据）完成初始化。</li>
+</ol>
+<div class="note" data-page-node-id="uzxj5bzKgLMAtQE8p43WSF">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="uHPdDoGlDGB4Ll3GYoo3XL"><circle cx="12" cy="12" r="9" data-page-node-id="hJFbLJOm0Hgsh9sLmoAG50"></circle><path d="M12 8h.01M12 12v4" data-page-node-id="QA6esVgiQAqZFGCAixKoHz"></path></svg>
+<div data-page-node-id="SG4DZ34WhHfgOEYCYG2QfX">别装到 <code data-page-node-id="ABRzlRFH9LERz9ZyQnsuGc">C:\Program Files\...</code>。那里写文件要过 UAC，就地替换更新会失败，只能每次手动下安装包覆盖。已经装错了？卸掉重装到用户目录即可，数据在 <code data-page-node-id="U7GfjDJmSdql3k9rby5Smm">~/.quickdock</code> 不受影响。</div>
+</div>
+<h4 data-page-node-id="NOJHHyZu1U2q5TlWEo84FV">macOS 首次打开</h4>
+<p data-page-node-id="EgsEGRB7HqpuhK395Uwjco">没有开发者签名时系统会拦一下。两种方式任选：</p>
+<div class="code" data-page-node-id="APQPFDMMBDHGPcVrCuiI9Q">
+<div class="code-head" data-page-node-id="RLp5PmEdSRhuAAIIihy5df"><span class="file" data-page-node-id="1USm2EuTgMyBDn5oR5AK7H">终端（推荐：装到 ~/Applications 时不需要 sudo）</span><button class="copy" data-copy="mac-quarantine" data-page-node-id="vLG02dsiElKbkx1pyiITis">复制</button></div>
+<pre id="mac-quarantine" data-page-node-id="ZjyBJlVKyu2yHd1lz8UcE7">xattr -dr com.apple.quarantine ~/Applications/quickdock.app</pre>
+</div>
+<p data-page-node-id="HkRFtUXLlpGkEz2QRqGqrX">或者：系统设置 → 隐私与安全性 → 找到被拦截的「快启坞」→ 点「仍要打开」。之后应用启动时会自动清理这个属性，不用每次手动。<br data-page-node-id="lF53tSLXpwgvjvfKkME3hn"/>
+<b style="color:var(--text-1);font-weight:510" data-page-node-id="9BWALAGpbJ1QJ2gEfrllTr">务必把 .app 拖到 ~/Applications</b>，别在下载目录里直接双击运行 —— 会触发 App Translocation，导致更新「假成功」。</p>
+<figure class="shot" data-page-node-id="16QM8JtWdJ11WAhNkCPuV6"><img src="assets/img/ui-onboarding.png" alt="首启引导" data-page-node-id="ABKkp657JDa0wh9RuW5VOr"></figure> 
+</article>
+<!-- ============ 2 ============ -->
+<article class="step reveal" id="g-ui" data-page-node-id="Okt5wfF3P0ae1yABb7jPXV">
+<span class="step-no" data-page-node-id="tGByx6WDyM4NChuEMNnLJx">STEP 02</span>
+<h3 data-page-node-id="fFBYbZsFcFjL7vxE6N9WWs">界面速览</h3>
+<h4 data-page-node-id="xEdXTTBscjruTdphLTaVFv">主窗口：三栏布局</h4>
+<div class="tbl wide" data-page-node-id="o1jkxECTlpc0GEFn9m15O9">
+<div class="tbl-row" data-page-node-id="1FtqJWfB1GKC9NnUqvlEZP"><span class="k" data-page-node-id="U9tFbREy0QVtisuxsrZzOU">侧边栏 210px</span><span data-page-node-id="ASWHpBDfTPn6eNxay246mv">工作空间与场景切换，最上面是全局入口</span></div>
+<div class="tbl-row" data-page-node-id="5S6OVCkFnzyuGkUR2GtUWY"><span class="k" data-page-node-id="Zn7ExOuUl2aQTdgZszyyue">集合列表 300px</span><span data-page-node-id="d5GxubAWeChLmV8KqBR1GG">当前场景下的集合分组</span></div>
+<div class="tbl-row" data-page-node-id="B1u667jBO16EzG0RVlcJVb"><span class="k" data-page-node-id="5Gtemz5d3BHtOO9DleZmYD">项目列表</span><span data-page-node-id="GccgwMXSnABym2Zz2PcGHC">集合里的具体条目，支持拖拽排序与右键菜单</span></div>
+</div>
+<p data-page-node-id="hAnXdR4IjR0sEePtrQAyNH">顶栏放搜索框、<b style="color:var(--text-1);font-weight:510" data-page-node-id="iFRHhHC2SidF09OqXe6uC1">端口全景</b>（一眼看全本机服务占用）和设置入口。主题支持深色 / 浅色 / 跟随系统，设置里切换，插件窗口会同步适配。</p>
+<h4 data-page-node-id="FuCWYNQ4Fa7LSHs5o2eBzX">四种窗口，三种是浮动的</h4>
+<div class="tbl wide" data-page-node-id="jZpordTno9IfhGV2Au2r1D">
+<div class="tbl-row" data-page-node-id="MDyiWBDgcDhJEKP0lLDRRi"><span class="k" data-page-node-id="LER6NaE9kRiZXRipzKrE48">主窗口</span><span data-page-node-id="msf4JKD8U8ZTHM9jyOciIz"><kbd data-page-node-id="3ujgG8BZvWCdBwHbHPo1hf">Ctrl</kbd>+<kbd data-page-node-id="aIsR62qSkkjtDzqZa32dCL">Space</kbd> 显示 / 隐藏，承载全部页面</span></div>
+<div class="tbl-row" data-page-node-id="vjuDHoQ7eV9SmLjjOHNJwZ"><span class="k" data-page-node-id="PFEl1V1aZeF6tCuqJ8Pwqk">命令面板</span><span data-page-node-id="uDu8vFeys1XLiDad2BzcFn"><kbd data-page-node-id="B4mINk3dW8ZAatfKBFRUi6">Ctrl</kbd>+<kbd data-page-node-id="xfU0kXdZOA9XH3yglvFBUV">K</kbd>，浮动窗口，失焦自动隐藏</span></div>
+<div class="tbl-row" data-page-node-id="6A2Y5ZBvDpj0lTqfuHMI2i"><span class="k" data-page-node-id="UjXjzrV5NIltbmkzQbqbw6">剪贴板</span><span data-page-node-id="wZX5urJdr5JKj9wu40UGpZ"><kbd data-page-node-id="iBEiaLLBaYbBLgCDIiSDzs">Ctrl</kbd>+<kbd data-page-node-id="JdEpvGpN4jnGNpn4K8sCxs">`</kbd>，浮动窗口，失焦自动隐藏</span></div>
+<div class="tbl-row" data-page-node-id="ctI0YxfuRAml717eubg50V"><span class="k" data-page-node-id="Qc1JXi9rkJzR45VCgmQVyG">快捷笔记</span><span data-page-node-id="y2eEIa0MT20bZIcId6PRgi"><kbd data-page-node-id="PthB0BqrYPFYjAsHu2zaRf">Ctrl</kbd>+<kbd data-page-node-id="qAJGWWQVe3FDfzGXfkxLZZ">Shift</kbd>+<kbd data-page-node-id="fNo9iKKt3ihAvD7pOEaxkO">N</kbd>，浮动窗口，失焦自动隐藏</span></div>
+</div>
+<h4 data-page-node-id="Qy1q6QGsGRHnMKpGGoioxb">主要页面在哪</h4>
+<p data-page-node-id="7ycdLadYKI7hW0pr3EJM1d">侧边栏 / 顶栏可进入：工作空间、环境管理、插件（已装 + 市场）、待办、定时、监控、端口全景、AI 助手、DeepSeek Harness、设置（通用 / 热键 / AI / DSH / 快照 / 同步 / 工具）。</p>
+<div class="note" data-page-node-id="sVii3dUDcDhbdFlHnkdJ3C">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="BGX3ktQD8pxutUN4M6sBqN"><rect height="16" rx="2" width="16" x="4" y="3" data-page-node-id="49Doe3tctY4pgJ7eordsTR"></rect><path d="M4 8h16M9 8V5M15 8V5" data-page-node-id="zzNrmrTfSHKAdgUbPshSQ4"></path></svg>
+<div data-page-node-id="iLsrHdrOot008ZrAujRAlD">同一台机器<b style="color:var(--text-1);font-weight:510" data-page-node-id="35WeT51TnxMYQefTwAUStv">同时只能跑一个 QuickDock 实例</b>（单实例锁，开发版和正式版共用）。双击没反应时先看托盘是不是已经在了。</div>
+</div>
+</article>
+<!-- ============ 3 ============ -->
+<article class="step reveal" id="g-hotkey" data-page-node-id="gzv92HyhKKn57R3OYSidz1">
+<span class="step-no" data-page-node-id="cIspYMFGzJ7XXeiFP85qTk">STEP 03</span>
+<h3 data-page-node-id="BjK04RzQUlUmTFJqg3dE4B">快捷键</h3>
+<p data-page-node-id="zMpGD6gvfUK7CZmeuiBwoB">默认只有四个全局热键，先记住它们就够用一整天。</p>
+<div class="keys" data-page-node-id="vrf8AIiPjAVRi0IyfYNeCq">
+<div class="keys-row" data-page-node-id="R5BUPLuH02wFwAW7kde02R"><span data-page-node-id="MEhhcgolrkL9Rs3pxUIkzG">显示 / 隐藏主窗口</span><span data-page-node-id="MZxw5VWVlnxrmfDeIrChT4"><kbd data-page-node-id="E4Xlq0NcvSLFws3jn7OCY2">Ctrl</kbd><kbd data-page-node-id="o43eQlDRd817m7vufsmcPn">Space</kbd></span></div>
+<div class="keys-row" data-page-node-id="4Ap6SMsetizo59Xm0BYZEF"><span data-page-node-id="8BkZeawvAGBlVvOtcHOO0n">命令面板</span><span data-page-node-id="l4tGQZZBqINwGllLwIECYX"><kbd data-page-node-id="PlewM6cdcmE18WOgQTzPNK">Ctrl</kbd><kbd data-page-node-id="hgHQ2HYdcHVidcK8leSUyQ">K</kbd></span></div>
+<div class="keys-row" data-page-node-id="d6PnskBd2w2bAhqNfzwJ3W"><span data-page-node-id="4w6mnfQURZYMGx6vDsBX2Y">剪贴板历史</span><span data-page-node-id="6GAgkGFK9h1PADgICWRByv"><kbd data-page-node-id="CqQYHx64ujNjVevzSxNEfc">Ctrl</kbd><kbd data-page-node-id="LSZLg5ep0N3U7VsfuAc98t">`</kbd></span></div>
+<div class="keys-row" data-page-node-id="H9nT58x3wZhKe0sCBbsb2z"><span data-page-node-id="IfB8X1b2YloheY5VoJfF5D">快捷笔记</span><span data-page-node-id="yWaGMqnFUiK290EGMYK8hX"><kbd data-page-node-id="LXAVBZe4OVNs0kLZhMVM2E">Ctrl</kbd><kbd data-page-node-id="8iDBKeBa6Xep2cwAe8UC7L">Shift</kbd><kbd data-page-node-id="W5BBQ5Uwv9lt4CSrvMJqRj">N</kbd></span></div>
+</div>
+<h4 data-page-node-id="McYgDl2pscLr0dCHQhA7bV">自定义热键</h4>
+<p data-page-node-id="4kIXjb22HcbNE2KV5tCXTb">「设置 → 热键」里逐条改，改完<b style="color:var(--text-1);font-weight:510" data-page-node-id="RUplhbSHD5wwHvHpFv1E8F">运行时动态重注册</b>，不用重启。捕获新按键时会暂停全局监听，避免和你正在按的组合撞车。改乱了想还原，设置页里有恢复默认。</p>
+<h4 data-page-node-id="fWwii381gM8bqWc0QDapZc">命令面板内的键盘操作</h4>
+<div class="keys" data-page-node-id="aIsZWaTHSjQ7VRnrvQIoLM">
+<div class="keys-row" data-page-node-id="mga2v4HmUZMox75NbF8mTT"><span data-page-node-id="c9EWrXaoFBwqnO5tATVIqU">上下移动选择</span><span data-page-node-id="HV8PqUs4HQjExgRwcQk6OG"><kbd data-page-node-id="IiGpFupoIxFmreiFFMJnNu">↑</kbd><kbd data-page-node-id="99mSr4YFyzPf6rWC1AqDCI">↓</kbd></span></div>
+<div class="keys-row" data-page-node-id="F9N9eGIj8QmwTsRMoFAGA2"><span data-page-node-id="MSHbkMdA8shqkCucHWvxPD">打开 / 执行选中项</span><span data-page-node-id="98hCOh9U5NCX1p1K2OvN6x"><kbd data-page-node-id="ZxLF1JL78HydZqAysE69Zx">Enter</kbd></span></div>
+<div class="keys-row" data-page-node-id="6Np2AupvLXB1Ln28FgPUH3"><span data-page-node-id="pgzSHZa5vEpBkSHcQkwNS8">关闭面板</span><span data-page-node-id="F69PewVOTRPvNdVNLF5nKY"><kbd data-page-node-id="x4MPJioEedYvHGuGkyBcKv">Esc</kbd></span></div>
+</div>
+<p data-page-node-id="h8Rxnf5LVEJObKo9ECENBu">面板里还能直接粘贴网址 —— 会自动识别并帮你建成项目，不用手动填表单。</p>
+<h4 data-page-node-id="fQtUZyaaPUCkAHYR5lMmXq">顺便：系统命令</h4>
+<p data-page-node-id="7UE6mWbStIuJgx3pDBSYVB">锁屏、关机、重启、睡眠、清空回收站也能在应用里直接触发，不用再去开始菜单点。</p>
+</article>
+<!-- ============ 4 ============ -->
+<article class="step reveal" id="g-workspace" data-page-node-id="mK05BBMmz3xlMx0xKCtWvL">
+<span class="step-no" data-page-node-id="es4xOAF8EEdTRo26S51J7Y">STEP 04</span>
+<h3 data-page-node-id="wHN5RqW4zL0Sd6hN4iHO3Y">工作空间与项目</h3>
+<p data-page-node-id="L75sNeMfJofMTerAubJhXR">QuickDock 用四层结构收纳一切资源。看着层级多，实际就一句话：<b style="color:var(--text-1);font-weight:510" data-page-node-id="s8wz4oV505uPivEI2FlnSg">按项目上下文分堆，再按关注点分页</b>。</p>
+<div class="code" data-page-node-id="Ib6kscnCo5C5MfBpHsi9BC">
+<div class="code-head" data-page-node-id="Bf9OHT9wQ1BvbRrWRjv3hr"><span class="file" data-page-node-id="8mfW0sDycDFUtNdkrMufV8">数据模型</span></div>
+<pre data-page-node-id="FWoDUAkyXWqbBLgP52NFR9">Workspace（工作空间） <span class="c-com" data-page-node-id="LcJsemdZoAeSXVWbIjtYGJ">— 顶级容器，隔离不同项目上下文</span>
+  └── Scene（场景） <span class="c-com" data-page-node-id="o0Q07nkN6HipRfSDxSC5xD">— 标签 / 图标 / 颜色，快速切换关注点</span>
+       └── Collection（集合） <span class="c-com" data-page-node-id="UqJJmKWYoenNpt4hfmcj3G">— 逻辑分组，可设打开策略与关联工具</span>
+            └── Item（项目） <span class="c-com" data-page-node-id="t7VJqDJpHmCVG2e3CJieaf">— 真正要打开的那个东西</span></pre>
+</div>
+<h4 data-page-node-id="gMXmlyQKDe7gFYuB9oOfiY">项目支持 6 种类型</h4>
+<div class="tbl wide" data-page-node-id="ISztDOte7zySqt5XdhtS81">
+<div class="tbl-row" data-page-node-id="eYhwZ9npiFVjc34t5dxSz9"><span class="k" data-page-node-id="J2Hd2wpU07oXo6YDYliDoh"><code data-page-node-id="LqC1bpU8k9n7V3MaiDdo0T">directory</code></span><span data-page-node-id="esyi8U8T4Lk1IjYbPO5cFw">目录 — 用资源管理器或终端打开</span></div>
+<div class="tbl-row" data-page-node-id="H1CTGd4Is53IdIcqo7GFM6"><span class="k" data-page-node-id="tAluYPsSeItualOgkGlg6Z"><code data-page-node-id="EQllGoUraUqf0eOMLMnJSo">file</code></span><span data-page-node-id="gEzyPTLtQvt7HD5toYsjuU">文件 — 用系统默认程序打开</span></div>
+<div class="tbl-row" data-page-node-id="jQz1yTOGHZHQrqD3fBKiAz"><span class="k" data-page-node-id="6z18SzFQIotdp8JTWEoQJn"><code data-page-node-id="AISR5nMdX9hyxfLhYGrOUc">url</code></span><span data-page-node-id="1KY3mcGDloOOelri8XWWOU">网页链接 — 用浏览器打开</span></div>
+<div class="tbl-row" data-page-node-id="wYzYZf8wUIEVjP91ur2rKO"><span class="k" data-page-node-id="Kbc2asoOJDld1G7U6iAUzE"><code data-page-node-id="hhcf23CZ2fvjSIqiW4pBh6">command</code></span><span data-page-node-id="qNzgCUQ5YVpzhyprARzvgQ">终端命令 — 在终端里执行</span></div>
+<div class="tbl-row" data-page-node-id="YXounihdmvnMsM4jX2q29w"><span class="k" data-page-node-id="kGJTcvFAjJoT3J5z5vy6eE"><code data-page-node-id="PPqHnjXMpBiPtJGeajiY6o">app</code></span><span data-page-node-id="HP1ztEAUfy0vhRbV5PwkPt">应用程序 — 指定可执行文件路径</span></div>
+<div class="tbl-row" data-page-node-id="wBQirPkH0quKNnbrOaJCRZ"><span class="k" data-page-node-id="NcMp50nqKBXK5WxEKmEsNS"><code data-page-node-id="PBoOcA3cdtB9sfwHNLhGhL">quicklink</code></span><span data-page-node-id="66hSk8gQ2Q3nuTN8vnMkyw">快速链接 — 带参数的快捷方式</span></div>
+</div>
+<h4 data-page-node-id="h83up9y68JLxv7QwhyHJNh">从零建一套</h4>
+<ol class="install" data-page-node-id="rHerTaeQPna35X69jhz3yQ">
+<li data-page-node-id="9wADrTPXvcVYq9fTgLKThC">侧边栏新建<b style="color:var(--text-1);font-weight:510" data-page-node-id="Gx6mDhZFVKEuPTenOrWk9d">工作空间</b>，比如「公司项目」「个人折腾」—— 它们彼此完全隔离。</li>
+<li data-page-node-id="UkNrYXerzb9CMrfL5gpnEQ">在工作空间下建<b style="color:var(--text-1);font-weight:510" data-page-node-id="K9HvzV3lP6F1BG0q7sLOSM">场景</b>，比如「开发」「运维」「日常」，配个图标和颜色方便认。</li>
+<li data-page-node-id="wPskKymKavRdFjiAuaFXKF">场景里建<b style="color:var(--text-1);font-weight:510" data-page-node-id="OmZEBKby0nj0GV0Xr6C25j">集合</b>，比如「前端仓库」「常用后台」「SQL 脚本」，集合可以设置打开策略（怎么开、用什么工具开）。</li>
+<li data-page-node-id="9jPABSXubRNuzAORtdR0AF">往集合里加<b style="color:var(--text-1);font-weight:510" data-page-node-id="kiOkXCbohWBK3nnVQ5WRnf">项目</b>：拖拽文件 / 文件夹进来最快，也可以手动新建填类型。</li>
+</ol>
+<h4 data-page-node-id="k9tG8BwgxxGG7fFfIY6vpU">用起来顺手的几个点</h4>
+<ul class="card" data-page-node-id="JYDXZNEAI9eJcABCUxcnVM">
+<li data-page-node-id="7Jb7C1z5sNq7B4G1SBsdFC">四个层级都支持<b style="color:var(--text-1);font-weight:510" data-page-node-id="MQjK3GPKb2sxumCgq1XPHL">拖拽排序</b>，顺序按你的习惯排</li>
+<li data-page-node-id="olgFHD23rKccHdBgBbqzwy">搜索基于 FTS5 全文索引，还支持<b style="color:var(--text-1);font-weight:510" data-page-node-id="DCfg1BptOxEgqHsZb02FhP">拼音搜中文</b>（敲 <code data-page-node-id="LFXUQDaf0pgKpadTizBFmL">hj</code> 能找到「环境」）</li>
+<li data-page-node-id="teM7XhjLQKSyRLKBBHw6f2">命令面板会按<b style="color:var(--text-1);font-weight:510" data-page-node-id="aBUz6PcLuVNBD9LynPwW8Y">最近使用 + 最常使用</b>排序，越用越准</li>
+<li data-page-node-id="cgTQFrKH7kDcoM1ajAK2hU">场景的图标、颜色、标签随时改，改完立刻生效</li>
+</ul>
+
+<figure class="shot" data-page-node-id="j7vwsDYHRjBuIt9mxICbwp"><img src="assets/img/ui-workspace.png" alt="工作空间" data-page-node-id="8SgAmRK8Ti8xyrvETw66G1"></figure>
+</article>
+<!-- ============ 5 ============ -->
+<article class="step reveal" id="g-palette" data-page-node-id="i9k3fCgVvdUx22CAbK9smB">
+<span class="step-no" data-page-node-id="VC7V1ngLR3ExVivvEViTAo">STEP 05</span>
+<h3 data-page-node-id="YB9DskKy61UPrfwPKhzBCN">命令面板</h3>
+<p data-page-node-id="LQLEyACLn8nZ0yCkQklyeB">整个应用的核心入口。<kbd data-page-node-id="iKgYCwtkPWeYkHxNndBChq">Ctrl</kbd>+<kbd data-page-node-id="d01GzUZsPLgtGkJCNaYRAA">K</kbd> 唤起，一个框搜遍全部资源，回车即执行 —— 手不用离开键盘。</p>
+<ul class="card" data-page-node-id="xrS8JisE1WWIQu912BN0UL">
+<li data-page-node-id="5Vic5uGOqcBDjNHYeiTfmB"><b style="color:var(--text-1);font-weight:510" data-page-node-id="4IjRZxTcVgIjyhyVpidw6B">全局搜索</b>：工作空间、场景、集合、项目统一索引，不用先切到对应页面</li>
+<li data-page-node-id="cvKfxtUiSBoa2OpxgMHyXt"><b style="color:var(--text-1);font-weight:510" data-page-node-id="ql74Y6Fc1ABVeFx91qFmHC">排序会学习</b>：最近使用 + 最常使用加权（frecency），常用项越排越前</li>
+<li data-page-node-id="aTK5RnbR2XLRAlcxdOZieV"><b style="color:var(--text-1);font-weight:510" data-page-node-id="6eFecWNNmlHijQuaT3TCCx">智能建档</b>：粘贴一个 URL 进去，自动识别并存成项目，不用填表单</li>
+<li data-page-node-id="94oxfwC4NbIzaSvtMwoo9g"><b style="color:var(--text-1);font-weight:510" data-page-node-id="C2agBtsz2oFYo3lfU8b3U1">多选批量</b>：选中多项后一次性执行，比如批量打开一套开发环境的五个目录</li>
+<li data-page-node-id="rj3M9sQnUkCc2QCEOWBEui">浮动窗口，<kbd data-page-node-id="aTbFOgP3zHl0kXmgoJTwHe">Esc</kbd> 或点外面就收起，不打断手上的活</li>
+</ul>
+<div class="note" data-page-node-id="ycgd2XW7gP57gcrfnpUKCC">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="l9QJ5iHonWGizTBaDABNzH"><path d="m13 2-9 11h7l-1 9 9-11h-7z" data-page-node-id="qbO8xB5xlAQokNIQwA4xFZ"></path></svg>
+<div data-page-node-id="rsqKH0bpDtSihkumhugHbm">最省事的用法：把每天开工要开的东西（仓库目录、Swagger、日志目录、数据库控制台）放进一个集合，之后 <kbd data-page-node-id="1PHSF4nVHkkS1PYjMZ5G68">Ctrl</kbd>+<kbd data-page-node-id="HoYS27X7IyjIAUOBZbXS6A">K</kbd> 敲集合名 → 批量打开。</div>
+</div>
+</article>
+<!-- ============ 6 ============ -->
+<article class="step reveal" id="g-clipboard" data-page-node-id="jzhNbI84HpzuYjiXgbaNKm">
+<span class="step-no" data-page-node-id="aARkiMAF3NwF32SvoDMwo0">STEP 06</span>
+<h3 data-page-node-id="zvLiscQTWBzM61Z4DppuJX">剪贴板历史</h3>
+<p data-page-node-id="JCCrPx5pZnPfA60E8iwxL3">后台自动监听剪贴板，文本、图片、文件都记，<kbd data-page-node-id="URxuWAiEnUwTCAtmr7p6zf">Ctrl</kbd>+<kbd data-page-node-id="x863j0gpvGEk54L60Er9x2">`</kbd> 随时翻旧账。</p>
+<ul class="card" data-page-node-id="ZnCYA2dWPZyRzPPCQw3jNL">
+<li data-page-node-id="Y8KSSwlMp2hcHDZyqf8VJo"><b style="color:var(--text-1);font-weight:510" data-page-node-id="ZLwysHLIQeJm0h4OOoTpuZ">常用条固定</b>：把天天要粘的地址、Token 前缀钉住，不会被清理</li>
+<li data-page-node-id="ZxkEWgBNOtjwymmdGA07ga"><b style="color:var(--text-1);font-weight:510" data-page-node-id="RzJR1ic6IAc1fNukgCZL08">搜索</b>：历史多了直接搜内容</li>
+<li data-page-node-id="VtDVq28QxAqH3Hdk1sLjjK"><b style="color:var(--text-1);font-weight:510" data-page-node-id="jxxjtSF3u0N53WN9r1ID8s">批量删除</b> / <b style="color:var(--text-1);font-weight:510" data-page-node-id="9cnjKJZg6z2LL7HaG8p9Wt">按天自动清理</b>：保留天数在设置里配，过期自动清</li>
+<li data-page-node-id="xsggi89NDHwhNHZVVCkk06">浮动窗口失焦即隐藏；图片条目存在 <code data-page-node-id="BIiAmz1L5A8ect95gNDcqn">~/.quickdock/images/</code></li>
+</ul>
+<p data-page-node-id="KP3jlbmywWwY9VGFivCXAA">想彻底不留痕迹：设置里关掉对应类型的记录（比如不记图片）。</p>
+</article>
+<!-- ============ 7 ============ -->
+<article class="step reveal" id="g-notes" data-page-node-id="LIGdBHlA7z8hwDRp7QlRhn">
+<span class="step-no" data-page-node-id="ZU24z4YCqV9MYVDznRJd6D">STEP 07</span>
+<h3 data-page-node-id="XlYmC8lF9gtd8TR9AFW30K">笔记库</h3>
+<p data-page-node-id="cAzH0Far0PBJnPsQOiahI5"><kbd data-page-node-id="kZCODz4ciNrMnjjXssQuXW">Ctrl</kbd>+<kbd data-page-node-id="QRfSnd5d1Z4Bv2WB5dLzrm">Shift</kbd>+<kbd data-page-node-id="lYUkmBOumUcrsLRvTaGipU">N</kbd> 唤起浮动笔记，随手记；要整理时进「笔记管理」页面，用树形结构归档。</p>
+<ul class="card" data-page-node-id="Ebmp1phJo2VKbasAkyGpTg">
+<li data-page-node-id="FSoAY4pC1R4x1cO3zVEWA7"><b style="color:var(--text-1);font-weight:510" data-page-node-id="itSrG6YMDVCw801LWiCplN">文件夹 + Markdown 文档</b>，任意层级嵌套，支持搜索、重命名、删除</li>
+<li data-page-node-id="VNwQvatvJVmn601r53jmd3"><b style="color:var(--text-1);font-weight:510" data-page-node-id="oHJqj3pri66UBYmUSPIAFG">自动保存</b>：500ms 防抖，不用按 Ctrl+S，也不用担心忘存</li>
+<li data-page-node-id="NCK761QDRJYWlMJqADhOSN">浮动窗口失焦自动隐藏，下次唤起接着上次的笔记</li>
+<li data-page-node-id="1WgENmimtu2FHjLM2k3Rup">早期版本的「快捷笔记」会自动兼容成根级文档，老数据不丢</li>
+</ul>
+<div class="note" data-page-node-id="WipGYqrNsrHSe0MUPhAGxW">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="YZSSpndhyS6duMg5gGlE27"><path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" data-page-node-id="davZwcpiM1ldOGMBOZTIqq"></path><path d="M14 4v5h5" data-page-node-id="0LPsdIv9mIm6E44IGKlRE9"></path></svg>
+<div data-page-node-id="dGdxA7BMDBClhpshxweHYE">浮动笔记适合「临时抓一段」：报错信息、临时命令、别人发的一段配置。要长期保存的，进笔记管理页拖进对应文件夹。</div>
+</div>
+</article>
+<!-- ============ 8 ============ -->
+<article class="step reveal" id="g-todo" data-page-node-id="lhDwr1MSaCkXfg3XH30uY9">
+<span class="step-no" data-page-node-id="nDT0IOMMaolEvheYZH7AiQ">STEP 08</span>
+<h3 data-page-node-id="4WyxzFWnMPR770Omufveet">待办与番茄专注</h3>
+<ul class="card" data-page-node-id="caq5qwCbTAekCW8dG5HfzE">
+<li data-page-node-id="EtuUCwcyqMrdgz303HA4sx"><b style="color:var(--text-1);font-weight:510" data-page-node-id="q3VFSJKTg2hM7BQj35j2QE">双视图</b>：列表看明细，看板按「待办 / 进行中 / 已完成」三列拖着走</li>
+<li data-page-node-id="qhwHCk1NddPwtsj0jo0tdB"><b style="color:var(--text-1);font-weight:510" data-page-node-id="s7laoErJCMlcwA9HKLR32T">子任务</b>：单层级 checklist，拆完打勾</li>
+<li data-page-node-id="AFmQzwNWSUiOSIYjKWnufs"><b style="color:var(--text-1);font-weight:510" data-page-node-id="MBiVtBB8JKyyBr9Ij5zYFu">标签分类</b> + <b style="color:var(--text-1);font-weight:510" data-page-node-id="TJquYRY0E7O5h2DTfX0qrO">重复待办</b>（每日 / 每周 / 每月），周期性的事只建一次</li>
+<li data-page-node-id="X5sjpvYlF35BGZFrjgNUON"><b style="color:var(--text-1);font-weight:510" data-page-node-id="M8rzjPWqdXkRtWnzIZ6DEV">到期提醒</b>：到点弹系统通知，不用另开提醒软件</li>
+</ul>
+<h4 data-page-node-id="AbwgyHWQTyErRxgfzdt2wJ">番茄专注</h4>
+<p data-page-node-id="EGqqrDNLwx61YxdeQhR088">在待办页选中一个任务启动倒计时，专注期间就盯着这一件事。倒计时结束弹系统通知，还可以配一个 Webhook 推送到手机（钉钉 / 企微 / 飞书等），离开电脑也收得到。</p>
+<div class="note" data-page-node-id="Ieqq0oxzDyvtByg37qCmTg">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="3PD2ZyKKEFALumjXXHrNjQ"><circle cx="12" cy="12" r="9" data-page-node-id="g26zcXTvzCyQLmTcw6mdC4"></circle><path d="M12 7v5l3 2" data-page-node-id="hTPB6Syeq284wa2fsvZ5EY"></path></svg>
+<div data-page-node-id="Yp1RXrKOjwGth93rAOzlYV">番茄钟和待办是绑在一起的：专注记录挂在具体任务上，回头看就知道这个任务花了几轮。</div>
+</div>
+</article>
+<!-- ============ 9 ============ -->
+<article class="step reveal" id="g-monitor" data-page-node-id="qEHEsJj3n7clx625BO6GDp">
+<span class="step-no" data-page-node-id="d2ccM9Ats8WvpF2A0awA7k">STEP 09</span>
+<h3 data-page-node-id="FAXM9VVLD30mDzIO9E7L1k">网站监控与通知</h3>
+<p data-page-node-id="54v3AHY3yvqtZ78BPpdlH0">给自己负责的站点挂个探活，出问题第一时间知道，不用等别人来问。</p>
+<h4 data-page-node-id="8nkywJ4Lu6ZueLU5MmnY8b">能监测什么</h4>
+<div class="tbl wide" data-page-node-id="ShMPzUmFKFRwMMT4hgrhPs">
+<div class="tbl-row" data-page-node-id="uvXZivK2A91EIrXnD4WL6C"><span class="k" data-page-node-id="zyOlepX1t8Fpp9CaunEwa4">状态码</span><span data-page-node-id="uchWnj9y1abE3OOSfksP8Y">定时探测（GET / HEAD / POST），非预期码即告警</span></div>
+<div class="tbl-row" data-page-node-id="YZV2xImchFnY8ejKnIYOIr"><span class="k" data-page-node-id="0ws9KM71sIKMpuPzW6YTGB">响应时间</span><span data-page-node-id="kj0VmrPjYkUBmzyMzIBDGS">记录并出趋势图，可选 24h / 7d / 全部三个区间</span></div>
+<div class="tbl-row" data-page-node-id="mUhD9iArbWif7w47nVEcMj"><span class="k" data-page-node-id="GoNlR7HPMVyJojIWsG7Apv">SSL 证书</span><span data-page-node-id="C5Fux5MaElvtbHKoYDAeA3">到期前 N 天预警，天数自己定</span></div>
+<div class="tbl-row" data-page-node-id="dXVDlBKVjEH59vpQc3NqCx"><span class="k" data-page-node-id="8aHrXDlc4wIYm5Dh5WLkGt">内容匹配</span><span data-page-node-id="GaE0VDxeD7VJbwC6b0hK96">关键字或正则匹配页面内容，页面被篡改能发现</span></div>
+<div class="tbl-row" data-page-node-id="r1Ar5NVe4JbqACXEtXNfzg"><span class="k" data-page-node-id="V8O3Vdbv4rujb5OCGbIBUd">在线率</span><span data-page-node-id="T3YqmPDFwfdtDSOSgtC9Cm">统计可用性，配检测日志和状态翻转记录</span></div>
+</div>
+<h4 data-page-node-id="4MX58bqjslX6ByTBsFgIlA">通知怎么配</h4>
+<p data-page-node-id="NBBdFwVJXksK3drNm3MkgB">「Webhook 设置」里填渠道地址即可，支持 <b style="color:var(--text-1);font-weight:510" data-page-node-id="9AP3ou5DK505kUlRL4Q6Xj">钉钉 / 企业微信 / 飞书 / Server酱 / PushPlus / Telegram</b>。状态翻转（正常 ↔ 异常）时才推，不会一直刷屏。桌面端同时弹系统通知。</p>
+<div class="note" data-page-node-id="OXXEAlM89fhfwaDpWJFpDK">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="mci0nFxb2OEB7diOq9YU2p"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" data-page-node-id="trIZJIhc38iP77zrRZMqQv"></path><path d="M13.7 21a2 2 0 0 1-3.4 0" data-page-node-id="lvMEJnibk1IrNFzAteGbVp"></path></svg>
+<div data-page-node-id="cHtjVTWigGQDYBOCdJ9Viq">监控依托 QuickDock 主进程运行，<b style="color:var(--text-1);font-weight:510" data-page-node-id="tlFPBRSLtc1LdBAj6UREMM">关了应用就不探了</b>。要 7×24 监控得让机器上的 QuickDock 保持运行（可以开开机自启）。</div>
+</div>
+</article>
+<!-- ============ 10 ============ -->
+<article class="step reveal" id="g-schedule" data-page-node-id="0QxZRItoDX8CnrsBCPUl1r">
+<span class="step-no" data-page-node-id="REZV3f4RS2cuIh7JV8giF6">STEP 10</span>
+<h3 data-page-node-id="e96VEdrMYWMHoSHAPlDRF2">定时任务</h3>
+<p data-page-node-id="lYsZ4XgDtuJhyIGxrnEVL5">五种动作 × 五种调度，组合出你要的自动化。</p>
+<div class="tbl wide" data-page-node-id="VCeqWD2TfONcFeYK5fz5KJ">
+<div class="tbl-row" data-page-node-id="9S7qrkqS5dDUoKuQUHl75z"><span class="k" data-page-node-id="V8JDyeztcfaiq7fSCMLjUz">动作</span><span data-page-node-id="wF7qNgniWz7ItAOpOPBnlx">打开软件 / 打开目录 / 打开网页 / 执行命令 / 发 HTTP 请求</span></div>
+<div class="tbl-row" data-page-node-id="fEZswH0EL5CliHUcvvdZOz"><span class="k" data-page-node-id="42OA18T33ZBDTki9k62p2j">调度</span><span data-page-node-id="uVFlUVJAHAnFMPgkEWS0GG">一次性 / 按间隔 / 每天 / 每周 / 每月</span></div>
+<div class="tbl-row" data-page-node-id="8T8YI2ngoMShRoXhUey2Zb"><span class="k" data-page-node-id="bPT67ejkQxdByZc8E9V9it">反馈</span><span data-page-node-id="3Y23C6U8ARxC05RleCoTv4">执行后弹系统通知；列表里可以手动「立即执行」先验证一把</span></div>
+</div>
+<p data-page-node-id="zUaKIlDK9gK26p7jYkYvl2">典型用法：每天早上九点自动拉起一整套开发环境（终端 + 目录 + 后台页面）；每天晚上定时调一次接口触发备份。</p>
+</article>
+<!-- ============ 11 ============ -->
+<article class="step reveal" id="g-env" data-page-node-id="kGR9nIYeQWUIhHLoxx4Dmu">
+<span class="step-no" data-page-node-id="HBNEet4zaabcWSZWf61pXM">STEP 11</span>
+<h3 data-page-node-id="RyiHhiaX4Q8zXnQNZb7X8J">环境管理</h3>
+<p data-page-node-id="j8W5JqQMczBkAiGwBdaE8U">把开发环境当成可装卸的模块：装、切、启停、改配置、看日志，全在一个页面。所有版本落在 <code data-page-node-id="NywB1Ncaghub267cpYm7l6">~/.quickdock/runtime/&lt;name&gt;/&lt;version&gt;/</code>，<b style="color:var(--text-1);font-weight:510" data-page-node-id="58UKsDAP3d54sws2twEZZ9">不写注册表、不改系统 PATH</b>，删掉 QuickDock 就一起没了。</p>
+<h4 data-page-node-id="kcZZWpv2XB95EkmC5xcbiD">安装一个运行时</h4>
+<ol class="install" data-page-node-id="ADlnFUzTVlbxzYoq9CTGD8">
+<li data-page-node-id="CzAz450s601C4A77pziWn9">左侧点运行时标签，自动拉取可安装版本列表。列表优先走 GitHub Releases API，失败自动用 HTML 解析兜底；国内源慢可以切镜像，换完点「刷新列表」重拉。</li>
+<li data-page-node-id="5L1QfAmiP4du3uEPFaO0rP">选版本 → 安装。下载 / 解压 / 安装全程异步，进度实时显示在界面上；多源回退 + 代理容错，一个源挂了自动换下一个。</li>
+<li data-page-node-id="PFgsTQYGl9FGiqUOQAUHM2">装完可以再装别的版本，<b style="color:var(--text-1);font-weight:510" data-page-node-id="7cjKRHMGGQxrltC1aTsFmE">多版本共存</b>，通过环境变量切换当前激活版本。</li>
+</ol>
+<h4 data-page-node-id="ld7LmNLmXDKQbSJDh1frhm">服务型运行时还能这么玩</h4>
+<div class="tbl wide" data-page-node-id="IN6oIiVoeobgC1UwAlTB4L">
+<div class="tbl-row" data-page-node-id="TMMYVfHxwtmRTUPfvel15c"><span class="k" data-page-node-id="maCrSckDciMCjCwXhsJBU0">启停重启</span><span data-page-node-id="xIQ5Pd32GS895uuDATGxYf">一键启动 / 停止 / 重启，实时显示 PID、端口与健康状态</span></div>
+<div class="tbl-row" data-page-node-id="0ZLTzglQ2lyJh6Wsg5ljDF"><span class="k" data-page-node-id="e7g1nARcZqt18lxCgKPSNI">配置编辑</span><span data-page-node-id="zdcvtTkQMToMfPkpOI0V62">直接改 <code data-page-node-id="A6BWfnKAk9FjM74mmICMYN">Caddyfile</code> / <code data-page-node-id="KotWlNANxPZK4d8a5MLP0Y">redis.conf</code> / <code data-page-node-id="Nm5FtxhljCvFaUwpg9DBpS">nginx.conf</code> / <code data-page-node-id="5HISULXtPhLzlF8pn4Ak19">traefik.yml</code> / <code data-page-node-id="rozTpbqAlinKOREDQEwHRs">php.ini</code> / <code data-page-node-id="bUYptCC16K7e8Gw5nhByf6">frpc.toml</code> 等</span></div>
+<div class="tbl-row" data-page-node-id="Y052IbXdxNmsTX25TC30HP"><span class="k" data-page-node-id="EYacFNzYdkB7MkBTDF5DtP">启动前校验</span><span data-page-node-id="nHVLcqUG2WCSL4oSTnunsJ">Nginx / Caddy / Apache 等会先跑配置校验（<code data-page-node-id="Ac1ZgbbWePvP6YxYeSIk2n">nginx -t</code> / <code data-page-node-id="7My7fl59NIFAqzA92HZeKH">caddy validate</code> / <code data-page-node-id="PDceH6pgUbentMzLoPDI6q">apache -t</code>），失败直接拦住不启动</span></div>
+<div class="tbl-row" data-page-node-id="lzsg6hL2vIgVE2drQAWDqC"><span class="k" data-page-node-id="1GUm2UjOt2uvmFmCk5ugaE">日志查看</span><span data-page-node-id="wxqVZosB2ow1F9RaUttsWR">弹窗实时滚动读取进程日志尾部 8KB</span></div>
+<div class="tbl-row" data-page-node-id="b2iOy032s4McB9o0hLgW8u"><span class="k" data-page-node-id="8ORyxbPDdDXFx3bfKOL4Eu">Web 控制台</span><span data-page-node-id="gAq7CHqu7BDHLyMNKpWHIR">运行中直接打开：MinIO 9001 / Mailpit 8025 / Traefik 8080 / RabbitMQ 15672 / Nginx·Caddy 80</span></div>
+<div class="tbl-row" data-page-node-id="DxfJIdCBFcNa6tpDfzT99m"><span class="k" data-page-node-id="TZ1gq86rk5cSJovnczs5cC">端口全景</span><span data-page-node-id="CqTmeQBBncRaW2UijeLmDm">顶栏汇总所有服务的运行时 / 版本 / 端口 / 控制台入口</span></div>
+</div>
+<h4 data-page-node-id="YjtVkjH5qmOW7swWKFI5Ps">Ollama 是特例（单版本）</h4>
+<p data-page-node-id="jLtb9RiUW26EWOmtNUrdLI">程序目录固定 <code data-page-node-id="mQXEFWrrU2R1fajpthosfl">runtime/ollama/</code>，<b style="color:var(--text-1);font-weight:510" data-page-node-id="3Vku1kiSMaEZ6sF8kLS4sS">不带版本号、不做多版本并存</b> —— 单份约 1.4GB 且独占 11434 端口，多版本纯属浪费。有新版本时侧栏只提示不自动动，你点「更新」才走原地替换（下载 → 暂存 → 校验 → 替换），任何一步失败当前版本都不受影响，<code data-page-node-id="DYwxFjBGtC7ArWCfvbQKEi">ollama.env</code> 配置保留。</p>
+<p data-page-node-id="2VIiKYEYtWT0Ctyz9llR5J">模型库默认与系统安装版共用 <code data-page-node-id="LeoGUC5wu6XcQLAZgevTxE">~/.ollama/models</code>，不用重下几十 GB。模型管理（列表 / 拉取 / 删除 / 查看已加载）都在界面里，走本地 REST API。卸载只删程序，绝不碰模型目录。</p>
+<div class="note" data-page-node-id="fDtFVGIX8FNc3u1iCOVIFP">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="rDVzVIDkaBmkCSK1g3pxLC"><circle cx="12" cy="12" r="9" data-page-node-id="iUMetNfJgRJuN8VVC58wUm"></circle><path d="M12 8h.01M12 12v4" data-page-node-id="62pmnbCFanxPbFNDZrDDuj"></path></svg>
+<div data-page-node-id="MeQDgTkYqjceRIKPZvsznq">如果机器上已经装了官方 Ollama 且开机自启，QuickDock 会提示它会抢占 11434 端口，但<b style="color:var(--text-1);font-weight:510" data-page-node-id="cgszqIl75mLMfJ5sS04y1h">不会自作主张禁用或卸载</b>，自己决定怎么处理。</div>
+</div>
+</article>
+<!-- ============ 12 ============ -->
+<article class="step reveal" id="g-plugin" data-page-node-id="lksTJGxzwZkmVkXJsjaHMD">
+<span class="step-no" data-page-node-id="JbHWEFDSueRUbcOWZDFLxh">STEP 12</span>
+<h3 data-page-node-id="9CJ59xTFoOLAqyewkQKVPN">插件</h3>
+<p data-page-node-id="dx6u74DDSZ1m1Vb4PZxPid">「插件市场」里 47 个官方插件一键安装 / 升级 / 卸载 / 启用禁用，装完还能给插件单独绑热键。</p>
+<h4 data-page-node-id="6xOZBWBHpj1uRbtbaRGx1V">三种运行时</h4>
+<div class="tbl wide" data-page-node-id="yUvvRS3Um3KUEPK9YtIHwF">
+<div class="tbl-row" data-page-node-id="kp3sF356sHuFFMAcXC3UK8"><span class="k" data-page-node-id="8xP8NeABGCnljMLC3Uu08c"><code data-page-node-id="CMh04aJTal6YcFBBrEnX5A">none</code></span><span data-page-node-id="1MR9shcbZPC2LwlfPY1o4f">纯前端，没有后端进程，最轻量</span></div>
+<div class="tbl-row" data-page-node-id="o5LOMTIehXHWXsZ8pXzcQU"><span class="k" data-page-node-id="iCrYCINe8sp1ydbLhU9fnI"><code data-page-node-id="QiyN31MwaEzcEASaLl7TaJ">goja</code></span><span data-page-node-id="OHDYgSvIdyGHnVINpnFTBG">内嵌 JavaScript 沙箱，能跑逻辑不需要额外依赖</span></div>
+<div class="tbl-row" data-page-node-id="Goh5DOhZTfDR6ZdPV5oQGt"><span class="k" data-page-node-id="NuNKkceLCanEJIJiKDtC38"><code data-page-node-id="88XXmdLhyn9BE9wGceC3s9">native</code></span><span data-page-node-id="hatnkWlGybEOTSPGiqnziF">独立子进程，能用系统级能力（如调用外部程序）</span></div>
+</div>
+<p data-page-node-id="uPJopCQ9IfRHhxpFX8bsdP">三者都通过 JSON-RPC 2.0 与宿主通信，能力面一致。插件装到 <code data-page-node-id="lZX1eO5ETlloepoQjicQGK">~/.quickdock/plugins/&lt;id&gt;/</code>。</p>
+<h4 data-page-node-id="lMRK2ISqStEUu1EIMBZzQw">安全模型</h4>
+<ul class="card" data-page-node-id="FQx12HpXIJ0GJklr9sVRLH">
+<li data-page-node-id="txhV7hi4L3zyLyEfkDHraY"><code data-page-node-id="vlq3CWcHaVgSE8geNi6D2B">permissions.filesystem</code> 声明目录 scope，读写越界直接拒绝</li>
+<li data-page-node-id="sX6C84848EiMITjCxBgzWp"><code data-page-node-id="pQx9E8zJtgUiFE9a12Fadw">permissions.network</code> 声明域名白名单，只放行列表里的域名</li>
+<li data-page-node-id="Gf2EjHEzZb0Sm8PwRIkeOv">插件不允许自己弹系统对话框 —— 文件 / 目录选择统一走宿主 API</li>
+<li data-page-node-id="VWWDROM1sfW0j4v70wGy7F">每个插件有独立的 KV 存储，互不干扰</li>
+</ul>
+<h4 data-page-node-id="H9ZaASb1CL9WCtyUqtNEzX">写一个插件</h4>
+<p data-page-node-id="CK46NPkWRqcqMOPgfvj8VT">宿主开放 27 个 Host API（日志、通知、剪贴板、对话框、KV 存储、文件读写、网络请求、Shell 打开、进程管理，以及复用宿主 MCP 的 <code data-page-node-id="qeu0xElAFsXhoVPhNyCVxa">host.mcp.call</code>）。最小骨架：</p>
+<div class="code" data-page-node-id="qlTP6KEcgHiElnLy5OG3TO">
+<div class="code-head" data-page-node-id="II6FPbXNauoZaYQQsSnZiR"><span class="file" data-page-node-id="AyOIDOxI4jxYKSnp4COhAt">plugin.json</span><button class="copy" data-copy="plugin-json" data-page-node-id="U8cETnM6GnBfHT94BChSmC">复制</button></div>
+<pre id="plugin-json" data-page-node-id="xsDDSk77ta0BPstIdLXW4L"><span class="c-com" data-page-node-id="sNCeytWbXEzMNF7ktkxDeo">// none 运行时最小集：plugin.json + icon.svg + frontend/</span>
+{
+  <span class="c-key" data-page-node-id="zpshy6CCusHVIEiM6WM7io">"id"</span>: <span class="c-str" data-page-node-id="sHk7Ig2xKvwdu9GFWKJgmq">"io.github.parieses.my-plugin"</span>,
+  <span class="c-key" data-page-node-id="eP8JSo5PHbpETMNccgsv4X">"name"</span>: <span class="c-str" data-page-node-id="vBuNBDC7yUtGa1PVlH9rsY">"我的插件"</span>,
+  <span class="c-key" data-page-node-id="PXavN8siFb6RsMNgATOj0K">"version"</span>: <span class="c-str" data-page-node-id="7f4FseIU1E6f2sIc6M4eaW">"0.0.1"</span>,
+  <span class="c-key" data-page-node-id="7I94J8zWx4cUUgJGlvboE2">"runtime"</span>: <span class="c-str" data-page-node-id="TtgK7AZBOvWMLyQjJ75Rzj">"none"</span>,
+  <span class="c-key" data-page-node-id="s5OpafHnoO62KMJFmg60VP">"entry"</span>: <span class="c-str" data-page-node-id="jCJ6wOhwmVtIVor3hZHAAE">"index"</span>, <span class="c-com" data-page-node-id="yPjQ9dHeQhypCbE5jVpxKw">// 不要写扩展名</span>
+  <span class="c-key" data-page-node-id="lKMzsfUTR26tU9J9oWmIfY">"permissions"</span>: {
+    <span class="c-key" data-page-node-id="GftA6HZFd15v4BSITpuDud">"filesystem"</span>: [<span class="c-str" data-page-node-id="4PsFhCjIFbnau0gPtKiwZd">"~/Downloads"</span>],
+    <span class="c-key" data-page-node-id="vxTc6RZmnRWzkBp0in10dj">"network"</span>: [<span class="c-str" data-page-node-id="OWNC88ximR59YHcZ0VATt0">"api.example.com"</span>]
+  }
+}</pre>
+</div>
+<p data-page-node-id="oSzKHzGrNKwBMWmHmD3gjU">完整开发文档与模板在 <a href="https://github.com/parieses/quickdock-plugins" rel="noopener" style="color:var(--brand-hover)" target="_blank" data-page-node-id="mMR3QKsbMyYOA9UraD251b">quickdock-plugins</a> 仓库。</p>
+</article>
+<!-- ============ 13 ============ -->
+<article class="step reveal" id="g-ai" data-page-node-id="F9uqQaF3sOLNw9DrZFRRhb">
+<span class="step-no" data-page-node-id="1cKenriKRWWa9KF9ajWwLn">STEP 13</span>
+<h3 data-page-node-id="zOdTfGYADmKcq7gsIbESC8">AI 助手与 DeepSeek Harness</h3>
+<h4 data-page-node-id="si8DSrJMdY3sktLpgiUEB7">内置 AI 助手（轻量对话）</h4>
+<ul class="card" data-page-node-id="oes0joYRuvBVHDtGmQIpSh">
+<li data-page-node-id="dK3olAx3SPKcS67mpeSrh3"><b style="color:var(--text-1);font-weight:510" data-page-node-id="9HczwyZ5fuF57Xd6heiwPb">多档案</b>：OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口，随时切</li>
+<li data-page-node-id="D7FpYa1dmWHaOPK8YFYzgY"><b style="color:var(--text-1);font-weight:510" data-page-node-id="6Nvd9B45WIqLnXxCaApDCq">四种模式</b>：聊天 / 解释代码 / 翻译 / 总结，模式 prompt 可叠加自定义 System Prompt</li>
+<li data-page-node-id="Q6ruDVGM68sZVq8XwLUGZM"><b style="color:var(--text-1);font-weight:510" data-page-node-id="XlGiCgUkRsLxpZyCg73bsz">SSE 流式输出</b>：token 到达即显示，不是转圈等半天</li>
+<li data-page-node-id="nu3wD0fMhRksOA2mbpHjoZ">思考过程（reasoning）默认折叠、Markdown 安全渲染、多会话管理、<b style="color:var(--text-1);font-weight:510" data-page-node-id="oMHE1AxlAlhO9cgTecFyew">Token 用量统计</b></li>
+<li data-page-node-id="ANDlqHx2Lbij34yfssN4aD">参数可调：Temperature / MaxTokens / TopP / 频率与存在惩罚</li>
+<li data-page-node-id="AkTsOXsZckOM2UcG5jm5Nq"><b style="color:var(--text-1);font-weight:510" data-page-node-id="BqxniO0s74R9LA0KWugLqM">API Key 用 DPAPI 加密</b>存储，前端不接触密文；设置页有「测试连接」一键验 Key</li>
+</ul>
+<h4 data-page-node-id="pzPlK5cOb4lcuTLzni42id">DeepSeek Harness（完整 Agent 编程入口）</h4>
+<p data-page-node-id="Dx0KJ5jchy0sXyrlQ4wpEh">和上面那个聊天框不是一回事 —— 这是内嵌的完整 Agent 环境，带工具、文件、终端、会话。</p>
+<ul class="card" data-page-node-id="2QnDh2ics9fyZsBqrHE14Y">
+<li data-page-node-id="wEvTWCwD2vHjceB1jPZAxw"><b style="color:var(--text-1);font-weight:510" data-page-node-id="nmQykdeBzBiMZE4E7Cp2G6">一键装填环境</b>：自动检测 node / npx / dsh，缺了就下便携 Node v22 并装 <code data-page-node-id="8QjahAHYnFxSzCWr7yz7t0">@deepseek-ai/dsh</code>，日志逐行可见</li>
+<li data-page-node-id="orTAMxC2xwAFFOUmQ5lO83"><b style="color:var(--text-1);font-weight:510" data-page-node-id="g2G0uDXwyp1PiQt0TUKLIW">原生窗口承载</b>：固定官方端口 3080，QuickDock 窗口直接打开，和浏览器访问同址</li>
+<li data-page-node-id="Rr50UJ3KIDTWQZJDC8hnwc"><b style="color:var(--text-1);font-weight:510" data-page-node-id="b8r73JQElXEPlXOkKtdVZD">关窗不停服务</b>：dsh 在后台常驻，下次点开秒进；要停得手动或退出 QuickDock</li>
+<li data-page-node-id="CKRyWUe0SpGRXMbpkTYkmm">复用官方 <code data-page-node-id="Ba8qOWk96rJ5zIDDhhredp">~/.dsh</code> 数据目录（皮肤 / 插件 / 会话），设置页可直接装 DSH 插件</li>
+</ul>
+</article>
+<!-- ============ 14 ============ -->
+<article class="step reveal" id="g-mcp" data-page-node-id="DvR7fKIFcCx5F5b87V1tGg">
+<span class="step-no" data-page-node-id="LK2j5tJjaih7VY1EhpQEMm">STEP 14</span>
+<h3 data-page-node-id="9NVW6F7nApMUrHA4eoJX0K">MCP 服务</h3>
+<p data-page-node-id="IOlTTAOSMQY9DuwkW7A7pq">QuickDock 自暴露一个 MCP（Model Context Protocol）服务，把本地能力开放给 AI 客户端 —— 让 AI 能真的操作你的环境，而不是只聊天。</p>
+<h4 data-page-node-id="EydzwMItuI6sEZGcZiMb1k">接入步骤</h4>
+<ol class="install" data-page-node-id="AsP0Ire0TBeNCCC4AHNjbC">
+<li data-page-node-id="daTMiZ22XeK62PoyVHi0dv">确认 QuickDock 正在运行（MCP 随主进程，退出即失效）。</li>
+<li data-page-node-id="qc6RaPZfeF3FGiMIpMOUyk">在你的 MCP 客户端里新增一个 <b style="color:var(--text-1);font-weight:510" data-page-node-id="3hfFlDyZSXJL8beakdkgDp">HTTP 类型</b>的 server，地址填 <code data-page-node-id="ETCf1Dx1NKjn4w5ZBp32MI">http://127.0.0.1:9230/mcp</code>。</li>
+<li data-page-node-id="fr3J7GkOvHVVYCzPSUfqop">需要写操作（起停服务、改待办等）的，到「环境管理」页把高危等级打开。</li>
+</ol>
+<div class="code" data-page-node-id="lAs03O7BRP0gwa4DBE628z">
+<div class="code-head" data-page-node-id="AjwtJN75ffrmOUMUXYezCC"><span class="file" data-page-node-id="8tdhdgnIFnQUdHnijpQew6">客户端配置示例</span><button class="copy" data-copy="mcp-cfg" data-page-node-id="zVe2CYSCZjJqgODafB9FHd">复制</button></div>
+<pre id="mcp-cfg" data-page-node-id="cc3vdYypoRVxSJfvMemYYv">{
+  <span class="c-key" data-page-node-id="xjIzUu1miB62P0MENCWJI1">"mcpServers"</span>: {
+    <span class="c-key" data-page-node-id="DGlLi3T0snt0DIIwHooERi">"quickdock"</span>: {
+      <span class="c-key" data-page-node-id="JZ7g4wgr2SHLVaiEadMx0U">"type"</span>: <span class="c-str" data-page-node-id="K5otAba5t9bFDAlSCQVUos">"http"</span>,
+      <span class="c-key" data-page-node-id="96KClexfcGeDOTK4rOE3u0">"url"</span>: <span class="c-str" data-page-node-id="lbvJrfqCFjxISCw9YdxXEo">"http://127.0.0.1:9230/mcp"</span>
+    }
+  }
+}</pre>
+</div>
+<h4 data-page-node-id="8es0BB2XOS1DMiEMAkKmnQ">能做什么</h4>
+<p data-page-node-id="zANn8VnxkfkGmRytCGlNkl">29 个工具分三级权限门：<b style="color:var(--text-1);font-weight:510" data-page-node-id="A8X6AVMX2ceSL0hPk8RIaZ">只读 17 个</b>（查环境、搜项目、看待办笔记、查端口、读日志）、<b style="color:var(--text-1);font-weight:510" data-page-node-id="xlbUkeKlccz1libmg5W4o5">低危写 10 个</b>（起停服务、建待办、写笔记、复制剪贴板）、<b style="color:var(--text-1);font-weight:510" data-page-node-id="ZdDw5dxQIreB9pZTm5aWzg">高危 2 个</b>（杀进程、执行系统命令，默认关闭）。完整清单见下方 <a href="#mcp" style="color:var(--brand-hover)" data-page-node-id="4LMqd23dY4eFBvphBTzE5r">MCP 章节</a>。</p>
+</article>
+<!-- ============ 15 ============ -->
+<article class="step reveal" id="g-backup" data-page-node-id="T6HL32Lenr8F4fDrIDqNeh">
+<span class="step-no" data-page-node-id="GDLrnwiV5gfTNSmLFKSyIT">STEP 15</span>
+<h3 data-page-node-id="87FyOyj4ViAKpzSHBNAY27">备份 · 同步 · 快照</h3>
+<h4 data-page-node-id="UMGlT6k2XFcvsMfNFQpP1I">快照（本地）</h4>
+<p data-page-node-id="Y7e6Fvw4UBZBjABd7AkRbI">设置 → 快照：一键把全部数据导出成一个 JSON 文件，换机器导入即恢复。升级前顺手存一份最保险。</p>
+<h4 data-page-node-id="UGjV1Fvc1GsQxlamOzRvOM">WebDAV 云同步</h4>
+<p data-page-node-id="cDD02dBi5uWNr0RDCU7ep7">设置 → 同步：填任意 WebDAV 服务器（自建 / 坚果云 / 第三方都行），全量备份与恢复，支持<b style="color:var(--text-1);font-weight:510" data-page-node-id="zawmeylkkfVtj2ELgsHn5S">多版本管理</b>，误操作能回滚到之前的版本。</p>
+<h4 data-page-node-id="c1UBHXzjDi5k8DtkFoiVHv">数据都在哪</h4>
+<div class="tbl wide" data-page-node-id="RYuENJRyjcLSL3Krjz7rkX">
+<div class="tbl-row" data-page-node-id="rT4SAayrXCfJ3Vl7IJHGQb"><span class="k" data-page-node-id="7XONYBudSAo3QoYYWPsCRx"><code data-page-node-id="QBSA5SkGoyfk59oFuBuvrK">~/.quickdock/quickdock.db</code></span><span data-page-node-id="dKEmI3hhfkg15WE8u0EWnO">SQLite 主库（WAL 模式）</span></div>
+<div class="tbl-row" data-page-node-id="cPs8AEdFms997nOZf18hZz"><span class="k" data-page-node-id="Iq2MdCWNCoVnbZ7EXlAN3e"><code data-page-node-id="nqlsAspgvhIXHSt1CzKKlW">~/.quickdock/images/</code></span><span data-page-node-id="2EFPOpNaI9V1wIHeI7vZdC">剪贴板图片</span></div>
+<div class="tbl-row" data-page-node-id="hhMsD06BqxOfob1VKBaEgv"><span class="k" data-page-node-id="OZ1TXSuDLjvqoqqZpgNQJA"><code data-page-node-id="JGHddUA3EppcXJ4Q3C8Exk">~/.quickdock/plugins/</code></span><span data-page-node-id="5xVoy9jsLii5jLhCYUiCJe">已安装插件</span></div>
+<div class="tbl-row" data-page-node-id="bkioB4xSs17DXwm7EFvyuR"><span class="k" data-page-node-id="TxdZOYXbo2lPWLyRpLEJM5"><code data-page-node-id="OfSrmu2bfxdYaHIXViRq5K">~/.quickdock/runtime/</code></span><span data-page-node-id="NuZtrs9iF5Ve0EsmHorVmX">各运行时版本</span></div>
+<div class="tbl-row" data-page-node-id="wbFNgPlZl1okBJ1b9RKLye"><span class="k" data-page-node-id="QEwY0CAFOMhDFjJVjDefC6"><code data-page-node-id="zqARmvzn3Cln0cJLj1SEEn">~/.quickdock/logs/</code></span><span data-page-node-id="lkHfeJCn1cEN6mc1EBJ82Z">日志，按天分文件</span></div>
+<div class="tbl-row" data-page-node-id="ieEgWTmHJkM0mrCxFCHLrM"><span class="k" data-page-node-id="S8m7MsYDx1CnnkSEwpbOfb"><code data-page-node-id="Jh3htKDgTQsPFSgLildJN7">%APPDATA%/QuickDock/</code></span><span data-page-node-id="o6BxtlrM4EIHZlIJFwEa6g">应用配置</span></div>
+</div>
+<div class="note" data-page-node-id="PxJ63l0gAG4RJgPK9j8mcd">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="69DhdxiMqCLlOXiRk5waUL"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16" data-page-node-id="jKuxlo0nJTlpGRw5eG3QDz"></path></svg>
+<div data-page-node-id="IfyHcuc7PyCQzd0usO1jjh">自动更新<b style="color:var(--text-1);font-weight:510" data-page-node-id="2fvvd0MELmQt69BxBS5Ltc">只替换主程序</b>，不碰 <code data-page-node-id="BebR9F1yg194Y7r3xKOrDe">~/.quickdock</code> 下任何数据；跨版本配置迁移由数据库迁移逻辑负责。</div>
+</div>
+</article>
+<!-- ============ 16 ============ -->
+<article class="step reveal" id="g-trouble" data-page-node-id="p3SHuIWO5YsitMrgq16zF5">
+<span class="step-no" data-page-node-id="imHOXZghV76hKFwxYt90nB">STEP 16</span>
+<h3 data-page-node-id="jGphUqxVeVSbCzAnAXkRs2">更新与排错</h3>
+<h4 data-page-node-id="DZAvPPwhuJUI5WRCCoWmOw">更新流程</h4>
+<p data-page-node-id="IkD6w240J5ehTN92tpOS2i">启动后自动拉取签名清单并验签 → 有新版本提示 → 你点「重启更新」→ helper 进程在主程序退出后备份旧文件、覆盖新文件（失败自动回滚）→ 重新拉起应用。<b style="color:var(--text-1);font-weight:510" data-page-node-id="VUfw6qxjpRL2YWTmocbrFC">不弹 UAC、不跑安装器</b>。</p>
+<h4 data-page-node-id="HgYM7mbBPiywV78SHcY2jc">常见问题</h4>
+<div class="tbl wide" data-page-node-id="sH11eb6Pct4S4BMpYRUk1u">
+<div class="tbl-row" data-page-node-id="Y9RbbOaQdCuuXnFBPznw4L"><span class="k" data-page-node-id="5aNHaxlnFKlJ5vqHRJsuNV">反复提示同一版本</span><span data-page-node-id="RUyeHi4F7YIk29RPNXSYjm">删除 <code data-page-node-id="aPPDQfUPragDyhxKhF4wqg">~/.quickdock/update-guard.json</code> 强制重试。这个文件记录「已替换但版本号没变」的目标版本，连续 2 次未生效会自动忽略该版本</span></div>
+<div class="tbl-row" data-page-node-id="7NY2tywCzo1i6EuFGCFEuH"><span class="k" data-page-node-id="yOnz8xDbuDnTiWBC474Br8">更新失败</span><span data-page-node-id="IdET95BnFwFZ42F4GDiywt">多半是装到了受 UAC 保护的目录（如 Program Files）。卸掉重装到用户目录</span></div>
+<div class="tbl-row" data-page-node-id="p12R7mkPCYUGqxPx09ATHw"><span class="k" data-page-node-id="lsSHwRHlvTgpDwMXuFZp04">双击没反应</span><span data-page-node-id="unxKGj1VuKFIfEYbtrA9Or">单实例锁 —— 看托盘是不是已经有一个在跑了</span></div>
+<div class="tbl-row" data-page-node-id="g0BCppuEXk5YlRobnMlN1R"><span class="k" data-page-node-id="MZ6oh0El9Tl8StH6Q2ELfB">装运行时卡住</span><span data-page-node-id="LoXxbc0TNGuqrZtITGmlSw">切换下载源（镜像）后点「刷新列表」重拉；下载失败会自动多源回退，也可以等它重试</span></div>
+<div class="tbl-row" data-page-node-id="54LtHtCn1wy3RBRTSYfnMf"><span class="k" data-page-node-id="ZCJGfWH3v2valM8BQOiGj2">想看报错</span><span data-page-node-id="vB9SHGLu8Euc93h73uD4sS">主日志 <code data-page-node-id="xLIRwuOB4srbnh69B4QCqz">~/.quickdock/logs/quickdock-YYYY-MM-DD.log</code>；更新替换日志 <code data-page-node-id="XWinUyxGwzzG5Dpj0iOFcW">%TEMP%\wails-update-&lt;pid&gt;.log</code></span></div>
+<div class="tbl-row" data-page-node-id="gFUB1QCtxfcdBCuEcJgW4D"><span class="k" data-page-node-id="vOEOKwlFSs0wfDG3RbElxL">反馈问题</span><span data-page-node-id="mYNEQo7cBujHXtPK3qSVE4">带日志去 <a href="https://github.com/parieses/quickdock/issues" rel="noopener" style="color:var(--brand-hover)" target="_blank" data-page-node-id="UalV55LCQykJvUWhVeetYF">GitHub Issues</a> 提，复现步骤写清楚</span></div>
+</div>
+</article>
+</div>
+</div>
+</div>
+</section>
+<hr class="divider" data-page-node-id="ZGe6bvFgTZSU6hmZ0dXshL"/>
+<!-- ============================ MCP ============================ -->
+<section id="mcp" data-page-node-id="BkYLIUYq1UEuRItYErlhJk">
+<div class="wrap" data-page-node-id="5GstWo7QxDtZY2JIieVpin">
+<div class="section-head reveal" data-page-node-id="Dse46GpZNrvGYcz6VixHRx">
+<span class="eyebrow" data-page-node-id="FS2gUtLAgKifbKpr9NBuIW">MCP 服务</span>
+<h2 data-page-node-id="dJwCcNBSilobI6wMJRFJxT">29 个工具，三级权限门</h2>
+<p data-page-node-id="ZJHkmKPHbKvVKkxQWsjy79">把本地开发能力开放给智能体：环境、项目、待办、笔记、剪贴板、端口、日志、崩溃记录，全部可被 AI 调用。写操作分低危 / 高危，高危默认关闭。</p>
+</div>
+<div class="grid-2" data-page-node-id="afMmsmH8VM4skg2LP2D2NI">
+<div class="reveal" data-page-node-id="b6Z4Xwnh6cxqJU3I69UnsU">
+<div class="tbl" data-page-node-id="QSarm1D2WBGgCUG4ZPkLxk">
+<div class="tbl-row" data-page-node-id="9WncfUr3EH7b1alqpPDabi"><span data-page-node-id="cW3LLSLFlmnF3e4FjrfIfC">等级</span><span data-page-node-id="Gvy9sJaHPz5IGTx5clYVC6">工具</span></div>
+<div class="tbl-row" data-page-node-id="19wEhmVijJ2feasRrqPviE">
+<span data-page-node-id="eQKYgmJHAADFMWUE07xEYO"><span class="tag tag-read" data-page-node-id="0YERyuA3JBuoywOFpgZk61">只读 17</span></span>
+<code data-page-node-id="843et7Hg5UTts2I35N5Kxk">app_info · env_list · env_status · env_log · env_versions · workspace_list · item_search · recent_items · todo_list · note_search · clipboard_recent · port_list · log_list · log_read · crash_list · crash_read · plugin_list</code>
+</div>
+<div class="tbl-row" data-page-node-id="KYMpwGEQI0yWnzjTzJOXko">
+<span data-page-node-id="dvDuSlGFNjO6dsyZpjuPjk"><span class="tag tag-low" data-page-node-id="GtjX9HHJypsSdfS1ynopoE">低危写 10</span></span>
+<code data-page-node-id="TDNw3odOkj7YVFhel4YTX2">env_start · env_stop · env_restart · item_open · todo_create · todo_done · clipboard_copy · note_create · note_update · note_quick · plugin_execute</code>
+</div>
+<div class="tbl-row" data-page-node-id="0w19QROPo2Hgs3LnwAI8gT">
+<span data-page-node-id="giJuWdJN8SkF5OaNoYzDDU"><span class="tag tag-high" data-page-node-id="7ct811gLR8g6BAEAb6C3Wr">高危 2</span></span>
+<code data-page-node-id="FsUup9yj7FrHG9XaR5Ha8u">process_kill · system_command（需在环境管理页手动开启高危等级）</code>
+</div>
+</div>
+<p style="margin-top:var(--s-4);font-size:14px;color:var(--text-3)" data-page-node-id="NWp30bziQGu5MIQCIamDJG">插件也可通过 <code data-page-node-id="cYXlwshCFkPcCJkc8gThPb">host.mcp.call</code> 复用全部 29 个工具，沿用同一套等级门，无需额外声明权限。</p>
+</div>
+<div class="reveal" data-page-node-id="TTkiuvYm8bkpOFMCfPTCeG">
+<div class="code" style="margin-top:0" data-page-node-id="8TEHtVCkUIp3GHogI8fDVX">
+<div class="code-head" data-page-node-id="y80M7jQGUybsEsRSICzm2S"><span class="file" data-page-node-id="BdFr9YRAFxZxOsRua5TjHe">curl — 列出已装运行时</span><button class="copy" data-copy="mcp-curl" data-page-node-id="fekUTYFkxO00Ed1P9ECBe3">复制</button></div>
+<pre id="mcp-curl" data-page-node-id="NywlOlNwE2ryHCIqwTRnx6"><span class="c-com" data-page-node-id="rDl5vwn1h8H2T6sXWL0DuI"># POST only；GET 返回 405，DELETE 关会话返回 204</span>
+curl -X POST http://127.0.0.1:9230/mcp \
+  -H <span class="c-str" data-page-node-id="hLc1pIVued7AOVHTmhhD27">"Content-Type: application/json"</span> \
+  -d <span class="c-str" data-page-node-id="qZcbUmxqTwd4eOD6MJONwh">'{
+    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+    "params": { "name": "env_list", "arguments": {} }
+  }'</span></pre>
+</div>
+<div class="card" style="margin-top:var(--s-4)" data-page-node-id="phepAOQdHwJ8LVX34yvYsK">
+<h3 data-page-node-id="dGAKzfBhjk8AHtA01XFTwj">协议细节</h3>
+<ul style="margin-top:var(--s-2)" data-page-node-id="oBMlzXnnj1wOszLEI66wAv">
+<li data-page-node-id="EcbR7Mfk5oofcjQgJo37WV">传输：Streamable HTTP，仅 POST</li>
+<li data-page-node-id="oll8XzHN2N0HVdvOCxz1dz">版本：2025-06-18</li>
+<li data-page-node-id="HJgLuqGRniTDtipp7DyC8K">生命周期：随主进程，QuickDock 退出即失效</li>
+<li data-page-node-id="pCMYkOVowyuJcFV7SEgXRE">实现：门面装配在 <code data-page-node-id="CziRY4MltXwgQd35gBpTjU">services/mcp</code>，工具经 Wails 各领域门面转发到宿主</li>
+</ul>
+</div>
+</div>
+</div>
+</div>
+</section>
+<hr class="divider" data-page-node-id="sUQDfpvoulkC1yR3zvMGSm"/>
+<!-- ============================ DOWNLOAD ============================ -->
+<section id="download" data-page-node-id="djYNYDk45WdWnSAVKmDL7T">
+<div class="wrap" data-page-node-id="cpjlhtOWwBJ1EbHAng1G4n">
+<div class="section-head reveal" style="margin-inline:auto;text-align:center" data-page-node-id="ShWBYJkhTHO7JPk3JqeDPi">
+<span class="eyebrow" data-page-node-id="xilrwH4gvXLHGDLEvlRzkM">下载</span>
+<h2 data-page-node-id="KqtsBwu2sgchpmopxxA9Ks">现在就把坞装上</h2>
+<p data-page-node-id="BnCp46fER1yqExdEEpVKuv">开源免费。装完自动检查更新，点「重启更新」就地替换，不弹 UAC、不跑安装器，数据和插件全部保留。</p>
+</div>
+<div class="dl-grid" data-page-node-id="ecfb24u9VXvBXy9uuQGEWJ">
+<div class="dl primary reveal" data-page-node-id="y88GWvnCzClHlygMjBIADD">
+<h3 data-page-node-id="Yt5GCtOQYiUsz82flwDaof">Windows</h3>
+<p class="meta" data-page-node-id="6cklw7kDtgw2YXIJC3WbI5">Windows 10 1809+ / 11 · x64 · ~100MB</p>
+<div class="arch" data-page-node-id="gTK4qLWtUFszSP1Nja0cf6">
+<a class="btn btn-primary" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64-installer.exe" data-page-node-id="AnGUraRlAy4u6vvsjr9JaE">安装版 · installer.exe</a>
+<a class="btn btn-quiet" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64.exe" data-page-node-id="jUx3YJDiOP7aspcyfwNRDg">便携版 · exe</a>
+</div>
+</div>
+<div class="dl reveal" data-page-node-id="ktlb0iiDUqwzXuBMAlCeEk">
+<h3 data-page-node-id="hKX4HpkvW54DBsfJmJkdGf">macOS（Apple 芯片）</h3>
+<p class="meta" data-page-node-id="fmTvcev93KAIM6hRZqGFX9">arm64 · .dmg · 拖到 ~/Applications</p>
+<div class="arch" data-page-node-id="Tj0AMEy838P1LXRdWUwVsF">
+<a class="btn btn-ghost" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-darwin-arm64.dmg" data-page-node-id="SqO57Ap9hEyyewXBCNWDao">下载 .dmg</a>
+</div>
+</div>
+<div class="dl reveal" data-page-node-id="LD7Fvm1rWcj8c6vViBdxum">
+<h3 data-page-node-id="GRqNm1XI3rk4RwfpXQikJF">macOS（Intel）</h3>
+<p class="meta" data-page-node-id="FI1pMltKLwPWpAIu7jFBOG">amd64 · .dmg · 拖到 ~/Applications</p>
+<div class="arch" data-page-node-id="4Sfcod53RZNPrTwgvMVCt0">
+<a class="btn btn-ghost" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-darwin-amd64.dmg" data-page-node-id="svSGp9T5msAVSUD1FkzjaV">下载 .dmg</a>
+</div>
+</div>
+</div>
+<div class="note reveal" style="margin-top:var(--s-5)" data-page-node-id="gLG1SO0NZHLs6FW4lLr3br">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="ILOZgOyGxhGHr81ZcUIKOY"><circle cx="12" cy="12" r="9" data-page-node-id="5NQsFMsQwuUBC3hFEQdDxE"></circle><path d="M12 8h.01M12 12v4" data-page-node-id="5KDcNQHneS4D2imaJnPRic"></path></svg>
+<div data-page-node-id="I3PKBKj8BqbrsQ4jqmrpHk">macOS 首次打开若提示「无法验证开发者」，终端执行一次 <code data-page-node-id="RerMzOiBR1BFcVGARPvUOs">xattr -dr com.apple.quarantine ~/Applications/quickdock.app</code>，或到「系统设置 → 隐私与安全性」点「仍要打开」。别装在下载目录里直接运行，会触发 App Translocation 导致更新假成功。</div>
+</div>
+</div>
+</section>
+<!-- ============================ FAQ ============================ -->
+<section id="faq" data-page-node-id="Kv15HVIlFRc6AcJhBVqAI6">
+<div class="wrap" data-page-node-id="kEPJXfSQrEmtkTISHb1SrU">
+<div class="section-head reveal" data-page-node-id="JiKzqmkvNyaoioxTBMrXzC">
+<span class="eyebrow" data-page-node-id="vjtUG0mTQBxD3fTwGVSOCd">FAQ</span>
+<h2 data-page-node-id="BpefEs7unG4yhGySpQQQcA">几个常被问到的问题</h2>
+</div>
+<div class="faq reveal" data-page-node-id="JueGZFfWhapsRT3xkUW4Ca">
+<details class="qa" open="" data-page-node-id="BBocDYgwJBO401lYehsXLK">
+<summary data-page-node-id="kxyIygDkmyXjIINAGGd5b4">要管理员权限吗？会污染系统环境吗？</summary>
+<div class="a" data-page-node-id="BQ3DFZ6XTwel4PBaqge0Y1">不要，也不会。所有运行时装到 <code data-page-node-id="CVLSXOJ0x4LsMFpnwQTnSL">~/.quickdock/runtime/</code>，不写注册表、不改系统 PATH、不申请提权。删掉 QuickDock，运行时一起没。</div>
+</details>
+<details class="qa" data-page-node-id="c1qf8lD0GEhByTgjXm72is">
+<summary data-page-node-id="VemIOo6sb2rNBoH1rqUU20">更新会丢数据吗？</summary>
+<div class="a" data-page-node-id="hcBV63W8G1huqtRCkpBB3R">不会。更新只替换主程序文件，<code data-page-node-id="1Yr8ppcNe1vLbFMfyjNigh">~/.quickdock</code> 下的数据库、插件、运行时目录全部保留。跨版本配置变化由数据库迁移逻辑处理。</div>
+</details>
+<details class="qa" data-page-node-id="EWYvSFTPIOR2LEu4vDjYAp">
+<summary data-page-node-id="oJ5SePYumrCPBEJHuLBJUq">数据存在哪？会上云吗？</summary>
+<div class="a" data-page-node-id="wNCbzarYG3jdsOmTaWPFqM">全在本地 SQLite。只有你主动配置 WebDAV 同步时才会上传备份；AI 助手的 API Key 在 Windows 下用 DPAPI 加密存储，前端不接触密文。</div>
+</details>
+<details class="qa" data-page-node-id="qExnV58sxJzMpPw6PZw9VB">
+<summary data-page-node-id="ONXRQpp66CROVogDhrtmMI">插件能做什么？安全吗？</summary>
+<div class="a" data-page-node-id="PKc9GwBw8OXFmF9086viUX">插件声明 <code data-page-node-id="anPcwT4y4uEXFx14PMxT3A">permissions.filesystem</code> 目录 scope 和 <code data-page-node-id="DtyDVhxZiop5j8Rw4AGtIL">permissions.network</code> 域名白名单，宿主逐次校验，越权直接拒绝。插件不能弹系统对话框，文件选择统一走宿主 API。</div>
+</details>
+<details class="qa" data-page-node-id="rB3kTbiyqeIuCCpXy53nfv">
+<summary data-page-node-id="ZrjFjGkvIju09dK3dGU31w">支持 Linux 吗？</summary>
+<div class="a" data-page-node-id="5YePKCpJfZdE8hdwD0heGx">引擎层已按 <code data-page-node-id="VZBMk2PvRre3K2rOKx7YA4">_windows</code> / <code data-page-node-id="H3c1MnBx7oa0rTwkmIhBEV">_darwin</code> / <code data-page-node-id="yN2gWzUo8bTqsltohapYNf">_unix</code> 拆文件，但目前官方只发 Windows 与 macOS 产物，Linux 尚未纳入发布流程。</div>
+</details>
+<details class="qa" data-page-node-id="h9crDLvz68AmognDESVpq1">
+<summary data-page-node-id="vx0ZDA9TUY1P5DCicSEYHH">怎么用 AI 控制 QuickDock？</summary>
+<div class="a" data-page-node-id="2foYe0DEbe5nNFPnCG8pwR">在任意 MCP 客户端（如 WorkBuddy）里把 <code data-page-node-id="tkCqGSimOixuT13of3yNYn">http://127.0.0.1:9230/mcp</code> 加为 HTTP 类型 server，即可调用 29 个工具。高危工具需要你先在环境管理页手动开启。</div>
+</details>
+</div>
+</div>
+</section>
+<!-- ============================ CTA ============================ -->
+<section style="padding-top:0" data-page-node-id="LjMm6WhiqFZOYmZGcHqp6m">
+<div class="wrap" data-page-node-id="1OIQ9t4oM78ZBD6DCSt1MM">
+<div class="cta-strip reveal" data-page-node-id="SrUF8J23wcTLnOjcbsZPZL">
+<h2 data-page-node-id="wzyfqHqkmxbm17P4OPCGvz">少点几十下鼠标，从今天开始</h2>
+<p data-page-node-id="WvCj6fCvYMDkBws5J2NW5Q">开源、免费、数据在本地。装上试试，不满意直接删，什么都不留。</p>
+<div class="hero-cta" data-page-node-id="Spyx7j3zSfr3xYtlX5slXi">
+<a class="btn btn-primary btn-lg" href="#download" data-page-node-id="TgT9MGaTPM5CDzK4NSdzkG">下载 QuickDock</a>
+<a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank" data-page-node-id="oV8uY8SlTr7XVti0xqNfoh">Star on GitHub</a>
+</div>
+</div>
+</div>
+</section>
+</main>
+<!-- ============================ FOOTER ============================ -->
+<footer class="footer" data-page-node-id="tjiCdKH9ERkFq3sXF0VMZr">
+<div class="wrap" data-page-node-id="NaMYlDN2DxbYVxoRmrPWEN">
+<div class="footer-grid" data-page-node-id="jLwHPa3athbuEOso9dJWvM">
+<div class="about" data-page-node-id="TyQb1A9tZi7Oz31xSOTH8H">
+<a class="brand" href="#top" data-page-node-id="rV6wzVklrpeTfPurCBIMKF">
+<span class="brand-mark" data-page-node-id="GrHFzMSJGI5Cv7kPMHFYWh"><img alt="QuickDock" src="assets/img/appicon-512.png" data-page-node-id="btUUFpg1K0XXcHOV2lx5H3"/></span>
+          快启坞 QuickDock
+        </a>
+<p data-page-node-id="qgiTa03NFFno3vOe31poSC">面向开发者的桌面效率工具。命令面板、环境管理、插件生态与 MCP 服务，装在一个坞里。</p>
+</div>
+<div data-page-node-id="nyMjNnQr9id1hyAGZCl6hB">
+<h4 data-page-node-id="9jZLlJ0frBo1MeTKFPCojq">产品</h4>
+<ul data-page-node-id="FLDIT4vqyrVlsMXpYcMQIW">
+<li data-page-node-id="5ec7UhJJgqMbmiyNA2KLEu"><a href="#features" data-page-node-id="66FUDG9jJamI6m0KTsqN7U">功能特性</a></li>
+<li data-page-node-id="krC03dV6OM6GqFw1h6hMXo"><a href="#runtime" data-page-node-id="0CU9B9V3e5hiv5W15aHh4F">环境管理</a></li>
+<li data-page-node-id="pvwUOS4BrVe2ojD1sbamlV"><a href="#plugins" data-page-node-id="4zW6lMxLLMLrjx6V19QXaB">插件生态</a></li>
+<li data-page-node-id="14zF6H0MPu6kgyxVlD0XW9"><a href="#download" data-page-node-id="iG9WDZp8a4DFXDqAG4qlnF">下载</a></li>
+</ul>
+</div>
+<div data-page-node-id="uAt5a3SIPEhjXJu0Dr56Gb">
+<h4 data-page-node-id="FumDOZ8bYSvtjgLnCa2R6a">文档</h4>
+<ul data-page-node-id="REIXt4GCra9JKCOoOKcvwE">
+<li data-page-node-id="PtgLUnzYFWZwhErvjsayGX"><a href="#guide" data-page-node-id="kQzF5NcaJmLWTzp4D2vs5x">使用说明</a></li>
+<li data-page-node-id="Q8fzcaCiPeluFt5ng4SgCw"><a href="#mcp" data-page-node-id="XCoYC7KU4GCQH3he5oyv6I">MCP 服务</a></li>
+<li data-page-node-id="Fsh2bFmGQRNmU63CobRw4B"><a href="#faq" data-page-node-id="6PdgXF0ajgJbW6D9SJGir7">常见问题</a></li>
+<li data-page-node-id="lUb1a9qwbmLICs8HFLwspT"><a href="https://github.com/parieses/quickdock#readme" rel="noopener" target="_blank" data-page-node-id="R7P1tPac0I03EA2fGBcFZw">README</a></li>
+</ul>
+</div>
+<div data-page-node-id="MV08eYxC2QPhTAFyj4ovoB">
+<h4 data-page-node-id="onRVewdADSjC41GyEefJ8r">开源</h4>
+<ul data-page-node-id="vZVVmyEObQ3panJrNU2sfB">
+<li data-page-node-id="ILtI0K2FE5kqggsMVNbyBG"><a href="https://github.com/parieses/quickdock" rel="noopener" target="_blank" data-page-node-id="xPm3TPrs5MxA3L7cN9qEyu">quickdock</a></li>
+<li data-page-node-id="3lXoRvcACDlDNdN6qlP9jA"><a href="https://github.com/parieses/quickdock-plugins" rel="noopener" target="_blank" data-page-node-id="11DvZ6EAUQnGmc6NWrn1ox">quickdock-plugins</a></li>
+<li data-page-node-id="PkiLAHvr7QjkLen9Qev8dw"><a href="https://github.com/parieses/quickdock/releases" rel="noopener" target="_blank" data-page-node-id="rEQR0EBGpYFmBvBohJwYkI">Releases</a></li>
+<li data-page-node-id="dbsGQJX63zW0uQrBs5qIPA"><a href="https://github.com/parieses/quickdock/issues" rel="noopener" target="_blank" data-page-node-id="HUlUXHT5xkOcyHbymDzEcc">反馈问题</a></li>
+</ul>
+</div>
+</div>
+<div class="footer-bottom" data-page-node-id="lHbvtcdfJxdZZLH4PuEFY3">
+<span data-page-node-id="P8EEoNHTGBSVoVSgiQHVnz">© <span id="year" data-page-node-id="okz5cVC5LCxPH2lsqTzLXN">2026</span> 快启坞 QuickDock · MIT License</span>
+<span data-page-node-id="ktn71vwRk9aQuHEh0zWAbg">基于 Wails v3 + Go + Vue 3 构建</span>
+</div>
+</div>
+</footer>
+<script src="assets/js/i18n.js"></script>
+<script src="assets/js/main.js"></script>
+</body>
+</html>
