@@ -229,6 +229,11 @@ func (m *DSHProcessManager) Start() (string, error) {
 	if err := cmd.Start(); err != nil {
 		return "", fmt.Errorf("启动 dsh 失败: %w", err)
 	}
+	// 挂入 Job Object：QuickDock 以任何方式结束（正常关闭、崩溃、任务管理器强杀、
+	// wails3 dev 重编译替换进程）时，由内核一并终止 dsh 及其孙进程。
+	// 不能只依赖 ServiceShutdown → Stop：进程被强杀时那条回调不会执行，
+	// 旧实例会残留成孤儿——白占内存，且其 token 已不可知，下次启动既无法复用也无法进入。
+	sysutil.AssignProcessToJob(cmd.Process.Pid)
 
 	// 排空 stdout/stderr（监听端口已知，无需解析 URL 行），同时把输出转发到日志面板，
 	// 首次初始化 profile 或启动失败时能直接看到 dsh 在做什么
