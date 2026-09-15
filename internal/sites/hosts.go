@@ -1,8 +1,9 @@
-// Package sites 内置 SNI 站点服务：单一 HTTPS 监听器按域名分发到各站点根目录，
-// 证书由 mkcert 自动签发，域名解析写入系统 hosts 文件。
+// Package sites 本地开发站点：域名 → 目录，由 nginx/caddy 以 HTTPS 对外提供服务。
+// QuickDock 负责签发 mkcert 证书、写入 hosts 解析、生成站点片段 —— 自己不监听任何端口。
 //
 // 与 httpserve 包的区别：httpserve 是「把某个目录挂到一个随机端口」（http://127.0.0.1:随机端口），
-// sites 是「给某个目录一个域名 + 自动 HTTPS」（https://myapp.test）——本地开发站点的正统形态。
+// sites 是「给某个目录一个域名 + 自动 HTTPS」（https://myapp.test）——本地开发站点的正统形态，
+// 代价是需要用户装一个 nginx/caddy 来真正提供服务。
 package sites
 
 import (

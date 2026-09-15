@@ -26,7 +26,6 @@ import {
   HTTPServeStart,
   HTTPServeStop,
   HTTPServeDelete,
-  SitesList,
 } from '../../bindings/quickdock/services/appservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import {
@@ -173,7 +172,7 @@ const sidebarGroups = computed(() => {
     }
     if (g === 'special') {
       items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: '#4a9eff', active: isHttp.value, running: httpAnyRunning.value })
-      items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: '⌂', color: '#e8a33d', active: isSites.value, running: sitesStatus.value.running })
+      items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: '⌂', color: '#e8a33d', active: isSites.value })
       items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: '#3ecf8e', active: isPorts.value })
     }
     if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items, collapsed: false, running: groupRunning(g) })
@@ -182,7 +181,9 @@ const sidebarGroups = computed(() => {
 })
 
 // 分组级运行标识：该分组内任意「有服务」的运行时正在运行即点亮；
-// AI 组额外纳入 DSH，内置工具组额外纳入 HTTP 服务与站点（HTTPS 监听器）的运行态。
+// AI 组额外纳入 DSH，内置工具组额外纳入 HTTP 服务的运行态。
+// 站点不在其中：它自己不提供服务，而是由 nginx/caddy 提供服务 ——
+// 那两者本就是运行时，跑起来时各自分组的绿点已经亮了。
 // 即便分组被折叠，也依据全量运行时实时计算，不依赖已折叠隐藏的子项。
 function groupRunning(key: string): boolean {
   for (const r of runtimes.value) {
@@ -191,9 +192,6 @@ function groupRunning(key: string): boolean {
   if (key === 'ai' && dshRunning.value) return true
   if (key === 'special') {
     for (const v of Object.values(httpRunning)) if (v) return true
-    // 站点服务是内置 HTTPS 监听器（非运行时），其运行态由 sitesStatus 单独维护，
-    // 必须纳入「内置工具」组的点亮判定，否则站点跑着该组绿点也不亮。
-    if (sitesStatus.value.running) return true
   }
   return false
 }
@@ -1229,16 +1227,6 @@ async function loadHTTPServers() {
   }
 }
 
-// 站点服务运行态：侧栏「站点」入口的小绿点依据它点亮（站点面板内部自行加载明细）。
-const sitesStatus = ref<{ running: boolean }>({ running: false })
-async function loadSitesStatus() {
-  try {
-    const res = unwrap<{ status: { running: boolean } }>(await SitesList())
-    if (res?.status) sitesStatus.value = res.status
-  } catch (e) {
-    console.warn('[env] 加载站点服务状态失败', e)
-  }
-}
 async function pickHTTPDir() {
   try {
     const dir = unwrap<string | null>(await PickFolderPath(t('pickDirTitle')))
@@ -1425,11 +1413,10 @@ async function pollStatus() {
       commitRuntimeCache(r)
     }
     await loadDshRunning()
-    // 站点 / HTTP 服务的绿点此前只在点进对应标签页或首次挂载时刷新，
+    // HTTP 服务的绿点此前只在点进对应标签页或首次挂载时刷新，
     // 在面板里启动/停止后再回侧栏，绿点仍是陈旧状态。这里并入 3s 轮询，
     // 与 dsh 同范式，保证侧栏入口的运行态始终反映真实情况。
     await loadHTTPServers()
-    await loadSitesStatus()
   } finally {
     polling = false
   }
@@ -1768,7 +1755,6 @@ onMounted(() => {
   // 绿点缓存要等到 3s 定时器那轮才填充，导致刚进环境管理绿点不显示。
   load().finally(() => pollStatus())
   loadHTTPServers()
-  loadSitesStatus()
   loadDshRunning()
   loadConfigSupport(selectedId.value) // 初始选中运行时的配置编辑入口
   ensureCertLoaded()                   // 若初始选中即 mkcert，预载证书区块状态
@@ -1781,7 +1767,6 @@ onMounted(() => {
 })
 // 切换运行时时自动拉取对应可下载版本列表（harness / http / sites / ports 区块不触发）
 watch(selectedId, (id) => {
-  if (id === SITES_KEY) loadSitesStatus()
   if (id && id !== HARNESS_KEY && id !== HTTP_KEY && id !== SITES_KEY && id !== PORTS_KEY) {
     loadAvailable(id)
     loadConfigSupport(id) // 通用「编辑配置」入口是否显示
@@ -2330,52 +2315,52 @@ const s = currentRuntimeState
         <!-- MCP 接入（MCP 专属）：监听地址、客户端配置、已开放工具 -->
         <section v-if="selected.id === 'mcp'" class="detail-block mcp-panel">
           <div class="block-head">
-            <span class="block-title">MCP 接入</span>
-            <span class="block-count">{{ mcpInfo.running ? '运行中' : '未启动' }}</span>
-            <button class="link-btn import-btn" :disabled="mcpLoading" @click="loadMCP">刷新</button>
+            <span class="block-title">{{ t('mcpPanelTitle') }}</span>
+            <span class="block-count">{{ mcpInfo.running ? t('svcRunning') : t('svcNotStarted') }}</span>
+            <button class="link-btn import-btn" :disabled="mcpLoading" @click="loadMCP">{{ t('refresh') }}</button>
           </div>
 
           <div v-if="mcpInfo.running" class="mcp-url-row">
             <code class="mcp-url">{{ mcpInfo.endpoint }}</code>
-            <button class="op-btn small" @click="copyMCP(mcpInfo.endpoint)">复制地址</button>
+            <button class="op-btn small" @click="copyMCP(mcpInfo.endpoint)">{{ t('copyAddr') }}</button>
           </div>
           <div v-else class="env-msg">
-            服务未启动：在上方版本表点「启动」后，AI 工具（Claude Code / Cursor / 其它 MCP 客户端）即可通过本地址操作 QuickDock。
+            {{ t('mcpNotRunning') }}
           </div>
 
           <div class="mcp-level-row">
-            <span class="mcp-label">工具权限</span>
+            <span class="mcp-label">{{ t('mcpToolLevel') }}</span>
             <select v-model.number="mcpInfo.maxLevel" class="env-input mcp-select" @change="setMCPLevel">
-              <option :value="0">只读（查询/状态/搜索）</option>
-              <option :value="1">只读 + 低危写（启停服务、建待办、写剪贴板）</option>
+              <option :value="0">{{ t('mcpLevelReadOnly') }}</option>
+              <option :value="1">{{ t('mcpLevelLowWrite') }}</option>
             </select>
-            <span class="mcp-hint">高危操作（执行命令、杀进程、删除数据）不开放</span>
+            <span class="mcp-hint">{{ t('mcpHighRiskClosed') }}</span>
           </div>
 
           <template v-if="mcpInfo.running">
             <div class="mcp-cfg-head">
-              <span>Claude Code 命令</span>
-              <button class="op-btn small" @click="copyMCP(mcpCfg.cli)">复制</button>
+              <span>{{ t('mcpClaudeCodeCmd') }}</span>
+              <button class="op-btn small" @click="copyMCP(mcpCfg.cli)">{{ t('copy') }}</button>
             </div>
             <pre class="mcp-code">{{ mcpCfg.cli }}</pre>
 
             <div class="mcp-cfg-head">
-              <span>Claude Desktop / 其它客户端（mcpServers JSON）</span>
-              <button class="op-btn small" @click="copyMCP(mcpCfg.json)">复制</button>
+              <span>{{ t('mcpClientJson') }}</span>
+              <button class="op-btn small" @click="copyMCP(mcpCfg.json)">{{ t('copy') }}</button>
             </div>
             <pre class="mcp-code">{{ mcpCfg.json }}</pre>
           </template>
 
           <div class="mcp-cfg-head">
-            <span>已开放工具 {{ mcpTools.length }}</span>
+            <span>{{ t('mcpExposedTools') }} {{ mcpTools.length }}</span>
           </div>
           <div class="mcp-tools">
             <div v-for="tool in mcpTools" :key="tool.name" class="mcp-tool-row">
               <span class="mcp-tool-name">{{ tool.name }}</span>
-              <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">{{ tool.level > 0 ? '可写' : '只读' }}</span>
+              <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">{{ tool.level > 0 ? t('mcpToolWritable') : t('mcpToolReadOnly') }}</span>
               <span class="mcp-tool-desc">{{ tool.description }}</span>
             </div>
-            <div v-if="!mcpTools.length" class="mcp-hint">暂无</div>
+            <div v-if="!mcpTools.length" class="mcp-hint">{{ t('mcpNoTools') }}</div>
           </div>
         </section>
 
@@ -2383,61 +2368,61 @@ const s = currentRuntimeState
              布局沿用 mcp-* 那几个纯布局类（url-row / cfg-head / code），不新增 CSS。 -->
         <section v-if="selected.id === 'webdav'" class="detail-block mcp-panel">
           <div class="block-head">
-            <span class="block-title">WebDAV 共享</span>
-            <span class="block-count">{{ svcOn(selected, 'builtin') ? '运行中' : '未启动' }}</span>
-            <button class="link-btn import-btn" @click="loadWebDAV">刷新</button>
+            <span class="block-title">{{ t('webdavPanelTitle') }}</span>
+            <span class="block-count">{{ svcOn(selected, 'builtin') ? t('svcRunning') : t('svcNotStarted') }}</span>
+            <button class="link-btn import-btn" @click="loadWebDAV">{{ t('refresh') }}</button>
           </div>
 
           <div class="mcp-url-row">
             <code class="mcp-url">{{ webdavURL }}</code>
-            <button class="op-btn small" @click="copyWebDAV(webdavURL)">复制地址</button>
-            <button class="op-btn small" :disabled="!svcOn(selected, 'builtin')" @click="openConsole(webdavInfo.port)">浏览器打开</button>
+            <button class="op-btn small" @click="copyWebDAV(webdavURL)">{{ t('copyAddr') }}</button>
+            <button class="op-btn small" :disabled="!svcOn(selected, 'builtin')" @click="openConsole(webdavInfo.port)">{{ t('webdavOpenBrowser') }}</button>
           </div>
 
           <div class="mcp-level-row">
-            <span class="mcp-label">账号</span>
+            <span class="mcp-label">{{ t('webdavAccount') }}</span>
             <code class="mcp-url">{{ webdavInfo.username }} / {{ webdavInfo.password }}</code>
-            <button class="op-btn small" @click="copyWebDAV(webdavInfo.username + ' / ' + webdavInfo.password)">复制账号</button>
+            <button class="op-btn small" @click="copyWebDAV(webdavInfo.username + ' / ' + webdavInfo.password)">{{ t('webdavCopyAccount') }}</button>
           </div>
 
           <div class="mcp-level-row">
-            <span class="mcp-label">共享目录</span>
+            <span class="mcp-label">{{ t('webdavRoot') }}</span>
             <code class="mcp-url">{{ webdavInfo.root || '—' }}</code>
-            <button class="op-btn small" @click="copyWebDAV(webdavInfo.root)">复制路径</button>
+            <button class="op-btn small" @click="copyWebDAV(webdavInfo.root)">{{ t('webdavCopyPath') }}</button>
           </div>
 
           <div class="mcp-level-row">
-            <span class="mcp-label">模式</span>
-            <span class="mcp-hint">{{ webdavInfo.readOnly ? '只读：客户端无法上传或删除' : '读写' }}</span>
+            <span class="mcp-label">{{ t('webdavMode') }}</span>
+            <span class="mcp-hint">{{ webdavInfo.readOnly ? t('webdavModeReadOnly') : t('webdavModeReadWrite') }}</span>
           </div>
 
           <div v-if="!svcOn(selected, 'builtin')" class="env-msg">
-            服务未启动：在上方版本表点「启动」后即可连接。地址、端口、共享目录、账号密码与只读开关都在「编辑配置」里改，改动需重启服务生效。
+            {{ t('webdavNotRunning') }}
           </div>
 
           <template v-if="webdavExposed">
             <div class="mcp-cfg-head">
-              <span>监听地址为 0.0.0.0——局域网内任意设备都能访问</span>
+              <span>{{ t('webdavListenAll') }}</span>
             </div>
             <div class="env-msg error">
-              Basic Auth 走明文 HTTP：不可信网络下请改用回环地址，或前置 Caddy / Nginx 提供 TLS。
+              {{ t('webdavExposedWarn') }}
             </div>
           </template>
 
           <div class="mcp-cfg-head">
-            <span>客户端接入</span>
+            <span>{{ t('webdavClientAccess') }}</span>
           </div>
           <template v-for="c in webdavCmds" :key="c.label">
             <div class="mcp-cfg-head">
               <span>{{ c.label }}</span>
-              <button class="op-btn small" @click="copyWebDAV(c.cmd)">复制</button>
+              <button class="op-btn small" @click="copyWebDAV(c.cmd)">{{ t('copy') }}</button>
             </div>
             <pre class="mcp-code">{{ c.cmd }}</pre>
           </template>
 
           <div class="mcp-cfg-head">
-            <span>配置文件</span>
-            <button class="op-btn small" @click="copyWebDAV(webdavInfo.path)">复制</button>
+            <span>{{ t('webdavConfigFile') }}</span>
+            <button class="op-btn small" @click="copyWebDAV(webdavInfo.path)">{{ t('copy') }}</button>
           </div>
           <pre class="mcp-code">{{ webdavInfo.path || '—' }}</pre>
         </section>
@@ -2485,7 +2470,7 @@ const s = currentRuntimeState
                     :class="{ active: v === s.version }"
                     @click="s.version = v; s.listExpanded = false"
                   >{{ v }}</div>
-                  <div v-if="s.available.length >= 50" class="version-list-note">
+                  <div v-if="selected.id === 'node' && s.available.length >= 60" class="version-list-note">
                     {{ t('versionListTruncated') }}
                   </div>
                 </template>

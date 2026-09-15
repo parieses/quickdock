@@ -577,3 +577,12 @@ func (r *RabbitMQRuntime) LogGet(version string) (string, error) {
 	}
 	return "", fmt.Errorf("暂无运行日志（启动后生成于 %s）", dir)
 }
+
+// ---- 编译期接口断言 ----
+//
+// 可选能力接口靠隐式 method set 满足，某天改掉一个方法签名不会报错、只会在运行时
+// 静默失去该能力（按钮消失/日志空白）。这里逐一固定下来，让编译器替我们守着。
+var _ ServiceController   = (*RabbitMQRuntime)(nil) // 服务启停与状态
+var _ LogProvider         = (*RabbitMQRuntime)(nil) // 运行日志弹窗
+var _ WebConsoleProvider  = (*RabbitMQRuntime)(nil) // Web 管理后台入口
+var _ ConfigPortsProvider = (*RabbitMQRuntime)(nil) // 配置内端口解析

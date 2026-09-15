@@ -43,8 +43,11 @@ func (f *FTPRuntime) DetectArgs() []string { return nil }
 func (f *FTPRuntime) ParseVersion(out string) (string, error) {
 	return "", fmt.Errorf("FTP 不支持通过目录导入")
 }
-func (f *FTPRuntime) DisplayName() string          { return DisplayName(RuntimeFTP) }
-func (f *FTPRuntime) SupportedPlatforms() []string { return []string{"windows", "darwin"} }
+func (f *FTPRuntime) DisplayName() string { return DisplayName(RuntimeFTP) }
+
+// SupportedPlatforms 仅 Windows：唯一下载源 FTPDMIN（Sentex）只发行 Windows 单文件 exe，
+// registry 里该源的 darwinTmpl 传的就是空串，声明 darwin 会让详情页徽章谎报支持。
+func (f *FTPRuntime) SupportedPlatforms() []string { return []string{"windows"} }
 func (f *FTPRuntime) Recommended() []string        { return Versions(RuntimeFTP) }
 
 func (f *FTPRuntime) versionDir(version string) string {
@@ -309,4 +312,11 @@ func (f *FTPRuntime) ConfigPath(version string) string {
 	return f.argsPath(version)
 }
 
-var _ ConfigProvider = (*FTPRuntime)(nil)
+
+// ---- 编译期接口断言 ----
+//
+// 可选能力接口靠隐式 method set 满足，某天改掉一个方法签名不会报错、只会在运行时
+// 静默失去该能力（按钮消失/日志空白）。这里逐一固定下来，让编译器替我们守着。
+var _ ServiceController   = (*FTPRuntime)(nil) // 服务启停与状态
+var _ ConfigProvider      = (*FTPRuntime)(nil) // 配置读写
+var _ ConfigPortsProvider = (*FTPRuntime)(nil) // 配置内端口解析

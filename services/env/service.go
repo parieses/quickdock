@@ -3,7 +3,6 @@
 package env
 
 import (
-	"context"
 	"fmt"
 	"strings"
 
@@ -11,7 +10,7 @@ import (
 	"quickdock/services"
 )
 
-// EnvironmentService 承载剪贴板历史领域方法。
+// EnvironmentService 承载环境管理领域方法（运行时安装/版本/服务/配置）。
 // App 回指宿主 AppService：DB 与 MainWindow/ClipboardMode/GetClipboardWindow 等
 // 均为宿主导出字段/注入回调，本包仅经 App 读取，不反向 import 宿主逻辑。
 type EnvironmentService struct {
@@ -63,29 +62,6 @@ func (s *EnvironmentService) EnvRefresh() *services.ApiResult {
 			s.App.App().Event.Emit("quickdock:env:refreshed")
 		}
 	})
-	return services.Ok(nil)
-}
-
-// EnvSources 返回某运行时的可用下载源（含自定义源）。
-func (s *EnvironmentService) EnvSources(runtime string) *services.ApiResult {
-	if r := s.checkEnv(); r != nil {
-		return r
-	}
-	srcs, err := s.App.Env.Sources(envmgr.Runtime(runtime))
-	if err != nil {
-		return services.Fail(err)
-	}
-	return services.Ok(srcs)
-}
-
-// EnvSetSource 切换某运行时的下载源，或设置/清除自定义源模板。
-func (s *EnvironmentService) EnvSetSource(runtime, sourceID, custom string) *services.ApiResult {
-	if r := s.checkEnv(); r != nil {
-		return r
-	}
-	if err := s.App.Env.SetSource(envmgr.Runtime(runtime), sourceID, custom); err != nil {
-		return services.Fail(err)
-	}
 	return services.Ok(nil)
 }
 
@@ -197,15 +173,6 @@ func (s *EnvironmentService) EnvSetEnabled(runtime string, on bool) *services.Ap
 	if err := s.App.Env.SetEnabled(envmgr.Runtime(runtime), on); err != nil {
 		return services.Fail(err)
 	}
-	return services.Ok(nil)
-}
-
-// EnvReconcile 手动触发一次对账：拉起所有「已开启但未运行」的常驻服务。
-func (s *EnvironmentService) EnvReconcile() *services.ApiResult {
-	if r := s.checkEnv(); r != nil {
-		return r
-	}
-	s.App.Env.ReconcileEnabled(context.Background())
 	return services.Ok(nil)
 }
 

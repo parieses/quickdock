@@ -7,19 +7,18 @@ import (
 	"strings"
 )
 
-// Backend 站点后端。builtin 是内置 SNI 监听器，nginx/caddy 走已装运行时的配置生成。
+// Backend 站点服务后端：都是外部的服务器软件，QuickDock 只生成它们的配置片段。
 type Backend string
 
 const (
-	BackendBuiltin Backend = "builtin"
-	BackendNginx   Backend = "nginx"
-	BackendCaddy   Backend = "caddy"
+	BackendNginx Backend = "nginx"
+	BackendCaddy Backend = "caddy"
 )
 
 // ParseBackend 校验后端取值。
 func ParseBackend(s string) (Backend, error) {
 	switch Backend(s) {
-	case BackendBuiltin, BackendNginx, BackendCaddy:
+	case BackendNginx, BackendCaddy:
 		return Backend(s), nil
 	}
 	return "", fmt.Errorf("未知的站点后端: %s", s)
@@ -131,9 +130,11 @@ type GenInput struct {
 	Backend    Backend
 	CertPath   string // mkcert 签发的证书（-cert.pem）
 	KeyPath    string // mkcert 签发的私钥（-key.pem）
-	ListenPort int    // 监听端口；0 表示用默认（https 443 / http 80）
+	// 监听端口不可配：站点恒为 https 443 + http 80（301 跳转到 443）。
+	// 本地开发站点只有「输域名就能开」这一种期望形态，给端口加开关只会让用户配出
+	// 一个 https://x.test:8443 这种自己都记不住的地址，故不设该字段。
 	// PHPFPMAddr 非空时生成 PHP 处理段（nginx fastcgi_pass / caddy php_fastcgi）。
-	// 为空表示纯静态站点。
+	// 为空表示纯静态站点：调用方（服务层）用 SiteNeedsPHP 判断，装了 PHP 不等于每个站点都要跑 PHP。
 	PHPFPMAddr string
 	LogDir     string // 访问/错误日志目录；空则不写 log 指令
 	// Modules 额外叠加的配置模块（见 Module 常量）。
@@ -158,7 +159,7 @@ type GenResult struct {
 // confSafeRe 配置文件名的安全字符集：域名已过 validateDomain，这里只做落盘前的兜底。
 var confSafeRe = regexp.MustCompile(`[^a-zA-Z0-9.-]`)
 
-// Generate 按后端生成配置片段。backend 为 builtin 时返回空片段（内置监听器不需要配置）。
+// Generate 按后端生成配置片段。
 func Generate(in GenInput) (*GenResult, error) {
 	if _, err := ParseBackend(string(in.Backend)); err != nil {
 		return nil, err
@@ -190,15 +191,15 @@ func Generate(in GenInput) (*GenResult, error) {
 		res.IncludeLine = "import quickdock-sites/*.caddy"
 		res.Snippet = caddySiteBlock(in, safe)
 	default:
-		res.FileName = ""
-		res.IncludeLine = ""
-		res.Snippet = ""
+		return nil, fmt.Errorf("未知的站点后端: %s", in.Backend)
 	}
 	return res, nil
 }
 
 // nginxServerBlock 生成 nginx server 块。
-// 同时给 443(ssl，mkcert 证书) 与 80(跳转) 两个 server，符合本地开发站点「输域名就能开」的预期。
+// 固定两个 server：443(ssl，mkcert 证书) 是站点本体，80 只做 301 跳转 ——
+// 符合本地开发站点「输域名就能开」的预期（浏览器默认走 http）。
+// 端口不参与计算：站点对外恒为 443/80，用户不可配（见 GenInput 注释）。
 func nginxServerBlock(in GenInput, name string) string {
 	var b strings.Builder
 	write := func(format string, args ...interface{}) {
@@ -209,25 +210,30 @@ func nginxServerBlock(in GenInput, name string) string {
 		fmt.Fprintf(&b, format+"\n", args...)
 	}
 
-	port := in.ListenPort
-	if port == 0 {
-		port = 443
-	}
-	dir := toSlash(in.Site.Dir)
+	dir := toSlash(in.Site.EffectiveDir())
 	proxy := hasModule(in.mods, ModProxy)
 
 	write("# QuickDock site: %s (%s)", in.Site.Name, in.Site.Domain)
 	write("# 由 QuickDock 生成；重新生成会覆盖本文件，请勿在此写自己的配置。")
+	if in.Site.DocRoot != "" {
+		write("# 文档根 = %s/%s", toSlash(in.Site.Dir), in.Site.DocRoot)
+	}
 	write("")
 	write("server {")
-	write("    listen      %d ssl;", port)
+	write("    listen      443 ssl;")
 	write("    server_name %s;", in.Site.Domain)
 	write("")
 	write("    ssl_certificate     %s;", toSlash(in.CertPath))
 	write("    ssl_certificate_key %s;", toSlash(in.KeyPath))
 	write("")
 	write("    root  %s;", dir)
-	write("    index index.php index.html index.htm;")
+	// index 里的 index.php 只对 PHP 站点写：nginx 对没有 FastCGI 段的 .php 请求会当静态文件
+	// 原样返回（源码泄漏），纯静态站点把一个 index.php 摆在索引列表首位没有半点好处。
+	if in.PHPFPMAddr != "" {
+		write("    index index.php index.html index.htm;")
+	} else {
+		write("    index index.html index.htm;")
+	}
 	if in.LogDir != "" {
 		write("")
 		write("    access_log %s/%s.access.log;", toSlash(in.LogDir), name)
@@ -297,7 +303,7 @@ func nginxServerBlock(in GenInput, name string) string {
 		write("    }")
 	} else {
 		write("    location / {")
-		write("        try_files %s;", indexTryFiles(in.mods))
+		write("        try_files %s;", indexTryFiles(in.mods, in.PHPFPMAddr != ""))
 		write("    }")
 		if in.PHPFPMAddr != "" {
 			write("")
@@ -322,27 +328,38 @@ func nginxServerBlock(in GenInput, name string) string {
 	}
 	write("}")
 	write("")
+	write("# http 固定 301 跳 https：浏览器敲域名默认走 80，没有这段就是「连接被拒绝」")
 	write("server {")
-	write("    listen      %d;", httpPortFor(port))
+	write("    listen      80;")
 	write("    server_name %s;", in.Site.Domain)
-	write("    return 301 https://$host%s$request_uri;", portSuffix(port))
+	write("    return 301 https://$host$request_uri;")
 	write("}")
 	return b.String()
 }
 
-// indexTryFiles 根 location 的回退策略：模块未勾选时保持原行为（PHP 框架风格的 index.php 回退）。
-func indexTryFiles(mods []Module) string {
+// indexTryFiles 根 location 的回退策略。
+// 必须区分「这个站点到底跑不跑 PHP」：默认回退到 /index.php 只对 PHP 框架成立，
+// 纯静态站点（前端构建产物、纯 HTML 目录）回退过去只会撞上一个不存在的文件 ——
+// 那正是「静态站点配好了、页面却打不开」的来源。
+func indexTryFiles(mods []Module, php bool) string {
 	switch {
 	case hasModule(mods, ModSPA):
 		return "$uri $uri/ /index.html"
 	case hasModule(mods, ModStatic):
 		return "$uri $uri/ =404"
-	default:
+	case php:
 		return "$uri $uri/ /index.php?$query_string"
+	default:
+		// 纯静态且没提要求：与 caddy 侧的默认回退（/index.html）保持一致
+		return "$uri $uri/ /index.html"
 	}
 }
 
 // caddySiteBlock 生成 Caddyfile 站点块。
+// 与 nginx 侧同语义：站点本体绑 https（443），另给一个 http 块做 301 跳转。
+// Caddy 一个块只能绑一个地址（不像 nginx 能在同一 server 里写两条 listen），
+// 所以跳转必须单独成块 —— 但 Caddy 对定义了 tls 的站点本会自动做 80→443 跳转，
+// 这里显式写出来的价值是：把跳转目标钉死在用户可见的域名上，而不是依赖自动重定向。
 // Caddy 自带自动 HTTPS，但本地域名无法申请公网证书，故仍显式指定 mkcert 的证书文件。
 func caddySiteBlock(in GenInput, name string) string {
 	var b strings.Builder
@@ -354,15 +371,15 @@ func caddySiteBlock(in GenInput, name string) string {
 		fmt.Fprintf(&b, format+"\n", args...)
 	}
 
-	addr := in.Site.Domain
-	if in.ListenPort != 0 && in.ListenPort != 443 {
-		addr = fmt.Sprintf("%s:%d", in.Site.Domain, in.ListenPort)
-	}
+	domain := in.Site.Domain
 	proxy := hasModule(in.mods, ModProxy)
 
 	write("# QuickDock site: %s (%s)", in.Site.Name, in.Site.Domain)
 	write("# 由 QuickDock 生成；重新生成会覆盖本文件，请勿在此写自己的配置。")
-	write("%s {", addr)
+	if in.Site.DocRoot != "" {
+		write("# 文档根 = %s/%s", toSlash(in.Site.Dir), in.Site.DocRoot)
+	}
+	write("%s {", domain)
 	write("    tls %s %s", toSlash(in.CertPath), toSlash(in.KeyPath))
 
 	// ---- 模块：server 级指令 ----
@@ -410,12 +427,12 @@ func caddySiteBlock(in GenInput, name string) string {
 		write("    # 模块：反向代理（Caddy 的 reverse_proxy 原生支持 WebSocket）")
 		write("    reverse_proxy 127.0.0.1:%d", in.ProxyPort)
 	} else {
-		write("    root * %s", toSlash(in.Site.Dir))
+		write("    root * %s", toSlash(in.Site.EffectiveDir()))
 		if in.PHPFPMAddr != "" {
 			write("    php_fastcgi %s", in.PHPFPMAddr)
 			write("    file_server")
 		} else {
-			// 静态站点：默认 spa 风格回退到 index.html，和内置监听器的行为对齐；
+			// 静态站点：默认回退到 index.html，与 nginx 侧同一套语义；
 			// 勾了纯静态模块则去掉回退，找不到就 404。
 			if hasModule(in.mods, ModStatic) {
 				write("    try_files {path} {path}/")
@@ -438,26 +455,18 @@ func caddySiteBlock(in GenInput, name string) string {
 		write("    }")
 	}
 	write("}")
+	write("")
+	// 这段必须自己写，不能指望 Caddy 的自动跳转：
+	// Caddy 的 Automatic HTTPS 在「手动加载证书」（即站点本体那条 tls <cert> <key>）时
+	// 不会激活（官方文档 Activation 一节的明确条件），而 80→443 的自动跳转正是
+	// Automatic HTTPS 的产物 —— 不显式写，浏览器敲域名就是连接被拒绝。
+	// 地址必须以 http:// 开头：前缀 http:// 同样阻止自动 HTTPS，于是这个块只监听 80、
+	// 只做跳转，不会和本体块抢 443（Caddy 一个块只能绑一个地址，故必须单独成块）。
+	write("# http 固定 301 跳 https（Caddy 单块只能绑一个地址，且手动加载证书不会自动跳转）")
+	write("http://%s {", domain)
+	write("    redir https://{host}{uri} 301")
+	write("}")
 	return b.String()
-}
-
-// httpPortFor 与 https 端口配对的 http 端口：443→80，其它→端口-1（本地非常规场景够用）。
-func httpPortFor(httpsPort int) int {
-	if httpsPort == 443 {
-		return 80
-	}
-	if httpsPort > 1 {
-		return httpsPort - 1
-	}
-	return 80
-}
-
-// portSuffix 非标准 https 端口在跳转 URL 里要带上端口号。
-func portSuffix(httpsPort int) string {
-	if httpsPort == 443 {
-		return ""
-	}
-	return fmt.Sprintf(":%d", httpsPort)
 }
 
 // SuggestedConfDir 返回片段建议落盘目录：配置文件同级下的 quickdock-sites/。

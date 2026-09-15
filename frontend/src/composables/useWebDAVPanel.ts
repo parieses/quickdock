@@ -39,9 +39,9 @@ export function useWebDAVPanel(selectedId: Ref<string>) {
   })
   const webdavExposed = computed(() => webdavInfo.addr === '0.0.0.0' || webdavInfo.addr === '::')
   const webdavCmds = computed(() => [
-    { label: 'Windows（映射为网络驱动器）', cmd: `net use Z: ${webdavURL.value} /user:${webdavInfo.username} ${webdavInfo.password}` },
-    { label: 'macOS（Finder → 前往 → 连接服务器）', cmd: webdavURL.value },
-    { label: 'Linux（davfs2）', cmd: `sudo mount -t davfs ${webdavURL.value} /mnt/webdav` },
+    { label: t('webdavWinLabel'), cmd: `net use Z: ${webdavURL.value} /user:${webdavInfo.username} ${webdavInfo.password}` },
+    { label: t('webdavMacLabel'), cmd: webdavURL.value },
+    { label: t('webdavLinuxLabel'), cmd: `sudo mount -t davfs ${webdavURL.value} /mnt/webdav` },
   ])
 
   async function copyWebDAV(text: string) {

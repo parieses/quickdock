@@ -4,9 +4,8 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
-	"net"
-	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -19,19 +18,81 @@ import (
 	"quickdock/internal/sysutil"
 )
 
-// Site 一个本地开发站点：域名 → 本地目录，经内置 HTTPS 服务以 https://<domain> 访问。
+// Site 一个本地开发站点：域名 → 本地目录。
+// QuickDock 自己不监听任何端口：只为 nginx/caddy 生成站点片段、签发证书、写 hosts 解析，
+// 真正的对外服务由用户装的那两个服务器软件承担。要挂一个本地 HTTP 目录，走「环境」页的 HTTP 服务。
 type Site struct {
-	ID      string `json:"id"`
-	Name    string `json:"name"`
-	Domain  string `json:"domain"` // 如 myapp.test
-	Dir     string `json:"dir"`
-	Enabled bool   `json:"enabled"` // 禁用则不参与证书、hosts 与请求分发
-	Running bool   `json:"running"` // 派生字段：HTTPS 服务是否在跑（不持久化）
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Domain string `json:"domain"` // 如 myapp.test
+	Dir    string `json:"dir"`
+	// DocRoot 是「对外服务的根」相对于 Dir 的子目录，空 = 直接用 Dir。
+	// PHP 框架的入口文件几乎都不在项目根：Laravel / ThinkPHP 是 public，
+	// Yii2 是 web（advanced 模板为 frontend/web），Symfony 是 public。
+	// 没有这一层，为框架生成的配置会把 root 指向项目根 —— .env、storage、vendor
+	// 全部暴露在 web 根下，是本地开发最容易踩的安全坑。
+	DocRoot string `json:"docRoot,omitempty"`
+	Enabled bool   `json:"enabled"` // 禁用则不参与证书与 hosts
 
 	// Modules / ProxyPort 是「生成配置」弹窗里的模块选择，随站点持久化，
-	// 下次打开弹窗自动回填（用户不必每次重勾）。只影响片段生成，不影响内置监听器。
+	// 下次打开弹窗自动回填（用户不必每次重勾）。只影响片段生成。
 	Modules   []string `json:"modules,omitempty"`
 	ProxyPort int      `json:"proxyPort,omitempty"`
+
+	// Configs 是用户手工编辑并保存的配置片段：backend → 片段内容。
+	// 有值时「生成配置」弹窗用它回填（重新生成不会把它冲掉），空 = 用生成器的结果。
+	// 用 map 而非单字段：同一站点可能既看 nginx 片段又看 Caddyfile 片段。
+	Configs map[string]string `json:"configs,omitempty"`
+}
+
+// EffectiveDir 站点对外服务的实际根目录：文档根是项目目录下的子目录时返回拼接结果，
+// 否则就是项目目录本身。生成配置与 PHP 探测都走它，两处的「文档根」语义才不会分叉。
+func (s Site) EffectiveDir() string {
+	if s.DocRoot == "" {
+		return s.Dir
+	}
+	return filepath.Join(s.Dir, filepath.FromSlash(s.DocRoot))
+}
+
+// SiteNeedsPHP 判断站点是否需要生成 PHP 处理段（nginx 的 fastcgi_pass / caddy 的 php_fastcgi）。
+//
+// 装了 PHP 不等于每个站点都要跑 PHP：给纯静态站点（前端构建产物目录）多挂一段 FastCGI
+// 是无用配置，还会让人以为站点依赖 PHP-FPM 的 9000 端口 —— 它根本不依赖。
+//
+// 两个判据，先看用户的显式选择，再看磁盘：
+//  1. 勾了「纯静态 / SPA / 反向代理」模块的站点一律不算 PHP —— 这是用户明确表态；
+//  2. 其余看文档根下有没有 .php 文件。只扫一层：框架入口（public/index.php、web/index.php、
+//     WordPress 的根 index.php）必在文档根第一层，而递归遍历 node_modules / vendor 代价很高。
+func SiteNeedsPHP(s Site) bool {
+	for _, mod := range s.Modules {
+		switch Module(mod) {
+		case ModStatic, ModSPA, ModProxy:
+			return false
+		}
+	}
+	entries, err := os.ReadDir(s.EffectiveDir())
+	if err != nil {
+		return false // 目录不存在或读不了：按静态处理，用户重新生成配置即可
+	}
+	for _, e := range entries {
+		if !e.IsDir() && strings.EqualFold(filepath.Ext(e.Name()), ".php") {
+			return true
+		}
+	}
+	return false
+}
+
+// cloneConfigs 复制一份 Configs，避免把内部 map 的引用交给调用方（List/Get 返回的是值拷贝，
+// 但 map 是引用类型，浅拷贝仍会共享底层数据）。空 map 归一成 nil，免得落盘出现 "configs":{}。
+func cloneConfigs(in map[string]string) map[string]string {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
 }
 
 // CertIssuer 签发本地可信证书的能力（由宿主注入 env.Manager 的实现）。
@@ -41,10 +102,9 @@ type CertIssuer interface {
 	CertIssue(outDir, name string, hosts []string) (map[string]string, error)
 }
 
-// Status 站点服务的整体状态，前端据此解释「为什么打不开」。
+// Status 站点功能的整体状态，前端据此解释「为什么打不开」。
+// 这里没有运行态：站点由 nginx/caddy 提供服务，跑没跑是那两者的状态，不归本站点管理器表达。
 type Status struct {
-	Running    bool   `json:"running"`
-	Port       int    `json:"port"`
 	CertReady  bool   `json:"certReady"`
 	CertError  string `json:"certError"`
 	HostsOK    bool   `json:"hostsOk"`
@@ -58,23 +118,21 @@ type Status struct {
 	Elevated bool `json:"elevated"`
 }
 
-// defaultPort 默认监听端口。443 是 https 标准端口，URL 里可省略端口号。
-const defaultPort = 443
-
 // domainRe 校验站点域名：小写字母/数字/连字符，至少两段。
-// 要求两段是为了排除裸 "localhost"（与内置服务冲突）；
+// 要求两段是为了排除裸 "localhost"（本地站点该有自己的主机名，而不是占掉本机回环名）；
 // 不校验 TLD 是否真实存在——本地开发域名本就千奇百怪（.test / .local / .dev / 公司内网域）。
 var domainRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$`)
 
-// config sites.json 的磁盘格式。用对象而非裸数组，port 才有地方放。
+// config sites.json 的磁盘格式。用对象而非裸数组，以后加字段不必迁移。
+// 旧版本里还带一个 port 字段（内置监听器的端口）——内置监听器已去掉，读到时忽略即可。
 type config struct {
-	Port  int    `json:"port"`
 	Sites []Site `json:"sites"`
 }
 
 // Manager 站点管理器：配置持久化到 <dir>/sites.json，证书放 <dir>/certs。
-// 单一 HTTPS 监听器 + SNI 共用一张「覆盖全部启用域名」的证书——
-// 每站点一张证书要多机器多个 GetCertificate 分支，收益为零。
+//
+// 只做三件事：维护站点集合、签发「覆盖全部启用域名」的 mkcert 证书（供 nginx/caddy 的
+// 站点片段引用）、把启用域名写进系统 hosts。不监听任何端口。
 type Manager struct {
 	mu     sync.Mutex
 	certMu sync.Mutex // 串行化证书签发（mkcert 是外部进程、慢，不能占着 mu）
@@ -82,12 +140,13 @@ type Manager struct {
 	dir     string
 	file    string
 	certDir string
-	port    int
+	// hostsPath 系统 hosts 文件路径。生产环境就是平台默认（hostsFilePath()）；
+	// 单测把它指向临时文件 —— 站点增删改都会同步 hosts，不重定向的话跑一次单测
+	// 就会改掉开发机真实的 hosts（在提权 shell 里尤其明显）。
+	hostsPath string
 
 	sites map[string]*Site
 
-	ln       net.Listener
-	srv      *http.Server
 	cert     *tls.Certificate
 	certSet  string // 当前证书覆盖的域名集合指纹（排序后拼接），用于判断是否需要重签
 	certErr  string
@@ -96,18 +155,15 @@ type Manager struct {
 	issuer CertIssuer
 }
 
-// New 创建站点管理器。port<=0 或越界时退回 443。
-func New(dir string, port int) *Manager {
-	if port <= 0 || port > 65535 {
-		port = defaultPort
-	}
+// New 创建站点管理器。
+func New(dir string) *Manager {
 	_ = os.MkdirAll(dir, 0o755)
 	m := &Manager{
-		dir:     dir,
-		file:    filepath.Join(dir, "sites.json"),
-		certDir: filepath.Join(dir, "certs"),
-		port:    port,
-		sites:   map[string]*Site{},
+		dir:       dir,
+		file:      filepath.Join(dir, "sites.json"),
+		certDir:   filepath.Join(dir, "certs"),
+		hostsPath: hostsFilePath(),
+		sites:     map[string]*Site{},
 	}
 	m.load()
 	return m
@@ -129,9 +185,6 @@ func (m *Manager) load() {
 	if json.Unmarshal(data, &cfg) != nil {
 		return
 	}
-	if cfg.Port > 0 && cfg.Port <= 65535 {
-		m.port = cfg.Port
-	}
 	for i := range cfg.Sites {
 		s := cfg.Sites[i]
 		// 磁盘上的模块集合同样过一遍归一化：旧版本、手改 json 都可能留下已废弃/互斥的 id。
@@ -143,11 +196,9 @@ func (m *Manager) load() {
 // persistLocked 落盘。调用方必须已持有 m.mu（对比 httpserve 的 persist 自带加锁——
 // 那里造成了调用方持锁时死锁的坑，这里统一改成 *Locked 版本，边界更清楚）。
 func (m *Manager) persistLocked() error {
-	cfg := config{Port: m.port, Sites: make([]Site, 0, len(m.sites))}
+	cfg := config{Sites: make([]Site, 0, len(m.sites))}
 	for _, s := range m.sites {
-		cp := *s
-		cp.Running = false // 运行态不持久化，重启后由 Resume 重新判定
-		cfg.Sites = append(cfg.Sites, cp)
+		cfg.Sites = append(cfg.Sites, *s)
 	}
 	sort.Slice(cfg.Sites, func(i, j int) bool {
 		if cfg.Sites[i].Domain != cfg.Sites[j].Domain {
@@ -162,7 +213,7 @@ func (m *Manager) persistLocked() error {
 	return os.WriteFile(m.file, data, 0o644)
 }
 
-// List 返回全部站点（Running 反映服务当前是否在跑）。
+// List 返回全部站点。
 func (m *Manager) List() []Site {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -173,7 +224,7 @@ func (m *Manager) listLocked() []Site {
 	out := make([]Site, 0, len(m.sites))
 	for _, s := range m.sites {
 		cp := *s
-		cp.Running = m.srv != nil
+		cp.Configs = cloneConfigs(s.Configs)
 		out = append(out, cp)
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -185,7 +236,7 @@ func (m *Manager) listLocked() []Site {
 	return out
 }
 
-// Get 按 id 返回站点（Running 反映服务当前是否在跑）。
+// Get 按 id 返回站点。
 func (m *Manager) Get(id string) (Site, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -194,29 +245,26 @@ func (m *Manager) Get(id string) (Site, error) {
 		return Site{}, fmt.Errorf("站点不存在")
 	}
 	cp := *s
-	cp.Running = m.srv != nil
+	cp.Configs = cloneConfigs(s.Configs)
 	return cp, nil
 }
 
-// CertPaths 返回内置监听器用的证书/私钥路径。
-// 文件名固定（一张证书覆盖全部启用域名），故 nginx/caddy 配置生成可以引用同一份证书，
-// 不必依赖内置服务是否在运行。
+// CertPaths 返回站点证书/私钥的文件路径。
+// 文件名固定（一张证书覆盖全部启用域名），故 nginx/caddy 的配置生成可以直接引用它。
 func (m *Manager) CertPaths() (cert, key string) {
 	return filepath.Join(m.certDir, "sites-cert.pem"), filepath.Join(m.certDir, "sites-key.pem")
 }
 
-// Status 返回服务整体状态。
+// Status 返回站点功能整体状态。
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	domains := m.enabledDomainsLocked()
 	st := Status{
-		Running:    m.srv != nil,
-		Port:       m.port,
 		CertReady:  m.cert != nil,
 		CertError:  m.certErr,
 		HostsError: m.hostsErr,
-		HostsPath:  hostsFilePath(),
+		HostsPath:  m.hostsPath,
 		HostsBlock: renderHostsBlock(domains),
 		Elevated:   sysutil.IsElevated(),
 	}
@@ -230,10 +278,10 @@ func (m *Manager) Status() Status {
 	return st
 }
 
-// enabledDomainsLocked 当前需要证书 / hosts 覆盖的域名集合（含 localhost）。
+// enabledDomainsLocked 当前需要证书 / hosts 覆盖的域名集合。
+// 不含 localhost：本站点管理器只管用户建的那些站点，回环名本来就由系统 hosts 与 mkcert 根证书覆盖。
 func (m *Manager) enabledDomainsLocked() []string {
-	out := make([]string, 0, len(m.sites)+1)
-	out = append(out, "localhost")
+	out := make([]string, 0, len(m.sites))
 	for _, s := range m.sites {
 		if s.Enabled && s.Domain != "" {
 			out = append(out, s.Domain)
@@ -272,6 +320,32 @@ func validateDir(raw string) (string, error) {
 	return dir, nil
 }
 
+// validateDocRoot 清洗文档根：统一分隔符、去掉首尾斜杠，空串表示「就用项目根目录」。
+//
+// 拒绝绝对路径与任何形式的向上逃逸，因为它的值会被写进 nginx/Caddyfile 的 root 指令：
+// 一个 "..\.." 就能把本地站点指向 C 盘，配置片段随后被人工放进主配置里长期生效。
+// 这里刻意不校验目录是否真实存在——文档根可以先配好、再去建目录，
+// 提前报错会让「先建站点后拉代码」这个常见顺序走不通。
+func validateDocRoot(raw string) (string, error) {
+	p := strings.TrimSpace(raw)
+	// 反斜杠在 Windows 上是分隔符，而在 nginx/Caddyfile 里是转义字符，统一成正斜杠
+	p = strings.ReplaceAll(p, `\`, "/")
+	if p == "" {
+		return "", nil
+	}
+	// 绝对路径必须在去掉前导斜杠之前判：顺序反了的话 /srv/www 会被当成合法的相对路径
+	if strings.HasPrefix(p, "/") || filepath.IsAbs(p) || strings.Contains(p, ":") {
+		return "", fmt.Errorf("文档根必须是项目目录下的相对路径: %s", raw)
+	}
+	p = strings.Trim(p, "/")
+	for _, seg := range strings.Split(p, "/") {
+		if seg == ".." {
+			return "", fmt.Errorf("文档根不能包含 ..（不允许越过项目目录）: %s", raw)
+		}
+	}
+	return path.Clean(p), nil
+}
+
 // siteSeq 与时间戳一起构成站点 ID 的进程内唯一性保证。
 // 只用 time.Now().UnixNano() 不够：Windows 的时钟粒度下连续两次 Create 可能落在同一纳秒，
 // ID 相撞会让后一个站点在 map 里覆盖前一个——静默丢站点，是最难查的那类 bug。
@@ -282,8 +356,8 @@ func newSiteID() string {
 	return fmt.Sprintf("%d-%d", time.Now().UnixNano(), siteSeq.Add(1))
 }
 
-// Create 新增站点。域名唯一、目录必须存在。
-func (m *Manager) Create(name, domain, dir string) (*Site, error) {
+// Create 新增站点。域名唯一、目录必须存在。docRoot 是相对项目目录的文档根子目录（可为空）。
+func (m *Manager) Create(name, domain, dir, docRoot string) (*Site, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("站点名称不能为空")
@@ -293,6 +367,10 @@ func (m *Manager) Create(name, domain, dir string) (*Site, error) {
 		return nil, err
 	}
 	dir, err = validateDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	docRoot, err = validateDocRoot(docRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +387,7 @@ func (m *Manager) Create(name, domain, dir string) (*Site, error) {
 		Name:    name,
 		Domain:  d,
 		Dir:     dir,
+		DocRoot: docRoot,
 		Enabled: true,
 	}
 	m.sites[site.ID] = site
@@ -327,7 +406,7 @@ func (m *Manager) Create(name, domain, dir string) (*Site, error) {
 }
 
 // Update 更新站点。domain 变化时需重新校验唯一性。
-func (m *Manager) Update(id, name, domain, dir string, enabled bool) (*Site, error) {
+func (m *Manager) Update(id, name, domain, dir string, enabled bool, docRoot string) (*Site, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return nil, fmt.Errorf("站点名称不能为空")
@@ -337,6 +416,10 @@ func (m *Manager) Update(id, name, domain, dir string, enabled bool) (*Site, err
 		return nil, err
 	}
 	dir, err = validateDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	docRoot, err = validateDocRoot(docRoot)
 	if err != nil {
 		return nil, err
 	}
@@ -354,7 +437,7 @@ func (m *Manager) Update(id, name, domain, dir string, enabled bool) (*Site, err
 		}
 	}
 	prev := *site
-	site.Name, site.Domain, site.Dir, site.Enabled = name, d, dir, enabled
+	site.Name, site.Domain, site.Dir, site.Enabled, site.DocRoot = name, d, dir, enabled, docRoot
 	if err := m.persistLocked(); err != nil {
 		*site = prev // 落盘失败回滚内存，避免内存与磁盘不一致
 		m.mu.Unlock()
@@ -384,27 +467,6 @@ func (m *Manager) Delete(id string) error {
 	return nil
 }
 
-// SetPort 修改监听端口（443 被占用/无权限时的降级出口）。服务运行中不允许改端口。
-func (m *Manager) SetPort(port int) error {
-	if port <= 0 || port > 65535 {
-		return fmt.Errorf("端口无效（1-65535）")
-	}
-	m.mu.Lock()
-	if m.srv != nil {
-		m.mu.Unlock()
-		return fmt.Errorf("请先停止站点服务再修改端口")
-	}
-	prev := m.port
-	m.port = port
-	if err := m.persistLocked(); err != nil {
-		m.port = prev
-		m.mu.Unlock()
-		return err
-	}
-	m.mu.Unlock()
-	return nil
-}
-
 // SetModules 保存站点的配置模块选择（生成 nginx/caddy 片段时叠加）。
 // 落盘前先归一化：未知模块被过滤、互斥关系被消解，
 // 于是磁盘上存的一定是能真正生效的集合，回显与生成结果不会互相打架。
@@ -428,30 +490,74 @@ func (m *Manager) SetModules(id string, modules []string, proxyPort int) (*Site,
 		return nil, err
 	}
 	cp := *site
+	cp.Configs = cloneConfigs(site.Configs)
 	m.mu.Unlock()
 	return &cp, nil
 }
-// 两个动作都只在服务运行时有意义——没跑就不需要证书和解析。
-// 失败不返回错误：调用方（Create/Update/Delete）已经改成功了，
-// 把「证书没签出来」「hosts 没权限写」当作 CRUD 失败会让用户重试一个已经生效的操作。
-// 失败原因记进 Status，由前端如实回显并提供重试入口。
-func (m *Manager) afterChange() {
+
+// SetCustomConfig 保存（或清除）某后端的手工配置片段。content 去掉首尾空白后为空 = 清除，
+// 之后该后端回到生成器的结果。
+func (m *Manager) SetCustomConfig(id, backend, content string) (*Site, error) {
+	be, err := ParseBackend(backend)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(content) == "" {
+		content = "" // 纯空白按清除处理，免得落盘一份肉眼看不见的空片段
+	}
+
 	m.mu.Lock()
-	running := m.srv != nil
+	site, ok := m.sites[id]
+	if !ok {
+		m.mu.Unlock()
+		return nil, fmt.Errorf("站点不存在")
+	}
+	prev := cloneConfigs(site.Configs)
+	next := cloneConfigs(site.Configs)
+	if next == nil {
+		next = map[string]string{}
+	}
+	if content == "" {
+		delete(next, string(be))
+	} else {
+		next[string(be)] = content
+	}
+	site.Configs = cloneConfigs(next) // 删空后归一成 nil，不落盘 "configs": {}
+	if err := m.persistLocked(); err != nil {
+		site.Configs = prev // 落盘失败回滚内存
+		m.mu.Unlock()
+		return nil, err
+	}
+	cp := *site
+	cp.Configs = cloneConfigs(site.Configs)
 	m.mu.Unlock()
-	if !running {
-		return
-	}
-	if _, err := m.ensureCert(); err != nil {
-		logger.W("[sites] 证书签发失败: %v", err)
-	}
-	if err := m.SyncHosts(); err != nil {
-		logger.W("[sites] hosts 同步失败: %v", err)
-	}
+	return &cp, nil
 }
 
-// ensureCert 保证内存中的证书覆盖当前全部启用域名，域名集合变化时重新签发。
+// 站点集合一变，两件事必须跟着走：证书覆盖的域名、hosts 里的解析条目。
+//
+// 刻意不判断内置服务是否在跑 —— 证书文件与 hosts 条目是 nginx/caddy 提供服务的必要条件，
+// 而 nginx/caddy 完全不受内置服务开关影响。早先「没跑就跳过」会让
+// 「先建站点、再启动 caddy」这条路拿不到证书、域名也解析不到，站点直接打不开。
+//
+// 失败不返回错误、也不打日志：调用方（Create/Update/Delete）已经改成功了，
+// 把「证书没签出来」「hosts 没权限写」当作 CRUD 失败会让用户重试一个已经生效的操作。
+// 失败原因一律记进 Status，由前端如实回显并提供重试入口 —— 那条路径已经说得很清楚，
+// 这里再刷一行日志只是噪音（非管理员写 hosts 本就是常态，不是异常）。
+//
+// 这里传 escalate=false：增删改站点常常只是顺手调整（改个文档根、切个启用状态），
+// 拿这种动作去弹 UAC 是打扰。需要提权的时机交给用户显式点击（面板上的「重新同步」），
+// 那时 Status.HostsOK 为 false，按钮就在那里。
+func (m *Manager) afterChange() {
+	_, _ = m.ensureCert()
+	_ = m.syncHosts(false)
+}
+
+// ensureCert 保证磁盘上的证书覆盖当前全部启用域名，域名集合变化时重新签发。
 // 签发要跑外部 mkcert，必须在 certMu 下串行、且不持有 mu。
+//
+// 没有启用站点时直接清空证书状态：证书的唯一用途是被站点片段引用，
+// 一个站点都没有时去签一张空证书毫无意义（mkcert 也需要至少一个 host）。
 func (m *Manager) ensureCert() (*tls.Certificate, error) {
 	m.certMu.Lock()
 	defer m.certMu.Unlock()
@@ -459,6 +565,11 @@ func (m *Manager) ensureCert() (*tls.Certificate, error) {
 	m.mu.Lock()
 	domains := m.enabledDomainsLocked()
 	fp := strings.Join(domains, ",")
+	if len(domains) == 0 {
+		m.cert, m.certSet, m.certErr = nil, "", ""
+		m.mu.Unlock()
+		return nil, nil
+	}
 	if m.cert != nil && m.certSet == fp {
 		c := m.cert
 		m.mu.Unlock()
@@ -507,19 +618,14 @@ func (m *Manager) setCertErr(msg string) {
 // 由前端提示并提供「复制区块手工粘贴」的兜底。
 func (m *Manager) SyncHosts() error { return m.syncHosts(true) }
 
-// ClearHosts 清除 hosts 里的 QuickDock 标记区块（停止服务时调用，避免留下
-// 「域名能解析但没有服务在听」的悬空状态）。
-func (m *Manager) ClearHosts() error {
-	err := syncHostsTo(hostsFilePath(), nil, true)
-	m.recordHostsErr(err)
-	return err
-}
-
 // syncHosts 内部实现，escalate 决定权限不足时是否弹 UAC 重试。
+//
+// 提权那一路由子进程自己算 hosts 路径（hostsFilePath()），父进程不传路径过去 ——
+// 少一个来自父进程的路径参数，就少一个「写任意文件」的入口。
 func (m *Manager) syncHosts(escalate bool) error {
 	m.mu.Lock()
 	domains := m.enabledDomainsLocked()
-	path := hostsFilePath()
+	path := m.hostsPath
 	m.mu.Unlock()
 
 	err := syncHostsTo(path, domains, escalate)
@@ -538,84 +644,13 @@ func (m *Manager) recordHostsErr(err error) {
 	m.mu.Unlock()
 }
 
-// Start 启动 HTTPS 站点服务（先备好证书，再监听端口，最后同步 hosts）。
-// 由用户显式点击触发，故 hosts 写不进去时会自动提权重试（弹一次 UAC）。
-func (m *Manager) Start() error { return m.start(true) }
-
-func (m *Manager) start(escalateHosts bool) error {
-	m.mu.Lock()
-	if m.srv != nil {
-		m.mu.Unlock()
-		return fmt.Errorf("站点服务已在运行")
-	}
-	port := m.port
-	m.mu.Unlock()
-
-	// 先备证书再监听：没证书就绑端口，只会让每个请求都停在握手里，前端也拿不到可读原因。
-	if _, err := m.ensureCert(); err != nil {
-		return err
-	}
-
-	// hosts 失败不阻断启动：证书与监听都是本机能力，hosts 只是「把域名解析过来」，
-	// 用户也可能用自己的 DNS/代理。失败原因由 Status 回显。
-	if err := m.syncHosts(escalateHosts); err != nil {
-		logger.W("[sites] hosts 同步失败（站点仍启动）: %v", err)
-	}
-
-	// 只监听回环：本地开发站点没有对外暴露的理由，需要局域网访问时再显式放开。
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
-	if err != nil {
-		return fmt.Errorf("监听端口 %d 失败：%w（可能被占用或权限不足，可在站点设置里改用 8443）", port, err)
-	}
-	tlsLn := tls.NewListener(ln, &tls.Config{
-		MinVersion: tls.VersionTLS12,
-		GetCertificate: func(*tls.ClientHelloInfo) (*tls.Certificate, error) {
-			m.mu.Lock()
-			c := m.cert
-			m.mu.Unlock()
-			if c == nil {
-				return nil, fmt.Errorf("证书未就绪")
-			}
-			return c, nil
-		},
-	})
-	srv := &http.Server{Handler: http.HandlerFunc(m.handle)}
-	m.mu.Lock()
-	m.ln, m.srv = tlsLn, srv
-	m.mu.Unlock()
-
-	go func() { _ = srv.Serve(tlsLn) }()
-	logger.I("[sites] 站点服务已启动 port=%d 站点数=%d", port, len(m.List()))
-	return nil
-}
-
-// Stop 停止服务并清除 hosts 标记区块。
-func (m *Manager) Stop() error {
-	m.mu.Lock()
-	srv, ln := m.srv, m.ln
-	m.srv, m.ln = nil, nil
-	m.mu.Unlock()
-	if srv == nil {
-		return nil
-	}
-	// 关闭在锁外做，避免阻塞其它调用；字段已清空，List/Status 读到的是一致的「已停止」。
-	_ = srv.Close()
-	if ln != nil {
-		_ = ln.Close()
-	}
-	if err := m.ClearHosts(); err != nil {
-		logger.W("[sites] 停止后清理 hosts 失败: %v", err)
-	}
-	logger.I("[sites] 站点服务已停止")
-	return nil
-}
-
-// Resume 应用启动时调用：存在已启用站点则自动拉起服务（用户此前显式启用过，
-// 属于明确的持续意图）。失败只记日志——开机就弹一个绑定端口失败的错误没有意义，
-// 状态在 Status 里可见，用户点「启动」即可得到完整报错。
+// Resume 应用启动时调用：为已启用的站点补一次证书与 hosts 解析（nginx/caddy 要用它们）。
 //
-// 这里刻意传 escalateHosts=false：应用一启动就弹 UAC 属于「用户没做任何动作却被要求授权」。
-// hosts 服务本身不受影响，用户在面板上点「重新同步」时会正常提权。
+// 这是启动时唯一要做的两件事 —— 本站点管理器不监听端口，也无所谓「拉起服务」：
+// 服务器软件的开与关归「环境」页管，站点只负责把它需要的证书和解析准备好。
+//
+// 刻意不提权（escalateHosts=false）：应用一启动就弹 UAC 属于「用户没做任何动作却被要求授权」。
+// hosts 同步失败不影响服务本身，用户在面板上点「重新同步」时会正常提权。
 func (m *Manager) Resume() {
 	m.mu.Lock()
 	anyEnabled := false
@@ -629,47 +664,10 @@ func (m *Manager) Resume() {
 	if !anyEnabled {
 		return
 	}
-	if err := m.start(false); err != nil {
-		logger.W("[sites] 启动时自动拉起站点服务失败: %v", err)
+	if _, err := m.ensureCert(); err != nil {
+		logger.W("[sites] 启动时签发证书失败: %v", err)
 	}
-}
-
-// handle 按请求域名分发到对应站点根目录。
-func (m *Manager) handle(w http.ResponseWriter, r *http.Request) {
-	domain := hostOnly(r.Host)
-	m.mu.Lock()
-	var dir string
-	for _, s := range m.sites {
-		if s.Enabled && strings.EqualFold(s.Domain, domain) {
-			dir = s.Dir
-			break
-		}
+	if err := m.syncHosts(false); err != nil {
+		logger.W("[sites] 启动时同步 hosts 失败: %v", err)
 	}
-	m.mu.Unlock()
-	if dir == "" {
-		http.Error(w, "no site configured for host: "+domain, http.StatusNotFound)
-		return
-	}
-	serveDir(w, r, dir)
-}
-
-// serveDir 提供静态文件，并禁用目录列举：
-// 请求指向目录且无 index.html 时返回 403，避免任意程序遍历站点目录结构。
-func serveDir(w http.ResponseWriter, r *http.Request, dir string) {
-	if strings.HasSuffix(r.URL.Path, "/") {
-		idx := filepath.Join(dir, filepath.Clean(r.URL.Path), "index.html")
-		if _, err := os.Stat(idx); err != nil {
-			http.Error(w, "directory listing disabled", http.StatusForbidden)
-			return
-		}
-	}
-	http.FileServer(http.Dir(dir)).ServeHTTP(w, r)
-}
-
-// hostOnly 从 Host 头里取出主机名：去掉端口，并剥掉 IPv6 的方括号。
-func hostOnly(host string) string {
-	if h, _, err := net.SplitHostPort(host); err == nil {
-		host = h
-	}
-	return strings.ToLower(strings.Trim(host, "[]"))
 }

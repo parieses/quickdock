@@ -278,7 +278,7 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 - **日志查看**：服务型运行时提供「查看日志」弹窗，实时滚动读取进程日志尾部 8KB（覆盖 PostgreSQL / MySQL·MariaDB / MongoDB / Memcached / MinIO / Mailpit / Apache / Nginx / Redis / RabbitMQ / Caddy / Traefik / Ollama）
 - **Web 控制台一键打开**：运行时监听内置 Web UI 时，运行中显示「打开控制台」按钮，直接打开 `http://127.0.0.1:<port>`，覆盖 MinIO(9001) / Mailpit(8025) / Traefik(8080) / RabbitMQ(15672，仅管理插件启用时) / Nginx·Caddy(80)
 - **端口全景**：顶栏「端口全景」弹窗汇总所有运行服务的运行时 / 版本 / 端口 / 控制台入口，快速掌握本机开发服务占用情况
-- **本地开发站点**（内置工具组）：给本地项目一键绑定自定义域名 + 自动 HTTPS——内置单监听器签发一张覆盖全部启用域名的证书（mkcert），hosts 只改写 `# quickdock-sites begin/end` 标记区块；证书与端口就绪后向「站点配置文件同级 `quickdock-sites/`」写入片段并返回 `includeLine` 供自行引用，**绝不自动改写 nginx.conf / Caddyfile**
+- **本地开发站点**（内置工具组）：给本地项目一键绑定自定义域名 + 自动 HTTPS——对外服务交给已装的 Nginx / Caddy（HTTPS 443，可跑 PHP、可配反代），QuickDock 自身**不监听任何端口**：签发一张覆盖全部启用域名的证书（mkcert）、hosts 只改写 `# quickdock-sites begin/end` 标记区块，并向「站点配置文件同级 `quickdock-sites/`」写入片段且写入后触发热重载，**绝不自动改写 nginx.conf / Caddyfile**；纯静态站点不会生成 PHP-FastCGI 段（不依赖 php-fpm 9000）
 
 ### UI 交互
 
@@ -500,7 +500,7 @@ quickdock/
 ├── internal/            # 引擎层（被门面/宿主调用，不含 Wails 绑定）
 │   ├── db/              # SQLite 数据层（安全白名单 + schema 自动迁移；workspace/collection/item/clipboard/notes/todo/scheduled_tasks/monitor/tool/plugin/plugin_exec_logs/usage_frecency/activity/snapshot…）
 │   ├── env/             # 多运行时引擎（29 运行时注册表 + 下载 + 解压 + 服务生命周期 + 项目级版本探测，跨平台分文件）
-│   ├── sites/           # 本地开发站点（域名 + 自动 HTTPS 单监听器 + hosts 标记区块 + 配置片段生成，不接管 nginx/Caddy 配置）
+│   ├── sites/           # 本地开发站点（域名 + 证书 + hosts 标记区块 + nginx/Caddy 片段生成，自身不监听端口，不接管 nginx/Caddy 配置）
 │   ├── dsh/             # DeepSeek Harness 引擎（node_env 便携 Node + dsh_runtime 进程管理）
 │   ├── plugin/          # 插件管理器引擎（manifest / manager / rpc / host / installer / window_manager…）
 │   ├── platform/        # 平台 API 封装（DPAPI / 剪贴板监听 / 热键 / 应用扫描 / 图标 / 系统命令 / 显示器）

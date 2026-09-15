@@ -26,16 +26,53 @@ const caddyAdminPort = 2019
 // 实际端口以 Caddyfile 解析结果为准（见 ConfiguredPorts / WebConsolePort）。
 const caddyDefaultSitePort = 8080
 
+// sitesDirName 站点片段目录名（与 internal/sites 的 SuggestedConfDir 约定的目录名必须一致）。
+// 站点页把每个站点生成成一个片段文件放进这里，主配置用 import 通配符整批引入。
+const sitesDirName = "quickdock-sites"
+
 // defaultCaddyfile 首次启动前自动生成的默认配置：把 admin API 锁在 localhost:2019，
-// 站点默认开在 :8080（避开 80 与 IIS/Skype 冲突），用户可在环境页直接编辑 Caddyfile 托管自己的站点。
-const defaultCaddyfile = `{
+// 站点默认开在 :8080（避开 80 与 IIS/Skype 冲突），并用 import 引入 quickdock-sites/ 里的站点片段。
+//
+// 站点片段由「站点」页生成与维护，这里是唯一的接入点：没有这行 import，片段写得再对也不会生效
+// （Caddy 只认 --config 指向的这份文件）。空目录时 import 只打一条 warn，不影响启动。
+const defaultCaddyfile = `# Managed by QuickDock —— 本文件由 QuickDock 生成与维护，会自动升级。
+# 用「站点」页管理站点（配置写到 quickdock-sites/）；在本文件里手写的站点会在自动升级时丢失。
+{
+	admin localhost:2019
+}
+
+# 没有站点片段时的兜底页，用于确认 Caddy 是否活着。
+:8080 {
+	respond "QuickDock Caddy is running"
+}
+
+# QuickDock 管理的站点片段（每站点一个 .caddy，可重复生成）。
+import quickdock-sites/*.caddy
+`
+
+// legacyDefaultCaddyfiles 是 QuickDock 历代发布过的默认 Caddyfile（逐字节）。
+// ensureConfig 会比对：命中说明用户从未编辑过，可以安全升级到最新模板；
+// 没命中就是用户自己的配置，一律不改。
+var legacyDefaultCaddyfiles = []string{
+	`{
 	admin localhost:2019
 }
 
 :8080 {
 	respond "QuickDock Caddy is running"
 }
-`
+`,
+}
+
+// isLegacyDefaultCaddyfile 判断内容是否等于某一个历史默认模板。
+func isLegacyDefaultCaddyfile(s string) bool {
+	for _, t := range legacyDefaultCaddyfiles {
+		if s == t {
+			return true
+		}
+	}
+	return false
+}
 
 // CaddyRuntime 管理便携 Caddy 运行时（caddyserver/caddy 的 Windows 发行 zip，含单文件 caddy.exe）。
 // 与 redis/nginx 同属「svcMgr PID 句柄」监控模型：以 `caddy run`（前台阻塞）拉起，由 svcMgr 记录 PID 与
@@ -215,13 +252,77 @@ func (c *CaddyRuntime) LogPath(version string) string {
 	return filepath.Join(c.versionDir(version), "caddy.log")
 }
 
-// ensureConfig 默认 Caddyfile 缺失时写入一份（admin 锁 localhost:2019，站点开 :8080 避开 80 冲突）。
+// ensureConfig 保证 Caddyfile 存在，并把 QuickDock 的默认模板升级到最新版。
+//
+// 只改写两种文件：不存在的（新建）、内容仍逐字节等于某个历史默认模板的（用户从未编辑过）。
+// 用户自己改过的配置一概不碰 —— 站点片段靠主配置里的 import 接入，不需要动别的地方。
 func (c *CaddyRuntime) ensureConfig(version string) error {
 	p := c.ConfigPath(version)
-	if _, err := os.Stat(p); err == nil {
+	cur, err := os.ReadFile(p)
+	if err != nil {
+		return os.WriteFile(p, []byte(defaultCaddyfile), 0644)
+	}
+	if string(cur) == defaultCaddyfile {
 		return nil
 	}
-	return os.WriteFile(p, []byte(defaultCaddyfile), 0644)
+	if isLegacyDefaultCaddyfile(string(cur)) {
+		logger.I("[env][caddy] 升级默认 Caddyfile：接入 quickdock-sites/ 站点片段")
+		return os.WriteFile(p, []byte(defaultCaddyfile), 0644)
+	}
+	// 用户自己的配置：保持原样。若里面没有 import 站点目录，由上层把「需手工加一行」提示出去。
+	return nil
+}
+
+// SitesDir 返回该版本存放站点片段的目录（主配置用 import 通配符引入该目录）。
+func (c *CaddyRuntime) SitesDir(version string) string {
+	return filepath.Join(c.versionDir(version), sitesDirName)
+}
+
+// ConfigNeedsSitesImport 报告主配置是否缺少对站点片段目录的引用。
+// 用于在「站点」页提示：配置写好了，但这份 Caddyfile 不会读它。
+func (c *CaddyRuntime) ConfigNeedsSitesImport(version string) bool {
+	data, err := os.ReadFile(c.ConfigPath(version))
+	if err != nil {
+		return false // 文件不存在时 ensureConfig 会生成带 import 的新模板
+	}
+	return !strings.Contains(string(data), sitesDirName)
+}
+
+// Reload 让运行中的 Caddy 重新加载配置（站点片段增删后调用）。
+//
+// 未运行时直接返回 nil：下次启动自然会读到新配置，不算失败。
+// 失败（多为端口被占，如 443 上已有别的监听器）时把 Caddy 的原始输出透出去 —— 里面
+// 通常就是 bind 失败的确切原因，比一句「重载失败」有用得多。
+func (c *CaddyRuntime) Reload(version string) error {
+	if !caddyHealthy() {
+		return nil
+	}
+	var exe, wd string
+	for _, ins := range c.InstalledVersions() {
+		if ins.Version != version {
+			continue
+		}
+		if ins.Scope == "system" {
+			exe, wd = ins.Path, filepath.Dir(ins.Path)
+		} else {
+			exe, wd = c.ExeFor(version), c.versionDir(version)
+		}
+		break
+	}
+	if exe == "" {
+		return fmt.Errorf("未安装该版本: %s", version)
+	}
+	cmd := sysutil.Command(exe, "reload", "--config", "Caddyfile", "--adapter", "caddyfile")
+	cmd.Dir = wd
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return fmt.Errorf("%s", msg)
+	}
+	return nil
 }
 
 // Start 以 `caddy run`（前台阻塞）拉起，由 svcMgr 记录 PID 并捕获日志；admin API 恒在 localhost:2019，
@@ -330,3 +431,14 @@ func caddyHealthy() bool {
 	resp.Body.Close()
 	return true
 }
+
+// ---- 编译期接口断言 ----
+//
+// 可选能力接口靠隐式 method set 满足，某天改掉一个方法签名不会报错、只会在运行时
+// 静默失去该能力（按钮消失/日志空白）。这里逐一固定下来，让编译器替我们守着。
+var _ ServiceController   = (*CaddyRuntime)(nil) // 服务启停与状态
+var _ WebConsoleProvider  = (*CaddyRuntime)(nil) // Web 管理后台入口
+var _ ConfigValidator     = (*CaddyRuntime)(nil) // 配置校验
+var _ SitesConfigHost     = (*CaddyRuntime)(nil) // 站点片段重载
+var _ ConfigProvider      = (*CaddyRuntime)(nil) // 配置读写
+var _ ConfigPortsProvider = (*CaddyRuntime)(nil) // 配置内端口解析

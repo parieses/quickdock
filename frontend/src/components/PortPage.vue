@@ -126,7 +126,11 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 </template>
 
 <style scoped>
-.port-page { display: flex; flex-direction: column; height: 100%; padding: var(--space-6) var(--space-8); overflow: hidden; }
+/* 本组件嵌在 EnvironmentPage 的 .env-detail 里，外层已给了内边距与滚动容器。
+   这里再自带一层 padding 会让顶部双重缩进（比其它分类低一截）；
+   height:100% + overflow:hidden 更糟——父容器是 auto 高度的 flex 列，
+   内层 .port-list 拿不到确定高度，会把列表压扁或整个裁掉。 */
+.port-page { display: flex; flex-direction: column; padding: 0; }
 .port-head { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: var(--space-5); flex-shrink: 0; gap: var(--space-4); }
 .port-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
 .port-title { font-size: 18px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
@@ -144,7 +148,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 
 .port-error { margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px; color: var(--color-danger); background: rgba(232, 76, 76, 0.1); border: 1px solid rgba(232, 76, 76, 0.3); border-radius: var(--radius-md); flex-shrink: 0; }
 
-.port-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 4px; }
+.port-list { display: flex; flex-direction: column; gap: 4px; }
 .port-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 .empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
 .port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px 12px; background: var(--color-bg-secondary); box-shadow: inset 0 0 0 1px var(--color-border); border-radius: var(--radius-md); transition: background var(--transition-fast); }

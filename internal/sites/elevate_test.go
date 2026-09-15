@@ -17,7 +17,8 @@ func TestValidateHostsEntries(t *testing.T) {
 			t.Errorf("validateHostsEntries(%q) 应通过，却报 %v", d, err)
 		}
 	}
-	// 清空场景（0 个域名）——ClearHosts 走的就是这条路，必须放行。
+	// 空集合必须放行：它的效果只是把标记区块写空，不构成攻击面。
+	// 这一层的职责是挡住「可能被当作路径 / 命令行参数 / 换行」的内容，不是限制集合大小。
 	if err := validateHostsEntries(nil); err != nil {
 		t.Errorf("清空场景应通过，却报 %v", err)
 	}

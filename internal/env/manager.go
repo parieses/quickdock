@@ -82,7 +82,7 @@ type ServiceController interface {
 type RuntimeInfo struct {
 	ID             string       `json:"id"`
 	Name           string       `json:"name"`
-	Group          string       `json:"group"` // 分组：language / webserver / cache / tool
+	Group          string       `json:"group"` // 分组：language / network / database / middleware / ai / tool / special
 	Platforms      []string     `json:"platforms"`
 	Recommended    []string     `json:"recommended"` // 兜底可下载版本（拉取失败时使用）
 	Installed      []Install    `json:"installed"`   // 已装版本列表（可多个）
@@ -501,34 +501,6 @@ func (m *Manager) Install(rt Runtime, version, sourceID, custom string, cb Insta
 	return nil
 }
 
-// SetSource 切换下载源 / 设置自定义源（custom=="" 且 sourceID!="custom" 时清除自定义源）
-func (m *Manager) SetSource(rt Runtime, sourceID, custom string) error {
-	if _, err := m.adapter(rt); err != nil {
-		return err
-	}
-	if sourceID != "" {
-		SetActiveSource(rt, sourceID)
-	}
-	if custom != "" {
-		SetCustomSource(rt, custom)
-	} else if sourceID != "custom" {
-		SetCustomSource(rt, "")
-	}
-	return nil
-}
-
-// Sources 返回某运行时的可用下载源
-func (m *Manager) Sources(rt Runtime) ([]SourceInfo, error) {
-	if _, err := m.adapter(rt); err != nil {
-		return nil, err
-	}
-	var si []SourceInfo
-	for _, s := range ListSources(rt) {
-		si = append(si, SourceInfo{ID: s.ID, Name: s.Name})
-	}
-	return si, nil
-}
-
 // AvailableVersions 返回某运行时的全量可下载版本（上游拉取，失败兜底推荐列表）。
 func (m *Manager) AvailableVersions(rt Runtime) []string {
 	if _, err := m.adapter(rt); err != nil {
@@ -879,35 +851,58 @@ type DataDirProvider interface {
 	DataDir(version string) string
 }
 
-// PathEntry 描述某运行时当前激活版本在系统 PATH 中的状态（供 PATH 可视化面板展示）。
-type PathEntry struct {
-	Runtime string `json:"runtime"` // 运行时 id
-	Version string `json:"version"` // 激活版本
-	BinDir  string `json:"binDir"`  // 该版本 bin 目录（即写入 PATH 的条目）
-	InPath  bool   `json:"inPath"`  // 该 bin 目录是否真实出现在系统 PATH 中
+// SitesConfigHost 可选能力：运行时的主配置能引入 QuickDock 生成的站点片段，并支持热重载。
+//
+// 「站点」页生成的片段本身只是文件，必须被主配置引用才会生效 —— 这正是「配置写好了却打不开」
+// 的唯一根因。实现该能力的运行时（caddy 等）由 Manager 转发下面三件事。
+type SitesConfigHost interface {
+	// SitesDir 存放站点片段的目录（主配置应引用它）。
+	SitesDir(version string) string
+	// ConfigNeedsSitesImport 主配置是否缺少对片段目录的引用（用户手写的主配置会命中）。
+	ConfigNeedsSitesImport(version string) bool
+	// Reload 热重载配置；运行时未在跑时为 no-op。
+	Reload(version string) error
 }
 
-// PathInfo 返回所有已设置激活版本的运行时，其 bin 目录及是否真正注册进系统 PATH。
-func (m *Manager) PathInfo() []PathEntry {
-	out := make([]PathEntry, 0, len(runtimeOrder))
-	for _, rt := range runtimeOrder {
-		v := activeVersion(rt)
-		if v == "" {
-			continue
-		}
-		dir := m.exeDirFor(rt, v)
-		inPath := false
-		if a, err := m.adapter(rt); err == nil {
-			for _, ins := range a.InstalledVersions() {
-				if ins.Version == v && ins.InSystemPath {
-					inPath = true
-					break
-				}
-			}
-		}
-		out = append(out, PathEntry{Runtime: string(rt), Version: v, BinDir: dir, InPath: inPath})
+// SitesDirFor 返回该运行时存放站点片段的目录。
+func (m *Manager) SitesDirFor(rt Runtime, version string) (string, error) {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return "", err
 	}
-	return out
+	h, ok := a.(SitesConfigHost)
+	if !ok {
+		return "", fmt.Errorf("%s 不支持托管站点片段", DisplayName(rt))
+	}
+	return h.SitesDir(version), nil
+}
+
+// SitesConfigNeedsImport 报告主配置是否缺少对站点片段目录的引用。
+// true 表示站点配置不会生效，需要用户在主配置里加一行（QuickDock 不改写用户手写的配置）。
+func (m *Manager) SitesConfigNeedsImport(rt Runtime, version string) (bool, error) {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return false, err
+	}
+	h, ok := a.(SitesConfigHost)
+	if !ok {
+		return false, fmt.Errorf("%s 不支持托管站点片段", DisplayName(rt))
+	}
+	return h.ConfigNeedsSitesImport(version), nil
+}
+
+// ReloadRuntime 让运行中的运行时重新加载配置（站点片段增删后调用）。
+// 不支持该能力的运行时返回 nil —— 站点片段与它无关，不该算失败。
+func (m *Manager) ReloadRuntime(rt Runtime, version string) error {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return err
+	}
+	h, ok := a.(SitesConfigHost)
+	if !ok {
+		return nil
+	}
+	return h.Reload(version)
 }
 
 // Start 启动某运行时的服务（仅 nginx/redis 支持）。

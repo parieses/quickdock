@@ -28,7 +28,9 @@ func TestGenerateNginx_Static(t *testing.T) {
 		"ssl_certificate     C:/data/sites/certs/sites-cert.pem;",
 		"ssl_certificate_key C:/data/sites/certs/sites-key.pem;",
 		"root  D:/proj/myapp;",
-		"try_files $uri $uri/ /index.php?$query_string;",
+		"index index.html index.htm;",
+		// 纯静态站点的回退目标是 index.html，绝不是 index.php（那个文件在静态站点上不存在）
+		"try_files $uri $uri/ /index.html;",
 		"listen      80;",
 		"return 301 https://$host$request_uri;",
 	} {
@@ -36,9 +38,9 @@ func TestGenerateNginx_Static(t *testing.T) {
 			t.Errorf("缺少 %q:\n%s", want, res.Snippet)
 		}
 	}
-	// 静态站点不应出现 FastCGI 段
-	if res.NeedsPHPFPM || strings.Contains(res.Snippet, "fastcgi_pass") {
-		t.Errorf("未检测到 PHP 时不应生成 FastCGI 段:\n%s", res.Snippet)
+	// 纯静态站点里不该出现任何 PHP 痕迹：FastCGI 段、index.php 回退、index 列表里的 index.php
+	if res.NeedsPHPFPM || strings.Contains(res.Snippet, "php") {
+		t.Errorf("纯静态站点不应出现任何 PHP 相关指令:\n%s", res.Snippet)
 	}
 	// 反斜杠在 nginx 里是转义字符，必须全部转成正斜杠
 	if strings.Contains(res.Snippet, `\`) {
@@ -64,6 +66,9 @@ func TestGenerateNginx_WithPHP(t *testing.T) {
 		`location ~ \.php$ {`,
 		"fastcgi_pass   127.0.0.1:9000;",
 		"fastcgi_param  SCRIPT_FILENAME $document_root$fastcgi_script_name;",
+		// PHP 站点才保留 index.php 作为目录索引与回退目标
+		"index index.php index.html index.htm;",
+		"try_files $uri $uri/ /index.php?$query_string;",
 	} {
 		if !strings.Contains(res.Snippet, want) {
 			t.Errorf("缺少 %q:\n%s", want, res.Snippet)
@@ -71,24 +76,28 @@ func TestGenerateNginx_WithPHP(t *testing.T) {
 	}
 }
 
-func TestGenerateNginx_CustomPortRedirectKeepsPort(t *testing.T) {
+// 站点对外端口不可配：无论输入什么，nginx 恒为 443 ssl + 80 的 301 跳转。
+func TestGenerateNginx_PortsAreFixed(t *testing.T) {
 	res, err := Generate(GenInput{
-		Site:       Site{Domain: "x.test", Dir: "/x"},
-		Backend:    BackendNginx,
-		ListenPort: 8443,
+		Site:    Site{Domain: "x.test", Dir: "/x"},
+		Backend: BackendNginx,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Snippet, "listen      8443 ssl;") {
-		t.Errorf("自定义端口未生效:\n%s", res.Snippet)
+	if !strings.Contains(res.Snippet, "listen      443 ssl;") {
+		t.Errorf("站点本体应固定监听 443 ssl:\n%s", res.Snippet)
 	}
-	// 非 443 时跳转 URL 必须带端口，否则会跳到 443 上的别的服务
-	if !strings.Contains(res.Snippet, "return 301 https://$host:8443$request_uri;") {
-		t.Errorf("跳转未保留端口:\n%s", res.Snippet)
+	if !strings.Contains(res.Snippet, "listen      80;") {
+		t.Errorf("应固定有 80 跳转块:\n%s", res.Snippet)
 	}
-	if !strings.Contains(res.Snippet, "listen      8442;") {
-		t.Errorf("http 端口推导不符（8443 → 8442）:\n%s", res.Snippet)
+	// 跳转 URL 不带端口号：本站就是 443，带上反而是错的
+	if !strings.Contains(res.Snippet, "return 301 https://$host$request_uri;") {
+		t.Errorf("跳转目标应为无端口的 https:\n%s", res.Snippet)
+	}
+	// 除了这两个端口，不该再出现别的 listen
+	if n := strings.Count(res.Snippet, "listen      "); n != 2 {
+		t.Errorf("应恰好有 2 条 listen（443/80），实际 %d 条:\n%s", n, res.Snippet)
 	}
 }
 
@@ -121,18 +130,18 @@ func TestGenerateCaddy(t *testing.T) {
 	}
 }
 
-func TestGenerateCaddy_WithPHPAndPort(t *testing.T) {
+func TestGenerateCaddy_WithPHPAndHTTPRedirect(t *testing.T) {
 	res, err := Generate(GenInput{
 		Site:       Site{Domain: "p.test", Dir: "/p"},
 		Backend:    BackendCaddy,
-		ListenPort: 8443,
 		PHPFPMAddr: "127.0.0.1:9000",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(res.Snippet, "p.test:8443 {") {
-		t.Errorf("非默认端口应写进站点地址:\n%s", res.Snippet)
+	// 站点本体是不带端口的域名（Caddy 对它有 tls，即 https 443）
+	if !strings.Contains(res.Snippet, "p.test {") {
+		t.Errorf("站点本体应绑裸域名:\n%s", res.Snippet)
 	}
 	if !strings.Contains(res.Snippet, "php_fastcgi 127.0.0.1:9000") {
 		t.Errorf("缺少 php_fastcgi:\n%s", res.Snippet)
@@ -141,21 +150,21 @@ func TestGenerateCaddy_WithPHPAndPort(t *testing.T) {
 	if strings.Contains(res.Snippet, "try_files") {
 		t.Errorf("PHP 站点不应叠加 try_files:\n%s", res.Snippet)
 	}
-}
-
-func TestGenerateBuiltinIsEmpty(t *testing.T) {
-	res, err := Generate(GenInput{Site: Site{Domain: "a.test", Dir: "/a"}, Backend: BackendBuiltin})
-	if err != nil {
-		t.Fatalf("内置后端不应报错: %v", err)
+	// 与 nginx 同语义：另给一个 http 块做 301 跳转（Caddy 单块只能绑一个地址）
+	if !strings.Contains(res.Snippet, "http://p.test {") {
+		t.Errorf("缺少 http 跳转块:\n%s", res.Snippet)
 	}
-	if res.Snippet != "" || res.FileName != "" {
-		t.Errorf("内置后端不生成配置: %+v", res)
+	if !strings.Contains(res.Snippet, "redir https://{host}{uri} 301") {
+		t.Errorf("http 块缺少 301 跳转:\n%s", res.Snippet)
 	}
 }
 
 func TestGenerateValidation(t *testing.T) {
 	if _, err := Generate(GenInput{Site: Site{Domain: "a.test", Dir: "/a"}, Backend: "apache"}); err == nil {
 		t.Error("未知后端应报错")
+	}
+	if _, err := Generate(GenInput{Site: Site{Domain: "a.test", Dir: "/a"}, Backend: "builtin"}); err == nil {
+		t.Error("内置后端已移除，不应再被接受")
 	}
 	if _, err := Generate(GenInput{Site: Site{Dir: "/a"}, Backend: BackendNginx}); err == nil {
 		t.Error("空域名应报错")
@@ -369,3 +378,55 @@ func TestGenerateCaddy_StaticAndProxy(t *testing.T) {
 	}
 }
 
+func TestGenerateDocRoot(t *testing.T) {
+	// 框架项目的入口几乎都在子目录（Laravel/ThinkPHP 的 public、Yii2 的 web）。
+	// root 不跟着走，.env / storage / vendor 就会落在 web 根下。
+	ng, err := Generate(GenInput{
+		Site:    Site{Domain: "laravel.test", Dir: `D:\proj\blog`, DocRoot: "public"},
+		Backend: BackendNginx,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(ng.Snippet, "root  D:/proj/blog/public;") {
+		t.Errorf("nginx root 未应用文档根:\n%s", ng.Snippet)
+	}
+	if strings.Contains(ng.Snippet, "root  D:/proj/blog;") {
+		t.Errorf("nginx root 仍指向项目根:\n%s", ng.Snippet)
+	}
+
+	// 多级文档根（Yii2 advanced 模板的 frontend/web）
+	multi, err := Generate(GenInput{
+		Site:    Site{Domain: "yii.test", Dir: "/srv/yii", DocRoot: "frontend/web"},
+		Backend: BackendNginx,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(multi.Snippet, "root  /srv/yii/frontend/web;") {
+		t.Errorf("多级文档根未生效:\n%s", multi.Snippet)
+	}
+
+	cd, err := Generate(GenInput{
+		Site:    Site{Domain: "laravel.test", Dir: "/srv/blog", DocRoot: "public"},
+		Backend: BackendCaddy,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(cd.Snippet, "root * /srv/blog/public") {
+		t.Errorf("caddy root 未应用文档根:\n%s", cd.Snippet)
+	}
+
+	// 空文档根 = 原行为，已存在的站点不受影响
+	plain, err := Generate(GenInput{
+		Site:    Site{Domain: "plain.test", Dir: `D:\www`},
+		Backend: BackendNginx,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(plain.Snippet, "root  D:/www;") {
+		t.Errorf("空文档根时 root 应保持项目目录:\n%s", plain.Snippet)
+	}
+}
