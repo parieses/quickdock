@@ -5,6 +5,7 @@ import "quickdock/services"
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -59,6 +60,11 @@ func (p *PluginService) ExecutePluginCommand(pluginID, commandID string, input m
 // recordPluginExecLog 写入一条插件命令执行日志（5.2）
 func (p *PluginService) recordPluginExecLog(pluginID, commandID, trigger string, start time.Time, result interface{}, execErr error) {
 	if p.App.DB == nil {
+		return
+	}
+	// 跳过只读轮询类命令（如 dup-finder 的 task-status，前端 1 秒一次拉进度）。
+	// 这些是进度轮询而非用户操作，落审计日志既无意义又会刷爆 plugin_exec_logs。
+	if strings.HasSuffix(commandID, "-status") {
 		return
 	}
 	log := &db.PluginExecLog{
