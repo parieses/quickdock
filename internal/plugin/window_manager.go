@@ -115,18 +115,19 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 			HiddenOnTaskbar: !showInTaskbar,
 		},
 	})
-	// 用户点击关闭按钮 → 真正销毁窗口，并从注册表删除；同时停止插件进程（关窗即终止）
+	// 用户点击关闭按钮 → 真正销毁窗口，并从注册表删除；停止插件进程（关窗即终止），
+	// 状态恢复为「就绪」而非「已停止」——关窗是系统自动回收，下次仍可经 EnsureLoaded 惰性复活。
 	win.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		m.mu.Lock()
 		delete(m.windows, pluginID)
 		m.mu.Unlock()
 		// 不调用 Cancel()，让窗口正常关闭销毁
 		if m.mgr != nil {
-			if err := m.mgr.StopPlugin(pluginID); err != nil {
+			if err := m.mgr.StopPluginOnWindowClose(pluginID); err != nil {
 				logger.W("[plugin-window] 窗口关闭 %s 后停止插件进程失败: %v", pluginID, err)
 			}
 		}
-		logger.I("[plugin-window] 窗口关闭 %s，已从注册表移除并停止插件进程", pluginID)
+		logger.I("[plugin-window] 窗口关闭 %s，已从注册表移除并停止插件进程（状态恢复为就绪）", pluginID)
 	})
 	m.windows[pluginID] = win
 	m.mu.Unlock()

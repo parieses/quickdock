@@ -124,7 +124,7 @@ type PluginInstance struct {
 	// 悬挂写者由 stopPlugin 杀进程 / 进程退出时回收。
 	writeBroken atomic.Bool
 	Dir         string       // 插件安装目录
-	Status      string       // running | stopped | crashed | unresponsive
+	Status      string       // registered | starting | running | unresponsive | stopped | crashed
 	statusMu    sync.RWMutex // 保护 Status 的并发读写（readLoop 在无锁 goroutine 中写）
 
 	// 健康检查
@@ -146,7 +146,7 @@ func NewPluginInstance(manifest PluginManifest, dir string) *PluginInstance {
 		readyCh:  make(chan struct{}),
 		doneCh:   make(chan struct{}),
 		Dir:      dir,
-		Status:   "created",
+		Status:   statusRegistered,
 	}
 }
 
@@ -176,7 +176,7 @@ type PluginInfo struct {
 	DescriptionI18n map[string]string `json:"descriptionI18n,omitempty"`
 	Author          string            `json:"author"`
 	Category        string            `json:"category"`
-	Status          string            `json:"status"` // running | stopped | crashed
+	Status          string            `json:"status"` // registered(就绪) | starting(启动中) | running(运行中) | unresponsive(无响应) | stopped(已停止) | crashed(已崩溃)
 	HasFrontend     bool              `json:"hasFrontend"`
 	// Runtime 后端运行类型：none | goja | native。
 	// none 表示插件无后端：命令由前端自行处理，宿主 ExecuteCommand 不执行任何 host 逻辑，

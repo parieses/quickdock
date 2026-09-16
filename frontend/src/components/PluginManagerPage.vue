@@ -229,18 +229,24 @@ const sortedPlugins = computed(() => {
 function statusBadgeClass(status: string): string {
   switch (status) {
     case 'running': return 'badge-running'
+    case 'starting': return 'badge-starting'
+    case 'registered': return 'badge-registered'
+    case 'unresponsive': return 'badge-unresponsive'
     case 'stopped': return 'badge-stopped'
     case 'crashed': return 'badge-crashed'
-    default: return 'badge-created'
+    default: return 'badge-registered'
   }
 }
 
 function statusLabel(status: string): string {
   switch (status) {
     case 'running': return t('pluginStatusRunning')
+    case 'starting': return t('pluginStatusStarting')
+    case 'registered': return t('pluginStatusRegistered')
+    case 'unresponsive': return t('pluginStatusUnresponsive')
     case 'stopped': return t('pluginStatusStopped')
     case 'crashed': return t('pluginStatusCrashed')
-    default: return t('pluginStatusCreated')
+    default: return t('pluginStatusRegistered')
   }
 }
 
@@ -336,9 +342,9 @@ onMounted(() => { loadPlugins(); loadLogs() })
           <button
             v-if="p.hasFrontend"
             class="action-top-btn btn-open-top"
-            :disabled="p.status !== 'running' || operating.has(p.id)"
+            :disabled="(p.status !== 'running' && p.status !== 'registered') || operating.has(p.id)"
             @click.stop="openPluginPage(p)"
-            :title="p.status === 'running' ? t('pluginOpen') : t('pluginNotRunning')"
+            :title="(p.status === 'running' || p.status === 'registered') ? t('pluginOpen') : t('pluginNotRunning')"
           >
             <ExternalLink :size="12" />
           </button>
@@ -576,7 +582,9 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .badge-running { background: rgba(29,158,117,0.15); color: #1D9E75; }
 .badge-stopped { background: rgba(136,135,128,0.15); color: #888780; }
 .badge-crashed { background: rgba(226,75,74,0.15); color: #E24B4A; }
-.badge-created { background: rgba(55,138,221,0.15); color: #378ADD; }
+.badge-registered { background: rgba(55,138,221,0.15); color: #378ADD; }
+.badge-starting { background: rgba(224,162,58,0.15); color: #E0A23A; }
+.badge-unresponsive { background: rgba(226,132,58,0.15); color: #E2843A; }
 
 /* 使用次数 */
 .card-usage { display: inline-flex; align-items: center; gap: 2px; font-size: 9px; color: var(--color-text-muted); }

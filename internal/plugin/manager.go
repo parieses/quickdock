@@ -24,6 +24,17 @@ import (
 // pidFileVersion 用于兼容未来格式变更
 const pidFileVersion = 1
 
+// statusRegistered 表示插件「仅登记、未启动」的懒加载占位状态：创建实例并写入 m.plugins，
+// 但不起进程 / 不起 goja VM / 不执行 initialize 握手。首次使用时经 EnsureLoaded 惰性拉起。
+const statusRegistered = "registered"
+
+// statusStarting 表示插件正在启动、等待 initialize 握手完成（瞬时状态）。
+const statusStarting = "starting"
+
+// statusUnresponsive 表示进程仍在但连续多次 ping 无响应（卡死）；
+// 与 stopped 不同：watchPlugin 会据此自动重启，而非放弃。
+const statusUnresponsive = "unresponsive"
+
 // pidFileData PID 文件结构
 type pidFileData struct {
 	Version   int            `json:"version"`
@@ -53,6 +64,12 @@ type Manager struct {
 	// per-ID 锁保证同 ID 串行，不同 ID 仍可并行（DiscoverAndLoad 依赖并发提速）。
 	loadLocks   map[string]*sync.Mutex
 	loadLocksMu sync.Mutex
+
+	// EnableLazyPluginLoad 控制启动期是否仅登记插件（懒加载）。
+	// true（默认）：DiscoverAndLoad 只 RegisterPlugin，后端进程/goja VM 延后到首次使用；
+	// false：沿用旧行为，启动即对全部启用插件调用 LoadPlugin。
+	// 作为一键回滚开关，发现懒加载异常时置 false 即可恢复旧链路。
+	EnableLazyPluginLoad bool
 }
 
 // NewManager 创建插件管理器
@@ -63,6 +80,8 @@ func NewManager(pluginsDir string) *Manager {
 		hostMethods: make(map[string]HostMethod),
 		pidFilePath: filepath.Join(filepath.Dir(pluginsDir), "plugin_pids.json"),
 		loadLocks:   make(map[string]*sync.Mutex),
+
+		EnableLazyPluginLoad: true,
 	}
 
 	m.registerDefaultHostMethods()
@@ -190,6 +209,25 @@ func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 	return nil
 }
 
+// RegisterPlugin 仅登记插件元信息（创建实例并写入 m.plugins），不启动后端进程 / 不起 goja
+// VM / 不执行 initialize 握手。真正的启动延后到首次使用：ExecuteCommand / 打开插件页 /
+// ShowPluginWindow 均经 EnsureLoaded 惰性拉起。
+//
+// 这是 P-2 懒加载的核心：把启动墙钟从「Σ(启用插件初始化)」降到「仅文件读取 + map 写入」，
+// 启动耗时不再随启用插件数线性增长。none 运行时无后端进程，登记即视为可用，直接置 running。
+func (m *Manager) RegisterPlugin(manifest PluginManifest, dir string) {
+	inst := NewPluginInstance(manifest, dir)
+	if manifest.Backend.Runtime == "none" {
+		inst.SetStatus("running")
+		close(inst.readyCh)
+	} else {
+		inst.SetStatus(statusRegistered)
+	}
+	m.mu.Lock()
+	m.plugins[manifest.ID] = inst
+	m.mu.Unlock()
+}
+
 // loadLock 获取指定插件的 per-ID 加载锁，返回解锁函数。
 // 同 ID 的 LoadPlugin 串行执行；不同 ID 互不阻塞。
 func (m *Manager) loadLock(pluginID string) func() {
@@ -223,8 +261,9 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 	m.mu.RUnlock()
 
 	// 先获取插件ID并检查是否需要停止旧实例
+	// registered 状态是「仅登记未启动」的懒加载占位实例，没有可停止的进程/VM，跳过避免误置 stopped 标记
 	m.mu.Lock()
-	if inst, ok := m.plugins[manifest.ID]; ok {
+	if inst, ok := m.plugins[manifest.ID]; ok && inst.GetStatus() != statusRegistered {
 		m.stopPlugin(inst, false)
 	}
 	m.mu.Unlock()
@@ -289,7 +328,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		inst.Cmd = cmd
 		inst.Stdin = stdin
 		inst.Stdout = stdout
-		inst.SetStatus("starting")
+		inst.SetStatus(statusStarting)
 
 		m.mu.Lock()
 		m.plugins[manifest.ID] = inst
@@ -499,6 +538,22 @@ func (m *Manager) StopPlugin(id string) error {
 	return nil
 }
 
+// StopPluginOnWindowClose 插件 UI 窗口被用户关闭时调用（关窗即终止）：
+// 停止插件子进程释放资源，但对外状态恢复为 registered（就绪）而非 stopped——
+// 关窗是系统自动回收资源，并非用户主动停止；下次打开窗口 / 执行命令仍可经 EnsureLoaded
+// 惰性复活。内部 stopped 标志保持 true（阻止 watchPlugin 在进程被杀后误复活）。
+func (m *Manager) StopPluginOnWindowClose(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	inst, ok := m.plugins[id]
+	if !ok {
+		return ErrPluginNotFound
+	}
+	m.stopPlugin(inst, true)
+	inst.SetStatus(statusRegistered)
+	return nil
+}
+
 // KillPlugin 强制终止插件（插件管理页「停止进程」入口）：
 // 停进程并断自动重启（stopPlugin 置 stopped，watchPlugin 不会复活），
 // 内部已连子进程树一并终止；再补杀目录内未被 m.plugins 跟踪的孤儿进程，
@@ -662,7 +717,7 @@ func (m *Manager) pingOne(pluginID string) {
 		// ping 成功，重置计数器
 		m.mu.Lock()
 		inst.MissedPings = 0
-		if inst.GetStatus() == "unresponsive" {
+		if inst.GetStatus() == statusUnresponsive {
 			inst.SetStatus("running")
 			logger.I("插件 %s 恢复响应", pluginID)
 		}
@@ -678,13 +733,13 @@ func (m *Manager) pingOne(pluginID string) {
 		// 连续 3 轮（约 90s）无响应：强制终止进程，由 watchPlugin 自动重启。
 		// 不能走 stopPlugin（会置 stopped=true，watchPlugin 将放弃重启）
 		inst.MissedPings = 0
-		inst.SetStatus("unresponsive")
+		inst.SetStatus(statusUnresponsive)
 		logger.E("插件 %s 长时间无响应，强制终止并重启", pluginID)
 		if inst.Cmd != nil && inst.Cmd.Process != nil {
 			inst.Cmd.Process.Kill()
 		}
 	} else if inst.MissedPings >= 3 && inst.GetStatus() == "running" {
-		inst.SetStatus("unresponsive")
+		inst.SetStatus(statusUnresponsive)
 		inst.UnresponsiveAt = time.Now()
 		logger.E("插件 %s 连续 %d 次无响应，标记为 unresponsive", pluginID, inst.MissedPings)
 	}
