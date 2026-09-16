@@ -26,9 +26,9 @@ const pidFileVersion = 1
 
 // pidFileData PID 文件结构
 type pidFileData struct {
-	Version   int              `json:"version"`
-	PIDs      map[string]int   `json:"pids"`      // pluginID → PID
-	CreatedAt string           `json:"created_at"`
+	Version   int            `json:"version"`
+	PIDs      map[string]int `json:"pids"` // pluginID → PID
+	CreatedAt string         `json:"created_at"`
 }
 
 // HostMethod 处理插件发起的回调请求
@@ -43,8 +43,8 @@ type Manager struct {
 	pidFilePath string
 	pidMu       sync.Mutex
 
-	healthCheckStopCh chan struct{}
-	healthCheckWg     sync.WaitGroup
+	healthCheckStopCh   chan struct{}
+	healthCheckWg       sync.WaitGroup
 	healthCheckStopOnce sync.Once
 
 	// loadLocks 按 pluginID 串行化 LoadPlugin：崩溃自动重启(watchPlugin 退避 2-6s)与
@@ -176,7 +176,11 @@ func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 		wg.Add(1)
 		go func(j pluginJob) {
 			defer wg.Done()
-			defer func() { if r := recover(); r != nil { logger.E("plugin load worker panic: %v", r) } }()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.E("plugin load worker panic: %v", r)
+				}
+			}()
 			if err := m.LoadPlugin(j.manifest, j.dir); err != nil {
 				logger.E("插件 %s 启动失败: %v", j.manifest.ID, err)
 			}
@@ -433,27 +437,35 @@ func (m *Manager) gojaAPI(manifest PluginManifest, pluginDB *sql.DB) map[string]
 		"db": map[string]interface{}{
 			"exec": func(sql string, args ...interface{}) (map[string]interface{}, error) {
 				res, e := pluginDB.Exec(sql, args...)
-				if e != nil { return nil, e }
+				if e != nil {
+					return nil, e
+				}
 				id, _ := res.LastInsertId()
 				ra, _ := res.RowsAffected()
 				return map[string]interface{}{"lastId": id, "rowsAffected": ra}, nil
 			},
 			"query": func(sql string, args ...interface{}) ([]map[string]interface{}, error) {
 				rows, e := pluginDB.Query(sql, args...)
-				if e != nil { return nil, e }
+				if e != nil {
+					return nil, e
+				}
 				defer rows.Close()
 				cols, _ := rows.Columns()
 				var results []map[string]interface{}
 				for rows.Next() {
 					vals := make([]interface{}, len(cols))
 					valPtrs := make([]interface{}, len(cols))
-					for i := range vals { valPtrs[i] = &vals[i] }
+					for i := range vals {
+						valPtrs[i] = &vals[i]
+					}
 					rows.Scan(valPtrs...)
 					row := make(map[string]interface{})
 					for i, c := range cols {
 						switch v := vals[i].(type) {
-						case []byte: row[c] = string(v)
-						default: row[c] = v
+						case []byte:
+							row[c] = string(v)
+						default:
+							row[c] = v
 						}
 					}
 					results = append(results, row)

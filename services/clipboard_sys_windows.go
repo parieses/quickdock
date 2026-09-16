@@ -220,6 +220,7 @@ handleText:
 		}()
 	}
 }
+
 // openClipboardRetry 打开剪贴板，被其他进程短暂持有时重试若干次。
 // 剪贴板监控里最容易被忽略的一类“静默丢数据”就是 OpenClipboard 偶发失败。
 func openClipboardRetry(hwnd uintptr) bool {

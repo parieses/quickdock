@@ -13,9 +13,9 @@ import (
 
 // 安全限制
 const (
-	maxPluginJSONSize     = 1 << 20  // plugin.json 最大 1MB
-	maxDecompressedSize   = 100 << 20 // 解压总大小上限 100MB
-	maxSingleFileSize     = 50 << 20  // 单文件解压大小上限 50MB
+	maxPluginJSONSize   = 1 << 20   // plugin.json 最大 1MB
+	maxDecompressedSize = 100 << 20 // 解压总大小上限 100MB
+	maxSingleFileSize   = 50 << 20  // 单文件解压大小上限 50MB
 )
 
 // InstallFromZip 从 zip 包安装插件
@@ -33,7 +33,7 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 	var pluginID string
 	var manifest *PluginManifest
 
-		for _, f := range zipReader.File {
+	for _, f := range zipReader.File {
 		if f.Name == "plugin.json" || f.Name == "./plugin.json" {
 			rc, err := f.Open()
 			if err != nil {

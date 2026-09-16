@@ -188,7 +188,7 @@ func (d *Database) ListEnabledWithNextRun() ([]ScheduledTask, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	rows, err := d.conn.Query(
-		`SELECT `+schedCols+` FROM scheduled_tasks
+		`SELECT ` + schedCols + ` FROM scheduled_tasks
 		 WHERE enabled = 1 AND next_run <> ''
 		 ORDER BY next_run ASC`)
 	if err != nil {

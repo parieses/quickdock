@@ -27,8 +27,8 @@ import (
 const wmClipboardUpdate = 0x031D
 
 var (
-	listenerUser32      = syscall.NewLazyDLL("user32.dll")
-	listenerKernel32    = syscall.NewLazyDLL("kernel32.dll")
+	listenerUser32       = syscall.NewLazyDLL("user32.dll")
+	listenerKernel32     = syscall.NewLazyDLL("kernel32.dll")
 	procRegisterClassW   = listenerUser32.NewProc("RegisterClassW")
 	procCreateWindowExW  = listenerUser32.NewProc("CreateWindowExW")
 	procDefWindowProcW   = listenerUser32.NewProc("DefWindowProcW")

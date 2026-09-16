@@ -47,11 +47,20 @@ export default defineConfig({
     },
   ],
   build: {
+    // 主 chunk 超过该体积才告警，避免大依赖拆分后频繁误报
+    chunkSizeWarningLimit: 1500,
     rollupOptions: {
       output: {
         manualChunks(id: string) {
+          // 仅对第三方依赖做分包，业务代码保持默认分组
+          if (!id.includes('node_modules')) return
           if (id.includes('pinyin-pro')) return 'pinyin-pro'
           if (id.includes('@lucide/vue') || id.includes('lucide-vue')) return 'lucide'
+          if (id.includes('vue-i18n')) return 'vue-i18n'
+          if (id.includes('pinia')) return 'pinia'
+          if (id.includes('marked')) return 'marked'
+          if (id.includes('dompurify') || id.includes('isomorphic-dompurify')) return 'dompurify'
+          if (id.includes('/vue/') || id.includes('vue-router')) return 'vue'
         },
       },
     },

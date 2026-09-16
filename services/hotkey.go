@@ -10,18 +10,18 @@ import (
 // hotkeySetting 热键设置定义（用于工厂函数）
 // 注意：HotkeyConfig 类型定义在 types.go 中
 type hotkeySetting struct {
-	key       string // 数据库键名
-	defaultMod int   // 默认修饰键
-	defaultVK  int   // 默认虚拟键码
+	key          string // 数据库键名
+	defaultMod   int    // 默认修饰键
+	defaultVK    int    // 默认虚拟键码
 	defaultLabel string // 默认标签
 }
 
 // 热键设置定义
 var hotkeySettings = []hotkeySetting{
-	{"hotkey", 2, 32, "Ctrl+Space"},           // 主热键
-	{"clipboard_hotkey", 2, 0xC0, "Ctrl+`"},   // 剪贴板热键
-	{"palette_hotkey", 2, 0x4B, "Ctrl+K"},     // 命令面板热键
-	{"note_hotkey", 6, 0x4E, "Ctrl+Shift+N"},  // 笔记热键
+	{"hotkey", 2, 32, "Ctrl+Space"},          // 主热键
+	{"clipboard_hotkey", 2, 0xC0, "Ctrl+`"},  // 剪贴板热键
+	{"palette_hotkey", 2, 0x4B, "Ctrl+K"},    // 命令面板热键
+	{"note_hotkey", 6, 0x4E, "Ctrl+Shift+N"}, // 笔记热键
 }
 
 // ===== 热键配置 =====

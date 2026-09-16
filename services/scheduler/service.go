@@ -18,15 +18,15 @@ import (
 
 // Service 定时任务调度服务
 type Service struct {
-	app       interface{} // *application.App (避免循环依赖)
-	db        *db.Database
-	notifier  *notifications.NotificationService
-	quit      chan struct{}
-	quitOnce  sync.Once
-	wake      chan struct{}
-	inflight  sync.Map // taskID -> struct{}
-	ctx       context.Context
-	cancel    func()
+	app      interface{} // *application.App (避免循环依赖)
+	db       *db.Database
+	notifier *notifications.NotificationService
+	quit     chan struct{}
+	quitOnce sync.Once
+	wake     chan struct{}
+	inflight sync.Map // taskID -> struct{}
+	ctx      context.Context
+	cancel   func()
 }
 
 // NewService 创建调度服务实例
@@ -220,7 +220,11 @@ func (s *Service) checkScheduledTasks() {
 		}
 		go func(t *db.ScheduledTask) {
 			defer s.inflight.Delete(t.ID)
-			defer func() { if r := recover(); r != nil { logger.E("QuickDock: schedule runner panic: %v", r) } }()
+			defer func() {
+				if r := recover(); r != nil {
+					logger.E("QuickDock: schedule runner panic: %v", r)
+				}
+			}()
 			s.executeAndNotify(t)
 		}(t)
 	}

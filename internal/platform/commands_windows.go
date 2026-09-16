@@ -23,12 +23,12 @@ const (
 
 // 虚拟键码（部分）
 const (
-	vkLWin        = 0x5B
-	vkLeft        = 0x25
-	vkRight       = 0x27
-	vkVolumeUp    = 0xAF
-	vkVolumeDown  = 0xAE
-	vkVolumeMute  = 0xAD
+	vkLWin         = 0x5B
+	vkLeft         = 0x25
+	vkRight        = 0x27
+	vkVolumeUp     = 0xAF
+	vkVolumeDown   = 0xAE
+	vkVolumeMute   = 0xAD
 	keyEventFKeyUp = 0x0002
 )
 
@@ -205,16 +205,16 @@ func processNameByPID(pid uint32) (string, error) {
 	}
 	defer modKernel32.NewProc("CloseHandle").Call(snapshot)
 	var entry struct {
-		Size              uint32
-		CntUsage          uint32
-		ProcessID         uint32
-		DefaultHeapID     uintptr
-		ModuleID          uint32
-		CntThreads        uint32
-		ParentProcessID   uint32
-		PriClassBase      int32
-		Flags             uint32
-		ExeFile           [260]uint16
+		Size            uint32
+		CntUsage        uint32
+		ProcessID       uint32
+		DefaultHeapID   uintptr
+		ModuleID        uint32
+		CntThreads      uint32
+		ParentProcessID uint32
+		PriClassBase    int32
+		Flags           uint32
+		ExeFile         [260]uint16
 	}
 	entry.Size = uint32(unsafe.Sizeof(entry))
 	ret, _, _ := modKernel32.NewProc("Process32FirstW").Call(snapshot, uintptr(unsafe.Pointer(&entry)))

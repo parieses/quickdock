@@ -126,10 +126,10 @@ func hasModule(mods []Module, want Module) bool {
 // 这里刻意不碰 env 包：调用方（服务层）负责把证书路径、PHP-FPM 地址、监听端口查出来传进来，
 // 生成器只做纯文本拼装 —— 于是它可以被完整单测，不需要真装一个 nginx。
 type GenInput struct {
-	Site       Site
-	Backend    Backend
-	CertPath   string // mkcert 签发的证书（-cert.pem）
-	KeyPath    string // mkcert 签发的私钥（-key.pem）
+	Site     Site
+	Backend  Backend
+	CertPath string // mkcert 签发的证书（-cert.pem）
+	KeyPath  string // mkcert 签发的私钥（-key.pem）
 	// 监听端口不可配：站点恒为 https 443 + http 80（301 跳转到 443）。
 	// 本地开发站点只有「输域名就能开」这一种期望形态，给端口加开关只会让用户配出
 	// 一个 https://x.test:8443 这种自己都记不住的地址，故不设该字段。

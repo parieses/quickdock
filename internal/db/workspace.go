@@ -229,4 +229,3 @@ func (d *Database) DeleteScene(id string) error {
 		return err
 	})
 }
-

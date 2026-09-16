@@ -10,33 +10,33 @@ import (
 // Monitor 网站运行状态监控（仿 UptimeRobot）
 // expected_status 支持 "2xx"/"3xx"/"4xx"/"5xx" 或精确码如 "200"
 type Monitor struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	URL             string `json:"url"`
-	Method          string `json:"method"`        // GET/POST/HEAD...
-	IntervalSec     int    `json:"intervalSec"`   // 检测间隔（秒）
-	TimeoutSec      int    `json:"timeoutSec"`    // 单次请求超时（秒）
-	ExpectedStatus  string `json:"expectedStatus"` // 2xx | 3xx | 4xx | 5xx | 200 ...
-	FollowRedirects bool   `json:"followRedirects"`
-	Enabled         bool   `json:"enabled"`
-	NotifyDown      bool   `json:"notifyDown"`
-	NotifyUp        bool   `json:"notifyUp"`
-	LastStatus      string `json:"lastStatus"`     // up | down | ''
-	LastCheckedAt   string `json:"lastCheckedAt"`  // YYYY-MM-DD HH:MM:SS
-	LastCheckedTs   int64  `json:"lastCheckedTs"`  // unix 秒，供检查器精确计算间隔
-	LastLatencyMs   int    `json:"lastLatencyMs"`
-	LastStatusCode  int    `json:"lastStatusCode"`
-	LastError       string `json:"lastError"`
-	SkipTLSVerify   bool   `json:"skipTLSVerify"` // 忽略证书错误（自签名/过期等），仅单条生效，默认关闭
-	CertWarnDays    int    `json:"certWarnDays"`   // SSL 证书提前 N 天告警
-	CertExpiresAt   int64  `json:"certExpiresAt"`  // 证书过期时间（unix 秒，0=未知/非HTTPS）
-	LastCertWarned  int64  `json:"lastCertWarned"` // 上次证书告警时间（unix 秒，去抖）
-	ContentMatchType string `json:"contentMatchType"` // none | contains | not_contains | regex
+	ID                  string `json:"id"`
+	Name                string `json:"name"`
+	URL                 string `json:"url"`
+	Method              string `json:"method"`         // GET/POST/HEAD...
+	IntervalSec         int    `json:"intervalSec"`    // 检测间隔（秒）
+	TimeoutSec          int    `json:"timeoutSec"`     // 单次请求超时（秒）
+	ExpectedStatus      string `json:"expectedStatus"` // 2xx | 3xx | 4xx | 5xx | 200 ...
+	FollowRedirects     bool   `json:"followRedirects"`
+	Enabled             bool   `json:"enabled"`
+	NotifyDown          bool   `json:"notifyDown"`
+	NotifyUp            bool   `json:"notifyUp"`
+	LastStatus          string `json:"lastStatus"`    // up | down | ''
+	LastCheckedAt       string `json:"lastCheckedAt"` // YYYY-MM-DD HH:MM:SS
+	LastCheckedTs       int64  `json:"lastCheckedTs"` // unix 秒，供检查器精确计算间隔
+	LastLatencyMs       int    `json:"lastLatencyMs"`
+	LastStatusCode      int    `json:"lastStatusCode"`
+	LastError           string `json:"lastError"`
+	SkipTLSVerify       bool   `json:"skipTLSVerify"`    // 忽略证书错误（自签名/过期等），仅单条生效，默认关闭
+	CertWarnDays        int    `json:"certWarnDays"`     // SSL 证书提前 N 天告警
+	CertExpiresAt       int64  `json:"certExpiresAt"`    // 证书过期时间（unix 秒，0=未知/非HTTPS）
+	LastCertWarned      int64  `json:"lastCertWarned"`   // 上次证书告警时间（unix 秒，去抖）
+	ContentMatchType    string `json:"contentMatchType"` // none | contains | not_contains | regex
 	ContentMatchPattern string `json:"contentMatchPattern"`
-	DownAlertThreshold int `json:"downAlertThreshold"` // 误报抑制：连续 N 次失败才发宕机告警（>=1）
-	ConsecutiveDown  int `json:"consecutiveDown"`     // 当前连续失败次数（运行态，>=0）
-	Sort            int    `json:"sort"`
-	CreatedAt       string `json:"createdAt"`
+	DownAlertThreshold  int    `json:"downAlertThreshold"` // 误报抑制：连续 N 次失败才发宕机告警（>=1）
+	ConsecutiveDown     int    `json:"consecutiveDown"`    // 当前连续失败次数（运行态，>=0）
+	Sort                int    `json:"sort"`
+	CreatedAt           string `json:"createdAt"`
 }
 
 // MonitorLog 单次检测记录
@@ -404,7 +404,7 @@ func (d *Database) GetMonitorLogsSince(id string, sinceTs, limit int64) ([]Monit
 func (d *Database) ListEnabledMonitors() ([]Monitor, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rows, err := d.conn.Query(`SELECT `+monCols+` FROM monitors WHERE enabled = 1 ORDER BY sort ASC`)
+	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors WHERE enabled = 1 ORDER BY sort ASC`)
 	if err != nil {
 		return nil, err
 	}

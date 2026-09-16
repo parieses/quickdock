@@ -161,9 +161,9 @@ func TestGhInstallLiftsBin(t *testing.T) {
 	dir := t.TempDir()
 	zipPath := filepath.Join(dir, "gh.zip")
 	writeZip(t, zipPath, map[string][]byte{
-		"bin/gh.exe":    []byte("MZgh"),
+		"bin/gh.exe":     []byte("MZgh"),
 		"share/man/gh.1": []byte("man"),
-		"LICENSE":       []byte("mit"),
+		"LICENSE":        []byte("mit"),
 	})
 	dest := filepath.Join(dir, "2.100.0")
 	if err := Extract(zipPath, dest); err != nil {

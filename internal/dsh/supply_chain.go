@@ -69,7 +69,9 @@ func mergeAllowBuilds(workspaceYaml string, extra []string) error {
 }
 
 // allowBuildsErrRe 匹配 pnpm 供应链报错里的包身份：如
-//   The git-hosted package "@changfenhuang/dsh-genui@0.9.8" needs to execute build scripts
+//
+//	The git-hosted package "@changfenhuang/dsh-genui@0.9.8" needs to execute build scripts
+//
 // 捕获 @scope/name 或 name（不含版本、URL）。allowBuilds 键应写包内部 name 不带版本。
 var allowBuildsErrRe = regexp.MustCompile(`package\s+"?((?:@[^/@\s"']+/)?[^@/\s"']+)@`)
 

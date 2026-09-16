@@ -17,8 +17,6 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
-
-
 // ===== Global shared state (accessed by main package via get/set) =====
 
 var (
@@ -56,7 +54,6 @@ func SetClipboardText(text string) {
 // OnClipboardChange handles clipboard change events
 
 // ===== Clipboard helpers =====
-
 
 // recoverPanic 恢复 goroutine panic 防止整个应用崩溃
 func recoverPanic(context string) {
@@ -187,4 +184,3 @@ func processImage(database *db.Database, imageData []byte, paths, src string, em
 		emit()
 	}
 }
-

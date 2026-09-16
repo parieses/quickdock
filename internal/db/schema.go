@@ -295,7 +295,6 @@ var baseTables = []string{
 		created_at TEXT NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
-
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
@@ -415,21 +414,21 @@ func (d *Database) migrate() error {
 		// monitors: 旧表只有 last_checked_at TEXT，新增 INTEGER 列供精确计算间隔
 		{"monitors", "last_checked_ts", "INTEGER NOT NULL DEFAULT 0"},
 		{"monitors", "last_checked_at", "TEXT DEFAULT ''"},
-	{"monitors", "skip_tls_verify", "INTEGER NOT NULL DEFAULT 0"},
-	// monitors: SSL 证书到期提醒 + 内容匹配检测
-	{"monitors", "cert_warn_days", "INTEGER NOT NULL DEFAULT 14"},
-	{"monitors", "cert_expires_at", "INTEGER NOT NULL DEFAULT 0"},
-	{"monitors", "last_cert_warned", "INTEGER NOT NULL DEFAULT 0"},
-	{"monitors", "content_match_type", "TEXT NOT NULL DEFAULT 'none'"},
-	{"monitors", "content_match_pattern", "TEXT NOT NULL DEFAULT ''"},
-	// monitors: 误报抑制（连续 N 次失败才告警）
-	{"monitors", "down_alert_threshold", "INTEGER NOT NULL DEFAULT 1"},
-	{"monitors", "consecutive_down", "INTEGER NOT NULL DEFAULT 0"},
-	// todos: 子任务层级（单层级 checklist）+ 状态字段（status 权威，done 派生）
-	{"todos", "parent_id", "TEXT DEFAULT ''"},
-	{"todos", "status", "TEXT DEFAULT 'todo'"},
-	// ai_messages: reasoning_content（思考过程）
-	{"ai_messages", "reasoning_content", "TEXT DEFAULT ''"},
+		{"monitors", "skip_tls_verify", "INTEGER NOT NULL DEFAULT 0"},
+		// monitors: SSL 证书到期提醒 + 内容匹配检测
+		{"monitors", "cert_warn_days", "INTEGER NOT NULL DEFAULT 14"},
+		{"monitors", "cert_expires_at", "INTEGER NOT NULL DEFAULT 0"},
+		{"monitors", "last_cert_warned", "INTEGER NOT NULL DEFAULT 0"},
+		{"monitors", "content_match_type", "TEXT NOT NULL DEFAULT 'none'"},
+		{"monitors", "content_match_pattern", "TEXT NOT NULL DEFAULT ''"},
+		// monitors: 误报抑制（连续 N 次失败才告警）
+		{"monitors", "down_alert_threshold", "INTEGER NOT NULL DEFAULT 1"},
+		{"monitors", "consecutive_down", "INTEGER NOT NULL DEFAULT 0"},
+		// todos: 子任务层级（单层级 checklist）+ 状态字段（status 权威，done 派生）
+		{"todos", "parent_id", "TEXT DEFAULT ''"},
+		{"todos", "status", "TEXT DEFAULT 'todo'"},
+		// ai_messages: reasoning_content（思考过程）
+		{"ai_messages", "reasoning_content", "TEXT DEFAULT ''"},
 		// ai_conversations: token 用量统计
 		{"ai_conversations", "prompt_tokens", "INTEGER DEFAULT 0"},
 		{"ai_conversations", "completion_tokens", "INTEGER DEFAULT 0"},
@@ -508,7 +507,7 @@ func (d *Database) migrate() error {
 func (d *Database) addColumnIfMissing(table, col, colType string) error {
 	var count int
 	if err := d.conn.QueryRow(
-		`SELECT COUNT(*) FROM pragma_table_info('` + table + `') WHERE name = ?`, col,
+		`SELECT COUNT(*) FROM pragma_table_info('`+table+`') WHERE name = ?`, col,
 	).Scan(&count); err != nil {
 		return fmt.Errorf("检查列 %s.%s 失败: %w", table, col, err)
 	}

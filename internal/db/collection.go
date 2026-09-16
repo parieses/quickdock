@@ -69,4 +69,3 @@ func (d *Database) DeleteCollection(id string) error {
 		return err
 	})
 }
-

@@ -21,9 +21,9 @@ import (
 type HTTPServer struct {
 	ID      string `json:"id"`
 	Name    string `json:"name"`
-	Dir     string `json:"dir"`            // 要对外提供服务的本地目录
-	Port    int    `json:"port"`           // 监听端口（http://localhost:<port>）
-	Running bool   `json:"running"`        // 是否应/正在运行（持久化 + 实际运行态由 Manager 维护）
+	Dir     string `json:"dir"`     // 要对外提供服务的本地目录
+	Port    int    `json:"port"`    // 监听端口（http://localhost:<port>）
+	Running bool   `json:"running"` // 是否应/正在运行（持久化 + 实际运行态由 Manager 维护）
 }
 
 type httpServerEntry struct {
@@ -34,10 +34,10 @@ type httpServerEntry struct {
 
 // HTTPServeManager 管理多个静态文件服务（创建/启停/删除/列表），持久化到 httpserve/servers.json。
 type HTTPServeManager struct {
-	mu       sync.Mutex
-	file     string
-	baseDir  string // 数据目录，用于路径穿越防护
-	servers  map[string]*httpServerEntry
+	mu      sync.Mutex
+	file    string
+	baseDir string // 数据目录，用于路径穿越防护
+	servers map[string]*httpServerEntry
 }
 
 // 包级单例：随 AppService 一起被引用，懒初始化到用户数据目录。

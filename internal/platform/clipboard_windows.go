@@ -32,7 +32,7 @@ func SimulatePaste() {
 	keybd := user32.NewProc("keybd_event")
 
 	const (
-		VK_CONTROL       = 0x11
+		VK_CONTROL        = 0x11
 		VK_V              = 0x56
 		KEYEVENTF_KEYDOWN = 0x0000
 		KEYEVENTF_KEYUP   = 0x0002
@@ -241,4 +241,3 @@ func UTF16PtrToString(ptr uintptr, maxLen int) string {
 	}
 	return string(utf16.Decode(buf))
 }
-

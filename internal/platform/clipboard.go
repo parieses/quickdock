@@ -150,7 +150,7 @@ func extractMask(val, mask uint32) uint8 {
 	}
 	shift := uint32(0)
 	m := mask
-	for (m & 1) == 0 && shift < 32 {
+	for (m&1) == 0 && shift < 32 {
 		m >>= 1
 		shift++
 	}

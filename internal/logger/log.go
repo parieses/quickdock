@@ -18,15 +18,15 @@ import (
 )
 
 var (
-	mu          sync.Mutex
-	f           *os.File
-	logDir      string
-	curDay      string
-	size        int64
+	mu     sync.Mutex
+	f      *os.File
+	logDir string
+	curDay string
+	size   int64
 	// 插件专属日志文件（与主日志分离，便于插件作者单独排查）
-	pf      *os.File
-	pCurDay string
-	pSize   int64
+	pf          *os.File
+	pCurDay     string
+	pSize       int64
 	initialized bool
 )
 

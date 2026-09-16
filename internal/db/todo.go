@@ -18,10 +18,10 @@ type Todo struct {
 	EndTime      string `json:"endTime"`      // '' 或 YYYY-MM-DD HH:MM:SS
 	ReminderTime string `json:"reminderTime"` // '' 或 YYYY-MM-DD HH:MM:SS
 	ReminderSent bool   `json:"reminderSent"`
-	Tags         string `json:"tags"`        // JSON 数组字符串，如 ["工作","紧急"]
-	Recurrence   string `json:"recurrence"`  // JSON：{"kind":"daily|weekly|monthly","timeOfDay":"09:00","weekdays":"1,2,3"}；none/空=不重复
-	ParentID     string `json:"parentId"`    // 子任务所属父待办 ID；空=顶层待办
-	Status       string `json:"status"`      // todo | doing | done（权威字段），done 由其派生
+	Tags         string `json:"tags"`       // JSON 数组字符串，如 ["工作","紧急"]
+	Recurrence   string `json:"recurrence"` // JSON：{"kind":"daily|weekly|monthly","timeOfDay":"09:00","weekdays":"1,2,3"}；none/空=不重复
+	ParentID     string `json:"parentId"`   // 子任务所属父待办 ID；空=顶层待办
+	Status       string `json:"status"`     // todo | doing | done（权威字段），done 由其派生
 	Sort         int    `json:"sort"`
 	CreatedAt    string `json:"createdAt"`
 	CompletedAt  string `json:"completedAt"`

@@ -7,13 +7,13 @@ import (
 
 // AIConversation AI 对话会话
 type AIConversation struct {
-	ID              string `json:"id"`
-	Title           string `json:"title"`
-	Summary         string `json:"summary"`
-	PromptTokens    int    `json:"prompt_tokens"`
-	CompletionTokens int   `json:"completion_tokens"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	ID               string `json:"id"`
+	Title            string `json:"title"`
+	Summary          string `json:"summary"`
+	PromptTokens     int    `json:"prompt_tokens"`
+	CompletionTokens int    `json:"completion_tokens"`
+	CreatedAt        string `json:"created_at"`
+	UpdatedAt        string `json:"updated_at"`
 }
 
 // AIMessage AI 对话消息

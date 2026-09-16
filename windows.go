@@ -12,7 +12,6 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/services/kvstore"
 )
 
-
 // 单实例检查已迁移到 Wails v3 框架：main.go 中 application.Options.SingleInstance。
 // 框架实现为 CreateMutex + 隐藏事件窗口：二次启动自动通知首实例（OnSecondInstanceLaunch
 // 回调里把主窗口带到前台）后以 ExitCode 退出，等价于旧的 CreateMutexW + EnumWindows 方案。

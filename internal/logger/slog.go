@@ -53,7 +53,7 @@ func (bridgeHandler) Handle(_ context.Context, r slog.Record) error {
 }
 
 func (h bridgeHandler) WithAttrs(attrs []slog.Attr) slog.Handler { return h }
-func (h bridgeHandler) WithGroup(name string) slog.Handler  { return h }
+func (h bridgeHandler) WithGroup(name string) slog.Handler       { return h }
 
 // stdLogWriter 让标准库 log 包的输出汇入统一日志（按 Info 级别）。
 type stdLogWriter struct{}

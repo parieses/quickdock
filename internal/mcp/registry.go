@@ -111,11 +111,11 @@ func Schema(desc string, required []string, props map[string]any) map[string]any
 }
 
 // Str / Int / Bool 属性快捷定义
-func Str(desc string) map[string]any   { return map[string]any{"type": "string", "description": desc} }
-func Int(desc string) map[string]any   { return map[string]any{"type": "integer", "description": desc} }
-func Bool(desc string) map[string]any  { return map[string]any{"type": "boolean", "description": desc} }
-func Num(desc string) map[string]any   { return map[string]any{"type": "number", "description": desc} }
-func Any(desc string) map[string]any   { return map[string]any{"description": desc} }
+func Str(desc string) map[string]any  { return map[string]any{"type": "string", "description": desc} }
+func Int(desc string) map[string]any  { return map[string]any{"type": "integer", "description": desc} }
+func Bool(desc string) map[string]any { return map[string]any{"type": "boolean", "description": desc} }
+func Num(desc string) map[string]any  { return map[string]any{"type": "number", "description": desc} }
+func Any(desc string) map[string]any  { return map[string]any{"description": desc} }
 func StrArr(desc string) map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
 }

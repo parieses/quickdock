@@ -32,8 +32,8 @@ func TestLogfToFile(t *testing.T) {
 func TestInitIdempotent(t *testing.T) {
 	dir := t.TempDir()
 	Init(dir)
-	Init(dir)         // 二次调用不炸
-	Init(dir+"/sub")  // 换目录重新初始化
+	Init(dir)          // 二次调用不炸
+	Init(dir + "/sub") // 换目录重新初始化
 	I("x")
 	Close()
 }

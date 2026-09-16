@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"io"
 	"net"
 	"net/http"
@@ -13,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"sort"
 	"strconv"
@@ -330,15 +330,15 @@ func (m *DSHProcessManager) Start() (string, error) {
 				logger.E("QuickDock: DSH waitReady goroutine panic: %v", r)
 			}
 		}()
-	err := m.waitReady(u, exit)
-	if err != nil {
-		// 不再因健康检查超时/失败而杀掉 dsh：慢机器首次初始化 profile 可能远超预算，
-		// 杀掉会造成「刚起来又被杀」死循环；且窗口已按 token URL 提前打开，dsh 自带
-		// 前端刷新会在就绪后自动呈现。这里仅记录日志并保留进程，由 reaper 处理真正退出。
-		if m.app != nil {
-			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: "dsh 健康检查未通过（可能仍在初始化）：" + err.Error()})
+		err := m.waitReady(u, exit)
+		if err != nil {
+			// 不再因健康检查超时/失败而杀掉 dsh：慢机器首次初始化 profile 可能远超预算，
+			// 杀掉会造成「刚起来又被杀」死循环；且窗口已按 token URL 提前打开，dsh 自带
+			// 前端刷新会在就绪后自动呈现。这里仅记录日志并保留进程，由 reaper 处理真正退出。
+			if m.app != nil {
+				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: "dsh 健康检查未通过（可能仍在初始化）：" + err.Error()})
+			}
 		}
-	}
 		m.mu.Lock()
 		m.starting = false
 		m.readyErr = err // nil=就绪；非 nil=失败原因（窗口 goroutine 据此显示友好错误页，而非死地址）
@@ -1243,6 +1243,7 @@ func (m *DSHProcessManager) emitPluginDone(ok bool) {
 //     最多等 25s，绝不 120s 空转；窗口「直接以 token URL 创建」绕开 WebView2 控制器
 //     就绪竞态（先建窗再 SetURL 会全部静默失败 → 卡死）；
 //  3. 不依赖健康检查是否通过——dsh 自带前端刷新，未完全就绪也会在就绪后自动呈现。
+//
 // openMu 串行化整个流程，保证「启动进程 + 建窗口」期间的重复点击不会开出第二个窗口。
 func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 	m.openMu.Lock()

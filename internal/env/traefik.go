@@ -266,8 +266,8 @@ func (t *TraefikRuntime) Status(version string) ServiceStatus {
 //
 // 可选能力接口靠隐式 method set 满足，某天改掉一个方法签名不会报错、只会在运行时
 // 静默失去该能力（按钮消失/日志空白）。这里逐一固定下来，让编译器替我们守着。
-var _ ServiceController   = (*TraefikRuntime)(nil) // 服务启停与状态
-var _ LogProvider         = (*TraefikRuntime)(nil) // 运行日志弹窗
-var _ WebConsoleProvider  = (*TraefikRuntime)(nil) // Web 管理后台入口
-var _ ConfigProvider      = (*TraefikRuntime)(nil) // 配置读写
+var _ ServiceController = (*TraefikRuntime)(nil)   // 服务启停与状态
+var _ LogProvider = (*TraefikRuntime)(nil)         // 运行日志弹窗
+var _ WebConsoleProvider = (*TraefikRuntime)(nil)  // Web 管理后台入口
+var _ ConfigProvider = (*TraefikRuntime)(nil)      // 配置读写
 var _ ConfigPortsProvider = (*TraefikRuntime)(nil) // 配置内端口解析

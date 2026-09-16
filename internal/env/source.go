@@ -75,7 +75,7 @@ const (
 const (
 	GroupLanguage = "language"
 	// GroupNetwork 原 GroupWebServer：含 FTP（文件传输），故不再叫 webserver。
-	GroupNetwork = "network"
+	GroupNetwork  = "network"
 	GroupDatabase = "database"
 	// GroupMiddleware 原 GroupStorage：容纳 RabbitMQ（消息队列）与 MinIO（对象存储），
 	// 它们都不是「缓存」，旧名会名不副实。
@@ -706,7 +706,6 @@ func mapNodeArch(arch string) string {
 	return arch // arm64
 }
 
-
 func darwinArch(arch, style string) string {
 	switch style {
 	case "x86":
@@ -745,7 +744,6 @@ func mailpitURL(winTmpl, darwinTmpl, style string) func(version, goos, arch stri
 		return ""
 	}
 }
-
 
 func buildCustom(tmpl, version, goos, arch string) string {
 	return strings.NewReplacer(

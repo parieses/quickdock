@@ -34,7 +34,7 @@ type multistatus struct {
 }
 
 type response struct {
-	Href    string   `xml:"href"`
+	Href     string   `xml:"href"`
 	Propstat propstat `xml:"propstat"`
 }
 
@@ -44,10 +44,10 @@ type propstat struct {
 }
 
 type prop struct {
-	DisplayName     string        `xml:"displayname"`
-	GetContentLength string       `xml:"getcontentlength"`
-	GetLastModified  string       `xml:"getlastmodified"`
-	ResourceType    *resourceType `xml:"resourcetype"`
+	DisplayName      string        `xml:"displayname"`
+	GetContentLength string        `xml:"getcontentlength"`
+	GetLastModified  string        `xml:"getlastmodified"`
+	ResourceType     *resourceType `xml:"resourcetype"`
 }
 
 type resourceType struct {

@@ -226,15 +226,44 @@ func (a *UpdateService) SkipUpdate(version string) error {
 	return nil
 }
 
+// 启动后首次自动检查的延迟与重试策略
+const (
+	autoCheckFirstDelay    = 30 * time.Second // 避开启动峰值
+	autoCheckRetryInterval = 5 * time.Minute  // 首次失败（网络/代理未就绪）后的重试间隔
+	autoCheckMaxAttempts   = 3                // 首次检查最多尝试次数
+	autoCheckInterval      = 24 * time.Hour   // 稳定后的周期
+)
+
 // StartAutoUpdateChecker 启动后台定时检查
+//
+// 注意：首次检查必须在进入 ticker 循环「之前」显式调用一次。
+// ticker.C 要等满一个周期才首次触发，若只靠 for range ticker.C，
+// 启动后的首次自动检查会被推迟整整一个周期（24h）——曾因此导致
+// 「新版本已发布但应用从不主动提示」。同理，首次检查若因网络/代理
+// 尚未就绪而失败，需短间隔重试，否则同样要等 24h 才会再试。
 func (a *UpdateService) StartAutoUpdateChecker() {
 	if a.App.App() == nil || a.App.App().Updater == nil {
 		return
 	}
 	go func() {
 		defer recoverPanic("auto update checker")
-		time.Sleep(30 * time.Second)
-		ticker := time.NewTicker(24 * time.Hour)
+
+		time.Sleep(autoCheckFirstDelay)
+		for attempt := 1; attempt <= autoCheckMaxAttempts; attempt++ {
+			if a.backgroundCheck() {
+				break
+			}
+			if attempt == autoCheckMaxAttempts {
+				logger.W("[update] 启动自动检查连续失败 %d 次，转为每 %s 检查一次",
+					autoCheckMaxAttempts, autoCheckInterval)
+				break
+			}
+			logger.W("[update] 启动自动检查失败（第 %d/%d 次），%s 后重试",
+				attempt, autoCheckMaxAttempts, autoCheckRetryInterval)
+			time.Sleep(autoCheckRetryInterval)
+		}
+
+		ticker := time.NewTicker(autoCheckInterval)
 		defer ticker.Stop()
 		for range ticker.C {
 			a.backgroundCheck()
@@ -242,29 +271,41 @@ func (a *UpdateService) StartAutoUpdateChecker() {
 	}()
 }
 
-// backgroundCheck 单次后台检查
-func (a *UpdateService) backgroundCheck() {
+// backgroundCheck 单次后台检查。
+// 返回 true 表示本次检查「成功完成」（无论结果是已是最新还是有更新）；
+// 返回 false 表示检查失败（如网络错误），调用方可据此重试。
+func (a *UpdateService) backgroundCheck() bool {
 	u := a.App.App().Updater
 	switch u.State() {
 	case updater.StateReady, updater.StateDownloading, updater.StateVerifying,
 		updater.StateInstalling, updater.StateAvailable:
-		return
+		// 已处于"有更新/安装中"状态，无需重复检查
+		return true
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	status := a.runCheck(ctx)
 	if status == nil {
-		return
+		return false
 	}
 	a.emitUpdateStatus(status)
-
-	if status.State == "available" && a.App.Notifier != nil {
-		_ = a.App.Notifier.SendNotification(notifications.NotificationOptions{
-			Title: "QuickDock 更新可用",
-			Body:  "发现新版本 " + status.AvailableVersion + "，打开设置即可下载安装。",
-		})
+	if status.State == "error" {
+		return false
 	}
+
+	if status.State == "available" {
+		logger.I("[update] 后台检查发现新版本 %s（当前 %s）", status.AvailableVersion, status.CurrentVersion)
+		if a.App.Notifier != nil {
+			_ = a.App.Notifier.SendNotification(notifications.NotificationOptions{
+				Title: "QuickDock 更新可用",
+				Body:  "发现新版本 " + status.AvailableVersion + "，打开设置即可下载安装。",
+			})
+		}
+	} else {
+		logger.I("[update] 后台检查完成：%s（当前 %s）", status.State, status.CurrentVersion)
+	}
+	return true
 }
 
 // friendlyError 将底层网络错误转为用户友好的中文提示

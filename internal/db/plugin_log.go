@@ -1,6 +1,7 @@
 package db
 
 import (
+	"sync/atomic"
 	"time"
 )
 
@@ -20,6 +21,14 @@ type PluginExecLog struct {
 
 const maxPluginExecLogs = 500
 
+// execLogTrimTick 周期性裁剪计数器：避免每次写入都跑 COUNT(*)，消除高频命令
+// （如 task-status 每秒轮询）对 plugin_exec_logs 的写放大。
+var execLogTrimTick int64
+
+// execLogTrimInterval 每多少次插入才检查一次裁剪。把 O(n) 的 COUNT(*) 从
+// 「每写必查」降为「低频抽查」，高频轮询命令的 DB 压力下降约该倍数。
+const execLogTrimInterval = 50
+
 func scanPluginExecLog(rows interface{ Scan(...interface{}) error }) (PluginExecLog, error) {
 	var l PluginExecLog
 	var success int
@@ -29,7 +38,9 @@ func scanPluginExecLog(rows interface{ Scan(...interface{}) error }) (PluginExec
 	return l, err
 }
 
-// AddPluginExecLog 写入一条执行日志，并按需裁剪到 maxPluginExecLogs 条
+// AddPluginExecLog 写入一条执行日志，并按需裁剪到 maxPluginExecLogs 条。
+// 裁剪不再每次插入都触发，而是每 execLogTrimInterval 次插入检查一次，
+// 避免高频命令把日志表当成轮询计数器、拖慢整库写入。
 func (d *Database) AddPluginExecLog(l *PluginExecLog) error {
 	l.ID = newID()
 	l.ExecutedAt = time.Now().Format(time.RFC3339)
@@ -44,6 +55,9 @@ func (d *Database) AddPluginExecLog(l *PluginExecLog) error {
 		l.DurationMs, l.Result, l.Error, l.Trigger,
 	); err != nil {
 		return err
+	}
+	if atomic.AddInt64(&execLogTrimTick, 1)%execLogTrimInterval != 0 {
+		return nil
 	}
 	var cnt int
 	if err := d.conn.QueryRow("SELECT COUNT(*) FROM plugin_exec_logs").Scan(&cnt); err != nil {

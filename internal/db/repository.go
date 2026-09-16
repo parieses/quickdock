@@ -27,9 +27,9 @@ type Scene struct {
 	Sort        int    `json:"sort"`
 	// Env 场景绑定的环境服务，JSON 数组：[{"runtime":"mysql","version":"8.4.3"}]。
 	// version 为空表示跟随激活版本（或首个已装版本）。空串/空数组=未绑定任何服务。
-	Env         string `json:"env"`
-	CreatedAt   string `json:"createdAt"`
-	UpdatedAt   string `json:"updatedAt"`
+	Env       string `json:"env"`
+	CreatedAt string `json:"createdAt"`
+	UpdatedAt string `json:"updatedAt"`
 }
 
 // Collection 集合

@@ -34,7 +34,7 @@ const (
 	// CREATE_UNICODE_ENVIRONMENT：lpEnvironment 传的是 UTF-16 块时必须置此位，
 	// 否则系统按 ANSI 解析该块（每条被当成单字节串），会触发 ERROR_INVALID_PARAMETER(87)。
 	createUnicodeEnvironment = 0x00000400
-	infinite                = 0xFFFFFFFF
+	infinite                 = 0xFFFFFFFF
 )
 
 var (

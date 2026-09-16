@@ -244,8 +244,8 @@ func parseMailpitVersion(out string) string {
 //
 // 可选能力接口靠隐式 method set 满足，某天改掉一个方法签名不会报错、只会在运行时
 // 静默失去该能力（按钮消失/日志空白）。这里逐一固定下来，让编译器替我们守着。
-var _ ServiceController   = (*MailpitRuntime)(nil) // 服务启停与状态
-var _ LogProvider         = (*MailpitRuntime)(nil) // 运行日志弹窗
-var _ WebConsoleProvider  = (*MailpitRuntime)(nil) // Web 管理后台入口
-var _ DataDirProvider     = (*MailpitRuntime)(nil) // 数据目录定位
+var _ ServiceController = (*MailpitRuntime)(nil)   // 服务启停与状态
+var _ LogProvider = (*MailpitRuntime)(nil)         // 运行日志弹窗
+var _ WebConsoleProvider = (*MailpitRuntime)(nil)  // Web 管理后台入口
+var _ DataDirProvider = (*MailpitRuntime)(nil)     // 数据目录定位
 var _ ConfigPortsProvider = (*MailpitRuntime)(nil) // 配置内端口解析

@@ -36,7 +36,7 @@ var (
 	// Caddyfile 站点地址的端口部分（配合行首无缩进判断使用）
 	reCaddySitePort = regexp.MustCompile(`(?i):(\d+)$`)
 	// Caddyfile: admin localhost:2019 / admin :2019 / admin 2019
-	reCaddyAdmin = regexp.MustCompile(`(?i)^admin\s+(?:[\w.]+:|:)?(\d+)\s*$`)
+	reCaddyAdmin    = regexp.MustCompile(`(?i)^admin\s+(?:[\w.]+:|:)?(\d+)\s*$`)
 	reCaddyAdminOff = regexp.MustCompile(`(?i)^admin\s+off\s*$`)
 	// ollama.env: OLLAMA_HOST=127.0.0.1:11434。取最后一个冒号后的端口，兼容
 	// host:port / :port / [::1]:port / 纯端口四种写法（故用贪婪 .*: 吃掉地址部分）。
