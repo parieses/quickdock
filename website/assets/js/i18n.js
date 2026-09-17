@@ -25,7 +25,17 @@ window.QD_I18N = {
     "命令面板唤起一切，28 个运行时一键装切，47 个插件开箱即用，再顺手把本地能力通过 MCP 开放给 AI。 Raycast 的速度 + VS Code 的开发者体验，打包进一个不到 100MB 的桌面应用。": "The command palette summons everything, 28 runtimes install and switch in one click, 47 plugins work out of the box — and your local capabilities are exposed to AI over MCP. Raycast's speed meets VS Code's developer experience, packed into a desktop app under 100MB.",
     "下载 Windows 版": "Download for Windows",
     "查看源码": "View source",
-    "v0.x 持续迭代中 · 免管理员安装 · 自动就地更新 · 数据全在本地": "v0.x, actively iterating · No admin required · Auto in-place updates · All data stays local",
+    "v0.0.10 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地": "v0.0.10 released · No admin required · Auto in-place updates · All data stays local",
+
+    /* ---------- what's new (v0.0.10) ---------- */
+    "这次更新了什么": "What's new",
+    "v0.0.10 带来 JDK 运行时、托盘应用重启与开机自启动，以及一批体验打磨。": "v0.0.10 brings the JDK runtime, tray app-restart and launch-on-login, plus a batch of polish.",
+    "JDK 运行时": "JDK runtime",
+    "新增 Java 开发工具链（Adoptium Temurin）：多版本共存、一键装切，点一下切换当前版本。": "New Java toolchain (Adoptium Temurin): side-by-side versions, one-click install/switch, pick the active version in one click.",
+    "应用重启": "App restart",
+    "托盘右键菜单新增「重启」；设置里新增「开机自启动」开关，开机自动拉起。": "The tray right-click menu gains a 'Restart'; Settings gains a 'Launch on login' toggle that starts QuickDock at boot.",
+    "体验优化": "Polish",
+    "隐藏控制台不再弹出黑框、启动更快，并修复若干稳定性与界面细节。": "The hidden console no longer pops a black window, startup is faster, and several stability and UI details are fixed.",
     "可管理运行时": "Runtimes",
     "开箱插件": "Plugins",
     "MCP 工具": "MCP tools",
