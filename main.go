@@ -453,6 +453,12 @@ func main() {
 	if appService.PluginWindowMgr != nil {
 		appService.PluginWindowMgr.CloseAll()
 	}
+	// env 服务（redis / caddy / nginx / php-cgi ...）是独立子进程，不随宿主退出而结束，
+	// 主动停止以免留下孤儿（孤儿会被下次启动的对账误判为「已在运行」而永久脱管）。
+	// 与 ServiceShutdown 中的调用互为安全网，StopAllOnExit 幂等。
+	if appService.Env != nil {
+		appService.Env.StopAllOnExit()
+	}
 }
 
 // initUpdater 初始化 Wails 自动更新器（endpoint provider + Ed25519 签名验证）

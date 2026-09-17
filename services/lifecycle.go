@@ -162,6 +162,12 @@ func (a *AppService) ServiceShutdown() error {
 	if a.PluginWindowMgr != nil {
 		a.PluginWindowMgr.CloseAll()
 	}
+	// 停止本会话拉起的 env 服务（redis / caddy / nginx / php-cgi ...）。它们是独立子进程，
+	// 不随宿主退出而结束——不主动停就会变成孤儿。放在插件之后：插件运行期可能仍要用到这些服务。
+	// 与 main.go 的退出清理互为安全网，StopAllOnExit 幂等，重复调用无副作用。
+	if a.Env != nil {
+		a.Env.StopAllOnExit()
+	}
 	// 停止 dsh 子进程（若正在运行），防止残留 Node 占用端口
 	if a.DSH != nil {
 		a.DSH.Stop()

@@ -24,6 +24,10 @@ const (
 	maxRestartAttempts = 5
 	restartWindow      = 60 * time.Second
 	watchdogInterval   = 15 * time.Second
+
+	// exitStopTimeout 退出清理的整体超时。单项 Stop 内部可能阻塞在子进程调用上
+	// （caddy stop 走 admin API、redis-cli shutdown 等握手），不能让任一环节把进程退出卡死。
+	exitStopTimeout = 5 * time.Second
 )
 
 // statesFile 返回期望状态持久化路径（env/states.json）。
@@ -204,4 +208,57 @@ func (m *Manager) StartWatchdog(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// StopAllOnExit 宿主退出时调用：停止本会话拉起的全部 env 服务，避免留下孤儿进程。
+//
+// 为什么需要：env 服务（redis / caddy / nginx / php-cgi / postgres ...）是宿主拉起的
+// 独立子进程，既不随宿主退出而结束，也不在 job object 内。不清理的话，上次会话的进程会以
+// 孤儿身份一直活着——占内存、脱离隐藏控制台，且下次启动对账时因 Status().Running 为真
+// 被判定「已在运行」而跳过，从此不受任何会话管理（实测遗留 caddy+php-cgi+redis 共 54.5 MB）。
+//
+// 只停 svcMgr 记录的本会话句柄，不做端口全量扫描，两个原因：
+//  1. 单实例降级：框架让第二个进程以 ExitCode 退出时也会走到这里，此时 svcMgr 为空，
+//     不会误停首实例正在跑的服务；
+//  2. stopByPort 杀的是「镜像名匹配该端口的任意进程」，退出路径上不该有这种波及面。
+//
+// 上次会话遗留的孤儿不在 svcMgr 中，本函数不处理（属「上次没清干净」，非本次退出职责）。
+// 不看 Enabled：手动启动（未开常驻）的服务同样只属于本次会话，一并不留；
+// 常驻服务由下次启动的 ReconcileEnabled 按 states.json 重新拉起。
+//
+// 幂等：停完即从 svcMgr 移除，重复调用为空操作（main.go 与 ServiceShutdown 双路径各调一次）。
+// 单项失败只记日志、不中断，且整体受 exitStopTimeout 保护。
+func (m *Manager) StopAllOnExit() {
+	tracked := svcMgr.tracked()
+	if len(tracked) == 0 {
+		return
+	}
+	logger.I("[env] 退出清理：本会话拉起了 %d 个服务，开始停止", len(tracked))
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		defer logger.RecoverToLog("env:stop-on-exit")
+		stopped, failed := 0, 0
+		// 按 runtimeOrder 顺序停止（web server 在 php 之前），避免停 php 后 caddy 仍在上游报错刷日志
+		for _, rt := range runtimeOrder {
+			ver, ok := tracked[rt]
+			if !ok {
+				continue
+			}
+			if err := m.Stop(rt, ver); err != nil {
+				logger.W("[env] 退出停止 %s(%s) 失败: %v", rt, ver, err)
+				failed++
+				continue
+			}
+			stopped++
+		}
+		logger.I("[env] 退出清理：已停止 %d 个本地服务（失败 %d）", stopped, failed)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(exitStopTimeout):
+		logger.W("[env] 退出清理超过 %s 未完成，剩余停止操作随进程退出中断", exitStopTimeout)
+	}
 }

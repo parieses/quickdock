@@ -55,6 +55,21 @@ func (s *serviceManager) running(rt Runtime) bool {
 	return ok
 }
 
+// tracked 返回本会话跟踪的服务运行时 → 版本快照（副本，供宿主退出清理遍历使用）。
+// 只含本进程真正拉起过的服务：外部启动的实例与上次会话遗留的孤儿都不在其中。
+// 版本取登记时实际拉起的那个，而非当前激活版本——退出清理必须停「本会话起的那一个」。
+func (s *serviceManager) tracked() map[Runtime]string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make(map[Runtime]string, len(s.svcs))
+	for rt, c := range s.svcs {
+		if c != nil {
+			out[rt] = c.version
+		}
+	}
+	return out
+}
+
 func (s *serviceManager) pid(rt Runtime) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
