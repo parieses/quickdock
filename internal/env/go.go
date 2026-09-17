@@ -63,7 +63,11 @@ func (g *GoRuntime) InstalledVersions() []Install {
 			}
 			v := e.Name()
 			if _, err := os.Stat(g.ExeFor(v)); err == nil {
-				out = append(out, Install{Version: v, Scope: "portable", Path: g.versionDir(v)})
+				// Path 必须是 bin 目录（go.exe 所在目录），与 SetActive 注册的 exeDirFor(=Dir(ExeFor)) 保持一致：
+				// Go 的发行包把 go.exe 放在 <version>/bin 下，若这里填版本根目录，
+				// 后端 binInSystemPath 与前端路径面板都会拿版本根目录去比对 PATH 而恒不命中，
+				// 表现为「设置环境变量没反应」（同 jdk.go / erlang.go 的处理）。
+				out = append(out, Install{Version: v, Scope: "portable", Path: filepath.Dir(g.ExeFor(v))})
 				dirs.record(filepath.Dir(g.ExeFor(v)))
 			}
 		}

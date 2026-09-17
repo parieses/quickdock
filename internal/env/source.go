@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"runtime"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -55,6 +56,9 @@ const (
 
 	// Erlang：底层语言运行时（被 RabbitMQ 等依赖），作为「语言」分组里的独立可管理运行时。
 	RuntimeErlang Runtime = "erlang"
+
+	// RuntimeJDK：便携 JDK（Adoptium Temurin 官方构建），纯工具链型，多版本并存于 runtime/jdk/<feature>。
+	RuntimeJDK Runtime = "jdk"
 
 	// RuntimeMCP：QuickDock 内置的 MCP 服务（让 AI 工具操作本应用）。
 	// 不是外部程序，无下载源/无版本，只在环境管理页提供启停与配置。
@@ -229,6 +233,12 @@ var (
 		// 被 RabbitMQ 安装/启动时复用：RabbitMQ 优先复用本运行时已安装的 Erlang（或系统 ERLANG_HOME/PATH）。
 		RuntimeErlang: {display: "Erlang", group: GroupLanguage, versions: []string{"27.3.4", "26.2.5", "25.3.2.9"}, versURL: "https://api.github.com/repos/erlang/otp/releases?per_page=100", versParse: parseErlangVersions, fallbackHTMLURL: "https://github.com/erlang/otp/releases", sources: []Source{
 			{ID: "erlang", Name: "erlang/otp (GitHub)", Build: erlangURL("https://github.com/erlang/otp/releases/download/OTP-{version}/otp_win64_{version}.zip", "https://github.com/erlang/otp/archive/refs/tags/OTP-{version}.tar.gz", "")},
+		}},
+		// JDK：Adoptium Temurin 官方构建（Eclipse 分发）。版本以 feature 号（8/11/17/21）区分，
+		// 下载走 Adoptium「latest binary」重定向 API，按 feature 号直接拿到该系列最新 GA 的 Windows/mac 便携 zip，
+		// 无需解析带 build 号（如 +11）的资产文件名。Extract 会剥掉单层顶层目录（jdk-21.0.5+11/），java.exe 落到 <feature>/bin/。
+		RuntimeJDK: {display: "JDK", group: GroupLanguage, versions: []string{"21", "17", "11", "8"}, versURL: "https://api.adoptium.net/v3/info/available_releases", versParse: parseJDKVersions, sources: []Source{
+			{ID: "adoptium", Name: "Adoptium Temurin", Build: jdkURL()},
 		}},
 	}
 
@@ -682,6 +692,26 @@ func erlangURL(winTmpl, darwinTmpl, style string) func(version, goos, arch strin
 		if goos == "darwin" {
 			mm := ""
 			return buildDarwin(darwinTmpl, version, arch, style, mm)
+		}
+		return ""
+	}
+}
+
+// jdkURL 构造 Adoptium Temurin 的下载地址：走「latest binary」重定向 API，
+// 按 feature 号（8/11/17/21）直接拿到该系列最新 GA 的便携 zip（Windows/mac），
+// 避免解析带 build 号（如 +11）的 GitHub 资产文件名。该端点返回 302 跳转到真实 zip，
+// Download 默认跟随重定向。非 Windows/mac 返回空串（本环境管理仅在桌面端提供）。
+func jdkURL() func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos == "windows" {
+			return fmt.Sprintf("https://api.adoptium.net/v3/binary/latest/%s/ga/windows/x64/jdk/hotspot/normal/eclipse", version)
+		}
+		if goos == "darwin" {
+			a := "x64"
+			if arch == "arm64" {
+				a = "aarch64"
+			}
+			return fmt.Sprintf("https://api.adoptium.net/v3/binary/latest/%s/ga/mac/%s/jdk/hotspot/normal/eclipse", version, a)
 		}
 		return ""
 	}
@@ -1244,6 +1274,24 @@ func parseRabbitVersions(body []byte) []string  { return parseTagVersions(body, 
 
 // parseErlangVersions 从 erlang/otp GitHub Releases 解析 tag_name（如 "OTP-27.3.4"），去掉前缀 "OTP-"。
 func parseErlangVersions(body []byte) []string { return parseTagVersions(body, "OTP-") }
+
+// parseJDKVersions 解析 Adoptium available_releases 响应（{"available_releases":[8,11,17,21,…]}），
+// 返回 feature 版本号字符串列表——与 jdkURL 的 version 参数一致（均以 feature 号 8/11/17/21… 为单位）。
+func parseJDKVersions(body []byte) []string {
+	var resp struct {
+		AvailableReleases []int `json:"available_releases"`
+	}
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(resp.AvailableReleases))
+	for _, v := range resp.AvailableReleases {
+		if v > 0 {
+			out = append(out, strconv.Itoa(v))
+		}
+	}
+	return out
+}
 
 // sortVersionsDesc 按语义版本号降序排序（仅比较 major.minor.patch，忽略预发布）。
 func sortVersionsDesc(vs []string) []string {

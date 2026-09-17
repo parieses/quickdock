@@ -28,6 +28,7 @@ var capabilityWant = map[Runtime][]string{
 	RuntimeGh:         nil,
 	RuntimeGit:        nil,
 	RuntimeGo:         nil,
+	RuntimeJDK:        nil,
 	RuntimeMailpit:    {"ServiceController", "LogProvider", "WebConsoleProvider", "DataDirProvider", "ConfigPortsProvider"},
 	RuntimeMariaDB:    {"ServiceController", "LogProvider", "DataDirProvider", "ConfigPortsProvider"},
 	RuntimeMCP:        {"ServiceController", "ConfigProvider", "ConfigPortsProvider"},

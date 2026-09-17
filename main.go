@@ -169,6 +169,11 @@ func main() {
 	defer logger.CapturePanic("main")
 	logger.I("QuickDock 启动 -------------------------------------------------------------")
 
+	// 托盘「重启」拉起的新进程带 --restart-wait=<旧PID>：先等旧进程退出再继续。
+	// 必须早于 application.New——单实例互斥在 New 里，旧进程还在的话本进程
+	// 会被判为重复启动而直接 os.Exit(0)（表现为「点了重启，应用没了」）。
+	waitForRestartPredecessor()
+
 	// 自建隐藏控制台，供后续所有子进程继承（Windows）：原先靠 CREATE_NO_WINDOW 让子进程
 	// "隐藏"，实际语义是每个子进程分配一个新控制台 → 各带一个 conhost.exe（约 6.5MB）。
 	// 47 插件全启用时 29 个后代进程白吃约 190MB。改为继承后全系统只剩 1 个 conhost。

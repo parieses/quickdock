@@ -3,6 +3,7 @@ package plugin
 import (
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -10,27 +11,36 @@ import (
 	"quickdock/internal/logger"
 )
 
+// 隐藏窗口后超过该时长仍未再次打开，则回收 WebView2 渲染进程（释放内存）。
+// 短于此时长内重新 Show 走复用路径（零延迟）；超过则真正销毁窗口，
+// 下次 Show 自动走「不存在则新建」路径重建，回收同时停插件进程（经 WindowClosing 钩子）。
+const pluginWindowRecycleAfter = 10 * time.Minute
+
 // PluginWindowManager 管理每个插件的独立窗口（窗口注册表模式）
 // 每个 pluginID 对应一个独立的 WebviewWindow，互不干扰
 type PluginWindowManager struct {
-	mu         sync.Mutex
-	windows    map[string]*application.WebviewWindow // pluginID → 独立窗口
-	app        *application.App
-	mgr        *Manager // 插件管理器（用于「关窗即终止」时停止进程 / 按需惰性复活）
-	baseWidth  int
-	baseHeight int
-	themeDark  bool // 当前 App 主题是否为深色（用于窗口底色，避免浅色下露黑底）
+	mu            sync.Mutex
+	windows       map[string]*application.WebviewWindow // pluginID → 独立窗口
+	app           *application.App
+	mgr           *Manager // 插件管理器（用于「关窗即终止」时停止进程 / 按需惰性复活）
+	baseWidth     int
+	baseHeight    int
+	themeDark     bool                   // 当前 App 主题是否为深色（用于窗口底色，避免浅色下露黑底）
+	recycleAfter  time.Duration          // 隐藏后多久未再打开则回收 WebView2
+	recycleTimers map[string]*time.Timer // pluginID → 回收计时器
 }
 
 // NewPluginWindowManager 创建窗口管理器
 func NewPluginWindowManager(app *application.App, mgr *Manager) *PluginWindowManager {
 	return &PluginWindowManager{
-		windows:    make(map[string]*application.WebviewWindow),
-		app:        app,
-		mgr:        mgr,
-		baseWidth:  800,
-		baseHeight: 600,
-		themeDark:  true, // 默认深色（与窗口初始 BackgroundColour 一致）
+		windows:       make(map[string]*application.WebviewWindow),
+		app:           app,
+		mgr:           mgr,
+		baseWidth:     800,
+		baseHeight:    600,
+		themeDark:     true, // 默认深色（与窗口初始 BackgroundColour 一致）
+		recycleAfter:  pluginWindowRecycleAfter,
+		recycleTimers: make(map[string]*time.Timer),
 	}
 }
 
@@ -76,6 +86,7 @@ func (m *PluginWindowManager) ensurePluginProcess(pluginID string) {
 func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (*application.WebviewWindow, bool) {
 	m.mu.Lock()
 	if win, ok := m.windows[pluginID]; ok {
+		m.cancelRecycleLocked(pluginID)
 		m.mu.Unlock()
 		// 复用路径同样要确保插件进程存活：进程可能已被外部停止（禁用/手动停/崩溃放弃重启）
 		// 而窗口引用仍在注册表——不拉活会显示一个"页面在、进程无"的僵尸窗口。
@@ -94,6 +105,7 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	// 后者会覆盖注册表、前者变孤儿（WebView2 进程泄漏 + 关窗时误删/误停）。
 	m.mu.Lock()
 	if win, ok := m.windows[pluginID]; ok {
+		m.cancelRecycleLocked(pluginID)
 		m.mu.Unlock()
 		m.ensurePluginProcess(pluginID)
 		win.Show()
@@ -120,6 +132,10 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	win.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		m.mu.Lock()
 		delete(m.windows, pluginID)
+		if t, ok := m.recycleTimers[pluginID]; ok {
+			t.Stop()
+			delete(m.recycleTimers, pluginID)
+		}
 		m.mu.Unlock()
 		// 不调用 Cancel()，让窗口正常关闭销毁
 		if m.mgr != nil {
@@ -158,8 +174,52 @@ func (m *PluginWindowManager) Hide(pluginID string) {
 	defer m.mu.Unlock()
 	if win, ok := m.windows[pluginID]; ok {
 		win.Hide()
-		logger.I("[plugin-window] 隐藏窗口 %s（保留注册表引用与 WebView2，待复用）", pluginID)
+		// 重置回收计时：隐藏超过 recycleAfter 仍未重新打开则销毁窗口、释放 WebView2。
+		// 重复 Hide 会重置计时，避免「关一下马上又开」被误回收。
+		if t, ok := m.recycleTimers[pluginID]; ok {
+			t.Stop()
+		}
+		m.recycleTimers[pluginID] = time.AfterFunc(m.recycleAfter, func() {
+			m.recycle(pluginID)
+		})
+		logger.I("[plugin-window] 隐藏窗口 %s（保留复用，%s 后回收 WebView2）", pluginID, m.recycleAfter)
 	}
+}
+
+// cancelRecycleLocked 取消某窗口的回收计时器，调用方须持 m.mu。
+func (m *PluginWindowManager) cancelRecycleLocked(pluginID string) {
+	if t, ok := m.recycleTimers[pluginID]; ok {
+		t.Stop()
+		delete(m.recycleTimers, pluginID)
+	}
+}
+
+// recycle 在窗口隐藏超过 recycleAfter 后回收：销毁 WebView2 渲染进程、从注册表移除引用，
+// 使下次 Show 自动走「不存在则新建」路径重建（复用既有逻辑）。
+// 销毁经 Close() 触发 WindowClosing 钩子（删引用 + 停插件进程），与用户点 X 同一条退出路径，
+// 故此处不再手动停进程。极短竞态（隐藏 30s 期间恰在同名瞬间重建窗口）被接受：
+// recycle 仅对旧窗口对象 Close，新窗口不受影响，重建时 ensurePluginProcess 会惰性复活进程。
+func (m *PluginWindowManager) recycle(pluginID string) {
+	m.mu.Lock()
+	win, ok := m.windows[pluginID]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	// 窗口已被重新打开（用户重新 Show）则放弃回收，并清理本计时器
+	if win.IsVisible() {
+		delete(m.recycleTimers, pluginID)
+		m.mu.Unlock()
+		return
+	}
+	delete(m.windows, pluginID)
+	delete(m.recycleTimers, pluginID)
+	m.mu.Unlock()
+
+	// 锁外销毁：Close 触发 WindowClosing 钩子（停进程）。
+	// 不在锁内调用——StopPlugin 会启进程/扫描，与 window 锁互斥（见 ensurePluginProcess 注释）。
+	win.Close()
+	logger.I("[plugin-window] 隐藏超时回收窗口 %s（释放 WebView2，下次打开重建）", pluginID)
 }
 
 // FocusedWindow 返回当前持有焦点的插件窗口；无则 nil。
@@ -182,6 +242,10 @@ func (m *PluginWindowManager) CloseAll() {
 	n := len(m.windows)
 	for id, win := range m.windows {
 		delete(m.windows, id)
+		if t, ok := m.recycleTimers[id]; ok {
+			t.Stop()
+			delete(m.recycleTimers, id)
+		}
 		win.Hide()
 	}
 	logger.I("[plugin-window] CloseAll 关闭 %d 个插件窗口", n)

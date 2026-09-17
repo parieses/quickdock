@@ -435,8 +435,8 @@ func (d *Database) Query(query string, params ...interface{}) ([]map[string]inte
 
 // appStateKeyValid 校验 key 是否允许读写 app_state 表，防止覆盖内置配置或误写。
 // 只允许已知前缀的 key：theme/locale 等用户设置、plugin_icon_* 插件图标、
-// 以及内部服务用的 ai_* / sync_config / notify_webhook 等。
-var appStateKeyValid = regexp.MustCompile(`^(theme|locale|lastWorkspaceId|lastSceneId|plugin_icon_|webdav_config|sync_config|ai_profiles|ai_active_profile|ai_config|notify_webhook|qd_)`)
+// 以及内部服务用的 ai_* / sync_config / notify_webhook / dsh_*（dsh_auto_start 等）/ qd_ 等。
+var appStateKeyValid = regexp.MustCompile(`^(theme|locale|lastWorkspaceId|lastSceneId|plugin_icon_|webdav_config|sync_config|ai_profiles|ai_active_profile|ai_config|notify_webhook|dsh_|qd_)`)
 
 func validateAppStateKey(key string) error {
 	if !appStateKeyValid.MatchString(key) {

@@ -64,6 +64,13 @@ func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(writte
 		return err
 	}
 	req.Header.Set("User-Agent", "QuickDock/1.0")
+	// 显式声明不收 gzip：下载目标恒为 .zip/.tar.gz（本身已是压缩格式），而默认 Go 会自动附上
+	// Accept-Encoding: gzip，个别源（实测 Go 官方包经 dl.google.com 分发）会据此 gzip 响应，
+	// Go 随即透明解压并把 resp.ContentLength 置为 -1（Uncompressed=true）→ 进度回调拿不到 total，
+	// 前端 percent() 退化只显示「已下载 N MB」，百分比永不出现（67MB 的 Go 包实测 CL=67418204 vs -1）。
+	// 注意不要改用 Transport.DisableCompression：Clone() 出来的 transport 会破坏 HTTP/2 握手
+	// （实测 h2 源全部报 malformed HTTP response / EOF），请求头方式无此副作用。
+	req.Header.Set("Accept-Encoding", "identity")
 	client := &http.Client{Transport: ProxyTransport()}
 	resp, err := client.Do(req)
 	if err != nil {

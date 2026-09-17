@@ -13,12 +13,15 @@ import (
 	_ "embed"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
+	"quickdock/internal/sysutil"
 	"quickdock/services"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -214,6 +217,33 @@ func createSystemTray(app *application.App) {
 			}
 		}
 	})
+	menu.Add("重启").OnClick(func(*application.Context) {
+		restartApp()
+	})
+	menu.AddSeparator()
+
+	// 开机自启动：勾选态在托盘菜单创建时读一次，用户在设置页改动后这里会陈旧，
+	// 所以点击时一律以系统真实状态取反，执行完再把显示纠正过来。
+	autoStartItem := menu.AddCheckbox("开机自启动", autoStartEnabled())
+	autoStartItem.OnClick(func(*application.Context) {
+		svc := appSvc.Load()
+		if svc == nil {
+			return
+		}
+		want := !autoStartEnabled()
+		if r := svc.SetAutoStart(want); r == nil || r.Code != 0 {
+			msg := "unknown error"
+			if r != nil {
+				msg = r.Msg
+			}
+			logger.W("[tray] 开机自启动设置失败: %s", msg)
+			autoStartItem.SetChecked(autoStartEnabled()) // 回读真实状态，避免显示与实际不符
+			return
+		}
+		autoStartItem.SetChecked(want)
+		logger.I("[tray] 开机自启动已%s", map[bool]string{true: "开启", false: "关闭"}[want])
+	})
+
 	menu.AddSeparator()
 	menu.Add("退出").OnClick(func(*application.Context) {
 		requestQuit()
@@ -245,6 +275,87 @@ func requestQuit() {
 		app.Quit()
 	} else {
 		os.Exit(0)
+	}
+}
+
+// ===== 重启 / 开机自启动 =====
+
+const (
+	// restartWaitFlag 重启时传给新进程的参数前缀，值为待等待退出的旧进程 PID。
+	// 新进程在 main 早期据此等待（见 waitForRestartPredecessor）。
+	restartWaitFlag = "--restart-wait="
+	// restartWaitTimeout 新进程等待旧进程退出的上限；超时也继续启动，
+	// 由单实例互斥兜底（旧进程还在 → 新进程被判定为重复启动并自行退出，不会双开）。
+	restartWaitTimeout = 15 * time.Second
+	// restartExitTimeout 点了重启后留给本进程正常退出的时间。超时仍未退出
+	// （典型：页面假死拖住 app.Quit）就强制结束——新进程正等着这个 PID 消失。
+	restartExitTimeout = 8 * time.Second
+)
+
+// autoStartEnabled 读取当前开机自启状态，失败按未开启处理（仅影响菜单勾选态）。
+func autoStartEnabled() bool {
+	svc := appSvc.Load()
+	if svc == nil {
+		return false
+	}
+	r := svc.GetAutoStart()
+	if r == nil || r.Code != 0 {
+		return false
+	}
+	enabled, _ := r.Data.(bool)
+	return enabled
+}
+
+// restartApp 重启应用：先以「脱离」方式拉起新进程，再走正常退出路径。
+//
+// 顺序不能反——Wails 的单实例互斥在 application.New 里，检测到已有实例时
+// 新进程会先通知首实例、再直接 os.Exit(0)。所以新进程启动后必须先等本进程
+// 退出才继续初始化（等待逻辑在 waitForRestartPredecessor，main 早期调用）。
+//
+// 用 StartDetached 而非普通 Start：让它脱离本进程所属的作业/进程组，
+// 否则本进程退出时新进程会被一并带走。
+func restartApp() {
+	exe, err := os.Executable()
+	if err != nil {
+		logger.E("[tray] 重启失败：无法定位可执行文件: %v", err)
+		return
+	}
+	cmd := sysutil.Command(exe, restartWaitFlag+strconv.Itoa(os.Getpid()))
+	if err := sysutil.StartDetached(cmd); err != nil {
+		logger.E("[tray] 重启失败：拉起新进程出错: %v", err)
+		return
+	}
+	logger.I("[tray] 重启：新进程已拉起 (pid=%d)，本进程开始退出", cmd.Process.Pid)
+
+	// 看门狗：页面假死时 app.Quit() 可能迟迟不返回，用户点了重启却卡在原地。
+	go func() {
+		time.Sleep(restartExitTimeout)
+		logger.W("[tray] 重启：本进程 %s 内未退出，强制结束", restartExitTimeout)
+		os.Exit(0)
+	}()
+
+	requestQuit()
+}
+
+// waitForRestartPredecessor 若本次启动由托盘「重启」拉起（命令行带 --restart-wait=<pid>），
+// 先等旧进程退出再返回。必须在 application.New 之前调用：单实例互斥就在 New 里，
+// 旧进程还活着的话新进程会被判为重复启动而直接退出（表现为「点了重启，应用没了」）。
+func waitForRestartPredecessor() {
+	var pid int
+	for _, arg := range os.Args[1:] {
+		if strings.HasPrefix(arg, restartWaitFlag) {
+			pid, _ = strconv.Atoi(strings.TrimPrefix(arg, restartWaitFlag))
+			break
+		}
+	}
+	if pid <= 0 {
+		return
+	}
+	start := time.Now()
+	if sysutil.WaitProcessExit(pid, restartWaitTimeout) {
+		logger.I("[tray] 重启：旧进程 %d 已退出（等待 %.2fs），继续启动", pid, time.Since(start).Seconds())
+	} else {
+		logger.W("[tray] 重启：等待旧进程 %d 退出超时（%.0fs），仍继续启动", pid, restartWaitTimeout.Seconds())
 	}
 }
 
