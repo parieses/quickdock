@@ -769,7 +769,7 @@ kbd {
 .tag-high { background: rgba(255, 91, 79, 0.14); color: #ff8b81; }
 
 /* ---------- 15. Download ---------- */
-.dl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--s-4); }
+.dl-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 420px)); justify-content: center; gap: var(--s-4); }
 .dl {
   padding: var(--s-5);
   border-radius: var(--r-panel);

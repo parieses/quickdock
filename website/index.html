@@ -308,16 +308,15 @@
 <h3 data-page-node-id="Y0qlO0iHQycnoGoPR0lvP2">安装与首次启动</h3>
 <h4 data-page-node-id="zGSUpuHfhErIzSAIGSythk">系统要求</h4>
 <div class="tbl wide" data-page-node-id="TwdvxTAh9RsUZfXYgJUE6i">
-<div class="tbl-row" data-page-node-id="0Ic1AUwmhDSCh8cSDDAjBb"><span class="k" data-page-node-id="XEVMiDlc7oJ8B2PhUekWId">操作系统</span><span data-page-node-id="9tpYH7l7nyYQRI2GXddJNj">Windows 10 1809+ 或 Windows 11（macOS 提供 arm64 / amd64 的 .dmg）</span></div>
+<div class="tbl-row" data-page-node-id="0Ic1AUwmhDSCh8cSDDAjBb"><span class="k" data-page-node-id="XEVMiDlc7oJ8B2PhUekWId">操作系统</span><span data-page-node-id="9tpYH7l7nyYQRI2GXddJNj">Windows 10 1809+ 或 Windows 11</span></div>
 <div class="tbl-row" data-page-node-id="lYQLbHSbAJryEyD4A7CsIi"><span class="k" data-page-node-id="OkDmRq5fA4SZ5Yb53dX98v">运行时</span><span data-page-node-id="FwLKrZAqkczDH3K0nCJb1H">WebView2 Runtime（Windows 一般系统自带，缺了会提示下载）</span></div>
 <div class="tbl-row" data-page-node-id="jUrWCF6edtpbGIxfTsUeW6"><span class="k" data-page-node-id="UmvAswOGznzaO2mNpE1Eg8">磁盘</span><span data-page-node-id="uH1pCLZDCBMeSKeN8Lopx1">约 100MB（不含后续安装的运行时，那些按需要下）</span></div>
 <div class="tbl-row" data-page-node-id="3Y7CvxKEwhxXc8APf30Hbx"><span class="k" data-page-node-id="EhNMCLC7MULS8WlrwWg6hJ">权限</span><span data-page-node-id="ph4IcEwexXPWfBxCNOj85d"><b style="color:var(--text-1);font-weight:510" data-page-node-id="Dy2qfi2TJMMsdt2MNbDiCh">不需要管理员</b>，不写注册表</span></div>
 </div>
-<h4 data-page-node-id="IfJC9zbEJmagTNVTjNS6P3">三种装法，选一个</h4>
+<h4 data-page-node-id="IfJC9zbEJmagTNVTjNS6P3">两种装法，选一个</h4>
 <div class="tbl wide" data-page-node-id="JTgSM0fvfzoxojsURF5H0m">
 <div class="tbl-row" data-page-node-id="hhZ25o9azRKbstw6FaJU9z"><span class="k" data-page-node-id="7qg3gFyyGCPZSJOWLHPSVi">安装版</span><span data-page-node-id="9Pv94B5ePZfRK0rHMyBYxk"><code data-page-node-id="AaOjl3isaEGKy5XNhItCcQ">quickdock-amd64-installer.exe</code> — 推荐。默认落到 <code data-page-node-id="7gMuwX1SqmsgAoNRHi80aD">%LOCALAPPDATA%\Programs\快启坞</code>，自动更新最省事</span></div>
 <div class="tbl-row" data-page-node-id="30kyYx4Cavr4ISEXCSeh1c"><span class="k" data-page-node-id="FcXPRCO51c58pkfDtc8lrE">便携版</span><span data-page-node-id="tZS1tPbdh0nlwBtJR8gKaa"><code data-page-node-id="kPN00MXmywgrAevHmLw8IB">quickdock-amd64.exe</code> — 单文件直接跑。只要放在<b style="color:var(--text-1);font-weight:510" data-page-node-id="7BUqVpthpuabf1PkNTXuB5">当前用户可写</b>的目录（别放 Program Files），同样支持就地更新</span></div>
-<div class="tbl-row" data-page-node-id="LdmFeDeEgwivOVR9INRPew"><span class="k" data-page-node-id="iBQEOEmDM6cISmUmPKx7R5">macOS</span><span data-page-node-id="4cZtV74YPgqL7FAxfax0te"><code data-page-node-id="2n5e4shCoqcITetHSMt3l7">quickdock-darwin-arm64.dmg</code>（Apple 芯片）/ <code data-page-node-id="sgRgT8GAOkzbkc2MOJX4sH">-amd64.dmg</code>（Intel）</span></div>
 </div>
 <h4 data-page-node-id="ZLqFrtxja8GCS9ict71iR8">Windows 安装步骤</h4>
 <ol class="install" data-page-node-id="cLntw82X9wEk31XflaKj5t">
@@ -329,14 +328,6 @@
 <svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="uHPdDoGlDGB4Ll3GYoo3XL"><circle cx="12" cy="12" r="9" data-page-node-id="hJFbLJOm0Hgsh9sLmoAG50"></circle><path d="M12 8h.01M12 12v4" data-page-node-id="QA6esVgiQAqZFGCAixKoHz"></path></svg>
 <div data-page-node-id="SG4DZ34WhHfgOEYCYG2QfX">别装到 <code data-page-node-id="ABRzlRFH9LERz9ZyQnsuGc">C:\Program Files\...</code>。那里写文件要过 UAC，就地替换更新会失败，只能每次手动下安装包覆盖。已经装错了？卸掉重装到用户目录即可，数据在 <code data-page-node-id="U7GfjDJmSdql3k9rby5Smm">~/.quickdock</code> 不受影响。</div>
 </div>
-<h4 data-page-node-id="NOJHHyZu1U2q5TlWEo84FV">macOS 首次打开</h4>
-<p data-page-node-id="EgsEGRB7HqpuhK395Uwjco">没有开发者签名时系统会拦一下。两种方式任选：</p>
-<div class="code" data-page-node-id="APQPFDMMBDHGPcVrCuiI9Q">
-<div class="code-head" data-page-node-id="RLp5PmEdSRhuAAIIihy5df"><span class="file" data-page-node-id="1USm2EuTgMyBDn5oR5AK7H">终端（推荐：装到 ~/Applications 时不需要 sudo）</span><button class="copy" data-copy="mac-quarantine" data-page-node-id="vLG02dsiElKbkx1pyiITis">复制</button></div>
-<pre id="mac-quarantine" data-page-node-id="ZjyBJlVKyu2yHd1lz8UcE7">xattr -dr com.apple.quarantine ~/Applications/quickdock.app</pre>
-</div>
-<p data-page-node-id="HkRFtUXLlpGkEz2QRqGqrX">或者：系统设置 → 隐私与安全性 → 找到被拦截的「快启坞」→ 点「仍要打开」。之后应用启动时会自动清理这个属性，不用每次手动。<br data-page-node-id="lF53tSLXpwgvjvfKkME3hn"/>
-<b style="color:var(--text-1);font-weight:510" data-page-node-id="9BWALAGpbJ1QJ2gEfrllTr">务必把 .app 拖到 ~/Applications</b>，别在下载目录里直接双击运行 —— 会触发 App Translocation，导致更新「假成功」。</p>
 <figure class="shot" data-page-node-id="16QM8JtWdJ11WAhNkCPuV6"><img src="assets/img/ui-onboarding.png" alt="首启引导" data-page-node-id="ABKkp657JDa0wh9RuW5VOr"></figure> 
 </article>
 <!-- ============ 2 ============ -->
@@ -745,24 +736,6 @@ curl -X POST http://127.0.0.1:9230/mcp \
 <a class="btn btn-quiet" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64.exe" data-page-node-id="jUx3YJDiOP7aspcyfwNRDg">便携版 · exe</a>
 </div>
 </div>
-<div class="dl reveal" data-page-node-id="ktlb0iiDUqwzXuBMAlCeEk">
-<h3 data-page-node-id="hKX4HpkvW54DBsfJmJkdGf">macOS（Apple 芯片）</h3>
-<p class="meta" data-page-node-id="fmTvcev93KAIM6hRZqGFX9">arm64 · .dmg · 拖到 ~/Applications</p>
-<div class="arch" data-page-node-id="Tj0AMEy838P1LXRdWUwVsF">
-<a class="btn btn-ghost" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-darwin-arm64.dmg" data-page-node-id="SqO57Ap9hEyyewXBCNWDao">下载 .dmg</a>
-</div>
-</div>
-<div class="dl reveal" data-page-node-id="LD7Fvm1rWcj8c6vViBdxum">
-<h3 data-page-node-id="GRqNm1XI3rk4RwfpXQikJF">macOS（Intel）</h3>
-<p class="meta" data-page-node-id="FI1pMltKLwPWpAIu7jFBOG">amd64 · .dmg · 拖到 ~/Applications</p>
-<div class="arch" data-page-node-id="4Sfcod53RZNPrTwgvMVCt0">
-<a class="btn btn-ghost" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-darwin-amd64.dmg" data-page-node-id="svSGp9T5msAVSUD1FkzjaV">下载 .dmg</a>
-</div>
-</div>
-</div>
-<div class="note reveal" style="margin-top:var(--s-5)" data-page-node-id="gLG1SO0NZHLs6FW4lLr3br">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24" data-page-node-id="ILOZgOyGxhGHr81ZcUIKOY"><circle cx="12" cy="12" r="9" data-page-node-id="5NQsFMsQwuUBC3hFEQdDxE"></circle><path d="M12 8h.01M12 12v4" data-page-node-id="5KDcNQHneS4D2imaJnPRic"></path></svg>
-<div data-page-node-id="I3PKBKj8BqbrsQ4jqmrpHk">macOS 首次打开若提示「无法验证开发者」，终端执行一次 <code data-page-node-id="RerMzOiBR1BFcVGARPvUOs">xattr -dr com.apple.quarantine ~/Applications/quickdock.app</code>，或到「系统设置 → 隐私与安全性」点「仍要打开」。别装在下载目录里直接运行，会触发 App Translocation 导致更新假成功。</div>
 </div>
 </div>
 </section>
@@ -792,7 +765,7 @@ curl -X POST http://127.0.0.1:9230/mcp \
 </details>
 <details class="qa" data-page-node-id="rB3kTbiyqeIuCCpXy53nfv">
 <summary data-page-node-id="ZrjFjGkvIju09dK3dGU31w">支持 Linux 吗？</summary>
-<div class="a" data-page-node-id="5YePKCpJfZdE8hdwD0heGx">引擎层已按 <code data-page-node-id="VZBMk2PvRre3K2rOKx7YA4">_windows</code> / <code data-page-node-id="H3c1MnBx7oa0rTwkmIhBEV">_darwin</code> / <code data-page-node-id="yN2gWzUo8bTqsltohapYNf">_unix</code> 拆文件，但目前官方只发 Windows 与 macOS 产物，Linux 尚未纳入发布流程。</div>
+<div class="a" data-page-node-id="5YePKCpJfZdE8hdwD0heGx">引擎层已按 <code data-page-node-id="VZBMk2PvRre3K2rOKx7YA4">_windows</code> / <code data-page-node-id="H3c1MnBx7oa0rTwkmIhBEV">_darwin</code> / <code data-page-node-id="yN2gWzUo8bTqsltohapYNf">_unix</code> 拆文件，但目前官方只发 Windows 产物，Linux 尚未纳入发布流程。</div>
 </details>
 <details class="qa" data-page-node-id="h9crDLvz68AmognDESVpq1">
 <summary data-page-node-id="vx0ZDA9TUY1P5DCicSEYHH">怎么用 AI 控制 QuickDock？</summary>
