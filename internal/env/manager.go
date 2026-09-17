@@ -92,6 +92,7 @@ type RuntimeInfo struct {
 	HasLog         bool         `json:"hasLog"`         // 是否支持运行日志查询（实现 LogProvider）
 	WebConsolePort int          `json:"webConsolePort"` // Web 管理后台端口（0=无，实现 WebConsoleProvider）
 	Enabled        bool         `json:"enabled"`        // 是否设为「常驻」（期望状态，由监督器保证运行）
+	SingleVersion  bool         `json:"singleVersion"`  // 单版本语义：装新版本即原地覆盖，前端据此隐藏版本下拉框
 }
 
 type SourceInfo struct {
@@ -405,6 +406,7 @@ func (m *Manager) List() []RuntimeInfo {
 			HasLog:         hasLog,
 			WebConsolePort: wcPort,
 			Enabled:        m.Enabled(rt),
+			SingleVersion:  registry[rt].singleVersion,
 		})
 	}
 	return out

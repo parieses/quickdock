@@ -107,13 +107,19 @@ func (g *GitRuntime) InstalledVersions() []Install {
 	return out
 }
 
-// DeleteVersion 单版本目录不支持删除（装新版本即覆盖）；历史多版本子目录可清理。
+// DeleteVersion 单版本语义：删除整个 runtime/git（含所有配套文件），彻底卸载。
+// 历史多版本子目录（升级前安装的遗留）单独清理。系统 PATH 上的 git 由前端禁用删除（scope=system）。
 func (g *GitRuntime) DeleteVersion(version string) error {
+	// 历史多版本子目录 runtime/git/<version>/（升级前安装的遗留）
 	if _, err := os.Stat(g.legacyExeFor(version)); err == nil {
 		return os.RemoveAll(filepath.Join(g.dir, version))
 	}
+	// 单版本主目录 runtime/git/（始终删除整个托管目录，以便彻底卸载）
 	if fileExists(g.ExeFor("")) {
-		return fmt.Errorf("Git 为单版本安装，不支持删除：请直接安装新版本（会自动覆盖）")
+		if err := os.RemoveAll(g.dir); err != nil {
+			return fmt.Errorf("删除 Git 失败: %w", err)
+		}
+		return nil
 	}
 	return fmt.Errorf("未找到该版本: %s", version)
 }

@@ -237,6 +237,7 @@ interface RuntimeInfo {
   hasLog: boolean
   webConsolePort: number
   enabled: boolean // 常驻开关：期望态（true=随应用自启/崩溃自愈，false=停止）
+  singleVersion: boolean // 单版本语义（如 git/ollama/gh/frpc）：固定目录、不显示版本下拉、一键装最新/一键更新
 }
 
 // 每个运行时的品牌色（用于头像背景，白填充的官方图标渲染其上）
@@ -320,7 +321,7 @@ function avatarIcon(id: string): string {
 // 运行时目录是写死的（与后端 services/env/source.go registry 一一对应）：
 // 侧栏挂载即静态渲染，EnvList 只负责填充已装版本/下载源/推荐版本等动态数据，
 // 页面切换重挂载时列表恒在，杜绝「空列表 → 加载后填充」的闪烁。后端新增运行时需同步此表。
-const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boolean }[] = [
+const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boolean; singleVersion?: boolean }[] = [
   { id: 'node', name: 'Node.js', group: 'language', hasService: false },
   { id: 'php', name: 'PHP', group: 'language', hasService: false },
   { id: 'go', name: 'Go', group: 'language', hasService: false },
@@ -337,14 +338,14 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'mongodb', name: 'MongoDB', group: 'database', hasService: true },
   { id: 'minio', name: 'MinIO', group: 'middleware', hasService: true },
   { id: 'rabbitmq', name: 'RabbitMQ', group: 'middleware', hasService: true },
-  { id: 'git', name: 'Git', group: 'tool', hasService: false },
+  { id: 'git', name: 'Git', group: 'tool', hasService: false, singleVersion: true },
   { id: 'composer', name: 'Composer', group: 'tool', hasService: false },
   { id: 'ffmpeg', name: 'FFmpeg', group: 'tool', hasService: false },
   { id: 'mailpit', name: 'Mailpit', group: 'tool', hasService: true },
-  { id: 'frpc', name: 'frpc', group: 'tool', hasService: false },
-  { id: 'gh', name: 'GitHub CLI', group: 'tool', hasService: false },
+  { id: 'frpc', name: 'frpc', group: 'tool', hasService: false, singleVersion: true },
+  { id: 'gh', name: 'GitHub CLI', group: 'tool', hasService: false, singleVersion: true },
   { id: 'mkcert', name: 'mkcert', group: 'tool', hasService: false },
-  { id: 'ollama', name: 'Ollama', group: 'ai', hasService: true },
+  { id: 'ollama', name: 'Ollama', group: 'ai', hasService: true, singleVersion: true },
   { id: 'python', name: 'Python', group: 'language', hasService: false },
   { id: 'jdk', name: 'JDK', group: 'language', hasService: false },
   { id: 'apache', name: 'Apache', group: 'network', hasService: true },
@@ -358,6 +359,7 @@ function staticRuntime(s: typeof STATIC_CATALOG[number]): RuntimeInfo {
     platforms: [], recommended: [],
     installed: [], sources: [], activeSource: '',
     hasService: s.hasService, hasLog: false, webConsolePort: 0, enabled: false,
+    singleVersion: s.singleVersion ?? false,
   }
 }
 const runtimes = ref<RuntimeInfo[]>(STATIC_CATALOG.map(staticRuntime))
@@ -535,25 +537,6 @@ const ollamaPulling = ref(false)
 const ollamaProgress = ref<{ percent: number; completed: number; total: number; status: string } | null>(null)
 const ollamaDelTarget = ref<OllamaModel | null>(null)
 
-// ---- Ollama 版本更新检测（单版本语义）----
-// 只在切到 Ollama 分类时静默查一次；发现新版显示徽标 + 更新按钮，由用户确认才替换。
-const ollamaUpdate = ref<{ installed: string; latest: string; hasUpdate: boolean } | null>(null)
-const ollamaUpdateChecking = ref(false)
-
-async function checkOllamaUpdate() {
-  if (ollamaUpdateChecking.value) return
-  ollamaUpdateChecking.value = true
-  try {
-    ollamaUpdate.value = unwrap<{ installed: string; latest: string; hasUpdate: boolean }>(
-      await EnvOllamaCheckUpdate(),
-    )
-  } catch {
-    ollamaUpdate.value = null
-  } finally {
-    ollamaUpdateChecking.value = false
-  }
-}
-
 // ---- 拉取输入框的官方模型库联想 ----
 // 数据源 ollama.com/api/tags（支持 ?q=），非本机已装模型——已装的不需要再拉。
 const ollamaLibModels = ref<{ name: string; size: number }[]>([])
@@ -660,7 +643,6 @@ function refreshOllamaPanel(delay = 0) {
   const run = () => {
     if (selectedId.value !== 'ollama') return
     loadOllama()
-    checkOllamaUpdate()
   }
   if (delay > 0) setTimeout(run, delay)
   else run()
@@ -721,7 +703,7 @@ function onOllamaPull(e: any) {
   }
 }
 
-watch(selectedId, (id) => { if (id === 'ollama') { loadOllama(); checkOllamaUpdate() } })
+watch(selectedId, (id) => { if (id === 'ollama') { loadOllama() } })
 
 // versionInput: 绑定到当前选中运行时的版本号，读写都经过 ui[state] 保证一致性
 const versionInput = computed({
@@ -1304,6 +1286,8 @@ async function load() {
         // 分组以后端 registry 为准（如 redis/memcached/minio 归入 storage），
         // 避免前端 STATIC_CATALOG 与后端 Group 字段发散导致分类错乱。
         target.group = info.group || target.group
+        // 单版本标记以后端 registry 为准（git/ollama/gh/frpc = singleVersion），同步覆盖静态默认值
+        if (typeof info.singleVersion === 'boolean') target.singleVersion = info.singleVersion
       }
       list.forEach((r) => stateFor(r.id, r))
       // 侧边栏 harness 入口可要求自动定位到 harness 区块（优先于默认选中第一个运行时）
@@ -1510,24 +1494,11 @@ async function install(r: RuntimeInfo) {
   }
 }
 
-// updateOllama 更新到检测到的最新版。
-// 走既有 install 流程（EnvInstall → OllamaRuntime.Install 原地替换，配置保留），
-// 只是先把目标版本写进 ui state——版本下拉在单版本语义下不展示，用户只能从这里触发。
-function updateOllama() {
-  const r = selected.value
-  const latest = ollamaUpdate.value?.latest
-  if (!r || r.id !== 'ollama' || !latest) return
-  const s = stateFor('ollama', r)
-  s.version = latest
-  install(r)
-}
-
-// Git 未检测到本地安装时的一键安装：用推荐版本（第一个）直接装，避开手输版本号。
-function installGitLatest() {
-  const r = selected.value
-  if (!r || r.id !== 'git') return
+// 单版本运行时一键装最新：用上游推荐列表（拉取后）第一项，未拉到则用 EnvList 返回的 recommended 兜底。
+// git/ollama/gh/frpc 均走此入口，统一隐藏版本下拉框。
+function installSingleLatest(r: RuntimeInfo) {
+  if (!r || !r.singleVersion) return
   const s = stateFor(r.id, r)
-  // 优先用上游推荐列表（拉取后）；未拉到则用 EnvList 返回的 recommended 兜底
   const latest = s.available?.[0] || r.recommended?.[0] || ''
   if (!latest) {
     toast.error(t('envLoadFailed'))
@@ -2149,10 +2120,16 @@ const s = currentRuntimeState
         </section>
 
         <!-- Git 状态表：版本 / 路径 / SSH / Git LFS -->
-        <section v-if="selected.id === 'git'" class="detail-block">
+        <!-- Git 状态表：仅在已安装时展示（版本/路径/SSH/Git LFS）；未安装时由下方统一安装卡片提供「一键装最新」 -->
+        <section v-if="selected.id === 'git' && selected.installed.length" class="detail-block">
           <div class="block-head">
             <span class="block-title">{{ t('gitStatus') }}</span>
             <span v-if="gitInfo" class="block-count">{{ gitInfo.version || '—' }}</span>
+            <button
+              v-if="selected.installed[0]?.scope === 'portable'"
+              class="link-btn danger"
+              @click="askDelete(selected, selected.installed[0])"
+            >{{ t('deleteVersion') }}</button>
           </div>
           <div v-if="gitInfo" class="git-table">
             <div class="git-row git-head">
@@ -2173,40 +2150,19 @@ const s = currentRuntimeState
               <span class="g-result" :title="row.result">{{ row.result }}</span>
             </div>
           </div>
-          <div v-else-if="loadedOnce && !selected.installed.length" class="empty-state">
-            <div class="empty-icon">∅</div>
-            <div class="empty-text">{{ t('noInstalledVersion') }}</div>
-            <div class="empty-actions">
-              <button class="env-install-btn" :disabled="stateFor(selected.id, selected).installing" @click="installGitLatest">{{ t('installGitLatest') }}</button>
-            </div>
-          </div>
         </section>
 
-        <!-- 已下载 / 已安装版本（非 Git 运行时） -->
-        <section v-else class="detail-block">
+        <!-- 已下载 / 已安装版本（非 Git 运行时；Git 走上方状态表） -->
+        <section v-else-if="selected.id !== 'git'" class="detail-block">
           <div class="block-head">
             <span class="block-title">{{ t('installedVersions') }}</span>
             <span class="block-count">{{ selected.installed.length }}</span>
-            <!-- Ollama 是单版本语义（目录固定、无版本共存），导入外部安装无意义，故不提供 -->
+            <!-- 单版本运行时（git/ollama/gh/frpc）固定目录、自动探测系统安装，导入外部安装无意义，故不提供；MCP/WebDAV 为内置服务亦无导入 -->
             <button
-              v-if="selected.id !== 'git' && selected.id !== 'mcp' && selected.id !== 'webdav' && selected.id !== 'ollama'"
+              v-if="!selected.singleVersion && selected.id !== 'mcp' && selected.id !== 'webdav'"
               class="link-btn import-btn"
               @click="importExisting(selected)"
             >{{ t('importExisting') }}</button>
-          </div>
-
-          <!-- Ollama 版本更新提示：检测到新版时显示，点「更新」走原地替换（保留配置） -->
-          <div v-if="selected.id === 'ollama' && ollamaUpdate?.hasUpdate" class="update-banner">
-            <span class="ub-icon">↑</span>
-            <div class="ub-text">
-              <span class="ub-title">{{ t('ollamaUpdateAvailable', { from: ollamaUpdate.installed, to: ollamaUpdate.latest }) }}</span>
-              <span class="ub-desc">{{ t('ollamaUpdateDesc') }}</span>
-            </div>
-            <button
-              class="env-install-btn"
-              :disabled="ui['ollama']?.installing || ollamaUpdateChecking"
-              @click="updateOllama"
-            >{{ ui['ollama']?.installing ? t('ollamaReplacing') : t('ollamaUpdateBtn') }}</button>
           </div>
 
           <!-- 端口冲突可视化提示：默认服务端口被其它程序占用时，启动会失败，提前给出明确警告 -->
@@ -2450,13 +2406,15 @@ const s = currentRuntimeState
           <pre class="mcp-code">{{ webdavInfo.path || '—' }}</pre>
         </section>
 
-        <!-- 安装新版本（Git 不展示：Git 为单版本，检测不到时由上方空状态提供一键安装；
-             MCP / WebDAV 为内置服务，无版本可装，后端 Install 直接返回错误，故一并隐藏） -->
-        <section v-if="selected.id !== 'git' && selected.id !== 'mcp' && selected.id !== 'webdav' && s" class="detail-block install-card">
+        <!-- 安装 / 更新（MCP / WebDAV 为内置服务，无版本可装，后端 Install 直接返回错误，故隐藏）。
+             单版本运行时（git/ollama/gh/frpc）隐藏版本下拉框，改为一键装最新 / 一键更新。 -->
+        <section v-if="selected.id !== 'mcp' && selected.id !== 'webdav' && s" class="detail-block install-card">
           <div class="block-head">
             <span class="block-title">{{ t('installNewVersion') }}</span>
           </div>
-          <div class="install-grid">
+
+          <!-- 多版本：版本输入 + 列表 + 源 + 安装 -->
+          <div v-if="!selected.singleVersion" class="install-grid">
             <!-- 版本号输入 + 可选列表 -->
             <div class="install-input-wrap">
               <input
@@ -2522,8 +2480,31 @@ const s = currentRuntimeState
             >{{ stateFor(selected.id, selected).installing ? t('installing') : t('install') }}</button>
           </div>
 
-          <!-- 上游有更高版本时提示可更新（点击即填入版本号并触发安装） -->
-          <div v-if="newestUpdate" class="env-update-hint">
+          <!-- 单版本：未安装 → 一键装最新；已安装 → 当前版本 + 一键更新（更新提示由 newestUpdate 统一驱动） -->
+          <div v-else class="install-grid">
+            <template v-if="!selected.installed.length">
+              <button
+                class="env-install-btn"
+                :class="{ busy: s.installing }"
+                :disabled="s.installing"
+                @click="installSingleLatest(selected)"
+              >{{ s.installing ? t('installing') : t('installLatest') }}</button>
+            </template>
+            <template v-else>
+              <span class="cur-ver">{{ t('currentVersion', { v: selected.installed[0].version }) }}</span>
+              <button
+                v-if="newestUpdate"
+                class="env-install-btn"
+                :class="{ busy: s.installing }"
+                :disabled="s.installing"
+                @click="applyUpdate(newestUpdate.to)"
+              >{{ s.installing ? t('installing') : t('installNewVersion', { to: newestUpdate.to }) }}</button>
+              <span v-else class="up-to-date">{{ t('upToDate') }}</span>
+            </template>
+          </div>
+
+          <!-- 上游有更高版本时提示可更新（仅多版本；单版本已在上方 v-else 显示更新按钮） -->
+          <div v-if="newestUpdate && !selected.singleVersion" class="env-update-hint">
             <span class="env-update-dot"></span>
             <span>{{ t('envNewVersion') }}: {{ newestUpdate.from }} → {{ newestUpdate.to }}</span>
             <button class="link-btn" :disabled="stateFor(selected.id, selected).installing" @click="applyUpdate(newestUpdate.to)">
@@ -3308,6 +3289,9 @@ const s = currentRuntimeState
 
 /* 安装区 */
 .install-grid { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cur-ver { font-weight: 600; color: var(--color-text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.up-to-date { color: #1a7f37; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.up-to-date::before { content: '✓'; }
 .install-input-wrap { flex: 1; min-width: 160px; }
 .env-input, .env-select {
   width: 100%; min-width: 0;
@@ -3331,6 +3315,8 @@ const s = currentRuntimeState
 }
 .link-btn:hover { background: var(--color-accent-bg); }
 .link-btn:disabled { opacity: 0.5; cursor: default; }
+.link-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
+.link-btn.danger:hover { background: rgba(216, 44, 32, 0.12); }
 .env-install-btn {
   flex-shrink: 0; padding: 8px 16px; border-radius: 6px; border: none;
   background: var(--color-accent); color: #fff; font-size: 13px; font-weight: 500;

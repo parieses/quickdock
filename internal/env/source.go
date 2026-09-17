@@ -65,7 +65,8 @@ const (
 	RuntimeMCP Runtime = "mcp"
 
 	// RuntimeOllama：本地大模型推理服务（ollama/ollama 官方 GitHub 发布的 Windows 便携 zip）。
-	// 服务型且独占 11434，语义同 redis/nginx：允许多版本并存安装，但同一时刻只能跑一个 serve。
+	// 服务型且独占 11434，单版本语义（singleVersion=true）：目录固定、装新版本即原地替换旧版本，
+	// 模型库全局共享、多版本并存是纯成本零收益。单实例：同一时刻只能跑一个 serve。
 	RuntimeOllama Runtime = "ollama"
 
 	// RuntimeWebDAV：QuickDock 内置的 WebDAV 服务端（把本地目录以 WebDAV 协议共享出去）。
@@ -109,6 +110,10 @@ type runtimeDef struct {
 	// fallbackHTMLURL 该运行时 GitHub Releases 页面的 HTML 地址（API 不可用时兜底解析版本）。
 	// 大多数 GitHub Releases 可共用默认 HTML tag 解析器，故直接作为自描述字段，新增运行时无需改中心 switch。
 	fallbackHTMLURL string
+	// singleVersion 单版本语义：始终安装到固定目录（runtime/<rt>），装新版本即原地覆盖旧版本，
+	// 不支持多版本并存。前端据此隐藏版本下拉框、改为「一键装最新 / 一键更新」。
+	// 适用：只有一个有意义的版本、或版本间兼容性好到无需并存（git / ollama / gh / frpc）。
+	singleVersion bool
 }
 
 var (
@@ -134,7 +139,7 @@ var (
 		RuntimeNginx: {display: "Nginx", group: GroupNetwork, versions: []string{"1.27.5", "1.26.3", "1.25.5"}, versURL: "https://nginx.org/download/", versParse: parseNginxVersions, sources: []Source{
 			{ID: "nginxorg", Name: "nginx.org 官方", Build: nginxURL("https://nginx.org/download/nginx-{version}.zip", "https://nginx.org/download/nginx-{version}.tar.gz", "")},
 		}},
-		RuntimeGit: {display: "Git", group: GroupTool, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, fallbackHTMLURL: "https://github.com/git-for-windows/git/releases", sources: []Source{
+		RuntimeGit: {display: "Git", group: GroupTool, singleVersion: true, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, fallbackHTMLURL: "https://github.com/git-for-windows/git/releases", sources: []Source{
 			{ID: "gfw", Name: "git-for-windows (GitHub)", Build: gitURL("https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}.windows.1-64-bit.zip", "https://github.com/git/git/archive/refs/tags/v{version}.tar.gz", "")},
 		}},
 		RuntimeCaddy: {display: "Caddy", group: GroupNetwork, versions: []string{"2.8.4", "2.7.6", "2.6.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, fallbackHTMLURL: "https://github.com/caddyserver/caddy/releases", sources: []Source{
@@ -187,7 +192,7 @@ var (
 		// frpc：frp 内网穿透客户端（fatedier/frp）。本地以 `frpc -c frpc.toml` 运行，
 		// 连接远端 frps 服务器；本身无固定监听端口（出站连接），运行状态按子进程存活判定
 		// （svcMgr），已接入 ServiceController 启停 + ConfigProvider 编辑 + LogProvider 日志。
-		RuntimeFrpc: {display: "frpc", group: GroupTool, versions: []string{"0.71.0", "0.70.1", "0.69.0"}, versURL: "https://api.github.com/repos/fatedier/frp/releases?per_page=100", versParse: parseFrpcVersions, versHTMLFallbackParse: parseFrpcVersionsHTML, fallbackHTMLURL: "https://github.com/fatedier/frp/releases", sources: []Source{
+		RuntimeFrpc: {display: "frpc", group: GroupTool, singleVersion: true, versions: []string{"0.71.0", "0.70.1", "0.69.0"}, versURL: "https://api.github.com/repos/fatedier/frp/releases?per_page=100", versParse: parseFrpcVersions, versHTMLFallbackParse: parseFrpcVersionsHTML, fallbackHTMLURL: "https://github.com/fatedier/frp/releases", sources: []Source{
 			{ID: "fatedier", Name: "fatedier/frp (GitHub)", Build: frpcURL("https://github.com/fatedier/frp/releases/download/v{version}/frp_{version}_windows_amd64.zip", "https://github.com/fatedier/frp/releases/download/v{version}/frp_{version}_darwin_{arch}.tar.gz", "")},
 		}},
 		// FTP：轻量开源控制台 FTP 服务器（FTPDMIN，Matthias Wandel，public domain）。
@@ -198,7 +203,7 @@ var (
 			{ID: "ftpdmin", Name: "FTPDMIN (Sentex)", Build: ftpURL("https://www.sentex.net/~mwandel/ftpdmin/ftpdmin.exe", "", "")},
 		}},
 		// GitHub CLI (gh)：官方命令行工具，单文件 zip 内 gh.exe。无服务、无配置、无导入（DetectArgs 返回空 → 不可导入系统 exe）。
-		RuntimeGh: {display: "GitHub CLI", group: GroupTool, versions: []string{"2.100.0", "2.99.0", "2.98.0"}, versURL: "https://api.github.com/repos/cli/cli/releases?per_page=100", versParse: parseGhVersions, fallbackHTMLURL: "https://github.com/cli/cli/releases", sources: []Source{
+		RuntimeGh: {display: "GitHub CLI", group: GroupTool, singleVersion: true, versions: []string{"2.100.0", "2.99.0", "2.98.0"}, versURL: "https://api.github.com/repos/cli/cli/releases?per_page=100", versParse: parseGhVersions, fallbackHTMLURL: "https://github.com/cli/cli/releases", sources: []Source{
 			{ID: "cli", Name: "cli/cli (GitHub)", Build: ghURL("https://github.com/cli/cli/releases/download/v{version}/gh_{version}_windows_amd64.zip", "https://github.com/cli/cli/releases/download/v{version}/gh_{version}_macOS_{arch}.zip", "x86")},
 		}},
 		// Bun：新兴 JS/TS 运行时（oven-sh/bun）。多版本并存，bun-windows-x64.zip 内含 bun.exe。无服务。
@@ -221,7 +226,7 @@ var (
 		// 故虽为多版本骨架，实际按「单活跃版本 + 可保留旧版回退」使用。
 		// 下载：官方 ollama.com/download 只做 307 跳转到 GitHub Releases（不托管文件），
 		// 1.4 GB 资产国内直连不可用，故默认给 gh-proxy 加速源（实测唯一能完整透传的镜像）。
-		RuntimeOllama: {display: "Ollama", group: GroupAI, versions: []string{"0.34.0", "0.33.3", "0.32.15", "0.30.11"}, versURL: "https://api.github.com/repos/ollama/ollama/releases?per_page=100", versParse: parseOllamaVersions, versHTMLFallbackParse: parseReleasesTagVersionsHTML, fallbackHTMLURL: "https://github.com/ollama/ollama/releases", sources: []Source{
+		RuntimeOllama: {display: "Ollama", group: GroupAI, singleVersion: true, versions: []string{"0.34.0", "0.33.3", "0.32.15", "0.30.11"}, versURL: "https://api.github.com/repos/ollama/ollama/releases?per_page=100", versParse: parseOllamaVersions, versHTMLFallbackParse: parseReleasesTagVersionsHTML, fallbackHTMLURL: "https://github.com/ollama/ollama/releases", sources: []Source{
 			{ID: "ghproxy", Name: "GitHub 加速 (gh-proxy.com)", Build: ollamaURL("https://gh-proxy.com/https://github.com/ollama/ollama/releases/download/v{version}/ollama-windows-amd64.zip")},
 			{ID: "official", Name: "Ollama 官方 (ollama.com)", Build: ollamaURL("https://ollama.com/download/ollama-windows-amd64.zip?version={version}")},
 		}},
