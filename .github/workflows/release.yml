@@ -172,90 +172,18 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
-  # 2) macOS：matrix 双架构原生编译（arm64 → macos-15 / amd64 → macos-15-intel）
-  #    产物：.dmg（首装）+ .app 的 .zip（就地替换更新的 payload），上传为 artifact
+  # 2) macOS：**暂时移除**（2026-09-17）。原 build-macos job（matrix 双架构 macos-15 /
+  #    macos-15-intel → .dmg + .zip）已停用，发版只产出 Windows 产物。
+  #    恢复方式：从 git 历史取回本 job；同时需要一并恢复下方 publish-manifest 里的
+  #    needs/mac zip 入参与 Upload Release Assets 的 mac 文件（三处齐全才闭环）。
+  #    build/darwin/Taskfile.yml 与 build/darwin/ 资源保留未动，随时可复用。
   # ─────────────────────────────────────────────────────────────
-  build-macos:
-    strategy:
-      matrix:
-        include:
-          - arch: arm64
-            runner: macos-15
-          - arch: amd64
-            runner: macos-15-intel
-    runs-on: ${{ matrix.runner }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-
-      - name: Setup Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.25'
-
-      - name: Setup Node
-        uses: actions/setup-node@v5
-        with:
-          node-version: '22'
-
-      - name: Install Task runner
-        run: |
-          go install github.com/go-task/task/v3/cmd/task@latest
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: Install Wails3 CLI
-        run: |
-          wailsVer=$(grep 'wailsapp/wails/v3 ' go.mod | head -1 | awk '{print $2}')
-          echo "Installing wails3 $wailsVer (resolved from go.mod)"
-          go install github.com/wailsapp/wails/v3/cmd/wails3@$wailsVer
-          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
-
-      - name: Extract version from tag
-        run: |
-          ver="${GITHUB_REF_NAME#v}"
-          echo "VERSION=$ver" >> "$GITHUB_ENV"
-          echo "Building version: $ver (arch=${{ matrix.arch }})"
-
-      - name: 校验构建注入版本号与 tag 一致
-        # 与 Windows 同源：.app 内 CFBundleShortVersionString 必须与 manifest version 相同。
-        working-directory: ${{ github.workspace }}
-        env:
-          APP_VERSION: ${{ github.ref_name }}
-        run: |
-          resolved=$(task -s darwin:version | tail -1 | sed 's/^v//')
-          echo "Taskfile 解析版本=$resolved / tag 版本=$VERSION"
-          [ "$resolved" = "$VERSION" ] || { echo "::error::构建注入版本号($resolved) 与 tag($VERSION) 不一致，已中止发布"; exit 1; }
-
-      - name: Build + package .dmg + .zip (native, per-arch)
-        # macos-15 / macos-15-intel 自带 Xcode CLT（含 macOS SDK），CGO_ENABLED=1 + GOOS=darwin 原生编译可行。
-        # 走官方 DMG 链路：build → package(.app, ad-hoc 签名) → create:dmg。
-        # 无 Developer ID 证书，.app 为 ad-hoc 签名，.dmg 仅本机/信任设备可用；正式分发需接
-        # Developer ID 签名 + notarization（docs/mac-support-plan.md）。
-        # 说明：当前 mac 首装需手动拖到 ~/Applications（详见 README）；就地替换更新链路已随 .zip 一并产出。
-        working-directory: ${{ github.workspace }}
-        env:
-          APP_VERSION: ${{ github.ref_name }}
-        run: |
-          task darwin:package:dmg ARCH=${{ matrix.arch }}
-          task darwin:package:zip ARCH=${{ matrix.arch }}
-
-      - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: mac-${{ matrix.arch }}
-          path: |
-            bin/quickdock-darwin-${{ matrix.arch }}.dmg
-            bin/quickdock-darwin-${{ matrix.arch }}.zip
-          if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
   # 3) publish-manifest：合并所有产物 → 生成签名 manifest.json → 上传到 Release
   # ─────────────────────────────────────────────────────────────
   publish-manifest:
-    needs: [build-windows, build-macos]
+    needs: [build-windows]
     # ⚠️ 勿改回 ubuntu-latest：本 job 需要 wails3 CLI（`wails3 updater manifest` 签名生成 manifest.json），
     # 而 `go install .../cmd/wails3` 在 Linux 上会连带编译 internal/operatingsystem，
     # 该包用 cgo + pkg-config 依赖 gtk4 / webkitgtk-6.0：
@@ -314,9 +242,9 @@ jobs:
         # 真正的安全机制：用 Ed25519 私钥对【更新 payload】签名，产出 manifest.json
         # （含 sha512 摘要 + ed25519ph 签名）。应用端 endpoint provider 拉取此文件验签
         # （fail closed：签名不符直接报错、不安装），再由 Wails updater helper 就地覆盖完成升级。
-        # manifest 仅收录"更新 payload"（windows exe + 两个 mac .zip），dmg/安装器是首装用的，不进 manifest。
-        # 架构识别由文件名驱动：quickdock-amd64.exe → windows/amd64；
-        # quickdock-darwin-arm64.zip / quickdock-darwin-amd64.zip → darwin/{arm64,amd64}。
+        # manifest 仅收录"更新 payload"（当前只有 windows exe），dmg/安装器是首装用的，不进 manifest。
+        # 架构识别由文件名驱动：quickdock-amd64.exe → windows/amd64。
+        # （mac 恢复时在此追加 quickdock-darwin-{arm64,amd64}.zip → darwin/{arm64,amd64}）
         # 必须设置仓库 Secret UPDATER_PRIVATE_KEY（私钥 PEM 全文），否则不生成 manifest、更新链路失效。
         env:
           UPDATER_PRIVATE_KEY: ${{ secrets.UPDATER_PRIVATE_KEY }}
@@ -345,16 +273,14 @@ jobs:
             -url-prefix "$urlPrefix" \
             -notes-file "$notesFile" \
             -output dist/manifest.json \
-            dist/quickdock-amd64.exe \
-            dist/quickdock-darwin-arm64.zip \
-            dist/quickdock-darwin-amd64.zip
+            dist/quickdock-amd64.exe
 
           rm -f updater.key "$notesFile"
 
       - name: Upload Release Assets
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "dist/quickdock-amd64-installer.exe,dist/quickdock-amd64.exe,dist/quickdock-darwin-arm64.dmg,dist/quickdock-darwin-arm64.zip,dist/quickdock-darwin-amd64.dmg,dist/quickdock-darwin-amd64.zip,dist/manifest.json"
+          artifacts: "dist/quickdock-amd64-installer.exe,dist/quickdock-amd64.exe,dist/manifest.json"
           generateReleaseNotes: true
           allowUpdates: true
           omitBodyDuringUpdate: true
