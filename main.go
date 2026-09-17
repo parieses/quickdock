@@ -20,6 +20,7 @@ import (
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/plugin"
+	"quickdock/internal/sysutil"
 	"quickdock/services"
 	aisvc "quickdock/services/ai"
 	clipboardsvc "quickdock/services/clipboard"
@@ -167,6 +168,16 @@ func main() {
 	// 顶层兜底：panic 落盘完整堆栈后原样重抛（不吞异常），崩溃现场留在 <logs>/crash/
 	defer logger.CapturePanic("main")
 	logger.I("QuickDock 启动 -------------------------------------------------------------")
+
+	// 自建隐藏控制台，供后续所有子进程继承（Windows）：原先靠 CREATE_NO_WINDOW 让子进程
+	// "隐藏"，实际语义是每个子进程分配一个新控制台 → 各带一个 conhost.exe（约 6.5MB）。
+	// 47 插件全启用时 29 个后代进程白吃约 190MB。改为继承后全系统只剩 1 个 conhost。
+	// 失败（或 dev 版已有可见控制台）时自动退回 CREATE_NO_WINDOW，功能不受影响。
+	if sysutil.InitHiddenConsole() {
+		logger.I("[启动] 已建立隐藏控制台：子进程统一继承，不再各自创建 conhost")
+	} else {
+		logger.I("[启动] 未建立隐藏控制台：子进程退回 CREATE_NO_WINDOW 兜底")
+	}
 
 	// macOS 无开发者账号时 ad-hoc 签名产物带 quarantine 隔离属性会被 Gatekeeper 拦截；
 	// 启动时自检并清除（仅 darwin 生效，其他平台 no-op）。
@@ -380,6 +391,19 @@ func main() {
 	})
 	mainWindow.RegisterHook(events.Common.WindowRestore, func(event *application.WindowEvent) {
 		windowFlags.Main.Store(true)
+	})
+
+	// 主窗口首次显示后，才在后台对账拉起「已开启常驻」的本地服务（redis / caddy / php ...）。
+	// 这些服务启动前的探测与校验（端口占用 / caddy validate / 版本扫描）全是子进程调用，
+	// 串行耗时 7s 以上；原先同步跑在 SetApp 里、也就是 app.Run() 之前，把主窗口显示拖到 16s。
+	// 拆开后主界面先可用，本地服务随后在后台按期望态补齐。
+	// 用 sync.Once：WM_SHOWWINDOW 在每次显示（含最小化还原）都会发，只认首次。
+	var envServicesOnce sync.Once
+	mainWindow.RegisterHook(events.Common.WindowShow, func(*application.WindowEvent) {
+		envServicesOnce.Do(func() {
+			logger.I("[启动] 主窗口已显示，转后台对账启动本地服务")
+			appService.StartEnvServicesAsync()
+		})
 	})
 
 	// 剪贴板/命令面板/插件窗口使用延迟创建（按需初始化，减少启动内存占用）

@@ -10,8 +10,13 @@ import (
 )
 
 const (
-	// createNoWindow = CREATE_NO_WINDOW：不创建控制台，从根上杜绝黑框。
-	// 优于 syscall.SysProcAttr{HideWindow:true}（只设 STARTF_USESHOWWINDOW/SW_HIDE）：
+	// createNoWindow = CREATE_NO_WINDOW：不显示控制台窗口。
+	// ⚠️ 它的真实语义是"分配一个新控制台但不显示"——每个带此标志的子进程都会配一个
+	// conhost.exe（实测 6.5MB/个）。因此只在宿主没有可继承的隐藏控制台时才用它兜底
+	// （见 console_windows.go 的 InitHiddenConsole）；正常情况下子进程直接继承宿主的
+	// 隐藏控制台，无需此标志，全系统只保留 1 个 conhost。
+	//
+	// 仍优于 syscall.SysProcAttr{HideWindow:true}（只设 STARTF_USESHOWWINDOW/SW_HIDE）：
 	// 后者仍会创建控制台，只是不显示，残留的 console 句柄会干扰管道读取。
 	createNoWindow = 0x08000000
 	// detachedProcess = DETACHED_PROCESS：子进程不继承父进程控制台（避免黑框与
@@ -30,12 +35,21 @@ const (
 	createBreakawayFromJob = 0x01000000
 )
 
-// Hide 附加“隐藏控制台窗口”属性。
+// Hide 确保子进程不会出现可见的控制台窗口。
+//
+// 两条路径：
+//   - 宿主已持有隐藏控制台（InitHiddenConsole 成功）→ 什么都不加，子进程默认继承它，
+//     整个进程树共用 1 个 conhost；
+//   - 否则（未初始化 / AllocConsole 失败 / dev 版已有可见控制台）→ 退回
+//     CREATE_NO_WINDOW 兜底，代价是每个子进程多一个 conhost，但功能一致。
+//
 // 用 |= 合并而非整体覆盖：调用方可能已在 SysProcAttr 上手写了 CmdLine 等字段
 // （如 explorer /select，" 必须手写完整命令行否则含空格路径会被 argv 规则拆散），
 // 整体覆盖会静默丢掉这些字段。
 func Hide(cmd *exec.Cmd) *exec.Cmd {
-	attr(cmd).CreationFlags |= createNoWindow
+	if !consoleInherited() {
+		attr(cmd).CreationFlags |= createNoWindow
+	}
 	return cmd
 }
 

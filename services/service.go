@@ -7,6 +7,7 @@ import (
 	"quickdock/internal/db"
 	dshcore "quickdock/internal/dsh"
 	"quickdock/internal/env"
+	"quickdock/internal/logger"
 	"quickdock/internal/plugin"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -127,14 +128,35 @@ func (a *AppService) SetApp(app *application.App) {
 		a.Env.RefreshAllAsync(func() {
 			app.Event.Emit("quickdock:env:refreshed")
 		})
-		// 服务常驻监督：启动即对已开启的运行时对账拉起，并启动崩溃自愈看门狗。
-		a.Env.ReconcileEnabled(context.Background())
+		// 崩溃自愈看门狗：内部自起 goroutine，首个巡检在 15s 后，不阻塞启动路径。
 		a.Env.StartWatchdog(context.Background())
 	}
 	// 站点服务：用户此前显式启用过站点则自动拉起。
 	// 失败只记日志不弹窗——开机就抛一个「443 绑定失败」没有意义，状态在 SitesList 里可见，
 	// 用户点「启动」即可拿到完整报错。
 	siteMgr.Resume()
+}
+
+// StartEnvServicesAsync 在后台对账拉起「已开启常驻」的本地服务（redis / caddy / php / nginx ...）。
+//
+// 必须由主窗口显示之后触发（main.go 注册 WindowShow 钩子），不能在启动路径上同步执行：
+// ReconcileEnabled 对每个已开启运行时都要跑版本扫描 + 端口占用探测 + 启动前配置校验
+// （caddy validate / nginx -t），全是子进程调用，实测 4 个运行时串行吃掉约 7 秒；
+// 而它原先在 app.Run() 之前执行，等于把主窗口显示硬生生拖后同样长的时间。
+// 改到窗口就绪后触发：主界面先可用，本地服务在后台按「期望状态」补齐。
+func (a *AppService) StartEnvServicesAsync() {
+	if a.Env == nil {
+		return
+	}
+	go func() {
+		defer logger.RecoverToLog("env:reconcile")
+		a.Env.ReconcileEnabled(context.Background())
+		// 对账完成前，环境页读到的是「未运行」，与该运行时的期望态不一致；
+		// 完成后通知前端重拉一次状态（EnvironmentPage 已监听该事件）。
+		if a.app != nil {
+			a.app.Event.Emit("quickdock:env:refreshed")
+		}
+	}()
 }
 
 // dshAutoStartEnabled 读取 dsh web 自动启动配置（默认开启）。

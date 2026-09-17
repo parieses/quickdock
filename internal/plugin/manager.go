@@ -288,8 +288,11 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 		if err != nil {
 			return err
 		}
-		// sysutil.Hide（Windows: CREATE_NO_WINDOW）让 node 进程获得隐藏控制台；子进程继承，整棵进程树连到同一隐藏控制台。
-		// 注意：不能用 DETACHED_PROCESS(0x00000008)——它让 node 脱离控制台，孙进程各自弹窗。
+		// sysutil.Command → Hide：子进程继承宿主的隐藏控制台（main 早期由
+		// sysutil.InitHiddenConsole 建立），整个进程树共用 1 个 conhost；
+		// 若宿主没有可继承的隐藏控制台，Hide 会自动退回 CREATE_NO_WINDOW 兜底。
+		// 注意：不能改用 DETACHED_PROCESS(0x00000008)——它让进程脱离控制台，插件内部
+		// 拉起的孙进程会各自弹出可见黑框。
 		cmd := sysutil.Command(entryPath, manifest.Backend.Args...)
 		cmd.Dir = dir
 

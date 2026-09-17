@@ -204,7 +204,8 @@ func (m *DSHProcessManager) Start() (string, error) {
 	}
 
 	// 直接用 node 拉起 dsh 的 JS 入口（不走 dsh.cmd/cmd.exe），
-	// 配合 CREATE_NO_WINDOW 彻底隐藏控制台窗口；stdout 进入管道，便于解析端口 URL。
+	// 配合 sysutil.Hide 隐藏控制台窗口（宿主有隐藏控制台则继承，否则 CREATE_NO_WINDOW 兜底）；
+	// stdout 进入管道，便于解析端口 URL。
 	// 必须带 --no-open：dsh web 默认会在启动后自行打开系统默认浏览器访问 127.0.0.1:3080
 	// （"opening the default browser"），而 QuickDock 已有原生 WebviewWindow 承载 dsh 界面，
 	// 不让它额外弹浏览器。
@@ -221,7 +222,8 @@ func (m *DSHProcessManager) Start() (string, error) {
 		}
 	}
 	cmd.Env = env
-	// sysutil.Hide：Windows 用 CREATE_NO_WINDOW(0x08000000)，切勿用 DETACHED_PROCESS(0x00000008)
+	// sysutil.Hide：宿主已建立隐藏控制台时子进程直接继承，全系统只留 1 个 conhost；
+	// 切勿用 DETACHED_PROCESS(0x00000008)——脱离控制台后孙进程会各自弹窗。
 	sysutil.Hide(cmd)
 
 	stdout, _ := cmd.StdoutPipe()
