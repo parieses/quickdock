@@ -508,7 +508,7 @@ onMounted(() => {
 .ce-hl :deep(.c-pl) { color: var(--color-text-primary); }
 
 /* 搜索命中 */
-.ce-hl :deep(mark) { color: inherit; background: transparent; border-radius: 2px; }
+.ce-hl :deep(mark) { color: inherit; background: transparent; border-radius: var(--radius-xs); }
 .ce-hl :deep(mark.m-hit) { background: rgba(240, 163, 94, 0.32); }
 .ce-hl :deep(mark.m-cur) { background: rgba(240, 163, 94, 0.75); box-shadow: 0 0 0 1px #f0a35e; }
 

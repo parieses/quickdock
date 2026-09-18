@@ -598,7 +598,7 @@ onUnmounted(() => {
   min-width: 220px;
   display: flex;
   flex-direction: column;
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-primary);
   border-right: 1px solid var(--color-border);
   overflow: hidden;
 }
@@ -612,7 +612,7 @@ onUnmounted(() => {
   border: 1px dashed var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   font-family: inherit;
   font-size: 13px;
@@ -625,7 +625,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   padding: 8px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   cursor: pointer;
   color: var(--color-text-secondary);
   font-size: 13px;
@@ -642,7 +642,7 @@ onUnmounted(() => {
 .ai-conv-del {
   background: none; border: none; color: var(--color-text-disabled);
   cursor: pointer; display: none; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 6px;
+  width: 22px; height: 22px; border-radius: var(--radius-sm);
 }
 .ai-conv-item:hover .ai-conv-del { display: flex; }
 .ai-conv-del:hover { color: var(--color-danger); background: rgba(232,76,76,0.1); }
@@ -669,7 +669,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-muted);
-  border-radius: 16px;
+  border-radius: var(--radius-lg);
   font-size: 12px;
   cursor: pointer;
   font-family: inherit;
@@ -682,7 +682,7 @@ onUnmounted(() => {
   max-width: 160px;
   padding: 5px 8px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-size: 12px;
@@ -694,13 +694,13 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border: 1px solid var(--color-border);
   background: transparent; color: var(--color-text-muted);
-  border-radius: 8px; cursor: pointer; font-family: inherit;
+  border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-icon-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
 .ai-stop {
   display: flex; align-items: center; gap: 4px;
-  padding: 5px 12px; border: none; border-radius: 6px;
+  padding: 5px 12px; border: none; border-radius: var(--radius-sm);
   background: var(--color-bg-active); color: var(--color-text-secondary);
   font-size: 12px; cursor: pointer; font-family: inherit;
 }
@@ -710,7 +710,7 @@ onUnmounted(() => {
 .ai-reasoning {
   font-size: 12px; margin: 2px 0; max-width: 80%;
 }
-.ai-reasoning details { background: var(--color-bg-active); border-radius: 6px; padding: 4px 8px; }
+.ai-reasoning details { background: var(--color-bg-active); border-radius: var(--radius-sm); padding: 4px 8px; }
 .ai-reasoning summary {
   cursor: pointer; color: var(--color-text-muted); font-size: 11px;
   user-select: none; outline: none;
@@ -730,7 +730,7 @@ onUnmounted(() => {
 .ai-msg-role { font-size: 11px; color: var(--color-text-disabled); margin-bottom: 1px; }
 .ai-msg-content {
   padding: 8px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: 13px;
   line-height: 1.5;
   white-space: pre-wrap;
@@ -750,7 +750,7 @@ onUnmounted(() => {
 .ai-copy {
   display: flex; align-items: center; gap: 3px;
   background: none; border: none; color: var(--color-text-disabled);
-  font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: 4px;
+  font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: var(--radius-xs);
 }
 .ai-copy:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .ai-msg.user .ai-copy { color: rgba(255,255,255,0.7); }
@@ -761,7 +761,7 @@ onUnmounted(() => {
   display: flex; align-items: center; gap: 4px;
   padding: 5px 10px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-size: 12px; cursor: pointer; font-family: inherit;
@@ -773,7 +773,7 @@ onUnmounted(() => {
 @keyframes ai-blink { 50% { opacity: 0; } }
 .ai-error {
   align-self: flex-start;
-  padding: 10px 14px; border-radius: 12px;
+  padding: 10px 14px; border-radius: var(--radius-lg);
   background: rgba(232,76,76,0.12); color: var(--color-danger);
   font-size: 13px; max-width: 80%;
 }
@@ -784,7 +784,7 @@ onUnmounted(() => {
 }
 .ai-need-key p, .ai-empty p { font-size: 13px; margin: 0; }
 .ai-go-settings {
-  padding: 7px 16px; border: none; border-radius: 8px;
+  padding: 7px 16px; border: none; border-radius: var(--radius-md);
   background: var(--color-accent); color: var(--color-accent-text);
   font-size: 13px; cursor: pointer; font-family: inherit;
 }
@@ -804,12 +804,12 @@ onUnmounted(() => {
   color: var(--color-text-muted); margin: 6px 0;
 }
 .ai-md :deep(pre) {
-  background: rgba(0,0,0,0.28); border-radius: 6px; padding: 10px 12px;
+  background: rgba(0,0,0,0.28); border-radius: var(--radius-sm); padding: 10px 12px;
   overflow-x: auto; margin: 6px 0;
 }
 .ai-md :deep(code) {
   font-family: var(--font-mono, monospace); font-size: 12px;
-  background: rgba(0,0,0,0.28); padding: 1px 4px; border-radius: 4px;
+  background: rgba(0,0,0,0.28); padding: 1px 4px; border-radius: var(--radius-xs);
 }
 .ai-md :deep(pre code) { background: none; padding: 0; }
 .ai-md :deep(table) { border-collapse: collapse; margin: 6px 0; }
@@ -829,7 +829,7 @@ onUnmounted(() => {
   height: 56px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-size: 13px;
@@ -844,7 +844,7 @@ onUnmounted(() => {
   padding: 0 20px;
   height: 56px;
   border: none;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--color-accent);
   color: var(--color-accent-text);
   font-size: 13px;

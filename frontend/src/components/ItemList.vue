@@ -204,26 +204,26 @@ function onDropItem(e: DragEvent, targetId: string) {
   width: 28px; height: 28px; flex-shrink: 0; color: var(--color-text-muted);
 }
 .item-app-icon-img {
-  width: 20px; height: 20px; object-fit: contain; border-radius: 4px;
+  width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs);
 }
 .item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-meta { font-size: 11px; color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .item-usage {
   font-size: 10px; color: var(--color-text-muted);
-  background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: 8px;
+  background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-md);
 }
 .item-quicklink-badge {
   display: flex; align-items: center; gap: 3px;
   font-size: 10px; color: var(--color-accent, #4a9eff);
   background: var(--color-accent-bg, rgba(74,158,255,0.1));
-  padding: 2px 6px; border-radius: 4px; flex-shrink: 0;
+  padding: 2px 6px; border-radius: var(--radius-xs); flex-shrink: 0;
 }
 .item-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
 .item-body li:hover .item-actions { opacity: 1; }
 .action-btn {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  width: 26px; height: 26px; border-radius: 5px; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+  width: 26px; height: 26px; border-radius: var(--radius-sm); transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
   display: flex; align-items: center; justify-content: center;
 }
 .action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }

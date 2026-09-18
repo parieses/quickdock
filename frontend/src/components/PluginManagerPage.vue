@@ -477,12 +477,12 @@ onMounted(() => { loadPlugins(); loadLogs() })
 }
 .plugin-header-left { display: flex; align-items: center; gap: 8px; }
 .plugin-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--color-text-primary); }
-.plugin-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 7px; border-radius: 8px; }
+.plugin-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 7px; border-radius: var(--radius-md); }
 .plugin-header-actions { display: flex; gap: 6px; }
 
 .install-btn {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 5px 10px; border-radius: 5px;
+  padding: 5px 10px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-accent);
   background: var(--color-accent-bg);
   color: var(--color-accent); cursor: pointer; font-size: 11px;
@@ -491,7 +491,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .refresh-btn {
   display: flex; align-items: center;
   padding: 5px 10px; border: 1px solid var(--color-border);
-  border-radius: 5px; background: var(--color-bg-secondary);
+  border-radius: var(--radius-sm); background: var(--color-bg-secondary);
   color: var(--color-text-secondary); cursor: pointer; font-size: 11px;
 }
 .refresh-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
@@ -521,7 +521,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .plugin-card {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 10px;
   display: flex; flex-direction: column;
   align-items: center;
@@ -538,7 +538,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .new-badge {
   position: absolute; top: 4px; left: 4px;
   font-size: 9px; line-height: 14px; font-weight: 600;
-  padding: 0 5px; border-radius: 7px;
+  padding: 0 5px; border-radius: var(--radius-sm);
   background: var(--color-accent, #4a9eff); color: #fff;
   z-index: 1; letter-spacing: 0.5px;
 }
@@ -552,7 +552,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .plugin-card:hover .card-actions-top { opacity: 1; }
 .action-top-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: 4px;
+  width: 22px; height: 22px; border-radius: var(--radius-xs);
   border: none; background: var(--color-bg-tertiary);
   color: var(--color-text-muted); cursor: pointer;
   font-size: 10px; transition: background-color 100ms, color 100ms, border-color 100ms;
@@ -578,9 +578,9 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .card-version { font-size: 9px; color: var(--color-text-muted); }
 
 /* 状态 */
-.status-badge { font-size: 9px; padding: 0 6px; border-radius: 8px; font-weight: 500; line-height: 16px; }
+.status-badge { font-size: 9px; padding: 0 6px; border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
 .badge-running { background: rgba(29,158,117,0.15); color: #1D9E75; }
-.badge-stopped { background: rgba(136,135,128,0.15); color: #888780; }
+.badge-stopped { background: rgba(136,135,128,0.15); color: var(--color-text-muted); }
 .badge-crashed { background: rgba(226,75,74,0.15); color: #E24B4A; }
 .badge-registered { background: rgba(55,138,221,0.15); color: #378ADD; }
 .badge-starting { background: rgba(224,162,58,0.15); color: #E0A23A; }
@@ -608,7 +608,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 }
 .cat-tab {
   display: inline-flex; align-items: center; gap: 3px;
-  padding: 4px 10px; border-radius: 5px;
+  padding: 4px 10px; border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--color-text-secondary);
@@ -645,7 +645,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .history-head:hover { color: var(--color-text-primary); }
 .history-count {
   font-size: 10px; color: var(--color-text-muted);
-  background: var(--color-bg-tertiary); padding: 0 6px; border-radius: 8px;
+  background: var(--color-bg-tertiary); padding: 0 6px; border-radius: var(--radius-md);
 }
 .history-err-dot {
   width: 6px; height: 6px; border-radius: 50%;
@@ -662,7 +662,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 }
 .exec-row {
   display: flex; align-items: center; gap: 8px;
-  padding: 5px 6px; border-radius: 5px;
+  padding: 5px 6px; border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   border: 1px solid transparent;
   cursor: pointer; font-size: 11px;
@@ -677,7 +677,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .row-cmd { color: var(--color-text-secondary); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-trigger {
   font-size: 10px; color: var(--color-text-muted);
-  background: var(--color-bg-tertiary); padding: 0 6px; border-radius: 8px; flex-shrink: 0;
+  background: var(--color-bg-tertiary); padding: 0 6px; border-radius: var(--radius-md); flex-shrink: 0;
 }
 .row-dur { color: var(--color-text-muted); font-family: var(--font-mono, monospace); flex-shrink: 0; }
 .row-time { color: var(--color-text-disabled); font-size: 10px; margin-left: auto; flex-shrink: 0; }
@@ -685,7 +685,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .exec-detail {
   padding: 6px 8px 8px; margin: -2px 0 2px;
   background: var(--color-bg-primary);
-  border: 1px solid var(--color-border); border-radius: 5px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
 }
 .detail-block { margin-top: 6px; }
 .detail-block:first-child { margin-top: 0; }
@@ -694,7 +694,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .detail-pre {
   font-family: var(--font-mono, monospace); font-size: 10px;
   color: var(--color-text-secondary);
-  background: var(--color-bg-tertiary); border-radius: 4px;
+  background: var(--color-bg-tertiary); border-radius: var(--radius-xs);
   padding: 6px 8px; margin: 0; max-height: 140px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
 }
@@ -702,7 +702,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 
 .view-toggle-btn {
   display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 10px; border-radius: 6px;
+  padding: 5px 10px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-secondary); font-size: 12px; cursor: pointer;
   transition: all .15s;
@@ -722,7 +722,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
   padding: 24px 34px;
   background: var(--color-bg-secondary, #1e1e1e);
   border: 1px solid var(--color-border, #2a2a2a);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
 }
 .install-overlay-spin { color: var(--color-accent, #4a9eff); animation: qd-spin 0.9s linear infinite; }

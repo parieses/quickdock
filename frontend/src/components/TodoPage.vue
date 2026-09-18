@@ -939,7 +939,7 @@ onMounted(() => {
   width: 332px; flex-shrink: 0; display: flex; flex-direction: column;
   background: var(--color-bg-secondary);
   border-radius: var(--radius-lg);
-  box-shadow: inset 0 0 0 1px var(--color-border);
+  border: 1px solid var(--color-border);
   padding: var(--space-4);
 }
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: var(--space-1); }
@@ -961,7 +961,7 @@ onMounted(() => {
   transition: color var(--transition-fast), background var(--transition-fast), box-shadow var(--transition-fast);
 }
 .cal-cell.out-month .cal-day { color: var(--color-text-disabled); }
-.cal-cell.is-today .cal-day { color: var(--color-accent); box-shadow: inset 0 0 0 1px var(--color-accent); }
+.cal-cell.is-today .cal-day { color: var(--color-accent); border: 1px solid var(--color-accent); }
 .cal-cell.is-selected .cal-day { background: var(--color-accent); color: #fff; box-shadow: none; }
 .cal-cell.is-selected.is-today .cal-day { background: var(--color-accent); color: #fff; }
 .cal-marks { display: flex; align-items: center; gap: 3px; height: 7px; flex-wrap: wrap; justify-content: center; }
@@ -978,7 +978,7 @@ onMounted(() => {
 }
 .unscheduled-chip:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .unscheduled-chip.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
-.chip-count { margin-left: auto; font-style: normal; background: var(--color-bg-tertiary); border-radius: 8px; padding: 0 6px; font-size: 11px; }
+.chip-count { margin-left: auto; font-style: normal; background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 6px; font-size: 11px; }
 
 /* 右侧面板 */
 .todo-panel { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -1000,7 +1000,7 @@ onMounted(() => {
 
 /* 状态徽章（4.3）*/
 .status-pill {
-  font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: 8px; cursor: pointer;
+  font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: var(--radius-md); cursor: pointer;
   border: 1px solid transparent; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .status-pill.st-todo { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
@@ -1010,13 +1010,13 @@ onMounted(() => {
 /* 子任务（4.1）*/
 .todo-item { flex-wrap: wrap; }
 .sub-progress { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
-.sub-progress-bar { flex: 1; height: 4px; border-radius: 2px; background: var(--color-bg-tertiary); overflow: hidden; }
-.sub-progress-fill { height: 100%; background: var(--color-accent); border-radius: 2px; transition: width var(--transition-fast); }
+.sub-progress-bar { flex: 1; height: 4px; border-radius: var(--radius-xs); background: var(--color-bg-tertiary); overflow: hidden; }
+.sub-progress-fill { height: 100%; background: var(--color-accent); border-radius: var(--radius-xs); transition: width var(--transition-fast); }
 .sub-progress-text { font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .subtasks { flex-basis: 100%; margin: 6px 0 2px 26px; display: flex; flex-direction: column; gap: 3px; }
 .sub-item { display: flex; align-items: center; gap: 7px; padding: 3px 0; }
 .sub-item.done .sub-name { text-decoration: line-through; color: var(--color-text-disabled); }
-.sub-check { width: 15px; height: 15px; border-radius: 4px; }
+.sub-check { width: 15px; height: 15px; border-radius: var(--radius-xs); }
 .sub-name { flex: 1; font-size: 12px; color: var(--color-text-secondary); min-width: 0; }
 .sub-del { opacity: 0; width: 22px; height: 22px; }
 .sub-item:hover .sub-del { opacity: 1; }
@@ -1028,7 +1028,7 @@ onMounted(() => {
 .kanban-col {
   display: flex; flex-direction: column; min-height: 0;
   background: var(--color-bg-secondary); border-radius: var(--radius-lg);
-  box-shadow: inset 0 0 0 1px var(--color-border); padding: var(--space-3);
+  border: 1px solid var(--color-border); padding: var(--space-3);
 }
 .kanban-col-head { display: flex; align-items: center; gap: 6px; margin-bottom: var(--space-2); flex-shrink: 0; }
 .kanban-dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -1036,10 +1036,10 @@ onMounted(() => {
 .kanban-dot.st-doing { background: #f5a623; }
 .kanban-dot.st-done { background: var(--color-accent); }
 .kanban-col-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
-.kanban-count { margin-left: auto; font-size: 11px; color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-radius: 8px; padding: 0 7px; }
+.kanban-count { margin-left: auto; font-size: 11px; color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
 .kanban-cards { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
 .kanban-card {
-  padding: 9px 11px; background: var(--color-bg-primary); box-shadow: inset 0 0 0 1px var(--color-border);
+  padding: 9px 11px; background: var(--color-bg-primary); border: 1px solid var(--color-border);
   border-radius: var(--radius-md); cursor: grab; transition: background var(--transition-fast);
 }
 .kanban-card:hover { background: var(--color-bg-hover); }
@@ -1050,7 +1050,7 @@ onMounted(() => {
 
 .tag-filter { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3); }
 .tag-fbtn {
-  font-size: 11px; padding: 2px 10px; border-radius: 8px; cursor: pointer;
+  font-size: 11px; padding: 2px 10px; border-radius: var(--radius-md); cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-muted); font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -1070,15 +1070,15 @@ onMounted(() => {
 
 .todo-item {
   display: flex; align-items: center; gap: var(--space-3); padding: 10px 12px;
-  background: var(--color-bg-secondary); box-shadow: inset 0 0 0 1px var(--color-border);
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .todo-item:hover { background: var(--color-bg-hover); }
 .todo-item.done .todo-name { text-decoration: line-through; color: var(--color-text-disabled); }
-.todo-item.overdue { box-shadow: inset 0 0 0 1px rgba(232, 76, 76, 0.4); }
+.todo-item.overdue { border: 1px solid rgba(232, 76, 76, 0.4); }
 .check {
   flex-shrink: 0; width: 18px; height: 18px; border: 1.5px solid var(--color-border);
-  background: transparent; border-radius: 5px; cursor: pointer; display: flex;
+  background: transparent; border-radius: var(--radius-sm); cursor: pointer; display: flex;
   align-items: center; justify-content: center; color: #fff; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .check:hover { border-color: var(--color-accent); }
@@ -1092,7 +1092,7 @@ onMounted(() => {
 .meta-pill.sent { color: var(--color-text-disabled); }
 .todo-note { color: var(--color-text-muted); }
 .tag-chip {
-  font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: 8px;
+  font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: var(--radius-md);
   background: var(--color-accent-bg); color: var(--color-accent);
   cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }

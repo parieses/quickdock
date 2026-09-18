@@ -264,7 +264,7 @@ function onClickAway() {
   justify-content: center;
   width: 16px;
   height: 16px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   font-size: 10px;
   line-height: 1;
   color: var(--color-text-muted);
@@ -305,7 +305,7 @@ function onClickAway() {
   min-width: 120px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 4px;
   box-shadow: 0 8px 32px var(--color-bg-overlay);
   backdrop-filter: blur(12px);
@@ -319,7 +319,7 @@ function onClickAway() {
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   cursor: pointer;
   white-space: nowrap;
   transition: background 0.1s;

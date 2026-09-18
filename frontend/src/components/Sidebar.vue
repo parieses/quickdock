@@ -466,7 +466,7 @@ async function handleDeleteScene(sceneId: string) {
   font-size: 13px;
   cursor: pointer;
   font-family: inherit;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
   text-align: left;
 }
@@ -474,7 +474,7 @@ async function handleDeleteScene(sceneId: string) {
 .nav-item.active { background: var(--color-bg-tertiary); color: var(--color-accent); font-weight: 500; }
 .nav-item.active svg { color: var(--color-accent); }
 .nav-badge {
-  margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: 8px;
+  margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-md);
   background: #e0533d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
 }
 .sidebar.collapsed .nav-badge { position: absolute; top: 6px; right: 10px; margin: 0; }

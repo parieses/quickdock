@@ -2852,14 +2852,14 @@ const s = currentRuntimeState
 }
 .env-info:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
 .env-refresh {
-  width: 30px; height: 30px; border-radius: 6px;
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-secondary); cursor: pointer; font-size: 15px;
 }
 .env-refresh:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
 .path-btn {
   display: inline-flex; align-items: center; gap: 6px;
-  height: 30px; padding: 0 13px; border-radius: 7px;
+  height: 30px; padding: 0 13px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border-focus);
   background: var(--color-accent-bg); color: var(--color-accent);
   font-size: 12px; font-weight: 700; letter-spacing: 0.5px; cursor: pointer;
@@ -2875,7 +2875,7 @@ const s = currentRuntimeState
 .env-cats {
   width: 196px; flex-shrink: 0;
   border-right: 1px solid var(--color-border);
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-primary);
   overflow-y: auto; padding: 12px 10px;
   display: flex; flex-direction: column; gap: 4px;
 }
@@ -2898,7 +2898,7 @@ const s = currentRuntimeState
   color: var(--color-text-primary);
 }
 .cat-avatar {
-  width: 28px; height: 28px; border-radius: 7px; flex-shrink: 0;
+  width: 28px; height: 28px; border-radius: var(--radius-sm); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   font-size: 13px; font-weight: 700; color: #fff;
 }
@@ -2909,7 +2909,7 @@ const s = currentRuntimeState
 .cat-trail { margin-left: auto; display: flex; align-items: center; gap: 6px; }
 .cat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 5px rgba(76, 175, 80, 0.6); flex-shrink: 0; }
 .cat-count {
-  min-width: 20px; text-align: center; font-size: 11px; padding: 1px 6px; border-radius: 10px;
+  min-width: 20px; text-align: center; font-size: 11px; padding: 1px 6px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 .cat-count.zero { color: var(--color-text-disabled); }
@@ -2924,7 +2924,7 @@ const s = currentRuntimeState
 }
 .detail-head { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .detail-avatar {
-  width: 34px; height: 34px; border-radius: 8px; flex-shrink: 0;
+  width: 34px; height: 34px; border-radius: var(--radius-md); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
   font-size: 16px; font-weight: 700; color: #fff;
 }
@@ -2934,15 +2934,15 @@ const s = currentRuntimeState
 .detail-name { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
 .detail-id {
   font-size: 11px; color: var(--color-text-disabled);
-  background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: 4px;
+  background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-xs);
 }
 .detail-badges { display: flex; align-items: center; gap: 6px; }
-.badge { font-size: 11px; padding: 1px 7px; border-radius: 10px; background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+.badge { font-size: 11px; padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .badge.svc { background: var(--color-accent-bg); color: var(--color-accent); }
 /* 常驻开关（服务类运行时）：开=随应用自启/崩溃自愈，关=停止 */
 .svc-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; cursor: pointer; user-select: none; -webkit-user-select: none; }
 .svc-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
-.svc-switch-track { position: relative; width: 34px; height: 18px; border-radius: 10px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border, transparent); transition: background .18s ease; flex: none; }
+.svc-switch-track { position: relative; width: 34px; height: 18px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); border: 1px solid var(--color-border, transparent); transition: background .18s ease; flex: none; }
 .svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .18s ease; }
 .svc-switch.on .svc-switch-track { background: var(--color-accent, #2f9e44); }
 .svc-switch.on .svc-switch-thumb { transform: translateX(16px); }
@@ -2962,7 +2962,7 @@ const s = currentRuntimeState
 .block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .block-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
 .block-count {
-  min-width: 20px; text-align: center; font-size: 11px; padding: 1px 7px; border-radius: 10px;
+  min-width: 20px; text-align: center; font-size: 11px; padding: 1px 7px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 
@@ -3002,11 +3002,11 @@ const s = currentRuntimeState
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
   max-height: 220px; overflow-y: auto; padding: 4px;
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-sm); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
 }
 .lib-option {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
-  padding: 6px 9px; border-radius: 4px; font-size: 12px;
+  padding: 6px 9px; border-radius: var(--radius-xs); font-size: 12px;
   color: var(--color-text-secondary); cursor: pointer;
 }
 .lib-option:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
@@ -3016,7 +3016,7 @@ const s = currentRuntimeState
 /* Ollama 更新提示横幅（检测到新版时出现，用户确认才替换） */
 .update-banner {
   display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
-  padding: 11px 14px; border-radius: 8px;
+  padding: 11px 14px; border-radius: var(--radius-md);
   background: var(--color-accent-bg, rgba(99, 102, 241, 0.08));
   border: 1px solid var(--color-accent-border);
 }
@@ -3026,7 +3026,7 @@ const s = currentRuntimeState
 .ub-desc { font-size: 11px; color: var(--color-text-muted); }
 /* 模型下载后的使用引导：给出可直接粘贴的 Base URL 与模型名 */
 .ollama-usage {
-  margin-top: 14px; padding: 12px 14px; border-radius: 8px;
+  margin-top: 14px; padding: 12px 14px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   display: flex; flex-direction: column; gap: 7px;
 }
@@ -3036,13 +3036,13 @@ const s = currentRuntimeState
 .usage-v {
   font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
   color: var(--color-text-primary); background: var(--color-bg-primary);
-  padding: 2px 7px; border-radius: 4px; border: 1px solid var(--color-border);
+  padding: 2px 7px; border-radius: var(--radius-xs); border: 1px solid var(--color-border);
 }
 .usage-tip { font-size: 11px; color: var(--color-text-disabled); line-height: 1.6; }
 .ollama-pull-row { display: flex; gap: 8px; margin-bottom: 10px; }
 .ollama-pull-row .env-input { flex: 1; }
 .ollama-prog { display: flex; flex-direction: column; gap: 5px; margin-bottom: 10px; }
-.ollama-prog-bar { height: 6px; border-radius: 3px; background: var(--color-bg-primary); overflow: hidden; }
+.ollama-prog-bar { height: 6px; border-radius: var(--radius-xs); background: var(--color-bg-primary); overflow: hidden; }
 .ollama-prog-fill { height: 100%; background: var(--color-accent); transition: width 0.2s linear; }
 /* 尚未拿到总大小时（拉清单阶段）来回滑动，表示「在动但进度未知」 */
 .ollama-prog-fill.unknown { animation: ollama-slide 1.2s ease-in-out infinite; }
@@ -3078,7 +3078,7 @@ const s = currentRuntimeState
 .g-status.warn { color: var(--color-warning); }
 .g-status.fail { color: var(--color-danger); }
 .g-status.missing { color: var(--color-text-disabled); }
-.g-cmd code { font-size: 11px; color: var(--color-text-secondary); background: var(--color-bg-primary); padding: 2px 6px; border-radius: 4px; }
+.g-cmd code { font-size: 11px; color: var(--color-text-secondary); background: var(--color-bg-primary); padding: 2px 6px; border-radius: var(--radius-xs); }
 .g-path, .g-result {
   font-size: 11px; color: var(--color-text-disabled);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace;
@@ -3095,7 +3095,7 @@ const s = currentRuntimeState
 .ver-name { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
 .ver-alias { font-size: 13px; font-weight: 600; color: var(--color-accent); white-space: nowrap; }
 .ver-ver { font-size: 12px; color: var(--color-text-secondary); font-family: monospace; }
-.ver-scope { font-size: 10px; padding: 1px 7px; border-radius: 10px; width: fit-content; }
+.ver-scope { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); width: fit-content; }
 .ver-scope.portable { background: var(--color-accent-bg); color: var(--color-accent); }
 .ver-scope.system { background: rgba(124, 129, 139, 0.18); color: var(--color-text-secondary); }
 .col-path, .col-note {
@@ -3103,7 +3103,7 @@ const s = currentRuntimeState
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace;
 }
 .col-note { font-family: inherit; }
-.env-badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; width: fit-content; }
+.env-badge { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-md); width: fit-content; }
 .env-badge.on { background: rgba(76, 175, 80, 0.15); color: var(--color-success); }
 .env-badge.off { background: var(--color-bg-primary); color: var(--color-text-disabled); }
 
@@ -3118,7 +3118,7 @@ const s = currentRuntimeState
 .status-dot.fail { background: var(--color-danger); box-shadow: 0 0 5px rgba(244, 67, 54, 0.5); }
 .status-dot.missing { background: var(--color-text-disabled); }
 .svc-btn {
-  font-size: 11px; padding: 4px 12px; border-radius: 5px; border: none; cursor: pointer;
+  font-size: 11px; padding: 4px 12px; border-radius: var(--radius-sm); border: none; cursor: pointer;
   font-family: inherit; color: #fff; transition: opacity var(--transition-fast);
 }
 .svc-btn.start { background: var(--color-success); }
@@ -3176,7 +3176,7 @@ const s = currentRuntimeState
 
 .col-ops { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .op-btn {
-  font-size: 11px; padding: 4px 10px; border-radius: 5px; cursor: pointer;
+  font-size: 11px; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
   font-family: inherit; transition: background var(--transition-fast), color var(--transition-fast);
   white-space: nowrap;
@@ -3204,7 +3204,7 @@ const s = currentRuntimeState
 /* ---- MCP 接入面板 ---- */
 .mcp-url-row { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
 .mcp-url {
-  flex: 1; padding: 6px 10px; border-radius: 6px; font-size: 12px;
+  flex: 1; padding: 6px 10px; border-radius: var(--radius-sm); font-size: 12px;
   background: var(--color-bg-secondary); color: var(--color-text-primary);
   border: 1px solid var(--color-border); overflow-x: auto; white-space: nowrap;
 }
@@ -3217,7 +3217,7 @@ const s = currentRuntimeState
   margin: 14px 0 6px; font-size: 13px; color: var(--color-text-secondary);
 }
 .mcp-code {
-  margin: 0; padding: 10px 12px; border-radius: 6px; font-size: 12px; line-height: 1.6;
+  margin: 0; padding: 10px 12px; border-radius: var(--radius-sm); font-size: 12px; line-height: 1.6;
   background: var(--color-bg-secondary); color: var(--color-text-primary);
   border: 1px solid var(--color-border); overflow-x: auto; white-space: pre-wrap; word-break: break-all;
 }
@@ -3245,7 +3245,7 @@ const s = currentRuntimeState
   display: flex; flex-direction: column; gap: 2px;
 }
 .op-item {
-  text-align: left; font-size: 12px; padding: 6px 10px; border-radius: 5px;
+  text-align: left; font-size: 12px; padding: 6px 10px; border-radius: var(--radius-sm);
   border: none; background: transparent; color: var(--color-text-secondary);
   font-family: inherit; cursor: pointer; white-space: nowrap;
 }
@@ -3261,9 +3261,9 @@ const s = currentRuntimeState
 .modal-check input { width: 14px; height: 14px; accent-color: var(--color-accent); }
 .env-header-actions { display: flex; align-items: center; gap: 8px; }
 .path-list { display: flex; flex-direction: column; gap: 7px; margin: 4px 0 12px; max-height: 52vh; overflow: auto; }
-.path-row { display: grid; grid-template-columns: 26px 130px 1fr auto; align-items: center; gap: 10px; padding: 9px 11px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: 9px; font-size: 12px; transition: border-color .12s ease, background .12s ease; }
+.path-row { display: grid; grid-template-columns: 26px 130px 1fr auto; align-items: center; gap: 10px; padding: 9px 11px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: 12px; transition: border-color .12s ease, background .12s ease; }
 .path-row:hover { border-color: var(--color-border-focus); background: var(--color-bg-secondary); }
-.path-badge { width: 26px; height: 26px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
+.path-badge { width: 26px; height: 26px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
 .path-badge :deep(svg) { width: 16px; height: 16px; }
 .path-name { font-weight: 600; color: var(--color-text); white-space: nowrap; }
 .path-name em { font-style: normal; color: var(--color-text-muted); font-weight: 400; margin-left: 5px; }
@@ -3274,7 +3274,7 @@ const s = currentRuntimeState
 .path-flag.no { color: #b42318; background: rgba(180,35,24,.13); }
 .path-empty { color: var(--color-text-muted); font-size: 12px; padding: 10px 2px; text-align: center; }
 .path-modal-head { display: flex; align-items: center; gap: 12px; margin: 2px 0 4px; }
-.path-modal-icon { width: 34px; height: 34px; border-radius: 9px; flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--color-accent-bg); color: var(--color-accent); }
+.path-modal-icon { width: 34px; height: 34px; border-radius: var(--radius-md); flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--color-accent-bg); color: var(--color-accent); }
 .path-modal-icon svg { width: 18px; height: 18px; }
 .path-modal-titles { min-width: 0; }
 .path-summary { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--color-text-secondary); margin: 8px 0 2px; }
@@ -3296,20 +3296,20 @@ const s = currentRuntimeState
 .env-input, .env-select {
   width: 100%; min-width: 0;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  color: var(--color-text-primary); border-radius: 6px; padding: 7px 9px; font-size: 12px;
+  color: var(--color-text-primary); border-radius: var(--radius-sm); padding: 7px 9px; font-size: 12px;
   font-family: inherit; outline: none;
 }
 .env-input.custom { margin-top: 10px; }
 .env-textarea {
   width: 100%; min-width: 0; resize: vertical;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  color: var(--color-text-primary); border-radius: 6px; padding: 7px 9px; font-size: 12px;
+  color: var(--color-text-primary); border-radius: var(--radius-sm); padding: 7px 9px; font-size: 12px;
   font-family: inherit; outline: none; margin-top: 6px;
 }
 .env-select { width: auto; flex-shrink: 0; }
 .env-select:focus, .env-input:focus, .env-textarea:focus { border-color: var(--color-border-focus); box-shadow: 0 0 0 2px var(--color-accent-bg); }
 .link-btn {
-  flex-shrink: 0; font-size: 11px; padding: 7px 11px; border-radius: 6px; cursor: pointer;
+  flex-shrink: 0; font-size: 11px; padding: 7px 11px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-accent);
   font-family: inherit; transition: background var(--transition-fast);
 }
@@ -3318,7 +3318,7 @@ const s = currentRuntimeState
 .link-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
 .link-btn.danger:hover { background: rgba(216, 44, 32, 0.12); }
 .env-install-btn {
-  flex-shrink: 0; padding: 8px 16px; border-radius: 6px; border: none;
+  flex-shrink: 0; padding: 8px 16px; border-radius: var(--radius-sm); border: none;
   background: var(--color-accent); color: #fff; font-size: 13px; font-weight: 500;
   cursor: pointer; font-family: inherit; transition: opacity var(--transition-fast);
 }
@@ -3327,8 +3327,8 @@ const s = currentRuntimeState
 .env-install-btn:disabled { opacity: 0.4; cursor: default; }
 
 .env-progress { display: flex; flex-direction: column; gap: 5px; margin-top: 12px; }
-.env-progress-bar { height: 6px; background: var(--color-bg-tertiary); border-radius: 3px; overflow: hidden; }
-.env-progress-fill { height: 100%; background: var(--color-accent); border-radius: 3px; transition: width var(--transition-base); }
+.env-progress-bar { height: 6px; background: var(--color-bg-tertiary); border-radius: var(--radius-xs); overflow: hidden; }
+.env-progress-fill { height: 100%; background: var(--color-accent); border-radius: var(--radius-xs); transition: width var(--transition-base); }
 .env-progress-fill.indeterminate { animation: env-indet 1.1s ease-in-out infinite; }
 @keyframes env-indet { 0% { margin-left: -40%; } 100% { margin-left: 100%; } }
 .env-progress-text { display: flex; justify-content: space-between; font-size: 11px; color: var(--color-text-muted); }
@@ -3459,7 +3459,7 @@ const s = currentRuntimeState
 .php-modal { width: 540px; max-width: 94vw; }
 .php-tabs { display: flex; gap: 4px; margin: 4px 0 10px; flex-wrap: wrap; }
 .php-tab {
-  font-size: 12px; padding: 5px 11px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; padding: 5px 11px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
   font-family: inherit;
 }
@@ -3468,20 +3468,20 @@ const s = currentRuntimeState
 .php-ini { font-family: monospace; font-size: 11px; line-height: 1.5; }
 .php-log {
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: 6px; padding: 8px 10px; font-size: 11px; max-height: 260px; overflow: auto;
+  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 11px; max-height: 260px; overflow: auto;
   white-space: pre-wrap; word-break: break-all; color: var(--color-text-muted); margin: 0;
 }
 .log-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
 .log-filter {
   flex: 1 1 160px; min-width: 120px; height: 28px; padding: 0 8px; font-size: 12px;
   background: var(--color-bg-primary); color: var(--color-text);
-  border: 1px solid var(--color-border); border-radius: 6px; outline: none;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm); outline: none;
 }
 .log-filter:focus { border-color: var(--color-accent); }
 .log-btn {
   height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border: 1px solid var(--color-border); border-radius: 6px; white-space: nowrap;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm); white-space: nowrap;
 }
 .log-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 .log-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
@@ -3489,7 +3489,7 @@ const s = currentRuntimeState
 .ext-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow: auto; }
 .ext-row {
   display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 8px;
-  border-radius: 5px; cursor: pointer; color: var(--color-text-secondary);
+  border-radius: var(--radius-sm); cursor: pointer; color: var(--color-text-secondary);
 }
 .ext-row:hover { background: var(--color-bg-tertiary); }
 .ext-name { font-weight: 600; }

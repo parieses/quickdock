@@ -731,7 +731,7 @@ onUnmounted(() => {
 
 .header-count {
   font-size: 11px; color: var(--color-text-muted); font-weight: 400;
-  background: var(--color-bg-tertiary); padding: 2px 8px; border-radius: 10px;
+  background: var(--color-bg-tertiary); padding: 2px 8px; border-radius: var(--radius-md);
 }
 
 .header-search {
@@ -746,7 +746,7 @@ onUnmounted(() => {
 
 .search-input {
   width: 100%; padding: 6px 30px 6px 32px;
-  border: 1px solid var(--color-border); border-radius: 8px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
   background: var(--color-surface); color: var(--color-text-secondary); font-size: 13px;
   outline: none; font-family: inherit;
 }
@@ -756,13 +756,13 @@ onUnmounted(() => {
 .clear-btn {
   position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
   background: none; border: none; color: var(--color-text-muted); cursor: pointer;
-  padding: 4px; border-radius: 4px; display: flex;
+  padding: 4px; border-radius: var(--radius-xs); display: flex;
 }
 .clear-btn:hover { color: var(--color-text-secondary); background: var(--color-bg-active); }
 
 .icon-btn {
   width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-  background: transparent; border: none; color: var(--color-text-muted); border-radius: 6px;
+  background: transparent; border: none; color: var(--color-text-muted); border-radius: var(--radius-sm);
   cursor: pointer; flex-shrink: 0;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
@@ -791,7 +791,7 @@ onUnmounted(() => {
 .time-btn {
   padding: 3px 9px;
   border: 1px solid transparent;
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--color-text-muted);
   font-size: 11px;
@@ -814,7 +814,7 @@ onUnmounted(() => {
   gap: 4px;
   padding: 4px 10px;
   border: 1px solid var(--color-border);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: transparent;
   color: var(--color-text-muted);
   font-size: 11px;
@@ -842,7 +842,7 @@ onUnmounted(() => {
   background: var(--color-accent-bg, rgba(74, 158, 255, 0.14));
   color: var(--color-accent, #4a9eff);
   font-weight: 600;
-  border-radius: 2px;
+  border-radius: var(--radius-xs);
   padding: 0;
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
@@ -862,7 +862,7 @@ onUnmounted(() => {
 
 .clipboard-item {
   display: flex; align-items: flex-start; gap: 10px;
-  padding: 10px 12px; border-radius: 8px;
+  padding: 10px 12px; border-radius: var(--radius-md);
   cursor: pointer; transition: background 0.1s;
 }
 .clipboard-item:hover {
@@ -879,7 +879,7 @@ onUnmounted(() => {
 .pin-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: 4px;
+  padding: 2px; border-radius: var(--radius-xs);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -911,7 +911,7 @@ onUnmounted(() => {
 .note-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: 4px;
+  padding: 2px; border-radius: var(--radius-xs);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -923,7 +923,7 @@ onUnmounted(() => {
 .delete-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: 4px;
+  padding: 2px; border-radius: var(--radius-xs);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -939,12 +939,12 @@ onUnmounted(() => {
 }
 .item-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .item-time { font-size: 11px; color: var(--color-text-disabled); }
-.item-source { font-size: 11px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: 4px; }
+.item-source { font-size: 11px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-xs); }
 .item-count { font-size: 11px; color: var(--color-accent); }
 
 .clipboard-item.is-image { align-items: flex-start; padding: 8px 12px; }
 .image-thumb-wrap {
-  width: 100%; max-width: 300px; border-radius: 6px; overflow: hidden;
+  width: 100%; max-width: 300px; border-radius: var(--radius-sm); overflow: hidden;
   margin-bottom: 6px; border: 1px solid var(--color-border);
 }
 .image-thumb {
@@ -954,7 +954,7 @@ onUnmounted(() => {
 }
 .image-placeholder {
   width: 160px; height: 100px; display: flex; align-items: center; justify-content: center;
-  background: var(--color-surface); border-radius: 6px; margin-bottom: 6px;
+  background: var(--color-surface); border-radius: var(--radius-sm); margin-bottom: 6px;
   border: 1px solid var(--color-border); color: var(--color-text-disabled);
 }
 
@@ -989,7 +989,7 @@ onUnmounted(() => {
 .clipboard-pagination .page-btn {
   display: flex; align-items: center; justify-content: center;
   min-width: 26px; height: 26px;
-  border: 1px solid var(--color-border); border-radius: 4px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   font-size: 11px; font-family: inherit; cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
@@ -1004,7 +1004,7 @@ onUnmounted(() => {
 .note-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: 4px;
+  padding: 2px; border-radius: var(--radius-xs);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1027,7 +1027,7 @@ onUnmounted(() => {
   width: 320px; max-width: 90vw;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column;
   overflow: hidden;
@@ -1056,7 +1056,7 @@ onUnmounted(() => {
   border-top: 1px solid var(--color-border);
 }
 .cancel-btn, .save-btn {
-  padding: 5px 14px; border-radius: 6px;
+  padding: 5px 14px; border-radius: var(--radius-sm);
   font-size: 12px; font-family: inherit; font-weight: 500;
   cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
   border: 1px solid var(--color-border);

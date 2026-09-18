@@ -43,7 +43,7 @@ defineEmits<{
 }
 .toast-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 10px 20px; border-radius: 8px; font-size: 13px;
+  padding: 10px 20px; border-radius: var(--radius-md); font-size: 13px;
   box-shadow: var(--shadow-toast);
   pointer-events: auto; cursor: pointer; white-space: nowrap;
   transition: box-shadow 0.15s;

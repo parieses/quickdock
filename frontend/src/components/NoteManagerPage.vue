@@ -340,7 +340,7 @@ watch(pendingOpenNoteId, (id) => {
 .notes-sub { font-size: 11px; color: var(--color-text-muted); }
 .notes-search { position: relative; width: 260px; flex-shrink: 0; display: flex; align-items: center; }
 .ns-icon { position: absolute; left: 8px; color: var(--color-text-disabled); }
-.ns-input { width: 100%; padding: 6px 28px 6px 28px; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px; outline: none; font-family: inherit; }
+.ns-input { width: 100%; padding: 6px 28px 6px 28px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px; outline: none; font-family: inherit; }
 .ns-input:focus { border-color: var(--color-accent); }
 .ns-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; }
 .notes-tags { flex: 1; min-width: 0; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: 8px; }
@@ -349,32 +349,32 @@ watch(pendingOpenNoteId, (id) => {
 .nt-chip.active { color: var(--color-accent); font-weight: 600; }
 
 .notes-body { flex: 1; display: flex; min-height: 0; }
-.notes-tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border); display: flex; flex-direction: column; background: var(--color-bg-secondary); }
+.notes-tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border); display: flex; flex-direction: column; background: var(--color-bg-primary); }
 .tree-toolbar { display: flex; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--color-border); }
-.tt-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: none; background: none; color: var(--color-text-muted); cursor: pointer; border-radius: 5px; }
+.tt-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: none; background: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }
 .tt-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .tt-sep { width: 1px; background: var(--color-border); margin: 0 4px; }
 .tree-wrap { flex: 1; overflow-y: auto; padding: 4px; }
 .tree-empty { color: var(--color-text-disabled); font-size: 12px; padding: 20px; text-align: center; }
-.sr-row { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.sr-row { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
 .sr-row:hover { background: var(--color-bg-hover); }
 
 .notes-editor { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 .ne-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--color-text-disabled); gap: 6px; }
 .ne-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
-.ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: 6px; background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 14px; font-weight: 600; outline: none; font-family: inherit; }
+.ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 14px; font-weight: 600; outline: none; font-family: inherit; }
 .ne-name:focus { border-color: var(--color-accent); }
 .ne-format { display: flex; gap: 2px; flex-shrink: 0; }
 .ne-format button { padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
-.ne-format button:first-child { border-radius: 6px 0 0 6px; }
+.ne-format button:first-child { border-radius: var(--radius-sm) 0 0 6px; }
 .ne-format button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
 .ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-format button:hover:not(.active) { color: var(--color-text-primary); }
-.ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: 6px; border-radius: 5px; }
+.ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: 6px; border-radius: var(--radius-sm); }
 .ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
 .ne-tags { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); }
 .ne-tags-label { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
-.ne-tags-input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: 5px; background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
+.ne-tags-input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
 .ne-tags-input:focus { border-color: var(--color-accent); }
 .ne-split { flex: 1; display: flex; min-height: 0; }
 .ne-input { flex: 1; min-width: 0; resize: none; padding: 12px; border: none; border-right: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); font-size: 13px; font-family: 'Consolas','Monaco',monospace; line-height: 1.6; outline: none; box-sizing: border-box; }
@@ -389,8 +389,8 @@ watch(pendingOpenNoteId, (id) => {
 .markdown-body :deep(h3) { font-size: 15px; }
 .markdown-body :deep(p) { margin: 8px 0; }
 .markdown-body :deep(a) { color: var(--color-accent); }
-.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: 4px; font-family: 'Consolas','Monaco',monospace; font-size: 13px; }
-.markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: 10px 12px; border-radius: 6px; overflow: auto; }
+.markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--radius-xs); font-family: 'Consolas','Monaco',monospace; font-size: 13px; }
+.markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: 10px 12px; border-radius: var(--radius-sm); overflow: auto; }
 .markdown-body :deep(pre code) { background: none; padding: 0; }
 .markdown-body :deep(blockquote) { border-left: 3px solid var(--color-border-focus); margin: 8px 0; padding: 2px 12px; color: var(--color-text-muted); }
 .markdown-body :deep(ul), .markdown-body :deep(ol) { padding-left: 22px; margin: 8px 0; }

@@ -111,7 +111,7 @@ function onDragStart(e: DragEvent) {
 /* 树节点行：对齐应用内 HttpFolderTreeNode 风格 */
 .tn-row {
   display: flex; align-items: center; gap: 5px;
-  padding: 5px 6px; border-radius: 6px; cursor: pointer;
+  padding: 5px 6px; border-radius: var(--radius-sm); cursor: pointer;
   font-size: 12px; min-height: 26px; box-sizing: border-box;
   color: var(--color-text-secondary);
   transition: background-color var(--transition-fast), color var(--transition-fast);
@@ -126,7 +126,7 @@ function onDragStart(e: DragEvent) {
 .tn-icon { flex-shrink: 0; color: var(--color-accent); }
 .tn-doc .tn-icon { color: #d9920a; }
 .tn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tn-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: 8px; padding: 0 6px; flex-shrink: 0; }
+.tn-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 6px; flex-shrink: 0; }
 
 /* hover 操作按钮：常在 hover 显示半透明，hover 变实 */
 .tn-actions { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; opacity: 0; transition: opacity var(--transition-fast); }
@@ -134,12 +134,12 @@ function onDragStart(e: DragEvent) {
 .tn-act {
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border: none; background: transparent;
-  color: var(--color-text-muted); cursor: pointer; border-radius: 4px;
+  color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-xs);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .tn-act:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 .tn-act.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.12); }
 
-.tn-input { flex: 1; min-width: 0; padding: 2px 6px; border: 1px solid var(--color-accent); border-radius: 4px; background: var(--color-bg-primary); color: var(--color-text-primary); font-size: 12px; outline: none; }
+.tn-input { flex: 1; min-width: 0; padding: 2px 6px; border: 1px solid var(--color-accent); border-radius: var(--radius-xs); background: var(--color-bg-primary); color: var(--color-text-primary); font-size: 12px; outline: none; }
 .tn-children { margin-left: 12px; }
 </style>

@@ -53,7 +53,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .confirm-panel {
   background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: 10px; width: 360px; max-width: 90vw;
+  border-radius: var(--radius-md); width: 360px; max-width: 90vw;
   padding: 24px; text-align: center;
   box-shadow: 0 12px 48px var(--color-bg-overlay);
 }
@@ -61,7 +61,7 @@ function onKeydown(e: KeyboardEvent) {
 .confirm-message { font-size: 14px; color: var(--color-text-primary); margin: 0 0 24px; line-height: 1.6; }
 .confirm-footer { display: flex; justify-content: center; gap: 12px; }
 .btn {
-  padding: 8px 24px; border-radius: 6px; font-size: 13px;
+  padding: 8px 24px; border-radius: var(--radius-sm); font-size: 13px;
   cursor: pointer; border: none; font-family: inherit;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s; font-weight: 500;
 }

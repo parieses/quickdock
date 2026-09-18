@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	envmgr "quickdock/internal/env"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/sysutil"
@@ -119,6 +120,9 @@ var (
 
 	paletteWin     *application.WebviewWindow
 	paletteWinLock sync.Mutex
+
+	// trayInstance 托盘实例引用，供切换服务后重建菜单（SetMenu 在运行时会实时更新 impl）。
+	trayInstance *application.SystemTray
 )
 
 func SetHotkeyApp(app *application.App) {
@@ -198,6 +202,29 @@ func StartHotkeyListener(app *application.App, svc *services.AppService) {
 // createSystemTray 用框架 SystemTray 创建托盘图标与菜单。
 // 左键显示主窗口；右键未设置回调时框架自动弹出菜单（applySmartDefaults）。
 func createSystemTray(app *application.App) {
+	menu := buildTrayMenu(app)
+
+	// SetIcon 接收一帧资源数据（见 trayIconData）：框架 CreateSmallHIconFromImage
+	// 会按 SM_CXSMICON 缩放到托盘标准尺寸。注意不能传整份 .ico 文件，否则框架会
+	// 把含 ICONDIR 头的整包交给 CreateIconFromResourceEx 而创建失败（误导性 WARN）。
+	tray := app.SystemTray.New()
+	tray.SetIcon(trayIconData())
+	tray.SetTooltip("快启坞 QuickDock")
+	tray.SetMenu(menu)
+	trayInstance = tray
+	tray.OnClick(func() {
+		if win := GetMainWindow(); win != nil {
+			showMainWindow(win)
+		}
+	})
+
+	tray.Show()
+	logger.I("QuickDock: 系统托盘已创建 (Wails SystemTray)")
+}
+
+// buildTrayMenu 构建托盘右键菜单（框架 smart default 已处理右键弹出）。
+// 每次重建都实时反映服务运行状态，托盘切换启停后会调用 rebuildTrayMenu 刷新。
+func buildTrayMenu(app *application.App) *application.Menu {
 	menu := app.Menu.New()
 	menu.Add("显示窗口").OnClick(func(*application.Context) {
 		if win := GetMainWindow(); win != nil {
@@ -220,6 +247,12 @@ func createSystemTray(app *application.App) {
 	menu.Add("重启").OnClick(func(*application.Context) {
 		restartApp()
 	})
+
+	// 服务快速启停子菜单：列出本机已装且支持服务管理的运行时，勾选=正在运行，
+	// 点击即切换启停（无需打开主窗口）。
+	svcSub := menu.AddSubmenu("服务")
+	populateServiceSubmenu(svcSub)
+
 	menu.AddSeparator()
 
 	// 开机自启动：勾选态在托盘菜单创建时读一次，用户在设置页改动后这里会陈旧，
@@ -249,21 +282,119 @@ func createSystemTray(app *application.App) {
 		requestQuit()
 	})
 
-	// SetIcon 接收一帧资源数据（见 trayIconData）：框架 CreateSmallHIconFromImage
-	// 会按 SM_CXSMICON 缩放到托盘标准尺寸。注意不能传整份 .ico 文件，否则框架会
-	// 把含 ICONDIR 头的整包交给 CreateIconFromResourceEx 而创建失败（误导性 WARN）。
-	tray := app.SystemTray.New()
-	tray.SetIcon(trayIconData())
-	tray.SetTooltip("快启坞 QuickDock")
-	tray.SetMenu(menu)
-	tray.OnClick(func() {
-		if win := GetMainWindow(); win != nil {
-			showMainWindow(win)
-		}
-	})
+	return menu
+}
 
-	tray.Show()
-	logger.I("QuickDock: 系统托盘已创建 (Wails SystemTray)")
+// populateServiceSubmenu 向「服务」子菜单填充「已装且支持服务管理」的运行时，
+// 每项以勾选态 + ●/○ 显示运行状况，点击切换启停。
+func populateServiceSubmenu(sub *application.Menu) {
+	svc := appSvc.Load()
+	if svc == nil || svc.Env == nil {
+		sub.Add("(环境未就绪)")
+		return
+	}
+	list := svc.Env.List()
+	var n int
+	for _, ri := range list {
+		if !ri.HasService || len(ri.Installed) == 0 {
+			continue
+		}
+		rt := envmgr.Runtime(ri.ID)
+		running := len(serviceRunningVersions(rt)) > 0
+		label := ri.Name
+		if running {
+			label = "● " + ri.Name
+		}
+		item := sub.AddCheckbox(label, running)
+		item.OnClick(func(*application.Context) {
+			toggleService(rt)
+			rebuildTrayMenu()
+		})
+		n++
+	}
+	if n == 0 {
+		sub.Add("(无可用服务)")
+	}
+}
+
+// serviceRunningVersions 返回该运行时当前正在运行的已装版本列表（用于托盘状态展示与停止）。
+func serviceRunningVersions(rt envmgr.Runtime) []string {
+	svc := appSvc.Load()
+	if svc == nil || svc.Env == nil {
+		return nil
+	}
+	installs, err := svc.Env.InstalledVersions(rt)
+	if err != nil || len(installs) == 0 {
+		return nil
+	}
+	var running []string
+	for _, ins := range installs {
+		if st, err := svc.Env.Status(rt, ins.Version); err == nil && st.Running {
+			running = append(running, ins.Version)
+		}
+	}
+	return running
+}
+
+// pickServiceVersion 选择用于启动的版本：激活版本优先，否则首个已装版本。
+func pickServiceVersion(rt envmgr.Runtime) string {
+	svc := appSvc.Load()
+	if svc == nil || svc.Env == nil {
+		return ""
+	}
+	installs, err := svc.Env.InstalledVersions(rt)
+	if err != nil || len(installs) == 0 {
+		return ""
+	}
+	for _, ins := range installs {
+		if ins.Active {
+			return ins.Version
+		}
+	}
+	return installs[0].Version
+}
+
+// toggleService 切换单个运行时的服务启停：有运行中的版本则全部停止，
+// 否则以「激活版本优先、否则首个已装版本」启动。结果经日志、托盘菜单刷新与主窗口事件回显。
+func toggleService(rt envmgr.Runtime) {
+	svc := appSvc.Load()
+	if svc == nil || svc.Env == nil {
+		return
+	}
+	if running := serviceRunningVersions(rt); len(running) > 0 {
+		for _, v := range running {
+			if err := svc.Env.Stop(rt, v); err != nil {
+				logger.W("[tray] 停止 %s@%s 失败: %v", rt, v, err)
+			} else {
+				logger.I("[tray] 已停止 %s@%s", rt, v)
+			}
+		}
+	} else {
+		v := pickServiceVersion(rt)
+		if v == "" {
+			logger.W("[tray] %s 无可用版本，无法启动", rt)
+			return
+		}
+		if err := svc.Env.Start(rt, v, nil); err != nil {
+			logger.W("[tray] 启动 %s@%s 失败: %v", rt, v, err)
+		} else {
+			logger.I("[tray] 已启动 %s@%s", rt, v)
+		}
+	}
+	// 通知主窗口同步状态（环境页监听该事件刷新列表）
+	if a := getHotkeyApp(); a != nil {
+		a.Event.Emit("quickdock:env:refreshed")
+	}
+}
+
+// rebuildTrayMenu 重建托盘菜单以反映最新服务状态（切换启停后调用）。
+func rebuildTrayMenu() {
+	tray := trayInstance
+	app := getHotkeyApp()
+	if tray == nil || app == nil {
+		return
+	}
+	tray.SetMenu(buildTrayMenu(app))
 }
 
 // requestQuit 统一退出路径：置真退出标记 → 移除剪贴板监听 → app.Quit()。

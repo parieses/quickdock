@@ -323,14 +323,14 @@ defineExpose({ capturing })
 <style scoped>
 .hotkey-page { width: 100%; max-width: 600px; }
 .page-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 24px; }
-.hotkey-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 10px; padding: 16px 20px; margin-bottom: 16px; }
+.hotkey-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 16px 20px; margin-bottom: 16px; }
 .hc-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); margin-bottom: 12px; }
 .hc-desc { font-size: 11px; color: var(--color-text-disabled); margin: 10px 0 0; }
 .hotkey-row { display: flex; align-items: center; gap: 12px; }
 .hotkey-label { font-size: 12px; color: var(--color-text-muted); flex-shrink: 0; width: 48px; }
 .hotkey-display {
   flex: 1; height: 36px; display: flex; align-items: center; gap: 8px;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   padding: 0 12px; cursor: pointer; transition: border-color 0.15s;
   min-width: 0;
 }
@@ -342,19 +342,19 @@ defineExpose({ capturing })
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
 .hotkey-badge {
   font-size: 14px; font-weight: 600; color: var(--color-accent);
-  background: var(--color-accent-bg); padding: 1px 8px; border-radius: 4px;
+  background: var(--color-accent-bg); padding: 1px 8px; border-radius: var(--radius-xs);
   font-family: 'Consolas',monospace; white-space: nowrap;
 }
 .hotkey-edit-hint { font-size: 11px; color: var(--color-text-disabled); white-space: nowrap; }
 .capture-hint { font-size: 13px; color: var(--color-warning); font-family: 'Consolas',monospace; }
 .reset-sm {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--color-text-disabled); border-radius: 4px; cursor: pointer;
+  border: none; background: transparent; color: var(--color-text-disabled); border-radius: var(--radius-xs); cursor: pointer;
 }
 .reset-sm:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
 .save-btn {
   padding: 8px 24px; border: none; background: var(--color-accent); color: var(--color-accent-text);
-  font-size: 13px; border-radius: 6px; cursor: pointer; font-family: inherit;
+  font-size: 13px; border-radius: var(--radius-sm); cursor: pointer; font-family: inherit;
   margin-bottom: 12px; display: inline-flex; align-items: center; gap: 6px;
 }
 .save-btn:hover { background: var(--color-accent-hover); }

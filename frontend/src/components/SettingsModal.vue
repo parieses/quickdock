@@ -622,7 +622,7 @@ async function toggleAutoStart() {
 }
 .close-btn {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  width: 30px; height: 30px; border-radius: 6px;
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
   display: flex; align-items: center; justify-content: center;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
@@ -727,18 +727,18 @@ async function toggleAutoStart() {
 .update-restart-btn { background: var(--color-accent); color: #fff; font-weight: 500; }
 .update-restart-btn:hover { opacity: 0.9; }
 .update-dl-bar {
-  height: 4px; margin-top: 10px; border-radius: 2px; overflow: hidden;
+  height: 4px; margin-top: 10px; border-radius: var(--radius-xs); overflow: hidden;
   background: var(--color-bg-tertiary);
 }
 .update-dl-fill {
-  height: 100%; border-radius: 2px;
+  height: 100%; border-radius: var(--radius-xs);
   background: var(--color-accent, #4a9eff); transition: width .2s ease;
 }
 
 .update-notes {
   margin-top: 14px;
   border: 1px solid var(--border-color, #333);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--surface-2, #1e1e1e);
   padding: 10px 12px;
 }
@@ -766,7 +766,7 @@ async function toggleAutoStart() {
 .theme-selector { display: flex; gap: 12px; }
 .theme-card {
   flex: 1; display: flex; flex-direction: column; align-items: center; gap: 8px;
-  padding: 16px 12px; border: 1px solid var(--color-border); border-radius: 10px;
+  padding: 16px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-md);
   background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer;
   font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
@@ -774,7 +774,7 @@ async function toggleAutoStart() {
 .theme-card.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
 .locale-selector { display: flex; gap: 8px; }
 .locale-btn {
-  padding: 8px 20px; border: 1px solid var(--color-border); border-radius: 8px;
+  padding: 8px 20px; border: 1px solid var(--color-border); border-radius: var(--radius-md);
   background: transparent; color: var(--color-text-muted); font-size: 13px; cursor: pointer;
   font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
@@ -794,14 +794,14 @@ async function toggleAutoStart() {
 .setting-label { font-size: 13px; color: var(--color-text-muted); min-width: 80px; }
 .setting-control { display: flex; align-items: center; gap: 8px; }
 .num-input {
-  width: 80px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: 6px;
+  width: 80px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px; font-family: inherit;
   outline: none;
 }
 .num-input:focus { border-color: var(--color-accent); }
 .input-suffix { font-size: 12px; color: var(--color-text-disabled); }
 .btn {
-  padding: 6px 14px; border: none; border-radius: 6px;
+  padding: 6px 14px; border: none; border-radius: var(--radius-sm);
   font-size: 12px; cursor: pointer; font-family: inherit;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
@@ -814,7 +814,7 @@ async function toggleAutoStart() {
 
 /* 切换开关 */
 .toggle-btn {
-  width: 40px; height: 22px; border-radius: 11px; border: none;
+  width: 40px; height: 22px; border-radius: var(--radius-md); border: none;
   background: var(--color-bg-active); cursor: pointer; position: relative;
   transition: background 0.2s; padding: 0;
 }
@@ -831,7 +831,7 @@ async function toggleAutoStart() {
 .snapshot-create-area { margin-bottom: 16px; }
 .snapshot-create-form { display: flex; flex-direction: column; gap: 8px; }
 .snapshot-input {
-  width: 100%; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: 6px;
+  width: 100%; padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px;
   font-family: inherit; outline: none; box-sizing: border-box;
 }
@@ -854,7 +854,7 @@ async function toggleAutoStart() {
 .ai-profiles { display: flex; flex-direction: column; gap: 6px; margin: 4px 0 16px; }
 .ai-profile-item {
   display: flex; align-items: center; gap: 8px;
-  padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 8px;
+  padding: 8px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-md);
   cursor: pointer; background: var(--color-bg-tertiary); transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-profile-item:hover { border-color: var(--color-border-light); }
@@ -864,7 +864,7 @@ async function toggleAutoStart() {
 .ai-profile-edit {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-  border-radius: 6px; flex-shrink: 0;
+  border-radius: var(--radius-sm); flex-shrink: 0;
 }
 .ai-profile-edit:hover { color: var(--color-accent); background: var(--color-accent-bg); }
 .ai-profile-name { flex: 1; font-size: 13px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -872,13 +872,13 @@ async function toggleAutoStart() {
 .ai-profile-del {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
-  border-radius: 6px; flex-shrink: 0;
+  border-radius: var(--radius-sm); flex-shrink: 0;
 }
 .ai-profile-del:hover { color: var(--color-danger); background: rgba(232,76,76,0.1); }
 .ai-profile-add {
   display: flex; align-items: center; justify-content: center; gap: 4px;
   padding: 7px; border: 1px dashed var(--color-border); background: transparent;
-  color: var(--color-text-secondary); border-radius: 8px; cursor: pointer;
+  color: var(--color-text-secondary); border-radius: var(--radius-md); cursor: pointer;
   font-family: inherit; font-size: 12px; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-profile-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
@@ -891,7 +891,7 @@ async function toggleAutoStart() {
 }
 .ai-modal {
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: 12px; width: 520px; max-width: 90vw; max-height: 85vh;
+  border-radius: var(--radius-lg); width: 520px; max-width: 90vw; max-height: 85vh;
   display: flex; flex-direction: column; box-shadow: 0 12px 40px rgba(0,0,0,0.25);
 }
 .ai-modal-header {
@@ -902,7 +902,7 @@ async function toggleAutoStart() {
 .ai-modal-close {
   background: none; border: none; color: var(--color-text-muted);
   font-size: 20px; cursor: pointer; width: 28px; height: 28px;
-  display: flex; align-items: center; justify-content: center; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);
 }
 .ai-modal-close:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
 .ai-modal-body { padding: 14px 18px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 8px; }
@@ -914,7 +914,7 @@ async function toggleAutoStart() {
 
 /* 小型 toggle 开关（思考模式） */
 .toggle-btn-sm {
-  position: relative; width: 36px; height: 20px; border-radius: 10px;
+  position: relative; width: 36px; height: 20px; border-radius: var(--radius-md);
   border: none; background: var(--color-bg-active); cursor: pointer;
   transition: background 0.15s; padding: 0; flex-shrink: 0;
 }
@@ -933,7 +933,7 @@ async function toggleAutoStart() {
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 12px; color: var(--color-text-muted); font-weight: 500; }
 .field-input {
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   padding: 9px 12px; color: var(--color-text-primary); font-size: 13px;
   outline: none; transition: border-color 0.15s;
   font-family: inherit;
@@ -946,17 +946,17 @@ async function toggleAutoStart() {
 .model-caret {
   position: absolute; right: 6px; background: transparent; border: none;
   color: var(--color-text-muted); cursor: pointer; font-size: 12px; padding: 2px 6px;
-  border-radius: 4px; line-height: 1;
+  border-radius: var(--radius-xs); line-height: 1;
 }
 .model-caret:hover { color: var(--color-text-primary); background: var(--color-bg-primary); }
 .model-dropdown {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 20;
   max-height: 200px; overflow-y: auto; padding: 4px;
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  border-radius: 6px; box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
+  border-radius: var(--radius-sm); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.28);
 }
 .model-option {
-  padding: 6px 9px; border-radius: 4px; font-size: 12px;
+  padding: 6px 9px; border-radius: var(--radius-xs); font-size: 12px;
   color: var(--color-text-secondary); cursor: pointer; white-space: nowrap;
 }
 .model-option:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
@@ -979,7 +979,7 @@ async function toggleAutoStart() {
 .snapshot-item {
   display: flex; align-items: center; justify-content: space-between; gap: 12px;
   padding: 12px 14px; background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: 8px; transition: border-color 0.12s;
+  border-radius: var(--radius-md); transition: border-color 0.12s;
 }
 .snapshot-item:hover { border-color: var(--color-border-light); }
 .snapshot-item-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
@@ -989,7 +989,7 @@ async function toggleAutoStart() {
 .snapshot-item-actions { display: flex; gap: 4px; flex-shrink: 0; }
 .snapshot-item-actions .action-btn {
   width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--color-text-muted); border-radius: 6px;
+  border: none; background: transparent; color: var(--color-text-muted); border-radius: var(--radius-sm);
   cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .snapshot-item-actions .action-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }

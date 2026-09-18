@@ -354,7 +354,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .editor-panel {
   width: 480px; max-height: 80vh;
-  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: 12px;
+  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg);
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 12px 40px var(--color-bg-overlay);
 }
@@ -365,7 +365,7 @@ function onKeydown(e: KeyboardEvent) {
 .editor-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
 .editor-close {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  width: 28px; height: 28px; border-radius: 6px;
+  width: 28px; height: 28px; border-radius: var(--radius-sm);
   display: flex; align-items: center; justify-content: center; font-size: 18px;
 }
 .editor-close:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
@@ -376,7 +376,7 @@ function onKeydown(e: KeyboardEvent) {
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 12px; font-weight: 600; color: var(--color-text-muted); }
 .field-input {
-  padding: 8px 12px; border: 1px solid var(--color-border); border-radius: 6px;
+  padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.12s;
 }
@@ -385,7 +385,7 @@ function onKeydown(e: KeyboardEvent) {
 .field-input::placeholder { color: var(--color-text-disabled); }
 .field-textarea {
   resize: vertical; min-height: 60px;
-  padding: 8px 12px; border: 1px solid var(--color-border); border-radius: 6px;
+  padding: 8px 12px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 13px; font-family: inherit; outline: none;
 }
@@ -395,7 +395,7 @@ function onKeydown(e: KeyboardEvent) {
 
 /* 项目环境：探测到的版本要求 + 全局切换/仅本项目绑定 */
 .project-env {
-  border: 1px solid var(--color-border); border-radius: 8px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
   padding: 10px 12px; background: var(--color-bg-tertiary); gap: 8px;
 }
 .project-env-head { display: flex; align-items: center; justify-content: space-between; }
@@ -403,14 +403,14 @@ function onKeydown(e: KeyboardEvent) {
 .env-row-main { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; font-size: 12px; }
 .env-rt { font-weight: 600; color: var(--color-text-primary); }
 .env-req { color: var(--color-text-muted); }
-.env-tag { padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+.env-tag { padding: 1px 6px; border-radius: var(--radius-xs); font-size: 11px; }
 .env-tag.ok { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .env-tag.bad { background: var(--color-danger); color: var(--color-accent-text); }
 .env-active { color: var(--color-text-disabled); font-size: 11px; }
 .env-row-actions { display: flex; align-items: center; gap: 8px; }
 .env-add { display: flex; align-items: center; gap: 6px; padding-top: 6px; border-top: 1px solid var(--color-border); }
 .env-add-select { flex: 1; padding: 4px 8px; font-size: 12px; }
-.env-select { padding: 3px 6px; font-size: 11px; border: 1px solid var(--color-border); border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.env-select { padding: 3px 6px; font-size: 11px; border: 1px solid var(--color-border); border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .link-btn {
   background: none; border: none; padding: 0; font-size: 12px; font-family: inherit;
   color: var(--color-accent); cursor: pointer;
@@ -423,7 +423,7 @@ function onKeydown(e: KeyboardEvent) {
   padding: 14px 20px; border-top: 1px solid var(--color-border);
 }
 .btn {
-  padding: 8px 18px; border: none; border-radius: 6px; font-size: 13px;
+  padding: 8px 18px; border: none; border-radius: var(--radius-sm); font-size: 13px;
   cursor: pointer; font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .btn-cancel { background: var(--color-bg-active); color: var(--color-text-muted); }

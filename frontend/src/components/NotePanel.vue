@@ -111,7 +111,7 @@ function askAI() {
 .note-actions { display: flex; align-items: center; gap: 10px; }
 .note-ask {
   display: flex; align-items: center; gap: 4px;
-  font-size: 12px; padding: 3px 8px; border-radius: 6px; cursor: pointer;
+  font-size: 12px; padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer;
   background: var(--color-accent); color: var(--color-accent-text); border: none;
 }
 .note-ask:disabled { opacity: 0.4; cursor: not-allowed; }

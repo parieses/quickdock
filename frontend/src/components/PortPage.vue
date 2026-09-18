@@ -136,9 +136,9 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .port-title { font-size: 18px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
 .port-sub { font-size: 12px; color: var(--color-text-disabled); }
 .port-tools { display: flex; align-items: center; gap: var(--space-3); }
-.port-search { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: 7px; background: var(--color-bg-secondary); color: var(--color-text-disabled); min-width: 200px; }
+.port-search { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-disabled); min-width: 200px; }
 .port-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: 13px; }
-.port-btn { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 5px 10px; border-radius: 7px; cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
+.port-btn { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
 .port-btn:disabled { opacity: 0.5; cursor: default; }
 .port-btn.is-loading .port-btn-icon { animation: port-spin 0.8s linear infinite; }
 @keyframes port-spin { to { transform: rotate(360deg); } }
@@ -151,18 +151,18 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .port-list { display: flex; flex-direction: column; gap: 4px; }
 .port-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 .empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
-.port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px 12px; background: var(--color-bg-secondary); box-shadow: inset 0 0 0 1px var(--color-border); border-radius: var(--radius-md); transition: background var(--transition-fast); }
+.port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px 12px; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: var(--radius-md); transition: background var(--transition-fast); }
 .port-row:hover { background: var(--color-bg-hover); }
 /* QuickDock 自身监听的端口（内置 HTTP 静态服务等）：描边高亮，避免混在系统进程里认不出 */
-.port-row.is-self { box-shadow: inset 0 0 0 1px var(--color-accent); background: rgba(74, 158, 255, 0.07); }
+.port-row.is-self { border: 1px solid var(--color-accent); background: rgba(74, 158, 255, 0.07); }
 .port-row.is-self:hover { background: rgba(74, 158, 255, 0.13); }
-.port-self-badge { margin-left: 6px; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: 4px; background: var(--color-accent); color: #fff; white-space: nowrap; }
+.port-self-badge { margin-left: 6px; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: var(--radius-xs); background: var(--color-accent); color: #fff; white-space: nowrap; }
 .port-num { font-size: 14px; font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; min-width: 64px; }
-.port-proto { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px; background: var(--color-bg-tertiary); color: var(--color-text-muted); min-width: 38px; text-align: center; }
+.port-proto { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-muted); min-width: 38px; text-align: center; }
 .port-proto.proto-udp { color: #e0a92b; }
 .port-pid { font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
 .port-name { flex: 1; min-width: 0; font-size: 13px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .port-path { flex: 1.6; min-width: 0; font-size: 12px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.port-kill { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: 7px; cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
+.port-kill { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
 .port-kill:hover { background: rgba(232, 76, 76, 0.1); border-color: rgba(232, 76, 76, 0.35); }
 </style>

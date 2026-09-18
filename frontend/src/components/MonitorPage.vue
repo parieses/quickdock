@@ -809,7 +809,7 @@ onUnmounted(() => {
 }
 .sum-item {
   flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;
-  background: var(--color-bg-secondary); box-shadow: inset 0 0 0 1px var(--color-border);
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
 }
 .sum-num { font-size: 18px; font-weight: 600; color: var(--color-text-primary); }
@@ -824,7 +824,7 @@ onUnmounted(() => {
 .empty-hint { font-size: 11px; color: var(--color-text-muted); margin-top: var(--space-2); }
 
 .mon-item {
-  background: var(--color-bg-secondary); box-shadow: inset 0 0 0 1px var(--color-border);
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .mon-item:hover { background: var(--color-bg-hover); }
@@ -840,7 +840,7 @@ onUnmounted(() => {
 .item-main { flex: 1; min-width: 0; }
 .item-line1 { display: flex; align-items: center; gap: 8px; }
 .item-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
-.status-badge { font-size: 10px; padding: 1px 7px; border-radius: 8px; }
+.status-badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); }
 .status-badge.up { background: rgba(70, 177, 123, 0.15); color: #46b17b; }
 .status-badge.down { background: rgba(232, 76, 76, 0.15); color: var(--color-danger); }
 .item-url { font-size: 12px; color: var(--color-text-secondary); margin-top: 2px; display: flex; align-items: center; gap: 4px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
@@ -852,8 +852,8 @@ onUnmounted(() => {
 
 .item-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .switch {
-  width: 34px; height: 19px; border-radius: 10px; border: none; cursor: pointer;
-  background: var(--color-bg-tertiary); box-shadow: inset 0 0 0 1px var(--color-border);
+  width: 34px; height: 19px; border-radius: var(--radius-md); border: none; cursor: pointer;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   position: relative; padding: 0; margin-right: 4px; transition: background var(--transition-fast);
 }
 .switch.on { background: var(--color-accent); box-shadow: none; }
@@ -883,7 +883,7 @@ onUnmounted(() => {
 .range-tabs { display: inline-flex; gap: 2px; padding: 2px; background: var(--color-bg-tertiary); border-radius: var(--radius-sm); }
 .range-tab {
   font-size: 11px; padding: 2px 9px; border: none; background: transparent;
-  color: var(--color-text-muted); border-radius: 4px; cursor: pointer; font-family: inherit;
+  color: var(--color-text-muted); border-radius: var(--radius-xs); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .range-tab:hover { color: var(--color-text-primary); }

@@ -110,7 +110,7 @@ onMounted(load)
   min-height: 30px;
   font-size: 12px;
   color: var(--color-text-secondary);
-  background: var(--color-bg-secondary);
+  background: var(--color-bg-primary);
   border-bottom: 1px solid var(--color-border);
 }
 
@@ -134,7 +134,7 @@ onMounted(load)
   align-items: center;
   gap: 5px;
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -164,7 +164,7 @@ onMounted(load)
   flex-shrink: 0;
   padding: 2px 10px;
   font-size: 12px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);

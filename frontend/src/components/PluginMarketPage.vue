@@ -489,24 +489,24 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .market-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
 .market-header-left { display: flex; align-items: center; gap: 8px; }
 .market-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
-.market-count { font-size: 11px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 8px; border-radius: 8px; }
+.market-count { font-size: 11px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 8px; border-radius: var(--radius-md); }
 .market-updated { font-size: 10px; color: var(--color-text-disabled); margin-left: 4px; }
 .refresh-btn {
   display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border-radius: 6px;
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-secondary); cursor: pointer;
 }
 .refresh-btn:hover { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); }
 .update-all-btn {
-  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: 6px;
+  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: var(--radius-sm);
   border: 1px solid rgba(233, 160, 19, 0.45); background: rgba(233, 160, 19, 0.15);
   color: #E9A013; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
 .update-all-btn:hover:not(:disabled) { background: rgba(233, 160, 19, 0.25); }
 .update-all-btn:disabled { opacity: .7; cursor: default; }
 .filter-chip {
-  display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px; border-radius: 16px;
+  display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px; border-radius: var(--radius-lg);
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-secondary); font-size: 12px; cursor: pointer; white-space: nowrap;
 }
@@ -514,13 +514,13 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .filter-chip.active { background: rgba(233, 160, 19, 0.15); border-color: rgba(233, 160, 19, 0.45); color: #E9A013; }
 .filter-chip:disabled { opacity: .45; cursor: default; }
 .chip-count {
-  font-size: 10px; padding: 0 6px; border-radius: 8px; background: rgba(233, 160, 19, 0.2);
+  font-size: 10px; padding: 0 6px; border-radius: var(--radius-md); background: rgba(233, 160, 19, 0.2);
   color: #E9A013; font-weight: 700;
 }
 .market-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .market-search {
   display: flex; align-items: center; gap: 7px; flex: 1; min-width: 180px;
-  height: 32px; padding: 0 10px; border-radius: 6px;
+  height: 32px; padding: 0 10px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-muted);
 }
@@ -532,7 +532,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .market-search-input::placeholder { color: var(--color-text-disabled); }
 .market-cat-select {
-  height: 32px; padding: 0 8px; border-radius: 6px; cursor: pointer;
+  height: 32px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-primary); font: inherit; font-size: 13px;
 }
@@ -551,28 +551,28 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 @media (min-width: 2160px) { .market-grid { grid-template-columns: repeat(6, 1fr); } }
 .market-card {
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  border-radius: var(--radius-md); padding: 14px; display: flex; flex-direction: column; gap: 10px;
 }
 .card-head { display: flex; align-items: flex-start; gap: 10px; }
-.card-icon { width: 36px; height: 36px; border-radius: 8px; background: var(--color-bg-tertiary); padding: 5px; }
+.card-icon { width: 36px; height: 36px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: 5px; }
 .card-icon-fallback { color: var(--color-text-muted); }
 .card-title-wrap { flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .card-title { font-size: 14px; font-weight: 600; color: var(--color-text-primary); }
 .card-id { font-size: 10px; color: var(--color-text-disabled); font-family: var(--font-mono, monospace); width: 100%; }
-.badge { font-size: 10px; padding: 1px 7px; border-radius: 8px; background: rgba(74, 158, 255, 0.12); color: var(--color-accent, #4a9eff); }
+.badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); background: rgba(74, 158, 255, 0.12); color: var(--color-accent, #4a9eff); }
 .badge-installed { background: rgba(29, 158, 117, 0.12); color: #1D9E75; }
 .badge-upgrade { background: rgba(233, 160, 19, 0.15); color: #E9A013; }
 .card-desc { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; min-height: 32px; }
 .card-meta { display: flex; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
 .card-perms { display: flex; gap: 4px; flex-wrap: wrap; }
-.perm-tag { font-size: 9px; padding: 1px 6px; border-radius: 6px; background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+.perm-tag { font-size: 9px; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .card-actions { margin-top: auto; }
 .dl-bar {
-  height: 3px; margin-bottom: 6px; border-radius: 2px;
+  height: 3px; margin-bottom: 6px; border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); overflow: hidden;
 }
 .dl-bar-fill {
-  height: 100%; border-radius: 2px;
+  height: 100%; border-radius: var(--radius-xs);
   background: var(--color-accent, #4a9eff);
   transition: width .2s ease;
 }
@@ -585,7 +585,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 @keyframes dl-spin { to { transform: rotate(360deg); } }
 .action-btn {
   display: inline-flex; align-items: center; gap: 5px; width: 100%; justify-content: center;
-  padding: 7px 10px; border-radius: 6px; border: 1px solid var(--color-border);
+  padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 12px; cursor: pointer; transition: all .15s;
 }
@@ -600,13 +600,13 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 /* 插件详情弹窗 */
 .plugin-detail { position: relative; max-width: 560px; width: 92%; max-height: 82vh; overflow-y: auto; }
 .detail-close {
-  position: absolute; top: 10px; right: 12px; width: 26px; height: 26px; border-radius: 6px;
+  position: absolute; top: 10px; right: 12px; width: 26px; height: 26px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-muted); cursor: pointer; font-size: 13px; line-height: 1;
 }
 .detail-close:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
 .detail-head { display: flex; align-items: center; gap: 12px; padding-right: 30px; }
-.detail-icon { width: 44px; height: 44px; border-radius: 9px; background: var(--color-bg-tertiary); padding: 6px; }
+.detail-icon { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: 6px; }
 .detail-icon-fallback { color: var(--color-text-muted); }
 .detail-titles { min-width: 0; }
 .detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
@@ -619,7 +619,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-desc, .detail-meta { font-size: 12px; color: var(--color-text-secondary); line-height: 1.55; margin: 0; white-space: pre-wrap; }
 .detail-muted { color: var(--color-text-disabled); }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 5px; }
-.detail-tag { font-size: 10px; padding: 2px 8px; border-radius: 6px; background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
+.detail-tag { font-size: 10px; padding: 2px 8px; border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-secondary); }
 .detail-perms { display: flex; flex-direction: column; gap: 8px; }
 .detail-perm { display: flex; flex-direction: column; gap: 4px; }
 .detail-perm-label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
@@ -627,11 +627,11 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-tag-path { font-family: var(--font-mono, monospace); word-break: break-all; }
 .detail-changelog {
   font-size: 11px; line-height: 1.5; color: var(--color-text-secondary);
-  background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   padding: 8px 10px; max-height: 160px; overflow: auto; white-space: pre-wrap; word-break: break-all; margin: 0;
 }
 .detail-shots { display: flex; flex-wrap: wrap; gap: 8px; }
-.detail-shot { width: 160px; border-radius: 6px; border: 1px solid var(--color-border); }
+.detail-shot { width: 160px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
 .detail-install { width: auto; padding: 7px 16px; }
 </style>
 

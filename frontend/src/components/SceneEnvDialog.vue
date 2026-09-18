@@ -172,7 +172,7 @@ function labelOf(id: string): string {
 }
 .panel {
   background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: 10px; width: 420px; max-width: 92vw;
+  border-radius: var(--radius-md); width: 420px; max-width: 92vw;
   padding: 20px 22px;
   box-shadow: 0 12px 48px var(--color-bg-overlay);
 }
@@ -180,15 +180,15 @@ function labelOf(id: string): string {
 .hint { margin: 0 0 14px; font-size: 12px; line-height: 1.6; color: var(--color-text-muted); }
 
 .list { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
-.row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 6px; }
+.row { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: var(--radius-sm); }
 .row:hover { background: var(--color-bg-hover); }
 .row-main { display: flex; align-items: center; gap: 8px; flex: 1; cursor: pointer; min-width: 0; }
 .row-name { font-size: 13px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tag { font-size: 10px; padding: 1px 5px; border-radius: 4px; background: var(--color-bg-active); color: var(--color-text-muted); flex-shrink: 0; }
+.tag { font-size: 10px; padding: 1px 5px; border-radius: var(--radius-xs); background: var(--color-bg-active); color: var(--color-text-muted); flex-shrink: 0; }
 .version-select {
   flex-shrink: 0; max-width: 130px; padding: 4px 6px; font-size: 12px; font-family: inherit;
   background: var(--color-bg-secondary); color: var(--color-text-secondary);
-  border: 1px solid var(--color-border); border-radius: 5px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
 }
 .version-select:disabled { opacity: 0.45; }
 
@@ -197,7 +197,7 @@ function labelOf(id: string): string {
 .results { margin-top: 12px; display: flex; flex-direction: column; gap: 4px; }
 .result { display: flex; align-items: center; justify-content: space-between; gap: 10px; font-size: 12px; }
 .result-name { color: var(--color-text-secondary); }
-.badge { padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+.badge { padding: 1px 6px; border-radius: var(--radius-xs); font-size: 11px; }
 .badge.ok { color: var(--color-success); }
 .badge.bad { color: var(--color-danger); }
 .badge.warn { color: var(--color-warning); }
@@ -206,7 +206,7 @@ function labelOf(id: string): string {
 
 .footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 .btn {
-  padding: 7px 18px; border-radius: 6px; font-size: 13px; font-weight: 500;
+  padding: 7px 18px; border-radius: var(--radius-sm); font-size: 13px; font-weight: 500;
   cursor: pointer; border: none; font-family: inherit;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }

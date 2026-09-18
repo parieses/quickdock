@@ -491,7 +491,7 @@ onMounted(refresh)
 
 .sched-item {
   display: flex; align-items: center; gap: var(--space-3); padding: 12px 14px;
-  background: var(--color-bg-secondary); box-shadow: inset 0 0 0 1px var(--color-border);
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .sched-item:hover { background: var(--color-bg-hover); }
@@ -511,7 +511,7 @@ onMounted(refresh)
 .item-line1 { display: flex; align-items: center; gap: 8px; }
 .item-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); }
 .item-badge {
-  font-size: 10px; padding: 1px 7px; border-radius: 8px;
+  font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
 .item-target {
@@ -526,8 +526,8 @@ onMounted(refresh)
 
 .item-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .switch {
-  width: 34px; height: 19px; border-radius: 10px; border: none; cursor: pointer;
-  background: var(--color-bg-tertiary); box-shadow: inset 0 0 0 1px var(--color-border);
+  width: 34px; height: 19px; border-radius: var(--radius-md); border: none; cursor: pointer;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   position: relative; padding: 0; margin-right: 4px; transition: background var(--transition-fast);
 }
 .switch.on { background: var(--color-accent); box-shadow: none; }

@@ -745,7 +745,7 @@ onMounted(() => { load(); loadCert() })
 .sites-panel { display: flex; flex-direction: column; gap: 16px; }
 .detail-head { display: flex; align-items: center; gap: 12px; }
 .detail-avatar {
-  width: 40px; height: 40px; border-radius: 10px; flex: 0 0 auto;
+  width: 40px; height: 40px; border-radius: var(--radius-md); flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
   font-size: 18px; color: #fff;
 }
@@ -755,11 +755,11 @@ onMounted(() => { load(); loadCert() })
 .detail-id { font-size: 11px; color: var(--color-text-disabled); }
 .detail-badges { display: flex; gap: 6px; }
 .badge {
-  font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  font-size: 10px; padding: 1px 6px; border-radius: var(--radius-xs);
   background: var(--color-bg-active); color: var(--color-text-muted);
 }
 .detail-block {
-  border: 1px solid var(--color-border); border-radius: 10px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
   padding: 14px 16px; background: var(--color-surface);
   display: flex; flex-direction: column; gap: 10px;
 }
@@ -775,7 +775,7 @@ onMounted(() => { load(); loadCert() })
 .status-value.off { color: var(--color-text-disabled); }
 .port-input { width: 90px; padding: 3px 8px; font-size: 12px; }
 .env-input {
-  padding: 7px 10px; border: 1px solid var(--color-border); border-radius: 6px;
+  padding: 7px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 12px; font-family: inherit; outline: none; min-width: 0;
 }
@@ -792,7 +792,7 @@ onMounted(() => { load(); loadCert() })
 .site-name { font-size: 12px; color: var(--color-text-muted); }
 /* 文档根徽标：一眼看出这个站点不是从项目根对外服务的（Laravel→public 之类） */
 .site-doc-root {
-  flex: 0 0 auto; font-size: 10px; padding: 1px 5px; border-radius: 4px;
+  flex: 0 0 auto; font-size: 10px; padding: 1px 5px; border-radius: var(--radius-xs);
   background: var(--color-bg-active); color: var(--color-text-muted);
   font-family: ui-monospace, Consolas, monospace;
 }
@@ -803,7 +803,7 @@ onMounted(() => { load(); loadCert() })
 .site-off { font-size: 11px; color: var(--color-danger); }
 .site-ops { display: flex; gap: 6px; flex: 0 0 auto; }
 .op-btn {
-  padding: 4px 10px; border: 1px solid var(--color-border); border-radius: 5px;
+  padding: 4px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   font-size: 11px; font-family: inherit; cursor: pointer;
 }
@@ -831,7 +831,7 @@ onMounted(() => { load(); loadCert() })
   width: 720px; max-width: 92vw; max-height: 84vh; overflow: hidden;
   display: flex; flex-direction: column; gap: 10px; padding: 16px 18px;
   background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: 12px; box-shadow: 0 12px 40px var(--color-bg-overlay);
+  border-radius: var(--radius-lg); box-shadow: 0 12px 40px var(--color-bg-overlay);
 }
 .gen-head { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; }
 .gen-tabs { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 0 0 auto; }
@@ -849,7 +849,7 @@ onMounted(() => { load(); loadCert() })
 .gen-tpl-desc { flex: 1 1 100%; font-size: 11px; color: var(--color-text-disabled); }
 .gen-code {
   min-height: 200px; width: 100%; box-sizing: border-box; resize: vertical; margin: 0;
-  padding: 12px; border-radius: 8px; border: 1px solid var(--color-border);
+  padding: 12px; border-radius: var(--radius-md); border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.5;
   white-space: pre; outline: none;
@@ -866,7 +866,7 @@ onMounted(() => { load(); loadCert() })
 .gen-mod {
   display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto;
   column-gap: 8px; align-items: center;
-  padding: 6px 8px; border: 1px solid var(--color-border); border-radius: 6px;
+  padding: 6px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); cursor: pointer;
 }
 .gen-mod.disabled { opacity: 0.45; cursor: not-allowed; }

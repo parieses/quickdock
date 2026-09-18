@@ -338,7 +338,7 @@ async function setDefault(tool: OpenTool) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-active);
   color: var(--color-text-muted);
 }
@@ -356,7 +356,7 @@ async function setDefault(tool: OpenTool) {
   padding: 12px 14px;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   transition: border-color 0.12s;
 }
 .tool-item:hover {
@@ -384,7 +384,7 @@ async function setDefault(tool: OpenTool) {
 .tool-type-badge {
   font-size: 11px;
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-active);
   color: var(--color-text-secondary);
   flex-shrink: 0;
@@ -392,7 +392,7 @@ async function setDefault(tool: OpenTool) {
 .tool-default-badge {
   font-size: 11px;
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   background: var(--color-accent);
   color: var(--color-accent-text);
   flex-shrink: 0;
@@ -434,7 +434,7 @@ async function setDefault(tool: OpenTool) {
   border: none;
   background: transparent;
   color: var(--color-text-muted);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background-color 0.12s, color 0.12s;
 }
@@ -460,7 +460,7 @@ async function setDefault(tool: OpenTool) {
 .tool-modal {
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   width: 520px;
   max-width: 90vw;
   max-height: 85vh;
@@ -493,7 +493,7 @@ async function setDefault(tool: OpenTool) {
   display: flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 .tool-modal-close:hover {
   background: var(--color-bg-active);
@@ -528,7 +528,7 @@ async function setDefault(tool: OpenTool) {
 .field-input {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   padding: 9px 12px;
   color: var(--color-text-primary);
   font-size: 13px;
@@ -567,7 +567,7 @@ async function setDefault(tool: OpenTool) {
 .btn {
   padding: 6px 14px;
   border: none;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   font-size: 12px;
   cursor: pointer;
   font-family: inherit;

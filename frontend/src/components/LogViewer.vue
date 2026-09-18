@@ -217,7 +217,7 @@ onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
 }
 .log-side-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px; font-size: 13px; font-weight: 600; color: var(--color-text-primary); border-bottom: 1px solid var(--color-border); }
 .log-file-list { flex: 1; overflow-y: auto; padding: 6px; }
-.log-file { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 7px 9px; border-radius: 7px; border: none; cursor: pointer; background: transparent; color: var(--color-text-primary); }
+.log-file { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 7px 9px; border-radius: var(--radius-sm); border: none; cursor: pointer; background: transparent; color: var(--color-text-primary); }
 .log-file:hover { background: var(--color-hover); }
 .log-file.active { background: var(--color-accent); color: var(--color-accent-text); }
 .log-file-name { font-size: 12px; font-family: var(--font-family); }
@@ -227,15 +227,15 @@ onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
 .log-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .log-toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); flex-shrink: 0; }
 .log-levels { display: flex; gap: 4px; }
-.lv { width: 24px; height: 24px; border-radius: 5px; border: 1px solid var(--color-border); cursor: pointer; font-size: 12px; font-weight: 700; background: var(--color-bg-secondary); color: var(--color-text-primary); }
+.lv { width: 24px; height: 24px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); cursor: pointer; font-size: 12px; font-weight: 700; background: var(--color-bg-secondary); color: var(--color-text-primary); }
 .lv.off { opacity: 0.3; }
 .lv.I { color: #3b9eff; }
 .lv.W { color: #e0a92b; }
 .lv.E { color: #ff5c5c; }
-.log-search { display: flex; align-items: center; gap: 5px; flex: 1; max-width: 280px; padding: 4px 8px; border-radius: 7px; background: var(--color-bg-secondary); color: var(--color-text-disabled); }
+.log-search { display: flex; align-items: center; gap: 5px; flex: 1; max-width: 280px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-disabled); }
 .log-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: 13px; }
 .log-follow { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-text-primary); cursor: pointer; }
-.log-btn { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: 7px; cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
+.log-btn { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
 .log-btn:disabled { opacity: 0.5; cursor: default; }
 
 .log-body { flex: 1; overflow-y: auto; padding: 8px 0; font-family: var(--font-family); font-size: 12px; line-height: 1.55; }
@@ -244,12 +244,12 @@ onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
 .line-copy {
   position: absolute; top: 2px; right: 6px; width: 20px; height: 20px;
   display: flex; align-items: center; justify-content: center; cursor: pointer;
-  border: 1px solid var(--color-border); border-radius: 5px; background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-secondary);
   color: var(--color-text-disabled); opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
 }
 .log-line-row:hover .line-copy { opacity: 1; }
 .line-copy:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
 .log-line.lv-W { color: #e0a92b; }
 .log-line.lv-E { color: #ff7b7b; }
-.log-line :deep(mark) { background: #ffd54a; color: #1a1a1a; border-radius: 2px; padding: 0 1px; }
+.log-line :deep(mark) { background: #ffd54a; color: #1a1a1a; border-radius: var(--radius-xs); padding: 0 1px; }
 </style>

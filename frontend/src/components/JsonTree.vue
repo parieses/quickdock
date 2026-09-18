@@ -147,7 +147,7 @@ function copyNodeJson() {
 .jt-copy {
   background: none; border: none; cursor: pointer; padding: 2px; margin-left: 4px;
   display: flex; align-items: center; justify-content: center;
-  color: var(--color-text-disabled); border-radius: 3px; flex-shrink: 0;
+  color: var(--color-text-disabled); border-radius: var(--radius-xs); flex-shrink: 0;
   opacity: 0; transition: color var(--transition-fast), opacity var(--transition-fast), background var(--transition-fast);
 }
 .jt-row:hover .jt-copy { opacity: 1; }

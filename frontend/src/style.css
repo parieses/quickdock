@@ -17,10 +17,10 @@
   --space-10: 40px;
   --space-11: 48px;
 
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --radius-full: 9999px;
 
   --sidebar-width: 210px;
@@ -39,27 +39,27 @@
 /* ==================== CSS 变量 — 深色主题 ==================== */
 :root,
 [data-theme="dark"] {
-  --color-bg-primary: #17181b;
-  --color-bg-secondary: #1e1f23;
-  --color-bg-tertiary: #26282d;
-  --color-bg-hover: #2f3137;
-  --color-bg-active: #3a3d44;
+  --color-bg-primary: #16181d;
+  --color-bg-secondary: #1d1f24;
+  --color-bg-tertiary: #25282e;
+  --color-bg-hover: #2e3138;
+  --color-bg-active: #3a3e46;
   --color-bg-overlay: rgba(0, 0, 0, 0.55);
-  --color-surface: #26282d;
-  --color-surface-elevated: #2f3137;
-  --color-text-primary: #e9eaec;
-  --color-text-secondary: #a9adb5;
-  --color-text-muted: #7c818b;
-  --color-text-disabled: #5c606a;
-  --color-border: #2b2d33;
-  --color-border-light: #3a3d44;
+  --color-surface: #25282e;
+  --color-surface-elevated: #2e3138;
+  --color-text-primary: #e8eaed;
+  --color-text-secondary: #a7adb6;
+  --color-text-muted: #7b818b;
+  --color-text-disabled: #565c66;
+  --color-border: #2a2d34;
+  --color-border-light: #3a3e46;
   --color-border-focus: #4a9eff;
   --color-accent: #4a9eff;
   --color-accent-hover: #3a8eef;
   --color-accent-text: #fff;
-  --color-danger: #e84c4c;
-  --color-success: #4caf50;
-  --color-warning: #ff9800;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
   --color-scrollbar-thumb: #3a3a3a;
   --color-scrollbar-hover: #4a4a4a;
   --color-scrollbar-track: transparent;
@@ -86,27 +86,27 @@
 
 /* ==================== CSS 变量 — 浅色主题 ==================== */
 [data-theme="light"] {
-  --color-bg-primary: #f4f3f0;
-  --color-bg-secondary: #fbfaf7;
-  --color-bg-tertiary: #ebe9e5;
-  --color-bg-hover: #e7e4df;
-  --color-bg-active: #ddd9d3;
-  --color-bg-overlay: rgba(40, 38, 33, 0.12);
-  --color-surface: #faf9f6;
-  --color-surface-elevated: #f0eeea;
-  --color-text-primary: #1f2329;
-  --color-text-secondary: #51565e;
-  --color-text-muted: #888d96;
-  --color-text-disabled: #aab0b8;
-  --color-border: #e3e6ec;
-  --color-border-light: #d0d4dc;
+  --color-bg-primary: #eceae5;
+  --color-bg-secondary: #f3f1ec;
+  --color-bg-tertiary: #e4e1db;
+  --color-bg-hover: #dedbd4;
+  --color-bg-active: #d3cfc8;
+  --color-bg-overlay: rgba(40, 38, 33, 0.14);
+  --color-surface: #f3f1ec;
+  --color-surface-elevated: #eae7e0;
+  --color-text-primary: #1f2328;
+  --color-text-secondary: #4b5159;
+  --color-text-muted: #6b7178;
+  --color-text-disabled: #9aa0a8;
+  --color-border: #d8dbe1;
+  --color-border-light: #c6cad2;
   --color-border-focus: #4a9eff;
   --color-accent: #4a9eff;
   --color-accent-hover: #3a8eef;
   --color-accent-text: #fff;
-  --color-danger: #e53935;
-  --color-success: #43a047;
-  --color-warning: #fb8c00;
+  --color-danger: #ef4444;
+  --color-success: #22c55e;
+  --color-warning: #f59e0b;
   --color-scrollbar-thumb: #d0d0cc;
   --color-scrollbar-hover: #b8b8b4;
   --color-scrollbar-track: transparent;
@@ -172,7 +172,7 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--color-scrollbar-thumb);
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   transition: background var(--transition-base);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-scrollbar-hover); }
@@ -234,7 +234,7 @@ select:focus-visible {
   background: var(--color-accent);
   color: #fff;
   border: none;
-  border-radius: 5px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   font-size: 10px;
   line-height: 1;

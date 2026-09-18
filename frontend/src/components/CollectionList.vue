@@ -174,7 +174,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 <style scoped>
 .collection-list {
   width: 300px; min-width: 300px; height: 100%;
-  background: var(--color-bg-secondary); border-right: 1px solid var(--color-border);
+  background: var(--color-bg-primary); border-right: 1px solid var(--color-border);
   display: flex; flex-direction: column; overflow: hidden;
 }
 .collection-header {
@@ -188,7 +188,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 .icon-btn {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
   display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border-radius: 6px; transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
+  width: 28px; height: 28px; border-radius: var(--radius-sm); transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
 }
 .icon-btn:hover { color: var(--color-accent); background: var(--color-bg-hover); }
 .collection-body { flex: 1; overflow-y: auto; padding: 6px 8px; }
@@ -202,12 +202,12 @@ function onDropCol(e: DragEvent, targetId: string) {
 .collection-body li:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .collection-body li.active {
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
-  box-shadow: inset 0 0 0 1px var(--color-accent-border);
+  border: 1px solid var(--color-accent-border);
 }
 .col-icon {
   display: flex; align-items: center; justify-content: center;
   width: 36px; height: 36px; flex-shrink: 0;
-  background: var(--color-bg-tertiary); border-radius: 8px; color: var(--color-text-muted);
+  background: var(--color-bg-tertiary); border-radius: var(--radius-md); color: var(--color-text-muted);
 }
 .collection-body li.active .col-icon {
   background: var(--color-accent-bg); color: var(--color-accent);
@@ -225,7 +225,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 .collection-body li:hover .col-actions { opacity: 1; }
 .action-btn {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  width: 26px; height: 26px; border-radius: 5px; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
+  width: 26px; height: 26px; border-radius: var(--radius-sm); transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
   display: flex; align-items: center; justify-content: center;
 }
 .action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }

@@ -346,6 +346,7 @@ body {
 .app-content {
   flex: 1; min-width: 0;
   display: flex; flex-direction: column; overflow: hidden;
+  background: var(--color-bg-primary);
 }
 .app-content-body {
   flex: 1; display: flex; overflow: hidden;
@@ -354,7 +355,7 @@ body {
   display: flex; align-items: center; gap: 8px;
   margin: 8px 12px 0;
   padding: 6px 10px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: rgba(244, 67, 54, 0.12);
   border: 1px solid rgba(244, 67, 54, 0.4);
   color: #ef5350;

@@ -596,7 +596,7 @@ watch(() => props.visible, async (v) => {
   gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
 }
 .dsh-status-left {
@@ -655,7 +655,7 @@ watch(() => props.visible, async (v) => {
   display: inline-block;
   margin-left: 6px;
   padding: 1px 8px;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: 11px;
   background: rgba(255, 176, 32, 0.16);
   color: #ffb020;
@@ -701,7 +701,7 @@ watch(() => props.visible, async (v) => {
   min-width: 0;
   padding: 7px 10px;
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-size: 12px;
@@ -737,7 +737,7 @@ watch(() => props.visible, async (v) => {
   justify-content: space-between;
   gap: 10px;
   padding: 5px 8px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   font-size: 12px;
 }
@@ -757,7 +757,7 @@ watch(() => props.visible, async (v) => {
 }
 .dsh-progress-bar {
   height: 6px;
-  border-radius: 3px;
+  border-radius: var(--radius-xs);
   background: var(--color-bg-active);
   overflow: hidden;
 }
@@ -786,7 +786,7 @@ watch(() => props.visible, async (v) => {
 .dsh-log-copy {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   color: var(--color-text-primary);
   font-size: 11px;
   padding: 2px 10px;
@@ -800,7 +800,7 @@ watch(() => props.visible, async (v) => {
   overflow-y: auto;
   padding: 10px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: #0d0f12;
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 11px;

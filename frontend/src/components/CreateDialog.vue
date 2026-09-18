@@ -147,7 +147,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .dialog-panel {
   background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: 10px; width: 380px; max-width: 92vw;
+  border-radius: var(--radius-md); width: 380px; max-width: 92vw;
   box-shadow: 0 12px 48px var(--color-bg-overlay);
   overflow: hidden; max-height: 86vh;
 }
@@ -163,7 +163,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .dialog-close {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  display: flex; padding: 3px; border-radius: 4px; transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
+  display: flex; padding: 3px; border-radius: var(--radius-xs); transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s;
 }
 .dialog-close:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 .dialog-body {
@@ -173,7 +173,7 @@ function onKeydown(e: KeyboardEvent) {
 .field { display: flex; flex-direction: column; gap: 6px; }
 .field-label { font-size: 12px; color: var(--color-text-muted); font-weight: 500; }
 .field-input {
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   padding: 9px 12px; color: var(--color-text-primary); font-size: 13px;
   outline: none; transition: border-color 0.15s;
   font-family: inherit;
@@ -193,7 +193,7 @@ function onKeydown(e: KeyboardEvent) {
   padding: 14px 20px; border-top: 1px solid var(--color-border); background: var(--color-bg-tertiary);
 }
 .btn {
-  padding: 7px 18px; border-radius: 6px; font-size: 13px;
+  padding: 7px 18px; border-radius: var(--radius-sm); font-size: 13px;
   cursor: pointer; border: none; font-family: inherit;
   transition: background-color 0.15s, color 0.15s, border-color 0.15s, opacity 0.15s; font-weight: 500;
 }

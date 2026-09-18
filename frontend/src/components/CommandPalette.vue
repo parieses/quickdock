@@ -1275,7 +1275,7 @@ onUnmounted(() => {
 .inline-input { font-size: 14px; }
 .inline-cancel {
   display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; border: none; border-radius: 5px;
+  width: 24px; height: 24px; border: none; border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   cursor: pointer; flex-shrink: 0;
   transition: background 0.12s, color 0.12s;
@@ -1362,7 +1362,7 @@ onUnmounted(() => {
 }
 
 .result-icon {
-  width: 30px; height: 30px; border-radius: 7px;
+  width: 30px; height: 30px; border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   display: flex; align-items: center; justify-content: center;
   color: var(--color-text-secondary); flex-shrink: 0;
@@ -1371,7 +1371,7 @@ onUnmounted(() => {
 .result-item:hover .result-icon { color: var(--color-text-primary); }
 .result-item.active .result-icon { color: var(--color-accent); background: var(--color-accent-bg); }
 
-.result-app-icon { width: 20px; height: 20px; object-fit: contain; border-radius: 4px; }
+.result-app-icon { width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs); }
 
 .result-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 
@@ -1384,7 +1384,7 @@ onUnmounted(() => {
 .result-new-badge {
   flex-shrink: 0;
   font-size: 9px; line-height: 14px; font-weight: 600;
-  padding: 0 5px; border-radius: 7px;
+  padding: 0 5px; border-radius: var(--radius-sm);
   background: var(--color-accent, #4a9eff); color: #fff;
   letter-spacing: 0.5px; align-self: center;
 }
@@ -1424,7 +1424,7 @@ onUnmounted(() => {
 .footer-hint { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--color-text-muted); }
 .footer-hint kbd {
   display: flex; align-items: center; justify-content: center;
-  min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px;
+  min-width: 18px; height: 18px; padding: 0 4px; border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   font-size: 10px; font-family: var(--font-mono, monospace); font-weight: 500;
 }
@@ -1445,7 +1445,7 @@ onUnmounted(() => {
 .palette-close {
   display: flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; margin-left: 2px; flex-shrink: 0;
-  border: none; background: transparent; border-radius: 5px;
+  border: none; background: transparent; border-radius: var(--radius-sm);
   color: var(--color-text-muted); cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
@@ -1463,7 +1463,7 @@ onUnmounted(() => {
 
 .palette-results::-webkit-scrollbar { width: 5px; }
 .palette-results::-webkit-scrollbar-track { background: transparent; }
-.palette-results::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 3px; }
+.palette-results::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: var(--radius-xs); }
 .palette-results::-webkit-scrollbar-thumb:hover { background: var(--color-scrollbar-hover); }
 
 /* ---- Ctrl+K 二级动作菜单 ---- */
@@ -1524,7 +1524,7 @@ onUnmounted(() => {
 }
 .action-menu-list::-webkit-scrollbar { width: 5px; }
 .action-menu-list::-webkit-scrollbar-track { background: transparent; }
-.action-menu-list::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: 3px; }
+.action-menu-list::-webkit-scrollbar-thumb { background: var(--color-scrollbar-thumb); border-radius: var(--radius-xs); }
 
 .action-menu-item {
   display: flex;
@@ -1555,7 +1555,7 @@ onUnmounted(() => {
   font-size: 10px; line-height: 14px; font-weight: 600;
   color: var(--color-text-muted);
   border: 1px solid var(--color-border);
-  border-radius: 4px; padding: 0 3px; opacity: 0.8;
+  border-radius: var(--radius-xs); padding: 0 3px; opacity: 0.8;
 }
 .action-menu-label { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .action-menu-enter { flex-shrink: 0; opacity: 0.5; }
@@ -1571,7 +1571,7 @@ onUnmounted(() => {
 
 .plugin-back-btn {
   display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 6px;
-  border: none; border-radius: 6px; background: transparent; color: var(--color-text-muted);
+  border: none; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted);
   font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer;
   -webkit-app-region: no-drag;
   transition: background 0.1s, color 0.1s;
@@ -1590,7 +1590,7 @@ onUnmounted(() => {
 
 .plugin-detach-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; border: none; border-radius: 6px;
+  width: 28px; height: 28px; border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--color-text-disabled); cursor: pointer;
   -webkit-app-region: no-drag;
   transition: background 0.12s, color 0.12s;

@@ -10,7 +10,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 - Dark chrome aesthetic with layered surface hierarchy (inspired by Raycast, Cursor)
 - Blue accent (#4a9eff) for interactive elements — restrained, never decorative
 - System font stack with monospace for technical labels
-- Shadow-as-border technique (inspired by Vercel) — `box-shadow` replaces CSS borders for smoother rendering
+- Hybrid borders: primary borders use real `1px solid var(--color-border)`; `--shadow-border` token reserved for subtle dividers where layout-shift-free rendering matters
 - 8px base spacing with 4px increments for consistency
 - Reduced motion preferred — 150ms transitions, no unnecessary animation
 - Focus visible ring on all interactive elements for accessibility
@@ -21,26 +21,26 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 
 | Token | Value | Role |
 |-------|-------|------|
-| `--color-bg-primary` | `#1a1a1a` | Main canvas, page background |
-| `--color-bg-secondary` | `#1e1e1e` | Sidebar, secondary surfaces |
-| `--color-bg-tertiary` | `#242424` | Card backgrounds, hover states |
-| `--color-bg-hover` | `#282828` | Interactive hover |
-| `--color-bg-active` | `#323232` | Active/selected state |
-| `--color-surface` | `#262626` | Elevated surface (dropdowns, menus) |
-| `--color-surface-elevated` | `#2e2e2e` | Modal/dialog surface |
-| `--color-text-primary` | `#e4e4e4` | Primary body text |
-| `--color-text-secondary` | `#b0b0b0` | Secondary labels, descriptions |
-| `--color-text-muted` | `#888888` | Placeholder, disabled text |
-| `--color-text-disabled` | `#555555` | Disabled controls |
-| `--color-border` | `#2e2e2e` | Subtle borders, dividers |
-| `--color-border-light` | `#3a3a3a` | Hover borders |
+| `--color-bg-primary` | `#16181d` | Main canvas, page background |
+| `--color-bg-secondary` | `#1d1f24` | Sidebar, secondary surfaces |
+| `--color-bg-tertiary` | `#25282e` | Card backgrounds, hover states |
+| `--color-bg-hover` | `#2e3138` | Interactive hover |
+| `--color-bg-active` | `#3a3e46` | Active/selected state |
+| `--color-surface` | `#25282e` | Elevated surface (dropdowns, menus) |
+| `--color-surface-elevated` | `#2e3138` | Modal/dialog surface |
+| `--color-text-primary` | `#e8eaed` | Primary body text |
+| `--color-text-secondary` | `#a7adb6` | Secondary labels, descriptions |
+| `--color-text-muted` | `#7b818b` | Placeholder, disabled text |
+| `--color-text-disabled` | `#565c66` | Disabled controls |
+| `--color-border` | `#2a2d34` | Subtle borders, dividers |
+| `--color-border-light` | `#3a3e46` | Hover borders |
 | `--color-border-focus` | `#4a9eff` | Focus ring |
 | `--color-accent` | `#4a9eff` | Primary accent, links, active |
 | `--color-accent-hover` | `#3a8eef` | Accent hover |
 | `--color-accent-text` | `#ffffff` | Text on accent |
-| `--color-danger` | `#e84c4c` | Destructive actions |
-| `--color-success` | `#4caf50` | Success states |
-| `--color-warning` | `#ff9800` | Warning states |
+| `--color-danger` | `#ef4444` | Destructive actions (modern red) |
+| `--color-success` | `#22c55e` | Success states (modern emerald) |
+| `--color-warning` | `#f59e0b` | Warning states (modern amber) |
 | `--color-accent-bg` | `rgba(74, 158, 255, 0.1)` | Subtle accent background |
 | `--color-accent-border` | `rgba(74, 158, 255, 0.2)` | Accent border |
 
@@ -48,20 +48,23 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 
 | Token | Value | Role |
 |-------|-------|------|
-| `--color-bg-primary` | `#f7f7f5` | Main canvas (warm off-white) |
-| `--color-bg-secondary` | `#ffffff` | Sidebar, secondary surfaces |
-| `--color-bg-tertiary` | `#efefeb` | Card backgrounds, hover |
-| `--color-bg-hover` | `#e8e8e4` | Interactive hover |
-| `--color-bg-active` | `#e0e0dc` | Active/selected |
-| `--color-surface` | `#ffffff` | Elevated surface |
-| `--color-surface-elevated` | `#f5f5f2` | Modal/dialog surface |
-| `--color-text-primary` | `#1a1a18` | Primary body text |
-| `--color-text-secondary` | `#4a4a48` | Secondary labels |
-| `--color-text-muted` | `#888886` | Placeholder |
-| `--color-text-disabled` | `#b0b0ae` | Disabled |
-| `--color-border` | `#e4e4e0` | Subtle borders |
-| `--color-border-light` | `#d0d0cc` | Hover borders |
+| `--color-bg-primary` | `#eceae5` | Main canvas (warm off-white, soft) |
+| `--color-bg-secondary` | `#f3f1ec` | Sidebar, secondary surfaces |
+| `--color-bg-tertiary` | `#e4e1db` | Card backgrounds, hover |
+| `--color-bg-hover` | `#dedbd4` | Interactive hover |
+| `--color-bg-active` | `#d3cfc8` | Active/selected |
+| `--color-surface` | `#f3f1ec` | Elevated surface |
+| `--color-surface-elevated` | `#eae7e0` | Modal/dialog surface |
+| `--color-text-primary` | `#1f2328` | Primary body text (near-black, high contrast) |
+| `--color-text-secondary` | `#4b5159` | Secondary labels |
+| `--color-text-muted` | `#6b7178` | Placeholder |
+| `--color-text-disabled` | `#9aa0a8` | Disabled |
+| `--color-border` | `#d8dbe1` | Subtle borders |
+| `--color-border-light` | `#c6cad2` | Hover borders |
 | `--color-border-focus` | `#4a9eff` | Focus ring |
+| `--color-danger` | `#ef4444` | Destructive (shared with dark) |
+| `--color-success` | `#22c55e` | Success (shared with dark) |
+| `--color-warning` | `#f59e0b` | Warning (shared with dark) |
 
 ## 3. Typography Rules
 
@@ -159,7 +162,7 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 | Level | Shadow | Use |
 |-------|--------|-----|
 | 0 | None | Background surfaces |
-| 1 | `0 1px 0 rgba(0,0,0,0.06)` — shadow border | Sidebar, panels |
+| 1 | `0 1px 0 rgba(0,0,0,0.08)` (dark) / `0.1` (light) — subtle shadow border (`--shadow-border`) | Sidebar, panels |
 | 2 | `0 1px 2px rgba(0,0,0,0.08)` | Hover items, tags |
 | 3 | `0 4px 12px rgba(0,0,0,0.15)` | Dropdowns, popovers |
 | 4 | `0 8px 24px rgba(0,0,0,0.2)` | Modals, dialogs |
@@ -175,9 +178,9 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 - Level 5: Modals, tooltips (`--color-surface-elevated`)
 
 ### Border Technique
-- Use `box-shadow` for borders instead of `border` property (prevents layout shift)
-- Pattern: `0 1px 0 rgba(0,0,0,0.06)` for a single border on one side
-- Pattern: `inset 0 0 0 1px rgba(0,0,0,0.06)` for internal borders
+- Primary borders use real `border: 1px solid var(--color-border)` — visible and consistent on both themes
+- `--shadow-border` / `--shadow-border-right` tokens (subtle 1px drop-shadow) are reserved for dividers where avoiding layout shift matters; light-theme alpha bumped to ~0.1 so they stay visible
+- Avoid `inset 0 0 0 1px` faux-borders — replaced with real borders during the 2026-09 style refactor
 
 ### Focus Ring
 - All interactive elements must have visible focus styles
@@ -196,12 +199,12 @@ The dark theme is not flat black but a rich layered gray-scale with subtle blue 
 - Use opacity for hover visibility on action buttons
 
 ### Don't
-- Don't use pure black (`#000`) for dark backgrounds — use `#1a1a1a` instead
-- Don't use heavy borders — shadow-border is always lighter
+- Don't use pure black (`#000`) for dark backgrounds — use `#16181d` instead
+- Don't use heavy borders — 1px `var(--color-border)` is the standard weight
 - Don't animate for animation's sake — only state transitions
 - Don't use more than 3 surface levels in a single view
 - Don't use border-top/bottom for section separation when shadow-border works
-- Don't mix border-radius styles (6px standard, 4px small, 8px large)
+- Don't mix border-radius styles — use the 4-tier scale: `--radius-xs:4 / sm:6 / md:10 / lg:14`
 
 ## 8. Interaction & Motion
 
