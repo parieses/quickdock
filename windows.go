@@ -24,13 +24,15 @@ var clipboardWinLock sync.Mutex
 // memoryOptimizedArgs 减少 WebView2 内存/进程数量的 Chromium 标志
 // 这些标志传递给全局 WebView2 浏览器进程，影响所有窗口。
 //
-// 注意：
+// 注意（2026-09-18 修正，修复"时间一长页面空白"）：
+//  - 已移除 --in-process-gpu：该标志把 GPU 进程合并进浏览器进程。一旦 GPU 出故障，
+//    整个浏览器进程会死，本应用所有 WebView2 窗口一起永久白屏且无法恢复（Wails v3
+//    未挂 ProcessFailed 恢复）。改为 GPU 独立进程后，GPU 故障可被 WebView2 重启，不再连坐。
+//  - 已移除 --renderer-process-limit=4：该限制让主窗口/浮窗/插件窗口共用同一渲染进程池，
+//    任一渲染进程崩溃会拖垮共用它的其它窗口。移除后每个 WebView2 窗口各自独立渲染进程，
+//    崩溃隔离，代价是任务管理器里多几个 msedgewebview2 进程（几 MB/个，可接受）。
 //  - 不传 --disable-renderer-backgrounding：让 WebView2 在 PutIsVisible(false) 时
 //    自动释放渲染/GPU 资源（后台窗口降级）。
-//  - --in-process-gpu：把 GPU 进程合并进浏览器进程，省掉一个独立子进程。
-//  - --renderer-process-limit=N：限制渲染进程数量，主窗口 + 剪贴板/命令面板等
-//    小窗尽量共用渲染进程，显著减少任务管理器里的 msedgewebview2 进程数，
-//    同时保留 WebView2 的站点/进程隔离（不用破坏性的 --single-process）。
 var memoryOptimizedArgs = []string{
 	"--disable-features=msSmartScreenProtection,Printing,Translate,ReadingList,MediaSessionService,NotificationService,PasswordManager,ChromeWhatsNewUI",
 	"--disable-sync",
@@ -41,8 +43,6 @@ var memoryOptimizedArgs = []string{
 	"--disable-default-apps",
 	"--mute-audio",
 	"--autoplay-policy=user-gesture-required",
-	"--in-process-gpu",
-	"--renderer-process-limit=4",
 }
 
 // disabledFeatures 禁用的 Chromium 特性

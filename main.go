@@ -128,6 +128,22 @@ func logStartupDetail(app *application.App, mainOpts application.WebviewWindowOp
 		len(memoryOptimizedArgs), len(disabledFeatures), strings.Join(disabledFeatures, ","))
 }
 
+// startRenderHeartbeat 渲染进程看门狗心跳：每 5s 向所有窗口广播 qd:heartbeat。
+// 前端据此检测 WebView2 渲染/桥接卡死（日志里表现为 "Eval failed: not in correct state"），
+// 自动重载页面自我恢复，避免"时间一长页面空白"需手动重启。发射失败（前端未就绪/桥接已断）静默忽略。
+func startRenderHeartbeat(app *application.App) {
+	go func() {
+		ticker := time.NewTicker(5 * time.Second)
+		defer ticker.Stop()
+		for range ticker.C {
+			if app == nil {
+				continue
+			}
+			app.Event.Emit("qd:heartbeat", time.Now().Unix())
+		}
+	}()
+}
+
 //go:embed all:frontend/dist
 var assets embed.FS
 
@@ -427,6 +443,9 @@ func main() {
 	if w := appService.GetNoteWindow(); w != nil {
 		w.Hide()
 	}
+
+	// 渲染进程看门狗：先于 Run 启动，给前端提供自愈所需的心跳信号。
+	startRenderHeartbeat(app)
 
 	// 运行应用
 	// 注意：Wails 框架在创建首个 WebView2 环境时会打印笼统的
