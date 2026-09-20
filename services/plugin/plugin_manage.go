@@ -143,11 +143,8 @@ func (p *PluginService) UninstallPlugin(id string) *services.ApiResult {
 			}
 		}
 	}
-	// 清理数据库记录和数据
-	if err := p.App.DB.DeletePlugin(id); err != nil {
-		return services.Fail(err)
-	}
-	if err := p.App.DB.CleanPluginData(id); err != nil {
+	// 清理数据库痕迹（记录 / 私有数据 / 使用记录 / 执行日志）
+	if err := p.App.DB.PurgePlugin(id); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)

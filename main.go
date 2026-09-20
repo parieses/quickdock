@@ -721,15 +721,16 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 		}
 	}
 
-	// 清理已删除内置插件的残留数据库记录（磁盘目录已由 pruneStaleBuiltins 移除，
-	// 但历史版本的数据库记录可能残留，需按内置命名空间 + 不在有效集合中删除）
+	// 清理已删除内置插件的残留数据库痕迹（磁盘目录已由 pruneStaleBuiltins 移除，
+	// 但历史版本的记录 / 私有数据 / 使用记录 / 执行日志可能残留，需按内置命名空间 +
+	// 不在有效集合中的条件清理；与卸载路径共用 PurgePlugin，避免两侧清理项漂移）
 	if allIDs, derr := database.ListAllPluginIDs(); derr == nil {
 		for _, id := range allIDs {
 			if strings.HasPrefix(id, "com.quickdock.") && !validBuiltinIDs[id] {
-				if rerr := database.DeletePlugin(id); rerr != nil {
-					logger.W("QuickDock: 删除残留内置插件记录 %s 失败: %v", id, rerr)
+				if rerr := database.PurgePlugin(id); rerr != nil {
+					logger.W("QuickDock: 清理残留内置插件 %s 失败: %v", id, rerr)
 				} else {
-					logger.I("QuickDock: 已删除残留内置插件记录 %s", id)
+					logger.I("QuickDock: 已清理残留内置插件痕迹 %s", id)
 				}
 			}
 		}

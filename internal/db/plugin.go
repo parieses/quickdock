@@ -3,6 +3,7 @@ package db
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // SetPluginEnabled 设置插件启用状态
@@ -25,6 +26,38 @@ func (d *Database) DeletePlugin(id string) error {
 	_, err := d.conn.Exec("DELETE FROM plugins WHERE id = ?", id)
 	if err != nil {
 		return fmt.Errorf("删除插件记录失败: %w", err)
+	}
+	return nil
+}
+
+// PurgePlugin 删除某插件在数据库中的全部痕迹（记录 / 私有数据 / 使用记录 / 执行日志）。
+// 卸载路径与启动期残留清理共用同一个入口：此前两条路径各写一份清理清单、互相漂移，
+// 结果先是卸载漏了使用记录与日志、后是启动清理漏了同样的两项。
+// 各子步骤自行加锁，故此处不持锁。
+func (d *Database) PurgePlugin(id string) error {
+	if err := d.DeletePlugin(id); err != nil {
+		return err
+	}
+	if err := d.CleanPluginData(id); err != nil {
+		return err
+	}
+	if err := d.DeletePluginUsage(id); err != nil {
+		return err
+	}
+	return d.DeletePluginExecLogs(id)
+}
+
+// DeletePluginUsage 删除某插件在 usage_frecency 的全部使用记录（key 形如 plugin:<id>.<commandID>）。
+// 卸载时调用：不清理的话命令面板「最近使用」会留下指向已卸载插件的死条目，
+// 且重装后 usageCount 会继承旧值，破坏「最近安装/更新优先」的排序语义。
+func (d *Database) DeletePluginUsage(pluginID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+
+	// pluginID 可能含 LIKE 通配符（_ / %），拼进模式串前必须转义，配合 ESCAPE 精确匹配
+	pattern := "plugin:" + strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`).Replace(pluginID) + ".%"
+	if _, err := d.conn.Exec(`DELETE FROM usage_frecency WHERE key LIKE ? ESCAPE '\'`, pattern); err != nil {
+		return fmt.Errorf("删除插件使用记录失败: %w", err)
 	}
 	return nil
 }

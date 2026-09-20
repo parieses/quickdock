@@ -1,6 +1,7 @@
 package db
 
 import (
+	"fmt"
 	"sync/atomic"
 	"time"
 )
@@ -74,6 +75,17 @@ func (d *Database) AddPluginExecLog(l *PluginExecLog) error {
 }
 
 // ListPluginExecLogs 返回最近 limit 条执行日志（按时间倒序）
+// DeletePluginExecLogs 删除某插件的全部执行日志（卸载时调用）。
+// 插件已卸载，这些日志再无查询入口，留着只是孤儿数据。
+func (d *Database) DeletePluginExecLogs(pluginID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, err := d.conn.Exec("DELETE FROM plugin_exec_logs WHERE plugin_id = ?", pluginID); err != nil {
+		return fmt.Errorf("删除插件执行日志失败: %w", err)
+	}
+	return nil
+}
+
 func (d *Database) ListPluginExecLogs(limit int) ([]PluginExecLog, error) {
 	if limit <= 0 {
 		limit = 100
