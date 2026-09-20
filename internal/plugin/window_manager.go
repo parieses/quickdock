@@ -211,6 +211,36 @@ func (m *PluginWindowManager) ShowWindow(pluginID string) {
 	}
 }
 
+// HideAllVisibleForCapture 临时隐藏所有当前可见的插件独立窗口，返回被隐藏的插件 ID。
+//
+// 供截图这类「要一张干净桌面」的场景使用：插件用「在窗口中打开」模式弹的独立窗口
+// 不归主窗口 / 命令面板的候选列表管，只隐藏宿主自己的窗口是盖不住它们的。
+// 只动原本可见的窗口，且完全不新建窗口——「用户开着哪些插件窗口」这个状态不变。
+func (m *PluginWindowManager) HideAllVisibleForCapture() []string {
+	m.mu.Lock()
+	ids := make([]string, 0, len(m.windows))
+	for id, win := range m.windows {
+		if win != nil && win.IsVisible() {
+			ids = append(ids, id)
+		}
+	}
+	m.mu.Unlock()
+
+	// 复用 Hide：它顺带重置回收计时器，否则「本来就隐藏了很久」的窗口
+	// 可能恰好在截图期间到点被回收，恢复时窗口就没了。
+	for _, id := range ids {
+		m.Hide(id)
+	}
+	return ids
+}
+
+// RestoreAfterCapture 恢复 HideAllVisibleForCapture 隐藏的插件窗口（不新建）。
+func (m *PluginWindowManager) RestoreAfterCapture(ids []string) {
+	for _, id := range ids {
+		m.ShowWindow(id)
+	}
+}
+
 // cancelRecycleLocked 取消某窗口的回收计时器，调用方须持 m.mu。
 func (m *PluginWindowManager) cancelRecycleLocked(pluginID string) {
 	if t, ok := m.recycleTimers[pluginID]; ok {

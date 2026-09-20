@@ -377,6 +377,8 @@ export default {
   paletteHotkeyDesc: 'Show/Hide command palette (search items, collections, notes)',
   noteHotkey: 'Quick Note',
   noteHotkeyDesc: 'Global shortcut to open the quick-note window (reuses the clipboard window)',
+  screenshotHotkey: 'Region Screenshot',
+  screenshotHotkeyDesc: 'Open a fullscreen overlay to select a region; the result is copied to the system clipboard',
   noteTitle: 'Quick Note',
   noteSaving: 'Saving…',
   noteSaved: 'Saved',
@@ -1143,6 +1145,8 @@ export default {
   cmdWifiToggleDesc: 'Toggle the Wi-Fi adapter (requires admin)',
   cmdKillForeground: 'Kill Foreground Process',
   cmdKillForegroundDesc: 'Terminate the process owning the foreground window',
+  cmdScreenshot: 'Region Screenshot',
+  cmdScreenshotDesc: 'Select a screen region and copy it to the clipboard',
   // Command Palette — Group Headers
   cmdGroupCalc: 'Calculator',
   cmdGroupWeb: 'Web',

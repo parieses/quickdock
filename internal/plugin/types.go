@@ -22,8 +22,8 @@ type PluginManifest struct {
 	Version         string            `json:"version"`
 	Description     string            `json:"description,omitempty"`
 	DescriptionI18n map[string]string `json:"description_i18n,omitempty"` // 多语言描述
-	Changelog        string            `json:"changelog,omitempty"`        // 更新日志（纯文本/Markdown），市场详情页展示
-	ChangelogI18n    map[string]string `json:"changelog_i18n,omitempty"`   // 多语言更新日志
+	Changelog       string            `json:"changelog,omitempty"`        // 更新日志（纯文本/Markdown），市场详情页展示
+	ChangelogI18n   map[string]string `json:"changelog_i18n,omitempty"`   // 多语言更新日志
 	Author          string            `json:"author,omitempty"`
 	Icon            string            `json:"icon,omitempty"`
 	Category        string            `json:"category,omitempty"`
@@ -183,8 +183,8 @@ type PluginInfo struct {
 	// Runtime 后端运行类型：none | goja | native。
 	// none 表示插件无后端：命令由前端自行处理，宿主 ExecuteCommand 不执行任何 host 逻辑，
 	// 故不可被 MCP/AI 真实调用。暴露此字段供 UI 与 MCP 识别，避免把前端自处理误认为宿主已执行。
-	Runtime    string    `json:"runtime"`
-	UsageCount int `json:"usageCount"`
+	Runtime    string `json:"runtime"`
+	UsageCount int    `json:"usageCount"`
 	// 首次安装时间 / 最近安装或更新时间（RFC3339 本地时区），用于列表「最近安装/更新」排序。
 	// 来源是 DB plugins 表的 installed_at / updated_at；内存 manager 不知情，由 service 层补齐。
 	InstalledAt string    `json:"installedAt,omitempty"`

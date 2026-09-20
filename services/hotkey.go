@@ -22,6 +22,7 @@ var hotkeySettings = []hotkeySetting{
 	{"clipboard_hotkey", 2, 0xC0, "Ctrl+`"},  // 剪贴板热键
 	{"palette_hotkey", 2, 0x4B, "Ctrl+K"},    // 命令面板热键
 	{"note_hotkey", 6, 0x4E, "Ctrl+Shift+N"}, // 笔记热键
+	{"screenshot_hotkey", 0, 0x70, "F1"},     // 截图热键（无修饰键，故 modifiers 为 0）
 }
 
 // ===== 热键配置 =====
@@ -64,6 +65,16 @@ func (a *AppService) GetNoteHotkeyConfig() *ApiResult {
 // SetNoteHotkeyConfig 设置笔记热键配置
 func (a *AppService) SetNoteHotkeyConfig(modifiers, vk int) *ApiResult {
 	return a.setHotkeyConfigByKey("note_hotkey", modifiers, vk)
+}
+
+// GetScreenshotHotkeyConfig 获取截图热键配置（默认 F1，无修饰键）
+func (a *AppService) GetScreenshotHotkeyConfig() *ApiResult {
+	return a.getHotkeyConfigByKey("screenshot_hotkey", 0, 0x70, "F1")
+}
+
+// SetScreenshotHotkeyConfig 设置截图热键配置
+func (a *AppService) SetScreenshotHotkeyConfig(modifiers, vk int) *ApiResult {
+	return a.setHotkeyConfigByKey("screenshot_hotkey", modifiers, vk)
 }
 
 // getHotkeyConfigByKey 通用热键配置获取（工厂函数）

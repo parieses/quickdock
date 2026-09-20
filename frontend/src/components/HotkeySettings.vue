@@ -2,7 +2,7 @@
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Keyboard, RotateCcw } from '@lucide/vue'
-import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig } from '../../bindings/quickdock/services/appservice'
+import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig, GetScreenshotHotkeyConfig, SetScreenshotHotkeyConfig } from '../../bindings/quickdock/services/appservice'
 import {
   SuspendHotkeys,
   ResumeHotkeys,
@@ -25,7 +25,11 @@ const paletteVk = ref(0x4B)
 const noteLabel = ref('Ctrl+Shift+N')
 const noteModifiers = ref(6)
 const noteVk = ref(0x4E)
-const capturing = ref<'app' | 'clipboard' | 'palette' | 'note' | null>(null)
+// 截图默认 F1：无修饰键，故 modifiers 为 0（后端 parseHotkeySetting 已支持 mods=0）
+const shotLabel = ref('F1')
+const shotModifiers = ref(0)
+const shotVk = ref(0x70)
+const capturing = ref<'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | null>(null)
 const message = ref('')
 const msgTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
@@ -115,6 +119,8 @@ function onGlobalKeyDown(e: KeyboardEvent) {
     paletteVk.value = vk; paletteModifiers.value = mods; paletteLabel.value = toLabel(mods, vk)
   } else if (capturing.value === 'note') {
     noteVk.value = vk; noteModifiers.value = mods; noteLabel.value = toLabel(mods, vk)
+  } else if (capturing.value === 'screenshot') {
+    shotVk.value = vk; shotModifiers.value = mods; shotLabel.value = toLabel(mods, vk)
   }
   capturing.value = null
   ResumeHotkeys()
@@ -138,6 +144,10 @@ onMounted(async () => {
     const c = unwrap<HotkeyConfig>(await GetNoteHotkeyConfig())
     if (c) { noteLabel.value = c.label; noteModifiers.value = c.modifiers; noteVk.value = c.vk }
   } catch {}
+  try {
+    const c = unwrap<HotkeyConfig>(await GetScreenshotHotkeyConfig())
+    if (c) { shotLabel.value = c.label; shotModifiers.value = c.modifiers; shotVk.value = c.vk }
+  } catch {}
 })
 
 onUnmounted(() => {
@@ -149,7 +159,7 @@ onUnmounted(() => {
   }
 })
 
-async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note') {
+async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot') {
   if (capturing.value === type) {
     capturing.value = null
     await ResumeHotkeys()
@@ -163,12 +173,13 @@ async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note') {
 async function saveAll() {
   message.value = ''
 
-  // 检查四个热键两两冲突
+  // 检查五个热键两两冲突
   const pairs = [
     [currentModifiers.value, currentVk.value],
     [clipModifiers.value, clipVk.value],
     [paletteModifiers.value, paletteVk.value],
     [noteModifiers.value, noteVk.value],
+    [shotModifiers.value, shotVk.value],
   ]
   for (let i = 0; i < pairs.length; i++) {
     for (let j = i + 1; j < pairs.length; j++) {
@@ -184,6 +195,7 @@ async function saveAll() {
     await SetClipboardHotkeyConfig(clipModifiers.value, clipVk.value)
     await SetPaletteHotkeyConfig(paletteModifiers.value, paletteVk.value)
     await SetNoteHotkeyConfig(noteModifiers.value, noteVk.value)
+    await SetScreenshotHotkeyConfig(shotModifiers.value, shotVk.value)
     // 重新注册全局快捷键（含调色板/笔记），使新配置立即生效。
     await ResumeHotkeys()
     setMsgAndClear(t('hotkeySaved'), 2000)
@@ -208,6 +220,11 @@ async function resetPaletteDefault() {
 async function resetNoteDefault() {
   noteModifiers.value = 6; noteVk.value = 0x4E; noteLabel.value = 'Ctrl+Shift+N'
   try { await SetNoteHotkeyConfig(6, 0x4E); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+}
+
+async function resetScreenshotDefault() {
+  shotModifiers.value = 0; shotVk.value = 0x70; shotLabel.value = 'F1'
+  try { await SetScreenshotHotkeyConfig(0, 0x70); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
 }
 
 // 暴露 capturing 状态给父组件（SettingsModal）
@@ -308,6 +325,29 @@ defineExpose({ capturing })
         </button>
       </div>
       <p class="hc-desc">{{ t('noteHotkeyDesc') }}</p>
+    </div>
+
+    <div class="hotkey-card">
+      <div class="hc-title">{{ t('screenshotHotkey') }}</div>
+      <div class="hotkey-row">
+        <span class="hotkey-label">{{ t('shortcut') }}</span>
+        <div
+          :class="['hotkey-display', { capturing: capturing === 'screenshot' }]"
+          @click="startCapture('screenshot')"
+        >
+          <template v-if="capturing === 'screenshot'">
+            <span class="capture-hint">{{ t('pressKeys') }}</span>
+          </template>
+          <template v-else>
+            <span class="hotkey-badge">{{ shotLabel }}</span>
+            <span class="hotkey-edit-hint">{{ t('clickToModify') }}</span>
+          </template>
+        </div>
+        <button class="reset-sm" @click="resetScreenshotDefault" :title="t('restoreDefault')">
+          <RotateCcw :size="12" />
+        </button>
+      </div>
+      <p class="hc-desc">{{ t('screenshotHotkeyDesc') }}</p>
     </div>
 
     <button class="save-btn" @click="saveAll">{{ t('saveAll') }}</button>

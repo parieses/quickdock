@@ -444,6 +444,14 @@ func main() {
 		w.Hide()
 	}
 
+	// 预创建截图覆盖窗口（原生 Win32 分层窗口，不走 WebView）。
+	// 放在 app.Run() 之前的原因同上面的浮窗：预创建后热键触发路径只剩
+	// 「抓屏 + 显示窗口」，不必在热键回调 goroutine 上承担建窗开销。
+	services.InitScreenshotOverlay()
+	// 贴图钉屏的右键菜单要用到宿主能力（剪贴板 / 原生保存对话框），注入进去。
+	// 钉图窗口是纯 GDI 的原生窗口，自己在独立线程上跑消息泵。
+	services.InitScreenshotPins(app)
+
 	// 渲染进程看门狗：先于 Run 启动，给前端提供自愈所需的心跳信号。
 	startRenderHeartbeat(app)
 

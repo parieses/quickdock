@@ -22,20 +22,24 @@ window.QD_I18N = {
     "开源 · 免费 · Windows 优先": "Open source · Free · Windows first",
     "一个坞，装下": "One dock for ",
     "你的整个开发流": "your entire dev workflow",
-    "命令面板唤起一切，28 个运行时一键装切，47 个插件开箱即用，再顺手把本地能力通过 MCP 开放给 AI。 Raycast 的速度 + VS Code 的开发者体验，打包进一个不到 100MB 的桌面应用。": "The command palette summons everything, 28 runtimes install and switch in one click, 47 plugins work out of the box — and your local capabilities are exposed to AI over MCP. Raycast's speed meets VS Code's developer experience, packed into a desktop app under 100MB.",
+    "命令面板唤起一切，28 个运行时一键装切，49 个插件开箱即用，截图标注随手就来，再顺手把本地能力通过 MCP 开放给 AI。 Raycast 的速度 + VS Code 的开发者体验，打包进一个不到 100MB 的桌面应用。": "The command palette summons everything, 28 runtimes install and switch in one click, 49 plugins work out of the box, screenshots and annotations are one keystroke away — and your local capabilities are exposed to AI over MCP. Raycast's speed meets VS Code's developer experience, packed into a desktop app under 100MB.",
     "下载 Windows 版": "Download for Windows",
     "查看源码": "View source",
-    "v0.0.10 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地": "v0.0.10 released · No admin required · Auto in-place updates · All data stays local",
+    "v0.0.14 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地": "v0.0.14 released · No admin required · Auto in-place updates · All data stays local",
 
-    /* ---------- what's new (v0.0.10) ---------- */
+    /* ---------- what's new (v0.0.14) ---------- */
     "这次更新了什么": "What's new",
-    "v0.0.10 带来 JDK 运行时、托盘应用重启与开机自启动，以及一批体验打磨。": "v0.0.10 brings the JDK runtime, tray app-restart and launch-on-login, plus a batch of polish.",
-    "JDK 运行时": "JDK runtime",
-    "新增 Java 开发工具链（Adoptium Temurin）：多版本共存、一键装切，点一下切换当前版本。": "New Java toolchain (Adoptium Temurin): side-by-side versions, one-click install/switch, pick the active version in one click.",
-    "应用重启": "App restart",
-    "托盘右键菜单新增「重启」；设置里新增「开机自启动」开关，开机自动拉起。": "The tray right-click menu gains a 'Restart'; Settings gains a 'Launch on login' toggle that starts QuickDock at boot.",
-    "体验优化": "Polish",
-    "隐藏控制台不再弹出黑框、启动更快，并修复若干稳定性与界面细节。": "The hidden console no longer pops a black window, startup is faster, and several stability and UI details are fixed.",
+    "v0.0.14 带来内置截图工具，以及一批环境管理与启动性能优化。": "v0.0.14 brings the built-in screenshot tool, plus a batch of environment-management and startup-performance work.",
+    "截图与标注": "Screenshots & annotations",
+    "内置截图工具：": "A built-in screenshot tool: ",
+    "唤起全屏覆盖层，框选松手即在原地浮出工具条，矩形 / 椭圆 / 箭头 / 文字 / 马赛克随手标注，复制、保存、贴图一步到位。": "opens a fullscreen overlay, and the toolbar floats up right where you released the selection — rectangle / ellipse / arrow / text / mosaic annotations, with copy, save and pin one click away.",
+    "贴图与吸附": "Pinning & snapping",
+    "标注完可一键钉在桌面最上层（拖动 / 滚轮缩放 / 双击关闭）；鼠标滑过任意程序窗口即高亮并显示尺寸，单击直接选中整个窗口，按住": "Annotated shots pin to the top of the desktop in one click (drag / wheel-zoom / double-click to close); hovering any app window highlights it and shows its size, and a click selects the whole window — hold",
+    "下钻到按钮、输入框这一级。": "to drill down to buttons and input fields.",
+    "环境与稳定性": "Environment & stability",
+    "支持单版本运行时的安装与卸载，优化 Git / gh / frpc / Ollama 的安装逻辑；新增 WebView2 渲染进程自愈看门狗，异常退出自动拉起。": "Single-version runtimes can now be installed and uninstalled, with reworked install logic for Git / gh / frpc / Ollama; a new WebView2 renderer watchdog restarts the process if it dies.",
+    "启动与体验": "Startup & polish",
+    "新增 mkcert 证书复用逻辑、启动链路优化，冷启动明显更快；托盘菜单支持服务启停，界面细节统一。": "mkcert certificates are now reused and the startup path was optimised for a noticeably faster cold start; the tray menu can start and stop services, and UI details are unified.",
     "可管理运行时": "Runtimes",
     "开箱插件": "Plugins",
     "MCP 工具": "MCP tools",
@@ -61,6 +65,9 @@ window.QD_I18N = {
     "一键唤出。": "one key to summon it.",
     "固定 / 搜索 / 批量删除": "Pin / search / bulk delete",
     "按天数自动清理过期内容": "Auto-purge old entries after N days",
+    "唤起全屏覆盖层，框选松手即在原地浮出工具条，矩形、椭圆、箭头、直线、文字、马赛克随手标注，全程零闪。": "opens a fullscreen overlay, and the toolbar floats up the moment you release the selection — rectangle, ellipse, arrow, line, text and mosaic annotations, with zero flicker.",
+    "窗口 / 元素智能吸附，单击选中整个窗口": "Smart window / element snapping — click to grab a whole window",
+    "贴图钉屏、导出 PNG、直入剪贴板": "Pin to the desktop, export PNG, straight to the clipboard",
     "树形笔记库": "Tree-based notes",
     "唤起浮动笔记，文件夹 + Markdown 多层级组织，500ms 防抖自动保存。": "Summon a floating note; folders + Markdown nested at any depth, auto-saved with a 500 ms debounce.",
     "待办与番茄专注": "Todos & Pomodoro focus",
@@ -105,7 +112,7 @@ window.QD_I18N = {
 
     /* ---------- plugins ---------- */
     "插件生态": "Plugin ecosystem",
-    "47 个插件，一个市场装完": "47 plugins from one marketplace",
+    "49 个插件，一个市场装完": "49 plugins from one marketplace",
     "三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 27 个 Host API，从文件读写到 MCP 复用，能力面三者一致。": "Three runtimes: pure frontend (none), embedded JS engine (goja), standalone subprocess (native) — all speaking JSON-RPC 2.0. The host exposes 27 Host APIs, from file I/O to MCP reuse; all three runtimes get the same capabilities.",
     "开发者向": "For developers",
     "HTTP 客户端": "HTTP client",
@@ -128,7 +135,7 @@ window.QD_I18N = {
 
     /* ---------- guide: ToC ---------- */
     "从装上到用顺手": "From install to muscle memory",
-    "16 节完整教程：前 3 节跑通基础，4—10 节覆盖日常功能，11—14 节是进阶玩法，最后两节讲数据备份和出问题怎么查。按顺序走一遍，或者用左侧目录直接跳。": "A 16-section tutorial: sections 1–3 cover the basics, 4–10 the daily workflow, 11–14 advanced usage, and the last two cover backups and troubleshooting. Read it in order, or jump straight in from the table of contents.",
+    "17 节完整教程：前 3 节跑通基础，4—11 节覆盖日常功能，12—15 节是进阶玩法，最后两节讲数据备份和出问题怎么查。按顺序走一遍，或者用左侧目录直接跳。": "A 17-section tutorial: sections 1–3 cover the basics, 4–11 the daily workflow, 12–15 advanced usage, and the last two cover backups and troubleshooting. Read it in order, or jump straight in from the table of contents.",
     "快速上手": "Getting started",
     "1. 安装与首次启动": "1. Install & first launch",
     "2. 界面速览": "2. UI tour",
@@ -137,18 +144,19 @@ window.QD_I18N = {
     "4. 工作空间与项目": "4. Workspaces & items",
     "5. 命令面板": "5. Command palette",
     "6. 剪贴板历史": "6. Clipboard history",
-    "7. 笔记库": "7. Notes",
-    "8. 待办与番茄专注": "8. Todos & Pomodoro",
-    "9. 网站监控与通知": "9. Site monitoring & alerts",
-    "10. 定时任务": "10. Scheduled tasks",
+    "7. 截图与标注": "7. Screenshots & annotations",
+    "8. 笔记库": "8. Notes",
+    "9. 待办与番茄专注": "9. Todos & Pomodoro",
+    "10. 网站监控与通知": "10. Site monitoring & alerts",
+    "11. 定时任务": "11. Scheduled tasks",
     "进阶": "Advanced",
-    "11. 环境管理": "11. Environment",
-    "12. 插件": "12. Plugins",
-    "13. AI 助手与 DSH": "13. AI assistant & DSH",
-    "14. MCP 服务": "14. MCP server",
+    "12. 环境管理": "12. Environment",
+    "13. 插件": "13. Plugins",
+    "14. AI 助手与 DSH": "14. AI assistant & DSH",
+    "15. MCP 服务": "15. MCP server",
     "运维": "Operations",
-    "15. 备份 · 同步 · 快照": "15. Backup · sync · snapshots",
-    "16. 更新与排错": "16. Updates & troubleshooting",
+    "16. 备份 · 同步 · 快照": "16. Backup · sync · snapshots",
+    "17. 更新与排错": "17. Updates & troubleshooting",
 
     /* ---------- guide 1: install ---------- */
     "安装与首次启动": "Install & first launch",
@@ -194,12 +202,14 @@ window.QD_I18N = {
     "顶栏放搜索框、": "The top bar holds the search box, ",
     "端口全景": " Port overview ",
     "（一眼看全本机服务占用）和设置入口。主题支持深色 / 浅色 / 跟随系统，设置里切换，插件窗口会同步适配。": "(every local service port at a glance) and settings. Themes support dark / light / follow system — switch in settings and plugin windows follow along.",
-    "四种窗口，三种是浮动的": "Four windows, three of them floating",
+    "四种常驻窗口，另有截图浮层": "Four resident windows, plus a screenshot overlay",
     "主窗口": "Main window",
     "显示 / 隐藏，承载全部页面": "show / hide; hosts every page",
     "，浮动窗口，失焦自动隐藏": ", a floating window that hides when unfocused",
     "剪贴板": "Clipboard",
     "快捷笔记": "Quick note",
+    "截图浮层": "Screenshot overlay",
+    "唤起的全屏浮层，用完即走，不占常驻窗口": "a fullscreen overlay on demand — it leaves no resident window behind",
     "主要页面在哪": "Where the main pages live",
     "侧边栏 / 顶栏可进入：工作空间、环境管理、插件（已装 + 市场）、待办、定时、监控、端口全景、AI 助手、DeepSeek Harness、设置（通用 / 热键 / AI / DSH / 快照 / 同步 / 工具）。": "Reachable from the sidebar / top bar: Workspaces, Environment, Plugins (installed + marketplace), Todos, Scheduled, Monitoring, Port overview, AI assistant, DeepSeek Harness and Settings (General / Hotkeys / AI / DSH / Snapshots / Sync / Tools).",
     "同一台机器": "On one machine ",
@@ -208,8 +218,9 @@ window.QD_I18N = {
 
     /* ---------- guide 3: shortcuts ---------- */
     "快捷键": "Shortcuts",
-    "默认只有四个全局热键，先记住它们就够用一整天。": "Four global hotkeys by default — memorizing these alone gets you through the day.",
+    "默认只有五个全局热键，先记住它们就够用一整天。": "Five global hotkeys by default — memorizing these alone gets you through the day.",
     "显示 / 隐藏主窗口": "Show / hide the main window",
+    "区域截图": "Region screenshot",
     "自定义热键": "Custom hotkeys",
     "「设置 → 热键」里逐条改，改完": "Change them one by one under Settings → Hotkeys; they are ",
     "运行时动态重注册": "re-registered live at runtime",
@@ -289,7 +300,29 @@ window.QD_I18N = {
     "浮动窗口失焦即隐藏；图片条目存在": "The floating window hides on blur; image entries are stored in",
     "想彻底不留痕迹：设置里关掉对应类型的记录（比如不记图片）。": "Want zero trace? Turn recording off for that type in settings (e.g. don't record images).",
 
-    /* ---------- guide 7: notes ---------- */
+    /* ---------- guide 7: screenshot ---------- */
+    "唤起全屏覆盖层，拖动框选、松手即定 —— 工具栏就地浮在选区下方，不用等第二个窗口弹出来。": "opens a fullscreen overlay: drag out a selection, release, and the toolbar floats up right below it — no second window ever pops in.",
+    "六种标注": "Six annotation tools",
+    "：矩形 / 椭圆 / 箭头 / 直线 / 文字 / 马赛克，配 9 种颜色、4 档线宽、6 档字号，带撤销重做": ": rectangle / ellipse / arrow / line / text / mosaic, with 9 colors, 4 stroke widths, 6 font sizes and undo/redo",
+    "画错了直接改": "Fix mistakes in place",
+    "：单击已画的图形即可选中并拖动位置，文字双击可重新编辑，内容清空即删除": ": click any drawn shape to select and drag it, double-click text to edit it again, and clear its content to delete it",
+    "窗口吸附": "Window snapping",
+    "：鼠标滑过任意程序窗口即自动高亮并显示尺寸，单击直接选中整个窗口；按下 Ctrl 再移动，可下钻到按钮、输入框这一级": ": hovering any app window highlights it and shows its size; one click selects the whole window, and holding Ctrl while moving drills down to buttons and input fields",
+    "贴图钉屏": "Pin to desktop",
+    "：把截图钉在桌面最上层，拖动移动、滚轮缩放、双击关闭，右键可复制或另存": ": pin a shot on top of the desktop — drag to move, wheel to zoom, double-click to close, right-click to copy or save as",
+    "选框支持 8 点拖拽微调，尺寸实时显示；框选与调框时才出现十字对齐线": "The selection has 8 drag handles for fine-tuning, with a live size readout; the crosshair guides show up only while you're drawing or resizing.",
+    "框选后用键盘": "Keyboard once you've got a selection",
+    "复制到剪贴板": "Copy to clipboard",
+    "存为 PNG": "Save as PNG",
+    "撤销 / 重做": "Undo / redo",
+    "切换工具：矩形 / 椭圆 / 箭头 / 直线 / 马赛克": "Switch tools: rectangle / ellipse / arrow / line / mosaic",
+    "微调选区，按住 Shift 步长 ×10": "Nudge the selection (hold Shift for ×10 steps)",
+    "全选屏幕": "Select the whole screen",
+    "取消截图或退出当前工具": "Cancel the capture or leave the current tool",
+    "删除选中的标注": "Delete the selected annotation",
+    "覆盖层是原生分层窗口而不是网页 —— 整帧像素一次性提交，所以它不会先白一下再显示内容。这就是 QuickDock 截图不闪屏的原因。": "The overlay is a native layered window, not a web page — the whole frame is committed in one shot, so it never flashes white before the content shows up. That's why QuickDock screenshots don't flicker.",
+
+    /* ---------- guide 8: notes ---------- */
     "笔记库": "Notes",
     "唤起浮动笔记，随手记；要整理时进「笔记管理」页面，用树形结构归档。": "Summon a floating note to jot things down; when it's time to organize, open the Notes page and file them in a tree.",
     "文件夹 + Markdown 文档": "Folders + Markdown documents",
@@ -300,7 +333,7 @@ window.QD_I18N = {
     "早期版本的「快捷笔记」会自动兼容成根级文档，老数据不丢": "Notes from the older \"quick note\" version are migrated to root-level documents automatically — nothing is lost",
     "浮动笔记适合「临时抓一段」：报错信息、临时命令、别人发的一段配置。要长期保存的，进笔记管理页拖进对应文件夹。": "Floating notes are for grabbing things on the fly: an error message, a throwaway command, a config snippet someone sent you. For anything long-lived, open the Notes page and drag it into the right folder.",
 
-    /* ---------- guide 8: todos ---------- */
+    /* ---------- guide 9: todos ---------- */
     "双视图": "Two views",
     "：列表看明细，看板按「待办 / 进行中 / 已完成」三列拖着走": ": a list for detail, and a kanban board with To do / In progress / Done columns you drag across",
     "子任务": "Subtasks",
@@ -314,7 +347,7 @@ window.QD_I18N = {
     "在待办页选中一个任务启动倒计时，专注期间就盯着这一件事。倒计时结束弹系统通知，还可以配一个 Webhook 推送到手机（钉钉 / 企微 / 飞书等），离开电脑也收得到。": "Pick a task on the todos page to start a countdown and focus on that one thing. When it ends you get a system notification — and you can wire a Webhook to your phone (DingTalk / WeCom / Feishu, etc.) so you hear about it away from your desk.",
     "番茄钟和待办是绑在一起的：专注记录挂在具体任务上，回头看就知道这个任务花了几轮。": "Pomodoro sessions are bound to todos: focus records attach to a specific task, so you can look back and see how many rounds it took.",
 
-    /* ---------- guide 9: monitoring ---------- */
+    /* ---------- guide 10: monitoring ---------- */
     "网站监控与通知": "Site monitoring & alerts",
     "给自己负责的站点挂个探活，出问题第一时间知道，不用等别人来问。": "Put a heartbeat on the sites you're responsible for — you'll know the moment something breaks, instead of waiting for someone to ask.",
     "能监测什么": "What it monitors",
@@ -336,7 +369,7 @@ window.QD_I18N = {
     "关了应用就不探了": "closing the app stops the probes",
     "。要 7×24 监控得让机器上的 QuickDock 保持运行（可以开开机自启）。": ". For round-the-clock monitoring, keep QuickDock running (enable launch at login).",
 
-    /* ---------- guide 10: scheduler ---------- */
+    /* ---------- guide 11: scheduler ---------- */
     "定时任务": "Scheduled tasks",
     "五种动作 × 五种调度，组合出你要的自动化。": "Five actions × five schedules — combine them into the automation you need.",
     "动作": "Action",
@@ -347,7 +380,7 @@ window.QD_I18N = {
     "执行后弹系统通知；列表里可以手动「立即执行」先验证一把": "A system notification after each run; hit \"Run now\" in the list to test it first",
     "典型用法：每天早上九点自动拉起一整套开发环境（终端 + 目录 + 后台页面）；每天晚上定时调一次接口触发备份。": "Typical uses: spin up a whole dev environment every morning at nine (terminal + folders + admin pages); call an endpoint every night to trigger a backup.",
 
-    /* ---------- guide 11: environment ---------- */
+    /* ---------- guide 12: environment ---------- */
     "把开发环境当成可装卸的模块：装、切、启停、改配置、看日志，全在一个页面。所有版本落在": "Treat your dev environment as swappable modules: install, switch, start/stop, edit config and read logs, all on one page. Every version lives in",
     "不写注册表、不改系统 PATH": "no registry writes, no system PATH edits",
     "，删掉 QuickDock 就一起没了。": " — delete QuickDock and it all goes with it.",
@@ -382,8 +415,8 @@ window.QD_I18N = {
     "不会自作主张禁用或卸载": "won't disable or uninstall anything on its own",
     "，自己决定怎么处理。": "; that call is yours.",
 
-    /* ---------- guide 12: plugins ---------- */
-    "「插件市场」里 47 个官方插件一键安装 / 升级 / 卸载 / 启用禁用，装完还能给插件单独绑热键。": "All 47 official plugins in the marketplace install / upgrade / uninstall / enable with one click — and you can bind a hotkey to any of them.",
+    /* ---------- guide 13: plugins ---------- */
+    "「插件市场」里 49 个官方插件一键安装 / 升级 / 卸载 / 启用禁用，装完还能给插件单独绑热键。": "All 49 official plugins in the marketplace install / upgrade / uninstall / enable with one click — and you can bind a hotkey to any of them.",
     "三种运行时": "Three runtimes",
     "纯前端，没有后端进程，最轻量": "Pure frontend, no backend process, the lightest of the three",
     "内嵌 JavaScript 沙箱，能跑逻辑不需要额外依赖": "An embedded JavaScript sandbox that runs logic without extra dependencies",
@@ -400,7 +433,7 @@ window.QD_I18N = {
     "完整开发文档与模板在": "Full developer docs and templates live in the",
     "仓库。": "repository.",
 
-    /* ---------- guide 13: AI ---------- */
+    /* ---------- guide 14: AI ---------- */
     "AI 助手与 DeepSeek Harness": "AI assistant & DeepSeek Harness",
     "内置 AI 助手（轻量对话）": "Built-in AI assistant (lightweight chat)",
     "多档案": "Multiple profiles",
@@ -426,7 +459,7 @@ window.QD_I18N = {
     "复用官方": "Reuses the official",
     "数据目录（皮肤 / 插件 / 会话），设置页可直接装 DSH 插件": "data directory (skins / plugins / sessions), and the settings page installs DSH plugins directly",
 
-    /* ---------- guide 14: MCP ---------- */
+    /* ---------- guide 15: MCP ---------- */
     "QuickDock 自暴露一个 MCP（Model Context Protocol）服务，把本地能力开放给 AI 客户端 —— 让 AI 能真的操作你的环境，而不是只聊天。": "QuickDock exposes its own MCP (Model Context Protocol) server, opening local capabilities to AI clients — so the AI can actually operate your environment instead of just chatting.",
     "接入步骤": "Connecting",
     "确认 QuickDock 正在运行（MCP 随主进程，退出即失效）。": "Make sure QuickDock is running (MCP lives in the main process and dies with it).",
@@ -445,7 +478,7 @@ window.QD_I18N = {
     "（杀进程、执行系统命令，默认关闭）。完整清单见下方": " (kill processes, run system commands — off by default). Full list below in ",
     "MCP 章节": "the MCP section",
 
-    /* ---------- guide 15: backup ---------- */
+    /* ---------- guide 16: backup ---------- */
     "备份 · 同步 · 快照": "Backup · sync · snapshots",
     "快照（本地）": "Snapshots (local)",
     "设置 → 快照：一键把全部数据导出成一个 JSON 文件，换机器导入即恢复。升级前顺手存一份最保险。": "Settings → Snapshots: export everything into a single JSON file in one click and import it on another machine. Grabbing one before an upgrade is the safest habit.",
@@ -461,7 +494,7 @@ window.QD_I18N = {
     "日志，按天分文件": "Logs, one file per day",
     "应用配置": "App configuration",
 
-    /* ---------- guide 16: updates & troubleshooting ---------- */
+    /* ---------- guide 17: updates & troubleshooting ---------- */
     "自动更新": "Auto-update ",
     "只替换主程序": "replaces the main binary only",
     "，不碰": " and never touches ",
@@ -526,7 +559,7 @@ window.QD_I18N = {
     "域名白名单，宿主逐次校验，越权直接拒绝。插件不能弹系统对话框，文件选择统一走宿主 API。": "domain allowlist, checked by the host on every call — anything out of bounds is rejected outright. Plugins can't raise system dialogs and file pickers go through the host API.",
     "支持 Linux 吗？": "Is Linux supported?",
     "引擎层已按": "The engine layer is already split by",
-    "拆文件，但目前官方只发 Windows 产物，Linux 尚未纳入发布流程。": ", but official builds only ship for Windows; Linux isn't in the release pipeline yet.",
+    "拆文件，但目前官方只发 Windows 产物，Linux 尚未纳入发布流程。截图与贴图是 Windows 原生实现，其他平台暂不可用。": ", but official builds only ship for Windows; Linux isn't in the release pipeline yet. Screenshots and pinning are native Windows implementations, so they aren't available on other platforms.",
     "怎么用 AI 控制 QuickDock？": "How do I control QuickDock with AI?",
     "在任意 MCP 客户端（如 WorkBuddy）里把": "Add",
     "加为 HTTP 类型 server，即可调用 29 个工具。高危工具需要你先在环境管理页手动开启。": "as an HTTP-type server in any MCP client (WorkBuddy, for instance) to call all 29 tools. High-risk tools must first be enabled manually on the Environment page.",
@@ -549,8 +582,8 @@ window.QD_I18N = {
 
   /* 属性类文案（meta / og），无法通过文本节点处理 */
   head: {
-    "description": "QuickDock is a desktop productivity tool for Windows developers: a command palette, workspace management, 28 runtime environments installed and switched in one click, 47 ready-to-use plugins, a built-in MCP server and an AI assistant.",
+    "description": "QuickDock is a desktop productivity tool for Windows developers: a command palette, workspace management, 28 runtime environments installed and switched in one click, 49 ready-to-use plugins, a built-in screenshot and annotation tool, an MCP server and an AI assistant.",
     "og:title": "QuickDock",
-    "og:description": "Command palette · Environment management · Plugin ecosystem · MCP server — one dock for your entire dev workflow."
+    "og:description": "Command palette · Environment management · Plugin ecosystem · Screenshots & annotations · MCP server — one dock for your entire dev workflow."
   }
 };

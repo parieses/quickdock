@@ -331,6 +331,7 @@ body {
   height: 100vh; width: 100vw; overflow: hidden;
   background: var(--color-bg-primary);
 }
+
 .plugin-standalone-empty {
   height: 100%; display: flex; align-items: center; justify-content: center;
   color: var(--color-text-disabled); font-size: 13px;

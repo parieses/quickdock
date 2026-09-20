@@ -142,5 +142,19 @@ src.resize((512,512), Image.LANCZOS).save('website/assets/img/appicon-512.png', 
 
 ## 改文案时注意
 
-- 数据类数字（28 运行时 / 47 插件 / 29 MCP 工具）散落在 Hero stats 与各章节标题，改了记得同步。
+- 数据类数字（28 运行时 / 49 插件 / 29 MCP 工具）散落在 Hero stats 与各章节标题，改了记得同步。
+- **版本号**散落在两处：Hero 的 `.hero-meta` 与 WHAT'S NEW 的 eyebrow + 副标题，改完记得同步 `i18n.js` 里对应的 key（key 本身含版本号，不是只改 value）。
 - 下载链接用的是 GitHub latest release 稳定地址（`releases/latest/download/...`），不需要改版本号。
+
+## 增删「使用说明」章节时
+
+使用说明是**顺序编号**的，插入/删除一节要**五处联动**，漏一处就会出现「侧栏写着 9、正文写着 8」这类错位：
+
+1. 正文的 `<span class="step-no">STEP NN</span>`（每节一处）
+2. 正文上方的注释 `<!-- ============ N ============ -->`
+3. 侧栏 `#guideNav` 里的 `<a href="#g-xxx">N. 标题</a>`
+4. `i18n.js` 里的 `"N. 标题"` 条目 —— **key 和 value 都含编号，两处都要改**
+5. 使用说明开头的「NN 节完整教程：…N—M 节覆盖…」那句总述
+
+批量重编号建议从**大到小**替换（先 16→17，再 15→16 ……），否则会把刚改好的数字再改一遍。`main.js` 的 scrollspy 是动态取 `#guideNav a`，不用改。
+

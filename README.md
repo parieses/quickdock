@@ -2,7 +2,7 @@
 
 > 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、Webhook 通知、端口全景、本地开发站点（自定义域名 + 自动 HTTPS），随附 **47 个**开箱即用外部插件（HTTP 客户端、数据库连接、OCR、端口检查、批量重命名、本地文件搜索、图床上传等，经插件市场一键安装），多运行时环境管理（**29 个运行时**：Node.js / PHP / Python / Go / Bun 等语言，Nginx / Caddy / Apache / Traefik 等网络服务，Redis / Memcached / RabbitMQ / MinIO 等中间件，MySQL / MariaDB / PostgreSQL / MongoDB 等数据库，Ollama 本地大模型、MCP 服务与 WebDAV 文件共享，一键安装、版本切换、启停、配置编辑、日志查看与 Web 控制台），内嵌 **DeepSeek Harness** 的 Agent 编程入口，并内置可选的 **AI 助手**（SSE 流式 / 多配置档案），让开发工作流更高效。
+快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、文本片段（树形笔记）、命令面板、待办（含番茄专注）、定时任务、网站监控、Webhook 通知、端口全景、本地开发站点（自定义域名 + 自动 HTTPS），内置 **截图工具**（框选 / 标注 / 贴图，零闪原生覆盖层），随附 **49 个**开箱即用外部插件（HTTP 客户端、数据库连接、OCR、端口检查、批量重命名、本地文件搜索、图床上传等，经插件市场一键安装），多运行时环境管理（**29 个运行时**：Node.js / PHP / Python / Go / Bun 等语言，Nginx / Caddy / Apache / Traefik 等网络服务，Redis / Memcached / RabbitMQ / MinIO 等中间件，MySQL / MariaDB / PostgreSQL / MongoDB 等数据库，Ollama 本地大模型、MCP 服务与 WebDAV 文件共享，一键安装、版本切换、启停、配置编辑、日志查看与 Web 控制台），内嵌 **DeepSeek Harness** 的 Agent 编程入口，并内置可选的 **AI 助手**（SSE 流式 / 多配置档案），让开发工作流更高效。
 
 ![主界面截图](image/主界面截图.png)
 
@@ -29,10 +29,12 @@
     - [🛠️ MCP 服务](#️-mcp-服务)
     - [☁️ WebDAV 云同步](#️-webdav-云同步)
     - [📸 快照备份](#-快照备份)
+    - [📷 截图工具](#-截图工具)
     - [🔧 全局热键（可自定义）](#-全局热键可自定义)
     - [🖥️ 系统命令](#️-系统命令)
   - [🔧 环境管理](#-环境管理)
     - [支持的运行时](#支持的运行时)
+    - [Ollama 本地大模型](#ollama-本地大模型)
     - [核心设计](#核心设计)
     - [服务管理能力](#服务管理能力)
     - [UI 交互](#ui-交互)
@@ -163,7 +165,7 @@
 
 - 开放插件架构，支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），基于 JSON-RPC 2.0 通信
 - 统一的插件 Host API（**27 个方法 / 11 组**）：日志、通知、剪贴板、对话框、按插件隔离的 KV 存储（`db.*`）、文件读写（`host.fs.*`，按 `permissions.filesystem` 声明的目录 scope 校验）、网络请求代发（`http.get/post`，按域名白名单）、Shell 打开（`host.shell.open`）、进程列表/结束（`host.process.list/kill`）、以及复用宿主 MCP 服务的 `host.mcp.call`；goja 经 `api.host(method, params)`、iframe 经注入的 `qdHostCall` 调用，三者能力面一致
-- 47 个官方插件经「在线市场」一键安装 / 升级，插件列表、功能说明与开发文档统一维护在仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
+- 49 个官方插件经「在线市场」一键安装 / 升级，插件列表、功能说明与开发文档统一维护在仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
 - 支持运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定
 
 ### 🛠️ MCP 服务
@@ -190,6 +192,22 @@ QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等�
 
 - 一键导出全部数据为 JSON 文件
 - 导入恢复，迁移无忧
+
+### 📷 截图工具
+
+内置 Snipaste 形态的截图工具，`F1` 唤起全屏覆盖层，**框选 → 标注 → 复制 / 保存 / 贴图**一条链路走完，全程不弹第二个窗口。
+
+- **原生覆盖层，零闪** — 全屏遮罩是自建 Win32 分层窗口，内容经 `UpdateLayeredWindow(ULW_ALPHA)` 整帧提交、**不走 `WM_PAINT`**；显示顺序严格为 `SW_HIDE → SetWindowPos 定死尺寸 → 像素画完 → SW_SHOW`，没有「先铺底色、再等内容」的空窗期。工具条、弹出面板与所有标注图形都画进同一张 DIB，所以它们出现时同样不闪
+- **框选后原地浮出工具条** — 选区下方为 `矩形 / 椭圆 / 箭头 / 直线 / 马赛克 / 文字` │ `颜色(9 色) / 线宽(4 档) / 字号(6 档)` │ `撤销 / 重做` │ `复制 / 保存 / 贴图 / 关闭`；颜色 / 线宽 / 字号均为弹出面板，与工具条共用同一次提交
+- **窗口 / 元素吸附** — 鼠标移动即实时高亮光标下的窗口，单击直接选中整个窗口；按住 `Ctrl` 下沉到子控件级（按钮 / 输入框）。已排除自身窗口、`WS_EX_TRANSPARENT` 与 DWM cloaked 幽灵窗
+- **选框可调** — 8 个控制点拖拽微调 + 框内整块平移，十字对齐辅助线仅在拖拽时出现，尺寸提示跟随选区
+- **标注可再编辑** — 已画的图形可点选、拖动改位置、`Delete` 删除；文字可双击重新编辑（清空即删除），编辑时输入框的字色/字号与当前设置所见即所得
+- **中文文字标注** — 分层窗口承载不了子控件、自绘又接不上 IME，故文字输入另开一个半透明 owned 顶层窗承载标准 EDIT 控件，子类化窗口过程拦截 `Enter` 提交 / `Esc` 取消
+- **贴图钉屏** — 截图钉在桌面最上层，可拖动、滚轮缩放（以光标为锚点）、双击关闭、右键菜单（复制 / 保存 / 关闭）。用原生 GDI 窗口而非 WebView 窗口，每张钉图的内存占用就是那张位图本身（不像一个 WebView2 进程 30–50MB）
+- **性能取舍** — 截图与亮度暗化预合成一次缓存，拖拽每帧只 `copy(base)` + 局部还原选区 + 画边框；绘制原语刻意绕开 GDI（32bpp DIB 的 alpha 写入无保证），改为纯字节写入
+- **快捷键** — `Enter` / `Ctrl+C` 复制，`Ctrl+S` 保存，`Ctrl+Z` / `Ctrl+Shift+Z`（或 `Ctrl+Y`）撤销重做，`Ctrl+A` 全选，`R` / `E` / `A` / `L` / `M` / `T` 切换工具，方向键微调（`Shift` ×10），`Delete` 删除选中图形，`Esc` 逐层退出（面板 → 工具 → 会话），右键取消
+
+
 
 ### 🔧 全局热键（可自定义）
 
@@ -392,6 +410,8 @@ https://github.com/parieses/quickdock/releases/latest/download/manifest.json
 
 启动后按 `Ctrl+Space` 唤出主窗口，跟随引导页完成初始设置即可开始使用。
 
+内置截图工具默认 `F1` 唤起（若被前台程序占用会自动回退并在日志中提示），框选松手后选区下方会浮出工具条，可直接标注、复制、保存或贴图。
+
 ---
 
 ## 开发指南
@@ -487,6 +507,7 @@ quickdock/
 │   ├── hotkey.go  theme.go(_windows/_unix)  autostart.go   # 宿主热键 / 主题 / 开机自启
 │   ├── app_launcher.go  focus.go  tool.go    # 应用启动 / 窗口聚焦 / 打开工具
 │   ├── clipboard_sys.go(_windows/_unix)      # 系统剪贴板操作与变更监听（宿主系统层）
+│   ├── screenshot.go                        # 截图编排（覆盖层/贴图预创建、收窗抓屏、剪贴板与保存）
 │   ├── sync.go          # WebDAV 云同步宿主方法
 │   ├── palette.go  plugin_hotkey.go  httpserve.go  httpserve_service.go  # 面板搜索 / 插件热键 / 本地 HTTP 服务基座
 │   ├── schedule.go  schedule_runner.go       # 定时任务 + 调度引擎（宿主转发层）
@@ -508,6 +529,7 @@ quickdock/
 │   ├── webdav/          # WebDAV HTTP 客户端
 │   ├── webdavsrv/       # 内置 WebDAV 服务端（宿主进程内，默认 9080）
 │   ├── mcp/             # MCP 服务器（Streamable HTTP，默认端口 9230）
+│   ├── screenshot/      # 截图工具（Windows 专属：GDI 抓屏 + 原生分层覆盖层 + 全原生标注 + 贴图钉屏，约 5.2k 行）
 │   ├── dl/              # 下载工具（代理感知 + 多源回退）
 │   ├── logger/          # 统一日志（宿主 logger.I/W/E + 插件 logger.PluginI/W/E，slog 桥接）
 │   ├── sysutil/         # 子进程/控制台工具（Command/Hide/Detach/StartDetached/PTY，Windows 作业纪律）
@@ -540,9 +562,9 @@ quickdock/
 ├── plugins/             # 插件（宿主骨架 + 开发模板；外部插件源码见下）
 │   ├── builtin/         # 内置插件骨架（仅 common.css/js，宿主注入兼容用，勿删）
 │   ├── templates/       # 插件开发模板（none / goja / native）
-│   └── external/        # 外部插件源码（47 个，独立 git 子仓库，已 gitignore，不随主仓分发；含 build.py 生成市场索引）
+│   └── external/        # 外部插件源码（49 个，独立 git 子仓库，已 gitignore，不随主仓分发；含 build.py 生成市场索引）
 ├── build/               # 构建配置（CI / 图标 / 平台产物）
-├── docs/                # 设计文档（mac 支持 / 自动更新 / 服务拆分 / 首启引导 / 审计报告 …）
+├── docs/                # 设计文档（mac 支持 / 自动更新 / 服务拆分 / 首启引导  / 审计报告 …）
 ├── website/             # 官网（纯静态单页，中英双语 + 明暗主题，无需构建；Pages workflow 发布）
 ├── scripts/             # 一次性维护脚本（ResetGit / ReTag）
 ├── image/               # README 截图资源
@@ -596,6 +618,7 @@ Workspace（工作空间）
 | 剪贴板历史 | `` Ctrl+` ``（反引号） | 显示 / 隐藏剪贴板浮动窗口 |
 | 命令面板 | `Ctrl+K` | 显示 / 隐藏命令面板浮动窗口 |
 | 快捷笔记 | `Ctrl+Shift+N` | 显示 / 隐藏笔记浮动窗口 |
+| 区域截图 | `F1` | 唤起全屏覆盖层框选截图（`F1` 被占用时自动回退 `Ctrl+Shift+A`） |
 
 > 所有热键均可在「设置 > 热键」页面自定义。
 
@@ -621,7 +644,7 @@ Workspace（工作空间）
 
 ## 插件生态
 
-QuickDock 采用开放的插件架构，官方插件（47 个）统一在独立仓库维护与分发：
+QuickDock 采用开放的插件架构，官方插件（49 个）统一在独立仓库维护与分发：
 
 👉 **[quickdock-plugins](https://github.com/parieses/quickdock-plugins)** —— 插件列表、功能说明与完整开发文档（目录结构、`plugin.json` 字段、三种运行时快速开始、通信协议、调试与发布）均在该仓库 README 中。
 
@@ -660,14 +683,15 @@ cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
 
 ## 架构亮点
 
-- **服务门面分层（宿主 + 20 门面子包）**：领域能力按包边界下沉为 20 个门面子包（`ai`/`clipboard`/`collection`/`diag`/`dsh`/`env`/`frecency`/`item`/`monitor`/`note`/`plugin`/`port`/`scene`/`snapshot`/`system`/`todo`/`update`/`workspace` + 引擎子包 `scheduler` + MCP 装配 `mcp`），宿主核心留在 AppService（约 62 方法），子包薄壳经宿主**全导出字段** `a.App.X` 回指（约 190 方法），依赖方向单向无环；引擎层集中在 `internal/`（`db`/`env`/`sites`/`dsh`/`plugin`/`platform`/`sync`/`webdav`/`webdavsrv`/`mcp`/`dl`/`logger`/`sysutil`/`validators`）
+- **服务门面分层（宿主 + 20 门面子包）**：领域能力按包边界下沉为 20 个门面子包（`ai`/`clipboard`/`collection`/`diag`/`dsh`/`env`/`frecency`/`item`/`monitor`/`note`/`plugin`/`port`/`scene`/`snapshot`/`system`/`todo`/`update`/`workspace` + 引擎子包 `scheduler` + MCP 装配 `mcp`），宿主核心留在 AppService（约 62 方法），子包薄壳经宿主**全导出字段** `a.App.X` 回指（约 190 方法），依赖方向单向无环；引擎层集中在 `internal/`（`db`/`env`/`sites`/`dsh`/`plugin`/`platform`/`sync`/`webdav`/`webdavsrv`/`mcp`/`screenshot`/`dl`/`logger`/`sysutil`/`validators`）
 - **四窗口架构**：主窗口 (1100×700) + 剪贴板 / 笔记浮动窗口 (480×420) + 命令面板浮动窗口 (680×460)，另有 DSH 原生长驻窗口
+- **截图覆盖层走原生窗口而非 WebView**：全屏遮罩是自建 Win32 分层窗口（`WS_EX_LAYERED|WS_EX_TOPMOST|WS_EX_TOOLWINDOW`），内容 `UpdateLayeredWindow(ULW_ALPHA)` 整帧提交、窗口类 `HbrBackground=0`、显示前先把像素画完 —— 这是「截图不闪」的唯一解，空窗期是 WebView2 的架构特性、调参修不掉。工具条 / 弹出面板 / 标注图形全部手绘进**同一张 DIB**，不引入第二个窗口；文字标注因必须走 IME 而另开 owned 顶层窗承载标准 EDIT。覆盖层在 `app.Run()` **之前**预创建（不涉及 WebView2，故没有次级窗口的白屏约束）
 - **所有次级窗口延迟创建**：在首次热键触发时才创建 WebView2，确保运行时完全初始化，避免白屏
 - **WebView2 内存优化**：`--in-process-gpu` + `--renderer-process-limit=4` 等参数限制渲染进程数，任务管理器更清爽
 - **窗口即隐藏**：关闭主窗口时隐藏到系统托盘而非退出，通过 `atomic.Bool` 标志区分真实退出
 - **多显示器支持**：浮动窗口自动定位到鼠标所在屏幕
 - **浮窗位置记忆**：剪贴板 / 命令面板 / 笔记浮窗位置经 kvstore 服务持久化，重启后原位恢复；拔出外接屏后自动收拢回窗口所在屏幕工作区
-- **框架原生底座**：托盘 / 全局热键 / 单实例 / 开机自启 / 自动更新 / 系统通知均基于 Wails v3 框架 API；系统日志汇入统一面板（`slog.SetDefault` 桥接）；仅剪贴板富内容、图标提取、系统命令等原理性 Win32 调用保留手写
+- **框架原生底座**：托盘 / 全局热键 / 单实例 / 开机自启 / 自动更新 / 系统通知均基于 Wails v3 框架 API；系统日志汇入统一面板（`slog.SetDefault` 桥接）；仅剪贴板富内容、图标提取、系统命令、截图覆盖层等原理性 Win32 调用保留手写
 - **纯 Go SQLite**：使用 modernc.org/sqlite，零 CGO 依赖，简化交叉编译
 - **回调注入解耦**：热键函数通过注入方式避免 main 和 services 包之间的循环依赖
 - **SQL 白名单**：表名和列名校验防止 SQL 注入
@@ -675,7 +699,7 @@ cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
 - **API Key 安全加密**：Windows 下 DPAPI 加密存储（`CryptProtectData`），macOS 下 base64 编码，前端全程不接触密文
 - **单实例锁**：框架 `Options.SingleInstance`（UniqueID `QuickDock-Instance`，开发/正式共用）——二次启动自动通知首实例把主窗口带到前台后退出，避免多进程并发写同一 SQLite 库
 - **后台服务**：SQLite WAL 模式 + 待办提醒调度器 (10s) + 定时任务调度器 + 监控检查器（含 SSL 检测）+ 流式 HTTP 服务（AI）+ 插件健康检查 + DSH 隐藏进程管理 + 内置 MCP 服务（9230）
-- **规模（2026-09）**：Go 约 251 文件 / 4.7w 行（主仓非 external，另含 40 个测试文件），前端 src 75 个 ts/vue（39 个 Vue 组件），47 个外部插件，29 个环境运行时，30 个 MCP 工具
+- **规模（2026-09）**：Go 约 320 文件 / 6.0w 行（主仓非 external，另含 43 个测试文件），前端 src 75 个 ts/vue（39 个 Vue 组件），49 个外部插件，29 个环境运行时，30 个 MCP 工具
 
 ---
 

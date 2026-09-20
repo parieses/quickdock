@@ -5,8 +5,6 @@ package platform
 import (
 	"encoding/binary"
 	"fmt"
-	"image"
-	"image/draw"
 	"image/png"
 	"os"
 	"syscall"
@@ -118,63 +116,9 @@ func SetClipboardImage(hwnd uintptr, imagePath string) error {
 		return fmt.Errorf("PNG decode failed: %w", err)
 	}
 
-	bounds := src.Bounds()
-	width := bounds.Dx()
-	height := bounds.Dy()
-
-	rgba := image.NewRGBA(bounds)
-	draw.Draw(rgba, bounds, src, bounds.Min, draw.Src)
-
-	headerSize := 40
-	stride := width * 4
-	dibSize := headerSize + stride*height
-	dibData := make([]byte, dibSize)
-
-	binary.LittleEndian.PutUint32(dibData[0:4], uint32(headerSize))
-	binary.LittleEndian.PutUint32(dibData[4:8], uint32(width))
-	binary.LittleEndian.PutUint32(dibData[8:12], uint32(height))
-	binary.LittleEndian.PutUint16(dibData[12:14], 1)
-	binary.LittleEndian.PutUint16(dibData[14:16], 32)
-	binary.LittleEndian.PutUint32(dibData[16:20], 0)
-
-	for y := 0; y < height; y++ {
-		destY := height - 1 - y
-		rowOffset := headerSize + destY*stride
-		for x := 0; x < width; x++ {
-			off := rgba.PixOffset(x, y)
-			pxOff := rowOffset + x*4
-			dibData[pxOff+0] = rgba.Pix[off+2]
-			dibData[pxOff+1] = rgba.Pix[off+1]
-			dibData[pxOff+2] = rgba.Pix[off+0]
-			dibData[pxOff+3] = rgba.Pix[off+3]
-		}
-	}
-
-	if !w32.OpenClipboard(w32.HWND(hwnd)) {
-		return fmt.Errorf("OpenClipboard failed")
-	}
-	defer w32.CloseClipboard()
-
-	w32.EmptyClipboard()
-
-	handle := w32.GlobalAlloc(0x0042, uint32(len(dibData)))
-	if handle == 0 {
-		return fmt.Errorf("GlobalAlloc failed")
-	}
-	ptr := w32.GlobalLock(handle)
-	if ptr == nil {
-		w32.GlobalFree(handle)
-		return fmt.Errorf("GlobalLock failed")
-	}
-	copy(unsafe.Slice((*byte)(ptr), len(dibData)), dibData)
-	w32.GlobalUnlock(handle)
-	if w32.SetClipboardData(8, handle) == 0 {
-		// 设置失败 → 释放已分配的内存
-		w32.GlobalFree(handle)
-		return fmt.Errorf("SetClipboardData failed")
-	}
-
-	return nil
+	// DIB 构造与写剪贴板复用内存路径（clipboard_image_windows.go），
+	// 避免同一套逻辑在两处各维护一份。
+	return writeClipboardDIB(hwnd, encodeDIB(src))
 }
 
 // GetClipboardText reads the current system clipboard text (CF_UNICODETEXT).

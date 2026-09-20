@@ -113,6 +113,7 @@ var (
 	currentClipAccel    string
 	currentPaletteAccel string
 	currentNoteAccel    string
+	currentShotAccel    string
 	accelMu             sync.Mutex
 
 	noteWin     *application.WebviewWindow
@@ -525,6 +526,20 @@ func getNoteAccel() string {
 	return currentNoteAccel
 }
 
+// 截图热键单独存取：它不在 setAccelerators 的批量签名里，
+// 以免为新增一个热键去改 5 处调用点（Reregister* 系列各自只改自己那一个）。
+func getShotAccel() string {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	return currentShotAccel
+}
+
+func setShotAccel(accel string) {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	currentShotAccel = accel
+}
+
 // modVKToAccelerator 把 DB 存储的 (modifiers,vk) 转为框架加速器字符串（如 "Ctrl+Space"）。
 func modVKToAccelerator(modifiers, vk int) string {
 	var parts []string
@@ -548,10 +563,15 @@ func modVKToAccelerator(modifiers, vk int) string {
 	return strings.Join(parts, "+")
 }
 
+// parseHotkeySetting 解析 DB 中存储的 "modifiers,vk"。
+//
+// 注意 modifiers 允许为 0：截图热键默认就是无修饰的 F1（0,112）。
+// 旧判定 `mods <= 0` 会把它当作脏数据回退成 Ctrl+Space，
+// 表现为「F1 设好能用，重启后又变回 Ctrl+Space」。
 func parseHotkeySetting(raw string) (int, int) {
 	var mods, vk int
 	fmt.Sscanf(raw, "%d,%d", &mods, &vk)
-	if mods <= 0 || vk <= 0 {
+	if mods < 0 || vk <= 0 {
 		return MOD_CONTROL, VK_SPACE
 	}
 	return mods, vk
@@ -646,6 +666,49 @@ func ReregisterNoteHotkey(modifiers, vk uintptr) {
 	}
 }
 
+// ReregisterScreenshotHotkey 设置页改截图热键后重新注册。
+func ReregisterScreenshotHotkey(modifiers, vk uintptr) {
+	app := getHotkeyApp()
+	if app == nil {
+		logger.I("QuickDock: 应用未初始化，跳过热键重注册")
+		return
+	}
+
+	oldAccel := getShotAccel()
+	if oldAccel != "" {
+		app.GlobalShortcut.Unregister(oldAccel)
+	}
+
+	newAccel := modVKToAccelerator(int(modifiers), int(vk))
+	if err := app.GlobalShortcut.Register(newAccel, handleScreenshotHotkey); err != nil {
+		logger.W("QuickDock: 截图热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+A", newAccel, err)
+		fallback := "Ctrl+Shift+A"
+		app.GlobalShortcut.Register(fallback, handleScreenshotHotkey)
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			svc.DB.SetSetting("screenshot_hotkey", "6,65")
+		}
+		setShotAccel(fallback)
+		return
+	}
+	logger.I("QuickDock: 截图快捷键 [%s] 已更新", newAccel)
+	setShotAccel(newAccel)
+}
+
+// handleScreenshotHotkey 截图热键回调。
+//
+// 必须转 goroutine：CaptureSelection 要等窗口收起重绘、再等用户完成框选，
+// 在热键回调线程上同步执行会把这个线程占住。
+func handleScreenshotHotkey() {
+	if !services.ScreenshotSupported() {
+		return
+	}
+	svc := appSvc.Load()
+	if svc == nil {
+		return
+	}
+	go svc.CaptureSelection()
+}
+
 // showNoteWindow 切换笔记独立窗口的显隐状态
 func showNoteWindow() {
 	nw := getNoteWindow()
@@ -698,6 +761,10 @@ func SuspendHotkeys() {
 	if noteAccel != "" {
 		app.GlobalShortcut.Unregister(noteAccel)
 	}
+	shotAccel := getShotAccel()
+	if shotAccel != "" {
+		app.GlobalShortcut.Unregister(shotAccel)
+	}
 	logger.I("QuickDock: 热键已暂停（设置页捕获中）")
 }
 
@@ -736,7 +803,7 @@ func toggleClipboardWindow() {
 func registerAllHotkeys(app *application.App) {
 	// 重注册前先注销上一轮已注册的快捷键，避免修改设置保存后旧热键残留、
 	// 新旧热键同时生效直到进程重启。与 Reregister* 系列保持一致。
-	for _, old := range []string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel()} {
+	for _, old := range []string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel()} {
 		if old != "" {
 			app.GlobalShortcut.Unregister(old)
 		}
@@ -745,6 +812,8 @@ func registerAllHotkeys(app *application.App) {
 	clipMods, clipVk := MOD_CONTROL, int(VK_OEM_3)
 	paletteMods, paletteVk := MOD_CONTROL, int(0x4B)
 	noteMods, noteVk := MOD_CONTROL|MOD_SHIFT, int(0x4E)
+	// 截图热键默认 F1 —— 无修饰键，mods 为 0（parseHotkeySetting 需允许 0）。
+	shotMods, shotVk := 0, 0x70
 	if svc := appSvc.Load(); svc != nil && svc.DB != nil {
 		if raw, err := svc.DB.GetSetting("hotkey"); err == nil && raw != "" {
 			appMods, appVk = parseHotkeySetting(raw)
@@ -758,12 +827,16 @@ func registerAllHotkeys(app *application.App) {
 		if raw, err := svc.DB.GetSetting("note_hotkey"); err == nil && raw != "" {
 			noteMods, noteVk = parseHotkeySetting(raw)
 		}
+		if raw, err := svc.DB.GetSetting("screenshot_hotkey"); err == nil && raw != "" {
+			shotMods, shotVk = parseHotkeySetting(raw)
+		}
 	}
 
 	appAccel := modVKToAccelerator(appMods, appVk)
 	clipAccel := modVKToAccelerator(clipMods, clipVk)
 	paletteAccel := modVKToAccelerator(paletteMods, paletteVk)
 	noteAccel := modVKToAccelerator(noteMods, noteVk)
+	shotAccel := modVKToAccelerator(shotMods, shotVk)
 
 	// 主窗口热键回调
 	registeredAppAccel := appAccel
@@ -849,6 +922,21 @@ func registerAllHotkeys(app *application.App) {
 	} else {
 		logger.I("笔记快捷键 [%s] 已注册", noteAccel)
 	}
+
+	// 截图热键（默认 F1，无修饰键）。F1 极易被前台程序占用，注册失败时
+	// 回退到 Ctrl+Shift+A，并把回退值写回设置，避免每次启动都重试失败项。
+	registeredShotAccel := shotAccel
+	if err := app.GlobalShortcut.Register(shotAccel, handleScreenshotHotkey); err != nil {
+		logger.W("截图热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+A", shotAccel, err)
+		app.GlobalShortcut.Register("Ctrl+Shift+A", handleScreenshotHotkey)
+		registeredShotAccel = "Ctrl+Shift+A"
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			svc.DB.SetSetting("screenshot_hotkey", "6,65")
+		}
+	} else {
+		logger.I("截图快捷键 [%s] 已注册", shotAccel)
+	}
+	setShotAccel(registeredShotAccel)
 
 	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel, registeredNoteAccel)
 }

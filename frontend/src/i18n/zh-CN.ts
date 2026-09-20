@@ -377,6 +377,8 @@ export default {
   paletteHotkeyDesc: '弹出/隐藏命令面板（搜索项目、集合、笔记）',
   noteHotkey: '快捷笔记',
   noteHotkeyDesc: '全局快捷键唤起快捷笔记窗口（复用剪贴板窗口）',
+  screenshotHotkey: '区域截图',
+  screenshotHotkeyDesc: '唤起全屏覆盖层框选区域，截图直接写入系统剪贴板',
   noteTitle: '快捷笔记',
   noteSaving: '保存中…',
   noteSaved: '已保存',
@@ -1144,6 +1146,8 @@ export default {
   cmdWifiToggleDesc: '切换 Wi-Fi 适配器开关（需管理员权限）',
   cmdKillForeground: '结束前台进程',
   cmdKillForegroundDesc: '结束当前前台窗口所属的进程',
+  cmdScreenshot: '区域截图',
+  cmdScreenshotDesc: '框选屏幕区域，复制到剪贴板',
   // 命令面板 — 分组标题
   cmdGroupCalc: '计算器',
   cmdGroupWeb: '网页',

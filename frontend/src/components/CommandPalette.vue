@@ -8,7 +8,7 @@ import {
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
   Copy, FolderSearch, Play, Save, Gauge
 } from '@lucide/vue'
-import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, SaveUrlAsItem } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection } from '../../bindings/quickdock/services/appservice'
 import { ExecuteSystemCommand, RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
 import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
@@ -265,6 +265,13 @@ const systemCommands = computed<SystemCmd[]>(() => [
     action: async () => { await ExecuteSystemCommand('wifi-toggle'); closePalette() } },
   { id: 'kill-foreground', label: t('cmdKillForeground'), desc: t('cmdKillForegroundDesc'), keywords: ['kill', 'process', '结束', '进程', '终止', 'jin cheng', 'zhong zhi', '系统'], icon: XCircle,
     action: async () => { await ExecuteSystemCommand('kill-foreground'); closePalette() } },
+  // 区域截图：必须先关面板再调用。面板已隐藏时 hideForCapture 不会把它算作
+  // 「需要恢复的窗口」，否则截完图面板会自己弹回来盖住结果。
+  { id: 'screenshot', label: t('cmdScreenshot'), desc: t('cmdScreenshotDesc'), keywords: ['screenshot', 'capture', '截图', '截屏', '区域', 'jietu', 'jie tu', 'qu yu', '系统'], icon: Camera,
+    action: async () => {
+      await closePalette()
+      try { unwrap(await CaptureSelection()) } catch (e) { logErr('[CmdPalette] CaptureSelection:', e) }
+    } },
 ])
 
 // ---- 拼音缓存预热 ----

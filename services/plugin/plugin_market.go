@@ -53,9 +53,9 @@ type marketPlugin struct {
 	// changelog_i18n 提供多语言版本，前端按当前 locale 优先取。
 	Changelog     string            `json:"changelog,omitempty"`
 	ChangelogI18n map[string]string `json:"changelog_i18n,omitempty"`
-	Author          string            `json:"author"`
-	Category        string            `json:"category"`
-	Icon            string            `json:"icon"`
+	Author        string            `json:"author"`
+	Category      string            `json:"category"`
+	Icon          string            `json:"icon"`
 	// 约束信息（与 plugin.json 对齐）
 	Platforms    []string               `json:"platforms"`
 	Permissions  map[string]interface{} `json:"permissions"`

@@ -25,14 +25,14 @@ var clipboardWinLock sync.Mutex
 // 这些标志传递给全局 WebView2 浏览器进程，影响所有窗口。
 //
 // 注意（2026-09-18 修正，修复"时间一长页面空白"）：
-//  - 已移除 --in-process-gpu：该标志把 GPU 进程合并进浏览器进程。一旦 GPU 出故障，
-//    整个浏览器进程会死，本应用所有 WebView2 窗口一起永久白屏且无法恢复（Wails v3
-//    未挂 ProcessFailed 恢复）。改为 GPU 独立进程后，GPU 故障可被 WebView2 重启，不再连坐。
-//  - 已移除 --renderer-process-limit=4：该限制让主窗口/浮窗/插件窗口共用同一渲染进程池，
-//    任一渲染进程崩溃会拖垮共用它的其它窗口。移除后每个 WebView2 窗口各自独立渲染进程，
-//    崩溃隔离，代价是任务管理器里多几个 msedgewebview2 进程（几 MB/个，可接受）。
-//  - 不传 --disable-renderer-backgrounding：让 WebView2 在 PutIsVisible(false) 时
-//    自动释放渲染/GPU 资源（后台窗口降级）。
+//   - 已移除 --in-process-gpu：该标志把 GPU 进程合并进浏览器进程。一旦 GPU 出故障，
+//     整个浏览器进程会死，本应用所有 WebView2 窗口一起永久白屏且无法恢复（Wails v3
+//     未挂 ProcessFailed 恢复）。改为 GPU 独立进程后，GPU 故障可被 WebView2 重启，不再连坐。
+//   - 已移除 --renderer-process-limit=4：该限制让主窗口/浮窗/插件窗口共用同一渲染进程池，
+//     任一渲染进程崩溃会拖垮共用它的其它窗口。移除后每个 WebView2 窗口各自独立渲染进程，
+//     崩溃隔离，代价是任务管理器里多几个 msedgewebview2 进程（几 MB/个，可接受）。
+//   - 不传 --disable-renderer-backgrounding：让 WebView2 在 PutIsVisible(false) 时
+//     自动释放渲染/GPU 资源（后台窗口降级）。
 var memoryOptimizedArgs = []string{
 	"--disable-features=msSmartScreenProtection,Printing,Translate,ReadingList,MediaSessionService,NotificationService,PasswordManager,ChromeWhatsNewUI",
 	"--disable-sync",
