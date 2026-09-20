@@ -151,7 +151,7 @@
 ### 💬 AI 助手
 
 - **多配置档案** — 支持 OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口
-- **四种对话模式** — 聊天 / 解释代码 / 翻译 / 总结，模式 prompt 可叠加自定义 System Prompt
+- **五种对话模式** — 聊天 / 解释代码 / 翻译 / 总结 / 使用教程，模式 prompt 可叠加自定义 System Prompt
 - **SSE 流式输出** — 本地 HTTP 流式服务（127.0.0.1:随机端口），token 到达即显示，非传统轮询
 - **思考过程折叠** — 模型思考内容（reasoning_content）以 `<details>` 折叠展示，默认收起
 - **Markdown 渲染** — 使用 `marked` + `DOMPurify` 安全渲染对话内容

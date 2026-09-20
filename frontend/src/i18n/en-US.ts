@@ -1233,6 +1233,7 @@ export default {
   aiModeExplain: 'Explain',
   aiModeTranslate: 'Translate',
   aiModeSummarize: 'Summarize',
+  aiModeTutorial: 'Tutorial',
   aiStop: 'Stop',
   aiYou: 'You',
   aiEmptyHint: 'Start chatting with the AI assistant, or pick a mode above',

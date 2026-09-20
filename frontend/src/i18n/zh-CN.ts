@@ -1234,6 +1234,7 @@ export default {
   aiModeExplain: '解释',
   aiModeTranslate: '翻译',
   aiModeSummarize: '总结',
+  aiModeTutorial: '使用教程',
   aiStop: '停止',
   aiYou: '我',
   aiEmptyHint: '开始和 AI 助手对话，或选择上方的模式',

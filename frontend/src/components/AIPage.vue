@@ -80,6 +80,7 @@ const modes = [
   { key: 'explain', label: 'aiModeExplain' },
   { key: 'translate', label: 'aiModeTranslate' },
   { key: 'summarize', label: 'aiModeSummarize' },
+  { key: 'tutorial', label: 'aiModeTutorial' },
 ]
 
 marked.setOptions({ breaks: true, gfm: true })
