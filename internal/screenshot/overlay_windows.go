@@ -106,6 +106,12 @@ type Overlay struct {
 	curFontSize int
 	panel       panelID
 
+	// 工具条 / 面板避让任务栏用的工作区缓存（见 toolbar_windows.go 的 clientWorkArea）。
+	// 按显示器句柄缓存：updateHover 在每次 mousemove 都会问到它，
+	// 没必要每次都打两轮 user32。
+	workMon uintptr
+	work    Rect
+
 	// 文字标注：popup 输入窗 + GDI 文本渲染用的离屏资源
 	ti        textInput
 	scratch   textScratch
@@ -349,6 +355,7 @@ func (o *Overlay) resetSession() {
 	o.curWidth = annotWidths[0] // 默认最细
 	o.curFontSize = annotFontSize
 	o.panel = panelNone
+	o.workMon, o.work = 0, Rect{} // 工作区缓存随会话失效（显示器可能变过）
 	o.mouseX, o.mouseY = -1, -1
 	o.mouseIn = false
 }

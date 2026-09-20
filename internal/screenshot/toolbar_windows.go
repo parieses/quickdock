@@ -135,27 +135,72 @@ func toolbarWidth() int {
 	return w
 }
 
-// layoutToolbar 按选区位置摆放工具条。
+// clientWorkArea 返回客户区坐标点 (x, y) 所在显示器的工作区（已排除任务栏）。
+//
+// 工具条的避让必须按**工作区**算，不能按整块虚拟桌面（详见 layoutToolbarIn）：
+// 虚拟桌面包围盒的四角在多显示器下可能没有屏幕覆盖，任务栏那条带子也不在可用区内。
+//
+// 取不到工作区（API 失败、显示器热插拔）时退化为整块覆盖层范围，与改动前一致。
+func (o *Overlay) clientWorkArea(x, y int) Rect {
+	full := Rect{X: 0, Y: 0, W: o.bounds.W, H: o.bounds.H}
+	hmon := monitorFromPoint(o.bounds.X+x, o.bounds.Y+y)
+	if hmon == 0 {
+		return full
+	}
+	if hmon == o.workMon && !o.work.Empty() {
+		return o.work
+	}
+	screen, ok := monitorWork(hmon)
+	if !ok {
+		return full
+	}
+	// 屏幕坐标 → 客户区坐标，再夹进覆盖层范围（别的显示器可能带来负坐标）。
+	r := Rect{X: screen.X - o.bounds.X, Y: screen.Y - o.bounds.Y, W: screen.W, H: screen.H}
+	r = r.intersect(full)
+	if r.Empty() {
+		return full
+	}
+	o.workMon, o.work = hmon, r
+	return r
+}
+
+// layoutToolbar 按选区位置摆放工具条（可用区取选区所在显示器的工作区）。
+func (o *Overlay) layoutToolbar(sel Rect) tbLayout {
+	return layoutToolbarIn(o.clientWorkArea(sel.X+sel.W/2, sel.Y+sel.H/2), sel)
+}
+
+// layoutToolbarIn 是摆放算法本体，抽成纯函数以便脱离 Win32 单测
+// （见 workarea_windows_test.go 的 TestLayoutToolbar*）。
 //
 // 优先级：选区下方 → 选区上方 → 选区内部底边 → 选区内部顶边（选区几乎占满
 // 整屏时的兜底）。水平方向左对齐选区左边缘，与 Snipaste / 微信截图一致。
-func (o *Overlay) layoutToolbar(sel Rect) tbLayout {
+//
+// work 必须是**可用区**（显示器工作区，已排除任务栏），而不是整块虚拟桌面：
+//   - 任务栏铺在屏幕某条边上，把屏幕边界当可用区就会把工具条算进任务栏里；
+//   - 多显示器下虚拟桌面包围盒的四角未必落在任何一块屏幕上（另一块显示器比主屏
+//     高 / 窄时就会留出死角），算到那里等于画在没有像素的地方。
+//
+// 全屏截图正好同时踩中这两条：早先按虚拟桌面边界避让，工具条被摆到左下角死角，
+// 表现为「截图全屏时操作栏看不到了」。
+func layoutToolbarIn(work, sel Rect) tbLayout {
 	w, h := toolbarWidth(), tbHeight
+
+	top, bottom := work.Y, work.Y+work.H
 
 	x := sel.X
 	y := sel.Y + sel.H + tbGap
-	if y+h > o.bounds.H {
+	if y+h > bottom {
 		y = sel.Y - tbGap - h
 	}
-	if y < 0 {
+	if y < top {
 		y = sel.Y + sel.H - h - tbGap
 	}
-	if y < 0 {
+	if y < top {
 		y = sel.Y + tbGap
 	}
 
-	x = clampInt(x, 0, maxInt(0, o.bounds.W-w))
-	y = clampInt(y, 0, maxInt(0, o.bounds.H-h))
+	x = clampInt(x, work.X, maxInt(work.X, work.X+work.W-w))
+	y = clampInt(y, top, maxInt(top, bottom-h))
 
 	lay := tbLayout{bar: Rect{X: x, Y: y, W: w, H: h}, cells: make([]Rect, len(tbItems))}
 	cx, cy := x+tbPadX, y+tbPadY
@@ -251,13 +296,15 @@ func (o *Overlay) panelRect() Rect {
 		return Rect{}
 	}
 	bar := o.layoutToolbar(o.sel).bar
+	work := o.clientWorkArea(bar.X+bar.W/2, bar.Y+bar.H/2)
+	top, bottom := work.Y, work.Y+work.H
 	x := bar.X
 	y := bar.Y - tbGap - h
-	if y < 0 {
+	if y < top {
 		y = bar.Y + bar.H + tbGap
 	}
-	x = clampInt(x, 0, maxInt(0, o.bounds.W-w))
-	y = clampInt(y, 0, maxInt(0, o.bounds.H-h))
+	x = clampInt(x, work.X, maxInt(work.X, work.X+work.W-w))
+	y = clampInt(y, top, maxInt(top, bottom-h))
 	return Rect{X: x, Y: y, W: w, H: h}
 }
 

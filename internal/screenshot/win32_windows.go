@@ -50,6 +50,11 @@ var (
 	procUpdateLayeredWindow = user32.NewProc("UpdateLayeredWindow")
 	procDrawTextW           = user32.NewProc("DrawTextW")
 
+	// 工具条 / 弹出面板避让任务栏（toolbar_windows.go 的 clientWorkArea）用。
+	// 任务栏是工作区之外的应用栏，只有取到 MONITORINFO.rcWork 才知道它占了哪条边。
+	procMonitorFromPoint = user32.NewProc("MonitorFromPoint")
+	procGetMonitorInfoW  = user32.NewProc("GetMonitorInfoW")
+
 	// SetLayeredWindowAttributes 让文字输入窗整体半透明（见 textinput_windows.go）。
 	procSetLayeredWindowAttributes = user32.NewProc("SetLayeredWindowAttributes")
 
@@ -191,6 +196,9 @@ const mfString = 0x0000
 
 // hwndTopmost 等价于 Win32 的 (HWND)-1。
 var hwndTopmost = ^uintptr(0)
+
+// MonitorFromPoint
+const monitorDefaultToNearest = 0x00000002
 
 // UpdateLayeredWindow
 const (
@@ -358,6 +366,16 @@ type pointStruct struct{ X, Y int32 }
 
 // rectStruct 对应 Win32 RECT。
 type rectStruct struct{ Left, Top, Right, Bottom int32 }
+
+// monitorInfoW 对应 Win32 MONITORINFO。
+// CbSize 必须由调用方填 sizeof(MONITORINFO)，否则 GetMonitorInfoW 直接失败。
+// 四个字段都是 4 字节对齐，无隐式填充，尺寸正好 40 字节。
+type monitorInfoW struct {
+	CbSize    uint32
+	RcMonitor rectStruct
+	RcWork    rectStruct
+	DwFlags   uint32
+}
 
 // sizeStruct 对应 Win32 SIZE（GetTextExtentPoint32W 的输出）。
 type sizeStruct struct{ CX, CY int32 }

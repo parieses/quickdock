@@ -18,6 +18,40 @@ func VirtualDesktopBounds() Rect {
 	return Rect{X: int(int32(x)), Y: int(int32(y)), W: int(w), H: int(h)}
 }
 
+// monitorFromPoint 返回屏幕坐标点 (x, y) 所在显示器的句柄；失败返回 0。
+//
+// MonitorFromPoint 的 POINT 是**按值**传入的，x64 下 8 字节的结构体走单个寄存器，
+// 因此这里把 x / y 打包成一个 uintptr：低 32 位 x、高 32 位 y（小端）。
+func monitorFromPoint(x, y int) uintptr {
+	h, _, _ := procMonitorFromPoint.Call(
+		uintptr(uint32(int32(x)))|uintptr(uint32(int32(y)))<<32,
+		monitorDefaultToNearest)
+	return h
+}
+
+// monitorWork 返回显示器的工作区（排除任务栏、停靠栏等应用栏），屏幕物理像素坐标。
+// 第二个返回值为 false 表示取不到，调用方需自行兜底。
+func monitorWork(hmon uintptr) (Rect, bool) {
+	if hmon == 0 {
+		return Rect{}, false
+	}
+	mi := monitorInfoW{CbSize: uint32(unsafe.Sizeof(monitorInfoW{}))}
+	ret, _, _ := procGetMonitorInfoW.Call(hmon, uintptr(unsafe.Pointer(&mi)))
+	if ret == 0 {
+		return Rect{}, false
+	}
+	r := Rect{
+		X: int(mi.RcWork.Left),
+		Y: int(mi.RcWork.Top),
+		W: int(mi.RcWork.Right - mi.RcWork.Left),
+		H: int(mi.RcWork.Bottom - mi.RcWork.Top),
+	}
+	if r.Empty() {
+		return Rect{}, false
+	}
+	return r, true
+}
+
 // captureRect 用 GDI BitBlt 抓取虚拟桌面上的指定区域，返回 top-down 32bpp BGRA 位图。
 //
 // 实现上用 CreateDIBSection 建目标位图：BitBlt 直接把像素落进我们持有的内存，
