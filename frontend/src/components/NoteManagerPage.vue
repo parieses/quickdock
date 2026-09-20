@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { pendingOpenNoteId } from '../composables/bridge'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { pinyinMatch } from '../utils/pinyin'
 import ConfirmDialog from './ConfirmDialog.vue'
 import NoteTreeNode from './NoteTreeNode.vue'
 import { marked } from 'marked'
@@ -74,6 +75,9 @@ function flatten(arr: TreeNode[]): TreeNode[] {
 }
 const flatResults = computed<TreeNode[]>(() => flatten(tree.value))
 
+// 全量笔记树（load 时刷新）。搜索时后端只回子串命中的子集，拼音匹配需要完整树做前端扫描。
+const allNodes = ref<Note[]>([])
+
 function parseTagsS(json: string): string[] {
   try { const a = JSON.parse(json || '[]'); return Array.isArray(a) ? a.filter((x: unknown) => typeof x === 'string') : [] } catch { return [] }
 }
@@ -83,6 +87,7 @@ async function load() {
   try {
     const r = unwrap<Note[]>(await ListNotesTree())
     nodes.value = r || []
+    allNodes.value = r || []
     if (selectedDocId.value && !nodes.value.find(n => n.id === selectedDocId.value)) {
       selectedDocId.value = ''; docContent.value = ''; docTagsText.value = ''
     }
@@ -98,7 +103,16 @@ async function load() {
 async function doSearch() {
   const q = searchQuery.value.trim()
   if (!q) { await load(); return }
-  try { nodes.value = unwrap<Note[]>(await SearchNotesTree(q)) || [] } catch (e) { toast.error(getErrorMessage(e)) }
+  try {
+    // 后端按 name/content/tags 子串匹配；再叠加前端拼音匹配 name/keyword，
+    // 二者取并集（按 id 去重）。拼音逻辑统一走 utils/pinyin，与命令面板/工作空间一致。
+    const sub = unwrap<Note[]>(await SearchNotesTree(q)) || []
+    const py = allNodes.value.filter(n => pinyinMatch(n.name || n.keyword || '', q))
+    const byId = new Map<string, Note>()
+    for (const n of sub) byId.set(n.id, n)
+    for (const n of py) if (!byId.has(n.id)) byId.set(n.id, n)
+    nodes.value = [...byId.values()]
+  } catch (e) { toast.error(getErrorMessage(e)) }
 }
 watch(searchQuery, () => doSearch())
 function clearSearch() { searchQuery.value = ''; load() }
