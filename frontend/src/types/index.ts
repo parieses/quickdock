@@ -307,6 +307,8 @@ export interface PluginInfo {
   status: string
   hasFrontend: boolean
   usageCount: number
+  installedAt?: string
+  updatedAt?: string
   commands: PluginCommand[]
 }
 

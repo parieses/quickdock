@@ -213,12 +213,23 @@ function openPluginPage(p: PluginInfo) {
 
 // ---- 状态辅助 ----
 const statusOrder: Record<string, number> = { running: 0, crashed: 1, stopped: 2, starting: 3 }
+
+// 解析 RFC3339 时间串为毫秒时间戳；缺失/非法返回 0（排到最后）。
+function parseTs(s?: string): number {
+  if (!s) return 0
+  const n = Date.parse(s)
+  return isNaN(n) ? 0 : n
+}
+
 const sortedPlugins = computed(() => {
   return [...plugins.value].sort((a, b) => {
-    // 先按 useCount 倒序
+    // 先按 useCount 倒序（常用优先）
     if ((b.usageCount || 0) !== (a.usageCount || 0)) {
       return (b.usageCount || 0) - (a.usageCount || 0)
     }
+    // 频率相同时，最近安装/更新的排前面（新装或刚升级的一眼可见）
+    const tsDiff = parseTs(b.updatedAt) - parseTs(a.updatedAt)
+    if (tsDiff !== 0) return tsDiff
     // 再按状态排序
     const statusDiff = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99)
     if (statusDiff !== 0) return statusDiff

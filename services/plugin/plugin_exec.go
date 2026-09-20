@@ -27,6 +27,15 @@ func (p *PluginService) ListPlugins() *services.ApiResult {
 				}
 			}
 		}
+		// 补齐安装 / 更新时间（来源 DB plugins 表），供前端按「最近安装/更新」排序。
+		if stamps, err := p.App.DB.GetPluginTimestamps(); err == nil {
+			for i := range plugins {
+				if ts, ok := stamps[plugins[i].ID]; ok {
+					plugins[i].InstalledAt = ts.InstalledAt
+					plugins[i].UpdatedAt = ts.UpdatedAt
+				}
+			}
+		}
 	}
 	return services.Ok(plugins)
 }

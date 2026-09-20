@@ -90,7 +90,8 @@ func (p *PluginService) InstallPlugin(zipPath string) *services.ApiResult {
 		permissions["shell"] = manifest.Permissions.Shell
 		permissions["processKill"] = manifest.Permissions.ProcessKill
 	}
-	if err := p.App.DB.InsertPluginFull(manifest.ID, manifest.Name, manifest.Version, manifest.Author, manifest.Description, manifest.Category, iconData, manifest.Capabilities, permissions); err != nil {
+	// 安装 / 更新：refreshUpdatedAt=true，刷新 updated_at 供列表「最近安装/更新」排序。
+	if err := p.App.DB.InsertPluginFull(manifest.ID, manifest.Name, manifest.Version, manifest.Author, manifest.Description, manifest.Category, iconData, manifest.Capabilities, permissions, true); err != nil {
 		logger.E("插件 %s 写入数据库记录失败: %v", manifest.ID, err)
 	} else {
 		// 安装 / 更新成功 → 标记「新」角标（首次打开后由前端清除）

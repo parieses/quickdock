@@ -640,6 +640,14 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 	// 当前有效的内置插件 ID 集合，用于清理残留的数据库记录
 	validBuiltinIDs := make(map[string]bool)
 
+	// 已入库的内置插件版本（id → version）：元信息未变化的插件跳过写库，
+	// 与 syncEmbeddedFile「内容一致则跳过」保持同一策略，避免每次启动全量 upsert。
+	// 查询失败按空 map 处理 → 回退为「总是写」，保证首次/异常时元信息不丢。
+	existingVersions, _ := database.ListPluginVersions()
+	if existingVersions == nil {
+		existingVersions = map[string]string{}
+	}
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -669,27 +677,36 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 			continue
 		}
 
-		// 读取图标
-		iconData := ""
-		if mf.Icon != "" {
-			iconPath := filepath.Join(targetDir, mf.Icon)
-			if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
-				mime := platform.IconMIME(filepath.Ext(mf.Icon))
-				iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
+		// 元信息（以 version 为代表）与已入库记录一致 → 跳过写库：
+		// 内置插件没有「安装/更新」事件（随 exe 打包），首次运行/版本升级才需落库；
+		// 平时启动无需重写，避免每次启动对全部内置插件做无谓 upsert。
+		if v, ok := existingVersions[mf.ID]; ok && v == mf.Version {
+			logger.I("QuickDock: 内置插件 %s (%s) 元信息未变化，跳过写库", mf.ID, mf.Version)
+		} else {
+			// 读取图标
+			iconData := ""
+			if mf.Icon != "" {
+				iconPath := filepath.Join(targetDir, mf.Icon)
+				if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
+					mime := platform.IconMIME(filepath.Ext(mf.Icon))
+					iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
+				}
 			}
-		}
 
-		// 写入数据库记录（含 capabilities / permissions / category / icon）
-		perms := make(map[string]interface{})
-		if mf.Permissions.Network.Granted() || mf.Permissions.Filesystem.Granted() || mf.Permissions.Clipboard || mf.Permissions.Shell.Granted() || mf.Permissions.ProcessKill {
-			perms["network"] = mf.Permissions.Network
-			perms["filesystem"] = mf.Permissions.Filesystem
-			perms["clipboard"] = mf.Permissions.Clipboard
-			perms["shell"] = mf.Permissions.Shell
-			perms["processKill"] = mf.Permissions.ProcessKill
-		}
-		if err := database.InsertPluginFull(mf.ID, mf.Name, mf.Version, mf.Author, mf.Description, mf.Category, iconData, mf.Capabilities, perms); err != nil {
-			logger.W("QuickDock: 内置插件 %s 写入数据库失败: %v", pluginID, err)
+			// 写入数据库记录（含 capabilities / permissions / category / icon）
+			perms := make(map[string]interface{})
+			if mf.Permissions.Network.Granted() || mf.Permissions.Filesystem.Granted() || mf.Permissions.Clipboard || mf.Permissions.Shell.Granted() || mf.Permissions.ProcessKill {
+				perms["network"] = mf.Permissions.Network
+				perms["filesystem"] = mf.Permissions.Filesystem
+				perms["clipboard"] = mf.Permissions.Clipboard
+				perms["shell"] = mf.Permissions.Shell
+				perms["processKill"] = mf.Permissions.ProcessKill
+			}
+			// 启动注册内置插件：refreshUpdatedAt=false，保留既有 updated_at，
+			// 避免每次启动都把内置插件刷成「最近更新」而冲乱插件列表排序。
+			if err := database.InsertPluginFull(mf.ID, mf.Name, mf.Version, mf.Author, mf.Description, mf.Category, iconData, mf.Capabilities, perms, false); err != nil {
+				logger.W("QuickDock: 内置插件 %s 写入数据库失败: %v", pluginID, err)
+			}
 		}
 
 		// 加载插件（DiscoverAndLoad 已加载运行中实例则跳过，避免 stop→重启 双重加载）
