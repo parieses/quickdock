@@ -22,6 +22,8 @@ type PluginManifest struct {
 	Version         string            `json:"version"`
 	Description     string            `json:"description,omitempty"`
 	DescriptionI18n map[string]string `json:"description_i18n,omitempty"` // 多语言描述
+	Changelog        string            `json:"changelog,omitempty"`        // 更新日志（纯文本/Markdown），市场详情页展示
+	ChangelogI18n    map[string]string `json:"changelog_i18n,omitempty"`   // 多语言更新日志
 	Author          string            `json:"author,omitempty"`
 	Icon            string            `json:"icon,omitempty"`
 	Category        string            `json:"category,omitempty"`

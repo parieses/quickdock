@@ -49,6 +49,10 @@ type marketPlugin struct {
 	// 展示信息
 	Description     string            `json:"description"`
 	DescriptionI18n map[string]string `json:"description_i18n,omitempty"`
+	// 更新日志（纯文本/Markdown），详情页「更新日志」区块展示；
+	// changelog_i18n 提供多语言版本，前端按当前 locale 优先取。
+	Changelog     string            `json:"changelog,omitempty"`
+	ChangelogI18n map[string]string `json:"changelog_i18n,omitempty"`
 	Author          string            `json:"author"`
 	Category        string            `json:"category"`
 	Icon            string            `json:"icon"`

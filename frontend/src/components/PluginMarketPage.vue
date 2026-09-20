@@ -598,7 +598,31 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .btn-disabled { color: var(--color-text-disabled); }
 
 /* 插件详情弹窗 */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  display: flex; align-items: center; justify-content: center; z-index: 50;
+}
+/* 弹窗卡片基类：同 EnvironmentPage 标准。此前缺失导致弹框裸奔（无遮罩/无卡片背景/无内边距/无圆角阴影） */
+.modal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.5);
+  padding: 20px 22px;
+  color: var(--color-text-primary);
+}
 .plugin-detail { position: relative; max-width: 560px; width: 92%; max-height: 82vh; overflow-y: auto; }
+.modal-actions {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border);
+}
+.op-btn {
+  font-size: 12px; padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
+  font-family: inherit; transition: background .15s, color .15s; white-space: nowrap;
+}
+.op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
+.op-btn:disabled { opacity: .4; cursor: default; }
 .detail-close {
   position: absolute; top: 10px; right: 12px; width: 26px; height: 26px; border-radius: var(--radius-sm);
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
@@ -632,7 +656,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .detail-shots { display: flex; flex-wrap: wrap; gap: 8px; }
 .detail-shot { width: 160px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); }
-.detail-install { width: auto; padding: 7px 16px; }
+.detail-install { width: auto; padding: 7px 16px; text-decoration: none; }
 </style>
 
 
