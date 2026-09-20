@@ -48,6 +48,14 @@ const (
 	pluginURLMaxLen     = 8 << 10 // url 长度上限 8 KiB，防超长 URL 拖慢 / 触发异常
 )
 
+// 屏幕取色等场景临时隐藏宿主窗口时的可见性快照：host.window.show 据此只还原
+// 原本可见的窗口，避免取色结束后误弹出取色前就已隐藏的窗口（如主面板）。
+var (
+	pickWindowHiddenMain    bool
+	pickWindowHiddenPalette bool
+	pickWindowHiddenPlugin  bool
+)
+
 // pluginNetworkPerm 取插件声明的网络权限（用于 HTTP 域名白名单校验）。
 func (svc *PluginService) pluginNetworkPerm(pluginID string) plugin.NetworkPerm {
 	if svc.App.PluginMgr == nil {
@@ -388,7 +396,63 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 	// ---- 文件系统（host.fs.*，实现在 plugin_fs.go）----
 	svc.registerFSHostMethods()
 
-	logger.I("插件 Host API 已注入（clipboard / notify / dialog / http / fs / mcp / db）；插件日志写入 plugin-YYYYMMDD.log")
+	// ---- 窗口显隐（供插件在屏幕取色等场景临时隐藏宿主窗口，避免遮挡取样区域）----
+	// 同时管控「主窗口 + 命令面板窗口」：内联插件渲染在面板窗口里，仅隐藏主窗口盖不住它。
+	// 隐藏前记录各自原可见性，恢复时只还原原本可见的窗口，避免取色后误弹出原本隐藏的窗口。
+	// 无额外权限门槛（纯 UI 便利，低风险）；同步 WindowFlags 防止热键 toggle 状态错位。
+	svc.App.PluginMgr.InjectHostMethod("host.window.hide", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		mainWasVisible := svc.App.MainWindow != nil && svc.App.MainWindow.IsVisible()
+		paletteWin := svc.App.GetPaletteWindow()
+		paletteWasVisible := paletteWin != nil && paletteWin.IsVisible()
+		pickWindowHiddenMain = mainWasVisible
+		pickWindowHiddenPalette = paletteWasVisible
+		pluginWinVisible := svc.App.PluginWindowMgr != nil && svc.App.PluginWindowMgr.IsWindowVisible(pluginID)
+		pickWindowHiddenPlugin = pluginWinVisible
+		if mainWasVisible && svc.App.MainWindow != nil {
+			svc.App.MainWindow.Hide()
+			if svc.App.Flags != nil {
+				svc.App.Flags.Main.Store(false)
+				svc.App.Flags.Clipboard.Store(false)
+			}
+		}
+		if paletteWasVisible && paletteWin != nil {
+			paletteWin.Hide()
+			if svc.App.Flags != nil {
+				svc.App.Flags.Palette.Store(false)
+			}
+		}
+		// 独立插件窗口（如「在窗口中打开」模式）：同样临时隐藏，取色后才恢复
+		if pluginWinVisible && svc.App.PluginWindowMgr != nil {
+			svc.App.PluginWindowMgr.Hide(pluginID)
+		}
+		return map[string]interface{}{"success": true}, nil
+	})
+
+	svc.App.PluginMgr.InjectHostMethod("host.window.show", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		if pickWindowHiddenMain && svc.App.MainWindow != nil {
+			svc.App.MainWindow.Show()
+			svc.App.MainWindow.Focus()
+			if svc.App.Flags != nil {
+				svc.App.Flags.Main.Store(true)
+			}
+		}
+		if pickWindowHiddenPalette {
+			if paletteWin := svc.App.GetPaletteWindow(); paletteWin != nil {
+				paletteWin.Show()
+				paletteWin.Focus()
+				if svc.App.Flags != nil {
+					svc.App.Flags.Palette.Store(true)
+				}
+			}
+		}
+		// 恢复被临时隐藏的独立插件窗口（若原本可见）
+		if pickWindowHiddenPlugin && svc.App.PluginWindowMgr != nil {
+			svc.App.PluginWindowMgr.ShowWindow(pluginID)
+		}
+		return map[string]interface{}{"success": true}, nil
+	})
+
+	logger.I("插件 Host API 已注入（clipboard / notify / dialog / http / fs / mcp / db / window）；插件日志写入 plugin-YYYYMMDD.log")
 }
 
 // CallPluginHostMethod 供宿主前端（插件 iframe 桥接）按插件身份代发任意 host 方法。

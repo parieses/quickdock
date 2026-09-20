@@ -186,6 +186,31 @@ func (m *PluginWindowManager) Hide(pluginID string) {
 	}
 }
 
+// IsWindowVisible 返回指定插件独立窗口当前是否可见（不存在返回 false）。
+// 供 host.window.hide/show 在「临时隐藏后恢复」时判断该窗口原本是否可见，
+// 仅恢复原本可见的，避免从未开独立窗口的插件凭空弹窗。
+func (m *PluginWindowManager) IsWindowVisible(pluginID string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	win, ok := m.windows[pluginID]
+	if !ok || win == nil {
+		return false
+	}
+	return win.IsVisible()
+}
+
+// ShowWindow 复用一个已存在的插件独立窗口（不新建），不存在则 no-op。
+// 仅用于「取色等临时隐藏后恢复」——绝不在未开独立窗口时凭空创建窗口。
+func (m *PluginWindowManager) ShowWindow(pluginID string) {
+	m.mu.Lock()
+	win, ok := m.windows[pluginID]
+	m.mu.Unlock()
+	if ok && win != nil {
+		win.Show()
+		win.Focus()
+	}
+}
+
 // cancelRecycleLocked 取消某窗口的回收计时器，调用方须持 m.mu。
 func (m *PluginWindowManager) cancelRecycleLocked(pluginID string) {
 	if t, ok := m.recycleTimers[pluginID]; ok {
