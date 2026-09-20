@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"time"
 
@@ -214,14 +215,50 @@ func (m *Manager) CertIssue(outDir, name string, hosts []string) (map[string]str
 	}
 	certPath := filepath.Join(outDir, name+"-cert.pem")
 	keyPath := filepath.Join(outDir, name+"-key.pem")
+	hostsKey := certHostsKey(hosts)
+	hostsFile := filepath.Join(outDir, name+".hosts")
+
+	// 短路复用：证书已存在且覆盖的域名与本次请求完全一致，直接返回既有路径，
+	// 跳过 mkcert 子进程。mkcert 签发有效期约 10 年，跨进程重启后 on-disk 证书仍有效，
+	// 无需每次启动重签（此前每次启动都重签，固定吃 2~6s）。域名集变化（增删站点）时
+	// hosts 不一致，照常重新签发。
+	if certReusable(certPath, keyPath, hostsFile, hostsKey) {
+		logger.I("[env] mkcert 复用已有证书 cert=%s key=%s hosts=%v", certPath, keyPath, hosts)
+		return map[string]string{"cert": certPath, "key": keyPath}, nil
+	}
+
 	args := []string{"-cert-file", certPath, "-key-file", keyPath}
 	args = append(args, hosts...)
 	out, err := runCertCmd(exe, args...)
 	if err != nil {
 		return nil, fmt.Errorf("签发失败: %s", strings.TrimSpace(out))
 	}
+	// 记录本次签发覆盖的域名，供下次启动短路比对（域名不变即可跳过 mkcert）。
+	_ = os.WriteFile(hostsFile, []byte(hostsKey), 0644)
 	logger.I("[env] mkcert 签发完成 cert=%s key=%s hosts=%v", certPath, keyPath, hosts)
 	return map[string]string{"cert": certPath, "key": keyPath}, nil
+}
+
+// certHostsKey 把域名集归一化为稳定字符串（排序后拼接），用于比对证书覆盖的域名是否变化。
+func certHostsKey(hosts []string) string {
+	s := append([]string{}, hosts...)
+	sort.Strings(s)
+	return strings.Join(s, ",")
+}
+
+// certReusable 判断既有证书是否可直接复用：cert/key 文件都存在，且记录的域名集与本次一致。
+func certReusable(certPath, keyPath, hostsFile, wantKey string) bool {
+	if wantKey == "" {
+		return false
+	}
+	if !fileExists(certPath) || !fileExists(keyPath) {
+		return false
+	}
+	data, err := os.ReadFile(hostsFile)
+	if err != nil {
+		return false // 无记录则保守重签，避免误用旧域名证书
+	}
+	return strings.TrimSpace(string(data)) == wantKey
 }
 
 // runCertCmd 以隐藏控制台方式执行一次 mkcert 命令并捕获合并输出，带 60s 超时。
