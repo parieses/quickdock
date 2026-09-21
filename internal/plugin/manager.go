@@ -190,6 +190,19 @@ func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 		jobs = append(jobs, pluginJob{manifest: *manifest, dir: filepath.Join(m.pluginsDir, entry.Name())})
 	}
 
+	// 懒加载（默认）：只登记，不起后端进程 / goja VM。native 的 cmd.Start() + initialize
+	// 握手延后到首次 EnsureLoaded（打开插件页 / 执行命令 / ShowPluginWindow 都经它）。
+	// 直接消掉「启动时把全部 native 插件都拉成常驻进程」的开销——实测 26 个 native 合计
+	// Private ~340 MB / RSS ~60 MB，而日常只会用到其中少数几个。
+	// 置 EnableLazyPluginLoad=false 可一键回滚到「启动即全量加载」的旧链路。
+	if m.EnableLazyPluginLoad {
+		for _, job := range jobs {
+			m.RegisterPlugin(job.manifest, job.dir)
+		}
+		logger.I("插件懒加载：已登记 %d 个启用插件，后端进程延后到首次使用", len(jobs))
+		return nil
+	}
+
 	var wg sync.WaitGroup
 	for _, job := range jobs {
 		wg.Add(1)

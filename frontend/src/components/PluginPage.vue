@@ -4,7 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { Minus, Square, X, RotateCw } from '@lucide/vue'
 
 import {
-  HidePluginWindow,
+  ClosePluginWindow,
   MinimizePluginWindow,
   ToggleMaximizePluginWindow,
 } from '../../bindings/quickdock/services/plugin/pluginservice'
@@ -17,9 +17,11 @@ const pluginName = ref(props.pluginId)
 
 const frameRef = ref<InstanceType<typeof PluginFrame> | null>(null)
 
-// 独立窗口：init 走全局 pending init（跨窗口传入），前端在此页不主动注入
+// 独立窗口：init 走全局 pending init（跨窗口传入），前端在此页不主动注入。
+// 关闭 = 立即销毁窗口并停插件进程（ClosePluginWindow），不做保活——用户点 X 是明确
+// 不要了，留着一个 WebView2 renderer（60~130 MB）等 10 分钟超时回收是纯浪费。
 function closeWindow() {
-  HidePluginWindow(props.pluginId)
+  ClosePluginWindow(props.pluginId)
 }
 
 // 刷新/重置：重建 iframe 让插件页回到初始状态（窗口与进程保持复用）

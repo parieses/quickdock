@@ -186,6 +186,29 @@ func (m *PluginWindowManager) Hide(pluginID string) {
 	}
 }
 
+// Close 立即销毁插件窗口（用户点窗口关闭按钮 = 明确不要了，不做保活复用）。
+//
+// 与 Hide 的区别：Hide 只隐藏并起回收计时器，窗口的 WebView2 renderer（实测 60~130 MB）
+// 仍常驻到超时；Close 立刻从注册表移除并 Close，Close 触发 WindowClosing 钩子完成
+//「停插件进程」（关窗即终止）。下次打开经 EnsureLoaded 惰性复活。
+//
+// 关掉的插件窗口没有复用价值——用户已经表示不要了——所以不该白占 renderer 到超时。
+func (m *PluginWindowManager) Close(pluginID string) {
+	m.mu.Lock()
+	win, ok := m.windows[pluginID]
+	if !ok {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.windows, pluginID)
+	m.cancelRecycleLocked(pluginID)
+	m.mu.Unlock()
+
+	// 锁外销毁：Close 触发 WindowClosing 钩子（删引用 + 停进程），与 recycle 同一退出路径。
+	win.Close()
+	logger.I("[plugin-window] 关闭并销毁插件窗口 %s（不保活，立即释放 WebView2）", pluginID)
+}
+
 // IsWindowVisible 返回指定插件独立窗口当前是否可见（不存在返回 false）。
 // 供 host.window.hide/show 在「临时隐藏后恢复」时判断该窗口原本是否可见，
 // 仅恢复原本可见的，避免从未开独立窗口的插件凭空弹窗。

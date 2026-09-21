@@ -131,12 +131,19 @@ async function killPlugin(p: PluginInfo) {
   }
 }
 
+// 插件的「已启用」语义 = 运行中（running）或 已登记待启动（registered）。
+// 懒加载后多数插件处于 registered（已启用、进程待首次使用才拉起），电源按钮必须按
+//「已启用」处理才能正确禁用；否则会出现「显示启用、点了只是把它启动起来、且禁用不掉」的错位。
+function isEnabled(p: PluginInfo): boolean {
+  return p.status === 'running' || p.status === 'registered'
+}
+
 // ---- 启用/禁用 ----
 async function togglePlugin(p: PluginInfo) {
   if (operating.value.has(p.id)) return
   operating.value.add(p.id)
   try {
-    if (p.status === 'running') {
+    if (isEnabled(p)) {
       await DisablePlugin(p.id)
       p.status = 'stopped'
     } else {
@@ -334,12 +341,12 @@ onMounted(() => { loadPlugins(); loadLogs() })
         <!-- 悬停操作按钮 -->
         <div class="card-actions-top">
           <button
-            :class="['action-top-btn', p.status === 'running' ? 'btn-stop-top' : 'btn-start-top']"
+            :class="['action-top-btn', isEnabled(p) ? 'btn-stop-top' : 'btn-start-top']"
             :disabled="operating.has(p.id)"
             @click.stop="togglePlugin(p)"
-            :title="p.status === 'running' ? t('pluginDisable') : t('pluginEnable')"
+            :title="isEnabled(p) ? t('pluginDisable') : t('pluginEnable')"
           >
-            <component :is="p.status === 'running' ? PowerOff : Power" :size="12" />
+            <component :is="isEnabled(p) ? PowerOff : Power" :size="12" />
           </button>
           <button
             v-if="p.status === 'running' || p.status === 'crashed'"

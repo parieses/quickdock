@@ -37,8 +37,12 @@ var winmgrWin *application.WebviewWindow
 //     崩溃隔离，代价是任务管理器里多几个 msedgewebview2 进程（几 MB/个，可接受）。
 //   - 不传 --disable-renderer-backgrounding：让 WebView2 在 PutIsVisible(false) 时
 //     自动释放渲染/GPU 资源（后台窗口降级）。
+//   - 已解除 Printing 禁用（2026-09-21，为"字帖打印"插件的 window.print()）：
+//     Chromium 的 Printing 特性被禁用时 window.print() 变成空操作（不报错、不弹框），
+//     插件侧无法自救。该禁用原本只为收敛功能面，与内存优化无关，解除后无额外收益损失。
+//     代价：所有 WebView2 窗口（含插件 iframe）都恢复了打印能力，属全局变更。
 var memoryOptimizedArgs = []string{
-	"--disable-features=msSmartScreenProtection,Printing,Translate,ReadingList,MediaSessionService,NotificationService,PasswordManager,ChromeWhatsNewUI",
+	"--disable-features=msSmartScreenProtection,Translate,ReadingList,MediaSessionService,NotificationService,PasswordManager,ChromeWhatsNewUI",
 	"--disable-sync",
 	"--disable-background-networking",
 	"--disable-background-timer-throttling",
@@ -50,9 +54,9 @@ var memoryOptimizedArgs = []string{
 }
 
 // disabledFeatures 禁用的 Chromium 特性
+// 注意：不含 Printing——字帖打印插件需要 window.print()，见上方 memoryOptimizedArgs 注释。
 var disabledFeatures = []string{
 	"msSmartScreenProtection",
-	"Printing",
 	"Translate",
 	"ReadingList",
 }

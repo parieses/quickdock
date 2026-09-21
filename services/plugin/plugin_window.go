@@ -57,6 +57,18 @@ func (p *PluginService) HidePluginWindow(pluginID string) {
 	p.App.PluginWindowMgr.Hide(pluginID)
 }
 
+// ClosePluginWindow 关闭并销毁插件窗口（插件窗口标题栏的关闭按钮）。
+//
+// 与 HidePluginWindow 的分工：Hide 保活复用（隐藏 + 10 分钟延迟回收）；Close 立即销毁
+// 窗口并停插件进程。用户点 X 是明确不要了，没有复用价值，不该让该窗口的 WebView2
+// renderer（实测 60~130 MB）继续常驻到超时。
+func (p *PluginService) ClosePluginWindow(pluginID string) {
+	if p.App.PluginWindowMgr == nil {
+		return
+	}
+	p.App.PluginWindowMgr.Close(pluginID)
+}
+
 // MinimizePluginWindow 最小化指定插件的窗口
 func (p *PluginService) MinimizePluginWindow(pluginID string) {
 	if p.App.PluginWindowMgr == nil {

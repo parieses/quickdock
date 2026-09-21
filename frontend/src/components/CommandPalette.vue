@@ -937,13 +937,16 @@ async function loadPluginIndex(forceIcons = false) {
   lastPluginIndexLoad = now
   try {
     const plugins = unwrap<PluginInfo[]>(await ListPlugins())
-    const running = plugins?.filter(p => p.status === 'running') || []
-    installedPlugins.value = running
-    pluginCmdIndex.value = buildPluginIndex(running)
+    // 懒加载后已启用插件多数处于 registered（进程/VM 待首次使用才起），必须一并建进索引：
+    // 否则命令面板搜不到它们，也就无从触发拉起（EnsureLoaded）——死锁。
+    // 排除的只有用户显式禁用的 stopped（DisablePlugin 只置 stopped、仍留在列表里）。
+    const enabled = plugins?.filter(p => p.status !== 'stopped') || []
+    installedPlugins.value = enabled
+    pluginCmdIndex.value = buildPluginIndex(enabled)
     // 预加载插件真实图标（data URI），结果列表据此展示，无图标的插件回退到 Puzzle
     if (forceIcons || now - lastPluginIconLoad >= PLUGIN_ICON_TTL) {
       lastPluginIconLoad = now
-      const iconPromises = running.map(async (p) => {
+      const iconPromises = enabled.map(async (p) => {
         try { const uri = unwrap<string | null>(await GetPluginIcon(p.id)); if (uri) pluginIcons.value[p.id] = uri } catch {}
       })
       await Promise.all(iconPromises)
