@@ -31,6 +31,7 @@ const CommandPalette = defineAsyncComponent(() => import('./components/CommandPa
 const PluginManagerPage = defineAsyncComponent(() => import('./components/PluginManagerPage.vue'))
 const NoteManagerPage = defineAsyncComponent(() => import('./components/NoteManagerPage.vue'))
 const PluginPage = defineAsyncComponent(() => import('./components/PluginPage.vue'))
+const WindowManager = defineAsyncComponent(() => import('./components/WindowManager.vue'))
 const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
 const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
 const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
@@ -138,6 +139,7 @@ window.addEventListener('hashchange', () => {
 
 const isClipboardWindow = computed(() => hashRef.value === '#/clipboard')
 const isNoteWindow = computed(() => hashRef.value === '#/note')
+const isWinmgrWindow = computed(() => hashRef.value === '#/window-manager')
 const isPaletteWindow = computed(() => hashRef.value === '#/command-palette')
 const isPluginWindow = computed(() => {
   return hashRef.value.startsWith('#/plugin')
@@ -213,6 +215,11 @@ const activeConfirm = computed(() =>
   <!-- 快捷笔记独立窗口：复用剪贴板窗口，导航到 #/note -->
   <div v-else-if="isNoteWindow" class="note-standalone">
     <NotePanel />
+  </div>
+
+  <!-- 窗口管理浮层：选模板→分配窗口→一键排版 -->
+  <div v-else-if="isWinmgrWindow" class="winmgr-standalone">
+    <WindowManager />
   </div>
 
   <!-- 命令面板独立窗口 -->
@@ -328,6 +335,11 @@ body {
 }
 
 .plugin-standalone {
+  height: 100vh; width: 100vw; overflow: hidden;
+  background: var(--color-bg-primary);
+}
+
+.winmgr-standalone {
   height: 100vh; width: 100vw; overflow: hidden;
   background: var(--color-bg-primary);
 }

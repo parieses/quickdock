@@ -74,7 +74,7 @@
 
 - Windows 10 1809+ 或 Windows 11
 - WebView2 Runtime（Windows 自带，无需单独安装）
-- 磁盘约 100MB
+- 磁盘约 50MB
 
 **安装**
 

@@ -28,6 +28,7 @@ type AppService struct {
 	GetClipboardWindow func() *application.WebviewWindow
 	GetPaletteWindow   func() *application.WebviewWindow
 	GetNoteWindow      func() *application.WebviewWindow
+	GetWinmgrWindow    func() *application.WebviewWindow
 
 	// Flags 主窗口与各浮窗的可见/模式标志（见 WindowFlags）。
 	// 由 NewAppService 创建，main 包持有同一实例——不再是 4 个跨包注入的裸指针，

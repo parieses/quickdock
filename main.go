@@ -164,6 +164,8 @@ const (
 	clipWinHeight    = 540
 	paletteWinWidth  = 900
 	paletteWinHeight = 600
+	winmgrWinWidth   = 900
+	winmgrWinHeight  = 700
 )
 
 // 主窗口与各浮窗的可见/模式标志：与 services 共享同一实例（见 services.WindowFlags）。

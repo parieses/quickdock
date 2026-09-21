@@ -227,6 +227,17 @@ async function resetScreenshotDefault() {
   try { await SetScreenshotHotkeyConfig(0, 0x70); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
 }
 
+function isDefault(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot'): boolean {
+  switch (type) {
+    case 'app': return currentModifiers.value === 2 && currentVk.value === 32
+    case 'clipboard': return clipModifiers.value === 2 && clipVk.value === 0xC0
+    case 'palette': return paletteModifiers.value === 2 && paletteVk.value === 0x4B
+    case 'note': return noteModifiers.value === 6 && noteVk.value === 0x4E
+    case 'screenshot': return shotModifiers.value === 0 && shotVk.value === 0x70
+  }
+  return false
+}
+
 // 暴露 capturing 状态给父组件（SettingsModal）
 defineExpose({ capturing })
 </script>
@@ -235,125 +246,92 @@ defineExpose({ capturing })
   <div class="hotkey-page">
     <h3 class="page-title">{{ t('hotkeySettings') }}</h3>
 
-    <div class="hotkey-card">
-      <div class="hc-title">{{ t('globalActivate') }}</div>
-      <div class="hotkey-row">
-        <span class="hotkey-label">{{ t('shortcut') }}</span>
-        <div
-          :class="['hotkey-display', { capturing: capturing === 'app' }]"
-          @click="startCapture('app')"
-        >
-          <template v-if="capturing === 'app'">
-            <span class="capture-hint">{{ t('pressKeys') }}</span>
-          </template>
-          <template v-else>
-            <span class="hotkey-badge">{{ currentLabel }}</span>
-            <span class="hotkey-edit-hint">{{ t('clickToModify') }}</span>
-          </template>
-        </div>
-        <button class="reset-sm" @click="resetAppDefault" :title="t('restoreDefault')">
+    <section class="hk-card">
+      <div class="hk-card-head">
+        <span class="hk-card-title">{{ t('globalActivate') }}</span>
+        <span class="hk-card-sub">{{ t('hotkeyDesc') }}</span>
+      </div>
+      <div class="hk-row">
+        <button class="hk-kbd" :class="{ capturing: capturing === 'app' }" :title="t('clickToModify')" @click="startCapture('app')">
+          <span v-if="capturing === 'app'" class="hk-capturing">{{ t('pressKeys') }}</span>
+          <span v-else class="hk-keys">{{ currentLabel }}</span>
+        </button>
+        <button v-show="!isDefault('app')" class="hk-reset" :title="t('restoreDefault')" @click="resetAppDefault">
           <RotateCcw :size="12" />
         </button>
       </div>
-      <p class="hc-desc">{{ t('hotkeyDesc') }}</p>
-    </div>
+    </section>
 
-    <div class="hotkey-card">
-      <div class="hc-title">{{ t('clipboardHotkey') }}</div>
-      <div class="hotkey-row">
-        <span class="hotkey-label">{{ t('shortcut') }}</span>
-        <div
-          :class="['hotkey-display', { capturing: capturing === 'clipboard' }]"
-          @click="startCapture('clipboard')"
-        >
-          <template v-if="capturing === 'clipboard'">
-            <span class="capture-hint">{{ t('pressKeys') }}</span>
-          </template>
-          <template v-else>
-            <span class="hotkey-badge">{{ clipLabel }}</span>
-            <span class="hotkey-edit-hint">{{ t('clickToModify') }}</span>
-          </template>
-        </div>
-        <button class="reset-sm" @click="resetClipDefault" :title="t('restoreDefault')">
+    <section class="hk-card">
+      <div class="hk-card-head">
+        <span class="hk-card-title">{{ t('clipboardHotkey') }}</span>
+        <span class="hk-card-sub">{{ t('clipboardHotkeyDesc') }}</span>
+      </div>
+      <div class="hk-row">
+        <button class="hk-kbd" :class="{ capturing: capturing === 'clipboard' }" :title="t('clickToModify')" @click="startCapture('clipboard')">
+          <span v-if="capturing === 'clipboard'" class="hk-capturing">{{ t('pressKeys') }}</span>
+          <span v-else class="hk-keys">{{ clipLabel }}</span>
+        </button>
+        <button v-show="!isDefault('clipboard')" class="hk-reset" :title="t('restoreDefault')" @click="resetClipDefault">
           <RotateCcw :size="12" />
         </button>
       </div>
-      <p class="hc-desc">{{ t('clipboardHotkeyDesc') }}</p>
-    </div>
+    </section>
 
-    <div class="hotkey-card">
-      <div class="hc-title">{{ t('paletteHotkey') }}</div>
-      <div class="hotkey-row">
-        <span class="hotkey-label">{{ t('shortcut') }}</span>
-        <div
-          :class="['hotkey-display', { capturing: capturing === 'palette' }]"
-          @click="startCapture('palette')"
-        >
-          <template v-if="capturing === 'palette'">
-            <span class="capture-hint">{{ t('pressKeys') }}</span>
-          </template>
-          <template v-else>
-            <span class="hotkey-badge">{{ paletteLabel }}</span>
-            <span class="hotkey-edit-hint">{{ t('clickToModify') }}</span>
-          </template>
-        </div>
-        <button class="reset-sm" @click="resetPaletteDefault" :title="t('restoreDefault')">
+    <section class="hk-card">
+      <div class="hk-card-head">
+        <span class="hk-card-title">{{ t('paletteHotkey') }}</span>
+        <span class="hk-card-sub">{{ t('paletteHotkeyDesc') }}</span>
+      </div>
+      <div class="hk-row">
+        <button class="hk-kbd" :class="{ capturing: capturing === 'palette' }" :title="t('clickToModify')" @click="startCapture('palette')">
+          <span v-if="capturing === 'palette'" class="hk-capturing">{{ t('pressKeys') }}</span>
+          <span v-else class="hk-keys">{{ paletteLabel }}</span>
+        </button>
+        <button v-show="!isDefault('palette')" class="hk-reset" :title="t('restoreDefault')" @click="resetPaletteDefault">
           <RotateCcw :size="12" />
         </button>
       </div>
-      <p class="hc-desc">{{ t('paletteHotkeyDesc') }}</p>
-    </div>
+    </section>
 
-    <div class="hotkey-card">
-      <div class="hc-title">{{ t('noteHotkey') }}</div>
-      <div class="hotkey-row">
-        <span class="hotkey-label">{{ t('shortcut') }}</span>
-        <div
-          :class="['hotkey-display', { capturing: capturing === 'note' }]"
-          @click="startCapture('note')"
-        >
-          <template v-if="capturing === 'note'">
-            <span class="capture-hint">{{ t('pressKeys') }}</span>
-          </template>
-          <template v-else>
-            <span class="hotkey-badge">{{ noteLabel }}</span>
-            <span class="hotkey-edit-hint">{{ t('clickToModify') }}</span>
-          </template>
-        </div>
-        <button class="reset-sm" @click="resetNoteDefault" :title="t('restoreDefault')">
+    <section class="hk-card">
+      <div class="hk-card-head">
+        <span class="hk-card-title">{{ t('noteHotkey') }}</span>
+        <span class="hk-card-sub">{{ t('noteHotkeyDesc') }}</span>
+      </div>
+      <div class="hk-row">
+        <button class="hk-kbd" :class="{ capturing: capturing === 'note' }" :title="t('clickToModify')" @click="startCapture('note')">
+          <span v-if="capturing === 'note'" class="hk-capturing">{{ t('pressKeys') }}</span>
+          <span v-else class="hk-keys">{{ noteLabel }}</span>
+        </button>
+        <button v-show="!isDefault('note')" class="hk-reset" :title="t('restoreDefault')" @click="resetNoteDefault">
           <RotateCcw :size="12" />
         </button>
       </div>
-      <p class="hc-desc">{{ t('noteHotkeyDesc') }}</p>
-    </div>
+    </section>
 
-    <div class="hotkey-card">
-      <div class="hc-title">{{ t('screenshotHotkey') }}</div>
-      <div class="hotkey-row">
-        <span class="hotkey-label">{{ t('shortcut') }}</span>
-        <div
-          :class="['hotkey-display', { capturing: capturing === 'screenshot' }]"
-          @click="startCapture('screenshot')"
-        >
-          <template v-if="capturing === 'screenshot'">
-            <span class="capture-hint">{{ t('pressKeys') }}</span>
-          </template>
-          <template v-else>
-            <span class="hotkey-badge">{{ shotLabel }}</span>
-            <span class="hotkey-edit-hint">{{ t('clickToModify') }}</span>
-          </template>
-        </div>
-        <button class="reset-sm" @click="resetScreenshotDefault" :title="t('restoreDefault')">
+    <section class="hk-card">
+      <div class="hk-card-head">
+        <span class="hk-card-title">{{ t('screenshotHotkey') }}</span>
+        <span class="hk-card-sub">{{ t('screenshotHotkeyDesc') }}</span>
+      </div>
+      <div class="hk-row">
+        <button class="hk-kbd" :class="{ capturing: capturing === 'screenshot' }" :title="t('clickToModify')" @click="startCapture('screenshot')">
+          <span v-if="capturing === 'screenshot'" class="hk-capturing">{{ t('pressKeys') }}</span>
+          <span v-else class="hk-keys">{{ shotLabel }}</span>
+        </button>
+        <button v-show="!isDefault('screenshot')" class="hk-reset" :title="t('restoreDefault')" @click="resetScreenshotDefault">
           <RotateCcw :size="12" />
         </button>
       </div>
-      <p class="hc-desc">{{ t('screenshotHotkeyDesc') }}</p>
+    </section>
+
+    <div class="hk-actions">
+      <button class="hk-btn hk-btn-primary" @click="saveAll">{{ t('saveAll') }}</button>
     </div>
+    <p v-if="message" class="hk-msg">{{ message }}</p>
 
-    <button class="save-btn" @click="saveAll">{{ t('saveAll') }}</button>
-    <p v-if="message" class="hotkey-msg">{{ message }}</p>
-
-    <p class="hotkey-tip">
+    <p class="hk-tip">
       <Keyboard :size="14" class="tip-icon" />
       {{ t('hotkeyTip') }}
     </p>
@@ -362,46 +340,93 @@ defineExpose({ capturing })
 
 <style scoped>
 .hotkey-page { width: 100%; max-width: 600px; }
-.page-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 24px; }
-.hotkey-card { background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-md); padding: 16px 20px; margin-bottom: 16px; }
-.hc-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); margin-bottom: 12px; }
-.hc-desc { font-size: 11px; color: var(--color-text-disabled); margin: 10px 0 0; }
-.hotkey-row { display: flex; align-items: center; gap: 12px; }
-.hotkey-label { font-size: 12px; color: var(--color-text-muted); flex-shrink: 0; width: 48px; }
-.hotkey-display {
-  flex: 1; height: 36px; display: flex; align-items: center; gap: 8px;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  padding: 0 12px; cursor: pointer; transition: border-color 0.15s;
+.page-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 16px; }
+
+.hk-card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+.hk-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
+.hk-card-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
+.hk-card-sub { font-size: 11px; color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.hk-row { display: flex; align-items: center; gap: 10px; }
+
+/* 真实键帽样式（与窗口管理设置页一致） */
+.hk-kbd {
+  flex: 1;
   min-width: 0;
+  height: 28px;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-bottom-width: 2px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: border-color 0.12s, background-color 0.12s, color 0.12s, box-shadow 0.12s;
 }
-.hotkey-display:hover { border-color: var(--color-border-focus); }
-.hotkey-display.capturing {
-  border-color: var(--color-warning); box-shadow: 0 0 0 2px rgba(250,173,20,0.12);
-  animation: pulse 1.2s ease-in-out infinite;
+.hk-kbd:hover { border-color: var(--color-border-focus); background: var(--color-bg-hover); }
+.hk-kbd.capturing {
+  border-color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  box-shadow: 0 0 0 2px var(--color-accent-border);
+  animation: hk-pulse 1.1s ease-in-out infinite;
 }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.7} }
-.hotkey-badge {
-  font-size: 14px; font-weight: 600; color: var(--color-accent);
-  background: var(--color-accent-bg); padding: 1px 8px; border-radius: var(--radius-xs);
-  font-family: 'Consolas',monospace; white-space: nowrap;
+@keyframes hk-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.65 } }
+.hk-capturing { font-family: inherit; font-size: 11px; font-weight: 500; }
+
+.hk-reset {
+  flex-shrink: 0;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--color-text-disabled);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.12s, color 0.12s, background 0.12s;
 }
-.hotkey-edit-hint { font-size: 11px; color: var(--color-text-disabled); white-space: nowrap; }
-.capture-hint { font-size: 13px; color: var(--color-warning); font-family: 'Consolas',monospace; }
-.reset-sm {
-  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
-  border: none; background: transparent; color: var(--color-text-disabled); border-radius: var(--radius-xs); cursor: pointer;
+.hk-card:hover .hk-reset { opacity: 1; }
+.hk-reset:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+
+.hk-actions { display: flex; gap: 8px; margin-top: 2px; }
+.hk-btn {
+  padding: 7px 18px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.12s, border-color 0.12s, color 0.12s;
 }
-.reset-sm:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
-.save-btn {
-  padding: 8px 24px; border: none; background: var(--color-accent); color: var(--color-accent-text);
-  font-size: 13px; border-radius: var(--radius-sm); cursor: pointer; font-family: inherit;
-  margin-bottom: 12px; display: inline-flex; align-items: center; gap: 6px;
-}
-.save-btn:hover { background: var(--color-accent-hover); }
-.hotkey-msg { font-size: 12px; color: var(--color-success); margin: 0 0 12px; }
-.hotkey-tip {
-  font-size: 12px; color: var(--color-text-disabled); line-height: 1.6;
-  display: flex; align-items: flex-start; gap: 6px; margin: 0;
+.hk-btn-primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
+.hk-btn-primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
+.hk-msg { font-size: 12px; color: var(--color-success); margin: 10px 0 0; }
+.hk-tip {
+  font-size: 11px;
+  color: var(--color-text-disabled);
+  line-height: 1.6;
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 10px 0 0;
 }
 .tip-icon { flex-shrink: 0; margin-top: 1px; }
 </style>

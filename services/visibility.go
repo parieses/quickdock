@@ -15,4 +15,5 @@ type WindowFlags struct {
 	Clipboard atomic.Bool // 剪贴板浮窗打开中
 	Palette   atomic.Bool // 命令面板打开中
 	Note      atomic.Bool // 快捷笔记浮窗打开中
+	Winmgr    atomic.Bool // 窗口管理浮层打开中
 }

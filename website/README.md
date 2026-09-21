@@ -11,7 +11,8 @@ website/
 │   ├── js/i18n.js      # 英文词典（中文原文 → 英文）
 │   └── img/            # 截图放这里
 ├── tools/
-│   └── extract-i18n-strings.py   # 列出还没翻译的中文文案
+│   ├── extract-i18n-strings.py   # 列出还没翻译的中文文案
+│   └── check-i18n-glue.py        # 检查行内标签两侧的英文值有没有漏空格（黏连）
 └── README.md
 ```
 
@@ -46,7 +47,13 @@ website/
    python tools/extract-i18n-strings.py        # 只列未翻译的
    ```
 3. 把列出来的中文原文翻好，填进 `assets/js/i18n.js` 的 `en` 段。
-4. 中文里没有空格，英文有 —— **文案被 `<b>` `<code>` 等行内元素切断时，记得在英文那侧补空格**（例：`一个坞，装下<b>你的整个开发流</b>` → `"One dock for "` + `"your entire dev workflow"`，值末尾那个空格就是粘合点）。判断办法：切到英文，看有没有出现 `foryour` 这种连体词。
+4. 中文里没有空格，英文有 —— **文案被 `<b>` `<code>` 等行内元素切断时，记得在英文那侧补空格**（例：`一个坞，装下<b>你的整个开发流</b>` → `"One dock for "` + `"your entire dev workflow"`，值末尾那个空格就是粘合点）。改完跑一下检查器，不用靠肉眼：
+
+   ```bash
+   python tools/check-i18n-glue.py     # ✅ 没有发现黏连 即可；有则按提示给前一条英文值补空格
+   ```
+
+   它会把 `Two routes: one-window snapping` + `with hotkeys` 这类拼成 `snappingwith` 的地方指出来。查不到就切到英文页面再扫一眼。
 
 ## 本地预览
 
@@ -142,7 +149,7 @@ src.resize((512,512), Image.LANCZOS).save('website/assets/img/appicon-512.png', 
 
 ## 改文案时注意
 
-- 数据类数字（28 运行时 / 49 插件 / 29 MCP 工具）散落在 Hero stats 与各章节标题，改了记得同步。
+- **不写具体数量**：运行时 / 插件 / MCP 工具的个数会随版本漂移，Hero stats 与章节标题一律不写数字（改写「一键装切」「开箱即用」「以插件市场为准」这类表述），要数字以应用内的环境管理页 / 插件市场为准。枚举清单（运行时长表格、插件 chip、工具表格）保留。
 - **版本号**散落在两处：Hero 的 `.hero-meta` 与 WHAT'S NEW 的 eyebrow + 副标题，改完记得同步 `i18n.js` 里对应的 key（key 本身含版本号，不是只改 value）。
 - 下载链接用的是 GitHub latest release 稳定地址（`releases/latest/download/...`），不需要改版本号。
 

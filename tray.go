@@ -23,6 +23,7 @@ import (
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/sysutil"
+	"quickdock/internal/winmgr"
 	"quickdock/services"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -109,12 +110,14 @@ var (
 	appSvc atomic.Pointer[services.AppService]
 
 	// 当前注册的 GlobalShortcut 加速器（供 Suspend/Resume/Reregister 使用）
-	currentAppAccel     string
-	currentClipAccel    string
-	currentPaletteAccel string
-	currentNoteAccel    string
-	currentShotAccel    string
-	accelMu             sync.Mutex
+	currentAppAccel         string
+	currentClipAccel        string
+	currentPaletteAccel     string
+	currentNoteAccel        string
+	currentShotAccel        string
+	currentWinmgrAccels     []string
+	currentWinmgrFloatAccel string
+	accelMu                 sync.Mutex
 
 	noteWin     *application.WebviewWindow
 	noteWinLock sync.Mutex
@@ -540,6 +543,32 @@ func setShotAccel(accel string) {
 	currentShotAccel = accel
 }
 
+func getWinmgrAccels() []string {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	out := make([]string, len(currentWinmgrAccels))
+	copy(out, currentWinmgrAccels)
+	return out
+}
+
+func setWinmgrAccels(accels []string) {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	currentWinmgrAccels = accels
+}
+
+func getWinmgrFloatAccel() string {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	return currentWinmgrFloatAccel
+}
+
+func setWinmgrFloatAccel(accel string) {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	currentWinmgrFloatAccel = accel
+}
+
 // modVKToAccelerator 把 DB 存储的 (modifiers,vk) 转为框架加速器字符串（如 "Ctrl+Space"）。
 func modVKToAccelerator(modifiers, vk int) string {
 	var parts []string
@@ -765,6 +794,14 @@ func SuspendHotkeys() {
 	if shotAccel != "" {
 		app.GlobalShortcut.Unregister(shotAccel)
 	}
+	for _, w := range getWinmgrAccels() {
+		if w != "" {
+			app.GlobalShortcut.Unregister(w)
+		}
+	}
+	if f := getWinmgrFloatAccel(); f != "" {
+		app.GlobalShortcut.Unregister(f)
+	}
 	logger.I("QuickDock: 热键已暂停（设置页捕获中）")
 }
 
@@ -798,12 +835,153 @@ func toggleClipboardWindow() {
 	}
 }
 
+// ===== 窗口管理热键 =====
+//
+// 作用于「当前前台窗口」：把前台窗口按布局贴屏 / 置顶 / 跨显示器移动。
+// 默认热键统一用 Ctrl+Alt+*，避开系统 Win+方向 的 Snap 冲突（系统层无法稳定拦截）。
+
+// winmgrAction 窗口管理动作表：DB key / winmgr layout / 默认热键。
+type winmgrAction struct {
+	key    string // DB 设置键
+	layout string // 传给 winmgr.ApplyLayout 的布局名
+	defMod int
+	defVK  int
+}
+
+// 默认热键：Ctrl+Alt + 方向/数字/字母。mods = MOD_CONTROL|MOD_ALT = 3。
+var winmgrActions = []winmgrAction{
+	{"winmgr_left", "left", MOD_CONTROL | MOD_ALT, 0x25},                 // ←
+	{"winmgr_right", "right", MOD_CONTROL | MOD_ALT, 0x27},               // →
+	{"winmgr_top", "top", MOD_CONTROL | MOD_ALT, 0x26},                   // ↑
+	{"winmgr_bottom", "bottom", MOD_CONTROL | MOD_ALT, 0x28},             // ↓
+	{"winmgr_tl", "tl", MOD_CONTROL | MOD_ALT, 0x31},                     // 1
+	{"winmgr_tr", "tr", MOD_CONTROL | MOD_ALT, 0x32},                     // 2
+	{"winmgr_bl", "bl", MOD_CONTROL | MOD_ALT, 0x33},                     // 3
+	{"winmgr_br", "br", MOD_CONTROL | MOD_ALT, 0x34},                     // 4
+	{"winmgr_center", "center", MOD_CONTROL | MOD_ALT, 0x43},             // C
+	{"winmgr_maximize", "maximize", MOD_CONTROL | MOD_ALT, 0x0D},         // Enter
+	{"winmgr_restore", "restore", MOD_CONTROL | MOD_ALT, 0x52},           // R
+	{"winmgr_minimize", "minimize", MOD_CONTROL | MOD_ALT, 0x4D},         // M
+	{"winmgr_topmost", "topmost", MOD_CONTROL | MOD_ALT, 0x54},           // T
+	{"winmgr_monitor_prev", "monitor-prev", MOD_CONTROL | MOD_ALT, 0xDB}, // [
+	{"winmgr_monitor_next", "monitor-next", MOD_CONTROL | MOD_ALT, 0xDD}, // ]
+}
+
+// makeWinmgrCallback 生成某布局的热键回调：取前台窗口并应用布局。
+// 直接在主调线程执行——窗口操作同步且极快，且需保证作用于「按热键瞬间」的前台窗口。
+func makeWinmgrCallback(layout string) func() {
+	return func() {
+		hwnd, err := winmgr.ForegroundWindow()
+		if err != nil {
+			return
+		}
+		if layout == "topmost" {
+			winmgr.ToggleAlwaysOnTop(hwnd)
+			return
+		}
+		ratio := 0.5
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			if raw, e := svc.DB.GetSetting("winmgr_ratio"); e == nil && raw != "" {
+				if v, e2 := strconv.Atoi(raw); e2 == nil {
+					ratio = float64(v) / 100
+				}
+			}
+		}
+		winmgr.ApplyLayout(hwnd, layout, ratio, -1)
+	}
+}
+
+// registerWinmgrHotkeys 注册全部窗口管理热键（DB 配置覆盖默认值）。
+// 单个注册失败时回退默认加速器并写回 DB。返回成功注册的加速器列表。
+func registerWinmgrHotkeys(app *application.App) []string {
+	accels := make([]string, 0, len(winmgrActions))
+	for _, a := range winmgrActions {
+		mods, vk := a.defMod, a.defVK
+		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+			if raw, err := svc.DB.GetSetting(a.key); err == nil && raw != "" {
+				mods, vk = parseHotkeySetting(raw)
+			}
+		}
+		accel := modVKToAccelerator(mods, vk)
+		if err := app.GlobalShortcut.Register(accel, makeWinmgrCallback(a.layout)); err != nil {
+			logger.W("QuickDock: 窗口管理热键 [%s] 注册失败: %v，回退默认", accel, err)
+			fallback := modVKToAccelerator(a.defMod, a.defVK)
+			if err2 := app.GlobalShortcut.Register(fallback, makeWinmgrCallback(a.layout)); err2 == nil {
+				accels = append(accels, fallback)
+				if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+					svc.DB.SetSetting(a.key, fmt.Sprintf("%d,%d", a.defMod, a.defVK))
+				}
+			}
+			continue
+		}
+		accels = append(accels, accel)
+	}
+	return accels
+}
+
+// handleWinmgrFloatHotkey Ctrl+Alt+W：唤起排版浮层（9 种布局模板，点格子即把当前窗口贴过去）。
+//
+// 关键顺序：先把「当前前台窗口」记为排版目标，再显示浮层——浮层一旦拿到焦点，
+// GetForegroundWindow 就指向 QuickDock 自己了。浮层已开着时再按一次 = 收起。
+func handleWinmgrFloatHotkey() {
+	// ① 先捕获目标窗口，必须在「取/建窗口」与 Show 之前：
+	//   浮窗的创建动作会抢一次前台，Show+Focus 更是直接把自己变成前台，
+	//   之后 GetForegroundWindow 就拿不到用户想排的窗口了。
+	if svc := appSvc.Load(); svc != nil {
+		svc.CaptureTilingTarget()
+	}
+	win := getWinmgrWindow()
+	if win == nil {
+		return
+	}
+	if windowFlags.Winmgr.Load() {
+		win.Hide()
+		windowFlags.Winmgr.Store(false)
+		return
+	}
+	platform.SetWindowToCursorScreen(win, winmgrWinWidth, winmgrWinHeight)
+	win.Show()
+	win.Focus()
+	windowFlags.Winmgr.Store(true)
+	// ② 通知前端「浮层又显示了一次」：窗口是懒创建 + 复用的，Vue 组件只在首次
+	//    加载时 mount，Hide/Show 不会重新 mount。少了这个事件，前端会一直停在
+	//    第一次拉到的目标窗口上（首次创建时还必然是空的），表现为永远提示未捕获。
+	if a := getHotkeyApp(); a != nil {
+		a.Event.Emit("winmgr:shown")
+	}
+}
+
+// registerWinmgrFloatHotkey 注册窗口管理浮层热键（默认 Ctrl+Alt+W），唤起浮层做模板排版。
+// 单个注册失败时回退默认加速器并写回 DB，返回成功注册的加速器字符串。
+func registerWinmgrFloatHotkey(app *application.App) string {
+	mods, vk := 3, 0x57 // Ctrl+Alt+W
+	if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+		if raw, err := svc.DB.GetSetting("winmgr_float_hotkey"); err == nil && raw != "" {
+			mods, vk = parseHotkeySetting(raw)
+		}
+	}
+	accel := modVKToAccelerator(mods, vk)
+	cb := handleWinmgrFloatHotkey
+	if err := app.GlobalShortcut.Register(accel, cb); err != nil {
+		logger.W("QuickDock: 窗口管理浮层热键 [%s] 注册失败: %v，回退默认", accel, err)
+		fallback := modVKToAccelerator(3, 0x57)
+		if err2 := app.GlobalShortcut.Register(fallback, cb); err2 == nil {
+			if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+				svc.DB.SetSetting("winmgr_float_hotkey", fmt.Sprintf("%d,%d", 3, 0x57))
+			}
+			return fallback
+		}
+		return ""
+	}
+	return accel
+}
+
 // registerAllHotkeys 统一注册主窗口/剪贴板/命令面板/快捷笔记四个全局快捷键。
 // 从 DB 读取配置，注册失败时回退到默认值并写回 DB。
 func registerAllHotkeys(app *application.App) {
 	// 重注册前先注销上一轮已注册的快捷键，避免修改设置保存后旧热键残留、
 	// 新旧热键同时生效直到进程重启。与 Reregister* 系列保持一致。
-	for _, old := range []string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel()} {
+	for _, old := range append([]string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel(), getWinmgrFloatAccel()}, getWinmgrAccels()...) {
 		if old != "" {
 			app.GlobalShortcut.Unregister(old)
 		}
@@ -937,6 +1115,12 @@ func registerAllHotkeys(app *application.App) {
 		logger.I("截图快捷键 [%s] 已注册", shotAccel)
 	}
 	setShotAccel(registeredShotAccel)
+
+	// 窗口管理热键：读 DB 覆盖默认，注册失败回退默认并写回 DB。
+	setWinmgrAccels(registerWinmgrHotkeys(app))
+
+	// 窗口管理浮层热键：唤起浮层做批量网格排版。
+	setWinmgrFloatAccel(registerWinmgrFloatHotkey(app))
 
 	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel, registeredNoteAccel)
 }

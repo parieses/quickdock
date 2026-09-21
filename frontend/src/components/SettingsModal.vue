@@ -16,6 +16,7 @@ import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsSync from './SettingsSync.vue'
 import SettingsTools from './SettingsTools.vue'
 import LogViewer from './LogViewer.vue'
+import SettingsWinmgr from './SettingsWinmgr.vue'
 
 import {
   GetClipboardRetentionDays,
@@ -54,6 +55,7 @@ const menuItems = computed(() => [
   { key: 'sync',      label: t('sync'),              icon: Cloud,    desc: t('syncDesc') },
   { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
   { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
+  { key: 'winmgr',     label: t('winmgr'),             icon: MonitorIcon, desc: t('winmgrDesc') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
   { key: 'logs',       label: t('navLogs'),           icon: ScrollText, desc: t('logsDesc') },
 ])
@@ -64,7 +66,7 @@ const menuGroups = computed(() => {
   const defs: { title: string; keys: string[] }[] = [
     { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys'] },
     { title: t('menuGroupData'), keys: ['data', 'sync', 'snapshot'] },
-    { title: t('menuGroupService'), keys: ['tools', 'ai', 'logs'] },
+    { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai', 'logs'] },
   ]
   return defs
     .map((g) => ({ title: g.title, items: g.keys.map((k) => byKey[k]).filter(Boolean) }))
@@ -558,6 +560,10 @@ async function toggleAutoStart() {
           <!-- 打开工具管理 -->
           <div v-else-if="activePage === 'tools'" class="content-page content-left">
             <SettingsTools :visible="activePage === 'tools'" />
+          </div>
+
+          <div v-else-if="activePage === 'winmgr'" class="content-page content-left">
+            <SettingsWinmgr />
           </div>
 
           <!-- 日志查看器（从导航栏迁入的专属设置项） -->

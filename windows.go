@@ -19,6 +19,10 @@ import (
 // clipboardWinLock 保护剪贴板窗口的懒创建（与 paletteWinLock 同模式）
 var clipboardWinLock sync.Mutex
 
+// winmgrWinLock 保护窗口管理浮窗的懒创建（与 clipboardWinLock 同模式）
+var winmgrWinLock sync.Mutex
+var winmgrWin *application.WebviewWindow
+
 // ===== WebView2 优化配置（全局，所有窗口共享）=====
 
 // memoryOptimizedArgs 减少 WebView2 内存/进程数量的 Chromium 标志
@@ -148,6 +152,9 @@ func saveAllFloatingPositions() {
 	noteWinLock.Lock()
 	noteW := noteWin
 	noteWinLock.Unlock()
+	winmgrWinLock.Lock()
+	winmgrW := winmgrWin
+	winmgrWinLock.Unlock()
 	type entry struct {
 		key string
 		w   *application.WebviewWindow
@@ -156,6 +163,7 @@ func saveAllFloatingPositions() {
 		{"clipboard", clipboardW},
 		{"palette", paletteW},
 		{"note", noteW},
+		{"winmgr", winmgrW},
 	} {
 		if e.w == nil {
 			continue
@@ -247,6 +255,41 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 		windowFlags.Note.Store(false)
 		x, y := win.Position()
 		saveWinPos("note", x, y)
+		win.Hide()
+	})
+	return win
+}
+
+// initWinmgrWindow 创建窗口管理浮窗（延迟初始化：9 种布局模板，点格子把当前窗口贴过去）
+func initWinmgrWindow(app *application.App) *application.WebviewWindow {
+	opts := application.WebviewWindowOptions{
+		Title:            "快启坞 - 窗口管理",
+		Width:            winmgrWinWidth,
+		Height:           winmgrWinHeight,
+		Frameless:        true,
+		AlwaysOnTop:      true,
+		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
+		URL:              "/#/window-manager",
+	}
+	applyWindowPlatformOptions(&opts)
+	applySavedWinPos(app, &opts, "winmgr")
+	win := app.Window.NewWithOptions(opts)
+	win.Hide()
+	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+		x, y := win.Position()
+		saveWinPos("winmgr", x, y)
+		windowFlags.Winmgr.Store(false)
+		win.Hide()
+	})
+	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。
+	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
+		if trayQuitRequested.Load() {
+			return
+		}
+		event.Cancel()
+		windowFlags.Winmgr.Store(false)
+		x, y := win.Position()
+		saveWinPos("winmgr", x, y)
 		win.Hide()
 	})
 	return win
@@ -346,6 +389,7 @@ func InjectWindowGetters(svc *services.AppService, app *application.App) {
 	svc.GetClipboardWindow = clipboardWindowGetter(app)
 	svc.GetPaletteWindow = paletteWindowGetter(app)
 	svc.GetNoteWindow = noteWindowGetter(app)
+	svc.GetWinmgrWindow = winmgrWindowGetter(app)
 }
 
 // ===== 热键回调用的窗口 getter =====
@@ -374,6 +418,35 @@ func getPaletteWindow() *application.WebviewWindow {
 		paletteWin = initPaletteWindow(app)
 	}
 	return paletteWin
+}
+
+// getWinmgrWindow 返回窗口管理浮窗（热键回调用，懒创建）
+func getWinmgrWindow() *application.WebviewWindow {
+	winmgrWinLock.Lock()
+	defer winmgrWinLock.Unlock()
+	if winmgrWin == nil {
+		app := getHotkeyApp()
+		if app == nil {
+			return nil
+		}
+		winmgrWin = initWinmgrWindow(app)
+	}
+	return winmgrWin
+}
+
+// winmgrWindowGetter 返回 AppService 使用的窗口管理浮窗 getter
+func winmgrWindowGetter(app *application.App) func() *application.WebviewWindow {
+	return func() *application.WebviewWindow {
+		winmgrWinLock.Lock()
+		defer winmgrWinLock.Unlock()
+		if winmgrWin == nil {
+			if app == nil {
+				return nil
+			}
+			winmgrWin = initWinmgrWindow(app)
+		}
+		return winmgrWin
+	}
 }
 
 // EnsureConfigDir 确保配置目录存在（用于 WebviewUserDataPath）

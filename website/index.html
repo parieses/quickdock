@@ -5,10 +5,10 @@
 <meta charset="utf-8"/>
 <meta content="width=device-width, initial-scale=1" name="viewport"/>
 <title>快启坞 QuickDock — 一个坞，装下你的整个开发流</title>
-<meta content="快启坞 QuickDock 是面向 Windows 开发者的桌面效率工具：命令面板、工作空间管理、28 个运行时环境一键装切、49 个开箱即用插件、内置截图标注工具与 MCP 服务。" name="description"/>
+<meta content="快启坞 QuickDock 是面向 Windows 开发者的桌面效率工具：命令面板、工作空间管理、多运行时环境一键装切、插件市场开箱即用、窗口排版、内置截图标注工具与 MCP 服务。" name="description"/>
 <meta content="#08090a" name="theme-color"/>
 <meta content="快启坞 QuickDock" property="og:title"/>
-<meta content="命令面板 · 环境管理 · 插件生态 · 截图标注 · MCP 服务 —— 一个坞，装下你的整个开发流。" property="og:description"/>
+<meta content="命令面板 · 环境管理 · 插件生态 · 窗口排版 · 截图标注 · MCP 服务 —— 一个坞，装下你的整个开发流。" property="og:description"/>
 <meta content="website" property="og:type"/>
 <link href="https://fonts.googleapis.com" rel="preconnect"/>
 <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
@@ -73,8 +73,8 @@
 <span class="pill"><span class="dot"></span>开源 · 免费 · Windows 优先</span>
 <h1>一个坞，装下<span class="grad">你的整个开发流</span></h1>
 <p class="hero-sub">
-      命令面板唤起一切，28 个运行时一键装切，49 个插件开箱即用，截图标注随手就来，再顺手把本地能力通过 MCP 开放给 AI。
-      Raycast 的速度 + VS Code 的开发者体验，打包进一个不到 100MB 的桌面应用。
+      命令面板唤起一切，运行时环境一键装切，插件市场开箱即用，窗口排版和截图标注随手就来，再顺手把本地能力通过 MCP 开放给 AI。
+      Raycast 的速度 + VS Code 的开发者体验，打包进一个不到 50MB 的桌面应用。
     </p>
 <div class="hero-cta">
 <a class="btn btn-primary btn-lg" href="#download">
@@ -83,30 +83,30 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.14 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.16 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
-<div class="stat"><b>28</b><span>可管理运行时</span></div>
-<div class="stat"><b>49</b><span>开箱插件</span></div>
-<div class="stat"><b>29</b><span>MCP 工具</span></div>
-<div class="stat"><b>&lt;100MB</b><span>安装包体积</span></div>
+<div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
+<div class="stat"><b>本地</b><span>数据存在自己机器</span></div>
+<div class="stat"><b>&lt;50MB</b><span>安装包体积</span></div>
+<div class="stat"><b>MIT</b><span>开源免费</span></div>
 </div>
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.14) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.16) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.14</span>
+<span class="eyebrow">v0.0.16</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.14 带来内置截图工具，以及一批环境管理与启动性能优化。</p>
+<p>v0.0.16 带来窗口管理：一组贴屏热键，加一个点一下就排好整屏的排版浮层。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">截图与标注</span><span>内置截图工具：<kbd>F1</kbd> 唤起全屏覆盖层，框选松手即在原地浮出工具条，矩形 / 椭圆 / 箭头 / 文字 / 马赛克随手标注，复制、保存、贴图一步到位。</span></div>
-<div class="tbl-row"><span class="k">贴图与吸附</span><span>标注完可一键钉在桌面最上层（拖动 / 滚轮缩放 / 双击关闭）；鼠标滑过任意程序窗口即高亮并显示尺寸，单击直接选中整个窗口，按住 <kbd>Ctrl</kbd> 下钻到按钮、输入框这一级。</span></div>
-<div class="tbl-row"><span class="k">环境与稳定性</span><span>支持单版本运行时的安装与卸载，优化 Git / gh / frpc / Ollama 的安装逻辑；新增 WebView2 渲染进程自愈看门狗，异常退出自动拉起。</span></div>
-<div class="tbl-row"><span class="k">启动与体验</span><span>新增 mkcert 证书复用逻辑、启动链路优化，冷启动明显更快；托盘菜单支持服务启停，界面细节统一。</span></div>
+<div class="tbl-row"><span class="k">贴屏热键</span><span>新增窗口管理：<kbd>Ctrl</kbd>+<kbd>Alt</kbd> 配方向键 / 数字 / 字母共 15 个热键。点住目标窗口一按，就贴到左半屏、四分之一、居中、最大化——不用再去够鼠标拖窗口。</span></div>
+<div class="tbl-row"><span class="k">排版浮层</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 唤起九宫格排版浮层：点布局里任意一块，当前窗口就进那一格，其余格子自动用本屏其他窗口填上，窗口不够就空着——一次点击整理整屏。</span></div>
+<div class="tbl-row"><span class="k">多显示器</span><span>排版按鼠标所在的那块屏换算几何，单窗口热键还能把窗口在屏之间搬运；左 / 右分屏比例可调（10%–90%）。</span></div>
+<div class="tbl-row"><span class="k">贴得更准</span><span>贴屏前先彻底清掉最大化状态，落位不抢焦点（浮层不会闪退）；几何按边界取整，相邻格严格贴合，不留缝也不重叠。</span></div>
 </div>
 </div>
 </section>
@@ -144,6 +144,12 @@
 <ul><li>窗口 / 元素智能吸附，单击选中整个窗口</li><li>贴图钉屏、导出 PNG、直入剪贴板</li></ul>
 </article>
 <article class="card reveal">
+<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="16" rx="2" width="18" x="3" y="4"></rect><path d="M12 4v16M3 12h18"></path></svg></div>
+<h3>窗口管理</h3>
+<p>15 个贴屏热键，加 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 排版浮层：点布局里任意一块，当前窗口就位，其余格子自动用本屏其他窗口填上。</p>
+<ul><li>9 种排版模板：左右对半 / 主次分栏 / 四象限 / 九宫格…</li><li>多显示器搬运、左 / 右分屏比例可调</li></ul>
+</article>
+<article class="card reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"></path><path d="M14 4v5h5M8 13h8M8 17h5"></path></svg></div>
 <h3>树形笔记库</h3>
 <p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> 唤起浮动笔记，文件夹 + Markdown 多层级组织，500ms 防抖自动保存。</p>
@@ -173,7 +179,7 @@
 <div class="wrap">
 <div class="section-head reveal">
 <span class="eyebrow">环境管理</span>
-<h2>28 个运行时，装在一个侧栏里</h2>
+<h2>运行时环境，全装在一个侧栏里</h2>
 <p>不写注册表、不申请管理员、不污染系统 PATH。多版本共存于用户目录，切换只是一点，删掉 QuickDock 就全没了。</p>
 </div>
 <div aria-label="运行时分组" class="tabs" id="rtTabs" role="tablist">
@@ -192,6 +198,7 @@
 <span class="chip">Python <small>全量</small></span>
 <span class="chip">Bun <small>全量</small></span>
 <span class="chip">Erlang <small>RabbitMQ 依赖</small></span>
+<span class="chip">JDK <small>Adoptium Temurin</small></span>
 </div>
 </div>
 <div class="panel" hidden="" id="p-web" role="tabpanel">
@@ -201,6 +208,7 @@
 <span class="chip">Apache <small>服务型</small></span>
 <span class="chip">Traefik <small>服务型</small></span>
 <span class="chip">FTP <small>FTPDMIN</small></span>
+<span class="chip">WebDAV <small>内置 · 9080</small></span>
 </div>
 </div>
 <div class="panel" hidden="" id="p-db" role="tabpanel">
@@ -223,7 +231,6 @@
 <div class="chips">
 <span class="chip">Ollama <small>本地大模型</small></span>
 <span class="chip">MCP 服务 <small>内置 · 9230</small></span>
-<span class="chip">WebDAV <small>内置 · 9080</small></span>
 <span class="chip">DeepSeek Harness <small>Agent 入口</small></span>
 </div>
 </div>
@@ -261,7 +268,7 @@
 <div class="wrap">
 <div class="section-head reveal">
 <span class="eyebrow">插件生态</span>
-<h2>49 个插件，一个市场装完</h2>
+<h2>一个市场，装完你要的插件</h2>
 <p>三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 27 个 Host API，从文件读写到 MCP 复用，能力面三者一致。</p>
 </div>
 <div class="grid-3">
@@ -289,7 +296,7 @@
 <div class="section-head reveal">
 <span class="eyebrow">使用说明</span>
 <h2>从装上到用顺手</h2>
-<p>17 节完整教程：前 3 节跑通基础，4—11 节覆盖日常功能，12—15 节是进阶玩法，最后两节讲数据备份和出问题怎么查。按顺序走一遍，或者用左侧目录直接跳。</p>
+<p>18 节完整教程：前 3 节跑通基础，4—11 节覆盖日常功能，12—16 节是进阶玩法，最后两节讲数据备份和出问题怎么查。按顺序走一遍，或者用左侧目录直接跳。</p>
 </div>
 <div class="guide">
 <!-- 侧栏目录 -->
@@ -317,11 +324,12 @@
 <li><a href="#g-plugin">13. 插件</a></li>
 <li><a href="#g-ai">14. AI 助手与 DSH</a></li>
 <li><a href="#g-mcp">15. MCP 服务</a></li>
+<li><a href="#g-winmgr">16. 窗口管理</a></li>
 </ul>
 <h4>运维</h4>
 <ul>
-<li><a href="#g-backup">16. 备份 · 同步 · 快照</a></li>
-<li><a href="#g-trouble">17. 更新与排错</a></li>
+<li><a href="#g-backup">17. 备份 · 同步 · 快照</a></li>
+<li><a href="#g-trouble">18. 更新与排错</a></li>
 </ul>
 </aside>
 <div>
@@ -333,7 +341,7 @@
 <div class="tbl wide">
 <div class="tbl-row"><span class="k">操作系统</span><span>Windows 10 1809+ 或 Windows 11</span></div>
 <div class="tbl-row"><span class="k">运行时</span><span>WebView2 Runtime（Windows 一般系统自带，缺了会提示下载）</span></div>
-<div class="tbl-row"><span class="k">磁盘</span><span>约 100MB（不含后续安装的运行时，那些按需要下）</span></div>
+<div class="tbl-row"><span class="k">磁盘</span><span>约 50MB（不含后续安装的运行时，那些按需要下）</span></div>
 <div class="tbl-row"><span class="k">权限</span><span><b style="color:var(--text-1);font-weight:510">不需要管理员</b>，不写注册表</span></div>
 </div>
 <h4>两种装法，选一个</h4>
@@ -364,16 +372,17 @@
 <div class="tbl-row"><span class="k">项目列表</span><span>集合里的具体条目，支持拖拽排序与右键菜单</span></div>
 </div>
 <p>顶栏放搜索框、<b style="color:var(--text-1);font-weight:510">端口全景</b>（一眼看全本机服务占用）和设置入口。主题支持深色 / 浅色 / 跟随系统，设置里切换，插件窗口会同步适配。</p>
-<h4>四种常驻窗口，另有截图浮层</h4>
+<h4>五个常驻窗口，另有截图浮层</h4>
 <div class="tbl wide">
 <div class="tbl-row"><span class="k">主窗口</span><span><kbd>Ctrl</kbd>+<kbd>Space</kbd> 显示 / 隐藏，承载全部页面</span></div>
 <div class="tbl-row"><span class="k">命令面板</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd>，浮动窗口，失焦自动隐藏</span></div>
 <div class="tbl-row"><span class="k">剪贴板</span><span><kbd>Ctrl</kbd>+<kbd>`</kbd>，浮动窗口，失焦自动隐藏</span></div>
 <div class="tbl-row"><span class="k">快捷笔记</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>，浮动窗口，失焦自动隐藏</span></div>
+<div class="tbl-row"><span class="k">排版浮层</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd>，九宫格布局浮层，排完自动收起</span></div>
 <div class="tbl-row"><span class="k">截图浮层</span><span><kbd>F1</kbd> 唤起的全屏浮层，用完即走，不占常驻窗口</span></div>
 </div>
 <h4>主要页面在哪</h4>
-<p>侧边栏 / 顶栏可进入：工作空间、环境管理、插件（已装 + 市场）、待办、定时、监控、端口全景、AI 助手、DeepSeek Harness、设置（通用 / 热键 / AI / DSH / 快照 / 同步 / 工具）。</p>
+<p>侧边栏 / 顶栏可进入：工作空间、环境管理、插件（已装 + 市场）、待办、定时、监控、端口全景、AI 助手、DeepSeek Harness、设置（通用 / 热键 / 窗口管理 / AI / DSH / 快照 / 同步 / 工具）。</p>
 <div class="note">
 <svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><rect height="16" rx="2" width="16" x="4" y="3"></rect><path d="M4 8h16M9 8V5M15 8V5"></path></svg>
 <div>同一台机器<b style="color:var(--text-1);font-weight:510">同时只能跑一个 QuickDock 实例</b>（单实例锁，开发版和正式版共用）。双击没反应时先看托盘是不是已经在了。</div>
@@ -383,16 +392,26 @@
 <article class="step reveal" id="g-hotkey">
 <span class="step-no">STEP 03</span>
 <h3>快捷键</h3>
-<p>默认只有五个全局热键，先记住它们就够用一整天。</p>
+<p>默认只有六个全局热键，先记住它们就够用一整天；窗口管理另有 15 个贴屏热键，用熟了会把鼠标拖窗口这件事忘掉。</p>
 <div class="keys">
 <div class="keys-row"><span>显示 / 隐藏主窗口</span><span><kbd>Ctrl</kbd><kbd>Space</kbd></span></div>
 <div class="keys-row"><span>命令面板</span><span><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
 <div class="keys-row"><span>剪贴板历史</span><span><kbd>Ctrl</kbd><kbd>`</kbd></span></div>
 <div class="keys-row"><span>快捷笔记</span><span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>N</kbd></span></div>
 <div class="keys-row"><span>区域截图</span><span><kbd>F1</kbd></span></div>
+<div class="keys-row"><span>窗口排版浮层</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd></span></div>
+</div>
+<h4>窗口管理热键</h4>
+<p>先点一下目标窗口让它成为前台，再按热键。全部落在 <kbd>Ctrl</kbd>+<kbd>Alt</kbd> 下，特意避开 <kbd>Win</kbd>+方向键——那是系统贴靠的地盘，不跟它抢。</p>
+<div class="keys">
+<div class="keys-row"><span>贴左 / 右 / 上 / 下半屏</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></span></div>
+<div class="keys-row"><span>四个四分之一角</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span></div>
+<div class="keys-row"><span>居中 / 置顶切换</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>C</kbd><kbd>T</kbd></span></div>
+<div class="keys-row"><span>最大化 / 还原 / 最小化</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>Enter</kbd><kbd>R</kbd><kbd>M</kbd></span></div>
+<div class="keys-row"><span>移到上一屏 / 下一屏</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>[</kbd><kbd>]</kbd></span></div>
 </div>
 <h4>自定义热键</h4>
-<p>「设置 → 热键」里逐条改，改完<b style="color:var(--text-1);font-weight:510">运行时动态重注册</b>，不用重启。捕获新按键时会暂停全局监听，避免和你正在按的组合撞车。改乱了想还原，设置页里有恢复默认。</p>
+<p>「设置 → 热键」里逐条改，改完<b style="color:var(--text-1);font-weight:510">运行时动态重注册</b>，不用重启。捕获新按键时会暂停全局监听，避免和你正在按的组合撞车。改乱了想还原，设置页里有恢复默认。窗口管理的 15 个热键另在「设置 → 窗口管理」里改。</p>
 <h4>命令面板内的键盘操作</h4>
 <div class="keys">
 <div class="keys-row"><span>上下移动选择</span><span><kbd>↑</kbd><kbd>↓</kbd></span></div>
@@ -556,10 +575,10 @@
 <article class="step reveal" id="g-schedule">
 <span class="step-no">STEP 11</span>
 <h3>定时任务</h3>
-<p>五种动作 × 五种调度，组合出你要的自动化。</p>
+<p>五种动作 × 四种调度，组合出你要的自动化。</p>
 <div class="tbl wide">
 <div class="tbl-row"><span class="k">动作</span><span>打开软件 / 打开目录 / 打开网页 / 执行命令 / 发 HTTP 请求</span></div>
-<div class="tbl-row"><span class="k">调度</span><span>一次性 / 按间隔 / 每天 / 每周 / 每月</span></div>
+<div class="tbl-row"><span class="k">调度</span><span>一次性 / 按间隔 / 每天 / 每周</span></div>
 <div class="tbl-row"><span class="k">反馈</span><span>执行后弹系统通知；列表里可以手动「立即执行」先验证一把</span></div>
 </div>
 <p>典型用法：每天早上九点自动拉起一整套开发环境（终端 + 目录 + 后台页面）；每天晚上定时调一次接口触发备份。</p>
@@ -596,7 +615,7 @@
 <article class="step reveal" id="g-plugin">
 <span class="step-no">STEP 13</span>
 <h3>插件</h3>
-<p>「插件市场」里 49 个官方插件一键安装 / 升级 / 卸载 / 启用禁用，装完还能给插件单独绑热键。</p>
+<p>「插件市场」里的官方插件一键安装 / 升级 / 卸载 / 启用禁用，装完还能给插件单独绑热键。</p>
 <h4>三种运行时</h4>
 <div class="tbl wide">
 <div class="tbl-row"><span class="k"><code>none</code></span><span>纯前端，没有后端进程，最轻量</span></div>
@@ -675,11 +694,43 @@
 }</pre>
 </div>
 <h4>能做什么</h4>
-<p>29 个工具分三级权限门：<b style="color:var(--text-1);font-weight:510">只读 17 个</b>（查环境、搜项目、看待办笔记、查端口、读日志）、<b style="color:var(--text-1);font-weight:510">低危写 10 个</b>（起停服务、建待办、写笔记、复制剪贴板）、<b style="color:var(--text-1);font-weight:510">高危 2 个</b>（杀进程、执行系统命令，默认关闭）。完整清单见下方 <a href="#mcp" style="color:var(--brand-hover)">MCP 章节</a>。</p>
+<p>工具分三级权限门：<b style="color:var(--text-1);font-weight:510">只读</b>（查环境、搜项目、看待办笔记、查端口、读日志）、<b style="color:var(--text-1);font-weight:510">低危写</b>（起停服务、建待办、写笔记、复制剪贴板）、<b style="color:var(--text-1);font-weight:510">高危</b>（杀进程、执行系统命令，默认关闭）。完整清单见下方 <a href="#mcp" style="color:var(--brand-hover)">MCP 章节</a>。</p>
 </article>
 <!-- ============ 16 ============ -->
-<article class="step reveal" id="g-backup">
+<article class="step reveal" id="g-winmgr">
 <span class="step-no">STEP 16</span>
+<h3>窗口管理</h3>
+<p>把窗口摆到该在的位置，别再拖着鼠标慢慢对边。两条路：<b style="color:var(--text-1);font-weight:510">单窗口贴屏</b>用热键，<b style="color:var(--text-1);font-weight:510">整屏排版</b>用浮层。</p>
+<h4>单窗口贴屏：点住窗口，按热键</h4>
+<ol class="install">
+<li>鼠标点一下目标窗口，让它成为前台窗口。</li>
+<li>按对应热键。比如 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> 贴左半屏，<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>3</kbd> 塞到左下四分之一，<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> 最大化。</li>
+</ol>
+<p>15 个动作的默认键见「快捷键」一节，也都能在「设置 → 窗口管理」里改。想要左窄右宽这类非常规分屏，去同一页调<b style="color:var(--text-1);font-weight:510">分屏比例</b>（10%–90%，默认对半）。</p>
+<div class="note">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
+<div>热键用的是 <kbd>Ctrl</kbd>+<kbd>Alt</kbd> 而不是 <kbd>Win</kbd>+方向键——后者是 Windows 自带的贴靠，故意不跟它抢，两套可以并存。</div>
+</div>
+<h4>整屏排版：一次点击排好一屏</h4>
+<ol class="install">
+<li>点一下要当主角的那个窗口。</li>
+<li>按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 唤起排版浮层，浮层上是一排布局预览。</li>
+<li>点布局里你希望主角待的那一块——<b style="color:var(--text-1);font-weight:510">当前窗口立刻进这一格，其余格子自动用本屏其他窗口依次填上</b>，窗口不够的格子就空着。排完浮层自动收起。</li>
+</ol>
+<div class="tbl wide">
+<div class="tbl-row"><span class="k">9 种布局</span><span>左右对半 / 左主右二 / 右主左二 / 上主下二 / 下主上二 / 四象限 / 三列 / 三行 / 九宫格</span></div>
+<div class="tbl-row"><span class="k">点卡片本身</span><span>等于让主角进「主位第 1 格」，一次点击就是「按这个模板整理整屏」</span></div>
+<div class="tbl-row"><span class="k">排哪块屏</span><span>鼠标所在的那块屏；单窗口热键另外支持把窗口在屏之间搬运</span></div>
+<div class="tbl-row"><span class="k">谁会被排</span><span>只有和布局同在一块屏上的可见窗口参与自动填充，别屏的窗口不会被拉过来；最小化的窗口也不参与，免得一按热键弹出一排</span></div>
+</div>
+<div class="note">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="m13 2-9 11h7l-1 9 9-11h-7z"></path></svg>
+<div>典型用法：写代码时左边编辑器、右边浏览器，点一下编辑器再点「左右对半」的左格就位；开完一堆窗口后按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 点「四象限」，一屏就齐了。浮层开着时再按一次 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 或按 <kbd>Esc</kbd> 即可收起。</div>
+</div>
+</article>
+<!-- ============ 17 ============ -->
+<article class="step reveal" id="g-backup">
+<span class="step-no">STEP 17</span>
 <h3>备份 · 同步 · 快照</h3>
 <h4>快照（本地）</h4>
 <p>设置 → 快照：一键把全部数据导出成一个 JSON 文件，换机器导入即恢复。升级前顺手存一份最保险。</p>
@@ -699,9 +750,9 @@
 <div>自动更新<b style="color:var(--text-1);font-weight:510">只替换主程序</b>，不碰 <code>~/.quickdock</code> 下任何数据；跨版本配置迁移由数据库迁移逻辑负责。</div>
 </div>
 </article>
-<!-- ============ 17 ============ -->
+<!-- ============ 18 ============ -->
 <article class="step reveal" id="g-trouble">
-<span class="step-no">STEP 17</span>
+<span class="step-no">STEP 18</span>
 <h3>更新与排错</h3>
 <h4>更新流程</h4>
 <p>启动后自动拉取签名清单并验签 → 有新版本提示 → 你点「重启更新」→ helper 进程在主程序退出后备份旧文件、覆盖新文件（失败自动回滚）→ 重新拉起应用。<b style="color:var(--text-1);font-weight:510">不弹 UAC、不跑安装器</b>。</p>
@@ -725,7 +776,7 @@
 <div class="wrap">
 <div class="section-head reveal">
 <span class="eyebrow">MCP 服务</span>
-<h2>29 个工具，三级权限门</h2>
+<h2>本地能力，三级权限门</h2>
 <p>把本地开发能力开放给智能体：环境、项目、待办、笔记、剪贴板、端口、日志、崩溃记录，全部可被 AI 调用。写操作分低危 / 高危，高危默认关闭。</p>
 </div>
 <div class="grid-2">
@@ -733,19 +784,19 @@
 <div class="tbl">
 <div class="tbl-row"><span>等级</span><span>工具</span></div>
 <div class="tbl-row">
-<span><span class="tag tag-read">只读 17</span></span>
+<span><span class="tag tag-read">只读</span></span>
 <code>app_info · env_list · env_status · env_log · env_versions · workspace_list · item_search · recent_items · todo_list · note_search · clipboard_recent · port_list · log_list · log_read · crash_list · crash_read · plugin_list</code>
 </div>
 <div class="tbl-row">
-<span><span class="tag tag-low">低危写 10</span></span>
+<span><span class="tag tag-low">低危写</span></span>
 <code>env_start · env_stop · env_restart · item_open · todo_create · todo_done · clipboard_copy · note_create · note_update · note_quick · plugin_execute</code>
 </div>
 <div class="tbl-row">
-<span><span class="tag tag-high">高危 2</span></span>
+<span><span class="tag tag-high">高危</span></span>
 <code>process_kill · system_command（需在环境管理页手动开启高危等级）</code>
 </div>
 </div>
-<p style="margin-top:var(--s-4);font-size:14px;color:var(--text-3)">插件也可通过 <code>host.mcp.call</code> 复用全部 29 个工具，沿用同一套等级门，无需额外声明权限。</p>
+<p style="margin-top:var(--s-4);font-size:14px;color:var(--text-3)">插件也可通过 <code>host.mcp.call</code> 复用全部工具，沿用同一套等级门，无需额外声明权限。</p>
 </div>
 <div class="reveal">
 <div class="code" style="margin-top:0">
@@ -783,7 +834,7 @@ curl -X POST http://127.0.0.1:9230/mcp \
 <div class="dl-grid">
 <div class="dl primary reveal">
 <h3>Windows</h3>
-<p class="meta">Windows 10 1809+ / 11 · x64 · ~100MB</p>
+<p class="meta">Windows 10 1809+ / 11 · x64 · ~50MB</p>
 <div class="arch">
 <a class="btn btn-primary" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64-installer.exe">安装版 · installer.exe</a>
 <a class="btn btn-quiet" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64.exe">便携版 · exe</a>
@@ -822,7 +873,7 @@ curl -X POST http://127.0.0.1:9230/mcp \
 </details>
 <details class="qa">
 <summary>怎么用 AI 控制 QuickDock？</summary>
-<div class="a">在任意 MCP 客户端（如 WorkBuddy）里把 <code>http://127.0.0.1:9230/mcp</code> 加为 HTTP 类型 server，即可调用 29 个工具。高危工具需要你先在环境管理页手动开启。</div>
+<div class="a">在任意 MCP 客户端（如 WorkBuddy）里把 <code>http://127.0.0.1:9230/mcp</code> 加为 HTTP 类型 server，即可调用这些工具。高危工具需要你先在环境管理页手动开启。</div>
 </details>
 </div>
 </div>

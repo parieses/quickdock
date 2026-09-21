@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"quickdock/internal/platform"
@@ -131,4 +132,62 @@ func hotkeyLabel(modifiers, vk int) string {
 	}
 	parts = append(parts, key)
 	return strings.Join(parts, "+")
+}
+
+// ===== 窗口管理热键配置 =====
+//
+// 窗口管理有 15 个动作（左/右/上/下/四分/居中/最大化/还原/最小化/置顶/移屏），
+// 每个动作在 DB 中各存一条 "modifiers,vk"。为避免过度膨胀，前端按 key 调统一的
+// Get/Set 方法（默认值由各动作在前端传入），后端复用 getHotkeyConfigByKey 工厂。
+
+// GetWinmgrHotkeyConfig 读取某个窗口管理动作的热键配置。
+// defMod/defVK 为该动作的默认热键；未配置或解析失败时回退默认值。
+func (a *AppService) GetWinmgrHotkeyConfig(key string, defMod, defVK int) *ApiResult {
+	return a.getHotkeyConfigByKey(key, defMod, defVK, "")
+}
+
+// SetWinmgrHotkeyConfig 保存某个窗口管理动作的热键配置。
+func (a *AppService) SetWinmgrHotkeyConfig(key string, modifiers, vk int) *ApiResult {
+	return a.setHotkeyConfigByKey(key, modifiers, vk)
+}
+
+// GetWinmgrRatio 读取分屏比例（左/右分屏时左占百分比，默认 50）。
+func (a *AppService) GetWinmgrRatio() *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	ratio := 50
+	if raw, err := a.DB.GetSetting("winmgr_ratio"); err == nil && raw != "" {
+		if v, e := strconv.Atoi(raw); e == nil && v >= 10 && v <= 90 {
+			ratio = v
+		}
+	}
+	return Ok(ratio)
+}
+
+// SetWinmgrRatio 保存分屏比例（约束在 10~90）。
+func (a *AppService) SetWinmgrRatio(ratio int) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if ratio < 10 {
+		ratio = 10
+	}
+	if ratio > 90 {
+		ratio = 90
+	}
+	if err := a.DB.SetSetting("winmgr_ratio", strconv.Itoa(ratio)); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
+}
+
+// GetWinmgrFloatHotkeyConfig 读取窗口管理浮层热键配置（默认 Ctrl+Alt+W）。
+func (a *AppService) GetWinmgrFloatHotkeyConfig() *ApiResult {
+	return a.getHotkeyConfigByKey("winmgr_float_hotkey", 3, 0x57, "")
+}
+
+// SetWinmgrFloatHotkeyConfig 保存窗口管理浮层热键配置。
+func (a *AppService) SetWinmgrFloatHotkeyConfig(modifiers, vk int) *ApiResult {
+	return a.setHotkeyConfigByKey("winmgr_float_hotkey", modifiers, vk)
 }
