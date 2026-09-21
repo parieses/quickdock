@@ -64,7 +64,7 @@ try {
 }
 console.log('脚本解析执行 OK（' + inner.length + ' chars）')
 
-for (const k of ['qdConfirm', 'qdAlert', 'qdPickFile', 'qdPickFolder', 'qdReadFile', 'qdHostCall', 'qdHttp']) {
+for (const k of ['qdConfirm', 'qdAlert', 'qdPickFile', 'qdPickFolder', 'qdReadFile', 'qdHostCall', 'qdHttp', 'qdPrint']) {
   ok(typeof win[k] === 'function', 'window.' + k + ' 存在')
 }
 ok(typeof win.alert === 'function', 'window.alert 仍被覆盖')
@@ -114,6 +114,25 @@ win.qdHttp({ url: 'https://example.com/c', method: 'POST', body: 'x=1', contentT
 ok(posted[0].params.body === 'x=1', '字符串 body 原样传', posted[0].params.body)
 ok(posted[0].params.contentType === 'application/x-www-form-urlencoded', 'contentType 不被覆盖', posted[0].params.contentType)
 
+// qdPrint：发 plugin:print（打印通道，宿主在顶层文档渲染后调系统打印）
+posted.length = 0
+let printRejected = null
+const pPrintOk = win.qdPrint({ html: '<!DOCTYPE html><p>纸面</p>', page: 'A4' })
+ok(posted.length === 1, 'qdPrint 发出一条消息', posted.length)
+const mp = posted[0]
+ok(mp.type === 'plugin:print', 'type=plugin:print', mp.type)
+ok(mp.html === '<!DOCTYPE html><p>纸面</p>', 'html 透传', mp.html)
+ok(mp.page === 'A4', 'page 透传', mp.page)
+sendToIframe({ type: 'plugin:print-result', id: mp.id, ok: true })
+
+// 失败路径：宿主打印失败必须 reject，不能静默吞掉（否则插件以为打印成功）
+posted.length = 0
+win.qdPrint({ html: '<p>x</p>' }).catch((e) => {
+  printRejected = e
+})
+ok(posted[0].page === '', 'page 缺省为空串', posted[0].page)
+sendToIframe({ type: 'plugin:print-result', id: posted[0].id, ok: false, error: '打印内容为空' })
+
 // 旧桥未被破坏
 posted.length = 0
 const p3 = win.qdConfirm('确定?')
@@ -129,6 +148,9 @@ ok(r1 && r1.tool === 'port_list', 'resolve 拿到宿主返回', r1)
 ok(rejected instanceof Error, 'error 时 reject', rejected && rejected.message)
 ok(rejected && /权限不足/.test(rejected.message), 'reject 保留宿主错误文案', rejected && rejected.message)
 ok((await p3) === true, 'qdConfirm resolve(true)')
+ok((await pPrintOk) === true, 'qdPrint resolve(true)')
+ok(printRejected instanceof Error, 'qdPrint error 时 reject', printRejected && printRejected.message)
+ok(printRejected && /打印内容为空/.test(printRejected.message), 'qdPrint reject 保留宿主错误文案', printRejected && printRejected.message)
 
 console.log('\nbad = ' + bad)
 process.exit(bad === 0 ? 0 : 1)

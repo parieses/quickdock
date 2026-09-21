@@ -117,7 +117,7 @@ window.QD_I18N = {
     /* ---------- plugins ---------- */
     "插件生态": "Plugin ecosystem",
     "一个市场，装完你要的插件": "One marketplace for every plugin you need",
-    "三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 27 个 Host API，从文件读写到 MCP 复用，能力面三者一致。": "Three runtimes: pure frontend (none), embedded JS engine (goja), standalone subprocess (native) — all speaking JSON-RPC 2.0. The host exposes 27 Host APIs, from file I/O to MCP reuse; all three runtimes get the same capabilities.",
+    "三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 29 个 Host API，从文件读写到 MCP 复用，能力面三者一致。": "Three runtimes: pure frontend (none), embedded JS engine (goja), standalone subprocess (native) — all speaking JSON-RPC 2.0. The host exposes 29 Host APIs, from file I/O to MCP reuse; all three runtimes get the same capabilities.",
     "开发者向": "For developers",
     "HTTP 客户端": "HTTP client",
     "数据库连接": "DB connections",
@@ -434,7 +434,7 @@ window.QD_I18N = {
     "插件不允许自己弹系统对话框 —— 文件 / 目录选择统一走宿主 API": "Plugins can't raise system dialogs themselves — file / folder pickers go through the host API",
     "每个插件有独立的 KV 存储，互不干扰": "Every plugin gets its own KV store, fully isolated",
     "写一个插件": "Writing a plugin",
-    "宿主开放 27 个 Host API（日志、通知、剪贴板、对话框、KV 存储、文件读写、网络请求、Shell 打开、进程管理，以及复用宿主 MCP 的": "The host exposes 27 Host APIs (logging, notifications, clipboard, dialogs, KV storage, file I/O, HTTP requests, shell open, process management, and",
+    "宿主开放 29 个 Host API（日志、通知、剪贴板、对话框、KV 存储、文件读写、网络请求、Shell 打开、进程管理、窗口显隐，以及复用宿主 MCP 的": "The host exposes 29 Host APIs (logging, notifications, clipboard, dialogs, KV storage, file I/O, HTTP requests, shell open, process management, window show/hide, and",
     "）。最小骨架：": "for reusing the host's MCP). The minimal skeleton:",
     "完整开发文档与模板在": "Full developer docs and templates live in the",
     "仓库。": "repository.",

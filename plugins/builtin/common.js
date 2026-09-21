@@ -90,4 +90,4 @@
   global.QD.copyText = copyText;
   global.QD.fallbackCopy = fallbackCopy;
   global.QD.i18n = createI18n;
-}(typeof window !== 'undefined' ? window : this);
+}(typeof window !== 'undefined' ? window : this));

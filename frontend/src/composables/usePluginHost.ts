@@ -11,6 +11,7 @@ import {
   ReadPickedFile,
 } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { unwrap } from '../utils/api'
+import { printHtmlDocument } from '../utils/printDocument'
 import { Dialogs } from '@wailsio/runtime'
 import type { ToastAPI } from '../types'
 
@@ -28,7 +29,7 @@ export interface PluginHostOptions {
  *
  * 同时承载「内联（命令面板内）」与「独立插件窗口」两种形态，收敛原先散落在
  * useInlinePlugin.ts 与 PluginPage.vue 中的重复逻辑：
- *  - postMessage 桥接（confirm / alert / copy / execute / pickfile / pickfolder / readfile / host）
+ *  - postMessage 桥接（confirm / alert / copy / execute / pickfile / pickfolder / readfile / host / print）
  *  - nonce 防跨源伪造
  *  - init（含 pending init 或直接传入）+ theme 下发
  *  - 主题 MutationObserver 动态跟随（移除写死的 dark）
@@ -154,6 +155,24 @@ export function usePluginHost(opts: PluginHostOptions) {
         event.source?.postMessage({ type: 'plugin:copy-result', id, ok: true }, '*')
       } catch {
         event.source?.postMessage({ type: 'plugin:copy-result', id, ok: false }, '*')
+      }
+      return
+    }
+
+    // 插件打印：WebView2 / Chromium 的 window.print() 只作用于**顶层文档**，
+    // 插件在 iframe 里自己调，打印的是整个 QuickDock 应用（暗色外壳 + 纸面内容
+    // 不在打印上下文里）—— 表现为「打印出来是一张白纸」。故由插件把打印用 HTML
+    // 交给宿主，宿主在顶层文档渲染后打印（见 utils/printDocument.ts）。
+    if (event.data?.type === 'plugin:print') {
+      const { id, html, page } = event.data
+      try {
+        await printHtmlDocument(String(html || ''), { page: page ? String(page) : undefined })
+        event.source?.postMessage({ type: 'plugin:print-result', id, ok: true }, '*')
+      } catch (e: any) {
+        event.source?.postMessage(
+          { type: 'plugin:print-result', id, ok: false, error: e?.message || String(e) },
+          '*'
+        )
       }
       return
     }

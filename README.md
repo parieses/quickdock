@@ -156,7 +156,8 @@
 ### 🔌 插件系统
 
 - 开放插件架构，支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），基于 JSON-RPC 2.0 通信
-- 统一的插件 Host API（**27 个方法 / 11 组**）：日志、通知、剪贴板、对话框、按插件隔离的 KV 存储（`db.*`）、文件读写（`host.fs.*`，按 `permissions.filesystem` 声明的目录 scope 校验）、网络请求代发（`http.get/post`，按域名白名单）、Shell 打开（`host.shell.open`）、进程列表/结束（`host.process.list/kill`）、以及复用宿主 MCP 服务的 `host.mcp.call`；goja 经 `api.host(method, params)`、iframe 经注入的 `qdHostCall` 调用，三者能力面一致
+- 统一的插件 Host API（**29 个方法 / 12 组**）：日志、存活探测、通知、剪贴板、对话框、按插件隔离的 KV 存储（`db.*`）、文件读写（`host.fs.*`，按 `permissions.filesystem` 声明的目录 scope 校验）、网络请求代发（`http.get/post`，按域名白名单）、Shell 打开（`host.shell.open`）、进程列表/结束（`host.process.list/kill`）、窗口显隐（`host.window.hide/show`，屏幕取色等场景临时隐藏宿主窗口）、以及复用宿主 MCP 服务的 `host.mcp.call`；goja 经 `api.host(method, params)`、iframe 经注入的 `qdHostCall` 调用，三者能力面一致
+- 插件前端页可调宿主注入的桥接 API：`qdConfirm` / `qdAlert` / `qdPickFile` / `qdPickFolder` / `qdReadFile` / `qdHostCall` / `qdHttp` / `qdPrint`（打印由宿主在顶层文档渲染后调起系统打印 —— iframe 内直接 `window.print()` 只会打印整个应用外壳，出来是白纸）
 - 官方插件经「在线市场」一键安装 / 升级，插件清单（含数量）、功能说明与开发文档统一维护在仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
 - 支持运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定
 

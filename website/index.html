@@ -269,7 +269,7 @@
 <div class="section-head reveal">
 <span class="eyebrow">插件生态</span>
 <h2>一个市场，装完你要的插件</h2>
-<p>三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 27 个 Host API，从文件读写到 MCP 复用，能力面三者一致。</p>
+<p>三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 29 个 Host API，从文件读写到 MCP 复用，能力面三者一致。</p>
 </div>
 <div class="grid-3">
 <article class="card reveal">
@@ -631,7 +631,7 @@
 <li>每个插件有独立的 KV 存储，互不干扰</li>
 </ul>
 <h4>写一个插件</h4>
-<p>宿主开放 27 个 Host API（日志、通知、剪贴板、对话框、KV 存储、文件读写、网络请求、Shell 打开、进程管理，以及复用宿主 MCP 的 <code>host.mcp.call</code>）。最小骨架：</p>
+<p>宿主开放 29 个 Host API（日志、通知、剪贴板、对话框、KV 存储、文件读写、网络请求、Shell 打开、进程管理、窗口显隐，以及复用宿主 MCP 的 <code>host.mcp.call</code>）。最小骨架：</p>
 <div class="code">
 <div class="code-head"><span class="file">plugin.json</span><button class="copy" data-copy="plugin-json">复制</button></div>
 <pre id="plugin-json"><span class="c-com">// none 运行时最小集：plugin.json + icon.svg + frontend/</span>
