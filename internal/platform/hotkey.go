@@ -69,6 +69,10 @@ func VKToKeyName(vk int) string {
 		return "Num."
 	case 0x6F:
 		return "Num/"
+	case 0xDB:
+		return "[" // 左方括号（与 { 同键，US 布局 OEM_4）
+	case 0xDD:
+		return "]" // 右方括号（与 } 同键，US 布局 OEM_6）
 	}
 	if vk >= 0x30 && vk <= 0x39 {
 		return string(rune('0' + vk - 0x30))

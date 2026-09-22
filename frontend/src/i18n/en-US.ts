@@ -336,6 +336,9 @@ export default {
   updateSkip: 'Skip this version',
   updateCheckingAuto: 'Auto-check every 24h',
   updateNotes: 'Release notes',
+  updateView: 'View & Update',
+  updateLater: 'Remind me later',
+  updateCurrentToNew: 'Current {from} → {to}',
   comingSoon: 'Coming soon...',
   selectMenuHint: 'Select a menu item on the left',
 

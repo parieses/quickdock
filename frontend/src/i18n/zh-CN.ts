@@ -336,6 +336,9 @@ export default {
   updateSkip: '跳过此版本',
   updateCheckingAuto: '每 24 小时自动检查',
   updateNotes: '更新内容',
+  updateView: '查看并更新',
+  updateLater: '稍后提醒',
+  updateCurrentToNew: '当前版本 {from}，可升级到 {to}',
   comingSoon: '功能开发中...',
   selectMenuHint: '选择左侧菜单项',
 

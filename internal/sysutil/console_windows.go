@@ -5,6 +5,7 @@ package sysutil
 import (
 	"sync/atomic"
 	"syscall"
+	"time"
 )
 
 // 背景：QuickDock 发布版以 GUI 子系统链接（-H windowsgui），宿主自身没有控制台。
@@ -29,9 +30,18 @@ var (
 	procGetConsoleWindow = kernel32.NewProc("GetConsoleWindow")
 	procIsWindowVisible  = user32.NewProc("IsWindowVisible")
 	procShowWindow       = user32.NewProc("ShowWindow")
+	procSetWindowPos     = user32.NewProc("SetWindowPos")
 )
 
-const swHide = 0
+const (
+	swHide = 0
+	// SetWindowPos 标志：强隐藏窗口，且不移动/缩放/改 Z 序/不抢激活
+	swpHideWindow = 0x0080
+	swpNoMove     = 0x0002
+	swpNoSize     = 0x0001
+	swpNoZOrder   = 0x0004
+	swpNoActivate = 0x0010
+)
 
 // inheritHiddenConsole 为真时，子进程直接继承宿主的隐藏控制台，
 // Hide() 不再叠加 CREATE_NO_WINDOW（叠加反而会新开 conhost）。
@@ -58,13 +68,26 @@ func InitHiddenConsole() bool {
 	if ret, _, _ := procAllocConsole.Call(); ret == 0 {
 		return false
 	}
-	// AllocConsole 建出的控制台默认可见，立刻隐藏。
-	// 窗口要在消息循环里才真正绘制，此处同线程抢先隐藏，实测无残留可见窗口。
-	if hwnd, _, _ := procGetConsoleWindow.Call(); hwnd != 0 {
-		procShowWindow.Call(hwnd, swHide)
+	// AllocConsole 让独立进程 conhost 为宿主创建一个控制台窗口，默认**可见**。
+	// 旧逻辑只在 GetConsoleWindow 立即返回非 0 句柄时才隐藏；但 conhost 建窗口
+	// 与 GetConsoleWindow 取句柄是跨进程异步的，首次调用常返回 0（窗口尚未就绪），
+	// 于是隐藏被整个跳过，窗口以可见态被 conhost 画出 → 启动闪一下黑框。
+	// 改为轮询：绝大多数情况下首次 GetConsoleWindow 即命中、同步 SW_HIDE 赶在
+	// conhost 首帧绘制前藏好，不会闪；偶发 0 时短暂重试（上限 100ms）直到藏住。
+	// 再叠一层 SetWindowPos(SWP_HIDEWINDOW)，防止 conhost 首绘时把窗口重新拉出来。
+	hidden := false
+	for i := 0; i < 100; i++ {
+		if hwnd, _, _ := procGetConsoleWindow.Call(); hwnd != 0 {
+			procShowWindow.Call(hwnd, swHide)
+			procSetWindowPos.Call(hwnd, 0, 0, 0, 0, 0,
+				swpHideWindow|swpNoMove|swpNoSize|swpNoZOrder|swpNoActivate)
+			hidden = true
+			break
+		}
+		time.Sleep(time.Millisecond)
 	}
 	inheritHiddenConsole.Store(true)
-	return true
+	return hidden
 }
 
 // consoleInherited 供同包 Hide() 判断是否需要 CREATE_NO_WINDOW。

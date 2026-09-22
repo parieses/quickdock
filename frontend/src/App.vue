@@ -23,6 +23,7 @@ import SceneTags from './components/SceneTags.vue';
 import SceneEnvBar from './components/SceneEnvBar.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
+import { SkipUpdate } from '../bindings/quickdock/services/update/updateservice';
 
 // 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
 const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
@@ -33,6 +34,7 @@ const NoteManagerPage = defineAsyncComponent(() => import('./components/NoteMana
 const PluginPage = defineAsyncComponent(() => import('./components/PluginPage.vue'))
 const WindowManager = defineAsyncComponent(() => import('./components/WindowManager.vue'))
 const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
+const UpdatePrompt = defineAsyncComponent(() => import('./components/UpdatePrompt.vue'))
 const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
 const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
 const AIPage = defineAsyncComponent(() => import('./components/AIPage.vue'))
@@ -48,6 +50,10 @@ const { t } = useI18n()
 const { items, remove, error, success, confirm, confirmItems, resolveConfirm } = useToast();
 const showSettings = ref(false);
 const settingsPage = ref<string | undefined>(undefined);
+// 后台自动更新提示弹窗状态
+const updatePromptVisible = ref(false);
+const updatePromptData = ref<{ version: string; currentVersion: string; releaseNotes: string } | null>(null);
+const updatePromptHandled = new Set<string>();
 // 环境管理定位区块：侧边栏点击 harness 时，让 EnvironmentPage 自动选中 harness 区块
 const envInitialSection = ref<string | undefined>(undefined);
 
@@ -192,7 +198,67 @@ onMounted(async () => {
     settingsPage.value = undefined
     showSettings.value = true
   })
+  // 后台自动检查到新版本时弹出应用内更新提示（不再依赖用户主动打开设置）
+  Events.On('quickdock:update:status', onUpdateStatus)
 });
+
+// ---- 后台自动更新提示弹窗 ----
+// 后台检查（backgroundCheck）发现新版本会发 quickdock:update:status；此前只在设置弹窗（默认关闭）内
+// 默默更新文字 + 发系统通知（易错过），用户感知不到。这里改为应用内自动弹出明显提示。
+function onUpdateStatus(payload: any) {
+  const st = payload?.data ?? payload
+  if (!st || st.state !== 'available') return
+  const v = st.availableVersion
+  if (!v) return
+  // 本次会话已处理过该版本，不再弹
+  if (updatePromptHandled.has(v)) return
+  try {
+    const today = new Date().toISOString().slice(0, 10)
+    // 当天选过「稍后」则今日不再弹；选过「跳过此版本」则永久不再弹
+    if (localStorage.getItem('qd_update_later_' + v) === today) return
+    if (localStorage.getItem('qd_update_skip_' + v) === '1') return
+  } catch (_) {}
+  updatePromptData.value = {
+    version: v,
+    currentVersion: st.currentVersion || '',
+    releaseNotes: st.releaseNotes || '',
+  }
+  updatePromptVisible.value = true
+}
+
+function closeUpdatePrompt() {
+  updatePromptVisible.value = false
+}
+
+function viewUpdate() {
+  const v = updatePromptData.value?.version
+  if (v) updatePromptHandled.add(v)
+  closeUpdatePrompt()
+  // 打开「关于」页，更新区（下载/重启）就在那里
+  settingsPage.value = 'about'
+  showSettings.value = true
+}
+
+function laterUpdate() {
+  const v = updatePromptData.value?.version
+  if (v) {
+    updatePromptHandled.add(v)
+    try { localStorage.setItem('qd_update_later_' + v, new Date().toISOString().slice(0, 10)) } catch (_) {}
+  }
+  closeUpdatePrompt()
+}
+
+async function skipUpdate() {
+  const v = updatePromptData.value?.version
+  if (v) {
+    updatePromptHandled.add(v)
+    try {
+      localStorage.setItem('qd_update_skip_' + v, '1')
+      await SkipUpdate(v)
+    } catch (_) {}
+  }
+  closeUpdatePrompt()
+}
 
 provide('theme', { current: currentTheme, set: setTheme })
 
@@ -293,6 +359,15 @@ const activeConfirm = computed(() =>
     </div>
 
     <SettingsModal :visible="showSettings" :initialPage="settingsPage" @close="showSettings = false; settingsPage = undefined" />
+    <UpdatePrompt
+      :visible="updatePromptVisible"
+      :version="updatePromptData?.version || ''"
+      :current-version="updatePromptData?.currentVersion || ''"
+      :release-notes="updatePromptData?.releaseNotes || ''"
+      @view="viewUpdate"
+      @later="laterUpdate"
+      @skip="skipUpdate"
+    />
   </div>
 
   <!-- 全局浮层：主窗口 / 独立剪贴板窗口 / 命令面板窗口 共用 -->

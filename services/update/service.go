@@ -12,7 +12,6 @@ import (
 	"quickdock/internal/logger"
 	"quickdock/services"
 
-	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 	"github.com/wailsapp/wails/v3/pkg/updater"
 )
 
@@ -296,12 +295,6 @@ func (a *UpdateService) backgroundCheck() bool {
 
 	if status.State == "available" {
 		logger.I("[update] 后台检查发现新版本 %s（当前 %s）", status.AvailableVersion, status.CurrentVersion)
-		if a.App.Notifier != nil {
-			_ = a.App.Notifier.SendNotification(notifications.NotificationOptions{
-				Title: "QuickDock 更新可用",
-				Body:  "发现新版本 " + status.AvailableVersion + "，打开设置即可下载安装。",
-			})
-		}
 	} else {
 		logger.I("[update] 后台检查完成：%s（当前 %s）", status.State, status.CurrentVersion)
 	}
