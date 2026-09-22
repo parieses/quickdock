@@ -28,26 +28,51 @@ window.QD_I18N = {
     "命令面板唤起一切，运行时环境一键装切，插件市场开箱即用，窗口排版和截图标注随手就来，再顺手把本地能力通过 MCP 开放给 AI。 Raycast 的速度 + VS Code 的开发者体验，打包进一个不到 50MB 的桌面应用。": "The command palette summons everything, runtime environments install and switch in one click, the plugin marketplace works out of the box, window tiling and screenshots are a keystroke away — and your local capabilities are exposed to AI over MCP. Raycast's speed meets VS Code's developer experience, packed into a desktop app under 50MB.",
     "下载 Windows 版": "Download for Windows",
     "查看源码": "View source",
-    "v0.0.16 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地": "v0.0.16 released · No admin required · Auto in-place updates · All data stays local",
+    "v0.0.17 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地": "v0.0.17 released · No admin required · Auto in-place updates · All data stays local",
 
-    /* ---------- what's new (v0.0.16) ---------- */
+    /* ---------- what's new (v0.0.17) ---------- */
     "这次更新了什么": "What's new",
-    "v0.0.16 带来窗口管理：一组贴屏热键，加一个点一下就排好整屏的排版浮层。": "v0.0.16 brings window management: a set of snap hotkeys plus a tiling overlay that arranges a whole screen in a single click.",
-    "贴屏热键": "Snap hotkeys",
-    "新增窗口管理：": "Window management arrives: ",
-    "配方向键 / 数字 / 字母共 15 个热键。点住目标窗口一按，就贴到左半屏、四分之一、居中、最大化——不用再去够鼠标拖窗口。": "15 hotkeys spanning the arrow keys, digits and letters. Click a target window, hit a key, and it snaps to the left half, a quarter, the centre or full screen — no more reaching for the mouse to drag windows.",
-    "排版浮层": "Tiling overlay",
-    "唤起九宫格排版浮层：点布局里任意一块，当前窗口就进那一格，其余格子自动用本屏其他窗口填上，窗口不够就空着——一次点击整理整屏。": "opens a layout overlay: click any cell and the current window takes it, while the remaining cells fill themselves with the other windows on this screen — and stay empty if there aren't enough. One click tidies the whole screen.",
-    "多显示器": "Multi-monitor",
-    "排版按鼠标所在的那块屏换算几何，单窗口热键还能把窗口在屏之间搬运；左 / 右分屏比例可调（10%–90%）。": "Tiling works off the screen under your cursor, and the single-window hotkeys can move windows between screens; the left/right split ratio is adjustable (10%–90%).",
-    "贴得更准": "Snap accuracy",
-    "贴屏前先彻底清掉最大化状态，落位不抢焦点（浮层不会闪退）；几何按边界取整，相邻格严格贴合，不留缝也不重叠。": "Maximised state is cleared first, placement never steals focus (so the overlay doesn't vanish), and geometry rounds on cell edges — adjacent cells meet exactly, with no gaps or overlaps.",
+    "v0.0.17 让插件更轻、更新更稳：插件改为懒加载，窗口即关即释放；新增系统打印能力；自动更新体验优化，顺手修掉 Windows 控制台闪屏。": "v0.0.17 makes plugins lighter and updates more reliable: plugins now load lazily and free up the moment their window closes, system printing arrives for plugins, and the auto-update flow is smoother — with the Windows console flicker fixed.",
+    "插件懒加载": "Lazy plugin loading",
+    "插件改为按需加载，启动更快、内存占用更低；插件窗口关闭后立即释放，不再留后台进程。": "Plugins now load on demand — faster startup, lower memory — and release immediately when their window closes, leaving no stray background process.",
+    "系统打印": "System printing",
+    "插件可通过宿主调用系统打印（host.dialog 打印通道），本地文件、报表一键出纸；Host API 文档同步更新。": "Plugins can call the system print dialog through the host (host.dialog print channel) — send local files or reports straight to paper; Host API docs updated to match.",
+    "更新更稳": "Smoother updates",
+    "优化自动更新体验，修复 Windows 下控制台闪屏；新增方括号热键，可在多显示器之间搬运窗口。": "The auto-update experience is refined and the Windows console flicker is fixed; new bracket hotkeys move windows between monitors.",
     "截图与标注": "Screenshots & annotations",
     "写注册表 / 提权": "Registry writes / elevation",
     "本地": "Local",
     "数据存在自己机器": "Data on your own machine",
     "安装包体积": "Installer size",
     "开源免费": "Open source & free",
+
+    /* ---------- changelog ---------- */
+    "更新日志": "Changelog",
+    "每个版本改了什么": "What changed in each release",
+    "按发布时间倒序，最新的在最上面。点任意一条展开细节。": "Newest first. Click any entry to expand the details.",
+    "最新": "Latest",
+    "插件改为按需加载，窗口关闭立即释放，启动更快、内存占用更低。": "Plugins now load on demand and release the moment their window closes — faster startup, lower memory.",
+    "插件可通过宿主调用系统打印，本地文件与报表一键出纸。": "Plugins can call the system print dialog through the host — send local files and reports straight to paper.",
+    "自动更新体验优化，修复 Windows 控制台闪屏；新增方括号热键，可在多显示器之间搬运窗口。": "A smoother auto-update flow, the Windows console flicker fixed, and new bracket hotkeys for moving windows between monitors.",
+    "新增窗口管理：15 个贴屏热键，加 Ctrl+Alt+W 九宫格排版浮层，一次点击排好整屏。": "Window management arrives: 15 snap hotkeys plus the Ctrl+Alt+W grid tiling overlay — one click tidies a whole screen.",
+    "搜索支持拼音匹配中文，敲缩写就能找到中文条目。": "Search matches Chinese by pinyin — type an abbreviation to find Chinese entries.",
+    "AI 助手新增「使用教程」对话模式，边问边学不用翻文档。": "The AI assistant gains a tutorial chat mode — learn by asking instead of reading the docs.",
+    "截图新增区域截图，配套智能吸附、贴图钉屏与导出。": "Region screenshot arrives, with smart snapping, desktop pinning and export.",
+    "插件市场支持展示更新日志，详情弹窗重做样式。": "The plugin marketplace shows changelogs, and the detail dialog got a fresh look.",
+    "插件列表按更新时间排序；卸载插件时清理关联的使用记录与执行日志。": "Plugins sort by update time, and uninstalling one clears its usage records and execution logs.",
+    "启动速度优化，mkcert 证书可复用，不再重复签发。": "Faster startup, and mkcert certificates are reused instead of re-issued.",
+    "托盘新增服务启停菜单，前端样式统一。": "The tray gains a service start/stop menu, with frontend styles unified.",
+    "插件宿主新增临时窗口显隐 API，供取色类插件使用。": "The plugin host gains a temporary window show/hide API for color-picking plugins.",
+    "新增 WebView2 渲染进程自愈看门狗，界面卡死能自动恢复。": "A self-healing watchdog for the WebView2 render process — a frozen UI recovers on its own.",
+    "支持单版本运行时管理，重写 Git / gh / frpc / Ollama 的安装逻辑。": "Single-version runtime management, with the install logic for Git / gh / frpc / Ollama rewritten.",
+    "新增 JDK 支持与应用内重启，多项交互体验优化。": "JDK support and in-app restart, plus assorted interaction refinements.",
+    "环境服务退出时统一清理，不再留下孤儿进程。": "Environment services are cleaned up on exit — no more orphaned processes.",
+    "移除 macOS 支持，发布流程只保留 Windows。": "macOS support removed; releases are Windows-only.",
+    "优化 Windows 控制台隐藏的内存占用与启动速度。": "The hidden-console mechanism on Windows uses less memory and starts faster.",
+    "插件状态机优化，实现懒加载并更新前端展示。": "The plugin state machine was reworked to load lazily, with the frontend updated to match.",
+    "重构本地站点系统，添加编译期接口安全校验。": "The local site system was refactored with compile-time interface assertions.",
+    "插件日志跳过后缀为 -status 的命令输出，避免日志刷屏。": "Plugin logs skip output from -status commands so the log doesn't flood.",
+    "更早的 v0.0.1–v0.0.7 是核心架构的搭建期，完整提交记录见": "The earlier v0.0.1–v0.0.7 releases were the core architecture build-out. For the full commit history, see",
 
     /* ---------- features ---------- */
     "核心能力": "Core capabilities",
@@ -536,6 +561,7 @@ window.QD_I18N = {
     "排版浮层：点布局里任意一块，当前窗口就位，其余格子自动用本屏其他窗口填上。": "the tiling overlay: click any cell and the current window takes it, while the other cells fill themselves with the rest of the windows on this screen.",
     "9 种排版模板：左右对半 / 主次分栏 / 四象限 / 九宫格…": "9 layout templates: split in half / main-and-side / four quadrants / 3×3 grid…",
     "多显示器搬运、左 / 右分屏比例可调": "Move windows across monitors; adjustable left/right split ratio",
+    "排版浮层": "Tiling overlay",
 
     /* ---------- guide 17: backup ---------- */
     "备份 · 同步 · 快照": "Backup · sync · snapshots",
@@ -634,6 +660,7 @@ window.QD_I18N = {
 
     /* ---------- 标点（独立文本节点） ---------- */
     "，": ", ",
+    "。": ".",
   },
 
   /* 属性类文案（meta / og），无法通过文本节点处理 */

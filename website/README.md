@@ -34,6 +34,7 @@ website/
 
 - 词典：`assets/js/i18n.js` 的 `QD_I18N.en`，键是中文原文、值是英文（`QD_I18N.head` 单独放 meta/og 这类属性文案，它们不是文本节点）。
 - 查表时会折叠空白（`\s+` → 单空格），所以键写成单行、词间单空格即可，不用管 HTML 里的换行缩进。
+- **键的首尾空格会被 `trim` 掉**，别在 key 两端写空格（写了就永远查不中，`extract` 会把这条一直报成「未翻译」）。行内标签断句留下的空格由 HTML 原文保留，替换时原样拼回 —— 所以英文值末尾**不用**再补空格。
 - 查不到就保持中文 —— 漏译只会显示中文，不会出错。
 - 跳过 `<pre>` `<code>` `<kbd>` 里的内容；只处理含中文的文本节点，纯 ASCII、数字、路径自动无视。
 - 切语言会同步 `<html lang>`，`style.css` 里有 `html[lang='en']` 的少量适配。
@@ -150,7 +151,8 @@ src.resize((512,512), Image.LANCZOS).save('website/assets/img/appicon-512.png', 
 ## 改文案时注意
 
 - **不写具体数量**：运行时 / 插件 / MCP 工具的个数会随版本漂移，Hero stats 与章节标题一律不写数字（改写「一键装切」「开箱即用」「以插件市场为准」这类表述），要数字以应用内的环境管理页 / 插件市场为准。枚举清单（运行时长表格、插件 chip、工具表格）保留。
-- **版本号**散落在两处：Hero 的 `.hero-meta` 与 WHAT'S NEW 的 eyebrow + 副标题，改完记得同步 `i18n.js` 里对应的 key（key 本身含版本号，不是只改 value）。
+- **版本号**散落在三处：Hero 的 `.hero-meta`、WHAT'S NEW 的 eyebrow + 副标题、`#changelog` 顶部那条的 `.log-ver`（配 `.log-date`）。改完记得同步 `i18n.js` 里对应的 key（key 本身含版本号，不是只改 value）。
+- **发版要在 `#changelog` 顶部插一条**：复制最新那条 `<details class="log" open="">` 改成新版本，并把**上一条的 `open` 属性去掉**（只让最新版默认展开）。版本号、日期是纯 ASCII 不参与翻译；正文要点写中文，再补进 `i18n.js`。内容来源是 git 提交历史 —— GitHub Release 的 body 是 CI 自动生成的 changelog 链接，**没有实际内容**，别指望从那里抄。
 - 下载链接用的是 GitHub latest release 稳定地址（`releases/latest/download/...`），不需要改版本号。
 
 ## 增删「使用说明」章节时

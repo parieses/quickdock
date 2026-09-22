@@ -45,6 +45,7 @@
 <a href="#guide">使用说明</a>
 <a href="#mcp">MCP</a>
 <a href="#faq">常见问题</a>
+<a href="#changelog">更新日志</a>
 </nav>
 <div class="nav-actions">
 <div aria-label="Language / 语言" class="tgl" role="group">
@@ -83,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.16 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.17 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -94,22 +95,107 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.16) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.17) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.16</span>
+<span class="eyebrow">v0.0.17</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.16 带来窗口管理：一组贴屏热键，加一个点一下就排好整屏的排版浮层。</p>
+<p>v0.0.17 让插件更轻、更新更稳：插件改为懒加载，窗口即关即释放；新增系统打印能力；自动更新体验优化，顺手修掉 Windows 控制台闪屏。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">贴屏热键</span><span>新增窗口管理：<kbd>Ctrl</kbd>+<kbd>Alt</kbd> 配方向键 / 数字 / 字母共 15 个热键。点住目标窗口一按，就贴到左半屏、四分之一、居中、最大化——不用再去够鼠标拖窗口。</span></div>
-<div class="tbl-row"><span class="k">排版浮层</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 唤起九宫格排版浮层：点布局里任意一块，当前窗口就进那一格，其余格子自动用本屏其他窗口填上，窗口不够就空着——一次点击整理整屏。</span></div>
-<div class="tbl-row"><span class="k">多显示器</span><span>排版按鼠标所在的那块屏换算几何，单窗口热键还能把窗口在屏之间搬运；左 / 右分屏比例可调（10%–90%）。</span></div>
-<div class="tbl-row"><span class="k">贴得更准</span><span>贴屏前先彻底清掉最大化状态，落位不抢焦点（浮层不会闪退）；几何按边界取整，相邻格严格贴合，不留缝也不重叠。</span></div>
+<div class="tbl-row"><span class="k">插件懒加载</span><span>插件改为按需加载，启动更快、内存占用更低；插件窗口关闭后立即释放，不再留后台进程。</span></div>
+<div class="tbl-row"><span class="k">系统打印</span><span>插件可通过宿主调用系统打印（host.dialog 打印通道），本地文件、报表一键出纸；Host API 文档同步更新。</span></div>
+<div class="tbl-row"><span class="k">更新更稳</span><span>优化自动更新体验，修复 Windows 下控制台闪屏；新增方括号热键，可在多显示器之间搬运窗口。</span></div>
 </div>
 </div>
 </section>
+<hr class="divider"/>
+<!-- ============================ CHANGELOG ============================ -->
+<section id="changelog">
+<div class="wrap">
+<div class="section-head reveal">
+<span class="eyebrow">更新日志</span>
+<h2>每个版本改了什么</h2>
+<p>按发布时间倒序，最新的在最上面。点任意一条展开细节。</p>
+</div>
+<div class="logs reveal">
+<details class="log" open="">
+<summary><span class="log-ver">v0.0.17</span><span class="log-date">2026-09-22</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>插件改为按需加载，窗口关闭立即释放，启动更快、内存占用更低。</li>
+<li>插件可通过宿主调用系统打印，本地文件与报表一键出纸。</li>
+<li>自动更新体验优化，修复 Windows 控制台闪屏；新增方括号热键，可在多显示器之间搬运窗口。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.16</span><span class="log-date">2026-09-21</span></summary>
+<ul class="log-body">
+<li>新增窗口管理：15 个贴屏热键，加 Ctrl+Alt+W 九宫格排版浮层，一次点击排好整屏。</li>
+<li>搜索支持拼音匹配中文，敲缩写就能找到中文条目。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.15</span><span class="log-date">2026-09-20</span></summary>
+<ul class="log-body">
+<li>AI 助手新增「使用教程」对话模式，边问边学不用翻文档。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.14</span><span class="log-date">2026-09-20</span></summary>
+<ul class="log-body">
+<li>截图新增区域截图，配套智能吸附、贴图钉屏与导出。</li>
+<li>插件市场支持展示更新日志，详情弹窗重做样式。</li>
+<li>插件列表按更新时间排序；卸载插件时清理关联的使用记录与执行日志。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.13</span><span class="log-date">2026-09-20</span></summary>
+<ul class="log-body">
+<li>启动速度优化，mkcert 证书可复用，不再重复签发。</li>
+<li>托盘新增服务启停菜单，前端样式统一。</li>
+<li>插件宿主新增临时窗口显隐 API，供取色类插件使用。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.12</span><span class="log-date">2026-09-18</span></summary>
+<ul class="log-body">
+<li>新增 WebView2 渲染进程自愈看门狗，界面卡死能自动恢复。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.11</span><span class="log-date">2026-09-17</span></summary>
+<ul class="log-body">
+<li>支持单版本运行时管理，重写 Git / gh / frpc / Ollama 的安装逻辑。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.10</span><span class="log-date">2026-09-17</span></summary>
+<ul class="log-body">
+<li>新增 JDK 支持与应用内重启，多项交互体验优化。</li>
+<li>环境服务退出时统一清理，不再留下孤儿进程。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.9</span><span class="log-date">2026-09-17</span></summary>
+<ul class="log-body">
+<li>移除 macOS 支持，发布流程只保留 Windows。</li>
+<li>优化 Windows 控制台隐藏的内存占用与启动速度。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.8</span><span class="log-date">2026-09-16</span></summary>
+<ul class="log-body">
+<li>插件状态机优化，实现懒加载并更新前端展示。</li>
+<li>重构本地站点系统，添加编译期接口安全校验。</li>
+<li>插件日志跳过后缀为 -status 的命令输出，避免日志刷屏。</li>
+</ul>
+</details>
+</div>
+<p class="logs-more">更早的 v0.0.1–v0.0.7 是核心架构的搭建期，完整提交记录见 <a href="https://github.com/parieses/quickdock/commits/main" rel="noopener" target="_blank">GitHub</a>。</p>
+</div>
+</section>
+<hr class="divider"/>
 <!-- ============================ FEATURES ============================ -->
 <section id="features">
 <div class="wrap">
@@ -918,6 +1004,7 @@ curl -X POST http://127.0.0.1:9230/mcp \
 <li><a href="#guide">使用说明</a></li>
 <li><a href="#mcp">MCP 服务</a></li>
 <li><a href="#faq">常见问题</a></li>
+<li><a href="#changelog">更新日志</a></li>
 <li><a href="https://github.com/parieses/quickdock#readme" rel="noopener" target="_blank">README</a></li>
 </ul>
 </div>

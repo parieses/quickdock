@@ -817,6 +817,46 @@ kbd {
 }
 .qa .a code { font-size: 13px; background: var(--w005); padding: 1px 5px; border-radius: var(--r-sm); }
 
+/* ---------- 更新日志 ---------- */
+.logs { border: 1px solid var(--border-subtle); border-radius: var(--r-panel); overflow: hidden; }
+.log { background: var(--bg-0); border-bottom: 1px solid var(--border-subtle); }
+.log:last-child { border-bottom: 0; }
+.log > summary {
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: var(--s-3);
+  padding: var(--s-4) var(--s-5);
+}
+.log > summary::-webkit-details-marker { display: none; }
+.log-ver { font-family: var(--mono); font-size: 13.5px; font-weight: 500; color: var(--text-1); }
+.log-date { font-size: 12.5px; color: var(--text-4); font-variant-numeric: tabular-nums; }
+.log-new { margin-left: auto; }
+.log > summary::after {
+  content: '+';
+  margin-left: auto;
+  color: var(--text-4);
+  font-size: 18px;
+  line-height: 1;
+  transition: transform 0.2s ease;
+}
+.log[open] > summary::after { transform: rotate(45deg); }
+.log-body { padding: 0 var(--s-5) var(--s-4); display: grid; gap: 7px; }
+.log-body li { position: relative; padding-left: 16px; font-size: 14px; line-height: 1.65; color: var(--text-3); }
+.log-body li::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 9px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--brand);
+}
+.logs-more { margin-top: var(--s-4); font-size: 13.5px; color: var(--text-4); }
+.logs-more a { color: var(--brand-hover); }
+
 /* ---------- 17. CTA strip ---------- */
 .cta-strip {
   text-align: center;
@@ -870,6 +910,7 @@ kbd {
   .guide-nav a.active { border-left: 0; }
   .footer-grid { grid-template-columns: 1fr 1fr; }
   .dl-grid { grid-template-columns: 1fr; }
+  .nav-links { gap: var(--s-4); font-size: 12.5px; }
 }
 
 @media (max-width: 768px) {
@@ -898,6 +939,26 @@ kbd {
   .tbl-row { grid-template-columns: 72px 1fr; }
   .footer-grid { grid-template-columns: 1fr; }
   .hero-cta .btn { width: 100%; }
+  .brand > span:not(.brand-mark) { display: none; }
+  .nav-actions { gap: 6px; }
+  .nav-actions .btn { height: 32px; padding: 0 12px; font-size: 12px; }
+}
+
+@media (max-width: 600px) {
+  .keys-row { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .tbl-row,
+  .tbl.wide .tbl-row { grid-template-columns: 1fr; gap: 2px; }
+  .hero-sub { font-size: 16px; }
+  .section-head p { font-size: 16px; }
+  .step h3 { font-size: 21px; }
+  .log > summary { padding: var(--s-3) var(--s-4); gap: var(--s-2); }
+  .log-body { padding: 0 var(--s-4) var(--s-3); }
+}
+
+@media (max-width: 380px) {
+  .wrap { padding: 0 14px; }
+  .nav-inner { gap: 10px; }
+  .nav-actions { gap: 4px; }
 }
 
 @media (max-width: 480px) {
