@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2 } from '@lucide/vue'
 
@@ -22,13 +22,14 @@ import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
 import PluginMarketPage from './PluginMarketPage.vue'
 import { pluginName, pluginDesc } from '../utils/localize'
+import { useThemeName } from '../composables/useThemeName'
 import type { ToastAPI, PluginInfo, PluginExecLog } from '../types'
 
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 const plugins = ref<PluginInfo[]>([])
-const icons = ref<Record<string, string>>({}) // pluginId → data URI
+const icons = ref<Record<string, string>>({}) // pluginId → data URI（当前主题那一档）
 const loading = ref(true)
 const operating = ref<Set<string>>(new Set())
 
@@ -90,20 +91,28 @@ const uninstallingId = ref('')
 const uninstallingName = ref('')
 
 // ---- 加载 ----
+// 图标分深浅两档，按当前主题取用；主题切换时需重新拉取（见下方 watch）
+const themeName = useThemeName()
+
+async function loadIcons() {
+  const theme = themeName.value
+  await Promise.all(
+    plugins.value
+      .filter(p => p.hasFrontend)
+      .map(async (p) => {
+        try {
+          const dataUri = unwrap<string | null>(await GetPluginIcon(p.id, theme))
+          if (dataUri) icons.value[p.id] = dataUri
+        } catch {}
+      })
+  )
+}
+
 async function loadPlugins() {
   loading.value = true
   try {
     plugins.value = (unwrap(await ListPlugins()) || []) as PluginInfo[]
-    // 并行加载所有启用了前端的插件图标
-    const iconPromises = plugins.value
-      .filter(p => p.hasFrontend)
-      .map(async (p) => {
-        try {
-          const dataUri = unwrap<string | null>(await GetPluginIcon(p.id))
-          if (dataUri) icons.value[p.id] = dataUri
-        } catch {}
-      })
-    await Promise.all(iconPromises)
+    await loadIcons()
     // 加载「新」角标集合
     try {
       const flags = await GetPluginNewFlags()
@@ -115,6 +124,8 @@ async function loadPlugins() {
     loading.value = false
   }
 }
+
+watch(themeName, () => { void loadIcons() })
 
 // ---- 强制终止进程（进程锁目录导致更新/卸载失败时用）----
 async function killPlugin(p: PluginInfo) {

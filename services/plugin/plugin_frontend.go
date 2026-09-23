@@ -30,23 +30,31 @@ func (p *PluginService) GetPluginFrontendURL(pluginID string) *services.ApiResul
 	return services.Wrap(path, err)
 }
 
-// GetPluginIcon 获取插件图标（返回 base64 data URI）
-func (p *PluginService) GetPluginIcon(pluginID string) *services.ApiResult {
+// GetPluginIcon 获取插件图标（返回 base64 data URI）。
+//
+// theme 为 "light" 时优先取与清单图标同名的浅色档（`icon.svg` → `icon.light.svg`），
+// 缺失则回退清单声明的图标 —— 只带一个图标的老插件在两个主题下都能正常显示。
+func (p *PluginService) GetPluginIcon(pluginID string, theme string) *services.ApiResult {
 	if p.App.PluginMgr == nil {
 		return services.FailMsg("plugin manager not initialized")
 	}
-
-	// 优先从数据库读取图标
-	if p.App.DB != nil {
-		if iconData, err := p.App.DB.GetValue("plugin_icon_" + pluginID); err == nil && iconData != "" {
-			return services.Ok(iconData)
-		}
+	if theme != "light" {
+		theme = "dark"
 	}
 
 	inst := p.App.PluginMgr.GetPlugin(pluginID)
 	if inst == nil {
 		return services.FailMsg("插件未加载")
 	}
+
+	// 优先从数据库读取图标（键含主题与插件版本：主题各存一份，插件升级后自然失效）
+	cacheKey := iconCacheKey(theme, inst.Manifest.Version, pluginID)
+	if p.App.DB != nil {
+		if iconData, err := p.App.DB.GetValue(cacheKey); err == nil && iconData != "" {
+			return services.Ok(iconData)
+		}
+	}
+
 	if inst.Manifest.Icon == "" {
 		return services.Ok(nil)
 	}
@@ -54,6 +62,9 @@ func (p *PluginService) GetPluginIcon(pluginID string) *services.ApiResult {
 	iconPath, err := safePluginPath(inst.Dir, inst.Manifest.Icon)
 	if err != nil {
 		return services.Fail(fmt.Errorf("图标路径非法: %w", err))
+	}
+	if alt, ok := themeIconPath(iconPath, theme); ok {
+		iconPath = alt
 	}
 	const maxIconSize = 2 << 20 // 2MB
 	if fi, serr := os.Stat(iconPath); serr == nil && fi.Size() > maxIconSize {
@@ -64,15 +75,34 @@ func (p *PluginService) GetPluginIcon(pluginID string) *services.ApiResult {
 		return services.Ok(nil) // 图标文件不存在不是致命错误
 	}
 	// 根据扩展名推断 MIME
-	mime := platform.IconMIME(filepath.Ext(inst.Manifest.Icon))
+	mime := platform.IconMIME(filepath.Ext(iconPath))
 	dataURI := fmt.Sprintf("data:%s;base64,%s", mime, base64Encode(data))
 
 	// 写入数据库缓存
 	if p.App.DB != nil {
-		p.App.DB.SetValue("plugin_icon_"+pluginID, dataURI)
+		p.App.DB.SetValue(cacheKey, dataURI)
 	}
 
 	return services.Ok(dataURI)
+}
+
+// themeIconPath 按主题解析图标实际路径。浅色档缺失时返回 (原路径, false) 表示沿用回退。
+// 约定：`icon.svg` 的浅色档为 `icon.light.svg`（同目录、同名、插在扩展名前）。
+func themeIconPath(iconPath, theme string) (string, bool) {
+	if theme != "light" {
+		return iconPath, false
+	}
+	ext := filepath.Ext(iconPath)
+	alt := strings.TrimSuffix(iconPath, ext) + ".light" + ext
+	if fi, err := os.Stat(alt); err == nil && !fi.IsDir() {
+		return alt, true
+	}
+	return iconPath, false
+}
+
+// iconCacheKey 图标缓存键。带主题与版本，避免两档互相覆盖、插件升级后仍读到旧图。
+func iconCacheKey(theme, version, pluginID string) string {
+	return "plugin_icon_" + theme + "_" + version + "_" + pluginID
 }
 
 // GetPluginFrontendPage 获取插件前端页面（内联 CSS/JS 的单 HTML 文件）

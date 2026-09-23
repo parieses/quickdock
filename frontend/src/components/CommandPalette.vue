@@ -47,6 +47,7 @@ import { getPluginLastResult, savePluginLastResult, pluginCmdKey } from '../util
 import { pinyinMatch, pinyinOf, clearPinyinCache } from '../utils/pinyin'
 import { useFrecency } from '../composables/useFrecency'
 import { usePluginIndex } from '../composables/usePluginIndex'
+import { useThemeName } from '../composables/useThemeName'
 import { useCommandSearch } from '../composables/useCommandSearch'
 import PluginFrame from './PluginFrame.vue'
 import type { RecentEntry } from '../composables/useCommandSearch'
@@ -931,6 +932,19 @@ let lastPluginIconLoad = 0
 const APP_SCAN_TTL = 60_000 // 应用扫描（启动器 start-menu 扫描较慢）长 TTL 缓存
 let lastAppScan = 0
 
+const themeName = useThemeName()
+
+async function loadPluginIcons(force = false) {
+  const now = Date.now()
+  if (!force && now - lastPluginIconLoad < PLUGIN_ICON_TTL) return
+  lastPluginIconLoad = now
+  // 图标分深浅两档，必须按当前主题取；主题切换时由下方 watch 强制重拉
+  const theme = themeName.value
+  await Promise.all(installedPlugins.value.map(async (p) => {
+    try { const uri = unwrap<string | null>(await GetPluginIcon(p.id, theme)); if (uri) pluginIcons.value[p.id] = uri } catch {}
+  }))
+}
+
 async function loadPluginIndex(forceIcons = false) {
   const now = Date.now()
   if (now - lastPluginIndexLoad < 500) return
@@ -944,15 +958,16 @@ async function loadPluginIndex(forceIcons = false) {
     installedPlugins.value = enabled
     pluginCmdIndex.value = buildPluginIndex(enabled)
     // 预加载插件真实图标（data URI），结果列表据此展示，无图标的插件回退到 Puzzle
-    if (forceIcons || now - lastPluginIconLoad >= PLUGIN_ICON_TTL) {
-      lastPluginIconLoad = now
-      const iconPromises = enabled.map(async (p) => {
-        try { const uri = unwrap<string | null>(await GetPluginIcon(p.id)); if (uri) pluginIcons.value[p.id] = uri } catch {}
-      })
-      await Promise.all(iconPromises)
-    }
+    await loadPluginIcons(forceIcons)
   } catch (e) { console.error('[CmdPalette] ListPlugins:', getErrorMessage(e)) }
 }
+
+// 主题切换：图标分档必须立刻换，旧的 TTL 缓存作废
+watch(themeName, () => {
+  lastPluginIconLoad = 0
+  pluginIcons.value = {}
+  void loadPluginIcons(true)
+})
 
 // 一次性加载全量池（项目 + 应用 + 笔记 + 最近使用），后续匹配完全在前端完成，
 // 从而支持拼音与子串搜索（后端 FTS5 前缀匹配无法覆盖这两类）。
