@@ -1028,6 +1028,7 @@ export default {
   pluginMarketAll: '全部分类',
   pluginMarketUncategorized: '未分类',
   pluginMarketNoResult: '没有匹配的插件，换个关键词或分类试试',
+  pluginMarketInstallStatus: '安装状态',
   pluginInstallFromMarket: '安装',
   pluginUpgrade: '升级',
   pluginDownloading: '下载中 {p}%',
@@ -1035,6 +1036,7 @@ export default {
   pluginInstalling: '安装中…',
   pluginHasUpdate: '有新版',
   pluginInstalled: '已安装',
+  pluginNotInstalled: '未安装',
   pluginNotSupportedPlatform: '不支持当前平台',
   // 在线市场：可更新筛选 + 一键更新
   pluginMarketUpdatesOnly: '仅看可更新',

@@ -1027,6 +1027,7 @@ export default {
   pluginMarketAll: 'All categories',
   pluginMarketUncategorized: 'Uncategorized',
   pluginMarketNoResult: 'No matching plugins, try another keyword or category',
+  pluginMarketInstallStatus: 'Install status',
   pluginInstallFromMarket: 'Install',
   pluginUpgrade: 'Upgrade',
   pluginDownloading: 'Downloading {p}%',
@@ -1034,6 +1035,7 @@ export default {
   pluginInstalling: 'Installing…',
   pluginHasUpdate: 'Update available',
   pluginInstalled: 'Installed',
+  pluginNotInstalled: 'Not installed',
   pluginNotSupportedPlatform: 'Not supported on this platform',
   // Online market: updatable filter + one-click update
   pluginMarketUpdatesOnly: 'Updatable only',

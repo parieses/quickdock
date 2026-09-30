@@ -64,6 +64,8 @@ const searchText = ref('')
 const activeCat = ref('')
 // 「仅看可更新」筛选：一键列出所有有新版可升级的已装插件
 const showUpdatesOnly = ref(false)
+// 「安装状态」筛选：全部 / 已安装 / 未安装（前端内存过滤，无需重新拉取市场索引）
+const installFilter = ref('')
 
 // 分类选项（按插件数降序），未声明分类归入「未分类」
 const categories = computed(() => {
@@ -90,12 +92,14 @@ const filteredPlugins = computed(() => {
   const kw = searchText.value.trim().toLowerCase()
   const cat = activeCat.value
   const onlyUpd = showUpdatesOnly.value
-  if (!kw && !cat && !onlyUpd) return plugins.value
+  const inst = installFilter.value
+  if (!kw && !cat && !onlyUpd && !inst) return plugins.value
   return plugins.value.filter((p) => {
     const okCat = !cat || (p.category || t('pluginMarketUncategorized')) === cat
     const okKw = !kw || matchesTextOrPinyin(pinyinFields(p), kw, 'pm:' + p.id)
     const okUpd = !onlyUpd || (p.installed && p.has_update)
-    return okCat && okKw && okUpd
+    const okInst = !inst || (inst === 'installed' ? !!p.installed : !p.installed)
+    return okCat && okKw && okUpd && okInst
   })
 })
 
@@ -309,6 +313,11 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
       <select v-model="activeCat" class="market-cat-select">
         <option value="">{{ t('pluginMarketAll') }}</option>
         <option v-for="c in categories" :key="c.cat" :value="c.cat">{{ c.cat }} ({{ c.count }})</option>
+      </select>
+      <select v-model="installFilter" class="market-cat-select">
+        <option value="">{{ t('pluginMarketInstallStatus') }}</option>
+        <option value="installed">{{ t('pluginInstalled') }}</option>
+        <option value="uninstalled">{{ t('pluginNotInstalled') }}</option>
       </select>
       <button
         class="filter-chip"
