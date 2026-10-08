@@ -36,10 +36,13 @@ jobs:
           node-version: '22'
 
       - name: Install Task runner
-        # CI 构建统一走仓库 Taskfile（单一事实来源），避免构建参数在 CI 与 Taskfile 间漂移
+        # CI 构建统一走仓库 Taskfile（单一事实来源），避免构建参数在 CI 与 Taskfile 间漂移。
+        # ⚠️ 钉死 v3.53.0：v3.54.0 起 go.mod 要求 go >= 1.26.4，而 CI 锁 go 1.25 且
+        # GOTOOLCHAIN=local 无法自动升级工具链，源码编译必失败；v3.53.0 要求 go 1.25.10，
+        # CI 的 go 1.25.14 满足。请勿改回 @latest（会再次撞 1.26.4 门槛）。
         shell: pwsh
         run: |
-          go install github.com/go-task/task/v3/cmd/task@latest
+          go install github.com/go-task/task/v3/cmd/task@v3.53.0
           # ⚠️ 必须 (.Trim())：pwsh 的 $(...) 命令替换会把 go 输出的末尾换行符原样嵌进字符串，
           # 不 Trim 会变成 "<gopath>\n/bin" 这种非法路径。Join-Path 统一分隔符。
           $goBin = (Join-Path (go env GOPATH).Trim() "bin")
@@ -49,6 +52,7 @@ jobs:
           "TASK_BIN=$taskExe" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM
           # 同时加入 PATH（utf8NoBOM 避免首行 BOM 污染）
           $goBin | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8NoBOM
+          & $taskExe --version
 
       - name: Install Wails3 CLI
         # 版本从 go.mod 自动解析，与本地开发/构建严格一致
