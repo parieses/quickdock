@@ -41,11 +41,10 @@ jobs:
         run: |
           go install github.com/go-task/task/v3/cmd/task@latest
           $taskBin = "$(go env GOPATH)/bin"
-          # ⚠️ 勿用 `-Encoding utf8`：pwsh 7 下该开关会写 UTF-8 BOM，污染 GITHUB_PATH 首行路径，
-          # 导致 `task` 不被识别、版本校验步骤直接 `task : 无法识别` 失败。pwsh 7 默认即无 BOM 的 UTF-8。
-          echo "$taskBin" | Out-File -Append -FilePath $env:GITHUB_PATH
-          # 同时导出 task 绝对路径，供后续步骤直接调用，彻底摆脱对跨步骤 PATH 注入的依赖。
-          echo "TASK_BIN=$taskBin/task.exe" >> $env:GITHUB_ENV
+          # ⚠️ 必须显式 `-Encoding utf8NoBOM`：pwsh 7 的 Out-File 默认仍可能写出 UTF-8 BOM，
+          # 会污染 GITHUB_PATH 首行路径（本步骤是第一个写入者），导致 `task` 不被识别、
+          # 版本校验步骤直接 `task : 无法识别` 失败。utf8NoBOM 保证首行路径干净。
+          echo "$taskBin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8NoBOM
 
       - name: Install Wails3 CLI
         # 版本从 go.mod 自动解析，与本地开发/构建严格一致
@@ -54,8 +53,8 @@ jobs:
           $wailsVer = (Select-String -Path go.mod -Pattern 'wailsapp/wails/v3 ').Line.Trim().Split(' ')[1]
           Write-Host "Installing wails3 $wailsVer (resolved from go.mod)"
           go install github.com/wailsapp/wails/v3/cmd/wails3@$wailsVer
-          # 同上方 Task runner：勿用 `-Encoding utf8`，避免 BOM 污染 GITHUB_PATH 首个路径条目。
-          echo "$(go env GOPATH)/bin" | Out-File -Append -FilePath $env:GITHUB_PATH
+          # 同上方 Task runner：必须显式 `-Encoding utf8NoBOM`，避免 BOM 污染 GITHUB_PATH 首个路径条目。
+          echo "$(go env GOPATH)/bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8NoBOM
 
       - name: Install NSIS
         shell: pwsh
@@ -120,8 +119,11 @@ jobs:
         env:
           APP_VERSION: ${{ github.ref_name }}
         run: |
-          $task = if ($env:TASK_BIN -and (Test-Path $env:TASK_BIN)) { $env:TASK_BIN } else { "task" }
-          $resolved = ((& $task -s windows:version) | Select-Object -Last 1).Trim() -replace '^v', ''
+          # 直接按 gopath 解析 task 绝对路径，不依赖跨步骤 PATH/GITHUB_ENV 注入（最稳；
+          # 即便 GITHUB_PATH 注入因编码问题失效，这里也能直接命中 bin/task.exe）。
+          $taskBin = "$(go env GOPATH)/bin/task.exe"
+          if (-not (Test-Path $taskBin)) { $taskBin = "task" }
+          $resolved = ((& $taskBin -s windows:version) | Select-Object -Last 1).Trim() -replace '^v', ''
           Write-Host "Taskfile 解析版本=$resolved / tag 版本=$env:VERSION"
           if ($resolved -ne $env:VERSION) {
             throw "构建注入版本号($resolved) 与 tag($env:VERSION) 不一致，已中止发布，避免产出无法收敛的更新包"
@@ -135,8 +137,10 @@ jobs:
         env:
           APP_VERSION: ${{ github.ref_name }}
         run: |
-          $task = if ($env:TASK_BIN -and (Test-Path $env:TASK_BIN)) { $env:TASK_BIN } else { "task" }
-          & $task build
+          # 直接按 gopath 解析 task 绝对路径，不依赖跨步骤 PATH/GITHUB_ENV 注入（最稳）。
+          $taskBin = "$(go env GOPATH)/bin/task.exe"
+          if (-not (Test-Path $taskBin)) { $taskBin = "task" }
+          & $taskBin build
 
       - name: Generate WebView2 bootstrapper
         shell: pwsh
