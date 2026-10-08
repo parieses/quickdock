@@ -116,7 +116,7 @@ func (s *SQLRuntime) InstalledVersions() []Install {
 			}
 			v := e.Name()
 			if _, err := os.Stat(s.serverPath(v)); err == nil {
-				out = append(out, Install{Version: v, Scope: "portable", Path: s.versionDir(v)})
+				out = append(out, Install{Version: v, Scope: "portable", Path: filepath.Join(s.versionDir(v), "bin")})
 				dirs.record(filepath.Dir(s.serverPath(v)))
 			}
 		}

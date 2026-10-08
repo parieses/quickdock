@@ -25,9 +25,9 @@ func TestGenerateNginx_Static(t *testing.T) {
 	for _, want := range []string{
 		"server_name myapp.test;",
 		"listen      443 ssl;",
-		"ssl_certificate     C:/data/sites/certs/sites-cert.pem;",
-		"ssl_certificate_key C:/data/sites/certs/sites-key.pem;",
-		"root  D:/proj/myapp;",
+		"ssl_certificate     \"C:/data/sites/certs/sites-cert.pem\";",
+		"ssl_certificate_key \"C:/data/sites/certs/sites-key.pem\";",
+		"root  \"D:/proj/myapp\";",
 		"index index.html index.htm;",
 		// 纯静态站点的回退目标是 index.html，绝不是 index.php（那个文件在静态站点上不存在）
 		"try_files $uri $uri/ /index.html;",
@@ -116,8 +116,8 @@ func TestGenerateCaddy(t *testing.T) {
 	}
 	for _, want := range []string{
 		"caddy.test {",
-		"tls D:/certs/c.pem D:/certs/k.pem",
-		"root * D:/www",
+		"tls \"D:/certs/c.pem\" \"D:/certs/k.pem\"",
+		"root * \"D:/www\"",
 		"file_server",
 		"try_files {path} {path}/ /index.html",
 	} {
@@ -388,10 +388,10 @@ func TestGenerateDocRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(ng.Snippet, "root  D:/proj/blog/public;") {
+	if !strings.Contains(ng.Snippet, "root  \"D:/proj/blog/public\";") {
 		t.Errorf("nginx root 未应用文档根:\n%s", ng.Snippet)
 	}
-	if strings.Contains(ng.Snippet, "root  D:/proj/blog;") {
+	if strings.Contains(ng.Snippet, "root  \"D:/proj/blog\";") {
 		t.Errorf("nginx root 仍指向项目根:\n%s", ng.Snippet)
 	}
 
@@ -403,7 +403,7 @@ func TestGenerateDocRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(multi.Snippet, "root  /srv/yii/frontend/web;") {
+	if !strings.Contains(multi.Snippet, "root  \"/srv/yii/frontend/web\";") {
 		t.Errorf("多级文档根未生效:\n%s", multi.Snippet)
 	}
 
@@ -414,7 +414,7 @@ func TestGenerateDocRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(cd.Snippet, "root * /srv/blog/public") {
+	if !strings.Contains(cd.Snippet, "root * \"/srv/blog/public\"") {
 		t.Errorf("caddy root 未应用文档根:\n%s", cd.Snippet)
 	}
 
@@ -426,7 +426,7 @@ func TestGenerateDocRoot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(plain.Snippet, "root  D:/www;") {
+	if !strings.Contains(plain.Snippet, "root  \"D:/www\";") {
 		t.Errorf("空文档根时 root 应保持项目目录:\n%s", plain.Snippet)
 	}
 }

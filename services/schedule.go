@@ -2,6 +2,7 @@ package services
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"quickdock/internal/db"
@@ -188,16 +189,37 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 		}
 	}
 
-	// 验证星期
+	// 验证星期：与 store/computeNextRun（parseWeekdays 按整数 0-6 解析，0=周日）保持一致。
+	// 前端 SchedulePage 发送的是整数数组（如 "1,2,3"），故此处应按整数校验；
+	// 同时兼容历史 mon..sun 写法（归一化为整数后判定），避免已存数据被拒。
 	if t.Weekdays != "" {
-		validDays := map[string]bool{
-			"mon": true, "tue": true, "wed": true, "thu": true,
-			"fri": true, "sat": true, "sun": true,
-		}
 		for _, day := range strings.Split(t.Weekdays, ",") {
 			day = strings.TrimSpace(strings.ToLower(day))
-			if day != "" && !validDays[day] {
-				return fmt.Errorf("无效的星期: %s", day)
+			if day == "" {
+				continue
+			}
+			var n int
+			var perr error
+			switch day {
+			case "mon":
+				n = 1
+			case "tue":
+				n = 2
+			case "wed":
+				n = 3
+			case "thu":
+				n = 4
+			case "fri":
+				n = 5
+			case "sat":
+				n = 6
+			case "sun":
+				n = 0
+			default:
+				n, perr = strconv.Atoi(day)
+			}
+			if perr != nil || n < 0 || n > 6 {
+				return fmt.Errorf("无效的星期: %s（应为 0-6，0=周日，或 mon..sun）", day)
 			}
 		}
 	}

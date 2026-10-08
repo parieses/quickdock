@@ -69,7 +69,7 @@ func (a *ApacheRuntime) InstalledVersions() []Install {
 			}
 			v := e.Name()
 			if _, err := os.Stat(a.ExeFor(v)); err == nil {
-				out = append(out, Install{Version: v, Scope: "portable", Path: a.versionDir(v)})
+				out = append(out, Install{Version: v, Scope: "portable", Path: filepath.Join(a.versionDir(v), "bin")})
 				dirs.record(filepath.Dir(a.ExeFor(v)))
 			}
 		}

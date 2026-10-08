@@ -90,7 +90,7 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 
 	// 自动安装内置插件（main.go 注入的回调，需在 DB 就绪后执行）。
 	// 必须在本段同步完成：内置插件首次运行才写入磁盘 + 注册 DB，若先异步扫描会漏掉这批刚安装的插件。
-	if a.InstallBuiltinPluginsFn != nil {
+	if a.InstallBuiltinPluginsFn != nil && a.PluginMgr != nil {
 		a.InstallBuiltinPluginsFn(a.PluginMgr, a.DB)
 	}
 

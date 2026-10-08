@@ -271,8 +271,10 @@ func (a *AppService) checkScheduledTasks() {
 			}()
 			status, result := a.executeTask(t)
 
-			// 计算下次运行时间与启用状态
-			nextRun := computeNextRun(t, now)
+			// 计算下次运行时间与启用状态：用「任务完成时刻」而非循环开头的陈旧 now，
+			// 否则慢任务（HTTP 阻塞 30s / command·open 挂起）执行耗时 ≥ 间隔时，写入的
+			// next_run 早已过去，下一轮立即再次命中 → 以「尽可能快」的频率反复执行而非按间隔节拍。
+			nextRun := computeNextRun(t, nowStr())
 			enabled := t.Enabled
 			if t.ScheduleKind == "once" || nextRun == "" {
 				// 一次性任务或无法再排期 → 自动停用

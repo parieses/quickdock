@@ -72,9 +72,6 @@ func fts5Escape(q string) string {
 // SearchAllItems 跨全部工作空间搜索项目（使用 FTS5 全文索引）
 // query 为空时返回空结果（前端请使用 GetMostUsedItems 获取热数据）
 func (d *Database) SearchAllItems(query string) ([]CollectionItem, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-
 	if query == "" {
 		return nil, nil
 	}
@@ -92,16 +89,24 @@ func (d *Database) SearchAllItems(query string) ([]CollectionItem, error) {
 	ftsQuery := strings.Join(parts, " ")
 
 	// items_fts 虚拟表自身含 id/name/value 列，与 items 表同名，SELECT 必须加 items. 前缀限定
+	// 只读路径用读锁（RLock）：命令面板全量池扫描不再阻塞写操作（OpenItem 的 usage_count 自增等）。
+	d.mu.RLock()
 	rows, err := d.conn.Query(`SELECT `+("items."+strings.ReplaceAll(itemCols, ", ", ", items."))+`
 		FROM items_fts JOIN items ON items.rowid = items_fts.rowid
 		WHERE items_fts MATCH ?
 		ORDER BY rank
 		LIMIT 200`, ftsQuery)
 	if err != nil {
+		d.mu.RUnlock()
 		return nil, err
 	}
 	defer rows.Close()
-	return d.scanItems(rows)
+	items, serr := d.scanItems(rows)
+	d.mu.RUnlock()
+	if serr == nil {
+		d.persistExtractedIcons(items)
+	}
+	return items, serr
 }
 
 // GetMostUsedItems 返回最常使用的项目（按 usage_count 降序，用于命令面板「最近使用」）
@@ -109,34 +114,45 @@ func (d *Database) GetMostUsedItems(limit int) ([]CollectionItem, error) {
 	if limit <= 0 {
 		limit = 30
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
 	rows, err := d.conn.Query("SELECT "+itemCols+" FROM items ORDER BY usage_count DESC, updated_at DESC LIMIT ?", limit)
 	if err != nil {
+		d.mu.RUnlock()
 		return nil, err
 	}
 	defer rows.Close()
-	return d.scanItems(rows)
+	items, serr := d.scanItems(rows)
+	d.mu.RUnlock()
+	if serr == nil {
+		d.persistExtractedIcons(items)
+	}
+	return items, serr
 }
 
 // ListAllItems 返回全部工作空间的项目（不分页）。
 // 命令面板改用前端对全量池做拼音/子串权威匹配（见 useCommandSearch），
 // 避免后端 FTS5 前缀匹配导致拼音与子串搜索完全失效。
 func (d *Database) ListAllItems() ([]CollectionItem, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
 	rows, err := d.conn.Query("SELECT " + itemCols + " FROM items ORDER BY usage_count DESC, updated_at DESC")
 	if err != nil {
+		d.mu.RUnlock()
 		return nil, err
 	}
 	defer rows.Close()
-	return d.scanItems(rows)
+	items, serr := d.scanItems(rows)
+	d.mu.RUnlock()
+	if serr == nil {
+		d.persistExtractedIcons(items)
+	}
+	return items, serr
 }
 
 // scanItems 通用 items 行扫描器。
 // 调用方必须已持有 d.mu（本方法只被持锁的查询方法调用）。
-// 提取成功的图标回填 DB：enrichItemIcon 仅在 icon 为空时提取，此处非空即新提取，
-// 写回后后续查询直接命中 icon 字段，避免命令面板每次全量池扫描都重复走磁盘提取。
+// 提取成功的图标只在内存里回填 item.Icon，不做 DB 写回——写回归入 persistExtractedIcons，
+// 避免在高频只读路径（命令面板全量池扫描）持写锁做磁盘 I/O 从而阻塞全部 DB 访问
+// （含 OpenItem 的 usage_count 自增等写操作）。
 func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 	var items []CollectionItem
 	for rows.Next() {
@@ -147,12 +163,15 @@ func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 		enrichItemIcon(&item)
 		items = append(items, item)
 	}
-	// 批量写回新提取的图标：单条 `CASE id WHEN ? THEN ?` UPDATE 替代逐行 UPDATE，
-	// 只在 icon 仍为空时写（WHERE icon = '' 防止并发覆盖用户手动设置的图标）。
-	var (
-		ids      []string
-		iconVals []string
-	)
+	return items, rows.Err()
+}
+
+// persistExtractedIcons 把扫描时新提取的图标写回 DB（仅在 icon 为空时），
+// 单独走写锁，避免在只读查询热路径持写锁做 I/O。
+// WHERE icon = '' 防止并发覆盖用户手动设置的图标；与扫描读之间即便有并发写也安全。
+func (d *Database) persistExtractedIcons(items []CollectionItem) {
+	ids := make([]string, 0, len(items))
+	iconVals := make([]string, 0, len(items))
 	for i := range items {
 		if items[i].Icon == "" {
 			continue
@@ -160,17 +179,19 @@ func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 		ids = append(ids, items[i].ID)
 		iconVals = append(iconVals, items[i].Icon)
 	}
-	if len(ids) > 0 {
-		qs := strings.Repeat("?,", len(ids))
-		qs = qs[:len(qs)-1]
-		// CASE id WHEN id1 THEN icon1 WHEN id2 THEN icon2 ... → 参数 interleave (id1,icon1,id2,icon2,...)
-		// 末尾再补 IN (id1,id2,...) 的 id 列表
-		_, _ = d.conn.Exec(
-			`UPDATE items SET icon = CASE id `+strings.Repeat("WHEN ? THEN ? ", len(ids))+`ELSE icon END
-			 WHERE id IN (`+qs+`) AND icon = ''`,
-			append(iconValsArgs(ids, iconVals), toIFaceSlice(ids)...)...)
+	if len(ids) == 0 {
+		return
 	}
-	return items, rows.Err()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	qs := strings.Repeat("?,", len(ids))
+	qs = qs[:len(qs)-1]
+	// CASE id WHEN id1 THEN icon1 WHEN id2 THEN icon2 ... → 参数 interleave (id1,icon1,id2,icon2,...)
+	// 末尾再补 IN (id1,id2,...) 的 id 列表
+	_, _ = d.conn.Exec(
+		`UPDATE items SET icon = CASE id `+strings.Repeat("WHEN ? THEN ? ", len(ids))+`ELSE icon END
+		 WHERE id IN (`+qs+`) AND icon = ''`,
+		append(iconValsArgs(ids, iconVals), toIFaceSlice(ids)...)...)
 }
 
 // iconValsArgs 生成 `CASE id WHEN id THEN icon ...` 的展开参数（interleave id,icon,...）。

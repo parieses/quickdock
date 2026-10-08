@@ -1,7 +1,6 @@
 package dsh
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -530,7 +529,7 @@ func (m *NodeEnvManager) runNpmInstall(ctx context.Context, target string, onMsg
 		return err
 	}
 	consume := func(r io.Reader) {
-		sc := bufio.NewScanner(r)
+		sc := newLogScanner(r)
 		for sc.Scan() {
 			if onMsg != nil {
 				onMsg(sc.Text())
@@ -572,7 +571,7 @@ func (m *NodeEnvManager) installPnpm(ctx context.Context, node, npmCli string, e
 		return err
 	}
 	consume := func(r io.Reader) {
-		sc := bufio.NewScanner(r)
+		sc := newLogScanner(r)
 		for sc.Scan() {
 			if onMsg != nil {
 				onMsg(sc.Text())

@@ -251,19 +251,33 @@ func isMissing(err error) bool {
 }
 
 // expandHome 展开开头的 ~（仅支持 ~ 与 ~/、~\ 前缀）
+//
+// Downloads/Desktop/Documents/Pictures 这四个目录在 Windows 上常被重定向
+// （OneDrive、改盘符等，即 Known Folder Redirection），其真实路径往往不是
+// 字面意义的 "主目录\Downloads"。若只按 UserHomeDir() 拼接，白名单里写的
+// ~/Downloads 会与对话框选出的真实路径对不上，导致合法目录也被判「无权限」。
+// 因此这几个目录改走系统 Known Folder ID 解析（见 knownFolderDir）。
 func expandHome(p string) (string, error) {
 	p = strings.TrimSpace(p)
 	if p != "~" && !strings.HasPrefix(p, "~/") && !strings.HasPrefix(p, `~\`) {
 		return p, nil
 	}
+	if p == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return "", fmt.Errorf("无法定位用户主目录（~ 展开失败）: %w", err)
+		}
+		return home, nil
+	}
+	sub := p[2:]
+	if dir, ok := knownFolderDir(sub); ok {
+		return dir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("无法定位用户主目录（~ 展开失败）: %w", err)
 	}
-	if p == "~" {
-		return home, nil
-	}
-	return filepath.Join(home, p[2:]), nil
+	return filepath.Join(home, sub), nil
 }
 
 // looksAbsolute 判断是否可视为绝对路径。

@@ -317,7 +317,9 @@ func validateDir(raw string) (string, error) {
 	if err != nil || !info.IsDir() {
 		return "", fmt.Errorf("目录不存在或不是有效目录: %s", raw)
 	}
-	return dir, nil
+	// 返回绝对路径 abs（而非仅 Clean 过的 dir），否则以相对路径落库会让生成的
+	// nginx/Caddy root 以 nginx 进程工作目录为基准解析，指向错误目录 → 站点 404。
+	return abs, nil
 }
 
 // validateDocRoot 清洗文档根：统一分隔符、去掉首尾斜杠，空串表示「就用项目根目录」。

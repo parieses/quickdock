@@ -27,6 +27,16 @@ import (
 	"quickdock/internal/sysutil"
 )
 
+// newLogScanner 返回放大了单行缓冲上限的 scanner。
+// 默认 bufio.Scanner 单行上限 64KB，一旦 dsh/npm 输出超长行（超大 JSON、压缩后的错误栈等），
+// Scan 会静默停止读取，管道数据无人消费 → 子进程写满 64KB 管道缓冲后永久阻塞（卡死），
+// 且退出不会被 cmd.Wait 正常感知。放大到 16MB 上限以容纳异常大行。
+func newLogScanner(r io.Reader) *bufio.Scanner {
+	sc := newLogScanner(r)
+	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
+	return sc
+}
+
 // DSHProcessManager 启动并管理 dsh web 子进程（独立 Node 进程，127.0.0.1 随机端口）。
 // 与现有 AI 助手互不干扰：DSH 是完整 Agent 入口（工具/文件/终端/会话），AI 助手是轻量聊天。
 type DSHProcessManager struct {
@@ -253,7 +263,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 				logger.E("QuickDock: DSH stdout log goroutine panic: %v", r)
 			}
 		}()
-		sc := bufio.NewScanner(stdout)
+		sc := newLogScanner(stdout)
 		for sc.Scan() {
 			l := sc.Text()
 			if l == "" {
@@ -284,7 +294,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 				logger.E("QuickDock: DSH stderr log goroutine panic: %v", r)
 			}
 		}()
-		sc := bufio.NewScanner(stderr)
+		sc := newLogScanner(stderr)
 		for sc.Scan() {
 			if l := sc.Text(); l != "" {
 				logf("error", l)
@@ -714,7 +724,7 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 				logger.E("QuickDock: DSH stdout log goroutine panic: %v", r)
 			}
 		}()
-		sc := bufio.NewScanner(stdout)
+		sc := newLogScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
@@ -725,7 +735,7 @@ func (m *DSHProcessManager) InstallPlugin(plugin string) error {
 				logger.E("QuickDock: DSH stderr log goroutine panic: %v", r)
 			}
 		}()
-		sc := bufio.NewScanner(stderr)
+		sc := newLogScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
@@ -832,7 +842,7 @@ func (m *DSHProcessManager) UpdateAllPlugins() error {
 				logger.E("QuickDock: DSH update stdout log goroutine panic: %v", r)
 			}
 		}()
-		sc := bufio.NewScanner(stdout)
+		sc := newLogScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
@@ -843,7 +853,7 @@ func (m *DSHProcessManager) UpdateAllPlugins() error {
 				logger.E("QuickDock: DSH update stderr log goroutine panic: %v", r)
 			}
 		}()
-		sc := bufio.NewScanner(stderr)
+		sc := newLogScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
@@ -906,13 +916,13 @@ func (m *DSHProcessManager) repairProfileNodeModules(profileDir string, logf fun
 		return err
 	}
 	go func() {
-		sc := bufio.NewScanner(stdout)
+		sc := newLogScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
 	}()
 	go func() {
-		sc := bufio.NewScanner(stderr)
+		sc := newLogScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
@@ -997,13 +1007,13 @@ func (m *DSHProcessManager) RollbackPlugins() (err error) {
 		return err
 	}
 	go func() {
-		sc := bufio.NewScanner(stdout)
+		sc := newLogScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
 	}()
 	go func() {
-		sc := bufio.NewScanner(stderr)
+		sc := newLogScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
@@ -1199,7 +1209,7 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 				logger.E("QuickDock: DSH stdout log goroutine panic: %v", r)
 			}
 		}()
-		sc := bufio.NewScanner(stdout)
+		sc := newLogScanner(stdout)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}
@@ -1210,7 +1220,7 @@ func (m *DSHProcessManager) ensurePnpm(ctx context.Context, logf func(string, st
 				logger.E("QuickDock: DSH stderr log goroutine panic: %v", r)
 			}
 		}()
-		sc := bufio.NewScanner(stderr)
+		sc := newLogScanner(stderr)
 		for sc.Scan() {
 			logf("info", sc.Text())
 		}

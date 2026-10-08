@@ -223,10 +223,10 @@ func nginxServerBlock(in GenInput, name string) string {
 	write("    listen      443 ssl;")
 	write("    server_name %s;", in.Site.Domain)
 	write("")
-	write("    ssl_certificate     %s;", toSlash(in.CertPath))
-	write("    ssl_certificate_key %s;", toSlash(in.KeyPath))
+	write("    ssl_certificate     \"%s\";", toSlash(in.CertPath))
+	write("    ssl_certificate_key \"%s\";", toSlash(in.KeyPath))
 	write("")
-	write("    root  %s;", dir)
+	write("    root  \"%s\";", dir)
 	// index 里的 index.php 只对 PHP 站点写：nginx 对没有 FastCGI 段的 .php 请求会当静态文件
 	// 原样返回（源码泄漏），纯静态站点把一个 index.php 摆在索引列表首位没有半点好处。
 	if in.PHPFPMAddr != "" {
@@ -236,8 +236,8 @@ func nginxServerBlock(in GenInput, name string) string {
 	}
 	if in.LogDir != "" {
 		write("")
-		write("    access_log %s/%s.access.log;", toSlash(in.LogDir), name)
-		write("    error_log  %s/%s.error.log;", toSlash(in.LogDir), name)
+		write("    access_log \"%s/%s.access.log\";", toSlash(in.LogDir), name)
+		write("    error_log  \"%s/%s.error.log\";", toSlash(in.LogDir), name)
 	}
 
 	// ---- 模块：server 级指令 ----
@@ -380,7 +380,7 @@ func caddySiteBlock(in GenInput, name string) string {
 		write("# 文档根 = %s/%s", toSlash(in.Site.Dir), in.Site.DocRoot)
 	}
 	write("%s {", domain)
-	write("    tls %s %s", toSlash(in.CertPath), toSlash(in.KeyPath))
+	write("    tls \"%s\" \"%s\"", toSlash(in.CertPath), toSlash(in.KeyPath))
 
 	// ---- 模块：server 级指令 ----
 	if hasModule(in.mods, ModGzip) {
@@ -427,7 +427,7 @@ func caddySiteBlock(in GenInput, name string) string {
 		write("    # 模块：反向代理（Caddy 的 reverse_proxy 原生支持 WebSocket）")
 		write("    reverse_proxy 127.0.0.1:%d", in.ProxyPort)
 	} else {
-		write("    root * %s", toSlash(in.Site.EffectiveDir()))
+		write("    root * \"%s\"", toSlash(in.Site.EffectiveDir()))
 		if in.PHPFPMAddr != "" {
 			write("    php_fastcgi %s", in.PHPFPMAddr)
 			write("    file_server")
@@ -451,7 +451,7 @@ func caddySiteBlock(in GenInput, name string) string {
 	if in.LogDir != "" {
 		write("")
 		write("    log {")
-		write("        output file %s/%s.access.log", toSlash(in.LogDir), name)
+		write("        output file \"%s/%s.access.log\"", toSlash(in.LogDir), name)
 		write("    }")
 	}
 	write("}")

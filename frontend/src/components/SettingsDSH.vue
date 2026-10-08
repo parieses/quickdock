@@ -77,7 +77,7 @@ const status = ref<NodeEnvStatus | null>(cachedDshStatus)
 const settingUp = ref(false)
 const updating = ref(false)
 const checkingUpdate = ref(false)
-const dshSvc = ref<DSHStatusInfo | null>(cachedDshSvc)
+const dshSvc = ref<DSHStatusInfo | null>(cachedDshSvc ? { ...cachedDshSvc } : null)
 const svcBusy = ref(false) // 启动/停止操作进行中
 const progress = ref<DshProgress | null>(null)
 const logs = ref<{ level: string; message: string }[]>([])
@@ -195,7 +195,9 @@ async function openDSH() {
 async function loadDSHStatus() {
   try {
     const res = unwrap<DSHStatusInfo | null>(await DSHStatus())
-    if (res) { dshSvc.value = res; cachedDshSvc = res }
+    // 缓存与组件实例各持一份拷贝：避免 UI 直接改写 dshSvc.value.running 等字段时污染模块级
+    // 缓存，导致离开页面再回来复用被污染的陈旧状态（见 toggleService 对 running 的即时置位）。
+    if (res) { const c = { ...res }; dshSvc.value = c; cachedDshSvc = c }
   } catch (e) {
     // 查询失败静默（如后端未就绪），不影响其余 UI
   }

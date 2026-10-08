@@ -18,10 +18,19 @@ func (p *PluginService) EnablePlugin(id string) *services.ApiResult {
 	if err != nil {
 		return services.Fail(err)
 	}
-	if err := p.App.DB.SetPluginEnabled(id, 1); err != nil {
+	affected, err := p.App.DB.SetPluginEnabled(id, 1)
+	if err != nil {
 		// 数据库更新失败：回滚已加载的插件进程
 		_ = p.App.PluginMgr.StopPlugin(id)
 		return services.Fail(err)
+	}
+	// 插件此前无 DB 记录（磁盘残留 / DB 损坏等孤儿）：启用必须把记录落库，
+	// 否则下次启动又被当成禁用、回到「禁用后消失」的怪圈。
+	if affected == 0 && manifest != nil {
+		if ierr := p.App.DB.InsertPluginFull(id, manifest.Name, manifest.Version, manifest.Author,
+			manifest.Description, manifest.Category, "", nil, nil, true); ierr != nil {
+			logger.W("插件 %s 启用落库失败: %v", id, ierr)
+		}
 	}
 
 	// 注册插件声明的热键：先清理旧的热键避免自冲突
@@ -62,7 +71,12 @@ func (p *PluginService) DisablePlugin(id string) *services.ApiResult {
 		// 插件可能不在内存中（初次启动时 DB 禁用但未加载），这不是错误
 		_ = err
 	}
-	if err := p.App.DB.SetPluginEnabled(id, 0); err != nil {
+	// 置内存禁用标记：阻止 EnsureLoaded 把已禁用插件经「惰性复活」静默拉起，
+	// 否则内存 running 与 DB disabled 状态不一致（禁用形同虚设）。
+	if inst := p.App.PluginMgr.GetPlugin(id); inst != nil {
+		inst.SetDisabled(true)
+	}
+	if _, err := p.App.DB.SetPluginEnabled(id, 0); err != nil {
 		return services.Fail(err)
 	}
 

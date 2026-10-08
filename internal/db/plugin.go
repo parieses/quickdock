@@ -6,16 +6,18 @@ import (
 	"strings"
 )
 
-// SetPluginEnabled 设置插件启用状态
-func (d *Database) SetPluginEnabled(id string, enabled int) error {
+// SetPluginEnabled 设置插件启用状态。返回受影响行数（0 表示无对应记录，
+// 用于调用方判断「磁盘孤儿插件无 DB 记录」并据此补 INSERT）。
+func (d *Database) SetPluginEnabled(id string, enabled int) (int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	_, err := d.conn.Exec("UPDATE plugins SET enabled = ? WHERE id = ?", enabled, id)
+	res, err := d.conn.Exec("UPDATE plugins SET enabled = ? WHERE id = ?", enabled, id)
 	if err != nil {
-		return fmt.Errorf("更新插件状态失败: %w", err)
+		return 0, fmt.Errorf("更新插件状态失败: %w", err)
 	}
-	return nil
+	n, _ := res.RowsAffected()
+	return n, nil
 }
 
 // DeletePlugin 删除插件记录

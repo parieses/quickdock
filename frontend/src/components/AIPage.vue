@@ -221,7 +221,7 @@ async function send() {
   const convId = activeId.value
   // 立即把用户消息显示出来，随后在消息区内等待 AI 流式回复
   const msg: AIMessage = {
-    id: '', conv_id: convId, role: 'user', content: text,
+    id: 'usr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), conv_id: convId, role: 'user', content: text,
     created_at: new Date().toISOString(),
   }
   messages.value.push(msg)

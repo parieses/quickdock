@@ -182,29 +182,45 @@ func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 			logger.W("跳过插件 %s（不支持当前平台 %s）", manifest.ID, runtime.GOOS)
 			continue
 		}
-		// 数据库里未注册 / 已禁用的插件：完全不加载。
-		// 必须在 LoadPlugin 之前判断——native 插件的 LoadPlugin 内部会真的 cmd.Start()。
-		if isEnabled != nil && !isEnabled(manifest.ID) {
-			continue
-		}
+		// 已禁用插件不再在此处跳过：它必须登记进 m.plugins，否则 ListPlugins 不返回、
+		// 管理页无法重新启用（禁用即消失、无法再启用的 bug）。真正的「启用/禁用」分流见下方：
+		// 仅启用的插件才真正拉起后端进程（native 的 cmd.Start() 必须在启用判定之后）。
 		jobs = append(jobs, pluginJob{manifest: *manifest, dir: filepath.Join(m.pluginsDir, entry.Name())})
 	}
 
-	// 懒加载（默认）：只登记，不起后端进程 / goja VM。native 的 cmd.Start() + initialize
-	// 握手延后到首次 EnsureLoaded（打开插件页 / 执行命令 / ShowPluginWindow 都经它）。
+	// 懒加载（默认）：登记全部插件（含已禁用），不起后端进程 / goja VM。native 的 cmd.Start()
+	// + initialize 握手延后到首次 EnsureLoaded（打开插件页 / 执行命令 / ShowPluginWindow 都经它）。
 	// 直接消掉「启动时把全部 native 插件都拉成常驻进程」的开销——实测 26 个 native 合计
 	// Private ~340 MB / RSS ~60 MB，而日常只会用到其中少数几个。
 	// 置 EnableLazyPluginLoad=false 可一键回滚到「启动即全量加载」的旧链路。
+	// 已禁用插件登记后压成 stopped：管理页可见且可重新启用，命令面板按 status 过滤掉 stopped
+	//（见 CommandPalette.loadPluginIndex 的 p.status !== 'stopped' 过滤，与 DisablePlugin 只置 stopped 的契约一致）。
 	if m.EnableLazyPluginLoad {
 		for _, job := range jobs {
 			m.RegisterPlugin(job.manifest, job.dir)
+			if isEnabled != nil && !isEnabled(job.manifest.ID) {
+				if inst, ok := m.plugins[job.manifest.ID]; ok {
+					inst.SetStatus("stopped")
+					inst.stopped.Store(true)
+					inst.disabled.Store(true)
+				}
+			}
 		}
-		logger.I("插件懒加载：已登记 %d 个启用插件，后端进程延后到首次使用", len(jobs))
+		logger.I("插件懒加载：已登记 %d 个插件（含已禁用），后端进程延后到首次使用", len(jobs))
 		return nil
 	}
 
 	var wg sync.WaitGroup
 	for _, job := range jobs {
+		// 已禁用插件：只登记、不启动进程（status=stopped，管理页可重新启用）
+		if isEnabled != nil && !isEnabled(job.manifest.ID) {
+			m.RegisterPlugin(job.manifest, job.dir)
+			if inst, ok := m.plugins[job.manifest.ID]; ok {
+				inst.SetStatus("stopped")
+				inst.stopped.Store(true)
+			}
+			continue
+		}
 		wg.Add(1)
 		go func(j pluginJob) {
 			defer wg.Done()
@@ -892,6 +908,11 @@ func (m *Manager) EnsureLoaded(pluginID string) error {
 	m.mu.RUnlock()
 	if ok && inst.GetStatus() == "running" && inst.Stdin != nil {
 		return nil
+	}
+	// 已显式禁用的插件：禁止被任意调用方（命令面板 / AI·MCP / 残留窗口）经「惰性复活」
+	// 静默拉起，否则内存 running 与 DB disabled 状态不一致、禁用形同虚设。
+	if ok && inst.disabled.Load() {
+		return fmt.Errorf("插件 %s 已禁用，拒绝加载", pluginID)
 	}
 	dir := filepath.Join(m.pluginsDir, pluginID)
 	manifestPath := filepath.Join(dir, "plugin.json")

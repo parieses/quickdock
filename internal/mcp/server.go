@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -208,7 +209,7 @@ func (s *Server) dispatch(req rpcRequest) rpcResponse {
 				return errResp(req.ID, codeInvalidParams, err.Error())
 			}
 		}
-		res, err := Call(p.Name, p.Arguments)
+		res, err := callToolSafe(p.Name, p.Arguments)
 		if err != nil {
 			// 工具执行失败按 MCP 约定回 isError 内容块，而非协议错误，便于模型读懂并自我纠正
 			logger.W("[mcp] 工具 %s 执行失败: %v", p.Name, err)
@@ -227,6 +228,20 @@ func (s *Server) dispatch(req rpcRequest) rpcResponse {
 	default:
 		return errResp(req.ID, codeMethodNotFound, "不支持的方法: "+req.Method)
 	}
+}
+
+// callToolSafe 包装工具调用，捕获 handler 内部 panic 并转成普通 error，
+// 让 MCP 返回干净的 isError 内容块而非连接被重置/空 body，便于模型自我纠正。
+// net/http 虽会在连接层 recover 进程级 panic，但恢复后不会写出任何合法响应，
+// 客户端拿到的是截断空 body，对应 MCP 通道被废弃。
+func callToolSafe(name string, args map[string]interface{}) (res interface{}, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.E("[mcp] 工具 %s panic: %v", name, r)
+			err = fmt.Errorf("工具 %s 执行异常: %v", name, r)
+		}
+	}()
+	return Call(name, args)
 }
 
 func (s *Server) sessionID() string {
