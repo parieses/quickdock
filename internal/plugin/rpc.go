@@ -256,8 +256,10 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	// 若不及时 Wait，句柄/僵尸会累积到下次 stopPlugin 才回收。进程已结束时 Wait 立即返回；
 	// 若 stdout 关闭但进程尚存（罕见），在独立 goroutine 中阻塞等待，由后续 stopPlugin(Kill+Wait) 兜底。
 	// 第二次 Wait（stopPlugin 中）返回 ErrProcessDone，安全。
+	// 捕获本地 cmd 副本：避免 stopPlugin 将 inst.Cmd 置 nil 后本 goroutine 读到 nil 触发空指针。
 	if inst.Cmd != nil && inst.Cmd.Process != nil {
-		go func() { _ = inst.Cmd.Wait() }()
+		cmd := inst.Cmd
+		go func() { _ = cmd.Wait() }()
 	}
 }
 

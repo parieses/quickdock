@@ -2,13 +2,13 @@ package plugin
 
 import (
 	"bufio"
-	"bytes"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -253,12 +253,22 @@ func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 //
 // 这是 P-2 懒加载的核心：把启动墙钟从「Σ(启用插件初始化)」降到「仅文件读取 + map 写入」，
 // 启动耗时不再随启用插件数线性增长。none 运行时无后端进程，登记即视为可用，直接置 running。
-func (m *Manager) RegisterPlugin(manifest PluginManifest, dir string) {
+// newRunningNoneInstance 构造一个「纯前端（runtime=none）已运行」的实例：
+// 无后端进程 / goja VM，立即置 running 并关闭 readyCh 表示就绪可用。
+// RegisterPlugin 与 LoadPlugin 的 none 分支共享此构造函数，避免重复逻辑。
+func newRunningNoneInstance(manifest PluginManifest, dir string) *PluginInstance {
 	inst := NewPluginInstance(manifest, dir)
+	inst.SetStatus("running")
+	close(inst.readyCh)
+	return inst
+}
+
+func (m *Manager) RegisterPlugin(manifest PluginManifest, dir string) {
+	var inst *PluginInstance
 	if manifest.Backend.Runtime == "none" {
-		inst.SetStatus("running")
-		close(inst.readyCh)
+		inst = newRunningNoneInstance(manifest, dir)
 	} else {
+		inst = NewPluginInstance(manifest, dir)
 		inst.SetStatus(statusRegistered)
 	}
 	m.mu.Lock()
@@ -308,9 +318,7 @@ func (m *Manager) LoadPlugin(manifest PluginManifest, dir string) error {
 
 	switch manifest.Backend.Runtime {
 	case "none":
-		inst := NewPluginInstance(manifest, dir)
-		inst.SetStatus("running")
-		close(inst.readyCh)
+		inst := newRunningNoneInstance(manifest, dir)
 		m.mu.Lock()
 		m.plugins[manifest.ID] = inst
 		m.mu.Unlock()
@@ -648,20 +656,41 @@ func (m *Manager) stopPlugin(inst *PluginInstance, treeKill bool) {
 		inst.DB.Close()
 	}
 
-	// 终止进程：先置 stopped（阻止 watchPlugin 复活），再回收主进程。
-	// treeKill 必须主进程尚存活时调用，否则 taskkill /T 找不到父进程会漏杀子进程。
-	if inst.Cmd != nil && inst.Cmd.Process != nil {
-		pid := inst.Cmd.Process.Pid
-		if treeKill {
-			killProcessTree(pid)
-		} else {
-			_ = inst.Cmd.Process.Kill()
-		}
-		_, _ = inst.Cmd.Process.Wait()
-	}
+	// 终止并回收进程：Kill 同步发出终止信号，Wait 在后台 goroutine 回收句柄——
+	// 不阻塞持有 m.mu 的调用方（degradePlugin / KillPlugin / StopPlugin / UnloadPlugin
+	// 均在持 m.mu 期间调本函数，若某进程卡死不响应终止信号，同步 Wait 会冻结整个插件
+	// 管理器）。reapProcess 会解除 inst.Cmd 引用（置 nil），故下方 safeWritePidFile 不会
+	// 再把本实例写回 PID 文件（它已被停止）。
+	m.reapProcess(inst, treeKill)
 
 	// 更新 PID 文件（调用者持有写锁，直接传 m.plugins 安全）
 	m.safeWritePidFile(m.plugins)
+}
+
+// reapProcess 终止并回收插件进程。Kill（TerminateProcess / taskkill /T）同步发出终止信号，
+// Wait 在后台 goroutine 回收句柄（避免调用方在持有 m.mu 期间被卡死的进程长时间阻塞）。
+// 调用前须已置 inst.stopped=true 并 inst.Close()。本函数会解除 inst.Cmd 引用（置 nil）：
+//   - 回收期间 safeWritePidFile 的快照不会把本实例误判为仍在运行；
+//   - 其他在 m.mu 下读取 inst.Cmd 的路径（safeWritePidFile / 状态查询）看到 nil 一致；
+//   - readLoop 已在闭包中捕获 cmd 本地副本，不受此处置 nil 影响（见 rpc.go）。
+//
+// 注意：treeKill=true 时必须主进程尚存活（Kill 先于 Wait 由本函数同步发出），否则
+// taskkill /T 找不到父进程会漏杀子进程树。
+func (m *Manager) reapProcess(inst *PluginInstance, treeKill bool) {
+	cmd := inst.Cmd
+	if cmd == nil || cmd.Process == nil {
+		return
+	}
+	// 解除引用：后续回收在后台进行，但本实例已不被当作「运行中的进程」对待。
+	inst.Cmd = nil
+	if treeKill {
+		killProcessTree(cmd.Process.Pid)
+	} else {
+		_ = cmd.Process.Kill()
+	}
+	go func() {
+		_, _ = cmd.Process.Wait()
+	}()
 }
 
 // watchPlugin 等待插件退出，崩溃时自动重启（最多 3 次指数退避）
@@ -829,7 +858,11 @@ func (m *Manager) EnsureLoaded(pluginID string) error {
 	m.mu.RLock()
 	inst, ok := m.plugins[pluginID]
 	m.mu.RUnlock()
-	if ok && inst.GetStatus() == "running" && inst.Stdin != nil {
+	// running 即无需重载：native / goja / none 三种运行时都已真正运行
+	//（none 在 RegisterPlugin 即置 running，goja/native 在 LoadPlugin 完成后置 running）。
+	// 此前多判了 inst.Stdin != nil，导致无 stdin 的 goja/none 即使已 running 也走不到这里、
+	// 会再触发一次 LoadPlugin（被内部双保险挡掉，仅冗余一次 RLock + 创建路径）。
+	if ok && inst.GetStatus() == "running" {
 		return nil
 	}
 	// 已显式禁用的插件：禁止被任意调用方（命令面板 / AI·MCP / 残留窗口）经「惰性复活」
@@ -966,45 +999,55 @@ func (m *Manager) cleanupOrphans() {
 		return
 	}
 
-	// 清理所有记录的 PID
+	// 单次 tasklist 全量获取存活进程清单，避免按 PID 逐个起 tasklist 子进程
+	//（上次异常退出留下多个孤儿时启动期会串行阻塞）。
+	alive := alivePIDs()
 	for pluginID, pid := range pids.PIDs {
-		if pid <= 0 {
+		if pid <= 0 || !alive[pid] {
 			continue
 		}
-		if !processExists(pid) {
-			continue
-		}
-		// 尝试终止进程
+		// 尝试终止进程（PID 复用窗口无法完全排除，但 cleanupOrphans 仅清理上次残留，
+		// 误杀概率极低）。Wait 在后台进行，不阻塞启动热路径。
 		proc, err := os.FindProcess(pid)
 		if err != nil {
-			continue
-		}
-		// 二次确认：processExists 与 Kill 之间存在 PID 复用窗口（旧进程已退出、PID 被无关
-		// 进程复用），仅再次校验仍存在以缩小误杀概率（仍非绝对，但显著降低风险）。
-		if !processExists(pid) {
 			continue
 		}
 		if err := proc.Kill(); err == nil {
 			logger.W("清理孤儿进程 %q (PID %d)", pluginID, pid)
 		}
-		proc.Wait()
+		go func(p *os.Process) { _, _ = p.Wait() }(proc)
 	}
 
 	// 删除 PID 文件
 	os.Remove(pidFile)
 }
 
-// processExists 验证 PID 对应的进程是否真实存在
-// Windows 上 os.FindProcess 始终成功，需要额外验证避免误杀 PID 被重用的问题
-func processExists(pid int) bool {
-	// 先用 tasklist 验证进程是否存在（Windows）
-	// 注意：主进程是 GUI 类型，直接 exec.Command 启动 tasklist（控制台程序）会弹 CMD 窗口
-	cmd := sysutil.Command("tasklist", "/FI", fmt.Sprintf("PID eq %d", pid), "/NH", "/FO", "CSV")
+// alivePIDs 返回当前系统存活的进程 PID 集合（单次 tasklist /FO CSV 全量解析）。
+// Windows 上 os.FindProcess 始终成功，需借助 tasklist 真实探测，避免 PID 被复用而误杀。
+func alivePIDs() map[int]bool {
+	set := make(map[int]bool)
+	// 主进程是 GUI 类型，直接 exec.Command 启动 tasklist（控制台程序）会弹 CMD 窗口，
+	// 故经 sysutil.Command 隐藏控制台。
+	cmd := sysutil.Command("tasklist", "/NH", "/FO", "CSV")
 	out, err := cmd.Output()
 	if err != nil {
-		return false
+		return set
 	}
-	return bytes.Contains(out, []byte(fmt.Sprintf(`"%d"`, pid)))
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.Trim(strings.TrimSpace(line), "\r")
+		if line == "" {
+			continue
+		}
+		// CSV 首列为 "PID" 或数字；按首个逗号切分并去掉引号。
+		if i := strings.IndexByte(line, ','); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.Trim(line, `"`)
+		if pid, e := strconv.Atoi(line); e == nil {
+			set[pid] = true
+		}
+	}
+	return set
 }
 
 // safeWritePidFile 将指定插件快照的 PID 写入文件
@@ -1060,9 +1103,14 @@ func (m *Manager) ShutdownAll() {
 		}
 		inst.SetStatus("stopped")
 		inst.Close()
+		// goja 插件在此关闭其专属 SQLite 数据库（native 无 DB、none 无进程），
+		// 与 stopPlugin 的关闭逻辑保持一致：避免进程退出前 WAL 未 checkpoint 导致的数据残留。
+		if inst.DB != nil {
+			inst.DB.Close()
+		}
 		if inst.Cmd != nil && inst.Cmd.Process != nil {
-			inst.Cmd.Process.Kill()
-			inst.Cmd.Wait()
+			// 后台回收：与 stopPlugin 一致，不在持有 m.mu 期间同步 Wait（否则可能阻塞退出）。
+			m.reapProcess(inst, false)
 		}
 	}
 
@@ -1146,7 +1194,8 @@ func (m *Manager) degradeIdlePlugins() {
 //「仍可降级」的全部条件，避免 degradeIdlePlugins 的快照与执行之间实例被替换（崩溃重启 /
 // 用户重新打开窗口）而误杀刚复活 / 正被使用的插件。返回 ErrPluginNotFound 表示插件已不在
 //（被卸载或实例已替换）；降级被二次校验否决时返回 nil（视为无需处理）。
-// 与用户主动 KillPlugin 的区别：降级不扫描目录锁进程（闲置插件不锁目录），仅释放其后端进程。
+// 与用户主动 KillPlugin 的区别：降级不扫描目录锁进程（闲置插件不锁目录），
+// 但仍按 treeKill 终止整棵进程树（stopPlugin(treeKill=true)），而非只杀主进程。
 func (m *Manager) degradePlugin(id string) error {
 	if !pluginIDRe.MatchString(id) {
 		return fmt.Errorf("%w: 非法插件 ID: %q", ErrInvalidManifest, id)
