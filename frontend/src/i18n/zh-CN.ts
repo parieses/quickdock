@@ -390,6 +390,7 @@ export default {
   saveAll: '保存全部',
   hotkeyTip: '点击快捷键区域后按下组合键即可捕获。支持 Ctrl / Alt / Shift / Win + 字母/数字/功能键。',
   hotkeyConflict: '快捷键不能重复，请为不同功能设置不同的组合键',
+  hotkeyRegisterFailed: '全局热键 {keys} 被其它程序占用，未能生效。请到「设置 → 窗口管理」改绑一个不冲突的组合',
   hotkeySaved: '已保存并生效',
   restoreOk: '已恢复默认',
 
@@ -972,6 +973,8 @@ export default {
   pluginStatusStarting: '启动中',
   pluginStatusUnresponsive: '无响应',
   pluginStatusRegistered: '就绪',
+  pluginStatusDisabled: '已禁用',
+  pluginForceClose: '强制关闭（终止插件进程）',
   pluginNoFrontend: '无界面',
   pluginHasFrontend: '有界面',
   pluginCommands: '注册命令',

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2 } from '@lucide/vue'
 
@@ -133,7 +133,9 @@ async function killPlugin(p: PluginInfo) {
   operating.value.add(p.id)
   try {
     await KillPlugin(p.id)
-    p.status = 'stopped'
+    // 杀进程 ≠ 禁用：后端把状态置回 registered（懒加载就绪），插件仍启用，
+    // 命令面板可见、下次打开/执行命令自动拉起——无需手动再启用。
+    p.status = 'registered'
     toast?.success?.(t('pluginKilled'))
   } catch (e) {
     toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
@@ -146,7 +148,7 @@ async function killPlugin(p: PluginInfo) {
 // 懒加载后多数插件处于 registered（已启用、进程待首次使用才拉起），电源按钮必须按
 //「已启用」处理才能正确禁用；否则会出现「显示启用、点了只是把它启动起来、且禁用不掉」的错位。
 function isEnabled(p: PluginInfo): boolean {
-  return p.status === 'running' || p.status === 'registered'
+  return !p.disabled && (p.status === 'running' || p.status === 'registered')
 }
 
 // ---- 启用/禁用 ----
@@ -156,9 +158,14 @@ async function togglePlugin(p: PluginInfo) {
   try {
     if (isEnabled(p)) {
       await DisablePlugin(p.id)
+      // 后端语义：禁用 = disabled=true + status=stopped；两个字段都要同步本地，
+      // 否则徽标/电源按钮会与真实状态错位（曾出现启用后仍显示「已禁用」）。
+      p.disabled = true
       p.status = 'stopped'
     } else {
       await EnablePlugin(p.id)
+      // EnablePlugin → ReloadPlugin 返回前已完成加载握手，状态即 running
+      p.disabled = false
       p.status = 'running'
     }
   } catch (e) {
@@ -224,6 +231,9 @@ function openPluginPage(p: PluginInfo) {
       newFlags.value.delete(p.id)
       MarkPluginSeen(p.id).catch(() => {})
     }
+    // 打开窗口路径会 EnsureLoaded 拉起后端（registered→running），
+    // 稍等握手完成后立即对齐徽标，不等 3s 轮询
+    setTimeout(refreshStatuses, 1200)
   }).catch(e => {
     toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
   })
@@ -255,8 +265,9 @@ const sortedPlugins = computed(() => {
     return (a.name || '').localeCompare(b.name || '')
   })
 })
-function statusBadgeClass(status: string): string {
-  switch (status) {
+function statusBadgeClass(p: PluginInfo): string {
+  if (p.disabled) return 'badge-disabled'
+  switch (p.status) {
     case 'running': return 'badge-running'
     case 'starting': return 'badge-starting'
     case 'registered': return 'badge-registered'
@@ -267,8 +278,9 @@ function statusBadgeClass(status: string): string {
   }
 }
 
-function statusLabel(status: string): string {
-  switch (status) {
+function statusLabel(p: PluginInfo): string {
+  if (p.disabled) return t('pluginStatusDisabled')
+  switch (p.status) {
     case 'running': return t('pluginStatusRunning')
     case 'starting': return t('pluginStatusStarting')
     case 'registered': return t('pluginStatusRegistered')
@@ -279,7 +291,30 @@ function statusLabel(status: string): string {
   }
 }
 
-onMounted(() => { loadPlugins(); loadLogs() })
+// 轻量状态刷新：只从后端合并 status/disabled，不重拉图标与角标。
+// 覆盖「打开窗口后 EnsureLoaded 拉起（registered→running）」「watchPlugin 崩溃重启」
+// 等后台状态变化——管理页本地数组不会自己变，必须轮询对齐。
+async function refreshStatuses() {
+  if (activeView.value !== 'local') return
+  try {
+    const fresh = (unwrap(await ListPlugins()) || []) as PluginInfo[]
+    const byId = new Map(fresh.map(q => [q.id, q]))
+    for (const p of plugins.value) {
+      const f = byId.get(p.id)
+      if (f) {
+        p.status = f.status
+        p.disabled = f.disabled
+      }
+    }
+  } catch {}
+}
+
+let statusTimer: number | undefined
+onMounted(() => {
+  loadPlugins(); loadLogs()
+  statusTimer = window.setInterval(refreshStatuses, 3000)
+})
+onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
 </script>
 
 <template>
@@ -371,7 +406,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
           <button
             v-if="p.hasFrontend"
             class="action-top-btn btn-open-top"
-            :disabled="(p.status !== 'running' && p.status !== 'registered') || operating.has(p.id)"
+            :disabled="(p.status !== 'running' && p.status !== 'registered') || p.disabled || operating.has(p.id)"
             @click.stop="openPluginPage(p)"
             :title="(p.status === 'running' || p.status === 'registered') ? t('pluginOpen') : t('pluginNotRunning')"
           >
@@ -410,7 +445,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
           </span>
         </div>
 
-        <span :class="['status-badge', statusBadgeClass(p.status)]">{{ statusLabel(p.status) }}</span>
+        <span :class="['status-badge', statusBadgeClass(p)]">{{ statusLabel(p) }}</span>
 
         <!-- 描述 -->
         <p v-if="p.description" class="card-desc">{{ pluginDesc(p, locale) }}</p>
@@ -610,6 +645,7 @@ onMounted(() => { loadPlugins(); loadLogs() })
 .status-badge { font-size: 9px; padding: 0 6px; border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
 .badge-running { background: rgba(29,158,117,0.15); color: #1D9E75; }
 .badge-stopped { background: rgba(136,135,128,0.15); color: var(--color-text-muted); }
+.badge-disabled { background: rgba(226,75,74,0.15); color: #E24B4A; }
 .badge-crashed { background: rgba(226,75,74,0.15); color: #E24B4A; }
 .badge-registered { background: rgba(55,138,221,0.15); color: #378ADD; }
 .badge-starting { background: rgba(224,162,58,0.15); color: #E0A23A; }

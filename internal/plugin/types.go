@@ -126,13 +126,12 @@ type PluginInstance struct {
 	// 置位后禁止再发起新写入（避免与悬挂写者并发写管道导致 JSON-RPC 帧交错），
 	// 悬挂写者由 stopPlugin 杀进程 / 进程退出时回收。
 	writeBroken atomic.Bool
-	Dir         string       // 插件安装目录
-	Status      string       // registered | starting | running | unresponsive | stopped | crashed
-	statusMu    sync.RWMutex // 保护 Status 的并发读写（readLoop 在无锁 goroutine 中写）
-
-	// 健康检查
-	MissedPings    int       // 连续 ping 失败次数
-	UnresponsiveAt time.Time // 标记为 unresponsive 的时间
+	// lastActiveAt 最近一次"被使用"（窗口打开 / 命令执行）的时间戳（Unix 纳秒），
+	// 用于闲置自动降级判断。仅作时长比较、非唯一 ID，允许纳秒精度。
+	lastActiveAt atomic.Int64
+	Dir          string       // 插件安装目录
+	Status       string       // registered | starting | running | stopped | crashed
+	statusMu     sync.RWMutex // 保护 Status 的并发读写（readLoop 在无锁 goroutine 中写）
 
 	// Goja VM（goja runtime 插件使用）
 	VM *goja.Runtime
@@ -143,7 +142,7 @@ type PluginInstance struct {
 
 // NewPluginInstance 创建插件实例
 func NewPluginInstance(manifest PluginManifest, dir string) *PluginInstance {
-	return &PluginInstance{
+	inst := &PluginInstance{
 		Manifest: manifest,
 		Pending:  make(map[string]chan *RPCResponse),
 		readyCh:  make(chan struct{}),
@@ -151,10 +150,18 @@ func NewPluginInstance(manifest PluginManifest, dir string) *PluginInstance {
 		Dir:      dir,
 		Status:   statusRegistered,
 	}
+	inst.lastActiveAt.Store(time.Now().UnixNano())
+	return inst
 }
 
-// GetStatus 线程安全地读取插件状态
+// GetStatus 线程安全地读取插件状态。
+// 显式禁用的插件一律表现为 stopped：禁用即停止态，命令面板/管理页据此统一处理，
+// 避免「禁用后仍 running」撕裂（DisablePlugin 先 stopPlugin 再 SetDisabled，
+// 但 EnsureLoaded 等并发路径可能读到中间态，这里兜底收敛为 stopped）。
 func (inst *PluginInstance) GetStatus() string {
+	if inst.disabled.Load() {
+		return "stopped"
+	}
 	inst.statusMu.RLock()
 	defer inst.statusMu.RUnlock()
 	return inst.Status
@@ -171,6 +178,16 @@ func (inst *PluginInstance) SetStatus(s string) {
 	inst.Status = s
 }
 
+// MarkActive 标记插件最近被使用（窗口打开 / 命令执行时调用），刷新闲置计时。
+func (inst *PluginInstance) MarkActive() {
+	inst.lastActiveAt.Store(time.Now().UnixNano())
+}
+
+// idleFor 返回距离上次被使用的时长；无活跃交互则持续增长。
+func (inst *PluginInstance) idleFor() time.Duration {
+	return time.Since(time.Unix(0, inst.lastActiveAt.Load()))
+}
+
 // ---- 管理者查询结构 ----
 
 // PluginInfo 暴露给前端的插件信息
@@ -183,7 +200,7 @@ type PluginInfo struct {
 	DescriptionI18n map[string]string `json:"descriptionI18n,omitempty"`
 	Author          string            `json:"author"`
 	Category        string            `json:"category"`
-	Status          string            `json:"status"` // registered(就绪) | starting(启动中) | running(运行中) | unresponsive(无响应) | stopped(已停止) | crashed(已崩溃)
+	Status          string            `json:"status"` // registered(就绪) | starting(启动中) | running(运行中) | stopped(已停止) | crashed(已崩溃)
 	HasFrontend     bool              `json:"hasFrontend"`
 	// Runtime 后端运行类型：none | goja | native。
 	// none 表示插件无后端：命令由前端自行处理，宿主 ExecuteCommand 不执行任何 host 逻辑，
@@ -195,4 +212,7 @@ type PluginInfo struct {
 	InstalledAt string    `json:"installedAt,omitempty"`
 	UpdatedAt   string    `json:"updatedAt,omitempty"`
 	Commands    []Command `json:"commands"`
+	// Disabled 显式禁用标记：与 Status=stopped 区分「用户主动禁用」与「进程被停止/Kill」。
+	// 管理页据此显示「已禁用」徽标并禁用打开按钮，命令面板据此排除（disabled 不进命令入口）。
+	Disabled bool `json:"disabled"`
 }

@@ -31,9 +31,11 @@ const statusRegistered = "registered"
 // statusStarting 表示插件正在启动、等待 initialize 握手完成（瞬时状态）。
 const statusStarting = "starting"
 
-// statusUnresponsive 表示进程仍在但连续多次 ping 无响应（卡死）；
-// 与 stopped 不同：watchPlugin 会据此自动重启，而非放弃。
-const statusUnresponsive = "unresponsive"
+// pluginIdleDegradeAfter 后端进程闲置（窗口不可见且无命令交互）超过该时长后自动降级为
+// registered（就绪）：杀进程释放 CPU/内存，下次打开窗口/执行命令经 EnsureLoaded 复活。
+// 与 window_manager 的 pluginWindowRecycleAfter（回收 WebView2 渲染进程）共同构成
+// 「关闭即闲置 → 定时全量卸载」模型，对齐 Chrome MV3 的 idle unload。
+const pluginIdleDegradeAfter = 10 * time.Minute
 
 // pidFileData PID 文件结构
 type pidFileData struct {
@@ -54,10 +56,6 @@ type Manager struct {
 	pidFilePath string
 	pidMu       sync.Mutex
 
-	healthCheckStopCh   chan struct{}
-	healthCheckWg       sync.WaitGroup
-	healthCheckStopOnce sync.Once
-
 	// loadLocks 按 pluginID 串行化 LoadPlugin：崩溃自动重启(watchPlugin 退避 2-6s)与
 	// 用户手动触发(EnsureLoaded / ReloadPlugin 启用)可能并发加载同 ID——旧实现 Start
 	// 子进程与登记 map 之间无锁，后登记覆盖先登记，先启动的进程脱管泄漏。
@@ -70,6 +68,13 @@ type Manager struct {
 	// false：沿用旧行为，启动即对全部启用插件调用 LoadPlugin。
 	// 作为一键回滚开关，发现懒加载异常时置 false 即可恢复旧链路。
 	EnableLazyPluginLoad bool
+
+	// idleDegradeAfter 闲置降级阈值（默认 pluginIdleDegradeAfter，可覆盖以适配测试）。
+	idleDegradeAfter time.Duration
+	// isWindowVisible 注入的窗口可见性判定（同包窗口管理器），nil 时保守跳过降级。
+	isWindowVisible func(pluginID string) bool
+	idleStopCh     chan struct{}
+	idleStopOnce   sync.Once
 }
 
 // NewManager 创建插件管理器
@@ -82,6 +87,9 @@ func NewManager(pluginsDir string) *Manager {
 		loadLocks:   make(map[string]*sync.Mutex),
 
 		EnableLazyPluginLoad: true,
+
+		idleDegradeAfter: pluginIdleDegradeAfter,
+		idleStopCh:       make(chan struct{}),
 	}
 
 	m.registerDefaultHostMethods()
@@ -92,9 +100,9 @@ func NewManager(pluginsDir string) *Manager {
 	// 启动时恢复被中断的插件安装（解压中途崩溃留下的 *.rollback 标记）
 	m.recoverInterruptedInstalls()
 
-	// 启动后台健康检查
-	m.healthCheckStopCh = make(chan struct{})
-	m.startHealthCheck()
+	// 后台闲置降级循环：将超过阈值未使用的后端进程降级为就绪（释放资源），
+	// 下次使用经 EnsureLoaded 复活。进程退出时由 ShutdownAll 关闭 idleStopCh 停止。
+	go m.idleDegradeLoop()
 
 	return m
 }
@@ -218,6 +226,7 @@ func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 			if inst, ok := m.plugins[job.manifest.ID]; ok {
 				inst.SetStatus("stopped")
 				inst.stopped.Store(true)
+				inst.disabled.Store(true) // 与懒加载分支一致：禁用标记缺失会导致管理页不显示"已禁用"徽标
 			}
 			continue
 		}
@@ -570,26 +579,33 @@ func (m *Manager) StopPlugin(id string) error {
 	return nil
 }
 
-// StopPluginOnWindowClose 插件 UI 窗口被用户关闭时调用（关窗即终止）：
-// 停止插件子进程释放资源，但对外状态恢复为 registered（就绪）而非 stopped——
-// 关窗是系统自动回收资源，并非用户主动停止；下次打开窗口 / 执行命令仍可经 EnsureLoaded
-// 惰性复活。内部 stopped 标志保持 true（阻止 watchPlugin 在进程被杀后误复活）。
+// StopPluginOnWindowClose 插件 UI 窗口被用户关闭时调用。
+// 新模型：插件后端是常驻后台进程，窗口只是它的一个视图。关闭窗口只销毁视图，
+// 不杀后端进程——后端继续在后台运行，下次打开窗口直接复用（status 保持 running）。
+// 仅 best-effort 通知插件「窗口已关闭」以便释放窗口相关资源；绝不置 stopped，
+// 也不调 stopPlugin（否则会杀掉常驻后端，违背「关闭窗口不杀插件」）。
 func (m *Manager) StopPluginOnWindowClose(id string) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.mu.RLock()
 	inst, ok := m.plugins[id]
+	m.mu.RUnlock()
 	if !ok {
 		return ErrPluginNotFound
 	}
-	m.stopPlugin(inst, true)
-	inst.SetStatus(statusRegistered)
+	// 后端无窗口概念（native 有进程、goja/none 无进程），仅 best-effort 通知，
+	// 失败忽略：不阻塞窗口关闭、不影响后端常驻。
+	if inst.Stdin != nil {
+		go func() { _ = inst.SendNotification("window:closed", nil) }()
+	}
 	return nil
 }
 
-// KillPlugin 强制终止插件（插件管理页「停止进程」入口）：
+// KillPlugin 强制终止插件（管理页「停止进程」/ 插件窗口「强制关闭」入口）：
 // 停进程并断自动重启（stopPlugin 置 stopped，watchPlugin 不会复活），
 // 内部已连子进程树一并终止；再补杀目录内未被 m.plugins 跟踪的孤儿进程，
 // 覆盖「进程锁住目录导致更新/卸载失败」。
+// 杀进程 ≠ 禁用：终止后状态置回 registered（懒加载就绪占位），插件仍是启用态、
+// 命令面板可见，下次打开窗口 / 执行命令经 EnsureLoaded 自动拉起——无需手动再启用。
+// 保留内存实例（不 delete），否则插件会从 ListPlugins 凭空消失（状态撕裂）。
 func (m *Manager) KillPlugin(id string) error {
 	if !pluginIDRe.MatchString(id) {
 		return fmt.Errorf("%w: 非法插件 ID: %q", ErrInvalidManifest, id)
@@ -597,7 +613,10 @@ func (m *Manager) KillPlugin(id string) error {
 	m.mu.Lock()
 	if inst, ok := m.plugins[id]; ok {
 		m.stopPlugin(inst, true)
-		delete(m.plugins, id)
+		// 杀进程后回到「就绪」而非「已停止」：用户意图是终结当前进程（卡死/锁目录），
+		// 不是停用插件。registered 与启动期懒加载占位完全同态，EnsureLoaded 可按需复活。
+		// GetStatus 在 disabled=true 时兜底 stopped，故禁用插件不受此处影响。
+		inst.SetStatus(statusRegistered)
 	}
 	m.mu.Unlock()
 
@@ -680,104 +699,6 @@ func (m *Manager) watchPlugin(inst *PluginInstance) {
 	logger.W("插件 %s 已达最大重启次数，放弃", inst.Manifest.ID)
 }
 
-// startHealthCheck 启动后台健康检查协程（每 30 秒 ping 所有运行中插件）
-func (m *Manager) startHealthCheck() {
-	// 重复 start（如退出后重新初始化）前先停掉旧的健康检查协程：否则下面覆盖
-	// healthCheckStopCh / Once 会让旧 goroutine 永久阻塞在 select 中，造成 goroutine 泄漏。
-	m.stopHealthCheck()
-	m.healthCheckStopCh = make(chan struct{})
-	m.healthCheckStopOnce = sync.Once{}
-	m.healthCheckWg.Add(1)
-	go func() {
-		defer m.healthCheckWg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				logger.E("[plugin] healthCheck panic: %v", r)
-			}
-		}()
-		ticker := time.NewTicker(30 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-m.healthCheckStopCh:
-				return
-			case <-ticker.C:
-				m.pingAll()
-			}
-		}
-	}()
-}
-
-// stopHealthCheck 停止后台健康检查。用 sync.Once 守卫 close，避免双退出路径（如应用退出 + 其它清理）
-// 二次 close 同一 channel 触发 panic（close of closed channel）。
-func (m *Manager) stopHealthCheck() {
-	if m.healthCheckStopCh != nil {
-		m.healthCheckStopOnce.Do(func() {
-			close(m.healthCheckStopCh)
-		})
-		m.healthCheckWg.Wait()
-	}
-}
-
-// pingAll 对所有运行中的插件发送 ping
-func (m *Manager) pingAll() {
-	m.mu.RLock()
-	ids := make([]string, 0, len(m.plugins))
-	for id, inst := range m.plugins {
-		if inst.GetStatus() == "running" && inst.Stdin != nil {
-			ids = append(ids, id)
-		}
-	}
-	m.mu.RUnlock()
-
-	for _, id := range ids {
-		m.pingOne(id)
-	}
-}
-
-// pingOne 对单个插件发送 ping，超过 3 次标记为 unresponsive
-func (m *Manager) pingOne(pluginID string) {
-	m.mu.RLock()
-	inst, ok := m.plugins[pluginID]
-	m.mu.RUnlock()
-	if !ok || inst.GetStatus() != "running" || inst.Stdin == nil {
-		return
-	}
-
-	_, err := inst.Call("host.ping", nil, 5*time.Second)
-	if err == nil {
-		// ping 成功，重置计数器
-		m.mu.Lock()
-		inst.MissedPings = 0
-		if inst.GetStatus() == statusUnresponsive {
-			inst.SetStatus("running")
-			logger.I("插件 %s 恢复响应", pluginID)
-		}
-		m.mu.Unlock()
-		return
-	}
-
-	// ping 失败，递增计数器，并记录失败原因（区分超时未回 / 返回 RPC 错误 / 进程已死）
-	m.mu.Lock()
-	inst.MissedPings++
-	logger.W("插件 %s ping 失败（已连续 %d 次）: %v", pluginID, inst.MissedPings, err)
-	if inst.MissedPings >= 6 {
-		// 连续 3 轮（约 90s）无响应：强制终止进程，由 watchPlugin 自动重启。
-		// 不能走 stopPlugin（会置 stopped=true，watchPlugin 将放弃重启）
-		inst.MissedPings = 0
-		inst.SetStatus(statusUnresponsive)
-		logger.E("插件 %s 长时间无响应，强制终止并重启", pluginID)
-		if inst.Cmd != nil && inst.Cmd.Process != nil {
-			inst.Cmd.Process.Kill()
-		}
-	} else if inst.MissedPings >= 3 && inst.GetStatus() == "running" {
-		inst.SetStatus(statusUnresponsive)
-		inst.UnresponsiveAt = time.Now()
-		logger.E("插件 %s 连续 %d 次无响应，标记为 unresponsive", pluginID, inst.MissedPings)
-	}
-	m.mu.Unlock()
-}
-
 // PluginsDir 返回插件安装目录
 func (m *Manager) PluginsDir() string {
 	return m.pluginsDir
@@ -814,6 +735,7 @@ func (inst *PluginInstance) callGojaJS(fnName string, params map[string]interfac
 
 // ExecuteCommand 执行插件命令（供 Wails 前端调用）
 func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]interface{}) (json.RawMessage, error) {
+	m.MarkActive(pluginID)
 	m.mu.RLock()
 	inst, ok := m.plugins[pluginID]
 	m.mu.RUnlock()
@@ -888,6 +810,7 @@ func (m *Manager) ListPlugins() []PluginInfo {
 			HasFrontend:     inst.Manifest.Frontend.Enabled,
 			Runtime:         inst.Manifest.Backend.Runtime,
 			Commands:        cmds,
+			Disabled:        inst.disabled.Load(),
 		})
 	}
 	return result
@@ -1119,9 +1042,9 @@ func (m *Manager) removePidFile() {
 
 // ShutdownAll 停止所有插件并清理 PID 文件（主程序退出时调用）
 func (m *Manager) ShutdownAll() {
-	// 先停止健康检查，避免 goroutine 在持有 RLock 时与下方的 Lock 死锁
-	m.stopHealthCheck()
-
+	// 先停闲置降级循环：其 degradeIdlePlugins 会调 KillPlugin（持写锁），
+	// 与下方 mu.Lock 并发将争用；停掉循环避免退出期冗余降级。
+	m.stopIdleLoop()
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -1129,8 +1052,11 @@ func (m *Manager) ShutdownAll() {
 		logger.I("停止插件 %q", id)
 		// 置 stopped：进程退出后 watchPlugin 读到 stopped=true 才不会把插件自动重启成孤儿进程
 		inst.stopped.Store(true)
+		// shutdown 通知在独立 goroutine 发送：SendNotification 内部有 2s 写入超时且会争用
+		// inst.sendMu（与在途的 ExecuteCommand.Call 互斥），若在持有 m.mu 期间同步等待，
+		// 会冻结整个插件管理器（含 ShutdownAll 自身）最长 2s×N；与 stopPlugin 的写法一致。
 		if inst.Stdin != nil {
-			inst.SendNotification("shutdown", nil)
+			go func() { _ = inst.SendNotification("shutdown", nil) }()
 		}
 		inst.SetStatus("stopped")
 		inst.Close()
@@ -1142,4 +1068,110 @@ func (m *Manager) ShutdownAll() {
 
 	// 清理 PID 文件
 	m.removePidFile()
+}
+
+// SetWindowVisibleChecker 注入窗口可见性判定（窗口管理器创建后调用一次）。
+// 用于闲置降级时跳过「窗口正打开」的插件，避免打断正在使用的用户。
+func (m *Manager) SetWindowVisibleChecker(fn func(pluginID string) bool) {
+	m.isWindowVisible = fn
+}
+
+// MarkActive 标记插件最近被使用（窗口打开 / 命令执行），刷新其闲置计时。
+// 实例不存在时静默 no-op（如尚未懒加载）。
+func (m *Manager) MarkActive(pluginID string) {
+	m.mu.RLock()
+	inst, ok := m.plugins[pluginID]
+	m.mu.RUnlock()
+	if ok {
+		inst.MarkActive()
+	}
+}
+
+// idleDegradeLoop 周期扫描并将闲置后端降级为就绪，直到 idleStopCh 关闭。
+func (m *Manager) idleDegradeLoop() {
+	ticker := time.NewTicker(30 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.idleStopCh:
+			return
+		case <-ticker.C:
+			m.degradeIdlePlugins()
+		}
+	}
+}
+
+// degradeIdlePlugins 将「窗口不可见、且最近无交互超过阈值」的 running 后端插件降级为就绪
+//（degradePlugin → registered，下次使用经 EnsureLoaded 复活）。不碰可见窗口 / 已禁用 /
+// 非 running / none 运行时（纯前端无后端进程）。
+// 先快照 ID 再在锁外逐个降级：degradePlugin 内部会二次校验，避免与本次读锁之间发生实例替换
+//（插件崩溃被 watchPlugin 重启 / 用户重新打开窗口）导致误杀正在使用的插件。
+func (m *Manager) degradeIdlePlugins() {
+	m.mu.RLock()
+	idle := make([]string, 0)
+	for id, inst := range m.plugins {
+		if inst.GetStatus() != "running" {
+			continue
+		}
+		if inst.disabled.Load() {
+			continue
+		}
+		// none 运行时无后端进程，无需降级；窗口回收由窗口管理器独立负责，此处跳过避免
+		// 纯前端插件在管理页无意义地闪成「就绪」。
+		if inst.Manifest.Backend.Runtime == "none" {
+			continue
+		}
+		// 窗口可见性检查：未注入检查器时保守跳过（宁可漏降也不误杀正在使用的插件）；
+		// 注入后只有窗口正打开的插件才算使用中。
+		if m.isWindowVisible == nil || m.isWindowVisible(id) {
+			continue
+		}
+		if inst.idleFor() < m.idleDegradeAfter {
+			continue
+		}
+		idle = append(idle, id)
+	}
+	m.mu.RUnlock()
+
+	for _, id := range idle {
+		if err := m.degradePlugin(id); err != nil {
+			logger.W("[plugin-idle] 闲置降级 %s 失败: %v", id, err)
+		} else {
+			logger.I("[plugin-idle] 插件 %s 闲置 %s，已自动降级为就绪（释放后端进程）", id, m.idleDegradeAfter)
+		}
+	}
+}
+
+// degradePlugin 将指定插件降级为就绪（stopPlugin → registered），但先在写锁内二次校验
+//「仍可降级」的全部条件，避免 degradeIdlePlugins 的快照与执行之间实例被替换（崩溃重启 /
+// 用户重新打开窗口）而误杀刚复活 / 正被使用的插件。返回 ErrPluginNotFound 表示插件已不在
+//（被卸载或实例已替换）；降级被二次校验否决时返回 nil（视为无需处理）。
+// 与用户主动 KillPlugin 的区别：降级不扫描目录锁进程（闲置插件不锁目录），仅释放其后端进程。
+func (m *Manager) degradePlugin(id string) error {
+	if !pluginIDRe.MatchString(id) {
+		return fmt.Errorf("%w: 非法插件 ID: %q", ErrInvalidManifest, id)
+	}
+	m.mu.Lock()
+	inst, ok := m.plugins[id]
+	if !ok {
+		m.mu.Unlock()
+		return ErrPluginNotFound
+	}
+	if inst.GetStatus() != "running" ||
+		inst.disabled.Load() ||
+		inst.Manifest.Backend.Runtime == "none" ||
+		(m.isWindowVisible != nil && m.isWindowVisible(id)) ||
+		inst.idleFor() < m.idleDegradeAfter {
+		m.mu.Unlock()
+		return nil
+	}
+	m.stopPlugin(inst, true)
+	inst.SetStatus(statusRegistered)
+	m.mu.Unlock()
+	return nil
+}
+
+// stopIdleLoop 停止闲置降级后台循环（幂等），供 ShutdownAll 在退出前调用。
+func (m *Manager) stopIdleLoop() {
+	m.idleStopOnce.Do(func() { close(m.idleStopCh) })
 }

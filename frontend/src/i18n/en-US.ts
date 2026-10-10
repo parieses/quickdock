@@ -390,6 +390,7 @@ export default {
   saveAll: 'Save All',
   hotkeyTip: 'Click the shortcut area and press the key combination. Supports Ctrl / Alt / Shift / Win + letters/numbers/function keys.',
   hotkeyConflict: 'Shortcuts cannot be the same. Use different key combinations for different functions.',
+  hotkeyRegisterFailed: 'Global hotkey {keys} is taken by another app and could not be registered. Rebind it in Settings → Window Manager',
   hotkeySaved: 'Saved and applied',
   restoreOk: 'restored to default',
 
@@ -971,6 +972,8 @@ export default {
   pluginStatusStarting: 'Starting',
   pluginStatusUnresponsive: 'Unresponsive',
   pluginStatusRegistered: 'Ready',
+  pluginStatusDisabled: 'Disabled',
+  pluginForceClose: 'Force close (kill plugin process)',
   pluginNoFrontend: 'No UI',
   pluginHasFrontend: 'Has UI',
   pluginCommands: 'Commands',

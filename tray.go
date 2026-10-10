@@ -569,6 +569,34 @@ func setWinmgrFloatAccel(accel string) {
 	currentWinmgrFloatAccel = accel
 }
 
+// hotkeyWarnings 记录本轮注册失败（含回退也失败）的热键加速器字符串，
+// 供前端提示用户「热键被其它程序占用」。注册发生在启动早期，此时主窗口
+// WebView2 可能尚未挂载，故 registerAllHotkeys 末尾会延迟一小段再 emit 给前端。
+var (
+	hotkeyWarningsMu sync.Mutex
+	hotkeyWarnings   []string
+)
+
+func resetHotkeyWarnings() {
+	hotkeyWarningsMu.Lock()
+	hotkeyWarnings = nil
+	hotkeyWarningsMu.Unlock()
+}
+
+func addHotkeyWarning(accel string) {
+	hotkeyWarningsMu.Lock()
+	hotkeyWarnings = append(hotkeyWarnings, accel)
+	hotkeyWarningsMu.Unlock()
+}
+
+func getHotkeyWarnings() []string {
+	hotkeyWarningsMu.Lock()
+	defer hotkeyWarningsMu.Unlock()
+	out := make([]string, len(hotkeyWarnings))
+	copy(out, hotkeyWarnings)
+	return out
+}
+
 // modVKToAccelerator 把 DB 存储的 (modifiers,vk) 转为框架加速器字符串（如 "Ctrl+Space"）。
 func modVKToAccelerator(modifiers, vk int) string {
 	var parts []string
@@ -962,18 +990,26 @@ func registerWinmgrFloatHotkey(app *application.App) string {
 	}
 	accel := modVKToAccelerator(mods, vk)
 	cb := handleWinmgrFloatHotkey
-	if err := app.GlobalShortcut.Register(accel, cb); err != nil {
-		logger.W("QuickDock: 窗口管理浮层热键 [%s] 注册失败: %v，回退默认", accel, err)
-		fallback := modVKToAccelerator(3, 0x57)
-		if err2 := app.GlobalShortcut.Register(fallback, cb); err2 == nil {
+	regErr := app.GlobalShortcut.Register(accel, cb)
+	if regErr == nil {
+		return accel
+	}
+
+	// 注册失败（多为被其它程序占用）。仅当当前键不是默认键时才回退默认键再试一次；
+	// 若本就失败在默认键上，回退同一个键毫无意义（必然再失败），直接记为冲突。
+	defAccel := modVKToAccelerator(3, 0x57)
+	if accel != defAccel {
+		logger.W("QuickDock: 窗口管理浮层热键 [%s] 注册失败: %v，回退默认 %s", accel, regErr, defAccel)
+		if err2 := app.GlobalShortcut.Register(defAccel, cb); err2 == nil {
 			if svc := appSvc.Load(); svc != nil && svc.DB != nil {
 				svc.DB.SetSetting("winmgr_float_hotkey", fmt.Sprintf("%d,%d", 3, 0x57))
 			}
-			return fallback
+			return defAccel
 		}
-		return ""
 	}
-	return accel
+	logger.W("QuickDock: 窗口管理浮层热键 [%s] 注册失败（可能被其它程序占用）: %v", accel, regErr)
+	addHotkeyWarning(accel)
+	return ""
 }
 
 // registerAllHotkeys 统一注册主窗口/剪贴板/命令面板/快捷笔记四个全局快捷键。
@@ -981,6 +1017,7 @@ func registerWinmgrFloatHotkey(app *application.App) string {
 func registerAllHotkeys(app *application.App) {
 	// 重注册前先注销上一轮已注册的快捷键，避免修改设置保存后旧热键残留、
 	// 新旧热键同时生效直到进程重启。与 Reregister* 系列保持一致。
+	resetHotkeyWarnings()
 	for _, old := range append([]string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel(), getWinmgrFloatAccel()}, getWinmgrAccels()...) {
 		if old != "" {
 			app.GlobalShortcut.Unregister(old)
@@ -1123,4 +1160,13 @@ func registerAllHotkeys(app *application.App) {
 	setWinmgrFloatAccel(registerWinmgrFloatHotkey(app))
 
 	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel, registeredNoteAccel)
+
+	// 注册失败的热键（多为被其它程序占用）：延迟 4s 再推前端——注册发生在启动早期，
+	// 此时主窗口 WebView2 尚未挂载，立即 emit 会丢；延迟后前端已就绪，可弹 toast 提示改绑。
+	if w := getHotkeyWarnings(); len(w) > 0 {
+		go func() {
+			time.Sleep(4 * time.Second)
+			app.Event.Emit("hotkey:register-failed", w)
+		}()
+	}
 }

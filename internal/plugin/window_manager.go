@@ -84,6 +84,11 @@ func (m *PluginWindowManager) ensurePluginProcess(pluginID string) {
 // showInTaskbar: 是否在任务栏显示图标（分离模式 = true）
 // 返回 (窗口, 是否为新创建)
 func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (*application.WebviewWindow, bool) {
+	// 标记插件被使用：复用路径刷新闲置计时（新建路径的实例在 NewPluginInstance 已置 now），
+	// 避免「刚打开的插件」被闲置降级循环误杀。
+	if m.mgr != nil {
+		m.mgr.MarkActive(pluginID)
+	}
 	m.mu.Lock()
 	if win, ok := m.windows[pluginID]; ok {
 		m.cancelRecycleLocked(pluginID)
@@ -122,13 +127,15 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		MinHeight:        300,
 		Frameless:        true,
 		BackgroundColour: pluginWindowBackground(m.themeDark),
-		URL:              "/#/plugin/" + pluginID,
+		// 独立插件窗口加载轻量入口 plugin.html（仅挂载 PluginPage，不加载主 SPA），
+		// 经 query 传 plugin id；首次打开免去主 bundle 下载，配合「关窗=隐藏复用」秒开。
+		URL:              "/plugin.html?id=" + pluginID,
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: !showInTaskbar,
 		},
 	})
-	// 用户点击关闭按钮 → 真正销毁窗口，并从注册表删除；停止插件进程（关窗即终止），
-	// 状态恢复为「就绪」而非「已停止」——关窗是系统自动回收，下次仍可经 EnsureLoaded 惰性复活。
+	// 用户点击关闭按钮 → 真正销毁窗口，并从注册表删除。新模型：关闭窗口只销毁视图，
+	// 不杀插件后端（后端常驻后台运行，下次打开窗口直接复用）；状态保持 running。
 	win.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {
 		m.mu.Lock()
 		delete(m.windows, pluginID)
@@ -143,7 +150,7 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 				logger.W("[plugin-window] 窗口关闭 %s 后停止插件进程失败: %v", pluginID, err)
 			}
 		}
-		logger.I("[plugin-window] 窗口关闭 %s，已从注册表移除并停止插件进程（状态恢复为就绪）", pluginID)
+		logger.I("[plugin-window] 窗口关闭 %s，已从注册表移除（后端常驻后台，不杀进程）", pluginID)
 	})
 	m.windows[pluginID] = win
 	m.mu.Unlock()

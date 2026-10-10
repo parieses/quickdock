@@ -365,6 +365,9 @@ func main() {
 	// 创建插件窗口管理器（需要 app 引用，只能放在 New 之后）
 	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app, pluginMgr)
 
+	// 注入窗口可见性判定，供插件管理器闲置自动降级时跳过「正打开」的插件。
+	pluginMgr.SetWindowVisibleChecker(appService.PluginWindowMgr.IsWindowVisible)
+
 	// 创建主窗口（启动时恢复上次记住的尺寸/位置）
 	mainRect := loadWindowState()
 	mainOpts := application.WebviewWindowOptions{

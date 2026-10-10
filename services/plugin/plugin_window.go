@@ -69,6 +69,30 @@ func (p *PluginService) ClosePluginWindow(pluginID string) {
 	p.App.PluginWindowMgr.Close(pluginID)
 }
 
+// ForceClosePluginWindow 强制关闭（插件窗口标题栏「强制关闭」按钮入口）：
+// 立即同步销毁窗口（用户体感即时，不等杀进程），杀进程放后台 goroutine。
+//
+// 为什么必须整体下沉后端：KillPlugin 全程持 m.mu 且要跑 taskkill /T + Process.Wait()
+// + PID 文件写盘 + 目录锁扫描，耗时可达秒级。若前端 await KillPlugin 再关窗，窗口会
+// 卡住这段时间才消失；若前端先关窗再调 KillPlugin，页面 JS 上下文已随窗口销毁、调用
+// 发不出去（race）。故由后端先同步 Close（快路径），再 go KillPlugin（慢路径）。
+//
+// KillPlugin 语义：进程树终止 + 状态置回 registered（就绪），≠ 禁用；下次打开窗口 /
+// 执行命令经 EnsureLoaded 自动拉起。
+func (p *PluginService) ForceClosePluginWindow(pluginID string) {
+	if p.App.PluginWindowMgr == nil {
+		return
+	}
+	p.App.PluginWindowMgr.Close(pluginID)
+	if p.App.PluginMgr == nil {
+		return
+	}
+	go func() {
+		_ = p.App.PluginMgr.KillPlugin(pluginID)
+		// 杀进程失败仅忽略：多为进程已不在（曾崩溃/已退出），窗口反正已销毁
+	}()
+}
+
 // MinimizePluginWindow 最小化指定插件的窗口
 func (p *PluginService) MinimizePluginWindow(pluginID string) {
 	if p.App.PluginWindowMgr == nil {

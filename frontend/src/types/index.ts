@@ -310,6 +310,8 @@ export interface PluginInfo {
   installedAt?: string
   updatedAt?: string
   commands: PluginCommand[]
+  // 显式禁用标记：与 status=stopped 区分「用户主动禁用」与「进程被停止/Kill」
+  disabled: boolean
 }
 
 // 插件命令执行日志（5.2）

@@ -200,6 +200,12 @@ onMounted(async () => {
   })
   // 后台自动检查到新版本时弹出应用内更新提示（不再依赖用户主动打开设置）
   Events.On('quickdock:update:status', onUpdateStatus)
+  // 全局热键注册失败（多被其它程序占用）：Go 侧延迟投放本事件，弹 toast 引导用户改绑
+  Events.On('hotkey:register-failed', (payload: any) => {
+    const list: string[] = Array.isArray(payload) ? payload : (payload?.data ?? [])
+    if (!list.length) return
+    error(t('hotkeyRegisterFailed', { keys: list.join('、') }))
+  })
 });
 
 // ---- 后台自动更新提示弹窗 ----

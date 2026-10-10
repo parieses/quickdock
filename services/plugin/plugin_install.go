@@ -97,6 +97,12 @@ func (p *PluginService) InstallPlugin(zipPath string) *services.ApiResult {
 		// 安装 / 更新成功 → 标记「新」角标（首次打开后由前端清除）
 		p.MarkPluginNew(manifest.ID)
 	}
+	// 安装/更新成功：拉起后端使其作为常驻后台进程运行（新模型：插件是后台服务，
+	// 安装后即运行，窗口只是视图；关闭窗口不杀、主程序退出才统一收割）。
+	// 失败仅告警，不阻断安装（库记录已落，用户稍后可从命令面板/管理页打开触发）。
+	if err := p.App.PluginMgr.LoadPlugin(*manifest, dir); err != nil {
+		logger.W("插件 %s 安装后拉起后端失败: %v", manifest.ID, err)
+	}
 	return services.Ok(map[string]interface{}{
 		"id":      manifest.ID,
 		"name":    manifest.Name,

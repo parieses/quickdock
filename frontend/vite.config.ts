@@ -1,6 +1,7 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import wails from "@wailsio/runtime/plugins/vite";
+import { fileURLToPath } from "node:url";
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -50,6 +51,11 @@ export default defineConfig({
     // 主 chunk 超过该体积才告警，避免大依赖拆分后频繁误报
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
+      // 多页入口：main = 主应用 SPA；plugin = 插件独立窗口轻量壳（不加载主 SPA，首开提速）
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        plugin: fileURLToPath(new URL("./plugin.html", import.meta.url)),
+      },
       output: {
         manualChunks(id: string) {
           // 仅对第三方依赖做分包，业务代码保持默认分组
