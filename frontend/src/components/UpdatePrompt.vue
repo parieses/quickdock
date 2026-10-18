@@ -78,7 +78,7 @@ function onKey(e: KeyboardEvent) {
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-  background: var(--color-bg-panel);
+  background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 14px;
   box-shadow: var(--shadow-toast);

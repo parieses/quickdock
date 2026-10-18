@@ -25,8 +25,9 @@ import {
   SuspendHotkeys,
   ResumeHotkeys,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
-import { GetAutoStart, SetAutoStart } from '../../bindings/quickdock/services/appservice'
+import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir } from '../../bindings/quickdock/services/appservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
+import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
 import type { UpdateStatus } from '../../bindings/quickdock/services/update/models'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
@@ -52,6 +53,7 @@ const menuItems = computed(() => [
   { key: 'preferences', label: t('preferences'), icon: Palette, desc: t('autoStart') + ' / ' + t('theme') + ' / ' + t('language') },
   { key: 'hotkeys',    label: t('hotkeySettings'),  icon: Keyboard, desc: t('shortcut') },
   { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
+  { key: 'storage',   label: t('storageLocation'),   icon: HardDrive, desc: t('storageDesc') },
   { key: 'sync',      label: t('sync'),              icon: Cloud,    desc: t('syncDesc') },
   { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
   { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
@@ -65,7 +67,7 @@ const menuGroups = computed(() => {
   const byKey = Object.fromEntries(menuItems.value.map((m) => [m.key, m]))
   const defs: { title: string; keys: string[] }[] = [
     { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys'] },
-    { title: t('menuGroupData'), keys: ['data', 'sync', 'snapshot'] },
+    { title: t('menuGroupData'), keys: ['data', 'storage', 'sync', 'snapshot'] },
     { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai', 'logs'] },
   ]
   return defs
@@ -213,6 +215,80 @@ async function doRestart() {
     updateResult.value = getErrorMessage(e)
   }
 }
+
+// ---- 存储位置（自定义数据目录）----
+const storageCur = ref('')
+const storageDefault = ref('')
+const storageIsCustom = ref(false)
+const storageInput = ref('')
+const storageMigrate = ref(true)
+const storageMsg = ref('')
+const storageLoading = ref(false)
+
+async function loadStorage() {
+  try {
+    const r = unwrap<{ current: string; isCustom: boolean; default: string }>(await GetDataDir())
+    if (r) {
+      storageCur.value = r.current
+      storageDefault.value = r.default
+      storageIsCustom.value = r.isCustom
+      storageInput.value = r.current
+    }
+  } catch (e: any) {
+    logErr('Settings.storage', e)
+  }
+}
+
+async function pickStorageDir() {
+  try {
+    const dir = unwrap<string | null>(await PickFolderPath(t('storagePick')))
+    if (dir) storageInput.value = dir
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+async function applyStorage() {
+  if (!storageInput.value) return
+  storageLoading.value = true
+  storageMsg.value = ''
+  try {
+    const res = await SetDataDir(storageInput.value, storageMigrate.value)
+    if (res && res.code === 0) {
+      storageMsg.value = res.msg || t('storageApply')
+      await loadStorage()
+    } else {
+      storageMsg.value = res?.msg || t('updateError')
+    }
+  } catch (e: any) {
+    storageMsg.value = getErrorMessage(e)
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+async function resetStorage() {
+  storageLoading.value = true
+  storageMsg.value = ''
+  try {
+    const res = await ResetDataDir()
+    if (res && res.code === 0) {
+      storageMsg.value = res.msg || t('storageReset')
+      await loadStorage()
+    } else {
+      storageMsg.value = res?.msg || t('updateError')
+    }
+  } catch (e: any) {
+    storageMsg.value = getErrorMessage(e)
+  } finally {
+    storageLoading.value = false
+  }
+}
+
+// 切换到存储页时刷新状态（弹窗常驻，onMounted 只在首次执行）
+watch(activePage, (k) => {
+  if (k === 'storage') loadStorage()
+})
 
 // ---- 主题 / 语言 ----
 // 主题状态由 App 统一管理（App.vue provide('theme')）：此处不再各存一份，否则用户切主题后
@@ -414,6 +490,16 @@ async function toggleAutoStart() {
               <p class="about-desc">{{ t('appDesc') }}</p>
               <p class="about-tech">{{ t('aboutTech') }}</p>
               <div class="about-links">
+                <a class="about-link" href="#" @click.prevent="openUrl('https://parieses.github.io/quickdock/')">
+                  <ExternalLink :size="12" />
+                  <span class="about-link-tag">{{ t('aboutSiteMain') }}</span>
+                  parieses.github.io/quickdock
+                </a>
+                <a class="about-link" href="#" @click.prevent="openUrl('https://parieses.github.io/quickdock-plugins/')">
+                  <ExternalLink :size="12" />
+                  <span class="about-link-tag">{{ t('aboutSitePlugins') }}</span>
+                  parieses.github.io/quickdock-plugins
+                </a>
                 <a class="about-link" href="#" @click.prevent="openUrl('https://github.com/parieses/quickdock')">
                   <ExternalLink :size="12" />
                   <span class="about-link-tag">{{ t('aboutRepoMain') }}</span>
@@ -550,6 +636,56 @@ async function toggleAutoStart() {
           <!-- 快照备份 -->
           <div v-else-if="activePage === 'snapshot'" class="content-page content-left">
             <SettingsSnapshot :visible="activePage === 'snapshot'" @close="close" />
+          </div>
+
+          <!-- 存储位置（自定义数据目录） -->
+          <div v-else-if="activePage === 'storage'" class="content-page content-left">
+            <div class="section">
+              <h3 class="section-title">{{ t('storageLocation') }}</h3>
+              <p class="section-desc">{{ t('storageDesc') }}</p>
+
+              <div class="setting-row">
+                <label class="setting-label">{{ t('storageCurrent') }}</label>
+                <div class="setting-control storage-current-path">{{ storageCur }}</div>
+              </div>
+              <p class="field-hint" v-if="storageIsCustom">{{ t('storageCustomNote') }}</p>
+              <p class="field-hint" v-else>{{ t('storageDefaultNote') }}</p>
+
+              <div class="setting-row">
+                <label class="setting-label">{{ t('storagePath') }}</label>
+                <div class="setting-control">
+                  <input
+                    v-model="storageInput"
+                    class="field-input storage-path-input"
+                    :placeholder="t('storageDefault')"
+                  />
+                  <button class="btn btn-secondary" @click="pickStorageDir">{{ t('storagePick') }}</button>
+                </div>
+              </div>
+
+              <label class="field toggle-field" style="cursor: pointer; margin-bottom: 16px;">
+                <input type="checkbox" v-model="storageMigrate" class="field-checkbox" />
+                <span>{{ t('storageMigrate') }}</span>
+              </label>
+
+              <div class="action-row">
+                <button class="btn btn-primary" :disabled="storageLoading" @click="applyStorage">
+                  {{ t('storageApply') }}
+                </button>
+                <button
+                  class="btn btn-secondary"
+                  v-if="storageIsCustom"
+                  :disabled="storageLoading"
+                  @click="resetStorage"
+                >
+                  {{ t('storageReset') }}
+                </button>
+                <button class="btn btn-secondary" @click="restartApp">{{ t('storageRestart') }}</button>
+              </div>
+
+              <p class="field-hint">{{ t('storageRestartHint') }}</p>
+              <p class="result-hint" v-if="storageMsg">{{ storageMsg }}</p>
+            </div>
           </div>
 
           <!-- AI 助手 -->
@@ -743,15 +879,15 @@ async function toggleAutoStart() {
 
 .update-notes {
   margin-top: 14px;
-  border: 1px solid var(--border-color, #333);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: var(--surface-2, #1e1e1e);
+  background: var(--color-bg-secondary);
   padding: 10px 12px;
 }
 .update-notes-title {
   font-size: 12px;
   font-weight: 600;
-  color: var(--text-secondary, #aaa);
+  color: var(--color-text-secondary);
   margin-bottom: 6px;
 }
 .update-notes-body {
@@ -888,6 +1024,26 @@ async function toggleAutoStart() {
   font-family: inherit; font-size: 12px; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .ai-profile-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
+
+/* 通用内容页标题 / 描述 */
+
+/* 通用次级按钮（与 .btn-primary 并列，浅描边风格） */
+.action-btn {
+  padding: 7px 14px; border: 1px solid var(--color-border); background: transparent;
+  color: var(--color-text-secondary); border-radius: var(--radius-md); cursor: pointer;
+  font-family: inherit; font-size: 13px;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast);
+}
+.action-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
+.action-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 存储位置（与其他设置页复用 section/setting-row/btn 体系） */
+.storage-current-path {
+  max-width: 420px; padding: 6px 10px; border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+  font-size: 13px; word-break: break-all;
+}
+.storage-path-input { flex: 1; width: auto; min-width: 220px; }
 
 /* 配置编辑模态框 */
 .ai-modal-overlay {

@@ -107,6 +107,7 @@ func reap(cmd *exec.Cmd) {
 //     “不允许脱离”的作业时，breakaway 会失败且子进程仍被困在作业内；explorer 中转
 //     从根上绕开了这个限制，覆盖 dev 运行时的作业场景。
 //   - 用 Hide 避免 explorer 弹出多余控制台。
+//
 // 注意：终端命令（命令型项目）不要走这里——它需要在终端里执行整条命令，
 // 应使用 startDetached；本函数仅用于“系统默认打开”。
 func OpenDetached(target string, workingDir string) error {

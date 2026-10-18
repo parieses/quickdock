@@ -31,17 +31,32 @@ func NewGitRuntime() *GitRuntime {
 func (g *GitRuntime) Kind() Runtime        { return RuntimeGit }
 func (g *GitRuntime) DetectArgs() []string { return []string{"--version"} }
 func (g *GitRuntime) ParseVersion(out string) (string, error) {
-	const p = "git version "
-	if i := strings.Index(out, p); i >= 0 {
-		if v := strings.TrimSpace(out[i+len(p):]); v != "" {
-			return v, nil
-		}
+	// 走与 InstalledVersions 相同的归一化逻辑，保证「导入的系统 git」与
+	// 「可下载版本列表」里的版本号格式一致（否则已安装判定会因 .windows.N 后缀失配）。
+	if v := parseGitVersion(out); v != "" {
+		return v, nil
 	}
 	return "", fmt.Errorf("无法识别 %s 版本", DisplayName(RuntimeGit))
 }
 func (g *GitRuntime) DisplayName() string          { return DisplayName(RuntimeGit) }
 func (g *GitRuntime) SupportedPlatforms() []string { return []string{"windows", "linux", "darwin"} }
 func (g *GitRuntime) Recommended() []string        { return Versions(RuntimeGit) }
+
+// ExtraPathDirs 除 cmd/（git.exe 所在）外，还需注册进 PATH 的目录。
+//
+// Git for Windows 自带 usr/bin，里面有 uname/tail/sort 等 Unix 工具，构建脚本常直接调用；
+// 只注册 cmd/ 会让这类脚本报 "uname: executable file not found"。
+// 目录不存在（如精简版 MinGit 没有 usr/）时返回 nil，不做无效注册。
+func (g *GitRuntime) ExtraPathDirs() []string {
+	if runtime.GOOS != "windows" {
+		return nil
+	}
+	dir := filepath.Join(g.dir, "usr", "bin")
+	if !fileExists(filepath.Join(dir, "uname.exe")) {
+		return nil
+	}
+	return []string{dir}
+}
 
 // cmdDir 返回含 git 可执行文件的目录：Windows 用 cmd/，其余用 bin/。该目录即写入系统 PATH 的条目。
 func (g *GitRuntime) cmdDir() string {
@@ -99,12 +114,39 @@ func (g *GitRuntime) InstalledVersions() []Install {
 		if v := parseGitVersion(RunVersion(p, "--version")); v != "" && !seen[v] {
 			// LookPath 命中本就由 QuickDock 托管并写入 PATH 的便携版时，不再重复登记为 system。
 			if dirs.dedupeByDir(p) {
-				return out
+				return promoteEffectiveGit(out)
 			}
 			out = append(out, Install{Version: v, Scope: "system", Path: p})
 		}
 	}
-	return out
+	return promoteEffectiveGit(out)
+}
+
+// promoteEffectiveGit 把 PATH 中真正生效的 git 排到列表首位。
+// 前端「当前版本」取 installed[0]，而 InstalledVersions 天然是「便携版在前、系统版在后」；
+// 当系统 PATH 上另有一份更新的 git（Git for Windows、或别的软件自带的 PortableGit）时，
+// 不排序就会一直展示便携版旧版本号，和终端里 `git --version` 对不上，
+// 看起来就像"我的 git 已经很新了，软件还在提示我安装新版本"。
+func promoteEffectiveGit(in []Install) []Install {
+	if len(in) < 2 {
+		return in
+	}
+	p, err := exec.LookPath("git")
+	if err != nil {
+		return in
+	}
+	exe := strings.ToLower(filepath.Clean(p))
+	dir := strings.ToLower(filepath.Clean(filepath.Dir(p)))
+	for i := range in {
+		c := strings.ToLower(filepath.Clean(in[i].Path))
+		if c == exe || c == dir { // system 存 exe 全路径；portable 存 bin 目录
+			if i > 0 {
+				in[0], in[i] = in[i], in[0]
+			}
+			break
+		}
+	}
+	return in
 }
 
 // DeleteVersion 单版本语义：删除整个 runtime/git（含所有配套文件），彻底卸载。
@@ -177,15 +219,24 @@ func (g *GitRuntime) Install(ctx context.Context, version string, cb InstallCall
 	return nil
 }
 
+// parseGitVersion 从 `git --version` 输出里取纯版本号。
+// 输入可能是 "git version 2.45.0"、"git version 2.45.0.windows.1" 乃至
+// "git version 2.55.0.windows.3"（Git for Windows 的大版本补丁号）。
+// 必须剥掉任意 .windows.N 后缀：下载列表里登记的是纯版本号（"2.55.0"），
+// 若这里留下后缀，字符串比较就会判定"该版本未安装"，进而永远提示安装新版本。
 func parseGitVersion(out string) string {
-	// "git version 2.45.0.windows.1" 或 "git version 2.45.0"
 	for _, tok := range strings.Fields(out) {
 		if strings.HasPrefix(tok, "version") {
 			continue
 		}
-		if v := strings.TrimPrefix(tok, "git"); v != "" && strings.Contains(v, ".") {
-			return strings.TrimSuffix(v, ".windows.1")
+		v := strings.TrimPrefix(tok, "git")
+		if v == "" || !strings.Contains(v, ".") {
+			continue
 		}
+		if i := strings.LastIndex(v, ".windows."); i >= 0 {
+			v = v[:i]
+		}
+		return v
 	}
 	return ""
 }

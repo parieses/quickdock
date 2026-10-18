@@ -168,7 +168,7 @@ func (d *Database) scanItems(rows *sql.Rows) ([]CollectionItem, error) {
 
 // persistExtractedIcons 把扫描时新提取的图标写回 DB（仅在 icon 为空时），
 // 单独走写锁，避免在只读查询热路径持写锁做 I/O。
-// WHERE icon = '' 防止并发覆盖用户手动设置的图标；与扫描读之间即便有并发写也安全。
+// WHERE icon = ” 防止并发覆盖用户手动设置的图标；与扫描读之间即便有并发写也安全。
 func (d *Database) persistExtractedIcons(items []CollectionItem) {
 	ids := make([]string, 0, len(items))
 	iconVals := make([]string, 0, len(items))

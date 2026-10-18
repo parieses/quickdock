@@ -266,8 +266,8 @@ const systemCommands = computed<SystemCmd[]>(() => [
     action: async () => { await ExecuteSystemCommand('wifi-toggle'); closePalette() } },
   { id: 'kill-foreground', label: t('cmdKillForeground'), desc: t('cmdKillForegroundDesc'), keywords: ['kill', 'process', '结束', '进程', '终止', 'jin cheng', 'zhong zhi', '系统'], icon: XCircle,
     action: async () => { await ExecuteSystemCommand('kill-foreground'); closePalette() } },
-  // 区域截图：必须先关面板再调用。面板已隐藏时 hideForCapture 不会把它算作
-  // 「需要恢复的窗口」，否则截完图面板会自己弹回来盖住结果。
+  // 区域截图：截图期间不再隐藏宿主窗口（见 services/screenshot.go 的 CaptureSelection），
+  // 故无需先关面板；截完也不会弹回任何窗口。
   { id: 'screenshot', label: t('cmdScreenshot'), desc: t('cmdScreenshotDesc'), keywords: ['screenshot', 'capture', '截图', '截屏', '区域', 'jietu', 'jie tu', 'qu yu', '系统'], icon: Camera,
     action: async () => {
       await closePalette()
@@ -1352,7 +1352,7 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background 150ms ease, color 150ms ease;
 }
-.group-expand:hover { background: var(--color-bg-tertiary); color: var(--color-text); }
+.group-expand:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .group-count {
   flex-shrink: 0;
   font-size: 10px;
@@ -1574,7 +1574,7 @@ onUnmounted(() => {
 .action-menu-item.active { background: var(--color-accent-bg); color: var(--color-text-primary); }
 .action-menu-item.danger { color: var(--color-danger); }
 .action-menu-item.danger.active,
-.action-menu-item.danger:hover { background: var(--color-danger-bg, rgba(239, 68, 68, 0.12)); color: var(--color-danger); }
+.action-menu-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
 
 .action-menu-icon { flex-shrink: 0; opacity: 0.85; }
 .action-menu-index {

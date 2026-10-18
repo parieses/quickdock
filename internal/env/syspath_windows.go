@@ -60,6 +60,29 @@ func sysUnregisterPath(dir string) error {
 	return nil
 }
 
+// sysSetEnvVar 设置当前用户（HKCU\Environment）的环境变量，并广播 WM_SETTINGCHANGE 使新进程生效。
+// name 为空时直接返回；value 为空表示删除该变量。
+// 供 ActiveEnvProvider 使用（如 Go 激活时写入版本专属的 GOPATH/GOENV），无需管理员权限。
+func sysSetEnvVar(name, value string) error {
+	if name == "" {
+		return nil
+	}
+	k, err := openUserEnv()
+	if err != nil {
+		return err
+	}
+	defer k.Close()
+
+	if value == "" {
+		// 变量可能本就不存在，删除失败视为已达成目标
+		_ = k.DeleteValue(name)
+	} else if err := k.SetStringValue(name, value); err != nil {
+		return err
+	}
+	broadcastEnvChange()
+	return nil
+}
+
 func openUserEnv() (winreg.Key, error) {
 	k, err := winreg.OpenKey(winreg.CURRENT_USER, `Environment`, winreg.READ|winreg.WRITE|winreg.SET_VALUE)
 	if err != nil {

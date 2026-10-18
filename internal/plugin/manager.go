@@ -73,8 +73,8 @@ type Manager struct {
 	idleDegradeAfter time.Duration
 	// isWindowVisible 注入的窗口可见性判定（同包窗口管理器），nil 时保守跳过降级。
 	isWindowVisible func(pluginID string) bool
-	idleStopCh     chan struct{}
-	idleStopOnce   sync.Once
+	idleStopCh      chan struct{}
+	idleStopOnce    sync.Once
 }
 
 // NewManager 创建插件管理器
@@ -1150,10 +1150,10 @@ func (m *Manager) idleDegradeLoop() {
 }
 
 // degradeIdlePlugins 将「窗口不可见、且最近无交互超过阈值」的 running 后端插件降级为就绪
-//（degradePlugin → registered，下次使用经 EnsureLoaded 复活）。不碰可见窗口 / 已禁用 /
+// （degradePlugin → registered，下次使用经 EnsureLoaded 复活）。不碰可见窗口 / 已禁用 /
 // 非 running / none 运行时（纯前端无后端进程）。
 // 先快照 ID 再在锁外逐个降级：degradePlugin 内部会二次校验，避免与本次读锁之间发生实例替换
-//（插件崩溃被 watchPlugin 重启 / 用户重新打开窗口）导致误杀正在使用的插件。
+// （插件崩溃被 watchPlugin 重启 / 用户重新打开窗口）导致误杀正在使用的插件。
 func (m *Manager) degradeIdlePlugins() {
 	m.mu.RLock()
 	idle := make([]string, 0)
@@ -1191,9 +1191,9 @@ func (m *Manager) degradeIdlePlugins() {
 }
 
 // degradePlugin 将指定插件降级为就绪（stopPlugin → registered），但先在写锁内二次校验
-//「仍可降级」的全部条件，避免 degradeIdlePlugins 的快照与执行之间实例被替换（崩溃重启 /
+// 「仍可降级」的全部条件，避免 degradeIdlePlugins 的快照与执行之间实例被替换（崩溃重启 /
 // 用户重新打开窗口）而误杀刚复活 / 正被使用的插件。返回 ErrPluginNotFound 表示插件已不在
-//（被卸载或实例已替换）；降级被二次校验否决时返回 nil（视为无需处理）。
+// （被卸载或实例已替换）；降级被二次校验否决时返回 nil（视为无需处理）。
 // 与用户主动 KillPlugin 的区别：降级不扫描目录锁进程（闲置插件不锁目录），
 // 但仍按 treeKill 终止整棵进程树（stopPlugin(treeKill=true)），而非只杀主进程。
 func (m *Manager) degradePlugin(id string) error {

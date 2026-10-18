@@ -34,10 +34,10 @@ func TestDiscoverAndLoadKeepsDisabledPlugin(t *testing.T) {
 	writePlugin("disabled-plug")
 
 	m := &Manager{
-		plugins:             make(map[string]*PluginInstance),
-		pluginsDir:          dir,
-		hostMethods:         make(map[string]HostMethod),
-		loadLocks:           make(map[string]*sync.Mutex),
+		plugins:              make(map[string]*PluginInstance),
+		pluginsDir:           dir,
+		hostMethods:          make(map[string]HostMethod),
+		loadLocks:            make(map[string]*sync.Mutex),
 		EnableLazyPluginLoad: true,
 	}
 

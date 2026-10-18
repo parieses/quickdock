@@ -896,15 +896,15 @@ onUnmounted(() => {
 .save-menu {
   position: absolute; top: calc(100% + 4px); right: 0; z-index: 40;
   min-width: 132px; padding: 4px;
-  background: var(--color-bg-elevated);
+  background: var(--color-surface-elevated);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
 }
 .save-menu-item {
   display: flex; align-items: center; gap: 8px; width: 100%;
   padding: 6px 8px; font-size: 12px; cursor: pointer;
-  background: transparent; border: 0; border-radius: calc(var(--radius) - 2px);
+  background: transparent; border: 0; border-radius: calc(var(--radius-md) - 2px);
   color: var(--color-text-secondary); text-align: left;
 }
 .save-menu-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }

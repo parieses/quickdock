@@ -218,7 +218,7 @@ onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
 .log-side-head { display: flex; align-items: center; gap: 6px; padding: 10px 12px; font-size: 13px; font-weight: 600; color: var(--color-text-primary); border-bottom: 1px solid var(--color-border); }
 .log-file-list { flex: 1; overflow-y: auto; padding: 6px; }
 .log-file { display: flex; flex-direction: column; gap: 2px; width: 100%; text-align: left; padding: 7px 9px; border-radius: var(--radius-sm); border: none; cursor: pointer; background: transparent; color: var(--color-text-primary); }
-.log-file:hover { background: var(--color-hover); }
+.log-file:hover { background: var(--color-bg-hover); }
 .log-file.active { background: var(--color-accent); color: var(--color-accent-text); }
 .log-file-name { font-size: 12px; font-family: var(--font-family); }
 .log-file-meta { font-size: 10px; opacity: 0.6; }

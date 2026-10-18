@@ -62,6 +62,9 @@ import {
   EnvOllamaRunningModels,
   EnvOllamaPullModel,
   EnvOllamaDeleteModel,
+  EnvGoEnvKeys,
+  EnvGoEnvGet,
+  EnvGoEnvSet,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import {
@@ -418,7 +421,10 @@ const pathEntries = computed(() => {
   for (const r of runtimes.value) {
     if (!r.installed) continue
     for (const ins of r.installed) {
-      if (ins.active) {
+      // 激活记录（active）或实际已在 PATH 中（inSystemPath）都要显示：
+      // 后者覆盖「路径已注册但激活元数据缺失」的情况（如安装后手工改动过 PATH），
+      // 否则面板会漏掉实际生效的目录，看着像没注册。
+      if (ins.active || ins.inSystemPath) {
         out.push({ id: r.id, name: r.name, version: ins.version, binDir: binDirOf(ins), inPath: !!ins.inSystemPath })
       }
     }
@@ -989,6 +995,62 @@ async function savePHPConfig() {
   }
 }
 
+// ---- Go 环境变量配置弹窗（go env -w / -u）----
+interface GoEnvKey { key: string; label: string; desc: string; placeholder: string; choices: string[]; secret: boolean }
+const goEnvModal = reactive<{
+  open: boolean; runtime: string; version: string
+  keys: GoEnvKey[]; values: Record<string, string>; loading: boolean; saving: boolean; error: string
+}>({
+  open: false, runtime: '', version: '',
+  keys: [], values: {}, loading: false, saving: false, error: '',
+})
+async function openGoEnv(r: RuntimeInfo, ins: Install) {
+  goEnvModal.runtime = r.id
+  goEnvModal.version = ins.version
+  goEnvModal.keys = []
+  goEnvModal.values = {}
+  goEnvModal.error = ''
+  goEnvModal.loading = true
+  goEnvModal.open = true
+  openMenu.value = null
+  try {
+    const [ks, vs] = await Promise.all([
+      unwrap<GoEnvKey[]>(await EnvGoEnvKeys(r.id)),
+      unwrap<Record<string, string>>(await EnvGoEnvGet(r.id, ins.version)),
+    ])
+    goEnvModal.keys = ks || []
+    goEnvModal.values = vs || {}
+  } catch (e: any) {
+    goEnvModal.error = getErrorMessage(e)
+  } finally {
+    goEnvModal.loading = false
+  }
+}
+async function saveGoEnv() {
+  goEnvModal.saving = true
+  goEnvModal.error = ''
+  try {
+    unwrap(await EnvGoEnvSet(goEnvModal.runtime, goEnvModal.version, { ...goEnvModal.values }))
+    toast.success(t('saved'))
+    goEnvModal.open = false
+  } catch (e: any) {
+    goEnvModal.error = getErrorMessage(e)
+  } finally {
+    goEnvModal.saving = false
+  }
+}
+// GOPROXY 一键镜像：国内网络拉模块常常超时，提供常用镜像直选。
+const goProxyPresets = [
+  { label: '官方', value: 'https://proxy.golang.org,direct' },
+  { label: '七牛 goproxy.cn', value: 'https://goproxy.cn,direct' },
+  { label: '阿里云', value: 'https://mirrors.aliyun.com/goproxy/,direct' },
+  { label: '腾讯云', value: 'https://mirrors.tencent.com/go/,direct' },
+  { label: '关闭(直连)', value: 'direct' },
+]
+function applyGoProxy(value: string) {
+  goEnvModal.values['GOPROXY'] = value
+}
+
 // ---- Redis 配置 / 日志弹窗（redis.conf 编辑 + 运行日志查询）----
 // Redis 已实现通用 ConfigProvider，故配置读写走 EnvConfigGet/Set（与 Nginx/Apache 一致）；
 // 日志查询走通用 EnvLogGet（原 EnvRedisLog 已废弃，仅 Redis 可用 → 现所有实现 LogProvider 的运行时可用）。
@@ -1364,13 +1426,17 @@ function cmpVer(a: string, b: string): number {
   }
   return 0
 }
-// newestUpdate: 上游最新版本高于已装版本时给出升级提示
-// available 为空时用 recommended[0] 兜底（推荐版本通常为最新 LTS）
+// newestUpdate: 上游最新版本高于已装版本时给出升级提示。
+//
+// 只在真正拉到上游版本列表时才判定：
+// recommended 是硬编码的推荐版本，一旦上游发版而未同步更新，它就会比用户已装版本还旧，
+// 拿它当"最新版本"会出现「已装 2.45.0 / 提示安装新版本 2.45.0」这类自相矛盾的提示，
+// 反之也会把「有更新」误判成「已是最新」。没有上游数据就没有判定依据，一律不提示。
 const newestUpdate = computed(() => {
   const r = selected.value
   const s = r ? ui[r.id] : null
   if (!r) return null
-  const candidates = s?.available?.length ? s.available : r.recommended
+  const candidates = s?.available
   if (!candidates?.length) return null
   const to = candidates[0] // 已降序，第一条即最新
   const from = r.installed.reduce((m, i) => (cmpVer(i.version, m) > 0 ? i.version : m), '')
@@ -2246,6 +2312,10 @@ const s = currentRuntimeState
                     {{ ins.inSystemPath ? t('unsetEnvVar') : t('setEnvVar') }}
                   </button>
                   <button class="op-item" @click="openAlias(selected, ins); openMenu = null">{{ t('setAlias') }}</button>
+                  <template v-if="selected.id === 'go'">
+                    <div class="op-sep"></div>
+                    <button class="op-item" @click="openGoEnv(selected, ins); openMenu = null">{{ t('goEnvConfig') }}</button>
+                  </template>
                   <template v-if="selected.id === 'php' && ins.scope !== 'system'">
                     <div class="op-sep"></div>
                     <button class="op-item" @click="openPHPConfig(selected, ins, 'ini'); openMenu = null">{{ t('phpIni') }}</button>
@@ -2499,7 +2569,10 @@ const s = currentRuntimeState
                 :disabled="s.installing"
                 @click="applyUpdate(newestUpdate.to)"
               >{{ s.installing ? t('installing') : t('installNewVersion', { to: newestUpdate.to }) }}</button>
-              <span v-else class="up-to-date">{{ t('upToDate') }}</span>
+              <span v-else-if="s.available.length" class="up-to-date">{{ t('upToDate') }}</span>
+              <button v-else class="link-btn" :disabled="s.fetching" @click="loadAvailable(selected.id)">
+                {{ s.fetching ? t('loading') : t('retryLoadVersions') }}
+              </button>
             </template>
           </div>
 
@@ -2696,6 +2769,53 @@ const s = currentRuntimeState
         <div class="modal-actions">
           <button class="op-btn" @click="phpModal.open = false">{{ t('cancel') }}</button>
           <button class="env-install-btn" @click="savePHPConfig">{{ t('save') }}</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Go 环境变量配置弹窗：go env -w / -u -->
+    <div v-if="goEnvModal.open" class="modal-overlay" @click.self="goEnvModal.open = false">
+      <div class="modal go-env-modal">
+        <div class="modal-title">{{ t('goEnvConfig') }} · {{ goEnvModal.version }}</div>
+        <p class="modal-text go-env-desc">{{ t('goEnvDesc') }}</p>
+        <div v-if="goEnvModal.loading" class="env-msg">{{ t('loading') }}</div>
+        <div v-else-if="goEnvModal.error" class="env-msg error">{{ goEnvModal.error }}</div>
+        <div v-else class="go-env-form">
+          <div class="go-env-row go-env-presets">
+            <span class="go-env-name">{{ t('goEnvProxyPreset') }}</span>
+            <div class="go-env-preset-row">
+              <button
+                v-for="p in goProxyPresets"
+                :key="p.value"
+                class="go-env-preset"
+                :class="{ active: goEnvModal.values['GOPROXY'] === p.value }"
+                @click="applyGoProxy(p.value)"
+              >{{ p.label }}</button>
+              <button class="go-env-preset" @click="applyGoProxy('')">{{ t('goEnvDefault') }}</button>
+            </div>
+          </div>
+          <div v-for="k in goEnvModal.keys" :key="k.key" class="go-env-row">
+            <label class="go-env-label">
+              <span class="go-env-key">{{ k.key }}</span>
+              <span class="go-env-name">{{ k.label }}</span>
+            </label>
+            <select v-if="k.choices && k.choices.length" v-model="goEnvModal.values[k.key]" class="env-input go-env-input">
+              <option value="">{{ t('goEnvDefault') }}</option>
+              <option v-for="c in k.choices" :key="c" :value="c">{{ c || t('goEnvDefault') }}</option>
+            </select>
+            <input
+              v-else
+              v-model="goEnvModal.values[k.key]"
+              :type="k.secret ? 'password' : 'text'"
+              class="env-input go-env-input"
+              :placeholder="k.placeholder"
+            />
+            <p v-if="k.desc" class="go-env-hint">{{ k.desc }}</p>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="op-btn" @click="goEnvModal.open = false">{{ t('cancel') }}</button>
+          <button class="env-install-btn" :class="{ busy: goEnvModal.saving }" :disabled="goEnvModal.saving" @click="saveGoEnv">{{ t('save') }}</button>
         </div>
       </div>
     </div>
@@ -3072,7 +3192,7 @@ const s = currentRuntimeState
   padding: 0 12px 2px; font-size: 11px; color: var(--color-text-disabled);
   text-transform: uppercase; letter-spacing: 0.4px;
 }
-.git-row:not(.git-head) .g-item { font-weight: 600; color: var(--color-text); }
+.git-row:not(.git-head) .g-item { font-weight: 600; color: var(--color-text-primary); }
 .g-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; text-transform: capitalize; }
 .g-status.ok { color: var(--color-success); }
 .g-status.warn { color: var(--color-warning); }
@@ -3135,7 +3255,7 @@ const s = currentRuntimeState
   gap: 8px;
   margin: 10px 0 4px;
   padding: 8px 12px;
-  border-radius: var(--radius);
+  border-radius: var(--radius-md);
   background: rgba(255, 170, 0, 0.12);
   border: 1px solid rgba(255, 170, 0, 0.4);
   color: #e0a200;
@@ -3257,7 +3377,7 @@ const s = currentRuntimeState
 .env-install-btn.danger { background: var(--color-danger); }
 .env-install-btn.danger:hover { opacity: 0.9; }
 .modal-text { font-size: 12px; color: var(--color-text-muted); margin: 6px 0 0; line-height: 1.5; }
-.modal-check { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; font-size: 12px; color: var(--color-text); cursor: pointer; user-select: none; }
+.modal-check { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; font-size: 12px; color: var(--color-text-primary); cursor: pointer; user-select: none; }
 .modal-check input { width: 14px; height: 14px; accent-color: var(--color-accent); }
 .env-header-actions { display: flex; align-items: center; gap: 8px; }
 .path-list { display: flex; flex-direction: column; gap: 7px; margin: 4px 0 12px; max-height: 52vh; overflow: auto; }
@@ -3265,7 +3385,7 @@ const s = currentRuntimeState
 .path-row:hover { border-color: var(--color-border-focus); background: var(--color-bg-secondary); }
 .path-badge { width: 26px; height: 26px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
 .path-badge :deep(svg) { width: 16px; height: 16px; }
-.path-name { font-weight: 600; color: var(--color-text); white-space: nowrap; }
+.path-name { font-weight: 600; color: var(--color-text-primary); white-space: nowrap; }
 .path-name em { font-style: normal; color: var(--color-text-muted); font-weight: 400; margin-left: 5px; }
 .path-dir { color: var(--color-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; min-width: 0; }
 .path-flag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; font-weight: 600; }
@@ -3289,7 +3409,7 @@ const s = currentRuntimeState
 
 /* 安装区 */
 .install-grid { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.cur-ver { font-weight: 600; color: var(--color-text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.cur-ver { font-weight: 600; color: var(--color-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .up-to-date { color: #1a7f37; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
 .up-to-date::before { content: '✓'; }
 .install-input-wrap { flex: 1; min-width: 160px; }
@@ -3336,7 +3456,7 @@ const s = currentRuntimeState
 .env-msg.error { color: var(--color-danger); }
 .ftp-form { padding: 4px 2px 0; display: flex; flex-direction: column; gap: 4px; }
 .ftp-form .env-input { margin-bottom: 6px; }
-.ftp-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 13px; color: var(--color-text); cursor: pointer; }
+.ftp-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 13px; color: var(--color-text-primary); cursor: pointer; }
 .ftp-check input { width: 15px; height: 15px; accent-color: var(--color-accent); }
 .env-update-hint {
   display: flex; align-items: center; gap: 8px; margin-top: 12px;
@@ -3457,6 +3577,29 @@ const s = currentRuntimeState
 
 /* PHP 配置弹窗 */
 .php-modal { width: 540px; max-width: 94vw; }
+/* Go 环境变量配置弹窗（go env） */
+.go-env-modal { width: 560px; max-width: 94vw; }
+.go-env-desc { font-size: 12px; color: var(--color-text-muted); margin: 0 0 12px; line-height: 1.5; }
+.go-env-form { max-height: 64vh; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; }
+.go-env-row { display: flex; flex-direction: column; gap: 5px; }
+.go-env-label { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.go-env-key {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600;
+  color: var(--color-accent); background: var(--color-accent-bg); padding: 1px 7px; border-radius: 999px;
+}
+.go-env-name { font-size: 12px; color: var(--color-text-secondary); }
+.go-env-input { width: 100%; }
+.go-env-hint { font-size: 11px; color: var(--color-text-disabled); margin: 0; line-height: 1.45; }
+.go-env-presets { gap: 7px; }
+.go-env-preset-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.go-env-preset {
+  font-size: 12px; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
+  font-family: inherit;
+}
+.go-env-preset:hover { border-color: var(--color-border-focus); color: var(--color-text-primary); }
+.go-env-preset.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
+
 .php-tabs { display: flex; gap: 4px; margin: 4px 0 10px; flex-wrap: wrap; }
 .php-tab {
   font-size: 12px; padding: 5px 11px; border-radius: var(--radius-sm); cursor: pointer;
@@ -3474,7 +3617,7 @@ const s = currentRuntimeState
 .log-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
 .log-filter {
   flex: 1 1 160px; min-width: 120px; height: 28px; padding: 0 8px; font-size: 12px;
-  background: var(--color-bg-primary); color: var(--color-text);
+  background: var(--color-bg-primary); color: var(--color-text-primary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm); outline: none;
 }
 .log-filter:focus { border-color: var(--color-accent); }

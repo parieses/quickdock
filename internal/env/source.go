@@ -139,8 +139,14 @@ var (
 		RuntimeNginx: {display: "Nginx", group: GroupNetwork, versions: []string{"1.27.5", "1.26.3", "1.25.5"}, versURL: "https://nginx.org/download/", versParse: parseNginxVersions, sources: []Source{
 			{ID: "nginxorg", Name: "nginx.org 官方", Build: nginxURL("https://nginx.org/download/nginx-{version}.zip", "https://nginx.org/download/nginx-{version}.tar.gz", "")},
 		}},
-		RuntimeGit: {display: "Git", group: GroupTool, singleVersion: true, versions: []string{"2.45.0", "2.44.0", "2.43.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, fallbackHTMLURL: "https://github.com/git-for-windows/git/releases", sources: []Source{
-			{ID: "gfw", Name: "git-for-windows (GitHub)", Build: gitURL("https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}.windows.1-64-bit.zip", "https://github.com/git/git/archive/refs/tags/v{version}.tar.gz", "")},
+		// 推荐列表仅在「上游 API + HTML 兜底都失败」时兜底，需定期跟进大版本，
+		// 否则网络异常时用户看到的是一两年前的旧版本号（此前一直是 2.45.0/2.44.0/2.43.0）。
+		RuntimeGit: {display: "Git", group: GroupTool, singleVersion: true, versions: []string{"2.56.0", "2.55.0", "2.54.0"}, versURL: "https://api.github.com/repos/git-for-windows/git/releases?per_page=100", versParse: parseGitVersions, versHTMLFallbackParse: parseGitVersionsHTML, fallbackHTMLURL: "https://github.com/git-for-windows/git/releases", sources: []Source{
+			{ID: "gfw", Name: "git-for-windows (GitHub)", Build: gitURL("https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}-64-bit.zip", "https://github.com/git/git/archive/refs/tags/v{version}.tar.gz", "")},
+			// 国内网络直连 github.com 常被拦（多为连接级失败，切换代价小），
+			// 故补两个镜像兜底：npmmirror 二进制镜像（CDN 最快）与 gh-proxy（全量转发，版本覆盖最全）。
+			{ID: "npmmirror", Name: "npmmirror 镜像 (国内)", Build: gitURL("https://registry.npmmirror.com/-/binary/git-for-windows/v{version}.windows.1/MinGit-{version}-64-bit.zip", "", "")},
+			{ID: "ghproxy", Name: "GitHub 加速 (gh-proxy.com)", Build: gitURL("https://gh-proxy.com/https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}-64-bit.zip", "", "")},
 		}},
 		RuntimeCaddy: {display: "Caddy", group: GroupNetwork, versions: []string{"2.8.4", "2.7.6", "2.6.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, fallbackHTMLURL: "https://github.com/caddyserver/caddy/releases", sources: []Source{
 			{ID: "caddyserver", Name: "caddyserver/caddy (GitHub)", Build: caddyURL("https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_windows_amd64.zip", "https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_darwin_{arch}.tar.gz", "")},
@@ -328,8 +334,13 @@ func nginxURL(winTmpl, darwinTmpl, style string) func(version, goos, arch string
 	}
 }
 
-// gitURL 构造 git-for-windows 的 MinGit 便携包地址。版本号内部存 "2.45.0"，
-// 真实发布标签为 v2.45.0.windows.1，故在模板外再补 .windows.1 后缀。
+// gitURL 构造 git-for-windows 的 MinGit 便携包地址。
+// 注意 tag 与资产文件名**命名不对称**：发布 tag 带补丁号（v2.45.0.windows.1），
+// 而资产文件名不含 .windows.N 后缀（MinGit-2.45.0-64-bit.zip）。
+// 早期实现把 ".windows.1" 也拼进了文件名，导致下载一律 404，回归用例见 TestGitMinGitURL。
+// 另外，改补丁号（.windows.2 等）时文件名会带上补丁号（MinGit-2.56.0.2-64-bit.zip）；
+// 由于版本列表解析已剥掉 .windows.N，这里统一按 .windows.1 取包——
+// 实测所有稳定版都存在 .windows.1 资产，只是落后一个补丁号。
 func gitURL(winTmpl, darwinTmpl, style string) func(version, goos, arch string) string {
 	return func(version, goos, arch string) string {
 		if goos == "windows" {
@@ -967,7 +978,10 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 	return vs
 }
 
-// fetchURL 拉取 URL 内容（带代理与 30s 超时），最多 4MB。
+// fetchURL 拉取 URL 内容（带代理与 30s 超时），最多 32MB。
+// 上限设这么高是因为 GitHub Releases API（per_page=100）单个响应就接近 5MB——
+// 早期只放 4MB，响应被 io.LimitReader 截断成非法 JSON，json.Unmarshal 静默失败，
+// 表现为"上游版本解析返回 0 条"而静默退回 HTML 兜底列表（只剩 4 个版本）。
 // 若代理模式下失败，自动重试无代理直连（兼容部分场景下代理配置异常的情况）。
 func fetchURL(url string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -993,7 +1007,7 @@ func fetchURL(url string) ([]byte, error) {
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	return io.ReadAll(io.LimitReader(resp.Body, 32<<20))
 }
 
 // ---- 上游版本列表解析 ----
@@ -1003,13 +1017,22 @@ func fetchURL(url string) ([]byte, error) {
 // 大多数运行时的版本列表解析都可复用本函数，避免每个运行时写一份近乎相同的实现。
 func parseTagVersions(body []byte, prefixes ...string) []string {
 	var arr []struct {
-		TagName string `json:"tag_name"`
+		TagName    string `json:"tag_name"`
+		Prerelease bool   `json:"prerelease"`
+		Draft      bool   `json:"draft"`
 	}
 	if err := json.Unmarshal(body, &arr); err != nil {
 		return nil
 	}
 	out := make([]string, 0, len(arr))
 	for _, it := range arr {
+		// 预发布/草稿一律剔除：它们不该出现在"可下载版本列表"里。
+		// 反例教训：git-for-windows 的 releases 中 100 条里有 58 条是 rc，
+		// 早期不过滤导致版本列表被 rc 塞满，且"一键装最新"会装上预发布版，
+		// 进而让"已是最新"判定永远不成立（rc 与正式版版本号字符串不等）。
+		if it.Prerelease || it.Draft {
+			continue
+		}
 		v := it.TagName
 		for _, p := range prefixes {
 			v = strings.TrimPrefix(v, p)
@@ -1017,6 +1040,11 @@ func parseTagVersions(body []byte, prefixes ...string) []string {
 		// git-for-windows 发布标签形如 "v2.45.0.windows.1"，去掉 .windows.N 后缀取纯版本号
 		if i := strings.LastIndex(v, ".windows."); i >= 0 {
 			v = v[:i]
+		}
+		// 兜底：个别仓库的 rc tag 没打 prerelease 标记，只能按版本号形态再过滤一次
+		// （形如 "2.56.0-rc2" / "0.30.12-rc0"）。
+		if strings.ContainsAny(v, "-+") {
+			continue
 		}
 		if v != "" {
 			out = append(out, v)

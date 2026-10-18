@@ -178,6 +178,12 @@ func main() {
 	// 详见 elevated_cli.go。
 	runElevatedCLI()
 
+	// 数据目录迁移：若上一次在设置里勾选了「迁移现有数据」，此处把旧目录整体复制到新目录。
+	// 必须早于 logger.Init 与 DB 打开——此时应用尚未触碰任何数据目录，拷贝最安全。
+	if err := platform.ApplyPendingDataDirMigration(); err != nil {
+		fmt.Fprintf(os.Stderr, "[quickdock] 数据目录迁移失败: %v\n", err)
+	}
+
 	// 全局日志：先于一切初始化，之后所有包（services/plugin/tray）的关键事件统一落盘
 	// ~/.quickdock/logs/quickdock-YYYYMMDD.log
 	logger.Init(filepath.Join(platform.DefaultDataDir(), "logs"))

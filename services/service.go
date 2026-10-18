@@ -151,6 +151,9 @@ func (a *AppService) StartEnvServicesAsync() {
 	}
 	go func() {
 		defer logger.RecoverToLog("env:reconcile")
+		// 先回收上次异常退出遗留的孤儿服务（占着端口会导致后续对账跳过 / 启动冲突），
+		// 再按期望态拉起本会话的服务。
+		a.Env.ReclaimOrphans(context.Background())
 		a.Env.ReconcileEnabled(context.Background())
 		// 对账完成前，环境页读到的是「未运行」，与该运行时的期望态不一致；
 		// 完成后通知前端重拉一次状态（EnvironmentPage 已监听该事件）。

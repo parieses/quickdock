@@ -358,6 +358,41 @@ func (s *EnvironmentService) EnvLogGet(runtime, version string) *services.ApiRes
 	return services.Ok(log)
 }
 
+// EnvGoEnvKeys 返回某运行时可编辑的环境变量清单（含中文标签/说明/候选值）。
+func (s *EnvironmentService) EnvGoEnvKeys(runtime string) *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	keys, err := s.App.Env.GoEnvKeys(envmgr.Runtime(runtime))
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(keys)
+}
+
+// EnvGoEnvGet 读取某运行时某版本的环境变量（go env 等）。
+func (s *EnvironmentService) EnvGoEnvGet(runtime, version string) *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	m, err := s.App.Env.GoEnvGet(envmgr.Runtime(runtime), version)
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(m)
+}
+
+// EnvGoEnvSet 写回某运行时某版本的环境变量。patch 中 value 为空表示清除该变量。
+func (s *EnvironmentService) EnvGoEnvSet(runtime, version string, patch map[string]string) *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	if err := s.App.Env.GoEnvSet(envmgr.Runtime(runtime), version, patch); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
 // EnvCertStatus 返回 mkcert 一键签发的前置状态。
 func (s *EnvironmentService) EnvCertStatus() *services.ApiResult {
 	if r := s.checkEnv(); r != nil {

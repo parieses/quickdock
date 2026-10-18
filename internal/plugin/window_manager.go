@@ -129,7 +129,7 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		BackgroundColour: pluginWindowBackground(m.themeDark),
 		// 独立插件窗口加载轻量入口 plugin.html（仅挂载 PluginPage，不加载主 SPA），
 		// 经 query 传 plugin id；首次打开免去主 bundle 下载，配合「关窗=隐藏复用」秒开。
-		URL:              "/plugin.html?id=" + pluginID,
+		URL: "/plugin.html?id=" + pluginID,
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: !showInTaskbar,
 		},
@@ -197,7 +197,7 @@ func (m *PluginWindowManager) Hide(pluginID string) {
 //
 // 与 Hide 的区别：Hide 只隐藏并起回收计时器，窗口的 WebView2 renderer（实测 60~130 MB）
 // 仍常驻到超时；Close 立刻从注册表移除并 Close，Close 触发 WindowClosing 钩子完成
-//「停插件进程」（关窗即终止）。下次打开经 EnsureLoaded 惰性复活。
+// 「停插件进程」（关窗即终止）。下次打开经 EnsureLoaded 惰性复活。
 //
 // 关掉的插件窗口没有复用价值——用户已经表示不要了——所以不该白占 renderer 到超时。
 func (m *PluginWindowManager) Close(pluginID string) {
@@ -238,36 +238,6 @@ func (m *PluginWindowManager) ShowWindow(pluginID string) {
 	if ok && win != nil {
 		win.Show()
 		win.Focus()
-	}
-}
-
-// HideAllVisibleForCapture 临时隐藏所有当前可见的插件独立窗口，返回被隐藏的插件 ID。
-//
-// 供截图这类「要一张干净桌面」的场景使用：插件用「在窗口中打开」模式弹的独立窗口
-// 不归主窗口 / 命令面板的候选列表管，只隐藏宿主自己的窗口是盖不住它们的。
-// 只动原本可见的窗口，且完全不新建窗口——「用户开着哪些插件窗口」这个状态不变。
-func (m *PluginWindowManager) HideAllVisibleForCapture() []string {
-	m.mu.Lock()
-	ids := make([]string, 0, len(m.windows))
-	for id, win := range m.windows {
-		if win != nil && win.IsVisible() {
-			ids = append(ids, id)
-		}
-	}
-	m.mu.Unlock()
-
-	// 复用 Hide：它顺带重置回收计时器，否则「本来就隐藏了很久」的窗口
-	// 可能恰好在截图期间到点被回收，恢复时窗口就没了。
-	for _, id := range ids {
-		m.Hide(id)
-	}
-	return ids
-}
-
-// RestoreAfterCapture 恢复 HideAllVisibleForCapture 隐藏的插件窗口（不新建）。
-func (m *PluginWindowManager) RestoreAfterCapture(ids []string) {
-	for _, id := range ids {
-		m.ShowWindow(id)
 	}
 }
 

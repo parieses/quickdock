@@ -7,3 +7,6 @@ package env
 func sysRegisterPath(dir string) error   { return nil }
 func sysUnregisterPath(dir string) error { return nil }
 func sysReadPath() (string, bool)        { return "", false }
+func sysSetEnvVar(name, value string) error {
+	return nil
+}

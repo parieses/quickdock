@@ -70,6 +70,25 @@ type RuntimeAdapter interface {
 	ParseVersion(output string) (string, error)
 }
 
+// ActiveEnvProvider 可选能力：某版本被设为「环境变量指向」时，除把其 bin 注册进 PATH 外，
+// 还需额外写入的用户级环境变量。
+//
+// 用于把「按版本隔离」从 QuickDock 内部调用延伸到用户终端：Go 默认所有版本共享同一份
+// $HOME/go/env，仅注册 PATH 不足以让终端里的 go 用上版本专属配置，故需一并写入 GOPATH/GOENV。
+// 返回 nil/空表示该版本无需额外变量（会被清除）。
+type ActiveEnvProvider interface {
+	ActiveEnvVars(version string) map[string]string
+}
+
+// ExtraPathProvider 可选能力：除主 bin 目录外，还需一并注册进系统 PATH 的目录。
+//
+// 典型是 Git for Windows：它自带 usr/bin（uname/tail/sort 等 Unix 工具），构建脚本常直接
+// 调用，只注册 cmd/ 会让这些脚本报 "uname: not found"。
+// 目录与版本无关（运行时级），激活时注册、取消激活时一并移除。
+type ExtraPathProvider interface {
+	ExtraPathDirs() []string
+}
+
 // ServiceController 可选能力：以服务方式启动/停止并查询运行状态（nginx/redis 实现）。
 type ServiceController interface {
 	Start(ctx context.Context, version string, onLog func(string)) error
@@ -501,6 +520,17 @@ func (m *Manager) Install(rt Runtime, version, sourceID, custom string, cb Insta
 	}
 	// 安装完成后重扫并重新保存检测结果，列表立即含新版本（触发点之一）
 	m.RefreshDetected(rt)
+
+	// 首次安装自动注册到系统 PATH：装完即可在终端里使用，不必再手动点「设置环境变量」。
+	// 已存在激活版本时不改动，避免覆盖用户显式选择的版本。
+	if activeVersion(rt) == "" {
+		target := m.installedVersionFor(rt, version)
+		if e := m.SetActive(rt, target); e != nil {
+			logger.W("[env] %s %s 安装后自动注册 PATH 失败: %v", rt, target, e)
+		} else if cb.OnLog != nil {
+			cb.OnLog("已注册到系统 PATH（新开终端生效）")
+		}
+	}
 	return nil
 }
 
@@ -523,28 +553,112 @@ func (m *Manager) InstalledVersions(rt Runtime) ([]Install, error) {
 	return mergeMeta(rt, m.mergeLinks(rt, m.cachedInstalls(rt)), activeVersion(rt), entries), nil
 }
 
+// activeEnvProvider 取某运行时实现的可选能力 ActiveEnvProvider，未实现则返回 nil。
+func (m *Manager) activeEnvProvider(rt Runtime) ActiveEnvProvider {
+	a, err := m.adapter(rt)
+	if err != nil {
+		return nil
+	}
+	p, _ := a.(ActiveEnvProvider)
+	return p
+}
+
+// applyActiveEnvVars 同步「激活版本」所需的额外用户级环境变量（见 ActiveEnvProvider）。
+// version 为空即清除（各键写空值 → 删除）。写入失败不阻断激活流程：PATH 已注册，
+// 缺少这些变量只是退回默认行为，不该让整个激活失败。
+func (m *Manager) applyActiveEnvVars(rt Runtime, version string) {
+	p := m.activeEnvProvider(rt)
+	if p == nil {
+		return
+	}
+	for name, val := range p.ActiveEnvVars(version) {
+		if err := sysSetEnvVar(name, val); err != nil {
+			logger.W("[env] 写入环境变量 %s 失败（可忽略）: %v", name, err)
+		}
+	}
+}
+
+// pathDirsFor 返回某版本激活时要注册进 PATH 的全部目录：主 bin 目录 + 运行时额外目录。
+func (m *Manager) pathDirsFor(rt Runtime, version string) []string {
+	var dirs []string
+	if d := m.exeDirFor(rt, version); d != "" {
+		dirs = append(dirs, d)
+	}
+	a, err := m.adapter(rt)
+	if err == nil {
+		if p, ok := a.(ExtraPathProvider); ok {
+			for _, d := range p.ExtraPathDirs() {
+				if d != "" {
+					dirs = append(dirs, d)
+				}
+			}
+		}
+	}
+	return dirs
+}
+
+// registerRuntimePaths / unregisterRuntimePaths 成对处理 pathDirsFor 的全部目录。
+func (m *Manager) registerRuntimePaths(rt Runtime, version string) error {
+	for _, d := range m.pathDirsFor(rt, version) {
+		if e := sysRegisterPath(d); e != nil {
+			return fmt.Errorf("写入系统环境变量失败: %w", e)
+		}
+	}
+	return nil
+}
+
+func (m *Manager) unregisterRuntimePaths(rt Runtime, version string) {
+	for _, d := range m.pathDirsFor(rt, version) {
+		_ = sysUnregisterPath(d)
+	}
+}
+
+// installedVersionFor 安装后按目录反查登记列表里实际使用的版本号。
+// 部分运行时安装时用的是完整版本串（Git 的 2.45.0.windows.1），而登记列表剥掉了后缀
+// （2.45.0）；直接用安装串写激活元数据，列表里就看不出激活状态。
+func (m *Manager) installedVersionFor(rt Runtime, version string) string {
+	dir := m.exeDirFor(rt, version)
+	if dir == "" {
+		return version
+	}
+	installs, err := m.InstalledVersions(rt)
+	if err != nil {
+		return version
+	}
+	want := filepath.Clean(dir)
+	for _, ins := range installs {
+		if ins.Path != "" && strings.EqualFold(filepath.Clean(ins.Path), want) {
+			return ins.Version
+		}
+	}
+	return version
+}
+
 // SetActive 设置某运行时的激活版本（其 bin 目录即“环境变量指向”的版本）。version=="" 清除激活。
 // 副作用：将激活版本的 bin 目录写入当前用户（HKCU）的 PATH 环境变量，使系统全局可用；
 // 同时把上一个激活的便携/导入版本从 PATH 移除。系统 PATH 上的版本不重复注册（其本身已在 PATH 中）。
+// 若该运行时实现 ActiveEnvProvider，还会同步写入其所需的额外环境变量（如 Go 的版本专属 GOPATH/GOENV）。
 func (m *Manager) SetActive(rt Runtime, version string) error {
 	prev := activeVersion(rt)
-	binOf := func(v string) string { return m.exeDirFor(rt, v) }
 	scopeOf := func(v string) string { return m.scopeFor(rt, v) }
 	if version == "" {
-		// 清除激活：从系统 PATH 移除旧版本 bin
+		// 清除激活：从系统 PATH 移除旧版本 bin（含运行时额外目录），并清除额外环境变量
 		if prev != "" && scopeOf(prev) != "system" {
-			_ = sysUnregisterPath(binOf(prev))
+			m.unregisterRuntimePaths(rt, prev)
 		}
+		m.applyActiveEnvVars(rt, "")
 	} else if version != prev {
 		// 设置/切换激活：先写入新版本 bin，再移除旧版本
 		if scopeOf(version) != "system" {
-			if e := sysRegisterPath(binOf(version)); e != nil {
-				return fmt.Errorf("写入系统环境变量失败: %w", e)
+			if e := m.registerRuntimePaths(rt, version); e != nil {
+				return e
 			}
 		}
 		if prev != "" && scopeOf(prev) != "system" {
-			_ = sysUnregisterPath(binOf(prev))
+			m.unregisterRuntimePaths(rt, prev)
 		}
+		// 同步版本专属的环境变量，使终端里直接执行 go 也命中该版本配置
+		m.applyActiveEnvVars(rt, version)
 	}
 	return writeActiveMeta(rt, version)
 }
@@ -558,8 +672,10 @@ func (m *Manager) UnsetActive(rt Runtime, version string) error {
 	}
 	scope := m.scopeFor(rt, version)
 	if scope != "system" {
-		_ = sysUnregisterPath(m.exeDirFor(rt, version))
+		m.unregisterRuntimePaths(rt, version)
 	}
+	// 一并清除该运行时此前写入的额外用户级环境变量（如 Go 的版本专属 GOPATH/GOENV）
+	m.applyActiveEnvVars(rt, "")
 	return writeActiveMeta(rt, "")
 }
 

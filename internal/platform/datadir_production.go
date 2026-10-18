@@ -7,13 +7,19 @@ import (
 	"path/filepath"
 )
 
-// DefaultDataDir 返回正式版数据目录 (~/.quickdock)
-func DefaultDataDir() string {
+// defaultDataDirFallback 返回正式版的默认数据目录（~/.quickdock）。
+// 仅当未配置自定义覆盖（见 datadir_override.go）时生效。
+func defaultDataDirFallback() string {
 	home, _ := os.UserHomeDir()
 	if home == "" {
 		return ".quickdock"
 	}
 	return filepath.Join(home, ".quickdock")
+}
+
+// DefaultDataDir 返回最终生效的数据目录（可能已被自定义覆盖）。
+func DefaultDataDir() string {
+	return resolveDataDir()
 }
 
 // DefaultConfigDir 返回正式版配置目录 (%APPDATA%\QuickDock)

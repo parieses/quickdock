@@ -7,7 +7,6 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
-	"sync/atomic"
 	"time"
 
 	"quickdock/internal/logger"
@@ -21,7 +20,8 @@ import (
 //
 // 抓屏、框选、工具条、标注全部在 internal/screenshot 的同一个原生分层窗口里完成
 // （Windows 侧自绘，不用 Wails 的 WebView 窗口——见该包注释，闪屏根因在那里）。
-// 本文件只负责宿主侧编排：收起自身窗口 → 交给覆盖层 → 按用户选的动作复制或保存。
+// 本文件只负责宿主侧编排：交给覆盖层 → 按用户选的动作复制或保存。
+// 截图期间不收起自身窗口（见 CaptureSelection 说明）。
 //
 // 覆盖层不再弹出第二个标注窗口：工具条与标注图形都和框选共用同一张 DIB，
 // 因此「框选完工具条出现」这个动作本身也不会有任何闪动。
@@ -61,8 +61,15 @@ func InitScreenshotPins(app *application.App) {
 // ScreenshotSupported 报告当前平台是否具备截图能力（darwin / linux 为 false）。
 func ScreenshotSupported() bool { return screenshotOverlay != nil }
 
-// CaptureSelection 触发一次区域截图：收起自身窗口 → 抓屏 → 框选/标注 →
+// CaptureSelection 触发一次区域截图：抓屏 → 框选/标注 →
 // 按用户在工具条上选的动作复制到剪贴板或弹出保存对话框。
+//
+// 设计：截图期间**不隐藏**宿主窗口与插件窗口，截完也**不恢复/抢焦点**。
+// 即软件本体与各插件窗口的可见性与焦点保持原样，避免「截图时最小化、截完又弹出」
+// 的打断感——满足「F1 截图不打扰当前窗口布局」的诉求。
+// 代价：若软件窗口当时正显示在屏幕上，会一并被截进图片（与干净的「纯桌面」截图不同）。
+// 若日后想要「既不动窗口、又能截出干净桌面」，可改为对自有窗口设置
+// SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)，让它们「可见但被捕获排除」。
 //
 // 用户取消时 width/height 为 0 且 Code 仍为 0（取消不是错误）。
 //
@@ -73,10 +80,7 @@ func (a *AppService) CaptureSelection() *ApiResult {
 		return FailMsg("截图功能当前不可用")
 	}
 
-	restore := a.hideForCapture()
 	res, err := screenshot.Select(screenshotOverlay)
-	// 覆盖层收起后才轮到保存对话框，宿主窗口必须先回到屏幕。
-	restore()
 
 	if err != nil {
 		return Fail(err)
@@ -146,79 +150,4 @@ func saveImageDialog(app *application.App, img image.Image) (string, error) {
 	}
 	logger.I("[screenshot] 已保存到 %s", path)
 	return path, nil
-}
-
-// hideForCapture 临时收起会遮挡截图的宿主窗口，返回恢复函数。
-//
-// 与 plugin_host.go 的 host.window.hide 同源思路（那个是给屏幕取色用的）：
-// 只隐藏原本可见的窗口、恢复时也只还原它们，避免截图后误弹出原本隐藏的窗口；
-// 同时同步 WindowFlags，防止热键 toggle 与实际可见性错位。
-//
-// ⚠️ 两个必守的点（都踩过）：
-//  1. WindowFlags 必须**成对**改。原先只在隐藏时置 false、恢复时不置回 true，
-//     结果命令面板这类「本来就开着」的窗口截图后会变成「显示一个已显示的窗口」，
-//     再按面板热键看着像没反应。
-//  2. 独立插件窗口（「在窗口中打开」模式）同样会遮挡截图，必须一并收起——
-//     它不归主窗口/浮窗的候选列表管，走 PluginWindowMgr。
-func (a *AppService) hideForCapture() func() {
-	// 每个被隐藏的窗口配上它对应的可见性标志，恢复时成对还原。
-	type hiddenWin struct {
-		w    *application.WebviewWindow
-		flag *atomic.Bool
-	}
-	var mainFlag, clipFlag, palFlag, noteFlag *atomic.Bool
-	if a.Flags != nil {
-		mainFlag = &a.Flags.Main
-		clipFlag = &a.Flags.Clipboard
-		palFlag = &a.Flags.Palette
-		noteFlag = &a.Flags.Note
-	}
-
-	var hidden []hiddenWin
-	hide := func(w *application.WebviewWindow, flag *atomic.Bool) {
-		if w == nil || !w.IsVisible() {
-			return
-		}
-		w.Hide()
-		if flag != nil {
-			flag.Store(false)
-		}
-		hidden = append(hidden, hiddenWin{w: w, flag: flag})
-	}
-
-	hide(a.MainWindow, mainFlag)
-	if a.GetClipboardWindow != nil {
-		hide(a.GetClipboardWindow(), clipFlag)
-	}
-	if a.GetPaletteWindow != nil {
-		hide(a.GetPaletteWindow(), palFlag)
-	}
-	if a.GetNoteWindow != nil {
-		hide(a.GetNoteWindow(), noteFlag)
-	}
-
-	var pluginIDs []string
-	if a.PluginWindowMgr != nil {
-		pluginIDs = a.PluginWindowMgr.HideAllVisibleForCapture()
-	}
-
-	if len(hidden) == 0 && len(pluginIDs) == 0 {
-		return func() {}
-	}
-
-	// Hide 是异步的：窗口过程要再跑一轮才真正从屏幕消失。抓屏紧随其后，
-	// 必须给桌面留出重绘时间，否则仍会把窗口残影拍进截图。
-	time.Sleep(180 * time.Millisecond)
-
-	return func() {
-		for _, h := range hidden {
-			h.w.Show()
-			if h.flag != nil {
-				h.flag.Store(true)
-			}
-		}
-		if a.PluginWindowMgr != nil {
-			a.PluginWindowMgr.RestoreAfterCapture(pluginIDs)
-		}
-	}
 }
