@@ -269,7 +269,16 @@ func (a *AppService) checkScheduledTasks() {
 					logger.E("QuickDock: schedule runner panic: %v", r)
 				}
 			}()
+			startedAt := time.Now()
 			status, result := a.executeTask(t)
+			// 执行结果原先只写进 DB 的 run result 字段，日志里毫无痕迹——
+			// 用户问「定时任务怎么没执行」时无法判断是没触发还是触发了但失败。
+			if status == "ok" {
+				logger.I("[schedule] 任务「%s」执行成功 耗时=%v", t.Name, time.Since(startedAt).Round(time.Millisecond))
+			} else {
+				logger.W("[schedule] 任务「%s」执行失败 status=%s 耗时=%v: %s",
+					t.Name, status, time.Since(startedAt).Round(time.Millisecond), logger.Trunc(result, 200))
+			}
 
 			// 计算下次运行时间与启用状态：用「任务完成时刻」而非循环开头的陈旧 now，
 			// 否则慢任务（HTTP 阻塞 30s / command·open 挂起）执行耗时 ≥ 间隔时，写入的

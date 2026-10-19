@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"regexp"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // baseTables 所有表结构（首次初始化时全部创建）
@@ -446,10 +448,20 @@ func (d *Database) migrate() error {
 		// 打开条目时把对应版本 bin 前置到子进程 PATH（项目级版本切换）
 		{"items", "env", "TEXT DEFAULT ''"},
 	}
+	var addedCols []string
 	for _, m := range columnMigrations {
-		if err := d.addColumnIfMissing(m.table, m.col, m.colType); err != nil {
-			return err
+		added, aerr := d.addColumnIfMissing(m.table, m.col, m.colType)
+		if aerr != nil {
+			return aerr
 		}
+		if added {
+			addedCols = append(addedCols, m.table+"."+m.col)
+		}
+	}
+	// 只有旧库升级才会补齐列：留痕可确认「新版本字段是否真的落到用户库」，
+	// 正常启动不产生日志（避免每次开机刷屏）。
+	if len(addedCols) > 0 {
+		logger.I("[db] 旧库结构升级：补齐 %d 个缺失列 %v", len(addedCols), addedCols)
 	}
 
 	// 数据迁移：notes 用 keyword 回填 name（幂等；旧 snippets 表已重命名为 notes）
@@ -504,22 +516,23 @@ func (d *Database) migrate() error {
 
 // addColumnIfMissing 为已有表安全新增列（幂等）。
 // table/col 均为代码内置常量，非用户输入，故直接拼接 SQL（pragma 表名无法参数化）。
-func (d *Database) addColumnIfMissing(table, col, colType string) error {
+func (d *Database) addColumnIfMissing(table, col, colType string) (bool, error) {
 	var count int
 	if err := d.conn.QueryRow(
 		`SELECT COUNT(*) FROM pragma_table_info('`+table+`') WHERE name = ?`, col,
 	).Scan(&count); err != nil {
-		return fmt.Errorf("检查列 %s.%s 失败: %w", table, col, err)
+		return false, fmt.Errorf("检查列 %s.%s 失败: %w", table, col, err)
 	}
 	if count == 0 {
 		if err := validateColumnType(colType); err != nil {
-			return err
+			return false, err
 		}
 		if _, err := d.conn.Exec(`ALTER TABLE ` + table + ` ADD COLUMN ` + col + ` ` + colType); err != nil {
-			return fmt.Errorf("新增列 %s.%s 失败: %w", table, col, err)
+			return false, fmt.Errorf("新增列 %s.%s 失败: %w", table, col, err)
 		}
+		return true, nil
 	}
-	return nil
+	return false, nil
 }
 
 // tableExists 判断表是否存在（用于幂等迁移，如 snippets→notes 重命名）。

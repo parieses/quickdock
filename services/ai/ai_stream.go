@@ -134,6 +134,8 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	cfg, okp := s.svc.getActiveAIProfile()
 	if !okp || cfg.APIKey == "" {
+		// 用户报「AI 不回话」时，最常见原因就是没配 Key；这条必须留痕。
+		logger.W("[ai] 请求被拒：未配置 API Key（conv=%s mode=%s）", convID, mode)
 		s.writeSSE(w, flusher, "error", map[string]string{"message": "请在设置中配置 API Key"})
 		return
 	}
@@ -178,6 +180,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	// 模型回复后统一落库两条消息，避免重复。
 	messages, err := s.svc.buildAIMessages(ctx, cfg, convID, mode, message)
 	if err != nil {
+		logger.W("[ai] 组装上下文失败 conv=%s mode=%s: %v", convID, mode, err)
 		s.writeSSE(w, flusher, "error", map[string]string{"message": err.Error()})
 		return
 	}
@@ -220,13 +223,18 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	saveBoth := func(asst string) {
 		asst = strings.TrimSpace(asst)
 		if asst == "" {
+			// 模型成功返回但内容为空（上游限流/工具调用/内容过滤都可能）：
+			// 前端只看到「无回复」，此处留痕才能区分是模型没说话还是落库失败。
+			logger.W("[ai] 模型未产出内容，跳过落库 conv=%s mode=%s", convID, mode)
 			return
 		}
 		if _, e := s.svc.App.DB.AddAIMessage(convID, "user", message); e != nil {
+			logger.W("[ai] 保存用户消息失败 conv=%s: %v", convID, e)
 			s.writeSSE(w, flusher, "error", map[string]string{"message": e.Error()})
 			return
 		}
 		if _, e := s.svc.App.DB.AddAIMessageFull(convID, "assistant", asst, reasoningBuf.String()); e != nil {
+			logger.W("[ai] 保存助手回复失败 conv=%s: %v", convID, e)
 			s.writeSSE(w, flusher, "error", map[string]string{"message": e.Error()})
 		}
 	}

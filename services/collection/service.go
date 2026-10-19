@@ -3,6 +3,7 @@ package collection
 
 import (
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -77,6 +78,9 @@ func (s *CollectionService) OpenItem(item db.CollectionItem) *services.ApiResult
 		return r
 	}
 	if err := s.App.DB.OpenItem(&item); err != nil {
+		// Fail() 只带 err 与调用点，排障时看不出是哪个条目打不开；
+		// 这里补一条带条目身份的 W（不记 Value，可能是含敏感信息的命令/URL）。
+		logger.W("打开条目失败 name=%q type=%s id=%s: %v", item.Name, item.Type, item.ID, err)
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -88,6 +92,7 @@ func (s *CollectionService) OpenAllInCollection(collectionID string) *services.A
 		return r
 	}
 	if err := s.App.DB.OpenAllInCollection(collectionID); err != nil {
+		logger.W("批量打开集合失败 collection=%s: %v", collectionID, err)
 		return services.Fail(err)
 	}
 	return services.Ok(nil)

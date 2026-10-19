@@ -9,11 +9,24 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 )
 
 func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []map[string]interface{}, convID string, onToken func(text string), onReasoning func(text string), onUsage func(promptTokens, completionTokens int)) (string, error) {
+	// 链路日志只记「元数据」（模型/条数/耗时/用量），绝不记消息正文——
+	// AI 对话可能含用户隐私，日志要能排障但不能泄密。
+	startedAt := time.Now()
+	var firstTokenAt time.Duration // 首字延迟：判断「慢」是上游排队还是本地处理的关键
+	var usageIn, usageOut int
+	logDone := func(outLen int) {
+		logger.I("[ai] 完成 model=%s conv=%s 耗时=%v 首字=%v 输出=%d字 tokens=%d/%d",
+			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond),
+			firstTokenAt.Round(time.Millisecond), outLen, usageIn, usageOut)
+	}
+
 	body := map[string]interface{}{
 		"model":          cfg.Model,
 		"messages":       messages,
@@ -54,13 +67,18 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	req.Header.Set("Cache-Control", "no-store")
 
 	client := a.aiHTTPClient
+	logger.I("[ai] 请求 model=%s provider=%s conv=%s messages=%d", cfg.Model, cfg.Provider, convID, len(messages))
 	resp, err := client.Do(req)
 	if err != nil {
+		logger.E("[ai] 请求失败 model=%s conv=%s 耗时=%v: %v",
+			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), err)
 		return "", err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		eb, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		logger.E("[ai] 上游返回异常 model=%s conv=%s status=%d body=%s",
+			cfg.Model, convID, resp.StatusCode, logger.Trunc(string(eb), 300))
 		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(eb)))
 	}
 
@@ -70,6 +88,8 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():
+			logger.I("[ai] 已取消 model=%s conv=%s 耗时=%v 已输出=%d字",
+				cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), len([]rune(sb.String())))
 			return sb.String(), ctx.Err()
 		default:
 		}
@@ -98,8 +118,11 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
-		if chunk.Usage != nil && onUsage != nil {
-			onUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens)
+		if chunk.Usage != nil {
+			usageIn, usageOut = chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens
+			if onUsage != nil {
+				onUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens)
+			}
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -107,6 +130,9 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		content := chunk.Choices[0].Delta.Content
 		reasoning := chunk.Choices[0].Delta.ReasoningContent
 		if content != "" {
+			if firstTokenAt == 0 {
+				firstTokenAt = time.Since(startedAt)
+			}
 			sb.WriteString(content)
 			if onToken != nil {
 				onToken(content)
@@ -117,9 +143,13 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		}
 	}
 	if err := scanner.Err(); err != nil {
+		logger.E("[ai] 流读取中断 model=%s conv=%s 耗时=%v 已输出=%d字: %v",
+			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), len([]rune(sb.String())), err)
 		return sb.String(), err
 	}
-	return sb.String(), nil
+	out := sb.String()
+	logDone(len([]rune(out)))
+	return out, nil
 }
 
 // buildAIMessages 组装发送给模型的消息列表，并自动执行摘要压缩

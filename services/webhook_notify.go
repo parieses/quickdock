@@ -89,7 +89,7 @@ func (a *AppService) TestWebhook(kind, url string) *ApiResult {
 	return OkMsg(nil, "发送成功")
 }
 
-// sendWebhookNotify 向所有已配置的机器人异步推送通知（best-effort，失败静默）。
+// sendWebhookNotify 向所有已配置的机器人异步推送通知（best-effort，单渠道失败不影响其它渠道）。
 // 用于监控状态翻转等事件通知。
 func (a *AppService) sendWebhookNotify(title, body string) {
 	cfg := a.loadWebhookConfig()
@@ -101,14 +101,23 @@ func (a *AppService) sendWebhookNotify(title, body string) {
 		{"pushplus", cfg.PushPlus},
 		{"telegram", cfg.Telegram},
 	}
+	sent := 0
 	for _, tg := range targets {
 		if strings.TrimSpace(tg.url) == "" {
 			continue
 		}
+		sent++
 		go func(kind, url string) {
 			defer logger.RecoverPanic("webhook:" + kind)
-			_ = postWebhook(kind, url, title, body)
+			// 原实现完全吞掉错误：配置写错 / 被限流 / 机器人被移出群时，用户只看到
+			// 「没收到通知」，日志里毫无线索。best-effort 仍要留一条 W。
+			if err := postWebhook(kind, url, title, body); err != nil {
+				logger.W("[webhook] %s 通知发送失败: %v", kind, err)
+			}
 		}(tg.kind, tg.url)
+	}
+	if sent == 0 {
+		logger.W("[webhook] 通知未发送：未配置任何通知渠道（标题=%s）", title)
 	}
 }
 
