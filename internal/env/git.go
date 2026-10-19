@@ -299,12 +299,23 @@ func (g *GitRuntime) detectSSH() GitSSHInfo {
 
 	home, _ := os.UserHomeDir()
 	keyDir := filepath.Join(home, ".ssh")
-	for _, name := range []string{"id_rsa", "id_ed25519", "id_ecdsa", "id_dsa", "id_ed25519_sk", "id_ecdsa_sk"} {
-		p := filepath.Join(keyDir, name)
-		if _, err := os.Stat(p); err == nil {
-			ssh.KeyExists = true
-			ssh.KeyPath = p
-			break
+	// 扫描 ~/.ssh 下所有 id_* 私钥文件（不再局限于标准命名，兼容 id_ed25519_quickdock 等自定义名）。
+	// 排除 .pub 公钥，并通过文件内容是否含 "PRIVATE KEY" 进一步确认是真实私钥而非其他文件。
+	if entries, err := os.ReadDir(keyDir); err == nil {
+		for _, e := range entries {
+			if e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if !strings.HasPrefix(name, "id_") || strings.HasSuffix(name, ".pub") {
+				continue
+			}
+			p := filepath.Join(keyDir, name)
+			if data, rerr := os.ReadFile(p); rerr == nil && strings.Contains(string(data), "PRIVATE KEY") {
+				ssh.KeyExists = true
+				ssh.KeyPath = p
+				break
+			}
 		}
 	}
 	if !ssh.KeyExists {
