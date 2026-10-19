@@ -18,7 +18,7 @@ func (o *Overlay) Start() error { return ErrUnsupported }
 func (o *Overlay) Stop() {}
 
 // Show 立即以「用户取消」结束本次会话。
-func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome) {
+func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome, _ launchStats) {
 	select {
 	case result <- outcome{}:
 	default:

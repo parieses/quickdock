@@ -41,6 +41,8 @@ var (
 	procPostMessageW        = user32.NewProc("PostMessageW")
 	procSetCapture          = user32.NewProc("SetCapture")
 	procReleaseCapture      = user32.NewProc("ReleaseCapture")
+	procSetTimer            = user32.NewProc("SetTimer")
+	procKillTimer           = user32.NewProc("KillTimer")
 	procSetCursor           = user32.NewProc("SetCursor")
 	procLoadCursorW         = user32.NewProc("LoadCursorW")
 	procGetAsyncKeyState    = user32.NewProc("GetAsyncKeyState")
@@ -48,7 +50,11 @@ var (
 	procGetDC               = user32.NewProc("GetDC")
 	procReleaseDC           = user32.NewProc("ReleaseDC")
 	procUpdateLayeredWindow = user32.NewProc("UpdateLayeredWindow")
-	procDrawTextW           = user32.NewProc("DrawTextW")
+
+	// 局部提交用：UpdateLayeredWindowIndirect + ULW_EX_NORESIZE + prcDirty
+	// 只更新脏区，且不改窗口尺寸/位置（见 overlay_windows.go 的 flushDirty）。
+	procUpdateLayeredWindowIndirect = user32.NewProc("UpdateLayeredWindowIndirect")
+	procDrawTextW                   = user32.NewProc("DrawTextW")
 
 	// 工具条 / 弹出面板避让任务栏（toolbar_windows.go 的 clientWorkArea）用。
 	// 任务栏是工作区之外的应用栏，只有取到 MONITORINFO.rcWork 才知道它占了哪条边。
@@ -205,6 +211,10 @@ const (
 	ulwAlpha   = 0x00000002
 	acSrcOver  = 0
 	acSrcAlpha = 1
+
+	// ulwExNoResize 是 UPDATELAYEREDWINDOWINFO.dwFlags 的扩展位：
+	// 配合 prcDirty 做局部提交，不改窗口尺寸与位置。
+	ulwExNoResize = 0x00000008
 )
 
 // SetLayeredWindowAttributes
@@ -267,6 +277,7 @@ const (
 	wmMouseWheel    = 0x020A
 	wmKeyDown       = 0x0100
 	wmKeyUp         = 0x0101
+	wmTimer         = 0x0113
 	wmSetFocus      = 0x0007
 	wmKillFocus     = 0x0008
 	wmSetFont       = 0x0030
@@ -366,6 +377,26 @@ type pointStruct struct{ X, Y int32 }
 
 // rectStruct 对应 Win32 RECT。
 type rectStruct struct{ Left, Top, Right, Bottom int32 }
+
+// updateLayeredWindowInfo 对应 Win32 UPDATELAYEREDWINDOWINFO。
+//
+// 局部提交的实测契约（见 2026-10-19 的探针记录）：
+//   - DwFlags 必须带 ulwExNoResize，否则 psize 会把窗口改成脏区大小；
+//   - PptDst/Psize 仍然**必须**填窗口的完整位置与尺寸，置 nil 会导致调用成功
+//     但画面不更新（返回值照样是 TRUE，非常坑）；
+//   - PrcDirty 用客户区坐标，只有这块会被搬运，其余像素保持原样。
+type updateLayeredWindowInfo struct {
+	CbSize   uint32
+	HdcDst   uintptr
+	PptDst   *pointStruct
+	Psize    *pointStruct
+	HdcSrc   uintptr
+	PptSrc   *pointStruct
+	CrKey    uint32
+	Pblend   *blendFunction
+	DwFlags  uint32
+	PrcDirty *rectStruct
+}
 
 // monitorInfoW 对应 Win32 MONITORINFO。
 // CbSize 必须由调用方填 sizeof(MONITORINFO)，否则 GetMonitorInfoW 直接失败。

@@ -5,14 +5,22 @@ package screenshot
 import (
 	"fmt"
 	"math"
+	"os"
 	"runtime"
 	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"quickdock/internal/logger"
 )
+
+// forceFullFrame 让每一帧都整帧重绘 + 整帧提交。
+//
+// 脏矩形是纯性能优化，任何机器上出现「残影 / 画面不刷新」的怀疑时，设
+// QD_SHOT_FULL=1 就能退回最保守的老路径，用来快速判断问题是不是它引起的。
+var forceFullFrame = os.Getenv("QD_SHOT_FULL") == "1"
 
 // 覆盖整个虚拟桌面的原生分层窗口，承载「框选 → 工具条 → 标注 → 导出」全流程。
 //
@@ -53,10 +61,45 @@ type Overlay struct {
 	hFont      uintptr
 	pixels     unsafe.Pointer
 	dibPix     []byte // 提交给窗口的整帧像素
+	dibW, dibH int    // 当前 DIB 的尺寸（判断能否跨会话复用）
 	base       []byte // 截图 + 暗化的预合成底图
 	src        *Bitmap
 	bounds     Rect
 	resultCh   chan outcome
+
+	// 合帧：鼠标消息只更新状态，出帧由 requestFrame 按预算调度。
+	frameDue   bool      // 有未提交的画面变更
+	frameTimer bool      // 定时器已挂，别重复挂
+	lastFrame  time.Time // 上一帧开始绘制的时刻（预算基准）
+
+	// 脏矩形：上一帧实际落笔的范围（见 footprint），下一帧只需还原 + 重提交这
+	// 些区域。paintKnown 为 false 表示范围无法枚举（或刚开新会话），下一帧必须
+	// 整帧重绘。
+	paintLast  [maxPaintRects]Rect
+	paintLastN int
+	paintKnown bool
+
+	// 帧耗时统计：每次会话结束打一行日志。「拖框卡不卡」是主观感受，没有这行
+	// 数字就只能靠猜——平均帧耗时和整帧比例能直接区分「帧太贵」和「出帧太少」。
+	profFrames int
+	profFull   int
+	profNanos  int64
+	profMax    int64
+	// 分段耗时与提交块数。三者之和约等于单帧耗时，用它定位瓶颈：
+	// 提交贵 → 减少提交块数；绘制贵 → 缓存工具条；还原贵 → 换架构。
+	profRestore int64
+	profDraw    int64
+	profFlush   int64
+	profRects   int
+
+	// 启动准备耗时。与逐帧统计分开记：这段是「按下热键 → 看见遮罩」的一次性
+	// 成本，抓屏一项就比整帧贵一个数量级，混进帧均值会把逐帧优化的效果完全盖住。
+	// 拆成四段是为了让「按 F1 那一下的迟滞」能直接定位到抓屏、暗化还是首帧绘制。
+	launch         launchStats
+	profPrepare    time.Duration // 建/复用 DIB 等绘制资源
+	profCompose    time.Duration // 截图暗化合成底图
+	profFirstPaint time.Duration // 首帧绘制 + 提交
+	profVisible    time.Duration // 热键 → 窗口可见（含上面全部）
 
 	// 会话状态
 	phase    phase
@@ -125,6 +168,7 @@ type overlayCmd struct {
 	src      *Bitmap
 	bounds   Rect
 	resultCh chan outcome
+	launch   launchStats
 }
 
 type phase uint8
@@ -163,6 +207,42 @@ const (
 	// historyLimit 是撤销栈深度上限。图形是小结构体，60 步只占几 KB，
 	// 足够覆盖一次截图会话里的全部操作。
 	historyLimit = 60
+
+	// timerFrame 是合帧定时器的 id。
+	timerFrame = 1
+
+	// frameBudget 是一帧的时间预算：只用它决定「这次鼠标移动要不要立刻画」，
+	// 与 WM_TIMER 的系统时钟粒度无关（见 requestFrame）。
+	frameBudget = 6 * time.Millisecond
+
+	// maxPaintRects 是一帧的落笔矩形上限。单帧最多 8 条（选区、尺寸提示、两条
+	// 辅助线、工具条、面板、图形提示），而脏区是「上一帧 ∪ 这一帧」，所以要给到
+	// 两倍余量；再超就整帧重绘兜底。
+	maxPaintRects = 16
+
+	// 提交与还原的成本模型，来自 1920×1080 **可见**分层窗口上的实测拟合
+	// （隐藏窗口测出来偏低，别用那组数）：
+	//
+	//   逐块提交 dirty 25%  0.996ms / 50% 1.742ms / 75% 2.673ms / 100% 3.064ms
+	//   三条窄条（十字线 + 提示）合计 0.529ms，四条 0.577ms
+	//   整屏还原（memcpy 8MB）1.1–1.7ms
+	//
+	// 拟合结果：一次 UpdateLayeredWindow ≈ 0.2ms 固定 + 1.45ms/百万像素。
+	// 固定项小、面积项大 —— 这跟「提交次数才是最贵的」直觉相反，实测是
+	// 「多提交一块只多 0.2ms，多搬 1 百万像素要多 1.45ms」。
+	// 换到 4K 时面积项涨 4 倍、固定项不变，所以路径选择必须用模型算，
+	// 不能写死百分比（当初那个 55% 在 4K 上必然判错）。
+	flushCallMs     = 0.2
+	flushPerMpxMs   = 1.45
+	restorePerMpxMs = 0.68
+
+	// dirtyHardLimitPercent 是硬上限：脏区超过它就一律整帧，兜住模型失准的情况
+	// （比如某台机器上局部提交特别贵）。
+	dirtyHardLimitPercent = 92
+
+	// coalesceWastePercent 是合并脏矩形时允许的「空搬」比例：包围盒面积不超过
+	// 两块面积之和的 (100+这个值)%。相交或紧邻的矩形远低于它，隔着半屏的不会合并。
+	coalesceWastePercent = 40
 )
 
 // colSelBorder 是选区边框/控制点描边色（BGR 顺序的 #0078D7）。
@@ -190,7 +270,7 @@ func (o *Overlay) Start() error {
 
 // Show 显示覆盖层并把会话结果写入返回的 channel。
 // 用户取消或选区无效时，channel 收到零值 outcome。
-func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome) {
+func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome, launch launchStats) {
 	// 连按热键时挡掉重复请求：正在用就以「取消」立刻返回，
 	// 不打断已显示的那一次。
 	if !o.showing.CompareAndSwap(false, true) {
@@ -208,7 +288,7 @@ func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome) {
 		return
 	}
 
-	o.cmdCh <- &overlayCmd{src: src, bounds: bounds, resultCh: result}
+	o.cmdCh <- &overlayCmd{src: src, bounds: bounds, resultCh: result, launch: launch}
 	procPostMessageW.Call(hwnd, wmOverlayShow, 0, 0)
 }
 
@@ -308,15 +388,21 @@ func (o *Overlay) handleShow(cmd *overlayCmd) {
 	o.src = cmd.src
 	o.bounds = cmd.bounds
 	o.resultCh = cmd.resultCh
+	o.launch = cmd.launch
 	o.hideTextInput()
 	o.resetSession()
 
 	// 2. 建绘制资源 + 预合成暗化底图（一次性开销，不参与逐帧重绘）。
+	tPrepare := time.Now()
 	if !o.prepareDraw() {
 		o.cancel()
 		return
 	}
+	o.profPrepare = time.Since(tPrepare)
+
+	tCompose := time.Now()
 	o.composeBase()
+	o.profCompose = time.Since(tCompose)
 
 	// 3. 位置尺寸在显示之前定死，避免先显示再 resize 造成的"跳一下"。
 	procSetWindowPos.Call(o.hwnd, hwndTopmost,
@@ -324,10 +410,18 @@ func (o *Overlay) handleShow(cmd *overlayCmd) {
 		uintptr(o.bounds.W), uintptr(o.bounds.H), 0)
 
 	// 4. 把像素全部画完——此刻窗口仍不可见，用户看不到任何中间态。
+	tPaint := time.Now()
 	o.redraw()
+	o.profFirstPaint = time.Since(tPaint)
 
 	// 5. 再显示：UpdateLayeredWindow 已把整帧内容提交，Show 落下一帧到位。
 	procShowWindow.Call(o.hwnd, swShow)
+
+	// 首帧可见口径：热键 → ShowWindow 返回。比 ms 更精细的抖动没有意义，
+	// 这里只关心「抓屏是不是占了大头」这种量级问题。
+	if !o.launch.started.IsZero() {
+		o.profVisible = time.Since(o.launch.started)
+	}
 
 	// 6. 抢焦点以接收 Esc 与快捷键。
 	procSetForegroundWindow.Call(o.hwnd)
@@ -358,6 +452,15 @@ func (o *Overlay) resetSession() {
 	o.workMon, o.work = 0, Rect{} // 工作区缓存随会话失效（显示器可能变过）
 	o.mouseX, o.mouseY = -1, -1
 	o.mouseIn = false
+	// 预算基准清零：上一轮的时间戳与这一次无关，留着会让首帧白等一个预算。
+	o.lastFrame = time.Time{}
+	o.frameDue = false
+	// 启动统计是本轮的量测输出，随会话开始一并清零；launch 是 Select 传进来的
+	// 输入，由 handleShow 单独赋值，刻意不在这里动。
+	o.profVisible, o.profPrepare, o.profCompose, o.profFirstPaint = 0, 0, 0, 0
+	// DIB 里还是上一轮的内容（甚至是第一次使用的垃圾页），首帧必须整帧重绘。
+	o.paintKnown = false
+	o.paintLastN = 0
 }
 
 // finishWith 结束会话并按 action 交付结果。
@@ -397,12 +500,18 @@ func (o *Overlay) deliver(res outcome) {
 }
 
 // finish 隐藏覆盖层并释放本轮的位图引用。
+//
+// 刻意**不**释放 DIB 与 base：下一张截图会拿到同样尺寸的画布，重建 DIB 是一次
+// VirtualAlloc + 逐页缺页中断，base 是一次 8MB 分配（4K 下 33MB），连着截几张图
+// 时这笔钱每张都要付一遍。代价是停留时多占 16MB 内存（1080p），对桌面工具可接受，
+// 真正的清理放在消息泵退出（messageLoop 里的 releaseDraw）。
 func (o *Overlay) finish() {
 	procShowWindow.Call(o.hwnd, swHide)
 	o.hideTextInput()
-	o.releaseDraw()
+	o.logFrameStats()
+	o.logLaunchStats()
 	o.src = nil
-	o.base = nil
+	o.frameDue = false
 	o.shapes = o.shapes[:0]
 	o.history = o.history[:0]
 	o.future = o.future[:0]
@@ -427,7 +536,15 @@ func (o *Overlay) selAbs() Rect {
 // ===== 绘制资源 =====
 
 // prepareDraw 建 32bpp top-down DIB 与提示文字字体。
+//
+// 尺寸与上一轮相同时直接复用已有资源：建 DIB 要一次 VirtualAlloc，首帧往里写像素
+// 还要逐页触发缺页中断（1080p 8MB / 4K 33MB），这是「按 F1 后那一下」里除了抓屏
+// 之外最容易被忽略的一段固定开销。显示器分辨率变了才重建。
 func (o *Overlay) prepareDraw() bool {
+	if o.hMemDC != 0 && o.hBitmap != 0 && o.dibPix != nil &&
+		o.dibW == o.bounds.W && o.dibH == o.bounds.H {
+		return true
+	}
 	o.releaseDraw()
 
 	hScreenDC, _, _ := procGetDC.Call(0)
@@ -463,6 +580,7 @@ func (o *Overlay) prepareDraw() bool {
 	o.hBitmap = hBitmap
 	o.pixels = pixels
 	o.dibPix = unsafe.Slice((*byte)(pixels), o.bounds.W*o.bounds.H*4)
+	o.dibW, o.dibH = o.bounds.W, o.bounds.H
 
 	o.hOldBitmap, _, _ = procSelectObject.Call(hMemDC, hBitmap)
 
@@ -503,10 +621,14 @@ func (o *Overlay) releaseDraw() {
 	}
 	o.hMemDC, o.hBitmap, o.hOldBitmap, o.hFont = 0, 0, 0, 0
 	o.pixels, o.dibPix = nil, nil
+	o.dibW, o.dibH = 0, 0
 }
 
 // composeBase 把原始截图按 50% 亮度合成到底图，作为每帧重绘的还原起点。
 // 这样逐帧重绘只需要一次 memmove + 选区局部还原，而不是每次全屏逐像素重算。
+//
+// 一趟循环直接「读抓屏结果 → 写底图」，不再先整帧 copy 一遍再原地压暗：
+// 后者要在 8MB 上多走一次读 + 一次写（实测 1.8ms），而压暗本身已经要读源、写目标。
 func (o *Overlay) composeBase() {
 	if o.src == nil {
 		return
@@ -515,15 +637,7 @@ func (o *Overlay) composeBase() {
 	if len(o.base) != n {
 		o.base = make([]byte, n)
 	}
-	copy(o.base, o.src.Pix)
-
-	// 亮度 ×0.5（右移一位）；alpha 保持不透明。
-	for i := 0; i+3 < n; i += 4 {
-		o.base[i] >>= 1
-		o.base[i+1] >>= 1
-		o.base[i+2] >>= 1
-		o.base[i+3] = 0xFF
-	}
+	dimHalf(o.src.Pix, o.base)
 }
 
 // screenPainter 是不带裁剪的画笔：用于选区边框、控制点、尺寸提示、辅助线、工具条。
@@ -539,12 +653,180 @@ func (o *Overlay) shapePainter() *painter {
 
 // ===== 逐帧重绘 =====
 
-func (o *Overlay) redraw() {
-	if o.dibPix == nil || len(o.base) == 0 {
+// frameKey 是「这一帧画面是否可能变了」的廉价指纹。
+//
+// 刻意不含鼠标坐标：坐标只影响两处画面——拖拽中的十字辅助线（拖拽已被下面的
+// drag != dragNone 无条件覆盖）和尺寸提示的位置（跟随选区走）。非拖拽状态下
+// 光标在空白处划来划去，画面一个像素都不会变，也就不该出帧。
+type frameKey struct {
+	phase      phase
+	drag       dragMode
+	sel        Rect
+	snap       Rect
+	snapOK     bool
+	hoverIdx   int
+	selected   int
+	panel      panelID
+	activeTool toolID
+	nShapes    int
+	textActive bool
+}
+
+func (o *Overlay) frameKey() frameKey {
+	return frameKey{
+		phase:      o.phase,
+		drag:       o.drag,
+		sel:        o.sel,
+		snap:       o.snap,
+		snapOK:     o.snapOK,
+		hoverIdx:   o.hoverIdx,
+		selected:   o.selected,
+		panel:      o.panel,
+		activeTool: o.activeTool,
+		nShapes:    len(o.shapes),
+		textActive: o.ti.active,
+	}
+}
+
+// requestFrame 在「预算够就立刻画、不够就排队」两种策略间自适应。
+//
+// 纯同步重绘的问题是帧成本会随分辨率线性上涨：1080p 一帧约 4.6ms（整屏 memcpy +
+// 一次 UpdateLayeredWindow 提交），4K 就是 15ms 以上。125Hz 鼠标每 8ms 来一个移动
+// 消息，帧成本一旦超过 8ms，消息队列必然越积越多，鼠标停下后选区还在追——这才是
+// 「拖框发涩」的根因。
+//
+// 纯定时器合帧则反过来：WM_TIMER 受系统时钟粒度约束（默认 15.6ms），10ms 的定时器
+// 实际按 ~15.6ms 触发，等于给每一次拖拽都白加一拍延迟，框会明显落在光标后面。
+//
+// 所以按实测预算来：距上一帧开始不足 frameBudget 就挂一个补帧定时器，把手里的
+// 变更攒到下一拍；预算够就当场画掉，延迟为零。帧成本低的机器吃到满帧率，4K 或
+// 显卡吃紧的机器自动降级成合帧，两边都不会排队。
+func (o *Overlay) requestFrame() {
+	o.frameDue = true
+	if o.frameTimer {
+		// 已经排了一拍，本次变更会并进那一帧，画面永远画在最新状态上。
+		return
+	}
+	if o.hwnd == 0 {
+		o.frameDue = false
+		o.redraw()
 		return
 	}
 
-	copy(o.dibPix, o.base)
+	if wait := frameWait(o.lastFrame, time.Now()); wait > 0 {
+		ms := uintptr(wait.Milliseconds())
+		if ms == 0 {
+			ms = 1 // SetTimer 传 0 会变成「尽快」，退回同步重绘更可预期
+		}
+		if r, _, _ := procSetTimer.Call(o.hwnd, timerFrame, ms, 0); r != 0 {
+			o.frameTimer = true
+			return
+		}
+		// 定时器建不起来（极小概率，比如消息队列已销毁）就退化成同步重绘：
+		// 宁可慢一点，也不能因为一个 SetTimer 失败就再也不出帧。
+	}
+
+	o.frameDue = false
+	o.redraw()
+}
+
+// frameWait 返回「还差多久才该画下一帧」：0 表示现在就该画。
+// 单独拎出来是为了能脱离窗口直接验证这段预算逻辑。
+func frameWait(last, now time.Time) time.Duration {
+	if last.IsZero() {
+		return 0 // 本次会话还没画过
+	}
+	wait := frameBudget - now.Sub(last)
+	if wait <= 0 {
+		return 0
+	}
+	if wait > frameBudget {
+		// 系统时间被往回拨过：按满预算等，别算出个离谱的间隔。
+		return frameBudget
+	}
+	return wait
+}
+
+// estimatePartialMs 估算「逐块还原 + 逐块提交」这条路径的耗时（毫秒）。
+//
+// 只算脏区的搬运与提交，不含选区回填和绘制——两条路径都要付那部分，不影响比较。
+func estimatePartialMs(dirtyPx, calls int) float64 {
+	mpx := float64(dirtyPx) / 1e6
+	return float64(calls)*flushCallMs + mpx*(flushPerMpxMs+restorePerMpxMs)
+}
+
+// estimateFullMs 估算「整帧还原 + 整帧提交」这条路径的耗时（毫秒）。
+func estimateFullMs(screenPx int) float64 {
+	mpx := float64(screenPx) / 1e6
+	return flushCallMs + mpx*(flushPerMpxMs+restorePerMpxMs)
+}
+
+// onFrameTimer 是合帧定时器的到期处理：一帧只画一次，画完即摘掉定时器。
+func (o *Overlay) onFrameTimer() {
+	procKillTimer.Call(o.hwnd, timerFrame)
+	o.frameTimer = false
+	if !o.frameDue {
+		return
+	}
+	o.frameDue = false
+	o.redraw()
+}
+
+func (o *Overlay) redraw() {
+	if o.dibPix == nil || len(o.base) == 0 || !o.showing.Load() {
+		return
+	}
+	// 直接调用（键盘、工具条点击）说明这一帧已经画出来了，
+	// 挂着的定时器到期后不要再重复画一遍；同时刷新预算基准。
+	o.frameDue = false
+	o.lastFrame = time.Now()
+
+	// 先算这一帧会落到哪些矩形，再算需要「还原 + 重新提交」的集合：
+	// 上一帧的落笔范围 ∪ 这一帧的落笔范围。
+	var curBuf [maxPaintRects]Rect
+	cur, known := o.footprint(curBuf[:0])
+	if len(cur) > maxPaintRects {
+		// 落笔矩形超出上限（正常状态到不了）：记不下完整范围就退化成整帧模式，
+		// 否则被截断的那几块会在下一帧变成残影。
+		known = false
+	}
+
+	var dirtyBuf [2 * maxPaintRects]Rect
+	var dirty []Rect
+	full := forceFullFrame || !known || !o.paintKnown
+	if !full {
+		dirty = unionRects(dirtyBuf[:0], o.paintLast[:o.paintLastN], cur)
+		if len(dirty) == 0 {
+			// 这一帧一个像素都不用改（比如光标在空白处划过、吸附目标没变）。
+			o.paintLastN = copy(o.paintLast[:], cur)
+			return
+		}
+		// 合并「并成一个包围盒几乎不多搬像素」的矩形：拖拽时新旧选框大面积重叠，
+		// 不合并就是两次全尺寸选区提交，白扔一次调用开销。
+		dirty = coalesceRects(dirty, coalesceWastePercent)
+
+		screenPx := o.bounds.W * o.bounds.H
+		dirtyPx := rectsArea(dirty)
+		full = len(dirty) > maxPaintRects ||
+			dirtyPx*100 > screenPx*dirtyHardLimitPercent ||
+			// 用实测成本模型在两条路径之间挑便宜的那个，而不是写死百分比。
+			estimatePartialMs(dirtyPx, len(dirty)) > estimateFullMs(screenPx)
+	}
+
+	// 分段计时：把「还原 / 绘制 / 提交」拆开记进会话统计。三层里哪一层贵，
+	// 决定的下一步完全不一样（提交贵 → 减少提交块数；绘制贵 → 缓存工具条；
+	// 还原贵 → 换架构），别靠猜。注意「绘制」这一段包含 restoreRegion
+	// （把选区回填成未暗化的原图，本质是搬运），看图时要一起算。
+	tRestoreStart := time.Now()
+	if full {
+		// 整帧：一次 memcpy 把整屏还原成暗化底图。
+		copy(o.dibPix, o.base)
+	} else {
+		for _, r := range dirty {
+			o.restoreRect(r)
+		}
+	}
+	tRestored := time.Now()
 
 	// 窗口吸附高亮先画：它在选区之外，会被后面的选区边框/工具条压住是正确的层次。
 	// 拖拽中不画——那会儿用户在做别的事，一个跟着光标跳的窗口框只有干扰。
@@ -605,7 +887,86 @@ func (o *Overlay) redraw() {
 		}
 	}
 
-	o.flush()
+	tDrawn := time.Now()
+	if full {
+		o.flush()
+	} else {
+		for _, r := range dirty {
+			o.flushDirty(r)
+		}
+	}
+	tFlushed := time.Now()
+
+	o.profRestore += int64(tRestored.Sub(tRestoreStart))
+	o.profDraw += int64(tDrawn.Sub(tRestored))
+	o.profFlush += int64(tFlushed.Sub(tDrawn))
+	if full {
+		o.profRects++
+	} else {
+		o.profRects += len(dirty)
+	}
+
+	// 记录这一帧的落笔范围，作为下一帧的还原依据（必须在绘制之后写，
+	// 但用的是绘制前算好的 cur）。
+	o.paintLastN = copy(o.paintLast[:], cur)
+	o.paintKnown = known
+
+	// 统计口径：o.lastFrame 是本帧开始绘制的时刻，差值即整帧成本（含提交）。
+	d := time.Since(o.lastFrame)
+	o.profFrames++
+	o.profNanos += int64(d)
+	if int64(d) > o.profMax {
+		o.profMax = int64(d)
+	}
+	if full {
+		o.profFull++
+	}
+}
+
+// logFrameStats 输出本次会话的帧成本，给「卡不卡」提供可核对的数据。
+func (o *Overlay) logFrameStats() {
+	if o.profFrames == 0 {
+		return
+	}
+	avg := time.Duration(o.profNanos / int64(o.profFrames))
+	n := int64(o.profFrames)
+	logger.I("[screenshot] 本次会话 %d 帧（%d×%d），平均 %v，最大 %v；拆解：还原 %v / 绘制 %v / 提交 %v，平均每次提交 %.1f 块，整帧 %d 次",
+		o.profFrames, o.bounds.W, o.bounds.H,
+		avg.Round(10*time.Microsecond), time.Duration(o.profMax).Round(10*time.Microsecond),
+		time.Duration(o.profRestore/n).Round(10*time.Microsecond),
+		time.Duration(o.profDraw/n).Round(10*time.Microsecond),
+		time.Duration(o.profFlush/n).Round(10*time.Microsecond),
+		float64(o.profRects)/float64(n),
+		o.profFull)
+	o.profFrames, o.profFull, o.profNanos, o.profMax = 0, 0, 0, 0
+	o.profRestore, o.profDraw, o.profFlush, o.profRects = 0, 0, 0, 0
+}
+
+// logLaunchStats 输出「按下热键 → 看见遮罩」这一段的一次性成本。
+//
+// 与帧统计分行打印，理由见 launchStats 的注释。四个分项之和约等于「合计可见」，
+// 差值来自线程投递、SetWindowPos、ShowWindow 这几个短调用，不必再细分。
+//
+// 这张表专治一类误判：用户报「截图很卡」，若不拆开看，很容易把 50ms 的抓屏和
+// 6ms 的逐帧混为一谈，进而在错误的环节上做优化。
+func (o *Overlay) logLaunchStats() {
+	if o.profVisible <= 0 {
+		return
+	}
+	logger.I("[screenshot] 启动（%d×%d）：抓屏 %s（含补 alpha %s）/ 建资源 %s / 暗化 %s / 首帧绘制 %s / 合计可见 %s",
+		o.bounds.W, o.bounds.H,
+		ms(o.launch.capture), ms(o.launch.opaque),
+		ms(o.profPrepare), ms(o.profCompose), ms(o.profFirstPaint), ms(o.profVisible))
+	o.launch = launchStats{}
+	o.profPrepare, o.profCompose, o.profFirstPaint, o.profVisible = 0, 0, 0, 0
+}
+
+// ms 把耗时统一格式化成「0.00ms」。
+//
+// time.Duration.String() 会按量级自动选单位，一行日志里出现 310µs 和 56.99ms
+// 混排时很难横向比较——而这几个数正是拿来比「谁占大头」的，统一单位比省几个字符值。
+func ms(d time.Duration) string {
+	return fmt.Sprintf("%.2fms", float64(d)/float64(time.Millisecond))
 }
 
 // drawTextCaret 在文字锚点画一根插入符标记，高度即当前字号。
@@ -678,9 +1039,33 @@ func (o *Overlay) drawGuides() {
 	}
 }
 
+// sizeHintRect 返回「宽 × 高」提示框的位置与尺寸。
+//
+// 抽出来是为了让 drawSizeHint 与 footprint 共用同一份摆放算法——两处算得不一样，
+// 脏区就会漏掉提示框，屏幕上留下残影。
+func (o *Overlay) sizeHintRect(r Rect) Rect {
+	if r.Empty() {
+		return Rect{}
+	}
+	w := len([]rune(fmt.Sprintf("%d × %d", r.W, r.H)))*8 + hintPadX*2
+	h := hintHeight
+	x := r.X
+	y := r.Y - h - 6
+	if y < 0 {
+		y = r.Y + 6 // 上方放不下就贴选区内部顶边
+	}
+	x = clampInt(x, 0, maxInt(0, o.bounds.W-w))
+	y = clampInt(y, 0, maxInt(0, o.bounds.H-h))
+	return Rect{X: x, Y: y, W: w, H: h}
+}
+
 // drawSizeHint 在选区左上角上方画「宽 × 高」。
 func (o *Overlay) drawSizeHint(r Rect) {
 	if o.hMemDC == 0 {
+		return
+	}
+	box := o.sizeHintRect(r)
+	if box.Empty() {
 		return
 	}
 	text := fmt.Sprintf("%d × %d", r.W, r.H)
@@ -689,17 +1074,8 @@ func (o *Overlay) drawSizeHint(r Rect) {
 		return
 	}
 
-	h := hintHeight
-	w := len([]rune(text))*8 + hintPadX*2
-	x := r.X
-	y := r.Y - h - 6
-	if y < 0 {
-		y = r.Y + 6 // 上方放不下就贴选区内部顶边
-	}
-	x = clampInt(x, 0, maxInt(0, o.bounds.W-w))
-	y = clampInt(y, 0, maxInt(0, o.bounds.H-h))
-
-	box := Rect{X: x, Y: y, W: w, H: h}
+	w, h := box.W, box.H
+	x, y := box.X, box.Y
 	o.screenPainter().fillRoundRect(box, 4, colHintBg)
 
 	if o.hFont != 0 {
@@ -744,7 +1120,10 @@ func (o *Overlay) fixAlpha(r Rect) {
 	}
 }
 
-// flush 把整帧 DIB 提交给分层窗口。
+// flush 把整帧 DIB 提交给分层窗口，同时定住窗口的位置与尺寸。
+//
+// 每个会话的首帧都走这里：UpdateLayeredWindow 会把分层表面按 psize 建好并摆到
+// pptDst，之后 flushDirty 才能在这个表面上做局部更新。
 func (o *Overlay) flush() {
 	ptSrc := pointStruct{X: 0, Y: 0}
 	ptDst := pointStruct{X: int32(o.bounds.X), Y: int32(o.bounds.Y)}
@@ -764,6 +1143,136 @@ func (o *Overlay) flush() {
 		uintptr(unsafe.Pointer(&blend)),
 		ulwAlpha,
 	)
+}
+
+// flushDirty 只把 r 这块提交给分层窗口。
+//
+// 为什么要换 UpdateLayeredWindowIndirect：UpdateLayeredWindow 的 psize 会**改变
+// 窗口尺寸**，直接传脏区大小会把整个覆盖层缩成一小块。带 ULW_EX_NORESIZE 才表示
+// 「尺寸位置按 psize/pptDst 认，但不真的改」，再靠 prcDirty 指定搬运范围。
+//
+// 实测（1080p）：整屏 2.4ms，900×600 只要 0.84ms，64×64 只要 0.125ms。
+func (o *Overlay) flushDirty(r Rect) {
+	if r.Empty() {
+		return
+	}
+	ptSrc := pointStruct{X: 0, Y: 0}
+	ptDst := pointStruct{X: int32(o.bounds.X), Y: int32(o.bounds.Y)}
+	size := pointStruct{X: int32(o.bounds.W), Y: int32(o.bounds.H)}
+	blend := blendFunction{
+		BlendOp:             acSrcOver,
+		SourceConstantAlpha: 255,
+		AlphaFormat:         acSrcAlpha,
+	}
+	dirty := rectStruct{
+		Left:   int32(r.X),
+		Top:    int32(r.Y),
+		Right:  int32(r.X + r.W),
+		Bottom: int32(r.Y + r.H),
+	}
+	info := updateLayeredWindowInfo{
+		CbSize:   uint32(unsafe.Sizeof(updateLayeredWindowInfo{})),
+		PptDst:   &ptDst,
+		Psize:    &size,
+		HdcSrc:   o.hMemDC,
+		PptSrc:   &ptSrc,
+		Pblend:   &blend,
+		DwFlags:  ulwAlpha | ulwExNoResize,
+		PrcDirty: &dirty,
+	}
+	procUpdateLayeredWindowIndirect.Call(o.hwnd, uintptr(unsafe.Pointer(&info)))
+}
+
+// restoreRect 把 r 从暗化底图拷回 DIB。
+//
+// 逐行 memcpy 而不是整块：r 通常是选区那块，行间距与 DIB 步长一致，所以能按行
+// 定位；整块 memcpy 只适用于「从 x=0 开始的整幅」。
+func (o *Overlay) restoreRect(r Rect) {
+	if r.Empty() {
+		return
+	}
+	w := o.bounds.W
+	rowBytes := r.W * 4
+	for y := r.Y; y < r.Y+r.H; y++ {
+		off := (y*w + r.X) * 4
+		copy(o.dibPix[off:off+rowBytes], o.base[off:off+rowBytes])
+	}
+}
+
+// footprint 收集「这一帧可能被写到的像素」。
+//
+// 返回的矩形不需要精确，但必须是 redraw 里所有落笔范围的**超集**：多算只是多搬
+// 一点像素，漏算就会在屏幕上留下上一帧的残影。
+//
+// known=false 表示当前状态无法安全枚举（调用方必须整帧处理）。目前的绘制路径都
+// 能穷举，这个出口是给以后新增绘制元素留的保险。
+func (o *Overlay) footprint(dst []Rect) ([]Rect, bool) {
+	W, H := o.bounds.W, o.bounds.H
+	bounds := Rect{W: W, H: H}
+	add := func(x, y, w, h int) {
+		if r := (Rect{X: x, Y: y, W: w, H: h}).intersect(bounds); !r.Empty() {
+			dst = append(dst, r)
+		}
+	}
+
+	// 十字辅助线贯穿整个客户区——这是框选时唯一会「横跨全屏」的元素，
+	// 所以单独拆成两条窄条，而不是把整个屏幕算进脏区。
+	if o.drag != dragNone && o.mouseIn &&
+		o.mouseX >= 0 && o.mouseY >= 0 && o.mouseX < W && o.mouseY < H {
+		add(0, o.mouseY-1, W, 3)
+		add(o.mouseX-1, 0, 3, H)
+	}
+
+	// 窗口吸附高亮（含它自己的尺寸提示）。
+	if o.snapOK && o.drag == dragNone && !o.ti.active && !o.snap.Empty() {
+		add(o.snap.X-2, o.snap.Y-2, o.snap.W+4, o.snap.H+4)
+		if hr := o.sizeHintRect(o.snap); !hr.Empty() {
+			add(hr.X, hr.Y, hr.W, hr.H)
+		}
+	}
+
+	if o.sel.Empty() {
+		return dst, true
+	}
+
+	// 选区本体：2px 边框 + 控制点 + 尺寸提示（提示会挂在选区外侧）。
+	m := handleSize/2 + 2
+	add(o.sel.X-m, o.sel.Y-m, o.sel.W+2*m, o.sel.H+2*m)
+	if hr := o.sizeHintRect(o.sel); !hr.Empty() {
+		add(hr.X, hr.Y, hr.W, hr.H)
+	}
+
+	// 文字输入中的插入符标记。
+	if o.ti.active {
+		h := clampInt(o.curFontSize, 8, maxInt(8, o.sel.H))
+		add(o.ti.anchor.x-1, o.ti.anchor.y, 4, h+1)
+	}
+
+	// 被选中图形的虚线框与它旁边的操作提示。
+	//
+	// 图形本身被 painter 的 clip 限制在选区内，但虚线框走的是不带裁剪的
+	// screenPainter，而图形只是「完全落到框外才被丢掉」，所以半出框的图形其虚线框
+	// 会伸到选区外面——这里必须按图形自己的外接矩形算。
+	if o.selected >= 0 && o.selected < len(o.shapes) {
+		b := o.shapeBounds(&o.shapes[o.selected])
+		padded := Rect{X: b.X - 2, Y: b.Y - 2, W: b.W + 4, H: b.H + 4}
+		if !padded.Empty() {
+			add(padded.X, padded.Y, padded.W, padded.H)
+		}
+		if hr := o.shapeHintRect(padded); !hr.Empty() {
+			add(hr.X, hr.Y, hr.W, hr.H)
+		}
+	}
+
+	if o.phase == phaseAdjusting {
+		if bar := o.layoutToolbar(o.sel).bar; !bar.Empty() {
+			add(bar.X-1, bar.Y-1, bar.W+2, bar.H+2)
+		}
+		if pr := o.panelRect(); !pr.Empty() {
+			add(pr.X-1, pr.Y-1, pr.W+2, pr.H+2)
+		}
+	}
+	return dst, true
 }
 
 // renderSelection 生成最终结果位图：选区原图 + 重放全部标注图形。
@@ -1078,7 +1587,9 @@ func (o *Overlay) drawShapeSelection(b Rect) {
 const shapeHintText = "拖动移动 · Delete 删除"
 
 // drawShapeHint 在被选中图形下方（放不下则上方）画一条深色提示条。
-func (o *Overlay) drawShapeHint(b Rect) {
+// shapeHintRect 返回选中图形旁那个操作提示框的位置与尺寸。
+// 与 drawShapeHint 共用同一份摆放算法（footprint 要照它算脏区）。
+func (o *Overlay) shapeHintRect(b Rect) Rect {
 	const (
 		h     = 20
 		fontH = 13
@@ -1086,7 +1597,7 @@ func (o *Overlay) drawShapeHint(b Rect) {
 	)
 	tw, th := o.textSize(shapeHintText, fontH)
 	if tw <= 0 || th <= 0 {
-		return
+		return Rect{}
 	}
 	w := tw + padX*2
 	x := b.X
@@ -1096,11 +1607,22 @@ func (o *Overlay) drawShapeHint(b Rect) {
 	}
 	x = clampInt(x, 0, maxInt(0, o.bounds.W-w))
 	y = clampInt(y, 0, maxInt(0, o.bounds.H-h))
+	return Rect{X: x, Y: y, W: w, H: h}
+}
+
+func (o *Overlay) drawShapeHint(b Rect) {
+	const (
+		fontH = 13
+		padX  = 10
+	)
+	box := o.shapeHintRect(b)
+	if box.Empty() {
+		return
+	}
 
 	p := o.screenPainter()
-	box := Rect{X: x, Y: y, W: w, H: h}
 	p.fillRoundRect(box, 4, colHintBg)
-	inner := Rect{X: x + padX, Y: y, W: w - padX*2, H: h}
+	inner := Rect{X: box.X + padX, Y: box.Y, W: box.W - padX*2, H: box.H}
 	o.drawTextVCentered(p, shapeHintText, inner, fontH, colHintText)
 }
 
@@ -1318,6 +1840,7 @@ func (o *Overlay) onLButtonDblClk(x, y int) {
 }
 
 func (o *Overlay) onMouseMove(x, y int) {
+	before := o.frameKey()
 	o.mouseX, o.mouseY, o.mouseIn = x, y, true
 
 	switch {
@@ -1337,7 +1860,12 @@ func (o *Overlay) onMouseMove(x, y int) {
 	}
 
 	o.applyCursor(x, y)
-	o.redraw()
+	// 拖拽中画面每帧都在变（选区 / 草稿 / 十字辅助线），无条件排帧；
+	// 非拖拽时先比一眼关键状态——光标在空白处划来划去、什么都没变，
+	// 以前也要走一整遍整帧 memcpy + 全屏提交。
+	if o.drag != dragNone || o.frameKey() != before {
+		o.requestFrame()
+	}
 }
 
 // updateHover 更新悬停态：工具条高亮 + 光标下窗口的吸附候选。
@@ -1793,6 +2321,10 @@ func overlayWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 
 	case wmOverlayStop:
 		procPostQuitMessage.Call(0)
+		return 0
+
+	case wmTimer:
+		o.onFrameTimer()
 		return 0
 
 	case wmNCHitTest:

@@ -1,6 +1,11 @@
 package screenshot
 
-import "fmt"
+import (
+	"fmt"
+	"time"
+
+	"quickdock/internal/logger"
+)
 
 // outcome 是覆盖层回传给上层的一次会话结果（包内类型，不对外暴露）。
 type outcome struct {
@@ -27,15 +32,28 @@ func Select(o *Overlay) (Result, error) {
 		return Result{}, fmt.Errorf("screenshot: 虚拟桌面尺寸无效")
 	}
 
+	// 启动耗时的起点取在这里：从热键回调进来算起，覆盖层的投递延迟、建资源、
+	// 暗化、首帧绘制全都算进「看见遮罩」里，与用户的主观感受口径一致。
+	started := time.Now()
+
 	// 先抓屏、后显示覆盖层 —— 顺序不能反，否则覆盖层自身会被抓进图里。
+	tCapture := time.Now()
 	src, err := captureRect(bounds)
+	capture := time.Since(tCapture)
 	if err != nil {
+		// 失败也记耗时：「按了热键没反应」十有八九是抓屏卡住或报错，
+		// 没有这行就只能猜。
+		logger.W("[screenshot] 抓屏失败（%v，%d×%d）：%v",
+			capture.Round(10*time.Microsecond), bounds.W, bounds.H, err)
 		return Result{}, err
 	}
+
+	tOpaque := time.Now()
 	src.ensureOpaque()
+	launch := launchStats{started: started, capture: capture, opaque: time.Since(tOpaque)}
 
 	result := make(chan outcome, 1)
-	o.Show(src, bounds, result)
+	o.Show(src, bounds, result, launch)
 
 	res, ok := <-result
 	if !ok || res.rect.Empty() || res.image.Empty() {

@@ -15,6 +15,8 @@ package screenshot
 import (
 	"errors"
 	"image"
+	"time"
+	"unsafe"
 )
 
 // ErrUnsupported 表示当前平台尚未实现截图能力。
@@ -61,6 +63,18 @@ type Result struct {
 	Bitmap *Bitmap // 已裁剪、已合成标注的位图
 }
 
+// launchStats 是一次会话「按下热键到看见遮罩」的启动耗时，由 Select 测出来
+// 交给覆盖层统一打印。
+//
+// 为什么不并进逐帧统计：这两类成本差一个数量级。抓屏在这台开发机上是 50ms 量级，
+// 而拖框时一帧只有 5–7ms；混在一起算均值，抓屏的抖动会把逐帧优化的效果彻底盖住，
+// 反过来也没法从均值里看出抓屏到底占多少。所以拆成两行，各自看各自的。
+type launchStats struct {
+	started time.Time     // 按下热键的时刻（Select 入口）
+	capture time.Duration // 抓屏全程（GDI 回读）；失败时也记，用于排查「按了没反应」
+	opaque  time.Duration // 抓屏结果补 alpha 的耗时，已含在 capture 之内
+}
+
 // Empty 报告本次会话是否没有产出内容。
 func (r Result) Empty() bool { return r.Bitmap.Empty() }
 
@@ -86,12 +100,55 @@ func (r Rect) intersect(o Rect) Rect {
 // GDI BitBlt 抓屏写进 32bpp DIB 时 alpha 字节没有保证——屏幕 DC 本身不含 alpha
 // 概念，抓到的位图 alpha 常为 0。而覆盖层用 UpdateLayeredWindow(ULW_ALPHA) 提交，
 // alpha=0 会让整块区域在合成时变成透明洞。抓屏后随手抹一遍是最省心的解法。
+//
+// 按 32 位字读写：一屏 1080p 是 200 万像素，逐字节写 alpha 要跑 200 万次带边界检查
+// 的循环，实测 1.7ms，按字处理只要 0.9ms。这只是省时间的写法，语义完全一致。
 func (b *Bitmap) ensureOpaque() {
 	if b.Empty() {
 		return
 	}
+	if w, ok := asWords(b.Pix); ok {
+		for i := range w {
+			w[i] |= 0xFF000000
+		}
+		return
+	}
 	for i := 3; i < len(b.Pix); i += 4 {
 		b.Pix[i] = 0xFF
+	}
+}
+
+// asWords 把 BGRA 字节切片按 32 位字重新解读（小端下一个字 = B|G<<8|R<<16|A<<24）。
+// 长度非 4 的倍数或首地址未按 4 字节对齐时返回 false，调用方退回逐字节路径。
+//
+// Go 的分配器对大对象至少给 8 字节对齐，所以正常路径不会走到退化分支；
+// 保留判断是为了不把「对齐」这件事变成一条隐式约定。
+func asWords(pix []byte) ([]uint32, bool) {
+	if len(pix) == 0 || len(pix)%4 != 0 || uintptr(unsafe.Pointer(&pix[0]))%4 != 0 {
+		return nil, false
+	}
+	return unsafe.Slice((*uint32)(unsafe.Pointer(&pix[0])), len(pix)/4), true
+}
+
+// dimHalf 把 src 的每个像素按 50% 亮度写入 dst 并把 alpha 置为不透明。
+//
+// 掩码 0x00FEFEFE 先清掉每个通道的最低位再整体右移一位，等价于三通道各自除以 2；
+// 直接 >>1 会把绿色字节的最低位溢进蓝色字节的最高位，画面会泛蓝。
+func dimHalf(src, dst []byte) {
+	n := minInt(len(src), len(dst))
+	if sw, ok := asWords(src[:n]); ok {
+		if dw, ok2 := asWords(dst[:n]); ok2 {
+			for i := range sw {
+				dw[i] = ((sw[i] & 0x00FEFEFE) >> 1) | 0xFF000000
+			}
+			return
+		}
+	}
+	for i := 0; i+3 < n; i += 4 {
+		dst[i] = src[i] >> 1
+		dst[i+1] = src[i+1] >> 1
+		dst[i+2] = src[i+2] >> 1
+		dst[i+3] = 0xFF
 	}
 }
 
@@ -141,6 +198,104 @@ func (b *Bitmap) ToNRGBA() *image.NRGBA {
 		}
 	}
 	return img
+}
+
+// covers 报告 a 是否完全包住 b。
+func covers(a, b Rect) bool {
+	return b.X >= a.X && b.Y >= a.Y &&
+		b.X+b.W <= a.X+a.W && b.Y+b.H <= a.Y+a.H
+}
+
+func coveredBy(r Rect, set []Rect) bool {
+	for _, e := range set {
+		if covers(e, r) {
+			return true
+		}
+	}
+	return false
+}
+
+// unionRects 把多组矩形合并成一份「需要还原 / 提交」的矩形列表。
+//
+// 只做两件事：丢掉空矩形、丢掉已被别的矩形完全包住的矩形。刻意不做真正的区域
+// 合并——脏区多提交一块只是多花一点带宽，漏掉一块就是屏幕上留残影，两边的代价
+// 完全不对称。
+func unionRects(dst []Rect, groups ...[]Rect) []Rect {
+	for _, g := range groups {
+		for _, r := range g {
+			if r.Empty() || coveredBy(r, dst) {
+				continue
+			}
+			// 新矩形吞掉了已存在的几块，把它们去掉（就地过滤，写位置永远不超前
+			// 读位置）。
+			kept := dst[:0]
+			for _, e := range dst {
+				if covers(r, e) {
+					continue
+				}
+				kept = append(kept, e)
+			}
+			dst = append(kept, r)
+		}
+	}
+	return dst
+}
+
+// unionBox 返回两个矩形的包围盒。
+func unionBox(a, b Rect) Rect {
+	x0 := minInt(a.X, b.X)
+	y0 := minInt(a.Y, b.Y)
+	x1 := maxInt(a.X+a.W, b.X+b.W)
+	y1 := maxInt(a.Y+a.H, b.Y+b.H)
+	return Rect{X: x0, Y: y0, W: x1 - x0, H: y1 - y0}
+}
+
+// coalesceRects 把「并成一个包围盒不会白搬太多像素」的矩形合并掉。
+//
+// 为什么需要它：拖拽选框时脏区是「上一帧 ∪ 这一帧」，新旧选框大面积重叠，两者
+// 的包围盒几乎就等于新选框本身。不合并的话这一帧要提交两次全尺寸选区，每次提交
+// 都有 ~0.66ms 的、与面积无关的固定开销（见 overlay_windows.go 的成本模型），
+// 等于白扔 0.66ms；两条平行辅助线同理，合并只多搬几十 KB，却省掉一次调用。
+//
+// wastePercent 是允许的空搬上限：包围盒面积不超过两块面积之和的
+// (100+wastePercent)%。取 40 时，「选框 + 它的尺寸提示」会合并（提示紧贴边框，
+// 包围盒几乎不增肥），而「贯穿全屏的辅助线 + 一个小选框」不会合并（那会白白
+// 把整屏都算进脏区）。
+//
+// 合并是 O(n²) 且每次合并后重头扫一遍；落笔矩形上限只有十几块，不值得优化。
+func coalesceRects(rs []Rect, wastePercent int) []Rect {
+	if len(rs) < 2 {
+		return rs
+	}
+	for merged := true; merged; {
+		merged = false
+		for i := 0; i < len(rs) && !merged; i++ {
+			for j := i + 1; j < len(rs) && !merged; j++ {
+				a, b := rs[i], rs[j]
+				if a.Empty() || b.Empty() {
+					continue
+				}
+				box := unionBox(a, b)
+				if box.W*box.H*100 > (a.W*a.H+b.W*b.H)*(100+wastePercent) {
+					continue
+				}
+				rs[i] = box
+				rs = append(rs[:j], rs[j+1:]...)
+				merged = true
+			}
+		}
+	}
+	return rs
+}
+
+// rectsArea 返回一组矩形的面积之和。重叠部分会被重复计算，只用于「整帧还是
+// 逐块」这种粗略判断，不需要精确。
+func rectsArea(rs []Rect) int {
+	sum := 0
+	for _, r := range rs {
+		sum += r.W * r.H
+	}
+	return sum
 }
 
 func minInt(a, b int) int {
