@@ -78,3 +78,16 @@ func launchAppPath(appPath string) error {
 	}
 	return nil
 }
+
+// appSourceDirs 返回应用扫描的来源目录（darwin 的 /Applications 与 ~/Applications），
+// 供缓存惰性失效使用；非 darwin 平台无来源目录。
+func appSourceDirs() []string {
+	if runtime.GOOS != "darwin" {
+		return nil
+	}
+	roots := []string{"/Applications"}
+	if home, err := os.UserHomeDir(); err == nil {
+		roots = append(roots, filepath.Join(home, "Applications"))
+	}
+	return roots
+}

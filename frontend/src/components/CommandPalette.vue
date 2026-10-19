@@ -929,8 +929,6 @@ let lastPluginIndexLoad = 0
 // #6 按需刷新：插件索引 500ms 节流；插件图标（每个插件一次 DB 读取）改为长 TTL 缓存，避免每次 show 全量重拉
 const PLUGIN_ICON_TTL = 30_000
 let lastPluginIconLoad = 0
-const APP_SCAN_TTL = 60_000 // 应用扫描（启动器 start-menu 扫描较慢）长 TTL 缓存
-let lastAppScan = 0
 
 const themeName = useThemeName()
 
@@ -977,12 +975,13 @@ async function loadPaletteData() {
   loading.value = true; const gen = ++itemsLoadGen
   await loadFrecency()
   try { const result = unwrap<CollectionItem[]>(await ListAllItems()); if (gen !== itemsLoadGen) return; items.value = result || [] } catch (e) { console.error('[CmdPalette] ListAllItems:', getErrorMessage(e)) }
-  // #6 按需刷新：应用扫描（start-menu 较慢）在 TTL 内复用已加载数据，避免每次 show 全量重拉
+  // 每次 Ctrl+K 唤起都主动刷新一次已安装应用：后端 GetCachedApps 采用「来源目录 mtime
+  // 惰性失效」，未装/卸软件时直接命中内存缓存（零磁盘扫描），仅当开始菜单确实变化时才重扫。
+  // 因此这里可以无条件请求，确保新装软件无需重启 QuickDock 即可被搜索到。
   try {
-    const now = Date.now()
-    if (gen === itemsLoadGen && (now - lastAppScan >= APP_SCAN_TTL || installedApps.value.length === 0)) {
-      const apps = unwrap<InstalledApp[]>(await ScanInstalledApps())
-      if (gen === itemsLoadGen) { installedApps.value = apps || []; lastAppScan = now }
+    if (gen === itemsLoadGen) {
+      const apps = unwrap<InstalledApp[]>(await ScanInstalledApps()) || []
+      if (gen === itemsLoadGen) installedApps.value = apps
     }
   } catch (e) { console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e)) }
   try { const notesData = unwrap<CmdNote[]>(await ListNotesTree()); if (gen !== itemsLoadGen) return; notes.value = notesData || [] } catch (e) { console.error('[CmdPalette] ListNotesTree:', getErrorMessage(e)) }

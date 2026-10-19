@@ -26,6 +26,11 @@ func getStartMenuDirs() []string {
 	return dirs
 }
 
+// appSourceDirs 返回应用扫描的来源目录（开始菜单），供缓存惰性失效使用。
+func appSourceDirs() []string {
+	return getStartMenuDirs()
+}
+
 // systemDir 返回 System32 目录路径
 func systemDir() string {
 	if root := os.Getenv("SystemRoot"); root != "" {
