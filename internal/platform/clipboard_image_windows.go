@@ -30,6 +30,49 @@ func SetClipboardImageData(img image.Image) error {
 	return writeClipboardDIB(ClipboardWindowHandle(), encodeDIB(img))
 }
 
+// SetClipboardDIBData 直接把内存里的 top-down 32bpp BGRA 像素写进剪贴板（CF_DIB）。
+//
+// 截图场景专用：像素本来就已经是 BGRA，走 SetClipboardImageData 那条路要先转成
+// image.NRGBA（逐像素倒通道，1080p 实测 13ms）、再被 draw.Draw 复制一遍、
+// 再逐像素翻成 BGRA 并倒行——同一份数据被搬了四遍。这里只做一次「倒行拷贝 + 补
+// alpha」，1080p 约 2ms。
+//
+// pix 必须是 top-down（第一行就是画面最上面一行），长度至少 w*h*4。
+func SetClipboardDIBData(pix []byte, w, h int) error {
+	if w <= 0 || h <= 0 || len(pix) < w*h*4 {
+		return fmt.Errorf("invalid image data")
+	}
+	return writeClipboardDIB(ClipboardWindowHandle(), encodeDIBFromBGRA(pix, w, h))
+}
+
+// encodeDIBFromBGRA 把 top-down BGRA 像素编码成 CF_DIB：
+// BITMAPINFOHEADER(40 字节) + 32bpp bottom-up BGRA 像素。
+//
+// 行倒序是 CF_DIB 的惯例（biHeight 取正 = bottom-up），各取用方支持最一致。
+// alpha 统一置 0xFF：屏幕抓到的像素 alpha 没有保证，写 0 会让「粘贴出来是空白」。
+func encodeDIBFromBGRA(pix []byte, w, h int) []byte {
+	const headerSize = 40
+	stride := w * 4
+	dib := make([]byte, headerSize+stride*h)
+
+	binary.LittleEndian.PutUint32(dib[0:4], headerSize)
+	binary.LittleEndian.PutUint32(dib[4:8], uint32(w))
+	binary.LittleEndian.PutUint32(dib[8:12], uint32(h))
+	binary.LittleEndian.PutUint16(dib[12:14], 1)  // biPlanes
+	binary.LittleEndian.PutUint16(dib[14:16], 32) // biBitCount
+
+	for y := 0; y < h; y++ {
+		dstOff := headerSize + (h-1-y)*stride
+		srcOff := y * stride
+		row := dib[dstOff : dstOff+stride]
+		copy(row, pix[srcOff:srcOff+stride])
+		for i := 3; i < stride; i += 4 {
+			row[i] = 0xFF
+		}
+	}
+	return dib
+}
+
 // encodeDIB 把任意 image.Image 编码成 CF_DIB：
 // BITMAPINFOHEADER(40 字节) + 32bpp bottom-up BGRA 像素。
 //

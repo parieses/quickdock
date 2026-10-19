@@ -50,7 +50,7 @@ func InitScreenshotOverlay() {
 func InitScreenshotPins(app *application.App) {
 	screenshot.SetPinActions(screenshot.PinActions{
 		Copy: func(b *screenshot.Bitmap) error {
-			return platform.SetClipboardImageData(b.ToNRGBA())
+			return platform.SetClipboardDIBData(b.Pix, b.W, b.H)
 		},
 		Save: func(b *screenshot.Bitmap) (string, error) {
 			return saveImageDialog(app, b.ToNRGBA())
@@ -89,11 +89,9 @@ func (a *AppService) CaptureSelection() *ApiResult {
 		return Ok(map[string]int{"width": 0, "height": 0})
 	}
 
-	img := res.Bitmap.ToNRGBA()
-
 	switch res.Action {
 	case screenshot.ActionSave:
-		path, saveErr := saveImageDialog(a.app, img)
+		path, saveErr := saveImageDialog(a.app, res.Bitmap.ToNRGBA())
 		if saveErr != nil {
 			return Fail(saveErr)
 		}
@@ -114,7 +112,9 @@ func (a *AppService) CaptureSelection() *ApiResult {
 		return Ok(map[string]any{"width": res.Rect.W, "height": res.Rect.H, "pinned": true})
 	}
 
-	if err := platform.SetClipboardImageData(img); err != nil {
+	// 复制走 CF_DIB 直通：Bitmap 本来就是 top-down BGRA，不必先转 image.NRGBA
+	// （逐像素倒通道，1080p 实测 13ms）再被剪贴板路径翻回 BGRA。
+	if err := platform.SetClipboardDIBData(res.Bitmap.Pix, res.Bitmap.W, res.Bitmap.H); err != nil {
 		return Fail(err)
 	}
 	logger.I("[screenshot] 已复制 %dx%d 区域到剪贴板", res.Rect.W, res.Rect.H)
