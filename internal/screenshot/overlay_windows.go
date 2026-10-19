@@ -78,9 +78,13 @@ type Overlay struct {
 	dibDimmed bool
 
 	// 长生命周期像素缓冲是否已锁进工作集。锁失败（工作集配额不足）保持 false，
-	// 只是省不掉那次换入，不影响功能。
+	// 只是省不掉那次换入，不影响功能。quotaRaised 表示已尝试抬高过配额——
+	// 默认配额只有 1.3MB 上限，不抬的话 VirtualLock 必然失败。
 	lockBase, lockDib bool
 	lockLogged        bool
+	quotaRaised       bool
+	lockErrBase       error
+	lockErrDib        error
 
 	// 合帧：鼠标消息只更新状态，出帧由 requestFrame 按预算调度。
 	frameDue   bool      // 有未提交的画面变更
@@ -681,15 +685,18 @@ func (o *Overlay) releaseDraw() {
 // 不可回收的物理内存，内存吃紧的机器上用户可能更希望关掉。
 var noPageLock = os.Getenv("QD_SHOT_NOLOCK") == "1"
 
-// pageLock 把一段已提交的内存锁进进程工作集；失败返回 false。
+// pageLock 把一段已提交的内存锁进进程工作集；失败返回 false 与系统错误。
 //
 // 长度不必页对齐——VirtualLock 内部会把起始地址向下、长度向上取整到页边界。
-func pageLock(b []byte) bool {
+func pageLock(b []byte) (bool, error) {
 	if len(b) == 0 {
-		return false
+		return false, nil
 	}
-	ok, _, _ := procVirtualLock.Call(uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)))
-	return ok != 0
+	ok, _, err := procVirtualLock.Call(uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)))
+	if ok == 0 {
+		return false, err
+	}
+	return true, nil
 }
 
 func pageUnlock(b []byte) {
@@ -697,6 +704,30 @@ func pageUnlock(b []byte) {
 		return
 	}
 	procVirtualUnlock.Call(uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)))
+}
+
+// raiseWorkingSetQuota 把进程工作集的保证值抬高到够锁住 need 字节。
+//
+// 为什么必须有这一步：实测这台机器上进程的默认配额是 min 0.2MB / max 1.3MB
+// （没有窗口的进程就是这么快被系统裁剪），而 VirtualLock 要求页必须留在工作集内，
+// 锁 33MB 必然返回 ERROR_WORKING_SET_QUOTA——这就是日志里「锁定失败 / 锁定失败」
+// 的来源，跟内存类型无关。
+//
+// 两个约束都踩过：
+//   - 只改 max 不改 min 会直接返回 ERROR_INVALID_PARAMETER，而且 min 传 0 也不行；
+//   - min 必须真的抬到「要锁的量 + 余量」，实测 min=64MB / max=512MB 就能锁住 32MB。
+func raiseWorkingSetQuota(need int) error {
+	hProc, _, _ := procGetCurrentProcess.Call()
+	if hProc == 0 {
+		return fmt.Errorf("GetCurrentProcess 失败")
+	}
+	const mb = 1024 * 1024
+	minWS := uintptr(need) + 32*mb
+	maxWS := minWS + 128*mb
+	if ok, _, err := procSetProcessWorkingSetSize.Call(hProc, minWS, maxWS); ok == 0 {
+		return err
+	}
+	return nil
 }
 
 // lockWorkingSet 把暗化底图与提交缓冲锁进物理内存，防止被系统回收。
@@ -712,18 +743,30 @@ func (o *Overlay) lockWorkingSet() {
 	if noPageLock {
 		return
 	}
+	// 先把工作集配额抬起来，否则 VirtualLock 一定失败——默认配额只有 1.3MB 上限。
+	// 只做一次：配额是进程级属性，之后连续截图都有效。
+	if !o.quotaRaised {
+		o.quotaRaised = true
+		if err := raiseWorkingSetQuota(len(o.base) + len(o.dibPix)); err != nil {
+			logger.W("[screenshot] 调整工作集配额失败（%v），缓冲常驻不可用", err)
+		}
+	}
 	if !o.lockBase && len(o.base) > 0 {
-		o.lockBase = pageLock(o.base)
+		var err error
+		o.lockBase, err = pageLock(o.base)
+		o.lockErrBase = err
 	}
 	if !o.lockDib && len(o.dibPix) > 0 {
-		o.lockDib = pageLock(o.dibPix)
+		var err error
+		o.lockDib, err = pageLock(o.dibPix)
+		o.lockErrDib = err
 	}
 	if !o.lockLogged {
 		o.lockLogged = true
 		logger.I("[screenshot] 像素缓冲常驻（%d×%d，%.1fMB）：暗化底图 %s / 提交缓冲 %s",
 			o.bounds.W, o.bounds.H,
 			float64(len(o.base)+len(o.dibPix))/1024/1024,
-			lockState(o.lockBase), lockState(o.lockDib))
+			lockState(o.lockBase, o.lockErrBase), lockState(o.lockDib, o.lockErrDib))
 	}
 }
 
@@ -738,12 +781,15 @@ func (o *Overlay) unlockWorkingSet() {
 	}
 }
 
-func lockState(ok bool) string {
+func lockState(ok bool, err error) string {
 	if noPageLock {
 		return "已关闭"
 	}
 	if ok {
 		return "已锁定"
+	}
+	if err != nil {
+		return "锁定失败（" + err.Error() + "）"
 	}
 	return "锁定失败"
 }

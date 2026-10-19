@@ -27,8 +27,12 @@ var (
 
 	// 把长生命周期的像素缓冲锁进工作集，避免应用在后台待机时被系统裁剪/压缩，
 	// 导致下一次截图首帧要重新换入（见 overlay_windows.go 的 lockWorkingSet）。
-	procVirtualLock   = kernel32.NewProc("VirtualLock")
-	procVirtualUnlock = kernel32.NewProc("VirtualUnlock")
+	// SetProcessWorkingSetSize 必须先抬高配额：默认进程 min/max 只有 0.2/1.3MB，
+	// 直接 VirtualLock 会返回 ERROR_WORKING_SET_QUOTA（实测两台机器都是）。
+	procGetCurrentProcess        = kernel32.NewProc("GetCurrentProcess")
+	procSetProcessWorkingSetSize = kernel32.NewProc("SetProcessWorkingSetSize")
+	procVirtualLock              = kernel32.NewProc("VirtualLock")
+	procVirtualUnlock            = kernel32.NewProc("VirtualUnlock")
 
 	procRegisterClassW      = user32.NewProc("RegisterClassW")
 	procUnregisterClassW    = user32.NewProc("UnregisterClassW")
