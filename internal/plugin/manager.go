@@ -789,7 +789,7 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 		return inst.Call("plugin.execute", map[string]interface{}{
 			"command": commandID,
 			"input":   input,
-		}, 20*time.Second)
+		}, m.commandTimeout(inst))
 	case "none":
 		// 无后端插件：命令由前端自行处理，宿主不执行任何 host 逻辑。
 		// 返回值仅表示「调用通道正常」，不等于「宿主已执行」——真实能力由 PluginInfo.Runtime 表达，
@@ -803,7 +803,7 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 		result, err := inst.callGojaJS("handleExecute", map[string]interface{}{
 			"command": commandID,
 			"input":   input,
-		}, 20*time.Second)
+		}, m.commandTimeout(inst))
 		if err != nil {
 			logger.PluginE(pluginID, "handleExecute 执行失败 command=%s: %v", commandID, err)
 			return nil, err
@@ -813,6 +813,16 @@ func (m *Manager) ExecuteCommand(pluginID, commandID string, input map[string]in
 	default:
 		return nil, fmt.Errorf("不支持的运行类型: %s", inst.Manifest.Backend.Runtime)
 	}
+}
+
+// commandTimeout 返回插件命令执行的宿主侧等待超时。
+// 默认 20s（用于快速探测插件崩溃）；若插件在 plugin.json 的 backend.timeout
+// 显式声明了更长的秒数（如 HTTP 客户端需要等待慢接口），则采用该值。
+func (m *Manager) commandTimeout(inst *PluginInstance) time.Duration {
+	if inst.Manifest.Backend.Timeout > 0 {
+		return time.Duration(inst.Manifest.Backend.Timeout) * time.Second
+	}
+	return 20 * time.Second
 }
 
 // ListPlugins 列出所有插件（暴露给前端）

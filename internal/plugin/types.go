@@ -40,6 +40,10 @@ type BackendConfig struct {
 	Runtime string   `json:"runtime"` // none | goja | native
 	Entry   string   `json:"entry"`
 	Args    []string `json:"args,omitempty"`
+	// Timeout 宿主侧等待插件命令响应（plugin.execute / handleExecute）的最长秒数。
+	// 0（默认）= 沿用全局 20s 兜底，用于快速探测插件崩溃。
+	// 网络类插件（如 HTTP 客户端）可声明更大的值（如 120），避免慢接口被宿主误判为「插件响应超时」。
+	Timeout int `json:"timeout,omitempty"`
 }
 
 // FrontendConfig 前端配置
