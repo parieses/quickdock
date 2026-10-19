@@ -41,11 +41,14 @@ var clipboardLogContent = os.Getenv("QUICKDOCK_LOG_CLIPBOARD") == "1"
 
 // SetClipboardText writes text to the system clipboard via Wails API
 func SetClipboardText(text string) {
+	// 成功路径不记日志：从历史复制是高频操作，原「clipboard written (length: N)」
+	// 只会把日志刷满，且长度信息对排障无意义。失败必须留痕（权限被占用/剪贴板锁）。
 	if app := AppRef.Load(); app != nil && app.Clipboard.SetText(text) {
 		setLastClipboardText(text)
-		logger.I("QuickDock: clipboard written (length: %d)", len(text))
+	} else if app == nil {
+		logger.W("QuickDock: 剪贴板写入失败：应用实例未就绪")
 	} else {
-		logger.W("QuickDock: clipboard write failed")
+		logger.W("QuickDock: 剪贴板写入失败：SetText 返回 false（可能被其他程序占用），长度=%d", len(text))
 	}
 }
 
@@ -66,6 +69,13 @@ func (a *AppService) emitClipboardEvent() {
 	if a.app != nil {
 		a.app.Event.Emit("clipboard:updated")
 	}
+}
+
+// logClipboardSkip 剪贴板捕获因数据库未就绪/已关闭而跳过时的统一记录。
+// 原实现散落 5 条文案各异但条件相同的 W 日志（"database not initialized" /
+// "database closed"），合并后既减少重复，也保证每条都点明丢失的是哪类内容。
+func logClipboardSkip(kind string) {
+	logger.W("QuickDock: 剪贴板捕获[%s]跳过：数据库未就绪或已关闭", kind)
 }
 
 // ===== Internal helpers =====
@@ -149,9 +159,8 @@ func processImage(database *db.Database, imageData []byte, paths, src string, em
 		logger.W("QuickDock: image clipboard save failed: %v", err)
 		return
 	}
-	// 诊断：确认入库真实生效。self-check 读回仅排查时开启（QUICKDOCK_LOG_CLIPBOARD=1），
-	// 默认只记一条极简入库确认，避免每次图片复制刷屏。
-	logger.I("QuickDock >> image entry saved: id=%s", entry.ID)
+	// 原「image entry saved: id=」与下方 captured 日志信息重复，已删除；
+	// 入库是否真实生效由 QUICKDOCK_LOG_CLIPBOARD=1 的 self-check 读回验证。
 	if clipboardLogContent {
 		if chk, e := database.GetClipboardEntry(entry.ID); e != nil {
 			logger.W("QuickDock: WARN self-check read-back failed: %v", e)

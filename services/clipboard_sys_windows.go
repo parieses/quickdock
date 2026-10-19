@@ -28,7 +28,7 @@ func globalSize(h uintptr) uintptr {
 }
 func (a *AppService) OnClipboardChange() {
 	if a.DB == nil {
-		logger.W("QuickDock: clipboard: database not initialized, skipping")
+		logClipboardSkip("入口")
 		return
 	}
 
@@ -107,8 +107,10 @@ func (a *AppService) OnClipboardChange() {
 			}
 		}
 	}
-	if imageData != nil {
-		logger.I("QuickDock: clipboard image detected (PNG=%v, %d bytes) db=%s", imageIsPNG, len(imageData), a.DB.Path())
+	if imageData != nil && clipboardLogContent {
+		// 仅在显式开启内容日志时记录：每次剪贴板变化都可能带图（含截图工具、浏览器复制图片），
+		// 默认不记，避免噪音；字节数与 PNG/DIB 形态对「抓错了格式」类问题仍有价值。
+		logger.I("QuickDock: clipboard image detected (PNG=%v, %d bytes)", imageIsPNG, len(imageData))
 	}
 
 	// 图片回环防护：若本次捕获的图片正是本程序刚写回剪贴板的那张（从历史复制图片），
@@ -141,7 +143,7 @@ func (a *AppService) OnClipboardChange() {
 			go func() {
 				defer recoverPanic("clipboard processImage (file)")
 				if a.DB == nil {
-					logger.W("QuickDock: clipboard: database closed, skipping image+file")
+					logClipboardSkip("图片+文件")
 					return
 				}
 				processImage(a.DB, imageData, joined, sourceApp, a.emitClipboardEvent, imageIsPNG)
@@ -155,7 +157,7 @@ func (a *AppService) OnClipboardChange() {
 		go func() {
 			defer recoverPanic("clipboard saveFile")
 			if a.DB == nil {
-				logger.W("QuickDock: clipboard: database closed, skipping file")
+				logClipboardSkip("文件")
 				return
 			}
 			entry, err := a.DB.InsertClipboardFileEntry(joined, sourceApp)
@@ -182,7 +184,7 @@ handleText:
 		go func() {
 			defer recoverPanic("clipboard saveText")
 			if a.DB == nil {
-				logger.W("QuickDock: clipboard: database closed, skipping text")
+				logClipboardSkip("文本")
 				return
 			}
 			entry, err := a.DB.InsertClipboardEntry(text, sourceApp)
@@ -213,7 +215,7 @@ handleText:
 		go func() {
 			defer recoverPanic("clipboard processImage (image-only)")
 			if a.DB == nil {
-				logger.W("QuickDock: clipboard: database closed, skipping image")
+				logClipboardSkip("图片")
 				return
 			}
 			processImage(a.DB, imageData, "", sourceApp, a.emitClipboardEvent, imageIsPNG)

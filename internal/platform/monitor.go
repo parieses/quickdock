@@ -15,11 +15,18 @@ package platform
 // 本实现改为遍历框架屏幕数据做命中判定，从根上绕开该问题。
 
 import (
+	"sync"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/w32"
 
 	"quickdock/internal/logger"
 )
+
+// cursorPosWarnOnce 让 GetCursorPos 失败只告警一次。
+// 该函数在每次显示浮窗时都会被调用，若环境性失败（会话锁定 / 非交互会话）
+// 持续存在，逐次打 W 会把日志刷满，反而淹没其它线索。
+var cursorPosWarnOnce sync.Once
 
 // cursorScreen 返回鼠标光标所在的屏幕：
 // 优先命中 PhysicalBounds，未命中（光标在屏幕间隙等）取中心最近者。
@@ -30,7 +37,9 @@ func cursorScreen() *application.Screen {
 	}
 	x, y, ok := w32.GetCursorPos()
 	if !ok {
-		logger.W("QuickDock: GetCursorPos failed, keeping default position")
+		cursorPosWarnOnce.Do(func() {
+			logger.W("QuickDock: GetCursorPos 失败（会话可能已锁定或非交互），浮窗沿用默认位置；同类失败不再重复记录")
+		})
 		return nil
 	}
 

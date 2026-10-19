@@ -1095,7 +1095,6 @@ func parseNodeVersions(body []byte) []string {
 		logger.E("[env][source] parseNodeVersions unmarshal error: %v", err)
 		return nil
 	}
-	logger.I("[env][source] parseNodeVersions unmarshaled %d entries", len(arr))
 	// 智能筛选：LTS + 近 3 年发布版本，去重后按语义降序，上限 60 条
 	type item struct {
 		ver  string
@@ -1125,13 +1124,8 @@ func parseNodeVersions(body []byte) []string {
 		}
 		items = append(items, item{ver: it.Version, date: d, lts: isLts})
 	}
-	logger.I("[env][source] parseNodeVersions unique versions=%d items=%d first3=%v", len(seen), len(items), func() []string {
-		r := make([]string, 0, min(3, len(items)))
-		for i := 0; i < len(r) && i < len(items); i++ {
-			r = append(r, items[i].ver)
-		}
-		return r
-	}())
+	// 筛选结果由上层 fetchUpstreamVersions 的「拉取成功 fetched=.. len(vs)=..」统一记录，
+	// 此处不再重复打印（原 first3 日志的匿名函数甚至因 len(r)==0 恒为空，属调试残留）。
 	now := time.Now()
 	cutoff := now.AddDate(-3, 0, 0)
 	sort.SliceStable(items, func(i, j int) bool {

@@ -313,7 +313,9 @@ func (o *Overlay) layoutTextInput() {
 // 而不是追加一条新的。
 func (o *Overlay) openTextInput(anchor pt, initial string, editIndex int) {
 	if err := o.ensureTextInput(); err != nil {
-		logger.W("[screenshot] %v", err)
+		// 原实现只打 err 正文，看不出是哪一步失败（建窗/子类化/建字体）；
+		// 补上动作名，配合 ensureTextInput 内的错误前缀即可定位。
+		logger.W("[screenshot] 文字输入窗打开失败（输入框不可用）: %v", err)
 		return
 	}
 	o.ti.editIndex = editIndex

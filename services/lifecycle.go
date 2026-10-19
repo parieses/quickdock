@@ -22,22 +22,22 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	dbDir := platform.DefaultDataDir()
 	os.MkdirAll(dbDir, 0755)
 	dbPath := filepath.Join(dbDir, "quickdock.db")
-	logger.I("正在打开数据库 %s", dbPath)
-
+	openStart := time.Now()
 	database, err := db.Open(dbPath)
 	if err != nil {
-		logger.E("数据库打开失败: %s", err.Error())
+		logger.E("[db] 打开失败 path=%s 耗时=%v: %v", dbPath, time.Since(openStart).Round(time.Millisecond), err)
 		return err
 	}
 	a.DB = database
-	logger.I("数据库已打开")
+	// 合并原「正在打开」+「已打开」两条：成功路径只留一条，带上路径与耗时（迁移耗时是大头）
+	logger.I("[db] 已就绪 path=%s 耗时=%v", dbPath, time.Since(openStart).Round(time.Millisecond))
 
-	// 检查 PRAGMA 状态
-	fkRow, err := database.QueryOne("PRAGMA foreign_keys")
-	if err != nil {
-		logger.W("PRAGMA 检查失败: %s", err.Error())
-	} else {
-		logger.I("PRAGMA foreign_keys = %v", fkRow["foreign_keys"])
+	// 外键约束是本项目数据一致性的前提（级联删除全靠它），只在异常时告警。
+	// 原实现把 foreign_keys=1 当常态信息逐次打印，属于噪音。
+	if fkRow, ferr := database.QueryOne("PRAGMA foreign_keys"); ferr != nil {
+		logger.W("[db] PRAGMA foreign_keys 检查失败: %v", ferr)
+	} else if v := fmt.Sprint(fkRow["foreign_keys"]); v != "1" {
+		logger.W("[db] PRAGMA foreign_keys = %s（期望 1）：级联删除与约束校验将失效", v)
 	}
 
 	// 确保默认工作空间存在
@@ -45,7 +45,6 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	if err != nil {
 		return fmt.Errorf("工作空间列表获取失败: %w", err)
 	}
-	logger.I("QuickDock: 找到 %d 个工作空间", len(workspaces))
 
 	if len(workspaces) == 0 {
 		ws, err := a.DB.CreateWorkspace(DefaultWorkspaceName)
@@ -53,10 +52,6 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 			logger.W("QuickDock: 创建默认工作空间失败: %v", err)
 		} else {
 			logger.I("QuickDock: 默认工作空间已创建, id=%v", ws.ID)
-		}
-	} else {
-		for _, w := range workspaces {
-			logger.I("QuickDock: 工作空间 id=%v 名称=%v", w.ID, w.Name)
 		}
 	}
 
@@ -167,7 +162,15 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 }
 
 // ServiceShutdown 应用退出时调用（v3 生命周期）
+//
+// 退出是全应用最容易「静默卡死 / 留下孤儿进程」的链路：插件子进程、env 服务、
+// dsh 进程都不随宿主自动结束。此处按阶段记录耗时，出问题时能直接看出卡在哪一步。
 func (a *AppService) ServiceShutdown() error {
+	exitStart := time.Now()
+	mark := exitStart
+	logger.I("[退出] 开始清理：插件=%v 插件窗口=%v 本地服务=%v dsh=%v 调度器=%v",
+		a.PluginMgr != nil, a.PluginWindowMgr != nil, a.Env != nil, a.DSH != nil, a.schedulerQuit != nil)
+
 	// 先停止所有插件并关闭插件窗口，避免它们在 DB 关闭后仍尝试写入，
 	// 导致 panic 或数据丢失（原顺序先关 DB，而插件子进程/goja 仍在运行）。
 	// 注意：main.go 的退出回调也会调用一次 ShutdownAll/CloseAll；此处为 v3 生命周期主路径，
@@ -178,6 +181,9 @@ func (a *AppService) ServiceShutdown() error {
 	if a.PluginWindowMgr != nil {
 		a.PluginWindowMgr.CloseAll()
 	}
+	logger.I("[退出] 插件与插件窗口已关闭 耗时=%v", time.Since(mark).Round(time.Millisecond))
+	mark = time.Now()
+
 	// 停止本会话拉起的 env 服务（redis / caddy / nginx / php-cgi ...）。它们是独立子进程，
 	// 不随宿主退出而结束——不主动停就会变成孤儿。放在插件之后：插件运行期可能仍要用到这些服务。
 	// 与 main.go 的退出清理互为安全网，StopAllOnExit 幂等，重复调用无副作用。
@@ -188,6 +194,9 @@ func (a *AppService) ServiceShutdown() error {
 	if a.DSH != nil {
 		a.DSH.Stop()
 	}
+	logger.I("[退出] 本地服务与 dsh 已停止 耗时=%v", time.Since(mark).Round(time.Millisecond))
+	mark = time.Now()
+
 	// 先停三个常驻调度 goroutine（提醒/定时任务/网站监控），避免 DB 关闭后它们仍触发访问
 	if a.schedulerQuit != nil {
 		a.StopSchedulers()
@@ -200,5 +209,7 @@ func (a *AppService) ServiceShutdown() error {
 	if a.DB != nil {
 		a.DB.Close()
 	}
+	logger.I("[退出] 调度器/剪贴板/数据库已停止 耗时=%v；清理总耗时=%v",
+		time.Since(mark).Round(time.Millisecond), time.Since(exitStart).Round(time.Millisecond))
 	return nil
 }

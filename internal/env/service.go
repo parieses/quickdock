@@ -104,7 +104,8 @@ func (s *serviceManager) forget(rt Runtime) {
 	}
 	delete(s.svcs, rt)
 	s.mu.Unlock()
-	logger.I("[env] forget %s（清掉会话内进程句柄）", rt)
+	// 不记日志：forget 只是清掉内存里的进程句柄，属内部实现细节；
+	// 对外的「Stop 完成」已由各运行时的 Stop 记录，重复打只会稀释有效信息。
 }
 
 // killTracked 结束本会话跟踪的服务进程（pty 或 exec.Cmd 两类都支持），但不清空记录。
