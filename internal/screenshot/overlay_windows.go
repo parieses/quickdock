@@ -556,6 +556,10 @@ func (o *Overlay) finish() {
 	o.hideTextInput()
 	o.logFrameStats()
 	o.logLaunchStats()
+	// 首次会话结束后顺带探一次渲染能力（只打日志，不影响抓屏）。
+	// 放在这里而不是启动路径上：探测器要建 D3D11 设备，几十毫秒的 GPU 调用跟
+	// Wails 启动、首次截图抢资源都不划算，而用户此刻已经截完图，机器是闲的。
+	logRenderCapability()
 	o.src.Close()
 	o.src = nil
 	o.frameDue = false
