@@ -53,6 +53,7 @@ const (
 	idxRelease         = 2
 	idxFactoryAdapters = 7  // IDXGIFactory::EnumAdapters
 	idxAdapterOutputs  = 7  // IDXGIAdapter::EnumOutputs
+	idxOutputGetDesc   = 7  // IDXGIOutput::GetDesc
 	idxAdapterGetDesc  = 8  // IDXGIAdapter::GetDesc
 	idxDuplicateOutput = 22 // IDXGIOutput1::DuplicateOutput
 	// IDXGIOutputDuplication : IDXGIObject，GetDesc(7) 之后就是取帧相关的四个。
@@ -129,8 +130,6 @@ func logDesktopDuplication() {
 		dupes    int
 		adapters int
 		level    = "未知"
-		acqFail  string
-		tested   bool // 取帧探测只做一次，别让每个输出白等 100ms
 	)
 
 	for ai := 0; ai < maxEnumerated; ai++ {
@@ -150,13 +149,13 @@ func logDesktopDuplication() {
 			name += "(软件适配器)"
 		}
 
-		aOut, aOK, aFail := probeAdapterOutputs(adapter, &level, &tested, &acqFail)
+		aOut, aOK, aNotes := probeAdapterOutputs(adapter, &level)
 		outputs += aOut
 		dupes += aOK
 
 		entry := fmt.Sprintf("%s %d/%d", name, aOK, aOut)
-		if aFail != "" {
-			entry += "[" + aFail + "]"
+		if len(aNotes) > 0 {
+			entry += "[" + strings.Join(aNotes, "，") + "]"
 		}
 		parts = append(parts, entry)
 
@@ -164,26 +163,27 @@ func logDesktopDuplication() {
 	}
 
 	summary := fmt.Sprintf("%d 个适配器：%s；feature level %s", adapters, strings.Join(parts, "，"), level)
-	if acqFail != "" {
-		// 能复制但取不到帧，等于不能用：日志里必须说清是哪一步挂的，
-		// 否则下次看到「1/1 可复制」会误以为有戏。
-		logger.W("[screenshot] 渲染能力：Desktop Duplication 不可用（%s）—— %s，抓屏继续走 BitBlt", acqFail, summary)
-		return
-	}
 	switch {
 	case adapters == 0:
 		logger.W("[screenshot] 渲染能力：Desktop Duplication 不可用（没有枚举到适配器），抓屏继续走 BitBlt")
-	case dupes > 0:
-		logger.I("[screenshot] 渲染能力：Desktop Duplication 可用（%d/%d 个输出可复制）—— %s", dupes, outputs, summary)
-	default:
+	case dupes == 0:
 		logger.W("[screenshot] 渲染能力：Desktop Duplication 不可用（%d 个输出全部不可复制）—— %s，抓屏继续走 BitBlt", outputs, summary)
+	case dupes < outputs:
+		// 部分输出可用 **不等于** 不可用：双屏里只要主屏能复制，主屏就能走 DDA，
+		// 另一块继续 BitBlt。早期版本把「任一输出失败」当成整体不可用，会把一条
+		// 真正可行的路直接埋掉，所以这里必须单独成一种结论。
+		logger.I("[screenshot] 渲染能力：Desktop Duplication 部分可用（%d/%d 个输出，其余仍走 BitBlt）—— %s", dupes, outputs, summary)
+	default:
+		logger.I("[screenshot] 渲染能力：Desktop Duplication 可用（%d/%d 个输出）—— %s", dupes, outputs, summary)
 	}
 }
 
 // probeAdapterOutputs 在一块适配器上枚举输出并逐个试复制。
-// 返回「输出数 / 可复制数 / 首个失败原因」。tested 与 acqFail 是跨适配器的共享
-// 状态：取帧探测整个进程只做一次，失败结论对全局有效。
-func probeAdapterOutputs(adapter unsafe.Pointer, level *string, tested *bool, acqFail *string) (outputs, duplicable int, firstFail string) {
+// 返回「输出数 / 可复制数 / 每个输出一行说明」。
+//
+// 每个输出独立测试：不能因为第一个输出失败就把后面的按同一结论处理，否则日志里
+// 会出现「1/2 个输出可复制」而实际上只有 1 个被真正测过（早期版本就是这个毛病）。
+func probeAdapterOutputs(adapter unsafe.Pointer, level *string) (outputs, duplicable int, notes []string) {
 	var dev unsafe.Pointer
 	var fl uint32
 	hr, _, _ := procD3D11CreateDevice.Call(
@@ -198,7 +198,7 @@ func probeAdapterOutputs(adapter unsafe.Pointer, level *string, tested *bool, ac
 		0, // 不需要立即上下文
 	)
 	if int32(hr) < 0 || dev == nil {
-		return 0, 0, fmt.Sprintf("建 D3D11 设备失败 hr=%#x", uint32(hr))
+		return 0, 0, []string{fmt.Sprintf("建 D3D11 设备失败 hr=%#x", uint32(hr))}
 	}
 	defer comRelease(dev)
 	if n := featureLevelName(fl); n != "未知" {
@@ -211,12 +211,11 @@ func probeAdapterOutputs(adapter unsafe.Pointer, level *string, tested *bool, ac
 			break
 		}
 		outputs++
+		label := outputLabel(out, oi)
 
 		var out1 unsafe.Pointer
 		if h := comCall(out, idxQueryInterface, uintptr(unsafe.Pointer(&iidIDXGIOutput1)), uintptr(unsafe.Pointer(&out1))); int32(h) < 0 || out1 == nil {
-			if firstFail == "" {
-				firstFail = fmt.Sprintf("输出%d 不支持 IDXGIOutput1", oi)
-			}
+			notes = append(notes, label+" 不支持 IDXGIOutput1")
 			comRelease(out)
 			continue
 		}
@@ -224,37 +223,31 @@ func probeAdapterOutputs(adapter unsafe.Pointer, level *string, tested *bool, ac
 		var dup unsafe.Pointer
 		dh := comCall(out1, idxDuplicateOutput, uintptr(dev), uintptr(unsafe.Pointer(&dup)))
 		if int32(dh) < 0 || dup == nil {
-			if firstFail == "" {
-				firstFail = fmt.Sprintf("输出%d hr=%#x", oi, uint32(dh))
-			}
+			notes = append(notes, fmt.Sprintf("%s 复制失败 hr=%#x", label, uint32(dh)))
 			comRelease(out1)
 			comRelease(out)
 			continue
 		}
 
-		if !*tested {
-			*tested = true
-			hr, ok, why := testDuplicateCycle(dup)
-			// ACCESS_LOST 常常是一次性的（桌面切换、别的截图工具刚释放）。
-			// 直接下「不可用」会误判，重开一次复制再看。
-			if !ok && hr == dxgiErrorAccessLost {
-				comRelease(dup)
-				time.Sleep(80 * time.Millisecond)
-				dup = nil
-				if h := comCall(out1, idxDuplicateOutput, uintptr(dev), uintptr(unsafe.Pointer(&dup))); int32(h) >= 0 && dup != nil {
-					hr, ok, why = testDuplicateCycle(dup)
-				} else {
-					why = fmt.Sprintf("重建复制失败 hr=%#x", uint32(h))
-				}
+		hr, ok, why := testDuplicateCycle(dup)
+		// ACCESS_LOST 常常是一次性的（桌面切换、别的截图工具刚释放）。
+		// 直接下「不可用」会误判，重开一次复制再看。
+		if !ok && hr == dxgiErrorAccessLost {
+			comRelease(dup)
+			time.Sleep(80 * time.Millisecond)
+			dup = nil
+			if h := comCall(out1, idxDuplicateOutput, uintptr(dev), uintptr(unsafe.Pointer(&dup))); int32(h) >= 0 && dup != nil {
+				hr, ok, why = testDuplicateCycle(dup)
+			} else {
+				why = fmt.Sprintf("重建复制失败 hr=%#x", uint32(h))
 			}
-			if ok {
-				duplicable++
-			} else if *acqFail == "" {
-				*acqFail = why
-			}
-		} else {
-			// 已经测过一轮，其余输出只要复制成功就按同一结论处理。
+		}
+
+		if ok {
 			duplicable++
+			notes = append(notes, label+" 可复制")
+		} else {
+			notes = append(notes, label+" "+why)
 		}
 		if dup != nil {
 			comRelease(dup)
@@ -263,7 +256,35 @@ func probeAdapterOutputs(adapter unsafe.Pointer, level *string, tested *bool, ac
 		comRelease(out1)
 		comRelease(out)
 	}
-	return outputs, duplicable, firstFail
+	return outputs, duplicable, notes
+}
+
+// dxgiOutputDesc 对应 DXGI_OUTPUT_DESC。
+type dxgiOutputDesc struct {
+	DeviceName         [32]uint16
+	DesktopCoordinates struct{ Left, Top, Right, Bottom int32 }
+	AttachedToDesktop  int32
+	Rotation           uint32
+	Monitor            uintptr
+}
+
+// outputLabel 给日志用的输出标识：显示器设备名 + 分辨率。
+// 双屏机器上必须能一眼看出「哪块屏可用」，否则拿到「1/2」也不知道能不能做。
+func outputLabel(out unsafe.Pointer, idx int) string {
+	var d dxgiOutputDesc
+	if h := comCall(out, idxOutputGetDesc, uintptr(unsafe.Pointer(&d))); int32(h) < 0 {
+		return fmt.Sprintf("输出%d", idx)
+	}
+	name := utf16Z(d.DeviceName[:])
+	if name == "" {
+		name = fmt.Sprintf("输出%d", idx)
+	}
+	if d.AttachedToDesktop == 0 {
+		return name + "(未连接)"
+	}
+	return fmt.Sprintf("%s(%d×%d)", name,
+		d.DesktopCoordinates.Right-d.DesktopCoordinates.Left,
+		d.DesktopCoordinates.Bottom-d.DesktopCoordinates.Top)
 }
 
 // testDuplicateCycle 在复制对象上跑一遍「取帧 → 释放 → 再取帧」。
@@ -272,6 +293,17 @@ func probeAdapterOutputs(adapter unsafe.Pointer, level *string, tested *bool, ac
 // AcquireNextFrame 也返回 S_OK，但 ReleaseFrame 被驱动拒绝（E_INVALIDARG），
 // 于是第二次取帧立刻变成 DXGI_ERROR_INVALID_CALL——真正的抓屏循环第一步就跑不下去。
 // 只看第一次取帧会得出「可用」的错误结论，而按它去写抓屏路径就是全量失败。
+//
+// 这段曾经被怀疑是「ReleaseFrame 下标写错」，做过一轮排除（2026-10-19，两台机器
+// 复现同样现象）：
+//   - GetDesc(7) 能填出正确的 1920×1080 / B8G8R8A8 / InSystemMemory=0；
+//   - 9/10 按带参数的 Get*Rects 形式调用能返回 S_OK 并写回 required；
+//   - MapDesktopSurface(12) 返回 DXGI_ERROR_UNSUPPORTED（InSystemMemory=0 时的预期值）；
+//   - UnMapDesktopSurface(13) 返回 INVALID_CALL（未 map 时的预期值）；
+//   - 但 9/10/11 三个下标用无参形式调用**全部**返回 E_INVALIDARG。
+//
+// 下标体系与文档一致，是这两台机器的显示栈拒绝释放帧（都挂着虚拟显示 / 远程
+// 控制类驱动）。判据因此保持「释放后还能再取一帧」，并保留整条失败链。
 //
 // 判据：第二次取帧能成功（拿到帧或 WAIT_TIMEOUT 都算）才算可用。
 func testDuplicateCycle(dup unsafe.Pointer) (hr uint32, ok bool, why string) {
