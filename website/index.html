@@ -84,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.21 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.22 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -95,18 +95,18 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.21) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.22) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.21</span>
+<span class="eyebrow">v0.0.22</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.21 让插件系统更稳、环境配置更顺手：插件进程管理重构，修复空指针与状态显示错乱，新增自定义超时；环境管理补上 Go 环境变量配置与自定义数据目录；命令面板的应用搜索改为实时刷新，新装软件不用重启。</p>
+<p>v0.0.22 修掉了一个会让 QuickDock 直接退出的严重问题，同时把截图这条链路从头到尾压了一遍：框选不再每帧重画整屏，复制到剪贴板也省掉了多余的一次全图转换。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">插件更可靠</span><span>重构插件进程管理逻辑，修复空指针与清理流程；插件可通过 plugin.json 声明 backend.timeout，慢接口不再被误判为响应超时。</span></div>
-<div class="tbl-row"><span class="k">环境配置</span><span>新增 Go 环境变量（go env）配置、自定义数据目录；Git 版本管理修复，SSH 私钥探测不再依赖固定文件名。</span></div>
-<div class="tbl-row"><span class="k">搜应用更准</span><span>命令面板的应用列表改为按来源目录变化自动刷新，装完新软件直接 Ctrl+K 就能搜到，不必重启 QuickDock。</span></div>
+<div class="tbl-row"><span class="k">不再闪退</span><span>修复 DeepSeek Harness 启动时的栈溢出：日志读取函数误写成递归调用自身，一旦读取子进程输出就会让宿主进程直接退出，表现为点一下即闪退。现已恢复正常打开。</span></div>
+<div class="tbl-row"><span class="k">框选更跟手</span><span>截图框选改为只重绘变化区域，不再每帧重画整屏；暗化合成与绘制资源改为跨会话复用，按住热键连拍也不用反复申请内存。</span></div>
+<div class="tbl-row"><span class="k">复制更快</span><span>截图复制到剪贴板改走 DIB 直写，省掉一次全图像素格式转换，1080p 下少约 13ms，粘贴前的等待明显缩短。</span></div>
 </div>
 </div>
 </section>
@@ -121,7 +121,17 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.21</span><span class="log-date">2026-10-19</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.22</span><span class="log-date">2026-10-19</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>修复 DeepSeek Harness 启动即闪退：日志读取函数误写成递归调用自身，触发栈溢出后宿主进程直接退出（该致命错误无法被捕获），现已恢复正常打开。</li>
+<li>截图框选改为脏矩形重绘：每帧只还原、只提交发生变化的区域，不再整屏重画，分辨率越高收益越明显。</li>
+<li>截图暗化合成与绘制资源改为跨会话复用，分辨率不变时不再重复申请内存；按键连拍多张更顺。</li>
+<li>截图复制到剪贴板改走 DIB 直写，省掉一次全图像素格式转换（1080p 约 13ms），复制大选区不再明显等待。</li>
+<li>新增截图启动耗时日志：抓屏与逐帧渲染分开记录，便于定位「按下热键后卡一下」发生在哪一段。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.21</span><span class="log-date">2026-10-19</span></summary>
 <ul class="log-body">
 <li>重构插件进程管理逻辑，修复空指针并优化卸载清理流程。</li>
 <li>插件支持在 plugin.json 里声明 backend.timeout，慢接口不再被宿主误判为响应超时。</li>
