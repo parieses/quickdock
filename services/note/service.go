@@ -113,6 +113,29 @@ func (s *NoteService) UpdateNoteDoc(id, content, tags string) *services.ApiResul
 	return services.Ok(nil)
 }
 
+// UpdateNoteDocContent 只更新正文、保留原有标签。
+// 供 MCP note_update 使用：模型常只回传正文，若走 UpdateNoteDoc 会把标签清空。
+func (s *NoteService) UpdateNoteDocContent(id, content string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if err := s.App.DB.UpdateNoteContent(id, content); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// UpdateNoteDocTags 只更新标签、保留原有正文（MCP note_update 只传 tags 时使用）。
+func (s *NoteService) UpdateNoteDocTags(id, tags string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if err := s.App.DB.UpdateNoteTags(id, tags); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
 // SetNoteDocFormat 设置笔记渲染格式（markdown | text）。
 func (s *NoteService) SetNoteDocFormat(id, format string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {

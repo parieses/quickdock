@@ -96,7 +96,12 @@ func Call(name string, args map[string]any) (any, error) {
 // -------- JSON Schema 快捷构造 --------
 
 // Schema 构造 inputSchema。props 形如 {"runtime": Str("运行时 id，如 node")}。
+// props 为 nil 时必须输出空对象 {}：JSON Schema 不允许 "properties": null，
+// 严格的 MCP 客户端会因此判定整个 tools/list 非法。
 func Schema(desc string, required []string, props map[string]any) map[string]any {
+	if props == nil {
+		props = map[string]any{}
+	}
 	s := map[string]any{
 		"type":       "object",
 		"properties": props,

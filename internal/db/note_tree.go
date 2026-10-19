@@ -1,6 +1,8 @@
 package db
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -31,8 +33,10 @@ func scanNoteNode(rows interface {
 }) (*Note, error) {
 	var n Note
 	var isFolder, isNote int
+	// 必须扫到临时 int 再转换：直接扫 &n.IsNote（bool）后又被 isNote 覆盖，
+	// 会让所有节点的 isNote 恒为 false（读模型与库里的 is_note 不一致）。
 	err := rows.Scan(&n.ID, &n.Keyword, &n.Content, &n.Category, &n.Name, &n.ParentID,
-		&isFolder, &n.Sort, &n.Tags, &n.IsNote, &n.Format, &n.CreatedAt)
+		&isFolder, &n.Sort, &n.Tags, &isNote, &n.Format, &n.CreatedAt)
 	n.IsFolder = isFolder != 0
 	n.IsNote = isNote != 0
 	if n.Format == "" {
@@ -64,6 +68,27 @@ func (d *Database) ListNotesTree() ([]Note, error) {
 	return out, rows.Err()
 }
 
+// ensureParentFolderLocked 校验父节点存在且是文件夹（parentID 为空表示根目录）。
+// 不做校验会插入「孤儿」节点：parentId 指向不存在的 id 或某个文档时，
+// 前端树只在文件夹下渲染子节点，节点就会建了却看不见。调用方需持 d.mu。
+func ensureParentFolderLocked(d *Database, parentID string) error {
+	if parentID == "" {
+		return nil
+	}
+	var isFolder int
+	err := d.conn.QueryRow(`SELECT is_folder FROM notes WHERE id = ?`, parentID).Scan(&isFolder)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("父目录不存在: %s（先用 note_search 查文件夹 id，或留空建到根目录）", parentID)
+	}
+	if err != nil {
+		return err
+	}
+	if isFolder == 0 {
+		return fmt.Errorf("父节点不是文件夹: %s（只能挂到 isFolder=true 的节点下）", parentID)
+	}
+	return nil
+}
+
 // CreateNoteFolder 新建文件夹节点（is_folder=1）。
 func (d *Database) CreateNoteFolder(parentID, name string) (*Note, error) {
 	name = strings.TrimSpace(name)
@@ -72,6 +97,9 @@ func (d *Database) CreateNoteFolder(parentID, name string) (*Note, error) {
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if err := ensureParentFolderLocked(d, parentID); err != nil {
+		return nil, err
+	}
 	n := &Note{
 		ID:        newID(),
 		Keyword:   "f:" + newID(), // 占位，保证 UNIQUE
@@ -94,6 +122,9 @@ func (d *Database) CreateNoteFolder(parentID, name string) (*Note, error) {
 func (d *Database) CreateNoteDoc(parentID, name, content, format string) (*Note, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if err := ensureParentFolderLocked(d, parentID); err != nil {
+		return nil, err
+	}
 	name = strings.TrimSpace(name)
 	if name == "" {
 		name = "未命名笔记"
@@ -143,15 +174,52 @@ func (d *Database) RenameNoteNode(id, name string) error {
 	return err
 }
 
-// UpdateNoteDoc 更新文档内容与标签。
+// UpdateNoteDoc 更新文档内容与标签。影响行数为 0 时报错，避免不存在的 id 静默成功。
 func (d *Database) UpdateNoteDoc(id, content, tags string) error {
 	if tags == "" {
 		tags = "[]"
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	_, err := d.conn.Exec(`UPDATE notes SET content = ?, tags = ? WHERE id = ? AND is_folder = 0`, content, tags, id)
-	return err
+	res, err := d.conn.Exec(`UPDATE notes SET content = ?, tags = ? WHERE id = ? AND is_folder = 0`, content, tags, id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("笔记不存在或不是文档: %s", id)
+	}
+	return nil
+}
+
+// UpdateNoteContent 只更新正文，保留标签（MCP note_update 未传 tags 时使用）。
+func (d *Database) UpdateNoteContent(id, content string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	res, err := d.conn.Exec(`UPDATE notes SET content = ? WHERE id = ? AND is_folder = 0`, content, id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("笔记不存在或不是文档: %s", id)
+	}
+	return nil
+}
+
+// UpdateNoteTags 只更新标签，保留正文（MCP note_update 只传 tags 时使用）。
+func (d *Database) UpdateNoteTags(id, tags string) error {
+	if tags == "" {
+		tags = "[]"
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	res, err := d.conn.Exec(`UPDATE notes SET tags = ? WHERE id = ? AND is_folder = 0`, tags, id)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		return fmt.Errorf("笔记不存在或不是文档: %s", id)
+	}
+	return nil
 }
 
 // SetNoteFormat 设置笔记渲染格式（markdown | text）。
