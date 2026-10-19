@@ -141,6 +141,21 @@ func I(format string, args ...interface{}) { Logf("I", format, args...) }
 func W(format string, args ...interface{}) { Logf("W", format, args...) }
 func E(format string, args ...interface{}) { Logf("E", format, args...) }
 
+// Trunc 把可能很长的外部文本（HTTP 响应、子进程输出、模型错误页）压成适合写入日志的一行：
+// 换行/回车替换为空格，避免破坏「一行一条日志」的结构；按 rune 截断，不会切坏中文。
+func Trunc(s string, maxRunes int) string {
+	s = strings.TrimSpace(s)
+	s = strings.NewReplacer("\r", " ", "\n", " ").Replace(s)
+	if maxRunes <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= maxRunes {
+		return s
+	}
+	return string(r[:maxRunes]) + "…(truncated)"
+}
+
 // ===== 插件专属日志 =====
 //
 // 插件日志与主日志分离到独立文件 <dataDir>/logs/plugin-YYYYMMDD.log，

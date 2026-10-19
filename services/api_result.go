@@ -1,6 +1,11 @@
 package services
 
 import (
+	"fmt"
+	"path/filepath"
+	"runtime"
+	"strings"
+
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
 )
@@ -21,11 +26,30 @@ func OkMsg(data interface{}, msg string) *ApiResult {
 	return &ApiResult{Code: 0, Data: data, Msg: msg}
 }
 
+// callerSite 返回首个「业务代码」调用帧（形如 service.go:123），用于给统一错误日志标注来源。
+//
+// Fail/Wrap 是全后端共用出口，若只记 err 文本，日志里出现 "[ERR] no such table: xxx"
+// 时无法判断是哪个接口触发的。此处向上跳栈，跳过本文件的包装帧，取到真正的调用点。
+// 仅在错误路径调用，runtime.Caller 的开销可忽略。
+func callerSite() string {
+	for i := 2; i < 8; i++ {
+		_, file, line, ok := runtime.Caller(i)
+		if !ok {
+			break
+		}
+		if strings.HasSuffix(file, "api_result.go") {
+			continue // wrap/Wrap 等包装帧，继续向上找业务调用点
+		}
+		return fmt.Sprintf("%s:%d", filepath.Base(file), line)
+	}
+	return "unknown"
+}
+
 func Fail(err error) *ApiResult {
 	if err == nil {
 		return &ApiResult{Code: 1, Msg: "unknown error"}
 	}
-	logger.E("[ERR] %v", err)
+	logger.E("[ERR] %s: %v", callerSite(), err)
 	return &ApiResult{Code: 1, Msg: err.Error()}
 }
 
@@ -80,7 +104,7 @@ func (a *AppService) dbOK() *ApiResult {
 // 各 service 的 dbOK() 统一委托至此：DB 未就绪时前端会拿到明确错误而非 nil 解引用崩溃。
 func CheckDB(d *db.Database) *ApiResult {
 	if d == nil {
-		logger.E("QuickDock: database not initialized")
+		logger.E("QuickDock: database not initialized (%s)", callerSite())
 		return FailMsg("database not initialized")
 	}
 	return nil
