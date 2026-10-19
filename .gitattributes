@@ -1,0 +1,37 @@
+# 统一行尾：所有文本文件以 LF 存储与检出，避免 Windows 默认 autocrlf 造成跨平台行尾翻滚。
+* text=auto eol=lf
+
+# 明确标记为文本，确保即使误判也能归一化
+*.go text
+*.ts text
+*.vue text
+*.js text
+*.json text
+*.md text
+*.yml text
+*.yaml text
+*.toml text
+*.sql text
+*.sh text
+*.bat text
+*.ps1 text
+
+# 二进制资源：禁止行尾转换
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.eot binary
+*.otf binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.tar binary
+*.exe binary
+*.dll binary
+*.so binary
