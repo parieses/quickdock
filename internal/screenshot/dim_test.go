@@ -39,6 +39,36 @@ func TestDimHalfOddLen(t *testing.T) {
 	dimHalf(src, dst) // 只走退化路径，不 panic 即可
 }
 
+// TestDimHalfInto 保证双写版本与单写版本逐字节一致——它是首帧省掉整屏拷贝的
+// 依据，两个目标只要有一个写歪了，屏幕上就会有一半暗一半亮。
+func TestDimHalfInto(t *testing.T) {
+	src := make([]byte, 4*257) // 257 个像素：奇数长度，顺带压住 word 视图的退化分支
+	for i := range src {
+		src[i] = byte(i * 7)
+	}
+	want := make([]byte, len(src))
+	dimHalf(src, want)
+
+	a := make([]byte, len(src))
+	b := make([]byte, len(src))
+	dimHalfInto(src, a, b)
+
+	for i := range want {
+		if a[i] != want[i] || b[i] != want[i] {
+			t.Fatalf("下标 %d：a=%#02x b=%#02x want=%#02x", i, a[i], b[i], want[i])
+		}
+	}
+}
+
+// TestDimHalfIntoShortDst 目标缓冲偏短时不能越界（正常路径靠尺寸校验保证一致，
+// 这里锁住退化行为，避免以后改逻辑时踩到）。
+func TestDimHalfIntoShortDst(t *testing.T) {
+	src := make([]byte, 64)
+	a := make([]byte, 32)
+	b := make([]byte, 16)
+	dimHalfInto(src, a, b) // 不 panic 即可
+}
+
 // TestEnsureOpaque 校验抓屏后补 alpha 的行为。
 func TestEnsureOpaque(t *testing.T) {
 	b := &Bitmap{W: 2, H: 1, Pix: []byte{1, 2, 3, 0, 4, 5, 6, 7}}

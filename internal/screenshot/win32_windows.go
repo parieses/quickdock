@@ -25,6 +25,11 @@ var (
 
 	procGetModuleHandleW = kernel32.NewProc("GetModuleHandleW")
 
+	// 把长生命周期的像素缓冲锁进工作集，避免应用在后台待机时被系统裁剪/压缩，
+	// 导致下一次截图首帧要重新换入（见 overlay_windows.go 的 lockWorkingSet）。
+	procVirtualLock   = kernel32.NewProc("VirtualLock")
+	procVirtualUnlock = kernel32.NewProc("VirtualUnlock")
+
 	procRegisterClassW      = user32.NewProc("RegisterClassW")
 	procUnregisterClassW    = user32.NewProc("UnregisterClassW")
 	procCreateWindowExW     = user32.NewProc("CreateWindowExW")
@@ -102,6 +107,7 @@ var (
 	procSelectObject          = gdi32.NewProc("SelectObject")
 	procDeleteObject          = gdi32.NewProc("DeleteObject")
 	procBitBlt                = gdi32.NewProc("BitBlt")
+	procGdiFlush              = gdi32.NewProc("GdiFlush")
 	procStretchBlt            = gdi32.NewProc("StretchBlt")
 	procSetStretchBltMode     = gdi32.NewProc("SetStretchBltMode")
 	procSetBrushOrgEx         = gdi32.NewProc("SetBrushOrgEx")

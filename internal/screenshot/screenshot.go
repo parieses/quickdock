@@ -36,6 +36,31 @@ type Bitmap struct {
 	W   int
 	H   int
 	Pix []byte // len(Pix) == W*H*4
+
+	// release 非 nil 表示 Pix 指向的不是 Go 堆，而是外部（GDI DIB section）内存，
+	// 必须由持有者调用 Close 释放；为 nil 时 Pix 是普通切片，GC 负责回收。
+	//
+	// 为什么允许 Pix 指向外部内存：4K 下一张整屏图是 33MB，抓屏时先 make 一块
+	// 再把 DIB 里的像素 copy 过去，等于白付一次 33MB 分配 + 33MB 拷贝，还因为
+	// 新页未触碰而在后续遍历（补 alpha、暗化）里再付一次缺页。线上 4K 实测：
+	// 首次会话光「补 alpha」就 213ms，稳态 12.6ms，差的就是缺页。
+	//
+	// 代价是生命周期必须显式管理——忘了 Close 就是一次 33MB（4K）的泄漏。
+	release func()
+}
+
+// Close 释放 Pix 背后的外部内存。对普通 Bitmap（release 为 nil）是空操作，
+// 可重复调用。
+//
+// 调用方约定：captureRect 返回的 Bitmap 所有权归调用者；传给 Show 之后由覆盖层
+// 在会话结束时释放（见 Overlay.finish）。未被接管的 Bitmap 必须由调用方 Close。
+func (b *Bitmap) Close() {
+	if b == nil || b.release == nil {
+		return
+	}
+	b.release()
+	b.release = nil
+	b.Pix = nil
 }
 
 // Empty 报告位图是否没有有效像素。
@@ -72,7 +97,7 @@ type Result struct {
 type launchStats struct {
 	started time.Time     // 按下热键的时刻（Select 入口）
 	capture time.Duration // 抓屏全程（GDI 回读）；失败时也记，用于排查「按了没反应」
-	opaque  time.Duration // 抓屏结果补 alpha 的耗时，已含在 capture 之内
+	opaque  time.Duration // 抓屏结果补 alpha 的耗时，与 capture 并列（不重叠）
 }
 
 // Empty 报告本次会话是否没有产出内容。
@@ -149,6 +174,35 @@ func dimHalf(src, dst []byte) {
 		dst[i+1] = src[i+1] >> 1
 		dst[i+2] = src[i+2] >> 1
 		dst[i+3] = 0xFF
+	}
+}
+
+// dimHalfInto 是 dimHalf 的两路输出版本：一趟读源，同时写进 a 和 b。
+//
+// 为什么需要：会话首帧既要一份暗化底图（base，供后续逐帧还原用），又要把暗化
+// 后的整屏摆进提交缓冲（dibPix，省掉首帧一次 base→dibPix 的整屏拷贝）。分成
+// 「先 dim 再 copy」两步，源就要读两遍——4K 下是白扔 33MB 的读带宽。
+func dimHalfInto(src, a, b []byte) {
+	n := minInt(len(src), minInt(len(a), len(b)))
+	if n <= 0 {
+		return
+	}
+	if sw, ok := asWords(src[:n]); ok {
+		if aw, ok2 := asWords(a[:n]); ok2 {
+			if bw, ok3 := asWords(b[:n]); ok3 {
+				for i := range sw {
+					v := ((sw[i] & 0x00FEFEFE) >> 1) | 0xFF000000
+					aw[i] = v
+					bw[i] = v
+				}
+				return
+			}
+		}
+	}
+	for i := 0; i+3 < n; i += 4 {
+		v0, v1, v2 := src[i]>>1, src[i+1]>>1, src[i+2]>>1
+		a[i], a[i+1], a[i+2], a[i+3] = v0, v1, v2, 0xFF
+		b[i], b[i+1], b[i+2], b[i+3] = v0, v1, v2, 0xFF
 	}
 }
 

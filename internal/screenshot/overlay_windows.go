@@ -67,6 +67,21 @@ type Overlay struct {
 	bounds     Rect
 	resultCh   chan outcome
 
+	// winRect 是窗口当前的客户区矩形，用来跳过「尺寸没变」时的 SetWindowPos。
+	// 4K 双屏下把 1×1 的分层窗口改成 3439×2160 要 40ms 以上（实测日志里那段
+	// 「其余」计时），而虚拟桌面尺寸在一次运行里几乎不变，所以 Start 时就先按
+	// 当前桌面预置好，Show 时只做比较。
+	winRect Rect
+
+	// dibDimmed 表示 composeBase 已把暗化后的整屏直接写进 dibPix，首帧不必再
+	// 从 base 整屏拷一遍。用完即清，后续整帧重绘仍走 copy(base)。
+	dibDimmed bool
+
+	// 长生命周期像素缓冲是否已锁进工作集。锁失败（工作集配额不足）保持 false，
+	// 只是省不掉那次换入，不影响功能。
+	lockBase, lockDib bool
+	lockLogged        bool
+
 	// 合帧：鼠标消息只更新状态，出帧由 requestFrame 按预算调度。
 	frameDue   bool      // 有未提交的画面变更
 	frameTimer bool      // 定时器已挂，别重复挂
@@ -270,10 +285,15 @@ func (o *Overlay) Start() error {
 
 // Show 显示覆盖层并把会话结果写入返回的 channel。
 // 用户取消或选区无效时，channel 收到零值 outcome。
+//
+// 所有权：调用成功即由覆盖层接管 src，并在会话结束时释放（见 finish）。三条提前
+// 返回的路径都没有接管，必须在这里 Close——src 的 Pix 可能指向 33MB 的 DIB 内存
+// （4K），漏一次就是一次实打实的泄漏。
 func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome, launch launchStats) {
 	// 连按热键时挡掉重复请求：正在用就以「取消」立刻返回，
 	// 不打断已显示的那一次。
 	if !o.showing.CompareAndSwap(false, true) {
+		src.Close()
 		close(result)
 		return
 	}
@@ -284,6 +304,7 @@ func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome, launch lau
 	o.mu.Unlock()
 	if closed || hwnd == 0 {
 		o.showing.Store(false)
+		src.Close()
 		close(result)
 		return
 	}
@@ -347,6 +368,17 @@ func (o *Overlay) messageLoop(ready chan<- error) {
 	o.mu.Lock()
 	o.hwnd = hwnd
 	o.mu.Unlock()
+
+	// 预置成当前虚拟桌面的尺寸。窗口此时是隐藏的，这一步不产生任何可见效果，
+	// 但能把 Show 路径上的一次大尺寸 SetWindowPos（4K 双屏 40ms+）省掉。
+	// 显示器接插导致桌面尺寸变化时，handleShow 会再比一次并补上。
+	if b := VirtualDesktopBounds(); !b.Empty() {
+		procSetWindowPos.Call(hwnd, hwndTopmost,
+			iptr(b.X), iptr(b.Y), uintptr(b.W), uintptr(b.H),
+			swpNoActivate|swpNoZOrder)
+		o.winRect = b
+	}
+
 	ready <- nil
 
 	var msg msgStruct
@@ -378,6 +410,7 @@ func (o *Overlay) handleShow(cmd *overlayCmd) {
 	// src 必须是整虚拟桌面的截图：尺寸对不上时逐行拷贝会越界。
 	if len(cmd.src.Pix) < cmd.bounds.W*cmd.bounds.H*4 {
 		logger.W("[screenshot] 截图尺寸与虚拟桌面不符，放弃本次框选")
+		cmd.src.Close()
 		o.deliver(outcome{})
 		return
 	}
@@ -404,10 +437,18 @@ func (o *Overlay) handleShow(cmd *overlayCmd) {
 	o.composeBase()
 	o.profCompose = time.Since(tCompose)
 
+	// 暗化底图与提交缓冲都是整屏大小、且跨会话复用，容易被系统当成可回收内存。
+	// 锁一次就常驻，后面每轮会话都不必再付换入成本。
+	o.lockWorkingSet()
+
 	// 3. 位置尺寸在显示之前定死，避免先显示再 resize 造成的"跳一下"。
-	procSetWindowPos.Call(o.hwnd, hwndTopmost,
-		iptr(o.bounds.X), iptr(o.bounds.Y),
-		uintptr(o.bounds.W), uintptr(o.bounds.H), 0)
+	// 尺寸与 Start 时预置的一致就跳过——4K 双屏下这一步本身要 40ms 量级。
+	if o.winRect != o.bounds {
+		procSetWindowPos.Call(o.hwnd, hwndTopmost,
+			iptr(o.bounds.X), iptr(o.bounds.Y),
+			uintptr(o.bounds.W), uintptr(o.bounds.H), 0)
+		o.winRect = o.bounds
+	}
 
 	// 4. 把像素全部画完——此刻窗口仍不可见，用户看不到任何中间态。
 	tPaint := time.Now()
@@ -461,6 +502,8 @@ func (o *Overlay) resetSession() {
 	// DIB 里还是上一轮的内容（甚至是第一次使用的垃圾页），首帧必须整帧重绘。
 	o.paintKnown = false
 	o.paintLastN = 0
+	// 首帧的整屏内容由本轮 composeBase 双写生成，跨越会话残留的标记必须清掉。
+	o.dibDimmed = false
 }
 
 // finishWith 结束会话并按 action 交付结果。
@@ -505,11 +548,15 @@ func (o *Overlay) deliver(res outcome) {
 // VirtualAlloc + 逐页缺页中断，base 是一次 8MB 分配（4K 下 33MB），连着截几张图
 // 时这笔钱每张都要付一遍。代价是停留时多占 16MB 内存（1080p），对桌面工具可接受，
 // 真正的清理放在消息泵退出（messageLoop 里的 releaseDraw）。
+//
+// 但 src 必须在这里释放：它的 Pix 指向抓屏用的 DIB section（见 captureRect），
+// 4K 下一张就 33MB，而且与绘制用的 DIB 是两块不同的内存，留着不会复用。
 func (o *Overlay) finish() {
 	procShowWindow.Call(o.hwnd, swHide)
 	o.hideTextInput()
 	o.logFrameStats()
 	o.logLaunchStats()
+	o.src.Close()
 	o.src = nil
 	o.frameDue = false
 	o.shapes = o.shapes[:0]
@@ -600,6 +647,8 @@ func (o *Overlay) prepareDraw() bool {
 }
 
 func (o *Overlay) releaseDraw() {
+	// 先解锁再释放：锁着页去 DeleteObject 会让 DIB 段无法回收。
+	o.unlockWorkingSet()
 	if o.hMemDC != 0 {
 		if o.hOldBitmap != 0 {
 			procSelectObject.Call(o.hMemDC, o.hOldBitmap)
@@ -624,19 +673,106 @@ func (o *Overlay) releaseDraw() {
 	o.dibW, o.dibH = 0, 0
 }
 
+// noPageLock 关掉缓冲常驻（QD_SHOT_NOLOCK=1）。留这个开关是因为锁页会占用
+// 不可回收的物理内存，内存吃紧的机器上用户可能更希望关掉。
+var noPageLock = os.Getenv("QD_SHOT_NOLOCK") == "1"
+
+// pageLock 把一段已提交的内存锁进进程工作集；失败返回 false。
+//
+// 长度不必页对齐——VirtualLock 内部会把起始地址向下、长度向上取整到页边界。
+func pageLock(b []byte) bool {
+	if len(b) == 0 {
+		return false
+	}
+	ok, _, _ := procVirtualLock.Call(uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)))
+	return ok != 0
+}
+
+func pageUnlock(b []byte) {
+	if len(b) == 0 {
+		return
+	}
+	procVirtualUnlock.Call(uintptr(unsafe.Pointer(&b[0])), uintptr(len(b)))
+}
+
+// lockWorkingSet 把暗化底图与提交缓冲锁进物理内存，防止被系统回收。
+//
+// 依据来自同机实测（3439×2160）：同一台机器上一个小时前「暗化」是 19–36ms，
+// 之后变成 131ms，而同期 BitBlt 抓屏稳定在 225±1ms、补 alpha 反而更快。也就是
+// CPU 频率和内存带宽都没变，变的只有「写一块放了很久的内存」这件事——正是工作集
+// 被裁剪/压缩的典型特征。这两个缓冲恰好是进程里唯一长生命周期的大块内存。
+//
+// 锁页的代价：4K 下 66MB 不可回收内存。失败（配额不足）不报错，只记一行日志，
+// 功能不受影响，只是省不掉那次换入。
+func (o *Overlay) lockWorkingSet() {
+	if noPageLock {
+		return
+	}
+	if !o.lockBase && len(o.base) > 0 {
+		o.lockBase = pageLock(o.base)
+	}
+	if !o.lockDib && len(o.dibPix) > 0 {
+		o.lockDib = pageLock(o.dibPix)
+	}
+	if !o.lockLogged {
+		o.lockLogged = true
+		logger.I("[screenshot] 像素缓冲常驻（%d×%d，%.1fMB）：暗化底图 %s / 提交缓冲 %s",
+			o.bounds.W, o.bounds.H,
+			float64(len(o.base)+len(o.dibPix))/1024/1024,
+			lockState(o.lockBase), lockState(o.lockDib))
+	}
+}
+
+func (o *Overlay) unlockWorkingSet() {
+	if o.lockBase {
+		pageUnlock(o.base)
+		o.lockBase = false
+	}
+	if o.lockDib {
+		pageUnlock(o.dibPix)
+		o.lockDib = false
+	}
+}
+
+func lockState(ok bool) string {
+	if noPageLock {
+		return "已关闭"
+	}
+	if ok {
+		return "已锁定"
+	}
+	return "锁定失败"
+}
+
 // composeBase 把原始截图按 50% 亮度合成到底图，作为每帧重绘的还原起点。
 // 这样逐帧重绘只需要一次 memmove + 选区局部还原，而不是每次全屏逐像素重算。
 //
 // 一趟循环直接「读抓屏结果 → 写底图」，不再先整帧 copy 一遍再原地压暗：
 // 后者要在 8MB 上多走一次读 + 一次写（实测 1.8ms），而压暗本身已经要读源、写目标。
+//
+// 首帧额外做一件事：把同一份暗化结果也写进 dibPix。首帧本来就要把整屏摆上屏幕，
+// 而 base 此刻才刚算出来、内容与首帧要显示的一模一样，先算 base 再拷进 dibPix
+// 等于把整屏搬两趟（4K 下 132MB 流量）。双写之后只剩 99MB，首帧的「还原」一步
+// 直接归零（见 redraw 里的 dibDimmed 分支）。
 func (o *Overlay) composeBase() {
 	if o.src == nil {
 		return
 	}
 	n := o.bounds.W * o.bounds.H * 4
 	if len(o.base) != n {
+		// 换缓冲前必须先解掉旧的锁：地址一换，旧的那 33MB 就再也没人解锁了。
+		if o.lockBase {
+			pageUnlock(o.base)
+			o.lockBase = false
+		}
 		o.base = make([]byte, n)
 	}
+	if len(o.dibPix) == n {
+		dimHalfInto(o.src.Pix, o.base, o.dibPix)
+		o.dibDimmed = true
+		return
+	}
+	// dibPix 不可用（建资源失败等）：只算底图，首帧仍走 copy 路径。
 	dimHalf(o.src.Pix, o.base)
 }
 
@@ -820,7 +956,13 @@ func (o *Overlay) redraw() {
 	tRestoreStart := time.Now()
 	if full {
 		// 整帧：一次 memcpy 把整屏还原成暗化底图。
-		copy(o.dibPix, o.base)
+		// 唯一的例外是本会话第一帧——composeBase 刚把暗化结果同时写进了 dibPix，
+		// 内容与 base 完全一致，再拷一遍纯属白扔 66MB 流量。
+		if o.dibDimmed {
+			o.dibDimmed = false
+		} else {
+			copy(o.dibPix, o.base)
+		}
 	} else {
 		for _, r := range dirty {
 			o.restoreRect(r)
@@ -944,16 +1086,20 @@ func (o *Overlay) logFrameStats() {
 
 // logLaunchStats 输出「按下热键 → 看见遮罩」这一段的一次性成本。
 //
-// 与帧统计分行打印，理由见 launchStats 的注释。四个分项之和约等于「合计可见」，
-// 差值来自线程投递、SetWindowPos、ShowWindow 这几个短调用，不必再细分。
+// 与帧统计分行打印，理由见 launchStats 的注释。五个分项之和加上十几毫秒，约等于
+// 「合计可见」；差额来自线程投递、SetWindowPos、ShowWindow 这几个短调用。
 //
-// 这张表专治一类误判：用户报「截图很卡」，若不拆开看，很容易把 50ms 的抓屏和
-// 6ms 的逐帧混为一谈，进而在错误的环节上做优化。
+// 注意 opaque 与 capture 是**并列**的两段，不是包含关系（2026-10-19 的线上日志
+// 里 4 项相加与合计只差 15ms，反证过这一点）。早期注释和日志文案误写成「含」，
+// 会让读者把总时长少算一个补 alpha 的时间。
+//
+// 这张表专治一类误判：用户报「截图很卡」，若不拆开看，很容易把 200ms 级的抓屏和
+// 几毫秒的逐帧混为一谈，进而在错误的环节上做优化。
 func (o *Overlay) logLaunchStats() {
 	if o.profVisible <= 0 {
 		return
 	}
-	logger.I("[screenshot] 启动（%d×%d）：抓屏 %s（含补 alpha %s）/ 建资源 %s / 暗化 %s / 首帧绘制 %s / 合计可见 %s",
+	logger.I("[screenshot] 启动（%d×%d）：抓屏 %s + 补 alpha %s / 建资源 %s / 暗化 %s / 首帧绘制 %s / 合计可见 %s",
 		o.bounds.W, o.bounds.H,
 		ms(o.launch.capture), ms(o.launch.opaque),
 		ms(o.profPrepare), ms(o.profCompose), ms(o.profFirstPaint), ms(o.profVisible))

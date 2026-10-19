@@ -56,6 +56,13 @@ func monitorWork(hmon uintptr) (Rect, bool) {
 //
 // 实现上用 CreateDIBSection 建目标位图：BitBlt 直接把像素落进我们持有的内存，
 // 省掉 GetDIBits 的二次拷贝，4K 双屏下能少一次几十 MB 的搬运。
+//
+// 返回的 Bitmap **直接引用 DIB section 的内存**，不再 copy 到 Go 堆（见 Bitmap.release）。
+// 这对 4K 尤其重要：整屏 33MB，原来的 make+copy 等于白付一次分配、一次 33MB 拷贝，
+// 而且新页未触碰，随后补 alpha / 暗化再遍历时又要逐页缺页。线上 4K 机器首次会话
+// 「补 alpha」213ms、稳态 12.6ms，差的就是这批缺页。
+//
+// 代价是生命周期：调用方用完必须 Close（覆盖层在会话结束时负责，见 Overlay.finish）。
 func captureRect(r Rect) (*Bitmap, error) {
 	if r.Empty() {
 		return nil, fmt.Errorf("screenshot: 无效的抓取区域 %dx%d", r.W, r.H)
@@ -71,7 +78,6 @@ func captureRect(r Rect) (*Bitmap, error) {
 	if hMemDC == 0 {
 		return nil, fmt.Errorf("screenshot: CreateCompatibleDC 失败")
 	}
-	defer procDeleteDC.Call(hMemDC)
 
 	// 负 height 表示 top-down：内存里第一行就是屏幕最上面一行，与 Bitmap.Pix 约定一致。
 	bi := bitmapInfo{
@@ -94,30 +100,42 @@ func captureRect(r Rect) (*Bitmap, error) {
 		0, 0,
 	)
 	if hBitmap == 0 || pixels == nil {
+		procDeleteDC.Call(hMemDC)
 		return nil, fmt.Errorf("screenshot: CreateDIBSection 失败")
 	}
-	defer procDeleteObject.Call(hBitmap)
 
 	oldBitmap, _, _ := procSelectObject.Call(hMemDC, hBitmap)
 	if oldBitmap == 0 {
+		procDeleteObject.Call(hBitmap)
+		procDeleteDC.Call(hMemDC)
 		return nil, fmt.Errorf("screenshot: SelectObject 失败")
 	}
-	defer procSelectObject.Call(hMemDC, oldBitmap)
 
 	// CAPTUREBLT 让分层窗口（部分悬浮窗、其他截图工具的选区层）也一并抓进来。
 	// 覆盖层自身的显示必然发生在抓屏之后（见 SelectionOrErr），因此不会被拍进来。
+	// 实测这个标志对性能没有影响（带与不带都在噪声内），不用为了速度去掉。
 	ok, _, _ := procBitBlt.Call(
 		hMemDC, 0, 0, uintptr(r.W), uintptr(r.H),
 		hScreenDC, iptr(r.X), iptr(r.Y),
 		srcCopy|captureBlt,
 	)
+
+	// 解绑与删 DC 必须在读取像素之前做：位图仍在 DC 里选中时，DeleteObject 会失败。
+	// DIB section 的像素内存挂在 hBitmap 上，与 DC 无关，所以 DC 删掉后内存照样有效。
+	procSelectObject.Call(hMemDC, oldBitmap)
+	procDeleteDC.Call(hMemDC)
 	if ok == 0 {
+		procDeleteObject.Call(hBitmap)
 		return nil, fmt.Errorf("screenshot: BitBlt 失败")
 	}
 
-	n := r.W * r.H * 4
-	pix := make([]byte, n)
-	copy(pix, unsafe.Slice((*byte)(pixels), n))
+	// GDI 是批处理的，BitBlt 返回不代表像素已经落到内存。以前每次都要 copy 一遍，
+	// copy 顺带等到了写入完成；现在直接读这块内存，必须显式 flush，否则可能抓到
+	// 上一帧的残留（表现为截图里混入旧画面）。
+	procGdiFlush.Call()
 
-	return &Bitmap{W: r.W, H: r.H, Pix: pix}, nil
+	n := r.W * r.H * 4
+	b := &Bitmap{W: r.W, H: r.H, Pix: unsafe.Slice((*byte)(pixels), n)}
+	b.release = func() { procDeleteObject.Call(hBitmap) }
+	return b, nil
 }

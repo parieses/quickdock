@@ -19,6 +19,7 @@ func (o *Overlay) Stop() {}
 
 // Show 立即以「用户取消」结束本次会话。
 func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome, _ launchStats) {
+	src.Close() // 没有接管，交还所有权（普通 Bitmap 上是空操作）
 	select {
 	case result <- outcome{}:
 	default:
