@@ -84,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.17 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.21 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -95,18 +95,18 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.17) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.21) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.17</span>
+<span class="eyebrow">v0.0.21</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.17 让插件更轻、更新更稳：插件改为懒加载，窗口即关即释放；新增系统打印能力；自动更新体验优化，顺手修掉 Windows 控制台闪屏。</p>
+<p>v0.0.21 让插件系统更稳、环境配置更顺手：插件进程管理重构，修复空指针与状态显示错乱，新增自定义超时；环境管理补上 Go 环境变量配置与自定义数据目录；命令面板的应用搜索改为实时刷新，新装软件不用重启。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">插件懒加载</span><span>插件改为按需加载，启动更快、内存占用更低；插件窗口关闭后立即释放，不再留后台进程。</span></div>
-<div class="tbl-row"><span class="k">系统打印</span><span>插件可通过宿主调用系统打印（host.dialog 打印通道），本地文件、报表一键出纸；Host API 文档同步更新。</span></div>
-<div class="tbl-row"><span class="k">更新更稳</span><span>优化自动更新体验，修复 Windows 下控制台闪屏；新增方括号热键，可在多显示器之间搬运窗口。</span></div>
+<div class="tbl-row"><span class="k">插件更可靠</span><span>重构插件进程管理逻辑，修复空指针与清理流程；插件可通过 plugin.json 声明 backend.timeout，慢接口不再被误判为响应超时。</span></div>
+<div class="tbl-row"><span class="k">环境配置</span><span>新增 Go 环境变量（go env）配置、自定义数据目录；Git 版本管理修复，SSH 私钥探测不再依赖固定文件名。</span></div>
+<div class="tbl-row"><span class="k">搜应用更准</span><span>命令面板的应用列表改为按来源目录变化自动刷新，装完新软件直接 Ctrl+K 就能搜到，不必重启 QuickDock。</span></div>
 </div>
 </div>
 </section>
@@ -121,7 +121,44 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.17</span><span class="log-date">2026-09-22</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.21</span><span class="log-date">2026-10-19</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>重构插件进程管理逻辑，修复空指针并优化卸载清理流程。</li>
+<li>插件支持在 plugin.json 里声明 backend.timeout，慢接口不再被宿主误判为响应超时。</li>
+<li>环境管理新增 Go 环境变量（go env）配置与自定义数据目录；Git 版本管理修复，SSH 私钥探测不再只认固定文件名。</li>
+<li>命令面板的应用列表改为按来源目录变化自动刷新，装完新软件直接 Ctrl+K 就能搜到，不必重启。</li>
+<li>修复快捷笔记「问 AI」与面板搜笔记会把完整主界面渲染进小浮窗的问题，跨窗口跳转改由后端统一调度。</li>
+<li>修复笔记树读取时类型标记恒为 false、新建笔记挂错父节点后看不见，以及 MCP 更新笔记只改正文会清空标签的问题。</li>
+<li>仓库新增 .gitattributes 统一 LF 行尾，跨平台协作不再出现整文件行尾翻滚。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.20</span><span class="log-date">2026-10-10</span></summary>
+<ul class="log-body">
+<li>插件新增显式禁用状态，区分「用户主动禁用」与「进程意外停止」。</li>
+<li>健康检查重构为闲置降级循环：闲置插件自动释放后端资源，不占着内存不放。</li>
+<li>插件改用独立窗口，关闭窗口不再连带终止后端进程，首屏加载更快。</li>
+<li>托盘新增插件强制关闭入口；热键注册失败时前端给出明确提示。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.19</span><span class="log-date">2026-10-08</span></summary>
+<ul class="log-body">
+<li>插件市场新增安装状态筛选，已装 / 未装 / 可更新一眼分开。</li>
+<li>插件图标支持主题适配，切换明暗主题时自动加载对应变体。</li>
+<li>修复禁用插件从管理页消失、站点路径含空格解析出错、定时任务重复执行等问题。</li>
+<li>数据库只读查询改用读锁，并拆分图标提取与持久化，降低并发阻塞。</li>
+<li>修复 Windows 发布流程的路径与编码问题，构建不再卡在 CI。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.18</span><span class="log-date">2026-09-23</span></summary>
+<ul class="log-body">
+<li>插件图标支持按主题切换，命令面板与管理页在明暗主题下都能显示正确图标。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.17</span><span class="log-date">2026-09-22</span></summary>
 <ul class="log-body">
 <li>插件改为按需加载，窗口关闭立即释放，启动更快、内存占用更低。</li>
 <li>插件可通过宿主调用系统打印，本地文件与报表一键出纸。</li>
