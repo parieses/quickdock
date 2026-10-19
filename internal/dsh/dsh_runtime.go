@@ -32,7 +32,7 @@ import (
 // Scan 会静默停止读取，管道数据无人消费 → 子进程写满 64KB 管道缓冲后永久阻塞（卡死），
 // 且退出不会被 cmd.Wait 正常感知。放大到 16MB 上限以容纳异常大行。
 func newLogScanner(r io.Reader) *bufio.Scanner {
-	sc := newLogScanner(r)
+	sc := bufio.NewScanner(r)
 	sc.Buffer(make([]byte, 0, 1024*1024), 16*1024*1024)
 	return sc
 }
