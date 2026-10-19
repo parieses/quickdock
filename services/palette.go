@@ -1,5 +1,9 @@
 package services
 
+import (
+	"strings"
+)
+
 // ===== 命令面板 =====
 
 // SearchAll 跨全部工作空间搜索项目（使用 FTS5）
@@ -54,4 +58,25 @@ func (a *AppService) HidePaletteWindow() {
 			win.Hide()
 		}
 	}
+}
+
+// OpenNoteFromPalette 命令面板选中笔记：隐藏面板 → 显示并聚焦主窗口 →
+// 广播 note:open-request 事件（携带笔记 id），主窗口监听后写入 pendingOpenNoteId
+// 并切到笔记页。必须经后端中转：面板浮窗与主窗口是两个 WebView，JS 状态互不可见；
+// 此前在面板内直接 navigateTo('notes') 会把完整主界面渲染进面板小窗（样式错乱）。
+func (a *AppService) OpenNoteFromPalette(noteId string) *ApiResult {
+	noteId = strings.TrimSpace(noteId)
+	if noteId == "" {
+		return FailMsg("笔记 ID 为空")
+	}
+	if a.app == nil {
+		return FailMsg("应用未就绪")
+	}
+	a.HidePaletteWindow()
+	if a.MainWindow != nil {
+		a.MainWindow.Show()
+		a.MainWindow.Focus()
+	}
+	a.app.Event.Emit("note:open-request", noteId)
+	return Ok(nil)
 }

@@ -397,7 +397,9 @@ async function saveAsNote(content: string) {
   }
 }
 
-// 笔记 → AI：监听来自笔记面板的草稿，注入输入框并聚焦
+// 笔记 → AI：监听来自笔记面板的草稿，注入输入框并聚焦。
+// immediate：文本经 App.vue 写入 aiDraft 时 AI 页可能尚未挂载（异步组件），
+// 挂载时需立即消费一次，否则草稿会滞留、输入框为空。
 watch(aiDraft, (v) => {
   if (v && v.trim()) {
     input.value = v
@@ -407,7 +409,7 @@ watch(aiDraft, (v) => {
       ta?.focus()
     })
   }
-})
+}, { immediate: true })
 
 function onDocMouseDown(e: MouseEvent) {
   const pop = document.querySelector('.ai-sel-copy')

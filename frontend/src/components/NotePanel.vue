@@ -1,12 +1,15 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { StickyNote, Check, Loader2, MessageCircleQuestion } from '@lucide/vue'
-import { GetNote, SaveNote } from '../../bindings/quickdock/services/note/noteservice'
+import { GetNote, SaveNote, AskAI } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
-import { aiDraft, navigateTo } from '../composables/bridge'
+import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
+import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
+const toast = inject<ToastAPI>('toast')!
 
 const note = ref('')
 const loaded = ref(false)
@@ -52,8 +55,11 @@ onUnmounted(() => {
   }
 })
 
-// 问 AI：优先取划选文本，否则取整篇笔记，注入 AI 输入框并跳转
-function askAI() {
+// 问 AI：优先取划选文本，否则取整篇笔记。
+// 本组件只运行在独立笔记浮窗里，与主窗口是两个 WebView、JS 状态互不可见，
+// 所以交给后端处理：隐藏本浮窗 + 唤起主窗口 + 广播文本（App.vue 监听后注入 AI 页）。
+// 浮窗内直接 navigateTo('ai') 会把完整主界面渲染进小浮窗，导致样式错乱。
+async function askAI() {
   const ta = areaRef.value
   let text = ''
   if (ta && ta.selectionStart !== ta.selectionEnd) {
@@ -61,8 +67,12 @@ function askAI() {
   }
   if (!text.trim()) text = note.value
   if (!text.trim()) return
-  aiDraft.value = text
-  navigateTo.value?.('ai')
+  try {
+    unwrap(await AskAI(text))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('NotePanel', e)
+  }
 }
 </script>
 

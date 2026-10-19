@@ -8,13 +8,12 @@ import {
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
   Copy, FolderSearch, Play, Save, Gauge
 } from '@lucide/vue'
-import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection, OpenNoteFromPalette } from '../../bindings/quickdock/services/appservice'
 import { ExecuteSystemCommand, RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
 import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
 import { GetAllUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
 import { DeleteItem, GetPathQuickInfo } from '../../bindings/quickdock/services/item/itemservice'
-import { navigateTo, pendingOpenNoteId } from '../composables/bridge'
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import {
   EnvList,
@@ -658,8 +657,10 @@ async function executeSelected() {
     try { await writeClipboard(result.calcResult) } catch {}; closePalette()
   } else if (result.type === 'note' && result.note) {
     recordUsage('note:' + result.note.id, 'note', result.label, result.desc)
-    pendingOpenNoteId.value = result.note.id
-    navigateTo.value?.('notes')
+    // 面板是独立浮窗，与主窗口 JS 状态不互通；交后端隐藏本窗 + 唤起主窗口
+    // 并广播笔记 id（App.vue 监听后写入 pendingOpenNoteId 并切到笔记页）。
+    // 面板内直接 navigateTo 会把完整主界面渲染进小浮窗，导致样式错乱。
+    try { await OpenNoteFromPalette(result.note.id) } catch (e) { console.error('[CmdPalette] OpenNoteFromPalette:', e) }
     closePalette()
   } else if (result.type === 'app' && result.appPath) {
     recordUsage('app:' + result.label, 'app', result.label, result.desc)
