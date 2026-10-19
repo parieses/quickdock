@@ -101,10 +101,11 @@
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
 <span class="eyebrow">v0.0.22</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.22 修掉了一个会让 QuickDock 直接退出的严重问题，同时把截图这条链路从头到尾压了一遍：框选不再每帧重画整屏，复制到剪贴板也省掉了多余的一次全图转换。</p>
+<p>v0.0.22 修掉了一个会让 QuickDock 直接退出的严重问题，同时把截图这条链路从头到尾压了一遍：高分屏上按下快捷键的等待大幅缩短，框选不再每帧重画整屏，复制到剪贴板也省掉了多余的一次全图转换。</p>
 </div>
 <div class="tbl wide">
 <div class="tbl-row"><span class="k">不再闪退</span><span>修复 DeepSeek Harness 启动时的栈溢出：日志读取函数误写成递归调用自身，一旦读取子进程输出就会让宿主进程直接退出，表现为点一下即闪退。现已恢复正常打开。</span></div>
+<div class="tbl-row"><span class="k">高分屏不再等</span><span>截图抓屏不再把整屏像素多拷一份，首帧也不再重复搬运整屏；4K、双屏这类大桌面下，按下热键到看见遮罩的等待明显缩短。</span></div>
 <div class="tbl-row"><span class="k">框选更跟手</span><span>截图框选改为只重绘变化区域，不再每帧重画整屏；暗化合成与绘制资源改为跨会话复用，按住热键连拍也不用反复申请内存。</span></div>
 <div class="tbl-row"><span class="k">复制更快</span><span>截图复制到剪贴板改走 DIB 直写，省掉一次全图像素格式转换，1080p 下少约 13ms，粘贴前的等待明显缩短。</span></div>
 </div>
@@ -124,6 +125,9 @@
 <summary><span class="log-ver">v0.0.22</span><span class="log-date">2026-10-19</span><span class="tag tag-low log-new">最新</span></summary>
 <ul class="log-body">
 <li>修复 DeepSeek Harness 启动即闪退：日志读取函数误写成递归调用自身，触发栈溢出后宿主进程直接退出（该致命错误无法被捕获），现已恢复正常打开。</li>
+<li>截图抓屏不再把整屏像素复制一份，改为直接使用抓到的画面；4K / 双屏这类大桌面下，按下热键后的等待明显缩短，首次截图尤其明显。</li>
+<li>截图首帧不再重复搬运一次整屏像素：暗化结果一次写到位，遮罩出现更快。</li>
+<li>长时间待机后截图依然跟手：暗化底图与绘制缓冲常驻内存，不会被系统回收后重新加载；内存吃紧时可用环境变量 QD_SHOT_NOLOCK=1 关闭该行为。</li>
 <li>截图框选改为脏矩形重绘：每帧只还原、只提交发生变化的区域，不再整屏重画，分辨率越高收益越明显。</li>
 <li>截图暗化合成与绘制资源改为跨会话复用，分辨率不变时不再重复申请内存；按键连拍多张更顺。</li>
 <li>截图复制到剪贴板改走 DIB 直写，省掉一次全图像素格式转换（1080p 约 13ms），复制大选区不再明显等待。</li>
