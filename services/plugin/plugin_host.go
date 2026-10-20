@@ -348,6 +348,72 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 		return map[string]interface{}{"success": true, "pid": arg.PID}, nil
 	})
 
+	// ---- 加密 / 解密（替代 iframe 里不可用的 window.crypto.subtle）----
+	// iframe 的 sandbox 不含 allow-same-origin → opaque origin → crypto.subtle 不可用，
+	// 插件（如 vault）只能降级成异或混淆。这里把 AES-256-GCM + PBKDF2 放到宿主持有完成。
+	// 无需 permissions：加密本身不触碰任何受控资源，密钥材料只存在于单次调用内。
+	// 明文上限 1 MiB、PBKDF2 100000 次（与 vault 前端参数一致，保证新旧路径可互解）。
+	svc.App.PluginMgr.InjectHostMethod("host.crypto.encrypt", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		var arg struct {
+			Password  string `json:"password"`
+			Salt      string `json:"salt"`
+			Plaintext string `json:"plaintext"`
+		}
+		if err := json.Unmarshal(params, &arg); err != nil {
+			return nil, fmt.Errorf("参数解析失败: %w", err)
+		}
+		salt, err := plugin.B64(arg.Salt)
+		if err != nil {
+			return nil, err
+		}
+		plain, err := plugin.B64(arg.Plaintext)
+		if err != nil {
+			return nil, err
+		}
+		iv, data, err := plugin.EncryptForPlugin(arg.Password, salt, plain)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"iv": iv, "data": data}, nil
+	})
+	svc.App.PluginMgr.InjectHostMethod("host.crypto.decrypt", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		var arg struct {
+			Password string `json:"password"`
+			Salt     string `json:"salt"`
+			IV       string `json:"iv"`
+			Data     string `json:"data"`
+		}
+		if err := json.Unmarshal(params, &arg); err != nil {
+			return nil, fmt.Errorf("参数解析失败: %w", err)
+		}
+		salt, err := plugin.B64(arg.Salt)
+		if err != nil {
+			return nil, err
+		}
+		plain, err := plugin.DecryptForPlugin(arg.Password, salt, arg.IV, arg.Data)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"plaintext": plugin.B64Enc(plain)}, nil
+	})
+	// 密码学随机数（生成 salt / IV / 随机密码）。
+	svc.App.PluginMgr.InjectHostMethod("host.crypto.random", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		var arg struct {
+			Bytes int `json:"bytes"`
+		}
+		if err := json.Unmarshal(params, &arg); err != nil {
+			return nil, fmt.Errorf("参数解析失败: %w", err)
+		}
+		if arg.Bytes <= 0 {
+			arg.Bytes = 16 // 默认 128-bit
+		}
+		s, err := plugin.RandomForPlugin(arg.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"base64": s}, nil
+	})
+
 	// ---- MCP 工具 ----
 	// 复用宿主内置 MCP Server 已注册的工具（item/note/todo/clipboard/env/port…），
 	// 插件无需重复实现检索与业务能力，且与 AI 客户端共享同一能力面。

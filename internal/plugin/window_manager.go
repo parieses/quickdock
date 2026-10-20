@@ -328,7 +328,15 @@ func (m *PluginWindowManager) ToggleMaximize(pluginID string) {
 	}
 }
 
-// InjectInitText 向指定插件窗口注入初始文本 + 命中的子命令（从命令面板跨窗口传递）
+// InjectInitText 向指定插件窗口注入初始文本 + 命中的子命令（从命令面板跨窗口传递）。
+//
+// 为什么要带 theme / locale：这是「窗口已打开、命令面板再次命中同一插件」时
+// 唯一的 init 通道。早先这里只下发 text/command，插件收到的 plugin:init
+// 里 data.theme 为 undefined。虽然窗口初次 onLoad 时 usePluginHost 已经发过
+// 带 theme 的 init，但此后用户可能在主窗口切了主题——此时这条迟到的 init
+// 反而成了插件唯一能拿到的「当前状态」信号，缺了 theme 就会用旧值渲染。
+// 取值口径与前端 currentThemeName() 一致：读本窗口 <html data-theme>，
+// 该属性由 plugin-entry.ts 启动时对齐、并随 quickdock:theme-changed 广播更新。
 func (m *PluginWindowManager) InjectInitText(pluginID, text, command string) {
 	m.mu.Lock()
 	win, ok := m.windows[pluginID]
@@ -341,6 +349,10 @@ func (m *PluginWindowManager) InjectInitText(pluginID, text, command string) {
 	win.ExecJS(fmt.Sprintf(
 		`setTimeout(function(){
 			var ifr = document.querySelector('iframe');
-			if (ifr && ifr.contentWindow) ifr.contentWindow.postMessage({type:'plugin:init', data:{text:%s, command:%s}}, '*');
+			if (!ifr || !ifr.contentWindow) return;
+			var de = document.documentElement;
+			var theme = de.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+			var locale = de.getAttribute('lang') || 'zh-CN';
+			ifr.contentWindow.postMessage({type:'plugin:init', data:{text:%s, command:%s, theme:theme, locale:locale}}, '*');
 		}, 400)`, safeText, safeCmd))
 }

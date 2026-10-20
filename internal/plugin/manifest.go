@@ -100,6 +100,15 @@ func validateManifest(m *PluginManifest) error {
 	if err := m.Permissions.Process.Validate(); err != nil {
 		return err
 	}
+	// 结束进程的目标白名单条目非空校验（bool 写法无需校验）。
+	if err := m.Permissions.ProcessKill.Validate(); err != nil {
+		return err
+	}
+	// 权限自证逃生舱：selfAudit=skip 时 skipReason 必填，
+	// 否则任何人都能用一个空壳理由静默关掉安装期审计。
+	if err := m.Permissions.Validate(); err != nil {
+		return err
+	}
 
 	return nil
 }

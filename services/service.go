@@ -78,6 +78,10 @@ type AppService struct {
 	ClipboardCtx    context.Context
 	ClipboardCancel func()
 
+	// 剪贴板变更信号（容量 1，丢弃式发送做合并）：Win32 消息线程只置信号，
+	// 真正的读取/解析/入库在 startClipboardWorker 起的协程上执行（见 clipboard_sys.go）。
+	clipboardWake chan struct{}
+
 	// 监控在检标记：防止同一监控并发检测（慢探针未更新 last_checked_ts 时被重复选为待检）
 	// 导致宕机时重复发送通知。LoadOrStore 原子保证同一时刻仅一个检查协程通过。
 	monitorInflight sync.Map // monitorID -> struct{}

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"quickdock/internal/logger"
+	"quickdock/internal/sysutil"
 )
 
 // ---- 权限校验 ----
@@ -79,8 +80,24 @@ func (m *Manager) checkPermission(pluginID string, method string, params json.Ra
 			return fmt.Errorf("%w: 插件 %q 无权打开目标 %s（不在 permissions.shell 白名单内）", ErrPermissionDenied, pluginID, t)
 		}
 	case method == "host.process.kill":
-		if !inst.Manifest.Permissions.ProcessKill {
-			return fmt.Errorf("%w: 插件 %q 没有 processKill 权限（kill 是高危操作，需显式声明 permissions.processKill）", ErrPermissionDenied, pluginID)
+		kill := inst.Manifest.Permissions.ProcessKill
+		if !kill.Granted() {
+			return fmt.Errorf("%w: 插件 %q 没有 processKill 权限（结束进程是高危操作，需显式声明 permissions.processKill）", ErrPermissionDenied, pluginID)
+		}
+		// 声明了目标白名单时，先查出「这一刀砍的是谁」再决定放行。
+		// 取不到名字（进程已退出/权限不足）按拒绝处理——证明不了清白就不能砍。
+		if len(kill.Programs) > 0 {
+			pid, ok := jsonIntField(params, "pid")
+			if !ok {
+				return fmt.Errorf("%w: host.process.kill 缺少有效的 pid 参数", ErrPermissionDenied)
+			}
+			name := sysutil.ProcessName(pid)
+			if name == "" {
+				return fmt.Errorf("%w: 取不到 PID %d 的进程名，无法核对 permissions.processKill 白名单，已拒绝", ErrPermissionDenied, pid)
+			}
+			if !kill.AllowsTarget(name) {
+				return fmt.Errorf("%w: 插件 %q 的 processKill 白名单不含 %s（PID %d）", ErrPermissionDenied, pluginID, name, pid)
+			}
 		}
 	case method == "host.process.exec":
 		proc := inst.Manifest.Permissions.Process
@@ -151,6 +168,26 @@ func jsonStringField(params json.RawMessage, field string) (string, bool) {
 		return "", false
 	}
 	return s, true
+}
+
+// jsonIntField 从 JSON-RPC params 中安全取出一个整数字段。
+// 字段不存在、不是数字或为浮点非整数时返回 ok=false。
+// 与 jsonStringField 同一口径：解析不出来的字段一律不参与后续校验，
+// 由调用方决定是拒绝还是忽略。
+func jsonIntField(params json.RawMessage, field string) (int, bool) {
+	var args map[string]json.RawMessage
+	if err := json.Unmarshal(params, &args); err != nil {
+		return 0, false
+	}
+	v, ok := args[field]
+	if !ok {
+		return 0, false
+	}
+	var n int
+	if err := json.Unmarshal(v, &n); err != nil {
+		return 0, false
+	}
+	return n, true
 }
 
 // ---- Host Method 注册 ----

@@ -83,7 +83,7 @@ func (p *PluginService) InstallPlugin(zipPath string) *services.ApiResult {
 	}
 	// 写入数据库记录（含 capabilities / permissions / category / icon）
 	permissions := make(map[string]interface{})
-	if manifest.Permissions.Network.Granted() || manifest.Permissions.Filesystem.Granted() || manifest.Permissions.Clipboard || manifest.Permissions.Shell.Granted() || manifest.Permissions.ProcessKill {
+	if manifest.Permissions.Network.Granted() || manifest.Permissions.Filesystem.Granted() || manifest.Permissions.Clipboard || manifest.Permissions.Shell.Granted() || manifest.Permissions.ProcessKill.Granted() {
 		permissions["network"] = manifest.Permissions.Network
 		permissions["filesystem"] = manifest.Permissions.Filesystem
 		permissions["clipboard"] = manifest.Permissions.Clipboard

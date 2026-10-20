@@ -123,6 +123,11 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	// 设置全局 App 引用（供 SetClipboardText 等函数使用）
 	AppRef.Store(a.app)
 
+	// 启动剪贴板捕获工作协程：WM_CLIPBOARDUPDATE 回调只置信号，读取/解析/入库都在
+	// 这条协程上做（详见 clipboard_sys.go 的 startClipboardWorker）。必须早于
+	// StartHotkeyListenerFn——监听一旦启动就会立刻收到变更通知。
+	a.startClipboardWorker(a.ClipboardCtx)
+
 	// 启动全局快捷键和系统托盘（由 main 包注入的回调）
 	a.Flags.Main.Store(true)
 	if a.StartHotkeyListenerFn != nil {

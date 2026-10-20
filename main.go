@@ -730,7 +730,7 @@ func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *
 
 			// 写入数据库记录（含 capabilities / permissions / category / icon）
 			perms := make(map[string]interface{})
-			if mf.Permissions.Network.Granted() || mf.Permissions.Filesystem.Granted() || mf.Permissions.Clipboard || mf.Permissions.Shell.Granted() || mf.Permissions.ProcessKill {
+			if mf.Permissions.Network.Granted() || mf.Permissions.Filesystem.Granted() || mf.Permissions.Clipboard || mf.Permissions.Shell.Granted() || mf.Permissions.ProcessKill.Granted() {
 				perms["network"] = mf.Permissions.Network
 				perms["filesystem"] = mf.Permissions.Filesystem
 				perms["clipboard"] = mf.Permissions.Clipboard

@@ -353,10 +353,27 @@ func TestCheckPermissionNetworkShellProcess(t *testing.T) {
 	})
 	t.Run("process.kill 显式授权后放行", func(t *testing.T) {
 		const pid = "test.kill"
-		addTestPlugin(m, pid, Permissions{ProcessKill: true})
+		addTestPlugin(m, pid, Permissions{ProcessKill: ProcessKillPerm{All: true}})
 		_, err := m.invokeHostMethod(pid, "host.process.kill", json.RawMessage(`{"pid":1234}`))
 		if err != nil {
 			t.Fatalf("已授权应放行: %v", err)
+		}
+	})
+	t.Run("process.kill 白名单不含目标时拒绝", func(t *testing.T) {
+		const pid = "test.kill.scoped"
+		addTestPlugin(m, pid, Permissions{ProcessKill: ProcessKillPerm{Programs: []string{"chrome"}}})
+		// 查不到进程名（PID 1234 不存在）时也必须拒绝：证明不了清白就不能砍。
+		_, err := m.invokeHostMethod(pid, "host.process.kill", json.RawMessage(`{"pid":1234}`))
+		if !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("取不到进程名应拒绝，得到: %v", err)
+		}
+	})
+	t.Run("process.kill 缺 pid 参数时拒绝", func(t *testing.T) {
+		const pid = "test.kill.nopid"
+		addTestPlugin(m, pid, Permissions{ProcessKill: ProcessKillPerm{Programs: []string{"chrome"}}})
+		_, err := m.invokeHostMethod(pid, "host.process.kill", json.RawMessage(`{}`))
+		if !errors.Is(err, ErrPermissionDenied) {
+			t.Fatalf("缺 pid 应拒绝，得到: %v", err)
 		}
 	})
 }

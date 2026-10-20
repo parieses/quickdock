@@ -44,7 +44,8 @@ import (
 
 // AuditFinding 一条审计发现
 type AuditFinding struct {
-	// Kind 危险能力类别：fs_write / fs_read / exec / raw_net
+	// Kind 危险能力类别：fs_write / fs_read / exec / raw_net /
+	// clipboard / process_kill / shell_open
 	Kind string
 	// API 命中的 API，如 "os.Remove"
 	API string
@@ -66,18 +67,33 @@ type PermissionAudit struct {
 	ExecPrograms []string
 	// NeedsRawNet 是否绕过 host.http 直连网络
 	NeedsRawNet bool
+	// NeedsClipboard 是否直接读写系统剪贴板（绕过 host.clipboard 桥）
+	NeedsClipboard bool
+	// NeedsProcessKill 是否直接结束进程（绕过 host.process.kill 桥）
+	NeedsProcessKill bool
+	// KillPIDs 源码里出现的 PID 字面量（去重），仅供人工参考
+	KillPIDs []string
+	// NeedsShellOpen 是否直接唤起系统 shell 打开目标（绕过 host.shell.open 桥）
+	NeedsShellOpen bool
+	// ShellTargets 源码里出现的 shell 目标字面量（去重）
+	ShellTargets []string
 	// ReadPaths 源码中出现的读路径字面量（去重）
 	ReadPaths []string
 	// WritePaths 源码中出现的写路径字面量（去重）
 	WritePaths []string
+	// Skipped 解析失败而跳过的文件（不阻断，但要让「审计少扫了」可见）
+	Skipped []string
 }
 
 // 危险能力类别常量
 const (
-	AuditKindFSWrite = "fs_write"
-	AuditKindFSRead  = "fs_read"
-	AuditKindExec    = "exec"
-	AuditKindRawNet  = "raw_net"
+	AuditKindFSWrite     = "fs_write"
+	AuditKindFSRead      = "fs_read"
+	AuditKindExec        = "exec"
+	AuditKindRawNet      = "raw_net"
+	AuditKindClipboard   = "clipboard"
+	AuditKindProcessKill = "process_kill"
+	AuditKindShellOpen   = "shell_open"
 )
 
 // ---- 危险 API 规则表 ----
@@ -130,6 +146,38 @@ var auditRules = map[string]string{
 	"net/http.Head":       AuditKindRawNet,
 	"net/http.Do":         AuditKindRawNet,
 	"net/http.NewRequest": AuditKindRawNet,
+
+	// 直接读写系统剪贴板（绕过 host.clipboard 桥）
+	// 插件正常应走 host.clipboard.read/write（受 permissions.clipboard 约束），
+	// 直接调第三方剪贴板库意味着这份授权被绕开了。
+	"golang.design/x/clipboard.Write":      AuditKindClipboard,
+	"golang.design/x/clipboard.Read":       AuditKindClipboard,
+	"clipboard.Write":                      AuditKindClipboard,
+	"clipboard.Read":                       AuditKindClipboard,
+	"clipboard.WriteAll":                   AuditKindClipboard,
+	"clipboard.ReadAll":                    AuditKindClipboard,
+	"github.com/atotto/clipboard.WriteAll": AuditKindClipboard,
+	"github.com/atotto/clipboard.ReadAll":  AuditKindClipboard,
+
+	// 直接结束进程（绕过 host.process.kill 桥）
+	// 注意：通过 exec.Command("taskkill", "/F", "/PID", ...) 结束进程
+	// 会同时命中上面的 exec 规则，由 process 白名单约束程序名；
+	// 这里管的是「不经进程启动、直接操作已有进程」的那一类。
+	//
+	// 为什么没有 "os.Process.Kill" / "os.Process.Signal"：这两个是 *os.Process
+	// 的方法，源码里写作 proc.Kill()，sel.X 是局部变量而非包名标识符，
+	// resolveImportAlias 会返回空串，这条规则永远不会触发。
+	// 与其放一条死规则造成「已覆盖」的错觉，不如从入口函数 os.FindProcess 识别——
+	// 拿到 *os.Process 几乎都是为了结束它。
+	"os.FindProcess":           AuditKindProcessKill,
+	"syscall.TerminateProcess": AuditKindProcessKill,
+
+	// 直接唤起系统 shell 打开目标（绕过 host.shell.open 桥）
+	// Windows 上 ShellExecute 是「用默认关联程序打开 URL/文件」的正规入口，
+	// 它不经进程启动，exec 规则抓不到，需要单独识别。
+	// 键必须是完整导入路径：resolveImportAlias 返回的是 import 语句里的全路径。
+	"golang.org/x/sys/windows.ShellExecute": AuditKindShellOpen,
+	"os.StartProcess":                       AuditKindShellOpen,
 }
 
 // auditSkipFiles 审计时跳过的文件（样板/日志/测试）
@@ -162,16 +210,22 @@ func AuditPermissions(pluginDir string) (*PermissionAudit, error) {
 			return nil
 		}
 
+		rel, _ := filepath.Rel(pluginDir, path)
+
 		src, err := os.ReadFile(path)
 		if err != nil {
+			// 读不到的文件要留痕：否则「审计只扫到 3 个文件」与
+			// 「本该扫 10 个但 7 个读失败」在日志里看起来一模一样。
+			a.Skipped = append(a.Skipped, rel+"（读取失败: "+err.Error()+"）")
 			return nil
 		}
 		f, err := parser.ParseFile(fset, path, src, parser.ParseComments)
 		if err != nil {
-			return nil // 语法错误的文件跳过，交给编译期报错
+			// 语法错误的文件跳过（交给编译期报错），但必须可见：
+			// 静默跳过等于「审计挂了也没人知道」。
+			a.Skipped = append(a.Skipped, rel+"（解析失败: "+err.Error()+"）")
+			return nil
 		}
-
-		rel, _ := filepath.Rel(pluginDir, path)
 		ast.Inspect(f, func(n ast.Node) bool {
 			// 只在调用表达式上处理，才能同时拿到被调用的 API 与实参
 			call, ok := n.(*ast.CallExpr)
@@ -223,6 +277,18 @@ func AuditPermissions(pluginDir string) (*PermissionAudit, error) {
 				}
 			case AuditKindRawNet:
 				a.NeedsRawNet = true
+			case AuditKindClipboard:
+				a.NeedsClipboard = true
+			case AuditKindProcessKill:
+				a.NeedsProcessKill = true
+				if fd.PathLiteral != "" {
+					a.KillPIDs = append(a.KillPIDs, fd.PathLiteral)
+				}
+			case AuditKindShellOpen:
+				a.NeedsShellOpen = true
+				if fd.PathLiteral != "" {
+					a.ShellTargets = append(a.ShellTargets, fd.PathLiteral)
+				}
 			case AuditKindFSRead:
 				if fd.PathLiteral != "" {
 					a.ReadPaths = append(a.ReadPaths, fd.PathLiteral)
@@ -243,6 +309,12 @@ func AuditPermissions(pluginDir string) (*PermissionAudit, error) {
 	a.WritePaths = dedupStrings(a.WritePaths)
 	sort.Strings(a.ExecPrograms)
 	a.ExecPrograms = dedupStrings(a.ExecPrograms)
+	sort.Strings(a.KillPIDs)
+	a.KillPIDs = dedupStrings(a.KillPIDs)
+	sort.Strings(a.ShellTargets)
+	a.ShellTargets = dedupStrings(a.ShellTargets)
+	sort.Strings(a.Skipped)
+	a.Skipped = dedupStrings(a.Skipped)
 	return a, nil
 }
 
@@ -350,6 +422,24 @@ func (p *Permissions) CheckAgainst(a *PermissionAudit) error {
 		missing = append(missing, "network（插件直连网络，绕过 host.http 白名单）")
 	}
 
+	// 直接读写剪贴板：需要 clipboard 授权
+	// 插件正常应走 host.clipboard.read/write；直接调第三方库意味着绕过了桥接约束。
+	if a.NeedsClipboard && !p.Clipboard {
+		missing = append(missing, "clipboard（插件直接读写系统剪贴板，绕过 host.clipboard 桥）")
+	}
+
+	// 直接结束进程：需要 processKill 授权
+	// 注意这里是「能力级」比对——只要源码直接操作已有进程，就必须声明；
+	// 程序级（允许砍谁）的核对在运行期做，因为源码里拿不到 PID 对应的进程名。
+	if a.NeedsProcessKill && !p.ProcessKill.Granted() {
+		missing = append(missing, "processKill（插件直接结束进程，绕过 host.process.kill 桥）")
+	}
+
+	// 直接唤起 shell：需要 shell 授权
+	if a.NeedsShellOpen && !p.Shell.Granted() {
+		missing = append(missing, "shell（插件直接唤起系统 shell 打开目标，绕过 host.shell.open 桥）")
+	}
+
 	// ---- 程序级比对 ----
 	// 只有声明了具体程序白名单才有意义；process:true（全放行）不做程序级比对。
 	if len(p.Process.Programs) > 0 {
@@ -430,9 +520,23 @@ func DescribeAudit(pluginID string, a *PermissionAudit) string {
 	if a.NeedsRawNet {
 		sb.WriteString(" [直连网络]")
 	}
+	if a.NeedsClipboard {
+		sb.WriteString(" [直接读写剪贴板]")
+	}
+	if a.NeedsProcessKill {
+		sb.WriteString(" [直接结束进程]")
+	}
+	if a.NeedsShellOpen {
+		sb.WriteString(" [直接唤起 shell]")
+	}
 	sb.WriteString("\n")
 	for _, f := range a.Findings {
 		fmt.Fprintf(&sb, "    %-10s %-24s %s\n", f.Kind, f.API, f.Location)
+	}
+	// 扫描失败的文件必须单独列出来：这部分源码「没被审计」，
+	// 与「审计过且干净」是两回事，混在一起会给人虚假的安全感。
+	for _, s := range a.Skipped {
+		fmt.Fprintf(&sb, "    [未审计] %s\n", s)
 	}
 	return sb.String()
 }

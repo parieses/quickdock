@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Minus, Square, X, RotateCw, Power } from '@lucide/vue'
 import { System } from '@wailsio/runtime'
@@ -9,8 +9,14 @@ import {
   MinimizePluginWindow,
   ToggleMaximizePluginWindow,
   ForceClosePluginWindow,
+  ListPlugins,
 } from '../../bindings/quickdock/services/plugin/pluginservice'
 import PluginFrame from './PluginFrame.vue'
+import { unwrap } from '../utils/api'
+import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
+import { pluginName as localizePluginName } from '../utils/localize'
+import type { PluginInfo } from '../types'
 
 // 缩放手柄：无边框窗口（Frameless:true）被 Wails 裁掉原生边框后，鼠标拖原生边框无法缩放。
 // 但 Wails v3 内置了"原生缩放接管"：标题栏拖动即走此机制（wails:drag → 后端 PostMessage(WM_NCLBUTTONDOWN)
@@ -24,8 +30,34 @@ function beginResize(edge: string) {
 
 const props = defineProps<{ pluginId: string }>()
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
+
+// 标题栏文案：优先取插件清单（plugin.json）里的显示名，插件页的 <title> 只作兜底。
+// 第三方插件的 <title> 普遍直接写成包名（io.github.xxx.pro），拿它当窗口标题对用户
+// 没有任何信息量；清单 name 才是安装后在插件列表/命令面板里展示的那个名字。
 const pluginName = ref(props.pluginId)
+const hasManifestName = ref(false)
+
+async function loadPluginName() {
+  try {
+    const list = (unwrap(await ListPlugins()) || []) as PluginInfo[]
+    const info = list.find((p) => p.id === props.pluginId)
+    if (!info?.name) return
+    pluginName.value = localizePluginName({ name: info.name, nameI18n: info.nameI18n }, locale)
+    hasManifestName.value = true
+  } catch (e) {
+    // 标题取不到属装饰性信息，不值得打断用户：保留 pluginId 兜底，只记日志。
+    logErr('PluginPage', getErrorMessage(e))
+  }
+}
+
+// iframe 内页面的 <title>：仅在没拿到清单名时兜底（例如插件已卸载、清单读取失败）
+function onFrameTitle(title: string) {
+  if (!title || hasManifestName.value) return
+  pluginName.value = title
+}
+
+onMounted(loadPluginName)
 
 // 仅在"独立插件窗口"（URL 为 /plugin.html）渲染缩放手柄：主 SPA 经 #/plugin/<id>
 // 路由也会挂载本组件，但那时 System.invoke("wails:resize:") 指向主窗口（本身 Frameless:false
@@ -81,7 +113,7 @@ function forceClose() {
     </div>
 
     <!-- 内容区：统一插件宿主 -->
-    <PluginFrame ref="frameRef" :plugin-id="props.pluginId" use-pending-init @title="pluginName = $event || pluginName" />
+    <PluginFrame ref="frameRef" :plugin-id="props.pluginId" use-pending-init @title="onFrameTitle" />
 
     <!-- 缩放手柄：覆盖在窗口边缘（z-index 高于 iframe，能捕获边缘 mousedown）；
          mousedown 即把缩放交给操作系统原生处理（wails:resize，丝滑无卡顿）。仅独立窗口渲染。 -->

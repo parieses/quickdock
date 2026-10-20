@@ -1,5 +1,7 @@
 package plugin
 
+import "strings"
+
 // ===== 插件窗口管理 =====
 
 // SetPendingPluginInit 保存待注入的初始文本和命令（从命令面板跨窗口传递），带插件 id 归属。
@@ -36,10 +38,13 @@ func (p *PluginService) ShowPluginWindow(pluginID string) {
 	if p.App.PluginWindowMgr == nil {
 		return
 	}
+	// 窗口标题用清单里的显示名；清单缺 name 时才退回 id（否则任务栏/Alt-Tab 会只剩 "快启坞 - "）。
 	title := pluginID
 	if p.App.PluginMgr != nil {
 		if inst := p.App.PluginMgr.GetPlugin(pluginID); inst != nil {
-			title = inst.Manifest.Name
+			if name := strings.TrimSpace(inst.Manifest.Name); name != "" {
+				title = name
+			}
 		}
 	}
 	if p.App.Flags.Palette.Load() {

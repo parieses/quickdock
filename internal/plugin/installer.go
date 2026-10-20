@@ -218,18 +218,40 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 
 	os.Chmod(targetDir, 0755)
 
-	// 权限自证（阶段一：只告警，不拦截）。
+	// 权限自证（native 插件专属）。
 	// native 插件在自己的进程里直接调标准库（os.Remove / exec.Command / net.Dial），
 	// 这些调用不经过 host.* 桥接，宿主在运行期无法拦截；因此只能核对
 	// 「清单声明的权限」是否覆盖「源码实际用到的危险能力」，把清单撒谎暴露出来。
-	// 阶段二起可改为拒绝安装（CheckAgainst 返回错误时中断安装）。
+	//
+	// 阶段一（仅告警）→ 阶段二（不符即拒绝安装）的切换在下方 selfAudit 分支：
+	//   - selfAudit=skip  ：跳过比对，但必须在安装日志里留痕（含 skipReason）
+	//   - 默认 audit      ：比对不符即中断安装并回滚
 	if manifest.Backend.Runtime == "native" {
-		if audit, err := AuditPermissions(targetDir); err == nil {
+		audit, auditErr := AuditPermissions(targetDir)
+		switch {
+		case auditErr != nil:
+			// 审计自身失败（目录读不到、遍历出错）。这不代表插件越权，
+			// 但代表「这道检查没跑成」——必须显式告知，不能静默放行。
+			// 处置为告警而非拒绝：审计器故障不该让用户装不上正常插件。
+			logger.W("[plugin-perm] %s 权限自证未能执行（%v）；"+
+				"该插件的清单声明未经过静态核对", manifest.ID, auditErr)
+		case manifest.Permissions.SelfAuditSkip():
+			// 逃生舱：插件的写法让静态分析必然漏判（动态拼接路径/配置驱动程序名）。
+			// 允许跳过，但理由必须写进日志，让「谁绕过了这道检查、为什么」可追溯。
+			logger.W("[plugin-perm] %s 声明 selfAudit=skip，已跳过权限自证；原因：%s",
+				manifest.ID, strings.TrimSpace(manifest.Permissions.SkipReason))
+		default:
 			if msg := DescribeAudit(manifest.ID, audit); msg != "" {
-				logger.W("[plugin-perm] %s 权限自证：%s", manifest.ID, msg)
+				logger.W("%s", msg)
 			}
 			if err := manifest.Permissions.CheckAgainst(audit); err != nil {
-				logger.W("[plugin-perm] %s 权限声明与实现不符（阶段一仅告警）：%v", manifest.ID, err)
+				// 阶段二：声明与实现不符 → 拒绝安装。
+				// 已落盘的文件由 defer 的 rollbackInstall 清理（committed 仍为 false）。
+				return "", fmt.Errorf("安装被拒绝：%w\n"+
+					"插件 %s 声明的权限未覆盖源码里实际用到的能力。\n"+
+					"请补全 plugin.json 的 permissions 后重试；"+
+					"若确认是静态分析误判，可声明 permissions.selfAudit=\"skip\" 并填写 permissions.skipReason 说明原因",
+					err, manifest.ID)
 			}
 		}
 	}

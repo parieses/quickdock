@@ -3,8 +3,10 @@ package plugin
 import (
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os/exec"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -56,12 +58,54 @@ type FrontendConfig struct {
 
 // Permissions 权限声明
 type Permissions struct {
-	Network     NetworkPerm    `json:"network,omitempty"`    // 详见 netperm.go：bool（全放行）或域名数组白名单
-	Filesystem  FilesystemPerm `json:"filesystem,omitempty"` // 详见 fsperm.go：bool（仅对话框）或 {read,write} scope 对象
-	Clipboard   bool           `json:"clipboard,omitempty"`
-	Shell       ShellPerm      `json:"shell,omitempty"`       // 详见 shellperm.go：bool（全放行）或目标前缀数组
-	Process     ProcessPerm    `json:"process,omitempty"`     // 详见 procperm.go：bool（全放行）或可执行程序名白名单
-	ProcessKill bool           `json:"processKill,omitempty"` // host.process.kill 专用；默认 false（风险操作，显式开启）
+	Network     NetworkPerm     `json:"network,omitempty"`    // 详见 netperm.go：bool（全放行）或域名数组白名单
+	Filesystem  FilesystemPerm  `json:"filesystem,omitempty"` // 详见 fsperm.go：bool（仅对话框）或 {read,write} scope 对象
+	Clipboard   bool            `json:"clipboard,omitempty"`
+	Shell       ShellPerm       `json:"shell,omitempty"`       // 详见 shellperm.go：bool（全放行）或目标前缀数组
+	Process     ProcessPerm     `json:"process,omitempty"`     // 详见 procperm.go：bool（全放行）或可执行程序名白名单
+	ProcessKill ProcessKillPerm `json:"processKill,omitempty"` // 详见 prockillperm.go：bool（任意非系统进程）或目标进程名白名单
+
+	// SelfAudit 是否跳过 native 插件的权限自证审计（安装期静态比对）。
+	// 取值 "audit"（默认）/ "skip"。skip 时必须同时填 SkipReason。
+	//
+	// 为什么需要逃生舱：静态分析对「路径动态拼接」「程序名来自配置」
+	// 这类写法必然漏判，一律拦截会把正常插件挡在门外。
+	// 但逃生舱必须可见、可审计——因此 SkipReason 是必填项，
+	// 且安装日志里会明确记录「本插件跳过了权限自证」。
+	SelfAudit  string `json:"selfAudit,omitempty"`
+	SkipReason string `json:"skipReason,omitempty"`
+}
+
+// AuditSkip 是 SelfAudit 的合法取值之一：跳过安装期权限自证。
+const AuditSkip = "skip"
+
+// AuditRun 是 SelfAudit 的默认取值：执行安装期权限自证。
+const AuditRun = "audit"
+
+// SelfAuditSkip 返回是否声明跳过权限自证。
+// 只有精确等于 "skip" 才算，其余值（含空串、大小写变体）一律按「执行审计」处理——
+// 宁可多审一次，也不让一个拼写错误悄悄关掉这道检查。
+func (p *Permissions) SelfAuditSkip() bool {
+	return strings.TrimSpace(p.SelfAudit) == AuditSkip
+}
+
+// Validate 校验逃生舱自身：声明 skip 就必须给理由，
+// 理由不得为空、不得是占位性质的糊弄文字。
+func (p *Permissions) Validate() error {
+	switch strings.TrimSpace(p.SelfAudit) {
+	case "", AuditRun:
+	case AuditSkip:
+		r := strings.TrimSpace(p.SkipReason)
+		if r == "" {
+			return fmt.Errorf("%w: permissions.selfAudit=skip 必须同时填写 permissions.skipReason（说明为何跳过权限自证）", ErrInvalidManifest)
+		}
+		if len([]rune(r)) < 4 {
+			return fmt.Errorf("%w: permissions.skipReason 过于简单（至少 4 个字符），请如实说明原因", ErrInvalidManifest)
+		}
+	default:
+		return fmt.Errorf(`%w: permissions.selfAudit 只能是 "audit" 或 "skip"，当前值 %q`, ErrInvalidManifest, p.SelfAudit)
+	}
+	return nil
 }
 
 // Command 插件命令
