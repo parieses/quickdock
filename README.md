@@ -1,349 +1,327 @@
+<!-- README 设计说明：英雄区 → 截图 → 功能卡片网格 → 可折叠详解 → 架构 → 技术栈 → 开发指南 → 设计/插件/许可。
+     所有长文详解收进 <details>，保证「一眼看懂」且不影响信息完整性。
+     修改后请同步官网 website/index.html 的更新日志（见 AGENTS.md 发版纪律）。 -->
+
+<div align="center">
+
 # 快启坞 QuickDock
 
-> 面向 Windows 开发者的效率工具 —— 资源集合、快速启动与工作空间管理
+**面向 Windows 开发者的桌面效率中枢** —— 资源集合 · 快速启动 · 工作空间管理
 
-快启坞（QuickDock）是一款专为 Windows 开发者打造的桌面效率工具，融合了 **Raycast 的快速启动** 与 **VS Code 的开发者体验**。它帮助你统一管理工作空间、项目、目录、网页链接、常用命令与应用，并内置剪贴板历史、命令面板、**窗口管理**（15 个贴屏热键 + 排版浮层）、待办（含番茄专注）、定时任务、网站监控、Webhook 通知、端口全景、本地开发站点（自定义域名 + 自动 HTTPS），内置 **截图工具**（框选 / 标注 / 贴图，零闪原生覆盖层），随附开箱即用的外部插件（HTTP 客户端、数据库连接、OCR、端口检查、批量重命名、本地文件搜索、图床上传等，经插件市场一键安装），以及多运行时环境管理（Node.js / PHP / Python / Go / Bun / JDK 等语言，Nginx / Caddy / Apache / Traefik 等网络服务，Redis / Memcached / RabbitMQ / MinIO 等中间件，MySQL / MariaDB / PostgreSQL / MongoDB 等数据库，Ollama 本地大模型、MCP 服务与 WebDAV 文件共享，一键安装、版本切换、启停、配置编辑、日志查看与 Web 控制台），内嵌 **DeepSeek Harness** 的 Agent 编程入口，并内置可选的 **AI 助手**（SSE 流式 / 多配置档案），让开发工作流更高效。
+*Raycast 的快启体验 × VS Code 的开发者质感，加上开箱即用的本地开发环境*
+
+![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.23-4a9eff)
+![License](https://img.shields.io/badge/License-MIT-4a9eff)
+![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
+![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
+
+🌐 官网 <https://parieses.github.io/quickdock/>　·　🐛 Issues <https://github.com/parieses/quickdock/issues>　·　🔌 插件市场 <https://github.com/parieses/quickdock-plugins>
+
+</div>
+
+---
 
 ![主界面截图](image/主界面截图.png)
 
-🌐 **官网**：<https://parieses.github.io/quickdock/> —— 源码在 `website/`（纯静态无构建），含中英双语与明暗主题；push 到 `main` 且改动落在 `website/**` 时由 GitHub Actions 自动发布到 Pages。
+> 一张图看不全 —— 它把「资源管理、剪贴板、命令面板、待办、监控、AI、环境管理、插件」全收进一个窗口，下面拆开讲。
 
 ---
 
-## 目录
+## ✨ 它解决什么
 
-- [快启坞 QuickDock](#快启坞-quickdock)
-  - [目录](#目录)
-  - [功能特性](#功能特性)
-    - [📦 工作空间与资源管理](#-工作空间与资源管理)
-    - [📋 剪贴板历史](#-剪贴板历史)
-    - [🔍 命令面板](#-命令面板)
-    - [✅ 待办任务（Todos）](#-待办任务todos)
-    - [⏰ 定时任务（Scheduler）](#-定时任务scheduler)
-    - [📡 网站监控（Monitor）](#-网站监控monitor)
-    - [🗒️ 快捷笔记](#️-快捷笔记)
-    - [🧠 DeepSeek Harness 集成](#-deepseek-harness-集成)
-    - [💬 AI 助手](#-ai-助手)
-    - [🔌 插件系统](#-插件系统)
-    - [🛠️ MCP 服务](#️-mcp-服务)
-    - [☁️ WebDAV 云同步](#️-webdav-云同步)
-    - [📸 快照备份](#-快照备份)
-    - [📷 截图工具](#-截图工具)
-    - [🪟 窗口管理](#-窗口管理)
-    - [🔧 全局热键（可自定义）](#-全局热键可自定义)
-    - [🖥️ 系统命令](#️-系统命令)
-  - [🔧 环境管理](#-环境管理)
-    - [支持的运行时](#支持的运行时)
-    - [Ollama 本地大模型](#ollama-本地大模型)
-    - [核心设计](#核心设计)
-    - [服务管理能力](#服务管理能力)
-    - [UI 交互](#ui-交互)
-    - [文件结构](#文件结构)
-  - [🔄 自动更新](#-自动更新)
-    - [更新流程（Windows：免安装器就地替换）](#更新流程windows免安装器就地替换)
-    - [前提与限制](#前提与限制)
-    - [相关文件](#相关文件)
-    - [版本号与发版纪律](#版本号与发版纪律)
-  - [快速开始](#快速开始)
-    - [系统要求](#系统要求)
-    - [下载安装](#下载安装)
-    - [首次使用](#首次使用)
-  - [开发指南](#开发指南)
-    - [前置条件](#前置条件)
-    - [常用命令](#常用命令)
-    - [数据库](#数据库)
-  - [技术栈](#技术栈)
-    - [后端](#后端)
-    - [前端](#前端)
-  - [项目结构](#项目结构)
-  - [数据模型](#数据模型)
-  - [全局热键](#全局热键)
-  - [设计哲学](#设计哲学)
-  - [插件生态](#插件生态)
-  - [构建与打包](#构建与打包)
-    - [本地构建](#本地构建)
-    - [平台支持](#平台支持)
-  - [架构亮点](#架构亮点)
-  - [许可协议](#许可协议)
-  - [致谢](#致谢)
+开发者桌面上永远散落着：项目目录、常用命令、文档链接、待办、监控地址、一堆需要切换版本的运行时……QuickDock 把它们统一收进一个**键盘优先**的窗口里，并额外塞进了截图、窗口排版、本地站点 HTTPS、AI 助手和插件市场。
+
+- **一处收纳**：工作空间 → 场景 → 集合 → 项目 四级资源树，支持拖拽、全文搜索与变量展开
+- **键盘驱动**：`Ctrl+Space` 主窗口、`Ctrl+K` 命令面板、`Ctrl+`` 剪贴板、`F1` 截图，全部可改键
+- **开箱环境**：28 种运行时（语言 / 服务 / 数据库 / 中间件 / AI）一键安装、版本切换、启停、日志、控制台
+- **本地智能**：内置 AI 助手（多模型 SSE 流式）+ DeepSeek Harness 编程入口 + 对 Agent 开放的 MCP 服务
+- **免管理员**：单文件应用、用户态安装、免 UAC 就地更新
 
 ---
 
-## 功能特性
+## 🧩 功能全景
 
-### 📦 工作空间与资源管理
+<details open>
+<summary><b>核心效率</b></summary>
+
+| 能力 | 默认热键 | 一句话 |
+|------|---------|--------|
+| 工作空间 / 场景 / 集合 / 项目 | — | 四级资源树，6 种项目类型，拖拽排序 + FTS5 全文搜索 |
+| 命令面板 | `Ctrl+K` | 跨工作空间 / 场景 / 集合 / 项目统一搜索，URL 智能识别存为项目 |
+| 剪贴板历史 | `` Ctrl+` `` | 文本 / 图片 / 文件监听，固定、搜索、过期清理，浮动窗口唤出 |
+| 快捷笔记 | `Ctrl+Shift+N` | 树形 Markdown 笔记库，自动保存，失焦隐藏 |
+
+</details>
+
+<details open>
+<summary><b>任务与监控</b></summary>
+
+| 能力 | 说明 |
+|------|------|
+| 待办 + 🍅 番茄专注 | 列表 / 看板视图、子任务、标签、重复与到期提醒；专注结束系统通知 + 可选 Webhook |
+| 定时任务 | 5 种动作 × 4 种调度（一次性 / 间隔 / 每天 / 每周），执行后系统通知 |
+| 网站监控 | HTTP 状态码 / 响应时间、SSL 到期预警、关键字 / 正则匹配、响应趋势图，状态翻转多渠道推送 |
+
+</details>
+
+<details open>
+<summary><b>AI 与开发</b></summary>
+
+| 能力 | 说明 |
+|------|------|
+| AI 助手 | OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义兼容；SSE 流式、思考折叠、Markdown 渲染、DPAPI 加密 Key |
+| DeepSeek Harness | 内嵌 `dsh` 完整 Agent 编程入口，便携 Node 自动装填，原生窗口承载 3080 端口 |
+| 内置 MCP 服务 | `http://127.0.0.1:9230/mcp`，三级权限门（只读 / 低危写 / 高危），把本地能力开放给智能体 |
+| 环境管理 | 28 种运行时一键装 / 切 / 启停 / 配 / 看日志 / 开控制台，纯用户态不污染 PATH |
+
+</details>
+
+<details open>
+<summary><b>工具箱</b></summary>
+
+| 能力 | 默认热键 | 说明 |
+|------|---------|--------|
+| 截图工具 | `F1` | 原生分层窗口零闪；框选 → 标注 → 复制 / 保存 / 贴图一条链路；窗口 / 元素吸附 |
+| 窗口管理 | `Ctrl+Alt+W` | 15 个贴屏热键 + 九宫格排版浮层，不抢 `Win+方向` |
+| 本地开发站点 | — | 项目一键绑自定义域名 + 自动 HTTPS（mkcert），自身不监听端口 |
+| SSH 远程终端 | `Ctrl+Alt+S` | 独立可缩放窗口管理远程主机：多标签终端 + SFTP 文件管理，指纹信任防中间人 |
+| WebDAV 云同步 / 快照备份 | — | 全量 JSON 备份恢复、多版本、任意 WebDAV；一键导出导入 |
+
+</details>
+
+<details open>
+<summary><b>插件生态</b></summary>
+
+- 开放插件架构，三种运行时：**none（纯前端）/ goja（内嵌 JS 沙箱）/ native（独立子进程）**，基于 JSON-RPC 2.0
+- 29 个 Host API / 12 组能力，权限声明式校验（文件系统 scope、网络白名单、剪贴板、进程等），native 安装期做 `go/ast` 静态审计
+- 官方插件经「在线市场」一键安装 / 升级，清单与开发文档统一在 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
+
+</details>
+
+---
+
+## 🚀 快速开始
+
+### 系统要求
+
+- **操作系统**：Windows 10 1809+ 或 Windows 11
+- **运行时**：WebView2 Runtime（Windows 自带）
+- **磁盘**：约 50 MB（运行时按需下载）
+
+### 下载安装
+
+1. 从 [Releases](https://github.com/parieses/quickdock/releases) 下载 `quickdock-amd64-installer.exe`
+2. 双击安装（**免管理员权限**，默认装到用户目录 `%LOCALAPPDATA%\Programs\快启坞`）
+3. 运行 `QuickDock.exe`，任务栏托盘出现图标即启动成功
+
+> **保持默认安装路径**：就地替换更新需要对该目录有写权限。若改到 `C:\Program Files\...`，每次更新都要过 UAC，自动更新会失败（只能手动覆盖）。
+> 也可直接下载 `quickdock-amd64.exe` 当便携版：只要放在**当前用户可写**的目录（非 `Program Files`），同样支持就地更新。
+
+### 快捷键速览
+
+| 功能 | 默认快捷键 |
+|------|-----------|
+| 切换主窗口 | `Ctrl+Space` |
+| 命令面板 | `Ctrl+K` |
+| 剪贴板历史 | `` Ctrl+` `` |
+| 快捷笔记 | `Ctrl+Shift+N` |
+| 区域截图 | `F1`（被占用回退 `Ctrl+Shift+A`） |
+| 窗口排版浮层 | `Ctrl+Alt+W` |
+| SSH 远程终端 | `Ctrl+Alt+S` |
+
+> 所有热键均可在「设置 → 热键 / 窗口管理」页面自定义、运行时动态重注册。
+
+---
+
+## 📚 功能详解
+
+<details>
+<summary><b>📦 工作空间与资源管理</b></summary>
 
 - **工作空间（Workspace）** — 顶级容器，隔离不同项目上下文
-- **场景（Scene）** — 工作空间下的视图分组，快速切换关注点，支持标签/图标/颜色
-- **集合（Collection）** — 资源的逻辑分组，可按项目或类型归类，支持四种打开策略
-- **项目（Item）** — 支持 6 种类型：
-  - `directory` — 目录，用系统/终端打开
-  - `file` — 文件，用系统默认程序打开
-  - `url` — 网页链接，用浏览器打开
-  - `command` — 终端命令，在终端中执行
-  - `app` — 应用程序路径
-  - `quicklink` — 快速链接，带参数的快捷方式
+- **场景（Scene）** — 工作空间下的视图分组，支持标签 / 图标 / 颜色
+- **集合（Collection）** — 资源逻辑分组，支持四种打开策略
+- **项目（Item）** — 6 种类型：
+  - `directory` 目录 · `file` 文件 · `url` 网页 · `command` 终端命令 · `app` 应用 · `quicklink` 带参快捷方式
+- 全层级拖拽排序、FTS5 全文搜索；`value` / 命令 / URL 支持 `{date}` `{time}` `{username}` `{clipboard}` 变量即时展开
 
-全层级支持拖拽排序、FTS5 全文搜索。项目的 value / 命令 / URL 字段支持 `{date}` / `{time}` / `{username}` / `{clipboard}` 变量替换，在打开时即时展开。
+</details>
 
-### 📋 剪贴板历史
+<details>
+<summary><b>📋 剪贴板历史</b></summary>
 
-- 自动监听并记录文本、图片、文件剪贴板内容
-- 支持固定、搜索、复制粘贴、批量删除
-- 过期自动清理（可配保留天数）
-- 浮动窗口，失焦自动隐藏，`` Ctrl+` `` 一键唤出
+自动监听文本 / 图片 / 文件剪贴板；支持固定、搜索、复制粘贴、批量删除；过期自动清理（可配保留天数）；浮动窗口失焦自动隐藏，`` Ctrl+` `` 一键唤出。
 
-### 🔍 命令面板
+</details>
 
-- 全局搜索：工作空间 / 场景 / 集合 / 项目统一搜索
-- 快速执行：选中即操作，支持键盘导航、多选批量
-- FTS5 全文搜索，URL 智能识别存为项目
-- 最近使用 / 最常使用列表
-- 浮动窗口，`Ctrl+K` 即时唤出
+<details>
+<summary><b>🔍 命令面板</b></summary>
 
-### ✅ 待办任务（Todos）
+全局搜索工作空间 / 场景 / 集合 / 项目；选中即操作，键盘导航 + 多选批量；FTS5 全文搜索、URL 智能识别存为项目；最近 / 最常使用列表；浮动窗口 `Ctrl+K` 即时唤出。
 
-- 待办列表 + 看板视图（待办 / 进行中 / 已完成三列）
-- 子任务（单层级 checklist）、标签分类
-- 重复待办（每日 / 每周 / 每月）、到期定时提醒（系统通知）
-- 🍅 番茄专注计时 — 待办页启动专注倒计时，结束时发系统通知 + 可选 Webhook 推送
+</details>
 
-### ⏰ 定时任务（Scheduler）
+<details>
+<summary><b>✅ 待办任务（Todos）</b></summary>
 
-- 五种动作类型：打开软件 / 目录 / 网页 / 命令 / HTTP 请求
-- 四种调度方式：一次性 / 按间隔 / 每天 / 每周
+- 待办列表 + 看板视图（待办 / 进行中 / 已完成）
+- 子任务、标签分类、重复待办（每日 / 每周 / 每月）、到期系统通知
+- 🍅 番茄专注：待办页启动倒计时，结束系统通知 + 可选 Webhook 推送
+
+</details>
+
+<details>
+<summary><b>⏰ 定时任务（Scheduler）</b></summary>
+
+- 5 种动作：打开软件 / 目录 / 网页 / 命令 / HTTP 请求
+- 4 种调度：一次性 / 按间隔 / 每天 / 每周
 - 执行后系统通知，支持手动立即执行
 
-### 📡 网站监控（Monitor）
+</details>
+
+<details>
+<summary><b>📡 网站监控（Monitor）</b></summary>
 
 - 定时探测 HTTP 状态码与响应时间（GET / HEAD / POST）
 - SSL 证书到期预警（可自定义提前天数）
-- 关键字 / 正则内容匹配检测
+- 关键字 / 正则内容匹配
 - 在线率统计、检测日志、状态翻转通知（桌面 + Webhook：钉钉 / 企微 / 飞书 / Server酱 / PushPlus / Telegram）
 - 响应时间趋势图（24h / 7d / 全部）
 
-### 🗒️ 快捷笔记
+</details>
 
-- 浮动笔记窗口，`Ctrl+Shift+N` 即时唤出
-- **树形笔记库** — 文件夹 + Markdown 文档多层级组织，支持搜索 / 重命名 / 删除
-- 自动保存（500ms 防抖）；旧快捷笔记自动兼容为根级文档
-- 失焦自动隐藏
+<details>
+<summary><b>🗒️ 快捷笔记</b></summary>
 
-### 🧠 DeepSeek Harness 集成
+浮动笔记窗口 `Ctrl+Shift+N` 即时唤出；**树形笔记库**（文件夹 + Markdown 多层级），搜索 / 重命名 / 删除；自动保存（500ms 防抖）；失焦自动隐藏。
 
-内嵌 [DeepSeek Harness](https://github.com/deepseek-ai/dsh) —— 完整的 Agent 编程入口（工具 / 文件 / 终端 / 会话），与轻量 AI 助手互补：
+</details>
 
-- **一键环境装填** — 自动检测 node / npx / dsh；缺失时下载便携 Node v22（npmmirror 镜像 → nodejs.org 兜底）并安装 `@deepseek-ai/dsh`
-- **原生窗口承载** — `node` 直接拉起 `dsh web --no-open`（CREATE_NO_WINDOW 隐藏控制台），固定官方端口 **3080** 与浏览器访问同址：被健康 dsh 占用则直接复用、残留 node 则清理后重绑，仅被无关进程占用才退回随机端口；QuickDock 原生 WebviewWindow 承载
-- **后台常驻** — 关窗不停服务：dsh 独立于窗口后台运行（下次点击秒开），真正停止由设置手动或 QuickDock 退出触发
-- **实时安装日志** — 下载 / 解压 / npm 安装全程逐行推送 `quickdock:dsh:log`，进度可见
-- **插件安装入口** — 设置页可直接安装 DSH 插件（默认 `dshmarket`，支持粘贴完整命令）；复用官方 `~/.dsh` 数据目录（皮肤 / 插件 / 会话）
-- **环境净化** — 过滤第三方注入的 `NODE_OPTIONS`（如 WorkBuddy shim），避免污染 dsh 进程
+<details>
+<summary><b>🧠 DeepSeek Harness 集成</b></summary>
 
-### 💬 AI 助手
+内嵌 [DeepSeek Harness](https://github.com/deepseek-ai/dsh) —— 完整 Agent 编程入口（工具 / 文件 / 终端 / 会话）：
 
-- **多配置档案** — 支持 OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口
-- **五种对话模式** — 聊天 / 解释代码 / 翻译 / 总结 / 使用教程，模式 prompt 可叠加自定义 System Prompt
-- **SSE 流式输出** — 本地 HTTP 流式服务（127.0.0.1:随机端口），token 到达即显示，非传统轮询
-- **思考过程折叠** — 模型思考内容（reasoning_content）以 `<details>` 折叠展示，默认收起
-- **Markdown 渲染** — 使用 `marked` + `DOMPurify` 安全渲染对话内容
+- **一键环境装填** — 自动检测 node / npx / dsh；缺失时下载便携 Node v22（npmmirror → nodejs.org 兜底）并安装 `@deepseek-ai/dsh`
+- **原生窗口承载** — `node` 拉起 `dsh web --no-open`（CREATE_NO_WINDOW 隐藏控制台），固定官方端口 **3080**；被健康 dsh 占用则复用、残留 node 则清理重绑，仅被无关进程占用才退随机端口
+- **后台常驻** — 关窗不停服务，下次点击秒开；真正停止由设置手动或退出触发
+- **实时安装日志** — 下载 / 解压 / npm 安装全程逐行推送 `quickdock:dsh:log`
+- **环境净化** — 过滤第三方注入的 `NODE_OPTIONS`，避免污染 dsh 进程
+
+</details>
+
+<details>
+<summary><b>💬 AI 助手</b></summary>
+
+- **多配置档案** — OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口
+- **5 种对话模式** — 聊天 / 解释代码 / 翻译 / 总结 / 使用教程，可叠加自定义 System Prompt
+- **SSE 流式输出** — 本地 HTTP 流式服务（127.0.0.1，随机端口 + 随机 token），逐 token 即时显示
+- **思考过程折叠** — `reasoning_content` 以 `<details>` 折叠，默认收起
+- **Markdown 渲染** — `marked` + `DOMPurify` 安全渲染
 - **参数可配** — Temperature / MaxTokens / TopP / FrequencyPenalty / PresencePenalty
-- **会话管理** — 多会话 / 标题自动生成 / 重新生成标题 / 清空上下文 / 删除会话
-- **Token 用量统计** — 每次对话自动记录 prompt 和 completion token 数
-- **API Key 安全存储** — Windows 下 DPAPI 加密，前端不接触密文
-- **测试连接** — 一键验证 API Key 和模型是否可用
+- **会话管理** — 多会话 / 标题自动生成 / 清空 / 删除；**Token 用量统计**
+- **API Key 安全存储** — Windows DPAPI 加密，前端不接触密文；支持测试连接
 
-### 🔌 插件系统
+</details>
 
-- 开放插件架构，支持三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），基于 JSON-RPC 2.0 通信
-- 统一的插件 Host API（**29 个方法 / 12 组**）：日志、存活探测、通知、剪贴板、对话框、按插件隔离的 KV 存储（`db.*`）、文件读写（`host.fs.*`，按 `permissions.filesystem` 声明的目录 scope 校验）、网络请求代发（`http.get/post`，按域名白名单）、Shell 打开（`host.shell.open`）、进程列表/执行/结束（`host.process.list/exec/kill`，执行与结束需显式声明 `process` / `processKill` 权限）、窗口显隐（`host.window.hide/show`，屏幕取色等场景临时隐藏宿主窗口）、以及复用宿主 MCP 服务的 `host.mcp.call`；goja 经 `api.host(method, params)`、iframe 经注入的 `qdHostCall` 调用，三者能力面一致
-- 插件前端页可调宿主注入的桥接 API：`qdConfirm` / `qdAlert` / `qdPickFile` / `qdPickFolder` / `qdReadFile` / `qdHostCall` / `qdHttp` / `qdPrint`（打印由宿主在顶层文档渲染后调起系统打印 —— iframe 内直接 `window.print()` 只会打印整个应用外壳，出来是白纸）
-- 官方插件经「在线市场」一键安装 / 升级，插件清单（含数量）、功能说明与开发文档统一维护在仓库 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
-- 插件权限模型：每个插件通过 manifest 的 `permissions` 声明所需能力（文件系统目录 scope、网络域名白名单、剪贴板、Shell 打开、执行程序白名单、结束进程），未声明的能力宿主一律拒绝；native 运行时插件在安装时还会做静态审计，用 `go/ast` 扫描源码，核对实际用到的高危能力（如 `os.Remove` / `exec.Command` / `net.Dial`）与声明是否一致，不符则在安装阶段告警
-- 支持运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定
+<details>
+<summary><b>🔌 插件系统</b></summary>
 
-### 🛠️ MCP 服务
+- 三种运行时（none / goja / native）+ JSON-RPC 2.0；统一 Host API（**29 方法 / 12 组**）：日志、存活探测、通知、剪贴板、对话框、按插件隔离 KV（`db.*`）、文件读写（`host.fs.*`，按 `permissions.filesystem` 目录 scope 校验）、网络代发（`http.get/post`，域名白名单）、Shell 打开、进程 list/exec/kill（需 `process` / `processKill` 权限）、窗口显隐、复用宿主 MCP 的 `host.mcp.call`
+- 前端桥接：`qdConfirm` / `qdAlert` / `qdPickFile` / `qdPickFolder` / `qdReadFile` / `qdHostCall` / `qdHttp` / `qdPrint`
+- **权限模型**：manifest `permissions` 声明所需能力，未声明一律拒绝；native 运行时安装期 `go/ast` 静态审计高危能力（如 `os.Remove` / `exec.Command` / `net.Dial`）与声明一致性，不符则告警
+- 运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定；官方插件经「在线市场」一键安装升级
 
-QuickDock 自暴露一个 **Model Context Protocol** 服务，供 AI 助手等外部 MCP 客户端调用，把本地能力开放给智能体：
+</details>
 
-- **地址**：`http://127.0.0.1:9230/mcp`（Streamable HTTP，仅 POST；GET 返 405，DELETE 关会话返 204；协议 2025-06-18）
-- **工具集分三级权限门，默认只开放只读 + 低危写**（完整清单以客户端 `tools/list` 返回为准）：
+<details>
+<summary><b>🛠️ MCP 服务</b></summary>
+
+自暴露 **Model Context Protocol** 服务，供 AI 客户端调用本地能力：
+
+- **地址**：`http://127.0.0.1:9230/mcp`（Streamable HTTP，仅 POST；协议 2025-06-18）
+- **工具集三级权限门**（默认只开放只读 + 低危写）：
   - 只读：`app_info` / `env_list` / `env_status` / `env_log` / `env_versions` / `workspace_list` / `item_search` / `recent_items` / `todo_list` / `note_search` / `clipboard_recent` / `port_list` / `log_list` / `log_read` / `crash_list` / `crash_read` / `plugin_list`
   - 低危写：`env_start` / `env_stop` / `env_restart` / `item_open` / `todo_create` / `todo_done` / `clipboard_copy` / `note_create` / `note_update` / `note_quick` / `plugin_execute`
-  - 高危（需在环境管理页开启高危等级）：`process_kill` / `system_command`
-  - 插件经宿主 `host.mcp.call` 可复用全部工具（沿用 MCP 等级门，无需额外声明权限）
-- **生命周期**：随主进程，QuickDock 退出即失效，不作常驻依赖
-- **实现**：门面装配在 `services/mcp`，工具经 Wails 各领域门面转发到宿主
+  - 高危（环境管理页开启）：`process_kill` / `system_command`
+  - 插件经 `host.mcp.call` 复用全部工具（沿用 MCP 等级门）
+- **生命周期**：随主进程，退出即失效；门面装配在 `services/mcp`，工具经各领域门面转发到宿主
 
-### ☁️ WebDAV 云同步
+</details>
 
-- 全量 JSON 备份 / 恢复
-- 多版本管理
-- 任意 WebDAV 服务器（自建 / 第三方）
-- 统一「同步后端」分层（`services/sync.go` → `internal/sync` → `internal/webdav`），未来可无痛接入 Git / 对象存储
+<details>
+<summary><b>🔧 环境管理（28 种运行时）</b></summary>
 
-### 📸 快照备份
+多运行时版本管理，一键安装 / 切换 / 启停，多版本共存于用户目录，不污染系统 PATH、不写注册表、不申请管理员权限。
 
-- 一键导出全部数据为 JSON 文件
-- 导入恢复，迁移无忧
+| 运行时 | 分组 | 类型 | 平台 |
+|--------|------|------|------|
+| Node.js / Go / PHP / Python / Bun / Erlang / JDK | 语言 | 命令行 / 服务型 | Windows |
+| Nginx / Caddy / Apache / Traefik / FTP / WebDAV(内置 9080) | 网络服务 | 服务型 | Windows |
+| Redis / Memcached / MinIO / RabbitMQ | 中间件 | 服务型 | Windows |
+| Git / Composer / FFmpeg / Mailpit / frpc / GitHub CLI / mkcert | 开发工具 | 命令行 / 服务型 | Windows |
+| Ollama / MCP 服务(内置 9230) | AI 服务 | 服务型 | Windows |
+| MariaDB / MySQL / PostgreSQL / MongoDB | 数据库 | 服务型 | Windows |
 
-### 📷 截图工具
+- **核心设计**：便携优先（`%APPDATA%\QuickDock\runtime\<name>\<version>`）、多版本共存、下载源可切换（`{version}` `{v}` `{os}` `{arch}` `{ext}` 占位符）、版本列表智能筛选 + 1h 内存缓存、代理容错与多源回退、后台异步进度推送
+- **服务管理能力**：一键启停 / 重启、配置编辑（Nginx / Apache / Caddy 启动前 `*-t` 校验）、实时日志（尾部 8KB）、Web 控制台一键打开、端口全景、本地开发站点（自定义域名 + 自动 HTTPS，自身不监听端口）
+- **Ollama 本地大模型**：单版本语义（程序目录 `runtime/ollama/`）、原地更新（只提示不自动）、模型库共享 `~/.ollama/models`、卸载只删程序不碰模型
+- **文件结构**：门面层 `services/env/`（31 方法） + 引擎层 `internal/env/`（注册表 / 下载 / 解压 / 服务生命周期 / 项目级版本探测，跨平台 `_windows` `_darwin` `_unix` 分文件）
 
-内置 Snipaste 形态的截图工具，`F1` 唤起全屏覆盖层，**框选 → 标注 → 复制 / 保存 / 贴图**一条链路走完，全程不弹第二个窗口。
+</details>
 
-- **原生覆盖层，零闪** — 全屏遮罩是自建 Win32 分层窗口，内容经 `UpdateLayeredWindow(ULW_ALPHA)` 整帧提交、**不走 `WM_PAINT`**；显示顺序严格为 `SW_HIDE → SetWindowPos 定死尺寸 → 像素画完 → SW_SHOW`，没有「先铺底色、再等内容」的空窗期。工具条、弹出面板与所有标注图形都画进同一张 DIB，所以它们出现时同样不闪
-- **框选后原地浮出工具条** — 选区下方为 `矩形 / 椭圆 / 箭头 / 直线 / 马赛克 / 文字` │ `颜色(9 色) / 线宽(4 档) / 字号(6 档)` │ `撤销 / 重做` │ `复制 / 保存 / 贴图 / 关闭`；颜色 / 线宽 / 字号均为弹出面板，与工具条共用同一次提交
-- **窗口 / 元素吸附** — 鼠标移动即实时高亮光标下的窗口，单击直接选中整个窗口；按住 `Ctrl` 下沉到子控件级（按钮 / 输入框）。已排除自身窗口、`WS_EX_TRANSPARENT` 与 DWM cloaked 幽灵窗
-- **选框可调** — 8 个控制点拖拽微调 + 框内整块平移，十字对齐辅助线仅在拖拽时出现，尺寸提示跟随选区
-- **标注可再编辑** — 已画的图形可点选、拖动改位置、`Delete` 删除；文字可双击重新编辑（清空即删除），编辑时输入框的字色/字号与当前设置所见即所得
-- **中文文字标注** — 分层窗口承载不了子控件、自绘又接不上 IME，故文字输入另开一个半透明 owned 顶层窗承载标准 EDIT 控件，子类化窗口过程拦截 `Enter` 提交 / `Esc` 取消
-- **贴图钉屏** — 截图钉在桌面最上层，可拖动、滚轮缩放（以光标为锚点）、双击关闭、右键菜单（复制 / 保存 / 关闭）。用原生 GDI 窗口而非 WebView 窗口，每张钉图的内存占用就是那张位图本身（不像一个 WebView2 进程 30–50MB）
-- **性能取舍** — 截图与亮度暗化预合成一次缓存，拖拽每帧只 `copy(base)` + 局部还原选区 + 画边框；绘制原语刻意绕开 GDI（32bpp DIB 的 alpha 写入无保证），改为纯字节写入
-- **快捷键** — `Enter` / `Ctrl+C` 复制，`Ctrl+S` 保存，`Ctrl+Z` / `Ctrl+Shift+Z`（或 `Ctrl+Y`）撤销重做，`Ctrl+A` 全选，`R` / `E` / `A` / `L` / `M` / `T` 切换工具，方向键微调（`Shift` ×10），`Delete` 删除选中图形，`Esc` 逐层退出（面板 → 工具 → 会话），右键取消
+<details>
+<summary><b>📷 截图工具</b></summary>
 
+Snipaste 形态，`F1` 唤起全屏覆盖层，**框选 → 标注 → 复制 / 保存 / 贴图**一条链路，全程不弹第二窗口。
 
+- **原生覆盖层零闪** — 全屏遮罩是自建 Win32 分层窗口，`UpdateLayeredWindow(ULW_ALPHA)` 整帧提交、不走 `WM_PAINT`；显示顺序 `SW_HIDE → SetWindowPos → 画完 → SW_SHOW` 无空窗期
+- **框选后原地浮出工具条** — 矩形 / 椭圆 / 箭头 / 直线 / 马赛克 / 文字 + 颜色(9) / 线宽(4) / 字号(6) + 撤销重做 + 复制 / 保存 / 贴图 / 关闭
+- **窗口 / 元素吸附** — 实时高亮光标下窗口，单击选中；`Ctrl` 下沉到子控件；已排除自身窗、`WS_EX_TRANSPARENT`、`DWM cloaked`
+- **选框可调、标注可再编辑** — 8 控制点 + 平移；图形点选 / 拖动 / `Delete`；文字双击重编辑（另开 owned 顶层窗承载 IME）
+- **贴图钉屏** — 原生 GDI 窗口钉桌面最上层，可拖动 / 滚轮缩放（光标锚点）/ 双击关闭，单张内存即位图本身（非 WebView2 进程）
+- **快捷键** — `Enter`/`Ctrl+C` 复制，`Ctrl+S` 保存，`Ctrl+Z`/`Ctrl+Shift+Z` 撤销重做，`Ctrl+A` 全选，`R/E/A/L/M/T` 切工具，方向键微调（`Shift`×10），`Delete` 删除，`Esc` 逐层退出
 
-### 🪟 窗口管理
+</details>
 
-纯热键驱动的「单窗口贴屏 + 批量排版浮层」，不占用 `Win+方向`（不与系统 Snap 抢键）：
+<details>
+<summary><b>🪟 窗口管理</b></summary>
 
-- **15 个贴屏热键** — 把鼠标点到目标窗口使其成为前台，按热键即贴到对应区域：左 / 右 / 上 / 下半屏、四个四分之一、居中、最大化、还原、最小化、置顶切换、移到上一屏 / 下一屏
-- **排版浮层（`Ctrl+Alt+W`）** — 一步到位：唤起浮层后点九宫格模板里的任意一块即完成排版。当前窗口进**点击的那一格**，其余格子自动用**同屏其他可见窗口**按 Z 序（最近用过在前）填充，窗口不够则留空（不会重复塞同一个窗口）；点卡片本身 = 主位第 1 格。9 种模板：左右对半 / 左主右二 / 右主左二 / 上主下二 / 下主上二 / 四象限 / 三列 / 三行 / 九宫格
-- **分屏比例可调** — 左 / 右半屏的宽度占比可在设置页调整（10%–90%，默认 50%）
-- **多显示器** — 排版按**光标所在屏**换算几何；单窗口热键支持把窗口在屏间搬运
-- **落位细节** — 贴屏前先彻底清掉最大化状态（`SW_RESTORE` 后仍 `IsZoomed`，再用 `SetWindowPlacement` 强制普通态），否则 `SetWindowPos` 设的尺寸会被 Windows 直接丢掉；落位带 `SWP_NOACTIVATE` 不抢焦点，浮层不会因被排窗口夺焦而闪退；几何按**边界取整**，屏宽不被格数整除时相邻格也严格贴合、不留缝
-- **设置入口** — 设置 → 窗口管理：15 个动作逐个改键、分屏比例、排版浮层热键
+纯热键驱动「单窗口贴屏 + 批量排版浮层」，不占 `Win+方向`：
 
-### 🔧 全局热键（可自定义）
+- **15 个贴屏热键** — 左 / 右 / 上 / 下半屏、四四分之一、居中、最大化、还原、最小化、置顶切换、移上一屏 / 下一屏（`Ctrl+Alt` 前缀，默认全部可改）
+- **排版浮层 `Ctrl+Alt+W`** — 点九宫格任意一块即排版：当前窗口进点击格，其余用同屏其他可见窗口按 Z 序填充；9 种模板（左右对半 / 左主右二 / 右主左二 / 上主下二 / 下主上二 / 四象限 / 三列 / 三行 / 九宫格）
+- **分屏比例可调** — 左右半屏宽度占比 10%–90%（默认 50%）；多显示器按光标所在屏换算几何
 
-- 所有热键均可在设置页面自定义
-- 运行时动态重注册
-- 捕获新热键时自动暂停全局监听以避免冲突
+</details>
 
-### 🖥️ 系统命令
+<details>
+<summary><b>🔐 SSH 远程终端</b></summary>
 
-- 锁屏、关机、重启、睡眠、清空回收站
+- **默认热键** — `Ctrl+Alt+S` 唤出独立可缩放窗口，切换窗口不中断会话
+- **主机管理** — 主机 + 分组（文件夹）树形组织、拖拽排序、环境标签（生产 / 预发 / 测试）、备注；凭据与配置分离存储
+- **认证方式** — 密码 / 私钥（ed25519 等）+ 私钥口令；兼容旧设备 `ssh-rsa` / SHA-1（legacy 开关）
+- **服务器指纹信任** — 首次连接弹出指纹确认对话框，可对照服务器命令核对；known_hosts 统一管理（查看 / 清除已信任指纹），指纹变更主动告警，防中间人
+- **多标签会话** — 同主机连接池复用（多标签只握手一次）；PTY 终端模拟，支持复制 / 粘贴 / 全选 / 清屏；滚动回放与断线重连
+- **SFTP 文件管理** — 远程目录浏览、上传 / 下载
+- **命令执行** — 非交互一次性 `Exec`（带超时、退出码、输出截断），用于脚本化运维
 
----
+</details>
 
-## 🔧 环境管理
+<details>
+<summary><b>☁️ WebDAV 云同步 / 📸 快照备份 / 🖥️ 系统命令</b></summary>
 
-内置多运行时版本管理，支持一键安装 / 切换 / 启停，多版本共存于用户目录，不污染系统 PATH，纯用户态、清理时随 QuickDock 一并删除。
+- **WebDAV 云同步** — 全量 JSON 备份 / 恢复、多版本、任意 WebDAV 服务器；统一「同步后端」分层（`services/sync.go` → `internal/sync` → `internal/webdav`），未来可接入 Git / 对象存储
+- **快照备份** — 一键导出全部数据为 JSON，导入恢复，迁移无忧
+- **系统命令** — 锁屏 / 关机 / 重启 / 睡眠 / 清空回收站
 
-### 支持的运行时
+</details>
 
-当前内置的运行时按职责在侧边栏归类（语言 / 网络服务 / 数据库 / 中间件 / AI 服务 / 开发工具，另有「内置工具」组承载 HTTP 服务、端口全景与本地开发站点三个页面入口；DeepSeek Harness Agent 入口归入 AI 服务组）。完整清单与当前安装状态以侧边栏「环境管理」页为准。「类型」列标注是否支持服务化（一键启停 / 重启 / 日志 / 控制台）。其中 **MCP 服务**与 **WebDAV** 属「内置服务型」——无版本、无下载源，服务由宿主进程内直接承载。
+<details>
+<summary><b>🔄 自动更新（Windows 免安装器就地替换）</b></summary>
 
-| 运行时 | 分组 | 类型 | 下载源 | 版本来源 | 平台 |
-|--------|------|------|--------|----------|------|
-| **Node.js** | 语言 | 命令行 | npmmirror 镜像 / 官方 | 全量（LTS + 近 3 年） | Windows |
-| **Go** | 语言 | 命令行 | 官方 / golang.google.cn | 全量 | Windows |
-| **PHP** | 语言 | 服务型（php-fpm） | windows.php.net（VS16/VS17） | 全量 | Windows |
-| **Python** | 语言 | 命令行 | python.org | 全量 | Windows |
-| **Bun** | 语言 | 命令行 | oven-sh/bun | 全量 | Windows |
-| **Erlang** | 语言 | 命令行（被 RabbitMQ 依赖） | erlang/otp | 全量 | Windows |
-| **JDK** | 语言 | 命令行 | Adoptium Temurin（api.adoptium.net） | 固定 4 个（8 / 11 / 17 / 21） | Windows |
-| **Nginx** | 网络服务 | 服务型 | nginx.org | 全量 | Windows |
-| **Caddy** | 网络服务 | 服务型 | caddyserver/caddy | 全量 | Windows |
-| **Apache** | 网络服务 | 服务型 | Apache Lounge | 全量（目录页动态解析） | Windows |
-| **Traefik** | 网络服务 | 服务型 | traefik/traefik | 全量 | Windows |
-| **FTP** | 网络服务 | 服务型 | FTPDMIN（Sentex） | 单版本 0.96 | Windows |
-| **WebDAV** | 网络服务 | 服务型（宿主进程内，默认 9080） | 无（内置） | 单版本 `builtin` | Windows |
-| **Redis** | 中间件 | 服务型 | redis-windows | 全量 | Windows |
-| **Memcached** | 中间件 | 服务型 | adamyg/memcached-win32 | 全量 | Windows |
-| **MinIO** | 中间件 | 服务型 | dl.min.io | 滚动发布（latest） | Windows |
-| **RabbitMQ** | 中间件 | 服务型 | rabbitmq-server | 全量 | Windows |
-| **Git** | 开发工具 | 命令行 | git-for-windows | 全量 | Windows |
-| **Composer** | 开发工具 | 命令行 | getcomposer.org | 全量 | Windows |
-| **FFmpeg** | 开发工具 | 命令行 | gyan.dev | 固定 3 个 | Windows |
-| **Mailpit** | 开发工具 | 服务型 | axllent/mailpit | 全量 | Windows |
-| **frpc** | 开发工具 | 命令行（可编辑配置） | fatedier/frp | 全量 | Windows |
-| **GitHub CLI** | 开发工具 | 命令行 | cli/cli | 全量 | Windows |
-| **mkcert** | 开发工具 | 命令行 | FiloSottile/mkcert | 全量 | Windows |
-| **Ollama** | AI 服务 | 服务型（含模型管理） | gh-proxy 加速 / 官方 | 全量（单版本原地更新） | Windows |
-| **MCP 服务** | AI 服务 | 服务型（宿主进程内，默认 9230） | 无（内置） | 单版本 `builtin` | Windows |
-| **MariaDB** | 数据库 | 服务型 | archive.mariadb.org | 固定 3 个 | Windows |
-| **MySQL** | 数据库 | 服务型 | cdn.mysql.com | 固定 3 个 | Windows |
-| **PostgreSQL** | 数据库 | 服务型 | EnterpriseDB 二进制包 | 固定 3 个 | Windows |
-| **MongoDB** | 数据库 | 服务型 | fastdl.mongodb.org | 全量 | Windows |
-
-### Ollama 本地大模型
-
-- **单版本语义**：程序目录固定为 `runtime/ollama/`（不带版本号），不做多版本并存——单份约 1.4 GB（主要体积为 CUDA v12/v13 双轨 dll），且独占 `11434`、模型库全局共享，多版本是纯成本零收益；旧版 `runtime/ollama/<version>/` 布局会在首次访问时自动上提合并
-- **原地更新**：检测到新版本时侧栏版本区出现提示条，**只提示不自动更新**，由用户点「更新」触发；流程为下载 → 解压到同级 `.ollama-staging` → 校验可执行文件 → 才替换程序文件，任何一步失败当前版本都不受影响，`ollama.env` 配置保留
-- **系统安装版识别**：自动检测官方安装版（`scope: system`），提示"该版本开机自启，会抢占 11434"，不做自动禁用/卸载
-- **启动前检测**：显式检测外部实例与端口占用并给出可操作提示
-- **模型管理**（经 Ollama 本地 REST API，无需 external 工具）：已装模型列表与体积、已加载进显存的模型、模型拉取（流式进度条，按 digest 聚合避免多层并行时进度来回跳；输入框按官方模型库 `ollama.com/api/tags` 做联想）、删除模型
-- **模型库共享**：默认与系统安装版、命令行 `ollama` 共用 `~/.ollama/models`，避免重下数十 GB
-- **卸载只删程序**：删除整个 `runtime/ollama/`（约 1.4 GB），绝不触碰模型目录
-- **配置**：一份 `ollama.env`（`OLLAMA_MODELS` / `OLLAMA_HOST` / `OLLAMA_ORIGINS` / `OLLAMA_KEEP_ALIVE` / `OLLAMA_NUM_PARALLEL`），改端口后状态列同步显示
-- **平台**：一期仅 Windows（macOS 为 `.app` bundle、Linux 为 `.tar.zst`，解压链路未适配）
-
-### 核心设计
-
-- **便携优先**：所有版本安装至 `%APPDATA%\QuickDock\runtime\<name>\<version>`，不写注册表、不申请管理员权限
-- **多版本共存**：同一运行时可安装多个版本，通过「环境变量」切换当前激活版本
-- **下载源可切换**：每个运行时支持官方源 / 国内镜像 / 自定义 URL 模板（支持 `{version}` / `{v}` / `{os}` / `{arch}` / `{ext}` 占位符）
-- **版本列表智能筛选**：
-  - Node.js：LTS 版本 + 近 3 年发布版本，去重后按语义降序
-  - PHP：自动识别 VS16 / VS17 编译器二进制包
-  - Go / Redis / Git / Caddy / Traefik / RabbitMQ 等：GitHub Releases API 优先，HTML 兜底解析
-  - Apache：动态抓取 Apache Lounge 目录页（VS17/VS18 两页，正则大小写不敏感）解析版本与下载地址
-- **缓存策略**：版本列表内存缓存 1h（仅成功时缓存），失败立即重试，避免网络抖动后长时间看到旧数据
-- **代理容错**：fetchURL 代理请求失败时自动降级直连，超时 30s
-- **下载可靠性**：先写临时文件，完整成功后才落盘目标目录，避免中途失败留下半成品
-- **后台异步**：下载 / 解压 / 安装全程异步，进度通过 IPC 事件实时推送前端
-
-### 服务管理能力
-
-- **启停与状态**：服务型运行时（Redis / Nginx / Apache / Caddy / Traefik / FTP / MySQL / MariaDB / PostgreSQL / MongoDB / Memcached / MinIO / Mailpit / RabbitMQ / PHP-fpm / Ollama / WebDAV / MCP）一键启动、停止，实时显示 PID、端口与健康状态
-- **重启**：运行中版本提供「重启」按钮，先停后启，并复用启动时的端口冲突检测与配置校验，避免重启后出现端口占用
-- **配置编辑**：支持配置文件的运行时提供「编辑配置」入口（如 `Caddyfile` / `redis.conf` / `nginx.conf` / `traefik.yml` / `php.ini` / `frpc.toml`）；Nginx、Apache、Caddy 支持启动前配置校验（`nginx -t` / `apache -t` / `caddy validate`），校验失败阻止启动（Traefik 无独立 dry-run 子命令，不做启动前校验）
-- **日志查看**：服务型运行时提供「查看日志」弹窗，实时滚动读取进程日志尾部 8KB（覆盖 PostgreSQL / MySQL·MariaDB / MongoDB / Memcached / MinIO / Mailpit / Apache / Nginx / Redis / RabbitMQ / Caddy / Traefik / Ollama）
-- **Web 控制台一键打开**：运行时监听内置 Web UI 时，运行中显示「打开控制台」按钮，直接打开 `http://127.0.0.1:<port>`，覆盖 MinIO(9001) / Mailpit(8025) / Traefik(8080) / RabbitMQ(15672，仅管理插件启用时) / Nginx·Caddy(80)
-- **端口全景**：顶栏「端口全景」弹窗汇总所有运行服务的运行时 / 版本 / 端口 / 控制台入口，快速掌握本机开发服务占用情况
-- **本地开发站点**（内置工具组）：给本地项目一键绑定自定义域名 + 自动 HTTPS——对外服务交给已装的 Nginx / Caddy（HTTPS 443，可跑 PHP、可配反代），QuickDock 自身**不监听任何端口**：签发一张覆盖全部启用域名的证书（mkcert）、hosts 只改写 `# quickdock-sites begin/end` 标记区块，并向「站点配置文件同级 `quickdock-sites/`」写入片段且写入后触发热重载，**绝不自动改写 nginx.conf / Caddyfile**；纯静态站点不会生成 PHP-FastCGI 段（不依赖 php-fpm 9000）
-
-### UI 交互
-
-- 点击运行时标签 → 自动加载版本列表
-- 点击 `▾` 按钮或聚焦输入框 → 展开版本下拉列表（滚动、高亮当前选中版本）
-- 点击外部 → 自动收起列表
-- 加载失败 → 显示错误信息 + 「重试」按钮
-- 手动刷新 → 点「刷新列表」按钮（换源后重新拉取）
-- 有更新 → 显示「可更新：X.X.X → Y.Y.Y」提示，一键升级
-- 运行中版本：显示「重启」/「停止」按钮，「打开控制台」「查看日志」按需出现
-
-### 文件结构
-
-环境管理采用「门面 + 引擎」双层：Wails 绑定门面在 `services/env/`（薄壳），运行时引擎（注册表 / 下载 / 解压 / 服务生命周期）全在 `internal/env/`：
-
-```
-services/env/          # 门面层：Wails 绑定（31 个方法）
-└── service.go          # EnvList / EnvInstall / EnvStart / EnvStop / EnvRestart / EnvLogGet / EnvConfig*…
-
-internal/env/          # 引擎层（纯库，跨平台 _windows / _darwin / _unix 分文件）
-├── manager.go         # 运行时注册表（runtimeOrder + adapters 双注册）+ 门面能力接口（Log/WebConsole）
-├── source.go          # 版本列表解析（GitHub API / HTML 兜底）+ 多下载源 + 缓存
-├── download.go  extract.go  config.go  validate.go  dedupe.go   # 下载(多源回退)/解压/配置/校验/版本去重
-├── service.go         # serviceManager：服务生命周期（start/stop/startPTY/startWithEnv）+ 端口探测
-├── node.go  go.go  php.go  python.go  bun.go  erlang*.go        # 语言运行时
-├── nginx.go  caddy.go  apache.go  traefik.go  ftp.go            # 网络服务运行时
-├── redis.go  memcached.go  minio.go  rabbitmq.go                # 中间件（缓存 / 对象存储 / 消息队列）
-├── ollama.go  ollama_api.go                                      # Ollama（单版本）：版本管理 + 模型库 REST API（tags/ps/pull/delete）
-├── mcp.go  webdav.go                                             # 内置服务型（无版本/无下载源，服务由宿主进程内承载）
-├── versionfile.go                                                # 项目级版本切换（探测 .nvmrc / .php-version / go.mod 等并匹配已装版本）
-├── sql*.go  postgresql*.go  mongodb.go                           # 数据库（MySQL/MariaDB 共用 SQLRuntime）
-└── git.go  composer.go  ffmpeg.go  mailpit.go  frpc.go  gh.go  mkcert.go  # 开发工具
-```
-
----
-
-## 🔄 自动更新
-
-### 更新流程（Windows：免安装器就地替换）
-
-应用启动后按 GitHub 稳定地址拉取**签名更新清单**并验签：
+启动后拉取**签名更新清单**并验签：
 
 ```
 https://github.com/parieses/quickdock/releases/latest/download/manifest.json
@@ -351,94 +329,103 @@ https://github.com/parieses/quickdock/releases/latest/download/manifest.json
 
 | 阶段 | 行为 |
 |------|------|
-| 检查 | 拉取 manifest.json，ed25519ph 验签 + sha512 摘要校验；版本号比当前高才提示 |
-| 下载 | 下载清单里的裸 `quickdock-amd64.exe` 并校验摘要（走内置多源镜像回退） |
-| 重启 | 点击「重启更新」→ `Updater.Restart()` 派生 helper 进程 → 主进程退出 |
-| 替换 | helper 在父进程退出后备份旧 exe → 覆盖新 exe（失败自动回滚）→ 重新拉起应用 |
+| 检查 | 拉取 manifest.json，ed25519ph 验签 + sha512 校验；版本更高才提示 |
+| 下载 | 下载裸 `quickdock-amd64.exe` 并校验摘要（多源镜像回退） |
+| 重启 | 点「重启更新」→ 派生 helper → 主进程退出 |
+| 替换 | helper 备份旧 exe → 覆盖新 exe（失败回滚）→ 重新拉起 |
 
-整个过程**不弹 UAC、不跑安装器**，用户数据、数据库、插件、运行时目录全部保留（单文件应用，前端资源已 `go:embed` 进 exe）。
+整个过程**不弹 UAC、不跑安装器**，用户数据 / 数据库 / 插件 / 运行时目录全部保留（单文件应用，前端 `go:embed` 进 exe）。
 
-### 前提与限制
+- **macOS**：每 release 产出 `quickdock-darwin-arm64` / `quickdock-darwin-amd64` 两个包；`.app` 须装到 `~/Applications`（普通权限可写）方可就地更新；无 Developer ID 时为 ad-hoc 签名，正式分发需补签名 + 公证
+- **发版纪律**：版本号唯一来源是 **git tag**，`main.appVersion` 恒为 `"0.0.0"`，打包时由 Taskfile 的 `APP_VERSION`（`git describe --tags --abbrev=0`）经 ldflags 注入 —— **发版只打 tag，不改任何版本文件**
 
-- **首次安装请保持默认用户目录**：NSIS 安装器默认 `INSTALL_SCOPE=user` → 落在 `%LOCALAPPDATA%\Programs\快启坞`（无需管理员即可被替换）。若改到 `C:\Program Files\...`，写文件受 UAC 保护，就地替换会失败（回退到手动下载安装包）。
-- **macOS（双架构）**：每个 release 同时产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64` 两个包（CI 用 matrix 在原生 runner 上各自编译，零交叉风险）。
-  - **首次安装**：下载对应架构的 `.dmg`，打开后把 `quickdock.app` 拖到 **`~/Applications`**（用户目录，普通权限可写——这是后续就地替换更新的前提，与 Windows 的 per-user 思路一致）。**不要**留在下载目录或从 dmg 直接运行（会触发 App Translocation，导致更新"假成功"）。
-    > 磁盘上的 bundle 名是 `quickdock.app`（取自 Taskfile 的 `APP_NAME`）；「快启坞」只是 `Info.plist` 里的显示名，访达中看到的名字与文件名不同属正常现象。Windows 侧相反，安装目录用的是产品名：`%LOCALAPPDATA%\Programs\快启坞`。
-  - **自动更新**：机制与 Windows 完全相同——manifest 里另含 `quickdock-darwin-<arch>.zip`（整包 `.app` 压缩），应用端发现新版本后**手动点「重启更新」**，由 Wails helper 退出后整包替换 `.app` 并重新拉起。无 Developer ID 证书时为 ad-hoc 签名，仅本机/信任设备可用；**正式分发需补 Developer ID 签名 + 公证**（详见 `docs/mac-update-sparkle-analysis.md`）。Sparkle 仅在与 Sparkle 生态 / delta 增量 / 提权替换 `/Applications` 有强需求时才引入，当前不采用。
-  - **首次安装后解除 Gatekeeper 拦截（无开发者账号时必做）**：从 Release 下载的 `.app` 默认带隔离属性，双击若提示「无法打开，因为无法验证开发者」，二选一：
-    ```bash
-    # 方式一：终端执行一次（推荐装到 ~/Applications 时无需 sudo）
-    xattr -dr com.apple.quarantine ~/Applications/quickdock.app
-    # 若你装到了 /Applications（需管理员密码）：
-    sudo xattr -dr com.apple.quarantine /Applications/quickdock.app
-    ```
-    ```bash
-    # 方式二：图形界面 —— 系统设置 → 隐私与安全性 → 看到被拦截的「快启坞」，点「仍要打开」
-    ```
-    > 已装用户后续由应用自身在启动时自动清除该属性（见 `internal/platform/quarantine_darwin.go`），无需每次手动处理；也可一行安装：`curl -fsSL https://raw.githubusercontent.com/parieses/quickdock/main/install.sh | bash`。
-- 更新只替换主程序 exe，**不会**改动 `~/.quickdock` 下任何数据；跨版本配置迁移由数据库迁移逻辑负责。
+</details>
 
-### 相关文件
+---
 
-| 路径 | 说明 |
+## 🏗️ 架构
+
+服务门面分层 + 引擎下沉，依赖方向单向无环：
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│                         QuickDock (Wails v3)                       │
+│                                                                    │
+│   ┌────────────────────┐      ┌────────────────────────────────┐  │
+│   │  Vue 3 Frontend     │◄────►│  services/  Wails 绑定门面        │  │
+│   │  (frontend/dist     │ IPC  │  AppService + 21 领域门面子包    │  │
+│   │   go:embed)         │      │  约 250 绑定方法                 │  │
+│   └────────────────────┘      └───────────────┬────────────────┘  │
+│                                                │ 单向依赖          │
+│                                 ┌──────────────▼────────────────┐  │
+│                                 │  internal/  引擎层（无绑定）    │  │
+│                                 │  db / env / sites / dsh /      │  │
+│                                 │  plugin / platform / sync /    │  │
+│                                 │  webdav / webdavsrv / mcp /   │  │
+│                                 │  screenshot / winmgr / dl /   │  │
+│                                 │  logger / sysutil / validators │  │
+│                                 └───────────────────────────────┘  │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+**架构亮点**
+
+- **门面分层**：领域能力下沉为 21 个门面子包，宿主核心留在 AppService（约 62 方法）经全导出字段回指（约 190 方法），依赖单向无环
+- **截图覆盖层走原生窗口而非 WebView**：自建 Win32 分层窗口 `UpdateLayeredWindow` 整帧提交，工具条 / 标注 / 图形全手绘进同一张 DIB —— 这是「截图不闪」的唯一解
+- **次级窗口延迟创建**：首次热键触发才创建 WebView2，避免白屏；浮窗位置经 kvstore 持久化，重启原位恢复
+- **后台服务**：SQLite WAL + 待办(10s) / 定时 / 监控调度器 + 流式 HTTP（AI）+ 插件健康检查 + DSH 隐藏进程 + 内置 MCP(9230)
+- **安全**：纯 Go SQLite（零 CGO）、SQL 白名单防注入、API Key DPAPI 加密、单实例锁防并发写库、本地 SSE 流式用随机端口 + 随机 token
+- **规模（实测）**：Go 源码 ~7.3 万行（`internal` 5.6w + `services` 1.7w，含 67 测试文件），前端 ~3.9 万行（54 Vue 组件 + 50 TS 模块）
+
+---
+
+## 💻 技术栈
+
+**后端**
+
+| 技术 | 说明 |
 |------|------|
-| `~/.quickdock/update-guard.json` | 更新守卫：记录「已替换但版本号未变化」的目标版本，连续 2 次未生效则自动忽略该版本；删除此文件可强制重试 |
-| `~/.quickdock/logs/quickdock-YYYY-MM-DD.log` | 主日志（含 `[update]` 前缀的更新链路记录） |
-| `%TEMP%\wails-update-<pid>.log` | helper 替换日志（备份 / 覆盖 / 回滚结果） |
+| Go 1.25 | 主语言 |
+| Wails3 v3.0.0-alpha2.122 | 桌面应用框架 |
+| modernc.org/sqlite | 纯 Go SQLite（无 CGO） |
+| go-sql-driver/mysql + go-redis/v9 | MySQL / Redis 客户端 |
+| golang.org/x/sys | Windows 系统 API |
+| dop251/goja | JavaScript 沙箱（插件执行） |
+| DPAPI | Windows 数据保护 API（Key 加密） |
 
-### 版本号与发版纪律
+**前端**
 
-- `main.appVersion` 由 **Taskfile 的 `APP_VERSION`** 注入（本地取 `git describe --tags --abbrev=0`，CI 由 `release.yml` 显式传触发 tag）。
-- **必须先有新 commit 再打 tag**：同一 commit 叠多个 tag 时 `git describe` 只返回其中一个，会导致 manifest 版本号 > exe 内注入版本号 → 客户端反复提示同一个更新（CI 已在构建前断言两者一致，不一致直接中止发布）。
-- 本地自检：`task windows:version` 输出的版本号必须等于你要发布的 tag。
-
----
-
-## 快速开始
-
-### 系统要求
-
-- **操作系统**：Windows 10 1809+ 或 Windows 11
-- **运行时**：WebView2 Runtime（Windows 自动带）
-- **磁盘**：~50MB
-
-### 下载安装
-
-1. 从 [Releases](https://github.com/parieses/quickdock/releases) 下载 `quickdock-amd64-installer.exe`
-2. 双击安装（免管理员权限，默认装到用户目录 `%LOCALAPPDATA%\Programs\快启坞`）
-3. 运行 `QuickDock.exe`
-4. 任务栏托盘出现 QuickDock 图标即启动成功
-
-> **建议保持默认安装路径**：就地替换更新需要对该目录有写权限。若改到 `C:\Program Files\...`，每次更新都要过 UAC，自动更新会失败（只能手动下载安装包覆盖）。
-> 也可以直接下载 `quickdock-amd64.exe` 当便携版用：只要放在**当前用户可写**的目录（非 `Program Files`），同样支持就地替换更新。
-
-### 首次使用
-
-启动后按 `Ctrl+Space` 唤出主窗口，跟随引导页完成初始设置即可开始使用。
-
-内置截图工具默认 `F1` 唤起（若被前台程序占用会自动回退并在日志中提示），框选松手后选区下方会浮出工具条，可直接标注、复制、保存或贴图。
+| 技术 | 说明 |
+|------|------|
+| Vue 3 + TypeScript | UI 框架 |
+| Vite 8（Rolldown） | 构建工具 |
+| Pinia 3 | 状态管理 |
+| vue-i18n 11 | 国际化（简中 / English） |
+| @lucide/vue | 图标库 |
+| pinyin-pro | 拼音搜索 |
+| marked 18 + DOMPurify | Markdown 安全渲染 |
+| @floating-ui/vue 2 | 浮层定位 |
+| @wailsio/runtime 3.0.0-alpha.96 | Wails 前端运行时 |
 
 ---
 
-## 开发指南
+## 🔧 开发指南
 
 ### 前置条件
 
 - Go 1.25+
 - Node.js 22+
-- Wails3 CLI（**版本须与 `go.mod` 中 wails 模块一致**，见下）
+- Wails3 CLI（**版本须与 `go.mod` 一致**，当前 `alpha2.122`）
 
 ```bash
-# 安装 Wails3 CLI —— 版本要与 go.mod 里的 github.com/wailsapp/wails/v3 完全一致
-# （当前为 alpha2.122；CLI 与模块版本不一致会导致 bindings 生成格式/内容差异）
+# 安装 Wails3 CLI（版本必须与 go.mod 的 wails 模块完全一致）
 go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha2.122
 
-# 安装前端依赖
+# 前端依赖
 cd frontend && npm install
 
-# 重新生成前端 bindings（新增/修改 Go 绑定后必须执行；-ts 输出 TS，-clean 先清旧文件）
-wails3 generate bindings -ts -i -clean
-#   等价于：cd frontend && npm run bindings
+# 重新生成 bindings（新增/修改 Go 绑定后必须执行）
+wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bindings
 ```
 
 ### 常用命令
@@ -446,324 +433,78 @@ wails3 generate bindings -ts -i -clean
 | 命令 | 说明 |
 |------|------|
 | `wails3 dev` | 开发模式（前后端热重载） |
-| `go build -o quickdock.exe .` | 直接 Go 构建（需先 `npm run build`） |
-| `wails3 build` | 生产构建（含前端构建 + 绑定生成） |
-| `task build` | 通过 Taskfile 构建 |
-| `task run` | 直接运行已构建的应用 |
-| `task windows:version` | 输出最终注入到 `main.appVersion` 的版本号（发版前自检用） |
+| `wails3 build` | 生产构建（前端构建 + 绑定生成） |
+| `task build` / `task run` | 经 Taskfile 构建 / 运行 |
+| `task windows:version` | 输出最终注入 `main.appVersion` 的版本号（发版自检） |
 
-**注意**：开发版与正式版共用同一 SQLite 数据库与单实例锁，同一时刻一台机器只能运行一个 QuickDock 实例；正式发布仍走 `wails3 build`（生产 tag 注入版本号与图标 / 清单）。
+> 开发版与正式版共用同一 SQLite 库与单实例锁，同一时刻只能运行一个实例。
 
-### 数据库
+### 数据存储
 
-- SQLite 数据库文件：`~/.quickdock/quickdock.db`（WAL + 外键 + 5s busy timeout）
-- 剪贴板图片：`~/.quickdock/images/`
-- 已安装插件：`~/.quickdock/plugins/`
-- 应用配置：`%APPDATA%/QuickDock/`
-- Node / DSH 运行时：便携 Node 与 dsh 安装于 `~/.quickdock/runtime/node`、`~/.quickdock/dsh`，数据与用户 profile 复用 `~/.dsh`
-- 更新守卫：`~/.quickdock/update-guard.json`（连续 2 次替换后版本号未变化则忽略该版本，删除可强制重试）
-- 日志：`~/.quickdock/logs/quickdock-YYYY-MM-DD.log`（helper 替换日志在 `%TEMP%\wails-update-<pid>.log`）
-
----
-
-## 技术栈
-
-### 后端
-
-| 技术 | 说明 |
+| 路径 | 说明 |
 |------|------|
-| **Go 1.25** | 主语言 |
-| **Wails3 v3.0.0-alpha2.122** | 桌面应用框架 |
-| **modernc.org/sqlite** | 纯 Go SQLite（无 CGO） |
-| **go-sql-driver/mysql + go-redis/v9** | MySQL / Redis 客户端 |
-| **golang.org/x/sys** | Windows 系统 API 调用 |
-| **dop251/goja** | JavaScript 沙箱（插件执行） |
-| **google/uuid** | UUID 生成 |
-| **DPAPI** | Windows 数据保护 API（API Key 加密） |
+| `~/.quickdock/quickdock.db` | SQLite（WAL + 外键 + 5s busy timeout） |
+| `~/.quickdock/images/` | 剪贴板图片 |
+| `~/.quickdock/plugins/` | 已安装插件 |
+| `%APPDATA%/QuickDock/` | 应用配置 |
+| `~/.quickdock/runtime/node` · `~/.quickdock/dsh` | 便携 Node / DSH |
+| `~/.quickdock/logs/quickdock-YYYY-MM-DD.log` | 主日志 |
 
-### 前端
-
-| 技术 | 说明 |
-|------|------|
-| **Vue 3 + TypeScript** | UI 框架 |
-| **Vite 8** | 构建工具（Rolldown） |
-| **Pinia 3** | 状态管理 |
-| **vue-i18n 11** | 国际化（简体中文 / English） |
-| **@lucide/vue** | 图标库 |
-| **pinyin-pro** | 拼音搜索支持 |
-| **marked 18 + DOMPurify** | Markdown 安全渲染 |
-| **@floating-ui/vue 2** | 浮层定位（右键菜单 / 划词浮层 / 图表 tooltip，自动防溢出与翻转） |
-| **@wailsio/runtime 3.0.0-alpha.96** | Wails 前端运行时绑定 |
-
----
-
-## 项目结构
+### 项目结构
 
 ```
 quickdock/
-├── main.go              # 入口：主窗口创建 + Wails 服务装配 + 更新检查
-├── windows.go           # 浮动窗口（剪贴板 / 笔记 / 命令面板 / 窗口排版浮层）+ 单实例锁
-├── tray.go              # 托盘菜单与全局热键注册
-├── elevated_cli.go      # 提权自举子进程入口（把站点域名写入系统 hosts 标记区块后立即退出）
-├── services/            # Wails 服务层（宿主 AppService + 领域门面子包，约 250 个绑定方法）
-│   ├── service.go       # AppService 宿主：配置/DB/窗口/热键等全导出字段（门面经 a.App.X 回指，62 方法）
-│   ├── api_result.go    # 统一 API 返回（Ok/Fail/OkMsg…）
-│   ├── types.go         # 配置类型定义
-│   ├── lifecycle.go     # 生命周期管理（启动清理 / 退出钩子）
-│   ├── hotkey.go  theme.go(_windows/_unix)  autostart.go  winmgr_service.go  # 宿主热键 / 主题 / 开机自启 / 窗口管理
-│   ├── app_launcher.go  focus.go  tool.go    # 应用启动 / 窗口聚焦 / 打开工具
-│   ├── clipboard_sys.go(_windows/_unix)      # 系统剪贴板操作与变更监听（宿主系统层）
-│   ├── screenshot.go                        # 截图编排（覆盖层/贴图预创建、收窗抓屏、剪贴板与保存）
-│   ├── sync.go          # WebDAV 云同步宿主方法
-│   ├── palette.go  plugin_hotkey.go  httpserve.go  httpserve_service.go  # 面板搜索 / 插件热键 / 本地 HTTP 服务基座
-│   ├── schedule.go  schedule_runner.go       # 定时任务 + 调度引擎（宿主转发层）
-│   ├── reminder.go  webhook_notify.go        # 待办提醒(10s 轮询) + 多渠道 Webhook 通知
-│   ├── monitor_checker.go                    # 网站监控探测引擎（SSL / 内容匹配，驻留宿主）
-│   └── ai/  clipboard/  collection/  diag/  dsh/  env/  frecency/  item/
-│       mcp/  monitor/  note/  plugin/  port/  scene/  scheduler/  snapshot/
-│       system/  todo/  update/  workspace/   # 20 个领域门面子包（薄壳：NewXxxService(app) + 方法转发）
-│          ├── scheduler/   # 定时调度引擎子包（Service 独立承载，非 Wails 门面）
-│          └── mcp/         # 内置 MCP 服务装配（见「🛠️ MCP 服务」）
-├── internal/            # 引擎层（被门面/宿主调用，不含 Wails 绑定）
-│   ├── db/              # SQLite 数据层（安全白名单 + schema 自动迁移；workspace/collection/item/clipboard/notes/todo/scheduled_tasks/monitor/tool/plugin/plugin_exec_logs/usage_frecency/activity/snapshot…）
-│   ├── env/             # 多运行时引擎（运行时注册表 + 下载 + 解压 + 服务生命周期 + 项目级版本探测，跨平台分文件）
-│   ├── sites/           # 本地开发站点（域名 + 证书 + hosts 标记区块 + nginx/Caddy 片段生成，自身不监听端口，不接管 nginx/Caddy 配置）
-│   ├── dsh/             # DeepSeek Harness 引擎（node_env 便携 Node + dsh_runtime 进程管理）
-│   ├── plugin/          # 插件管理器引擎（manifest / manager / rpc / host / installer / window_manager…）
-│   ├── platform/        # 平台 API 封装（DPAPI / 剪贴板监听 / 热键 / 应用扫描 / 图标 / 系统命令 / 显示器）
-│   ├── sync/            # 统一同步后端（当前实现：WebDAV）
-│   ├── webdav/          # WebDAV HTTP 客户端
-│   ├── webdavsrv/       # 内置 WebDAV 服务端（宿主进程内，默认 9080）
-│   ├── mcp/             # MCP 服务器（Streamable HTTP，默认端口 9230）
-│   ├── screenshot/      # 截图工具（Windows 专属：GDI 抓屏 + 原生分层覆盖层 + 全原生标注 + 贴图钉屏，约 5.2k 行）
-│   ├── winmgr/          # 窗口管理（Windows 专属：贴屏布局 + 多屏搬运 + 排版浮层的枚举/落位）
-│   ├── dl/              # 下载工具（代理感知 + 多源回退）
-│   ├── logger/          # 统一日志（宿主 logger.I/W/E + 插件 logger.PluginI/W/E，slog 桥接）
-│   ├── sysutil/         # 子进程/控制台工具（Command/Hide/Detach/StartDetached/PTY，Windows 作业纪律）
-│   └── validators/      # 输入校验
-├── frontend/
-│   ├── src/
-│   │   ├── App.vue  main.ts  style.css  # 应用根组件 / 入口 / 全局样式
-│   │   ├── components/  # 41 个 Vue 页面与组件
-│   │   │   ├── AIPage.vue  SettingsAI.vue         # AI 对话与设置
-│   │   │   ├── ClipboardPanel.vue                 # 剪贴板历史浮动面板
-│   │   │   ├── CommandPalette.vue                 # 命令面板
-│   │   │   ├── EnvironmentPage.vue  ConfigEditor.vue  LogViewer.vue  # 环境管理与配置/日志
-│   │   │   ├── TodoPage.vue  SchedulePage.vue  MonitorPage.vue       # 待办(番茄) / 定时 / 监控
-│   │   │   ├── NotePanel.vue  NoteTreeNode.vue  NoteManagerPage.vue  # 快捷笔记与树形笔记库
-│   │   │   ├── PortPage.vue                       # 端口全景
-│   │   │   ├── PluginManagerPage.vue  PluginMarketPage.vue  PluginPage.vue  PluginFrame.vue # 插件
-│   │   │   ├── SettingsDSH.vue                    # DeepSeek Harness 设置页
-│   │   │   ├── SettingsSnapshot.vue  SettingsSync.vue  SettingsTools.vue  # 快照 / 同步 / 工具
-│   │   │   ├── WebhookSettingsModal.vue           # Webhook 通知配置
-│   │   │   ├── Sidebar.vue  CollectionList.vue  ItemList.vue  ItemEditor.vue  # 主界面三栏
-│   │   │   ├── OnboardingPage.vue                 # 首启引导页
-│   │   │   └── ...（更多通用组件：CreateDialog / ConfirmDialog / Toast / HotkeySettings…）
-│   │   ├── stores/       # Pinia 状态管理（workspace.ts）
-│   │   ├── types/        # TypeScript 类型（index.ts / ai.ts）
-│   │   ├── utils/        # 工具函数（api.ts / pluginBridge.ts / calc.ts …）
-│   │   ├── i18n/         # 国际化（zh-CN / en-US）
-│   │   ├── composables/  # 组合式函数（useFloatMenu / useFrecency …）
-│   │   └── assets/       # 静态资源
-│   └── vite.config.ts
-├── plugins/             # 插件（宿主骨架 + 开发模板；外部插件源码见下）
-│   ├── builtin/         # 内置插件骨架（仅 common.css/js，宿主注入兼容用，勿删）
-│   ├── templates/       # 插件开发模板（none / goja / native）
-│   └── external/        # 外部插件源码（独立 git 子仓库，已 gitignore，不随主仓分发；含 build.py 生成市场索引）
-├── build/               # 构建配置（CI / 图标 / 平台产物）
-├── docs/                # 设计文档（mac 支持 / 自动更新 / 服务拆分 / 首启引导  / 审计报告 …）
-├── website/             # 官网（纯静态单页，中英双语 + 明暗主题，无需构建；Pages workflow 发布）
-├── scripts/             # 一次性维护脚本（ResetGit / ReTag）
-├── image/               # README 截图资源
-├── DESIGN.md            # 设计系统规范
-├── LICENSE              # MIT
-├── Taskfile.yml         # 构建任务定义
-├── go.mod  go.sum       # Go 依赖（module quickdock）
-├── main_unix.go  main_windows.go     # 跨平台入口（平台差异装配）
-└── windows_unix.go  windows_windows.go  # 浮动窗口平台差异
+├── main.go / tray.go / windows.go        # 入口 / 托盘 / 浮动窗口 + 单实例锁
+├── services/                             # Wails 门面层（宿主 + 21 领域子包，~250 方法）
+│   ├── service.go  api_result.go  types.go lifecycle.go
+│   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
+│   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go
+│   ├── screenshot.go  sync.go  palette.go  plugin_hotkey.go
+│   ├── schedule.go  schedule_runner.go  reminder.go  webhook_notify.go
+│   ├── monitor_checker.go
+│   └── ai/ clipboard/ collection/ diag/ dsh/ env/ frecency/ item/
+│       mcp/ monitor/ note/ plugin/ port/ scene/ scheduler/ snapshot/
+│       system/ todo/ update/ workspace/   # 领域门面子包
+├── internal/                             # 引擎层（被门面调用，无 Wails 绑定）
+│   ├── db/  env/  sites/  dsh/  plugin/  platform/  sync/  webdav/  webdavsrv/
+│   ├── mcp/  screenshot/  winmgr/  dl/  logger/  sysutil/  validators/
+├── frontend/src/                         # Vue 3 + TS（54 组件 + 50 TS 模块）
+│   ├── App.vue  main.ts  style.css  i18n/  stores/  composables/  utils/
+│   └── components/  # 三栏主界面 / 面板 / 设置 / 插件 / 环境 / 监控 …
+├── plugins/                              # 宿主骨架 + 开发模板（外部插件见独立仓库）
+├── build/  docs/  website/  scripts/  image/  Taskfile.yml
+├── DESIGN.md  AGENTS.md  LICENSE
+└── main_unix.go  main_windows.go  windows_unix.go  windows_windows.go
 ```
 
----
-
-## 数据模型
-
-```
-Workspace（工作空间）
-  └── Scene（场景）— 标签/类型/图标/颜色
-       └── Collection（集合）— 类型/打开策略/关联工具
-            └── Item（项目）
-                  ├── directory   — 目录
-                  ├── file        — 文件
-                  ├── url         — 网页链接
-                  ├── command     — 终端命令
-                  ├── app         — 应用程序
-                  └── quicklink   — 快速链接
-```
-
-**独立模型：**
-
-| 模型 | 说明 |
-|------|------|
-| **ClipboardEntry** | 剪贴板条目（文本/图片/文件） |
-| **Note** | 笔记树节点（`notes` 表；`is_folder` 区分文件夹与 Markdown 文档） |
-| **Todo** | 待办任务（子任务、标签、状态、重复） |
-| **Schedule** | 定时任务（四种调度、五种动作） |
-| **Monitor** | 网站监控（状态码/SSL/内容匹配） |
-| **AIConversation** | AI 对话会话（标题、摘要、token 统计） |
-| **AIMessage** | AI 消息（角色、内容、思考过程） |
-| **WebhookConfig** | 多渠道通知配置（钉钉 / 企微 / 飞书 / Server酱 / PushPlus / Telegram） |
-
-所有数据库表通过白名单机制防止 SQL 注入。
+> 更完整的工程约束（提交纪律、样式 token、目录职责、自检清单）见 [AGENTS.md](./AGENTS.md)。
 
 ---
 
-## 全局热键
+## 🎨 设计哲学
 
-| 功能 | 默认快捷键 | 说明 |
-|------|-----------|------|
-| 切换主窗口 | `Ctrl+Space` | 显示 / 隐藏主界面 |
-| 剪贴板历史 | `` Ctrl+` ``（反引号） | 显示 / 隐藏剪贴板浮动窗口 |
-| 命令面板 | `Ctrl+K` | 显示 / 隐藏命令面板浮动窗口 |
-| 快捷笔记 | `Ctrl+Shift+N` | 显示 / 隐藏笔记浮动窗口 |
-| 区域截图 | `F1` | 唤起全屏覆盖层框选截图（`F1` 被占用时自动回退 `Ctrl+Shift+A`） |
-| 窗口排版浮层 | `Ctrl+Alt+W` | 唤起九宫格排版浮层，点任意一块即排版（开着时再按一次收起） |
+**精准暗色极简主义（Precision Dark Minimalism）**
 
-> 所有热键均可在「设置 > 热键」页面自定义。
-
-### 窗口管理热键
-
-先点目标窗口使其成为前台，再按对应热键。默认全部在 `Ctrl+Alt` 下，**刻意避开 `Win+方向`**（那是系统 Snap 的地盘）：
-
-| 动作 | 默认快捷键 | 动作 | 默认快捷键 |
-|------|-----------|------|-----------|
-| 贴左半屏 | `Ctrl+Alt+←` | 左上四分之一 | `Ctrl+Alt+1` |
-| 贴右半屏 | `Ctrl+Alt+→` | 右上四分之一 | `Ctrl+Alt+2` |
-| 贴上半屏 | `Ctrl+Alt+↑` | 左下四分之一 | `Ctrl+Alt+3` |
-| 贴下半屏 | `Ctrl+Alt+↓` | 右下四分之一 | `Ctrl+Alt+4` |
-| 居中 | `Ctrl+Alt+C` | 置顶切换 | `Ctrl+Alt+T` |
-| 最大化 | `Ctrl+Alt+Enter` | 移到上一屏 | `Ctrl+Alt+[` |
-| 还原 | `Ctrl+Alt+R` | 移到下一屏 | `Ctrl+Alt+]` |
-| 最小化 | `Ctrl+Alt+M` | | |
-
-> 15 个动作与排版浮层热键均可改键：设置 → 窗口管理。
+- 暗色为主（层次化灰阶非纯黑），支持深 / 浅 / 跟随系统；强调色 `#4a9eff` 仅用于功能交互
+- 三面板布局：侧边栏(210px) | 集合列表(300px) | 项目列表(flex-1)
+- 8px 基准间距、系统字体栈（基字 13px）、150ms 过渡、键盘优先、`box-shadow` 替代 `border` 消除布局偏移
+- 完整规范见 [DESIGN.md](./DESIGN.md)
 
 ---
 
-## 设计哲学
+## 🔌 插件生态
 
-快启坞遵循 **精准暗色极简主义（Precision Dark Minimalism）**：
+官方插件统一在独立仓库维护与分发 👉 **[quickdock-plugins](https://github.com/parieses/quickdock-plugins)**（插件列表、功能说明与完整开发文档：目录结构、`plugin.json` 字段、三种运行时快速开始、通信协议、调试与发布）。
 
-- **暗色主题为主** — 层次化灰色调，非纯黑，通过明度对比创造深度；支持深色 / 浅色 / 跟随系统切换，插件窗口同步适配
-- **强调色 `#4a9eff`** — 仅用于功能性交互元素，不作装饰
-- **三面板布局** — 侧边栏(210px) | 集合列表(300px) | 项目列表(flex-1)
-- **8px 基准间距** — 4px 递增，从 2px 到 48px
-- **系统字体栈** — 无自定义字体，基字大小 13px
-- **150ms 过渡** — 少动效，仅状态变化时使用动画
-- **键盘优先** — 所有交互均支持键鼠操作
-- **Shadow-border 技术** — `box-shadow` 替代 CSS `border`，消除布局偏移
-- **4 种色调层次** — `bg-primary(#1a1a1a)` → `bg-secondary(#1e1e1e)` → `bg-tertiary(#242424)` → `bg-active(#2a2a2a)`
-
-详细设计规范请参阅 [DESIGN.md](./DESIGN.md)。
+主仓库仅保留**宿主实现**（`internal/plugin/` 引擎 + `services/plugin/` 门面）；用户安装的插件落在 `~/.quickdock/plugins/<plugin-id>/`。随仓库挂载的部分外部插件涵盖：HTTP 客户端、数据库连接、OCR、端口检查、JSON / 正则 / 哈希 / 颜色 / JWT / 二维码工具、PDF / 图片工作室、代码对比、Hosts 管理、网络诊断、磁盘分析、重复文件查找、批量重命名、本地文件搜索、图床上传 等。
 
 ---
 
-## 插件生态
+## 📄 许可协议
 
-QuickDock 采用开放的插件架构，官方插件统一在独立仓库维护与分发：
+[MIT License](./LICENSE) © 2025–2026 王亮亮
 
-👉 **[quickdock-plugins](https://github.com/parieses/quickdock-plugins)** —— 插件列表、功能说明与完整开发文档（目录结构、`plugin.json` 字段、三种运行时快速开始、通信协议、调试与发布）均在该仓库 README 中。
+## 🙏 致谢
 
-主仓库仅保留插件**宿主实现**（安装 / 启停 / 通信 / 热键 / 窗口管理），源码分两层：`internal/plugin/`（引擎：类型 / 清单 / 管理器 / JSON-RPC / 宿主 / 安装器 / 窗口）与 `services/plugin/`（Wails 门面绑定）；前端经「插件管理」页的「在线市场」标签一键安装 / 升级官方插件。
-
-> 插件**源码**本体在独立仓库维护；本地开发时以 `plugins/external/` 子仓库形式挂载（自带 `.git`，已加入主仓 `.gitignore`，不随主仓分发），其中的 `build.py` 生成市场索引 `site/index.json`；用户安装的插件落在 `~/.quickdock/plugins/<plugin-id>/`。
-
-**已随仓库挂载的部分外部插件**：HTTP 客户端、数据库连接、OCR（PaddleOCR ONNX）、端口检查器、JSON 工具箱、正则提取、哈希计算、颜色转换、货币大写、JWT 解码、二维码、PDF 工具箱、图片工作室、代码对比、Hosts 管理、网络诊断、站点审计、磁盘分析、重复文件查找、邮件检测、速度测试、Wi-Fi 管理、子域名枚举、接口压测、指纹/目录扫描、批量重命名、本地文件搜索、图床上传 等。
-
----
-
-## 构建与打包
-
-### 本地构建
-
-```bash
-# 开发模式（热重载）
-wails3 dev
-
-# 生产构建
-wails3 build
-
-# 直接 Go 构建（需先 npm run build）
-cd frontend && npm run build
-cd .. && CGO_ENABLED=0 go build -o quickdock.exe .
-
-# 运行
-./quickdock.exe
-```
-
-### 平台支持
-
-> **当前仅支持 Windows 10 1809+/Windows 11**。macOS 适配已做平台层抽象（`mac` 分支），但 `.app` 必须在 Mac 上构建（Wails 依赖 CGO 和 macOS 框架）。
-
----
-
-## 架构亮点
-
-- **服务门面分层（宿主 + 20 门面子包）**：领域能力按包边界下沉为 20 个门面子包（`ai`/`clipboard`/`collection`/`diag`/`dsh`/`env`/`frecency`/`item`/`monitor`/`note`/`plugin`/`port`/`scene`/`snapshot`/`system`/`todo`/`update`/`workspace` + 引擎子包 `scheduler` + MCP 装配 `mcp`），宿主核心留在 AppService（约 62 方法），子包薄壳经宿主**全导出字段** `a.App.X` 回指（约 190 方法），依赖方向单向无环；引擎层集中在 `internal/`（`db`/`env`/`sites`/`dsh`/`plugin`/`platform`/`sync`/`webdav`/`webdavsrv`/`mcp`/`screenshot`/`winmgr`/`dl`/`logger`/`sysutil`/`validators`）
-- **多窗口架构**：主窗口 (1100×700) + 剪贴板 / 笔记浮动窗口 (480×420) + 命令面板浮动窗口 (680×460) + 窗口排版浮层 (900×700)，另有 DSH 原生长驻窗口
-- **截图覆盖层走原生窗口而非 WebView**：全屏遮罩是自建 Win32 分层窗口（`WS_EX_LAYERED|WS_EX_TOPMOST|WS_EX_TOOLWINDOW`），内容 `UpdateLayeredWindow(ULW_ALPHA)` 整帧提交、窗口类 `HbrBackground=0`、显示前先把像素画完 —— 这是「截图不闪」的唯一解，空窗期是 WebView2 的架构特性、调参修不掉。工具条 / 弹出面板 / 标注图形全部手绘进**同一张 DIB**，不引入第二个窗口；文字标注因必须走 IME 而另开 owned 顶层窗承载标准 EDIT。覆盖层在 `app.Run()` **之前**预创建（不涉及 WebView2，故没有次级窗口的白屏约束）
-- **所有次级窗口延迟创建**：在首次热键触发时才创建 WebView2，确保运行时完全初始化，避免白屏
-- **WebView2 内存优化**：`--in-process-gpu` + `--renderer-process-limit=4` 等参数限制渲染进程数，任务管理器更清爽
-- **窗口即隐藏**：关闭主窗口时隐藏到系统托盘而非退出，通过 `atomic.Bool` 标志区分真实退出
-- **多显示器支持**：浮动窗口自动定位到鼠标所在屏幕
-- **浮窗位置记忆**：剪贴板 / 命令面板 / 笔记 / 窗口排版浮层的位置经 kvstore 服务持久化，重启后原位恢复；拔出外接屏后自动收拢回窗口所在屏幕工作区
-- **框架原生底座**：托盘 / 全局热键 / 单实例 / 开机自启 / 自动更新 / 系统通知均基于 Wails v3 框架 API；系统日志汇入统一面板（`slog.SetDefault` 桥接）；仅剪贴板富内容、图标提取、系统命令、截图覆盖层等原理性 Win32 调用保留手写
-- **纯 Go SQLite**：使用 modernc.org/sqlite，零 CGO 依赖，简化交叉编译
-- **回调注入解耦**：热键函数通过注入方式避免 main 和 services 包之间的循环依赖
-- **SQL 白名单**：表名和列名校验防止 SQL 注入
-- **本地流式架构**：内置 `127.0.0.1` HTTP SSE 流式服务（随机端口 + 随机 token），避免 Wails 事件框架的缓冲限制，实现逐 token 即时显示（用于 AI 对话等场景）
-- **API Key 安全加密**：Windows 下 DPAPI 加密存储（`CryptProtectData`），macOS 下 base64 编码，前端全程不接触密文
-- **单实例锁**：框架 `Options.SingleInstance`（UniqueID `QuickDock-Instance`，开发/正式共用）——二次启动自动通知首实例把主窗口带到前台后退出，避免多进程并发写同一 SQLite 库
-- **后台服务**：SQLite WAL 模式 + 待办提醒调度器 (10s) + 定时任务调度器 + 监控检查器（含 SSL 检测）+ 流式 HTTP 服务（AI）+ 插件健康检查 + DSH 隐藏进程管理 + 内置 MCP 服务（9230）
-- **规模（2026-09）**：Go 约 324 文件 / 6.2w 行（主仓非 external，另含 44 个测试文件），前端 src 约 77 个 ts/vue（41 个 Vue 组件）
-
----
-
-## 许可协议
-
-本项目采用 **MIT License** 开源许可证。
-
-Copyright (c) 2025-2026 王亮亮
-
-```
-MIT License
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-```
-
----
-
-## 致谢
-
-- [Wails](https://wails.io/) — 强大的 Go 桌面应用框架
-- [Vue.js](https://vuejs.org/) — 渐进式前端框架
-- [Floating UI](https://floating-ui.com/) — 浮层定位引擎（防溢出 / 自动翻转）
-- [Lucide](https://lucide.dev/) — 优雅的开源图标库
-- [modernc.org/sqlite](https://modernc.org/sqlite) — 纯 Go SQLite 实现
-- [marked](https://marked.js.org/) — 快速 Markdown 解析
-- [DOMPurify](https://github.com/cure53/DOMPurify) — XSS 安全过滤
+- [Wails](https://wails.io/) · [Vue.js](https://vuejs.org/) · [Floating UI](https://floating-ui.com/) · [Lucide](https://lucide.dev/)
+- [modernc.org/sqlite](https://modernc.org/sqlite) · [marked](https://marked.js.org/) · [DOMPurify](https://github.com/cure53/DOMPurify)
