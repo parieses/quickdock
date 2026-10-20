@@ -32,7 +32,7 @@ window.QD_I18N = {
 
     /* ---------- what's new (v0.0.23) ---------- */
     "这次更新了什么": "What's new",
-    "v0.0.23 加入了 SSH 远程终端：QuickDock 现在能直接连你的服务器开终端、传文件。主机集中管理并支持分组，凭据本地保存；首次连接会先让你核对服务器指纹再决定是否信任。按 Ctrl+Alt+S 唤起独立窗口，切换窗口不会中断已建立的会话。": "v0.0.23 adds an SSH remote terminal: QuickDock can now connect to your servers to open a terminal and transfer files. Hosts are centrally managed with grouping, credentials stay local, and the first connection asks you to verify the server fingerprint before trusting it. Press Ctrl+Alt+S to bring up the standalone window — switching windows never interrupts an established session.",
+    "v0.0.23 带来两大更新：一是 SSH 远程终端，可以直接连服务器开终端、传文件，主机集中管理、首次连接先核对指纹；二是插件权限大梳理，每个插件能做什么（读文件 / 联网 / 执行程序 / 结束进程）安装前一目了然，高危能力默认关闭、需你点头才生效。": "v0.0.23 brings two headline updates: an SSH remote terminal you can use to connect to servers, open a terminal and transfer files — with centralized host management and fingerprint verification on first connect; and a full overhaul of plugin permissions, where everything a plugin can do (read files / reach the network / run programs / end processes) is laid out before install, and high-risk capabilities are off by default until you explicitly allow them.",
     "SSH 远程终端": "SSH remote terminal",
     "Ctrl+Alt+S 唤起独立终端窗口，多标签页并行会话，切换标签或最小化窗口都不打断连接；侧栏与托盘都有入口。": "Ctrl+Alt+S opens a standalone terminal window with multi-tab parallel sessions; switching tabs or minimizing never drops the connection. Available from both the sidebar and the tray.",
     "主机集中管理": "Centralized host management",
@@ -40,7 +40,15 @@ window.QD_I18N = {
     "先核对再连": "Verify before you trust",
     "首次连接会展示服务器指纹供人工核对，主机密钥变更时额外告警——服务器重装和连接被劫持在技术上都表现为密钥变化，QuickDock 不会替你猜，把决定权交给你。": "The first connection shows the server fingerprint for you to check, and a changed host key raises an explicit warning — a reinstalled server and a hijacked connection look identical technically, so QuickDock doesn't guess for you. The decision is yours.",
     "SFTP 传文件": "SFTP file transfer",
-    "终端内直接浏览远程目录，拖拽即可上传下载，不必再开一个 FTP 客户端。": "Browse remote directories right inside the terminal and drag to upload or download — no separate FTP client needed.",    "v0.0.21 让插件系统更稳、环境配置更顺手：插件进程管理重构，修复空指针与状态显示错乱，新增自定义超时；环境管理补上 Go 环境变量配置与自定义数据目录；命令面板的应用搜索改为实时刷新，新装软件不用重启。": "v0.0.21 makes plugins more reliable and runtime setup more convenient: plugin process management was reworked (null-pointer and status-display bugs fixed, custom timeouts added), environment management gains Go env config and a custom data directory, and the command palette now refreshes installed apps in real time — no restart after installing new software.",
+    "终端内直接浏览远程目录，拖拽即可上传下载，不必再开一个 FTP 客户端。": "Browse remote directories right inside the terminal and drag to upload or download — no separate FTP client needed.",
+
+    /* ---------- what's new (v0.0.23) 插件权限 ---------- */
+    "插件权限看得见": "Visible plugin permissions",
+    "每个插件能读哪些文件、连哪些网址、是否允许执行程序或结束进程，安装前都列得清清楚楚；没声明的能力一律不可用。": "Each plugin lists exactly what it can do — which files it reads, which URLs it reaches, whether it may run programs or end processes — all shown before install; anything not declared is simply unavailable.",
+    "高危默认关": "High-risk off by default",
+    "执行程序、结束进程这类操作默认关闭，必须插件显式申请、你明确允许才生效，不给流氓插件可乘之机。": "Running programs or ending processes is off by default; the plugin must explicitly ask and you must explicitly allow it — leaving no room for rogue plugins.",
+
+    "v0.0.21 让插件系统更稳、环境配置更顺手：插件进程管理重构，修复空指针与状态显示错乱，新增自定义超时；环境管理补上 Go 环境变量配置与自定义数据目录；命令面板的应用搜索改为实时刷新，新装软件不用重启。": "v0.0.21 makes plugins more reliable and runtime setup more convenient: plugin process management was reworked (null-pointer and status-display bugs fixed, custom timeouts added), environment management gains Go env config and a custom data directory, and the command palette now refreshes installed apps in real time — no restart after installing new software.",
     "插件更可靠": "More reliable plugins",
     "重构插件进程管理逻辑，修复空指针与清理流程；插件可通过 plugin.json 声明 backend.timeout，慢接口不再被误判为响应超时。": "Plugin process management reworked — null pointers and the uninstall cleanup flow fixed. Plugins can declare backend.timeout in plugin.json so slow endpoints are no longer mistaken for timeouts.",
     "环境配置": "Environment setup",
@@ -66,6 +74,9 @@ window.QD_I18N = {
     "为兼容 OpenSSH 7.0 之前的老设备与老网络设备，可单独开启 ssh-rsa / SHA-1 通道（会降低算法强度，默认关闭）。": "For compatibility with pre-OpenSSH-7.0 servers and older network gear, the ssh-rsa / SHA-1 channel can be enabled separately (weaker algorithms, off by default).",
     "终端内集成 SFTP：直接浏览远程目录，拖拽上传下载，不必另开 FTP 客户端。": "SFTP built into the terminal: browse remote directories and drag to upload or download — no separate FTP client.",
     "连接池按主机维度复用已建立的连接，重复操作不再反复握手；会话与窗口生命周期解耦。": "A per-host connection pool reuses established connections, so repeated operations skip the handshake; sessions are decoupled from the window lifecycle.",
+    "插件权限模型上线：每个插件能做什么（读文件 / 联网 / 执行程序 / 结束进程）在安装前清晰列出，未声明的能力一律不可用。": "Plugin permission model is live: everything a plugin can do (read files / reach the network / run programs / end processes) is listed clearly before install, and anything undeclared is simply unavailable.",
+    "高危能力默认关闭：执行程序、结束进程这类操作需插件显式申请、你明确允许后才生效。": "High-risk capabilities are off by default: running programs or ending processes requires the plugin to explicitly request it and you to explicitly allow it.",
+    "安装插件时会核对其声明与实际行为是否一致，发现越权会告警提示，让你知道插件到底要干什么。": "When installing a plugin, its declared permissions are checked against its actual behavior; any overreach triggers a warning so you know exactly what the plugin is up to.",
     "修复 DeepSeek Harness 启动即闪退：日志读取函数误写成递归调用自身，触发栈溢出后宿主进程直接退出（该致命错误无法被捕获），现已恢复正常打开。": "Fixed DeepSeek Harness crashing on launch: the log-reading function was written as a recursive self-call, overflowing the stack and taking down the host process (an unrecoverable fatal error). It opens normally again.",
     "截图抓屏不再把整屏像素复制一份，改为直接使用抓到的画面；4K / 双屏这类大桌面下，按下热键后的等待明显缩短，首次截图尤其明显。": "Screen capture no longer duplicates the full-screen pixel buffer — it now uses the captured surface directly. On large desktops (4K, multi-monitor), the wait after pressing the hotkey drops noticeably, especially for the first shot.",
     "截图首帧不再重复搬运一次整屏像素：暗化结果一次写到位，遮罩出现更快。": "The first screenshot frame no longer moves a full-screen pixel buffer a second time: the dimmed result is written in one pass, so the overlay appears faster.",
