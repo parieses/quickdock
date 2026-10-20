@@ -67,6 +67,17 @@ jobs:
           "WAILS3_BIN=$wailsBin" | Out-File -Append -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM
           (go env GOPATH).Trim() + "\bin" | Out-File -Append -FilePath $env:GITHUB_PATH -Encoding utf8NoBOM
 
+      - name: Plugin bridge self-check
+        # BRIDGE_SCRIPT 是内联在 pluginBridge.ts 里的压缩 JS，注入到**每个**插件 iframe 的
+        # <head>。它没有类型检查、没有构建期校验，改坏一个引号就是「所有 none 类插件的
+        # 宿主能力静默失灵」——包括主题跟随（plugin:theme → data-theme）与运行期异常
+        # 上报（window.error → log.error），而这类故障在宿主里只表现为插件界面异常，极难定位。
+        # 本检查把它抽出来在 stub 环境真跑一遍，无外部依赖，在编译之前拦截。
+        # 同时守一条架构约束：桥内不得出现读parent/opener.document 的代码——插件 iframe
+        # 沙箱刻意不含 allow-same-origin（opaque origin），读了必抛 SecurityError。
+        working-directory: frontend
+        run: npm run check:bridge
+
       - name: Install NSIS
         shell: pwsh
         run: choco install nsis -y --no-progress
