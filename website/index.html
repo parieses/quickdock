@@ -84,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.22 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.23 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -95,20 +95,19 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.22) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.23) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.22</span>
+<span class="eyebrow">v0.0.23</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.22 修掉了一个会让 QuickDock 直接退出的严重问题，同时把截图这条链路从头到尾压了一遍：高分屏上按下快捷键的等待大幅缩短，框选不再每帧重画整屏，复制到剪贴板也省掉了多余的一次全图转换。另外把运行日志整体理了一遍——刷屏的冗余记录去掉，真正影响排障的上下文补上。</p>
+<p>v0.0.23 加入了 SSH 远程终端：QuickDock 现在能直接连你的服务器开终端、传文件。主机集中管理并支持分组，凭据本地保存；首次连接会先让你核对服务器指纹再决定是否信任。按 Ctrl+Alt+S 唤起独立窗口，切换窗口不会中断已建立的会话。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">不再闪退</span><span>修复 DeepSeek Harness 启动时的栈溢出：日志读取函数误写成递归调用自身，一旦读取子进程输出就会让宿主进程直接退出，表现为点一下即闪退。现已恢复正常打开。</span></div>
-<div class="tbl-row"><span class="k">高分屏不再等</span><span>截图抓屏不再把整屏像素多拷一份，首帧也不再重复搬运整屏；4K、双屏这类大桌面下，按下热键到看见遮罩的等待明显缩短。</span></div>
-<div class="tbl-row"><span class="k">框选更跟手</span><span>截图框选改为只重绘变化区域，不再每帧重画整屏；暗化合成与绘制资源改为跨会话复用，按住热键连拍也不用反复申请内存。</span></div>
-<div class="tbl-row"><span class="k">复制更快</span><span>截图复制到剪贴板改走 DIB 直写，省掉一次全图像素格式转换，1080p 下少约 13ms，粘贴前的等待明显缩短。</span></div>
-<div class="tbl-row"><span class="k">出问题看得见</span><span>错误记录现在会带上出错的具体位置，不再是干巴巴一句错误。启动、退出、AI 对话、定时任务、通知推送这些链路都补上了耗时与结果记录——反馈问题时能直接看出卡在哪一步，而不是「就是不太对」。</span></div>
+<div class="tbl-row"><span class="k">SSH 远程终端</span><span>Ctrl+Alt+S 唤起独立终端窗口，多标签页并行会话，切换标签或最小化窗口都不打断连接；侧栏与托盘都有入口。</span></div>
+<div class="tbl-row"><span class="k">主机集中管理</span><span>服务器按树状分组管理，可标注生产 / 预发 / 测试环境并拖拽调整层级；支持密码与私钥（含口令）两种认证，保存前可先测试连接并看到耗时。</span></div>
+<div class="tbl-row"><span class="k">先核对再连</span><span>首次连接会展示服务器指纹供人工核对，主机密钥变更时额外告警——服务器重装和连接被劫持在技术上都表现为密钥变化，QuickDock 不会替你猜，把决定权交给你。</span></div>
+<div class="tbl-row"><span class="k">SFTP 传文件</span><span>终端内直接浏览远程目录，拖拽即可上传下载，不必再开一个 FTP 客户端。</span></div>
 </div>
 </div>
 </section>
@@ -123,7 +122,19 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.22</span><span class="log-date">2026-10-19</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.23</span><span class="log-date">2026-10-20</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>新增 SSH 远程终端：Ctrl+Alt+S 唤起独立窗口，多标签页并行会话，切换标签或最小化都不打断已建立的连接。</li>
+<li>服务器集中管理：树状分组、拖拽调整层级，可标注生产 / 预发 / 测试环境。</li>
+<li>支持密码与私钥（含口令）两种认证方式，密码可存可清；保存前可先测试连接并看到耗时。</li>
+<li>首次连接展示服务器指纹供人工核对；主机密钥变更时额外告警——服务器重装与连接被劫持在技术上都表现为密钥变化，QuickDock 不替你猜，把决定权交给用户。</li>
+<li>为兼容 OpenSSH 7.0 之前的老设备与老网络设备，可单独开启 ssh-rsa / SHA-1 通道（会降低算法强度，默认关闭）。</li>
+<li>终端内集成 SFTP：直接浏览远程目录，拖拽上传下载，不必另开 FTP 客户端。</li>
+<li>连接池按主机维度复用已建立的连接，重复操作不再反复握手；会话与窗口生命周期解耦。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.22</span><span class="log-date">2026-10-19</span></summary>
 <ul class="log-body">
 <li>修复 DeepSeek Harness 启动即闪退：日志读取函数误写成递归调用自身，触发栈溢出后宿主进程直接退出（该致命错误无法被捕获），现已恢复正常打开。</li>
 <li>截图抓屏不再把整屏像素复制一份，改为直接使用抓到的画面；4K / 双屏这类大桌面下，按下热键后的等待明显缩短，首次截图尤其明显。</li>
