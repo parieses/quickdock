@@ -2,17 +2,14 @@
 /**
  * 会话标签栏（#13）。
  *
- * 每个标签 = 一个 hostId + 一个 sessionId。注意标签不是「主机」：
- * 同一台主机理论上可以开多个会话（不同目录/不同 sudo 上下文），
- * 但当前 UI 刻意**一个主机只留一个标签**——同一台机器开三个看不出区别的终端，
- * 用户自己都分不清谁是谁。要开多个请用 tmux/screen，那是服务器侧该管的事。
+ * 每个标签 = 一个全局唯一 id + 一个 hostId + 一个 sessionId。标签不再等于「主机」：
+ * 同一台主机现在允许开多个标签（不同目录/不同 sudo 上下文/一个跑更新一个看日志），
+ * 用右键「复制会话」或双击标签即可再开一个，后端连接池会复用同一条 TCP、各开一个 channel。
  *
- * 已打开的主机再点一次是「聚焦已有标签」而不是重新连接：
- * 后端连接池会复用同一条 TCP，但 manager.Start 仍会新建一个 channel，
- * 旧的那个 session 就成了没人管的孤儿（占着引用计数直到进程结束）。
- * 前端先查已有标签，从根上避免制造孤儿。
+ * 点左树主机时仍是「聚焦该主机已有标签」而不是重新连接：避免手滑多点开一堆孤儿会话。
+ * 真正要第二个独立会话，走复制入口（openTab，resume 为 null）。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { HardDrive, Plus, X } from '@lucide/vue'
 import { sshEnvClass, type SshHost } from '../utils/ssh'
@@ -33,6 +30,8 @@ const emit = defineEmits<{
   (e: 'new'): void
   /** 切换当前标签的文件面板 */
   (e: 'files'): void
+  /** 复制该标签的会话到新标签（同主机第二个独立会话） */
+  (e: 'duplicate', tabId: string): void
 }>()
 
 const hostOf = computed(() => {
@@ -41,13 +40,47 @@ const hostOf = computed(() => {
   return map
 })
 
+/** 每台主机开了几个标签：>1 时需要给标签加序号区分。 */
+const hostCounts = computed(() => {
+  const m = new Map<string, number>()
+  for (const t of props.tabs) m.set(t.hostId, (m.get(t.hostId) || 0) + 1)
+  return m
+})
+
+/** 同一主机下每个标签的序号（1 起），用于标签上的角标。 */
+const ordinals = computed(() => {
+  const seen = new Map<string, number>()
+  const out = new Map<string, number>()
+  for (const t of props.tabs) {
+    const n = (seen.get(t.hostId) || 0) + 1
+    seen.set(t.hostId, n)
+    out.set(t.id, n)
+  }
+  return out
+})
+
 function shortLabel(tab: SshTab): string {
   return tab.host.name || tab.host.host
 }
 
 function titleOf(tab: SshTab): string {
   const h = tab.host
-  return `${h.name || h.host} — ${h.user || 'root'}@${h.host}:${h.port || 22}`
+  const ord =
+    (hostCounts.value.get(h.id) || 0) > 1 ? ` ·${ordinals.value.get(tab.id)}` : ''
+  return `${h.name || h.host} — ${h.user || 'root'}@${h.host}:${h.port || 22}${ord}`
+}
+
+// ---- 右键菜单：复制会话 ----
+const menu = ref<{ id: string; x: number; y: number } | null>(null)
+function openMenu(tabId: string, ev: MouseEvent) {
+  menu.value = { id: tabId, x: ev.clientX, y: ev.clientY }
+}
+function closeMenu() {
+  menu.value = null
+}
+function duplicate(tabId: string) {
+  emit('duplicate', tabId)
+  closeMenu()
 }
 </script>
 
@@ -63,10 +96,13 @@ function titleOf(tab: SshTab): string {
         :aria-selected="tab.id === activeId"
         :title="titleOf(tab)"
         @click="emit('select', tab.id)"
+        @dblclick="emit('duplicate', tab.id)"
+        @contextmenu.prevent="openMenu(tab.id, $event)"
       >
         <!-- 生产环境标签用实心红点 + 危险色：多标签并排时颜色是唯一能一眼分辨的线索 -->
         <i class="tab-dot" :class="sshEnvClass(tab.host.env)" />
         <span class="tab-name">{{ shortLabel(tab) }}</span>
+        <sup v-if="(hostCounts.get(tab.hostId) || 0) > 1" class="tab-ord">{{ ordinals.get(tab.id) }}</sup>
         <span v-if="tab.busy" class="tab-spinner" />
         <span
           class="tab-x"
@@ -90,6 +126,15 @@ function titleOf(tab: SshTab): string {
           @click="emit('files')"
         >
           <HardDrive :size="13" />
+        </button>
+      </div>
+    </div>
+
+    <!-- 右键菜单：复制会话到新标签 -->
+    <div v-if="menu" class="tab-menu-backdrop" @click="closeMenu" @contextmenu.prevent="closeMenu">
+      <div class="tab-menu" :style="{ left: menu.x + 'px', top: menu.y + 'px' }" @click.stop>
+        <button class="tab-menu-item" @click="duplicate(menu.id)">
+          {{ t('sshDuplicateTab') }}
         </button>
       </div>
     </div>
@@ -259,5 +304,49 @@ function titleOf(tab: SshTab): string {
 .tabs-act:disabled {
   cursor: default;
   opacity: 0.4;
+}
+
+/* 同一主机的多个标签：右上角小序号，便于区分「哪个是跑更新的、哪个是看日志的」 */
+.tab-ord {
+  margin-left: 2px;
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  font-family: var(--font-sans);
+}
+
+.tab-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+}
+
+.tab-menu {
+  position: fixed;
+  z-index: 1001;
+  min-width: 168px;
+  padding: var(--space-1);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-pop);
+}
+
+.tab-menu-item {
+  display: block;
+  width: 100%;
+  padding: var(--space-2) var(--space-3);
+  font-size: 12px;
+  font-family: inherit;
+  text-align: left;
+  color: var(--color-text-primary);
+  background: none;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.tab-menu-item:hover {
+  background: var(--color-bg-hover);
 }
 </style>

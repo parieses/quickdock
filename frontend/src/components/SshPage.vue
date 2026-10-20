@@ -39,6 +39,7 @@ import {
   closeTab,
   findResumable,
   findTab,
+  openOrFocus,
   openTab,
   patchTab,
   syncHost,
@@ -97,7 +98,7 @@ const busyHostIds = computed(() => {
 })
 
 /** 多标签下「选中」是多个（每台已打开的主机都算），左树要能同时高亮。 */
-const activeHostIds = computed(() => new Set(tabs.value.map(t => t.id)))
+const activeHostIds = computed(() => new Set(tabs.value.map(t => t.hostId)))
 
 const activeTab = computed(() => tabs.value.find(t => t.id === activeId.value) || null)
 
@@ -150,25 +151,24 @@ async function load() {
 
 // ---- 标签操作 ----
 
-/** 点主机：已打开就聚焦，未打开就新建标签。 */
+/** 点主机：该主机已有标签就聚焦最近打开的那个，否则新建。 */
 async function selectHost(h: SshHost) {
   if (h.isFolder) return
-  // 已在当前标签：什么都不用做（再点一次不要重连）
-  if (activeId.value === h.id) return
-
   // 从别的标签切过来时，当前标签可能正跑着命令。但**不弹确认**：
   // 标签栏的意义就是随时切换，切换不销毁会话（SshSessionView 靠 v-show 保留），
   // 所以这里没有任何破坏性后果，弹框只会让多标签变得难用。
-  const existing = tabs.value.find(t => t.id === h.id)
-  if (existing) {
-    activeId.value = h.id
-    return
-  }
+  const r = openOrFocus(tabs.value, h, findResumableFor(h.id))
+  tabs.value = r.tabs
+  activeId.value = r.activeId
+}
 
-  // 新标签：先看这台主机是不是已经挂着一条会话（之前开着没关干净的）。
-  // 接回而不是重连——重连会多开一个 channel，旧会话变成没人管的孤儿，
-  // 还占着连接池的引用计数减不下去。
-  const r = openTab(tabs.value, h, findResumableFor(h.id))
+/** 复制当前会话到新标签：同一台主机再开一个独立会话（共享 TCP，各自一个 channel）。
+ *  用于「一个标签跑更新命令、另一个看日志/比对配置」这类场景。 */
+function duplicateTab(tabId: string) {
+  const tab = findTab(tabs.value, tabId)
+  if (!tab) return
+  // resume 传 null：强制新开一个 channel，而非接回这条已有会话。
+  const r = openTab(tabs.value, tab.host, null)
   tabs.value = r.tabs
   activeId.value = r.activeId
 }
@@ -298,11 +298,11 @@ async function removeHost(h: SshHost) {
     // 被删的主机若有打开的标签，一并关掉并断开——否则标签会停在一块死画面上。
     //
     // 删**文件夹**必须展开子树：后端是级联删除的，而文件夹本身不会有标签，
-    // 只看 tab.id === h.id 会一个都匹配不到。结果就是分组从树上消失了，
+    // 只看 tab.hostId === h.id 会一个都匹配不到。结果就是分组从树上消失了，
     // 但里面主机的标签和会话全留着——重连必然报 ssh_host_not_found，
     // 而且那条 Go 侧会话从此没有任何 UI 入口能关掉。
     const doomed = new Set(h.isFolder ? collectSubtreeIds(tree.value, h.id) : [h.id])
-    const affected = tabs.value.filter(tab => doomed.has(tab.id))
+    const affected = tabs.value.filter(tab => doomed.has(tab.hostId))
     for (const tab of affected) {
       const sid = tabSessionId(tab)
       if (sid) {
@@ -432,7 +432,8 @@ defineExpose({
         @toggle="toggleFolder"
         @edit="openEdit"
         @delete="removeHost"
-        @create="createFolder"
+        @create="openNew"
+        @create-folder="createFolder"
         @move="moveHost"
       />
     </aside>
@@ -447,6 +448,7 @@ defineExpose({
         @close="closeTabById"
         @new="onNewTab"
         @files="toggleSftp(activeId)"
+        @duplicate="duplicateTab"
       />
 
       <div class="ssh-stage">

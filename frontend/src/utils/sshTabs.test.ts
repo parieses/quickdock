@@ -3,6 +3,8 @@ import {
   closeTab,
   findResumable,
   findTab,
+  makeTabId,
+  openOrFocus,
   openTab,
   patchTab,
   syncHost,
@@ -48,34 +50,71 @@ function session(id: string, hostId: string, started: number): SshSessionInfo {
   }
 }
 
+// 注：这里的「已开标签」用 id === hostId 只是为了测试可读性；
+// 真实运行里所有标签都由 makeTabId 生成全局唯一 id，openTab/openOrFocus 的新标签亦是。
 const tabs = (...ids: string[]): SshTab[] =>
-  ids.map(id => ({ id, host: host(id), resume: null, sessionId: '', busy: false }))
+  ids.map(id => ({ id, hostId: id, host: host(id), resume: null, sessionId: '', busy: false }))
 
 describe('openTab', () => {
-  it('新主机追加到末尾并聚焦', () => {
+  it('新主机追加到末尾并聚焦（id 全局唯一，不等于 hostId）', () => {
     const r = openTab(tabs('a'), host('b'))
-    expect(r.tabs.map(t => t.id)).toEqual(['a', 'b'])
-    expect(r.activeId).toBe('b')
+    expect(r.tabs.map(t => t.hostId)).toEqual(['a', 'b'])
+    expect(r.tabs[1].id).not.toBe('b')
+    expect(r.activeId).toBe(r.tabs[1].id)
   })
 
-  it('已存在则只聚焦，不新建', () => {
-    // 这是「同主机只 1 条 TCP」在 UI 层的关键：重复点主机不能开出第二个标签，
-    // 否则会多一个 channel，旧会话变孤儿。
+  it('每次 openTab 都新建独立标签，不影响已有标签', () => {
+    const s = session('s1', 'b', 1000)
+    const r = openTab(tabs('a'), host('b'), s)
+    expect(r.tabs[1].resume).toBe(s)
+    expect(r.tabs[0].resume).toBeNull()
+  })
+})
+
+describe('openOrFocus', () => {
+  it('已存在则只聚焦，不新建（避免手滑多点开孤儿会话）', () => {
     const orig = tabs('a', 'b')
-    const r = openTab(orig, host('a'))
+    const r = openOrFocus(orig, host('a'))
     expect(r.tabs.length).toBe(2)
-    expect(r.activeId).toBe('a')
+    expect(r.opened).toBe(false)
+    expect(r.activeId).toBe(r.tabs[0].id) // 聚焦已有的那个 a
     // 同一引用：没产生新数组，Vue 不会因这次点击重渲整个标签栏
     expect(r.tabs).toBe(orig)
   })
 
-  it('resume 只在新建时生效', () => {
+  it('不存在则新建一个独立标签', () => {
+    const r = openOrFocus(tabs('a'), host('b'))
+    expect(r.opened).toBe(true)
+    expect(r.tabs.length).toBe(2)
+    expect(r.tabs[1].hostId).toBe('b')
+  })
+
+  it('同一主机可开多个标签（复制会话场景）', () => {
+    let cur = tabs('a')
+    cur = openOrFocus(cur, host('a')).tabs // 聚焦已有的 a
+    cur = openTab(cur, host('a')).tabs // 显式再开一个
+    expect(cur.filter(t => t.hostId === 'a').length).toBe(2)
+    // 两个标签 id 不同
+    expect(cur[0].id).not.toBe(cur[1].id)
+  })
+})
+
+describe('openTab / openOrFocus 与 resume', () => {
+  it('openTab 新建标签带上传入的 resume', () => {
     const s = session('s1', 'b', 1000)
     const r = openTab(tabs('a'), host('b'), s)
     expect(r.tabs[1].resume).toBe(s)
-    // 已存在的标签即使传了 resume 也不该被覆盖——那条标签连着别的会话
-    const r2 = openTab(r.tabs, host('b'), session('s2', 'b', 2000))
-    expect(findTab(r2.tabs, 'b')?.resume).toBe(s)
+    expect(r.tabs[0].resume).toBeNull()
+  })
+
+  it('openOrFocus 聚焦已有标签时不覆盖其 resume', () => {
+    const s1 = session('s1', 'a', 1000)
+    const withOne: SshTab[] = [
+      { id: 'a', hostId: 'a', host: host('a'), resume: s1, sessionId: '', busy: false },
+    ]
+    const r = openOrFocus(withOne, host('a'), session('s2', 'a', 2000))
+    expect(r.opened).toBe(false)
+    expect(findTab(r.tabs, 'a')?.resume).toBe(s1)
   })
 })
 
@@ -117,7 +156,7 @@ describe('closeTab', () => {
     // 不断连的后果：Go 侧那条 session 永远留着，回放缓冲占着内存，
     // 且连接池的引用计数减不下去（最后一个引用不归零，TCP 一直吊着）。
     const withSession: SshTab[] = [
-      { id: 'a', host: host('a'), resume: session('s1', 'a', 1), sessionId: '', busy: false },
+      { id: 'a', hostId: 'a', host: host('a'), resume: session('s1', 'a', 1), sessionId: '', busy: false },
     ]
     const r = closeTab(withSession, 'a', 'a')
     expect(r.closed?.resume?.id).toBe('s1')
@@ -140,21 +179,21 @@ describe('patchTab', () => {
 describe('syncHost', () => {
   it('用最新的主机信息刷新已打开的标签', () => {
     // 用户在表单里改了名字，标签上必须立刻变，否则要关掉重开才生效。
-    const orig: SshTab[] = [{ id: 'a', host: host('a', { name: '旧名' }), resume: null, sessionId: '', busy: false }]
+    const orig: SshTab[] = [{ id: 'a', hostId: 'a', host: host('a', { name: '旧名' }), resume: null, sessionId: '', busy: false }]
     const r = syncHost(orig, [host('a', { name: '新名' })])
     expect(r[0].host.name).toBe('新名')
   })
 
   it('没有变化时返回同一引用（避免无谓重渲染）', () => {
     const h = host('a')
-    const orig: SshTab[] = [{ id: 'a', host: h, resume: null, sessionId: '', busy: false }]
+    const orig: SshTab[] = [{ id: 'a', hostId: 'a', host: h, resume: null, sessionId: '', busy: false }]
     expect(syncHost(orig, [h])).toBe(orig)
   })
 
   it('主机被删除时不动标签', () => {
     // 标签里还握着 host 引用，删了也要留着让用户看到会话内容，
     // 彻底移除是 closeTab 的事。
-    const orig: SshTab[] = [{ id: 'a', host: host('a'), resume: null, sessionId: '', busy: false }]
+    const orig: SshTab[] = [{ id: 'a', hostId: 'a', host: host('a'), resume: null, sessionId: '', busy: false }]
     expect(syncHost(orig, [])[0].id).toBe('a')
   })
 })

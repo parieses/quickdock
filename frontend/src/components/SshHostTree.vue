@@ -9,7 +9,7 @@
  * 三带的判定按鼠标在行内的纵向位置（0-33% 上、33-67% 中、67-100% 下），
  * 中带只在目标是文件夹时才是「放进去」，落在主机上则退化为「插到它前面」。
  */
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   ChevronDown,
@@ -43,6 +43,7 @@ const emit = defineEmits<{
   (e: 'edit', host: SshHost): void
   (e: 'delete', host: SshHost): void
   (e: 'create', parentId: string): void
+  (e: 'createFolder', parentId: string): void
   (e: 'move', payload: { id: string; parentId: string }): void
 }>()
 
@@ -53,22 +54,11 @@ const dropHint = ref<{ targetId: string; position: DropPosition } | null>(null)
 const gapBefore = ref('')
 const gapAfter = ref('')
 
+// 展平后的行：折叠的分组不展开子节点，但分组自身仍是一行。
+// 空态只在该行数为 0（即树上连一个分组都没有）时才显示——
+// 否则「只有一个空分组」会被误判成「没有任何主机」而用占位图把分组整个藏起来，
+// 用户建了分组却看不见，更没法往里加连接。
 const rows = computed(() => flattenSshTree(props.tree, props.collapsed))
-const hasAnyHost = computed(() => {
-  for (const n of props.tree) {
-    if (n.kind === 'host') return true
-    if (hasHostUnder(n.children)) return true
-  }
-  return false
-})
-
-function hasHostUnder(list: SshTreeNode[]): boolean {
-  for (const n of list) {
-    if (n.kind === 'host') return true
-    if (hasHostUnder(n.children)) return true
-  }
-  return false
-}
 
 /** 拖拽悬停：按纵向位置算出落点，并顺手维护插入线的显示位置。 */
 function onDragOver(n: SshTreeNode, ev: DragEvent) {
@@ -125,6 +115,56 @@ function resetDrag() {
   gapAfter.value = ''
 }
 
+// ---- 文件夹「+」弹出菜单 ----
+//
+// 以前文件夹的 + 只做一件事（要么建主机、要么建子分组），用户点错就误建。
+// 这里把 + 做成菜单：明确给出「在此分组内新建主机」和「新建子分组」两个选项，
+// 消除「点 + 结果建了个分组」的困惑。
+const folderMenu = ref<{ x: number; y: number; folderId: string } | null>(null)
+
+function openFolderMenu(e: MouseEvent, folderId: string) {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  const x = Math.min(rect.right, window.innerWidth - 180)
+  const y = Math.min(rect.bottom + 4, window.innerHeight - 120)
+  folderMenu.value = { x, y, folderId }
+}
+
+function closeFolderMenu() {
+  folderMenu.value = null
+}
+
+function folderMenuAction(kind: 'host' | 'subfolder') {
+  const m = folderMenu.value
+  closeFolderMenu()
+  if (!m) return
+  if (kind === 'host') emit('create', m.folderId)
+  else emit('createFolder', m.folderId)
+}
+
+function onMenuDocDown(e: MouseEvent) {
+  if (!folderMenu.value) return
+  const el = e.target as HTMLElement | null
+  if (!el || !el.closest('.tree-folder-menu')) closeFolderMenu()
+}
+
+function onMenuDocKey(e: KeyboardEvent) {
+  if (folderMenu.value && e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    closeFolderMenu()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onMenuDocDown)
+  document.addEventListener('keydown', onMenuDocKey, true)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', onMenuDocDown)
+  document.removeEventListener('keydown', onMenuDocKey, true)
+})
+
 /** 落点在行内的类名，供模板高亮。 */
 function hintClass(n: SshTreeNode): string[] {
   const h = dropHint.value
@@ -153,7 +193,7 @@ function onRowClick(n: SshTreeNode) {
       <span class="tree-spinner" />
     </div>
 
-    <div v-else-if="!hasAnyHost" class="tree-hint">
+    <div v-else-if="rows.length === 0" class="tree-hint">
       <Server :size="26" class="tree-hint-icon" />
       <p class="tree-hint-text">{{ loadErr ? t('loadFailed') : t('sshHostsEmpty') }}</p>
       <button class="tree-empty-cta" @click="emit('create', '')">
@@ -220,9 +260,18 @@ function onRowClick(n: SshTreeNode) {
 
           <span class="tree-actions">
             <button
+              v-if="n.kind === 'folder'"
               class="tree-act"
               :title="t('sshNewInFolder')"
-              @click.stop="emit('create', n.host.id)"
+              @click.stop="openFolderMenu($event, n.host.id)"
+            >
+              <Plus :size="11" />
+            </button>
+            <button
+              v-else
+              class="tree-act"
+              :title="t('sshNewSiblingHost')"
+              @click.stop="emit('create', n.host.parentId ?? '')"
             >
               <Plus :size="11" />
             </button>
@@ -243,6 +292,25 @@ function onRowClick(n: SshTreeNode) {
       <!-- 末节点的下侧插入线：循环里只有「上侧」，最后一行下面还得补一条 -->
       <div class="tree-gap" :class="{ 'is-after': gapAfter === rows[rows.length - 1]?.host.id }" />
     </template>
+
+    <!-- 文件夹「+」菜单：用 Teleport 脱离 .ssh-side 的 overflow 裁剪 -->
+    <Teleport to="body">
+      <div v-if="folderMenu" class="tree-folder-backdrop" @click="closeFolderMenu" @contextmenu.prevent="closeFolderMenu" />
+      <div
+        v-if="folderMenu"
+        class="tree-folder-menu"
+        :style="{ left: folderMenu.x + 'px', top: folderMenu.y + 'px' }"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <button class="tree-menu-item" @click="folderMenuAction('host')">
+          {{ t('sshNewInFolder') }}
+        </button>
+        <button class="tree-menu-item" @click="folderMenuAction('subfolder')">
+          {{ t('sshNewSubFolder') }}
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -527,5 +595,41 @@ function onRowClick(n: SshTreeNode) {
   color: var(--color-danger);
   border-color: var(--color-danger-bg);
   background: var(--color-danger-bg);
+}
+
+/* 文件夹「+」菜单 */
+.tree-folder-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1900;
+}
+
+.tree-folder-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 168px;
+  padding: var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 28px var(--color-bg-overlay);
+}
+
+.tree-menu-item {
+  display: block;
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  text-align: left;
+}
+
+.tree-menu-item:hover {
+  background: var(--color-bg-active);
 }
 </style>

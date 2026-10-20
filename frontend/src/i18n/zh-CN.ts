@@ -1605,10 +1605,17 @@ export default {
   sshNewFolder: '新建分组',
   sshFolderNamePrompt: '分组名称：',
   sshNewInFolder: '在此分组内新建主机',
+  sshNewSubFolder: '新建子分组',
+  sshNewSiblingHost: '新建同级主机',
+  sshCtxCopy: '复制',
+  sshCtxPaste: '粘贴',
+  sshCtxSelectAll: '全选',
+  sshCtxClear: '清空屏幕',
   sshDeleteFolderExtra: '\n\n该分组下的所有主机也会一并删除。',
   sshCloseTab: '关闭标签',
   sshCloseTabConfirm: '关闭「{name}」的标签会断开它的会话，继续？',
   sshNewTab: '收起终端，回到主机列表',
+  sshDuplicateTab: '复制会话到新标签',
   sshFolder: '分组',
 
   // ---- 已信任服务器（指纹管理）----

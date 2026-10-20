@@ -1604,10 +1604,17 @@ export default {
   sshNewFolder: 'New group',
   sshFolderNamePrompt: 'Group name:',
   sshNewInFolder: 'New host in this group',
+  sshNewSubFolder: 'New subgroup',
+  sshNewSiblingHost: 'New sibling host',
+  sshCtxCopy: 'Copy',
+  sshCtxPaste: 'Paste',
+  sshCtxSelectAll: 'Select all',
+  sshCtxClear: 'Clear screen',
   sshDeleteFolderExtra: '\n\nAll hosts inside this group will be deleted too.',
   sshCloseTab: 'Close tab',
   sshCloseTabConfirm: 'Closing the tab for "{name}" will disconnect its session. Continue?',
   sshNewTab: 'Hide the terminal and go back to the host list',
+  sshDuplicateTab: 'Duplicate session to a new tab',
   sshFolder: 'Group',
 
   // ---- Trusted servers (fingerprint management) ----

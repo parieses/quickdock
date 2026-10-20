@@ -11,10 +11,11 @@
  * 等 sessionId 到位再按到达顺序补写。
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { Events } from '@wailsio/runtime'
+import { Clipboard, Events } from '@wailsio/runtime'
 import '@xterm/xterm/css/xterm.css'
 
 import { Replay, Resize, Write } from '../../bindings/quickdock/services/sshx/sshservice'
@@ -74,6 +75,159 @@ const emit = defineEmits<{
   /** 多行粘贴待确认：数据原样带出，父组件弹窗确认后再决定是否发送 */
   paste: [data: string]
 }>()
+
+const { t } = useI18n()
+
+// ---- 右键菜单（复制 / 粘贴 / 全选 / 清空） ----
+//
+// xterm.js 只负责「选中文字」，但默认**不会把选区写进系统剪贴板**，也没有任何
+// 右键菜单——所以在 WebView 里选中一段输出后，用户既没法 Ctrl+C（那是发给远端的
+// SIGINT），也没法右键复制，等于「看得见拿不走」。这里补一个轻量右键菜单 +
+// 快捷键（Ctrl+Shift+C 复制 / Ctrl+Shift+V、Shift+Insert 粘贴），与主流终端一致。
+const menu = ref<{ x: number; y: number } | null>(null)
+
+function hasSelection(): boolean {
+  return !!term && term.hasSelection()
+}
+
+function openMenu(e: MouseEvent) {
+  // 超出视口时往回收，避免菜单被屏幕边缘裁掉点不到。
+  const x = Math.min(e.clientX, window.innerWidth - 180)
+  const y = Math.min(e.clientY, window.innerHeight - 160)
+  menu.value = { x, y }
+}
+
+function closeMenu() {
+  menu.value = null
+}
+
+/**
+ * 写系统剪贴板。
+ *
+ * 走 Wails 原生桥（Clipboard.SetText）——它直接调 Go 侧的 app.Clipboard.SetText，
+ * 经系统 API 写剪贴板，**不受 WebView2 安全上下文限制**。这是项目里早验证过的
+ * 正确路径（见 services/clipboard 的 CopyText 注释）：在 WebView 里 navigator.clipboard
+ * 经常因非安全上下文被静默拦截，execCommand('copy') 在 WebView2 也极不可靠，
+ * 表现为「选中了却复制不走」。非 Wails 环境（纯浏览器/单测）才退回 navigator.clipboard。
+ */
+async function copyText(text: string): Promise<boolean> {
+  try {
+    await Clipboard.SetText(text)
+    return true
+  } catch {
+    // 退回 Web 标准方案（仅非 Wails 环境有意义）
+  }
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+      return true
+    }
+  } catch {
+    /* ignore */
+  }
+  return false
+}
+
+/**
+ * 读系统剪贴板。
+ *
+ * 同样走 Wails 原生桥（Clipboard.Text），避免 WebView2 对 readText 的授权/安全上下文
+ * 拦截——那正是终端「粘贴没反应」的根因。调用方（onPaste）拿到空串会静默处理。
+ */
+async function readClipboardText(): Promise<string> {
+  try {
+    return (await Clipboard.Text()) || ''
+  } catch {
+    // 退回 Web 标准方案
+  }
+  try {
+    if (navigator.clipboard && window.isSecureContext) {
+      return await navigator.clipboard.readText()
+    }
+  } catch {
+    /* ignore */
+  }
+  return ''
+}
+
+async function onCopy() {
+  if (hasSelection()) await copyText(term!.getSelection())
+  closeMenu()
+}
+
+async function onPaste() {
+  const text = await readClipboardText()
+  // 显式粘贴：不走 isMultiLinePaste 确认（用户主动操作），
+  // 直接经与按键相同的发送路径发往远端。
+  if (text) sendInput(text)
+  closeMenu()
+}
+
+function onSelectAll() {
+  term?.selectAll()
+  closeMenu()
+}
+
+function onClear() {
+  term?.clear()
+  closeMenu()
+}
+
+/** 快捷键：
+ *  - Ctrl/Cmd+Shift+C 复制、Ctrl/Cmd+Insert 复制；
+ *  - Ctrl/Cmd+V、Ctrl/Cmd+Shift+V、Shift+Insert 粘贴（都走 Wails 原生桥读取剪贴板）。
+ *  普通 Ctrl+C 不介入（那是 SIGINT，交给 xterm / 远端）。
+ *  普通 Ctrl+V 也要拦截：WebView2 下浏览器原生粘贴事件常拿不到剪贴板数据，
+ *  直接交给原生会导致「粘贴没反应」，故统一改走原生桥读取。 */
+function onKeydown(e: KeyboardEvent) {
+  const mod = e.ctrlKey || e.metaKey
+  const k = e.key
+  if (mod && k === 'C' && e.shiftKey) {
+    e.preventDefault()
+    void onCopy()
+    return
+  }
+  if (mod && k === 'V' && e.shiftKey) {
+    e.preventDefault()
+    void onPaste()
+    return
+  }
+  if (mod && k === 'V') {
+    e.preventDefault()
+    void onPaste()
+    return
+  }
+  if (mod && k === 'Insert') {
+    e.preventDefault()
+    void onCopy()
+    return
+  }
+  if (e.shiftKey && k === 'Insert') {
+    e.preventDefault()
+    void onPaste()
+    return
+  }
+}
+
+// ---- 文档级监听：点菜单外 / 滚动 / Esc 关闭 ----
+function onDocMouseDown(e: MouseEvent) {
+  if (!menu.value) return
+  const el = e.target as HTMLElement | null
+  if (!el || !el.closest('.term-menu')) closeMenu()
+}
+
+function onDocKeydown(e: KeyboardEvent) {
+  // 捕获阶段拦截：菜单开着时 Esc 只关菜单，别漏给终端（否则会把 Esc 发到远端）。
+  if (menu.value && e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    closeMenu()
+  }
+}
+
+function onDocScroll() {
+  if (menu.value) closeMenu()
+}
 
 const hostEl = ref<HTMLElement | null>(null)
 /** 用普通变量而非 ref 持有实例：xterm 对象一旦被 Vue 代理，内部大量
@@ -348,6 +502,12 @@ onMounted(async () => {
   )
   observer.observe(hostEl.value)
 
+  // 右键菜单的文档级关闭监听：点菜单外 / 滚动 / Esc。
+  // 用捕获阶段挂 Esc，确保菜单开时 Esc 不会漏给终端。
+  document.addEventListener('mousedown', onDocMouseDown)
+  document.addEventListener('keydown', onDocKeydown, true)
+  document.addEventListener('scroll', onDocScroll, true)
+
   emit('ready', { cols: term.cols, rows: term.rows })
   if (props.sessionId) await attach(props.sessionId)
   else if (props.autoFocus) term.focus()
@@ -375,6 +535,9 @@ onBeforeUnmount(() => {
   offState?.()
   observer?.disconnect()
   observer = null
+  document.removeEventListener('mousedown', onDocMouseDown)
+  document.removeEventListener('keydown', onDocKeydown, true)
+  document.removeEventListener('scroll', onDocScroll, true)
   writeQueue.dispose()
   pending = []
   duringReplay = []
@@ -395,7 +558,38 @@ defineExpose({
 
 <template>
   <div class="ssh-term">
-    <div ref="hostEl" class="ssh-term-host" />
+    <div
+      ref="hostEl"
+      class="ssh-term-host"
+      @contextmenu.prevent="openMenu"
+      @keydown="onKeydown"
+    />
+
+    <Teleport to="body">
+      <div
+        v-if="menu"
+        class="term-menu"
+        :style="{ left: menu.x + 'px', top: menu.y + 'px' }"
+        @click.stop
+        @contextmenu.prevent
+      >
+        <button class="term-menu-item" :disabled="!hasSelection()" @click="onCopy">
+          <span>{{ t('sshCtxCopy') }}</span>
+          <span class="term-menu-kbd">Ctrl+Shift+C</span>
+        </button>
+        <button class="term-menu-item" @click="onPaste">
+          <span>{{ t('sshCtxPaste') }}</span>
+          <span class="term-menu-kbd">Ctrl+Shift+V</span>
+        </button>
+        <button class="term-menu-item" @click="onSelectAll">
+          <span>{{ t('sshCtxSelectAll') }}</span>
+        </button>
+        <div class="term-menu-sep" />
+        <button class="term-menu-item" @click="onClear">
+          <span>{{ t('sshCtxClear') }}</span>
+        </button>
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -427,5 +621,57 @@ defineExpose({
 .ssh-term :deep(.xterm-viewport) {
   background: transparent !important;
   scrollbar-width: thin;
+}
+
+/* 终端右键菜单：轻量浮层，不引入第三方菜单库。
+   用 position: fixed + Teleport 到 body，避免被 .ssh-term 的 overflow:hidden 裁掉，
+   也避开任意祖先的 stacking context。 */
+.term-menu {
+  position: fixed;
+  z-index: 2000;
+  min-width: 160px;
+  padding: var(--space-1);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 28px var(--color-bg-overlay);
+}
+
+.term-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-6);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  font-size: 12px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  text-align: left;
+}
+
+.term-menu-item:hover:not(:disabled) {
+  background: var(--color-bg-active);
+}
+
+.term-menu-item:disabled {
+  color: var(--color-text-disabled);
+  cursor: default;
+}
+
+.term-menu-kbd {
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+}
+
+.term-menu-sep {
+  height: 1px;
+  margin: var(--space-1) 0;
+  background: var(--color-border);
 }
 </style>
