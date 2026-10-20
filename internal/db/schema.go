@@ -297,6 +297,42 @@ var baseTables = []string{
 		created_at TEXT NOT NULL
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
+
+	// SSH 主机与会话树节点（文件夹与主机同表，用 is_folder 区分，与 notes 一致）。
+	// parent_id / is_folder / sort / env 是 P2「会话树 + 多标签」的前置字段，
+	// 现在就加，避免后期对用户库做数据迁移。
+	`CREATE TABLE IF NOT EXISTS ssh_hosts (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL DEFAULT '',
+		host TEXT NOT NULL DEFAULT '',
+		port INTEGER NOT NULL DEFAULT 22,
+		user TEXT NOT NULL DEFAULT '',
+		auth_type TEXT NOT NULL DEFAULT 'password',
+		password TEXT NOT NULL DEFAULT '',
+		key_path TEXT NOT NULL DEFAULT '',
+		key_passphrase TEXT NOT NULL DEFAULT '',
+		legacy_algorithms INTEGER NOT NULL DEFAULT 0,
+		env TEXT NOT NULL DEFAULT 'test',
+		parent_id TEXT NOT NULL DEFAULT '',
+		is_folder INTEGER NOT NULL DEFAULT 0,
+		sort INTEGER NOT NULL DEFAULT 0,
+		remark TEXT NOT NULL DEFAULT '',
+		last_connected_at TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_parent ON ssh_hosts(parent_id, sort)`,
+
+	// 已信任的主机密钥。主键含 key_type：同一台服务器可同时有 ed25519/ecdsa/rsa，
+	// 只按 host+port 存一条会导致「协商到另一个算法就误报指纹变更」。
+	`CREATE TABLE IF NOT EXISTS ssh_known_hosts (
+		host TEXT NOT NULL,
+		port INTEGER NOT NULL,
+		key_type TEXT NOT NULL,
+		fingerprint TEXT NOT NULL,
+		added_at INTEGER NOT NULL DEFAULT 0,
+		PRIMARY KEY (host, port, key_type)
+	)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）

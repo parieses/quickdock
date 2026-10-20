@@ -47,6 +47,8 @@ var validTables = map[string]bool{
 	"ai_messages":       true,
 	"plugins":           true,
 	"plugin_data":       true,
+	"ssh_hosts":         true,
+	"ssh_known_hosts":   true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）
