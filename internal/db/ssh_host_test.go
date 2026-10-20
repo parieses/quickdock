@@ -8,6 +8,10 @@ import (
 	"testing"
 )
 
+// testSshPassword 仅用于单元测试的占位字符串，绝不是真实凭据。
+// 使用明显非机密、低熵的占位值，避免被密钥扫描器（GitGuardian 等）误报为「通用密码」。
+const testSshPassword = "placeholder-test-credential-no-secret"
+
 // rawSshHostPassword 直接读密文列，用于验证「库里没有明文」。
 func rawSshHostPassword(t *testing.T, d *Database, id string) string {
 	t.Helper()
@@ -23,7 +27,7 @@ func TestSshHostCreateEncryptsPassword(t *testing.T) {
 
 	h, err := d.SaveSshHost(SshHost{
 		Name: "测试机", Host: "10.0.0.5", Port: 2222, User: "root",
-		AuthType: SshAuthPassword, Password: "p@ssw0rd", Env: SshEnvTest,
+		AuthType: SshAuthPassword, Password: testSshPassword, Env: SshEnvTest,
 	})
 	if err != nil {
 		t.Fatalf("新建失败: %v", err)
@@ -40,7 +44,7 @@ func TestSshHostCreateEncryptsPassword(t *testing.T) {
 	if enc == "" {
 		t.Fatal("密文列不应为空")
 	}
-	if enc == "p@ssw0rd" || strings.Contains(enc, "p@ssw0rd") {
+	if enc == testSshPassword || strings.Contains(enc, testSshPassword) {
 		t.Fatalf("密码以明文/可识别形式落库: %q", enc)
 	}
 
@@ -61,7 +65,7 @@ func TestSshHostCreateEncryptsPassword(t *testing.T) {
 	if err != nil {
 		t.Fatalf("解密失败: %v", err)
 	}
-	if sec.Password != "p@ssw0rd" || sec.Port != 2222 || sec.AuthType != SshAuthPassword {
+	if sec.Password != testSshPassword || sec.Port != 2222 || sec.AuthType != SshAuthPassword {
 		t.Fatalf("解密结果不对: %+v", sec)
 	}
 }
