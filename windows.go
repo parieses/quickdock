@@ -3,9 +3,12 @@ package main
 import (
 	"os"
 	"sync"
+	"sync/atomic"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/services"
+	sshxsvc "quickdock/services/sshx"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
@@ -22,6 +25,10 @@ var clipboardWinLock sync.Mutex
 // winmgrWinLock 保护窗口管理浮窗的懒创建（与 clipboardWinLock 同模式）
 var winmgrWinLock sync.Mutex
 var winmgrWin *application.WebviewWindow
+
+// sshWinLock 保护 SSH 终端窗口的懒创建（与 clipboardWinLock 同模式）
+var sshWinLock sync.Mutex
+var sshWin *application.WebviewWindow
 
 // ===== WebView2 优化配置（全局，所有窗口共享）=====
 
@@ -186,6 +193,44 @@ func applySavedWinPos(app *application.App, opts *application.WebviewWindowOptio
 
 // ===== 延迟窗口工厂 =====
 
+// hideOnCloseHook 返回一个 WindowClosing 钩子：默认取消关闭并隐藏窗口，
+// 仅当「真退出」标记置位（托盘退出/更新重启）时才放行销毁。
+//
+// 必须用 RegisterHook 而不能是 OnWindowEvent，原因见 initSshWindow 的长注释：
+// Wails 建窗时就给自己注册了一个 WindowClosing 监听，那个监听无条件销毁窗口；
+// 普通监听器各自起 goroutine 并发派发，谁先跑完不可控，于是 Cancel() 经常晚一步——
+// 窗口已被销毁并从 Window 列表摘除，随后执行的 Hide() 又把 options.Hidden 置回 true，
+// 下次 Show() 走「已销毁 → Run()」分支重建出一个看不见的窗口。
+// 表现就是「关掉后再点热键/侧栏完全没反应」，要重启进程才恢复。
+//
+// onHide 在真正隐藏前调用，用于清窗口标志位、发 before-hide 事件等各窗口自己的收尾。
+// 这里刻意不做超时/重试：竞态的根源是派发顺序，Hook 的同步语义才是解药。
+func hideOnCloseHook(onHide func()) func(event *application.WindowEvent) {
+	return func(event *application.WindowEvent) {
+		if trayQuitRequested.Load() {
+			return // 真退出：放行销毁，否则托盘退出时窗口会拦着不让关
+		}
+		event.Cancel()
+		if onHide != nil {
+			onHide()
+		}
+	}
+}
+
+// hideFloatingWindow 是四个浮窗（剪贴板/笔记/命令面板/窗口管理）共用的失焦隐藏逻辑：
+// 记位置 → 清标志位 → 隐藏。closeHook 额外复用它，保证 Alt+F4 与失焦两条路径
+// 收尾完全一致，不会出现「Alt+F4 关掉后标志位还留着，热键以为它开着」的状态错位。
+func hideFloatingWindow(win *application.WebviewWindow, posKey string, flag *atomic.Bool) func() {
+	return func() {
+		x, y := win.Position()
+		saveWinPos(posKey, x, y)
+		if flag != nil {
+			flag.Store(false)
+		}
+		win.Hide()
+	}
+}
+
 // initClipboardWindow 创建剪贴板独立窗口（延迟初始化）
 func initClipboardWindow(app *application.App) *application.WebviewWindow {
 	opts := application.WebviewWindowOptions{
@@ -201,31 +246,23 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 	applySavedWinPos(app, &opts, "clipboard")
 	win := app.Window.NewWithOptions(opts)
 	win.Hide()
+	// 剪贴板比其它浮窗多一步：隐藏前要通知前端落盘，否则剪贴板内容会丢。
+	hide := hideFloatingWindow(win, "clipboard", &windowFlags.Clipboard)
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
-		x, y := win.Position()
-		saveWinPos("clipboard", x, y)
-		windowFlags.Clipboard.Store(false)
 		if a := getHotkeyApp(); a != nil {
 			a.Event.Emit("clipboard:before-hide")
 		}
-		win.Hide()
+		hide()
 	})
 	// Alt+F4 / 系统关闭会触发真实销毁；若此时直接销毁，缓存的指针不会被清空，
 	// 之后对应热键仍返回已销毁的窗口、无法恢复，只能重启。因此默认取消关闭并改为隐藏，
-	// 仅当「真退出」标记置位（托盘退出/更新重启）时才放行。
-	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		if trayQuitRequested.Load() {
-			return
-		}
-		event.Cancel()
-		windowFlags.Clipboard.Store(false)
-		x, y := win.Position()
-		saveWinPos("clipboard", x, y)
+	// 仅当「真退出」标记置位（托盘退出/更新重启）时才放行。用 Hook 而非监听器，理由见 hideOnCloseHook。
+	win.RegisterHook(events.Common.WindowClosing, hideOnCloseHook(func() {
 		if a := getHotkeyApp(); a != nil {
 			a.Event.Emit("clipboard:before-hide")
 		}
-		win.Hide()
-	})
+		hide()
+	}))
 	return win
 }
 
@@ -244,23 +281,59 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 	applySavedWinPos(app, &opts, "note")
 	win := app.Window.NewWithOptions(opts)
 	win.Hide()
+	hide := hideFloatingWindow(win, "note", &windowFlags.Note)
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
-		x, y := win.Position()
-		saveWinPos("note", x, y)
-		windowFlags.Note.Store(false)
-		win.Hide()
+		hide()
 	})
-	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。
-	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		if trayQuitRequested.Load() {
-			return
-		}
-		event.Cancel()
-		windowFlags.Note.Store(false)
+	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。理由见 hideOnCloseHook。
+	win.RegisterHook(events.Common.WindowClosing, hideOnCloseHook(hide))
+	return win
+}
+
+// initSshWindow 创建 SSH 终端独立窗口（延迟初始化）。
+//
+// 形态参考 DSH 窗口（internal/dsh/dsh_runtime.go 的 createDSHWindow）：面积大、
+// 有边框、可缩放、显示在任务栏。与上面四个浮窗刻意不同：
+//
+//  1. 有边框、可缩放（Frameless=false + MinWidth/MinHeight）。终端是长会话工作台，
+//     用户会一边看文档一边敲命令、会拉大窗口看日志，固定尺寸不可接受。
+//  2. 失焦不隐藏。浮窗的「失焦即 Hide」套在终端上，会导致点到浏览器复制一条命令
+//     窗口就消失，完全没法用。这里只在失焦时保存位置。
+//  3. 显示在任务栏（显式 HiddenOnTaskbar:false，不调 applyWindowPlatformOptions）。
+//     它是主窗口之外唯一需要 Alt+Tab / 点击任务栏切回的窗口；隐藏会让用户无从下手。
+//
+// 关闭仍拦截为 Hide（这点与 DSH 的「销毁并下次重建」不同）：SSH 会话常驻 Go 侧
+// （internal/sshx 的 Manager），窗口留着比销毁再回放体验更直接——重新打开时终端
+// 的滚动缓冲原样还在，不需要等回放。真退出（托盘退出/更新重启）才放行。
+func initSshWindow(app *application.App) *application.WebviewWindow {
+	opts := application.WebviewWindowOptions{
+		Title:            "快启坞 - SSH",
+		Width:            sshWinWidth,
+		Height:           sshWinHeight,
+		MinWidth:         640,
+		MinHeight:        420,
+		Frameless:        false,
+		AlwaysOnTop:      false,
+		BackgroundColour: application.RGBA{Red: 22, Green: 24, Blue: 29, Alpha: 255},
+		Windows:          application.WindowsWindow{HiddenOnTaskbar: false},
+		URL:              "/#/ssh",
+	}
+	applySavedWinPos(app, &opts, "ssh")
+	win := app.Window.NewWithOptions(opts)
+	win.Hide()
+	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
+		// 只记位置，不隐藏（与浮窗相反，见函数注释）。
 		x, y := win.Position()
-		saveWinPos("note", x, y)
-		win.Hide()
+		saveWinPos("ssh", x, y)
 	})
+	// 关闭必须用 RegisterHook，不能用 OnWindowEvent。
+	//
+	// 完整根因分析见 hideOnCloseHook 的注释（四个浮窗是同一个 bug）。
+	win.RegisterHook(events.Common.WindowClosing, hideOnCloseHook(func() {
+		x, y := win.Position()
+		saveWinPos("ssh", x, y)
+		win.Hide()
+	}))
 	return win
 }
 
@@ -279,23 +352,13 @@ func initWinmgrWindow(app *application.App) *application.WebviewWindow {
 	applySavedWinPos(app, &opts, "winmgr")
 	win := app.Window.NewWithOptions(opts)
 	win.Hide()
+	hide := hideFloatingWindow(win, "winmgr", &windowFlags.Winmgr)
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
-		x, y := win.Position()
-		saveWinPos("winmgr", x, y)
-		windowFlags.Winmgr.Store(false)
-		win.Hide()
+		hide()
 	})
-	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。
-	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		if trayQuitRequested.Load() {
-			return
-		}
-		event.Cancel()
-		windowFlags.Winmgr.Store(false)
-		x, y := win.Position()
-		saveWinPos("winmgr", x, y)
-		win.Hide()
-	})
+	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。理由见 hideOnCloseHook。
+	// 这个窗口尤其需要：它是被 Alt+F4 关得最多的一个，修之前关掉后再唤起会没反应。
+	win.RegisterHook(events.Common.WindowClosing, hideOnCloseHook(hide))
 	return win
 }
 
@@ -323,17 +386,10 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 		windowFlags.Palette.Store(false)
 		win.Hide()
 	})
-	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。
-	win.OnWindowEvent(events.Common.WindowClosing, func(event *application.WindowEvent) {
-		if trayQuitRequested.Load() {
-			return
-		}
-		event.Cancel()
-		windowFlags.Palette.Store(false)
-		x, y := win.Position()
-		saveWinPos("palette", x, y)
-		win.Hide()
-	})
+	// 同剪贴板窗口：默认取消 Alt+F4 销毁并隐藏，仅真退出时放行。理由见 hideOnCloseHook。
+	// 失焦路径不能复用 hideFloatingWindow：它要先把位置存下来，再判断是不是自家
+	// 模态框导致的失焦（模态框弹出时也要记住位置，只是不隐藏）。
+	win.RegisterHook(events.Common.WindowClosing, hideOnCloseHook(hideFloatingWindow(win, "palette", &windowFlags.Palette)))
 	return win
 }
 
@@ -394,6 +450,7 @@ func InjectWindowGetters(svc *services.AppService, app *application.App) {
 	svc.GetPaletteWindow = paletteWindowGetter(app)
 	svc.GetNoteWindow = noteWindowGetter(app)
 	svc.GetWinmgrWindow = winmgrWindowGetter(app)
+	svc.GetSshWindow = sshWindowGetter(app)
 }
 
 // ===== 热键回调用的窗口 getter =====
@@ -451,6 +508,42 @@ func winmgrWindowGetter(app *application.App) func() *application.WebviewWindow 
 		}
 		return winmgrWin
 	}
+}
+
+// sshWindowGetter 返回 AppService 使用的 SSH 终端窗口 getter。
+// 与浮窗一致采用懒创建：SSH 只在用户真正打开时才初始化 WebView2，不拖慢启动。
+// 入口只有一个（services/sshx.OpenSshWindow），所以这里不另设包级 getSshWindow——
+// 避免出现两条「一个发事件、一个不发」的显示路径。
+func sshWindowGetter(app *application.App) func() *application.WebviewWindow {
+	return func() *application.WebviewWindow {
+		sshWinLock.Lock()
+		defer sshWinLock.Unlock()
+		if sshWin == nil {
+			if app == nil {
+				return nil
+			}
+			sshWin = initSshWindow(app)
+		}
+		return sshWin
+	}
+}
+
+// sshServiceRef 保存 SSH 门面服务，供全局热键走与前端完全相同的打开路径。
+var sshServiceRef *sshxsvc.SshService
+
+// setSshService 在服务装配完成后注入（见 main.go）。
+func setSshService(s *sshxsvc.SshService) { sshServiceRef = s }
+
+// showSshWindow 唤起/前置 SSH 终端窗口（全局热键入口）。
+//
+// 只转调服务层的 OpenSshWindow，不自己写一套 Show+Focus+Emit：显示逻辑一旦分成两份，
+// 迟早会出现「热键打开的不刷新清单、侧栏打开的才刷新」这类不一致。
+func showSshWindow() {
+	if sshServiceRef == nil {
+		logger.W("QuickDock: SSH 服务未就绪，热键忽略")
+		return
+	}
+	sshServiceRef.OpenSshWindow()
 }
 
 // EnsureConfigDir 确保配置目录存在（用于 WebviewUserDataPath）

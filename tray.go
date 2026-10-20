@@ -44,6 +44,13 @@ const ctrlBackquote = "`"
 // CTRL_BACKQUOTE 剪贴板热键回退加速器（Ctrl+`）
 const CTRL_BACKQUOTE = "Ctrl+" + ctrlBackquote
 
+// SSH_ACCEL SSH 终端全局热键（Ctrl+Alt+S）。
+//
+// 固定键位、暂不进设置页：终端是低频入口，先保证「一键可达」比「可配置」更重要；
+// 真要被占用（register 失败）走 addHotkeyWarning 提示用户，不做自动回退——
+// 与已有热键不同，这里换一个键位没有第二选择，硬回退成别的键反而更迷惑。
+const SSH_ACCEL = "Ctrl+Alt+S"
+
 //go:embed build/tray.ico
 var trayIcoEmbed []byte
 
@@ -1018,7 +1025,7 @@ func registerAllHotkeys(app *application.App) {
 	// 重注册前先注销上一轮已注册的快捷键，避免修改设置保存后旧热键残留、
 	// 新旧热键同时生效直到进程重启。与 Reregister* 系列保持一致。
 	resetHotkeyWarnings()
-	for _, old := range append([]string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel(), getWinmgrFloatAccel()}, getWinmgrAccels()...) {
+	for _, old := range append([]string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel(), getWinmgrFloatAccel(), SSH_ACCEL}, getWinmgrAccels()...) {
 		if old != "" {
 			app.GlobalShortcut.Unregister(old)
 		}
@@ -1158,6 +1165,17 @@ func registerAllHotkeys(app *application.App) {
 
 	// 窗口管理浮层热键：唤起浮层做批量网格排版。
 	setWinmgrFloatAccel(registerWinmgrFloatHotkey(app))
+
+	// SSH 终端热键（Ctrl+Alt+S）：与侧栏同一个入口（showSshWindow 转调
+	// SshService.OpenSshWindow），不存在「热键开的不刷新清单、侧栏开的才刷新」。
+	// 语义是「唤起/前置」而不是「切换」：终端里可能正跑着命令，按一次就隐藏窗口
+	// 很容易把用户的活儿弄丢。
+	if err := app.GlobalShortcut.Register(SSH_ACCEL, showSshWindow); err != nil {
+		logger.W("SSH 热键 [%s] 注册失败（可能被其它程序占用）: %v", SSH_ACCEL, err)
+		addHotkeyWarning(SSH_ACCEL)
+	} else {
+		logger.I("SSH 快捷键 [%s] 已注册", SSH_ACCEL)
+	}
 
 	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel, registeredNoteAccel)
 

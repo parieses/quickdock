@@ -10,7 +10,7 @@ import { pluginUpdateBadge } from '../composables/usePluginUpdateBadge'
 import type { Scene, ToastAPI } from '../types'
 import {
   Bot, FolderKanban, FileText, Activity, ListTodo, AlarmClock,
-  Clipboard, Puzzle, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Search, X, Settings, Terminal, Server,
+  Clipboard, Puzzle, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Search, X, Settings, Terminal, Server, SquareTerminal,
 } from '@lucide/vue'
 
 const store = useWorkspaceStore()
@@ -260,6 +260,12 @@ async function handleDeleteScene(sceneId: string) {
       <button :class="['nav-item', { active: currentPage === 'environments' }]" @click="emit('navigate', 'environments')">
         <Server :size="14" />
         <span>{{ t('navEnvironments') }}</span>
+      </button>
+      <!-- SSH 不切换主窗口页面，而是唤起独立终端窗口（见 App.vue 的 setPage），
+           所以这里不置 active——主窗口内容始终保持不动。 -->
+      <button class="nav-item" :title="t('navSshHint')" @click="emit('navigate', 'ssh')">
+        <SquareTerminal :size="14" />
+        <span>{{ t('navSsh') }}</span>
       </button>
       <button :class="['nav-item', { active: currentPage === 'ai' }]" @click="emit('navigate', 'ai')">
         <Bot :size="14" />

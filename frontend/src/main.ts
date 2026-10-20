@@ -43,13 +43,27 @@ app.config.errorHandler = (err: any, _vm, info: string) => {
 // 隐藏/最小化窗口不触发，避免误重载；启动留 20s 宽限等首个心跳到达。
 let lastHeartbeat = Date.now()
 const watchdogStart = Date.now()
+let sshWatchdogWarned = false
 Events.On('qd:heartbeat', () => {
   lastHeartbeat = Date.now()
+  sshWatchdogWarned = false
 })
 setInterval(() => {
   if (document.visibilityState !== 'visible') return
   if (Date.now() - watchdogStart < 20000) return
   if (Date.now() - lastHeartbeat > 30000) {
+    // SSH 终端窗口豁免自动重载：location.reload() 会清空 xterm 的屏幕与滚动历史，
+    // 正在 tail 的日志、跑到一半的命令当场消失，而 Go 侧的会话其实还活着——
+    // 「画面没了但连接还在」比卡住更难向用户解释。
+    // 代价是失去自愈能力，所以这里至少把事件落进崩溃日志，便于事后定位；
+    // 等 #12 的回放接进 UI（重开窗口可还原画面）后再考虑恢复重载。
+    if (window.location.hash === '#/ssh') {
+      if (!sshWatchdogWarned) {
+        sshWatchdogWarned = true
+        reportFrontendError('watchdog', 'SSH 窗口 30s 未收到心跳（已跳过自动重载）', '')
+      }
+      return
+    }
     location.reload()
   }
 }, 5000)

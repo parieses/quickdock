@@ -10,6 +10,7 @@ import {
   DetectNodeEnv,
   SetupDSH,
 } from '../bindings/quickdock/services/dsh/dshservice';
+import { OpenSshWindow } from '../bindings/quickdock/services/sshx/sshservice'
 import { i18n } from './i18n';
 import { unwrap } from './utils/api';
 import { getErrorMessage } from './utils/error';
@@ -39,6 +40,8 @@ const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePag
 const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
 const AIPage = defineAsyncComponent(() => import('./components/AIPage.vue'))
 const EnvironmentPage = defineAsyncComponent(() => import('./components/EnvironmentPage.vue'))
+// SSH 终端窗口专用页：只在该独立窗口内加载，不进主窗口体积
+const SshPage = defineAsyncComponent(() => import('./components/SshPage.vue'))
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {
@@ -62,6 +65,11 @@ const currentPage = ref('workspace')
 function setPage(page: string) {
   if (page === 'dsh') {
     openDSH()
+    return
+  }
+  if (page === 'ssh') {
+    // SSH 不是主窗口内的页面：点侧栏只负责把独立终端窗口唤到前台。
+    openSsh()
     return
   }
   currentPage.value = page
@@ -136,6 +144,16 @@ async function openDSH() {
 
 provide('toast', { error, success, confirm });
 
+// 侧栏「SSH 终端」：唤起独立窗口（窗口由 Go 侧懒创建；已存在就 Show+Focus 复用）。
+// 与 DSH 不同，这里不含任何进程启动，打开是瞬时的，所以不做 loading 态。
+async function openSsh() {
+  try {
+    unwrap(await OpenSshWindow())
+  } catch (e: any) {
+    error(getErrorMessage(e))
+  }
+}
+
 // ---- 窗口类型检测 ----
 // 使用 ref 来使 hash 变化可响应
 const hashRef = ref(window.location.hash)
@@ -147,6 +165,9 @@ const isClipboardWindow = computed(() => hashRef.value === '#/clipboard')
 const isNoteWindow = computed(() => hashRef.value === '#/note')
 const isWinmgrWindow = computed(() => hashRef.value === '#/window-manager')
 const isPaletteWindow = computed(() => hashRef.value === '#/command-palette')
+// SSH 终端独立窗口（#/ssh）：与其它独立窗口不同，它有边框、可缩放、失焦不隐藏，
+// 见 windows.go 的 initSshWindow。
+const isSshWindow = computed(() => hashRef.value === '#/ssh')
 const isPluginWindow = computed(() => {
   return hashRef.value.startsWith('#/plugin')
 })
@@ -330,6 +351,11 @@ const activeConfirm = computed(() =>
     </div>
   </div>
 
+  <!-- SSH 终端独立窗口（多会话工作台，非浮窗） -->
+  <div v-else-if="isSshWindow" class="ssh-standalone">
+    <SshPage />
+  </div>
+
   <!-- 主窗口：完整 UI -->
   <div v-else class="app-container">
     <div class="app-body">
@@ -444,6 +470,13 @@ body {
 }
 
 .winmgr-standalone {
+  height: 100vh; width: 100vw; overflow: hidden;
+  background: var(--color-bg-primary);
+}
+
+/* SSH 窗口：SshPage 自己撑满并管理内部滚动，这里不加 padding，
+   否则终端的 FitAddon 会按父元素高度算尺寸（见 SshTerminal.vue 的注释）。 */
+.ssh-standalone {
   height: 100vh; width: 100vw; overflow: hidden;
   background: var(--color-bg-primary);
 }

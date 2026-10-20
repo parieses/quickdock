@@ -37,6 +37,7 @@ import (
 	portsvc "quickdock/services/port"
 	scenesvc "quickdock/services/scene"
 	snapshotsvc "quickdock/services/snapshot"
+	sshxsvc "quickdock/services/sshx"
 	systemsvc "quickdock/services/system"
 	todosvc "quickdock/services/todo"
 	updatesvc "quickdock/services/update"
@@ -166,6 +167,11 @@ const (
 	paletteWinHeight = 600
 	winmgrWinWidth   = 900
 	winmgrWinHeight  = 700
+
+	// SSH 终端窗口比浮窗大得多：终端 + 会话列表 + 状态条需要横向空间，
+	// 且 80 列终端在 640px 以下会挤（见 windows.go 的 MinWidth）。
+	sshWinWidth  = 1000
+	sshWinHeight = 680
 )
 
 // 主窗口与各浮窗的可见/模式标志：与 services 共享同一实例（见 services.WindowFlags）。
@@ -269,6 +275,12 @@ func main() {
 	itemSvc := itemsvc.NewItemService(appService)
 	portSvc := portsvc.NewPortService(appService)
 
+	// SSH 服务门面：主机管理/指纹信任/连通性测试/命令执行（引擎在 internal/sshx），
+	// 单独绑定为独立 Wails service。
+	sshSvc := sshxsvc.NewSshService(appService)
+	// 供全局热键走同一条打开路径（见 windows.go 的 showSshWindow）
+	setSshService(sshSvc)
+
 	// MCP 服务门面：协议/传输在 internal/mcp，本门面注册业务工具并提供前端启停接口。
 	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合门面（工具复用其能力），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
@@ -319,6 +331,7 @@ func main() {
 			application.NewService(snapshotSvc),
 			application.NewService(itemSvc),
 			application.NewService(portSvc),
+			application.NewService(sshSvc),
 			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),
 			application.NewService(notifier),
@@ -493,6 +506,9 @@ func main() {
 	// 以 guard 保证幂等，重复调用安全无副作用，故此处与 ServiceShutdown 重复是有意设计。
 	aiSvc.StopAIStreamServer()
 	pluginMgr.ShutdownAll()
+	// 关闭 SSH 终端会话：会话常驻在 Go 侧（关窗口不断连），
+	// 进程退出时必须主动收掉，否则远端会残留一串没断的 shell 进程。
+	sshSvc.Shutdown()
 	if appService.PluginWindowMgr != nil {
 		appService.PluginWindowMgr.CloseAll()
 	}

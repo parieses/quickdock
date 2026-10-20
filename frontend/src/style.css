@@ -70,6 +70,31 @@
   --color-accent-border: rgba(74, 158, 255, 0.2);
   --color-accent-muted: rgba(74, 158, 255, 0.5);
   --color-accent-light: #6db3ff;
+
+  /* 终端调色板：xterm 只接受具体色值，无法传 var()，所以这些 token 由
+     SshTerminal.vue 用 getComputedStyle 读出实际值再喂给 xterm。
+     16 个 ANSI 色 + 背景/前景/光标/选区，两套主题必须一一对应。 */
+  --color-terminal-bg: #16181d;
+  --color-terminal-fg: #d7dae0;
+  --color-terminal-cursor: #4a9eff;
+  --color-terminal-selection: rgba(74, 158, 255, 0.28);
+  --color-terminal-black: #2a2d34;
+  --color-terminal-red: #ef6b6b;
+  --color-terminal-green: #67c98a;
+  --color-terminal-yellow: #e0b341;
+  --color-terminal-blue: #5c9dff;
+  --color-terminal-magenta: #c58af9;
+  --color-terminal-cyan: #4dd0e1;
+  --color-terminal-white: #c9ccd3;
+  --color-terminal-bright-black: #6b7280;
+  --color-terminal-bright-red: #ff8a8a;
+  --color-terminal-bright-green: #86dda4;
+  --color-terminal-bright-yellow: #f2cd63;
+  --color-terminal-bright-blue: #8ab8ff;
+  --color-terminal-bright-magenta: #d9a9ff;
+  --color-terminal-bright-cyan: #7ce0ed;
+  --color-terminal-bright-white: #f0f2f5;
+
   --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.08);
   --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.06);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
@@ -120,6 +145,30 @@
   --color-accent-border: rgba(74, 158, 255, 0.15);
   --color-accent-muted: rgba(74, 158, 255, 0.5);
   --color-accent-light: #6db3ff;
+
+  /* 浅色终端调色板：对比度按浅底重算过，直接复用深色色值会偏灰、
+     在 #fbfaf7 上读不清（尤其 yellow / cyan）。 */
+  --color-terminal-bg: #fbfaf7;
+  --color-terminal-fg: #1f2328;
+  --color-terminal-cursor: #2b6cb0;
+  --color-terminal-selection: rgba(74, 158, 255, 0.22);
+  --color-terminal-black: #1f2328;
+  --color-terminal-red: #c0392b;
+  --color-terminal-green: #1e8449;
+  --color-terminal-yellow: #9a6a00;
+  --color-terminal-blue: #1f6feb;
+  --color-terminal-magenta: #8e44ad;
+  --color-terminal-cyan: #0e7490;
+  --color-terminal-white: #d5d2c9;
+  --color-terminal-bright-black: #6b7178;
+  --color-terminal-bright-red: #d9534f;
+  --color-terminal-bright-green: #27ae60;
+  --color-terminal-bright-yellow: #b8860b;
+  --color-terminal-bright-blue: #3b82f6;
+  --color-terminal-bright-magenta: #a569bd;
+  --color-terminal-bright-cyan: #0891b2;
+  --color-terminal-bright-white: #ffffff;
+
   --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.05);
   --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.04);
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);

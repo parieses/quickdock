@@ -153,9 +153,18 @@ func (d *Database) CreateNoteDoc(parentID, name, content, format string) (*Note,
 }
 
 // nextSortLocked 计算某父目录下最大的 sort+1（调用方需持 d.mu）
+//
+// table 参数此前被忽略、始终查 notes（笔记是唯一调用方，问题一直没暴露）。
+// 现在 SSH 会话树也用它，改成按传入表名查询，并走白名单校验防注入。
 func nextSortLocked(d *Database, table, parentID string) int {
+	if err := validateTable(table); err != nil {
+		return 0
+	}
 	var mx int
-	err := d.conn.QueryRow("SELECT COALESCE(MAX(sort),0) FROM notes WHERE parent_id = ?", parentID).Scan(&mx)
+	err := d.conn.QueryRow(
+		fmt.Sprintf("SELECT COALESCE(MAX(sort),0) FROM %s WHERE parent_id = ?", table),
+		parentID,
+	).Scan(&mx)
 	if err != nil {
 		return 0
 	}

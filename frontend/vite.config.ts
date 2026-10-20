@@ -24,6 +24,11 @@ export default defineConfig({
       "@lucide/vue",
       "@floating-ui/vue",
       "@wailsio/runtime",
+      // 终端相关：xterm 体积大、加载晚（只在 SSH 窗口用到），
+      // 不预声明会在首次打开 SSH 窗口时触发二次预构建。
+      "@xterm/xterm",
+      "@xterm/addon-fit",
+      "@xterm/addon-unicode11",
     ],
   },
   plugins: [
