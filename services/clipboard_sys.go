@@ -2,12 +2,14 @@ package services
 
 import (
 	"bytes"
+	"context"
 	"image/png"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
@@ -39,22 +41,64 @@ var (
 // 又泄露隐私。排查时设环境变量 QUICKDOCK_LOG_CLIPBOARD=1 再启动即可开启。
 var clipboardLogContent = os.Getenv("QUICKDOCK_LOG_CLIPBOARD") == "1"
 
-// SetClipboardText writes text to the system clipboard via Wails API
-func SetClipboardText(text string) {
-	// 成功路径不记日志：从历史复制是高频操作，原「clipboard written (length: N)」
-	// 只会把日志刷满，且长度信息对排障无意义。失败必须留痕（权限被占用/剪贴板锁）。
-	if app := AppRef.Load(); app != nil && app.Clipboard.SetText(text) {
-		setLastClipboardText(text)
-	} else if app == nil {
-		logger.W("QuickDock: 剪贴板写入失败：应用实例未就绪")
-	} else {
-		logger.W("QuickDock: 剪贴板写入失败：SetText 返回 false（可能被其他程序占用），长度=%d", len(text))
+// startClipboardWorker 启动剪贴板捕获协程（ServiceStartup 调用，随 ClipboardCtx 退出）。
+//
+// 变更信号（a.clipboardWake）承载的是「状态」而不是「事件」：无论期间来了多少次变更，
+// 最终只需要按最新的剪贴板内容抓一次，所以 OnClipboardChange 用丢弃式非阻塞发送做合并。
+//
+// 为什么要单独一个协程：WM_CLIPBOARDUPDATE 回调跑在 Win32 消息线程上，那条线程同时
+// 负责全局热键、托盘与浮窗消息。一旦在里面做 DIB 解码/PNG 编码/查库，热键和托盘
+// 就跟着卡；更糟的是它会把剪贴板一直敞着（读取时 OpenClipboard 到函数返回才关闭），
+// 别家程序的复制在这期间全部失败。
+func (a *AppService) startClipboardWorker(ctx context.Context) {
+	a.clipboardWake = make(chan struct{}, 1)
+	go func() {
+		defer logger.RecoverPanic("clipboard worker")
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-a.clipboardWake:
+				a.captureClipboard()
+			}
+		}
+	}()
+}
+
+// OnClipboardChange 由 Win32 消息线程调用（见 tray.go 的回调注入）。
+// 这里只置一个信号就返回，绝不阻塞消息线程——真正的读取/解析/入库在剪贴板工作协程上。
+func (a *AppService) OnClipboardChange() {
+	if a.clipboardWake == nil {
+		return
+	}
+	select {
+	case a.clipboardWake <- struct{}{}:
+	default: // 已有待处理信号，合并成一次（内容以最终状态为准）
 	}
 }
 
-// ===== OnClipboardChange — called by tray.go's windowProc =====
-
-// OnClipboardChange handles clipboard change events
+// SetClipboardText writes text to the system clipboard via Wails API
+func SetClipboardText(text string) {
+	app := AppRef.Load()
+	if app == nil {
+		logger.W("QuickDock: 剪贴板写入失败：应用实例未就绪")
+		return
+	}
+	// 剪贴板是全系统独占资源，被别的程序短暂占用时 SetText 会直接返回 false。
+	// 写失败且不重试，用户看到的就是「点了复制，粘出来还是旧内容」，故这里退避重试。
+	const attempts = 4
+	for i := 0; i < attempts; i++ {
+		if app.Clipboard.SetText(text) {
+			// 成功路径不记日志：从历史复制是高频操作，记日志只会把日志刷满。
+			setLastClipboardText(text)
+			return
+		}
+		if i < attempts-1 {
+			time.Sleep(time.Duration(i+1) * 20 * time.Millisecond)
+		}
+	}
+	logger.W("QuickDock: 剪贴板写入失败：SetText 连续 %d 次返回 false（可能被其他程序占用），长度=%d", attempts, len(text))
+}
 
 // ===== Clipboard helpers =====
 
@@ -109,24 +153,6 @@ func SetLastClipboardImageHash(h string) {
 	setLastClipboardImageHash(h)
 }
 
-// imageDataHash 计算剪贴板图片的去重哈希，口径与 processImage 完全一致：
-// PNG 原样取 MD5，DIB 解码后重编码 PNG 取 MD5。用于在捕获入口同步判断
-// "是否为本程序刚写回的图片"（防回环）。返回 (hash, ok)，ok=false 表示无法计算。
-func imageDataHash(imageData []byte, isPNG bool) (string, bool) {
-	if isPNG {
-		return platform.MD5Hash(imageData), true
-	}
-	img, err := platform.DibToImage(imageData)
-	if err != nil {
-		return "", false
-	}
-	var buf bytes.Buffer
-	if err := png.Encode(&buf, img); err != nil {
-		return "", false
-	}
-	return platform.MD5Hash(buf.Bytes()), true
-}
-
 // ===== Internal processing functions (run in goroutines) =====
 
 // processImage 处理剪贴板图片数据：DIB→PNG（或 PNG 原样）→去重→写入磁盘→入库
@@ -150,6 +176,17 @@ func processImage(database *db.Database, imageData []byte, paths, src string, em
 		pngBytes = pngBuf.Bytes()
 	}
 	hashHex := platform.MD5Hash(pngBytes)
+
+	// 回环防护：本次捕获的图片正是本程序刚写回剪贴板的那张（从历史复制图片），直接跳过，
+	// 避免 CopyCount 失真。
+	//
+	// 比对放在这里而不是捕获入口：入口处为了比对要先解 DIB 再编一次 PNG，和下面这段
+	// 编码完全重复（4K 截图约 200ms/次），而这里本来就要算哈希，等于零额外开销。
+	if hashHex == getLastClipboardImageHash() {
+		// 只挡一次：用户下次再主动复制同一张图，仍应正常记录。
+		setLastClipboardImageHash("")
+		return
+	}
 
 	imageID := uuid.New().String()
 	imagePath := filepath.Join(platform.GetImageDir(), imageID+".png")

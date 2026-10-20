@@ -121,13 +121,9 @@ func writeClipboardDIB(hwnd uintptr, dib []byte) error {
 	if len(dib) == 0 {
 		return fmt.Errorf("empty image data")
 	}
-	if !w32.OpenClipboard(w32.HWND(hwnd)) {
-		return fmt.Errorf("OpenClipboard failed")
-	}
-	defer w32.CloseClipboard()
 
-	w32.EmptyClipboard()
-
+	// 同 SetClipboardFiles：先把全局内存准备好，最后才 EmptyClipboard + SetClipboardData，
+	// 避免「清空了旧内容但新内容没写进去」把用户的剪贴板搞成空的。
 	// 0x0042 = GMEM_MOVEABLE | GMEM_ZEROINIT
 	handle := w32.GlobalAlloc(0x0042, uint32(len(dib)))
 	if handle == 0 {
@@ -142,6 +138,14 @@ func writeClipboardDIB(hwnd uintptr, dib []byte) error {
 	}
 	copy(unsafe.Slice((*byte)(ptr), len(dib)), dib)
 	w32.GlobalUnlock(handle)
+
+	if !openClipboardWithRetry(hwnd) {
+		w32.GlobalFree(handle)
+		return fmt.Errorf("OpenClipboard failed")
+	}
+	defer w32.CloseClipboard()
+
+	w32.EmptyClipboard()
 
 	if w32.SetClipboardData(8, handle) == 0 {
 		// 设置失败 → 内存所有权未转移，需自行释放。

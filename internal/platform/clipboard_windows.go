@@ -43,6 +43,25 @@ func SimulatePaste() {
 	keybd.Call(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 }
 
+// openClipboardWithRetry 打开系统剪贴板，被其他进程短暂持有时重试。
+//
+// 剪贴板是全系统独占资源：同一时刻只允许一个进程 OpenClipboard。别的程序（含本程序
+// 的读取路径）在自己的临界区里停留几十毫秒是常态，所以单次 OpenClipboard 失败
+// 并不代表剪贴板坏了——写路径直接放弃，用户看到的就是「点了复制，粘出来的还是旧内容」。
+// 退避总时长约 150ms，全部用在写路径（不阻塞 Win32 消息循环）。
+func openClipboardWithRetry(hwnd uintptr) bool {
+	const attempts = 6
+	for i := 0; i < attempts; i++ {
+		if w32.OpenClipboard(w32.HWND(hwnd)) {
+			return true
+		}
+		if i < attempts-1 {
+			time.Sleep(time.Duration(i+1) * 10 * time.Millisecond)
+		}
+	}
+	return false
+}
+
 // SetClipboardFiles writes a list of file paths to the system clipboard (CF_HDROP)
 func SetClipboardFiles(hwnd uintptr, paths []string) error {
 	if hwnd == 0 {
@@ -70,13 +89,10 @@ func SetClipboardFiles(hwnd uintptr, paths []string) error {
 		binary.LittleEndian.PutUint16(data[drophdrSize+i*2:], ch)
 	}
 
-	if !w32.OpenClipboard(w32.HWND(hwnd)) {
-		return fmt.Errorf("OpenClipboard failed")
-	}
-	defer w32.CloseClipboard()
-
-	w32.EmptyClipboard()
-
+	// 先分配并写好全局内存，最后才动剪贴板。
+	// 顺序有讲究：OpenClipboard 成功后必须 EmptyClipboard，此时若后面的
+	// GlobalAlloc/GlobalLock/SetClipboardData 失败，用户的剪贴板会被清空却没有
+	// 写入任何新内容——表现为「复制了，但粘贴是空的」，比直接报错更难排查。
 	handle := w32.GlobalAlloc(0x0042, uint32(len(data)))
 	if handle == 0 {
 		return fmt.Errorf("GlobalAlloc failed")
@@ -90,8 +106,17 @@ func SetClipboardFiles(hwnd uintptr, paths []string) error {
 	}
 	copy(unsafe.Slice((*byte)(ptr), len(data)), data)
 	w32.GlobalUnlock(handle)
+
+	if !openClipboardWithRetry(hwnd) {
+		w32.GlobalFree(handle)
+		return fmt.Errorf("OpenClipboard failed")
+	}
+	defer w32.CloseClipboard()
+
+	w32.EmptyClipboard()
+
 	if w32.SetClipboardData(15, handle) == 0 {
-		// 设置失败 → 释放已分配的内存
+		// 设置失败 → 内存所有权未转移，释放已分配的内存
 		w32.GlobalFree(handle)
 		return fmt.Errorf("SetClipboardData failed")
 	}
@@ -125,7 +150,7 @@ func SetClipboardImage(hwnd uintptr, imagePath string) error {
 // Used by snippet variable {clipboard}. Returns "" on any failure
 // (e.g. another app holds the clipboard open) — never errors.
 func GetClipboardText() string {
-	if !w32.OpenClipboard(0) {
+	if !openClipboardWithRetry(0) {
 		return ""
 	}
 	defer w32.CloseClipboard()

@@ -51,16 +51,19 @@ func (a *ClipboardService) DeleteExpiredClipboardEntries() (int64, error) {
 func (a *ClipboardService) writeEntryToClipboard(entry *db.ClipboardEntry, hwnd uintptr) error {
 	switch {
 	case entry.ContentType == "image" && entry.ImagePath != "":
+		// 回环防护的哈希必须在写入剪贴板**之前**登记：写入成功到登记之间，剪贴板
+		// 工作协程可能已经把这次变更抓走，导致「从历史复制图片」被误记成一次新复制。
+		// 该哈希口径与 processImage 的 DIB→PNG MD5 一致（PNG 文件经 DIB 往返后重编码字节确定性相同）。
+		if data, e := os.ReadFile(entry.ImagePath); e == nil {
+			services.SetLastClipboardImageHash(platform.MD5Hash(data))
+		}
 		if entry.TextContent != "" {
 			_ = platform.SetClipboardFiles(hwnd, strings.Split(entry.TextContent, "\n"))
 		}
 		if err := platform.SetClipboardImage(hwnd, entry.ImagePath); err != nil {
+			// 没写进剪贴板就不能留下这枚「通行证」，否则用户下次真正复制这张图会被误吞。
+			services.SetLastClipboardImageHash("")
 			return fmt.Errorf("图片写入剪贴板失败: %v", err)
-		}
-		// 回环防护：记录刚写回剪贴板的图片哈希，使后续捕获能识别"从历史复制的图片"并跳过。
-		// 该哈希口径与 processImage 的 DIB→PNG MD5 一致（PNG 文件经 DIB 往返后重编码字节确定性相同）。
-		if data, e := os.ReadFile(entry.ImagePath); e == nil {
-			services.SetLastClipboardImageHash(platform.MD5Hash(data))
 		}
 	case entry.ContentType == "file" && entry.TextContent != "":
 		if err := platform.SetClipboardFiles(hwnd, strings.Split(entry.TextContent, "\n")); err != nil {
