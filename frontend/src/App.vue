@@ -190,6 +190,8 @@ async function setTheme(theme: Theme) {
   currentTheme.value = theme
   applyTheme(theme)
   try { await SetValue('theme', theme) } catch (_) {}
+  // 广播到所有 WebView 窗口（主窗口 + 各浮窗），让它们各自的 document 同步切换主题
+  try { Events.Emit('quickdock:theme-changed', theme) } catch (_) {}
 }
 
 // 监听系统主题变化
@@ -214,6 +216,14 @@ onMounted(async () => {
       i18n.global.locale.value = saved
     }
   } catch (_) {}
+  // 跨 WebView 广播：主窗口切主题时，所有浮窗同步（每个窗口独立应用）
+  Events.On('quickdock:theme-changed', (payload: any) => {
+    const t = (typeof payload === 'string' ? payload : payload?.data) as Theme
+    if (t === 'dark' || t === 'light' || t === 'system') {
+      currentTheme.value = t
+      applyTheme(t)
+    }
+  })
   // 托盘「打开设置」：显示主窗口后由 Go 侧发事件，这里打开设置模态框
   Events.On('app:open-settings', () => {
     settingsPage.value = undefined

@@ -1086,6 +1086,7 @@ export default {
   pluginPermWrite: 'File Write',
   pluginPermDialog: 'File Dialogs',
   pluginPermNetwork: 'Network Allowlist',
+  pluginPermProcess: 'Executable Allowlist',
   pluginDetailChangelog: 'Changelog',
   pluginDetailNoChangelog: 'No changelog available (not provided by market index)',
   pluginDetailScreenshots: 'Screenshots',
@@ -1160,6 +1161,8 @@ export default {
   // Unified Sync (sync backend abstraction: WebDAV is one impl, Git / object storage can be added)
   sync: 'Sync',
   syncDesc: 'Back up data to a sync backend. WebDAV is supported now; Git / object storage backends can be added later without changing the core export/restore logic.',
+  syncAndSnapshot: 'Sync & Snapshot',
+  syncAndSnapshotDesc: 'Data sync (WebDAV and more) and local snapshot backup, managed together',
   syncBackend: 'Sync Backend',
   syncSelectBackend: 'Select sync backend',
   syncNoBackend: 'Please select and configure a sync backend first',

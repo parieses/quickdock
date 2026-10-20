@@ -1087,6 +1087,7 @@ export default {
   pluginPermWrite: '文件写入',
   pluginPermDialog: '文件对话框',
   pluginPermNetwork: '网络白名单',
+  pluginPermProcess: '可执行程序白名单',
   pluginDetailChangelog: '更新日志',
   pluginDetailNoChangelog: '暂无更新日志（市场索引未提供）',
   pluginDetailScreenshots: '截图',
@@ -1161,6 +1162,8 @@ export default {
   // 统一同步（同步后端抽象：WebDAV 是一种实现，未来可加 Git / 对象存储）
   sync: '同步',
   syncDesc: '将数据备份到同步后端。当前支持 WebDAV，未来可扩展 Git / 对象存储等后端，核心导出/恢复逻辑不变。',
+  syncAndSnapshot: '同步与快照',
+  syncAndSnapshotDesc: '数据同步（WebDAV 等后端）与本地快照备份，合并管理',
   syncBackend: '同步后端',
   syncSelectBackend: '选择同步后端',
   syncNoBackend: '请先选择并配置同步后端',

@@ -4,6 +4,7 @@ import "quickdock/services"
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -35,6 +36,7 @@ import (
 //	host.shell.open                              （需 permissions.shell；目标前缀白名单）
 //	host.process.list                            （无需权限，内置能力）
 //	host.process.kill                           （需 permissions.processKill；高危，默认拒绝）
+//	host.process.exec                           （需 permissions.process；程序名白名单，高危，默认拒绝）
 //	host.mcp.call                                （无需权限，等级门由 mcpsrv.Call 把关）
 //	db.get / db.set / db.delete / db.list        （无需权限，按 plugin_id 强隔离）
 
@@ -254,6 +256,62 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 			return nil, fmt.Errorf("打开 %q 失败: %w", arg.Target, err)
 		}
 		return map[string]interface{}{"success": true}, nil
+	})
+
+	// ---- 执行程序（高危，需显式声明 permissions.process）----
+	// 权限校验已在 internal/plugin/host.go 的 checkPermission 完成：
+	// 未声明 permissions.process 一律拒绝；带白名单时程序名必须在白名单内。
+	// 这里只负责真正把进程跑起来。
+	svc.App.PluginMgr.InjectHostMethod("host.process.exec", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		var arg struct {
+			Program string   `json:"program"`
+			Args    []string `json:"args"`
+		}
+		if err := json.Unmarshal(params, &arg); err != nil {
+			return nil, fmt.Errorf("参数解析失败: %w", err)
+		}
+		program := strings.TrimSpace(arg.Program)
+		if program == "" {
+			return nil, fmt.Errorf("program 不能为空")
+		}
+		// 参数数量上限：防止插件用超大参数列表撑爆宿主内存/命令行长度。
+		if len(arg.Args) > 64 {
+			return nil, fmt.Errorf("args 数量超出上限（最多 64 个）")
+		}
+		for _, a := range arg.Args {
+			if len(a) > 4096 {
+				return nil, fmt.Errorf("单个参数过长（上限 4096 字节）")
+			}
+		}
+
+		// 超时兜底：宿主不能被插件的进程拖住（插件可传 "timeout" 毫秒，默认 10s）。
+		timeoutMs := 10000
+		var raw struct {
+			Timeout int `json:"timeout"`
+		}
+		_ = json.Unmarshal(params, &raw)
+		if raw.Timeout > 0 {
+			timeoutMs = raw.Timeout
+		}
+		if timeoutMs > 120000 {
+			timeoutMs = 120000
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutMs)*time.Millisecond)
+		defer cancel()
+
+		cmd := sysutil.CommandContext(ctx, program, arg.Args...)
+		// 合并 stdout/stderr：插件看到的是程序真实输出，不做静默丢弃。
+		out, err := cmd.CombinedOutput()
+		res := map[string]interface{}{
+			"success":  err == nil,
+			"output":   string(out),
+			"exitCode": cmd.ProcessState.ExitCode(),
+		}
+		if err != nil {
+			// 进程非零退出不等于宿主失败：把错误信息带回，由插件自行判断。
+			res["error"] = err.Error()
+		}
+		return res, nil
 	})
 
 	// ---- 进程列表（全量，按内存降序）----

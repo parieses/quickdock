@@ -96,6 +96,10 @@ func validateManifest(m *PluginManifest) error {
 	if err := m.Permissions.Shell.Validate(); err != nil {
 		return err
 	}
+	// 进程执行白名单条目非空校验（bool 写法无需校验）。
+	if err := m.Permissions.Process.Validate(); err != nil {
+		return err
+	}
 
 	return nil
 }

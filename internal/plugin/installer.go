@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // 安全限制
@@ -215,6 +217,22 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 	}
 
 	os.Chmod(targetDir, 0755)
+
+	// 权限自证（阶段一：只告警，不拦截）。
+	// native 插件在自己的进程里直接调标准库（os.Remove / exec.Command / net.Dial），
+	// 这些调用不经过 host.* 桥接，宿主在运行期无法拦截；因此只能核对
+	// 「清单声明的权限」是否覆盖「源码实际用到的危险能力」，把清单撒谎暴露出来。
+	// 阶段二起可改为拒绝安装（CheckAgainst 返回错误时中断安装）。
+	if manifest.Backend.Runtime == "native" {
+		if audit, err := AuditPermissions(targetDir); err == nil {
+			if msg := DescribeAudit(manifest.ID, audit); msg != "" {
+				logger.W("[plugin-perm] %s 权限自证：%s", manifest.ID, msg)
+			}
+			if err := manifest.Permissions.CheckAgainst(audit); err != nil {
+				logger.W("[plugin-perm] %s 权限声明与实现不符（阶段一仅告警）：%v", manifest.ID, err)
+			}
+		}
+	}
 
 	// 安装成功，提交（defer 不再回滚）
 	committed = true

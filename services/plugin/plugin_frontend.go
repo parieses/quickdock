@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
 
@@ -170,6 +171,10 @@ func (p *PluginService) GetPluginFrontendPage(pluginID string, theme string, loc
 		} else {
 			html = commonStyle + html
 		}
+	} else {
+		// 读取失败时插件页会缺少通用主题变量（表现为排版错乱），必须显式告警，
+		// 否则只能靠用户肉眼发现"界面长得不一样"。
+		logger.E("[plugin-frontend] 读取 common.css 失败，插件页将缺少通用主题变量: %v", err)
 	}
 
 	// 注入 common.js
@@ -181,6 +186,8 @@ func (p *PluginService) GetPluginFrontendPage(pluginID string, theme string, loc
 		} else {
 			html = commonJS + html
 		}
+	} else {
+		logger.E("[plugin-frontend] 读取 common.js 失败，插件页将缺少复制/i18n 兜底能力: %v", err)
 	}
 
 	// 注入 QuickDock 运行时脚本
@@ -196,14 +203,19 @@ func (p *PluginService) GetPluginFrontendPage(pluginID string, theme string, loc
 		"(function(){" +
 		"var t='" + safeTheme + "';" +
 		"var l='" + safeLocale + "';" +
-		"document.documentElement.setAttribute('data-theme',t);" +
-		"document.documentElement.setAttribute('lang',l);" +
+		"var el=document.documentElement;" +
+		// 主题设置收敛到 apply()：首屏立即落定（插件页 CSS 按 html[data-theme] 取变量，
+		// 若等到 plugin:theme 消息到达才设置，首帧会取不到值而闪白/闪黑），
+		// 后续主题变更也统一走这里，避免与前端 BRIDGE_SCRIPT 各写一份。
+		"function apply(x){if(x==='light'||x==='dark')el.setAttribute('data-theme',x)};" +
+		"apply(t);" +
+		"el.setAttribute('lang',l);" +
 		"window.addEventListener('message',function(e){" +
 		"if(e.data&&e.data.type==='plugin:theme'){" +
 		"var dt=(e.data.data&&e.data.data.theme)||e.data.theme;" +
 		"var dl=(e.data.data&&e.data.data.locale)||e.data.locale;" +
-		"if(dt)document.documentElement.setAttribute('data-theme',dt);" +
-		"if(dl)document.documentElement.setAttribute('lang',dl);" +
+		"if(dt)apply(dt);" +
+		"if(dl)el.setAttribute('lang',dl);" +
 		"}});" +
 		"})();" +
 		"</script>\n"

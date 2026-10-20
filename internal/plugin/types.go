@@ -60,6 +60,7 @@ type Permissions struct {
 	Filesystem  FilesystemPerm `json:"filesystem,omitempty"` // 详见 fsperm.go：bool（仅对话框）或 {read,write} scope 对象
 	Clipboard   bool           `json:"clipboard,omitempty"`
 	Shell       ShellPerm      `json:"shell,omitempty"`       // 详见 shellperm.go：bool（全放行）或目标前缀数组
+	Process     ProcessPerm    `json:"process,omitempty"`     // 详见 procperm.go：bool（全放行）或可执行程序名白名单
 	ProcessKill bool           `json:"processKill,omitempty"` // host.process.kill 专用；默认 false（风险操作，显式开启）
 }
 

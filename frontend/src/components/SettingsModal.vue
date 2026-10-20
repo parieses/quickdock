@@ -54,8 +54,7 @@ const menuItems = computed(() => [
   { key: 'hotkeys',    label: t('hotkeySettings'),  icon: Keyboard, desc: t('shortcut') },
   { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
   { key: 'storage',   label: t('storageLocation'),   icon: HardDrive, desc: t('storageDesc') },
-  { key: 'sync',      label: t('sync'),              icon: Cloud,    desc: t('syncDesc') },
-  { key: 'snapshot',   label: t('snapshot'),          icon: HardDrive, desc: t('snapshotDesc') },
+  { key: 'datasync',  label: t('syncAndSnapshot'),   icon: Cloud,    desc: t('syncAndSnapshotDesc') },
   { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
   { key: 'winmgr',     label: t('winmgr'),             icon: MonitorIcon, desc: t('winmgrDesc') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
@@ -67,7 +66,7 @@ const menuGroups = computed(() => {
   const byKey = Object.fromEntries(menuItems.value.map((m) => [m.key, m]))
   const defs: { title: string; keys: string[] }[] = [
     { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys'] },
-    { title: t('menuGroupData'), keys: ['data', 'storage', 'sync', 'snapshot'] },
+    { title: t('menuGroupData'), keys: ['data', 'storage', 'datasync'] },
     { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai', 'logs'] },
   ]
   return defs
@@ -326,10 +325,13 @@ async function setLocale(newLocale: string) {
 
 // 打开设置页时如有初始页面则导航，不再全局挂起热键
 watch(() => props.visible, async (val) => {
-  if (val) {
-    if (props.initialPage) {
-      activePage.value = props.initialPage
-    }
+    if (val) {
+      if (props.initialPage) {
+        // 兼容旧入口：'sync' / 'snapshot' 已合并为 'datasync'
+        activePage.value = props.initialPage === 'sync' || props.initialPage === 'snapshot'
+          ? 'datasync'
+          : props.initialPage
+      }
   }
 }, { immediate: false })
 
@@ -628,14 +630,10 @@ async function toggleAutoStart() {
             </div>
           </div>
 
-          <!-- 统一同步（同步后端抽象：WebDAV 是一种实现） -->
-          <div v-else-if="activePage === 'sync'" class="content-page content-left">
-            <SettingsSync :visible="activePage === 'sync'" @close="close" />
-          </div>
-
-          <!-- 快照备份 -->
-          <div v-else-if="activePage === 'snapshot'" class="content-page content-left">
-            <SettingsSnapshot :visible="activePage === 'snapshot'" @close="close" />
+          <!-- 同步与快照（合并为一个菜单） -->
+          <div v-else-if="activePage === 'datasync'" class="content-page content-left">
+            <SettingsSync :visible="activePage === 'datasync'" @close="close" />
+            <SettingsSnapshot :visible="activePage === 'datasync'" @close="close" />
           </div>
 
           <!-- 存储位置（自定义数据目录） -->

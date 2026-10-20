@@ -17,10 +17,10 @@
   --space-10: 40px;
   --space-11: 48px;
 
-  --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-xs: 5px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
   --radius-full: 9999px;
 
   --sidebar-width: 210px;
@@ -39,23 +39,23 @@
 /* ==================== CSS 变量 — 深色主题 ==================== */
 :root,
 [data-theme="dark"] {
-  --color-bg-primary: #16181d;
-  --color-bg-secondary: #1d1f24;
-  --color-bg-tertiary: #25282e;
-  --color-bg-hover: #2e3138;
-  --color-bg-active: #3a3e46;
+  --color-bg-primary: #121419;
+  --color-bg-secondary: #181b22;
+  --color-bg-tertiary: #20242c;
+  --color-bg-hover: #282d37;
+  --color-bg-active: #303643;
   --color-bg-overlay: rgba(0, 0, 0, 0.55);
-  --color-surface: #25282e;
-  --color-surface-elevated: #2e3138;
-  --color-text-primary: #e8eaed;
-  --color-text-secondary: #a7adb6;
-  --color-text-muted: #7b818b;
+  --color-surface: #181b22;
+  --color-surface-elevated: #20242c;
+  --color-text-primary: #dde1e7;
+  --color-text-secondary: #aab1bd;
+  --color-text-muted: #7d8590;
   --color-text-disabled: #565c66;
-  --color-border: #2a2d34;
-  --color-border-light: #3a3e46;
-  --color-border-focus: #4a9eff;
-  --color-accent: #4a9eff;
-  --color-accent-hover: #3a8eef;
+  --color-border: #282d37;
+  --color-border-light: #363c47;
+  --color-border-focus: #5b8cff;
+  --color-accent: #5b8cff;
+  --color-accent-hover: #4a7af0;
   --color-accent-text: #fff;
   --color-danger: #ef4444;
   --color-danger-bg: rgba(239, 68, 68, 0.12);
@@ -63,21 +63,21 @@
   --color-success-bg: rgba(34, 197, 94, 0.12);
   --color-warning: #f59e0b;
   --color-warning-bg: rgba(245, 158, 11, 0.12);
-  --color-scrollbar-thumb: #3a3a3a;
-  --color-scrollbar-hover: #4a4a4a;
+  --color-scrollbar-thumb: #363c47;
+  --color-scrollbar-hover: #444b58;
   --color-scrollbar-track: transparent;
-  --color-accent-bg: rgba(74, 158, 255, 0.1);
-  --color-accent-border: rgba(74, 158, 255, 0.2);
-  --color-accent-muted: rgba(74, 158, 255, 0.5);
-  --color-accent-light: #6db3ff;
+  --color-accent-bg: rgba(91, 140, 255, 0.1);
+  --color-accent-border: rgba(91, 140, 255, 0.2);
+  --color-accent-muted: rgba(91, 140, 255, 0.5);
+  --color-accent-light: #7ea6ff;
 
   /* 终端调色板：xterm 只接受具体色值，无法传 var()，所以这些 token 由
      SshTerminal.vue 用 getComputedStyle 读出实际值再喂给 xterm。
      16 个 ANSI 色 + 背景/前景/光标/选区，两套主题必须一一对应。 */
-  --color-terminal-bg: #16181d;
-  --color-terminal-fg: #d7dae0;
-  --color-terminal-cursor: #4a9eff;
-  --color-terminal-selection: rgba(74, 158, 255, 0.28);
+  --color-terminal-bg: #121419;
+  --color-terminal-fg: #c6cad3;
+  --color-terminal-cursor: #5b8cff;
+  --color-terminal-selection: rgba(91, 140, 255, 0.28);
   --color-terminal-black: #2a2d34;
   --color-terminal-red: #ef6b6b;
   --color-terminal-green: #67c98a;
@@ -114,23 +114,23 @@
 
 /* ==================== CSS 变量 — 浅色主题 ==================== */
 [data-theme="light"] {
-  --color-bg-primary: #eceae5;
-  --color-bg-secondary: #f3f1ec;
-  --color-bg-tertiary: #e4e1db;
-  --color-bg-hover: #dedbd4;
-  --color-bg-active: #d3cfc8;
-  --color-bg-overlay: rgba(40, 38, 33, 0.14);
-  --color-surface: #f3f1ec;
-  --color-surface-elevated: #eae7e0;
-  --color-text-primary: #1f2328;
-  --color-text-secondary: #4b5159;
-  --color-text-muted: #6b7178;
-  --color-text-disabled: #9aa0a8;
-  --color-border: #d8dbe1;
-  --color-border-light: #c6cad2;
-  --color-border-focus: #4a9eff;
-  --color-accent: #4a9eff;
-  --color-accent-hover: #3a8eef;
+  --color-bg-primary: #e9ebef;
+  --color-bg-secondary: #f1f3f6;
+  --color-bg-tertiary: #e1e4e9;
+  --color-bg-hover: #dde1e7;
+  --color-bg-active: #d3d8df;
+  --color-bg-overlay: rgba(15, 18, 24, 0.14);
+  --color-surface: #f2f4f7;
+  --color-surface-elevated: #e9ebef;
+  --color-text-primary: #23272e;
+  --color-text-secondary: #565d68;
+  --color-text-muted: #7c848f;
+  --color-text-disabled: #a2a8b0;
+  --color-border: #d6dae0;
+  --color-border-light: #c7ccd4;
+  --color-border-focus: #5b8cff;
+  --color-accent: #5b8cff;
+  --color-accent-hover: #4a7af0;
   --color-accent-text: #fff;
   --color-danger: #ef4444;
   --color-danger-bg: rgba(239, 68, 68, 0.1);
@@ -138,20 +138,20 @@
   --color-success-bg: rgba(34, 197, 94, 0.12);
   --color-warning: #f59e0b;
   --color-warning-bg: rgba(245, 158, 11, 0.14);
-  --color-scrollbar-thumb: #d0d0cc;
-  --color-scrollbar-hover: #b8b8b4;
+  --color-scrollbar-thumb: #cbd0d6;
+  --color-scrollbar-hover: #aab0b8;
   --color-scrollbar-track: transparent;
-  --color-accent-bg: rgba(74, 158, 255, 0.08);
-  --color-accent-border: rgba(74, 158, 255, 0.15);
-  --color-accent-muted: rgba(74, 158, 255, 0.5);
-  --color-accent-light: #6db3ff;
+  --color-accent-bg: rgba(91, 140, 255, 0.08);
+  --color-accent-border: rgba(91, 140, 255, 0.15);
+  --color-accent-muted: rgba(91, 140, 255, 0.5);
+  --color-accent-light: #7ea6ff;
 
   /* 浅色终端调色板：对比度按浅底重算过，直接复用深色色值会偏灰、
      在 #fbfaf7 上读不清（尤其 yellow / cyan）。 */
-  --color-terminal-bg: #fbfaf7;
-  --color-terminal-fg: #1f2328;
-  --color-terminal-cursor: #2b6cb0;
-  --color-terminal-selection: rgba(74, 158, 255, 0.22);
+  --color-terminal-bg: #ffffff;
+  --color-terminal-fg: #1a1d24;
+  --color-terminal-cursor: #4a7af0;
+  --color-terminal-selection: rgba(91, 140, 255, 0.22);
   --color-terminal-black: #1f2328;
   --color-terminal-red: #c0392b;
   --color-terminal-green: #1e8449;
@@ -215,8 +215,8 @@ body {
 }
 
 #app {
-  height: 100vh;
-  width: 100vw;
+  height: 100%;
+  width: 100%;
 }
 
 /* ==================== 滚动条 ==================== */

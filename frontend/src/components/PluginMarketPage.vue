@@ -153,6 +153,12 @@ function permDetails(p: MarketPlugin): { label: string; values: string[] }[] {
       out.push({ label: t('pluginPermNetwork'), values: v })
       continue
     }
+    // process：可执行程序白名单。单独分支是为了用中文标签说清
+    // 「这些是它能启动的程序」——比裸露的 program 名更易理解。
+    if (k === 'process' && Array.isArray(v)) {
+      out.push({ label: t('pluginPermProcess'), values: v })
+      continue
+    }
     if (Array.isArray(v)) {
       out.push({ label: k, values: v })
     } else if (v && typeof v === 'object') {

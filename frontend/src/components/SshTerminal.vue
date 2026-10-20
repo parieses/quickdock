@@ -304,10 +304,18 @@ function readTermTheme(): ITheme {
 }
 
 const themeName = useThemeName()
-watch(themeName, () => {
-  // 热更新，不重建终端：重建会丢掉当前画面与回滚内容。
-  if (term) term.options.theme = readTermTheme()
-})
+watch(
+  themeName,
+  async () => {
+    // 热更新，不重建终端：重建会丢掉当前画面与回滚内容。
+    if (!term) return
+    // 等一拍再读 token，避免切主题瞬间读到中间态的旧值
+    await nextTick()
+    term.options.theme = readTermTheme()
+    // 强制重绘已渲染的画面，否则背景/文字会残留旧主题色（表现为「切了还是深色」）
+    term.refresh(0, term.rows - 1)
+  },
+)
 
 // ---- attach（拿到 sessionId 之后） ----
 

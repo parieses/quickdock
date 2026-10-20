@@ -82,6 +82,16 @@ func (m *Manager) checkPermission(pluginID string, method string, params json.Ra
 		if !inst.Manifest.Permissions.ProcessKill {
 			return fmt.Errorf("%w: 插件 %q 没有 processKill 权限（kill 是高危操作，需显式声明 permissions.processKill）", ErrPermissionDenied, pluginID)
 		}
+	case method == "host.process.exec":
+		proc := inst.Manifest.Permissions.Process
+		if !proc.Granted() {
+			return fmt.Errorf("%w: 插件 %q 没有 process 权限（执行程序是高危操作，需显式声明 permissions.process）", ErrPermissionDenied, pluginID)
+		}
+		// 程序名白名单：全放行直接过；带白名单时逐个比对。
+		// 比对放在权限层而非实现层，保证「校验通过但实现另有分支」也不会漏。
+		if name, ok := jsonStringField(params, "program"); ok && !proc.AllowsProgram(name) {
+			return fmt.Errorf("%w: 插件 %q 无权执行程序 %s（不在 permissions.process 白名单内）", ErrPermissionDenied, pluginID, name)
+		}
 	}
 
 	return nil
