@@ -67,32 +67,18 @@ release_notes.md
 
 # 本地 Ed25519 验签回归测试：仅本地保留用于守护更新签名链路，不纳入版本库
 services/update_verify_test.go
-docs/project-scan-report.md
 scripts/
-docs/audit-2026-08.md
 
 # --- 外部插件（独立开发，不在主仓库管理）---
 plugins/external/
-docs/env-manager-feasibility.md
-docs/audit-2026-09-05.md
-docs/dsh-isolation-plan.md
-docs/mac-support-plan.md
-docs/mac-unsupported.md
-docs/windows-inplace-update-plan.md
-docs/mac-update-sparkle-analysis.md
-docs/release-update-roadmap.md
-docs/API_SPLITSK_PLAN.md
-docs/services-split-rest-plan.md
-docs/plugin-host-api-plan.md
-docs/ollama-env-plan.md
 .qd-devpage.js
-docs/competitor-analysis-2026-09-12.md
-docs/project-scan-2026-09-12.md
-docs/software-review-2026-09-12.md
+
+# --- 本地文档（方案 / 报告 / 草稿）---
+# 新写的 md 一律放docs/local/ 或 .workbuddy/ 下，整目录忽略，
+# 不再逐个文件名加条目（曾积压 20 条已失效的 docs/*.md 规则）。
+docs/local/
+# 历史单篇提案：仅本地保留
+docs/proposals/ssh-feasibility.md
 
 # --- 公众号文章（本地草稿，不入库）---
 articles/
-docs/scrolling-screenshot-plan.md
-docs/super-panel-plan.md
-docs/window-management-plan.md
-docs/proposals/ssh-feasibility.md
