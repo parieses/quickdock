@@ -19,7 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	envmgr "quickdock/internal/env"
+	envengine "quickdock/internal/env"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/sysutil"
@@ -310,7 +310,7 @@ func populateServiceSubmenu(sub *application.Menu) {
 		if !ri.HasService || len(ri.Installed) == 0 {
 			continue
 		}
-		rt := envmgr.Runtime(ri.ID)
+		rt := envengine.Runtime(ri.ID)
 		running := len(serviceRunningVersions(rt)) > 0
 		label := ri.Name
 		if running {
@@ -329,7 +329,7 @@ func populateServiceSubmenu(sub *application.Menu) {
 }
 
 // serviceRunningVersions 返回该运行时当前正在运行的已装版本列表（用于托盘状态展示与停止）。
-func serviceRunningVersions(rt envmgr.Runtime) []string {
+func serviceRunningVersions(rt envengine.Runtime) []string {
 	svc := appSvc.Load()
 	if svc == nil || svc.Env == nil {
 		return nil
@@ -348,7 +348,7 @@ func serviceRunningVersions(rt envmgr.Runtime) []string {
 }
 
 // pickServiceVersion 选择用于启动的版本：激活版本优先，否则首个已装版本。
-func pickServiceVersion(rt envmgr.Runtime) string {
+func pickServiceVersion(rt envengine.Runtime) string {
 	svc := appSvc.Load()
 	if svc == nil || svc.Env == nil {
 		return ""
@@ -367,7 +367,7 @@ func pickServiceVersion(rt envmgr.Runtime) string {
 
 // toggleService 切换单个运行时的服务启停：有运行中的版本则全部停止，
 // 否则以「激活版本优先、否则首个已装版本」启动。结果经日志、托盘菜单刷新与主窗口事件回显。
-func toggleService(rt envmgr.Runtime) {
+func toggleService(rt envengine.Runtime) {
 	svc := appSvc.Load()
 	if svc == nil || svc.Env == nil {
 		return

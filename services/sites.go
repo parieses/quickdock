@@ -1,12 +1,16 @@
 package services
 
+// D7（技术债 · 前向约定）：本文件属 services 根包，承载 *AppService 的站点相关方法 + 包级单例 siteMgr。
+// 按目录决策树，新增的「站点」能力应落入 services/sites 子包；此处为历史遗留，待后续在不破坏
+// Wails 绑定契约（前端 bindings/quickdock/services/appservice 由 *AppService 方法生成）的前提下逐步收敛。
+// 新增功能请勿继续往根包加，统一走子包。
 import (
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
-	envmgr "quickdock/internal/env"
+	envengine "quickdock/internal/env"
 	"quickdock/internal/platform"
 	"quickdock/internal/sites"
 )
@@ -38,7 +42,7 @@ func (a *AppService) siteBackends() []map[string]any {
 			out = append(out, item)
 			continue
 		}
-		ver, err := a.Env.ResolveVersion(envmgr.Runtime(id), "")
+		ver, err := a.Env.ResolveVersion(envengine.Runtime(id), "")
 		if err != nil {
 			item["reason"] = err.Error()
 			out = append(out, item)
@@ -48,7 +52,7 @@ func (a *AppService) siteBackends() []map[string]any {
 		item["version"] = ver
 		// 服务器当前是否在跑：生成的片段只是磁盘上的文件，不跑就没有人加载它。
 		// 前端据此提示「配置已就绪，启动 nginx/caddy 后生效」。
-		if st, err := a.Env.Status(envmgr.Runtime(id), ver); err == nil {
+		if st, err := a.Env.Status(envengine.Runtime(id), ver); err == nil {
 			item["running"] = st.Running
 		}
 		out = append(out, item)
@@ -63,7 +67,7 @@ func (a *AppService) siteServerAvailable() (string, bool) {
 		return "", false
 	}
 	for _, id := range []string{string(sites.BackendNginx), string(sites.BackendCaddy)} {
-		if _, err := a.Env.ResolveVersion(envmgr.Runtime(id), ""); err == nil {
+		if _, err := a.Env.ResolveVersion(envengine.Runtime(id), ""); err == nil {
 			return id, true
 		}
 	}
@@ -85,7 +89,7 @@ func (a *AppService) hasPHP() bool {
 	if a.Env == nil {
 		return false
 	}
-	_, err := a.Env.ResolveVersion(envmgr.RuntimePHP, "")
+	_, err := a.Env.ResolveVersion(envengine.RuntimePHP, "")
 	return err == nil
 }
 
@@ -182,7 +186,7 @@ func (a *AppService) SitesGenConfig(id, backend string, write bool, custom strin
 		site = s
 	}
 
-	rt := envmgr.Runtime(backend)
+	rt := envengine.Runtime(backend)
 	ver, err := a.Env.ResolveVersion(rt, "")
 	if err != nil {
 		return FailMsg(fmt.Sprintf("请先安装 %s：%v", backend, err))
@@ -200,7 +204,7 @@ func (a *AppService) SitesGenConfig(id, backend string, write bool, custom strin
 	// 生成 fastcgi_pass 也只会换来一堆 502。两条都不成立就按纯静态生成。
 	fpmAddr := ""
 	if a.hasPHP() && sites.SiteNeedsPHP(site) {
-		fpmAddr = envmgr.FPMAddr()
+		fpmAddr = envengine.FPMAddr()
 	}
 
 	res, err := sites.Generate(sites.GenInput{

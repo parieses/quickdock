@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	envmgr "quickdock/internal/env"
+	envengine "quickdock/internal/env"
 	"quickdock/services"
 )
 
@@ -70,7 +70,7 @@ func (s *EnvironmentService) EnvInstall(runtime, version, sourceID, custom strin
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	rt := envmgr.Runtime(runtime)
+	rt := envengine.Runtime(runtime)
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
@@ -80,7 +80,7 @@ func (s *EnvironmentService) EnvInstall(runtime, version, sourceID, custom strin
 				}
 			}
 		}()
-		cb := envmgr.InstallCallback{
+		cb := envengine.InstallCallback{
 			OnProgress: func(written, total int64) {
 				if s.App.App() != nil {
 					s.App.App().Event.Emit("quickdock:env:progress", envProgress{Runtime: runtime, Stage: "download", Written: written, Total: total})
@@ -116,7 +116,7 @@ func (s *EnvironmentService) EnvAvailableVersions(runtime string) *services.ApiR
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	vs := s.App.Env.AvailableVersions(envmgr.Runtime(runtime))
+	vs := s.App.Env.AvailableVersions(envengine.Runtime(runtime))
 	return services.Ok(vs)
 }
 
@@ -125,7 +125,7 @@ func (s *EnvironmentService) EnvStart(runtime, version string) *services.ApiResu
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.Start(envmgr.Runtime(runtime), version, nil); err != nil {
+	if err := s.App.Env.Start(envengine.Runtime(runtime), version, nil); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -136,7 +136,7 @@ func (s *EnvironmentService) EnvStop(runtime string) *services.ApiResult {
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.Stop(envmgr.Runtime(runtime), ""); err != nil {
+	if err := s.App.Env.Stop(envengine.Runtime(runtime), ""); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -147,7 +147,7 @@ func (s *EnvironmentService) EnvRestart(runtime, version string) *services.ApiRe
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.Restart(envmgr.Runtime(runtime), version, nil); err != nil {
+	if err := s.App.Env.Restart(envengine.Runtime(runtime), version, nil); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -158,7 +158,7 @@ func (s *EnvironmentService) EnvStatus(runtime, version string) *services.ApiRes
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	st, err := s.App.Env.Status(envmgr.Runtime(runtime), version)
+	st, err := s.App.Env.Status(envengine.Runtime(runtime), version)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -170,7 +170,7 @@ func (s *EnvironmentService) EnvSetEnabled(runtime string, on bool) *services.Ap
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.SetEnabled(envmgr.Runtime(runtime), on); err != nil {
+	if err := s.App.Env.SetEnabled(envengine.Runtime(runtime), on); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -181,7 +181,7 @@ func (s *EnvironmentService) EnvPortConflict(runtime, version string) *services.
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	pc, err := s.App.Env.PortConflict(envmgr.Runtime(runtime), version)
+	pc, err := s.App.Env.PortConflict(envengine.Runtime(runtime), version)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -241,7 +241,7 @@ func (s *EnvironmentService) EnvSetActive(runtime, version string) *services.Api
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.SetActive(envmgr.Runtime(runtime), version); err != nil {
+	if err := s.App.Env.SetActive(envengine.Runtime(runtime), version); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -252,7 +252,7 @@ func (s *EnvironmentService) EnvUnsetActive(runtime, version string) *services.A
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.UnsetActive(envmgr.Runtime(runtime), version); err != nil {
+	if err := s.App.Env.UnsetActive(envengine.Runtime(runtime), version); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -263,7 +263,7 @@ func (s *EnvironmentService) EnvSetMeta(runtime, version, alias, note string) *s
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.SetVersionMeta(envmgr.Runtime(runtime), version, alias, note); err != nil {
+	if err := s.App.Env.SetVersionMeta(envengine.Runtime(runtime), version, alias, note); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -274,7 +274,7 @@ func (s *EnvironmentService) EnvDeleteVersion(runtime, version string, removeDat
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.DeleteVersion(envmgr.Runtime(runtime), version, removeData); err != nil {
+	if err := s.App.Env.DeleteVersion(envengine.Runtime(runtime), version, removeData); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -285,7 +285,7 @@ func (s *EnvironmentService) EnvImportVersion(runtime, dir string) *services.Api
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	version, err := s.App.Env.ImportVersion(envmgr.Runtime(runtime), dir)
+	version, err := s.App.Env.ImportVersion(envengine.Runtime(runtime), dir)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -297,7 +297,7 @@ func (s *EnvironmentService) EnvConfigSupport(runtime string) *services.ApiResul
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	return services.Ok(s.App.Env.ConfigSupport(envmgr.Runtime(runtime)))
+	return services.Ok(s.App.Env.ConfigSupport(envengine.Runtime(runtime)))
 }
 
 // EnvConfigGet 读取某 runtime 某版本的配置文件。
@@ -305,7 +305,7 @@ func (s *EnvironmentService) EnvConfigGet(runtime, version string) *services.Api
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	cfg, err := s.App.Env.ConfigGet(envmgr.Runtime(runtime), version)
+	cfg, err := s.App.Env.ConfigGet(envengine.Runtime(runtime), version)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -317,7 +317,7 @@ func (s *EnvironmentService) EnvConfigSet(runtime, version, raw string) *service
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.ConfigSet(envmgr.Runtime(runtime), version, raw); err != nil {
+	if err := s.App.Env.ConfigSet(envengine.Runtime(runtime), version, raw); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -328,7 +328,7 @@ func (s *EnvironmentService) EnvPHPConfigGet(runtime, version string) *services.
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	cfg, err := s.App.Env.PHPConfigGet(envmgr.Runtime(runtime), version)
+	cfg, err := s.App.Env.PHPConfigGet(envengine.Runtime(runtime), version)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -336,11 +336,11 @@ func (s *EnvironmentService) EnvPHPConfigGet(runtime, version string) *services.
 }
 
 // EnvPHPConfigSet 写回某已装 PHP 版本的配置。
-func (s *EnvironmentService) EnvPHPConfigSet(runtime, version string, patch envmgr.PHPConfigPatch) *services.ApiResult {
+func (s *EnvironmentService) EnvPHPConfigSet(runtime, version string, patch envengine.PHPConfigPatch) *services.ApiResult {
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.PHPConfigSet(envmgr.Runtime(runtime), version, patch); err != nil {
+	if err := s.App.Env.PHPConfigSet(envengine.Runtime(runtime), version, patch); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -351,7 +351,7 @@ func (s *EnvironmentService) EnvLogGet(runtime, version string) *services.ApiRes
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	log, err := s.App.Env.LogGet(envmgr.Runtime(runtime), version)
+	log, err := s.App.Env.LogGet(envengine.Runtime(runtime), version)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -363,7 +363,7 @@ func (s *EnvironmentService) EnvGoEnvKeys(runtime string) *services.ApiResult {
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	keys, err := s.App.Env.GoEnvKeys(envmgr.Runtime(runtime))
+	keys, err := s.App.Env.GoEnvKeys(envengine.Runtime(runtime))
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -375,7 +375,7 @@ func (s *EnvironmentService) EnvGoEnvGet(runtime, version string) *services.ApiR
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	m, err := s.App.Env.GoEnvGet(envmgr.Runtime(runtime), version)
+	m, err := s.App.Env.GoEnvGet(envengine.Runtime(runtime), version)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -387,7 +387,7 @@ func (s *EnvironmentService) EnvGoEnvSet(runtime, version string, patch map[stri
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	if err := s.App.Env.GoEnvSet(envmgr.Runtime(runtime), version, patch); err != nil {
+	if err := s.App.Env.GoEnvSet(envengine.Runtime(runtime), version, patch); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -456,7 +456,7 @@ func (s *EnvironmentService) EnvProjectVersions(dir string) *services.ApiResult 
 	if r := s.checkEnv(); r != nil {
 		return r
 	}
-	hints := envmgr.DetectVersionHints(dir)
+	hints := envengine.DetectVersionHints(dir)
 	out := make([]projectVersionStatus, 0, len(hints))
 	for _, h := range hints {
 		st := projectVersionStatus{Runtime: string(h.Runtime), Require: h.Version, Source: h.Source}
@@ -469,7 +469,7 @@ func (s *EnvironmentService) EnvProjectVersions(dir string) *services.ApiResult 
 					st.Active = ins.Version
 				}
 			}
-			st.Matched = envmgr.MatchInstalledVersion(h.Version, st.Installed)
+			st.Matched = envengine.MatchInstalledVersion(h.Version, st.Installed)
 		}
 		out = append(out, st)
 	}

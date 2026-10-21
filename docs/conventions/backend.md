@@ -69,7 +69,7 @@ internal/**       引擎 / 基础设施：DB、平台 API、外部协议、算�
 - 类型 / 函数：`XxxService` + `NewXxxService`（19/20 子包一致）。
 - 常量：外部可见/枚举用 PascalCase 导出；对外协议常量（如 Windows VK）用 SCREAMING_SNAKE；包内私有用 lowerCamel。
 - import 别名：优先使用包原名；重名时统一用 `<domain>engine` 或 `<domain>mgr`，同一包在仓库内**只用一个别名**
-  （当前 `internal/env` 有 `envmgr`/`envengine` 两种，`internal/plugin` 有 `pluginmgr`/`plugincore` 两种 —— 债务 D8）。
+  （`internal/env` 统一用 `envengine`，`internal/plugin` 统一用 `pluginmgr`；同一包在仓库内只保留一个别名）。
 - 注释：**中文为主**（占比约 90%），保持；每个包至少一个 `// Package xxx ...` 包注释，
   放在该包**主文件**（`service.go` 或同名文件），不要散落在次要文件（反例：`services/env` 的包注释写在 `ollama.go`）。
 - 根散落文件用 `// ===== xxx =====` 分区注释时，分区标题要与实际内容一致，失效注释须随代码更新
@@ -78,7 +78,7 @@ internal/**       引擎 / 基础设施：DB、平台 API、外部协议、算�
 ## 7. 格式化与校验
 
 ```bash
-gofmt -l internal services *.go      # 必须输出为空（本次已修复 6 个文件的存量问题）
+gofmt -l internal services *.go      # 必须输出为空
 go vet ./internal/... ./services/...
 ```
 
@@ -88,17 +88,3 @@ go vet ./internal/... ./services/...
 - 测试：`internal/**` 测试覆盖尚可，`services/**` 20 个子包仅 4 个有测试。
   **新增领域逻辑须带单测**，尤其 `services/<domain>/` 门面层。
 - 不要提交调试用测试（反例：`internal/env/zz_debug_path_test.go` 含 `fmt.Println`）。
-
-## 8. 待治理的结构债务（禁止新增同类问题）
-
-| # | 现状 | 目标 |
-|---|---|---|
-| B1 | `services/sites.go`、`sync.go`、`winmgr_service.go`、`screenshot.go` 有 `internal` 引擎却无 `services` 子包 | 新增功能走 `services/<domain>/`；存量随改随迁 |
-| B2 | `services/monitor` 一半在子包一半在根包 `monitor_checker.go` | 常驻循环留在宿主需在文件头注明理由 |
-| B3 | `services/httpserve*.go`（310 行）无 internal 引擎，纯业务堆在根包 | 新增 HTTP 能力先建 `internal/<domain>` |
-| B4 | `services/scheduler` 死代码包（未注册、0 引用、返回 `(T, error)`） | 启用前按第 3 节改造 |
-| B5 | `internal/env` 68 文件，基础设施与领域（php/redis/nginx…）混包 | 新增运行时支撑放 `internal/env/<sub>` 或独立包 |
-| B6 | 热键逻辑三处：`internal/platform/hotkey.go`、`services/hotkey.go`、`services/plugin_hotkey.go` | 新增热键能力统一走 `services/hotkey.go` |
-| B7 | `internal/platform/monitor.go`（屏幕枚举）与 `services/monitor`（网站监控）同名不同域 | 新增监控相关命名加领域限定（`DisplayMonitor` / `SiteMonitor`） |
-| B8 | WebDAV 三处：`internal/webdav`（客户端）、`internal/webdavsrv`（服务端）、`internal/sync/webdav.go` | 新代码按 客户端 / 服务端 / 同步适配 三选一，不新增第四处 |
-| B9 | `go vet` 存量告警：`internal/plugin/fsperm_windows.go:47` possible misuse of unsafe.Pointer | 该处为 syscall 调用，需加 `//nolint` 说明或重构为 `unsafe.Slice`；不新增同类告警 |

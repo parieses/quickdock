@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	envmgr "quickdock/internal/env"
+	envengine "quickdock/internal/env"
 	"quickdock/services"
 )
 
@@ -113,7 +113,7 @@ func (s *EnvironmentService) EnvOllamaPullModel(model string) *services.ApiResul
 		}()
 		ctx, cancel := context.WithTimeout(context.Background(), ollamaPullTimeout)
 		defer cancel()
-		err := s.App.Env.OllamaPullModel(ctx, name, func(p envmgr.OllamaPullProgress) {
+		err := s.App.Env.OllamaPullModel(ctx, name, func(p envengine.OllamaPullProgress) {
 			s.emitOllamaPull(ollamaPullProgress{
 				Model: name, Stage: "progress", Status: p.Status,
 				Completed: p.Completed, Total: p.Total, Percent: p.Percent,

@@ -12,10 +12,10 @@ import (
 	"strings"
 
 	"quickdock/internal/db"
-	envmgr "quickdock/internal/env"
+	envengine "quickdock/internal/env"
 	mcpsrv "quickdock/internal/mcp"
 	"quickdock/internal/platform"
-	plugincore "quickdock/internal/plugin"
+	pluginmgr "quickdock/internal/plugin"
 	"quickdock/services"
 	clipboardsvc "quickdock/services/clipboard"
 	collectionsvc "quickdock/services/collection"
@@ -87,7 +87,7 @@ func (s *MCPService) MCPStart() *services.ApiResult {
 	if s.App.Env == nil {
 		return services.FailMsg("env 未初始化")
 	}
-	if err := s.App.Env.Start(envmgr.RuntimeMCP, builtinVersion, nil); err != nil {
+	if err := s.App.Env.Start(envengine.RuntimeMCP, builtinVersion, nil); err != nil {
 		return services.FailMsg(err.Error())
 	}
 	return services.Ok(mcpsrv.Default.Endpoint())
@@ -98,7 +98,7 @@ func (s *MCPService) MCPStop() *services.ApiResult {
 	if s.App.Env == nil {
 		return services.FailMsg("env 未初始化")
 	}
-	if err := s.App.Env.Stop(envmgr.RuntimeMCP, builtinVersion); err != nil {
+	if err := s.App.Env.Stop(envengine.RuntimeMCP, builtinVersion); err != nil {
 		return services.FailMsg(err.Error())
 	}
 	return services.Ok(nil)
@@ -192,7 +192,7 @@ func (s *MCPService) registerTools() {
 				"versions":   versions,
 			}
 			if r.HasService && len(versions) > 0 {
-				if st, err := s.App.Env.Status(envmgr.Runtime(r.ID), versions[0]); err == nil {
+				if st, err := s.App.Env.Status(envengine.Runtime(r.ID), versions[0]); err == nil {
 					row["running"] = st.Running
 					row["ports"] = st.Ports
 				}
@@ -210,7 +210,7 @@ func (s *MCPService) registerTools() {
 		if s.App.Env == nil {
 			return nil, errors.New("环境管理未初始化")
 		}
-		st, err := s.App.Env.Status(envmgr.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")))
+		st, err := s.App.Env.Status(envengine.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")))
 		if err != nil {
 			return nil, err
 		}
@@ -223,7 +223,7 @@ func (s *MCPService) registerTools() {
 			return nil, errors.New("环境管理未初始化")
 		}
 		id := mcpsrv.Arg(args, "runtime")
-		log, err := s.App.Env.LogGet(envmgr.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")))
+		log, err := s.App.Env.LogGet(envengine.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")))
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +238,7 @@ func (s *MCPService) registerTools() {
 		if s.App.Env == nil {
 			return nil, errors.New("环境管理未初始化")
 		}
-		return s.App.Env.AvailableVersions(envmgr.Runtime(mcpsrv.Arg(args, "runtime"))), nil
+		return s.App.Env.AvailableVersions(envengine.Runtime(mcpsrv.Arg(args, "runtime"))), nil
 	}, read, "env_versions", "列出某运行时可下载的版本（需联网，慢）", []string{"runtime"},
 		map[string]any{"runtime": str("运行时 id")})
 
@@ -293,7 +293,7 @@ func (s *MCPService) registerTools() {
 			return nil, errors.New("环境管理未初始化")
 		}
 		id := mcpsrv.Arg(args, "runtime")
-		if err := s.App.Env.Stop(envmgr.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version"))); err != nil {
+		if err := s.App.Env.Stop(envengine.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version"))); err != nil {
 			return nil, err
 		}
 		return "已停止 " + id, nil
@@ -305,7 +305,7 @@ func (s *MCPService) registerTools() {
 			return nil, errors.New("环境管理未初始化")
 		}
 		id := mcpsrv.Arg(args, "runtime")
-		if err := s.App.Env.Restart(envmgr.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")), nil); err != nil {
+		if err := s.App.Env.Restart(envengine.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")), nil); err != nil {
 			return nil, err
 		}
 		return "已重启 " + id, nil
@@ -542,13 +542,13 @@ func (s *MCPService) envStart(id, version string) (any, error) {
 		return nil, errors.New("环境管理未初始化")
 	}
 	ver := pickVersion(s.App.Env, id, version)
-	if st, err := s.App.Env.Status(envmgr.Runtime(id), ver); err == nil && st.Running {
+	if st, err := s.App.Env.Status(envengine.Runtime(id), ver); err == nil && st.Running {
 		return id + " 已在运行（端口 " + strings.Trim(fmt.Sprint(st.Ports), "[]") + "）", nil
 	}
-	if err := s.App.Env.Start(envmgr.Runtime(id), ver, nil); err != nil {
+	if err := s.App.Env.Start(envengine.Runtime(id), ver, nil); err != nil {
 		return nil, err
 	}
-	st, _ := s.App.Env.Status(envmgr.Runtime(id), ver)
+	st, _ := s.App.Env.Status(envengine.Runtime(id), ver)
 	return map[string]any{"runtime": id, "version": ver, "running": st.Running, "ports": st.Ports}, nil
 }
 
@@ -566,11 +566,11 @@ func (s *MCPService) allItems() ([]db.CollectionItem, error) {
 }
 
 // pickVersion 取要操作的版本：显式指定优先，否则用已装的第一个版本。
-func pickVersion(m *envmgr.Manager, id, version string) string {
+func pickVersion(m *envengine.Manager, id, version string) string {
 	if version != "" {
 		return version
 	}
-	if installs, err := m.InstalledVersions(envmgr.Runtime(id)); err == nil && len(installs) > 0 {
+	if installs, err := m.InstalledVersions(envengine.Runtime(id)); err == nil && len(installs) > 0 {
 		return installs[0].Version
 	}
 	return ""
@@ -586,7 +586,7 @@ func (s *MCPService) pluginRuntime(pluginID string) string {
 	if res == nil || res.Code != 0 {
 		return ""
 	}
-	list, ok := res.Data.([]plugincore.PluginInfo)
+	list, ok := res.Data.([]pluginmgr.PluginInfo)
 	if !ok {
 		return ""
 	}

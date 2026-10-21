@@ -1,5 +1,9 @@
 package services
 
+// D7（技术债 · 前向约定）：本文件属 services 根包，承载 *AppService 的区域截图编排方法 + 包级覆盖窗口单例。
+// 按目录决策树，新增的「截图」能力应落入 services/screenshot 子包；此处为历史遗留，待后续在不破坏
+// Wails 绑定契约（前端 bindings/quickdock/services/appservice 由 *AppService 方法生成）的前提下逐步收敛。
+// 新增功能请勿继续往根包加，统一走子包。
 import (
 	"bytes"
 	"errors"
