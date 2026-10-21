@@ -83,6 +83,8 @@ import { logErr, logWarn, logDebug } from '../utils/logger'
 import { useCertPanel } from '../composables/useCertPanel'
 import { useMCPPanel } from '../composables/useMCPPanel'
 import { useWebDAVPanel } from '../composables/useWebDAVPanel'
+// D9：品牌色 / 内置工具组标识色集中到 palette（主题扩展表），组件不再散落硬编码
+import { RUNTIME_COLORS, SPECIAL_ITEM_COLORS } from '../utils/palette'
 
 const { t } = useI18n()
 const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!
@@ -174,9 +176,9 @@ const sidebarGroups = computed(() => {
       items.push({ kind: 'special', id: HARNESS_KEY, name: t('navDsh'), avatar: 'DS', color: 'var(--color-accent)', active: isHarness.value, running: dshRunning.value })
     }
     if (g === 'special') {
-      items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: '#4a9eff', active: isHttp.value, running: httpAnyRunning.value })
-      items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: '⌂', color: '#e8a33d', active: isSites.value })
-      items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: '#3ecf8e', active: isPorts.value })
+      items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: SPECIAL_ITEM_COLORS.http, active: isHttp.value, running: httpAnyRunning.value })
+      items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: '⌂', color: SPECIAL_ITEM_COLORS.sites, active: isSites.value })
+      items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: SPECIAL_ITEM_COLORS.ports, active: isPorts.value })
     }
     if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items, collapsed: false, running: groupRunning(g) })
   }
@@ -243,36 +245,6 @@ interface RuntimeInfo {
   singleVersion: boolean // 单版本语义（如 git/ollama/gh/frpc）：固定目录、不显示版本下拉、一键装最新/一键更新
 }
 
-// 每个运行时的品牌色（用于头像背景，白填充的官方图标渲染其上）
-const RUNTIME_COLORS: Record<string, string> = {
-  php: '#777bb3',
-  node: '#539e43',
-  go: '#00add8',
-  redis: '#d82c20',
-  nginx: '#009639',
-  git: '#f05032',
-  python: '#3776ab',
-  caddy: '#1f9e8f',
-  apache: '#d52b1e',
-  composer: '#885630',
-  ffmpeg: '#1f8ac9',
-  memcached: '#1170aa',
-  mariadb: '#1f5fbf',
-  mysql: '#00758f',
-  postgresql: '#336791',
-  mongodb: '#13aa52',
-  mailpit: '#6366f1',
-  minio: '#c51d1d',
-  frpc: '#3b82f6',
-  ftp: '#64748b',
-  bun: '#f472b6',
-  erlang: '#A90533',
-  traefik: '#2393f3',
-  rabbitmq: '#ff6600',
-  gh: '#24292f',
-  mkcert: '#6b7280',
-  jdk: '#007396',
-}
 function avatarColor(id: string): string {
   return RUNTIME_COLORS[id] || 'var(--color-accent)'
 }
@@ -1933,7 +1905,7 @@ const s = currentRuntimeState
         <!-- HTTP 服务区块：目录 → 可访问的静态服务 -->
         <template v-else-if="isHttp">
           <header class="detail-head">
-            <span class="detail-avatar" style="background:#4a9eff">⬡</span>
+            <span class="detail-avatar" :style="{ background: SPECIAL_ITEM_COLORS.http }">⬡</span>
             <div class="detail-titles">
               <div class="detail-title-row">
                 <span class="detail-name">{{ t('httpServe') }}</span>

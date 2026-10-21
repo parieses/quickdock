@@ -25,21 +25,18 @@ import SceneEnvBar from './components/SceneEnvBar.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import { SkipUpdate } from '../bindings/quickdock/services/update/updateservice';
+// 页面注册表：主窗口内容页与侧边栏导航项的单一数据源（替代 currentPage 手动 switch）
+import { findContentPage, type PageContext } from './pages/registry'
 
 // 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
 const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
 const OnboardingPage = defineAsyncComponent(() => import('./components/OnboardingPage.vue'))
 const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
-const PluginManagerPage = defineAsyncComponent(() => import('./components/PluginManagerPage.vue'))
-const NoteManagerPage = defineAsyncComponent(() => import('./components/NoteManagerPage.vue'))
+// 主窗口内容页（notes/plugins/todo/schedule/monitor/ai/environments/clipboard）的
+// 异步组件与导航信息已收敛到 pages/registry，由注册表驱动渲染，替代手工 v-if 切换链。
 const PluginPage = defineAsyncComponent(() => import('./components/PluginPage.vue'))
 const WindowManager = defineAsyncComponent(() => import('./components/WindowManager.vue'))
-const TodoPage = defineAsyncComponent(() => import('./components/TodoPage.vue'))
 const UpdatePrompt = defineAsyncComponent(() => import('./components/UpdatePrompt.vue'))
-const SchedulePage = defineAsyncComponent(() => import('./components/SchedulePage.vue'))
-const MonitorPage = defineAsyncComponent(() => import('./components/MonitorPage.vue'))
-const AIPage = defineAsyncComponent(() => import('./components/AIPage.vue'))
-const EnvironmentPage = defineAsyncComponent(() => import('./components/EnvironmentPage.vue'))
 // SSH 终端窗口专用页：只在该独立窗口内加载，不进主窗口体积
 const SshPage = defineAsyncComponent(() => import('./components/SshPage.vue'))
 
@@ -80,6 +77,15 @@ navigateTo.value = (page: string) => {
   if (window.location.hash) window.location.hash = ''
   currentPage.value = page
 }
+
+// 打开设置模态框（供 AIPage 等注册页经注册表事件回调复用，替代模板内联箭头）
+function openSettings(page?: string) {
+  settingsPage.value = page
+  showSettings.value = true
+}
+// 页面注册表渲染上下文：向注册页传递动态 props / 事件处理器
+const pageContext: PageContext = { envInitialSection, openSettings }
+const currentContentPage = computed(() => findContentPage(currentPage.value))
 
 // 从侧边栏点 DeepSeek：先探测环境——缺 node/dsh 自动安装并打开设置页展示进度；已就绪直接开原生窗口
 interface EnvProbe { nodeFound?: boolean; dshInstalled?: boolean }
@@ -373,13 +379,13 @@ const activeConfirm = computed(() =>
         :currentPage="currentPage"
         :dshOpening="dshOpening"
         @navigate="setPage"
-        @open-settings="(page?: string) => { settingsPage = page; showSettings = true }"
+        @open-settings="openSettings"
       />
       <div class="app-content">
-        <!-- 工作空间页面 -->
+        <!-- 工作空间复合页（含首次引导 Onboarding / 场景栏，非单组件，保留显式分支） -->
         <template v-if="currentPage === 'workspace'">
           <!-- 空状态引导页（首次使用，无工作空间） -->
-          <OnboardingPage v-if="store.workspaces.length === 0" @open-settings="(page?: string) => { settingsPage = page; showSettings = true }" />
+          <OnboardingPage v-if="store.workspaces.length === 0" @open-settings="openSettings" />
 
           <!-- 常规内容 -->
           <template v-else>
@@ -396,30 +402,17 @@ const activeConfirm = computed(() =>
           </template>
         </template>
 
-        <!-- 笔记页面 -->
-        <NoteManagerPage v-else-if="currentPage === 'notes'" />
-
-        <!-- 剪贴板历史页面 -->
-        <div v-else-if="currentPage === 'clipboard'" class="clipboard-page">
-          <ClipboardPanel />
+        <!-- 注册页：由 pages/registry 驱动动态渲染，替代手工 v-if 切换链 -->
+        <div
+          v-else-if="currentContentPage"
+          :class="currentContentPage.wrapperClass || 'page-shell'"
+        >
+          <component
+            :is="currentContentPage.component"
+            v-bind="currentContentPage.props ? currentContentPage.props(pageContext) : {}"
+            v-on="currentContentPage.listeners ? currentContentPage.listeners(pageContext) : {}"
+          />
         </div>
-
-        <!-- 插件页面 -->
-        <PluginManagerPage v-else-if="currentPage === 'plugins'" />
-
-        <!-- 待办任务页面 -->
-        <TodoPage v-else-if="currentPage === 'todo'" />
-
-        <!-- 定时任务页面 -->
-        <SchedulePage v-else-if="currentPage === 'schedule'" />
-        <!-- 网站监控页面 -->
-        <MonitorPage v-else-if="currentPage === 'monitor'" />
-
-        <!-- 环境管理页面（Node/PHP/Go/Redis/Nginx 便携运行时） -->
-        <EnvironmentPage v-else-if="currentPage === 'environments'" :initial-section="envInitialSection" />
-
-        <!-- AI 助手页面 -->
-        <AIPage v-else-if="currentPage === 'ai'" @open-settings="(page?: string) => { settingsPage = page; showSettings = true }" />
       </div>
     </div>
 
@@ -511,6 +504,9 @@ body {
 .app-content-body {
   flex: 1; display: flex; overflow: hidden;
 }
+/* 注册页外层：默认 display:contents 使其子组件等价于 .app-content 的直接 flex 子项，
+   保持与旧 v-if 链一致的布局；clipboard 等需撑满的页由 wrapperClass 覆盖本规则。 */
+.page-shell { display: contents; }
 .ws-error-bar {
   display: flex; align-items: center; gap: 8px;
   margin: 8px 12px 0;

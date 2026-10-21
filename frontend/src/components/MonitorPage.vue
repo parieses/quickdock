@@ -12,6 +12,8 @@ import { useFloatMenu } from '../composables/useFloatMenu'
 import type { Monitor } from '../../bindings/quickdock/internal/db/models'
 import WebhookSettingsModal from './WebhookSettingsModal.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
+// D9：canvas 图表用色集中到 palette（主题扩展表），canvas 无法吃 CSS var，运行时取此表
+import { CHART_COLORS } from '../utils/palette'
 
 // 以下两个结构仅作为返回值中的元素出现，Wails 绑定生成器不会为其单独生成类型，
 // 故在前端本地声明（运行时为普通 JSON，字段与后端 json tag 一致）。
@@ -351,14 +353,14 @@ function drawChart(id: string) {
   const CY = H - PT - PB  // chart area height
 
   // 背景
-  ctx.fillStyle = '#1a1a2e'
+  ctx.fillStyle = CHART_COLORS.bg
   ctx.fillRect(0, 0, W, H)
 
   // 数据：取最近 50 条，时间正序（后端返回倒序）
   const data = [...logs].reverse()
   const n = data.length
   if (n < 2) {
-    ctx.fillStyle = '#666'
+    ctx.fillStyle = CHART_COLORS.textMuted
     ctx.font = '12px sans-serif'
     ctx.textAlign = 'center'
     ctx.fillText(t('monitorNeedMoreData'), W / 2, H / 2)
@@ -386,12 +388,12 @@ function drawChart(id: string) {
   }
 
   // ---- 网格 ----
-  ctx.strokeStyle = '#2a2a3e'
+  ctx.strokeStyle = CHART_COLORS.grid
   ctx.lineWidth = 1
   for (let y = 0; y <= yMax; y += yStep) {
     const yy = yPos(y)
     ctx.beginPath(); ctx.moveTo(PL, yy); ctx.lineTo(W - PR, yy); ctx.stroke()
-    ctx.fillStyle = '#666'
+    ctx.fillStyle = CHART_COLORS.textMuted
     ctx.font = '10px sans-serif'
     ctx.textAlign = 'right'
     ctx.fillText(y + t('monitorMsSuffix'), PL - 6, yy + 3)
@@ -400,11 +402,11 @@ function drawChart(id: string) {
   // 超时线
   const timeoutY = yPos(timeout * 1000)
   if (timeoutY > PT) {
-    ctx.strokeStyle = 'rgba(232,76,76,0.4)'
+    ctx.strokeStyle = CHART_COLORS.timeoutLine
     ctx.setLineDash([4, 4])
     ctx.beginPath(); ctx.moveTo(PL, timeoutY); ctx.lineTo(W - PR, timeoutY); ctx.stroke()
     ctx.setLineDash([])
-    ctx.fillStyle = 'rgba(232,76,76,0.6)'
+    ctx.fillStyle = CHART_COLORS.timeoutText
     ctx.font = '9px sans-serif'
     ctx.textAlign = 'left'
     ctx.fillText(t('monitorTimeoutLabel', { seconds: timeout }), PL + 4, timeoutY - 3)
@@ -413,7 +415,7 @@ function drawChart(id: string) {
   // ---- X 轴标签（最多显示 6 个） ----
   const xLabelCount = Math.min(n, 6)
   const xLabelStep = Math.max(1, Math.floor((n - 1) / (xLabelCount - 1)))
-  ctx.fillStyle = '#888'
+  ctx.fillStyle = CHART_COLORS.textMuted2
   ctx.font = '9px sans-serif'
   ctx.textAlign = 'center'
   for (let i = 0; i < n; i += xLabelStep) {
@@ -432,7 +434,7 @@ function drawChart(id: string) {
     if (i === 0) ctx.moveTo(x, y)
     else ctx.lineTo(x, y)
   }
-  ctx.strokeStyle = '#4a9eff'
+  ctx.strokeStyle = CHART_COLORS.accent
   ctx.lineWidth = 2
   ctx.stroke()
 
@@ -442,16 +444,16 @@ function drawChart(id: string) {
     const x = xPos(i), y = yPos(d.latencyMs)
     const r = 3.5
     if (d.status === 'up') {
-      ctx.fillStyle = '#46b17b'
+      ctx.fillStyle = CHART_COLORS.ok
     } else {
-      ctx.fillStyle = '#e84c4c'
+      ctx.fillStyle = CHART_COLORS.danger
     }
     ctx.beginPath()
     ctx.arc(x, y, r, 0, Math.PI * 2)
     ctx.fill()
     // 失败的显示小箭头或 x
     if (d.status !== 'up') {
-      ctx.strokeStyle = '#e84c4c'
+      ctx.strokeStyle = CHART_COLORS.danger
       ctx.lineWidth = 1.5
       const s = 4
       ctx.beginPath()
@@ -463,15 +465,15 @@ function drawChart(id: string) {
 
   // 右上角图例
   const total = n, upCnt = data.filter(d => d.status === 'up').length
-  ctx.fillStyle = 'rgba(0,0,0,0.6)'
+  ctx.fillStyle = CHART_COLORS.legendBg
   ctx.fillRect(W - PR - 110, PT + 2, 108, 38)
   ctx.font = '10px sans-serif'
   ctx.textAlign = 'left'
-  ctx.fillStyle = '#aaa'
+  ctx.fillStyle = CHART_COLORS.textMuted3
   ctx.fillText(t('monitorChecks', { count: total }), W - PR - 102, PT + 14)
-  ctx.fillStyle = '#46b17b'
+  ctx.fillStyle = CHART_COLORS.ok
   ctx.fillText(t('monitorHealthy', { count: upCnt }), W - PR - 102, PT + 27)
-  ctx.fillStyle = '#e84c4c'
+  ctx.fillStyle = CHART_COLORS.danger
   ctx.fillText(t('monitorFaults', { count: total - upCnt }), W - PR - 50, PT + 27)
   // 存储像素坐标供 tooltip 悬停检测
   const pts: Array<{ x: number; y: number; data: MonitorLog }> = []
@@ -616,9 +618,9 @@ onUnmounted(() => {
             </div>
           </div>
           <div class="item-actions" @click.stop>
-            <button class="switch" :class="{ on: m.enabled }" @click="toggleEnabled(m)"
+            <button class="toggle-btn" :class="{ active: m.enabled }" @click="toggleEnabled(m)"
                     :title="m.enabled ? t('mon_enabled') : t('mon_disabled')">
-              <span class="knob"></span>
+              <span class="toggle-knob" />
             </button>
             <button class="act" :disabled="checkingId === m.id" @click="checkNow(m)" :title="t('mon_check_now')">
               <RefreshCw :size="14" :class="{ spin: checkingId === m.id }" />
@@ -851,14 +853,6 @@ onUnmounted(() => {
 .meta-cert.warn { color: #E2A04A; font-weight: 500; }
 
 .item-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
-.switch {
-  width: 34px; height: 19px; border-radius: var(--radius-md); border: none; cursor: pointer;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  position: relative; padding: 0; margin-right: 4px; transition: background var(--transition-fast);
-}
-.switch.on { background: var(--color-accent); box-shadow: none; }
-.knob { position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%; background: #fff; transition: transform var(--transition-fast); }
-.switch.on .knob { transform: translateX(15px); }
 .act {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--color-text-disabled);
@@ -923,14 +917,6 @@ onUnmounted(() => {
   width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-surface);
   border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
 }
-.modal h3 { margin: 0 0 var(--space-3); font-size: 15px; color: var(--color-text-primary); }
-.modal label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-text-muted); margin: var(--space-3) 0 var(--space-1); }
-.modal-input {
-  width: 100%; box-sizing: border-box; height: 34px; padding: 0 10px; background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  color: var(--color-text-primary); font-size: 13px; font-family: inherit; outline: none;
-}
-.modal-input:focus { border-color: var(--color-border-focus); box-shadow: 0 0 0 2px var(--color-accent-bg); }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
 
@@ -943,9 +929,4 @@ onUnmounted(() => {
 .toggle-row { display: flex; gap: var(--space-5); margin-top: var(--space-3); flex-wrap: wrap; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
-.btn-ghost { padding: 6px 14px; border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 13px; cursor: pointer; font-family: inherit; }
-.btn-ghost:hover { background: var(--color-bg-hover); }
-.btn-primary { padding: 6px 14px; border: none; background: var(--color-accent); color: #fff; border-radius: var(--radius-md); font-size: 13px; cursor: pointer; font-family: inherit; }
-.btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); }
-.btn-primary:disabled { opacity: 0.5; cursor: default; }
 </style>

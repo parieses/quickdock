@@ -8,10 +8,11 @@ import SceneEnvDialog from './SceneEnvDialog.vue'
 import { getErrorMessage } from '../utils/error'
 import { pluginUpdateBadge } from '../composables/usePluginUpdateBadge'
 import type { Scene, ToastAPI } from '../types'
+// 导航项图标已收敛到 pages/registry（纯数据），侧边栏仅保留仍在本文件直接使用的图标
 import {
-  Bot, FolderKanban, FileText, Activity, ListTodo, AlarmClock,
-  Clipboard, Puzzle, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Search, X, Settings, Terminal, Server, SquareTerminal,
+  FolderKanban, Server, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Search, X, Settings,
 } from '@lucide/vue'
+import { navEntries } from '../pages/registry'
 
 const store = useWorkspaceStore()
 const { t, tm } = useI18n()
@@ -230,62 +231,52 @@ async function handleDeleteScene(sceneId: string) {
       </Transition>
     </div>
 
-    <!-- 页面导航（新增） -->
+    <!-- 页面导航（由 pages/registry 驱动，新增页面只改注册表） -->
     <div class="sidebar-navigator">
       <div class="navigator-header">{{ t('navigation') }}</div>
-      <button :class="['nav-item', { active: currentPage === 'workspace' }]" @click="emit('navigate', 'workspace')">
-        <FolderKanban :size="14" />
-        <span>{{ t('navWorkspace') }}</span>
-      </button>
-      <button :class="['nav-item', { active: currentPage === 'notes' }]" @click="emit('navigate', 'notes')">
-        <FileText :size="14" />
-        <span>{{ t('navNotes') }}</span>
-      </button>
-      <button :class="['nav-item', { active: currentPage === 'todo' }]" @click="emit('navigate', 'todo')">
-        <ListTodo :size="14" />
-        <span>{{ t('navTodo') }}</span>
-      </button>
-      <button :class="['nav-item', { active: currentPage === 'schedule' }]" @click="emit('navigate', 'schedule')">
-        <AlarmClock :size="14" />
-        <span>{{ t('navSchedule') }}</span>
-      </button>
-      <button :class="['nav-item', { active: currentPage === 'monitor' }]" @click="emit('navigate', 'monitor')">
-        <Activity :size="14" />
-        <span>{{ t('navMonitor') }}</span>
-      </button>
-        <button :class="['nav-item', { active: currentPage === 'clipboard' }]" @click="emit('navigate', 'clipboard')">
-        <Clipboard :size="14" />
-        <span>{{ t('navClipboard') }}</span>
-      </button>
-      <button :class="['nav-item', { active: currentPage === 'environments' }]" @click="emit('navigate', 'environments')">
-        <Server :size="14" />
-        <span>{{ t('navEnvironments') }}</span>
-      </button>
-      <!-- SSH 不切换主窗口页面，而是唤起独立终端窗口（见 App.vue 的 setPage），
-           所以这里不置 active——主窗口内容始终保持不动。 -->
-      <button class="nav-item" :title="t('navSshHint')" @click="emit('navigate', 'ssh')">
-        <SquareTerminal :size="14" />
-        <span>{{ t('navSsh') }}</span>
-      </button>
-      <button :class="['nav-item', { active: currentPage === 'ai' }]" @click="emit('navigate', 'ai')">
-        <Bot :size="14" />
-        <span>{{ t('navAi') }}</span>
-      </button>
-      <button
-        :class="['nav-item', { active: currentPage === 'dsh', opening: dshOpening }]"
-        @click="emit('navigate', 'dsh')"
-        :disabled="dshOpening"
-        :title="dshOpening ? t('dshLaunching') : undefined"
-      >
-        <span v-if="dshOpening" class="nav-spinner"></span>
-        <Terminal v-else :size="14" />
-        <span>{{ dshOpening ? t('dshLaunching') : t('navDsh') }}</span>
-      </button>
-      <button :class="['nav-item', { active: currentPage === 'plugins' }]" @click="goPlugins">
-        <Puzzle :size="14" />
-        <span>{{ t('navPlugins') }}</span>
-        <span v-if="pluginUpdateBadge.count > 0" class="nav-badge" :title="t('pluginUpdateBadge', { n: pluginUpdateBadge.count })">{{ pluginUpdateBadge.count > 99 ? '99+' : pluginUpdateBadge.count }}</span>
-      </button>
+      <template v-for="entry in navEntries" :key="entry.id">
+        <!-- 普通页 / 工作空间：点击导航，按 currentPage 高亮 -->
+        <button
+          v-if="entry.kind === 'workspace' || entry.kind === 'page'"
+          :class="['nav-item', { active: currentPage === entry.id }]"
+          @click="emit('navigate', entry.id)"
+        >
+          <component :is="entry.icon" :size="14" />
+          <span>{{ t(entry.labelKey) }}</span>
+        </button>
+        <!-- SSH：唤起独立终端窗口，主窗口内容不动，不置 active -->
+        <button
+          v-else-if="entry.kind === 'window'"
+          class="nav-item"
+          :title="t('navSshHint')"
+          @click="emit('navigate', entry.id)"
+        >
+          <component :is="entry.icon" :size="14" />
+          <span>{{ t(entry.labelKey) }}</span>
+        </button>
+        <!-- DSH：DeepSeek Harness 原生窗口，启动中显示 loading 且禁用 -->
+        <button
+          v-else-if="entry.kind === 'dsh'"
+          :class="['nav-item', { active: currentPage === 'dsh', opening: dshOpening }]"
+          :disabled="dshOpening"
+          :title="dshOpening ? t('dshLaunching') : undefined"
+          @click="emit('navigate', entry.id)"
+        >
+          <span v-if="dshOpening" class="nav-spinner"></span>
+          <component v-else :is="entry.icon" :size="14" />
+          <span>{{ dshOpening ? t('dshLaunching') : t(entry.labelKey) }}</span>
+        </button>
+        <!-- 插件：点击清角标后导航，带可更新角标 -->
+        <button
+          v-else-if="entry.kind === 'plugins'"
+          :class="['nav-item', { active: currentPage === 'plugins' }]"
+          @click="goPlugins"
+        >
+          <component :is="entry.icon" :size="14" />
+          <span>{{ t(entry.labelKey) }}</span>
+          <span v-if="pluginUpdateBadge.count > 0" class="nav-badge" :title="t('pluginUpdateBadge', { n: pluginUpdateBadge.count })">{{ pluginUpdateBadge.count > 99 ? '99+' : pluginUpdateBadge.count }}</span>
+        </button>
+      </template>
     </div>
 
     <!-- 仅工作空间页显示场景相关 -->
