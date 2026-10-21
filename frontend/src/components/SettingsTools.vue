@@ -576,21 +576,6 @@ async function setDefault(tool: OpenTool) {
   gap: 4px;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
-.btn-primary {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-}
-.btn-primary:hover {
-  background: var(--color-accent-hover);
-}
-.btn-secondary {
-  background: var(--color-bg-active);
-  color: var(--color-text-secondary);
-}
-.btn-secondary:hover {
-  background: var(--color-bg-active);
-  color: var(--color-text-primary);
-}
 .btn:disabled {
   opacity: 0.6;
   cursor: not-allowed;

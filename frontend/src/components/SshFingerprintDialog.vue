@@ -429,26 +429,6 @@ function onKeydown(e: KeyboardEvent) {
   opacity: 0.5;
 }
 
-.btn-ghost {
-  color: var(--color-text-muted);
-  background: transparent;
-  border: 1px solid var(--color-border);
-}
-
-.btn-ghost:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
-.btn-primary {
-  color: var(--color-accent-text);
-  background: var(--color-accent);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
-}
-
 .btn-danger {
   color: var(--color-accent-text);
   background: var(--color-danger);

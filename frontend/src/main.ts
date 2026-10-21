@@ -5,6 +5,8 @@ import { i18n } from './i18n'
 import { Events } from '@wailsio/runtime'
 import { ReportFrontendError } from '../bindings/quickdock/services/diag/diagservice'
 import './style.css'
+// 设置模块公共样式（D5：从 SettingsModal.vue 抽离，供 SettingsAI/SettingsSnapshot 等无自身 style 的子组件依赖）
+import './styles/settings.css'
 
 // 前端异常落盘：白屏 / 交互报错时，用户可在「设置 > 关于」的崩溃记录里看到现场，
 // 不必开 DevTools（打包版根本没有 DevTools）。

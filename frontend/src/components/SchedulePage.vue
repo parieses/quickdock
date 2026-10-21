@@ -325,9 +325,9 @@ onMounted(refresh)
 
         <div class="item-actions">
           <!-- 启用开关 -->
-          <button class="switch" :class="{ on: task.enabled }" @click="toggleEnabled(task)"
+          <button class="toggle-btn" :class="{ active: task.enabled }" @click="toggleEnabled(task)"
                   :title="task.enabled ? t('sched_enabled') : t('sched_disabled')">
-            <span class="knob"></span>
+            <span class="toggle-knob" />
           </button>
           <button class="act" :disabled="runningId === task.id" @click="runNow(task)" :title="t('sched_run_now')">
             <Play :size="14" />
@@ -525,17 +525,6 @@ onMounted(refresh)
 .meta-last.fail { color: var(--color-danger); }
 
 .item-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
-.switch {
-  width: 34px; height: 19px; border-radius: var(--radius-md); border: none; cursor: pointer;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  position: relative; padding: 0; margin-right: 4px; transition: background var(--transition-fast);
-}
-.switch.on { background: var(--color-accent); box-shadow: none; }
-.knob {
-  position: absolute; top: 2px; left: 2px; width: 15px; height: 15px; border-radius: 50%;
-  background: #fff; transition: transform var(--transition-fast);
-}
-.switch.on .knob { transform: translateX(15px); }
 .act {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
   border: none; background: transparent; color: var(--color-text-disabled);
@@ -554,14 +543,6 @@ onMounted(refresh)
   width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-surface);
   border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
 }
-.modal h3 { margin: 0 0 var(--space-3); font-size: 15px; color: var(--color-text-primary); }
-.modal label { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-text-muted); margin: var(--space-3) 0 var(--space-1); }
-.modal-input {
-  width: 100%; box-sizing: border-box; height: 34px; padding: 0 10px; background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  color: var(--color-text-primary); font-size: 13px; font-family: inherit; outline: none;
-}
-.modal-input:focus { border-color: var(--color-border-focus); box-shadow: 0 0 0 2px var(--color-accent-bg); }
 .modal-area { height: auto; padding: 8px 10px; resize: vertical; line-height: 1.5; }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
@@ -591,9 +572,4 @@ onMounted(refresh)
 .toggle-label input { cursor: pointer; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
-.btn-ghost { padding: 6px 14px; border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 13px; cursor: pointer; font-family: inherit; }
-.btn-ghost:hover { background: var(--color-bg-hover); }
-.btn-primary { padding: 6px 14px; border: none; background: var(--color-accent); color: #fff; border-radius: var(--radius-md); font-size: 13px; cursor: pointer; font-family: inherit; }
-.btn-primary:hover:not(:disabled) { background: var(--color-accent-hover); }
-.btn-primary:disabled { opacity: 0.5; cursor: default; }
 </style>

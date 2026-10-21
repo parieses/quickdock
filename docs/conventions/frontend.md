@@ -24,14 +24,14 @@
 ### 1.2 硬性规则
 
 - 主题由 `<html data-theme="dark|light">` 驱动，`composables/useThemeName.ts` 用 MutationObserver 订阅，**是唯一真相**。
-  `App.vue` 与 `SettingsModal.vue` 各写了一份 apply/setTheme（债务 D4），新增代码**不要**再引入第三份。
+  `App.vue` 与 `SettingsModal.vue` 各写了一份 apply/setTheme，新增代码**不要**再引入第三份。
 - 新增 token：必须在 `:root,[data-theme="dark"]` 与 `[data-theme="light"]` **两处同时定义**，否则浅色主题会失效。
 - 禁止 `var(--xxx, #333)` 这种"变量 + 硬编码兜底"的写法——它掩盖了变量未定义的问题。
 - 语义色优先用状态 token；确实需要品牌/图表色时，先扩展 token，不要在脚本里存色值数组（反例：`EnvironmentPage.vue` 的 29 个运行时品牌色）。
 
 ## 2. 类名体系（公共类，新增代码一律复用）
 
-公共类目前定义在 `style.css` 与 `SettingsModal.vue`（后者为非 scoped 的"事实全局"，债务 D5）。
+公共类定义在 `frontend/src/style.css` 与 `frontend/src/styles/settings.css`。
 **新增代码必须用下面这套，不得新建同义类。**
 
 | 语义 | 类 | 备注 |
@@ -41,7 +41,7 @@
 | 按钮 | `.btn .btn-primary` / `.btn .btn-secondary` | 两个类必须成对出现，缺 `.btn` 会丢内边距 |
 | 操作行 / 结果提示 | `.action-row` / `.result-hint` | |
 | 纵向字段 | `.field` / `.field-label` / `.field-input` / `.field-hint` / `.field-checkbox` / `.toggle-field` | 用于需要独占一行的长表单 |
-| 开关 | `.toggle-btn` + `.toggle-knob`（激活态 `.active`） | 不用 `.switch/.knob`（债务 D3） |
+| 开关 | `.toggle-btn` + `.toggle-knob`（激活态 `.active`） | 不用 `.switch/.knob` |
 | 空状态 | `.empty-icon` / `.empty-text` / `.empty-hint` | |
 
 **命名约定**：BEM 风格的块前缀 + 短横线（`.snapshot-item-actions`），组件私有类加业务前缀避免与公共类重名。

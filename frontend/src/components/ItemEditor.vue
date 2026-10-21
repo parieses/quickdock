@@ -428,8 +428,6 @@ function onKeydown(e: KeyboardEvent) {
 }
 .btn-cancel { background: var(--color-bg-active); color: var(--color-text-muted); }
 .btn-cancel:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
-.btn-primary { background: var(--color-accent); color: var(--color-accent-text); }
-.btn-primary:hover { background: var(--color-accent-hover); }
 
 .dialog-enter-active, .dialog-leave-active { transition: opacity 0.15s; }
 .dialog-enter-from, .dialog-leave-to { opacity: 0; }

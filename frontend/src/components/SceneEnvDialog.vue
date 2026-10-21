@@ -213,8 +213,6 @@ function labelOf(id: string): string {
 .btn:disabled { opacity: 0.5; cursor: default; }
 .btn-cancel { background: var(--color-bg-active); color: var(--color-text-muted); }
 .btn-cancel:hover:not(:disabled) { color: var(--color-text-primary); }
-.btn-primary { background: var(--color-accent); color: var(--color-accent-text); }
-.btn-primary:hover:not(:disabled) { opacity: 0.85; }
 
 .dialog-enter-active { transition: opacity 0.2s ease-out, transform 0.2s ease-out; }
 .dialog-leave-active { transition: opacity 0.15s ease-in; }

@@ -765,17 +765,6 @@ function onKeydown(e: KeyboardEvent) {
   opacity: 0.45;
 }
 
-.btn-ghost {
-  color: var(--color-text-muted);
-  background: transparent;
-  border: 1px solid var(--color-border);
-}
-
-.btn-ghost:hover:not(:disabled) {
-  color: var(--color-text-primary);
-  background: var(--color-bg-hover);
-}
-
 .btn-outline {
   color: var(--color-text-secondary);
   background: transparent;
@@ -785,15 +774,6 @@ function onKeydown(e: KeyboardEvent) {
 .btn-outline:hover:not(:disabled) {
   color: var(--color-text-primary);
   border-color: var(--color-border-light);
-}
-
-.btn-primary {
-  color: var(--color-accent-text);
-  background: var(--color-accent);
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--color-accent-hover);
 }
 
 .spin {
