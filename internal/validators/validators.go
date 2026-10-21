@@ -88,7 +88,7 @@ func ParseTimeOfDay(s string) (*ParseTimeResult, error) {
 
 	sec := 0
 	if len(parts) == 3 {
-		var e3 error
+		var e3 *ValidationErr
 		sec, e3 = parseIntParts(parts[2], 0, 59)
 		if e3 != nil {
 			return nil, e3
