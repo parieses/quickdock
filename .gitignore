@@ -77,8 +77,8 @@ plugins/external/
 # 新写的 md 一律放docs/local/ 或 .workbuddy/ 下，整目录忽略，
 # 不再逐个文件名加条目（曾积压 20 条已失效的 docs/*.md 规则）。
 docs/local/
-# 历史单篇提案：仅本地保留
-docs/proposals/ssh-feasibility.md
+# 开发/检测发现的 bug 与修复记录（工作过程记录，不入库）；已随上行忽略，此行便于阅读
+docs/local/bugfixes/
 
 # --- 公众号文章（本地草稿，不入库）---
 articles/

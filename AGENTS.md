@@ -55,21 +55,7 @@ plugins/**                                                   ← 内置插件与
 3. 进程级单例状态、常驻循环（剪贴板监听、定时巡检等）→ 留在 `services/*.go`，并在文件头注释写明"为何留在宿主"
 4. **禁止**同一领域一边在 `services/<domain>/` 一边在 `services/*.go` 各自实现一半
 
-## 3. 已识别的风格债务（禁止新增，按批次渐进修复）
-
-| # | 债务 | 位置 | 处理原则 |
-|---|---|---|---|
-| D1 | `.btn-primary` 等公共类在 9 个组件各自重写，padding/radius 不一致 | CreateDialog / ItemEditor / MonitorPage / SchedulePage / SettingsTools … | 新代码只用 R6 体系；旧页面随改随迁 |
-| D2 | 第二套弹窗体系 `.modal/.modal-input/.btn-ghost` | MonitorPage / SchedulePage / TodoPage / WebhookSettingsModal | 不得新增使用 |
-| D3 | 开关两套：`.switch/.knob` 与 `.toggle-btn/.toggle-field` | MonitorPage / SchedulePage vs SettingsModal | 新代码一律 `.toggle-btn`/`.toggle-field` |
-| D4 | 主题切换逻辑重复实现两份 | `App.vue:161-172` 与 `SettingsModal.vue:304-316` | 唯一真相是 `<html data-theme>` + `useThemeName` |
-| D5 | 组件无 `<style>` 却依赖 SettingsModal 的非 scoped 类 | SettingsAI / SettingsSnapshot / TypeIcon | 后续抽公共样式文件时一并治理 |
-| D6 | `services/scheduler` 为死代码包（未注册、0 引用、返回 `(T, error)`） | `services/scheduler/service.go` | 启用前先按 R11 改造 |
-| D7 | sites / sync / winmgr / screenshot 有 `internal` 引擎却无 `services` 子包 | `services/sites.go`、`sync.go`、`winmgr_service.go`、`screenshot.go` | 新增功能走子包，不下沉到根 |
-| D8 | 同一内部包两种 import 别名（`envmgr`/`envengine`、`pluginmgr`/`plugincore`） | `main.go`、`services/mcp/service.go` | 新代码统一用 `<domain>` 原包名，必要时用 `<domain>engine` |
-| D9 | 硬编码品牌色/图表色散落在页面脚本 | EnvironmentPage（29 个运行时色）、MonitorPage canvas | 新增色值必须落 token 或主题扩展表 |
-
-## 4. 提交前自检清单
+## 3. 提交前自检清单
 
 ```bash
 # 后端（必须全绿）
@@ -88,7 +74,7 @@ cd frontend && npx vue-tsc --noEmit -p tsconfig.json
 - [ ] 新增后端方法返回 `*services.ApiResult`
 - [ ] 未手改 `frontend/bindings/**`
 
-## 5. 细则索引
+## 4. 细则索引
 
 - 前端样式与组件规范：`docs/conventions/frontend.md`
 - Go 后端目录与代码风格：`docs/conventions/backend.md`
