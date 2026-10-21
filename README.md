@@ -22,7 +22,7 @@
 
 ---
 
-![主界面截图](image/主界面截图.png)
+![主界面截图](image/main-ui.png)
 
 > 一张图看不全 —— 它把「资源管理、剪贴板、命令面板、待办、监控、AI、环境管理、插件」全收进一个窗口，下面拆开讲。
 
@@ -463,16 +463,16 @@ quickdock/
 │   ├── schedule.go  schedule_runner.go  reminder.go  webhook_notify.go
 │   ├── monitor_checker.go
 │   └── ai/ clipboard/ collection/ diag/ dsh/ env/ frecency/ item/
-│       mcp/ monitor/ note/ plugin/ port/ scene/ scheduler/ snapshot/
+│       mcp/ monitor/ note/ plugin/ port/ scene/ snapshot/
 │       system/ todo/ update/ workspace/   # 领域门面子包
 ├── internal/                             # 引擎层（被门面调用，无 Wails 绑定）
 │   ├── db/  env/  sites/  dsh/  plugin/  platform/  sync/  webdav/  webdavsrv/
 │   ├── mcp/  screenshot/  winmgr/  dl/  logger/  sysutil/  validators/
-├── frontend/src/                         # Vue 3 + TS（54 组件 + 50 TS 模块）
-│   ├── App.vue  main.ts  style.css  i18n/  stores/  composables/  utils/
+├── frontend/src/                         # Vue 3 + TS（组件 + TS 模块）
+│   ├── App.vue  main.ts  style.css  pages/  i18n/  stores/  composables/  utils/
 │   └── components/  # 三栏主界面 / 面板 / 设置 / 插件 / 环境 / 监控 …
 ├── plugins/                              # 宿主骨架 + 开发模板（外部插件见独立仓库）
-├── build/  docs/  website/  scripts/  image/  Taskfile.yml
+├── build/  docs/  website/  image/  Taskfile.yml
 ├── DESIGN.md  AGENTS.md  LICENSE
 └── main_unix.go  main_windows.go  windows_unix.go  windows_windows.go
 ```
