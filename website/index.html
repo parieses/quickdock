@@ -84,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.23 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.24 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -95,21 +95,20 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.23) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.24) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.23</span>
+<span class="eyebrow">v0.0.24</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.23 带来两大更新：一是 SSH 远程终端，可以直接连服务器开终端、传文件，主机集中管理、首次连接先核对指纹；二是插件权限大梳理，每个插件能做什么（读文件 / 联网 / 执行程序 / 结束进程）安装前一目了然，高危能力默认关闭、需你点头才生效。</p>
+<p>v0.0.24 是一次稳定性专项更新：修掉了一批会让界面卡死、插件崩溃、退出丢数据的问题，并规范了界面配色与错误提示，日常使用更省心、更可靠。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">SSH 远程终端</span><span>Ctrl+Alt+S 唤起独立终端窗口，多标签页并行会话，切换标签或最小化窗口都不打断连接；侧栏与托盘都有入口。</span></div>
-<div class="tbl-row"><span class="k">主机集中管理</span><span>服务器按树状分组管理，可标注生产 / 预发 / 测试环境并拖拽调整层级；支持密码与私钥（含口令）两种认证，保存前可先测试连接并看到耗时。</span></div>
-<div class="tbl-row"><span class="k">先核对再连</span><span>首次连接会展示服务器指纹供人工核对，主机密钥变更时额外告警——服务器重装和连接被劫持在技术上都表现为密钥变化，QuickDock 不会替你猜，把决定权交给你。</span></div>
-<div class="tbl-row"><span class="k">SFTP 传文件</span><span>终端内直接浏览远程目录，拖拽即可上传下载，不必再开一个 FTP 客户端。</span></div>
-<div class="tbl-row"><span class="k">插件权限看得见</span><span>每个插件能读哪些文件、连哪些网址、是否允许执行程序或结束进程，安装前都列得清清楚楚；没声明的能力一律不可用。</span></div>
-<div class="tbl-row"><span class="k">高危默认关</span><span>执行程序、结束进程这类操作默认关闭，必须插件显式申请、你明确允许才生效，不给流氓插件可乘之机。</span></div>
+<div class="tbl-row"><span class="k">连接不再卡死</span><span>修复远程终端断开连接时界面卡死的问题，重连、关闭窗口、切换标签都恢复顺滑响应，不再卡在「正在断开」。</span></div>
+<div class="tbl-row"><span class="k">插件更可靠</span><span>修复插件通信偶发的写入死锁与进程崩溃，长时间运行的带权限插件不再因一次异常整体退出。</span></div>
+<div class="tbl-row"><span class="k">退出不丢活</span><span>退出应用前会等后台定时任务、网站监控、提醒真正跑完再关闭，执行结果不再静默丢失。</span></div>
+<div class="tbl-row"><span class="k">截图更跟手</span><span>修复截图热键偶发无响应，框选后正常出图；后台日志改为按体积自动滚动，长时间运行不再越攒越大。</span></div>
+<div class="tbl-row"><span class="k">界面更规范</span><span>统一了全站配色与错误提示风格，补齐了一批缺失的错误提示，偶现的样式错乱明显减少。</span></div>
 </div>
 </div>
 </section>
@@ -124,7 +123,19 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.23</span><span class="log-date">2026-10-21</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.24</span><span class="log-date">2026-10-22</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>修复远程终端断开连接时界面卡死（死锁），重连、关闭窗口、切换标签恢复顺滑响应。</li>
+<li>修复插件通信在插件不读取输入时的写入死锁与进程崩溃，长时间运行的插件更稳定。</li>
+<li>修复退出应用时后台任务（定时任务 / 网站监控 / 提醒）执行结果被静默丢弃，现退出前等待其完成。</li>
+<li>修复截图热键偶发无响应（提前返回未通知调用方导致永久挂起）。</li>
+<li>修复后台日志超过 20MB 后单文件只增不减、每条日志重复开关文件，改为按体积自动滚动。</li>
+<li>修复剪贴板监听线程在窗口尚未就绪时停止导致线程永久泄漏。</li>
+<li>前端统一界面配色 token、补齐 50 余处缺失的错误处理；后端 service 方法统一返回 ApiResult，便于前端一致处理成功与失败。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.23</span><span class="log-date">2026-10-21</span></summary>
 <ul class="log-body">
 <li>新增 SSH 远程终端：Ctrl+Alt+S 唤起独立窗口，多标签页并行会话，切换标签或最小化都不打断已建立的连接。</li>
 <li>服务器集中管理：树状分组、拖拽调整层级，可标注生产 / 预发 / 测试环境。</li>
