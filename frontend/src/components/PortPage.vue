@@ -146,7 +146,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .port-loading { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--space-3); padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 .port-spinner { width: 26px; height: 26px; border-radius: 50%; border: 2.5px solid var(--color-border); border-top-color: var(--color-accent); animation: port-spin 0.8s linear infinite; }
 
-.port-error { margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px; color: var(--color-danger); background: rgba(232, 76, 76, 0.1); border: 1px solid rgba(232, 76, 76, 0.3); border-radius: var(--radius-md); flex-shrink: 0; }
+.port-error { margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px; color: var(--color-danger); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0; }
 
 .port-list { display: flex; flex-direction: column; gap: 4px; }
 .port-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
@@ -154,15 +154,15 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px 12px; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: var(--radius-md); transition: background var(--transition-fast); }
 .port-row:hover { background: var(--color-bg-hover); }
 /* QuickDock 自身监听的端口（内置 HTTP 静态服务等）：描边高亮，避免混在系统进程里认不出 */
-.port-row.is-self { border: 1px solid var(--color-accent); background: rgba(74, 158, 255, 0.07); }
-.port-row.is-self:hover { background: rgba(74, 158, 255, 0.13); }
-.port-self-badge { margin-left: 6px; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: var(--radius-xs); background: var(--color-accent); color: #fff; white-space: nowrap; }
+.port-row.is-self { border: 1px solid var(--color-accent); background: var(--color-accent-bg); }
+.port-row.is-self:hover { background: var(--color-accent-bg); }
+.port-self-badge { margin-left: 6px; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: var(--radius-xs); background: var(--color-accent); color: var(--color-accent-text); white-space: nowrap; }
 .port-num { font-size: 14px; font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; min-width: 64px; }
 .port-proto { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-muted); min-width: 38px; text-align: center; }
-.port-proto.proto-udp { color: #e0a92b; }
+.port-proto.proto-udp { color: var(--color-warning); }
 .port-pid { font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
 .port-name { flex: 1; min-width: 0; font-size: 13px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .port-path { flex: 1.6; min-width: 0; font-size: 12px; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .port-kill { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: transparent; color: var(--color-danger); transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast); }
-.port-kill:hover { background: rgba(232, 76, 76, 0.1); border-color: rgba(232, 76, 76, 0.35); }
+.port-kill:hover { background: var(--color-danger-bg); border-color: var(--color-danger-border); }
 </style>

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus } from '@lucide/vue'
@@ -18,7 +19,6 @@ import {
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
-import { logErr } from '../utils/logger'
 import { pinyinOf } from '../utils/pinyin'
 import type { ToastAPI } from '../types'
 
@@ -475,7 +475,7 @@ function onPanelKeydown(e: KeyboardEvent) {
       break
     case 'Escape':
       resetScrollOnHide()
-      try { HideClipboardWindow() } catch {}
+      try { HideClipboardWindow() } catch (e) { logErr('ClipboardPanel', e) }
       break
   }
 }
@@ -804,8 +804,8 @@ onUnmounted(() => {
 .time-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .time-btn.active {
   color: var(--color-accent);
-  background: var(--color-accent-bg, rgba(74, 158, 255, 0.1));
-  border-color: var(--color-accent-border, rgba(74, 158, 255, 0.2));
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border, var(--color-accent-bg));
 }
 
 .tag-btn {
@@ -839,8 +839,8 @@ onUnmounted(() => {
 /* 搜索命中高亮：明显区分 —— 主题蓝字 + 半粗 + 极淡蓝底，
    一眼能看清命中词，又不刺眼 */
 .hl-hit {
-  background: var(--color-accent-bg, rgba(74, 158, 255, 0.14));
-  color: var(--color-accent, #4a9eff);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
   font-weight: 600;
   border-radius: var(--radius-xs);
   padding: 0;
@@ -930,7 +930,7 @@ onUnmounted(() => {
 }
 .clipboard-item:hover .delete-btn,
 .clipboard-item.selected .delete-btn { opacity: 0.4; }
-.delete-btn:hover { opacity: 0.8 !important; color: var(--color-danger, #e5484d); }
+.delete-btn:hover { opacity: 0.8 !important; color: var(--color-danger); }
 
 .item-content { flex: 1; min-width: 0; }
 .item-text {
@@ -996,7 +996,7 @@ onUnmounted(() => {
 }
 .clipboard-pagination .page-btn:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
 .clipboard-pagination .page-btn:disabled { opacity: 0.35; cursor: default; }
-.clipboard-pagination .page-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+.clipboard-pagination .page-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .clipboard-pagination .page-ellipsis { color: var(--color-text-disabled); font-size: 11px; width: 18px; text-align: center; }
 .clipboard-pagination .page-total { margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
 
@@ -1018,7 +1018,7 @@ onUnmounted(() => {
 .note-editor-mask {
   position: absolute; inset: 0; z-index: 100;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--color-bg-overlay);
   animation: fadeIn 0.12s ease;
 }
 @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -1064,7 +1064,7 @@ onUnmounted(() => {
 }
 .cancel-btn:hover { background: var(--color-bg-hover); }
 .save-btn {
-  background: var(--color-accent); color: #fff; border-color: var(--color-accent);
+  background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent);
 }
 .save-btn:hover { filter: brightness(1.1); }
 

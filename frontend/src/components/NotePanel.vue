@@ -1,11 +1,11 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, watch, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { StickyNote, Check, Loader2, MessageCircleQuestion } from '@lucide/vue'
 import { GetNote, SaveNote, AskAI } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()

@@ -85,7 +85,7 @@ async function detachPluginFor(r: SearchResult) {
     const last = r.pluginCommandId ? getPluginLastResult(pid, r.pluginCommandId) : null
     const input = r.inlineInput || last?.input || ''
     if (r.pluginCommandId) {
-      try { await SetPendingPluginInit(pid, input, r.pluginCommandId) } catch {}
+      try { await SetPendingPluginInit(pid, input, r.pluginCommandId) } catch (e) { logErr('CommandPalette', e) }
     }
     await closePalette()       // 先隐藏 AlwaysOnTop 面板，避免新窗口被压在后面
     await ShowPluginWindow(pid)
@@ -101,7 +101,7 @@ async function detachPlugin() {
   markPluginSeen(id)
   try {
     if (inlinePluginInit.value.text || inlinePluginInit.value.command) {
-      try { await SetPendingPluginInit(id, inlinePluginInit.value.text, inlinePluginInit.value.command) } catch {}
+      try { await SetPendingPluginInit(id, inlinePluginInit.value.text, inlinePluginInit.value.command) } catch (e) { logErr('CommandPalette', e) }
     }
     await closePalette()       // 先隐藏 AlwaysOnTop 面板，再开独立窗口确保在最前
     await ShowPluginWindow(id)
@@ -221,7 +221,7 @@ async function loadPluginNewFlags() {
   try {
     const flags = await GetPluginNewFlags()
     if (Array.isArray(flags)) newFlags.value = new Set(flags as string[])
-  } catch {}
+  } catch (e) { logErr('CommandPalette', e) }
 }
 function markPluginSeen(pid: string) {
   if (!pid || !newFlags.value.has(pid)) return
@@ -654,7 +654,7 @@ async function executeSelected() {
   } else if (result.type === 'url' && result.url) {
     try { await Browser.OpenURL(result.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }; closePalette()
   } else if (result.type === 'calculator' && result.calcResult) {
-    try { await writeClipboard(result.calcResult) } catch {}; closePalette()
+    try { await writeClipboard(result.calcResult) } catch (e) { logErr('CommandPalette', e) }; closePalette()
   } else if (result.type === 'note' && result.note) {
     recordUsage('note:' + result.note.id, 'note', result.label, result.desc)
     // 面板是独立浮窗，与主窗口 JS 状态不互通；交后端隐藏本窗 + 唤起主窗口
@@ -738,7 +738,7 @@ async function executeSelected() {
             ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult)) : String(pluginResult)
           const copyText = typeof pluginResult === 'object'
             ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText) : displayText
-          try { await writeClipboard(copyText) } catch {}
+          try { await writeClipboard(copyText) } catch (e) { logErr('CommandPalette', e) }
           // 持久化「每命令最近一次结果」：重开面板/重启后 preview 仍可展示、动作菜单可复制、acceptsInput 命令可一键重跑
           savePluginLastResult(result.pluginId, result.pluginCommandId, {
             result: displayText, pluginName: result.desc || result.label,
@@ -759,7 +759,7 @@ async function executeSelected() {
       // urlEncode 实现完全一致（encodeURIComponent 语义），核心功能零插件耦合
       let encoded = ''
       try { encoded = encodeURIComponent(result.url) } catch { encoded = result.url }
-      try { await writeClipboard(encoded) } catch {}
+      try { await writeClipboard(encoded) } catch (e) { logErr('CommandPalette', e) }
       toast?.success?.(t('pluginResultCopied')); closePalette()
     }
   }
@@ -940,7 +940,7 @@ async function loadPluginIcons(force = false) {
   // 图标分深浅两档，必须按当前主题取；主题切换时由下方 watch 强制重拉
   const theme = themeName.value
   await Promise.all(installedPlugins.value.map(async (p) => {
-    try { const uri = unwrap<string | null>(await GetPluginIcon(p.id, theme)); if (uri) pluginIcons.value[p.id] = uri } catch {}
+    try { const uri = unwrap<string | null>(await GetPluginIcon(p.id, theme)); if (uri) pluginIcons.value[p.id] = uri } catch (e) { logErr('CommandPalette', e) }
   }))
 }
 
@@ -1412,7 +1412,7 @@ onUnmounted(() => {
   flex-shrink: 0;
   font-size: 9px; line-height: 14px; font-weight: 600;
   padding: 0 5px; border-radius: var(--radius-sm);
-  background: var(--color-accent, #4a9eff); color: #fff;
+  background: var(--color-accent); color: var(--color-accent-text);
   letter-spacing: 0.5px; align-self: center;
 }
 
@@ -1466,7 +1466,7 @@ onUnmounted(() => {
 }
 .result-check {
   display: flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border-radius: var(--radius-sm); background: var(--color-accent); color: #fff; flex-shrink: 0;
+  width: 18px; height: 18px; border-radius: var(--radius-sm); background: var(--color-accent); color: var(--color-accent-text); flex-shrink: 0;
 }
 
 .palette-close {
@@ -1502,7 +1502,7 @@ onUnmounted(() => {
   align-items: flex-end;
   justify-content: flex-end;
   padding: 0 10px 42px;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--color-bg-overlay);
   backdrop-filter: blur(1.5px);
 }
 
@@ -1515,7 +1515,7 @@ onUnmounted(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-secondary);
-  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 12px 34px var(--color-bg-overlay);
   animation: action-menu-in 0.12s ease-out;
 }
 

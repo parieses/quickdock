@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Minus, Square, X, RotateCw, Power } from '@lucide/vue'
@@ -14,7 +15,6 @@ import {
 import PluginFrame from './PluginFrame.vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
 import { pluginName as localizePluginName } from '../utils/localize'
 import type { PluginInfo } from '../types'
 
@@ -197,12 +197,12 @@ function forceClose() {
 }
 .pw-btn-close:hover {
   background: var(--color-danger);
-  color: #fff;
+  color: var(--color-accent-text);
 }
 /* 强制关闭：与 X 同款危险色 hover，但图标不同（电源）作视觉区分 */
 .pw-btn-kill:hover {
   background: var(--color-danger);
-  color: #fff;
+  color: var(--color-accent-text);
 }
 .pw-btn-max svg {
   transform: rotate(180deg);

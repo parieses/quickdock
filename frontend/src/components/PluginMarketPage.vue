@@ -512,25 +512,25 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-secondary); cursor: pointer;
 }
-.refresh-btn:hover { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); }
+.refresh-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
 .update-all-btn {
   display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: var(--radius-sm);
-  border: 1px solid rgba(233, 160, 19, 0.45); background: rgba(233, 160, 19, 0.15);
-  color: #E9A013; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  border: 1px solid var(--color-warning-border); background: var(--color-warning-bg);
+  color: var(--color-warning); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
-.update-all-btn:hover:not(:disabled) { background: rgba(233, 160, 19, 0.25); }
+.update-all-btn:hover:not(:disabled) { background: var(--color-warning-border); }
 .update-all-btn:disabled { opacity: .7; cursor: default; }
 .filter-chip {
   display: inline-flex; align-items: center; gap: 4px; height: 32px; padding: 0 10px; border-radius: var(--radius-lg);
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-secondary); font-size: 12px; cursor: pointer; white-space: nowrap;
 }
-.filter-chip:hover:not(:disabled) { border-color: var(--color-accent, #4a9eff); color: var(--color-accent, #4a9eff); }
-.filter-chip.active { background: rgba(233, 160, 19, 0.15); border-color: rgba(233, 160, 19, 0.45); color: #E9A013; }
+.filter-chip:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
+.filter-chip.active { background: var(--color-warning-bg); border-color: var(--color-warning-border); color: var(--color-warning); }
 .filter-chip:disabled { opacity: .45; cursor: default; }
 .chip-count {
-  font-size: 10px; padding: 0 6px; border-radius: var(--radius-md); background: rgba(233, 160, 19, 0.2);
-  color: #E9A013; font-weight: 700;
+  font-size: 10px; padding: 0 6px; border-radius: var(--radius-md); background: var(--color-warning-bg);
+  color: var(--color-warning); font-weight: 700;
 }
 .market-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .market-search {
@@ -539,7 +539,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-muted);
 }
-.market-search:focus-within { border-color: var(--color-accent, #4a9eff); }
+.market-search:focus-within { border-color: var(--color-accent); }
 .search-icon { flex: none; }
 .market-search-input {
   flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
@@ -551,7 +551,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-primary); font: inherit; font-size: 13px;
 }
-.market-cat-select:focus { outline: none; border-color: var(--color-accent, #4a9eff); }
+.market-cat-select:focus { outline: none; border-color: var(--color-accent); }
 .market-result { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
 .market-loading, .market-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
@@ -574,9 +574,9 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .card-title-wrap { flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .card-title { font-size: 14px; font-weight: 600; color: var(--color-text-primary); }
 .card-id { font-size: 10px; color: var(--color-text-disabled); font-family: var(--font-mono, monospace); width: 100%; }
-.badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); background: rgba(74, 158, 255, 0.12); color: var(--color-accent, #4a9eff); }
-.badge-installed { background: rgba(29, 158, 117, 0.12); color: #1D9E75; }
-.badge-upgrade { background: rgba(233, 160, 19, 0.15); color: #E9A013; }
+.badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
+.badge-installed { background: var(--color-success-bg); color: var(--color-success); }
+.badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning); }
 .card-desc { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; min-height: 32px; }
 .card-meta { display: flex; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
 .card-perms { display: flex; gap: 4px; flex-wrap: wrap; }
@@ -588,7 +588,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .dl-bar-fill {
   height: 100%; border-radius: var(--radius-xs);
-  background: var(--color-accent, #4a9eff);
+  background: var(--color-accent);
   transition: width .2s ease;
 }
 .dl-bar-fill.indeterminate { animation: dl-slide 1.2s ease-in-out infinite; }
@@ -604,17 +604,17 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 12px; cursor: pointer; transition: all .15s;
 }
-.action-btn:hover:not(:disabled) { border-color: var(--color-accent, #4a9eff); color: var(--color-accent, #4a9eff); }
+.action-btn:hover:not(:disabled) { border-color: var(--color-accent); color: var(--color-accent); }
 .action-btn:disabled { opacity: .6; cursor: default; }
-.btn-install { background: var(--color-accent, #4a9eff); color: #fff; border-color: var(--color-accent, #4a9eff); }
-.btn-install:hover:not(:disabled) { opacity: .9; color: #fff; }
-.btn-upgrade { background: rgba(233, 160, 19, 0.15); color: #E9A013; border-color: rgba(233, 160, 19, 0.4); }
-.btn-done { color: #1D9E75; }
+.btn-install { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
+.btn-install:hover:not(:disabled) { opacity: .9; color: var(--color-accent-text); }
+.btn-upgrade { background: var(--color-warning-bg); color: var(--color-warning); border-color: var(--color-warning-border); }
+.btn-done { color: var(--color-success); }
 .btn-disabled { color: var(--color-text-disabled); }
 
 /* 插件详情弹窗 */
 .modal-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  position: fixed; inset: 0; background: var(--color-bg-overlay);
   display: flex; align-items: center; justify-content: center; z-index: 50;
 }
 /* 弹窗卡片基类：同 EnvironmentPage 标准。此前缺失导致弹框裸奔（无遮罩/无卡片背景/无内边距/无圆角阴影） */
@@ -622,7 +622,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 18px 56px var(--color-bg-overlay);
   padding: 20px 22px;
   color: var(--color-text-primary);
 }
@@ -662,7 +662,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-perms { display: flex; flex-direction: column; gap: 8px; }
 .detail-perm { display: flex; flex-direction: column; gap: 4px; }
 .detail-perm-label { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
-.detail-perm-on { font-size: 11px; color: #1D9E75; }
+.detail-perm-on { font-size: 11px; color: var(--color-success); }
 .detail-tag-path { font-family: var(--font-mono, monospace); word-break: break-all; }
 .detail-changelog {
   font-size: 11px; line-height: 1.5; color: var(--color-text-secondary);

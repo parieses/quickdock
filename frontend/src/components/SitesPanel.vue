@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 // 本地开发站点：域名 + 目录 → 由 nginx/caddy 以 HTTPS 提供服务。QuickDock 只负责签发证书、
 // 写 hosts 解析并生成站点片段，自己不监听任何端口。后端实现在 internal/sites。
 import { ref, onMounted, computed, inject } from 'vue'
@@ -6,7 +7,6 @@ import { useI18n } from 'vue-i18n'
 import { Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
 import {
   SitesList, SitesCreate, SitesUpdate, SitesDelete,
   SitesSyncHosts, SitesGenConfig, SitesSetModules,
@@ -747,7 +747,7 @@ onMounted(() => { load(); loadCert() })
 .detail-avatar {
   width: 40px; height: 40px; border-radius: var(--radius-md); flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  font-size: 18px; color: #fff;
+  font-size: 18px; color: var(--color-accent-text);
 }
 .detail-titles { display: flex; flex-direction: column; gap: 4px; }
 .detail-title-row { display: flex; align-items: baseline; gap: 8px; }

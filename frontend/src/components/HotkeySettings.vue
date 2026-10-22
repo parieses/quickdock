@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Keyboard, RotateCcw } from '@lucide/vue'
@@ -131,23 +132,23 @@ onMounted(async () => {
   try {
     const c = unwrap<HotkeyConfig>(await GetHotkeyConfig())
     if (c) { currentLabel.value = c.label; currentModifiers.value = c.modifiers; currentVk.value = c.vk }
-  } catch {}
+  } catch (e) { logErr('HotkeySettings', e) }
   try {
     const c = unwrap<HotkeyConfig>(await GetClipboardHotkeyConfig())
     if (c) { clipLabel.value = c.label; clipModifiers.value = c.modifiers; clipVk.value = c.vk }
-  } catch {}
+  } catch (e) { logErr('HotkeySettings', e) }
   try {
     const c = unwrap<HotkeyConfig>(await GetPaletteHotkeyConfig())
     if (c) { paletteLabel.value = c.label; paletteModifiers.value = c.modifiers; paletteVk.value = c.vk }
-  } catch {}
+  } catch (e) { logErr('HotkeySettings', e) }
   try {
     const c = unwrap<HotkeyConfig>(await GetNoteHotkeyConfig())
     if (c) { noteLabel.value = c.label; noteModifiers.value = c.modifiers; noteVk.value = c.vk }
-  } catch {}
+  } catch (e) { logErr('HotkeySettings', e) }
   try {
     const c = unwrap<HotkeyConfig>(await GetScreenshotHotkeyConfig())
     if (c) { shotLabel.value = c.label; shotModifiers.value = c.modifiers; shotVk.value = c.vk }
-  } catch {}
+  } catch (e) { logErr('HotkeySettings', e) }
 })
 
 onUnmounted(() => {
@@ -204,27 +205,27 @@ async function saveAll() {
 
 async function resetAppDefault() {
   currentModifiers.value = 2; currentVk.value = 32; currentLabel.value = 'Ctrl+Space'
-  try { await SetHotkeyConfig(2, 32); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+  try { await SetHotkeyConfig(2, 32); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
 async function resetClipDefault() {
   clipModifiers.value = 2; clipVk.value = 0xC0; clipLabel.value = 'Ctrl+`'
-  try { await SetClipboardHotkeyConfig(2, 0xC0); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+  try { await SetClipboardHotkeyConfig(2, 0xC0); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
 async function resetPaletteDefault() {
   paletteModifiers.value = 2; paletteVk.value = 0x4B; paletteLabel.value = 'Ctrl+K'
-  try { await SetPaletteHotkeyConfig(2, 0x4B); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+  try { await SetPaletteHotkeyConfig(2, 0x4B); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
 async function resetNoteDefault() {
   noteModifiers.value = 6; noteVk.value = 0x4E; noteLabel.value = 'Ctrl+Shift+N'
-  try { await SetNoteHotkeyConfig(6, 0x4E); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+  try { await SetNoteHotkeyConfig(6, 0x4E); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
 async function resetScreenshotDefault() {
   shotModifiers.value = 0; shotVk.value = 0x70; shotLabel.value = 'F1'
-  try { await SetScreenshotHotkeyConfig(0, 0x70); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch {}
+  try { await SetScreenshotHotkeyConfig(0, 0x70); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
 function isDefault(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot'): boolean {

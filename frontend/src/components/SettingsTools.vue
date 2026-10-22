@@ -444,7 +444,7 @@ async function setDefault(tool: OpenTool) {
 }
 .tool-action.danger:hover {
   color: var(--color-danger);
-  background: rgba(232, 76, 76, 0.1);
+  background: var(--color-danger-bg);
 }
 
 /* 编辑模态框 */
@@ -452,7 +452,7 @@ async function setDefault(tool: OpenTool) {
   position: fixed;
   inset: 0;
   z-index: 20000;
-  background: rgba(0, 0, 0, 0.45);
+  background: var(--color-bg-overlay);
   display: flex;
   align-items: center;
   justify-content: center;

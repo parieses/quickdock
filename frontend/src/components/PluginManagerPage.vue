@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2 } from '@lucide/vue'
@@ -103,7 +104,7 @@ async function loadIcons() {
         try {
           const dataUri = unwrap<string | null>(await GetPluginIcon(p.id, theme))
           if (dataUri) icons.value[p.id] = dataUri
-        } catch {}
+        } catch (e) { logErr('PluginManagerPage', e) }
       })
   )
 }
@@ -117,7 +118,7 @@ async function loadPlugins() {
     try {
       const flags = await GetPluginNewFlags()
       if (Array.isArray(flags)) newFlags.value = new Set(flags as string[])
-    } catch {}
+    } catch (e) { logErr('PluginManagerPage', e) }
   } catch (e) {
     toast?.error?.(t('pluginLoadFailed') + ': ' + getErrorMessage(e))
   } finally {
@@ -306,7 +307,7 @@ async function refreshStatuses() {
         p.disabled = f.disabled
       }
     }
-  } catch {}
+  } catch (e) { logErr('PluginManagerPage', e) }
 }
 
 let statusTimer: number | undefined
@@ -595,15 +596,15 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
   cursor: default;
   position: relative;
 }
-.plugin-card:hover { border-color: var(--color-accent); box-shadow: 0 0 0 1px rgba(74,158,255,0.15); }
-.plugin-card.card-running { border-color: rgba(29,158,117,0.25); }
+.plugin-card:hover { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent-bg); }
+.plugin-card.card-running { border-color: var(--color-success-border); }
 
 /* 「新」角标 */
 .new-badge {
   position: absolute; top: 4px; left: 4px;
   font-size: 9px; line-height: 14px; font-weight: 600;
   padding: 0 5px; border-radius: var(--radius-sm);
-  background: var(--color-accent, #4a9eff); color: #fff;
+  background: var(--color-accent); color: var(--color-accent-text);
   z-index: 1; letter-spacing: 0.5px;
 }
 
@@ -622,10 +623,10 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
   font-size: 10px; transition: background-color 100ms, color 100ms, border-color 100ms;
 }
 .action-top-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.action-top-btn.btn-stop-top:hover { color: #E2A04A; }
-.action-top-btn.btn-kill-top:hover { color: #E24B4A; }
+.action-top-btn.btn-stop-top:hover { color: var(--color-warning); }
+.action-top-btn.btn-kill-top:hover { color: var(--color-danger); }
 .action-top-btn.btn-open-top:hover { color: var(--color-accent); }
-.action-top-btn.btn-uninstall-top:hover { color: #E24B4A; }
+.action-top-btn.btn-uninstall-top:hover { color: var(--color-danger); }
 
 /* 图标 */
 .card-icon-wrap {
@@ -643,11 +644,11 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
 
 /* 状态 */
 .status-badge { font-size: 9px; padding: 0 6px; border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
-.badge-running { background: rgba(29,158,117,0.15); color: #1D9E75; }
-.badge-stopped { background: rgba(136,135,128,0.15); color: var(--color-text-muted); }
-.badge-disabled { background: rgba(226,75,74,0.15); color: #E24B4A; }
-.badge-crashed { background: rgba(226,75,74,0.15); color: #E24B4A; }
-.badge-registered { background: rgba(55,138,221,0.15); color: #378ADD; }
+.badge-running { background: var(--color-success-bg); color: var(--color-success); }
+.badge-stopped { background: var(--color-border); color: var(--color-text-muted); }
+.badge-disabled { background: var(--color-danger-bg); color: var(--color-danger); }
+.badge-crashed { background: var(--color-danger-bg); color: var(--color-danger); }
+.badge-registered { background: var(--color-accent-bg); color: #378ADD; }
 .badge-starting { background: rgba(224,162,58,0.15); color: #E0A23A; }
 .badge-unresponsive { background: rgba(226,132,58,0.15); color: #E2843A; }
 
@@ -714,7 +715,7 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
 }
 .history-err-dot {
   width: 6px; height: 6px; border-radius: 50%;
-  background: #E24B4A; margin-left: 2px;
+  background: var(--color-danger); margin-left: 2px;
 }
 .history-body { margin-top: 6px; }
 .history-loading, .history-empty {
@@ -733,11 +734,11 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
   cursor: pointer; font-size: 11px;
 }
 .exec-row:hover { background: var(--color-bg-hover); }
-.exec-row.exec-fail { background: rgba(226,75,74,0.06); }
-.exec-row.exec-fail:hover { background: rgba(226,75,74,0.12); }
+.exec-row.exec-fail { background: var(--color-danger-bg); }
+.exec-row.exec-fail:hover { background: var(--color-danger-bg); }
 .exec-row.exec-expanded { border-color: var(--color-border); }
-.row-ok { color: #1D9E75; flex-shrink: 0; }
-.row-err { color: #E24B4A; flex-shrink: 0; }
+.row-ok { color: var(--color-success); flex-shrink: 0; }
+.row-err { color: var(--color-danger); flex-shrink: 0; }
 .row-plugin { color: var(--color-text-primary); font-weight: 500; max-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-cmd { color: var(--color-text-secondary); max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row-trigger {
@@ -755,7 +756,7 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
 .detail-block { margin-top: 6px; }
 .detail-block:first-child { margin-top: 0; }
 .detail-label { font-size: 10px; color: var(--color-text-muted); margin-bottom: 3px; }
-.detail-label.detail-err { color: #E24B4A; }
+.detail-label.detail-err { color: var(--color-danger); }
 .detail-pre {
   font-family: var(--font-mono, monospace); font-size: 10px;
   color: var(--color-text-secondary);
@@ -763,7 +764,7 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
   padding: 6px 8px; margin: 0; max-height: 140px; overflow-y: auto;
   white-space: pre-wrap; word-break: break-all;
 }
-.detail-pre-err { color: #E24B4A; }
+.detail-pre-err { color: var(--color-danger); }
 
 .view-toggle-btn {
   display: inline-flex; align-items: center; gap: 5px;
@@ -772,8 +773,8 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
   color: var(--color-text-secondary); font-size: 12px; cursor: pointer;
   transition: all .15s;
 }
-.view-toggle-btn:hover { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); }
-.view-toggle-btn.active { color: var(--color-accent, #4a9eff); border-color: var(--color-accent, #4a9eff); background: rgba(74, 158, 255, 0.08); }
+.view-toggle-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.view-toggle-btn.active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 
 /* ---- zip 安装遮罩动画 ---- */
 .install-overlay {
@@ -788,11 +789,11 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
   background: var(--color-bg-secondary, #1e1e1e);
   border: 1px solid var(--color-border, #2a2a2a);
   border-radius: var(--radius-md);
-  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 10px 32px var(--color-bg-overlay);
 }
-.install-overlay-spin { color: var(--color-accent, #4a9eff); animation: qd-spin 0.9s linear infinite; }
+.install-overlay-spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }
 .install-overlay-text { font-size: 13px; color: var(--color-text-secondary, #bdbdbd); }
-.spin { color: var(--color-accent, #4a9eff); animation: qd-spin 0.9s linear infinite; }
+.spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }
 @keyframes qd-spin { to { transform: rotate(360deg); } }
 
 </style>

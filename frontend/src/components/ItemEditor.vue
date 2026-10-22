@@ -1,10 +1,10 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, watch, computed, toRef, inject } from 'vue';
 import { useI18n } from 'vue-i18n';
 import { useWorkspaceStore } from '../stores/workspace'
 import { useFocusTrap } from '../utils/focusTrap'
 import { unwrap } from '../utils/api'
-import { logErr } from '../utils/logger'
 import { EnvList, EnvSetActive, EnvProjectVersions } from '../../bindings/quickdock/services/env/environmentservice'
 import type { CollectionItem, OpenTool, EnvRuntimeInfo, ToastAPI } from '../types';
 

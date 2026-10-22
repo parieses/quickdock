@@ -156,7 +156,7 @@ async function test(kind: WebhookKind) {
 .nf-trigger:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
 .modal-mask {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex;
+  position: fixed; inset: 0; background: var(--color-bg-overlay); display: flex;
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {

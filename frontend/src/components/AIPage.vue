@@ -648,7 +648,7 @@ onUnmounted(() => {
   width: 22px; height: 22px; border-radius: var(--radius-sm);
 }
 .ai-conv-item:hover .ai-conv-del { display: flex; }
-.ai-conv-del:hover { color: var(--color-danger); background: rgba(232,76,76,0.1); }
+.ai-conv-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .ai-conv-tokens {
   font-size: 10px; color: var(--color-text-disabled); white-space: nowrap;
   margin-right: 4px; font-variant-numeric: tabular-nums;
@@ -757,7 +757,7 @@ onUnmounted(() => {
 }
 .ai-copy:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .ai-msg.user .ai-copy { color: rgba(255,255,255,0.7); }
-.ai-msg.user .ai-copy:hover { color: #fff; background: rgba(255,255,255,0.18); }
+.ai-msg.user .ai-copy:hover { color: var(--color-accent-text); background: rgba(255,255,255,0.18); }
 /* 划词复制浮层（position/left/top 由 floating-ui 注入） */
 .ai-sel-copy {
   z-index: 50;
@@ -768,7 +768,7 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-size: 12px; cursor: pointer; font-family: inherit;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+  box-shadow: 0 4px 16px var(--color-bg-overlay);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .ai-sel-copy:hover { color: var(--color-accent); border-color: var(--color-accent); }
@@ -777,7 +777,7 @@ onUnmounted(() => {
 .ai-error {
   align-self: flex-start;
   padding: 10px 14px; border-radius: var(--radius-lg);
-  background: rgba(232,76,76,0.12); color: var(--color-danger);
+  background: var(--color-danger-bg); color: var(--color-danger);
   font-size: 13px; max-width: 80%;
 }
 .ai-need-key, .ai-empty {

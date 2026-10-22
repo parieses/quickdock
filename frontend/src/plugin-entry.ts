@@ -1,3 +1,4 @@
+import { logErr } from './utils/logger'
 import { createApp } from 'vue'
 import { i18n } from './i18n'
 import PluginPage from './components/PluginPage.vue'
@@ -46,7 +47,7 @@ function applyThemeName(theme: 'dark' | 'light' | 'system') {
   const isDark = theme === 'dark' || (theme === 'system' && prefersDark.matches)
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
   // 让原生窗口（标题栏）也跟着切；失败不影响 Web 侧主题
-  try { ApplyTheme(isDark) } catch (_) {}
+  try { ApplyTheme(isDark) } catch (e) { logErr('plugin-entry', e) }
 }
 
 // 启动即对齐：先按系统偏好落一版（避免默认浅色闪一下），再读持久化偏好纠正。

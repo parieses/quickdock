@@ -138,7 +138,7 @@ function onDragStart(e: DragEvent) {
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .tn-act:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
-.tn-act.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.12); }
+.tn-act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
 .tn-input { flex: 1; min-width: 0; padding: 2px 6px; border: 1px solid var(--color-accent); border-radius: var(--radius-xs); background: var(--color-bg-primary); color: var(--color-text-primary); font-size: 12px; outline: none; }
 .tn-children { margin-left: 12px; }

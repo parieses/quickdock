@@ -1,3 +1,4 @@
+import { logErr } from '../utils/logger'
 import { inject, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
@@ -74,7 +75,7 @@ export function usePluginHost(opts: PluginHostOptions) {
           text = (raw && raw[0]) || ''
           command = (raw && raw[1]) || ''
         }
-      } catch {}
+      } catch (e) { logErr('usePluginHost', e) }
     }
     iframePostMessage({ type: 'plugin:init', data: { text, command, theme, locale: locale.value } })
   }

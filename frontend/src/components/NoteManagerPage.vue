@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onBeforeUnmount, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { pendingOpenNoteId } from '../composables/bridge'
@@ -197,14 +198,30 @@ async function handleDrop(dragId: string, targetId: string) {
 const selectedDoc = computed<Note | null>(() => (selectedDocId.value ? nodes.value.find(n => n.id === selectedDocId.value) || null : null))
 const previewHtml = computed(() => (docContent.value ? DOMPurify.sanitize(marked.parse(docContent.value, { async: false }) as string) : ''))
 
+// 标签以逗号分隔输入，必须序列化成合法 JSON 数组。
+//
+// 早先版本手工拼 '["' + ... + '"]'：标签里一旦含引号或反斜杠就产出非法 JSON，
+// 后端照样落库，之后 parseTagsS 解析失败又静默返回 []——用户写的标签全丢，
+// 而且整个过程没有任何提示。交给 JSON.stringify 处理转义即可。
+function buildTagsJSON(text: string): string {
+  return JSON.stringify(text.split(',').map(x => x.trim()).filter(Boolean))
+}
+
 // 落盘当前文档（切文档/离开前调用）。先同步快照再 await，避免调用后被切换污染把内容存错文档。
+//
+// 自动保存此处刻意不弹 toast：它在 800ms 防抖里高频触发，失败就弹会持续打断
+// 用户写作。但也不该彻底无痕（原写法是空 catch），故记为 error 日志留证。
 async function flushPendingSave() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
   const id = selectedDocId.value
   if (!id) return
   const content = docContent.value
-  const tags = '["' + docTagsText.value.split(',').map(x => x.trim()).filter(Boolean).join('","') + '"]'
-  try { await UpdateNoteDoc(id, content, tags); await load() } catch { /* 自动保存静默 */ }
+  try {
+    await UpdateNoteDoc(id, content, buildTagsJSON(docTagsText.value))
+    await load()
+  } catch (e) {
+    logErr('NoteManager:flushPendingSave', e)
+  }
 }
 
 function onDoc(d: Note) {
@@ -230,8 +247,12 @@ function onDocInput() {
 }
 async function saveDoc() {
   if (!selectedDocId.value) return
-  const tags = '["' + docTagsText.value.split(',').map(x => x.trim()).filter(Boolean).join('","') + '"]'
-  try { await UpdateNoteDoc(selectedDocId.value, docContent.value, tags); await load() } catch { /* 自动保存静默 */ }
+  try {
+    await UpdateNoteDoc(selectedDocId.value, docContent.value, buildTagsJSON(docTagsText.value))
+    await load()
+  } catch (e) {
+    logErr('NoteManager:saveDoc', e)
+  }
 }
 async function copyDoc() {
   if (!docContent.value) return

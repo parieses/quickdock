@@ -631,7 +631,7 @@ watch(() => props.visible, async (v) => {
 .dsh-node-hint {
   margin-top: 10px;
   font-size: 12px;
-  color: #ffb020;
+  color: var(--color-warning);
   line-height: 1.5;
 }
 .dsh-goto-link {
@@ -660,11 +660,11 @@ watch(() => props.visible, async (v) => {
   border-radius: var(--radius-md);
   font-size: 11px;
   background: rgba(255, 176, 32, 0.16);
-  color: #ffb020;
+  color: var(--color-warning);
 }
 .dsh-update-badge.ok {
-  background: rgba(76, 175, 80, 0.16);
-  color: #4caf50;
+  background: var(--color-success-bg);
+  color: var(--color-success);
 }
 .dsh-dot {
   display: inline-block;
@@ -676,7 +676,7 @@ watch(() => props.visible, async (v) => {
   background: #8b919c;
 }
 .dsh-dot.on {
-  background: #4caf50;
+  background: var(--color-success);
   box-shadow: 0 0 6px rgba(76, 175, 80, 0.8);
 }
 .dsh-auto-start {
@@ -821,10 +821,10 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-disabled);
 }
 .dsh-log-line.error {
-  color: #ff6b6b;
+  color: var(--color-danger);
 }
 .dsh-log-line.error::before {
   content: '✗ ';
-  color: #ff6b6b;
+  color: var(--color-danger);
 }
 </style>

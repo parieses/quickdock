@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RotateCcw } from '@lucide/vue'
@@ -144,7 +145,7 @@ onMounted(async () => {
   try {
     const r = unwrap<number>(await GetWinmgrRatio())
     if (typeof r === 'number') ratio.value = r
-  } catch {}
+  } catch (e) { logErr('SettingsWinmgr', e) }
   for (const it of items) {
     try {
       const c = unwrap<HotkeyConfig>(await GetWinmgrHotkeyConfig(it.key, it.defMod, it.defVK))
@@ -152,7 +153,7 @@ onMounted(async () => {
         it.mods = c.modifiers
         it.vk = c.vk
       }
-    } catch {}
+    } catch (e) { logErr('SettingsWinmgr', e) }
   }
   try {
     const fc = unwrap<HotkeyConfig>(await GetWinmgrFloatHotkeyConfig())
@@ -160,7 +161,7 @@ onMounted(async () => {
       floatMods.value = fc.modifiers
       floatVk.value = fc.vk
     }
-  } catch {}
+  } catch (e) { logErr('SettingsWinmgr', e) }
 })
 
 onUnmounted(() => {
@@ -224,7 +225,7 @@ async function resetAll() {
     await SetWinmgrFloatHotkeyConfig(3, 0x57)
     await ResumeHotkeys()
     setMsg(t('restoreOk'), 2000)
-  } catch {}
+  } catch (e) { logErr('SettingsWinmgr', e) }
 }
 
 async function saveAll() {

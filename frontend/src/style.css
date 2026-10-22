@@ -63,6 +63,22 @@
   --color-success-bg: rgba(34, 197, 94, 0.12);
   --color-warning: #f59e0b;
   --color-warning-bg: rgba(245, 158, 11, 0.12);
+  --color-warning-border: rgba(245, 158, 11, 0.4);
+  /* 状态色的「描边」档：徽章/按钮边框此前在各组件里散写 rgba(...,0.4~0.45)，
+     深浅主题无法分别调整，故与 -bg 一样收进 token。 */
+  --color-danger-border: rgba(239, 68, 68, 0.4);
+  --color-success-border: rgba(34, 197, 94, 0.4);
+  --color-accent-border-strong: rgba(91, 140, 255, 0.45);
+  /* 日志级别色：I/W/E 三档此前在 LogViewer 里散写，W 档可直接复用 warning */
+  --color-log-info: #3b9eff;
+  --color-log-error: #ff5c5c;
+  /* 搜索命中高亮：黄底深字，深浅主题下都需保证对比度 */
+  --color-mark-bg: #ffd54a;
+  --color-mark-text: #1a1a1a;
+  --color-search-hit-bg: rgba(240, 163, 94, 0.32);
+  --color-search-hit-bg-active: rgba(240, 163, 94, 0.75);
+  /* 语法高亮：配置编辑器的标点色 */
+  --color-syntax-punctuation: #c792ea;
   --color-scrollbar-thumb: #363c47;
   --color-scrollbar-hover: #444b58;
   --color-scrollbar-track: transparent;
@@ -138,6 +154,19 @@
   --color-success-bg: rgba(34, 197, 94, 0.12);
   --color-warning: #f59e0b;
   --color-warning-bg: rgba(245, 158, 11, 0.14);
+  /* 浅色底上描边要更实一点才看得清，故比深色档略高 */
+  --color-warning-border: rgba(217, 119, 6, 0.45);
+  --color-danger-border: rgba(239, 68, 68, 0.45);
+  --color-success-border: rgba(34, 197, 94, 0.45);
+  --color-accent-border-strong: rgba(91, 140, 255, 0.5);
+  /* 浅色底上要压深一档才够对比度 */
+  --color-log-info: #1d6fd8;
+  --color-log-error: #d92d20;
+  --color-mark-bg: #ffd54a;
+  --color-mark-text: #1a1a1a;
+  --color-search-hit-bg: rgba(240, 163, 94, 0.35);
+  --color-search-hit-bg-active: rgba(240, 163, 94, 0.7);
+  --color-syntax-punctuation: #8250df;
   --color-scrollbar-thumb: #cbd0d6;
   --color-scrollbar-hover: #aab0b8;
   --color-scrollbar-track: transparent;

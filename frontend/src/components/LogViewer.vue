@@ -229,9 +229,9 @@ onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
 .log-levels { display: flex; gap: 4px; }
 .lv { width: 24px; height: 24px; border-radius: var(--radius-sm); border: 1px solid var(--color-border); cursor: pointer; font-size: 12px; font-weight: 700; background: var(--color-bg-secondary); color: var(--color-text-primary); }
 .lv.off { opacity: 0.3; }
-.lv.I { color: #3b9eff; }
-.lv.W { color: #e0a92b; }
-.lv.E { color: #ff5c5c; }
+.lv.I { color: var(--color-log-info); }
+.lv.W { color: var(--color-warning); }
+.lv.E { color: var(--color-log-error); }
 .log-search { display: flex; align-items: center; gap: 5px; flex: 1; max-width: 280px; padding: 4px 8px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-disabled); }
 .log-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: 13px; }
 .log-follow { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--color-text-primary); cursor: pointer; }
@@ -249,7 +249,7 @@ onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
 }
 .log-line-row:hover .line-copy { opacity: 1; }
 .line-copy:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
-.log-line.lv-W { color: #e0a92b; }
-.log-line.lv-E { color: #ff7b7b; }
-.log-line :deep(mark) { background: #ffd54a; color: #1a1a1a; border-radius: var(--radius-xs); padding: 0 1px; }
+.log-line.lv-W { color: var(--color-warning); }
+.log-line.lv-E { color: var(--color-log-error); }
+.log-line :deep(mark) { background: var(--color-mark-bg); color: var(--color-mark-text); border-radius: var(--radius-xs); padding: 0 1px; }
 </style>

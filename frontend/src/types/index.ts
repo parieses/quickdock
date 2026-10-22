@@ -359,3 +359,18 @@ export interface EnvRuntimeInfo {
   activeSource: string
   hasService: boolean // 是否支持服务启停/状态监听
 }
+
+// 更新状态（对应后端 services/update 的 UpdateStatus）。
+//
+// 为什么不从 bindings 导入：R11 要求对外接口统一返回 ApiResult 之后，该结构体
+// 不再出现在任何绑定方法签名中，wails3 也就不再为它生成 model。它改由
+// ApiResult.data 承载，故在此按后端字段手写一份——后端增删字段时需同步。
+export interface UpdateStatus {
+  currentVersion: string
+  // idle / checking / available / up-to-date / downloading / ready / error
+  state: string
+  availableVersion?: string
+  releaseNotes?: string
+  downloadProgress?: number
+  error?: string
+}

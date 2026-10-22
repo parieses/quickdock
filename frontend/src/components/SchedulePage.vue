@@ -473,15 +473,15 @@ onMounted(refresh)
 .sched-sub { font-size: 12px; color: var(--color-text-disabled); }
 .add-btn {
   display: inline-flex; align-items: center; gap: 5px; padding: 7px 14px;
-  background: var(--color-accent); color: #fff; border: none; border-radius: var(--radius-md);
+  background: var(--color-accent); color: var(--color-accent-text); border: none; border-radius: var(--radius-md);
   font-size: 13px; cursor: pointer; font-family: inherit; transition: background var(--transition-fast);
 }
 .add-btn:hover { background: var(--color-accent-hover); }
 
 .sched-error {
   margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px;
-  color: var(--color-danger); background: rgba(232, 76, 76, 0.1);
-  border: 1px solid rgba(232, 76, 76, 0.3); border-radius: var(--radius-md); flex-shrink: 0;
+  color: var(--color-danger); background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
 .sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
@@ -499,11 +499,11 @@ onMounted(refresh)
 
 .item-icon {
   flex-shrink: 0; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
-  border-radius: var(--radius-md); color: #fff; background: var(--color-accent);
+  border-radius: var(--radius-md); color: var(--color-accent-text); background: var(--color-accent);
 }
-.item-icon.a-app { background: #4a9eff; }
-.item-icon.a-dir { background: #f5a623; }
-.item-icon.a-url { background: #46b17b; }
+.item-icon.a-app { background: var(--color-accent); }
+.item-icon.a-dir { background: var(--color-warning); }
+.item-icon.a-url { background: var(--color-success); }
 .item-icon.a-command { background: #9b6dff; }
 .item-icon.a-http { background: #e0556b; }
 
@@ -532,11 +532,11 @@ onMounted(refresh)
 }
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
 .act:disabled { opacity: 0.4; cursor: default; }
-.act.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+.act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
 /* 弹窗 */
 .modal-mask {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex;
+  position: fixed; inset: 0; background: var(--color-bg-overlay); display: flex;
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {

@@ -1,3 +1,4 @@
+import { logErr } from '../utils/logger'
 import { ref } from 'vue'
 import { pinyinParts } from '../utils/pinyin'
 import type { PluginInfo, PluginCommand } from '../types'
@@ -125,7 +126,7 @@ function calcPluginScore(
           if (idx.cmd.acceptsInput) inlineInput = q
         }
       }
-    } catch {}
+    } catch (e) { logErr('usePluginIndex', e) }
   }
   // 标题命中辅助：原始标题与 title_i18n 各语言任一命中即可（支持多语言搜索）
   const titleHits = (fn: (s: string) => boolean) => idx.titleLc.some(fn)

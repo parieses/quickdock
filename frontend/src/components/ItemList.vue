@@ -215,8 +215,8 @@ function onDropItem(e: DragEvent, targetId: string) {
 }
 .item-quicklink-badge {
   display: flex; align-items: center; gap: 3px;
-  font-size: 10px; color: var(--color-accent, #4a9eff);
-  background: var(--color-accent-bg, rgba(74,158,255,0.1));
+  font-size: 10px; color: var(--color-accent);
+  background: var(--color-accent-bg);
   padding: 2px 6px; border-radius: var(--radius-xs); flex-shrink: 0;
 }
 .item-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
@@ -227,7 +227,7 @@ function onDropItem(e: DragEvent, targetId: string) {
   display: flex; align-items: center; justify-content: center;
 }
 .action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.action-btn.danger:hover { color: var(--color-danger); background: rgba(255,77,79,0.1); }
+.action-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
 .item-body li.dragging { opacity: 0.4; }
 .item-body li[draggable="true"] { cursor: grab; }

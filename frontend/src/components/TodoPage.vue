@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
@@ -67,14 +68,14 @@ function startFocus(todo: Todo) {
   focusTodoId.value = todo.id
   focusRemaining.value = Math.max(1, Math.floor(focusMinutes.value)) * 60
   focusRunning.value = true
-  try { NotifyFocusStart(focusTitle(todo.id), focusMinutes.value) } catch {}
+  try { NotifyFocusStart(focusTitle(todo.id), focusMinutes.value) } catch (e) { logErr('TodoPage', e) }
   focusTimer = window.setInterval(() => {
     if (!focusRunning.value) return
     focusRemaining.value--
     if (focusRemaining.value <= 0) {
       focusRemaining.value = 0
       const title = focusTitle(focusTodoId.value) || t('focusTimerTitle')
-      try { NotifyFocusComplete(title, focusMinutes.value) } catch {}
+      try { NotifyFocusComplete(title, focusMinutes.value) } catch (e) { logErr('TodoPage', e) }
       stopFocusTimer()
       focusTodoId.value = ''
     }
@@ -84,7 +85,7 @@ function stopFocusTimer() {
   if (focusTimer !== null) { clearInterval(focusTimer); focusTimer = null }
 }
 function endFocus() {
-  if (focusTodoId.value) { try { NotifyFocusComplete(focusTitle(focusTodoId.value), Math.round((focusMinutes.value * 60 - focusRemaining.value) / 60) || 1) } catch {} }
+  if (focusTodoId.value) { try { NotifyFocusComplete(focusTitle(focusTodoId.value), Math.round((focusMinutes.value * 60 - focusRemaining.value) / 60) || 1) } catch (e) { logErr('TodoPage', e) } }
   stopFocusTimer()
   focusTodoId.value = ''
   focusRunning.value = false
@@ -928,8 +929,8 @@ onMounted(() => {
 
 .todo-error {
   margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px;
-  color: var(--color-danger); background: rgba(232, 76, 76, 0.1);
-  border: 1px solid rgba(232, 76, 76, 0.3); border-radius: var(--radius-md); flex-shrink: 0;
+  color: var(--color-danger); background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
 .todo-body { display: flex; gap: var(--space-6); flex: 1; min-height: 0; }
@@ -962,8 +963,8 @@ onMounted(() => {
 }
 .cal-cell.out-month .cal-day { color: var(--color-text-disabled); }
 .cal-cell.is-today .cal-day { color: var(--color-accent); border: 1px solid var(--color-accent); }
-.cal-cell.is-selected .cal-day { background: var(--color-accent); color: #fff; box-shadow: none; }
-.cal-cell.is-selected.is-today .cal-day { background: var(--color-accent); color: #fff; }
+.cal-cell.is-selected .cal-day { background: var(--color-accent); color: var(--color-accent-text); box-shadow: none; }
+.cal-cell.is-selected.is-today .cal-day { background: var(--color-accent); color: var(--color-accent-text); }
 .cal-marks { display: flex; align-items: center; gap: 3px; height: 7px; flex-wrap: wrap; justify-content: center; }
 .dot { width: 4px; height: 4px; border-radius: 50%; display: inline-block; }
 .dot.done { opacity: 0.3; }
@@ -996,7 +997,7 @@ onMounted(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .vt-btn + .vt-btn { border-left: 1px solid var(--color-border); }
-.vt-btn.active { background: var(--color-accent); color: #fff; }
+.vt-btn.active { background: var(--color-accent); color: var(--color-accent-text); }
 
 /* 状态徽章（4.3）*/
 .status-pill {
@@ -1004,7 +1005,7 @@ onMounted(() => {
   border: 1px solid transparent; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .status-pill.st-todo { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
-.status-pill.st-doing { background: rgba(245, 166, 35, 0.15); color: #f5a623; border-color: rgba(245, 166, 35, 0.35); }
+.status-pill.st-doing { background: var(--color-warning-bg); color: var(--color-warning); border-color: var(--color-warning-border); }
 .status-pill.st-done { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
 
 /* 子任务（4.1）*/
@@ -1033,7 +1034,7 @@ onMounted(() => {
 .kanban-col-head { display: flex; align-items: center; gap: 6px; margin-bottom: var(--space-2); flex-shrink: 0; }
 .kanban-dot { width: 8px; height: 8px; border-radius: 50%; }
 .kanban-dot.st-todo { background: var(--color-text-disabled); }
-.kanban-dot.st-doing { background: #f5a623; }
+.kanban-dot.st-doing { background: var(--color-warning); }
 .kanban-dot.st-done { background: var(--color-accent); }
 .kanban-col-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
 .kanban-count { margin-left: auto; font-size: 11px; color: var(--color-text-disabled); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 7px; }
@@ -1058,7 +1059,7 @@ onMounted(() => {
 .tag-fbtn.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
 .add-fab {
   width: 30px; height: 30px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-  background: var(--color-accent); color: #fff; border: none; border-radius: var(--radius-md);
+  background: var(--color-accent); color: var(--color-accent-text); border: none; border-radius: var(--radius-md);
   cursor: pointer; transition: background var(--transition-fast);
 }
 .add-fab:hover { background: var(--color-accent-hover); }
@@ -1075,11 +1076,11 @@ onMounted(() => {
 }
 .todo-item:hover { background: var(--color-bg-hover); }
 .todo-item.done .todo-name { text-decoration: line-through; color: var(--color-text-disabled); }
-.todo-item.overdue { border: 1px solid rgba(232, 76, 76, 0.4); }
+.todo-item.overdue { border: 1px solid var(--color-danger-border); }
 .check {
   flex-shrink: 0; width: 18px; height: 18px; border: 1.5px solid var(--color-border);
   background: transparent; border-radius: var(--radius-sm); cursor: pointer; display: flex;
-  align-items: center; justify-content: center; color: #fff; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  align-items: center; justify-content: center; color: var(--color-accent-text); transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .check:hover { border-color: var(--color-accent); }
 .check.checked { background: var(--color-accent); border-color: var(--color-accent); }
@@ -1106,7 +1107,7 @@ onMounted(() => {
   border-radius: var(--radius-sm); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .act:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.act.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+.act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .focus-act { font-size: 11px; font-weight: 600; color: var(--color-accent); min-width: 34px; }
 .focus-act.running { background: var(--color-accent-bg); color: var(--color-accent); }
 
@@ -1116,7 +1117,7 @@ onMounted(() => {
   color: var(--color-text-disabled); border-radius: var(--radius-md); font-size: 12px;
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
-.clear-btn:hover { color: var(--color-danger); border-color: rgba(232, 76, 76, 0.3); }
+.clear-btn:hover { color: var(--color-danger); border-color: var(--color-danger-border); }
 .test-btn {
   display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
   padding: 6px 12px; border: 1px solid var(--color-border); background: transparent;
@@ -1130,12 +1131,12 @@ onMounted(() => {
 /* 优先级配色 */
 .p-none { background: var(--color-text-disabled); }
 .p-low { background: var(--color-accent); }
-.p-medium { background: #f5a623; }
+.p-medium { background: var(--color-warning); }
 .p-high { background: var(--color-danger); }
 
 /* 弹窗 */
 .modal-mask {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5); display: flex;
+  position: fixed; inset: 0; background: var(--color-bg-overlay); display: flex;
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {

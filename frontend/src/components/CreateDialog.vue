@@ -178,7 +178,7 @@ function onKeydown(e: KeyboardEvent) {
   outline: none; transition: border-color 0.15s;
   font-family: inherit;
 }
-.field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px rgba(74,158,255,0.12); }
+.field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-bg); }
 .field-input::placeholder { color: var(--color-text-disabled); }
 .field-textarea { resize: vertical; min-height: 220px; font-family: var(--font-mono, monospace); line-height: 1.5; }
 .field-error {

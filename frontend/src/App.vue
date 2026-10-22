@@ -13,6 +13,7 @@ import {
 import { OpenSshWindow } from '../bindings/quickdock/services/sshx/sshservice'
 import { i18n } from './i18n';
 import { unwrap } from './utils/api';
+import { logErr } from './utils/logger';
 import { getErrorMessage } from './utils/error';
 import { navigateTo, aiDraft, pendingOpenNoteId } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
@@ -189,15 +190,15 @@ function applyTheme(theme: Theme) {
   const isDark = theme === 'dark' || (theme === 'system' && prefersDark.matches)
   document.documentElement.setAttribute('data-theme', isDark ? 'dark' : 'light')
   // 同步到原生窗口：主窗口（系统原生标题栏）跟随 App 主题，插件窗口底色跟随主题
-  try { ApplyTheme(isDark) } catch (_) {}
+  try { ApplyTheme(isDark) } catch (e) { logErr('App', e) }
 }
 
 async function setTheme(theme: Theme) {
   currentTheme.value = theme
   applyTheme(theme)
-  try { await SetValue('theme', theme) } catch (_) {}
+  try { await SetValue('theme', theme) } catch (e) { logErr('App', e) }
   // 广播到所有 WebView 窗口（主窗口 + 各浮窗），让它们各自的 document 同步切换主题
-  try { Events.Emit('quickdock:theme-changed', theme) } catch (_) {}
+  try { Events.Emit('quickdock:theme-changed', theme) } catch (e) { logErr('App', e) }
 }
 
 // 监听系统主题变化
@@ -213,7 +214,7 @@ onMounted(async () => {
     if (saved === 'dark' || saved === 'light' || saved === 'system') {
       currentTheme.value = saved as Theme
     }
-  } catch (_) {}
+  } catch (e) { logErr('App', e) }
   applyTheme(currentTheme.value)
   // 读取已保存的语言设置
   try {
@@ -221,7 +222,7 @@ onMounted(async () => {
     if (saved === 'en-US' || saved === 'zh-CN') {
       i18n.global.locale.value = saved
     }
-  } catch (_) {}
+  } catch (e) { logErr('App', e) }
   // 跨 WebView 广播：主窗口切主题时，所有浮窗同步（每个窗口独立应用）
   Events.On('quickdock:theme-changed', (payload: any) => {
     const t = (typeof payload === 'string' ? payload : payload?.data) as Theme
@@ -283,7 +284,7 @@ function onUpdateStatus(payload: any) {
     // 当天选过「稍后」则今日不再弹；选过「跳过此版本」则永久不再弹
     if (localStorage.getItem('qd_update_later_' + v) === today) return
     if (localStorage.getItem('qd_update_skip_' + v) === '1') return
-  } catch (_) {}
+  } catch (e) { logErr('App', e) }
   updatePromptData.value = {
     version: v,
     currentVersion: st.currentVersion || '',
@@ -309,7 +310,7 @@ function laterUpdate() {
   const v = updatePromptData.value?.version
   if (v) {
     updatePromptHandled.add(v)
-    try { localStorage.setItem('qd_update_later_' + v, new Date().toISOString().slice(0, 10)) } catch (_) {}
+    try { localStorage.setItem('qd_update_later_' + v, new Date().toISOString().slice(0, 10)) } catch (e) { logErr('App', e) }
   }
   closeUpdatePrompt()
 }
@@ -320,8 +321,11 @@ async function skipUpdate() {
     updatePromptHandled.add(v)
     try {
       localStorage.setItem('qd_update_skip_' + v, '1')
-      await SkipUpdate(v)
-    } catch (_) {}
+      unwrap(await SkipUpdate(v))
+    } catch (e) {
+      // 跳过失败也要留痕：否则用户点了「跳过」却反复被同一版本打扰，无从排查
+      logErr('App:skipUpdate', e)
+    }
   }
   closeUpdatePrompt()
 }
@@ -512,9 +516,9 @@ body {
   margin: 8px 12px 0;
   padding: 6px 10px;
   border-radius: var(--radius-sm);
-  background: rgba(244, 67, 54, 0.12);
-  border: 1px solid rgba(244, 67, 54, 0.4);
-  color: #ef5350;
+  background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border);
+  color: var(--color-danger);
   font-size: 12px;
 }
 .ws-error-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

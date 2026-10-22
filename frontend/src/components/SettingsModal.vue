@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText } from '@lucide/vue'
@@ -30,12 +31,11 @@ import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir } from
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
-import type { UpdateStatus } from '../../bindings/quickdock/services/update/models'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
-import type { ToastAPI } from '../types'
+// UpdateStatus 改从 ../types 取：接口统一返回 ApiResult 后 bindings 不再生成它的 model
+import type { ToastAPI, UpdateStatus } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
-import { logErr } from '../utils/logger'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{
@@ -108,11 +108,14 @@ let offDlProgress: (() => void) | null = null
 
 onMounted(async () => {
   try {
-    const ver = await GetAppVersion()
-    appVersion.value = ver
-    const state = await GetUpdateState()
+    // 后端已按 R11 统一返回 ApiResult，必须 unwrap 才能拿到业务数据。
+    appVersion.value = unwrap<string>(await GetAppVersion()) ?? ''
+    const state = unwrap<UpdateStatus>(await GetUpdateState())
     if (state) updateStatus.value = state
-  } catch {}
+  } catch (e) {
+    // 取不到版本/状态不影响设置页其它功能，但不该静默——否则用户以为更新功能坏了
+    logErr('SettingsModal:loadUpdateState', e)
+  }
   // 订阅后台自动检查结果：与手动"检测更新"复用同一套渲染，保证流程一致。
   offUpdateStatus = Events.On('quickdock:update:status', (payload: any) => {
     applyUpdateStatus((payload?.data ?? payload) as UpdateStatus)
@@ -151,7 +154,7 @@ async function checkForUpdates() {
   updateChecking.value = true
   updateResult.value = ''
   try {
-    const result = await CheckForUpdates()
+    const result = unwrap<UpdateStatus>(await CheckForUpdates())
     applyUpdateStatus(result)
   } catch (e: any) {
     updateResult.value = getErrorMessage(e)
@@ -171,9 +174,11 @@ async function downloadUpdate() {
   updateProgress.value = 0
   updateResult.value = t('updateDownloading')
   try {
-    const result = await DownloadUpdate()
-    if (!result) { updateResult.value = t('updateError'); return }
+    const result = unwrap<UpdateStatus>(await DownloadUpdate())
+    // 先复位下载态：原先 !result 的早退写在这行之前，一旦走到早退，
+    // updateDlActive 就一直停在 true，进度条卡在界面上下不来。
     updateDlActive.value = false
+    if (!result) { updateResult.value = t('updateError'); return }
     updateStatus.value = result
     if (result.state === 'ready') {
       updateResult.value = t('updateReady')
@@ -208,10 +213,10 @@ function onUpdateAdminConfirm() {
 async function doRestart() {
   updateResult.value = t('updateRestarting')
   try {
-    await RestartApp()
+    unwrap(await RestartApp())
     // 成功时进程会在助手接管后异步退出，这里不会再有后续 UI 更新
   } catch (e: any) {
-    // 以前这里是 catch {}，任何失败都被静默吞掉，用户只能看到"点了没反应"
+    // 以前这里是 catch (e) { logErr('SettingsModal', e) }，任何失败都被静默吞掉，用户只能看到"点了没反应"
     updateResult.value = getErrorMessage(e)
   }
 }
@@ -307,7 +312,7 @@ async function setLocale(newLocale: string) {
   i18n.global.locale.value = newLocale as 'zh-CN' | 'en-US'
   try {
     await SetValue('locale', newLocale)
-  } catch (_) {}
+  } catch (e) { logErr('SettingsModal', e) }
 }
 
 // 打开设置页时如有初始页面则导航，不再全局挂起热键
@@ -338,20 +343,20 @@ onMounted(async () => {
   try {
     const saved = unwrap<string>(await GetValue('locale'))
     if (saved) currentLocale.value = saved
-  } catch (_) {}
+  } catch (e) { logErr('SettingsModal', e) }
   try {
     const saved = unwrap<string>(await GetValue('theme'))
     if (saved === 'dark' || saved === 'light' || saved === 'system') {
       currentTheme.value = saved
     }
-  } catch (_) {}
+  } catch (e) { logErr('SettingsModal', e) }
   try {
     const days = unwrap<number>(await GetClipboardRetentionDays())
     clipboardRetentionDays.value = days ?? 30
-  } catch (_) {}
+  } catch (e) { logErr('SettingsModal', e) }
   try {
     autoStart.value = unwrap<boolean>(await GetAutoStart()) ?? false
-  } catch (_) {}
+  } catch (e) { logErr('SettingsModal', e) }
 })
 
 // ---- 剪贴板设置 ----

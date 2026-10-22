@@ -229,7 +229,7 @@ function onDropCol(e: DragEvent, targetId: string) {
   display: flex; align-items: center; justify-content: center;
 }
 .action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.action-btn.danger:hover { color: var(--color-danger); background: rgba(255,77,79,0.1); }
+.action-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
 .collection-body li.dragging { opacity: 0.4; }
 .collection-body li[draggable="true"] { cursor: grab; }

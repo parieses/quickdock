@@ -314,13 +314,17 @@ async function removeHost(h: SshHost) {
       }
     }
     if (affected.length) {
-      tabs.value = tabs.value.filter(tab => !doomed.has(tab.id))
+      // doomed 装的是 hostId，而 tab.id 是 `${hostId}::${seq}`（见 utils/sshTabs
+      // 的 makeTabId），两者不同命名空间——用 doomed.has(tab.id) 永远匹配不上，
+      // 标签一个都关不掉。上面 affected 的判定用的是 tab.hostId，这里必须一致。
+      tabs.value = tabs.value.filter(tab => !doomed.has(tab.hostId))
       if (!tabs.value.some(tab => tab.id === activeId.value)) {
         activeId.value = tabs.value.length ? tabs.value[tabs.value.length - 1].id : ''
       }
       // 顺带收掉这些标签的文件面板，否则 Set 里会留下永不清理的项。
+      // sftpTabs 存的是 tabId 而非 hostId，故这里要遍历 affected 取 tab.id。
       const next = new Set(sftpTabs.value)
-      for (const id of doomed) next.delete(id)
+      for (const tab of affected) next.delete(tab.id)
       sftpTabs.value = next
     }
     await load()

@@ -1,3 +1,4 @@
+import { logErr } from '../utils/logger'
 // QuickDock - 工作区 Pinia Store
 // 管理场景、集合、项、打开工具、搜索的全局状态
 
@@ -15,7 +16,6 @@ import { unwrap } from '../utils/api'
 import { toSnakeCase, toCamelCase } from '../utils/caseConversion'
 import { debounce } from '../utils/debounce'
 import { matchesTextOrPinyin } from '../utils/pinyin'
-import { logErr } from '../utils/logger'
 
 // 资源类型 → 推荐打开工具类型（数组：第一项用于默认工具，全部用于下拉候选）
 // 目录额外把「编辑器」纳入候选，以便用 VSCode / Trae / Cursor 等打开目录
@@ -173,7 +173,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
           await selectScene(lastScene)
         }
       }
-    } catch (_) {}
+    } catch (e) { logErr('workspace', e) }
   }
 
   async function fetchTools() {
@@ -212,7 +212,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     searchQuery.value = ''
     const gen = workspaceGen
     await fetchScenes(id, gen)
-    try { unwrap(await SetValue('lastWorkspaceId', id)) } catch (_) {}
+    try { unwrap(await SetValue('lastWorkspaceId', id)) } catch (e) { logErr('workspace', e) }
   }
 
   async function fetchScenes(workspaceId: string, gen?: number) {
@@ -239,7 +239,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     const gen = sceneGen
     await fetchCollections(id, gen)
-    try { unwrap(await SetValue('lastSceneId', id)) } catch (_) {}
+    try { unwrap(await SetValue('lastSceneId', id)) } catch (e) { logErr('workspace', e) }
   }
 
   async function closeSceneTab(id: string) {

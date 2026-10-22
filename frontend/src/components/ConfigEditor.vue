@@ -497,20 +497,20 @@ onMounted(() => {
   caret-color: var(--color-text-primary);
   overflow: auto;
 }
-.ce-ta::selection { background: rgba(56, 139, 253, 0.35); }
+.ce-ta::selection { background: var(--color-accent-border-strong); }
 
 /* 语法配色 */
 .ce-hl :deep(.c-cm) { color: var(--color-text-disabled); font-style: italic; }
-.ce-hl :deep(.c-di) { color: #4aa3ff; font-weight: 500; }
-.ce-hl :deep(.c-st) { color: #5ecb8a; }
-.ce-hl :deep(.c-nu) { color: #f0a35e; }
-.ce-hl :deep(.c-pu) { color: #c792ea; }
+.ce-hl :deep(.c-di) { color: var(--color-accent); font-weight: 500; }
+.ce-hl :deep(.c-st) { color: var(--color-success); }
+.ce-hl :deep(.c-nu) { color: var(--color-warning); }
+.ce-hl :deep(.c-pu) { color: var(--color-syntax-punctuation); }
 .ce-hl :deep(.c-pl) { color: var(--color-text-primary); }
 
 /* 搜索命中 */
 .ce-hl :deep(mark) { color: inherit; background: transparent; border-radius: var(--radius-xs); }
-.ce-hl :deep(mark.m-hit) { background: rgba(240, 163, 94, 0.32); }
-.ce-hl :deep(mark.m-cur) { background: rgba(240, 163, 94, 0.75); box-shadow: 0 0 0 1px #f0a35e; }
+.ce-hl :deep(mark.m-hit) { background: var(--color-search-hit-bg); }
+.ce-hl :deep(mark.m-cur) { background: var(--color-search-hit-bg-active); box-shadow: 0 0 0 1px var(--color-warning); }
 
 /* ---- 状态栏 ---- */
 .ce-status {
@@ -523,7 +523,7 @@ onMounted(() => {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 .ce-st-sep { color: var(--color-text-disabled); }
-.ce-dirty { color: #f0a35e; }
+.ce-dirty { color: var(--color-warning); }
 .ce-spacer { flex: 1 1 auto; }
 .ce-keys { color: var(--color-text-disabled); }
 </style>

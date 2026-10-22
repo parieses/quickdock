@@ -142,7 +142,7 @@ function openSettings() {
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-accent);
-  color: #fff;
+  color: var(--color-accent-text);
   font-size: 15px;
   font-weight: 600;
   font-family: inherit;
@@ -153,7 +153,7 @@ function openSettings() {
 .ob-start-btn:hover {
   background: var(--color-accent-hover);
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(74, 158, 255, 0.3);
+  box-shadow: 0 4px 12px var(--color-accent-border-strong);
 }
 .ob-start-btn:active {
   transform: translateY(0);

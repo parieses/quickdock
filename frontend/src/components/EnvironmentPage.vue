@@ -65,6 +65,20 @@ import {
   EnvGoEnvKeys,
   EnvGoEnvGet,
   EnvGoEnvSet,
+  EnvSourceCheck,
+  EnvDiskUsage,
+  EnvMirrorState,
+  EnvMirrorToggle,
+  EnvGitHubAccelState,
+  EnvGitHubAccelSet,
+  EnvManifestExport,
+  EnvManifestImport,
+  EnvUserEnv,
+  EnvUserEnvSetVar,
+  EnvUserEnvDeleteVar,
+  EnvUserEnvSetPath,
+  EnvRuntimeTasks,
+  EnvRunTask,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import {
@@ -836,7 +850,7 @@ async function saveAlias() {
   }
 }
 
-// 设置/取消环境变量：未设置的版本注册其 bin 目录到系统 PATH；已设置的注销其 bin 目录。
+// 设置/取消环境变量：未设置的版本把 bin 目录写入用户 PATH；已设置的注销其 bin 目录。
 // 取消走 EnvUnsetActive（直接按版本注销，不依赖 active 元数据），避免元数据漂移导致 PATH 残留旧版本。
 async function toggleEnvVar(r: RuntimeInfo, ins: Install) {
   try {
@@ -856,10 +870,108 @@ const openMenu = ref<string | null>(null)
 function toggleMenu(v: string) {
   const willOpen = openMenu.value !== v
   openMenu.value = willOpen ? v : null
+  if (!willOpen) return
+  const cur = selected.value
+  if (!cur) return
   // 展开 RabbitMQ 操作菜单时，拉取管理后台启用状态以决定显示「启用/关闭」
-  if (willOpen && selected.value?.id === 'rabbitmq') {
-    const ins = selected.value.installed.find(i => i.version === v)
+  if (cur.id === 'rabbitmq') {
+    const ins = cur.installed.find(i => i.version === v)
     if (ins) fetchMgmt(ins.version)
+  }
+  // 镜像项文案取决于当前是否已在用国内源，展开菜单时补一次状态
+  if (MIRROR_RUNTIMES.has(cur.id)) fetchRuntimeMirror(cur.id)
+  // 特色操作清单（后端静态声明）同样在展开时补拉，未安装版本也能看到有哪些能力
+  fetchRuntimeTasks(cur.id)
+}
+
+// ---- 特色操作：各语言/软件生态自己的高频动作 ----
+//
+// 任务清单由后端声明（只有 id / kind / confirm），文案在 i18n（键名 = task_ + id，点换下划线）。
+// 统一用一个文本输出弹窗承载结果：
+//   info   —— 只读查询，点开即跑；
+//   action —— 可逆写操作，点开即跑；
+//   danger —— 清理/删除，先停在确认页，用户再点「运行」才下发，
+//             避免手滑一下就把模块缓存、pip 缓存删了。
+interface RuntimeTask {
+  id: string
+  kind: 'info' | 'action' | 'danger'
+  confirm: boolean
+}
+
+const runtimeTasks = reactive<Record<string, RuntimeTask[]>>({})
+
+async function fetchRuntimeTasks(rt: string) {
+  if (runtimeTasks[rt]) return
+  try {
+    runtimeTasks[rt] = unwrap<RuntimeTask[]>(await EnvRuntimeTasks(rt)) || []
+  } catch {
+    runtimeTasks[rt] = []
+  }
+}
+
+function taskKey(id: string): string {
+  return id.replace(/\./g, '_')
+}
+
+// 切换运行时即预取任务清单：菜单展开的那一刻条目就已经在，不必等第二次打开才出现。
+watch(selectedId, (id) => {
+  if (id) fetchRuntimeTasks(id)
+}, { immediate: true })
+
+const taskModal = reactive({
+  open: false,
+  runtime: '',
+  version: '',
+  taskId: '',
+  kind: 'info' as 'info' | 'action' | 'danger',
+  needsConfirm: false,
+  busy: false,
+  output: '',
+  error: '',
+  durationMs: 0,
+  truncated: false,
+})
+
+function openTask(r: RuntimeInfo, ins: Install, tk: RuntimeTask) {
+  taskModal.open = true
+  taskModal.runtime = r.id
+  taskModal.version = ins.version
+  taskModal.taskId = tk.id
+  taskModal.kind = tk.kind
+  taskModal.output = ''
+  taskModal.error = ''
+  taskModal.durationMs = 0
+  taskModal.truncated = false
+  taskModal.needsConfirm = !!tk.confirm
+  taskModal.busy = false
+  if (!tk.confirm) runTask()
+}
+
+async function runTask() {
+  if (taskModal.busy || !taskModal.taskId) return
+  taskModal.needsConfirm = false
+  taskModal.busy = true
+  taskModal.error = ''
+  taskModal.output = ''
+  try {
+    const res = unwrap<any>(await EnvRunTask(taskModal.runtime, taskModal.version, taskModal.taskId))
+    taskModal.output = res?.output || ''
+    taskModal.error = res?.error || ''
+    taskModal.durationMs = res?.durationMs || 0
+    taskModal.truncated = !!res?.truncated
+  } catch (e: any) {
+    taskModal.error = getErrorMessage(e)
+  } finally {
+    taskModal.busy = false
+  }
+}
+
+async function copyTaskOutput() {
+  try {
+    await navigator.clipboard.writeText(taskModal.output)
+    toast.success(t('copied'))
+  } catch {
+    toast.error(t('copyFailed'))
   }
 }
 
@@ -968,29 +1080,32 @@ async function savePHPConfig() {
 }
 
 // ---- Go 环境变量配置弹窗（go env -w / -u）----
+// 作用域（scope）：
+//   version → 该版本专属 go.env（runtime/go/<ver>/gopath/env），QuickDock 运行该版本时读的就是它
+//   global  → 系统全局即用户级 go.env（%APPDATA%\go\env），对没做版本隔离的 go 生效
+// 两个作用域互不覆盖，后端用 version 参数区分（空串 = 全局），因此不需要新接口。
+type GoEnvScope = 'version' | 'global'
 interface GoEnvKey { key: string; label: string; desc: string; placeholder: string; choices: string[]; secret: boolean }
 const goEnvModal = reactive<{
-  open: boolean; runtime: string; version: string
+  open: boolean; runtime: string; version: string; scope: GoEnvScope
   keys: GoEnvKey[]; values: Record<string, string>; loading: boolean; saving: boolean; error: string
+  // PATH 与 go.env 是两件事，但用户常把它们混为一谈：
+  // 前者决定「go 命令能否被找到」，后者决定「go 的行为（GOPATH/代理/缓存）」。
+  // 弹窗里把前者显式摆出来（目录 + 状态 + 一键切换），避免再去菜单里翻。
+  inPath: boolean; binDir: string; pathBusy: boolean
 }>({
-  open: false, runtime: '', version: '',
+  open: false, runtime: '', version: '', scope: 'version',
   keys: [], values: {}, loading: false, saving: false, error: '',
+  inPath: false, binDir: '', pathBusy: false,
 })
-async function openGoEnv(r: RuntimeInfo, ins: Install) {
-  goEnvModal.runtime = r.id
-  goEnvModal.version = ins.version
-  goEnvModal.keys = []
-  goEnvModal.values = {}
-  goEnvModal.error = ''
+async function loadGoEnvValues() {
   goEnvModal.loading = true
-  goEnvModal.open = true
-  openMenu.value = null
+  goEnvModal.error = ''
+  goEnvModal.values = {}
   try {
-    const [ks, vs] = await Promise.all([
-      unwrap<GoEnvKey[]>(await EnvGoEnvKeys(r.id)),
-      unwrap<Record<string, string>>(await EnvGoEnvGet(r.id, ins.version)),
-    ])
-    goEnvModal.keys = ks || []
+    // 全局作用域传空版本号，后端据此读写用户级 go.env
+    const ver = goEnvModal.scope === 'global' ? '' : goEnvModal.version
+    const vs = unwrap<Record<string, string>>(await EnvGoEnvGet(goEnvModal.runtime, ver))
     goEnvModal.values = vs || {}
   } catch (e: any) {
     goEnvModal.error = getErrorMessage(e)
@@ -998,11 +1113,62 @@ async function openGoEnv(r: RuntimeInfo, ins: Install) {
     goEnvModal.loading = false
   }
 }
+async function switchGoEnvScope(scope: GoEnvScope) {
+  if (goEnvModal.scope === scope || goEnvModal.saving) return
+  goEnvModal.scope = scope
+  await loadGoEnvValues()
+}
+async function openGoEnv(r: RuntimeInfo, ins: Install) {
+  goEnvModal.runtime = r.id
+  goEnvModal.version = ins.version
+  goEnvModal.scope = 'version'
+  goEnvModal.keys = []
+  goEnvModal.values = {}
+  goEnvModal.error = ''
+  goEnvModal.loading = true
+  goEnvModal.open = true
+  goEnvModal.inPath = !!ins.inSystemPath
+  goEnvModal.binDir = binDirOf(ins)
+  openMenu.value = null
+  try {
+    const ks = unwrap<GoEnvKey[]>(await EnvGoEnvKeys(r.id))
+    goEnvModal.keys = ks || []
+  } catch (e: any) {
+    goEnvModal.error = getErrorMessage(e)
+    goEnvModal.loading = false
+    return
+  }
+  await loadGoEnvValues()
+}
+// toggleGoPath 在弹窗内直接切换「该版本 bin 是否在用户 PATH」。
+// 复用菜单里的 toggleEnvVar（同一套写入/注销逻辑），切换后 load() 会重建
+// runtimes，所以必须重新取一次 install 才能拿到最新 inSystemPath。
+async function toggleGoPath() {
+  if (goEnvModal.pathBusy) return
+  goEnvModal.pathBusy = true
+  try {
+    const r = runtimes.value.find(x => x.id === goEnvModal.runtime)
+    const ins = r?.installed?.find(i => i.version === goEnvModal.version)
+    if (!r || !ins) return
+    await toggleEnvVar(r, ins)
+    const r2 = runtimes.value.find(x => x.id === goEnvModal.runtime)
+    const ins2 = r2?.installed?.find(i => i.version === goEnvModal.version)
+    goEnvModal.inPath = !!ins2?.inSystemPath
+    goEnvModal.binDir = ins2 ? binDirOf(ins2) : goEnvModal.binDir
+    toast.success(goEnvModal.inPath ? t('goPathAdded') : t('goPathRemoved'))
+  } catch (e: any) {
+    goEnvModal.error = getErrorMessage(e)
+    logErr('env/goenv', e)
+  } finally {
+    goEnvModal.pathBusy = false
+  }
+}
 async function saveGoEnv() {
   goEnvModal.saving = true
   goEnvModal.error = ''
   try {
-    unwrap(await EnvGoEnvSet(goEnvModal.runtime, goEnvModal.version, { ...goEnvModal.values }))
+    const ver = goEnvModal.scope === 'global' ? '' : goEnvModal.version
+    unwrap(await EnvGoEnvSet(goEnvModal.runtime, ver, { ...goEnvModal.values }))
     toast.success(t('saved'))
     goEnvModal.open = false
   } catch (e: any) {
@@ -1767,9 +1933,463 @@ async function toggleRabbitMgmt(ins: Install) {
   else await enableRabbitMgmt(ins)
 }
 
+// ===== 维护面板：源体检 / 磁盘占用 / 镜像加速 / 环境清单 =====
+// 这四件事都属于「跨运行时」的整体运维，不属于任何一个运行时卡片，
+// 故收拢到一个弹窗里按标签页组织，避免把这些按钮塞进每个运行时的详情区。
+
+interface SourceCheckItem {
+  runtime: string
+  name: string
+  sourceId: string
+  source: string
+  version: string
+  url: string
+  ok: boolean
+  code: number
+  error: string
+  latencyMs: number
+  mirrorOk: boolean
+  mirrorMs: number
+}
+interface VersionCheckItem {
+  runtime: string
+  name: string
+  url: string
+  ok: boolean
+  code: number
+  error: string
+  latencyMs: number
+  count: number
+  latest: string
+  recommended: string
+  stale: boolean
+}
+interface DiskUsageItem {
+  runtime: string
+  name: string
+  bytes: number
+  versions: { version: string; bytes: number }[]
+}
+interface MirrorStateItem {
+  key: string
+  label: string
+  available: boolean
+  enabled: boolean
+  current: string
+  target: string
+  file: string
+  detail: string
+}
+
+const MAINT_TABS = ['check', 'disk', 'manifest', 'envvar'] as const
+type MaintTab = (typeof MAINT_TABS)[number]
+
+const maint = reactive({ open: false, tab: 'check' as MaintTab })
+
+const sourceCheck = reactive({
+  running: false,
+  done: false,
+  error: '',
+  sources: [] as SourceCheckItem[],
+  versions: [] as VersionCheckItem[],
+  report: null as null | { durationMs: number; ok: number; mirrorOnly: number; failed: number },
+})
+
+const diskUsage = reactive({ loading: false, loaded: false, totalBytes: 0, items: [] as DiskUsageItem[] })
+
+// ---- 运行时级包源镜像（Node→npm / Python→pip / Composer→composer）----
+// 入口在各自运行时的操作菜单里：用户要加速的通常是某一个包管理器，
+// 不再用一个全局「一次性切四项」的开关。Go 不在此列——它的 GOPROXY 在
+// 「Go 环境配置」弹窗里有快捷预设，且要按版本写各自的 go.env，语义不同。
+const MIRROR_RUNTIMES = new Set(['node', 'python', 'composer'])
+const runtimeMirror = reactive<Record<string, MirrorStateItem | undefined>>({})
+const mirrorBusy = ref('')
+
+async function fetchRuntimeMirror(rt: string) {
+  if (!MIRROR_RUNTIMES.has(rt)) return
+  try {
+    const st = unwrap<MirrorStateItem>(await EnvMirrorState(rt))
+    if (st) runtimeMirror[rt] = st
+  } catch (e: any) {
+    // 状态读不到不影响菜单可用性，点击时后端还会再校验一次
+    logErr('env/mirror', e)
+  }
+}
+
+async function toggleRuntimeMirror(r: RuntimeInfo) {
+  if (mirrorBusy.value) return
+  const st = runtimeMirror[r.id]
+  const enable = !st?.enabled
+  mirrorBusy.value = r.id
+  try {
+    const next = unwrap<MirrorStateItem>(await EnvMirrorToggle(r.id, enable))
+    if (next) runtimeMirror[r.id] = next
+    toast.success(enable ? t('mirrorEnabledToast') : t('mirrorDisabledToast'))
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+    logErr('env/mirror', e)
+  } finally {
+    mirrorBusy.value = ''
+  }
+}
+
+// mirrorMenuLabel 菜单项文案：知道当前状态时按状态提示下一步动作。
+function mirrorMenuLabel(rt: string): string {
+  const st = runtimeMirror[rt]
+  if (!st) return t('mirrorEnable')
+  return st.enabled ? t('mirrorDisable') : t('mirrorEnable')
+}
+
+function mirrorMenuTitle(rt: string): string {
+  const st = runtimeMirror[rt]
+  if (!st) return t('mirrorEnableHint')
+  return st.enabled
+    ? t('mirrorDisableHint', { v: st.current || st.target })
+    : t('mirrorEnableHint')
+}
+
+// ---- GitHub 下载加速（gh-proxy）----
+// 源体检里「需加速」的项要靠这个开关才真正生效，否则体检说能下、实际下载仍走直连。
+const githubAccel = reactive({ loading: false, enabled: false, busy: false })
+async function loadGithubAccel() {
+  githubAccel.loading = true
+  try {
+    const d = unwrap<{ enabled: boolean }>(await EnvGitHubAccelState())
+    githubAccel.enabled = !!d?.enabled
+  } catch (e: any) {
+    logErr('env/maint', e)
+  } finally {
+    githubAccel.loading = false
+  }
+}
+async function toggleGithubAccel() {
+  if (githubAccel.busy) return
+  githubAccel.busy = true
+  const next = !githubAccel.enabled
+  try {
+    unwrap(await EnvGitHubAccelSet(next))
+    githubAccel.enabled = next
+    toast.success(next ? t('ghAccelOn') : t('ghAccelOff'))
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+    logErr('env/maint', e)
+  } finally {
+    githubAccel.busy = false
+  }
+}
+const manifestInput = ref<HTMLInputElement | null>(null)
+const manifestPanel = reactive({
+  busy: false,
+  error: '',
+  text: '',
+  report: null as any,
+  applied: [] as string[],
+})
+
+// ---- 用户环境变量（HKCU\Environment）----
+// 激活某个版本时后端会把它的 bin 目录写进用户 PATH，并写入 GOPATH/GOROOT 等变量。
+// 这些是「系统环境变量」，不在 go.env 里，此前界面上看不到也改不了——本面板补这个缺口。
+interface UserEnvVarItem { name: string; value: string; expand: boolean; managed: boolean }
+const userEnv = reactive({
+  loading: false,
+  saving: false,
+  loaded: false,
+  error: '',
+  pathEntries: [] as string[],
+  vars: [] as UserEnvVarItem[],
+  newPathEntry: '',
+  newName: '',
+  newValue: '',
+  pendingDelete: '', // 二次确认：同一行再点一次才真的删
+})
+
+function isQuickdockEntry(p: string): boolean {
+  const low = p.toLowerCase()
+  return low.includes('.quickdock\\') || low.includes('.quickdock/')
+}
+
+async function loadUserEnv() {
+  userEnv.loading = true
+  userEnv.error = ''
+  try {
+    const rep: any = unwrap(await EnvUserEnv())
+    userEnv.pathEntries = rep?.path?.entries || []
+    userEnv.vars = rep?.vars || []
+    userEnv.loaded = true
+  } catch (e: any) {
+    userEnv.error = getErrorMessage(e)
+    logErr('env/envvar', e)
+  } finally {
+    userEnv.loading = false
+  }
+}
+
+async function saveUserPath(next: string[]) {
+  userEnv.saving = true
+  userEnv.error = ''
+  try {
+    unwrap(await EnvUserEnvSetPath(next))
+    await loadUserEnv()
+  } catch (e: any) {
+    userEnv.error = getErrorMessage(e)
+    logErr('env/envvar', e)
+  } finally {
+    userEnv.saving = false
+  }
+}
+
+async function addPathEntry() {
+  const v = userEnv.newPathEntry.trim()
+  if (!v) return
+  if (userEnv.pathEntries.some((x) => x.toLowerCase() === v.toLowerCase())) {
+    userEnv.error = t('maintEnvDupEntry')
+    return
+  }
+  userEnv.newPathEntry = ''
+  await saveUserPath([...userEnv.pathEntries, v])
+}
+
+async function removePathEntry(p: string) {
+  await saveUserPath(userEnv.pathEntries.filter((x) => x !== p))
+}
+
+async function saveUserVar() {
+  const name = userEnv.newName.trim().toUpperCase()
+  const value = userEnv.newValue.trim()
+  if (!name) {
+    userEnv.error = t('maintEnvNameRequired')
+    return
+  }
+  if (!value) {
+    userEnv.error = t('maintEnvValueRequired')
+    return
+  }
+  userEnv.saving = true
+  userEnv.error = ''
+  try {
+    unwrap(await EnvUserEnvSetVar(name, value))
+    userEnv.newName = ''
+    userEnv.newValue = ''
+    toast.success(t('saved'))
+    await loadUserEnv()
+  } catch (e: any) {
+    userEnv.error = getErrorMessage(e)
+    logErr('env/envvar', e)
+  } finally {
+    userEnv.saving = false
+  }
+}
+
+// deleteUserVar 两段式：第一次点亮「确认删除」，再点一次才执行。
+// 删的是系统环境变量，误删会影响其它程序，不值得为省一次点击冒险。
+async function deleteUserVar(name: string) {
+  if (userEnv.pendingDelete !== name) {
+    userEnv.pendingDelete = name
+    return
+  }
+  userEnv.saving = true
+  userEnv.error = ''
+  try {
+    unwrap(await EnvUserEnvDeleteVar(name))
+    await loadUserEnv()
+  } catch (e: any) {
+    userEnv.error = getErrorMessage(e)
+    logErr('env/envvar', e)
+  } finally {
+    userEnv.saving = false
+    userEnv.pendingDelete = ''
+  }
+}
+
+function openMaintenance(tab: MaintTab) {
+  maint.open = true
+  maint.tab = tab
+  if (tab === 'disk' && !diskUsage.loaded) loadDiskUsage()
+  if (tab === 'check' && !githubAccel.loading) loadGithubAccel()
+  if (tab === 'envvar' && !userEnv.loaded) loadUserEnv()
+}
+
+// formatSize 人性化字节数（磁盘统计面板用；与进程占用的 formatBytes 分开，
+// 后者只输出 MB/GB 且 0 值显示为「—」，语义不同）
+function formatSize(n: number): string {
+  if (!n || n <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
+  let i = 0
+  let v = n
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return (i === 0 ? v.toFixed(0) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i]
+}
+
+async function runSourceCheck() {
+  if (sourceCheck.running) return
+  sourceCheck.running = true
+  sourceCheck.done = false
+  sourceCheck.error = ''
+  sourceCheck.sources = []
+  sourceCheck.versions = []
+  sourceCheck.report = null
+  try {
+    unwrap(await EnvSourceCheck())
+  } catch (e: any) {
+    sourceCheck.running = false
+    sourceCheck.error = getErrorMessage(e)
+    logErr('env/maint', e)
+  }
+}
+
+// onSourceCheckEvent 逐条接收体检结果。重复点体检时同一目标只替换不叠加。
+// 注意：Wails 事件的回调参数是 {name, data} 包装体，必须取 data
+// （本文件 onProgress / onOllamaPull 都是 `e?.data ?? e` 这个口径）。
+function onSourceCheckEvent(payload: any) {
+  const ev = payload?.data ?? payload
+  if (!ev) return
+  if (ev.kind === 'source' && ev.source) {
+    const item = ev.source as SourceCheckItem
+    const i = sourceCheck.sources.findIndex((x) => x.runtime === item.runtime && x.sourceId === item.sourceId)
+    if (i >= 0) sourceCheck.sources.splice(i, 1, item)
+    else sourceCheck.sources.push(item)
+    return
+  }
+  if (ev.kind === 'version' && ev.version) {
+    const item = ev.version as VersionCheckItem
+    const i = sourceCheck.versions.findIndex((x) => x.runtime === item.runtime)
+    if (i >= 0) sourceCheck.versions.splice(i, 1, item)
+    else sourceCheck.versions.push(item)
+  }
+}
+
+// localSourceStats 按已收到的明细统计，作为 done 事件的兜底。
+// 后端报告字段缺失（版本不一致/序列化差异）时不至于让界面显示全 0。
+function localSourceStats() {
+  let ok = 0
+  let mirror = 0
+  let failed = 0
+  for (const it of sourceCheck.sources) {
+    if (it.ok) ok++
+    else if (it.mirrorOk) mirror++
+    else failed++
+  }
+  return { ok, mirror, failed }
+}
+
+function onSourceCheckDone(payload: any) {
+  const rep = payload?.data ?? payload
+  sourceCheck.running = false
+  sourceCheck.done = true
+  if (rep && rep.error) {
+    sourceCheck.error = String(rep.error)
+    return
+  }
+  // 汇总报告带完整列表，先回填明细，兜住事件丢失/顺序问题
+  if (Array.isArray(rep?.sources) && rep.sources.length) sourceCheck.sources = rep.sources
+  if (Array.isArray(rep?.versions) && rep.versions.length) sourceCheck.versions = rep.versions
+  const local = localSourceStats()
+  const num = (v: any, fallback: number) => {
+    const n = Number(v)
+    return Number.isFinite(n) && n > 0 ? n : fallback
+  }
+  sourceCheck.report = {
+    durationMs: Number(rep?.durationMs) || 0,
+    ok: num(rep?.ok, local.ok),
+    mirrorOnly: num(rep?.mirrorOnly, local.mirror),
+    failed: num(rep?.failed, local.failed),
+  }
+}
+
+async function loadDiskUsage() {
+  diskUsage.loading = true
+  try {
+    const data = unwrap<{ totalBytes: number; runtimes: DiskUsageItem[] }>(await EnvDiskUsage())
+    diskUsage.totalBytes = data?.totalBytes || 0
+    diskUsage.items = data?.runtimes || []
+    diskUsage.loaded = true
+  } catch (e: any) {
+    toast.error(t('maintDiskFail') + ': ' + getErrorMessage(e))
+    logErr('env/maint', e)
+  } finally {
+    diskUsage.loading = false
+  }
+}
+
+// exportManifest 导出环境清单：后端给 JSON 文本，前端落成文件下载。
+async function exportManifest() {
+  if (manifestPanel.busy) return
+  manifestPanel.busy = true
+  manifestPanel.error = ''
+  try {
+    const text = unwrap<string>(await EnvManifestExport()) || ''
+    const blob = new Blob([text], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'quickdock-env-' + new Date().toISOString().slice(0, 10) + '.json'
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
+    toast.success(t('maintManifestExported'))
+  } catch (e: any) {
+    manifestPanel.error = getErrorMessage(e)
+    logErr('env/maint', e)
+  } finally {
+    manifestPanel.busy = false
+  }
+}
+
+function pickManifestFile() {
+  manifestInput.value?.click()
+}
+
+// onManifestFile 选文件后先只做比对（不动本机环境），
+// 需要切激活版本时再由用户点一次「应用激活版本」。
+async function onManifestFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 允许重复选同一个文件
+  if (!file) return
+  manifestPanel.busy = true
+  manifestPanel.error = ''
+  manifestPanel.report = null
+  manifestPanel.applied = []
+  try {
+    const text = await file.text()
+    const res = unwrap<any>(await EnvManifestImport(text, false))
+    manifestPanel.text = text
+    manifestPanel.report = res?.report || null
+  } catch (err: any) {
+    manifestPanel.error = getErrorMessage(err)
+    logErr('env/maint', err)
+  } finally {
+    manifestPanel.busy = false
+  }
+}
+
+// applyManifestActive 按清单把「已装且要求激活」的版本设为激活版本
+async function applyManifestActive() {
+  if (!manifestPanel.text || manifestPanel.busy) return
+  manifestPanel.busy = true
+  try {
+    const res = unwrap<any>(await EnvManifestImport(manifestPanel.text, true))
+    manifestPanel.report = res?.report || manifestPanel.report
+    manifestPanel.applied = res?.appliedActive || []
+    if (manifestPanel.applied.length) toast.success(t('maintManifestApplied', { n: manifestPanel.applied.length }))
+    await load()
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+    logErr('env/maint', e)
+  } finally {
+    manifestPanel.busy = false
+  }
+}
+
 let off: (() => void) | null = null
 let offRefreshed: (() => void) | null = null
 let offOllamaPull: (() => void) | null = null
+let offSourceCheck: (() => void) | null = null
+let offSourceCheckDone: (() => void) | null = null
 let timer: number | null = null
 // 点击外部时收起版本列表
 function onDocClick(e: MouseEvent) {
@@ -1793,6 +2413,9 @@ onMounted(() => {
   // 后台重扫完成（启动扫描 / 手动刷新按钮 / 安装完成后）→ 重新读取持久化缓存
   offRefreshed = Events.On('quickdock:env:refreshed', () => { load(); ensureCertLoaded(); pollStatus(); refreshOllamaPanel() })
   offOllamaPull = Events.On('quickdock:env:ollama:pull', onOllamaPull)
+  // 源体检：逐条结果 + 结束汇总（异步，避免长调用把界面卡住）
+  offSourceCheck = Events.On('quickdock:env:sourcecheck', onSourceCheckEvent)
+  offSourceCheckDone = Events.On('quickdock:env:sourcecheck-done', onSourceCheckDone)
   timer = window.setInterval(pollStatus, 3000)
 })
 // 切换运行时时自动拉取对应可下载版本列表（harness / http / sites / ports 区块不触发）
@@ -1819,6 +2442,8 @@ onUnmounted(() => {
   if (off) off()
   if (offRefreshed) offRefreshed()
   if (offOllamaPull) offOllamaPull()
+  if (offSourceCheck) offSourceCheck()
+  if (offSourceCheckDone) offSourceCheckDone()
   if (timer) clearInterval(timer)
   if (logTimer) clearInterval(logTimer)
   if (logModalTimer) clearInterval(logModalTimer)
@@ -1838,6 +2463,10 @@ const s = currentRuntimeState
         </h2>
       </div>
       <div class="env-header-actions">
+        <button class="path-btn" @click="openMaintenance('check')" :title="t('maintTitle')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9 9a2.8 2.8 0 0 1-4-4l9-9z"/><path d="M19.7 11.3 21 10a3 3 0 0 0-4-4l-1.3 1.3"/></svg>
+          <span>{{ t('maintTitle') }}</span>
+        </button>
         <button class="path-btn" @click="pathModal.open = true" :title="t('pathPanel')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0M15.5 18H10a4 4 0 0 1-4-4v0"/></svg>
           <span>PATH</span>
@@ -2280,13 +2909,35 @@ const s = currentRuntimeState
                   {{ t('operations') }}<span class="caret">▾</span>
                 </button>
                 <div v-if="openMenu === ins.version" class="op-menu">
-                  <button class="op-item" :class="{ on: ins.inSystemPath }" @click="toggleEnvVar(selected, ins); openMenu = null">
+                  <button class="op-item" :class="{ on: ins.inSystemPath }" :title="t('setEnvVarHint')" @click="toggleEnvVar(selected, ins); openMenu = null">
                     {{ ins.inSystemPath ? t('unsetEnvVar') : t('setEnvVar') }}
                   </button>
                   <button class="op-item" @click="openAlias(selected, ins); openMenu = null">{{ t('setAlias') }}</button>
+                  <template v-if="(runtimeTasks[selected.id] || []).length">
+                    <div class="op-sep"></div>
+                    <div class="op-group">{{ t('taskGroup') }}</div>
+                    <button
+                      v-for="tk in runtimeTasks[selected.id]"
+                      :key="tk.id"
+                      class="op-item"
+                      :class="{ danger: tk.kind === 'danger' }"
+                      :title="t('task_' + taskKey(tk.id) + '_desc')"
+                      @click="openTask(selected, ins, tk); openMenu = null"
+                    >{{ t('task_' + taskKey(tk.id)) }}</button>
+                  </template>
                   <template v-if="selected.id === 'go'">
                     <div class="op-sep"></div>
                     <button class="op-item" @click="openGoEnv(selected, ins); openMenu = null">{{ t('goEnvConfig') }}</button>
+                  </template>
+                  <template v-if="MIRROR_RUNTIMES.has(selected.id)">
+                    <div class="op-sep"></div>
+                    <button
+                      class="op-item"
+                      :class="{ on: runtimeMirror[selected.id]?.enabled }"
+                      :title="mirrorMenuTitle(selected.id)"
+                      :disabled="mirrorBusy === selected.id"
+                      @click="toggleRuntimeMirror(selected)"
+                    >{{ mirrorMenuLabel(selected.id) }}</button>
                   </template>
                   <template v-if="selected.id === 'php' && ins.scope !== 'system'">
                     <div class="op-sep"></div>
@@ -2662,6 +3313,44 @@ const s = currentRuntimeState
       </div>
     </div>
 
+    <!-- 特色操作输出弹窗：各语言生态的只读查询 / 可逆写操作 / 清理动作共用一个文本视图 -->
+    <div v-if="taskModal.open" class="modal-overlay" @click.self="taskModal.open = false">
+      <div class="modal task-modal">
+        <div class="modal-title">
+          {{ t('task_' + taskKey(taskModal.taskId)) }}
+          <span class="task-ver">{{ taskModal.runtime }} · {{ taskModal.version }}</span>
+        </div>
+        <p class="modal-text">{{ t('task_' + taskKey(taskModal.taskId) + '_desc') }}</p>
+
+        <div v-if="taskModal.needsConfirm" class="task-confirm">
+          <span class="task-confirm-icon">!</span>
+          <div>
+            <div class="task-confirm-title">{{ t('taskDangerTitle') }}</div>
+            <p class="task-confirm-text">{{ t('taskDangerDesc') }}</p>
+          </div>
+        </div>
+
+        <div v-if="taskModal.busy" class="env-msg">{{ t('taskRunning') }}</div>
+        <div v-else-if="taskModal.error" class="env-msg error">{{ taskModal.error }}</div>
+
+        <pre v-if="taskModal.output" class="task-output">{{ taskModal.output }}</pre>
+        <p v-if="taskModal.truncated" class="task-hint">{{ t('taskTruncated') }}</p>
+        <p v-if="taskModal.durationMs" class="task-hint">{{ t('taskDuration', { ms: taskModal.durationMs }) }}</p>
+
+        <div class="modal-actions">
+          <button class="op-btn" @click="taskModal.open = false">{{ t('close') }}</button>
+          <button v-if="taskModal.output" class="op-btn" @click="copyTaskOutput">{{ t('copy') }}</button>
+          <button
+            v-if="taskModal.needsConfirm || taskModal.error"
+            class="env-install-btn"
+            :class="{ busy: taskModal.busy, danger: taskModal.kind === 'danger' }"
+            :disabled="taskModal.busy"
+            @click="runTask"
+          >{{ taskModal.needsConfirm ? t('taskRun') : t('taskRetry') }}</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 端口全景弹窗：所有运行中服务的端口与控制台一览 -->
     <div v-if="panorama.open" class="modal-overlay" @click.self="panorama.open = false">
       <div class="modal path-modal" style="max-width: 640px">
@@ -2745,11 +3434,34 @@ const s = currentRuntimeState
       </div>
     </div>
 
-    <!-- Go 环境变量配置弹窗：go env -w / -u -->
+    <!-- Go 环境配置弹窗：上半是 PATH（命令能否被找到），下半是 go.env（go 的行为） -->
     <div v-if="goEnvModal.open" class="modal-overlay" @click.self="goEnvModal.open = false">
       <div class="modal go-env-modal">
         <div class="modal-title">{{ t('goEnvConfig') }} · {{ goEnvModal.version }}</div>
-        <p class="modal-text go-env-desc">{{ t('goEnvDesc') }}</p>
+        <div class="go-path-box">
+          <div class="go-path-row">
+            <span class="go-path-label">{{ t('goEnvBinLabel') }}</span>
+            <code class="go-path-value" :title="goEnvModal.binDir">{{ goEnvModal.binDir || '—' }}</code>
+            <span class="path-flag" :class="goEnvModal.inPath ? 'ok' : 'no'">
+              <span class="path-flag-dot"></span>{{ goEnvModal.inPath ? t('inPath') : t('notInPath') }}
+            </span>
+            <button class="op-btn" :disabled="goEnvModal.pathBusy" @click="toggleGoPath">
+              {{ goEnvModal.inPath ? t('unsetEnvVar') : t('setEnvVar') }}
+            </button>
+          </div>
+          <p class="go-path-hint">{{ t('goEnvPathHint') }}</p>
+        </div>
+        <div class="php-tabs go-env-tabs">
+          <button class="php-tab" :class="{ active: goEnvModal.scope === 'version' }" @click="switchGoEnvScope('version')">
+            {{ t('goEnvScopeVersion', { v: goEnvModal.version }) }}
+          </button>
+          <button class="php-tab" :class="{ active: goEnvModal.scope === 'global' }" @click="switchGoEnvScope('global')">
+            {{ t('goEnvScopeGlobal') }}
+          </button>
+        </div>
+        <p class="modal-text go-env-desc">
+          {{ goEnvModal.scope === 'global' ? t('goEnvGlobalHint') : t('goEnvDesc') }}
+        </p>
         <div v-if="goEnvModal.loading" class="env-msg">{{ t('loading') }}</div>
         <div v-else-if="goEnvModal.error" class="env-msg error">{{ goEnvModal.error }}</div>
         <div v-else class="go-env-form">
@@ -2912,6 +3624,204 @@ const s = currentRuntimeState
     </div>
 
     <!-- 操作下拉点击外部关闭 -->
+    <!-- 维护面板：源体检 / 磁盘占用 / 镜像加速 / 环境清单 -->
+    <div v-if="maint.open" class="modal-overlay" @click.self="maint.open = false">
+      <div class="modal maint-modal">
+        <div class="modal-title">{{ t('maintTitle') }}</div>
+        <div class="php-tabs">
+          <button class="php-tab" :class="{ active: maint.tab === 'check' }" @click="openMaintenance('check')">{{ t('maintTabCheck') }}</button>
+          <button class="php-tab" :class="{ active: maint.tab === 'disk' }" @click="openMaintenance('disk')">{{ t('maintTabDisk') }}</button>
+          <button class="php-tab" :class="{ active: maint.tab === 'manifest' }" @click="openMaintenance('manifest')">{{ t('maintTabManifest') }}</button>
+          <button class="php-tab" :class="{ active: maint.tab === 'envvar' }" @click="openMaintenance('envvar')">{{ t('maintTabEnvVar') }}</button>
+        </div>
+
+        <div class="php-tab-body maint-body">
+          <!-- ① 源体检 -->
+          <template v-if="maint.tab === 'check'">
+            <p class="modal-text">{{ t('maintCheckDesc') }}</p>
+            <div class="maint-actions">
+              <button class="env-install-btn" :disabled="sourceCheck.running" @click="runSourceCheck">
+                {{ sourceCheck.running ? t('maintChecking') : t('maintCheckRun') }}
+              </button>
+              <span v-if="sourceCheck.running" class="maint-summary">
+                {{ t('maintCheckReceived', { n: sourceCheck.sources.length + sourceCheck.versions.length }) }}
+              </span>
+              <span v-else-if="sourceCheck.report" class="maint-summary">
+                {{ t('maintCheckSummary', { ok: sourceCheck.report.ok, mirror: sourceCheck.report.mirrorOnly, failed: sourceCheck.report.failed, sec: (sourceCheck.report.durationMs / 1000).toFixed(1) }) }}
+              </span>
+            </div>
+            <div v-if="sourceCheck.error" class="env-msg error">{{ sourceCheck.error }}</div>
+            <!-- GitHub 下载加速：体检里「需加速」的项要靠这个开关才真正走 gh-proxy -->
+            <label class="gh-accel">
+              <input
+                type="checkbox"
+                :checked="githubAccel.enabled"
+                :disabled="githubAccel.busy || githubAccel.loading"
+                @change="toggleGithubAccel"
+              />
+              <span class="gh-accel-label">{{ t('ghAccelLabel') }}</span>
+              <em class="gh-accel-hint">{{ t('ghAccelHint') }}</em>
+            </label>
+
+            <div v-if="sourceCheck.sources.length" class="maint-table">
+              <div class="maint-row maint-head">
+                <span>{{ t('maintColRuntime') }}</span>
+                <span>{{ t('maintColSource') }}</span>
+                <span>{{ t('maintColStatus') }}</span>
+                <span>{{ t('maintColLatency') }}</span>
+              </div>
+              <div v-for="it in sourceCheck.sources" :key="it.runtime + '/' + it.sourceId" class="maint-row">
+                <span class="maint-rt">{{ it.name }}<em v-if="it.version">{{ it.version }}</em></span>
+                <span class="maint-src" :title="it.url || it.error">{{ it.source }}</span>
+                <span
+                  class="maint-status"
+                  :class="it.ok ? 'ok' : (it.mirrorOk ? 'warn' : 'bad')"
+                  :title="!it.ok && it.mirrorOk ? t('maintMirrorOnlyHint', { ms: it.mirrorMs }) : it.error"
+                >
+                  {{ it.ok ? t('maintOK') : (it.mirrorOk ? t('maintMirrorOnly') : (it.code ? 'HTTP ' + it.code : t('maintUnreachable'))) }}
+                </span>
+                <span class="maint-lat">{{ it.latencyMs }}ms</span>
+              </div>
+            </div>
+
+            <div v-if="sourceCheck.versions.length" class="maint-sub">
+              <div class="maint-sub-title">{{ t('maintVersionSources') }}</div>
+              <div class="maint-table">
+                <div class="maint-row maint-head">
+                  <span>{{ t('maintColRuntime') }}</span>
+                  <span>{{ t('maintColLatest') }}</span>
+                  <span>{{ t('maintColStatus') }}</span>
+                  <span>{{ t('maintColLatency') }}</span>
+                </div>
+                <div v-for="v in sourceCheck.versions" :key="'v/' + v.runtime" class="maint-row">
+                  <span class="maint-rt">{{ v.name }}</span>
+                  <span class="maint-src" :title="v.url || v.error">
+                    <template v-if="v.url">{{ v.latest || '—' }}<em v-if="v.stale"> · {{ t('maintStaleHint', { rec: v.recommended }) }}</em></template>
+                    <template v-else>{{ t('maintNoUpstream') }}</template>
+                  </span>
+                  <span class="maint-status" :class="v.ok ? (v.stale ? 'warn' : 'ok') : 'bad'">
+                    {{ v.ok ? (v.stale ? t('maintStaleTag') : t('maintOK')) : (v.code ? 'HTTP ' + v.code : t('maintUnreachable')) }}
+                  </span>
+                  <span class="maint-lat">{{ v.latencyMs }}ms</span>
+                </div>
+              </div>
+            </div>
+            <div v-if="!sourceCheck.running && !sourceCheck.sources.length && !sourceCheck.error" class="empty-text">
+              {{ t('maintCheckIdle') }}
+            </div>
+          </template>
+
+          <!-- ⑦ 磁盘占用 -->
+          <template v-else-if="maint.tab === 'disk'">
+            <p class="modal-text">{{ t('maintDiskDesc') }}</p>
+            <div class="maint-actions">
+              <button class="op-btn" :disabled="diskUsage.loading" @click="loadDiskUsage">
+                {{ diskUsage.loading ? t('loading') : t('maintDiskRefresh') }}
+              </button>
+              <span v-if="diskUsage.totalBytes" class="maint-summary">{{ t('maintDiskTotal', { size: formatSize(diskUsage.totalBytes) }) }}</span>
+            </div>
+            <div v-if="diskUsage.items.length" class="disk-list">
+              <div v-for="d in diskUsage.items" :key="d.runtime" class="disk-row">
+                <div class="disk-head">
+                  <span class="disk-name">{{ d.name }}</span>
+                  <span class="disk-size">{{ formatSize(d.bytes) }}</span>
+                </div>
+                <div class="disk-chips">
+                  <span v-for="v in d.versions" :key="v.version" class="disk-chip">{{ v.version }} · {{ formatSize(v.bytes) }}</span>
+                </div>
+              </div>
+            </div>
+            <div v-else class="empty-text">{{ diskUsage.loading ? t('loading') : t('maintDiskEmpty') }}</div>
+          </template>
+
+          <!-- ⑧ 环境清单 -->
+          <template v-else-if="maint.tab === 'manifest'">
+            <p class="modal-text">{{ t('maintManifestDesc') }}</p>
+            <div class="maint-actions">
+              <button class="env-install-btn" :disabled="manifestPanel.busy" @click="exportManifest">{{ t('maintManifestExport') }}</button>
+              <button class="op-btn" :disabled="manifestPanel.busy" @click="pickManifestFile">{{ t('maintManifestImport') }}</button>
+              <button
+                v-if="manifestPanel.report && manifestPanel.report.runtimes.some((d: any) => d.activeChanged)"
+                class="op-btn"
+                :disabled="manifestPanel.busy"
+                @click="applyManifestActive"
+              >{{ t('maintManifestApplyActive') }}</button>
+              <input ref="manifestInput" type="file" accept=".json,application/json" class="hidden-file" @change="onManifestFile" />
+            </div>
+            <div v-if="manifestPanel.error" class="env-msg error">{{ manifestPanel.error }}</div>
+            <div v-if="manifestPanel.report" class="manifest-report">
+              <div class="maint-summary">
+                {{ t('maintManifestSummary', { matched: manifestPanel.report.matchedTotal, missing: manifestPanel.report.missingTotal }) }}
+              </div>
+              <div v-for="d in manifestPanel.report.runtimes" :key="d.runtime" class="manifest-row">
+                <span class="manifest-name">{{ d.name }}</span>
+                <span v-if="d.missing.length" class="manifest-tag bad">{{ t('maintManifestMissing') }}: {{ d.missing.join(', ') }}</span>
+                <span v-if="d.extra.length" class="manifest-tag extra">{{ t('maintManifestExtra') }}: {{ d.extra.join(', ') }}</span>
+                <span v-if="d.activeChanged" class="manifest-tag warn">{{ t('maintManifestActiveHint', { v: d.activeWanted }) }}</span>
+                <span v-if="!d.missing.length && !d.extra.length && !d.activeChanged" class="manifest-tag ok">{{ t('maintManifestSame') }}</span>
+              </div>
+              <div v-if="manifestPanel.applied.length" class="maint-summary">{{ t('maintManifestApplied', { n: manifestPanel.applied.length }) }}</div>
+            </div>
+          </template>
+
+          <!-- ⑤ 用户环境变量（HKCU\Environment）—— 链尾，兼作未知 tab 的兜底 -->
+          <template v-else>
+            <p class="modal-text">{{ t('maintEnvDesc') }}</p>
+            <div v-if="userEnv.error" class="env-msg error">{{ userEnv.error }}</div>
+
+            <div class="maint-sub">
+              <div class="maint-sub-title">{{ t('maintEnvPathTitle') }}</div>
+              <div class="maint-table">
+                <div v-for="p in userEnv.pathEntries" :key="p" class="maint-row envvar-path-row">
+                  <span class="envvar-path">
+                    {{ p }}
+                    <em v-if="isQuickdockEntry(p)" class="envvar-badge">{{ t('maintEnvManaged') }}</em>
+                  </span>
+                  <button class="op-btn danger" :disabled="userEnv.saving" @click="removePathEntry(p)">{{ t('maintEnvRemove') }}</button>
+                </div>
+                <div v-if="!userEnv.pathEntries.length" class="empty-text">{{ t('maintEnvPathEmpty') }}</div>
+              </div>
+              <div class="maint-actions">
+                <input v-model="userEnv.newPathEntry" class="env-input" :placeholder="t('maintEnvPathPlaceholder')" @keyup.enter="addPathEntry" />
+                <button class="op-btn" :disabled="userEnv.saving" @click="addPathEntry">{{ t('maintEnvAdd') }}</button>
+              </div>
+            </div>
+
+            <div class="maint-sub">
+              <div class="maint-sub-title">{{ t('maintEnvVarTitle') }}</div>
+              <div class="maint-table">
+                <div v-for="v in userEnv.vars" :key="v.name" class="maint-row envvar-row">
+                  <span class="envvar-name">
+                    {{ v.name }}
+                    <em v-if="v.managed" class="envvar-badge">{{ t('maintEnvManaged') }}</em>
+                  </span>
+                  <span class="envvar-value" :title="v.value">{{ v.value }}</span>
+                  <button
+                    class="op-btn"
+                    :class="{ danger: userEnv.pendingDelete === v.name }"
+                    :disabled="userEnv.saving"
+                    @click="deleteUserVar(v.name)"
+                  >{{ userEnv.pendingDelete === v.name ? t('maintEnvConfirmDelete') : t('maintEnvRemove') }}</button>
+                </div>
+                <div v-if="!userEnv.vars.length" class="empty-text">{{ t('maintEnvVarEmpty') }}</div>
+              </div>
+              <div class="maint-actions">
+                <input v-model="userEnv.newName" class="env-input envvar-name-input" :placeholder="t('maintEnvNamePlaceholder')" />
+                <input v-model="userEnv.newValue" class="env-input" :placeholder="t('maintEnvValuePlaceholder')" @keyup.enter="saveUserVar" />
+                <button class="op-btn" :disabled="userEnv.saving" @click="saveUserVar">{{ t('maintEnvAdd') }}</button>
+              </div>
+            </div>
+
+            <p class="env-msg">{{ t('maintEnvScopeHint') }}</p>
+          </template>
+        </div>
+
+        <div class="modal-actions">
+          <button class="op-btn" @click="maint.open = false">{{ t('close') }}</button>
+        </div>
+      </div>
+    </div>
+
     <div v-if="openMenu" class="menu-backdrop" @click="openMenu = null"></div>
   </div>
 </template>
@@ -2992,14 +3902,14 @@ const s = currentRuntimeState
 .cat-avatar {
   width: 28px; height: 28px; border-radius: var(--radius-sm); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 700; color: #fff;
+  font-size: 13px; font-weight: 700; color: var(--color-accent-text);
 }
 .cat-avatar :deep(svg) { width: 20px; height: 20px; display: block; }
 .cat-meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
 .cat-name { font-weight: 600; font-size: 13px; }
 .cat-id { font-size: 10px; color: var(--color-text-disabled); }
 .cat-trail { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.cat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 5px rgba(76, 175, 80, 0.6); flex-shrink: 0; }
+.cat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); flex-shrink: 0; }
 .cat-count {
   min-width: 20px; text-align: center; font-size: 11px; padding: 1px 6px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
@@ -3018,7 +3928,7 @@ const s = currentRuntimeState
 .detail-avatar {
   width: 34px; height: 34px; border-radius: var(--radius-md); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 700; color: #fff;
+  font-size: 16px; font-weight: 700; color: var(--color-accent-text);
 }
 .detail-avatar :deep(svg) { width: 22px; height: 22px; display: block; }
 .detail-titles { display: flex; flex-direction: column; gap: 4px; }
@@ -3035,11 +3945,11 @@ const s = currentRuntimeState
 .svc-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; cursor: pointer; user-select: none; -webkit-user-select: none; }
 .svc-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
 .svc-switch-track { position: relative; width: 34px; height: 18px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); border: 1px solid var(--color-border, transparent); transition: background .18s ease; flex: none; }
-.svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .18s ease; }
-.svc-switch.on .svc-switch-track { background: var(--color-accent, #2f9e44); }
+.svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-accent-text); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .18s ease; }
+.svc-switch.on .svc-switch-track { background: var(--color-accent, var(--color-success)); }
 .svc-switch.on .svc-switch-thumb { transform: translateX(16px); }
 .svc-switch-label { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
-.svc-switch.on .svc-switch-label { color: var(--color-accent, #2f9e44); }
+.svc-switch.on .svc-switch-label { color: var(--color-accent, var(--color-success)); }
 .svc-switch.busy { opacity: .6; pointer-events: none; }
 .svc-switch.busy .svc-switch-thumb { animation: svc-thumb-pulse .8s ease-in-out infinite; }
 @keyframes svc-thumb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
@@ -3094,7 +4004,7 @@ const s = currentRuntimeState
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
   max-height: 220px; overflow-y: auto; padding: 4px;
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-sm); box-shadow: 0 6px 20px var(--color-bg-overlay);
 }
 .lib-option {
   display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -3109,7 +4019,7 @@ const s = currentRuntimeState
 .update-banner {
   display: flex; align-items: center; gap: 12px; margin-bottom: 12px;
   padding: 11px 14px; border-radius: var(--radius-md);
-  background: var(--color-accent-bg, rgba(99, 102, 241, 0.08));
+  background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border);
 }
 .ub-icon { font-size: 15px; color: var(--color-accent); flex: 0 0 auto; }
@@ -3189,14 +4099,14 @@ const s = currentRuntimeState
 .ver-ver { font-size: 12px; color: var(--color-text-secondary); font-family: monospace; }
 .ver-scope { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); width: fit-content; }
 .ver-scope.portable { background: var(--color-accent-bg); color: var(--color-accent); }
-.ver-scope.system { background: rgba(124, 129, 139, 0.18); color: var(--color-text-secondary); }
+.ver-scope.system { background: var(--color-border); color: var(--color-text-secondary); }
 .col-path, .col-note {
   font-size: 11px; color: var(--color-text-disabled);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: monospace;
 }
 .col-note { font-family: inherit; }
 .env-badge { font-size: 11px; padding: 2px 8px; border-radius: var(--radius-md); width: fit-content; }
-.env-badge.on { background: rgba(76, 175, 80, 0.15); color: var(--color-success); }
+.env-badge.on { background: var(--color-success-bg); color: var(--color-success); }
 .env-badge.off { background: var(--color-bg-primary); color: var(--color-text-disabled); }
 
 .col-svc { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -3204,19 +4114,19 @@ const s = currentRuntimeState
 .status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; color: var(--color-text-muted); }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-disabled); }
 .status.on { color: var(--color-success); }
-.status.on .status-dot { background: var(--color-success); box-shadow: 0 0 5px rgba(76, 175, 80, 0.6); }
-.status-dot.ok { background: var(--color-success); box-shadow: 0 0 5px rgba(76, 175, 80, 0.6); }
-.status-dot.warn { background: var(--color-warning); box-shadow: 0 0 5px rgba(245, 166, 35, 0.5); }
-.status-dot.fail { background: var(--color-danger); box-shadow: 0 0 5px rgba(244, 67, 54, 0.5); }
+.status.on .status-dot { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
+.status-dot.ok { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
+.status-dot.warn { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
+.status-dot.fail { background: var(--color-danger); box-shadow: 0 0 5px var(--color-danger-border); }
 .status-dot.missing { background: var(--color-text-disabled); }
 .svc-btn {
   font-size: 11px; padding: 4px 12px; border-radius: var(--radius-sm); border: none; cursor: pointer;
-  font-family: inherit; color: #fff; transition: opacity var(--transition-fast);
+  font-family: inherit; color: var(--color-accent-text); transition: opacity var(--transition-fast);
 }
 .svc-btn.start { background: var(--color-success); }
 .svc-btn.stop { background: var(--color-danger); }
 .svc-btn.restart { background: var(--color-accent); }
-.svc-btn.console { background: #6b7280; }
+.svc-btn.console { background: var(--color-text-muted); }
 .svc-btn:hover { opacity: 0.9; }
 .svc-btn:disabled { opacity: 0.55; cursor: default; }
 .svc-port { font-size: 11px; color: var(--color-text-disabled); }
@@ -3228,13 +4138,13 @@ const s = currentRuntimeState
   margin: 10px 0 4px;
   padding: 8px 12px;
   border-radius: var(--radius-md);
-  background: rgba(255, 170, 0, 0.12);
-  border: 1px solid rgba(255, 170, 0, 0.4);
-  color: #e0a200;
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  color: var(--color-warning);
   font-size: 12px;
   line-height: 1.5;
 }
-.dark .port-conflict-banner { color: #f0b429; }
+.dark .port-conflict-banner { color: var(--color-warning); }
 .pc-icon { font-size: 14px; line-height: 1; }
 .svc-port-link { text-decoration: none; transition: color var(--transition-fast); }
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
@@ -3275,13 +4185,13 @@ const s = currentRuntimeState
 }
 .op-btn:hover { background: var(--color-bg-primary); color: var(--color-text-primary); }
 .op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
-.op-btn.danger:hover { background: rgba(216, 44, 32, 0.12); color: var(--color-danger); border-color: var(--color-danger); }
+.op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger); }
 .op-btn:disabled { opacity: 0.4; cursor: default; }
 .op-btn.small { padding: 2px 9px; font-size: 11px; }
 .op-btn.primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .op-btn.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
-.badge.ok { background: rgba(67, 160, 71, 0.12); color: var(--color-success); }
-.badge.warn { background: rgba(251, 140, 0, 0.12); color: var(--color-warning); }
+.badge.ok { background: var(--color-success-bg); color: var(--color-success); }
+.badge.warn { background: var(--color-warning-bg); color: var(--color-warning); }
 
 
 /* ---- 证书签发面板 ---- */
@@ -3333,8 +4243,10 @@ const s = currentRuntimeState
   position: absolute; z-index: 30; min-width: 160px;
   background: var(--color-surface); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); padding: 4px; margin-top: 4px;
-  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 28px var(--color-bg-overlay);
   display: flex; flex-direction: column; gap: 2px;
+  /* 特色操作接入后条目变多（Node 一条版本行可到 8 项），限高滚动避免菜单长到屏幕外 */
+  max-height: 70vh; overflow-y: auto;
 }
 .op-item {
   text-align: left; font-size: 12px; padding: 6px 10px; border-radius: var(--radius-sm);
@@ -3343,7 +4255,7 @@ const s = currentRuntimeState
 }
 .op-item:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .op-item.on { color: var(--color-accent); }
-.op-item.danger:hover { background: rgba(216, 44, 32, 0.12); color: var(--color-danger); }
+.op-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
 .op-item:disabled { opacity: 0.4; cursor: default; }
 .menu-backdrop { position: fixed; inset: 0; z-index: 20; }
 .env-install-btn.danger { background: var(--color-danger); }
@@ -3362,8 +4274,8 @@ const s = currentRuntimeState
 .path-dir { color: var(--color-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; min-width: 0; }
 .path-flag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; font-weight: 600; }
 .path-flag-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-.path-flag.ok { color: #1a7f37; background: rgba(26,127,55,.13); }
-.path-flag.no { color: #b42318; background: rgba(180,35,24,.13); }
+.path-flag.ok { color: var(--color-success); background: var(--color-success-bg); }
+.path-flag.no { color: var(--color-danger); background: var(--color-danger-bg); }
 .path-empty { color: var(--color-text-muted); font-size: 12px; padding: 10px 2px; text-align: center; }
 .path-modal-head { display: flex; align-items: center; gap: 12px; margin: 2px 0 4px; }
 .path-modal-icon { width: 34px; height: 34px; border-radius: var(--radius-md); flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--color-accent-bg); color: var(--color-accent); }
@@ -3371,7 +4283,7 @@ const s = currentRuntimeState
 .path-modal-titles { min-width: 0; }
 .path-summary { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--color-text-secondary); margin: 8px 0 2px; }
 .path-summary-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-disabled); flex: none; }
-.path-summary-dot.ok { background: #1a7f37; }
+.path-summary-dot.ok { background: var(--color-success); }
 
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 26px 0; }
 .empty-actions { margin-top: 10px; }
@@ -3382,7 +4294,7 @@ const s = currentRuntimeState
 /* 安装区 */
 .install-grid { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cur-ver { font-weight: 600; color: var(--color-text-primary); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-.up-to-date { color: #1a7f37; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
+.up-to-date { color: var(--color-success); font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px; }
 .up-to-date::before { content: '✓'; }
 .install-input-wrap { flex: 1; min-width: 160px; }
 .env-input, .env-select {
@@ -3408,10 +4320,10 @@ const s = currentRuntimeState
 .link-btn:hover { background: var(--color-accent-bg); }
 .link-btn:disabled { opacity: 0.5; cursor: default; }
 .link-btn.danger { color: var(--color-danger); border-color: var(--color-danger); }
-.link-btn.danger:hover { background: rgba(216, 44, 32, 0.12); }
+.link-btn.danger:hover { background: var(--color-danger-bg); }
 .env-install-btn {
   flex-shrink: 0; padding: 8px 16px; border-radius: var(--radius-sm); border: none;
-  background: var(--color-accent); color: #fff; font-size: 13px; font-weight: 500;
+  background: var(--color-accent); color: var(--color-accent-text); font-size: 13px; font-weight: 500;
   cursor: pointer; font-family: inherit; transition: opacity var(--transition-fast);
 }
 .env-install-btn:hover { opacity: 0.9; }
@@ -3442,7 +4354,7 @@ const s = currentRuntimeState
 
 /* 弹窗（通用遮罩，供各类子弹窗复用） */
 .modal-overlay {
-  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  position: fixed; inset: 0; background: var(--color-bg-overlay);
   display: flex; align-items: center; justify-content: center; z-index: 50;
 }
 
@@ -3457,7 +4369,7 @@ const s = currentRuntimeState
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
-  box-shadow: 0 18px 56px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 18px 56px var(--color-bg-overlay);
   display: flex;
   flex-direction: column;
   padding: 20px 22px;
@@ -3474,11 +4386,11 @@ const s = currentRuntimeState
 }
 
 /* 通用配置编辑弹窗（现代化：分层头部 / 路径胶囊 / 等宽编辑器 / 分隔页脚） */
-.cfg-overlay { background: rgba(0, 0, 0, 0.45); backdrop-filter: blur(2px); }
+.cfg-overlay { background: var(--color-bg-overlay); backdrop-filter: blur(2px); }
 .cfg-modal {
   width: 860px; max-width: 94vw; height: 82vh; max-height: 88vh;
   background: var(--color-surface); border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg); box-shadow: 0 18px 56px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-lg); box-shadow: 0 18px 56px var(--color-bg-overlay);
   display: flex; flex-direction: column; overflow: hidden;
 }
 .cfg-head {
@@ -3522,7 +4434,7 @@ const s = currentRuntimeState
 }
 .cfg-btn.ghost { background: transparent; border-color: var(--color-border); color: var(--color-text-secondary); }
 .cfg-btn.ghost:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.cfg-btn.primary { background: var(--color-accent); color: #fff; font-weight: 500; }
+.cfg-btn.primary { background: var(--color-accent); color: var(--color-accent-text); font-weight: 500; }
 .cfg-btn.primary:hover { opacity: 0.9; }
 
 /* 分组侧栏 */
@@ -3551,6 +4463,20 @@ const s = currentRuntimeState
 .php-modal { width: 540px; max-width: 94vw; }
 /* Go 环境变量配置弹窗（go env） */
 .go-env-modal { width: 560px; max-width: 94vw; }
+/* PATH 区块：与下方 go.env 表单明确分区——前者管「命令找不找得到」，后者管「命令的行为」 */
+.go-path-box {
+  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+  border-radius: 10px; padding: 10px 12px; margin: 4px 0 14px;
+}
+.go-path-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.go-path-label { font-size: 12px; color: var(--color-text-secondary); flex: none; }
+.go-path-value {
+  flex: 1 1 200px; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11.5px; color: var(--color-text-primary); background: var(--color-bg-primary);
+  border: 1px solid var(--color-border); border-radius: 6px; padding: 3px 8px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.go-path-hint { margin: 7px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--color-text-muted); }
 .go-env-desc { font-size: 12px; color: var(--color-text-muted); margin: 0 0 12px; line-height: 1.5; }
 .go-env-form { max-height: 64vh; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; }
 .go-env-row { display: flex; flex-direction: column; gap: 5px; }
@@ -3586,6 +4512,37 @@ const s = currentRuntimeState
   border-radius: var(--radius-sm); padding: 8px 10px; font-size: 11px; max-height: 260px; overflow: auto;
   white-space: pre-wrap; word-break: break-all; color: var(--color-text-muted); margin: 0;
 }
+/* 特色操作输出弹窗：宽度略宽于普通弹窗，输出区可滚动 */
+.task-modal { width: 680px; }
+.task-ver {
+  margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--color-text-muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.task-confirm {
+  display: flex; gap: 10px; margin-top: 12px; padding: 10px 12px;
+  border-radius: var(--radius-sm); border: 1px solid var(--color-danger);
+  background: var(--color-danger-bg);
+}
+.task-confirm-icon {
+  width: 20px; height: 20px; flex: none; border-radius: 50%; background: var(--color-danger);
+  color: var(--color-accent-text); font-size: 12px; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.task-confirm-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
+.task-confirm-text { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--color-text-secondary); }
+.task-output {
+  margin: 12px 0 0; padding: 10px 12px; flex: 1 1 auto; max-height: 52vh; overflow: auto;
+  background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px; line-height: 1.6; color: var(--color-text-primary);
+  white-space: pre-wrap; word-break: break-word;
+}
+.task-hint { margin: 6px 0 0; font-size: 11px; color: var(--color-text-muted); }
+.op-group {
+  padding: 4px 10px 2px; font-size: 10px; letter-spacing: 0.04em;
+  color: var(--color-text-disabled); text-transform: uppercase;
+}
+
 .log-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
 .log-filter {
   flex: 1 1 160px; min-width: 120px; height: 28px; padding: 0 8px; font-size: 12px;
@@ -3599,7 +4556,7 @@ const s = currentRuntimeState
   border: 1px solid var(--color-border); border-radius: var(--radius-sm); white-space: nowrap;
 }
 .log-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
-.log-btn.active { background: var(--color-accent); color: #fff; border-color: var(--color-accent); }
+.log-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .log-count { font-size: 11px; color: var(--color-text-disabled); margin-left: auto; }
 .ext-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow: auto; }
 .ext-row {
@@ -3609,5 +4566,186 @@ const s = currentRuntimeState
 .ext-row:hover { background: var(--color-bg-tertiary); }
 .ext-name { font-weight: 600; }
 .ext-file { margin-left: auto; font-size: 10px; color: var(--color-text-disabled); font-family: monospace; }
+
+/* ===== 维护面板（源体检 / 磁盘 / 镜像 / 清单）===== */
+.maint-modal {
+  width: min(940px, 94vw);
+  max-height: 84vh;
+  display: flex;
+  flex-direction: column;
+}
+.maint-body {
+  overflow-y: auto;
+  min-height: 200px;
+}
+.maint-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-5);
+}
+.maint-summary {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.maint-sub { margin-top: var(--space-6); }
+.maint-sub-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: var(--space-3);
+}
+.maint-table { display: flex; flex-direction: column; gap: 2px; }
+.maint-row {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr) 96px 68px;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xs);
+  font-size: 12px;
+}
+.maint-row:not(.maint-head):hover { background: var(--color-bg-tertiary); }
+.maint-head {
+  color: var(--color-text-muted);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  border-bottom: 1px solid var(--color-border);
+}
+.maint-rt {
+  display: flex;
+  flex-direction: column;
+  color: var(--color-text-primary);
+  overflow: hidden;
+}
+.maint-rt em {
+  font-style: normal;
+  font-size: 10px;
+  color: var(--color-text-disabled);
+  font-family: monospace;
+}
+.maint-src {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-secondary);
+}
+.maint-src em { font-style: normal; color: var(--color-warning); }
+.maint-status {
+  font-size: 11px;
+  padding: 2px var(--space-3);
+  border-radius: var(--radius-full);
+  text-align: center;
+}
+.maint-status.ok { color: var(--color-success); background: var(--color-success-bg); }
+.maint-status.bad { color: var(--color-danger); background: var(--color-danger-bg); }
+.maint-status.warn { color: var(--color-warning); background: var(--color-warning-bg); }
+.maint-status.off { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
+.maint-lat {
+  text-align: right;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* 系统环境变量面板：PATH 行是「路径 + 删除」，变量行是「名 + 值 + 删除」，列宽各自定制 */
+.envvar-path-row { grid-template-columns: minmax(0, 1fr) 72px; }
+.envvar-row { grid-template-columns: 170px minmax(0, 1fr) 88px; }
+.envvar-path,
+.envvar-name {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  color: var(--color-text-primary);
+}
+.envvar-value {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: monospace;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+}
+.envvar-badge {
+  flex-shrink: 0;
+  font-style: normal;
+  font-size: 10px;
+  padding: 1px var(--space-2);
+  border-radius: var(--radius-full);
+  color: var(--color-primary);
+  background: var(--color-bg-tertiary);
+}
+.envvar-name-input { max-width: 170px; font-family: monospace; text-transform: uppercase; }
+.disk-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.disk-row {
+  padding: var(--space-3) var(--space-4);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.disk-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.disk-name { font-weight: 600; font-size: 13px; }
+.disk-size {
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.disk-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin-top: var(--space-2);
+}
+.disk-chip {
+  font-size: 11px;
+  padding: 2px var(--space-4);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+}
+/* GitHub 下载加速开关（体检页内） */
+.gh-accel {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  margin: var(--space-2) 0 var(--space-3); padding: 8px 12px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary); cursor: pointer;
+}
+.gh-accel input { width: 14px; height: 14px; accent-color: var(--color-accent); cursor: pointer; flex: none; }
+.gh-accel-label { font-size: 13px; color: var(--color-text-primary); }
+.gh-accel-hint { font-size: 11.5px; color: var(--color-text-muted); font-style: normal; }
+.manifest-report {
+  margin-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.manifest-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-secondary);
+}
+.manifest-name { font-weight: 600; font-size: 12px; min-width: 110px; }
+.manifest-tag {
+  font-size: 11px;
+  padding: 2px var(--space-4);
+  border-radius: var(--radius-full);
+}
+.manifest-tag.bad { color: var(--color-danger); background: var(--color-danger-bg); }
+.manifest-tag.warn { color: var(--color-warning); background: var(--color-warning-bg); }
+.manifest-tag.extra { color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
+.manifest-tag.ok { color: var(--color-success); background: var(--color-success-bg); }
+.hidden-file { display: none; }
 
 </style>

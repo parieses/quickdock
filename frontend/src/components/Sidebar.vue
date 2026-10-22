@@ -472,7 +472,7 @@ async function handleDeleteScene(sceneId: string) {
 .nav-item.active svg { color: var(--color-accent); }
 .nav-badge {
   margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-md);
-  background: #e0533d; color: #fff; font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+  background: #e0533d; color: var(--color-accent-text); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
 }
 .sidebar.collapsed .nav-badge { position: absolute; top: 6px; right: 10px; margin: 0; }
 .nav-item.opening { cursor: default; opacity: .7; }
@@ -561,7 +561,7 @@ async function handleDeleteScene(sceneId: string) {
 }
 .ws-item-row:hover .ws-item-action { display: flex; }
 .ws-item-action:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.ws-item-action.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+.ws-item-action.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .ws-item-action:disabled,
 .ws-item-action.ws-action-disabled { display: none; }
 .ws-create { border-top: 1px solid var(--color-border); color: var(--color-text-disabled); }
@@ -720,7 +720,7 @@ async function handleDeleteScene(sceneId: string) {
   justify-content: center;
 }
 .action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.action-btn.danger:hover { color: var(--color-danger); background: rgba(232, 76, 76, 0.1); }
+.action-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 
 /* 拖拽样式 */
 .sidebar-nav li.dragging { opacity: 0.4; }

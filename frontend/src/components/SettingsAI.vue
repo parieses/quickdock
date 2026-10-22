@@ -169,7 +169,7 @@ async function testAIConnection() {
   await saveAIProfiles()
   aiTesting.value = true; showAIMsg('测试中…')
   try {
-    const res = await AITestConnection(cur.id)
+    const res = unwrap<{ success?: boolean; message?: string }>(await AITestConnection(cur.id))
     if (!res) throw new Error('无响应')
     showAIMsg(res.message || '未知', res.success !== true)
   } catch (e: any) {
