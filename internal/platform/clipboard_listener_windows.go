@@ -15,8 +15,10 @@ package platform
 
 import (
 	goruntime "runtime"
+	"sync"
 	"sync/atomic"
 	"syscall"
+	"time"
 	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/w32"
@@ -43,10 +45,40 @@ var (
 // listenerHwnd 监听窗口句柄（移除监听 / 剪贴板读取使用）
 var listenerHwnd atomic.Uintptr
 
+var (
+	// listenerReady 在监听窗口创建完成（hwnd 已就绪）后关闭；创建失败也会关闭。
+	//
+	// Stop 必须等它。早期版本直接读 listenerHwnd，若 Stop 早于 Store(hwnd)
+	// 被调用（Start 里还有 RegisterClass + CreateWindow 两步阻塞），会读到 0
+	// 而静默放弃——随后窗口照样被建出来并进入消息循环，那条 LockOSThread
+	// 的线程从此无人能关，永久泄漏。
+	listenerReady   chan struct{}
+	listenerReadyMu sync.Mutex
+
+	// listenerRunning 保证 Start 幂等：重复 Start 会叠加出第二个消息线程和
+	// 第二个监听窗口，而 listenerHwnd 只存最后一个，前者再也关不掉。
+	listenerRunning atomic.Bool
+)
+
+// listenerReadyTimeout 等待监听窗口就绪的上限。
+// 建窗口是同步 Win32 调用，正常在毫秒级；超时说明线程卡住或压根没起来，
+// 此时也没有窗口可销毁，继续等只会拖慢退出。
+const listenerReadyTimeout = 3 * time.Second
+
 // StartClipboardListener 在独立 OS 线程上启动消息泵（GetMessage 阻塞，必须独占线程）。
 // onChange 在 Win32 消息线程上被调用，重活应自行转 goroutine。
 func StartClipboardListener(onChange func()) {
-	go runClipboardListener(onChange)
+	if listenerRunning.Swap(true) {
+		logger.W("[platform] 剪贴板监听已在运行，忽略重复启动")
+		return
+	}
+
+	listenerReadyMu.Lock()
+	listenerReady = make(chan struct{})
+	ready := listenerReady
+	listenerReadyMu.Unlock()
+
+	go runClipboardListener(onChange, ready)
 }
 
 // StopClipboardListener 注销剪贴板格式监听并退出消息泵。
@@ -55,13 +87,32 @@ func StartClipboardListener(onChange func()) {
 // （LockOSThread），若不发 WM_DESTROY 使其 PostQuitMessage(0) 退出循环，该线程会永久泄漏。
 // DestroyWindow 跨线程安全——它在窗口所属线程派发 WM_DESTROY，由 wndProc 触发退出。
 func StopClipboardListener() {
+	if !listenerRunning.Load() {
+		return
+	}
+
+	// 先等窗口就绪，避免「窗口还没建好 → 读到 hwnd==0 → 放弃」导致的线程泄漏。
+	listenerReadyMu.Lock()
+	ready := listenerReady
+	listenerReadyMu.Unlock()
+	if ready != nil {
+		select {
+		case <-ready:
+		case <-time.After(listenerReadyTimeout):
+			logger.W("[platform] 等待剪贴板监听窗口就绪超时（%v），放弃停止", listenerReadyTimeout)
+		}
+	}
+
 	hwnd := listenerHwnd.Load()
 	if hwnd == 0 {
+		// 窗口创建失败：线程自己已退出，这里只需复位运行标记。
+		listenerRunning.Store(false)
 		return
 	}
 	w32.RemoveClipboardFormatListener(w32.HWND(hwnd))
 	procDestroyWindowW.Call(hwnd)
 	listenerHwnd.Store(0)
+	listenerRunning.Store(false)
 	logger.I("[platform] 剪贴板监听已停止")
 }
 
@@ -90,8 +141,14 @@ func clipboardWndProc(onChange func()) func(hwnd uintptr, msg uint32, wParam, lP
 	}
 }
 
-func runClipboardListener(onChange func()) {
+func runClipboardListener(onChange func(), ready chan struct{}) {
 	goruntime.LockOSThread()
+
+	// 消息泵真正退出时才复位运行标记，使 Stop→Start 的重启得以成立。
+	defer listenerRunning.Store(false)
+	// ready 必须在**任何**退出路径上关闭，否则 Stop 会白等一个超时才继续。
+	closeReady := sync.OnceFunc(func() { close(ready) })
+	defer closeReady()
 
 	// syscall.UTF16PtrFromString：StringToUTF16Ptr 已弃用（SA1019）；常量串无内嵌 NUL，error 必为 nil
 	className, _ := syscall.UTF16PtrFromString("QuickDock_Clipboard_Window_v4")
@@ -131,9 +188,11 @@ func runClipboardListener(onChange func()) {
 
 	if hwnd == 0 {
 		logger.E("[platform] 创建剪贴板监听窗口失败")
-		return
+		return // ready 由 defer 关闭，Stop 不会白等
 	}
 	listenerHwnd.Store(hwnd)
+	// 就绪信号必须在 Store 之后立刻发出，Stop 靠它判断能否安全销毁。
+	closeReady()
 
 	if w32.AddClipboardFormatListener(w32.HWND(hwnd)) {
 		logger.I("[platform] 剪贴板监听已启动 (AddClipboardFormatListener)")

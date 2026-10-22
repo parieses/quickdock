@@ -295,7 +295,27 @@ func (m *Manager) InvokeHostMethod(pluginID, method string, params json.RawMessa
 // handleCallback 处理插件发起的回调请求/通知（带权限校验）
 // 由 readLoop goroutine 调用；rawLine 为该行原始 JSON，用于区分"无 id 的通知"
 // 与"id 恰好为 0 的请求"（JSON-RPC 规范中 id=0 是合法请求 ID）
+//
+// 这里此前有两处缺陷，一并修掉：
+//
+//  1. 无 recover。本函数跑在独立 goroutine 里（见 rpc.go 的调用点），而
+//     invokeHostMethod 最终执行的是 services 层注入的业务 handler，第三方
+//     插件发来的 JSON 可间接触发任意代码路径。其中任一 nil 解引用/越界都会
+//     越过 goroutine 边界传播，直接终止整个宿主进程——是「宿主崩溃」而非
+//     「插件崩溃」。同包 mcp/server.go 的 callToolSafe 对同类风险已做 recover。
+//
+//  2. 裸 Stdin.Write 无超时。插件不再读 stdin 时管道写满会永久阻塞，而调用方
+//     stopPlugin 是在持有 m.mu 的路径上，会把整个插件管理器连同 ShutdownAll
+//     一起拖死，应用退出时卡住。且它不查 writeBroken，与最常走的 Call /
+//     SendNotification 两条路径并发写同一管道，会把 JSON-RPC 行撕成错位字节。
 func (m *Manager) handleCallback(inst *PluginInstance, req *RPCRequest, rawLine []byte) {
+	defer func() {
+		if r := recover(); r != nil {
+			logger.PluginE(inst.Manifest.ID, "[PANIC] handleCallback %s: %v", req.Method, r)
+			_ = inst.writeWithTimeout(MakeError(req.ID, -32603, fmt.Sprintf("host 方法内部错误: %v", r)))
+		}
+	}()
+
 	var probe struct {
 		ID *int64 `json:"id"`
 	}
@@ -316,17 +336,11 @@ func (m *Manager) handleCallback(inst *PluginInstance, req *RPCRequest, rawLine 
 		default:
 			logger.PluginE(inst.Manifest.ID, "host 方法 %s 执行失败: %v", req.Method, err)
 		}
-		resp := MakeError(req.ID, code, err.Error())
-		inst.sendMu.Lock()
-		inst.Stdin.Write(resp)
-		inst.sendMu.Unlock()
+		_ = inst.writeWithTimeout(MakeError(req.ID, code, err.Error()))
 		return
 	}
 
-	resp := MakeResponse(req.ID, result)
-	inst.sendMu.Lock()
-	inst.Stdin.Write(resp)
-	inst.sendMu.Unlock()
+	_ = inst.writeWithTimeout(MakeResponse(req.ID, result))
 }
 
 // InjectHostMethod 供 services 层注入实际 Host Method 实现

@@ -33,6 +33,11 @@ var (
 // MaxFileSize 单文件超过后自动滚动到新文件（保留同名不覆盖语义，日期变化即切换）
 const MaxFileSize = 20 << 20 // 20 MB
 
+// maxLogShards 单日最多滚动出多少个分片（含不带序号的首个）。
+// 全部分片写满后继续往最后一个追加，故单日总量上界为
+// maxLogShards*MaxFileSize，不会像早期版本那样单个文件只增不减。
+const maxLogShards = 5
+
 // Init 初始化日志目录并打开当日文件；幂等（同目录多次调用无副作用）。
 func Init(dir string) {
 	mu.Lock()
@@ -67,6 +72,26 @@ func Close() {
 	}
 }
 
+// pickLogName 选出当日应当写入的日志文件：首个写满就滚到 -2、-3…。
+//
+// 为什么必须滚动：早期版本超限后仍以固定文件名 + O_APPEND 重开**同一个**文件，
+// size 被重置成当前大小（依旧超限），于是「超限」判定对之后每一条日志都成立——
+// 每条都要白做一遍 Close+Open+Stat，而文件只增不减，最终能把磁盘撑爆。
+// 分片名仍带 quickdock-/plugin- 前缀，cleanOld 的按前缀回收照旧生效。
+func pickLogName(prefix, day string) string {
+	name := prefix + day + ".log"
+	for i := 2; i <= maxLogShards && logFull(filepath.Join(logDir, name)); i++ {
+		name = fmt.Sprintf("%s%s-%d.log", prefix, day, i)
+	}
+	return name
+}
+
+// logFull 判断日志文件是否已写到上限；文件不存在视为未满。
+func logFull(path string) bool {
+	st, err := os.Stat(path)
+	return err == nil && st.Size() >= MaxFileSize
+}
+
 func openLocked() {
 	// 切换目录/日期前先关闭旧文件，避免句柄泄漏（Windows 下还会锁文件）
 	if f != nil {
@@ -75,7 +100,7 @@ func openLocked() {
 	}
 	now := time.Now()
 	day := now.Format("2006-01-02")
-	name := "quickdock-" + day + ".log"
+	name := pickLogName("quickdock-", day)
 	var err error
 	f, err = os.OpenFile(filepath.Join(logDir, name), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
@@ -133,7 +158,12 @@ func Logf(level, format string, args ...interface{}) {
 		now.Format("2006-01-02 15:04:05.000"), level, fmt.Sprintf(format, args...))
 	n, _ := f.WriteString(line)
 	size += int64(n)
-	_ = f.Sync() // 及时落盘：排障场景要实时可读
+	// 只给 E 级强制落盘：崩溃排障要看的是错误，而 I/W 级正好落在最热的路径上
+	// （插件逐行转发子进程 stdout、监控高频轮询），每条都 fsync 一次会把整个
+	// 宿主拖慢。其余级别交给 OS 回写，代价是最多丢崩溃前的最后几条。
+	if level == "E" {
+		_ = f.Sync()
+	}
 }
 
 // I/W/E 便捷封装
@@ -163,7 +193,8 @@ func Trunc(s string, maxRunes int) string {
 // 设计要点：
 //   - 复用同一把 mu，避免插件文件与主文件并发打开/滚动的竞态（日志写操作极短，性能影响可忽略）。
 //   - 未初始化时回退到 os.Stderr（与 Logf 一致），保证任何情况下调用不阻塞主流程。
-//   - 同样走 Sync 实时落盘，排障场景要实时可读。
+//   - 落盘策略与主日志一致（仅 E 级 fsync）。插件逐行转发子进程 stdout 是
+//     最热的调用路径，每条都 fsync 会实打实拖慢宿主。
 
 // openPluginLocked 打开/滚动插件日志文件；调用方须持有 mu。
 func openPluginLocked() {
@@ -173,8 +204,9 @@ func openPluginLocked() {
 	}
 	now := time.Now()
 	day := now.Format("2006-01-02")
+	name := pickLogName("plugin-", day)
 	var err error
-	pf, err = os.OpenFile(filepath.Join(logDir, "plugin-"+day+".log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	pf, err = os.OpenFile(filepath.Join(logDir, name), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 	if err != nil {
 		pf = nil
 		return
@@ -206,7 +238,10 @@ func PluginLog(pluginID, level, format string, args ...interface{}) {
 		now.Format("2006-01-02 15:04:05.000"), level, pluginID, msg)
 	n, _ := pf.WriteString(line)
 	pSize += int64(n)
-	_ = pf.Sync()
+	// 与主日志同策略：只有 E 级 fsync，I/W 级交给 OS 回写。
+	if level == "E" {
+		_ = pf.Sync()
+	}
 }
 
 // PluginI/PluginW/PluginE 插件日志便捷封装

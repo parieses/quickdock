@@ -14,7 +14,9 @@ import (
 // 每 10 秒轮询一次，对「已到提醒时间、未完成、未发送」的待办推送系统通知。
 func (a *AppService) StartReminderScheduler() {
 	a.schedulerQuit = make(chan struct{})
+	a.schedWG.Add(1)
 	go func() {
+		defer a.schedWG.Done()
 		defer logger.RecoverPanic("reminder scheduler")
 		// 延迟 3 秒启动，确保通知服务已完成 ServiceStartup 初始化
 		time.Sleep(3 * time.Second)
@@ -38,6 +40,33 @@ func (a *AppService) StopSchedulers() {
 		return
 	}
 	a.schedulerQuitOnce.Do(func() { close(a.schedulerQuit) })
+}
+
+// schedulerDrainTimeout 退出时等待常驻协程收尾的宽限期。
+//
+// 不能无限等：慢探针/HTTP 任务最长能跑 30s，点退出后卡半分钟无法接受。
+// 给一个短宽限期让「正好在飞」的任务把结果落库，超时就放弃剩余结果——
+// 宁可丢最后几条执行记录，也不能让应用退不出去。
+const schedulerDrainTimeout = 3 * time.Second
+
+// waitForSchedulers 等到三个常驻循环及其派生的执行协程全部返回。
+//
+// 为什么必须在 DB.Close() 之前做：循环本体收到退出信号立即返回，但此前派生出的
+// 探测/执行协程仍在跑并持有 DB 引用。DB 一旦先关，写回执行结果
+// （SetTaskRunResult / AddMonitorLog）会静默失败，任务执行结果永久丢失。
+func (a *AppService) waitForSchedulers() {
+	done := make(chan struct{})
+	go func() {
+		a.schedWG.Wait()
+		a.taskWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		logger.I("[退出] 常驻循环与执行协程已全部收尾")
+	case <-time.After(schedulerDrainTimeout):
+		logger.W("[退出] 等待常驻协程收尾超时（%v），放弃剩余执行结果", schedulerDrainTimeout)
+	}
 }
 
 // checkReminders 检查并发送到期的待办提醒

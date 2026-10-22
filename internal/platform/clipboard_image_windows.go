@@ -139,15 +139,18 @@ func writeClipboardDIB(hwnd uintptr, dib []byte) error {
 	copy(unsafe.Slice((*byte)(ptr), len(dib)), dib)
 	w32.GlobalUnlock(handle)
 
-	if !openClipboardWithRetry(hwnd) {
+	// 临界区整体锁线程（见 WithClipboard）：Open/Close 跨线程 = 剪贴板永久锁死。
+	var setFailed bool
+	if !WithClipboard(hwnd, func() {
+		w32.EmptyClipboard()
+		if w32.SetClipboardData(8, handle) == 0 {
+			setFailed = true
+		}
+	}) {
 		w32.GlobalFree(handle)
 		return fmt.Errorf("OpenClipboard failed")
 	}
-	defer w32.CloseClipboard()
-
-	w32.EmptyClipboard()
-
-	if w32.SetClipboardData(8, handle) == 0 {
+	if setFailed {
 		// 设置失败 → 内存所有权未转移，需自行释放。
 		w32.GlobalFree(handle)
 		return fmt.Errorf("SetClipboardData failed")

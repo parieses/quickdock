@@ -21,6 +21,7 @@ type PluginService struct {
 	pendingInitPlugin  string
 	pendingInitText    string
 	pendingInitCommand string
+	pendingInitAt      time.Time // 槽位写入时间，供 TTL 过期判定（见 GetAndClearPendingPluginInit）
 	pendingInitTextMu  sync.Mutex
 }
 

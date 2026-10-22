@@ -202,9 +202,14 @@ func (a *AppService) ServiceShutdown() error {
 	logger.I("[退出] 本地服务与 dsh 已停止 耗时=%v", time.Since(mark).Round(time.Millisecond))
 	mark = time.Now()
 
-	// 先停三个常驻调度 goroutine（提醒/定时任务/网站监控），避免 DB 关闭后它们仍触发访问
+	// 先停三个常驻调度 goroutine（提醒/定时任务/网站监控），并等它们真正收尾。
+	//
+	// 只 close 通道是不够的：循环本体收到信号会立即返回，但此前派生的执行协程
+	// 仍在访问 DB。DB 一关，它们写回执行结果就全部静默失败——用户看到的是
+	// 「任务跑了，结果没记」。故必须 waitForSchedulers() 之后再 Close。
 	if a.schedulerQuit != nil {
 		a.StopSchedulers()
+		a.waitForSchedulers()
 	}
 	// 取消剪贴板监听上下文，终止正在进行的剪贴板处理 goroutine
 	if a.ClipboardCancel != nil {

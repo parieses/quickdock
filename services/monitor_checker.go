@@ -34,8 +34,12 @@ var monitorRegexCache sync.Map // pattern → *regexp.Regexp
 // 监控增删改/启停时用 monitorWake 立即唤醒重排。
 func (a *AppService) StartMonitorChecker() {
 	a.monitorWake = make(chan struct{}, 1)
+	a.schedWG.Add(1)
 	// 常驻循环：panic 落盘后不重抛，避免一次异常让整个监控静默停摆
-	go logger.CapturePanicInGo("monitor:loop", a.monitorLoop)()
+	go logger.CapturePanicInGo("monitor:loop", func() {
+		defer a.schedWG.Done()
+		a.monitorLoop()
+	})()
 }
 
 func (a *AppService) wakeMonitorChecker() {
@@ -90,7 +94,11 @@ func (a *AppService) runDueMonitors() {
 		if _, loaded := a.monitorInflight.LoadOrStore(m.ID, struct{}{}); loaded {
 			continue
 		}
+		// 纳入 taskWG：探测完成后要写 AddMonitorLog，DB 关闭后写会静默失败
+		// （理由同 schedule_runner 的执行协程）。
+		a.taskWG.Add(1)
 		go func(m *db.Monitor) {
+			defer a.taskWG.Done()
 			defer a.monitorInflight.Delete(m.ID)
 			defer func() {
 				if r := recover(); r != nil {

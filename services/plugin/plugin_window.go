@@ -1,8 +1,18 @@
 package plugin
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // ===== 插件窗口管理 =====
+
+// pendingInitTTL 待注入 init 的存活时长，超过即视为过期残留：丢弃而非返回。
+// 防「槽位已设置但目标窗口在加载前被销毁 / 注入失败」后，陈旧 init 被该插件
+// 日后某次 iframe onLoad 无意消费——表现为插件莫名带着上次分离时的输入。
+// 正常链路（SetPendingPluginInit → ShowPluginWindow → 新窗口 onLoad）秒级完成，
+// 60s 对慢机器（插件进程冷启动 + 前端页拉取）仍留有余量。
+const pendingInitTTL = 60 * time.Second
 
 // SetPendingPluginInit 保存待注入的初始文本和命令（从命令面板跨窗口传递），带插件 id 归属。
 // 归属随 init 一起记录，避免独立窗口/内联在快速连开时跨插件错配。
@@ -12,23 +22,34 @@ func (p *PluginService) SetPendingPluginInit(pluginID, text, command string) {
 	p.pendingInitPlugin = pluginID
 	p.pendingInitText = text
 	p.pendingInitCommand = command
+	p.pendingInitAt = time.Now()
 }
 
 // GetAndClearPendingPluginInit 取出并清除待注入的初始文本和命令。
 // 仅当归属插件与传入的 pluginID 匹配时才取用并清除；不匹配则返回空、保留待注入数据，
-// 供正确的插件窗口日后消费。
+// 供正确的插件窗口日后消费。归属匹配但超过 pendingInitTTL 未消费，按过期残留丢弃。
 func (p *PluginService) GetAndClearPendingPluginInit(pluginID string) (text, command string) {
 	p.pendingInitTextMu.Lock()
 	defer p.pendingInitTextMu.Unlock()
 	if p.pendingInitPlugin != pluginID {
 		return "", ""
 	}
+	if p.pendingInitAt.IsZero() || time.Since(p.pendingInitAt) > pendingInitTTL {
+		p.clearPendingInitLocked()
+		return "", ""
+	}
 	text = p.pendingInitText
 	command = p.pendingInitCommand
+	p.clearPendingInitLocked()
+	return
+}
+
+// clearPendingInitLocked 清空待注入槽位，调用方须持 pendingInitTextMu。
+func (p *PluginService) clearPendingInitLocked() {
 	p.pendingInitPlugin = ""
 	p.pendingInitText = ""
 	p.pendingInitCommand = ""
-	return
+	p.pendingInitAt = time.Time{}
 }
 
 // ShowPluginWindow 显示插件窗口。
@@ -47,10 +68,24 @@ func (p *PluginService) ShowPluginWindow(pluginID string) {
 			}
 		}
 	}
+	// Show 返回 (窗口, 是否新创建)：false = 命中注册表复用已存在窗口。
+	var created bool
 	if p.App.Flags.Palette.Load() {
-		p.App.PluginWindowMgr.ShowInPanel(pluginID, title)
+		_, created = p.App.PluginWindowMgr.ShowInPanel(pluginID, title)
 	} else {
-		p.App.PluginWindowMgr.ShowAsWindow(pluginID, title)
+		_, created = p.App.PluginWindowMgr.ShowAsWindow(pluginID, title)
+	}
+	// created=false = 命中注册表复用已存在窗口（页内 X 是隐藏复用不是销毁，
+	// 10 分钟内重开同一插件都走这条路）。复用路径必须补 init：窗口的 iframe
+	// 早已加载完，@load 不会再触发，pending init 无人消费——用户表现为
+	// 「分离为独立窗口后数据没带过去，相当于重开了一个窗口」。
+	// 新建路径相反：iframe onLoad 会自行消费槽位（usePluginHost.usePendingInit），
+	// 这里若抢先取走，新窗口反而拿到空 init，故只处理复用路径。
+	if !created {
+		text, command := p.GetAndClearPendingPluginInit(pluginID)
+		if text != "" || command != "" {
+			p.App.PluginWindowMgr.InjectInitText(pluginID, text, command)
+		}
 	}
 }
 

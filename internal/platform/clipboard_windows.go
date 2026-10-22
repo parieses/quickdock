@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"image/png"
 	"os"
+	"runtime"
 	"syscall"
 	"time"
 	"unicode/utf16"
 	"unsafe"
 
 	"github.com/wailsapp/wails/v3/pkg/w32"
+
+	"quickdock/internal/logger"
 )
 
 // procGlobalSize w32 未导出 GlobalSize，保留手写声明（仅此处使用）。
@@ -43,23 +46,67 @@ func SimulatePaste() {
 	keybd.Call(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
 }
 
+// 剪贴板打开重试参数。总等待约 150ms：足够跨过别的程序几十毫秒级的占用，
+// 又不至于让一次「复制」的入库延迟到用户可感知。导出供 services 层日志引用，
+// 避免两处各写一份魔数。
+const (
+	ClipboardOpenAttempts  = 6
+	ClipboardRetryStepWait = 10 * time.Millisecond
+)
+
 // openClipboardWithRetry 打开系统剪贴板，被其他进程短暂持有时重试。
 //
 // 剪贴板是全系统独占资源：同一时刻只允许一个进程 OpenClipboard。别的程序（含本程序
 // 的读取路径）在自己的临界区里停留几十毫秒是常态，所以单次 OpenClipboard 失败
 // 并不代表剪贴板坏了——写路径直接放弃，用户看到的就是「点了复制，粘出来的还是旧内容」。
 // 退避总时长约 150ms，全部用在写路径（不阻塞 Win32 消息循环）。
+//
+// 注意：本函数只管「打开」，调用方必须经 WithClipboard 包裹整个临界区，
+// 否则 Open 与 Close 可能被 Go 调度切到不同 OS 线程上（见 WithClipboard 注释）。
 func openClipboardWithRetry(hwnd uintptr) bool {
-	const attempts = 6
-	for i := 0; i < attempts; i++ {
+	for i := 0; i < ClipboardOpenAttempts; i++ {
 		if w32.OpenClipboard(w32.HWND(hwnd)) {
 			return true
 		}
-		if i < attempts-1 {
-			time.Sleep(time.Duration(i+1) * 10 * time.Millisecond)
+		if i < ClipboardOpenAttempts-1 {
+			time.Sleep(ClipboardRetryStepWait * time.Duration(i+1))
 		}
 	}
 	return false
+}
+
+// WithClipboard 打开系统剪贴板 → 执行 fn → 关闭。返回 false 表示剪贴板始终
+// 未能打开（fn 不会被执行）。
+//
+// 【线程绑定是本项目剪贴板代码的第一纪律，也是本函数存在的唯一理由】
+// Win32 的 OpenClipboard 把剪贴板锁绑定到「调用线程」，之后必须由同一线程调用
+// CloseClipboard 才能释放。Go 运行时会因异步抢占（GC、循环安全点）把 goroutine
+// 切到别的 OS 线程——临界区里满是循环与内存拷贝，安全点非常密集。一旦 Open 与
+// Close 落在不同线程，CloseClipboard 静默失败，剪贴板被原线程无限期占用：
+// 此后所有程序的「复制」全部失败（它们重试几次后放弃，用户侧表现为复制毫无
+// 反应），本程序的捕获也会因 OpenClipboard 失败而全部丢失，且只能杀进程恢复。
+// wails 自带的 w32.SetClipboardText 内部正是用 LockOSThread 规避了同一问题，
+// 本项目自有路径必须保持同一纪律——所有剪贴板临界区一律经本函数进出。
+//
+// fn 内只允许做内存拷贝：解析 DIB、查前台窗口标题、写数据库等一律放到 fn 外。
+// 剪贴板是全局独占资源，临界区里多停留的每一毫秒，都会让别的程序的「复制」
+// 直接失败；而失败的复制不会产生 WM_CLIPBOARDUPDATE，那段内容既进不了系统
+// 剪贴板、也进不了历史记录——用户看到的就是「复制得越多，越复制不进去」。
+func WithClipboard(hwnd uintptr, fn func()) bool {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	if !openClipboardWithRetry(hwnd) {
+		return false
+	}
+	defer func() {
+		if !w32.CloseClipboard() {
+			logger.E("[platform] CloseClipboard 失败：剪贴板可能被无限期占用，其他程序的复制将全部失败，需重启进程恢复")
+		}
+	}()
+
+	fn()
+	return true
 }
 
 // SetClipboardFiles writes a list of file paths to the system clipboard (CF_HDROP)
@@ -107,15 +154,18 @@ func SetClipboardFiles(hwnd uintptr, paths []string) error {
 	copy(unsafe.Slice((*byte)(ptr), len(data)), data)
 	w32.GlobalUnlock(handle)
 
-	if !openClipboardWithRetry(hwnd) {
+	// 临界区整体锁线程（见 WithClipboard）：Open/Close 跨线程 = 剪贴板永久锁死。
+	var setFailed bool
+	if !WithClipboard(hwnd, func() {
+		w32.EmptyClipboard()
+		if w32.SetClipboardData(15, handle) == 0 {
+			setFailed = true
+		}
+	}) {
 		w32.GlobalFree(handle)
 		return fmt.Errorf("OpenClipboard failed")
 	}
-	defer w32.CloseClipboard()
-
-	w32.EmptyClipboard()
-
-	if w32.SetClipboardData(15, handle) == 0 {
+	if setFailed {
 		// 设置失败 → 内存所有权未转移，释放已分配的内存
 		w32.GlobalFree(handle)
 		return fmt.Errorf("SetClipboardData failed")
@@ -150,37 +200,36 @@ func SetClipboardImage(hwnd uintptr, imagePath string) error {
 // Used by snippet variable {clipboard}. Returns "" on any failure
 // (e.g. another app holds the clipboard open) — never errors.
 func GetClipboardText() string {
-	if !openClipboardWithRetry(0) {
-		return ""
-	}
-	defer w32.CloseClipboard()
-
-	handle := w32.GetClipboardData(13) // CF_UNICODETEXT
-	if handle == 0 {
-		return ""
-	}
-	ptr := w32.GlobalLock(handle)
-	if ptr == nil {
-		return ""
-	}
-	defer w32.GlobalUnlock(handle)
-
-	size := globalSize(uintptr(handle))
-	if size == 0 {
-		return ""
-	}
-	n := int(size) / 2
-	if n > 1<<20 {
-		n = 1 << 20 // 安全上限 1MB
-	}
-	buf := unsafe.Slice((*uint16)(ptr), n)
-	for i := 0; i < len(buf); i++ {
-		if buf[i] == 0 {
-			buf = buf[:i]
-			break
+	var text string
+	WithClipboard(0, func() {
+		handle := w32.GetClipboardData(13) // CF_UNICODETEXT
+		if handle == 0 {
+			return
 		}
-	}
-	return string(utf16.Decode(buf))
+		ptr := w32.GlobalLock(handle)
+		if ptr == nil {
+			return
+		}
+		defer w32.GlobalUnlock(handle)
+
+		size := globalSize(uintptr(handle))
+		if size == 0 {
+			return
+		}
+		n := int(size) / 2
+		if n > 1<<20 {
+			n = 1 << 20 // 安全上限 1MB
+		}
+		buf := unsafe.Slice((*uint16)(ptr), n)
+		for i := 0; i < len(buf); i++ {
+			if buf[i] == 0 {
+				buf = buf[:i]
+				break
+			}
+		}
+		text = string(utf16.Decode(buf))
+	})
+	return text
 }
 
 // GetActiveWindowTitle returns the title of the foreground window

@@ -39,12 +39,12 @@ func (a *ClipboardService) InsertClipboardEntry(text, sourceApp string) *service
 	return services.Wrap(data, err)
 }
 
-func (a *ClipboardService) DeleteExpiredClipboardEntries() (int64, error) {
-	if a.App.DB == nil {
-		return 0, fmt.Errorf("database not initialized")
+func (a *ClipboardService) DeleteExpiredClipboardEntries() *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
 	}
 	days, _ := a.App.DB.GetClipboardRetentionDays()
-	return a.App.DB.DeleteExpiredClipboardEntries(days)
+	return services.Wrap(a.App.DB.DeleteExpiredClipboardEntries(days))
 }
 
 // writeEntryToClipboard 将一条剪贴板条目写入系统剪贴板（image/file/text 三分支）。
@@ -243,49 +243,57 @@ func (a *ClipboardService) PasteClipboardEntry(id string) *services.ApiResult {
 	return services.Ok(nil)
 }
 
-// ===== 窗口隐藏 =====
+// ===== 窗口隐藏 / 热键控制 =====
+//
+// 这一组此前全部无返回值：窗口没藏住、热键没挂上时前端拿不到任何信号，
+// 只能静默失败。按 R11 统一改成 *services.ApiResult，调用方至少能判断成败。
 
 // HideWindow 隐藏主窗口
-func (a *ClipboardService) HideWindow() {
+func (a *ClipboardService) HideWindow() *services.ApiResult {
 	a.App.Flags.Clipboard.Store(false)
 	a.App.Flags.Main.Store(false)
 	if win := a.App.MainWindow; win != nil {
 		win.Hide()
 	}
+	return services.Ok(nil)
 }
 
 // HideClipboardWindow 隐藏剪贴板独立窗口
-func (a *ClipboardService) HideClipboardWindow() {
+func (a *ClipboardService) HideClipboardWindow() *services.ApiResult {
 	a.App.Flags.Clipboard.Store(false)
 	if fn := a.App.GetClipboardWindow; fn != nil {
 		if win := fn(); win != nil {
 			win.Hide()
 		}
 	}
+	return services.Ok(nil)
 }
 
 // HideNoteWindow 隐藏快捷笔记独立窗口（并复位置 noteMode 标志，保证热键开关正确）
-func (a *ClipboardService) HideNoteWindow() {
+func (a *ClipboardService) HideNoteWindow() *services.ApiResult {
 	a.App.Flags.Note.Store(false)
 	if fn := a.App.GetNoteWindow; fn != nil {
 		if win := fn(); win != nil {
 			win.Hide()
 		}
 	}
+	return services.Ok(nil)
 }
 
-// ===== 热键控制 =====
-
-func (a *ClipboardService) SuspendHotkeys() {
+// SuspendHotkeys 暂停全局热键（如编辑热键时避免与输入框抢按键）
+func (a *ClipboardService) SuspendHotkeys() *services.ApiResult {
 	if a.App.SuspendHotkeysFn != nil {
 		a.App.SuspendHotkeysFn()
 	}
+	return services.Ok(nil)
 }
 
-func (a *ClipboardService) ResumeHotkeys() {
+// ResumeHotkeys 恢复全局热键
+func (a *ClipboardService) ResumeHotkeys() *services.ApiResult {
 	if a.App.ResumeHotkeysFn != nil {
 		a.App.ResumeHotkeysFn()
 	}
+	return services.Ok(nil)
 }
 
 // UpdateClipboardNote 更新剪贴板条目的备注

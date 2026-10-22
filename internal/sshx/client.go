@@ -304,7 +304,13 @@ func (c *Client) fireDisconnect(err error) {
 	// Close() 会让阻塞中的 keepalive 探测（SendRequest）返回错误并走到这里；
 	// 此时若不拦，上层会收到一次假的「连接已断开」，与 watchConn 里
 	// 「localClosed → 直接 return」的意图正好相反。
-	if c.disconnectFired || c.isLocallyClosed() {
+	//
+	// 这里直接读字段，绝不调用 isLocallyClosed()：本函数已持有 c.mu，而
+	// sync.Mutex 不可重入，再走一次加锁就是自死锁。短路求值在
+	// disconnectFired=false 时必然求值到后半段，于是「每次断线必死锁」——
+	// 该 goroutine 永久持有 c.mu，之后 Close/SetOnDisconnect 全部挂死，
+	// UI 的「重连」按钮再无响应。
+	if c.disconnectFired || c.localClosed {
 		c.mu.Unlock()
 		return
 	}

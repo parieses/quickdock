@@ -330,6 +330,12 @@ func (m *PluginWindowManager) ToggleMaximize(pluginID string) {
 
 // InjectInitText 向指定插件窗口注入初始文本 + 命中的子命令（从命令面板跨窗口传递）。
 //
+// 调用方：PluginService.ShowPluginWindow 的复用路径（created=false）。新建路径的
+// 窗口经 iframe onLoad 自行消费 pending init（usePluginHost.usePendingInit），不走这里。
+//
+// 注入时机：有界轮询等 iframe 就绪（200ms × 15 = 3s 上限），而非固定延迟——
+// 复用路径通常 iframe 早已在，但窗口刚创建的竞态下 PluginFrame 还在拉前端页。
+//
 // 为什么要带 theme / locale：这是「窗口已打开、命令面板再次命中同一插件」时
 // 唯一的 init 通道。早先这里只下发 text/command，插件收到的 plugin:init
 // 里 data.theme 为 undefined。虽然窗口初次 onLoad 时 usePluginHost 已经发过
@@ -338,6 +344,11 @@ func (m *PluginWindowManager) ToggleMaximize(pluginID string) {
 // 取值口径与前端 currentThemeName() 一致：读本窗口 <html data-theme>，
 // 该属性由 plugin-entry.ts 启动时对齐、并随 quickdock:theme-changed 广播更新。
 func (m *PluginWindowManager) InjectInitText(pluginID, text, command string) {
+	// 空 init 不注入：复用窗口里插件可能已处于编辑状态，插件页收到 init 会按
+	// text/command 重渲染，空注入等于把用户正在弄的半截状态清掉。
+	if text == "" && command == "" {
+		return
+	}
 	m.mu.Lock()
 	win, ok := m.windows[pluginID]
 	m.mu.Unlock()
@@ -346,13 +357,25 @@ func (m *PluginWindowManager) InjectInitText(pluginID, text, command string) {
 	}
 	safeText := fmt.Sprintf("%q", text)
 	safeCmd := fmt.Sprintf("%q", command)
+	// 有界轮询等 iframe 就绪后再发 init。复用路径的窗口通常早已挂载 iframe；
+	// 极端竞态下窗口刚创建、PluginFrame 还在异步拉前端页（loading 态无 iframe），
+	// 原先的单次 setTimeout(400) 探不到 iframe 就静默丢弃，init 丢失。
+	// 每 200ms 探一次、最多 3s（15 次）：插件无前端页时永远等不到，到点放弃；
+	// 窗口被关则 JS 上下文随销毁，interval 自然终止，无泄漏。
 	win.ExecJS(fmt.Sprintf(
-		`setTimeout(function(){
-			var ifr = document.querySelector('iframe');
-			if (!ifr || !ifr.contentWindow) return;
-			var de = document.documentElement;
-			var theme = de.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
-			var locale = de.getAttribute('lang') || 'zh-CN';
-			ifr.contentWindow.postMessage({type:'plugin:init', data:{text:%s, command:%s, theme:theme, locale:locale}}, '*');
-		}, 400)`, safeText, safeCmd))
+		`(function(){
+			var tries = 0;
+			var timer = setInterval(function(){
+				var ifr = document.querySelector('iframe');
+				if (ifr && ifr.contentWindow) {
+					clearInterval(timer);
+					var de = document.documentElement;
+					var theme = de.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+					var locale = de.getAttribute('lang') || 'zh-CN';
+					ifr.contentWindow.postMessage({type:'plugin:init', data:{text:%s, command:%s, theme:theme, locale:locale}}, '*');
+				} else if (++tries >= 15) {
+					clearInterval(timer);
+				}
+			}, 200);
+		})()`, safeText, safeCmd))
 }

@@ -51,12 +51,20 @@ type UpdateStatus struct {
 
 // ===== UpdateService 方法 =====
 
-// GetAppVersion 返回当前应用版本号
-func (a *UpdateService) GetAppVersion() string {
+// appVersion 返回当前版本号（内部使用）。
+//
+// 与对外方法分开是必要的：GetAppVersion 按 R11 必须返回 *services.ApiResult，
+// 而 runCheck 等内部路径要的只是裸字符串，若去调对外方法就得层层解包。
+func (a *UpdateService) appVersion() string {
 	if a.App.AppVersion != "" {
 		return a.App.AppVersion
 	}
 	return "0.0.0"
+}
+
+// GetAppVersion 返回当前应用版本号
+func (a *UpdateService) GetAppVersion() *services.ApiResult {
+	return services.Ok(a.appVersion())
 }
 
 // runCheck 执行一次更新探测（阻塞，串行于 updateCheckMu）
@@ -67,7 +75,7 @@ func (a *UpdateService) runCheck(ctx context.Context) *UpdateStatus {
 	release, err := a.App.App().Updater.Check(ctx)
 	if err != nil {
 		st := &UpdateStatus{
-			CurrentVersion: a.GetAppVersion(),
+			CurrentVersion: a.appVersion(),
 			State:          "error",
 			Error:          friendlyError(err),
 		}
@@ -75,7 +83,7 @@ func (a *UpdateService) runCheck(ctx context.Context) *UpdateStatus {
 		return st
 	}
 	if release == nil {
-		st := &UpdateStatus{CurrentVersion: a.GetAppVersion(), State: "up-to-date"}
+		st := &UpdateStatus{CurrentVersion: a.appVersion(), State: "up-to-date"}
 		a.setLastCheck(st)
 		return st
 	}
@@ -83,13 +91,13 @@ func (a *UpdateService) runCheck(ctx context.Context) *UpdateStatus {
 	// 该版本已被守卫判定为"替换后版本号不变"，不再提示
 	if IsVersionSkipped(release.Version) {
 		logger.W("[update] 版本 %s 已被忽略（连续替换后版本号未变化），本次按已是最新处理", release.Version)
-		st := &UpdateStatus{CurrentVersion: a.GetAppVersion(), State: "up-to-date"}
+		st := &UpdateStatus{CurrentVersion: a.appVersion(), State: "up-to-date"}
 		a.setLastCheck(st)
 		return st
 	}
 
 	st := &UpdateStatus{
-		CurrentVersion:   a.GetAppVersion(),
+		CurrentVersion:   a.appVersion(),
 		State:            "available",
 		AvailableVersion: release.Version,
 		ReleaseNotes:     release.Notes,
@@ -118,59 +126,50 @@ func (a *UpdateService) emitUpdateStatus(st *UpdateStatus) {
 }
 
 // CheckForUpdates 手动检查更新（阻塞直到检查完成）
-func (a *UpdateService) CheckForUpdates() *UpdateStatus {
+//
+// 语义说明：网络失败等探测期错误由 UpdateStatus.State="error" 表达，仍走 Code=0——
+// 「检查完了，结论是失败」与「接口本身没跑起来」不是一回事，前者不该触发前端
+// 的统一错误弹窗。只有更新器压根没初始化这种前置失败才返回 Code=1。
+func (a *UpdateService) CheckForUpdates() *services.ApiResult {
 	if a.App.App() == nil || a.App.App().Updater == nil {
-		return &UpdateStatus{
-			CurrentVersion: a.GetAppVersion(),
-			State:          "error",
-			Error:          "更新器未初始化",
-		}
+		return services.FailMsg("更新器未初始化")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	return a.runCheck(ctx)
+	return services.Ok(a.runCheck(ctx))
 }
 
 // DownloadUpdate 下载发现的更新（阻塞直到下载完成）
-func (a *UpdateService) DownloadUpdate() *UpdateStatus {
+func (a *UpdateService) DownloadUpdate() *services.ApiResult {
 	if a.App.App() == nil || a.App.App().Updater == nil {
-		return &UpdateStatus{
-			State: "error",
-			Error: "更新器未初始化",
-		}
+		return services.FailMsg("更新器未初始化")
 	}
 
 	state := a.App.App().Updater.State()
 	if state != updater.StateAvailable {
-		return &UpdateStatus{
-			CurrentVersion: a.GetAppVersion(),
-			State:          string(state),
-			Error:          "没有待下载的更新",
-		}
+		return services.FailMsg("没有待下载的更新")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
+	// 走 Fail 而非包成 State="error" 的 Ok：下载失败是需要用户知道并可能重试的
+	// 操作失败，且 Fail 会带调用点落日志——此前更新失败在日志里完全无痕。
 	if err := a.App.App().Updater.DownloadAndInstall(ctx); err != nil {
-		return &UpdateStatus{
-			CurrentVersion: a.GetAppVersion(),
-			State:          "error",
-			Error:          friendlyError(err),
-		}
+		return services.Fail(err)
 	}
 
-	return &UpdateStatus{
-		CurrentVersion: a.GetAppVersion(),
+	return services.Ok(&UpdateStatus{
+		CurrentVersion: a.appVersion(),
 		State:          "ready",
-	}
+	})
 }
 
 // RestartApp 在下载并验签完成后执行"就地替换"更新
-func (a *UpdateService) RestartApp() error {
+func (a *UpdateService) RestartApp() *services.ApiResult {
 	logger.I("[update] 就地替换更新：派生 helper，父进程退出后覆盖 exe 并重新拉起（免安装器/UAC）")
 	if a.App.App() == nil || a.App.App().Updater == nil {
-		return fmt.Errorf("更新器未初始化")
+		return services.FailMsg("更新器未初始化")
 	}
 
 	if a.App.PrepareQuitFn != nil {
@@ -188,23 +187,24 @@ func (a *UpdateService) RestartApp() error {
 
 	if err := a.App.App().Updater.Restart(ctx); err != nil {
 		ClearPendingUpdate()
-		return fmt.Errorf("启动就地替换更新失败: %w", err)
+		return services.Fail(fmt.Errorf("启动就地替换更新失败: %w", err))
 	}
-	return nil
+	return services.Ok(nil)
 }
 
 // GetUpdateState 获取当前更新器状态
-func (a *UpdateService) GetUpdateState() *UpdateStatus {
+func (a *UpdateService) GetUpdateState() *services.ApiResult {
 	if a.App.App() == nil || a.App.App().Updater == nil {
-		return &UpdateStatus{
-			CurrentVersion: a.GetAppVersion(),
+		// 更新器不可用是正常状态（如开发模式），不是接口失败，故仍返回 Code=0。
+		return services.Ok(&UpdateStatus{
+			CurrentVersion: a.appVersion(),
 			State:          "unavailable",
-		}
+		})
 	}
 
 	live := a.App.App().Updater.State()
 	st := &UpdateStatus{
-		CurrentVersion: a.GetAppVersion(),
+		CurrentVersion: a.appVersion(),
 		State:          string(live),
 	}
 	if live == updater.StateAvailable {
@@ -213,16 +213,16 @@ func (a *UpdateService) GetUpdateState() *UpdateStatus {
 			st.ReleaseNotes = lc.ReleaseNotes
 		}
 	}
-	return st
+	return services.Ok(st)
 }
 
 // SkipUpdate 跳过指定版本的更新
-func (a *UpdateService) SkipUpdate(version string) error {
+func (a *UpdateService) SkipUpdate(version string) *services.ApiResult {
 	if a.App.App() == nil || a.App.App().Updater == nil {
-		return fmt.Errorf("更新器未初始化")
+		return services.FailMsg("更新器未初始化")
 	}
 	a.App.App().Updater.SkipVersion(version)
-	return nil
+	return services.Ok(nil)
 }
 
 // 启动后首次自动检查的延迟与重试策略

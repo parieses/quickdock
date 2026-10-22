@@ -207,7 +207,15 @@ func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 		for _, job := range jobs {
 			m.RegisterPlugin(job.manifest, job.dir)
 			if isEnabled != nil && !isEnabled(job.manifest.ID) {
-				if inst, ok := m.plugins[job.manifest.ID]; ok {
+				// 必须持锁读：「并发 map 读 + 写」在 Go runtime 里是
+				// throw("concurrent map read and map write")——不可 recover
+				// 的进程级致命错误，不是普通 panic。本循环在启动期与
+				// EnsureLoaded→LoadPlugin（持 m.mu 写同一 map）并发，
+				// 早期版本这里裸读 map 是直接踩雷的。
+				m.mu.RLock()
+				inst, ok := m.plugins[job.manifest.ID]
+				m.mu.RUnlock()
+				if ok {
 					inst.SetStatus("stopped")
 					inst.stopped.Store(true)
 					inst.disabled.Store(true)
@@ -223,7 +231,11 @@ func (m *Manager) DiscoverAndLoad(isEnabled func(pluginID string) bool) error {
 		// 已禁用插件：只登记、不启动进程（status=stopped，管理页可重新启用）
 		if isEnabled != nil && !isEnabled(job.manifest.ID) {
 			m.RegisterPlugin(job.manifest, job.dir)
-			if inst, ok := m.plugins[job.manifest.ID]; ok {
+			// 同懒加载分支：必须持锁读，并发 map 读写是 Go runtime 致命错误。
+			m.mu.RLock()
+			inst, ok := m.plugins[job.manifest.ID]
+			m.mu.RUnlock()
+			if ok {
 				inst.SetStatus("stopped")
 				inst.stopped.Store(true)
 				inst.disabled.Store(true) // 与懒加载分支一致：禁用标记缺失会导致管理页不显示"已禁用"徽标

@@ -49,6 +49,13 @@ func GetActiveWindowTitle() string {
 	return strings.TrimSpace(string(out))
 }
 
+// WithClipboard 在非 Windows 平台没有「全局独占剪贴板」语义（不走 Win32 的
+// 线程绑定模型），直接执行 fn 即可。与 Windows 版保持 API 形状一致。
+func WithClipboard(hwnd uintptr, fn func()) bool {
+	fn()
+	return true
+}
+
 // SetClipboardFiles 将文件路径列表写入剪贴板。
 // 非 Windows 暂不支持 CF_HDROP 等价物，退化为写入以换行分隔的路径文本。
 func SetClipboardFiles(hwnd uintptr, paths []string) error {

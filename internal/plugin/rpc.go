@@ -11,6 +11,10 @@ import (
 	"quickdock/internal/logger"
 )
 
+// stdinWriteTimeout 是向插件 stdin 写一帧的最长等待时间。
+// 超过即判定该实例的 stdin 已不可用（writeBroken），后续写入一律拒绝。
+const stdinWriteTimeout = 2 * time.Second
+
 // Call 发送 JSON-RPC 请求并等待响应
 // method: 方法名（如 "initialize"、"plugin.execute"）
 // params: 参数（会被序列化为 JSON）
@@ -61,34 +65,14 @@ func (inst *PluginInstance) Call(method string, params interface{}, timeout time
 	}
 	data = append(data, '\n')
 
-	// 串行写入 stdin ← P0 修复：sendMu 防止多协程写入交错
-	// 写操作带超时：插件活着但不读 stdin 时管道写满会永久阻塞，而 select 里的
-	// 30s 超时根本到不了（Write 同步阻塞）。用 goroutine+select 复用 SendNotification 的做法。
-	inst.sendMu.Lock()
-	writeDone := make(chan error, 1)
-	go func() {
-		_, werr := inst.Stdin.Write(data)
-		writeDone <- werr
-	}()
-	select {
-	case werr := <-writeDone:
-		inst.sendMu.Unlock()
-		if werr != nil {
-			inst.readMu.Lock()
-			delete(inst.Pending, idKey)
-			inst.readMu.Unlock()
-			return nil, fmt.Errorf("写入插件 stdin 失败: %w", werr)
-		}
-	case <-time.After(2 * time.Second):
-		inst.sendMu.Unlock()
+	// 串行 + 带超时写入 stdin（机制见 writeWithTimeout）。
+	// 写失败或超时都必须摘掉 pending：否则这条请求永远等不到响应，
+	// 下面的 30s select 会白白挂住一个协程。
+	if werr := inst.writeWithTimeout(data); werr != nil {
 		inst.readMu.Lock()
 		delete(inst.Pending, idKey)
 		inst.readMu.Unlock()
-		// 悬挂写 goroutine 仍阻塞在 Stdin.Write（管道满、插件不读），无法在此回收。
-		// 置 writeBroken 禁止后续新写入与之并发交错；悬挂写者随进程被杀/退出而终止。
-		inst.writeBroken.Store(true)
-		logger.PluginE(inst.Manifest.ID, "stdin 写入超时（2s），通信中断；实例不可再写，待 stopPlugin/进程退出回收悬挂写者")
-		return nil, ErrStdinTimeout
+		return nil, werr
 	}
 
 	// 默认超时
@@ -256,9 +240,18 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 	// 若不及时 Wait，句柄/僵尸会累积到下次 stopPlugin 才回收。进程已结束时 Wait 立即返回；
 	// 若 stdout 关闭但进程尚存（罕见），在独立 goroutine 中阻塞等待，由后续 stopPlugin(Kill+Wait) 兜底。
 	// 第二次 Wait（stopPlugin 中）返回 ErrProcessDone，安全。
-	// 捕获本地 cmd 副本：避免 stopPlugin 将 inst.Cmd 置 nil 后本 goroutine 读到 nil 触发空指针。
-	if inst.Cmd != nil && inst.Cmd.Process != nil {
-		cmd := inst.Cmd
+	//
+	// 必须在管理器锁下一次性取快照：上面那种「先判非空、再读一次」是典型
+	// TOCTOU——reapProcess（持 m.mu 置 nil）正好插在两读之间时，第二次
+	// 读到 nil，下面的 goroutine 便 cmd.Wait() 空指针 panic。而它跑在裸
+	// goroutine 里，readLoop 自己的 defer recover 覆盖不到，会直接终止整个进程。
+	manager.mu.RLock()
+	var cmd = inst.Cmd
+	if cmd != nil && cmd.Process == nil {
+		cmd = nil
+	}
+	manager.mu.RUnlock()
+	if cmd != nil {
 		go func() { _ = cmd.Wait() }()
 	}
 }
@@ -280,16 +273,25 @@ func (inst *PluginInstance) SendNotification(method string, params interface{}) 
 		return fmt.Errorf("序列化通知失败: %w", err)
 	}
 	data = append(data, '\n')
+	return inst.writeWithTimeout(data)
+}
 
-	// stdin 已判定写超时（悬挂写者未回收）：禁止再发起新写入，避免帧交错
+// writeWithTimeout 向插件 stdin 写一帧，带 2s 超时。
+//
+// 为什么必须有超时：插件挂死不读 stdin 时管道写满会永久阻塞，而调用方
+// （stopPlugin / handleCallback）是在持有管理器锁的路径上，一旦卡死，
+// 整个插件管理器连同 ShutdownAll 一起死锁，应用退不出去。
+//
+// 为什么必须先查 writeBroken：超时后那个写 goroutine 仍悬挂在 Stdin.Write 上，
+// 若放任后续写入，两个 goroutine 会并发写同一管道把 JSON-RPC 行撕成错位字节，
+// 插件侧解析失败后协议彻底错乱。故所有写路径都要经过本函数，无一例外。
+func (inst *PluginInstance) writeWithTimeout(data []byte) error {
 	if inst.writeBroken.Load() {
 		return ErrStdinTimeout
 	}
 
 	inst.sendMu.Lock()
 	defer inst.sendMu.Unlock()
-	// 写入带超时：插件挂死不读 stdin 时管道写满会永久阻塞，
-	// 而 stopPlugin 在持有管理器锁时调用本方法，无超时会导致整个插件管理器（含 ShutdownAll）死锁
 	writeDone := make(chan error, 1)
 	go func() {
 		_, err := inst.Stdin.Write(data)
@@ -301,9 +303,9 @@ func (inst *PluginInstance) SendNotification(method string, params interface{}) 
 			return fmt.Errorf("写入插件 stdin 失败: %w", err)
 		}
 		return nil
-	case <-time.After(2 * time.Second):
+	case <-time.After(stdinWriteTimeout):
 		inst.writeBroken.Store(true)
-		logger.PluginE(inst.Manifest.ID, "stdin 通知写入超时（2s），通信中断；实例不可再写，待 stopPlugin/进程退出回收悬挂写者")
+		logger.PluginE(inst.Manifest.ID, "stdin 写入超时（%v），通信中断；实例不可再写，待 stopPlugin/进程退出回收悬挂写者", stdinWriteTimeout)
 		return ErrStdinTimeout
 	}
 }

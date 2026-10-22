@@ -180,8 +180,12 @@ func parseWeekdays(csv string) map[int]bool {
 // 但无需引入额外依赖，且与进程内状态天然一致。
 func (a *AppService) StartScheduleRunner() {
 	a.schedWake = make(chan struct{}, 1)
+	a.schedWG.Add(1)
 	// 常驻循环：panic 落盘后不重抛，避免一次异常让整个调度器静默停摆
-	go logger.CapturePanicInGo("schedule:loop", a.scheduleLoop)()
+	go logger.CapturePanicInGo("schedule:loop", func() {
+		defer a.schedWG.Done()
+		a.scheduleLoop()
+	})()
 }
 
 // wakeScheduler 非阻塞唤醒调度循环，使其立即重新计算并扫描到期任务
@@ -262,7 +266,12 @@ func (a *AppService) checkScheduledTasks() {
 		if _, loaded := a.schedInflight.LoadOrStore(t.ID, struct{}{}); loaded {
 			continue
 		}
+		// 纳入 taskWG：这些协程写回执行结果时会访问 DB，退出流程必须等它们
+		// 收尾才能真正 Close（见 waitForSchedulers）。Add 必须在启动前调用，
+		// 否则协程可能先 Done 于 Add。
+		a.taskWG.Add(1)
 		go func(t *db.ScheduledTask) {
+			defer a.taskWG.Done()
 			defer a.schedInflight.Delete(t.ID)
 			defer func() {
 				if r := recover(); r != nil {

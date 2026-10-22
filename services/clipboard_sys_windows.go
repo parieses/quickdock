@@ -6,7 +6,6 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
-	"time"
 	"unsafe"
 
 	"quickdock/internal/logger"
@@ -27,13 +26,6 @@ func globalSize(h uintptr) uintptr {
 	return sz
 }
 
-// 剪贴板读取的失败重试参数。总等待约 150ms：足够跨过别的程序几十毫秒级的占用，
-// 又不至于让一次「复制」的入库延迟到用户可感知。
-const (
-	clipboardOpenAttempts  = 6
-	clipboardRetryStepWait = 10 * time.Millisecond
-)
-
 // clipboardSnapshot 一次剪贴板变更的原始内容快照。
 //
 // 三个字段都是**已经拷进 Go 堆内存的副本**，因此拿到快照后即可立刻 CloseClipboard。
@@ -47,8 +39,9 @@ type clipboardSnapshot struct {
 // captureClipboard 取一次剪贴板快照并入库。
 //
 // 运行在剪贴板工作协程上（见 startClipboardWorker），绝不在 Win32 消息线程上执行。
-// OpenClipboard 失败时按退避重试——剪贴板变更是一次性的状态变化，这次丢了就再也没有
-// 补抓机会（别的程序不会再发一次 WM_CLIPBOARDUPDATE）。
+// 读临界区（Open→内存拷贝→Close）由 platform.WithClipboard 包裹并 LockOSThread：
+// 剪贴板变更是一次性的状态变化，这次丢了就再也没有补抓机会（别的程序不会再发
+// 一次 WM_CLIPBOARDUPDATE），故打开失败时按退避重试（参数见 platform.ClipboardOpenAttempts）。
 func (a *AppService) captureClipboard() {
 	if a.DB == nil {
 		logClipboardSkip("入口")
@@ -56,41 +49,28 @@ func (a *AppService) captureClipboard() {
 	}
 
 	hwnd := platform.ClipboardWindowHandle()
-	var (
-		snap clipboardSnapshot
-		ok   bool
-	)
-	for attempt := 0; attempt < clipboardOpenAttempts; attempt++ {
-		if snap, ok = readClipboardSnapshot(hwnd); ok {
-			break
-		}
-		if attempt < clipboardOpenAttempts-1 {
-			time.Sleep(clipboardRetryStepWait * time.Duration(attempt+1))
-		}
-	}
-	if !ok {
-		logger.W("QuickDock: OpenClipboard 连续 %d 次失败，本次剪贴板变更丢失", clipboardOpenAttempts)
+	var snap clipboardSnapshot
+	if !platform.WithClipboard(hwnd, func() {
+		readClipboardSnapshot(&snap)
+	}) {
+		logger.W("QuickDock: OpenClipboard 连续 %d 次失败，本次剪贴板变更丢失", platform.ClipboardOpenAttempts)
 		return
 	}
 
 	a.handleClipboardSnapshot(snap)
 }
 
-// readClipboardSnapshot 读取剪贴板内容。第二个返回值为 false 表示剪贴板被其他进程占着。
+// readClipboardSnapshot 在剪贴板**已打开**的前提下读取内容快照。
+// 调用方必须用 platform.WithClipboard 包裹（本函数不负责 Open/Close）——
+// Open/Close 一旦被 Go 调度切到不同 OS 线程，剪贴板会被无限期锁死。
 //
-// 临界区纪律（这是本文件最重要的一条约束）：OpenClipboard 与 CloseClipboard 之间
-// **只允许做内存拷贝**——不解析 DIB、不做 PNG 编码、不查前台窗口标题、不碰数据库。
+// 临界区纪律（这是本文件最重要的一条约束）：函数体内**只允许做内存拷贝**——
+// 不解析 DIB、不做 PNG 编码、不查前台窗口标题、不碰数据库。
 // 剪贴板是全局独占资源，同一时刻只能被一个进程打开；临界区里多停留的每一毫秒，
 // 都会让别的程序的「复制」直接失败。而失败的复制不会产生 WM_CLIPBOARDUPDATE，
 // 于是那段内容既进不了系统剪贴板，也进不了这里的历史记录——用户看到的现象就是
 // 「复制得越多，后面复制的东西就越进不去剪贴板」。
-func readClipboardSnapshot(hwnd uintptr) (clipboardSnapshot, bool) {
-	var snap clipboardSnapshot
-	if !w32.OpenClipboard(w32.HWND(hwnd)) {
-		return snap, false
-	}
-	defer w32.CloseClipboard()
-
+func readClipboardSnapshot(snap *clipboardSnapshot) {
 	// 1. CF_HDROP
 	if h := w32.GetClipboardData(15); h != 0 {
 		if raw := readGlobalMem(h, 1*1024*1024); len(raw) > 0 {
@@ -142,8 +122,6 @@ func readClipboardSnapshot(hwnd uintptr) (clipboardSnapshot, bool) {
 			}
 		}
 	}
-
-	return snap, true
 }
 
 // handleClipboardSnapshot 对快照做分类入库。此时剪贴板已经关闭，可以放心做解析、

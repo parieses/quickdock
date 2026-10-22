@@ -472,7 +472,18 @@ func (a *AIService) AIStreamInfo() *services.ApiResult {
 	}
 	return services.Ok(map[string]interface{}{"port": s.port, "token": s.token})
 }
-func (a *AIService) AITestConnection(profileID string) (map[string]interface{}, error) {
+
+// AITestConnection 测试指定档案的连通性（暴露给前端）
+func (a *AIService) AITestConnection(profileID string) *services.ApiResult {
+	return services.Wrap(a.testConnection(profileID))
+}
+
+// testConnection 探测逻辑本体。
+//
+// 与对外方法拆开的原因：R11 要求暴露给前端的方法统一返回 *services.ApiResult，
+// 而本函数体内有十余处提前 return，写成裸 (值, error) 顺手得多。拆开后函数体
+// 可以一行不动，改动面与出错面都最小。
+func (a *AIService) testConnection(profileID string) (map[string]interface{}, error) {
 	stored := a.loadAIProfiles()
 	if len(stored) == 0 {
 		return nil, fmt.Errorf("无档案")

@@ -74,6 +74,15 @@ type AppService struct {
 	schedulerQuit     chan struct{}
 	schedulerQuitOnce sync.Once
 
+	// schedWG 跟踪三个常驻循环本体；taskWG 跟踪它们派生出的探测/执行协程。
+	//
+	// 光 close(schedulerQuit) 是不够的：循环收到信号后会立即返回，但此前已 go
+	// 出去的执行协程（HTTP 监控最长 30s）仍持有 DB 引用。若紧接着关闭 DB，
+	// 这些协程写回执行结果的操作会全部静默失败——用户看到的是「任务明明跑了，
+	// 结果却没记录」。退出前必须等它们收尾，超时兜底见 waitForSchedulers。
+	schedWG sync.WaitGroup
+	taskWG  sync.WaitGroup
+
 	// 剪贴板监听上下文：用于取消正在进行的剪贴板处理 goroutine
 	ClipboardCtx    context.Context
 	ClipboardCancel func()

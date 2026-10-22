@@ -408,7 +408,24 @@ func (o *Overlay) messageLoop(ready chan<- error) {
 
 // handleShow 在消息线程上执行一次完整的"显示覆盖层"流程。
 func (o *Overlay) handleShow(cmd *overlayCmd) {
-	if cmd == nil || cmd.src == nil || cmd.bounds.Empty() {
+	if cmd == nil {
+		return
+	}
+	// resultCh 必须在任何校验之前挂上。
+	//
+	// 早期版本把它放在尺寸校验之后，于是「尺寸不符」这条早退路径上 deliver
+	// 投递给的是 nil 通道（首轮）或上一轮的旧通道；而 deliver 对 nil 通道
+	// 什么都不做——连 close 都不做。调用方 Select() 里的 <-result 因此永远
+	// 等不到东西：用户按下截图热键完全没反应，那条 goroutine 也永久挂起。
+	// 多显示器热插拔后 VirtualDesktopBounds 与抓屏尺寸不一致就会走到这里。
+	o.resultCh = cmd.resultCh
+
+	// 无效输入：投递空结果让调用方返回，切勿静默 return。
+	if cmd.src == nil || cmd.bounds.Empty() {
+		if cmd.src != nil {
+			cmd.src.Close()
+		}
+		o.deliver(outcome{})
 		return
 	}
 	// src 必须是整虚拟桌面的截图：尺寸对不上时逐行拷贝会越界。
@@ -424,7 +441,6 @@ func (o *Overlay) handleShow(cmd *overlayCmd) {
 
 	o.src = cmd.src
 	o.bounds = cmd.bounds
-	o.resultCh = cmd.resultCh
 	o.launch = cmd.launch
 	o.hideTextInput()
 	o.resetSession()
