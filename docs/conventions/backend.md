@@ -61,6 +61,10 @@ internal/**       引擎 / 基础设施：DB、平台 API、外部协议、算�
   ```
 - 不使用 `clipboard_sys_windows.go` 这类中缀（`_sys_`），直接 `<name>_windows.go`。
 - 非平台维度的条件编译用 build tag + 语义后缀，如 `datadir_production.go` / `datadir_dev.go`。
+- **剪贴板临界区一律经 `platform.WithClipboard(hwnd, fn)` 进出，禁止裸调 `OpenClipboard`/`CloseClipboard`**：
+  Win32 把剪贴板锁绑定到调用线程，Go 的异步抢占会让 goroutine 在临界区中间切到别的 OS 线程，
+  Open/Close 一旦跨线程，`CloseClipboard` 静默失败、剪贴板被无限期锁死——所有程序的复制全部失效，
+  只能重启进程恢复。`fn` 内只允许内存拷贝，解析/入库/查窗口标题放到 `fn` 外。
 
 ## 6. 命名与注释
 
