@@ -107,6 +107,13 @@ type runtimeDef struct {
 	versParse func(body []byte) []string // 解析版本列表（返回形如 "1.25.0" / "v22.22.2" 的版本号）
 	// versHTMLFallbackParse 当 API 失败时的 HTML 解析兜底；fallbackHTMLURL 返回对应 HTML 页面地址
 	versHTMLFallbackParse func(body []byte) []string
+	// versValidate 可选：对上游版本列表做「真实可下载性」复核（返回 false 表示该版本实际装不了）。
+	// 典型场景：python.org/ftp/python/ 下 3.16.0 目录真实存在，但里面只有 3.16.0a1 源码，
+	// Windows embed zip 是 404 —— 纯目录解析会把它当最新稳定版，"一键装最新"必失败。
+	versValidate func(version string) bool
+	// versValidateTopN 只复核头部 N 个版本（0=不复核）。越老的版本越不可能有这种幽灵目录，
+	// 全量 HEAD 会把一次版本拉取变成几十次网络往返。
+	versValidateTopN int
 	// fallbackHTMLURL 该运行时 GitHub Releases 页面的 HTML 地址（API 不可用时兜底解析版本）。
 	// 大多数 GitHub Releases 可共用默认 HTML tag 解析器，故直接作为自描述字段，新增运行时无需改中心 switch。
 	fallbackHTMLURL string
@@ -119,24 +126,24 @@ type runtimeDef struct {
 var (
 	regMu    sync.RWMutex
 	registry = map[Runtime]runtimeDef{
-		RuntimeNode: {display: "Node.js", group: GroupLanguage, versions: []string{"v22.22.2", "v20.19.0", "v18.20.4"}, versURL: "https://nodejs.org/dist/index.json", versParse: parseNodeVersions, sources: []Source{
+		RuntimeNode: {display: "Node.js", group: GroupLanguage, versions: []string{"v24.22.1", "v22.23.4", "v26.12.1"}, versURL: "https://nodejs.org/dist/index.json", versParse: parseNodeVersions, sources: []Source{
 			{ID: "npmmirror", Name: "npmmirror 镜像", Build: nodeURL("https://registry.npmmirror.com/-/binary/node/{v}/node-{v}-{os}-{arch}.{ext}")},
 			{ID: "official", Name: "Node.js 官方", Build: nodeURL("https://nodejs.org/dist/{v}/node-{v}-{os}-{arch}.{ext}")},
 		}},
-		RuntimeGo: {display: "Go", group: GroupLanguage, versions: []string{"1.23.4", "1.22.10", "1.21.13"}, versURL: "https://go.dev/dl/", versParse: parseGoVersionsFromHTML, sources: []Source{
+		RuntimeGo: {display: "Go", group: GroupLanguage, versions: []string{"1.27.3", "1.26.10", "1.25.14"}, versURL: "https://go.dev/dl/", versParse: parseGoVersionsFromHTML, sources: []Source{
 			{ID: "official", Name: "Go 官方", Build: goURL("https://go.dev/dl/go{version}.{os}-{arch}.{ext}")},
 			{ID: "golangcn", Name: "golang.google.cn (国内)", Build: goURL("https://golang.google.cn/dl/go{version}.{os}-{arch}.{ext}")},
 		}},
-		RuntimePHP: {display: "PHP", group: GroupLanguage, versions: []string{"8.3.20", "8.2.27", "8.1.31"}, versURL: "https://downloads.php.net/~windows/releases/archives/", versParse: parsePHPWinVersions, sources: []Source{
+		RuntimePHP: {display: "PHP", group: GroupLanguage, versions: []string{"8.5.12", "8.4.27", "8.3.36"}, versURL: "https://downloads.php.net/~windows/releases/archives/", versParse: parsePHPWinVersions, sources: []Source{
 			{ID: "windowsphpnet-archive-vs17", Name: "windows.php.net (archives VS17)", Build: phpURL("https://downloads.php.net/~windows/releases/archives/php-{version}-Win32-vs17-x64.zip", "https://www.php.net/distributions/php-{version}.tar.gz", "")},
 			{ID: "windowsphpnet-archive", Name: "windows.php.net (archives VS16)", Build: phpURL("https://downloads.php.net/~windows/releases/archives/php-{version}-Win32-vs16-x64.zip", "https://www.php.net/distributions/php-{version}.tar.gz", "")},
 			{ID: "windowsphpnet", Name: "windows.php.net (releases VS17)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs17-x64.zip", "https://www.php.net/distributions/php-{version}.tar.gz", "")},
 			{ID: "windowsphpnet-rel", Name: "windows.php.net (releases VS16)", Build: phpURL("https://windows.php.net/downloads/releases/php-{version}-Win32-vs16-x64.zip", "https://www.php.net/distributions/php-{version}.tar.gz", "")},
 		}},
-		RuntimeRedis: {display: "Redis", group: GroupMiddleware, versions: []string{"7.4.0", "7.2.5", "7.0.15"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, versHTMLFallbackParse: parseRedisVersionsHTML, fallbackHTMLURL: "https://github.com/redis-windows/redis-windows/releases", sources: []Source{
+		RuntimeRedis: {display: "Redis", group: GroupMiddleware, versions: []string{"8.10.2", "8.10.1", "8.8.3"}, versURL: "https://api.github.com/repos/redis-windows/redis-windows/releases?per_page=100", versParse: parseRedisVersions, versHTMLFallbackParse: parseRedisVersionsHTML, fallbackHTMLURL: "https://github.com/redis-windows/redis-windows/releases", sources: []Source{
 			{ID: "rediswindows", Name: "redis-windows/redis-windows (GitHub)", Build: redisURL("https://github.com/redis-windows/redis-windows/releases/download/{version}/Redis-{version}-Windows-x64-msys2.zip", "https://download.redis.io/releases/redis-{version}.tar.gz", "")},
 		}},
-		RuntimeNginx: {display: "Nginx", group: GroupNetwork, versions: []string{"1.27.5", "1.26.3", "1.25.5"}, versURL: "https://nginx.org/download/", versParse: parseNginxVersions, sources: []Source{
+		RuntimeNginx: {display: "Nginx", group: GroupNetwork, versions: []string{"1.31.7", "1.31.6", "1.31.5"}, versURL: "https://nginx.org/download/", versParse: parseNginxVersions, sources: []Source{
 			{ID: "nginxorg", Name: "nginx.org 官方", Build: nginxURL("https://nginx.org/download/nginx-{version}.zip", "https://nginx.org/download/nginx-{version}.tar.gz", "")},
 		}},
 		// 推荐列表仅在「上游 API + HTML 兜底都失败」时兜底，需定期跟进大版本，
@@ -148,23 +155,35 @@ var (
 			{ID: "npmmirror", Name: "npmmirror 镜像 (国内)", Build: gitURL("https://registry.npmmirror.com/-/binary/git-for-windows/v{version}.windows.1/MinGit-{version}-64-bit.zip", "", "")},
 			{ID: "ghproxy", Name: "GitHub 加速 (gh-proxy.com)", Build: gitURL("https://gh-proxy.com/https://github.com/git-for-windows/git/releases/download/v{version}.windows.1/MinGit-{version}-64-bit.zip", "", "")},
 		}},
-		RuntimeCaddy: {display: "Caddy", group: GroupNetwork, versions: []string{"2.8.4", "2.7.6", "2.6.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, fallbackHTMLURL: "https://github.com/caddyserver/caddy/releases", sources: []Source{
+		RuntimeCaddy: {display: "Caddy", group: GroupNetwork, versions: []string{"2.11.7", "2.11.6", "2.11.4"}, versURL: "https://api.github.com/repos/caddyserver/caddy/releases?per_page=100", versParse: parseCaddyVersions, versHTMLFallbackParse: parseCaddyVersionsHTML, fallbackHTMLURL: "https://github.com/caddyserver/caddy/releases", sources: []Source{
 			{ID: "caddyserver", Name: "caddyserver/caddy (GitHub)", Build: caddyURL("https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_windows_amd64.zip", "https://github.com/caddyserver/caddy/releases/download/v{version}/caddy_{version}_darwin_{arch}.tar.gz", "")},
 		}},
-		RuntimeComposer: {display: "Composer", group: GroupTool, versions: []string{"2.7.7", "2.6.6", "2.5.8"}, versURL: "https://getcomposer.org/versions", versParse: parseComposerVersions, sources: []Source{
+		RuntimeComposer: {display: "Composer", group: GroupTool, versions: []string{"2.10.3", "2.9.8", "2.8.12"}, versURL: "https://getcomposer.org/versions", versParse: parseComposerVersions, sources: []Source{
 			{ID: "getcomposer", Name: "getcomposer.org 官方", Build: composerURL("https://getcomposer.org/download/{version}/composer.phar")},
 		}},
-		RuntimeFFmpeg: {display: "FFmpeg", group: GroupTool, versions: []string{"7.1", "6.1", "5.1"}, sources: []Source{
-			{ID: "gyandev", Name: "gyan.dev 官方构建", Build: ffmpegURL("https://www.gyan.dev/ffmpeg/builds/ffmpeg-{version}-essentials_build.zip", "https://github.com/eugeneware/ffmpeg-static/releases/download/b{version}/ffmpeg-{version}-darwin-{arch}", "x64")},
+		// ⚠️ gyan.dev 2026-10 再次改版：版本化 zip 全部下架——/builds/packages/ 下只剩
+		// .7z 格式的 git 快照（extract.go 只认 zip/tar.gz，用不了），/ffmpeg/builds/ 只剩
+		// 无版本的 ffmpeg-release-essentials.zip（303 跳当前版本）。好在作者把每个正式版同步
+		// 发到了 GitHub（GyanD/codexffmpeg），tag 即版本号、资产名仍为
+		// ffmpeg-{ver}-essentials_build.zip（实测 9.0.2 可下载），故下载改走 GitHub，
+		// 国内网络可用「镜像加速」把 GitHub 地址自动改写成 gh-proxy。
+		// 版本列表取 GitHub Releases，需过滤掉 2026-10-19-git-xxx 这类 git 快照 tag。
+		RuntimeFFmpeg: {display: "FFmpeg", group: GroupTool, versions: []string{"9.0.2", "9.0.1", "9.0"}, versURL: "https://api.github.com/repos/GyanD/codexffmpeg/releases?per_page=100", versParse: parseFFmpegVersions, versHTMLFallbackParse: parseFFmpegVersionsHTML, fallbackHTMLURL: "https://github.com/GyanD/codexffmpeg/releases", sources: []Source{
+			{ID: "gyandev-gh", Name: "GyanD/codexffmpeg (GitHub)", Build: ffmpegURL("https://github.com/GyanD/codexffmpeg/releases/download/{version}/ffmpeg-{version}-essentials_build.zip", "https://github.com/eugeneware/ffmpeg-static/releases/download/b{version}/ffmpeg-{version}-darwin-{arch}", "x64")},
 		}},
-		RuntimePython: {display: "Python", group: GroupLanguage, versions: []string{"3.12.7", "3.11.9", "3.10.14"}, versURL: "https://www.python.org/ftp/python/", versParse: parsePythonVersions, sources: []Source{
+		// ⚠️ python.org/ftp/python/ 会出现「幽灵目录」：3.16.0/ 真实存在，但里面只有
+		// 3.16.0a1 源码包，Windows embed zip 是 404。纯目录解析会把预发布目录当稳定版，
+		// 「一键装最新」必然失败。故对上游列表头部几个版本额外校验 embed zip 是否可下载
+		// （versValidate），剔掉不可下载的之后，最新稳定版自然回落到 3.15.0。
+		RuntimePython: {display: "Python", group: GroupLanguage, versions: []string{"3.15.1", "3.14.9", "3.13.16"}, versURL: "https://www.python.org/ftp/python/", versParse: parsePythonVersions, versValidate: pythonEmbedZipOK, versValidateTopN: 4, sources: []Source{
 			{ID: "pythonorg", Name: "python.org 官方", Build: pythonURL("https://www.python.org/ftp/python/{version}/python-{version}-embed-amd64.zip", "https://github.com/indygreg/python-build-standalone/releases/download/20240828/cpython-{version}-20240828-{arch}-apple-darwin-install_only.tar.gz", "x86")},
 		}},
 		// ⚠️ Apache Lounge 文件名含构建日期且 VS 版本会升级（httpd-2.4.66-251206-Win64-VS17.zip / httpd-2.4.68-260827-Win64-VS18.zip），
 		// 构建日期无法由版本号推导，静态模板必然 404（且返回 HTTP 200 的 HTML 错误页，伪装成有效下载）。
 		// URL 与版本列表均由 apacheFetchIndex 抓取官方目录页动态解析（VS17/VS18 两页，正则大小写不敏感），
-		// 见下方 apacheURL / apacheVersParse。当前 2.4.66 在 VS17、2.4.68 在 VS18，均已实测可解析为有效 zip。
-		RuntimeApache: {display: "Apache", group: GroupNetwork, versions: []string{"2.4.68", "2.4.66"}, versURL: apacheLoungeBase + "/download/VS17/", versParse: apacheVersParse, sources: []Source{
+		// 见下方 apacheURL / apacheVersParse。实测（2026-10）2.4.66 在 VS17、2.4.69 在 VS18，
+		// 2.4.68 已从两个目录页同时下架——旧推荐清单里的 2.4.68 会解析为空 URL。
+		RuntimeApache: {display: "Apache", group: GroupNetwork, versions: []string{"2.4.69", "2.4.66"}, versURL: apacheLoungeBase + "/download/VS17/", versParse: apacheVersParse, sources: []Source{
 			{ID: "apachelounge", Name: "Apache Lounge (官方)", Build: apacheURL("https://archive.apache.org/dist/httpd/httpd-{version}.tar.gz")},
 		}},
 		// Memcached：nono303 已停止发布 GitHub Releases，改用 adamyg/memcached-win32（含
@@ -172,33 +191,46 @@ var (
 		RuntimeMemcached: {display: "Memcached", group: GroupMiddleware, versions: []string{"1.6.34.11"}, versURL: "https://api.github.com/repos/adamyg/memcached-win32/releases?per_page=100", versParse: parseGitVersions, sources: []Source{
 			{ID: "adamyg", Name: "adamyg/memcached-win32 (GitHub)", Build: memcachedURL("https://github.com/adamyg/memcached-win32/releases/download/{version}/package-vc2022-x64.zip", "https://github.com/memcached/memcached/archive/refs/tags/{version}.tar.gz", "")},
 		}},
-		RuntimeMariaDB: {display: "MariaDB", group: GroupDatabase, versions: []string{"11.6.2", "11.5.2", "10.11.10"}, sources: []Source{
+		// ⚠️ 推荐清单只收「archive 上确有 winx64-packages 包」的版本：上游最新版 13.2.0
+		// 的 winx64-packages 目录是空的（13.1.2/12.3.0 同样没有 Windows 包），
+		// 直接按「最新版本号」写进去会 404。实测可下载：13.1.1 / 12.2.2 / 11.8.6。
+		RuntimeMariaDB: {display: "MariaDB", group: GroupDatabase, versions: []string{"13.1.1", "12.2.2", "11.8.6"}, sources: []Source{
 			{ID: "mariadborg", Name: "archive.mariadb.org 官方", Build: mariadbURL("https://archive.mariadb.org/mariadb-{version}/winx64-packages/mariadb-{version}-winx64.zip", "https://archive.mariadb.org/mariadb-{version}/macosx-x86_64/mariadb-{version}-macos-x86_64.tar.gz", "")},
 		}},
-		RuntimeMySQL: {display: "MySQL", group: GroupDatabase, versions: []string{"8.4.3", "8.0.40", "5.7.44"}, sources: []Source{
+		RuntimeMySQL: {display: "MySQL", group: GroupDatabase, versions: []string{"8.4.11", "9.7.0", "8.0.44"}, sources: []Source{
 			// downloads.mysql.com/archives/get/p/23/file/... 是归档页下载中转，直接拉会被 403（需 cookie）。
 			// 改用 CDN 直链 cdn.mysql.com/archives/mysql-{mm}/，8.x/5.7 均 200（已验证）。
 			{ID: "mysqlarchive", Name: "MySQL 官方归档", Build: mysqlURL("https://cdn.mysql.com/archives/mysql-{mm}/mysql-{version}-winx64.zip", "https://cdn.mysql.com/Downloads/MySQL-{mm}/mysql-{version}-macos13-{arch}.tgz", "x86")},
 		}},
-		RuntimePostgreSQL: {display: "PostgreSQL", group: GroupDatabase, versions: []string{"16.4", "15.6", "14.13"}, sources: []Source{
+		RuntimePostgreSQL: {display: "PostgreSQL", group: GroupDatabase, versions: []string{"18.4", "17.8", "16.10"}, sources: []Source{
 			// EDB 二进制包文件名含 build 号（固定 -1），缺则 404。
 			{ID: "edb", Name: "EnterpriseDB 二进制包", Build: postgresURL("https://get.enterprisedb.com/postgresql/postgresql-{version}-1-windows-x64-binaries.zip", "https://ftp.postgresql.org/pub/source/v{version}/postgresql-{version}.tar.gz", "")},
 		}},
-		RuntimeMongoDB: {display: "MongoDB", group: GroupDatabase, versions: []string{"7.0.14", "6.0.16", "5.0.30"}, versURL: "https://api.github.com/repos/mongodb/mongo/releases?per_page=100", versParse: parseMongoVersions, sources: []Source{
+		// ⚠️ mongodb/mongo 的 GitHub Releases API 已不再返回二进制发布（实测返回空数组 []），
+		// 用它做版本列表源会永远兜底到硬编码清单。改用官方 downloads.mongodb.org/current.json
+		// （约 465KB，列出各维护线当前版本：9.0.4 / 8.3.13 / 8.0.34 / 7.0.45 …）。
+		// 下载地址仍只有 fastdl.mongodb.org 一处（国内直连常失败），
+		// 国内用户可在「自定义源」里粘贴可达镜像兜底。
+		RuntimeMongoDB: {display: "MongoDB", group: GroupDatabase, versions: []string{"9.0.4", "8.3.13", "8.0.34"}, versURL: "https://downloads.mongodb.org/current.json", versParse: parseMongoCurrentVersions, sources: []Source{
 			{ID: "mongodb", Name: "fastdl.mongodb.org 官方", Build: mongoURL("https://fastdl.mongodb.org/windows/mongodb-windows-x86_64-{version}.zip", "https://fastdl.mongodb.org/osx/mongodb-macos-{arch}-{version}.tgz", "x86")},
 		}},
 		// Mailpit：本地 SMTP + Web 收件箱（SMTP 1025 / Web UI 8025）。GitHub releases 单文件 zip。
-		RuntimeMailpit: {display: "Mailpit", group: GroupTool, versions: []string{"1.31.0", "1.30.7", "1.30.6"}, versURL: "https://api.github.com/repos/axllent/mailpit/releases?per_page=100", versParse: parseMailpitVersions, sources: []Source{
+		RuntimeMailpit: {display: "Mailpit", group: GroupTool, versions: []string{"1.31.6", "1.31.5", "1.31.4"}, versURL: "https://api.github.com/repos/axllent/mailpit/releases?per_page=100", versParse: parseMailpitVersions, sources: []Source{
 			{ID: "mailpit", Name: "axllent/mailpit (GitHub)", Build: mailpitURL("https://github.com/axllent/mailpit/releases/download/v{version}/mailpit-windows-amd64.zip", "https://github.com/axllent/mailpit/releases/download/v{version}/mailpit-darwin-{arch}.zip", "")},
 		}},
 		// MinIO：S3 兼容对象存储（API 9000 / Console 9001）。滚动发布（RELEASE 日期版本），单文件 minio.exe。
-		RuntimeMinIO: {display: "MinIO", group: GroupMiddleware, versions: []string{"latest"}, sources: []Source{
-			{ID: "minio", Name: "dl.min.io 官方", Build: minioURL("https://dl.min.io/server/minio/release/windows-amd64/minio.exe", "https://dl.min.io/server/minio/release/darwin-{arch}/minio", "")},
+		// ⚠️ dl.min.io 已全站下线（2026-10 实测 windows/linux/archive 全部 HTTP 410 Gone）；
+		// 且官方自 2025-09 起不再往 GitHub Releases 发 Windows 资产——最后一个带
+		// minio.windows-amd64.<tag>.exe 的正式版是 RELEASE.2025-09-07T16-13-09Z。
+		// 故版本列表改走 GitHub Releases（保留完整 RELEASE 日期 tag），下载用 GitHub 资产，
+		// 国内可开「镜像加速」把地址自动改写为 gh-proxy。
+		RuntimeMinIO: {display: "MinIO", group: GroupMiddleware, versions: []string{"RELEASE.2025-09-07T16-13-09Z", "RELEASE.2025-07-23T15-54-02Z", "RELEASE.2025-07-18T21-56-31Z"}, versURL: "https://api.github.com/repos/minio/minio/releases?per_page=100", versParse: parseMinioVersions, versHTMLFallbackParse: parseMinioVersionsHTML, fallbackHTMLURL: "https://github.com/minio/minio/releases", sources: []Source{
+			{ID: "minio", Name: "minio/minio (GitHub)", Build: minioURL("https://github.com/minio/minio/releases/download/{version}/minio.windows-amd64.{version}.exe", "", "")},
 		}},
 		// frpc：frp 内网穿透客户端（fatedier/frp）。本地以 `frpc -c frpc.toml` 运行，
 		// 连接远端 frps 服务器；本身无固定监听端口（出站连接），运行状态按子进程存活判定
 		// （svcMgr），已接入 ServiceController 启停 + ConfigProvider 编辑 + LogProvider 日志。
-		RuntimeFrpc: {display: "frpc", group: GroupTool, singleVersion: true, versions: []string{"0.71.0", "0.70.1", "0.69.0"}, versURL: "https://api.github.com/repos/fatedier/frp/releases?per_page=100", versParse: parseFrpcVersions, versHTMLFallbackParse: parseFrpcVersionsHTML, fallbackHTMLURL: "https://github.com/fatedier/frp/releases", sources: []Source{
+		RuntimeFrpc: {display: "frpc", group: GroupTool, singleVersion: true, versions: []string{"0.71.1", "0.71.0", "0.70.1"}, versURL: "https://api.github.com/repos/fatedier/frp/releases?per_page=100", versParse: parseFrpcVersions, versHTMLFallbackParse: parseFrpcVersionsHTML, fallbackHTMLURL: "https://github.com/fatedier/frp/releases", sources: []Source{
 			{ID: "fatedier", Name: "fatedier/frp (GitHub)", Build: frpcURL("https://github.com/fatedier/frp/releases/download/v{version}/frp_{version}_windows_amd64.zip", "https://github.com/fatedier/frp/releases/download/v{version}/frp_{version}_darwin_{arch}.tar.gz", "")},
 		}},
 		// FTP：轻量开源控制台 FTP 服务器（FTPDMIN，Matthias Wandel，public domain）。
@@ -209,15 +241,15 @@ var (
 			{ID: "ftpdmin", Name: "FTPDMIN (Sentex)", Build: ftpURL("https://www.sentex.net/~mwandel/ftpdmin/ftpdmin.exe", "", "")},
 		}},
 		// GitHub CLI (gh)：官方命令行工具，单文件 zip 内 gh.exe。无服务、无配置、无导入（DetectArgs 返回空 → 不可导入系统 exe）。
-		RuntimeGh: {display: "GitHub CLI", group: GroupTool, singleVersion: true, versions: []string{"2.100.0", "2.99.0", "2.98.0"}, versURL: "https://api.github.com/repos/cli/cli/releases?per_page=100", versParse: parseGhVersions, fallbackHTMLURL: "https://github.com/cli/cli/releases", sources: []Source{
+		RuntimeGh: {display: "GitHub CLI", group: GroupTool, singleVersion: true, versions: []string{"2.102.1", "2.102.0", "2.101.0"}, versURL: "https://api.github.com/repos/cli/cli/releases?per_page=100", versParse: parseGhVersions, fallbackHTMLURL: "https://github.com/cli/cli/releases", sources: []Source{
 			{ID: "cli", Name: "cli/cli (GitHub)", Build: ghURL("https://github.com/cli/cli/releases/download/v{version}/gh_{version}_windows_amd64.zip", "https://github.com/cli/cli/releases/download/v{version}/gh_{version}_macOS_{arch}.zip", "x86")},
 		}},
 		// Bun：新兴 JS/TS 运行时（oven-sh/bun）。多版本并存，bun-windows-x64.zip 内含 bun.exe。无服务。
-		RuntimeBun: {display: "Bun", group: GroupLanguage, versions: []string{"1.4.1", "1.3.0", "1.2.0"}, versURL: "https://api.github.com/repos/oven-sh/bun/releases?per_page=100", versParse: parseBunVersions, fallbackHTMLURL: "https://github.com/oven-sh/bun/releases", sources: []Source{
+		RuntimeBun: {display: "Bun", group: GroupLanguage, versions: []string{"1.4.3", "1.4.2", "1.4.1"}, versURL: "https://api.github.com/repos/oven-sh/bun/releases?per_page=100", versParse: parseBunVersions, fallbackHTMLURL: "https://github.com/oven-sh/bun/releases", sources: []Source{
 			{ID: "oven", Name: "oven-sh/bun (GitHub)", Build: bunURL("https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-windows-x64.zip", "https://github.com/oven-sh/bun/releases/download/bun-v{version}/bun-darwin-{arch}.zip", "x64")},
 		}},
 		// Traefik：Go 编写的边缘路由器，单文件 traefik.exe。服务型（serve），支持配置校验（validate --configFile）。
-		RuntimeTraefik: {display: "Traefik", group: GroupNetwork, versions: []string{"3.7.13", "3.6.4", "3.5.2"}, versURL: "https://api.github.com/repos/traefik/traefik/releases?per_page=100", versParse: parseTraefikVersions, fallbackHTMLURL: "https://github.com/traefik/traefik/releases", sources: []Source{
+		RuntimeTraefik: {display: "Traefik", group: GroupNetwork, versions: []string{"3.7.16", "3.7.15", "3.7.14"}, versURL: "https://api.github.com/repos/traefik/traefik/releases?per_page=100", versParse: parseTraefikVersions, fallbackHTMLURL: "https://github.com/traefik/traefik/releases", sources: []Source{
 			{ID: "traefik", Name: "traefik/traefik (GitHub)", Build: traefikURL("https://github.com/traefik/traefik/releases/download/v{version}/traefik_v{version}_windows_amd64.zip", "https://github.com/traefik/traefik/releases/download/v{version}/traefik_v{version}_darwin_{arch}.tar.gz", "")},
 		}},
 		// mkcert：本地 HTTPS 自签名证书工具（FiloSottile/mkcert），单文件 exe（非 zip）。无服务、无配置。
@@ -232,23 +264,26 @@ var (
 		// 故虽为多版本骨架，实际按「单活跃版本 + 可保留旧版回退」使用。
 		// 下载：官方 ollama.com/download 只做 307 跳转到 GitHub Releases（不托管文件），
 		// 1.4 GB 资产国内直连不可用，故默认给 gh-proxy 加速源（实测唯一能完整透传的镜像）。
-		RuntimeOllama: {display: "Ollama", group: GroupAI, singleVersion: true, versions: []string{"0.34.0", "0.33.3", "0.32.15", "0.30.11"}, versURL: "https://api.github.com/repos/ollama/ollama/releases?per_page=100", versParse: parseOllamaVersions, versHTMLFallbackParse: parseReleasesTagVersionsHTML, fallbackHTMLURL: "https://github.com/ollama/ollama/releases", sources: []Source{
+		RuntimeOllama: {display: "Ollama", group: GroupAI, singleVersion: true, versions: []string{"0.40.7", "0.40.6", "0.40.5"}, versURL: "https://api.github.com/repos/ollama/ollama/releases?per_page=100", versParse: parseOllamaVersions, versHTMLFallbackParse: parseReleasesTagVersionsHTML, fallbackHTMLURL: "https://github.com/ollama/ollama/releases", sources: []Source{
 			{ID: "ghproxy", Name: "GitHub 加速 (gh-proxy.com)", Build: ollamaURL("https://gh-proxy.com/https://github.com/ollama/ollama/releases/download/v{version}/ollama-windows-amd64.zip")},
 			{ID: "official", Name: "Ollama 官方 (ollama.com)", Build: ollamaURL("https://ollama.com/download/ollama-windows-amd64.zip?version={version}")},
 		}},
 		// RabbitMQ：Erlang 消息代理（rabbitmq-server-windows 自带 Erlang 运行时，无需单独安装）。服务型（sbin/rabbitmq-server.bat）。
-		RuntimeRabbitMQ: {display: "RabbitMQ", group: GroupMiddleware, versions: []string{"4.3.5", "4.2.0", "3.13.7"}, versURL: "https://api.github.com/repos/rabbitmq/rabbitmq-server/releases?per_page=100", versParse: parseRabbitVersions, fallbackHTMLURL: "https://github.com/rabbitmq/rabbitmq-server/releases", sources: []Source{
+		RuntimeRabbitMQ: {display: "RabbitMQ", group: GroupMiddleware, versions: []string{"4.4.0", "4.3.7", "4.3.6"}, versURL: "https://api.github.com/repos/rabbitmq/rabbitmq-server/releases?per_page=100", versParse: parseRabbitVersions, fallbackHTMLURL: "https://github.com/rabbitmq/rabbitmq-server/releases", sources: []Source{
 			{ID: "rabbitmq", Name: "rabbitmq/rabbitmq-server (GitHub)", Build: rabbitURL("https://github.com/rabbitmq/rabbitmq-server/releases/download/v{version}/rabbitmq-server-windows-{version}.zip", "https://github.com/rabbitmq/rabbitmq-server/releases/download/v{version}/rabbitmq-server-{version}.tar.xz", "")},
 		}},
 		// Erlang：底层语言运行时，多版本并存（erlang/otp 官方 GitHub 发布的 Windows 便携 zip）。
 		// 被 RabbitMQ 安装/启动时复用：RabbitMQ 优先复用本运行时已安装的 Erlang（或系统 ERLANG_HOME/PATH）。
-		RuntimeErlang: {display: "Erlang", group: GroupLanguage, versions: []string{"27.3.4", "26.2.5", "25.3.2.9"}, versURL: "https://api.github.com/repos/erlang/otp/releases?per_page=100", versParse: parseErlangVersions, fallbackHTMLURL: "https://github.com/erlang/otp/releases", sources: []Source{
+		RuntimeErlang: {display: "Erlang", group: GroupLanguage, versions: []string{"29.1.2", "29.1.1", "29.0.6"}, versURL: "https://api.github.com/repos/erlang/otp/releases?per_page=100", versParse: parseErlangVersions, fallbackHTMLURL: "https://github.com/erlang/otp/releases", sources: []Source{
 			{ID: "erlang", Name: "erlang/otp (GitHub)", Build: erlangURL("https://github.com/erlang/otp/releases/download/OTP-{version}/otp_win64_{version}.zip", "https://github.com/erlang/otp/archive/refs/tags/OTP-{version}.tar.gz", "")},
 		}},
 		// JDK：Adoptium Temurin 官方构建（Eclipse 分发）。版本以 feature 号（8/11/17/21）区分，
 		// 下载走 Adoptium「latest binary」重定向 API，按 feature 号直接拿到该系列最新 GA 的 Windows/mac 便携 zip，
 		// 无需解析带 build 号（如 +11）的资产文件名。Extract 会剥掉单层顶层目录（jdk-21.0.5+11/），java.exe 落到 <feature>/bin/。
-		RuntimeJDK: {display: "JDK", group: GroupLanguage, versions: []string{"21", "17", "11", "8"}, versURL: "https://api.adoptium.net/v3/info/available_releases", versParse: parseJDKVersions, sources: []Source{
+		// JDK 推荐值优先 LTS（Temurin 的 25 / 21 / 17 / 8），而不是 feature release 27：
+		// Adoptium 的 available_releases 会把每个半年版都列出来，但对企业/日常开发来说
+		// LTS 才是默认选择；8 也保留，老项目仍在用。
+		RuntimeJDK: {display: "JDK", group: GroupLanguage, versions: []string{"25", "21", "17", "8"}, versURL: "https://api.adoptium.net/v3/info/available_releases", versParse: parseJDKVersions, sources: []Source{
 			{ID: "adoptium", Name: "Adoptium Temurin", Build: jdkURL()},
 		}},
 	}
@@ -839,7 +874,36 @@ func CandidateURLs(rt Runtime, version string) []string {
 			urls = append(urls, u)
 		}
 	}
-	return urls
+
+	// GitHub 下载加速：把 github.com 地址的 gh-proxy 版本插到最前面。
+	// 国内直连 Release 资产常是连接级失败（不是 4xx，重试也救不回来），
+	// 所以不是「兜底追加」而是「优先尝试」。
+	if GitHubAccelerateEnabled() {
+		accel := make([]string, 0, len(urls))
+		for _, u := range urls {
+			if p := ghProxyURL(u); p != "" {
+				accel = append(accel, p)
+			}
+		}
+		if len(accel) > 0 {
+			urls = append(accel, urls...)
+		}
+	}
+	return dedupeStrings(urls)
+}
+
+// dedupeStrings 去重并保持首次出现顺序（gh-proxy 改写可能与已有镜像源重复）。
+func dedupeStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := in[:0]
+	for _, s := range in {
+		if s == "" || seen[s] {
+			continue
+		}
+		seen[s] = true
+		out = append(out, s)
+	}
+	return out
 }
 
 // ListSources 列出某运行时所有可用下载源（含自定义源），供前端渲染切换下拉框。
@@ -890,6 +954,13 @@ func SetCustomSource(rt Runtime, template string) {
 		return
 	}
 	customTemplate[rt] = template
+}
+
+// CustomSource 返回用户为该运行时设置的自定义源模板（未设置为空串），供清单导出与面板回显。
+func CustomSource(rt Runtime) string {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	return customTemplate[rt]
 }
 
 // DisplayName 返回运行时的展示名（如 "Node.js"）。
@@ -962,10 +1033,17 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 			}
 		}
 	}
+	// 上游列表的「可下载性」复核：只查头部 N 个（python 幽灵预发布目录就出在头部）。
+	// 仅在确实拉到上游列表时做——兜底清单是人工筛过的，不必再花网络往返。
+	if fetched {
+		vs = validateTopVersions(rt, vs)
+	}
 	if len(vs) == 0 {
 		vs = Versions(rt)
 	}
-	// Node.js: parseNodeVersions 内部已做智能筛选（LTS + 近 3 年，上限 60 条）
+	// Node.js: parseNodeVersions 内部已做智能筛选（LTS + 近 3 年，上限 60 条，
+	// 并补回每个维护线的最新版）。注意上面的 sortVersionsDesc 会按版本号重排，
+	// 所以解析器里的排序只影响「谁被截掉」，不影响最终展示顺序。
 
 	// 写缓存：仅上游拉取成功时缓存（TTL 1h）。
 	// 失败时不缓存，下次调用立即重试——避免网络抖动时用户长时间看到兜底列表。
@@ -984,11 +1062,18 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 // 表现为"上游版本解析返回 0 条"而静默退回 HTML 兜底列表（只剩 4 个版本）。
 // 若代理模式下失败，自动重试无代理直连（兼容部分场景下代理配置异常的情况）。
 func fetchURL(url string) ([]byte, error) {
+	body, _, err := fetchURLCode(url)
+	return body, err
+}
+
+// fetchURLCode 同 fetchURL，但同时带回 HTTP 状态码（0 表示连接层失败、没有响应）。
+// 供「源体检」区分「404 地址已失效」与「连不上」两类完全不同的故障。
+func fetchURLCode(url string) ([]byte, int, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	req.Header.Set("User-Agent", "QuickDock/1.0")
 
@@ -1000,14 +1085,15 @@ func fetchURL(url string) ([]byte, error) {
 		req2.Header.Set("User-Agent", "QuickDock/1.0")
 		resp, err = (&http.Client{Transport: &http.Transport{}}).Do(req2)
 		if err != nil {
-			return nil, err
+			return nil, 0, err
 		}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
-	return io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	body, rerr := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	return body, resp.StatusCode, rerr
 }
 
 // ---- 上游版本列表解析 ----
@@ -1145,11 +1231,41 @@ func parseNodeVersions(body []byte) []string {
 		}
 		return false
 	})
-	out := make([]string, 0, len(items))
+	// 截断时的补充：挑出「近 3 年内发布的每个主版本线的最新版」。
+	//
+	// 排序是 LTS 优先，而 v20/v22/v24 三条 LTS 线的历史补丁版加起来早就超过 60 条，
+	// 直接截断会把当前最新的非 LTS 大版本（如刚发布、还没转 LTS 的 v26）整条线挤没，
+	// 用户在版本下拉里根本选不到最新版。
+	// 所以：先按原顺序取 60 条，再把「漏网」的每条线最新版追加进去（只增不减）。
+	// 注意：调用方 AvailableVersions 拿到结果后还会统一 sortVersionsDesc，
+	// 这里的先后顺序对最终展示无影响，真正起作用的是「哪些版本入选」。
+	lineSeen := map[string]bool{}
+	var extra []string
 	for _, it := range items {
-		out = append(out, it.ver)
+		if it.date.IsZero() || !it.date.After(cutoff) {
+			continue // 只补近 3 年还在维护的版本线，老到 v0～v14 的不用占位
+		}
+		major := strings.SplitN(strings.TrimPrefix(it.ver, "v"), ".", 2)[0]
+		if major == "" || lineSeen[major] {
+			continue
+		}
+		lineSeen[major] = true
+		extra = append(extra, it.ver)
+	}
+	out := make([]string, 0, 64)
+	for _, it := range items {
 		if len(out) >= 60 {
 			break
+		}
+		out = append(out, it.ver)
+	}
+	inOut := make(map[string]bool, len(out))
+	for _, v := range out {
+		inOut[v] = true
+	}
+	for _, v := range extra {
+		if !inOut[v] {
+			out = append(out, v)
 		}
 	}
 	return out
@@ -1246,6 +1362,50 @@ func parseOllamaVersions(body []byte) []string {
 // parseCaddyVersionsHTML 从 GitHub Releases 页面 HTML 提取版本号（API 不可用时兜底）。
 func parseCaddyVersionsHTML(body []byte) []string { return parseReleasesTagVersionsHTML(body) }
 
+// reFFmpegReleaseTag FFmpeg 正式版 tag 形如 "9.0.2" / "9.0"（无 v 前缀）。
+// GyanD/codexffmpeg 同一个仓库还发每日 git 快照（tag 如 "2026-10-19-git-2344518cc5"），
+// 必须靠形态过滤，否则版本列表会被上百条快照 tag 淹没。
+var reFFmpegReleaseTag = regexp.MustCompile(`^\d+\.\d+(?:\.\d+)?$`)
+
+// parseFFmpegVersions 解析 GyanD/codexffmpeg 的 GitHub Releases：只保留纯版本号 tag。
+func parseFFmpegVersions(body []byte) []string {
+	var arr []struct {
+		TagName    string `json:"tag_name"`
+		Prerelease bool   `json:"prerelease"`
+		Draft      bool   `json:"draft"`
+	}
+	if err := json.Unmarshal(body, &arr); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, it := range arr {
+		if it.Prerelease || it.Draft {
+			continue
+		}
+		if !reFFmpegReleaseTag.MatchString(it.TagName) {
+			continue
+		}
+		out = append(out, it.TagName)
+	}
+	return out
+}
+
+// parseFFmpegVersionsHTML 从 Releases 页面 HTML 提取正式版 tag（API 兜底，同时排除 git 快照）。
+func parseFFmpegVersionsHTML(body []byte) []string {
+	re := regexp.MustCompile(`/releases/tag/(\d+\.\d+(?:\.\d+)?)"`)
+	matches := re.FindAllSubmatch(body, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		v := string(m[1])
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
 // parseComposerVersions 从 getcomposer.org/versions 解析 stable 数组的 version 字段（如 "2.7.7"）。
 func parseComposerVersions(body []byte) []string {
 	var obj struct {
@@ -1278,8 +1438,85 @@ func parsePythonVersions(body []byte) []string {
 	return out
 }
 
-// parseMongoVersions 从 mongodb/mongo GitHub Releases 解析 tag_name（如 "r7.0.14"），去掉前缀 r。
-func parseMongoVersions(body []byte) []string { return parseTagVersions(body, "r") }
+// pythonEmbedZipURL 构造 python.org 官方便携包地址（Windows embeddable zip）。
+func pythonEmbedZipURL(version string) string {
+	return "https://www.python.org/ftp/python/" + version + "/python-" + version + "-embed-amd64.zip"
+}
+
+// pythonEmbedZipOK 复核某版本在 python.org 上是否真有 Windows 便携包。
+// 用于剔除「幽灵预发布目录」（目录存在、内容只有 a1 源码、embed zip 404）。
+// 网络层失败（超时/连不上）返回 true，避免把可用版本误杀成不可用。
+func pythonEmbedZipOK(version string) bool {
+	code, _, err := probeURLStatus(pythonEmbedZipURL(version))
+	if err != nil {
+		return true
+	}
+	return code >= 200 && code < 300
+}
+
+// parseMongoCurrentVersions 解析 downloads.mongodb.org/current.json 的 versions 数组
+// （每项含 version/current/date 等；该文件只列各维护线的当前版本，约 465KB）。
+// 剔除预发布（形如 9.0.0-rc0）。
+func parseMongoCurrentVersions(body []byte) []string {
+	var obj struct {
+		Versions []struct {
+			Version string `json:"version"`
+		} `json:"versions"`
+	}
+	if err := json.Unmarshal(body, &obj); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(obj.Versions))
+	for _, v := range obj.Versions {
+		if v.Version == "" || strings.ContainsAny(v.Version, "-+") {
+			continue
+		}
+		out = append(out, v.Version)
+	}
+	return out
+}
+
+// minioTagRe MinIO 的 GitHub tag 形如 RELEASE.2025-09-07T16-13-09Z（日期版本，非 semver）。
+// 含 "-"，故不能复用 parseTagVersions（它把带 "-" 的一律当预发布剔除）。
+var minioTagRe = regexp.MustCompile(`^RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z$`)
+
+// parseMinioVersions 解析 minio/minio 的 GitHub Releases，保留完整 RELEASE 日期 tag。
+// 注意：2025-09 之后的 release 已不含 Windows 资产，列表里可能有「无 Windows 包」的
+// 新版本；推荐清单只放确认带 minio.windows-amd64.<tag>.exe 的三个版本。
+func parseMinioVersions(body []byte) []string {
+	var arr []struct {
+		TagName    string `json:"tag_name"`
+		Prerelease bool   `json:"prerelease"`
+		Draft      bool   `json:"draft"`
+	}
+	if err := json.Unmarshal(body, &arr); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(arr))
+	for _, it := range arr {
+		if it.Prerelease || it.Draft || !minioTagRe.MatchString(it.TagName) {
+			continue
+		}
+		out = append(out, it.TagName)
+	}
+	return out
+}
+
+// parseMinioVersionsHTML 从 Releases 页面 HTML 提取 RELEASE 日期 tag（API 兜底）。
+func parseMinioVersionsHTML(body []byte) []string {
+	re := regexp.MustCompile(`/releases/tag/(RELEASE\.\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}Z)`)
+	matches := re.FindAllSubmatch(body, -1)
+	out := make([]string, 0, len(matches))
+	seen := map[string]bool{}
+	for _, m := range matches {
+		v := string(m[1])
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
+}
 
 // parseMailpitVersions 从 axllent/mailpit GitHub Releases 解析 tag_name（如 "v1.31.0"），去掉前缀 v。
 func parseMailpitVersions(body []byte) []string { return parseTagVersions(body, "v") }

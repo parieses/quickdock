@@ -51,9 +51,13 @@ func (m *Manager) GoEnvKeys(rt Runtime) ([]EnvKeyDef, error) {
 }
 
 // GoEnvGet 读取某 runtime 某版本的环境变量（go env 等）。
+// version 为空表示「系统全局」作用域（用户级配置文件，对所有未做版本隔离的实例生效），
+// 此时不做版本号校验——它不涉及任何版本目录，没有路径穿越风险。
 func (m *Manager) GoEnvGet(rt Runtime, version string) (map[string]string, error) {
-	if err := validateVersion(version); err != nil {
-		return nil, err
+	if version != "" {
+		if err := validateVersion(version); err != nil {
+			return nil, err
+		}
 	}
 	a, err := m.adapter(rt)
 	if err != nil {
@@ -66,10 +70,12 @@ func (m *Manager) GoEnvGet(rt Runtime, version string) (map[string]string, error
 	return p.GoEnvGet(version)
 }
 
-// GoEnvSet 写回某 runtime 某版本的环境变量。
+// GoEnvSet 写回某 runtime 某版本的环境变量。version 为空 = 系统全局作用域。
 func (m *Manager) GoEnvSet(rt Runtime, version string, patch map[string]string) error {
-	if err := validateVersion(version); err != nil {
-		return err
+	if version != "" {
+		if err := validateVersion(version); err != nil {
+			return err
+		}
 	}
 	a, err := m.adapter(rt)
 	if err != nil {

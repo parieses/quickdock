@@ -292,13 +292,81 @@ func (g *GoRuntime) ActiveEnvVars(version string) map[string]string {
 	return vars
 }
 
+// goBinAny 为「系统全局作用域」挑一个 go 二进制：优先 PATH，其次任一已安装版本。
+//
+// 全局 go.env 的读写与用哪个 go 可执行文件无关——只要不注入 GOENV，
+// `go env -w` 就作用于用户级配置文件（Windows 为 %APPDATA%\go\env）。
+// 所以这里不要求「版本已安装」，装了任一版本即可读全局。
+func (g *GoRuntime) goBinAny() (string, error) {
+	if p, err := exec.LookPath("go"); err == nil {
+		return p, nil
+	}
+	if entries, err := os.ReadDir(g.baseDir); err == nil {
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			if p := g.ExeFor(e.Name()); fileExists(p) {
+				return p, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("未找到可用的 go 可执行文件（系统 PATH 中无 go，也没有已安装的版本）")
+}
+
+// envBin 按作用域选 go 二进制：version 为空 = 系统全局，否则用该版本自己那份。
+func (g *GoRuntime) envBin(version string) (string, error) {
+	if version == "" {
+		return g.goBinAny()
+	}
+	return g.goBin(version)
+}
+
+// runGoGlobal 以「系统全局」身份执行 go 子命令：不注入 GOENV，读写用户级 go.env。
+//
+// 必须剔除继承的 GOENV：QuickDock 激活某版本时会往用户环境变量里写 GOENV，
+// 若原样继承，本意「写全局」的操作会悄悄落到某个版本的 go.env 上。
+// 同时剔除 GOPATH / GOPROXY：进程里存在同名环境变量时 `go env -w` 会被拒绝
+// （"does not override conflicting OS environment variable"）。
+func (g *GoRuntime) runGoGlobal(bin string, args ...string) (string, error) {
+	cmd := exec.Command(bin, args...)
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if strings.HasPrefix(kv, "GOENV=") || strings.HasPrefix(kv, "GOPATH=") || strings.HasPrefix(kv, "GOPROXY=") {
+			continue
+		}
+		env = append(env, kv)
+	}
+	cmd.Env = env
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("执行 go %s 失败: %v: %s", strings.Join(args, " "), err, out.String())
+	}
+	return out.String(), nil
+}
+
+// runGoScope 按作用域执行 go 子命令：
+// version 非空 → 注入该版本的 GOENV（读写版本专属 go.env）；
+// version 为空 → 系统全局（用户级 go.env）。
+func (g *GoRuntime) runGoScope(bin, version string, args ...string) (string, error) {
+	if version == "" {
+		return g.runGoGlobal(bin, args...)
+	}
+	return g.runGo(bin, args...)
+}
+
 // GoEnvGet 读取当前生效的 go env（go env -json 解析），仅回填可编辑清单里的 key。
+//
+// version 为空表示「系统全局」作用域（用户级 go.env），用于前端弹窗的第二个 tab；
+// 非空时读该版本专属 go.env（QuickDock 运行时实际读的那份）。
 func (g *GoRuntime) GoEnvGet(version string) (map[string]string, error) {
-	bin, err := g.goBin(version)
+	bin, err := g.envBin(version)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := g.runGo(bin, "env", "-json")
+	raw, err := g.runGoScope(bin, version, "env", "-json")
 	if err != nil {
 		return nil, err
 	}
@@ -314,27 +382,28 @@ func (g *GoRuntime) GoEnvGet(version string) (map[string]string, error) {
 }
 
 // GoEnvSet 写回：patch 中 value 非空则 `go env -w key=value`，空则 `go env -u key` 清除。
+// version 为空表示写「系统全局」（用户级 go.env），否则写该版本专属 go.env。
 // 健壮性：空值仅在「该 key 当前确有自定义值」时才执行 -u，避免对未设置过的变量调 -u 报错
 // （go env -u 对不存在的条目会返回错误，会中断整批写入）。
 func (g *GoRuntime) GoEnvSet(version string, patch map[string]string) error {
-	bin, err := g.goBin(version)
+	bin, err := g.envBin(version)
 	if err != nil {
 		return err
 	}
 	for k, v := range patch {
 		if v == "" {
-			cur, e := g.runGo(bin, "env", k)
+			cur, e := g.runGoScope(bin, version, "env", k)
 			if e != nil || strings.TrimSpace(cur) == "" {
 				continue // 当前本就未设置（或读不到），无需清除
 			}
 			// 清除动作尽力而为：若该项只是 Go 内置默认值、go.env 中并无自定义条目，
 			// `go env -u` 可能报错；但「回退到默认」的目标本就已达成，故忽略错误继续。
-			if _, uerr := g.runGo(bin, "env", "-u", k); uerr != nil {
+			if _, uerr := g.runGoScope(bin, version, "env", "-u", k); uerr != nil {
 				logger.W("[env go] 清除 %s 失败（可忽略）: %v", k, uerr)
 			}
 			continue
 		}
-		if _, err := g.runGo(bin, "env", "-w", k+"="+v); err != nil {
+		if _, err := g.runGoScope(bin, version, "env", "-w", k+"="+v); err != nil {
 			return err
 		}
 	}

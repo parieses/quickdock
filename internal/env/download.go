@@ -3,9 +3,11 @@ package env
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,9 +23,36 @@ func ProxyTransport() http.RoundTripper {
 // MySQL/MariaDB 等大包网络抖动即整体失败，重试可显著提升成功率。
 const downloadMaxAttempts = 4
 
+// httpFatalError 表示「重试无益」的 HTTP 响应：4xx（除 408 超时 / 429 限流）多为
+// 地址不存在（404）、源已下线（410）等确定性错误，重试只会白白拉长失败时间
+// （实测 404 也退避重试 4 次约 3.5s，且每个候选源都重来一遍）。
+// 上层据此跳过该地址的重试循环，直接尝试下一个候选源。
+type httpFatalError struct {
+	Code int // HTTP 状态码；0 表示非状态类确定性失败（如源站返回 HTML 错误页）
+	URL  string
+	Msg  string // Code==0 时的自定义描述
+}
+
+func (e *httpFatalError) Error() string {
+	if e.Code > 0 {
+		return fmt.Sprintf("下载失败 HTTP %d: %s", e.Code, e.URL)
+	}
+	if e.Msg != "" {
+		return e.Msg
+	}
+	return fmt.Sprintf("下载失败: %s", e.URL)
+}
+
+// isFatalStatus 判断 HTTP 状态码是否属于「重试无益」。
+// 408（请求超时）与 429（限流）虽是 4xx，但属临时性故障，保留重试。
+func isFatalStatus(code int) bool {
+	return code >= 400 && code < 500 && code != http.StatusRequestTimeout && code != http.StatusTooManyRequests
+}
+
 // Download 依次尝试 urls 下载到 dst；任意一个地址成功即返回。带进度回调与代理穿透。
 // 下载先写临时文件，完整成功后才落到 dst，避免中途失败污染目标。
-// 每个地址最多重试 downloadMaxAttempts 次（指数退避），全部失败再尝试下一个候选地址。
+// 每个地址最多重试 downloadMaxAttempts 次（指数退避）；命中 httpFatalError（4xx）时
+// 不重试直接换下一个地址。全部失败再尝试下一个候选地址。
 func Download(ctx context.Context, dst string, urls []string, onProgress func(written, total int64)) error {
 	var lastErr error
 	for _, u := range urls {
@@ -41,6 +70,10 @@ func Download(ctx context.Context, dst string, urls []string, onProgress func(wr
 				return nil
 			}
 			lastErr = attemptErr
+			var fe *httpFatalError
+			if errors.As(attemptErr, &fe) {
+				break // 4xx 确定性失败，放弃该地址的重试
+			}
 		}
 		// 该地址多次重试仍失败，继续尝试下一个候选地址
 	}
@@ -48,6 +81,35 @@ func Download(ctx context.Context, dst string, urls []string, onProgress func(wr
 		lastErr = fmt.Errorf("无可用下载地址")
 	}
 	return lastErr
+}
+
+// newDownloadClient 构造下载用 client，并在跟随重定向时按需改写目标地址。
+//
+// 为什么要在重定向这一步改写：部分下载源给的是「重定向 API」而不是静态文件——
+// JDK 的 api.adoptium.net/v3/binary/latest/... 会 307 到 github.com 的 Release 资产。
+// 候选地址里根本没有 github.com，CandidateURLs 的加速改写无从下手，于是国内直连时
+// 请求在重定向后的 github 连接上一直卡到超时（表现为「下载停在 0%」）。
+// 在这条路径上改写，才能让「GitHub 下载加速」覆盖所有走 github.com 的流量，而不只是
+// 恰好把 github 写进候选清单的那几个源。
+func newDownloadClient() *http.Client {
+	return &http.Client{
+		Transport: ProxyTransport(),
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 10 {
+				return fmt.Errorf("重定向层数过多（>10），疑似跳转环: %s", req.URL)
+			}
+			if GitHubAccelerateEnabled() {
+				if p := ghProxyURL(req.URL.String()); p != "" {
+					if u, err := url.Parse(p); err == nil {
+						req.URL = u
+						// Host 必须同步：http 包用 req.Host（若为空则回落到 URL.Host）建连与发 Host 头
+						req.Host = u.Host
+					}
+				}
+			}
+			return nil
+		},
+	}
 }
 
 func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(written, total int64)) error {
@@ -71,13 +133,16 @@ func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(writte
 	// 注意不要改用 Transport.DisableCompression：Clone() 出来的 transport 会破坏 HTTP/2 握手
 	// （实测 h2 源全部报 malformed HTTP response / EOF），请求头方式无此副作用。
 	req.Header.Set("Accept-Encoding", "identity")
-	client := &http.Client{Transport: ProxyTransport()}
+	client := newDownloadClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		if isFatalStatus(resp.StatusCode) {
+			return &httpFatalError{Code: resp.StatusCode, URL: urlStr}
+		}
 		return fmt.Errorf("下载失败 HTTP %d: %s", resp.StatusCode, urlStr)
 	}
 	// 防御：部分源（如 Apache Lounge）对不存在的路径返回 HTTP 200 + text/html 错误页，
@@ -85,7 +150,8 @@ func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(writte
 	// 这里在下载阶段提前拦截（仅对 .zip 目标）。
 	if strings.HasSuffix(strings.ToLower(dst), ".zip") {
 		if ct := strings.ToLower(resp.Header.Get("Content-Type")); strings.Contains(ct, "text/html") {
-			return fmt.Errorf("下载源返回了 HTML 页面而非 ZIP 压缩包（HTTP %d, Content-Type=%s）: %s", resp.StatusCode, ct, urlStr)
+			// 源站把错误页包上 200 返回时，重试同样内容毫无意义，按确定性失败处理
+			return &httpFatalError{URL: urlStr, Msg: fmt.Sprintf("下载源返回了 HTML 页面而非 ZIP 压缩包（HTTP %d, Content-Type=%s）: %s", resp.StatusCode, ct, urlStr)}
 		}
 	}
 
@@ -175,7 +241,8 @@ func downloadOne(ctx context.Context, urlStr, dst string, onProgress func(writte
 	if strings.HasSuffix(strings.ToLower(dst), ".zip") {
 		if err := verifyZipMagic(dst); err != nil {
 			os.Remove(dst)
-			return err
+			// 同为确定性失败（内容不是 zip），包装成 httpFatalError 让上层跳过重试
+			return &httpFatalError{URL: urlStr, Msg: fmt.Sprintf("%v（下载源可能返回了错误页）: %s", err, urlStr)}
 		}
 	}
 	return nil
