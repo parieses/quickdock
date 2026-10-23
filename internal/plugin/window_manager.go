@@ -25,19 +25,26 @@ type PluginWindowManager struct {
 	mgr           *Manager // 插件管理器（用于「关窗即终止」时停止进程 / 按需惰性复活）
 	baseWidth     int
 	baseHeight    int
+	zoom          float64                // UI 等比缩放（与主窗口一致）：窗口尺寸与内容按同系数放大，避免内容被裁
 	themeDark     bool                   // 当前 App 主题是否为深色（用于窗口底色，避免浅色下露黑底）
 	recycleAfter  time.Duration          // 隐藏后多久未再打开则回收 WebView2
 	recycleTimers map[string]*time.Timer // pluginID → 回收计时器
 }
 
-// NewPluginWindowManager 创建窗口管理器
-func NewPluginWindowManager(app *application.App, mgr *Manager) *PluginWindowManager {
+// NewPluginWindowManager 创建窗口管理器。
+// zoom 是全局 UI 等比缩放系数（与主窗口 main.go 的 uiZoom 一致），由调用方传入以保持单一来源；
+// 插件窗口尺寸与内容按同系数放大，否则只放大内容会把固定尺寸的窗口撑爆/裁切。
+func NewPluginWindowManager(app *application.App, mgr *Manager, zoom float64) *PluginWindowManager {
+	if zoom <= 0 {
+		zoom = 1 // 兜底：0/负值会算出 0×0 窗口，一律按不缩放处理
+	}
 	return &PluginWindowManager{
 		windows:       make(map[string]*application.WebviewWindow),
 		app:           app,
 		mgr:           mgr,
 		baseWidth:     800,
 		baseHeight:    600,
+		zoom:          zoom,
 		themeDark:     true, // 默认深色（与窗口初始 BackgroundColour 一致）
 		recycleAfter:  pluginWindowRecycleAfter,
 		recycleTimers: make(map[string]*time.Timer),
@@ -119,14 +126,27 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		return win, false
 	}
 	// 创建窗口（不触发其它事件钩子，无重入锁风险）
+	// 尺寸与缩放同系数放大：只加 Zoom 不改尺寸会把固定尺寸窗口撑爆/裁切。
+	w := int(float64(m.baseWidth) * m.zoom)
+	h := int(float64(m.baseHeight) * m.zoom)
+	// 最小尺寸同样按 zoom 放大，但不超过窗口本身——否则声明了很小的插件（如小游戏）
+	// 会被 min 顶得比它自己声明得还大。
+	minW, minH := int(400*m.zoom), int(300*m.zoom)
+	if minW > w {
+		minW = w
+	}
+	if minH > h {
+		minH = h
+	}
 	win := m.app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Title:            "快启坞 - " + title,
-		Width:            m.baseWidth,
-		Height:           m.baseHeight,
-		MinWidth:         400,
-		MinHeight:        300,
+		Width:            w,
+		Height:           h,
+		MinWidth:         minW,
+		MinHeight:        minH,
 		Frameless:        true,
 		BackgroundColour: pluginWindowBackground(m.themeDark),
+		Zoom:             m.zoom,
 		// 独立插件窗口加载轻量入口 plugin.html（仅挂载 PluginPage，不加载主 SPA），
 		// 经 query 传 plugin id；首次打开免去主 bundle 下载，配合「关窗=隐藏复用」秒开。
 		URL: "/plugin.html?id=" + pluginID,
@@ -157,7 +177,7 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 
 	win.Show()
 	win.Focus() // 新建路径必须显式聚焦，否则新窗口 z-order 会被压在主窗口/面板之下
-	logger.I("[plugin-window] 创建插件窗口 %s title=%s taskbar=%v", pluginID, title, showInTaskbar)
+	logger.I("[plugin-window] 创建插件窗口 %s title=%s taskbar=%v size=%dx%d zoom=%.2f", pluginID, title, showInTaskbar, w, h, m.zoom)
 	return win, true
 }
 

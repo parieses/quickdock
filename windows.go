@@ -241,6 +241,7 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 		AlwaysOnTop:      true,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/#/clipboard",
+		Zoom:             uiZoom,
 	}
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "clipboard")
@@ -276,6 +277,7 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 		AlwaysOnTop:      true,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/#/note",
+		Zoom:             uiZoom,
 	}
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "note")
@@ -307,16 +309,18 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 // 的滚动缓冲原样还在，不需要等回放。真退出（托盘退出/更新重启）才放行。
 func initSshWindow(app *application.App) *application.WebviewWindow {
 	opts := application.WebviewWindowOptions{
-		Title:            "快启坞 - SSH",
-		Width:            sshWinWidth,
-		Height:           sshWinHeight,
-		MinWidth:         640,
-		MinHeight:        420,
+		Title:  "快启坞 - SSH",
+		Width:  sshWinWidth,
+		Height: sshWinHeight,
+		// 按 uiZoom 放大：否则 1.15 缩放下把窗口拖到最小时，80 列终端仍会被裁。
+		MinWidth:         int(640 * uiZoom),
+		MinHeight:        int(420 * uiZoom),
 		Frameless:        false,
 		AlwaysOnTop:      false,
 		BackgroundColour: application.RGBA{Red: 22, Green: 24, Blue: 29, Alpha: 255},
 		Windows:          application.WindowsWindow{HiddenOnTaskbar: false},
 		URL:              "/#/ssh",
+		Zoom:             uiZoom,
 	}
 	applySavedWinPos(app, &opts, "ssh")
 	win := app.Window.NewWithOptions(opts)
@@ -347,6 +351,7 @@ func initWinmgrWindow(app *application.App) *application.WebviewWindow {
 		AlwaysOnTop:      true,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/#/window-manager",
+		Zoom:             uiZoom,
 	}
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "winmgr")
@@ -372,6 +377,7 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 		AlwaysOnTop:      true,
 		BackgroundColour: application.RGBA{Red: 0, Green: 0, Blue: 0, Alpha: 1},
 		URL:              "/#/command-palette",
+		Zoom:             uiZoom,
 	}
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "palette")

@@ -159,20 +159,30 @@ var updaterPublicKey []byte
 var appVersion = "0.0.0"
 
 const (
-	appTitle         = "快启坞 QuickDock"
-	appWidth         = 1100
-	appHeight        = 700
-	clipWinWidth     = 480
-	clipWinHeight    = 540
-	paletteWinWidth  = 900
-	paletteWinHeight = 600
-	winmgrWinWidth   = 900
-	winmgrWinHeight  = 700
+	appTitle  = "快启坞 QuickDock"
+	appWidth  = 1100
+	appHeight = 800
+
+	// uiZoom 是全局 UI 等比缩放（WebView ZoomFactor），主窗口与所有独立浮窗共用，
+	// 改这一个值即统一改全部窗口的文字/图标/间距大小。
+	//
+	// 定尺寸浮窗（剪贴板/笔记/命令面板/窗口管理）的宽高必须按同一系数推导：
+	// 这些窗口 Frameless 且宽高固定，若只放大内容（Zoom）不改窗口尺寸，
+	// 放大后的内容会被固定窗口裁掉或整块溢出滚动——两者必须同步。
+	// 下面尺寸写成「基准 × uiZoom」即为此；SSH 可缩放，同样缩放保持默认观感一致。
+	uiZoom = 1.15
+
+	clipWinWidth     = int(480 * uiZoom)
+	clipWinHeight    = int(540 * uiZoom)
+	paletteWinWidth  = int(900 * uiZoom)
+	paletteWinHeight = int(600 * uiZoom)
+	winmgrWinWidth   = int(900 * uiZoom)
+	winmgrWinHeight  = int(700 * uiZoom)
 
 	// SSH 终端窗口比浮窗大得多：终端 + 会话列表 + 状态条需要横向空间，
-	// 且 80 列终端在 640px 以下会挤（见 windows.go 的 MinWidth）。
-	sshWinWidth  = 1000
-	sshWinHeight = 680
+	// 且 80 列终端在 640px 以下会挤（见 windows.go 的 MinWidth，已按 uiZoom 放大）。
+	sshWinWidth  = int(1000 * uiZoom)
+	sshWinHeight = int(680 * uiZoom)
 )
 
 // 主窗口与各浮窗的可见/模式标志：与 services 共享同一实例（见 services.WindowFlags）。
@@ -473,7 +483,7 @@ func main() {
 	winPosKV = kvStore
 
 	// 创建插件窗口管理器（需要 app 引用，只能放在 New 之后）
-	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app, pluginMgr)
+	appService.PluginWindowMgr = plugin.NewPluginWindowManager(app, pluginMgr, uiZoom)
 
 	// 注入窗口可见性判定，供插件管理器闲置自动降级时跳过「正打开」的插件。
 	pluginMgr.SetWindowVisibleChecker(appService.PluginWindowMgr.IsWindowVisible)
@@ -489,6 +499,8 @@ func main() {
 		Frameless:        false,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/",
+		// 整体等比缩放（值见常量 uiZoom，主窗口与所有独立浮窗共用同一系数）。
+		Zoom: uiZoom,
 	}
 	if mainRect != nil {
 		mainOpts.Width = mainRect.Width
