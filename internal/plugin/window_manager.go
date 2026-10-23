@@ -87,6 +87,22 @@ func (m *PluginWindowManager) ensurePluginProcess(pluginID string) {
 	}
 }
 
+// windowSize 返回插件窗口宽高（已按 zoom 放大）：优先用插件清单声明的前端尺寸
+// （frontend.width/height，即插件布局的「设计画布」），未声明则退回通用基准
+// baseWidth/baseHeight。两者都乘 zoom——声明尺寸是设计尺寸，放大后可见内容量不变、
+// 文字随全局变大，插件从此按自己声明的尺寸开窗，而非一律挤在通用尺寸里。
+func (m *PluginWindowManager) windowSize(pluginID string) (int, int) {
+	w, h := m.baseWidth, m.baseHeight
+	if m.mgr != nil {
+		if inst := m.mgr.GetPlugin(pluginID); inst != nil {
+			if fw, fh := inst.Manifest.Frontend.Width, inst.Manifest.Frontend.Height; fw > 0 && fh > 0 {
+				w, h = fw, fh
+			}
+		}
+	}
+	return int(float64(w) * m.zoom), int(float64(h) * m.zoom)
+}
+
 // Show 显示插件窗口。如果窗口不存在则创建新窗口。
 // showInTaskbar: 是否在任务栏显示图标（分离模式 = true）
 // 返回 (窗口, 是否为新创建)
@@ -126,9 +142,8 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		return win, false
 	}
 	// 创建窗口（不触发其它事件钩子，无重入锁风险）
-	// 尺寸与缩放同系数放大：只加 Zoom 不改尺寸会把固定尺寸窗口撑爆/裁切。
-	w := int(float64(m.baseWidth) * m.zoom)
-	h := int(float64(m.baseHeight) * m.zoom)
+	// 尺寸：优先插件清单声明的 frontend.width/height，未声明退回通用基准；均按 zoom 放大。
+	w, h := m.windowSize(pluginID)
 	// 最小尺寸同样按 zoom 放大，但不超过窗口本身——否则声明了很小的插件（如小游戏）
 	// 会被 min 顶得比它自己声明得还大。
 	minW, minH := int(400*m.zoom), int(300*m.zoom)
