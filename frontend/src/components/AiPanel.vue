@@ -19,7 +19,7 @@
  */
 import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { AlignLeft, Check, Copy, Loader2, Send, Sparkles, Trash2, Waves, X } from '@lucide/vue'
+import { AlignLeft, Check, Copy, Loader2, Send, Sparkles, Square, Trash2, Waves, X } from '@lucide/vue'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { splitAiSegments } from '../utils/aiSegments'
@@ -40,7 +40,7 @@ export interface AiPanelSegment {
   commands: AiPanelCommand[] | null
 }
 
-/** 面板展示的完整结果。 */
+  /** 面板展示的完整结果。 */
 export interface AiPanelResult {
   answer: string
   commands: AiPanelCommand[] | null
@@ -48,6 +48,13 @@ export interface AiPanelResult {
   model: string
   hasRisk: boolean
   elapsedMs: number
+  /** 历史摘要（SSH 场景）：后端把旧轮次压缩后的摘要，前端回存并在下一轮回传。 */
+  summary?: string
+  /**
+   * 后端本轮实际保留原文的历史条目数（SSH 场景）。
+   * 前端据此收敛本地历史数组：未压缩时=全部，压缩后=最近若干条。
+   */
+  historyKept?: number
 }
 
 const props = withDefaults(defineProps<{
@@ -71,6 +78,14 @@ const props = withDefaults(defineProps<{
   showClear?: boolean
   /** 是否显示「关闭」按钮。 */
   showClose?: boolean
+  /**
+   * 是否允许在「请求中」通过发送按钮位置中止本轮。
+   *
+   * 一旦开启，busy 态下发送按钮会变成「停止」（见 footer）。
+   * 用于 SSH / 剪贴板这类「问 AI」面板：模型慢或卡住时，用户不必干等转圈，
+   * 点一下即可退出思考态（后端调用仍在后台跑完，无害）。
+   */
+  stoppable?: boolean
   /** 附加在标题下方的说明行（CSS 类由调用方作用域决定）。 */
   hintClass?: string
   /**
@@ -105,6 +120,7 @@ const props = withDefaults(defineProps<{
   hintClass: '',
   liveText: '',
   draft: undefined,
+  stoppable: false,
 })
 
 const emit = defineEmits<{
@@ -112,6 +128,16 @@ const emit = defineEmits<{
   clear: []
   close: []
   copy: [text: string]
+  stop: []
+  /**
+   * 输入框内容变化。
+   *
+   * 通用面板不关心内容本身，但调用方可能需要它做**当场决策**：
+   * SSH 面板要据"问题里有没有提到屏显"决定这一轮要不要把整屏内容拼进 prompt，
+   * 并在输入框上方提示"本轮将附带屏显"。让面板替它猜只能在 ask 时才知道，
+   * 那时已经来不及提示了。
+   */
+  'update:question': [text: string]
 }>()
 
 const { t } = useI18n()
@@ -301,6 +327,9 @@ watch(
   { immediate: true }
 )
 
+// 把输入内容实时抛给调用方（预填也会经此走一遍，父组件不需要另走一条路）。
+watch(question, (v) => emit('update:question', v))
+
 defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 </script>
 
@@ -424,7 +453,10 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
           :disabled="busy"
           @keydown.enter.exact.prevent="emit('ask')"
         />
-        <button class="ai-panel-send" :disabled="askDisabled" @click="emit('ask')">
+        <button v-if="busy && stoppable" class="ai-panel-send stop" :title="t('aiStop')" @click="emit('stop')">
+          <Square :size="14" />
+        </button>
+        <button v-else class="ai-panel-send" :disabled="askDisabled" @click="emit('ask')">
           <Loader2 v-if="busy" :size="14" class="spin" />
           <Send v-else :size="14" />
         </button>
@@ -785,5 +817,32 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 .ai-panel-send:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* 中止态：把发送按钮临时变成「停止」。用 danger 红让它从一排图标里跳出来，
+   用户卡在转圈时一眼就能找到出口；hover 再加深，避免误点。 */
+.ai-panel-send.stop,
+.ai-panel-send.stop:hover {
+  background: var(--color-danger);
+  color: var(--color-danger-text);
+}
+
+/*
+ * 旋转动画：思考中 / 流式等待时的 Loader2 图标靠它转起来。
+ *
+ * 关键：这个 class 必须定义在本组件的 scoped 样式里。
+ * 之前它只在别的组件（SshSessionView / MonitorPage 等）的 scoped 里定义，
+ * 而 scoped 样式按组件隔离，AiPanel 引用 .spin 却拿不到那段规则——
+ * 表现为「思考中」图标静止不动（不是卡死，纯粹是没动画）。
+ * 这里补一份，让本组件的 Loader2 真正旋转。
+ */
+.spin {
+  animation: ai-panel-spin 0.9s linear infinite;
+}
+
+@keyframes ai-panel-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

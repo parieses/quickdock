@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 
@@ -104,7 +105,7 @@ func TestStripAnsi_KeepsPlainText(t *testing.T) {
 }
 
 func TestBuildSshAiPrompt(t *testing.T) {
-	got := buildSshAiPrompt("root@10.0.0.1:22（生产环境）", db.SshEnvProd, "nginx: command not found", "这报错啥意思", []string{"上一个问题"}, "")
+	got := buildSshAiPrompt("root@10.0.0.1:22（生产环境）", db.SshEnvProd, "nginx: command not found", "这报错啥意思", []string{"上一个问题"}, "", "")
 
 	// 屏显必须在场：这是 AI 能看懂现场的唯一依据。
 	if !strings.Contains(got, "nginx: command not found") {
@@ -126,7 +127,7 @@ func TestBuildSshAiPrompt(t *testing.T) {
 
 func TestBuildSshAiPrompt_TrimsLongScreen(t *testing.T) {
 	long := strings.Repeat("x", aiScreenMaxRune+500)
-	got := buildSshAiPrompt("h", "", long, "q", nil, "")
+	got := buildSshAiPrompt("h", "", long, "q", nil, "", "")
 	if n := len([]rune(got)); n > aiScreenMaxRune+400 {
 		t.Errorf("超长屏显未被裁剪，总长 %d", n)
 	}
@@ -165,7 +166,7 @@ func TestDescribeHost_EnvLabel(t *testing.T) {
 func TestBuildSshAiPrompt_SelectionSection(t *testing.T) {
 	// 终端右键「问 AI」带来的选区：必须单独成节，且排在屏显之前
 	// ——它表达的是"我关心的就是这几行"，权重要高于整屏画面。
-	got := buildSshAiPrompt("root@prod", "", "整屏画面", "这啥意思", nil, "nginx: bind() to 0.0.0.0:80 failed")
+	got := buildSshAiPrompt("root@prod", "", "整屏画面", "这啥意思", nil, "nginx: bind() to 0.0.0.0:80 failed", "")
 	if !strings.Contains(got, "## 用户选中的输出") {
 		t.Errorf("缺少选区小节:\n%s", got)
 	}
@@ -183,7 +184,7 @@ func TestBuildSshAiPrompt_SelectionTruncated(t *testing.T) {
 	// 误操作全选时选区会非常大，必须截断，否则屏显与历史会被挤没。
 	big := strings.Repeat("x", 120) + "\n"
 	sel := strings.Repeat(big, 100)
-	got := buildSshAiPrompt("h", "", "", "q", nil, sel)
+	got := buildSshAiPrompt("h", "", "", "q", nil, sel, "")
 	if !strings.Contains(got, "…") {
 		t.Errorf("超长选区未截断")
 	}
@@ -200,7 +201,7 @@ func TestBuildSshAiPrompt_LimitsHistoryTurns(t *testing.T) {
 	for i := 0; i < aiHistoryMaxTurns+5; i++ {
 		h = append(h, strings.Repeat("h", 10))
 	}
-	got := buildSshAiPrompt("host", "", "", "q", h, "")
+	got := buildSshAiPrompt("host", "", "", "q", h, "", "")
 	// 只取末尾若干轮：更早的历史对当前问题没有帮助，还会误导模型。
 	if strings.Count(got, "hhhhhhhhhh") > aiHistoryMaxTurns {
 		t.Errorf("历史轮次未被限制:\n%s", got)
@@ -218,7 +219,7 @@ func TestBuildSshAiPrompt_QuestionSurvivesBudget(t *testing.T) {
 		h = append(h, strings.Repeat("历史回答 ", 100)) // 每轮约 500 rune
 	}
 	q := "nginx 启动失败怎么排查"
-	got := buildSshAiPrompt("root@prod（生产环境）", db.SshEnvProd, screen, q, h, "")
+	got := buildSshAiPrompt("root@prod（生产环境）", db.SshEnvProd, screen, q, h, "", "")
 
 	if !strings.HasSuffix(strings.TrimSpace(got), q) {
 		t.Errorf("本次问题丢失（不在 prompt 末尾）:\n…%s", got[len(got)-200:])
@@ -235,5 +236,56 @@ func TestDescribeHost(t *testing.T) {
 	// 空指针不能 panic：Ask 在拿不到主机信息时仍要能继续（上下文少一点而已）。
 	if got := describeHost(nil); got != "" {
 		t.Errorf("nil 主机应返回空串，实际 %q", got)
+	}
+}
+
+func TestCompressSshHistory(t *testing.T) {
+	// 历史很短：不触发摘要，原样返回，summary 为空。
+	short := []string{"q1", "AI: a1", "q2", "AI: a2"}
+	if recent, summary := compressSshHistory(nil, "", short); len(recent) != len(short) || summary != "" {
+		t.Errorf("短历史不应压缩: recent=%d summary=%q", len(recent), summary)
+	}
+
+	// 未达批次阈值（len=6，overflow=2 < sumBatch）：也原样返回，不额外调模型。
+	six := []string{"t0", "t1", "t2", "t3", "t4", "t5"}
+	called := false
+	stubNoCall := func(system, prompt string, timeout int) (string, string, error) {
+		called = true
+		return "X", "model", nil
+	}
+	if recent, summary := compressSshHistory(stubNoCall, "", six); len(recent) != 6 || summary != "" || called {
+		t.Errorf("未达批次不应压缩: recent=%d summary=%q called=%v", len(recent), summary, called)
+	}
+
+	// 达到批次阈值（len=8，overflow=4）：最近 sshHistoryKeepRecent 条保留原文，其余进摘要。
+	var full []string
+	for i := 0; i < 8; i++ {
+		full = append(full, fmt.Sprintf("turn%d", i))
+	}
+	stub := func(system, prompt string, timeout int) (string, string, error) {
+		return "摘要", "model", nil
+	}
+	recent, summary := compressSshHistory(stub, "", full)
+	if len(recent) != sshHistoryKeepRecent {
+		t.Errorf("应保留最近 %d 条，实际 %d", sshHistoryKeepRecent, len(recent))
+	}
+	if summary != "摘要" {
+		t.Errorf("长历史应触发摘要，实际 %q", summary)
+	}
+
+	// 增量压缩：带上 prevSummary，桩内应看到「已有的更早摘要」被传入。
+	stub2 := func(system, prompt string, timeout int) (string, string, error) {
+		if !strings.Contains(prompt, "[已有的更早摘要]") {
+			t.Errorf("应把 prevSummary 传入摘要 prompt")
+		}
+		return "合并摘要", "model", nil
+	}
+	if _, summary := compressSshHistory(stub2, "旧摘要", full); summary != "合并摘要" {
+		t.Errorf("应返回合并摘要，实际 %q", summary)
+	}
+
+	// 模型不可用（askFn 为 nil 或返回错误）：退回 prevSummary，recent 仍然正确。
+	if recent, summary := compressSshHistory(nil, "旧摘要", full); len(recent) != sshHistoryKeepRecent || summary != "旧摘要" {
+		t.Errorf("摘要失败应退回 prevSummary: recent=%d summary=%q", len(recent), summary)
 	}
 }

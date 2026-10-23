@@ -6,6 +6,7 @@ import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote, ArrowDo
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { splitMarkdownBlocks as splitBlocks } from '../utils/markdownBlocks'
 import { useFloatMenu } from '../composables/useFloatMenu'
@@ -779,24 +780,12 @@ function stop() {
 }
 
 async function copy(text: string) {
-  const value = text ?? ''
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(value)
-    } else {
-      const ta = document.createElement('textarea')
-      ta.value = value
-      ta.style.position = 'fixed'
-      ta.style.top = '-9999px'
-      ta.style.opacity = '0'
-      document.body.appendChild(ta)
-      ta.focus()
-      ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-    }
+  // 统一入口见 utils/clipboard：navigator.clipboard 在 WebView2 里要么被静默拒绝，
+  // 要么（execCommand 兜底）返回 true 但其实没写进去——两种都会让用户看到「已复制」的假象。
+  const ok = await copyToClipboard(text ?? '')
+  if (ok) {
     toast.success(t('copied'))
-  } catch {
+  } else {
     toast.error(t('copyFailed'))
   }
 }

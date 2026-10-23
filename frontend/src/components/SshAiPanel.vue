@@ -18,9 +18,10 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { Check, Play, Terminal, TextSelect, X } from '@lucide/vue'
+import { Check, Monitor, Play, Terminal, TextSelect, X } from '@lucide/vue'
 import { Ask } from '../../bindings/quickdock/services/sshx/sshservice'
 import { apiErrorCode, unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useAIAvailability } from '../composables/useAIAvailability'
@@ -37,7 +38,12 @@ const props = defineProps<{
    * 同一个「直接执行」按钮，点在生产机和测试机上的后果完全不同。
    */
   hostEnv?: string
-  /** 取终端屏显纯文本。由父组件转发 SshTerminal 的 readScreen。 */
+  /**
+   * 取终端屏显纯文本。由父组件转发 SshTerminal 的 readScreen。
+   *
+   * **只在用户的问题里提到屏显时才调用**（见 wantsScreen）：屏显是整屏画面，
+   * 每轮都送既费 token，又会让模型把注意力落到与问题无关的画面上。
+   */
   readScreen: () => string
   /**
    * 把内容写入终端输入缓冲。
@@ -57,13 +63,56 @@ const { error: toastError } = useToast()
 
 const busy = ref(false)
 const errMsg = ref('')
+/** 用户中途点了「停止」：用于丢弃迟到的本轮结果。 */
+const cancelled = ref(false)
 const result = ref<AiPanelResult | null>(null)
 /** 最近几轮的纯文本，用于多轮追问。够用即可：再多模型会被旧问题带偏。 */
 const history = ref<string[]>([])
+/**
+ * 历史摘要：后端把旧轮次压缩后的精炼摘要。
+ *
+ * SSH 历史是前端内存态（不落库），所以压缩态要在前后端之间传递：
+ * 本轮把上一轮的 summary 作为 prevSummary 回传，后端只对「本轮新晋升为旧的」
+ * 那一轮做增量摘要，返回新的 summary 存回这里。这样长对话的历史保持有界，
+ * 不再随轮数线性膨胀（根治「越问越卡」）。
+ */
+const summary = ref('')
 /** 刚发送到终端的命令文本，用于给按钮一个短暂反馈。 */
 const sent = ref('')
 
 const panelRef = ref<InstanceType<typeof AiPanel> | null>(null)
+
+/**
+ * 输入框内容的镜像（由通用面板经 update:question 抛上来）。
+ *
+ * 输入框归通用面板所有，但「这一轮要不要带屏显」必须由本组件判定——
+ * 判定依据就是用户写的字，所以在面板里输入时同步一份到这里。
+ */
+const questionText = ref('')
+
+/**
+ * 屏显触发词。
+ *
+ * 为什么不再每次都送屏显：屏显是**整屏画面**（上限 3000 rune），而大部分问题
+ * （"磁盘还剩多少"、"nginx 怎么重载"）根本不需要看屏幕。每轮都塞一份既费 token，
+ * 又会把模型注意力引到无关画面上。用户只要在问题里提一句「屏显」，
+ * 就说明他确实想让 AI 看屏幕——这是唯一可靠的意图信号。
+ *
+ * 判定放在前端而不是后端：screenText 入参的语义就是"要送进 prompt 的屏显"，
+ * 由调用方决定带不带、后端拿到就用。这样判定只有一份实现，
+ * 上面的「本轮将附带屏显」提示也不会和后端实际行为分叉。
+ */
+const SCREEN_KEYWORDS = ['屏显', '当前画面', '当前屏幕', '屏幕内容', 'current screen', 'screen']
+
+/** 本轮是否会让 AI 看到屏幕内容。关键字命中即可，后面不必再写别的内容。 */
+const wantsScreen = computed(() => {
+  const q = questionText.value.toLowerCase()
+  return SCREEN_KEYWORDS.some((k) => q.includes(k))
+})
+
+function onQuestionInput(v: string) {
+  questionText.value = v
+}
 
 /** 当前激活的 AI 档案：多 Key 场景下「问 AI 实际用的是哪一个」由它回答。 */
 const { profile: activeProfile, model: activeModel, check: checkAI } = useAIAvailability()
@@ -137,6 +186,7 @@ async function ask() {
   const q = panelRef.value?.getQuestion()?.trim()
   if (!q || busy.value) return
   busy.value = true
+  cancelled.value = false
   errMsg.value = ''
   // 新一轮开始：清掉上一轮的增量，换一个 streamId（旧 id 迟到的增量不会再匹配上）。
   liveText.value = ''
@@ -146,18 +196,32 @@ async function ask() {
       await Ask({
         sessionId: props.sessionId,
         question: q,
-        screenText: props.readScreen(),
-        history: history.value.slice(-6),
+        // 屏显只在问题提到它时才送：没有意图信号就送，等于让模型猜我们在看什么。
+        screenText: wantsScreen.value ? props.readScreen() : '',
+        history: history.value.slice(-12),
+        // 把上一轮的摘要回传，后端据此做增量压缩（见后端 compressSshHistory）。
+        prevSummary: summary.value,
         selection: selection.value,
         // 关掉流式就传空：后端据此不推增量，等于一次性返回。
         streamId: streamEnabled.value ? streamId.value : '',
       })
     )
+    // 中途点了「停止」：本轮结果已无意义，丢弃即可（Go 侧调用仍在后台跑完，无害）。
+    if (cancelled.value) return
     // unwrap 只在成功时返回数据，失败已 throw；此处 null 说明调用没返回内容。
     if (!r) throw new Error(t('sshAiFailed'))
     result.value = r
-    history.value = [...history.value, q, `AI: ${r.answer}`].slice(-12)
+    // 回存历史摘要：下一场提问作为 prevSummary 回传，长对话的历史因此保持有界。
+    summary.value = r.summary ?? ''
+    // 按后端报告的 historyKept 收敛本地历史：未压缩时=全部，压缩后=最近若干条。
+    // 不这么做本地数组会一直增长；而前端硬编码上限又会和后端 keepRecent 口径漂移。
+    const kept = typeof r.historyKept === 'number' ? r.historyKept : history.value.length
+    const base = kept > 0 ? history.value.slice(history.value.length - kept) : []
+    history.value = [...base, q, `AI: ${r.answer}`].slice(-12)
     panelRef.value?.setQuestion('')
+    // 选中输出（右键「问 AI」带来的上下文）随本轮提问一起消费，发送后从引用条移除：
+    // 不移除会一直挂在侧栏，既占空间又让用户误以为这轮还没发出。
+    selection.value = ''
     // 换了一轮回答，上一轮待确认的命令必须作废：
     // 留着会让用户在新的答案里点「执行」时，把旧命令直接发出去。
     confirmRun.value = ''
@@ -177,13 +241,11 @@ async function ask() {
 }
 
 async function copyCmd(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyToClipboard(text)) {
     panelRef.value?.markCopied(text)
-  } catch (e) {
-    logErr('ssh.ai.copy', e)
-    toastError(getErrorMessage(e))
+    return
   }
+  toastError(t('copyFailed'))
 }
 
 /**
@@ -215,17 +277,37 @@ function sendCmd(text: string, execute: boolean) {
 function clearAll() {
   result.value = null
   history.value = []
+  summary.value = ''
   errMsg.value = ''
   selection.value = ''
   confirmRun.value = ''
   liveText.value = ''
   streamId.value = ''
+  cancelled.value = false
   panelRef.value?.setQuestion('')
 }
 
+/**
+ * 停止本轮问答。
+ *
+ * 后端 Go 调用无法从前端真正中断（一次性的 HTTP 请求），但这里先把视觉态复位：
+ * 清除「思考中 / 转圈」并作废迟到的增量与结果，让面板不再卡在转圈不动的状态。
+ * 后台那次调用会自行跑完（最多 30s 超时），不对用户造成副作用。
+ */
+function stop() {
+  if (!busy.value) return
+  cancelled.value = true
+  busy.value = false
+  liveText.value = ''
+  // 清空 streamId：后端仍在推的增量因此匹配不上而被忽略，不会污染下一轮。
+  streamId.value = ''
+}
+
 /** 空状态里的示例问题：点一下填进输入框（不直接发送——
- *  用户往往想改几个字，误触就发一次请求也不合适）。 */
-const samples = computed(() => [t('sshAiSample1'), t('sshAiSample2'), t('sshAiSample3')])
+ *  用户往往想改几个字，误触就发一次请求也不合适）。
+ *  sshAiSample4 特意点出「结合当前屏显」：它同时示范了屏显的**触发方式**——
+ *  问题里出现「屏显」，这一轮才会带上正在看的画面，不用自己粘贴终端内容。 */
+const samples = computed(() => [t('sshAiSample1'), t('sshAiSample2'), t('sshAiSample3'), t('sshAiSample4')])
 
 /**
  * 终端右键「问 AI」带来的选中输出。
@@ -303,10 +385,13 @@ function dropSelection() {
       :err-msg="errMsg"
       :draft="draft"
       :live-text="liveText"
+      :stoppable="true"
       @ask="ask"
+      @stop="stop"
       @clear="clearAll"
       @close="emit('close')"
       @copy="copyCmd"
+      @update:question="onQuestionInput"
     >
       <!-- 环境徽章：让用户随时知道自己在问哪一类机器。
            生产用 danger 色——它不该是"又一个标签"，而要能在余光里被认出来。 -->
@@ -334,6 +419,16 @@ function dropSelection() {
           </div>
           <div v-for="(l, i) in selectionPreview.head" :key="i" class="ssh-ai-quote-line">{{ l }}</div>
         </div>
+        <!-- 屏显提示：让用户当场知道这一轮会不会把整屏内容发出去。
+             不提示的话，"带不带屏显"是个看不见的状态——用户既不知道为什么
+             某次答得准、某次答偏，也无从确认自己没把整屏内容送出去。 -->
+        <div v-if="wantsScreen" class="ssh-ai-screen-note">
+          <Monitor :size="12" />
+          <span>{{ t('sshAiScreenOn') }}</span>
+        </div>
+        <!-- 历史压缩提示：让用户知道更早的轮次已被摘要化、上下文仍在延续，
+             而不是以为前面的对话被丢了。 -->
+        <div v-if="summary" class="ssh-ai-summary-note">{{ t('sshAiSummaryNote') }}</div>
       </template>
 
       <!--
@@ -478,6 +573,28 @@ function dropSelection() {
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* 屏显提示：与选区引用条同排，但用中性色——它只是"这轮多带了什么"的说明，
+   不是需要用户处理的东西。accent 色留给选区（那是用户主动圈的重点）。 */
+.ssh-ai-screen-note {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+
+/* 历史压缩提示：一行弱化的说明，不抢输入区的注意力。 */
+.ssh-ai-summary-note {
+  padding: 2px 2px 0;
+  font-size: 10.5px;
+  line-height: 1.4;
+  color: var(--color-text-disabled);
 }
 
 /*

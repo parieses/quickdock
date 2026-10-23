@@ -19,6 +19,7 @@ import { Events } from '@wailsio/runtime'
 import { FileText, Sparkles } from '@lucide/vue'
 import { AskAI } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useAIAvailability } from '../composables/useAIAvailability'
@@ -159,13 +160,11 @@ function askFree() {
 }
 
 async function copyResult(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyToClipboard(text)) {
     panelRef.value?.markCopied(text)
-  } catch (e) {
-    logErr('clipboard.ai.copy', e)
-    errMsg.value = getErrorMessage(e)
+    return
   }
+  errMsg.value = t('copyFailed')
 }
 
 function clearAll() {

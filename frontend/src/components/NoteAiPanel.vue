@@ -17,6 +17,7 @@ import { Events } from '@wailsio/runtime'
 import { AlignLeft, Languages, ListTree, PenLine } from '@lucide/vue'
 import { AskAI } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useAIAvailability } from '../composables/useAIAvailability'
@@ -137,13 +138,13 @@ function askFree() {
 }
 
 async function copyResult(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
+  // 统一走 utils/clipboard：WebView2 的 navigator.clipboard 在文档失焦时会被拒绝，
+  // 而 AI 面板恰好常在浮窗里被调用，是「点了复制没反应」的高发处。
+  if (await copyToClipboard(text)) {
     panelRef.value?.markCopied(text)
-  } catch (e) {
-    logErr('note.ai.copy', e)
-    errMsg.value = getErrorMessage(e)
+    return
   }
+  errMsg.value = t('copyFailed')
 }
 
 function clearAll() {

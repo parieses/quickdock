@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Pen, Trash2, Plus } from '@lucide/vue'
+import { Pen, Trash2, Plus, RefreshCw } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 
 import {
+  AIFetchModels,
   AIListProfiles,
   AISaveProfiles,
   AITestConnection,
@@ -48,41 +49,79 @@ const aiTesting = ref(false)
 const aiEditDraft = ref<AIProfile | null>(null)
 let aiMsgTimer: ReturnType<typeof setTimeout> | null = null
 
-// ollamaLocalModels 本机 Ollama 已下载模型名，用于编辑档案时给「模型」输入框做联想。
-// 只在编辑 Ollama 档案时按需拉取；拉不到（未装/未启动）就静默降级为普通文本输入。
-const ollamaLocalModels = ref<string[]>([])
-const ollamaModelsLoading = ref(false)
-const ollamaModelOpen = ref(false)
+// modelOptions 模型候选列表，来源有两类：
+//   - Ollama：编辑档案时自动拉本机已下载模型（EnvOllamaModels）；
+//   - 其它兼容接口：用户点「拉取模型列表」后从 /models 拉取（AIFetchModels）。
+// 两路共用同一份候选与下拉，避免维护两套 UI、两种交互。
+const modelOptions = ref<string[]>([])
+const modelOptionsLoading = ref(false)
+const modelOptionsOpen = ref(false)
+const modelOptionsError = ref('')
 
-// filteredOllamaModels 下拉列表内容：已输入则按子串过滤（大小写不敏感），未输入则全列。
+// filteredModelOptions 下拉内容：已输入则按子串过滤（大小写不敏感），未输入则全列。
 // 这样「点箭头看全部、边打边缩」两种用法都成立。
-const filteredOllamaModels = computed(() => {
+const filteredModelOptions = computed(() => {
   const kw = (aiEditDraft.value?.model || '').trim().toLowerCase()
-  if (!kw || ollamaLocalModels.value.includes(aiEditDraft.value?.model || '')) {
-    return ollamaLocalModels.value
+  if (!kw || modelOptions.value.includes(aiEditDraft.value?.model || '')) {
+    return modelOptions.value
   }
-  return ollamaLocalModels.value.filter((m) => m.toLowerCase().includes(kw))
+  return modelOptions.value.filter((m) => m.toLowerCase().includes(kw))
 })
 
-function onModelFocus() {
-  if (aiEditDraft.value?.provider === 'ollama') ollamaModelOpen.value = true
+function resetModelOptions() {
+  modelOptions.value = []
+  modelOptionsError.value = ''
+  modelOptionsOpen.value = false
 }
 
-function pickOllamaModel(name: string) {
+function onModelFocus() {
+  if (modelOptions.value.length) modelOptionsOpen.value = true
+}
+
+function pickModel(name: string) {
   if (aiEditDraft.value) aiEditDraft.value.model = name
-  ollamaModelOpen.value = false
+  modelOptionsOpen.value = false
 }
 
 async function loadOllamaLocalModels() {
-  if (ollamaModelsLoading.value) return
-  ollamaModelsLoading.value = true
+  if (modelOptionsLoading.value) return
+  modelOptionsLoading.value = true
+  modelOptionsError.value = ''
   try {
     const ms = unwrap<{ name: string }[]>(await EnvOllamaModels()) || []
-    ollamaLocalModels.value = ms.map((m) => m.name).filter(Boolean)
+    modelOptions.value = ms.map((m) => m.name).filter(Boolean)
   } catch {
-    ollamaLocalModels.value = []
+    modelOptions.value = []
   } finally {
-    ollamaModelsLoading.value = false
+    modelOptionsLoading.value = false
+  }
+}
+
+// fetchApiModels 从兼容接口拉取模型列表（OpenAI 兼容 GET /models）。
+// 直接把「编辑中的草稿」传给后端：用户刚填好 BaseURL/Key、尚未保存时也能拉取；
+// 若 Key 是回填的掩码，后端会回退到库里该档案解密后的 Key（见 AIFetchModels）。
+async function fetchApiModels() {
+  const d = aiEditDraft.value
+  if (!d || modelOptionsLoading.value) return
+  const needKey = d.provider !== 'ollama'
+  if (!d.baseURL || (needKey && !d.apiKey)) {
+    modelOptionsError.value = t('aiFetchNeedBaseKey')
+    return
+  }
+  modelOptionsLoading.value = true
+  modelOptionsError.value = ''
+  try {
+    const res = unwrap<{ models?: string[] }>(
+      await AIFetchModels({ id: d.id, provider: d.provider, baseURL: d.baseURL, apiKey: d.apiKey }),
+    )
+    const list = res?.models ?? []
+    modelOptions.value = list
+    modelOptionsOpen.value = list.length > 0
+    if (!list.length) modelOptionsError.value = t('aiNoModelsFound')
+  } catch (e: any) {
+    modelOptionsError.value = t('aiFetchModelsFailed') + ': ' + (e?.message || String(e))
+  } finally {
+    modelOptionsLoading.value = false
   }
 }
 
@@ -181,6 +220,7 @@ function openAIEditor() {
   const cur = aiCurrent.value
   if (!cur) return
   aiEditDraft.value = { ...cur }
+  resetModelOptions()
   if (cur.provider === 'ollama') loadOllamaLocalModels()
 }
 function onAIProviderChangeDraft() {
@@ -188,9 +228,11 @@ function onAIProviderChangeDraft() {
   if (!d) return
   const url = aiPresets[d.provider]
   if (url) d.baseURL = url
+  // 切换服务商后旧的候选列表已不适用，清掉重新来。
+  resetModelOptions()
   if (d.provider === 'ollama') loadOllamaLocalModels()
 }
-function closeAIEditor() { aiEditDraft.value = null; ollamaModelOpen.value = false }
+function closeAIEditor() { aiEditDraft.value = null; resetModelOptions() }
 function saveAIModal() {
   const draft = aiEditDraft.value
   if (!draft) return
@@ -281,7 +323,7 @@ function saveAIModal() {
             </label>
             <label class="field">
               <span class="field-label">{{ t('aiModel') }}</span>
-              <!-- Ollama：输入框 + 显式下拉。原生 datalist 必须聚焦后输入才过滤，
+              <!-- 输入框 + 显式下拉。原生 datalist 必须聚焦后输入才过滤，
                    WebView2 上体验不可靠，故自己做一个「点箭头即出全部」的列表。 -->
               <div class="model-input-wrap">
                 <input
@@ -292,32 +334,48 @@ function saveAIModal() {
                   @focus="onModelFocus"
                 />
                 <button
-                  v-if="aiEditDraft.provider === 'ollama' && ollamaLocalModels.length"
+                  v-if="modelOptions.length"
                   type="button"
                   class="model-caret"
-                  :title="t('aiOllamaLocalModels')"
-                  @click.prevent="ollamaModelOpen = !ollamaModelOpen"
+                  :title="t('aiFetchModels')"
+                  @click.prevent="modelOptionsOpen = !modelOptionsOpen"
                 >▾</button>
-                <div v-if="ollamaModelOpen && aiEditDraft.provider === 'ollama'" class="model-dropdown">
+                <div v-if="modelOptionsOpen && modelOptions.length" class="model-dropdown">
                   <div
-                    v-for="m in filteredOllamaModels"
+                    v-for="m in filteredModelOptions"
                     :key="m"
                     class="model-option"
                     :class="{ on: aiEditDraft.model === m }"
-                    @mousedown.prevent="pickOllamaModel(m)"
+                    @mousedown.prevent="pickModel(m)"
                   >{{ m }}</div>
-                  <div v-if="!filteredOllamaModels.length" class="model-option-empty">
-                    {{ t('aiOllamaNoModels') }}
+                  <div v-if="!filteredModelOptions.length" class="model-option-empty">
+                    {{ t('aiNoModelsFound') }}
                   </div>
                 </div>
+              </div>
+              <!-- 非 Ollama：从兼容接口拉取模型列表。Ollama 已在编辑时自动拉本机模型，无需此按钮。 -->
+              <div v-if="aiEditDraft.provider !== 'ollama'" class="model-fetch-row">
+                <button
+                  type="button"
+                  class="model-fetch-btn"
+                  :disabled="modelOptionsLoading"
+                  @click.prevent="fetchApiModels"
+                >
+                  <RefreshCw :size="12" :class="{ spinning: modelOptionsLoading }" />
+                  {{ modelOptionsLoading ? t('aiFetchingModels') : t('aiFetchModels') }}
+                </button>
+                <span v-if="modelOptionsError" class="model-fetch-msg error">{{ modelOptionsError }}</span>
+                <span v-else-if="modelOptions.length" class="model-fetch-msg">
+                  {{ t('aiModelsFetched', { n: modelOptions.length }) }}
+                </span>
               </div>
             </label>
             <!-- Ollama：chip 快捷选择（与下拉等价，鼠标不用移来移去） -->
             <div v-if="aiEditDraft.provider === 'ollama'" class="ollama-model-picks">
-              <template v-if="ollamaLocalModels.length">
+              <template v-if="modelOptions.length">
                 <span class="picks-label">{{ t('aiOllamaLocalModels') }}</span>
                 <button
-                  v-for="m in ollamaLocalModels"
+                  v-for="m in modelOptions"
                   :key="m"
                   type="button"
                   class="pick-chip"
@@ -325,7 +383,7 @@ function saveAIModal() {
                   @click="aiEditDraft.model = m"
                 >{{ m }}</button>
               </template>
-              <span v-else-if="ollamaModelsLoading" class="picks-hint">{{ t('aiOllamaLoading') }}</span>
+              <span v-else-if="modelOptionsLoading" class="picks-hint">{{ t('aiOllamaLoading') }}</span>
               <span v-else class="picks-hint">{{ t('aiOllamaNoModels') }}</span>
             </div>
             <div class="field-row">

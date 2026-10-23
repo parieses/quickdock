@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -81,7 +82,11 @@ var sshAiSystemPrompt = strings.Join([]string{
 	"5. 涉及删除、覆盖磁盘、改防火墙、改系统服务、重启的命令，必须显式标注风险等级与不可逆后果。",
 	"6. 不要输出交互式全屏程序（vim、top、less），用户无法在此确认。",
 	"",
-	"终端屏显中若包含报错，请先解释原因再给修复命令。",
+	// 屏显**不一定是报错**：可能是正常命令输出、日志滚动、程序界面（TOP/htop）、
+	// 或者一个空提示符。若这里写成"屏显里若有报错……"，模型会把任何画面都当故障
+	// 来解释——用户只是想问"现在是什么情况"时，会得到一段他并不需要的排查方案。
+	"终端屏显可能不是报错，也可能是正常输出、命令结果或正在运行的程序界面；",
+	"请先判断画面属于哪种情况，再据此回答。确有报错时，先解释原因，再给修复命令。",
 }, "\n")
 
 // sshEnvLabel 主机环境取值到中文标签的映射。
@@ -112,6 +117,82 @@ func sshEnvGuidance(env string) string {
 		// 只会让模型给出一堆"请先确认"的废话。
 		return ""
 	}
+}
+
+// sshAiSummarySystem 历史摘要压缩用的系统提示词。
+//
+// 与 AIPage 的 summarizeAndStore 同源：把旧问答压成精炼摘要。区别在 SSH 历史
+// 是前端内存态、不落库，所以压缩态要在前后端之间传递（见 compressSshHistory）。
+var sshAiSummarySystem = "你是一个对话压缩助手。请把用户给的历史问答（交替的「用户」与「AI」条目）" +
+	"压缩为简洁的中文摘要，保留关键命令、结论、已尝试过的操作与待办，便于后续延续上下文。" +
+	"摘要必须精炼（控制在 400 字以内）。只输出摘要本身，不要任何解释或前缀。"
+
+const (
+	// sshHistoryKeepRecent 触发压缩时保留原文的最近条目数（4 条 = 2 轮「问+答」）。
+	// 最近两轮足以承接连贯追问，更早的进摘要，不至于压缩后追问立刻断片。
+	sshHistoryKeepRecent = 4
+	// sshHistorySumBatch 可压缩条目累积到这么多才真正触发一次摘要。
+	//
+	// 为什么要批次：若每轮都调一次模型做摘要，等于给每次提问多加一次往返延迟
+	// ——而用户抱怨的恰恰是「越问越卡」。按 2 轮（4 条）一批触发，把额外调用
+	// 摊薄到大约每两轮一次；未达批次时旧轮次仍以原文进 prompt，不额外耗时。
+	sshHistorySumBatch = 4
+)
+
+// compressSshHistory 对过长的多轮历史做摘要压缩，返回 (recent, summary)。
+//
+// 设计（与 AIPage 的 buildAIMessages 同源，但适配 SSH 的内存态历史）：
+//   - recent  本轮直接进 prompt 的历史（未压缩时是全部，压缩后是最近 sshHistoryKeepRecent 条）；
+//   - summary 旧轮次经模型压缩后的摘要，可能等于入参 prevSummary（本轮未触发压缩）。
+//
+// 摊销：每轮只把「积累到批次阈值」的旧轮次连同 prevSummary 重算一次摘要，
+// 整体 O(n)，且约每两轮才多打一次模型，避免压缩本身成为新的卡顿来源。
+//
+// 模型不可用/超时（askFn 为 nil 或调用失败）不致命：退回用 prevSummary，recent 仍可用，
+// 不会比「不压缩」更差。
+func compressSshHistory(askFn func(string, string, int) (string, string, error), prevSummary string, history []string) (recent []string, summary string) {
+	summary = prevSummary
+	if len(history) <= sshHistoryKeepRecent {
+		return history, summary
+	}
+	overflow := len(history) - sshHistoryKeepRecent
+	// 未达批次：旧轮次还没多到值得单独压缩，全部原文进 prompt（不额外调模型）。
+	if overflow < sshHistorySumBatch {
+		return history, summary
+	}
+	recent = history[overflow:]
+	toSum := history[:overflow]
+	if len(toSum) == 0 || askFn == nil {
+		return recent, summary
+	}
+	if s, err := summarizeSshHistory(askFn, prevSummary, toSum); err == nil && s != "" {
+		summary = s
+	}
+	return recent, summary
+}
+
+// summarizeSshHistory 调用模型把一批旧问答压成中文摘要，并与已有 prevSummary 合并。
+func summarizeSshHistory(askFn func(string, string, int) (string, string, error), prevSummary string, turns []string) (string, error) {
+	var b strings.Builder
+	b.WriteString("请把下面的历史问答（交替的「用户」与「AI」）压缩为简洁的中文摘要，" +
+		"保留关键命令、结论、已尝试的操作与待办，便于后续延续上下文。只输出摘要本身，不要解释或加前缀：\n\n")
+	if prevSummary != "" {
+		b.WriteString("[已有的更早摘要]\n" + prevSummary + "\n\n")
+	}
+	b.WriteString("[本轮待压缩的历史]\n")
+	for _, t := range turns {
+		if t = strings.TrimSpace(t); t != "" {
+			b.WriteString("- " + t + "\n")
+		}
+	}
+	text, _, err := askFn(sshAiSummarySystem, b.String(), aiTimeoutSec)
+	if err != nil {
+		return "", err
+	}
+	if text = strings.TrimSpace(text); text == "" {
+		return "", fmt.Errorf("摘要为空")
+	}
+	return text, nil
 }
 
 // sshAiDangerRule 危险命令规则。
@@ -177,6 +258,10 @@ type SshAiAskRequest struct {
 	Selection string `json:"selection"`
 	// History 可选的历史问答，用于多轮追问。每项取 text 字段作为纯文本。
 	History []string `json:"history"`
+	// PrevSummary 上一轮返回的「历史摘要」（见 Summary）。随请求回传，
+	// 后端据此只对「本轮新晋升为旧的」那一轮做增量摘要，避免每轮重算全部历史。
+	// 首轮或历史尚短时为空。
+	PrevSummary string `json:"prevSummary"`
 	// StreamID 流式标识。非空时后端会经 Wails 事件 ai:ask-delta 逐段推送增量，
 	// 前端按此 ID 区分不同轮次；空则退化为一次性返回（插件等无前端通道的调用方）。
 	StreamID string `json:"streamId"`
@@ -198,6 +283,14 @@ type SshAiAskResult struct {
 	HasRisk bool `json:"hasRisk"`
 	// ElapsedMs 耗时毫秒。
 	ElapsedMs int64 `json:"elapsedMs"`
+	// Summary 本轮压缩后的历史摘要。前端回存并在下一轮作为 PrevSummary 回传，
+	// 使长对话的历史保持有界——这是「越问越卡」的根治：屏显之外，旧轮次不再
+	// 逐字占预算，而是被压成一段精炼摘要随上下文延续。
+	Summary string `json:"summary"`
+	// HistoryKept 本轮后端实际保留原文的历史条目数。
+	// 前端据此收敛本地历史（未压缩=全部，压缩后=最近若干条），避免本地数组无限增长；
+	// 由后端决定而不是前端硬编码，避免两侧对 keepRecent 的口径漂移。
+	HistoryKept int `json:"historyKept"`
 }
 
 // Ask 就当前 SSH 会话向 AI 提问。
@@ -235,7 +328,11 @@ func (s *SshService) Ask(req SshAiAskRequest) *services.ApiResult {
 		}
 	}
 
-	prompt := buildSshAiPrompt(hostLabel, hostEnv, req.ScreenText, question, req.History, req.Selection)
+	// 历史摘要压缩：把过长的多轮历史压成有界摘要，避免 prompt 随轮数线性膨胀
+	// （即用户感受到的「越问越卡」）。recent 保留最近 2 轮原文，其余进摘要。
+	recent, summary := compressSshHistory(s.App.AskAIFn, req.PrevSummary, req.History)
+
+	prompt := buildSshAiPrompt(hostLabel, hostEnv, req.ScreenText, question, recent, req.Selection, summary)
 
 	// 流式：把增量经 Wails 事件推给前端。批量按 ~40 rune 做一次 IPC，
 	// 避免逐 token 高频调用把窄带 Wails 事件总线打满（SSH 答案通常不长，但翻译/摘要会）。
@@ -284,8 +381,10 @@ func (s *SshService) Ask(req SshAiAskRequest) *services.ApiResult {
 		Commands:  commands,
 		Segments:  segments,
 		Model:     model,
-		HasRisk:   hasRisk,
-		ElapsedMs: time.Since(start).Milliseconds(),
+		HasRisk:     hasRisk,
+		ElapsedMs:   time.Since(start).Milliseconds(),
+		Summary:     summary,
+		HistoryKept: len(recent),
 	})
 }
 
@@ -330,7 +429,7 @@ func describeHost(h *db.SshHost) string {
 //
 // hostEnv 与 hostLabel 分开传：后者是展示用的主机串，前者驱动行为约束。
 // 合成一个参数的话，将来想在描述里加别的信息就会把环境判定也一起改坏。
-func buildSshAiPrompt(hostLabel, hostEnv, screenText, question string, history []string, selection string) string {
+func buildSshAiPrompt(hostLabel, hostEnv, screenText, question string, history []string, selection string, summary string) string {
 	// 连接信息 + 环境约束，永远保留：这是模型判断"该有多保守"的唯一依据，
 	// 屏显和历史再长也不能把它挤掉（否则生产机上的输出会变得和测试机一样随意）。
 	var head strings.Builder
@@ -369,6 +468,17 @@ func buildSshAiPrompt(hostLabel, hostEnv, screenText, question string, history [
 			// 另一半留给历史与多轮连贯性，屏显吃满会让追问彻底断片。
 			KeepTail: true,
 			MaxShare: 0.5,
+		})
+	}
+
+	// 历史摘要：更早的轮次已被压成一段精炼摘要（见 compressSshHistory）。
+	// 不 Pinned——它只是上下文补充，预算极紧时让位于屏显/问题也无妨；
+	// 用 MaxShare 把它限制在 35% 预算内，既延续上下文又不挤占当前画面与问题。
+	if sum := strings.TrimSpace(summary); sum != "" {
+		sections = append(sections, aiutil.Section{
+			Title:    "历史对话摘要（更早的轮次已压缩，供延续上下文）",
+			Body:     sum,
+			MaxShare: 0.35,
 		})
 	}
 
