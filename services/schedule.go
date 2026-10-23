@@ -111,6 +111,9 @@ func (a *AppService) RunScheduledTaskNow(id string) *ApiResult {
 		return Fail(err)
 	}
 	status, result := a.executeTask(t)
+	// 操作流水：手动触发才记（定时后台跑几千条会把时间线冲垮，
+	// 那些该去定时任务自己的执行记录里看）。
+	a.NoteActivity(db.ActivityScheduleRun, t.ID, t.Name)
 	// 手动执行只更新运行结果，不改动 next_run / enabled
 	_ = a.DB.SetTaskRunResult(t.ID, nowStr(), status, result, t.NextRun, t.Enabled)
 	if t.Notify {

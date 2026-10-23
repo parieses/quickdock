@@ -314,6 +314,36 @@ func main() {
 	// 与 Wails 事件，只能靠同步回调（api.aiStream）拿增量，故单独回注一份。
 	pluginMgr.SetAIStreamFn(appService.AskAIFnStream)
 
+	// 把「AI 是否可用」能力回注宿主，供插件在调用 host.ai.ask 前预检
+	// （宿主自身面板用 Wails 绑定 AIAvailable 判断，插件走 JSON-RPC 拿不到那条路）。
+	// 解包 ApiResult.Data 里的 available/reason/profile/model，未配置时返回
+	// (false, reason, "", "") 让插件直接提示「去设置配置 AI 档案」，而非盲目调用后拿裸错。
+	appService.AIAvailableFn = func() (bool, string, string, string) {
+		r := aiSvc.AIAvailable()
+		if r == nil || r.Code != 0 {
+			return false, "unavailable", "", ""
+		}
+		d, ok := r.Data.(map[string]interface{})
+		if !ok {
+			return false, "unavailable", "", ""
+		}
+		var available bool
+		if b, ok := d["available"].(bool); ok {
+			available = b
+		}
+		var reason, profile, model string
+		if s, ok := d["reason"].(string); ok {
+			reason = s
+		}
+		if s, ok := d["profile"].(string); ok {
+			profile = s
+		}
+		if s, ok := d["model"].(string); ok {
+			model = s
+		}
+		return available, reason, profile, model
+	}
+
 	// 更新服务门面：承载自动更新领域方法（检测/下载/重启/后台检查），单独绑定为独立 Wails service
 	updateSvc := updatesvc.NewUpdateService(appService)
 
@@ -548,7 +578,18 @@ func main() {
 
 	err := app.Run()
 	if err != nil {
+		// 启动失败必须让用户「当场」看到，而不只是躺在日志里。
+		//
+		// 三条通道各管一段，互不替代：
+		//   ① logger.E → 日志文件（排障的事实来源，带时间戳与上下文）
+		//   ② stderr   → dev 构建有真实控制台，由 logger 的 tee 自动带走
+		//   ③ 原生弹窗 → 正式版是 -H windowsgui，没有控制台；不弹窗的话
+		//      用户看到的就是「双击了，窗口没起来，也没有任何提示」。
+		// v0.0.25 的迁移失败正是这样被漏掉的：控制台空白，只有翻 log 才知道
+		// 是哪条 SQL 报错。
 		logger.E("应用运行失败: %v", err)
+		sysutil.ShowFatalError("QuickDock 无法启动",
+			fmt.Sprintf("%v\n\n详细日志：\n%s", err, logger.LogDir()))
 		// 不调用 log.Fatal，确保下面的 ShutdownAll 执行
 	}
 

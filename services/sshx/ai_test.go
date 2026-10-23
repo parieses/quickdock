@@ -52,7 +52,7 @@ func TestEvalRisk(t *testing.T) {
 		{"git status", ""},
 	}
 	for _, c := range cases {
-		got, _ := sshAiDangerRule.Eval(c.cmd)
+		got, _ := sshDangerRule.Eval(c.cmd)
 		if got != c.want {
 			t.Errorf("Eval(%q) = %q，期望 %q", c.cmd, got, c.want)
 		}
@@ -66,7 +66,7 @@ func TestEvalRisk_HighestLevelWins(t *testing.T) {
 	//
 	// 这两条同时命中「通配符删除(medium)」与「递归强制删除(high)」。
 	for _, cmd := range []string{"rm -rf /var/log/*.log", "rm -rf /opt/*"} {
-		level, note := sshAiDangerRule.Eval(cmd)
+		level, note := sshDangerRule.Eval(cmd)
 		if level != "high" {
 			t.Errorf("Eval(%q) = %q，期望 high（说明: %q）", cmd, level, note)
 		}
@@ -80,11 +80,11 @@ func TestEvalRisk_HighestLevelWins(t *testing.T) {
 func TestRiskNote_NonEmpty(t *testing.T) {
 	// 有风险就必须带说明，否则卡片上的红框没有意义。
 	for _, cmd := range []string{"rm -rf /data", "dd if=a of=/dev/sda", "systemctl restart nginx"} {
-		if _, n := sshAiDangerRule.Eval(cmd); strings.TrimSpace(n) == "" {
+		if _, n := sshDangerRule.Eval(cmd); strings.TrimSpace(n) == "" {
 			t.Errorf("命令 %q 判为有风险却没有风险说明", cmd)
 		}
 	}
-	if _, n := sshAiDangerRule.Eval("df -h"); n != "" {
+	if _, n := sshDangerRule.Eval("df -h"); n != "" {
 		t.Errorf("安全命令不该有风险说明，实际 %q", n)
 	}
 }

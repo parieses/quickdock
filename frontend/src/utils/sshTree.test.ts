@@ -3,6 +3,7 @@ import {
   buildSshTree,
   collectFolders,
   collectSubtreeIds,
+  filterSshTree,
   flattenSshTree,
   resolveDrop,
   treeHasHost,
@@ -283,5 +284,47 @@ describe('collectSubtreeIds', () => {
   it('找不到的 id 返回空数组', () => {
     const t = buildSshTree([host('h1')])
     expect(collectSubtreeIds(t, 'nope')).toEqual([])
+  })
+})
+
+describe('filterSshTree', () => {
+  const t = buildSshTree([
+    folder('prod', { name: '生产环境' }),
+    host('db1', { name: '数据库', host: 'db1.prod.example.com', parentId: 'prod', remark: '主库' }),
+    host('web1', { name: 'web-1', host: 'web1.prod.example.com', parentId: 'prod' }),
+    folder('dev', { name: '开发' }),
+    host('local', { name: '本地', host: '127.0.0.1', parentId: 'dev' }),
+    host('bare', { name: '裸机', host: '10.0.0.9' }),
+  ])
+
+  it('空关键字原样返回', () => {
+    expect(filterSshTree(t, '   ')).toBe(t)
+  })
+
+  it('命中主机时保留祖先链，不相关的分支整个消失', () => {
+    expect(shape(filterSshTree(t, 'db1'))).toEqual(['prod/db1'])
+  })
+
+  it('命中文件夹名时整棵子树保留（按分组名找里面有什么）', () => {
+    // 用户搜「生产」的意图是「看看生产组里有啥」，若再按关键字筛子项
+    // 会得到「分组在、里都没了」，与意图相反。
+    expect(shape(filterSshTree(t, '生产'))).toEqual(['prod/db1,web1'])
+  })
+
+  it('文件夹命中但大小写不同也能匹配', () => {
+    expect(shape(filterSshTree(t, 'WEB1'))).toEqual(['prod/web1'])
+  })
+
+  it('备注也参与匹配（用户不一定记得主机名叫什么）', () => {
+    expect(shape(filterSshTree(t, '主库'))).toEqual(['prod/db1'])
+  })
+
+  it('保留下来的文件夹重算 hostCount，与眼前能点开的主机数一致', () => {
+    const [prod] = filterSshTree(t, 'web1')
+    expect(prod.hostCount).toBe(1)
+  })
+
+  it('完全不匹配时返回空树', () => {
+    expect(filterSshTree(t, 'zzz')).toEqual([])
   })
 })

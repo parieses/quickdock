@@ -17,6 +17,7 @@ import { logErr } from './utils/logger';
 import { getErrorMessage } from './utils/error';
 import { navigateTo, pendingOpenNoteId } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
+import SceneRail from './components/SceneRail.vue';
 import CollectionList from './components/CollectionList.vue';
 import ItemList from './components/ItemList.vue';
 import ClipboardPanel from './components/ClipboardPanel.vue';
@@ -379,6 +380,8 @@ const activeConfirm = computed(() =>
         @navigate="setPage"
         @open-settings="openSettings"
       />
+      <!-- 场景栏：位于导航与内容区之间，顺序为 场景 → 集合 → 项目（仅工作空间页且有工作空间时显示） -->
+      <SceneRail v-if="currentPage === 'workspace' && store.workspaces.length > 0" />
       <div class="app-content">
         <!-- 工作空间复合页（含首次引导 Onboarding / 场景栏，非单组件，保留显式分支） -->
         <template v-if="currentPage === 'workspace'">

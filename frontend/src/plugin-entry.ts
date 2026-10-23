@@ -79,8 +79,18 @@ if (prefersDark.addEventListener) {
 
 const app = createApp(PluginPage, { pluginId })
 app.use(i18n)
-app.config.errorHandler = (err: any, _vm, info: string) => {
-  reportFrontendError('vue:' + info, err?.message || String(err), err?.stack || '')
+// 把出错组件名并入 label（同 main.ts 的考量：Vue 打包堆栈不含组件名，
+// 不带上组件名就分不清是哪个插件页的组件炸了）。
+function vueComponentName(vm: any): string {
+  const t = vm?.$?.type
+  const name = (t && (t.__name || t.name)) || vm?.$options?.name || ''
+  return typeof name === 'string' && name ? name : ''
+}
+
+app.config.errorHandler = (err: any, vm: any, info: string) => {
+  const name = vueComponentName(vm)
+  const label = name ? `vue:${info} (${name})` : 'vue:' + info
+  reportFrontendError(label, err?.message || String(err), err?.stack || '')
 }
 
 // 渲染进程看门狗（与主窗口一致）：宿主每 5s 经 qd:heartbeat 广播，连续 ~30s 收不到

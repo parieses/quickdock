@@ -83,6 +83,8 @@ func (s *CollectionService) OpenItem(item db.CollectionItem) *services.ApiResult
 		logger.W("打开条目失败 name=%q type=%s id=%s: %v", item.Name, item.Type, item.ID, err)
 		return services.Fail(err)
 	}
+	// 操作流水：只在真正打开成功后记一次（db 层还有冷却去重，连点不会刷屏）
+	s.App.NoteActivity(db.ActivityItemOpened, item.ID, item.Name)
 	return services.Ok(nil)
 }
 

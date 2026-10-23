@@ -178,6 +178,13 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 // 约束与 AIAsk 完全一致（见其注释）：不落库、不占 convId、自带超时、
 // 返回裁剪后的完整文本。区别只在传输方式：这里把增量交给调用方，
 // 最终的完整文本仍按 AIAsk 的口径裁剪后返回，方便调用方做一次性的分段解析。
+//
+// 为何不导出到前端：onToken 是 func(string)，跨不过 JSON 边界——生成器会为它
+// 吐一条 "function types are not supported by encoding/json" 告警，并产出
+// 一个参数填不进去的假方法。前端要流式请走 StartAIStreamServer 的 SSE 通道；
+// 这里的调用方只有 Go 侧（main.go 的 AskAIFnStream，供 goja 插件的宿主 API）。
+//
+//wails:ignore
 func (a *AIService) AIAskStream(req AIAskRequest, onToken func(text string)) *services.ApiResult {
 	question := strings.TrimSpace(req.Question)
 	if question == "" {

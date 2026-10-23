@@ -104,7 +104,7 @@ export interface TrustedHost {
   display: string
   keyType: string
   fingerprint: string
-  /** Unix 秒 */
+  /** Unix 毫秒（Go 侧 UnixMilli 写入，直接喂 new Date 即可，不要再乘 1000） */
   addedAt: number
   /** 关联的主机 ID；主机已删除时为空串 */
   hostId: string
@@ -328,4 +328,92 @@ export function isMultiLinePaste(data: string): boolean {
   // 剥掉末尾的一个换行序列（\r\n / \n / \r 都算），它只代表「这一行敲完了」。
   bare = bare.replace(/(?:\r\n|\r|\n)$/, '')
   return bare.includes('\n') || bare.includes('\r')
+}
+
+// ---- 批量执行 ----
+//
+// 后端返回 ApiResult{Data interface{}}，绑定里不会生成这些结果类型
+// （只有入参 SshBatchRequest / SshBatchPlanRequest 进了 models.ts），
+// 所以按仓库惯例在 utils 里手写一份 wire 类型。**字段名必须与后端 json tag
+// 完全一致**（全小写驼峰）：JS 大小写敏感，写成 HostId 就是整表空白。
+//
+// 与后端 services/sshx/batch.go 成对维护，改一处必须改另一处。
+
+export interface SshBatchTarget {
+  hostId: string
+  name: string
+  addr: string
+  /** prod | staging | test，原始值 */
+  env: string
+}
+
+export interface SshBatchSkipped {
+  hostId: string
+  name: string
+  /** 稳定错误码，前端据此选文案 */
+  reason: string
+  detail: string
+}
+
+export interface SshBatchPlan {
+  hosts: SshBatchTarget[]
+  skipped: SshBatchSkipped[]
+  /** high | medium | '' */
+  riskLevel: string
+  riskNote: string
+  prodCount: number
+}
+
+export interface SshBatchStart {
+  batchId: string
+  total: number
+  skipped: number
+}
+
+export interface SshBatchHostResult {
+  batchId: string
+  hostId: string
+  name: string
+  addr: string
+  env: string
+  stdout: string
+  stderr: string
+  exitCode: number
+  durationMs: number
+  truncated: boolean
+  /** 非空 = 命令没跑完（连接失败/超时/取消），与退出码非 0 是两回事 */
+  errorCode: string
+  error: string
+}
+
+export interface SshBatchSummary {
+  batchId: string
+  total: number
+  succeeded: number
+  failed: number
+  errored: number
+  canceled: number
+  skipped: number
+  aborted: boolean
+  durationMs: number
+}
+
+/** 结果行状态。 */
+export type SshBatchStatus = 'pending' | 'running' | 'ok' | 'failed' | 'errored' | 'canceled'
+
+/**
+ * 单台结果 → 行状态。
+ *
+ * 关键区分：**退出码非 0 是"跑了但结果是否定"，ErrorCode 非空是"根本没跑"**。
+ * 这两类在汇总里必须分开（back 端的 SshBatchSummary 也分 failed / errored），
+ * 否则「3 台失败」到底该查网络还是查命令，用户完全没法判断——而处置方式正相反。
+ */
+export function batchRowStatus(
+  res: SshBatchHostResult | null | undefined,
+  running: boolean,
+): SshBatchStatus {
+  if (!res) return running ? 'running' : 'pending'
+  if (res.errorCode === 'ssh_batch_canceled') return 'canceled'
+  if (res.errorCode) return 'errored'
+  return res.exitCode === 0 ? 'ok' : 'failed'
 }

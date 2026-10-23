@@ -8,9 +8,11 @@ package sshx
 // 后者就是这里一堆可以吃单元测试的纯逻辑。
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -392,7 +394,9 @@ func (s *SftpSession) WriteText(remotePath, content string, mode os.FileMode) er
 // dst 落在已存在的本地目录时按源文件名拼到它下面；否则当作完整目标路径，
 // 覆盖同名文件。文件面板里用户期待的就是「下载下来替换掉」，
 // 下载要能和 server 上正在被 tail -f 的路径对上。
-func (s *SftpSession) Download(remotePath, dst string, onProgress func(done, total int64)) error {
+//
+// ctx 只用于取消：用户点了「取消」时要在几十毫秒内停下，而不是传完再报错。
+func (s *SftpSession) Download(ctx context.Context, remotePath, dst string, onProgress func(done, total int64)) error {
 	abs, err := s.RealPath(remotePath)
 	if err != nil {
 		return err
@@ -403,17 +407,21 @@ func (s *SftpSession) Download(remotePath, dst string, onProgress func(done, tot
 	}
 
 	if info.IsDir() {
-		return s.downloadDir(abs, dst, onProgress)
+		return s.downloadDir(ctx, abs, dst, onProgress)
 	}
 	local, err := chooseLocalPath(dst, path.Base(abs))
 	if err != nil {
 		return err
 	}
-	return s.downloadFile(abs, local, info.Size(), onProgress)
+	return s.downloadFile(ctx, abs, local, info.Size(), onProgress)
 }
 
-// Upload 把本地文件上传到远端，remoteDir 为已存在的目标目录。
-func (s *SftpSession) Upload(localPath, remoteDir string, onProgress func(done, total int64)) error {
+// Upload 把本地文件或目录上传到远端，remoteDir 为已存在的目标目录。
+//
+// 目录会落到 remoteDir/<本地目录名> 下，已存在的同名文件被覆盖——
+// 与 `scp -r` 的语义一致。此前只支持单文件，用户传一个 dist/ 只能逐个点，
+// 而下载方向早就支持目录，两个方向不对称。
+func (s *SftpSession) Upload(ctx context.Context, localPath, remoteDir string, onProgress func(done, total int64)) error {
 	local, err := os.Stat(localPath)
 	if err != nil {
 		return fmt.Errorf("sshx: 读取本地文件失败: %w", err)
@@ -422,10 +430,28 @@ func (s *SftpSession) Upload(localPath, remoteDir string, onProgress func(done, 
 	if err != nil {
 		return err
 	}
-	return s.uploadFile(localPath, path.Join(dir, filepath.Base(localPath)), local.Size(), onProgress)
+	if local.IsDir() {
+		return s.uploadDir(ctx, localPath, dir, onProgress)
+	}
+	return s.uploadFile(ctx, localPath, path.Join(dir, filepath.Base(localPath)), local.Size(), onProgress)
 }
 
-func (s *SftpSession) downloadFile(remotePath, localPath string, size int64, onProgress func(done, total int64)) error {
+// Chmod 改远端路径的权限位。
+//
+// 刻意不跟随软链接语义做特殊处理：SFTP 的 SETSTAT 作用在服务端解析出的目标上，
+// 与 ssh 的 chmod 一致。改不动（没有属主权限）时由服务端拒绝，错误会带上路径。
+func (s *SftpSession) Chmod(remotePath string, mode os.FileMode) error {
+	abs, err := s.RealPath(remotePath)
+	if err != nil {
+		return err
+	}
+	if err := s.client.Chmod(abs, mode); err != nil {
+		return classifySftpErr(abs, err)
+	}
+	return nil
+}
+
+func (s *SftpSession) downloadFile(ctx context.Context, remotePath, localPath string, size int64, onProgress func(done, total int64)) error {
 	src, err := s.client.Open(remotePath)
 	if err != nil {
 		return classifySftpErr(remotePath, err)
@@ -441,15 +467,18 @@ func (s *SftpSession) downloadFile(remotePath, localPath string, size int64, onP
 	}
 	defer dst.Close()
 
-	if _, err := copyTrack(src, dst, size, onProgress); err != nil {
-		return fmt.Errorf("sshx: 下载失败: %w", err)
+	if _, err := copyTrack(ctx, src, dst, size, onProgress); err != nil {
+		return wrapCanceled(err, "sshx: 下载失败")
 	}
 	return nil
 }
 
-func (s *SftpSession) downloadDir(remotePath, localRoot string, onProgress func(done, total int64)) error {
+func (s *SftpSession) downloadDir(ctx context.Context, remotePath, localRoot string, onProgress func(done, total int64)) error {
 	w := s.client.Walk(remotePath)
 	for w.Step() {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		if w.Err() != nil {
 			return classifySftpErr(w.Path(), w.Err())
 		}
@@ -468,14 +497,60 @@ func (s *SftpSession) downloadDir(remotePath, localRoot string, onProgress func(
 			continue
 		}
 		// 复用这一次 Stat 的结果，不要到 downloadFile 里再 Stat 一遍。
-		if err := s.downloadFile(w.Path(), target, info.Size(), onProgress); err != nil {
+		if err := s.downloadFile(ctx, w.Path(), target, info.Size(), onProgress); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (s *SftpSession) uploadFile(localPath, remotePath string, size int64, onProgress func(done, total int64)) error {
+// uploadDir 递归上传本地目录到 remoteRoot（调用方已把它解析成 abs）。
+//
+// 不跟随软链接：本地一个指向上级目录的链接会让遍历成环且无限上传，
+// 而「上传一个链接」本身几乎没有用户期待的正确行为。跳过并在注释里说明，
+// 好过悄悄把别处的内容也传上去。
+func (s *SftpSession) uploadDir(ctx context.Context, localRoot, remoteRoot string, onProgress func(done, total int64)) error {
+	root := path.Join(remoteRoot, filepath.Base(filepath.Clean(localRoot)))
+	if err := s.client.MkdirAll(root); err != nil {
+		return classifySftpErr(root, err)
+	}
+
+	return filepath.WalkDir(localRoot, func(localPath string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return fmt.Errorf("sshx: 遍历本地目录失败: %w", err)
+		}
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return ctxErr
+		}
+
+		rel, err := filepath.Rel(localRoot, localPath)
+		if err != nil {
+			return fmt.Errorf("sshx: 计算相对路径失败: %w", err)
+		}
+		// 远端一律用斜杠；Windows 的 filepath.Rel 会给出反斜杠。
+		remotePath := path.Join(root, filepath.ToSlash(rel))
+
+		if d.IsDir() {
+			if localPath == localRoot {
+				return nil
+			}
+			if err := s.client.MkdirAll(remotePath); err != nil {
+				return classifySftpErr(remotePath, err)
+			}
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		info, err := d.Info()
+		if err != nil {
+			return fmt.Errorf("sshx: 读取本地文件信息失败: %w", err)
+		}
+		return s.uploadFile(ctx, localPath, remotePath, info.Size(), onProgress)
+	})
+}
+
+func (s *SftpSession) uploadFile(ctx context.Context, localPath, remotePath string, size int64, onProgress func(done, total int64)) error {
 	src, err := os.Open(localPath)
 	if err != nil {
 		return fmt.Errorf("sshx: 打开本地文件失败: %w", err)
@@ -488,18 +563,36 @@ func (s *SftpSession) uploadFile(localPath, remotePath string, size int64, onPro
 	}
 	defer dst.Close()
 
-	if _, err := copyTrack(src, dst, size, onProgress); err != nil {
-		return fmt.Errorf("sshx: 上传失败: %w", err)
+	if _, err := copyTrack(ctx, src, dst, size, onProgress); err != nil {
+		return wrapCanceled(err, "sshx: 上传失败")
 	}
 	return nil
 }
 
+// wrapCanceled 取消原样返回，其余错误加中文前缀。
+//
+// 为什么取消要原样返回：服务层靠 errors.Is(err, context.Canceled) 识别出
+// 「用户自己停的」，把它包成「下载失败：context canceled」会让前端分不清
+// 该不该弹红色错误。
+func wrapCanceled(err error, prefix string) error {
+	if errors.Is(err, context.Canceled) {
+		return err
+	}
+	return fmt.Errorf("%s: %w", prefix, err)
+}
+
 // copyTrack 带进度的拷贝。32KB 的缓冲区是 SFTP 的常见最优窗口：
 // 再大会让单帧超过 SSH 通道窗口，反而要等 ACK。
-func copyTrack(src io.Reader, dst io.Writer, total int64, onProgress func(done, total int64)) (int64, error) {
+//
+// ctx 每块检查一次：32KB 一块，100MB 的文件也就 3200 次检查，
+// 代价可以忽略，而取消能在一块的传输时间内（毫秒级）生效。
+func copyTrack(ctx context.Context, src io.Reader, dst io.Writer, total int64, onProgress func(done, total int64)) (int64, error) {
 	buf := make([]byte, 32*1024)
 	var written int64
 	for {
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
 		n, rerr := src.Read(buf)
 		if n > 0 {
 			w, werr := dst.Write(buf[:n])

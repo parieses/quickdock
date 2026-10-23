@@ -35,8 +35,20 @@ app.use(pinia)
 app.use(i18n)
 
 // Vue 组件渲染 / 生命周期抛错（window.onerror 不一定捕获得到）
-app.config.errorHandler = (err: any, _vm, info: string) => {
-  reportFrontendError('vue:' + info, err?.message || String(err), err?.stack || '')
+//
+// 把出错组件名并入 label：Vue 打包后的堆栈只到 vue.runtime，不含组件名，
+// 否则崩溃记录只能写「vue:render function」，没法定位是哪个组件炸的。
+// 从实例取 dev 阶段 SFC 编译器塞的 __name（生产构建可能被剥掉，退化为 options.name）。
+function vueComponentName(vm: any): string {
+  const t = vm?.$?.type
+  const name = (t && (t.__name || t.name)) || vm?.$options?.name || ''
+  return typeof name === 'string' && name ? name : ''
+}
+
+app.config.errorHandler = (err: any, vm: any, info: string) => {
+  const name = vueComponentName(vm)
+  const label = name ? `vue:${info} (${name})` : 'vue:' + info
+  reportFrontendError(label, err?.message || String(err), err?.stack || '')
 }
 
 // 渲染进程看门狗：宿主每 5s 经 qd:heartbeat 广播一次；若可见窗口连续 ~30s 收不到心跳，

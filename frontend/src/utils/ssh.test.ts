@@ -10,6 +10,8 @@ import {
   sshErrorKey,
   sshErrorText,
   SSH_ERR,
+  batchRowStatus,
+  type SshBatchHostResult,
   type SshSessionInfo,
 } from './ssh'
 
@@ -200,5 +202,50 @@ describe('splitPasteLines', () => {
   it('空内容不产生行', () => {
     expect(splitPasteLines('').total).toBe(0)
     expect(splitPasteLines('\n').total).toBe(0)
+  })
+})
+
+describe('batchRowStatus', () => {
+  function res(over: Partial<SshBatchHostResult> = {}): SshBatchHostResult {
+    return {
+      batchId: 'b1',
+      hostId: 'h1',
+      name: 'web-1',
+      addr: 'root@10.0.0.1:22',
+      env: 'test',
+      stdout: '',
+      stderr: '',
+      exitCode: 0,
+      durationMs: 12,
+      truncated: false,
+      errorCode: '',
+      error: '',
+      ...over,
+    }
+  }
+
+  it('还没回报时按是否在跑区分「等待中」与「执行中」', () => {
+    expect(batchRowStatus(null, false)).toBe('pending')
+    expect(batchRowStatus(undefined, true)).toBe('running')
+  })
+
+  it('退出码 0 算成功', () => {
+    expect(batchRowStatus(res({ exitCode: 0 }), false)).toBe('ok')
+  })
+
+  // 这一条是整个设计的关键：命令跑了但返回非零，和命令根本没跑，
+  // 排障方向完全相反（查命令 vs 查网络/凭据），不能都算「失败」。
+  it('退出码非 0 算失败，但不等于没执行', () => {
+    expect(batchRowStatus(res({ exitCode: 1 }), false)).toBe('failed')
+    expect(batchRowStatus(res({ exitCode: 127 }), false)).toBe('failed')
+  })
+
+  it('有错误码表示命令没跑完，哪怕退出码是 0', () => {
+    expect(batchRowStatus(res({ errorCode: 'ssh_unreachable' }), false)).toBe('errored')
+    expect(batchRowStatus(res({ errorCode: 'ssh_exec_timeout', exitCode: 0 }), false)).toBe('errored')
+  })
+
+  it('取消是单独一态，不该混进「未执行」', () => {
+    expect(batchRowStatus(res({ errorCode: 'ssh_batch_canceled' }), false)).toBe('canceled')
   })
 })

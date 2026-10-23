@@ -292,9 +292,10 @@ function statusLabel(p: PluginInfo): string {
   }
 }
 
-// 轻量状态刷新：只从后端合并 status/disabled，不重拉图标与角标。
+// 轻量状态刷新：只从后端合并 status/disabled/usageCount，不重拉图标与角标。
 // 覆盖「打开窗口后 EnsureLoaded 拉起（registered→running）」「watchPlugin 崩溃重启」
-// 等后台状态变化——管理页本地数组不会自己变，必须轮询对齐。
+// 「别的窗口跑了一条插件命令（计数 +1）」等后台变化——管理页本地数组不会自己变，
+// 必须轮询对齐。
 async function refreshStatuses() {
   if (activeView.value !== 'local') return
   try {
@@ -305,6 +306,7 @@ async function refreshStatuses() {
       if (f) {
         p.status = f.status
         p.disabled = f.disabled
+        p.usageCount = f.usageCount
       }
     }
   } catch (e) { logErr('PluginManagerPage', e) }

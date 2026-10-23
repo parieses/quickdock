@@ -44,11 +44,10 @@ const ctrlBackquote = "`"
 // CTRL_BACKQUOTE 剪贴板热键回退加速器（Ctrl+`）
 const CTRL_BACKQUOTE = "Ctrl+" + ctrlBackquote
 
-// SSH_ACCEL SSH 终端全局热键（Ctrl+Alt+S）。
+// SSH_ACCEL SSH 终端全局热键的默认值（Ctrl+Alt+S），可在「设置 → 快捷键」里改。
 //
-// 固定键位、暂不进设置页：终端是低频入口，先保证「一键可达」比「可配置」更重要；
-// 真要被占用（register 失败）走 addHotkeyWarning 提示用户，不做自动回退——
-// 与已有热键不同，这里换一个键位没有第二选择，硬回退成别的键反而更迷惑。
+// 设置键 ssh_hotkey 存 "modifiers,vk"；本常量只在 DB 无配置时作为默认、
+// 以及注册失败回退时的兜底使用——真实生效的键以 getSshAccel() 为准。
 const SSH_ACCEL = "Ctrl+Alt+S"
 
 //go:embed build/tray.ico
@@ -122,6 +121,7 @@ var (
 	currentPaletteAccel     string
 	currentNoteAccel        string
 	currentShotAccel        string
+	currentSshAccel         string
 	currentWinmgrAccels     []string
 	currentWinmgrFloatAccel string
 	accelMu                 sync.Mutex
@@ -536,6 +536,20 @@ func getNoteAccel() string {
 	return currentNoteAccel
 }
 
+// SSH 热键与截图热键一样单独存取，不进 setAccelerators 的批量签名——
+// 新增一个热键不必去改那一圈调用点。空串表示「当前没注册成功」，跳过注销。
+func getSshAccel() string {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	return currentSshAccel
+}
+
+func setSshAccel(accel string) {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	currentSshAccel = accel
+}
+
 // 截图热键单独存取：它不在 setAccelerators 的批量签名里，
 // 以免为新增一个热键去改 5 处调用点（Reregister* 系列各自只改自己那一个）。
 func getShotAccel() string {
@@ -717,11 +731,11 @@ func ReregisterNoteHotkey(modifiers, vk uintptr) {
 	cb := showNoteWindow
 
 	if err := app.GlobalShortcut.Register(newAccel, cb); err != nil {
-		logger.W("QuickDock: 笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+N", newAccel, err)
-		fallbackAccel := "Ctrl+Shift+N"
+		logger.W("QuickDock: 笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Alt+N", newAccel, err)
+		fallbackAccel := "Ctrl+Alt+N"
 		app.GlobalShortcut.Register(fallbackAccel, cb)
 		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
-			svc.DB.SetSetting("note_hotkey", "6,78")
+			svc.DB.SetSetting("note_hotkey", "3,78")
 		}
 		setAccelerators(getAppAccel(), getClipAccel(), getPaletteAccel(), fallbackAccel)
 	} else {
@@ -828,6 +842,10 @@ func SuspendHotkeys() {
 	shotAccel := getShotAccel()
 	if shotAccel != "" {
 		app.GlobalShortcut.Unregister(shotAccel)
+	}
+	sshAccel := getSshAccel()
+	if sshAccel != "" {
+		app.GlobalShortcut.Unregister(sshAccel)
 	}
 	for _, w := range getWinmgrAccels() {
 		if w != "" {
@@ -1025,7 +1043,7 @@ func registerAllHotkeys(app *application.App) {
 	// 重注册前先注销上一轮已注册的快捷键，避免修改设置保存后旧热键残留、
 	// 新旧热键同时生效直到进程重启。与 Reregister* 系列保持一致。
 	resetHotkeyWarnings()
-	for _, old := range append([]string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel(), getWinmgrFloatAccel(), SSH_ACCEL}, getWinmgrAccels()...) {
+	for _, old := range append([]string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel(), getSshAccel(), getWinmgrFloatAccel()}, getWinmgrAccels()...) {
 		if old != "" {
 			app.GlobalShortcut.Unregister(old)
 		}
@@ -1033,9 +1051,11 @@ func registerAllHotkeys(app *application.App) {
 	appMods, appVk := MOD_CONTROL, int(VK_SPACE)
 	clipMods, clipVk := MOD_CONTROL, int(VK_OEM_3)
 	paletteMods, paletteVk := MOD_CONTROL, int(0x4B)
-	noteMods, noteVk := MOD_CONTROL|MOD_SHIFT, int(0x4E)
+	noteMods, noteVk := MOD_CONTROL|MOD_ALT, int(0x4E)
 	// 截图热键默认 F1 —— 无修饰键，mods 为 0（parseHotkeySetting 需允许 0）。
 	shotMods, shotVk := 0, 0x70
+	// SSH 终端窗口热键默认 Ctrl+Alt+S（S=SSH，与快捷笔记的 Ctrl+Alt+N 同族）。
+	sshMods, sshVk := MOD_CONTROL|MOD_ALT, int(0x53)
 	if svc := appSvc.Load(); svc != nil && svc.DB != nil {
 		if raw, err := svc.DB.GetSetting("hotkey"); err == nil && raw != "" {
 			appMods, appVk = parseHotkeySetting(raw)
@@ -1052,6 +1072,9 @@ func registerAllHotkeys(app *application.App) {
 		if raw, err := svc.DB.GetSetting("screenshot_hotkey"); err == nil && raw != "" {
 			shotMods, shotVk = parseHotkeySetting(raw)
 		}
+		if raw, err := svc.DB.GetSetting("ssh_hotkey"); err == nil && raw != "" {
+			sshMods, sshVk = parseHotkeySetting(raw)
+		}
 	}
 
 	appAccel := modVKToAccelerator(appMods, appVk)
@@ -1059,6 +1082,7 @@ func registerAllHotkeys(app *application.App) {
 	paletteAccel := modVKToAccelerator(paletteMods, paletteVk)
 	noteAccel := modVKToAccelerator(noteMods, noteVk)
 	shotAccel := modVKToAccelerator(shotMods, shotVk)
+	sshAccel := modVKToAccelerator(sshMods, sshVk)
 
 	// 主窗口热键回调
 	registeredAppAccel := appAccel
@@ -1132,14 +1156,14 @@ func registerAllHotkeys(app *application.App) {
 		logger.I("命令面板快捷键 [%s] 已注册", paletteAccel)
 	}
 
-	// 快捷笔记热键（默认 Ctrl+Shift+N），复用剪贴板独立窗口导航到 #/note
+	// 快捷笔记热键（默认 Ctrl+Alt+N），复用剪贴板独立窗口导航到 #/note
 	registeredNoteAccel := noteAccel
 	if err := app.GlobalShortcut.Register(noteAccel, showNoteWindow); err != nil {
-		logger.W("笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Shift+N", noteAccel, err)
-		app.GlobalShortcut.Register("Ctrl+Shift+N", showNoteWindow)
-		registeredNoteAccel = "Ctrl+Shift+N"
+		logger.W("笔记热键 [%s] 注册失败: %v，回退到 Ctrl+Alt+N", noteAccel, err)
+		app.GlobalShortcut.Register("Ctrl+Alt+N", showNoteWindow)
+		registeredNoteAccel = "Ctrl+Alt+N"
 		if svc := appSvc.Load(); svc != nil && svc.DB != nil {
-			svc.DB.SetSetting("note_hotkey", "6,78")
+			svc.DB.SetSetting("note_hotkey", "3,78")
 		}
 	} else {
 		logger.I("笔记快捷键 [%s] 已注册", noteAccel)
@@ -1166,16 +1190,34 @@ func registerAllHotkeys(app *application.App) {
 	// 窗口管理浮层热键：唤起浮层做批量网格排版。
 	setWinmgrFloatAccel(registerWinmgrFloatHotkey(app))
 
-	// SSH 终端热键（Ctrl+Alt+S）：与侧栏同一个入口（showSshWindow 转调
+	// SSH 终端热键（默认 Ctrl+Alt+S，设置页可改）：与侧栏同一个入口（showSshWindow 转调
 	// SshService.OpenSshWindow），不存在「热键开的不刷新清单、侧栏开的才刷新」。
 	// 语义是「唤起/前置」而不是「切换」：终端里可能正跑着命令，按一次就隐藏窗口
 	// 很容易把用户的活儿弄丢。
-	if err := app.GlobalShortcut.Register(SSH_ACCEL, showSshWindow); err != nil {
-		logger.W("SSH 热键 [%s] 注册失败（可能被其它程序占用）: %v", SSH_ACCEL, err)
-		addHotkeyWarning(SSH_ACCEL)
+	//
+	// 回退策略与截图热键同构（键位可配置后才有意义）：当前键不是默认键时先退回默认键
+	// 再试一次，仍失败才记为冲突并写回默认设置——避免用户改成一个被占用的键之后
+	// 每次启动都白试一遍，也避免把「非默认键冲突」永久留在配置里。
+	registeredSshAccel := sshAccel
+	// 默认键的加速器串要按同一套拼接规则生成再比较——SSH_ACCEL 常量写的是
+	// "Ctrl+Alt+S"，而 modVKToAccelerator 产出 "Alt+Ctrl+S"（它固定先 Alt 后 Ctrl），
+	// 直接拿常量比较会把「用户本来就用默认键」误判成「改过键」。
+	defaultSshAccel := modVKToAccelerator(MOD_CONTROL|MOD_ALT, 0x53)
+	if err := app.GlobalShortcut.Register(sshAccel, showSshWindow); err != nil {
+		logger.W("SSH 热键 [%s] 注册失败: %v，回退到 %s", sshAccel, err, SSH_ACCEL)
+		if sshAccel != defaultSshAccel && app.GlobalShortcut.Register(defaultSshAccel, showSshWindow) == nil {
+			registeredSshAccel = defaultSshAccel
+			if svc := appSvc.Load(); svc != nil && svc.DB != nil {
+				svc.DB.SetSetting("ssh_hotkey", "3,83")
+			}
+		} else {
+			registeredSshAccel = ""
+			addHotkeyWarning(sshAccel)
+		}
 	} else {
-		logger.I("SSH 快捷键 [%s] 已注册", SSH_ACCEL)
+		logger.I("SSH 快捷键 [%s] 已注册", sshAccel)
 	}
+	setSshAccel(registeredSshAccel)
 
 	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel, registeredNoteAccel)
 

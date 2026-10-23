@@ -7,6 +7,7 @@ import {
   formatMtime,
   isPreviewable,
   joinPath,
+  looksBinary,
   parentOf,
   permOctal,
   splitPath,
@@ -240,5 +241,39 @@ describe('permOctal', () => {
   it('mode 太短返回空串', () => {
     expect(permOctal('??')).toBe('')
     expect(permOctal('')).toBe('')
+  })
+})
+
+describe('looksBinary', () => {
+  it('普通文本 / 空内容不算二进制', () => {
+    expect(looksBinary('')).toBe(false)
+    expect(looksBinary('server {\n  listen 80;\n}\n')).toBe(false)
+  })
+
+  it('中文与 tab、CRLF 都是合法文本', () => {
+    expect(looksBinary('# 中文注释\r\n\tkey = 值\r\n')).toBe(false)
+  })
+
+  it('出现 NUL 直接判定二进制（最强信号）', () => {
+    expect(looksBinary('abc\u0000def')).toBe(true)
+  })
+
+  it('零散控制字符不到 2% 仍按文本处理', () => {
+    // 100 个字符里 1 个 \u0007，不足以判定——终端转义残留很常见。
+    expect(looksBinary('a'.repeat(99) + '\u0007')).toBe(false)
+  })
+
+  it('控制字符成片出现判定二进制', () => {
+    expect(looksBinary('\u0001\u0002\u0003\u0004abcdefgh')).toBe(true)
+  })
+
+  it('U+FFFD 成片出现判定二进制（原文不是合法 UTF-8）', () => {
+    expect(looksBinary('\ufffd'.repeat(10) + 'abc')).toBe(true)
+  })
+
+  it('只采样前 8KB，尾部是二进制不影响开头是文本的判定', () => {
+    // 这是刻意行为：只影响要不要拦，不影响正确性——真保存二进制时
+    // 前面的 NUL 判定已经拦住了绝大多数情况，此处锁定「采样」这个契约。
+    expect(looksBinary('a'.repeat(9000) + '\u0000')).toBe(false)
   })
 })

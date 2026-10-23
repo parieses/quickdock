@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
@@ -18,6 +18,7 @@ import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsSync from './SettingsSync.vue'
 import SettingsTools from './SettingsTools.vue'
 import LogViewer from './LogViewer.vue'
+import ActivityPage from './ActivityPage.vue'
 import SettingsWinmgr from './SettingsWinmgr.vue'
 
 import {
@@ -56,6 +57,9 @@ const menuItems = computed(() => [
   { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
   { key: 'storage',   label: t('storageLocation'),   icon: HardDrive, desc: t('storageDesc') },
   { key: 'datasync',  label: t('syncAndSnapshot'),   icon: Cloud,    desc: t('syncAndSnapshotDesc') },
+  // 最近动态：最常用排行 + 操作流水。从一级导航迁入——它属于「偶尔回头看一眼」
+  // 的回顾型信息，日常使用频率远低于笔记/待办/监控，占导航位不值当。
+  { key: 'activity',   label: t('navActivity'),       icon: History,  desc: t('activitySubtitle') },
   { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
   { key: 'winmgr',     label: t('winmgr'),             icon: MonitorIcon, desc: t('winmgrDesc') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
@@ -67,7 +71,7 @@ const menuGroups = computed(() => {
   const byKey = Object.fromEntries(menuItems.value.map((m) => [m.key, m]))
   const defs: { title: string; keys: string[] }[] = [
     { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys'] },
-    { title: t('menuGroupData'), keys: ['data', 'storage', 'datasync'] },
+    { title: t('menuGroupData'), keys: ['data', 'storage', 'datasync', 'activity'] },
     { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai', 'logs'] },
   ]
   return defs
@@ -717,6 +721,11 @@ async function toggleAutoStart() {
           <!-- 日志查看器（从导航栏迁入的专属设置项） -->
           <div v-else-if="activePage === 'logs'" class="content-page content-logs">
             <LogViewer />
+          </div>
+
+          <!-- 最近动态（从导航栏迁入：属于「偶尔回头看一眼」的信息，不值得占一级导航） -->
+          <div v-else-if="activePage === 'activity'" class="content-page content-flush">
+            <ActivityPage embedded />
           </div>
 
           <!-- 其他设置页占位（旧路由兼容） -->

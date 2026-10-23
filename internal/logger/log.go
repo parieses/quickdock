@@ -158,6 +158,12 @@ func Logf(level, format string, args ...interface{}) {
 		now.Format("2006-01-02 15:04:05.000"), level, fmt.Sprintf(format, args...))
 	n, _ := f.WriteString(line)
 	size += int64(n)
+	// dev 版同时写一份到 stderr（见 tee_dev.go）：文件是排障的事实来源，
+	// 但「启动阶段就失败」时用户需要一个当场就能看见的提示，否则只会看到
+	// 窗口没起来、控制台空白，得靠翻 log 才知道原委。
+	if teeStderr {
+		fmt.Fprint(os.Stderr, "QuickDock: "+line)
+	}
 	// 只给 E 级强制落盘：崩溃排障要看的是错误，而 I/W 级正好落在最热的路径上
 	// （插件逐行转发子进程 stdout、监控高频轮询），每条都 fsync 一次会把整个
 	// 宿主拖慢。其余级别交给 OS 回写，代价是最多丢崩溃前的最后几条。

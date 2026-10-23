@@ -55,17 +55,31 @@ type SshService struct {
 	ownerMu sync.Mutex
 	owners  map[string]string
 
+	// transferMu / transferCancels 记录「进行中的传输 → 取消函数」，键是前端生成的
+	// transferID。为什么按 ID 而不是按主机：一个用户可以在两个标签里同时往同一台机器
+	// 传文件，按主机只能一把取消全部，那不是用户按下「取消」时想要的结果。
+	transferMu      sync.Mutex
+	transferCancels map[string]context.CancelFunc
+
+	// batchMu / batchCancels 记录「进行中的批量执行 → 取消函数」，键是批次 id。
+	// 与 transferCancels 同形但不是同一张表：两者生命周期与语义都不同
+	// （传输是单文件搬运，批次是一组主机的命令），混在一起会让取消互相误伤。
+	batchMu      sync.Mutex
+	batchCancels map[string]context.CancelFunc
+
 	shutdownOnce sync.Once
 }
 
 // NewSshService 创建 SshService。
 func NewSshService(app *services.AppService) *SshService {
 	s := &SshService{
-		App:      app,
-		known:    sshcore.NewKnownHosts(knownHostStore{app: app}),
-		pool:     newConnPool(),
-		releases: make(map[string]func()),
-		owners:   make(map[string]string),
+		App:             app,
+		known:           sshcore.NewKnownHosts(knownHostStore{app: app}),
+		pool:            newConnPool(),
+		releases:        make(map[string]func()),
+		owners:          make(map[string]string),
+		transferCancels: make(map[string]context.CancelFunc),
+		batchCancels:    make(map[string]context.CancelFunc),
 	}
 	s.batcher = sshcore.NewBatcher(eventSink{app: app}, sshcore.DefaultFlushInterval)
 	s.manager = sshcore.NewManager(s.batcher, sshcore.DefaultScrollback)

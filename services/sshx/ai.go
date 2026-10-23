@@ -195,12 +195,16 @@ func summarizeSshHistory(askFn func(string, string, int) (string, string, error)
 	return text, nil
 }
 
-// sshAiDangerRule 危险命令规则。
+// sshDangerRule 危险命令规则。
 //
 // 为什么不写一个通用的"危险词表"给全局用：SSH 场景的危害评估必须结合
 // "这条命令在远程生产机上跑"这个前提，比如 `systemctl restart nginx`
 // 在本地无害、在生产上要停服务。这类语义没法靠通用词表覆盖。
 // **规则表因此留在 SSH 域内**，公共层只提供判定机制（aiutil.RiskRules.Eval）。
+//
+// 名字里没有 AI：批量执行（batch.go）用的是同一张表，因为判定前提完全一致
+// ——都是"这段命令要在远程机上跑"。**它一度叫 sshAiDangerRule**，那会让人
+// 误以为只服务 AI 面板，从而在批量执行里另抄一份、两份规则迟早漂移。
 //
 // 规则表的**顺序不代表优先级**：判定取最高等级的那条（见 aiutil.RiskRules.Eval），
 // 因此新增规则可以直接追加，不必担心插错位置导致等级被降级。
@@ -208,7 +212,7 @@ func summarizeSshHistory(askFn func(string, string, int) (string, string, error)
 // 表是**有限收录**而非穷举：它覆盖的是不可逆或影响整机/服务的常见写法，
 // 拦不住所有危险命令。所以生产环境还有一层提示词约束（sshEnvGuidance），
 // 以及「高风险不给一键执行」这条界面底线——三层各自独立，不互为替代。
-var sshAiDangerRule = aiutil.RiskRules{
+var sshDangerRule = aiutil.RiskRules{
 	{Pattern: regexp.MustCompile(`\brm\s+(-[a-zA-Z]*\s+)*-[a-zA-Z]*[rR][a-zA-Z]*f|\brm\s+-[a-zA-Z]*f[a-zA-Z]*[rR]|\brm\s+-fr\b|\brm\s+-rf\b`), Level: "high", Note: "递归强制删除，不可恢复，执行前务必确认路径"},
 	{Pattern: regexp.MustCompile(`\bdd\s+if=|\bdd\s+of=/dev/`), Level: "high", Note: "直接写裸设备，数据会被覆盖且无法恢复"},
 	{Pattern: regexp.MustCompile(`\bmkfs\b|\bfdisk\b|\bparted\b`), Level: "high", Note: "会重写分区表或格式化文件系统，磁盘数据全部丢失"},
@@ -366,8 +370,8 @@ func (s *SshService) Ask(req SshAiAskRequest) *services.ApiResult {
 		return services.Fail(err)
 	}
 
-	commands := aiutil.ExtractCommands(text, sshAiDangerRule)
-	segments := aiutil.ExtractSegments(text, sshAiDangerRule)
+	commands := aiutil.ExtractCommands(text, sshDangerRule)
+	segments := aiutil.ExtractSegments(text, sshDangerRule)
 	hasRisk := false
 	for _, c := range commands {
 		if c.Risk == "high" {
@@ -377,10 +381,10 @@ func (s *SshService) Ask(req SshAiAskRequest) *services.ApiResult {
 	}
 
 	return services.Ok(SshAiAskResult{
-		Answer:    text,
-		Commands:  commands,
-		Segments:  segments,
-		Model:     model,
+		Answer:      text,
+		Commands:    commands,
+		Segments:    segments,
+		Model:       model,
 		HasRisk:     hasRisk,
 		ElapsedMs:   time.Since(start).Milliseconds(),
 		Summary:     summary,

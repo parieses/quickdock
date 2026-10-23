@@ -10,6 +10,10 @@ import (
 
 // baseTables 所有表结构（首次初始化时全部创建）
 // 使用 CREATE TABLE IF NOT EXISTS 确保幂等
+//
+// **索引不写在这里**：老库的列可能少于建表语句（新增列靠 columnMigrations
+// 补），索引一旦引用新列就会在补列之前执行而报 no such column，
+// 导致整个迁移失败、应用起不来。索引统一下方 postMigrations。
 var baseTables = []string{
 	`CREATE TABLE IF NOT EXISTS workspaces (
 		id TEXT PRIMARY KEY,
@@ -82,7 +86,6 @@ var baseTables = []string{
 		updated_at TEXT NOT NULL,
 		env TEXT DEFAULT ''
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_items_collection ON items(collection_id)`,
 
 	`CREATE TABLE IF NOT EXISTS tools (
 		id TEXT PRIMARY KEY,
@@ -96,11 +99,19 @@ var baseTables = []string{
 		updated_at TEXT NOT NULL DEFAULT ''
 	)`,
 
+	// 操作流水：谁在什么时候做了什么（打开项目 / 连主机 / 跑插件命令…）。
+	// 该表与 snapshots 同批建好但长期没有写入方，属于空置表；启用时补上
+	// kind（分类，驱动图标与配色）、ref_id（关联对象 id，供前端跳转）与
+	// created_ts（Unix 毫秒，排序与前端直接 new Date）。
 	`CREATE TABLE IF NOT EXISTS activity (
 		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL DEFAULT '',
+		ref_id TEXT NOT NULL DEFAULT '',
 		text TEXT NOT NULL,
-		created_at TEXT NOT NULL
+		created_at TEXT NOT NULL,
+		created_ts INTEGER NOT NULL DEFAULT 0
 	)`,
+	// 注意：activity 的 created_ts 索引**不能**放这里，见 postMigrations。
 
 	`CREATE TABLE IF NOT EXISTS snapshots (
 		id TEXT PRIMARY KEY,
@@ -136,10 +147,6 @@ var baseTables = []string{
 		note TEXT DEFAULT '',
 		created_at INTEGER NOT NULL
 	)`,
-
-	`CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_entries(created_at)`,
-	`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_text ON clipboard_entries(content_type, text_content)`,
-	`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_image ON clipboard_entries(content_type, image_hash)`,
 
 	`CREATE TABLE IF NOT EXISTS notes (
 		id TEXT PRIMARY KEY,
@@ -265,7 +272,6 @@ var baseTables = []string{
 		latency_ms INTEGER NOT NULL DEFAULT 0,
 		error TEXT DEFAULT ''
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_monitor_logs_mid_ts ON monitor_logs(monitor_id, checked_ts)`,
 
 	`CREATE TABLE IF NOT EXISTS plugin_exec_logs (
 		id TEXT PRIMARY KEY,
@@ -279,7 +285,6 @@ var baseTables = []string{
 		error TEXT DEFAULT '',
 		trigger TEXT DEFAULT 'manual'
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_plugin_exec_logs_ts ON plugin_exec_logs(executed_ts)`,
 
 	`CREATE TABLE IF NOT EXISTS ai_conversations (
 		id TEXT PRIMARY KEY,
@@ -296,7 +301,6 @@ var baseTables = []string{
 		content TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
 
 	// SSH 主机与会话树节点（文件夹与主机同表，用 is_folder 区分，与 notes 一致）。
 	// parent_id / is_folder / sort / env 是 P2「会话树 + 多标签」的前置字段，
@@ -321,7 +325,6 @@ var baseTables = []string{
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_parent ON ssh_hosts(parent_id, sort)`,
 
 	// 已信任的主机密钥。主键含 key_type：同一台服务器可同时有 ed25519/ecdsa/rsa，
 	// 只按 host+port 存一条会导致「协商到另一个算法就误报指纹变更」。
@@ -485,6 +488,10 @@ func (d *Database) migrate() error {
 		// items: 条目绑定的运行时版本（JSON 数组，与 scenes.env 同形），
 		// 打开条目时把对应版本 bin 前置到子进程 PATH（项目级版本切换）
 		{"items", "env", "TEXT DEFAULT ''"},
+		// activity: 启用操作流水时补齐的三列（老库里该表只有 id/text/created_at）
+		{"activity", "kind", "TEXT NOT NULL DEFAULT ''"},
+		{"activity", "ref_id", "TEXT NOT NULL DEFAULT ''"},
+		{"activity", "created_ts", "INTEGER NOT NULL DEFAULT 0"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {
@@ -500,6 +507,32 @@ func (d *Database) migrate() error {
 	// 正常启动不产生日志（避免每次开机刷屏）。
 	if len(addedCols) > 0 {
 		logger.I("[db] 旧库结构升级：补齐 %d 个缺失列 %v", len(addedCols), addedCols)
+	}
+
+	// 补列之后才能建的索引。
+	//
+	// 顺序契约：**所有索引都放这里，不放进 baseTables**。
+	// baseTables 里 CREATE TABLE IF NOT EXISTS 对已存在的老表是空操作，
+	// 老表的列可能比建表语句少（新增列靠下面的 columnMigrations 补），
+	// 索引若紧跟建表语句执行，引用的新列此时还不存在，直接报
+	// `SQL logic error: no such column: xxx` 并让整个迁移失败 ——
+	// 应用起不来，而日志里只有一句 SQL 报错，完全看不出是顺序问题。
+	// v0.0.25 的 activity.created_ts 就是这么崩的。
+	postMigrations := []string{
+		`CREATE INDEX IF NOT EXISTS idx_items_collection ON items(collection_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_entries(created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_text ON clipboard_entries(content_type, text_content)`,
+		`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_image ON clipboard_entries(content_type, image_hash)`,
+		`CREATE INDEX IF NOT EXISTS idx_monitor_logs_mid_ts ON monitor_logs(monitor_id, checked_ts)`,
+		`CREATE INDEX IF NOT EXISTS idx_plugin_exec_logs_ts ON plugin_exec_logs(executed_ts)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_parent ON ssh_hosts(parent_id, sort)`,
+		`CREATE INDEX IF NOT EXISTS idx_activity_created_ts ON activity(created_ts DESC)`,
+	}
+	for _, sql := range postMigrations {
+		if _, err := d.conn.Exec(sql); err != nil {
+			return fmt.Errorf("创建索引失败: %w", err)
+		}
 	}
 
 	// 数据迁移：notes 用 keyword 回填 name（幂等；旧 snippets 表已重命名为 notes）

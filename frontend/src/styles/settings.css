@@ -196,7 +196,9 @@
 /* 数据与备份 */
 .content-left { align-items: flex-start; justify-content: flex-start; }
 /* 日志查看器：撑满设置内容区，由查看器自身管理滚动 */
-.content-logs { height: 100%; padding: 0; align-items: stretch; justify-content: flex-start; }
+/* content-flush 是通用形态：组件自带内边距与滚动，外层只负责给满高度、不做居中。
+   最近动态页与日志查看器都用它（前者两个面板各自滚动，后者整列滚动）。 */
+.content-logs, .content-flush { height: 100%; padding: 0; align-items: stretch; justify-content: flex-start; }
 .content-inner { width: 100%; max-width: 600px; }
 .section { width: 100%; max-width: 600px; }
 .section + .section { margin-top: 28px; }

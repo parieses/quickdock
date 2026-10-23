@@ -19,11 +19,12 @@ type hotkeySetting struct {
 
 // 热键设置定义
 var hotkeySettings = []hotkeySetting{
-	{"hotkey", 2, 32, "Ctrl+Space"},          // 主热键
-	{"clipboard_hotkey", 2, 0xC0, "Ctrl+`"},  // 剪贴板热键
-	{"palette_hotkey", 2, 0x4B, "Ctrl+K"},    // 命令面板热键
-	{"note_hotkey", 6, 0x4E, "Ctrl+Shift+N"}, // 笔记热键
-	{"screenshot_hotkey", 0, 0x70, "F1"},     // 截图热键（无修饰键，故 modifiers 为 0）
+	{"hotkey", 2, 32, "Ctrl+Space"},         // 主热键
+	{"clipboard_hotkey", 2, 0xC0, "Ctrl+`"}, // 剪贴板热键
+	{"palette_hotkey", 2, 0x4B, "Ctrl+K"},   // 命令面板热键
+	{"note_hotkey", 3, 0x4E, "Ctrl+Alt+N"},  // 笔记热键（Ctrl+Alt+N：N=Note，与 SSH 的 Ctrl+Alt+S 同族）
+	{"screenshot_hotkey", 0, 0x70, "F1"},    // 截图热键（无修饰键，故 modifiers 为 0）
+	{"ssh_hotkey", 3, 0x53, "Ctrl+Alt+S"},   // SSH 终端窗口热键（S=SSH）
 }
 
 // ===== 热键配置 =====
@@ -60,12 +61,22 @@ func (a *AppService) SetPaletteHotkeyConfig(modifiers, vk int) *ApiResult {
 
 // GetNoteHotkeyConfig 获取笔记热键配置
 func (a *AppService) GetNoteHotkeyConfig() *ApiResult {
-	return a.getHotkeyConfigByKey("note_hotkey", 6, 0x4E, "Ctrl+Shift+N")
+	return a.getHotkeyConfigByKey("note_hotkey", 3, 0x4E, "Ctrl+Alt+N")
 }
 
 // SetNoteHotkeyConfig 设置笔记热键配置
 func (a *AppService) SetNoteHotkeyConfig(modifiers, vk int) *ApiResult {
 	return a.setHotkeyConfigByKey("note_hotkey", modifiers, vk)
+}
+
+// GetSshHotkeyConfig 获取 SSH 终端窗口热键配置
+func (a *AppService) GetSshHotkeyConfig() *ApiResult {
+	return a.getHotkeyConfigByKey("ssh_hotkey", 3, 0x53, "Ctrl+Alt+S")
+}
+
+// SetSshHotkeyConfig 设置 SSH 终端窗口热键配置
+func (a *AppService) SetSshHotkeyConfig(modifiers, vk int) *ApiResult {
+	return a.setHotkeyConfigByKey("ssh_hotkey", modifiers, vk)
 }
 
 // GetScreenshotHotkeyConfig 获取截图热键配置（默认 F1，无修饰键）
@@ -112,13 +123,17 @@ func (a *AppService) setHotkeyConfigByKey(key string, modifiers, vk int) *ApiRes
 // ===== 辅助函数 =====
 
 // hotkeyLabel 根据修饰键和虚拟键码生成标签
+//
+// 修饰键顺序固定为 Ctrl→Alt→Shift→Win，与前端（HotkeySettings / SettingsWinmgr 的
+// toLabel）、以及 tray.go 里 "Ctrl+Alt+S" 这类常量写法保持一致。反过来的话
+// Ctrl+Alt+N 会显示成 "Alt+Ctrl+N"，同一个键在不同页面写法不同。
 func hotkeyLabel(modifiers, vk int) string {
 	var parts []string
-	if modifiers&1 != 0 {
-		parts = append(parts, "Alt")
-	}
 	if modifiers&2 != 0 {
 		parts = append(parts, "Ctrl")
+	}
+	if modifiers&1 != 0 {
+		parts = append(parts, "Alt")
 	}
 	if modifiers&4 != 0 {
 		parts = append(parts, "Shift")

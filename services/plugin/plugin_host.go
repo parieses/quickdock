@@ -40,6 +40,8 @@ import (
 //	host.mcp.call                                （无需权限，等级门由 mcpsrv.Call 把关）
 //	host.ai.ask                                  （无需权限，复用宿主 AI 档案，一次性问答不落库；
 //	                                              带 streamId 时沿途下发 host.ai.delta 增量）
+//	host.ai.available                            （无需权限，预检宿主是否已配置可用 AI 档案；
+//	                                              返回 available/reason/profile/model，避免盲目调用 host.ai.ask）
 //	db.get / db.set / db.delete / db.list        （无需权限，按 plugin_id 强隔离）
 
 const (
@@ -576,6 +578,26 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 			return nil, err
 		}
 		return map[string]interface{}{"text": text, "model": model}, nil
+	})
+
+	// host.ai.available：让插件在调用 host.ai.ask 前先判断宿主是否配置了可用的 AI 档案，
+	// 避免「盲目调用 → 拿到未配置/不可用 的裸错」。
+	//
+	// 无权限门（与 host.ai.ask 一致）；不触碰任何凭据，只回报激活档案的可用性与元信息。
+	// 返回 { available, reason, profile, model }：
+	//   available=false 时 reason ∈ { no_profile, no_endpoint, unavailable }，
+	//   插件据此提示「请在 设置 → AI 中配置 AI 档案」而非发起注定失败的调用。
+	svc.App.PluginMgr.InjectHostMethod("host.ai.available", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		if svc.App.AIAvailableFn == nil {
+			return map[string]interface{}{"available": false, "reason": "unavailable"}, nil
+		}
+		available, reason, profile, model := svc.App.AIAvailableFn()
+		return map[string]interface{}{
+			"available": available,
+			"reason":    reason,
+			"profile":   profile,
+			"model":     model,
+		}, nil
 	})
 
 	// ---- 插件专属存储（按 plugin_id 强隔离，插件无法跨插件读写）----

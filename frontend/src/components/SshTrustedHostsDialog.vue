@@ -113,10 +113,16 @@ async function copy(text: string) {
   }
 }
 
-/** 指纹记录只存 Unix 秒；空值显示为 '-',避免出现「1970 年」误导用户。 */
+/**
+ * addedAt 是 **Unix 毫秒**（Go 侧 `time.Now().UnixMilli()` 写入，与仓库其它表一致），
+ * 直接喂 Date 即可。别再乘 1000 —— 那是把毫秒当秒，会算出公元 5 万年。
+ * 空值显示 '-'，避免出现「1970 年」误导用户。
+ */
 function formatDate(ts: number): string {
   if (!ts) return '-'
-  return new Date(ts * 1000).toLocaleDateString()
+  // 容错：极小的值只可能是被误存成秒的旧记录（1e11 毫秒 ≈ 公元 5138 年），补齐后再格式化。
+  const d = new Date(ts < 1e11 ? ts * 1000 : ts)
+  return Number.isNaN(d.getTime()) ? '-' : d.toLocaleDateString()
 }
 
 function onKeydown(e: KeyboardEvent) {

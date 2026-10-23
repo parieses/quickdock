@@ -17,11 +17,12 @@ import {
   Folder,
   Pencil,
   Plus,
+  Search,
   Server,
   Trash2,
 } from '@lucide/vue'
 import { sshEnvClass, sshEnvKey, sshTargetFull, type SshHost } from '../utils/ssh'
-import { flattenSshTree, resolveDrop, type DropPosition, type SshTreeNode } from '../utils/sshTree'
+import { flattenSshTree, filterSshTree, resolveDrop, type DropPosition, type SshTreeNode } from '../utils/sshTree'
 
 const { t } = useI18n()
 
@@ -35,6 +36,8 @@ const props = defineProps<{
   activeHostIds: Set<string>
   /** 折叠状态由父级持有，切主机时不希望折叠被重置 */
   collapsed: Set<string>
+  /** 搜索关键字（空串＝不过滤）。过滤保留祖先链，命中文件夹时整棵子树保留 */
+  keyword?: string
 }>()
 
 const emit = defineEmits<{
@@ -45,6 +48,7 @@ const emit = defineEmits<{
   (e: 'create', parentId: string): void
   (e: 'createFolder', parentId: string): void
   (e: 'move', payload: { id: string; parentId: string }): void
+  (e: 'batch', folderId: string): void
 }>()
 
 const dragId = ref('')
@@ -58,7 +62,16 @@ const gapAfter = ref('')
 // 空态只在该行数为 0（即树上连一个分组都没有）时才显示——
 // 否则「只有一个空分组」会被误判成「没有任何主机」而用占位图把分组整个藏起来，
 // 用户建了分组却看不见，更没法往里加连接。
-const rows = computed(() => flattenSshTree(props.tree, props.collapsed))
+//
+// 搜索态下强制全展开：命中项若藏在折叠的分组里，用户会得到「有结果但看不见」，
+// 那种「明明有却找不到」比搜不到更让人怀疑功能坏了。
+const searching = computed(() => !!props.keyword?.trim())
+const visibleTree = computed(() =>
+  searching.value ? filterSshTree(props.tree, props.keyword || '') : props.tree,
+)
+const rows = computed(() =>
+  flattenSshTree(visibleTree.value, searching.value ? new Set<string>() : props.collapsed),
+)
 
 /** 拖拽悬停：按纵向位置算出落点，并顺手维护插入线的显示位置。 */
 function onDragOver(n: SshTreeNode, ev: DragEvent) {
@@ -133,12 +146,15 @@ function closeFolderMenu() {
   folderMenu.value = null
 }
 
-function folderMenuAction(kind: 'host' | 'subfolder') {
+function folderMenuAction(kind: 'host' | 'subfolder' | 'batch') {
   const m = folderMenu.value
   closeFolderMenu()
   if (!m) return
   if (kind === 'host') emit('create', m.folderId)
-  else emit('createFolder', m.folderId)
+  else if (kind === 'subfolder') emit('createFolder', m.folderId)
+  // 批量执行的默认目标就是「这个分组里的全部主机」，与用户在这个位置上
+  // 点右键的心智一致；弹窗里还能再改勾选，所以按子树预选不会造成误操作。
+  else emit('batch', m.folderId)
 }
 
 function onMenuDocDown(e: MouseEvent) {
@@ -194,12 +210,20 @@ function onRowClick(n: SshTreeNode) {
     </div>
 
     <div v-else-if="rows.length === 0" class="tree-hint">
-      <Server :size="26" class="tree-hint-icon" />
-      <p class="tree-hint-text">{{ loadErr ? t('loadFailed') : t('sshHostsEmpty') }}</p>
-      <button class="tree-empty-cta" @click="emit('create', '')">
-        <Plus :size="12" />
-        <span>{{ t('sshAddFirst') }}</span>
-      </button>
+      <!-- 搜索无结果时不给「新建第一台主机」的 CTA：用户手里明明有主机，
+           这里再劝他新建只会更困惑，他要的是「换个关键字」。 -->
+      <template v-if="searching">
+        <Search :size="26" class="tree-hint-icon" />
+        <p class="tree-hint-text">{{ t('sshHostNoMatch') }}</p>
+      </template>
+      <template v-else>
+        <Server :size="26" class="tree-hint-icon" />
+        <p class="tree-hint-text">{{ loadErr ? t('loadFailed') : t('sshHostsEmpty') }}</p>
+        <button class="tree-empty-cta" @click="emit('create', '')">
+          <Plus :size="12" />
+          <span>{{ t('sshAddFirst') }}</span>
+        </button>
+      </template>
     </div>
 
     <template v-else>
@@ -308,6 +332,10 @@ function onRowClick(n: SshTreeNode) {
         </button>
         <button class="tree-menu-item" @click="folderMenuAction('subfolder')">
           {{ t('sshNewSubFolder') }}
+        </button>
+        <div class="tree-menu-sep" />
+        <button class="tree-menu-item" @click="folderMenuAction('batch')">
+          {{ t('sshBatchFolderEntry') }}
         </button>
       </div>
     </Teleport>
@@ -631,5 +659,13 @@ function onRowClick(n: SshTreeNode) {
 
 .tree-menu-item:hover {
   background: var(--color-bg-active);
+}
+
+/* 分隔线：把「新建类」与「操作类」菜单项分开。批量执行会动到整个分组，
+   和上面两个「加一个节点」不是同一类动作，视觉上不该连成一片。 */
+.tree-menu-sep {
+  height: 1px;
+  margin: var(--space-1) var(--space-2);
+  background: var(--color-border);
 }
 </style>

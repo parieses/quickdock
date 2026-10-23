@@ -8,27 +8,41 @@
  *
  * 刻意不做拖拽上传：WebView2 的 dataTransfer.files 拿不到真实路径，
  * 而 SFTP 上传必须在 Go 侧用本地绝对路径打开文件，这条路走不通。
- * 用「填路径」的输入框反而是当下唯一可靠的形式。
+ * 改为走宿主原生文件对话框（SelectLocalFile / SelectSavePath）——
+ * 路径由系统选择器给出，真实、绝对，不用用户去资源管理器里复制一遍。
  */
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Events } from '@wailsio/runtime'
 import {
   ArrowUp,
   Download,
-  File,
+  Eye,
+  FileArchive,
+  FileCode,
+  FileCog,
+  FileImage,
+  FilePlay,
+  FileText,
   Folder,
   FolderPlus,
+  FolderUp,
   HardDrive,
   Home,
   Loader,
   Pencil,
   RefreshCw,
+  ScrollText,
   Trash2,
   Upload,
   X,
 } from '@lucide/vue'
+import SftpFileEditor from './SftpFileEditor.vue'
 import type { SshHost } from '../utils/ssh'
+import { formatBytes } from '../utils/ssh'
 import {
+  SftpCancelTransfer,
+  SftpChmod,
   SftpDownload,
   SftpList,
   SftpMkdir,
@@ -36,15 +50,23 @@ import {
   SftpRename,
   SftpUpload,
 } from '../../bindings/quickdock/services/sshx/sshservice'
-import { unwrap } from '../utils/api'
+import {
+  SelectLocalDirectory,
+  SelectLocalFile,
+  SelectSavePath,
+} from '../../bindings/quickdock/services/appservice'
+import { apiErrorCode, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useToast } from '../composables/useToast'
 import {
+  entryKind,
   filterEntries,
   formatEntrySize,
   formatMtime,
   joinPath,
+  permOctal,
   splitPath,
+  type EntryKind,
   type SftpEntry,
 } from '../utils/sshSftp'
 
@@ -81,17 +103,75 @@ const toolBusy = ref(false)
 const kw = ref('')
 const selected = ref<SftpEntry | null>(null)
 
+/**
+ * 正在查看/编辑的文件。非空即打开编辑弹窗。
+ *
+ * 单独一个状态而不是复用 selected：用户可能一边开着编辑窗，
+ * 一边在列表里点别的行看信息，两者不该互相覆盖。
+ */
+const editorEntry = ref<SftpEntry | null>(null)
+
 /** 路径输入框类操作：null 表示没在开任何输入框 */
-type PromptKind = 'mkdir' | 'rename' | 'download' | 'upload'
+type PromptKind = 'mkdir' | 'rename' | 'chmod'
 const promptKind = ref<PromptKind | null>(null)
 const promptValue = ref('')
 const promptTitle = ref('')
 const promptLabel = ref('')
 const promptOk = ref('')
 
+/**
+ * 当前传输。同一面板一次只跑一个：进度条只有一条，两个传输同时跑会互相覆盖，
+ * 而用户也无法从一条进度里判断到底哪个在动。要并发就开另一个标签。
+ */
+interface TransferState {
+  id: string
+  op: 'upload' | 'download'
+  name: string
+  done: number
+  total: number
+  /** 已发出取消信号，等后端返回；期间按钮置灰防重复点。 */
+  canceling?: boolean
+}
+const transfer = ref<TransferState | null>(null)
+const transferring = computed(() => transfer.value !== null)
+/** 进度百分比。total 未知（目录下载等）时给 0，进度条走 indeterminate 样式。 */
+const transferPercent = computed(() => {
+  const tr = transfer.value
+  if (!tr || tr.total <= 0) return 0
+  return Math.min(100, Math.floor((tr.done / tr.total) * 100))
+})
+const transferText = computed(() => {
+  const tr = transfer.value
+  if (!tr) return ''
+  if (tr.total <= 0) return formatBytes(tr.done)
+  return `${transferPercent.value}% · ${formatBytes(tr.done)} / ${formatBytes(tr.total)}`
+})
+
 const rows = computed(() => filterEntries(entries.value, kw.value))
 const crumbs = computed(() => splitPath(pwd.value))
 const canUp = computed(() => pwd.value !== parent.value && pwd.value !== '/')
+
+/**
+ * 文件类型 → 图标。
+ *
+ * 之前所有非目录文件都共用同一个 File 图标，等于「图标只区分了目录和文件」——
+ * 而一屏里 90% 都是文件，那 1 bit 信息几乎没用。压缩包、图片、代码、配置、
+ * 日志各给一个形状，用户不用读后缀就能扫到目标。
+ * 目录不走这里（Folder 图标 + accent 色有更强的语义）。
+ */
+const KIND_ICONS: Record<EntryKind, Component> = {
+  archive: FileArchive,
+  code: FileCode,
+  image: FileImage,
+  video: FilePlay,
+  log: ScrollText,
+  config: FileCog,
+  text: FileText,
+}
+
+function kindIcon(e: SftpEntry) {
+  return KIND_ICONS[entryKind(e)]
+}
 
 async function load(path = pwd.value) {
   if (!path) path = ''
@@ -133,11 +213,15 @@ watch(
 )
 
 function openEntry(e: SftpEntry) {
-  if (!e.isDir) {
-    selected.value = e
+  if (e.isDir) {
+    void load(e.path)
     return
   }
-  void load(e.path)
+  selected.value = e
+  // 文件双击 = 打开查看/编辑。真正的「能不能当文本打开」由弹窗判定
+  // （扩展名 + 内容双重判断），这里不预筛——否则二进制文件被点开时
+  // 会毫无反应，用户只会以为双击没生效。
+  editorEntry.value = e
 }
 
 function goUp() {
@@ -152,12 +236,17 @@ function selectRow(e: SftpEntry) {
   selected.value = e
 }
 
-/** 双击是「进入」，单击是「选中」——两者都绑在行上，靠 dblclick 覆盖 click 的默认。 */
+/** 双击是「进入/打开」——目录进目录，文件开编辑窗。单击只负责选中。 */
 function onRowClick(e: SftpEntry) {
   selectRow(e)
 }
 function onRowDblClick(e: SftpEntry) {
   openEntry(e)
+}
+
+/** 工具栏/行内「打开」按钮：与双击同一个入口，给不知道能双击的人一条明路。 */
+function openSelected() {
+  if (selected.value) openEntry(selected.value)
 }
 
 // ---- 路径型操作 ----
@@ -176,15 +265,10 @@ function openPrompt(kind: PromptKind, seed: string) {
       promptLabel.value = t('sshFileNewName')
       promptOk.value = t('save')
       break
-    case 'download':
-      promptTitle.value = t('sshFileDownload')
-      promptLabel.value = t('sshFileDownloadTo')
-      promptOk.value = t('sshFileDownload')
-      break
-    case 'upload':
-      promptTitle.value = t('sshFileUpload')
-      promptLabel.value = t('sshFileUploadFrom')
-      promptOk.value = t('sshFileUpload')
+    case 'chmod':
+      promptTitle.value = t('sshFileChmod')
+      promptLabel.value = t('sshFileChmodLabel')
+      promptOk.value = t('save')
       break
   }
 }
@@ -194,10 +278,14 @@ function closePrompt() {
   promptValue.value = ''
 }
 
+/** 权限输入框的校验：3 位（644）或 4 位（4755，带 setuid/sticky）八进制。 */
+const chmodValid = computed(() => /^[0-7]{3,4}$/.test(promptValue.value.trim()))
+
 async function submitPrompt() {
   const kind = promptKind.value
   const value = promptValue.value.trim()
   if (!kind || !value) return
+  if (kind === 'chmod' && !chmodValid.value) return
 
   toolBusy.value = true
   try {
@@ -210,15 +298,13 @@ async function submitPrompt() {
         unwrap(await SftpRename(props.host.id, selected.value.path, value))
         break
       }
-      case 'download': {
+      case 'chmod': {
         if (!selected.value) break
-        unwrap(await SftpDownload(props.host.id, selected.value.path, value))
-        toastSuccess(t('sshFileDownloadDone', { name: selected.value.name }))
+        // parseInt 的第二个参数必须是 8：用户填 644，十进制会变成 644 & 0o7777
+        // 之外的巨数，服务层会直接拒绝。
+        unwrap(await SftpChmod(props.host.id, selected.value.path, parseInt(value, 8)))
         break
       }
-      case 'upload':
-        unwrap(await SftpUpload(props.host.id, value, pwd.value))
-        break
     }
     closePrompt()
     await load()
@@ -230,6 +316,166 @@ async function submitPrompt() {
     toolBusy.value = false
   }
 }
+
+/** 打开改权限输入框，预填当前八进制（没有则留空，别塞一个假值）。 */
+function startChmod(entry: SftpEntry) {
+  selected.value = entry
+  openPrompt('chmod', permOctal(entry.mode))
+}
+
+// ---- 传输（上传 / 下载）----
+
+/**
+ * 进度事件名必须与 services/sshx/sftp.go 的 EventSftpProgress 一致。
+ * 两边都是字符串字面量，编译器帮不上忙，改一处就要同步改另一处。
+ */
+const EVENT_TRANSFER_PROGRESS = 'quickdock:ssh:sftp-progress'
+
+let offProgress: (() => void) | null = null
+
+/**
+ * 生成 transferId。
+ *
+ * 不需要全局唯一：只要和「本面板并发的那一个」不同即可（面板本身已串行化）。
+ * 但两个标签页可能同一毫秒发起传输，所以带一段随机后缀而不是纯时间戳。
+ */
+function newTransferId(): string {
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+}
+
+/** 跑一次传输：置状态 → 调后端 → 清状态（无论成败）。 */
+async function runTransfer(
+  op: 'upload' | 'download',
+  name: string,
+  task: (transferId: string) => Promise<unknown>,
+) {
+  const id = newTransferId()
+  transfer.value = { id, op, name, done: 0, total: 0 }
+  toolBusy.value = true
+  try {
+    await task(id)
+    toastSuccess(
+      op === 'upload'
+        ? t('sshFileUploadDone', { name })
+        : t('sshFileDownloadDone', { name }),
+    )
+    await load()
+  } catch (e) {
+    // 用户自己按的取消不是失败：后端把它编成独立错误码，这里静默吞掉。
+    // 若按普通错误弹一条红色提示，等于告诉用户「你刚才那下把东西弄坏了」。
+    if (apiErrorCode(e) !== 'ssh_transfer_canceled') {
+      toastError(getErrorMessage(e))
+    }
+  } finally {
+    transfer.value = null
+    toolBusy.value = false
+  }
+}
+
+/**
+ * 取消当前传输。
+ *
+ * 只发取消信号，不清 transfer 状态：后端要等当前 32KB 分片写完才会返回，
+ * 提前清掉进度条会让用户以为已经停了，实际还在写盘。真正的清理由
+ * runTransfer 的 finally 负责。
+ */
+async function cancelTransfer() {
+  const tr = transfer.value
+  if (!tr || tr.canceling) return
+  tr.canceling = true
+  try {
+    unwrap(await SftpCancelTransfer(tr.id))
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    tr.canceling = false
+  }
+}
+
+/**
+ * 选本地文件上传。
+ *
+ * 取消（对话框返回空串）直接返回，不发请求也不报错——取消是正常操作，
+ * 报错会让用户以为上传失败。
+ */
+async function pickAndUpload() {
+  if (transferring.value) return
+  let local = ''
+  try {
+    local = unwrap<string>(await SelectLocalFile(t('sshFileUpload'))) || ''
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    return
+  }
+  if (!local) return
+  const name = local.split(/[\\/]/).pop() || local
+  await runTransfer('upload', name, id => SftpUpload(props.host.id, local, pwd.value, id))
+}
+
+/**
+ * 选本地目录上传（递归）。
+ *
+ * 与上传文件分成两个按钮而不是让后端猜：一个「上传」按钮在用户选了目录时
+ * 静默开始传几百个文件，是最容易被误触的行为。分开之后，「传目录」是一次
+ * 明确的决定。目录落到当前目录下、以本地目录名命名，已存在则逐文件覆盖。
+ */
+async function pickAndUploadDir() {
+  if (transferring.value) return
+  let local = ''
+  try {
+    local = unwrap<string>(await SelectLocalDirectory(t('sshFileUploadDir'))) || ''
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    return
+  }
+  if (!local) return
+  const name = local.replace(/[\\/]+$/, '').split(/[\\/]/).pop() || local
+  await runTransfer('upload', name, id => SftpUpload(props.host.id, local, pwd.value, id))
+}
+
+/**
+ * 下载选中项。
+ *
+ * 目录下载也走「另存为」选落点：引擎对已存在的目录会把源名字拼进去，
+ * 对不存在的路径则当作完整目标名，两种都接受，所以直接透传用户选的结果。
+ */
+async function startDownload() {
+  const entry = selected.value
+  if (!entry) return
+  await downloadEntry(entry)
+}
+
+/** 指定下载某一项（编辑窗里「二进制请下载」也走这条路，不依赖列表选中态）。 */
+async function downloadEntry(entry: SftpEntry) {
+  if (transferring.value) return
+  let target = ''
+  try {
+    target = unwrap<string>(await SelectSavePath(t('sshFileDownload'), entry.name)) || ''
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    return
+  }
+  if (!target) return
+  await runTransfer('download', entry.name, id =>
+    SftpDownload(props.host.id, entry.path, target, id),
+  )
+}
+
+onMounted(() => {
+  // 回调参数是 Wails 的事件信封 { name, data }，负载在 .data 里。
+  offProgress = Events.On(EVENT_TRANSFER_PROGRESS, (ev: any) => {
+    const p = ev?.data as { transferId?: string; done?: number; total?: number } | undefined
+    const tr = transfer.value
+    // 只认自己发起的那一个：别的标签页/面板的进度不能画到这条进度条上。
+    if (!tr || !p?.transferId || p.transferId !== tr.id) return
+    tr.done = Number(p.done) || 0
+    tr.total = Number(p.total) || 0
+  })
+})
+
+onBeforeUnmount(() => {
+  offProgress?.()
+  offProgress = null
+})
 
 async function removeEntry(e: SftpEntry) {
   const msg = e.isDir
@@ -255,11 +501,6 @@ async function removeEntry(e: SftpEntry) {
 function startRename() {
   if (!selected.value) return
   openPrompt('rename', selected.value.name)
-}
-
-function startDownload() {
-  if (!selected.value) return
-  openPrompt('download', selected.value.name)
 }
 </script>
 
@@ -295,9 +536,25 @@ function startDownload() {
           class="sftp-tool"
           :disabled="toolBusy"
           :title="t('sshFileUpload')"
-          @click="openPrompt('upload', '')"
+          @click="pickAndUpload"
         >
           <Upload :size="14" />
+        </button>
+        <button
+          class="sftp-tool"
+          :disabled="toolBusy"
+          :title="t('sshFileUploadDir')"
+          @click="pickAndUploadDir"
+        >
+          <FolderUp :size="14" />
+        </button>
+        <button
+          class="sftp-tool"
+          :disabled="!selected || selected.isDir"
+          :title="t('sshFileOpen')"
+          @click="openSelected"
+        >
+          <Eye :size="14" />
         </button>
         <button
           class="sftp-tool sftp-tool--danger"
@@ -327,6 +584,32 @@ function startDownload() {
       </button>
       <input v-model="kw" class="sftp-kw" :placeholder="t('search')" />
     </nav>
+
+    <!-- 传输进度条：只在传输期间出现，避免常驻占一行。
+         total 为 0（目录下载时单片大小未知）走 indeterminate，不假装有百分比。
+         填充宽度是运行时计算值，只能内联 style（R7 的例外项）。 -->
+    <div v-if="transfer" class="sftp-progress">
+      <div class="sftp-progress-text">
+        <span class="sftp-progress-name">{{ transfer.name }}</span>
+        <span class="sftp-progress-meta">{{ transferText }}</span>
+        <button
+          class="sftp-progress-cancel"
+          :disabled="transfer.canceling"
+          :title="t('sshFileTransferCancel')"
+          @click="cancelTransfer"
+        >
+          <X :size="11" />
+          <span>{{ transfer.canceling ? t('sshFileTransferCanceling') : t('cancel') }}</span>
+        </button>
+      </div>
+      <div class="sftp-progress-track">
+        <div
+          class="sftp-progress-fill"
+          :class="{ 'is-indeterminate': transfer.total <= 0 }"
+          :style="{ width: transfer.total > 0 ? transferPercent + '%' : '100%' }"
+        />
+      </div>
+    </div>
 
     <div class="sftp-body">
       <div v-if="errMsg" class="sftp-err">{{ errMsg }}</div>
@@ -361,14 +644,27 @@ function startDownload() {
           >
             <td class="c-name">
               <Folder v-if="e.isDir" :size="14" class="ic ic--dir" />
-              <File v-else :size="14" class="ic" />
+              <component :is="kindIcon(e)" v-else :size="14" class="ic" />
               <span class="nm">{{ e.name }}</span>
               <span v-if="e.isLink" class="tag-link">link</span>
             </td>
             <td class="c-size">{{ formatEntrySize(e) }}</td>
-            <td class="c-perm">{{ e.mode }}</td>
+            <td class="c-perm" :title="t('sshFileChmod')">
+              <button class="perm" @click.stop="startChmod(e)">
+                <span class="perm-oct">{{ permOctal(e.mode) }}</span>
+                <span class="perm-rwx">{{ e.mode.slice(-9) }}</span>
+              </button>
+            </td>
             <td class="c-time">{{ formatMtime(e.modTime) }}</td>
             <td class="c-ops">
+              <button
+                v-if="!e.isDir"
+                class="op"
+                :title="t('sshFileOpen')"
+                @click.stop="openEntry(e)"
+              >
+                <Eye :size="12" />
+              </button>
               <button
                 class="op"
                 :disabled="!!rowBusy"
@@ -404,7 +700,7 @@ function startDownload() {
       </p>
     </div>
 
-    <!-- 路径型操作的统一输入框：上传/下载要本地绝对路径，没有原生文件对话框可用 -->
+    <!-- 新建目录 / 重命名 / 改权限的输入框。上传下载已改走原生文件对话框，不再需要它。 -->
     <Teleport to="body">
       <Transition name="sfp">
         <div v-if="promptKind" class="sfp-overlay" @mousedown.self="closePrompt">
@@ -414,12 +710,22 @@ function startDownload() {
             <input
               v-model="promptValue"
               class="sfp-input"
+              :class="{ 'sfp-input--bad': promptKind === 'chmod' && promptValue && !chmodValid }"
               autofocus
               @keydown.esc.stop="closePrompt"
             />
+            <!-- 权限是唯一需要格式校验的输入：用户敲「rwx」或不存在的位都拦在这里，
+                 让后端只处理合法八进制，报错集中在网络/权限问题上。 -->
+            <div v-if="promptKind === 'chmod' && promptValue && !chmodValid" class="sfp-hint">
+              {{ t('sshFileChmodInvalid') }}
+            </div>
             <div class="sfp-foot">
               <button class="sfp-btn" @click="closePrompt">{{ t('cancel') }}</button>
-              <button class="sfp-btn sfp-btn--primary" :disabled="toolBusy" @click="submitPrompt">
+              <button
+                class="sfp-btn sfp-btn--primary"
+                :disabled="toolBusy || (promptKind === 'chmod' && !chmodValid)"
+                @click="submitPrompt"
+              >
                 {{ promptOk }}
               </button>
             </div>
@@ -427,6 +733,16 @@ function startDownload() {
         </div>
       </Transition>
     </Teleport>
+
+    <!-- 双击文件打开的查看/编辑弹窗。自带 Teleport，放在最后不与上面互斥。 -->
+    <SftpFileEditor
+      v-if="editorEntry"
+      :host-id="host.id"
+      :entry="editorEntry"
+      @close="editorEntry = null"
+      @saved="load()"
+      @download="downloadEntry"
+    />
   </div>
 </template>
 
@@ -564,6 +880,96 @@ function startDownload() {
   border-color: var(--color-accent);
 }
 
+/* 传输进度：细条 + 一行文本，不抢正文的空间（面板本身只有 300px 宽） */
+.sftp-progress {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sftp-progress-text {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  min-width: 0;
+  font-size: 11px;
+}
+
+.sftp-progress-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+}
+
+.sftp-progress-meta {
+  flex: 0 0 auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+
+/* 取消按钮跟进度文案同一行、贴右侧：传输是阻塞式的一整段，
+   把「怎么停下来」放在进度旁边，比藏在工具栏里更容易在慌乱中找到。 */
+.sftp-progress-cancel {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 0 var(--space-2);
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.sftp-progress-cancel:hover:not(:disabled) {
+  color: var(--color-danger);
+  border-color: var(--color-danger-border);
+}
+
+.sftp-progress-cancel:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.sftp-progress-track {
+  height: 3px;
+  overflow: hidden;
+  background: var(--color-bg-tertiary);
+  border-radius: var(--radius-full);
+}
+
+.sftp-progress-fill {
+  height: 100%;
+  background: var(--color-accent);
+  border-radius: var(--radius-full);
+  transition: width 0.15s linear;
+}
+
+/* 总长未知时不显示百分比，用一条来回走的动画表示「还在传，但不知道还有多久」 */
+.sftp-progress-fill.is-indeterminate {
+  animation: sftp-indeterminate 1.1s ease-in-out infinite;
+  transition: none;
+}
+
+@keyframes sftp-indeterminate {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 .sftp-body {
   flex: 1 1 auto;
   min-height: 0;
@@ -670,9 +1076,53 @@ function startDownload() {
 }
 
 .c-perm {
-  width: 92px;
+  /* 同时放八进制与 rwx：644 是 chmod 时要的数字，-rw-r--r-- 是 ls -l 的直觉读法。
+     两个都要，任一单独出现都会让另一拨用户去心算。112px 是二者并排的最小值。 */
+  width: 112px;
   font-family: var(--font-mono);
   font-size: 10.5px;
+}
+
+/* 内层按钮而不是给 td 加 display:flex——td 一旦不是 table-cell，
+   行高、列宽、border-bottom 全部脱离表格布局，整行会错位。
+   做成按钮是因为权限现在可改：不改的话这一列看起来就是死文本，
+   没人会想到点它。 */
+.perm {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: 1px 3px;
+  margin: -1px -3px;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.perm:hover {
+  border-color: var(--color-border);
+  background: var(--color-bg-hover);
+}
+
+.perm-oct {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+
+.perm-rwx {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--color-text-muted);
+}
+
+.perm:hover .perm-rwx {
+  color: var(--color-text-secondary);
 }
 
 .c-time {
@@ -767,6 +1217,18 @@ function startDownload() {
 
 .sfp-input:focus {
   border-color: var(--color-accent);
+}
+
+/* 校验失败时边框先变红，提示文字在下面补原因——
+   只变红不说话，用户还得自己猜哪里不对。 */
+.sfp-input--bad,
+.sfp-input--bad:focus {
+  border-color: var(--color-danger);
+}
+
+.sfp-hint {
+  font-size: 10.5px;
+  color: var(--color-danger);
 }
 
 .sfp-foot {

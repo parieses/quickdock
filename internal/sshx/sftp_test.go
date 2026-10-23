@@ -11,6 +11,7 @@ package sshx
 // 服务层只是一层「取连接 + 转错误码」的壳子，另有覆盖。
 
 import (
+	"context"
 	"crypto/ed25519"
 	"crypto/rand"
 	"errors"
@@ -455,7 +456,7 @@ func TestSftpDownloadAndUpload(t *testing.T) {
 
 	// 下载单个文件到指定完整路径。
 	target := filepath.Join(t.TempDir(), "out.txt")
-	if err := sess.Download("payload.txt", target, nil); err != nil {
+	if err := sess.Download(context.Background(), "payload.txt", target, nil); err != nil {
 		t.Fatalf("下载文件失败: %v", err)
 	}
 	if b, err := os.ReadFile(target); err != nil || string(b) != "download-me" {
@@ -464,7 +465,7 @@ func TestSftpDownloadAndUpload(t *testing.T) {
 
 	// 下载到目录：按源文件名落盘。
 	dir := t.TempDir()
-	if err := sess.Download("payload.txt", dir, nil); err != nil {
+	if err := sess.Download(context.Background(), "payload.txt", dir, nil); err != nil {
 		t.Fatalf("下载到目录失败: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "payload.txt")); err != nil {
@@ -473,7 +474,7 @@ func TestSftpDownloadAndUpload(t *testing.T) {
 
 	// 下载整个目录。
 	dirRoot := t.TempDir()
-	if err := sess.Download("bundle", dirRoot, nil); err != nil {
+	if err := sess.Download(context.Background(), "bundle", dirRoot, nil); err != nil {
 		t.Fatalf("下载目录失败: %v", err)
 	}
 	if b, err := os.ReadFile(filepath.Join(dirRoot, "inner.txt")); err != nil || string(b) != "inner" {
@@ -486,7 +487,7 @@ func TestSftpDownloadAndUpload(t *testing.T) {
 	// 目标目录传空 = 家目录（chroot 下就是 root）。
 	// 这里不能传 srv.root 的绝对路径：服务端对绝对路径不套 workDir，
 	// 会真的写到盘符根目录去。
-	if err := sess.Upload(local, "", nil); err != nil {
+	if err := sess.Upload(context.Background(), local, "", nil); err != nil {
 		t.Fatalf("上传失败: %v", err)
 	}
 	if b, err := os.ReadFile(filepath.Join(srv.root, "up.txt")); err != nil || string(b) != "upload-me" {
@@ -498,8 +499,69 @@ func TestSftpUploadMissingLocalFile(t *testing.T) {
 	srv := startSftpTestServer(t)
 	sess := newSftpForTest(t, srv)
 
-	if err := sess.Upload(filepath.Join(t.TempDir(), "missing.bin"), srv.root, nil); err == nil {
+	if err := sess.Upload(context.Background(), filepath.Join(t.TempDir(), "missing.bin"), srv.root, nil); err == nil {
 		t.Fatal("本地文件不存在时应报错")
+	}
+}
+
+// 上传目录：嵌套子目录与文件都要落到 <目标目录>/<本地目录名>/ 下。
+func TestSftpUploadDir(t *testing.T) {
+	srv := startSftpTestServer(t)
+	sess := newSftpForTest(t, srv)
+
+	src := filepath.Join(t.TempDir(), "bundle")
+	mustWrite(t, filepath.Join(src, "top.txt"), "top")
+	mustWrite(t, filepath.Join(src, "sub", "deep.txt"), "deep")
+
+	// 目标目录传空 = 家目录（chroot 下就是 root），与服务端对绝对路径的处理有关。
+	if err := sess.Upload(context.Background(), src, "", nil); err != nil {
+		t.Fatalf("上传目录失败: %v", err)
+	}
+	for rel, want := range map[string]string{
+		"bundle/top.txt":      "top",
+		"bundle/sub/deep.txt": "deep",
+	} {
+		b, err := os.ReadFile(filepath.Join(srv.root, filepath.FromSlash(rel)))
+		if err != nil || string(b) != want {
+			t.Fatalf("%s 内容不对: %q, err=%v", rel, string(b), err)
+		}
+	}
+}
+
+// 取消：ctx 已取消时复制必须立刻停，且返回的必须是 context.Canceled
+// （服务层靠 errors.Is 认它，包一层就会变成「下载失败」的红色报错）。
+func TestSftpTransferCanceled(t *testing.T) {
+	srv := startSftpTestServer(t)
+	sess := newSftpForTest(t, srv)
+
+	mustWrite(t, filepath.Join(srv.root, "payload.txt"), "download-me")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	target := filepath.Join(t.TempDir(), "out.txt")
+	err := sess.Download(ctx, "payload.txt", target, nil)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("已取消的 ctx 应返回 context.Canceled，实际: %v", err)
+	}
+}
+
+// 改权限：644 → 600，再读一次确认服务端真的改了。
+func TestSftpChmod(t *testing.T) {
+	srv := startSftpTestServer(t)
+	sess := newSftpForTest(t, srv)
+
+	mustWrite(t, filepath.Join(srv.root, "payload.txt"), "download-me")
+
+	if err := sess.Chmod("payload.txt", 0o600); err != nil {
+		t.Fatalf("chmod 失败: %v", err)
+	}
+	fi, err := os.Stat(filepath.Join(srv.root, "payload.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && fi.Mode().Perm() != 0o600 {
+		t.Fatalf("权限没改成功: %v", fi.Mode().Perm())
 	}
 }
 

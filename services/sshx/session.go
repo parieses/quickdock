@@ -10,6 +10,7 @@ import (
 
 	"golang.org/x/crypto/ssh"
 
+	"quickdock/internal/db"
 	sshcore "quickdock/internal/sshx"
 	"quickdock/services"
 )
@@ -138,6 +139,14 @@ func (s *SshService) Connect(hostID string, cols, rows int) *services.ApiResult 
 
 	s.rememberRelease(sess.ID, release)
 	s.rememberOwner(sess.ID, host.ID)
+
+	// 操作流水：用主机显示名，没起名字的主机回落到地址。
+	// 只在 Start 成功后记——握手就该失败、或 PTY 申请被拒的连接不算「用过这台机」。
+	label := host.Name
+	if label == "" {
+		label = host.Host
+	}
+	s.App.NoteActivity(db.ActivitySshConnected, host.ID, label)
 
 	// 先登记再挂回调：若会话在 Start 返回前就断了，
 	// SetOnStateChange 会同步触发回调，此时 release 必须已经就位。
@@ -278,6 +287,8 @@ func (s *SshService) Replay(sessionID string) *services.ApiResult {
 // Shutdown 关闭全部会话与合批器（应用退出时调用）。
 func (s *SshService) Shutdown() {
 	s.shutdownOnce.Do(func() {
+		// 批次要先停：它持有独立的连接，退出后还在拨号的话会把进程拖住。
+		s.cancelBatches()
 		if s.manager != nil {
 			s.manager.CloseAll()
 		}

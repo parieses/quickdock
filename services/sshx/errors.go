@@ -1,6 +1,7 @@
 package sshx
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"net"
@@ -41,6 +42,14 @@ const (
 	CodeRemoteIsDir      = "ssh_remote_is_dir"
 	CodeRemoteNotEmpty   = "ssh_remote_not_empty"
 	CodeSftpSubsystemOff = "ssh_sftp_unavailable"
+	// 用户主动取消了传输。前端据此**不弹错误**：取消是正常操作，
+	// 把它渲染成红色失败提示，等于让用户以为自己把什么东西弄坏了。
+	CodeTransferCanceled = "ssh_transfer_canceled"
+
+	// 用户取消了批量执行。与 CodeTransferCanceled 分开：
+	// 两者在网上取消的是完全不同的东西，结果表中一行「传输已取消」
+	// 会让人去找哪个文件传了一半，而实际上根本没传过文件。
+	CodeBatchCanceled = "ssh_batch_canceled"
 
 	CodeNoPendingKey        = "ssh_no_pending_key"
 	CodeFingerprintMismatch = "ssh_fingerprint_mismatch"
@@ -170,6 +179,11 @@ func classifySshError(err error) (string, map[string]interface{}) {
 		return CodeSftpSubsystemOff, nil
 	case errors.Is(err, sshcore.ErrInvalidRemotePath):
 		return CodeInvalidInput, nil
+	// 传输被用户取消。必须排在网络的兜底判断之前——context.Canceled 在
+	// Go 1.20+ 也满足 net.Error 的 Timeout() 契约（返回 false），
+	// 掉到下面会被判成「主机连不上」，用户明明是自己按的取消。
+	case errors.Is(err, context.Canceled):
+		return CodeTransferCanceled, nil
 	}
 
 	// 兜底：剩下的多半是拨号阶段的网络错误（拒绝连接、DNS 失败、超时）。

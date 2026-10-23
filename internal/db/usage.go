@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"sort"
 	"strings"
 	"time"
 )
@@ -89,34 +90,70 @@ func (d *Database) GetTopUsage(limit int) ([]FrecencyEntry, error) {
 	return d.queryUsage("SELECT key, type, label, description, input, count, last_used FROM usage_frecency ORDER BY count DESC, last_used DESC LIMIT ?", limit)
 }
 
-// GetAllPluginUsageCounts 一条 SQL 查出所有插件的使用次数，返回 map[pluginID]sum
-// 替代原来 ListPlugins() 里对每个插件单独查 GetPluginUsageCount 的 N+1 模式
+// GetAllPluginUsageCounts 查出所有已安装插件的使用次数，返回 map[pluginID]sum
+//
+// 归组方式：以 plugins 表里的已安装 id 为前缀（"plugin:<id>."）最长匹配。
+// 为什么不能从 key 反解：key = "plugin:{pluginID}.{commandID}"，而 pluginID
+// （io.github.parieses.database）和 commandID（table.rows）都自带点号，
+// 无论按第一个还是最后一个 "." 切分都会切错 —— 反解出的 pid 变成
+// io.github.parieses.database.table，与任何真实 id 都对不上，计数恒为 0
+// （只有"命令名不含点"的插件碰巧正确，如 disk-analyzer.disk-scan-root）。
+// 卸载时 usage 已被 PurgePlugin 清掉，故只统计已安装 id 足够。
 func (d *Database) GetAllPluginUsageCounts() (map[string]int, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
-	rows, err := d.conn.Query("SELECT key, SUM(count) FROM usage_frecency WHERE key LIKE 'plugin:%' GROUP BY key")
+	ids, err := d.installedPluginIDs()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]int, len(ids))
+	if len(ids) == 0 {
+		return out, nil
+	}
+	// 最长 id 优先，避免某个 id 恰好是另一个 id 的前缀时误归组
+	sort.Slice(ids, func(i, j int) bool { return len(ids[i]) > len(ids[j]) })
+
+	rows, err := d.conn.Query("SELECT key, count FROM usage_frecency WHERE key LIKE 'plugin:%'")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	out := make(map[string]int)
 	for rows.Next() {
 		var key string
-		var total sql.NullInt64
-		if err := rows.Scan(&key, &total); err != nil {
+		var n sql.NullInt64
+		if err := rows.Scan(&key, &n); err != nil {
 			return nil, err
 		}
-		if !total.Valid {
+		if !n.Valid {
 			continue
 		}
-		// key = "plugin:{pluginID}.{commandID}"，取 plugin: 之后、最后一个 . 之前的部分
-		k := strings.TrimPrefix(key, "plugin:")
-		if idx := strings.LastIndex(k, "."); idx > 0 {
-			pid := k[:idx]
-			out[pid] += int(total.Int64)
+		for _, id := range ids {
+			if strings.HasPrefix(key, "plugin:"+id+".") {
+				out[id] += int(n.Int64)
+				break
+			}
 		}
 	}
 	return out, rows.Err()
+}
+
+// installedPluginIDs 读取已安装插件 id（调用方须持 d.mu）
+func (d *Database) installedPluginIDs() ([]string, error) {
+	rows, err := d.conn.Query("SELECT id FROM plugins")
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }

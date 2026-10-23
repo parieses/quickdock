@@ -101,6 +101,17 @@ func (p *PluginService) recordPluginExecLog(pluginID, commandID, trigger string,
 	if err := p.App.DB.AddPluginExecLog(log); err != nil {
 		logger.E("写入插件执行日志失败: %v", err)
 	}
+
+	// 操作流水：与执行日志同源（同样已跳过 -status 轮询）。
+	// 这里要的是插件**显示名**，直接落到时间线上的是
+	// io.github.parieses.database 这种 id 等于没写。
+	name := pluginID
+	if p.App.PluginMgr != nil {
+		if inst := p.App.PluginMgr.GetPlugin(pluginID); inst != nil && inst.Manifest.Name != "" {
+			name = inst.Manifest.Name
+		}
+	}
+	p.App.NoteActivity(db.ActivityPluginRun, pluginID+"."+commandID, name)
 }
 
 // ListPluginExecLogs 返回最近 limit 条插件命令执行日志（前端历史展示，5.2）

@@ -229,6 +229,57 @@ export function treeHasHost(nodes: SshTreeNode[]): boolean {
 }
 
 /**
+ * 关键字过滤：返回一棵「只剩命中项及其祖先」的新树。
+ *
+ * 三条刻意的规则：
+ *  1. **文件夹自身命中 → 整棵子树保留**。用户搜「生产」是想看那个分组里有什么，
+ *     把子项按关键字再筛一遍等于告诉他「分组在，里都没了」，与意图相反。
+ *  2. 只有子孙命中的文件夹要保留（否则命中项无处挂），并重算 hostCount，
+ *     数字必须和眼前能点开的主机数一致。
+ *  3. 匹配 name / host / user / remark / env 五个字段：库里那台机器叫什么、
+ *     备注写了什么，用户自己也不一定记得，多匹配几个字段的成本只是几次字符串比较。
+ *
+ * 不处理大小写以外的模糊匹配（拼音首字母等）——主机名本来就是 ASCII，
+ * 真要按拼音找，搜索框里那几个字母和直接输主机名的成本差不多。
+ */
+export function filterSshTree(nodes: SshTreeNode[], keyword: string): SshTreeNode[] {
+  const kw = String(keyword || '').trim().toLowerCase()
+  if (!kw) return nodes
+
+  const hit = (h: SshHost): boolean =>
+    [h.name, h.host, h.user, h.remark, h.env].some(
+      v => typeof v === 'string' && v.toLowerCase().includes(kw),
+    )
+
+  const walk = (list: SshTreeNode[]): SshTreeNode[] => {
+    const out: SshTreeNode[] = []
+    for (const n of list) {
+      if (n.kind === 'folder') {
+        if (hit(n.host)) {
+          out.push(n)
+          continue
+        }
+        const kids = walk(n.children)
+        if (kids.length === 0) continue
+        out.push({ ...n, children: kids, hostCount: countHosts(kids) })
+        continue
+      }
+      if (hit(n.host)) out.push(n)
+    }
+    return out
+  }
+  return walk(nodes)
+}
+
+function countHosts(nodes: SshTreeNode[]): number {
+  let n = 0
+  for (const node of nodes) {
+    n += node.kind === 'folder' ? countHosts(node.children) : 1
+  }
+  return n
+}
+
+/**
  * 收集节点及其全部后代的 host id（含自身）。
  *
  * 删文件夹时用：后端是级联删除，而文件夹本身不会有标签，只看当前 id

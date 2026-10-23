@@ -17,7 +17,7 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { FolderPlus, Plus, RefreshCw, Server, ShieldCheck } from '@lucide/vue'
+import { FolderPlus, ListChecks, Plus, RefreshCw, Search, Server, ShieldCheck, X } from '@lucide/vue'
 import {
   DeleteHost,
   Disconnect,
@@ -53,6 +53,7 @@ import SshTabBar from './SshTabBar.vue'
 import SshTrustedHostsDialog from './SshTrustedHostsDialog.vue'
 import SshFolderDialog from './SshFolderDialog.vue'
 import SftpPanel from './SftpPanel.vue'
+import SshBatchDialog from './SshBatchDialog.vue'
 
 const { t } = useI18n()
 const { confirm, error: toastError } = useToast()
@@ -66,6 +67,15 @@ const tabs = ref<SshTab[]>([])
 const activeId = ref('')
 const collapsed = ref<Set<string>>(new Set())
 
+/**
+ * 主机搜索关键字。
+ *
+ * 放在父级而不是树里：树是无状态渲染（props 进、事件出），
+ * 让树自己持有关键字会让「按名字过滤」和「折叠状态」两套可变状态纠缠在一起。
+ * 过滤本身是纯函数（utils/sshTree.filterSshTree），这里只负责持有输入。
+ */
+const hostKeyword = ref('')
+
 const dialogVisible = ref(false)
 const editingHost = ref<SshHost | null>(null)
 /** 新建时的父节点：为空表示建在根。 */
@@ -77,6 +87,10 @@ const folderVisible = ref(false)
 const folderParentId = ref('')
 /** SFTP 文件面板：按标签 id 记录谁开着，关某个标签时要一起收掉 */
 const sftpTabs = ref<Set<string>>(new Set())
+
+/** 批量执行弹窗；preselect 是打开时要预勾选的主机（从分组菜单进来时带整棵子树） */
+const batchVisible = ref(false)
+const batchPreselect = ref<string[]>([])
 
 let offShown: (() => void) | null = null
 
@@ -109,6 +123,12 @@ function toggleSftp(tabId: string) {
   else next.add(tabId)
   sftpTabs.value = next
 }
+/** 打开批量执行。传空数组 = 从工具栏进来，让用户自己勾。 */
+function openBatch(hostIds: string[]) {
+  batchPreselect.value = hostIds
+  batchVisible.value = true
+}
+
 const folderNames = computed(() =>
   hosts.value.filter(h => h.isFolder).map(h => h.name),
 )
@@ -420,10 +440,37 @@ defineExpose({
           <button class="ssh-tool" :title="t('sshTrustedTitle')" @click="trustedVisible = true">
             <ShieldCheck :size="14" />
           </button>
+          <button
+            class="ssh-tool"
+            :disabled="!hostCount"
+            :title="t('sshBatchTitle')"
+            @click="openBatch([])"
+          >
+            <ListChecks :size="14" />
+          </button>
         </div>
       </header>
 
       <div v-if="loadErr" class="ssh-error">{{ loadErr }}</div>
+
+      <!-- 搜索框只在有主机时出现：一台都没有时它的唯一作用是让人困惑 -->
+      <div v-if="hostCount > 0" class="ssh-side-search">
+        <Search :size="12" class="ssh-side-search-icon" />
+        <input
+          v-model="hostKeyword"
+          class="ssh-side-search-input"
+          :placeholder="t('sshSearchHosts')"
+          spellcheck="false"
+        />
+        <button
+          v-if="hostKeyword"
+          class="ssh-side-search-clear"
+          :title="t('clear')"
+          @click="hostKeyword = ''"
+        >
+          <X :size="12" />
+        </button>
+      </div>
 
       <SshHostTree
         :tree="tree"
@@ -432,6 +479,7 @@ defineExpose({
         :busy-host-ids="busyHostIds"
         :active-host-ids="activeHostIds"
         :collapsed="collapsed"
+        :keyword="hostKeyword"
         @select="selectHost"
         @toggle="toggleFolder"
         @edit="openEdit"
@@ -439,6 +487,7 @@ defineExpose({
         @create="openNew"
         @create-folder="createFolder"
         @move="moveHost"
+        @batch="(folderId: string) => openBatch(collectSubtreeIds(tree, folderId))"
       />
     </aside>
 
@@ -504,6 +553,12 @@ defineExpose({
     />
 
     <SshTrustedHostsDialog v-model:visible="trustedVisible" />
+
+    <SshBatchDialog
+      v-model:visible="batchVisible"
+      :hosts="hosts"
+      :preselect="batchPreselect"
+    />
 
     <SshFolderDialog
       :visible="folderVisible"
@@ -605,6 +660,58 @@ defineExpose({
   color: var(--color-danger);
   background: var(--color-danger-bg);
   border-radius: var(--radius-xs);
+}
+
+/* ---- 左侧：主机搜索 ---- */
+.ssh-side-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  margin: 0 var(--space-4) var(--space-3);
+  padding: 2px var(--space-3);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+}
+
+.ssh-side-search:focus-within {
+  border-color: var(--color-accent);
+}
+
+.ssh-side-search-icon {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.ssh-side-search-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 2px 0;
+  font-size: 11.5px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.ssh-side-search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.ssh-side-search-clear {
+  display: flex;
+  flex: 0 0 auto;
+  padding: 0;
+  color: var(--color-text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+}
+
+.ssh-side-search-clear:hover {
+  color: var(--color-text-primary);
 }
 
 /* ---- 右侧：标签栏 + 终端 ---- */

@@ -3,7 +3,7 @@ import { logErr } from '../utils/logger'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Keyboard, RotateCcw } from '@lucide/vue'
-import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig, GetScreenshotHotkeyConfig, SetScreenshotHotkeyConfig } from '../../bindings/quickdock/services/appservice'
+import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig, GetScreenshotHotkeyConfig, SetScreenshotHotkeyConfig, GetSshHotkeyConfig, SetSshHotkeyConfig } from '../../bindings/quickdock/services/appservice'
 import {
   SuspendHotkeys,
   ResumeHotkeys,
@@ -23,14 +23,18 @@ const clipVk = ref(0xC0)
 const paletteLabel = ref('Ctrl+K')
 const paletteModifiers = ref(2)
 const paletteVk = ref(0x4B)
-const noteLabel = ref('Ctrl+Shift+N')
-const noteModifiers = ref(6)
+const noteLabel = ref('Ctrl+Alt+N')
+const noteModifiers = ref(3)
 const noteVk = ref(0x4E)
 // 截图默认 F1：无修饰键，故 modifiers 为 0（后端 parseHotkeySetting 已支持 mods=0）
 const shotLabel = ref('F1')
 const shotModifiers = ref(0)
 const shotVk = ref(0x70)
-const capturing = ref<'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | null>(null)
+// SSH 终端窗口默认 Ctrl+Alt+S：与 tray.go 的 SSH_ACCEL 默认值一致
+const sshLabel = ref('Ctrl+Alt+S')
+const sshModifiers = ref(3)
+const sshVk = ref(0x53)
+const capturing = ref<'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh' | null>(null)
 const message = ref('')
 const msgTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
@@ -122,6 +126,8 @@ function onGlobalKeyDown(e: KeyboardEvent) {
     noteVk.value = vk; noteModifiers.value = mods; noteLabel.value = toLabel(mods, vk)
   } else if (capturing.value === 'screenshot') {
     shotVk.value = vk; shotModifiers.value = mods; shotLabel.value = toLabel(mods, vk)
+  } else if (capturing.value === 'ssh') {
+    sshVk.value = vk; sshModifiers.value = mods; sshLabel.value = toLabel(mods, vk)
   }
   capturing.value = null
   ResumeHotkeys()
@@ -149,6 +155,10 @@ onMounted(async () => {
     const c = unwrap<HotkeyConfig>(await GetScreenshotHotkeyConfig())
     if (c) { shotLabel.value = c.label; shotModifiers.value = c.modifiers; shotVk.value = c.vk }
   } catch (e) { logErr('HotkeySettings', e) }
+  try {
+    const c = unwrap<HotkeyConfig>(await GetSshHotkeyConfig())
+    if (c) { sshLabel.value = c.label; sshModifiers.value = c.modifiers; sshVk.value = c.vk }
+  } catch (e) { logErr('HotkeySettings', e) }
 })
 
 onUnmounted(() => {
@@ -160,7 +170,7 @@ onUnmounted(() => {
   }
 })
 
-async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot') {
+async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh') {
   if (capturing.value === type) {
     capturing.value = null
     await ResumeHotkeys()
@@ -174,13 +184,14 @@ async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note' | 'sc
 async function saveAll() {
   message.value = ''
 
-  // 检查五个热键两两冲突
+  // 检查六个热键两两冲突
   const pairs = [
     [currentModifiers.value, currentVk.value],
     [clipModifiers.value, clipVk.value],
     [paletteModifiers.value, paletteVk.value],
     [noteModifiers.value, noteVk.value],
     [shotModifiers.value, shotVk.value],
+    [sshModifiers.value, sshVk.value],
   ]
   for (let i = 0; i < pairs.length; i++) {
     for (let j = i + 1; j < pairs.length; j++) {
@@ -197,7 +208,8 @@ async function saveAll() {
     await SetPaletteHotkeyConfig(paletteModifiers.value, paletteVk.value)
     await SetNoteHotkeyConfig(noteModifiers.value, noteVk.value)
     await SetScreenshotHotkeyConfig(shotModifiers.value, shotVk.value)
-    // 重新注册全局快捷键（含调色板/笔记），使新配置立即生效。
+    await SetSshHotkeyConfig(sshModifiers.value, sshVk.value)
+    // 重新注册全局快捷键（含调色板/笔记/SSH 窗口），使新配置立即生效。
     await ResumeHotkeys()
     setMsgAndClear(t('hotkeySaved'), 2000)
   } catch (e) { message.value = t('saveFailed2') + ': ' + getErrorMessage(e) }
@@ -219,8 +231,13 @@ async function resetPaletteDefault() {
 }
 
 async function resetNoteDefault() {
-  noteModifiers.value = 6; noteVk.value = 0x4E; noteLabel.value = 'Ctrl+Shift+N'
-  try { await SetNoteHotkeyConfig(6, 0x4E); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+  noteModifiers.value = 3; noteVk.value = 0x4E; noteLabel.value = 'Ctrl+Alt+N'
+  try { await SetNoteHotkeyConfig(3, 0x4E); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+}
+
+async function resetSshDefault() {
+  sshModifiers.value = 3; sshVk.value = 0x53; sshLabel.value = 'Ctrl+Alt+S'
+  try { await SetSshHotkeyConfig(3, 0x53); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
 async function resetScreenshotDefault() {
@@ -228,13 +245,14 @@ async function resetScreenshotDefault() {
   try { await SetScreenshotHotkeyConfig(0, 0x70); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
-function isDefault(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot'): boolean {
+function isDefault(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh'): boolean {
   switch (type) {
     case 'app': return currentModifiers.value === 2 && currentVk.value === 32
     case 'clipboard': return clipModifiers.value === 2 && clipVk.value === 0xC0
     case 'palette': return paletteModifiers.value === 2 && paletteVk.value === 0x4B
-    case 'note': return noteModifiers.value === 6 && noteVk.value === 0x4E
+    case 'note': return noteModifiers.value === 3 && noteVk.value === 0x4E
     case 'screenshot': return shotModifiers.value === 0 && shotVk.value === 0x70
+    case 'ssh': return sshModifiers.value === 3 && sshVk.value === 0x53
   }
   return false
 }
@@ -322,6 +340,22 @@ defineExpose({ capturing })
           <span v-else class="hk-keys">{{ shotLabel }}</span>
         </button>
         <button v-show="!isDefault('screenshot')" class="hk-reset" :title="t('restoreDefault')" @click="resetScreenshotDefault">
+          <RotateCcw :size="12" />
+        </button>
+      </div>
+    </section>
+
+    <section class="hk-card">
+      <div class="hk-card-head">
+        <span class="hk-card-title">{{ t('sshHotkey') }}</span>
+        <span class="hk-card-sub">{{ t('sshHotkeyDesc') }}</span>
+      </div>
+      <div class="hk-row">
+        <button class="hk-kbd" :class="{ capturing: capturing === 'ssh' }" :title="t('clickToModify')" @click="startCapture('ssh')">
+          <span v-if="capturing === 'ssh'" class="hk-capturing">{{ t('pressKeys') }}</span>
+          <span v-else class="hk-keys">{{ sshLabel }}</span>
+        </button>
+        <button v-show="!isDefault('ssh')" class="hk-reset" :title="t('restoreDefault')" @click="resetSshDefault">
           <RotateCcw :size="12" />
         </button>
       </div>

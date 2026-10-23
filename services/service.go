@@ -60,6 +60,15 @@ type AppService struct {
 	// onToken 允许为 nil（如插件这类拿不到前端通道的调用方，退化成一次性返回）。
 	AskAIFnStream func(system, question string, timeoutSec int, onToken func(text string)) (text string, model string, err error)
 
+	// AIAvailableFn 报告当前是否配置了可用的 AI 档案（供插件在调用 host.ai.ask 前预检，
+	// 避免「盲目调用 → 拿到未配置/不可用 的裸错」）。
+	//
+	// 与 AskAIFn 同因：services/ai 反向 import services，这里不能直接持 *ai.AIService，
+	// 函数签名是唯一能复用 AIAvailable() 又不构成环的形状。返回值为
+	// (可用, 不可用原因, 激活档案名, 激活模型名)；原因取 AIAvailable 的 reason
+	// （no_profile / no_endpoint / unavailable），无具体原因时为空串。
+	AIAvailableFn func() (available bool, reason, profile, model string)
+
 	// 标记"这是一次真退出"，令主窗口的 WindowClosing 钩子放行而不是取消关闭并隐藏到托盘。
 	// 更新时（RestartApp 拉起安装器 → app.Quit）必须先调用，否则 cleanup() 里的
 	// window.Close() 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净。

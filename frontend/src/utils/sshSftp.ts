@@ -122,6 +122,32 @@ export function isPreviewable(entry: SftpEntry): boolean {
   return !BINARY_EXTS.has(entry.ext)
 }
 
+/**
+ * 内容看起来是不是二进制。
+ *
+ * 为什么不能只靠扩展名：服务器上真正要看的文件常常没后缀（hosts、crontab、
+ * 各种 include），而误把二进制当文本打开、改一个字再保存，等于把文件写坏。
+ * 所以扩展名判定负责「一眼就知道是二进制的别发请求」，内容判定负责兜底。
+ *
+ * 判据：
+ *   - 出现 NUL（0x00）：文本文件不会有，这是最强信号。
+ *   - 控制字符（除 \t \n \r）或 U+FFFD 占比 > 2%：后者是 Go 把非法 UTF-8
+ *     塞进 JSON 字符串时留下的替换符，说明原文不是合法 UTF-8。
+ * 只看前 8KB：判定足够，且不会为一个 512KB 的文件扫全量。
+ */
+export function looksBinary(text: string): boolean {
+  if (!text) return false
+  const sample = text.length > 8192 ? text.slice(0, 8192) : text
+  let bad = 0
+  for (let i = 0; i < sample.length; i++) {
+    const c = sample.charCodeAt(i)
+    if (c === 0) return true
+    if (c < 0x20 && c !== 9 && c !== 10 && c !== 13) bad++
+    else if (c === 0xfffd) bad++
+  }
+  return bad / sample.length > 0.02
+}
+
 /** 文件类型分桶，用于选图标。目录单独走 isDir 判断。 */
 export type EntryKind = 'archive' | 'code' | 'image' | 'video' | 'log' | 'config' | 'text'
 

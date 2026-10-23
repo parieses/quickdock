@@ -10,11 +10,12 @@
  * 所以本组件挂载即订阅事件，把「还没 attach」期间收到的帧先缓存，
  * 等 sessionId 到位再按到达顺序补写。
  */
-import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Sparkles } from '@lucide/vue'
+import { ChevronDown, ChevronUp, Search, Sparkles, X } from '@lucide/vue'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
 import { Clipboard, Events } from '@wailsio/runtime'
 import '@xterm/xterm/css/xterm.css'
@@ -205,6 +206,19 @@ function onClear() {
 function onKeydown(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
   const k = e.key
+  // Ctrl/Cmd+F：终端内搜索。必须拦，否则 Ctrl+F 会发给远端
+  // （readline 里它是「光标前移一格」，用户按了只会看到光标走一步，更迷惑）。
+  if (mod && !e.shiftKey && (k === 'f' || k === 'F')) {
+    e.preventDefault()
+    openSearch()
+    return
+  }
+  // Esc 只在搜索条开着时才归我们处理，其余情况原样发给远端（vim / less 都要它）。
+  if (k === 'Escape' && searchOpen.value) {
+    e.preventDefault()
+    closeSearch()
+    return
+  }
   if (mod && k === 'C' && e.shiftKey) {
     e.preventDefault()
     void onCopy()
@@ -265,6 +279,66 @@ const hostEl = ref<HTMLElement | null>(null)
  *  getter / 私有字段会变慢，也容易在响应式依赖里被误追踪。 */
 let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
+let searchAddon: SearchAddon | null = null
+
+// ---- 终端内搜索（Ctrl+F）----
+const searchOpen = ref(false)
+const searchText = ref('')
+/** 第几个 / 共几个。index 从 0 起；命中数超过插件的 highlightLimit 时给 -1 */
+const searchScore = ref<{ index: number; count: number }>({ index: -1, count: 0 })
+const searchInputEl = ref<HTMLInputElement | null>(null)
+
+const searchCountText = computed(() => {
+  if (!searchText.value) return ''
+  const { index, count } = searchScore.value
+  if (count <= 0) return t('sshTermSearchNone')
+  // index < 0 表示「命中了但多到不再单独计数」，此时只报总数，不编一个假序号。
+  return index < 0 ? String(count) : `${index + 1}/${count}`
+})
+
+/** 高亮色从 token 读：写死色值会让浅色主题下出现一坨看不清的深色块。 */
+function searchDecorations() {
+  const match = cssVar('--color-terminal-search-match')
+  const active = cssVar('--color-terminal-search-active')
+  return {
+    matchBackground: match,
+    matchOverviewRuler: match,
+    activeMatchBackground: active,
+    activeMatchColorOverviewRuler: active,
+  }
+}
+
+function runSearch(dir: 'next' | 'prev', incremental = false) {
+  if (!searchAddon) return
+  const kw = searchText.value
+  if (!kw) {
+    searchAddon.clearDecorations()
+    searchScore.value = { index: -1, count: 0 }
+    return
+  }
+  // 大小写不敏感：终端里出现宏名/路径/报错，用户不会记得当初打的是哪种大小写。
+  const opts = { caseSensitive: false, incremental, decorations: searchDecorations() }
+  if (dir === 'next') searchAddon.findNext(kw, opts)
+  else searchAddon.findPrevious(kw, opts)
+}
+
+function openSearch() {
+  searchOpen.value = true
+  // 打开即全选上次的词：连着搜第二个词时，直接打字就覆盖了，不用先清空。
+  void nextTick(() => {
+    searchInputEl.value?.focus()
+    searchInputEl.value?.select()
+  })
+}
+
+function closeSearch() {
+  if (!searchOpen.value) return
+  searchOpen.value = false
+  // 必须清装饰：否则关掉搜索条后满屏高亮还留着，看起来像选中了一大片。
+  searchAddon?.clearDecorations()
+  searchScore.value = { index: -1, count: 0 }
+  term?.focus()
+}
 
 /**
  * 最近一次「非空选区」的快照。
@@ -521,6 +595,17 @@ onMounted(async () => {
     console.warn('[SshTerminal] Unicode11 addon 不可用，中文宽字符可能错位:', e)
   }
 
+  // 搜索插件：只在终端内找、不碰远端（Ctrl+F 在 readline 里是「前移一个字符」，
+  // 用户按它几乎只是想找屏幕上的东西）。
+  //
+  // 用 onDidChangeResults 拿「第几个 / 共几个」的前提是**开启 decorations**，
+  // 关掉高亮时该事件不触发，计数会永远停在 0。所以 findNext 每次都带 decorations。
+  searchAddon = new SearchAddon()
+  term.loadAddon(searchAddon)
+  searchAddon.onDidChangeResults(({ resultIndex, resultCount }) => {
+    searchScore.value = { index: resultIndex, count: resultCount }
+  })
+
   term.open(hostEl.value)
   await nextTick()
   fitAddon.fit()
@@ -625,6 +710,7 @@ onBeforeUnmount(() => {
   // 只销毁渲染器，不关会话：会话常驻 Go 侧，关窗后重开要能接回来。
   term?.dispose()
   term = null
+  searchAddon = null
 })
 
 // ---- 屏显取文本（供 AI 面板当上下文）----
@@ -671,6 +757,41 @@ defineExpose({
       @keydown="onKeydown"
     />
 
+    <!-- 搜索条绝对定位于右上角：不参与 flex 布局，免得把终端渲染宽度挤窄
+         （挤窄会触发 fit → cols 变化 → 远端 PS1 重排，画面来回跳）。 -->
+    <div v-if="searchOpen" class="term-search" @mousedown.stop>
+      <Search :size="12" class="term-search-icon" />
+      <input
+        ref="searchInputEl"
+        v-model="searchText"
+        class="term-search-input"
+        :placeholder="t('sshTermSearch')"
+        spellcheck="false"
+        @input="runSearch('next', true)"
+        @keydown.enter.exact.prevent="runSearch('next')"
+        @keydown.shift.enter.prevent="runSearch('prev')"
+        @keydown.esc.prevent.stop="closeSearch"
+      />
+      <span class="term-search-count">{{ searchCountText }}</span>
+      <button
+        class="term-search-btn"
+        :title="t('sshTermSearchPrev')"
+        @click="runSearch('prev')"
+      >
+        <ChevronUp :size="12" />
+      </button>
+      <button
+        class="term-search-btn"
+        :title="t('sshTermSearchNext')"
+        @click="runSearch('next')"
+      >
+        <ChevronDown :size="12" />
+      </button>
+      <button class="term-search-btn" :title="t('cancel')" @click="closeSearch">
+        <X :size="12" />
+      </button>
+    </div>
+
     <Teleport to="body">
       <div
         v-if="menu"
@@ -709,6 +830,7 @@ defineExpose({
 <style scoped>
 .ssh-term {
   display: flex;
+  position: relative;
   box-sizing: border-box;
   width: 100%;
   height: 100%;
@@ -729,6 +851,65 @@ defineExpose({
   min-width: 0;
   min-height: 0;
   overflow: hidden;
+}
+
+/* ---- 终端内搜索条 ---- */
+.term-search {
+  position: absolute;
+  top: var(--space-4);
+  right: var(--space-5);
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  max-width: calc(100% - var(--space-8));
+  padding: var(--space-2) var(--space-3);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+
+.term-search-icon {
+  flex: 0 0 auto;
+  color: var(--color-text-muted);
+}
+
+.term-search-input {
+  flex: 1 1 auto;
+  min-width: 120px;
+  padding: 1px 0;
+  font-size: 11.5px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.term-search-count {
+  flex: 0 0 auto;
+  min-width: 34px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  text-align: right;
+  color: var(--color-text-muted);
+}
+
+.term-search-btn {
+  display: flex;
+  flex: 0 0 auto;
+  padding: 2px;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.term-search-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
 }
 
 .ssh-term :deep(.xterm-viewport) {
