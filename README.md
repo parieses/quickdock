@@ -11,7 +11,7 @@
 *Raycast 的快启体验 × VS Code 的开发者质感，加上开箱即用的本地开发环境*
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.25-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.26-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -47,10 +47,12 @@
 
 | 能力 | 默认热键 | 一句话 |
 |------|---------|--------|
-| 工作空间 / 场景 / 集合 / 项目 | — | 四级资源树，6 种项目类型，拖拽排序 + FTS5 全文搜索 |
+| 工作空间 / 场景 / 集合 / 项目 | — | 四级资源树，6 种项目类型，拖拽排序 + FTS5 全文搜索；主界面按「导航 / 场景 / 集合 / 项目」分栏，场景独立成栏，导航再多也挤不到场景 |
 | 命令面板 | `Ctrl+K` | 跨工作空间 / 场景 / 集合 / 项目统一搜索，URL 智能识别存为项目 |
 | 剪贴板历史 | `` Ctrl+` `` | 文本 / 图片 / 文件监听，固定、搜索、过期清理，浮动窗口唤出 |
 | 快捷笔记 | `Ctrl+Alt+N` | 树形 Markdown 笔记库，自动保存，失焦隐藏 |
+| 最近动态 | — | 「设置 → 最近动态」：左栏是使用热度榜（最常打开的项目 / 场景），右栏是操作时间线，知道自己这段时间在忙什么 |
+| 崩溃记录 | — | 「设置 → 日志」侧栏列出 JS / Go panic 崩溃现场，带时间与组件名，可逐条查看堆栈或一键清空 |
 
 </details>
 
@@ -89,9 +91,10 @@
 | 截图工具 | `F1` | 原生分层窗口零闪；框选 → 标注 → 复制 / 保存 / 贴图一条链路；窗口 / 元素吸附 |
 | 窗口管理 | `Ctrl+Alt+W` | 15 个贴屏热键 + 九宫格排版浮层，不抢 `Win+方向` |
 | 本地开发站点 | — | 项目一键绑自定义域名 + 自动 HTTPS（mkcert），自身不监听端口 |
-| SSH 远程终端 | `Ctrl+Alt+S` | 独立可缩放窗口管理远程主机：多标签终端 + SFTP 文件管理，指纹信任防中间人 |
+| SSH 远程终端 | `Ctrl+Alt+S` | 独立可缩放窗口管理远程主机：多标签终端 + SFTP 文件管理，指纹信任防中间人；同一分组可多选主机批量执行，逐台回传结果 |
 | 终端内 AI 助手 | — | 提到「屏显」才带上当前屏幕（不提就不发，省 token 也不跑偏）；选中输出右键即问；命令一键填入 / 执行，高危命令只给填入，生产环境需二次确认；回答可切流式 / 一次性（默认流式）、也可中途停止 |
 | WebDAV 云同步 / 快照备份 | — | 全量 JSON 备份恢复、多版本、任意 WebDAV；一键导出导入 |
+| 界面缩放 | — | 主界面与全部独立窗口（剪贴板 / 笔记 / 命令面板 / 窗口管理 / SSH / 插件）统一 1.15x 等比放大，文字、图标、间距一起放大而布局比例不变 |
 
 </details>
 
@@ -320,6 +323,7 @@ Snipaste 形态，`F1` 唤起全屏覆盖层，**框选 → 标注 → 复制 / 
 - **多标签会话** — 同主机连接池复用（多标签只握手一次）；PTY 终端模拟，支持复制 / 粘贴 / 全选 / 清屏；滚动回放与断线重连
 - **SFTP 文件管理** — 远程目录浏览、上传 / 下载
 - **命令执行** — 非交互一次性 `Exec`（带超时、退出码、输出截断），用于脚本化运维
+- **多主机批量执行** — 在分组上点「批量执行…」勾选多台主机：先**预演**（只读，列出每台将要执行的命令与风险等级）再运行，逐台回传输出与退出码，可随时取消；生产环境的一键执行同样要求二次确认，高危命令仍只给「填入」
 
 </details>
 
@@ -487,6 +491,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 | `%APPDATA%/QuickDock/` | 应用配置 |
 | `~/.quickdock/runtime/node` · `~/.quickdock/dsh` | 便携 Node / DSH |
 | `~/.quickdock/logs/quickdock-YYYY-MM-DD.log` | 主日志 |
+| `~/.quickdock/logs/crash/` | 崩溃现场（`js-*` / `panic-*`，可在「设置 → 日志」查看） |
 
 ### 项目结构
 

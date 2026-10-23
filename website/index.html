@@ -84,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.25 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.26 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -95,21 +95,21 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.25) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.26) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.25</span>
+<span class="eyebrow">v0.0.26</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.25 把 AI 从「只能聊天」扩成「能看你贴的图、能就在你正在看的地方答」：对话里直接发图让 AI 理解，剪贴板与笔记里的条目上点一下就能问，插件也能复用你配好的 AI 档案。SSH 终端 AI 侧栏这轮也一起改顺了：屏显按需带上、长对话不再越问越卡、答不下去可以停。模型名也不用再手抄——填好地址和 Key 点一下就能从接口拉出来。</p>
+<p>v0.0.26 把主界面重排了一遍：场景从拥挤的导航里拆出来独立成栏，「导航 / 场景 / 集合 / 项目」一眼看清，导航项再多也不会把场景挤没。新增的「最近动态」放进设置里——左边是你最常用的项目与场景，右边是这段时间的操作时间线。设置 → 日志现在能直接看崩溃现场，带时间、类型和出问题的组件名，不再是一堆没有上下文的堆栈。SSH 支持多主机批量执行：先预演再跑，逐台回传结果，随时能停。另外整个界面放大了一档，主界面和每个浮窗、插件窗口都一致。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">对话能看图了</span><span>贴图 / 选文件 / 拖拽都能发，AI 直接理解图片内容；缩略图可点击全屏放大，看不清的细节点开就好。</span></div>
-<div class="tbl-row"><span class="k">剪贴板、笔记就地问 AI</span><span>看到一段英文、一堆日志或一份 JSON，在条目上点「问 AI」——翻译、摘要、格式化或随便问，就地弹层给答案，不用切到 AI 页再粘贴一遍。</span></div>
-<div class="tbl-row"><span class="k">插件也能调 AI</span><span>插件复用你已配好的 AI 档案（凭据不出后端），带 streamId 即流式回答，三种运行时各有增量通道。</span></div>
-<div class="tbl-row"><span class="k">模型名不用再手抄</span><span>AI 设置里填好 BaseURL 与 Key，点「拉取模型列表」直接从接口取回可选模型，选中即可；还没保存的草稿也能拉。</span></div>
-<div class="tbl-row"><span class="k">终端里问得更省更连贯</span><span>SSH 侧栏不再每轮都把整屏发给模型——问题里提到「屏显」才带；长对话把更早的轮次自动压成摘要，追问不再越问越卡；「思考中」时点一下就能停。</span></div>
-<div class="tbl-row"><span class="k">复制不再时灵时不灵</span><span>全应用「复制」改走后端直写系统剪贴板，不再受窗口焦点影响；剪贴板监听补上兜底巡检，漏一次通知也能补抓回来。</span></div>
+<div class="tbl-row"><span class="k">主界面重新分栏</span><span>场景从导航里拆出独立成栏，顺序是「导航 / 场景 / 集合 / 项目」；场景自带滚动，导航再长也挤不到它。「设置」仍留在侧栏最底部，不混进导航列表。</span></div>
+<div class="tbl-row"><span class="k">最近动态搬进设置</span><span>左栏是使用热度榜——按打开次数列出你最常用的项目与场景；右栏是操作时间线，项目打开、SSH 连接、插件执行、定时任务跑过都记在上面，随查随看。</span></div>
+<div class="tbl-row"><span class="k">崩溃现场一眼看清</span><span>设置 → 日志侧栏列出每次崩溃现场：带上发生时间、类型（前端 / Go）与出问题的组件名，堆栈按日志格式逐行染色，看完可一键清空。日志区排版也重做了一遍。</span></div>
+<div class="tbl-row"><span class="k">SSH 多主机批量执行</span><span>在分组上「批量执行…」勾选一批主机：先预演看看每台将执行什么、风险多高，确认后再跑，逐台回传输出与退出码，中途可取消；生产环境依旧要二次确认。</span></div>
+<div class="tbl-row"><span class="k">界面放大一档</span><span>主界面与剪贴板、笔记、命令面板、窗口管理、SSH、插件窗口统一放大，文字、图标、间距一起放大而布局比例不变，不会再出现「主界面大、浮窗小」。</span></div>
+<div class="tbl-row"><span class="k">插件按自己的尺寸开窗</span><span>插件声明的窗口尺寸此前一直被忽略、一律开成同一大小，数据库客户端这类复杂插件被挤得施展不开；现在各按自己声明的尺寸开窗，小巧插件也不再被硬拉大。</span></div>
 </div>
 </div>
 </section>
@@ -124,7 +124,26 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.25</span><span class="log-date">2026-10-23</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.26</span><span class="log-date">2026-10-23</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>主界面三栏重排：场景从左侧导航中拆出独立成栏，顺序为「导航 / 场景 / 集合 / 项目」，场景自带滚动，不再与导航抢竖向空间。</li>
+<li>「设置」回归侧栏最底部的独立入口（此前一度并入导航列表末尾）；导航区改为可内部滚动，导航项再多底部按钮也始终可见。</li>
+<li>新增「最近动态」（设置 → 最近动态）：左栏使用热度榜，按打开次数列出最常用的项目与场景；右栏操作时间线，覆盖项目打开、SSH 连接、插件执行、定时任务执行，90 秒内同对象去重，最多保留 800 条。</li>
+<li>设置 → 日志支持查看崩溃记录：侧栏列出前端与 Go 崩溃现场，正文统一带上现场时间并按类型染色，顶部 meta 卡片显示时间 / 类型 / 组件名，可逐条查看堆栈或一键清空。</li>
+<li>崩溃上报抓取组件名：Vue 错误处理器从实例取出组件名并入标签，下次崩溃现场能直接定位到是哪个组件出的问题。</li>
+<li>日志查看器排版重做：时间与级别改为三段栅格对齐，修复警告行不着色、时间戳高亮破坏对齐、长行换行截断标识符等问题。</li>
+<li>SSH 多主机批量执行：分组上「批量执行…」勾选主机，先预演（只读，列出每台将执行的命令与风险等级）再执行，逐台回传输出与退出码，可中途取消；生产环境执行需二次确认，高危命令仍只给「填入」。</li>
+<li>SFTP 文件管理增强：远程目录浏览、上传下载之外，可直接编辑远程文件并保存。</li>
+<li>修复启动崩溃：数据库索引建在补列之前，老库升级时报告 <code>no such column: created_ts</code>；索引改为在补列之后执行，并补上迁移测试。</li>
+<li>启动失败不再静默：日志同时输出到控制台；正式版没有控制台时改为弹窗提示，并给出日志所在目录。</li>
+<li>界面整体放大 1.15 倍：主窗口与剪贴板 / 笔记 / 命令面板 / 窗口管理 / SSH / 插件窗口统一缩放（单一常量控制），文字、图标、间距一起放大而布局比例不变。</li>
+<li>插件窗口改为按插件清单声明的尺寸开窗（此前一律 800×600），数据库客户端等复杂插件不再被挤；未声明尺寸的插件仍用通用尺寸，最小尺寸同步放大且不会超过窗口本身。</li>
+<li>修复在线市场在放大后一行放不下三个卡片：网格列被不可断行的长插件 ID 顶宽，第三张卡被横向裁掉。</li>
+<li>重新生成前端 bindings，移除 <code>AIAskStream</code> 的告警（该方法入参是函数类型，生成的绑定实际无法调用，已退出绑定面）。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.25</span><span class="log-date">2026-10-23</span></summary>
 <ul class="log-body">
 <li>AI 对话支持图片理解：发送本地图片或图片链接，AI 看图回答；缩略图可点击全屏放大查看细节。档案可配置图片输入方式（公网链接 / 本地图片 / 两者），按模型能力灵活适配。</li>
 <li>剪贴板历史条目「问 AI」：文本条目上点「问 AI」，翻译 / 摘要 / 格式化或自由追问，就地弹层流式给答案，内容不进入 AI 对话历史。</li>
