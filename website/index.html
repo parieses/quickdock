@@ -84,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.24 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.25 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -95,20 +95,18 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.24) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.25) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.24</span>
+<span class="eyebrow">v0.0.25</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.24 是一次稳定性专项更新：修掉了一批会让界面卡死、插件崩溃、退出丢数据的问题，并规范了界面配色与错误提示，日常使用更省心、更可靠。</p>
+<p>v0.0.25 给 SSH 远程终端加了一位 AI 运维搭档：它能看到你当前终端的屏显、你圈选的那段输出，以及这台机器是生产还是测试环境，所以「这段报错什么意思、怎么修」能答到点子上。命令可以直接填入或执行，但高危操作始终由你亲手确认。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">连接不再卡死</span><span>修复远程终端断开连接时界面卡死的问题，重连、关闭窗口、切换标签都恢复顺滑响应，不再卡在「正在断开」。</span></div>
-<div class="tbl-row"><span class="k">插件更可靠</span><span>修复插件通信偶发的写入死锁与进程崩溃，长时间运行的带权限插件不再因一次异常整体退出。</span></div>
-<div class="tbl-row"><span class="k">退出不丢活</span><span>退出应用前会等后台定时任务、网站监控、提醒真正跑完再关闭，执行结果不再静默丢失。</span></div>
-<div class="tbl-row"><span class="k">截图更跟手</span><span>修复截图热键偶发无响应，框选后正常出图；后台日志改为按体积自动滚动，长时间运行不再越攒越大。</span></div>
-<div class="tbl-row"><span class="k">界面更规范</span><span>统一了全站配色与错误提示风格，补齐了一批缺失的错误提示，偶现的样式错乱明显减少。</span></div>
+<div class="tbl-row"><span class="k">看得到现场</span><span>提问自动带上当前屏显与机器环境（生产 / 预发 / 测试），AI 知道你在哪台机器、面对什么报错，不再答非所问。</span></div>
+<div class="tbl-row"><span class="k">选中即问</span><span>在终端里圈一段输出 → 右键「问 AI 这段输出」，侧栏自动打开、把这段上下文挂上并预填好问题，一个回车就能追问。</span></div>
+<div class="tbl-row"><span class="k">命令可一键执行，高危只给填入</span><span>回答里的命令单独成卡，一键填入或执行；<code>rm -rf</code> / <code>reboot</code> 等不可逆命令必须你亲自回车，生产环境执行还要再点一次确认。</span></div>
 </div>
 </div>
 </section>
@@ -123,7 +121,17 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.24</span><span class="log-date">2026-10-22</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.25</span><span class="log-date">2026-10-23</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>SSH 远程终端新增 AI 运维助手：侧栏提问自动带上当前屏显，并标注目标主机环境（生产 / 预发 / 测试），让 AI 知道面对的是什么机器与报错。</li>
+<li>终端内选中一段输出，右键「问 AI 这段输出」即可就这一段追问，侧栏自动打开并预填问题，无需复制粘贴。</li>
+<li>AI 回答中的命令单独成卡，支持一键填入终端或一键执行；<code>rm -rf</code> / <code>dd</code> / <code>mkfs</code> / <code>reboot</code> 等高危命令只给填入、不给执行，必须用户亲自回车；生产环境执行还需二次确认。</li>
+<li>命令解析支持模型以 shell 提示符风格（<code>$ </code> / <code># </code>）书写的命令，正确剥离前缀、不误吞注释。</li>
+<li>环境管理与运行时能力增强：本地文件搜索、嵌入式 Python 运行时、命令面板与设置细节同步优化。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.24</span><span class="log-date">2026-10-22</span></summary>
 <ul class="log-body">
 <li>修复远程终端断开连接时界面卡死（死锁），重连、关闭窗口、切换标签恢复顺滑响应。</li>
 <li>修复插件通信在插件不读取输入时的写入死锁与进程崩溃，长时间运行的插件更稳定。</li>
@@ -344,6 +352,10 @@
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m4 17 6-5-6-5"></path><path d="m12 19h8"></path></svg></div>
 <h3>SSH 远程终端</h3>
 <p><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> 唤起独立终端窗口：多标签并行会话、同主机连接复用、断线自动重连，切换窗口或最小化都不打断连接；主机按树形分组管理，支持密码与私钥认证，首次连接先核对服务器指纹防中间人，终端内直接浏览远程目录、拖拽上传下载（SFTP）。</p>
+</article>
+<article class="card reveal">
+<h3>终端里的 AI 运维助手</h3>
+<p>终端右侧的 AI 侧栏：<b>提问自动带上当前屏显</b>，所以「这段报错什么意思」能答到点上；在终端里选中一段输出，右键<b>「问 AI 这段输出」</b>即可就这一段追问。命令单独成卡支持<b>一键填入或一键执行</b>，不用再复制粘贴——但 <code>rm -rf</code> / <code>reboot</code> 这类<b>高危命令只给填入不给执行</b>，必须你亲自按回车。远程机上没有撤销键，AI 只建议，决定权始终在你。</p>
 </article>
 </div>
 </div>
@@ -938,6 +950,19 @@
 </div>
 <h4>多标签会话与 SFTP</h4>
 <p>同一窗口可开多个标签连不同主机，<b style="color:var(--text-1);font-weight:510">同主机的连接会复用</b>（多标签只握手一次）；终端支持复制 / 粘贴 / 全选 / 清屏、滚动回放与断线重连。连上主机后侧边可切换到 <b style="color:var(--text-1);font-weight:510">SFTP</b> 面板，直接浏览远程目录、拖拽上传下载，不必再另开 FTP 客户端。</p>
+<h4>终端里的 AI 助手</h4>
+<p>点终端右上角的 <b style="color:var(--text-1);font-weight:510">AI</b> 打开侧栏。<b style="color:var(--text-1);font-weight:510">提问时会自动带上当前屏显与环境标签</b>（生产 / 预发 / 测试），所以直接问「这段报错什么意思」「磁盘还剩多少」就能得到对得上这台机器的答案。</p>
+<ol class="install">
+<li><b style="color:var(--text-1);font-weight:510">选中即问</b>：在终端里选中一段输出 → 右键 → <b style="color:var(--text-1);font-weight:510">问 AI 这段输出</b>。侧栏自动打开、把选区挂成上下文并预填好问题，一个回车就能问。</li>
+<li><b style="color:var(--text-1);font-weight:510">命令卡片</b>：回答里的命令单独成卡，可<b style="color:var(--text-1);font-weight:510">一键填入终端</b>或<b style="color:var(--text-1);font-weight:510">一键执行</b>，不用复制粘贴。</li>
+<li><b style="color:var(--text-1);font-weight:510">连续追问</b>：侧栏内保留上下文，可以针对同一段报错一直问下去；切换会话会自动清空，不会把 A 机器的屏显带给 B 机器。</li>
+</ol>
+<p>侧栏头部常驻<b style="color:var(--text-1);font-weight:510">环境徽章</b>。标着<b style="color:var(--text-1);font-weight:510">生产</b>时，模型会按更保守的口径回答——<b style="color:var(--text-1);font-weight:510">默认先给只读的探查命令</b>，涉及写入、删除、重启、改配置的命令必须写明影响范围和回滚方式。</p>
+<div class="note">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
+<div><b style="color:var(--text-1);font-weight:510">AI 只给命令，不会替你执行。</b>其中 <code>rm -rf</code> / <code>dd</code> / <code>mkfs</code> / <code>iptables -F</code> / <code>reboot</code> / <code>kubectl delete</code> / <code>DROP TABLE</code> / <code>git reset --hard</code> 这类不可逆命令<b style="color:var(--text-1);font-weight:510">只有「填入」没有「执行」</b>，必须由你亲自按回车；<code>systemctl restart</code> / <code>sed -i</code> 这类中风险命令可以一键执行，但卡片上会先给出风险说明。另外<b style="color:var(--text-1);font-weight:510">生产机上「执行」要点两次</b>——风险规则表是有限收录的，总有些看着无害的命令会漏过去。生产机上没有撤销键——AI 的建议也要自己看过再跑。</div>
+</div>
+<p>AI 能力复用「设置 → AI」里的档案，未配置 API Key 时侧栏会给出引导。</p>
 </article>
 <!-- ============ 18 ============ -->
 <article class="step reveal" id="g-backup">
