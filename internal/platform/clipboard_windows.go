@@ -109,6 +109,135 @@ func WithClipboard(hwnd uintptr, fn func()) bool {
 	return true
 }
 
+// ClipboardOwnerProbeTimeoutMs 读取前探测 owner 是否响应的上限。
+// 正常窗口在 1ms 内就会应一个 WM_NULL；200ms 足够区分「忙」与「挂死」。
+const ClipboardOwnerProbeTimeoutMs uint32 = 200
+
+// WithClipboardRead 是 WithClipboard 的「读取版」：打开剪贴板后先确认 owner
+// 窗口还能响应，再执行 fn。返回 true 表示 fn 确实执行过。
+//
+// 【为什么所有读路径都必须走这里】
+// GetClipboardData 对延迟渲染格式会同步 SendMessage(WM_RENDERFORMAT) 到 owner，
+// 没有超时。owner 一旦卡死，调用线程就永久停在这一行——而它此时**正持有剪贴板**，
+// 于是全系统所有程序的复制都开始返回 ERROR_ACCESS_DENIED，本程序自己的捕获也
+// 再也打不开剪贴板。表现就是「用着用着就复制不了了，重启才恢复」。
+//
+// 本程序的读路径不止捕获协程一条：{clipboard} 变量（db/item.go）与插件
+// host.clipboard.read 都走 GetClipboardText，它们同样会以 OpenClipboard(NULL)
+// 打开——这种 NULL owner 的持有连 GetOpenClipboardWindow 都查不出来，事后只能
+// 重启进程。所以保护必须放在这一层，而不是每个调用点各写一遍。
+func WithClipboardRead(hwnd uintptr, fn func()) (executed bool) {
+	if !WithClipboard(hwnd, func() {
+		if !ClipboardOwnerResponsive(ClipboardOwnerProbeTimeoutMs) {
+			// 不响应的 owner ⇒ 任何 GetClipboardData 都可能永久阻塞，直接放弃读取。
+			logger.W("[platform] 剪贴板 owner 无响应，跳过本次读取（避免 GetClipboardData 永久阻塞并锁死剪贴板）")
+			return
+		}
+		executed = true
+		fn()
+	}) {
+		return false
+	}
+	return executed
+}
+
+// ClipboardProbe 探测剪贴板当前是否可打开：打开后立刻关闭，不读任何内容。
+//
+// 只做**一次**尝试（不像 openClipboardWithRetry 那样退避 150ms）——这是周期性
+// 健康检查，不能自己长时间占着剪贴板。返回 false 说明有别的进程正锁着它：
+// 此时系统里所有程序的「复制」都会失败，本程序的捕获也拿不到任何通知。
+func ClipboardProbe() bool {
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	if !w32.OpenClipboard(0) {
+		return false
+	}
+	w32.CloseClipboard()
+	return true
+}
+
+// allocGlobal 分配 GMEM_MOVEABLE|GMEM_ZEROINIT 全局内存并写入 data。
+//
+// 返回句柄的内存所有权归调用方：SetClipboardData 成功后所有权移交系统，
+// 未移交（含整次写入失败）必须自行 GlobalFree，否则泄漏全局内存。
+func allocGlobal(data []byte) (w32.HANDLE, error) {
+	handle := w32.GlobalAlloc(0x0042, uint32(len(data)))
+	if handle == 0 {
+		return 0, fmt.Errorf("GlobalAlloc failed")
+	}
+	ptr := w32.GlobalLock(handle)
+	if ptr == nil {
+		// GlobalLock 失败：内存从未被写入，绝不能提交给系统剪贴板，
+		// 否则会把未初始化（清零）数据当成真实内容，且需释放句柄避免泄漏。
+		w32.GlobalFree(handle)
+		return 0, fmt.Errorf("GlobalLock failed")
+	}
+	copy(unsafe.Slice((*byte)(ptr), len(data)), data)
+	w32.GlobalUnlock(handle)
+	return handle, nil
+}
+
+// clipboardFormat 一个「格式号 + 全局内存句柄」对，供 writeClipboardFormats 使用。
+type clipboardFormat struct {
+	format uint
+	handle w32.HANDLE
+}
+
+// writeClipboardFormats 在**同一次**剪贴板会话里写入多个格式（EmptyClipboard 只做一次）。
+//
+// 多格式必须一次写完：分成两次会话时，后一次的 EmptyClipboard 会把前一次刚写的
+// 格式冲掉。剪贴板历史里「复制的是图片文件」的条目就踩过这条——先写 CF_HDROP
+// 再写 CF_DIB，CB 里只剩图片，粘贴到资源管理器毫无反应（用户侧就是「复制不了」）。
+func writeClipboardFormats(hwnd uintptr, formats []clipboardFormat) error {
+	if len(formats) == 0 {
+		return nil
+	}
+	var setFailed bool
+	// 临界区整体锁线程（见 WithClipboard）：Open/Close 跨线程 = 剪贴板永久锁死。
+	opened := WithClipboard(hwnd, func() {
+		w32.EmptyClipboard()
+		for i := range formats {
+			if w32.SetClipboardData(formats[i].format, formats[i].handle) == 0 {
+				setFailed = true
+				continue
+			}
+			formats[i].handle = 0 // 所有权已移交系统，不可再释放
+		}
+	})
+	// 未被系统接手的句柄自行释放（含 OpenClipboard 始终失败、一个都没写进去的情况）。
+	for _, f := range formats {
+		if f.handle != 0 {
+			w32.GlobalFree(f.handle)
+		}
+	}
+	if !opened {
+		return fmt.Errorf("OpenClipboard failed")
+	}
+	if setFailed {
+		return fmt.Errorf("SetClipboardData failed")
+	}
+	return nil
+}
+
+// hdropBytes 构造 CF_HDROP 数据：DROPFILES 结构头（20 字节）+ 双 NUL 结尾的宽字符路径表。
+func hdropBytes(paths []string) []byte {
+	var u16buf []uint16
+	for _, p := range paths {
+		u16buf = append(u16buf, utf16.Encode([]rune(p))...)
+		u16buf = append(u16buf, 0)
+	}
+	u16buf = append(u16buf, 0)
+
+	const drophdrSize = 20
+	data := make([]byte, drophdrSize+len(u16buf)*2)
+	binary.LittleEndian.PutUint32(data[0:4], drophdrSize)
+	binary.LittleEndian.PutUint32(data[16:20], 1) // fWide = TRUE
+	for i, ch := range u16buf {
+		binary.LittleEndian.PutUint16(data[drophdrSize+i*2:], ch)
+	}
+	return data
+}
+
 // SetClipboardFiles writes a list of file paths to the system clipboard (CF_HDROP)
 func SetClipboardFiles(hwnd uintptr, paths []string) error {
 	if hwnd == 0 {
@@ -117,61 +246,38 @@ func SetClipboardFiles(hwnd uintptr, paths []string) error {
 	if len(paths) == 0 {
 		return nil
 	}
-
-	var u16buf []uint16
-	for _, p := range paths {
-		u16buf = append(u16buf, utf16.Encode([]rune(p))...)
-		u16buf = append(u16buf, 0)
+	// 先分配并写好全局内存，最后才动剪贴板：EmptyClipboard 之后任何一步失败，
+	// 用户的剪贴板都会变成空的却又没有新内容——「复制了，但粘贴是空的」。
+	handle, err := allocGlobal(hdropBytes(paths))
+	if err != nil {
+		return err
 	}
-	u16buf = append(u16buf, 0)
+	return writeClipboardFormats(hwnd, []clipboardFormat{{format: 15, handle: handle}})
+}
 
-	drophdrSize := 20
-	totalSize := drophdrSize + len(u16buf)*2
-	data := make([]byte, totalSize)
-
-	binary.LittleEndian.PutUint32(data[0:4], uint32(drophdrSize))
-	binary.LittleEndian.PutUint32(data[16:20], 1)
-
-	for i, ch := range u16buf {
-		binary.LittleEndian.PutUint16(data[drophdrSize+i*2:], ch)
+// SetClipboardText 把纯文本写入系统剪贴板（CF_UNICODETEXT），返回是否成功。
+//
+// 不复用 wails 的 app.Clipboard.SetText：那条路径经 InvokeSyncWithResult 把写入
+// 调度到主线程**同步**执行，而它内部的 waitOpenClipboard 最多自旋 1 秒——剪贴板被
+// 别的程序占住时，主线程（热键、托盘、浮窗都在这条线程上）会跟着卡住；它的
+// UTF16FromString 失败分支还会在已 EmptyClipboard 之后直接 return，把剪贴板留在
+// 打开状态。自有路径与文件/图片写入共用 WithClipboard，是所有剪贴板临界区的唯一入口。
+func SetClipboardText(hwnd uintptr, text string) error {
+	// 先转换再动剪贴板：文本含内嵌 NUL 时转码会报错，此时必须什么都还没清空，
+	// 否则用户的剪贴板会被清成空。
+	data, err := syscall.UTF16FromString(text)
+	if err != nil {
+		return fmt.Errorf("文本无法编码为 UTF-16: %w", err)
 	}
-
-	// 先分配并写好全局内存，最后才动剪贴板。
-	// 顺序有讲究：OpenClipboard 成功后必须 EmptyClipboard，此时若后面的
-	// GlobalAlloc/GlobalLock/SetClipboardData 失败，用户的剪贴板会被清空却没有
-	// 写入任何新内容——表现为「复制了，但粘贴是空的」，比直接报错更难排查。
-	handle := w32.GlobalAlloc(0x0042, uint32(len(data)))
-	if handle == 0 {
-		return fmt.Errorf("GlobalAlloc failed")
+	raw := make([]byte, len(data)*2)
+	for i, u := range data {
+		binary.LittleEndian.PutUint16(raw[i*2:], u)
 	}
-	ptr := w32.GlobalLock(handle)
-	if ptr == nil {
-		// GlobalLock 失败：内存从未被写入，绝不能提交给系统剪贴板，
-		// 否则会把未初始化（清零）数据当成真实内容，且需释放句柄避免泄漏。
-		w32.GlobalFree(handle)
-		return fmt.Errorf("GlobalLock failed")
+	handle, err := allocGlobal(raw)
+	if err != nil {
+		return err
 	}
-	copy(unsafe.Slice((*byte)(ptr), len(data)), data)
-	w32.GlobalUnlock(handle)
-
-	// 临界区整体锁线程（见 WithClipboard）：Open/Close 跨线程 = 剪贴板永久锁死。
-	var setFailed bool
-	if !WithClipboard(hwnd, func() {
-		w32.EmptyClipboard()
-		if w32.SetClipboardData(15, handle) == 0 {
-			setFailed = true
-		}
-	}) {
-		w32.GlobalFree(handle)
-		return fmt.Errorf("OpenClipboard failed")
-	}
-	if setFailed {
-		// 设置失败 → 内存所有权未转移，释放已分配的内存
-		w32.GlobalFree(handle)
-		return fmt.Errorf("SetClipboardData failed")
-	}
-
-	return nil
+	return writeClipboardFormats(hwnd, []clipboardFormat{{format: 13, handle: handle}})
 }
 
 // SetClipboardImage writes a PNG image to the system clipboard (CF_DIB)
@@ -197,11 +303,14 @@ func SetClipboardImage(hwnd uintptr, imagePath string) error {
 }
 
 // GetClipboardText reads the current system clipboard text (CF_UNICODETEXT).
-// Used by snippet variable {clipboard}. Returns "" on any failure
-// (e.g. another app holds the clipboard open) — never errors.
+// Used by snippet variable {clipboard} and plugin host.clipboard.read.
+// Returns "" on any failure (e.g. another app holds the clipboard open) — never errors.
+//
+// 走 WithClipboardRead：这里用的是 OpenClipboard(NULL)，一旦卡在 GetClipboardData
+// 上连 GetOpenClipboardWindow 都定位不到持有者，只能重启进程恢复。
 func GetClipboardText() string {
 	var text string
-	WithClipboard(0, func() {
+	WithClipboardRead(0, func() {
 		handle := w32.GetClipboardData(13) // CF_UNICODETEXT
 		if handle == 0 {
 			return
@@ -239,6 +348,53 @@ func GetActiveWindowTitle() string {
 		return ""
 	}
 	return w32.GetWindowText(hwnd)
+}
+
+// 剪贴板 owner 响应探测所需的 Win32 入口（w32 包未提供）。
+var (
+	procGetClipboardOwner  = modUser32.NewProc("GetClipboardOwner")
+	procSendMessageTimeout = modUser32.NewProc("SendMessageTimeoutW")
+)
+
+const (
+	wmNull          = 0x0000
+	smtoBlock       = 0x0001
+	smtoAbortIfHung = 0x0002
+	smtoErrorOnExit = 0x0020
+)
+
+// ClipboardOwnerResponsive 判断剪贴板 owner 窗口当前是否还能处理消息。
+//
+// 【为什么必须存在：GetClipboardData 会同步等一个卡死的进程】
+// 剪贴板里的格式可以「延迟渲染」——程序只登记格式，真正数据等别人来取时才现做。
+// 此时 GetClipboardData 会 **SendMessage(WM_RENDERFORMAT) 到 owner 窗口**，这是
+// 同步且**没有超时**的等待。owner 进程一旦卡住（无响应窗口、调试器挂起、正在
+// 退出的程序），调用方就永久卡在 GetClipboardData 里。
+//
+// 对我们来说这是致命的：调用发生在 WithClipboard 的临界区内，于是剪贴板一直被
+// 本进程打开着——别的程序此后所有 Ctrl+C 都失败（它们不会因此产生
+// WM_CLIPBOARDUPDATE），本程序的捕获协程也永久不再前进。用户看到的两件事
+// 「复制没反应」和「历史里没有最新内容」其实是同一个死锁。
+//
+// 必须在**调用 GetClipboardData 之前**（剪贴板已打开状态下）用本函数探测 owner：
+// 不响应的窗口一律跳过本次读取并立刻 CloseClipboard，宁可丢这一次，也不能锁死。
+//
+// 返回 true 表示可以安全读取（含无 owner 的情形）。
+func ClipboardOwnerResponsive(timeoutMs uint32) bool {
+	owner, _, _ := procGetClipboardOwner.Call()
+	if owner == 0 {
+		// 无 owner：EmptyClipboard 后尚未 SetClipboardData 之类，没有可阻塞的目标。
+		return true
+	}
+	var result uintptr
+	ret, _, _ := procSendMessageTimeout.Call(
+		owner,
+		wmNull, 0, 0,
+		smtoBlock|smtoAbortIfHung|smtoErrorOnExit,
+		uintptr(timeoutMs),
+		uintptr(unsafe.Pointer(&result)),
+	)
+	return ret != 0
 }
 
 // UTF16PtrToString converts a UTF-16 pointer to a Go string

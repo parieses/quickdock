@@ -2,6 +2,7 @@ import { computed, inject, reactive, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { EnvConfigGet } from '../../bindings/quickdock/services/env/environmentservice'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 
 // useWebDAVPanel 内置 WebDAV 服务面板：连接信息与各平台挂载示例。
@@ -46,11 +47,10 @@ export function useWebDAVPanel(selectedId: Ref<string>) {
 
   async function copyWebDAV(text: string) {
     if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
+    if (await copyToClipboard(text)) {
       toast.success(t('copied'))
-    } catch (e) {
-      toast.error(getErrorMessage(e))
+    } else {
+      toast.error(t('copyFailed'))
     }
   }
 

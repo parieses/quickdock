@@ -138,7 +138,11 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 		if err := json.Unmarshal(params, &arg); err != nil {
 			return nil, fmt.Errorf("参数解析失败: %w", err)
 		}
-		services.SetClipboardText(arg.Text)
+		if !services.SetClipboardText(arg.Text) {
+			// 返回 success:false 而不是抛错：插件侧对「复制失败」通常只需要一次重试或提示，
+			// 让它们自己决定要不要当成异常，避免插件把偶发的剪贴板占用当成宿主故障。
+			return map[string]interface{}{"success": false, "error": "系统剪贴板被其他程序占用"}, nil
+		}
 		return map[string]interface{}{"success": true}, nil
 	})
 

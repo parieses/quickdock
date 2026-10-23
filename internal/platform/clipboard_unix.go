@@ -70,6 +70,22 @@ func SetClipboardImage(hwnd uintptr, imagePath string) error {
 	return fmt.Errorf("当前平台暂不支持写入图片到剪贴板")
 }
 
+// SetClipboardText 写入纯文本到剪贴板（darwin=pbcopy，linux=xclip）。
+// 与 Windows 版保持 API 形状一致；失败返回错误而不是静默吞掉。
+func SetClipboardText(hwnd uintptr, text string) error {
+	return setClipboardText(text)
+}
+
+// SetClipboardFilesAndImage 一次写入「文件 + 图片」。
+// 非 Windows 没有 CF_HDROP / CF_DIB 等价物，退化为写换行分隔的路径文本
+// （与 SetClipboardFiles 一致），保证调用方能拿到确定的成功/失败。
+func SetClipboardFilesAndImage(hwnd uintptr, paths []string, imagePath string) error {
+	if len(paths) == 0 {
+		return SetClipboardImage(hwnd, imagePath)
+	}
+	return SetClipboardFiles(hwnd, paths)
+}
+
 // setClipboardText 写入纯文本到剪贴板（darwin=pbcopy）。
 func setClipboardText(text string) error {
 	name := "xclip"

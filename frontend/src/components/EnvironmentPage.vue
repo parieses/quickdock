@@ -102,6 +102,7 @@ import { DSHStatus } from '../../bindings/quickdock/services/dsh/dshservice'
 import PortPage from './PortPage.vue'
 import SitesPanel from './SitesPanel.vue'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr, logWarn, logDebug } from '../utils/logger'
 import { useCertPanel } from '../composables/useCertPanel'
@@ -601,11 +602,10 @@ const ollamaBaseURL = computed(() => {
 
 async function copyOllamaText(text: string) {
   if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyToClipboard(text)) {
     toast.success(t('copied'))
-  } catch (e) {
-    toast.error(getErrorMessage(e))
+  } else {
+    toast.error(t('copyFailed'))
   }
 }
 
@@ -981,10 +981,9 @@ async function runTask() {
 }
 
 async function copyTaskOutput() {
-  try {
-    await navigator.clipboard.writeText(taskModal.output)
+  if (await copyToClipboard(taskModal.output)) {
     toast.success(t('copied'))
-  } catch {
+  } else {
     toast.error(t('copyFailed'))
   }
 }

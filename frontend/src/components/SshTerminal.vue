@@ -21,6 +21,7 @@ import '@xterm/xterm/css/xterm.css'
 
 import { Replay, Resize, Write } from '../../bindings/quickdock/services/sshx/sshservice'
 import { base64ToBytes, bytesToBase64, textToBytes } from '../utils/base64'
+import { copyToClipboard } from '../utils/clipboard'
 import { createWriteQueue } from '../utils/termWriteQueue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -109,28 +110,14 @@ function closeMenu() {
 /**
  * 写系统剪贴板。
  *
- * 走 Wails 原生桥（Clipboard.SetText）——它直接调 Go 侧的 app.Clipboard.SetText，
- * 经系统 API 写剪贴板，**不受 WebView2 安全上下文限制**。这是项目里早验证过的
- * 正确路径（见 services/clipboard 的 CopyText 注释）：在 WebView 里 navigator.clipboard
- * 经常因非安全上下文被静默拦截，execCommand('copy') 在 WebView2 也极不可靠，
- * 表现为「选中了却复制不走」。非 Wails 环境（纯浏览器/单测）才退回 navigator.clipboard。
+ * 统一走 utils/clipboard（→ 后端 CopyText → platform 的 Win32 写入）：不依赖
+ * WebView2 的安全上下文 / 文档焦点 / 用户激活，且会如实返回成败。
+ * 旧实现在这里调 @wailsio/runtime 的 Clipboard.SetText，它内部把写入同步派发到
+ * 主线程、失败还只能靠 navigator.clipboard 兜底，而那条兜底在 WebView2 里
+ * 「选中了却复制不走」正是本函数要解决的原始问题。
  */
 async function copyText(text: string): Promise<boolean> {
-  try {
-    await Clipboard.SetText(text)
-    return true
-  } catch {
-    // 退回 Web 标准方案（仅非 Wails 环境有意义）
-  }
-  try {
-    if (navigator.clipboard && window.isSecureContext) {
-      await navigator.clipboard.writeText(text)
-      return true
-    }
-  } catch {
-    /* ignore */
-  }
-  return false
+  return copyToClipboard(text)
 }
 
 /**
@@ -156,7 +143,9 @@ async function readClipboardText(): Promise<string> {
 }
 
 async function onCopy() {
-  if (hasSelection()) await copyText(term!.getSelection())
+  // 用 currentSelection 而不是现读 getSelection：见其注释（选区常在点击前就被清掉）。
+  const text = currentSelection()
+  if (text) await copyText(text)
   closeMenu()
 }
 
@@ -184,7 +173,7 @@ function onAskAI() {
   // 优先用上次选区成立的快照（onSelectionChange 捕获，不依赖点击此刻的实时选区，
   // 否则右键/菜单交互可能已把选区清掉，拿到空串）。若快照为空但此刻确有选区，
   // 再退回读一次实时选区兜底。
-  const raw = lastSelection || (hasSelection() ? term!.getSelection() : '')
+  const raw = currentSelection()
   if (!raw.trim()) {
     closeMenu()
     return
@@ -292,6 +281,25 @@ let fitAddon: FitAddon | null = null
  * 只用普通变量持有：它只在组件实例内流转，不需要响应式。
  */
 let lastSelection = ''
+
+/**
+ * 当前可用的选区文本 —— 复制与问 AI 的**唯一取值口径**。
+ *
+ * 必须优先用快照：现读 `getSelection()` 在「右键菜单点下去」「Ctrl+Shift+C 按下」
+ * 这些时机经常已经是空串（xterm 会在用户输入/点击终端时清选区，WebView2 的
+ * contextmenu 时机更不可控）。旧实现里复制按钮的 disabled 直接从 `hasSelection()`
+ * 取，于是出现「明明选中了，复制是灰的 / 按了没反应」——问 AI 那条路已改成用快照，
+ * 复制这条漏改了。
+ */
+function currentSelection(): string {
+  if (lastSelection) return lastSelection
+  return term && term.hasSelection() ? term.getSelection() : ''
+}
+
+/** 是否存在可复制/可提问的内容（含快照兜底）。 */
+function canCopy(): boolean {
+  return currentSelection() !== ''
+}
 
 // ---- 写入队列（rAF 分片 + 背压） ----
 //
@@ -671,11 +679,11 @@ defineExpose({
         @click.stop
         @contextmenu.prevent
       >
-        <button class="term-menu-item" :disabled="!hasSelection()" @click="onCopy">
+        <button class="term-menu-item" :disabled="!canCopy()" @click="onCopy">
           <span>{{ t('sshCtxCopy') }}</span>
           <span class="term-menu-kbd">Ctrl+Shift+C</span>
         </button>
-        <button class="term-menu-item ask-ai" :disabled="!hasSelection()" @click="onAskAI">
+        <button class="term-menu-item ask-ai" :disabled="!canCopy()" @click="onAskAI">
           <span class="mi-lead">
             <Sparkles :size="13" />
             <span>{{ t('sshCtxAskAI') }}</span>

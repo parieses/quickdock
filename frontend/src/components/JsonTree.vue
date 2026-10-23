@@ -2,6 +2,7 @@
 import { computed, ref, watch, inject, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronRight, Copy } from '@lucide/vue'
+import { copyToClipboard } from '../utils/clipboard'
 import type { ToastAPI } from '../types'
 
 const props = withDefaults(defineProps<{
@@ -58,10 +59,11 @@ const selfType = computed(() => valType(props.data))
 const selfDisplay = computed(() => valDisplay(props.data))
 
 async function copy(text: string) {
-  try {
-    await navigator.clipboard.writeText(text)
+  // 走统一入口（后端 Win32 写入）：WebView2 里 navigator.clipboard 会因文档未聚焦
+  // 被静默拒绝，表现为「点了复制没反应」。
+  if (await copyToClipboard(text)) {
     toast.success(t('copied'))
-  } catch {
+  } else {
     toast.error(t('copyFailed'))
   }
 }

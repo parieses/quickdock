@@ -14,7 +14,6 @@ import { OpenItem } from '../../bindings/quickdock/services/collection/collectio
 import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
 import { GetAllUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
 import { DeleteItem, GetPathQuickInfo } from '../../bindings/quickdock/services/item/itemservice'
-import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import {
   EnvList,
   EnvStatus,
@@ -36,6 +35,7 @@ import {
 } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr, logWarn, logDebug } from '../utils/logger'
 import type { CollectionItem, PluginInfo, EnvRuntimeInfo, EnvServiceStatus } from '../types'
@@ -132,9 +132,13 @@ function focusInput() {
   if (el) { el.focus(); el.select() }
 }
 
-// 写入系统剪贴板（优先 Go 侧 CopyText，规避 WebView2 中 navigator.clipboard 静默失败）
-async function writeClipboard(text: string) {
-  try { await CopyText(text) } catch (e) { console.error('[CmdPalette] CopyText:', e) }
+// 写入系统剪贴板（唯一入口见 utils/clipboard：Go 侧 Win32 写入，不依赖 WebView2 焦点状态）。
+// 只在失败时提示：成功文案由各调用点自己给（有的复制计算结果是「静默关闭面板」，
+// 有的已经带了「结果已复制」提示，统一在这里加成功会重复弹两次）。
+async function writeClipboard(text: string): Promise<boolean> {
+  if (await copyToClipboard(text)) return true
+  toast?.error?.(t('copyFailed'))
+  return false
 }
 
 // ---- 应用图标映射 ----
@@ -675,7 +679,7 @@ async function executeSelected() {
   } else if (result.type === 'url' && result.url) {
     try { await Browser.OpenURL(result.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }; closePalette()
   } else if (result.type === 'calculator' && result.calcResult) {
-    try { await writeClipboard(result.calcResult) } catch (e) { logErr('CommandPalette', e) }; closePalette()
+    await writeClipboard(result.calcResult); closePalette()
   } else if (result.type === 'note' && result.note) {
     recordUsage('note:' + result.note.id, 'note', result.label, result.desc)
     // 面板是独立浮窗，与主窗口 JS 状态不互通；交后端隐藏本窗 + 唤起主窗口
@@ -762,7 +766,7 @@ async function executeSelected() {
             ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult)) : String(pluginResult)
           const copyText = typeof pluginResult === 'object'
             ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText) : displayText
-          try { await writeClipboard(copyText) } catch (e) { logErr('CommandPalette', e) }
+          await writeClipboard(copyText)
           // 持久化「每命令最近一次结果」：重开面板/重启后 preview 仍可展示、动作菜单可复制、acceptsInput 命令可一键重跑
           savePluginLastResult(result.pluginId, result.pluginCommandId, {
             result: displayText, pluginName: result.desc || result.label,
@@ -783,8 +787,8 @@ async function executeSelected() {
       // urlEncode 实现完全一致（encodeURIComponent 语义），核心功能零插件耦合
       let encoded = ''
       try { encoded = encodeURIComponent(result.url) } catch { encoded = result.url }
-      try { await writeClipboard(encoded) } catch (e) { logErr('CommandPalette', e) }
-      toast?.success?.(t('pluginResultCopied')); closePalette()
+      if (await writeClipboard(encoded)) toast?.success?.(t('pluginResultCopied'))
+      closePalette()
     }
   }
 }
@@ -917,8 +921,8 @@ async function runAction(a: PaletteAction) {
 }
 
 async function copyAndClose(text: string) {
-  await writeClipboard(text)
-  toast?.success?.(t('copied'))
+  // 失败时 writeClipboard 已经弹过错误提示，这里不能再报「已复制」。
+  if (await writeClipboard(text)) toast?.success?.(t('copied'))
   closePalette()
 }
 
@@ -1034,9 +1038,14 @@ async function refreshRecentCache(gen?: number) {
 
 // ---- 生命周期 ----
 let lastClipboardUpdate = 0
+// 事件注销句柄：Wails 的 Events.Off 按事件名整体移除（没有回调参数），
+// 而 ClipboardPanel 也监听 clipboard:updated，全局 Off 会把面板的刷新监听一起删掉。
+const paletteEventOffs: Array<() => void> = []
 
 onMounted(async () => {
-  Events.On('clipboard:updated', () => { lastClipboardUpdate = Date.now() })
+  paletteEventOffs.push(
+    Events.On('clipboard:updated', () => { lastClipboardUpdate = Date.now() }),
+  )
   // 插件 iframe 内的 Esc 经插件桥转发（qd:plugin-esc）：iframe 抢占焦点后
   // 父级 document 收不到 keydown，这是唯一的 Esc 通路
   window.addEventListener('qd:plugin-esc', escFromPlugin)
@@ -1097,8 +1106,11 @@ watch(inlineQuicklink, (v) => { if (v) selectedIndex.value = 0 })
 
 onUnmounted(() => {
   closeInlinePlugin()
+  // palette:shown 只有本组件监听，可以按名注销；clipboard:updated 与剪贴板面板共用，
+  // 只能移除自己注册的那个回调（见 paletteEventOffs 的说明）。
   Events.Off('palette:shown')
-  Events.Off('clipboard:updated')
+  paletteEventOffs.forEach((off) => off())
+  paletteEventOffs.length = 0
   window.removeEventListener('qd:plugin-esc', escFromPlugin)
   document.removeEventListener('keydown', onGlobalEsc, true)
   document.removeEventListener('keydown', onGlobalKey, true)

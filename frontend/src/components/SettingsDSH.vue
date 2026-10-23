@@ -11,6 +11,7 @@ import { useI18n } from 'vue-i18n'
 import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import {
@@ -309,11 +310,10 @@ async function rollbackPlugins() {
 async function copyLogs() {
   if (!logs.value.length) return
   const text = logs.value.map((l) => (l.level === 'error' ? '✗ ' : '› ') + l.message).join('\n')
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyToClipboard(text)) {
     toast.success(t('copied'))
-  } catch (e) {
-    showMsg(getErrorMessage(e), true)
+  } else {
+    showMsg(t('copyFailed'), true)
   }
 }
 

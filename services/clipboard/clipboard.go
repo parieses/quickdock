@@ -16,10 +16,15 @@ import (
 // ===== 剪贴板历史 =====
 
 // CopyText 将文本写入系统剪贴板（命令面板结果复制用）。
-// 直接走 Wails Clipboard.SetText，避免 WebView2 中 navigator.clipboard
+// 直接走 platform 的 Win32 写入，避免 WebView2 中 navigator.clipboard
 // 在文档未聚焦时被静默拦截的问题。
+//
+// 写失败必须让前端看见：这条路径曾是「点了复制没反应」的源头——底层返回 void，
+// 上层只能一律报成功，用户拿到的永远是旧剪贴板内容。
 func (a *ClipboardService) CopyText(text string) *services.ApiResult {
-	services.SetClipboardText(text)
+	if !services.SetClipboardText(text) {
+		return services.FailMsg("写入剪贴板失败：系统剪贴板可能被其他程序占用，请稍后重试")
+	}
 	return services.Ok(nil)
 }
 
@@ -54,23 +59,66 @@ func (a *ClipboardService) writeEntryToClipboard(entry *db.ClipboardEntry, hwnd 
 		// 回环防护的哈希必须在写入剪贴板**之前**登记：写入成功到登记之间，剪贴板
 		// 工作协程可能已经把这次变更抓走，导致「从历史复制图片」被误记成一次新复制。
 		// 该哈希口径与 processImage 的 DIB→PNG MD5 一致（PNG 文件经 DIB 往返后重编码字节确定性相同）。
-		if data, e := os.ReadFile(entry.ImagePath); e == nil {
-			services.SetLastClipboardImageHash(platform.MD5Hash(data))
+		imageData, readErr := os.ReadFile(entry.ImagePath)
+		if readErr == nil {
+			services.SetLastClipboardImageHash(platform.MD5Hash(imageData))
 		}
-		if entry.TextContent != "" {
-			_ = platform.SetClipboardFiles(hwnd, strings.Split(entry.TextContent, "\n"))
-		}
-		if err := platform.SetClipboardImage(hwnd, entry.ImagePath); err != nil {
+		err := a.writeImageEntryToClipboard(entry, hwnd, readErr)
+		if err != nil {
 			// 没写进剪贴板就不能留下这枚「通行证」，否则用户下次真正复制这张图会被误吞。
 			services.SetLastClipboardImageHash("")
-			return fmt.Errorf("图片写入剪贴板失败: %v", err)
+			return err
 		}
 	case entry.ContentType == "file" && entry.TextContent != "":
 		if err := platform.SetClipboardFiles(hwnd, strings.Split(entry.TextContent, "\n")); err != nil {
 			return fmt.Errorf("文件写入剪贴板失败: %v", err)
 		}
 	default:
-		services.SetClipboardText(entry.TextContent)
+		if !services.SetClipboardText(entry.TextContent) {
+			return fmt.Errorf("文本写入剪贴板失败（剪贴板可能被其他程序占用）")
+		}
+	}
+	return nil
+}
+
+// writeImageEntryToClipboard 图片条目的回写。
+//
+// 图片条目有两种来源，必须分开处理：
+//   - 纯图片（截图/网页图片）：只写 CF_DIB；
+//   - 「复制的图片文件」：条目上还带着文件路径，需要**一次会话**里同时写
+//     CF_HDROP(文件) + CF_DIB(图片)。旧实现先写文件再写图片，两次 EmptyClipboard
+//     把文件格式冲掉了，粘到资源管理器没有任何反应。
+//
+// 图片文件缺失（历史清理/被手动删除）时退化为只写文件路径，而不是整条失败。
+func (a *ClipboardService) writeImageEntryToClipboard(entry *db.ClipboardEntry, hwnd uintptr, readErr error) error {
+	paths := []string(nil)
+	if entry.TextContent != "" {
+		paths = strings.Split(entry.TextContent, "\n")
+	}
+	if readErr != nil || entry.ImagePath == "" {
+		if len(paths) > 0 {
+			if err := platform.SetClipboardFiles(hwnd, paths); err != nil {
+				return fmt.Errorf("文件写入剪贴板失败: %v", err)
+			}
+			return nil
+		}
+		if readErr != nil {
+			return fmt.Errorf("读取图片失败: %v", readErr)
+		}
+		return fmt.Errorf("该条目没有可复制的内容")
+	}
+	if len(paths) > 0 {
+		if err := platform.SetClipboardFilesAndImage(hwnd, paths, entry.ImagePath); err == nil {
+			return nil
+		}
+		// 文件+图片合并写入失败（图片损坏等）时，至少把文件路径写进去。
+		if err := platform.SetClipboardFiles(hwnd, paths); err != nil {
+			return fmt.Errorf("文件写入剪贴板失败: %v", err)
+		}
+		return nil
+	}
+	if err := platform.SetClipboardImage(hwnd, entry.ImagePath); err != nil {
+		return fmt.Errorf("图片写入剪贴板失败: %v", err)
 	}
 	return nil
 }

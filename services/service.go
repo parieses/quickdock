@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 
 	"quickdock/internal/db"
 	dshcore "quickdock/internal/dsh"
@@ -112,6 +113,15 @@ type AppService struct {
 	// 剪贴板变更信号（容量 1，丢弃式发送做合并）：Win32 消息线程只置信号，
 	// 真正的读取/解析/入库在 startClipboardWorker 起的协程上执行（见 clipboard_sys.go）。
 	clipboardWake chan struct{}
+
+	// 剪贴板捕获看护状态（见 clipboard_sys.go 的 runClipboardCapture / pollClipboardSequence）。
+	//
+	// clipboardSeq 记录「已处理到哪个剪贴板序号」，兜底轮询靠它发现「序号变了却没收到
+	// WM_CLIPBOARDUPDATE」的漏抓；clipboardBusy 防事件与轮询并发捕获；clipboardBusyAt
+	// 用于把卡住的捕获写进日志（GetClipboardData 对延迟渲染格式没有超时）。
+	clipboardSeq    atomic.Uint32
+	clipboardBusy   atomic.Bool
+	clipboardBusyAt atomic.Int64
 
 	// 监控在检标记：防止同一监控并发检测（慢探针未更新 last_checked_ts 时被重复选为待检）
 	// 导致宕机时重复发送通知。LoadOrStore 原子保证同一时刻仅一个检查协程通过。

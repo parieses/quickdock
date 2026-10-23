@@ -6,6 +6,7 @@ import { ref, onMounted, computed, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import {
   SitesList, SitesCreate, SitesUpdate, SitesDelete,
@@ -352,12 +353,10 @@ async function regenerate() {
 async function copySnippet() {
   const text = gen.value.text
   if (!text) return
-  try {
-    await navigator.clipboard.writeText(text)
+  if (await copyToClipboard(text)) {
     toast.success(t('siteCopied'))
-  } catch (e: any) {
-    logErr('SitesPanel.copy', e)
-    toast.error(getErrorMessage(e))
+  } else {
+    toast.error(t('copyFailed'))
   }
 }
 

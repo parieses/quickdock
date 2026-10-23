@@ -8,6 +8,7 @@ import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
 import ClipboardAiPanel from './ClipboardAiPanel.vue'
 import {
   ListClipboardEntries,
+  CopyClipboardEntry,
   PasteClipboardEntry,
   GetClipboardImageBase64,
   HideClipboardWindow,
@@ -260,13 +261,18 @@ async function loadEntries() {
 
 async function handleCopy(entry: ClipboardEntry) {
   try {
-    // 紧凑模式（独立窗口）粘贴后窗口关闭，先归零滚动避免下次打开卡顿
+    // 两种宿主窗口的点击语义不同，不能都用「复制 + 模拟 Ctrl+V」：
+    //   - 浮窗（compact）：点条目 = 选一条内容贴到刚才那个程序里，所以写入后隐藏浮窗再发 Ctrl+V；
+    //   - 主窗口的剪贴板页：点条目 = 只放回剪贴板。旧实现同样隐藏窗口并发 Ctrl+V，
+    //     于是这次粘贴落到了 QuickDock 自己身上（当前焦点的搜索框/输入框），
+    //     用户看到的是「粘贴没反应」或「输入框被塞了东西」。
     if (props.compact) {
+      // 先归零滚动避免下次打开卡顿
       listRef.value?.scrollTo(0, 0)
-    }
-    await PasteClipboardEntry(entry.id)
-    // 主页面模式下刷新列表，让条目因 created_at 更新而移到顶部
-    if (!props.compact) {
+      unwrap(await PasteClipboardEntry(entry.id))
+    } else {
+      unwrap(await CopyClipboardEntry(entry.id))
+      toast.success(t('copied'))
       await loadEntries()
     }
   } catch (e) {
@@ -522,12 +528,24 @@ function onPanelKeydown(e: KeyboardEvent) {
   }
 }
 
+// 事件注销句柄：必须用 On 返回的 off 逐个移除。
+//
+// **不要用 Events.Off('clipboard:updated')**：Wails 的 Off 是按事件名整体移除的
+// （签名见 @wailsio/runtime 的 events.d.ts，只接受事件名、没有回调参数），
+// CommandPalette 也监听同名事件，面板一卸载就会把它的监听一起删掉；
+// 反过来命令面板卸载也会删掉面板的监听。被删掉的那一端此后收不到任何刷新，
+// 只能等 30s 轮询或重新挂载——用户看到的就是「复制了，进剪贴板却没有最新内容」。
+// 项目里 App.vue 的 quickdock:dsh:progress 已有同样一处教训，口径保持一致。
+const clipboardEventOffs: Array<() => void> = []
+
 onMounted(() => {
   loadEntries()
   refreshTimer.value = window.setInterval(loadEntries, 30000)
-  Events.On('clipboard:updated', loadEntries)
-  Events.On('clipboard:shown', clearSearch)
-  Events.On('clipboard:before-hide', resetScrollOnHide)
+  clipboardEventOffs.push(
+    Events.On('clipboard:updated', loadEntries),
+    Events.On('clipboard:shown', clearSearch),
+    Events.On('clipboard:before-hide', resetScrollOnHide),
+  )
   document.addEventListener('keydown', onPanelKeydown)
   // 转存菜单：点击面板任意位置即收起（按钮自身用 @click.stop 拦截）
   document.addEventListener('click', closeSaveMenu)
@@ -538,9 +556,8 @@ onUnmounted(() => {
   if (refreshTimer.value !== null) {
     clearInterval(refreshTimer.value)
   }
-  Events.Off('clipboard:updated')
-  Events.Off('clipboard:shown')
-  Events.Off('clipboard:before-hide')
+  clipboardEventOffs.forEach((off) => off())
+  clipboardEventOffs.length = 0
   document.removeEventListener('keydown', onPanelKeydown)
   observerRef.value?.disconnect()
 })

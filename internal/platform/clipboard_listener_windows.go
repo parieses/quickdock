@@ -40,7 +40,36 @@ var (
 	procDispatchMessageW = listenerUser32.NewProc("DispatchMessageW")
 	procPostQuitMessage  = listenerUser32.NewProc("PostQuitMessage")
 	procGetModuleHandleW = listenerKernel32.NewProc("GetModuleHandleW")
+	procClipSeqNum       = listenerUser32.NewProc("GetClipboardSequenceNumber")
+	procIsWindow         = listenerUser32.NewProc("IsWindow")
 )
+
+// ClipboardSequenceNumber 返回系统剪贴板序号：每次有程序写入/清空剪贴板都会递增。
+//
+// 它是「剪贴板内容到底变没变」的唯一可靠判据，且**不需要 OpenClipboard**——
+// 因此可以在监听器失效（WM_CLIPBOARDUPDATE 收不到）时用来兜底补抓。
+// 返回 0 表示不可用（非 Windows 平台，或系统拒绝）。
+func ClipboardSequenceNumber() uint32 {
+	ret, _, _ := procClipSeqNum.Call()
+	return uint32(ret)
+}
+
+// ClipboardListenerAlive 报告监听消息线程是否仍在运行。
+//
+// 用于诊断：序号一直在变却始终没有回调，说明消息线程/监听注册已经失效。
+func ClipboardListenerAlive() bool {
+	if !listenerRunning.Load() {
+		return false
+	}
+	hwnd := listenerHwnd.Load()
+	if hwnd == 0 {
+		return false
+	}
+	// 窗口句柄会被系统复用（销毁后可能被别的窗口占用），单看非零不足以证明
+	// 我们的消息泵还活着；IsWindow 至少能排除「句柄已失效」这一类。
+	ret, _, _ := procIsWindow.Call(hwnd)
+	return ret != 0
+}
 
 // listenerHwnd 监听窗口句柄（移除监听 / 剪贴板读取使用）
 var listenerHwnd atomic.Uintptr

@@ -6,6 +6,7 @@ import { ListLogFiles, ReadLogFile } from '../../bindings/quickdock/services/dia
 import { OpenLogsDir } from '../../bindings/quickdock/services/system/systemservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { copyToClipboard } from '../utils/clipboard'
 
 const { t } = useI18n()
 
@@ -111,28 +112,10 @@ watch([levels, keyword], () => { /* 纯前端过滤，computed 自动更新 */ }
 
 const copied = ref(false)
 let copyTimer: ReturnType<typeof setTimeout> | null = null
+// 复制统一走 utils/clipboard：后端 Win32 写入，不依赖 WebView2 的焦点/激活状态。
 async function copyText(text: string) {
   if (!text) return
-  let ok = false
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text)
-      ok = true
-    }
-  } catch { /* 落到兜底方案 */ }
-  if (!ok) {
-    try {
-      const ta = document.createElement('textarea')
-      ta.value = text
-      ta.style.position = 'fixed'
-      ta.style.left = '-9999px'
-      document.body.appendChild(ta)
-      ta.focus(); ta.select()
-      document.execCommand('copy')
-      document.body.removeChild(ta)
-      ok = true
-    } catch { /* ignore */ }
-  }
+  const ok = await copyToClipboard(text)
   if (ok) {
     copied.value = true
     if (copyTimer) clearTimeout(copyTimer)

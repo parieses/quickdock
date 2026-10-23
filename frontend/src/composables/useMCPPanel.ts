@@ -11,6 +11,7 @@ import {
   MCPCheck,
 } from '../../bindings/quickdock/services/mcp/mcpservice'
 import { unwrap } from '../utils/api'
+import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 
 export interface MCPToolInfo {
@@ -69,11 +70,11 @@ export function useMCPPanel(selectedId: Ref<string>) {
 
   async function copyMCP(text: string) {
     if (!text) return
-    try {
-      await navigator.clipboard.writeText(text)
+    // 统一入口（后端 Win32 写入），避免 WebView2 里 navigator.clipboard 被静默拒绝。
+    if (await copyToClipboard(text)) {
       toast.success(t('copied'))
-    } catch (e) {
-      toast.error(getErrorMessage(e))
+    } else {
+      toast.error(t('copyFailed'))
     }
   }
 

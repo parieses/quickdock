@@ -7,7 +7,8 @@ import (
 	"fmt"
 	"image"
 	"image/draw"
-	"unsafe"
+	"image/png"
+	"os"
 
 	"github.com/wailsapp/wails/v3/pkg/w32"
 )
@@ -121,39 +122,52 @@ func writeClipboardDIB(hwnd uintptr, dib []byte) error {
 	if len(dib) == 0 {
 		return fmt.Errorf("empty image data")
 	}
+	// 全局内存准备好之后才动剪贴板，避免「清空了旧内容但新内容没写进去」。
+	handle, err := allocGlobal(dib)
+	if err != nil {
+		return err
+	}
+	return writeClipboardFormats(hwnd, []clipboardFormat{{format: 8, handle: handle}})
+}
 
-	// 同 SetClipboardFiles：先把全局内存准备好，最后才 EmptyClipboard + SetClipboardData，
-	// 避免「清空了旧内容但新内容没写进去」把用户的剪贴板搞成空的。
-	// 0x0042 = GMEM_MOVEABLE | GMEM_ZEROINIT
-	handle := w32.GlobalAlloc(0x0042, uint32(len(dib)))
-	if handle == 0 {
-		return fmt.Errorf("GlobalAlloc failed")
+// SetClipboardFilesAndImage 一次会话同时写入 CF_HDROP(文件) 与 CF_DIB(图片)。
+//
+// 用于「剪贴板历史里的图片条目本身来自文件」这类内容：用户当初复制的是文件，
+// 粘回资源管理器应当还是文件，粘到聊天窗口应当还是图。两次会话分别写会让后写的
+// 格式把先写的格式冲掉（EmptyClipboard 是全局的），因此必须由这里一次写完。
+func SetClipboardFilesAndImage(hwnd uintptr, paths []string, imagePath string) error {
+	if hwnd == 0 {
+		return fmt.Errorf("window not initialized")
 	}
-	ptr := w32.GlobalLock(handle)
-	if ptr == nil {
-		// 内存从未被写入，绝不能提交给系统剪贴板，否则会把清零数据当成真实内容；
-		// 同时释放句柄避免泄漏。
-		w32.GlobalFree(handle)
-		return fmt.Errorf("GlobalLock failed")
+	if len(paths) == 0 {
+		return SetClipboardImage(hwnd, imagePath)
 	}
-	copy(unsafe.Slice((*byte)(ptr), len(dib)), dib)
-	w32.GlobalUnlock(handle)
 
-	// 临界区整体锁线程（见 WithClipboard）：Open/Close 跨线程 = 剪贴板永久锁死。
-	var setFailed bool
-	if !WithClipboard(hwnd, func() {
-		w32.EmptyClipboard()
-		if w32.SetClipboardData(8, handle) == 0 {
-			setFailed = true
-		}
-	}) {
-		w32.GlobalFree(handle)
-		return fmt.Errorf("OpenClipboard failed")
+	f, err := os.Open(imagePath)
+	if err != nil {
+		return fmt.Errorf("failed to open image file: %w", err)
 	}
-	if setFailed {
-		// 设置失败 → 内存所有权未转移，需自行释放。
-		w32.GlobalFree(handle)
-		return fmt.Errorf("SetClipboardData failed")
+	defer f.Close()
+	src, err := png.Decode(f)
+	if err != nil {
+		return fmt.Errorf("PNG decode failed: %w", err)
 	}
-	return nil
+	dib := encodeDIB(src)
+	if len(dib) == 0 {
+		return fmt.Errorf("empty image data")
+	}
+
+	hFile, err := allocGlobal(hdropBytes(paths))
+	if err != nil {
+		return err
+	}
+	hDib, err := allocGlobal(dib)
+	if err != nil {
+		w32.GlobalFree(hFile) // 文件句柄尚未提交给系统，须自行释放
+		return err
+	}
+	return writeClipboardFormats(hwnd, []clipboardFormat{
+		{format: 15, handle: hFile},
+		{format: 8, handle: hDib},
+	})
 }
