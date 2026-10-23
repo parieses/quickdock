@@ -43,10 +43,27 @@ type AppService struct {
 	// RegisterPluginHostFn 注入插件 Host API 注册（实现在 services/plugin 包，避免循环依赖）
 	RegisterPluginHostFn func()
 
+	// AskAIFn 注入「一次性 AI 问答」能力（实现在 services/ai 包，避免循环依赖）。
+	//
+	// 为什么是函数而不是 *ai.AIService 指针：services/ai 反过来 import services
+	// （门面需要 ApiResult 与 App 回指），若这里持具体类型就构成环。
+	// 函数签名是唯一能同时被 sshx 与 plugin 复用、又不必 import ai 包的形状。
+	//
+	// 语义：传入 system 与 question，返回模型正文与所用模型名。
+	// 由 main.go 在创建 aiSvc 之后注入；未注入时调用方须判 nil（插件无 AI 配置、
+	// AI 服务构造失败等）。
+	AskAIFn func(system, question string, timeoutSec int) (text string, model string, err error)
+
 	// 标记"这是一次真退出"，令主窗口的 WindowClosing 钩子放行而不是取消关闭并隐藏到托盘。
 	// 更新时（RestartApp 拉起安装器 → app.Quit）必须先调用，否则 cleanup() 里的
 	// window.Close() 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净。
 	PrepareQuitFn func()
+
+	// RestartAppFn 注入「重启应用」能力（实现在 main 包 tray.go：脱离式拉起新进程 +
+	// --restart-wait 等待旧进程退出，再走统一退出路径）。存储位置切换等场景需要
+	// 真正重启才能让新数据目录生效——注意与 UpdateService.RestartApp 区分：
+	// 那个是「就地替换更新」专用，无待更新时会失败，不能用于普通重启。
+	RestartAppFn func()
 
 	// 插件管理器
 	PluginMgr     *plugin.Manager
@@ -145,6 +162,11 @@ func (a *AppService) SetApp(app *application.App) {
 		})
 		// 崩溃自愈看门狗：内部自起 goroutine，首个巡检在 15s 后，不阻塞启动路径。
 		a.Env.StartWatchdog(context.Background())
+		// Everything 文件检索预热：后台无头拉起实例（内部自带全部前置条件判断：
+		// 已装/未运行/总开关开/本进程建得了索引），把冷索引的空窗挪出用户交互期。
+		if ev := a.Env.EverythingRuntime(); ev != nil {
+			go ev.WarmUp()
+		}
 	}
 	// 站点服务：用户此前显式启用过站点则自动拉起。
 	// 失败只记日志不弹窗——开机就抛一个「443 绑定失败」没有意义，状态在 SitesList 里可见，

@@ -38,6 +38,7 @@ import (
 //	host.process.kill                           （需 permissions.processKill；高危，默认拒绝）
 //	host.process.exec                           （需 permissions.process；程序名白名单，高危，默认拒绝）
 //	host.mcp.call                                （无需权限，等级门由 mcpsrv.Call 把关）
+//	host.ai.ask                                  （无需权限，复用宿主 AI 档案，一次性问答不落库）
 //	db.get / db.set / db.delete / db.list        （无需权限，按 plugin_id 强隔离）
 
 const (
@@ -48,6 +49,12 @@ const (
 	pluginDataMaxList   = 500              // db.list 返回条数上限
 	pluginHTTPMaxRedirs = 5
 	pluginURLMaxLen     = 8 << 10 // url 长度上限 8 KiB，防超长 URL 拖慢 / 触发异常
+
+	// host.ai.ask 的入参上限（rune 而非 byte：中文一个字 3 字节，按字节算会误伤）。
+	// 与 services/ai 的 askMaxUserRune 同量级，此处先拦一道避免无谓往返，
+	// 最终仍由 AIAsk 兜底裁剪。
+	pluginAIQuestionMaxRune = 4000
+	pluginAISystemMaxRune   = 4000
 )
 
 // 屏幕取色等场景临时隐藏宿主窗口时的可见性快照：host.window.show 据此只还原
@@ -436,6 +443,47 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 			return nil, err
 		}
 		return map[string]interface{}{"tool": arg.Tool, "result": res}, nil
+	})
+
+	// ---- AI 能力 ----
+	//
+	// 让插件用宿主的 AI 档案做一次性问答：插件自己不带 API Key，
+	// 也不用各自实现流式解析与重试，凭据始终留在 Go 后端。
+	//
+	// 不设权限门：AI 档案是用户自己配的凭据，插件能提问不等于能读到凭据
+	//（返回的只有模型正文）。若后续要按插件区分额度/模型，再加 scope。
+	svc.App.PluginMgr.InjectHostMethod("host.ai.ask", func(pluginID string, params json.RawMessage) (interface{}, error) {
+		if svc.App.AskAIFn == nil {
+			return nil, fmt.Errorf("AI 能力不可用")
+		}
+		var arg struct {
+			// System 可选。留空则用档案里配置的 SystemPrompt。
+			System string `json:"system"`
+			// Question 必填。
+			Question string `json:"question"`
+			// TimeoutSec 可选，上限由 AIAsk 内部收敛到 120s。
+			TimeoutSec int `json:"timeoutSec"`
+		}
+		if err := json.Unmarshal(params, &arg); err != nil {
+			return nil, fmt.Errorf("参数解析失败: %w", err)
+		}
+		question := strings.TrimSpace(arg.Question)
+		if question == "" {
+			return nil, fmt.Errorf("question 不能为空")
+		}
+		// 入参上限：插件是第三方代码，不能假设它会自觉控制长度。
+		// 与 ai_ask.go 的常量同量级，这里先拦一道，省掉一次无谓的网络往返。
+		if n := len([]rune(question)); n > pluginAIQuestionMaxRune {
+			return nil, fmt.Errorf("question 超长（上限 %d 字符，当前 %d）", pluginAIQuestionMaxRune, n)
+		}
+		if n := len([]rune(arg.System)); n > pluginAISystemMaxRune {
+			return nil, fmt.Errorf("system 超长（上限 %d 字符，当前 %d）", pluginAISystemMaxRune, n)
+		}
+		text, model, err := svc.App.AskAIFn(arg.System, question, arg.TimeoutSec)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"text": text, "model": model}, nil
 	})
 
 	// ---- 插件专属存储（按 plugin_id 强隔离，插件无法跨插件读写）----

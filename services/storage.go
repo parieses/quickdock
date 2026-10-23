@@ -32,3 +32,14 @@ func (a *AppService) ResetDataDir() *ApiResult {
 	}
 	return OkMsg(nil, "已恢复默认，重启后生效")
 }
+
+// RestartApp 真正重启应用（脱离式拉起新进程 + 等待旧进程退出后统一退出）。
+// 存储位置修改必须重启才能生效：日志、数据库、运行时都已按旧目录打开。
+// 与 UpdateService.RestartApp（就地替换更新专用）语义不同，那个无待更新时会失败。
+func (a *AppService) RestartApp() *ApiResult {
+	if a.RestartAppFn == nil {
+		return FailMsg("重启能力未初始化")
+	}
+	a.RestartAppFn()
+	return Ok(nil)
+}

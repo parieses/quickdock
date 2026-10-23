@@ -360,6 +360,22 @@ export interface EnvRuntimeInfo {
   hasService: boolean // 是否支持服务启停/状态监听
 }
 
+// Everything 单条文件检索结果（对应后端 internal/env 的 FileSearchResult）。
+//
+// 为什么不从 bindings 导入：EnvEverythingSearch 对外统一返回 ApiResult，
+// FileSearchResult 由 ApiResult.data 承载，wails3 不会为它生成 model；
+// 且 bindings 在 `wails3 build` 时会被重新生成、手工补的接口会被抹掉。
+// 故在此手写一份——后端增删字段时需同步。
+// 注意：字段名必须与后端 Go 结构体的 json tag 一致（小写 path/name/dir/modified）。
+// JS 属性访问大小写敏感，写成 Path/Name/Dir 会静默拿到 undefined——
+// 症状是命令面板「文件」分组出现但每行只有图标没有文字（2026-10-22 实际踩中）。
+export interface FileSearchResult {
+  path?: string // 完整路径
+  name?: string // 文件名（含扩展名）
+  dir?: string // 所在目录
+  modified?: number // 修改时间（Unix 秒）
+}
+
 // 更新状态（对应后端 services/update 的 UpdateStatus）。
 //
 // 为什么不从 bindings 导入：R11 要求对外接口统一返回 ApiResult 之后，该结构体

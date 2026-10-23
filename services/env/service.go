@@ -10,6 +10,7 @@ import (
 
 	envengine "quickdock/internal/env"
 	"quickdock/internal/logger"
+	"quickdock/internal/platform"
 	"quickdock/services"
 )
 
@@ -719,4 +720,150 @@ func (s *EnvironmentService) EnvManifestImport(data string, applyActive bool) *s
 		"appliedActive": applied,
 		"mergedNotes":   merged,
 	})
+}
+
+// ===== Everything 文件检索（效率工具） =====
+
+// EnvEverythingStatus 返回 Everything 的综合四态状态（未安装 / 缺少 es.exe / 已停止 / 运行中）。
+func (s *EnvironmentService) EnvEverythingStatus() *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	e := s.App.Env.EverythingRuntime()
+	if e == nil {
+		return services.FailMsg("Everything 未启用")
+	}
+	return services.Ok(e.EverythingStatus())
+}
+
+// EnvEverythingSearch 通过 es.exe 检索本地文件（命令面板 / MCP 复用）。
+// 总开关关闭、es.exe 缺失、Everything 未运行、查询超时等全部静默降级为空结果，绝不阻塞调用方。
+func (s *EnvironmentService) EnvEverythingSearch(query string, limit int, sortBy string) *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	// 总开关关闭时直接返回空，不触发 es.exe。
+	if !envengine.FileSearchEnabled() {
+		return services.Ok([]envengine.FileSearchResult{})
+	}
+	e := s.App.Env.EverythingRuntime()
+	if e == nil {
+		return services.Ok([]envengine.FileSearchResult{})
+	}
+	results, err := e.Search(context.Background(), query, limit, sortBy)
+	if err != nil {
+		// 仅参数非法（如空查询）会走到这里，正常返回错误；其余降级已在引擎内吞掉。
+		return services.Fail(err)
+	}
+	if results == nil {
+		results = []envengine.FileSearchResult{}
+	}
+	return services.Ok(results)
+}
+
+// EnvEverythingStart 启动 Everything.exe（外部工具，直接拉起其进程）。
+func (s *EnvironmentService) EnvEverythingStart() *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	e := s.App.Env.EverythingRuntime()
+	if e == nil {
+		return services.FailMsg("Everything 未启用")
+	}
+	if err := e.Start(context.Background(), "", nil); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// EnvEverythingStop 停止 Everything.exe（结束其进程）。
+func (s *EnvironmentService) EnvEverythingStop() *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	e := s.App.Env.EverythingRuntime()
+	if e == nil {
+		return services.FailMsg("Everything 未启用")
+	}
+	if err := e.Stop(""); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// EnvEverythingOpenDownload 打开 Everything 官网下载页（64 位安装包）。
+func (s *EnvironmentService) EnvEverythingOpenDownload() *services.ApiResult {
+	if err := platform.ShellOpen("https://www.voidtools.com/downloads/", ""); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// EnvEverythingOpenCliDownload 打开 Everything CLI（es.exe）下载页，提示放入 Everything 目录或 PATH。
+func (s *EnvironmentService) EnvEverythingOpenCliDownload() *services.ApiResult {
+	if err := platform.ShellOpen("https://www.voidtools.com/downloads/#cli", ""); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// EnvEverythingInstall 程序托管下载 Everything 便携版（便捷版）：按系统 32/64 位自动选包，
+// 下载并解压到 QuickDock 托管目录，不再跳转到官网手动下载。
+func (s *EnvironmentService) EnvEverythingInstall() *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	e := s.App.Env.EverythingRuntime()
+	if e == nil {
+		return services.FailMsg("Everything 未启用")
+	}
+	cb := envengine.InstallCallback{
+		OnLog: func(msg string) { logger.I("[env][everything] %s", msg) },
+	}
+	if err := e.Install(context.Background(), "", cb); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// EnvEverythingInstallEs 程序托管下载 es.exe 命令行工具（文件检索依赖它），落盘到 Everything 同目录。
+func (s *EnvironmentService) EnvEverythingInstallEs() *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	e := s.App.Env.EverythingRuntime()
+	if e == nil {
+		return services.FailMsg("Everything 未启用")
+	}
+	cb := envengine.InstallCallback{
+		OnLog: func(msg string) { logger.I("[env][everything] %s", msg) },
+	}
+	if err := e.InstallEs(context.Background(), cb); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// EnvEverythingGetSettings 返回文件搜索相关设置（自定义安装目录 / es.exe 路径 / 总开关）。
+func (s *EnvironmentService) EnvEverythingGetSettings() *services.ApiResult {
+	settings := envengine.EverythingSettings{
+		InstallPath:       envengine.GetEverythingInstallPath(),
+		EsExePath:         envengine.GetEsExePath(),
+		FileSearchEnabled: envengine.FileSearchEnabled(),
+	}
+	return services.Ok(settings)
+}
+
+// EnvEverythingSetSettings 写入文件搜索设置；空字符串表示恢复默认（自动探测）。
+func (s *EnvironmentService) EnvEverythingSetSettings(installPath string, esExePath string, enabled bool) *services.ApiResult {
+	if err := envengine.SetEverythingInstallPath(installPath); err != nil {
+		return services.Fail(err)
+	}
+	if err := envengine.SetEsExePath(esExePath); err != nil {
+		return services.Fail(err)
+	}
+	if err := envengine.SetFileSearchEnabled(enabled); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
 }

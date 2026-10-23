@@ -86,6 +86,11 @@
   --color-accent-border: rgba(91, 140, 255, 0.2);
   --color-accent-muted: rgba(91, 140, 255, 0.5);
   --color-accent-light: #7ea6ff;
+  /* 代码块：AI 助手与笔记预览共用。AI 气泡已改为透明底，
+     代码块需要自带底色才能与正文拉开层级，故单列一组 token。 */
+  --color-code-bg: #14171d;
+  --color-code-bar-bg: #1c2029;
+  --color-code-inline-bg: #242932;
 
   /* 终端调色板：xterm 只接受具体色值，无法传 var()，所以这些 token 由
      SshTerminal.vue 用 getComputedStyle 读出实际值再喂给 xterm。
@@ -174,6 +179,9 @@
   --color-accent-border: rgba(91, 140, 255, 0.15);
   --color-accent-muted: rgba(91, 140, 255, 0.5);
   --color-accent-light: #7ea6ff;
+  --color-code-bg: #f4f6f9;
+  --color-code-bar-bg: #e9ecf1;
+  --color-code-inline-bg: #e4e7ec;
 
   /* 浅色终端调色板：对比度按浅底重算过，直接复用深色色值会偏灰、
      在 #fbfaf7 上读不清（尤其 yellow / cyan）。 */

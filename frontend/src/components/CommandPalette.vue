@@ -195,7 +195,7 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
 ]
 
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file'
 interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
 interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
 interface CmdNote { id: string; name: string; content: string; isFolder: boolean; parentId: string; keyword: string }
@@ -205,6 +205,7 @@ interface SearchResult {
   frecencyScore?: number; appPath?: string; appCategory?: string; pluginId?: string; pluginCommandId?: string
   pluginHasFrontend?: boolean; pluginNotRunning?: boolean; inlineInput?: string; pluginResult?: string; score?: number; matchType?: string; url?: string; clipAction?: string; acceptsInput?: boolean
   envRuntimeId?: string; envVersion?: string; envAction?: 'start' | 'stop' | 'mgmt'
+  filePath?: string; fileDir?: string; fileName?: string
 }
 
 // ---- 状态 ----
@@ -598,7 +599,23 @@ function onGlobalKey(e: KeyboardEvent) {
 
 // ---- 执行 ----
 function isOpenable(r: SearchResult): boolean {
-  return r.type === 'item' || r.type === 'url' || r.type === 'app' || r.type === 'quicklink' || r.type === 'quicklink-inline'
+  return r.type === 'item' || r.type === 'url' || r.type === 'app' || r.type === 'quicklink' || r.type === 'quicklink-inline' || r.type === 'file'
+}
+
+// Everything 命中的文件：回车不打开文件本身，而是定位到所在文件夹
+// （Windows = explorer /select，文件夹弹出且文件处于选中态）——搜文件的目的
+// 通常是接着操作它的目录，直接打开文件反而常跳出重型应用。
+// 文件结果不写使用历史：Everything 检索是即时查询，记进去只会把「最近使用」冲淡。
+async function openFileItem(r: SearchResult): Promise<boolean> {
+  if (!r.filePath) return false
+  try {
+    unwrap(await RevealInExplorer(r.filePath))
+    return true
+  } catch (e) {
+    console.error('[CmdPalette] RevealInExplorer:', e)
+    toast?.error?.(getErrorMessage(e))
+    return false
+  }
 }
 
 async function openResultOnly(r: SearchResult): Promise<boolean> {
@@ -621,6 +638,10 @@ async function openResultOnly(r: SearchResult): Promise<boolean> {
   if (r.type === 'app' && r.appPath) {
     recordUsage('app:' + r.label, 'app', r.label, r.desc)
     try { await LaunchInstalledApp(r.appPath); return true } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e); toast?.error?.(getErrorMessage(e)); return false }
+  }
+  if (r.type === 'file' && r.filePath) {
+    const ok = await openFileItem(r)
+    return ok
   }
   return false
 }
@@ -665,6 +686,9 @@ async function executeSelected() {
   } else if (result.type === 'app' && result.appPath) {
     recordUsage('app:' + result.label, 'app', result.label, result.desc)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }; closePalette()
+  } else if (result.type === 'file' && result.filePath) {
+    const ok = await openFileItem(result)
+    if (ok) closePalette()
   } else if (result.type === 'env') {
     await executeEnvAction(result)
   } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
@@ -809,6 +833,7 @@ function targetValue(r: SearchResult): string {
     case 'note': return r.note?.content || ''
     case 'calculator': return r.calcResult || ''
     case 'plugin': return r.label || ''
+    case 'file': return r.filePath || ''
     default: return ''
   }
 }
@@ -827,15 +852,17 @@ const contextActions = computed<PaletteAction[]>(() => {
   const value = targetValue(r)
 
   // 主操作（等价于直接回车）
+  // 文件结果（Everything 检索）的主操作是「定位所在文件夹」而非打开文件本身
   const primaryLabel =
     r.type === 'env' ? (r.envAction === 'stop' ? t('envStop') : r.envAction === 'mgmt' ? t('envEnableMgmt') : t('envStart'))
       : r.type === 'app' ? t('actLaunch')
         : r.type === 'note' ? t('actOpenNote')
-          : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
-            : r.type === 'calculator' ? t('actCopyResult')
-              : t('actOpen')
+          : r.type === 'file' ? t('actReveal')
+            : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
+              : r.type === 'calculator' ? t('actCopyResult')
+                : t('actOpen')
   const primaryIcon = r.type === 'env' ? (r.envAction === 'stop' ? Power : r.envAction === 'mgmt' ? Gauge : Play)
-    : r.type === 'note' ? FileText : r.type === 'calculator' ? Copy : Play
+    : r.type === 'note' ? FileText : r.type === 'file' ? FolderSearch : r.type === 'calculator' ? Copy : Play
   acts.push({ id: 'primary', label: primaryLabel, icon: primaryIcon, run: () => executeSelected() })
 
   if (r.label) acts.push({ id: 'copy-name', label: t('actCopyName'), icon: Copy, run: () => copyAndClose(r.label) })
@@ -858,7 +885,8 @@ const contextActions = computed<PaletteAction[]>(() => {
     }
   }
 
-  if (isLocalPath(value)) acts.push({ id: 'reveal', label: t('actReveal'), icon: FolderSearch, run: () => revealAndClose(value) })
+  // 文件结果的主操作已是「定位所在文件夹」，不重复追加 reveal 项
+  if (isLocalPath(value) && r.type !== 'file') acts.push({ id: 'reveal', label: t('actReveal'), icon: FolderSearch, run: () => revealAndClose(value) })
 
   if ((r.type === 'url' || r.type === 'clipboard-action') && r.url) {
     acts.push({ id: 'save-url', label: t('cmdSaveAsItem'), icon: Save, run: () => saveUrlAndClose(r.url!) })
@@ -997,7 +1025,9 @@ async function refreshRecentCache(gen?: number) {
     if (gen === undefined || gen === itemsLoadGen) {
       // plugin 记录 label 可能为空（某些热键/自动执行路径），但近期有 plugin 记录本身
       // 就值得留在「最近使用」——组装时用命令标题/插件名兜底，故放宽过滤
-      recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && (e.label || e.type === 'plugin'))
+      // file（Everything 文件结果）不写也不读历史：即时检索不该沉淀进「最近使用」，
+      // 这里顺手滤掉旧版本可能已写入的 file 记录
+      recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.type !== 'file' && (e.label || e.type === 'plugin'))
     }
   } catch (e) { console.error('[CmdPalette] GetAllUsage:', getErrorMessage(e)) }
 }

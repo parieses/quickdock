@@ -27,7 +27,7 @@ import {
   SuspendHotkeys,
   ResumeHotkeys,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
-import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir } from '../../bindings/quickdock/services/appservice'
+import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, RestartApp as RestartAppPlain } from '../../bindings/quickdock/services/appservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
@@ -294,6 +294,28 @@ async function resetStorage() {
 watch(activePage, (k) => {
   if (k === 'storage') loadStorage()
 })
+
+// 存储位置页的「重启」：走 AppService.RestartApp（真重启，脱离式拉起新进程）。
+// 以前这里复用更新页的 restartApp()——那个是「就地替换更新」专用，无待更新时必然失败，
+// 且错误只显示在更新页，存储页表现为「点了没反应」，数据目录迁移也因此卡住。
+// 现在错误直接落在本页的 storageMsg，用户能看到真实原因。
+async function restartAppForStorage() {
+  storageLoading.value = true
+  storageMsg.value = t('storageRestarting')
+  try {
+    const res = await RestartAppPlain()
+    if (res && res.code === 0) {
+      // 成功时进程会在新实例接管后异步退出，不再有后续 UI 更新
+      storageMsg.value = t('storageRestarting')
+    } else {
+      storageMsg.value = res?.msg || t('updateError')
+    }
+  } catch (e: any) {
+    storageMsg.value = getErrorMessage(e)
+  } finally {
+    storageLoading.value = false
+  }
+}
 
 // ---- 主题 / 语言 ----
 // 主题状态由 App 统一管理（App.vue provide('theme')）：此处不再各存一份，否则用户切主题后
@@ -670,7 +692,7 @@ async function toggleAutoStart() {
                 >
                   {{ t('storageReset') }}
                 </button>
-                <button class="btn btn-secondary" @click="restartApp">{{ t('storageRestart') }}</button>
+                <button class="btn btn-secondary" :disabled="storageLoading" @click="restartAppForStorage">{{ t('storageRestart') }}</button>
               </div>
 
               <p class="field-hint">{{ t('storageRestartHint') }}</p>

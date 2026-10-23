@@ -79,6 +79,16 @@ import {
   EnvUserEnvSetPath,
   EnvRuntimeTasks,
   EnvRunTask,
+  EnvEverythingStatus,
+  EnvEverythingSearch,
+  EnvEverythingStart,
+  EnvEverythingStop,
+  EnvEverythingInstall,
+  EnvEverythingInstallEs,
+  EnvEverythingOpenDownload,
+  EnvEverythingOpenCliDownload,
+  EnvEverythingGetSettings,
+  EnvEverythingSetSettings,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import {
@@ -328,6 +338,7 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'minio', name: 'MinIO', group: 'middleware', hasService: true },
   { id: 'rabbitmq', name: 'RabbitMQ', group: 'middleware', hasService: true },
   { id: 'git', name: 'Git', group: 'tool', hasService: false, singleVersion: true },
+  { id: 'everything', name: 'Everything', group: 'tool', hasService: true, singleVersion: true },
   { id: 'composer', name: 'Composer', group: 'tool', hasService: false },
   { id: 'ffmpeg', name: 'FFmpeg', group: 'tool', hasService: false },
   { id: 'mailpit', name: 'Mailpit', group: 'tool', hasService: true },
@@ -1498,6 +1509,8 @@ async function load() {
       if (selectedId.value && selectedId.value !== HARNESS_KEY && selectedId.value !== HTTP_KEY && selectedId.value !== SITES_KEY && selectedId.value !== PORTS_KEY) loadAvailable(selectedId.value)
       // Git 状态表（版本/路径/SSH/LFS）按需拉取
       loadGitInfo()
+      // Everything 四态状态 + 设置（外部工具，按需拉取）
+      loadEverything()
     }
   } catch (e: any) {
     toast.error(t('envLoadFailed') + ': ' + getErrorMessage(e))
@@ -1515,6 +1528,8 @@ async function refresh() {
 }
 
 async function loadAvailable(id: string) {
+  // 外部工具（git/ollama/gh/frpc/everything）无上游下载源，跳过版本拉取
+  if (id === 'everything') return
   const s = ui[id]
   if (s.fetching) return
   s.fetching = true
@@ -1754,6 +1769,155 @@ const gitRows = computed(() => {
     { item: 'Git LFS', status: g.lfs.installed ? 'ok' : 'missing', command: g.lfs.command, path: '', result: g.lfs.version || t('notInstalled') },
   ]
 })
+
+// ---- Everything 文件搜索（效率工具）：四态探测 + 启停 + 设置 ----
+// Everything 是外部程序（参考 git/ollama 的单版本语义），QuickDock 不托管下载与更新，
+// 只负责探测、启停 Everything.exe 进程、提供 es.exe 检索封装与设置。
+interface EverythingStatusInfo {
+  installed: boolean
+  hasEsExe: boolean
+  running: boolean
+  state: 'not_installed' | 'missing_es' | 'stopped' | 'running'
+  version: string
+  exePath: string
+  esExePath: string
+  searchDiag?: string
+  enabled: boolean
+  updatedAt: number
+}
+interface EverythingSettings {
+  installPath: string
+  esExePath: string
+  fileSearchEnabled: boolean
+}
+
+const evStatus = ref<EverythingStatusInfo | null>(null)
+const evSettings = ref<EverythingSettings>({ installPath: '', esExePath: '', fileSearchEnabled: true })
+const evBusy = ref(false)
+
+const evStateText = computed(() => {
+  const st = evStatus.value?.state
+  if (st === 'running') return t('evStateRunning')
+  if (st === 'stopped') return t('evStateStopped')
+  if (st === 'missing_es') return t('evStateMissingEs')
+  if (st === 'not_installed') return t('evStateNotInstalled')
+  return '—'
+})
+const evStateClass = computed(() => {
+  const st = evStatus.value?.state
+  if (st === 'running') return 'ok'
+  if (st === 'missing_es' || st === 'not_installed') return 'fail'
+  return 'warn'
+})
+const evStateHint = computed(() => {
+  const st = evStatus.value?.state
+  if (st === 'running') return t('evRunningReady')
+  if (st === 'stopped') return t('evStoppedHint')
+  if (st === 'missing_es') return t('evMissingEsHint')
+  if (st === 'not_installed') return t('evNotInstalledHint')
+  return ''
+})
+
+async function loadEverything() {
+  if (selected.value?.id !== 'everything') return
+  // 先保留上次数据（消除切回时的闪现），再后台刷新
+  try {
+    const res = unwrap<EverythingStatusInfo>(await EnvEverythingStatus())
+    if (res) evStatus.value = res
+  } catch (e: any) { /* 保留旧值 */ }
+  try {
+    const s = unwrap<EverythingSettings>(await EnvEverythingGetSettings())
+    if (s) evSettings.value = s
+  } catch (e: any) { /* 保留旧值 */ }
+}
+
+async function evRedetect() {
+  if (evBusy.value) return
+  evBusy.value = true
+  try {
+    unwrap(await EnvRefresh()) // 触发后端真实重扫（与刷新按钮一致），再读新状态
+  } catch (e: any) { /* 忽略刷新失败，仍读当前状态 */ }
+  await loadEverything()
+  evBusy.value = false
+}
+
+async function evStart() {
+  if (evBusy.value) return
+  evBusy.value = true
+  try {
+    unwrap(await EnvEverythingStart())
+    toast.success(t('envStarted'))
+    await loadEverything()
+    if (selected.value) refreshRuntimeCacheNow(selected.value)
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  } finally { evBusy.value = false }
+}
+
+async function evStop() {
+  if (evBusy.value) return
+  evBusy.value = true
+  try {
+    unwrap(await EnvEverythingStop())
+    toast.success(t('envStopped'))
+    await loadEverything()
+    if (selected.value) refreshRuntimeCacheNow(selected.value)
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  } finally { evBusy.value = false }
+}
+
+// 程序托管下载 Everything 便携版（便捷版）：按系统 32/64 位自动选包，下载+解压到托管目录。
+async function evInstall() {
+  if (evBusy.value) return
+  evBusy.value = true
+  try {
+    unwrap(await EnvEverythingInstall())
+    toast.success(t('evInstallDone'))
+    await loadEverything()
+    if (selected.value) refreshRuntimeCacheNow(selected.value)
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  } finally { evBusy.value = false }
+}
+
+// 程序托管下载 es.exe 命令行工具（文件检索依赖它），落盘到 Everything 同目录。
+async function evInstallEs() {
+  if (evBusy.value) return
+  evBusy.value = true
+  try {
+    unwrap(await EnvEverythingInstallEs())
+    toast.success(t('evInstallEsDone'))
+    await loadEverything()
+    if (selected.value) refreshRuntimeCacheNow(selected.value)
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  } finally { evBusy.value = false }
+}
+
+// 兜底：跳转官网手动下载（次要入口，主路径是上面的程序托管下载）。
+async function evOpenDownload() {
+  try { unwrap(await EnvEverythingOpenDownload()) } catch (e: any) { toast.error(getErrorMessage(e)) }
+}
+async function evOpenCliDownload() {
+  try { unwrap(await EnvEverythingOpenCliDownload()) } catch (e: any) { toast.error(getErrorMessage(e)) }
+}
+
+async function evSaveSettings() {
+  if (!evSettings.value || evBusy.value) return
+  evBusy.value = true
+  try {
+    unwrap(await EnvEverythingSetSettings(
+      evSettings.value.installPath,
+      evSettings.value.esExePath,
+      evSettings.value.fileSearchEnabled,
+    ))
+    toast.success(t('evSaved'))
+    await loadEverything()
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  } finally { evBusy.value = false }
+}
 
 // 常驻开关：把运行时设为「期望态」。开=随应用自启/崩溃自愈，关=停止。
 // 不再暴露手动 start/stop 单次动作，由后端监督器对账拉起。
@@ -2432,6 +2596,8 @@ watch(selectedId, (id) => {
   if (id === HARNESS_KEY) loadDshRunning()
   // Git 区块切换时拉取状态表
   loadGitInfo()
+  // Everything 区块切换时拉取四态状态 + 设置
+  loadEverything()
 })
 // 侧边栏 harness 入口要求切换区块时同步定位
 watch(() => props.initialSection, (v) => {
@@ -2612,9 +2778,9 @@ const s = currentRuntimeState
               <span class="detail-id">{{ selected.id }}</span>
             </div>
             <div class="detail-badges">
-              <span v-if="selected.hasService" class="badge svc">{{ t('svcManage') }}</span>
+              <span v-if="selected.hasService && selected.id !== 'everything'" class="badge svc">{{ t('svcManage') }}</span>
               <span v-for="p in selected.platforms" :key="p" class="badge plat">{{ p }}</span>
-              <label v-if="selected.hasService" class="svc-switch" :class="{ on: selected.enabled, busy: settingEnabled[selected.id] }">
+              <label v-if="selected.hasService && selected.id !== 'everything'" class="svc-switch" :class="{ on: selected.enabled, busy: settingEnabled[selected.id] }">
                 <input
                   type="checkbox"
                   :checked="selected.enabled"
@@ -2819,8 +2985,8 @@ const s = currentRuntimeState
           </div>
         </section>
 
-        <!-- 已下载 / 已安装版本（非 Git 运行时；Git 走上方状态表） -->
-        <section v-else-if="selected.id !== 'git'" class="detail-block">
+        <!-- 已下载 / 已安装版本（非 Git / Everything 运行时；Git 走上方状态表，Everything 走专属面板） -->
+        <section v-else-if="selected.id !== 'git' && selected.id !== 'everything'" class="detail-block">
           <div class="block-head">
             <span class="block-title">{{ t('installedVersions') }}</span>
             <span class="block-count">{{ selected.installed.length }}</span>
@@ -2984,6 +3150,100 @@ const s = currentRuntimeState
           </div>
         </section>
 
+        <!-- Everything 文件搜索（效率工具专属）：四态状态 + 启停 + 重新检测 + 外部下载引导 + 设置 -->
+        <section v-if="selected.id === 'everything'" class="detail-block">
+          <div class="block-head">
+            <span class="block-title">{{ t('evPanel') }}</span>
+            <span class="block-count" :class="'ev-state-' + (evStatus?.state || '')">{{ evStateText }}</span>
+            <button class="link-btn import-btn" :disabled="evBusy" @click="evRedetect">{{ t('evRedetect') }}</button>
+          </div>
+
+          <!-- 状态明细 -->
+          <div class="git-table">
+            <div class="git-row git-head">
+              <span class="g-item">{{ t('item') }}</span>
+              <span class="g-status">{{ t('status') }}</span>
+              <span class="g-cmd">{{ t('command') }}</span>
+              <span class="g-path">{{ t('path') }}</span>
+              <span class="g-result">{{ t('result') }}</span>
+            </div>
+            <div class="git-row">
+              <span class="g-item">{{ t('evRuntime') }}</span>
+              <span class="g-status"><span class="status-dot" :class="evStateClass"></span>{{ evStateText }}</span>
+              <span class="g-cmd">—</span>
+              <span class="g-path">—</span>
+              <span class="g-result">{{ evStateHint }}</span>
+            </div>
+            <div class="git-row">
+              <span class="g-item">{{ t('evVersion') }}</span>
+              <span class="g-status">—</span>
+              <span class="g-cmd">—</span>
+              <span class="g-path clickable" v-if="evStatus?.exePath" :title="t('openInExplorer')" @click="reveal(evStatus.exePath)">{{ evStatus.exePath }}</span>
+              <span class="g-path" v-else>—</span>
+              <span class="g-result">{{ evStatus?.version || t('notInstalled') }}</span>
+            </div>
+            <div class="git-row">
+              <span class="g-item">es.exe</span>
+              <span class="g-status"><span class="status-dot" :class="evStatus?.hasEsExe ? 'ok' : 'fail'"></span>{{ evStatus?.hasEsExe ? t('evOk') : t('evMissing') }}</span>
+              <span class="g-cmd">—</span>
+              <span class="g-path clickable" v-if="evStatus?.esExePath" :title="t('openInExplorer')" @click="reveal(evStatus.esExePath)">{{ evStatus.esExePath }}</span>
+              <span class="g-path" v-else>—</span>
+              <span class="g-result">{{ evStatus?.hasEsExe ? t('evOk') : t('evMissingEsHint') }}</span>
+            </div>
+            <div class="git-row">
+              <span class="g-item">{{ t('evFileSearch') }}</span>
+              <span class="g-status">—</span>
+              <span class="g-cmd">—</span>
+              <span class="g-path">—</span>
+              <span class="g-result">{{ evStatus?.enabled ? t('evOn') : t('evOff') }}</span>
+            </div>
+          </div>
+
+          <!-- 检索诊断：es.exe 连不上 IPC 的典型场景（Everything 以管理员身份运行） -->
+          <div v-if="evStatus?.searchDiag === 'ipc_elevated'" class="env-msg error" style="margin-top:10px">
+            {{ t('evDiagIpcElevated') }}
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="ev-actions">
+            <template v-if="evStatus?.state === 'not_installed'">
+              <button class="env-install-btn" :disabled="evBusy" @click="evInstall">{{ evBusy ? t('evInstalling') : t('evDownload') }}</button>
+              <button class="link-btn" :disabled="evBusy" @click="evOpenDownload">{{ t('evManualSite') }}</button>
+            </template>
+            <template v-else-if="evStatus?.state === 'missing_es'">
+              <button class="env-install-btn" :disabled="evBusy" @click="evInstallEs">{{ evBusy ? t('evInstallingEs') : t('evDownloadCli') }}</button>
+              <button class="link-btn" :disabled="evBusy" @click="evOpenCliDownload">{{ t('evManualSiteCli') }}</button>
+            </template>
+            <template v-else>
+              <button v-if="evStatus?.state === 'stopped'" class="op-btn" :disabled="evBusy" @click="evStart">{{ t('envStart') }}</button>
+              <button v-if="evStatus?.state === 'running'" class="op-btn danger" :disabled="evBusy" @click="evStop">{{ t('envStop') }}</button>
+              <button class="op-btn" :disabled="evBusy" @click="evRedetect">{{ t('evRedetect') }}</button>
+            </template>
+          </div>
+
+          <!-- 设置：文件搜索总开关 + 自定义路径 -->
+          <div class="block-head" style="margin-top:18px">
+            <span class="block-title">{{ t('evSettings') }}</span>
+          </div>
+          <div class="ev-settings">
+            <label class="ev-toggle">
+              <input type="checkbox" :checked="evSettings?.fileSearchEnabled" @change="evSettings && (evSettings.fileSearchEnabled = ($event.target as HTMLInputElement).checked)" />
+              <span>{{ t('evSearchEnabled') }}</span>
+            </label>
+            <span class="ev-hint">{{ t('evSearchEnabledHint') }}</span>
+
+            <div class="ev-field">
+              <label>{{ t('evInstallPath') }}</label>
+              <input class="env-input" v-model="evSettings.installPath" :placeholder="t('evInstallPathPlaceholder')" />
+            </div>
+            <div class="ev-field">
+              <label>es.exe {{ t('path') }}</label>
+              <input class="env-input" v-model="evSettings.esExePath" :placeholder="t('evEsExePathPlaceholder')" />
+            </div>
+            <button class="op-btn small" :disabled="evBusy" @click="evSaveSettings">{{ t('save') }}</button>
+          </div>
+        </section>
+
         <!-- MCP 接入（MCP 专属）：监听地址、客户端配置、已开放工具 -->
         <section v-if="selected.id === 'mcp'" class="detail-block mcp-panel">
           <div class="block-head">
@@ -3099,9 +3359,9 @@ const s = currentRuntimeState
           <pre class="mcp-code">{{ webdavInfo.path || '—' }}</pre>
         </section>
 
-        <!-- 安装 / 更新（MCP / WebDAV 为内置服务，无版本可装，后端 Install 直接返回错误，故隐藏）。
+        <!-- 安装 / 更新（MCP / WebDAV 为内置服务，Everything 为外部程序，均无版本可装；后端 Install 直接返回错误，故隐藏）。
              单版本运行时（git/ollama/gh/frpc）隐藏版本下拉框，改为一键装最新 / 一键更新。 -->
-        <section v-if="selected.id !== 'mcp' && selected.id !== 'webdav' && s" class="detail-block install-card">
+        <section v-if="selected.id !== 'mcp' && selected.id !== 'webdav' && selected.id !== 'everything' && s" class="detail-block install-card">
           <div class="block-head">
             <span class="block-title">{{ t('installNewVersion') }}</span>
           </div>
@@ -4747,5 +5007,19 @@ const s = currentRuntimeState
 .manifest-tag.extra { color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
 .manifest-tag.ok { color: var(--color-success); background: var(--color-success-bg); }
 .hidden-file { display: none; }
+
+/* Everything 文件搜索面板 */
+.ev-state-running { color: var(--color-success); }
+.ev-state-stopped { color: var(--color-warning); }
+.ev-state-missing_es,
+.ev-state-not_installed { color: var(--color-danger); }
+.ev-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
+.ev-settings { margin-top: 4px; }
+.ev-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-text-primary); }
+.ev-toggle input { width: 15px; height: 15px; accent-color: var(--color-accent); }
+.ev-hint { display: block; margin: 6px 0 14px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; }
+.ev-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
+.ev-field label { font-size: 12px; color: var(--color-text-secondary); }
+.ev-field .env-input { max-width: 420px; }
 
 </style>

@@ -17,4 +17,6 @@
     "noEmit": true
   },
   "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue", "bindings"],
+  // node:test 运行的单元测试不属于应用构建产物，也不参与 vue-tsc 门禁
+  "exclude": ["src/**/*.test.ts"]
 }

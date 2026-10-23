@@ -5,8 +5,10 @@ import type { PluginCmdIndex } from './usePluginIndex'
 import { commandTitle, pluginName } from '../utils/localize'
 import { getPluginLastResult } from '../utils/pluginLastResult'
 import { evaluate, format, convertExpression } from '../utils/calc'
-import { Puzzle, Play, Power, Gauge } from '@lucide/vue'
-import type { EnvRuntimeInfo, EnvServiceStatus } from '../types'
+import { Puzzle, Play, Power, Gauge, File } from '@lucide/vue'
+import type { EnvRuntimeInfo, EnvServiceStatus, FileSearchResult } from '../types'
+import { EnvEverythingSearch } from '../../bindings/quickdock/services/env/environmentservice'
+import { unwrap } from '../utils/api'
 
 // 运行时的中文分类别名，用于 Ctrl+K 中文检索（如「数据库」「缓存」「消息队列」）。
 const ENV_GROUP_ALIASES: Record<string, string[]> = {
@@ -37,7 +39,7 @@ const ENV_RUNTIME_ALIASES: Record<string, string[]> = {
 }
 
 // ---- Types ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file'
 
 export interface SearchResult {
   type: ResultType
@@ -68,6 +70,10 @@ export interface SearchResult {
   envRuntimeId?: string
   envVersion?: string
   envAction?: 'start' | 'stop' | 'mgmt'
+  // Everything 文件搜索结果（效率工具）
+  filePath?: string
+  fileDir?: string
+  fileName?: string
 }
 
 interface CmdNote { id: string; name: string; content: string; isFolder: boolean; parentId: string; keyword: string }
@@ -127,6 +133,44 @@ export function useCommandSearch(deps: SearchDeps) {
     debounceTimer = setTimeout(() => { debouncedQuery.value = v }, 80)
   }, { immediate: true })
   onScopeDispose(() => { if (debounceTimer) clearTimeout(debounceTimer) })
+
+  // Everything 文件搜索：Ctrl+K 输入经 130ms 防抖后才打后端 es.exe（外部进程，比本地扫描重），
+  // 命中的文件路径 merge 进独立的 file 分组（排在资源结果之后）。后端在「未启用 / es 缺失 / 未运行」
+  // 时静默返回空，绝不会阻塞 QuickDock 自身的检索。
+  const fileResults = ref<SearchResult[]>([])
+  let fileDebounce: ReturnType<typeof setTimeout> | null = null
+  let fileReqId = 0
+  watch(query, (v) => {
+    const q = v.trim()
+    if (fileDebounce) clearTimeout(fileDebounce)
+    if (!q) { fileResults.value = []; return }
+    fileDebounce = setTimeout(() => {
+      const reqId = ++fileReqId
+      ;(async () => {
+        try {
+          const res = unwrap<FileSearchResult[]>(await EnvEverythingSearch(q, 30, 'name'))
+          if (reqId !== fileReqId) return // 已被更新的输入取代
+          if (res && res.length) {
+            fileResults.value = res.map((f) => ({
+              type: 'file' as ResultType,
+              label: f.name ?? '',
+              desc: f.dir ?? '',
+              icon: File,
+              filePath: f.path ?? '',
+              fileDir: f.dir ?? '',
+              fileName: f.name ?? '',
+              score: 50,
+            }))
+          } else {
+            fileResults.value = []
+          }
+        } catch {
+          fileResults.value = []
+        }
+      })()
+    }, 130)
+  }, { immediate: true })
+  onScopeDispose(() => { if (fileDebounce) clearTimeout(fileDebounce) })
 
   const groupedResults = computed<ResultGroup[]>(() => {
     void frecencyTick.value
@@ -408,6 +452,20 @@ export function useCommandSearch(deps: SearchDeps) {
       }
     }
 
+    // 7.6 Everything 文件搜索（效率工具）：merge 进独立 file 分组，排在资源结果之后（env 之后、plugin 之前）。
+    // fileResults 由上方 130ms 防抖异步填充，命中后本 computed 随 ref 变化自动重算。
+    {
+      const hits = fileResults.value.filter((r) => {
+        const k = 'file:' + (r.filePath || r.label)
+        if (seen.has(k)) return false
+        seen.add(k)
+        return true
+      })
+      if (hits.length > 0) {
+        groups.push({ type: 'file', label: t('cmdGroupFiles'), results: hits.slice(0, 20) })
+      }
+    }
+
     // 剪贴板智能路由
     if (clipboardUrlSource.value && q === clipboardUrlSource.value) {
       const urlStr = clipboardUrlSource.value
@@ -451,7 +509,7 @@ export function useCommandSearch(deps: SearchDeps) {
     // 应用分组优先于其它内容分组展示（应用排在前面）
     const GROUP_PRIORITY: Record<string, number> = {
       best: 0, 'clipboard-action': 1, calculator: 2, url: 3,
-      app: 4, item: 5, 'quicklink-inline': 6, note: 7, system: 8, env: 8.5, plugin: 9,
+      app: 4, item: 5, 'quicklink-inline': 6, note: 7, system: 8, env: 8.5, file: 8.7, plugin: 9,
     }
     groups.sort((a, b) => (GROUP_PRIORITY[a.type] ?? 99) - (GROUP_PRIORITY[b.type] ?? 99))
 
@@ -615,6 +673,7 @@ export function useCommandSearch(deps: SearchDeps) {
     }
     if (r.type === 'url' && r.url) return { title: r.label, subtitle: t('previewUrl'), lines: [r.url], kind: 'url' }
     if (r.type === 'app' && r.appPath) return { title: r.label, subtitle: t('previewPath'), lines: [r.appPath], kind: 'app' }
+    if (r.type === 'file' && r.filePath) return { title: r.fileName || r.label, subtitle: t('cmdGroupFiles'), lines: [r.filePath], kind: 'file' }
     if (r.type === 'clipboard-action' && r.url) return { title: r.label, subtitle: t('previewUrl'), lines: [r.url], kind: 'clipboard-action' }
     return null
   })

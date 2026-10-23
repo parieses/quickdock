@@ -5,6 +5,7 @@ import (
 	"embed"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -232,6 +233,9 @@ func main() {
 	// 真退出标记：与托盘"退出"走同一路径，让 WindowClosing 钩子放行
 	appService.PrepareQuitFn = func() { trayQuitRequested.Store(true) }
 
+	// 重启应用（存储位置切换等场景的前端入口）：复用托盘同一套脱离式重启逻辑
+	appService.RestartAppFn = restartApp
+
 	// 初始化插件管理器
 	pluginsDir := filepath.Join(platform.DefaultDataDir(), "plugins")
 	os.MkdirAll(pluginsDir, 0755)
@@ -252,6 +256,34 @@ func main() {
 
 	// AI 服务门面：承载 AI 档案/对话/聊天领域方法（门面即实现，纯 DB 依赖），单独绑定为独立 Wails service
 	aiSvc := aisvc.NewAIService(appService)
+
+	// 把「一次性 AI 问答」能力回注宿主，供 SSH 面板与插件复用。
+	//
+	// 走一次性接口（不落库、不占流式 convId）而不是复用流式对话：
+	// 这两类调用都是一次性问答，写进用户的 AI 对话历史只会污染列表；
+	// 且流式接口靠前端 SSE 驱动，插件与 Go 侧调用方拿不到那条通道。
+	appService.AskAIFn = func(system, question string, timeoutSec int) (string, string, error) {
+		r := aiSvc.AIAsk(aisvc.AIAskRequest{
+			System:     system,
+			Question:   question,
+			TimeoutSec: timeoutSec,
+		})
+		if r == nil {
+			return "", "", errors.New("AI 服务无响应")
+		}
+		if r.Code != 0 {
+			msg := r.Msg
+			if msg == "" {
+				msg = "AI 调用失败"
+			}
+			return "", "", errors.New(msg)
+		}
+		res, ok := r.Data.(aisvc.AIAskResult)
+		if !ok {
+			return "", "", errors.New("AI 返回结构异常")
+		}
+		return res.Text, res.Model, nil
+	}
 
 	// 更新服务门面：承载自动更新领域方法（检测/下载/重启/后台检查），单独绑定为独立 Wails service
 	updateSvc := updatesvc.NewUpdateService(appService)
