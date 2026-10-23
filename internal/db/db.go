@@ -82,6 +82,7 @@ var validColumns = map[string]bool{
 	"keyword":           true,
 	"content":           true,
 	"reasoning_content": true,
+	"images":            true, // ai_messages：图片引用 JSON 数组（仅 user 消息）
 	"image_hash":        true,
 	"count":             true,
 	"prompt_tokens":     true, "completion_tokens": true,

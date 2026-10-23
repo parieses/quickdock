@@ -292,6 +292,31 @@ func (m *Manager) InvokeHostMethod(pluginID, method string, params json.RawMessa
 	return m.invokeHostMethod(pluginID, method, params)
 }
 
+// NotifyPlugin 向插件进程下发一条 JSON-RPC 通知（宿主 → 插件，无 id、不等响应）。
+//
+// 目前只服务 AI 流式增量（host.ai.delta）：native 插件是独立进程，
+// 除了 stdio 没有别的方式让宿主主动推数据给它。
+//
+// 静默跳过的三种情况，都不算错误：
+//   - 插件未加载（懒加载插件可能还没起进程）
+//   - goja 插件（没有 stdin，增量走 api.aiStream 回调）
+//   - 插件已退出（stdin 已关闭）
+//
+// 返回 error 交给调用方决定要不要重试：流式增量是 best-effort，
+// 一次写失败就该停发，而不是每个 token 都撞一次同样的错。
+func (m *Manager) NotifyPlugin(pluginID, method string, params interface{}) error {
+	if m == nil {
+		return nil
+	}
+	m.mu.RLock()
+	inst := m.plugins[pluginID]
+	m.mu.RUnlock()
+	if inst == nil || inst.Stdin == nil {
+		return nil
+	}
+	return inst.SendNotification(method, params)
+}
+
 // handleCallback 处理插件发起的回调请求/通知（带权限校验）
 // 由 readLoop goroutine 调用；rawLine 为该行原始 JSON，用于区分"无 id 的通知"
 // 与"id 恰好为 0 的请求"（JSON-RPC 规范中 id=0 是合法请求 ID）

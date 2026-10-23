@@ -75,6 +75,28 @@ type Manager struct {
 	isWindowVisible func(pluginID string) bool
 	idleStopCh      chan struct{}
 	idleStopOnce    sync.Once
+
+	// aiStreamFn 流式 AI 问答实现，由 services 层在启动时注入（见 SetAIStreamFn）。
+	//
+	// 为什么需要单独一条通路：native / web 插件的增量靠「宿主 → 插件」通道
+	// （stdio 通知 / iframe 消息）下发，而 goja 插件跑在宿主的 goja VM 里，
+	// 既没有 stdin 也没有前端，唯一能拿到增量的方式是同步回调（api.aiStream）。
+	// 这里只存函数值，保持 internal/plugin 不反向依赖 services。
+	aiStreamFn func(system, question string, timeoutSec int, onToken func(text string)) (text string, model string, err error)
+}
+
+// AI 入参上限（rune 而非 byte：中文一个字 3 字节，按字节算会误伤）。
+//
+// host.ai.ask 与 goja 的 api.aiStream 两条通路共用这一份数字——
+// 拆成两处的话，插件换个调用方式就能绕过长度闸门，等于没有闸门。
+const (
+	AIQuestionMaxRune = 4000
+	AISystemMaxRune   = 4000
+)
+
+// SetAIStreamFn 注入流式问答实现（由 services 层在启动时调用一次）。
+func (m *Manager) SetAIStreamFn(fn func(system, question string, timeoutSec int, onToken func(text string)) (string, string, error)) {
+	m.aiStreamFn = fn
 }
 
 // NewManager 创建插件管理器
@@ -456,7 +478,7 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string)
 	}
 	pluginDB.SetMaxOpenConns(1)
 
-	vm.Set("api", m.gojaAPI(manifest, pluginDB))
+	vm.Set("api", m.gojaAPI(manifest, pluginDB, vm))
 
 	func() {
 		defer func() {
@@ -507,18 +529,29 @@ func (m *Manager) loadGojaPlugin(manifest PluginManifest, dir, entryPath string)
 //   - api.host(method, params)              转发到宿主 hostMethods 注册表，与 native 的
 //     JSON-RPC 回调共用 invokeHostMethod，因此 http.get/post、host.notify、
 //     host.dialog.*、host.clipboard.*、db.* 对 goja 插件同样可用（此前一概不可达）
+//   - api.aiStream(params, onDelta)         流式问答：增量经 onDelta(text) 回调逐段送到插件
 //   - api.db.exec / api.db.query            插件私有 SQLite（data.db）的裸 SQL。
 //     注意这与 native 的 db.*（宿主库中按 plugin_id 隔离的 KV）不是同一套存储
 //
 // 约束：api.host 是同步阻塞调用，受 callGojaJS 的超时（handleExecute 20s）限制。
 // 需要用户交互的方法（host.dialog.open/save）在用户完成操作前就可能被 vm.Interrupt
 // 打断，goja 插件不宜依赖这类方法；长耗时任务应走 taskId + 轮询的异步范式。
-func (m *Manager) gojaAPI(manifest PluginManifest, pluginDB *sql.DB) map[string]interface{} {
+//
+// vm 参数只为 api.aiStream 的回调服务：把 Go 字符串转成 JS 值必须经由该 VM，
+// 而 VM 只在 loadGojaPlugin 里创建，故显式传进来而不是让调用方在闭包里抓。
+func (m *Manager) gojaAPI(manifest PluginManifest, pluginDB *sql.DB, vm *goja.Runtime) map[string]interface{} {
 	return map[string]interface{}{
 		// 日志：写插件专属日志文件 plugin-YYYYMMDD.log（[plugin:<id>] 前缀），与主日志分离
 		"log":   func(msg string) { logger.PluginI(manifest.ID, "%s", msg) },
 		"warn":  func(msg string) { logger.PluginW(manifest.ID, "%s", msg) },
 		"error": func(msg string) { logger.PluginE(manifest.ID, "%s", msg) },
+
+		// 流式问答。goja 插件拿不到 stdio 通知与 Wails 事件，
+		// 所以增量只能靠回调——这也是它不能复用 api.host('host.ai.ask') 的原因：
+		// 那条路径一次性返回，插件在生成期间没有任何可观测点。
+		"aiStream": func(params map[string]interface{}, onDelta func(goja.FunctionCall) goja.Value) (interface{}, error) {
+			return m.gojaAIStream(params, vm, onDelta)
+		},
 
 		// 通用 host 转发：等价于 native 侧发起同名 JSON-RPC 请求，返回值/错误语义一致。
 		// 未传参数时按空对象 {} 处理，避免各 handler 收到 null 而解析失败。
@@ -574,6 +607,55 @@ func (m *Manager) gojaAPI(manifest PluginManifest, pluginDB *sql.DB) map[string]
 			},
 		},
 	}
+}
+
+// gojaAIStream 执行一次流式问答，把增量逐段交给 JS 回调。
+//
+// 线程安全：本函数只会在 goja VM 正在执行（callGojaJS 持有 vmMu）的同一 goroutine
+// 里被调用，AskAIFnStream 也是同步逐个回调，因此 onDelta 触达 VM 时不存在并发，
+// 不需要额外加锁——反过来若哪天改成异步回调，这里必须补 vmMu，否则会崩 VM。
+//
+// 入参闸门与 host.ai.ask 共用 AIQuestionMaxRune / AISystemMaxRune：
+// 超长直接报错而不是静默截断（插件是第三方代码，不能假设它会自觉控制长度）。
+func (m *Manager) gojaAIStream(params map[string]interface{}, vm *goja.Runtime, onDelta func(goja.FunctionCall) goja.Value) (interface{}, error) {
+	if m.aiStreamFn == nil {
+		return nil, fmt.Errorf("AI 能力不可用")
+	}
+	question, _ := params["question"].(string)
+	question = strings.TrimSpace(question)
+	if question == "" {
+		return nil, fmt.Errorf("question 不能为空")
+	}
+	system, _ := params["system"].(string)
+	if n := len([]rune(question)); n > AIQuestionMaxRune {
+		return nil, fmt.Errorf("question 超长（上限 %d 字符，当前 %d）", AIQuestionMaxRune, n)
+	}
+	if n := len([]rune(system)); n > AISystemMaxRune {
+		return nil, fmt.Errorf("system 超长（上限 %d 字符，当前 %d）", AISystemMaxRune, n)
+	}
+	// JS 里的数字一律是 float64；同时接受整数类型，便于宿主侧测试直接构造参数。
+	timeoutSec := 0
+	switch v := params["timeoutSec"].(type) {
+	case float64:
+		timeoutSec = int(v)
+	case int64:
+		timeoutSec = int(v)
+	case int:
+		timeoutSec = v
+	}
+
+	var onToken func(string)
+	// 回调可选：插件只想拿最终结果时可以不传（等价于一次性问答）。
+	if onDelta != nil && vm != nil {
+		onToken = func(delta string) {
+			onDelta(goja.FunctionCall{Arguments: []goja.Value{vm.ToValue(delta)}})
+		}
+	}
+	text, model, err := m.aiStreamFn(system, question, timeoutSec, onToken)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]interface{}{"text": text, "model": model}, nil
 }
 
 // UnloadPlugin 卸载插件（从内存移除）

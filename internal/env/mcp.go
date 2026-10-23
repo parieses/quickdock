@@ -121,6 +121,31 @@ func (m *MCPRuntime) loadConfig() MCPConfig {
 
 // -------- 服务启停 --------
 
+// SetMaxLevel 持久化工具等级上限，并立即对注册表生效。
+//
+// 必须落盘：Start 每次都从 config.json 读回等级。只改内存的话，用户在面板里
+// 选完「只读」、重启一次服务就被悄悄改回默认的「只读+低危写」——面板看起来
+// 设置了，实际配置另有出处，这种静默回滚最难排查。
+func (m *MCPRuntime) SetMaxLevel(level int) error {
+	if level < mcp.LevelRead || level > mcp.LevelRisk {
+		return fmt.Errorf("工具等级超出范围: %d", level)
+	}
+	cfg := m.loadConfig()
+	cfg.MaxLevel = level
+	raw, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(m.baseDir, 0o755); err != nil {
+		return err
+	}
+	if err := os.WriteFile(m.configPath(), raw, 0o644); err != nil {
+		return err
+	}
+	mcp.SetMaxLevel(level)
+	return nil
+}
+
 func (m *MCPRuntime) DefaultPort() int { return m.loadConfig().Port }
 
 // ConfiguredPorts 回显真实端口（配置解析，未配置时用实际监听端口）。

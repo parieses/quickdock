@@ -41,6 +41,10 @@ type AIProfile struct {
 	FrequencyPenalty float64 `json:"frequencyPenalty"`
 	PresencePenalty  float64 `json:"presencePenalty"`
 	ThinkingEnabled  bool    `json:"thinkingEnabled"`
+	// ImageInput 图片输入能力声明：both（默认，URL+本地图）/ url（仅公网链接，
+	// 如 Agnes 2.5 Flash）/ base64（仅本地图）。不按模型名推断——各家支持矩阵
+	// 是厂商实现细节，显式声明是唯一不会静默出错的姿势（见 ai_image.go）。
+	ImageInput string `json:"imageInput"`
 }
 
 // aiProfileStored 落库结构（API Key 为密文）。
@@ -171,6 +175,7 @@ func (a *AIService) getActiveAIProfile() (AIProfile, bool) {
 		FrequencyPenalty: s.FrequencyPenalty,
 		PresencePenalty:  s.PresencePenalty,
 		ThinkingEnabled:  s.ThinkingEnabled,
+		ImageInput:       normalizeImageInput(s.ImageInput),
 	}
 	if s.APIKey != "" {
 		dec, e := platform.DecryptSecret(s.APIKey)
@@ -223,6 +228,7 @@ func (a *AIService) AIListProfiles() *services.ApiResult {
 			FrequencyPenalty: s.FrequencyPenalty,
 			PresencePenalty:  s.PresencePenalty,
 			ThinkingEnabled:  s.ThinkingEnabled,
+			ImageInput:       normalizeImageInput(s.ImageInput),
 		}
 		if s.APIKey != "" {
 			if dec, e := platform.DecryptSecret(s.APIKey); e == nil {
@@ -272,6 +278,7 @@ func (a *AIService) AISaveProfiles(req AISaveProfilesRequest) *services.ApiResul
 			FrequencyPenalty: p.FrequencyPenalty,
 			PresencePenalty:  p.PresencePenalty,
 			ThinkingEnabled:  p.ThinkingEnabled,
+			ImageInput:       normalizeImageInput(p.ImageInput),
 		}
 		if p.APIKey == "" {
 			if e, ok := existing[id]; ok {

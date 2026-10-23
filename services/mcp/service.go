@@ -7,10 +7,16 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
 	"quickdock/internal/db"
 	envengine "quickdock/internal/env"
@@ -58,26 +64,40 @@ func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService
 
 // -------- 前端绑定方法 --------
 
-// MCPStatus 返回 MCP 服务运行状态与监听地址。
+// MCPStatus 返回 MCP 服务运行状态、监听地址与工具开放情况。
+//
+// tools / total / blocked 三个数是给面板解释「为什么工具比预期少」用的：
+// 只报一个数时，用户看到工具变少会怀疑是服务出问题，而实际是等级门正常拦截。
 func (s *MCPService) MCPStatus() *services.ApiResult {
+	cat := mcpsrv.Catalog()
+	exposed := 0
+	for _, t := range cat {
+		if t.Exposed {
+			exposed++
+		}
+	}
 	return services.Ok(map[string]any{
 		"running":  mcpsrv.Default.Running(),
 		"endpoint": mcpsrv.Default.Endpoint(),
 		"port":     mcpsrv.Default.Port(),
 		"maxLevel": mcpsrv.MaxLevel(),
-		"tools":    len(mcpsrv.List()),
+		"tools":    exposed,
+		"total":    len(cat),
+		"blocked":  len(cat) - exposed,
 	})
 }
 
-// MCPTools 列出当前开放的工具（名称/说明/危险等级），供环境管理页展示。
+// MCPTools 列出全部已注册工具（名称/说明/危险等级/当前是否开放），供环境管理页展示。
+// 未开放的也要给前端：面板据此显示「被等级挡住的工具」及其原因，而不是留下空白。
 func (s *MCPService) MCPTools() *services.ApiResult {
-	list := mcpsrv.List()
-	out := make([]map[string]any, 0, len(list))
-	for _, t := range list {
+	cat := mcpsrv.Catalog()
+	out := make([]map[string]any, 0, len(cat))
+	for _, t := range cat {
 		out = append(out, map[string]any{
 			"name":        t.Name,
 			"description": t.Description,
-			"level":       toolLevels[t.Name],
+			"level":       t.Level,
+			"exposed":     t.Exposed,
 		})
 	}
 	return services.Ok(out)
@@ -105,34 +125,190 @@ func (s *MCPService) MCPStop() *services.ApiResult {
 	return services.Ok(nil)
 }
 
-// MCPSetLevel 设置可暴露的工具危险等级上限：0=只读，1=只读+低危写。改后需重启 MCP 服务生效。
+// MCPRestart 重启 MCP 服务：改了工具等级或端口后用它让客户端重新握手。
+// 走 Manager.Restart 而不是前端「停一下再启动」：重启前会重跑端口冲突与配置校验，
+// 两条独立调用会把这些守卫绕过。
+func (s *MCPService) MCPRestart() *services.ApiResult {
+	if s.App.Env == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	if err := s.App.Env.Restart(envengine.RuntimeMCP, builtinVersion, nil); err != nil {
+		return services.FailMsg(err.Error())
+	}
+	return services.Ok(mcpsrv.Default.Endpoint())
+}
+
+// MCPSetLevel 设置可暴露的工具危险等级上限：0=只读，1=只读+低危写。
+//
+// 等级会写回 runtime/mcp/config.json —— 只改内存的话重启服务就回滚成默认值。
+// 正在运行的实例，工具集要等客户端重连（或重启服务）才更新，故返回 needsRestart
+// 让前端提示「重启服务」而不是让用户对着没变化的客户端怀疑设置没生效。
 func (s *MCPService) MCPSetLevel(level int) *services.ApiResult {
 	if level < mcpsrv.LevelRead || level > mcpsrv.LevelWrite {
 		return services.FailMsg("等级只能是 0（只读）或 1（只读+低危写）")
 	}
+	if s.App != nil && s.App.Env != nil {
+		if rt := s.App.Env.MCPRuntime(); rt != nil {
+			if err := rt.SetMaxLevel(level); err != nil {
+				return services.FailMsg("保存工具等级失败: " + err.Error())
+			}
+		}
+	}
 	mcpsrv.SetMaxLevel(level)
-	return services.Ok(mcpsrv.MaxLevel())
+	return services.Ok(map[string]any{
+		"maxLevel":     mcpsrv.MaxLevel(),
+		"running":      mcpsrv.Default.Running(),
+		"needsRestart": mcpsrv.Default.Running(),
+	})
 }
 
-// MCPClientConfig 生成客户端配置片段（Claude Desktop 的 JSON 与 Claude Code 的 CLI 命令），
-// 未运行时返回空串，由前端提示先启动。
+// mcpClient 一种 MCP 客户端的接入方式（配置片段 + 该写到哪个文件）。
+type mcpClient struct {
+	ID     string `json:"id"`
+	Label  string `json:"label"`
+	Path   string `json:"path"`   // 配置应写到哪里；纯命令行方式为空
+	Config string `json:"config"` // 可直接粘贴或执行的内容
+}
+
+// MCPClientConfig 生成各客户端的接入片段，未运行时全部为空串，由前端提示先启动。
+//
+// 这里不偷懒只给一份 mcpServers：VS Code 用 servers + type=http，Claude Code 走 CLI，
+// 各家配置文件位置也不同。给成一份「通用 JSON」的结果是用户粘进去客户端不认，
+// 却看不出错在哪。
 func (s *MCPService) MCPClientConfig() *services.ApiResult {
 	ep := mcpsrv.Default.Endpoint()
 	if ep == "" {
-		return services.Ok(map[string]any{"running": false, "json": "", "cli": ""})
+		return services.Ok(map[string]any{"running": false, "clients": []mcpClient{}})
 	}
-	cfg := fmt.Sprintf("{\n  \"mcpServers\": {\n    \"quickdock\": {\n      \"type\": \"http\",\n      \"url\": \"%s\"\n    }\n  }\n}", ep)
-	cli := fmt.Sprintf("claude mcp add --transport http quickdock %s", ep)
-	return services.Ok(map[string]any{"running": true, "url": ep, "json": cfg, "cli": cli})
+	serversJSON := fmt.Sprintf(`{
+  "mcpServers": {
+    "quickdock": {
+      "type": "http",
+      "url": "%s"
+    }
+  }
+}`, ep)
+	vsCodeJSON := fmt.Sprintf(`{
+  "servers": {
+    "quickdock": {
+      "type": "http",
+      "url": "%s"
+    }
+  }
+}`, ep)
+	cli := "claude mcp add --transport http quickdock " + ep
+	curl := fmt.Sprintf("curl -s -X POST %s -H \"Content-Type: application/json\" -H \"Accept: application/json, text/event-stream\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'", ep)
+
+	clients := []mcpClient{
+		{ID: "claude-code", Label: "Claude Code", Config: cli},
+		{ID: "claude-desktop", Label: "Claude Desktop", Path: claudeDesktopConfigPath(), Config: serversJSON},
+		{ID: "cursor", Label: "Cursor", Path: "~/.cursor/mcp.json", Config: serversJSON},
+		{ID: "cline", Label: "Cline / Roo Code", Path: "~/.codeium/windsurf/mcp_config.json（同类客户端通用 mcpServers 格式）", Config: serversJSON},
+		{ID: "vscode", Label: "VS Code (Copilot)", Path: ".vscode/mcp.json", Config: vsCodeJSON},
+		{ID: "curl", Label: "curl 连通性验证", Config: curl},
+	}
+	return services.Ok(map[string]any{"running": true, "clients": clients})
+}
+
+// MCPCheck 连通性自检：像真实客户端一样走一次 initialize + tools/list。
+//
+// 端口在监听不等于服务可用——等级把工具全滤掉、注册漏了、协议实现写错，
+// 都表现为「连得上但客户端没反应」。让用户能在面板上一键拿到结论，
+// 比让他去翻客户端日志快得多。
+func (s *MCPService) MCPCheck() *services.ApiResult {
+	ep := mcpsrv.Default.Endpoint()
+	if ep == "" {
+		return services.FailMsg("MCP 服务未启动")
+	}
+	start := time.Now()
+	init, err := mcpRPC(ep, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"`+mcpsrv.ProtocolVersion+`","capabilities":{},"clientInfo":{"name":"quickdock-self-check","version":"1"}}}`)
+	if err != nil {
+		return services.FailMsg("握手失败: " + err.Error())
+	}
+	protocol, _ := init["protocolVersion"].(string)
+	serverName, serverVersion := "", ""
+	if info, ok := init["serverInfo"].(map[string]any); ok {
+		serverName, _ = info["name"].(string)
+		serverVersion, _ = info["version"].(string)
+	}
+	list, err := mcpRPC(ep, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	if err != nil {
+		return services.FailMsg("拉取工具清单失败: " + err.Error())
+	}
+	toolCount := 0
+	if arr, ok := list["tools"].([]any); ok {
+		toolCount = len(arr)
+	}
+	return services.Ok(map[string]any{
+		"ok":              true,
+		"endpoint":        ep,
+		"protocolVersion": protocol,
+		"serverName":      serverName,
+		"serverVersion":   serverVersion,
+		"tools":           toolCount,
+		"latencyMs":       time.Since(start).Milliseconds(),
+	})
+}
+
+// mcpRPC 向本机 MCP 端点发一条 JSON-RPC 请求，返回 result。
+// 显式禁用环境代理：127.0.0.1 走代理会表现为「连不上自己的服务」，很难想到是代理配置的锅。
+func mcpRPC(endpoint, body string) (map[string]any, error) {
+	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	client := &http.Client{Timeout: 5 * time.Second, Transport: &http.Transport{}}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(raw)))
+	}
+	var out struct {
+		Result map[string]any `json:"result"`
+		Error  *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, fmt.Errorf("响应不是合法 JSON: %w", err)
+	}
+	if out.Error != nil {
+		return nil, fmt.Errorf("JSON-RPC %d: %s", out.Error.Code, out.Error.Message)
+	}
+	if out.Result == nil {
+		return nil, errors.New("响应缺少 result")
+	}
+	return out.Result, nil
+}
+
+// claudeDesktopConfigPath 返回 Claude Desktop 配置文件位置（写进面板的「配置放哪」提示）。
+func claudeDesktopConfigPath() string {
+	switch runtime.GOOS {
+	case "windows":
+		if appData := os.Getenv("APPDATA"); appData != "" {
+			return filepath.Join(appData, "Claude", "claude_desktop_config.json")
+		}
+		return `%APPDATA%\Claude\claude_desktop_config.json`
+	case "darwin":
+		return "~/Library/Application Support/Claude/claude_desktop_config.json"
+	default:
+		return "~/.config/Claude/claude_desktop_config.json"
+	}
 }
 
 // -------- 工具注册 --------
 
-// toolLevels 记录每个工具的危险等级，仅供 MCPTools 展示（注册表内部已持有，避免重复维护两份列表）。
-var toolLevels = map[string]int{}
-
+// register 注册工具。等级只存在注册表的 Tool.Level 一处——面板展示读的是
+// mcpsrv.Catalog()，早期在服务层另存一份 toolLevels 的做法让「等级」有了两个来源，
+// 加工具时漏改一份就会显示成别的档位。
 func (s *MCPService) register(run func(args map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any) {
-	toolLevels[name] = level
 	mcpsrv.Register(mcpsrv.Tool{
 		Name:        name,
 		Description: desc,
@@ -561,7 +737,11 @@ func (s *MCPService) registerTools() {
 			"input":    str("可选：传给插件的输入文本"),
 		})
 
-	// ---- 高危（LevelRisk：默认 maxLvl=LevelWrite 不暴露，需在环境管理页开启高危等级）----
+	// ---- 高危（LevelRisk）----
+	// 环境管理页只提供「只读 / 只读+低危写」两档，故这两条当前恒不开放：
+	// tools/list 里看不到，Call 也会被等级门拒绝。保留注册是为了将来放开上限时
+	// 不必改注册代码，但描述必须如实——写成「去面板开启高危等级」会引导模型
+	// 反复尝试一个根本不存在的开关。
 
 	s.register(func(args map[string]any) (any, error) {
 		pid := mcpsrv.ArgInt(args, "pid", 0)
@@ -569,7 +749,7 @@ func (s *MCPService) registerTools() {
 			return nil, errors.New("缺少或无效的参数 pid")
 		}
 		return unwrap(s.Port.KillProcess(pid))
-	}, mcpsrv.LevelRisk, "process_kill", "结束指定 PID 的进程（高危：误杀会导致数据丢失）。需先在环境管理页开启高危等级", []string{"pid"},
+	}, mcpsrv.LevelRisk, "process_kill", "结束指定 PID 的进程（高危：误杀会导致数据丢失）。当前版本不对外暴露，本工具不可用", []string{"pid"},
 		map[string]any{"pid": intp("要结束的进程 PID")})
 
 	s.register(func(args map[string]any) (any, error) {
@@ -578,7 +758,7 @@ func (s *MCPService) registerTools() {
 			return nil, errors.New("缺少参数 cmd")
 		}
 		return unwrap(s.System.ExecuteSystemCommand(cmd))
-	}, mcpsrv.LevelRisk, "system_command", "执行系统指令（lock/shutdown/restart/sleep/emptytrash，高危）。需先在环境管理页开启高危等级", []string{"cmd"},
+	}, mcpsrv.LevelRisk, "system_command", "执行系统指令（lock/shutdown/restart/sleep/emptytrash，高危）。当前版本不对外暴露，本工具不可用", []string{"cmd"},
 		map[string]any{"cmd": str("系统指令，如 shutdown / restart / lock / sleep / emptytrash")})
 }
 

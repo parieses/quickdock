@@ -54,6 +54,11 @@ type AppService struct {
 	// AI 服务构造失败等）。
 	AskAIFn func(system, question string, timeoutSec int) (text string, model string, err error)
 
+	// AskAIFnStream 与 AskAIFn 同源，但 onToken 逐段回调增量文本，供前端流式渲染。
+	// 调用方（SSH / 剪贴板面板）在 onToken 里把增量经 Wails 事件推给前端即可。
+	// onToken 允许为 nil（如插件这类拿不到前端通道的调用方，退化成一次性返回）。
+	AskAIFnStream func(system, question string, timeoutSec int, onToken func(text string)) (text string, model string, err error)
+
 	// 标记"这是一次真退出"，令主窗口的 WindowClosing 钩子放行而不是取消关闭并隐藏到托盘。
 	// 更新时（RestartApp 拉起安装器 → app.Quit）必须先调用，否则 cleanup() 里的
 	// window.Close() 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净。
@@ -197,6 +202,34 @@ func (a *AppService) StartEnvServicesAsync() {
 			a.app.Event.Emit("quickdock:env:refreshed")
 		}
 	}()
+}
+
+// ShowMainWindow 把主窗口唤起/前置（最小化则还原）。
+//
+// 供前端从独立浮窗（剪贴板 / SSH）触发「跳转配置」时调用：
+// 浮窗里的「问 AI」若发现没配档案，需要把主窗口带上来并打开 AI 设置页，
+// 否则用户点完仍在浮窗里，看不到配置界面。
+func (a *AppService) ShowMainWindow() {
+	w := a.MainWindow
+	if w == nil {
+		return
+	}
+	if w.IsMinimised() {
+		w.Restore()
+	}
+	w.Show()
+}
+
+// OpenAISettings 跨窗口跳转：唤起主窗口并令其打开 AI 配置页。
+//
+// 为什么做成一个 Go 方法而不是直接前端 Events.Emit：事件从浮窗发往主窗口
+// 虽能送达，但「唤起主窗口」这一步必须落在 Go 侧（窗口控制权在宿主），
+// 集中在 Go 里做比前端各自 Emit + 再 Emit 更不易分叉。
+func (a *AppService) OpenAISettings() {
+	a.ShowMainWindow()
+	if a.app != nil {
+		a.app.Event.Emit("app:open-ai-settings")
+	}
 }
 
 // dshAutoStartEnabled 读取 dsh web 自动启动配置（默认开启）。

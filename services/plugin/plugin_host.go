@@ -38,7 +38,8 @@ import (
 //	host.process.kill                           （需 permissions.processKill；高危，默认拒绝）
 //	host.process.exec                           （需 permissions.process；程序名白名单，高危，默认拒绝）
 //	host.mcp.call                                （无需权限，等级门由 mcpsrv.Call 把关）
-//	host.ai.ask                                  （无需权限，复用宿主 AI 档案，一次性问答不落库）
+//	host.ai.ask                                  （无需权限，复用宿主 AI 档案，一次性问答不落库；
+//	                                              带 streamId 时沿途下发 host.ai.delta 增量）
 //	db.get / db.set / db.delete / db.list        （无需权限，按 plugin_id 强隔离）
 
 const (
@@ -50,11 +51,22 @@ const (
 	pluginHTTPMaxRedirs = 5
 	pluginURLMaxLen     = 8 << 10 // url 长度上限 8 KiB，防超长 URL 拖慢 / 触发异常
 
-	// host.ai.ask 的入参上限（rune 而非 byte：中文一个字 3 字节，按字节算会误伤）。
-	// 与 services/ai 的 askMaxUserRune 同量级，此处先拦一道避免无谓往返，
-	// 最终仍由 AIAsk 兜底裁剪。
-	pluginAIQuestionMaxRune = 4000
-	pluginAISystemMaxRune   = 4000
+	// host.ai.ask 的入参上限来自 internal/plugin（与 goja 的 api.aiStream 共用同一份，
+	// 否则插件换个调用方式就能绕过闸门）。此处拦一道避免无谓往返，最终仍由 AIAsk 兜底裁剪。
+	pluginAIQuestionMaxRune = plugin.AIQuestionMaxRune
+	pluginAISystemMaxRune   = plugin.AISystemMaxRune
+
+	// pluginAIStreamChunk 增量合批阈值（字节）。逐 token 推送会同时打满
+	// Wails 事件总线与插件 stdin，量级与 SSH 面板保持一致。
+	pluginAIStreamChunk = 40
+
+	// pluginAIStreamMaxBytes 单次流式下发到插件的增量总量上限。
+	//
+	// 为什么要设上限：native 插件若在等响应时不读 stdin（模板就是单线程循环），
+	// 管道写满会让 writeWithTimeout 超时并把实例标记成 writeBroken——那是**整条
+	// 通信链断掉**，代价远大于"流式体验没做好"。24 KiB 低于 Windows 管道默认
+	// 64 KiB 缓冲，正常长度的回答触不到；超限后只停发增量，最终文本仍随响应返回。
+	pluginAIStreamMaxBytes = 24 << 10
 )
 
 // 屏幕取色等场景临时隐藏宿主窗口时的可见性快照：host.window.show 据此只还原
@@ -85,6 +97,26 @@ func (svc *PluginService) pluginShellPerm(pluginID string) plugin.ShellPerm {
 		return inst.Manifest.Permissions.Shell
 	}
 	return plugin.ShellPerm{}
+}
+
+// emitPluginAIDelta 把 AI 增量推给 web 插件（iframe 形态）。
+//
+// 为什么走 Wails 事件再转一道，而不是直接 postMessage：增量产生在 Go 后端，
+// 而插件 iframe 的窗口对象只有宿主前端持有（usePluginHost），Go 侧拿不到。
+// 于是路径是「Go → 宿主前端事件 → 当前插件 iframe」。
+//
+// 载荷里必须带 pluginId：事件是全局广播的，宿主前端据此只转发给**当前插件**，
+// 别的插件窗口收不到别人的模型输出。
+func (svc *PluginService) emitPluginAIDelta(pluginID, streamID, delta string) {
+	app := svc.App.App()
+	if app == nil {
+		return
+	}
+	app.Event.Emit("plugin:ai-delta", map[string]string{
+		"pluginId": pluginID,
+		"streamId": streamID,
+		"delta":    delta,
+	})
 }
 
 // RegisterPluginHostMethods 注入全部 Host API 实现。
@@ -463,6 +495,12 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 			Question string `json:"question"`
 			// TimeoutSec 可选，上限由 AIAsk 内部收敛到 120s。
 			TimeoutSec int `json:"timeoutSec"`
+			// StreamID 可选。非空即开启流式：宿主沿途下发增量，最终文本仍随响应返回。
+			//
+			// 用「有没有 streamId」而不是另开一个 host.ai.askStream 方法：
+			// 三条运行时（native / goja / web）的增量投递方式各不相同，但**请求语义相同**。
+			// 拆两个方法会让插件作者以为拿到了两套能力，实际只是同一件事的两个入口。
+			StreamID string `json:"streamId"`
 		}
 		if err := json.Unmarshal(params, &arg); err != nil {
 			return nil, fmt.Errorf("参数解析失败: %w", err)
@@ -479,7 +517,57 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 		if n := len([]rune(arg.System)); n > pluginAISystemMaxRune {
 			return nil, fmt.Errorf("system 超长（上限 %d 字符，当前 %d）", pluginAISystemMaxRune, n)
 		}
-		text, model, err := svc.App.AskAIFn(arg.System, question, arg.TimeoutSec)
+		// 流式：按 streamID 沿途下发增量（合批，避免逐 token 推事件）。
+		// 没有 streamId 时 onToken 为 nil，走一次性路径。
+		// 条件里带上 AskAIFnStream != nil：流式实现可能未装配（测试/裁剪构建），
+		// 此时静默退化为一次性问答，好过插件拿一个 nil 函数直接 panic。
+		streamID := strings.TrimSpace(arg.StreamID)
+		var onToken func(string)
+		var flush func()
+		if streamID != "" && svc.App.AskAIFnStream != nil {
+			var buf strings.Builder
+			sent := 0
+			// stdio 通道写失败后停发：增量是 best-effort，同一个错误不该每个 token 都撞一次。
+			notifyBroken := false
+			flush = func() {
+				if buf.Len() == 0 {
+					return
+				}
+				delta := buf.String()
+				buf.Reset()
+				// 超上限后丢弃剩余增量：只影响"看到多少"，不影响最终结果。
+				if sent >= pluginAIStreamMaxBytes {
+					return
+				}
+				sent += len(delta)
+				svc.emitPluginAIDelta(pluginID, streamID, delta)
+				if notifyBroken {
+					return
+				}
+				if err := svc.App.PluginMgr.NotifyPlugin(pluginID, "host.ai.delta", map[string]string{
+					"streamId": streamID,
+					"delta":    delta,
+				}); err != nil {
+					notifyBroken = true
+					logger.PluginW(pluginID, "AI 增量下发失败，本次流式改为只返回最终结果: %v", err)
+				}
+			}
+			onToken = func(delta string) {
+				buf.WriteString(delta)
+				if buf.Len() >= pluginAIStreamChunk {
+					flush()
+				}
+			}
+		}
+		var text, model string
+		var err error
+		if onToken != nil {
+			text, model, err = svc.App.AskAIFnStream(arg.System, question, arg.TimeoutSec, onToken)
+			// 结尾不足一个合批阈值的尾巴也要送出去，否则最后几个字会凭空消失。
+			flush()
+		} else {
+			text, model, err = svc.App.AskAIFn(arg.System, question, arg.TimeoutSec)
+		}
 		if err != nil {
 			return nil, err
 		}

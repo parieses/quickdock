@@ -17,12 +17,18 @@ type AIConversation struct {
 }
 
 // AIMessage AI 对话消息
+//
+// Images 为 JSON 数组字符串，元素形如 {"kind":"url","url":"https://..."} 或
+// {"kind":"file","path":"ai-images/xxx.png","name":"shot.png"}（path 相对数据目录）。
+// 只出现在 user 消息上：assistant 回复永远是纯文本。图片字节本身不放 DB——
+// file 类落盘到数据目录，发送时按需重读；url 类只存链接。
 type AIMessage struct {
 	ID               string `json:"id"`
 	ConvID           string `json:"conv_id"`
 	Role             string `json:"role"`
 	Content          string `json:"content"`
 	ReasoningContent string `json:"reasoning_content"`
+	Images           string `json:"images"`
 	CreatedAt        string `json:"created_at"`
 }
 
@@ -45,6 +51,7 @@ func mapToAIMessage(m map[string]interface{}) AIMessage {
 		Role:             str(m["role"]),
 		Content:          str(m["content"]),
 		ReasoningContent: str(m["reasoning_content"]),
+		Images:           str(m["images"]),
 		CreatedAt:        str(m["created_at"]),
 	}
 }
@@ -159,6 +166,25 @@ func (d *Database) AddAIMessageFull(convID, role, content, reasoningContent stri
 		Content:          content,
 		ReasoningContent: reasoningContent,
 		CreatedAt:        now(),
+	}
+	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {
+		return nil, err
+	}
+	return m, nil
+}
+
+// AddAIMessageImages 追加一条带图片引用的 user 消息。
+// images 为 JSON 数组字符串（结构见 AIMessage.Images 注释），无图片时传 ""。
+// 与 AddAIMessageFull 分开而不是加可选参数：调用点（流式链路）两种形态都要用，
+// 分开后每个调用点的意图在签名上就可见，不会出现"这个参数到底传不传"的犹豫。
+func (d *Database) AddAIMessageImages(convID, role, content, images string) (*AIMessage, error) {
+	m := &AIMessage{
+		ID:        newID(),
+		ConvID:    convID,
+		Role:      role,
+		Content:   content,
+		Images:    images,
+		CreatedAt: now(),
 	}
 	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {
 		return nil, err

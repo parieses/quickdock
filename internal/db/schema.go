@@ -467,6 +467,8 @@ func (d *Database) migrate() error {
 		{"todos", "status", "TEXT DEFAULT 'todo'"},
 		// ai_messages: reasoning_content（思考过程）
 		{"ai_messages", "reasoning_content", "TEXT DEFAULT ''"},
+		// ai_messages: images（图片引用 JSON 数组，仅 user 消息；字节落盘不落库）
+		{"ai_messages", "images", "TEXT DEFAULT ''"},
 		// ai_conversations: token 用量统计
 		{"ai_conversations", "prompt_tokens", "INTEGER DEFAULT 0"},
 		{"ai_conversations", "completion_tokens", "INTEGER DEFAULT 0"},

@@ -285,6 +285,35 @@ func main() {
 		return res.Text, res.Model, nil
 	}
 
+	// 流式版本：onToken 把增量交给调用方，最终完整文本仍一次性返回。
+	// 与 AskAIFn 共用 AIAskStream（见 services/ai），保证两套路径的截断/超时/档案选择一致。
+	appService.AskAIFnStream = func(system, question string, timeoutSec int, onToken func(string)) (string, string, error) {
+		r := aiSvc.AIAskStream(aisvc.AIAskRequest{
+			System:     system,
+			Question:   question,
+			TimeoutSec: timeoutSec,
+		}, onToken)
+		if r == nil {
+			return "", "", errors.New("AI 服务无响应")
+		}
+		if r.Code != 0 {
+			msg := r.Msg
+			if msg == "" {
+				msg = "AI 调用失败"
+			}
+			return "", "", errors.New(msg)
+		}
+		res, ok := r.Data.(aisvc.AIAskResult)
+		if !ok {
+			return "", "", errors.New("AI 返回结构异常")
+		}
+		return res.Text, res.Model, nil
+	}
+
+	// goja 插件跑在宿主的 goja VM 里：没有 stdin、也没有前端，拿不到 stdio 通知
+	// 与 Wails 事件，只能靠同步回调（api.aiStream）拿增量，故单独回注一份。
+	pluginMgr.SetAIStreamFn(appService.AskAIFnStream)
+
 	// 更新服务门面：承载自动更新领域方法（检测/下载/重启/后台检查），单独绑定为独立 Wails service
 	updateSvc := updatesvc.NewUpdateService(appService)
 

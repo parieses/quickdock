@@ -152,8 +152,10 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	return out, nil
 }
 
-// buildAIMessages 组装发送给模型的消息列表，并自动执行摘要压缩
-func (a *AIService) buildAIMessages(ctx context.Context, cfg AIProfile, convID, mode, currentUser string) ([]map[string]interface{}, error) {
+// buildAIMessages 组装发送给模型的消息列表，并自动执行摘要压缩。
+// 当前用户消息已在调用前由 saveUserTurn 落库（见 ai_stream.go），
+// 故这里仅从 DB 加载历史（已含本轮用户消息），不再单独追加。
+func (a *AIService) buildAIMessages(ctx context.Context, cfg AIProfile, convID, mode string) ([]map[string]interface{}, error) {
 	hist, err := a.App.DB.ListAIMessages(convID)
 	if err != nil {
 		return nil, err
@@ -167,6 +169,9 @@ func (a *AIService) buildAIMessages(ctx context.Context, cfg AIProfile, convID, 
 		n := 0
 		for _, m := range msgs {
 			n += len([]rune(m.Content)) * 10 / 16
+			// 图片不按字符估：一张图的 token 与文字量级完全不同，
+			// 漏掉会让摘要压缩在“其实已经超窗”的会话上迟迟不触发。
+			n += countStoredImages(m.Images) * aiImageTokenEstimate
 		}
 		return n
 	}
@@ -196,9 +201,13 @@ func (a *AIService) buildAIMessages(ctx context.Context, cfg AIProfile, convID, 
 
 	messages := []map[string]interface{}{{"role": "system", "content": system}}
 	for _, m := range hist {
-		messages = append(messages, map[string]interface{}{"role": m.Role, "content": m.Content})
+		// 带图片的 user 消息组装为 [text, image_url...] 块数组，其余保持纯字符串。
+		// 图片按当前档案能力转换：本地图重读 base64，URL 图直发；能力不匹配的跳过。
+		messages = append(messages, map[string]interface{}{
+			"role":    m.Role,
+			"content": a.messageContent(cfg, m.Role, m.Content, m.Images),
+		})
 	}
-	messages = append(messages, map[string]interface{}{"role": "user", "content": currentUser})
 	return messages, nil
 }
 

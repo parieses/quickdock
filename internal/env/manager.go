@@ -403,6 +403,18 @@ func (m *Manager) EverythingRuntime() *EverythingRuntime {
 	return nil
 }
 
+// MCPRuntime 返回内置 MCP 服务适配器（未注册时返回 nil）。
+// 供 services/mcp 把面板设置写回 config.json —— 等级这类配置的归属方是本包，
+// 让调用方自己去拼 runtime/mcp 路径会出现第二份「配置在哪」的答案。
+func (m *Manager) MCPRuntime() *MCPRuntime {
+	if a, ok := m.adapters[RuntimeMCP]; ok {
+		if r, ok := a.(*MCPRuntime); ok {
+			return r
+		}
+	}
+	return nil
+}
+
 // EverythingReady 报告 Everything 检索「能力就绪」：已装 + es.exe 在位 + 进程在跑。
 // MCP file_search 工具仅在就绪时注册，避免暴露一个永远返回空的工具。
 func (m *Manager) EverythingReady() bool {

@@ -6,7 +6,11 @@
 //   2. 发 {"method":"initialize"} → 子进程返回 {"status":"ready"}
 //   3. 每 5 秒发 {"method":"host.ping"} → 子进程返回 {"pong":true}
 //   4. 用户执行命令时发 {"method":"plugin.execute", "params":{"command":"...", "input":{...}}}
-//   5. QuickDock 退出时发 {"method":"shutdown"} 或关闭 stdin
+//   5. 调 host.ai.ask 时若带 streamId，宿主会持续下发 {"method":"host.ai.delta",
+//      "params":{"streamId":"...","delta":"..."}} 通知（无 id，不需要回复）。
+//      注意：本模板是单线程 stdin 循环，会在 plugin.execute 返回后才读到这些通知；
+//      要真正"边生成边显示"，需另起 goroutine 读 stdin，按 streamId 分发给 UI。
+//   6. QuickDock 退出时发 {"method":"shutdown"} 或关闭 stdin
 //
 // 编译: go build -o my-plugin.exe main.go
 
@@ -71,6 +75,11 @@ func handleRequest(req RPCRequest) {
 
 	case "host.shutdown":
 		os.Exit(0)
+
+	case "host.ai.delta":
+		// AI 流式增量（宿主下发的通知，没有 id，不需要回复）。
+		// 模板不消费增量，读到这里直接丢弃；真实插件应在这里把 delta 刷到自己的 UI 上。
+		return
 
 	case "plugin.execute":
 		var params struct {

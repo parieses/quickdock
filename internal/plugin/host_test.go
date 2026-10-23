@@ -3,7 +3,10 @@ package plugin
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
+
+	"github.com/dop251/goja"
 )
 
 // newTestManager 手工构造 Manager，不调用 NewManager。
@@ -234,10 +237,10 @@ func TestGojaAPIHostForwarding(t *testing.T) {
 		return map[string]interface{}{"success": true}, nil
 	})
 
-	// pluginDB 传 nil：本用例只走 host 转发，不会触碰 api.db 的闭包。
-	api := m.gojaAPI(PluginManifest{ID: pid}, nil)
+	// pluginDB / vm 传 nil：本用例只走 host 转发，不会触碰 api.db 与回调。
+	api := m.gojaAPI(PluginManifest{ID: pid}, nil, nil)
 
-	for _, key := range []string{"log", "warn", "error", "host", "db"} {
+	for _, key := range []string{"log", "warn", "error", "host", "aiStream", "db"} {
 		if api[key] == nil {
 			t.Fatalf("api.%s 缺失（goja 能力面被削弱）", key)
 		}
@@ -376,4 +379,106 @@ func TestCheckPermissionNetworkShellProcess(t *testing.T) {
 			t.Fatalf("缺 pid 应拒绝，得到: %v", err)
 		}
 	})
+}
+
+// TestGoJaAIStream 锁定 goja 插件的流式通道。
+//
+// goja 插件既没有 stdin（native 的 host.ai.delta 通知走不到）也没有前端
+// （Wails 事件 plugin:ai-delta 走不到），增量只能靠 api.aiStream 的回调。
+// 这条测试真的起一个 goja VM 跑 JS，确认「回调类型转换」这件事在运行期成立——
+// 光看 Go 侧签名正确，不代表 goja 能把 JS 函数塞进 func(FunctionCall) Value。
+func TestGoJaAIStream(t *testing.T) {
+	const pid = "test.goja.aistream"
+	m := newTestManager()
+
+	var gotSystem, gotQuestion string
+	m.SetAIStreamFn(func(system, question string, timeoutSec int, onToken func(string)) (string, string, error) {
+		gotSystem, gotQuestion = system, question
+		if onToken != nil {
+			onToken("你")
+			onToken("好")
+		}
+		return "你好", "test-model", nil
+	})
+
+	vm := goja.New()
+	vm.Set("api", m.gojaAPI(PluginManifest{ID: pid}, nil, vm))
+
+	// 增量必须逐段到达回调，且最终结果照常返回（不是二选一）。
+	v, err := vm.RunString(`
+		var deltas = [];
+		var r = api.aiStream({ question: '你好', system: 'sys' }, function (d) { deltas.push(d); });
+		JSON.stringify({ deltas: deltas.join(''), text: r.text, model: r.model });
+	`)
+	if err != nil {
+		t.Fatalf("JS 调用 api.aiStream 失败: %v", err)
+	}
+	var out struct {
+		Deltas string `json:"deltas"`
+		Text   string `json:"text"`
+		Model  string `json:"model"`
+	}
+	if err := json.Unmarshal([]byte(v.String()), &out); err != nil {
+		t.Fatalf("结果解析失败: %v（原始: %s）", err, v.String())
+	}
+	if out.Deltas != "你好" {
+		t.Errorf("增量回调收到 %q，期望 %q", out.Deltas, "你好")
+	}
+	if out.Text != "你好" || out.Model != "test-model" {
+		t.Errorf("最终结果不符: text=%q model=%q", out.Text, out.Model)
+	}
+	if gotSystem != "sys" || gotQuestion != "你好" {
+		t.Errorf("入参未送达: system=%q question=%q", gotSystem, gotQuestion)
+	}
+}
+
+// TestGoJaAIStreamGuards 锁定入参闸门：与 host.ai.ask 同一份上限，
+// 插件换个调用方式不能绕过长度限制。
+func TestGoJaAIStreamGuards(t *testing.T) {
+	m := newTestManager()
+	m.SetAIStreamFn(func(system, question string, timeoutSec int, onToken func(string)) (string, string, error) {
+		return "ok", "m", nil
+	})
+	vm := goja.New()
+	vm.Set("api", m.gojaAPI(PluginManifest{ID: "test.goja.guard"}, nil, vm))
+
+	t.Run("question 为空时报错", func(t *testing.T) {
+		_, err := vm.RunString(`api.aiStream({ question: '   ' }, function () {})`)
+		if err == nil {
+			t.Fatal("空 question 应报错")
+		}
+	})
+
+	t.Run("question 超长时报错", func(t *testing.T) {
+		long := strings.Repeat("x", AIQuestionMaxRune+1)
+		_, err := vm.RunString(`api.aiStream({ question: '` + long + `' }, function () {})`)
+		if err == nil {
+			t.Fatal("超长 question 应报错")
+		}
+	})
+
+	t.Run("宿主未注入实现时报错", func(t *testing.T) {
+		blank := newTestManager()
+		vm2 := goja.New()
+		vm2.Set("api", blank.gojaAPI(PluginManifest{ID: "test.goja.noai"}, nil, vm2))
+		if _, err := vm2.RunString(`api.aiStream({ question: 'hi' }, function () {})`); err == nil {
+			t.Fatal("未注入 AI 实现时应报错，而不是静默返回空文本")
+		}
+	})
+}
+
+// TestNotifyPluginNoop 锁定「不存在的插件 / goja 插件」都静默跳过。
+//
+// 流式增量是 best-effort：插件可能已退出、也可能根本没起进程。
+// 这时 panic 或报错都会让一次正常的 AI 问答变成失败。
+func TestNotifyPluginNoop(t *testing.T) {
+	m := newTestManager()
+	if err := m.NotifyPlugin("not.exist", "host.ai.delta", map[string]string{"delta": "x"}); err != nil {
+		t.Errorf("未知插件应静默跳过，得到: %v", err)
+	}
+	// goja 实例没有 stdin，同样跳过。
+	m.plugins["test.goja"] = NewPluginInstance(PluginManifest{ID: "test.goja"}, "")
+	if err := m.NotifyPlugin("test.goja", "host.ai.delta", map[string]string{"delta": "x"}); err != nil {
+		t.Errorf("goja 插件应静默跳过，得到: %v", err)
+	}
 }

@@ -171,3 +171,79 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 		ElapsedMs: time.Since(start).Milliseconds(),
 	})
 }
+
+// AIAskStream 与 AIAsk 同源，但每收到一段增量文本就通过 onToken 回调，
+// 供前端逐字流式渲染——这正是「问 AI」面板从"等半天出整段"变成"边想边出"的关键。
+//
+// 约束与 AIAsk 完全一致（见其注释）：不落库、不占 convId、自带超时、
+// 返回裁剪后的完整文本。区别只在传输方式：这里把增量交给调用方，
+// 最终的完整文本仍按 AIAsk 的口径裁剪后返回，方便调用方做一次性的分段解析。
+func (a *AIService) AIAskStream(req AIAskRequest, onToken func(text string)) *services.ApiResult {
+	question := strings.TrimSpace(req.Question)
+	if question == "" {
+		return services.FailMsg("问题不能为空")
+	}
+	cfg, ok := a.getActiveAIProfile()
+	if !ok {
+		return services.FailMsg("未配置可用的 AI 档案")
+	}
+
+	system := strings.TrimSpace(req.System)
+	if system == "" {
+		system = cfg.SystemPrompt
+	}
+	if n := len([]rune(system)); n > askMaxSystemRune {
+		system = string([]rune(system)[:askMaxSystemRune])
+	}
+	if n := len([]rune(question)); n > askMaxUserRune {
+		question = string([]rune(question)[:askMaxUserRune])
+	}
+
+	timeout := askTimeout
+	if req.TimeoutSec > 0 {
+		if req.TimeoutSec > 120 {
+			req.TimeoutSec = 120
+		}
+		timeout = time.Duration(req.TimeoutSec) * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	maxTok := cfg.MaxTokens
+	if maxTok <= 0 {
+		maxTok = aiDefaultMax
+	}
+	if req.MaxTokens > 0 && req.MaxTokens < maxTok {
+		maxTok = req.MaxTokens
+	}
+	if maxTok > askMaxTokens {
+		maxTok = askMaxTokens
+	}
+
+	// streamAIChat 收 []map[string]interface{}（与 buildAIMessages 同构），
+	// 这里手搓两条消息即可，不必再走一次会话/摘要逻辑。
+	messages := []map[string]interface{}{
+		{"role": "system", "content": system},
+		{"role": "user", "content": question},
+	}
+
+	start := time.Now()
+	text, err := a.streamAIChat(ctx, cfg, messages, "ai-ask", onToken, nil, nil)
+	if err != nil {
+		return services.Fail(err)
+	}
+
+	truncated := false
+	if n := len([]rune(text)); n > askMaxReturnRune {
+		text = string([]rune(text)[:askMaxReturnRune])
+		truncated = true
+	}
+
+	return services.Ok(AIAskResult{
+		Text:      text,
+		Model:     cfg.Model,
+		Profile:   cfg.Name,
+		Truncated: truncated,
+		ElapsedMs: time.Since(start).Milliseconds(),
+	})
+}

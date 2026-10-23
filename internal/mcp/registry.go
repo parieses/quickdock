@@ -75,6 +75,41 @@ func List() []toolDefinition {
 	return out
 }
 
+// ToolInfo 工具元信息，含危险等级与「在当前等级下是否开放」。
+//
+// 管理界面需要看到全量工具而不是 List()：注册在高危档的工具确实存在，
+// 只是被等级门挡住。只展示 List() 会让用户以为「能力就这么多」，
+// 也会让库里那些高危工具的描述（写着「请去开启高危等级」）显得凭空消失。
+type ToolInfo struct {
+	Name        string
+	Description string
+	Level       int
+	Exposed     bool
+}
+
+// Catalog 返回全部已注册工具（含被等级门挡住的），按等级升序、同级按名称排序，
+// 保证管理界面的展示顺序稳定。
+func Catalog() []ToolInfo {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	out := make([]ToolInfo, 0, len(tools))
+	for _, t := range tools {
+		out = append(out, ToolInfo{
+			Name:        t.Name,
+			Description: t.Description,
+			Level:       t.Level,
+			Exposed:     t.Level <= maxLvl,
+		})
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Level != out[j].Level {
+			return out[i].Level < out[j].Level
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out
+}
+
 // Call 执行工具。未注册或超出等级限制时返回错误。
 func Call(name string, args map[string]any) (any, error) {
 	regMu.RLock()

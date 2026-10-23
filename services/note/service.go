@@ -51,35 +51,6 @@ func (s *NoteService) SaveNote(content string) *services.ApiResult {
 	return services.Ok(nil)
 }
 
-// AskAI 快捷笔记「问 AI」：隐藏笔记独立窗口 → 显示并聚焦主窗口 →
-// 广播 note:ask-ai 事件（携带笔记文本），由主窗口注入 AI 输入框并切到 AI 页。
-// 必须经后端中转：笔记浮窗与主窗口是两个 WebView，JS 状态互不可见；
-// 此前在浮窗内直接 navigateTo('ai') 会把完整主界面渲染进小浮窗（样式错乱）。
-func (s *NoteService) AskAI(text string) *services.ApiResult {
-	content := strings.TrimSpace(text)
-	if content == "" {
-		return services.FailMsg("内容为空")
-	}
-	app := s.App.App()
-	if app == nil {
-		return services.FailMsg("应用未就绪")
-	}
-	// 隐藏笔记浮窗并复位标志（与 ClipboardService.HideNoteWindow 逻辑一致，保证热键开关正确）
-	if fn := s.App.GetNoteWindow; fn != nil {
-		if win := fn(); win != nil {
-			s.App.Flags.Note.Store(false)
-			win.Hide()
-		}
-	}
-	// 显示并聚焦主窗口（与 plugin_host 的唤起模式一致）
-	if win := s.App.MainWindow; win != nil {
-		win.Show()
-		win.Focus()
-	}
-	app.Event.Emit("note:ask-ai", content)
-	return services.Ok(nil)
-}
-
 // ListNotesTree 返回全部笔记节点（文件夹 + 文档），前端拼树。
 func (s *NoteService) ListNotesTree() *services.ApiResult {
 	if r := s.dbOK(); r != nil {

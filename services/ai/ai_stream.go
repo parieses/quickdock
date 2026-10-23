@@ -108,9 +108,10 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	// 必须在写入任何响应之前读取并解析请求体。若先 WriteHeader+Flush 再读
 	// r.Body，net/http 会使请求体为空（读到 EOF），导致“请求解析失败”。
 	var req struct {
-		ConvID  string `json:"convId"`
-		Mode    string `json:"mode"`
-		Message string `json:"message"`
+		ConvID  string        `json:"convId"`
+		Mode    string        `json:"mode"`
+		Message string        `json:"message"`
+		Images  []AIChatImage `json:"images"`
 	}
 	raw, rerr := io.ReadAll(r.Body)
 	if rerr != nil {
@@ -140,12 +141,23 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		s.writeSSE(w, flusher, "error", map[string]any{"message": "请在设置中配置 API Key"})
 		return
 	}
-	if message == "" {
+	// 纯图片提问（“这张图里有什么”）是合法场景：文字为空但有图片时放行。
+	if message == "" && len(req.Images) == 0 {
 		s.writeSSE(w, flusher, "error", map[string]any{"message": "消息为空"})
 		return
 	}
 	if mode == "" || aiModePrompts[mode] == "" {
 		mode = "chat"
+	}
+
+	// 图片闸门 + 落盘：按档案声明的 imageInput 能力校验（见 ai_image.go），
+	// 本地图写盘后只把路径引用带去上下文。放在建会话之前——图片不合法时
+	// 不该先留下一个空会话。
+	imagesJSON, err := s.svc.prepareChatImages(cfg, req.Images)
+	if err != nil {
+		logger.W("[ai] 图片校验失败 conv=%s: %v", convID, err)
+		s.writeSSE(w, flusher, "error", map[string]any{"message": err.Error()})
+		return
 	}
 
 	// 跟随请求上下文，前端 abort 时 r.Context() 取消，立即停止读取模型流
@@ -188,10 +200,18 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	fl := newSSEFlusher(w, flusher, convID)
 	defer fl.close()
 
+	// 调模型前先落库用户消息：无论后续成功 / 失败 / 被打断，历史都不会出现空会话，
+	// 用户刷新或重进会话都能看到自己问了什么，而不是点进来一片空白。
+	if err := s.svc.saveUserTurn(convID, message, imagesJSON); err != nil {
+		logger.W("[ai] 保存用户消息失败 conv=%s: %v", convID, err)
+		fl.writeEvent("error", map[string]any{"message": err.Error()})
+		return
+	}
+
 	// 组装上下文（含摘要压缩）
 	// 注意：用户消息尚未存 DB，buildAIMessages 会从 DB 加载历史 + 追加 currentUser 作为最后一条。
 	// 模型回复后统一落库两条消息，避免重复。
-	messages, err := s.svc.buildAIMessages(ctx, cfg, convID, mode, message)
+	messages, err := s.svc.buildAIMessages(ctx, cfg, convID, mode)
 	if err != nil {
 		logger.W("[ai] 组装上下文失败 conv=%s mode=%s: %v", convID, mode, err)
 		fl.writeEvent("error", map[string]any{"message": err.Error()})
@@ -201,6 +221,10 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	// 首次消息自动生成标题
 	if conv != nil && conv.Title == "" {
 		title := message
+		if title == "" {
+			// 纯图片提问：用固定词兜底，否则标题为空、列表里显示“新对话”
+			title = "图片问答"
+		}
 		if utf8.RuneCountInString(title) > 30 {
 			title = string([]rune(title)[:30]) + "…"
 		}
@@ -238,19 +262,12 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		},
 	)
 
-	// 统一落库用户消息 + 助手回复（无论正常结束还是取消，有 assistant 就存）。
-	// 若模型未产出任何内容（assistant 为空），不写入空回复，避免污染对话历史。
-	saveBoth := func(asst string) {
+	// 仅落库助手回复：用户消息已在调模型前由 saveUserTurn 落库（幂等，重试不重复）。
+	// 模型成功返回但内容为空（上游限流/工具调用/内容过滤都可能）时不写空回复，避免污染历史。
+	saveAssistant := func(asst string) {
 		asst = strings.TrimSpace(asst)
 		if asst == "" {
-			// 模型成功返回但内容为空（上游限流/工具调用/内容过滤都可能）：
-			// 前端只看到「无回复」，此处留痕才能区分是模型没说话还是落库失败。
-			logger.W("[ai] 模型未产出内容，跳过落库 conv=%s mode=%s", convID, mode)
-			return
-		}
-		if _, e := s.svc.App.DB.AddAIMessage(convID, "user", message); e != nil {
-			logger.W("[ai] 保存用户消息失败 conv=%s: %v", convID, e)
-			fl.writeEvent("error", map[string]any{"message": e.Error()})
+			logger.W("[ai] 模型未产出内容，跳过落库助手回复 conv=%s mode=%s", convID, mode)
 			return
 		}
 		if _, e := s.svc.App.DB.AddAIMessageFull(convID, "assistant", asst, reasoningBuf.String()); e != nil {
@@ -261,17 +278,22 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		if ctx.Err() != nil {
-			// 用户主动取消，保存已收到部分
-			saveBoth(assistant)
+			// 用户主动取消，保存已收到部分（用户消息已在调模型前落库）
+			saveAssistant(assistant)
 			fl.writeEvent("done", doneEvent(convID, firstTokenAt, usageIn, usageOut))
 			return
 		}
-		fl.writeEvent("error", map[string]any{"message": err.Error()})
+		// 上游报错：用户消息已落库，历史不会空。若疑似因 base64 本地图片被拒，给明确提示。
+		msg := err.Error()
+		if hint := s.svc.imageErrorHint(err, req.Images); hint != "" {
+			msg += hint
+		}
+		fl.writeEvent("error", map[string]any{"message": msg})
 		return
 	}
 
-	// 正常结束，落库
-	saveBoth(assistant)
+	// 正常结束，落库助手回复（用户消息已在调模型前落库）
+	saveAssistant(assistant)
 	_ = s.svc.App.DB.UpdateAIConversationMeta(convID, "", "")
 	logger.I("[ai] 流式结束 conv=%s 首字=%dms in=%d out=%d", convID, firstTokenAt.Milliseconds(), usageIn, usageOut)
 	fl.writeEvent("done", doneEvent(convID, firstTokenAt, usageIn, usageOut))
