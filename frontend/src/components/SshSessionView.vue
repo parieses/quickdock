@@ -14,7 +14,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Loader2, RotateCw, Unplug } from '@lucide/vue'
+import { Loader2, RotateCw, Sparkles, Unplug } from '@lucide/vue'
 import { Connect, Disconnect, ListSessions, Resize } from '../../bindings/quickdock/services/sshx/sshservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
 import { useToast } from '../composables/useToast'
@@ -30,6 +30,7 @@ import {
   type SshSessionInfo,
 } from '../utils/ssh'
 import SshTerminal from './SshTerminal.vue'
+import SshAiPanel from './SshAiPanel.vue'
 import SshFingerprintDialog from './SshFingerprintDialog.vue'
 import SshPasteDialog from './SshPasteDialog.vue'
 
@@ -339,6 +340,64 @@ function onPasteCancel() {
   pasteData.value = ''
 }
 
+// ---- AI 面板 ----
+
+// 默认收起：300px 对小窗口是实打实的损失，而 AI 是偶发需求。
+const aiOpen = ref(false)
+
+/** 转发给 AI 面板的屏显读取：必须在调用时才取，不能缓存——
+ *  用户提问前可能刚敲了新命令，缓存的旧屏显会让 AI 答非所问。 */
+function readScreen(): string {
+  return termRef.value?.readScreen?.() ?? ''
+}
+
+/**
+ * 转发给 AI 面板的「写入终端」能力。
+ *
+ * 走终端暴露的 send 而不是另开一条通路：按键、粘贴、AI 发送必须共用同一条
+ * 串行输入链，否则用户「发完命令马上敲键」时两路字节会交叉，远端收到的是乱序。
+ *
+ * execute=false 时把命令写进远端输入缓冲但不发回车：用户在屏幕上能看到这条命令，
+ * 由他亲自按回车执行。这是刻意的——AI 建议的命令一旦自动跑起来，
+ * 在生产机上没有撤销的机会。
+ */
+function sendToTerm(data: string, execute: boolean): void {
+  const text = execute ? data + '\r' : data
+  termRef.value?.send?.(text)
+}
+
+/**
+ * 终端右键「问 AI」：把选中的输出交给 AI 面板。
+ *
+ * 两个动作：先开面板，再把选区**推给面板**。但光"顺序对"还不够，
+ * **时序**也必须对：两行若在同一个同步块里连续执行，Vue 要到异步 flush 才挂载
+ * 面板，而面板的 watch 默认不对初始值触发——挂载时 pendingAsk 早已就位，
+ * 那次赋值不构成"变化"，watch 永远不会跑。
+ *
+ * 表现很隐蔽：面板**默认是收起的**，所以用户第一次右键时面板刚被打开、
+ * 选区却没进去，看到的是空输入框，只会以为右键没生效。
+ * 因此这里 await nextTick() 等面板挂载完成再注入。
+ *
+ * 不能改用 `watch(..., { immediate: true })` 兜底：那样每次点右下角 AI 按钮
+ * 重新打开面板时，都会把上一次的旧选区再挂上来。
+ *
+ * 选区与屏显的关系：两者都进 prompt。屏显是"整屏画面"，选区是"我圈出来的
+ * 那一段"，后者权重更高，模型会优先看它（见 Ask 里的 selection）。
+ */
+async function askAIAbout(selection: string): Promise<void> {
+  aiOpen.value = true
+  // 等这一帧渲染完（面板挂载、watch 注册完毕），再注入一次性载荷。
+  await nextTick()
+  pendingAsk.value = { text: selection, seq: ++askSeq }
+}
+
+/** 待注入 AI 面板的提问（右键选中后的一次性载荷）。
+ *  带 seq 是为了让用户连续两次选中不同内容时，面板能识别这是新的一次；
+ *  seq 只是自增计数器，不需要响应式，故用普通变量（写成 ref 会误导后续维护者
+ *  以为界面依赖它的变化）。 */
+let askSeq = 0
+const pendingAsk = ref<{ text: string; seq: number } | null>(null)
+
 // ---- 状态条时钟 ----
 
 /**
@@ -434,48 +493,73 @@ defineExpose({
       <span v-if="bytesText">{{ bytesText }}</span>
     </div>
 
-    <div class="sess-body">
-      <SshTerminal
-        ref="termRef"
-        :session-id="sessionId"
-        :replay-on-attach="!!resume?.id"
-        @ready="onReady"
-        @state="onState"
-        @error="onTermError"
-        @paste="onPaste"
-      />
+    <!-- 终端 + AI 面板并列。面板默认收起：占掉 300px 对小窗口来说是实打实的损失，
+         而 AI 是偶发需求（遇到报错、想不起来某条命令时才用），不该常驻占位。 -->
+    <div class="sess-row">
+      <div class="sess-body">
+        <SshTerminal
+          ref="termRef"
+          :session-id="sessionId"
+          :replay-on-attach="!!resume?.id"
+          @ready="onReady"
+          @state="onState"
+          @error="onTermError"
+          @paste="onPaste"
+          @askAI="askAIAbout"
+        />
 
-      <!-- 连接中：盖住终端，避免用户对着空白屏以为连上了 -->
-      <div v-if="phase === 'connecting'" class="sess-overlay">
-        <Loader2 :size="18" class="spin" />
-        <span>{{ t('sshConnecting') }}</span>
-      </div>
+        <!-- AI 入口按钮：只在会话已建立时出现 -->
+        <button
+          v-if="phase === 'connected' && !aiOpen"
+          class="sess-ai-fab"
+          :title="t('sshAiTitle')"
+          @click="aiOpen = true"
+        >
+          <Sparkles :size="15" />
+        </button>
 
-      <!-- 连接失败：给出原因，不留死路（可重试） -->
-      <div v-else-if="phase === 'error'" class="sess-overlay">
-        <div class="sess-card">
-          <p class="sess-card-title">{{ t('sshConnectFailed') }}</p>
-          <p class="sess-card-msg">{{ errMsg }}</p>
-          <div class="sess-card-actions">
-            <button class="sess-btn" @click="reconnect">{{ t('sshReconnect') }}</button>
+        <!-- 连接中：盖住终端，避免用户对着空白屏以为连上了 -->
+        <div v-if="phase === 'connecting'" class="sess-overlay">
+          <Loader2 :size="18" class="spin" />
+          <span>{{ t('sshConnecting') }}</span>
+        </div>
+
+        <!-- 连接失败：给出原因，不留死路（可重试） -->
+        <div v-else-if="phase === 'error'" class="sess-overlay">
+          <div class="sess-card">
+            <p class="sess-card-title">{{ t('sshConnectFailed') }}</p>
+            <p class="sess-card-msg">{{ errMsg }}</p>
+            <div class="sess-card-actions">
+              <button class="sess-btn" @click="reconnect">{{ t('sshReconnect') }}</button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- 已断开：用底部横条而不是全屏遮罩，让用户还能看到最后的输出 -->
-      <div v-else-if="phase === 'closed'" class="sess-banner">
-        <div class="sess-banner-text">
-          <span>{{ errMsg || stateText }}</span>
-          <em v-if="endHint" class="sess-banner-hint">{{ endHint }}</em>
+        <!-- 已断开：用底部横条而不是全屏遮罩，让用户还能看到最后的输出 -->
+        <div v-else-if="phase === 'closed'" class="sess-banner">
+          <div class="sess-banner-text">
+            <span>{{ errMsg || stateText }}</span>
+            <em v-if="endHint" class="sess-banner-hint">{{ endHint }}</em>
+          </div>
+          <button class="sess-btn sess-btn--sm" @click="reconnect">{{ t('sshReconnect') }}</button>
         </div>
-        <button class="sess-btn sess-btn--sm" @click="reconnect">{{ t('sshReconnect') }}</button>
+
+        <SshPasteDialog
+          :visible="!!pasteData"
+          :data="pasteData"
+          @confirm="onPasteConfirm"
+          @cancel="onPasteCancel"
+        />
       </div>
 
-      <SshPasteDialog
-        :visible="!!pasteData"
-        :data="pasteData"
-        @confirm="onPasteConfirm"
-        @cancel="onPasteCancel"
+      <SshAiPanel
+        v-if="aiOpen && phase === 'connected'"
+        :session-id="sessionId"
+        :host-env="host.env"
+        :read-screen="readScreen"
+        :send-to-term="sendToTerm"
+        :pending-ask="pendingAsk"
+        @close="aiOpen = false"
       />
     </div>
 
@@ -628,6 +712,39 @@ defineExpose({
   flex: 1 1 auto;
   min-height: 0;
   min-width: 0;
+}
+
+/* 终端与 AI 面板的横向容器。min-width: 0 是必需的：
+   flex 子项默认 min-width:auto，终端内容过宽会把这一行撑破，
+   AI 面板被挤出可视区（表现为面板"消失"而不是布局变窄）。 */
+.sess-row {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
+/* 悬浮入口：贴在终端右下角，不占布局空间。 */
+.sess-ai-fab {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.sess-ai-fab:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-accent);
 }
 
 .sess-overlay {

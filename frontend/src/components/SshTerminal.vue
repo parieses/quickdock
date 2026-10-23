@@ -12,6 +12,7 @@
  */
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Sparkles } from '@lucide/vue'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -74,6 +75,8 @@ const emit = defineEmits<{
   error: [message: string]
   /** 多行粘贴待确认：数据原样带出，父组件弹窗确认后再决定是否发送 */
   paste: [data: string]
+  /** 对选中内容提问 AI：带出选区文本，由父组件决定是否打开面板 */
+  askAI: [selection: string]
 }>()
 
 const { t } = useI18n()
@@ -83,7 +86,8 @@ const { t } = useI18n()
 // xterm.js 只负责「选中文字」，但默认**不会把选区写进系统剪贴板**，也没有任何
 // 右键菜单——所以在 WebView 里选中一段输出后，用户既没法 Ctrl+C（那是发给远端的
 // SIGINT），也没法右键复制，等于「看得见拿不走」。这里补一个轻量右键菜单 +
-// 快捷键（Ctrl+Shift+C 复制 / Ctrl+Shift+V、Shift+Insert 粘贴），与主流终端一致。
+// 快捷键（Ctrl+Shift+C 复制 / Ctrl+Shift+V、Shift+Insert 粘贴 / Ctrl+Shift+A 问 AI），
+// 与主流终端一致。
 const menu = ref<{ x: number; y: number } | null>(null)
 
 function hasSelection(): boolean {
@@ -92,8 +96,9 @@ function hasSelection(): boolean {
 
 function openMenu(e: MouseEvent) {
   // 超出视口时往回收，避免菜单被屏幕边缘裁掉点不到。
+  // 底部预留 190px：菜单每加一项约增高 30px，预留不足会正好压住最后一项。
   const x = Math.min(e.clientX, window.innerWidth - 180)
-  const y = Math.min(e.clientY, window.innerHeight - 160)
+  const y = Math.min(e.clientY, window.innerHeight - 190)
   menu.value = { x, y }
 }
 
@@ -168,6 +173,31 @@ function onSelectAll() {
   closeMenu()
 }
 
+/**
+ * 对选中内容提问 AI。
+ *
+ * 选区文本要做规整：xterm 的 getSelection 对跨行选取会保留每行的**尾随空格**
+ * （补齐到终端宽度），并且整块包裹的长行在换行处不会补回车——直接喂给模型的话，
+ * 既浪费 token，也会让日志/堆栈的行边界错位，模型因此更容易读错报错位置。
+ */
+function onAskAI() {
+  if (!hasSelection()) {
+    closeMenu()
+    return
+  }
+  const lines = term!.getSelection().split('\n').map((l) => l.trimEnd())
+  // 去掉首尾空行：中间的细节才是现场，边缘空白对模型没有信息量。
+  while (lines.length && lines[0].trim() === '') lines.shift()
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop()
+  const text = lines.join('\n')
+  if (!text) {
+    closeMenu()
+    return
+  }
+  emit('askAI', text)
+  closeMenu()
+}
+
 function onClear() {
   term?.clear()
   closeMenu()
@@ -185,6 +215,14 @@ function onKeydown(e: KeyboardEvent) {
   if (mod && k === 'C' && e.shiftKey) {
     e.preventDefault()
     void onCopy()
+    return
+  }
+  // Ctrl/Cmd+Shift+A：对选中内容提问 AI。无选区时不拦截，
+  // 把这个组合留给宿主/浏览器的其它用途，避免按了没反应又拦了键。
+  if (mod && k === 'A' && e.shiftKey) {
+    if (!hasSelection()) return
+    e.preventDefault()
+    onAskAI()
     return
   }
   if (mod && k === 'V' && e.shiftKey) {
@@ -554,6 +592,29 @@ onBeforeUnmount(() => {
   term = null
 })
 
+// ---- 屏显取文本（供 AI 面板当上下文）----
+//
+// 从 xterm 的 buffer 读而不是让后端去取 Replay：Replay 是原始字节，
+// 里面全是 ANSI 转义序列，直接喂模型只会得到乱码；buffer 里是已渲染的纯文本。
+//
+// 只取「当前视口 + 往上多留一屏」：再往上是滚动历史，对"刚才那条命令报了什么错"
+// 这类问题没有帮助，却会让 token 费用与无关噪声一起翻倍。
+function readScreenText(): string {
+  if (!term) return ''
+  const buf = term.buffer.active
+  // baseY 是当前视口最上方的行号；多往上取一屏，覆盖"命令 + 输出 + 报错"完整一段。
+  const top = Math.max(0, buf.baseY - term.rows)
+  const lines: string[] = []
+  for (let y = top; y < buf.baseY + term.rows; y++) {
+    const line = buf.getLine(y)
+    lines.push(line ? line.translateToString(true) : '')
+  }
+  // 去掉首尾空行：模型看到几十行空白会以为上下文被截断了，反而多问一轮。
+  while (lines.length && lines[0].trim() === '') lines.shift()
+  while (lines.length && lines[lines.length - 1].trim() === '') lines.pop()
+  return lines.join('\n')
+}
+
 defineExpose({
   focus: () => term?.focus(),
   fit: () => fitAddon?.fit(),
@@ -561,6 +622,8 @@ defineExpose({
   clear: () => term?.clear(),
   /** 用户确认多行粘贴后由父组件调用，走与按键完全相同的发送路径。 */
   send: sendInput,
+  /** 取当前屏幕的纯文本，供 AI 面板当作上下文。 */
+  readScreen: readScreenText,
 })
 </script>
 
@@ -584,6 +647,13 @@ defineExpose({
         <button class="term-menu-item" :disabled="!hasSelection()" @click="onCopy">
           <span>{{ t('sshCtxCopy') }}</span>
           <span class="term-menu-kbd">Ctrl+Shift+C</span>
+        </button>
+        <button class="term-menu-item ask-ai" :disabled="!hasSelection()" @click="onAskAI">
+          <span class="mi-lead">
+            <Sparkles :size="13" />
+            <span>{{ t('sshCtxAskAI') }}</span>
+          </span>
+          <span class="term-menu-kbd">Ctrl+Shift+A</span>
         </button>
         <button class="term-menu-item" @click="onPaste">
           <span>{{ t('sshCtxPaste') }}</span>
@@ -669,6 +739,24 @@ defineExpose({
 .term-menu-item:disabled {
   color: var(--color-text-disabled);
   cursor: default;
+}
+
+/* 「问 AI」项：图标与文字成组靠左，快捷键靠右，
+   与复制/粘贴项的 [内容 ... 快捷键] 结构保持一致。
+   用显式 class 而不是 :has(.mi-lead) —— 后者要 Chrome 105+，
+   WebView2 若停在旧版会整条样式失效。 */
+.term-menu-item.ask-ai {
+  color: var(--color-accent);
+}
+
+.term-menu-item.ask-ai:disabled {
+  color: var(--color-text-disabled);
+}
+
+.term-menu-item .mi-lead {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
 }
 
 .term-menu-kbd {
