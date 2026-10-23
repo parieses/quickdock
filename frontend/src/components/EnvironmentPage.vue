@@ -514,7 +514,10 @@ function failState(r: RuntimeInfo, e: any) {
 // ---- 证书 / MCP / WebDAV：三块内置能力已抽到 composables（页面 script 过长，
 // 3589 行单文件难以维护）。模板引用保持同名，原样解构即可，模板无需改动。
 const { certModal, loadCertStatus, ensureCertLoaded, certInstallRoot, certPickDir, certIssue } = useCertPanel(selectedId)
-const { mcpInfo, mcpTools, mcpCfg, mcpLoading, loadMCP, copyMCP, setMCPLevel } = useMCPPanel(selectedId)
+const {
+  mcpInfo, mcpTools, mcpClients, mcpLoading, mcpBusy, mcpLevelHint, mcpCheck,
+  loadMCP, copyMCP, setMCPLevel, startMCP, stopMCP, restartMCP, checkMCP,
+} = useMCPPanel(selectedId)
 const { webdavInfo, webdavURL, webdavExposed, webdavCmds, copyWebDAV, loadWebDAV } = useWebDAVPanel(selectedId)
 
 
@@ -3244,13 +3247,27 @@ const s = currentRuntimeState
           </div>
         </section>
 
-        <!-- MCP 接入（MCP 专属）：监听地址、客户端配置、已开放工具 -->
+        <!-- MCP 接入（MCP 专属）：启停、监听地址、工具权限、客户端配置与工具清单 -->
         <section v-if="selected.id === 'mcp'" class="detail-block mcp-panel">
           <div class="block-head">
             <span class="block-title">{{ t('mcpPanelTitle') }}</span>
             <span class="block-count">{{ mcpInfo.running ? t('svcRunning') : t('svcNotStarted') }}</span>
             <button class="link-btn import-btn" :disabled="mcpLoading" @click="loadMCP">{{ t('refresh') }}</button>
           </div>
+
+          <div class="mcp-actions">
+            <button class="op-btn small" :disabled="mcpBusy || mcpInfo.running" @click="startMCP">{{ t('envStart') }}</button>
+            <button class="op-btn small" :disabled="mcpBusy || !mcpInfo.running" @click="stopMCP">{{ t('svcStop') }}</button>
+            <button class="op-btn small" :disabled="mcpBusy || !mcpInfo.running" @click="restartMCP">{{ t('svcRestart') }}</button>
+            <button
+              class="op-btn small"
+              :disabled="mcpBusy || mcpCheck.busy || !mcpInfo.running"
+              @click="checkMCP"
+            >
+              {{ mcpCheck.busy ? t('mcpChecking') : t('mcpCheck') }}
+            </button>
+          </div>
+          <p v-if="mcpCheck.text" class="mcp-check" :class="mcpCheck.ok ? 'ok' : 'err'">{{ mcpCheck.text }}</p>
 
           <div v-if="mcpInfo.running" class="mcp-url-row">
             <code class="mcp-url">{{ mcpInfo.endpoint }}</code>
@@ -3259,37 +3276,51 @@ const s = currentRuntimeState
           <div v-else class="env-msg">
             {{ t('mcpNotRunning') }}
           </div>
+          <p class="mcp-note">{{ t('mcpLocalOnly') }}</p>
 
           <div class="mcp-level-row">
             <span class="mcp-label">{{ t('mcpToolLevel') }}</span>
-            <select v-model.number="mcpInfo.maxLevel" class="env-input mcp-select" @change="setMCPLevel">
+            <select
+              v-model.number="mcpInfo.maxLevel"
+              class="env-input mcp-select"
+              :disabled="mcpBusy"
+              @change="setMCPLevel"
+            >
               <option :value="0">{{ t('mcpLevelReadOnly') }}</option>
               <option :value="1">{{ t('mcpLevelLowWrite') }}</option>
             </select>
             <span class="mcp-hint">{{ t('mcpHighRiskClosed') }}</span>
           </div>
+          <p v-if="mcpLevelHint" class="mcp-level-hint">{{ mcpLevelHint }}</p>
 
           <template v-if="mcpInfo.running">
             <div class="mcp-cfg-head">
-              <span>{{ t('mcpClaudeCodeCmd') }}</span>
-              <button class="op-btn small" @click="copyMCP(mcpCfg.cli)">{{ t('copy') }}</button>
+              <span>{{ t('mcpClientsTitle') }}</span>
             </div>
-            <pre class="mcp-code">{{ mcpCfg.cli }}</pre>
-
-            <div class="mcp-cfg-head">
-              <span>{{ t('mcpClientJson') }}</span>
-              <button class="op-btn small" @click="copyMCP(mcpCfg.json)">{{ t('copy') }}</button>
-            </div>
-            <pre class="mcp-code">{{ mcpCfg.json }}</pre>
+            <template v-for="c in mcpClients" :key="c.id">
+              <div class="mcp-cfg-head">
+                <span>{{ c.label }}</span>
+                <button class="op-btn small" @click="copyMCP(c.config)">{{ t('copy') }}</button>
+              </div>
+              <p v-if="c.path" class="mcp-client-path">{{ t('mcpClientPath', { path: c.path }) }}</p>
+              <pre class="mcp-code">{{ c.config }}</pre>
+            </template>
           </template>
 
           <div class="mcp-cfg-head">
-            <span>{{ t('mcpExposedTools') }} {{ mcpTools.length }}</span>
+            <span>{{ t('mcpExposedTools') }} {{ mcpInfo.tools }} / {{ mcpInfo.total }}</span>
           </div>
           <div class="mcp-tools">
-            <div v-for="tool in mcpTools" :key="tool.name" class="mcp-tool-row">
+            <div
+              v-for="tool in mcpTools"
+              :key="tool.name"
+              class="mcp-tool-row"
+              :class="{ 'is-blocked': !tool.exposed }"
+            >
               <span class="mcp-tool-name">{{ tool.name }}</span>
-              <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">{{ tool.level > 0 ? t('mcpToolWritable') : t('mcpToolReadOnly') }}</span>
+              <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">
+                {{ tool.level > 1 ? t('mcpToolHighRisk') : tool.level > 0 ? t('mcpToolWritable') : t('mcpToolReadOnly') }}
+              </span>
               <span class="mcp-tool-desc">{{ tool.description }}</span>
             </div>
             <div v-if="!mcpTools.length" class="mcp-hint">{{ t('mcpNoTools') }}</div>
@@ -4484,6 +4515,14 @@ const s = currentRuntimeState
   border: 1px solid var(--color-border); overflow-x: auto; white-space: pre-wrap; word-break: break-all;
 }
 .mcp-tools { display: flex; flex-direction: column; gap: 4px; }
+.mcp-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0; }
+.mcp-check { margin: 0 0 8px; font-size: 12px; }
+.mcp-check.ok { color: var(--color-success); }
+.mcp-check.err { color: var(--color-danger); }
+.mcp-note { margin: 0 0 6px; font-size: 11px; color: var(--color-text-muted); }
+.mcp-level-hint { margin: 0 0 6px; font-size: 11px; color: var(--color-warning); }
+.mcp-client-path { margin: 0 0 6px; font-size: 11px; color: var(--color-text-muted); word-break: break-all; }
+.mcp-tool-row.is-blocked { opacity: .55; }
 .mcp-tool-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; }
 .mcp-tool-name { font-family: var(--font-mono, monospace); color: var(--color-text-primary); flex: none; min-width: 140px; }
 .mcp-tool-desc { color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

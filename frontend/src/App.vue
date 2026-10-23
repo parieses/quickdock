@@ -15,7 +15,7 @@ import { i18n } from './i18n';
 import { unwrap } from './utils/api';
 import { logErr } from './utils/logger';
 import { getErrorMessage } from './utils/error';
-import { navigateTo, aiDraft, pendingOpenNoteId } from './composables/bridge';
+import { navigateTo, pendingOpenNoteId } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
 import CollectionList from './components/CollectionList.vue';
 import ItemList from './components/ItemList.vue';
@@ -236,6 +236,12 @@ onMounted(async () => {
     settingsPage.value = undefined
     showSettings.value = true
   })
+  // 浮窗（剪贴板 / SSH）里「问 AI」发现没配 Key 时，Go 侧唤起主窗口并发本事件，
+  // 这里直接定位到 AI 配置页 —— 用户无需再自己找入口。
+  Events.On('app:open-ai-settings', () => {
+    settingsPage.value = 'ai'
+    showSettings.value = true
+  })
   // 后台自动检查到新版本时弹出应用内更新提示（不再依赖用户主动打开设置）
   Events.On('quickdock:update:status', onUpdateStatus)
   // 全局热键注册失败（多被其它程序占用）：Go 侧延迟投放本事件，弹 toast 引导用户改绑
@@ -243,18 +249,6 @@ onMounted(async () => {
     const list: string[] = Array.isArray(payload) ? payload : (payload?.data ?? [])
     if (!list.length) return
     error(t('hotkeyRegisterFailed', { keys: list.join('、') }))
-  })
-  // 快捷笔记「问 AI」：独立笔记浮窗经后端广播文本，主窗口在此接收——
-  // 写入 aiDraft（AIPage 监听后注入输入框）并切到 AI 页。
-  // 事件会广播到所有窗口，独立窗口（hash 非空）必须忽略，否则其内部
-  // navigateTo 会把完整主界面渲染进小浮窗造成样式错乱。
-  Events.On('note:ask-ai', (ev: any) => {
-    if (window.location.hash) return
-    const raw = ev?.data ?? ev
-    const text = typeof raw === 'string' ? raw : ''
-    if (!text.trim()) return
-    aiDraft.value = text
-    navigateTo.value?.('ai')
   })
   // 命令面板选中笔记：面板浮窗经后端广播笔记 id，主窗口写入 pendingOpenNoteId
   // （NoteManagerPage 加载/监听后打开对应文档）并切到笔记页。

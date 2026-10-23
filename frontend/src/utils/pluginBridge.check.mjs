@@ -91,7 +91,7 @@ try {
 }
 console.log('脚本解析执行 OK（' + inner.length + ' chars）')
 
-for (const k of ['qdConfirm', 'qdAlert', 'qdPickFile', 'qdPickFolder', 'qdReadFile', 'qdHostCall', 'qdHttp', 'qdPrint']) {
+for (const k of ['qdConfirm', 'qdAlert', 'qdPickFile', 'qdPickFolder', 'qdReadFile', 'qdHostCall', 'qdHttp', 'qdPrint', 'qdAiAsk']) {
   ok(typeof win[k] === 'function', 'window.' + k + ' 存在')
 }
 ok(typeof win.alert === 'function', 'window.alert 仍被覆盖')
@@ -165,6 +165,46 @@ posted.length = 0
 const p3 = win.qdConfirm('确定?')
 ok(posted[0].type === 'plugin:confirm', 'qdConfirm 仍发 plugin:confirm', posted[0].type)
 sendToIframe({ type: 'plugin:confirm-result', id: posted[0].id, ok: true })
+
+// ---- qdAiAsk：流式 AI 问答 ----
+// 宿主沿途下发 plugin:ai-delta（带 streamId），桥按 streamId 投给对应回调；
+// 调用结束后必须摘掉回调，否则长期开着的插件会一直累积闭包。
+posted.length = 0
+const aiDeltas = []
+const pAi = win.qdAiAsk({ question: '介绍下 QuickDock', system: 's' }, (d) => aiDeltas.push(d))
+const mAi = posted[0]
+ok(mAi && mAi.type === 'plugin:host', 'qdAiAsk 走 plugin:host 通道', mAi && mAi.type)
+ok(mAi && mAi.method === 'host.ai.ask', 'method=host.ai.ask', mAi && mAi.method)
+ok(mAi && typeof mAi.params.streamId === 'string' && mAi.params.streamId.length > 0, '自带 streamId', mAi && mAi.params.streamId)
+ok(mAi && mAi.params.question === '介绍下 QuickDock', 'question 透传', mAi && mAi.params.question)
+ok(mAi && mAi.params.system === 's', 'system 透传', mAi && mAi.params.system)
+sendToIframe({ type: 'plugin:ai-delta', streamId: mAi.params.streamId, delta: '快' })
+sendToIframe({ type: 'plugin:ai-delta', streamId: mAi.params.streamId, delta: '启' })
+ok(aiDeltas.join('') === '快启', '增量按 streamId 投递给回调', aiDeltas.join(''))
+// 别的 streamId 的增量不得串台（同时开两个问答时尤其明显）
+sendToIframe({ type: 'plugin:ai-delta', streamId: 'other-stream', delta: '错' })
+ok(aiDeltas.join('') === '快启', '其他 streamId 的增量不串台', aiDeltas.join(''))
+sendToIframe({ type: 'plugin:host-result', id: mAi.id, data: { text: '快启', model: 'test' } })
+const aiRes = await pAi
+ok(aiRes && aiRes.text === '快启', '最终结果仍从响应返回', aiRes)
+sendToIframe({ type: 'plugin:ai-delta', streamId: mAi.params.streamId, delta: 'X' })
+ok(aiDeltas.join('') === '快启', '结束后不再投递增量（回调已摘除）', aiDeltas.join(''))
+
+// 失败路径：Host 返回 error 时同样要摘掉回调，并 reject 出原始文案
+posted.length = 0
+const aiFailed = []
+let aiRejected = null
+win.qdAiAsk({ question: 'x' }, (d) => aiFailed.push(d)).catch((e) => {
+  aiRejected = e
+})
+sendToIframe({ type: 'plugin:ai-delta', streamId: posted[0].params.streamId, delta: '半' })
+sendToIframe({ type: 'plugin:host-result', id: posted[0].id, error: '未配置可用的 AI 档案' })
+// 回调摘除发生在 Promise 链的微任务里，断言前先让微任务跑完
+await new Promise((r) => setImmediate(r))
+ok(aiFailed.join('') === '半', '失败前已收到的增量仍然保留', aiFailed.join(''))
+ok(aiRejected && /未配置可用的 AI 档案/.test(aiRejected.message), 'reject 保留宿主错误文案', aiRejected && aiRejected.message)
+sendToIframe({ type: 'plugin:ai-delta', streamId: posted[0].params.streamId, delta: 'Y' })
+ok(aiFailed.join('') === '半', '失败后不再投递增量', aiFailed.join(''))
 
 // ---- 主题跟随 ----
 // 桥内已有 plugin:theme → documentElement[data-theme] 的同步，插件侧

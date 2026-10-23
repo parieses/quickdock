@@ -17,6 +17,7 @@ import { useI18n } from 'vue-i18n'
 import { Loader2, RotateCw, Sparkles, Unplug } from '@lucide/vue'
 import { Connect, Disconnect, ListSessions, Resize } from '../../bindings/quickdock/services/sshx/sshservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
+import { useAIAvailability } from '../composables/useAIAvailability'
 import { useToast } from '../composables/useToast'
 import {
   formatBytes,
@@ -385,11 +386,28 @@ function sendToTerm(data: string, execute: boolean): void {
  * 那一段"，后者权重更高，模型会优先看它（见 Ask 里的 selection）。
  */
 async function askAIAbout(selection: string): Promise<void> {
+  // 入口前置：没配 Key 就先带去设置页，而不是打开一个注定失败的面板。
+  // 这一步必须在 aiOpen 之前——面板一旦打开，用户对着输入框发问才发现没配置。
+  if (!(await ai.check())) {
+    ai.goToConfig()
+    return
+  }
   aiOpen.value = true
   // 等这一帧渲染完（面板挂载、watch 注册完毕），再注入一次性载荷。
   await nextTick()
   pendingAsk.value = { text: selection, seq: ++askSeq }
 }
+
+/** 右下角 AI 按钮：与右键「问 AI」走同一套前置校验。 */
+async function openAiPanel(): Promise<void> {
+  if (!(await ai.check())) {
+    ai.goToConfig()
+    return
+  }
+  aiOpen.value = true
+}
+
+const ai = useAIAvailability()
 
 /** 待注入 AI 面板的提问（右键选中后的一次性载荷）。
  *  带 seq 是为了让用户连续两次选中不同内容时，面板能识别这是新的一次；
@@ -513,7 +531,7 @@ defineExpose({
           v-if="phase === 'connected' && !aiOpen"
           class="sess-ai-fab"
           :title="t('sshAiTitle')"
-          @click="aiOpen = true"
+          @click="openAiPanel"
         >
           <Sparkles :size="15" />
         </button>

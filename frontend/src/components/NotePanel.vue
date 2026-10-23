@@ -1,15 +1,13 @@
 <script setup lang="ts">
-import { logErr } from '../utils/logger'
-import { ref, watch, onMounted, onUnmounted, inject } from 'vue'
+import { ref, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { StickyNote, Check, Loader2, MessageCircleQuestion } from '@lucide/vue'
-import { GetNote, SaveNote, AskAI } from '../../bindings/quickdock/services/note/noteservice'
+import { GetNote, SaveNote } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
-import { getErrorMessage } from '../utils/error'
-import type { ToastAPI } from '../types'
+import { useAIAvailability } from '../composables/useAIAvailability'
+import NoteAiPanel from './NoteAiPanel.vue'
 
 const { t } = useI18n()
-const toast = inject<ToastAPI>('toast')!
 
 const note = ref('')
 const loaded = ref(false)
@@ -55,10 +53,15 @@ onUnmounted(() => {
   }
 })
 
-// 问 AI：优先取划选文本，否则取整篇笔记。
-// 本组件只运行在独立笔记浮窗里，与主窗口是两个 WebView、JS 状态互不可见，
-// 所以交给后端处理：隐藏本浮窗 + 唤起主窗口 + 广播文本（App.vue 监听后注入 AI 页）。
-// 浮窗内直接 navigateTo('ai') 会把完整主界面渲染进小浮窗，导致样式错乱。
+// 问 AI：优先取划选文本，否则取整篇笔记，然后在**本浮窗内**打开面板。
+//
+// 旧实现是把浮窗隐藏、唤起主窗口、经后端广播 note:ask-ai 让 AI 页接住文本。
+// 那条链路横跨三个窗口状态（浮窗显隐、主窗口聚焦、AI 页是否已挂载），
+// 每一环失效都只表现为"点了没反应"。现在上下文直接随请求走。
+const aiOpen = ref(false)
+const aiText = ref('')
+const { check: checkAI, goToConfig } = useAIAvailability()
+
 async function askAI() {
   const ta = areaRef.value
   let text = ''
@@ -67,12 +70,14 @@ async function askAI() {
   }
   if (!text.trim()) text = note.value
   if (!text.trim()) return
-  try {
-    unwrap(await AskAI(text))
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-    logErr('NotePanel', e)
+
+  // 入口前置：没配 Key 就带去设置页，而不是打开一个注定失败的面板。
+  if (!(await checkAI())) {
+    goToConfig()
+    return
   }
+  aiText.value = text
+  aiOpen.value = true
 }
 </script>
 
@@ -103,6 +108,9 @@ async function askAI() {
       :placeholder="t('notePlaceholder')"
       spellcheck="false"
     ></textarea>
+
+    <!-- AI 面板覆盖在编辑区之上：关掉就回到原文，不打断"边看边改"。 -->
+    <NoteAiPanel v-if="aiOpen" :text="aiText" @close="aiOpen = false" />
   </div>
 </template>
 
@@ -111,6 +119,8 @@ async function askAI() {
   height: 100vh; width: 100vw; overflow: hidden;
   display: flex; flex-direction: column;
   background: var(--color-bg-primary);
+  /* AI 面板是覆盖层（position:absolute），容器必须建立定位上下文 */
+  position: relative;
 }
 .note-head {
   display: flex; align-items: center; justify-content: space-between;

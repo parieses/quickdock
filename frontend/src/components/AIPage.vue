@@ -2,7 +2,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote, ArrowDown } from '@lucide/vue'
+import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote, ArrowDown, Image as ImageIcon, Link2 } from '@lucide/vue'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
@@ -10,7 +10,6 @@ import { getErrorMessage } from '../utils/error'
 import { splitMarkdownBlocks as splitBlocks } from '../utils/markdownBlocks'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
-import { aiDraft } from '../composables/bridge'
 import type { ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIProfilesResult } from '../types/ai'
@@ -24,13 +23,21 @@ import {
   AIListConversations,
   AIDeleteConversation,
   AIGetMessages,
+  AILoadImage,
 } from '../../bindings/quickdock/services/ai/aiservice'
 
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 interface AIConversation { id: string; title: string; summary: string; prompt_tokens: number; completion_tokens: number; created_at: string; updated_at: string }
-interface AIMessage { id: string; conv_id: string; role: string; content: string; created_at: string; reasoning_content?: string }
+interface AIMessage { id: string; conv_id: string; role: string; content: string; created_at: string; reasoning_content?: string; images?: string; imgList?: AIMsgImage[] }
+
+// 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
+// path 为落盘后相对数据目录的路径，重载会话时由 AILoadImage 读回 dataUrl）。
+interface AIMsgImage { kind: 'file' | 'url'; url?: string; path?: string; name?: string; dataUrl?: string }
+
+// 待发送附件（发送前预览，尚未落库/组包）。
+interface PendingImage { kind: 'file' | 'url'; url?: string; dataUrl?: string; name: string }
 
 const emit = defineEmits<{ (e: 'open-settings', page?: string): void }>()
 
@@ -278,6 +285,137 @@ const modes = [
   { key: 'tutorial', label: 'aiModeTutorial' },
 ]
 
+// —— 图片附件 ——
+// attachments 为待发送预览；发送后清空。file 类存 dataUrl（base64），直接随请求发给模型；
+// url 类存公网链接。imageInputMode 来自当前激活档案的声明（both/url/base64），
+// 决定允许哪种附件——Agnes 这类只收 URL 的模型要禁用本地图选择（见 ai_image.go 闸门）。
+const attachments = ref<PendingImage[]>([])
+
+// 当前激活档案的 imageInput 能力；空（旧档案）按 both 处理，与后端 normalizeImageInput 一致。
+const imageInputMode = computed<string>(() => {
+  const p = aiProfiles.value.find((x) => x.id === aiActive.value)
+  const v = (p?.imageInput || 'both').toLowerCase()
+  if (v === 'url' || v === 'base64') return v
+  return 'both'
+})
+// 是否允许添加本地图片 / 公网链接（两者在 both 下都允许）。
+const allowFileImage = computed(() => imageInputMode.value === 'both' || imageInputMode.value === 'base64')
+const allowUrlImage = computed(() => imageInputMode.value === 'both' || imageInputMode.value === 'url')
+
+// 本地图片大小上限（与后端 10 MiB 对齐，前端先拦一道，避免把巨大 base64 塞进请求体）。
+const maxImageBytes = 10 * 1024 * 1024
+
+// 把 File 转 data URL（前端预览 + 随请求发送）。仅读取为 base64，格式校验交给后端
+// （magic bytes 校验，比前端扩展名更可靠），前端不做硬性拒绝以免误伤。
+function fileToDataURL(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(r.result as string)
+    r.onerror = () => reject(new Error('读取失败'))
+    r.readAsDataURL(file)
+  })
+}
+
+async function addFiles(files: FileList | File[]) {
+  if (!allowFileImage.value) { toast.error(t('aiImgOnlyUrl')); return }
+  for (const file of Array.from(files)) {
+    if (!file.type.startsWith('image/')) { toast.error(t('aiImgOnlyLocal')); continue }
+    if (file.size > maxImageBytes) { toast.error(t('aiImageTooLarge')); continue }
+    const dataUrl = await fileToDataURL(file)
+    attachments.value.push({ kind: 'file', dataUrl, name: file.name || 'image' })
+  }
+  if (attachments.value.length) toast.success(t('aiImageAdded', { n: attachments.value.length }))
+}
+
+function addUrlImage(url: string) {
+  const u = url.trim()
+  if (!u) return
+  if (!allowUrlImage.value) { toast.error(t('aiImgOnlyLocal')); return }
+  if (!/^https?:\/\//i.test(u)) { toast.error(t('aiImageUrlInvalid')); return }
+  attachments.value.push({ kind: 'url', url: u, name: u })
+}
+
+function removeAttachment(i: number) {
+  attachments.value.splice(i, 1)
+}
+
+// 剪贴板粘贴图片：在输入框按 Ctrl+V 时，若剪贴板含图片文件则作为本地图附件。
+function onInputPaste(e: ClipboardEvent) {
+  const items = e.clipboardData?.items
+  if (!items) return
+  const imgs: File[] = []
+  for (const it of Array.from(items)) {
+    if (it.kind === 'file' && it.type.startsWith('image/')) {
+      const f = it.getAsFile()
+      if (f) imgs.push(f)
+    }
+  }
+  if (imgs.length) {
+    e.preventDefault()
+    addFiles(imgs)
+  }
+}
+
+// 拖拽图片到输入区：drop 时取图片文件作为本地图附件。
+function onInputDrop(e: DragEvent) {
+  const files = e.dataTransfer?.files
+  if (files && files.length) {
+    e.preventDefault()
+    const imgs = Array.from(files).filter((f) => f.type.startsWith('image/'))
+    if (imgs.length) addFiles(imgs)
+  }
+}
+
+// 历史消息图片懒加载：把后端存盘（file 类）的路径读回 dataUrl，回填到消息的 imgList。
+// url 类直发链接，无需加载。返回供模板渲染用的图片数组（file 类未加载完毕时 dataUrl 为空）。
+async function resolveMessageImages(msgs: AIMessage[]) {
+  for (const m of msgs) {
+    if (!m.images) { m.imgList = []; continue }
+    let arr: AIMsgImage[] = []
+    try {
+      const raw = JSON.parse(m.images)
+      if (Array.isArray(raw)) {
+        arr = raw.map((x: any) => ({ kind: x.kind, url: x.url, path: x.path, name: x.name }))
+      }
+    } catch { arr = [] }
+    for (const img of arr) {
+      if (img.kind === 'file' && img.path) {
+        try {
+          const d = unwrap<string>(await AILoadImage(img.path))
+          if (d) img.dataUrl = d
+        } catch { /* 读不到图不阻断对话，缩略图留空 */ }
+      }
+    }
+    m.imgList = arr
+  }
+}
+
+// 图片链接输入框（点击「图片链接」后展开的小输入框），避免每次都弹 prompt。
+const urlInputOpen = ref(false)
+const urlDraft = ref('')
+const fileInputEl = ref<HTMLInputElement | null>(null)
+
+function onPickFiles(e: Event) {
+  const input = e.target as HTMLInputElement
+  if (input.files && input.files.length) addFiles(input.files)
+  input.value = '' // 允许重复选择同一文件
+}
+
+function openFilePicker() {
+  fileInputEl.value?.click()
+}
+
+function toggleUrlInput() {
+  urlInputOpen.value = !urlInputOpen.value
+  if (urlInputOpen.value) urlDraft.value = ''
+}
+
+function confirmUrlImage() {
+  addUrlImage(urlDraft.value)
+  urlDraft.value = ''
+  urlInputOpen.value = false
+}
+
 // —— Markdown 渲染 ——
 // 用独立 Marked 实例（而非全局 marked），避免污染 NoteManagerPage 的全局配置，
 // 同时便于扩展 code renderer：给代码块加语言标签 + 复制按钮。
@@ -343,7 +481,12 @@ async function loadMessages(convID: string) {
   try {
     const msgs = unwrap<AIMessage[]>(await AIGetMessages(convID))
     if (gen !== messagesGen) return // 已有更新的会话选择，丢弃过期响应
-    messages.value = msgs ?? []
+    // 解析历史消息图片：file 类从盘上读回 dataUrl（异步），url 类直发链接。
+    // 在赋值 messages.value 之前完成，避免先渲染无图再补图导致的重渲染与闪烁。
+    const list = msgs ?? []
+    await resolveMessageImages(list)
+    if (gen !== messagesGen) return // 等待图片加载期间用户已切换会话，丢弃过期响应
+    messages.value = list
   } catch (e) {
     if (gen !== messagesGen) return
     toast.error(getErrorMessage(e))
@@ -469,23 +612,33 @@ function formatDuration(ms: number): string {
 async function send() {
   if (streaming.value) return
   const text = input.value.trim()
-  if (!text) return
+  if (!text && attachments.value.length === 0) return
   if (!hasKey.value) {
     toast.error(t('aiNeedKey'))
     emit('open-settings', 'ai')
     return
   }
   const convId = activeId.value
+  // 把待发送附件组包为发送给模型的图片数组（file 带 dataUrl，url 带链接），
+  // 同时生成渲染用的 imgList（file 直用 dataUrl，无需二次加载）。
+  const imgs: PendingImage[] = attachments.value
+  const imgList: AIMsgImage[] = imgs.map((a) => a.kind === 'url'
+    ? { kind: 'url', url: a.url, name: a.name }
+    : { kind: 'file', dataUrl: a.dataUrl, name: a.name })
+  const imagesPayload = imgs.map((a) => a.kind === 'url'
+    ? { kind: 'url', url: a.url, name: a.name }
+    : { kind: 'file', dataUrl: a.dataUrl, name: a.name })
   // 立即把用户消息显示出来，随后在消息区内等待 AI 流式回复
   const msg: AIMessage = {
     id: 'usr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), conv_id: convId, role: 'user', content: text,
-    created_at: new Date().toISOString(),
+    created_at: new Date().toISOString(), imgList,
   }
   messages.value.push(msg)
   stickToBottom.value = true
   showJumpBtn.value = false
   scrollToBottom()
   input.value = ''
+  attachments.value = []
   streaming.value = true
   resetStreamState()
   errorMsg.value = ''
@@ -500,7 +653,7 @@ async function send() {
         'Content-Type': 'application/json',
         'X-Stream-Token': aiStreamToken.value,
       },
-      body: JSON.stringify({ convId, mode: mode.value, message: text }),
+      body: JSON.stringify({ convId, mode: mode.value, message: text, images: imagesPayload }),
       signal: ctrl.signal,
     })
     if (!resp.body) throw new Error('无响应流')
@@ -721,24 +874,23 @@ async function saveAsNote(content: string) {
   }
 }
 
-// 笔记 → AI：监听来自笔记面板的草稿，注入输入框并聚焦。
-// immediate：文本经 App.vue 写入 aiDraft 时 AI 页可能尚未挂载（异步组件），
-// 挂载时需立即消费一次，否则草稿会滞留、输入框为空。
-watch(aiDraft, (v) => {
-  if (v && v.trim()) {
-    input.value = v
-    aiDraft.value = ''
-    nextTick(() => {
-      const ta = document.querySelector('.ai-input') as HTMLTextAreaElement | null
-      ta?.focus()
-    })
-  }
-}, { immediate: true })
-
 function onDocMouseDown(e: MouseEvent) {
   const pop = document.querySelector('.ai-sel-copy')
   if (pop && pop.contains(e.target as Node)) return
   hideSelPop()
+}
+
+// 图片全屏查看器：缩略图点击放大。放组件级状态而非每条消息各自持有，
+// 同一时刻最多预览一张图；点遮罩 / Esc 关闭，点图不关（防误触）。
+const imgViewer = ref<AIMsgImage | null>(null)
+function openImgViewer(img: AIMsgImage) {
+  imgViewer.value = img
+}
+function closeImgViewer() {
+  imgViewer.value = null
+}
+function onGlobalKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape' && imgViewer.value) closeImgViewer()
 }
 
 onMounted(async () => {
@@ -760,6 +912,8 @@ onMounted(async () => {
   Events.On('ai:profiles-updated', loadProfiles)
   // 点击消息区之外时隐藏划词复制浮层
   document.addEventListener('mousedown', onDocMouseDown, true)
+  // 图片查看器的 Esc 关闭（capture 不必要，普通冒泡即可；避免干扰输入框内 Esc 行为的判断）
+  document.addEventListener('keydown', onGlobalKeydown)
 
   // ResizeObserver 观察消息内容容器：内容变高（流式输出、图片加载、代码块撑开）
   // 时把视口拉到底部。这是「AI 一直在回复但视口不跟随」的正确修法——
@@ -779,6 +933,7 @@ onUnmounted(() => {
   Events.Off('ai:conv')
   Events.Off('ai:profiles-updated')
   document.removeEventListener('mousedown', onDocMouseDown, true)
+  document.removeEventListener('keydown', onGlobalKeydown)
   if (streamCtrl) streamCtrl.abort()
   if (streamTimer) { clearTimeout(streamTimer); streamTimer = null }
   if (resizeObs) { resizeObs.disconnect(); resizeObs = null }
@@ -859,10 +1014,18 @@ onUnmounted(() => {
             <div
               v-for="m in messages"
               :key="m.id"
-              v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale]"
+              v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0)]"
               :class="['ai-msg', m.role]"
             >
               <div class="ai-msg-role">{{ m.role === 'user' ? t('aiYou') : 'AI' }}</div>
+              <!-- 图片缩略图：url 类直发链接，file 类用已加载的 dataUrl；历史 file 图由 loadMessages 懒加载填回 -->
+              <div v-if="m.imgList && m.imgList.length" class="ai-msg-imgs">
+                <div v-for="(img, bi) in m.imgList" :key="bi" class="ai-msg-img">
+                  <img v-if="img.url" :src="img.url" :alt="img.name" class="ai-msg-img-el is-clickable" loading="lazy" @click.stop="openImgViewer(img)" />
+                  <img v-else-if="img.dataUrl" :src="img.dataUrl" :alt="img.name" class="ai-msg-img-el is-clickable" loading="lazy" @click.stop="openImgViewer(img)" />
+                  <div v-else class="ai-msg-img-el ai-img-broken">{{ t('aiImageBroken') }}</div>
+                </div>
+              </div>
               <details v-if="m.reasoning_content" class="ai-reasoning">
                 <summary>{{ t('aiThought') }} · {{ t('aiThoughtChars', { n: m.reasoning_content.length }) }}</summary>
                 <div class="ai-reasoning-content">{{ m.reasoning_content }}</div>
@@ -933,19 +1096,57 @@ onUnmounted(() => {
       </Teleport>
 
       <!-- 输入区 -->
-      <div class="ai-input-area">
-        <textarea
-          v-model="input"
-          class="ai-input"
-          :placeholder="t('aiPlaceholder')"
-          :disabled="!hasKey || streaming"
-          @keydown.enter.exact.prevent="send"
-        />
-        <button class="ai-send" :disabled="!hasKey || streaming || !input.trim()" @click="send">
-          {{ streaming ? t('aiThinking') : t('send') }}
-        </button>
+      <div class="ai-input-area" @dragover.prevent @drop="onInputDrop">
+        <!-- 待发送图片预览 -->
+        <div v-if="attachments.length" class="ai-attach-preview">
+          <div v-for="(a, i) in attachments" :key="i" class="ai-attach-thumb">
+            <img v-if="a.kind === 'file' && a.dataUrl" :src="a.dataUrl" class="ai-attach-img" />
+            <img v-else-if="a.kind === 'url'" :src="a.url" class="ai-attach-img" />
+            <button class="ai-attach-del" :title="t('delete')" @click="removeAttachment(i)">×</button>
+          </div>
+        </div>
+        <!-- 图片链接输入框（点击「图片链接」后展开） -->
+        <div v-if="urlInputOpen" class="ai-url-row">
+          <input
+            v-model="urlDraft"
+            type="text"
+            class="ai-url-input"
+            :placeholder="t('aiAddImageUrlPh')"
+            @keydown.enter.prevent="confirmUrlImage"
+          />
+          <button class="ai-url-ok" @click="confirmUrlImage">{{ t('add') }}</button>
+        </div>
+        <div class="ai-input-row">
+          <textarea
+            v-model="input"
+            class="ai-input"
+            :placeholder="t('aiPlaceholder')"
+            :disabled="!hasKey || streaming"
+            @keydown.enter.exact.prevent="send"
+            @paste="onInputPaste"
+          />
+          <div class="ai-input-tools">
+            <button v-if="allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="openFilePicker">
+              <ImageIcon :size="16" />
+            </button>
+            <button v-if="allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="toggleUrlInput">
+              <Link2 :size="16" />
+            </button>
+            <button class="ai-send" :disabled="!hasKey || streaming || (!input.trim() && !attachments.length)" @click="send">
+              {{ streaming ? t('aiThinking') : t('send') }}
+            </button>
+          </div>
+        </div>
+        <input ref="fileInputEl" type="file" accept="image/*" multiple hidden @change="onPickFiles" />
       </div>
     </section>
+
+    <!-- 图片全屏查看器：点遮罩关闭，点图不关（防误触），Esc 同样关闭 -->
+    <Teleport to="body">
+      <div v-if="imgViewer" class="ai-img-viewer" @click="closeImgViewer">
+        <img :src="imgViewer.dataUrl || imgViewer.url || ''" :alt="imgViewer.name" @click.stop />
+      </div>
+    </Teleport>
   </div>
 </template>
 
@@ -1302,10 +1503,78 @@ onUnmounted(() => {
 /* 输入 */
 .ai-input-area {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px 16px;
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;
+}
+.ai-input-row { display: flex; gap: 10px; align-items: flex-end; }
+.ai-input-tools { display: flex; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.ai-tool-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: 40px; border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+  border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-input { height: 40px; }
+.ai-send { height: 40px; }
+/* 待发送图片预览缩略图 */
+.ai-attach-preview { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-attach-thumb {
+  position: relative; width: 56px; height: 56px; border-radius: var(--radius-sm);
+  overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+}
+.ai-attach-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.ai-attach-del {
+  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+  border: none; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff;
+  font-size: 12px; cursor: pointer; padding: 0;
+}
+.ai-attach-del:hover { background: var(--color-danger); }
+.ai-url-row { display: flex; gap: 6px; }
+.ai-url-input {
+  flex: 1; height: 32px; padding: 0 10px; border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); background: var(--color-bg-tertiary);
+  color: var(--color-text-primary); font-size: 12px; font-family: inherit; outline: none;
+}
+.ai-url-input:focus { border-color: var(--color-accent); }
+.ai-url-ok {
+  padding: 0 14px; height: 32px; border: none; border-radius: var(--radius-md);
+  background: var(--color-accent); color: var(--color-accent-text);
+  font-size: 12px; cursor: pointer; font-family: inherit;
+}
+/* 消息内图片缩略图（用户气泡 / 历史消息） */
+.ai-msg-imgs { display: flex; flex-wrap: wrap; gap: 8px; }
+.ai-msg.user .ai-msg-imgs { justify-content: flex-end; }
+/* 缩略图尺寸：120px 在实际气泡里被 max-width 二次压缩后几乎看不清内容，
+   放大到 180px/55% 并提高 max-height，保证缩略阶段就能辨认图片主体 */
+.ai-msg-img { width: 180px; max-width: 55%; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--color-border); }
+.ai-msg-img-el { width: 100%; display: block; max-height: 220px; object-fit: cover; background: var(--color-bg-tertiary); }
+.ai-msg-img-el.is-clickable { cursor: zoom-in; }
+.ai-img-broken { height: 80px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--color-text-disabled); }
+
+/* 图片全屏查看器（Teleport 到 body，scoped 属性仍在元素上，样式生效） */
+.ai-img-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  background: var(--color-bg-overlay-deep);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  padding: var(--space-4);
+}
+.ai-img-viewer img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  cursor: default;
 }
 .ai-input {
   flex: 1;

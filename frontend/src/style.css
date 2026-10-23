@@ -45,6 +45,7 @@
   --color-bg-hover: #282d37;
   --color-bg-active: #303643;
   --color-bg-overlay: rgba(0, 0, 0, 0.55);
+  --color-bg-overlay-deep: rgba(0, 0, 0, 0.78); /* 图片全屏查看器等需要深遮罩的场景 */
   --color-surface: #181b22;
   --color-surface-elevated: #20242c;
   --color-text-primary: #dde1e7;
@@ -141,6 +142,7 @@
   --color-bg-hover: #dde1e7;
   --color-bg-active: #d3d8df;
   --color-bg-overlay: rgba(15, 18, 24, 0.14);
+  --color-bg-overlay-deep: rgba(15, 18, 24, 0.62); /* 与暗色主题同名 token，一一对应 */
   --color-surface: #f2f4f7;
   --color-surface-elevated: #e9ebef;
   --color-text-primary: #23272e;

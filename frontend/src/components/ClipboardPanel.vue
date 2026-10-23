@@ -2,9 +2,10 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus } from '@lucide/vue'
+import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles } from '@lucide/vue'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
+import ClipboardAiPanel from './ClipboardAiPanel.vue'
 import {
   ListClipboardEntries,
   PasteClipboardEntry,
@@ -19,6 +20,7 @@ import {
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import { useAIAvailability } from '../composables/useAIAvailability'
 import { pinyinOf } from '../utils/pinyin'
 import type { ToastAPI } from '../types'
 
@@ -353,6 +355,34 @@ async function clearClipboard() {
   }
 }
 
+// ---- 问 AI：把选中条目交给 AI 处理（翻译 / 摘要 / 格式化 / 自由提问）----
+
+// 正在问 AI 的条目 id。空串表示没开 AI 面板。
+// 用 id 而不是对象：条目列表会随剪贴板监听刷新（每 30s 一次），
+// 持对象引用会在刷新后指向已失效的旧数据。
+const aiEntryId = ref('')
+
+const aiEntry = computed(() => entries.value.find((e) => e.id === aiEntryId.value) || null)
+
+const ai = useAIAvailability()
+
+async function openAi(entry: ClipboardEntry) {
+  // 只有文本条目能问 AI：图片与文件没有可提问的内容。
+  if (entry.contentType !== 'text' || !entry.textContent?.trim()) return
+  // 入口前置：未配置 AI 档案时，不打开一个空面板让用户对着输入框发呆，
+  // 直接跳转到设置页填 Key（跨窗口由 Go 侧负责把主窗口带上来）。
+  const ok = await ai.check()
+  if (!ok) {
+    ai.goToConfig()
+    return
+  }
+  aiEntryId.value = entry.id
+}
+
+function closeAi() {
+  aiEntryId.value = ''
+}
+
 // ---- 一键转存：剪贴板条目 → 待办 / 笔记 ----
 
 const saveMenuId = ref('')
@@ -447,6 +477,18 @@ function scrollToSelected() {
 function onPanelKeydown(e: KeyboardEvent) {
   const list = displayEntries.value
   if (list.length === 0) return
+
+  // AI 面板打开时，列表级快捷键让位给面板：
+  // - Enter 应当发问，而不是把选中的剪贴板条目粘贴出去（那会覆盖用户剪贴板）；
+  // - Escape 应当关闭 AI 面板回到列表，而不是直接关掉整个浮窗。
+  if (aiEntryId.value) {
+    if (e.key === 'Escape') {
+      e.preventDefault()
+      e.stopPropagation()
+      closeAi()
+    }
+    return
+  }
 
   if (e.key === 'Enter' && e.target === searchInputRef.value) {
     e.preventDefault()
@@ -640,6 +682,19 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+        <!--
+          问 AI：翻译 / 摘要 / 格式化这条文本。
+          与「转存」并排放在同一位置组——两个都是"对这条文本做点什么"，
+          分开放会让用户在四个图标里找。
+        -->
+        <button
+          v-if="entry.contentType === 'text'"
+          class="ai-btn"
+          :title="t('clipboardAskAI')"
+          @click.stop="openAi(entry)"
+        >
+          <Sparkles :size="13" />
+        </button>
         <button
           class="pin-btn"
           :class="{ pinned: entry.isPinned === 1 }"
@@ -708,6 +763,17 @@ onUnmounted(() => {
     <div v-if="loading" class="clipboard-loading">
       <p>{{ t('loading') }}</p>
     </div>
+
+    <!--
+      AI 面板：覆盖在列表之上。
+      放在 .clipboard-panel 内而不是 App.vue 里，因为它是**某个条目**的上下文
+      （跟列表里的那一条绑定），不是全局功能。
+    -->
+    <ClipboardAiPanel
+      v-if="aiEntry"
+      :text="aiEntry.textContent"
+      @close="closeAi"
+    />
   </div>
 </template>
 
@@ -715,6 +781,8 @@ onUnmounted(() => {
 .clipboard-panel {
   height: 100%; display: flex; flex-direction: column;
   background: var(--color-bg-primary);
+  /* AI 面板是绝对定位覆盖在列表之上的，容器必须是定位参照物。 */
+  position: relative;
 }
 
 .clipboard-header {
@@ -931,6 +999,20 @@ onUnmounted(() => {
 .clipboard-item:hover .delete-btn,
 .clipboard-item.selected .delete-btn { opacity: 0.4; }
 .delete-btn:hover { opacity: 0.8 !important; color: var(--color-danger); }
+
+/* 问 AI 按钮：与固定/删除同一组（悬停才显形），
+   但用 accent 色区分——它是"对内容做处理"，与"管理条目"不是一类动作。 */
+.ai-btn {
+  flex-shrink: 0; margin-top: 3px;
+  background: none; border: none; cursor: pointer;
+  padding: 2px; border-radius: var(--radius-xs);
+  color: var(--color-text-disabled); opacity: 0;
+  transition: opacity 0.15s, color 0.15s;
+  display: flex; align-items: center; justify-content: center;
+}
+.clipboard-item:hover .ai-btn,
+.clipboard-item.selected .ai-btn { opacity: 0.4; }
+.ai-btn:hover { opacity: 0.9 !important; color: var(--color-accent); }
 
 .item-content { flex: 1; min-width: 0; }
 .item-text {

@@ -113,6 +113,7 @@ function newAIProfile(): AIProfile {
     frequencyPenalty: 0,
     presencePenalty: 0,
     thinkingEnabled: true,
+    imageInput: 'both',
   }
 }
 
@@ -341,6 +342,15 @@ function saveAIModal() {
               <span class="field-label">{{ t('aiSystemPrompt') }}</span>
               <textarea v-model="aiEditDraft.systemPrompt" class="field-input" rows="3" :placeholder="t('aiSystemPromptPh')"></textarea>
             </label>
+            <label class="field">
+              <span class="field-label">{{ t('aiImageInput') }}</span>
+              <select v-model="aiEditDraft.imageInput" class="field-input">
+                <option value="both">{{ t('aiImageInputBoth') }}</option>
+                <option value="url">{{ t('aiImageInputURL') }}</option>
+                <option value="base64">{{ t('aiImageInputBase64') }}</option>
+              </select>
+            </label>
+            <p class="ai-field-hint">{{ t('aiImageInputHint') }}</p>
             <div class="field-row">
               <label class="field field-half">
                 <span class="field-label">top_p</span>
@@ -373,3 +383,12 @@ function saveAIModal() {
     </Teleport>
   </div>
 </template>
+
+<style scoped>
+.ai-field-hint {
+  margin: 2px 0 0;
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+}
+</style>

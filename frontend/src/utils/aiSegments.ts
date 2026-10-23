@@ -1,19 +1,23 @@
 /**
- * SSH AI 面板的正文分段逻辑。
+ * AI 回答的正文分段逻辑（通用）。
  *
- * 背景：模型输出是**交错**的——先解释、再给命令、再补充说明。
- * 面板要按这个原始顺序渲染，说明文字走 markdown、命令走可复制卡片。
+ * 背景：模型输出是**交错**的——先解释、再给代码块、再补充说明。
+ * 面板要按这个原始顺序渲染，说明文字走 markdown、代码块走可复制卡片。
  *
  * 单独抽成工具文件而不是写在 .vue 里，有两个原因：
  *   1. 这段逻辑决定「用户看到什么」，是回归风险最高的地方，必须有单测；
  *   2. 组件里再写一遍围栏状态机，前后端各一份判定规则容易走偏
  *      （后端认为这是命令、前端认为是正文 → 同一条命令显示两遍）。
+ *
+ * 与后端 internal/aiutil 的围栏判定是**同一套规则**（逐行状态机）：
+ * 后端是权威实现，本文件是前端兜底（后端已返回 segments 时不走它）。
+ * 改任一边时另一边必须跟着改。
  */
 
 /** 围栏开/闭标记行：``` 或 ~~~（允许最多 3 个前导空格）。 */
 const FENCE_RE = /^\s{0,3}(`{3,}|~{3,})/
 
-// 以下两个正则与后端 services/sshx/ai.go 的 shellPromptRe / commandTokenRe **同形**。
+// 以下两个正则与后端 internal/aiutil/scenario.go 的 shellPromptRe / commandTokenRe **同形**。
 // 两边一旦不同步，就会出现「后端把 `# apt-get install nginx` 当命令、
 // 前端兜底把它当注释丢掉」这种分叉——用户看到的取决于走的是哪条路径，
 // 排查时极难复现。改任一边时另一边必须跟着改。
@@ -25,7 +29,7 @@ const SHELL_PROMPT_RE = /^[$#][ \t]+(.*)$/
 const COMMAND_TOKEN_RE = /^[A-Za-z0-9_./-]+/
 
 /** 一段内容。 */
-export type SshAiSegment =
+export type AiSegment =
   | { kind: 'text'; text: string }
   | { kind: 'cmd'; commands: string[] }
 
@@ -74,23 +78,23 @@ function allPromptLines(lines: string[], marker: string): boolean {
  * 围栏内的内容原样作为命令返回（不做风险判定——那是后端的事）。
  * 围栏外的文字保留 markdown 原文，由调用方渲染。
  *
- * 与后端 `extractSegments` 同一套判定规则（逐行状态机）：
+ * 与后端 `aiutil.ExtractSegments` 同一套判定规则（逐行状态机）：
  *   - 支持 ``` 与 ~~~ 两种围栏
  *   - 支持未闭合围栏（模型被 max_tokens 截断），此时剩余内容都算命令
  *   - 收尾标记字符相同且长度不短于开标记
  */
-export function splitSshAiSegments(raw: string): SshAiSegment[] {
+export function splitAiSegments(raw: string): AiSegment[] {
   const text = raw ?? ''
   if (!text.trim()) return []
 
   const lines = text.split('\n')
-  const out: SshAiSegment[] = []
+  const out: AiSegment[] = []
   let buf: string[] = []
   let fenceLines: string[] = []
   let inFence = false
   let fenceChar = ''
   let fenceLen = 0
-  /** 已出现过的命令，跨块去重（与后端 extractSegments 的 seen 同义）。 */
+  /** 已出现过的命令，跨块去重（与后端 ExtractSegments 的 seen 同义）。 */
   const seen = new Set<string>()
 
   const flushText = () => {

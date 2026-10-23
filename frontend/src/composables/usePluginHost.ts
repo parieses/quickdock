@@ -13,7 +13,7 @@ import {
 } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { unwrap } from '../utils/api'
 import { printHtmlDocument } from '../utils/printDocument'
-import { Dialogs } from '@wailsio/runtime'
+import { Dialogs, Events } from '@wailsio/runtime'
 import type { ToastAPI } from '../types'
 
 export interface PluginHostOptions {
@@ -281,6 +281,18 @@ export function usePluginHost(opts: PluginHostOptions) {
   }
   window.addEventListener('message', messageHandler)
 
+  // AI 流式增量：Go 侧按 pluginId 广播（含 native/goja/web 三种插件），
+  // 这里只转给**当前插件**的 iframe。
+  // 为什么必须按 pluginId 过滤：事件是全局广播的，不过滤的话任何打开的插件窗口
+  // 都能收到别的插件正在生成的模型输出——跨插件数据泄露。
+  let offAIDelta: (() => void) | null = null
+  offAIDelta = Events.On('plugin:ai-delta', (ev: any) => {
+    const d = ev?.data ?? ev
+    if (!d || !d.streamId) return
+    if (d.pluginId !== opts.pluginId()) return
+    iframePostMessage({ type: 'plugin:ai-delta', streamId: d.streamId, delta: d.delta })
+  })
+
   // 宿主主题切换时，实时重发 theme 给插件 iframe（浅色/深色跟随）
   themeObserver = new MutationObserver(() => {
     iframePostMessage({ type: 'plugin:theme', data: { theme: currentThemeName(), locale: locale.value } })
@@ -295,6 +307,10 @@ export function usePluginHost(opts: PluginHostOptions) {
 
   function cleanup() {
     stopLocaleWatch()
+    if (offAIDelta) {
+      offAIDelta()
+      offAIDelta = null
+    }
     if (messageHandler) {
       window.removeEventListener('message', messageHandler)
       messageHandler = null

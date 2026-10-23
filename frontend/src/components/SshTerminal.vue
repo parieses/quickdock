@@ -181,11 +181,15 @@ function onSelectAll() {
  * 既浪费 token，也会让日志/堆栈的行边界错位，模型因此更容易读错报错位置。
  */
 function onAskAI() {
-  if (!hasSelection()) {
+  // 优先用上次选区成立的快照（onSelectionChange 捕获，不依赖点击此刻的实时选区，
+  // 否则右键/菜单交互可能已把选区清掉，拿到空串）。若快照为空但此刻确有选区，
+  // 再退回读一次实时选区兜底。
+  const raw = lastSelection || (hasSelection() ? term!.getSelection() : '')
+  if (!raw.trim()) {
     closeMenu()
     return
   }
-  const lines = term!.getSelection().split('\n').map((l) => l.trimEnd())
+  const lines = raw.split('\n').map((l) => l.trimEnd())
   // 去掉首尾空行：中间的细节才是现场，边缘空白对模型没有信息量。
   while (lines.length && lines[0].trim() === '') lines.shift()
   while (lines.length && lines[lines.length - 1].trim() === '') lines.pop()
@@ -272,6 +276,22 @@ const hostEl = ref<HTMLElement | null>(null)
  *  getter / 私有字段会变慢，也容易在响应式依赖里被误追踪。 */
 let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
+
+/**
+ * 最近一次「非空选区」的快照。
+ *
+ * 为什么需要它：xterm 的选区是**实时**的，`term.getSelection()` 在右键问 AI 被点击
+ * 的那一刻可能已经不是用户刚选的那段了——xterm 在用户有输入时会自动清掉选区
+ * （见 xterm 源码的 `onUserInput(() => { this.hasSelection && this.clearSelection() })`），
+ * 而 WebView2 里右键 contextmenu 的时机更不可控，选区说没就没。
+ *
+ * 所以不能「点击问 AI 时再读一次 getSelection()」，而要在选区**成立的瞬间**
+ * （onSelectionChange 回调）就把它存下来。这样即便随后选区被清，
+ * 右键问 AI 仍能拿到用户真正圈出来的那一段。
+ *
+ * 只用普通变量持有：它只在组件实例内流转，不需要响应式。
+ */
+let lastSelection = ''
 
 // ---- 写入队列（rAF 分片 + 背压） ----
 //
@@ -496,6 +516,13 @@ onMounted(async () => {
   term.open(hostEl.value)
   await nextTick()
   fitAddon.fit()
+
+  // 选区成立的瞬间就快照下来（见 lastSelection 注释）。只在「非空」时更新，
+  // 选区被清除时不动它——这样右键问 AI 仍能拿到上一段被选中的内容，
+  // 而不会拿到一个空值。
+  term.onSelectionChange(() => {
+    if (term && term.hasSelection()) lastSelection = term.getSelection()
+  })
 
   term.onData(handleInput)
   term.onResize(({ cols, rows }) => {
