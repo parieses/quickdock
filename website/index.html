@@ -101,12 +101,12 @@
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
 <span class="eyebrow">v0.0.25</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.25 给 SSH 远程终端加了一位 AI 运维搭档：它能看到你当前终端的屏显、你圈选的那段输出，以及这台机器是生产还是测试环境，所以「这段报错什么意思、怎么修」能答到点子上。命令可以直接填入或执行，但高危操作始终由你亲手确认。</p>
+<p>v0.0.25 把 AI 从「只能聊天」扩成「能看你贴的图、能就在你正在看的地方答」：对话里直接发图让 AI 理解，剪贴板与笔记里的条目上点一下就能问，插件也能复用你配好的 AI 档案。上一版的 SSH 终端 AI 运维助手继续保留。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">看得到现场</span><span>提问自动带上当前屏显与机器环境（生产 / 预发 / 测试），AI 知道你在哪台机器、面对什么报错，不再答非所问。</span></div>
-<div class="tbl-row"><span class="k">选中即问</span><span>在终端里圈一段输出 → 右键「问 AI 这段输出」，侧栏自动打开、把这段上下文挂上并预填好问题，一个回车就能追问。</span></div>
-<div class="tbl-row"><span class="k">命令可一键执行，高危只给填入</span><span>回答里的命令单独成卡，一键填入或执行；<code>rm -rf</code> / <code>reboot</code> 等不可逆命令必须你亲自回车，生产环境执行还要再点一次确认。</span></div>
+<div class="tbl-row"><span class="k">对话能看图了</span><span>贴图 / 选文件 / 拖拽都能发，AI 直接理解图片内容；缩略图可点击全屏放大，看不清的细节点开就好。</span></div>
+<div class="tbl-row"><span class="k">剪贴板、笔记就地问 AI</span><span>看到一段英文、一堆日志或一份 JSON，在条目上点「问 AI」——翻译、摘要、格式化或随便问，就地弹层给答案，不用切到 AI 页再粘贴一遍。</span></div>
+<div class="tbl-row"><span class="k">插件也能调 AI</span><span>插件复用你已配好的 AI 档案（凭据不出后端），带 streamId 即流式回答，三种运行时各有增量通道。</span></div>
 </div>
 </div>
 </section>
@@ -123,11 +123,13 @@
 <details class="log" open="">
 <summary><span class="log-ver">v0.0.25</span><span class="log-date">2026-10-23</span><span class="tag tag-low log-new">最新</span></summary>
 <ul class="log-body">
-<li>SSH 远程终端新增 AI 运维助手：侧栏提问自动带上当前屏显，并标注目标主机环境（生产 / 预发 / 测试），让 AI 知道面对的是什么机器与报错。</li>
-<li>终端内选中一段输出，右键「问 AI 这段输出」即可就这一段追问，侧栏自动打开并预填问题，无需复制粘贴。</li>
-<li>AI 回答中的命令单独成卡，支持一键填入终端或一键执行；<code>rm -rf</code> / <code>dd</code> / <code>mkfs</code> / <code>reboot</code> 等高危命令只给填入、不给执行，必须用户亲自回车；生产环境执行还需二次确认。</li>
+<li>AI 对话支持图片理解：发送本地图片或图片链接，AI 看图回答；缩略图可点击全屏放大查看细节。档案可配置图片输入方式（公网链接 / 本地图片 / 两者），按模型能力灵活适配。</li>
+<li>剪贴板历史条目「问 AI」：文本条目上点「问 AI」，翻译 / 摘要 / 格式化或自由追问，就地弹层流式给答案，内容不进入 AI 对话历史。</li>
+<li>笔记浮窗内嵌 AI 面板：总结 / 润色 / 续写 / 翻译，划选就只送选中的那段；关掉面板回到原文。</li>
+<li>插件可调用宿主 AI 能力（host.ai.ask）：复用用户已配档案、凭据不出后端，带 streamId 即流式，三种运行时各有增量通道；宿主 Host API 扩展至 34 个。</li>
+<li>SSH 远程终端 AI 运维助手：侧栏提问自动带上当前屏显并标注主机环境（生产 / 预发 / 测试），选中输出右键即问，命令一键填入 / 执行，高危命令只给填入、生产环境二次确认。</li>
 <li>命令解析支持模型以 shell 提示符风格（<code>$ </code> / <code># </code>）书写的命令，正确剥离前缀、不误吞注释。</li>
-<li>环境管理与运行时能力增强：本地文件搜索、嵌入式 Python 运行时、命令面板与设置细节同步优化。</li>
+<li>环境管理与运行时能力增强：本地文件搜索、嵌入式 Python 运行时、命令面板与设置细节同步优化；MCP 服务与插件桥接同步增强。</li>
 </ul>
 </details>
 <details class="log">
@@ -313,7 +315,7 @@
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="16" rx="2" width="12" x="6" y="4"></rect><path d="M10 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1"></path></svg></div>
 <h3>剪贴板历史</h3>
 <p>文本、图片、文件全记录，浮动窗口失焦即隐，<kbd>Ctrl</kbd>+<kbd>`</kbd> 一键唤出。</p>
-<ul><li>固定 / 搜索 / 批量删除</li><li>按天数自动清理过期内容</li></ul>
+<ul><li>固定 / 搜索 / 批量删除</li><li>按天数自动清理过期内容</li><li>条目上直接「问 AI」</li></ul>
 </article>
 <article class="card reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path><circle cx="12" cy="12.5" r="3.5"></circle></svg></div>
@@ -343,10 +345,22 @@
 <p>定时探测状态码与响应时间，SSL 到期预警、关键字匹配、在线率统计，异常走桌面通知和 Webhook。</p>
 <ul><li>钉钉 / 企微 / 飞书 / Server酱 / PushPlus / Telegram</li><li>24h / 7d / 全部 响应趋势</li></ul>
 </article>
+<article class="card reveal">
+<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"></path><path d="M18 16l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"></path></svg></div>
+<h3>剪贴板与笔记里的 AI</h3>
+<p>看到一段英文、一堆日志、一份 JSON，直接在条目上点<b>「问 AI」</b>——翻译、摘要、格式化或者随便问，就地弹层给答案，不用切到 AI 页再粘贴一遍。笔记浮窗里同理：总结、润色、续写、翻译，关掉面板就回到原文。</p>
+<ul><li>回答默认流式，等长答案时能边生成边读</li><li>标题旁显示当前用的哪个 AI 档案</li><li>内容不落进 AI 对话历史</li></ul>
+</article>
+<article class="card reveal">
+<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="13" rx="2" width="16" x="4" y="5"></rect><circle cx="9" cy="10" r="1.6"></circle><path d="m5 17 4-4 3 3 3-4 4 5"></path></svg></div>
+<h3>AI 图片理解</h3>
+<p>在 AI 对话里贴图、选文件或拖入图片，直接问「这张图讲了什么」「这段代码什么意思」。支持公网图片链接与本地图片，缩略图点开可全屏放大。</p>
+<ul><li>按模型能力选输入方式</li><li>缩略图可全屏放大</li><li>历史消息里的图也能回看</li></ul>
+</article>
 <article class="card card-wide reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"></path><circle cx="12" cy="12" r="9"></circle></svg></div>
 <h3>AI 助手 &amp; DeepSeek Harness</h3>
-<p>内置多档案 AI 助手（OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义），SSE 流式输出、思考过程折叠、Token 统计，API Key 在 Windows 下用 DPAPI 加密存储。同时内嵌 DeepSeek Harness —— 一键装填 node + dsh 环境，原生窗口承载完整 Agent 编程入口，关窗不停服务。</p>
+<p>内置多档案 AI 助手（OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义），SSE 流式输出、思考过程折叠、Token 统计，API Key 在 Windows 下用 DPAPI 加密存储。同一份档案还供给终端侧栏、剪贴板、笔记和插件里的「问 AI」，一处配置四处可用。同时内嵌 DeepSeek Harness —— 一键装填 node + dsh 环境，原生窗口承载完整 Agent 编程入口，关窗不停服务。</p>
 </article>
 <article class="card card-wide reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m4 17 6-5-6-5"></path><path d="m12 19h8"></path></svg></div>
@@ -456,7 +470,7 @@
 <div class="section-head reveal">
 <span class="eyebrow">插件生态</span>
 <h2>一个市场，装完你要的插件</h2>
-<p>三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 29 个 Host API，从文件读写到 MCP 复用，能力面三者一致。</p>
+<p>三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 34 个 Host API，从文件读写到 MCP 复用、宿主 AI 问答，能力面三者一致。</p>
 </div>
 <div class="grid-3">
 <article class="card reveal">
@@ -676,6 +690,7 @@
 <li><b style="color:var(--text-1);font-weight:510">搜索</b>：历史多了直接搜内容</li>
 <li><b style="color:var(--text-1);font-weight:510">批量删除</b> / <b style="color:var(--text-1);font-weight:510">按天自动清理</b>：保留天数在设置里配，过期自动清</li>
 <li>浮动窗口失焦即隐藏；图片条目存在 <code>~/.quickdock/images/</code></li>
+<li><b style="color:var(--text-1);font-weight:510">问 AI</b>：文本条目上点「问 AI」，翻译 / 摘要 / 格式化或者自由追问，就地弹层给答案，不用切到 AI 页再粘贴一遍</li>
 </ul>
 <p>想彻底不留痕迹：设置里关掉对应类型的记录（比如不记图片）。</p>
 </article>
@@ -716,6 +731,7 @@
 <li><b style="color:var(--text-1);font-weight:510">文件夹 + Markdown 文档</b>，任意层级嵌套，支持搜索、重命名、删除</li>
 <li><b style="color:var(--text-1);font-weight:510">自动保存</b>：500ms 防抖，不用按 Ctrl+S，也不用担心忘存</li>
 <li>浮动窗口失焦自动隐藏，下次唤起接着上次的笔记</li>
+<li><b style="color:var(--text-1);font-weight:510">问 AI</b>：浮窗里直接开面板，总结 / 润色 / 续写 / 翻译，划选就只送选中的那段；关掉面板回到原文，内容也不会进 AI 对话历史</li>
 <li>早期版本的「快捷笔记」会自动兼容成根级文档，老数据不丢</li>
 </ul>
 <div class="note">
@@ -820,7 +836,7 @@
 <li>每个插件有独立的 KV 存储，互不干扰</li>
 </ul>
 <h4>写一个插件</h4>
-<p>宿主开放 29 个 Host API（日志、通知、剪贴板、对话框、KV 存储、文件读写、网络请求、Shell 打开、进程管理、窗口显隐，以及复用宿主 MCP 的 <code>host.mcp.call</code>）。最小骨架：</p>
+<p>宿主开放 34 个 Host API（日志、通知、剪贴板、对话框、KV 存储、文件读写、网络请求、Shell 打开、进程管理、窗口显隐、加解密，复用宿主 MCP 的 <code>host.mcp.call</code>，以及复用用户已配 AI 档案的 <code>host.ai.ask</code>——带 <code>streamId</code> 即流式输出）。最小骨架：</p>
 <div class="code">
 <div class="code-head"><span class="file">plugin.json</span><button class="copy" data-copy="plugin-json">复制</button></div>
 <pre id="plugin-json"><span class="c-com">// none 运行时最小集：plugin.json + icon.svg + frontend/</span>
@@ -850,6 +866,7 @@
 <li>思考过程（reasoning）默认折叠、Markdown 安全渲染、多会话管理、<b style="color:var(--text-1);font-weight:510">Token 用量统计</b></li>
 <li>参数可调：Temperature / MaxTokens / TopP / 频率与存在惩罚</li>
 <li><b style="color:var(--text-1);font-weight:510">API Key 用 DPAPI 加密</b>存储，前端不接触密文；设置页有「测试连接」一键验 Key</li>
+<li><b style="color:var(--text-1);font-weight:510">就地也问得到</b>：同一份档案还供给 SSH 终端侧栏、剪贴板条目和笔记浮窗里的「问 AI」——看到什么就问什么，不用切到对话页再粘贴</li>
 </ul>
 <h4>DeepSeek Harness（完整 Agent 编程入口）</h4>
 <p>和上面那个聊天框不是一回事 —— 这是内嵌的完整 Agent 环境，带工具、文件、终端、会话。</p>
@@ -956,13 +973,14 @@
 <li><b style="color:var(--text-1);font-weight:510">选中即问</b>：在终端里选中一段输出 → 右键 → <b style="color:var(--text-1);font-weight:510">问 AI 这段输出</b>。侧栏自动打开、把选区挂成上下文并预填好问题，一个回车就能问。</li>
 <li><b style="color:var(--text-1);font-weight:510">命令卡片</b>：回答里的命令单独成卡，可<b style="color:var(--text-1);font-weight:510">一键填入终端</b>或<b style="color:var(--text-1);font-weight:510">一键执行</b>，不用复制粘贴。</li>
 <li><b style="color:var(--text-1);font-weight:510">连续追问</b>：侧栏内保留上下文，可以针对同一段报错一直问下去；切换会话会自动清空，不会把 A 机器的屏显带给 B 机器。</li>
+<li><b style="color:var(--text-1);font-weight:510">回答方式可选</b>：面板头部一个开关，切成流式（默认，边生成边显示）或一次性返回整段；这个偏好 SSH、剪贴板、笔记三处共用。标题旁还会显示<b style="color:var(--text-1);font-weight:510">当前用的是哪个 AI 档案</b>，配了多个 Key 时不会搞混。</li>
 </ol>
 <p>侧栏头部常驻<b style="color:var(--text-1);font-weight:510">环境徽章</b>。标着<b style="color:var(--text-1);font-weight:510">生产</b>时，模型会按更保守的口径回答——<b style="color:var(--text-1);font-weight:510">默认先给只读的探查命令</b>，涉及写入、删除、重启、改配置的命令必须写明影响范围和回滚方式。</p>
 <div class="note">
 <svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
 <div><b style="color:var(--text-1);font-weight:510">AI 只给命令，不会替你执行。</b>其中 <code>rm -rf</code> / <code>dd</code> / <code>mkfs</code> / <code>iptables -F</code> / <code>reboot</code> / <code>kubectl delete</code> / <code>DROP TABLE</code> / <code>git reset --hard</code> 这类不可逆命令<b style="color:var(--text-1);font-weight:510">只有「填入」没有「执行」</b>，必须由你亲自按回车；<code>systemctl restart</code> / <code>sed -i</code> 这类中风险命令可以一键执行，但卡片上会先给出风险说明。另外<b style="color:var(--text-1);font-weight:510">生产机上「执行」要点两次</b>——风险规则表是有限收录的，总有些看着无害的命令会漏过去。生产机上没有撤销键——AI 的建议也要自己看过再跑。</div>
 </div>
-<p>AI 能力复用「设置 → AI」里的档案，未配置 API Key 时侧栏会给出引导。</p>
+<p>AI 能力复用「设置 → AI」里的档案，不落库、不占对话上下文。没配 API Key 时点「问 AI」不会打开空面板，而是直接把你带到那个设置页。</p>
 </article>
 <!-- ============ 18 ============ -->
 <article class="step reveal" id="g-backup">

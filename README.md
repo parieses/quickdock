@@ -11,7 +11,7 @@
 *Raycast 的快启体验 × VS Code 的开发者质感，加上开箱即用的本地开发环境*
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.24-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.25-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -71,7 +71,10 @@
 | 能力 | 说明 |
 |------|------|
 | AI 助手 | OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义兼容；SSE 流式、思考折叠、Markdown 渲染、DPAPI 加密 Key |
+| AI 图片理解 | 对话里贴图 / 选文件 / 拖拽，AI 直接理解图片内容；缩略图可点击全屏放大；按模型能力配置输入方式 |
 | 终端内 AI 助手 | SSH 终端里的 AI 侧栏：带屏显提问、选中输出右键即问、命令一键填入 / 执行；高危命令只给填入，生产环境额外要求二次确认 |
+| 剪贴板 AI | 剪贴板条目上「问 AI」：翻译 / 摘要 / 格式化或自由提问，就地弹层给出答案，不跳页 |
+| 笔记 AI | 笔记浮窗内嵌面板：总结 / 润色 / 续写 / 翻译，关掉面板就回到原文 |
 | DeepSeek Harness | 内嵌 `dsh` 完整 Agent 编程入口，便携 Node 自动装填，原生窗口承载 3080 端口 |
 | 内置 MCP 服务 | `http://127.0.0.1:9230/mcp`，三级权限门（只读 / 低危写 / 高危），把本地能力开放给智能体 |
 | 环境管理 | 28 种运行时一键装 / 切 / 启停 / 配 / 看日志 / 开控制台，纯用户态不污染 PATH |
@@ -87,7 +90,7 @@
 | 窗口管理 | `Ctrl+Alt+W` | 15 个贴屏热键 + 九宫格排版浮层，不抢 `Win+方向` |
 | 本地开发站点 | — | 项目一键绑自定义域名 + 自动 HTTPS（mkcert），自身不监听端口 |
 | SSH 远程终端 | `Ctrl+Alt+S` | 独立可缩放窗口管理远程主机：多标签终端 + SFTP 文件管理，指纹信任防中间人 |
-| 终端内 AI 助手 | — | 带着屏显与环境提问；选中输出右键即问；命令一键填入 / 执行，高危命令只给填入，生产环境需二次确认 |
+| 终端内 AI 助手 | — | 带着屏显与环境提问；选中输出右键即问；命令一键填入 / 执行，高危命令只给填入，生产环境需二次确认；回答可切流式 / 一次性（默认流式） |
 | WebDAV 云同步 / 快照备份 | — | 全量 JSON 备份恢复、多版本、任意 WebDAV；一键导出导入 |
 
 </details>
@@ -96,7 +99,8 @@
 <summary><b>插件生态</b></summary>
 
 - 开放插件架构，三种运行时：**none（纯前端）/ goja（内嵌 JS 沙箱）/ native（独立子进程）**，基于 JSON-RPC 2.0
-- 29 个 Host API / 12 组能力，权限声明式校验（文件系统 scope、网络白名单、剪贴板、进程等），native 安装期做 `go/ast` 静态审计
+- 34 个 Host API / 14 组能力，权限声明式校验（文件系统 scope、网络白名单、剪贴板、进程等），native 安装期做 `go/ast` 静态审计
+- 向插件开放宿主 AI 能力：`host.ai.ask` 复用用户已配好的档案（凭据不出后端），带 `streamId` 即流式——三种运行时各有增量通道（native 走 `host.ai.delta` 通知、goja 走 `api.aiStream` 回调、前端插件走 `qdAiAsk`）
 - 官方插件经「在线市场」一键安装 / 升级，清单与开发文档统一在 [quickdock-plugins](https://github.com/parieses/quickdock-plugins)
 
 </details>
@@ -155,6 +159,8 @@
 
 自动监听文本 / 图片 / 文件剪贴板；支持固定、搜索、复制粘贴、批量删除；过期自动清理（可配保留天数）；浮动窗口失焦自动隐藏，`` Ctrl+` `` 一键唤出。
 
+条目上还有 **「问 AI」**：文本条目直接就地弹层提问，预置翻译 / 摘要 / 格式化和自由追问，回答流式呈现，代码块单独成卡可复制。没有执行动作——剪贴板里的代码是拿去看的，不是拿来跑的。
+
 </details>
 
 <details>
@@ -198,6 +204,8 @@
 
 浮动笔记窗口 `Ctrl+Shift+N` 即时唤出；**树形笔记库**（文件夹 + Markdown 多层级），搜索 / 重命名 / 删除；自动保存（500ms 防抖）；失焦自动隐藏。
 
+浮窗里的 **「问 AI」** 直接开面板（划选则只送选中的那段，否则送整篇），预置总结 / 润色 / 续写 / 翻译，也能自由追问。整个过程不离开浮窗，也**不会把整篇笔记写进 AI 对话历史**。
+
 </details>
 
 <details>
@@ -224,15 +232,15 @@
 - **参数可配** — Temperature / MaxTokens / TopP / FrequencyPenalty / PresencePenalty
 - **会话管理** — 多会话 / 标题自动生成 / 清空 / 删除；**Token 用量统计**
 - **API Key 安全存储** — Windows DPAPI 加密，前端不接触密文；支持测试连接
-- **一处配置，多处复用** — 同一份档案同时服务对话页、SSH 终端侧栏与插件，互不干扰
+- **一处配置，多处复用** — 同一份档案同时服务对话页、SSH 终端侧栏、剪贴板与笔记的「问 AI」，以及插件调用的 `host.ai.ask`；各入口互不干扰
 
 </details>
 
 <details>
 <summary><b>🔌 插件系统</b></summary>
 
-- 三种运行时（none / goja / native）+ JSON-RPC 2.0；统一 Host API（**29 方法 / 12 组**）：日志、存活探测、通知、剪贴板、对话框、按插件隔离 KV（`db.*`）、文件读写（`host.fs.*`，按 `permissions.filesystem` 目录 scope 校验）、网络代发（`http.get/post`，域名白名单）、Shell 打开、进程 list/exec/kill（需 `process` / `processKill` 权限）、窗口显隐、复用宿主 MCP 的 `host.mcp.call`
-- 前端桥接：`qdConfirm` / `qdAlert` / `qdPickFile` / `qdPickFolder` / `qdReadFile` / `qdHostCall` / `qdHttp` / `qdPrint`
+- 三种运行时（none / goja / native）+ JSON-RPC 2.0；统一 Host API（**34 方法 / 14 组**）：日志、存活探测、通知、剪贴板、对话框、按插件隔离 KV（`db.*`）、文件读写（`host.fs.*`，按 `permissions.filesystem` 目录 scope 校验）、网络代发（`http.get/post`，域名白名单）、Shell 打开、进程 list/exec/kill（需 `process` / `processKill` 权限）、窗口显隐、加解密（`host.crypto.*`）、复用宿主 MCP 的 `host.mcp.call`、复用宿主 AI 档案的 `host.ai.ask`（带 `streamId` 即流式）
+- 前端桥接：`qdConfirm` / `qdAlert` / `qdPickFile` / `qdPickFolder` / `qdReadFile` / `qdHostCall` / `qdHttp` / `qdAiAsk`（流式问答）/ `qdPrint` / `qdCrypto`
 - **权限模型**：manifest `permissions` 声明所需能力，未声明一律拒绝；native 运行时安装期 `go/ast` 静态审计高危能力（如 `os.Remove` / `exec.Command` / `net.Dial`）与声明一致性，不符则告警
 - 运行时安装 / 卸载 / 启用 / 禁用 / 热键绑定；官方插件经「在线市场」一键安装升级
 
@@ -328,7 +336,10 @@ Snipaste 形态，`F1` 唤起全屏覆盖层，**框选 → 标注 → 复制 / 
   - 「填入」只写进远端输入缓冲不发回车，你仍能在屏幕上审视这条命令
 - **多轮追问** — 侧栏内保留上下文连续追问；提示词按优先级控预算（本次问题 > 屏显 > 历史），历史过长时丢最旧的，保证用户的问题不被截断
 - **多主机隔离** — 切换会话自动清空上下文，不会把 A 机器的屏显带给 B 机器
-- **配置独立** — 复用 AI 档案，但与对话页互不干扰
+- **回答方式可选** — 面板头部一个开关：**流式**（默认，边生成边显示）或**一次性**返回整段。偏好存在本地，SSH / 剪贴板 / 笔记三处共用同一份，不会这个面板关了那个还开着
+- **用的是哪个档案** — 标题旁显示当前激活的 AI 档案名（hover 看模型），配了多个 Key 时一眼能看出这一问走的是哪个
+- **未配置就带走** — 没配 API Key 时点「问 AI」不会打开一个注定失败的面板，而是直接带你去「设置 → AI」填 Key
+- **配置独立** — 复用 AI 档案，但与对话页互不干扰：不落库、不占对话上下文
 
 </details>
 
