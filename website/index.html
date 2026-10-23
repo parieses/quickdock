@@ -101,12 +101,15 @@
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
 <span class="eyebrow">v0.0.25</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.25 把 AI 从「只能聊天」扩成「能看你贴的图、能就在你正在看的地方答」：对话里直接发图让 AI 理解，剪贴板与笔记里的条目上点一下就能问，插件也能复用你配好的 AI 档案。上一版的 SSH 终端 AI 运维助手继续保留。</p>
+<p>v0.0.25 把 AI 从「只能聊天」扩成「能看你贴的图、能就在你正在看的地方答」：对话里直接发图让 AI 理解，剪贴板与笔记里的条目上点一下就能问，插件也能复用你配好的 AI 档案。SSH 终端 AI 侧栏这轮也一起改顺了：屏显按需带上、长对话不再越问越卡、答不下去可以停。模型名也不用再手抄——填好地址和 Key 点一下就能从接口拉出来。</p>
 </div>
 <div class="tbl wide">
 <div class="tbl-row"><span class="k">对话能看图了</span><span>贴图 / 选文件 / 拖拽都能发，AI 直接理解图片内容；缩略图可点击全屏放大，看不清的细节点开就好。</span></div>
 <div class="tbl-row"><span class="k">剪贴板、笔记就地问 AI</span><span>看到一段英文、一堆日志或一份 JSON，在条目上点「问 AI」——翻译、摘要、格式化或随便问，就地弹层给答案，不用切到 AI 页再粘贴一遍。</span></div>
 <div class="tbl-row"><span class="k">插件也能调 AI</span><span>插件复用你已配好的 AI 档案（凭据不出后端），带 streamId 即流式回答，三种运行时各有增量通道。</span></div>
+<div class="tbl-row"><span class="k">模型名不用再手抄</span><span>AI 设置里填好 BaseURL 与 Key，点「拉取模型列表」直接从接口取回可选模型，选中即可；还没保存的草稿也能拉。</span></div>
+<div class="tbl-row"><span class="k">终端里问得更省更连贯</span><span>SSH 侧栏不再每轮都把整屏发给模型——问题里提到「屏显」才带；长对话把更早的轮次自动压成摘要，追问不再越问越卡；「思考中」时点一下就能停。</span></div>
+<div class="tbl-row"><span class="k">复制不再时灵时不灵</span><span>全应用「复制」改走后端直写系统剪贴板，不再受窗口焦点影响；剪贴板监听补上兜底巡检，漏一次通知也能补抓回来。</span></div>
 </div>
 </div>
 </section>
@@ -127,9 +130,15 @@
 <li>剪贴板历史条目「问 AI」：文本条目上点「问 AI」，翻译 / 摘要 / 格式化或自由追问，就地弹层流式给答案，内容不进入 AI 对话历史。</li>
 <li>笔记浮窗内嵌 AI 面板：总结 / 润色 / 续写 / 翻译，划选就只送选中的那段；关掉面板回到原文。</li>
 <li>插件可调用宿主 AI 能力（host.ai.ask）：复用用户已配档案、凭据不出后端，带 streamId 即流式，三种运行时各有增量通道；宿主 Host API 扩展至 34 个。</li>
-<li>SSH 远程终端 AI 运维助手：侧栏提问自动带上当前屏显并标注主机环境（生产 / 预发 / 测试），选中输出右键即问，命令一键填入 / 执行，高危命令只给填入、生产环境二次确认。</li>
+<li>SSH 远程终端 AI 运维助手：侧栏提问可带上当前屏显并标注主机环境（生产 / 预发 / 测试），选中输出右键即问，命令一键填入 / 执行，高危命令只给填入、生产环境二次确认。</li>
 <li>命令解析支持模型以 shell 提示符风格（<code>$ </code> / <code># </code>）书写的命令，正确剥离前缀、不误吞注释。</li>
 <li>环境管理与运行时能力增强：本地文件搜索、嵌入式 Python 运行时、命令面板与设置细节同步优化；MCP 服务与插件桥接同步增强。</li>
+<li>AI 设置支持「拉取模型列表」：填好 BaseURL 与 API Key 后一键从接口取回可用模型，选中即填；素材未保存也能拉，Key 明文不出后端。</li>
+<li>SSH 终端 AI 侧栏：屏显改为按需附带——问题里提到「屏显」才把当前屏幕发给模型，不再每轮都发；屏显与选中输出也不再被默认当成报错，正常输出 / 命令结果 / 程序界面都会如实说明。</li>
+<li>SSH 终端 AI 多轮对话增加历史摘要压缩：更早的轮次自动压成摘要继续沿用，长对话不再越问越卡；「思考中」时发送键变为停止键，可随时退出等待（同时修复转圈图标不旋转）。</li>
+<li>剪贴板监听补上自愈与可观测：除系统通知外按剪贴板序号兜底巡检，漏一次通知也能补抓；捕获卡住或被长期占用会写进日志。</li>
+<li>全应用「复制」统一走后端直写系统剪贴板，修复部分窗口下「点了复制没反应」；插件桥接的复制失败改为返回失败结果，插件可自行重试或提示。</li>
+<li>命令面板事件注销改为句柄式，避免关闭面板时连带移除剪贴板面板的刷新监听。</li>
 </ul>
 </details>
 <details class="log">
@@ -360,7 +369,7 @@
 <article class="card card-wide reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"></path><circle cx="12" cy="12" r="9"></circle></svg></div>
 <h3>AI 助手 &amp; DeepSeek Harness</h3>
-<p>内置多档案 AI 助手（OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义），SSE 流式输出、思考过程折叠、Token 统计，API Key 在 Windows 下用 DPAPI 加密存储。同一份档案还供给终端侧栏、剪贴板、笔记和插件里的「问 AI」，一处配置四处可用。同时内嵌 DeepSeek Harness —— 一键装填 node + dsh 环境，原生窗口承载完整 Agent 编程入口，关窗不停服务。</p>
+<p>内置多档案 AI 助手（OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义），SSE 流式输出、思考过程折叠、Token 统计，API Key 在 Windows 下用 DPAPI 加密存储；填好地址与 Key 还能一键<b>拉取模型列表</b>，模型名不用手抄。同一份档案还供给终端侧栏、剪贴板、笔记和插件里的「问 AI」，一处配置四处可用。同时内嵌 DeepSeek Harness —— 一键装填 node + dsh 环境，原生窗口承载完整 Agent 编程入口，关窗不停服务。</p>
 </article>
 <article class="card card-wide reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m4 17 6-5-6-5"></path><path d="m12 19h8"></path></svg></div>
@@ -369,7 +378,7 @@
 </article>
 <article class="card reveal">
 <h3>终端里的 AI 运维助手</h3>
-<p>终端右侧的 AI 侧栏：<b>提问自动带上当前屏显</b>，所以「这段报错什么意思」能答到点上；在终端里选中一段输出，右键<b>「问 AI 这段输出」</b>即可就这一段追问。命令单独成卡支持<b>一键填入或一键执行</b>，不用再复制粘贴——但 <code>rm -rf</code> / <code>reboot</code> 这类<b>高危命令只给填入不给执行</b>，必须你亲自按回车。远程机上没有撤销键，AI 只建议，决定权始终在你。</p>
+<p>终端右侧的 AI 侧栏：问题里提到 <b>「屏显」</b> 就会带上当前终端画面（不提就不发），所以在终端里看到什么就能问什么；选中一段输出后右键<b>「问 AI 这段输出」</b>即可就这一段追问。命令单独成卡支持<b>一键填入或一键执行</b>，不用再复制粘贴——但 <code>rm -rf</code> / <code>reboot</code> 这类<b>高危命令只给填入不给执行</b>，必须你亲自按回车。远程机上没有撤销键，AI 只建议，决定权始终在你。</p>
 </article>
 </div>
 </div>
@@ -968,11 +977,12 @@
 <h4>多标签会话与 SFTP</h4>
 <p>同一窗口可开多个标签连不同主机，<b style="color:var(--text-1);font-weight:510">同主机的连接会复用</b>（多标签只握手一次）；终端支持复制 / 粘贴 / 全选 / 清屏、滚动回放与断线重连。连上主机后侧边可切换到 <b style="color:var(--text-1);font-weight:510">SFTP</b> 面板，直接浏览远程目录、拖拽上传下载，不必再另开 FTP 客户端。</p>
 <h4>终端里的 AI 助手</h4>
-<p>点终端右上角的 <b style="color:var(--text-1);font-weight:510">AI</b> 打开侧栏。<b style="color:var(--text-1);font-weight:510">提问时会自动带上当前屏显与环境标签</b>（生产 / 预发 / 测试），所以直接问「这段报错什么意思」「磁盘还剩多少」就能得到对得上这台机器的答案。</p>
+<p>点终端右上角的 <b style="color:var(--text-1);font-weight:510">AI</b> 打开侧栏。问题里提到 <b style="color:var(--text-1);font-weight:510">「屏显」</b>，这一轮就会把终端当前画面连同环境标签（生产 / 预发 / 测试）一起给模型——提到就够了，后面不用再补别的内容；不提就不发，省 token 也不会把模型带偏。屏显<b style="color:var(--text-1);font-weight:510">不一定是报错</b>，正常输出、命令结果、正在运行的程序界面都会如实说明。</p>
 <ol class="install">
 <li><b style="color:var(--text-1);font-weight:510">选中即问</b>：在终端里选中一段输出 → 右键 → <b style="color:var(--text-1);font-weight:510">问 AI 这段输出</b>。侧栏自动打开、把选区挂成上下文并预填好问题，一个回车就能问。</li>
 <li><b style="color:var(--text-1);font-weight:510">命令卡片</b>：回答里的命令单独成卡，可<b style="color:var(--text-1);font-weight:510">一键填入终端</b>或<b style="color:var(--text-1);font-weight:510">一键执行</b>，不用复制粘贴。</li>
-<li><b style="color:var(--text-1);font-weight:510">连续追问</b>：侧栏内保留上下文，可以针对同一段报错一直问下去；切换会话会自动清空，不会把 A 机器的屏显带给 B 机器。</li>
+<li><b style="color:var(--text-1);font-weight:510">连续追问</b>：侧栏内保留上下文，可以针对同一段输出一直问下去；更早的轮次会自动压成摘要继续沿用，问得再多也不会越问越卡。切换会话会自动清空，不会把 A 机器的屏显带给 B 机器。</li>
+<li><b style="color:var(--text-1);font-weight:510">随时可停</b>：「思考中」时发送键变成停止键，模型迟迟不返回、或你已经看清一半，点一下立刻退出等待。</li>
 <li><b style="color:var(--text-1);font-weight:510">回答方式可选</b>：面板头部一个开关，切成流式（默认，边生成边显示）或一次性返回整段；这个偏好 SSH、剪贴板、笔记三处共用。标题旁还会显示<b style="color:var(--text-1);font-weight:510">当前用的是哪个 AI 档案</b>，配了多个 Key 时不会搞混。</li>
 </ol>
 <p>侧栏头部常驻<b style="color:var(--text-1);font-weight:510">环境徽章</b>。标着<b style="color:var(--text-1);font-weight:510">生产</b>时，模型会按更保守的口径回答——<b style="color:var(--text-1);font-weight:510">默认先给只读的探查命令</b>，涉及写入、删除、重启、改配置的命令必须写明影响范围和回滚方式。</p>
