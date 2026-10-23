@@ -42,7 +42,11 @@ func RuntimeRoot() string {
 // DiskUsage 统计每个运行时及其各版本的磁盘占用，按占用降序排列。
 // 只统计磁盘上真实存在目录的运行时；不存在的一律不返回（避免面板全是 0 值行）。
 func DiskUsage() DiskUsageReport {
-	root := RuntimeRoot()
+	return diskUsageUnder(RuntimeRoot())
+}
+
+// diskUsageUnder 以指定根目录（<数据目录>/runtime）执行统计，便于测试注入临时目录。
+func diskUsageUnder(root string) DiskUsageReport {
 	report := DiskUsageReport{Runtimes: []RuntimeDiskUsage{}}
 
 	entries, err := os.ReadDir(root)
@@ -75,6 +79,31 @@ func DiskUsage() DiskUsageReport {
 				}
 				item.Versions = append(item.Versions, VersionDiskUsage{Version: v.Name(), Bytes: size})
 				item.Bytes += size
+			}
+			// Everything 便携版（便捷版）是平铺布局：everything.exe / es.exe / *.ini / *.lng
+			// 直接放在 runtime/everything 根目录，没有版本子目录。不走这个分支，
+			// 「磁盘占用」里会完全看不到它（item.Bytes 恒 0 被跳过）。根级文件单列一个条目，
+			// 版本号取探测到的安装版本（读不到记 unknown，与其它面板口径一致）。
+			if rt == RuntimeEverything && item.Bytes == 0 {
+				var rootBytes int64
+				for _, v := range vers {
+					if v.IsDir() {
+						continue
+					}
+					info, ierr := v.Info()
+					if ierr != nil || !info.Mode().IsRegular() {
+						continue
+					}
+					rootBytes += info.Size()
+				}
+				if rootBytes > 0 {
+					verLabel := "unknown"
+					if ins := NewEverythingRuntime().InstalledVersions(); len(ins) > 0 && ins[0].Version != "" {
+						verLabel = ins[0].Version
+					}
+					item.Versions = append(item.Versions, VersionDiskUsage{Version: verLabel, Bytes: rootBytes})
+					item.Bytes += rootBytes
+				}
 			}
 		}
 		// 版本子目录之外的文件（如 links.json 之类）不计入：占比可忽略，且容易让人误读

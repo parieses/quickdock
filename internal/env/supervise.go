@@ -165,6 +165,13 @@ func (m *Manager) ReclaimOrphans(ctx context.Context) {
 		if _, ok := m.adapters[rt].(ServiceController); !ok {
 			continue
 		}
+		// Everything 不参与孤儿回收：它是用户桌面工具（托盘 GUI），不监听任何端口，
+		// 留着运行不会与任何服务冲突；而回收它意味着每次启动都去结束用户可能手动
+		// （甚至以管理员身份）拉起的实例——既违背预期，非管理员进程也根本杀不掉
+		//（拒绝访问），只会刷一堆无用的失败日志。残留实例由用户自行决定去留。
+		if rt == RuntimeEverything {
+			continue
+		}
 		installs, err := m.InstalledVersions(rt)
 		if err != nil || len(installs) == 0 {
 			continue

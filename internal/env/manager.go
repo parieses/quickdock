@@ -152,7 +152,7 @@ type Manager struct {
 // runtimeOrder 运行时固定展示顺序
 var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeBun, RuntimeErlang, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeTraefik, RuntimeComposer,
 	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
-	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeWebDAV, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeJDK, RuntimeMCP}
+	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeWebDAV, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeJDK, RuntimeMCP, RuntimeEverything}
 
 func NewManager() *Manager {
 	m := &Manager{
@@ -187,6 +187,7 @@ func NewManager() *Manager {
 			RuntimeOllama:     NewOllamaRuntime(),
 			RuntimeMCP:        NewMCPRuntime(),
 			RuntimeWebDAV:     NewWebDAVRuntime(),
+			RuntimeEverything: NewEverythingRuntime(),
 		},
 		links:        map[Runtime][]linkEntry{},
 		detectCache:  map[Runtime][]Install{},
@@ -389,6 +390,27 @@ func (m *Manager) adapter(rt Runtime) (RuntimeAdapter, error) {
 		return nil, fmt.Errorf("不支持的运行时: %s", rt)
 	}
 	return a, nil
+}
+
+// EverythingRuntime 返回 Everything 引擎实例（未启用时返回 nil）。
+// 供 facade / MCP / 命令面板等需要 Everything 专属能力的调用方取用。
+func (m *Manager) EverythingRuntime() *EverythingRuntime {
+	if a, ok := m.adapters[RuntimeEverything]; ok {
+		if e, ok := a.(*EverythingRuntime); ok {
+			return e
+		}
+	}
+	return nil
+}
+
+// EverythingReady 报告 Everything 检索「能力就绪」：已装 + es.exe 在位 + 进程在跑。
+// MCP file_search 工具仅在就绪时注册，避免暴露一个永远返回空的工具。
+func (m *Manager) EverythingReady() bool {
+	e := m.EverythingRuntime()
+	if e == nil {
+		return false
+	}
+	return e.IsAvailable()
 }
 
 // List 返回所有运行时概览（顺序：Node → PHP → Go → Redis → Nginx → Git）。

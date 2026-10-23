@@ -8,15 +8,19 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"time"
 
+	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
 
 const pythonBaseRel = "runtime/python"
 
 // PythonRuntime 管理便携 Python 运行时（python.org embeddable 构建，单目录含 python.exe）。
-// 纯工具型：仅下载/解压/版本切换，不支持服务。embeddable 默认不含 pip，
-// 需要时在版本目录内 `python -m ensurepip` 引导即可（不自动执行以免安装失败）。
+// 纯工具型：仅下载/解压/版本切换，不支持服务。
+//
+// embeddable 包天生缺 pip / ensurepip / venv 三个模块，且 _pth 注释掉了 import site，
+// 故安装完成后会自动走一遍引导流程（修 _pth + get-pip.py 装 pip），详见 python_embed.go。
 type PythonRuntime struct {
 	baseDir string
 }
@@ -127,8 +131,32 @@ func (p *PythonRuntime) Install(ctx context.Context, version string, cb InstallC
 	if _, err := os.Stat(p.ExeFor(version)); err != nil {
 		return fmt.Errorf("解压完成但未找到 %s", p.ExeFor(version))
 	}
-	if cb.OnLog != nil {
-		cb.OnLog("Python " + version + " 解压完成（embeddable 默认不含 pip，需时在目录内执行 python -m ensurepip）")
+	// 引导 pip：embeddable 包既不含 pip 也不含 ensurepip，
+	// 且 _pth 注释掉了 import site 导致 site-packages 不进 sys.path。
+	// 不引导的话，用户装完 Python 第一件事 pip install 就会失败。
+	// 这里引导失败不阻断安装（网络问题不该让「装运行时」整体失败），只记日志并提示。
+	if lay := detectPythonEmbedLayout(dir); lay != nil {
+		if _, err := fixPthFile(lay.PthFile); err != nil {
+			logger.W("[env][python] 修正 _pth 失败 %s: %v", version, err)
+		}
+		if err := ensurePythonSitePackages(lay); err != nil {
+			logger.W("[env][python] 创建 site-packages 失败 %s: %v", version, err)
+		}
+		// 已有 pip 就跳过（幂等）
+		if !pythonPipInstalled(lay.Exe) {
+			// 超时给足 5 分钟：引导要下载 get-pip.py，再按候选源轮询（最多 5 个源），
+			// 源不通时每个都要等网络超时，180 秒不够用。
+			bootCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer cancel()
+			if out, err := bootstrapPythonPip(bootCtx, lay, nil); err != nil {
+				logger.W("[env][python] 自动引导 pip 失败 %s: %v\n%s", version, err, out)
+				if cb.OnLog != nil {
+					cb.OnLog("Python " + version + " 已安装，但自动引导 pip 失败（" + err.Error() + "），可在环境管理里手动执行「引导 pip」")
+				}
+			} else if cb.OnLog != nil {
+				cb.OnLog("Python " + version + " 已就绪（" + pythonPipVersion(lay.Exe) + "）")
+			}
+		}
 	}
 	return nil
 }

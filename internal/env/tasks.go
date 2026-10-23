@@ -449,6 +449,10 @@ func taskPythonInfo(ctx context.Context, e *taskExec) (string, error) {
 
 // pythonVenvState 判断该解释器是否带 venv / ensurepip 模块——embeddable 包通常两者皆无，
 // 这是「pip 用不了」的最常见原因，直接显示出来比让用户猜要好。
+//
+// 对 embeddable（无内置 venv）额外显示 virtualenv 状态：
+// 引导 pip 时会顺带装上 virtualenv，它是该场景下唯一能建虚拟环境的途径，
+// 只报「venv 不可用」会让用户以为完全没法建虚拟环境。
 func pythonVenvState(binDir string) string {
 	py := firstExe(binDir, "python", "python3")
 	if py == "" {
@@ -467,6 +471,11 @@ func pythonVenvState(binDir string) string {
 		desc = append(desc, "可用")
 	} else {
 		desc = append(desc, "不可用")
+		if pythonHasVirtualenv(py) {
+			desc = append(desc, "可用 virtualenv 代替")
+		} else {
+			desc = append(desc, "执行「引导 pip」后可用 virtualenv 代替")
+		}
 	}
 	if parts[1] == "ensurepip" {
 		desc = append(desc, "ensurepip 可用")
@@ -479,20 +488,34 @@ func pythonVenvState(binDir string) string {
 func taskPythonPipList(ctx context.Context, e *taskExec) (string, error) {
 	out, err := e.run(ctx, "python", "-m", "pip", "list")
 	if err != nil && strings.Contains(out, "No module named pip") {
-		return out, fmt.Errorf("该 Python 未安装 pip，可先执行「引导 pip（ensurepip）」")
+		return out, fmt.Errorf("该 Python 未安装 pip，可先执行「引导 pip」")
 	}
 	return out, err
 }
 
+// taskPythonEnsurepip 为该解释器引导 pip。
+//
+// 完整版 Python 自带 pip（或可 ensurepip），一步即成；
+// 而 QuickDock 装的是 python.org embeddable 便携包——它既不含 pip 也不含 ensurepip 模块
+// （`python -m ensurepip` 必然报 "No module named ensurepip"），
+// 且 python3XX._pth 默认把 `import site` 注释掉，导致 site-packages 根本不进 sys.path。
+// 故对 embeddable 走专用流程：先修 _pth 启用 site，再下载 get-pip.py 装 pip。
+// 详见 python_embed.go。
 func taskPythonEnsurepip(ctx context.Context, e *taskExec) (string, error) {
-	out, err := e.run(ctx, "python", "-m", "ensurepip", "--upgrade")
-	if err != nil {
-		if strings.Contains(out, "No module named ensurepip") {
-			return out, fmt.Errorf("该发行版不含 ensurepip（python.org embeddable 包即如此），请改用完整版 Python 或手动安装 pip")
+	lay := detectPythonEmbedLayout(e.binDir)
+	if lay == nil {
+		// 非 embeddable：走标准 ensurepip
+		out, err := e.run(ctx, "python", "-m", "ensurepip", "--upgrade")
+		if err != nil {
+			if strings.Contains(out, "No module named ensurepip") {
+				return out, fmt.Errorf("该发行版不含 ensurepip，且不是 embeddable 便携包，请手动安装 pip")
+			}
+			return out, err
 		}
-		return out, err
+		return strings.TrimSpace(out + "\n\n" + e.try(ctx, "python", "-m", "pip", "--version")), nil
 	}
-	return strings.TrimSpace(out + "\n" + e.try(ctx, "python", "-m", "pip", "--version")), nil
+	// embeddable：修 _pth + get-pip.py（多源回退，见 python_embed.go）
+	return bootstrapPythonPip(ctx, lay, nil)
 }
 
 func taskPythonPipUpgrade(ctx context.Context, e *taskExec) (string, error) {

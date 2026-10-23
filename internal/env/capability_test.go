@@ -47,6 +47,7 @@ var capabilityWant = map[Runtime][]string{
 	RuntimeRedis:      {"ServiceController", "LogProvider", "ConfigProvider", "ConfigPortsProvider"},
 	RuntimeTraefik:    {"ServiceController", "LogProvider", "WebConsoleProvider", "ConfigProvider", "ConfigPortsProvider"},
 	RuntimeWebDAV:     {"ServiceController", "ConfigProvider", "ConfigPortsProvider"},
+	RuntimeEverything: {"ServiceController"},
 }
 
 // capOf 用类型断言实测某适配器实现了哪些可选能力接口。

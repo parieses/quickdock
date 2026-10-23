@@ -72,6 +72,12 @@ const (
 	// RuntimeWebDAV：QuickDock 内置的 WebDAV 服务端（把本地目录以 WebDAV 协议共享出去）。
 	// 与 RuntimeMCP 同属「内置服务」：无下载源、无版本，只在环境管理页提供启停与配置。
 	RuntimeWebDAV Runtime = "webdav"
+
+	// RuntimeEverything：外部安装的 Everything 文件检索工具（voidtools 官方），
+	// 归入「开发工具」分组、单版本语义（singleVersion=true）：QuickDock 不托管其下载与版本，
+	// 只负责探测安装、封装 es.exe 检索、控制 Everything.exe 进程启停。与 git/ollama 同构，
+	// 但额外区分「缺少 es.exe」态（es.exe 与 Everything.exe 分开发行）。
+	RuntimeEverything Runtime = "everything"
 )
 
 // 环境管理分组（侧边栏按职责归类：语言 / 网络服务 / 数据库 / 中间件 / AI / 开发工具）
@@ -260,6 +266,8 @@ var (
 		RuntimeMCP: {display: "MCP 服务", group: GroupAI},
 		// WebDAV：内置文件共享服务端，与 FTP 同组（都是文件传输），无版本/无下载源。
 		RuntimeWebDAV: {display: "WebDAV", group: GroupNetwork},
+		// Everything：外部文件检索工具，单版本、无下载源；状态四态（未安装/缺 es/已停止/运行中）。
+		RuntimeEverything: {display: "Everything", group: GroupTool, singleVersion: true},
 		// Ollama：本地大模型推理服务，体积巨大（1.4 GB/版本，其中 1.36 GB 是 CUDA v12/v13 双轨 dll），
 		// 故虽为多版本骨架，实际按「单活跃版本 + 可保留旧版回退」使用。
 		// 下载：官方 ollama.com/download 只做 307 跳转到 GitHub Releases（不托管文件），
