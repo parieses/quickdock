@@ -559,21 +559,32 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .empty-icon { color: var(--color-text-disabled); }
 .empty-title { font-size: 13px; }
-.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(3, 1fr); align-content: start; gap: 12px; padding-right: 2px; }
-/* 最小三列；主窗口加宽时逐级增加列数 */
-@media (min-width: 1440px) { .market-grid { grid-template-columns: repeat(4, 1fr); } }
-@media (min-width: 1800px) { .market-grid { grid-template-columns: repeat(5, 1fr); } }
-@media (min-width: 2160px) { .market-grid { grid-template-columns: repeat(6, 1fr); } }
+/* 最小三列；主窗口加宽时逐级增加列数。
+   注意两处易踩的点：
+   1) 必须用 minmax(0, 1fr) 而非 1fr：1fr 的下限是 auto(=min-content)，卡片里
+      有不可断行的长插件 ID 时会把列顶宽、第三列被挤出可视区（全局 Zoom 放大后
+      CSS 视口变窄，此坑必现）。
+   2) 断点按 main.go 的 uiZoom(1.15) 折算下调（1440/1.15≈1250 …）：媒体查询量的是
+      CSS 视口，Zoom 放大后视口比物理宽度小，用物理断点会导致宽窗口也升不了列。 */
+.market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: 12px; padding-right: 2px; }
+@media (min-width: 1250px) { .market-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+@media (min-width: 1560px) { .market-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+@media (min-width: 1870px) { .market-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 .market-card {
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: var(--radius-md); padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  /* grid item 默认 min-width:auto(=min-content)，不置 0 的话即使列设为 minmax(0,1fr)
+     卡片仍会溢出列宽 */
+  min-width: 0;
 }
 .card-head { display: flex; align-items: flex-start; gap: 10px; }
 .card-icon { width: 36px; height: 36px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: 5px; }
 .card-icon-fallback { color: var(--color-text-muted); }
 .card-title-wrap { flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .card-title { font-size: 14px; font-weight: 600; color: var(--color-text-primary); }
-.card-id { font-size: 10px; color: var(--color-text-disabled); font-family: var(--font-mono, monospace); width: 100%; }
+/* 插件 ID 是无空格的长串（如 io.github.parieses.database），默认不可断行，
+   会撑出很大的 min-content 宽度把列顶宽；anywhere 让它在窄列里也能断行。 */
+.card-id { font-size: 10px; color: var(--color-text-disabled); font-family: var(--font-mono, monospace); width: 100%; overflow-wrap: anywhere; }
 .badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
 .badge-installed { background: var(--color-success-bg); color: var(--color-success); }
 .badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning); }
