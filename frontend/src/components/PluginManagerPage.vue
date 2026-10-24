@@ -702,6 +702,9 @@ onUnmounted(() => {
   transition: border-color 150ms, box-shadow 150ms;
   cursor: default;
   position: relative;
+  /* 同市场页 .market-card：grid item 默认 min-width:auto(=min-content)，
+     置 0 后卡片才允许收缩到列宽，内容约束（见 .card-desc）才能真正生效 */
+  min-width: 0;
 }
 .plugin-card:hover { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent-bg); }
 .plugin-card.card-running { border-color: var(--color-success-border); }
@@ -770,6 +773,11 @@ onUnmounted(() => {
   margin: 1px 0 0; line-height: 1.3;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
+  /* 卡片是 flex column + align-items:center，item 宽度=内容宽而非容器宽：
+     不约束 max-width，一个超长无空格词（英文描述/URL）就会把描述撑破卡片 */
+  max-width: 100%;
+  /* line-clamp 的省略号只加在行尾；单词本身超过一行宽时，先得让它能断行 */
+  overflow-wrap: anywhere;
 }
 
 /* ---- 分类 Tabs ---- */

@@ -588,7 +588,9 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
 .badge-installed { background: var(--color-success-bg); color: var(--color-success); }
 .badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning); }
-.card-desc { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; min-height: 32px; }
+/* 描述：卡片是 flex column，desc 默认 stretch 到容器宽，但超长无空格词
+   （英文描述/URL）仍会撑出这一行；anywhere 与 .card-id 同一处理 */
+.card-desc { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; min-height: 32px; overflow-wrap: anywhere; }
 .card-meta { display: flex; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
 .card-perms { display: flex; gap: 4px; flex-wrap: wrap; }
 .perm-tag { font-size: 9px; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
