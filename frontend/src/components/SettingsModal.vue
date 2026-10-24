@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
@@ -20,6 +20,7 @@ import SettingsTools from './SettingsTools.vue'
 import LogViewer from './LogViewer.vue'
 import ActivityPage from './ActivityPage.vue'
 import SettingsWinmgr from './SettingsWinmgr.vue'
+import SettingsNav from './SettingsNav.vue'
 
 import {
   GetClipboardRetentionDays,
@@ -37,6 +38,7 @@ import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { ToastAPI, UpdateStatus } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
+import { markSeen } from '../composables/useNavBadges'
 import ConfirmDialog from './ConfirmDialog.vue'
 
 const props = defineProps<{
@@ -47,12 +49,18 @@ const props = defineProps<{
 const emit = defineEmits<{ close: [] }>()
 
 const activePage = ref<string | null>(null)
+// 无论从哪个入口打开设置（footer 按钮 / AI 页 / 命令面板），都视为看过设置内的
+// 待读信息（崩溃记录角标）—— 只靠侧栏 footer 清水位，会漏掉其它打开路径
+watch(() => props.visible, (v) => { if (v) markSeen('settings') })
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
 const hotkeyRef = ref<InstanceType<typeof HotkeySettings> | null>(null)
 
 const menuItems = computed(() => [
   { key: 'preferences', label: t('preferences'), icon: Palette, desc: t('autoStart') + ' / ' + t('theme') + ' / ' + t('language') },
+  // 导航显隐与排序：它是「隐藏了怎么找回来」的唯一兜底入口，放在通用组开头。
+  // 为什么必须在设置里：侧栏可以被裁剪，但这个入口不属于导航项，永远可达。
+  { key: 'navigation', label: t('navSettings'), icon: ListOrdered, desc: t('navSettingsDesc') },
   { key: 'hotkeys',    label: t('hotkeySettings'),  icon: Keyboard, desc: t('shortcut') },
   { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
   { key: 'storage',   label: t('storageLocation'),   icon: HardDrive, desc: t('storageDesc') },
@@ -70,7 +78,7 @@ const menuItems = computed(() => [
 const menuGroups = computed(() => {
   const byKey = Object.fromEntries(menuItems.value.map((m) => [m.key, m]))
   const defs: { title: string; keys: string[] }[] = [
-    { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys'] },
+    { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys', 'navigation'] },
     { title: t('menuGroupData'), keys: ['data', 'storage', 'datasync', 'activity'] },
     { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai', 'logs'] },
   ]
@@ -707,6 +715,11 @@ async function toggleAutoStart() {
           <!-- AI 助手 -->
           <div v-else-if="activePage === 'ai'" class="content-page content-left">
             <SettingsAI :visible="activePage === 'ai'" />
+          </div>
+
+          <!-- 导航项显隐 / 排序：被隐藏的导航项在这里总能找回来 -->
+          <div v-else-if="activePage === 'navigation'" class="content-page content-left">
+            <SettingsNav :visible="activePage === 'navigation'" />
           </div>
 
           <!-- 打开工具管理 -->

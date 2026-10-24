@@ -1,16 +1,20 @@
 <script setup lang="ts">
-import { ref, inject, onMounted, onUnmounted } from 'vue'
+import { ref, inject, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import CreateDialog from './CreateDialog.vue'
+import NavBadge from './NavBadge.vue'
 import { getErrorMessage } from '../utils/error'
-import { pluginUpdateBadge } from '../composables/usePluginUpdateBadge'
 import type { ToastAPI } from '../types'
 // 导航项图标已收敛到 pages/registry（纯数据），侧边栏仅保留仍在本文件直接使用的图标
 import {
   FolderKanban, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Settings,
+  EyeOff, ArrowUp, ArrowDown, RotateCcw,
 } from '@lucide/vue'
-import { navEntries } from '../pages/registry'
+// navEntries 不再直接使用：可见性/顺序交给 useNavPrefs，它内部仍以 registry 为唯一真相
+
+import { useNavPrefs } from '../composables/useNavPrefs'
+import { useNavBadges } from '../composables/useNavBadges'
 
 const store = useWorkspaceStore()
 const { t } = useI18n()
@@ -26,6 +30,74 @@ const props = defineProps<{
 }>()
 const toast = inject<ToastAPI>('toast')!
 
+// 导航显隐 + 排序的本地偏好（唯一数据源，设置页与侧栏共用同一份）
+const { orderedNav, visibleNav, hiddenNav, hideNav, showNav, moveNav, canMoveUp, canMoveDown } = useNavPrefs()
+
+// 通用角标：注册 polling + 跟随 currentPage 自动打已读。
+// 为什么这里需要用 object spread：useNavPrefs 已经顶着 orderedNav 同名变量了。
+const navBadge = useNavBadges(() => props.currentPage)
+const settingsBadge = navBadge.settingsBadge
+
+// 崩溃记录藏在「设置 → 日志」里，打开设置即视为看过；
+// 否则用户进了日志页，脚标上的红点还得等下一轮轮询才消失。
+function openSettings() {
+  navBadge.markSeen('settings')
+  emit('open-settings')
+}
+
+// ---- 导航项右键菜单 ----
+// 用 fixed 定位跟随鼠标：菜单要浮在侧栏之上且能被全局 document click 关闭，
+// 放进侧栏内会被 overflow:hidden 裁掉。
+const navMenu = ref<{ id: string; x: number; y: number } | null>(null)
+function openNavMenu(id: string, e: MouseEvent) {
+  e.preventDefault()
+  e.stopPropagation()
+  navMenu.value = { id, x: e.clientX, y: e.clientY }
+}
+function closeNavMenu() { navMenu.value = null }
+
+function menuHide(id: string) {
+  // 先取名字再隐藏：隐藏后它就从 visibleNav 里消失了
+  const label = t(visibleNav.value.find((e) => e.id === id)?.labelKey ?? '')
+  if (!hideNav(id)) {
+    toast.error(t('navKeepOne'))
+    return
+  }
+  closeNavMenu()
+  toast.success(t('navHiddenToast', { name: label }) + ' · ' + t('navHiddenWhere'))
+}
+// 模板里 v-if="navMenu" 无法收窄类型，统一走这些 computed 取值
+const menuId = computed(() => navMenu.value?.id ?? '')
+const menuLabel = computed(() => t(orderedNav.value.find((e) => e.id === menuId.value)?.labelKey ?? ''))
+const menuIsHidden = computed(() => hiddenNav.value.some((e) => e.id === menuId.value))
+
+function menuMove(id: string, dir: -1 | 1) {
+  moveNav(id, dir)
+  closeNavMenu()
+}
+
+function menuRestore(id: string) {
+  showNav(id)
+  closeNavMenu()
+}
+
+// ---- 底部「已隐藏」折叠组 ----
+const showHidden = ref(false)
+function toggleHidden(e: MouseEvent) {
+  e.stopPropagation()
+  showHidden.value = !showHidden.value
+}
+
+// 点击外部关闭：右键菜单 / 已隐藏浮层 / 工作空间菜单共用（避免多个浮层互相打架）
+function onDocumentClick() {
+  showWorkspaceMenu.value = false
+  navMenu.value = null
+  showHidden.value = false
+}
+
+onMounted(() => document.addEventListener('click', onDocumentClick))
+onUnmounted(() => document.removeEventListener('click', onDocumentClick))
+
 // ---- 侧栏收起（仅显示图标） ----
 const collapsed = ref(localStorage.getItem('qd_sidebar_collapsed') === '1')
 function toggleCollapse() {
@@ -33,9 +105,10 @@ function toggleCollapse() {
   try { localStorage.setItem('qd_sidebar_collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
 }
 
-// 点击「插件」导航：先清掉「可更新」角标（打开后即视为已查看），再导航
+// 点击「插件」导航：进入即视为已读，useNavBadges 会在 currentPage 变为
+// 'plugins' 时自动 markSeen('plugins') 把「可更新」角标清零。插件更新数本身
+// 来自 usePluginUpdateBadge（在 useNavBadges 内部订阅），这里无需再手写清零。
 function goPlugins() {
-  pluginUpdateBadge.count = 0
   emit('navigate', 'plugins')
 }
 
@@ -91,11 +164,6 @@ async function handleDeleteWorkspace(wsId: string) {
   }
 }
 
-// 点击外部关闭工作空间菜单
-function onDocumentClick() {
-  showWorkspaceMenu.value = false
-}
-
 onMounted(() => document.addEventListener('click', onDocumentClick))
 onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 </script>
@@ -134,18 +202,20 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       </Transition>
     </div>
 
-    <!-- 页面导航（由 pages/registry 驱动，新增页面只改注册表） -->
+    <!-- 页面导航（由 pages/registry 驱动 + useNavPrefs 裁剪排序，新增页面只改注册表） -->
     <div class="sidebar-navigator">
       <div class="navigator-header">{{ t('navigation') }}</div>
-      <template v-for="entry in navEntries" :key="entry.id">
+      <template v-for="entry in visibleNav" :key="entry.id">
         <!-- 普通页 / 工作空间：点击导航，按 currentPage 高亮 -->
         <button
           v-if="entry.kind === 'workspace' || entry.kind === 'page'"
           :class="['nav-item', { active: currentPage === entry.id }]"
           @click="emit('navigate', entry.id)"
+          @contextmenu="openNavMenu(entry.id, $event)"
         >
           <component :is="entry.icon" :size="14" />
           <span>{{ t(entry.labelKey) }}</span>
+          <NavBadge :id="entry.id" />
         </button>
         <!-- SSH：唤起独立终端窗口，主窗口内容不动，不置 active -->
         <button
@@ -153,9 +223,11 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
           class="nav-item"
           :title="t('navSshHint')"
           @click="emit('navigate', entry.id)"
+          @contextmenu="openNavMenu(entry.id, $event)"
         >
           <component :is="entry.icon" :size="14" />
           <span>{{ t(entry.labelKey) }}</span>
+          <NavBadge :id="entry.id" />
         </button>
         <!-- DSH：DeepSeek Harness 原生窗口，启动中显示 loading 且禁用 -->
         <button
@@ -164,22 +236,53 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
           :disabled="dshOpening"
           :title="dshOpening ? t('dshLaunching') : undefined"
           @click="emit('navigate', entry.id)"
+          @contextmenu="openNavMenu(entry.id, $event)"
         >
           <span v-if="dshOpening" class="nav-spinner"></span>
           <component v-else :is="entry.icon" :size="14" />
           <span>{{ dshOpening ? t('dshLaunching') : t(entry.labelKey) }}</span>
+          <NavBadge :id="entry.id" />
         </button>
-        <!-- 插件：点击清角标后导航，带可更新角标 -->
+        <!-- 插件：点击清角标后导航。角标数据源本身在 useNavBadges 里统一管了，
+             这里保留 goPlugins 的语义：进入即视为已读（markSeen 由 currentPage 变更触发） -->
         <button
           v-else-if="entry.kind === 'plugins'"
           :class="['nav-item', { active: currentPage === 'plugins' }]"
           @click="goPlugins"
+          @contextmenu="openNavMenu(entry.id, $event)"
         >
           <component :is="entry.icon" :size="14" />
           <span>{{ t(entry.labelKey) }}</span>
-          <span v-if="pluginUpdateBadge.count > 0" class="nav-badge" :title="t('pluginUpdateBadge', { n: pluginUpdateBadge.count })">{{ pluginUpdateBadge.count > 99 ? '99+' : pluginUpdateBadge.count }}</span>
+          <NavBadge :id="entry.id" />
         </button>
       </template>
+
+      <!-- 已隐藏项的栖身之所：隐藏不等于删除，这里始终可以取回。
+           只有在「当前可见项被隐藏」或「收起态」时才会出现；也可以从设置 → 导航管理。 -->
+      <div v-if="hiddenNav.length" class="hidden-group">
+        <button class="nav-item hidden-toggle" :title="t('navHiddenWhere')" @click="toggleHidden($event)">
+          <EyeOff :size="14" />
+          <span>{{ t('navHiddenCount', { n: hiddenNav.length }) }}</span>
+          <ChevronDown :size="13" class="hidden-caret" :class="{ open: showHidden }" />
+        </button>
+        <!-- 展开态：就地列出；收起态：侧栏塞不下，用浮层向右展开 -->
+        <div :class="['hidden-list', { open: showHidden, 'as-popover': collapsed }]" @click.stop>
+          <button
+            v-for="e in hiddenNav"
+            :key="e.id"
+            class="nav-item hidden-item"
+            :title="t(e.labelKey)"
+            @click="emit('navigate', e.id)"
+            @contextmenu="openNavMenu(e.id, $event)"
+          >
+            <component :is="e.icon" :size="14" />
+            <span>{{ t(e.labelKey) }}</span>
+            <button class="hidden-restore" :title="t('navRestore')" @click.stop="showNav(e.id)">
+              <RotateCcw :size="12" />
+            </button>
+          </button>
+        </div>
+      </div>
     </div>
 
     <!-- 工作空间新建 / 编辑弹窗（场景相关已迁移到右侧 SceneRail） -->
@@ -193,15 +296,46 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 
     <!-- 底部固定：设置 + 收起（设置始终沉在最底部，与导航区独立） -->
     <div class="sidebar-footer">
-      <button class="settings-btn" @click="emit('open-settings')" :title="t('settings')">
+      <button class="settings-btn" @click="openSettings" :title="t('settings')">
         <Settings :size="16" />
         <span>{{ t('settings') }}</span>
+        <span
+          v-if="settingsBadge"
+          class="nav-badge footer-badge"
+          :class="`tone-${settingsBadge.tone}`"
+          :title="t(settingsBadge.titleKey, { n: settingsBadge.count })"
+        >{{ settingsBadge.count > 99 ? '99+' : settingsBadge.count }}</span>
       </button>
       <button class="collapse-btn" @click="toggleCollapse" :title="collapsed ? t('expandSidebar') : t('collapseSidebar')">
         <ChevronLeft v-if="!collapsed" :size="16" />
         <ChevronRight v-else :size="16" />
       </button>
     </div>
+
+    <!-- 导航项右键菜单：Teleport 到 body，避免被侧栏 overflow:hidden 裁切 -->
+    <Teleport to="body">
+      <div
+        v-if="navMenu"
+        class="nav-menu"
+        :style="{ top: navMenu.y + 'px', left: navMenu.x + 'px' }"
+        @click.stop
+      >
+        <div class="nav-menu-title">{{ menuLabel }}</div>
+        <button :disabled="!canMoveUp(menuId)" @click="menuMove(menuId, -1)">
+          <ArrowUp :size="13" /><span>{{ t('navMoveUp') }}</span>
+        </button>
+        <button :disabled="!canMoveDown(menuId)" @click="menuMove(menuId, 1)">
+          <ArrowDown :size="13" /><span>{{ t('navMoveDown') }}</span>
+        </button>
+        <div class="nav-menu-divider" />
+        <button v-if="menuIsHidden" @click="menuRestore(menuId)">
+          <RotateCcw :size="13" /><span>{{ t('navRestore') }}</span>
+        </button>
+        <button v-else class="danger" @click="menuHide(menuId)">
+          <EyeOff :size="13" /><span>{{ t('navHide') }}</span>
+        </button>
+      </div>
+    </Teleport>
   </aside>
 </template>
 
@@ -231,6 +365,11 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 .sidebar.collapsed .sidebar-footer { justify-content: center; gap: 4px; }
 .sidebar.collapsed .settings-btn { flex: 0; padding: 6px; }
 .sidebar.collapsed .ws-dropdown { left: 6px; right: auto; width: 200px; }
+/* 收起态同样不能隐藏 span（浮层里的行要靠它显示名字），
+   只在不同的 class 上做显隐，不用 :has() —— WebView2 版本不可控 */
+.sidebar.collapsed .hidden-toggle span,
+.sidebar.collapsed .hidden-caret { display: none; }
+.sidebar.collapsed .hidden-item span { display: inline; }
 
 /* 工作空间切换器 */
 .workspace-selector {
@@ -288,9 +427,30 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 .nav-item.active svg { color: var(--color-accent); }
 .nav-badge {
   margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-md);
-  background: #e0533d; color: var(--color-accent-text); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
+  background: var(--color-danger); color: var(--color-accent-text); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
 }
-.sidebar.collapsed .nav-badge { position: absolute; top: 6px; right: 10px; margin: 0; }
+/* 角标色调：红=故障/崩溃，橙=该处理的事，蓝=有好东西可用（统一走语义 token） */
+.nav-badge.tone-danger { background: var(--color-danger); }
+.nav-badge.tone-warning { background: var(--color-warning); }
+.nav-badge.tone-info { background: var(--color-accent); }
+/* footer 上的设置角标：按钮没右侧内边距，且不能让小红点把「设置」文字挤没 */
+.footer-badge { margin-left: 4px; flex-shrink: 0; }
+.sidebar.collapsed .nav-item .nav-badge,
+.sidebar.collapsed .settings-btn .footer-badge {
+  /* 收起态「只留图标」的规则是 .nav-item span（0-3-1），这里必须至少 0-4-0 才能翻盘；
+     之前收起态角标从不显示，根因正是权重输给了那条 */
+  display: inline-block;
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  margin: 0;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  line-height: 14px;
+  font-size: 9px;
+}
+.sidebar.collapsed .settings-btn .footer-badge { top: 0; right: 2px; }
 .nav-item.opening { cursor: default; opacity: .7; }
 .nav-item.opening:hover { background: transparent; color: var(--color-text-secondary); }
 .nav-spinner {
@@ -301,6 +461,92 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   animation: nav-spin .8s linear infinite;
 }
 @keyframes nav-spin { to { transform: rotate(360deg); } }
+
+/* 已隐藏项折叠组：虚线框 + 就地恢复列表 */
+.hidden-group { margin-top: 6px; }
+.hidden-toggle { color: var(--color-text-disabled); }
+.hidden-caret { margin-left: auto; color: var(--color-text-disabled); transition: transform var(--transition-base); }
+.hidden-caret.open { transform: rotate(180deg); }
+.hidden-list { display: none; flex-direction: column; gap: 1px; padding-left: 8px; border-left: 1px dashed var(--color-border-secondary); margin: 2px 0 0 10px; }
+/* 展开与否只由 .open 决定；as-popover 只负责换定位方式，两者互不干涉 */
+.hidden-list.open { display: flex; }
+.hidden-list.as-popover {
+  position: fixed;
+  left: 54px;
+  bottom: 72px;
+  width: 180px;
+  max-height: 240px;
+  overflow-y: auto;
+  z-index: 60;
+  margin: 0;
+  padding: 6px;
+  border-left: none;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+/* 已隐藏项被 hover 时才显示「恢复」按钮：默认不占用横向空间 */
+.hidden-item { position: relative; color: var(--color-text-disabled); font-style: normal; }
+.hidden-item:hover { color: var(--color-text-secondary); }
+.hidden-restore {
+  display: none;
+  margin-left: auto;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: var(--color-accent);
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+}
+.hidden-item:hover .hidden-restore { display: flex; }
+.hidden-restore:hover { background: var(--color-bg-active); }
+
+/* 导航右键菜单 */
+.nav-menu {
+  position: fixed;
+  z-index: 200;
+  min-width: 150px;
+  padding: 4px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+.nav-menu-title {
+  padding: 4px 8px 6px;
+  font-size: 11px;
+  color: var(--color-text-disabled);
+  border-bottom: 1px solid var(--color-border);
+  margin-bottom: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.nav-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.nav-menu button:hover:not(:disabled) { background: var(--color-bg-active); color: var(--color-text-primary); }
+.nav-menu button:disabled { opacity: 0.4; cursor: default; }
+.nav-menu button.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.nav-menu-divider { height: 1px; background: var(--color-border); margin: 4px 2px; }
 
 .ws-name {
   flex: 1;
@@ -391,6 +637,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   padding: var(--space-3) 10px;
 }
 .settings-btn {
+  position: relative; /* footer 角标 absolute 的定位基准，缺了它会相对窗口跑飞 */
   flex: 1;
   display: flex;
   align-items: center;
