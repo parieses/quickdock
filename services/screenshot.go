@@ -83,9 +83,32 @@ func (a *AppService) CaptureSelection() *ApiResult {
 	if screenshotOverlay == nil {
 		return FailMsg("截图功能当前不可用")
 	}
+	return a.finishCapture(screenshot.Select(screenshotOverlay))
+}
 
-	res, err := screenshot.Select(screenshotOverlay)
+// CaptureFullScreen 直接截取整个虚拟桌面（含多显示器），不进入框选。
+//
+// 抓完屏覆盖层就带着工具条出现，与区域截图完全同一套后续动作：
+// Enter / Ctrl+C 复制到剪贴板、Ctrl+S 弹保存对话框、点「贴图」钉在屏幕上，
+// 也仍可标注。差别只在省掉「拖一个框」这一步。
+//
+// 取消语义、阻塞特性与 CaptureSelection 一致。
+func (a *AppService) CaptureFullScreen() *ApiResult {
+	if screenshotOverlay == nil {
+		return FailMsg("截图功能当前不可用")
+	}
+	return a.finishCapture(screenshot.SelectFull(screenshotOverlay))
+}
 
+// finishCapture 是两种截图入口共用的收尾：按用户在工具条上选的动作
+// 复制 / 保存 / 贴图。拆出来是为了避免「全屏截图」把这段再抄一遍——
+// 抄过去之后，保存对话框的行为迟早会只在一处被修，另一处静默落后。
+func (a *AppService) finishCapture(res screenshot.Result, err error) *ApiResult {
+	// 收尾无论哪条路径，Bitmap 都不会被接管（ActionSave 走 ToNRGBA 拷贝、
+	// ActionPin 走 PinImage 拷贝、复制路径只读 Pix），所以这里统一释放背后的
+	// GDI DIB section 内存（4K 下约 33MB）。Close 对普通 Bitmap（release 为 nil）
+	// 是空操作，release 非 nil 时才真正 DeleteObject，绝对安全。
+	defer res.Bitmap.Close()
 	if err != nil {
 		return Fail(err)
 	}

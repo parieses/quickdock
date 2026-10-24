@@ -498,7 +498,7 @@ onMounted(() => { load(); loadCert() })
 <template>
   <div class="sites-panel">
     <header class="detail-head">
-      <span class="detail-avatar" style="background:#e8a33d">⌂</span>
+      <span class="detail-avatar">⌂</span>
       <div class="detail-titles">
         <div class="detail-title-row">
           <span class="detail-name">{{ t('sitesTitle') }}</span>
@@ -746,7 +746,7 @@ onMounted(() => { load(); loadCert() })
 .detail-avatar {
   width: 40px; height: 40px; border-radius: var(--radius-md); flex: 0 0 auto;
   display: flex; align-items: center; justify-content: center;
-  font-size: 18px; color: var(--color-accent-text);
+  font-size: 18px; color: var(--color-accent-text); background: var(--color-warning);
 }
 .detail-titles { display: flex; flex-direction: column; gap: 4px; }
 .detail-title-row { display: flex; align-items: baseline; gap: 8px; }

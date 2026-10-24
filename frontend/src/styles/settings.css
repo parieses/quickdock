@@ -136,7 +136,7 @@
 .about-copy { font-size: 11px; color: var(--color-text-disabled); margin: 0; }
 
 /* 更新按钮 */
-.update-restart-btn { background: var(--color-accent); color: #fff; font-weight: 500; }
+.update-restart-btn { background: var(--color-accent); color: var(--color-accent-text); font-weight: 500; }
 .update-restart-btn:hover { opacity: 0.9; }
 .update-dl-bar {
   height: 4px; margin-top: 10px; border-radius: var(--radius-xs); overflow: hidden;
@@ -304,7 +304,7 @@
   display: flex; align-items: center; justify-content: center; width: 22px; height: 22px;
   border-radius: var(--radius-sm); flex-shrink: 0;
 }
-.ai-profile-del:hover { color: var(--color-danger); background: rgba(232,76,76,0.1); }
+.ai-profile-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .ai-profile-add {
   display: flex; align-items: center; justify-content: center; gap: 4px;
   padding: 7px; border: 1px dashed var(--color-border); background: transparent;
@@ -336,7 +336,7 @@
 /* 配置编辑模态框 */
 .ai-modal-overlay {
   position: fixed; inset: 0; z-index: 20000;
-  background: rgba(0,0,0,0.45); display: flex;
+  background: var(--color-bg-overlay); display: flex;
   align-items: center; justify-content: center;
 }
 .ai-modal {
@@ -421,7 +421,7 @@
   cursor: pointer; font-family: inherit; transition: all 0.12s;
 }
 .pick-chip:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
-.pick-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: #fff; }
+.pick-chip.on { background: var(--color-accent); border-color: var(--color-accent); color: var(--color-accent-text); }
 /* 拉取模型列表：非 Ollama 兼容接口用（SettingsAI） */
 .model-fetch-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
 .model-fetch-btn {
@@ -457,7 +457,7 @@
 }
 .snapshot-item-actions .action-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .snapshot-item-actions .restore-btn:hover { color: var(--color-accent); }
-.snapshot-item-actions .action-btn.danger:hover { color: var(--color-danger); background: rgba(255,77,79,0.1); }
+.snapshot-item-actions .action-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .snapshot-item-actions .action-btn.enabled-btn { color: var(--color-accent); }
 
 /* 占位 */

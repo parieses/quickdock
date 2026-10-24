@@ -6,9 +6,9 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Copy, FolderSearch, Play, Save, Gauge
+  Copy, FolderSearch, Play, Save, Gauge, Monitor, RefreshCw
 } from '@lucide/vue'
-import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection, OpenNoteFromPalette } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, ResetInstalledAppsCache, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette } from '../../bindings/quickdock/services/appservice'
 import { ExecuteSystemCommand, RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
 import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
@@ -277,6 +277,17 @@ const systemCommands = computed<SystemCmd[]>(() => [
       await closePalette()
       try { unwrap(await CaptureSelection()) } catch (e) { logErr('[CmdPalette] CaptureSelection:', e) }
     } },
+  // 全屏截图：与区域截图同一条覆盖层链路，只是抓完屏直接带着整屏选区出现工具条，
+  // 省掉「拖一个框」。因此后续动作（复制/保存/贴图/标注）与区域截图完全一致。
+  { id: 'screenshot-full', label: t('cmdScreenshotFull'), desc: t('cmdScreenshotFullDesc'), keywords: ['screenshot', 'full', 'capture', '全屏', '截图', '截屏', 'jietu', 'quan ping', '系统'], icon: Monitor,
+    action: async () => {
+      await closePalette()
+      try { unwrap(await CaptureFullScreen()) } catch (e) { logErr('[CmdPalette] CaptureFullScreen:', e) }
+    } },
+  // 重建应用索引：后端缓存按「开始菜单目录 mtime 变化」自动失效，但覆盖不到
+  // 所有安装方式（绿色版、自定义目录、便携软件），搜不到时给用户一条手动出路。
+  { id: 'rebuild-app-index', label: t('cmdRebuildAppIndex'), desc: t('cmdRebuildAppIndexDesc'), keywords: ['app', 'index', 'rebuild', '应用', '索引', '重建', '扫描', 'sao miao', '系统'], icon: RefreshCw,
+    action: async () => { await rebuildAppIndex() } },
 ])
 
 // ---- 拼音缓存预热 ----
@@ -380,7 +391,7 @@ async function executeEnvAction(r: SearchResult) {
     }
     // 执行后重轮询状态，让结果即时翻转为相反动作（启动→停止），不关闭面板便于连续控制
     await pollEnvStatus().catch(() => {})
-    setTimeout(() => pollEnvStatus().catch(() => {}), 1500)
+    envPollTimer = setTimeout(() => pollEnvStatus().catch(() => {}), ENV_POLL_RETRY_MS)
   } catch (e: any) {
     const msg = r.envAction === 'mgmt' ? (t('envMgmtFailed') + ': ' + getErrorMessage(e)) : getErrorMessage(e)
     toast?.error?.(msg)
@@ -402,6 +413,10 @@ const {
 interface PathQuickInfo { exists: boolean; isDir?: boolean; path?: string; sizeText?: string; modified?: string }
 const quickInfo = ref<PathQuickInfo | null>(null)
 let quickInfoTimer: ReturnType<typeof setTimeout> | null = null
+let envPollTimer: ReturnType<typeof setTimeout> | null = null
+// 轮询/防抖间隔集中成常量，避免散落字面量漂移
+const QUICKINFO_DEBOUNCE_MS = 200
+const ENV_POLL_RETRY_MS = 1500
 
 // 拉取文件/目录元数据（本地 stat，防抖 200ms 防切项风暴）
 async function loadQuickInfo(item: CollectionItem) {
@@ -413,7 +428,7 @@ async function loadQuickInfo(item: CollectionItem) {
       const res = unwrap<PathQuickInfo | null>(await GetPathQuickInfo(item.value || ''))
       quickInfo.value = res || null
     } catch { quickInfo.value = null }
-  }, 200)
+  }, QUICKINFO_DEBOUNCE_MS)
 }
 
 // 选中项变化：跟随刷新元数据
@@ -1004,6 +1019,25 @@ watch(themeName, () => {
 
 // 一次性加载全量池（项目 + 应用 + 笔记 + 最近使用），后续匹配完全在前端完成，
 // 从而支持拼音与子串搜索（后端 FTS5 前缀匹配无法覆盖这两类）。
+// 重建应用索引：清掉后端的内存缓存后立刻重扫一次。
+//
+// 为什么需要手动入口：缓存的失效依据是「开始菜单/卸载表这些来源目录的 mtime 变化」，
+// 覆盖不到绿色版、便携版、装到自定义目录的软件——它们的安装不碰任何一个被监控的目录，
+// 于是缓存永远命中，用户就一直搜不到。手动重建是这条自动链路兜不住时的出路。
+//
+// 重扫期间不关面板：扫描是磁盘活儿，耗时几百毫秒到数秒，关掉面板用户看不到
+// 「正在重建」，只会以为按了没反应；不关也能在完成后立刻用新索引搜。
+async function rebuildAppIndex() {
+  try {
+    unwrap(await ResetInstalledAppsCache())
+    installedApps.value = unwrap<InstalledApp[]>(await ScanInstalledApps()) || []
+    toast?.success?.(t('appIndexRebuilt'))
+  } catch (e) {
+    console.error('[CmdPalette] RebuildAppIndex:', getErrorMessage(e))
+    toast?.error?.(t('appIndexRebuildFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
 async function loadPaletteData() {
   loading.value = true; const gen = ++itemsLoadGen
   await loadFrecency()
@@ -1115,6 +1149,8 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onGlobalEsc, true)
   document.removeEventListener('keydown', onGlobalKey, true)
   window.removeEventListener('focus', focusInput)
+  if (quickInfoTimer) clearTimeout(quickInfoTimer)
+  if (envPollTimer) clearTimeout(envPollTimer)
 })
 </script>
 

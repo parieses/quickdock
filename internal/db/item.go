@@ -129,12 +129,17 @@ func (d *Database) GetMostUsedItems(limit int) ([]CollectionItem, error) {
 	return items, serr
 }
 
-// ListAllItems 返回全部工作空间的项目（不分页）。
+// ListAllItems 返回工作空间的项目（用于命令面板的全量匹配池）。
 // 命令面板改用前端对全量池做拼音/子串权威匹配（见 useCommandSearch），
 // 避免后端 FTS5 前缀匹配导致拼音与子串搜索完全失效。
+//
+// 上限 listAllItemsLimit：正常库远不会到这个数，且 FTS5 搜索（SearchAllItems）覆盖其余查询，
+// 截断尾部对体验无影响，却能避免条目无界增长时整表读进内存 + scanItems 的开销失控。
+const listAllItemsLimit = 5000
+
 func (d *Database) ListAllItems() ([]CollectionItem, error) {
 	d.mu.RLock()
-	rows, err := d.conn.Query("SELECT " + itemCols + " FROM items ORDER BY usage_count DESC, updated_at DESC")
+	rows, err := d.conn.Query("SELECT "+itemCols+" FROM items ORDER BY usage_count DESC, updated_at DESC LIMIT ?", listAllItemsLimit)
 	if err != nil {
 		d.mu.RUnlock()
 		return nil, err

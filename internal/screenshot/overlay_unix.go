@@ -26,3 +26,8 @@ func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome, _ launchSt
 	}
 	close(result)
 }
+
+// ShowPreset 与 Show 同：darwin / linux 尚未实现截图，直接按取消结束。
+func (o *Overlay) ShowPreset(src *Bitmap, bounds, preset Rect, result chan outcome, launch launchStats) {
+	o.Show(src, bounds, result, launch)
+}

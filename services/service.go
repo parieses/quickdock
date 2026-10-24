@@ -88,9 +88,6 @@ type AppService struct {
 	// 插件窗口管理器（每个插件独立窗口）
 	PluginWindowMgr *plugin.PluginWindowManager
 
-	// 内置插件自动安装（由 main.go 注入，含 embed.FS）
-	InstallBuiltinPluginsFn func(mgr *plugin.Manager, database *db.Database)
-
 	// 应用版本号（由 main.go 在编译时通过 -ldflags -X 注入）
 	AppVersion string
 

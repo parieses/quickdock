@@ -3,7 +3,6 @@ package main
 import (
 	"bytes"
 	"embed"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +15,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"quickdock/internal/db"
 	envengine "quickdock/internal/env"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -149,8 +147,13 @@ func startRenderHeartbeat(app *application.App) {
 //go:embed all:frontend/dist
 var assets embed.FS
 
-//go:embed all:plugins/builtin
-var builtinPlugins embed.FS
+// 插件共享资源（common.css / common.js）：随 exe 打包，每次启动同步到
+// ~/.quickdock/plugins/builtin/ 供历史外部插件引用。
+//
+// 目录里**不再有内置插件**：内置插件方案已搁置（插件一律来自市场或本地 zip 安装），
+// 故 plugins/ 下只留这一份共享样式，不参与插件的注册与加载。
+//go:embed all:plugins/shared
+var sharedPluginAssets embed.FS
 
 //go:embed updater.key.pub
 var updaterPublicKey []byte
@@ -387,11 +390,6 @@ func main() {
 	envengine.SetMCPAppVersion(appVersion)
 	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, appVersion)
 
-	// 注入内置插件自动安装回调（在 ServiceStartup DB 就绪后执行）
-	appService.InstallBuiltinPluginsFn = func(mgr *plugin.Manager, database *db.Database) {
-		autoInstallBuiltins(mgr, database, &builtinPlugins)
-	}
-
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()
 
@@ -446,10 +444,10 @@ func main() {
 	applyPlatformAppOptions(&opts)
 	app := application.New(opts)
 
-	// 先提取内置插件骨架文件（common.css / common.js）到 ~/.quickdock/plugins/
+	// 先把插件共享资源（common.css / common.js）同步到 ~/.quickdock/plugins/builtin/
 	// 必须早于插件加载，确保宿主注入的兼容样式/脚本是最新版本。
 	// 放在 application.New 之后：二次启动已在 New 内部退出，避免与首实例并发写插件目录。
-	extractBuiltinPluginFiles(pluginMgr, &builtinPlugins)
+	extractSharedPluginAssets(pluginMgr, &sharedPluginAssets)
 
 	// 插件扫描与加载不在这里：磁盘目录只代表「曾经被放到这里」，真正的启用状态在数据库里，
 	// 而数据库要到 ServiceStartup 才打开。改由 services/lifecycle.go 在 DB 就绪后按启用列表加载。
@@ -690,230 +688,33 @@ func initUpdater(app *application.App, version string) error {
 	})
 }
 
-// extractBuiltinPluginFiles 增量同步内置插件文件到 ~/.quickdock/plugins/（不含 DB 写入和 LoadPlugin）
-// 在插件加载（services/lifecycle.go 按 DB 启用列表扫描）之前调用，确保宿主注入的兼容样式/脚本是最新版本。
-// 采用增量同步：仅覆盖内容变化的文件，保留插件目录内的本地运行状态（如 sqlite、日志）。
-func extractBuiltinPluginFiles(mgr *plugin.Manager, builtinFS *embed.FS) {
-	entries, err := builtinFS.ReadDir("plugins/builtin")
-	if err != nil {
-		logger.W("QuickDock: 读取内置插件目录失败: %v", err)
+// extractSharedPluginAssets 把插件共享资源（common.css / common.js）增量同步到
+// ~/.quickdock/plugins/builtin/，供早期安装的外部插件引用——它们的前端仍写着
+// ../builtin/common.css，新版插件自带 qd-theme.css，不再依赖它。
+//
+// 在插件加载（services/lifecycle.go 按 DB 启用列表扫描）之前调用，确保宿主注入的
+// 兼容样式/脚本是最新版本；仅覆盖内容变化的文件。
+//
+// 这里**不再有内置插件**：内置插件方案搁置，插件一律来自市场或本地 zip 安装，
+// 因此本函数只同步共享资源，不注册也不加载任何插件。
+func extractSharedPluginAssets(mgr *plugin.Manager, sharedFS *embed.FS) {
+	// 目标目录沿用 builtin 这个名字：它已经写进历史插件前端的 <link> 路径，
+	// 改名会让已装插件丢样式。仓库侧源目录已改为 plugins/shared。
+	sharedDir := filepath.Join(mgr.PluginsDir(), "builtin")
+	if err := os.MkdirAll(sharedDir, 0755); err != nil {
+		logger.W("QuickDock: 创建插件共享资源目录失败: %v", err)
 		return
 	}
-
-	// 确保 builtin 共享目录存在，同步 common.css / common.js
-	//（兼容历史已安装的外部插件：它们的前端仍引用 ../common.css，由宿主注入；
-	// 新版外部插件均已自带 qd-theme.css 自包含样式，不再依赖此注入）
-	builtinDir := filepath.Join(mgr.PluginsDir(), "builtin")
-	os.MkdirAll(builtinDir, 0755)
 	for _, name := range []string{"common.css", "common.js"} {
-		if data, cer := builtinFS.ReadFile(path.Join("plugins/builtin", name)); cer == nil {
-			syncEmbeddedFile(filepath.Join(builtinDir, name), data)
-		}
-	}
-
-	// 当前仍内置的插件目录名集合（用于清理已删除插件的残留）
-	currentBuiltin := make(map[string]bool)
-	for _, entry := range entries {
-		if entry.IsDir() {
-			currentBuiltin[entry.Name()] = true
-		}
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pluginID := entry.Name()
-		targetDir := filepath.Join(mgr.PluginsDir(), pluginID)
-
-		// 增量同步插件文件（不删除本地目录，保留插件运行状态）
-		os.MkdirAll(targetDir, 0755)
-		if err := syncEmbeddedDir(builtinFS, path.Join("plugins/builtin", pluginID), targetDir); err != nil {
-			logger.W("QuickDock: 同步内置插件 %s 失败: %v", pluginID, err)
-			continue
-		}
-
-		// 把 common.css / common.js 同步到每个插件根目录
-		for _, name := range []string{"common.css", "common.js"} {
-			if cd, cer := builtinFS.ReadFile(path.Join("plugins/builtin", name)); cer == nil {
-				syncEmbeddedFile(filepath.Join(targetDir, name), cd)
-			}
-		}
-	}
-
-	// 清理已删除内置插件的残留目录：磁盘上仍存在、但已不在嵌入集中、且 ID 属于内置命名空间
-	pruneStaleBuiltins(mgr, currentBuiltin)
-}
-
-// pruneStaleBuiltins 删除 pluginsDir 下残留的、已不在内置集合中的旧内置插件目录
-func pruneStaleBuiltins(mgr *plugin.Manager, currentBuiltin map[string]bool) {
-	dirEntries, err := os.ReadDir(mgr.PluginsDir())
-	if err != nil {
-		return
-	}
-	for _, e := range dirEntries {
-		if !e.IsDir() {
-			continue
-		}
-		name := e.Name()
-		if name == "builtin" || currentBuiltin[name] {
-			continue
-		}
-		mfPath := filepath.Join(mgr.PluginsDir(), name, "plugin.json")
-		data, rerr := os.ReadFile(mfPath)
-		if rerr != nil {
-			continue
-		}
-		var mf plugin.PluginManifest
-		if jerr := json.Unmarshal(data, &mf); jerr != nil {
-			continue
-		}
-		// 仅清理内置命名空间，避免误删用户自行安装的插件
-		if !strings.HasPrefix(mf.ID, "com.quickdock.") {
-			continue
-		}
-		logger.I("QuickDock: 清理已删除的内置插件 %s (%s)", name, mf.ID)
-		mgr.UnloadPlugin(mf.ID)
-		os.RemoveAll(filepath.Join(mgr.PluginsDir(), name))
-	}
-}
-
-// autoInstallBuiltins 注册内置插件到数据库并加载（文件已由 extractBuiltinPluginFiles 提取到磁盘）
-func autoInstallBuiltins(mgr *plugin.Manager, database *db.Database, builtinFS *embed.FS) {
-	entries, err := builtinFS.ReadDir("plugins/builtin")
-	if err != nil {
-		logger.W("QuickDock: 读取内置插件目录失败: %v", err)
-		return
-	}
-
-	// 当前有效的内置插件 ID 集合，用于清理残留的数据库记录
-	validBuiltinIDs := make(map[string]bool)
-
-	// 已入库的内置插件版本（id → version）：元信息未变化的插件跳过写库，
-	// 与 syncEmbeddedFile「内容一致则跳过」保持同一策略，避免每次启动全量 upsert。
-	// 查询失败按空 map 处理 → 回退为「总是写」，保证首次/异常时元信息不丢。
-	existingVersions, _ := database.ListPluginVersions()
-	if existingVersions == nil {
-		existingVersions = map[string]string{}
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-		pluginID := entry.Name()
-		targetDir := filepath.Join(mgr.PluginsDir(), pluginID)
-
-		// 读取 plugin.json 获取 ID
-		data, err := builtinFS.ReadFile(path.Join("plugins/builtin", pluginID, "plugin.json"))
+		data, err := sharedFS.ReadFile(path.Join("plugins/shared", name))
 		if err != nil {
-			logger.W("QuickDock: 读取内置插件 %s plugin.json 失败: %v", pluginID, err)
+			logger.W("QuickDock: 读取共享资源 %s 失败: %v", name, err)
 			continue
 		}
-
-		var mf plugin.PluginManifest
-		if err := json.Unmarshal(data, &mf); err != nil {
-			logger.W("QuickDock: 解析内置插件 %s plugin.json 失败: %v", pluginID, err)
-			continue
-		}
-
-		// 记录当前有效的内置插件 ID，用于清理残留数据库记录
-		validBuiltinIDs[mf.ID] = true
-
-		// 目录不存在说明 extractBuiltinPluginFiles 失败，跳过
-		if _, err := os.Stat(targetDir); os.IsNotExist(err) {
-			logger.I("QuickDock: 内置插件 %s 目录不存在，跳过", pluginID)
-			continue
-		}
-
-		// 元信息（以 version 为代表）与已入库记录一致 → 跳过写库：
-		// 内置插件没有「安装/更新」事件（随 exe 打包），首次运行/版本升级才需落库；
-		// 平时启动无需重写，避免每次启动对全部内置插件做无谓 upsert。
-		if v, ok := existingVersions[mf.ID]; ok && v == mf.Version {
-			logger.I("QuickDock: 内置插件 %s (%s) 元信息未变化，跳过写库", mf.ID, mf.Version)
-		} else {
-			// 读取图标
-			iconData := ""
-			if mf.Icon != "" {
-				iconPath := filepath.Join(targetDir, mf.Icon)
-				if icoBytes, err := os.ReadFile(iconPath); err == nil && len(icoBytes) > 0 {
-					mime := platform.IconMIME(filepath.Ext(mf.Icon))
-					iconData = fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(icoBytes))
-				}
-			}
-
-			// 写入数据库记录（含 capabilities / permissions / category / icon）
-			perms := make(map[string]interface{})
-			if mf.Permissions.Network.Granted() || mf.Permissions.Filesystem.Granted() || mf.Permissions.Clipboard || mf.Permissions.Shell.Granted() || mf.Permissions.ProcessKill.Granted() {
-				perms["network"] = mf.Permissions.Network
-				perms["filesystem"] = mf.Permissions.Filesystem
-				perms["clipboard"] = mf.Permissions.Clipboard
-				perms["shell"] = mf.Permissions.Shell
-				perms["processKill"] = mf.Permissions.ProcessKill
-			}
-			// 启动注册内置插件：refreshUpdatedAt=false，保留既有 updated_at，
-			// 避免每次启动都把内置插件刷成「最近更新」而冲乱插件列表排序。
-			if err := database.InsertPluginFull(mf.ID, mf.Name, mf.Version, mf.Author, mf.Description, mf.Category, iconData, mf.Capabilities, perms, false); err != nil {
-				logger.W("QuickDock: 内置插件 %s 写入数据库失败: %v", pluginID, err)
-			}
-		}
-
-		// 加载插件（DiscoverAndLoad 已加载运行中实例则跳过，避免 stop→重启 双重加载）
-		if inst := mgr.GetPlugin(mf.ID); inst != nil && inst.GetStatus() == "running" {
-			logger.I("[plugin %s] %s (%s) 已加载，跳过重复加载", mf.ID, mf.Name, mf.Version)
-			continue
-		}
-		if err := mgr.LoadPlugin(mf, targetDir); err != nil {
-			logger.W("QuickDock: 加载内置插件 %s 失败: %v", pluginID, err)
-		} else {
-			logger.I("[plugin %s] %s (%s) 已安装并加载", mf.ID, mf.Name, mf.Version)
+		if err := syncEmbeddedFile(filepath.Join(sharedDir, name), data); err != nil {
+			logger.W("QuickDock: 同步共享资源 %s 失败: %v", name, err)
 		}
 	}
-
-	// 清理已删除内置插件的残留数据库痕迹（磁盘目录已由 pruneStaleBuiltins 移除，
-	// 但历史版本的记录 / 私有数据 / 使用记录 / 执行日志可能残留，需按内置命名空间 +
-	// 不在有效集合中的条件清理；与卸载路径共用 PurgePlugin，避免两侧清理项漂移）
-	if allIDs, derr := database.ListAllPluginIDs(); derr == nil {
-		for _, id := range allIDs {
-			if strings.HasPrefix(id, "com.quickdock.") && !validBuiltinIDs[id] {
-				if rerr := database.PurgePlugin(id); rerr != nil {
-					logger.W("QuickDock: 清理残留内置插件 %s 失败: %v", id, rerr)
-				} else {
-					logger.I("QuickDock: 已清理残留内置插件痕迹 %s", id)
-				}
-			}
-		}
-	}
-}
-
-// syncEmbeddedDir 将 embed.FS 中的目录增量同步到本地文件系统：
-// 仅写入不存在或内容变化的文件，保留本地已有的其他文件（如插件运行状态）
-func syncEmbeddedDir(fs *embed.FS, embedPath, targetDir string) error {
-	entries, err := fs.ReadDir(embedPath)
-	if err != nil {
-		return err
-	}
-	for _, entry := range entries {
-		srcPath := path.Join(embedPath, entry.Name())
-		dstPath := filepath.Join(targetDir, entry.Name())
-
-		if entry.IsDir() {
-			os.MkdirAll(dstPath, 0755)
-			if err := syncEmbeddedDir(fs, srcPath, dstPath); err != nil {
-				return err
-			}
-			continue
-		}
-
-		data, err := fs.ReadFile(srcPath)
-		if err != nil {
-			return err
-		}
-		if err := syncEmbeddedFile(dstPath, data); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // syncEmbeddedFile 写入文件，内容与本地一致时跳过（避免每次启动全量重写磁盘）

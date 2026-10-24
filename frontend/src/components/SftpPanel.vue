@@ -48,6 +48,7 @@ import {
   SftpMkdir,
   SftpRemove,
   SftpRename,
+  SftpStat,
   SftpUpload,
 } from '../../bindings/quickdock/services/sshx/sshservice'
 import {
@@ -58,6 +59,7 @@ import {
 import { apiErrorCode, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useToast } from '../composables/useToast'
+import { copyToClipboard } from '../utils/clipboard'
 import {
   entryKind,
   filterEntries,
@@ -502,6 +504,66 @@ function startRename() {
   if (!selected.value) return
   openPrompt('rename', selected.value.name)
 }
+
+// ---- 右键菜单 ----
+//
+// 行内的图标按钮已经能完成大部分操作，但每个按钮都要先 hover 到那一行才看得见，
+// 且「文件到底多大、什么时候改的」在窄列里会被截断。右键菜单把这两件事补齐：
+// 一组不用找图标的常用动作，加一个「属性」看完整信息。
+interface RowMenu { x: number; y: number; entry: SftpEntry }
+const rowMenu = ref<RowMenu | null>(null)
+
+function openRowMenu(e: MouseEvent, entry: SftpEntry) {
+  selectRow(entry)
+  // 往回收，避免菜单被视口边缘裁掉：宽度按最长一项估，高度按项数算。
+  const w = 170
+  const h = 30 * (entry.isDir ? 5 : 7) + 12
+  rowMenu.value = {
+    x: Math.min(e.clientX, window.innerWidth - w),
+    y: Math.min(e.clientY, window.innerHeight - h),
+    entry,
+  }
+}
+function closeRowMenu() { rowMenu.value = null }
+
+// ---- 属性弹窗 ----
+//
+// 现取（SftpStat）而不用列表里那条记录：列表可能是几十秒前拉的，
+// 这期间文件被别的过程改过很常见——属性弹窗的意义恰恰是「此刻的状态」，
+// 拿旧数据就白弹了。
+const propsEntry = ref<SftpEntry | null>(null)
+const propsLoading = ref(false)
+const propsError = ref('')
+
+async function showProps(entry: SftpEntry) {
+  rowMenu.value = null
+  propsEntry.value = entry
+  propsError.value = ''
+  propsLoading.value = true
+  try {
+    const fresh = unwrap<SftpEntry>(await SftpStat(props.host.id, entry.path))
+    if (fresh) propsEntry.value = fresh
+  } catch (e) {
+    // 取不到就退回列表里的那条：宁可展示可能过期的信息，也不要弹个空窗。
+    // 错误仍然提示，让用户知道这不是最新值。
+    propsError.value = getErrorMessage(e)
+  } finally {
+    propsLoading.value = false
+  }
+}
+function closeProps() { propsEntry.value = null; propsError.value = '' }
+
+function propsTypeLabel(e: SftpEntry): string {
+  if (e.isLink) return t('sshFileTypeLink')
+  return e.isDir ? t('sshFileTypeDir') : t('sshFileTypeFile')
+}
+
+async function copyPath(e: SftpEntry) {
+  rowMenu.value = null
+  const ok = await copyToClipboard(e.path)
+  if (ok) toastSuccess(t('sshFileCopied'))
+  else toastError(t('copyFailed'))
+}
 </script>
 
 <template>
@@ -641,6 +703,7 @@ function startRename() {
             :class="{ 'sftp-row--sel': selected?.path === e.path }"
             @click="onRowClick(e)"
             @dblclick="onRowDblClick(e)"
+            @contextmenu.prevent="openRowMenu($event, e)"
           >
             <td class="c-name">
               <Folder v-if="e.isDir" :size="14" class="ic ic--dir" />
@@ -728,6 +791,118 @@ function startRename() {
               >
                 {{ promptOk }}
               </button>
+            </div>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
+    <!-- 行右键菜单：backdrop 负责「点别处/再右键即关」，菜单本体 stop 掉冒泡 -->
+    <Teleport to="body">
+      <div
+        v-if="rowMenu"
+        class="sfp-menu-backdrop"
+        @click="closeRowMenu"
+        @contextmenu.prevent="closeRowMenu"
+      >
+        <div
+          class="sfp-menu"
+          :style="{ left: rowMenu.x + 'px', top: rowMenu.y + 'px' }"
+          @click.stop
+          @contextmenu.prevent
+        >
+          <button class="sfp-menu-item" @click="(closeRowMenu(), onRowDblClick(rowMenu.entry))">
+            {{ rowMenu.entry.isDir ? t('sshFileEnter') : t('sshFileOpen') }}
+          </button>
+          <button class="sfp-menu-item" @click="showProps(rowMenu.entry)">
+            {{ t('sshFileProps') }}
+          </button>
+          <button class="sfp-menu-item" @click="copyPath(rowMenu.entry)">
+            {{ t('sshFileCopyPath') }}
+          </button>
+          <div class="sfp-menu-sep" />
+          <button
+            v-if="!rowMenu.entry.isDir"
+            class="sfp-menu-item"
+            :disabled="!!rowBusy"
+            @click="(closeRowMenu(), downloadEntry(rowMenu.entry))"
+          >
+            {{ t('sshFileDownload') }}
+          </button>
+          <button
+            class="sfp-menu-item"
+            :disabled="!!rowBusy"
+            @click="(selectRow(rowMenu.entry), closeRowMenu(), startRename())"
+          >
+            {{ t('sshFileRename') }}
+          </button>
+          <button
+            class="sfp-menu-item"
+            @click="(closeRowMenu(), startChmod(rowMenu.entry))"
+          >
+            {{ t('sshFileChmod') }}
+          </button>
+          <div class="sfp-menu-sep" />
+          <button
+            class="sfp-menu-item sfp-menu-item--danger"
+            :disabled="rowBusy === rowMenu.entry.path"
+            @click="(closeRowMenu(), removeEntry(rowMenu.entry))"
+          >
+            {{ t('sshDelete') }}
+          </button>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- 属性弹窗 -->
+    <Teleport to="body">
+      <Transition name="sfp">
+        <div v-if="propsEntry" class="sfp-overlay" @mousedown.self="closeProps">
+          <div class="sfp-panel sfp-panel--props" role="dialog" @keydown.esc.stop="closeProps">
+            <div class="sfp-title">{{ t('sshFileProps') }}</div>
+            <div class="props-grid">
+              <div class="props-row">
+                <span class="props-k">{{ t('sshName') }}</span>
+                <span class="props-v props-v--wrap">{{ propsEntry.name }}</span>
+              </div>
+              <div class="props-row">
+                <span class="props-k">{{ t('sshFilePropType') }}</span>
+                <span class="props-v">{{ propsTypeLabel(propsEntry) }}</span>
+              </div>
+              <div class="props-row">
+                <span class="props-k">{{ t('sshFilePropPath') }}</span>
+                <span class="props-v props-v--wrap">{{ propsEntry.path }}</span>
+              </div>
+              <div class="props-row">
+                <span class="props-k">{{ t('sshFilePropSize') }}</span>
+                <span class="props-v">
+                  {{ formatEntrySize(propsEntry) }}
+                  <span v-if="!propsEntry.isDir" class="props-sub">（{{ propsEntry.size }} B）</span>
+                </span>
+              </div>
+              <div class="props-row">
+                <span class="props-k">{{ t('sshFilePropPerm') }}</span>
+                <span class="props-v">
+                  <span class="props-oct">{{ permOctal(propsEntry.mode) }}</span>
+                  <span class="props-sub">{{ propsEntry.mode.slice(-9) }}</span>
+                </span>
+              </div>
+              <div class="props-row">
+                <span class="props-k">{{ t('sshFilePropMtime') }}</span>
+                <span class="props-v">{{ formatMtime(propsEntry.modTime) }}</span>
+              </div>
+              <div v-if="propsEntry.isLink && propsEntry.linkTo" class="props-row">
+                <span class="props-k">{{ t('sshFilePropLink') }}</span>
+                <span class="props-v props-v--wrap">{{ propsEntry.linkTo }}</span>
+              </div>
+            </div>
+            <div v-if="propsLoading" class="props-note">{{ t('loading') }}</div>
+            <div v-else-if="propsError" class="props-note props-note--warn">
+              {{ t('sshFilePropsStale', { err: propsError }) }}
+            </div>
+            <div class="sfp-foot">
+              <button class="sfp-btn" @click="copyPath(propsEntry)">{{ t('sshFileCopyPath') }}</button>
+              <button class="sfp-btn sfp-btn--primary" @click="closeProps">{{ t('close') }}</button>
             </div>
           </div>
         </div>
@@ -1263,6 +1438,89 @@ function startRename() {
   cursor: default;
   opacity: 0.5;
 }
+
+/* ---- 行右键菜单 ---- */
+/* backdrop 铺满视口接住「点别处关闭」，菜单按坐标定位。
+   不用 document 监听：组件卸载时容易漏解绑，而 backdrop 随 v-if 一起消失。 */
+.sfp-menu-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 3000;
+}
+.sfp-menu {
+  position: fixed;
+  min-width: 160px;
+  padding: 4px;
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px var(--color-bg-overlay);
+  display: flex;
+  flex-direction: column;
+}
+.sfp-menu-item {
+  display: block;
+  width: 100%;
+  padding: 5px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: 11.5px;
+  text-align: left;
+  cursor: pointer;
+}
+.sfp-menu-item:hover:not(:disabled) { background: var(--color-bg-hover); }
+.sfp-menu-item:disabled { color: var(--color-text-disabled); cursor: default; }
+.sfp-menu-item--danger { color: var(--color-danger); }
+.sfp-menu-item--danger:hover:not(:disabled) { background: var(--color-danger-bg); }
+.sfp-menu-sep {
+  height: 1px;
+  margin: 3px 2px;
+  background: var(--color-border);
+}
+
+/* ---- 属性弹窗 ---- */
+.sfp-panel--props { min-width: 380px; max-width: 560px; }
+.props-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 4px 0 2px;
+}
+.props-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+.props-k {
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.props-v {
+  font-size: 12px;
+  color: var(--color-text-primary);
+  min-width: 0;
+}
+/* 路径与文件名会比弹窗宽：截断就看不到后半个路径，而那正是属性里最有价值的一项 */
+.props-v--wrap {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  word-break: break-all;
+}
+.props-sub { color: var(--color-text-muted); font-size: 10.5px; margin-left: 4px; }
+.props-oct {
+  font-family: var(--font-mono);
+  color: var(--color-accent);
+}
+.props-note {
+  margin-top: 6px;
+  font-size: 10.5px;
+  color: var(--color-text-muted);
+}
+.props-note--warn { color: var(--color-warning); }
 
 .sfp-enter-active,
 .sfp-leave-active {

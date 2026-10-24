@@ -186,6 +186,9 @@ type Overlay struct {
 type overlayCmd struct {
 	src      *Bitmap
 	bounds   Rect
+	// preset 非空时会话一开始就是「选区已定」状态（跳过框选，工具条立即可见）。
+	// 全屏截图走这条路：用户不需要拖拽，抓完屏直接能复制/保存/贴图。
+	preset   Rect
 	resultCh chan outcome
 	launch   launchStats
 }
@@ -294,6 +297,16 @@ func (o *Overlay) Start() error {
 // 返回的路径都没有接管，必须在这里 Close——src 的 Pix 可能指向 33MB 的 DIB 内存
 // （4K），漏一次就是一次实打实的泄漏。
 func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome, launch launchStats) {
+	o.show(src, bounds, Rect{}, result, launch)
+}
+
+// ShowPreset 同 Show，但会话开始时就把 preset 当作已定选区（跳过框选，
+// 工具条立即可见）。全屏截图这类「不需要用户拖拽」的入口走这条路。
+func (o *Overlay) ShowPreset(src *Bitmap, bounds, preset Rect, result chan outcome, launch launchStats) {
+	o.show(src, bounds, preset, result, launch)
+}
+
+func (o *Overlay) show(src *Bitmap, bounds, preset Rect, result chan outcome, launch launchStats) {
 	// 连按热键时挡掉重复请求：正在用就以「取消」立刻返回，
 	// 不打断已显示的那一次。
 	if !o.showing.CompareAndSwap(false, true) {
@@ -313,7 +326,7 @@ func (o *Overlay) Show(src *Bitmap, bounds Rect, result chan outcome, launch lau
 		return
 	}
 
-	o.cmdCh <- &overlayCmd{src: src, bounds: bounds, resultCh: result, launch: launch}
+	o.cmdCh <- &overlayCmd{src: src, bounds: bounds, preset: preset, resultCh: result, launch: launch}
 	procPostMessageW.Call(hwnd, wmOverlayShow, 0, 0)
 }
 
@@ -444,6 +457,15 @@ func (o *Overlay) handleShow(cmd *overlayCmd) {
 	o.launch = cmd.launch
 	o.hideTextInput()
 	o.resetSession()
+	// 预置选区（全屏截图）：resetSession 之后设置，否则会被它清掉。
+	// 必须裁进 bounds —— 覆盖层后续 crop/绘制都以虚拟桌面坐标为准，
+	// 越界的选区会在合成时读写到 DIB 之外。
+	if !cmd.preset.Empty() {
+		o.sel = cmd.preset.intersect(cmd.bounds)
+		if !o.sel.Empty() {
+			o.phase = phaseAdjusting
+		}
+	}
 
 	// 2. 建绘制资源 + 预合成暗化底图（一次性开销，不参与逐帧重绘）。
 	tPrepare := time.Now()

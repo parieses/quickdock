@@ -61,3 +61,45 @@ func Select(o *Overlay) (Result, error) {
 	}
 	return Result{Action: res.action, Rect: res.rect, Bitmap: res.image}, nil
 }
+
+// SelectFull 抓取整个虚拟桌面，并把整屏作为**已定选区**送进覆盖层。
+//
+// 与 Select 的差别只有「要不要用户先拖一个框」：这里抓完屏工具条就在，
+// 用户直接 Enter 复制 / Ctrl+S 保存 / 点贴图。全屏截图走这条路，
+// 标注、保存、贴图等能力完全复用框选会话，不另开一条链路。
+//
+// 取消语义与 Select 一致（返回零值 Result，err == nil）。
+func SelectFull(o *Overlay) (Result, error) {
+	if o == nil {
+		return Result{}, ErrUnsupported
+	}
+
+	bounds := VirtualDesktopBounds()
+	if bounds.Empty() {
+		return Result{}, fmt.Errorf("screenshot: 虚拟桌面尺寸无效")
+	}
+
+	started := time.Now()
+
+	tCapture := time.Now()
+	src, err := captureRect(bounds)
+	capture := time.Since(tCapture)
+	if err != nil {
+		logger.W("[screenshot] 全屏抓屏失败（%v，%d×%d）：%v",
+			capture.Round(10*time.Microsecond), bounds.W, bounds.H, err)
+		return Result{}, err
+	}
+
+	tOpaque := time.Now()
+	src.ensureOpaque()
+	launch := launchStats{started: started, capture: capture, opaque: time.Since(tOpaque)}
+
+	result := make(chan outcome, 1)
+	o.ShowPreset(src, bounds, bounds, result, launch)
+
+	res, ok := <-result
+	if !ok || res.rect.Empty() || res.image.Empty() {
+		return Result{Action: ActionCancel}, nil
+	}
+	return Result{Action: res.action, Rect: res.rect, Bitmap: res.image}, nil
+}

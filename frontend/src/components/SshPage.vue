@@ -48,6 +48,7 @@ import {
 } from '../utils/sshTabs'
 import SshHostTree from './SshHostTree.vue'
 import SshHostDialog from './SshHostDialog.vue'
+import SshHostDetailDialog from './SshHostDetailDialog.vue'
 import SshSessionView from './SshSessionView.vue'
 import SshTabBar from './SshTabBar.vue'
 import SshTrustedHostsDialog from './SshTrustedHostsDialog.vue'
@@ -304,6 +305,25 @@ function openEdit(h: SshHost) {
   dialogVisible.value = true
 }
 
+// ---- 单主机详情 ----
+const detailVisible = ref(false)
+const detailHost = ref<SshHost | null>(null)
+const detailFolderName = ref('')
+
+function openDetail(h: SshHost) {
+  detailHost.value = h
+  // 分组名在树里才有（hosts 是扁平列表，只有 parentId），这里顺手查出来：
+  // 详情里写「未分组」还是分组名，是用户判断这台机器归属的唯一依据。
+  detailFolderName.value = h.parentId ? (hosts.value.find((x) => x.id === h.parentId)?.name || '') : ''
+  detailVisible.value = true
+}
+
+/** 详情里点「编辑」：关详情 → 开编辑表单，避免两个弹窗叠在一起。 */
+function editFromDetail(h: SshHost) {
+  detailVisible.value = false
+  openEdit(h)
+}
+
 async function onSaved() {
   dialogVisible.value = false
   await load()
@@ -483,6 +503,7 @@ defineExpose({
         @select="selectHost"
         @toggle="toggleFolder"
         @edit="openEdit"
+        @detail="openDetail"
         @delete="removeHost"
         @create="openNew"
         @create-folder="createFolder"
@@ -550,6 +571,15 @@ defineExpose({
       :parent-id="creatingParentId"
       @saved="onSaved"
       @cancel="dialogVisible = false"
+    />
+
+    <SshHostDetailDialog
+      :visible="detailVisible"
+      :host-id="detailHost?.id || ''"
+      :fallback="detailHost"
+      :folder-name="detailFolderName"
+      @edit="editFromDetail"
+      @close="detailVisible = false"
     />
 
     <SshTrustedHostsDialog v-model:visible="trustedVisible" />

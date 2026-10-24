@@ -83,12 +83,6 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		a.RegisterPluginHostFn()
 	}
 
-	// 自动安装内置插件（main.go 注入的回调，需在 DB 就绪后执行）。
-	// 必须在本段同步完成：内置插件首次运行才写入磁盘 + 注册 DB，若先异步扫描会漏掉这批刚安装的插件。
-	if a.InstallBuiltinPluginsFn != nil && a.PluginMgr != nil {
-		a.InstallBuiltinPluginsFn(a.PluginMgr, a.DB)
-	}
-
 	// 扫描并加载插件：只加载数据库中 enabled=1 的插件。改为后台 goroutine——
 	// 此前 DiscoverAndLoad 内部 wg.Wait() 会阻塞本函数（=阻塞主窗口显示）：native 插件的
 	// initialize 握手最坏 15s+，一次 http-client 握手超时曾把单次启动拖到 34s。挪到后台后

@@ -128,11 +128,6 @@ export function useCommandSearch(deps: SearchDeps) {
   // 80ms 内停顿才真正重算，键盘快速打字时结果滞后几乎不可感知
   const debouncedQuery = ref(query.value)
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
-  watch(query, (v) => {
-    if (debounceTimer) clearTimeout(debounceTimer)
-    debounceTimer = setTimeout(() => { debouncedQuery.value = v }, 80)
-  }, { immediate: true })
-  onScopeDispose(() => { if (debounceTimer) clearTimeout(debounceTimer) })
 
   // Everything 文件搜索：Ctrl+K 输入经 130ms 防抖后才打后端 es.exe（外部进程，比本地扫描重），
   // 命中的文件路径 merge 进独立的 file 分组（排在资源结果之后）。后端在「未启用 / es 缺失 / 未运行」
@@ -140,7 +135,14 @@ export function useCommandSearch(deps: SearchDeps) {
   const fileResults = ref<SearchResult[]>([])
   let fileDebounce: ReturnType<typeof setTimeout> | null = null
   let fileReqId = 0
+
+  // 合并 query 的两个监听：本地全量扫描防抖（轻，80ms）与 Everything 文件搜索防抖（外部进程，130ms）
+  // 共用同一个 watcher，避免对同一个 query 注册两个独立 watch、重复求值。
+  const QUERY_DEBOUNCE_MS = 80
+  const FILE_SEARCH_DEBOUNCE_MS = 130
   watch(query, (v) => {
+    if (debounceTimer) clearTimeout(debounceTimer)
+    debounceTimer = setTimeout(() => { debouncedQuery.value = v }, QUERY_DEBOUNCE_MS)
     const q = v.trim()
     if (fileDebounce) clearTimeout(fileDebounce)
     if (!q) { fileResults.value = []; return }
@@ -168,9 +170,12 @@ export function useCommandSearch(deps: SearchDeps) {
           fileResults.value = []
         }
       })()
-    }, 130)
+    }, FILE_SEARCH_DEBOUNCE_MS)
   }, { immediate: true })
-  onScopeDispose(() => { if (fileDebounce) clearTimeout(fileDebounce) })
+  onScopeDispose(() => {
+    if (debounceTimer) clearTimeout(debounceTimer)
+    if (fileDebounce) clearTimeout(fileDebounce)
+  })
 
   const groupedResults = computed<ResultGroup[]>(() => {
     void frecencyTick.value

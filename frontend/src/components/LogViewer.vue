@@ -1,12 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ScrollText, FolderOpen, RefreshCw, Search, Copy, Check, AlertTriangle, Trash2 } from '@lucide/vue'
-import { ListLogFiles, ReadLogFile, ListCrashFiles, ClearCrashFiles } from '../../bindings/quickdock/services/diag/diagservice'
+import { ScrollText, FolderOpen, RefreshCw, Search, Copy, Check, AlertTriangle, Trash2, HardDrive } from '@lucide/vue'
+import { ListLogFiles, ReadLogFile, ListCrashFiles, ClearCrashFiles, GetLogStorage, ClearLogs } from '../../bindings/quickdock/services/diag/diagservice'
 import { OpenLogsDir } from '../../bindings/quickdock/services/system/systemservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { copyToClipboard } from '../utils/clipboard'
+import { formatBytes } from '../utils/ssh'
 
 const { t } = useI18n()
 
@@ -27,6 +28,9 @@ const follow = ref(false)
 const loading = ref(false)
 let followTimer: ReturnType<typeof setInterval> | null = null
 let lastCount = 0
+let lastFollowContent = '' // 跟随轮询用的「上次内容」快照，避免每 2s 整段 join 比对
+const LOG_FOLLOW_INTERVAL_MS = 2000
+const LOG_TAIL_LINES = 3000
 
 const logFiles = computed(() => files.value.filter((f) => !f.name.startsWith('crash/')))
 
@@ -159,9 +163,10 @@ async function loadContent() {
   if (!selected.value) return
   loading.value = true
   try {
-    const res = unwrap<string[]>(await ReadLogFile(currentPath(), 3000))
+    const res = unwrap<string[]>(await ReadLogFile(currentPath(), LOG_TAIL_LINES))
     rawLines.value = res || []
     lastCount = rawLines.value.length
+    lastFollowContent = rawLines.value.join('\n')
     await nextTick()
     scrollToBottom()
   } catch (e: any) {
@@ -194,9 +199,84 @@ async function clearCrash() {
       rawLines.value = []
       if (selected.value) await loadContent()
     }
+    // 崩溃记录也算在占用里，清完必须重算，否则卡片会一直显示已删掉的那部分
+    await loadStorage()
   } catch (e: any) {
     rawLines.value = ['[error] ' + getErrorMessage(e)]
   }
+}
+
+// ---- 日志占用与清理 ----
+//
+// 日志目录会一直长：宿主本身只在启动时清一次 30 天前的，插件日志、崩溃记录
+// 各自还有别的落盘路径。没有一个「现在占了多少」的读数，用户要么永远不会
+// 注意到，要么发现时目录已经几百 MB 却不知道从哪下手。
+interface LogStorageInfo {
+  dir: string
+  totalSize: number
+  logSize: number
+  crashSize: number
+  logCount: number
+  crashCount: number
+  oldest: string
+  newest: string
+  removableSize: number
+}
+const storage = ref<LogStorageInfo | null>(null)
+
+// 占比条按「日志 / 崩溃」两段画：两者清理入口不同（崩溃另有「清空崩溃记录」），
+// 只给一个总数的话，用户看到 300MB 也不知道该点哪个按钮。
+const logPercent = computed(() => {
+  const s = storage.value
+  if (!s || s.totalSize <= 0) return 0
+  return Math.max(0, Math.min(100, (s.logSize / s.totalSize) * 100))
+})
+
+async function loadStorage() {
+  try {
+    storage.value = unwrap<LogStorageInfo>(await GetLogStorage())
+  } catch (_) { storage.value = null }
+}
+
+// 清理一律「点两次」：删文件不可逆，而这里的收益只是省空间，
+// 不值得为它弹一个模态框打断正在看的日志——与清空崩溃记录保持同一套手感。
+const cleanArmed = ref<'old' | 'all' | null>(null)
+let cleanTimer: ReturnType<typeof setTimeout> | null = null
+
+async function runCleanup(scope: 'old' | 'all') {
+  if (cleanArmed.value !== scope) {
+    cleanArmed.value = scope
+    if (cleanTimer) clearTimeout(cleanTimer)
+    cleanTimer = setTimeout(() => { cleanArmed.value = null }, 3000)
+    return
+  }
+  if (cleanTimer) clearTimeout(cleanTimer)
+  cleanArmed.value = null
+  try {
+    // keepDays=30 对齐宿主的自动清理线；scope=all 时传 0，删到只剩今天。
+    // 今天的永远不删（后端保证）——logger 正握着它的写句柄，删了也不真释放。
+    const res = unwrap<{ removed: number; freed: number }>(await ClearLogs(scope === 'old' ? 30 : 0, true))
+    if (res && res.removed > 0) {
+      toastMsg.value = t('logCleanupDone', { n: res.removed, size: formatBytes(res.freed) })
+    } else {
+      toastMsg.value = t('logCleanupNone')
+    }
+    msgTimer()
+    await loadFiles()
+    await loadStorage()
+  } catch (e: any) {
+    toastMsg.value = t('logCleanupFailed') + ': ' + getErrorMessage(e)
+    msgTimer()
+  }
+}
+
+// 清理结果的提示：本组件不 inject toast（设置页与主页面都挂它，注入点不统一），
+// 用一行自带的横条反馈，位置固定在占用卡片下方，不会跑到别的实例身上。
+const toastMsg = ref('')
+let toastTimer: ReturnType<typeof setTimeout> | null = null
+function msgTimer() {
+  if (toastTimer) clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toastMsg.value = '' }, 4000)
 }
 
 // 用 ref 而不是 document.querySelector('.log-body')：设置面板里将来若同时挂
@@ -214,20 +294,19 @@ function toggleFollow() {
     followTimer = setInterval(async () => {
       if (!selected.value) return
       try {
-        const res = unwrap<string[]>(await ReadLogFile(currentPath(), 3000))
+        const res = unwrap<string[]>(await ReadLogFile(currentPath(), LOG_TAIL_LINES))
         const lines = res || []
-        // 仅当新增行时更新，避免无谓重绘
-        if (lines.length >= lastCount && lines.slice(0, lastCount).join('\n') === rawLines.value.join('\n')) {
-          rawLines.value = lines
-          lastCount = lines.length
-          await nextTick()
-          scrollToBottom()
-        } else {
-          rawLines.value = lines
-          lastCount = lines.length
-        }
+        const joined = lines.join('\n')
+        // 内容没变就什么都不做：不重绘、不抢滚动条。后端 ReadLogFile 已对未变更文件做
+        // 整文件读缓存，这里只在内容真正变化时才 join 一次并决定要不要滚到底部。
+        if (joined === lastFollowContent) return
+        rawLines.value = lines
+        lastCount = lines.length
+        lastFollowContent = joined
+        await nextTick()
+        scrollToBottom()
       } catch (_) { /* ignore */ }
-    }, 2000)
+    }, LOG_FOLLOW_INTERVAL_MS)
   } else if (followTimer) {
     clearInterval(followTimer)
     followTimer = null
@@ -236,7 +315,7 @@ function toggleFollow() {
 
 // 文件切换由 selectFile 显式触发加载（它同时设置 isCrash，watch(selected)
 // 会在「同名文件、不同来源」时不触发，容易读到上一个文件的内容）。
-watch([levels, keyword], () => { /* 纯前端过滤，computed 自动更新 */ })
+// 纯前端过滤（levels/keyword）由 computed 自动完成，无需 watch 触发。
 
 const copied = ref(false)
 let copyTimer: ReturnType<typeof setTimeout> | null = null
@@ -255,9 +334,14 @@ function copyLine(l: string) { copyText(l) }
 
 onMounted(async () => {
   await loadFiles()
+  await loadStorage()
   await loadContent()
 })
-onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
+onUnmounted(() => {
+  if (followTimer) clearInterval(followTimer)
+  if (cleanTimer) clearTimeout(cleanTimer)
+  if (toastTimer) clearTimeout(toastTimer)
+})
 </script>
 
 <template>
@@ -304,6 +388,55 @@ onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
           <Trash2 :size="13" />
           {{ clearArmed ? t('crashClearConfirm') : t('crashClear') }}
         </button>
+      </div>
+
+      <!-- 日志占用：读数 + 占比条 + 清理入口 -->
+      <div class="storage-card">
+        <div class="storage-head">
+          <HardDrive :size="13" />
+          <span class="storage-title">{{ t('logStorage') }}</span>
+          <span v-if="storage" class="storage-total">{{ formatBytes(storage.totalSize) }}</span>
+        </div>
+
+        <template v-if="storage && storage.totalSize > 0">
+          <div class="storage-bar" role="img" :aria-label="t('logStorage')">
+            <div class="storage-seg storage-seg--log" :style="{ width: logPercent + '%' }" />
+            <div class="storage-seg storage-seg--crash" :style="{ width: (100 - logPercent) + '%' }" />
+          </div>
+          <div class="storage-meta">
+            <span>{{ t('logStorageFiles', { logs: storage.logCount, crashes: storage.crashCount }) }}</span>
+            <span v-if="storage.oldest" class="storage-range">
+              {{ storage.oldest === storage.newest ? storage.newest : storage.oldest + ' ~ ' + storage.newest }}
+            </span>
+          </div>
+          <div class="storage-legend">
+            <span class="lg lg--log">{{ t('logFiles') }} {{ formatBytes(storage.logSize) }}</span>
+            <span class="lg lg--crash">{{ t('crashRecords') }} {{ formatBytes(storage.crashSize) }}</span>
+          </div>
+        </template>
+        <div v-else class="storage-meta">{{ t('logStorageEmpty') }}</div>
+
+        <div class="storage-actions">
+          <button
+            class="log-btn"
+            :class="{ armed: cleanArmed === 'old' }"
+            :title="t('logCleanupOldTitle')"
+            @click="runCleanup('old')"
+          >
+            <Trash2 :size="12" />
+            {{ cleanArmed === 'old' ? t('logCleanupConfirm') : t('logCleanupOld') }}
+          </button>
+          <button
+            class="log-btn"
+            :class="{ armed: cleanArmed === 'all' }"
+            :title="t('logCleanupAllTitle')"
+            @click="runCleanup('all')"
+          >
+            <Trash2 :size="12" />
+            {{ cleanArmed === 'all' ? t('logCleanupConfirm') : t('logCleanupAll') }}
+          </button>
+        </div>
+        <div v-if="toastMsg" class="storage-msg">{{ toastMsg }}</div>
       </div>
     </aside>
 
@@ -472,6 +605,61 @@ onUnmounted(() => { if (followTimer) clearInterval(followTimer) })
   background: var(--color-danger-bg);
 }
 .log-empty { padding: 12px 6px; font-size: 11.5px; color: var(--color-text-disabled); }
+
+/* === 日志占用卡片 ===
+   钉在侧栏底部：它管的是「整个目录」而不是某一个文件，跟上面的文件列表是
+   两件事，放一起会被误读成「当前选中文件占了多少」。 */
+.storage-card {
+  margin-top: auto; flex-shrink: 0;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+.storage-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 11px; color: var(--color-text-muted);
+  margin-bottom: 8px;
+}
+.storage-title { font-weight: 600; letter-spacing: 0.04em; }
+.storage-total {
+  margin-left: auto;
+  font-family: var(--font-mono, monospace); font-size: 11.5px;
+  color: var(--color-text-primary);
+}
+.storage-bar {
+  display: flex; height: 6px; width: 100%;
+  border-radius: var(--radius-full, 999px);
+  overflow: hidden; background: var(--color-bg-tertiary);
+}
+.storage-seg { height: 100%; }
+.storage-seg--log { background: var(--color-accent); }
+.storage-seg--crash { background: var(--color-danger); }
+.storage-meta {
+  display: flex; flex-direction: column; gap: 2px;
+  margin-top: 6px; font-size: 10.5px; color: var(--color-text-muted);
+}
+.storage-range { color: var(--color-text-disabled); }
+.storage-legend { display: flex; gap: 10px; margin-top: 6px; font-size: 10px; }
+.lg { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-muted); }
+/* 小色块用 ::before 而不是再画一个元素：这里只需要一个 6px 的点 */
+.lg::before {
+  content: ''; width: 6px; height: 6px; border-radius: 50%;
+}
+.lg--log::before { background: var(--color-accent); }
+.lg--crash::before { background: var(--color-danger); }
+.storage-actions { display: flex; gap: 6px; margin-top: 10px; }
+.storage-actions .log-btn { flex: 1; justify-content: center; padding: 4px 6px; font-size: 10.5px; }
+.storage-actions .log-btn.armed {
+  border-color: var(--color-danger-border); color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+}
+.storage-msg {
+  margin-top: 8px; padding: 5px 7px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  font-size: 10.5px; color: var(--color-text-secondary);
+  word-break: break-all;
+}
 
 /* === 右侧日志区 === */
 .log-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }

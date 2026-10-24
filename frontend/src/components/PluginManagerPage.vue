@@ -11,6 +11,7 @@ import {
   UninstallPlugin,
   PickFilePath,
   InstallPlugin,
+  InstallPluginFromBytes,
   GetPluginIcon,
   ShowPluginWindow,
   ListPluginExecLogs,
@@ -221,6 +222,91 @@ async function selectAndInstall() {
   }
 }
 
+// ---- 拖拽安装 ----
+//
+// WebView 里从资源管理器拖进来的 File 拿不到磁盘路径（浏览器安全模型只给内容），
+// 所以拖拽走「读成字节 → 后端写临时文件 → 同一条 InstallFromZip 链路」，
+// 与「从文件安装」共用后端校验（zip slip / zip bomb 防护 + 失败回滚），
+// 只是取包的途径不同。
+
+// 走 IPC 的字节要过 base64，体积膨胀约 1/3；超过这个量级就该改用「从文件安装」
+// （后端只收路径，不经过前端内存）。
+const maxDropBytes = 50 * 1024 * 1024
+
+const dragOver = ref(false)
+// 嵌套元素会连续触发 dragenter/dragleave，用计数抵消，否则高亮会疯狂闪烁
+let dragDepth = 0
+
+function dragHasFiles(e: DragEvent): boolean {
+  const types = e.dataTransfer?.types
+  return !!types && Array.from(types).includes('Files')
+}
+
+function onDragEnter(e: DragEvent) {
+  // 拖的是文本（比如集合卡片重排）时不接管，否则会打断页面内既有的拖拽交互
+  if (!dragHasFiles(e)) return
+  dragDepth++
+  dragOver.value = true
+}
+
+function onDragOver(e: DragEvent) {
+  if (!dragHasFiles(e)) return
+  // 不 preventDefault 的话 drop 不会触发，且 WebView 可能自己导航到该文件
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+}
+
+function onDragLeave(e: DragEvent) {
+  if (!dragHasFiles(e)) return
+  dragDepth = Math.max(0, dragDepth - 1)
+  if (dragDepth === 0) dragOver.value = false
+}
+
+async function onDrop(e: DragEvent) {
+  if (!dragHasFiles(e)) return
+  e.preventDefault()
+  dragDepth = 0
+  dragOver.value = false
+  const file = Array.from(e.dataTransfer?.files || []).find((f) => f.name.toLowerCase().endsWith('.zip'))
+  if (!file) {
+    toast?.error?.(t('pluginDropZipOnly'))
+    return
+  }
+  await installDroppedFile(file)
+}
+
+async function installDroppedFile(file: File) {
+  if (operating.value.has('_install_')) return
+  if (file.size > maxDropBytes) {
+    toast?.error?.(t('pluginDropTooLarge'))
+    return
+  }
+  operating.value.add('_install_')
+  try {
+    const b64 = await fileToBase64(file)
+    unwrap(await InstallPluginFromBytes(file.name, b64))
+    toast?.success?.(t('pluginInstallSuccess'))
+    await loadPlugins()
+  } catch (e) {
+    toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
+  } finally {
+    operating.value.delete('_install_')
+  }
+}
+
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => {
+      // dataURL 形如 data:<mime>;base64,xxxx —— 绑定层要的是裸 base64
+      const s = String(r.result || '')
+      resolve(s.slice(s.indexOf(',') + 1))
+    }
+    r.onerror = () => reject(new Error('读取文件失败'))
+    r.readAsDataURL(file)
+  })
+}
+
 // ---- Emits ----
 const emit = defineEmits<{ (e: 'navigate-plugin', pluginId: string): void }>()
 
@@ -234,7 +320,7 @@ function openPluginPage(p: PluginInfo) {
     }
     // 打开窗口路径会 EnsureLoaded 拉起后端（registered→running），
     // 稍等握手完成后立即对齐徽标，不等 3s 轮询
-    setTimeout(refreshStatuses, 1200)
+    windowOpenTimer = setTimeout(refreshStatuses, 1200)
   }).catch(e => {
     toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
   })
@@ -313,15 +399,26 @@ async function refreshStatuses() {
 }
 
 let statusTimer: number | undefined
+let windowOpenTimer: ReturnType<typeof setTimeout> | null = null
 onMounted(() => {
   loadPlugins(); loadLogs()
   statusTimer = window.setInterval(refreshStatuses, 3000)
 })
-onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
+onUnmounted(() => {
+  if (statusTimer !== undefined) clearInterval(statusTimer)
+  if (windowOpenTimer !== null) clearTimeout(windowOpenTimer)
+})
 </script>
 
 <template>
-  <div class="plugin-page">
+  <div
+    class="plugin-page"
+    :class="{ 'page-drag-over': dragOver }"
+    @dragenter="onDragEnter"
+    @dragover="onDragOver"
+    @dragleave="onDragLeave"
+    @drop="onDrop"
+  >
     <!-- 头部 -->
     <div class="plugin-header">
       <div class="plugin-header-left">
@@ -366,7 +463,7 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
     </div>
 
     <!-- 空状态 -->
-    <div v-else-if="plugins.length === 0" class="plugin-empty">
+    <div v-else-if="plugins.length === 0" class="plugin-empty" @click="selectAndInstall">
       <Puzzle :size="48" class="empty-icon" />
       <p class="empty-title">{{ t('pluginNoPlugins') }}</p>
       <p class="empty-desc">{{ t('pluginDragToInstall') }}</p>
@@ -517,6 +614,14 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
         <div class="install-overlay-text">{{ t('pluginInstalling') }}</div>
       </div>
     </div>
+
+    <!-- 拖拽投放提示：只在真正拖着文件时出现，告诉用户「松手即安装」 -->
+    <div v-else-if="dragOver" class="drop-hint">
+      <div class="drop-hint-box">
+        <Upload :size="24" />
+        <span>{{ t('pluginDropHint') }}</span>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -650,9 +755,9 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
 .badge-stopped { background: var(--color-border); color: var(--color-text-muted); }
 .badge-disabled { background: var(--color-danger-bg); color: var(--color-danger); }
 .badge-crashed { background: var(--color-danger-bg); color: var(--color-danger); }
-.badge-registered { background: var(--color-accent-bg); color: #378ADD; }
-.badge-starting { background: rgba(224,162,58,0.15); color: #E0A23A; }
-.badge-unresponsive { background: rgba(226,132,58,0.15); color: #E2843A; }
+.badge-registered { background: var(--color-accent-bg); color: var(--color-accent); }
+.badge-starting { background: var(--color-warning-bg); color: var(--color-warning); }
+.badge-unresponsive { background: var(--color-warning-bg); color: var(--color-warning); }
 
 /* 使用次数 */
 .card-usage { display: inline-flex; align-items: center; gap: 2px; font-size: 9px; color: var(--color-text-muted); }
@@ -782,7 +887,7 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
 .install-overlay {
   position: absolute; inset: 0; z-index: 60;
   display: flex; align-items: center; justify-content: center;
-  background: rgba(18, 18, 18, 0.55);
+  background: var(--color-bg-overlay);
   backdrop-filter: blur(1.5px);
 }
 .install-overlay-box {
@@ -793,6 +898,32 @@ onUnmounted(() => { if (statusTimer !== undefined) clearInterval(statusTimer) })
   border-radius: var(--radius-md);
   box-shadow: 0 10px 32px var(--color-bg-overlay);
 }
+/* ---- 拖拽投放提示 ---- */
+/* 虚线边框画在页面上而不是弹一层遮罩：遮罩会盖住插件列表，
+   用户想确认「装到哪儿去了」时反而看不见；描边只提示，不挡内容。 */
+.plugin-page.page-drag-over { outline: 2px dashed var(--color-accent); outline-offset: -4px; border-radius: var(--radius-md); }
+.drop-hint {
+  position: absolute; inset: 0; z-index: 55;
+  display: flex; align-items: center; justify-content: center;
+  pointer-events: none; /* 不能吃掉 drop 事件：提示层只负责显示 */
+  /* 不用 color-mix()：它是 Chrome 111+ 才有的函数，宿主是用户机器上的
+     WebView2，版本下限不受我们控制，失效时会静默变透明。 */
+  background: var(--color-accent-bg);
+}
+.drop-hint-box {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  padding: 20px 30px;
+  background: var(--color-bg-secondary);
+  border: 1px dashed var(--color-accent);
+  border-radius: var(--radius-md);
+  color: var(--color-accent); font-size: 13px;
+  box-shadow: 0 8px 24px var(--color-bg-overlay);
+}
+
+/* 空状态可点：文案原本就写着「拖入此区域或点击安装」，之前点击是没反应的 */
+.plugin-empty { cursor: pointer; }
+.plugin-empty:hover .empty-title { color: var(--color-accent); }
+
 .install-overlay-spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }
 .install-overlay-text { font-size: 13px; color: var(--color-text-secondary, #bdbdbd); }
 .spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }

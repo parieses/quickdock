@@ -15,6 +15,7 @@ import {
   ChevronDown,
   ChevronRight,
   Folder,
+  Info,
   Pencil,
   Plus,
   Search,
@@ -44,6 +45,7 @@ const emit = defineEmits<{
   (e: 'select', host: SshHost): void
   (e: 'toggle', folderId: string): void
   (e: 'edit', host: SshHost): void
+  (e: 'detail', host: SshHost): void
   (e: 'delete', host: SshHost): void
   (e: 'create', parentId: string): void
   (e: 'createFolder', parentId: string): void
@@ -298,6 +300,15 @@ function onRowClick(n: SshTreeNode) {
               @click.stop="emit('create', n.host.parentId ?? '')"
             >
               <Plus :size="11" />
+            </button>
+            <!-- 详情只在主机行上：文件夹没有「连接参数」可看 -->
+            <button
+              v-if="n.kind !== 'folder'"
+              class="tree-act"
+              :title="t('sshHostDetail')"
+              @click.stop="emit('detail', n.host)"
+            >
+              <Info :size="11" />
             </button>
             <button class="tree-act" :title="t('sshEdit')" @click.stop="emit('edit', n.host)">
               <Pencil :size="11" />
