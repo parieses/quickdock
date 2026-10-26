@@ -9,7 +9,6 @@ import {
   DisablePlugin,
   EnablePlugin,
   UninstallPlugin,
-  PickFilePath,
   InstallPlugin,
   InstallPluginFromBytes,
   GetPluginIcon,
@@ -19,6 +18,8 @@ import {
   GetPluginNewFlags,
   MarkPluginSeen,
 } from '../../bindings/quickdock/services/plugin/pluginservice'
+// 多选文件对话框：宿主级能力（services/dialog.go），不放在插件域里
+import { SelectLocalFiles } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -209,25 +210,71 @@ async function handleUninstall() {
   }
 }
 
-// ---- 安装 ----
-async function selectAndInstall() {
-  if (operating.value.has('_install_')) return
-  // 1. 先选文件：此时不显示遮罩，避免选文件期间「安装中」抢窗
-  const zipPath = unwrap(await PickFilePath('选择插件包 (.zip)', '插件包', '*.zip'))
-  if (!zipPath) return // 用户取消
-  // 2. 选完文件后才显示「安装中」遮罩并开始安装
+// ---- 安装（多选 / 多拖：一次装多个 zip）----
+//
+// 文件对话框走宿主 SelectLocalFiles（AllowsMultipleSelection），拖拽也能一次进来
+// 多个 .zip。逐个装、失败不中断，最后**统一刷新一次列表** —— 每装一个刷一次会让
+// 九宫格连续闪 N 次；失败的文件名单独带进提示，否则用户只知道「装了但少了一个」，
+// 也不知道少的是哪个。
+
+// 批量进度：只用于遮罩文案「第 i / 共 n 个」；装单个时沿用原来的「安装中…」
+const installProgress = ref({ done: 0, total: 0 })
+
+async function installBatch<T>(
+  items: T[],
+  run: (item: T) => Promise<unknown>,
+  labelOf: (item: T) => string,
+) {
+  installProgress.value = { done: 0, total: items.length }
   operating.value.add('_install_')
+  const failed: { name: string; err: string }[] = []
   try {
-    const result = unwrap(await InstallPlugin(zipPath))
-    if (result) {
-      toast?.success?.(t('pluginInstallSuccess'))
-      await reloadPlugins()
+    for (let i = 0; i < items.length; i++) {
+      installProgress.value = { done: i, total: items.length }
+      try {
+        await run(items[i])
+      } catch (e) {
+        // 单个失败不中断整批：一个坏包不该让后面几个也装不上
+        failed.push({ name: labelOf(items[i]), err: getErrorMessage(e) })
+      }
     }
-  } catch (e) {
-    toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
   } finally {
     operating.value.delete('_install_')
+    installProgress.value = { done: 0, total: 0 }
   }
+  if (failed.length === 0) {
+    toast?.success?.(
+      items.length > 1 ? t('pluginInstallBatchDone', { n: items.length }) : t('pluginInstallSuccess'),
+    )
+  } else {
+    const ok = items.length - failed.length
+    const first = failed[0]
+    const more = failed.length > 1 ? t('pluginInstallBatchMore', { n: failed.length - 1 }) : ''
+    toast?.error?.(t('pluginInstallBatchPartial', { ok, fail: failed.length }) + '：' + first.name + ' - ' + first.err + more)
+  }
+  await reloadPlugins()
+}
+
+// 提示里只显示文件名，不甩一长串绝对路径
+function zipName(p: string): string {
+  return p.split(/[\\/]/).pop() || p
+}
+
+async function selectAndInstall() {
+  if (operating.value.has('_install_')) return
+  // 先选文件：此时不显示遮罩，避免选文件期间「安装中」抢窗
+  let paths: string[] = []
+  try {
+    paths = (unwrap(await SelectLocalFiles(t('pluginInstallPickTitle'), '插件包', '*.zip')) || []) as string[]
+  } catch (e) {
+    // 选文件这一步必须出声。它发生在 installBatch 之外，不接住就是个未处理的
+    // promise rejection —— 表现是「点了按钮完全没反应」，连到底是取消还是出错都分不清
+    // （后端缺方法、对话框被拒都会走到这里）。
+    toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
+    return
+  }
+  if (!paths.length) return // 用户取消
+  await installBatch(paths, async (p) => unwrap(await InstallPlugin(p)), zipName)
 }
 
 // ---- 拖拽安装 ----
@@ -275,31 +322,19 @@ async function onDrop(e: DragEvent) {
   e.preventDefault()
   dragDepth = 0
   dragOver.value = false
-  const file = Array.from(e.dataTransfer?.files || []).find((f) => f.name.toLowerCase().endsWith('.zip'))
-  if (!file) {
+  // 一次拖进来多个 zip 时全部装上（非 zip 静默忽略，只在没有 zip 时才提示）
+  const files = Array.from(e.dataTransfer?.files || []).filter((f) => f.name.toLowerCase().endsWith('.zip'))
+  if (!files.length) {
     toast?.error?.(t('pluginDropZipOnly'))
     return
   }
-  await installDroppedFile(file)
-}
-
-async function installDroppedFile(file: File) {
   if (operating.value.has('_install_')) return
-  if (file.size > maxDropBytes) {
+  // 体积检查在开装之前做：装到一半才发现超限，用户分不清哪几个进去了
+  if (files.some((f) => f.size > maxDropBytes)) {
     toast?.error?.(t('pluginDropTooLarge'))
     return
   }
-  operating.value.add('_install_')
-  try {
-    const b64 = await fileToBase64(file)
-    unwrap(await InstallPluginFromBytes(file.name, b64))
-    toast?.success?.(t('pluginInstallSuccess'))
-    await reloadPlugins()
-  } catch (e) {
-    toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
-  } finally {
-    operating.value.delete('_install_')
-  }
+  await installBatch(files, async (f) => unwrap(await InstallPluginFromBytes(f.name, await fileToBase64(f))), (f) => f.name)
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -615,13 +650,13 @@ onUnmounted(() => {
     </div>
     </div>
 
-    <PluginMarketPage v-else @installed="onMarketInstalled" @install-local="selectAndInstall" />
+    <PluginMarketPage v-else @installed="onMarketInstalled" />
 
     <!-- zip 安装遮罩动画：覆盖「选择 zip → 安装完成」全过程 -->
     <div v-if="operating.has('_install_')" class="install-overlay">
       <div class="install-overlay-box">
         <Loader2 :size="28" class="install-overlay-spin" />
-        <div class="install-overlay-text">{{ t('pluginInstalling') }}</div>
+        <div class="install-overlay-text">{{ installProgress.total > 1 ? t('pluginInstallBatchProgress', { i: installProgress.done + 1, n: installProgress.total }) : t('pluginInstalling') }}</div>
       </div>
     </div>
 

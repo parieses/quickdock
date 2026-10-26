@@ -78,6 +78,42 @@ func (a *AppService) SelectLocalFile(title string) *ApiResult {
 	return Ok(path)
 }
 
+// SelectLocalFiles 弹出「打开文件（可多选）」对话框，返回选中的绝对路径列表。
+// 取消或什么都不选时返回空数组且 Code=0（取消是正常操作）。
+//
+// 为什么单独一个方法而不是给 SelectLocalFile 加个开关：多选与单选在平台层是两条
+// 不同的调用（PromptForMultipleSelection / PromptForSingleSelection），返回值形状
+// 也不同，合成一个开关会让每个调用方都要先判类型。批量安装插件是第一个多选场景
+// —— 一次拖/选五六个 zip 却只能装一个是明显的功能缺口。
+func (a *AppService) SelectLocalFiles(title, filterName, pattern string) *ApiResult {
+	app := a.App()
+	if app == nil {
+		return FailMsg("应用未就绪")
+	}
+	if strings.TrimSpace(filterName) == "" || strings.TrimSpace(pattern) == "" {
+		filterName, pattern = "所有文件", "*.*"
+	}
+	opts := &application.OpenFileDialogOptions{
+		CanChooseFiles:          true,
+		CanChooseDirectories:    false,
+		AllowsMultipleSelection: true,
+		Title:                   strings.TrimSpace(title),
+		Window:                  a.dialogOwnerWindow(),
+		Filters:                 []application.FileFilter{{DisplayName: filterName, Pattern: pattern}},
+	}
+	paths, err := app.Dialog.OpenFileWithOptions(opts).PromptForMultipleSelection()
+	if dialogCancelled(err) {
+		return Ok([]string{})
+	}
+	if err != nil {
+		return Fail(err)
+	}
+	if paths == nil {
+		paths = []string{}
+	}
+	return Ok(paths)
+}
+
 // SelectLocalDirectory 弹出「选择目录」对话框，返回本地绝对路径；取消返回空串。
 func (a *AppService) SelectLocalDirectory(title string) *ApiResult {
 	app := a.App()

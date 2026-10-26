@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban, Search, Upload } from '@lucide/vue'
+import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban, Search } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 
 import {
@@ -52,7 +52,7 @@ interface MarketIndex {
   plugins: MarketPlugin[]
 }
 
-const emit = defineEmits<{ (e: 'installed'): void; (e: 'install-local'): void }>()
+const emit = defineEmits<{ (e: 'installed'): void }>()
 
 const plugins = ref<MarketPlugin[]>([])
 const loading = ref(true)
@@ -297,12 +297,9 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
         <span v-if="updated" class="market-updated">{{ t('pluginMarketUpdated') }}: {{ updated.slice(0, 10) }}</span>
       </div>
       <div class="market-header-actions">
-        <!-- 本地安装：浏览市场时也能直接装拿到的 .zip（离线/内网分发场景），
-             不用切回本地视图。选文件与安装链路复用父页 selectAndInstall。 -->
-        <button class="qd-btn" @click="emit('install-local')" :title="t('pluginInstallFromFile')">
-          <Upload :size="14" />
-          <span>{{ t('pluginInstallFromFile') }}</span>
-        </button>
+        <!-- 这里只放市场自己的操作（一键更新 / 刷新）。「安装本地 zip」属于本地视图，
+             入口在父页（插件管理）的页头 —— 那个页头在市场视图下依然常驻，
+             再在这里放一个就是同屏两个「安装插件」。 -->
         <button v-if="updatableCount > 0" class="qd-btn qd-btn-primary" :disabled="updatingAll" @click="updateAll">
           <RefreshCw v-if="updatingAll" :size="14" class="spin" />
           <ArrowUpCircle v-else :size="14" />
