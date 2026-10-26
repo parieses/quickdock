@@ -267,12 +267,17 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
         </button>
         <!-- 展开态：就地列出；收起态：侧栏塞不下，用浮层向右展开 -->
         <div :class="['hidden-list', { open: showHidden, 'as-popover': collapsed }]" @click.stop>
-          <button
+          <!-- 外层必须是 div：里面还有一个「取回」按钮，<button> 不能嵌套 <button> -->
+          <div
             v-for="e in hiddenNav"
             :key="e.id"
             class="nav-item hidden-item"
+            role="button"
+            tabindex="0"
             :title="t(e.labelKey)"
             @click="emit('navigate', e.id)"
+            @keydown.enter.prevent="emit('navigate', e.id)"
+            @keydown.space.prevent="emit('navigate', e.id)"
             @contextmenu="openNavMenu(e.id, $event)"
           >
             <component :is="e.icon" :size="14" />
@@ -280,7 +285,7 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
             <button class="hidden-restore" :title="t('navRestore')" @click.stop="showNav(e.id)">
               <RotateCcw :size="12" />
             </button>
-          </button>
+          </div>
         </div>
       </div>
     </div>
@@ -411,7 +416,8 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   gap: 8px;
   position: relative;
   width: 100%;
-  padding: 7px 10px;
+  min-height: 32px;
+  padding: 0 10px;
   border: none;
   background: transparent;
   color: var(--color-text-secondary);
@@ -423,7 +429,9 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   text-align: left;
 }
 .nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.nav-item.active { background: var(--color-bg-tertiary); color: var(--color-accent); font-weight: 500; }
+/* 选中态与工作空间三栏的 .qd-row.active 同一套语言：强调色淡底 + 图标转强调色。
+   原来用 bg-tertiary + 整行文字变蓝，字一多就像超链接。 */
+.nav-item.active { background: var(--color-accent-bg); color: var(--color-text-primary); font-weight: 500; }
 .nav-item.active svg { color: var(--color-accent); }
 .nav-badge {
   margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-md);
@@ -487,7 +495,14 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   box-shadow: var(--shadow-md);
 }
 /* 已隐藏项被 hover 时才显示「恢复」按钮：默认不占用横向空间 */
-.hidden-item { position: relative; color: var(--color-text-disabled); font-style: normal; }
+/* 已隐藏项：外层是 div（内含「取回」按钮，不能嵌套 button），
+   所以显式补上按钮本来自带的行为 */
+.hidden-item {
+  position: relative;
+  color: var(--color-text-disabled);
+  font-style: normal;
+  user-select: none;
+}
 .hidden-item:hover { color: var(--color-text-secondary); }
 .hidden-restore {
   display: none;

@@ -7,24 +7,11 @@ import { useFloatMenu } from '../composables/useFloatMenu'
 import { SceneExport, SceneImport } from '../../bindings/quickdock/services/scene/sceneservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import SceneEnvDialog from './SceneEnvDialog.vue'
 import type { Scene, ToastAPI } from '../types'
 
 const store = useWorkspaceStore()
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
-
-// 场景环境服务绑定弹窗（随场景启停哪些运行时）
-const envDialogVisible = ref(false)
-const envDialogSceneId = ref('')
-const envDialogSceneName = ref('')
-
-function menuEnv() {
-  envDialogSceneId.value = menuSceneId.value
-  envDialogSceneName.value = store.scenes.find(s => s.id === menuSceneId.value)?.name ?? ''
-  envDialogVisible.value = true
-  ctxMenu.hide()
-}
 
 // ---- 场景声明式导入/导出 ----
 // 导出成 quickdock-scene.json（只含声明，不含 id 与本机统计），可放进项目仓库随代码走。
@@ -169,20 +156,12 @@ function onClickAway() {
           <button class="menu-item" :disabled="!canCloseLeft" @click="menuCloseLeft">{{ t('closeLeft') }}</button>
           <button class="menu-item" :disabled="!canCloseRight" @click="menuCloseRight">{{ t('closeRight') }}</button>
           <button class="menu-item" :disabled="!canCloseOthers" @click="menuCloseOthers">{{ t('closeOthers') }}</button>
-          <button class="menu-item" @click="menuEnv">{{ t('envServices') }}…</button>
           <button class="menu-item" @click="menuExport">{{ t('sceneExport') }}…</button>
           <button class="menu-item" @click="menuImport">{{ t('sceneImport') }}…</button>
         </div>
       </div>
     </Teleport>
   </div>
-
-  <SceneEnvDialog
-    :visible="envDialogVisible"
-    :scene-id="envDialogSceneId"
-    :scene-name="envDialogSceneName"
-    @close="envDialogVisible = false"
-  />
 </template>
 
 <style scoped>
@@ -197,7 +176,11 @@ function onClickAway() {
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  padding: 4px 8px 0;
+  /* 高度对齐一级页头（.qd-page-header 44px）：工作空间没有传统页头，
+     这条标签栏就是它的顶栏；不等高的话从工作空间切到其它页会上下跳。
+     减去 1px 是因为下面还有 .tab-line 那条分隔线。 */
+  min-height: 43px;
+  padding: 6px 10px 0;
   overflow: hidden;
   -webkit-app-region: no-drag;
 }

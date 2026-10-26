@@ -47,6 +47,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const tools = ref<OpenTool[]>([])
 
   const loading = ref(false)
+  // 场景 / 集合列表加载中：用于区分「确实一个都没有」与「还在加载」。
+  // 没有这两个标记时，切换工作空间/场景会先把数组清空再拉取，
+  // 空状态引导页会闪一下（先显示"暂无集合 + 添加集合"，再变成真实列表）。
+  const scenesLoading = ref(false)
+  const collectionsLoading = ref(false)
   const error = ref('')
 
   // ---- 请求世代计数器（防止异步请求竞争） ----
@@ -169,7 +174,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       const lastScene = unwrap<string>(await GetValue('lastSceneId'))
       if (lastWs && workspaces.value.find(w => w.id === lastWs)) {
         await selectWorkspace(lastWs)
-        if (lastScene && scenes.value.find(s => s.id === lastScene)) {
+        // selectWorkspace 可能已自动选中唯一场景；此时不必再走一遍
+        // （重复 selectScene 会多两次后端查询，且会把刚打开的场景标签重排）
+        if (lastScene && lastScene !== activeSceneId.value && scenes.value.find(s => s.id === lastScene)) {
           await selectScene(lastScene)
         }
       }
@@ -213,9 +220,13 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const gen = workspaceGen
     await fetchScenes(id, gen)
     try { unwrap(await SetValue('lastWorkspaceId', id)) } catch (e) { logErr('workspace', e) }
+    // 只有一个场景时直接选中：否则用户进来看到的是「请先选择一个集合」的空页面，
+    // 还得再点一次唯一的那一行才有内容
+    await autoSelectSingleScene()
   }
 
   async function fetchScenes(workspaceId: string, gen?: number) {
+    scenesLoading.value = true
     error.value = ''
     try {
       const result = unwrap(await ListScenes(workspaceId))
@@ -224,6 +235,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } catch (e) {
       error.value = getErrorMessage(e)
       logErr('fetchScenes', e)
+    } finally {
+      // 过期请求不能把新一代请求的 loading 关掉
+      if (gen === undefined || gen === workspaceGen) scenesLoading.value = false
     }
   }
 
@@ -240,6 +254,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const gen = sceneGen
     await fetchCollections(id, gen)
     try { unwrap(await SetValue('lastSceneId', id)) } catch (e) { logErr('workspace', e) }
+    // 同理：这个场景下只有一个集合时直接选中它，不再要求用户多点一次
+    await autoSelectSingleCollection()
   }
 
   async function closeSceneTab(id: string) {
@@ -349,6 +365,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   }
 
   async function fetchCollections(sceneId: string, gen?: number) {
+    collectionsLoading.value = true
     error.value = ''
     try {
       const result = unwrap(await ListCollections(sceneId))
@@ -357,6 +374,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     } catch (e) {
       error.value = getErrorMessage(e)
       logErr('fetchCollections', e)
+    } finally {
+      if (gen === undefined || gen === sceneGen) collectionsLoading.value = false
     }
   }
 
@@ -379,6 +398,21 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       error.value = getErrorMessage(e)
       logErr('fetchItems', e)
     }
+  }
+
+  // ---- 「只有一个」时自动选中 ----
+  // 只有一个候选时选中它没有歧义，让界面直接落到有内容的那一屏；
+  // 有多个候选则不猜（用户可能想先建第二个），保持未选中。
+  async function autoSelectSingleScene() {
+    if (activeSceneId.value) return
+    if (scenes.value.length !== 1) return
+    await selectScene(scenes.value[0].id)
+  }
+
+  async function autoSelectSingleCollection() {
+    if (activeCollectionId.value) return
+    if (collections.value.length !== 1) return
+    await selectCollection(collections.value[0].id)
   }
 
   // ---- 创建 ----
@@ -433,6 +467,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const s = unwrap(await CreateScene(activeWorkspaceId.value, name, type))
     const normalized = normalizeRows([s])[0] as Scene
     scenes.value.push(normalized)
+    // 刚建出来的是唯一场景 → 直接选中，省掉"建完还要再点一下"
+    await autoSelectSingleScene()
     return normalized
   }
 
@@ -440,6 +476,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const c = unwrap(await CreateCollection(activeWorkspaceId.value, activeSceneId.value, name, type, openStrategy))
     const normalized = normalizeRows([c])[0] as Collection
     collections.value.push(normalized)
+    await autoSelectSingleCollection()
     return normalized
   }
 
@@ -485,6 +522,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (activeSceneId.value === id) {
       activeSceneId.value = ''
       activeCollectionId.value = ''
+      // 删掉当前场景后只剩一个场景 → 自动落到那个场景，别停在空页面
+      await autoSelectSingleScene()
     }
   }
 
@@ -495,6 +534,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       activeCollectionId.value = ''
       // 清空属于此集合的 items，防止残留数据
       items.value = []
+      await autoSelectSingleCollection()
     }
   }
 
@@ -527,6 +567,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     activeWorkspaceId, activeSceneId, activeCollectionId, openedSceneIds,
     workspaces, scenes, collections, items, tools,
     loading, error,
+    scenesLoading, collectionsLoading,
     searchQuery, hasSearch, searchResults, searchLoading,
     activeWorkspace, activeScene, activeCollection,
     sortedScenes, filteredCollections, filteredItems,

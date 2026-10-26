@@ -23,7 +23,6 @@ import ItemList from './components/ItemList.vue';
 import ClipboardPanel from './components/ClipboardPanel.vue';
 import NotePanel from './components/NotePanel.vue';
 import SceneTags from './components/SceneTags.vue';
-import SceneEnvBar from './components/SceneEnvBar.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import { SkipUpdate } from '../bindings/quickdock/services/update/updateservice';
@@ -33,6 +32,8 @@ import { findContentPage, type PageContext } from './pages/registry'
 // 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
 const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
 const OnboardingPage = defineAsyncComponent(() => import('./components/OnboardingPage.vue'))
+// 整页空状态引导（无场景 / 无集合两档共用）：此前这两档都没有可点入口
+const EmptyGuide = defineAsyncComponent(() => import('./components/EmptyGuide.vue'))
 const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
 // 主窗口内容页（notes/plugins/todo/schedule/monitor/ai/environments/clipboard）的
 // 异步组件与导航信息已收敛到 pages/registry，由注册表驱动渲染，替代手工 v-if 切换链。
@@ -88,6 +89,27 @@ function openSettings(page?: string) {
 // 页面注册表渲染上下文：向注册页传递动态 props / 事件处理器
 const pageContext: PageContext = { envInitialSection, openSettings }
 const currentContentPage = computed(() => findContentPage(currentPage.value))
+
+// 工作空间空状态引导：已选到工作空间、场景列表加载完毕、但一个场景都没有。
+// 必须带 !scenesLoading，否则切换工作空间时 scenes 先被清空，引导页会闪一下。
+// 这一档要占满整个内容区（连场景栏一起收掉），否则会留下一个空荡荡的场景列。
+const showWorkspaceGuide = computed(() =>
+  store.workspaces.length > 0 &&
+  store.scenes.length === 0 &&
+  !store.scenesLoading &&
+  !store.hasSearch
+)
+
+// 「当前场景下一个集合都没有」这一档：引导页占满集合 + 项目两块区域。
+// 只有两个空列表并排、各自写一句「点击上方 +」时，用户看到的是两片空白。
+// 同样要带 !collectionsLoading，否则切换场景时 collections 先被清空会闪。
+const showCollectionsGuide = computed(() =>
+  store.workspaces.length > 0 &&
+  !!store.activeSceneId &&
+  store.collections.length === 0 &&
+  !store.collectionsLoading &&
+  !store.hasSearch
+)
 
 // 从侧边栏点 DeepSeek：先探测环境——缺 node/dsh 自动安装并打开设置页展示进度；已就绪直接开原生窗口
 interface EnvProbe { nodeFound?: boolean; dshInstalled?: boolean }
@@ -380,13 +402,21 @@ const activeConfirm = computed(() =>
         @navigate="setPage"
         @open-settings="openSettings"
       />
-      <!-- 场景栏：位于导航与内容区之间，顺序为 场景 → 集合 → 项目（仅工作空间页且有工作空间时显示） -->
-      <SceneRail v-if="currentPage === 'workspace' && store.workspaces.length > 0" />
+      <!-- 场景栏不再挂在 .app-body 下：它必须和集合/项目在同一行里，
+           否则 SceneTags 这条横栏只把集合/项目往下推，
+           三栏的面板头不在同一条水平线上 —— 这才是"三栏割裂"的主因。 -->
       <div class="app-content">
         <!-- 工作空间复合页（含首次引导 Onboarding / 场景栏，非单组件，保留显式分支） -->
         <template v-if="currentPage === 'workspace'">
           <!-- 空状态引导页（首次使用，无工作空间） -->
           <OnboardingPage v-if="store.workspaces.length === 0" @open-settings="openSettings" />
+
+          <!-- 空状态引导页（已有工作空间，但里面一个场景都没有）：占满整个内容区 -->
+          <EmptyGuide
+            v-else-if="showWorkspaceGuide"
+            variant="scene"
+            @open-settings="openSettings"
+          />
 
           <!-- 常规内容 -->
           <template v-else>
@@ -395,10 +425,19 @@ const activeConfirm = computed(() =>
               <button class="ws-error-close" @click="store.error = ''" :title="t('close')">✕</button>
             </div>
             <SceneTags />
-            <SceneEnvBar />
             <div class="app-content-body">
-              <CollectionList class="app-collections" />
-              <ItemList class="app-items" />
+              <!-- 三栏起点：场景 → 集合 → 项目，共用同一条顶部基线 -->
+              <SceneRail />
+              <!-- 当前场景下没有集合：引导页占满「集合 + 项目」两块区域 -->
+              <EmptyGuide
+                v-if="showCollectionsGuide"
+                variant="collection"
+                @open-settings="openSettings"
+              />
+              <template v-else>
+                <CollectionList class="app-collections" />
+                <ItemList class="app-items" />
+              </template>
             </div>
           </template>
         </template>
