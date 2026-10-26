@@ -21,6 +21,16 @@ var scheduleHTTPClient = &http.Client{Timeout: 30 * time.Second}
 
 const schedTimeLayout = "2006-01-02 15:04:05"
 
+// schedCommandTimeout 命令类任务的等待上限，与 HTTP 动作的 30s 对齐：
+// 到点仍未退出按「仍在运行」收尾，不杀进程（见 platform.RunCommandCapture）。
+const schedCommandTimeout = 30 * time.Second
+
+// schedResultMaxRunes 执行结果串的最大长度（按 rune，中文不吃亏）。
+// 结果会进三处消费面：任务卡与运行历史（单行省略显示）、机器人通知
+// （企微 text 消息上限 2048 字节）。必须自己收紧——DB 层虽还有 500 字节
+// 兜底，但等到那一步已是按字节硬切，没必要把摘要先撑到那儿。
+const schedResultMaxRunes = 300
+
 func nowStr() string {
 	return time.Now().Format(schedTimeLayout)
 }
@@ -363,10 +373,7 @@ func (a *AppService) executeTask(t *db.ScheduledTask) (string, string) {
 		return "ok", "已打开：" + t.Target
 
 	case "command":
-		if err := platform.RunCommand(t.Target, t.WorkingDir); err != nil {
-			return "fail", "命令执行失败：" + err.Error()
-		}
-		return "ok", "命令已执行：" + t.Target
+		return a.executeCommandTask(t)
 
 	case "http":
 		return a.executeHTTP(t)
@@ -375,6 +382,55 @@ func (a *AppService) executeTask(t *db.ScheduledTask) (string, string) {
 		return a.executeRecurringTodo(t)
 	}
 	return "fail", "未知的动作类型：" + t.Action
+}
+
+// executeCommandTask 执行命令类任务：等进程结束，捕获 stdout/stderr 与退出码，
+// 把「输出摘要 + 退出码」作为执行结果——与 HTTP 动作的「状态码 + 正文预览」
+// 同一契约。于是 ls / dir / git status 的输出会进任务卡、运行历史和机器人
+// 通知，而不是只看到一句「命令已执行」。
+//
+// 与旧「即发即忘」的差异：命令要等到结束（最长 schedCommandTimeout）才产出
+// 结果。启动 GUI/常驻程序的场景请用「打开软件」动作，那里本就是即发即忘。
+func (a *AppService) executeCommandTask(t *db.ScheduledTask) (string, string) {
+	out := platform.RunCommandCapture(t.Target, t.WorkingDir, schedCommandTimeout)
+	if out.Err != nil {
+		return "fail", "命令执行失败：" + out.Err.Error()
+	}
+	// 输出摘要：优先 stdout（ls/dir 的正常输出走 stdout），为空退回 stderr
+	// （失败原因通常在 stderr）。压成单行——撑坏三种消费面没有任何好处。
+	text := flattenResult(out.Stdout)
+	if text == "" {
+		text = flattenResult(out.Stderr)
+	}
+	switch {
+	case out.TimedOut:
+		if text != "" {
+			return "ok", fmt.Sprintf("命令已执行，%d 秒内未退出（仍在运行）· %s", int(schedCommandTimeout.Seconds()), text)
+		}
+		return "ok", fmt.Sprintf("命令已执行，%d 秒内未退出（仍在运行）：%s", int(schedCommandTimeout.Seconds()), t.Target)
+	case out.ExitCode != 0:
+		if text != "" {
+			return "fail", fmt.Sprintf("命令执行失败（退出码 %d）· %s", out.ExitCode, text)
+		}
+		return "fail", fmt.Sprintf("命令执行失败（退出码 %d）：%s", out.ExitCode, t.Target)
+	default:
+		if text != "" {
+			return "ok", fmt.Sprintf("命令已执行（退出码 %d）· %s", out.ExitCode, text)
+		}
+		return "ok", "命令已执行：" + t.Target
+	}
+}
+
+// flattenResult 把可能多行/超长的输出压成单行摘要：空白折叠为单个空格，
+// 按 rune 截断（不切坏中文）。空结果（纯空白）返回 ""，调用方据此回退到
+// 「命令已执行：<目标>」这类不带输出的文案。
+func flattenResult(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	r := []rune(s)
+	if len(r) > schedResultMaxRunes {
+		return string(r[:schedResultMaxRunes]) + "…（已截断）"
+	}
+	return s
 }
 
 // executeRecurringTodo 由重复待办触发生成一条具体待办

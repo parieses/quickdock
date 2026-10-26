@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"quickdock/internal/logger"
 )
@@ -212,14 +213,30 @@ func (d *Database) ListEnabledWithNextRun() ([]ScheduledTask, error) {
 func (d *Database) SetTaskRunResult(id, lastRun, status, result, nextRun string, enabled bool) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if len(result) > 500 {
-		result = result[:500]
-	}
+	result = truncateUTF8(result, scheduleResultMaxBytes)
 	_, err := d.conn.Exec(
 		`UPDATE scheduled_tasks SET last_run = ?, last_status = ?, last_result = ?, next_run = ?, enabled = ? WHERE id = ?`,
 		lastRun, status, result, nextRun, b2i(enabled), id,
 	)
 	return err
+}
+
+// scheduleResultMaxBytes 执行结果列的字节上限。
+const scheduleResultMaxBytes = 500
+
+// truncateUTF8 按字节上限截断，且保证不切坏 UTF-8 序列。
+// 直接 s[:n] 会把中文/emoji 劈成半个字符，JSON 序列化时变成 U+FFFD 乱码；
+// 命令动作的输出（dir/ls/构建日志）现在会进这一列，踩中的概率不低。
+func truncateUTF8(s string, maxBytes int) string {
+	if len(s) <= maxBytes {
+		return s
+	}
+	b := []byte(s)
+	cut := maxBytes
+	for cut > 0 && !utf8.RuneStart(b[cut]) {
+		cut--
+	}
+	return string(b[:cut])
 }
 
 // ScheduleRun 单次执行历史（append-only，按保留策略清理）
@@ -246,9 +263,7 @@ const (
 //  1. 每任务仅保留最近 scheduleRunKeepPerTask 条（按 created_ts 倒序）；
 //  2. 全局清理 created_ts 早于 maxAgeDays 天前的记录。
 func (d *Database) InsertScheduleRun(taskID, taskName, status, result string, durationMs int64) error {
-	if len(result) > 500 {
-		result = result[:500]
-	}
+	result = truncateUTF8(result, scheduleResultMaxBytes)
 	now := time.Now()
 	d.mu.Lock()
 	defer d.mu.Unlock()
