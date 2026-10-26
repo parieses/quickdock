@@ -1491,6 +1491,9 @@ onUnmounted(() => {
 
 /* 输入 */
 .ai-input-area {
+  /* 输入行控件的唯一高度来源：输入框 / 图标按钮 / 发送按钮全部引用它，
+     避免各处硬编码不同数值出现高度参差 */
+  --ai-input-h: 56px;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -1502,14 +1505,12 @@ onUnmounted(() => {
 .ai-input-tools { display: flex; align-items: flex-end; gap: 6px; flex-shrink: 0; }
 .ai-tool-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 40px; height: 40px; border: 1px solid var(--color-border);
+  width: 40px; height: var(--ai-input-h); border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.ai-input { height: 40px; }
-.ai-send { height: 40px; }
 /* 待发送图片预览缩略图 */
 .ai-attach-preview { display: flex; flex-wrap: wrap; gap: 8px; }
 .ai-attach-thumb {
@@ -1568,7 +1569,7 @@ onUnmounted(() => {
 .ai-input {
   flex: 1;
   resize: none;
-  height: 56px;
+  height: var(--ai-input-h);
   padding: 10px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -1584,7 +1585,7 @@ onUnmounted(() => {
 .ai-send {
   align-self: flex-end;
   padding: 0 20px;
-  height: 56px;
+  height: var(--ai-input-h);
   border: none;
   border-radius: var(--radius-md);
   background: var(--color-accent);
