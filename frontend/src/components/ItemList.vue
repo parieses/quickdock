@@ -1,16 +1,33 @@
 <script setup lang="ts">
-import { ref, inject, computed } from 'vue'
+import { ref, inject, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
-import { Plus, Pencil, Trash2, Play, Link } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Play, Link, Search, X } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import ItemEditor from './ItemEditor.vue'
 import { getErrorMessage } from '../utils/error'
+import { matchesTextOrPinyin } from '../utils/pinyin'
 import type { CollectionItem, ToastAPI } from '../types'
 
 const store = useWorkspaceStore()
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
+
+// ---- 局部过滤 ----
+// 与 CollectionList 同构：全局搜索跨集合，这里只在当前集合内按 名称+值 过滤
+// （支持拼音），大集合里定位单条不用翻屏。过滤态禁用拖拽排序。
+const localQuery = ref('')
+const filtering = computed(() => localQuery.value.trim().length > 0)
+
+const visibleItems = computed(() => {
+  const q = localQuery.value.trim().toLowerCase()
+  const base = store.filteredItems
+  if (!q) return base
+  return base.filter(it => matchesTextOrPinyin([it.name, it.value], q, 'i:' + it.id))
+})
+
+// 换集合时清空：上一个集合的关键词不该接着筛这一集合
+watch(() => store.activeCollectionId, () => { localQuery.value = '' })
 
 const showEditor = ref(false)
 const editingItem = ref<CollectionItem | null>(null)
@@ -34,6 +51,8 @@ async function handleOpenAll() {
 }
 
 function handleAddItem() {
+  // 没有选中集合时不允许新增（按钮此时为禁用态，这里再兜底一次）
+  if (!store.activeCollectionId) return
   editingItem.value = null
   showEditor.value = true
 }
@@ -78,14 +97,14 @@ function onDragOverItem(e: DragEvent) {
 }
 function onDropItem(e: DragEvent, targetId: string) {
   e.preventDefault()
+  if (store.hasSearch || filtering.value) {
+    dragItemId.value = null
+    return
+  }
   const ids = store.filteredItems.map(it => it.id)
   const from = ids.indexOf(dragItemId.value!)
   const to = ids.indexOf(targetId)
   if (from < 0 || to < 0 || from === to) {
-    dragItemId.value = null
-    return
-  }
-  if (store.hasSearch) {
     dragItemId.value = null
     return
   }
@@ -97,42 +116,68 @@ function onDropItem(e: DragEvent, targetId: string) {
 </script>
 
 <template>
-  <section class="item-list">
-    <div class="item-header">
-      <div class="header-left">
-        <span class="item-title">{{ store.hasSearch ? t('searchResults') : (store.activeCollection?.name || t('items')) }}</span>
-        <span v-if="store.filteredItems.length" class="item-count">{{ store.filteredItems.length }} {{ t('count') }}</span>
-      </div>
-      <div class="header-actions">
-        <button v-if="store.activeCollectionId && store.filteredItems.length && !store.hasSearch" class="action-btn" @click="handleOpenAll" :title="t('openAll')">
-          <Play :size="13" />
+  <section class="item-list qd-panel">
+    <div class="qd-panel-header">
+      <span class="qd-panel-title">{{ t('items') }}</span>
+      <span v-if="store.activeCollection" class="qd-panel-chip">{{ store.activeCollection.name }}</span>
+      <div class="qd-panel-actions">
+        <button
+          class="qd-icon-btn"
+          :disabled="!store.activeCollectionId || !visibleItems.length || store.hasSearch || filtering"
+          @click="handleOpenAll"
+          :title="t('openAll')"
+        >
+          <Play :size="15" />
         </button>
-        <button v-if="store.activeCollectionId && !store.hasSearch" class="action-btn" @click="handleAddItem" :title="t('addItem')">
+        <button
+          class="qd-icon-btn"
+          :disabled="!store.activeCollectionId || store.hasSearch"
+          @click="handleAddItem"
+          :title="store.activeCollectionId && !store.hasSearch ? t('addItem') : t('selectCollectionFirst')"
+        >
           <Plus :size="16" />
         </button>
       </div>
     </div>
-    <div class="item-body">
-      <ul v-if="store.filteredItems.length">
+    <!-- 局部过滤：只搜当前集合内的条目；ESC 清空。
+         与场景/集合栏同位置同高度（无集合时保留输入框但禁用，避免整行消失） -->
+    <div class="qd-panel-search" :class="{ 'is-disabled': !store.activeCollectionId || store.hasSearch }">
+      <Search :size="13" class="qd-search-icon" />
+      <input
+        v-model="localQuery"
+        type="text"
+        class="qd-search-input"
+        :placeholder="t('filterItemsPh')"
+        autocomplete="off"
+        :disabled="!store.activeCollectionId || store.hasSearch"
+        @keydown.esc="localQuery = ''"
+      />
+      <button v-if="filtering" class="qd-search-clear" @click="localQuery = ''" :title="t('clear')">
+        <X :size="12" />
+      </button>
+    </div>
+    <div class="qd-panel-body">
+      <ul v-if="visibleItems.length">
         <li
-          v-for="item in store.filteredItems"
+          v-for="item in visibleItems"
           :key="item.id"
+          class="qd-row"
           :class="{ dragging: dragItemId === item.id }"
-          :draggable="!store.hasSearch"
+          :draggable="!store.hasSearch && !filtering"
           @click="handleItemClick(item)"
           @dragstart="onDragStartItem($event, item.id)"
           @dragend="onDragEndItem"
           @dragover="onDragOverItem"
           @drop="onDropItem($event, item.id)"
         >
-          <span class="item-icon">
+          <span class="qd-row-icon">
             <img v-if="item.icon" :src="item.icon" class="item-app-icon-img" alt="" />
-            <TypeIcon v-else :type="item.type" :size="18" />
+            <TypeIcon v-else :type="item.type" :size="17" />
           </span>
-          <div class="item-info">
-            <span class="item-name">{{ item.name }}</span>
-            <span class="item-meta">{{ item.value }}</span>
-          </div>
+          <span class="qd-row-main">
+            <span class="qd-row-title">{{ item.name }}</span>
+            <span class="qd-row-sub">{{ item.value }}</span>
+          </span>
           <span v-if="item.value && item.value.includes('{query}')" class="item-quicklink-badge" :title="t('quicklink')">
             <Link :size="11" />
             <span>{{ t('quicklinkBadge') }}</span>
@@ -140,30 +185,34 @@ function onDropItem(e: DragEvent, targetId: string) {
           <span v-if="item.usageCount" class="item-usage" :title="t('openCount') + item.usageCount + t('times')">
             {{ item.usageCount }}
           </span>
-          <span class="item-actions" @click.stop>
-            <button class="action-btn" @click="handleItemClick(item)" :title="t('open')">
+          <span class="qd-row-actions" @click.stop>
+            <button class="qd-row-btn" @click="handleItemClick(item)" :title="t('open')">
               <Play :size="13" />
             </button>
-            <button class="action-btn" @click="handleEditItem(item)" :title="t('edit')">
+            <button class="qd-row-btn" @click="handleEditItem(item)" :title="t('edit')">
               <Pencil :size="13" />
             </button>
-            <button class="action-btn danger" @click="handleDeleteItem(item.id)" :title="t('delete')">
+            <button class="qd-row-btn danger" @click="handleDeleteItem(item.id)" :title="t('delete')">
               <Trash2 :size="13" />
             </button>
           </span>
         </li>
       </ul>
-      <div v-else class="item-empty">
-        <template v-if="store.hasSearch">
-          <p class="empty-text">{{ t('noMatchItems') }}</p>
-          <p class="empty-hint">{{ t('tryOtherKeywords') }}</p>
+      <div v-else class="qd-empty">
+        <template v-if="filtering || store.hasSearch">
+          <p class="qd-empty-title">{{ t('noMatchItems') }}</p>
+          <p class="qd-empty-hint">{{ t('tryOtherKeywords') }}</p>
         </template>
         <template v-else-if="store.activeCollectionId">
-          <p class="empty-text">{{ t('noItems') }}</p>
-          <p class="empty-hint">{{ t('createFirstItem') }}</p>
+          <p class="qd-empty-title">{{ t('noItems') }}</p>
+          <p class="qd-empty-hint">{{ t('createFirstItem') }}</p>
+          <button class="qd-empty-cta" @click="handleAddItem">
+            <Plus :size="13" />
+            <span>{{ t('addItem') }}</span>
+          </button>
         </template>
-        <template v-else>
-          <p class="empty-text muted">{{ t('selectCollectionFirst') }}</p>
+        <template v-else-if="!store.collectionsLoading">
+          <p class="qd-empty-title">{{ t('selectCollectionFirst') }}</p>
         </template>
       </div>
     </div>
@@ -178,63 +227,42 @@ function onDropItem(e: DragEvent, targetId: string) {
 </template>
 
 <style scoped>
+/* 面板头 / 搜索行 / 行 / 空状态的公共外观在 styles/panels.css（qd- 前缀），
+   这里只留项目栏特有的部分 */
 .item-list {
-  flex: 1; min-width: 0; height: 100%;
-  display: flex; flex-direction: column; overflow: hidden;
+  flex: 1;
+  min-width: 0;
   background: var(--color-bg-primary);
 }
-.item-header {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 12px 18px; box-shadow: var(--shadow-border);
-}
-.header-left { display: flex; align-items: center; gap: 10px; }
-.item-title { font-size: 14px; font-weight: 600; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item-count { font-size: 11px; color: var(--color-text-disabled); }
-.header-actions { display: flex; gap: var(--space-2); }
-.item-body { flex: 1; overflow-y: auto; padding: var(--space-2) 0; }
-.item-body ul { list-style: none; padding: 0; margin: 0; }
-.item-body li {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 18px; cursor: pointer; color: var(--color-text-secondary);
-  font-size: 13px; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast); border-radius: 0;
-}
-.item-body li:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.item-icon {
-  display: flex; align-items: center; justify-content: center;
-  width: 28px; height: 28px; flex-shrink: 0; color: var(--color-text-muted);
-}
+
+/* 应用图标是位图，不能跟着文字色走，尺寸也固定 */
 .item-app-icon-img {
-  width: 20px; height: 20px; object-fit: contain; border-radius: var(--radius-xs);
+  width: 20px;
+  height: 20px;
+  object-fit: contain;
+  border-radius: var(--radius-xs);
 }
-.item-info { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.item-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.item-meta { font-size: 11px; color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 打开次数徽标 */
 .item-usage {
-  font-size: 10px; color: var(--color-text-muted);
-  background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-md);
+  flex-shrink: 0;
+  padding: 1px 6px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  font-size: 10px;
 }
+
+/* 快捷链接徽标（value 里含 {query} 的条目） */
 .item-quicklink-badge {
-  display: flex; align-items: center; gap: 3px;
-  font-size: 10px; color: var(--color-accent);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  border-radius: var(--radius-xs);
   background: var(--color-accent-bg);
-  padding: 2px 6px; border-radius: var(--radius-xs); flex-shrink: 0;
+  color: var(--color-accent);
+  font-size: 10px;
 }
-.item-actions { display: flex; gap: 2px; opacity: 0; transition: opacity 0.12s; }
-.item-body li:hover .item-actions { opacity: 1; }
-.action-btn {
-  background: none; border: none; color: var(--color-text-disabled); cursor: pointer;
-  width: 26px; height: 26px; border-radius: var(--radius-sm); transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
-  display: flex; align-items: center; justify-content: center;
-}
-.action-btn:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.action-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-
-.item-body li.dragging { opacity: 0.4; }
-.item-body li[draggable="true"] { cursor: grab; }
-.item-body li[draggable="true"]:active { cursor: grabbing; }
-
-.item-empty { padding: 48px 16px; text-align: center; }
-.empty-text { font-size: 13px; color: var(--color-text-disabled); margin-bottom: 4px; }
-.empty-text.muted { color: var(--color-text-disabled); }
-.empty-hint { font-size: 11px; color: var(--color-text-muted); }
 </style>

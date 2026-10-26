@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onUnmounted, toRef, watch, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, toRef, watch, inject, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Trash2 } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
 import { i18n } from '../i18n'
+import { pinyinMatch } from '../utils/pinyin'
 import { Events, Browser } from '@wailsio/runtime'
 
 const { t } = useI18n()
@@ -19,6 +20,7 @@ import SettingsSync from './SettingsSync.vue'
 import SettingsTools from './SettingsTools.vue'
 import LogViewer from './LogViewer.vue'
 import ActivityPage from './ActivityPage.vue'
+import RecycleBinPage from './RecycleBinPage.vue'
 import SettingsWinmgr from './SettingsWinmgr.vue'
 import SettingsNav from './SettingsNav.vue'
 
@@ -55,6 +57,12 @@ watch(() => props.visible, (v) => { if (v) markSeen('settings') })
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
 const hotkeyRef = ref<InstanceType<typeof HotkeySettings> | null>(null)
+const searchRef = ref<HTMLInputElement | null>(null)
+
+// ---- 设置项搜索 ----
+// 11 个设置页靠左侧菜单逐个翻已经不快。搜索框按「标签 + 描述 + 内部 key + 拼音」
+// 过滤菜单项：key 参与匹配是为了让英文输入（如 sync、ai）在中文界面下也能命中。
+const settingsQuery = ref('')
 
 const menuItems = computed(() => [
   { key: 'preferences', label: t('preferences'), icon: Palette, desc: t('autoStart') + ' / ' + t('theme') + ' / ' + t('language') + ' / ' + t('uiZoom') },
@@ -68,27 +76,67 @@ const menuItems = computed(() => [
   // 最近动态：最常用排行 + 操作流水。从一级导航迁入——它属于「偶尔回头看一眼」
   // 的回顾型信息，日常使用频率远低于笔记/待办/监控，占导航位不值当。
   { key: 'activity',   label: t('navActivity'),       icon: History,  desc: t('activitySubtitle') },
+  // 回收站和「最近动态」同组：都是「删错了/做过什么」的回头路。
+  { key: 'recycle',    label: t('recycleBin'),        icon: Trash2,   desc: t('recycleSubtitle') },
   { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
   { key: 'winmgr',     label: t('winmgr'),             icon: MonitorIcon, desc: t('winmgrDesc') },
   { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
   { key: 'logs',       label: t('navLogs'),           icon: ScrollText, desc: t('logsDesc') },
 ])
 
-// 左侧菜单分组：通用 / 数据与备份 / 服务与工具，扁平展示但用分组标题区分层级。
+function menuMatches(m: { key: string; label: string; desc: string }, qLC: string): boolean {
+  if (m.label.toLowerCase().includes(qLC)) return true
+  if (m.desc.toLowerCase().includes(qLC)) return true
+  if (m.key.toLowerCase().includes(qLC)) return true
+  return pinyinMatch(m.label, qLC) || pinyinMatch(m.desc, qLC)
+}
+
 const menuGroups = computed(() => {
+  const qLC = settingsQuery.value.trim().toLowerCase()
   const byKey = Object.fromEntries(menuItems.value.map((m) => [m.key, m]))
   const defs: { title: string; keys: string[] }[] = [
     { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys', 'navigation'] },
-    { title: t('menuGroupData'), keys: ['data', 'storage', 'datasync', 'activity'] },
+    { title: t('menuGroupData'), keys: ['data', 'storage', 'datasync', 'activity', 'recycle'] },
     { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai', 'logs'] },
   ]
   return defs
-    .map((g) => ({ title: g.title, items: g.keys.map((k) => byKey[k]).filter(Boolean) }))
+    .map((g) => ({ title: g.title, items: g.keys.map((k) => byKey[k]).filter(Boolean).filter((m) => !qLC || menuMatches(m, qLC)) }))
     .filter((g) => g.items.length > 0)
+})
+
+// 「关于」置底独立成行，同样参与搜索
+const aboutVisible = computed(() => {
+  const qLC = settingsQuery.value.trim().toLowerCase()
+  if (!qLC) return true
+  return menuMatches({ key: 'about', label: t('appName'), desc: t('aboutDesc') }, qLC)
+})
+
+// 回车直达第一个匹配项：搜索的意图就是「少点一次」
+function searchGoFirst() {
+  const first = menuGroups.value[0]?.items[0]
+  if (first) selectMenu(first.key)
+  else if (aboutVisible.value) selectMenu('about')
+}
+function onSearchKeydown(e: KeyboardEvent) {
+  if (e.key === 'Enter') { e.preventDefault(); searchGoFirst() }
+  else if (e.key === 'Escape') {
+    e.preventDefault()
+    if (settingsQuery.value) settingsQuery.value = ''
+    else close()
+  }
+}
+
+// 打开设置且停在根菜单时聚焦搜索框（带 initialPage 的直接进目标页，不抢焦点）
+watch(() => props.visible, (v) => {
+  if (v && !props.initialPage && !activePage.value) {
+    nextTick(() => searchRef.value?.focus())
+  }
 })
 
 function selectMenu(key: string) {
   activePage.value = key
+  // 选了就走：过滤条件留着，从设置页返回根菜单时反而要找半天为什么少了一半
+  settingsQuery.value = ''
 }
 
 function close() {
@@ -535,6 +583,21 @@ async function toggleAutoStart() {
             </button>
           </div>
 
+          <!-- 设置项搜索：根菜单常驻；进了具体设置页也留着，回来时不用重输 -->
+          <div class="settings-search">
+            <div class="settings-search-box">
+              <Search :size="14" class="settings-search-icon" />
+              <input
+                ref="searchRef"
+                v-model="settingsQuery"
+                type="text"
+                :placeholder="t('settingsSearchPh')"
+                autocomplete="off"
+                @keydown="onSearchKeydown"
+              />
+            </div>
+          </div>
+
           <div class="settings-menu">
             <template v-for="group in menuGroups" :key="group.title">
               <div class="menu-group-title">{{ group.title }}</div>
@@ -553,8 +616,12 @@ async function toggleAutoStart() {
               </button>
             </template>
 
+            <p v-if="settingsQuery.trim() && !menuGroups.length && !aboutVisible" class="settings-search-empty">
+              {{ t('settingsNoMatch') }}
+            </p>
+
             <!-- 关于（含更新与日志，置底独立） -->
-            <div class="about-row-wrap">
+            <div v-if="aboutVisible" class="about-row-wrap">
               <button
                 :class="['menu-row about-row', { active: activePage === 'about' }]"
                 @click="selectMenu('about')"
@@ -822,6 +889,9 @@ async function toggleAutoStart() {
           <!-- 最近动态（从导航栏迁入：属于「偶尔回头看一眼」的信息，不值得占一级导航） -->
           <div v-else-if="activePage === 'activity'" class="content-page content-flush">
             <ActivityPage embedded />
+          </div>
+          <div v-else-if="activePage === 'recycle'" class="content-page content-flush">
+            <RecycleBinPage />
           </div>
 
           <!-- 其他设置页占位（旧路由兼容） -->

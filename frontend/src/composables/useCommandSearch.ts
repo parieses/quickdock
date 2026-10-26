@@ -8,6 +8,8 @@ import { evaluate, format, convertExpression } from '../utils/calc'
 import { Puzzle, Play, Power, Gauge, File } from '@lucide/vue'
 import type { EnvRuntimeInfo, EnvServiceStatus, FileSearchResult } from '../types'
 import { EnvEverythingSearch } from '../../bindings/quickdock/services/env/environmentservice'
+import { SearchAll } from '../../bindings/quickdock/services/appservice'
+import { SearchNotesTree } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
 
 // 运行时的中文分类别名，用于 Ctrl+K 中文检索（如「数据库」「缓存」「消息队列」）。
@@ -175,7 +177,47 @@ export function useCommandSearch(deps: SearchDeps) {
   onScopeDispose(() => {
     if (debounceTimer) clearTimeout(debounceTimer)
     if (fileDebounce) clearTimeout(fileDebounce)
+    if (backendTimer) clearTimeout(backendTimer)
   })
+
+  // 后端全文检索兜底（q 长度 ≥2 才启用，140ms 防抖 + 请求代次守卫）：
+  // - SearchAll（items FTS5）：兜住 ListAllItems 的 5000 上限之外的条目——
+  //   超限条目在本地全量池里根本不存在，前端扫得再快也找不到它们。
+  //   这也让长期零引用的 SearchAll 上岗（feature-suggestions 有记）。
+  // - SearchNotesTree（notes LIKE 全文）：内容/标签匹配交给 SQLite，
+  //   前端只保留名称 + 拼音的快速通道。笔记量大时逐篇 contains 全文
+  //   是命令面板可感知的卡顿源，而标签匹配前端本来就做不到。
+  // 两条链路失败都静默：本地匹配仍是权威路径，后端只是补充。
+  const backendItems = ref<CollectionItem[]>([])
+  const backendNotes = ref<CmdNote[]>([])
+  let backendReqId = 0
+  let backendTimer: ReturnType<typeof setTimeout> | null = null
+
+  watch(query, (v) => {
+    if (backendTimer) clearTimeout(backendTimer)
+    const reqId = ++backendReqId
+    const q = v.trim()
+    if (q.length < 2) {
+      backendItems.value = []
+      backendNotes.value = []
+      return
+    }
+    backendTimer = setTimeout(() => {
+      if (reqId !== backendReqId) return // 已被更新的输入取代
+      void (async () => {
+        try {
+          const [its, nts] = await Promise.all([SearchAll(q), SearchNotesTree(q)])
+          if (reqId !== backendReqId) return
+          backendItems.value = unwrap<CollectionItem[]>(its) || []
+          backendNotes.value = unwrap<CmdNote[]>(nts) || []
+        } catch {
+          if (reqId !== backendReqId) return
+          backendItems.value = []
+          backendNotes.value = []
+        }
+      })()
+    }, 140)
+  }, { immediate: true })
 
   const groupedResults = computed<ResultGroup[]>(() => {
     void frecencyTick.value
@@ -259,6 +301,22 @@ export function useCommandSearch(deps: SearchDeps) {
         score: itemScore,
       })
     }
+    // 3a. 后端 FTS 兜底：本地池上限之外的条目（见 backendItems 注释）
+    for (const item of backendItems.value) {
+      if (seen.has(item.id)) continue
+      seen.add(item.id)
+      const isQuicklink = item.value && item.value.includes('{query}')
+      itemResults.push({
+        type: isQuicklink ? 'quicklink' : 'item',
+        label: item.name,
+        desc: item.value || '',
+        icon: itemIcon(item),
+        iconBase64: item.icon || undefined,
+        item,
+        frecencyScore: frecencyScore('item:' + item.id),
+        score: 55,
+      })
+    }
     // 应用类型条目优先；同权重时按相关度与频次排序
     itemResults.sort((a, b) => {
       const wa = (a.item?.type === '应用' ? 1000 : 0) + (a.score || 0) + Math.min(30, a.frecencyScore || 0)
@@ -310,6 +368,20 @@ export function useCommandSearch(deps: SearchDeps) {
           })
         }
       }
+    }
+    // 4a. 后端全文兜底：内容/标签命中而本地扫描漏掉的笔记（见 backendNotes 注释）
+    for (const n of backendNotes.value) {
+      if (seen.has('note-' + n.id)) continue
+      seen.add('note-' + n.id)
+      const nameLC = (n.name || n.keyword || '').toLowerCase()
+      noteResults.push({
+        type: 'note',
+        label: n.name || n.keyword,
+        desc: (n.content || '').slice(0, 80),
+        note: n,
+        frecencyScore: frecencyScore('note:' + n.id),
+        score: nameLC.includes(qLC) ? 60 : 55,
+      })
     }
     noteResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
     if (noteResults.length > 0) {
