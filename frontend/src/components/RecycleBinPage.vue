@@ -14,6 +14,10 @@ const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')
 const store = useWorkspaceStore()
 
+// embedded：嵌在设置的「历史」页里（与 ActivityPage 同款契约）。
+// 页头标题与副标题由外层分段控件承担，这里只保留操作按钮（刷新 / 清空）。
+const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
+
 // 与后端 db.Tombstone 同形（小写 tag —— 字段名错一个是整列空白）。
 interface RecycleEntry {
   collection: string
@@ -157,11 +161,14 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="recycle-page">
+  <div class="recycle-page" :class="{ embedded: props.embedded }">
     <div class="qd-page-header">
+      <!-- titles 插槽：见 ActivityPage 同名插槽（同一套嵌入契约） -->
       <div class="qd-page-titles">
-        <h2 class="qd-page-title">{{ t('recycleBin') }}</h2>
-        <span class="qd-page-sub">{{ t('recycleSubtitle') }}</span>
+        <slot name="titles">
+          <h2 v-if="!props.embedded" class="qd-page-title">{{ t('recycleBin') }}</h2>
+          <span v-if="!props.embedded" class="qd-page-sub">{{ t('recycleSubtitle') }}</span>
+        </slot>
       </div>
       <div class="qd-page-actions">
         <button class="qd-btn" :disabled="loading" @click="load">
@@ -223,6 +230,8 @@ onMounted(load)
   display: flex; flex-direction: column; height: 100%; overflow: hidden;
   background: transparent;
 }
+/* 嵌入设置时：页头降级（标题由外层分段控件给），与 ActivityPage.embedded 保持一致 */
+.recycle-page.embedded .qd-page-header { padding: 0 14px; min-height: 40px; box-shadow: none; }
 /* 页头已统一为 .qd-page-header（见 styles/app.css） */
 
 .recycle-filters {

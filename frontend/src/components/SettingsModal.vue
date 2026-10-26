@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Cloud, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, HardDrive, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Trash2 } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
@@ -14,6 +14,8 @@ const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 const store = useWorkspaceStore()
 import HotkeySettings from './HotkeySettings.vue'
+import SettingsClipboardRules from './SettingsClipboardRules.vue'
+import SettingsHistory from './SettingsHistory.vue'
 import SettingsAI from './SettingsAI.vue'
 import SettingsSnapshot from './SettingsSnapshot.vue'
 import SettingsSync from './SettingsSync.vue'
@@ -64,25 +66,38 @@ const searchRef = ref<HTMLInputElement | null>(null)
 // 过滤菜单项：key 参与匹配是为了让英文输入（如 sync、ai）在中文界面下也能命中。
 const settingsQuery = ref('')
 
+// 菜单项按「一件事一项」划分，不按实现模块划分：
+//   · 剪贴板 = 历史保留/清理 + 自动规则（原来拆成「剪贴板历史」「剪贴板规则」两项，
+//     而前者只有保留天数一个控件，独立成页是浪费一次点击）
+//   · 数据与备份 = 存储位置 + 同步 + 快照（三件事都是「数据放哪、怎么留后路」）
+//   · 历史 = 最近动态 + 回收站（都是「回头看一眼」型信息，页内用分段切换）
+// 日志与关于不属于配置，置底独立成行（见 footerItems）。
 const menuItems = computed(() => [
   { key: 'preferences', label: t('preferences'), icon: Palette, desc: t('autoStart') + ' / ' + t('theme') + ' / ' + t('language') + ' / ' + t('uiZoom') },
   // 导航显隐与排序：它是「隐藏了怎么找回来」的唯一兜底入口，放在通用组开头。
   // 为什么必须在设置里：侧栏可以被裁剪，但这个入口不属于导航项，永远可达。
   { key: 'navigation', label: t('navSettings'), icon: ListOrdered, desc: t('navSettingsDesc') },
-  { key: 'hotkeys',    label: t('hotkeySettings'),  icon: Keyboard, desc: t('shortcut') },
-  { key: 'data',       label: t('clipboardHistory'), icon: Database, desc: t('retentionDays') + ' / ' + t('cleanupNow') },
-  { key: 'storage',   label: t('storageLocation'),   icon: HardDrive, desc: t('storageDesc') },
-  { key: 'datasync',  label: t('syncAndSnapshot'),   icon: Cloud,    desc: t('syncAndSnapshotDesc') },
-  // 最近动态：最常用排行 + 操作流水。从一级导航迁入——它属于「偶尔回头看一眼」
-  // 的回顾型信息，日常使用频率远低于笔记/待办/监控，占导航位不值当。
-  { key: 'activity',   label: t('navActivity'),       icon: History,  desc: t('activitySubtitle') },
-  // 回收站和「最近动态」同组：都是「删错了/做过什么」的回头路。
-  { key: 'recycle',    label: t('recycleBin'),        icon: Trash2,   desc: t('recycleSubtitle') },
-  { key: 'tools',      label: t('openTool'),          icon: Wrench,    desc: t('toolManageDesc') },
-  { key: 'winmgr',     label: t('winmgr'),             icon: MonitorIcon, desc: t('winmgrDesc') },
-  { key: 'ai',         label: t('navAi'),             icon: Bot,      desc: t('aiSettingsDesc') },
-  { key: 'logs',       label: t('navLogs'),           icon: ScrollText, desc: t('logsDesc') },
+  { key: 'hotkeys',    label: t('hotkeySettings'), icon: Keyboard, desc: t('setHotkeysDesc') },
+  { key: 'clipboard',  label: t('clipboard'),      icon: Clipboard, desc: t('setClipboardDesc') },
+  { key: 'backup',     label: t('setBackup'),      icon: Database,  desc: t('setBackupDesc') },
+  { key: 'history',    label: t('setHistory'),     icon: History,   desc: t('setHistoryDesc') },
+  { key: 'tools',      label: t('openTool'),       icon: Wrench,    desc: t('toolManageDesc') },
+  { key: 'winmgr',     label: t('winmgr'),         icon: MonitorIcon, desc: t('winmgrDesc') },
+  { key: 'ai',         label: t('navAi'),          icon: Bot,       desc: t('aiSettingsDesc') },
 ])
+
+// ---- 旧 key 别名 ----
+// 合并后旧 key 会失效，但深链散落在各入口（Onboarding/EmptyGuide 传 'snapshot'、
+// 备忘单传 'hotkeys'、AI 页传 'ai'），改一次 key 就得全局搜一遍。这里集中兜底：
+// 任何历史 key 进来都会被翻译成当前 key，命不中的原样返回。
+const PAGE_ALIASES: Record<string, string> = {
+  data: 'clipboard', cliprule: 'clipboard',
+  storage: 'backup', datasync: 'backup', sync: 'backup', snapshot: 'backup',
+  activity: 'history', recycle: 'history',
+}
+function resolvePage(key: string): string {
+  return PAGE_ALIASES[key] ?? key
+}
 
 function menuMatches(m: { key: string; label: string; desc: string }, qLC: string): boolean {
   if (m.label.toLowerCase().includes(qLC)) return true
@@ -95,27 +110,32 @@ const menuGroups = computed(() => {
   const qLC = settingsQuery.value.trim().toLowerCase()
   const byKey = Object.fromEntries(menuItems.value.map((m) => [m.key, m]))
   const defs: { title: string; keys: string[] }[] = [
-    { title: t('menuGroupBasics'), keys: ['preferences', 'hotkeys', 'navigation'] },
-    { title: t('menuGroupData'), keys: ['data', 'storage', 'datasync', 'activity', 'recycle'] },
-    { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai', 'logs'] },
+    { title: t('menuGroupBasics'), keys: ['preferences', 'navigation', 'hotkeys'] },
+    { title: t('menuGroupData'), keys: ['clipboard', 'backup', 'history'] },
+    { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai'] },
   ]
   return defs
     .map((g) => ({ title: g.title, items: g.keys.map((k) => byKey[k]).filter(Boolean).filter((m) => !qLC || menuMatches(m, qLC)) }))
     .filter((g) => g.items.length > 0)
 })
 
-// 「关于」置底独立成行，同样参与搜索
-const aboutVisible = computed(() => {
+// 置底独立成行：日志与关于都不是「配置项」，是「了解这个应用」的入口，
+// 混在服务组里会让那一组看起来像四个互不相干的东西。同样参与搜索。
+const footerItems = computed(() => {
   const qLC = settingsQuery.value.trim().toLowerCase()
-  if (!qLC) return true
-  return menuMatches({ key: 'about', label: t('appName'), desc: t('aboutDesc') }, qLC)
+  const all = [
+    { key: 'logs', label: t('navLogs'), icon: ScrollText, desc: t('logsDesc') },
+    { key: 'about', label: t('appName'), icon: Info, desc: t('aboutDesc') },
+  ]
+  if (!qLC) return all
+  return all.filter((m) => menuMatches(m, qLC))
 })
 
 // 回车直达第一个匹配项：搜索的意图就是「少点一次」
 function searchGoFirst() {
   const first = menuGroups.value[0]?.items[0]
   if (first) selectMenu(first.key)
-  else if (aboutVisible.value) selectMenu('about')
+  else if (footerItems.value[0]) selectMenu(footerItems.value[0].key)
 }
 function onSearchKeydown(e: KeyboardEvent) {
   if (e.key === 'Enter') { e.preventDefault(); searchGoFirst() }
@@ -134,7 +154,7 @@ watch(() => props.visible, (v) => {
 })
 
 function selectMenu(key: string) {
-  activePage.value = key
+  activePage.value = resolvePage(key)
   // 选了就走：过滤条件留着，从设置页返回根菜单时反而要找半天为什么少了一半
   settingsQuery.value = ''
 }
@@ -352,7 +372,7 @@ async function resetStorage() {
 
 // 切换到存储页时刷新状态（弹窗常驻，onMounted 只在首次执行）
 watch(activePage, (k) => {
-  if (k === 'storage') loadStorage()
+  if (k === 'backup') loadStorage()
   if (k === 'preferences') loadUiZoom()
 })
 
@@ -466,10 +486,8 @@ async function setLocale(newLocale: string) {
 watch(() => props.visible, async (val) => {
     if (val) {
       if (props.initialPage) {
-        // 兼容旧入口：'sync' / 'snapshot' 已合并为 'datasync'
-        activePage.value = props.initialPage === 'sync' || props.initialPage === 'snapshot'
-          ? 'datasync'
-          : props.initialPage
+        // 兼容旧入口：'sync' / 'snapshot' / 'data' / 'storage' … 经 PAGE_ALIASES 落到当前页
+        activePage.value = resolvePage(props.initialPage)
       }
   }
 }, { immediate: false })
@@ -616,20 +634,22 @@ async function toggleAutoStart() {
               </button>
             </template>
 
-            <p v-if="settingsQuery.trim() && !menuGroups.length && !aboutVisible" class="settings-search-empty">
+            <p v-if="settingsQuery.trim() && !menuGroups.length && !footerItems.length" class="settings-search-empty">
               {{ t('settingsNoMatch') }}
             </p>
 
-            <!-- 关于（含更新与日志，置底独立） -->
-            <div v-if="aboutVisible" class="about-row-wrap">
+            <!-- 置底：日志 / 关于（都不是配置项，单独一行不参与分组） -->
+            <div v-if="footerItems.length" class="about-row-wrap">
               <button
-                :class="['menu-row about-row', { active: activePage === 'about' }]"
-                @click="selectMenu('about')"
+                v-for="item in footerItems"
+                :key="item.key"
+                :class="['menu-row about-row', { active: activePage === item.key }]"
+                @click="selectMenu(item.key)"
               >
-                <Info :size="18" class="menu-row-icon" />
+                <component :is="item.icon" :size="18" class="menu-row-icon" />
                 <div class="menu-row-text">
-                  <span class="menu-row-label">{{ t('appName') }}</span>
-                  <span class="menu-row-desc">{{ t('aboutDesc') }}</span>
+                  <span class="menu-row-label">{{ item.label }}</span>
+                  <span class="menu-row-desc">{{ item.desc }}</span>
                 </div>
                 <ChevronRight :size="14" class="menu-row-arrow" />
               </button>
@@ -785,9 +805,9 @@ async function toggleAutoStart() {
           <div v-else-if="activePage === 'hotkeys'" class="content-page content-left">
             <HotkeySettings ref="hotkeyRef" />
           </div>
-
-          <!-- 数据与备份 -->
-          <div v-else-if="activePage === 'data'" class="content-page content-left">
+          <!-- 剪贴板：历史保留/清理 + 自动规则（原「剪贴板历史」只有保留天数一个控件，
+               单独占一页是浪费一次点击，合并进规则页由「自动规则」带标题区分） -->
+          <div v-else-if="activePage === 'clipboard'" class="content-page content-left">
             <div class="section">
               <h3 class="section-title">{{ t('clipboardHistory') }}</h3>
               <p class="section-desc">{{ t('clipboardDesc') }}</p>
@@ -804,16 +824,11 @@ async function toggleAutoStart() {
               </div>
               <p v-if="cleanupResult" class="result-hint">{{ cleanupResult }}</p>
             </div>
+            <SettingsClipboardRules />
           </div>
 
-          <!-- 同步与快照（合并为一个菜单） -->
-          <div v-else-if="activePage === 'datasync'" class="content-page content-left">
-            <SettingsSync :visible="activePage === 'datasync'" @close="close" />
-            <SettingsSnapshot :visible="activePage === 'datasync'" @close="close" />
-          </div>
-
-          <!-- 存储位置（自定义数据目录） -->
-          <div v-else-if="activePage === 'storage'" class="content-page content-left">
+          <!-- 数据与备份：存储位置 + 同步 + 快照（原「存储位置」「同步与快照」两项合并） -->
+          <div v-else-if="activePage === 'backup'" class="content-page content-left">
             <div class="section">
               <h3 class="section-title">{{ t('storageLocation') }}</h3>
               <p class="section-desc">{{ t('storageDesc') }}</p>
@@ -860,6 +875,12 @@ async function toggleAutoStart() {
               <p class="field-hint">{{ t('storageRestartHint') }}</p>
               <p class="result-hint" v-if="storageMsg">{{ storageMsg }}</p>
             </div>
+            <SettingsSync :visible="activePage === 'backup'" @close="close" />
+            <SettingsSnapshot :visible="activePage === 'backup'" @close="close" />
+          </div>
+          <!-- 历史：最近动态 + 回收站（页内分段切换，两者都是「回头看一眼」型信息） -->
+          <div v-else-if="activePage === 'history'" class="content-page content-flush">
+            <SettingsHistory />
           </div>
 
           <!-- AI 助手 -->
@@ -887,12 +908,6 @@ async function toggleAutoStart() {
           </div>
 
           <!-- 最近动态（从导航栏迁入：属于「偶尔回头看一眼」的信息，不值得占一级导航） -->
-          <div v-else-if="activePage === 'activity'" class="content-page content-flush">
-            <ActivityPage embedded />
-          </div>
-          <div v-else-if="activePage === 'recycle'" class="content-page content-flush">
-            <RecycleBinPage />
-          </div>
 
           <!-- 其他设置页占位（旧路由兼容） -->
           <div v-else-if="activePage && activePage !== 'about' && activePage !== 'hotkeys'" class="content-page">
@@ -918,5 +933,4 @@ async function toggleAutoStart() {
     @cancel="showUpdateAdminConfirm = false"
   />
 </template>
-
 
