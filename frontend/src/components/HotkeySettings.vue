@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Keyboard, RotateCcw } from '@lucide/vue'
+import { Keyboard, RotateCcw, Monitor, Clipboard, Command, FileText, Camera, SquareTerminal } from '@lucide/vue'
 import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig, GetScreenshotHotkeyConfig, SetScreenshotHotkeyConfig, GetSshHotkeyConfig, SetSshHotkeyConfig } from '../../bindings/quickdock/services/appservice'
 import {
   SuspendHotkeys,
@@ -10,6 +10,7 @@ import {
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import CheatSheetModal from './CheatSheetModal.vue'
 import type { HotkeyConfig } from '../types'
 
 const { t } = useI18n()
@@ -35,7 +36,11 @@ const sshLabel = ref('Ctrl+Alt+S')
 const sshModifiers = ref(3)
 const sshVk = ref(0x53)
 const capturing = ref<'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh' | null>(null)
+const showCheatSheet = ref(false)
 const message = ref('')
+// 提示色调：冲突/失败是 err（红），保存成功/恢复默认是 ok（绿）。
+// 旧版一律绿色，结果"热键冲突"这条报错看起来像成功提示。
+const msgTone = ref<'ok' | 'err'>('ok')
 const msgTimer = ref<ReturnType<typeof setTimeout> | null>(null)
 
 function clearMsgTimer() {
@@ -45,8 +50,9 @@ function clearMsgTimer() {
   }
 }
 
-function setMsgAndClear(text: string, delay: number) {
+function setMsgAndClear(text: string, delay: number, tone: 'ok' | 'err' = 'ok') {
   clearMsgTimer()
+  msgTone.value = tone
   message.value = text
   msgTimer.value = setTimeout(() => { message.value = ''; msgTimer.value = null }, delay)
 }
@@ -196,7 +202,7 @@ async function saveAll() {
   for (let i = 0; i < pairs.length; i++) {
     for (let j = i + 1; j < pairs.length; j++) {
       if (pairs[i][0] === pairs[j][0] && pairs[i][1] === pairs[j][1]) {
-        setMsgAndClear(t('hotkeyConflict'), 3000)
+        setMsgAndClear(t('hotkeyConflict'), 3000, 'err')
         return
       }
     }
@@ -212,7 +218,10 @@ async function saveAll() {
     // 重新注册全局快捷键（含调色板/笔记/SSH 窗口），使新配置立即生效。
     await ResumeHotkeys()
     setMsgAndClear(t('hotkeySaved'), 2000)
-  } catch (e) { message.value = t('saveFailed2') + ': ' + getErrorMessage(e) }
+  } catch (e) {
+    msgTone.value = 'err'
+    message.value = t('saveFailed2') + ': ' + getErrorMessage(e)
+  }
 }
 
 async function resetAppDefault() {
@@ -263,144 +272,183 @@ defineExpose({ capturing })
 
 <template>
   <div class="hotkey-page">
-    <h3 class="page-title">{{ t('hotkeySettings') }}</h3>
+    <!-- 页头：标题 + 备忘单入口（备忘单是"看懂这套键"的出口，放在页头而不是页脚，
+         因为它不是保存动作的一部分） -->
+    <header class="hk-header">
+      <h3 class="page-title">{{ t('hotkeySettings') }}</h3>
+      <button class="hk-btn hk-btn-ghost" @click="showCheatSheet = true">
+        <Keyboard :size="13" />
+        <span>{{ t('cheatSheet') }}</span>
+      </button>
+    </header>
 
-    <section class="hk-card">
-      <div class="hk-card-head">
-        <span class="hk-card-title">{{ t('globalActivate') }}</span>
-        <span class="hk-card-sub">{{ t('hotkeyDesc') }}</span>
+    <!-- 列表而非卡片墙：一行一个热键（图标 / 功能 / 说明 / 键帽 / 重置），
+         6 项一屏看完，改绑时不用在卡片之间跳视线 -->
+    <section class="hk-panel">
+      <div class="hk-panel-head">
+        <span class="hk-panel-title">{{ t('cheatSheetGlobal') }}</span>
+        <span class="hk-panel-hint">{{ t('clickToModify') }}</span>
       </div>
-      <div class="hk-row">
+
+      <div class="hk-row" :class="{ capturing: capturing === 'app' }">
+        <span class="hk-icon"><Monitor :size="14" /></span>
+        <span class="hk-name">{{ t('globalActivate') }}</span>
+        <span class="hk-desc" :title="t('hotkeyDesc')">{{ t('hotkeyDesc') }}</span>
         <button class="hk-kbd" :class="{ capturing: capturing === 'app' }" :title="t('clickToModify')" @click="startCapture('app')">
           <span v-if="capturing === 'app'" class="hk-capturing">{{ t('pressKeys') }}</span>
           <span v-else class="hk-keys">{{ currentLabel }}</span>
         </button>
-        <button v-show="!isDefault('app')" class="hk-reset" :title="t('restoreDefault')" @click="resetAppDefault">
-          <RotateCcw :size="12" />
+        <button class="hk-reset" :class="{ 'is-idle': isDefault('app') }" :title="t('restoreDefault')" @click="resetAppDefault">
+          <RotateCcw :size="13" />
         </button>
       </div>
-    </section>
 
-    <section class="hk-card">
-      <div class="hk-card-head">
-        <span class="hk-card-title">{{ t('clipboardHotkey') }}</span>
-        <span class="hk-card-sub">{{ t('clipboardHotkeyDesc') }}</span>
-      </div>
-      <div class="hk-row">
+      <div class="hk-row" :class="{ capturing: capturing === 'clipboard' }">
+        <span class="hk-icon"><Clipboard :size="14" /></span>
+        <span class="hk-name">{{ t('clipboardHotkey') }}</span>
+        <span class="hk-desc" :title="t('clipboardHotkeyDesc')">{{ t('clipboardHotkeyDesc') }}</span>
         <button class="hk-kbd" :class="{ capturing: capturing === 'clipboard' }" :title="t('clickToModify')" @click="startCapture('clipboard')">
           <span v-if="capturing === 'clipboard'" class="hk-capturing">{{ t('pressKeys') }}</span>
           <span v-else class="hk-keys">{{ clipLabel }}</span>
         </button>
-        <button v-show="!isDefault('clipboard')" class="hk-reset" :title="t('restoreDefault')" @click="resetClipDefault">
-          <RotateCcw :size="12" />
+        <button class="hk-reset" :class="{ 'is-idle': isDefault('clipboard') }" :title="t('restoreDefault')" @click="resetClipDefault">
+          <RotateCcw :size="13" />
         </button>
       </div>
-    </section>
 
-    <section class="hk-card">
-      <div class="hk-card-head">
-        <span class="hk-card-title">{{ t('paletteHotkey') }}</span>
-        <span class="hk-card-sub">{{ t('paletteHotkeyDesc') }}</span>
-      </div>
-      <div class="hk-row">
+      <div class="hk-row" :class="{ capturing: capturing === 'palette' }">
+        <span class="hk-icon"><Command :size="14" /></span>
+        <span class="hk-name">{{ t('paletteHotkey') }}</span>
+        <span class="hk-desc" :title="t('paletteHotkeyDesc')">{{ t('paletteHotkeyDesc') }}</span>
         <button class="hk-kbd" :class="{ capturing: capturing === 'palette' }" :title="t('clickToModify')" @click="startCapture('palette')">
           <span v-if="capturing === 'palette'" class="hk-capturing">{{ t('pressKeys') }}</span>
           <span v-else class="hk-keys">{{ paletteLabel }}</span>
         </button>
-        <button v-show="!isDefault('palette')" class="hk-reset" :title="t('restoreDefault')" @click="resetPaletteDefault">
-          <RotateCcw :size="12" />
+        <button class="hk-reset" :class="{ 'is-idle': isDefault('palette') }" :title="t('restoreDefault')" @click="resetPaletteDefault">
+          <RotateCcw :size="13" />
         </button>
       </div>
-    </section>
 
-    <section class="hk-card">
-      <div class="hk-card-head">
-        <span class="hk-card-title">{{ t('noteHotkey') }}</span>
-        <span class="hk-card-sub">{{ t('noteHotkeyDesc') }}</span>
-      </div>
-      <div class="hk-row">
+      <div class="hk-row" :class="{ capturing: capturing === 'note' }">
+        <span class="hk-icon"><FileText :size="14" /></span>
+        <span class="hk-name">{{ t('noteHotkey') }}</span>
+        <span class="hk-desc" :title="t('noteHotkeyDesc')">{{ t('noteHotkeyDesc') }}</span>
         <button class="hk-kbd" :class="{ capturing: capturing === 'note' }" :title="t('clickToModify')" @click="startCapture('note')">
           <span v-if="capturing === 'note'" class="hk-capturing">{{ t('pressKeys') }}</span>
           <span v-else class="hk-keys">{{ noteLabel }}</span>
         </button>
-        <button v-show="!isDefault('note')" class="hk-reset" :title="t('restoreDefault')" @click="resetNoteDefault">
-          <RotateCcw :size="12" />
+        <button class="hk-reset" :class="{ 'is-idle': isDefault('note') }" :title="t('restoreDefault')" @click="resetNoteDefault">
+          <RotateCcw :size="13" />
         </button>
       </div>
-    </section>
 
-    <section class="hk-card">
-      <div class="hk-card-head">
-        <span class="hk-card-title">{{ t('screenshotHotkey') }}</span>
-        <span class="hk-card-sub">{{ t('screenshotHotkeyDesc') }}</span>
-      </div>
-      <div class="hk-row">
+      <div class="hk-row" :class="{ capturing: capturing === 'screenshot' }">
+        <span class="hk-icon"><Camera :size="14" /></span>
+        <span class="hk-name">{{ t('screenshotHotkey') }}</span>
+        <span class="hk-desc" :title="t('screenshotHotkeyDesc')">{{ t('screenshotHotkeyDesc') }}</span>
         <button class="hk-kbd" :class="{ capturing: capturing === 'screenshot' }" :title="t('clickToModify')" @click="startCapture('screenshot')">
           <span v-if="capturing === 'screenshot'" class="hk-capturing">{{ t('pressKeys') }}</span>
           <span v-else class="hk-keys">{{ shotLabel }}</span>
         </button>
-        <button v-show="!isDefault('screenshot')" class="hk-reset" :title="t('restoreDefault')" @click="resetScreenshotDefault">
-          <RotateCcw :size="12" />
+        <button class="hk-reset" :class="{ 'is-idle': isDefault('screenshot') }" :title="t('restoreDefault')" @click="resetScreenshotDefault">
+          <RotateCcw :size="13" />
         </button>
       </div>
-    </section>
 
-    <section class="hk-card">
-      <div class="hk-card-head">
-        <span class="hk-card-title">{{ t('sshHotkey') }}</span>
-        <span class="hk-card-sub">{{ t('sshHotkeyDesc') }}</span>
-      </div>
-      <div class="hk-row">
+      <div class="hk-row" :class="{ capturing: capturing === 'ssh' }">
+        <span class="hk-icon"><SquareTerminal :size="14" /></span>
+        <span class="hk-name">{{ t('sshHotkey') }}</span>
+        <span class="hk-desc" :title="t('sshHotkeyDesc')">{{ t('sshHotkeyDesc') }}</span>
         <button class="hk-kbd" :class="{ capturing: capturing === 'ssh' }" :title="t('clickToModify')" @click="startCapture('ssh')">
           <span v-if="capturing === 'ssh'" class="hk-capturing">{{ t('pressKeys') }}</span>
           <span v-else class="hk-keys">{{ sshLabel }}</span>
         </button>
-        <button v-show="!isDefault('ssh')" class="hk-reset" :title="t('restoreDefault')" @click="resetSshDefault">
-          <RotateCcw :size="12" />
+        <button class="hk-reset" :class="{ 'is-idle': isDefault('ssh') }" :title="t('restoreDefault')" @click="resetSshDefault">
+          <RotateCcw :size="13" />
         </button>
       </div>
     </section>
 
     <div class="hk-actions">
       <button class="hk-btn hk-btn-primary" @click="saveAll">{{ t('saveAll') }}</button>
+      <p v-if="message" class="hk-msg" :class="{ 'is-error': msgTone === 'err' }">{{ message }}</p>
     </div>
-    <p v-if="message" class="hk-msg">{{ message }}</p>
 
     <p class="hk-tip">
       <Keyboard :size="14" class="tip-icon" />
       {{ t('hotkeyTip') }}
     </p>
+
+    <CheatSheetModal :visible="showCheatSheet" :show-modify="false" @close="showCheatSheet = false" />
   </div>
 </template>
 
 <style scoped>
-.hotkey-page { width: 100%; max-width: 600px; }
-.page-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 16px; }
+.hotkey-page { width: 100%; max-width: 660px; }
 
-.hk-card {
+.hk-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  margin-bottom: 14px;
+}
+.page-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
+
+/* 列表容器：细边框 + 圆角，行间用 1px 分隔线而不再各自成卡，密度更高 */
+.hk-panel {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: 12px 14px;
-  margin-bottom: 12px;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
 }
-.hk-card-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 10px; }
-.hk-card-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
-.hk-card-sub { font-size: 11px; color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hk-panel-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-4);
+  padding: 8px 12px;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+.hk-panel-title { font-size: 11px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.6px; }
+.hk-panel-hint { font-size: 11px; color: var(--color-text-disabled); }
 
-.hk-row { display: flex; align-items: center; gap: 10px; }
+/* 单行栅格：图标 / 功能名 / 说明（可伸长可省略） / 键帽 / 重置 */
+.hk-row {
+  display: grid;
+  grid-template-columns: 20px 84px minmax(0, 1fr) auto 26px;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 12px;
+  transition: background-color var(--transition-fast);
+}
+.hk-row + .hk-row { border-top: 1px solid var(--color-border); }
+.hk-row:hover { background: var(--color-bg-hover); }
+/* 捕获态：整行点亮，让"正在录哪个键"没有歧义 */
+.hk-row.capturing { background: var(--color-accent-bg); }
 
-/* 真实键帽样式（与窗口管理设置页一致） */
+.hk-icon { display: inline-flex; align-items: center; justify-content: center; color: var(--color-text-disabled); }
+.hk-row.capturing .hk-icon { color: var(--color-accent); }
+.hk-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); white-space: nowrap; }
+.hk-desc {
+  font-size: 11.5px;
+  color: var(--color-text-disabled);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 键帽：等宽 + 2px 下沿（像真键帽）。宽度按内容走，不再整行铺满 */
 .hk-kbd {
-  flex: 1;
-  min-width: 0;
-  height: 28px;
-  padding: 0 12px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-width: 96px;
+  height: 26px;
+  padding: 0 10px;
   font-family: 'Consolas', ui-monospace, SFMono-Regular, monospace;
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 600;
   line-height: 1;
   color: var(--color-text-primary);
@@ -409,59 +457,68 @@ defineExpose({ capturing })
   border-bottom-width: 2px;
   border-radius: 6px;
   cursor: pointer;
-  transition: border-color 0.12s, background-color 0.12s, color 0.12s, box-shadow 0.12s;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
 .hk-kbd:hover { border-color: var(--color-border-focus); background: var(--color-bg-hover); }
 .hk-kbd.capturing {
   border-color: var(--color-accent);
   border-bottom-color: var(--color-accent);
-  background: var(--color-accent-bg);
+  background: var(--color-surface);
   color: var(--color-accent);
   box-shadow: 0 0 0 2px var(--color-accent-border);
   animation: hk-pulse 1.1s ease-in-out infinite;
 }
-@keyframes hk-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.65 } }
+@keyframes hk-pulse { 0%, 100% { opacity: 1 } 50% { opacity: 0.6 } }
 .hk-capturing { font-family: inherit; font-size: 11px; font-weight: 500; }
 
+/* 重置：已是默认值时用 visibility 隐藏而不是 display:none ——
+   保留栅格列宽，避免某行"少一个按钮"导致键帽位置左右跳动 */
 .hk-reset {
-  flex-shrink: 0;
-  width: 24px;
-  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  width: 26px;
+  height: 26px;
   border: none;
   background: transparent;
   color: var(--color-text-disabled);
-  border-radius: var(--radius-xs);
-  cursor: pointer;
-  opacity: 0;
-  transition: opacity 0.12s, color 0.12s, background 0.12s;
-}
-.hk-card:hover .hk-reset { opacity: 1; }
-.hk-reset:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
-
-.hk-actions { display: flex; gap: 8px; margin-top: 2px; }
-.hk-btn {
-  padding: 7px 18px;
-  border: 1px solid transparent;
   border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast), opacity var(--transition-fast);
+}
+.hk-reset:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
+.hk-reset.is-idle { visibility: hidden; }
+
+.hk-actions { display: flex; align-items: center; gap: 12px; margin-top: 12px; }
+.hk-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
   font-size: 13px;
   font-family: inherit;
   cursor: pointer;
-  transition: background 0.12s, border-color 0.12s, color 0.12s;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .hk-btn-primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .hk-btn-primary:hover { background: var(--color-accent-hover); border-color: var(--color-accent-hover); }
-.hk-msg { font-size: 12px; color: var(--color-success); margin: 10px 0 0; }
+.hk-btn-ghost { background: transparent; color: var(--color-text-secondary); border-color: var(--color-border); }
+.hk-btn-ghost:hover { color: var(--color-text-primary); background: var(--color-bg-hover); border-color: var(--color-border-focus); }
+
+.hk-msg { margin: 0; font-size: 12px; color: var(--color-success); }
+.hk-msg.is-error { color: var(--color-danger); }
+
 .hk-tip {
-  font-size: 11px;
-  color: var(--color-text-disabled);
-  line-height: 1.6;
+  margin: 12px 0 0;
   display: flex;
   align-items: flex-start;
   gap: 6px;
-  margin: 10px 0 0;
+  font-size: 11px;
+  color: var(--color-text-disabled);
+  line-height: 1.6;
 }
 .tip-icon { flex-shrink: 0; margin-top: 1px; }
 </style>
