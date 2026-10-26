@@ -254,9 +254,11 @@ onMounted(async () => {
       applyTheme(t)
     }
   })
-  // 托盘「打开设置」：显示主窗口后由 Go 侧发事件，这里打开设置模态框
-  Events.On('app:open-settings', () => {
-    settingsPage.value = undefined
+  // 托盘「打开设置」：显示主窗口后由 Go 侧发事件，这里打开设置模态框。
+  // 载荷可带目标页签（命令面板的备忘单「去修改」会传 'hotkeys'），Go 侧不带载荷时回落到默认页。
+  Events.On('app:open-settings', (ev: any) => {
+    const raw = ev?.data ?? ev
+    settingsPage.value = typeof raw === 'string' && raw ? raw : undefined
     showSettings.value = true
   })
   // 浮窗（剪贴板 / SSH）里「问 AI」发现没配 Key 时，Go 侧唤起主窗口并发本事件，

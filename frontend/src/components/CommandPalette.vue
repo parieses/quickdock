@@ -6,7 +6,7 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Copy, FolderSearch, Play, Save, Gauge, Monitor, RefreshCw
+  Copy, FolderSearch, Play, Save, Gauge, Monitor, RefreshCw, Keyboard, ScrollText
 } from '@lucide/vue'
 import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, ResetInstalledAppsCache, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette } from '../../bindings/quickdock/services/appservice'
 import { ExecuteSystemCommand, RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -49,6 +49,7 @@ import { usePluginIndex } from '../composables/usePluginIndex'
 import { useThemeName } from '../composables/useThemeName'
 import { useCommandSearch } from '../composables/useCommandSearch'
 import PluginFrame from './PluginFrame.vue'
+import CheatSheetModal from './CheatSheetModal.vue'
 import type { RecentEntry } from '../composables/useCommandSearch'
 
 const { t, locale } = useI18n()
@@ -244,6 +245,11 @@ const inlineQuery = ref('')
 const inlineInputRef = ref<HTMLInputElement | null>(null)
 const notes = ref<CmdNote[]>([])
 
+// ---- 快捷键备忘单 ----
+// 就地弹窗展示（不关面板）：命令面板跑在自己的独立窗口里，主窗口可能没显示，
+// 若走「发事件让主窗口弹」的链路，事件到了也没人看得见。关掉备忘单后可以接着搜。
+const showCheatSheet = ref(false)
+
 // ---- 系统命令 ----
 const systemCommands = computed<SystemCmd[]>(() => [
   { id: 'lock', label: t('cmdLock'), desc: t('cmdLockDesc'), keywords: ['lock', '锁屏', '锁定', 'suo ping', 'suo ding', '系统'], icon: Lock,
@@ -288,7 +294,25 @@ const systemCommands = computed<SystemCmd[]>(() => [
   // 所有安装方式（绿色版、自定义目录、便携软件），搜不到时给用户一条手动出路。
   { id: 'rebuild-app-index', label: t('cmdRebuildAppIndex'), desc: t('cmdRebuildAppIndexDesc'), keywords: ['app', 'index', 'rebuild', '应用', '索引', '重建', '扫描', 'sao miao', '系统'], icon: RefreshCw,
     action: async () => { await rebuildAppIndex() } },
+  // 快捷键备忘单：就地弹窗展示（不关面板），关掉备忘单后可以接着搜。
+  // 为什么不是发事件让主窗口弹：命令面板跑在自己的独立窗口里，主窗口可能没显示，
+  // 事件到了也没人看得见 —— 就地渲染才可靠。
+  { id: 'cheatsheet', label: t('cheatSheetCmd'), desc: t('cheatSheetCmdDesc'), keywords: ['cheatsheet', 'hotkey', 'shortcut', '快捷键', '备忘单', '键位', 'kuai jie jian', 'bei wang dan', '系统'], icon: Keyboard,
+    action: async () => { showCheatSheet.value = true } },
+  // 实时尾随入口：它住在设置的「日志」页里（和应用日志/崩溃记录同一个面板），
+  // 搜「tail」能直达，否则这三个字在设置菜单里很难被翻到。
+  { id: 'logtail', label: t('ltCmd'), desc: t('ltCmdDesc'), keywords: ['tail', 'log', 'follow', 'logtail', '日志', '尾随', '实时', 'rizhi', 'wei sui', 'shishi', '系统'], icon: ScrollText,
+    action: async () => { openSettingsPage('logs') } },
 ])
+
+// 打开设置并落到指定页。名字不叫 openHotkeySettings 是因为它现在被两条命令共用
+// （备忘单「去修改」→ hotkeys，实时尾随 → logs）。
+function openSettingsPage(page: string) {
+  showCheatSheet.value = false
+  closePalette()
+  // 走与托盘「打开设置」同一条事件通道（App.vue 的 app:open-settings 支持带页签）
+  try { Events.Emit('app:open-settings', page) } catch (e) { logErr('[CmdPalette] open-settings:', e) }
+}
 
 // ---- 拼音缓存预热 ----
 // 匹配实现已收敛到 utils/pinyin.ts（原先只有命令面板能用，其余搜索框够不着）。
@@ -595,6 +619,8 @@ function escFromPlugin() {
 // 仅 @keydown 绑在 <input> 上时 Esc 会丢失，故在 document 上再兜一层（capture 保证不被子组件吞掉）。
 function onGlobalEsc(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
+  // 备忘单浮在上面时 Esc 归它，别顺手把面板也关了
+  if (showCheatSheet.value) { e.preventDefault(); showCheatSheet.value = false; return }
   e.preventDefault()
   if (actionMenuOpen.value) { closeActionMenu(); return }
   if (inlineQuicklink.value) { cancelInlineQuicklink(); return }
@@ -612,6 +638,8 @@ function navFocused(): boolean {
 // Escape 专由 onGlobalEsc 处理，这里跳过避免双触发。
 function onGlobalKey(e: KeyboardEvent) {
   if (e.key === 'Escape') return
+  // 备忘单打开时导航键归它，方向键别去动背后的结果列表
+  if (showCheatSheet.value) return
   if (navFocused()) return
   onKeydown(e)
 }
@@ -1328,6 +1356,13 @@ onUnmounted(() => {
       </div>
     </div>
   </div>
+
+  <!-- 快捷键备忘单：就地弹窗（系统命令 cheatsheet 触发），关掉后回到搜索 -->
+  <CheatSheetModal
+    :visible="showCheatSheet"
+    @close="showCheatSheet = false"
+    @open-settings="openSettingsPage"
+  />
 </template>
 
 <style scoped>
