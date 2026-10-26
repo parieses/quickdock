@@ -1,9 +1,12 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ScrollText, FolderOpen, RefreshCw, Search, Copy, Check, AlertTriangle, Trash2, HardDrive } from '@lucide/vue'
+import { ScrollText, FolderOpen, RefreshCw, Search, Copy, Check, AlertTriangle, Trash2, HardDrive, Radio, Plus, X, Pause, Play } from '@lucide/vue'
 import { ListLogFiles, ReadLogFile, ListCrashFiles, ClearCrashFiles, GetLogStorage, ClearLogs } from '../../bindings/quickdock/services/diag/diagservice'
 import { OpenLogsDir } from '../../bindings/quickdock/services/system/systemservice'
+import { SelectLocalFile } from '../../bindings/quickdock/services/appservice'
+import { LogTailOpen, LogTailStop, LogTailPause } from '../../bindings/quickdock/services/logtail/logtailservice'
+import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { copyToClipboard } from '../utils/clipboard'
@@ -19,9 +22,20 @@ const files = ref<LogFile[]>([])
 // 但只有 ListCrashFiles 给出 kind（panic / js）—— 那是后端按落盘规则判定的，
 // 前端照文件名前缀猜会在命名规则变动时静默错位。
 const crashFiles = ref<CrashFile[]>([])
+// 三种来源互斥：应用日志 / 崩溃记录 / 实时尾随。
+// 原来是 isCrash 布尔，加第三种来源后布尔不够用了（会变成两个人改同一个标志位）。
+type Source = 'log' | 'crash' | 'tail'
+const source = ref<Source>('log')
+const isCrash = computed(() => source.value === 'crash')
+const isTail = computed(() => source.value === 'tail')
 const selected = ref('')
-const isCrash = ref(false)
-const rawLines = ref<string[]>([])
+// 静态来源（日志/崩溃）读出来的行；展示统一走下面的 rawLines 计算属性
+const staticLines = ref<string[]>([])
+// 展示用的原始行：静态来源读全文、尾随来源读当前标签的环形缓冲。
+// 后面的过滤/级别人色/复制全部建立在它之上，三种来源共用一条渲染管线。
+const rawLines = computed<string[]>(() =>
+  isTail.value ? (activeTab.value?.lines ?? []) : staticLines.value,
+)
 const keyword = ref('')
 const levels = ref<Record<string, boolean>>({ I: true, W: true, E: true })
 const follow = ref(false)
@@ -137,7 +151,7 @@ async function loadFiles() {
     files.value = res || []
     if (!selected.value && logFiles.value.length) {
       selected.value = logFiles.value[0].name
-      isCrash.value = false
+      source.value = 'log'
     }
   } catch (_) { /* ignore */ }
   try {
@@ -153,9 +167,9 @@ function currentPath(): string {
 }
 
 function selectFile(name: string, crash: boolean) {
-  if (selected.value === name && isCrash.value === crash) return
+  if (selected.value === name && source.value === (crash ? 'crash' : 'log')) return
   selected.value = name
-  isCrash.value = crash
+  source.value = crash ? 'crash' : 'log'
   loadContent()
 }
 
@@ -164,13 +178,13 @@ async function loadContent() {
   loading.value = true
   try {
     const res = unwrap<string[]>(await ReadLogFile(currentPath(), LOG_TAIL_LINES))
-    rawLines.value = res || []
+    staticLines.value = res || []
     lastCount = rawLines.value.length
     lastFollowContent = rawLines.value.join('\n')
     await nextTick()
     scrollToBottom()
   } catch (e: any) {
-    rawLines.value = ['[error] ' + getErrorMessage(e)]
+    staticLines.value = ['[error] ' + getErrorMessage(e)]
   } finally {
     loading.value = false
   }
@@ -194,15 +208,15 @@ async function clearCrash() {
     unwrap(await ClearCrashFiles())
     crashFiles.value = []
     if (isCrash.value) {
-      isCrash.value = false
+      source.value = 'log'
       selected.value = logFiles.value[0]?.name || ''
-      rawLines.value = []
+      staticLines.value = []
       if (selected.value) await loadContent()
     }
     // 崩溃记录也算在占用里，清完必须重算，否则卡片会一直显示已删掉的那部分
     await loadStorage()
   } catch (e: any) {
-    rawLines.value = ['[error] ' + getErrorMessage(e)]
+    staticLines.value = ['[error] ' + getErrorMessage(e)]
   }
 }
 
@@ -300,7 +314,7 @@ function toggleFollow() {
         // 内容没变就什么都不做：不重绘、不抢滚动条。后端 ReadLogFile 已对未变更文件做
         // 整文件读缓存，这里只在内容真正变化时才 join 一次并决定要不要滚到底部。
         if (joined === lastFollowContent) return
-        rawLines.value = lines
+        staticLines.value = lines
         lastCount = lines.length
         lastFollowContent = joined
         await nextTick()
@@ -313,9 +327,157 @@ function toggleFollow() {
   }
 }
 
-// 文件切换由 selectFile 显式触发加载（它同时设置 isCrash，watch(selected)
+// 文件切换由 selectFile 显式触发加载（它同时设置 source，watch(selected)
 // 会在「同名文件、不同来源」时不触发，容易读到上一个文件的内容）。
 // 纯前端过滤（levels/keyword）由 computed 自动完成，无需 watch 触发。
+
+// ==================== 实时尾随 ====================
+//
+// 与上面两种来源的根本区别：静态日志是「读一次」，尾随是「订阅一段增长」。
+// 后端每 500ms 看一次文件，只推新增的行；这里要做的是收、攒、不超过内存预算。
+//
+// 不用 setInterval 在前端轮询：每次把整块文件读出来再通过 JSON 传一遍既浪费 IO 也卡主线程，
+// 而后端已经握着偏移——让它来决策「有没有新东西」最省。
+interface TailTab {
+  id: string
+  path: string
+  name: string
+  lines: string[]
+  received: number
+  paused: boolean
+}
+
+// 环形缓冲上限：一条高速滚动的日志跑一晚上能到几百万行，
+// 全部留在数组里内存会失控，而用户真正会回看的永远只有最近那一段。
+const TAIL_MAX_LINES = 5000
+
+const tailTabs = ref<TailTab[]>([])
+const tailId = ref('')
+const activeTab = computed(() => tailTabs.value.find((x) => x.id === tailId.value) || null)
+
+async function pickTailFile() {
+  let path = ''
+  try {
+    path = (unwrap<string>(await SelectLocalFile(t('ltPick'))) || '').trim()
+  } catch (e: any) {
+    setTailError(t('ltOpenFailed') + ': ' + getErrorMessage(e))
+    return
+  }
+  if (!path) return
+  if (tailTabs.value.some((x) => x.path === path)) {
+    tailId.value = tailTabs.value.find((x) => x.path === path)!.id
+    source.value = 'tail'
+    return
+  }
+  try {
+    const res = unwrap<any>(await LogTailOpen(path, TAIL_MAX_LINES))
+    if (!res || !res.id) {
+      setTailError(t('ltOpenFailed'))
+      return
+    }
+    tailTabs.value.push({
+      id: res.id,
+      path: res.path,
+      name: res.name,
+      lines: res.lines || [],
+      received: (res.lines || []).length,
+      paused: false,
+    })
+    tailId.value = res.id
+    source.value = 'tail'
+    await nextTick()
+    scrollToBottom()
+  } catch (e: any) {
+    setTailError(t('ltOpenFailed') + ': ' + getErrorMessage(e))
+  }
+}
+
+async function closeTail(tab: TailTab) {
+  const idx = tailTabs.value.findIndex((x) => x.id === tab.id)
+  if (idx >= 0) tailTabs.value.splice(idx, 1)
+  // 必须通知后端停掉轮询 goroutine：前端删掉标签只是不显示了，
+  // 后端还会继续 stat 到进程退出（ServiceShutdown 才能收，那是几分钟以后的事）。
+  try { unwrap(await LogTailStop(tab.id)) } catch (_) { /* ignore */ }
+  if (tailId.value === tab.id) {
+    tailId.value = tailTabs.value[0]?.id || ''
+    if (!tailTabs.value.length) source.value = 'log'
+  }
+}
+
+async function toggleTabPause(tab: TailTab) {
+  tab.paused = !tab.paused
+  try { unwrap(await LogTailPause(tab.id, tab.paused)) } catch (_) { /* ignore */ }
+}
+
+// 清空同样「点两次」：与本组件其它破坏性动作保持一致的手感。
+const clearTailArmed = ref(false)
+let clearTailTimer: ReturnType<typeof setTimeout> | null = null
+function clearTail() {
+  if (!clearTailArmed.value) {
+    clearTailArmed.value = true
+    if (clearTailTimer) clearTimeout(clearTailTimer)
+    clearTailTimer = setTimeout(() => { clearTailArmed.value = false }, 3000)
+    return
+  }
+  if (clearTailTimer) clearTimeout(clearTailTimer)
+  clearTailArmed.value = false
+  const tab = activeTab.value
+  if (tab) tab.lines = []
+}
+
+const tailError = ref('')
+function setTailError(msg: string) {
+  tailError.value = msg
+  setTimeout(() => { if (tailError.value === msg) tailError.value = '' }, 5000)
+}
+
+// 自动滚动只在「用户本来就贴着底部」时执行。
+// 尾随时每 500ms 就可能来一批新行，无条件滚到底会让正在往上翻的用户永远翻不上去。
+const stickBottom = ref(true)
+function onBodyScroll() {
+  const el = bodyEl.value
+  if (!el) return
+  stickBottom.value = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+}
+
+let offTail: (() => void) | null = null
+
+function onTailLine(ev: any) {
+  const p = ev?.data ?? ev
+  if (!p || !p.id) return
+  const tab = tailTabs.value.find((x) => x.id === p.id)
+  if (!tab) return
+  if (p.rotated) {
+    // 轮转：后端已经重新对齐到新文件末尾，这里跟着换掉整屏，
+    // 否则用户会看到「旧文件的尾巴 + 新文件的开头」拼在一起的错误上下文。
+    tab.lines = p.lines || []
+    setTailError(t('ltRotated'))
+    if (isTail.value) scrollToBottom()
+    return
+  }
+  const incoming = p.lines || []
+  if (!incoming.length) return
+  tab.lines = tab.lines.concat(incoming)
+  tab.received += incoming.length
+  if (tab.lines.length > TAIL_MAX_LINES) {
+    tab.lines = tab.lines.slice(tab.lines.length - TAIL_MAX_LINES)
+  }
+  if (isTail.value && stickBottom.value) {
+    nextTick(() => scrollToBottom())
+  }
+}
+
+// 卸载必须逐个 LogTailStop：设置面板反复开关，每留一个会话就多一个常驻轮询，
+// 而会话只有 ServiceShutdown 才统一收——那是几小时以后的事。
+async function stopAllTails() {
+  if (offTail) { offTail(); offTail = null }
+  for (const tab of tailTabs.value) {
+    try { unwrap(await LogTailStop(tab.id)) } catch (_) { /* ignore */ }
+  }
+  tailTabs.value = []
+  tailId.value = ''
+  if (source.value === 'tail') source.value = 'log'
+}
 
 const copied = ref(false)
 let copyTimer: ReturnType<typeof setTimeout> | null = null
@@ -333,14 +495,19 @@ function copyAll() { copyText(displayLines.value.map((r) => r.raw).join('\n')) }
 function copyLine(l: string) { copyText(l) }
 
 onMounted(async () => {
+  offTail = Events.On('logtail:line', onTailLine)
   await loadFiles()
   await loadStorage()
   await loadContent()
 })
 onUnmounted(() => {
+  // stopAllTails 是异步的，卸载时不 await：停止请求已经发出，
+  // 后端按 id 幂等处理，页面先消失也不影响结果。
+  void stopAllTails()
   if (followTimer) clearInterval(followTimer)
   if (cleanTimer) clearTimeout(cleanTimer)
   if (toastTimer) clearTimeout(toastTimer)
+  if (clearTailTimer) clearTimeout(clearTailTimer)
 })
 </script>
 
@@ -355,7 +522,7 @@ onUnmounted(() => {
         <button
           v-for="f in logFiles"
           :key="f.name"
-          :class="['log-file', { active: !isCrash && f.name === selected }]"
+          :class="['log-file', { active: source === 'log' && f.name === selected }]"
           @click="selectFile(f.name, false)"
         >
           <span class="log-file-name" :title="f.name">{{ f.name }}</span>
@@ -373,7 +540,7 @@ onUnmounted(() => {
         <button
           v-for="c in crashFiles"
           :key="c.name"
-          :class="['log-file', { active: isCrash && c.name === selected }]"
+          :class="['log-file', { active: source === 'crash' && c.name === selected }]"
           @click="selectFile(c.name, true)"
         >
           <span class="log-file-name" :title="c.name">
@@ -388,6 +555,40 @@ onUnmounted(() => {
           <Trash2 :size="13" />
           {{ clearArmed ? t('crashClearConfirm') : t('crashClear') }}
         </button>
+      </div>
+
+      <!-- 实时尾随：与前两种来源并列的第三种来源。
+           应用日志/崩溃是「读一次」，尾随是「订阅增长」，所以它有独立的
+           打开入口（选任意本机文件）与会话生命周期（关闭标签要通知后端停轮询）。 -->
+      <div class="log-side-head tail-head">
+        <Radio :size="14" />
+        <span>{{ t('ltSection') }}</span>
+        <button class="tail-add" :title="t('ltPick')" @click="pickTailFile">
+          <Plus :size="13" />
+        </button>
+      </div>
+      <div class="crash-list">
+        <div
+          v-for="tab in tailTabs"
+          :key="tab.id"
+          :class="['log-file', 'tail-tab', { active: source === 'tail' && tab.id === tailId }]"
+          @click="tailId = tab.id; source = 'tail'"
+        >
+          <span class="log-file-name" :title="tab.path">
+            <span class="tail-dot" :class="{ paused: tab.paused }" /><span class="tail-name">{{ tab.name }}</span>
+          </span>
+          <span class="log-file-meta">
+            {{ tab.paused ? t('ltPause') : t('ltWatching') }} · {{ t('ltReceived', { n: tab.received }) }}
+          </span>
+          <button
+            class="tail-x"
+            :title="t('ltClose')"
+            @click.stop="closeTail(tab)"
+          >
+            <X :size="12" />
+          </button>
+        </div>
+        <p v-if="!tailTabs.length" class="log-empty">{{ t('ltEmpty') }}</p>
       </div>
 
       <!-- 日志占用：读数 + 占比条 + 清理入口 -->
@@ -456,16 +657,32 @@ onUnmounted(() => {
             <Search :size="13" class="log-search-icon" />
             <input v-model="keyword" :placeholder="t('logSearch')" class="log-search-input" />
           </div>
-          <label class="log-follow">
+          <label v-if="!isTail" class="log-follow">
             <input type="checkbox" :checked="follow" @change="toggleFollow" />
             {{ t('logFollow') }}
           </label>
+          <!-- 尾随模式：读取的是订阅流而不是静态文件，所以不需要「刷新/跟随」，
+               换成暂停（真的停止后端读取）与清空（丢弃已攒的行） -->
+          <template v-else-if="activeTab">
+            <button class="log-btn" @click="toggleTabPause(activeTab)">
+              <Pause v-if="!activeTab.paused" :size="13" />
+              <Play v-else :size="13" />
+              {{ activeTab.paused ? t('ltResume') : t('ltPause') }}
+            </button>
+            <button class="log-btn" :class="{ armed: clearTailArmed }" @click="clearTail">
+              <Trash2 :size="13" />
+              {{ clearTailArmed ? t('ltClearConfirm') : t('ltClear') }}
+            </button>
+          </template>
         </div>
         <div class="log-toolbar-right">
-          <span v-if="rawLines.length" class="log-count">
+          <span v-if="isTail && activeTab" class="log-count">
+            {{ t('ltReceived', { n: activeTab.received }) }}
+          </span>
+          <span v-else-if="rawLines.length" class="log-count">
             {{ t('logLines', { shown: displayLines.length, total: rawLines.length }) }}
           </span>
-          <button class="log-btn" :disabled="loading" @click="loadContent">
+          <button v-if="!isTail" class="log-btn" :disabled="loading" @click="loadContent">
             <RefreshCw :size="13" /> {{ t('logRefresh') }}
           </button>
           <button class="log-btn" @click="OpenLogsDir()">
@@ -479,7 +696,8 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <div ref="bodyEl" class="log-body">
+      <div ref="bodyEl" class="log-body" @scroll.passive="onBodyScroll">
+        <p v-if="tailError" class="log-empty tail-error">{{ tailError }}</p>
         <div v-if="isCrash && crashMeta" class="crash-meta" :data-kind="crashMeta.kind">
           <div class="crash-meta-head">
             <span class="crash-badge" :data-kind="crashMeta.kind">{{ crashMeta.kind }}</span>
@@ -605,6 +823,51 @@ onUnmounted(() => {
   background: var(--color-danger-bg);
 }
 .log-empty { padding: 12px 6px; font-size: 11.5px; color: var(--color-text-disabled); }
+
+/* === 实时尾随 ===
+   状态点刻意做成「呼吸」而不是静态圆点：尾随是一个持续进行的动作，
+   静止的小圆点和「已停止」分不出来。暂停时彻底停掉动画——
+   还在微微呼吸的话，用户会以为它仍在读。 */
+.tail-head { border-top: 1px solid var(--color-border); margin-top: 8px; padding-top: 13px; }
+.tail-add {
+  margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.tail-add:hover { color: var(--color-accent); border-color: var(--color-accent); }
+
+.tail-tab { position: relative; }
+/* 名称行让出右侧 20px：关闭按钮是绝对定位的，不占栅格宽度，
+   但文字必须提前避让，否则「hover 时按钮盖住文件名尾部」 */
+.tail-tab .log-file-name { display: flex; align-items: center; gap: 5px; padding-right: 20px; }
+/* ellipsis 必须落在自己的盒子上：flex 容器里的匿名文本不吃 text-overflow */
+.tail-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tail-dot {
+  flex-shrink: 0; width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-success); animation: tail-pulse 1.6s ease-in-out infinite;
+}
+.tail-dot.paused { background: var(--color-text-disabled); animation: none; }
+@keyframes tail-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+
+.tail-x {
+  position: absolute; top: 5px; right: 4px;
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-disabled); border: none; cursor: pointer;
+  opacity: 0; transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+.tail-tab:hover .tail-x { opacity: 1; }
+.tail-x:hover { color: var(--color-danger-text); }
+/* 键盘可达：只用 :hover 显示关闭按钮的话，键盘用户永远摸不到它 */
+.tail-x:focus-visible { opacity: 1; }
+
+.tail-error {
+  margin: 0 0 8px; padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg); color: var(--color-warning);
+}
 
 /* === 日志占用卡片 ===
    钉在侧栏底部：它管的是「整个目录」而不是某一个文件，跟上面的文件列表是

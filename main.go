@@ -29,6 +29,7 @@ import (
 	envsvc "quickdock/services/env"
 	frecencysvc "quickdock/services/frecency"
 	itemsvc "quickdock/services/item"
+	logtailsvc "quickdock/services/logtail"
 	mcpsvc "quickdock/services/mcp"
 	monitorsvc "quickdock/services/monitor"
 	notesvc "quickdock/services/note"
@@ -380,6 +381,9 @@ func main() {
 	todoSvc := todosvc.NewTodoService(appService)
 	monitorSvc := monitorsvc.NewMonitorService(appService)
 
+	// 日志尾随门面：会话/轮询/事件推送（读取内核在 internal/logtail）
+	logtailSvc := logtailsvc.NewLogTailService(appService)
+
 	// 回收站门面：误删的项目/集合/场景/笔记在此恢复（墓碑由 db 删除路径写入）
 	recycleSvc := recyclesvc.NewRecycleService(appService)
 
@@ -436,6 +440,7 @@ func main() {
 			application.NewService(workspaceSvc),
 			application.NewService(todoSvc),
 			application.NewService(monitorSvc),
+			application.NewService(logtailSvc),
 			application.NewService(recycleSvc),
 			application.NewService(noteSvc),
 			application.NewService(collectionSvc),
