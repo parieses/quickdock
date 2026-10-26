@@ -58,10 +58,12 @@ func (m *PluginWindowManager) SetMainWindow(w *application.WebviewWindow) {
 	m.mainWindow = w
 }
 
-// pluginWindowBackground 返回与主题匹配的底色：深 #17181b / 浅 #f5f6f8。
+// pluginWindowBackground 返回与主题匹配的底色：深 #0f1116 / 浅 #f5f6f8。
+// 必须与 style.css 的 --color-bg-primary 同值，否则窗口首帧会在内容渲染前
+// 闪出一块比页面更深/更浅的底（用户看到的是"窗口底色和内容不是一个色"）。
 func pluginWindowBackground(dark bool) application.RGBA {
 	if dark {
-		return application.RGBA{Red: 23, Green: 24, Blue: 27, Alpha: 255}
+		return application.RGBA{Red: 15, Green: 17, Blue: 22, Alpha: 255}
 	}
 	return application.RGBA{Red: 245, Green: 246, Blue: 248, Alpha: 255}
 }
