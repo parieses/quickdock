@@ -11,7 +11,7 @@
 *Raycast 的快启体验 × VS Code 的开发者质感，加上开箱即用的本地开发环境*
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.28-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.29-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)

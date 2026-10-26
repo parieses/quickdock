@@ -84,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.28 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.29 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -95,18 +95,18 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.28) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.29) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.28</span>
+<span class="eyebrow">v0.0.29</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.28 给定时任务补齐了「执行历史」和「机器人通知」：每条任务现在能随时回看每次跑得怎样，结果还会自动推到钉钉 / 企业微信 / 飞书。定时任务新增运行历史（时间、成功 / 失败、耗时、结果摘要），自动保留最近记录、超量清理；机器人通知新增 MCP 方法，外部 AI 客户端也能发消息；定时任务执行后会把「结果 + 耗时」一并推送到已配置的机器人。</p>
+<p>v0.0.29 做了两件最影响日常手感的事：删错了能找回来，以及整个界面重排了一遍。删除的项目 / 集合 / 场景 / 笔记 / 工作空间现在统一进「设置 → 回收站」，随时恢复；界面这一轮把散在各处的页头、按钮、面板头收敛成同一套，三栏顶部对齐、控件高度统一，工作空间空的时候有清晰的引导告诉你下一步该建什么。监控则补齐了分组、延迟告警、CSV 导出与停机日历。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">定时任务运行历史</span><span>每条任务卡新增「运行历史」入口，可查看历次执行的时间、状态、耗时与结果；保留最近 100 条 / 30 天，自动清理不撑爆数据库。</span></div>
-<div class="tbl-row"><span class="k">机器人通知 MCP 方法</span><span>MCP 服务暴露 robot_notify 工具，外部 AI 客户端（配置过机器人后）可直接向钉钉 / 企业微信 / 飞书 / ServerChan / PushPlus / Telegram 发消息，支持指定渠道或全部渠道。</span></div>
-<div class="tbl-row"><span class="k">定时结果推送机器人</span><span>定时任务（自动与手动）执行后，把「执行结果 + 耗时」一并推送到已配置的机器人通知，失败原因也一并带上。</span></div>
+<div class="tbl-row"><span class="k">回收站</span><span>删除不再是不可逆的：项目、集合、场景、笔记、整个工作空间的删除都会先进回收站，在「设置 → 回收站」一键恢复，级联删掉的子内容一起回来。</span></div>
+<div class="tbl-row"><span class="k">界面整体统一</span><span>九个业务页各自为政的页头、按钮、面板头收敛成一套，三栏顶部对齐在同一条线上，控件高度与圆角统一；工作空间为空、或场景里还没有集合时，给出分步引导而不是一片空白。</span></div>
+<div class="tbl-row"><span class="k">监控分组与停机日历</span><span>监控可按分组归类，延迟超过阈值的抖动不再当成宕机；新增 CSV 导出与 12 周停机热力日历，一眼看出哪天不稳。</span></div>
 </div>
 </div>
 </section>
@@ -121,7 +121,20 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.28</span><span class="log-date">2026-10-26</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.29</span><span class="log-date">2026-10-26</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>回收站：项目、集合、场景、笔记、工作空间的删除都改为先进回收站，在「设置 → 回收站」可一键恢复，级联删除的子内容与文件夹结构一并还原；没选中的删除确认文案里会提示去哪找回。</li>
+<li>界面整体统一：页头、面板头、按钮、输入框、行与空状态收敛成同一套实现，三栏顶部对齐在同一条水平线，控件高度与圆角统一，工作空间三栏重排（场景 200 / 集合 240，项目列更宽）。</li>
+<li>空状态引导：工作空间里还没有场景、或当前场景还没有集合时，用整页分步引导代替空白列表，并自动选中唯一的场景 / 集合（有多个时不替你猜）。</li>
+<li>局部过滤：集合、条目、设置各自增加就地过滤框，只筛当前这一层；设置搜索支持用 sync、ai 这类关键词命中中文界面下的设置项。</li>
+<li>活动流水筛选：可按来源（项目 / SSH / 批量执行 / 插件 / 任务）与时间（今天 / 近 7 天 / 全部）筛选，「清除」只清当前筛选结果而不是全清；最常用排行可一键重置。</li>
+<li>监控增强：支持分组归类展示，新增延迟告警阈值（抖动不再误报为宕机），新增 CSV 导出与 12 周停机热力日历。</li>
+<li>定时任务命令动作：现在会捕获命令的真实输出（成功带 stdout，失败带退出码与 stderr，超时给出已执行提示），中文输出不再乱码，结果随通知一起推送。</li>
+<li>命令面板笔记检索改走后端，不再受前端条数上限限制；顺带修掉三处列表行尾按钮「有框无图标」的显示问题与侧栏按钮嵌套告警。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.28</span><span class="log-date">2026-10-26</span></summary>
 <ul class="log-body">
 <li>定时任务执行历史：新增 schedule_runs 历史表，记录每条任务每次执行的时间、状态、耗时与结果；前端每个任务卡新增「运行历史」入口查看最近记录，保留最近 100 条 / 30 天自动清理，避免无限增长。</li>
 <li>机器人通知 MCP 方法：MCP 服务暴露 robot_notify 工具，前提是已在「设置 → 通知」配置过机器人（未配置返回明确错误）；支持指定渠道或全部已配置渠道发送。</li>
