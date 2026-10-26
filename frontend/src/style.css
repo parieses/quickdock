@@ -17,10 +17,13 @@
   --space-10: 40px;
   --space-11: 48px;
 
-  --radius-xs: 5px;
-  --radius-sm: 8px;
-  --radius-md: 12px;
-  --radius-lg: 16px;
+  /* 圆角阶梯：13px 正文的桌面工具里，5/8/12/16 读起来像移动端卡片。
+     收到 4/6/10/14 后，控件与容器的层级仍能区分，但整体更"硬"。
+     改这四个值等于全应用换一套圆角，不要再在组件里写死 px。 */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
   --radius-full: 9999px;
 
   --sidebar-width: 210px;
@@ -39,21 +42,24 @@
 /* ==================== CSS 变量 — 深色主题 ==================== */
 :root,
 [data-theme="dark"] {
-  --color-bg-primary: #121419;
-  --color-bg-secondary: #181b22;
-  --color-bg-tertiary: #20242c;
-  --color-bg-hover: #282d37;
-  --color-bg-active: #303643;
+  /* 中性色阶：底色压深一档、hover/active 的跳幅收窄。
+     原来 hover(#282d37) 落在 bg-primary(#121419) 上跳了 22 级亮度，
+     鼠标划过一行像开了一盏灯；压深底色 + 收窄跳幅后层级靠"微微抬起"表达。 */
+  --color-bg-primary: #0f1116;
+  --color-bg-secondary: #151920;
+  --color-bg-tertiary: #1c2029;
+  --color-bg-hover: #1f242e;
+  --color-bg-active: #262d39;
   --color-bg-overlay: rgba(0, 0, 0, 0.55);
   --color-bg-overlay-deep: rgba(0, 0, 0, 0.78); /* 图片全屏查看器等需要深遮罩的场景 */
-  --color-surface: #181b22;
-  --color-surface-elevated: #20242c;
-  --color-text-primary: #dde1e7;
-  --color-text-secondary: #aab1bd;
-  --color-text-muted: #7d8590;
-  --color-text-disabled: #565c66;
-  --color-border: #282d37;
-  --color-border-light: #363c47;
+  --color-surface: #151920;
+  --color-surface-elevated: #1c2029;
+  --color-text-primary: #e6e9ef;
+  --color-text-secondary: #a1a8b4;
+  --color-text-muted: #6f7784;
+  --color-text-disabled: #565d68;
+  --color-border: #22272f;
+  --color-border-light: #2e3440;
   --color-border-focus: #5b8cff;
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;
@@ -81,8 +87,8 @@
   --color-search-hit-bg-active: rgba(240, 163, 94, 0.75);
   /* 语法高亮：配置编辑器的标点色 */
   --color-syntax-punctuation: #c792ea;
-  --color-scrollbar-thumb: #363c47;
-  --color-scrollbar-hover: #444b58;
+  --color-scrollbar-thumb: #2c323c;
+  --color-scrollbar-hover: #3a4250;
   --color-scrollbar-track: transparent;
   --color-accent-bg: rgba(91, 140, 255, 0.1);
   --color-accent-border: rgba(91, 140, 255, 0.2);
@@ -90,14 +96,14 @@
   --color-accent-light: #7ea6ff;
   /* 代码块：AI 助手与笔记预览共用。AI 气泡已改为透明底，
      代码块需要自带底色才能与正文拉开层级，故单列一组 token。 */
-  --color-code-bg: #14171d;
-  --color-code-bar-bg: #1c2029;
-  --color-code-inline-bg: #242932;
+  --color-code-bg: #12161c;
+  --color-code-bar-bg: #191d25;
+  --color-code-inline-bg: #212630;
 
   /* 终端调色板：xterm 只接受具体色值，无法传 var()，所以这些 token 由
      SshTerminal.vue 用 getComputedStyle 读出实际值再喂给 xterm。
      16 个 ANSI 色 + 背景/前景/光标/选区，两套主题必须一一对应。 */
-  --color-terminal-bg: #121419;
+  --color-terminal-bg: #0f1116;
   --color-terminal-fg: #c6cad3;
   --color-terminal-cursor: #5b8cff;
   --color-terminal-selection: rgba(91, 140, 255, 0.28);
@@ -142,21 +148,23 @@
 
 /* ==================== CSS 变量 — 浅色主题 ==================== */
 [data-theme="light"] {
-  --color-bg-primary: #e9ebef;
-  --color-bg-secondary: #f1f3f6;
-  --color-bg-tertiary: #e1e4e9;
-  --color-bg-hover: #dde1e7;
-  --color-bg-active: #d3d8df;
+  /* 浅色同阶：底色提亮到近白（原来 #e9ebef 偏灰，长时间看发闷），
+     面板靠 -secondary/-tertiary 拉开层级。与深色一一对应。 */
+  --color-bg-primary: #f5f6f8;
+  --color-bg-secondary: #ebedf1;
+  --color-bg-tertiary: #e3e6eb;
+  --color-bg-hover: #e1e4e9;
+  --color-bg-active: #d7dbe2;
   --color-bg-overlay: rgba(15, 18, 24, 0.14);
   --color-bg-overlay-deep: rgba(15, 18, 24, 0.62); /* 与暗色主题同名 token，一一对应 */
-  --color-surface: #f2f4f7;
-  --color-surface-elevated: #e9ebef;
-  --color-text-primary: #23272e;
-  --color-text-secondary: #565d68;
-  --color-text-muted: #7c848f;
+  --color-surface: #f0f2f5;
+  --color-surface-elevated: #e6e9ee;
+  --color-text-primary: #1f242c;
+  --color-text-secondary: #565e6b;
+  --color-text-muted: #737b88;
   --color-text-disabled: #a2a8b0;
-  --color-border: #d6dae0;
-  --color-border-light: #c7ccd4;
+  --color-border: #d8dce2;
+  --color-border-light: #c6cbd3;
   --color-border-focus: #5b8cff;
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;

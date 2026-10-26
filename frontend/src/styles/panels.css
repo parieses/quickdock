@@ -1,0 +1,293 @@
+/* ============================================================================
+ * 工作空间三栏（场景 / 集合 / 项目）的公共外观
+ *
+ * 为什么要抽成全局文件：这三个面板原本各写一套 scoped 样式，结果同一件事
+ * （面板标题、行、圆角、选中态、行尾按钮）在三处的取值都不一样，界面看着
+ * 像三个不同产品拼起来的 ——
+ *   场景行：通栏、无圆角、选中靠左侧 2px 竖条
+ *   集合行：圆角卡片 + 上下间距、选中靠描边、图标带 28px 底色块
+ *   项目行：通栏、无圆角、选中态根本没有
+ * 与其在三份 scoped 里各改一遍（改漏一处就再次分叉），不如只留一份。
+ *
+ * 类名统一 `qd-` 前缀：`styles/settings.css` 里的全局 `.action-btn` 已经
+ * 和组件内同名类打过一次架（padding/border 互相盖，图标被压成 0 宽），
+ * 公共类必须用前缀避免同类事故。
+ *
+ * 尺寸基准对齐 Sidebar 的 `.nav-item`（padding 7px 10px / gap 8px /
+ * radius-sm / hover bg-hover / active bg-tertiary），保证侧栏与三栏是同一套语言。
+ * ========================================================================== */
+
+/* ---- 面板容器 ---- */
+.qd-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+}
+
+/* ---- 面板头：三栏同高、同内边距、同分隔线 ---- */
+.qd-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-shrink: 0;
+  height: 38px;
+  padding: 0 8px 0 12px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* 分区名（场景 / 集合 / 项目）。项目栏也用它，当前集合名改为标题后的胶囊，
+   否则三栏标题一式两样，头一眼就割裂。 */
+.qd-panel-title {
+  min-width: 0;
+  flex-shrink: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  user-select: none;
+}
+
+/* 标题后的胶囊：放「当前集合」这类上下文，替代原来的大标题。
+   水平方向靠 margin-right: auto 吸收剩余空间，这样「标题 + 胶囊」贴左、
+   操作按钮靠右，不必再套一层 flex 容器。 */
+.qd-panel-chip {
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 55%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-left: 8px;
+  margin-right: auto;
+  padding: 1px 7px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.qd-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+/* 头部方按钮与行内按钮共用 app.css 的 .qd-icon-btn 定义，
+   这里不再重复一套（重复就必然和页头分叉）。 */
+
+/* ---- 过滤行：三栏都在头部下方、同样高度 ---- */
+.qd-panel-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  /* 项目栏是 flex:1 的宽面板，不限宽的话搜索框会拉满上千像素，
+     和左边两栏的窄框完全不像同一套控件 */
+  max-width: 380px;
+  margin: 8px 8px 6px;
+  padding: 0 8px;
+  height: 28px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  transition: border-color var(--transition-fast);
+}
+.qd-panel-search:focus-within { border-color: var(--color-accent); }
+.qd-panel-search.is-disabled { opacity: 0.6; }
+.qd-search-icon { flex-shrink: 0; color: var(--color-text-disabled); }
+.qd-search-input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  color: var(--color-text-primary);
+  font-size: 12px;
+  font-family: inherit;
+}
+.qd-search-input::placeholder { color: var(--color-text-disabled); }
+.qd-search-input:disabled { cursor: not-allowed; }
+.qd-search-clear {
+  padding: 0;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+}
+.qd-search-clear:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
+
+/* 搜索结果计数条 */
+.qd-search-hint {
+  flex-shrink: 0;
+  padding: 4px 14px;
+  font-size: 11px;
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+/* ---- 滚动区 ---- */
+.qd-panel-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 4px 6px 8px;
+}
+.qd-panel-body ul { list-style: none; padding: 0; margin: 0; }
+
+/* ---- 行：三栏统一「图标 + 两行文字 + 行尾操作」 ---- */
+.qd-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  margin-bottom: 2px;
+  padding: 5px 6px 5px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
+}
+.qd-row:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+/* 选中态用强调色淡底 + 图标转强调色：比纯中性底色更能一眼锁定当前项，
+   同时和 hover（纯中性抬起）明显区分 —— 两者早前同色，分不清哪行选中。 */
+.qd-row.active { background: var(--color-accent-bg); color: var(--color-text-primary); }
+.qd-row.dragging { opacity: 0.4; }
+.qd-row[draggable="true"] { cursor: grab; }
+.qd-row[draggable="true"]:active { cursor: grabbing; }
+
+.qd-row-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  flex-shrink: 0;
+  color: var(--color-text-muted);
+}
+.qd-row.active .qd-row-icon { color: var(--color-accent); }
+
+.qd-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.qd-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  line-height: 1.3;
+}
+.qd-row-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--color-text-disabled);
+}
+.qd-row.active .qd-row-sub { color: var(--color-text-muted); }
+
+.qd-row-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+  opacity: 1;
+}
+
+/* 行内小按钮。padding: 0 必须写死：settings.css 里有同名全局 .action-btn
+   （padding 7px 14px + border 1px），box-sizing: border-box 下会把 22px 宽
+   按钮的内容盒压成 0，SVG 被收缩到不可见。这里用 qd- 前缀从根上避开，
+   padding: 0 仍然显式写，防止有人日后把类名改回 .action-btn。 */
+.qd-row-btn {
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.qd-row-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
+.qd-row-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.qd-row-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
+.qd-row-btn:disabled:hover { color: var(--color-text-disabled); background: none; }
+
+/* ---- 空状态：三栏同一套 ---- */
+.qd-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 36px 16px;
+  text-align: center;
+}
+.qd-empty-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  margin-bottom: 12px;
+  border: 1px dashed var(--color-border-light);
+  border-radius: var(--radius-md);
+  color: var(--color-text-disabled);
+}
+.qd-empty-title {
+  margin: 0 0 4px;
+  font-size: 13px;
+  color: var(--color-text-secondary);
+}
+.qd-empty-hint {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--color-text-muted);
+}
+.qd-empty-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  margin-top: 14px;
+  padding: 6px 13px;
+  border: 1px solid var(--color-accent-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.qd-empty-cta:hover {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}

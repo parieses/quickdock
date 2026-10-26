@@ -1,0 +1,255 @@
+/* ============================================================================
+ * 应用外壳与通用控件（全应用唯一实现）
+ *
+ * 为什么要有这个文件：每个业务页都自己写了一个 `xxx-header` ——
+ *   .env-header       padding 10px 20px   标题 15px  分隔靠 shadow
+ *   .mon-header       margin-bottom 20px  标题 18px  无分隔
+ *   .plugin-header    margin-bottom 12px  标题 14px  无分隔
+ *   .activity-header  padding 14px 20px   标题 15px  1px 线
+ *   .notes-header     padding 10px 16px   标题 15px  1px 线
+ * 五套写法意味着切换页面时标题会在竖直方向"跳"一下，同一排按钮的
+ * 高度、内边距、圆角也各不相同，整体看起来像几个工具拼在一起。
+ *
+ * 这里只提供**两级**头部：
+ *   .qd-page-header   一级页面（环境服务 / 监控 / 笔记 / 插件 ...），44px
+ *   .qd-panel-header  三栏面板（见 panels.css），38px
+ * 任何页面都不许再自造 `xxx-header`。
+ *
+ * 按钮同理，只保留三种：.qd-btn（次级）/ .qd-btn-primary / .qd-icon-btn。
+ * 所有取值走 style.css 的 token，禁止在这里写死色值。
+ * ========================================================================== */
+
+/* ---- 页面容器 ---- */
+.qd-page {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--color-bg-primary);
+}
+
+.qd-page-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 16px;
+}
+
+/* ---- 一级页头 ---- */
+.qd-page-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  min-height: 44px;
+  padding: 0 16px;
+  /* 1px 实线而不是 shadow：底色压深后 `--shadow-border`（0 1px 0 rgba(0,0,0,.08)）
+     在深色主题几乎看不见，页头会像悬空的。 */
+  border-bottom: 1px solid var(--color-border);
+}
+
+/* 标题块：主标题 + 可选副标题。也允许只有标题（多数页面）。 */
+.qd-page-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  flex-shrink: 0;
+}
+
+.qd-page-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--color-text-primary);
+}
+
+.qd-page-sub {
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--color-text-muted);
+}
+
+/* 页头里需要占满中间的控件（搜索框 / 标签条）。没有它时按钮靠
+   .qd-page-actions 的 margin-left:auto 自己贴右。 */
+.qd-page-fill {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.qd-page-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ---- 按钮：只有一种盒子，三种语气 ---- */
+.qd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  height: 28px;
+  padding: 0 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-secondary);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.qd-btn:hover {
+  background: var(--color-bg-hover);
+  border-color: var(--color-border-light);
+  color: var(--color-text-primary);
+}
+.qd-btn:disabled {
+  color: var(--color-text-disabled);
+  border-color: var(--color-border);
+  background: none;
+  cursor: not-allowed;
+}
+
+.qd-btn-primary {
+  background: var(--color-accent);
+  border-color: var(--color-accent);
+  color: var(--color-accent-text);
+  font-weight: 500;
+}
+.qd-btn-primary:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  color: var(--color-accent-text);
+}
+.qd-btn-primary:disabled {
+  background: var(--color-accent-muted);
+  border-color: transparent;
+  color: var(--color-accent-text);
+  opacity: 0.6;
+}
+
+/* 无边框：用于页头里成组的心理"次要动作"，hover 才浮出底色 */
+.qd-btn-ghost {
+  border-color: transparent;
+  background: none;
+}
+.qd-btn-ghost:hover {
+  background: var(--color-bg-hover);
+  border-color: transparent;
+}
+
+.qd-btn-danger {
+  border-color: var(--color-danger-border);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+.qd-btn-danger:hover {
+  background: var(--color-danger);
+  border-color: var(--color-danger);
+  color: var(--color-danger-text);
+}
+
+/* 开关型按钮的"已选中"态（如插件页的「市场 / 本地」切换、分组筛选 chip） */
+.qd-btn.is-on {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border-strong);
+  background: var(--color-accent-bg);
+}
+.qd-btn.is-on:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+/* 小一号：表格行尾、卡片内部 */
+.qd-btn-sm {
+  height: 24px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+/* 图标按钮：页头与三栏共用一套。定义必须留在本文件（而不是 panels.css），
+   否则只在页头用它的页面会拿到浏览器默认按钮样式 —— 白底方块。 */
+.qd-icon-btn {
+  padding: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast),
+    border-color var(--transition-fast);
+}
+.qd-icon-btn:hover { color: var(--color-accent); background: var(--color-bg-hover); }
+.qd-icon-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
+.qd-icon-btn:disabled:hover { color: var(--color-text-disabled); background: none; }
+
+/* ---- 输入框 ---- */
+.qd-input {
+  height: 28px;
+  padding: 0 9px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+.qd-input::placeholder { color: var(--color-text-disabled); }
+.qd-input:focus { border-color: var(--color-accent); }
+.qd-input:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
+
+/* 带图标的输入框（搜索）：图标绝对定位，输入框留左内边距 */
+.qd-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.qd-input-wrap > svg {
+  position: absolute;
+  left: 9px;
+  color: var(--color-text-disabled);
+  pointer-events: none;
+}
+.qd-input-wrap > .qd-input { padding-left: 28px; width: 100%; }
+
+/* ---- 卡片 ---- */
+.qd-card {
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+
+/* ---- 内容工具栏（页头之下的一排筛选/操作） ---- */
+.qd-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--color-border);
+}

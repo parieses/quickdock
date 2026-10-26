@@ -1,0 +1,174 @@
+/* ============================================================================
+ * 空状态引导页（整页级）
+ *
+ * 两个层级共用一份样式，避免"同一个引导页在不同空状态下长得不一样"：
+ *   1. 工作空间里一个场景都没有  → 占满内容区（此时场景栏也不渲染）
+ *   2. 当前场景下一个集合都没有  → 占满「集合 + 项目」两块区域
+ *
+ * 排版要点（第一版踩过）：容器同时写了 `align-items/justify-content: center`
+ * 和 `overflow-y: auto`。内容一旦高于容器，flex 居中会把顶部顶到可视区之外，
+ * 而且**滚不上去** —— 表现就是"能上下滑、但排版松散又看不到开头"。
+ * 正确做法：容器只做 `display: flex` + `overflow-y: auto`，
+ * 由内层的 `margin: auto` 完成居中 —— auto margin 在溢出时会退化为 0，
+ * 顶部因此始终可见，且不需要滚动。
+ * ========================================================================== */
+
+.qd-guide {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow-y: auto;
+  background: var(--color-bg-primary);
+}
+
+.qd-guide-inner {
+  /* auto margin 居中：内容超出容器时自动退化为 0，顶部不会被裁掉 */
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  width: 100%;
+  max-width: 640px;
+  padding: 28px 24px;
+}
+
+.qd-guide-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+  margin-bottom: 14px;
+  border-radius: 50%;
+  background: var(--color-accent-bg);
+  flex-shrink: 0;
+}
+
+.qd-guide-title {
+  margin: 0 0 6px;
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  letter-spacing: -0.2px;
+}
+
+.qd-guide-desc {
+  margin: 0 0 18px;
+  font-size: 13px;
+  line-height: 1.65;
+  color: var(--color-text-muted);
+}
+
+.qd-guide-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px 20px;
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  background: var(--color-accent);
+  color: var(--color-accent-text);
+  font-size: 13px;
+  font-weight: 600;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+  margin-bottom: 22px;
+}
+.qd-guide-cta:hover {
+  background: var(--color-accent-hover);
+  border-color: var(--color-accent-hover);
+  box-shadow: 0 4px 12px var(--color-accent-border-strong);
+}
+.qd-guide-cta:disabled { opacity: 0.6; cursor: default; box-shadow: none; }
+
+/* 步骤：横排三列更紧凑（竖排三张卡片 + 连接线的总高度会把页面撑出滚动条）。
+   窄窗口自动折成一列，不靠新式选择器。 */
+.qd-guide-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  margin-bottom: 18px;
+}
+@media (max-width: 660px) {
+  .qd-guide-steps { grid-template-columns: 1fr; }
+}
+
+.qd-guide-step {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  text-align: left;
+}
+
+.qd-guide-step-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.qd-guide-step-num {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  border: 1px solid var(--color-accent-border);
+  border-radius: 50%;
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.qd-guide-step-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.qd-guide-step-desc {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--color-text-muted);
+}
+
+.qd-guide-footer {
+  display: flex;
+  justify-content: center;
+}
+
+.qd-guide-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 11px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+.qd-guide-link:hover {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}

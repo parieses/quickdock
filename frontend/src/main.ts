@@ -5,8 +5,15 @@ import { i18n } from './i18n'
 import { Events } from '@wailsio/runtime'
 import { ReportFrontendError } from '../bindings/quickdock/services/diag/diagservice'
 import './style.css'
+// 应用外壳与通用控件（页头 / 按钮 / 输入框 / 卡片）：全应用唯一实现，
+// 各业务页不许再自造 xxx-header 或第 N 套按钮尺寸
+import './styles/app.css'
 // 设置模块公共样式（D5：从 SettingsModal.vue 抽离，供 SettingsAI/SettingsSnapshot 等无自身 style 的子组件依赖）
 import './styles/settings.css'
+// 工作空间三栏（场景/集合/项目）公共外观：一份类名三处共用，避免再各写一套 scoped 样式
+import './styles/panels.css'
+// 整页空状态引导（无场景 / 无集合两档共用）
+import './styles/guide.css'
 
 // 前端异常落盘：白屏 / 交互报错时，用户可在「设置 > 关于」的崩溃记录里看到现场，
 // 不必开 DevTools（打包版根本没有 DevTools）。
