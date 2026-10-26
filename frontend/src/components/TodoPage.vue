@@ -534,23 +534,27 @@ onMounted(() => {
 <template>
   <div class="todo-page">
     <!-- 顶部栏 -->
-    <div class="todo-header">
-      <div class="todo-title-wrap">
-        <h2 class="todo-title">{{ t('todoTitle') }}</h2>
-        <span class="todo-sub">{{ t('todoSubtitle') }}</span>
+    <div class="qd-page-header">
+      <div class="qd-page-titles">
+        <h2 class="qd-page-title">{{ t('todoTitle') }}</h2>
+        <span class="qd-page-sub">{{ t('todoSubtitle') }}</span>
       </div>
-      <div class="cal-nav">
-        <button class="cal-btn" @click="prevMonth" :title="t('prevMonth')"><ChevronLeft :size="16" /></button>
-        <span class="cal-month">{{ monthLabel }}</span>
-        <button class="cal-btn" @click="nextMonth" :title="t('nextMonth')"><ChevronRight :size="16" /></button>
-        <button class="cal-today" @click="goToday">{{ t('todoToday') }}</button>
+      <div class="qd-page-fill">
+        <div class="cal-nav">
+          <button class="qd-icon-btn" @click="prevMonth" :title="t('prevMonth')"><ChevronLeft :size="16" /></button>
+          <span class="cal-month">{{ monthLabel }}</span>
+          <button class="qd-icon-btn" @click="nextMonth" :title="t('nextMonth')"><ChevronRight :size="16" /></button>
+          <button class="qd-btn qd-btn-ghost" @click="goToday">{{ t('todoToday') }}</button>
+        </div>
       </div>
-      <div class="focus-dur" :title="t('todoFocusDur')">
-        <button v-for="d in FOCUS_DEFAULTS" :key="d"
-          :class="['focus-dur-btn', { active: focusMinutes === d }]"
-          @click="focusMinutes = d">
-          {{ d }}
-        </button>
+      <div class="qd-page-actions">
+        <div class="focus-dur" :title="t('todoFocusDur')">
+          <button v-for="d in FOCUS_DEFAULTS" :key="d"
+            :class="['focus-dur-btn', { active: focusMinutes === d }]"
+            @click="focusMinutes = d">
+            {{ d }}
+          </button>
+        </div>
       </div>
     </div>
 
@@ -886,54 +890,32 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* 页头已统一为 .qd-page-header（通栏），页容器不再留 padding */
 .todo-page {
   display: flex;
   flex-direction: column;
   height: 100%;
-  padding: var(--space-6) var(--space-8);
   overflow: hidden;
+  background: var(--color-bg-primary);
 }
-.todo-header {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  margin-bottom: var(--space-5);
-  flex-shrink: 0;
-}
-.todo-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
-.todo-title { font-size: 18px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
-.todo-sub { font-size: 12px; color: var(--color-text-disabled); }
 .cal-nav { display: flex; align-items: center; gap: var(--space-2); }
-.focus-dur { display: flex; align-items: center; gap: 2px; margin-left: var(--space-3); }
+.focus-dur { display: flex; align-items: center; gap: 2px; }
 .focus-dur-btn {
-  min-width: 30px; height: 26px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+  min-width: 28px; height: 24px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-muted); border-radius: var(--radius-sm); font-size: 11px; cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }
 .focus-dur-btn:hover { color: var(--color-text-primary); }
 .focus-dur-btn.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
-.cal-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.cal-btn:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
-.cal-month { font-size: 14px; font-weight: 600; color: var(--color-text-primary); min-width: 88px; text-align: center; }
-.cal-today {
-  margin-left: var(--space-2); padding: 5px 12px; border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border-radius: var(--radius-md); font-size: 12px; cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.cal-today:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
+.cal-month { font-size: 13px; font-weight: 600; color: var(--color-text-primary); min-width: 84px; text-align: center; }
 
 .todo-error {
-  margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px;
+  margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
-.todo-body { display: flex; gap: var(--space-6); flex: 1; min-height: 0; }
+.todo-body { display: flex; gap: var(--space-6); flex: 1; min-height: 0; padding: 14px 20px 16px; }
 
 /* 日历卡片 */
 .cal-card {

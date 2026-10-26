@@ -2623,27 +2623,29 @@ const s = currentRuntimeState
 
 <template>
   <div class="env-page">
-    <div class="env-header">
-      <div>
-        <h2 class="env-title">
+    <div class="qd-page-header">
+      <div class="qd-page-titles">
+        <h2 class="qd-page-title">
           {{ t('navEnvironments') }}
           <span class="env-info" :title="t('envSubtitle')" role="img" aria-label="info">?</span>
         </h2>
       </div>
-      <div class="env-header-actions">
-        <button class="path-btn" @click="openMaintenance('check')" :title="t('maintTitle')">
+      <div class="qd-page-actions">
+        <button class="qd-btn qd-btn-ghost" @click="openMaintenance('check')" :title="t('maintTitle')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9 9a2.8 2.8 0 0 1-4-4l9-9z"/><path d="M19.7 11.3 21 10a3 3 0 0 0-4-4l-1.3 1.3"/></svg>
           <span>{{ t('maintTitle') }}</span>
         </button>
-        <button class="path-btn" @click="pathModal.open = true" :title="t('pathPanel')">
+        <button class="qd-btn qd-btn-ghost" @click="pathModal.open = true" :title="t('pathPanel')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0M15.5 18H10a4 4 0 0 1-4-4v0"/></svg>
           <span>PATH</span>
         </button>
-        <button class="path-btn" @click="openPanorama" :title="t('portPanorama')">
+        <button class="qd-btn qd-btn-ghost" @click="openPanorama" :title="t('portPanorama')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h2M8 17h2M14 14h2M14 17h2"/></svg>
           <span>{{ t('portPanorama') }}</span>
         </button>
-        <button class="env-refresh" @click="refresh" :title="t('refresh')">⟳</button>
+        <button class="qd-icon-btn" @click="refresh" :title="t('refresh')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg>
+        </button>
       </div>
     </div>
 
@@ -4125,15 +4127,8 @@ const s = currentRuntimeState
   overflow: hidden;
   background: var(--color-bg-primary);
 }
-.env-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 10px 20px;
-  box-shadow: var(--shadow-border);
-  flex-shrink: 0;
-}
-.env-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--color-text-primary); display: inline-flex; align-items: center; gap: 7px; }
+/* 页头已统一到 styles/app.css 的 .qd-page-header（全应用一致），
+   这里只保留本页特有的「?」说明图标。 */
 /* 标题旁说明图标：悬停显示 envSubtitle。原为整行副标题，改为悬停提示以压缩头部高度。 */
 .env-info {
   width: 15px; height: 15px; border-radius: 50%;
@@ -4143,23 +4138,6 @@ const s = currentRuntimeState
   border: 1px solid var(--color-border);
 }
 .env-info:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
-.env-refresh {
-  width: 30px; height: 30px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary); cursor: pointer; font-size: 15px;
-}
-.env-refresh:hover { color: var(--color-accent); border-color: var(--color-border-focus); }
-.path-btn {
-  display: inline-flex; align-items: center; gap: 6px;
-  height: 30px; padding: 0 13px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border-focus);
-  background: var(--color-accent-bg); color: var(--color-accent);
-  font-size: 12px; font-weight: 700; letter-spacing: 0.5px; cursor: pointer;
-  white-space: nowrap; flex-shrink: 0;
-  transition: background .12s ease, border-color .12s ease;
-}
-.path-btn:hover { background: color-mix(in srgb, var(--color-accent) 20%, transparent); border-color: var(--color-accent); }
-.path-btn svg { width: 14px; height: 14px; }
 
 .env-body { flex: 1; min-height: 0; display: flex; }
 

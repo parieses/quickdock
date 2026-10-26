@@ -279,19 +279,21 @@ watch(pendingOpenNoteId, (id) => {
 <template>
   <div class="notes-page">
     <!-- 顶部 -->
-    <div class="notes-header">
-      <div class="notes-title">
-        <h2 class="notes-h2">{{ t('notesTitle') }}</h2>
-        <span class="notes-sub">{{ t('notesSubtitle') }}</span>
+    <div class="qd-page-header">
+      <div class="qd-page-titles">
+        <h2 class="qd-page-title">{{ t('notesTitle') }}</h2>
+        <span class="qd-page-sub">{{ t('notesSubtitle') }}</span>
       </div>
-      <div class="notes-search">
-        <Search :size="14" class="ns-icon" />
-        <input v-model="searchQuery" class="ns-input" :placeholder="t('notesSearchPh')" />
-        <button v-if="searchQuery" class="ns-clear" @click="clearSearch"><X :size="13" /></button>
-      </div>
-      <div class="notes-tags">
-        <button class="nt-chip" :class="{ active: activeTag === '' }" @click="activeTag = ''">{{ t('notesAllTags') }}</button>
-        <button v-for="tg in allTags" :key="tg" class="nt-chip" :class="{ active: activeTag === tg }" @click="activeTag = activeTag === tg ? '' : tg">{{ tg }}</button>
+      <div class="qd-page-fill">
+        <div class="qd-input-wrap notes-search">
+          <Search :size="14" />
+          <input v-model="searchQuery" class="qd-input ns-input" :placeholder="t('notesSearchPh')" />
+          <button v-if="searchQuery" class="ns-clear" @click="clearSearch"><X :size="13" /></button>
+        </div>
+        <div class="notes-tags">
+          <button class="nt-chip" :class="{ active: activeTag === '' }" @click="activeTag = ''">{{ t('notesAllTags') }}</button>
+          <button v-for="tg in allTags" :key="tg" class="nt-chip" :class="{ active: activeTag === tg }" @click="activeTag = activeTag === tg ? '' : tg">{{ tg }}</button>
+        </div>
       </div>
     </div>
 
@@ -362,22 +364,17 @@ watch(pendingOpenNoteId, (id) => {
       </div>
     </div>
 
-    <ConfirmDialog :visible="showDel" :message="(deletingNode?.isFolder ? t('notesDelFolder') : t('notesDelDoc')) + '?'"
+    <ConfirmDialog :visible="showDel" :message="deletingNode?.isFolder ? t('notesDelFolder') : t('notesDelDoc')"
       @confirm="confirmDeleteNode" @cancel="showDel = false" />
   </div>
 </template>
 
 <style scoped>
 .notes-page { height: 100%; display: flex; flex-direction: column; background: var(--color-bg-primary); }
-.notes-header { display: flex; align-items: center; gap: 10px; padding: 10px 16px; border-bottom: 1px solid var(--color-border); }
-.notes-title { display: flex; flex-direction: column; flex-shrink: 0; }
-.notes-h2 { margin: 0; font-size: 15px; color: var(--color-text-primary); }
-.notes-sub { font-size: 11px; color: var(--color-text-muted); }
-.notes-search { position: relative; width: 260px; flex-shrink: 0; display: flex; align-items: center; }
-.ns-icon { position: absolute; left: 8px; color: var(--color-text-disabled); }
-.ns-input { width: 100%; padding: 6px 28px 6px 28px; border: 1px solid var(--color-border); border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px; outline: none; font-family: inherit; }
-.ns-input:focus { border-color: var(--color-accent); }
-.ns-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; }
+/* 页头已统一到 styles/app.css 的 .qd-page-header（标题 + 搜索 + 标签三段式） */
+.notes-search { width: 240px; flex-shrink: 0; }
+.ns-input { padding-left: 28px; padding-right: 26px; }
+.ns-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
 .notes-tags { flex: 1; min-width: 0; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-left: 8px; }
 .nt-chip { padding: 2px 6px; border: none; background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; flex-shrink: 0; line-height: 1; transition: color var(--transition-fast), font-weight var(--transition-fast); }
 .nt-chip:hover { color: var(--color-text-primary); }

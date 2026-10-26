@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban, Search } from '@lucide/vue'
+import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban, Search, Upload } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 
 import {
@@ -52,7 +52,7 @@ interface MarketIndex {
   plugins: MarketPlugin[]
 }
 
-const emit = defineEmits<{ (e: 'installed'): void }>()
+const emit = defineEmits<{ (e: 'installed'): void; (e: 'install-local'): void }>()
 
 const plugins = ref<MarketPlugin[]>([])
 const loading = ref(true)
@@ -289,21 +289,29 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 
 <template>
   <div class="market-page">
-    <div class="market-header">
+    <!-- 市场视图的标题已由父页（插件管理）的页头承担，这里只留一排状态 + 操作，
+         避免同屏出现两条标题栏。 -->
+    <div class="qd-toolbar market-header">
       <div class="market-header-left">
-        <Store :size="20" />
-        <h2 class="market-title">{{ t('pluginMarket') }}</h2>
         <span v-if="plugins.length" class="market-count">{{ filteredPlugins.length }}</span>
         <span v-if="updated" class="market-updated">{{ t('pluginMarketUpdated') }}: {{ updated.slice(0, 10) }}</span>
       </div>
-      <button v-if="updatableCount > 0" class="update-all-btn" :disabled="updatingAll" @click="updateAll">
-        <RefreshCw v-if="updatingAll" :size="14" class="spin" />
-        <ArrowUpCircle v-else :size="14" />
-        <span>{{ updatingAll ? t('pluginUpdateAllProgress', { done: updateAllDone, total: updateAllTotal }) : t('pluginUpdateAll') }}</span>
-      </button>
-      <button class="refresh-btn" @click="loadMarket" :title="t('refresh')">
-        <RefreshCw :size="14" />
-      </button>
+      <div class="market-header-actions">
+        <!-- 本地安装：浏览市场时也能直接装拿到的 .zip（离线/内网分发场景），
+             不用切回本地视图。选文件与安装链路复用父页 selectAndInstall。 -->
+        <button class="qd-btn" @click="emit('install-local')" :title="t('pluginInstallFromFile')">
+          <Upload :size="14" />
+          <span>{{ t('pluginInstallFromFile') }}</span>
+        </button>
+        <button v-if="updatableCount > 0" class="qd-btn qd-btn-primary" :disabled="updatingAll" @click="updateAll">
+          <RefreshCw v-if="updatingAll" :size="14" class="spin" />
+          <ArrowUpCircle v-else :size="14" />
+          <span>{{ updatingAll ? t('pluginUpdateAllProgress', { done: updateAllDone, total: updateAllTotal }) : t('pluginUpdateAll') }}</span>
+        </button>
+        <button class="qd-icon-btn" @click="loadMarket" :title="t('refresh')">
+          <RefreshCw :size="14" />
+        </button>
+      </div>
     </div>
 
     <div v-if="plugins.length" class="market-toolbar">
@@ -500,24 +508,13 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 </template>
 
 <style scoped>
-.market-page { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; }
-.market-header { display: flex; align-items: center; justify-content: space-between; padding: 4px 0; }
+.market-page { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 10px 20px 16px; }
+/* 头部改为 .qd-toolbar（副工具栏），只承担状态 + 操作，不再重复标题 */
+.market-header { padding: 0; box-shadow: none; }
 .market-header-left { display: flex; align-items: center; gap: 8px; }
-.market-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
-.market-count { font-size: 11px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 8px; border-radius: var(--radius-md); }
+.market-header-actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.market-count { font-size: 11px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 8px; border-radius: var(--radius-xs); }
 .market-updated { font-size: 10px; color: var(--color-text-disabled); margin-left: 4px; }
-.refresh-btn {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border); background: var(--color-bg-secondary);
-  color: var(--color-text-secondary); cursor: pointer;
-}
-.refresh-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.update-all-btn {
-  display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 12px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-warning-border); background: var(--color-warning-bg);
-  color: var(--color-warning); font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap;
-}
 .update-all-btn:hover:not(:disabled) { background: var(--color-warning-border); }
 .update-all-btn:disabled { opacity: .7; cursor: default; }
 .filter-chip {

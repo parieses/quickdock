@@ -287,14 +287,14 @@ onMounted(refresh)
 <template>
   <div class="sched-page">
     <!-- 顶部栏 -->
-    <div class="sched-header">
-      <div class="sched-title-wrap">
-        <h2 class="sched-title">{{ t('sched_title') }}</h2>
-        <span class="sched-sub">{{ t('sched_subtitle') }}</span>
+    <div class="qd-page-header">
+      <div class="qd-page-titles">
+        <h2 class="qd-page-title">{{ t('sched_title') }}</h2>
+        <span class="qd-page-sub">{{ t('sched_subtitle') }}</span>
       </div>
-      <div class="sched-header-actions">
+      <div class="qd-page-actions">
         <WebhookSettingsModal :label="t('sched_nf_title')" />
-        <button class="add-btn" @click="openCreate"><Plus :size="15" /> {{ t('sched_add') }}</button>
+        <button class="qd-btn qd-btn-primary" @click="openCreate"><Plus :size="14" /> {{ t('sched_add') }}</button>
       </div>
     </div>
 
@@ -474,33 +474,20 @@ onMounted(refresh)
 <style scoped>
 .sched-page {
   display: flex; flex-direction: column; height: 100%;
-  padding: var(--space-6) var(--space-8); overflow: hidden;
+  overflow: hidden; background: var(--color-bg-primary);
 }
-.sched-header {
-  display: flex; align-items: flex-end; justify-content: space-between;
-  margin-bottom: var(--space-5); flex-shrink: 0;
-}
-.sched-header-actions { display: flex; align-items: center; gap: var(--space-2); }
+/* 页头已统一为 .qd-page-header（通栏），内边距下放到内容块 */
 .interval-row { display: flex; align-items: center; gap: var(--space-2); }
 .interval-num { flex: 1 1 auto; min-width: 0; }
 .interval-unit { flex: 0 0 96px; width: 96px; }
-.sched-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
-.sched-title { font-size: 18px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
-.sched-sub { font-size: 12px; color: var(--color-text-disabled); }
-.add-btn {
-  display: inline-flex; align-items: center; gap: 5px; padding: 7px 14px;
-  background: var(--color-accent); color: var(--color-accent-text); border: none; border-radius: var(--radius-md);
-  font-size: 13px; cursor: pointer; font-family: inherit; transition: background var(--transition-fast);
-}
-.add-btn:hover { background: var(--color-accent-hover); }
 
 .sched-error {
-  margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px;
+  margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
-.sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
+.sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 14px 20px 16px; }
 .sched-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 .empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
 .empty-hint { font-size: 11px; color: var(--color-text-muted); margin-top: var(--space-2); }

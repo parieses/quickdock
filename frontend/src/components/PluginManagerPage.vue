@@ -43,7 +43,7 @@ const activeView = ref<'local' | 'market'>('local')
 
 // 市场安装成功后刷新本地插件列表
 async function onMarketInstalled() {
-  await loadPlugins()
+  await reloadPlugins()
 }
 
 // ---- 执行历史（5.2） ----
@@ -110,8 +110,11 @@ async function loadIcons() {
   )
 }
 
-async function loadPlugins() {
-  loading.value = true
+// silent：刷新不闪屏。卸载/安装/停用失败后的重载都走这条——列表已有内容时
+// 把九宫格换成「加载中」再换回，整页会明显闪一下（用户报「卸载插件页面会闪」）。
+// 只有首次加载（列表还是空的）才值得显示全屏 loading。
+async function loadPlugins(opts?: { silent?: boolean }) {
+  if (!opts?.silent) loading.value = true
   try {
     plugins.value = (unwrap(await ListPlugins()) || []) as PluginInfo[]
     await loadIcons()
@@ -125,6 +128,11 @@ async function loadPlugins() {
   } finally {
     loading.value = false
   }
+}
+
+// 常规刷新（卸载/安装/失败重试）：保留现有列表，静默替换数据
+function reloadPlugins() {
+  return loadPlugins({ silent: true })
 }
 
 watch(themeName, () => { void loadIcons() })
@@ -172,7 +180,7 @@ async function togglePlugin(p: PluginInfo) {
     }
   } catch (e) {
     toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
-    await loadPlugins()
+    await reloadPlugins()
   } finally {
     operating.value.delete(p.id)
   }
@@ -193,7 +201,7 @@ async function handleUninstall() {
   try {
     await unwrap(await UninstallPlugin(id)) // code!=0 抛错，防止卸载失败误报成功
     toast?.success?.(t('deleted'))
-    await loadPlugins()
+    await reloadPlugins()
   } catch (e) {
     toast?.error?.(t('pluginUninstallFailed') + ': ' + getErrorMessage(e))
   } finally {
@@ -213,7 +221,7 @@ async function selectAndInstall() {
     const result = unwrap(await InstallPlugin(zipPath))
     if (result) {
       toast?.success?.(t('pluginInstallSuccess'))
-      await loadPlugins()
+      await reloadPlugins()
     }
   } catch (e) {
     toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
@@ -286,7 +294,7 @@ async function installDroppedFile(file: File) {
     const b64 = await fileToBase64(file)
     unwrap(await InstallPluginFromBytes(file.name, b64))
     toast?.success?.(t('pluginInstallSuccess'))
-    await loadPlugins()
+    await reloadPlugins()
   } catch (e) {
     toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
   } finally {
@@ -420,23 +428,25 @@ onUnmounted(() => {
     @drop="onDrop"
   >
     <!-- 头部 -->
-    <div class="plugin-header">
-      <div class="plugin-header-left">
-        <Puzzle :size="20" />
-        <h2 class="plugin-title">{{ t('pluginManager') }}</h2>
-        <span v-if="plugins.length" class="plugin-count">{{ plugins.length }}</span>
+    <div class="qd-page-header">
+      <div class="qd-page-titles">
+        <h2 class="qd-page-title">
+          <Puzzle :size="17" />
+          {{ t('pluginManager') }}
+          <span v-if="plugins.length" class="plugin-count">{{ plugins.length }}</span>
+        </h2>
       </div>
-      <div class="plugin-header-actions">
-        <button :class="['view-toggle-btn', { active: activeView === 'market' }]" @click="activeView = activeView === 'local' ? 'market' : 'local'" :title="t('pluginMarket')">
+      <div class="qd-page-actions">
+        <button :class="['qd-btn', 'qd-btn-ghost', { 'is-on': activeView === 'market' }]" @click="activeView = activeView === 'local' ? 'market' : 'local'" :title="t('pluginMarket')">
           <Globe :size="14" />
           <span>{{ t('pluginMarket') }}</span>
         </button>
-        <button class="install-btn" @click="selectAndInstall" :title="t('pluginInstallFromFile')" :disabled="operating.has('_install_')">
+        <button class="qd-btn" @click="selectAndInstall" :title="t('pluginInstallFromFile')" :disabled="operating.has('_install_')">
           <Loader2 v-if="operating.has('_install_')" :size="14" class="spin" />
           <Upload v-else :size="14" />
           <span>{{ operating.has('_install_') ? t('pluginInstalling') : t('pluginInstallFromFile') }}</span>
         </button>
-        <button class="refresh-btn" @click="loadPlugins" :title="t('refresh')">
+        <button class="qd-icon-btn" @click="reloadPlugins" :title="t('refresh')">
           <RefreshCw :size="14" />
         </button>
       </div>
@@ -605,7 +615,7 @@ onUnmounted(() => {
     </div>
     </div>
 
-    <PluginMarketPage v-else @installed="onMarketInstalled" />
+    <PluginMarketPage v-else @installed="onMarketInstalled" @install-local="selectAndInstall" />
 
     <!-- zip 安装遮罩动画：覆盖「选择 zip → 安装完成」全过程 -->
     <div v-if="operating.has('_install_')" class="install-overlay">
@@ -629,44 +639,24 @@ onUnmounted(() => {
 /* 中间包装层：v-if="activeView==='local'" 的块级 div 会打断 flex 链，
    使 .plugin-grid 的 flex:1/overflow 失效（grid 撑满内容高度后被 overflow:hidden 裁掉）。
    这里把它也纳入 flex column，grid 才能获得受限高度并内部滚动。 */
+/* 页头通栏后，内边距落到内容容器上（与监控页同一套做法） */
 .plugin-local {
   flex: 1; min-height: 0;
   display: flex; flex-direction: column;
   overflow: hidden;
+  padding: 12px 20px 16px;
 }
 
 .plugin-page {
   flex: 1; display: flex; flex-direction: column;
-  overflow: hidden; padding: 16px 20px;
+  overflow: hidden;
   min-height: 0; /* flex 子项默认 min-height:auto 会按内容撑高，插件多时整页超出被裁、无法滚动 */
   position: relative; /* 安装遮罩绝对定位的参照 */
+  background: var(--color-bg-primary);
 }
 
-/* ---- 头部 ---- */
-.plugin-header {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: 12px; flex-shrink: 0;
-}
-.plugin-header-left { display: flex; align-items: center; gap: 8px; }
-.plugin-title { font-size: 14px; font-weight: 600; margin: 0; color: var(--color-text-primary); }
-.plugin-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 7px; border-radius: var(--radius-md); }
-.plugin-header-actions { display: flex; gap: 6px; }
-
-.install-btn {
-  display: inline-flex; align-items: center; gap: 4px;
-  padding: 5px 10px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-accent);
-  background: var(--color-accent-bg);
-  color: var(--color-accent); cursor: pointer; font-size: 11px;
-}
-.install-btn:hover { opacity: 0.85; }
-.refresh-btn {
-  display: flex; align-items: center;
-  padding: 5px 10px; border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); background: var(--color-bg-secondary);
-  color: var(--color-text-secondary); cursor: pointer; font-size: 11px;
-}
-.refresh-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+/* ---- 头部：已统一到 styles/app.css 的 .qd-page-header ---- */
+.plugin-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); padding: 1px 7px; border-radius: var(--radius-xs); }
 
 /* ---- 加载 / 空状态 ---- */
 .plugin-loading, .plugin-empty {
@@ -881,15 +871,7 @@ onUnmounted(() => {
 }
 .detail-pre-err { color: var(--color-danger); }
 
-.view-toggle-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 10px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border); background: var(--color-bg-secondary);
-  color: var(--color-text-secondary); font-size: 12px; cursor: pointer;
-  transition: all .15s;
-}
-.view-toggle-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.view-toggle-btn.active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+/* 视图切换已改用 .qd-btn + .qd-btn.is-on（见 styles/app.css） */
 
 /* ---- zip 安装遮罩动画 ---- */
 .install-overlay {
