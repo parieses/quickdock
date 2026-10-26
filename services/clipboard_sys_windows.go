@@ -294,6 +294,10 @@ func (a *AppService) saveClipboardText(text string) bool {
 	sourceApp := platform.GetActiveWindowTitle()
 	setLastClipboardText(text)
 
+	// 剪贴板自动规则：默认关（DB 总开关），开启后按优先级串行转换。
+	// 这里只做纯文本变换（internal/cliprule，无 IO），真正耗时的回写放到下面的 goroutine 里。
+	ruled, needWriteBack := a.applyClipboardRules(text, sourceApp)
+
 	// 异步入库：避免 DB 繁忙时阻塞剪贴板工作协程（同图片路径）
 	go func() {
 		defer recoverPanic("clipboard saveText")
@@ -301,7 +305,9 @@ func (a *AppService) saveClipboardText(text string) bool {
 			logClipboardSkip("文本")
 			return
 		}
-		entry, err := a.DB.InsertClipboardEntry(text, sourceApp)
+		// 入库的是「规则处理后的文本」：历史列表里点一下粘出来的就是处理好的内容，
+		// 不需要用户每次再手工转一遍。
+		entry, err := a.DB.InsertClipboardEntry(ruled, sourceApp)
 		if err != nil {
 			// 入库失败不再「占位」：旧实现在这里之前就已把内容记为已处理，
 			// 于是同一条内容之后再也进不来（DB 短暂不可用会变成永久丢内容）。
@@ -319,6 +325,11 @@ func (a *AppService) saveClipboardText(text string) bool {
 		}
 		// 默认不记录文本捕获（复制频繁、无排查价值）；排查时设 QUICKDOCK_LOG_CLIPBOARD=1 重启。
 		a.emitClipboardEvent()
+		// 回写系统剪贴板：只有规则显式 write_back 才会走到这里（默认关）。
+		// SetClipboardText 内部会登记回环令牌，所以这次写入不会再被当成一次新复制。
+		if needWriteBack && ruled != text {
+			SetClipboardText(ruled)
+		}
 	}()
 	return true
 }

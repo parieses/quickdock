@@ -17,6 +17,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/wailsapp/wails/v3/pkg/application"
+
+	"quickdock/internal/cliprule"
 )
 
 // ===== Global shared state (accessed by main package via get/set) =====
@@ -434,4 +436,33 @@ func processImage(database *db.Database, imageData []byte, paths, src string, em
 	if emit != nil {
 		emit()
 	}
+}
+
+// ClipboardRulesEnabledKey 剪贴板自动规则总开关的 DB 键名（唯一定义处）。
+// 默认关闭：自动改写用户刚复制的内容属于侵入行为，必须由用户显式打开。
+const ClipboardRulesEnabledKey = "clipboard_rules_enabled"
+
+// applyClipboardRules 在文本入库前跑一次自动规则。
+//
+// 性能考虑：总开关关闭时只读一行设置就返回，不做任何规则查询 —— 剪贴板捕获是高频
+// 路径，不能让它每次都去扫规则表。开关打开且规则为空时同样直接返回。
+//
+// 返回：(可能被转换后的文本, 是否需要回写系统剪贴板)
+func (a *AppService) applyClipboardRules(text, sourceApp string) (string, bool) {
+	if a.DB == nil {
+		return text, false
+	}
+	raw, err := a.DB.GetSetting(ClipboardRulesEnabledKey)
+	if err != nil || raw != "1" {
+		return text, false
+	}
+	rules, err := a.DB.ListClipboardRules()
+	if err != nil || len(rules) == 0 {
+		return text, false
+	}
+	out, changed, writeBack := cliprule.Apply(rules, text, sourceApp)
+	if !changed {
+		return text, false
+	}
+	return out, writeBack
 }
