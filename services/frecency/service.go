@@ -77,3 +77,14 @@ func (s *FrecencyService) GetTopUsage(limit int) *services.ApiResult {
 	}
 	return s.usageResult(s.App.DB.GetTopUsage(limit))
 }
+
+// ClearUsage 重置使用频率榜（最常用排行从零开始）。
+func (s *FrecencyService) ClearUsage() *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if err := s.App.DB.ClearUsage(); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}

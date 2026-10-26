@@ -53,3 +53,15 @@ func (a *AppService) ClearActivity() *ApiResult {
 	}
 	return Ok(nil)
 }
+
+// ClearActivityWhere 按来源与时间批量清除操作流水（「清除当前筛选结果」）。
+// kind 为空 = 不限来源；sinceTs<=0 = 不限时间；都空等价于 ClearActivity。
+func (a *AppService) ClearActivityWhere(kind string, sinceTs int64) *ApiResult {
+	if r := CheckDB(a.DB); r != nil {
+		return r
+	}
+	if err := a.DB.ClearActivityWhere(kind, sinceTs); err != nil {
+		return Fail(err)
+	}
+	return Ok(nil)
+}

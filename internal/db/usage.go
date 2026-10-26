@@ -77,6 +77,16 @@ func (d *Database) GetAllUsage() ([]FrecencyEntry, error) {
 	return d.queryUsage("SELECT key, type, label, description, input, count, last_used FROM usage_frecency ORDER BY last_used DESC")
 }
 
+// ClearUsage 清空使用频率榜（用户手动重置，与逐条记录无关）。
+// 清的是「用得频不频」这个统计本身，不是任何业务数据——重置后
+// 命令面板的「最近使用」与设置里的最常用排行都从零开始攒。
+func (d *Database) ClearUsage() error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec("DELETE FROM usage_frecency")
+	return err
+}
+
 // GetRecentUsage 返回最近使用的 N 条记录（命令面板「最近使用」专用）
 func (d *Database) GetRecentUsage(limit int) ([]FrecencyEntry, error) {
 	if limit <= 0 {

@@ -134,3 +134,24 @@ func (d *Database) ClearActivity() error {
 	_, err := d.conn.Exec("DELETE FROM activity")
 	return err
 }
+
+// ClearActivityWhere 按「来源 + 时间」批量清除操作流水。
+// kind 为空表示不限来源；sinceTs<=0 表示不限时间（等价于全清）。
+// 两者都给了就是「清除当前筛选结果」——筛选界面上的批量清除走这条，
+// 而不是只有全清一个档位。
+func (d *Database) ClearActivityWhere(kind string, sinceTs int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	query := "DELETE FROM activity WHERE 1=1"
+	var args []interface{}
+	if kind != "" {
+		query += " AND kind = ?"
+		args = append(args, kind)
+	}
+	if sinceTs > 0 {
+		query += " AND created_ts >= ?"
+		args = append(args, sinceTs)
+	}
+	_, err := d.conn.Exec(query, args...)
+	return err
+}
