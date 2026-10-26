@@ -101,12 +101,17 @@
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
 <span class="eyebrow">v0.0.29</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.29 做了两件最影响日常手感的事：删错了能找回来，以及整个界面重排了一遍。删除的项目 / 集合 / 场景 / 笔记 / 工作空间现在统一进「设置 → 回收站」，随时恢复；界面这一轮把散在各处的页头、按钮、面板头收敛成同一套，三栏顶部对齐、控件高度统一，工作空间空的时候有清晰的引导告诉你下一步该建什么。监控则补齐了分组、延迟告警、CSV 导出与停机日历。</p>
+<p>v0.0.29 前半程做了两件最影响日常手感的事：删错了能找回来，以及整个界面重排了一遍。删除的项目 / 集合 / 场景 / 笔记 / 工作空间现在统一进「设置 → 回收站」，随时恢复；界面把散在各处的页头、按钮、面板头收敛成同一套。后半程补上四项每天都用得上的能力：通知中心把监控、定时任务、AI 的「办完了」收进一个铃铛；日志能 <code>tail -f</code> 盯住正在被写入的文件；剪贴板可以按规则自动清洗复制进来的内容；热键记不住时有备忘单。顺手把设置从 14 页合并成 11 页。</p>
 </div>
 <div class="tbl wide">
 <div class="tbl-row"><span class="k">回收站</span><span>删除不再是不可逆的：项目、集合、场景、笔记、整个工作空间的删除都会先进回收站，在「设置 → 回收站」一键恢复，级联删掉的子内容一起回来。</span></div>
-<div class="tbl-row"><span class="k">界面整体统一</span><span>九个业务页各自为政的页头、按钮、面板头收敛成一套，三栏顶部对齐在同一条线上，控件高度与圆角统一；工作空间为空、或场景里还没有集合时，给出分步引导而不是一片空白。</span></div>
+<div class="tbl-row"><span class="k">通知中心</span><span>侧栏底部一个铃铛收口全部「办完了」：监控掉线 / 恢复、定时任务执行结果、AI 回答完成。窗口正开着就不打扰你，只在你没看它时才收进来；点了能直接跳回那条监控 / 那个任务 / 那次对话。</span></div>
+<div class="tbl-row"><span class="k">日志实时尾随</span><span>任意本机文件都能 <code>tail -f</code>：打开先读末尾几行，之后每 500ms 只读新增的部分；文件被轮转或原地重写会自动重新对齐，可随时暂停、关键字过滤高亮、清空。</span></div>
+<div class="tbl-row"><span class="k">剪贴板自动规则</span><span>复制进来的内容按条件自动清洗：去首尾空白、删空行、去重行、排序、JSON 格式化 / 压缩、去 ANSI 颜色、URL 解码、大小写转换。可只对匹配正则或某个来源窗口的内容生效，改之前能先试运行。<b>不做脱敏</b>——不会偷偷改写你复制的手机号和密钥。</span></div>
+<div class="tbl-row"><span class="k">快捷键备忘单</span><span>命令面板输入 <code>cheatsheet</code>，或点「设置 → 快捷键」页头的按钮，一张表列出全局热键、窗口管理 15 个贴屏键与面板内操作键。内容实时读自热键设置，你改过键它就跟着变。</span></div>
+<div class="tbl-row"><span class="k">设置页合并</span><span>设置从 14 页收到 11 页：剪贴板历史与自动规则合一，存储位置 / 同步 / 快照合成「存储与同步」，最近动态与回收站合成「历史」页内分段切换。</span></div>
 <div class="tbl-row"><span class="k">监控分组与停机日历</span><span>监控可按分组归类，延迟超过阈值的抖动不再当成宕机；新增 CSV 导出与 12 周停机热力日历，一眼看出哪天不稳。</span></div>
+<div class="tbl-row"><span class="k">界面整体统一</span><span>九个业务页各自为政的页头、按钮、面板头收敛成一套，三栏顶部对齐在同一条线上，控件高度与圆角统一；工作空间为空、或场景里还没有集合时，给出分步引导而不是一片空白。</span></div>
 </div>
 </div>
 </section>
@@ -121,8 +126,15 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.29</span><span class="log-date">2026-10-26</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.29</span><span class="log-date">2026-10-27</span><span class="tag tag-low log-new">最新</span></summary>
 <ul class="log-body">
+<li>通知中心：侧栏底部新增铃铛入口，监控状态翻转、定时任务执行结果、AI 回答完成统一收口，未读强调色角标，支持全部 / 未读过滤、单条删除、全部已读与一键清空，点击可跳回对应对象。AI 完成时若主窗口正开着且有焦点则不推送，不打扰正在看的屏幕。</li>
+<li>日志实时尾随：任意本机文件支持 <code>tail -f</code>（命令面板输入 <code>logtail</code>），打开先读末尾 N 行，之后每 500ms 增量读取；文件被轮转（新建同名）或原地截断重写时自动重新对齐读取位置；可暂停、关键字过滤高亮、清空，上限 5000 行。</li>
+<li>剪贴板自动规则：9 种清洗动作（去空白 / 删空行 / 去重行 / 行排序 / JSON 格式化与压缩 / 去 ANSI / URL 解码 / 大小写）按「全部 / 正则 / 来源窗口」条件命中后在入库前依次执行，支持试运行预览；总开关默认关闭。<b>不做脱敏</b>——不识别也不替换手机号、身份证、密钥，避免静默改写用户复制的内容。</li>
+<li>快捷键备忘单：命令面板输入 <code>cheatsheet</code> 或点「设置 → 快捷键」页头按钮打开，列出全局热键、窗口管理 15 个贴屏键与面板内操作键；内容实时读自热键设置。</li>
+<li>设置页合并：菜单从 14 项收到 11 项——剪贴板历史与自动规则合一，存储位置 / 同步 / 快照合成「存储与同步」，最近动态与回收站合成「历史」页内分段切换；旧的内部 key 全部走别名兜底，历史深链不会跳空页。</li>
+<li>快捷键设置页重排为单行列表（名称 / 键位 / 说明 / 改键 / 重置），行高与列宽对齐，重置按钮用隐藏占位保住列宽不跳动。</li>
+<li>修复 AI 对话页输入框、图片按钮与发送按钮三者高度不一致（同一高度改为单一变量控制）；修正官网与文档里快捷笔记热键写成 <code>Ctrl+Shift+N</code> 的错误（实际默认 <code>Ctrl+Alt+N</code>）。</li>
 <li>回收站：项目、集合、场景、笔记、工作空间的删除都改为先进回收站，在「设置 → 回收站」可一键恢复，级联删除的子内容与文件夹结构一并还原；没选中的删除确认文案里会提示去哪找回。</li>
 <li>界面整体统一：页头、面板头、按钮、输入框、行与空状态收敛成同一套实现，三栏顶部对齐在同一条水平线，控件高度与圆角统一，工作空间三栏重排（场景 200 / 集合 240，项目列更宽）。</li>
 <li>空状态引导：工作空间里还没有场景、或当前场景还没有集合时，用整页分步引导代替空白列表，并自动选中唯一的场景 / 集合（有多个时不替你猜）。</li>
@@ -392,7 +404,7 @@
 <article class="card reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"></path><path d="M14 4v5h5M8 13h8M8 17h5"></path></svg></div>
 <h3>树形笔记库</h3>
-<p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> 唤起浮动笔记，文件夹 + Markdown 多层级组织，500ms 防抖自动保存。</p>
+<p><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> 唤起浮动笔记，文件夹 + Markdown 多层级组织，500ms 防抖自动保存。</p>
 </article>
 <article class="card reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m4 12 4 4L20 6"></path><path d="M4 19h16"></path></svg></div>
@@ -430,6 +442,29 @@
 <article class="card reveal">
 <h3>终端里的 AI 运维助手</h3>
 <p>终端右侧的 AI 侧栏：问题里提到 <b>「屏显」</b> 就会带上当前终端画面（不提就不发），所以在终端里看到什么就能问什么；选中一段输出后右键<b>「问 AI 这段输出」</b>即可就这一段追问。命令单独成卡支持<b>一键填入或一键执行</b>，不用再复制粘贴——但 <code>rm -rf</code> / <code>reboot</code> 这类<b>高危命令只给填入不给执行</b>，必须你亲自按回车。远程机上没有撤销键，AI 只建议，决定权始终在你。</p>
+</article>
+<article class="card card-wide reveal">
+<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></div>
+<h3>通知中心</h3>
+<p>侧栏底部一个铃铛，把散落各处的「办完了」收在一处：监控掉线与恢复、定时任务执行结果、AI 回答完成，不用再去各个页面翻记录。主窗口正开着时 AI 完成<b>不推送</b>——你本来就看着屏幕，没必要打扰。</p>
+<ul><li>未读角标用强调色，红色只留给监控掉线这类真故障</li><li>点了就跳回去：直接回到那条监控 / 那个任务 / 那次对话</li><li>全部 / 未读两栏切换，可单条删、全部已读、一键清空</li></ul>
+</article>
+<article class="card reveal">
+<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M15 12h-5"></path><path d="M15 8h-5"></path><path d="M19 17V5a2 2 0 0 0-2-2H4"></path><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"></path></svg></div>
+<h3>日志实时尾随</h3>
+<p>命令面板输入 <code>logtail</code>，选一个正在被写入的文件，它就像 <code>tail -f</code> 一样自己往下滚 —— 只读新增的部分，不是整本重读。</p>
+<ul><li>文件被轮转或原地重写会自动重新对齐</li><li>可暂停、关键字过滤高亮、一键清空</li><li>上限 5000 行，长时间挂着不撑内存</li></ul>
+</article>
+<article class="card card-wide reveal">
+<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"></path><path d="m14 7 3 3"></path><path d="M5 6v4"></path><path d="M19 14v4"></path><path d="M10 2v2"></path><path d="M7 8H3"></path><path d="M21 16h-4"></path><path d="M11 3H9"></path></svg></div>
+<h3>剪贴板自动规则</h3>
+<p>复制进来的内容先自动收拾一遍再进历史：去首尾空白、删空行、重复行去重、行排序、JSON 缩进格式化或压成一行、去掉终端里的 ANSI 颜色、URL 解码、大小写转换。可以只对匹配正则或来自某个窗口的内容生效，多条规则按顺序串成流水线。</p>
+<ul><li>改之前能<b>先试运行</b>，粘一段样例文本直接看清洗结果</li><li>总开关默认关闭 —— 不希望「自动改写剪贴板」在没被知情的情况下生效</li><li><b>不做脱敏</b>：不识别也不替换手机号、身份证、密钥，不会被误判改写</li></ul>
+</article>
+<article class="card reveal">
+<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="16" rx="2" width="20" x="2" y="4"></rect><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"></path></svg></div>
+<h3>快捷键备忘单</h3>
+<p>命令面板输入 <code>cheatsheet</code>，一张表列出全局热键、窗口管理 15 个贴屏键与面板内操作键。内容实时读自热键设置 —— 你改过键它就跟着变，不是抄一份出厂默认值。</p>
 </article>
 </div>
 </div>
@@ -639,12 +674,12 @@
 <div class="tbl-row"><span class="k">主窗口</span><span><kbd>Ctrl</kbd>+<kbd>Space</kbd> 显示 / 隐藏，承载全部页面</span></div>
 <div class="tbl-row"><span class="k">命令面板</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd>，浮动窗口，失焦自动隐藏</span></div>
 <div class="tbl-row"><span class="k">剪贴板</span><span><kbd>Ctrl</kbd>+<kbd>`</kbd>，浮动窗口，失焦自动隐藏</span></div>
-<div class="tbl-row"><span class="k">快捷笔记</span><span><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd>，浮动窗口，失焦自动隐藏</span></div>
+<div class="tbl-row"><span class="k">快捷笔记</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd>，浮动窗口，失焦自动隐藏</span></div>
 <div class="tbl-row"><span class="k">排版浮层</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd>，九宫格布局浮层，排完自动收起</span></div>
 <div class="tbl-row"><span class="k">截图浮层</span><span><kbd>F1</kbd> 唤起的全屏浮层，用完即走，不占常驻窗口</span></div>
 </div>
 <h4>主要页面在哪</h4>
-<p>侧边栏 / 顶栏可进入：工作空间、环境管理、插件（已装 + 市场）、待办、定时、监控、端口全景、AI 助手、DeepSeek Harness、SSH 远程终端、设置（通用 / 热键 / 窗口管理 / AI / DSH / 快照 / 同步 / 工具）。</p>
+<p>侧边栏 / 顶栏可进入：工作空间、环境管理、插件（已装 + 市场）、待办、定时、监控、端口全景、AI 助手、DeepSeek Harness、SSH 远程终端、设置（通用 / 导航 / 快捷键 / 剪贴板 / 存储与同步 / 历史 / 工具 / 窗口管理 / AI，另有日志与关于）。</p>
 <div class="note">
 <svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><rect height="16" rx="2" width="16" x="4" y="3"></rect><path d="M4 8h16M9 8V5M15 8V5"></path></svg>
 <div>同一台机器<b style="color:var(--text-1);font-weight:510">同时只能跑一个 QuickDock 实例</b>（单实例锁，开发版和正式版共用）。双击没反应时先看托盘是不是已经在了。</div>
@@ -674,7 +709,9 @@
 <div class="keys-row"><span>移到上一屏 / 下一屏</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>[</kbd><kbd>]</kbd></span></div>
 </div>
 <h4>自定义热键</h4>
-<p>「设置 → 热键」里逐条改，改完<b style="color:var(--text-1);font-weight:510">运行时动态重注册</b>，不用重启。捕获新按键时会暂停全局监听，避免和你正在按的组合撞车。改乱了想还原，设置页里有恢复默认。窗口管理的 15 个热键另在「设置 → 窗口管理」里改。</p>
+<p>「设置 → 快捷键」里逐条改，改完<b style="color:var(--text-1);font-weight:510">运行时动态重注册</b>，不用重启。捕获新按键时会暂停全局监听，避免和你正在按的组合撞车。改乱了想还原，设置页里有恢复默认。窗口管理的 15 个热键另在「设置 → 窗口管理」里改。</p>
+<h4>记不住？开备忘单</h4>
+<p>命令面板输入 <code>cheatsheet</code>，或者点「设置 → 快捷键」页头的备忘单按钮，一张表看完全部键位。它读的是<b style="color:var(--text-1);font-weight:510">你当前的键位</b>，改完键表就跟着更新。</p>
 <h4>命令面板内的键盘操作</h4>
 <div class="keys">
 <div class="keys-row"><span>上下移动选择</span><span><kbd>↑</kbd><kbd>↓</kbd></span></div>
@@ -752,6 +789,16 @@
 <li>浮动窗口失焦即隐藏；图片条目存在 <code>~/.quickdock/images/</code></li>
 <li><b style="color:var(--text-1);font-weight:510">问 AI</b>：文本条目上点「问 AI」，翻译 / 摘要 / 格式化或者自由追问，就地弹层给答案，不用切到 AI 页再粘贴一遍</li>
 </ul>
+<h4>自动规则：复制进来就先收拾好</h4>
+<p>「设置 → 剪贴板」里给复制的内容挂规则：<b style="color:var(--text-1);font-weight:510">去首尾空白、删空行、重复行去重、行排序、JSON 格式化 / 压缩、去 ANSI 颜色、URL 解码、大小写转换</b>，按「全部 / 正则 / 来源窗口」命中后依次执行。</p>
+<ul class="card">
+<li>规则页里能<b style="color:var(--text-1);font-weight:510">先试运行</b>，粘一段样例文本直接看清洗结果，不用真的去复制一次</li>
+<li>总开关<b style="color:var(--text-1);font-weight:510">默认关闭</b>：自动改写剪贴板这种事，不该在你不知道的情况下生效</li>
+</ul>
+<div class="note">
+<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>
+<div><b>不做脱敏</b>：规则不识别也不替换手机号、身份证、密钥。脱敏会静默改写你复制的东西，一旦误判反而更危险——真要脱敏，自己粘进 AI 处理。</div>
+</div>
 <p>想彻底不留痕迹：设置里关掉对应类型的记录（比如不记图片）。</p>
 </article>
 <!-- ============ 7 ============ -->
@@ -786,7 +833,7 @@
 <article class="step reveal" id="g-notes">
 <span class="step-no">STEP 08</span>
 <h3>笔记库</h3>
-<p><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd> 唤起浮动笔记，随手记；要整理时进「笔记管理」页面，用树形结构归档。</p>
+<p><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> 唤起浮动笔记，随手记；要整理时进「笔记管理」页面，用树形结构归档。</p>
 <ul class="card">
 <li><b style="color:var(--text-1);font-weight:510">文件夹 + Markdown 文档</b>，任意层级嵌套，支持搜索、重命名、删除</li>
 <li><b style="color:var(--text-1);font-weight:510">自动保存</b>：500ms 防抖，不用按 Ctrl+S，也不用担心忘存</li>
@@ -831,6 +878,7 @@
 </div>
 <h4>通知怎么配</h4>
 <p>「Webhook 设置」里填渠道地址即可，支持 <b style="color:var(--text-1);font-weight:510">钉钉 / 企业微信 / 飞书 / Server酱 / PushPlus / Telegram</b>。状态翻转（正常 ↔ 异常）时才推，不会一直刷屏。桌面端同时弹系统通知。</p>
+<p>站内还有个<b style="color:var(--text-1);font-weight:510">通知中心</b>（侧栏底部铃铛）：监控翻转、定时任务结果、AI 回答完成都收在这里，桌面通知错过了回来看一眼就有，点开直接跳回那条监控。</p>
 <div class="note">
 <svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg>
 <div>监控依托 QuickDock 主进程运行，<b style="color:var(--text-1);font-weight:510">关了应用就不探了</b>。要 7×24 监控得让机器上的 QuickDock 保持运行（可以开开机自启）。</div>
@@ -1000,7 +1048,7 @@
 <p>不用再装第三方客户端，连服务器、开终端、传文件都在 QuickDock 里完成。</p>
 <h4>三种打开方式</h4>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">全局热键</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd>（可在「设置 → 热键」自定义）</span></div>
+<div class="tbl-row"><span class="k">全局热键</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd>（可在「设置 → 快捷键」自定义）</span></div>
 <div class="tbl-row"><span class="k">侧边栏</span><span>导航栏 <b style="color:var(--text-1);font-weight:510">SSH</b> 入口</span></div>
 <div class="tbl-row"><span class="k">托盘</span><span>托盘菜单同样有入口</span></div>
 </div>
@@ -1048,9 +1096,9 @@
 <span class="step-no">STEP 18</span>
 <h3>备份 · 同步 · 快照</h3>
 <h4>快照（本地）</h4>
-<p>设置 → 快照：一键把全部数据导出成一个 JSON 文件，换机器导入即恢复。升级前顺手存一份最保险。</p>
+<p>「设置 → 存储与同步」里导出：一键把全部数据存成一个 JSON 文件，换机器导入即恢复。升级前顺手存一份最保险。</p>
 <h4>WebDAV 云同步</h4>
-<p>设置 → 同步：填任意 WebDAV 服务器（自建 / 坚果云 / 第三方都行），全量备份与恢复，支持<b style="color:var(--text-1);font-weight:510">多版本管理</b>，误操作能回滚到之前的版本。</p>
+<p>「设置 → 存储与同步」里填任意 WebDAV 服务器（自建 / 坚果云 / 第三方都行），全量备份与恢复，支持<b style="color:var(--text-1);font-weight:510">多版本管理</b>，误操作能回滚到之前的版本。</p>
 <h4>数据都在哪</h4>
 <div class="tbl wide">
 <div class="tbl-row"><span class="k"><code>~/.quickdock/quickdock.db</code></span><span>SQLite 主库（WAL 模式）</span></div>
@@ -1077,7 +1125,9 @@
 <div class="tbl-row"><span class="k">更新失败</span><span>多半是装到了受 UAC 保护的目录（如 Program Files）。卸掉重装到用户目录</span></div>
 <div class="tbl-row"><span class="k">双击没反应</span><span>单实例锁 —— 看托盘是不是已经有一个在跑了</span></div>
 <div class="tbl-row"><span class="k">装运行时卡住</span><span>切换下载源（镜像）后点「刷新列表」重拉；下载失败会自动多源回退，也可以等它重试</span></div>
-<div class="tbl-row"><span class="k">想看报错</span><span>主日志 <code>~/.quickdock/logs/quickdock-YYYY-MM-DD.log</code>；更新替换日志 <code>%TEMP%\wails-update-&lt;pid&gt;.log</code></span></div>
+<div class="tbl-row"><span class="k">想看报错</span><span>「设置 → 日志」按天查看主日志与崩溃记录；文件位置 <code>~/.quickdock/logs/quickdock-YYYY-MM-DD.log</code>；更新替换日志 <code>%TEMP%\wails-update-&lt;pid&gt;.log</code></span></div>
+<div class="tbl-row"><span class="k">想盯实时日志</span><span>命令面板输入 <code>logtail</code> 选文件即可 <code>tail -f</code>，支持暂停与关键字过滤高亮；文件被轮转会自动重新对齐</span></div>
+<div class="tbl-row"><span class="k">没收到通知</span><span>先点侧栏底部的铃铛看通知中心；AI 完成类通知在主窗口打开且有焦点时故意不推</span></div>
 <div class="tbl-row"><span class="k">反馈问题</span><span>带日志去 <a href="https://github.com/parieses/quickdock/issues" rel="noopener" style="color:var(--brand-hover)" target="_blank">GitHub Issues</a> 提，复现步骤写清楚</span></div>
 </div>
 </article>
