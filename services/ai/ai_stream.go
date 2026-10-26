@@ -297,6 +297,10 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	_ = s.svc.App.DB.UpdateAIConversationMeta(convID, "", "")
 	logger.I("[ai] 流式结束 conv=%s 首字=%dms in=%d out=%d", convID, firstTokenAt.Milliseconds(), usageIn, usageOut)
 	fl.writeEvent("done", doneEvent(convID, firstTokenAt, usageIn, usageOut))
+
+	// 用户已经切走了才提醒：盯着屏幕看完整段回答的人再收到一条「回答完成」纯属噪音，
+	// 而趁回答生成的时间去干别的事、回来发现早就好了，才是最需要提醒的场景。
+	s.notifyAIDone(convID, message, assistant)
 }
 
 // doneEvent 组装流式结束事件：附带首字延迟与本次用量，回传前端展示。
@@ -473,4 +477,27 @@ func (s *aiStreamServer) writeSSE(w http.ResponseWriter, f http.Flusher, event s
 	}
 	f.Flush()
 	return nil
+}
+
+// notifyAIDone 在「主窗口没盯着」时把回答完成写进通知中心。
+//
+// 判定条件用「主窗口不可见 或 没有焦点」：AI 回答往往要等十几秒到几分钟，
+// 用户切去别的窗口干活是常态。反过来，人就在 AI 页面上看着，还弹一条完成提醒，
+// 是纯粹的打扰 —— 通知的价值在于「替你盯着」，不是复述你已经看到的东西。
+func (s *aiStreamServer) notifyAIDone(convID, question, answer string) {
+	if s.svc == nil || s.svc.App == nil || s.svc.App.DB == nil {
+		return
+	}
+	if s.svc.App.MainWindowActive() {
+		return
+	}
+	answer = strings.TrimSpace(answer)
+	if answer == "" {
+		return
+	}
+	title := "AI 回答已完成"
+	if q := strings.TrimSpace(question); q != "" {
+		title = "AI 回答已完成：" + logger.Trunc(strings.ReplaceAll(q, "\n", " "), 24)
+	}
+	s.svc.App.PushNotification("ai", "success", title, logger.Trunc(answer, 160), "ai", convID)
 }

@@ -4,8 +4,10 @@ import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import CreateDialog from './CreateDialog.vue'
 import NavBadge from './NavBadge.vue'
+import NotificationCenter from './NotificationCenter.vue'
 import { getErrorMessage } from '../utils/error'
 import type { ToastAPI } from '../types'
+import { Events } from '@wailsio/runtime'
 // 导航项图标已收敛到 pages/registry（纯数据），侧边栏仅保留仍在本文件直接使用的图标
 import {
   FolderKanban, ChevronDown, ChevronLeft, ChevronRight, Plus, Pencil, Trash2, Settings,
@@ -43,6 +45,13 @@ const settingsBadge = navBadge.settingsBadge
 function openSettings() {
   navBadge.markSeen('settings')
   emit('open-settings')
+}
+
+// 通知点进去要落在具体的设置页（比如崩溃记录在「日志」页）。
+// 与命令面板走同一条事件通道，避免再给 Sidebar 加一个 emit 通道。
+function openSettingsPage(page: string) {
+  navBadge.markSeen('settings')
+  try { Events.Emit('app:open-settings', page) } catch { /* 主窗口未就绪时忽略 */ }
 }
 
 // ---- 导航项右键菜单 ----
@@ -301,6 +310,9 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 
     <!-- 底部固定：设置 + 收起（设置始终沉在最底部，与导航区独立） -->
     <div class="sidebar-footer">
+      <!-- 通知中心：与设置同级沉底。它进不了导航区——导航是「去某个地方」，
+           通知是「刚才发生了什么」，混在一起会让导航项的顺序失去意义。 -->
+      <NotificationCenter @navigate="(p) => emit('navigate', p)" @open-settings="openSettingsPage" />
       <button class="settings-btn" @click="openSettings" :title="t('settings')">
         <Settings :size="16" />
         <span>{{ t('settings') }}</span>

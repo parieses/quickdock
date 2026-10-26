@@ -360,6 +360,12 @@ func (a *AppService) notifyScheduleRun(t *db.ScheduledTask, status, result strin
 		})
 	}
 	a.sendWebhookNotify(title, b.String())
+	// 进通知中心：定时任务是「没人盯着的时候发生的事」，正是最需要事后留档的一类。
+	level := "success"
+	if status != "ok" {
+		level = "warn"
+	}
+	a.PushNotification("schedule", level, title, b.String(), "schedule", t.ID)
 }
 
 // executeTask 执行单个任务，返回 (status, result)

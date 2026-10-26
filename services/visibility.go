@@ -17,3 +17,18 @@ type WindowFlags struct {
 	Note      atomic.Bool // 快捷笔记浮窗打开中
 	Winmgr    atomic.Bool // 窗口管理浮层打开中
 }
+
+// MainWindowActive 报告主窗口是否「正被用户盯着」（可见且有焦点）。
+//
+// 用途：决定某些提醒要不要发。通知的价值在于替用户盯着他看不到的地方；
+// 窗口就在眼前、还往通知中心塞一条，只会把真正需要看的信息淹掉。
+func (a *AppService) MainWindowActive() bool {
+	if a.Flags != nil && !a.Flags.Main.Load() {
+		return false
+	}
+	w := a.MainWindow
+	if w == nil {
+		return false
+	}
+	return w.IsFocused()
+}

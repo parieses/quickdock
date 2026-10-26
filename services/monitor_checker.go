@@ -247,6 +247,9 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 			})
 		}
 		a.sendWebhookNotify(title, body)
+		// 同一次翻转也进通知中心：气泡弹完就没了，用户离开电脑十分钟回来
+		// 只想知道「刚才是不是炸过」，那张表就是给这个问题的。
+		a.PushNotification("monitor", "error", title, body, "monitor", m.ID)
 	case status == "up" && prev == "down" && current.NotifyUp:
 		title := "🟢 已恢复：" + m.Name
 		body := fmt.Sprintf("%s\n响应 %d · %dms", m.URL, code, latency)
@@ -258,6 +261,7 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 			})
 		}
 		a.sendWebhookNotify(title, body)
+		a.PushNotification("monitor", "success", title, body, "monitor", m.ID)
 	}
 	return status, summary
 }
