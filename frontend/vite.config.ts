@@ -25,9 +25,12 @@ export default defineConfig({
       "@floating-ui/vue",
       "@wailsio/runtime",
       // 终端相关：xterm 体积大、加载晚（只在 SSH 窗口用到），
-      // 不预声明会在首次打开 SSH 窗口时触发二次预构建。
+      // 不预声明会在首次打开 SSH 窗口时触发二次预构建 —— SshTerminal 导入的
+      // 四个包必须全部列在这里，漏一个（曾漏 addon-search）就是打开 SSH 页时
+      // 现发现依赖 → re-optimize → 旧 browserHash 的请求全部 504 → 页面打不开。
       "@xterm/xterm",
       "@xterm/addon-fit",
+      "@xterm/addon-search",
       "@xterm/addon-unicode11",
     ],
   },
