@@ -36,6 +36,8 @@ var validTables = map[string]bool{
 	"app_state":         true,
 	"schema_version":    true,
 	"clipboard_entries": true,
+	"clipboard_rules":   true,
+	"notifications":     true,
 	"notes":             true,
 	"usage_frecency":    true,
 	"todos":             true,
@@ -122,6 +124,12 @@ var validColumns = map[string]bool{
 	"input": true,
 	// notes 笔记树列
 	"is_folder": true, "is_note": true, "format": true,
+	// notifications 通知中心列（kind / title / body / ref_id 已在上文声明）
+	"level": true, "ref_type": true, "read": true,
+
+	// clipboard_rules 剪贴板自动规则列（priority 已在上文 todos 处声明）
+	"match_kind": true, "match_expr": true,
+	"action": true, "action_arg": true, "write_back": true, "updated_ts": true,
 }
 
 // validateTable 检查表名是否在白名单中

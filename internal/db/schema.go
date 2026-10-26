@@ -152,6 +152,36 @@ var baseTables = []string{
 		created_at INTEGER NOT NULL
 	)`,
 
+	// 剪贴板自动规则：复制到文本后按优先级做一次转换。
+	// 注意表名不是 snippets（历史迁移会删它），也不要和 clipboard_entries 混用。
+	`CREATE TABLE IF NOT EXISTS clipboard_rules (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL,
+		enabled INTEGER NOT NULL DEFAULT 1,
+		priority INTEGER NOT NULL DEFAULT 0,
+		match_kind TEXT NOT NULL DEFAULT 'all',
+		match_expr TEXT NOT NULL DEFAULT '',
+		action TEXT NOT NULL DEFAULT '',
+		action_arg TEXT NOT NULL DEFAULT '',
+		write_back INTEGER NOT NULL DEFAULT 0,
+		created_ts INTEGER NOT NULL,
+		updated_ts INTEGER NOT NULL
+	)`,
+
+	// notifications 应用内通知（收口通知中心）。
+	// 与系统托盘通知是两条路：托盘那条会消失、不保留历史，这里留档给「回头看」。
+	`CREATE TABLE IF NOT EXISTS notifications (
+		id TEXT PRIMARY KEY,
+		kind TEXT NOT NULL DEFAULT 'system',
+		level TEXT NOT NULL DEFAULT 'info',
+		title TEXT NOT NULL DEFAULT '',
+		body TEXT NOT NULL DEFAULT '',
+		ref_type TEXT NOT NULL DEFAULT '',
+		ref_id TEXT NOT NULL DEFAULT '',
+		read INTEGER NOT NULL DEFAULT 0,
+		created_ts INTEGER NOT NULL
+	)`,
+
 	`CREATE TABLE IF NOT EXISTS notes (
 		id TEXT PRIMARY KEY,
 		keyword TEXT NOT NULL UNIQUE,
