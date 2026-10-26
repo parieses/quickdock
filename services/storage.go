@@ -33,6 +33,23 @@ func (a *AppService) ResetDataDir() *ApiResult {
 	return OkMsg(nil, "已恢复默认，重启后生效")
 }
 
+// GetUiZoom 返回当前生效的界面缩放系数（1 = 标准）。
+// 与数据目录一样走 platform 配置（而非数据库）：窗口在创建时就固定了 Zoom，
+// 而数据库要等服务启动才打开，那时窗口已经建好了。
+func (a *AppService) GetUiZoom() *ApiResult {
+	return Ok(platform.LoadUiZoom())
+}
+
+// SetUiZoom 设置界面缩放并持久化。
+// 修改不会即时生效：各窗口的 Zoom 与尺寸在创建时即已固定，运行期改不了，
+// 故需重启应用（前端保存后提示「重启后生效」并调用 RestartApp）。
+func (a *AppService) SetUiZoom(zoom float64) *ApiResult {
+	if err := platform.SetUiZoom(zoom); err != nil {
+		return Fail(err)
+	}
+	return OkMsg(nil, "已保存，重启后生效")
+}
+
 // RestartApp 真正重启应用（脱离式拉起新进程 + 等待旧进程退出后统一退出）。
 // 存储位置修改必须重启才能生效：日志、数据库、运行时都已按旧目录打开。
 // 与 UpdateService.RestartApp（就地替换更新专用）语义不同，那个无待更新时会失败。

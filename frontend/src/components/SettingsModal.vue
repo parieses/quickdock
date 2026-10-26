@@ -29,7 +29,7 @@ import {
   SuspendHotkeys,
   ResumeHotkeys,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
-import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, RestartApp as RestartAppPlain } from '../../bindings/quickdock/services/appservice'
+import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, GetUiZoom, SetUiZoom, RestartApp as RestartAppPlain } from '../../bindings/quickdock/services/appservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
@@ -57,7 +57,7 @@ const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panel
 const hotkeyRef = ref<InstanceType<typeof HotkeySettings> | null>(null)
 
 const menuItems = computed(() => [
-  { key: 'preferences', label: t('preferences'), icon: Palette, desc: t('autoStart') + ' / ' + t('theme') + ' / ' + t('language') },
+  { key: 'preferences', label: t('preferences'), icon: Palette, desc: t('autoStart') + ' / ' + t('theme') + ' / ' + t('language') + ' / ' + t('uiZoom') },
   // 导航显隐与排序：它是「隐藏了怎么找回来」的唯一兜底入口，放在通用组开头。
   // 为什么必须在设置里：侧栏可以被裁剪，但这个入口不属于导航项，永远可达。
   { key: 'navigation', label: t('navSettings'), icon: ListOrdered, desc: t('navSettingsDesc') },
@@ -305,6 +305,7 @@ async function resetStorage() {
 // 切换到存储页时刷新状态（弹窗常驻，onMounted 只在首次执行）
 watch(activePage, (k) => {
   if (k === 'storage') loadStorage()
+  if (k === 'preferences') loadUiZoom()
 })
 
 // 存储位置页的「重启」：走 AppService.RestartApp（真重启，脱离式拉起新进程）。
@@ -326,6 +327,70 @@ async function restartAppForStorage() {
     storageMsg.value = getErrorMessage(e)
   } finally {
     storageLoading.value = false
+  }
+}
+
+// ---- 界面缩放 ----
+// 与存储位置同源：缩放写在 platform 配置（quickdock.json）而非数据库里，因为窗口的
+// Zoom 与尺寸在「创建时」就固定了，而数据库要等 Wails 服务启动才打开——那时窗口早已建好。
+// 同理改完不能即时生效，必须重启应用（见下面 restartForUiZoom）。
+const uiZoomValue = ref(1)
+const uiZoomMsg = ref('')
+const uiZoomBusy = ref(false)
+// 只暴露三档：缩放会同时改窗口尺寸与内容，任意数值很容易得到内容被裁的畸形窗口。
+// 用 computed 包一层，切语言时标签跟着变（t 是响应式的）。
+const uiZoomLevels = computed(() => [
+  { value: 1, label: t('uiZoomStandard') },
+  { value: 1.1, label: t('uiZoomLarge') },
+  { value: 1.2, label: t('uiZoomXLarge') },
+])
+
+async function loadUiZoom() {
+  try {
+    const v = unwrap<number>(await GetUiZoom())
+    if (typeof v === 'number') uiZoomValue.value = v
+  } catch (e) {
+    logErr('Settings.uiZoom', e)
+  }
+}
+
+async function selectUiZoom(v: number) {
+  if (uiZoomBusy.value || v === uiZoomValue.value) return
+  uiZoomBusy.value = true
+  uiZoomMsg.value = ''
+  try {
+    const res = await SetUiZoom(v)
+    if (res && res.code === 0) {
+      uiZoomValue.value = v
+      uiZoomMsg.value = res.msg || t('uiZoomRestartHint')
+    } else {
+      uiZoomMsg.value = res?.msg || t('updateError')
+    }
+  } catch (e: any) {
+    uiZoomMsg.value = getErrorMessage(e)
+  } finally {
+    uiZoomBusy.value = false
+  }
+}
+
+// 缩放改完必须重启才生效：走 AppService.RestartApp（真重启，脱离式拉起新进程），
+// 与存储位置页同一条路径——不能用更新页的 restartApp，那个是「就地替换更新」专用，
+// 无待更新时必然失败，表现为「点了没反应」。
+async function restartForUiZoom() {
+  uiZoomBusy.value = true
+  uiZoomMsg.value = t('uiZoomRestarting')
+  try {
+    const res = await RestartAppPlain()
+    if (res && res.code === 0) {
+      // 成功时进程会在新实例接管后异步退出，不再有后续 UI 更新
+      uiZoomMsg.value = t('uiZoomRestarting')
+    } else {
+      uiZoomMsg.value = res?.msg || t('updateError')
+    }
+  } catch (e: any) {
+    uiZoomMsg.value = getErrorMessage(e)
+  } finally {
+    uiZoomBusy.value = false
   }
 }
 
@@ -629,6 +694,24 @@ async function toggleAutoStart() {
                   :class="['locale-btn', { active: currentLocale === 'en-US' }]"
                   @click="setLocale('en-US')"
                 >English</button>
+              </div>
+            </div>
+            <div class="section">
+              <h3 class="section-title">{{ t('uiZoom') }}</h3>
+              <p class="section-desc">{{ t('uiZoomDesc') }}</p>
+              <div class="locale-selector">
+                <button
+                  v-for="lv in uiZoomLevels"
+                  :key="lv.value"
+                  :class="['locale-btn', { active: uiZoomValue === lv.value }]"
+                  :disabled="uiZoomBusy"
+                  @click="selectUiZoom(lv.value)"
+                >{{ lv.label }}</button>
+              </div>
+              <!-- 「立即重启」只在改完出现：缩放是窗口创建时固定的，不重启等于没改 -->
+              <div v-if="uiZoomMsg" class="action-row">
+                <p class="result-hint">{{ uiZoomMsg }}</p>
+                <button class="btn btn-secondary" :disabled="uiZoomBusy" @click="restartForUiZoom">{{ t('uiZoomRestart') }}</button>
               </div>
             </div>
           </div>

@@ -22,7 +22,8 @@ type PluginWindowManager struct {
 	mu            sync.Mutex
 	windows       map[string]*application.WebviewWindow // pluginID → 独立窗口
 	app           *application.App
-	mgr           *Manager // 插件管理器（用于「关窗即终止」时停止进程 / 按需惰性复活）
+	mainWindow    *application.WebviewWindow // 主窗口引用：用于把新建插件窗口对齐到主窗口所在显示器
+	mgr           *Manager                   // 插件管理器（用于「关窗即终止」时停止进程 / 按需惰性复活）
 	baseWidth     int
 	baseHeight    int
 	zoom          float64                // UI 等比缩放（与主窗口一致）：窗口尺寸与内容按同系数放大，避免内容被裁
@@ -49,6 +50,12 @@ func NewPluginWindowManager(app *application.App, mgr *Manager, zoom float64) *P
 		recycleAfter:  pluginWindowRecycleAfter,
 		recycleTimers: make(map[string]*time.Timer),
 	}
+}
+
+// SetMainWindow 注入主窗口引用，供新建插件窗口对齐到主窗口所在显示器。
+// 必须由 main.go 在主窗口创建后调用（PluginWindowManager 构造早于主窗口，故用注入而非入参）。
+func (m *PluginWindowManager) SetMainWindow(w *application.WebviewWindow) {
+	m.mainWindow = w
 }
 
 // pluginWindowBackground 返回与主题匹配的底色：深 #17181b / 浅 #f5f6f8。
@@ -189,6 +196,15 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	})
 	m.windows[pluginID] = win
 	m.mu.Unlock()
+
+	// 多显示器：把新建的插件窗口对齐到主窗口当前所在的显示器。
+	// 否则 Wails 默认把它放到主屏（Primary）中央，主窗口若在副屏时插件窗口会跑偏。
+	// 复用路径（窗口已存在）不动它，保留用户上次拖到的位置。
+	if m.mainWindow != nil {
+		if ms, err := m.mainWindow.GetScreen(); err == nil && ms != nil {
+			win.SetScreen(ms)
+		}
+	}
 
 	win.Show()
 	win.Focus() // 新建路径必须显式聚焦，否则新窗口 z-order 会被压在主窗口/面板之下

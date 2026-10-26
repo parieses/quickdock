@@ -32,6 +32,10 @@ func dataDirConfigFile() string {
 type dataDirConfig struct {
 	DataDir     string `json:"dataDir"`     // 自定义数据目录（绝对路径）
 	MigrateFrom string `json:"migrateFrom"` // 待迁移的旧目录（下次启动拷贝完成后清空）
+	// UiZoom 全局界面缩放系数（WebView ZoomFactor），见 uizoom.go 的档位定义。
+	// 放在这个「数据目录之外」的配置文件里是有意的：窗口在创建时就固定了 Zoom 与尺寸，
+	// 必须能在打开数据库之前读到（数据库要等 Wails 服务启动才就绪，那时窗口早已建好）。
+	UiZoom float64 `json:"uiZoom,omitempty"`
 }
 
 var (

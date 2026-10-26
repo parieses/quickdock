@@ -152,6 +152,7 @@ var assets embed.FS
 //
 // 目录里**不再有内置插件**：内置插件方案已搁置（插件一律来自市场或本地 zip 安装），
 // 故 plugins/ 下只留这一份共享样式，不参与插件的注册与加载。
+//
 //go:embed all:plugins/shared
 var sharedPluginAssets embed.FS
 
@@ -165,15 +166,23 @@ const (
 	appTitle  = "快启坞 QuickDock"
 	appWidth  = 1100
 	appHeight = 800
+)
 
-	// uiZoom 是全局 UI 等比缩放（WebView ZoomFactor），主窗口与所有独立浮窗共用，
-	// 改这一个值即统一改全部窗口的文字/图标/间距大小。
-	//
-	// 定尺寸浮窗（剪贴板/笔记/命令面板/窗口管理）的宽高必须按同一系数推导：
-	// 这些窗口 Frameless 且宽高固定，若只放大内容（Zoom）不改窗口尺寸，
-	// 放大后的内容会被固定窗口裁掉或整块溢出滚动——两者必须同步。
-	// 下面尺寸写成「基准 × uiZoom」即为此；SSH 可缩放，同样缩放保持默认观感一致。
-	uiZoom = 1.15
+// uiZoom 是全局 UI 等比缩放（WebView ZoomFactor），主窗口与所有独立浮窗共用，
+// 改这一个值即统一改全部窗口的文字/图标/间距大小。
+//
+// 取值来自「设置 → 基础 → 界面缩放」，由 platform.LoadUiZoom 读持久化配置，默认 1.0（标准）。
+// 用 var 而非 const 是有意的：窗口的 Zoom 与尺寸在**创建时**即固定，而配置只有进程启动
+// 后才读得到（此时数据库尚未打开，缩放因此存在数据目录之外的 quickdock.json，见
+// internal/platform/uizoom.go）。包级 var 在 main() 之前完成初始化，且 Go 按依赖顺序
+// 初始化——下面各尺寸依赖 uiZoom，必然排在其后，故无需显式的初始化函数。
+//
+// 定尺寸浮窗（剪贴板/笔记/命令面板/窗口管理）的宽高必须按同一系数推导：
+// 这些窗口 Frameless 且宽高固定，若只放大内容（Zoom）不改窗口尺寸，
+// 放大后的内容会被固定窗口裁掉或整块溢出滚动——两者必须同步。
+// 下面尺寸写成「基准 × uiZoom」即为此；SSH 可缩放，同样缩放保持默认观感一致。
+var (
+	uiZoom = platform.LoadUiZoom()
 
 	clipWinWidth     = int(480 * uiZoom)
 	clipWinHeight    = int(540 * uiZoom)
@@ -511,6 +520,8 @@ func main() {
 	// 保存主窗口引用供 tray.go 使用
 	SetMainWindow(mainWindow)
 	appService.MainWindow = mainWindow
+	// 让插件窗口创建时对齐到主窗口所在显示器（多屏场景）
+	appService.PluginWindowMgr.SetMainWindow(mainWindow)
 
 	// 窗口尺寸/位置记忆：移动或缩放结束后（防抖）把矩形写入配置文件，
 	// 下次启动 loadWindowState() 恢复。最大化/最小化态不记录，避免恢复成畸形窗口。

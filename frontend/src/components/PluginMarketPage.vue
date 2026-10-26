@@ -564,8 +564,10 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
    1) 必须用 minmax(0, 1fr) 而非 1fr：1fr 的下限是 auto(=min-content)，卡片里
       有不可断行的长插件 ID 时会把列顶宽、第三列被挤出可视区（全局 Zoom 放大后
       CSS 视口变窄，此坑必现）。
-   2) 断点按 main.go 的 uiZoom(1.15) 折算下调（1440/1.15≈1250 …）：媒体查询量的是
-      CSS 视口，Zoom 放大后视口比物理宽度小，用物理断点会导致宽窗口也升不了列。 */
+   2) 断点按「缩放后的 CSS 视口」折算下调（1440/1.15≈1250 …）：媒体查询量的是
+      CSS 视口，Zoom 放大后视口比物理宽度小，用物理断点会导致宽窗口也升不了列。
+      当前取值以 1.1 档为准——uiZoom 现已是设置项（标准 1 / 较大 1.1 / 超大 1.2，
+      默认 1），放大档位下视口更窄、列数更少，标准档下更宽、列数更多，均属预期。 */
 .market-grid { flex: 1; min-height: 0; overflow-y: auto; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; gap: 12px; padding-right: 2px; }
 @media (min-width: 1250px) { .market-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 @media (min-width: 1560px) { .market-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
