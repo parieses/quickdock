@@ -220,8 +220,12 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	// 状态翻转通知（桌面 + Webhook）。
 	// 误报抑制：宕机告警仅在连续失败达到阈值（downAlertThreshold）的那一次发出；
 	// 恢复通知在首次探活成功时立即发出。用 current 副本避免探针期间读到过期开关。
+	//
+	// 多条件告警：latency_alert_ms>0 时，宕机告警还要求「当次延迟也超过该阈值」——
+	// 「连续 3 次失败且延迟>500ms」这类组合条件由此表达。关闭（0）时行为不变。
 	prev := current.LastStatus
-	downAlertTriggered := !up && (newDownCount == threshold) && (current.ConsecutiveDown == threshold-1)
+	latencyCond := current.LatencyAlertMs <= 0 || latency > current.LatencyAlertMs
+	downAlertTriggered := !up && (newDownCount == threshold) && (current.ConsecutiveDown == threshold-1) && latencyCond
 	switch {
 	case downAlertTriggered && current.NotifyDown:
 		title := "🔴 监控告警：" + m.Name
@@ -231,6 +235,9 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 		}
 		if threshold > 1 {
 			body += fmt.Sprintf("\n（连续 %d 次失败）", newDownCount)
+		}
+		if current.LatencyAlertMs > 0 {
+			body += fmt.Sprintf("\n（延迟 %dms > %dms）", latency, current.LatencyAlertMs)
 		}
 		if a.Notifier != nil {
 			_ = a.Notifier.SendNotification(notifications.NotificationOptions{

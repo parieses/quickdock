@@ -35,6 +35,8 @@ type Monitor struct {
 	ContentMatchPattern string `json:"contentMatchPattern"`
 	DownAlertThreshold  int    `json:"downAlertThreshold"` // 误报抑制：连续 N 次失败才发宕机告警（>=1）
 	ConsecutiveDown     int    `json:"consecutiveDown"`    // 当前连续失败次数（运行态，>=0）
+	GroupName           string `json:"groupName"`          // 分组名（空=未分组；列表按它分区展示）
+	LatencyAlertMs      int    `json:"latencyAlertMs"`     // 延迟告警阈值 ms（0=关闭；开启则宕机告警还要求当次延迟超过它）
 	Sort                int    `json:"sort"`
 	CreatedAt           string `json:"createdAt"`
 }
@@ -68,6 +70,7 @@ const monCols = `id, name, url, method, interval_sec, timeout_sec, expected_stat
 	cert_warn_days, cert_expires_at, last_cert_warned,
 	content_match_type, content_match_pattern,
 	down_alert_threshold, consecutive_down,
+	group_name, latency_alert_ms,
 	sort, created_at`
 
 const logWindowSec = int64(24 * 3600) // 统计窗口：近 24 小时
@@ -76,8 +79,8 @@ const maxLogsPerMonitor = 1000        // 每个监控保留的检测日志上限
 func scanMonitor(rows interface{ Scan(...interface{}) error }) (Monitor, error) {
 	var m Monitor
 	var follow, enabled, notifyDown, notifyUp, skipTLS int
-	var certWarn, alertThresh int
-	var contentMatchType, contentMatchPattern string
+	var certWarn, alertThresh, latencyAlert int
+	var contentMatchType, contentMatchPattern, groupName string
 	err := rows.Scan(&m.ID, &m.Name, &m.URL, &m.Method, &m.IntervalSec, &m.TimeoutSec,
 		&m.ExpectedStatus, &follow, &enabled, &notifyDown, &notifyUp,
 		&m.LastStatus, &m.LastCheckedAt, &m.LastCheckedTs, &m.LastLatencyMs, &m.LastStatusCode,
@@ -85,6 +88,7 @@ func scanMonitor(rows interface{ Scan(...interface{}) error }) (Monitor, error) 
 		&certWarn, &m.CertExpiresAt, &m.LastCertWarned,
 		&contentMatchType, &contentMatchPattern,
 		&alertThresh, &m.ConsecutiveDown,
+		&groupName, &latencyAlert,
 		&m.Sort, &m.CreatedAt)
 	m.FollowRedirects = follow != 0
 	m.Enabled = enabled != 0
@@ -98,6 +102,11 @@ func scanMonitor(rows interface{ Scan(...interface{}) error }) (Monitor, error) 
 	}
 	m.ContentMatchType = contentMatchType
 	m.ContentMatchPattern = contentMatchPattern
+	m.GroupName = strings.TrimSpace(groupName)
+	m.LatencyAlertMs = latencyAlert
+	if m.LatencyAlertMs < 0 {
+		m.LatencyAlertMs = 0
+	}
 	return m, err
 }
 
@@ -131,6 +140,10 @@ func (d *Database) CreateMonitor(m *Monitor) (*Monitor, error) {
 	if m.DownAlertThreshold < 1 {
 		m.DownAlertThreshold = 1
 	}
+	m.GroupName = strings.TrimSpace(m.GroupName)
+	if m.LatencyAlertMs < 0 {
+		m.LatencyAlertMs = 0
+	}
 	m.ID = newID()
 	m.CreatedAt = time.Now().Format(time.RFC3339)
 
@@ -149,16 +162,18 @@ func (d *Database) CreateMonitor(m *Monitor) (*Monitor, error) {
 			 cert_warn_days, cert_expires_at, last_cert_warned,
 			 content_match_type, content_match_pattern,
 			 down_alert_threshold, consecutive_down,
+			 group_name, latency_alert_ms,
 			 sort, created_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, 0, 0, '', ?,
 			 ?, 0, 0, ?, ?,
-			 ?, 0,
+			 ?, 0, ?, ?,
 			 ?, ?)`,
 		m.ID, m.Name, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
 		b2i(m.FollowRedirects), b2i(m.Enabled), b2i(m.NotifyDown), b2i(m.NotifyUp),
 		b2i(m.SkipTLSVerify),
 		m.CertWarnDays, m.ContentMatchType, m.ContentMatchPattern,
 		m.DownAlertThreshold,
+		m.GroupName, m.LatencyAlertMs,
 		m.Sort, m.CreatedAt,
 	)
 	return m, err
@@ -226,6 +241,10 @@ func (d *Database) UpdateMonitor(m *Monitor) error {
 	if m.DownAlertThreshold < 1 {
 		m.DownAlertThreshold = 1
 	}
+	m.GroupName = strings.TrimSpace(m.GroupName)
+	if m.LatencyAlertMs < 0 {
+		m.LatencyAlertMs = 0
+	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	_, err := d.conn.Exec(
@@ -234,13 +253,13 @@ func (d *Database) UpdateMonitor(m *Monitor) error {
 			follow_redirects = ?, enabled = ?, notify_down = ?, notify_up = ?,
 			skip_tls_verify = ?,
 			cert_warn_days = ?, content_match_type = ?, content_match_pattern = ?,
-			down_alert_threshold = ?
+			down_alert_threshold = ?, group_name = ?, latency_alert_ms = ?
 		 WHERE id = ?`,
 		m.Name, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
 		b2i(m.FollowRedirects), b2i(m.Enabled), b2i(m.NotifyDown), b2i(m.NotifyUp),
 		b2i(m.SkipTLSVerify),
 		m.CertWarnDays, m.ContentMatchType, m.ContentMatchPattern,
-		m.DownAlertThreshold,
+		m.DownAlertThreshold, m.GroupName, m.LatencyAlertMs,
 		m.ID,
 	)
 	return err

@@ -107,6 +107,7 @@ var validColumns = map[string]bool{
 	// 监控表列
 	"timeout_sec": true, "expected_status": true,
 	"down_alert_threshold": true, "consecutive_down": true,
+	"group_name": true, "latency_alert_ms": true,
 	// HTTP 请求历史列
 	"status_code": true, "created_ts": true,
 	"ok": true,
