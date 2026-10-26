@@ -412,7 +412,22 @@ func (d *Database) autoFillItemIcon(id string, updates map[string]interface{}) {
 	updates["icon"] = resolveItemIcon(itemType, value)
 }
 
+// DeleteItem 删除项目（先拍墓碑进回收站，再真删）。
+// 捕获失败即放弃删除：误删不可恢复比「删不掉」严重得多。
 func (d *Database) DeleteItem(id string) error {
+	d.mu.RLock()
+	rows, err := captureRows(d.conn, "items", "id = ?", id)
+	d.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return nil // 本来就不存在，无需墓碑
+	}
+	if err := d.AddTombstone("items", id, rowLabel(rows[0]),
+		map[string][]map[string]interface{}{"items": rows}); err != nil {
+		return err
+	}
 	return d.DeleteWhere("items", "id = ?", id)
 }
 

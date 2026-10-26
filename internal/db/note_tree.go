@@ -281,6 +281,7 @@ func isSelfInSubtreeLocked(d *Database, id, ancestorID string) bool {
 }
 
 // DeleteNoteNode 递归删除节点及其子树（文件夹含其下所有）。
+// 删除前把整棵子树拍成墓碑：误删一个文件夹时，恢复它即可连内容一起回来。
 func (d *Database) DeleteNoteNode(id string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -288,14 +289,27 @@ func (d *Database) DeleteNoteNode(id string) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	qs := strings.Repeat("?,", len(ids))
-	qs = qs[:len(qs)-1]
-	args := make([]interface{}, len(ids))
-	for i, v := range ids {
-		args[i] = v
+	// 捕获子树全部行（调用方已持 d.mu，直接用 conn，不走带锁的 AddTombstone）
+	noteRows, err := captureSubtreeRows(d.conn, "notes", ids)
+	if err != nil {
+		return err
 	}
-	_, err := d.conn.Exec(`DELETE FROM notes WHERE id IN (`+qs+`)`, args...)
+	if err := writeTombstone(d.conn, "notes", id, rowLabel(firstRow(noteRows)),
+		map[string][]map[string]interface{}{"notes": noteRows}); err != nil {
+		return err
+	}
+	qs := placeholders(len(ids))
+	args := argsOf(ids)
+	_, err = d.conn.Exec(`DELETE FROM notes WHERE id IN (`+qs+`)`, args...)
 	return err
+}
+
+// firstRow 取首行（无行时返回空 map，rowLabel 会退回空串）。
+func firstRow(rows []map[string]interface{}) map[string]interface{} {
+	if len(rows) == 0 {
+		return map[string]interface{}{}
+	}
+	return rows[0]
 }
 
 // collectSubtreeLocked 返回 id 及其所有子孙 id（调用方持 d.mu）。

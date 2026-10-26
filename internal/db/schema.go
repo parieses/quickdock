@@ -123,10 +123,14 @@ var baseTables = []string{
 		created_at TEXT NOT NULL
 	)`,
 
+	// 删除墓碑（回收站）：collection=主体表名，id=主体 id，label=展示名，
+	// payload=恢复载荷 JSON（级联删除时含整棵子树，见 tombstone.go）。
 	`CREATE TABLE IF NOT EXISTS tombstones (
 		collection TEXT NOT NULL,
 		id TEXT NOT NULL,
 		deleted_at TEXT NOT NULL,
+		label TEXT NOT NULL DEFAULT '',
+		payload TEXT NOT NULL DEFAULT '',
 		PRIMARY KEY (collection, id)
 	)`,
 
@@ -258,6 +262,8 @@ var baseTables = []string{
 		content_match_pattern TEXT NOT NULL DEFAULT '',
 		down_alert_threshold INTEGER NOT NULL DEFAULT 1,
 		consecutive_down INTEGER NOT NULL DEFAULT 0,
+		group_name TEXT NOT NULL DEFAULT '',
+		latency_alert_ms INTEGER NOT NULL DEFAULT 0,
 		sort INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL
 	)`,
@@ -479,6 +485,10 @@ func (d *Database) migrate() error {
 		// monitors: 误报抑制（连续 N 次失败才告警）
 		{"monitors", "down_alert_threshold", "INTEGER NOT NULL DEFAULT 1"},
 		{"monitors", "consecutive_down", "INTEGER NOT NULL DEFAULT 0"},
+		// monitors: 分组（列表分区展示）+ 延迟告警阈值（0=关闭；
+		// 与连续失败阈值构成「连续 N 次失败且延迟>Xms」多条件告警）
+		{"monitors", "group_name", "TEXT NOT NULL DEFAULT ''"},
+		{"monitors", "latency_alert_ms", "INTEGER NOT NULL DEFAULT 0"},
 		// todos: 子任务层级（单层级 checklist）+ 状态字段（status 权威，done 派生）
 		{"todos", "parent_id", "TEXT DEFAULT ''"},
 		{"todos", "status", "TEXT DEFAULT 'todo'"},
@@ -506,6 +516,9 @@ func (d *Database) migrate() error {
 		{"activity", "kind", "TEXT NOT NULL DEFAULT ''"},
 		{"activity", "ref_id", "TEXT NOT NULL DEFAULT ''"},
 		{"activity", "created_ts", "INTEGER NOT NULL DEFAULT 0"},
+		// tombstones: 回收站启用时补齐的展示名与恢复载荷（老表只有三元主键）
+		{"tombstones", "label", "TEXT NOT NULL DEFAULT ''"},
+		{"tombstones", "payload", "TEXT NOT NULL DEFAULT ''"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {

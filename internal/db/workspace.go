@@ -89,28 +89,63 @@ func (d *Database) DeleteWorkspace(id string) error {
 			crows.Close()
 		}
 
-		// 3. 删除 items
+		// 3. 拍墓碑：整棵子树（workspace + scenes + collections + items）。
+		// 这是最重的一次删除，没有墓碑就等于永久丢数据；捕获失败整体回滚。
+		wsRows, err := captureRows(tx, "workspaces", "id = ?", id)
+		if err != nil {
+			return err
+		}
+		if len(wsRows) == 0 {
+			return nil
+		}
+		sceneRows, err := captureSubtreeRows(tx, "scenes", sceneIDs)
+		if err != nil {
+			return err
+		}
+		colRows, err := captureSubtreeRows(tx, "collections", collectionIDs)
+		if err != nil {
+			return err
+		}
+		var itemRows []map[string]interface{}
+		if len(collectionIDs) > 0 {
+			itemRows, err = captureRows(tx, "items",
+				"collection_id IN ("+placeholders(len(collectionIDs))+")", argsOf(collectionIDs)...)
+			if err != nil {
+				return err
+			}
+		}
+		if err := writeTombstone(tx, "workspaces", id, rowLabel(wsRows[0]),
+			map[string][]map[string]interface{}{
+				"workspaces":  wsRows,
+				"scenes":      sceneRows,
+				"collections": colRows,
+				"items":       itemRows,
+			}); err != nil {
+			return err
+		}
+
+		// 4. 删除 items
 		for _, cid := range collectionIDs {
 			if _, err := tx.Exec("DELETE FROM items WHERE collection_id = ?", cid); err != nil {
 				logger.W("QuickDock: 删除 items 失败 (collection=%s): %v", cid, err)
 			}
 		}
 
-		// 4. 删除 collections
+		// 5. 删除 collections
 		for _, sid := range sceneIDs {
 			if _, err := tx.Exec("DELETE FROM collections WHERE scene_id = ?", sid); err != nil {
 				logger.W("QuickDock: 删除 collections 失败 (scene=%s): %v", sid, err)
 			}
 		}
 
-		// 5. 删除 scenes
+		// 6. 删除 scenes
 		for _, sid := range sceneIDs {
 			if _, err := tx.Exec("DELETE FROM scenes WHERE id = ?", sid); err != nil {
 				logger.W("QuickDock: 删除 scene 失败: %v", err)
 			}
 		}
 
-		// 6. 删除 workspace
+		// 7. 删除 workspace
 		_, err = tx.Exec("DELETE FROM workspaces WHERE id = ?", id)
 		return err
 	})
@@ -193,7 +228,9 @@ func (d *Database) UpdateScene(id string, updates map[string]interface{}) error 
 }
 
 func (d *Database) DeleteScene(id string) error {
-	// 级联删除：先删该 scene 下的 collections → items，最后删 scene
+	// 级联删除：先删该 scene 下的 collections → items，最后删 scene。
+	// 整棵子树先在同一个事务里拍成墓碑（scene + collections + items），
+	// 恢复时连子树一起回来；捕获失败整体回滚。
 	return d.Transaction(func(tx *sql.Tx) error {
 		// 1. 获取该 scene 下的所有 collection IDs
 		rows, err := tx.Query("SELECT id FROM collections WHERE scene_id = ?", id)
@@ -210,21 +247,50 @@ func (d *Database) DeleteScene(id string) error {
 		}
 		rows.Close()
 
-		// 2. 删除 items
+		// 2. 捕获整棵子树进墓碑（scene 行 + collections 行 + 全部 items 行）
+		sceneRows, err := captureRows(tx, "scenes", "id = ?", id)
+		if err != nil {
+			return err
+		}
+		if len(sceneRows) == 0 {
+			return nil
+		}
+		colRows, err := captureSubtreeRows(tx, "collections", collectionIDs)
+		if err != nil {
+			return err
+		}
+		// 无子集合时不能拼 IN ()——空集合直接给 nil
+		var itemRows []map[string]interface{}
+		if len(collectionIDs) > 0 {
+			itemRows, err = captureRows(tx, "items", "collection_id IN ("+placeholders(len(collectionIDs))+")", argsOf(collectionIDs)...)
+			if err != nil {
+				return err
+			}
+		}
+		if err := writeTombstone(tx, "scenes", id, rowLabel(sceneRows[0]),
+			map[string][]map[string]interface{}{
+				"scenes":      sceneRows,
+				"collections": colRows,
+				"items":       itemRows,
+			}); err != nil {
+			return err
+		}
+
+		// 3. 删除 items
 		for _, cid := range collectionIDs {
 			if _, err := tx.Exec("DELETE FROM items WHERE collection_id = ?", cid); err != nil {
 				logger.W("QuickDock: 删除 items 失败 (collection=%s): %v", cid, err)
 			}
 		}
 
-		// 3. 删除 collections
+		// 4. 删除 collections
 		for _, cid := range collectionIDs {
 			if _, err := tx.Exec("DELETE FROM collections WHERE id = ?", cid); err != nil {
 				logger.W("QuickDock: 删除 collection 失败: %v", err)
 			}
 		}
 
-		// 4. 删除 scene
+		// 5. 删除 scene
 		_, err = tx.Exec("DELETE FROM scenes WHERE id = ?", id)
 		return err
 	})

@@ -34,6 +34,7 @@ import (
 	notesvc "quickdock/services/note"
 	pluginsvc "quickdock/services/plugin"
 	portsvc "quickdock/services/port"
+	recyclesvc "quickdock/services/recycle"
 	scenesvc "quickdock/services/scene"
 	snapshotsvc "quickdock/services/snapshot"
 	sshxsvc "quickdock/services/sshx"
@@ -379,6 +380,9 @@ func main() {
 	todoSvc := todosvc.NewTodoService(appService)
 	monitorSvc := monitorsvc.NewMonitorService(appService)
 
+	// 回收站门面：误删的项目/集合/场景/笔记在此恢复（墓碑由 db 删除路径写入）
+	recycleSvc := recyclesvc.NewRecycleService(appService)
+
 	// 笔记/收藏/场景/快照/项目/端口/频率 门面：承载剩余纯 CRUD 领域方法，单独绑定为独立 Wails service
 	noteSvc := notesvc.NewNoteService(appService)
 	collectionSvc := collectionsvc.NewCollectionService(appService)
@@ -432,6 +436,7 @@ func main() {
 			application.NewService(workspaceSvc),
 			application.NewService(todoSvc),
 			application.NewService(monitorSvc),
+			application.NewService(recycleSvc),
 			application.NewService(noteSvc),
 			application.NewService(collectionSvc),
 			application.NewService(frecencySvc),

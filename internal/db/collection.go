@@ -60,12 +60,28 @@ func (d *Database) UpdateCollection(id string, updates map[string]interface{}) e
 }
 
 func (d *Database) DeleteCollection(id string) error {
-	// 级联删除 items
+	// 级联删除 items。先在同一事务里把集合与其全部条目拍成墓碑，
+	// 任一捕获失败整体回滚——不留下「删了一半」的中间态。
 	return d.Transaction(func(tx *sql.Tx) error {
+		colRows, err := captureRows(tx, "collections", "id = ?", id)
+		if err != nil {
+			return err
+		}
+		if len(colRows) == 0 {
+			return nil
+		}
+		itemRows, err := captureRows(tx, "items", "collection_id = ?", id)
+		if err != nil {
+			return err
+		}
+		if err := writeTombstone(tx, "collections", id, rowLabel(colRows[0]),
+			map[string][]map[string]interface{}{"collections": colRows, "items": itemRows}); err != nil {
+			return err
+		}
 		if _, err := tx.Exec("DELETE FROM items WHERE collection_id = ?", id); err != nil {
 			logger.W("QuickDock: 删除 items 失败 (collection=%s): %v", id, err)
 		}
-		_, err := tx.Exec("DELETE FROM collections WHERE id = ?", id)
+		_, err = tx.Exec("DELETE FROM collections WHERE id = ?", id)
 		return err
 	})
 }
