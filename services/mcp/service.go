@@ -592,6 +592,22 @@ func (s *MCPService) registerTools() {
 	}, write, "clipboard_copy", "把文本写入系统剪贴板", []string{"text"},
 		map[string]any{"text": str("要写入的文本")})
 
+	// ---- 机器人通知（前提是已在「设置 → 通知」配置过机器人）----
+
+	s.register(func(args map[string]any) (any, error) {
+		title := mcpsrv.Arg(args, "title")
+		if title == "" {
+			return nil, errors.New("缺少参数 title（消息标题）")
+		}
+		res := s.App.SendWebhookMessage(title, mcpsrv.Arg(args, "body"), mcpsrv.Arg(args, "channel"))
+		return unwrap(res)
+	}, write, "robot_notify", "通过已配置的机器人（钉钉/企业微信/飞书/ServerChan/PushPlus/Telegram）发送一条消息。前提是已在「设置 → 通知」配置过至少一个机器人，未配置时会返回明确错误。channel 留空则发给所有已配置渠道，指定则只发该渠道", []string{"title"},
+		map[string]any{
+			"title":   str("消息标题，必填"),
+			"body":    str("消息正文，可留空"),
+			"channel": str("指定渠道：dingtalk / wecom / feishu / serverchan / pushplus / telegram；留空则发给所有已配置渠道"),
+		})
+
 	// ---- P0 写入闭环：笔记（让 AI 能把产出塞回 QuickDock）----
 
 	s.register(func(args map[string]any) (any, error) {

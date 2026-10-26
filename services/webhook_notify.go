@@ -121,6 +121,91 @@ func (a *AppService) sendWebhookNotify(title, body string) {
 	}
 }
 
+// SendWebhookMessage 通过 MCP / 外部调用向已配置的机器人发送消息（「机器人通知」的显式入口）。
+//
+// 与定时任务/监控自动触发走的 sendWebhookNotify 不同：那个是 best-effort 异步、不回收结果；
+// 这里同步返回每个渠道的成败，便于调用方判断是否真的发出去了。
+//
+// 前提：必须至少配置过一个机器人渠道（钉钉/企业微信/飞书/ServerChan/PushPlus/Telegram），
+// 否则直接返回可读错误——而不是静默「发不出去」，让调用方误以为成功。
+//
+// channel 留空 → 发给所有已配置渠道；指定 channel → 只发该渠道（需已配置）。
+func (a *AppService) SendWebhookMessage(title, body, channel string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return FailMsg("消息标题 title 不能为空")
+	}
+
+	cfg := a.loadWebhookConfig()
+	targets := []struct{ kind, url string }{
+		{"dingtalk", cfg.Dingtalk},
+		{"wecom", cfg.Wecom},
+		{"feishu", cfg.Feishu},
+		{"serverchan", cfg.ServerChan},
+		{"pushplus", cfg.PushPlus},
+		{"telegram", cfg.Telegram},
+	}
+
+	if channel != "" {
+		channel = strings.ToLower(strings.TrimSpace(channel))
+		found := false
+		for _, tg := range targets {
+			if tg.kind == channel {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return FailMsg("未知的通知渠道: " + channel + "（可选：dingtalk / wecom / feishu / serverchan / pushplus / telegram）")
+		}
+		// 只保留指定渠道
+		filtered := targets[:0]
+		for _, tg := range targets {
+			if tg.kind == channel {
+				filtered = append(filtered, tg)
+			}
+		}
+		targets = filtered
+	}
+
+	// 过滤掉未配置的渠道
+	active := make([]struct{ kind, url string }, 0, len(targets))
+	for _, tg := range targets {
+		if strings.TrimSpace(tg.url) != "" {
+			active = append(active, tg)
+		}
+	}
+	if len(active) == 0 {
+		return FailMsg("未配置任何机器人通知渠道，请先在「设置 → 通知」中配置（钉钉 / 企业微信 / 飞书 / ServerChan / PushPlus / Telegram）后再发送")
+	}
+
+	results := make([]map[string]any, 0, len(active))
+	for _, tg := range active {
+		if err := postWebhook(tg.kind, tg.url, title, body); err != nil {
+			logger.W("[webhook] MCP 调用发送 %s 失败: %v", tg.kind, err)
+			results = append(results, map[string]any{"channel": tg.kind, "ok": false, "error": err.Error()})
+		} else {
+			results = append(results, map[string]any{"channel": tg.kind, "ok": true})
+		}
+	}
+	okCount := 0
+	for _, r := range results {
+		if b, _ := r["ok"].(bool); b {
+			okCount++
+		}
+	}
+	return Ok(map[string]any{
+		"title":   title,
+		"channel": channel,
+		"sent":    len(active),
+		"ok":      okCount,
+		"results": results,
+	})
+}
+
 // postWebhook 按各平台消息格式构造 payload 并 POST，解析返回判定是否成功。
 func postWebhook(kind, url, title, body string) error {
 	ts := time.Now().Format("2006-01-02 15:04:05")
