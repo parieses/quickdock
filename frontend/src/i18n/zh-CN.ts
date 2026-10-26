@@ -1095,6 +1095,15 @@ export default {
   sched_err_target: '请填写执行目标',
   sched_err_runat: '请选择执行时间',
   sched_err_weekday: '请至少选择一个星期',
+  sched_history: '运行历史',
+  sched_history_title: '运行历史',
+  sched_history_empty: '暂无执行记录',
+  sched_history_loading: '加载中…',
+  sched_history_time: '时间',
+  sched_history_status: '状态',
+  sched_history_duration: '耗时',
+  sched_history_result: '结果',
+  sched_history_retention: '仅保留最近 100 次 / 30 天内的记录',
 
   // 网站监控（仿 UptimeRobot）
   mon_title: '网站监控',

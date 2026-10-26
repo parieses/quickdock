@@ -336,6 +336,20 @@ var baseTables = []string{
 		added_at INTEGER NOT NULL DEFAULT 0,
 		PRIMARY KEY (host, port, key_type)
 	)`,
+
+	// 定时任务执行历史（append-only）。每条执行（自动到点 / 手动「立即运行」）
+	// 落一条；任务名做快照，重命名/删除后仍可追溯。保留策略在 InsertScheduleRun 内执行，
+	// 避免无限增长：每任务仅留最近 N 条，并清理超过 D 天的记录。
+	`CREATE TABLE IF NOT EXISTS schedule_runs (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL,
+		task_name TEXT DEFAULT '',
+		run_at TEXT DEFAULT '',
+		status TEXT DEFAULT '',
+		result TEXT DEFAULT '',
+		duration_ms INTEGER NOT NULL DEFAULT 0,
+		created_ts INTEGER NOT NULL DEFAULT 0
+	)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
@@ -528,6 +542,7 @@ func (d *Database) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_parent ON ssh_hosts(parent_id, sort)`,
 		`CREATE INDEX IF NOT EXISTS idx_activity_created_ts ON activity(created_ts DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_schedule_runs_task_ts ON schedule_runs(task_id, created_ts DESC)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {

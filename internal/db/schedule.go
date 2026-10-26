@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"quickdock/internal/logger"
 )
 
 // ScheduledTask 定时任务
@@ -217,5 +219,95 @@ func (d *Database) SetTaskRunResult(id, lastRun, status, result, nextRun string,
 		`UPDATE scheduled_tasks SET last_run = ?, last_status = ?, last_result = ?, next_run = ?, enabled = ? WHERE id = ?`,
 		lastRun, status, result, nextRun, b2i(enabled), id,
 	)
+	return err
+}
+
+// ScheduleRun 单次执行历史（append-only，按保留策略清理）
+type ScheduleRun struct {
+	ID         string `json:"id"`
+	TaskID     string `json:"taskId"`
+	TaskName   string `json:"taskName"` // 执行时的任务名快照，重命名/删除后仍可追溯
+	RunAt      string `json:"runAt"`    // 执行时刻（2006-01-02 15:04:05）
+	Status     string `json:"status"`   // ok | fail
+	Result     string `json:"result"`   // 结果概要（≤500 字）
+	DurationMs int64  `json:"durationMs"`
+	CreatedTs  int64  `json:"createdTs"` // Unix 毫秒，用于排序与保留策略清理
+}
+
+const (
+	// scheduleRunKeepPerTask 每个任务保留的最近执行条数（防止单任务历史无限膨胀）
+	scheduleRunKeepPerTask = 100
+	// scheduleRunMaxAgeDays 全局保留天数：超过该天数的记录一律清理
+	scheduleRunMaxAgeDays = 30
+)
+
+// InsertScheduleRun 追加一条执行历史，并就地执行保留策略清理（避免无限增长）。
+// 清理与插入在同一把写锁内，保证「写入即收敛」：
+//  1. 每任务仅保留最近 scheduleRunKeepPerTask 条（按 created_ts 倒序）；
+//  2. 全局清理 created_ts 早于 maxAgeDays 天前的记录。
+func (d *Database) InsertScheduleRun(taskID, taskName, status, result string, durationMs int64) error {
+	if len(result) > 500 {
+		result = result[:500]
+	}
+	now := time.Now()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, err := d.conn.Exec(
+		`INSERT INTO schedule_runs (id, task_id, task_name, run_at, status, result, duration_ms, created_ts)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		newID(), taskID, taskName, now.Format("2006-01-02 15:04:05"),
+		status, result, durationMs, now.UnixMilli(),
+	); err != nil {
+		return err
+	}
+	// 保留策略 1：每任务仅留最近 N 条（子查询 LIMIT 用同 task_id 两次，安全）
+	if _, err := d.conn.Exec(
+		`DELETE FROM schedule_runs WHERE task_id = ? AND id NOT IN (
+			SELECT id FROM schedule_runs WHERE task_id = ? ORDER BY created_ts DESC, id DESC LIMIT ?)`,
+		taskID, taskID, scheduleRunKeepPerTask,
+	); err != nil {
+		logger.W("QuickDock: 清理 schedule_runs 失败(per-task): %v", err)
+	}
+	// 保留策略 2：清理超过保留天数的记录（全局）
+	cutoff := now.AddDate(0, 0, -scheduleRunMaxAgeDays).UnixMilli()
+	if _, err := d.conn.Exec(`DELETE FROM schedule_runs WHERE created_ts < ?`, cutoff); err != nil {
+		logger.W("QuickDock: 清理 schedule_runs 失败(age): %v", err)
+	}
+	return nil
+}
+
+// ListScheduleRuns 返回指定任务的执行历史（按时间倒序，最多 limit 条）。
+// limit 非法（≤0 或 >1000）时回退到 200。
+func (d *Database) ListScheduleRuns(taskID string, limit int) ([]ScheduleRun, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	rows, err := d.conn.Query(
+		`SELECT id, task_id, task_name, run_at, status, result, duration_ms, created_ts
+		 FROM schedule_runs WHERE task_id = ? ORDER BY created_ts DESC LIMIT ?`,
+		taskID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ScheduleRun
+	for rows.Next() {
+		var r ScheduleRun
+		if err := rows.Scan(&r.ID, &r.TaskID, &r.TaskName, &r.RunAt, &r.Status,
+			&r.Result, &r.DurationMs, &r.CreatedTs); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DeleteScheduleRunsForTask 级联删除某任务的全部执行历史（任务删除时调用）
+func (d *Database) DeleteScheduleRunsForTask(taskID string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec(`DELETE FROM schedule_runs WHERE task_id = ?`, taskID)
 	return err
 }

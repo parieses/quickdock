@@ -10,9 +10,10 @@ import {
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import WebhookSettingsModal from './WebhookSettingsModal.vue'
 import ConfirmDialog from './ConfirmDialog.vue'
+import ScheduleRunHistoryDialog from './ScheduleRunHistoryDialog.vue'
 import {
   Plus, Play, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
-  Globe, TerminalSquare, Zap, CheckCircle2, XCircle,
+  Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
 } from '@lucide/vue'
 
 const { t, locale } = useI18n()
@@ -261,6 +262,14 @@ async function remove(t0: ScheduledTask) {
 const delTask = ref<ScheduledTask | null>(null)
 const showDelConfirm = ref(false)
 
+// ---- 运行历史 ----
+const historyTask = ref<ScheduledTask | null>(null)
+const showHistory = ref(false)
+function openHistory(t0: ScheduledTask) {
+  historyTask.value = t0
+  showHistory.value = true
+}
+
 async function confirmDel() {
   const t = delTask.value
   if (!t) return
@@ -332,6 +341,7 @@ onMounted(refresh)
           <button class="act" :disabled="runningId === task.id" @click="runNow(task)" :title="t('sched_run_now')">
             <Play :size="14" />
           </button>
+          <button class="act" @click="openHistory(task)" :title="t('sched_history')"><History :size="14" /></button>
           <button class="act" @click="openEdit(task)" :title="t('sched_edit')"><Pencil :size="14" /></button>
           <button class="act danger" @click="remove(task)" :title="t('sched_delete')"><Trash2 :size="14" /></button>
         </div>
@@ -451,6 +461,12 @@ onMounted(refresh)
       :message="t('sched_delete') + '?'"
       @confirm="confirmDel"
       @cancel="showDelConfirm = false"
+    />
+
+    <ScheduleRunHistoryDialog
+      :visible="showHistory"
+      :task="historyTask"
+      @cancel="showHistory = false"
     />
   </div>
 </template>

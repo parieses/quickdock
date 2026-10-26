@@ -280,6 +280,7 @@ func (a *AppService) checkScheduledTasks() {
 			}()
 			startedAt := time.Now()
 			status, result := a.executeTask(t)
+			durationMs := time.Since(startedAt).Milliseconds()
 			// 执行结果原先只写进 DB 的 run result 字段，日志里毫无痕迹——
 			// 用户问「定时任务怎么没执行」时无法判断是没触发还是触发了但失败。
 			if status == "ok" {
@@ -300,25 +301,55 @@ func (a *AppService) checkScheduledTasks() {
 				enabled = false
 			}
 			_ = a.DB.SetTaskRunResult(t.ID, now, status, result, nextRun, enabled)
+			// 追加一条执行历史（含耗时），供「运行历史」回看逐次执行情况
+			_ = a.DB.InsertScheduleRun(t.ID, t.Name, status, result, durationMs)
 
-			// 可选：执行后发系统通知 + 机器人 Webhook（钉钉/企业微信/飞书，全局共用配置）
-			if t.Notify {
-				icon := "✅"
-				if status != "ok" {
-					icon = "⚠️"
-				}
-				title := icon + " 定时任务：" + t.Name
-				if a.Notifier != nil {
-					_ = a.Notifier.SendNotification(notifications.NotificationOptions{
-						ID:    "schedtask-" + t.ID + "-" + time.Now().Format("150405"),
-						Title: title,
-						Body:  result,
-					})
-				}
-				a.sendWebhookNotify(title, result)
-			}
+			// 执行结果按 t.Notify 推送给系统通知 + 已配置机器人（结果/耗时统一拼进消息体）
+			a.notifyScheduleRun(t, status, result, durationMs)
 		}(t)
 	}
+}
+
+// notifyScheduleRun 定时任务执行后，按 t.Notify 开关向系统通知 + 已配置机器人推送结果。
+//
+// 把原来散在自动/手动两条执行路径里的重复通知逻辑收口到一处：二者都曾各自拼 title、
+// 各自调 Notifier / sendWebhookNotify，一旦一处改了另一处忘了，就出现「手动跑有通知、
+// 到点跑没通知」之类的漂移。结果（含失败原因）与耗时统一在这里拼进消息体，
+// 确保机器人收到的消息一定带「执行结果」。
+func (a *AppService) notifyScheduleRun(t *db.ScheduledTask, status, result string, durationMs int64) {
+	if !t.Notify {
+		return
+	}
+	icon := "✅"
+	if status != "ok" {
+		icon = "⚠️"
+	}
+	title := icon + " 定时任务：" + t.Name
+
+	// 结果 + 耗时明确拼进 body：机器人消息一定带「执行结果」，而不是只看到任务名。
+	res := strings.TrimSpace(result)
+	var b strings.Builder
+	b.WriteString("结果：")
+	if res == "" {
+		b.WriteString(status) // 结果为空兜底，至少给个 ok/fail
+	} else {
+		b.WriteString(res)
+	}
+	b.WriteString("\n耗时：")
+	if durationMs > 0 {
+		b.WriteString((time.Duration(durationMs) * time.Millisecond).String())
+	} else {
+		b.WriteString("—")
+	}
+
+	if a.Notifier != nil {
+		_ = a.Notifier.SendNotification(notifications.NotificationOptions{
+			ID:    "schedtask-" + t.ID + "-" + time.Now().Format("150405"),
+			Title: title,
+			Body:  b.String(),
+		})
+	}
+	a.sendWebhookNotify(title, b.String())
 }
 
 // executeTask 执行单个任务，返回 (status, result)

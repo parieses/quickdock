@@ -1094,6 +1094,15 @@ export default {
   sched_err_target: 'Please enter a target',
   sched_err_runat: 'Please pick a run time',
   sched_err_weekday: 'Please select at least one weekday',
+  sched_history: 'Run history',
+  sched_history_title: 'Run history',
+  sched_history_empty: 'No execution records yet',
+  sched_history_loading: 'Loading…',
+  sched_history_time: 'Time',
+  sched_history_status: 'Status',
+  sched_history_duration: 'Duration',
+  sched_history_result: 'Result',
+  sched_history_retention: 'Only the latest 100 runs / within 30 days are kept',
 
   // Uptime Monitor (UptimeRobot-style)
   mon_title: 'Uptime Monitor',

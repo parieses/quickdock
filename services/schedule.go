@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/validators"
@@ -74,8 +75,19 @@ func (a *AppService) DeleteScheduledTask(id string) *ApiResult {
 	if err := a.DB.DeleteScheduledTask(id); err != nil {
 		return Fail(err)
 	}
+	// 级联清理执行历史，避免历史表残留孤儿记录（保留策略只按时间/条数收敛，不感知任务删除）
+	_ = a.DB.DeleteScheduleRunsForTask(id)
 	a.wakeScheduler()
 	return Ok(nil)
+}
+
+// GetScheduleRuns 返回指定任务的执行历史（按时间倒序，最多 limit 条）
+func (a *AppService) GetScheduleRuns(taskID string, limit int) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	runs, err := a.DB.ListScheduleRuns(taskID, limit)
+	return wrap(runs, err)
 }
 
 // SetScheduledTaskEnabled 启用/停用定时任务；启用时重算 next_run
@@ -110,19 +122,18 @@ func (a *AppService) RunScheduledTaskNow(id string) *ApiResult {
 	if err != nil {
 		return Fail(err)
 	}
+	startedAt := time.Now()
 	status, result := a.executeTask(t)
+	durationMs := time.Since(startedAt).Milliseconds()
 	// 操作流水：手动触发才记（定时后台跑几千条会把时间线冲垮，
 	// 那些该去定时任务自己的执行记录里看）。
 	a.NoteActivity(db.ActivityScheduleRun, t.ID, t.Name)
 	// 手动执行只更新运行结果，不改动 next_run / enabled
 	_ = a.DB.SetTaskRunResult(t.ID, nowStr(), status, result, t.NextRun, t.Enabled)
-	if t.Notify {
-		icon := "✅"
-		if status != "ok" {
-			icon = "⚠️"
-		}
-		a.sendWebhookNotify(icon+" 定时任务："+t.Name, result)
-	}
+	// 追加一条执行历史（含耗时）
+	_ = a.DB.InsertScheduleRun(t.ID, t.Name, status, result, durationMs)
+	// 执行结果按 t.Notify 推送给系统通知 + 已配置机器人（结果/耗时统一拼进消息体）
+	a.notifyScheduleRun(t, status, result, durationMs)
 	if status != "ok" {
 		return FailMsg(result)
 	}

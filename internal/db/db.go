@@ -40,6 +40,7 @@ var validTables = map[string]bool{
 	"usage_frecency":    true,
 	"todos":             true,
 	"scheduled_tasks":   true,
+	"schedule_runs":     true,
 	"monitors":          true,
 	"monitor_logs":      true,
 	"plugin_exec_logs":  true,
@@ -101,6 +102,8 @@ var validColumns = map[string]bool{
 	"schedule_kind": true, "run_at": true, "interval_sec": true, "time_of_day": true,
 	"weekdays": true, "notify": true, "next_run": true,
 	"last_run": true, "last_status": true, "last_result": true,
+	// schedule 执行历史表列（run_at/status/created_ts/duration_ms 已在上文声明）
+	"task_id": true, "task_name": true,
 	// 监控表列
 	"timeout_sec": true, "expected_status": true,
 	"down_alert_threshold": true, "consecutive_down": true,
