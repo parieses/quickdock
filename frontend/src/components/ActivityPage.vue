@@ -3,10 +3,10 @@ import { ref, computed, onMounted, onUnmounted, inject, type Component } from 'v
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { ListActivity, ClearActivity } from '../../bindings/quickdock/services/appservice'
-import { GetTopUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
+import { ListActivity, ClearActivity, ClearActivityWhere } from '../../bindings/quickdock/services/appservice'
+import { GetTopUsage, ClearUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
 import {
-  Activity, FolderKanban, Server, Puzzle, AlarmClock, ListChecks, RefreshCw, Trash2,
+  Activity, FolderKanban, Server, Puzzle, AlarmClock, ListChecks, RefreshCw, Trash2, RotateCcw,
 } from '@lucide/vue'
 import type { ToastAPI } from '../types'
 
@@ -48,6 +48,52 @@ const topUsed = ref<FrecencyEntry[]>([])
 const timeline = ref<ActivityRow[]>([])
 const loading = ref(false)
 const error = ref('')
+
+// ---- 筛选：来源（kind）+ 时间范围 ----
+// 两条都只作用于「已加载的最近 500 条」：activity 有自动裁剪上限，
+// 全量拉取没有意义，500 条足够覆盖任何人工筛选场景。
+const ACTIVITY_LOAD_LIMIT = 500
+
+const KIND_FILTERS: { value: string; labelKey: string }[] = [
+  { value: '', labelKey: 'activityFilterAll' },
+  { value: 'item', labelKey: 'activityFilterItem' },
+  { value: 'ssh', labelKey: 'activityFilterSsh' },
+  { value: 'ssh_batch', labelKey: 'activityFilterSshBatch' },
+  { value: 'plugin', labelKey: 'activityFilterPlugin' },
+  { value: 'schedule', labelKey: 'activityFilterSchedule' },
+]
+const kindFilter = ref('')
+
+const TIME_FILTERS = [
+  { value: 'today', labelKey: 'activityTimeToday', ms: 0 },
+  { value: '7d', labelKey: 'activityTime7d', ms: 7 * 86400_000 },
+  { value: 'all', labelKey: 'activityTimeAll', ms: 0 },
+]
+const timeFilter = ref('all')
+
+// 「今天」按本地天零点起算：Unix 毫秒直接减 86400000 会得到「24 小时前」，
+// 下午打开页面时把昨天下午的记录也算成「今天」。
+function todayStartMs(): number {
+  const d = new Date()
+  d.setHours(0, 0, 0, 0)
+  return d.getTime()
+}
+
+const timeSinceMs = computed(() => {
+  const f = TIME_FILTERS.find(x => x.value === timeFilter.value)
+  if (!f || f.value === 'all') return 0
+  if (f.value === 'today') return todayStartMs()
+  return Date.now() - f.ms
+})
+
+const filterActive = computed(() => kindFilter.value !== '' || timeSinceMs.value > 0)
+
+const visibleTimeline = computed(() => {
+  const since = timeSinceMs.value
+  return timeline.value.filter(a =>
+    (!kindFilter.value || a.kind === kindFilter.value) &&
+    (!since || a.createdTs >= since))
+})
 
 // now 每分钟推进一次：相对时间（「3 分钟前」）不靠定时器刷新的话，
 // 页面开着不动，显示就会一直停在打开那一刻。
@@ -92,7 +138,7 @@ async function load() {
   try {
     const [top, acts] = await Promise.all([
       GetTopUsage(20),
-      ListActivity(200),
+      ListActivity(ACTIVITY_LOAD_LIMIT),
     ])
     topUsed.value = (unwrap<FrecencyEntry[]>(top) || []) as FrecencyEntry[]
     timeline.value = (unwrap<ActivityRow[]>(acts) || []) as ActivityRow[]
@@ -104,14 +150,41 @@ async function load() {
   }
 }
 
+// 批量清除 = 清除「当前筛选结果」：筛选是用户自己划的范围，
+// 清这个范围比只有「全清」一个档位有用，也比逐条勾选轻。
 async function clearTimeline() {
+  const scope = filterActive.value ? t('activityClearFiltered') : t('activityClearAll')
   if (toast?.confirm) {
-    const ok = await toast.confirm(t('activityClearConfirm'))
+    const ok = await toast.confirm(t('activityClearConfirm', { scope }))
     if (!ok) return
   }
   try {
-    unwrap(await ClearActivity())
-    timeline.value = []
+    if (filterActive.value) {
+      unwrap(await ClearActivityWhere(kindFilter.value, timeSinceMs.value))
+    } else {
+      unwrap(await ClearActivity())
+    }
+    // 本地同步移除被清掉的行，不必整页重拉（重闪一下也没意义）。
+    // 删除条件与后端 ClearActivityWhere 一致：kind 与时间是 AND 关系。
+    const since = timeSinceMs.value
+    const matchesFilter = (a: ActivityRow) =>
+      (!kindFilter.value || a.kind === kindFilter.value) &&
+      (!since || a.createdTs >= since)
+    timeline.value = timeline.value.filter(a => !matchesFilter(a))
+  } catch (e: any) {
+    toast?.error?.(getErrorMessage(e))
+  }
+}
+
+// 重置最常用排行：清的是使用频率统计，不是任何业务数据
+async function resetTopUsed() {
+  if (toast?.confirm) {
+    const ok = await toast.confirm(t('activityResetTopConfirm'))
+    if (!ok) return
+  }
+  try {
+    unwrap(await ClearUsage())
+    topUsed.value = []
   } catch (e: any) {
     toast?.error?.(getErrorMessage(e))
   }
@@ -133,17 +206,19 @@ onUnmounted(() => {
 
 <template>
   <div class="activity-page" :class="{ embedded: props.embedded }">
-    <div class="activity-header">
-      <div class="activity-title-wrap">
-        <h2 v-if="!props.embedded" class="activity-title">{{ t('navActivity') }}</h2>
-        <span class="activity-sub">{{ t('activitySubtitle') }}</span>
+    <div class="qd-page-header">
+      <div class="qd-page-titles">
+        <h2 v-if="!props.embedded" class="qd-page-title">{{ t('navActivity') }}</h2>
+        <span class="qd-page-sub">{{ t('activitySubtitle') }}</span>
       </div>
-      <button class="act-btn" :disabled="loading" @click="load">
-        <RefreshCw :size="13" /> {{ t('logRefresh') }}
-      </button>
-      <button class="act-btn" :disabled="loading || !timeline.length" @click="clearTimeline">
-        <Trash2 :size="13" /> {{ t('activityClear') }}
-      </button>
+      <div class="qd-page-actions">
+        <button class="qd-btn" :disabled="loading" @click="load">
+          <RefreshCw :size="13" /> {{ t('logRefresh') }}
+        </button>
+        <button class="qd-btn" :disabled="loading || !visibleTimeline.length" @click="clearTimeline">
+          <Trash2 :size="13" /> {{ filterActive ? t('activityClearFilteredBtn') : t('activityClear') }}
+        </button>
+      </div>
     </div>
 
     <div v-if="error" class="activity-error">{{ error }}</div>
@@ -154,6 +229,9 @@ onUnmounted(() => {
         <div class="pane-head">
           <span>{{ t('activityTopUsed') }}</span>
           <span v-if="topCount" class="pane-count">{{ topCount }}</span>
+          <button v-if="topCount" class="pane-head-btn" :title="t('activityResetTop')" @click="resetTopUsed">
+            <RotateCcw :size="12" />
+          </button>
         </div>
         <div class="pane-body">
           <ol v-if="topUsed.length" class="used-list">
@@ -171,11 +249,30 @@ onUnmounted(() => {
       <section class="pane">
         <div class="pane-head">
           <span>{{ t('activityTimeline') }}</span>
-          <span v-if="timeline.length" class="pane-count">{{ timeline.length }}</span>
+          <span v-if="visibleTimeline.length" class="pane-count">{{ visibleTimeline.length }}</span>
+        </div>
+        <!-- 筛选：来源 + 时间范围。都作用于本地已加载行，即时无请求 -->
+        <div class="tl-filters">
+          <div class="tl-filter-row">
+            <button
+              v-for="f in KIND_FILTERS"
+              :key="f.value"
+              :class="['tl-chip', { active: kindFilter === f.value }]"
+              @click="kindFilter = f.value"
+            >{{ t(f.labelKey) }}</button>
+          </div>
+          <div class="tl-filter-row">
+            <button
+              v-for="f in TIME_FILTERS"
+              :key="f.value"
+              :class="['tl-chip', { active: timeFilter === f.value }]"
+              @click="timeFilter = f.value"
+            >{{ t(f.labelKey) }}</button>
+          </div>
         </div>
         <div class="pane-body">
-          <div v-if="timeline.length" class="tl-list">
-            <div v-for="a in timeline" :key="a.id" class="tl-item">
+          <div v-if="visibleTimeline.length" class="tl-list">
+            <div v-for="a in visibleTimeline" :key="a.id" class="tl-item">
               <span class="tl-dot" :data-kind="a.kind">
                 <component :is="KIND_ICON[a.kind] || Activity" :size="13" />
               </span>
@@ -188,6 +285,7 @@ onUnmounted(() => {
               </div>
             </div>
           </div>
+          <p v-else-if="timeline.length" class="pane-empty">{{ t('activityFilterEmpty') }}</p>
           <p v-else class="pane-empty">{{ t('activityEmpty') }}</p>
         </div>
       </section>
@@ -202,24 +300,9 @@ onUnmounted(() => {
 }
 /* 嵌入设置面板：背景交给外层，内边距收紧一档 */
 .activity-page.embedded { background: transparent; }
-.activity-page.embedded .activity-header { padding: 12px 16px; }
-.activity-page.embedded .activity-sub { font-size: 12px; }
+.activity-page.embedded .qd-page-header { padding: 0 14px; min-height: 40px; box-shadow: none; }
 .activity-page.embedded .activity-body { padding: 12px 16px 16px; }
 .activity-page.embedded .activity-error { margin: 8px 16px 0; }
-.activity-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 14px 20px; border-bottom: 1px solid var(--color-border); flex-shrink: 0;
-}
-.activity-title-wrap { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.activity-title { margin: 0; font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
-.activity-sub { font-size: 12px; color: var(--color-text-secondary); }
-.act-btn {
-  display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 4px 9px;
-  border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary);
-}
-.act-btn:hover:not(:disabled) { background: var(--color-bg-hover); }
-.act-btn:disabled { opacity: 0.45; cursor: default; }
 .activity-error {
   margin: 10px 20px 0; padding: 8px 12px; border-radius: var(--radius-sm); font-size: 12px;
   color: var(--color-danger-text); background: var(--color-danger-bg); border: 1px solid var(--color-danger-border);
@@ -242,6 +325,31 @@ onUnmounted(() => {
 .pane-count {
   margin-left: auto; font-weight: 400; font-size: 11px; padding: 0 6px;
   border-radius: 8px; background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+}
+.pane-head-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; margin-left: 2px;
+  border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-disabled); cursor: pointer;
+}
+.pane-head-btn:hover { color: var(--color-accent); background: var(--color-bg-active); }
+/* ---- 时间线筛选（来源 + 时间）---- */
+.tl-filters {
+  display: flex; flex-direction: column; gap: 4px;
+  padding: 8px 10px; flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border);
+}
+.tl-filter-row { display: flex; gap: 4px; flex-wrap: wrap; }
+.tl-chip {
+  padding: 2px 9px; border-radius: var(--radius-md);
+  border: 1px solid var(--color-border); background: transparent;
+  color: var(--color-text-secondary); font-size: 11px; font-family: inherit;
+  cursor: pointer; white-space: nowrap;
+  transition: background-color 0.1s, color 0.1s, border-color 0.1s;
+}
+.tl-chip:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.tl-chip.active {
+  background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent);
 }
 .pane-body { flex: 1; overflow-y: auto; padding: 6px; }
 .pane-empty { margin: 0; padding: 24px 12px; font-size: 12px; line-height: 1.6; color: var(--color-text-disabled); }

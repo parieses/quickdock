@@ -37,7 +37,7 @@ interface MonitorStat {
 }
 import {
   Plus, Play, Pencil, Trash2, Globe, Activity, RefreshCw,
-  ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio,
+  ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -48,6 +48,43 @@ const logsMap = ref<Record<string, MonitorLog[]>>({})
 const expanded = ref<Set<string>>(new Set())
 const loading = ref(false)
 const error = ref('')
+
+// ---- 分组 ----
+// 分组名由用户在建/改时填写，为空即「未分组」。展示顺序：未分组在前、
+// 命名分组按名称排——组是用户自己划的，字母序比「谁先建」更易找。
+const groupFilter = ref('') // ''=全部；'__none__'=仅看未分组
+
+const monitorGroups = computed(() => {
+  const names = new Set<string>()
+  for (const m of monitors.value) if (m.groupName) names.add(m.groupName)
+  return Array.from(names).sort((a, b) => a.localeCompare(b))
+})
+
+const hasUngrouped = computed(() => monitors.value.some(m => !m.groupName))
+
+interface MonitorGroup { name: string; items: Monitor[] }
+const monitorGroupList = computed<MonitorGroup[]>(() => {
+  const byName = new Map<string, Monitor[]>()
+  const ungrouped: Monitor[] = []
+  for (const m of monitors.value) {
+    if (m.groupName) {
+      const arr = byName.get(m.groupName) || []
+      arr.push(m)
+      byName.set(m.groupName, arr)
+    } else {
+      ungrouped.push(m)
+    }
+  }
+  const groups: MonitorGroup[] = []
+  if (ungrouped.length) groups.push({ name: '', items: ungrouped })
+  for (const name of Array.from(byName.keys()).sort((a, b) => a.localeCompare(b))) {
+    groups.push({ name, items: byName.get(name)! })
+  }
+  // 分组筛选：只看某一组（含「未分组」）
+  if (groupFilter.value === '__none__') return groups.filter(g => g.name === '')
+  if (groupFilter.value) return groups.filter(g => g.name === groupFilter.value)
+  return groups
+})
 
 // ---- 汇总指标 ----
 const summary = computed(() => {
@@ -122,6 +159,8 @@ const fNotifyDown = ref(true)
 const fNotifyUp = ref(true)
 const fSkipTLS = ref(false) // 忽略证书错误（默认关闭）
 const fDownAlertThreshold = ref(1) // 误报抑制：连续 N 次失败才告警
+const fGroup = ref('') // 分组名（空=未分组）
+const fLatencyAlert = ref(0) // 延迟告警阈值 ms（0=关闭）
 
 // 6.1 SSL 证书告警提前天数；6.2 内容匹配
 const fCertWarnDays = ref(14)
@@ -152,6 +191,8 @@ function openCreate() {
   fSkipTLS.value = false
   fCertWarnDays.value = 14
   fDownAlertThreshold.value = 1
+  fGroup.value = ''
+  fLatencyAlert.value = 0
   fContentMatchType.value = 'none'
   fContentMatchPattern.value = ''
   showModal.value = true
@@ -174,6 +215,8 @@ function openEdit(m: Monitor) {
   fContentMatchType.value = m.contentMatchType || 'none'
   fContentMatchPattern.value = m.contentMatchPattern || ''
   fDownAlertThreshold.value = m.downAlertThreshold > 0 ? m.downAlertThreshold : 1
+  fGroup.value = m.groupName || ''
+  fLatencyAlert.value = m.latencyAlertMs > 0 ? m.latencyAlertMs : 0
   showModal.value = true
 }
 
@@ -197,6 +240,8 @@ function buildPayload(): Monitor {
     contentMatchType: fContentMatchType.value,
     contentMatchPattern: fContentMatchPattern.value.trim(),
     downAlertThreshold: Math.max(1, Math.floor(fDownAlertThreshold.value || 1)),
+    groupName: fGroup.value.trim(),
+    latencyAlertMs: Math.max(0, Math.floor(fLatencyAlert.value || 0)),
     consecutiveDown: 0,
     lastStatus: '', lastCheckedAt: '', lastCheckedTs: 0, lastLatencyMs: 0,
     lastStatusCode: 0, lastError: '', sort: 0, createdAt: '',
@@ -500,6 +545,87 @@ async function clearLogs(m: Monitor) {
   try { await unwrap(await ClearMonitorLogs(m.id)); logsMap.value[m.id] = [] } catch (e) { error.value = getErrorMessage(e) }
 }
 
+// ---- 导出 CSV ----
+// 导出当前时间范围已加载的日志（响应时间 + 状态码 + 错误）。
+// 两个细节：① 带 UTF-8 BOM——Windows 用户默认双击用 Excel 打开，无 BOM 中文必乱码；
+// ② 后端返回倒序（新→旧），导出转正序，符合「从早读到晚」的习惯。
+function exportCsv(m: Monitor) {
+  const logs = logsMap.value[m.id] || []
+  if (logs.length === 0) return
+  const esc = (v: string | number) => '"' + String(v ?? '').replace(/"/g, '""') + '"'
+  const lines = [['checked_at', 'status', 'status_code', 'latency_ms', 'error'].map(esc).join(',')]
+  for (const l of [...logs].reverse()) {
+    lines.push([l.checkedAt, l.status, l.statusCode, l.latencyMs, l.error].map(esc).join(','))
+  }
+  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  // 文件名去掉 Windows 非法字符，否则下载静默失败
+  a.download = 'monitor-' + m.name.replace(/[\\/:*?"<>|]/g, '_') + '-' + new Date().toISOString().slice(0, 10) + '.csv'
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(url)
+}
+
+// ---- 停机日历 ----
+// 按日聚合当前范围日志的失败次数，格子色深表示当日失败强度。
+// 数据源就是已加载的 logsMap：切换时间范围日历跟着变，不额外请求。
+// 跨度取日志覆盖的日期（对齐到周一、最多 12 周）——24h 范围只亮一两天，
+// 全部范围则是一幅停机热力图。
+interface CalDay { key: string; down: number; total: number }
+const CAL_MAX_DAYS = 84
+
+function fmtDay(d: Date): string {
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+
+function calendarDaysFor(id: string): CalDay[] {
+  const logs = logsMap.value[id] || []
+  const byDay = new Map<string, { down: number; total: number }>()
+  let minTs = Infinity, maxTs = -Infinity
+  for (const l of logs) {
+    const ts = l.checkedTs || Date.parse(l.checkedAt)
+    if (!ts || isNaN(ts)) continue
+    if (ts < minTs) minTs = ts
+    if (ts > maxTs) maxTs = ts
+    const day = l.checkedAt ? l.checkedAt.slice(0, 10) : fmtDay(new Date(ts))
+    let e = byDay.get(day)
+    if (!e) { e = { down: 0, total: 0 }; byDay.set(day, e) }
+    e.total++
+    if (l.status !== 'up') e.down++
+  }
+  if (minTs === Infinity) return []
+  // 对齐到周一，末尾至少铺到今天
+  const start = new Date(Math.min(minTs, Date.now()))
+  start.setHours(0, 0, 0, 0)
+  start.setDate(start.getDate() - ((start.getDay() + 6) % 7))
+  const end = new Date(Math.max(maxTs, Date.now()))
+  end.setHours(0, 0, 0, 0)
+  const days: CalDay[] = []
+  for (let d = new Date(start); d <= end && days.length < CAL_MAX_DAYS; d.setDate(d.getDate() + 1)) {
+    const key = fmtDay(d)
+    const e = byDay.get(key)
+    days.push({ key, down: e?.down || 0, total: e?.total || 0 })
+  }
+  return days
+}
+
+// 0=无失败；1-3 按当日失败占比升档。无数据的格子单独一档（lv-x），
+ // 免得「没探测」和「全天在线」看起来一样。
+function calLevel(d: CalDay): string {
+  if (d.total === 0) return 'x'
+  if (d.down === 0) return '0'
+  const r = d.down / d.total
+  return r <= 0.25 ? '1' : r <= 0.5 ? '2' : '3'
+}
+function calTip(d: CalDay): string {
+  if (d.total === 0) return d.key + ' · ' + t('mon_cal_nodata')
+  return t('mon_cal_tip', { date: d.key, down: d.down, total: d.total })
+}
+
 // ---- 自动刷新设置（页面级偏好，存 localStorage） ----
 // 0 = 关闭；其余为间隔秒数
 const REFRESH_OPTIONS = [0, 5, 10, 15, 30, 60]
@@ -562,12 +688,12 @@ onUnmounted(() => {
 <template>
   <div class="mon-page">
     <!-- 顶部栏 -->
-    <div class="mon-header">
-      <div class="mon-title-wrap">
-        <h2 class="mon-title">{{ t('mon_title') }}</h2>
-        <span class="mon-sub">{{ t('mon_subtitle') }}</span>
+    <div class="qd-page-header">
+      <div class="qd-page-titles">
+        <h2 class="qd-page-title">{{ t('mon_title') }}</h2>
+        <span class="qd-page-sub">{{ t('mon_subtitle') }}</span>
       </div>
-      <div class="mon-header-actions">
+      <div class="qd-page-actions">
         <div class="refresh-control">
           <RefreshCw :size="14" />
           <select v-model.number="refreshSec" class="refresh-select" :title="t('mon_auto_refresh')">
@@ -577,7 +703,7 @@ onUnmounted(() => {
           </select>
         </div>
         <WebhookSettingsModal :label="t('mon_nf_title')" />
-        <button class="add-btn" @click="openCreate"><Plus :size="15" /> {{ t('mon_add') }}</button>
+        <button class="qd-btn qd-btn-primary" @click="openCreate"><Plus :size="14" /> {{ t('mon_add') }}</button>
       </div>
     </div>
 
@@ -591,6 +717,22 @@ onUnmounted(() => {
       <div class="sum-item"><span class="sum-num">{{ summary.avgLatency }}<i>ms</i></span><span class="sum-lbl">{{ t('mon_sum_latency') }}</span></div>
     </div>
 
+    <!-- 分组筛选（有命名分组时才出现，否则纯属噪音） -->
+    <div v-if="monitorGroups.length" class="group-filter">
+      <button :class="['group-chip', { active: groupFilter === '' }]" @click="groupFilter = ''">
+        {{ t('mon_group_all') }}
+      </button>
+      <button
+        v-for="g in monitorGroups"
+        :key="g"
+        :class="['group-chip', { active: groupFilter === g }]"
+        @click="groupFilter = g"
+      >{{ g }}</button>
+      <button v-if="hasUngrouped" :class="['group-chip', { active: groupFilter === '__none__' }]" @click="groupFilter = '__none__'">
+        {{ t('mon_group_none') }}
+      </button>
+    </div>
+
     <!-- 列表 -->
     <div class="mon-list">
       <div v-if="!loading && monitors.length === 0" class="mon-empty">
@@ -599,7 +741,13 @@ onUnmounted(() => {
         <p class="empty-hint">{{ t('mon_empty_hint') }}</p>
       </div>
 
-      <div v-for="m in monitors" :key="m.id" :class="['mon-item', { disabled: !m.enabled }]">
+      <template v-for="g in monitorGroupList" :key="g.name || '__none__'">
+        <!-- 分组头：多个组并列时才需要，单独一组时是冗余信息 -->
+        <div v-if="monitorGroupList.length > 1" class="group-head">
+          <span class="group-head-name">{{ g.name || t('mon_group_none') }}</span>
+          <span class="group-head-count">{{ g.items.length }}</span>
+        </div>
+        <div v-for="m in g.items" :key="m.id" :class="['mon-item', { disabled: !m.enabled }]">
         <div class="item-head" @click="toggleExpand(m)">
           <span :class="['status-dot', m.lastStatus || 'unknown']"></span>
           <div class="item-main">
@@ -650,14 +798,38 @@ onUnmounted(() => {
                   @click="logRange = r.value; onRangeChange(m.id)"
                 >{{ r.label }}</button>
               </div>
+              <button class="clear-logs" :disabled="!logsMap[m.id]?.length" @click="exportCsv(m)" :title="t('mon_export_csv')">
+                <Download :size="12" /> {{ t('mon_export_csv') }}
+              </button>
               <button class="clear-logs" @click="clearLogs(m)">{{ t('mon_clear_logs') }}</button>
             </div>
           </div>
           <div v-if="!logsMap[m.id] || logsMap[m.id].length === 0" class="logs-empty">{{ t('mon_no_logs') }}</div>
-          <canvas v-else :id="chartId(m.id)" class="chart-canvas"
-            @mousemove="onChartMove($event, m.id)" @mouseleave="onChartLeave"></canvas>
+          <template v-else>
+            <canvas :id="chartId(m.id)" class="chart-canvas"
+              @mousemove="onChartMove($event, m.id)" @mouseleave="onChartLeave"></canvas>
+            <!-- 停机日历：按日看失败强度，一眼定位「哪天挂过」 -->
+            <div v-if="calendarDaysFor(m.id).length" class="down-cal">
+              <div class="cal-head">
+                <span>{{ t('mon_down_calendar') }}</span>
+                <span class="cal-legend">
+                  {{ t('mon_cal_less') }}
+                  <i class="cal-cell lv-x"></i><i class="cal-cell lv0"></i><i class="cal-cell lv1"></i>
+                  <i class="cal-cell lv2"></i><i class="cal-cell lv3"></i>
+                  {{ t('mon_cal_more') }}
+                </span>
+              </div>
+              <div class="cal-grid">
+                <i v-for="d in calendarDaysFor(m.id)" :key="d.key"
+                  :class="['cal-cell', 'lv' + calLevel(d)]" :title="calTip(d)"></i>
+              </div>
+            </div>
+          </template>
         </div>
-      </div>
+        <!-- /logs-panel -->
+        </div>
+        <!-- /mon-item：必须收在 <template v-for> 之内，否则分组循环外会多出一个闭合标签 -->
+      </template>
     </div>
 
     <!-- 曲线图 tooltip -->
@@ -753,6 +925,22 @@ onUnmounted(() => {
           <span class="unit-suffix">{{ t('mon_suppress_unit') }}</span>
         </div>
 
+        <!-- 多条件告警：延迟阈值（0=关闭）。与「连续 N 次失败」是 AND 关系，
+             即「连续 3 次失败且延迟>500ms」这种组合条件 -->
+        <div class="interval-row" style="margin-top: var(--space-2);">
+          <label>{{ t('mon_latency_alert') }}</label>
+          <input v-model.number="fLatencyAlert" type="number" min="0" step="100" class="modal-input interval-num" style="flex:0 0 72px;" placeholder="0" />
+          <span class="unit-suffix">{{ t('mon_latency_alert_unit') }}</span>
+        </div>
+        <p class="field-hint">{{ t('mon_latency_alert_hint') }}</p>
+
+        <!-- 分组：列表按组分区，监控多了之后按业务线/环境一眼定位 -->
+        <label style="margin-top: var(--space-2);">{{ t('mon_group') }}</label>
+        <input v-model="fGroup" class="modal-input" :placeholder="t('mon_group_ph')" list="mon-group-options" />
+        <datalist id="mon-group-options">
+          <option v-for="g in monitorGroups" :key="g" :value="g" />
+        </datalist>
+
         <div class="modal-actions">
           <button class="btn-ghost" @click="showModal = false">{{ t('cancel') }}</button>
           <button class="btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
@@ -770,29 +958,17 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* 页头已统一为 .qd-page-header（通栏），页容器不再留 padding，
+   内边距下放给各内容块 —— 否则页头会缩在 padding 里，与其它页错位。 */
 .mon-page {
   display: flex; flex-direction: column; height: 100%;
-  padding: var(--space-6) var(--space-8); overflow: hidden;
+  overflow: hidden; background: var(--color-bg-primary);
 }
-.mon-header {
-  display: flex; align-items: flex-end; justify-content: space-between;
-  margin-bottom: var(--space-5); flex-shrink: 0;
-}
-.mon-title-wrap { display: flex; align-items: baseline; gap: var(--space-3); }
-.mon-title { font-size: 18px; font-weight: 600; color: var(--color-text-primary); margin: 0; }
-.mon-sub { font-size: 12px; color: var(--color-text-disabled); }
-.add-btn {
-  display: inline-flex; align-items: center; gap: 5px; padding: 7px 14px;
-  background: var(--color-accent); color: var(--color-accent-text); border: none; border-radius: var(--radius-md);
-  font-size: 13px; cursor: pointer; font-family: inherit; transition: background var(--transition-fast);
-}
-.add-btn:hover { background: var(--color-accent-hover); }
-.mon-header-actions { display: flex; align-items: center; gap: var(--space-2); }
 .refresh-control {
   display: inline-flex; align-items: center; gap: 5px; padding: 0 10px;
-  height: 32px; background: transparent; color: var(--color-text-secondary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  font-size: 13px; cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
+  height: 28px; background: transparent; color: var(--color-text-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  font-size: 12px; cursor: pointer; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .refresh-control:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .refresh-select {
@@ -803,13 +979,13 @@ onUnmounted(() => {
 .refresh-select option { background: var(--color-surface); color: var(--color-text-primary); }
 
 .mon-error {
-  margin-bottom: var(--space-4); padding: 8px 12px; font-size: 12px;
+  margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
 }
 
 .mon-summary {
-  display: flex; gap: var(--space-3); margin-bottom: var(--space-4); flex-shrink: 0;
+  display: flex; gap: var(--space-3); margin: 14px 20px 12px; flex-shrink: 0;
 }
 .sum-item {
   flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;
@@ -822,7 +998,32 @@ onUnmounted(() => {
 .sum-item.up .sum-num { color: var(--color-success); }
 .sum-item.down .sum-num { color: var(--color-danger); }
 
-.mon-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); }
+.mon-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 0 20px 16px; }
+
+/* ---- 分组筛选与分组头 ---- */
+.group-filter { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 20px 10px; flex-shrink: 0; }
+.group-chip {
+  padding: 3px 10px; border-radius: var(--radius-md);
+  border: 1px solid var(--color-border); background: transparent;
+  color: var(--color-text-secondary); font-size: 11px; font-family: inherit;
+  cursor: pointer; white-space: nowrap;
+  transition: background-color 0.1s, color 0.1s, border-color 0.1s;
+}
+.group-chip:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.group-chip.active {
+  background: var(--color-accent-bg); border-color: var(--color-accent); color: var(--color-accent);
+}
+.group-head {
+  display: flex; align-items: center; gap: 8px;
+  margin: var(--space-2) 0 0; flex-shrink: 0;
+  font-size: 11px; font-weight: 600; color: var(--color-text-muted);
+}
+.group-head-name { text-transform: uppercase; letter-spacing: 0.06em; }
+.group-head-count {
+  font-weight: 400; padding: 0 6px; border-radius: 8px;
+  background: var(--color-bg-tertiary); color: var(--color-text-disabled);
+}
+.field-hint { margin: 4px 0 0; font-size: 11px; color: var(--color-text-disabled); }
 .mon-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 .empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
 .empty-hint { font-size: 11px; color: var(--color-text-muted); margin-top: var(--space-2); }
@@ -890,6 +1091,30 @@ onUnmounted(() => {
 
 /* 曲线图 canvas */
 .chart-canvas { display: block; width: 100%; height: 200px; border-radius: var(--radius-md); }
+
+/* ---- 停机日历 ---- */
+.down-cal { margin-top: 10px; }
+.cal-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  font-size: 11px; color: var(--color-text-muted); margin-bottom: 6px;
+}
+.cal-legend { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--color-text-disabled); }
+.cal-legend .cal-cell { margin-left: 2px; }
+/* 一周一列（7 行），列自动流；格子 11px + 3px 间距，12 周约 190px 宽 */
+.cal-grid {
+  display: grid; grid-auto-flow: column;
+  grid-template-rows: repeat(7, 11px);
+  grid-auto-columns: 11px; gap: 3px;
+  overflow-x: auto; padding-bottom: 2px;
+}
+.cal-cell {
+  display: block; width: 11px; height: 11px; border-radius: 2px;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+}
+.cal-cell.lv0 { background: var(--color-success-bg); border-color: var(--color-success-border); }
+.cal-cell.lv1 { background: var(--color-warning-bg); border-color: var(--color-warning-border); }
+.cal-cell.lv2 { background: var(--color-warning); border-color: var(--color-warning); }
+.cal-cell.lv3 { background: var(--color-danger); border-color: var(--color-danger); }
 
 /* 曲线图 tooltip */
 .chart-tooltip {
