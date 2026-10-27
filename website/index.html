@@ -374,8 +374,8 @@
 <article class="card reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></div>
 <h3>命令面板</h3>
-<p>一个 <kbd>Ctrl</kbd>+<kbd>K</kbd> 搜遍全部资源，FTS5 全文索引，键盘直达不用摸鼠标。</p>
-<ul><li>工作空间 / 场景 / 集合 / 项目统一搜索</li><li>多选批量操作、最近与最常使用排序</li><li>粘贴 URL 自动识别并建档</li></ul>
+<p>一个 <kbd>Ctrl</kbd>+<kbd>K</kbd> 搜遍全部资源，FTS5 全文索引，键盘直达不用摸鼠标。结果不是一长条混在一起，而是<b style="color:var(--text-1);font-weight:510">按来源分成十几个区</b>，每区带标题和计数。</p>
+<ul><li>项目 / 快速链接 / 笔记 / 应用程序 / 文件 / 插件命令 / 环境服务 / 系统命令各成一区</li><li>另有计算器与网页：直接算、直接开网址</li><li>最佳匹配排在前面，空着没输入时显示最近使用</li><li>多选批量操作、最近与最常使用排序（frecency）</li><li>粘贴 URL 自动识别并建档</li></ul>
 </article>
 <article class="card reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></div>
@@ -770,6 +770,9 @@
 <li><b style="color:var(--text-1);font-weight:510">排序会学习</b>：最近使用 + 最常使用加权（frecency），常用项越排越前</li>
 <li><b style="color:var(--text-1);font-weight:510">智能建档</b>：粘贴一个 URL 进去，自动识别并存成项目，不用填表单</li>
 <li><b style="color:var(--text-1);font-weight:510">多选批量</b>：选中多项后一次性执行，比如批量打开一套开发环境的五个目录</li>
+<li><b style="color:var(--text-1);font-weight:510">结果分区</b>：项目、快速链接、笔记、应用程序、文件、插件命令、环境服务、系统命令各有标题分区带计数，不是一长条混排；「最佳匹配」永远在最上面</li>
+<li><b style="color:var(--text-1);font-weight:510">待办与剪贴板历史不参与面板搜索</b>：待办去待办页看；面板里的「剪贴板建议」只作用于<b style="color:var(--text-1);font-weight:510">刚复制的那一条</b>，历史条目要去 <kbd>Ctrl</kbd>+<kbd>`</kbd> 浮窗里搜</li>
+<li>各区有显示上限（应用 8 / 文件 20 / 快链 3），目前只有「最近」一区能展开看全部</li>
 <li>浮动窗口，<kbd>Esc</kbd> 或点外面就收起，不打断手上的活</li>
 </ul>
 <div class="note">
