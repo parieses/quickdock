@@ -17,6 +17,7 @@ let cachedGitInfo: GitStatusInfo | null = null
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
+import { matchesTextOrPinyin } from '../utils/pinyin'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import ConfigEditor from './ConfigEditor.vue'
@@ -33,6 +34,7 @@ import {
   EnvInstall,
   EnvAvailableVersions,
   EnvRestart,
+  EnvStart,
   EnvStop,
   EnvStatus,
   EnvPortConflict,
@@ -53,9 +55,6 @@ import {
   EnvRabbitMQDisableMgmt,
   EnvRabbitMQIsMgmtEnabled,
   EnvSetEnabled,
-  EnvCertStatus,
-  EnvCertInstallRoot,
-  EnvCertIssue,
   EnvOllamaModels,
   EnvOllamaSearchLibrary,
   EnvOllamaCheckUpdate,
@@ -79,6 +78,7 @@ import {
   EnvUserEnvSetPath,
   EnvRuntimeTasks,
   EnvRunTask,
+  EnvProjectVersions,
   EnvEverythingStatus,
   EnvEverythingSearch,
   EnvEverythingStart,
@@ -174,16 +174,23 @@ interface SidebarItem {
   running?: boolean
   active: boolean
 }
+// 侧栏搜索：31 个运行时只能靠滚动 + 折叠找，"那个 pb" 得翻半天。
+// 搜索时**强制展开**分组——搜到的东西藏在折叠分组里等于没搜到。
+const sidebarQuery = ref('')
+const sidebarSearching = computed(() => sidebarQuery.value.trim().length > 0)
+
 const sidebarGroups = computed(() => {
   const out: { key: string; labelKey: string; items: SidebarItem[]; collapsed: boolean; running: boolean }[] = []
+  const q = sidebarQuery.value.trim().toLowerCase()
   for (const g of GROUP_ORDER) {
-    if (collapsedGroups[g]) {
+    if (collapsedGroups[g] && !q) {
       // 折叠态：仅保留分组标题，列表项清空（运行标识仍按全量运行时计算，折叠也能看到）
       out.push({ key: g, labelKey: GROUP_LABEL[g], items: [], collapsed: true, running: groupRunning(g) })
       continue
     }
     const items: SidebarItem[] = runtimes.value
       .filter((r) => r.group === g)
+      .filter((r) => !q || matchesTextOrPinyin([r.name, r.id], q, 'env:' + r.id))
       .map((r): SidebarItem => ({
         kind: 'runtime',
         id: r.id,
@@ -198,13 +205,14 @@ const sidebarGroups = computed(() => {
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }))
     // DSH（DeepSeek Harness）是 AI Agent 入口，归入 AI 服务组；它和 HTTP 服务/端口一样是页面入口而非可安装运行时，
     // 故以 kind: 'special' 注入，不参与上面的 runtime 列表与排序。
-    if (g === 'ai') {
+    const hit = (name: string, id: string) => !q || matchesTextOrPinyin([name, id], q)
+    if (g === 'ai' && hit(t('navDsh'), HARNESS_KEY)) {
       items.push({ kind: 'special', id: HARNESS_KEY, name: t('navDsh'), avatar: 'DS', color: 'var(--color-accent)', active: isHarness.value, running: dshRunning.value })
     }
     if (g === 'special') {
-      items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: SPECIAL_ITEM_COLORS.http, active: isHttp.value, running: httpAnyRunning.value })
-      items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: '⌂', color: SPECIAL_ITEM_COLORS.sites, active: isSites.value })
-      items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: SPECIAL_ITEM_COLORS.ports, active: isPorts.value })
+      if (hit(t('httpServe'), HTTP_KEY)) items.push({ kind: 'special', id: HTTP_KEY, name: t('httpServe'), avatar: '⬡', color: SPECIAL_ITEM_COLORS.http, active: isHttp.value, running: httpAnyRunning.value })
+      if (hit(t('sitesTitle'), SITES_KEY)) items.push({ kind: 'special', id: SITES_KEY, name: t('sitesTitle'), avatar: '⌂', color: SPECIAL_ITEM_COLORS.sites, active: isSites.value })
+      if (hit(t('portsTitle'), PORTS_KEY)) items.push({ kind: 'special', id: PORTS_KEY, name: t('portsTitle'), avatar: '⇄', color: SPECIAL_ITEM_COLORS.ports, active: isPorts.value })
     }
     if (items.length) out.push({ key: g, labelKey: GROUP_LABEL[g], items, collapsed: false, running: groupRunning(g) })
   }
@@ -473,12 +481,54 @@ const selectedConflict = computed<PortConflict | null>(() => {
   return portConflicts[selectedId.value] || null
 })
 
+// ---- 下载源选择持久化 ----
+// source / custom 原先只是组件内的临时状态：关面板或重启就回落到 activeSource，
+// 而 activeSource 是「上次成功安装用的源」，不是「用户选的源」——选了镜像的人下次
+// 装机又悄悄走官方源。这里按运行时持久化：下次打开面板直接回填上次的选择。
+const sourcePrefKey = (id: string) => 'qd_env_source:' + id
+
+function readSourcePref(id: string): { source: string; custom: string } {
+  try {
+    const raw = localStorage.getItem(sourcePrefKey(id))
+    if (!raw) return { source: '', custom: '' }
+    const p = JSON.parse(raw) || {}
+    return { source: String(p.source || ''), custom: String(p.custom || '') }
+  } catch {
+    // 解析失败/无 localStorage：当作没存过，回落 activeSource
+    return { source: '', custom: '' }
+  }
+}
+
+function saveSourcePref(id: string, source: string, custom: string) {
+  try {
+    localStorage.setItem(sourcePrefKey(id), JSON.stringify({ source, custom }))
+  } catch {
+    // 隐私模式或配额满：静默放弃，源选择退回「本次会话内有效」，不影响安装
+  }
+}
+
+// onSourceChange 切源后立即落盘；自定义源模板变更（失焦）也走这里。
+// 版本号刻意保留：上游版本清单与下载源无关（Source 只负责构造下载地址），
+// 清空反而让用户白选一次。真正的可下载性由下载器逐个候选地址回退兜底。
+function onSourceChange(r: RuntimeInfo) {
+  const s = stateFor(r.id, r)
+  saveSourcePref(r.id, s.source, s.custom)
+}
+
+// customSourceMissing 选了「自定义源」却没填模板：此时后端构造不出任何下载地址，
+// 点安装只会得到一个看不出原因的 404/超时。直接禁用并说明，比让用户猜省事。
+function customSourceMissing(r: RuntimeInfo): boolean {
+  const s = stateFor(r.id, r)
+  return s.source === 'custom' && !s.custom.trim()
+}
+
 function stateFor(id: string, info: RuntimeInfo): UiState {
   if (!ui[id]) {
+    const pref = readSourcePref(id)
     ui[id] = {
       version: '',
-      source: '',
-      custom: '',
+      source: pref.source,
+      custom: pref.custom,
       installing: false,
       stage: '',
       message: '',
@@ -544,6 +594,28 @@ const ollamaPulling = ref(false)
 // 与界面语言无关，原样展示不做翻译。
 const ollamaProgress = ref<{ percent: number; completed: number; total: number; status: string } | null>(null)
 const ollamaDelTarget = ref<OllamaModel | null>(null)
+
+// ---- Ollama 程序版本 ----
+// 与上方 newestUpdate 不是一回事：那个比的是「受管目录里已装的最高版本 vs 上游」，
+// 而 Ollama 常常是用官方安装包/包管理器装的、根本不在 runtime 目录下，
+// 于是 newestUpdate 对它永远显示「未安装」。EnvOllamaCheckUpdate 走的是
+// DetectInstalledVersion()（系统里实际生效的那个），两套判定各管一段，别合并。
+interface OllamaUpdateInfo { installed: string; latest: string; hasUpdate: boolean }
+const ollamaUpdate = ref<OllamaUpdateInfo | null>(null)
+const ollamaChkBusy = ref(false)
+
+async function checkOllamaUpdate() {
+  if (ollamaChkBusy.value) return
+  ollamaChkBusy.value = true
+  try {
+    ollamaUpdate.value = unwrap<OllamaUpdateInfo>(await EnvOllamaCheckUpdate()) ?? null
+  } catch (e) {
+    logWarn('env/ollamaUpdate', e)
+    ollamaUpdate.value = null
+  } finally {
+    ollamaChkBusy.value = false
+  }
+}
 
 // ---- 拉取输入框的官方模型库联想 ----
 // 数据源 ollama.com/api/tags（支持 ?q=），非本机已装模型——已装的不需要再拉。
@@ -710,7 +782,7 @@ function onOllamaPull(e: any) {
   }
 }
 
-watch(selectedId, (id) => { if (id === 'ollama') { loadOllama() } })
+watch(selectedId, (id) => { if (id === 'ollama') { loadOllama(); void checkOllamaUpdate() } })
 
 // versionInput: 绑定到当前选中运行时的版本号，读写都经过 ui[state] 保证一致性
 const versionInput = computed({
@@ -1529,11 +1601,18 @@ async function load() {
 
 // 刷新按钮：触发后端真实重扫（系统 PATH + 便携目录）并重新保存检测结果，
 // 完成后经 quickdock:env:refreshed 事件回来再 load() 读新缓存。
+// 刷新要重新探测每个运行时的版本/服务状态，几十次 IPC，不是瞬间完成 ——
+// 期间按钮必须转起来，否则用户会连点好几下。
+const refreshing = ref(false)
 async function refresh() {
+  if (refreshing.value) return
+  refreshing.value = true
   try {
     unwrap(await EnvRefresh())
   } catch (e: any) {
     toast.error(getErrorMessage(e))
+  } finally {
+    refreshing.value = false
   }
 }
 
@@ -1627,15 +1706,24 @@ async function pollStatus() {
         if (ins.scope === 'linked' && r.id !== 'php') continue
         try {
           const st = unwrap<ServiceStatus>(await EnvStatus(r.id, ins.version))
-          if (st) s.svc[ins.version] = st
+          if (st) {
+            s.svc[ins.version] = st
+            delete svcUnknown[r.id + ins.version]
+          }
         } catch {
-          /* 忽略单次轮询失败 */
+          // 查询失败不能沿用上一次的「运行中」：服务可能已经崩了，
+          // 而 UI 还在给用户一个绿色的假象。这里标记成「状态未知」，如实显示。
+          svcUnknown[r.id + ins.version] = true
         }
       }
-      // 端口冲突探测（启动前可视化提示）：仅对已装服务的运行时查询一次
+      // 端口冲突探测（启动前可视化提示）：优先探测**正在运行的那个版本**。
+      // 只查 installed[0] 时，多版本并存会对着一个没跑的版本报冲突——用户照着
+      // 提示去改配置，改的却不是真正占着端口的那个，问题永远解决不了。
       if (r.installed.length) {
+        const running = r.installed.find((i) => s.svc[i.version] && s.svc[i.version].running)
+        const probeVer = running ? running.version : r.installed[0].version
         try {
-          const pc = unwrap<PortConflict>(await EnvPortConflict(r.id, r.installed[0].version))
+          const pc = unwrap<PortConflict>(await EnvPortConflict(r.id, probeVer))
           if (pc) portConflicts[r.id] = pc
         } catch {
           /* 忽略单次探测失败 */
@@ -1805,6 +1893,37 @@ const evStatus = ref<EverythingStatusInfo | null>(null)
 const evSettings = ref<EverythingSettings>({ installPath: '', esExePath: '', fileSearchEnabled: true })
 const evBusy = ref(false)
 
+// ---- 测试搜索 ----
+// EnvEverythingSearch 是命令面板与 MCP 的取数口，之前在这个页面上完全没接 ——
+// 于是「诊断说 running、es.exe 也在，但文件搜不出来」这种情况用户无处自查。
+// 这里直接调同一个接口，看到的就是命令面板会拿到的东西。
+interface EvFileResult { path?: string; name?: string; dir?: string; modified?: number }
+const evQuery = ref('')
+const evSearching = ref(false)
+const evSearchErr = ref(false)
+const evSearchMsg = ref('')
+const evResults = ref<EvFileResult[]>([])
+
+async function runEvSearch() {
+  const q = evQuery.value.trim()
+  if (!q || evSearching.value) return
+  evSearching.value = true
+  evSearchErr.value = false
+  evSearchMsg.value = ''
+  evResults.value = []
+  try {
+    const rows = unwrap<EvFileResult[]>(await EnvEverythingSearch(q, 20, 'date_modified')) ?? []
+    evResults.value = rows
+    evSearchMsg.value = rows.length ? t('evTestSearchOk', { n: rows.length }) : t('evTestSearchEmpty')
+  } catch (e) {
+    evSearchErr.value = true
+    evSearchMsg.value = getErrorMessage(e)
+    logErr('env/evSearch', e)
+  } finally {
+    evSearching.value = false
+  }
+}
+
 const evStateText = computed(() => {
   const st = evStatus.value?.state
   if (st === 'running') return t('evStateRunning')
@@ -1954,6 +2073,32 @@ async function toggleEnabled(r: RuntimeInfo, on: boolean) {
 
 // stopping[rt+version] 标记某版本正在停止，期间禁用按钮避免重复点击
 const stopping = reactive<Record<string, boolean>>({})
+// starting[rt+version] 同上，用于「启动」按钮
+const starting = reactive<Record<string, boolean>>({})
+// svcUnknown[rt+version] 最近一次状态查询失败：此时不能沿用旧的 running 值
+// （服务可能已经崩了），UI 要如实显示「状态未知」而不是一个绿点。
+const svcUnknown = reactive<Record<string, boolean>>({})
+
+// startService 启动服务。
+//
+// 之前页面根本没有「启动」：EnvStart 早就实现了，但只有命令面板在用。
+// 结果是想临时起一个服务，只能去开「常驻」开关让它被看门狗拉起来 ——
+// 为了跑一次而永久改变常驻策略，代价完全不成比例。
+async function startService(r: RuntimeInfo, ins: Install) {
+  const key = r.id + ins.version
+  starting[key] = true
+  try {
+    unwrap(await EnvStart(r.id, ins.version))
+    toast.success(r.name + ' ' + ins.version + ' ' + t('svcStarted'))
+    await pollStatus()
+    refreshRuntimeCacheNow(r)
+    refreshOllamaPanel()
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    starting[key] = false
+  }
+}
 // stopService 停止服务。若该运行时处于「常驻」期望态，一并撤销该期望态——
 // 否则看门狗会在下一个巡检周期把它拉回来，用户会以为「停止无效」。
 // 场景应用拉起的服务本就非常驻（enabled=false），直接停即可。
@@ -2281,6 +2426,11 @@ const userEnv = reactive({
   newName: '',
   newValue: '',
   pendingDelete: '', // 二次确认：同一行再点一次才真的删
+  // 就地编辑：后端 EnvUserEnvSetVar 对同名变量就是覆盖，所以「改值」不需要新接口。
+  // 之前只能新增/删除，想改一个已存在变量的值，得先删再建——中间那个空档里
+  // 依赖它的程序读到的是「变量不存在」。
+  editingName: '',
+  editingValue: '',
 })
 
 function isQuickdockEntry(p: string): boolean {
@@ -2360,6 +2510,45 @@ async function saveUserVar() {
   }
 }
 
+// ---- 就地编辑已有变量 ----
+// EnvUserEnvSetVar 对同名变量即覆盖，所以「改值」不需要新接口。
+// 此前只能新增/删除，想改一个已存在变量的值必须先删再建 ——
+// 中间那个空档里，依赖它的程序读到的是「变量不存在」。
+function startEditVar(v: UserEnvVarItem) {
+  userEnv.editingName = v.name
+  userEnv.editingValue = v.value
+  userEnv.pendingDelete = ''
+}
+
+function cancelEditVar() {
+  userEnv.editingName = ''
+  userEnv.editingValue = ''
+}
+
+async function commitEditVar() {
+  const name = userEnv.editingName
+  const value = userEnv.editingValue.trim()
+  if (!name) return
+  if (!value) {
+    userEnv.error = t('maintEnvValueRequired')
+    return
+  }
+  userEnv.saving = true
+  userEnv.error = ''
+  try {
+    unwrap(await EnvUserEnvSetVar(name, value)) // 同名 = 覆盖
+    userEnv.editingName = ''
+    userEnv.editingValue = ''
+    toast.success(t('saved'))
+    await loadUserEnv()
+  } catch (e: any) {
+    userEnv.error = getErrorMessage(e)
+    logErr('env/envvar', e)
+  } finally {
+    userEnv.saving = false
+  }
+}
+
 // deleteUserVar 两段式：第一次点亮「确认删除」，再点一次才执行。
 // 删的是系统环境变量，误删会影响其它程序，不值得为省一次点击冒险。
 async function deleteUserVar(name: string) {
@@ -2387,6 +2576,74 @@ function openMaintenance(tab: MaintTab) {
   if (tab === 'disk' && !diskUsage.loaded) loadDiskUsage()
   if (tab === 'check' && !githubAccel.loading) loadGithubAccel()
   if (tab === 'envvar' && !userEnv.loaded) loadUserEnv()
+}
+
+// ---- 项目版本要求检查 ----
+// EnvProjectVersions 后端一直完整（services/env/service.go），此前只有条目编辑器在调。
+// 而环境页才是最需要它的地方：装了一堆运行时之后，想知道「这个项目要求的版本本机有没有」，
+// 以前只能去条目编辑器里找个目录绕一圈看。
+interface ProjectReqRow {
+  runtime: string
+  require: string
+  source: string
+  matched: string
+  active: string
+  installed: string[]
+}
+const projectCheck = reactive({
+  open: false,
+  dir: '',
+  loading: false,
+  error: '',
+  rows: [] as ProjectReqRow[],
+})
+
+const projectMissing = computed(() => projectCheck.rows.filter((r) => r.require && !r.matched).length)
+
+async function pickProjectDir() {
+  try {
+    const dir = unwrap<string | null>(await PickFolderPath(t('pickDirTitle')))
+    if (!dir) return
+    projectCheck.dir = dir
+    await runProjectCheck()
+  } catch (e) {
+    logErr('env/projectCheck', e)
+  }
+}
+
+async function runProjectCheck() {
+  const dir = projectCheck.dir.trim()
+  if (!dir) {
+    projectCheck.rows = []
+    return
+  }
+  projectCheck.loading = true
+  projectCheck.error = ''
+  projectCheck.rows = []
+  try {
+    projectCheck.rows = unwrap<ProjectReqRow[]>(await EnvProjectVersions(dir)) ?? []
+  } catch (e) {
+    projectCheck.error = getErrorMessage(e)
+    logErr('env/projectCheck', e)
+  } finally {
+    projectCheck.loading = false
+  }
+}
+
+const projectRuntimeName = (id: string) => runtimes.value.find((r) => r.id === id)?.name || id
+
+// 直接在面板里切换全局激活版本：探测结果说「要求 v20，本机装的是 v18」时，
+// 下一步必然是去左侧找到那个运行时再点一次激活 —— 把那步收进来。
+async function setActiveFromProject(row: ProjectReqRow, version: string) {
+  if (!version) return
+  try {
+    unwrap(await EnvSetActive(row.runtime, version))
+    row.active = version
+    toast.success(t('saved'))
+    await load()
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
 }
 
 // formatSize 人性化字节数（磁盘统计面板用；与进程占用的 formatBytes 分开，
@@ -2649,6 +2906,10 @@ const s = currentRuntimeState
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9 9a2.8 2.8 0 0 1-4-4l9-9z"/><path d="M19.7 11.3 21 10a3 3 0 0 0-4-4l-1.3 1.3"/></svg>
           <span>{{ t('maintTitle') }}</span>
         </button>
+        <button class="qd-btn qd-btn-ghost" @click="projectCheck.open = true" :title="t('projectCheck')">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m9 14 2 2 4-4"/></svg>
+          <span>{{ t('projectCheck') }}</span>
+        </button>
         <button class="qd-btn qd-btn-ghost" @click="pathModal.open = true" :title="t('pathPanel')">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0M15.5 18H10a4 4 0 0 1-4-4v0"/></svg>
           <span>PATH</span>
@@ -2657,7 +2918,8 @@ const s = currentRuntimeState
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h2M8 17h2M14 14h2M14 17h2"/></svg>
           <span>{{ t('portPanorama') }}</span>
         </button>
-        <button class="qd-icon-btn" @click="refresh" :title="t('refresh')">
+        <button class="qd-icon-btn" :class="{ spinning: refreshing }" :disabled="refreshing"
+                @click="refresh" :title="refreshing ? t('refreshing') : t('refresh')">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg>
         </button>
       </div>
@@ -2667,6 +2929,12 @@ const s = currentRuntimeState
       <!-- 左侧：分组导航 -->
       <aside class="env-cats">
         <div class="cats-title">{{ t('envCategories') }}</div>
+        <div class="cats-search">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+          <input v-model="sidebarQuery" class="cats-search-input" :placeholder="t('envSearchPh')" />
+          <button v-if="sidebarQuery" class="cats-search-clear" @click="sidebarQuery = ''" :title="t('clear')">×</button>
+        </div>
+        <div v-if="sidebarSearching && sidebarGroups.length === 0" class="cats-empty">{{ t('envNoMatch') }}</div>
         <template v-for="grp in sidebarGroups" :key="grp.key">
           <button class="cats-group-label" type="button" @click="toggleGroup(grp.key)">
             <span v-if="grp.running" class="cat-dot" :title="t('svcRunning')"></span>
@@ -2814,6 +3082,23 @@ const s = currentRuntimeState
 
         <!-- Ollama 模型管理：管的是模型库（全局共享、几十 GB），与上方程序版本互不越界 -->
         <section v-if="selected.id === 'ollama'" class="detail-block">
+          <!-- 程序版本检测：用系统里实际生效的那个 ollama（可能是官方安装包装的、
+               不在受管目录里），与上方「受管目录版本 vs 上游」是两条判定 -->
+          <div class="ollama-ver">
+            <span class="ollama-ver-label">{{ t('ollamaProgram') }}</span>
+            <span class="ollama-ver-cur">{{ ollamaUpdate?.installed || t('ollamaNotDetected') }}</span>
+            <template v-if="ollamaUpdate?.hasUpdate">
+              <span class="ollama-ver-new">{{ t('ollamaLatestIs', { v: ollamaUpdate.latest }) }}</span>
+              <button class="link-btn" :disabled="ollamaChkBusy" @click="applyUpdate(ollamaUpdate.latest)">
+                {{ t('ollamaUpdateNow') }}
+              </button>
+            </template>
+            <span v-else-if="ollamaUpdate?.installed" class="ollama-ver-ok">{{ t('ollamaUpToDate') }}</span>
+            <button class="link-btn ollama-ver-refresh" :disabled="ollamaChkBusy" @click="checkOllamaUpdate">
+              {{ ollamaChkBusy ? t('checking') : t('ollamaCheckUpdate') }}
+            </button>
+          </div>
+
           <div class="block-head">
             <span class="block-title">{{ t('ollamaModelsTitle') }}</span>
             <span class="block-count">{{ ollamaModels.length }}</span>
@@ -3056,9 +3341,15 @@ const s = currentRuntimeState
                 <span v-else class="env-badge off" :title="t('envVarUnsetTitle')">{{ t('envVarUnset') }}</span>
               </div>
               <div class="col-svc" v-if="selected.hasService && (ins.scope !== 'linked' || selected.id === 'php')">
-                <span class="status" :class="{ on: svcOn(selected, ins.version) }">
+                <span
+                  class="status"
+                  :class="{ on: svcOn(selected, ins.version), unknown: svcUnknown[selected.id + ins.version] }"
+                  :title="svcUnknown[selected.id + ins.version] ? t('svcUnknownHint') : ''"
+                >
                   <span class="status-dot"></span>
-                  {{ svcOn(selected, ins.version) ? t('svcRunning') : t('svcStopped') }}
+                  {{ svcUnknown[selected.id + ins.version]
+                    ? t('svcUnknown')
+                    : (svcOn(selected, ins.version) ? t('svcRunning') : t('svcStopped')) }}
                 </span>
                 <template v-if="svcOn(selected, ins.version)">
                   <button
@@ -3077,6 +3368,12 @@ const s = currentRuntimeState
                     @click="openConsole(consolePort(selected, ins))"
                   >{{ t('openConsole') }}</button>
                 </template>
+                <button
+                  v-else
+                  class="svc-btn start"
+                  :disabled="starting[selected.id + ins.version]"
+                  @click="startService(selected, ins)"
+                >{{ starting[selected.id + ins.version] ? t('svcStarting') : t('svcStart') }}</button>
                 <span v-if="svcPorts(selected, ins.version).length" class="svc-port">
                   {{ t('svcPort') }}:
                   <template v-if="selected.id === 'rabbitmq' && rabbitMgmt[ins.version]">5672 / 15672</template>
@@ -3153,7 +3450,10 @@ const s = currentRuntimeState
                     </button>
                   </template>
                   <div class="op-sep"></div>
-                  <button class="op-item danger" :disabled="ins.scope === 'system'" @click="askDelete(selected, ins)">
+                  <!-- 禁用态没有说明等于没解释：用户只看到按钮灰着，不知道为什么 -->
+                  <button class="op-item danger" :disabled="ins.scope === 'system'"
+                          :title="ins.scope === 'system' ? t('deleteSystemVersionHint') : t('deleteVersion')"
+                          @click="askDelete(selected, ins)">
                     {{ t('deleteVersion') }}
                   </button>
                 </div>
@@ -3237,6 +3537,38 @@ const s = currentRuntimeState
               <button v-if="evStatus?.state === 'running'" class="op-btn danger" :disabled="evBusy" @click="evStop">{{ t('envStop') }}</button>
               <button class="op-btn" :disabled="evBusy" @click="evRedetect">{{ t('evRedetect') }}</button>
             </template>
+          </div>
+
+          <!-- 测试搜索：直接跑一次真实检索，验证 es.exe 与 Everything 的 IPC 是否通 -->
+          <div class="block-head" style="margin-top:18px">
+            <span class="block-title">{{ t('evTestSearch') }}</span>
+          </div>
+          <div class="ev-test">
+            <div class="ev-test-row">
+              <input
+                v-model="evQuery"
+                class="env-input"
+                :placeholder="t('evTestSearchPh')"
+                @keyup.enter="runEvSearch"
+              />
+              <button class="op-btn" :disabled="evSearching || !evQuery.trim()" @click="runEvSearch">
+                {{ evSearching ? t('evSearching') : t('evSearch') }}
+              </button>
+            </div>
+            <p class="ev-hint">{{ t('evTestSearchHint') }}</p>
+            <p v-if="evSearchMsg" class="env-msg" :class="{ error: evSearchErr }">{{ evSearchMsg }}</p>
+            <div v-if="evResults.length" class="ev-results">
+              <div
+                v-for="(r, i) in evResults"
+                :key="i"
+                class="ev-res"
+                :title="r.path || ''"
+                @click="r.path && reveal(r.path)"
+              >
+                <span class="ev-res-name">{{ r.name || r.path }}</span>
+                <span class="ev-res-dir">{{ r.dir }}</span>
+              </div>
+            </div>
           </div>
 
           <!-- 设置：文件搜索总开关 + 自定义路径 -->
@@ -3467,14 +3799,15 @@ const s = currentRuntimeState
               v-model="stateFor(selected.id, selected).source"
               class="env-select"
               :disabled="stateFor(selected.id, selected).installing"
+              @change="onSourceChange(selected)"
             >
               <option v-for="s in selected.sources" :key="s.id" :value="s.id">{{ s.name }}</option>
             </select>
             <button
               class="env-install-btn"
               :class="{ busy: stateFor(selected.id, selected).installing }"
-              :disabled="stateFor(selected.id, selected).installing || !s.version"
-              :title="!s.version ? t('versionRequired') : ''"
+              :disabled="stateFor(selected.id, selected).installing || !s.version || customSourceMissing(selected)"
+              :title="!s.version ? t('versionRequired') : (customSourceMissing(selected) ? t('customSourceRequired') : '')"
               @click="install(selected)"
             >{{ stateFor(selected.id, selected).installing ? t('installing') : t('install') }}</button>
           </div>
@@ -3520,6 +3853,7 @@ const s = currentRuntimeState
             class="env-input custom"
             :placeholder="t('customSourcePlaceholder')"
             :disabled="stateFor(selected.id, selected).installing"
+            @change="onSourceChange(selected)"
           />
 
           <div v-if="stateFor(selected.id, selected).installing" class="env-progress">
@@ -3658,6 +3992,78 @@ const s = currentRuntimeState
     </div>
 
     <!-- 端口全景弹窗：所有运行中服务的端口与控制台一览 -->
+    <!-- 项目版本要求检查：探测目录里的版本声明，与已装/激活对比 -->
+    <div v-if="projectCheck.open" class="modal-overlay" @click.self="projectCheck.open = false">
+      <div class="modal path-modal" style="max-width: 760px">
+        <div class="modal-actions-top">
+          <div>
+            <div class="modal-title">{{ t('projectCheck') }}</div>
+            <p class="modal-text">{{ t('projectCheckDesc') }}</p>
+          </div>
+          <button class="cfg-close" type="button" :title="t('close')" @click="projectCheck.open = false">×</button>
+        </div>
+
+        <div class="pc-row">
+          <input
+            v-model="projectCheck.dir"
+            class="env-input"
+            :placeholder="t('projectCheckPh')"
+            @keyup.enter="runProjectCheck"
+          />
+          <button class="op-btn" @click="pickProjectDir">{{ t('projectCheckPick') }}</button>
+          <button
+            class="op-btn"
+            :disabled="projectCheck.loading || !projectCheck.dir.trim()"
+            @click="runProjectCheck"
+          >{{ projectCheck.loading ? t('checking') : t('projectCheckRun') }}</button>
+        </div>
+
+        <p v-if="projectCheck.error" class="env-msg error">{{ projectCheck.error }}</p>
+        <div v-else-if="!projectCheck.rows.length" class="empty-state">
+          <div class="empty-text">{{ projectCheck.dir ? t('projectCheckNone') : t('projectCheckEmpty') }}</div>
+        </div>
+        <template v-else>
+          <p v-if="projectMissing" class="env-msg error">{{ t('projectCheckMissing', { n: projectMissing }) }}</p>
+          <table class="panorama-table">
+            <thead>
+              <tr>
+                <th>{{ t('runtime') }}</th>
+                <th>{{ t('projectCheckRequire') }}</th>
+                <th>{{ t('projectCheckMatched') }}</th>
+                <th>{{ t('projectCheckActive') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="row in projectCheck.rows" :key="row.runtime + '|' + row.require">
+                <td>{{ projectRuntimeName(row.runtime) }}</td>
+                <td>
+                  <span class="mono">{{ row.require || '—' }}</span>
+                  <span v-if="row.source" class="muted"> · {{ row.source }}</span>
+                </td>
+                <td>
+                  <span v-if="row.matched" class="pc-ok">{{ row.matched }}</span>
+                  <span v-else class="pc-bad">{{ t('projectCheckNoMatch') }}</span>
+                </td>
+                <td>
+                  <span v-if="row.active" class="mono">{{ row.active }}</span>
+                  <span v-else class="muted">—</span>
+                  <select
+                    v-if="row.installed.length"
+                    class="pc-select"
+                    :value="row.active"
+                    @change="setActiveFromProject(row, ($event.target as HTMLSelectElement).value)"
+                  >
+                    <option value="">{{ t('projectCheckSwitch') }}</option>
+                    <option v-for="v in row.installed" :key="v" :value="v">{{ v }}</option>
+                  </select>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </template>
+      </div>
+    </div>
+
     <div v-if="panorama.open" class="modal-overlay" @click.self="panorama.open = false">
       <div class="modal path-modal" style="max-width: 640px">
         <div class="modal-actions-top">
@@ -4101,13 +4507,31 @@ const s = currentRuntimeState
                     {{ v.name }}
                     <em v-if="v.managed" class="envvar-badge">{{ t('maintEnvManaged') }}</em>
                   </span>
-                  <span class="envvar-value" :title="v.value">{{ v.value }}</span>
-                  <button
-                    class="op-btn"
-                    :class="{ danger: userEnv.pendingDelete === v.name }"
-                    :disabled="userEnv.saving"
-                    @click="deleteUserVar(v.name)"
-                  >{{ userEnv.pendingDelete === v.name ? t('maintEnvConfirmDelete') : t('maintEnvRemove') }}</button>
+                  <!-- 编辑态：value 列变输入框，按钮区换成 保存 / 取消 -->
+                  <template v-if="userEnv.editingName === v.name">
+                    <input
+                      v-model="userEnv.editingValue"
+                      class="env-input"
+                      @keyup.enter="commitEditVar"
+                      @keyup.esc="cancelEditVar"
+                    />
+                    <span class="envvar-actions">
+                      <button class="op-btn" :disabled="userEnv.saving" @click="commitEditVar">{{ t('save') }}</button>
+                      <button class="op-btn" @click="cancelEditVar">{{ t('cancel') }}</button>
+                    </span>
+                  </template>
+                  <template v-else>
+                    <span class="envvar-value" :title="v.value">{{ v.value }}</span>
+                    <span class="envvar-actions">
+                      <button class="op-btn" :disabled="userEnv.saving" @click="startEditVar(v)">{{ t('edit') }}</button>
+                      <button
+                        class="op-btn"
+                        :class="{ danger: userEnv.pendingDelete === v.name }"
+                        :disabled="userEnv.saving"
+                        @click="deleteUserVar(v.name)"
+                      >{{ userEnv.pendingDelete === v.name ? t('maintEnvConfirmDelete') : t('maintEnvRemove') }}</button>
+                    </span>
+                  </template>
                 </div>
                 <div v-if="!userEnv.vars.length" class="empty-text">{{ t('maintEnvVarEmpty') }}</div>
               </div>
@@ -4163,6 +4587,32 @@ const s = currentRuntimeState
   overflow-y: auto; padding: 12px 10px;
   display: flex; flex-direction: column; gap: 4px;
 }
+.cats-search {
+  display: flex; align-items: center; gap: 5px; margin: 0 8px 8px;
+  padding: 0 7px; height: 26px; flex-shrink: 0;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); color: var(--color-text-disabled);
+}
+.cats-search:focus-within { border-color: var(--color-accent); }
+.cats-search-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: none;
+  color: var(--color-text-primary); font-size: 11px; font-family: inherit;
+}
+.cats-search-input::placeholder { color: var(--color-text-disabled); }
+.cats-search-clear {
+  padding: 0; border: none; background: none; color: var(--color-text-disabled);
+  font-size: 14px; line-height: 1; cursor: pointer;
+}
+.cats-search-clear:hover { color: var(--color-text-primary); }
+.cats-empty {
+  padding: 16px 10px; font-size: 11px; text-align: center;
+  color: var(--color-text-disabled);
+}
+
+/* 刷新中：图标转起来。刷新要探测几十次 IPC，没有反馈时用户会连点 */
+.qd-icon-btn.spinning svg { animation: env-spin 1s linear infinite; }
+@keyframes env-spin { to { transform: rotate(360deg); } }
+
 .cats-title {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
   color: var(--color-text-disabled); padding: 2px 8px 8px;
@@ -4276,6 +4726,20 @@ const s = currentRuntimeState
 /* Ollama 模型表：4 列（模型 / 大小 / 参数·量化·时间 / 操作），比通用 6 列网格窄一档；
    已加载模型表只有 3 列（无操作列）。通用网格按 span 顺序填充，不覆盖列定义会把操作按钮挤到中间列。 */
 .ollama-row { grid-template-columns: 1.6fr 0.8fr 2fr auto; }
+/* 程序版本行：一行放下「当前 / 最新 / 操作」，只在 ollama 面板出现 */
+.ollama-ver {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 10px; margin-bottom: 10px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+}
+.ollama-ver-label { color: var(--color-text-muted); }
+.ollama-ver-cur { font-family: monospace; color: var(--color-text-primary); }
+.ollama-ver-new { color: var(--color-warning); }
+.ollama-ver-ok { color: var(--color-text-disabled); }
+.ollama-ver-refresh { margin-left: auto; }
 .ollama-run-row { grid-template-columns: 1.6fr 0.8fr 1.6fr; }
 .ollama-time { display: block; font-size: 10px; color: var(--color-text-disabled); }
 .ollama-sub-head { margin-top: 16px; }
@@ -4397,6 +4861,8 @@ const s = currentRuntimeState
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-text-disabled); }
 .status.on { color: var(--color-success); }
 .status.on .status-dot { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
+.status.unknown { color: var(--color-warning); }
+.status.unknown .status-dot { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
 .status-dot.ok { background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); }
 .status-dot.warn { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
 .status-dot.fail { background: var(--color-danger); box-shadow: 0 0 5px var(--color-danger-border); }
@@ -4939,7 +5405,40 @@ const s = currentRuntimeState
 }
 /* 系统环境变量面板：PATH 行是「路径 + 删除」，变量行是「名 + 值 + 删除」，列宽各自定制 */
 .envvar-path-row { grid-template-columns: minmax(0, 1fr) 72px; }
-.envvar-row { grid-template-columns: 170px minmax(0, 1fr) 88px; }
+.envvar-row { grid-template-columns: 170px minmax(0, 1fr) 148px; }
+/* 行尾两个按钮（编辑 / 删除，或 保存 / 取消）：右对齐，不占额外列宽 */
+.envvar-actions { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+
+/* Everything 测试搜索：输入行 + 结果列表 */
+.ev-test { display: flex; flex-direction: column; gap: 6px; }
+.ev-test-row { display: flex; gap: 8px; }
+.ev-test-row .env-input { flex: 1; }
+.ev-hint { font-size: 11px; color: var(--color-text-disabled); margin: 0; }
+.ev-results {
+  max-height: 220px; overflow-y: auto;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+}
+.ev-res {
+  display: flex; flex-direction: column; gap: 1px;
+  padding: 5px 8px; cursor: pointer;
+  border-bottom: 1px solid var(--color-border);
+}
+.ev-res:last-child { border-bottom: none; }
+.ev-res:hover { background: var(--color-bg-hover); }
+.ev-res-name { font-size: 12px; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ev-res-dir { font-size: 10px; font-family: monospace; color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* 项目版本要求检查弹窗 */
+.pc-row { display: flex; gap: 8px; margin-bottom: 10px; }
+.pc-row .env-input { flex: 1; }
+.pc-ok { color: var(--color-success); font-family: monospace; font-size: 11px; }
+.pc-bad { color: var(--color-danger); font-size: 11px; }
+.pc-select {
+  margin-left: 6px; padding: 2px 5px; font-size: 11px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  background: var(--color-bg-tertiary); color: var(--color-text-primary);
+}
 .envvar-path,
 .envvar-name {
   display: flex;

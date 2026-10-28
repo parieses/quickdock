@@ -12,6 +12,7 @@ import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { pluginName, pluginDesc } from '../utils/localize'
 import { matchesTextOrPinyin } from '../utils/pinyin'
+import { pickDownload } from '../utils/platform'
 import { setPluginUpdateBadge } from '../composables/usePluginUpdateBadge'
 import { logWarn } from '../utils/logger'
 import type { ToastAPI } from '../types'
@@ -105,7 +106,7 @@ const filteredPlugins = computed(() => {
 
 // 可更新插件数量（用于「一键更新」按钮显隐与进度）
 const updatableCount = computed(
-  () => plugins.value.filter((p) => p.installed && p.has_update && p.supported && !!p.downloads?.windows).length,
+  () => plugins.value.filter((p) => p.installed && p.has_update && p.supported && !!pickDownload(p.downloads)).length,
 )
 
 // ---- 插件详情弹窗 ----
@@ -175,12 +176,12 @@ const updatingAll = ref(false)
 const updateAllDone = ref(0)
 const updateAllTotal = ref(0)
 
-// 下载进度（key = 下载 URL，与卡片 p.downloads.windows 匹配）
+// 下载进度（key = 下载 URL，与卡片 pickDownload(p.downloads) 匹配）
 interface DownloadProgress { url: string; downloaded: number; total: number; percent: number; stage?: string }
 const progressMap = ref<Record<string, DownloadProgress>>({})
 
 function dlState(p: MarketPlugin): DownloadProgress | undefined {
-  const url = p.downloads?.windows
+  const url = pickDownload(p.downloads)
   return url ? progressMap.value[url] : undefined
 }
 
@@ -202,7 +203,7 @@ async function loadMarket() {
       updated.value = idx.updated || ''
       // 同步「可更新」角标到侧栏（插件页未挂载时由本页兜底刷新）
       setPluginUpdateBadge(
-        (idx.plugins || []).filter((p) => p.installed && p.has_update && p.supported && !!p.downloads?.windows).length,
+        (idx.plugins || []).filter((p) => p.installed && p.has_update && p.supported && !!pickDownload(p.downloads)).length,
       )
     }
   } catch (e) {
@@ -216,7 +217,7 @@ async function loadMarket() {
 // 由调用方统一刷新与提示；返回值表示本次是否成功，便于批量更新统计。
 async function install(p: MarketPlugin, silent = false): Promise<boolean> {
   if (installing.value.has(p.id)) return false
-  const url = p.downloads?.windows
+  const url = pickDownload(p.downloads)
   if (!url) {
     if (!silent) toast?.error?.(t('pluginMarketNoDownload'))
     return false
@@ -244,7 +245,7 @@ async function install(p: MarketPlugin, silent = false): Promise<boolean> {
 // 一键更新：将所有「已安装且有新版」的插件依次重装到最新（复用 install 的下载/校验链路）。
 async function updateAll() {
   const todo = plugins.value.filter(
-    (p) => p.installed && p.has_update && p.supported && p.downloads?.windows,
+    (p) => p.installed && p.has_update && p.supported && !!pickDownload(p.downloads),
   )
   if (!todo.length || updatingAll.value) return
   updatingAll.value = true
@@ -491,7 +492,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 
         <div class="modal-actions">
           <button class="op-btn" @click="closeDetail()">{{ t('close') }}</button>
-          <a v-if="detail.downloads?.windows" class="action-btn btn-install detail-install"
+          <a v-if="pickDownload(detail.downloads)" class="action-btn btn-install detail-install"
             :class="{ 'is-installing': installing.has(detail.id) }"
             @click="install(detail)">
             <RefreshCw v-if="installing.has(detail.id)" :size="14" class="spin" />

@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard, Bell } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
@@ -24,6 +24,7 @@ import LogViewer from './LogViewer.vue'
 import ActivityPage from './ActivityPage.vue'
 import RecycleBinPage from './RecycleBinPage.vue'
 import SettingsWinmgr from './SettingsWinmgr.vue'
+import SettingsNotify from './SettingsNotify.vue'
 import SettingsNav from './SettingsNav.vue'
 
 import {
@@ -84,6 +85,7 @@ const menuItems = computed(() => [
   { key: 'history',    label: t('setHistory'),     icon: History,   desc: t('setHistoryDesc') },
   { key: 'tools',      label: t('openTool'),       icon: Wrench,    desc: t('toolManageDesc') },
   { key: 'winmgr',     label: t('winmgr'),         icon: MonitorIcon, desc: t('winmgrDesc') },
+  { key: 'notify',     label: t('mon_nf_title'),   icon: Bell,      desc: t('notifyUnifiedDesc') },
   { key: 'ai',         label: t('navAi'),          icon: Bot,       desc: t('aiSettingsDesc') },
 ])
 
@@ -113,7 +115,7 @@ const menuGroups = computed(() => {
   const defs: { title: string; keys: string[] }[] = [
     { title: t('menuGroupBasics'), keys: ['preferences', 'navigation', 'hotkeys'] },
     { title: t('menuGroupData'), keys: ['clipboard', 'backup', 'history'] },
-    { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'ai'] },
+    { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'notify', 'ai'] },
   ]
   return defs
     .map((g) => ({ title: g.title, items: g.keys.map((k) => byKey[k]).filter(Boolean).filter((m) => !qLC || menuMatches(m, qLC)) }))
@@ -1068,6 +1070,11 @@ async function toggleAutoStart() {
 
           <div v-else-if="activePage === 'winmgr'" class="content-page content-left">
             <SettingsWinmgr />
+          </div>
+
+          <!-- 通知：机器人 Webhook 全局配置（监控/定时任务共用一份，页内只控制渠道开关） -->
+          <div v-else-if="activePage === 'notify'" class="content-page content-left">
+            <SettingsNotify :visible="activePage === 'notify'" />
           </div>
 
           <!-- 日志查看器（从导航栏迁入的专属设置项） -->

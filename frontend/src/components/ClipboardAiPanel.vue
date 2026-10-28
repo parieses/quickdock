@@ -193,7 +193,6 @@ function clearAll() {
       :busy="busy"
       :err-msg="errMsg"
       :live-text="liveText"
-      :show-clear="false"
       @ask="askFree"
       @clear="clearAll"
       @close="emit('close')"

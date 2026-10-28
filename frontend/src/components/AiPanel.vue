@@ -431,6 +431,15 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
         <span v-if="streaming" class="ai-panel-caret" />
 
         <p v-if="!streaming && shownResult.model" class="ai-panel-meta">{{ shownResult.model }} · {{ (shownResult.elapsedMs / 1000).toFixed(1) }}s</p>
+
+        <!--
+          结果尾部的操作条。与 cmdActions 的区别：那个挂在**代码块卡片**上，
+          只在有代码块时出现；这个挂在整条回答的末尾，用于「把整段结果拿去用」
+          （笔记写回、存为待办…），没有代码块的回答同样需要。
+        -->
+        <div v-if="$slots.resultActions" class="ai-panel-result-actions">
+          <slot name="resultActions" :result="shownResult" />
+        </div>
       </template>
 
       <div v-if="busy && !streaming" class="ai-panel-busy">
@@ -759,6 +768,15 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
   margin: 0;
   font-size: 11px;
   color: var(--color-text-disabled);
+}
+
+/* 结果尾部操作条：与 cmd-actions 同一套轻量语言（无边框、弱化色、hover 浮背景） */
+.ai-panel-result-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  margin: 2px 0 0 -5px;
 }
 
 /* 流式光标：一个随呼吸闪烁的窄条，比旋转图标更贴近"文字正在长出来"的观感 */

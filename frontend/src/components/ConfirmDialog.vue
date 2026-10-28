@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, toRef } from 'vue'
+import { ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
@@ -9,19 +9,35 @@ const { t } = useI18n()
 const props = defineProps<{
   visible: boolean
   message: string
+  /** 明细行（如插件权限清单）：有内容才显示，等宽字体逐行列出 */
+  details?: string[]
+  /** 可选勾选框标签（如「保留数据」）。确认时经 update:checkbox 交回父组件 */
+  checkboxLabel?: string
 }>()
 
 const emit = defineEmits<{
   (e: 'confirm'): void
   (e: 'cancel'): void
+  (e: 'update:checkbox', v: boolean): void
 }>()
 
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
 
+// 勾选框每次打开都回到未勾选：危险操作的默认项必须是最保守的那个，
+// 上一次的选择不该被记住。
+const checked = ref(false)
+watch(() => props.visible, (v) => { if (v) checked.value = false })
+
 function onKeydown(e: KeyboardEvent) {
   if (e.key === 'Escape') { emit('cancel'); return }
   onKeydownTrap(e)
+}
+
+/** 确认时把勾选态完整交回（true/false 都发），父组件不需要自己维护默认值。 */
+function onConfirm() {
+  emit('update:checkbox', checked.value)
+  emit('confirm')
 }
 </script>
 
@@ -34,9 +50,16 @@ function onKeydown(e: KeyboardEvent) {
             <AlertTriangle :size="24" />
           </div>
           <p class="confirm-message">{{ message }}</p>
+          <ul v-if="details && details.length" class="confirm-details">
+            <li v-for="(d, i) in details" :key="i">{{ d }}</li>
+          </ul>
+          <label v-if="checkboxLabel" class="confirm-check">
+            <input v-model="checked" type="checkbox" />
+            <span>{{ checkboxLabel }}</span>
+          </label>
           <div class="confirm-footer">
             <button class="btn btn-cancel" @click="emit('cancel')">{{ t('cancel') }}</button>
-            <button class="btn btn-danger" @click="emit('confirm')">{{ t('confirm') }}</button>
+            <button class="btn btn-danger" @click="onConfirm">{{ t('confirm') }}</button>
           </div>
         </div>
       </div>
@@ -59,6 +82,21 @@ function onKeydown(e: KeyboardEvent) {
 }
 .confirm-icon { color: var(--color-warning); margin-bottom: 12px; }
 .confirm-message { font-size: 14px; color: var(--color-text-primary); margin: 0 0 24px; line-height: 1.6; }
+/* 明细清单：等宽左对齐，权限声明这类内容需要逐字可核对 */
+.confirm-details {
+  margin: -12px 0 16px; padding: 8px 12px; text-align: left;
+  max-height: 180px; overflow-y: auto;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  list-style: none;
+  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+  color: var(--color-text-secondary); line-height: 1.7;
+  word-break: break-all;
+}
+.confirm-check {
+  display: flex; align-items: center; gap: 6px; justify-content: center;
+  margin: -8px 0 16px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;
+}
+.confirm-check input { accent-color: var(--color-accent); }
 .confirm-footer { display: flex; justify-content: center; gap: 12px; }
 .btn {
   padding: 8px 24px; border-radius: var(--radius-sm); font-size: 13px;

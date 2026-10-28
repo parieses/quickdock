@@ -8,8 +8,8 @@ let cachedDshSvc: any = null
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle } from '@lucide/vue'
-import { Events } from '@wailsio/runtime'
+import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle, Copy, FileDown } from '@lucide/vue'
+import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
@@ -307,6 +307,43 @@ async function rollbackPlugins() {
   }
 }
 
+// 服务地址：能点开、能复制。原来只当纯文本渲染，想进管理界面只能自己
+// 抄一遍 URL 到浏览器地址栏。
+async function openServiceUrl() {
+  const u = dshSvc.value?.url
+  if (!u) return
+  try {
+    await Browser.OpenURL(u)
+  } catch (e) {
+    showMsg(getErrorMessage(e), true)
+  }
+}
+
+async function copyServiceUrl() {
+  const u = dshSvc.value?.url
+  if (!u) return
+  if (await copyToClipboard(u)) toast.success(t('copied'))
+  else showMsg(t('copyFailed'), true)
+}
+
+// 日志导出：只有"复制"时，想留档排查得先粘到别处再存盘。
+function exportLogs() {
+  if (!logs.value.length) return
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  const text = logs.value
+    .map((l) => `[${new Date().toLocaleTimeString()}] ${l.level === 'error' ? 'ERROR' : 'INFO'} ${l.message}`)
+    .join('\r\n')
+  const blob = new Blob(['\uFEFF' + text], { type: 'text/plain;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `dsh-${stamp}.log`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  setTimeout(() => URL.revokeObjectURL(url), 0)
+}
+
 async function copyLogs() {
   if (!logs.value.length) return
   const text = logs.value.map((l) => (l.level === 'error' ? '✗ ' : '› ') + l.message).join('\n')
@@ -321,6 +358,22 @@ let offProgress: (() => void) | null = null
 let offLog: (() => void) | null = null
 let offPlugin: (() => void) | null = null
 let offRollback: (() => void) | null = null
+let offExited: (() => void) | null = null
+
+// 运行状态轮询：dsh 进程可能被任务管理器/崩溃/其它工具的清理脚本结束，
+// 只在「进页 + 操作后」查一次的话，状态会永远停在"运行中"。
+// 仅在页面可见时跑，设置页关着就别占 IPC。
+let statusTimer: number | null = null
+function startStatusPolling() {
+  stopStatusPolling()
+  statusTimer = window.setInterval(() => { void loadDSHStatus() }, 5000)
+}
+function stopStatusPolling() {
+  if (statusTimer !== null) {
+    window.clearInterval(statusTimer)
+    statusTimer = null
+  }
+}
 onMounted(() => {
   offProgress = Events.On('quickdock:dsh:progress', (payload: any) => {
     const p = (payload?.data ?? payload) as DshProgress
@@ -372,8 +425,18 @@ onMounted(() => {
       showMsg(t('dshRollbackFailed'), true)
     }
   })
+  // 进程意外退出：后端 reaper 已经清过内存状态，这一查必定读到 false，
+  // 所以不必等下一个轮询周期，用户当场就能看到状态翻成"已停止"。
+  offExited = Events.On('quickdock:dsh:exited', (payload: any) => {
+    const p = (payload?.data ?? payload) as { message?: string } | undefined
+    void loadDSHStatus()
+    showMsg(p?.message || t('dshServiceCrashed'), true)
+  })
 })
-onUnmounted(() => { offProgress?.(); offLog?.(); offPlugin?.(); offRollback?.() })
+onUnmounted(() => {
+  offProgress?.(); offLog?.(); offPlugin?.(); offRollback?.(); offExited?.()
+  stopStatusPolling()
+})
 
 let checkRanOnce = false
 watch(() => props.visible, async (v) => {
@@ -383,10 +446,13 @@ watch(() => props.visible, async (v) => {
     updatingPlugins.value = false
     await refresh()
     loadDSHStatus()
+    startStatusPolling()
     if (!checkRanOnce && dshReady.value) {
       checkRanOnce = true
       checkUpdate() // 进入页面静默自动检测一次新版本
     }
+  } else {
+    stopStatusPolling()
   }
 }, { immediate: true })
 </script>
@@ -452,7 +518,10 @@ watch(() => props.visible, async (v) => {
             <span class="dsh-dot" :class="{ on: dshSvc?.running }" />
             {{ dshSvc && dshSvc.running ? t('dshServiceRunning') : t('dshServiceStopped') }}
           </span>
-          <span v-if="dshSvc?.running && dshSvc.url" class="dsh-status-path">{{ dshSvc.url }}</span>
+          <span v-if="dshSvc?.running && dshSvc.url" class="dsh-url">
+            <a class="dsh-status-path dsh-url-link" href="#" :title="t('dshOpenInBrowser')" @click.prevent="openServiceUrl">{{ dshSvc.url }}</a>
+            <button class="dsh-url-copy" :title="t('copy')" @click="copyServiceUrl"><Copy :size="11" /></button>
+          </span>
         </div>
         <div class="action-row" style="flex-shrink:0">
           <button
@@ -557,6 +626,9 @@ watch(() => props.visible, async (v) => {
     <div v-if="logs.length" class="dsh-log-wrap">
       <div class="dsh-log-head">
         <span>{{ t('dshLogTitle') }}</span>
+        <button class="dsh-log-copy" @click="exportLogs" :title="t('dshExportLog')">
+          <FileDown :size="11" /> {{ t('dshExportLog') }}
+        </button>
         <button class="dsh-log-copy" @click="copyLogs">{{ t('copy') }}</button>
       </div>
       <div ref="logBox" class="dsh-log">
@@ -617,6 +689,22 @@ watch(() => props.visible, async (v) => {
   word-break: break-all;
   line-height: 1.4;
 }
+/* 服务地址：可点开 + 可复制 */
+.dsh-url { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
+.dsh-url-link {
+  color: var(--color-accent);
+  text-decoration: none;
+  cursor: pointer;
+}
+.dsh-url-link:hover { text-decoration: underline; }
+.dsh-url-copy {
+  display: flex; align-items: center; justify-content: center;
+  width: 18px; height: 18px; padding: 0; flex-shrink: 0;
+  border: none; border-radius: var(--radius-xs); background: none;
+  color: var(--color-text-disabled); cursor: pointer;
+}
+.dsh-url-copy:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+
 .dsh-status-path.clickable {
   cursor: pointer;
   color: var(--color-text-secondary);
@@ -786,6 +874,7 @@ watch(() => props.visible, async (v) => {
   color: var(--color-text-muted);
 }
 .dsh-log-copy {
+  display: inline-flex; align-items: center; gap: 4px;
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);

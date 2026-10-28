@@ -3,7 +3,7 @@ defineOptions({ name: 'PluginManagerPage' })
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2 } from '@lucide/vue'
+import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X } from '@lucide/vue'
 
 import {
   ListPlugins,
@@ -12,22 +12,26 @@ import {
   UninstallPlugin,
   InstallPlugin,
   InstallPluginFromBytes,
+  InspectPluginZip,
+  InspectPluginZipData,
   GetPluginIcon,
   ShowPluginWindow,
   ListPluginExecLogs,
   KillPlugin,
   GetPluginNewFlags,
   MarkPluginSeen,
+  GetPluginMarket,
 } from '../../bindings/quickdock/services/plugin/pluginservice'
+import { setPluginUpdateBadge } from '../composables/usePluginUpdateBadge'
 // 多选文件对话框：宿主级能力（services/dialog.go），不放在插件域里
 import { SelectLocalFiles } from '../../bindings/quickdock/services/appservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
 import PluginMarketPage from './PluginMarketPage.vue'
-import { pluginName, pluginDesc } from '../utils/localize'
+import { pluginName, pluginDesc, commandTitle } from '../utils/localize'
 import { useThemeName } from '../composables/useThemeName'
-import type { ToastAPI, PluginInfo, PluginExecLog } from '../types'
+import type { ToastAPI, PluginInfo, PluginExecLog, PluginCommand } from '../types'
 
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
@@ -53,6 +57,46 @@ const execLogs = ref<PluginExecLog[]>([])
 const loadingLogs = ref(false)
 const historyOpen = ref(false)
 const expandedLog = ref<string | null>(null)
+
+// ---- 权限审计 ----
+//
+// 只在卡片上列"有声明"的项：Permissions 是 Go 结构体，零值（false / 空对象）也会被
+// 序列化出来，不过滤就等于给每个插件挂一排假标签。
+const PERM_KEYS = ['network', 'filesystem', 'shell', 'process', 'processKill', 'clipboard'] as const
+
+function permTags(p: PluginInfo): string[] {
+  const out: string[] = []
+  for (const c of p.capabilities || []) if (c) out.push(c)
+  const perm = p.permissions || {}
+  for (const [k, v] of Object.entries(perm)) {
+    // selfAudit / skipReason 是审计开关，不是能力
+    if (k === 'selfAudit' || k === 'skipReason') continue
+    if (!v) continue
+    if (!out.includes(k)) out.push(k)
+  }
+  return [...new Set(out)]
+}
+
+function permLabel(key: string): string {
+  const known = PERM_KEYS as readonly string[]
+  if (!known.includes(key)) return key // 插件自定义 capability，原样显示
+  return t('pluginPerm' + key.charAt(0).toUpperCase() + key.slice(1))
+}
+
+// ---- 命令与热键 ----
+//
+// PluginInfo.commands 一直在下发，此前卡片上完全不提，导致「装了插件却不知道
+// 它能干什么」。卡片宽度放不下整张命令表，所以：显示前两条（带热键），
+// 完整清单塞进 title 提示 —— 一行一条「热键 · 标题」。
+function cmdTitle(c: PluginCommand): string {
+  return commandTitle(c, locale)
+}
+
+function cmdListTitle(p: PluginInfo): string {
+  return (p.commands || [])
+    .map((c) => (c.hotkey ? `${c.hotkey} · ${cmdTitle(c)}` : cmdTitle(c)))
+    .join('\n')
+}
 
 async function loadLogs() {
   loadingLogs.value = true
@@ -84,15 +128,48 @@ const categories = computed(() => {
   }
   return Array.from(cats).sort()
 })
+// 名称 / 描述 / 分类 / id 一起搜：装多了以后只按分类 tab 筛，"找那个 OCR 的"
+// 还是得逐张卡片看标题。
+const pluginQuery = ref('')
+
 const filteredPlugins = computed(() => {
-  if (!selectedCategory.value) return sortedPlugins.value
-  return sortedPlugins.value.filter(p => p.category === selectedCategory.value)
+  let list = sortedPlugins.value
+  if (selectedCategory.value) list = list.filter(p => p.category === selectedCategory.value)
+  const q = pluginQuery.value.trim().toLowerCase()
+  if (!q) return list
+  return list.filter((p) =>
+    pluginName(p, locale).toLowerCase().includes(q) ||
+    pluginDesc(p, locale).toLowerCase().includes(q) ||
+    (p.category || '').toLowerCase().includes(q) ||
+    (p.id || '').toLowerCase().includes(q),
+  )
 })
+
+// ---- 检查更新 ----
+// 更新检查原本只能在市场页触发：用户装完插件停在本地页，想知道有没有新版
+// 得先切过去。这里直接复用市场索引接口，只统计「已装且有新版」的数量。
+const checkingUpdates = ref(false)
+async function checkUpdates() {
+  checkingUpdates.value = true
+  try {
+    const idx = unwrap<{ plugins?: Array<{ installed?: boolean; has_update?: boolean }> }>(await GetPluginMarket())
+    const n = (idx?.plugins || []).filter((p) => p.installed && p.has_update).length
+    setPluginUpdateBadge(n)
+    if (n > 0) toast.success(t('pluginUpdatesFound', { n }))
+    else toast.success(t('pluginNoUpdates'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    checkingUpdates.value = false
+  }
+}
 
 // 卸载确认
 const showUninstallConfirm = ref(false)
 const uninstallingId = ref('')
 const uninstallingName = ref('')
+// 「保留数据」勾选：卸载时只删本体，私有数据/使用记录/执行日志留着
+const uninstallKeepData = ref(false)
 
 // ---- 加载 ----
 // 图标分深浅两档，按当前主题取用；主题切换时需重新拉取（见下方 watch）
@@ -201,14 +278,51 @@ async function handleUninstall() {
   if (operating.value.has(id)) return
   operating.value.add(id)
   try {
-    await unwrap(await UninstallPlugin(id)) // code!=0 抛错，防止卸载失败误报成功
-    toast?.success?.(t('deleted'))
+    await unwrap(await UninstallPlugin(id, uninstallKeepData.value)) // code!=0 抛错，防止卸载失败误报成功
+    toast?.success?.(t(uninstallKeepData.value ? 'pluginUninstallKept' : 'deleted'))
     await reloadPlugins()
   } catch (e) {
     toast?.error?.(t('pluginUninstallFailed') + ': ' + getErrorMessage(e))
   } finally {
     operating.value.delete(id)
   }
+}
+
+// ---- 安装前权限二次确认 ----
+//
+// native 插件的危险调用运行期拦不住，唯一能拦的时机就是安装前：装之前把 zip 里
+// plugin.json 声明的敏感能力（联网/读写文件/剪贴板/执行命令/杀进程）亮出来，
+// 用户看清再点确认。预检失败的包不在此阻断——真正安装时后端还有完整校验兜底。
+interface ZipPermPreview { name: string; version: string; permissions: string[] }
+
+const permDialog = ref<{ visible: boolean; details: string[] }>({ visible: false, details: [] })
+let permResolve: ((ok: boolean) => void) | null = null
+
+function confirmInstallPermissions(details: string[]): Promise<boolean> {
+  permDialog.value = { visible: true, details }
+  return new Promise((resolve) => { permResolve = resolve })
+}
+function onPermConfirm() { permDialog.value.visible = false; permResolve?.(true); permResolve = null }
+function onPermCancel() { permDialog.value.visible = false; permResolve?.(false); permResolve = null }
+
+/** 逐包预检并汇总成确认框明细行。返回 null 表示全部预检失败（直接走安装，让后端报错）。 */
+async function buildPermDetails<T>(
+  items: T[],
+  inspectOf: (item: T) => Promise<ZipPermPreview | null>,
+  labelOf: (item: T) => string,
+): Promise<string[] | null> {
+  const lines: string[] = []
+  let inspected = 0
+  for (const it of items) {
+    let prev: ZipPermPreview | null = null
+    try { prev = await inspectOf(it) } catch { prev = null }
+    if (!prev) continue
+    inspected++
+    lines.push(`${labelOf(it)} — ${prev.name} v${prev.version}`)
+    if (prev.permissions.length) lines.push(...prev.permissions.map((p) => '  · ' + p))
+    else lines.push(`  · ${t('pluginPermNone')}`)
+  }
+  return inspected ? lines : null
 }
 
 // ---- 安装（多选 / 多拖：一次装多个 zip）----
@@ -275,6 +389,13 @@ async function selectAndInstall() {
     return
   }
   if (!paths.length) return // 用户取消
+  // 安装前权限确认：亮出每个包声明的敏感能力，用户确认才继续
+  const details = await buildPermDetails(
+    paths,
+    async (p) => unwrap<ZipPermPreview>(await InspectPluginZip(p)),
+    zipName,
+  )
+  if (details && !(await confirmInstallPermissions(details))) return
   await installBatch(paths, async (p) => unwrap(await InstallPlugin(p)), zipName)
 }
 
@@ -335,7 +456,17 @@ async function onDrop(e: DragEvent) {
     toast?.error?.(t('pluginDropTooLarge'))
     return
   }
-  await installBatch(files, async (f) => unwrap(await InstallPluginFromBytes(f.name, await fileToBase64(f))), (f) => f.name)
+  // base64 只算一遍：预检和安装各要一份，重复读 50MB 文件太浪费
+  const b64 = new Map<File, string>()
+  for (const f of files) b64.set(f, await fileToBase64(f))
+  // 安装前权限确认（与「从文件安装」同一条规则）
+  const details = await buildPermDetails(
+    files,
+    async (f) => unwrap<ZipPermPreview>(await InspectPluginZipData(f.name, b64.get(f) || '')),
+    (f) => f.name,
+  )
+  if (details && !(await confirmInstallPermissions(details))) return
+  await installBatch(files, async (f) => unwrap(await InstallPluginFromBytes(f.name, b64.get(f) || '')), (f) => f.name)
 }
 
 function fileToBase64(file: File): Promise<string> {
@@ -482,6 +613,11 @@ onUnmounted(() => {
           <Upload v-else :size="14" />
           <span>{{ operating.has('_install_') ? t('pluginInstalling') : t('pluginInstallFromFile') }}</span>
         </button>
+        <button class="qd-btn" :disabled="checkingUpdates" @click="checkUpdates" :title="t('pluginCheckUpdates')">
+          <Loader2 v-if="checkingUpdates" :size="14" class="spin" />
+          <DownloadCloud v-else :size="14" />
+          <span>{{ checkingUpdates ? t('checking') : t('pluginCheckUpdates') }}</span>
+        </button>
         <button class="qd-icon-btn" @click="reloadPlugins" :title="t('refresh')">
           <RefreshCw :size="14" />
         </button>
@@ -501,6 +637,11 @@ onUnmounted(() => {
         :class="['cat-tab', { active: selectedCategory === cat }]"
         @click="selectedCategory = cat"
       >{{ cat }} <span class="cat-count">{{ plugins.filter(p => p.category === cat).length }}</span></button>
+      <div class="plugin-search">
+        <Search :size="12" class="plugin-search-icon" />
+        <input v-model="pluginQuery" class="plugin-search-input" :placeholder="t('pluginSearchPh')" />
+        <button v-if="pluginQuery" class="plugin-search-clear" @click="pluginQuery = ''"><X :size="11" /></button>
+      </div>
     </div>
 
     <!-- 加载中 -->
@@ -593,17 +734,47 @@ onUnmounted(() => {
 
         <span :class="['status-badge', statusBadgeClass(p)]">{{ statusLabel(p) }}</span>
 
+        <!-- 权限审计：装完之后仍能看到这个插件能碰什么，不必回去翻 plugin.json -->
+        <div v-if="permTags(p).length" class="card-perms">
+          <span v-for="tag in permTags(p)" :key="tag" class="perm-tag">{{ permLabel(tag) }}</span>
+        </div>
+
+        <!--
+          命令与热键：PluginInfo.commands 一直在下发，但此前卡片上完全不提。
+          后果是「装了插件却不知道它能干什么」——只能去命令面板里瞎搜，
+          或者回去翻 plugin.json。热键尤其要露出来：它是唯一「不用先想起插件名」
+          的入口。
+        -->
+        <div v-if="p.commands && p.commands.length" class="card-cmds" :title="cmdListTitle(p)">
+          <span v-for="c in p.commands.slice(0, 2)" :key="c.id" class="cmd-chip">
+            <kbd v-if="c.hotkey" class="cmd-kbd">{{ c.hotkey }}</kbd>
+            <span class="cmd-chip-title">{{ cmdTitle(c) }}</span>
+          </span>
+          <span v-if="p.commands.length > 2" class="cmd-more">+{{ p.commands.length - 2 }}</span>
+        </div>
+
         <!-- 描述 -->
         <p v-if="p.description" class="card-desc">{{ pluginDesc(p, locale) }}</p>
       </div>
     </div>
 
-    <!-- 卸载确认 -->
+    <!-- 卸载确认：可选「保留数据」，重装/迁移时不至于把插件积累一并抹掉 -->
     <ConfirmDialog
       :visible="showUninstallConfirm"
       :message="t('pluginUninstallConfirm', { name: uninstallingName })"
+      :checkbox-label="t('pluginKeepData')"
+      @update:checkbox="uninstallKeepData = $event"
       @confirm="handleUninstall"
       @cancel="showUninstallConfirm = false"
+    />
+
+    <!-- 安装前权限确认 -->
+    <ConfirmDialog
+      :visible="permDialog.visible"
+      :message="t('pluginPermConfirmTitle')"
+      :details="permDialog.details"
+      @confirm="onPermConfirm"
+      @cancel="onPermCancel"
     />
 
     <!-- 执行历史（5.2） -->
@@ -788,6 +959,60 @@ onUnmounted(() => {
 .badge-starting { background: var(--color-warning-bg); color: var(--color-warning); }
 .badge-unresponsive { background: var(--color-warning-bg); color: var(--color-warning); }
 
+/* 权限标签：与状态徽标同尺寸，但用中性底 —— 权限是"事实"不是"状态"，
+   给它们上色会和运行状态抢注意力 */
+.card-perms { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
+.perm-tag {
+  font-size: 9px;
+  line-height: 15px;
+  padding: 0 5px;
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 命令与热键：卡片上只露前两条，完整清单在 title 里。
+   热键用 kbd 的等宽感是刻意的 —— 它是「按键」而不是「标签」。 */
+.card-cmds {
+  display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
+  justify-content: center;
+  max-width: 100%;
+}
+.cmd-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  max-width: 100%;
+  font-size: 9px;
+  color: var(--color-text-secondary);
+}
+.cmd-kbd {
+  padding: 0 4px;
+  font-family: var(--font-mono, monospace);
+  font-size: 9px;
+  line-height: 14px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  white-space: nowrap;
+}
+.cmd-chip-title {
+  max-width: 96px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-text-muted);
+}
+.cmd-more {
+  font-size: 9px;
+  line-height: 15px;
+  padding: 0 4px;
+  border-radius: var(--radius-md);
+  color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary);
+}
+
 /* 使用次数 */
 .card-usage { display: inline-flex; align-items: center; gap: 2px; font-size: 9px; color: var(--color-text-muted); }
 .usage-icon { font-size: 7px; }
@@ -807,6 +1032,26 @@ onUnmounted(() => {
 }
 
 /* ---- 分类 Tabs ---- */
+/* 搜索框跟分类 tab 同一行靠右：装得多时先搜再筛，比先筛再翻更快 */
+.plugin-search {
+  display: flex; align-items: center; gap: 5px; margin-left: auto;
+  height: 26px; padding: 0 8px; min-width: 150px;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+}
+.plugin-search:focus-within { border-color: var(--color-accent); }
+.plugin-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
+.plugin-search-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: none;
+  color: var(--color-text-primary); font-size: 11px; font-family: inherit;
+}
+.plugin-search-input::placeholder { color: var(--color-text-disabled); }
+.plugin-search-clear {
+  display: flex; padding: 0; border: none; background: none;
+  color: var(--color-text-disabled); cursor: pointer;
+}
+.plugin-search-clear:hover { color: var(--color-text-primary); }
+
 .plugin-categories {
   display: flex; gap: 3px; flex-wrap: wrap;
   margin-bottom: 10px; flex-shrink: 0;

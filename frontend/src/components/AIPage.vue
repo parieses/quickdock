@@ -2,7 +2,7 @@
 import { ref, computed, reactive, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote, ArrowDown, Image as ImageIcon, Link2, X, Download } from '@lucide/vue'
+import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote, ArrowDown, Image as ImageIcon, Link2, X, Download, Pencil, Search } from '@lucide/vue'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
@@ -38,6 +38,7 @@ import {
   AIStreamInfo,
   AIClearMessages,
   AIRegenerateTitle,
+  AIRenameConversation,
   AIListConversations,
   AIDeleteConversation,
   AIGetMessages,
@@ -59,6 +60,10 @@ interface AIMessage {
   reasoning_content?: string; images?: string; imgList?: AIMsgImage[]
   // 该条回复自己那一次调用的用量（assistant 才有值，老消息为 0/undefined）
   model?: string; prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number
+  // 这条回复的估算费用（元）。后端按当前价目表现算，未收录的模型没有这个字段。
+  cost?: number
+  // 这条回复被用户中途停止（内容是半截的）。后端同样落库，刷新后标记仍在。
+  stopped?: boolean
 }
 
 // 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
@@ -641,11 +646,29 @@ async function loadProfiles() {
     if (!res) return
     aiProfiles.value = res.profiles ?? []
     aiActive.value = res.active || (aiProfiles.value[0]?.id ?? '')
+    // 以服务端返回的「当前生效档案」为准，作为切模型失败时的还原基准
+    lastActiveProfile = aiActive.value
   } catch (e) {
     aiProfiles.value = []
     errorMsg.value = getErrorMessage(e)
   }
 }
+
+// ---- 会话搜索 / 分批渲染 ----
+// 列表一次全量拉、全量渲染：上百个会话时侧栏本身就成了负担，而真正要找的
+// 往往是最近几条。搜 + 分批显示，两个毛病一起解决。
+const convQuery = ref('')
+const CONV_PAGE = 30
+const convLimit = ref(CONV_PAGE)
+
+const filteredConversations = computed(() => {
+  const q = convQuery.value.trim().toLowerCase()
+  if (!q) return conversations.value
+  return conversations.value.filter((c) => (c.title || '').toLowerCase().includes(q))
+})
+const shownConversations = computed(() => filteredConversations.value.slice(0, convLimit.value))
+
+watch(convQuery, () => { convLimit.value = CONV_PAGE })
 
 async function loadConversations() {
   try {
@@ -716,6 +739,9 @@ function resetStreamState() {
 
 async function delConv(id: string) {
   if (!(await toast.confirm(t('confirmDelete')))) return
+  // 删的正是当前在跑的会话：先掐流再删。否则后端会先发现「会话已被删除」
+  // 而把内容写失败，前端还会抱着一条指向已删会话的流继续读。
+  if (streaming.value && activeId.value === id) stop()
   try {
     unwrap(await AIDeleteConversation(id))
     if (activeId.value === id) newConv()
@@ -725,8 +751,52 @@ async function delConv(id: string) {
   }
 }
 
-function onModelChange() {
-  if (aiActive.value) AISetActiveProfile(aiActive.value)
+// 上一个真正生效的模型：切模型失败时把下拉框拉回去。
+// 不还原的话，界面显示的是新模型、后端实际请求还是旧模型——
+// 这种「看起来切了其实没切」的不一致是最难排查的一类问题。
+let lastActiveProfile = ''
+
+async function onModelChange() {
+  const want = aiActive.value
+  if (!want) return
+  try {
+    unwrap(await AISetActiveProfile(want))
+    lastActiveProfile = want
+  } catch (e: any) {
+    toast.error(getErrorMessage(e))
+    aiActive.value = lastActiveProfile
+  }
+}
+
+// ---- 失败重试 ----
+// 后端在调模型之前就把用户消息落库了（所以失败后历史不会丢），
+// 但没有重试入口时用户只能手动重打一遍问题——图片还得重新贴。
+// retryPending 让 send() 跳过再插一个 user 气泡：那条消息本来就在列表里，
+// 后端 saveUserTurn 对「同内容 + 同图片」也是幂等的，重发不会产生重复行。
+let retryPending = false
+
+function canRetry(): boolean {
+  if (streaming.value) return false
+  return messages.value.some((m) => m.role === 'user')
+}
+
+function retryLast() {
+  if (!canRetry()) return
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    const m = messages.value[i]
+    if (m.role !== 'user') continue
+    errorMsg.value = ''
+    retryPending = true
+    input.value = m.content
+    attachments.value = (m.imgList || []).map((img) => ({
+      kind: img.kind,
+      url: img.url,
+      dataUrl: img.dataUrl,
+      name: img.name || 'image',
+    }))
+    send()
+    return
+  }
 }
 
 async function regenTitle() {
@@ -740,6 +810,56 @@ async function regenTitle() {
     }
   } catch (e) {
     toast.error(getErrorMessage(e))
+  }
+}
+
+// ---- 会话改名 ----
+//
+// 自动生成的标题常常只是「大概意思」，用户想换成自己能记住的说法；而重生成
+// 要再花一次模型调用（输入是整段对话），改两个字不该有这种代价。
+// 底层 UpdateAIConversationMeta 一直都在（摘要压缩也在用它），此前只是没有对外入口。
+//
+// 做成行内编辑而不是弹窗：为一个短标题开一层模态框，输入成本比标题本身还高。
+const renamingId = ref('')
+const renameText = ref('')
+const renameInput = ref<HTMLInputElement | null>(null)
+
+function startRename(c: AIConversation) {
+  renamingId.value = c.id
+  renameText.value = c.title || ''
+  // 等 input 渲染出来再聚焦并全选：不全选的话，用户得先手动删掉旧标题才能打新的。
+  nextTick(() => {
+    renameInput.value?.focus()
+    renameInput.value?.select()
+  })
+}
+
+function cancelRename() {
+  renamingId.value = ''
+  renameText.value = ''
+}
+
+/**
+ * 提交改名。
+ *
+ * Enter 与 blur 都会走到这里（Enter 后输入框随即失焦），所以进函数先清 renamingId：
+ * 第二次调用读到空 id 直接返回，避免同一份标题被提交两遍。
+ */
+async function commitRename(c: AIConversation) {
+  const id = renamingId.value
+  if (!id) return
+  const title = renameText.value.trim()
+  renamingId.value = ''
+  // 没改或删空都当作放弃：后端会拒绝空标题，为「改到一半又不想改」弹个错误太吵。
+  if (!title || title === (c.title || '')) return
+  try {
+    const saved = unwrap<string>(await AIRenameConversation(id, title))
+    const i = conversations.value.findIndex((x) => x.id === id)
+    if (i >= 0 && saved) conversations.value[i].title = saved
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    // 失败时拉回真实值：界面上的标题若停在用户改过的样子，会与库里不一致。
+    await loadConversations()
   }
 }
 
@@ -767,7 +887,7 @@ async function ensureStreamInfo() {
 }
 
 // 单条回复的统计信息（耗时 / 首字延迟 / token 用量）
-interface AIStreamStat { elapsedMs: number; firstTokenMs: number; promptTokens: number; completionTokens: number; cachedTokens: number }
+interface AIStreamStat { elapsedMs: number; firstTokenMs: number; promptTokens: number; completionTokens: number; cachedTokens: number; cost?: number }
 // messageId -> 统计。挂在消息对象上随消息一起渲染。
 const statMap = reactive(new Map<string, AIStreamStat>())
 
@@ -787,6 +907,9 @@ function formatStat(stat: AIStreamStat): string {
       ? t('aiStatTokensCached', { in: fmtTokens(stat.promptTokens), out: fmtTokens(stat.completionTokens), pct })
       : t('aiStatTokens', { in: fmtTokens(stat.promptTokens), out: fmtTokens(stat.completionTokens) }))
   }
+  // 费用由后端算（价目表只有 ai_pricing.go 一份）；未收录的模型没有 cost，
+  // 这里就不显示——与设置页「未知模型不计价」保持同一口径。
+  if (stat.cost && stat.cost > 0) parts.push(t('aiStatCost', { c: fmtCost(stat.cost) }))
   return parts.join(' · ')
 }
 
@@ -796,6 +919,15 @@ function fmtTokens(n: number): string {
   if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M'
   if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'
   return String(n)
+}
+
+// 费用格式化：与设置页用量面板同一口径（小额多给两位小数，否则 ¥0.00 会把
+// 「这条几乎不要钱」和「这条免费」显示成一个样子）。
+function fmtCost(n: number): string {
+  if (!n) return '¥0'
+  if (n >= 1) return '¥' + n.toFixed(2)
+  if (n >= 0.01) return '¥' + n.toFixed(3)
+  return '¥' + n.toFixed(4)
 }
 
 // 单条消息要显示的统计：优先用本次会话内存里的（含耗时/首字），
@@ -809,6 +941,7 @@ function msgStat(m: AIMessage): AIStreamStat | null {
     promptTokens: m.prompt_tokens || 0,
     completionTokens: m.completion_tokens || 0,
     cachedTokens: m.cached_tokens || 0,
+    cost: m.cost || 0,
   }
 }
 
@@ -819,6 +952,10 @@ function formatDuration(ms: number): string {
 }
 
 async function send() {
+  // 先读后清：任何提前 return（没配 Key / 空消息 / 正在流式）都不能把标志
+  // 留给下一次手动发送，否则那条用户发言将不再出现在气泡里。
+  const reuseUserBubble = retryPending
+  retryPending = false
   if (streaming.value) return
   const text = input.value.trim()
   if (!text && attachments.value.length === 0) return
@@ -828,6 +965,12 @@ async function send() {
     return
   }
   const convId = activeId.value
+  // 发送时的模型名：流式结束前用户可能切档案（onModelChange 会回滚），
+  // 事后读 activeProfile 拿到的是新值，所以此刻先定下来。
+  const streamModel = aiProfiles.value.find((x) => x.id === aiActive.value)?.model || ''
+  // 本轮流式归属的会话：新建会话时由 conv 事件回填。中断/失败时都要按它判断
+  // 「用户是否还停留在同一会话」，不能读 activeId —— 用户中途可能已经切走。
+  let streamConvId = convId
   // 把待发送附件组包为发送给模型的图片数组（file 带 dataUrl，url 带链接），
   // 同时生成渲染用的 imgList（file 直用 dataUrl，无需二次加载）。
   const imgs: PendingImage[] = attachments.value
@@ -842,7 +985,9 @@ async function send() {
     id: 'usr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), conv_id: convId, role: 'user', content: text,
     created_at: new Date().toISOString(), imgList,
   }
-  messages.value.push(msg)
+  // 重试：那条 user 消息本来就在列表里，别再插一个重复气泡。
+  // （后端 saveUserTurn 对「同内容 + 同图片」幂等，DB 里也不会多出一行）
+  if (!reuseUserBubble) messages.value.push(msg)
   stickToBottom.value = true
   showJumpBtn.value = false
   scrollToBottom()
@@ -903,7 +1048,7 @@ async function send() {
             if (data.text) { streamReasonBuf += data.text; scheduleStreamFlush() }
             break
           case 'conv':
-            if (data.id) activeId.value = data.id
+            if (data.id) { activeId.value = data.id; streamConvId = data.id }
             if (data.title !== undefined) {
               const i = conversations.value.findIndex((c) => c.id === data.id)
               if (i >= 0) conversations.value[i].title = data.title
@@ -919,6 +1064,9 @@ async function send() {
               const reasoning = reasoningText.value
               if (content || reasoning) {
                 const msg: Record<string, any> = { id: `ast-${Date.now()}`, conv_id: data.convId, role: 'assistant', content: content || '', created_at: new Date().toISOString() }
+                // 模型名由后端回传（它就是落库的那份），拿不到才退回发送时的档案
+                const usedModel = String(data.model || streamModel || '').trim()
+                if (usedModel) msg.model = usedModel
                 if (reasoning) msg.reasoning_content = reasoning
                 messages.value.push(msg as AIMessage)
                 // 复用流式期已渲染好的块 HTML，避免落地瞬间整条重新解析
@@ -930,6 +1078,8 @@ async function send() {
                   promptTokens: Number(data.promptTokens) || 0,
                   completionTokens: Number(data.completionTokens) || 0,
                   cachedTokens: Number(data.cachedTokens) || 0,
+                  // 后端算好带回来；未收录模型没有这个字段 → 0 即隐藏
+                  cost: Number(data.cost) || 0,
                 }
                 statMap.set(msg.id as string, stat)
                 // 同步到消息对象：刷新后由 DB 里的同名字段接管，展示逻辑不用分两套
@@ -964,21 +1114,28 @@ async function send() {
     if (streamingText.value || reasoningText.value) {
       const content = streamingText.value
       const reasoning = reasoningText.value
+      // 只往「用户还停留着的那个会话」里补气泡。切走之后后端仍会把半截内容落库
+      // （带 stopped 标记），但绝不能塞进另一个会话的消息列表——以前这里用的是
+      // activeId.value，selectConv 先 stop 再改 activeId，半截内容就串到新会话里了。
       if (content || reasoning) {
-        const aid = `ast-${Date.now()}-stop`
-        const msg: Record<string, any> = { id: aid, conv_id: activeId.value, role: 'assistant', content: content || '', created_at: new Date().toISOString(), stopped: true }
-        if (reasoning) msg.reasoning_content = reasoning
-        messages.value.push(msg as AIMessage)
-        // 同样复用流式期已渲染的块
-        primeMessageBlocks(aid, content, streamBlocks.value.map((b) => b.html))
-        const stat: AIStreamStat = {
-          elapsedMs: Math.round(performance.now() - startedAt),
-          firstTokenMs: 0,
-          promptTokens: 0,
-          completionTokens: 0,
-          cachedTokens: 0,
+        if (streamConvId && activeId.value === streamConvId) {
+          const aid = `ast-${Date.now()}-stop`
+          const msg: Record<string, any> = { id: aid, conv_id: streamConvId, role: 'assistant', content: content || '', created_at: new Date().toISOString(), stopped: true }
+          // 中断时后端还没发 done，模型名用发送时记下的那份
+          if (streamModel) msg.model = streamModel
+          if (reasoning) msg.reasoning_content = reasoning
+          messages.value.push(msg as AIMessage)
+          // 同样复用流式期已渲染的块
+          primeMessageBlocks(aid, content, streamBlocks.value.map((b) => b.html))
+          const stat: AIStreamStat = {
+            elapsedMs: Math.round(performance.now() - startedAt),
+            firstTokenMs: 0,
+            promptTokens: 0,
+            completionTokens: 0,
+            cachedTokens: 0,
+          }
+          statMap.set(aid, stat)
         }
-        statMap.set(aid, stat)
       }
     }
     streamingText.value = ''
@@ -1323,25 +1480,62 @@ onUnmounted(() => {
       <button class="ai-new-btn" @click="newConv">
         <Plus :size="14" /> {{ t('aiNewChat') }}
       </button>
+      <div v-if="conversations.length > 5" class="ai-conv-search">
+        <Search :size="12" class="ai-conv-search-icon" />
+        <input v-model="convQuery" class="ai-conv-search-input" :placeholder="t('aiSearchConvPh')" />
+        <button v-if="convQuery" class="ai-conv-search-clear" @click="convQuery = ''"><X :size="11" /></button>
+      </div>
       <div class="ai-conv-list">
         <div
-          v-for="c in conversations"
+          v-for="c in shownConversations"
           :key="c.id"
           :class="['ai-conv-item', { active: c.id === activeId }]"
           @click="selectConv(c.id)"
         >
-          <span class="ai-conv-title">{{ c.title || t('aiNewChat') }}</span>
+          <input
+            v-if="renamingId === c.id"
+            ref="renameInput"
+            v-model="renameText"
+            class="ai-conv-rename"
+            spellcheck="false"
+            maxlength="60"
+            @click.stop
+            @keydown.enter.prevent="commitRename(c)"
+            @keydown.esc.prevent="cancelRename()"
+            @blur="commitRename(c)"
+          />
+          <!-- 双击标题也能改名：改名是低频操作，给它常驻按钮不如给个不占位的手势 -->
+          <span
+            v-else
+            class="ai-conv-title"
+            :title="t('aiRenameHint')"
+            @dblclick.stop="startRename(c)"
+          >{{ c.title || t('aiNewChat') }}</span>
           <!-- 会话累计用量：只统计「问答」，标题生成 / 摘要压缩不计入（见 ai_usage.go），
                所以这里的数字应该等于该会话各条回复下方统计之和。
                折算成 k/M 显示，精确值放 title。 -->
-          <span v-if="c.prompt_tokens > 0 || c.completion_tokens > 0" class="ai-conv-tokens" :title="t('aiConvTokenTip', { in: c.prompt_tokens, out: c.completion_tokens })">
+          <span v-if="renamingId !== c.id && (c.prompt_tokens > 0 || c.completion_tokens > 0)" class="ai-conv-tokens" :title="t('aiConvTokenTip', { in: c.prompt_tokens, out: c.completion_tokens })">
             {{ fmtTokens(c.prompt_tokens + c.completion_tokens) }}
           </span>
-          <button class="ai-conv-del" :title="t('delete')" @click.stop="delConv(c.id)">
+          <button
+            v-if="renamingId !== c.id"
+            class="ai-conv-ren"
+            :title="t('aiRename')"
+            @click.stop="startRename(c)"
+          >
+            <Pencil :size="12" />
+          </button>
+          <button v-if="renamingId !== c.id" class="ai-conv-del" :title="t('delete')" @click.stop="delConv(c.id)">
             <Trash2 :size="13" />
           </button>
         </div>
         <div v-if="conversations.length === 0" class="ai-conv-empty">{{ t('aiNoConversations') }}</div>
+        <div v-else-if="filteredConversations.length === 0" class="ai-conv-empty">{{ t('aiNoMatchConv') }}</div>
+        <button
+          v-else-if="filteredConversations.length > shownConversations.length"
+          class="ai-conv-more"
+          @click="convLimit += CONV_PAGE"
+        >{{ t('aiShowMoreConv', { n: filteredConversations.length - shownConversations.length }) }}</button>
       </div>
     </aside>
 
@@ -1396,7 +1590,11 @@ onUnmounted(() => {
               v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0)]"
               :class="['ai-msg', m.role]"
             >
-              <div class="ai-msg-role">{{ m.role === 'user' ? t('aiYou') : 'AI' }}</div>
+              <div class="ai-msg-role">
+                {{ m.role === 'user' ? t('aiYou') : 'AI' }}
+                <!-- 多档案（不同模型/档案）混着聊时，不写模型名就分不清这句是谁答的 -->
+                <span v-if="m.role === 'assistant' && m.model" class="ai-msg-model">{{ m.model }}</span>
+              </div>
               <!-- 图片缩略图：url 类直发链接，file 类用已加载的 dataUrl；历史 file 图由 loadMessages 懒加载填回 -->
               <div v-if="m.imgList && m.imgList.length" class="ai-msg-imgs">
                 <div v-for="(img, bi) in m.imgList" :key="bi" class="ai-msg-img">
@@ -1415,6 +1613,9 @@ onUnmounted(() => {
               <div v-else class="ai-msg-content ai-plain">{{ m.content }}</div>
               <!-- 操作按钮同一行：.ai-msg 是纵向 flex，不包一层的话每个按钮都会各占一行 -->
               <div class="ai-msg-actions">
+                <!-- 中断标记：内容照样保留（后端也把半截内容连同 stopped 一起落库），
+                     但要让人一眼看出「这是我按了停止」，而不是模型只答了这么多 -->
+                <span v-if="m.stopped" class="ai-msg-stopped" :title="t('aiStoppedHint')">{{ t('aiStopped') }}</span>
                 <button v-if="m.content" class="ai-copy" @click="copy(m.content)" :title="t('copy')">
                   <Copy :size="12" /> {{ t('copy') }}
                 </button>
@@ -1445,7 +1646,11 @@ onUnmounted(() => {
               <span class="ai-cursor">▋</span>
             </div>
 
-            <div v-if="errorMsg" class="ai-error">{{ errorMsg }}</div>
+            <div v-if="errorMsg" class="ai-error">
+              <span class="ai-error-text">{{ errorMsg }}</span>
+              <!-- 失败时用户消息已落库，重试就是把它再发一次（图片一起带回去） -->
+              <button v-if="canRetry()" class="ai-retry" @click="retryLast">{{ t('aiRetry') }}</button>
+            </div>
 
             <div v-if="messages.length === 0 && !streamingText && !errorMsg" class="ai-empty">
               <Bot :size="40" />
@@ -1643,6 +1848,26 @@ onUnmounted(() => {
 }
 .ai-conv-item:hover .ai-conv-del { display: flex; }
 .ai-conv-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.ai-conv-ren {
+  background: none; border: none; color: var(--color-text-disabled);
+  cursor: pointer; display: none; align-items: center; justify-content: center;
+  width: 22px; height: 22px; border-radius: var(--radius-sm);
+}
+.ai-conv-item:hover .ai-conv-ren { display: flex; }
+.ai-conv-ren:hover { color: var(--color-text-primary); background: var(--color-bg-tertiary); }
+/* 行内编辑：撑满标题那一格，且必须能盖住行本身的点击（改选中了会话就白改了） */
+.ai-conv-rename {
+  flex: 1;
+  min-width: 0;
+  padding: 0 4px;
+  font: inherit;
+  font-size: 13px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-sm);
+  outline: none;
+}
 .ai-conv-tokens {
   font-size: 10px; color: var(--color-text-disabled); white-space: nowrap;
   margin-right: 4px; font-variant-numeric: tabular-nums;
@@ -1744,7 +1969,41 @@ onUnmounted(() => {
 .ai-msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
 .ai-msg.user { align-self: flex-end; align-items: flex-end; }
 .ai-msg.assistant { align-self: flex-start; }
-.ai-msg-role { font-size: 11px; color: var(--color-text-disabled); margin-bottom: 1px; }
+.ai-msg-role { font-size: 11px; color: var(--color-text-disabled); margin-bottom: 1px; display: flex; align-items: center; gap: 6px; }
+/* 模型名淡到几乎只作注脚，但比"猜这句是谁答的"强 */
+.ai-msg-model {
+  font-size: 10px; color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary); padding: 0 5px;
+  border-radius: var(--radius-xs); opacity: 0.85;
+}
+
+/* 会话搜索：与新建按钮同宽，同一视觉层级 */
+.ai-conv-search {
+  display: flex; align-items: center; gap: 5px;
+  margin: 6px 8px 2px; padding: 0 7px; height: 26px;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); flex-shrink: 0;
+}
+.ai-conv-search:focus-within { border-color: var(--color-accent); }
+.ai-conv-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
+.ai-conv-search-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: none;
+  color: var(--color-text-primary); font-size: 11px; font-family: inherit;
+}
+.ai-conv-search-input::placeholder { color: var(--color-text-disabled); }
+.ai-conv-search-clear {
+  display: flex; padding: 0; border: none; background: none;
+  color: var(--color-text-disabled); cursor: pointer;
+}
+.ai-conv-search-clear:hover { color: var(--color-text-primary); }
+/* 加载更多：整行按钮，不要做成小链接——点中的概率太低 */
+.ai-conv-more {
+  margin: 2px 8px 8px; padding: 5px 0; flex-shrink: 0;
+  border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
+  background: none; color: var(--color-text-muted); font-size: 11px;
+  font-family: inherit; cursor: pointer;
+}
+.ai-conv-more:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
 
 /* AI 气泡去掉底色：原来整块套 --color-bg-tertiary 灰底，
    里面再套深色代码块、外面再套引用块，三层嵌套导致视觉很乱。
@@ -1783,6 +2042,14 @@ onUnmounted(() => {
 .ai-copy:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
 .ai-msg.user .ai-copy { color: var(--color-text-muted); }
 .ai-msg.user .ai-copy:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+/* 中断标记：贴在操作行最左侧，用警示色区别于普通小字（stat 行） */
+.ai-msg-stopped {
+  font-size: 10px; padding: 1px 6px; border-radius: var(--radius-xs);
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+  cursor: default;
+}
 /* 单条回复统计：淡色小字，鼠标悬停可看完整信息 */
 .ai-msg-stat {
   font-size: 10px;
@@ -1871,7 +2138,19 @@ onUnmounted(() => {
   padding: 10px 14px; border-radius: var(--radius-lg);
   background: var(--color-danger-bg); color: var(--color-danger);
   font-size: 13px; max-width: 80%;
+  /* 错误文案 + 重试按钮同一行；长错误换行，按钮不跟着被挤压 */
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
 }
+.ai-error-text { flex: 1 1 auto; min-width: 0; word-break: break-word; }
+.ai-retry {
+  flex: 0 0 auto;
+  padding: 3px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--color-danger-border);
+  background: transparent; color: var(--color-danger);
+  font-size: 12px; font-family: inherit; cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+.ai-retry:hover { background: var(--color-danger-bg); }
 .ai-need-key, .ai-empty {
   margin: auto;
   display: flex; flex-direction: column; align-items: center; gap: 12px;
