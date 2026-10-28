@@ -42,12 +42,21 @@ function handleCollectionClick(collectionId: string) {
   store.selectCollection(collectionId)
 }
 
-async function handleOpenAll(collectionId: string) {
+// 「打开」按集合自己的 open_strategy 执行（single / batch / all）。
+// 之前这个字段只在表单里存在，选了没有任何行为差异。
+async function handleOpenByStrategy(col: Collection) {
   try {
-    await store.openAllInCollection(collectionId)
+    const n = await store.openCollectionByStrategy(col)
+    if (n === 0) toast.success(t('collectionHasNoItems'))
+    else if (n > 0) toast.success(t('collectionOpenedN', { n }))
   } catch (e) {
     toast.error(t('openAllFailed') + ': ' + getErrorMessage(e))
   }
+}
+
+function openStrategyTitle(col: Collection) {
+  const s = (col.openStrategy || 'single') as 'single' | 'batch' | 'all'
+  return t('openStrategy') + ': ' + t(`openStrategies.${s}`)
 }
 
 async function handleCreateCollection(values: Record<string, string>) {
@@ -163,7 +172,7 @@ function onDropCol(e: DragEvent, targetId: string) {
             <span class="qd-row-sub">{{ col.type }}</span>
           </span>
           <span class="qd-row-actions" @click.stop>
-            <button class="qd-row-btn" @click="handleOpenAll(col.id)" :title="t('openAll')">
+            <button class="qd-row-btn" @click="handleOpenByStrategy(col)" :title="openStrategyTitle(col)">
               <Play :size="13" />
             </button>
             <button class="qd-row-btn" @click="editingCollection = col; showEditDialog = true" :title="t('edit')">

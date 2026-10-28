@@ -1,11 +1,9 @@
 <script setup lang="ts">
 import { computed, inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Dialogs } from '@wailsio/runtime'
 import { useWorkspaceStore } from '../stores/workspace'
 import { useFloatMenu } from '../composables/useFloatMenu'
-import { SceneExport, SceneImport } from '../../bindings/quickdock/services/scene/sceneservice'
-import { unwrap } from '../utils/api'
+import { pickExportScene } from '../utils/sceneIO'
 import { getErrorMessage } from '../utils/error'
 import type { Scene, ToastAPI } from '../types'
 
@@ -20,47 +18,14 @@ async function menuExport() {
   const sc = store.scenes.find(s => s.id === id)
   ctxMenu.hide()
   try {
-    const picked = await Dialogs.SaveFile({
-      Title: t('sceneExportTitle'),
-      Filename: (sc?.name || 'scene') + '.quickdock-scene.json',
-      Filters: [{ DisplayName: t('sceneFileFilter'), Pattern: '*.json' }],
-    })
-    if (!picked) return
-    const r = unwrap<{ collections: number; items: number }>(await SceneExport(id, picked))
+    const r = await pickExportScene(id, sc?.name || 'scene', t('sceneExportTitle'), t('sceneFileFilter'))
     if (r) toast.success(t('sceneExportDone', { collections: r.collections, items: r.items }))
   } catch (e) {
     toast.error(getErrorMessage(e))
   }
 }
 
-// 导入总是新建场景（同名自动加「(导入)」后缀），不做合并——条目改名后按名字匹配
-// 必然对不上，静默合并比重名更危险。
-async function menuImport() {
-  ctxMenu.hide()
-  const wsId = store.activeWorkspaceId
-  if (!wsId) {
-    toast.error(t('sceneImportNoWorkspace'))
-    return
-  }
-  try {
-    const picked = await Dialogs.OpenFile({
-      Title: t('sceneImportTitle'),
-      Filters: [{ DisplayName: t('sceneFileFilter'), Pattern: '*.json' }],
-      AllowsMultipleSelection: false,
-    })
-    const paths = typeof picked === 'string' ? [picked] : (picked || [])
-    if (paths.length === 0) return
-    const r = unwrap<{ sceneName: string; collections: number; items: number; skippedEnv: string[] }>(
-      await SceneImport(wsId, paths[0]),
-    )
-    await store.fetchScenes(wsId)
-    if (!r) return
-    const skipped = r.skippedEnv?.length ? t('sceneImportSkipped', { n: r.skippedEnv.length }) : ''
-    toast.success(t('sceneImportDone', { name: r.sceneName, collections: r.collections, items: r.items }) + skipped)
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-  }
-}
+// 导入入口已移除（产品决定不做导入，只保留导出）。
 
 // 已打开的场景标签页列表
 const openedTabs = computed(() => {
@@ -157,7 +122,6 @@ function onClickAway() {
           <button class="menu-item" :disabled="!canCloseRight" @click="menuCloseRight">{{ t('closeRight') }}</button>
           <button class="menu-item" :disabled="!canCloseOthers" @click="menuCloseOthers">{{ t('closeOthers') }}</button>
           <button class="menu-item" @click="menuExport">{{ t('sceneExport') }}…</button>
-          <button class="menu-item" @click="menuImport">{{ t('sceneImport') }}…</button>
         </div>
       </div>
     </Teleport>

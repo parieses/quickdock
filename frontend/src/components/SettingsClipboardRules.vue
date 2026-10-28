@@ -29,6 +29,7 @@ const loading = ref(true)
 // 编辑态：editing.id 为空表示新建
 const editing = ref<ClipboardRule | null>(null)
 const sample = ref('')
+const sampleApp = ref('')   // 试运行用的来源应用（仅 app 匹配规则需要）
 const testOut = ref('')
 const testState = ref<'' | 'matched' | 'unchanged' | 'nomatch'>('')
 
@@ -75,6 +76,7 @@ async function toggleGlobal() {
 function startCreate() {
   editing.value = emptyRule()
   sample.value = ''
+  sampleApp.value = ''
   testOut.value = ''
   testState.value = ''
 }
@@ -82,6 +84,7 @@ function startCreate() {
 function startEdit(r: ClipboardRule) {
   editing.value = { ...r }
   sample.value = ''
+  sampleApp.value = ''
   testOut.value = ''
   testState.value = ''
 }
@@ -144,7 +147,8 @@ async function runTest() {
   if (!cur || !sample.value) return
   try {
     const res = unwrap<{ output: string; matched: boolean; changed: boolean }>(
-      await TestClipboardRule(cur, sample.value, ''),
+      // 第三参是来源应用（窗口标题）：app 类规则靠它判定，传空串等于必然不命中
+      await TestClipboardRule(cur, sample.value, sampleApp.value.trim()),
     )
     testOut.value = res?.output ?? ''
     testState.value = !res?.matched ? 'nomatch' : (res.changed ? 'matched' : 'unchanged')
@@ -156,6 +160,18 @@ async function runTest() {
 
 const showExpr = computed(() => editing.value?.matchKind === 'regex' || editing.value?.matchKind === 'app')
 const showArg = computed(() => editing.value?.action === 'case' || editing.value?.action === 'json_format')
+
+// 优先级：DB 里 priority ASC 决定执行顺序，新建时后端自动排到末尾（>0 才生效）。
+// 之前这个字段既看不到也改不了 —— 多条规则同时命中时，谁先谁后完全靠运气。
+// 用受控文本而非 number 输入：0 在语义上是「还没分配」，显示成空比显示 "0" 清楚。
+const priorityText = computed({
+  get: () => (editing.value && editing.value.priority > 0 ? String(editing.value.priority) : ''),
+  set: (v: string) => {
+    if (!editing.value) return
+    const n = Number(String(v).replace(/[^\d]/g, ''))
+    editing.value.priority = Number.isFinite(n) && n > 0 ? n : 0
+  },
+})
 
 function actionLabel(a: string): string {
   return t('crAct_' + a)
@@ -229,6 +245,15 @@ function matchLabel(r: ClipboardRule): string {
         </div>
       </div>
 
+      <div class="cr-grid">
+        <div class="field">
+          <label class="field-label">{{ t('crPriority') }}</label>
+          <input v-model="priorityText" class="field-input" :placeholder="t('crPriorityAuto')" inputmode="numeric" />
+          <p class="field-hint">{{ t('crPriorityHint') }}</p>
+        </div>
+        <div></div>
+      </div>
+
       <label class="cr-check">
         <input v-model="editing.writeBack" type="checkbox" />
         <span>
@@ -240,6 +265,14 @@ function matchLabel(r: ClipboardRule): string {
       <!-- 试运行：先看它到底会把内容改成什么样，再决定是否保存 -->
       <div class="cr-test">
         <textarea v-model="sample" class="cr-test-input" rows="3" :placeholder="t('crTestPlaceholder')" />
+        <!-- 应用匹配规则必须能提供"来源应用"才能验证：后端拿到空串一律判不命中，
+             于是这条规则在试运行里永远显示"未匹配"，用户根本没法自查写法对不对。 -->
+        <input
+          v-if="editing.matchKind === 'app'"
+          v-model="sampleApp"
+          class="cr-test-input"
+          :placeholder="t('crTestAppPlaceholder')"
+        />
         <div class="cr-test-actions">
           <button class="btn btn-secondary" :disabled="!sample" @click="runTest">
             <Play :size="12" />
@@ -265,7 +298,10 @@ function matchLabel(r: ClipboardRule): string {
     <div class="cr-list">
       <div v-for="r in rules" :key="r.id" class="cr-row" :class="{ off: !r.enabled }">
         <div class="cr-row-main">
-          <span class="cr-row-name">{{ r.name }}</span>
+          <span class="cr-row-name">
+            <span class="cr-pri" :title="t('crPriorityHint')">#{{ r.priority }}</span>
+            {{ r.name }}
+          </span>
           <span class="cr-row-meta">
             {{ actionLabel(r.action) }} · {{ matchLabel(r) }}
             <template v-if="r.matchExpr"> · {{ r.matchExpr }}</template>
@@ -383,6 +419,19 @@ function matchLabel(r: ClipboardRule): string {
 .cr-row.off .cr-row-main { opacity: 0.55; }
 .cr-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .cr-row-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 执行序号：与规则名同一行，弱化处理——它是说明顺序的，不是名字的一部分 */
+.cr-pri {
+  display: inline-block;
+  min-width: 18px;
+  margin-right: 4px;
+  padding: 0 3px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-disabled);
+  font-size: 10px;
+  font-weight: 400;
+  text-align: center;
+}
 .cr-row-meta {
   font-size: 11px;
   color: var(--color-text-disabled);

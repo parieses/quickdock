@@ -103,6 +103,8 @@ async function handleDeleteScene(sceneId: string) {
 function openCreate() {
   showSceneDialog.value = true
 }
+
+// 场景导入入口已移除（产品决定不做导入，只保留导出）：面板头只剩「新建」。
 </script>
 
 <template>

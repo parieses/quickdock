@@ -8,7 +8,7 @@ import { ListWorkspaces, CreateWorkspace, DeleteWorkspace, UpdateWorkspace, GetW
 import { ListScenes, CreateScene, UpdateScene, DeleteScene, ReorderScenes } from '../../bindings/quickdock/services/scene/sceneservice'
 import { ListCollections, CreateCollection, UpdateCollection, DeleteCollection, ReorderCollections, OpenItem, OpenAllInCollection } from '../../bindings/quickdock/services/collection/collectionservice'
 import { ListItems, CreateItem, UpdateItem, DeleteItem, ReorderItems } from '../../bindings/quickdock/services/item/itemservice'
-import { ListTools, GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
+import { ListTools, GetValue, SetValue, SearchAll } from '../../bindings/quickdock/services/appservice'
 import type { CollectionItem as BindingCollectionItem } from '../../bindings/quickdock/internal/db/models'
 import type { Workspace, Scene, Collection, CollectionItem, OpenTool } from '../types'
 import { getErrorMessage } from '../utils/error'
@@ -40,6 +40,34 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const activeCollectionId = ref('')
   const openedSceneIds = ref<string[]>([]) // 已打开的场景标签页
 
+  // ---- 场景标签页持久化 ----
+  //
+  // 标签页是用户的「工作台」：关掉应用再回来，昨天开着的几个场景应该还在。
+  // 之前它只是内存里的 ref，切工作空间/重启即清空，这个功能的价值基本为零。
+  // 按工作空间分别存（key 带 wsId），因为不同工作空间的场景 id 互不相干。
+  const openedTabsKey = (wsId: string) => 'openedSceneIds:' + wsId
+
+  const saveOpenedTabs = debounce(() => {
+    const wsId = activeWorkspaceId.value
+    if (!wsId) return
+    // 写库失败不该影响交互（标签页已经在前端生效了），只记日志
+    SetValue(openedTabsKey(wsId), JSON.stringify(openedSceneIds.value))
+      .catch((e) => logErr('workspace:saveTabs', e))
+  }, 300)
+
+  async function restoreOpenedTabs(wsId: string) {
+    try {
+      const raw = await GetValue(openedTabsKey(wsId))
+      const ids = JSON.parse(String(raw || '[]'))
+      if (!Array.isArray(ids)) return
+      // 只保留当前仍存在的场景：场景可能已被删除，留下点不开的空标签更糟
+      const alive = new Set(scenes.value.map((sc) => sc.id))
+      openedSceneIds.value = ids.filter((x): x is string => typeof x === 'string' && alive.has(x))
+    } catch (e) {
+      logErr('workspace:restoreTabs', e)
+    }
+  }
+
   const workspaces = ref<Workspace[]>([])
   const scenes = ref<Scene[]>([])
   const collections = ref<Collection[]>([])
@@ -66,33 +94,52 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const searchResults = ref<{ scenes: Scene[]; collections: Collection[]; items: CollectionItem[] } | null>(null)
   const searchLoading = ref(false)
 
+  /**
+   * 当前工作空间内的条目搜索。
+   *
+   * 两条来源缺一不可：
+   *   - 内存匹配：覆盖已加载的条目，并且支持拼音（FTS5 只做前缀匹配，不认拼音、不认中文子串）；
+   *   - 后端 FTS：覆盖**没点开过的集合**里的条目——条目是按集合懒加载的，
+   *     只扫内存会让人以为"我明明存过这条"。
+   * 结果按 workspaceId 过滤，避免把别的工作空间的条目混进来。
+   */
+  async function searchItemsEverywhere(q: string, wsId: string): Promise<CollectionItem[]> {
+    const local = items.value.filter((i) => matchesTextOrPinyin([i.name, i.value], q, 'i:' + i.id))
+    if (!wsId) return local
+    try {
+      const remote = (unwrap(await SearchAll(q)) || []) as CollectionItem[]
+      const seen = new Set(local.map((i) => i.id))
+      const extra = remote.filter((i) => i.workspaceId === wsId && !seen.has(i.id))
+      return [...local, ...extra]
+    } catch (e) {
+      // 搜索失败只降级为内存结果，不要弹错打断输入
+      logErr('workspace:searchFts', e)
+      return local
+    }
+  }
+
   // 防抖搜索：用户输入时延迟计算，避免频繁重算
-  const debouncedSearch = debounce((query: string) => {
-    searchLoading.value = true
-    // 使用 setTimeout 让 UI 有机会更新 loading 状态
-    setTimeout(() => {
-      const q = query.trim().toLowerCase()
-      if (!q) {
-        searchResults.value = null
-        searchLoading.value = false
-        return
-      }
-      const matchedScenes: Scene[] = []
-      const matchedCollections: Collection[] = []
-      const matchedItems: CollectionItem[] = []
-      for (const s of scenes.value) {
-        if (matchesTextOrPinyin([s.name], q, 's:' + s.id)) matchedScenes.push(s)
-      }
-      for (const c of collections.value) {
-        if (matchesTextOrPinyin([c.name], q, 'c:' + c.id)) matchedCollections.push(c)
-      }
-      for (const i of items.value) {
-        if (matchesTextOrPinyin([i.name, i.value], q, 'i:' + i.id)) matchedItems.push(i)
-      }
-      searchResults.value = { scenes: matchedScenes, collections: matchedCollections, items: matchedItems }
+  const debouncedSearch = debounce((query: string) => { void runSearch(query) }, 150)
+
+  async function runSearch(query: string) {
+    const q = query.trim().toLowerCase()
+    if (!q) {
+      searchResults.value = null
       searchLoading.value = false
-    }, 50)
-  }, 150)
+      return
+    }
+    searchLoading.value = true
+    try {
+      const matchedScenes = scenes.value.filter((s) => matchesTextOrPinyin([s.name], q, 's:' + s.id))
+      const matchedCollections = collections.value.filter((c) => matchesTextOrPinyin([c.name], q, 'c:' + c.id))
+      const matchedItems = await searchItemsEverywhere(q, activeWorkspaceId.value)
+      // 期间用户又敲了字：丢弃这次的结果，避免旧结果覆盖新查询
+      if (searchQuery.value.trim().toLowerCase() !== q) return
+      searchResults.value = { scenes: matchedScenes, collections: matchedCollections, items: matchedItems }
+    } finally {
+      searchLoading.value = false
+    }
+  }
 
   // 监听搜索查询变化，触发防抖搜索
   watch(searchQuery, (newQuery) => {
@@ -219,6 +266,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     searchQuery.value = ''
     const gen = workspaceGen
     await fetchScenes(id, gen)
+    await restoreOpenedTabs(id)
     try { unwrap(await SetValue('lastWorkspaceId', id)) } catch (e) { logErr('workspace', e) }
     // 只有一个场景时直接选中：否则用户进来看到的是「请先选择一个集合」的空页面，
     // 还得再点一次唯一的那一行才有内容
@@ -250,6 +298,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     searchQuery.value = ''
     if (!openedSceneIds.value.includes(id)) {
       openedSceneIds.value.push(id)
+      saveOpenedTabs()
     }
     const gen = sceneGen
     await fetchCollections(id, gen)
@@ -262,6 +311,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     const idx = openedSceneIds.value.indexOf(id)
     if (idx < 0) return
     openedSceneIds.value.splice(idx, 1)
+    saveOpenedTabs()
     // 如果关闭的是当前激活场景，切换到相邻场景
     if (activeSceneId.value === id) {
       if (openedSceneIds.value.length > 0) {
@@ -284,6 +334,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (idx <= 0) return
     const toRemove = openedSceneIds.value.slice(0, idx)
     openedSceneIds.value.splice(0, idx)
+    saveOpenedTabs()
     // 如果当前激活的场景被关闭了，切换到被右击的场景
     if (toRemove.includes(activeSceneId.value)) {
       await selectScene(id)
@@ -296,6 +347,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     if (idx < 0 || idx >= openedSceneIds.value.length - 1) return
     const toRemove = openedSceneIds.value.slice(idx + 1)
     openedSceneIds.value.splice(idx + 1)
+    saveOpenedTabs()
     // 如果当前激活的场景被关闭了，切换到被右击的场景
     if (toRemove.includes(activeSceneId.value)) {
       await selectScene(id)
@@ -553,6 +605,40 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     unwrap(await OpenAllInCollection(collectionId))
   }
 
+  // ---- 集合的「打开策略」 ----
+  //
+  // collections.open_strategy 一直只在写侧存在（新建/编辑表单能选三档），
+  // 全仓库没有任何一处读它做分支 —— 选什么都不影响行为。这里把它接到
+  // 集合行的「打开」动作上：
+  //   single 单次打开 → 只打开使用次数最高的一条（"我就想开常用的那个"）
+  //   batch  批量打开 → 打开前 N 条（N 有上限，别一次弹十几个窗口）
+  //   all    全部打开 → 打开集合内全部条目（沿用后端批量接口）
+  // 只取 usageCount 最高的场景下，未打开过的集合按 sort 顺序退化，结果可预期。
+  const OPEN_BATCH_LIMIT = 5
+
+  async function openCollectionByStrategy(collection: Collection): Promise<number> {
+    const strategy = collection.openStrategy || 'single'
+    if (strategy === 'all') {
+      await openAllInCollection(collection.id)
+      return -1 // -1 = 全部，调用方据此显示不同文案
+    }
+    // 不动 items.value：那是「当前选中集合」的列表，这里只是取数据
+    const rows = (unwrap<BindingCollectionItem[]>(await ListItems(collection.id)) ?? [])
+      .map((r) => toCamelCase(r) as unknown as CollectionItem)
+    let picks: CollectionItem[]
+    if (strategy === 'batch') {
+      picks = rows.slice(0, OPEN_BATCH_LIMIT)
+    } else {
+      picks = [...rows].sort((a, b) => (b.usageCount ?? 0) - (a.usageCount ?? 0)).slice(0, 1)
+    }
+    let opened = 0
+    for (const it of picks) {
+      await openItem(it) // 单条失败只影响它自己，不阻断其余
+      opened++
+    }
+    return opened
+  }
+
   // ---- 搜索 ----
 
   function setSearch(query: string) {
@@ -581,7 +667,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     reorderWorkspaces,
     updateSceneAction, updateCollectionAction, updateItemAction,
     removeScene, removeCollection, removeItem,
-    openItem, openAllInCollection,
+    openItem, openAllInCollection, openCollectionByStrategy,
     setSearch, clearSearch,
     getDefaultToolForType, getToolsForType,
   }

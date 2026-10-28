@@ -29,9 +29,50 @@ const value = ref('');
 const remark = ref('');
 const toolId = ref('');
 const workingDirectory = ref('');
+// args / color / icon 三列在后端早就有（UpdateItem 白名单已放行，items 表也有），
+// 但编辑器从来不提交它们 —— 命令没法带参数、条目没法标记颜色/自定义图标。
+const args = ref('');
+const color = ref('');
+const icon = ref('');
+// 跨集合移动：collection_id 本来就在更新白名单里，前端一直没有入口
+const collectionId = ref('');
 const nameError = ref(false);
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
+
+// 可移动的目标集合 = 当前场景下的集合（跨场景移动会改变归属场景，语义上不属于"整理"，
+// 留给拖拽；这里只做同场景内的重新归类）
+const collectionOptions = computed(() => store.filteredCollections)
+
+const iconInput = ref<HTMLInputElement | null>(null)
+
+// 自定义图标存 data URL：items.icon 本来就是这个格式（应用/网页图标由后端提取成
+// data URL 写入），复用同一列就不用再加文件管理。超过 ~256KB 的图会明显拖慢列表渲染，
+// 所以挡住。
+const ICON_MAX_BYTES = 256 * 1024
+
+function pickIcon() {
+  iconInput.value?.click()
+}
+
+function onIconChange(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  input.value = '' // 允许重复选择同一个文件
+  if (!file) return
+  if (!file.type.startsWith('image/')) {
+    toast.error(t('itemIconNotImage'))
+    return
+  }
+  if (file.size > ICON_MAX_BYTES) {
+    toast.error(t('itemIconTooLarge'))
+    return
+  }
+  const reader = new FileReader()
+  reader.onload = () => { icon.value = String(reader.result || '') }
+  reader.onerror = () => toast.error(t('itemIconReadFailed'))
+  reader.readAsDataURL(file)
+}
 
 const availableTools = computed<OpenTool[]>(() => store.getToolsForType(type.value))
 
@@ -186,6 +227,11 @@ watch(() => [props.visible, props.item], ([v]) => {
     remark.value = props.item?.remark ?? '';
     toolId.value = props.item?.toolId ?? '';
     workingDirectory.value = props.item?.workingDirectory ?? '';
+    args.value = props.item?.args ?? '';
+    color.value = props.item?.color ?? '';
+    icon.value = props.item?.icon ?? '';
+    // 新建时目标集合就是当前集合；编辑时是它原本所属的集合
+    collectionId.value = props.item?.collectionId ?? store.activeCollectionId;
     nameError.value = false;
     if (!props.item && !toolId.value) {
       const suggested = store.getDefaultToolForType(type.value)
@@ -197,8 +243,17 @@ watch(() => [props.visible, props.item], ([v]) => {
 
 watch(type, (newType) => {
   if (newType === '快速链接' && !value.value.includes('{query}')) {
-    // 自动添加 {query} 占位符示例
-    value.value = 'https://' + value.value + '{query}'
+    // 自动补成「协议 + 域名 + {query}」的示例，但不能无脑拼前缀：
+    // 用户填的常常已经是完整地址（https://a.com/search?q=），再拼一次就变成
+    // https://https://a.com/search?q={query}，点了直接打不开。
+    const v = value.value.trim()
+    if (!v) {
+      value.value = 'https://{query}'
+    } else if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) {
+      value.value = v + '{query}' // 已带协议：只补占位符
+    } else {
+      value.value = 'https://' + v + '{query}' // 裸域名：补协议
+    }
   }
   // 切换类型后，校验当前 toolId 是否仍属于新类型可选工具；不属于则回落默认
   const valid = store.getToolsForType(newType).some(t => t.id === toolId.value)
@@ -215,7 +270,7 @@ function handleSave() {
     return
   }
   nameError.value = false
-  emit('save', {
+  const payload: Partial<CollectionItem> & Record<string, any> = {
     name: trimmed,
     type: type.value,
     value: value.value,
@@ -223,7 +278,15 @@ function handleSave() {
     toolId: toolId.value,
     workingDirectory: workingDirectory.value,
     env: envJSON(),
-  });
+    args: args.value.trim(),
+    color: color.value,
+    icon: icon.value,
+  }
+  // 只有编辑态才可能真的「移动」：新建时集合由 activeCollectionId 决定
+  if (props.item && collectionId.value && collectionId.value !== props.item.collectionId) {
+    payload.collectionId = collectionId.value
+  }
+  emit('save', payload);
 }
 
 function handleCancel() {
@@ -274,6 +337,32 @@ function onKeydown(e: KeyboardEvent) {
                 <option v-for="opt in toolOptions" :key="opt.id" :value="opt.id">{{ opt.name }}</option>
               </select>
             </label>
+            <label class="field">
+              <span class="field-label">{{ t('itemArgs') }}</span>
+              <input v-model="args" type="text" class="field-input" :placeholder="t('itemArgsPlaceholder')" />
+              <p class="field-hint">{{ t('itemArgsHint') }}</p>
+            </label>
+            <label v-if="item && collectionOptions.length > 1" class="field">
+              <span class="field-label">{{ t('itemCollection') }}</span>
+              <select v-model="collectionId" class="field-input">
+                <option v-for="c in collectionOptions" :key="c.id" :value="c.id">{{ c.name }}</option>
+              </select>
+              <p class="field-hint">{{ t('itemMoveHint') }}</p>
+            </label>
+            <div class="field">
+              <span class="field-label">{{ t('itemAppearance') }}</span>
+              <div class="appearance-row">
+                <input v-model="color" type="color" class="color-input" :title="t('itemColor')" />
+                <button v-if="color" type="button" class="link-btn" @click="color = ''">{{ t('clear') }}</button>
+                <span class="appearance-gap"></span>
+                <img v-if="icon" :src="icon" class="icon-preview" alt="" />
+                <button type="button" class="link-btn" @click="pickIcon">
+                  {{ icon ? t('itemIconChange') : t('itemIconPick') }}
+                </button>
+                <button v-if="icon" type="button" class="link-btn" @click="icon = ''">{{ t('clear') }}</button>
+                <input ref="iconInput" type="file" accept="image/*" class="icon-file" @change="onIconChange" />
+              </div>
+            </div>
             <div v-if="projectDir" class="field project-env">
               <div class="project-env-head">
                 <span class="field-label">{{ t('projectEnvTitle') }}</span>
@@ -392,6 +481,21 @@ function onKeydown(e: KeyboardEvent) {
 .field-textarea:focus { border-color: var(--color-accent); }
 .field-error { font-size: 11px; color: var(--color-danger); margin-top: 2px; }
 .field-hint { font-size: 11px; color: var(--color-text-disabled); margin-top: 2px; }
+
+/* 外观行：颜色 + 自定义图标（都是可选，默认不占视觉重量） */
+.appearance-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.color-input {
+  width: 32px; height: 24px; padding: 0; cursor: pointer;
+  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  background: var(--color-bg-tertiary);
+}
+.appearance-gap { flex: 1; }
+.icon-preview {
+  width: 20px; height: 20px; object-fit: contain;
+  border-radius: var(--radius-xs);
+}
+/* 文件选择的原生按钮不显示，靠上面的「选择图标」按钮触发 */
+.icon-file { display: none; }
 
 /* 项目环境：探测到的版本要求 + 全局切换/仅本项目绑定 */
 .project-env {

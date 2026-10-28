@@ -310,6 +310,10 @@ export interface PluginInfo {
   installedAt?: string
   updatedAt?: string
   commands: PluginCommand[]
+  // 权限审计：来自插件 manifest（运行期实际生效的口径）。
+  // 安装期的 permcheck 只在装的那一刻检查一次，装完就无从查看，故随列表一起下发。
+  capabilities?: string[]
+  permissions?: Record<string, unknown>
   // 显式禁用标记：与 status=stopped 区分「用户主动禁用」与「进程被停止/Kill」
   disabled: boolean
 }

@@ -1,8 +1,8 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles } from '@lucide/vue'
+import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown } from '@lucide/vue'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
 import ClipboardAiPanel from './ClipboardAiPanel.vue'
@@ -19,7 +19,9 @@ import {
   ClearClipboardHistory,
   DeleteClipboardEntry,
   UpdateClipboardNote,
+  CountClipboardEntries,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
+import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
@@ -130,8 +132,15 @@ const filteredEntries = computed(() => {
       if (text.toLowerCase().includes(q)) return true
       // 拼音命中：这是「纯过滤」列表（不像命令面板会按分数排序把弱命中压下去），
       // 若用全拼 includes 判定，输入 "de" 会命中几乎所有含「的」的记录，噪音太大。
-      // 故只用首字母前缀规则：输入 hjgl 命中「环境管理」，误报率低。
-      return pinyinOf(text, 'cb:' + e.id).init.startsWith(q)
+      const parts = pinyinOf(text, 'cb:' + e.id)
+      // 1) 首字母前缀：输入 hjgl 命中「环境管理…」开头，最准。
+      if (parts.init.startsWith(q)) return true
+      // 2) 长文本中间命中：一段日志/代码里的「环境管理」在中间时，只比开头永远搜不到。
+      //    但 1~2 个字母在千字文本的首字母串里几乎必然出现（676 种组合 × 上千个位置），
+      //    纯噪音，所以只有 3 个字母以上才放开到任意位置；全拼再多收一位。
+      if (q.length < 3) return false
+      if (parts.init.includes(q)) return true
+      return q.length >= 4 && parts.full.includes(q)
     })
   }
   return list
@@ -165,6 +174,18 @@ const CLIPBOARD_PAGE_SIZE = 20
 const CLIPBOARD_MAX_LOAD = 1000
 const clipboardPage = ref(1)
 
+// 历史总条数（不受 CLIPBOARD_MAX_LOAD 影响）。
+// 标题以前写 entries.length，那只是"已载入多少"：历史有 3 万条时显示 1000，
+// 用户会以为东西被删了。
+const totalCount = ref(0)
+async function loadTotal() {
+  try {
+    totalCount.value = unwrap<number>(await CountClipboardEntries()) ?? 0
+  } catch {
+    totalCount.value = 0 // 计数失败不影响主列表，不弹错
+  }
+}
+
 const displayEntries = computed(() => {
   // 紧凑模式（快捷弹窗）不分页，显示全部
   if (props.compact) return filteredEntries.value
@@ -176,11 +197,20 @@ const totalClipboardPages = computed(() =>
   Math.max(1, Math.ceil(filteredEntries.value.length / CLIPBOARD_PAGE_SIZE))
 )
 
-watch(filteredEntries, () => { clipboardPage.value = 1 })
+// 页码只在**筛选条件变化**时归 1。
+// 绑到 filteredEntries 会让每 30 秒一次的轮询刷新（以及每次复制后的刷新）
+// 把正在看的第 3 页弹回第 1 页——数据本身没变，只是重新取了一遍。
+watch([activeTag, searchQuery, timeFilter], () => { clipboardPage.value = 1 })
+// 但筛选结果变少时页码可能越界（比如删到只剩 1 页），这时要收回到最后一页，
+// 否则会停在一个空白页上，看起来像"东西没了"。
+watch(totalClipboardPages, (n) => {
+  if (clipboardPage.value > n) clipboardPage.value = n
+})
 
 function selectTag(tagId: string) {
   activeTag.value = tagId
-  searchQuery.value = ''
+  // 保留搜索词：以前切一下分类就把刚敲的关键词清了，"先在搜索结果里换个分类"
+  // 这个最自然的动作反而要重打一遍。要清空搜索用搜索框里的 ×。
   selectedIndex.value = 0
 }
 
@@ -260,7 +290,9 @@ async function loadEntries() {
     if (gen !== entriesLoadGen) return // 已有更新的刷新，丢弃过期响应
     // 不再预加载所有图片 — 由 IntersectionObserver 懒加载
     entries.value = r
-     loading.value = false
+    loading.value = false
+    // 删除 / 清空 / 自动过期都会走这里刷新，总数一并跟上
+    void loadTotal()
   } catch (e) {
     if (gen !== entriesLoadGen) return
     const msg = getErrorMessage(e)
@@ -280,6 +312,59 @@ watch(() => {
 }, (nv, ov) => {
   if (nv !== ov) loadEntries()
 })
+
+// ---- 文件 / 图片条目的落盘入口 ----
+// 文件条目原来只能"点一下复制路径"，再自己去资源管理器粘贴定位；
+// 图片条目只能看缩略图，想留一张就得截图重存。这两个动作本该一步到位。
+const revealBusyId = ref('')
+
+async function revealEntry(entry: ClipboardEntry) {
+  // file 条目的 textContent 可能是多行（一次复制多个文件），定位第一个
+  const first = (entry.textContent || '')
+    .split(/\r?\n/)
+    .map((x) => x.trim())
+    .filter(Boolean)[0]
+  if (!first) {
+    toast.error(t('clipboardRevealNoPath'))
+    return
+  }
+  revealBusyId.value = entry.id
+  try {
+    unwrap(await RevealInExplorer(first))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    revealBusyId.value = ''
+  }
+}
+
+async function saveImageAs(entry: ClipboardEntry) {
+  try {
+    let dataUrl = imageCache.value[entry.id]
+    if (!dataUrl) {
+      const b64 = unwrap<string>(await GetClipboardImageBase64(entry.id))
+      dataUrl = 'data:image/png;base64,' + b64
+      cacheImage(entry.id, dataUrl)
+    }
+    // data URL → Blob → 交给浏览器的下载通道（WebView2 会落到「下载」目录）。
+    // 不用后端另开保存对话框：一条链条两个进程，且这条路径失败时无从提示。
+    const blob = await (await fetch(dataUrl)).blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    // createdAt 是毫秒时间戳（不是字符串）：文件名自己拼，避免非法字符
+    const d = new Date(entry.createdAt || Date.now())
+    const p2 = (n: number) => String(n).padStart(2, '0')
+    a.download = `clipboard-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}${p2(d.getSeconds())}.png`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 0)
+    toast.success(t('clipboardImageSaved'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
 
 async function handleCopy(entry: ClipboardEntry) {
   try {
@@ -375,9 +460,12 @@ async function clearClipboard() {
   const ok = await toast?.confirm?.(t('confirmClearClipboard'))
   if (!ok) return
   try {
-    unwrap(await ClearClipboardHistory())
+    // 后端返回 {deleted: n}：之前 unwrap 完直接丢掉，只提示一句「已清空」，
+    // 用户看不出到底删了 0 条还是 3000 条（重复点、或已被过期清理时尤其困惑）。
+    const res = unwrap<{ deleted: number }>(await ClearClipboardHistory())
+    const n = res?.deleted ?? 0
     await loadEntries()
-    if (toast?.success) toast.success(t('clipboardCleared'))
+    if (toast?.success) toast.success(t('clipboardClearedN', { n }))
   } catch (e) {
     if (toast?.error) toast.error(getErrorMessage(e))
   }
@@ -528,14 +616,33 @@ function onPanelKeydown(e: KeyboardEvent) {
   switch (e.key) {
     case 'ArrowDown':
       e.preventDefault()
-      if (selectedIndex.value < list.length - 1) selectedIndex.value++
-      else selectedIndex.value = 0
+      if (selectedIndex.value < list.length - 1) {
+        selectedIndex.value++
+      } else if (!props.compact && clipboardPage.value < totalClipboardPages.value) {
+        // 页尾再按一次 → 翻到下一页并从第一项开始。以前是在本页内绕回第一项，
+        // 有 50 页时想看到第 2 页只能去点分页按钮。
+        clipboardPage.value++
+        selectedIndex.value = 0
+      } else {
+        selectedIndex.value = 0
+      }
       scrollToSelected()
       break
     case 'ArrowUp':
       e.preventDefault()
-      if (selectedIndex.value > 0) selectedIndex.value--
-      else selectedIndex.value = list.length - 1
+      if (selectedIndex.value > 0) {
+        selectedIndex.value--
+      } else if (!props.compact && clipboardPage.value > 1) {
+        clipboardPage.value--
+        // 落到上一页的最后一项（翻页后 displayEntries 才是新页，用 nextTick 取长度）
+        nextTick(() => {
+          selectedIndex.value = Math.max(0, displayEntries.value.length - 1)
+          scrollToSelected()
+        })
+        break
+      } else {
+        selectedIndex.value = list.length - 1
+      }
       scrollToSelected()
       break
     case 'Enter':
@@ -592,7 +699,11 @@ onUnmounted(() => {
       <div class="header-left">
         <ClipboardList :size="18" />
         <span class="header-title">{{ t('clipboardHistoryTitle') }}</span>
-        <span v-if="entries.length" class="header-count">{{ entries.length }} {{ t('count') }}</span>
+        <!-- 已载入 / 总数：单写 entries.length 会被误读成"历史就这么多" -->
+        <span v-if="totalCount || entries.length" class="header-count"
+              :title="t('clipboardCountTip', { loaded: entries.length, total: totalCount || entries.length })">
+          {{ totalCount || entries.length }}{{ entries.length < totalCount ? ' · ' + entries.length : '' }} {{ t('count') }}
+        </span>
       </div>
       <div class="header-search">
         <Search :size="14" class="search-icon" />
@@ -681,6 +792,10 @@ onUnmounted(() => {
             <div class="file-entry">
               <FileIcon :size="16" class="file-icon" />
               <div class="file-paths">{{ entry.textContent }}</div>
+              <button class="file-reveal" :disabled="revealBusyId === entry.id"
+                      :title="t('clipboardReveal')" @click.stop="revealEntry(entry)">
+                <FolderSearch :size="13" />
+              </button>
             </div>
           </template>
           <!-- 文本条目 -->
@@ -702,6 +817,14 @@ onUnmounted(() => {
             <span>{{ entry.note }}</span>
           </div>
         </div>
+        <button
+          v-if="entry.contentType === 'image'"
+          class="note-btn"
+          :title="t('clipboardSaveImage')"
+          @click.stop="saveImageAs(entry)"
+        >
+          <ImageDown :size="13" />
+        </button>
         <div class="save-wrap">
           <button
             v-if="entry.contentType === 'text'"
@@ -743,7 +866,6 @@ onUnmounted(() => {
           <Star :size="13" />
         </button>
         <button
-          v-if="entry.isPinned === 1"
           class="note-btn"
           :class="{ 'note-editing': noteEditingId === entry.id }"
           :title="t('clipboardEditNote')"
@@ -1085,9 +1207,21 @@ onUnmounted(() => {
 }
 .file-icon { flex-shrink: 0; margin-top: 2px; color: var(--color-accent); }
 .file-paths {
+  flex: 1; min-width: 0;
   font-size: 12px; color: var(--color-text-secondary); line-height: 1.5;
   word-break: break-all; white-space: pre-wrap;
 }
+/* 在资源管理器定位：贴在路径右侧，hover 条目才显出来，不抢视觉 */
+.file-reveal {
+  flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0;
+  border: none; border-radius: var(--radius-sm); background: none;
+  color: var(--color-text-disabled); cursor: pointer; opacity: 0;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast);
+}
+.clipboard-item:hover .file-reveal { opacity: 1; }
+.file-reveal:hover { color: var(--color-accent); background: var(--color-accent-bg); }
+.file-reveal:disabled { opacity: 0.4; cursor: default; }
 
 .clipboard-empty {
   display: flex; flex-direction: column; align-items: center;
