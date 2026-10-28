@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -215,6 +216,64 @@ func (d *Database) DeleteTodo(id string) error {
 	defer d.mu.Unlock()
 	_, err := d.conn.Exec("DELETE FROM todos WHERE id = ? OR parent_id = ?", id, id)
 	return err
+}
+
+// SearchTodos 按标题 / 备注 / 标签模糊检索待办（命令面板用）。
+//
+// 只回未完成的顶层任务：面板里的「待办」是"接下来要做什么"的入口，
+// 已完成的条目和子任务混进来只会把真要找的那条挤下去。
+// 排序列故意不含未完成的重排逻辑——沿用 ListTodos 的 sort/created_at 顺序即可，
+// 面板另有 frecency 加权。
+func (d *Database) SearchTodos(q string, limit int) ([]Todo, error) {
+	q = strings.TrimSpace(q)
+	if q == "" {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	pattern := "%" + escapeLike(q) + "%"
+	rows, err := d.conn.Query(
+		`SELECT id, title, done, priority, due_date, note, start_time, end_time, reminder_time, reminder_sent, tags, recurrence, parent_id, status, sort, created_at, completed_at
+		 FROM todos
+		 WHERE parent_id = '' AND status <> 'done'
+		   AND (title LIKE ? ESCAPE '\' OR note LIKE ? ESCAPE '\' OR tags LIKE ? ESCAPE '\')
+		 ORDER BY sort ASC, created_at DESC
+		 LIMIT ?`,
+		pattern, pattern, pattern, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanTodos(rows)
+}
+
+// scanTodos 把查询结果扫成 []Todo（ListTodos 之后新增的查询共用）。
+func scanTodos(rows *sql.Rows) ([]Todo, error) {
+	var todos []Todo
+	for rows.Next() {
+		var t Todo
+		var done, reminderSent int
+		if err := rows.Scan(&t.ID, &t.Title, &done, &t.Priority, &t.DueDate, &t.Note,
+			&t.StartTime, &t.EndTime, &t.ReminderTime, &reminderSent, &t.Tags, &t.Recurrence, &t.ParentID, &t.Status, &t.Sort, &t.CreatedAt, &t.CompletedAt); err != nil {
+			return nil, err
+		}
+		t.Done = t.Status == "done" // 由 status 派生，避免与 done 列口径不一致
+		t.ReminderSent = reminderSent != 0
+		todos = append(todos, t)
+	}
+	return todos, rows.Err()
+}
+
+// escapeLike 转义 LIKE 通配符：用户搜字面下划线/百分号时不应退化成"匹配任意"。
+// SQLite 无默认转义符，必须在每个 LIKE 后写 ESCAPE '\' 才生效。
+func escapeLike(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `%`, `\%`)
+	s = strings.ReplaceAll(s, `_`, `\_`)
+	return s
 }
 
 // ClearCompletedTodos 清除所有已完成项

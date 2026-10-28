@@ -83,7 +83,17 @@ func camelToSnake(s string) string {
 }
 
 // structToMap 将结构体转为 map（供 BulkInsert 使用）
-// 使用 reflect 按 json tag 取 key，再转为蛇形 → 匹配数据库列名
+// 使用 reflect 按 json tag 取 key，再转为蛇形 → 匹配数据库列名。
+//
+// ⚠️ 零值字段约束（P12）：本函数会把**每一个导出字段**都转成列，包括零值字段
+// （0 / "" / false / nil）。BulkInsert 在写入前会对每个列做 validColumns 白名单校验
+// （见 db.go）。因此：
+//  1. 给结构体新增字段时，必须同步在 validColumns 里补上对应列名，否则该表**所有**
+//     插入都会报「非法列名」——即便这个字段是零值、你本不打算写它；
+//  2. 只在「确实需要落库」的结构体上挂 json tag，无关字段不要暴露成导出字段；
+//  3. 不要指望零值会被跳过：这里没有 omitempty 语义，零值照样生成列。
+//
+// 守则是「只填必要字段 + 同步补白名单」，而不是一次大 INSERT 把所有字段都塞进去。
 func structToMap(v interface{}) map[string]interface{} {
 	result := make(map[string]interface{})
 	rv := reflect.ValueOf(v)

@@ -54,7 +54,11 @@ var validTables = map[string]bool{
 	"ssh_known_hosts":   true,
 }
 
-// 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）
+// 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）。
+//
+// ⚠️ 全局共用（P12）：白名单不是按表分的。structToMap 会把结构体的每个导出字段
+// 都转成列，BulkInsert 写入前逐一校验此表。漏掉任何一个被用到的列 → 该表所有插入
+// 报「非法列名」。新增结构体字段 / 新增表列时，务必来这里同步补白名单。
 var validColumns = map[string]bool{
 	"id": true, "name": true, "type": true, "value": true,
 	"workspace_id": true, "scene_id": true, "collection_id": true,
@@ -74,7 +78,7 @@ var validColumns = map[string]bool{
 	"installed": true, "enabled": true,
 	"kind": true, "label": true, "note": true, "payload": true, "size": true,
 	"key":  true,
-	"text": true, "content_type": true, "text_content": true, "image_path": true,
+	"text": true, "content_type": true, "text_type": true, "text_content": true, "image_path": true,
 	"source_app":        true,
 	"title":             true,
 	"summary":           true,
@@ -104,6 +108,10 @@ var validColumns = map[string]bool{
 	"schedule_kind": true, "run_at": true, "interval_sec": true, "time_of_day": true,
 	"weekdays": true, "notify": true, "next_run": true,
 	"last_run": true, "last_status": true, "last_result": true,
+	// "action" 已在 clipboard_rules 处声明（白名单全局共用，重复声明无意义）
+	// target：回收站恢复定时任务必需——整行 21 个列都会被转成插入列，漏一个就报
+	// 「非法列名」，而且报错发生在实际删 Bespoke 定时任务之后的恢复环节，很难联想到这里。
+	"target": true,
 	// schedule 执行历史表列（run_at/status/created_ts/duration_ms 已在上文声明）
 	"task_id": true, "task_name": true,
 	// 监控表列
@@ -130,6 +138,8 @@ var validColumns = map[string]bool{
 	// clipboard_rules 剪贴板自动规则列（priority 已在上文 todos 处声明）
 	"match_kind": true, "match_expr": true,
 	"action": true, "action_arg": true, "write_back": true, "updated_ts": true,
+	// AI 用量统计列（model 是多张表都可能用到的通用列名，白名单全局共用故只声明一次）
+	"model": true, "request_count": true, "cached_tokens": true,
 }
 
 // validateTable 检查表名是否在白名单中

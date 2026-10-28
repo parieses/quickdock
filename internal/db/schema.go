@@ -149,7 +149,8 @@ var baseTables = []string{
 		is_pinned INTEGER DEFAULT 0,
 		copy_count INTEGER DEFAULT 0,
 		note TEXT DEFAULT '',
-		created_at INTEGER NOT NULL
+		created_at INTEGER NOT NULL,
+		text_type TEXT DEFAULT ''
 	)`,
 
 	// 剪贴板自动规则：复制到文本后按优先级做一次转换。
@@ -335,6 +336,27 @@ var baseTables = []string{
 		conv_id TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
 		role TEXT NOT NULL,
 		content TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		prompt_tokens INTEGER NOT NULL DEFAULT 0,
+		completion_tokens INTEGER NOT NULL DEFAULT 0,
+		cached_tokens INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`,
+
+	// AI 用量明细：**一次模型调用一行**。
+	//
+	// 为什么不复用 ai_conversations 上的累加列：那是 upsert 口径，只能回答「这个会话一共
+	// 用了多少」，答不了「今天花了多少钱」「哪个模型最费」。日期与模型必须跟这一次调用
+	// 绑在一起才有意义，而累加列每次都被覆盖成最新值。
+	// 删会话时明细**不清**（conv_id 不建外键约束）：历史花费不该因为清理对话而消失。
+	`CREATE TABLE IF NOT EXISTS ai_usage (
+		id TEXT PRIMARY KEY,
+		conv_id TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		kind TEXT NOT NULL DEFAULT 'chat',
+		prompt_tokens INTEGER NOT NULL DEFAULT 0,
+		completion_tokens INTEGER NOT NULL DEFAULT 0,
+		cached_tokens INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL
 	)`,
 
@@ -484,6 +506,7 @@ func (d *Database) migrate() error {
 		{"clipboard_entries", "copy_count", "INTEGER DEFAULT 0"},
 		{"clipboard_entries", "image_hash", "TEXT"},
 		{"clipboard_entries", "note", "TEXT DEFAULT ''"},
+		{"clipboard_entries", "text_type", "TEXT DEFAULT ''"},
 		{"plugins", "installed_at", "TEXT NOT NULL DEFAULT ''"},
 		{"plugins", "updated_at", "TEXT NOT NULL DEFAULT ''"},
 		{"plugins", "category", "TEXT DEFAULT ''"},
@@ -529,6 +552,18 @@ func (d *Database) migrate() error {
 		// ai_conversations: token 用量统计
 		{"ai_conversations", "prompt_tokens", "INTEGER DEFAULT 0"},
 		{"ai_conversations", "completion_tokens", "INTEGER DEFAULT 0"},
+		// ai_conversations: 用量统计按模型拆分所需（model=本次使用的模型名，
+		// request_count=该会话累计问答次数 —— token 是累加的，光靠 SUM 推不出请求数）
+		{"ai_conversations", "model", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_conversations", "request_count", "INTEGER NOT NULL DEFAULT 0"},
+		// ai_usage: 输入中命中前缀缓存的部分（不含独立单价就是算不准钱的根因）
+		{"ai_usage", "cached_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		// ai_messages: 单条回复自己那一次调用的用量，用于「回答下方那一行小字」
+		// （原实现只有前端内存里的 statMap，刷新或换会话就看不到了）
+		{"ai_messages", "model", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_messages", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_messages", "completion_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		{"ai_messages", "cached_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		// notes 笔记树：新增树形/标题/标签字段
 		{"notes", "name", "TEXT DEFAULT ''"},
 		{"notes", "parent_id", "TEXT DEFAULT ''"},
@@ -583,6 +618,7 @@ func (d *Database) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_monitor_logs_mid_ts ON monitor_logs(monitor_id, checked_ts)`,
 		`CREATE INDEX IF NOT EXISTS idx_plugin_exec_logs_ts ON plugin_exec_logs(executed_ts)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_ai_usage_at ON ai_usage(created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_parent ON ssh_hosts(parent_id, sort)`,
 		`CREATE INDEX IF NOT EXISTS idx_activity_created_ts ON activity(created_ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_schedule_runs_task_ts ON schedule_runs(task_id, created_ts DESC)`,
@@ -591,6 +627,22 @@ func (d *Database) migrate() error {
 		if _, err := d.conn.Exec(sql); err != nil {
 			return fmt.Errorf("创建索引失败: %w", err)
 		}
+	}
+
+	// 数据迁移：AI 用量明细表刚建立时，把老版本累加在会话上的 token 折成一条历史记录。
+	//
+	// 老数据只有「会话累计」，没有逐次明细，所以一条会话最多折一行、日期取会话最后活跃日、
+	// 模型取该会话记下的最后一个 —— 只能保证「总额不丢」，无法还原真实分布。
+	// 幂等条件：该会话在 ai_usage 里没有任何行。新版本每次问答都会同时写两边，
+	// 所以有明细的会话不会被重复折算。
+	if _, err := d.conn.Exec(`
+		INSERT INTO ai_usage (id, conv_id, model, kind, prompt_tokens, completion_tokens, created_at)
+		SELECT c.id || '-legacy', c.id, COALESCE(c.model, ''), 'legacy',
+		       COALESCE(c.prompt_tokens, 0), COALESCE(c.completion_tokens, 0), c.updated_at
+		FROM ai_conversations c
+		WHERE (COALESCE(c.prompt_tokens, 0) > 0 OR COALESCE(c.completion_tokens, 0) > 0)
+		  AND NOT EXISTS (SELECT 1 FROM ai_usage u WHERE u.conv_id = c.id)`); err != nil {
+		return fmt.Errorf("折算历史 AI 用量失败: %w", err)
 	}
 
 	// 数据迁移：notes 用 keyword 回填 name（幂等；旧 snippets 表已重命名为 notes）
@@ -638,6 +690,12 @@ func (d *Database) migrate() error {
 		time.Now().UnixMilli(),
 	); err != nil {
 		return fmt.Errorf("回填 clipboard_entries.created_at 失败: %w", err)
+	}
+
+	// 数据迁移：为存量文本条目补齐 text_type 智能分类（入库分类的前置补偿）。
+	// 新条目在 InsertClipboardEntry 时已写入；这里只补老数据，幂等。
+	if err := d.backfillClipboardTextType(); err != nil {
+		return fmt.Errorf("回填 clipboard_entries.text_type 失败: %w", err)
 	}
 
 	return nil

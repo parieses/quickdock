@@ -149,8 +149,38 @@ func (d *Database) UpdateScheduledTask(t *ScheduledTask) error {
 	return err
 }
 
-// DeleteScheduledTask 删除
+// DeleteScheduledTask 硬删除（不进回收站）。
+// 只给系统自动清理路径用：待办的重复配置被取消 / 待办被删时连带删掉它派生的
+// recur-<id> 记录。这类删除用户没有主动发出，进回收站只会在列表里凭空多出一条。
 func (d *Database) DeleteScheduledTask(id string) error {
+	return d.DeleteWhere("scheduled_tasks", "id = ?", id)
+}
+
+// DeleteScheduledTaskToRecycle 用户主动删除定时任务：先拍墓碑再真删。
+//
+// 定时任务和项目/笔记一样是配了一堆字段的心血（命令行、HTTP 请求体、周期），
+// 误删要从零重配。走同一套 tombstone 机制：删除前把整行拍进 payload，
+// 「设置 → 历史 → 回收站」里一键恢复。
+//
+// 执行历史（schedule_runs）不入墓碑：它是任务的产出日志而非配置本身，
+// 且可能动辄上千行；任务回来后历史为空是可接受的代价。
+//
+// 与硬删除分成两个方法而不是加 bool 开关：开关会让每个调用方都得先自问
+// 「我这次要不要留后路」，而这恰好是写错了一时半会发现不了的那类参数。
+func (d *Database) DeleteScheduledTaskToRecycle(id string) error {
+	d.mu.RLock()
+	rows, err := captureRows(d.conn, "scheduled_tasks", "id = ?", id)
+	d.mu.RUnlock()
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 {
+		return d.DeleteWhere("scheduled_tasks", "id = ?", id)
+	}
+	if err := d.AddTombstone("schedules", id, rowLabel(rows[0]),
+		map[string][]map[string]interface{}{"scheduled_tasks": rows}); err != nil {
+		return err
+	}
 	return d.DeleteWhere("scheduled_tasks", "id = ?", id)
 }
 
