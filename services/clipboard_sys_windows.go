@@ -68,8 +68,9 @@ func (a *AppService) captureClipboard() {
 		// 所有程序都会返回 ERROR_ACCESS_DENIED。累计到一定次数后升级为 E 级，
 		// 让用户/排查者能立刻分辨「是外部占用」还是「本程序坏了」。
 		if n := clipboardOpenFailStreak.Add(1); n == 10 || n%100 == 0 {
-			logger.E("QuickDock: 剪贴板已连续 %d 次无法打开：被其他进程长期占用或锁死。"+
-				"此时系统里所有程序的「复制」都会失败，剪贴板历史也会停止更新（重启占用者即可恢复）", n)
+			logger.E("QuickDock: 剪贴板已连续 %d 次无法打开，占用者：%s。"+
+				"此时系统里所有程序的「复制」都会失败，剪贴板历史也会停止更新（重启占用者即可恢复）",
+				n, clipboardHolderDesc())
 		}
 		return
 	}

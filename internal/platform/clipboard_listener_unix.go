@@ -28,3 +28,6 @@ func ClipboardOwnerResponsive(timeoutMs uint32) bool { return true }
 
 // ClipboardProbe 非 Windows 平台没有可探测的独占剪贴板，恒为可用。
 func ClipboardProbe() bool { return true }
+
+// ClipboardHolderInfo 非 Windows 平台没有「打开锁」，也就不存在可指名的持有者。
+func ClipboardHolderInfo() string { return "" }

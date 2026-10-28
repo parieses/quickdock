@@ -36,6 +36,25 @@ func (a *ClipboardService) ListClipboardEntries(limit int) *services.ApiResult {
 	return services.Wrap(data, err)
 }
 
+// ListClipboardEntriesByType 按类型过滤列出历史（content_type 已在表内，无需新增字段）。
+func (a *ClipboardService) ListClipboardEntriesByType(limit int, contentType string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	data, err := a.App.DB.ListClipboardEntriesByType(limit, contentType)
+	return services.Wrap(data, err)
+}
+
+// ListClipboardEntriesBySmartType 按文本智能分类（url/email/json/code/phone）过滤列出历史。
+// 对应前端的智能分类标签：text_type 在入库时已算好，这里直接下推 SQL，既快又覆盖全量历史。
+func (a *ClipboardService) ListClipboardEntriesBySmartType(limit int, smartType string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	data, err := a.App.DB.ListClipboardEntriesBySmartType(limit, smartType)
+	return services.Wrap(data, err)
+}
+
 func (a *ClipboardService) InsertClipboardEntry(text, sourceApp string) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r

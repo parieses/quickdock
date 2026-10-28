@@ -97,6 +97,16 @@ var (
 	clipboardMissStreak  atomic.Int64
 )
 
+// clipboardHolderDesc 返回「当前锁住剪贴板的进程」的可读描述，查不到时说清原因。
+//
+// 只在 OpenClipboard 已经失败之后调用：持有锁时查询，报的是本进程自己。
+func clipboardHolderDesc() string {
+	if h := platform.ClipboardHolderInfo(); h != "" {
+		return h
+	}
+	return "无法定位（持有者未关联窗口，或以 NULL 句柄打开）"
+}
+
 // startClipboardWorker 启动剪贴板捕获协程（ServiceStartup 调用，随 ClipboardCtx 退出）。
 //
 // 变更信号（a.clipboardWake）承载的是「状态」而不是「事件」：无论期间来了多少次变更，
@@ -163,9 +173,11 @@ func (a *AppService) startClipboardWorker(ctx context.Context) {
 				}
 				fails++
 				if fails == clipboardProbeWarnAfter || fails%10 == 0 {
-					logger.E("QuickDock: 剪贴板探测失败 %d 次（每次间隔 %v）：正被其他进程锁死/占用。"+
+					// 点名占用者。必须在探测**失败之后**才查——本进程一旦成功打开
+					// 剪贴板，GetOpenClipboardWindow 报的就是本进程自己。
+					logger.E("QuickDock: 剪贴板探测失败 %d 次（每次间隔 %v），占用者：%s。"+
 						"此时系统内所有程序都无法复制，本程序的剪贴板历史也不会更新——重启占用者或注销即可恢复",
-						fails, clipboardProbeInterval)
+						fails, clipboardProbeInterval, clipboardHolderDesc())
 				}
 			}
 		}

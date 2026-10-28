@@ -8,6 +8,8 @@ import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
 import ClipboardAiPanel from './ClipboardAiPanel.vue'
 import {
   ListClipboardEntries,
+  ListClipboardEntriesByType,
+  ListClipboardEntriesBySmartType,
   CopyClipboardEntry,
   PasteClipboardEntry,
   GetClipboardImageBase64,
@@ -23,6 +25,7 @@ import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { useAIAvailability } from '../composables/useAIAvailability'
 import { pinyinOf } from '../utils/pinyin'
+import { filterByTag, queryPushForTag, tagPushSignature } from '../utils/clipboardFilter'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -45,6 +48,7 @@ interface ClipboardEntry {
   copyCount: number
   note: string
   createdAt: number
+  textType?: string
 }
 
 const entries = ref<ClipboardEntry[]>([])
@@ -74,34 +78,28 @@ function cacheImage(id: string, dataUri: string) {
 }
 
 // ---- 智能分类标签 ----
-interface SmartTag {
-  id: string
-  label: string
-  icon: any
-  match: (entry: ClipboardEntry) => boolean
-}
-
-// 共享：检测文本基础类型（标签栏筛选与片段自动分类复用同一套正则）
-type DetectedType = 'email' | 'url' | 'phone' | 'json' | 'code' | null
-function detectType(text: string): DetectedType {
-  const trimmed = text.trim()
-  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return 'email'
-  if (/^https?:\/\/[^\s]+$/.test(trimmed)) return 'url'
-  if (/^1[3-9]\d{9}$/.test(trimmed)) return 'phone'
-  if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && (trimmed.endsWith('}') || trimmed.endsWith(']'))) return 'json'
-  if (trimmed.includes('\n') || /^(function|const|let|var|import|export|class|def|#include|public|private)\b/.test(trimmed)) return 'code'
-  return null
-}
-
-const tags = computed<SmartTag[]>(() => [
-  { id: 'all', label: t('tagAll'), icon: Tag, match: () => true },
-  { id: 'favorite', label: t('tagFavorite'), icon: Star, match: (e) => e.isPinned === 1 },
-  { id: 'url', label: t('tagUrl'), icon: Globe, match: (e) => detectType(e.textContent || '') === 'url' },
-  { id: 'email', label: t('tagEmail'), icon: Mail, match: (e) => detectType(e.textContent || '') === 'email' },
-  { id: 'json', label: t('tagJson'), icon: Braces, match: (e) => detectType(e.textContent || '') === 'json' },
-  { id: 'code', label: t('tagCode'), icon: Code, match: (e) => detectType(e.textContent || '') === 'code' },
-  { id: 'phone', label: t('tagPhone'), icon: Phone, match: (e) => detectType(e.textContent || '') === 'phone' },
+// 标签只需 id/label/icon：真正的匹配逻辑全部下沉到 utils/clipboardFilter.ts
+// （filterByTag 按 tagId 判定，且智能分类已下推到 SQL 的 text_type 列）。
+// 这里不再保留每标签的 match 回调——它和 filterByTag 是两套判定，容易再次分叉。
+const tags = computed(() => [
+  { id: 'all', label: t('tagAll'), icon: Tag },
+  { id: 'favorite', label: t('tagFavorite'), icon: Star },
+  // 图片 / 文件是 content_type 已有的两类，单独成标签直接下推到 SQL 过滤
+  // （前端不再把整段历史拉回再筛）。
+  { id: 'image', label: t('tagImage'), icon: ImageIcon },
+  { id: 'file', label: t('tagFile'), icon: FileIcon },
+  // 文本智能分类：入库时已按正则算好 text_type，筛选阶段下推到 SQL，
+  // 既快又覆盖全量历史（不再受「只载入前 N 条」限制）。
+  { id: 'url', label: t('tagUrl'), icon: Globe },
+  { id: 'email', label: t('tagEmail'), icon: Mail },
+  { id: 'json', label: t('tagJson'), icon: Braces },
+  { id: 'code', label: t('tagCode'), icon: Code },
+  { id: 'phone', label: t('tagPhone'), icon: Phone },
 ])
+
+// 需要下推到 SQL 的类型标签与智能分类标签的判定，见 utils/clipboardFilter.ts。
+// （image/file 不是 text 的子类 —— 曾经统一套了 text 前置条件，
+//   导致点「图片」标签永远筛不出任何条目；智能分类下推的是 text_type 而非 content_type。）
 
 const filteredEntries = computed(() => {
   let list = entries.value
@@ -119,14 +117,10 @@ const filteredEntries = computed(() => {
     const cutoff = tf === 'today' ? startOfToday : tf === 'week' ? startOfWeek : startOfToday - 29 * 86400000
     list = list.filter(e => e.createdAt >= cutoff)
   }
-  // 按标签筛选
+  // 按标签筛选（filterByTag 内部按 tagId 判定；智能分类已下推到 SQL，这里只兜底校验）
   const tag = tags.value.find(t => t.id === activeTag.value)
   if (tag && tag.id !== 'all') {
-    if (tag.id === 'favorite') {
-      list = list.filter(e => e.isPinned === 1)
-    } else {
-      list = list.filter(e => e.contentType === 'text' && tag.match(e))
-    }
+    list = filterByTag(list, tag.id)
   }
   // 按搜索词筛选
   const q = searchQuery.value.toLowerCase().trim()
@@ -165,6 +159,10 @@ function highlight(text: string, query: string): { text: string; hit: boolean }[
 
 // ---- 剪贴板分页 ----
 const CLIPBOARD_PAGE_SIZE = 20
+// 全量载入上限：非 compact 模式不再拉整表（limit=0 会触发后端无上限分支，
+// 历史量大时整段读内存）。image/file 等类型标签走 SQL 下推（见 queryPushForTag），
+// 不受这个上限影响。
+const CLIPBOARD_MAX_LOAD = 1000
 const clipboardPage = ref(1)
 
 const displayEntries = computed(() => {
@@ -243,8 +241,22 @@ let entriesLoadGen = 0
 async function loadEntries() {
   const gen = ++entriesLoadGen
   try {
-    const limit = props.compact ? 300 : 0
-    const r = unwrap(await ListClipboardEntries(limit)) || []
+    const limit = props.compact ? 300 : CLIPBOARD_MAX_LOAD
+    // 按当前标签把类型过滤下推到 SQL：
+    //  - image/file → content_type 整类（ListClipboardEntriesByType）
+    //  - 智能分类（url/email/json/code/phone）→ text_type 列（ListClipboardEntriesBySmartType，
+    //    content_type 固定为 text），同样在库内过滤，既快又覆盖全量历史。
+    // 这样即使目标条目排在「最近 1000 条」之外，对应标签也能查到。
+    const push = queryPushForTag(activeTag.value)
+    let r: any
+    if (push.push === 'contentType') {
+      r = await ListClipboardEntriesByType(limit, push.value)
+    } else if (push.push === 'smartType') {
+      r = await ListClipboardEntriesBySmartType(limit, push.value)
+    } else {
+      r = await ListClipboardEntries(limit)
+    }
+    r = unwrap(r) || []
     if (gen !== entriesLoadGen) return // 已有更新的刷新，丢弃过期响应
     // 不再预加载所有图片 — 由 IntersectionObserver 懒加载
     entries.value = r
@@ -258,6 +270,16 @@ async function loadEntries() {
     }
   }
 }
+
+// 标签切换后若下推方式变了，必须重新查库（已载入的集合不再是所需的那一类）。
+// 用「完整下推签名」（push 类型 + 值）做比较：智能分类之间互切（url↔email）虽然都下推
+// smartType，但 text_type 值不同 → SQL 查询不同 → 必须重查；而 all↔favorite 都下推 none，
+// 集合一致，不重查。
+watch(() => {
+  return tagPushSignature(queryPushForTag(activeTag.value))
+}, (nv, ov) => {
+  if (nv !== ov) loadEntries()
+})
 
 async function handleCopy(entry: ClipboardEntry) {
   try {

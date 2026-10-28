@@ -156,6 +156,74 @@ func ClipboardProbe() bool {
 	return true
 }
 
+// 剪贴板「打开锁」持有者查询所需的 Win32 入口（w32 包未提供）。
+var (
+	procGetOpenClipboardWindow = modUser32.NewProc("GetOpenClipboardWindow")
+	procGetClassNameW          = modUser32.NewProc("GetClassNameW")
+)
+
+// ClipboardHolderInfo 描述当前**锁住剪贴板**的进程，供探测失败的日志直接指名占用者。
+//
+// 【能查到什么】
+// GetOpenClipboardWindow 返回持有剪贴板打开锁的窗口，再经 GetWindowThreadProcessId
+// 得到 PID、processNameByPID 得到进程名——绝大多数程序（浏览器、Office、网盘客户端）
+// 都是用自己的窗口打开剪贴板的，这条链路能直接给出进程名与窗口标题。
+//
+// 【查不到什么】
+// 以 OpenClipboard(NULL) 打开的持有者不关联任何窗口，GetOpenClipboardWindow 返回 0，
+// 本函数返回空串。Windows 没有「列出谁打开了剪贴板」的反向查询 API，剪贴板也不是内核
+// 句柄对象（Process Explorer 之类的句柄搜索同样找不到），这种情况只能从现象侧排查。
+//
+// 必须在 OpenClipboard 失败**之后**调用：本进程一旦成功打开，查到的就是自己。
+// 另注意与 GetClipboardOwner 区分——后者是「剪贴板内容的所有者」，正常状态也非 0，
+// 拿它当占用者会一直误报（实测常见值是浏览器的消息窗口）。
+func ClipboardHolderInfo() string {
+	hwnd, _, _ := procGetOpenClipboardWindow.Call()
+	if hwnd == 0 {
+		return ""
+	}
+	var pid uint32
+	modUser32.NewProc("GetWindowThreadProcessId").Call(hwnd, uintptr(unsafe.Pointer(&pid)))
+	if pid == 0 {
+		return ""
+	}
+	// 持有者是自己：临界区没能正常 Close（跨线程，或卡在 GetClipboardData 里）。
+	// 这和「别的程序占着」是两回事——用户该做的是重启 QuickDock，不是去找别的程序。
+	if int(pid) == os.Getpid() {
+		return fmt.Sprintf("本程序自身（pid=%d，剪贴板临界区未正常结束，重启 QuickDock 即可恢复）", pid)
+	}
+	name, err := processNameByPID(pid)
+	if err != nil || name == "" {
+		name = "未知进程名"
+	}
+	detail := fmt.Sprintf("pid=%d %s", pid, name)
+	if cls := windowClassName(hwnd); cls != "" {
+		detail += "，窗口类 " + cls
+	}
+	if title := w32.GetWindowText(w32.HWND(hwnd)); title != "" {
+		detail += fmt.Sprintf("，窗口标题「%s」", clipRunes(title, 60))
+	}
+	return detail
+}
+
+// windowClassName 取窗口类名（诊断用，失败返回空串）。
+func windowClassName(hwnd uintptr) string {
+	var buf [128]uint16
+	n, _, _ := procGetClassNameW.Call(hwnd, uintptr(unsafe.Pointer(&buf[0])), uintptr(len(buf)))
+	if n == 0 {
+		return ""
+	}
+	return string(utf16.Decode(buf[:n]))
+}
+
+// clipRunes 按 rune 截断，避免超长窗口标题把日志撑爆。
+func clipRunes(s string, n int) string {
+	if r := []rune(s); len(r) > n {
+		return string(r[:n]) + "…"
+	}
+	return s
+}
+
 // allocGlobal 分配 GMEM_MOVEABLE|GMEM_ZEROINIT 全局内存并写入 data。
 //
 // 返回句柄的内存所有权归调用方：SetClipboardData 成功后所有权移交系统，
