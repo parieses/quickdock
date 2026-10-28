@@ -84,7 +84,7 @@
       </a>
 <a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
 </div>
-<p class="hero-meta">v0.0.29 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
+<p class="hero-meta">v0.0.30 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
 <figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
 <div class="stats reveal">
 <div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
@@ -95,23 +95,24 @@
 </div>
 </section>
 <hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.29) ============================ -->
+<!-- ============================ WHAT'S NEW (v0.0.30) ============================ -->
 <section id="whatsnew">
 <div class="wrap">
 <div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.29</span>
+<span class="eyebrow">v0.0.30</span>
 <h2>这次更新了什么</h2>
-<p>v0.0.29 前半程做了两件最影响日常手感的事：删错了能找回来，以及整个界面重排了一遍。删除的项目 / 集合 / 场景 / 笔记 / 工作空间现在统一进「设置 → 回收站」，随时恢复；界面把散在各处的页头、按钮、面板头收敛成同一套。后半程补上四项每天都用得上的能力：通知中心把监控、定时任务、AI 的「办完了」收进一个铃铛；日志能 <code>tail -f</code> 盯住正在被写入的文件；剪贴板可以按规则自动清洗复制进来的内容；热键记不住时有备忘单。顺手把设置从 14 页合并成 11 页。</p>
+<p>v0.0.30 收拾的是三件"心里没底"的事：<b style="color:var(--text-1);font-weight:510">数据存在哪、AI 花了多少、误删还能不能找回来</b>。整个数据目录现在能打包搬到别的盘 —— 连同装好的运行时和环境变量一起，重启就生效；新装时也能直接挑目录。AI 助手多了用量统计，近 7 天 / 30 天花了多少、哪个模型在烧钱、缓存命中替省下多少，一眼能看明白。定时任务删错会进回收站，能恢复。AI 回答也终于"能看"了：公式、流程图、代码高亮都渲染出来，表格能排序导出，图和公式右键就能复制成图片贴给别人。剪贴板修掉了「图片」「文件」标签点了没反应的老毛病，分类也不再只认最近那一千条。</p>
 </div>
 <div class="tbl wide">
-<div class="tbl-row"><span class="k">回收站</span><span>删除不再是不可逆的：项目、集合、场景、笔记、整个工作空间的删除都会先进回收站，在「设置 → 回收站」一键恢复，级联删掉的子内容一起回来。</span></div>
-<div class="tbl-row"><span class="k">通知中心</span><span>侧栏底部一个铃铛收口全部「办完了」：监控掉线 / 恢复、定时任务执行结果、AI 回答完成。窗口正开着就不打扰你，只在你没看它时才收进来；点了能直接跳回那条监控 / 那个任务 / 那次对话。</span></div>
-<div class="tbl-row"><span class="k">日志实时尾随</span><span>任意本机文件都能 <code>tail -f</code>：打开先读末尾几行，之后每 500ms 只读新增的部分；文件被轮转或原地重写会自动重新对齐，可随时暂停、关键字过滤高亮、清空。</span></div>
-<div class="tbl-row"><span class="k">剪贴板自动规则</span><span>复制进来的内容按条件自动清洗：去首尾空白、删空行、去重行、排序、JSON 格式化 / 压缩、去 ANSI 颜色、URL 解码、大小写转换。可只对匹配正则或某个来源窗口的内容生效，改之前能先试运行。<b>不做脱敏</b>——不会偷偷改写你复制的手机号和密钥。</span></div>
-<div class="tbl-row"><span class="k">快捷键备忘单</span><span>命令面板输入 <code>cheatsheet</code>，或点「设置 → 快捷键」页头的按钮，一张表列出全局热键、窗口管理 15 个贴屏键与面板内操作键。内容实时读自热键设置，你改过键它就跟着变。</span></div>
-<div class="tbl-row"><span class="k">设置页合并</span><span>设置从 14 页收到 11 页：剪贴板历史与自动规则合一，存储位置 / 同步 / 快照合成「存储与同步」，最近动态与回收站合成「历史」页内分段切换。</span></div>
-<div class="tbl-row"><span class="k">监控分组与停机日历</span><span>监控可按分组归类，延迟超过阈值的抖动不再当成宕机；新增 CSV 导出与 12 周停机热力日历，一眼看出哪天不稳。</span></div>
-<div class="tbl-row"><span class="k">界面整体统一</span><span>九个业务页各自为政的页头、按钮、面板头收敛成一套，三栏顶部对齐在同一条线上，控件高度与圆角统一；工作空间为空、或场景里还没有集合时，给出分步引导而不是一片空白。</span></div>
+<div class="tbl-row"><span class="k">数据目录搬家</span><span>换盘不用重装：整个数据目录（数据库、剪贴板图片、插件、日志、便携运行时）一次性搬到新位置，环境变量跟着改写，重启即生效。新装时安装器也会问一次放哪。</span></div>
+<div class="tbl-row"><span class="k">AI 花了多少钱</span><span>「设置 → AI」新增用量统计：近 7 天 / 30 天 / 全部的花费估算、问答次数、Token、每日趋势，按模型与按入口拆开看，缓存命中省下的单独标出。<b>这是估算不是账单</b>，按内置单价线性算，以服务商结算为准。</span></div>
+<div class="tbl-row"><span class="k">回答里的公式和图</span><span>LaTeX 公式、Mermaid 流程图、代码高亮都能正常渲染，配色跟主题走；流程图可折叠、可切换看源码；宽表格能横向滚、点表头排序、导出 CSV。</span></div>
+<div class="tbl-row"><span class="k">图和代码能直接拿走</span><span>公式、流程图、代码块右键「复制为图片」，PNG 直进剪贴板（2 倍图）；流程图还能下载 PNG / SVG。HTML 代码块多一个「预览」，在全屏沙箱里跑，拿不到宿主的东西。</span></div>
+<div class="tbl-row"><span class="k">点外链不再顶掉界面</span><span>AI 回答、笔记预览、插件窗口里的链接一律交给系统浏览器打开。以前在应用里点一下，整个主界面就被导航走了，连后退都没有。</span></div>
+<div class="tbl-row"><span class="k">切页面不中断 AI</span><span>AI 在后台继续生成，去监控、SSH、笔记逛一圈回来，回答还在往下写；侧栏 AI 那条带状态点，生成中会呼吸，答完了没看是实心点。</span></div>
+<div class="tbl-row"><span class="k">剪贴板筛选修好了</span><span>「图片」「文件」现在是独立的整类标签，点了就能筛出来（以前一律被当成"文本"处理，永远是空列表）；网址 / 邮箱 / 电话 / JSON / 代码这些分类改成入库时就分好，能翻到全部历史。</span></div>
+<div class="tbl-row"><span class="k">命令面板能搜待办</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd> 输入待办标题就出现「待办」区，回车直接跳到那一条所在日期并高亮，顺手就能标记完成。</span></div>
+<div class="tbl-row"><span class="k">大列表、长日志不卡</span><span>集合条目过了 100 条改虚拟滚动，只渲染看得见的行；日志最多渲染 5000 行，超了会提示用搜索 / 筛选缩小范围，而不是越滚越卡。</span></div>
 </div>
 </div>
 </section>
@@ -126,7 +127,29 @@
 </div>
 <div class="logs reveal">
 <details class="log" open="">
-<summary><span class="log-ver">v0.0.29</span><span class="log-date">2026-10-27</span><span class="tag tag-low log-new">最新</span></summary>
+<summary><span class="log-ver">v0.0.30</span><span class="log-date">2026-10-28</span><span class="tag tag-low log-new">最新</span></summary>
+<ul class="log-body">
+<li>数据目录搬家：在「设置 → 存储与同步」改存储位置，整个数据目录打包搬到新盘 —— 数据库、剪贴板图片、插件、日志、便携运行时、模块缓存全在内，搬完不需要重新下载任何运行时。选盘符根目录会自动落到 <code>D:\.quickdock</code>，界面回显「实际将迁移到」；指向旧目录的环境变量（<code>PATH</code> / <code>GOROOT</code> / <code>GOPATH</code> 等）一并改写，已开着的终端要重开才认。全程有阶段与文件数进度，半路失败旧目录始终完好，可重试。</li>
+<li>迁移的收尾要重启：数据库文件正被程序独占、搬不动，所以先导一份一致的快照，重启时才落到新位置；旧目录也是重启后才删。也就是说从迁完到重启这段时间，两个目录一起占空间，目标盘记得留出「压缩包 + 解压后」的峰值余量。</li>
+<li>安装时可选数据目录：安装器多一页「选择数据目录」，只在新装时出现（覆盖升级不会重置你选过的位置）；卸载只删程序，不碰数据。</li>
+<li>AI 用量统计：设置 → AI 新增「用量统计」，近 7 天 / 30 天 / 全部的花费估算、问答次数、Token、对话数、每日柱状图，按模型与按来源（对话 / 面板与插件 / 标题生成 / 摘要压缩）拆开看；输入缓存命中省下的部分单独标注。记账覆盖所有入口：对话页、SSH 侧栏、剪贴板与笔记的「问 AI」、插件调用、自动起标题、长对话压缩。口径写在卡片上：<b>按内置单价线性估算，不是账单</b>，缓存折扣、批量优惠、阶梯计价都没算；价目表里没有的模型按 0 计并单独提示。老版本只存了会话累计 token，升级后会折算成一条「历史折算」记录，总额不丢，但还原不出当时的分布。</li>
+<li>AI 回答渲染：支持 LaTeX 公式（KaTeX，<code>\(..\)</code> / <code>\[..\]</code> / <code>$..$</code> / <code>$$..$$</code> / 裸 <code>\begin{}</code>，流式生成中公式还没写完时先显示原文，写完即刻）、Mermaid 流程图（结束后画成跟随主题的 SVG，可折叠、可切源码，画不出来就保留源码，不弹报错）；代码块接入语法高亮，明暗两套配色跟主题走。SSH 侧栏与笔记预览里的公式也一起能看了。</li>
+<li>表格处理：太宽的表格可以横向滚，点表头排序，还能导出 CSV。</li>
+<li>图与代码能直接拿走：公式、流程图、代码块右键「复制为图片」，PNG 直进剪贴板（2 倍图，矢量按序列化、公式走 foreignObject），流程图另可下载 PNG / SVG；<code>html</code> 代码块工具栏多一个「预览」，在全屏沙箱 iframe 里运行，拿不到宿主的东西。</li>
+<li>外链交给系统浏览器：AI 回答、笔记预览、独立插件窗口里的 http(s) 链接统一用默认浏览器打开，不再把主界面整页导航走（以前只能重启应用）。环境页的 HTTP 服务「打开」和各类控制台入口同样处理。</li>
+<li>切页面不再中断 AI：AI、监控、SSH、笔记、插件管理页切走再回来不重新加载，SSH 终端、监控轮询、笔记编辑态都保留，AI 流在后台继续生成；侧栏 AI 项带状态点（生成中呼吸、答完未读是实心），侧栏收起时也能看见。</li>
+<li>「AI 回答完成」的通知判定改准了：只有窗口隐藏 / 最小化、或你停在别的页面时才推；正盯着 AI 页就不打扰。README 与文档里的旧说法一并改掉。</li>
+<li>剪贴板「图片」「文件」筛选修好：这两个标签以前被当成"文本"的子类，外层条件与自身判定互斥，点了永远是空列表。现在它们是与文本并列的独立整类，点了就是全部图片 / 全部文件。</li>
+<li>剪贴板智能分类改到入库时算：网址 / 邮箱 / 电话 / JSON / 代码在条目写进库时就把分类定下来，切标签查的是整个历史，不再受「最近 1000 条」限制；存量数据首次启动会自动补分类，之后启动不再重复。</li>
+<li>剪贴板被占用时能点名了：日志里会写出占着剪贴板的进程名、PID、窗口类名与标题，告一段落不用再猜是谁。遇到拿不到窗口的占用者（以 NULL 句柄打开）会明说"无法定位"，自己的窗口占用也会单独提示。界面不弹提示，只记日志。</li>
+<li>命令面板能搜待办：输入标题 / 备注 / 标签出现「待办」区，只列还没完成的顶层任务；回车不是"打开待办页"，而是直接站到那一条上（切页、跳到所在日期、必要时清掉标签过滤、目标行高亮两秒），动作菜单里还能直接「标记完成」。面板分区因此变成 14 个（12 个来源 + 最佳匹配 + 最近）。</li>
+<li>定时任务删错能找回：删除改为先进回收站（回收站里单独一类「定时任务」），可一键恢复；恢复后按当前时间重算下次运行，不会因为快照里的时间早就过了而立刻补跑一次。</li>
+<li>大列表、长日志不卡：集合条目超过 100 条改虚拟滚动，只渲染看得见的那几行（行高统一 44px，有无副标题不再有高度差）；日志最多渲染 5000 行，超出部分不再往页面里塞，顶部会提示"已渲染前 N 行，请用搜索 / 筛选缩小范围"，「复制全部」也只复制可见部分。</li>
+<li>顺手更快：侧栏角标原本三条数据源各打一次接口，现在一次拿全、统一 60 秒刷新；导航显示偏好写入合并，不再每次点击都落盘；插件页 HTML 按「插件 + 主题 + 语言」缓存，来回切页面不重复拉；监控页两项查询改为并行。剪贴板面板、代码高亮、公式、流程图都拆成按需加载，不打开就不下载。</li>
+</ul>
+</details>
+<details class="log">
+<summary><span class="log-ver">v0.0.29</span><span class="log-date">2026-10-27</span></summary>
 <ul class="log-body">
 <li>通知中心：侧栏底部新增铃铛入口，监控状态翻转、定时任务执行结果、AI 回答完成统一收口，未读强调色角标，支持全部 / 未读过滤、单条删除、全部已读与一键清空，点击可跳回对应对象。AI 完成时若主窗口正开着且有焦点则不推送，不打扰正在看的屏幕。</li>
 <li>日志实时尾随：任意本机文件支持 <code>tail -f</code>（命令面板输入 <code>logtail</code>），打开先读末尾 N 行，之后每 500ms 增量读取；文件被轮转（新建同名）或原地截断重写时自动重新对齐读取位置；可暂停、关键字过滤高亮、清空，上限 5000 行。</li>
@@ -387,7 +410,7 @@
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="16" rx="2" width="12" x="6" y="4"></rect><path d="M10 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1"></path></svg></div>
 <h3>剪贴板历史</h3>
 <p>文本、图片、文件全记录，浮动窗口失焦即隐，<kbd>Ctrl</kbd>+<kbd>`</kbd> 一键唤出。</p>
-<ul><li>固定 / 搜索 / 批量删除</li><li>按天数自动清理过期内容</li><li>条目上直接「问 AI」</li></ul>
+<ul><li>固定 / 搜索 / 批量删除</li><li>按类型筛：图片、文件、网址、邮箱、电话、JSON、代码各自成标签，查的是全部历史</li><li>按天数自动清理过期内容</li><li>条目上直接「问 AI」</li></ul>
 </article>
 <article class="card reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path><circle cx="12" cy="12.5" r="3.5"></circle></svg></div>
@@ -432,7 +455,7 @@
 <article class="card card-wide reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"></path><circle cx="12" cy="12" r="9"></circle></svg></div>
 <h3>AI 助手 &amp; DeepSeek Harness</h3>
-<p>内置多档案 AI 助手（OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义），SSE 流式输出、思考过程折叠、Token 统计，API Key 在 Windows 下用 DPAPI 加密存储；填好地址与 Key 还能一键<b>拉取模型列表</b>，模型名不用手抄。同一份档案还供给终端侧栏、剪贴板、笔记和插件里的「问 AI」，一处配置四处可用。同时内嵌 DeepSeek Harness —— 一键装填 node + dsh 环境，原生窗口承载完整 Agent 编程入口，关窗不停服务。</p>
+<p>内置多档案 AI 助手（OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义），SSE 流式输出、思考过程折叠、<b style="color:var(--text-1);font-weight:510">公式 / 流程图 / 代码高亮</b>都正常渲染，Token 用量与<b style="color:var(--text-1);font-weight:510">花费估算</b>看得见，API Key 在 Windows 下用 DPAPI 加密存储；填好地址与 Key 还能一键<b>拉取模型列表</b>，模型名不用手抄。同一份档案还供给终端侧栏、剪贴板、笔记和插件里的「问 AI」，一处配置四处可用。同时内嵌 DeepSeek Harness —— 一键装填 node + dsh 环境，原生窗口承载完整 Agent 编程入口，关窗不停服务。</p>
 </article>
 <article class="card card-wide reveal">
 <div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m4 17 6-5-6-5"></path><path d="m12 19h8"></path></svg></div>
@@ -694,7 +717,7 @@
 <div class="keys-row"><span>显示 / 隐藏主窗口</span><span><kbd>Ctrl</kbd><kbd>Space</kbd></span></div>
 <div class="keys-row"><span>命令面板</span><span><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
 <div class="keys-row"><span>剪贴板历史</span><span><kbd>Ctrl</kbd><kbd>`</kbd></span></div>
-<div class="keys-row"><span>快捷笔记</span><span><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>N</kbd></span></div>
+<div class="keys-row"><span>快捷笔记</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>N</kbd></span></div>
 <div class="keys-row"><span>区域截图</span><span><kbd>F1</kbd></span></div>
 <div class="keys-row"><span>SSH 远程终端</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>S</kbd></span></div>
 <div class="keys-row"><span>窗口排版浮层</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd></span></div>
@@ -770,8 +793,9 @@
 <li><b style="color:var(--text-1);font-weight:510">排序会学习</b>：最近使用 + 最常使用加权（frecency），常用项越排越前</li>
 <li><b style="color:var(--text-1);font-weight:510">智能建档</b>：粘贴一个 URL 进去，自动识别并存成项目，不用填表单</li>
 <li><b style="color:var(--text-1);font-weight:510">多选批量</b>：选中多项后一次性执行，比如批量打开一套开发环境的五个目录</li>
-<li><b style="color:var(--text-1);font-weight:510">结果分区</b>：项目、快速链接、笔记、应用程序、文件、插件命令、环境服务、系统命令各有标题分区带计数，不是一长条混排；「最佳匹配」永远在最上面</li>
-<li><b style="color:var(--text-1);font-weight:510">待办与剪贴板历史不参与面板搜索</b>：待办去待办页看；面板里的「剪贴板建议」只作用于<b style="color:var(--text-1);font-weight:510">刚复制的那一条</b>，历史条目要去 <kbd>Ctrl</kbd>+<kbd>`</kbd> 浮窗里搜</li>
+<li><b style="color:var(--text-1);font-weight:510">结果分区</b>：项目、快速链接、笔记、待办、应用程序、文件、插件命令、环境服务、系统命令各有标题分区带计数，不是一长条混排；「最佳匹配」永远在最上面</li>
+<li><b style="color:var(--text-1);font-weight:510">待办也能搜</b>：输入标题、备注或标签就出现「待办」区，只列还没完成的顶层任务；回车直接站到那一条上（切到待办页、跳到它那一天、目标行高亮），动作菜单里还能直接标完成</li>
+<li><b style="color:var(--text-1);font-weight:510">剪贴板历史条目不参与搜索</b>：面板里的「剪贴板建议」只作用于<b style="color:var(--text-1);font-weight:510">刚复制的那一条</b>，历史条目要去 <kbd>Ctrl</kbd>+<kbd>`</kbd> 浮窗里搜</li>
 <li>各区有显示上限（应用 8 / 文件 20 / 快链 3），目前只有「最近」一区能展开看全部</li>
 <li>浮动窗口，<kbd>Esc</kbd> 或点外面就收起，不打断手上的活</li>
 </ul>
@@ -790,6 +814,7 @@
 <li><b style="color:var(--text-1);font-weight:510">搜索</b>：历史多了直接搜内容</li>
 <li><b style="color:var(--text-1);font-weight:510">批量删除</b> / <b style="color:var(--text-1);font-weight:510">按天自动清理</b>：保留天数在设置里配，过期自动清</li>
 <li>浮动窗口失焦即隐藏；图片条目存在 <code>~/.quickdock/images/</code></li>
+<li><b style="color:var(--text-1);font-weight:510">按类型筛</b>：「图片」「文件」是独立的整类标签，点了就是全部图片 / 全部文件；「网址 / 邮箱 / 电话 / JSON / 代码」这类智能分类在入库时就算好了，切标签查的是整个历史，不受「只载入最近 1000 条」的限制</li>
 <li><b style="color:var(--text-1);font-weight:510">问 AI</b>：文本条目上点「问 AI」，翻译 / 摘要 / 格式化或者自由追问，就地弹层给答案，不用切到 AI 页再粘贴一遍</li>
 </ul>
 <h4>自动规则：复制进来就先收拾好</h4>
@@ -975,6 +1000,9 @@
 <li><b style="color:var(--text-1);font-weight:510">四种模式</b>：聊天 / 解释代码 / 翻译 / 总结，模式 prompt 可叠加自定义 System Prompt</li>
 <li><b style="color:var(--text-1);font-weight:510">SSE 流式输出</b>：token 到达即显示，不是转圈等半天</li>
 <li>思考过程（reasoning）默认折叠、Markdown 安全渲染、多会话管理、<b style="color:var(--text-1);font-weight:510">Token 用量统计</b></li>
+<li><b style="color:var(--text-1);font-weight:510">回答能直接看</b>：LaTeX 公式（KaTeX）、Mermaid 流程图、代码高亮都渲染出来，配色跟主题走；表格可横向滚、点表头排序、导出 CSV；公式 / 流程图 / 代码块右键<b style="color:var(--text-1);font-weight:510">「复制为图片」</b>，贴进群里就能讲清楚</li>
+<li><b style="color:var(--text-1);font-weight:510">花了多少看得见</b>：「设置 → AI」的用量统计，近 7 天 / 30 天 / 全部的花费估算、次数、Token、每日趋势，按模型和按入口拆；缓存命中的那部分单独标出。<b style="color:var(--text-1);font-weight:510">这是估算不是账单</b>——按内置单价线性算，缓存折扣与阶梯计价都没算进去</li>
+<li>切走页面回答也不断：AI 在后台继续生成，侧栏那条带状态点（生成中呼吸 / 完成了没看是实心点）</li>
 <li>参数可调：Temperature / MaxTokens / TopP / 频率与存在惩罚</li>
 <li><b style="color:var(--text-1);font-weight:510">API Key 用 DPAPI 加密</b>存储，前端不接触密文；设置页有「测试连接」一键验 Key</li>
 <li><b style="color:var(--text-1);font-weight:510">就地也问得到</b>：同一份档案还供给 SSH 终端侧栏、剪贴板条目和笔记浮窗里的「问 AI」——看到什么就问什么，不用切到对话页再粘贴</li>
@@ -1067,7 +1095,7 @@
 <p>第一次连接某台服务器时会弹出<b style="color:var(--text-1);font-weight:510">服务器指纹</b>供人工核对。可以在服务器上执行 <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> 得到指纹，与弹窗逐一比对，核对无误后选「信任并记住」。</p>
 <div class="note">
 <svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
-<div>如果<b style="color:var(--text-1);font-weight:510">已信任的主机指纹突然变了，QuickDock 会额外告警</b>——服务器重装和连接被劫持在技术上都表现为密钥变化，QuickDock 不替你猜，把决定权交给你。已信任的指纹统一在「设置 → SSH」里管理，可查看、可清除。</div>
+<div>如果<b style="color:var(--text-1);font-weight:510">已信任的主机指纹突然变了，QuickDock 会额外告警</b>——服务器重装和连接被劫持在技术上都表现为密钥变化，QuickDock 不替你猜，把决定权交给你。已信任的指纹统一在 SSH 窗口顶栏的「<b style="color:var(--text-1);font-weight:510">已信任的服务器</b>」里管理，可查看、可清除。</div>
 </div>
 <h4>主机管理</h4>
 <div class="tbl wide">
@@ -1111,9 +1139,17 @@
 <div class="tbl-row"><span class="k"><code>~/.quickdock/logs/</code></span><span>日志，按天分文件</span></div>
 <div class="tbl-row"><span class="k"><code>%APPDATA%/QuickDock/</code></span><span>应用配置</span></div>
 </div>
+<h4>数据目录搬家</h4>
+<p>C 盘塞不下、想把整个家挪到另一块盘：「设置 → 存储与同步」改<b style="color:var(--text-1);font-weight:510">存储位置</b>，点「应用」。选 <code>D:\</code> 会自动落到 <code>D:\.quickdock</code>，选普通目录也会补一层 <code>.quickdock</code>，界面会回显「实际将迁移到」。</p>
+<ul class="card">
+<li><b style="color:var(--text-1);font-weight:510">整个目录一起搬</b>：数据库、剪贴板图片、插件、日志、便携运行时、模块缓存全在内，搬完不用重新下载任何运行时</li>
+<li><b style="color:var(--text-1);font-weight:510">环境变量一起改</b>：指向旧目录的 <code>PATH</code> / <code>GOROOT</code> / <code>GOPATH</code> 会被改写到新目录；已经开着的终端要重开才认</li>
+<li><b style="color:var(--text-1);font-weight:510">要重启才算搬完</b>：数据库正被程序独占，先导快照、重启时落到新位置，旧目录也是重启后才删——这期间两个目录一起占空间，目标盘记得留「压缩包 + 解压后」的峰值余量</li>
+<li>半路失败不慌：最后一步之前旧目录始终完好，重试即可</li>
+</ul>
 <div class="note">
 <svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"></path></svg>
-<div>自动更新<b style="color:var(--text-1);font-weight:510">只替换主程序</b>，不碰 <code>~/.quickdock</code> 下任何数据；跨版本配置迁移由数据库迁移逻辑负责。</div>
+<div>自动更新<b style="color:var(--text-1);font-weight:510">只替换主程序</b>，不碰数据目录下任何内容；跨版本配置迁移由数据库迁移逻辑负责。新装时安装器会问一次数据目录，<b style="color:var(--text-1);font-weight:510">只在新装时出现</b>，覆盖升级不会重置；卸载只删程序，不删数据。</div>
 </div>
 </article>
 <!-- ============ 18 ============ -->
