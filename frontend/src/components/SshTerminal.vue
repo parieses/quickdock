@@ -12,7 +12,7 @@
  */
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ChevronDown, ChevronUp, Search, Sparkles, X } from '@lucide/vue'
+import { ChevronDown, ChevronUp, Search, Sparkles, X, ZoomIn, ZoomOut } from '@lucide/vue'
 import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
@@ -92,15 +92,48 @@ const { t } = useI18n()
 // 与主流终端一致。
 const menu = ref<{ x: number; y: number } | null>(null)
 
+// ---- 字号（本地偏好） ----
+//
+// 声明了 `fontSize` prop 但父组件从不传，等于把这项能力焊死在 13px。xterm 要求改
+// `options.fontSize` 后重新 fit（列数会变，必须同步 resized 给远端），所以调字号
+// 不是纯 CSS 改动，只能走这里的统一入口。存 localStorage 是因为它属于"这台机器
+// 这台屏幕"的偏好，不该进数据库跟着账号走。
+const FONT_SIZE_KEY = 'qd_ssh_fontsize'
+const FONT_SIZE_MIN = 10
+const FONT_SIZE_MAX = 24
+
+function readFontSize(): number {
+  try {
+    const v = Number(localStorage.getItem(FONT_SIZE_KEY))
+    if (Number.isFinite(v) && v >= FONT_SIZE_MIN && v <= FONT_SIZE_MAX) return v
+  } catch { /* localStorage 不可用时用默认值 */ }
+  return props.fontSize || 13
+}
+
+const fontSizePx = ref(readFontSize())
+
+function applyFontSize(next: number) {
+  const size = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(next)))
+  if (size === fontSizePx.value && term?.options.fontSize === size) return
+  fontSizePx.value = size
+  try { localStorage.setItem(FONT_SIZE_KEY, String(size)) } catch { /* ignore */ }
+  if (!term) return
+  term.options.fontSize = size
+  // fit 之后再触发一次 resize 同步：只改 options 不改窗口时，远端仍按旧列数换行，
+  // 表现为"字变大了但 vim 还是按窄屏排版"。
+  fitAddon?.fit()
+  closeMenu()
+}
+
 function hasSelection(): boolean {
   return !!term && term.hasSelection()
 }
 
 function openMenu(e: MouseEvent) {
   // 超出视口时往回收，避免菜单被屏幕边缘裁掉点不到。
-  // 底部预留 190px：菜单每加一项约增高 30px，预留不足会正好压住最后一项。
+  // 底部预留 260px：菜单每加一项约增高 30px，预留不足会正好压住最后一项。
   const x = Math.min(e.clientX, window.innerWidth - 180)
-  const y = Math.min(e.clientY, window.innerHeight - 190)
+  const y = Math.min(e.clientY, window.innerHeight - 260)
   menu.value = { x, y }
 }
 
@@ -570,7 +603,7 @@ onMounted(async () => {
     // xterm 要在 canvas 上量字符宽度，CSS 变量在这个上下文里无效，
     // 拿不到度量就会退回默认字体，导致光标位置与渲染错位。
     fontFamily: "Consolas, 'Cascadia Mono', 'Microsoft YaHei Mono', 'Noto Sans Mono CJK SC', monospace",
-    fontSize: props.fontSize,
+    fontSize: fontSizePx.value,
     lineHeight: 1.2,
     cursorBlink: true,
     scrollback: 5000,
@@ -690,9 +723,8 @@ watch(
 watch(
   () => props.fontSize,
   (size) => {
-    if (!term || !size) return
-    term.options.fontSize = size
-    fitAddon?.fit()
+    // 父组件显式传值时才跟随；内部调过的字号优先（用户刚点过"放大"，不该被默认值覆盖）。
+    if (size && size !== fontSizePx.value) applyFontSize(size)
   },
 )
 
@@ -817,6 +849,20 @@ defineExpose({
         </button>
         <button class="term-menu-item" @click="onSelectAll">
           <span>{{ t('sshCtxSelectAll') }}</span>
+        </button>
+        <div class="term-menu-sep" />
+        <button class="term-menu-item" :disabled="fontSizePx >= FONT_SIZE_MAX" @click="applyFontSize(fontSizePx + 1)">
+          <span class="mi-lead">
+            <ZoomIn :size="13" />
+            <span>{{ t('sshCtxFontLarger') }}</span>
+          </span>
+          <span class="term-menu-kbd">{{ fontSizePx }}</span>
+        </button>
+        <button class="term-menu-item" :disabled="fontSizePx <= FONT_SIZE_MIN" @click="applyFontSize(fontSizePx - 1)">
+          <span class="mi-lead">
+            <ZoomOut :size="13" />
+            <span>{{ t('sshCtxFontSmaller') }}</span>
+          </span>
         </button>
         <div class="term-menu-sep" />
         <button class="term-menu-item" @click="onClear">

@@ -56,6 +56,7 @@ import SshTrustedHostsDialog from './SshTrustedHostsDialog.vue'
 import SshFolderDialog from './SshFolderDialog.vue'
 import SftpPanel from './SftpPanel.vue'
 import SshBatchDialog from './SshBatchDialog.vue'
+import SshQuickExecDialog from './SshQuickExecDialog.vue'
 
 const { t } = useI18n()
 const { confirm, error: toastError } = useToast()
@@ -325,6 +326,19 @@ function editFromDetail(h: SshHost) {
   openEdit(h)
 }
 
+// ---- 一次性执行命令 ----
+//
+// 从详情弹窗进来：**不关详情**。用户刚在详情里看过凭据状态、环境与地址，
+// 跑完命令往往还要回去核对，关掉再打开是纯损失。执行弹窗的 z-index 更高，
+// 直接叠在上面，Esc 先收掉它。
+const execVisible = ref(false)
+const execHost = ref<SshHost | null>(null)
+
+function openExec(h: SshHost) {
+  execHost.value = h
+  execVisible.value = true
+}
+
 async function onSaved() {
   dialogVisible.value = false
   await load()
@@ -397,6 +411,42 @@ function toggleFolder(id: string) {
 // 会话列表变化时树的绿点标记自动更新（busyHostIds 是 computed，模板直接依赖它，
 // 不需要额外的 watch —— 加一个空 watch 只会让人误以为这里有副作用逻辑）。
 
+/** 首屏一次最多接回几条会话（见 restoreTabs 里的取舍说明）。 */
+const RESTORE_MAX = 8
+
+/**
+ * 首屏恢复：把上一个窗口里还留着的会话按原顺序接回标签。
+ *
+ * 为什么不再「只恢复最近一条」：用户关窗时开着 5 个终端，重开只剩 1 个，
+ * 剩下 4 个要自己一台台点回来——「记住上次开了哪些」是终端工具的基本预期，
+ * 少恢复反而是丢状态。
+ *
+ * 但仍要有上限：崩溃重连或长期积累可能留下几十条残留会话，一次全接回会让
+ * 首屏卡很久（每条都要抓一次回放），标签栏也会被撑成一行省略号。
+ * 取最近 RESTORE_MAX 条，按 started 升序排，最新的那个标签落在最右侧并激活——
+ * 和用户自己一个个点开的观感一致。
+ */
+function restoreTabs() {
+  const kept = sessions.value
+    .filter(isSessionRetained)
+    .sort((a, b) => a.started - b.started)
+    .slice(-RESTORE_MAX)
+  let next = tabs.value
+  let lastId = ''
+  for (const s of kept) {
+    // 认不出主人（主机被删了）就不恢复：硬接回去用户会看到一个
+    // 不认识的终端画面，比重新连一次更难理解。
+    const h = hosts.value.find(x => x.id === s.hostId && !x.isFolder)
+    if (!h) continue
+    const r = openTab(next, h, s)
+    next = r.tabs
+    lastId = r.activeId
+  }
+  if (!lastId) return
+  tabs.value = next
+  activeId.value = lastId
+}
+
 onMounted(async () => {
   // 订阅要放在第一个 await 之前。
   //
@@ -414,19 +464,7 @@ onMounted(async () => {
 
   await load()
   await loadSessions()
-  // 首屏恢复：把最近一条还活着的会话接回一个标签。
-  // 只恢复一条而不是全部——窗口一开就是 N 个终端对大多数用户是惊吓。
-  const candidate = sessions.value.filter(isSessionRetained).pop()
-  if (candidate) {
-    const h = hosts.value.find(x => x.id === candidate.hostId && !x.isFolder)
-    // 认不出主人（主机被删了）就不恢复：硬接回去用户会看到一个
-    // 不认识的终端画面，比重新连一次更难理解。
-    if (h) {
-      const r = openTab(tabs.value, h, candidate)
-      tabs.value = r.tabs
-      activeId.value = r.activeId
-    }
-  }
+  restoreTabs()
 })
 
 onBeforeUnmount(() => {
@@ -580,7 +618,14 @@ defineExpose({
       :fallback="detailHost"
       :folder-name="detailFolderName"
       @edit="editFromDetail"
+      @exec="openExec"
       @close="detailVisible = false"
+    />
+
+    <SshQuickExecDialog
+      :visible="execVisible"
+      :host="execHost"
+      @close="execVisible = false"
     />
 
     <SshTrustedHostsDialog v-model:visible="trustedVisible" />

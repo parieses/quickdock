@@ -3,8 +3,9 @@
  * SSH 批量执行弹窗：选一批主机，把同一条命令并发发下去，逐台看结果。
  *
  * 为什么是一个弹窗而不是新页面：它是一次「操作」而不是一个「场所」。
- * 用户从主机树进来、跑完就走，结果只在这次操作内有意义（后端也不落库，
- * 只有一条 activity 记录）。做成页面就要处理「上次那批结果还算不算数」。
+ * 用户从主机树进来、跑完就走。后端不落库（只有一条 activity 记录），
+ * 但**最后一批**的命令与结果会存进 localStorage，重开弹窗还能看到（见 lastAt）。
+ * 不做完整历史，所以也不需要一个页面去承载「历次批次」。
  *
  * 三条安全约束在这里落地（与 SSH 一键执行同一套底线）：
  *  1. **风险说明排在执行按钮之前**——把「这条命令会删库」放在按钮下面，
@@ -82,6 +83,44 @@ const results = ref<Record<string, SshBatchHostResult>>({})
 const order = ref<string[]>([])
 const summary = ref<SshBatchSummary | null>(null)
 const expanded = ref<Set<string>>(new Set())
+
+/**
+ * 当前展示的是不是「上一次执行」留下的结果（非 0 = 上次执行的结束时间）。
+ *
+ * 结果原本关窗即失：用户跑完 20 台，关掉弹窗去别处看一眼，再回来只剩一个
+ * 空表，只能重跑一遍才知道哪台失败。现在把**最后一批**的结果落在 localStorage
+ * （见 saveLastBatch），重开弹窗就能接着看。
+ *
+ * 为什么只留最后一批、而不是落库做完整历史：
+ *   - 单批输出上限 128KB × 100 台，落库要配套建表、清理策略和一套历史 UI，
+ *     而主要诉求只是「刚才那批结果还在吗」；
+ *   - localStorage 天然按窗口隔离、不需要迁移，代价是换台机器就没了——
+ *     这与「临时看一眼」的定位相符。
+ * 真要留存归档，用户应该把输出拷走，而不是指望这个弹窗当审计库。
+ */
+const lastAt = ref(0)
+
+/** 上次执行的展示时间（本地时区，精确到分钟就够了）。 */
+const lastRunTime = computed(() => {
+  if (!lastAt.value) return ''
+  const d = new Date(lastAt.value)
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`
+})
+
+/** 单条输出的留存上限：再长就截断，避免几条就把 localStorage 写满。 */
+const LAST_OUTPUT_CAP = 8 << 10
+const LAST_KEY = 'quickdock.ssh.batch.last'
+
+interface LastBatch {
+  batchId: string
+  command: string
+  timeoutSec: number
+  finishedAt: number
+  order: string[]
+  summary: SshBatchSummary | null
+  results: Record<string, SshBatchHostResult>
+}
 
 let offHost: (() => void) | null = null
 let offDone: (() => void) | null = null
@@ -234,6 +273,8 @@ async function startRun() {
   results.value = {}
   expanded.value = new Set()
   summary.value = null
+  // 新一批开始了，表里很快会出现本次的结果，「上次执行」的标记必须让位。
+  lastAt.value = 0
   // id 由前端生成并**先**赋值：第一台可能在后端返回之前就跑完了，
   // 事件到达时前端必须已经有一个可比的 id，否则那条结果会被自己过滤掉。
   batchId.value = newBatchId()
@@ -291,6 +332,9 @@ async function requestClose() {
     batchId.value = ''
     running.value = false
   }
+  // 关窗前再存一次：最后一台的 host 事件可能排在 summary 之后到，
+  // 只靠 done 里存会漏掉它（漏掉的恰好是最新的一条）。
+  if (summary.value) saveLastBatch()
   disarm()
   visible.value = false
 }
@@ -387,7 +431,69 @@ function reset() {
   order.value = []
   summary.value = null
   expanded.value = new Set()
+  lastAt.value = 0
+  // 先把上一次的结果接回来，必要时再补预演：预演会按（可能已被上次命令填充的）
+  // 命令重新算风险等级，顺序反了就会拿空命令算一次再算第二次。
+  restoreLastBatch()
   if (selected.value.size) void loadPlan()
+}
+
+// ---- 上一次执行的留存 ----
+
+function clipOutput(s: string): string {
+  if (!s || s.length <= LAST_OUTPUT_CAP) return s
+  return s.slice(0, LAST_OUTPUT_CAP) + '\n…'
+}
+
+function saveLastBatch() {
+  try {
+    const results: Record<string, SshBatchHostResult> = {}
+    for (const [id, r] of Object.entries(results.value)) {
+      results[id] = { ...r, stdout: clipOutput(r.stdout), stderr: clipOutput(r.stderr) }
+    }
+    const snap: LastBatch = {
+      batchId: batchId.value,
+      command: command.value,
+      timeoutSec: timeoutSec.value,
+      finishedAt: Date.now(),
+      order: [...order.value],
+      summary: summary.value,
+      results,
+    }
+    localStorage.setItem(LAST_KEY, JSON.stringify(snap))
+  } catch {
+    // 写不进去（配额满 / 隐私模式）就算了：这是「顺手记一下」，
+    // 不该因为它让一次已经执行完的批量跑看起来失败了。
+    try {
+      localStorage.removeItem(LAST_KEY)
+    } catch {
+      /* 连删都失败就彻底放弃，不影响执行 */
+    }
+  }
+}
+
+/** 接回上一次的结果。返回是否真的恢复了内容。 */
+function restoreLastBatch(): boolean {
+  let snap: LastBatch | null = null
+  try {
+    const raw = localStorage.getItem(LAST_KEY)
+    if (raw) snap = JSON.parse(raw) as LastBatch
+  } catch {
+    return false
+  }
+  if (!snap || !Array.isArray(snap.order) || !snap.order.length) return false
+  // 只恢复「主机还在」的行：主机被删掉后没有名字可显示，留着只会是一行
+  // 认不出来的 id。全部主机都没了就当没有历史。
+  const alive = new Set(props.hosts.map(h => h.id))
+  const order0 = snap.order.filter(id => alive.has(id))
+  if (!order0.length) return false
+  order.value = order0
+  results.value = snap.results || {}
+  summary.value = snap.summary || null
+  command.value = snap.command || ''
+  timeoutSec.value = snap.timeoutSec || 30
+  lastAt.value = snap.finishedAt || 0
+  return true
 }
 
 watch(visible, v => {
@@ -416,10 +522,13 @@ onMounted(() => {
     })
     if (sum.aborted || sum.errored > 0) toastError(msg)
     else toastSuccess(msg)
+    saveLastBatch()
   })
 })
 
 onBeforeUnmount(() => {
+  // 窗口/页面被直接销毁（不是点关闭）时也留一份，否则这条路径上的结果全丢。
+  if (summary.value) saveLastBatch()
   offHost?.()
   offHost = null
   offDone?.()
@@ -572,6 +681,9 @@ onBeforeUnmount(() => {
           <div v-if="order.length" class="batch-results">
             <div class="batch-results-head">
               <span class="batch-results-title">{{ t('sshBatchResults') }}</span>
+              <span v-if="lastAt" class="batch-results-last">
+                {{ t('sshBatchLastRun', { time: lastRunTime }) }}
+              </span>
               <span v-if="summary" class="batch-results-sum">
                 {{ t(summary.aborted ? 'sshBatchDoneAborted' : 'sshBatchDone', {
                   ok: summary.succeeded,
@@ -1101,6 +1213,15 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
   font-size: 10.5px;
   color: var(--color-text-muted);
+}
+
+/* 「上次执行」标记：用提示色而不是正文色，一眼能看出这不是本次跑出来的 */
+.batch-results-last {
+  padding: 1px var(--space-2);
+  font-size: 10px;
+  color: var(--color-warning);
+  background: var(--color-bg-secondary);
+  border-radius: var(--radius-xs);
 }
 
 .batch-result-list {

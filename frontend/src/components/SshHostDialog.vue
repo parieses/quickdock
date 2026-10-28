@@ -6,14 +6,14 @@
  *   - 保存与测试连接都在本组件内完成，父组件只接收 emitted('saved') 后刷新列表。
  *     表单字段多，抛给父组件维护会多一层状态同步，还容易漏掉 sort/parentId 这类
  *     「不该改但必须原样带回去」的字段。
- *   - 「测试连接」测的是**已保存**的配置（后端接口只接受 hostId）。表单有未保存
- *     修改时直接禁用并说明原因，而不是偷偷保存——用户点「取消」时配置被动过是最
- *     难排查的一类问题。
+ *   - 「测试连接」测的是**表单当前的值**，不要求先保存：新建主机填错密码/端口时，
+ *     不该被迫先存一台连不上的机器再回头改（后端 TestHostInput 接受未落库的表单值）。
+ *     但也不会偷偷保存——测试通过与否都不改动已存配置，用户点「取消」时一切照旧。
  */
 import { computed, reactive, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Eye, EyeOff, Loader2, X } from '@lucide/vue'
-import { SaveHost, TestHost } from '../../bindings/quickdock/services/sshx/sshservice'
+import { SaveHost, TestHostInput } from '../../bindings/quickdock/services/sshx/sshservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useFocusTrap } from '../utils/focusTrap'
@@ -138,33 +138,23 @@ watch(
   { immediate: true },
 )
 
-/** 表单相对已保存配置是否有改动。测试连接只对已保存配置生效。 */
-const dirty = computed(() => {
-  const h = props.host
-  if (!h) return true
-  return (
-    form.name !== (h.name ?? '') ||
-    form.host !== (h.host ?? '') ||
-    form.port !== String(h.port || 22) ||
-    form.user !== (h.user || 'root') ||
-    form.authType !== (h.authType === 'key' ? 'key' : 'password') ||
-    form.keyPath !== (h.keyPath ?? '') ||
-    form.legacyAlgorithms !== !!h.legacyAlgorithms ||
-    form.env !== (h.env || 'test') ||
-    form.remark !== (h.remark ?? '') ||
-    form.password !== '' ||
-    form.keyPassphrase !== '' ||
-    form.clearPassword
-  )
-})
-
-const canTest = computed(() => isEdit.value && !dirty.value && !saving.value && !testing.value)
-
-const testHint = computed(() => {
-  if (!isEdit.value) return t('sshTestOnlySaved')
-  if (dirty.value) return t('sshTestDirty')
+/**
+ * 挡住「测试连接」的原因，空串表示可以测。
+ *
+ * 只作为禁用按钮的 title 提示，不挂到结果区——刚打开一个空白表单就红一句
+ * 「请填写主机地址」太吵，用户还没开始填。
+ */
+const testBlocker = computed(() => {
+  const bad = validate()
+  if (bad) return bad
+  // 编辑态密码留空是「沿用库里已存的」；新建或勾了「清除密码」时留空才是真没凭据。
+  if (form.authType === 'password' && !form.password && (!props.host || form.clearPassword)) {
+    return t('sshPasswordRequired')
+  }
   return ''
 })
+
+const canTest = computed(() => !testBlocker.value && !saving.value && !testing.value)
 
 function validate(): string {
   if (!form.host.trim()) return t('sshHostRequired')
@@ -233,19 +223,21 @@ function openFingerprint(mode: 'unknown' | 'changed', data: SshHostKeyInfo) {
 }
 
 async function testConn() {
-  const id = props.host?.id
-  if (!id || !canTest.value) return
+  if (!canTest.value) return
   testing.value = true
   testErr.value = ''
   testOk.value = ''
   try {
-    const r = unwrap<TestHostResult>(await TestHost(id))
+    // 传表单值而不是 id：新建的主机库里还没有记录，后端也能拿同一套逻辑去连。
+    const r = unwrap<TestHostResult>(await TestHostInput(toInput()))
     if (!r) return
     if (r.needsTrust) {
       // 连通了，但服务器身份还没被信任：这不是失败，弹窗让用户核对指纹。
+      // host/port 取表单值：新建时 props.host 为空，用库里的会把待信任的
+      // 指纹记到一台不存在（或另一台）的机器名下。
       openFingerprint('unknown', {
-        host: props.host?.host,
-        port: props.host?.port,
+        host: form.host.trim(),
+        port: Number(form.port) || 22,
         keyType: r.hostKeyAlgorithm,
         fingerprint: r.fingerprint,
         knownTypes: r.knownTypes,
@@ -436,16 +428,15 @@ function onKeydown(e: KeyboardEvent) {
           <!-- 结果区：故意放在滚动区外，钉在按钮栏正上方。
                表单字段多时 .hd-body 会滚动，结果行跟着滚就会被推到看不见的底部，
                用户点完「测试连接」只看到按钮恢复原样，以为没生效。 -->
-          <div v-if="formErr || testErr || testOk || testHint" class="hd-status">
+          <div v-if="formErr || testErr || testOk" class="hd-status">
             <p v-if="formErr" class="hd-msg hd-msg--err">{{ formErr }}</p>
             <p v-else-if="testErr" class="hd-msg hd-msg--err">{{ testErr }}</p>
             <p v-else-if="testOk" class="hd-msg hd-msg--ok">{{ testOk }}</p>
-            <p v-else-if="testHint" class="hd-msg hd-msg--hint">{{ testHint }}</p>
           </div>
 
           <footer class="hd-foot">
             <button class="btn btn-ghost" :disabled="saving" @click="emit('cancel')">{{ t('cancel') }}</button>
-            <button class="btn btn-outline" :disabled="!canTest" :title="testHint" @click="testConn">
+            <button class="btn btn-outline" :disabled="!canTest" :title="testBlocker" @click="testConn">
               <Loader2 v-if="testing" :size="13" class="spin" />
               <span>{{ testing ? t('sshTesting') : t('sshTest') }}</span>
             </button>

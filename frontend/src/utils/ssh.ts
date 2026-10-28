@@ -330,6 +330,22 @@ export function isMultiLinePaste(data: string): boolean {
   return bare.includes('\n') || bare.includes('\r')
 }
 
+// ---- 一次性命令执行 ----
+//
+// `SshService.Exec` 的返回体同样不进 models.ts（ApiResult.Data 是 interface{}），
+// 字段与 services/sshx/service.go 的 ExecResult json tag 一一对应，改一处必须改另一处。
+// 与「批量执行」是两条后端路径：Exec 跑完即断（无会话、无事件推送），
+// 批量走 BatchRun + 事件流。风险判定则共用同一份规则（前端一律问 SshBatchPlan）。
+
+export interface SshExecResult {
+  stdout: string
+  stderr: string
+  exitCode: number
+  durationMs: number
+  /** 输出超过上限被截断（后端只保留前一段） */
+  truncated?: boolean
+}
+
 // ---- 批量执行 ----
 //
 // 后端返回 ApiResult{Data interface{}}，绑定里不会生成这些结果类型

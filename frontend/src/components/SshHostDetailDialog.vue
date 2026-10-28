@@ -12,7 +12,7 @@
  */
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Pencil, Copy, Check, X, Server } from '@lucide/vue'
+import { Pencil, Copy, Check, X, Server, SquareTerminal } from '@lucide/vue'
 import { GetHost } from '../../bindings/quickdock/services/sshx/sshservice'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -33,6 +33,8 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'edit', host: SshHost): void
+  /** 打开「一次性执行命令」：详情里看得见凭据状态，正好判断能不能跑 */
+  (e: 'exec', host: SshHost): void
   (e: 'close'): void
 }>()
 
@@ -177,6 +179,10 @@ async function copyTarget() {
               <Check v-if="copied" :size="13" />
               <Copy v-else :size="13" />
               {{ copied ? t('logCopied') : t('sshHostCopyTarget') }}
+            </button>
+            <button v-if="host && !host.isFolder" class="hdd-btn" @click="emit('exec', host)">
+              <SquareTerminal :size="13" />
+              {{ t('sshQuickExec') }}
             </button>
             <span class="hdd-foot-spacer" />
             <button class="hdd-btn" @click="emit('close')">{{ t('close') }}</button>

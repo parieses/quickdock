@@ -11,7 +11,7 @@
  * 改为走宿主原生文件对话框（SelectLocalFile / SelectSavePath）——
  * 路径由系统选择器给出，真实、绝对，不用用户去资源管理器里复制一遍。
  */
-import { computed, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import {
@@ -25,6 +25,7 @@ import {
   FilePlay,
   FileText,
   Folder,
+  FolderInput,
   FolderPlus,
   FolderUp,
   HardDrive,
@@ -106,6 +107,25 @@ const kw = ref('')
 const selected = ref<SftpEntry | null>(null)
 
 /**
+ * 多选集合（path → 选中）。
+ *
+ * 与 selected 分成两套状态而不是「把 selected 改成数组」：
+ *   - selected 是「当前行」，重命名 / 改权限 / 编辑 / 属性都只对它生效，
+ *     这些操作天然是单项的，做成多选语义反而要想「改了 3 个文件的权限」怎么提示；
+ *   - checked 只服务批量动作（下载 / 删除 / 移动）。
+ * 两者可以并存：右键某行会同时把它设为当前行，多选不受影响。
+ *
+ * 用 Set 而不是数组：勾选/取消是 O(1)，且 rows 每次过滤后无需去重。
+ */
+const checked = ref<Set<string>>(new Set())
+
+/** 已勾选的条目（按列表顺序，与用户视觉一致）。 */
+const checkedEntries = computed(() => entries.value.filter(e => checked.value.has(e.path)))
+
+/** 当前可见行是否全选（受搜索过滤影响：全选 = 选中你看见的这些）。 */
+const allChecked = computed(() => rows.value.length > 0 && rows.value.every(e => checked.value.has(e.path)))
+
+/**
  * 正在查看/编辑的文件。非空即打开编辑弹窗。
  *
  * 单独一个状态而不是复用 selected：用户可能一边开着编辑窗，
@@ -114,7 +134,7 @@ const selected = ref<SftpEntry | null>(null)
 const editorEntry = ref<SftpEntry | null>(null)
 
 /** 路径输入框类操作：null 表示没在开任何输入框 */
-type PromptKind = 'mkdir' | 'rename' | 'chmod'
+type PromptKind = 'mkdir' | 'rename' | 'chmod' | 'move'
 const promptKind = ref<PromptKind | null>(null)
 const promptValue = ref('')
 const promptTitle = ref('')
@@ -175,6 +195,51 @@ function kindIcon(e: SftpEntry) {
   return KIND_ICONS[entryKind(e)]
 }
 
+// ---- 直接输入路径 ----
+// 原来只能逐级点面包屑：从 /home/u 去 /etc/nginx 要退两次再点两次，
+// 路径深的时候完全是体力活。这里给面包屑一个"编辑"入口，回车即跳转。
+const pathEditing = ref(false)
+const pathInput = ref('')
+const pathInputRef = ref<HTMLInputElement | null>(null)
+
+function startPathEdit() {
+  pathInput.value = pwd.value
+  pathEditing.value = true
+  nextTick(() => {
+    pathInputRef.value?.focus()
+    pathInputRef.value?.select()
+  })
+}
+
+/**
+ * 把用户敲的路径规范成绝对远端路径。
+ *
+ * 统一用 /、按当前目录拼相对路径、折叠 . 与 ..、去掉尾部 /（根目录除外）。
+ * 折叠 .. 是必须的：用户写 ../logs 很正常，不处理会拼出 /a/../logs 这种
+ * 能连但看着别扭、又没法跟列表里的 path 直接比对的路径。
+ */
+function normalizeRemotePath(raw: string): string {
+  let next = String(raw || '').trim().replace(/\\/g, '/')
+  if (!next) return ''
+  if (!next.startsWith('/')) next = (pwd.value.replace(/\/$/, '') || '') + '/' + next
+  const parts: string[] = []
+  for (const seg of next.split('/')) {
+    if (!seg || seg === '.') continue
+    if (seg === '..') parts.pop()
+    else parts.push(seg)
+  }
+  return '/' + parts.join('/')
+}
+
+function commitPath() {
+  pathEditing.value = false
+  const raw = pathInput.value.trim()
+  if (!raw) return
+  const next = normalizeRemotePath(raw)
+  if (!next) return
+  if (next !== pwd.value) void load(next)
+}
+
 async function load(path = pwd.value) {
   if (!path) path = ''
   loading.value = true
@@ -182,6 +247,9 @@ async function load(path = pwd.value) {
   // 留在同一目录的刷新要保住选中行：换个目录才清，
   // 否则用户选中一个文件再点刷新，选中就没了，得重新找一遍。
   const keep = path === pwd.value ? selected.value : null
+  // 勾选集同理：换目录整批清掉（那些路径已经不在眼前，留着会让「批量删除」
+  // 删到上一个目录的东西）；同目录刷新则只保留仍存在的路径。
+  const prevChecked = path === pwd.value ? checked.value : new Set<string>()
   try {
     const res = unwrap<{
       path: string
@@ -195,10 +263,12 @@ async function load(path = pwd.value) {
     truncated.value = !!res?.truncated
     selected.value =
       keep && entries.value.some(e => e.path === keep.path) ? keep : null
+    checked.value = new Set([...prevChecked].filter(p => entries.value.some(e => e.path === p)))
   } catch (e) {
     errMsg.value = getErrorMessage(e)
     entries.value = []
     selected.value = null
+    checked.value = new Set()
   } finally {
     loading.value = false
   }
@@ -251,6 +321,36 @@ function openSelected() {
   if (selected.value) openEntry(selected.value)
 }
 
+// ---- 多选 ----
+
+function isChecked(e: SftpEntry): boolean {
+  return checked.value.has(e.path)
+}
+
+/** 勾选/取消单行。force 用于全选框的子项同步（显式给值，避免来回翻转）。 */
+function toggleCheck(e: SftpEntry, force?: boolean) {
+  const want = force ?? !checked.value.has(e.path)
+  const next = new Set(checked.value)
+  if (want) next.add(e.path)
+  else next.delete(e.path)
+  checked.value = next
+}
+
+/** 全选/取消全选**当前可见**行：搜索过滤后就只作用于过滤结果，符合所见即所得。 */
+function toggleCheckAll() {
+  const on = !allChecked.value
+  const next = new Set(checked.value)
+  for (const e of rows.value) {
+    if (on) next.add(e.path)
+    else next.delete(e.path)
+  }
+  checked.value = next
+}
+
+function clearChecked() {
+  if (checked.value.size) checked.value = new Set()
+}
+
 // ---- 路径型操作 ----
 
 function openPrompt(kind: PromptKind, seed: string) {
@@ -272,6 +372,11 @@ function openPrompt(kind: PromptKind, seed: string) {
       promptLabel.value = t('sshFileChmodLabel')
       promptOk.value = t('save')
       break
+    case 'move':
+      promptTitle.value = t('sshFileBatchMove')
+      promptLabel.value = t('sshFileMoveLabel')
+      promptOk.value = t('sshFileBatchMove')
+      break
   }
 }
 
@@ -291,6 +396,15 @@ async function submitPrompt() {
 
   toolBusy.value = true
   try {
+    // 「移动到」是批量动作，逻辑与结果汇总都在 submitBatchMove 里，
+    // 它自己会刷目录，所以走独立分支提前返回，别再落到下面的单条 switch。
+    if (kind === 'move') {
+      const target = normalizeRemotePath(value)
+      if (!target) return
+      closePrompt()
+      await submitBatchMove(target)
+      return
+    }
     switch (kind) {
       case 'mkdir':
         unwrap(await SftpMkdir(props.host.id, joinPath(pwd.value, value) || value))
@@ -345,31 +459,53 @@ function newTransferId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 }
 
-/** 跑一次传输：置状态 → 调后端 → 清状态（无论成败）。 */
+/** 单次传输的结局。批量操作靠它区分「失败继续下一个」与「用户中止整批」。 */
+type TransferOutcome = 'ok' | 'fail' | 'cancel'
+
+/**
+ * 跑一次传输：置状态 → 调后端 → 清状态（无论成败）。
+ *
+ * 只负责进度条与错误归一，不弹提示也不重列目录——那些交给调用方：
+ * 批量下载里逐个 toast 会把屏幕刷满，逐个 load() 更是把同一个目录列 N 遍。
+ */
+async function runTransferOnce(
+  op: 'upload' | 'download',
+  name: string,
+  task: (transferId: string) => Promise<unknown>,
+): Promise<TransferOutcome> {
+  const id = newTransferId()
+  transfer.value = { id, op, name, done: 0, total: 0 }
+  try {
+    await task(id)
+    return 'ok'
+  } catch (e) {
+    // 用户自己按的取消不是失败：后端把它编成独立错误码，这里静默吞掉。
+    // 若按普通错误弹一条红色提示，等于告诉用户「你刚才那下把东西弄坏了」。
+    if (apiErrorCode(e) === 'ssh_transfer_canceled') return 'cancel'
+    toastError(getErrorMessage(e))
+    return 'fail'
+  } finally {
+    transfer.value = null
+  }
+}
+
+/** 单次传输（含提示与刷目录），上传/下载按钮走这里。 */
 async function runTransfer(
   op: 'upload' | 'download',
   name: string,
   task: (transferId: string) => Promise<unknown>,
 ) {
-  const id = newTransferId()
-  transfer.value = { id, op, name, done: 0, total: 0 }
   toolBusy.value = true
   try {
-    await task(id)
+    const out = await runTransferOnce(op, name, task)
+    if (out !== 'ok') return
     toastSuccess(
       op === 'upload'
         ? t('sshFileUploadDone', { name })
         : t('sshFileDownloadDone', { name }),
     )
     await load()
-  } catch (e) {
-    // 用户自己按的取消不是失败：后端把它编成独立错误码，这里静默吞掉。
-    // 若按普通错误弹一条红色提示，等于告诉用户「你刚才那下把东西弄坏了」。
-    if (apiErrorCode(e) !== 'ssh_transfer_canceled') {
-      toastError(getErrorMessage(e))
-    }
   } finally {
-    transfer.value = null
     toolBusy.value = false
   }
 }
@@ -505,6 +641,151 @@ function startRename() {
   openPrompt('rename', selected.value.name)
 }
 
+// ---- 批量操作 ----
+//
+// 多选的价值全在这三件事上：一次挑一批下载、删掉、挪走。逐条来点 10 个文件
+// 就是 30 次点击（选中、点按钮、确认），而真正的意图是「这一批」。
+
+/**
+ * 批量结果汇总成一条提示。
+ *
+ * 逐个 toast 会把屏幕刷满，一条不报又会让用户不知道哪几个没成，
+ * 所以合成一条：全成报成功，有失败就报失败并列出前几个名字。
+ */
+function reportBatch(okKey: string, ok: number, total: number, failed: string[]) {
+  if (failed.length) {
+    const names = failed.slice(0, 3).join('、') + (failed.length > 3 ? ` …(+${failed.length - 3})` : '')
+    toastError(t('sshFileBatchPartial', { ok, total, n: failed.length, names }))
+    return
+  }
+  if (ok > 0) toastSuccess(t(okKey, { n: ok }))
+}
+
+/** 批量下载：只选一次本地目录，逐个下到该目录下（沿用远端原文件名）。 */
+async function batchDownload() {
+  const list = checkedEntries.value
+  if (!list.length || transferring.value) return
+  let dir = ''
+  try {
+    dir = unwrap<string>(await SelectLocalDirectory(t('sshFileBatchDownload'))) || ''
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    return
+  }
+  if (!dir) return
+
+  const failed: string[] = []
+  let ok = 0
+  let canceled = false
+  toolBusy.value = true
+  try {
+    for (const e of list) {
+      // dst 直接传目录：引擎对「已存在的目录」会把源名拼进去，
+      // 文件与目录都落在 dir/<名字>，前端不必自己拼本地分隔符。
+      const out = await runTransferOnce('download', e.name, id =>
+        SftpDownload(props.host.id, e.path, dir, id),
+      )
+      if (out === 'ok') ok++
+      else {
+        failed.push(e.name)
+        // 用户按了「中断」就把整批停掉：他要的是别再传了，
+        // 继续把剩下 9 个传完是最糟的响应。
+        if (out === 'cancel') {
+          canceled = true
+          break
+        }
+      }
+    }
+  } finally {
+    toolBusy.value = false
+  }
+  reportBatch('sshFileBatchDownloaded', ok, list.length, failed)
+  if (ok) {
+    if (!canceled) clearChecked()
+    await load()
+  }
+}
+
+/** 批量删除：一次确认，逐个删（目录递归）。 */
+async function batchDelete() {
+  const list = checkedEntries.value
+  if (!list.length || !!rowBusy.value) return
+  const hasDir = list.some(e => e.isDir)
+  // 含目录时换一句文案：递归删掉一整棵子树和删几个文件不是一个量级的事。
+  const confirmed = await confirm(
+    t(hasDir ? 'sshFileBatchDeleteMixed' : 'sshFileBatchDeleteConfirm', { n: list.length }),
+  )
+  if (!confirmed) return
+
+  const failed: string[] = []
+  let ok = 0
+  toolBusy.value = true
+  try {
+    for (const e of list) {
+      // rowBusy 逐行给上：删目录可能要几秒，没有行内反馈用户会以为卡住了。
+      rowBusy.value = e.path
+      try {
+        // 目录一律递归，理由同 removeEntry：一次确认就够了，
+        // 不要再弹「目录非空」让用户钩第二个框。
+        unwrap(await SftpRemove(props.host.id, e.path, e.isDir))
+        ok++
+      } catch {
+        failed.push(e.name)
+      }
+    }
+  } finally {
+    rowBusy.value = ''
+    toolBusy.value = false
+  }
+  reportBatch('sshFileBatchDeleted', ok, list.length, failed)
+  clearChecked()
+  await load()
+}
+
+/** 批量移动：输入目标目录，逐个 rename 过去（同主机内是纯 rename，不搬数据）。 */
+function startBatchMove() {
+  if (!checkedEntries.value.length) return
+  openPrompt('move', '')
+}
+
+async function submitBatchMove(target: string) {
+  const list = checkedEntries.value
+  if (!list.length) return
+  // 先确认目标目录存在且确实是目录：否则下面的 N 次 rename 会报 N 条同样的错，
+  // 用户还得从一堆重复错误里猜「是我路径打错了」。
+  try {
+    const st = unwrap<SftpEntry>(await SftpStat(props.host.id, target))
+    if (!st?.isDir) {
+      toastError(t('sshFileMoveNotDir', { path: target }))
+      return
+    }
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    return
+  }
+
+  const failed: string[] = []
+  let ok = 0
+  for (const e of list) {
+    // 目标里已经有同名项时 rename 会被服务端拒绝（不静默覆盖），
+    // 失败的进 failed 汇总，成功的照常移动——不做全有或全无的回滚，
+    // 那反而会把已经挪走的文件再挪回来，越弄越乱。
+    if (e.path === target || target.startsWith(e.path + '/')) {
+      failed.push(e.name)
+      continue
+    }
+    try {
+      unwrap(await SftpRename(props.host.id, e.path, joinPath(target, e.name)))
+      ok++
+    } catch {
+      failed.push(e.name)
+    }
+  }
+  reportBatch('sshFileBatchMoved', ok, list.length, failed)
+  clearChecked()
+  await load()
+}
+
 // ---- 右键菜单 ----
 //
 // 行内的图标按钮已经能完成大部分操作，但每个按钮都要先 hover 到那一行才看得见，
@@ -634,16 +915,32 @@ async function copyPath(e: SftpEntry) {
     </header>
 
     <nav class="sftp-crumbs">
-      <button
-        v-for="c in crumbs"
-        :key="c.path"
-        class="sftp-crumb"
-        :class="{ 'sftp-crumb--now': c.path === pwd }"
-        :disabled="loading"
-        @click="load(c.path)"
-      >
-        {{ c.name }}
-      </button>
+      <template v-if="pathEditing">
+        <input
+          ref="pathInputRef"
+          v-model="pathInput"
+          class="sftp-path-input"
+          :placeholder="t('sshPathPh')"
+          @keyup.enter="commitPath"
+          @keyup.esc="pathEditing = false"
+          @blur="commitPath"
+        />
+      </template>
+      <template v-else>
+        <button
+          v-for="c in crumbs"
+          :key="c.path"
+          class="sftp-crumb"
+          :class="{ 'sftp-crumb--now': c.path === pwd }"
+          :disabled="loading"
+          @click="load(c.path)"
+        >
+          {{ c.name }}
+        </button>
+        <button class="sftp-crumb sftp-crumb-edit" :title="t('sshEditPath')" :disabled="loading" @click="startPathEdit">
+          ✎
+        </button>
+      </template>
       <input v-model="kw" class="sftp-kw" :placeholder="t('search')" />
     </nav>
 
@@ -674,6 +971,32 @@ async function copyPath(e: SftpEntry) {
     </div>
 
     <div class="sftp-body">
+      <!-- 多选工具条：只在勾选了东西之后出现，平时不占一行。
+           批量动作放这里而不是顶部工具栏，是因为它们的前提就是「你已经勾了几项」，
+           挨着列表显示，勾完立刻能看见能做什么。 -->
+      <div v-if="!errMsg && checkedEntries.length" class="sftp-selbar">
+        <span class="sftp-selcount">{{ t('sshFileSelCount', { n: checkedEntries.length }) }}</span>
+        <button class="sftp-selbtn" :disabled="toolBusy || transferring" @click="batchDownload">
+          <Download :size="12" />
+          <span>{{ t('sshFileBatchDownload') }}</span>
+        </button>
+        <button class="sftp-selbtn" :disabled="toolBusy || !!rowBusy" @click="startBatchMove">
+          <FolderInput :size="12" />
+          <span>{{ t('sshFileBatchMove') }}</span>
+        </button>
+        <button
+          class="sftp-selbtn sftp-selbtn--danger"
+          :disabled="toolBusy || !!rowBusy"
+          @click="batchDelete"
+        >
+          <Trash2 :size="12" />
+          <span>{{ t('sshFileBatchDelete') }}</span>
+        </button>
+        <button class="sftp-selclear" :title="t('sshFileSelClear')" @click="clearChecked">
+          <X :size="11" />
+        </button>
+      </div>
+
       <div v-if="errMsg" class="sftp-err">{{ errMsg }}</div>
 
       <div v-else-if="loading && !entries.length" class="sftp-state">
@@ -688,6 +1011,15 @@ async function copyPath(e: SftpEntry) {
       <table v-else class="sftp-table">
         <thead>
           <tr>
+            <th class="c-check">
+              <input
+                type="checkbox"
+                class="sftp-check"
+                :checked="allChecked"
+                :title="t('sshFileSelectAll')"
+                @change="toggleCheckAll"
+              />
+            </th>
             <th class="c-name">{{ t('sshName') }}</th>
             <th class="c-size">{{ t('sshFileSize') }}</th>
             <th class="c-perm">{{ t('sshFilePerm') }}</th>
@@ -705,6 +1037,14 @@ async function copyPath(e: SftpEntry) {
             @dblclick="onRowDblClick(e)"
             @contextmenu.prevent="openRowMenu($event, e)"
           >
+            <td class="c-check" @click.stop>
+              <input
+                type="checkbox"
+                class="sftp-check"
+                :checked="isChecked(e)"
+                @change="toggleCheck(e)"
+              />
+            </td>
             <td class="c-name">
               <Folder v-if="e.isDir" :size="14" class="ic ic--dir" />
               <component :is="kindIcon(e)" v-else :size="14" class="ic" />
@@ -737,7 +1077,6 @@ async function copyPath(e: SftpEntry) {
                 <Pencil :size="12" />
               </button>
               <button
-                v-if="!e.isDir"
                 class="op"
                 :disabled="!!rowBusy"
                 :title="t('sshFileDownload')"
@@ -822,7 +1161,6 @@ async function copyPath(e: SftpEntry) {
           </button>
           <div class="sfp-menu-sep" />
           <button
-            v-if="!rowMenu.entry.isDir"
             class="sfp-menu-item"
             :disabled="!!rowBusy"
             @click="(closeRowMenu(), downloadEntry(rowMenu.entry))"
@@ -1032,6 +1370,28 @@ async function copyPath(e: SftpEntry) {
   color: var(--color-text-primary);
   background: var(--color-bg-hover);
 }
+/* 面包屑末尾的"编辑路径"按钮：字符文案用 ✎，省一个图标 import */
+.sftp-crumb-edit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--color-text-disabled);
+  padding: 2px 5px;
+}
+.sftp-crumb-edit:hover:not(:disabled) { color: var(--color-accent); }
+/* 路径输入框：占满面包屑剩余宽度，与面包屑同字号同高 */
+.sftp-path-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 22px;
+  padding: 0 var(--space-2);
+  font-size: 11.5px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-accent);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
 
 .sftp-crumb--now {
   color: var(--color-text-primary);
@@ -1149,6 +1509,87 @@ async function copyPath(e: SftpEntry) {
   flex: 1 1 auto;
   min-height: 0;
   overflow-y: auto;
+}
+
+/* ---- 多选工具条 ---- */
+
+.sftp-selbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-4);
+  font-size: 11.5px;
+  background: var(--color-accent-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sftp-selcount {
+  flex: 0 0 auto;
+  font-weight: 500;
+  color: var(--color-accent);
+}
+
+.sftp-selbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 3px var(--space-3);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.sftp-selbtn:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-focus);
+}
+
+.sftp-selbtn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sftp-selbtn--danger:hover:not(:disabled) {
+  color: var(--color-danger);
+  border-color: var(--color-danger);
+}
+
+.sftp-selclear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  /* 推到最右：它是「取消选择」，离批量按钮远一点，避免误点成删除。 */
+  margin-left: auto;
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-muted);
+  background: none;
+  border: 0;
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+
+.sftp-selclear:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.c-check {
+  width: 30px;
+  padding-right: 0 !important;
+  text-align: center;
+}
+
+.sftp-check {
+  width: 12px;
+  height: 12px;
+  margin: 0;
+  accent-color: var(--color-accent);
+  cursor: pointer;
 }
 
 .sftp-err {
