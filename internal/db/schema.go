@@ -259,6 +259,7 @@ var baseTables = []string{
 		weekdays TEXT DEFAULT '',
 		enabled INTEGER NOT NULL DEFAULT 1,
 		notify INTEGER NOT NULL DEFAULT 1,
+		notify_channels TEXT NOT NULL DEFAULT 'system,webhook',
 		next_run TEXT DEFAULT '',
 		last_run TEXT DEFAULT '',
 		last_status TEXT DEFAULT '',
@@ -295,6 +296,11 @@ var baseTables = []string{
 		consecutive_down INTEGER NOT NULL DEFAULT 0,
 		group_name TEXT NOT NULL DEFAULT '',
 		latency_alert_ms INTEGER NOT NULL DEFAULT 0,
+		-- 自定义请求头 / 请求体：POST/PUT/PATCH 类健康检查（带 token 的接口、
+		-- 需要提交 JSON 的探针）没有这两列就只能带空 body 发出去，等于方法形同虚设。
+		-- headers 存 "Name: Value" 每行一条，便于编辑与人工核对。
+		http_headers TEXT NOT NULL DEFAULT '',
+		http_body TEXT NOT NULL DEFAULT '',
 		sort INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL
 	)`,
@@ -340,6 +346,7 @@ var baseTables = []string{
 		prompt_tokens INTEGER NOT NULL DEFAULT 0,
 		completion_tokens INTEGER NOT NULL DEFAULT 0,
 		cached_tokens INTEGER NOT NULL DEFAULT 0,
+		stopped INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL
 	)`,
 
@@ -564,6 +571,10 @@ func (d *Database) migrate() error {
 		{"ai_messages", "prompt_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"ai_messages", "completion_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		{"ai_messages", "cached_tokens", "INTEGER NOT NULL DEFAULT 0"},
+		// ai_messages: stopped（这条回复被用户中断，内容是半截的）
+		// 中断时后端会把已收到的部分落库，但没有这个标记的话，刷新后看到一句
+		// 没说完的话，用户分不清「模型就答了这些」还是「我自己点了停止」。
+		{"ai_messages", "stopped", "INTEGER NOT NULL DEFAULT 0"},
 		// notes 笔记树：新增树形/标题/标签字段
 		{"notes", "name", "TEXT DEFAULT ''"},
 		{"notes", "parent_id", "TEXT DEFAULT ''"},
@@ -584,6 +595,16 @@ func (d *Database) migrate() error {
 		// tombstones: 回收站启用时补齐的展示名与恢复载荷（老表只有三元主键）
 		{"tombstones", "label", "TEXT NOT NULL DEFAULT ''"},
 		{"tombstones", "payload", "TEXT NOT NULL DEFAULT ''"},
+		// monitors: POST/PUT/PATCH 探测需要的请求头与请求体
+		{"monitors", "http_headers", "TEXT NOT NULL DEFAULT ''"},
+		{"monitors", "http_body", "TEXT NOT NULL DEFAULT ''"},
+		// monitors: 软删（进回收站，与定时任务一致）+ 维护窗口（暂停检测到某 unix 秒）。
+		// 老库删除会直接抹掉，升级后改为打标，留出"误删可恢复"的余地。
+		{"monitors", "deleted_at", "TEXT DEFAULT ''"},
+		{"monitors", "maintenance_until", "INTEGER NOT NULL DEFAULT 0"},
+		// scheduled_tasks: 通知渠道拆成 CSV（system=系统通知 / webhook=机器人）。
+		// 老库一律补成「两个都要」，与升级前"notify 一开就双发"的行为一致。
+		{"scheduled_tasks", "notify_channels", "TEXT NOT NULL DEFAULT 'system,webhook'"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {

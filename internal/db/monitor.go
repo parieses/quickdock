@@ -37,8 +37,12 @@ type Monitor struct {
 	ConsecutiveDown     int    `json:"consecutiveDown"`    // 当前连续失败次数（运行态，>=0）
 	GroupName           string `json:"groupName"`          // 分组名（空=未分组；列表按它分区展示）
 	LatencyAlertMs      int    `json:"latencyAlertMs"`     // 延迟告警阈值 ms（0=关闭；开启则宕机告警还要求当次延迟超过它）
+	HTTPHeaders         string `json:"httpHeaders"`        // 自定义请求头："Name: Value" 每行一条（空=不附加）
+	HTTPBody            string `json:"httpBody"`           // 请求体（仅 POST/PUT/PATCH 等带 body 的方法发送）
 	Sort                int    `json:"sort"`
 	CreatedAt           string `json:"createdAt"`
+	DeletedAt           string `json:"deletedAt"`        // 软删标记：非空即进回收站，列表默认不显示
+	MaintenanceUntil    int64  `json:"maintenanceUntil"` // 维护窗口：unix 秒，>now 期间暂停检测
 }
 
 // MonitorLog 单次检测记录
@@ -71,10 +75,17 @@ const monCols = `id, name, url, method, interval_sec, timeout_sec, expected_stat
 	content_match_type, content_match_pattern,
 	down_alert_threshold, consecutive_down,
 	group_name, latency_alert_ms,
-	sort, created_at`
+	http_headers, http_body,
+	sort, created_at, deleted_at, maintenance_until`
 
 const logWindowSec = int64(24 * 3600) // 统计窗口：近 24 小时
-const maxLogsPerMonitor = 1000        // 每个监控保留的检测日志上限
+// maxLogsPerMonitor 每个监控保留的检测日志上限。
+//
+// 原来是 1000 条：60 秒间隔只能存 16.7 小时，而前端却提供「7d / 全部」两个范围——
+// 选项名跟数据完全对不上。20000 条在 60s 间隔下约 14 天、5min 间隔约 69 天，
+// 单条 ~120B，最坏也就 2.4MB/监控。裁剪是索引上的 O(1) DELETE（见 AddMonitorLog），
+// 提高上限不会拖慢写入。
+const maxLogsPerMonitor = 20000
 
 func scanMonitor(rows interface{ Scan(...interface{}) error }) (Monitor, error) {
 	var m Monitor
@@ -89,7 +100,8 @@ func scanMonitor(rows interface{ Scan(...interface{}) error }) (Monitor, error) 
 		&contentMatchType, &contentMatchPattern,
 		&alertThresh, &m.ConsecutiveDown,
 		&groupName, &latencyAlert,
-		&m.Sort, &m.CreatedAt)
+		&m.HTTPHeaders, &m.HTTPBody,
+		&m.Sort, &m.CreatedAt, &m.DeletedAt, &m.MaintenanceUntil)
 	m.FollowRedirects = follow != 0
 	m.Enabled = enabled != 0
 	m.NotifyDown = notifyDown != 0
@@ -163,27 +175,30 @@ func (d *Database) CreateMonitor(m *Monitor) (*Monitor, error) {
 			 content_match_type, content_match_pattern,
 			 down_alert_threshold, consecutive_down,
 			 group_name, latency_alert_ms,
-			 sort, created_at)
+			 http_headers, http_body,
+			 sort, created_at, deleted_at, maintenance_until)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, 0, 0, '', ?,
 			 ?, 0, 0, ?, ?,
 			 ?, 0, ?, ?,
-			 ?, ?)`,
+			 ?, ?,
+			 ?, ?, '', 0)`,
 		m.ID, m.Name, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
 		b2i(m.FollowRedirects), b2i(m.Enabled), b2i(m.NotifyDown), b2i(m.NotifyUp),
 		b2i(m.SkipTLSVerify),
 		m.CertWarnDays, m.ContentMatchType, m.ContentMatchPattern,
 		m.DownAlertThreshold,
 		m.GroupName, m.LatencyAlertMs,
+		m.HTTPHeaders, m.HTTPBody,
 		m.Sort, m.CreatedAt,
 	)
 	return m, err
 }
 
-// ListMonitors 全部监控（按 sort）
+// ListMonitors 全部监控（按 sort），默认排除已软删的
 func (d *Database) ListMonitors() ([]Monitor, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors ORDER BY sort ASC, created_at ASC`)
+	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors WHERE deleted_at = '' ORDER BY sort ASC, created_at ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -253,19 +268,22 @@ func (d *Database) UpdateMonitor(m *Monitor) error {
 			follow_redirects = ?, enabled = ?, notify_down = ?, notify_up = ?,
 			skip_tls_verify = ?,
 			cert_warn_days = ?, content_match_type = ?, content_match_pattern = ?,
-			down_alert_threshold = ?, group_name = ?, latency_alert_ms = ?
+			down_alert_threshold = ?, group_name = ?, latency_alert_ms = ?,
+			http_headers = ?, http_body = ?
 		 WHERE id = ?`,
 		m.Name, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
 		b2i(m.FollowRedirects), b2i(m.Enabled), b2i(m.NotifyDown), b2i(m.NotifyUp),
 		b2i(m.SkipTLSVerify),
 		m.CertWarnDays, m.ContentMatchType, m.ContentMatchPattern,
 		m.DownAlertThreshold, m.GroupName, m.LatencyAlertMs,
+		m.HTTPHeaders, m.HTTPBody,
 		m.ID,
 	)
 	return err
 }
 
-// DeleteMonitor 删除监控及其全部日志
+// DeleteMonitor 硬删：彻底移除监控及其全部日志（仅用于回收站「彻底删除」）。
+// 普通删除请走 SoftDeleteMonitor 进回收站。
 func (d *Database) DeleteMonitor(id string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -276,6 +294,58 @@ func (d *Database) DeleteMonitor(id string) error {
 		return err
 	}
 	return nil
+}
+
+// SoftDeleteMonitor 软删：打 deleted_at 标记进回收站，保留日志与运行数据，可恢复。
+func (d *Database) SoftDeleteMonitor(id string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec("UPDATE monitors SET deleted_at = ? WHERE id = ?", time.Now().Format(time.RFC3339), id)
+	return err
+}
+
+// RestoreMonitor 从回收站恢复：清掉 deleted_at 标记。
+func (d *Database) RestoreMonitor(id string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec("UPDATE monitors SET deleted_at = '' WHERE id = ?", id)
+	return err
+}
+
+// ListDeletedMonitors 回收站里的监控（按软删时间倒序）。
+func (d *Database) ListDeletedMonitors() ([]Monitor, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors WHERE deleted_at <> '' ORDER BY deleted_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Monitor
+	for rows.Next() {
+		m, err := scanMonitor(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
+}
+
+// SetMonitorSort 仅改排序（拖拽用），不走 UpdateMonitor 以免覆盖编辑字段或误触发归一化。
+func (d *Database) SetMonitorSort(id string, sort int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec("UPDATE monitors SET sort = ? WHERE id = ?", sort, id)
+	return err
+}
+
+// SetMonitorMaintenance 设置维护窗口：until=0 表示取消（恢复检测）。
+func (d *Database) SetMonitorMaintenance(id string, until int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec("UPDATE monitors SET maintenance_until = ? WHERE id = ?", until, id)
+	return err
 }
 
 // SetMonitorEnabled 启用/停用
@@ -423,7 +493,7 @@ func (d *Database) GetMonitorLogsSince(id string, sinceTs, limit int64) ([]Monit
 func (d *Database) ListEnabledMonitors() ([]Monitor, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors WHERE enabled = 1 ORDER BY sort ASC`)
+	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors WHERE enabled = 1 AND deleted_at = '' ORDER BY sort ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -445,7 +515,7 @@ func (d *Database) ListMonitorsDue(nowTs int64) ([]Monitor, error) {
 	defer d.mu.Unlock()
 	rows, err := d.conn.Query(
 		`SELECT `+monCols+` FROM monitors
-		 WHERE enabled = 1 AND (last_checked_ts = 0 OR last_checked_ts + interval_sec <= ?)
+		 WHERE enabled = 1 AND deleted_at = '' AND (last_checked_ts = 0 OR last_checked_ts + interval_sec <= ?)
 		 ORDER BY last_checked_ts ASC`, nowTs)
 	if err != nil {
 		return nil, err

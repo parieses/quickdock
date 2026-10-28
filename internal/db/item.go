@@ -498,6 +498,13 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 	// 由宿主注入的解析器算出实际目录（db 不认识 env 包）；未注入/未绑定则为空。
 	pathDirs := itemPathDirs(item)
 
+	// 条目级附加参数（items.args）：命令行类型追加到命令尾，其余类型追加到工具参数尾。
+	// 这一列以前只有存储没有消费方——编辑器里没入口，打开链路也不读，等于死字段。
+	extra := strings.TrimSpace(expandItemVars(item.Args))
+	if extra != "" && itemType == "命令" {
+		value = value + " " + extra
+	}
+
 	if tool.Path == "" || tool.Name == "系统默认" {
 		return openWithSystemDefault(value, itemType, item.WorkingDirectory)
 	}
@@ -519,6 +526,11 @@ func execOpen(item *CollectionItem, tool OpenTool) error {
 		args = expandToolArgs(args, value)
 	} else {
 		args = expandToolArgs(args, value)
+	}
+
+	// 非命令类型：附加参数接在工具模板参数之后（命令类型上文已并进 value）
+	if extra != "" && itemType != "命令" {
+		args = strings.TrimSpace(args) + " " + extra
 	}
 
 	argList := splitArgs(args)

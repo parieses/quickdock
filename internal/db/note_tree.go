@@ -255,6 +255,17 @@ func (d *Database) MoveNoteNode(id, newParentID string) error {
 	return err
 }
 
+// SetNoteSort 只改同级排序值（拖拽排序用）。
+//
+// 不塞进 MoveNoteNode：那个会改 parent_id 并重算 sort 到末尾，
+// 拖一下排序却顺手换了父目录（或把节点甩到列表最后）不是用户要的结果。
+func (d *Database) SetNoteSort(id string, sort int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec(`UPDATE notes SET sort = ? WHERE id = ?`, sort, id)
+	return err
+}
+
 // isSelfInSubtreeLocked 判断 id 是否在 ancestorID 的子树中（调用方持 d.mu）。
 // 即：从 ancestorID 沿 parent 链向上，若碰到 id 则说明 ancestor 在 id 树下。
 func isSelfInSubtreeLocked(d *Database, id, ancestorID string) bool {

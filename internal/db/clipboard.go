@@ -194,7 +194,11 @@ func scanClipboardEntries(rows *sql.Rows) ([]ClipboardEntry, error) {
 	return entries, rows.Err()
 }
 
-// ListClipboardEntries 列出剪贴板历史（按时间倒序）
+// ListClipboardEntries 列出剪贴板历史（置顶优先，其余按时间倒序）
+//
+// 为什么置顶项要排在最前：全部列表查询都带 LIMIT，而置顶项的语义是「永远不该丢」。
+// 之前只按 created_at 排，一条三个月前置顶的内容根本进不了「最近 1000 条」窗口，
+// 于是「收藏」标签里也看不到它 —— 置顶等于没生效。
 func (d *Database) ListClipboardEntries(limit int) ([]ClipboardEntry, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -205,7 +209,37 @@ func (d *Database) ListClipboardEntries(limit int) ([]ClipboardEntry, error) {
 	} else if limit > MAX_CLIPBOARD_ROWS {
 		limit = MAX_CLIPBOARD_ROWS
 	}
-	rows, err := d.conn.Query("SELECT "+clipboardSelectCols+" FROM clipboard_entries ORDER BY created_at DESC LIMIT ?", limit)
+	rows, err := d.conn.Query("SELECT "+clipboardSelectCols+" FROM clipboard_entries ORDER BY is_pinned DESC, created_at DESC LIMIT ?", limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanClipboardEntries(rows)
+}
+
+// ListAllClipboardEntries 读取全部剪贴板条目（无 LIMIT），**仅供导出使用**。
+//
+// 为什么单独开一个方法而不是把 MAX_CLIPBOARD_ROWS 调大：那个常量是「误用 limit=0
+// 时不要整表读内存」的护栏，导出是唯一确实需要全量的场景，把它做成显式命名的方法，
+// 就不会有人顺手在列表页调它。
+// CountClipboardEntries 返回库内总条数。
+// 列表接口带 limit（前端只拉最近 1000 条），标题上直接写 entries.length 会让
+// 用户以为历史只有这么多；配上真总数才说得清「已载入 / 共多少」。
+func (d *Database) CountClipboardEntries() (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	var n int
+	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM clipboard_entries`).Scan(&n); err != nil {
+		return 0, err
+	}
+	return n, nil
+}
+
+func (d *Database) ListAllClipboardEntries() ([]ClipboardEntry, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rows, err := d.conn.Query(
+		"SELECT " + clipboardSelectCols + " FROM clipboard_entries ORDER BY is_pinned DESC, created_at DESC")
 	if err != nil {
 		return nil, err
 	}
@@ -226,9 +260,9 @@ func (d *Database) ListClipboardEntriesByType(limit int, contentType string) ([]
 	var rows *sql.Rows
 	var err error
 	if contentType == "" {
-		rows, err = d.conn.Query("SELECT "+clipboardSelectCols+" FROM clipboard_entries ORDER BY created_at DESC LIMIT ?", limit)
+		rows, err = d.conn.Query("SELECT "+clipboardSelectCols+" FROM clipboard_entries ORDER BY is_pinned DESC, created_at DESC LIMIT ?", limit)
 	} else {
-		rows, err = d.conn.Query("SELECT "+clipboardSelectCols+" FROM clipboard_entries WHERE content_type = ? ORDER BY created_at DESC LIMIT ?", contentType, limit)
+		rows, err = d.conn.Query("SELECT "+clipboardSelectCols+" FROM clipboard_entries WHERE content_type = ? ORDER BY is_pinned DESC, created_at DESC LIMIT ?", contentType, limit)
 	}
 	if err != nil {
 		return nil, err
@@ -249,7 +283,7 @@ func (d *Database) ListClipboardEntriesBySmartType(limit int, smartType string) 
 	defer d.mu.Unlock()
 
 	rows, err := d.conn.Query(
-		"SELECT "+clipboardSelectCols+" FROM clipboard_entries WHERE content_type = 'text' AND text_type = ? ORDER BY created_at DESC LIMIT ?",
+		"SELECT "+clipboardSelectCols+" FROM clipboard_entries WHERE content_type = 'text' AND text_type = ? ORDER BY is_pinned DESC, created_at DESC LIMIT ?",
 		smartType, limit,
 	)
 	if err != nil {
@@ -348,25 +382,54 @@ func (d *Database) TogglePinClipboardEntry(id string) (bool, error) {
 	return newVal == 1, nil
 }
 
-// DeleteClipboardEntry 删除单条剪贴板条目
-func (d *Database) DeleteClipboardEntry(id string) error {
+// DeleteClipboardEntry 删除单条剪贴板条目，返回它引用的图片路径（非图片条目为空串）。
+//
+// 为什么不在这里顺手删文件：DB 层只负责数据。图片落在 platform.GetImageDir() 下，
+// 由服务层统一按目录白名单清理（见 services.RemoveClipboardImages），
+// 这样「只删自己目录里的文件」这条安全规则只有一处实现。
+func (d *Database) DeleteClipboardEntry(id string) (string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	var img sql.NullString
+	// 查不到行不是错误：下面 DELETE 同样影响 0 行，调用方拿到的语义一致。
+	_ = d.conn.QueryRow("SELECT image_path FROM clipboard_entries WHERE id = ?", id).Scan(&img)
 	_, err := d.conn.Exec("DELETE FROM clipboard_entries WHERE id = ?", id)
-	return err
+	return img.String, err
 }
 
-// ClearClipboardHistory 清空剪贴板历史（保留固定的条目），返回删除条数
-func (d *Database) ClearClipboardHistory() (int64, error) {
+// collectClipboardImagePaths 取出即将被删的条目的图片路径（调用方已持锁）。
+func (d *Database) collectClipboardImagePaths(where string, args ...interface{}) []string {
+	rows, err := d.conn.Query(
+		"SELECT image_path FROM clipboard_entries WHERE "+where+" AND image_path IS NOT NULL AND image_path <> ''",
+		args...,
+	)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var p string
+		if rows.Scan(&p) == nil && p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// ClearClipboardHistory 清空剪贴板历史（保留固定的条目），返回删除条数与待清理的图片路径
+func (d *Database) ClearClipboardHistory() (int64, []string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
+	imgs := d.collectClipboardImagePaths("is_pinned = 0")
 	res, err := d.conn.Exec("DELETE FROM clipboard_entries WHERE is_pinned = 0")
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
-	return res.RowsAffected()
+	n, _ := res.RowsAffected()
+	return n, imgs, nil
 }
 
 // IncrementClipboardCopyCount 增加指定条目的复制次数
@@ -387,20 +450,24 @@ func (d *Database) UpdateClipboardNote(id, note string) error {
 	return err
 }
 
-// DeleteExpiredClipboardEntries 删除超过指定天数的剪贴板条目
-func (d *Database) DeleteExpiredClipboardEntries(days int) (int64, error) {
+// DeleteExpiredClipboardEntries 删除超过指定天数的剪贴板条目，返回删除条数与待清理的图片路径。
+//
+// 返回图片路径是必须的：只删数据库行会让 GetImageDir() 下的 PNG 永远留着，
+// 一个月几十张截图不显眼，一年就是几百 MB 的纯垃圾（且用户完全看不到）。
+func (d *Database) DeleteExpiredClipboardEntries(days int) (int64, []string, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 
 	cutoff := time.Now().AddDate(0, 0, -days).UnixMilli()
+	imgs := d.collectClipboardImagePaths("created_at < ? AND is_pinned = 0", cutoff)
 	res, err := d.conn.Exec(
 		"DELETE FROM clipboard_entries WHERE created_at < ? AND is_pinned = 0", cutoff,
 	)
 	if err != nil {
-		return 0, err
+		return 0, nil, err
 	}
 	count, _ := res.RowsAffected()
-	return count, nil
+	return count, imgs, nil
 }
 
 // GetClipboardRetentionDays 获取剪贴板保留天数（默认 30 天）

@@ -39,7 +39,10 @@ type AIMessage struct {
 	PromptTokens     int    `json:"prompt_tokens"`
 	CompletionTokens int    `json:"completion_tokens"`
 	CachedTokens     int    `json:"cached_tokens"`
-	CreatedAt        string `json:"created_at"`
+	// Stopped 这条助手回复是被用户中途打断的（内容是半截的），
+	// 前端据此在气泡上标「已中断」，避免刷新后被当成完整回答。
+	Stopped   bool   `json:"stopped"`
+	CreatedAt string `json:"created_at"`
 }
 
 func mapToAIConversation(m map[string]interface{}) AIConversation {
@@ -68,6 +71,7 @@ func mapToAIMessage(m map[string]interface{}) AIMessage {
 		PromptTokens:     integer(m["prompt_tokens"]),
 		CompletionTokens: integer(m["completion_tokens"]),
 		CachedTokens:     integer(m["cached_tokens"]),
+		Stopped:          integer(m["stopped"]) != 0,
 		CreatedAt:        str(m["created_at"]),
 	}
 }
@@ -288,7 +292,10 @@ func (d *Database) AddAIMessageFull(convID, role, content, reasoningContent stri
 // 与 AddAIMessageFull 分开：那个签名已经被「不带用量的写入」用着（例如外部
 // 直接补一条消息），把 usage 塞成第 5 个参数会让每个调用点都要判断传什么。
 // 用量放消息上是为了「回答下面那行小字」能持久化——前端 statMap 只活在当前会话。
-func (d *Database) SaveAssistantTurn(convID, content, reasoningContent, model string, u TokenUsage) (*AIMessage, error) {
+//
+// stopped=true 表示这条回复被用户中途打断：内容照样落库（半截也比没有强），
+// 但要带标记，否则刷新后无法区分「模型只答了这些」与「我自己点了停止」。
+func (d *Database) SaveAssistantTurn(convID, content, reasoningContent, model string, u TokenUsage, stopped bool) (*AIMessage, error) {
 	m := &AIMessage{
 		ID:               newID(),
 		ConvID:           convID,
@@ -299,6 +306,7 @@ func (d *Database) SaveAssistantTurn(convID, content, reasoningContent, model st
 		PromptTokens:     u.Prompt,
 		CompletionTokens: u.Completion,
 		CachedTokens:     u.Cached,
+		Stopped:          stopped,
 		CreatedAt:        now(),
 	}
 	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {

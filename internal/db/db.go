@@ -140,6 +140,8 @@ var validColumns = map[string]bool{
 	"action": true, "action_arg": true, "write_back": true, "updated_ts": true,
 	// AI 用量统计列（model 是多张表都可能用到的通用列名，白名单全局共用故只声明一次）
 	"model": true, "request_count": true, "cached_tokens": true,
+	// stopped：ai_messages 的「这条回复被中断」标记
+	"stopped": true,
 }
 
 // validateTable 检查表名是否在白名单中

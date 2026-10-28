@@ -162,11 +162,39 @@ func (d *Database) UpdateTodo(id, title, priority, dueDate, note, startTime, end
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
+
+	// 先读旧值：SQLite 的 UPDATE ... SET 里引用同名列时语义不直观（取决于赋值顺序），
+	// 这两件事又都必须基于「改之前」的值判断，索性读出来在 Go 里算。
+	var oldReminder, oldCompletedAt string
+	var oldSent int
+	if err := d.conn.QueryRow(
+		"SELECT reminder_time, reminder_sent, completed_at FROM todos WHERE id = ?", id,
+	).Scan(&oldReminder, &oldSent, &oldCompletedAt); err != nil {
+		return err
+	}
+	// 提醒时间被改过就复位 reminder_sent：提醒器只扫 reminder_sent=0 的条目，
+	// 不复位等于「这条提醒响过一次，用户改了时间想让它再响一次，却永远不会响」。
+	sent := oldSent
+	if oldReminder != reminderTime {
+		sent = 0
+	}
+	// 完成时间与 status 严格绑定（与 SetTodoStatus 同口径）：
+	//   - 改成 done：沿用已有的完成时间，没有才写当前时间（"完成于"应是首次完成时刻，
+	//     而不是每次点保存都刷新）；
+	//   - 改成非 done：清空，避免「未完成却有完成时间」。
+	completedAt := ""
+	if status == "done" {
+		completedAt = oldCompletedAt
+		if completedAt == "" {
+			completedAt = time.Now().Format(time.RFC3339)
+		}
+	}
+
 	_, err := d.conn.Exec(
 		`UPDATE todos
-		 SET title = ?, priority = ?, due_date = ?, note = ?, start_time = ?, end_time = ?, reminder_time = ?, recurrence = ?, tags = ?, status = ?, done = ?
+		 SET title = ?, priority = ?, due_date = ?, note = ?, start_time = ?, end_time = ?, reminder_time = ?, recurrence = ?, tags = ?, status = ?, done = ?, reminder_sent = ?, completed_at = ?
 		 WHERE id = ?`,
-		title, priority, dueDate, note, startTime, endTime, reminderTime, recurrence, tags, status, done, id,
+		title, priority, dueDate, note, startTime, endTime, reminderTime, recurrence, tags, status, done, sent, completedAt, id,
 	)
 	return err
 }
@@ -187,6 +215,16 @@ func (d *Database) SetTodoStatus(id, status string) error {
 		`UPDATE todos SET status = ?, done = ?, completed_at = CASE WHEN ? = 'done' THEN ? ELSE '' END WHERE id = ?`,
 		status, done, status, time.Now().Format(time.RFC3339), id,
 	)
+	return err
+}
+
+// SetTodoSort 只更新排序权重（看板拖拽落位 / 子任务上下移）。
+// 不复用 UpdateTodo：那条语句要传十几个字段、还会复位 reminder_sent，
+// 为了挪一个位置把提醒重置掉，副作用太远。
+func (d *Database) SetTodoSort(id string, sort int) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec(`UPDATE todos SET sort = ? WHERE id = ?`, sort, id)
 	return err
 }
 
@@ -276,10 +314,19 @@ func escapeLike(s string) string {
 	return s
 }
 
-// ClearCompletedTodos 清除所有已完成项
+// ClearCompletedTodos 清除所有已完成项（连同它们的子任务）
+//
+// 子任务几乎总是 "todo" 状态（父任务做完了，勾选项未必逐条勾过），只删
+// status='done' 会把它们留成**孤儿行**：列表按父行分组渲染、搜索也只返回顶层任务，
+// 于是这些行既看不见也搜不到，只会在数据库里一直躺着。
 func (d *Database) ClearCompletedTodos() error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
+	if _, err := d.conn.Exec(
+		"DELETE FROM todos WHERE parent_id <> '' AND parent_id IN (SELECT id FROM todos WHERE status = 'done')",
+	); err != nil {
+		return err
+	}
 	_, err := d.conn.Exec("DELETE FROM todos WHERE status = 'done'")
 	return err
 }
