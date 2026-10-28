@@ -8,7 +8,7 @@
 | 项 | 值 |
 |---|---|
 | 类型 | Wails v3 桌面应用（Go 后端 + Vue3 前端，单进程嵌入式 WebView） |
-| 模块名 | `quickdock`（Go 1.25 / toolchain 1.25.13） |
+| 模块名 | `quickdock`（Go 1.26，见 `go.mod`） |
 | 前端 | Vue 3 `<script setup>` + TypeScript，Vite 构建，产物 `frontend/dist` 被 `main.go` embed |
 | 绑定 | `frontend/bindings/**` 由 `wails3 generate bindings` **自动生成，禁止手改** |
 | 任务入口 | `Taskfile.yml`（build / package / run / dev），CI 见 `.github/workflows/release.yml` |

@@ -28,7 +28,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
       - name: Setup Node
         uses: actions/setup-node@v5
@@ -37,9 +37,8 @@ jobs:
 
       - name: Install Task runner
         # CI 构建统一走仓库 Taskfile（单一事实来源），避免构建参数在 CI 与 Taskfile 间漂移。
-        # ⚠️ 钉死 v3.53.0：v3.54.0 起 go.mod 要求 go >= 1.26.4，而 CI 锁 go 1.25 且
-        # GOTOOLCHAIN=local 无法自动升级工具链，源码编译必失败；v3.53.0 要求 go 1.25.10，
-        # CI 的 go 1.25.14 满足。请勿改回 @latest（会再次撞 1.26.4 门槛）。
+        # task 版本与本地一致，钉死 v3.53.0：不追最新，避免 CI 与本地行为漂移。
+        # （v3.54 系列要求 go >= 1.26，CI 已升到 1.26，需要时本地验证后一并升级，别改 @latest。）
         shell: pwsh
         run: |
           go install github.com/go-task/task/v3/cmd/task@v3.53.0
@@ -263,7 +262,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25'
+          go-version: '1.26'
 
       # 注意：本 job 不需要 Task runner（不跑 Taskfile，只调用 wails3 updater manifest）
 
