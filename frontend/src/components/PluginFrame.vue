@@ -29,8 +29,26 @@ const { onLoad } = usePluginHost({
   usePendingInit: props.usePendingInit,
 })
 
+// 模块级缓存：同一插件 + 主题 + 语言的前端页 HTML 只让后端构建一次，
+// 之后 remount / reload 直接复用，避免每次都打 GetPluginFrontendPage（插件前端构建偏重）。
+const pluginFrontendCache = new Map<string, string>()
+function frontendCacheKey(id: string, theme: string, loc: string): string {
+  return `${id}:${theme}:${loc}`
+}
+
 function currentThemeName(): string {
   return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+}
+
+async function buildHtml(): Promise<string | null> {
+  const theme = currentThemeName()
+  const loc = locale.value
+  const key = frontendCacheKey(props.pluginId, theme, loc)
+  const cached = pluginFrontendCache.get(key)
+  if (cached) return cached
+  const html = unwrap<string>(await GetPluginFrontendPage(props.pluginId, theme, loc))
+  if (html) pluginFrontendCache.set(key, html)
+  return html
 }
 
 async function loadFrontend() {
@@ -42,7 +60,7 @@ async function loadFrontend() {
     blobUrl = null
   }
   try {
-    const html = unwrap<string>(await GetPluginFrontendPage(props.pluginId, currentThemeName(), locale.value))
+    const html = await buildHtml()
     if (!html) {
       error.value = t('pluginNoFrontend')
       loading.value = false

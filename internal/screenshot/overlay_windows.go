@@ -184,8 +184,8 @@ type Overlay struct {
 }
 
 type overlayCmd struct {
-	src      *Bitmap
-	bounds   Rect
+	src    *Bitmap
+	bounds Rect
 	// preset 非空时会话一开始就是「选区已定」状态（跳过框选，工具条立即可见）。
 	// 全屏截图走这条路：用户不需要拖拽，抓完屏直接能复制/保存/贴图。
 	preset   Rect

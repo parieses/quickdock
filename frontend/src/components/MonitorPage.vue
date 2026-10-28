@@ -1,4 +1,5 @@
 <script setup lang="ts">
+defineOptions({ name: 'MonitorPage' })
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
@@ -107,10 +108,12 @@ async function refresh() {
   loading.value = true
   error.value = ''
   try {
-    monitors.value = unwrap<Monitor[]>(await ListMonitors()) ?? []
-    const st = unwrap<MonitorStat[]>(await ListMonitorStats()) ?? []
+    // 两条查询无依赖，并行发起，减少一次 Wails 往返（每次 binding 调用都是序列化 round-trip）
+    const [mons, st] = await Promise.all([ListMonitors(), ListMonitorStats()])
+    monitors.value = unwrap<Monitor[]>(mons) ?? []
+    const statsArr = unwrap<MonitorStat[]>(st) ?? []
     const map: Record<string, MonitorStat> = {}
-    for (const s of st) map[s.monitorId] = s
+    for (const s of statsArr) map[s.monitorId] = s
     stats.value = map
   } catch (e) {
     error.value = getErrorMessage(e)

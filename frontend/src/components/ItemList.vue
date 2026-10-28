@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, computed, watch } from 'vue'
+import { ref, inject, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import { Plus, Pencil, Trash2, Play, Link, Search, X } from '@lucide/vue'
@@ -28,6 +28,39 @@ const visibleItems = computed(() => {
 
 // 换集合时清空：上一个集合的关键词不该接着筛这一集合
 watch(() => store.activeCollectionId, () => { localQuery.value = '' })
+
+// ---- 虚拟滚动（仅超大集合窗口化，保留拖拽排序）----
+// 普通集合（<=VIRTUAL_THRESHOLD）走原始 v-for，外观 / 拖拽完全不变；
+// 超过阈值才窗口化：只渲染可视区 + 上下缓冲的行，避免数千条一次性建 DOM。
+// 行高固定 ROW_H（与 .qd-row 实际高度对齐，强制 44px 消除「有无副标题」的高度差）；
+// 拖拽落点用 store.filteredItems 全量下标，不依赖 DOM 上哪些行被渲染，故与重排兼容。
+const VIRTUAL_THRESHOLD = 100
+const ROW_H = 44
+const BUFFER = 6
+const scrollEl = ref<HTMLElement | null>(null)
+const scrollTop = ref(0)
+const viewportH = ref(0)
+const useVirtual = computed(() => visibleItems.value.length > VIRTUAL_THRESHOLD)
+const total = computed(() => visibleItems.value.length)
+const startIndex = computed(() => Math.max(0, Math.floor(scrollTop.value / ROW_H) - BUFFER))
+const endIndex = computed(() => Math.min(total.value, Math.ceil((scrollTop.value + viewportH.value) / ROW_H) + BUFFER))
+const slice = computed(() => visibleItems.value.slice(startIndex.value, endIndex.value))
+const offsetY = computed(() => startIndex.value * ROW_H)
+const totalH = computed(() => total.value * ROW_H)
+const bottomPad = computed(() => Math.max(0, totalH.value - offsetY.value - slice.value.length * ROW_H))
+
+function onScroll(e: Event) {
+  const el = e.target as HTMLElement
+  scrollTop.value = el.scrollTop
+  // 顺手刷新可视高：避免某些布局时机下 onMounted 测量为 0 导致首屏只渲染缓冲行
+  viewportH.value = el.clientHeight
+}
+function measureViewport() {
+  if (scrollEl.value) viewportH.value = scrollEl.value.clientHeight
+}
+onMounted(measureViewport)
+window.addEventListener('resize', measureViewport)
+onBeforeUnmount(() => window.removeEventListener('resize', measureViewport))
 
 const showEditor = ref(false)
 const editingItem = ref<CollectionItem | null>(null)
@@ -156,8 +189,51 @@ function onDropItem(e: DragEvent, targetId: string) {
         <X :size="12" />
       </button>
     </div>
-    <div class="qd-panel-body">
-      <ul v-if="visibleItems.length">
+    <div class="qd-panel-body" ref="scrollEl" @scroll.passive="onScroll">
+      <div v-if="useVirtual" class="item-vlist">
+        <div class="item-vspacer" :style="{ height: offsetY + 'px' }"></div>
+        <div
+          v-for="item in slice"
+          :key="item.id"
+          class="qd-row"
+          :class="{ dragging: dragItemId === item.id }"
+          :draggable="!store.hasSearch && !filtering"
+          @click="handleItemClick(item)"
+          @dragstart="onDragStartItem($event, item.id)"
+          @dragend="onDragEndItem"
+          @dragover="onDragOverItem"
+          @drop="onDropItem($event, item.id)"
+        >
+          <span class="qd-row-icon">
+            <img v-if="item.icon" :src="item.icon" class="item-app-icon-img" alt="" />
+            <TypeIcon v-else :type="item.type" :size="17" />
+          </span>
+          <span class="qd-row-main">
+            <span class="qd-row-title">{{ item.name }}</span>
+            <span class="qd-row-sub">{{ item.value }}</span>
+          </span>
+          <span v-if="item.value && item.value.includes('{query}')" class="item-quicklink-badge" :title="t('quicklink')">
+            <Link :size="11" />
+            <span>{{ t('quicklinkBadge') }}</span>
+          </span>
+          <span v-if="item.usageCount" class="item-usage" :title="t('openCount') + item.usageCount + t('times')">
+            {{ item.usageCount }}
+          </span>
+          <span class="qd-row-actions" @click.stop>
+            <button class="qd-row-btn" @click="handleItemClick(item)" :title="t('open')">
+              <Play :size="13" />
+            </button>
+            <button class="qd-row-btn" @click="handleEditItem(item)" :title="t('edit')">
+              <Pencil :size="13" />
+            </button>
+            <button class="qd-row-btn danger" @click="handleDeleteItem(item.id)" :title="t('delete')">
+              <Trash2 :size="13" />
+            </button>
+          </span>
+        </div>
+        <div class="item-vspacer" :style="{ height: bottomPad + 'px' }"></div>
+      </div>
+      <ul v-else-if="visibleItems.length">
         <li
           v-for="item in visibleItems"
           :key="item.id"
@@ -264,5 +340,15 @@ function onDropItem(e: DragEvent, targetId: string) {
   background: var(--color-accent-bg);
   color: var(--color-accent);
   font-size: 10px;
+}
+
+/* 虚拟滚动：窗口化容器与撑高占位块。.qd-row 在虚拟列表里强制固定 44px，
+   与 ROW_H 对齐（消除「有无副标题」造成的高度差，否则累计偏移会漂移）。 */
+.item-vlist { position: relative; }
+.item-vspacer { width: 100%; flex-shrink: 0; }
+.item-vlist .qd-row {
+  height: 44px;
+  margin-bottom: 0;
+  box-sizing: border-box;
 }
 </style>

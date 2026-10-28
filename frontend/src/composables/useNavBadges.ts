@@ -15,13 +15,10 @@
 //
 // 自动清已读：Sidebar 监听 currentPage 变化，进入哪一页就 markSeen 哪一页。
 
-import { reactive, computed, ref, watch } from 'vue'
+import { reactive, computed, watch } from 'vue'
 import { unwrap } from '../utils/api'
-import { ListMonitors } from '../../bindings/quickdock/services/monitor/monitorservice'
-import { ListTodos } from '../../bindings/quickdock/services/todo/todoservice'
-import { ListCrashFiles } from '../../bindings/quickdock/services/diag/diagservice'
+import { GetNavBadges } from '../../bindings/quickdock/services/appservice'
 import { pluginUpdateBadge } from './usePluginUpdateBadge'
-import type { Monitor, Todo } from '../../bindings/quickdock/internal/db/models'
 
 export type BadgeTone = 'danger' | 'warning' | 'info'
 
@@ -31,15 +28,25 @@ export interface NavBadge {
   titleKey: string
 }
 
-interface NavBadgeSource {
-  id: string
+// 角标元数据：tone / 文案 / sticky。raw 计数由下方轮询统一写入。
+interface BadgeMeta {
   tone: BadgeTone
-  /** 轮询间隔：崩溃要第一时间看到，待办到期一天之内变不了几次 */
-  intervalSec: number
-  /** sticky = 不在乎「看过没有」，数量本身就是要持续提醒的事实 */
-  sticky?: boolean
-  fetch: () => Promise<number>
   titleKey: string
+  sticky?: boolean
+}
+
+const META: Record<string, BadgeMeta> = {
+  monitor: { tone: 'danger', titleKey: 'badgeMonitorDown' },
+  todo: { tone: 'warning', titleKey: 'badgeTodoDue', sticky: true },
+  settings: { tone: 'danger', titleKey: 'badgeNewCrash' },
+  plugins: { tone: 'danger', titleKey: 'pluginUpdateBadge' },
+}
+
+// 后端聚合返回的角标计数（一次性拿 monitor/todo/crash，替代三路独立 IPC）
+interface NavBadgesResp {
+  monitorDown: number
+  todoDue: number
+  crashFiles: number
 }
 
 // 今日 0 点的比较基准只用日期字符串（YYYY-MM-DD 字典序 == 时间序），不引 date 库
@@ -67,74 +74,41 @@ function readSeen(): Record<string, number> {
   }
 }
 
-function writeSeen(map: Record<string, number>) {
-  try {
-    localStorage.setItem(SEEN_KEY, JSON.stringify(map))
-  } catch {
-    /* 隐私模式下写不了，本次会话内仍有效 */
-  }
+// 写入合并：轮询下调水位、markSeen 都会触发写，用 150ms 防抖合并高频写，避免每次 tick 都 setItem。
+// pendingSeenJson 存的必须是**最后一次**调用传入的值：防抖窗口内的多次调用只保留最新一份，
+// 否则窗口结束时落盘的是第一次的旧水位，下次启动角标又会全部冒出来。
+let pendingSeenJson: string | null = null
+let seenWriteTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleWriteSeen(map: Record<string, number>) {
+  pendingSeenJson = JSON.stringify(map)
+  if (seenWriteTimer) return
+  seenWriteTimer = setTimeout(() => {
+    seenWriteTimer = null
+    if (pendingSeenJson === null) return
+    try {
+      localStorage.setItem(SEEN_KEY, pendingSeenJson)
+    } catch {
+      /* 隐私模式下写不了，本次会话内仍有效 */
+    }
+    pendingSeenJson = null
+  }, 150)
 }
 
-// ---- 数据源注册表：新增一个角标就在这里加一条 ----
-const sources: NavBadgeSource[] = [
-  {
-    id: 'monitor',
-    tone: 'danger',
-    intervalSec: 90,
-    titleKey: 'badgeMonitorDown',
-    async fetch() {
-      const list = unwrap<Monitor[]>(await ListMonitors()) || []
-      // 只数「启用中且最近一次检查失败」的；停用的监控停 while 不该打扰用户
-      return list.filter((m) => m.enabled && m.lastStatus === 'down').length
-    },
-  },
-  {
-    id: 'todo',
-    tone: 'warning',
-    intervalSec: 300,
-    sticky: true,
-    titleKey: 'badgeTodoDue',
-    async fetch() {
-      const list = unwrap<Todo[]>(await ListTodos()) || []
-      const today = todayStr()
-      return list.filter((x) => !x.done && x.dueDate && x.dueDate <= today).length
-    },
-  },
-  {
-    id: 'settings',
-    tone: 'danger',
-    intervalSec: 60,
-    titleKey: 'badgeNewCrash',
-    async fetch() {
-      const files = unwrap<string[]>(await ListCrashFiles()) || []
-      return files.length
-    },
-  },
-  {
-    id: 'plugins',
-    tone: 'danger',
-    intervalSec: 300,
-    titleKey: 'pluginUpdateBadge',
-    // 市场索引拉取后写入 pluginUpdateBadge，这里只读它，不重复发请求
-    async fetch() {
-      return pluginUpdateBadge.count
-    },
-  },
-]
+function writeSeen(map: Record<string, number>) {
+  scheduleWriteSeen(map)
+}
 
 const raw = reactive<Record<string, number>>({})
 const seen = reactive<Record<string, number>>(readSeen())
 
-/** 某个 source 当前应显示的角标；无需显示返回 null。
- * 用普通函数而非 `computed(() => (id) => ...)`：后者只在「返回一个函数」上 memo，
- * 真正的响应式读取发生在调用处的 render effect 里，computed 几乎没收益还误导读者。 */
+/** 某个 source 当前应显示的角标；无需显示返回 null。 */
 function badgeOf(id: string): NavBadge | null {
-  const s = sources.find((x) => x.id === id)
-  if (!s) return null
+  const m = META[id]
+  if (!m) return null
   const r = raw[id] ?? 0
-  const n = s.sticky ? r : Math.max(0, r - (seen[id] ?? 0))
+  const n = m.sticky ? r : Math.max(0, r - (seen[id] ?? 0))
   if (n <= 0) return null
-  return { count: n, tone: s.tone, titleKey: s.titleKey }
+  return { count: n, tone: m.tone, titleKey: m.titleKey }
 }
 
 /** 「设置」按钮上的汇总角标：直接复用 badgeOf('settings')，避免和上面那套「已读水位」逻辑重复 */
@@ -142,63 +116,63 @@ const settingsBadge = computed<NavBadge | null>(() => badgeOf('settings'))
 
 /** 进入某页 → 记为已读（sticky 源不受影响）。单独导出：设置弹窗打开时也要清崩溃角标 */
 export function markSeen(id: string) {
-  const s = sources.find((x) => x.id === id)
-  if (!s || s.sticky) return
+  const m = META[id]
+  if (!m || m.sticky) return
   seen[id] = raw[id] ?? 0
   writeSeen({ ...seen })
 }
 
-async function refreshSource(s: NavBadgeSource) {
-  try {
-    raw[s.id] = Math.max(0, await s.fetch())
-  } catch {
-    // 角标取不到就当没有：它不是业务闭环的一环，静默降级比报错合适
-    raw[s.id] = 0
-  }
+function pullWaterLevel(id: string) {
   // 数据源下降时把水位一起拉下来。否则「清空了 3 条 → seen 仍记 3」，
   // 之后新来 1 条会被算成 (1-3) = 0，新事件就永远不提示了。
-  if (!s.sticky && (seen[s.id] ?? 0) > raw[s.id]) {
-    seen[s.id] = raw[s.id]
+  if ((seen[id] ?? 0) > (raw[id] ?? 0)) {
+    seen[id] = raw[id]
     writeSeen({ ...seen })
   }
 }
 
-/** 立即刷新单个源（业务操作后调用，例如改完待办希望角标马上跟上） */
-function refreshNow(id: string) {
-  const s = sources.find((x) => x.id === id)
-  if (s) void refreshSource(s)
+async function refreshAggregated() {
+  try {
+    const r = unwrap<NavBadgesResp>(await GetNavBadges())
+    if (r) {
+      raw['monitor'] = Math.max(0, r.monitorDown)
+      raw['todo'] = Math.max(0, r.todoDue)
+      raw['settings'] = Math.max(0, r.crashFiles)
+      // 插件可更新是前端派生值（市场索引拉取后写入），不走后端聚合
+      raw['plugins'] = Math.max(0, pluginUpdateBadge.count)
+      for (const id of ['monitor', 'todo', 'settings', 'plugins']) pullWaterLevel(id)
+      return
+    }
+  } catch {
+    // 角标取不到就当没有：它不是业务闭环的一环，静默降级比报错合适
+  }
+  for (const id of ['monitor', 'todo', 'settings']) raw[id] = 0
 }
 
+/** 立即刷新（业务操作后调用，例如改完待办希望角标马上跟上） */
+function refreshNow() {
+  void refreshAggregated()
+}
+
+/** 全量刷新（首次挂载用） */
 function refreshAll() {
-  void Promise.all(sources.map(refreshSource))
+  void refreshAggregated()
 }
 
-// ---- 轮询：统一 15s tick，每个源按自己的 intervalSec 到期才真正请求 ----
-const TICK_SEC = 15
-const lastRun = ref<Record<string, number>>({})
+// ---- 轮询：统一 60s tick（取原最快相关源 crash=60s 的节奏），每次只打 1 次后端聚合 ----
+const TICK_SEC = 60
 let timer: ReturnType<typeof setInterval> | null = null
 let running = false
 
 function tick() {
   if (running) return // 慢请求叠加保护：上一轮没跑完就不发新的
   running = true
-  const now = Date.now()
-  void Promise.all(
-    sources
-      .filter((s) => now - (lastRun.value[s.id] ?? 0) >= s.intervalSec * 1000)
-      .map(async (s) => {
-        lastRun.value[s.id] = now
-        await refreshSource(s)
-      }),
-  ).finally(() => { running = false })
+  void refreshAggregated().finally(() => { running = false })
 }
 
 function startPolling() {
   if (timer) return
-  void Promise.all(sources.map(async (s) => {
-    lastRun.value[s.id] = Date.now()
-    await refreshSource(s)
-  }))
+  void refreshAggregated()
   timer = setInterval(tick, TICK_SEC * 1000)
 }
 

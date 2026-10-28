@@ -133,6 +133,15 @@ const displayLines = computed<LogRow[]>(() =>
   isCrash.value ? crashDisplayLines.value : filteredLines.value.map(parseLine),
 )
 
+// 渲染上限：静态日志 / 崩溃日志可能几十万行，一次性建 DOM 会卡死。
+// tail 模式已由 TAIL_MAX_LINES 截断；这里约束非 tail 的渲染输出，复制也只复制可见部分。
+const RENDER_CAP = 5000
+const renderedLines = computed<LogRow[]>(() => {
+  const d = displayLines.value
+  return d.length > RENDER_CAP ? d.slice(0, RENDER_CAP) : d
+})
+const isRenderCapped = computed(() => displayLines.value.length > RENDER_CAP)
+
 function escapeHtml(s: string): string {
   return s.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c] as string))
 }
@@ -491,7 +500,7 @@ async function copyText(text: string) {
     copyTimer = setTimeout(() => { copied.value = false }, 1500)
   }
 }
-function copyAll() { copyText(displayLines.value.map((r) => r.raw).join('\n')) }
+function copyAll() { copyText(renderedLines.value.map((r) => r.raw).join('\n')) }
 function copyLine(l: string) { copyText(l) }
 
 onMounted(async () => {
@@ -680,7 +689,10 @@ onUnmounted(() => {
             {{ t('ltReceived', { n: activeTab.received }) }}
           </span>
           <span v-else-if="rawLines.length" class="log-count">
-            {{ t('logLines', { shown: displayLines.length, total: rawLines.length }) }}
+            {{ t('logLines', { shown: renderedLines.length, total: rawLines.length }) }}
+          </span>
+          <span v-if="isRenderCapped" class="log-count log-capped">
+            {{ t('logRenderCapped', { max: RENDER_CAP }) }}
           </span>
           <button v-if="!isTail" class="log-btn" :disabled="loading" @click="loadContent">
             <RefreshCw :size="13" /> {{ t('logRefresh') }}
@@ -707,7 +719,7 @@ onUnmounted(() => {
           <div class="crash-meta-msg">{{ crashMeta.message }}</div>
         </div>
         <div
-          v-for="(row, i) in displayLines"
+          v-for="(row, i) in renderedLines"
           :key="i"
           :class="['log-line-row', 'lv-' + row.level]"
         >
@@ -940,6 +952,7 @@ onUnmounted(() => {
   font-size: 11px; color: var(--color-text-disabled);
   font-variant-numeric: tabular-nums; white-space: nowrap; padding-right: 2px;
 }
+.log-capped { color: var(--color-warning); }
 
 /* 级别开关：开着的按钮有淡底，关掉的透明且半透明——状态一眼可辨，
    比原来「都一样、只差 0.3 透明度」清楚 */

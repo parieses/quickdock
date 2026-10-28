@@ -29,12 +29,28 @@ function readList(key: string): string[] {
   }
 }
 
+// 写入合并：拖拽排序 / 显隐会连续触发 persist()，每次同步 JSON.stringify + setItem 偏贵。
+// 用 150ms 防抖把高频写合并成一次；模块级 pending 表保证多条 key 一起落盘。
+const pendingWrites = new Map<string, string>()
+let writeTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleWrite(key: string, value: string) {
+  pendingWrites.set(key, value)
+  if (writeTimer) return
+  writeTimer = setTimeout(() => {
+    writeTimer = null
+    for (const [k, v] of pendingWrites) {
+      try {
+        localStorage.setItem(k, v)
+      } catch {
+        /* 隐私模式下写不了，本次会话内仍生效 */
+      }
+    }
+    pendingWrites.clear()
+  }, 150)
+}
+
 function writeList(key: string, list: string[]) {
-  try {
-    localStorage.setItem(key, JSON.stringify(list))
-  } catch {
-    /* 隐私模式下写不了，本次会话内仍生效 */
-  }
+  scheduleWrite(key, JSON.stringify(list))
 }
 
 const hiddenIds = ref<string[]>(readList(HIDDEN_KEY))
