@@ -209,6 +209,33 @@ func (a *AppService) wakeScheduler() {
 	}
 }
 
+// RescheduleAfterRestore 定时任务从回收站恢复后重排下次运行时间。
+//
+// 墓碑存的是「删除那一刻」的整行快照，next_run 通常是早已过去的时间点。
+// 原样写回会被下一轮 checkScheduledTasks 判成到期而在恢复瞬间补跑一次——
+// 用户只是把任务找回来，不代表要它现在执行（更别说可能是一次性之外的向下单/重启类动作）。
+// 因此这里统一按当前时刻重算下一次；已过期的才会被重排，未到期的不动。
+func (a *AppService) RescheduleAfterRestore(id string) {
+	id = strings.TrimSpace(id)
+	if a.DB == nil || id == "" {
+		return
+	}
+	t, err := a.DB.GetScheduledTask(id)
+	if err != nil || t == nil {
+		return
+	}
+	now := nowStr()
+	if t.NextRun != "" && t.NextRun > now {
+		a.wakeScheduler() // 还没到点，快照仍然有效，只需让调度器知道它回来了
+		return
+	}
+	next := computeNextRun(t, now)
+	if err := a.DB.SetTaskEnabled(t.ID, t.Enabled, next); err != nil {
+		logger.W("QuickDock: 恢复定时任务后重排失败 (id=%s): %v", id, err)
+	}
+	a.wakeScheduler()
+}
+
 func (a *AppService) scheduleLoop() {
 	defer logger.RecoverPanic("schedule runner")
 	time.Sleep(3 * time.Second)

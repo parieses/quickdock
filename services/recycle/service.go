@@ -48,12 +48,18 @@ func (s *RecycleService) ListRecycle() *services.ApiResult {
 }
 
 // RestoreRecycle 恢复一条：原样写回各行（含级联子树），成功后移除墓碑。
+//
+// 定时任务额外走 AppService.RescheduleAfterRestore：墓碑里的 next_run 可能早已过期，
+// 不重排会在恢复那一刻被调度循环当成到期任务立刻跑一次。
 func (s *RecycleService) RestoreRecycle(collection, id string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
 	}
 	if err := s.App.DB.RestoreTombstone(collection, id); err != nil {
 		return services.Fail(err)
+	}
+	if collection == "schedules" {
+		s.App.RescheduleAfterRestore(id)
 	}
 	return services.Ok(nil)
 }

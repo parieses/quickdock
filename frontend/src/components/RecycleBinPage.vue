@@ -7,7 +7,7 @@ import { useWorkspaceStore } from '../stores/workspace'
 import {
   ListRecycle, RestoreRecycle, PurgeRecycle, ClearRecycle,
 } from '../../bindings/quickdock/services/recycle/recycleservice'
-import { Boxes, LayoutGrid, Layers, Bookmark, FileText, RefreshCw, Trash2, Undo2 } from '@lucide/vue'
+import { Boxes, LayoutGrid, Layers, Bookmark, FileText, RefreshCw, Trash2, Undo2, Timer } from '@lucide/vue'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -40,6 +40,7 @@ const TYPE_FILTERS: { value: string; labelKey: string }[] = [
   { value: 'collections', labelKey: 'recycleTypeCollection' },
   { value: 'items', labelKey: 'recycleTypeItem' },
   { value: 'notes', labelKey: 'recycleTypeNote' },
+  { value: 'schedules', labelKey: 'recycleTypeSchedule' },
 ]
 const typeFilter = ref('')
 
@@ -49,6 +50,7 @@ const TYPE_ICON: Record<string, Component> = {
   collections: Layers,
   items: Bookmark,
   notes: FileText,
+  schedules: Timer,
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -57,6 +59,7 @@ const TYPE_LABEL: Record<string, string> = {
   collections: 'recycleTypeCollection',
   items: 'recycleTypeItem',
   notes: 'recycleTypeNote',
+  schedules: 'recycleTypeSchedule',
 }
 
 // 只显示出现在筛选里的类型，避免假选项（某类型一条都没有时点进去是空页）

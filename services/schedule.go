@@ -72,7 +72,7 @@ func (a *AppService) DeleteScheduledTask(id string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.DB.DeleteScheduledTask(id); err != nil {
+	if err := a.DB.DeleteScheduledTaskToRecycle(id); err != nil {
 		return Fail(err)
 	}
 	// 级联清理执行历史，避免历史表残留孤儿记录（保留策略只按时间/条数收敛，不感知任务删除）
