@@ -19,7 +19,16 @@ export default defineConfig({
       "vue-i18n",
       "pinia",
       "marked",
+      // 公式渲染：AI 页是异步 chunk，katex 在该 chunk 里才被 import，
+      // 不预声明会在第一次点开 AI 页时触发二次预构建（见本段开头说明）。
+      "katex",
       "dompurify",
+      // 代码块语法高亮：common 子集按需加载（AI 页用到才拉），必须预声明，
+      // 否则首次渲染高亮代码块会触发二次预构建 → re-optimize 崩溃。
+      "highlight.js/lib/common",
+      // Mermaid 同样是「用到才加载」（动态 import，回答里出现 ```mermaid 才拉），
+      // 必须在这里声明，否则首次渲染流程图时会触发二次预构建 → 页面请求 504。
+      "mermaid",
       "pinyin-pro",
       "@lucide/vue",
       "@floating-ui/vue",
@@ -74,6 +83,11 @@ export default defineConfig({
           if (id.includes('pinia')) return 'pinia'
           if (id.includes('marked')) return 'marked'
           if (id.includes('dompurify') || id.includes('isomorphic-dompurify')) return 'dompurify'
+          // 重依赖独立分包：进对应页才按需拉，缩短首屏/进页白屏
+          if (id.includes('@xterm')) return 'xterm'
+          if (id.includes('katex')) return 'katex'
+          if (id.includes('mermaid')) return 'mermaid'
+          if (id.includes('highlight.js')) return 'highlight'
           if (id.includes('/vue/') || id.includes('vue-router')) return 'vue'
         },
       },

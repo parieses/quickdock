@@ -23,6 +23,7 @@ import { AlignLeft, Check, Copy, Loader2, Send, Sparkles, Square, Trash2, Waves,
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { splitAiSegments } from '../utils/aiSegments'
+import { mathExtension } from '../utils/mathMarkdown'
 import { useAiStreamPreference } from '../composables/useAiStreamPreference'
 import { useToast } from '../composables/useToast'
 
@@ -159,6 +160,8 @@ const { streamEnabled } = useAiStreamPreference()
  * 若这里也渲染一次，同一条内容会在界面上出现两遍。
  */
 const md = new Marked({ breaks: true, gfm: true })
+// 公式渲染：SSH 面板里的 AI 回答同样会有 LaTeX，规则与主对话页共用一套。
+md.use(mathExtension())
 
 const question = ref('')
 const copied = ref('')
@@ -618,6 +621,30 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 
 .ai-panel-answer :deep(li) {
   margin: 1px 0;
+}
+
+/* 数学公式：面板窄，块级公式必须能横向滚，否则会把整个面板撑宽 */
+.ai-panel-answer :deep(.md-math-inline) {
+  display: inline;
+}
+
+.ai-panel-answer :deep(.md-math-block) {
+  display: block;
+  margin: 6px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.ai-panel-answer :deep(.md-math-block .katex-display) {
+  margin: 0;
+}
+
+.ai-panel-answer :deep(.md-math-raw) {
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text-secondary);
 }
 
 .ai-panel-answer :deep(li > p) {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+defineOptions({ name: 'NoteManagerPage' })
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onBeforeUnmount, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -10,6 +11,7 @@ import ConfirmDialog from './ConfirmDialog.vue'
 import NoteTreeNode from './NoteTreeNode.vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import { installMathOnce } from '../utils/mathMarkdown'
 import {
   ListNotesTree,
   SearchNotesTree,
@@ -196,6 +198,11 @@ async function handleDrop(dragId: string, targetId: string) {
 
 // ---- 右侧文档编辑/预览 ----
 const selectedDoc = computed<Note | null>(() => (selectedDocId.value ? nodes.value.find(n => n.id === selectedDocId.value) || null : null))
+// 笔记预览也认 LaTeX：AI 回答里「存为笔记」保存的就是带 `\(...\)` / `\[...\]` 的原文，
+// 不接这一步，笔记里就会重现「公式当正文」的样子。
+// 用 installMathOnce 而不是直接 marked.use —— 本文件每次进入页面都会重跑一遍 setup。
+installMathOnce(marked)
+
 const previewHtml = computed(() => (docContent.value ? DOMPurify.sanitize(marked.parse(docContent.value, { async: false }) as string) : ''))
 
 // 标签以逗号分隔输入，必须序列化成合法 JSON 数组。
@@ -429,4 +436,12 @@ watch(pendingOpenNoteId, (id) => {
 .markdown-body :deep(table) { border-collapse: collapse; margin: 8px 0; }
 .markdown-body :deep(th), .markdown-body :deep(td) { border: 1px solid var(--color-border); padding: 4px 8px; }
 .markdown-body :deep(img) { max-width: 100%; }
+/* 数学公式：与 AI 对话页同一套容器规则（见 utils/mathMarkdown.ts） */
+.markdown-body :deep(.md-math-inline) { display: inline; }
+.markdown-body :deep(.md-math-block) { display: block; margin: 10px 0; overflow-x: auto; overflow-y: hidden; }
+.markdown-body :deep(.md-math-block .katex-display) { margin: 0; }
+.markdown-body :deep(.md-math-raw) {
+  font-family: 'Consolas','Monaco',monospace; font-size: 12px;
+  white-space: pre-wrap; word-break: break-word; color: var(--color-text-secondary);
+}
 </style>

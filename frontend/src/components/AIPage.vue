@@ -1,15 +1,32 @@
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote, ArrowDown, Image as ImageIcon, Link2 } from '@lucide/vue'
+import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote, ArrowDown, Image as ImageIcon, Link2, X, Download } from '@lucide/vue'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
+import { SetAIPageVisible } from '../../bindings/quickdock/services/appservice'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { splitMarkdownBlocks as splitBlocks } from '../utils/markdownBlocks'
+import { isMathFenceLang, mathExtension, renderMath } from '../utils/mathMarkdown'
+import {
+  handleMermaidToolbarClick,
+  isMermaidFenceLang,
+  mermaidPlaceholder,
+  renderMermaidIn,
+  setMermaidFolded,
+  setMermaidSourceMode,
+  type MermaidLabels,
+} from '../utils/mermaidMarkdown'
+import { copyElementAsImage, downloadBlob, serializeMermaidSvg, svgToPngBlob, resolveBackground } from '../utils/elementImage'
+// 代码块语法高亮：common 子集覆盖 AI 常见语言（js/ts/python/go/bash/json/sql/html...），
+// 比全量包小很多。主题配色见 styles/hljs-theme.css（跟随 <html data-theme>）。
+import hljs from 'highlight.js/lib/common'
+import '../styles/hljs-theme.css'
 import { useFloatMenu } from '../composables/useFloatMenu'
+import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import type { ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
@@ -27,11 +44,22 @@ import {
   AILoadImage,
 } from '../../bindings/quickdock/services/ai/aiservice'
 
+// 这个 name 是 App.vue 里 <KeepAlive :include> 的匹配依据，改它等于让 AI 页失去保活。
+// 为什么必须显式声明：页面是经 defineAsyncComponent(import(...)) 注册的，而 KeepAlive 判断
+// 异步组件时读的是 `vnode.type.__asyncResolved`（内层 SFC 定义）上的名字 ——
+// 在包装器上赋 name 完全无效，不声明就永远匹配不上，切页照样销毁组件。
+defineOptions({ name: 'AIPageKeepAlive' })
+
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 interface AIConversation { id: string; title: string; summary: string; prompt_tokens: number; completion_tokens: number; created_at: string; updated_at: string }
-interface AIMessage { id: string; conv_id: string; role: string; content: string; created_at: string; reasoning_content?: string; images?: string; imgList?: AIMsgImage[] }
+interface AIMessage {
+  id: string; conv_id: string; role: string; content: string; created_at: string
+  reasoning_content?: string; images?: string; imgList?: AIMsgImage[]
+  // 该条回复自己那一次调用的用量（assistant 才有值，老消息为 0/undefined）
+  model?: string; prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number
+}
 
 // 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
 // path 为落盘后相对数据目录的路径，重载会话时由 AILoadImage 读回 dataUrl）。
@@ -184,6 +212,113 @@ function pruneMessageBlocks(list: AIMessage[]) {
   }
 }
 
+// —— Mermaid 图渲染调度 ——
+// 图不是同步渲染出来的：marked 只吐源码占位块，真正画图要等 DOM 挂上后走异步 API。
+// 这个调度点用 nextTick 合并同一批更新（流式每帧都会触发，语义上只需要「这帧之后扫一遍」）。
+let mermaidScanPending = false
+
+function skipStreamTail(el: HTMLElement): boolean {
+  // 流式尾块的围栏还没闭合，此时渲染必然失败；等它变成普通块（下一帧或回答结束）再画
+  const block = el.closest('.ai-md-block') as HTMLElement | null
+  if (!block || !block.closest('.ai-msg.streaming')) return false
+  return block === block.parentElement?.lastElementChild
+}
+
+function scheduleMermaidScan() {
+  if (mermaidScanPending) return
+  mermaidScanPending = true
+  nextTick(() => {
+    mermaidScanPending = false
+    renderMermaidIn(msgContent.value, { skip: skipStreamTail })
+    enhanceTables(msgContent.value)
+  })
+}
+
+// —— 表格增强：横向滚动 / 表头点击排序 / 导出 CSV ——
+// 这些作用在 v-html 渲染出的真实 DOM 上（Vue 不托管），故走原生 API。
+// 已处理的表打 data-tbl-enhanced，避免流式每帧重扫时重复注入。
+function enhanceTables(root: HTMLElement | null) {
+  if (!root) return
+  const tables = root.querySelectorAll('table:not([data-tbl-enhanced])')
+  for (const tbl of Array.from(tables) as HTMLTableElement[]) {
+    tbl.setAttribute('data-tbl-enhanced', '1')
+    const parent = tbl.parentElement
+    // 横向滚动容器：表格可能比气泡宽，不包一层表格自己不会滚
+    let wrap = parent?.classList.contains('md-table-wrap')
+      ? (parent as HTMLElement)
+      : null
+    if (!wrap && parent) {
+      wrap = document.createElement('div')
+      wrap.className = 'md-table-wrap'
+      parent.insertBefore(wrap, tbl)
+      wrap.appendChild(tbl)
+    }
+    // 表头排序：给每个 thead th 打列索引 + 可点标记（marked 表格第一行即 thead>th）
+    tbl.querySelectorAll('thead th').forEach((th, i) => {
+      th.setAttribute('data-col', String(i))
+      th.classList.add('md-th-sortable')
+    })
+    // 导出 CSV 按钮条（插在滚动容器上方）
+    if (wrap && !wrap.previousElementSibling?.classList.contains('md-table-bar')) {
+      const bar = document.createElement('div')
+      bar.className = 'md-table-bar'
+      const btn = document.createElement('button')
+      btn.type = 'button'
+      btn.className = 'md-table-export'
+      btn.textContent = t('aiExportCsv')
+      btn.addEventListener('click', () => exportTableCsv(tbl))
+      bar.appendChild(btn)
+      wrap.parentElement?.insertBefore(bar, wrap)
+    }
+  }
+}
+
+function csvCell(s: string): string {
+  const v = (s || '').replace(/\r?\n/g, ' ').trim()
+  return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v
+}
+
+function exportTableCsv(tbl: HTMLTableElement) {
+  const lines = Array.from(tbl.querySelectorAll('tr')).map((r) =>
+    Array.from(r.children)
+      .map((c) => csvCell(c.textContent ?? ''))
+      .join(','),
+  )
+  const csv = '﻿' + lines.join('\r\n') // 前导 BOM：避免 Excel 把中文 CSV 读成乱码
+  downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'table.csv')
+  toast.success(t('aiDownloadOk', { name: 'table.csv' }))
+}
+
+function sortTableByColumn(th: HTMLElement) {
+  const tbl = th.closest('table') as HTMLTableElement | null
+  if (!tbl) return
+  const col = Number(th.dataset.col ?? '0')
+  const tbody = (tbl.querySelector('tbody') as HTMLTableSectionElement | null) || tbl
+  const rows = Array.from(tbody.querySelectorAll('tr'))
+  if (!rows.length) return
+  const prevCol = tbl.dataset.sortCol
+  const prevDir = tbl.dataset.sortDir
+  const dir = prevCol === String(col) && prevDir === 'asc' ? 'desc' : 'asc'
+  const numeric = rows.every((r) => {
+    const v = (r.children[col]?.textContent ?? '').trim()
+    return v !== '' && !Number.isNaN(Number(v))
+  })
+  rows.sort((a, b) => {
+    const av = (a.children[col]?.textContent ?? '').trim()
+    const bv = (b.children[col]?.textContent ?? '').trim()
+    const cmp = numeric ? Number(av) - Number(bv) : av.localeCompare(bv, undefined, { numeric: true })
+    return dir === 'asc' ? cmp : -cmp
+  })
+  rows.forEach((r) => tbody.appendChild(r))
+  tbl.dataset.sortCol = String(col)
+  tbl.dataset.sortDir = dir
+  // 指示符：只有当前列显示 ▲/▼，其余清掉
+  tbl.querySelectorAll('.md-th-sortable').forEach((el) => {
+    if (el !== th) el.removeAttribute('data-sort-dir')
+  })
+  th.setAttribute('data-sort-dir', dir)
+}
+
 // 提交缓冲区到响应式状态。done/停止时必须立即 flush，否则尾部文字会丢。
 function flushStream() {
   if (streamTimer) { clearTimeout(streamTimer); streamTimer = null }
@@ -196,6 +331,7 @@ function flushStream() {
     streamReasonBuf = ''
   }
   renderLiveBlocks(streamingText.value)
+  scheduleMermaidScan()
   followBottom()
 }
 
@@ -422,6 +558,22 @@ function confirmUrlImage() {
 // 同时便于扩展 code renderer：给代码块加语言标签 + 复制按钮。
 const md = new Marked({ breaks: true, gfm: true })
 
+// 流程图工具栏的文案。utils 层是纯函数、没有 i18n 上下文，所以由这里翻好再传下去；
+// 做成函数而不是常量，切语言后新渲染的图能立刻用上新文案。
+function mermaidLabels(): MermaidLabels {
+  return {
+    error: t('aiMermaidError'),
+    source: t('aiMermaidSource'),
+    diagram: t('aiMermaidDiagram'),
+    fold: t('aiMermaidFold'),
+    expand: t('aiMermaidExpand'),
+  }
+}
+
+// 数学公式：AI 回答里的公式一律是 LaTeX 源码，没有这一步就会被当成正文原样吐出来。
+// 规则与边界见 utils/mathMarkdown.ts（含流式半截公式的降级处理）。
+md.use(mathExtension())
+
 // DOMPurify 默认白名单已包含 button / svg / pre / code，且默认放行 data-* 属性
 // （ALLOW_DATA_ATTR=true）与 aria-*（ALLOW_ARIA_ATTR=true），
 // 因此复制按钮可以安全地写在 v-html 里，用事件委托处理点击。
@@ -431,14 +583,42 @@ md.use({
   renderer: {
     code(token: { text: string; lang?: string }) {
       const lang = (token.lang || '').split(/\s+/)[0] || ''
-      const body = escapeHtml(token.text.replace(/\n$/, ''))
+      // ```latex / ```math 这类围栏装的是公式而不是代码：渲染成公式，
+      // 也不再给「复制代码」按钮——复制一段 LaTeX 源码回聊天框没有意义。
+      if (isMathFenceLang(lang)) return renderMath(token.text, true)
+      // ```mermaid 装的是图定义：先吐源码占位块，等 DOM 挂上后再异步渲染成 SVG。
+      // 为什么不能在这里直接渲染：Mermaid 只有异步 API，而这条链路是同步的（详见 utils/mermaidMarkdown.ts）。
+      if (isMermaidFenceLang(lang)) return mermaidPlaceholder(token.text, mermaidLabels())
+      const codeText = token.text.replace(/\n$/, '')
       const label = lang || 'text'
+      // 语法高亮：已知语言走精确高亮，未知语言交给 highlightAuto（按内容猜）。
+      // hljs 返回的 value 已是「转义后 + <span class="hljs-*" >」的 HTML，无需再 escapeHtml。
+      let body: string
+      try {
+        const langLower = lang.toLowerCase()
+        body = lang && hljs.getLanguage(langLower)
+          ? hljs.highlight(codeText, { language: langLower }).value
+          : hljs.highlightAuto(codeText).value
+      } catch {
+        body = escapeHtml(codeText)
+      }
+      // html 代码块给一个「预览」按钮：模型给的示例页只有真的跑起来才知道对不对，
+      // 存成文件再双击打开太绕。实际执行放在沙箱 iframe 里，见 openHtmlPreview。
+      const runnable = /^(html|htm)$/i.test(lang)
+      const runBtn = runnable
+        ? `<button type="button" class="md-code-run" data-md-run="1" title="${escapeHtml(t('aiPreviewHtml'))}" aria-label="${escapeHtml(t('aiPreviewHtml'))}">` +
+            `<svg viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>` +
+          `</button>`
+        : ''
       return `<div class="md-code" data-md-code>` +
         `<div class="md-code-bar">` +
           `<span class="md-code-lang">${escapeHtml(label)}</span>` +
-          `<button type="button" class="md-code-copy" data-md-copy="1" title="${escapeHtml(t('copyCode'))}" aria-label="${escapeHtml(t('copyCode'))}">` +
-            `<svg viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>` +
-          `</button>` +
+          `<span class="md-code-actions">` +
+            runBtn +
+            `<button type="button" class="md-code-copy" data-md-copy="1" title="${escapeHtml(t('copyCode'))}" aria-label="${escapeHtml(t('copyCode'))}">` +
+              `<svg viewbox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>` +
+            `</button>` +
+          `</span>` +
         `</div>` +
         `<pre><code${lang ? ` class="language-${escapeHtml(lang)}"` : ''}>${body}</code></pre>` +
       `</div>`
@@ -500,6 +680,8 @@ async function loadMessages(convID: string) {
   stickToBottom.value = true
   showJumpBtn.value = false
   scrollToBottom()
+  // 历史消息里可能有 ```mermaid（图不是同步渲染的，得在 DOM 挂上后补扫一遍）
+  scheduleMermaidScan()
 }
 
 async function selectConv(id: string) {
@@ -585,7 +767,7 @@ async function ensureStreamInfo() {
 }
 
 // 单条回复的统计信息（耗时 / 首字延迟 / token 用量）
-interface AIStreamStat { elapsedMs: number; firstTokenMs: number; promptTokens: number; completionTokens: number }
+interface AIStreamStat { elapsedMs: number; firstTokenMs: number; promptTokens: number; completionTokens: number; cachedTokens: number }
 // messageId -> 统计。挂在消息对象上随消息一起渲染。
 const statMap = reactive(new Map<string, AIStreamStat>())
 
@@ -594,14 +776,40 @@ const statMap = reactive(new Map<string, AIStreamStat>())
 // 首字延迟为 0 说明是中断的回复（没等到首字），此时不展示该项。
 function formatStat(stat: AIStreamStat): string {
   const parts: string[] = []
-  parts.push(t('aiStatElapsed', { ms: formatDuration(stat.elapsedMs) }))
+  // 耗时只在「本次会话刚生成」时才有（从库里读回来的消息没有），0 即隐藏
+  if (stat.elapsedMs > 0) parts.push(t('aiStatElapsed', { ms: formatDuration(stat.elapsedMs) }))
   if (stat.firstTokenMs > 0) {
     parts.push(t('aiStatFirstToken', { ms: formatDuration(stat.firstTokenMs) }))
   }
   if (stat.promptTokens > 0 || stat.completionTokens > 0) {
-    parts.push(t('aiStatTokens', { in: stat.promptTokens, out: stat.completionTokens }))
+    const pct = stat.promptTokens > 0 ? Math.round((stat.cachedTokens / stat.promptTokens) * 1000) / 10 : 0
+    parts.push(pct > 0
+      ? t('aiStatTokensCached', { in: fmtTokens(stat.promptTokens), out: fmtTokens(stat.completionTokens), pct })
+      : t('aiStatTokens', { in: fmtTokens(stat.promptTokens), out: fmtTokens(stat.completionTokens) }))
   }
   return parts.join(' · ')
+}
+
+// token 数折算成 k/M：真实对话的输入常是几万到几十万，原样打印会把这一行拖得很长
+function fmtTokens(n: number): string {
+  if (!n) return '0'
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M'
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'
+  return String(n)
+}
+
+// 单条消息要显示的统计：优先用本次会话内存里的（含耗时/首字），
+// 否则回落到消息自带的用量 —— 这样刷新页面或换会话回来，token 与缓存命中仍在。
+function msgStat(m: AIMessage): AIStreamStat | null {
+  const live = statMap.get(m.id)
+  if (live) return live
+  if (!m.prompt_tokens && !m.completion_tokens) return null
+  return {
+    elapsedMs: 0, firstTokenMs: 0,
+    promptTokens: m.prompt_tokens || 0,
+    completionTokens: m.completion_tokens || 0,
+    cachedTokens: m.cached_tokens || 0,
+  }
 }
 
 // 毫秒 → 人类可读：<1s 用 ms，否则一位小数的秒
@@ -721,8 +929,15 @@ async function send() {
                   firstTokenMs: Number(data.firstTokenMs) || 0,
                   promptTokens: Number(data.promptTokens) || 0,
                   completionTokens: Number(data.completionTokens) || 0,
+                  cachedTokens: Number(data.cachedTokens) || 0,
                 }
                 statMap.set(msg.id as string, stat)
+                // 同步到消息对象：刷新后由 DB 里的同名字段接管，展示逻辑不用分两套
+                Object.assign(msg, {
+                  prompt_tokens: stat.promptTokens,
+                  completion_tokens: stat.completionTokens,
+                  cached_tokens: stat.cachedTokens,
+                })
                 scrollToBottom()
               }
               streamingText.value = ''
@@ -761,6 +976,7 @@ async function send() {
           firstTokenMs: 0,
           promptTokens: 0,
           completionTokens: 0,
+          cachedTokens: 0,
         }
         statMap.set(aid, stat)
       }
@@ -772,12 +988,52 @@ async function send() {
     streamReasonBuf = ''
     streaming.value = false
     streamCtrl = null
+    // 流式结束后尾块不再是「进行中」：补一次扫描，把最后一张图（可能就在结尾）画出来
+    scheduleMermaidScan()
+    // 在别的页面期间回答跑完了：给侧栏一个未读点，否则用户不知道已经能看
+    if (!pageActive.value) aiFinishedUnread.value = true
   }
 }
 
 function stop() {
   if (streamCtrl) streamCtrl.abort()
 }
+
+// ---- 保活（KeepAlive）后的可见性 ----
+// 本页被 App 的 KeepAlive 白名单留住：切到别的导航页时组件只是 deactivate，
+// 正在进行的 fetch 流和已生成的文字都还在（以前是销毁 → onUnmounted 里 abort →
+// 回答整段消失）。代价是用户在别的页看不到任何迹象，所以把状态外抛给侧栏：
+// 生成中 = 转圈，已生成且用户还没回来 = 未读点。
+const pageActive = ref(true)
+watch(streaming, (v) => { aiGenerating.value = v })
+
+// 告诉后端「AI 页是不是在前台」。
+//
+// 为什么需要：完成通知的判定不能只看窗口焦点 —— 用户在 AI 页盯着回答生成时，
+// 可能去点了一下别的应用（窗口失焦），按焦点判断就会往通知中心塞一条
+// 「AI 回答已完成」，而他刚刚就看着这句话写完。后端逻辑见 services/ai/ai_stream.go。
+//
+// 失败无妨（后端是旧二进制时没有这个方法）：最坏退化成按窗口焦点判断的老行为。
+function reportAIPageVisible(visible: boolean) {
+  try {
+    const p = SetAIPageVisible(visible)
+    if (p && typeof p.catch === 'function') p.catch(() => undefined)
+  } catch {
+    // 绑定不存在（应用未重启）时忽略
+  }
+}
+
+onActivated(() => {
+  pageActive.value = true
+  aiFinishedUnread.value = false
+  reportAIPageVisible(true)
+  // 回来时停在原位会看不到后面生成的内容：流式期间一直是贴底的，直接拉到底
+  if (streaming.value) nextTick(scrollToBottom)
+})
+onDeactivated(() => {
+  pageActive.value = false
+  reportAIPageVisible(false)
+})
 
 async function copy(text: string) {
   // 统一入口见 utils/clipboard：navigator.clipboard 在 WebView2 里要么被静默拒绝，
@@ -790,12 +1046,31 @@ async function copy(text: string) {
   }
 }
 
-// —— 代码块复制按钮 ——
+// —— 代码块按钮（复制 / html 预览）——
 // 按钮在 v-html 里（DOMPurify 放行 button），无法直接绑 Vue 事件，
-// 故在消息区做事件委托：点击 [data-md-copy] 时取其所在代码块的 <code> 文本。
+// 故在消息区做事件委托。
 function onMsgClick(e: MouseEvent) {
   const target = e.target as HTMLElement | null
   if (!target) return
+
+  // 流程图工具栏：看源码 / 折叠。状态挂在容器属性上（见 utils/mermaidMarkdown.ts），
+  // 这里只做事件委托，真正的翻转逻辑与按钮文案都在 utils 里。
+  if (handleMermaidToolbarClick(target, mermaidLabels())) return
+  // 表格表头点击排序（v-html 真实 DOM，原生事件委托）
+  const th = target.closest?.('.md-th-sortable') as HTMLElement | null
+  if (th) { sortTableByColumn(th); return }
+
+  // html 代码块的「预览」：取源码塞进沙箱 iframe（见模板里的 ai-html-preview）
+  const runBtn = target.closest?.('[data-md-run]') as HTMLElement | null
+  if (runBtn) {
+    const code = runBtn.closest('.md-code')?.querySelector('code')?.textContent ?? ''
+    if (code.trim()) {
+      // 没有 <!doctype> / <html> 的片段也当成整页渲染：浏览器本来就会补全
+      htmlPreview.value = code
+    }
+    return
+  }
+
   const btn = target.closest?.('[data-md-copy]') as HTMLElement | null
   if (!btn) return
   const wrap = btn.closest?.('.md-code') as HTMLElement | null
@@ -809,6 +1084,105 @@ function onMsgClick(e: MouseEvent) {
     btn.classList.remove('copied')
     btn.setAttribute('aria-label', t('copyCode'))
   }, 1200)
+}
+
+// —— HTML 预览（沙箱 iframe，全屏遮罩）——
+// sandbox 里**绝对不能**带 allow-same-origin：那样 iframe 与宿主同源，
+// 里面的脚本就能拿到 QuickDock 的 window 与 Wails 运行时。允许 scripts /
+// modals（示例页常用 alert）/ forms 就够了，opaque origin 下它连相对路径都取不到。
+const htmlPreview = ref('')
+
+function closeHtmlPreview() {
+  htmlPreview.value = ''
+}
+
+// —— 右键：把流程图 / 公式复制成图片 ——
+// 原生右键菜单只能「复制」成文本（复制到的是 LaTeX 源码或 SVG 标签），
+// 而这类内容的去向通常是文档或聊天框——那里需要一张图。
+interface CtxTarget {
+  el: HTMLElement
+  kind: 'mermaid' | 'math' | 'code'
+}
+const ctxTarget = ref<CtxTarget | null>(null)
+const ctxMenu = useFloatMenu({ placement: 'right-start', offset: 4 })
+
+function onMsgContextMenu(e: MouseEvent) {
+  const target = e.target as HTMLElement | null
+  if (!target) return
+  // 只认**已经画出来**的图和公式：未渲染的 mermaid 只是一段源码，走原生菜单更合适
+  const mmd = target.closest('.md-mermaid[data-mermaid-done="1"]') as HTMLElement | null
+  const math = mmd ? null : (target.closest('.md-math') as HTMLElement | null)
+  // 普通代码块（.md-code）：右键也能「复制为图片」，与图/公式体验统一
+  const code = mmd || math ? null : (target.closest('.md-code') as HTMLElement | null)
+  const el = mmd || math || code
+  if (!el) return
+  // 折叠状态的图尺寸是 0（内容 display:none），转图会得到空图 —— 先展开再弹菜单。
+  // 右键本身就意味着「我要对这张图做点什么」，展开是符合预期的，也不留后遗症。
+  if (mmd?.hasAttribute('data-mermaid-folded')) setMermaidFolded(mmd, false, mermaidLabels())
+  // 源码视图下 SVG 也是 display:none，「复制为图片」会截到代码块而不是图。
+  // 与折叠态同样处理：右键即代表要对图操作，自动切到图形视图。
+  if (mmd?.hasAttribute('data-mermaid-src')) setMermaidSourceMode(mmd, false, mermaidLabels())
+  e.preventDefault()
+  ctxTarget.value = { el, kind: mmd ? 'mermaid' : math ? 'math' : 'code' }
+  ctxMenu.showAt(e.clientX, e.clientY)
+}
+
+function closeCtxMenu() {
+  ctxMenu.hide()
+  ctxTarget.value = null
+}
+
+async function ctxCopyImage() {
+  const t0 = ctxTarget.value
+  closeCtxMenu()
+  if (!t0) return
+  try {
+    const ok = await copyElementAsImage(t0.el)
+    if (ok) toast.success(t('aiCopyImageOk'))
+    else toast.error(t('aiCopyImageFail'))
+  } catch {
+    toast.error(t('aiCopyImageFail'))
+  }
+}
+
+function ctxCopySource() {
+  const t0 = ctxTarget.value
+  closeCtxMenu()
+  if (!t0) return
+  let code = ''
+  if (t0.kind === 'math') {
+    // 公式源码存在渲染外层 span 的 data-tex（见 utils/mathMarkdown.ts renderMath）
+    code = t0.el.dataset.tex || ''
+  } else {
+    // 渲染成功后 DOM 里只剩 SVG，源码在 data-mermaid-code 上（见 utils/mermaidMarkdown.ts）
+    code = t0.el.dataset.mermaidCode || t0.el.querySelector('.md-mermaid-src code')?.textContent || ''
+  }
+  if (code) copy(code)
+}
+
+async function ctxDownloadSvg() {
+  const t0 = ctxTarget.value
+  closeCtxMenu()
+  if (!t0) return
+  const xml = serializeMermaidSvg(t0.el)
+  if (!xml) { toast.error(t('aiDownloadFail')); return }
+  downloadBlob(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }), 'diagram.svg')
+  toast.success(t('aiDownloadOk', { name: 'diagram.svg' }))
+}
+
+async function ctxDownloadPng() {
+  const t0 = ctxTarget.value
+  closeCtxMenu()
+  if (!t0) return
+  const svg = t0.el.querySelector('.md-mermaid-svg svg') as SVGSVGElement | null
+  if (!svg) { toast.error(t('aiDownloadFail')); return }
+  const blob = await svgToPngBlob(svg, resolveBackground(t0.el))
+  if (blob) {
+    downloadBlob(blob, 'diagram.png')
+    toast.success(t('aiDownloadOk', { name: 'diagram.png' }))
+  } else {
+    toast.error(t('aiDownloadFail'))
+  }
 }
 
 // —— 划词（选择文本）复制 ——
@@ -864,6 +1238,8 @@ async function saveAsNote(content: string) {
 }
 
 function onDocMouseDown(e: MouseEvent) {
+  // 右键菜单自己吞掉 mousedown（@mousedown.stop），落到这里的点击都在菜单之外
+  if (ctxTarget.value) closeCtxMenu()
   const pop = document.querySelector('.ai-sel-copy')
   if (pop && pop.contains(e.target as Node)) return
   hideSelPop()
@@ -879,10 +1255,16 @@ function closeImgViewer() {
   imgViewer.value = null
 }
 function onGlobalKeydown(e: KeyboardEvent) {
-  if (e.key === 'Escape' && imgViewer.value) closeImgViewer()
+  if (e.key !== 'Escape') return
+  if (imgViewer.value) closeImgViewer()
+  else if (htmlPreview.value) closeHtmlPreview()
+  else if (ctxTarget.value) closeCtxMenu()
 }
 
 onMounted(async () => {
+  // KeepAlive 首次挂载也会走 onActivated，但那条路依赖 App.vue 的包裹结构；
+  // 这里显式再置一次，保证「一进来就停在 AI 页」这个事实后端一定知道。
+  reportAIPageVisible(true)
   await loadProfiles()
   await loadConversations()
 
@@ -923,9 +1305,14 @@ onUnmounted(() => {
   Events.Off('ai:profiles-updated')
   document.removeEventListener('mousedown', onDocMouseDown, true)
   document.removeEventListener('keydown', onGlobalKeydown)
+  // 这里的 abort 现在只会在「应用退出」时跑到：切到别的导航页是 deactivate，
+  // 组件还活着，流照常继续（见下方 onActivated / onDeactivated）。
   if (streamCtrl) streamCtrl.abort()
   if (streamTimer) { clearTimeout(streamTimer); streamTimer = null }
   if (resizeObs) { resizeObs.disconnect(); resizeObs = null }
+  aiGenerating.value = false
+  aiFinishedUnread.value = false
+  reportAIPageVisible(false)
 })
 </script>
 
@@ -944,8 +1331,11 @@ onUnmounted(() => {
           @click="selectConv(c.id)"
         >
           <span class="ai-conv-title">{{ c.title || t('aiNewChat') }}</span>
+          <!-- 会话累计用量：只统计「问答」，标题生成 / 摘要压缩不计入（见 ai_usage.go），
+               所以这里的数字应该等于该会话各条回复下方统计之和。
+               折算成 k/M 显示，精确值放 title。 -->
           <span v-if="c.prompt_tokens > 0 || c.completion_tokens > 0" class="ai-conv-tokens" :title="t('aiConvTokenTip', { in: c.prompt_tokens, out: c.completion_tokens })">
-            {{ c.prompt_tokens }}/{{ c.completion_tokens }}
+            {{ fmtTokens(c.prompt_tokens + c.completion_tokens) }}
           </span>
           <button class="ai-conv-del" :title="t('delete')" @click.stop="delConv(c.id)">
             <Trash2 :size="13" />
@@ -984,7 +1374,7 @@ onUnmounted(() => {
       </div>
 
       <!-- 消息区 -->
-      <div ref="msgArea" class="ai-messages" @scroll="onMsgScroll" @mouseup="onMsgMouseUp" @keyup="onMsgMouseUp" @click="onMsgClick">
+      <div ref="msgArea" class="ai-messages" @scroll="onMsgScroll" @mouseup="onMsgMouseUp" @keyup="onMsgMouseUp" @click="onMsgClick" @contextmenu="onMsgContextMenu">
         <div ref="msgContent" class="ai-msg-content-wrap">
           <div v-if="!hasKey" class="ai-need-key">
             <Bot :size="40" />
@@ -1032,8 +1422,8 @@ onUnmounted(() => {
                   <StickyNote :size="12" /> {{ t('aiSaveToNote') }}
                 </button>
                 <!-- 单条回复统计：耗时 / 首字延迟 / token 用量 -->
-                <span v-if="statMap.get(m.id)" class="ai-msg-stat">
-                  {{ formatStat(statMap.get(m.id)!) }}
+                <span v-if="msgStat(m)" class="ai-msg-stat">
+                  {{ formatStat(msgStat(m)!) }}
                 </span>
               </div>
             </div>
@@ -1082,6 +1472,57 @@ onUnmounted(() => {
         >
           <Copy :size="12" /> {{ t('copySelection') }}
         </button>
+      </Teleport>
+
+      <!-- 流程图 / 公式的右键菜单：原生菜单只能复制成文本，这里要的是「一张图」 -->
+      <Teleport to="body">
+        <div
+          v-if="ctxMenu.visible.value"
+          class="ai-ctx"
+          :ref="el => (ctxMenu.floatingRef.value = el as HTMLElement | null)"
+          :style="ctxMenu.floatingStyles.value"
+          @mousedown.stop
+          @contextmenu.prevent
+        >
+          <button class="ai-ctx-item" @click="ctxCopyImage">
+            <ImageIcon :size="13" /> {{ t('aiCopyImage') }}
+          </button>
+          <button v-if="ctxTarget?.kind === 'mermaid' || ctxTarget?.kind === 'math'" class="ai-ctx-item" @click="ctxCopySource">
+            <Copy :size="13" /> {{ t('aiCopySource') }}
+          </button>
+          <template v-if="ctxTarget?.kind === 'mermaid'">
+            <button class="ai-ctx-item" @click="ctxDownloadPng">
+              <Download :size="13" /> {{ t('aiDownloadPng') }}
+            </button>
+            <button class="ai-ctx-item" @click="ctxDownloadSvg">
+              <Download :size="13" /> {{ t('aiDownloadSvg') }}
+            </button>
+          </template>
+        </div>
+      </Teleport>
+
+      <!-- html 代码块预览：sandbox 无 allow-same-origin，脚本跑在自己的不透明源里 -->
+      <Teleport to="body">
+        <div v-if="htmlPreview" class="ai-html-preview" @click.self="closeHtmlPreview">
+          <div class="ai-html-preview-box">
+            <div class="ai-html-preview-bar">
+              <span class="ai-html-preview-title">{{ t('aiPreviewTitle') }}</span>
+              <button class="qd-btn qd-btn-sm" @click="copy(htmlPreview)">
+                <Copy :size="12" /> {{ t('copyCode') }}
+              </button>
+              <button class="qd-icon-btn" :title="t('close')" @click="closeHtmlPreview">
+                <X :size="14" />
+              </button>
+            </div>
+            <iframe
+              class="ai-html-preview-frame"
+              :srcdoc="htmlPreview"
+              sandbox="allow-scripts allow-modals allow-forms allow-popups"
+              referrerpolicy="no-referrer"
+              title="preview"
+            ></iframe>
+          </div>
+        </div>
       </Teleport>
 
       <!-- 输入区 -->
@@ -1347,7 +1788,10 @@ onUnmounted(() => {
   font-size: 10px;
   color: var(--color-text-disabled);
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  /* 允许换行：这行可能同时有「耗时 / 首字 / 输入输出 / 缓存命中」四段，
+     窄窗口下 nowrap 会把后面的内容顶出可视区（数字被裁比换行更难接受） */
+  white-space: normal;
+  line-height: 1.6;
   cursor: default;
 }
 
@@ -1367,6 +1811,61 @@ onUnmounted(() => {
 .ai-sel-copy:hover { color: var(--color-accent); border-color: var(--color-accent); }
 .ai-cursor { animation: ai-blink 1s steps(1) infinite; color: var(--color-accent); }
 @keyframes ai-blink { 50% { opacity: 0; } }
+
+/* 图 / 公式的右键菜单（position 由 floating-ui 注入） */
+.ai-ctx {
+  z-index: 700;
+  display: flex; flex-direction: column;
+  min-width: 132px; padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+  box-shadow: var(--shadow-md);
+}
+.ai-ctx-item {
+  display: flex; align-items: center; gap: 7px;
+  height: 28px; padding: 0 9px;
+  border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-primary);
+  font-family: inherit; font-size: 12px; text-align: left; cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.ai-ctx-item:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-ctx-item svg { flex: 0 0 auto; }
+
+/* html 代码块预览：铺满窗口的遮罩 + 白色画布（示例页大多假设白底，
+   跟着应用主题变暗会让「我的网页」看起来坏了） */
+.ai-html-preview {
+  position: fixed; inset: 0; z-index: 800;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px;
+  background: var(--color-bg-overlay);
+}
+.ai-html-preview-box {
+  display: flex; flex-direction: column;
+  width: 100%; height: 100%;
+  max-width: 1080px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-primary);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+.ai-html-preview-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 8px 6px 14px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+.ai-html-preview-title {
+  margin-right: auto;
+  font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.ai-html-preview-frame {
+  flex: 1; width: 100%; min-height: 0;
+  border: none; background: #fff;
+}
 .ai-error {
   align-self: flex-start;
   padding: 10px 14px; border-radius: var(--radius-lg);
@@ -1467,6 +1966,22 @@ onUnmounted(() => {
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
+.ai-md :deep(.md-code-actions) { display: flex; align-items: center; gap: 2px; }
+/* html 代码块的「预览」按钮与复制按钮同构，只是悬停时给成主色 ——
+   它是这一行里唯一会「做事」的按钮，值得比复制更显眼一点 */
+.ai-md :deep(.md-code-run) {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.ai-md :deep(.md-code-run:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-md :deep(.md-code-run svg) { width: 13px; height: 13px; }
 .ai-md :deep(.md-code-copy:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
 .ai-md :deep(.md-code-copy.copied) { color: var(--color-success); }
 .ai-md :deep(.md-code-copy svg) { width: 13px; height: 13px; }
@@ -1483,11 +1998,160 @@ onUnmounted(() => {
   background: var(--color-code-inline-bg); padding: 1px 5px; border-radius: var(--radius-xs);
 }
 .ai-md :deep(pre code) { background: none; padding: 0; font-size: 12px; }
-.ai-md :deep(table) { border-collapse: collapse; margin: 8px 0; }
+.ai-md :deep(table) { border-collapse: collapse; }
 .ai-md :deep(th), .ai-md :deep(td) { border: 1px solid var(--color-border); padding: 5px 9px; }
 .ai-md :deep(th) { background: var(--color-bg-secondary); font-weight: 600; }
+/* 表格增强：横向滚动容器 + 导出条 + 可排序列（见 enhanceTables） */
+.ai-md :deep(.md-table-wrap) {
+  margin: 8px 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+}
+.ai-md :deep(.md-table-bar) {
+  display: flex; justify-content: flex-end;
+  padding: 3px 6px;
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  background: var(--color-code-bar-bg);
+}
+.ai-md :deep(.md-table-export) {
+  display: inline-flex; align-items: center; gap: 3px;
+  font-size: 11px; padding: 2px 8px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  background: var(--color-bg-primary); color: var(--color-text-muted); cursor: pointer;
+}
+.ai-md :deep(.md-table-export:hover) { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-md :deep(.md-th-sortable) { cursor: pointer; user-select: none; white-space: nowrap; }
+.ai-md :deep(.md-th-sortable:hover) { color: var(--color-accent); }
+.ai-md :deep(.md-th-sortable[data-sort-dir="asc"]::after) { content: " ▲"; font-size: 9px; }
+.ai-md :deep(.md-th-sortable[data-sort-dir="desc"]::after) { content: " ▼"; font-size: 9px; }
 .ai-md :deep(hr) { border: none; border-top: 1px solid var(--color-border); margin: 10px 0; }
 .ai-md :deep(img) { max-width: 100%; border-radius: var(--radius-sm); }
+
+/* 数学公式。katex.min.css 负责字形，这里只管容器：块级公式横向可滚
+   （长公式会顶破消息气泡），行内公式不要影响行高节奏。 */
+.ai-md :deep(.md-math-inline) { display: inline; }
+.ai-md :deep(.md-math-inline .katex) { font-size: 1.05em; }
+.ai-md :deep(.md-math-block) {
+  display: block;
+  margin: 8px 0;
+  padding: 2px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.ai-md :deep(.md-math-block .katex-display) { margin: 0; }
+/* 公式还没写完 / 写法不支持时的降级形态：等宽小字，别跟正文混在一起看不出是源码 */
+.ai-md :deep(.md-math-raw) {
+  font-family: var(--font-mono, monospace);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--color-text-secondary);
+}
+
+/* Mermaid 图。结构是「工具栏 + 内容区」两层：
+   - 工具栏常驻（画出来之后也是），长图占满一屏时折叠 / 看源码仍然点得到；
+   - 内容区按容器属性切三种形态：图形（data-mermaid-done）/ 源码（data-mermaid-src）/
+     折叠（data-mermaid-folded）。源码 <pre> 一直留在 DOM 里，只是被藏起来。 */
+.ai-md :deep(.md-mermaid) {
+  margin: 8px 0;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-code-bg);
+  /* 圆角要裁得住里面的工具栏；横向滚动交给内容区，见 .md-mermaid-body */
+  overflow: hidden;
+}
+.ai-md :deep(.md-mermaid-bar) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 4px 6px 4px 10px;
+  background: var(--color-code-bar-bg);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  /* 工具栏只是外壳，别让它参与划词复制 */
+  user-select: none;
+}
+/* 折叠后只剩这一条：分隔线留着会像半张空卡片 */
+.ai-md :deep(.md-mermaid[data-mermaid-folded] .md-mermaid-bar) {
+  border-bottom-color: transparent;
+}
+.ai-md :deep(.md-mermaid-lang) {
+  text-transform: lowercase;
+  letter-spacing: 0.02em;
+}
+.ai-md :deep(.md-mermaid-acts) { display: flex; align-items: center; gap: 2px; }
+.ai-md :deep(.md-mermaid-act) {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.ai-md :deep(.md-mermaid-act:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
+.ai-md :deep(.md-mermaid-act svg) { width: 13px; height: 13px; display: block; }
+
+/* 按钮里的两个图标靠容器属性切换，JS 只改属性、不重排 DOM ——
+   看图时显示 `</>`（点了去看源码），看源码时显示眼睛（点了回来看图）。
+   ⚠️ 这里的隐藏必须写成 `.md-mermaid-act .md-mermaid-i-*`（三个 class）：
+   上面那条 `.md-mermaid-act svg { display: block }` 是「两 class + 一标签」，
+   比单纯 `.md-mermaid-i-eye`（两 class）更具体，写短了会四个图标一起显示。 */
+.ai-md :deep(.md-mermaid-act .md-mermaid-i-eye) { display: none; }
+.ai-md :deep(.md-mermaid[data-mermaid-src] .md-mermaid-act .md-mermaid-i-code) { display: none; }
+.ai-md :deep(.md-mermaid[data-mermaid-src] .md-mermaid-act .md-mermaid-i-eye) { display: block; }
+/* 折叠态：展开时是向上箭头（点了收起），折叠后换成向下箭头（点了展开） */
+.ai-md :deep(.md-mermaid-act .md-mermaid-i-down) { display: none; }
+.ai-md :deep(.md-mermaid[data-mermaid-folded] .md-mermaid-act .md-mermaid-i-up) { display: none; }
+.ai-md :deep(.md-mermaid[data-mermaid-folded] .md-mermaid-act .md-mermaid-i-down) { display: block; }
+
+.ai-md :deep(.md-mermaid-body) { overflow-x: auto; }
+/* 默认（占位块已带 data-mermaid-src）显示源码、藏起图形；点了「查看图」移除该属性就反过来。
+   刻意不用 `:not([data-mermaid-src])` 压成一条：拆成两条后写的覆盖前面的，
+   意图更直白，也不必依赖 :not 的参数写法（预览脚本抽 :deep 时会在 `:not(` 的括号上截断）。 */
+.ai-md :deep(.md-mermaid-svg) { display: none; }
+.ai-md :deep(.md-mermaid[data-mermaid-done="1"] .md-mermaid-svg) {
+  display: block;
+  padding: 10px;
+  background: var(--color-bg-primary);
+}
+.ai-md :deep(.md-mermaid[data-mermaid-done="1"] .md-mermaid-src) { display: none; }
+.ai-md :deep(.md-mermaid[data-mermaid-src] .md-mermaid-svg) { display: none; }
+/* 源码视图限高：13 个节点的图定义能有一屏长，别让它把整条回答推走 */
+.ai-md :deep(.md-mermaid[data-mermaid-src] .md-mermaid-src) {
+  display: block;
+  max-height: 320px;
+  overflow: auto;
+}
+.ai-md :deep(.md-mermaid[data-mermaid-folded] .md-mermaid-body) { display: none; }
+
+/* Mermaid 输出带内联 width/max-width，这里只兜住「别溢出、别被拉变形」 */
+.ai-md :deep(.md-mermaid svg) {
+  display: block;
+  margin: 0 auto;
+  max-width: 100%;
+  height: auto;
+}
+/* 失败提示压在源码上方：流式半截定义每帧都会失败，没有这行用户会以为是卡片坏了 */
+.ai-md :deep(.md-mermaid-err) {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-code-bar-bg);
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+/* 流式尾块（正在写的那一块）不显示工具栏。
+   原因：最后一块每帧都会整块重新渲染（见 renderLiveBlocks），点上去的状态下一帧
+   就被冲掉，表现成「点了没反应」；而且此时图还没画出来，两个按钮也没有可操作的对象。
+   前面已完成的块不受影响，照常可折叠。 */
+.ai-msg.streaming :deep(.ai-md-block:last-child .md-mermaid-bar) { display: none; }
 
 /* 输入 */
 .ai-input-area {
