@@ -20,12 +20,18 @@ const gitBaseRel = "runtime/git"
 // 与其他运行时不同，Git 为**单版本**：始终安装到 runtime/git，装新版本即覆盖旧版本
 // （Git 版本间兼容性好，日常开发只需一份；多版本并存会让 PATH 切换变成负担）。
 // 同时探测系统 PATH 上已安装的 git（如 Git for Windows）。
-type GitRuntime struct {
-	dir string // runtime/git
-}
+//
+// dir 不在构造时固化，而是每次动态解析 platform.DefaultDataDir()——
+// 数据目录迁移后（设置 → 存储与同步），运行时必须自动指向新目录。
+type GitRuntime struct{}
 
 func NewGitRuntime() *GitRuntime {
-	return &GitRuntime{dir: filepath.Join(platform.DefaultDataDir(), gitBaseRel)}
+	return &GitRuntime{}
+}
+
+// BaseDir 便携 Git 运行时根目录：<数据目录>/runtime/git。
+func (g *GitRuntime) BaseDir() string {
+	return filepath.Join(platform.DefaultDataDir(), gitBaseRel)
 }
 
 func (g *GitRuntime) Kind() Runtime        { return RuntimeGit }
@@ -51,7 +57,7 @@ func (g *GitRuntime) ExtraPathDirs() []string {
 	if runtime.GOOS != "windows" {
 		return nil
 	}
-	dir := filepath.Join(g.dir, "usr", "bin")
+	dir := filepath.Join(g.BaseDir(), "usr", "bin")
 	if !fileExists(filepath.Join(dir, "uname.exe")) {
 		return nil
 	}
@@ -61,9 +67,9 @@ func (g *GitRuntime) ExtraPathDirs() []string {
 // cmdDir 返回含 git 可执行文件的目录：Windows 用 cmd/，其余用 bin/。该目录即写入系统 PATH 的条目。
 func (g *GitRuntime) cmdDir() string {
 	if runtime.GOOS == "windows" {
-		return filepath.Join(g.dir, "cmd")
+		return filepath.Join(g.BaseDir(), "cmd")
 	}
-	return filepath.Join(g.dir, "bin")
+	return filepath.Join(g.BaseDir(), "bin")
 }
 
 // ExeFor 单版本：忽略 version，始终返回固定目录下的 git。
@@ -77,7 +83,7 @@ func (g *GitRuntime) ExeFor(version string) string {
 // legacyExeFor 旧版多版本布局 runtime/git/<version>/cmd/git.exe（升级前安装的）。
 // 仍要能被识别，否则用户升级后旧目录变成既看不见也删不掉的垃圾。
 func (g *GitRuntime) legacyExeFor(version string) string {
-	base := filepath.Join(g.dir, version)
+	base := filepath.Join(g.BaseDir(), version)
 	if runtime.GOOS == "windows" {
 		return filepath.Join(base, "cmd", "git.exe")
 	}
@@ -96,7 +102,7 @@ func (g *GitRuntime) InstalledVersions() []Install {
 			dirs.record(filepath.Dir(p))
 		}
 	}
-	if entries, err := os.ReadDir(g.dir); err == nil {
+	if entries, err := os.ReadDir(g.BaseDir()); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() || seen[e.Name()] {
 				continue
@@ -154,11 +160,11 @@ func promoteEffectiveGit(in []Install) []Install {
 func (g *GitRuntime) DeleteVersion(version string) error {
 	// 历史多版本子目录 runtime/git/<version>/（升级前安装的遗留）
 	if _, err := os.Stat(g.legacyExeFor(version)); err == nil {
-		return os.RemoveAll(filepath.Join(g.dir, version))
+		return os.RemoveAll(filepath.Join(g.BaseDir(), version))
 	}
 	// 单版本主目录 runtime/git/（始终删除整个托管目录，以便彻底卸载）
 	if fileExists(g.ExeFor("")) {
-		if err := os.RemoveAll(g.dir); err != nil {
+		if err := os.RemoveAll(g.BaseDir()); err != nil {
 			return fmt.Errorf("删除 Git 失败: %w", err)
 		}
 		return nil
@@ -183,7 +189,7 @@ func (g *GitRuntime) Install(ctx context.Context, version string, cb InstallCall
 		}
 	}
 	// 单版本：整目录重装，避免新旧文件混用
-	if err := os.RemoveAll(g.dir); err != nil {
+	if err := os.RemoveAll(g.BaseDir()); err != nil {
 		return fmt.Errorf("清理旧版本失败: %w", err)
 	}
 	urls := CandidateURLs(RuntimeGit, version)
@@ -205,9 +211,9 @@ func (g *GitRuntime) Install(ctx context.Context, version string, cb InstallCall
 		cb.OnStage("extract", "正在解压 Git…")
 	}
 	if cb.OnLog != nil {
-		cb.OnLog("解压 Git 到 " + g.dir)
+		cb.OnLog("解压 Git 到 " + g.BaseDir())
 	}
-	if err := Extract(zipPath, g.dir); err != nil {
+	if err := Extract(zipPath, g.BaseDir()); err != nil {
 		return fmt.Errorf("解压 Git 失败: %w", err)
 	}
 	if !fileExists(exe) {

@@ -360,6 +360,25 @@
 }
 .storage-path-input { flex: 1; width: auto; min-width: 220px; }
 
+/* 存储位置迁移进度条：复制核心数据 → 清理旧目录 → 环境数据重新下载 */
+.storage-migrate-progress {
+  margin: 0 0 16px; padding: 12px 14px; border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+}
+.storage-migrate-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px;
+}
+.storage-migrate-phase { color: var(--color-text-primary); font-size: 13px; font-weight: 500; }
+.storage-migrate-size { color: var(--color-text-secondary); font-size: 12px; font-variant-numeric: tabular-nums; }
+.storage-migrate-bar {
+  height: 6px; border-radius: var(--radius-xs); overflow: hidden; background: var(--color-bg-primary);
+}
+.storage-migrate-fill {
+  height: 100%; border-radius: var(--radius-xs); background: var(--color-accent);
+  transition: width var(--transition-fast);
+}
+.storage-migrate-progress .field-hint { margin: 8px 0 0; word-break: break-all; }
+
 /* 配置编辑模态框 */
 .ai-modal-overlay {
   position: fixed; inset: 0; z-index: 20000;
@@ -388,6 +407,86 @@
   padding: 12px 18px; border-top: 1px solid var(--color-border); flex-shrink: 0;
 }
 .ai-edit-bar { display: flex; gap: 8px; margin: 4px 0; }
+
+/* ── AI 用量统计 ─────────────────────────────────────────────────────
+   刻意做成「一张贴了标签的卡片」而不是又来一个 section：它是 AI 配置页的
+   附属信息（配好之后才会关心花了多少），视觉权重必须低于上面的档案列表。 */
+.ai-usage {
+  margin-top: 20px; padding: 12px 12px 10px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary);
+}
+.ai-usage-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px; }
+.ai-usage-title { margin: 0; font-size: 12px; font-weight: 600; color: var(--color-text-secondary); }
+.ai-usage-ranges { display: flex; gap: 2px; flex-shrink: 0; }
+.usage-range {
+  height: 20px; padding: 0 8px; border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-muted); font-size: 11px;
+  font-family: inherit; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.usage-range:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.usage-range.on { background: var(--color-accent-bg); color: var(--color-accent); }
+
+.usage-tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }
+.usage-tile {
+  display: flex; flex-direction: column; gap: 2px;
+  padding: 6px 8px; border-radius: var(--radius-sm); background: var(--color-bg-primary);
+}
+.usage-tile-label { font-size: 10px; color: var(--color-text-muted); white-space: nowrap; }
+.usage-tile-value {
+  font-size: 14px; font-weight: 600; color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 每日柱：底对齐，柱子挤在下沿，日期轴在下面一行 */
+.usage-chart {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 64px; margin-top: 12px; padding: 0 2px;
+  border-bottom: 1px solid var(--color-border);
+}
+.usage-bar { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+.usage-bar-fill { background: var(--color-accent); border-radius: 1px 1px 0 0; opacity: 0.65; }
+.usage-bar:hover .usage-bar-fill { opacity: 1; }
+/* 30 根柱子逐根标日期必然重叠，只标首尾两天，具体某天靠 title 悬停 */
+.usage-axis {
+  display: flex; justify-content: space-between;
+  margin: 3px 2px 0; font-size: 10px; color: var(--color-text-disabled);
+  font-variant-numeric: tabular-nums;
+}
+
+.usage-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
+.usage-table th {
+  text-align: left; font-weight: 500; color: var(--color-text-muted);
+  padding: 0 0 4px; border-bottom: 1px solid var(--color-border);
+}
+.usage-table td { padding: 4px 0; color: var(--color-text-secondary); border-bottom: 1px solid var(--color-border); }
+.usage-table tr:last-child td { border-bottom: none; }
+.usage-table .num { text-align: right; font-variant-numeric: tabular-nums; }
+.usage-table .model {
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-text-primary);
+}
+.usage-table .unknown { color: var(--color-text-disabled); }
+
+/* 未收录模型的提示用正文次要色而非告警色：本地 Ollama 用户每次进来都会看到它，
+   一直亮黄会变成噪音 —— 它要的是「别把数字当账单」，不是「出事了」 */
+.usage-note { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-text-secondary); }
+
+/* 缓存命中率高是好事，语气与告警相反：用强调色，不用黄 */
+.usage-cache { margin: 10px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-accent); }
+
+/* 来源 chip：一眼看出「钱花在对话还是面板/插件」 */
+.usage-sources { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 10px; }
+.usage-source {
+  display: inline-flex; align-items: center; gap: 4px;
+  height: 18px; padding: 0 6px; border-radius: var(--radius-sm);
+  background: var(--color-bg-primary); color: var(--color-text-muted); font-size: 10px;
+}
+.usage-source b { font-weight: 600; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+
+/* 表格单元格里的次要行（模型行下挂缓存命中率） */
+.usage-cell-sub { display: block; font-size: 10px; color: var(--color-text-disabled); }
+.usage-hint { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-text-disabled); }
 
 /* 小型 toggle 开关（思考模式） */
 .toggle-btn-sm {

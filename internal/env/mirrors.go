@@ -153,7 +153,7 @@ func runGoEnvAt(bin, envFile string, args ...string) (string, error) {
 func goMirrorTargets() []goTarget {
 	g := NewGoRuntime()
 	var out []goTarget
-	if entries, err := os.ReadDir(g.baseDir); err == nil {
+	if entries, err := os.ReadDir(g.BaseDir()); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue

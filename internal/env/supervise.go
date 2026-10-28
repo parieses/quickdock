@@ -108,10 +108,11 @@ func (m *Manager) ResolveVersion(rt Runtime, want string) (string, error) {
 // 开启：立即拉起（用激活版本，无激活则用首个已装版本）；关闭：立即停止。
 // 非服务类运行时返回错误（前端仅对 hasService 的运行时展示开关）。
 func (m *Manager) SetEnabled(rt Runtime, on bool) error {
-	if _, ok := m.adapters[rt]; !ok {
+	a := m.lookupAdapter(rt)
+	if a == nil {
 		return fmt.Errorf("未知运行时: %s", rt)
 	}
-	if _, ok := m.adapters[rt].(ServiceController); !ok {
+	if _, ok := a.(ServiceController); !ok {
 		return fmt.Errorf("该运行时不支持服务管理，无法设为常驻")
 	}
 	m.enabledMu.Lock()
@@ -159,10 +160,11 @@ func (m *Manager) SetEnabled(rt Runtime, on bool) error {
 func (m *Manager) ReclaimOrphans(ctx context.Context) {
 	for _, rt := range runtimeOrder {
 		// 仅处理支持服务管理的运行时（与 SetEnabled 同款能力判定）
-		if _, ok := m.adapters[rt]; !ok {
+		a := m.lookupAdapter(rt)
+		if a == nil {
 			continue
 		}
-		if _, ok := m.adapters[rt].(ServiceController); !ok {
+		if _, ok := a.(ServiceController); !ok {
 			continue
 		}
 		// Everything 不参与孤儿回收：它是用户桌面工具（托盘 GUI），不监听任何端口，

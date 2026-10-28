@@ -31,18 +31,25 @@ type InstallCallback struct {
 // NodeRuntime 管理便携 Node 运行时：多版本共存于 runtime/node/<version>，
 // 同时探测系统 PATH 上已安装的 node。按需从可切换下载源拉取并解压。
 // 不依赖系统 PATH、不写注册表、不申请管理员权限——纯用户态、随 QuickDock 清理。
+//
+// baseDir 不在构造时固化，而是每次动态解析 platform.DefaultDataDir()——
+// 数据目录迁移后（设置 → 存储与同步），运行时必须自动指向新目录。
 type NodeRuntime struct {
-	baseDir    string
 	installing atomic.Bool
 }
 
 func NewNodeRuntime() *NodeRuntime {
-	return &NodeRuntime{baseDir: filepath.Join(platform.DefaultDataDir(), nodeBaseRel)}
+	return &NodeRuntime{}
+}
+
+// BaseDir 便携 Node 运行时根目录：<数据目录>/runtime/node。
+func (n *NodeRuntime) BaseDir() string {
+	return filepath.Join(platform.DefaultDataDir(), nodeBaseRel)
 }
 
 // versionDir 便携 Node 的版本目录：runtime/node/<version>
 func (n *NodeRuntime) versionDir(version string) string {
-	return filepath.Join(n.baseDir, version)
+	return filepath.Join(n.BaseDir(), version)
 }
 
 // nodeExeIn 返回某目录下的 node 可执行文件（Windows 在根目录，其余在 bin/）。
@@ -55,7 +62,7 @@ func nodeExeIn(dir string) string {
 
 // legacyExe 旧版单版本布局的可执行文件：runtime/node/node.exe。
 // 升级前安装的便携 node 落在这里，仍要能被 DSH 找到，否则升级后 DSH 直接失效。
-func (n *NodeRuntime) legacyExe() string { return nodeExeIn(n.baseDir) }
+func (n *NodeRuntime) legacyExe() string { return nodeExeIn(n.BaseDir()) }
 
 // RuntimeDir 返回 DSH 应使用的 node 所在目录（npm 全局 prefix 与 PATH 拼装基准）。
 // 多版本下随 Exe() 一起解析，而非写死 baseDir。
@@ -102,7 +109,7 @@ type nodeInstall struct {
 
 // portableInstalls 扫描 runtime/node/<version> 下的便携版本
 func (n *NodeRuntime) portableInstalls() []nodeInstall {
-	entries, err := os.ReadDir(n.baseDir)
+	entries, err := os.ReadDir(n.BaseDir())
 	if err != nil {
 		return nil
 	}
@@ -271,8 +278,8 @@ func (n *NodeRuntime) InstalledVersions() []Install {
 	if p := n.legacyExe(); fileExists(p) {
 		if v := RunVersion(p, "--version"); v != "" && !seen[v] {
 			seen[v] = true
-			out = append(out, Install{Version: v, Scope: "portable", Path: n.baseDir})
-			dirs.record(n.baseDir)
+			out = append(out, Install{Version: v, Scope: "portable", Path: n.BaseDir()})
+			dirs.record(n.BaseDir())
 		}
 	}
 	if p, err := exec.LookPath("node"); err == nil {

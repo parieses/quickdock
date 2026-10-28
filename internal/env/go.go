@@ -18,12 +18,19 @@ import (
 const goBaseRel = "runtime/go"
 
 // GoRuntime 管理便携 Go 运行时（官方发行包），支持多版本共存于 runtime/go/<version>。
-type GoRuntime struct {
-	baseDir string
-}
+//
+// baseDir 不在构造时固化，而是每次动态解析 platform.DefaultDataDir()——
+// 数据目录迁移后（设置 → 存储与同步），运行时必须自动指向新目录，
+// 否则重装/探测都会落到旧目录去。
+type GoRuntime struct{}
 
 func NewGoRuntime() *GoRuntime {
-	return &GoRuntime{baseDir: filepath.Join(platform.DefaultDataDir(), goBaseRel)}
+	return &GoRuntime{}
+}
+
+// BaseDir 便携 Go 运行时根目录：<数据目录>/runtime/go。
+func (g *GoRuntime) BaseDir() string {
+	return filepath.Join(platform.DefaultDataDir(), goBaseRel)
 }
 
 func (g *GoRuntime) Kind() Runtime        { return RuntimeGo }
@@ -44,7 +51,7 @@ func (g *GoRuntime) SupportedPlatforms() []string { return []string{"windows", "
 func (g *GoRuntime) Recommended() []string        { return Versions(RuntimeGo) }
 
 func (g *GoRuntime) versionDir(version string) string {
-	return filepath.Join(g.baseDir, version)
+	return filepath.Join(g.BaseDir(), version)
 }
 
 func (g *GoRuntime) ExeFor(version string) string {
@@ -59,7 +66,7 @@ func (g *GoRuntime) ExeFor(version string) string {
 func (g *GoRuntime) InstalledVersions() []Install {
 	var out []Install
 	dirs := managedDirs{}
-	if entries, err := os.ReadDir(g.baseDir); err == nil {
+	if entries, err := os.ReadDir(g.BaseDir()); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue
@@ -244,7 +251,7 @@ func (g *GoRuntime) goEnvFile(version string) string {
 // versionFromBin 从 go 二进制路径反推版本号：便携版形如 <baseDir>/<version>/bin/go(.exe)。
 // 推不出来（系统 PATH 上的 go）返回 ""，此时不注入版本专属环境、沿用共享 go.env。
 func (g *GoRuntime) versionFromBin(bin string) string {
-	rel, err := filepath.Rel(g.baseDir, bin)
+	rel, err := filepath.Rel(g.BaseDir(), bin)
 	if err != nil || rel == "" || strings.HasPrefix(rel, "..") {
 		return ""
 	}
@@ -301,7 +308,7 @@ func (g *GoRuntime) goBinAny() (string, error) {
 	if p, err := exec.LookPath("go"); err == nil {
 		return p, nil
 	}
-	if entries, err := os.ReadDir(g.baseDir); err == nil {
+	if entries, err := os.ReadDir(g.BaseDir()); err == nil {
 		for _, e := range entries {
 			if !e.IsDir() {
 				continue

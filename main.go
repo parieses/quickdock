@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"quickdock/internal/db"
 	envengine "quickdock/internal/env"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -210,10 +211,30 @@ func main() {
 	// 详见 elevated_cli.go。
 	runElevatedCLI()
 
-	// 数据目录迁移：若上一次在设置里勾选了「迁移现有数据」，此处把旧目录整体复制到新目录。
+	// 数据目录迁移的收尾：把数据库搬到新目录，并删掉旧目录。
+	//
+	// 之所以在启动时做（而不是迁移当时），是因为迁移发生在应用运行时——
+	// 数据库正被本进程独占，Windows 上既不能复制（WAL 拆分导致快照不一致）
+	// 也不能删除（文件被占用）。重启后句柄已释放，才能用 VACUUM INTO 导出
+	// 一致快照、再整体删除旧目录。
+	//
+	// 必须早于 logger.Init 与 DB 打开——此时应用尚未触碰任何数据目录，最安全。
+	if old := platform.PendingCleanupDir(); old != "" {
+		if err := db.FinishDataDirMigration(old, platform.DefaultDataDir()); err != nil {
+			fmt.Fprintf(os.Stderr, "[quickdock] 旧数据目录清理失败: %v\n", err)
+		}
+	}
+
+	// 数据目录迁移的兜底路径：正常流程是用户在「设置 → 存储与同步」里点迁移，
+	// 由 StorageService 在运行时执行（这样才有进度条）。这里只处理一种遗留情况：
+	// 上一版实现把「迁移」记录成 config 里的 migrateFrom 标记，等下次启动时搬。
+	// 若检测到该标记（旧版本留下的），仍在此静默完成，避免数据卡在两处。
+	//
 	// 必须早于 logger.Init 与 DB 打开——此时应用尚未触碰任何数据目录，拷贝最安全。
-	if err := platform.ApplyPendingDataDirMigration(); err != nil {
-		fmt.Fprintf(os.Stderr, "[quickdock] 数据目录迁移失败: %v\n", err)
+	if platform.HasPendingDataDirMigration() {
+		if err := platform.ApplyPendingDataDirMigration(nil); err != nil {
+			fmt.Fprintf(os.Stderr, "[quickdock] 数据目录迁移失败: %v\n", err)
+		}
 	}
 
 	// 全局日志：先于一切初始化，之后所有包（services/plugin/tray）的关键事件统一落盘
@@ -275,6 +296,10 @@ func main() {
 
 	// 环境管理服务门面：承载 Env 领域方法（引擎在 internal/env），单独绑定为独立 Wails service
 	envSvc := envsvc.NewEnvironmentService(appService)
+
+	// 存储迁移服务门面：承载数据目录迁移（复制核心数据 + 清理旧目录 + 环境数据重装），
+	// 单独绑定为独立 Wails service（前端要订阅其进度事件）
+	storageSvc := services.NewStorageService(appService)
 
 	// dsh 服务门面：承载 DeepSeek Harness 领域方法（引擎在 internal/dsh），单独绑定为独立 Wails service
 	dshSvc := dshsvc.NewDSHService(appService)
@@ -435,6 +460,7 @@ func main() {
 		Services: []application.Service{
 			application.NewService(appService),
 			application.NewService(envSvc),
+			application.NewService(storageSvc),
 			application.NewService(dshSvc),
 			application.NewService(aiSvc),
 			application.NewService(updateSvc),

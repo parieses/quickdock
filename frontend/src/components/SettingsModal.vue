@@ -33,7 +33,8 @@ import {
   SuspendHotkeys,
   ResumeHotkeys,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
-import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, GetUiZoom, SetUiZoom, RestartApp as RestartAppPlain } from '../../bindings/quickdock/services/appservice'
+import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, NormalizeDataDir, GetUiZoom, SetUiZoom, RestartApp as RestartAppPlain } from '../../bindings/quickdock/services/appservice'
+import { StorageMigrate } from '../../bindings/quickdock/services/storageservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { GetAppVersion, CheckForUpdates, DownloadUpdate, RestartApp, GetUpdateState } from '../../bindings/quickdock/services/update/updateservice'
@@ -208,11 +209,15 @@ onMounted(async () => {
     updateProgress.value = Math.min(100, Math.max(1, Math.round((d.written / d.total) * 100)))
     updateResult.value = t('updateDownloadingPct', { pct: updateProgress.value })
   })
+  // 订阅数据目录迁移进度（复制核心数据 → 清理旧目录 → 环境数据重新下载）。
+  // 提前订阅而非等到点「应用」才订阅：后端是异步任务，可能在调用返回前就已推了首帧进度。
+  watchMigrateProgress()
 })
 
 onUnmounted(() => {
   offUpdateStatus?.()
   offDlProgress?.()
+  offMigrate?.()
 })
 
 // 手动检测与后台自动检查共用同一渲染逻辑，保证两条路径展示完全一致。
@@ -310,6 +315,94 @@ const storageMigrate = ref(true)
 const storageMsg = ref('')
 const storageLoading = ref(false)
 
+// ---- 存储位置迁移进度 ----
+// 迁移是运行时异步执行（后端打包旧数据 → 复制到新目录 → 解压 → 切目录 → 改环境变量 → 清理旧目录），
+// 进度经 quickdock:storage:migrate 事件推送，这里订阅后渲染进度条。
+const migratePhase = ref('')
+const migrateTotalFiles = ref(0)
+const migrateDoneFiles = ref(0)
+const migrateTotalBytes = ref(0)
+const migrateDoneBytes = ref(0)
+const migrateCurrent = ref('')
+const migrateRunning = ref(false)
+const migrateDone = ref(false)
+const migrateSkipped = ref<string[]>([])
+
+/** 目标目录回显：用户选 D 盘 → D:\.quickdock（后端规则，前端只展示）。 */
+const storageTargetHint = ref('')
+
+/** 迁移进度百分比：按字节算（比文件数更贴近用户感知的大小）。字节未知时回退按文件数。 */
+const migratePercent = computed(() => {
+  if (migrateTotalBytes.value > 0) {
+    return Math.min(100, Math.round((migrateDoneBytes.value / migrateTotalBytes.value) * 100))
+  }
+  if (migrateTotalFiles.value > 0) {
+    return Math.min(100, Math.round((migrateDoneFiles.value / migrateTotalFiles.value) * 100))
+  }
+  return migratePhase.value === 'done' ? 100 : 0
+})
+
+/** 已复制的体积文案。 */
+const migrateSizeText = computed(() => {
+  const mb = (n: number) => (n / 1024 / 1024).toFixed(1)
+  if (migrateTotalBytes.value > 0) return `${mb(migrateDoneBytes.value)} / ${mb(migrateTotalBytes.value)} MB`
+  return `${migrateDoneFiles.value} / ${migrateTotalFiles.value}`
+})
+
+/** 迁移阶段的用户可读文案。 */
+const migratePhaseText = computed(() => {
+  switch (migratePhase.value) {
+    case 'scanning':
+      return t('storageMigrateScanning')
+    case 'packing':
+      return t('storageMigratePacking')
+    case 'copying':
+      return t('storageMigrateCopying')
+    case 'extracting':
+      return t('storageMigrateExtracting')
+    case 'cleanup':
+      return t('storageMigrateCleanup')
+    case 'downloading':
+    case 'rebind':
+    case 'envvars':
+      return t('storageMigrateDownloading')
+    case 'done':
+      return t('storageMigrateDone')
+    default:
+      return ''
+  }
+})
+
+/** 订阅后端迁移进度事件。 */
+let offMigrate: (() => void) | null = null
+function watchMigrateProgress() {
+  if (offMigrate) return
+  offMigrate = Events.On('quickdock:storage:migrate', (payload: any) => {
+    // Wails v3 发结构体时载荷可能被包一层 data，必须兼容两种形态——
+    // 否则 payload.phase 是 undefined，进度条永远停在 0/0（真踩过）。
+    const p = (payload?.data ?? payload) as any
+    if (!p || typeof p !== 'object') return
+    migratePhase.value = p.phase || ''
+    migrateTotalFiles.value = p.totalFiles || 0
+    migrateDoneFiles.value = p.doneFiles || 0
+    migrateTotalBytes.value = p.totalBytes || 0
+    migrateDoneBytes.value = p.doneBytes || 0
+    migrateCurrent.value = p.current || ''
+    if (Array.isArray(p.skipped)) migrateSkipped.value = p.skipped
+    if (p.message) storageMsg.value = p.message
+    if (p.phase === 'done') {
+      migrateRunning.value = false
+      migrateDone.value = true
+      // 迁移完成 → 刷新显示的当前路径（后端已写配置）
+      loadStorage()
+    }
+    if (p.phase === 'error') {
+      migrateRunning.value = false
+      storageMsg.value = p.err || t('updateError')
+    }
+  })
+}
+
 async function loadStorage() {
   try {
     const r = unwrap<{ current: string; isCustom: boolean; default: string }>(await GetDataDir())
@@ -318,8 +411,32 @@ async function loadStorage() {
       storageDefault.value = r.default
       storageIsCustom.value = r.isCustom
       storageInput.value = r.current
+      await updateStorageTargetHint()
     }
   } catch (e: any) {
+    logErr('Settings.storage', e)
+  }
+}
+
+/**
+ * 更新「实际将迁移到」的目标目录回显。
+ *
+ * 规则由后端 platform.NormalizeTargetDir 决定（唯一实现）：
+ * 选 D 盘根目录 → D:\.quickdock；选 D:\data → D:\data\.quickdock。
+ * 前端只负责展示——自己复制一份规则必然与后端漂移。
+ */
+async function updateStorageTargetHint() {
+  const p = storageInput.value?.trim()
+  if (!p) {
+    storageTargetHint.value = ''
+    return
+  }
+  try {
+    const r = unwrap<string>(await NormalizeDataDir(p))
+    // 与当前目录相同时不提示（后端会直接拒绝迁移）。
+    storageTargetHint.value = r && r !== storageCur.value ? r : ''
+  } catch (e: any) {
+    storageTargetHint.value = ''
     logErr('Settings.storage', e)
   }
 }
@@ -327,7 +444,10 @@ async function loadStorage() {
 async function pickStorageDir() {
   try {
     const dir = unwrap<string | null>(await PickFolderPath(t('storagePick')))
-    if (dir) storageInput.value = dir
+    if (dir) {
+      storageInput.value = dir
+      await updateStorageTargetHint()
+    }
   } catch (e: any) {
     toast.error(getErrorMessage(e))
   }
@@ -338,7 +458,29 @@ async function applyStorage() {
   storageLoading.value = true
   storageMsg.value = ''
   try {
-    const res = await SetDataDir(storageInput.value, storageMigrate.value)
+    // 勾选「迁移现有数据」时走迁移接口（带进度条，运行时执行，完成后提示重启）；
+    // 未勾选则只是切换路径（新目录从空开始，旧数据留在原地）。
+    if (storageMigrate.value) {
+      watchMigrateProgress()
+      migrateRunning.value = true
+      migrateDone.value = false
+      migratePhase.value = 'scanning'
+      migrateTotalFiles.value = 0
+      migrateDoneFiles.value = 0
+      migrateTotalBytes.value = 0
+      migrateDoneBytes.value = 0
+      migrateCurrent.value = ''
+      migrateSkipped.value = []
+      const res = await StorageMigrate(storageInput.value)
+      if (res && res.code === 0) {
+        storageMsg.value = t('storageMigrateStarted')
+      } else {
+        migrateRunning.value = false
+        storageMsg.value = res?.msg || t('updateError')
+      }
+      return
+    }
+    const res = await SetDataDir(storageInput.value, false)
     if (res && res.code === 0) {
       storageMsg.value = res.msg || t('storageApply')
       await loadStorage()
@@ -346,6 +488,7 @@ async function applyStorage() {
       storageMsg.value = res?.msg || t('updateError')
     }
   } catch (e: any) {
+    migrateRunning.value = false
     storageMsg.value = getErrorMessage(e)
   } finally {
     storageLoading.value = false
@@ -847,29 +990,54 @@ async function toggleAutoStart() {
                     v-model="storageInput"
                     class="field-input storage-path-input"
                     :placeholder="t('storageDefault')"
+                    @input="updateStorageTargetHint"
                   />
                   <button class="btn btn-secondary" @click="pickStorageDir">{{ t('storagePick') }}</button>
                 </div>
               </div>
+              <!-- 目标目录回显：用户选 D 盘时显示 D:\.quickdock，避免疑惑「怎么多了个子目录」 -->
+              <p class="field-hint" v-if="storageTargetHint">
+                {{ t('storageMigrateTarget') }}：{{ storageTargetHint }}
+              </p>
 
               <label class="field toggle-field" style="cursor: pointer; margin-bottom: 16px;">
-                <input type="checkbox" v-model="storageMigrate" class="field-checkbox" />
+                <input type="checkbox" v-model="storageMigrate" class="field-checkbox" :disabled="migrateRunning" />
                 <span>{{ t('storageMigrate') }}</span>
               </label>
 
+              <!-- 迁移进度条：打包 → 复制 → 解压 → 切目录 → 改环境变量 → 清理旧目录 -->
+              <div v-if="migrateRunning || migrateDone" class="storage-migrate-progress">
+                <div class="storage-migrate-head">
+                  <span class="storage-migrate-phase">{{ migratePhaseText }}</span>
+                  <span class="storage-migrate-size">{{ migrateSizeText }}</span>
+                </div>
+                <div class="storage-migrate-bar">
+                  <div class="storage-migrate-fill" :style="{ width: migratePercent + '%' }" />
+                </div>
+                <p class="field-hint" v-if="migrateCurrent">
+                  {{ t('storageMigrateCurrent') }}：{{ migrateCurrent }}
+                </p>
+              </div>
+
               <div class="action-row">
-                <button class="btn btn-primary" :disabled="storageLoading" @click="applyStorage">
+                <button class="btn btn-primary" :disabled="storageLoading || migrateRunning" @click="applyStorage">
                   {{ t('storageApply') }}
                 </button>
                 <button
                   class="btn btn-secondary"
                   v-if="storageIsCustom"
-                  :disabled="storageLoading"
+                  :disabled="storageLoading || migrateRunning"
                   @click="resetStorage"
                 >
                   {{ t('storageReset') }}
                 </button>
-                <button class="btn btn-secondary" :disabled="storageLoading" @click="restartAppForStorage">{{ t('storageRestart') }}</button>
+                <button
+                  class="btn btn-secondary"
+                  :disabled="storageLoading || migrateRunning"
+                  @click="restartAppForStorage"
+                >
+                  {{ t('storageRestart') }}
+                </button>
               </div>
 
               <p class="field-hint">{{ t('storageRestartHint') }}</p>

@@ -15,6 +15,15 @@ func (a *AppService) GetDataDir() *ApiResult {
 	})
 }
 
+// NormalizeDataDir 把用户选择的目录规范化成最终的数据目录路径（仅用于 UI 展示）。
+//
+// 规则见 platform.NormalizeTargetDir：选盘符根目录（D:\）→ D:\.quickdock；
+// 选普通目录 → 追加 .quickdock。用户选 D 盘时看到「D:\.quickdock」才不会疑惑
+// 「我明明选了 D 盘，怎么变成 D:\.quickdock 了」。
+func (a *AppService) NormalizeDataDir(path string) *ApiResult {
+	return Ok(platform.NormalizeTargetDir(path))
+}
+
 // SetDataDir 设置自定义数据目录。
 // copyExisting=true 时，会在下次启动把旧目录（当前生效目录）的数据整体迁移到新目录。
 // 修改不会即时生效：日志、数据库、运行时等已按旧目录打开，故需重启应用。

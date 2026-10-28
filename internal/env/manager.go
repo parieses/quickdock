@@ -127,7 +127,10 @@ type linkEntry struct {
 
 // Manager 环境管理门面：聚合各运行时 adapter，供 AppService 调用。
 type Manager struct {
-	adapters map[Runtime]RuntimeAdapter
+	// adaptersMu 保护 adapters 表的替换（RebuildAdapters 会整表换掉）。
+	// 读取方（adapter()）持读锁，避免与替换并发导致 map 读写竞争。
+	adaptersMu sync.RWMutex
+	adapters   map[Runtime]RuntimeAdapter
 	// links 记录用户导入的外部安装目录（按运行时），loadLinks/saveLinks 持久化到 env/links.json
 	linksMu sync.RWMutex
 	links   map[Runtime][]linkEntry
@@ -154,41 +157,50 @@ var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeBun, Run
 	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
 	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeWebDAV, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeJDK, RuntimeMCP, RuntimeEverything}
 
+// newAdapters 创建全部运行时适配器。
+//
+// 必须由函数生成而非在 NewManager 里内联：数据目录迁移后需要重建整张表——
+// 多数适配器（如 RedisRuntime）在构造时把 baseDir 固化成当时的
+// platform.DefaultDataDir()，迁移后不重建就会继续往旧目录装东西。
+func newAdapters() map[Runtime]RuntimeAdapter {
+	return map[Runtime]RuntimeAdapter{
+		RuntimeNode:       NewNodeRuntime(),
+		RuntimePHP:        NewPHPRuntime(),
+		RuntimeGo:         NewGoRuntime(),
+		RuntimeRedis:      NewRedisRuntime(),
+		RuntimeNginx:      NewNginxRuntime(),
+		RuntimeGit:        NewGitRuntime(),
+		RuntimeCaddy:      NewCaddyRuntime(),
+		RuntimeComposer:   NewComposerRuntime(),
+		RuntimeFFmpeg:     NewFFmpegRuntime(),
+		RuntimePython:     NewPythonRuntime(),
+		RuntimeApache:     NewApacheRuntime(),
+		RuntimeMemcached:  NewMemcachedRuntime(),
+		RuntimeMariaDB:    NewMariaDBRuntime(),
+		RuntimeMySQL:      NewMySQLRuntime(),
+		RuntimePostgreSQL: NewPostgresRuntime(),
+		RuntimeMongoDB:    NewMongoRuntime(),
+		RuntimeMailpit:    NewMailpitRuntime(),
+		RuntimeMinIO:      NewMinioRuntime(),
+		RuntimeFrpc:       NewFrpcRuntime(),
+		RuntimeFTP:        NewFTPRuntime(),
+		RuntimeGh:         NewGhRuntime(),
+		RuntimeBun:        NewBunRuntime(),
+		RuntimeErlang:     NewErlangRuntime(),
+		RuntimeJDK:        NewJDKRuntime(),
+		RuntimeTraefik:    NewTraefikRuntime(),
+		RuntimeMkcert:     NewMkcertRuntime(),
+		RuntimeRabbitMQ:   NewRabbitMQRuntime(),
+		RuntimeOllama:     NewOllamaRuntime(),
+		RuntimeMCP:        NewMCPRuntime(),
+		RuntimeWebDAV:     NewWebDAVRuntime(),
+		RuntimeEverything: NewEverythingRuntime(),
+	}
+}
+
 func NewManager() *Manager {
 	m := &Manager{
-		adapters: map[Runtime]RuntimeAdapter{
-			RuntimeNode:       NewNodeRuntime(),
-			RuntimePHP:        NewPHPRuntime(),
-			RuntimeGo:         NewGoRuntime(),
-			RuntimeRedis:      NewRedisRuntime(),
-			RuntimeNginx:      NewNginxRuntime(),
-			RuntimeGit:        NewGitRuntime(),
-			RuntimeCaddy:      NewCaddyRuntime(),
-			RuntimeComposer:   NewComposerRuntime(),
-			RuntimeFFmpeg:     NewFFmpegRuntime(),
-			RuntimePython:     NewPythonRuntime(),
-			RuntimeApache:     NewApacheRuntime(),
-			RuntimeMemcached:  NewMemcachedRuntime(),
-			RuntimeMariaDB:    NewMariaDBRuntime(),
-			RuntimeMySQL:      NewMySQLRuntime(),
-			RuntimePostgreSQL: NewPostgresRuntime(),
-			RuntimeMongoDB:    NewMongoRuntime(),
-			RuntimeMailpit:    NewMailpitRuntime(),
-			RuntimeMinIO:      NewMinioRuntime(),
-			RuntimeFrpc:       NewFrpcRuntime(),
-			RuntimeFTP:        NewFTPRuntime(),
-			RuntimeGh:         NewGhRuntime(),
-			RuntimeBun:        NewBunRuntime(),
-			RuntimeErlang:     NewErlangRuntime(),
-			RuntimeJDK:        NewJDKRuntime(),
-			RuntimeTraefik:    NewTraefikRuntime(),
-			RuntimeMkcert:     NewMkcertRuntime(),
-			RuntimeRabbitMQ:   NewRabbitMQRuntime(),
-			RuntimeOllama:     NewOllamaRuntime(),
-			RuntimeMCP:        NewMCPRuntime(),
-			RuntimeWebDAV:     NewWebDAVRuntime(),
-			RuntimeEverything: NewEverythingRuntime(),
-		},
+		adapters:     newAdapters(),
 		links:        map[Runtime][]linkEntry{},
 		detectCache:  map[Runtime][]Install{},
 		enabled:      map[Runtime]bool{},
@@ -199,6 +211,24 @@ func NewManager() *Manager {
 	m.loadStates()
 	m.syncPHPLinks()
 	return m
+}
+
+// RebuildAdapters 重建整张适配器表，使其指向当前的数据目录。
+//
+// 用途：数据目录迁移后调用。多数适配器在构造时把 baseDir 固化成当时的
+// platform.DefaultDataDir()——不重建的话，后续「重装运行时」会装回旧目录，
+// 迁移就白做了。
+//
+// 重建后 PHP 的导入目录链接需要重新注入（syncPHPLinks），否则 php-fpm 起不来。
+func (m *Manager) RebuildAdapters() {
+	m.adaptersMu.Lock()
+	m.adapters = newAdapters()
+	m.adaptersMu.Unlock()
+	// 重建后检测缓存里的路径已失效（旧目录），清掉让它重新探测。
+	m.detectMu.Lock()
+	m.detectCache = map[Runtime][]Install{}
+	m.detectMu.Unlock()
+	m.syncPHPLinks()
 }
 
 // linksFile 返回 links 持久化文件路径（env/links.json）。
@@ -379,14 +409,24 @@ func (m *Manager) syncPHPLinks() {
 // syncPHPLinksLocked 同 syncPHPLinks，但调用方必须已持有 linksMu（读或写均可）。
 // 单独拆出是因为 RWMutex 不可重入：removeLink 持写锁时不能再经 syncPHPLinks 取读锁。
 func (m *Manager) syncPHPLinksLocked() {
-	if p, ok := m.adapters[RuntimePHP].(*PHPRuntime); ok {
+	if p, ok := m.lookupAdapter(RuntimePHP).(*PHPRuntime); ok {
 		p.SetLinkedDirs(linksToMap(m.links[RuntimePHP]))
 	}
 }
 
+// lookupAdapter 取适配器（加读锁）。
+//
+// 所有对 m.adapters 的直接访问都必须经由本方法或 adapter()——
+// RebuildAdapters 会整表替换，直接访问会与替换产生 map 读写竞争（Go 会直接 panic）。
+func (m *Manager) lookupAdapter(rt Runtime) RuntimeAdapter {
+	m.adaptersMu.RLock()
+	defer m.adaptersMu.RUnlock()
+	return m.adapters[rt]
+}
+
 func (m *Manager) adapter(rt Runtime) (RuntimeAdapter, error) {
-	a, ok := m.adapters[rt]
-	if !ok {
+	a := m.lookupAdapter(rt)
+	if a == nil {
 		return nil, fmt.Errorf("不支持的运行时: %s", rt)
 	}
 	return a, nil
@@ -395,10 +435,8 @@ func (m *Manager) adapter(rt Runtime) (RuntimeAdapter, error) {
 // EverythingRuntime 返回 Everything 引擎实例（未启用时返回 nil）。
 // 供 facade / MCP / 命令面板等需要 Everything 专属能力的调用方取用。
 func (m *Manager) EverythingRuntime() *EverythingRuntime {
-	if a, ok := m.adapters[RuntimeEverything]; ok {
-		if e, ok := a.(*EverythingRuntime); ok {
-			return e
-		}
+	if e, ok := m.lookupAdapter(RuntimeEverything).(*EverythingRuntime); ok {
+		return e
 	}
 	return nil
 }
@@ -407,10 +445,8 @@ func (m *Manager) EverythingRuntime() *EverythingRuntime {
 // 供 services/mcp 把面板设置写回 config.json —— 等级这类配置的归属方是本包，
 // 让调用方自己去拼 runtime/mcp 路径会出现第二份「配置在哪」的答案。
 func (m *Manager) MCPRuntime() *MCPRuntime {
-	if a, ok := m.adapters[RuntimeMCP]; ok {
-		if r, ok := a.(*MCPRuntime); ok {
-			return r
-		}
+	if r, ok := m.lookupAdapter(RuntimeMCP).(*MCPRuntime); ok {
+		return r
 	}
 	return nil
 }
@@ -434,7 +470,7 @@ func (m *Manager) List() []RuntimeInfo {
 	entries := splitSystemPath(pathVal)
 	var out []RuntimeInfo
 	for _, rt := range runtimeOrder {
-		a := m.adapters[rt]
+		a := m.lookupAdapter(rt)
 		var si []SourceInfo
 		for _, s := range ListSources(rt) {
 			si = append(si, SourceInfo{ID: s.ID, Name: s.Name})
@@ -666,6 +702,87 @@ func (m *Manager) installedVersionFor(rt Runtime, version string) string {
 		}
 	}
 	return version
+}
+
+// RebindRuntime 把指定运行时的「环境变量指向」重新注册到**当前数据目录**下的安装。
+//
+// 与 ReinstallRuntime 的区别：**不下载任何东西**。数据目录迁移改成「整体打包搬运」后，
+// 运行时本体（便携 Go/Node/Git、模块缓存、依赖树）已经随压缩包搬到新目录了，
+// 这里只需要把「哪个版本处于激活状态」重新写一遍环境变量：
+//   - PATH 条目（旧目录的 bin → 新目录的 bin）
+//   - 版本专属变量（Go 的 GOPATH / GOENV）
+//
+// 前置条件：调用方必须先 RebuildAdapters()——适配器的 baseDir 在构造时被固化成当时的
+// platform.DefaultDataDir()，不重建的话算出来的还是旧目录路径。
+//
+// version 为空时用当前激活版本；没有激活版本则视为无事可做。
+func (m *Manager) RebindRuntime(runtimeID, version string) error {
+	rt := Runtime(runtimeID)
+	if version == "" {
+		version = activeVersion(rt)
+		if version == "" {
+			return nil // 没有激活版本，不涉及环境变量
+		}
+	}
+	// 系统 PATH 上的版本（用户自己装在系统里的）不受数据目录影响，不用管。
+	if m.scopeFor(rt, version) == "system" {
+		return nil
+	}
+	// rebindActive 会：注册新路径 → 移除旧版本路径 → 写版本专属变量 → 更新激活元数据。
+	// 迁移前后版本号通常相同（go 1.27.2 → go 1.27.2），所以不能用 SetActive
+	// （它在版本号没变时会跳过重新注册），必须走 rebindActive 这条无条件重绑的路径。
+	return m.rebindActive(rt, version)
+}
+
+// ReinstallRuntime 重新下载并安装指定运行时的指定版本。
+//
+// 用途：运行时缺失时重新下载并安装到当前数据目录。
+// 数据目录迁移已改为「整体打包搬运」，迁移流程不再调用本方法（见 RebindRuntime）。
+//
+// version 为空时用该运行时的推荐版本。sourceID 为空时沿用当前下载源。
+func (m *Manager) ReinstallRuntime(runtimeID, version string) error {
+	rt := Runtime(runtimeID)
+	if version == "" {
+		version = Versions(rt)[0]
+	}
+	cb := InstallCallback{}
+	if err := m.Install(rt, version, "", "", cb); err != nil {
+		return err
+	}
+	// 装完后确保激活状态指向新目录里的这份（迁移前激活的是旧目录里的版本）。
+	//
+	// 注意不能直接调 SetActive：它在「版本号没变」时会跳过重新注册——
+	// 而迁移场景恰恰是版本号相同、路径变了（go 1.27.2 → 新的 1.27.2），
+	// 结果 PATH 仍指向旧目录，等于没迁移。故这里显式走「先注销旧的、再注册新的」。
+	if m.scopeFor(rt, version) != "system" {
+		if err := m.rebindActive(rt, version); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// rebindActive 把激活版本重新绑定到当前目录下的安装（数据目录迁移后用）。
+//
+// 与 SetActive 的区别：不看「版本号是否变化」，而是**无条件**重新注册路径——
+// 迁移前后版本号往往相同但实际路径已变（旧的在新目录、新的是刚下载的），
+// 按版本号判断会漏掉重新注册，PATH 会继续指向旧目录。
+//
+// 顺序：先写新路径，再移除旧路径——反过来会让用户在切换过程中出现「两条都没有」的窗口。
+func (m *Manager) rebindActive(rt Runtime, version string) error {
+	prev := activeVersion(rt)
+	if m.scopeFor(rt, version) != "system" {
+		if e := m.registerRuntimePaths(rt, version); e != nil {
+			return e
+		}
+	}
+	if prev != "" && prev != version && m.scopeFor(rt, prev) != "system" {
+		m.unregisterRuntimePaths(rt, prev)
+	}
+	// 同步版本专属的环境变量（Go 的 GOPATH/GOENV 等），使终端里直接执行 go
+	// 也命中新目录里的配置。
+	m.applyActiveEnvVars(rt, version)
+	return writeActiveMeta(rt, version)
 }
 
 // SetActive 设置某运行时的激活版本（其 bin 目录即“环境变量指向”的版本）。version=="" 清除激活。
@@ -1174,8 +1291,8 @@ type PortConflict struct {
 
 // EnableRabbitMQManagement 针对运行中的 RabbitMQ 节点启用管理后台插件（rabbitmq_management，端口 15672）。
 func (m *Manager) EnableRabbitMQManagement(version string, onLog func(string)) error {
-	a, ok := m.adapters[RuntimeRabbitMQ]
-	if !ok {
+	a := m.lookupAdapter(RuntimeRabbitMQ)
+	if a == nil {
 		return fmt.Errorf("RabbitMQ 运行时未注册")
 	}
 	r, ok := a.(*RabbitMQRuntime)
@@ -1187,8 +1304,8 @@ func (m *Manager) EnableRabbitMQManagement(version string, onLog func(string)) e
 
 // DisableRabbitMQManagement 关闭 RabbitMQ 管理后台插件（rabbitmq_management，端口 15672）。
 func (m *Manager) DisableRabbitMQManagement(version string, onLog func(string)) error {
-	a, ok := m.adapters[RuntimeRabbitMQ]
-	if !ok {
+	a := m.lookupAdapter(RuntimeRabbitMQ)
+	if a == nil {
 		return fmt.Errorf("RabbitMQ 运行时未注册")
 	}
 	r, ok := a.(*RabbitMQRuntime)
@@ -1200,8 +1317,8 @@ func (m *Manager) DisableRabbitMQManagement(version string, onLog func(string)) 
 
 // IsRabbitMQManagementEnabled 返回 RabbitMQ 管理后台是否已启用。
 func (m *Manager) IsRabbitMQManagementEnabled(version string) bool {
-	a, ok := m.adapters[RuntimeRabbitMQ]
-	if !ok {
+	a := m.lookupAdapter(RuntimeRabbitMQ)
+	if a == nil {
 		return false
 	}
 	r, ok := a.(*RabbitMQRuntime)
