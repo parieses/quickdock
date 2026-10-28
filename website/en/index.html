@@ -342,6 +342,25 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">SSH is harder to get wrong, monitors are recoverable, runtimes tell you which version a project needs</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>SSH gained a "run command" window: one command, then the connection closes. On production hosts the risk is checked first, high-risk commands can only be filled in rather than executed, and output is copyable.</li>
+          <li>Hosts can be tested before you save the form; reopening the window restores the tabs you had; SFTP supports multi-select batch download, move and delete, and a path you can type to jump.</li>
+          <li>Monitors go to a recycle bin and come back with their logs and configuration. Search, batch enable/disable and drag sorting are in. A one-hour maintenance window pauses checks and alerts.</li>
+          <li>Scheduled tasks gained a monthly frequency, search and filters (failed, enabled, disabled), a countdown to the next run, and a run history you can filter to failures and export to CSV. Bot push moved into settings, configured once rather than per page.</li>
+          <li>Environment management checks what a project directory requires (<code>.nvmrc</code>, <code>.tool-versions</code>, <code>go.mod</code>, <code>package.json</code> and more) against what is installed and active, and switches to the right version on the spot.</li>
+          <li>Notes gained a table of contents, word count, drag sorting and <code>.md</code> export, and the AI panel can insert at the cursor, append, or replace the whole note. Todos are searchable, and subtasks can be renamed, reordered and given their own due date.</li>
+          <li>Items can carry a mark colour and a custom icon, and can be batch-deleted or moved between collections. The clipboard clears in bulk, reveals files in Explorer, saves images, and orders rules by priority with an app-match dry run.</li>
+          <li>Under the hood: Wails v3 stable and Go 1.26, and scenes are export-only.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.30</span>
+          <span class="log-date">2026-10-28</span>
           <span class="log-title">Move your data folder, see what the AI costs, take formulas and diagrams out of an answer</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -385,21 +404,6 @@
           <li>Results can be pushed to a bot: WeCom, DingTalk, Feishu, Telegram and others.</li>
           <li>The MCP server exposes <code>robot_notify</code>, so agents can send messages out too.</li>
           <li>Interface zoom has three steps and lives in settings; plugin windows follow the display the main window is on.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.27</span>
-          <span class="log-date">2026-10-24</span>
-          <span class="log-title">Full-screen capture, drag-and-drop plugins, rearrangeable navigation</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Screenshots gain a full-screen mode; the SFTP panel shows file attributes; SSH hosts get a detail page.</li>
-          <li>Drop a plugin zip onto the window to install it, no clicking through menus.</li>
-          <li>Navigation items can be hidden and reordered, and the sidebar carries general-purpose badges.</li>
-          <li>Logs can be cleared by range, and database indexes can be rebuilt.</li>
         </ul>
       </details>
     </div>

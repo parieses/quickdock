@@ -342,6 +342,25 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">SSH 更难用错，监控能找回，环境会告诉你项目缺哪个版本</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>SSH 加了「执行命令」窗口：一条命令跑完就断开，不留会话。生产主机会先核对风险，高危命令只给填入、不给执行，输出可以复制。</li>
+          <li>主机表单里没保存也能直接测通不通；重开窗口自动恢复上次的标签页；SFTP 支持多选批量下载、移动、删除，路径可以直接输入跳转。</li>
+          <li>监控可以进回收站，恢复时日志和配置都还在；支持搜索、批量启停、拖拽排序。临时维护能设一小时窗口，期间不检测也不告警。</li>
+          <li>定时任务加了每月频率、搜索与筛选（仅失败、启用中、已停用）、下次执行倒计时；执行历史能只看失败、导出 CSV。机器人推送收进设置里统一配，不再各页各配一份。</li>
+          <li>环境管理能按项目目录检查版本要求（<code>.nvmrc</code>、<code>.tool-versions</code>、<code>go.mod</code>、<code>package.json</code> 等），和本机已装、当前激活的版本逐个对比，缺的当场切过去。</li>
+          <li>笔记加了目录、字数统计、拖拽排序和导出 <code>.md</code>，AI 面板能把结果插入光标、追加到末尾或替换全文。待办支持搜索，子任务可改名、上下移动、单独设截止日。</li>
+          <li>条目可以设标记颜色和自定义图标，支持批量删除与跨集合移动。剪贴板能批量清空、在资源管理器里定位、把图片另存，自动规则可以排优先级并试跑应用匹配。</li>
+          <li>底层升到 Wails v3 正式版与 Go 1.26，场景只保留导出。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.30</span>
+          <span class="log-date">2026-10-28</span>
           <span class="log-title">数据目录能搬家，AI 花了多少能看见，回答里的公式和图能拿走</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -385,21 +404,6 @@
           <li>执行结果可以推送到机器人：企业微信、钉钉、飞书、Telegram 等。</li>
           <li>MCP 服务暴露 <code>robot_notify</code>，Agent 也能往外发消息。</li>
           <li>界面缩放改成三档，放进设置页；插件窗口跟随主窗口所在的显示器。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.27</span>
-          <span class="log-date">2026-10-24</span>
-          <span class="log-title">全屏截图、拖拽装插件、导航可以自己排</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>截图支持全屏模式，SFTP 面板能看到文件属性，SSH 主机有详情页。</li>
-          <li>把插件 zip 拖进窗口就能装，不用一层层点。</li>
-          <li>导航项可以隐藏、拖动排序，导航上也挂上了通用角标。</li>
-          <li>日志支持按范围清理，数据库索引可以重建。</li>
         </ul>
       </details>
     </div>

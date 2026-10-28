@@ -120,6 +120,7 @@
             <li><b>Collections</b> group by purpose and carry one of four open strategies, which decide whether items open all at once or one by one.</li>
             <li><b>Items</b> come in six types: folder, file, URL, terminal command, application, shortcut with arguments.</li>
             <li>Every level can be dragged into order. Commands and URLs accept <code>{date}</code>, <code>{time}</code>, <code>{username}</code> and <code>{clipboard}</code>, expanded at the moment they open.</li>
+            <li>Items can be ticked for batch delete or moved to another collection in the same scenario. An item can carry a mark colour and a custom icon (an image up to 256 KB), plus its own extra arguments.</li>
             <li>When you can't find something, <kbd>Ctrl</kbd><kbd>K</kbd> beats digging through the tree.</li>
           </ul>
         </section>
@@ -145,6 +146,7 @@
             <li>Classification is computed and stored when an entry is written, so picking a tag reaches the whole history rather than the 1000 rows the All list loads by default.</li>
             <li>Ask AI on an entry to translate, summarize or reformat — or ask your own question — answered in place, without leaving the page.</li>
             <li>Retention is set under Settings → Clipboard, and entries expire on schedule. Automatic rules can clean up what you copy, with a dry run first.</li>
+            <li>History can be cleared in one go, file entries reveal in Explorer, and images save to disk. Rules can be ordered by priority, and you can simulate a source window to see whether they'd match.</li>
             <li>Every copy in the app goes through the backend system API, unaffected by which window has focus.</li>
           </ul>
         </section>
@@ -169,6 +171,7 @@
             <li>Content is stored as Markdown and saved 500 ms after you stop typing. There is no save button.</li>
             <li>The window hides when it loses focus, so it never sits on top of your work.</li>
             <li>Ask AI in the float: with a selection only that goes, without one the whole note. Presets cover summarize, polish, continue and translate, and you can ask anything. None of it is written to the AI conversation history.</li>
+            <li>The footer counts words, characters and lines, headings become a table of contents you can click through, the tree can be dragged into order, and the whole note exports to <code>.md</code>. An AI answer can go in at the cursor, onto the end, or replace the note.</li>
           </ul>
         </section>
 
@@ -179,7 +182,8 @@
             <li>Tasks can carry subtasks, tags, notes and an estimate.</li>
             <li>Repeat rules cover daily, weekly and monthly; finishing one creates the next.</li>
             <li>A due time triggers a system notification.</li>
-            <li>Pomodoro runs a countdown on the todo page and notifies when it ends; a webhook can push it to your phone under Settings → Open Tool.</li>
+            <li>Pomodoro runs a countdown on the todo page and notifies when it ends; a webhook can push it to your phone under Settings → Robot Notifications.</li>
+            <li>Subtasks can be renamed, moved up or down, and given their own due date; the in-page search filters by title and notes.</li>
             <li>Search a task title in the command palette and Enter jumps straight to it.</li>
           </ul>
         </section>
@@ -193,16 +197,19 @@
             <li>A state flip pushes a desktop notification, or DingTalk, WeCom, Feishu, ServerChan, PushPlus or Telegram.</li>
             <li>Trend charts cover 24 hours, 7 days and all time; the monitor list exports to CSV.</li>
             <li>Every notification also lands in the bell at the bottom of the sidebar, and clicking one jumps to its monitor. AI completion notices stay quiet while the window is in front of you.</li>
+            <li>With many monitors you can search, tick several to enable or disable, and drag them into order. Deleted ones go to a recycle bin and come back with logs and configuration; a one-hour maintenance window pauses checks and alerts.</li>
           </ul>
         </section>
 
         <section class="doc-sec" id="s11">
           <h2><span>11</span>Schedules</h2>
-          <p>Five actions and four schedules cover everyday scripts and reminders.</p>
+          <p>Five actions and five schedules cover everyday scripts and reminders.</p>
           <ul>
             <li>Actions: open an application, open a folder, open a URL, run a command, send an HTTP request.</li>
-            <li>Schedules: once, interval, daily, weekly.</li>
+            <li>Schedules: once, interval, daily, weekly, monthly.</li>
             <li>Run one immediately from the list instead of waiting for the clock.</li>
+            <li>The list searches by name and filters to failed, enabled or disabled; each row shows how long until the next run. The run history filters to failures and exports to CSV.</li>
+            <li>Bot addresses are configured once under Settings → Robot Notifications; a task only decides whether to send and through which channel.</li>
             <li>Deleted tasks go to the recycle bin. Restoring recalculates the next run from now, so a task whose time passed long ago doesn't fire the moment it comes back.</li>
           </ul>
         </section>
@@ -216,6 +223,7 @@
             <li>Service runtimes — Nginx, MySQL, Redis and the like — start, stop and restart from here. Configs can be edited in the app and reloaded on save.</li>
             <li>Nginx, Apache and Caddy validate their config before starting; a syntax error stops there instead of breaking a live service.</li>
             <li>Every service has live logs (last 8 KB) and a web console entry; the port overview shows which process holds which port.</li>
+            <li>Check Project reads the version declarations in a directory — <code>.nvmrc</code>, <code>.tool-versions</code>, <code>go.mod</code>, <code>package.json</code> and more — compares them against what is installed and active, and switches to the missing version on the spot. If Everything returns nothing, the page has a self-test too.</li>
             <li>Everything installs under <code>%APPDATA%\QuickDock\runtime\</code>: no registry writes, no system PATH changes, no admin rights.</li>
           </ul>
         </section>
@@ -240,8 +248,10 @@
             <li>The host tree supports groups (folders), drag reordering, and environment tags: production, staging, test.</li>
             <li>Authenticate with a password or a key (ed25519 and friends, passphrase supported). Older devices on <code>ssh-rsa</code> need the legacy switch turned on.</li>
             <li><b>The first connection to a new machine asks you to confirm its fingerprint.</b> Compare it against <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> on the server before trusting it. Trusted fingerprints are managed in known_hosts on the window's top bar, and a changed fingerprint raises an alert.</li>
-            <li>Several tabs on one host handshake once. Dropped connections reconnect on their own, and scrollback is kept.</li>
-            <li>The SFTP panel browses remote directories, uploads and downloads.</li>
+            <li>Several tabs on one host handshake once. Dropped connections reconnect on their own, and scrollback is kept. Reopen the window and last session's tabs come back.</li>
+            <li>A host can be tested for connectivity before you save the form, so you don't keep a config that never connects.</li>
+            <li>The SFTP panel browses remote directories, uploads and downloads, and multi-selects for batch download, move and delete; the path box takes a typed path to jump to.</li>
+            <li>Run Command is one-shot: it runs and disconnects, keeping no session. On production hosts the risk is checked first, high-risk commands can only be filled in, <kbd>Ctrl</kbd><kbd>Enter</kbd> runs, and output is copyable.</li>
             <li>Batch execution on a group lets you tick several machines, dry-run first (read-only — it lists the commands and their risks), then run, with output streamed back per host.</li>
             <li>The AI sidebar on the right: select terminal output, right-click and ask. High-risk commands get a fill-in button only; you press Enter.</li>
           </ul>
