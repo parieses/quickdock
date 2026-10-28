@@ -5,11 +5,12 @@ import type { PluginCmdIndex } from './usePluginIndex'
 import { commandTitle, pluginName } from '../utils/localize'
 import { getPluginLastResult } from '../utils/pluginLastResult'
 import { evaluate, format, convertExpression } from '../utils/calc'
-import { Puzzle, Play, Power, Gauge, File } from '@lucide/vue'
+import { Puzzle, Play, Power, Gauge, File, ListChecks } from '@lucide/vue'
 import type { EnvRuntimeInfo, EnvServiceStatus, FileSearchResult } from '../types'
 import { EnvEverythingSearch } from '../../bindings/quickdock/services/env/environmentservice'
 import { SearchAll } from '../../bindings/quickdock/services/appservice'
 import { SearchNotesTree } from '../../bindings/quickdock/services/note/noteservice'
+import { SearchTodos as SearchTodosApi } from '../../bindings/quickdock/services/todo/todoservice'
 import { unwrap } from '../utils/api'
 
 // 运行时的中文分类别名，用于 Ctrl+K 中文检索（如「数据库」「缓存」「消息队列」）。
@@ -41,7 +42,7 @@ const ENV_RUNTIME_ALIASES: Record<string, string[]> = {
 }
 
 // ---- Types ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'todo' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file'
 
 export interface SearchResult {
   type: ResultType
@@ -53,6 +54,7 @@ export interface SearchResult {
   cmd?: any
   calcResult?: string
   note?: CmdNote
+  todo?: CmdTodo
   inlineQuery?: string
   frecencyScore?: number
   appPath?: string
@@ -79,6 +81,9 @@ export interface SearchResult {
 }
 
 interface CmdNote { id: string; name: string; content: string; isFolder: boolean; parentId: string; keyword: string }
+// 待办命中项：命令面板只做「检索 + 跳转」，展示用字段够用即可，
+// 完整字段由待办页自行按 id 加载（避免每次输入都把备注/重复配置全量拉回来）。
+interface CmdTodo { id: string; title: string; status: string; priority: string; dueDate: string; tags: string }
 interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
 interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
 
@@ -115,6 +120,25 @@ export interface SearchDeps {
   envRuntimes: Ref<EnvRuntimeInfo[]>
   envStatuses: Ref<Record<string, EnvServiceStatus>>
   envMgmt: Ref<Record<string, boolean>> // RabbitMQ 各版本管理后台启用状态（version → enabled）
+}
+
+// 待办结果的副标题：一行里挑最有用的那条信息——先期限（含逾期），再标签。
+// 期限比标签更容易决定「现在该处理哪条」，所以排在前面；两者都没有就留空，
+// 让标题独占一行（硬凑一个占位词反而把标题挤窄）。
+function todoSubtitle(td: CmdTodo, t: (k: string, n?: any) => string): string {
+  if (td.dueDate) {
+    // 必须用本地日期而不是 toISOString()：后者是 UTC，UTC+8 的早上八点前
+    // 会把"今天到期"判成"已逾期"。
+    const d = new Date()
+    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    const prefix = td.dueDate < today ? t('todoOverdue') : t('todoDue')
+    return `${prefix} ${td.dueDate}`
+  }
+  try {
+    const tags = JSON.parse(td.tags || '[]')
+    if (Array.isArray(tags) && tags.length) return tags.map((x: unknown) => '#' + String(x)).join(' ')
+  } catch { /* tags 是手写 JSON，坏数据不该让整条结果消失 */ }
+  return ''
 }
 
 export function useCommandSearch(deps: SearchDeps) {
@@ -187,11 +211,21 @@ export function useCommandSearch(deps: SearchDeps) {
   // - SearchNotesTree（notes LIKE 全文）：内容/标签匹配交给 SQLite，
   //   前端只保留名称 + 拼音的快速通道。笔记量大时逐篇 contains 全文
   //   是命令面板可感知的卡顿源，而标签匹配前端本来就做不到。
-  // 两条链路失败都静默：本地匹配仍是权威路径，后端只是补充。
+  // - SearchTodos（todos LIKE）：待办没有本地池，这一路是唯一来源。
+  // 三条链路失败都静默：本地匹配仍是权威路径，后端只是补充。
   const backendItems = ref<CollectionItem[]>([])
   const backendNotes = ref<CmdNote[]>([])
+  // 待办没有本地常驻池：items/notes 在 App.vue 有一份列表喂进来，待办没有，
+  // 所以这一个区 100% 依赖后端检索（否则 Ctrl+K 永远搜不到待办）。
+  const backendTodos = ref<CmdTodo[]>([])
   let backendReqId = 0
   let backendTimer: ReturnType<typeof setTimeout> | null = null
+
+  // P6：后端全文检索结果缓存（按 query），TTL 30s。
+  // 命令面板连续输入同一词（删字重打）不再重复打 3 次 IPC；
+  // 后端只是本地匹配的补充，TTL 自然失效不影响权威路径。
+  const backendSearchCache = new Map<string, { ts: number; items: CollectionItem[]; notes: CmdNote[]; todos: CmdTodo[] }>()
+  const BACKEND_SEARCH_TTL = 30_000
 
   watch(query, (v) => {
     if (backendTimer) clearTimeout(backendTimer)
@@ -200,20 +234,35 @@ export function useCommandSearch(deps: SearchDeps) {
     if (q.length < 2) {
       backendItems.value = []
       backendNotes.value = []
+      backendTodos.value = []
+      return
+    }
+    // 命中缓存直接填，省一次 IPC 往返
+    const cached = backendSearchCache.get(q)
+    if (cached && Date.now() - cached.ts < BACKEND_SEARCH_TTL) {
+      backendItems.value = cached.items
+      backendNotes.value = cached.notes
+      backendTodos.value = cached.todos
       return
     }
     backendTimer = setTimeout(() => {
       if (reqId !== backendReqId) return // 已被更新的输入取代
       void (async () => {
         try {
-          const [its, nts] = await Promise.all([SearchAll(q), SearchNotesTree(q)])
+          const [its, nts, tds] = await Promise.all([SearchAll(q), SearchNotesTree(q), SearchTodosApi(q)])
           if (reqId !== backendReqId) return
-          backendItems.value = unwrap<CollectionItem[]>(its) || []
-          backendNotes.value = unwrap<CmdNote[]>(nts) || []
+          const items = unwrap<CollectionItem[]>(its) || []
+          const notes = unwrap<CmdNote[]>(nts) || []
+          const todos = unwrap<CmdTodo[]>(tds) || []
+          backendSearchCache.set(q, { ts: Date.now(), items, notes, todos })
+          backendItems.value = items
+          backendNotes.value = notes
+          backendTodos.value = todos
         } catch {
           if (reqId !== backendReqId) return
           backendItems.value = []
           backendNotes.value = []
+          backendTodos.value = []
         }
       })()
     }, 140)
@@ -386,6 +435,27 @@ export function useCommandSearch(deps: SearchDeps) {
     noteResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
     if (noteResults.length > 0) {
       groups.push({ type: 'note', label: t('cmdGroupNotes'), results: noteResults })
+    }
+
+    // 4b. 待办（唯一来源就是后端检索：本地没有待办池）
+    const todoResults: SearchResult[] = []
+    for (const td of backendTodos.value) {
+      if (seen.has('todo-' + td.id)) continue
+      seen.add('todo-' + td.id)
+      const titleLC = (td.title || '').toLowerCase()
+      const score = titleLC === qLC ? 100 : titleLC.startsWith(qLC) ? 75 : titleLC.includes(qLC) ? 60 : 50
+      todoResults.push({
+        type: 'todo',
+        label: td.title,
+        icon: ListChecks,
+        desc: todoSubtitle(td, t),
+        todo: td,
+        score,
+      })
+    }
+    todoResults.sort((a, b) => (b.score || 0) - (a.score || 0))
+    if (todoResults.length > 0) {
+      groups.push({ type: 'todo', label: t('cmdGroupTodos'), results: todoResults })
     }
 
     // 5. 已安装应用
@@ -570,6 +640,7 @@ export function useCommandSearch(deps: SearchDeps) {
         if (r.pluginId && r.pluginCommandId) return 'plugin:' + r.pluginId + '.' + r.pluginCommandId
         if (r.item?.id) return 'item:' + r.item.id
         if (r.note?.id) return 'note:' + r.note?.id
+        if (r.todo?.id) return 'todo:' + r.todo?.id
         if (r.cmd?.id) return 'cmd:' + r.cmd?.id
         if (r.appPath) return 'app:' + r.appPath
         return r.label
@@ -586,7 +657,7 @@ export function useCommandSearch(deps: SearchDeps) {
     // 应用分组优先于其它内容分组展示（应用排在前面）
     const GROUP_PRIORITY: Record<string, number> = {
       best: 0, 'clipboard-action': 1, calculator: 2, url: 3,
-      app: 4, item: 5, 'quicklink-inline': 6, note: 7, system: 8, env: 8.5, file: 8.7, plugin: 9,
+      app: 4, item: 5, 'quicklink-inline': 6, todo: 6.5, note: 7, system: 8, env: 8.5, file: 8.7, plugin: 9,
     }
     groups.sort((a, b) => (GROUP_PRIORITY[a.type] ?? 99) - (GROUP_PRIORITY[b.type] ?? 99))
 
@@ -737,6 +808,9 @@ export function useCommandSearch(deps: SearchDeps) {
     }
     if (r.type === 'note' && r.note) {
       return { title: r.label, subtitle: r.note.isFolder ? '📁' : '', lines: [r.note.content], kind: 'note' }
+    }
+    if (r.type === 'todo' && r.todo) {
+      return { title: r.label, subtitle: t('cmdGroupTodos'), lines: [r.desc || ''], kind: 'todo' }
     }
     if (r.type === 'plugin') {
       const last = r.pluginId && r.pluginCommandId ? getPluginLastResult(r.pluginId, r.pluginCommandId) : null

@@ -60,10 +60,21 @@ func (a *AppService) HidePaletteWindow() {
 	}
 }
 
-// OpenNoteFromPalette 命令面板选中笔记：隐藏面板 → 显示并聚焦主窗口 →
-// 广播 note:open-request 事件（携带笔记 id），主窗口监听后写入 pendingOpenNoteId
-// 并切到笔记页。必须经后端中转：面板浮窗与主窗口是两个 WebView，JS 状态互不可见；
-// 此前在面板内直接 navigateTo('notes') 会把完整主界面渲染进面板小窗（样式错乱）。
+// handOffToMainWindow 命令面板把一件事交给主窗口处理：隐藏面板 → 显示并聚焦
+// 主窗口 → 广播带负载的事件。
+//
+// 必须经后端中转：面板浮窗与主窗口是两个 WebView，JS 状态互不可见；此前在面板内
+// 直接 navigateTo 会把完整主界面渲染进面板小窗（样式错乱）。
+func (a *AppService) handOffToMainWindow(event, payload string) {
+	a.HidePaletteWindow()
+	if a.MainWindow != nil {
+		a.MainWindow.Show()
+		a.MainWindow.Focus()
+	}
+	a.app.Event.Emit(event, payload)
+}
+
+// OpenNoteFromPalette 命令面板选中笔记：交给主窗口打开对应文档。
 func (a *AppService) OpenNoteFromPalette(noteId string) *ApiResult {
 	noteId = strings.TrimSpace(noteId)
 	if noteId == "" {
@@ -72,11 +83,20 @@ func (a *AppService) OpenNoteFromPalette(noteId string) *ApiResult {
 	if a.app == nil {
 		return FailMsg("应用未就绪")
 	}
-	a.HidePaletteWindow()
-	if a.MainWindow != nil {
-		a.MainWindow.Show()
-		a.MainWindow.Focus()
+	a.handOffToMainWindow("note:open-request", noteId)
+	return Ok(nil)
+}
+
+// OpenTodoFromPalette 命令面板选中待办：交给主窗口切到待办页并定位该条。
+// 与笔记走同一条链路（事件名不同），主窗口不再额外拉一条 duplicated 实现。
+func (a *AppService) OpenTodoFromPalette(todoId string) *ApiResult {
+	todoId = strings.TrimSpace(todoId)
+	if todoId == "" {
+		return FailMsg("待办 ID 为空")
 	}
-	a.app.Event.Emit("note:open-request", noteId)
+	if a.app == nil {
+		return FailMsg("应用未就绪")
+	}
+	a.handOffToMainWindow("todo:open-request", todoId)
 	return Ok(nil)
 }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -12,6 +12,7 @@ import {
 import {
   SendTestNotification, NotifyFocusComplete, NotifyFocusStart,
 } from '../../bindings/quickdock/services/appservice'
+import { pendingOpenTodoId } from '../composables/bridge'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
   RefreshCw, ListTree, Timer, X,
@@ -525,10 +526,45 @@ function isOverdue(todo: Todo) {
   return todo.dueDate !== '' && todo.dueDate < todayStr.value && !todo.done
 }
 
+// ---- 命令面板深链定位 ----
+// 面板选中一条待办后由后端广播 id，App.vue 写入 pendingOpenTodoId 并切到本页。
+// 关键点是「先把 gaze 挪过去」：列表只显示 selectedDate 那一天（或未排期），
+// 日期不对时目标压根不在 DOM 里，谈滚动/高亮都是空的。
+const highlightTodoId = ref('')
+let highlightTimer: number | null = null
+
+async function focusPendingTodo() {
+  const id = pendingOpenTodoId.value
+  if (!id) return
+  pendingOpenTodoId.value = '' // 先清空： navigateTo 与本页 mount 的先后不确定，可能重复触发
+  // id 可能先于数据到位（切页时列表还没 refresh 完）
+  let target = todos.value.find(x => x.id === id)
+  if (!target) {
+    await refresh()
+    target = todos.value.find(x => x.id === id)
+  }
+  if (!target) return
+  selectedDate.value = target.dueDate // '' = 未排期，与 selectedTodos 的取值口径一致
+  if (activeTag.value && !parseTags(target.tags).includes(activeTag.value)) activeTag.value = ''
+  if (viewMode.value !== 'list') viewMode.value = 'list' // 看板视图下没有可滚动的单行
+  await nextTick()
+  const el = document.querySelector<HTMLElement>(`[data-todo-id="${id.replace(/"/g, '\\"')}"]`)
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  highlightTodoId.value = id
+  if (highlightTimer) clearTimeout(highlightTimer)
+  highlightTimer = window.setTimeout(() => { highlightTodoId.value = '' }, 1800)
+}
+
+watch(pendingOpenTodoId, (v) => { if (v) void focusPendingTodo() })
+
 onMounted(() => {
   selectedDate.value = todayStr.value
   refresh()
+  // id 可能在组件创建之前就已写入（先切页、后 mount），watch 不会回溯触发
+  if (pendingOpenTodoId.value) void focusPendingTodo()
 })
+onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 </script>
 
 <template>
@@ -625,7 +661,8 @@ onMounted(() => {
             <div
               v-for="todo in selectedTodos"
               :key="todo.id"
-              :class="['todo-item', { done: todo.done, overdue: isOverdue(todo) }]"
+              :data-todo-id="todo.id"
+              :class="['todo-item', { done: todo.done, overdue: isOverdue(todo), 'todo-flash': highlightTodoId === todo.id }]"
             >
               <button class="check" :class="{ checked: todo.done }" @click="toggle(todo)">
                 <Check v-if="todo.done" :size="13" />
@@ -1057,6 +1094,15 @@ onMounted(() => {
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .todo-item:hover { background: var(--color-bg-hover); }
+/* 深链定位后的短暂高亮：一天可能有十几条，不给个落点眼睛找不到滚到哪了 */
+.todo-item.todo-flash {
+  border-color: var(--color-accent);
+  animation: todo-flash 1.8s ease-out 1;
+}
+@keyframes todo-flash {
+  0%, 55% { background: var(--color-bg-hover); }
+  100% { background: var(--color-bg-secondary); }
+}
 .todo-item.done .todo-name { text-decoration: line-through; color: var(--color-text-disabled); }
 .todo-item.overdue { border: 1px solid var(--color-danger-border); }
 .check {

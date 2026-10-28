@@ -44,6 +44,17 @@ func (s *TodoService) ListTodos() *services.ApiResult {
 	return services.Wrap(todos, err)
 }
 
+// SearchTodos 命令面板检索待办：标题 / 备注 / 标签模糊匹配。
+// 前端本地没有待办池（不像 items/notes 有一份常驻列表），这一路是唯一来源，
+// 失败时要给出明确错误而不是静默返回空——静默空会让「待办到底有没有进面板」无法诊断。
+func (s *TodoService) SearchTodos(q string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	todos, err := s.App.DB.SearchTodos(q, 20)
+	return services.Wrap(todos, err)
+}
+
 // CreateSubtask 新建子任务（归属指定父待办）
 func (s *TodoService) CreateSubtask(parentID, title string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
@@ -100,6 +111,7 @@ func (s *TodoService) DeleteTodo(id string) *services.ApiResult {
 	if err := s.App.DB.DeleteTodo(id); err != nil {
 		return services.Fail(err)
 	}
+	// 派生的重复调度记录走硬删除：它不是用户建的，不该出现在回收站里
 	_ = s.App.DB.DeleteScheduledTask("recur-" + id)
 	return services.Ok(nil)
 }

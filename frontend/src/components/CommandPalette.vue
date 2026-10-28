@@ -6,9 +6,10 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Copy, FolderSearch, Play, Save, Gauge, Monitor, RefreshCw, Keyboard, ScrollText
+  Copy, FolderSearch, Play, Save, Gauge, Monitor, RefreshCw, Keyboard, ScrollText, ListChecks
 } from '@lucide/vue'
-import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, ResetInstalledAppsCache, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette } from '../../bindings/quickdock/services/appservice'
+import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, ResetInstalledAppsCache, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette, OpenTodoFromPalette } from '../../bindings/quickdock/services/appservice'
+import { SetTodoStatus } from '../../bindings/quickdock/services/todo/todoservice'
 import { ExecuteSystemCommand, RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
 import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
@@ -200,13 +201,14 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
 ]
 
 // ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file'
+type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'todo' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file'
 interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
 interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
 interface CmdNote { id: string; name: string; content: string; isFolder: boolean; parentId: string; keyword: string }
+interface CmdTodo { id: string; title: string; status: string; priority: string; dueDate: string; tags: string }
 interface SearchResult {
   type: ResultType; label: string; desc?: string; icon?: any; iconBase64?: string
-  item?: CollectionItem; cmd?: SystemCmd; calcResult?: string; note?: CmdNote; inlineQuery?: string
+  item?: CollectionItem; cmd?: SystemCmd; calcResult?: string; note?: CmdNote; todo?: CmdTodo; inlineQuery?: string
   frecencyScore?: number; appPath?: string; appCategory?: string; pluginId?: string; pluginCommandId?: string
   pluginHasFrontend?: boolean; pluginNotRunning?: boolean; inlineInput?: string; pluginResult?: string; score?: number; matchType?: string; url?: string; clipAction?: string; acceptsInput?: boolean
   envRuntimeId?: string; envVersion?: string; envAction?: 'start' | 'stop' | 'mgmt'
@@ -730,6 +732,11 @@ async function executeSelected() {
     // 面板内直接 navigateTo 会把完整主界面渲染进小浮窗，导致样式错乱。
     try { await OpenNoteFromPalette(result.note.id) } catch (e) { console.error('[CmdPalette] OpenNoteFromPalette:', e) }
     closePalette()
+  } else if (result.type === 'todo' && result.todo) {
+    recordUsage('todo:' + result.todo.id, 'todo', result.label, result.desc)
+    // 与笔记同一条链路：后端隐藏面板 + 唤起主窗口 + 广播待办 id（见 OpenNoteFromPalette 注释）
+    try { await OpenTodoFromPalette(result.todo.id) } catch (e) { console.error('[CmdPalette] OpenTodoFromPalette:', e) }
+    closePalette()
   } else if (result.type === 'app' && result.appPath) {
     recordUsage('app:' + result.label, 'app', result.label, result.desc)
     try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }; closePalette()
@@ -878,6 +885,7 @@ function targetValue(r: SearchResult): string {
     case 'app': return r.appPath || ''
     case 'url': case 'clipboard-action': return r.url || ''
     case 'note': return r.note?.content || ''
+    case 'todo': return r.todo?.title || ''
     case 'calculator': return r.calcResult || ''
     case 'plugin': return r.label || ''
     case 'file': return r.filePath || ''
@@ -904,12 +912,13 @@ const contextActions = computed<PaletteAction[]>(() => {
     r.type === 'env' ? (r.envAction === 'stop' ? t('envStop') : r.envAction === 'mgmt' ? t('envEnableMgmt') : t('envStart'))
       : r.type === 'app' ? t('actLaunch')
         : r.type === 'note' ? t('actOpenNote')
+        : r.type === 'todo' ? t('actOpenTodo')
           : r.type === 'file' ? t('actReveal')
             : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
               : r.type === 'calculator' ? t('actCopyResult')
                 : t('actOpen')
   const primaryIcon = r.type === 'env' ? (r.envAction === 'stop' ? Power : r.envAction === 'mgmt' ? Gauge : Play)
-    : r.type === 'note' ? FileText : r.type === 'file' ? FolderSearch : r.type === 'calculator' ? Copy : Play
+    : r.type === 'note' ? FileText : r.type === 'todo' ? ListChecks : r.type === 'file' ? FolderSearch : r.type === 'calculator' ? Copy : Play
   acts.push({ id: 'primary', label: primaryLabel, icon: primaryIcon, run: () => executeSelected() })
 
   if (r.label) acts.push({ id: 'copy-name', label: t('actCopyName'), icon: Copy, run: () => copyAndClose(r.label) })
@@ -930,6 +939,19 @@ const contextActions = computed<PaletteAction[]>(() => {
         acts.push({ id: 'plugin-copy-last', label: t('actCopyLastResult'), icon: Copy, run: () => copyAndClose(last.result) })
       }
     }
+  }
+
+  // 待办专属：不用在面板里来回切到待办页就能勾掉一条（搜索的目的往往就是"找出来处理掉"）
+  if (r.type === 'todo' && r.todo?.id && r.todo.status !== 'done') {
+    const id = r.todo.id
+    acts.push({
+      id: 'complete-todo', label: t('actCompleteTodo'), icon: Check,
+      run: async () => {
+        try { unwrap(await SetTodoStatus(id, 'done')); toast?.success?.(t('actCompleteTodo')) }
+        catch (e) { toast?.error?.(getErrorMessage(e)); nextTick(focusInput); return }
+        closePalette()
+      },
+    })
   }
 
   // 文件结果的主操作已是「定位所在文件夹」，不重复追加 reveal 项
