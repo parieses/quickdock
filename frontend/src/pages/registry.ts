@@ -25,7 +25,11 @@ const PluginManagerPage = defineAsyncComponent(() => import('../components/Plugi
 const TodoPage = defineAsyncComponent(() => import('../components/TodoPage.vue'))
 const SchedulePage = defineAsyncComponent(() => import('../components/SchedulePage.vue'))
 const MonitorPage = defineAsyncComponent(() => import('../components/MonitorPage.vue'))
+const AI_KEEP_ALIVE_NAME = 'AIPageKeepAlive'
 const AIPage = defineAsyncComponent(() => import('../components/AIPage.vue'))
+// 注意：**不能**在这里给 AIPage 赋 name 来对齐白名单。KeepAlive 判断异步组件时读的是
+// `vnode.type.__asyncResolved`（内层 SFC 定义）的名字，外层包装器上的 name 无人问津。
+// 所以名字写在 AIPage.vue 的 defineOptions 里，这里只保留同一个常量做对照。
 const EnvironmentPage = defineAsyncComponent(() => import('../components/EnvironmentPage.vue'))
 // 剪贴板历史页需要 .clipboard-page 容器撑满，故单独引用组件 + wrapperClass
 const ClipboardPanel = defineAsyncComponent(() => import('../components/ClipboardPanel.vue'))
@@ -90,3 +94,15 @@ export const navEntries: NavEntry[] = [
 export function findContentPage(id: string): NavEntry | undefined {
   return navEntries.find((e) => e.id === id && e.component)
 }
+
+// KeepAlive 白名单：这些页离开后继续存活，切回来不重 fetch / 不重建（如 SSH 的 xterm 会话、
+// Monitor 的轮询状态、Note 的编辑态、AI 的回答流）。其余页（workspace/notes/todo/schedule/
+// clipboard/environments）仍按常规卸载重载——它们是无状态列表，重建便宜且能拿到最新数据。
+// 注意：白名单里的页组件必须 `defineOptions({ name })` 与这里的值一致，KeepAlive 按 name 匹配。
+export const KEEP_ALIVE_PAGES = [
+  AI_KEEP_ALIVE_NAME,
+  'MonitorPage',
+  'SshPage',
+  'NoteManagerPage',
+  'PluginManagerPage',
+]

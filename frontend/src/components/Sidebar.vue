@@ -17,6 +17,7 @@ import {
 
 import { useNavPrefs } from '../composables/useNavPrefs'
 import { useNavBadges } from '../composables/useNavBadges'
+import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
 
 const store = useWorkspaceStore()
 const { t } = useI18n()
@@ -224,6 +225,18 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
         >
           <component :is="entry.icon" :size="14" />
           <span>{{ t(entry.labelKey) }}</span>
+          <!-- AI 生成指示：AI 页被 KeepAlive 保活，回答会在别的页面继续生成完成，
+               不给提示用户会以为"切走了就没了" -->
+          <span
+            v-if="entry.id === 'ai' && aiGenerating"
+            class="nav-ai-dot running"
+            :title="t('aiGeneratingHint')"
+          ></span>
+          <span
+            v-else-if="entry.id === 'ai' && aiFinishedUnread"
+            class="nav-ai-dot done"
+            :title="t('aiFinishedHint')"
+          ></span>
           <NavBadge :id="entry.id" />
         </button>
         <!-- SSH：唤起独立终端窗口，主窗口内容不动，不置 active -->
@@ -481,6 +494,27 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
   animation: nav-spin .8s linear infinite;
 }
 @keyframes nav-spin { to { transform: rotate(360deg); } }
+
+/* AI 生成指示点：running = 还在写（呼吸动画），done = 已写完等你回来看。
+   颜色不用红：红色留给监控掉线这类真故障（与通知中心角标同一口径）。 */
+.nav-ai-dot {
+  flex-shrink: 0; margin-left: auto;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--color-accent);
+}
+.nav-ai-dot.running { animation: nav-ai-pulse 1.1s ease-in-out infinite; }
+@keyframes nav-ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+/* NavBadge 也挂在行尾，两者同排时留一点间距 */
+.nav-ai-dot + * { margin-left: 4px; }
+/* 收起态照样要看见：`.collapsed .nav-item span` 会 display:none（0-3-1），
+   这里必须同样的权重以上才能翻盘（nav-badge 是同样的坑，见上） */
+.sidebar.collapsed .nav-item .nav-ai-dot {
+  display: inline-block;
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  margin: 0;
+}
 
 /* 已隐藏项折叠组：虚线框 + 就地恢复列表 */
 .hidden-group { margin-top: 6px; }

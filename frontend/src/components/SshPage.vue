@@ -1,4 +1,5 @@
 <script lang="ts" setup>
+defineOptions({ name: 'SshPage' })
 /**
  * SSH 独立窗口的主页面：左侧会话树 + 顶部标签栏 + 右侧终端（#13）。
  *

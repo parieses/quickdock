@@ -109,6 +109,7 @@ import { useCertPanel } from '../composables/useCertPanel'
 import { useMCPPanel } from '../composables/useMCPPanel'
 import { useWebDAVPanel } from '../composables/useWebDAVPanel'
 // D9：品牌色 / 内置工具组标识色集中到 palette（主题扩展表），组件不再散落硬编码
+import { openExternal } from '../utils/externalLinks'
 import { RUNTIME_COLORS, SPECIAL_ITEM_COLORS } from '../utils/palette'
 
 const { t } = useI18n()
@@ -1471,8 +1472,15 @@ async function deleteHTTP(id: string) {
   try { unwrap(await HTTPServeDelete(id)); await loadHTTPServers(); toast.success(t('deleted')) }
   catch (e: any) { toast.error(getErrorMessage(e)) }
 }
-function openHTTP(s: HTTPServerItem) {
-  window.open('http://localhost:' + s.port + '/', '_blank')
+// 走系统浏览器而不是 window.open：后者在 WebView 里要么被拦、要么在应用内开窗口，
+// 而本地服务页面同样会把主界面顶掉（与站点面板的 openSite 同一套约定）。
+async function openHTTP(s: HTTPServerItem) {
+  try {
+    await openExternal('http://localhost:' + s.port + '/')
+  } catch (e: any) {
+    logErr('EnvironmentPage.openHTTP', e)
+    toast.error(getErrorMessage(e))
+  }
 }
 
 async function load() {
@@ -1995,8 +2003,14 @@ function consolePort(r: RuntimeInfo, ins: Install): number {
   if (r.id === 'rabbitmq') return rabbitMgmt[ins.version] ? 15672 : 0
   return r.webConsolePort || 0
 }
-function openConsole(port: number) {
-  window.open('http://127.0.0.1:' + port + '/', '_blank')
+// 同上：控制台页面（MinIO / RabbitMQ / Mailpit / Traefik）交给系统浏览器。
+async function openConsole(port: number) {
+  try {
+    await openExternal('http://127.0.0.1:' + port + '/')
+  } catch (e: any) {
+    logErr('EnvironmentPage.openConsole', e)
+    toast.error(getErrorMessage(e))
+  }
 }
 
 // ---- 通用日志查看器（任意实现了 LogProvider 的运行时）----

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+defineOptions({ name: 'PluginManagerPage' })
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'

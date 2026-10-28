@@ -15,19 +15,19 @@ import { i18n } from './i18n';
 import { unwrap } from './utils/api';
 import { logErr } from './utils/logger';
 import { getErrorMessage } from './utils/error';
-import { navigateTo, pendingOpenNoteId } from './composables/bridge';
+import { installExternalLinkGuard } from './utils/externalLinks';
+import { navigateTo, pendingOpenNoteId, pendingOpenTodoId } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
 import SceneRail from './components/SceneRail.vue';
 import CollectionList from './components/CollectionList.vue';
 import ItemList from './components/ItemList.vue';
-import ClipboardPanel from './components/ClipboardPanel.vue';
 import NotePanel from './components/NotePanel.vue';
 import SceneTags from './components/SceneTags.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import { SkipUpdate } from '../bindings/quickdock/services/update/updateservice';
 // 页面注册表：主窗口内容页与侧边栏导航项的单一数据源（替代 currentPage 手动 switch）
-import { findContentPage, type PageContext } from './pages/registry'
+import { findContentPage, KEEP_ALIVE_PAGES, type PageContext } from './pages/registry'
 
 // 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
 const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
@@ -42,6 +42,12 @@ const WindowManager = defineAsyncComponent(() => import('./components/WindowMana
 const UpdatePrompt = defineAsyncComponent(() => import('./components/UpdatePrompt.vue'))
 // SSH 终端窗口专用页：只在该独立窗口内加载，不进主窗口体积
 const SshPage = defineAsyncComponent(() => import('./components/SshPage.vue'))
+// 剪贴板面板：独立剪贴板窗口（#/clipboard）与主窗口内容页共用它。
+// 这里**必须**也是动态 import，不能静态 import —— 静态引用会把它无条件编进主 chunk，
+// 于是 ① pages/registry 里的动态 import 拆不出独立 chunk（Vite 报 INEFFECTIVE_DYNAMIC_IMPORT），
+// ② 笔记窗口、命令面板窗口、窗口管理浮窗也各自白载一份剪贴板面板代码。
+// 两处用的是同一个 import specifier，Rollup 会把它们合并成同一个 chunk，不会重复打包。
+const ClipboardPanel = defineAsyncComponent(() => import('./components/ClipboardPanel.vue'))
 
 document.title = i18n.global.t('appName');
 watch(() => i18n.global.locale.value, () => {
@@ -174,6 +180,12 @@ async function openDSH() {
 
 provide('toast', { error, success, confirm });
 
+// 全局外链拦截：AI 回答 / markdown 预览里的 <a href> 由 v-html 直接注入 DOM，
+// 不经过任何组件，只有 document 级委托才拦得住（否则点击会把整个界面导航走、没法返回）。
+// 装在 App.vue 是因为主窗口与剪贴板 / 笔记 / SSH 等独立窗口都挂载它，一处覆盖全部。
+// 细节与选型理由见 utils/externalLinks.ts。
+installExternalLinkGuard((_url, e) => error(getErrorMessage(e)));
+
 // 侧栏「SSH 终端」：唤起独立窗口（窗口由 Go 侧懒创建；已存在就 Show+Focus 复用）。
 // 与 DSH 不同，这里不含任何进程启动，打开是瞬时的，所以不做 loading 态。
 async function openSsh() {
@@ -285,6 +297,15 @@ onMounted(async () => {
     if (!id.trim()) return
     pendingOpenNoteId.value = id
     navigateTo.value?.('notes')
+  })
+  // 命令面板选中待办：同上，写入 pendingOpenTodoId 并切到待办页
+  Events.On('todo:open-request', (ev: any) => {
+    if (window.location.hash) return
+    const raw = ev?.data ?? ev
+    const id = typeof raw === 'string' ? raw : ''
+    if (!id.trim()) return
+    pendingOpenTodoId.value = id
+    navigateTo.value?.('todos')
   })
 });
 
@@ -449,11 +470,16 @@ const activeConfirm = computed(() =>
           v-else-if="currentContentPage"
           :class="currentContentPage.wrapperClass || 'page-shell'"
         >
-          <component
-            :is="currentContentPage.component"
-            v-bind="currentContentPage.props ? currentContentPage.props(pageContext) : {}"
-            v-on="currentContentPage.listeners ? currentContentPage.listeners(pageContext) : {}"
-          />
+          <!-- KeepAlive：白名单内的页（AI / Monitor / SSH / Note / Plugin）离开后继续存活，
+               切回来不重 fetch、不重建 xterm / 轮询 / 编辑态（见 KEEP_ALIVE_PAGES）。
+               其余页按常规卸载重载——它们是无状态列表，重建便宜且能拿到最新数据。 -->
+          <KeepAlive :include="KEEP_ALIVE_PAGES">
+            <component
+              :is="currentContentPage.component"
+              v-bind="currentContentPage.props ? currentContentPage.props(pageContext) : {}"
+              v-on="currentContentPage.listeners ? currentContentPage.listeners(pageContext) : {}"
+            />
+          </KeepAlive>
         </div>
       </div>
     </div>

@@ -8,3 +8,11 @@ export const navigateTo = ref<((page: string) => void) | null>(null)
 
 // 笔记深链：命令面板选中某条笔记后写入该 id，NoteManagerPage 监听并打开对应文档。
 export const pendingOpenNoteId = ref<string>('')
+
+// 待办深链：命令面板选中某条待办后写入该 id，TodoPage 监听并滚动定位 + 短暂高亮。
+export const pendingOpenTodoId = ref<string>('')
+
+// AI 生成状态（给侧栏用）：AI 页被 KeepAlive 保活，离开后回答仍在后台生成，
+// 但用户在别的页看不到任何迹象 —— 尤其是完成时，回来之前需要一个提示。
+export const aiGenerating = ref(false)
+export const aiFinishedUnread = ref(false)

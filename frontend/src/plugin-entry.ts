@@ -6,6 +6,7 @@ import { Events } from '@wailsio/runtime'
 import { ReportFrontendError } from '../bindings/quickdock/services/diag/diagservice'
 import { GetValue, ApplyTheme } from '../bindings/quickdock/services/appservice'
 import { unwrap } from './utils/api'
+import { installExternalLinkGuard } from './utils/externalLinks'
 import './style.css'
 
 // 轻量入口：插件独立窗口只挂载 PluginPage（标题栏 + 插件 iframe 宿主），
@@ -107,5 +108,9 @@ setInterval(() => {
     location.reload()
   }
 }, 5000)
+
+// 独立插件窗口只挂载 PluginPage，不加载 App.vue，全局外链拦截得自己装一次：
+// 这个窗口里同样可能有 markdown / 说明文档渲染出的链接，漏装就会把窗口整页导航走。
+installExternalLinkGuard()
 
 app.mount('#app')
