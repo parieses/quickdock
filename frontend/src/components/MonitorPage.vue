@@ -4,14 +4,17 @@ import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { matchesTextOrPinyin } from '../utils/pinyin'
+import { useToast } from '../composables/useToast'
 import {
   CreateMonitor, ListMonitors, UpdateMonitor,
-  DeleteMonitor, SetMonitorEnabled, CheckMonitorNow,
+  DeleteMonitor, SoftDeleteMonitor, RestoreMonitor, ListDeletedMonitors,
+  SetMonitorEnabled, SetMonitorSort, SetMonitorMaintenance, CheckMonitorNow,
   GetMonitorLogs, GetMonitorLogsSince, ClearMonitorLogs, ListMonitorStats,
 } from '../../bindings/quickdock/services/monitor/monitorservice'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import type { Monitor } from '../../bindings/quickdock/internal/db/models'
-import WebhookSettingsModal from './WebhookSettingsModal.vue'
+import { Events } from '@wailsio/runtime'
 import ConfirmDialog from './ConfirmDialog.vue'
 // D9：canvas 图表用色集中到 palette（主题扩展表），canvas 无法吃 CSS var，运行时取此表
 import { CHART_COLORS } from '../utils/palette'
@@ -38,10 +41,12 @@ interface MonitorStat {
 }
 import {
   Plus, Play, Pencil, Trash2, Globe, Activity, RefreshCw,
-  ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download,
+  ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download, Search, Power, X, Wrench,
+  Bell as BellIcon,
 } from '@lucide/vue'
 
 const { t } = useI18n()
+const toast = useToast()
 
 const monitors = ref<Monitor[]>([])
 const stats = ref<Record<string, MonitorStat>>({})
@@ -54,6 +59,64 @@ const error = ref('')
 // 分组名由用户在建/改时填写，为空即「未分组」。展示顺序：未分组在前、
 // 命名分组按名称排——组是用户自己划的，字母序比「谁先建」更易找。
 const groupFilter = ref('') // ''=全部；'__none__'=仅看未分组
+
+/** 搜索词：匹配名称/URL/分组名，支持拼音（与命令面板/工作空间同一套 utils）。 */
+const query = ref('')
+
+// ---- 多选批量启停 ----
+//
+// 十几个监控点里想「把 staging 那几条都停掉」，逐个点开关要来回找；
+// 停用后开关状态又很容易看漏。多选 + 批量是最短的路径。
+const selectedIds = ref<Set<string>>(new Set())
+const allVisibleSelected = computed(
+  () => visibleMonitors.value.length > 0 && visibleMonitors.value.every(m => selectedIds.value.has(m.id)),
+)
+const batchBusy = ref(false)
+
+function isSelected(id: string): boolean { return selectedIds.value.has(id) }
+function toggleSelect(id: string, force?: boolean) {
+  const want = force ?? !selectedIds.value.has(id)
+  const next = new Set(selectedIds.value)
+  if (want) next.add(id)
+  else next.delete(id)
+  selectedIds.value = next
+}
+function toggleSelectAll() {
+  const on = !allVisibleSelected.value
+  const next = new Set(selectedIds.value)
+  for (const m of visibleMonitors.value) {
+    if (on) next.add(m.id)
+    else next.delete(m.id)
+  }
+  selectedIds.value = next
+}
+function clearSelection() { if (selectedIds.value.size) selectedIds.value = new Set() }
+
+/** 批量启用/停用。逐个发请求而不是造一个新的批量接口：
+ *  后端 SetMonitorEnabled 是幂等的单条写，N 条最多也就十几毫秒，
+ *  为它加一条批量接口反而要额外维护「部分失败怎么回滚」的语义。 */
+async function batchSetEnabled(enabled: boolean) {
+  const ids = [...selectedIds.value]
+  if (!ids.length || batchBusy.value) return
+  batchBusy.value = true
+  error.value = ''
+  const failed: string[] = []
+  for (const id of ids) {
+    const m = monitors.value.find(x => x.id === id)
+    if (!m || m.enabled === enabled) continue
+    try {
+      unwrap(await SetMonitorEnabled(id, enabled))
+    } catch (e) {
+      failed.push(m.name)
+      error.value = getErrorMessage(e)
+    }
+  }
+  batchBusy.value = false
+  clearSelection()
+  await refresh()
+  if (!failed.length) toast.success(t(enabled ? 'mon_batch_enabled' : 'mon_batch_disabled', { n: ids.length }))
+  else toast.error(t('mon_batch_partial', { n: failed.length, names: failed.slice(0, 3).join('、') }))
+}
 
 const monitorGroups = computed(() => {
   const names = new Set<string>()
@@ -82,10 +145,21 @@ const monitorGroupList = computed<MonitorGroup[]>(() => {
     groups.push({ name, items: byName.get(name)! })
   }
   // 分组筛选：只看某一组（含「未分组」）
-  if (groupFilter.value === '__none__') return groups.filter(g => g.name === '')
-  if (groupFilter.value) return groups.filter(g => g.name === groupFilter.value)
-  return groups
+  let out = groups
+  if (groupFilter.value === '__none__') out = groups.filter(g => g.name === '')
+  else if (groupFilter.value) out = groups.filter(g => g.name === groupFilter.value)
+  // 搜索最后做：作用在已筛选的组内，命中为空的分组整个不显示——
+  // 否则搜一个词会留下五六个空标题，看着像没筛选成功。
+  const q = query.value.trim()
+  if (!q) return out
+  const hit = out
+    .map(g => ({ name: g.name, items: g.items.filter(m => matchesTextOrPinyin([m.name, m.url, m.groupName], q, 'monitor')) }))
+    .filter(g => g.items.length > 0)
+  return hit
 })
+
+/** 当前列表里可见的监控点（搜索/分组筛选之后），批量操作的「全选」以它为准。 */
+const visibleMonitors = computed<Monitor[]>(() => monitorGroupList.value.flatMap(g => g.items))
 
 // ---- 汇总指标 ----
 const summary = computed(() => {
@@ -140,6 +214,16 @@ function uptimeText(id: string): string {
   return s.uptimeRatio.toFixed(1) + '%'
 }
 
+// 列表里补上后端早就算好、前端却一直没显示的三个统计量。
+// 只有 uptimeRatio 在用的时候，「在线率 99.9%」到底是 10 次里挂 1 次还是
+// 10000 次里挂 10 次完全看不出来 —— totalChecks 就是这个分母。
+function checksOf(id: string): number { return statOf(id)?.totalChecks ?? 0 }
+function avgLatOf(id: string): number { return statOf(id)?.avgLatencyMs ?? 0 }
+function lastDownText(id: string): string {
+  const v = statOf(id)?.lastDownAt || ''
+  return v ? v.slice(5, 16) : '' // YYYY-MM-DD HH:MM:SS → MM-DD HH:MM
+}
+
 function expectedLabel(e: string): string {
   if (e === '') return 'any'
   return e
@@ -169,6 +253,14 @@ const fLatencyAlert = ref(0) // 延迟告警阈值 ms（0=关闭）
 const fCertWarnDays = ref(14)
 const fContentMatchType = ref('none') // none | contains | not_contains | regex
 const fContentMatchPattern = ref('')
+// 请求头 / 请求体：这两列是随「POST/PUT/PATCH 探针不可用」的修复一起加的，
+// bindings 要重新生成才会带上字段，故用交叉类型补齐，避免整页类型检查被卡住
+//（不手改 frontend/bindings，那是生成物）。
+type MonitorWithHTTP = Monitor & { httpHeaders?: string; httpBody?: string }
+const fHeaders = ref('')
+const fBody = ref('')
+const NEEDS_BODY = ['POST', 'PUT', 'PATCH'] as const
+const showBodyFields = computed(() => (NEEDS_BODY as readonly string[]).includes(fMethod.value))
 
 const MATCH_TYPES = ['none', 'contains', 'not_contains', 'regex']
 
@@ -179,7 +271,13 @@ function intervalVal(): number {
   return Math.max(5, Math.floor(fIntervalVal.value || 300))
 }
 
+/** 机器人 Webhook 是全局配置，跳设置页去改（本页不重复实现一份表单）。 */
+function openNotifySettings() {
+  try { Events.Emit('app:open-settings', 'notify') } catch { /* 事件通道未就绪时静默，不阻塞新建监控 */ }
+}
+
 function openCreate() {
+  formErr.value = ''
   editingId.value = ''
   fName.value = ''
   fUrl.value = ''
@@ -198,10 +296,13 @@ function openCreate() {
   fLatencyAlert.value = 0
   fContentMatchType.value = 'none'
   fContentMatchPattern.value = ''
+  fHeaders.value = ''
+  fBody.value = ''
   showModal.value = true
 }
 
 function openEdit(m: Monitor) {
+  formErr.value = ''
   editingId.value = m.id
   fName.value = m.name
   fUrl.value = m.url
@@ -217,13 +318,16 @@ function openEdit(m: Monitor) {
   fCertWarnDays.value = m.certWarnDays > 0 ? m.certWarnDays : 14
   fContentMatchType.value = m.contentMatchType || 'none'
   fContentMatchPattern.value = m.contentMatchPattern || ''
+  const mh = m as MonitorWithHTTP
+  fHeaders.value = mh.httpHeaders || ''
+  fBody.value = mh.httpBody || ''
   fDownAlertThreshold.value = m.downAlertThreshold > 0 ? m.downAlertThreshold : 1
   fGroup.value = m.groupName || ''
   fLatencyAlert.value = m.latencyAlertMs > 0 ? m.latencyAlertMs : 0
   showModal.value = true
 }
 
-function buildPayload(): Monitor {
+function buildPayload(): MonitorWithHTTP {
   return {
     id: editingId.value,
     name: fName.value.trim(),
@@ -246,25 +350,31 @@ function buildPayload(): Monitor {
     groupName: fGroup.value.trim(),
     latencyAlertMs: Math.max(0, Math.floor(fLatencyAlert.value || 0)),
     consecutiveDown: 0,
+    // 只有带 body 的方法才发送这两个值：GET/HEAD 上带 body 请求体会被部分服务端直接拒，
+    // 用户从 POST 切回 GET 后残留的 body 不该偷偷生效。
+    httpHeaders: fHeaders.value.trim(),
+    httpBody: showBodyFields.value ? fBody.value : '',
     lastStatus: '', lastCheckedAt: '', lastCheckedTs: 0, lastLatencyMs: 0,
     lastStatusCode: 0, lastError: '', sort: 0, createdAt: '',
-  } as Monitor
+  } as MonitorWithHTTP
 }
 
 const saving = ref(false)
+// 弹窗内的校验/保存错误：页面级 error 被遮罩盖着看不见，等于「点保存没反应」
+const formErr = ref('')
 async function save() {
   const p = buildPayload()
-  if (!p.name) { error.value = t('mon_err_name'); return }
-  if (!p.url) { error.value = t('mon_err_url'); return }
+  formErr.value = ''
+  if (!p.name) { formErr.value = t('mon_err_name'); return }
+  if (!p.url) { formErr.value = t('mon_err_url'); return }
   saving.value = true
-  error.value = ''
   try {
     if (editingId.value) await unwrap(await UpdateMonitor(p))
     else await unwrap(await CreateMonitor(p))
     showModal.value = false
     await refresh()
   } catch (e) {
-    error.value = getErrorMessage(e)
+    formErr.value = getErrorMessage(e)
   } finally {
     saving.value = false
   }
@@ -293,12 +403,110 @@ async function remove(m: Monitor) {
 const delTarget = ref<Monitor | null>(null)
 const showDelConfirm = ref(false)
 
+// 删除改为软删进回收站（与定时任务一致），避免「手滑删一个监控、几年日志全没」。
 async function confirmDel() {
   const m = delTarget.value
   if (!m) return
   showDelConfirm.value = false
   delTarget.value = null
-  try { await unwrap(await DeleteMonitor(m.id)); expanded.value.delete(m.id); await refresh() } catch (e) { error.value = getErrorMessage(e) }
+  try { await unwrap(await SoftDeleteMonitor(m.id)); expanded.value.delete(m.id); await refresh() } catch (e) { error.value = getErrorMessage(e) }
+}
+
+// ---- 回收站 ----
+// 与硬删不同，软删只打标，日志与运行数据都留着。误删可一键恢复，
+// 彻底删除（真要抹掉）留在回收站里做，平时不会误触。
+const viewMode = ref<'active' | 'recycle'>('active')
+const deletedMonitors = ref<Monitor[]>([])
+const loadingDeleted = ref(false)
+
+async function loadDeleted() {
+  loadingDeleted.value = true
+  try {
+    deletedMonitors.value = unwrap<Monitor[]>(await ListDeletedMonitors()) ?? []
+  } catch (e) { error.value = getErrorMessage(e) } finally { loadingDeleted.value = false }
+}
+
+async function switchView(v: 'active' | 'recycle') {
+  viewMode.value = v
+  clearSelection()
+  if (v === 'recycle') await loadDeleted()
+  else await refresh()
+}
+
+async function restoreMonitor(m: Monitor) {
+  try { await unwrap(await RestoreMonitor(m.id)); await loadDeleted() } catch (e) { error.value = getErrorMessage(e) }
+}
+
+const purgeTarget = ref<Monitor | null>(null)
+const showPurgeConfirm = ref(false)
+function askPurge(m: Monitor) { purgeTarget.value = m; showPurgeConfirm.value = true }
+async function confirmPurge() {
+  const m = purgeTarget.value
+  if (!m) return
+  showPurgeConfirm.value = false
+  purgeTarget.value = null
+  try { await unwrap(await DeleteMonitor(m.id)); await loadDeleted() } catch (e) { error.value = getErrorMessage(e) }
+}
+
+// ---- 维护窗口 ----
+// 维护后端时不想被一连串误报告警刷屏：设个 1 小时窗口，期间检查器直接跳过本监控，
+// 不写日志也不告警。到点自动恢复，不用回头改配置。
+function inMaintenance(m: Monitor): boolean {
+  return (m.maintenanceUntil || 0) > Math.floor(Date.now() / 1000)
+}
+function maintRemaining(m: Monitor): string {
+  const left = (m.maintenanceUntil || 0) - Math.floor(Date.now() / 1000)
+  if (left <= 0) return ''
+  if (left < 3600) return Math.ceil(left / 60) + t('mon_min_short')
+  return (left / 3600).toFixed(1) + t('mon_hour_short')
+}
+async function toggleMaintenance(m: Monitor) {
+  try {
+    const until = inMaintenance(m) ? 0 : Math.floor(Date.now() / 1000) + 3600
+    await unwrap(await SetMonitorMaintenance(m.id, until))
+    await refresh()
+  } catch (e) { error.value = getErrorMessage(e) }
+}
+
+// ---- 拖拽排序 ----
+// 复用定时任务/笔记同一套「按可见顺序重写 sort=i*10」：拖一下只动 sort 一列，
+// 不碰任何编辑字段，也绝不重算运行数据。分组只是展示层——拖动会反映到全局 sort 顺序，
+// 跨组拖动保留原分组归属（组是用户自己划的，拖排序不该偷偷改它）。
+const dragId = ref('')
+function onDragStart(e: DragEvent, m: Monitor) {
+  dragId.value = m.id
+  e.dataTransfer?.setData('text/plain', m.id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+function onDragOver(e: DragEvent, m: Monitor) {
+  if (!dragId.value || dragId.value === m.id) return
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+}
+async function onDrop(target: Monitor) {
+  const from = dragId.value
+  dragId.value = ''
+  if (!from || from === target.id) return
+  const list = visibleMonitors.value
+  const fromIdx = list.findIndex(x => x.id === from)
+  if (fromIdx < 0) return
+  const next = list.slice()
+  const [moved] = next.splice(fromIdx, 1)
+  const toIdx = next.findIndex(x => x.id === target.id)
+  if (toIdx < 0) return
+  next.splice(toIdx, 0, moved)
+  const busy = new Set<string>()
+  try {
+    for (let i = 0; i < next.length; i++) {
+      if (next[i].sort !== i * 10) {
+        busy.add(next[i].id)
+        await SetMonitorSort(next[i].id, i * 10)
+      }
+    }
+    // 乐观更新：本地立刻重排，省一次往返闪烁
+    monitors.value = next.slice()
+    await refresh()
+  } catch (e) { error.value = getErrorMessage(e) }
 }
 
 // ---- 展开日志 ----
@@ -310,17 +518,24 @@ const LOG_RANGES = [
   { value: '7d', sec: 86400 * 7, label: '7d' },
   { value: 'all', sec: 0, label: '全部' },
 ]
-const logRange = ref('24h')
+// 范围按监控各存一份。用单个全局值时，同页展开多条会出现
+// 「切了 A 的范围，B 的图也跟着变了，但 B 的数据没重载」——图和数据对不上。
+const logRanges = ref<Record<string, string>>({})
+function logRangeOf(id: string): string { return logRanges.value[id] || '24h' }
+function setLogRange(id: string, v: string) { logRanges.value[id] = v }
 
-function rangeSec(): number {
-  const r = LOG_RANGES.find(x => x.value === logRange.value)
+function rangeSec(id: string): number {
+  const r = LOG_RANGES.find(x => x.value === logRangeOf(id))
   return r ? r.sec : 86400
 }
 
 async function loadLogs(id: string) {
   try {
-    const since = rangeSec() > 0 ? Math.floor(Date.now() / 1000) - rangeSec() : 0
-    logsMap.value[id] = unwrap<MonitorLog[]>(await GetMonitorLogsSince(id, since, 500)) ?? []
+    const rs = rangeSec(id)
+    const since = rs > 0 ? Math.floor(Date.now() / 1000) - rs : 0
+    // 绘图点上限 2000：再多 canvas 也画不出区别，但序列化与解析会明显变慢。
+    // 后端保留上限已提到 20000 条，所以「7d / 全部」拿到的确实是可用区间内的数据。
+    logsMap.value[id] = unwrap<MonitorLog[]>(await GetMonitorLogsSince(id, since, 2000)) ?? []
   } catch { /* ignore */ }
 }
 
@@ -549,27 +764,36 @@ async function clearLogs(m: Monitor) {
 }
 
 // ---- 导出 CSV ----
-// 导出当前时间范围已加载的日志（响应时间 + 状态码 + 错误）。
+// 导出**所选时间范围的全量**日志，而不是画图用的那份 logsMap：
+// 那条链路为了 canvas 渲染把上限压到 2000 条，拿它导出等于「选 7 天只导出一段」。
 // 两个细节：① 带 UTF-8 BOM——Windows 用户默认双击用 Excel 打开，无 BOM 中文必乱码；
 // ② 后端返回倒序（新→旧），导出转正序，符合「从早读到晚」的习惯。
-function exportCsv(m: Monitor) {
-  const logs = logsMap.value[m.id] || []
-  if (logs.length === 0) return
-  const esc = (v: string | number) => '"' + String(v ?? '').replace(/"/g, '""') + '"'
-  const lines = [['checked_at', 'status', 'status_code', 'latency_ms', 'error'].map(esc).join(',')]
-  for (const l of [...logs].reverse()) {
-    lines.push([l.checkedAt, l.status, l.statusCode, l.latencyMs, l.error].map(esc).join(','))
+const CSV_MAX_ROWS = 20000 // 与后端 monitor_logs 的保留上限一致
+
+async function exportCsv(m: Monitor) {
+  try {
+    const rs = rangeSec(m.id)
+    const since = rs > 0 ? Math.floor(Date.now() / 1000) - rs : 0
+    const logs = unwrap<MonitorLog[]>(await GetMonitorLogsSince(m.id, since, CSV_MAX_ROWS)) ?? []
+    if (logs.length === 0) return
+    const esc = (v: string | number) => '"' + String(v ?? '').replace(/"/g, '""') + '"'
+    const lines = [['checked_at', 'status', 'status_code', 'latency_ms', 'error'].map(esc).join(',')]
+    for (const l of [...logs].reverse()) {
+      lines.push([l.checkedAt, l.status, l.statusCode, l.latencyMs, l.error].map(esc).join(','))
+    }
+    const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    // 文件名去掉 Windows 非法字符，否则下载静默失败
+    a.download = 'monitor-' + m.name.replace(/[\\/:*?"<>|]/g, '_') + '-' + new Date().toISOString().slice(0, 10) + '.csv'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e) {
+    error.value = getErrorMessage(e)
   }
-  const blob = new Blob(['\uFEFF' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  // 文件名去掉 Windows 非法字符，否则下载静默失败
-  a.download = 'monitor-' + m.name.replace(/[\\/:*?"<>|]/g, '_') + '-' + new Date().toISOString().slice(0, 10) + '.csv'
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  URL.revokeObjectURL(url)
 }
 
 // ---- 停机日历 ----
@@ -705,7 +929,10 @@ onUnmounted(() => {
             </option>
           </select>
         </div>
-        <WebhookSettingsModal :label="t('mon_nf_title')" />
+        <!-- 机器人地址是全局配置（设置 → 机器人通知），这里只跳转，不再重复弹一份表单 -->
+        <button class="qd-btn" :title="t('notifyGoSettings')" @click="openNotifySettings">
+          <BellIcon :size="14" /> {{ t('mon_nf_title') }}
+        </button>
         <button class="qd-btn qd-btn-primary" @click="openCreate"><Plus :size="14" /> {{ t('mon_add') }}</button>
       </div>
     </div>
@@ -713,11 +940,21 @@ onUnmounted(() => {
     <div v-if="error" class="mon-error">{{ error }}</div>
 
     <!-- 汇总条 -->
-    <div v-if="monitors.length" class="mon-summary">
+    <div v-if="monitors.length || (viewMode === 'recycle' && deletedMonitors.length)" class="mon-summary">
       <div class="sum-item"><span class="sum-num">{{ summary.total }}</span><span class="sum-lbl">{{ t('mon_sum_total') }}</span></div>
       <div class="sum-item up"><span class="sum-num">{{ summary.up }}</span><span class="sum-lbl">{{ t('mon_sum_up') }}</span></div>
       <div class="sum-item down"><span class="sum-num">{{ summary.down }}</span><span class="sum-lbl">{{ t('mon_sum_down') }}</span></div>
       <div class="sum-item"><span class="sum-num">{{ summary.avgLatency }}<i>ms</i></span><span class="sum-lbl">{{ t('mon_sum_latency') }}</span></div>
+    </div>
+
+    <!-- 视图切换：活动列表 / 回收站 -->
+    <div class="mon-viewtabs">
+      <button :class="['vt-tab', { active: viewMode === 'active' }]" @click="switchView('active')">
+        {{ t('mon_view_active') }}<span v-if="summary.total" class="vt-count">{{ summary.total }}</span>
+      </button>
+      <button :class="['vt-tab', { active: viewMode === 'recycle' }]" @click="switchView('recycle')">
+        {{ t('mon_view_recycle') }}<span v-if="deletedMonitors.length" class="vt-count warn">{{ deletedMonitors.length }}</span>
+      </button>
     </div>
 
     <!-- 分组筛选（有命名分组时才出现，否则纯属噪音） -->
@@ -736,8 +973,32 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <!-- 列表 -->
-    <div class="mon-list">
+    <!-- 搜索 + 批量操作条 -->
+    <div v-if="monitors.length >= 4" class="mon-tools">
+      <label v-if="visibleMonitors.length > 1" class="mon-selall" :title="t('mon_sel_all')">
+        <input type="checkbox" :checked="allVisibleSelected" @change="toggleSelectAll" />
+      </label>
+      <div class="mon-search">
+        <Search :size="13" />
+        <input v-model="query" class="mon-search-input" :placeholder="t('mon_search_ph')" />
+        <button v-if="query" class="mon-search-clear" @click="query = ''"><X :size="12" /></button>
+      </div>
+      <span v-if="query" class="mon-search-count">{{ t('mon_search_count', { n: visibleMonitors.length }) }}</span>
+      <span class="mon-tools-fill" />
+      <template v-if="selectedIds.size">
+        <span class="mon-sel-count">{{ t('mon_sel_count', { n: selectedIds.size }) }}</span>
+        <button class="mon-selbtn" :disabled="batchBusy" @click="batchSetEnabled(true)">
+          <Power :size="12" />{{ t('mon_batch_on') }}
+        </button>
+        <button class="mon-selbtn" :disabled="batchBusy" @click="batchSetEnabled(false)">
+          <Power :size="12" />{{ t('mon_batch_off') }}
+        </button>
+        <button class="mon-selbtn" @click="clearSelection">{{ t('mon_sel_clear') }}</button>
+      </template>
+    </div>
+
+    <!-- 列表（活动监控） -->
+    <div v-if="viewMode === 'active'" class="mon-list">
       <div v-if="!loading && monitors.length === 0" class="mon-empty">
         <Radio :size="30" class="empty-icon" />
         <p>{{ t('mon_empty') }}</p>
@@ -749,9 +1010,30 @@ onUnmounted(() => {
         <div v-if="monitorGroupList.length > 1" class="group-head">
           <span class="group-head-name">{{ g.name || t('mon_group_none') }}</span>
           <span class="group-head-count">{{ g.items.length }}</span>
+          <!-- 组头右侧的「全选本组」：搜索/筛选之后，只想批量动眼前这一组 -->
+          <button v-if="g.items.length > 1" class="group-sel" @click="g.items.forEach(m => toggleSelect(m.id, !g.items.every(x => isSelected(x.id))))">
+            {{ g.items.every(x => isSelected(x.id)) ? t('mon_sel_none') : t('mon_sel_group') }}
+          </button>
         </div>
-        <div v-for="m in g.items" :key="m.id" :class="['mon-item', { disabled: !m.enabled }]">
+        <div
+          v-for="m in g.items"
+          :key="m.id"
+          :class="['mon-item', { disabled: !m.enabled, picked: isSelected(m.id), dragging: dragId === m.id }]"
+          draggable="true"
+          @dragstart="onDragStart($event, m)"
+          @dragover="onDragOver($event, m)"
+          @drop="onDrop(m)"
+          @dragend="dragId = ''"
+        >
         <div class="item-head" @click="toggleExpand(m)">
+          <input
+            type="checkbox"
+            class="mon-check"
+            :checked="isSelected(m.id)"
+            :title="t('mon_sel_hint')"
+            @click.stop
+            @change="toggleSelect(m.id)"
+          />
           <span :class="['status-dot', m.lastStatus || 'unknown']"></span>
           <div class="item-main">
             <div class="item-line1">
@@ -762,11 +1044,18 @@ onUnmounted(() => {
             </div>
             <div class="item-url" :title="m.url"><Globe :size="11" /> {{ m.url }}</div>
             <div class="item-meta">
-              <span class="meta-up">{{ t('mon_uptime') }} {{ uptimeText(m.id) }}</span>
+              <span class="meta-up" :title="t('mon_checks_ttl')">{{ t('mon_uptime') }} {{ uptimeText(m.id) }}<template v-if="checksOf(m.id)"> · {{ t('mon_checks_n', { n: checksOf(m.id) }) }}</template></span>
               <span class="meta-lat" v-if="m.lastLatencyMs > 0">{{ m.lastLatencyMs }}ms</span>
+              <span class="meta-avg" v-if="avgLatOf(m.id)" :title="t('mon_avg_ttl')">⌀ {{ avgLatOf(m.id) }}ms</span>
               <span class="meta-checked">{{ t('mon_checked') }} {{ relTime(m.lastCheckedTs) }}</span>
+              <span v-if="lastDownText(m.id)" class="meta-down">{{ t('mon_last_down') }} {{ lastDownText(m.id) }}</span>
+              <span v-if="m.lastStatusCode" class="meta-code" :title="t('mon_status_code')">HTTP {{ m.lastStatusCode }}</span>
+              <span v-if="m.lastError" class="meta-err" :title="m.lastError">{{ m.lastError }}</span>
               <span v-if="certText(m)" :class="['meta-cert', { warn: certWarn(m) }]">
                 <component :is="certWarn(m) ? XCircle : CheckCircle2" :size="11" /> {{ certText(m) }}
+              </span>
+              <span v-if="inMaintenance(m)" class="meta-maint" :title="t('mon_maint_ttl')">
+                <Wrench :size="11" /> {{ t('mon_maint_on', { t: maintRemaining(m) }) }}
               </span>
             </div>
           </div>
@@ -779,6 +1068,10 @@ onUnmounted(() => {
               <RefreshCw :size="14" :class="{ spin: checkingId === m.id }" />
             </button>
             <button class="act" @click="openEdit(m)" :title="t('mon_edit')"><Pencil :size="14" /></button>
+            <button class="act" :class="{ active: inMaintenance(m) }" @click="toggleMaintenance(m)"
+                    :title="inMaintenance(m) ? t('mon_maint_cancel') : t('mon_maint_1h')">
+              <Wrench :size="14" />
+            </button>
             <button class="act danger" @click="remove(m)" :title="t('mon_delete')"><Trash2 :size="14" /></button>
           </div>
           <button class="expand-btn" @click.stop="toggleExpand(m)" :title="t('mon_logs')">
@@ -797,8 +1090,8 @@ onUnmounted(() => {
                 <button
                   v-for="r in LOG_RANGES"
                   :key="r.value"
-                  :class="['range-tab', { active: logRange === r.value }]"
-                  @click="logRange = r.value; onRangeChange(m.id)"
+                  :class="['range-tab', { active: logRangeOf(m.id) === r.value }]"
+                  @click="setLogRange(m.id, r.value); onRangeChange(m.id)"
                 >{{ r.label }}</button>
               </div>
               <button class="clear-logs" :disabled="!logsMap[m.id]?.length" @click="exportCsv(m)" :title="t('mon_export_csv')">
@@ -833,6 +1126,28 @@ onUnmounted(() => {
         </div>
         <!-- /mon-item：必须收在 <template v-for> 之内，否则分组循环外会多出一个闭合标签 -->
       </template>
+    </div>
+
+    <!-- 回收站 -->
+    <div v-else-if="viewMode === 'recycle'" class="mon-list recycle-list">
+      <div v-if="loadingDeleted" class="mon-state"><Loader2 :size="16" class="spin" /><span>{{ t('loading') }}</span></div>
+      <div v-else-if="!deletedMonitors.length" class="mon-empty">
+        <Trash2 :size="30" class="empty-icon" />
+        <p>{{ t('mon_recycle_empty') }}</p>
+      </div>
+      <div v-for="m in deletedMonitors" :key="m.id" class="mon-item recycled">
+        <div class="item-main">
+          <div class="item-line1"><span class="item-name">{{ m.name }}</span></div>
+          <div class="item-url" :title="m.url"><Globe :size="11" /> {{ m.url }}</div>
+          <div class="item-meta">
+            <span class="meta-checked">{{ t('mon_deleted_at') }} {{ m.deletedAt?.slice(5, 16) || '' }}</span>
+          </div>
+        </div>
+        <div class="item-actions" @click.stop>
+          <button class="act" @click="restoreMonitor(m)" :title="t('mon_restore')"><RefreshCw :size="14" /></button>
+          <button class="act danger" @click="askPurge(m)" :title="t('mon_purge')"><Trash2 :size="14" /></button>
+        </div>
+      </div>
     </div>
 
     <!-- 曲线图 tooltip -->
@@ -874,12 +1189,22 @@ onUnmounted(() => {
           </div>
         </div>
 
+        <!-- 请求头 / 请求体：POST/PUT/PATCH 类探针要能带鉴权头与 payload，
+             否则这些方法只能发出一个空 body，和 GET 没区别（接口一律 401/400）。 -->
+        <template v-if="showBodyFields">
+          <label>{{ t('mon_http_headers') }}</label>
+          <textarea v-model="fHeaders" class="modal-input mon-textarea" rows="3"
+            :placeholder="t('mon_http_headers_ph')"></textarea>
+          <label>{{ t('mon_http_body') }}</label>
+          <textarea v-model="fBody" class="modal-input mon-textarea" rows="3"
+            :placeholder="t('mon_http_body_ph')"></textarea>
+        </template>
+
         <div class="modal-grid">
           <div>
             <label>{{ t('mon_interval') }}{{ t('sched_unit_sec') }}</label>
             <input v-model.number="fIntervalVal" type="number" min="5" class="modal-input" />
-          </div>
-          <div>
+          </div>          <div>
             <label>{{ t('mon_timeout') }}</label>
             <div class="interval-row">
               <input v-model.number="fTimeout" type="number" min="1" class="modal-input interval-num" />
@@ -928,8 +1253,8 @@ onUnmounted(() => {
           <span class="unit-suffix">{{ t('mon_suppress_unit') }}</span>
         </div>
 
-        <!-- 多条件告警：延迟阈值（0=关闭）。与「连续 N 次失败」是 AND 关系，
-             即「连续 3 次失败且延迟>500ms」这种组合条件 -->
+        <!-- 多条件告警：延迟阈值（0=关闭）。达到「连续 N 次失败」时告警，延迟超阈值
+             只在消息里附加说明——它不参与是否告警的判定（否则第 N 次延迟正常就永远不告警） -->
         <div class="interval-row" style="margin-top: var(--space-2);">
           <label>{{ t('mon_latency_alert') }}</label>
           <input v-model.number="fLatencyAlert" type="number" min="0" step="100" class="modal-input interval-num" style="flex:0 0 72px;" placeholder="0" />
@@ -944,23 +1269,39 @@ onUnmounted(() => {
           <option v-for="g in monitorGroups" :key="g" :value="g" />
         </datalist>
 
+        <!-- 校验提示画在弹窗里：页面级 error 被遮罩盖住，等于没提示 -->
+        <p v-if="formErr" class="form-err">{{ formErr }}</p>
+
         <div class="modal-actions">
-          <button class="btn-ghost" @click="showModal = false">{{ t('cancel') }}</button>
-          <button class="btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
+          <button class="qd-btn" @click="showModal = false">{{ t('cancel') }}</button>
+          <button class="qd-btn qd-btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
         </div>
       </div>
     </div>
 
     <ConfirmDialog
       :visible="showDelConfirm"
-      :message="t('mon_delete') + '?'"
+      :message="t('mon_delete_confirm')"
       @confirm="confirmDel"
       @cancel="showDelConfirm = false"
+    />
+    <ConfirmDialog
+      :visible="showPurgeConfirm"
+      :message="t('mon_purge_confirm')"
+      @confirm="confirmPurge"
+      @cancel="showPurgeConfirm = false"
     />
   </div>
 </template>
 
 <style scoped>
+/* 请求头 / 请求体输入框：多行、可手动拉高。字体用等宽更利于核对
+   "Name: Value" 的冒号对齐，但行高跟着主题走，不写死像素。 */
+.mon-textarea {
+  resize: vertical;
+  font-family: var(--font-mono);
+  line-height: 1.5;
+}
 /* 页头已统一为 .qd-page-header（通栏），页容器不再留 padding，
    内边距下放给各内容块 —— 否则页头会缩在 padding 里，与其它页错位。 */
 .mon-page {
@@ -1026,6 +1367,47 @@ onUnmounted(() => {
   font-weight: 400; padding: 0 6px; border-radius: 8px;
   background: var(--color-bg-tertiary); color: var(--color-text-disabled);
 }
+/* 组头右侧的全选本组：只在组内多于一条时出现 */
+.group-sel {
+  margin-left: auto; padding: 1px 6px; font-size: 10px; font-family: inherit;
+  color: var(--color-text-muted); background: none; border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs); cursor: pointer;
+}
+.group-sel:hover { color: var(--color-accent); border-color: var(--color-accent); }
+
+/* ---- 搜索 + 批量条 ---- */
+.mon-tools {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 0 20px var(--space-2);
+}
+.mon-selall { display: inline-flex; align-items: center; flex-shrink: 0; cursor: pointer; }
+.mon-search {
+  display: flex; align-items: center; gap: 6px;
+  width: 220px; padding: 4px 8px; flex-shrink: 0;
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); color: var(--color-text-muted);
+}
+.mon-search:focus-within { border-color: var(--color-border-focus); }
+.mon-search-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: none;
+  color: var(--color-text-primary); font-size: 12px; font-family: inherit;
+}
+.mon-search-clear {
+  display: inline-flex; align-items: center; border: none; background: none;
+  color: var(--color-text-muted); cursor: pointer; padding: 0;
+}
+.mon-search-count { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
+.mon-tools-fill { flex: 1; }
+.mon-sel-count { font-size: 11px; font-weight: 500; color: var(--color-accent); }
+.mon-selbtn {
+  padding: 3px 9px; font-size: 11px; font-family: inherit; cursor: pointer;
+  color: var(--color-text-secondary); background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
+}
+.mon-selbtn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.mon-selbtn:disabled { opacity: 0.5; cursor: not-allowed; }
+.mon-check { flex-shrink: 0; width: 12px; height: 12px; accent-color: var(--color-accent); cursor: pointer; }
 .field-hint { margin: 4px 0 0; font-size: 11px; color: var(--color-text-disabled); }
 .mon-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
 .empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
@@ -1037,6 +1419,35 @@ onUnmounted(() => {
 }
 .mon-item:hover { background: var(--color-bg-hover); }
 .mon-item.disabled { opacity: 0.55; }
+/* 勾选行的高亮不能只靠 checkbox：停用行本身半透明，只多一个小勾很难看出来 */
+.mon-item.picked { border-color: var(--color-accent); }
+/* 拖拽中：半透明 + 虚线框，告诉用户「这条正在被拖」而不是页面卡了 */
+.mon-item.dragging { opacity: 0.45; border-style: dashed; }
+.mon-item[draggable="true"] { cursor: grab; }
+.mon-item[draggable="true"]:active { cursor: grabbing; }
+/* 回收站里的条目：只读展示，没有展开/勾选那套交互 */
+.mon-item.recycled { cursor: default; }
+
+/* 维护窗口徽标：与状态徽标区分，用中性的强调色 */
+.meta-maint { color: var(--color-warning, var(--color-text-muted)); }
+.mon-item .act.active { color: var(--color-warning, var(--color-accent)); }
+
+/* 视图切换 tab：活动列表 / 回收站，像标签页一样一眼分清当前在哪 */
+.mon-viewtabs { display: flex; gap: var(--space-2); padding: 0 20px 10px; }
+.vt-tab {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 5px 12px; border-radius: 999px;
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  color: var(--color-text-muted); font-size: 12.5px; cursor: pointer;
+}
+.vt-tab.active { background: var(--color-bg-tertiary); border-color: var(--color-accent); color: var(--color-text-primary); }
+.vt-count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 11px;
+}
+.vt-count.warn { background: var(--color-danger-bg, var(--color-bg-tertiary)); color: var(--color-danger, var(--color-text-muted)); }
+.mon-state { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 24px; color: var(--color-text-muted); }
 
 .item-head { display: flex; align-items: center; gap: var(--space-3); padding: 12px 14px; cursor: pointer; }
 
@@ -1055,6 +1466,14 @@ onUnmounted(() => {
 .item-meta { font-size: 11px; color: var(--color-text-disabled); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; }
 .meta-up { color: var(--color-accent); }
 .meta-lat { color: var(--color-text-muted); }
+.meta-avg { color: var(--color-text-muted); }
+.meta-down { color: var(--color-warning); }
+.meta-code { color: var(--color-text-muted); }
+/* 最近一次错误：单行截断，完整内容在 title 里（错误串可能很长，撑开会把行挤爆） */
+.meta-err {
+  max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--color-danger);
+}
 .meta-cert { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
 .meta-cert.warn { color: var(--color-warning); font-weight: 500; }
 
@@ -1159,4 +1578,10 @@ onUnmounted(() => {
 .toggle-row { display: flex; gap: var(--space-5); margin-top: var(--space-3); flex-wrap: wrap; }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
+/* 弹窗内校验提示：弹窗自己有内边距，这里不再加外边距 */
+.form-err {
+  margin: var(--space-3) 0 0; padding: 7px 10px; font-size: 12px;
+  color: var(--color-danger); background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
+}
 </style>

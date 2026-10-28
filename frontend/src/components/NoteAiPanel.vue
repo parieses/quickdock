@@ -14,7 +14,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { AlignLeft, Languages, ListTree, PenLine } from '@lucide/vue'
+import { AlignLeft, Languages, ListTree, PenLine, CornerDownLeft, Plus, Replace } from '@lucide/vue'
 import { AskAI } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
@@ -27,8 +27,19 @@ import AiPanel, { type AiPanelResult } from './AiPanel.vue'
 const props = defineProps<{
   /** 待处理的笔记内容（划选片段，或整篇）。 */
   text: string
+  /**
+   * 是否提供「写回笔记」操作。
+   *
+   * 只有笔记管理器页开启：浮窗（NotePanel）里同样能编辑正文，但它是一个
+   * 独立小窗，插入位置（光标/选区）与主编辑区不是同一个 DOM，交回主窗口处理
+   * 会横跨窗口状态。首页直接写自己的 textarea，链路最短。
+   */
+  allowWriteBack?: boolean
 }>()
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{
+  close: []
+  writeback: [text: string, mode: 'insert' | 'replace' | 'append']
+}>()
 
 const { t } = useI18n()
 
@@ -156,6 +167,13 @@ function clearAll() {
   streamId.value = ''
   panelRef.value?.setQuestion('')
 }
+
+/** 把结果交给宿主写回正文；具体落到哪个位置由宿主决定（它才知道光标在哪）。 */
+function writeBack(mode: 'insert' | 'replace' | 'append') {
+  const answer = result.value?.answer
+  if (!answer) return
+  emit('writeback', answer, mode)
+}
 </script>
 
 <template>
@@ -169,7 +187,6 @@ function clearAll() {
       :busy="busy"
       :err-msg="errMsg"
       :live-text="liveText"
-      :show-clear="false"
       @ask="askFree"
       @clear="clearAll"
       @close="emit('close')"
@@ -212,6 +229,22 @@ function clearAll() {
       <!-- 笔记里的代码块是写作内容（示例/提纲），不是要执行的命令。 -->
       <template #cmdActions>
         <span class="note-ai-cmd-hint">{{ t('noteAiCmdHint') }}</span>
+      </template>
+
+      <!-- 写回正文：结果只是"看一眼"没有意义，落在文档里才算用上。 -->
+      <template v-if="allowWriteBack" #resultActions>
+        <button class="note-ai-action" :disabled="busy" @click="writeBack('insert')">
+          <CornerDownLeft :size="12" />
+          {{ t('noteAiInsertAtCursor') }}
+        </button>
+        <button class="note-ai-action" :disabled="busy" @click="writeBack('append')">
+          <Plus :size="12" />
+          {{ t('noteAiAppend') }}
+        </button>
+        <button class="note-ai-action" :disabled="busy" @click="writeBack('replace')">
+          <Replace :size="12" />
+          {{ t('noteAiReplaceAll') }}
+        </button>
       </template>
     </AiPanel>
   </div>

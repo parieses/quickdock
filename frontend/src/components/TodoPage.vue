@@ -7,15 +7,16 @@ import { getErrorMessage } from '../utils/error'
 import ConfirmDialog from './ConfirmDialog.vue'
 import {
   CreateTodo, ListTodos, UpdateTodo, ToggleTodo, DeleteTodo, ClearCompletedTodos,
-  CreateSubtask, SetTodoStatus,
+  CreateSubtask, SetTodoStatus, SetTodoSort,
 } from '../../bindings/quickdock/services/todo/todoservice'
 import {
   SendTestNotification, NotifyFocusComplete, NotifyFocusStart,
 } from '../../bindings/quickdock/services/appservice'
 import { pendingOpenTodoId } from '../composables/bridge'
+import { matchesTextOrPinyin } from '../utils/pinyin'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
-  RefreshCw, ListTree, Timer, X,
+  RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -52,50 +53,147 @@ const loading = ref(false)
 const error = ref('')
 
 // ---- 番茄钟 / 专注计时 ----
+//
+// 计时用**截止时间戳**而不是每秒递减：
+//   - 窗口失焦 / 系统休眠 / 后台节流会让 setInterval 的“一秒”被拉长，递减式计时
+//     越走越慢，用户回来一看还剩 18 分钟，而实际已经过了 25 分钟；
+//   - 切到别的页面时本组件会被卸载（不在 KeepAlive 白名单），状态必须落到
+//     localStorage 才能在回来时接上，否则"专注中切走就丢了"。
 const FOCUS_DEFAULTS = [25, 45, 60]
+const FOCUS_KEY = 'qd_focus_session'
 const focusMinutes = ref(25)          // 本次专注时长（分钟）
 const focusTodoId = ref('')           // 正在专注的待办 id（''=无）
 const focusRemaining = ref(0)         // 剩余秒数
 const focusRunning = ref(false)       // 是否在倒计时
-let focusTimer: number | null = null  // setInterval id
+const focusTotalSec = ref(0)          // 本轮目标秒数：区分「到点完成」与「中途放弃」
+let focusTimer: number | null = null  // setInterval id（只负责刷新显示，不负责计时）
+let focusEndAt = 0                    // 运行中的截止时间戳（ms）；0 = 未运行
 
 function focusTitle(id: string): string {
   return todos.value.find(t => t.id === id)?.title || ''
 }
+
+function saveFocus() {
+  try {
+    if (!focusTodoId.value) {
+      localStorage.removeItem(FOCUS_KEY)
+      return
+    }
+    localStorage.setItem(FOCUS_KEY, JSON.stringify({
+      todoId: focusTodoId.value,
+      endAt: focusEndAt,
+      remaining: focusRemaining.value,
+      running: focusRunning.value,
+      total: focusTotalSec.value,
+      minutes: focusMinutes.value,
+    }))
+  } catch { /* localStorage 不可用（隐私模式等）时只影响跨页恢复 */ }
+}
+
+function tickFocus() {
+  if (!focusRunning.value || !focusEndAt) return
+  const left = Math.ceil((focusEndAt - Date.now()) / 1000)
+  focusRemaining.value = Math.max(0, left)
+  if (left <= 0) completeFocus()
+}
+
+function startTicker() {
+  stopFocusTimer()
+  focusTimer = window.setInterval(tickFocus, 500)
+}
+
+function completeFocus() {
+  const title = focusTitle(focusTodoId.value) || t('focusTimerTitle')
+  try { NotifyFocusComplete(title, Math.round(focusTotalSec.value / 60) || 1) } catch (e) { logErr('TodoPage', e) }
+  stopFocusTimer()
+  focusEndAt = 0
+  focusTodoId.value = ''
+  focusRunning.value = false
+  focusRemaining.value = 0
+  focusTotalSec.value = 0
+  saveFocus()
+}
+
+function resumeFocus() {
+  focusEndAt = Date.now() + focusRemaining.value * 1000
+  focusRunning.value = true
+  startTicker()
+  saveFocus()
+}
+
 function startFocus(todo: Todo) {
   if (todo.done) return
   // 若在专注别条，先清掉旧的
   stopFocusTimer()
   focusTodoId.value = todo.id
-  focusRemaining.value = Math.max(1, Math.floor(focusMinutes.value)) * 60
-  focusRunning.value = true
+  focusTotalSec.value = Math.max(1, Math.floor(focusMinutes.value)) * 60
+  focusRemaining.value = focusTotalSec.value
+  resumeFocus()
   try { NotifyFocusStart(focusTitle(todo.id), focusMinutes.value) } catch (e) { logErr('TodoPage', e) }
-  focusTimer = window.setInterval(() => {
-    if (!focusRunning.value) return
-    focusRemaining.value--
-    if (focusRemaining.value <= 0) {
-      focusRemaining.value = 0
-      const title = focusTitle(focusTodoId.value) || t('focusTimerTitle')
-      try { NotifyFocusComplete(title, focusMinutes.value) } catch (e) { logErr('TodoPage', e) }
-      stopFocusTimer()
-      focusTodoId.value = ''
-    }
-  }, 1000)
 }
 function stopFocusTimer() {
   if (focusTimer !== null) { clearInterval(focusTimer); focusTimer = null }
 }
 function endFocus() {
-  if (focusTodoId.value) { try { NotifyFocusComplete(focusTitle(focusTodoId.value), Math.round((focusMinutes.value * 60 - focusRemaining.value) / 60) || 1) } catch (e) { logErr('TodoPage', e) } }
+  // 只有真的走到 0 才算「专注完成」。过去这里一律调 NotifyFocusComplete，
+  // 点了两分钟就放弃也被记成"专注 25 分钟完成"，统计与通知全是假的。
+  const total = focusTotalSec.value
+  const left = Math.max(0, focusRemaining.value)
+  const finished = total > 0 && left <= 0
+  const title = focusTitle(focusTodoId.value)
   stopFocusTimer()
+  focusEndAt = 0
+  if (finished && focusTodoId.value) {
+    try { NotifyFocusComplete(title || t('focusTimerTitle'), Math.round(total / 60) || 1) } catch (e) { logErr('TodoPage', e) }
+  }
   focusTodoId.value = ''
   focusRunning.value = false
   focusRemaining.value = 0
+  focusTotalSec.value = 0
+  saveFocus()
 }
 function pauseFocus() {
-  if (focusRunning.value) { focusRunning.value = false; return true }
-  focusRunning.value = true
+  if (focusRunning.value) {
+    // 先结算一次再停，避免暂停时漏掉刚刚过去的那一秒
+    tickFocus()
+    focusRunning.value = false
+    focusEndAt = 0
+    stopFocusTimer()
+    saveFocus()
+    return true
+  }
+  resumeFocus()
   return false
+}
+
+/** 回到本页时接上未结束的专注（含"离开期间已到点"的补结算）。 */
+function restoreFocus() {
+  let raw = ''
+  try { raw = localStorage.getItem(FOCUS_KEY) || '' } catch { return }
+  if (!raw) return
+  try {
+    const s = JSON.parse(raw) as {
+      todoId?: string; endAt?: number; remaining?: number
+      running?: boolean; total?: number; minutes?: number
+    }
+    if (!s?.todoId) return
+    focusTodoId.value = s.todoId
+    if (s.minutes) focusMinutes.value = s.minutes
+    focusTotalSec.value = s.total || 0
+    focusRemaining.value = s.remaining || 0
+    if (s.running && s.endAt) {
+      const left = Math.ceil((s.endAt - Date.now()) / 1000)
+      if (left <= 0) {
+        focusRemaining.value = 0
+        completeFocus() // 离开期间到点：补发一次完成通知并清状态
+        return
+      }
+      focusRemaining.value = left
+      focusEndAt = s.endAt
+      focusRunning.value = true
+      startTicker()
+    }
+  } catch { /* 数据损坏就当没存过 */ }
 }
 function fmtFocus(sec: number): string {
   const m = Math.floor(sec / 60); const s = sec % 60
@@ -255,16 +353,88 @@ async function addSubtask(parent: Todo) {
   }
 }
 
-// 看板：顶层待办按状态分组（忽略日期，按工作流状态；受标签筛选影响）
-// 索引：status → 顶层待办（已排序、已过滤标签），模板每列多次调用只做 O(1) 查找
+// ---- 子任务：行内改名 / 上下移 ----
+// 原来子任务只能「加」和「删」：改一个字要删了重建，顺序永远按创建先后。
+// 改名复用 UpdateTodo（其它字段原样带回），排序走 SetTodoSort。
+const renamingSubId = ref('')
+const renamingSubTitle = ref('')
+const subRenameInputRef = ref<HTMLInputElement[] | HTMLInputElement | null>(null)
+
+function startRenameSub(st: Todo) {
+  renamingSubId.value = st.id
+  renamingSubTitle.value = st.title
+  nextTick(() => {
+    const el = Array.isArray(subRenameInputRef.value) ? subRenameInputRef.value[0] : subRenameInputRef.value
+    el?.focus()
+    el?.select()
+  })
+}
+
+async function commitRenameSub(st: Todo) {
+  // 先清标记再判等：Enter 与 blur 会连续触发两次，第二次拿到的是空 id 直接返回
+  if (renamingSubId.value !== st.id) return
+  renamingSubId.value = ''
+  const title = renamingSubTitle.value.trim()
+  if (!title || title === st.title) return
+  try {
+    await unwrap(await UpdateTodo(st.id, title, st.priority, st.dueDate, st.note,
+      st.startTime, st.endTime, st.reminderTime, st.recurrence,
+      st.tags as unknown as string, st.status))
+    await refresh()
+  } catch (e) {
+    error.value = getErrorMessage(e)
+  }
+}
+
+/** 与相邻兄弟交换位置，然后把整组按 index*10 重写 sort（步长 10 留插入余地）。 */
+async function moveSub(st: Todo, dir: -1 | 1) {
+  const siblings = subtasksOf(st.parentId)
+  const i = siblings.findIndex(x => x.id === st.id)
+  const j = i + dir
+  if (i < 0 || j < 0 || j >= siblings.length) return
+  const order = [...siblings]
+  order.splice(j, 0, order.splice(i, 1)[0])
+  try {
+    for (let k = 0; k < order.length; k++) {
+      if ((order[k].sort || 0) === k * 10) continue
+      await unwrap(await SetTodoSort(order[k].id, k * 10))
+    }
+    await refresh()
+  } catch (e) {
+    error.value = getErrorMessage(e)
+  }
+}
+
+// ---- 子任务：单独设截止日 ----
+// 子任务原本只能跟着父待办的日期走：父没排期，子也永远"未排期"；想给某条子任务
+// 单独定个 deadline 只能去改父任务（改了又影响其它子任务）。父/子各有独立 dueDate，
+// 这里只改子任务这一条，不动父。
+const subDueFor = ref('')
+function toggleSubDue(st: Todo) { subDueFor.value = subDueFor.value === st.id ? '' : st.id }
+async function commitSubDue(st: Todo, val: string) {
+  subDueFor.value = ''
+  if (val === st.dueDate) return
+  try {
+    await unwrap(await UpdateTodo(st.id, st.title, st.priority, val, st.note,
+      st.startTime, st.endTime, st.reminderTime, st.recurrence,
+      st.tags as unknown as string, st.status))
+    await refresh()
+  } catch (e) { error.value = getErrorMessage(e) }
+}
+
+// 看板：顶层待办按状态分组。
+// 数据源必须是 selectedTodos，不能是 todos —— 否则日期、搜索、标签这三个筛选
+// 在列表视图生效、切到看板全部失效（选着"今天"，看板却给出全部待办）。
+// 分组只是在这个已筛好的集合上再按 status 切一刀。
+// 索引：status → 待办，模板每列多次调用只做 O(1) 查找
 const topTodosByStatus = computed(() => {
   const m = new Map<string, Todo[]>()
-  for (const x of todos.value) {
-    if (x.parentId !== '') continue
-    if (activeTag.value && !parseTags(x.tags).includes(activeTag.value)) continue
+  for (const x of selectedTodos.value) {
     if (!m.has(x.status)) m.set(x.status, [])
     m.get(x.status)!.push(x)
   }
+  // 列内按用户手排的 sort：selectedTodos 已按「未完成 → 有时间 → sort」排过，
+  // 那份顺序是给列表视图的，看板里同列应该体现拖拽后的相对位置。
   for (const arr of m.values()) arr.sort((a, b) => a.sort - b.sort)
   return m
 })
@@ -273,14 +443,33 @@ function statusTodos(status: string): Todo[] {
   return topTodosByStatus.value.get(status) || []
 }
 const dragId = ref('')
-function onDragStart(id: string) { dragId.value = id }
+const dragOverStatus = ref('')
+
+function onDragStart(id: string) {
+  dragId.value = id
+  dragOverStatus.value = ''
+}
+
+/** 拖进某一列：先换状态，再落到该列末尾。 */
 async function moveToStatus(status: string) {
   const id = dragId.value
   dragId.value = ''
+  dragOverStatus.value = ''
   if (!id) return
   const todo = todos.value.find(x => x.id === id)
-  if (!todo || todo.status === status) return
-  await setStatus(todo, status)
+  if (!todo) return
+  // 同列内落位也要重排（换到末尾），否则拖了半天顺序纹丝不动
+  const siblings = statusTodos(status).filter(x => x.id !== id)
+  const nextSort = siblings.length ? Math.max(...siblings.map(x => x.sort || 0)) + 10 : 0
+  try {
+    if (todo.status !== status) await unwrap(await SetTodoStatus(id, status))
+    // sort 单独走 SetTodoSort：SetTodoStatus 不管顺序，混在一起会让人
+    // 以为「只改状态」也动了排序。
+    if ((todo.sort || 0) !== nextSort) await unwrap(await SetTodoSort(id, nextSort))
+    await refresh()
+  } catch (e) {
+    error.value = getErrorMessage(e)
+  }
 }
 
 // 构建 6×7 共 42 个单元格（周一为起始列）
@@ -322,6 +511,7 @@ const cells = computed(() => {
 })
 
 const selectedLabel = computed(() => {
+  if (searching.value) return t('todoSearchResults', { count: selectedTodos.value.length })
   if (selectedDate.value === '') return t('todoUnscheduled')
   const [y, m, d] = selectedDate.value.split('-').map(Number)
   const wk = ['日', '一', '二', '三', '四', '五', '六'][new Date(y, m - 1, d).getDay()]
@@ -330,14 +520,40 @@ const selectedLabel = computed(() => {
 
 const unscheduledCount = computed(() => todos.value.filter(x => x.dueDate === '').length)
 
+// 页面内搜索：ListTodos 已经一次把全部待办取到内存，直接前端过滤即可 ——
+// 支持拼音、零延迟，也不必再为页面单独开一条 SearchTodos 的请求链路
+//（那个接口的价值在命令面板：那边是独立窗口，没有这份内存数据）。
+// 搜索时**跨日期**：只搜当天等于没搜，用户找的是"那条待办在哪天"。
+const searchQuery = ref('')
+const searching = computed(() => searchQuery.value.trim().length > 0)
+
 const selectedTodos = computed(() => {
-  let list = selectedDate.value === ''
-    ? todos.value.filter(x => x.dueDate === '' && x.parentId === '')
-    : todos.value.filter(x => x.dueDate === selectedDate.value && x.parentId === '')
+  const q = searchQuery.value.trim().toLowerCase()
+  let list: Todo[]
+  if (q) {
+    list = todos.value.filter(x =>
+      x.parentId === '' && matchesTextOrPinyin([x.title, x.note, x.tags], q, 't:' + x.id))
+  } else if (selectedDate.value === '') {
+    list = todos.value.filter(x => x.dueDate === '' && x.parentId === '')
+  } else {
+    const d = selectedDate.value
+    // 看「今天」时把**逾期未完成**的一并带出来：导航角标统计的正是「今天到期 + 逾期」，
+    // 而页面此前只按 dueDate 精确匹配，于是角标写 8、点进去只看到 2。
+    // 逾期条目挂在过去某天，不并进来就得逐个翻日历才找得到。
+    list = todos.value.filter(x => x.parentId === '' && (
+      x.dueDate === d || (d === todayStr.value && x.dueDate !== '' && x.dueDate < d && !x.done)
+    ))
+  }
   if (activeTag.value) {
     list = list.filter(x => parseTags(x.tags).includes(activeTag.value))
   }
-  return [...list].sort((a, b) => Number(a.done) - Number(b.done) || a.sort - b.sort)
+  // 排序：未完成 → 有时间安排的 → 用户手排的 sort。
+  // hasTime 此前是个定义了却没人调的死函数；用在这里是因为"几点要做"比
+  // "哪天要做但没说时间"更该排在前面，同一天里这个差别对用户是可见的。
+  return [...list].sort((a, b) =>
+    Number(a.done) - Number(b.done) ||
+    Number(hasTime(b)) - Number(hasTime(a)) ||
+    a.sort - b.sort)
 })
 
 const remainingCount = computed(() => selectedTodos.value.filter(x => !x.done).length)
@@ -561,6 +777,8 @@ watch(pendingOpenTodoId, (v) => { if (v) void focusPendingTodo() })
 onMounted(() => {
   selectedDate.value = todayStr.value
   refresh()
+  // 专注计时可能在上次离开本页时仍在跑（状态在 localStorage 里），先接上再渲染
+  restoreFocus()
   // id 可能在组件创建之前就已写入（先切页、后 mount），watch 不会回溯触发
   if (pendingOpenTodoId.value) void focusPendingTodo()
 })
@@ -576,6 +794,11 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
         <span class="qd-page-sub">{{ t('todoSubtitle') }}</span>
       </div>
       <div class="qd-page-fill">
+        <div class="qd-input-wrap todo-search">
+          <Search :size="14" />
+          <input v-model="searchQuery" class="qd-input ts-input" :placeholder="t('todoSearchPh')" />
+          <button v-if="searchQuery" class="ts-clear" @click="searchQuery = ''"><X :size="13" /></button>
+        </div>
         <div class="cal-nav">
           <button class="qd-icon-btn" @click="prevMonth" :title="t('prevMonth')"><ChevronLeft :size="16" /></button>
           <span class="cal-month">{{ monthLabel }}</span>
@@ -655,8 +878,14 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
           <div class="todo-list">
             <div v-if="selectedTodos.length === 0" class="todo-empty">
               <CalendarDays :size="28" class="empty-icon" />
-              <p>{{ t('todoNoTodosThisDay') }}</p>
-              <p class="empty-hint">{{ t('todoClickDayHint') }}</p>
+              <template v-if="searching">
+                <p>{{ t('noMatchItems') }}</p>
+                <p class="empty-hint">{{ t('tryOtherKeywords') }}</p>
+              </template>
+              <template v-else>
+                <p>{{ t('todoNoTodosThisDay') }}</p>
+                <p class="empty-hint">{{ t('todoClickDayHint') }}</p>
+              </template>
             </div>
             <div
               v-for="todo in selectedTodos"
@@ -671,6 +900,8 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
               <div class="todo-main">
                 <span class="todo-name">{{ todo.title }}</span>
                 <div class="todo-meta">
+                  <!-- 搜索是跨日期的，列表必须标出这一条属于哪天，否则只有标题看不出落点 -->
+                  <span v-if="searching && todo.dueDate" class="meta-pill">{{ todo.dueDate }}</span>
                   <span v-if="isOverdue(todo)" class="overdue-text">{{ t('todoOverdue') }}</span>
                   <span v-if="todo.reminderTime" class="meta-pill" :class="{ sent: todo.reminderSent }">
                     <Bell v-if="!todo.reminderSent" :size="11" />
@@ -715,11 +946,35 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
                   <div class="sub-progress-bar"><div class="sub-progress-fill" :style="{ width: subProgress(todo.id).pct + '%' }"></div></div>
                   <span class="sub-progress-text">{{ subProgress(todo.id).done }}/{{ subProgress(todo.id).total }} ({{ subProgress(todo.id).pct }}%)</span>
                 </div>
-                <div v-for="st in subtasksOf(todo.id)" :key="st.id" :class="['sub-item', { done: st.done }]">
+                <div v-for="(st, si) in subtasksOf(todo.id)" :key="st.id" :class="['sub-item', { done: st.done }]">
                   <button class="check sub-check" :class="{ checked: st.done }" @click="toggle(st)">
                     <Check v-if="st.done" :size="11" />
                   </button>
-                  <span class="sub-name">{{ st.title }}</span>
+                  <!-- 行内改名：双击进入，Enter/blur 提交。子任务原本只能删了重建，
+                       改一个字都要重来一遍 -->
+                  <input
+                    v-if="renamingSubId === st.id"
+                    ref="subRenameInputRef"
+                    v-model="renamingSubTitle"
+                    class="sub-rename"
+                    @keyup.enter="commitRenameSub(st)"
+                    @keyup.esc="renamingSubId = ''"
+                    @blur="commitRenameSub(st)"
+                  />
+                  <span v-else class="sub-name" :title="t('todoSubRenameHint')" @dblclick="startRenameSub(st)">{{ st.title }}</span>
+                  <!-- 单独设截止日：子任务默认跟着父任务的日期，这里可单独覆盖 -->
+                  <button class="act sub-act sub-due" :class="{ active: !!st.dueDate }"
+                          :title="st.dueDate ? t('todoSubDueSet', { d: st.dueDate }) : t('todoSubDue')"
+                          @click="toggleSubDue(st)">
+                    <CalendarDays :size="11" />
+                  </button>
+                  <input v-if="subDueFor === st.id" type="date" class="sub-date"
+                         :value="st.dueDate" @change="commitSubDue(st, ($event.target as HTMLInputElement).value)" @blur="subDueFor = ''" />
+                  <!-- 上下移：单层 checklist 的排序只能靠拖，但子任务行太小拖不准 -->
+                  <div class="sub-move">
+                    <button class="act sub-act" :disabled="si === 0" @click="moveSub(st, -1)" :title="t('todoSubMoveUp')"><ChevronUp :size="11" /></button>
+                    <button class="act sub-act" :disabled="si === subtasksOf(todo.id).length - 1" @click="moveSub(st, 1)" :title="t('todoSubMoveDown')"><ChevronDown :size="11" /></button>
+                  </div>
                   <button class="act danger sub-del" @click="remove(st)" :title="t('todoDelete')"><Trash2 :size="11" /></button>
                 </div>
                 <div v-if="addingSubFor === todo.id" class="sub-add">
@@ -736,8 +991,10 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
           <div
             v-for="st in KANBAN_STATUSES"
             :key="st"
-            class="kanban-col"
+            :class="['kanban-col', { 'drag-over': dragOverStatus === st }]"
             @dragover.prevent
+            @dragenter="dragOverStatus = st"
+            @dragleave="dragOverStatus = ''"
             @drop="moveToStatus(st)"
           >
             <div class="kanban-col-head">
@@ -755,6 +1012,10 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
               >
                 <span class="kanban-card-name">{{ card.title }}</span>
                 <div class="kanban-card-meta">
+                  <!-- 看板按状态看，卡片不写日期的话「今天哪些没做完」在列里完全看不出来 -->
+                  <span v-if="card.dueDate" :class="['kanban-due', { overdue: isOverdue(card) }]">
+                    {{ card.dueDate.slice(5) }}
+                  </span>
                   <button class="status-pill" :class="'st-' + (card.status || 'todo')" @click.stop="cycleStatus(card)">{{ statusLabel(card.status) }}</button>
                   <i :class="['pri-dot', 'p-' + card.priority]"></i>
                   <template v-for="tg in parseTags(card.tags)" :key="tg">
@@ -833,7 +1094,7 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 
         <!-- 4.2 标签 -->
         <label>{{ t('todoTags') }}</label>
-        <input v-model="editTags" class="modal-input" :placeholder="t('todoTagsPh')" />
+        <input v-model="editTags" class="modal-input" :placeholder="t('todoTagsPh')" list="todo-tag-options" />
 
         <label>{{ t('todoDue') }}</label>
         <input v-model="editDueDate" type="date" class="modal-input" />
@@ -842,8 +1103,8 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
         <input v-model="editNote" class="modal-input" />
 
         <div class="modal-actions">
-          <button class="btn-ghost" @click="showEdit = false">{{ t('cancel') }}</button>
-          <button class="btn-primary" @click="saveEdit">{{ t('save') }}</button>
+          <button class="qd-btn" @click="showEdit = false">{{ t('cancel') }}</button>
+          <button class="qd-btn qd-btn-primary" @click="saveEdit">{{ t('save') }}</button>
         </div>
       </div>
     </div>
@@ -896,7 +1157,7 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 
         <!-- 4.2 标签 -->
         <label>{{ t('todoTags') }}</label>
-        <input v-model="cTags" class="modal-input" :placeholder="t('todoTagsPh')" />
+        <input v-model="cTags" class="modal-input" :placeholder="t('todoTagsPh')" list="todo-tag-options" />
 
         <label>{{ t('todoDue') }}</label>
         <input v-model="cDueDate" type="date" class="modal-input" />
@@ -905,11 +1166,17 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
         <input v-model="cNote" class="modal-input" />
 
         <div class="modal-actions">
-          <button class="btn-ghost" @click="showCreate = false">{{ t('cancel') }}</button>
-          <button class="btn-primary" @click="createTodo">{{ t('save') }}</button>
+          <button class="qd-btn" @click="showCreate = false">{{ t('cancel') }}</button>
+          <button class="qd-btn qd-btn-primary" @click="createTodo">{{ t('save') }}</button>
         </div>
       </div>
     </div>
+
+    <!-- 标签联想：allTags 早就统计好了（标签筛选栏在用），输入时却全靠手打，
+         拼错一个字就分裂成两个标签。原生 datalist 零依赖，够用。 -->
+    <datalist id="todo-tag-options">
+      <option v-for="tg in allTags" :key="tg" :value="tg" />
+    </datalist>
 
     <ConfirmDialog
       :visible="showDelConfirm"
@@ -936,6 +1203,10 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
   background: var(--color-bg-primary);
 }
 .cal-nav { display: flex; align-items: center; gap: var(--space-2); }
+/* 页内搜索：只搜标题/备注/标签，跨日期；宽度与笔记页搜索一致 */
+.todo-search { width: 220px; flex-shrink: 0; margin-right: var(--space-3); }
+.ts-input { padding-left: 28px; padding-right: 26px; }
+.ts-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
 .focus-dur { display: flex; align-items: center; gap: 2px; }
 .focus-dur-btn {
   min-width: 28px; height: 24px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
@@ -1040,8 +1311,30 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 .sub-name { flex: 1; font-size: 12px; color: var(--color-text-secondary); min-width: 0; }
 .sub-del { opacity: 0; width: 22px; height: 22px; }
 .sub-item:hover .sub-del { opacity: 1; }
+/* 行内改名：与 .sub-name 同字号，去掉输入框边框只留底色，避免行高跳动 */
+.sub-rename {
+  flex: 1; min-width: 0; height: 20px; padding: 0 5px;
+  border: 1px solid var(--color-accent); border-radius: var(--radius-xs);
+  background: var(--color-bg-tertiary); color: var(--color-text-primary);
+  font-size: 12px; font-family: inherit; outline: none;
+}
+/* 上下移：hover 才出现，和删除按钮同一套作息 */
+.sub-move { display: flex; align-items: center; gap: 1px; opacity: 0; }
+.sub-item:hover .sub-move { opacity: 1; }
+.sub-act { width: 18px; height: 18px; }
+.sub-act:disabled { opacity: 0.25; cursor: default; }
 .sub-add { margin-top: 2px; }
 .sub-input { height: 28px; font-size: 12px; }
+
+/* 单独设截止日：日期按钮与上下移同一套 hover 作息；已设日期的常显一个小色点提示 */
+.sub-due { opacity: 0; }
+.sub-item:hover .sub-due { opacity: 1; }
+.sub-due.active { opacity: 1; color: var(--color-accent); }
+.sub-date {
+  height: 20px; padding: 0 4px; border: 1px solid var(--color-accent);
+  border-radius: var(--radius-xs); background: var(--color-bg-tertiary);
+  color: var(--color-text-primary); font-size: 11px; font-family: inherit; outline: none;
+}
 
 /* 看板视图（4.3）*/
 .kanban { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); min-height: 0; overflow: hidden; }
@@ -1066,6 +1359,11 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 .kanban-card:active { cursor: grabbing; }
 .kanban-card-name { font-size: 13px; color: var(--color-text-primary); }
 .kanban-card-meta { margin-top: 5px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+/* 卡片上的截止日：逾期改用警示色，扫一眼就知道哪张拖后腿了 */
+.kanban-due { font-size: 10px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+.kanban-due.overdue { color: var(--color-danger); font-weight: 500; }
+/* 拖拽落点：整列描边提示，比只高亮卡片更容易判断"会落到哪一列" */
+.kanban-col.drag-over { border-color: var(--color-accent); background: var(--color-accent-bg); }
 .kanban-empty { text-align: center; font-size: 11px; color: var(--color-text-disabled); padding: var(--space-5) 0; }
 
 .tag-filter { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3); }

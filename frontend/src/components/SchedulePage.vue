@@ -1,19 +1,21 @@
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import {
   CreateScheduledTask, ListScheduledTasks, UpdateScheduledTask,
   DeleteScheduledTask, SetScheduledTaskEnabled, RunScheduledTaskNow,
+  SetScheduledTaskSort,
 } from '../../bindings/quickdock/services/appservice'
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
-import WebhookSettingsModal from './WebhookSettingsModal.vue'
+import { Events } from '@wailsio/runtime'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ScheduleRunHistoryDialog from './ScheduleRunHistoryDialog.vue'
 import {
   Plus, Play, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
+  Search, LoaderCircle, GripVertical, Bell,
 } from '@lucide/vue'
 
 const { t, locale } = useI18n()
@@ -21,6 +23,9 @@ const { t, locale } = useI18n()
 const tasks = ref<ScheduledTask[]>([])
 const loading = ref(false)
 const error = ref('')
+// 弹窗内的校验/保存错误：不能复用 error——它渲染在页面里，弹窗盖着完全看不见，
+// 用户只看到「点保存没反应」。
+const formErr = ref('')
 
 // ---- 动作类型元信息 ----
 const ACTIONS = ['app', 'dir', 'url', 'command', 'http'] as const
@@ -30,7 +35,10 @@ const actionIcon: Record<string, any> = {
 function actionLabel(a: string) { return t('sched_action_' + a) }
 
 // ---- 调度类型 ----
-const KINDS = ['once', 'interval', 'daily', 'weekly'] as const
+// monthly 后端一直支持（validateScheduledTask + computeNextRun 都有分支），
+// 前端漏了它，等于「每月几号跑一次」这个能力完全不可达，而派生自待办的月度任务
+// 还会在列表里显示成空白描述。
+const KINDS = ['once', 'interval', 'daily', 'weekly', 'monthly'] as const
 // 周一为首列展示；v 使用 JS 星期编号（0=周日..6=周六）
 const WEEKDAYS = computed(() => {
   const zh = ['一', '二', '三', '四', '五', '六', '日']
@@ -59,6 +67,7 @@ function scheduleDesc(t0: ScheduledTask): string {
     case 'interval': return t('sched_kind_interval') + ' · ' + humanInterval(t0.intervalSec)
     case 'daily': return t('sched_kind_daily') + ' · ' + (t0.timeOfDay || '')
     case 'weekly': return t('sched_kind_weekly') + ' · ' + weekdayText(t0.weekdays) + ' ' + (t0.timeOfDay || '')
+    case 'monthly': return t('sched_kind_monthly') + ' · ' + (t0.timeOfDay || '')
   }
   return ''
 }
@@ -79,12 +88,122 @@ async function refresh() {
   loading.value = true
   error.value = ''
   try {
-    tasks.value = unwrap<ScheduledTask[]>(await ListScheduledTasks()) ?? []
+    const list = unwrap<ScheduledTask[]>(await ListScheduledTasks()) ?? []
+    // action='todo' 是「待办重复」在调度层的内部实现，入口与展示都在待办页。
+    // 让它混进本页的代价：图标找不到、文案显示原始 key，而且一编辑保存就被后端
+    // 以「未知的动作类型: todo」拒绝——看起来就像本页坏了。
+    tasks.value = list.filter(x => x.action !== 'todo')
   } catch (e) {
     error.value = getErrorMessage(e)
   } finally {
     loading.value = false
   }
+}
+
+// ---- 搜索与筛选 ----
+// 任务攒到十几条之后，「找那个每 5 分钟拉的」只能靠肉眼扫列表，
+// 而每条又有 name/target 两段可搜文本、四种状态 —— 这两样都补上。
+const query = ref('')
+const statusFilter = ref<'all' | 'fail' | 'on' | 'off'>('all')
+
+const STATUS_FILTERS = computed(() => [
+  { v: 'all' as const, l: t('sched_filter_all') },
+  { v: 'fail' as const, l: t('sched_filter_fail') },
+  { v: 'on' as const, l: t('sched_filter_on') },
+  { v: 'off' as const, l: t('sched_filter_off') },
+])
+
+const filteredTasks = computed(() => {
+  const q = query.value.trim().toLowerCase()
+  return tasks.value.filter((x) => {
+    if (statusFilter.value === 'fail' && x.lastStatus !== 'fail') return false
+    if (statusFilter.value === 'on' && !x.enabled) return false
+    if (statusFilter.value === 'off' && x.enabled) return false
+    if (!q) return true
+    return (x.name || '').toLowerCase().includes(q) || (x.target || '').toLowerCase().includes(q)
+  })
+})
+
+/** 有筛选时禁用拖拽：此时列表是任务全集的子集，拖出来的顺序没法映射回全量 sort。 */
+const canDrag = computed(() => !query.value.trim() && statusFilter.value === 'all')
+
+// ---- 倒计时 ----
+// next_run 是后端算好的绝对时间（'YYYY-MM-DD HH:MM:SS' 本地时区），前端只做差。
+// 30 秒一跳：够看清「还有几分钟」，又不至于像秒表那样整页重渲染。
+const nowTs = ref(Date.now())
+const tickTimer = setInterval(() => { nowTs.value = Date.now() }, 30_000)
+onBeforeUnmount(() => clearInterval(tickTimer))
+
+function parseLocal(s: string): number {
+  if (!s) return 0
+  // 'YYYY-MM-DD HH:MM:SS' → 'YYYY-MM-DDTHH:MM:SS'（WebView2 与各浏览器都按本地时区解）
+  const ms = Date.parse(s.replace(' ', 'T'))
+  return Number.isFinite(ms) ? ms : 0
+}
+
+/** 返回「还有 X」这类相对时间；已到期返回空串（由调用方显示「即将执行」）。 */
+function leftText(task: ScheduledTask): string {
+  const ts = parseLocal(task.nextRun)
+  if (!ts) return ''
+  const diff = ts - nowTs.value
+  if (diff <= 0) return t('sched_due_now')
+  const sec = Math.round(diff / 1000)
+  if (sec < 60) return t('sched_left_sec', { n: sec })
+  const min = Math.round(sec / 60)
+  if (min < 60) return t('sched_left_min', { n: min })
+  const hour = Math.floor(min / 60)
+  if (hour < 24) return t('sched_left_hr', { n: hour })
+  return t('sched_left_day', { n: Math.round(hour / 24) })
+}
+
+// ---- 拖拽排序 ----
+// db 早有 sort 列，列表也按 sort ASC 排，但一直没有任何 UI 能写它 ——
+// 加了任务就只能按创建时间排。拖拽走 SetScheduledTaskSort（只改 sort 列），
+// 不经过 UpdateScheduledTask，所以不会重算 next_run。
+const dragId = ref('')
+const dragOverId = ref('')
+
+function onDragStart(e: DragEvent, task: ScheduledTask) {
+  if (!canDrag.value) return
+  dragId.value = task.id
+  e.dataTransfer?.setData('text/plain', task.id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+
+function onDragOver(task: ScheduledTask) {
+  if (!dragId.value || dragId.value === task.id) return
+  dragOverId.value = task.id
+}
+
+async function onDrop(task: ScheduledTask) {
+  const from = dragId.value
+  dragId.value = ''
+  dragOverId.value = ''
+  if (!from || from === task.id) return
+  const list = [...filteredTasks.value]
+  const fi = list.findIndex((x) => x.id === from)
+  const ti = list.findIndex((x) => x.id === task.id)
+  if (fi < 0 || ti < 0) return
+  const [moved] = list.splice(fi, 1)
+  list.splice(ti, 0, moved)
+  // 乐观更新：先改本地顺序，失败再拉回来（不然要等 N 次 IPC 才看到变化）
+  tasks.value = list
+  try {
+    // 步长 10：以后要在中间插一条，改一个数就够，不用整段重排。
+    for (let i = 0; i < list.length; i++) {
+      if ((list[i].sort || 0) === i * 10) continue
+      await unwrap(await SetScheduledTaskSort(list[i].id, i * 10))
+      list[i].sort = i * 10
+    }
+  } catch (e) {
+    error.value = getErrorMessage(e)
+    await refresh()
+  }
+}
+
+function onDragEnd() {
+  dragId.value = ''
+  dragOverId.value = ''
 }
 
 // ---- 表单模型（新增 / 编辑共用） ----
@@ -107,11 +226,21 @@ const fTimeOfDay = ref('09:00')
 const fWeekdays = ref<number[]>([1, 2, 3, 4, 5])
 const fEnabled = ref(true)
 const fNotify = ref(true)
+// 通知渠道：与后端 notify_channels 的 system/webhook 一一对应。
+// 是「总开关 + 分渠道」不是三选一：fNotify 关掉时两个渠道都不发。
+const fNotifySystem = ref(true)
+const fNotifyWebhook = ref(true)
 
 function toInput(s: string): string { return s ? s.replace(' ', 'T') : '' }
 function fromInput(s: string): string { return s ? s.replace('T', ' ') : '' }
 
+/** 机器人 Webhook 是全局配置，跳设置页去改（本页不重复实现一份表单）。 */
+function openNotifySettings() {
+  try { Events.Emit('app:open-settings', 'notify') } catch { /* 事件通道未就绪时静默，不阻塞新建任务 */ }
+}
+
 function openCreate() {
+  formErr.value = ''
   editingId.value = ''
   fName.value = ''
   fAction.value = 'app'
@@ -128,10 +257,13 @@ function openCreate() {
   fWeekdays.value = [1, 2, 3, 4, 5]
   fEnabled.value = true
   fNotify.value = true
+  fNotifySystem.value = true
+  fNotifyWebhook.value = true
   showModal.value = true
 }
 
 function openEdit(t0: ScheduledTask) {
+  formErr.value = ''
   editingId.value = t0.id
   fName.value = t0.name
   fAction.value = t0.action
@@ -150,6 +282,10 @@ function openEdit(t0: ScheduledTask) {
   fWeekdays.value = t0.weekdays ? t0.weekdays.split(',').filter(Boolean).map(Number) : []
   fEnabled.value = t0.enabled
   fNotify.value = t0.notify
+  // 空值视为「两个都要」，与 db 层归一化同口径
+  const chans = t0.notifyChannels || 'system,webhook'
+  fNotifySystem.value = chans.includes('system')
+  fNotifyWebhook.value = chans.includes('webhook')
   showModal.value = true
 }
 
@@ -186,6 +322,12 @@ function intervalVal(): number {
   return Math.max(5, n * u.mul)
 }
 
+function buildChannels(): string {
+  if (!fNotify.value) return 'system,webhook' // 总开关关着，渠道值无所谓，保持满值不误导
+  const picked = [fNotifySystem.value ? 'system' : '', fNotifyWebhook.value ? 'webhook' : ''].filter(Boolean)
+  return picked.length ? picked.join(',') : 'system'
+}
+
 function buildPayload(): ScheduledTask {
   return {
     id: editingId.value,
@@ -199,10 +341,13 @@ function buildPayload(): ScheduledTask {
     scheduleKind: fKind.value,
     runAt: fromInput(fRunAt.value),
     intervalSec: intervalVal(),
-    timeOfDay: fKind.value === 'daily' || fKind.value === 'weekly' ? fTimeOfDay.value + ':00' : '',
+    timeOfDay: fKind.value === 'daily' || fKind.value === 'weekly' || fKind.value === 'monthly' ? fTimeOfDay.value + ':00' : '',
     weekdays: fKind.value === 'weekly' ? [...fWeekdays.value].sort((a, b) => a - b).join(',') : '',
     enabled: fEnabled.value,
     notify: fNotify.value,
+    // 开了通知却一个渠道都没勾，等于「静默不通知」——这种组合用户多半是误操作，
+    // 兜底成系统通知（本机一定能送达到），而不是让后端归一成"两个都要"往上推机器人。
+    notifyChannels: buildChannels(),
     nextRun: '', lastRun: '', lastStatus: '', lastResult: '', sort: 0, createdAt: '',
   } as ScheduledTask
 }
@@ -210,12 +355,12 @@ function buildPayload(): ScheduledTask {
 const saving = ref(false)
 async function save() {
   const p = buildPayload()
-  if (!p.name) { error.value = t('sched_err_name'); return }
-  if (!p.target) { error.value = t('sched_err_target'); return }
-  if (p.scheduleKind === 'once' && !p.runAt) { error.value = t('sched_err_runat'); return }
-  if (p.scheduleKind === 'weekly' && !p.weekdays) { error.value = t('sched_err_weekday'); return }
+  formErr.value = ''
+  if (!p.name) { formErr.value = t('sched_err_name'); return }
+  if (!p.target) { formErr.value = t('sched_err_target'); return }
+  if (p.scheduleKind === 'once' && !p.runAt) { formErr.value = t('sched_err_runat'); return }
+  if (p.scheduleKind === 'weekly' && !p.weekdays) { formErr.value = t('sched_err_weekday'); return }
   saving.value = true
-  error.value = ''
   try {
     if (editingId.value) {
       await unwrap(await UpdateScheduledTask(p))
@@ -225,7 +370,7 @@ async function save() {
     showModal.value = false
     await refresh()
   } catch (e) {
-    error.value = getErrorMessage(e)
+    formErr.value = getErrorMessage(e)
   } finally {
     saving.value = false
   }
@@ -293,12 +438,29 @@ onMounted(refresh)
         <span class="qd-page-sub">{{ t('sched_subtitle') }}</span>
       </div>
       <div class="qd-page-actions">
-        <WebhookSettingsModal :label="t('sched_nf_title')" />
+        <!-- 机器人地址是全局一份，配置入口统一收在设置里；这里只做跳转，避免两个入口改同一份数据 -->
+        <button class="qd-btn" :title="t('notifyGoSettings')" @click="openNotifySettings">
+          <Bell :size="14" /> {{ t('sched_nf_title') }}
+        </button>
         <button class="qd-btn qd-btn-primary" @click="openCreate"><Plus :size="14" /> {{ t('sched_add') }}</button>
       </div>
     </div>
 
     <div v-if="error" class="sched-error">{{ error }}</div>
+
+    <!-- 搜索 / 状态筛选 -->
+    <div v-if="tasks.length" class="sched-toolbar">
+      <div class="sched-search">
+        <Search :size="13" class="sched-search-icon" />
+        <input v-model="query" class="sched-search-input" :placeholder="t('sched_search_ph')" />
+      </div>
+      <div class="sched-filters">
+        <button v-for="f in STATUS_FILTERS" :key="f.v" type="button"
+                :class="['qd-btn', 'qd-btn-sm', { 'is-on': statusFilter === f.v }]"
+                @click="statusFilter = f.v">{{ f.l }}</button>
+      </div>
+      <span class="sched-count">{{ t('sched_count', { n: filteredTasks.length, total: tasks.length }) }}</span>
+    </div>
 
     <!-- 列表 -->
     <div class="sched-list">
@@ -308,7 +470,20 @@ onMounted(refresh)
         <p class="empty-hint">{{ t('sched_empty_hint') }}</p>
       </div>
 
-      <div v-for="task in tasks" :key="task.id" :class="['sched-item', { disabled: !task.enabled }]">
+      <div v-else-if="filteredTasks.length === 0" class="sched-empty">
+        <Search :size="26" class="empty-icon" />
+        <p>{{ t('sched_no_match') }}</p>
+      </div>
+
+      <div v-for="task in filteredTasks" :key="task.id"
+           :class="['sched-item', { disabled: !task.enabled, dragging: dragId === task.id, 'drag-over': dragOverId === task.id }]"
+           :draggable="canDrag"
+           @dragstart="onDragStart($event, task)"
+           @dragover.prevent="onDragOver(task)"
+           @drop.prevent="onDrop(task)"
+           @dragend="onDragEnd">
+        <!-- 手柄只是提示：整行都可拖，但给个抓取点用户才知道能拖 -->
+        <GripVertical v-if="canDrag" :size="13" class="drag-handle" />
         <div class="item-icon" :class="'a-' + task.action">
           <component :is="actionIcon[task.action]" :size="16" />
         </div>
@@ -323,6 +498,7 @@ onMounted(refresh)
             <span class="meta-sched">{{ scheduleDesc(task) }}</span>
             <span v-if="task.enabled && task.nextRun" class="meta-next">
               {{ t('sched_next') }} {{ task.nextRun.slice(5, 16) }}
+              <span v-if="leftText(task)" class="meta-left">({{ leftText(task) }})</span>
             </span>
             <span v-if="task.lastRun" class="meta-last" :class="task.lastStatus">
               <CheckCircle2 v-if="task.lastStatus === 'ok'" :size="11" />
@@ -338,8 +514,12 @@ onMounted(refresh)
                   :title="task.enabled ? t('sched_enabled') : t('sched_disabled')">
             <span class="toggle-knob" />
           </button>
-          <button class="act" :disabled="runningId === task.id" @click="runNow(task)" :title="t('sched_run_now')">
-            <Play :size="14" />
+          <!-- 「立即执行」是同步阻塞调用（后端要等命令跑完，最长 30s），
+               所以这里只能给转圈 + 说明，不能画进度条或停止按钮 —— 都没有真实通道。 -->
+          <button class="act" :disabled="runningId === task.id" @click="runNow(task)"
+                  :title="runningId === task.id ? t('sched_running') : t('sched_run_now')">
+            <LoaderCircle v-if="runningId === task.id" :size="14" class="spin" />
+            <Play v-else :size="14" />
           </button>
           <button class="act" @click="openHistory(task)" :title="t('sched_history')"><History :size="14" /></button>
           <button class="act" @click="openEdit(task)" :title="t('sched_edit')"><Pencil :size="14" /></button>
@@ -439,6 +619,12 @@ onMounted(refresh)
           <input v-model="fTimeOfDay" type="time" class="modal-input" />
         </template>
 
+        <!-- monthly：后端按"保存当天是几号"作为每月日，所以这里只需要时间 -->
+        <template v-else-if="fKind === 'monthly'">
+          <label>{{ t('sched_time_of_day') }}</label>
+          <input v-model="fTimeOfDay" type="time" class="modal-input" />
+        </template>
+
         <!-- 开关 -->
         <div class="toggle-row">
           <label class="toggle-label">
@@ -447,11 +633,29 @@ onMounted(refresh)
           <label class="toggle-label">
             <input type="checkbox" v-model="fNotify" /> {{ t('sched_notify') }}
           </label>
+          <!-- 渠道只在总开关打开时出现：关着还显示两个灰框，只会让人以为哪里坏了 -->
+          <template v-if="fNotify">
+            <label class="toggle-label toggle-sub">
+              <input type="checkbox" v-model="fNotifySystem" /> {{ t('sched_notify_system') }}
+            </label>
+            <label class="toggle-label toggle-sub">
+              <input type="checkbox" v-model="fNotifyWebhook" /> {{ t('sched_notify_webhook') }}
+            </label>
+            <!-- 勾了机器人渠道但一个地址都没配，任务不会报错、只是静默发不出去——
+                 这里就地给一条去向，省得用户去翻设置菜单。 -->
+            <span class="nf-link" @click="openNotifySettings">{{ t('notifyGoSettings') }}</span>
+          </template>
         </div>
 
+        <!-- 校验提示必须画在弹窗里：页面级 error 被遮罩盖住，等于没提示 -->
+        <p v-if="formErr" class="form-err">{{ formErr }}</p>
+
+        <!-- 用 qd-btn 这套（app.css）而不是设置页的 .btn/.btn-primary：
+             .btn-primary 只定义颜色，盒子尺寸靠 .btn 基类，漏了基类就是「浏览器默认
+             按钮 + 主题色文字」——正是保存按钮看起来不对的原因。 -->
         <div class="modal-actions">
-          <button class="btn-ghost" @click="showModal = false">{{ t('cancel') }}</button>
-          <button class="btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
+          <button class="qd-btn" @click="showModal = false">{{ t('cancel') }}</button>
+          <button class="qd-btn qd-btn-primary" :disabled="saving" @click="save">{{ t('save') }}</button>
         </div>
       </div>
     </div>
@@ -481,10 +685,37 @@ onMounted(refresh)
 .interval-num { flex: 1 1 auto; min-width: 0; }
 .interval-unit { flex: 0 0 96px; width: 96px; }
 
+/* 搜索 / 状态筛选条：跟着页头一起通栏，内边距与列表对齐 */
+.sched-toolbar {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: 10px 20px 0; flex-shrink: 0; flex-wrap: wrap;
+}
+.sched-search {
+  display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px;
+  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); flex: 1 1 180px; max-width: 320px;
+}
+.sched-search:focus-within { border-color: var(--color-accent); }
+.sched-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
+.sched-search-input {
+  flex: 1; min-width: 0; border: none; outline: none; background: none;
+  color: var(--color-text-primary); font-size: 12px; font-family: inherit;
+}
+.sched-search-input::placeholder { color: var(--color-text-disabled); }
+.sched-filters { display: flex; align-items: center; gap: 4px; }
+.sched-count { margin-left: auto; font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+
 .sched-error {
   margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md); flex-shrink: 0;
+}
+
+/* 弹窗内校验提示：与页面级 .sched-error 同色系，但去掉外边距（弹窗有自己的内边距） */
+.form-err {
+  margin: var(--space-3) 0 0; padding: 7px 10px; font-size: 12px;
+  color: var(--color-danger); background: var(--color-danger-bg);
+  border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
 }
 
 .sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 14px 20px 16px; }
@@ -499,6 +730,11 @@ onMounted(refresh)
 }
 .sched-item:hover { background: var(--color-bg-hover); }
 .sched-item.disabled { opacity: 0.55; }
+/* 拖拽：抓起来的半透明、落点给一条左侧高亮 */
+.sched-item.dragging { opacity: 0.45; }
+.sched-item.drag-over { border-color: var(--color-accent); box-shadow: inset 0 2px 0 var(--color-accent); }
+.drag-handle { flex-shrink: 0; color: var(--color-text-disabled); cursor: grab; margin-right: -6px; }
+.sched-item:active .drag-handle { cursor: grabbing; }
 
 .item-icon {
   flex-shrink: 0; width: 34px; height: 34px; display: flex; align-items: center; justify-content: center;
@@ -523,6 +759,7 @@ onMounted(refresh)
 }
 .item-meta { font-size: 11px; color: var(--color-text-disabled); margin-top: 4px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
 .meta-next { color: var(--color-accent); }
+.meta-left { color: var(--color-text-muted); }
 .meta-last { display: inline-flex; align-items: center; gap: 3px; max-width: 260px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .meta-last.ok { color: var(--color-text-muted); }
 .meta-last.fail { color: var(--color-danger); }
@@ -536,6 +773,10 @@ onMounted(refresh)
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
 .act:disabled { opacity: 0.4; cursor: default; }
 .act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+
+/* 同步执行中的转圈 */
+.spin { animation: sched-spin 1s linear infinite; }
+@keyframes sched-spin { to { transform: rotate(360deg); } }
 
 /* 弹窗 */
 .modal-mask {
@@ -570,9 +811,15 @@ onMounted(refresh)
 .wd-btn:hover { color: var(--color-text-primary); }
 .wd-btn.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-accent-border); }
 
-.toggle-row { display: flex; gap: var(--space-5); margin-top: var(--space-4); }
+.toggle-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3) var(--space-5); margin-top: var(--space-4); }
+/* 渠道从属于总开关：左移一点 + 略小，视觉上挂在它下面 */
+.toggle-sub { padding-left: var(--space-3); font-size: 11px; color: var(--color-text-muted); }
 .toggle-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; margin: 0; }
 .toggle-label input { cursor: pointer; }
+/* 「机器人地址去设置配」的跳转链接：做成手型+下划线虚线，别用按钮——
+   它不是本次操作的动作，只是一条注记。 */
+.nf-link { font-size: 11px; color: var(--color-accent); cursor: pointer; text-decoration: underline dotted; }
+.nf-link:hover { color: var(--color-accent-hover); }
 
 .modal-actions { display: flex; justify-content: flex-end; gap: var(--space-3); margin-top: var(--space-5); }
 </style>

@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { GetScheduleRuns } from '../../bindings/quickdock/services/appservice'
-import { History, CheckCircle2, XCircle } from '@lucide/vue'
+import { downloadCsv } from '../utils/csv'
+import { History, CheckCircle2, XCircle, Download } from '@lucide/vue'
 
 const props = defineProps<{
   visible: boolean
@@ -29,7 +30,24 @@ const runs = ref<RunItem[]>([])
 const loading = ref(false)
 const error = ref('')
 
-const LIMIT = 100
+// 后端按时间倒序返回，limit 是上限。100 条对「每分钟跑一次」的任务只够一小时半，
+// 排查一次偶发失败常常要翻更早的记录 —— 提到 500，真正的收敛仍由后端的
+// 保留策略负责（不会因为前端要得多就无限增长）。
+const LIMIT = 500
+
+/** 只看失败：排查时最常用的视角，省得在几百条 ok 里找红点。 */
+const onlyFail = ref(false)
+
+const failed = computed(() => runs.value.filter((r) => r.status !== 'ok'))
+
+const shown = computed(() => (onlyFail.value ? failed.value : runs.value))
+
+function exportCsv() {
+  const head = [t('sched_history_col_time'), t('sched_history_col_status'), t('sched_history_col_duration'), t('sched_history_col_result')]
+  const rows = shown.value.map((r) => [r.runAt, r.status, r.durationMs || 0, r.result || ''])
+  const name = (props.task?.name || 'schedule').replace(/[\\/:*?"<>|]/g, '_')
+  downloadCsv(`schedule-${name}-${new Date().toISOString().slice(0, 10)}.csv`, [head, ...rows])
+}
 
 function fmtDuration(ms: number): string {
   if (!ms || ms < 0) return '—'
@@ -78,14 +96,28 @@ function close() {
         <button class="dlg-close" @click="close" title="×">×</button>
       </div>
 
+      <!-- 筛选 / 导出：历史原本只有一坨按时间的流水，既挑不出失败也带不走 -->
+      <div class="dlg-tools">
+        <button :class="['qd-btn', 'qd-btn-sm', { 'is-on': !onlyFail }]" @click="onlyFail = false">
+          {{ t('sched_filter_all') }} ({{ runs.length }})
+        </button>
+        <button :class="['qd-btn', 'qd-btn-sm', { 'is-on': onlyFail }]" @click="onlyFail = true">
+          {{ t('sched_filter_fail') }} ({{ failed.length }})
+        </button>
+        <button class="qd-btn qd-btn-sm dlg-export" :disabled="!shown.length" @click="exportCsv">
+          <Download :size="12" /> {{ t('sched_history_export') }}
+        </button>
+      </div>
+
       <div v-if="error" class="dlg-error">{{ error }}</div>
 
       <div class="dlg-body">
         <div v-if="loading" class="dlg-empty">{{ t('sched_history_loading') }}</div>
         <div v-else-if="runs.length === 0" class="dlg-empty">{{ t('sched_history_empty') }}</div>
+        <div v-else-if="shown.length === 0" class="dlg-empty">{{ t('sched_history_no_fail') }}</div>
 
         <div v-else class="run-list">
-          <div v-for="r in runs" :key="r.id" class="run-row" :class="r.status">
+          <div v-for="r in shown" :key="r.id" class="run-row" :class="r.status">
             <div class="run-status">
               <CheckCircle2 v-if="r.status === 'ok'" :size="14" />
               <XCircle v-else :size="14" />
@@ -99,7 +131,7 @@ function close() {
 
       <div class="dlg-foot">
         <span class="dlg-retention">{{ t('sched_history_retention') }}</span>
-        <button class="btn btn-secondary" @click="close">{{ t('cancel') }}</button>
+        <button class="qd-btn" @click="close">{{ t('cancel') }}</button>
       </div>
     </div>
   </div>
@@ -157,7 +189,7 @@ function close() {
   margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--color-border);
 }
 .dlg-retention { font-size: 11px; color: var(--color-text-disabled); }
-.btn-secondary {
-  font-size: 12px; padding: 6px 14px;
-}
+/* 工具条与头部之间留白；导出按钮靠右 */
+.dlg-tools { display: flex; align-items: center; gap: 4px; margin-bottom: var(--space-3); }
+.dlg-export { margin-left: auto; }
 </style>

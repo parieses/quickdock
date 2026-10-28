@@ -26,6 +26,8 @@ const emit = defineEmits<{
   (e: 'create-folder', folderId: string): void
   (e: 'create-doc', folderId: string): void
   (e: 'drop-node', dragId: string, targetId: string): void
+  /** 同级排序：把 dragId 插到 targetId 前面（before=true）或后面 */
+  (e: 'reorder', dragId: string, targetId: string, before: boolean): void
 }>()
 
 const { t } = useI18n()
@@ -42,11 +44,48 @@ watch(
   { immediate: true },
 )
 
+/**
+ * 拖拽落点：'' = 中间（放进这个文件夹），'before'/'after' = 上下边缘（同级排序）。
+ *
+ * 为什么要分区域：同一个拖拽手势既要能「移进文件夹」又要能「插到某一项前后」，
+ * 唯一不冲突的切分方式就是按行的上下边缘。边缘区取 30%，中间 40% 留给
+ * 「放进文件夹」——文件夹默认是展开的，中间区域误插进去很难复原。
+ *
+ * dragover 期间拿不到 dataTransfer.getData（浏览器为安全屏蔽），所以这里只算
+ * 落点，是否同级由页面在 drop 时判定。
+ */
+const dropSide = ref<'' | 'before' | 'after'>('')
+
+function sideOf(e: DragEvent): '' | 'before' | 'after' {
+  const el = e.currentTarget as HTMLElement | null
+  if (!el) return ''
+  const r = el.getBoundingClientRect()
+  const y = e.clientY - r.top
+  if (y < r.height * 0.3) return 'before'
+  if (y > r.height * 0.7) return 'after'
+  return ''
+}
+
+function onDragOver(e: DragEvent) {
+  e.preventDefault(); e.stopPropagation()
+  dropSide.value = sideOf(e)
+}
+
+function onDragLeave() { dropSide.value = '' }
+
 function onDrop(e: DragEvent) {
   e.preventDefault(); e.stopPropagation()
   const did = e.dataTransfer?.getData('text/plain')
-  if (did) emit('drop-node', did, n.value.id)
+  const side = dropSide.value
+  dropSide.value = ''
+  if (!did) return
+  if (!side || did === n.value.id) {
+    emit('drop-node', did, n.value.id)
+    return
+  }
+  emit('reorder', did, n.value.id, side === 'before')
 }
+
 function onDragStart(e: DragEvent) {
   e.dataTransfer?.setData('text/plain', n.value.id)
 }
@@ -57,10 +96,15 @@ function onDragStart(e: DragEvent) {
     <div
       draggable
       :style="'padding-left:' + (12 + depth * 16) + 'px'"
-      :class="['tn-row', 'tn-' + (isFolder ? 'folder' : 'doc'), { selected: selectedDoc === node.id || selectedFolder === node.id }]"
+      :class="['tn-row', 'tn-' + (isFolder ? 'folder' : 'doc'), {
+        selected: selectedDoc === node.id || selectedFolder === node.id,
+        'drop-before': dropSide === 'before',
+        'drop-after': dropSide === 'after',
+      }]"
       @click="isFolder ? emit('toggle', node.id) : emit('select', node)"
       @dragstart="onDragStart"
-      @dragover.prevent.stop
+      @dragover="onDragOver"
+      @dragleave="onDragLeave"
       @drop="onDrop"
     >
       <button v-if="isFolder" class="tn-caret" @click.stop="emit('toggle', node.id)">
@@ -102,6 +146,7 @@ function onDragStart(e: DragEvent) {
         @rename-input="(v: string) => emit('rename-input', v)" @rename-cancel="emit('rename-cancel')"
         @del="emit('del', $event)" @create-folder="emit('create-folder', $event)" @create-doc="emit('create-doc', $event)"
         @drop-node="(d: string, t: string) => emit('drop-node', d, t)"
+        @reorder="(d: string, t: string, b: boolean) => emit('reorder', d, t, b)"
       />
     </template>
   </div>
@@ -118,6 +163,10 @@ function onDragStart(e: DragEvent) {
 }
 .tn-row:hover { background: var(--color-bg-hover); }
 .tn-row.selected { background: var(--color-bg-tertiary); }
+
+/* 拖拽落点提示：上下边缘一条线，比整行高亮更清楚「会插到哪」 */
+.tn-row.drop-before { box-shadow: inset 0 2px 0 var(--color-accent); }
+.tn-row.drop-after { box-shadow: inset 0 -2px 0 var(--color-accent); }
 .tn-row.tn-folder { font-weight: 600; }
 .tn-row.tn-doc.selected { color: var(--color-accent); }
 
