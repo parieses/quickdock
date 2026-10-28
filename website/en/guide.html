@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Guide — QuickDock</title>
+<meta name="description" content="QuickDock guide: installation, interface, hotkeys, resources, command palette, clipboard, screenshots, notes, todos, monitors, schedules, runtimes, AI, SSH, backup and troubleshooting.">
+<meta name="theme-color" content="#080c15">
+<link rel="icon" href="../assets/img/favicon-64.png">
+<link rel="alternate" hreflang="zh-CN" href="../guide.html">
+<link rel="alternate" hreflang="en" href="guide.html">
+<link rel="alternate" hreflang="x-default" href="../guide.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/style.css">
+</head>
+<body>
+
+<header class="top" id="top-bar">
+  <div class="top-inner">
+    <a class="brand" href="index.html" aria-label="QuickDock">
+      <img src="../assets/img/appicon-512.png" alt="" width="26" height="26">
+      <b>QuickDock</b><span>快启坞</span>
+    </a>
+    <nav>
+      <a href="index.html#ui">Interface</a>
+      <a href="index.html#tools">Tools</a>
+      <a href="index.html#runtime">Runtimes</a>
+      <a href="index.html#ai">AI</a>
+      <a href="index.html#log">Changes</a>
+      <a href="guide.html" style="color:var(--t1)">Guide</a>
+    </nav>
+    <div class="top-right">
+      <div class="lang">
+        <a href="../guide.html" hreflang="zh-CN" lang="zh-CN">中</a>
+        <a class="on" aria-current="true" href="guide.html">EN</a>
+      </div>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle theme" title="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.8 6.8 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <a class="btn btn-solid btn-sm" href="index.html#download">Download</a>
+    </div>
+  </div>
+</header>
+
+<main class="doc">
+  <div class="wrap">
+    <div class="doc-head">
+      <h1>Guide</h1>
+      <p>From installed to second nature. The first four sections are worth doing in order; the rest are reference. The sidebar jumps anywhere.</p>
+    </div>
+
+    <div class="doc-body">
+      <aside class="doc-nav" id="docNav">
+        <a href="#s1">01 Install</a>
+        <a href="#s2">02 Interface</a>
+        <a href="#s3">03 Hotkeys</a>
+        <a href="#s4">04 Resources</a>
+        <a href="#s5">05 Command palette</a>
+        <a href="#s6">06 Clipboard</a>
+        <a href="#s7">07 Screenshots</a>
+        <a href="#s8">08 Notes</a>
+        <a href="#s9">09 Todos</a>
+        <a href="#s10">10 Monitors</a>
+        <a href="#s11">11 Schedules</a>
+        <a href="#s12">12 Runtimes</a>
+        <a href="#s13">13 AI</a>
+        <a href="#s14">14 SSH</a>
+        <a href="#s15">15 Data &amp; backup</a>
+        <a href="#s16">16 Updates &amp; fixes</a>
+      </aside>
+
+      <div class="doc-main">
+
+        <section class="doc-sec" id="s1">
+          <h2><span>01</span>Install</h2>
+          <p>Download <code>quickdock-amd64-installer.exe</code> and run it. No admin rights at any point.</p>
+          <ul>
+            <li>It installs to <code>%LOCALAPPDATA%\Programs\快启坞</code>. Afterwards run <code>QuickDock.exe</code>; a tray icon means it's up.</li>
+            <li><b>Keep the default install path.</b> Auto-update depends on write access to that directory. Put it in <code>C:\Program Files</code> and every update has to clear UAC, which leaves you overwriting by hand.</li>
+            <li>Installing is optional: grab <code>quickdock-amd64.exe</code> and run it as a portable build from a directory your user can write to. In-place updates work there too.</li>
+            <li>The first launch asks once where to keep data. To change it later, go to Settings → Storage &amp; Sync.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s2">
+          <h2><span>02</span>Interface</h2>
+          <p>The main window is three fixed panes, all aligned on one line.</p>
+          <ul>
+            <li><b>Top bar</b>: workspace switcher on the left, scenario tabs in the middle, Config on the right — the runtime services bound to the current scenario hang there.</li>
+            <li><b>Sidebar</b>: navigation on top (workspaces, notes, todos, schedules, monitors, clipboard, runtimes, AI, DeepSeek Harness, plugins), the scenario list below, a search box between them, and the notification bell plus settings at the bottom.</li>
+            <li><b>Middle</b>: collections in the current scenario, each with a type icon and an item count.</li>
+            <li><b>Right</b>: the items of the selected collection. With nothing selected it shows a hint — that's expected, not a bug.</li>
+            <li>The interface scales proportionally under Settings → Preferences. The main window and every detached window zoom together and the proportions stay put.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s3">
+          <h2><span>03</span>Hotkeys</h2>
+          <p>Seven global hotkeys by default. These are the ones you'll reach for all day.</p>
+          <ul>
+            <li><kbd>Ctrl</kbd><kbd>Space</kbd> show or hide the main window</li>
+            <li><kbd>Ctrl</kbd><kbd>K</kbd> command palette</li>
+            <li><kbd>Ctrl</kbd><kbd>`</kbd> clipboard history</li>
+            <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>N</kbd> quick notes</li>
+            <li><kbd>F1</kbd> region screenshot, falling back to <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd> when it's taken</li>
+            <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd> window tiling overlay, plus 15 more snap hotkeys under Settings → Window Management</li>
+            <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>S</kbd> SSH terminal</li>
+            <li>All of them can be rebound under Settings → Hotkey Settings, effective immediately, no restart. If you forget one, type <code>cheatsheet</code> in the command palette; the sheet reads your current bindings.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s4">
+          <h2><span>04</span>Resources</h2>
+          <p>Four levels: workspaces hold scenarios, scenarios hold collections, collections hold items.</p>
+          <ul>
+            <li><b>Workspaces</b> separate contexts — Work and Personal, say — so they never interfere.</li>
+            <li><b>Scenarios</b> are slices of the same resources, with their own tags, icons and colors. Switch to Frontend while writing code, Production while on call.</li>
+            <li><b>Collections</b> group by purpose and carry one of four open strategies, which decide whether items open all at once or one by one.</li>
+            <li><b>Items</b> come in six types: folder, file, URL, terminal command, application, shortcut with arguments.</li>
+            <li>Every level can be dragged into order. Commands and URLs accept <code>{date}</code>, <code>{time}</code>, <code>{username}</code> and <code>{clipboard}</code>, expanded at the moment they open.</li>
+            <li>When you can't find something, <kbd>Ctrl</kbd><kbd>K</kbd> beats digging through the tree.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s5">
+          <h2><span>05</span>Command palette</h2>
+          <p><kbd>Ctrl</kbd><kbd>K</kbd> opens it. Type to search, press Enter to run.</p>
+          <ul>
+            <li>Results are grouped by source: best match, recent, projects, quick links, notes, todos, applications, files, plugin commands, runtime services, system commands, clipboard suggestions, plus inline calculator and web results.</li>
+            <li>Todos only return unfinished top-level tasks. Enter switches to the todo page, jumps to that day, clears tag filters when needed and highlights the row for two seconds; the action menu can mark it done.</li>
+            <li>Type an expression and the answer appears; paste a URL and it asks whether to save it as a project.</li>
+            <li>Type <code>cheatsheet</code> for the hotkey sheet, or <code>logtail</code> to open log tailing.</li>
+            <li>Two boundaries worth knowing: clipboard history entries aren't searched (the suggestions only cover what you just copied), and each group has a display cap — only recent can be expanded.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s6">
+          <h2><span>06</span>Clipboard</h2>
+          <p><kbd>Ctrl</kbd><kbd>`</kbd> opens the float window, which hides as soon as it loses focus.</p>
+          <ul>
+            <li>Text, images and files are all recorded. Images live in <code>~/.quickdock/images/</code>.</li>
+            <li>Tags come in two kinds: <b>Images</b>, <b>Files</b>, <b>All</b> and <b>Starred</b> filter by type; <b>URL</b>, <b>Email</b>, <b>Phone</b>, <b>JSON</b> and <b>Code</b> are smart categories that only apply to text.</li>
+            <li>Classification is computed and stored when an entry is written, so picking a tag reaches the whole history rather than the 1000 rows the All list loads by default.</li>
+            <li>Ask AI on an entry to translate, summarize or reformat — or ask your own question — answered in place, without leaving the page.</li>
+            <li>Retention is set under Settings → Clipboard, and entries expire on schedule. Automatic rules can clean up what you copy, with a dry run first.</li>
+            <li>Every copy in the app goes through the backend system API, unaffected by which window has focus.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s7">
+          <h2><span>07</span>Screenshots</h2>
+          <p><kbd>F1</kbd> raises a full-screen overlay. Draw a selection and the toolbar appears in place.</p>
+          <ul>
+            <li>Six annotation tools: rectangle, ellipse, arrow, line, mosaic, text. Nine colors, four stroke widths, six text sizes.</li>
+            <li>While selecting, hovering a window highlights the whole window and one click takes it; hold <kbd>Ctrl</kbd> to drop to the child control.</li>
+            <li>Annotations can be selected, dragged and deleted, text can be double-clicked to edit, and the selection has eight handles.</li>
+            <li>Pin a capture to the screen afterwards: drag it, scroll to scale, double-click to close.</li>
+            <li>Common keys: <kbd>Enter</kbd> or <kbd>Ctrl</kbd><kbd>C</kbd> copies, <kbd>Ctrl</kbd><kbd>S</kbd> saves, <kbd>Ctrl</kbd><kbd>Z</kbd> undoes, <kbd>R</kbd><kbd>E</kbd><kbd>A</kbd><kbd>L</kbd><kbd>M</kbd><kbd>T</kbd> switch tools, <kbd>Esc</kbd> steps back out.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s8">
+          <h2><span>08</span>Notes</h2>
+          <p><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>N</kbd> opens the floating notes window.</p>
+          <ul>
+            <li>A tree of notes on the left, folders nest, with search, rename and delete.</li>
+            <li>Content is stored as Markdown and saved 500 ms after you stop typing. There is no save button.</li>
+            <li>The window hides when it loses focus, so it never sits on top of your work.</li>
+            <li>Ask AI in the float: with a selection only that goes, without one the whole note. Presets cover summarize, polish, continue and translate, and you can ask anything. None of it is written to the AI conversation history.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s9">
+          <h2><span>09</span>Todos</h2>
+          <p>Open Todos from the sidebar; list and kanban views switch freely.</p>
+          <ul>
+            <li>Tasks can carry subtasks, tags, notes and an estimate.</li>
+            <li>Repeat rules cover daily, weekly and monthly; finishing one creates the next.</li>
+            <li>A due time triggers a system notification.</li>
+            <li>Pomodoro runs a countdown on the todo page and notifies when it ends; a webhook can push it to your phone under Settings → Open Tool.</li>
+            <li>Search a task title in the command palette and Enter jumps straight to it.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s10">
+          <h2><span>10</span>Monitors</h2>
+          <p>Create one under Site Monitor in the sidebar. An address and an interval is enough.</p>
+          <ul>
+            <li>Shows status code, response time and days left on the SSL certificate, and can require a keyword or a regex in the response body.</li>
+            <li>Latency jitter isn't an outage; adjust the threshold in settings so a network hiccup doesn't page you.</li>
+            <li>A state flip pushes a desktop notification, or DingTalk, WeCom, Feishu, ServerChan, PushPlus or Telegram.</li>
+            <li>Trend charts cover 24 hours, 7 days and all time; the monitor list exports to CSV.</li>
+            <li>Every notification also lands in the bell at the bottom of the sidebar, and clicking one jumps to its monitor. AI completion notices stay quiet while the window is in front of you.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s11">
+          <h2><span>11</span>Schedules</h2>
+          <p>Five actions and four schedules cover everyday scripts and reminders.</p>
+          <ul>
+            <li>Actions: open an application, open a folder, open a URL, run a command, send an HTTP request.</li>
+            <li>Schedules: once, interval, daily, weekly.</li>
+            <li>Run one immediately from the list instead of waiting for the clock.</li>
+            <li>Deleted tasks go to the recycle bin. Restoring recalculates the next run from now, so a task whose time passed long ago doesn't fire the moment it comes back.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s12">
+          <h2><span>12</span>Runtimes</h2>
+          <p>Open Runtimes from the sidebar: groups on the left, versions and services on the right.</p>
+          <ul>
+            <li>Install a version by picking it and clicking install; progress streams back live. Switch mirror when one is slow, or point at your own address.</li>
+            <li>Several versions of the same runtime coexist. Switching just moves PATH — nothing is uninstalled or overwritten.</li>
+            <li>Service runtimes — Nginx, MySQL, Redis and the like — start, stop and restart from here. Configs can be edited in the app and reloaded on save.</li>
+            <li>Nginx, Apache and Caddy validate their config before starting; a syntax error stops there instead of breaking a live service.</li>
+            <li>Every service has live logs (last 8 KB) and a web console entry; the port overview shows which process holds which port.</li>
+            <li>Everything installs under <code>%APPDATA%\QuickDock\runtime\</code>: no registry writes, no system PATH changes, no admin rights.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s13">
+          <h2><span>13</span>AI</h2>
+          <p>Start under Settings → AI Assistant: pick a provider, fill in the base URL and key, pull the model list and choose one.</p>
+          <ul>
+            <li>Once the profile exists, the chat page, the SSH sidebar, the clipboard's Ask AI and the notes window all share it. You configure it once, not four times.</li>
+            <li>The chat page has multiple sessions, automatic titles and modes (chat, explain code, translate, summarize, tutorial), and your own system prompt can be layered on top.</li>
+            <li>Formulas, diagrams and code blocks render. Diagrams, formulas and code blocks can be copied as images from the context menu, and <code>html</code> blocks open in a full-screen sandbox preview.</li>
+            <li>Switch to another page and the answer keeps generating; come back and it's where you left it.</li>
+            <li>Usage stats sit under Settings → AI Assistant: cost estimates for 7 days, 30 days and all time, split by model and entry point. They're linear estimates from built-in prices, not a bill — your provider's invoice is authoritative.</li>
+            <li>Keys are encrypted with Windows DPAPI; the front end never sees the ciphertext, and deleting a profile deletes it too.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s14">
+          <h2><span>14</span>SSH</h2>
+          <p><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>S</kbd> opens a separate window that resizes and minimizes; switching windows doesn't drop the connection.</p>
+          <ul>
+            <li>The host tree supports groups (folders), drag reordering, and environment tags: production, staging, test.</li>
+            <li>Authenticate with a password or a key (ed25519 and friends, passphrase supported). Older devices on <code>ssh-rsa</code> need the legacy switch turned on.</li>
+            <li><b>The first connection to a new machine asks you to confirm its fingerprint.</b> Compare it against <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> on the server before trusting it. Trusted fingerprints are managed in known_hosts on the window's top bar, and a changed fingerprint raises an alert.</li>
+            <li>Several tabs on one host handshake once. Dropped connections reconnect on their own, and scrollback is kept.</li>
+            <li>The SFTP panel browses remote directories, uploads and downloads.</li>
+            <li>Batch execution on a group lets you tick several machines, dry-run first (read-only — it lists the commands and their risks), then run, with output streamed back per host.</li>
+            <li>The AI sidebar on the right: select terminal output, right-click and ask. High-risk commands get a fill-in button only; you press Enter.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s15">
+          <h2><span>15</span>Data &amp; backup</h2>
+          <p>Everything lives in <code>~/.quickdock</code> by default; configuration is in <code>%APPDATA%\QuickDock</code>.</p>
+          <ul>
+            <li><code>quickdock.db</code> is the main database (workspaces, todos, notes, the clipboard index); <code>images/</code> holds clipboard images, <code>plugins/</code> plugins, <code>logs/</code> logs.</li>
+            <li><b>Moving</b>: change the storage location under Settings → Storage &amp; Sync. The whole directory is packed and moved to the new drive, taking installed runtimes and environment variables with it, effective after a restart. Leave room on the target for the archive plus the unpacked copy.</li>
+            <li><b>Cloud sync</b>: configure a WebDAV server on the same page for full JSON backups, keep several versions, restore in one click.</li>
+            <li><b>Snapshot</b>: export everything to a JSON file and keep it somewhere. Importing overwrites current data — read the prompt first.</li>
+            <li>Uninstalling never deletes data; reinstalling picks it up again.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s16">
+          <h2><span>16</span>Updates &amp; fixes</h2>
+          <p>On startup the app fetches a signed manifest and mentions new versions in settings.</p>
+          <ul>
+            <li>Updates replace in place: download the new exe, verify the digest, then after a restart a helper backs up the old one and copies the new one over, rolling back on failure. No UAC, no installer.</li>
+            <li>Most update failures come from installing into a directory without write permission. Use the default path, or download and overwrite manually.</li>
+            <li>When something goes wrong, look under Settings → Logs: main logs by day, filterable by level, with JS and Go crash reports on the same page.</li>
+            <li>Log files can themselves be tailed: type <code>logtail</code> in the command palette, pick a file being written, and only new bytes are read every 500 ms.</li>
+            <li>If a hotkey does nothing, something else probably claimed it. Change it under Settings → Hotkey Settings; it re-registers immediately.</li>
+            <li>If a service won't start, check the validation output on its config page first, then the port overview to see whether another process holds the port.</li>
+          </ul>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap foot">
+    <div>
+      <div class="foot-brand">
+        <img src="../assets/img/appicon-512.png" alt="" width="24" height="24">
+        <b>QuickDock</b>
+      </div>
+      <p class="foot-note">A Windows desktop tool written in Go, Vue 3 and Wails v3. MIT licensed, source on GitHub.</p>
+    </div>
+    <div class="foot-links">
+      <a href="index.html">Home</a>
+      <a href="https://github.com/parieses/quickdock" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/parieses/quickdock/releases" target="_blank" rel="noopener">Changelog</a>
+      <a href="https://github.com/parieses/quickdock/issues" target="_blank" rel="noopener">Issues</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/js/main.js"></script>
+</body>
+</html>

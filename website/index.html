@@ -1,1348 +1,488 @@
 <!DOCTYPE html>
-
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
-<meta charset="utf-8"/>
-<meta content="width=device-width, initial-scale=1" name="viewport"/>
-<title>快启坞 QuickDock — 一个坞，装下你的整个开发流</title>
-<meta content="快启坞 QuickDock 是面向 Windows 开发者的桌面效率工具：命令面板、工作空间管理、多运行时环境一键装切、插件市场开箱即用、窗口排版、内置截图标注工具与 MCP 服务。" name="description"/>
-<meta content="#08090a" name="theme-color"/>
-<meta content="快启坞 QuickDock" property="og:title"/>
-<meta content="命令面板 · 环境管理 · 插件生态 · 窗口排版 · 截图标注 · MCP 服务 —— 一个坞，装下你的整个开发流。" property="og:description"/>
-<meta content="website" property="og:type"/>
-<link href="https://fonts.googleapis.com" rel="preconnect"/>
-<link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet"/>
-<link href="assets/css/style.css" rel="stylesheet"/>
-<!-- 首屏前定主题，避免刷新时闪一下（localStorage 优先，其次跟随系统） -->
-<script>
-  (function () {
-    try {
-      var t = localStorage.getItem('qd-theme');
-      if (!t) t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) ? 'light' : 'dark';
-      document.documentElement.setAttribute('data-theme', t);
-    } catch (e) {}
-  })();
-</script>
-<link href="assets/img/favicon-64.png" rel="icon" sizes="64x64" type="image/png"/>
-<link href="assets/img/apple-touch-icon.png" rel="apple-touch-icon" sizes="180x180"/>
-<meta content="assets/img/appicon-512.png" property="og:image"/>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>快启坞 QuickDock — 把开发要用的东西收进一个窗口</title>
+<meta name="description" content="Windows 桌面工具。资源树、命令面板、剪贴板、28 种运行时环境、截图与窗口排版、SSH 终端、AI 助手。单文件安装，不需要管理员权限，数据留在本机。">
+<meta name="theme-color" content="#080c15">
+<link rel="icon" href="assets/img/favicon-64.png">
+<link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="快启坞 QuickDock — 把开发要用的东西收进一个窗口">
+<meta property="og:description" content="资源树、命令面板、剪贴板、28 种运行时、截图与窗口排版、SSH 与 AI。单文件安装，数据全在本机。">
+<meta property="og:image" content="assets/img/ui-main.png">
+<link rel="alternate" hreflang="zh-CN" href="index.html">
+<link rel="alternate" hreflang="en" href="en/index.html">
+<link rel="alternate" hreflang="x-default" href="index.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+<script src="assets/js/site.js" defer></script>
 </head>
 <body>
-<!-- ============================ NAV ============================ -->
-<header class="nav" id="nav">
-<div class="nav-inner">
-<a class="brand" href="#top">
-<span class="brand-mark">
-<img alt="QuickDock" src="assets/img/appicon-512.png"/>
-</span>
-      快启坞 <span style="color:var(--text-4);font-weight:400">QuickDock</span>
-</a>
-<nav class="nav-links" id="navLinks">
-<a href="#features">功能</a>
-<a href="#runtime">环境管理</a>
-<a href="#plugins">插件</a>
-<a href="#guide">使用说明</a>
-<a href="#mcp">MCP</a>
-<a href="#faq">常见问题</a>
-<a href="#changelog">更新日志</a>
-</nav>
-<div class="nav-actions">
-<div aria-label="Language / 语言" class="tgl" role="group">
-<button aria-pressed="true" id="langZh" type="button">中</button>
-<button aria-pressed="false" id="langEn" type="button">EN</button>
-</div>
-<button aria-label="切换明暗主题" class="tgl" id="themeToggle" title="切换亮 / 暗主题" type="button">
-<svg class="i-moon" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"></path></svg>
-<svg class="i-sun" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2m0 16v2M2 12h2m16 0h2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4"></path></svg>
-</button>
-<a class="btn btn-ghost" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">
-<svg fill="currentColor" viewBox="0 0 24 24"><path d="M12 .5a11.5 11.5 0 0 0-3.64 22.42c.58.1.79-.25.79-.55v-2.1c-3.2.7-3.88-1.4-3.88-1.4-.53-1.34-1.3-1.7-1.3-1.7-1.06-.72.08-.71.08-.71 1.17.08 1.79 1.2 1.79 1.2 1.04 1.78 2.73 1.27 3.4.97.1-.75.4-1.27.73-1.56-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.29 1.19-3.1-.12-.29-.52-1.46.11-3.05 0 0 .97-.31 3.18 1.18a11 11 0 0 1 5.79 0c2.2-1.49 3.17-1.18 3.17-1.18.63 1.59.23 2.76.12 3.05.74.81 1.18 1.84 1.18 3.1 0 4.41-2.69 5.39-5.25 5.67.41.36.78 1.06.78 2.14v3.17c0 .3.2.66.8.55A11.5 11.5 0 0 0 12 .5Z"></path></svg>
-        GitHub
-      </a>
-<a class="btn btn-primary" href="#download">下载</a>
-<button aria-expanded="false" aria-label="菜单" class="nav-toggle" id="navToggle"><span></span><span></span></button>
-</div>
-</div>
+
+<header class="top" id="top-bar">
+  <div class="top-inner">
+    <a class="brand" href="#top" aria-label="快启坞 QuickDock">
+      <img src="assets/img/appicon-512.png" alt="" width="26" height="26">
+      <b>快启坞</b><span>QuickDock</span>
+    </a>
+    <nav>
+      <a href="#ui">界面</a>
+      <a href="#tools">工具</a>
+      <a href="#runtime">环境</a>
+      <a href="#ai">AI</a>
+      <a href="#log">更新</a>
+      <a href="guide.html">说明</a>
+    </nav>
+    <div class="top-right">
+      <div class="lang">
+        <a class="on" aria-current="true" href="index.html">中</a>
+        <a href="en/index.html" hreflang="en" lang="en">EN</a>
+      </div>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="切换明暗主题" title="切换明暗主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.8 6.8 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <a class="btn btn-solid btn-sm" href="#download">下载</a>
+    </div>
+  </div>
 </header>
+
 <main id="top">
+
 <!-- ============================ HERO ============================ -->
 <section class="hero">
-<div class="glow glow-a"></div>
-<div class="glow glow-b"></div>
-<div class="wrap hero-inner">
-<span class="pill"><span class="dot"></span>开源 · 免费 · Windows 优先</span>
-<h1>一个坞，装下<span class="grad">你的整个开发流</span></h1>
-<p class="hero-sub">
-      命令面板唤起一切，运行时环境一键装切，插件市场开箱即用，窗口排版和截图标注随手就来，再顺手把本地能力通过 MCP 开放给 AI。
-      Raycast 的速度 + VS Code 的开发者体验，打包进一个不到 50MB 的桌面应用。
+  <div class="wrap">
+    <p class="kicker"><i></i><span data-ver></span> · Windows 10 / 11 · MIT</p>
+    <h1>把开发要用的东西<br>收进<em>一个窗口</em></h1>
+    <p class="lede">
+      资源树、命令面板、剪贴板、28 种运行时、截图与窗口排版、SSH 终端、AI 助手。
+      单文件安装，不需要管理员权限，数据留在本机。
     </p>
-<div class="hero-cta">
-<a class="btn btn-primary btn-lg" href="#download">
-<svg fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"></path></svg>
+    <div class="cta">
+      <a class="btn btn-solid btn-lg" href="#download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4.2-4.2M12 15l-4.2-4.2M5 19h14"/></svg>
         下载 Windows 版
       </a>
-<a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">查看源码</a>
-</div>
-<p class="hero-meta">v0.0.30 已发布 · 免管理员安装 · 自动就地更新 · 数据全在本地</p>
-<figure class="shot"><img src="assets/img/ui-main.png" alt="QuickDock 主界面"></figure> 
-<div class="stats reveal">
-<div class="stat"><b>0</b><span>写注册表 / 提权</span></div>
-<div class="stat"><b>本地</b><span>数据存在自己机器</span></div>
-<div class="stat"><b>&lt;50MB</b><span>安装包体积</span></div>
-<div class="stat"><b>MIT</b><span>开源免费</span></div>
-</div>
-</div>
+      <a class="btn btn-line btn-lg" href="https://github.com/parieses/quickdock" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.2c0 4.5 2.9 8.3 6.8 9.6.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.3 9.3 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7 1 .7 1.9v2.8c0 .3.2.6.7.5A10.1 10.1 0 0 0 22 12.2C22 6.6 17.5 2 12 2z"/></svg>
+        在 GitHub 上看源码
+      </a>
+    </div>
+    <ul class="facts">
+      <li><b>&lt; 50 MB</b> 安装包</li>
+      <li><b>0</b> 管理员权限</li>
+      <li><b>28</b> 种运行时</li>
+      <li><b>MIT</b> 开源</li>
+    </ul>
+
+    <figure class="shot">
+      <div class="shot-inner">
+        <img src="assets/img/ui-main.png" alt="QuickDock 主界面：左侧导航、中间集合、右侧项目" width="1063" height="740">
+      </div>
+    </figure>
+  </div>
 </section>
-<hr class="divider"/>
-<!-- ============================ WHAT'S NEW (v0.0.30) ============================ -->
-<section id="whatsnew">
-<div class="wrap">
-<div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">v0.0.30</span>
-<h2>这次更新了什么</h2>
-<p>v0.0.30 收拾的是三件"心里没底"的事：<b style="color:var(--text-1);font-weight:510">数据存在哪、AI 花了多少、误删还能不能找回来</b>。整个数据目录现在能打包搬到别的盘 —— 连同装好的运行时和环境变量一起，重启就生效；新装时也能直接挑目录。AI 助手多了用量统计，近 7 天 / 30 天花了多少、哪个模型在烧钱、缓存命中替省下多少，一眼能看明白。定时任务删错会进回收站，能恢复。AI 回答也终于"能看"了：公式、流程图、代码高亮都渲染出来，表格能排序导出，图和公式右键就能复制成图片贴给别人。剪贴板修掉了「图片」「文件」标签点了没反应的老毛病，分类也不再只认最近那一千条。</p>
-</div>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">数据目录搬家</span><span>换盘不用重装：整个数据目录（数据库、剪贴板图片、插件、日志、便携运行时）一次性搬到新位置，环境变量跟着改写，重启即生效。新装时安装器也会问一次放哪。</span></div>
-<div class="tbl-row"><span class="k">AI 花了多少钱</span><span>「设置 → AI」新增用量统计：近 7 天 / 30 天 / 全部的花费估算、问答次数、Token、每日趋势，按模型与按入口拆开看，缓存命中省下的单独标出。<b>这是估算不是账单</b>，按内置单价线性算，以服务商结算为准。</span></div>
-<div class="tbl-row"><span class="k">回答里的公式和图</span><span>LaTeX 公式、Mermaid 流程图、代码高亮都能正常渲染，配色跟主题走；流程图可折叠、可切换看源码；宽表格能横向滚、点表头排序、导出 CSV。</span></div>
-<div class="tbl-row"><span class="k">图和代码能直接拿走</span><span>公式、流程图、代码块右键「复制为图片」，PNG 直进剪贴板（2 倍图）；流程图还能下载 PNG / SVG。HTML 代码块多一个「预览」，在全屏沙箱里跑，拿不到宿主的东西。</span></div>
-<div class="tbl-row"><span class="k">点外链不再顶掉界面</span><span>AI 回答、笔记预览、插件窗口里的链接一律交给系统浏览器打开。以前在应用里点一下，整个主界面就被导航走了，连后退都没有。</span></div>
-<div class="tbl-row"><span class="k">切页面不中断 AI</span><span>AI 在后台继续生成，去监控、SSH、笔记逛一圈回来，回答还在往下写；侧栏 AI 那条带状态点，生成中会呼吸，答完了没看是实心点。</span></div>
-<div class="tbl-row"><span class="k">剪贴板筛选修好了</span><span>「图片」「文件」现在是独立的整类标签，点了就能筛出来（以前一律被当成"文本"处理，永远是空列表）；网址 / 邮箱 / 电话 / JSON / 代码这些分类改成入库时就分好，能翻到全部历史。</span></div>
-<div class="tbl-row"><span class="k">命令面板能搜待办</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd> 输入待办标题就出现「待办」区，回车直接跳到那一条所在日期并高亮，顺手就能标记完成。</span></div>
-<div class="tbl-row"><span class="k">大列表、长日志不卡</span><span>集合条目过了 100 条改虚拟滚动，只渲染看得见的行；日志最多渲染 5000 行，超了会提示用搜索 / 筛选缩小范围，而不是越滚越卡。</span></div>
-</div>
-</div>
+
+<!-- ============================ 01 界面 ============================ -->
+<section id="ui">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">01</div>
+      <div>
+        <h2>三栏，装下一天的工作</h2>
+        <p class="sec-sub">左边导航，中间集合，右边项目。资源树是四级结构，项目可以是目录、文件、网页、命令、应用，或者带参数的快捷方式。</p>
+      </div>
+    </div>
+
+    <div class="rows">
+      <article class="row rise">
+        <div class="row-copy">
+          <div>
+            <span class="row-tag">资源</span>
+            <h3>资源摆在哪，按你的习惯来</h3>
+            <p>工作空间隔离不同项目的上下文，场景是同一份资源的不同切面，集合按用途分组。任何一层都能拖拽排序。</p>
+          </div>
+          <ul>
+            <li>四级结构：工作空间 → 场景 → 集合 → 项目</li>
+            <li>FTS5 全文搜索，中文和英文都能命中</li>
+            <li>命令与网址支持 <code>{date}</code> <code>{time}</code> <code>{clipboard}</code> 变量，打开时展开</li>
+          </ul>
+        </div>
+        <div class="row-shot">
+          <img src="assets/img/ui-main.png" alt="主界面：导航、集合、项目三栏" width="1063" height="740" loading="lazy">
+        </div>
+      </article>
+
+      <article class="row rise">
+        <div class="row-copy">
+          <div>
+            <span class="row-tag">环境</span>
+            <h3>28 种运行时，装在用户目录里</h3>
+            <p>语言、数据库、中间件、网络服务、开发工具，版本想装几个装几个。切换只改一个环境变量，不写注册表，不动系统 PATH。</p>
+          </div>
+          <ul>
+            <li>安装进度逐行推送，下载源可切换、多源回退</li>
+            <li>Nginx、Apache、Caddy 启动前自动跑 <code>*-t</code> 校验</li>
+            <li>服务日志、Web 控制台、端口总览在同一页</li>
+          </ul>
+        </div>
+        <div class="row-shot">
+          <img src="assets/img/ui-env.png" alt="环境管理：运行时分组与版本列表" width="1063" height="740" loading="lazy">
+        </div>
+      </article>
+
+      <article class="row rise" id="plugins">
+        <div class="row-copy">
+          <div>
+            <span class="row-tag">插件</span>
+            <h3>插件跑在沙箱里，权限写在清单上</h3>
+            <p>三种运行时：纯前端、内嵌 JS 沙箱、独立子进程。用到哪些能力就在 <code>plugin.json</code> 里声明，没声明的一律拒绝。</p>
+          </div>
+          <ul>
+            <li>34 个 Host API，涵盖文件、网络、剪贴板、进程、加解密</li>
+            <li>原生插件在安装期做静态审计，声明与实际调用不一致就告警</li>
+            <li>官方插件在在线市场里安装和升级</li>
+          </ul>
+        </div>
+        <div class="row-shot">
+          <img src="assets/img/ui-plugins.png" alt="插件市场：分类、搜索、已安装标记" width="1063" height="740" loading="lazy">
+        </div>
+      </article>
+    </div>
+  </div>
 </section>
-<hr class="divider"/>
-<!-- ============================ CHANGELOG ============================ -->
-<section id="changelog">
-<div class="wrap">
-<div class="section-head reveal">
-<span class="eyebrow">更新日志</span>
-<h2>每个版本改了什么</h2>
-<p>按发布时间倒序，最新的在最上面。点任意一条展开细节。</p>
-</div>
-<div class="logs reveal">
-<details class="log" open="">
-<summary><span class="log-ver">v0.0.30</span><span class="log-date">2026-10-28</span><span class="tag tag-low log-new">最新</span></summary>
-<ul class="log-body">
-<li>数据目录搬家：在「设置 → 存储与同步」改存储位置，整个数据目录打包搬到新盘 —— 数据库、剪贴板图片、插件、日志、便携运行时、模块缓存全在内，搬完不需要重新下载任何运行时。选盘符根目录会自动落到 <code>D:\.quickdock</code>，界面回显「实际将迁移到」；指向旧目录的环境变量（<code>PATH</code> / <code>GOROOT</code> / <code>GOPATH</code> 等）一并改写，已开着的终端要重开才认。全程有阶段与文件数进度，半路失败旧目录始终完好，可重试。</li>
-<li>迁移的收尾要重启：数据库文件正被程序独占、搬不动，所以先导一份一致的快照，重启时才落到新位置；旧目录也是重启后才删。也就是说从迁完到重启这段时间，两个目录一起占空间，目标盘记得留出「压缩包 + 解压后」的峰值余量。</li>
-<li>安装时可选数据目录：安装器多一页「选择数据目录」，只在新装时出现（覆盖升级不会重置你选过的位置）；卸载只删程序，不碰数据。</li>
-<li>AI 用量统计：设置 → AI 新增「用量统计」，近 7 天 / 30 天 / 全部的花费估算、问答次数、Token、对话数、每日柱状图，按模型与按来源（对话 / 面板与插件 / 标题生成 / 摘要压缩）拆开看；输入缓存命中省下的部分单独标注。记账覆盖所有入口：对话页、SSH 侧栏、剪贴板与笔记的「问 AI」、插件调用、自动起标题、长对话压缩。口径写在卡片上：<b>按内置单价线性估算，不是账单</b>，缓存折扣、批量优惠、阶梯计价都没算；价目表里没有的模型按 0 计并单独提示。老版本只存了会话累计 token，升级后会折算成一条「历史折算」记录，总额不丢，但还原不出当时的分布。</li>
-<li>AI 回答渲染：支持 LaTeX 公式（KaTeX，<code>\(..\)</code> / <code>\[..\]</code> / <code>$..$</code> / <code>$$..$$</code> / 裸 <code>\begin{}</code>，流式生成中公式还没写完时先显示原文，写完即刻）、Mermaid 流程图（结束后画成跟随主题的 SVG，可折叠、可切源码，画不出来就保留源码，不弹报错）；代码块接入语法高亮，明暗两套配色跟主题走。SSH 侧栏与笔记预览里的公式也一起能看了。</li>
-<li>表格处理：太宽的表格可以横向滚，点表头排序，还能导出 CSV。</li>
-<li>图与代码能直接拿走：公式、流程图、代码块右键「复制为图片」，PNG 直进剪贴板（2 倍图，矢量按序列化、公式走 foreignObject），流程图另可下载 PNG / SVG；<code>html</code> 代码块工具栏多一个「预览」，在全屏沙箱 iframe 里运行，拿不到宿主的东西。</li>
-<li>外链交给系统浏览器：AI 回答、笔记预览、独立插件窗口里的 http(s) 链接统一用默认浏览器打开，不再把主界面整页导航走（以前只能重启应用）。环境页的 HTTP 服务「打开」和各类控制台入口同样处理。</li>
-<li>切页面不再中断 AI：AI、监控、SSH、笔记、插件管理页切走再回来不重新加载，SSH 终端、监控轮询、笔记编辑态都保留，AI 流在后台继续生成；侧栏 AI 项带状态点（生成中呼吸、答完未读是实心），侧栏收起时也能看见。</li>
-<li>「AI 回答完成」的通知判定改准了：只有窗口隐藏 / 最小化、或你停在别的页面时才推；正盯着 AI 页就不打扰。README 与文档里的旧说法一并改掉。</li>
-<li>剪贴板「图片」「文件」筛选修好：这两个标签以前被当成"文本"的子类，外层条件与自身判定互斥，点了永远是空列表。现在它们是与文本并列的独立整类，点了就是全部图片 / 全部文件。</li>
-<li>剪贴板智能分类改到入库时算：网址 / 邮箱 / 电话 / JSON / 代码在条目写进库时就把分类定下来，切标签查的是整个历史，不再受「最近 1000 条」限制；存量数据首次启动会自动补分类，之后启动不再重复。</li>
-<li>剪贴板被占用时能点名了：日志里会写出占着剪贴板的进程名、PID、窗口类名与标题，告一段落不用再猜是谁。遇到拿不到窗口的占用者（以 NULL 句柄打开）会明说"无法定位"，自己的窗口占用也会单独提示。界面不弹提示，只记日志。</li>
-<li>命令面板能搜待办：输入标题 / 备注 / 标签出现「待办」区，只列还没完成的顶层任务；回车不是"打开待办页"，而是直接站到那一条上（切页、跳到所在日期、必要时清掉标签过滤、目标行高亮两秒），动作菜单里还能直接「标记完成」。面板分区因此变成 14 个（12 个来源 + 最佳匹配 + 最近）。</li>
-<li>定时任务删错能找回：删除改为先进回收站（回收站里单独一类「定时任务」），可一键恢复；恢复后按当前时间重算下次运行，不会因为快照里的时间早就过了而立刻补跑一次。</li>
-<li>大列表、长日志不卡：集合条目超过 100 条改虚拟滚动，只渲染看得见的那几行（行高统一 44px，有无副标题不再有高度差）；日志最多渲染 5000 行，超出部分不再往页面里塞，顶部会提示"已渲染前 N 行，请用搜索 / 筛选缩小范围"，「复制全部」也只复制可见部分。</li>
-<li>顺手更快：侧栏角标原本三条数据源各打一次接口，现在一次拿全、统一 60 秒刷新；导航显示偏好写入合并，不再每次点击都落盘；插件页 HTML 按「插件 + 主题 + 语言」缓存，来回切页面不重复拉；监控页两项查询改为并行。剪贴板面板、代码高亮、公式、流程图都拆成按需加载，不打开就不下载。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.29</span><span class="log-date">2026-10-27</span></summary>
-<ul class="log-body">
-<li>通知中心：侧栏底部新增铃铛入口，监控状态翻转、定时任务执行结果、AI 回答完成统一收口，未读强调色角标，支持全部 / 未读过滤、单条删除、全部已读与一键清空，点击可跳回对应对象。AI 完成时若主窗口正开着且有焦点则不推送，不打扰正在看的屏幕。</li>
-<li>日志实时尾随：任意本机文件支持 <code>tail -f</code>（命令面板输入 <code>logtail</code>），打开先读末尾 N 行，之后每 500ms 增量读取；文件被轮转（新建同名）或原地截断重写时自动重新对齐读取位置；可暂停、关键字过滤高亮、清空，上限 5000 行。</li>
-<li>剪贴板自动规则：9 种清洗动作（去空白 / 删空行 / 去重行 / 行排序 / JSON 格式化与压缩 / 去 ANSI / URL 解码 / 大小写）按「全部 / 正则 / 来源窗口」条件命中后在入库前依次执行，支持试运行预览；总开关默认关闭。<b>不做脱敏</b>——不识别也不替换手机号、身份证、密钥，避免静默改写用户复制的内容。</li>
-<li>快捷键备忘单：命令面板输入 <code>cheatsheet</code> 或点「设置 → 快捷键」页头按钮打开，列出全局热键、窗口管理 15 个贴屏键与面板内操作键；内容实时读自热键设置。</li>
-<li>设置页合并：菜单从 14 项收到 11 项——剪贴板历史与自动规则合一，存储位置 / 同步 / 快照合成「存储与同步」，最近动态与回收站合成「历史」页内分段切换；旧的内部 key 全部走别名兜底，历史深链不会跳空页。</li>
-<li>快捷键设置页重排为单行列表（名称 / 键位 / 说明 / 改键 / 重置），行高与列宽对齐，重置按钮用隐藏占位保住列宽不跳动。</li>
-<li>修复 AI 对话页输入框、图片按钮与发送按钮三者高度不一致（同一高度改为单一变量控制）；修正官网与文档里快捷笔记热键写成 <code>Ctrl+Shift+N</code> 的错误（实际默认 <code>Ctrl+Alt+N</code>）。</li>
-<li>回收站：项目、集合、场景、笔记、工作空间的删除都改为先进回收站，在「设置 → 回收站」可一键恢复，级联删除的子内容与文件夹结构一并还原；没选中的删除确认文案里会提示去哪找回。</li>
-<li>界面整体统一：页头、面板头、按钮、输入框、行与空状态收敛成同一套实现，三栏顶部对齐在同一条水平线，控件高度与圆角统一，工作空间三栏重排（场景 200 / 集合 240，项目列更宽）。</li>
-<li>空状态引导：工作空间里还没有场景、或当前场景还没有集合时，用整页分步引导代替空白列表，并自动选中唯一的场景 / 集合（有多个时不替你猜）。</li>
-<li>局部过滤：集合、条目、设置各自增加就地过滤框，只筛当前这一层；设置搜索支持用 sync、ai 这类关键词命中中文界面下的设置项。</li>
-<li>活动流水筛选：可按来源（项目 / SSH / 批量执行 / 插件 / 任务）与时间（今天 / 近 7 天 / 全部）筛选，「清除」只清当前筛选结果而不是全清；最常用排行可一键重置。</li>
-<li>监控增强：支持分组归类展示，新增延迟告警阈值（抖动不再误报为宕机），新增 CSV 导出与 12 周停机热力日历。</li>
-<li>定时任务命令动作：现在会捕获命令的真实输出（成功带 stdout，失败带退出码与 stderr，超时给出已执行提示），中文输出不再乱码，结果随通知一起推送。</li>
-<li>命令面板笔记检索改走后端，不再受前端条数上限限制；顺带修掉三处列表行尾按钮「有框无图标」的显示问题与侧栏按钮嵌套告警。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.28</span><span class="log-date">2026-10-26</span></summary>
-<ul class="log-body">
-<li>定时任务执行历史：新增 schedule_runs 历史表，记录每条任务每次执行的时间、状态、耗时与结果；前端每个任务卡新增「运行历史」入口查看最近记录，保留最近 100 条 / 30 天自动清理，避免无限增长。</li>
-<li>机器人通知 MCP 方法：MCP 服务暴露 robot_notify 工具，前提是已在「设置 → 通知」配置过机器人（未配置返回明确错误）；支持指定渠道或全部已配置渠道发送。</li>
-<li>定时任务结果推送机器人：定时任务（自动到点与手动「立即运行」）执行后，把执行结果与耗时推送至已配置的机器人通知，失败原因一并带出；自动与手动两条路径共用同一发送逻辑，行为一致。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.27</span><span class="log-date">2026-10-24</span></summary>
-<ul class="log-body">
-<li>新增全屏截图：命令面板「全屏截图」一键抓取整个虚拟桌面（含多显示器），不再局限于选区截图。</li>
-<li>插件支持拖拽安装：插件页面直接把 .zip 拖入窗口即安装，省去「安装插件」菜单的翻找；拖入时高亮提示，失败就地报错。</li>
-<li>SFTP 文件「属性」：远程文件右键「属性」查看名称、路径、类型、大小、权限（rwx 形式）与修改时间。</li>
-<li>SSH 单主机详情：主机树右键「详情」查看端口、用户、认证方式、密钥、跳板、标签与备注，并可就地进入编辑。</li>
-<li>命令面板「重建应用索引」：搜不到刚安装的软件时点一下即时重建本地应用索引，无需重启应用。</li>
-<li>设置 → 导航：导航项可隐藏 / 显示、拖拽排序、把隐藏项收进「已隐藏」折叠组随时恢复，顺序与可见性本地保存并自动自净。</li>
-<li>通用角标机制：监控掉线（红，90s）、今日逾期待办（橙）、应用崩溃（红）、可更新插件（蓝）在对应导航项上显示数量角标，打开相关页面即视为已读、数字收敛。</li>
-<li>日志占用可视化与清理：设置 → 日志侧栏展示总占用、文件数与占比条，支持按天一键清理释放空间。</li>
-<li>截图 GDI 资源修复：截图结果使用的位图显式释放，避免每次截图泄漏显存；日志跟随改为增量读取，大日志下 CPU / IO 明显下降。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.26</span><span class="log-date">2026-10-23</span></summary>
-<ul class="log-body">
-<li>主界面三栏重排：场景从左侧导航中拆出独立成栏，顺序为「导航 / 场景 / 集合 / 项目」，场景自带滚动，不再与导航抢竖向空间。</li>
-<li>「设置」回归侧栏最底部的独立入口（此前一度并入导航列表末尾）；导航区改为可内部滚动，导航项再多底部按钮也始终可见。</li>
-<li>新增「最近动态」（设置 → 最近动态）：左栏使用热度榜，按打开次数列出最常用的项目与场景；右栏操作时间线，覆盖项目打开、SSH 连接、插件执行、定时任务执行，90 秒内同对象去重，最多保留 800 条。</li>
-<li>设置 → 日志支持查看崩溃记录：侧栏列出前端与 Go 崩溃现场，正文统一带上现场时间并按类型染色，顶部 meta 卡片显示时间 / 类型 / 组件名，可逐条查看堆栈或一键清空。</li>
-<li>崩溃上报抓取组件名：Vue 错误处理器从实例取出组件名并入标签，下次崩溃现场能直接定位到是哪个组件出的问题。</li>
-<li>日志查看器排版重做：时间与级别改为三段栅格对齐，修复警告行不着色、时间戳高亮破坏对齐、长行换行截断标识符等问题。</li>
-<li>SSH 多主机批量执行：分组上「批量执行…」勾选主机，先预演（只读，列出每台将执行的命令与风险等级）再执行，逐台回传输出与退出码，可中途取消；生产环境执行需二次确认，高危命令仍只给「填入」。</li>
-<li>SFTP 文件管理增强：远程目录浏览、上传下载之外，可直接编辑远程文件并保存。</li>
-<li>修复启动崩溃：数据库索引建在补列之前，老库升级时报告 <code>no such column: created_ts</code>；索引改为在补列之后执行，并补上迁移测试。</li>
-<li>启动失败不再静默：日志同时输出到控制台；正式版没有控制台时改为弹窗提示，并给出日志所在目录。</li>
-<li>界面整体放大 1.15 倍：主窗口与剪贴板 / 笔记 / 命令面板 / 窗口管理 / SSH / 插件窗口统一缩放（单一常量控制），文字、图标、间距一起放大而布局比例不变。</li>
-<li>插件窗口改为按插件清单声明的尺寸开窗（此前一律 800×600），数据库客户端等复杂插件不再被挤；未声明尺寸的插件仍用通用尺寸，最小尺寸同步放大且不会超过窗口本身。</li>
-<li>修复在线市场在放大后一行放不下三个卡片：网格列被不可断行的长插件 ID 顶宽，第三张卡被横向裁掉。</li>
-<li>重新生成前端 bindings，移除 <code>AIAskStream</code> 的告警（该方法入参是函数类型，生成的绑定实际无法调用，已退出绑定面）。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.25</span><span class="log-date">2026-10-23</span></summary>
-<ul class="log-body">
-<li>AI 对话支持图片理解：发送本地图片或图片链接，AI 看图回答；缩略图可点击全屏放大查看细节。档案可配置图片输入方式（公网链接 / 本地图片 / 两者），按模型能力灵活适配。</li>
-<li>剪贴板历史条目「问 AI」：文本条目上点「问 AI」，翻译 / 摘要 / 格式化或自由追问，就地弹层流式给答案，内容不进入 AI 对话历史。</li>
-<li>笔记浮窗内嵌 AI 面板：总结 / 润色 / 续写 / 翻译，划选就只送选中的那段；关掉面板回到原文。</li>
-<li>插件可调用宿主 AI 能力（host.ai.ask）：复用用户已配档案、凭据不出后端，带 streamId 即流式，三种运行时各有增量通道；宿主 Host API 扩展至 34 个。</li>
-<li>SSH 远程终端 AI 运维助手：侧栏提问可带上当前屏显并标注主机环境（生产 / 预发 / 测试），选中输出右键即问，命令一键填入 / 执行，高危命令只给填入、生产环境二次确认。</li>
-<li>命令解析支持模型以 shell 提示符风格（<code>$ </code> / <code># </code>）书写的命令，正确剥离前缀、不误吞注释。</li>
-<li>环境管理与运行时能力增强：本地文件搜索、嵌入式 Python 运行时、命令面板与设置细节同步优化；MCP 服务与插件桥接同步增强。</li>
-<li>AI 设置支持「拉取模型列表」：填好 BaseURL 与 API Key 后一键从接口取回可用模型，选中即填；素材未保存也能拉，Key 明文不出后端。</li>
-<li>SSH 终端 AI 侧栏：屏显改为按需附带——问题里提到「屏显」才把当前屏幕发给模型，不再每轮都发；屏显与选中输出也不再被默认当成报错，正常输出 / 命令结果 / 程序界面都会如实说明。</li>
-<li>SSH 终端 AI 多轮对话增加历史摘要压缩：更早的轮次自动压成摘要继续沿用，长对话不再越问越卡；「思考中」时发送键变为停止键，可随时退出等待（同时修复转圈图标不旋转）。</li>
-<li>剪贴板监听补上自愈与可观测：除系统通知外按剪贴板序号兜底巡检，漏一次通知也能补抓；捕获卡住或被长期占用会写进日志。</li>
-<li>全应用「复制」统一走后端直写系统剪贴板，修复部分窗口下「点了复制没反应」；插件桥接的复制失败改为返回失败结果，插件可自行重试或提示。</li>
-<li>命令面板事件注销改为句柄式，避免关闭面板时连带移除剪贴板面板的刷新监听。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.24</span><span class="log-date">2026-10-22</span></summary>
-<ul class="log-body">
-<li>修复远程终端断开连接时界面卡死（死锁），重连、关闭窗口、切换标签恢复顺滑响应。</li>
-<li>修复插件通信在插件不读取输入时的写入死锁与进程崩溃，长时间运行的插件更稳定。</li>
-<li>修复退出应用时后台任务（定时任务 / 网站监控 / 提醒）执行结果被静默丢弃，现退出前等待其完成。</li>
-<li>修复截图热键偶发无响应（提前返回未通知调用方导致永久挂起）。</li>
-<li>修复后台日志超过 20MB 后单文件只增不减、每条日志重复开关文件，改为按体积自动滚动。</li>
-<li>修复剪贴板监听线程在窗口尚未就绪时停止导致线程永久泄漏。</li>
-<li>前端统一界面配色 token、补齐 50 余处缺失的错误处理；后端 service 方法统一返回 ApiResult，便于前端一致处理成功与失败。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.23</span><span class="log-date">2026-10-21</span></summary>
-<ul class="log-body">
-<li>新增 SSH 远程终端：Ctrl+Alt+S 唤起独立窗口，多标签页并行会话，切换标签或最小化都不打断已建立的连接。</li>
-<li>服务器集中管理：树状分组、拖拽调整层级，可标注生产 / 预发 / 测试环境。</li>
-<li>支持密码与私钥（含口令）两种认证方式，密码可存可清；保存前可先测试连接并看到耗时。</li>
-<li>首次连接展示服务器指纹供人工核对；主机密钥变更时额外告警——服务器重装与连接被劫持在技术上都表现为密钥变化，QuickDock 不替你猜，把决定权交给用户。</li>
-<li>为兼容 OpenSSH 7.0 之前的老设备与老网络设备，可单独开启 ssh-rsa / SHA-1 通道（会降低算法强度，默认关闭）。</li>
-<li>终端内集成 SFTP：直接浏览远程目录，拖拽上传下载，不必另开 FTP 客户端。</li>
-<li>连接池按主机维度复用已建立的连接，重复操作不再反复握手；会话与窗口生命周期解耦。</li>
-<li>插件权限模型上线：每个插件能做什么（读文件 / 联网 / 执行程序 / 结束进程）在安装前清晰列出，未声明的能力一律不可用。</li>
-<li>高危能力默认关闭：执行程序、结束进程这类操作需插件显式申请、你明确允许后才生效。</li>
-<li>安装插件时会核对其声明与实际行为是否一致，发现越权会告警提示，让你知道插件到底要干什么。</li>
-<li>文档更新：README 与首次使用教程补齐 SSH 远程终端的使用引导（主机管理、指纹核对、SFTP 传文件）。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.22</span><span class="log-date">2026-10-19</span></summary>
-<ul class="log-body">
-<li>修复 DeepSeek Harness 启动即闪退：日志读取函数误写成递归调用自身，触发栈溢出后宿主进程直接退出（该致命错误无法被捕获），现已恢复正常打开。</li>
-<li>截图抓屏不再把整屏像素复制一份，改为直接使用抓到的画面；4K / 双屏这类大桌面下，按下热键后的等待明显缩短，首次截图尤其明显。</li>
-<li>截图首帧不再重复搬运一次整屏像素：暗化结果一次写到位，遮罩出现更快。</li>
-<li>长时间待机后截图依然跟手：暗化底图与绘制缓冲常驻内存，不会被系统回收后重新加载；内存吃紧时可用环境变量 QD_SHOT_NOLOCK=1 关闭该行为。</li>
-<li>截图框选改为脏矩形重绘：每帧只还原、只提交发生变化的区域，不再整屏重画，分辨率越高收益越明显。</li>
-<li>截图暗化合成与绘制资源改为跨会话复用，分辨率不变时不再重复申请内存；按键连拍多张更顺。</li>
-<li>截图复制到剪贴板改走 DIB 直写，省掉一次全图像素格式转换（1080p 约 13ms），复制大选区不再明显等待。</li>
-<li>新增截图启动耗时日志：抓屏与逐帧渲染分开记录，便于定位「按下热键后卡一下」发生在哪一段。</li>
-<li>错误记录带上出错位置（文件与行号）：以往日志只有一句错误文本，几百处调用无法判断是谁报的错，现在一眼能定位到具体功能。</li>
-<li>退出过程分阶段计时：插件、本地服务、调度器与数据库各自耗时都记下来，退出卡住或残留进程时能看出卡在哪一步；此前这条链路完全没有记录。</li>
-<li>AI 对话补上请求与结果记录：模型、消息数、首字延迟、总耗时、token 用量，失败时附上游状态码与响应摘要（只记元数据，不记对话正文）；定时任务与通知推送同样补上执行结果与失败原因。</li>
-<li>清理高频冗余日志：剪贴板每次写入、环境版本探测、浮窗定位失败等刷屏记录已收敛，其中剪贴板图像诊断改为设置 QUICKDOCK_LOG_CLIPBOARD=1 才输出；日志文件更清爽，出问题时更容易翻到关键信息。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.21</span><span class="log-date">2026-10-19</span></summary>
-<ul class="log-body">
-<li>重构插件进程管理逻辑，修复空指针并优化卸载清理流程。</li>
-<li>插件支持在 plugin.json 里声明 backend.timeout，慢接口不再被宿主误判为响应超时。</li>
-<li>环境管理新增 Go 环境变量（go env）配置与自定义数据目录；Git 版本管理修复，SSH 私钥探测不再只认固定文件名。</li>
-<li>命令面板的应用列表改为按来源目录变化自动刷新，装完新软件直接 Ctrl+K 就能搜到，不必重启。</li>
-<li>修复快捷笔记「问 AI」与面板搜笔记会把完整主界面渲染进小浮窗的问题，跨窗口跳转改由后端统一调度。</li>
-<li>修复笔记树读取时类型标记恒为 false、新建笔记挂错父节点后看不见，以及 MCP 更新笔记只改正文会清空标签的问题。</li>
-<li>仓库新增 .gitattributes 统一 LF 行尾，跨平台协作不再出现整文件行尾翻滚。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.20</span><span class="log-date">2026-10-10</span></summary>
-<ul class="log-body">
-<li>插件新增显式禁用状态，区分「用户主动禁用」与「进程意外停止」。</li>
-<li>健康检查重构为闲置降级循环：闲置插件自动释放后端资源，不占着内存不放。</li>
-<li>插件改用独立窗口，关闭窗口不再连带终止后端进程，首屏加载更快。</li>
-<li>托盘新增插件强制关闭入口；热键注册失败时前端给出明确提示。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.19</span><span class="log-date">2026-10-08</span></summary>
-<ul class="log-body">
-<li>插件市场新增安装状态筛选，已装 / 未装 / 可更新一眼分开。</li>
-<li>插件图标支持主题适配，切换明暗主题时自动加载对应变体。</li>
-<li>修复禁用插件从管理页消失、站点路径含空格解析出错、定时任务重复执行等问题。</li>
-<li>数据库只读查询改用读锁，并拆分图标提取与持久化，降低并发阻塞。</li>
-<li>修复 Windows 发布流程的路径与编码问题，构建不再卡在 CI。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.18</span><span class="log-date">2026-09-23</span></summary>
-<ul class="log-body">
-<li>插件图标支持按主题切换，命令面板与管理页在明暗主题下都能显示正确图标。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.17</span><span class="log-date">2026-09-22</span></summary>
-<ul class="log-body">
-<li>插件改为按需加载，窗口关闭立即释放，启动更快、内存占用更低。</li>
-<li>插件可通过宿主调用系统打印，本地文件与报表一键出纸。</li>
-<li>自动更新体验优化，修复 Windows 控制台闪屏；新增方括号热键，可在多显示器之间搬运窗口。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.16</span><span class="log-date">2026-09-21</span></summary>
-<ul class="log-body">
-<li>新增窗口管理：15 个贴屏热键，加 Ctrl+Alt+W 九宫格排版浮层，一次点击排好整屏。</li>
-<li>搜索支持拼音匹配中文，敲缩写就能找到中文条目。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.15</span><span class="log-date">2026-09-20</span></summary>
-<ul class="log-body">
-<li>AI 助手新增「使用教程」对话模式，边问边学不用翻文档。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.14</span><span class="log-date">2026-09-20</span></summary>
-<ul class="log-body">
-<li>截图新增区域截图，配套智能吸附、贴图钉屏与导出。</li>
-<li>插件市场支持展示更新日志，详情弹窗重做样式。</li>
-<li>插件列表按更新时间排序；卸载插件时清理关联的使用记录与执行日志。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.13</span><span class="log-date">2026-09-20</span></summary>
-<ul class="log-body">
-<li>启动速度优化，mkcert 证书可复用，不再重复签发。</li>
-<li>托盘新增服务启停菜单，前端样式统一。</li>
-<li>插件宿主新增临时窗口显隐 API，供取色类插件使用。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.12</span><span class="log-date">2026-09-18</span></summary>
-<ul class="log-body">
-<li>新增 WebView2 渲染进程自愈看门狗，界面卡死能自动恢复。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.11</span><span class="log-date">2026-09-17</span></summary>
-<ul class="log-body">
-<li>支持单版本运行时管理，重写 Git / gh / frpc / Ollama 的安装逻辑。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.10</span><span class="log-date">2026-09-17</span></summary>
-<ul class="log-body">
-<li>新增 JDK 支持与应用内重启，多项交互体验优化。</li>
-<li>环境服务退出时统一清理，不再留下孤儿进程。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.9</span><span class="log-date">2026-09-17</span></summary>
-<ul class="log-body">
-<li>移除 macOS 支持，发布流程只保留 Windows。</li>
-<li>优化 Windows 控制台隐藏的内存占用与启动速度。</li>
-</ul>
-</details>
-<details class="log">
-<summary><span class="log-ver">v0.0.8</span><span class="log-date">2026-09-16</span></summary>
-<ul class="log-body">
-<li>插件状态机优化，实现懒加载并更新前端展示。</li>
-<li>重构本地站点系统，添加编译期接口安全校验。</li>
-<li>插件日志跳过后缀为 -status 的命令输出，避免日志刷屏。</li>
-</ul>
-</details>
-</div>
-<p class="logs-more">更早的 v0.0.1–v0.0.7 是核心架构的搭建期，完整提交记录见 <a href="https://github.com/parieses/quickdock/commits/main" rel="noopener" target="_blank">GitHub</a>。</p>
-</div>
+
+<!-- ============================ 02 工具 ============================ -->
+<section id="tools">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">02</div>
+      <div>
+        <h2>顺手带的十几个工具</h2>
+        <p class="sec-sub">单独拿出来都不算稀奇，但都在同一个窗口、共用同一套快捷键时，就不用为了截个图或者看一眼日志再开一个应用。</p>
+      </div>
+    </div>
+
+    <dl class="tools rise">
+      <div class="tool">
+        <dt>命令面板 <kbd>Ctrl K</kbd></dt>
+        <dd>项目、笔记、待办、应用、文件、插件命令一起搜，结果按来源分区。粘贴网址会问要不要存成项目。</dd>
+      </div>
+      <div class="tool">
+        <dt>剪贴板历史 <kbd>Ctrl `</kbd></dt>
+        <dd>文本、图片、文件都记账。图片和文件是独立类型，网址、邮箱、JSON、代码在入库时分类，能翻到全部历史。</dd>
+      </div>
+      <div class="tool">
+        <dt>截图 <kbd>F1</kbd></dt>
+        <dd>原生分层窗口做覆盖层，框选、标注、复制、贴图都在同一层里完成，不打开第二个窗口。</dd>
+      </div>
+      <div class="tool">
+        <dt>窗口排版 <kbd>Ctrl Alt W</kbd></dt>
+        <dd>15 个贴屏热键加九宫格浮层，点一格排一次。不占用 Win 加方向键。</dd>
+      </div>
+      <div class="tool">
+        <dt>快捷笔记 <kbd>Ctrl Alt N</kbd></dt>
+        <dd>树形 Markdown 笔记库，自动保存，失焦自动隐藏。浮窗里可以直接问 AI。</dd>
+      </div>
+      <div class="tool">
+        <dt>待办</dt>
+        <dd>列表与看板两种视图，子任务、标签、重复规则、到期提醒，附带番茄专注计时。</dd>
+      </div>
+      <div class="tool">
+        <dt>网站监控</dt>
+        <dd>状态码、响应时间、SSL 到期、关键字匹配。状态翻转时推送到桌面或 Webhook。</dd>
+      </div>
+      <div class="tool">
+        <dt>定时任务</dt>
+        <dd>打开软件、目录、网页，执行命令，发 HTTP 请求。一次性、间隔、每天、每周四种调度。</dd>
+      </div>
+      <div class="tool">
+        <dt>SSH 终端 <kbd>Ctrl Alt S</kbd></dt>
+        <dd>多标签会话、SFTP 文件管理、指纹信任、多主机批量执行。终端右侧可以挂 AI 侧栏。</dd>
+      </div>
+      <div class="tool">
+        <dt>日志尾随</dt>
+        <dd><code>tail -f</code> 任意本机文件。文件被轮转或原地重写时自动重新对齐，可暂停、可过滤高亮。</dd>
+      </div>
+      <div class="tool">
+        <dt>通知中心</dt>
+        <dd>监控掉线、定时任务结果、AI 回答完成收在一个铃铛里。点通知能跳回对应的监控或那次对话。</dd>
+      </div>
+      <div class="tool">
+        <dt>数据目录搬家</dt>
+        <dd>把整个数据目录连同装好的运行时搬到别的盘，环境变量一起改写。C 盘不够用的时候有用。</dd>
+      </div>
+      <div class="tool">
+        <dt>本地开发站点</dt>
+        <dd>给项目绑自定义域名并自动签发 HTTPS 证书，自身不监听端口。</dd>
+      </div>
+      <div class="tool">
+        <dt>WebDAV 同步</dt>
+        <dd>全量 JSON 导出与恢复，多版本快照，可以指向任意 WebDAV 服务器。</dd>
+      </div>
+    </dl>
+  </div>
 </section>
-<hr class="divider"/>
-<!-- ============================ FEATURES ============================ -->
-<section id="features">
-<div class="wrap">
-<div class="section-head reveal">
-<span class="eyebrow">核心能力</span>
-<h2>每天要点的那几十下，收进一个面板</h2>
-<p>项目、目录、命令、网址、剪贴板、笔记、待办……不用再在开始菜单和文件夹之间来回横跳。</p>
-</div>
-<div class="grid-3">
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg></div>
-<h3>命令面板</h3>
-<p>一个 <kbd>Ctrl</kbd>+<kbd>K</kbd> 搜遍全部资源，FTS5 全文索引，键盘直达不用摸鼠标。结果不是一长条混在一起，而是<b style="color:var(--text-1);font-weight:510">按来源分成十几个区</b>，每区带标题和计数。</p>
-<ul><li>项目 / 快速链接 / 笔记 / 应用程序 / 文件 / 插件命令 / 环境服务 / 系统命令各成一区</li><li>另有计算器与网页：直接算、直接开网址</li><li>最佳匹配排在前面，空着没输入时显示最近使用</li><li>多选批量操作、最近与最常使用排序（frecency）</li><li>粘贴 URL 自动识别并建档</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg></div>
-<h3>工作空间与场景</h3>
-<p>工作空间 → 场景 → 集合 → 项目四层结构，按项目上下文隔离，切换关注点只在一瞬。</p>
-<ul><li>6 种项目类型：目录 / 文件 / 网址 / 命令 / 应用 / 快链</li><li>四种打开策略，全层级拖拽排序</li><li>场景支持图标、颜色与标签</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="16" rx="2" width="12" x="6" y="4"></rect><path d="M10 4V3a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1"></path></svg></div>
-<h3>剪贴板历史</h3>
-<p>文本、图片、文件全记录，浮动窗口失焦即隐，<kbd>Ctrl</kbd>+<kbd>`</kbd> 一键唤出。</p>
-<ul><li>固定 / 搜索 / 批量删除</li><li>按类型筛：图片、文件、网址、邮箱、电话、JSON、代码各自成标签，查的是全部历史</li><li>按天数自动清理过期内容</li><li>条目上直接「问 AI」</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h2l1.5-2h5L16 6h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"></path><circle cx="12" cy="12.5" r="3.5"></circle></svg></div>
-<h3>截图与标注</h3>
-<p><kbd>F1</kbd> 唤起全屏覆盖层，框选松手即在原地浮出工具条，矩形、椭圆、箭头、直线、文字、马赛克随手标注，全程零闪。</p>
-<ul><li>窗口 / 元素智能吸附，单击选中整个窗口</li><li>贴图钉屏、导出 PNG、直入剪贴板</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="16" rx="2" width="18" x="3" y="4"></rect><path d="M12 4v16M3 12h18"></path></svg></div>
-<h3>窗口管理</h3>
-<p>15 个贴屏热键，加 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 排版浮层：点布局里任意一块，当前窗口就位，其余格子自动用本屏其他窗口填上。</p>
-<ul><li>9 种排版模板：左右对半 / 主次分栏 / 四象限 / 九宫格…</li><li>多显示器搬运、左 / 右分屏比例可调</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"></path><path d="M14 4v5h5M8 13h8M8 17h5"></path></svg></div>
-<h3>树形笔记库</h3>
-<p><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> 唤起浮动笔记，文件夹 + Markdown 多层级组织，500ms 防抖自动保存。</p>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m4 12 4 4L20 6"></path><path d="M4 19h16"></path></svg></div>
-<h3>待办与番茄专注</h3>
-<p>列表 + 看板双视图，子任务、标签、重复规则与到期提醒齐全，专注结束还能推 Webhook。</p>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M3 17l5-6 4 4 5-7 4 5"></path><path d="M3 21h18"></path></svg></div>
-<h3>网站监控</h3>
-<p>定时探测状态码与响应时间，SSL 到期预警、关键字匹配、在线率统计，异常走桌面通知和 Webhook。</p>
-<ul><li>钉钉 / 企微 / 飞书 / Server酱 / PushPlus / Telegram</li><li>24h / 7d / 全部 响应趋势</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M12 3l1.9 4.6L18.5 9.5 13.9 11.4 12 16l-1.9-4.6L5.5 9.5l4.6-1.9z"></path><path d="M18 16l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"></path></svg></div>
-<h3>剪贴板与笔记里的 AI</h3>
-<p>看到一段英文、一堆日志、一份 JSON，直接在条目上点<b>「问 AI」</b>——翻译、摘要、格式化或者随便问，就地弹层给答案，不用切到 AI 页再粘贴一遍。笔记浮窗里同理：总结、润色、续写、翻译，关掉面板就回到原文。</p>
-<ul><li>回答默认流式，等长答案时能边生成边读</li><li>标题旁显示当前用的哪个 AI 档案</li><li>内容不落进 AI 对话历史</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="13" rx="2" width="16" x="4" y="5"></rect><circle cx="9" cy="10" r="1.6"></circle><path d="m5 17 4-4 3 3 3-4 4 5"></path></svg></div>
-<h3>AI 图片理解</h3>
-<p>在 AI 对话里贴图、选文件或拖入图片，直接问「这张图讲了什么」「这段代码什么意思」。支持公网图片链接与本地图片，缩略图点开可全屏放大。</p>
-<ul><li>按模型能力选输入方式</li><li>缩略图可全屏放大</li><li>历史消息里的图也能回看</li></ul>
-</article>
-<article class="card card-wide reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"></path><circle cx="12" cy="12" r="9"></circle></svg></div>
-<h3>AI 助手 &amp; DeepSeek Harness</h3>
-<p>内置多档案 AI 助手（OpenAI / DeepSeek / Kimi / 通义 / Ollama / Azure / 自定义），SSE 流式输出、思考过程折叠、<b style="color:var(--text-1);font-weight:510">公式 / 流程图 / 代码高亮</b>都正常渲染，Token 用量与<b style="color:var(--text-1);font-weight:510">花费估算</b>看得见，API Key 在 Windows 下用 DPAPI 加密存储；填好地址与 Key 还能一键<b>拉取模型列表</b>，模型名不用手抄。同一份档案还供给终端侧栏、剪贴板、笔记和插件里的「问 AI」，一处配置四处可用。同时内嵌 DeepSeek Harness —— 一键装填 node + dsh 环境，原生窗口承载完整 Agent 编程入口，关窗不停服务。</p>
-</article>
-<article class="card card-wide reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m4 17 6-5-6-5"></path><path d="m12 19h8"></path></svg></div>
-<h3>SSH 远程终端</h3>
-<p><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd> 唤起独立终端窗口：多标签并行会话、同主机连接复用、断线自动重连，切换窗口或最小化都不打断连接；主机按树形分组管理，支持密码与私钥认证，首次连接先核对服务器指纹防中间人，终端内直接浏览远程目录、拖拽上传下载（SFTP）。</p>
-</article>
-<article class="card reveal">
-<h3>终端里的 AI 运维助手</h3>
-<p>终端右侧的 AI 侧栏：问题里提到 <b>「屏显」</b> 就会带上当前终端画面（不提就不发），所以在终端里看到什么就能问什么；选中一段输出后右键<b>「问 AI 这段输出」</b>即可就这一段追问。命令单独成卡支持<b>一键填入或一键执行</b>，不用再复制粘贴——但 <code>rm -rf</code> / <code>reboot</code> 这类<b>高危命令只给填入不给执行</b>，必须你亲自按回车。远程机上没有撤销键，AI 只建议，决定权始终在你。</p>
-</article>
-<article class="card card-wide reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg></div>
-<h3>通知中心</h3>
-<p>侧栏底部一个铃铛，把散落各处的「办完了」收在一处：监控掉线与恢复、定时任务执行结果、AI 回答完成，不用再去各个页面翻记录。主窗口正开着时 AI 完成<b>不推送</b>——你本来就看着屏幕，没必要打扰。</p>
-<ul><li>未读角标用强调色，红色只留给监控掉线这类真故障</li><li>点了就跳回去：直接回到那条监控 / 那个任务 / 那次对话</li><li>全部 / 未读两栏切换，可单条删、全部已读、一键清空</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="M15 12h-5"></path><path d="M15 8h-5"></path><path d="M19 17V5a2 2 0 0 0-2-2H4"></path><path d="M8 21h12a2 2 0 0 0 2-2v-1a1 1 0 0 0-1-1H11a1 1 0 0 0-1 1v1a2 2 0 1 1-4 0V5a2 2 0 1 0-4 0v2a1 1 0 0 0 1 1h3"></path></svg></div>
-<h3>日志实时尾随</h3>
-<p>命令面板输入 <code>logtail</code>，选一个正在被写入的文件，它就像 <code>tail -f</code> 一样自己往下滚 —— 只读新增的部分，不是整本重读。</p>
-<ul><li>文件被轮转或原地重写会自动重新对齐</li><li>可暂停、关键字过滤高亮、一键清空</li><li>上限 5000 行，长时间挂着不撑内存</li></ul>
-</article>
-<article class="card card-wide reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><path d="m21.64 3.64-1.28-1.28a1.21 1.21 0 0 0-1.72 0L2.36 18.64a1.21 1.21 0 0 0 0 1.72l1.28 1.28a1.2 1.2 0 0 0 1.72 0L21.64 5.36a1.2 1.2 0 0 0 0-1.72"></path><path d="m14 7 3 3"></path><path d="M5 6v4"></path><path d="M19 14v4"></path><path d="M10 2v2"></path><path d="M7 8H3"></path><path d="M21 16h-4"></path><path d="M11 3H9"></path></svg></div>
-<h3>剪贴板自动规则</h3>
-<p>复制进来的内容先自动收拾一遍再进历史：去首尾空白、删空行、重复行去重、行排序、JSON 缩进格式化或压成一行、去掉终端里的 ANSI 颜色、URL 解码、大小写转换。可以只对匹配正则或来自某个窗口的内容生效，多条规则按顺序串成流水线。</p>
-<ul><li>改之前能<b>先试运行</b>，粘一段样例文本直接看清洗结果</li><li>总开关默认关闭 —— 不希望「自动改写剪贴板」在没被知情的情况下生效</li><li><b>不做脱敏</b>：不识别也不替换手机号、身份证、密钥，不会被误判改写</li></ul>
-</article>
-<article class="card reveal">
-<div class="icon"><svg fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.7" viewBox="0 0 24 24"><rect height="16" rx="2" width="20" x="2" y="4"></rect><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"></path></svg></div>
-<h3>快捷键备忘单</h3>
-<p>命令面板输入 <code>cheatsheet</code>，一张表列出全局热键、窗口管理 15 个贴屏键与面板内操作键。内容实时读自热键设置 —— 你改过键它就跟着变，不是抄一份出厂默认值。</p>
-</article>
-</div>
-</div>
-</section>
-<hr class="divider"/>
-<!-- ============================ RUNTIME ============================ -->
+
+<!-- ============================ 03 运行时明细 ============================ -->
 <section id="runtime">
-<div class="wrap">
-<div class="section-head reveal">
-<span class="eyebrow">环境管理</span>
-<h2>运行时环境，全装在一个侧栏里</h2>
-<p>不写注册表、不申请管理员、不污染系统 PATH。多版本共存于用户目录，切换只是一点，删掉 QuickDock 就全没了。</p>
-</div>
-<div aria-label="运行时分组" class="tabs" id="rtTabs" role="tablist">
-<button aria-selected="true" class="tab" data-panel="p-lang" role="tab">语言</button>
-<button aria-selected="false" class="tab" data-panel="p-web" role="tab">网络服务</button>
-<button aria-selected="false" class="tab" data-panel="p-db" role="tab">数据库</button>
-<button aria-selected="false" class="tab" data-panel="p-mw" role="tab">中间件</button>
-<button aria-selected="false" class="tab" data-panel="p-ai" role="tab">AI 服务</button>
-<button aria-selected="false" class="tab" data-panel="p-tool" role="tab">开发工具</button>
-</div>
-<div class="panel" id="p-lang" role="tabpanel">
-<div class="chips">
-<span class="chip">Node.js <small>LTS + 近 3 年</small></span>
-<span class="chip">Go <small>全量</small></span>
-<span class="chip">PHP <small>VS16 / VS17</small></span>
-<span class="chip">Python <small>全量</small></span>
-<span class="chip">Bun <small>全量</small></span>
-<span class="chip">Erlang <small>RabbitMQ 依赖</small></span>
-<span class="chip">JDK <small>Adoptium Temurin</small></span>
-</div>
-</div>
-<div class="panel" hidden="" id="p-web" role="tabpanel">
-<div class="chips">
-<span class="chip">Nginx <small>服务型</small></span>
-<span class="chip">Caddy <small>服务型</small></span>
-<span class="chip">Apache <small>服务型</small></span>
-<span class="chip">Traefik <small>服务型</small></span>
-<span class="chip">FTP <small>FTPDMIN</small></span>
-<span class="chip">WebDAV <small>内置 · 9080</small></span>
-</div>
-</div>
-<div class="panel" hidden="" id="p-db" role="tabpanel">
-<div class="chips">
-<span class="chip">MySQL <small>服务型</small></span>
-<span class="chip">MariaDB <small>服务型</small></span>
-<span class="chip">PostgreSQL <small>服务型</small></span>
-<span class="chip">MongoDB <small>服务型</small></span>
-</div>
-</div>
-<div class="panel" hidden="" id="p-mw" role="tabpanel">
-<div class="chips">
-<span class="chip">Redis <small>服务型</small></span>
-<span class="chip">Memcached <small>服务型</small></span>
-<span class="chip">MinIO <small>对象存储</small></span>
-<span class="chip">RabbitMQ <small>消息队列</small></span>
-</div>
-</div>
-<div class="panel" hidden="" id="p-ai" role="tabpanel">
-<div class="chips">
-<span class="chip">Ollama <small>本地大模型</small></span>
-<span class="chip">MCP 服务 <small>内置 · 9230</small></span>
-<span class="chip">DeepSeek Harness <small>Agent 入口</small></span>
-</div>
-</div>
-<div class="panel" hidden="" id="p-tool" role="tabpanel">
-<div class="chips">
-<span class="chip">Git <small>全量</small></span>
-<span class="chip">Composer <small>全量</small></span>
-<span class="chip">FFmpeg <small>固定 3 版</small></span>
-<span class="chip">Mailpit <small>邮件捕获</small></span>
-<span class="chip">frpc <small>内网穿透</small></span>
-<span class="chip">GitHub CLI <small>gh</small></span>
-<span class="chip">mkcert <small>本地证书</small></span>
-</div>
-</div>
-<div class="grid-3" style="margin-top:var(--s-6)">
-<article class="card reveal">
-<h3>一键装切</h3>
-<p>版本列表来自官方源或国内镜像，GitHub Releases API 优先、HTML 兜底，换源后一键重拉。</p>
-</article>
-<article class="card reveal">
-<h3>启停与校验</h3>
-<p>服务型运行时支持启动 / 停止 / 重启，Nginx、Caddy、Apache 等启动前先跑配置校验，失败直接拦住。</p>
-</article>
-<article class="card reveal">
-<h3>日志与控制台</h3>
-<p>实时滚动查看进程日志尾部，MinIO / Mailpit / Traefik / RabbitMQ 等提供 Web 控制台一键直达。</p>
-</article>
-</div>
-<figure class="shot"><img src="assets/img/ui-env.png" alt="环境管理"></figure>
-</div>
-</section>
-<hr class="divider"/>
-<!-- ============================ PLUGINS ============================ -->
-<section id="plugins">
-<div class="wrap">
-<div class="section-head reveal">
-<span class="eyebrow">插件生态</span>
-<h2>一个市场，装完你要的插件</h2>
-<p>三种运行时：纯前端（none）、内嵌 JS 引擎（goja）、独立子进程（native），统一走 JSON-RPC 2.0。宿主开放 34 个 Host API，从文件读写到 MCP 复用、宿主 AI 问答，能力面三者一致。</p>
-</div>
-<div class="grid-3">
-<article class="card reveal">
-<h3>开发者向</h3>
-<ul><li>HTTP 客户端</li><li>数据库连接</li><li>端口检查器</li><li>Cron 表达式解释</li><li>代码卡片美化</li><li>批量重命名</li></ul>
-</article>
-<article class="card reveal">
-<h3>系统向</h3>
-<ul><li>磁盘分析</li><li>本地文件搜索</li><li>垃圾清理</li><li>进程与端口全景</li><li>系统命令</li></ul>
-</article>
-<article class="card reveal">
-<h3>内容向</h3>
-<ul><li>OCR 文字识别</li><li>图床上传</li><li>剪贴板增强</li><li>文本处理工具集</li></ul>
-</article>
-</div>
-<figure class="shot"><img src="assets/img/ui-plugins.png" alt="插件市场"></figure>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">03</div>
+      <div>
+        <h2>能装的运行时</h2>
+        <p class="sec-sub">全部装在用户目录，便携优先，多版本共存。卸载只删程序，不动你的项目和模型。</p>
+      </div>
+    </div>
 
-</div>
-</section>
-<hr class="divider"/>
-<!-- ============================ GUIDE 使用说明 ============================ -->
-<section id="guide">
-<div class="wrap">
-<div class="section-head reveal">
-<span class="eyebrow">使用说明</span>
-<h2>从装上到用顺手</h2>
-<p>19 节完整教程：前 3 节跑通基础，4—11 节覆盖日常功能，12—17 节是进阶玩法（环境 / 插件 / AI / MCP / 窗口管理 / SSH），最后两节讲数据备份和出问题怎么查。按顺序走一遍，或者用左侧目录直接跳。</p>
-</div>
-<div class="guide">
-<!-- 侧栏目录 -->
-<aside class="guide-nav" id="guideNav">
-<h4>快速上手</h4>
-<ul>
-<li><a href="#g-install">1. 安装与首次启动</a></li>
-<li><a href="#g-ui">2. 界面速览</a></li>
-<li><a href="#g-hotkey">3. 快捷键</a></li>
-</ul>
-<h4>日常使用</h4>
-<ul>
-<li><a href="#g-workspace">4. 工作空间与项目</a></li>
-<li><a href="#g-palette">5. 命令面板</a></li>
-<li><a href="#g-clipboard">6. 剪贴板历史</a></li>
-<li><a href="#g-screenshot">7. 截图与标注</a></li>
-<li><a href="#g-notes">8. 笔记库</a></li>
-<li><a href="#g-todo">9. 待办与番茄专注</a></li>
-<li><a href="#g-monitor">10. 网站监控与通知</a></li>
-<li><a href="#g-schedule">11. 定时任务</a></li>
-</ul>
-<h4>进阶</h4>
-<ul>
-<li><a href="#g-env">12. 环境管理</a></li>
-<li><a href="#g-plugin">13. 插件</a></li>
-<li><a href="#g-ai">14. AI 助手与 DSH</a></li>
-<li><a href="#g-mcp">15. MCP 服务</a></li>
-<li><a href="#g-winmgr">16. 窗口管理</a></li>
-<li><a href="#g-ssh">17. SSH 远程终端</a></li>
-</ul>
-<h4>运维</h4>
-<ul>
-<li><a href="#g-backup">18. 备份 · 同步 · 快照</a></li>
-<li><a href="#g-trouble">19. 更新与排错</a></li>
-</ul>
-</aside>
-<div>
-<!-- ============ 1 ============ -->
-<article class="step reveal" id="g-install">
-<span class="step-no">STEP 01</span>
-<h3>安装与首次启动</h3>
-<h4>系统要求</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">操作系统</span><span>Windows 10 1809+ 或 Windows 11</span></div>
-<div class="tbl-row"><span class="k">运行时</span><span>WebView2 Runtime（Windows 一般系统自带，缺了会提示下载）</span></div>
-<div class="tbl-row"><span class="k">磁盘</span><span>约 50MB（不含后续安装的运行时，那些按需要下）</span></div>
-<div class="tbl-row"><span class="k">权限</span><span><b style="color:var(--text-1);font-weight:510">不需要管理员</b>，不写注册表</span></div>
-</div>
-<h4>两种装法，选一个</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">安装版</span><span><code>quickdock-amd64-installer.exe</code> — 推荐。默认落到 <code>%LOCALAPPDATA%\Programs\快启坞</code>，自动更新最省事</span></div>
-<div class="tbl-row"><span class="k">便携版</span><span><code>quickdock-amd64.exe</code> — 单文件直接跑。只要放在<b style="color:var(--text-1);font-weight:510">当前用户可写</b>的目录（别放 Program Files），同样支持就地更新</span></div>
-</div>
-<h4>Windows 安装步骤</h4>
-<ol class="install">
-<li>下载 <code>quickdock-amd64-installer.exe</code> 并双击，<b style="color:var(--text-1);font-weight:510">一路默认不要改安装路径</b>。</li>
-<li>装完运行 QuickDock，任务栏托盘出现图标即启动成功。</li>
-<li>按 <kbd>Ctrl</kbd>+<kbd>Space</kbd> 唤出主窗口，跟着首启引导页点几下（主题、开机自启、要不要示例数据）完成初始化。</li>
-</ol>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
-<div>别装到 <code>C:\Program Files\...</code>。那里写文件要过 UAC，就地替换更新会失败，只能每次手动下安装包覆盖。已经装错了？卸掉重装到用户目录即可，数据在 <code>~/.quickdock</code> 不受影响。</div>
-</div>
-<figure class="shot"><img src="assets/img/ui-onboarding.png" alt="首启引导"></figure> 
-</article>
-<!-- ============ 2 ============ -->
-<article class="step reveal" id="g-ui">
-<span class="step-no">STEP 02</span>
-<h3>界面速览</h3>
-<h4>主窗口：三栏布局</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">侧边栏 210px</span><span>工作空间与场景切换，最上面是全局入口</span></div>
-<div class="tbl-row"><span class="k">集合列表 300px</span><span>当前场景下的集合分组</span></div>
-<div class="tbl-row"><span class="k">项目列表</span><span>集合里的具体条目，支持拖拽排序与右键菜单</span></div>
-</div>
-<p>顶栏放搜索框、<b style="color:var(--text-1);font-weight:510">端口全景</b>（一眼看全本机服务占用）和设置入口。主题支持深色 / 浅色 / 跟随系统，设置里切换，插件窗口会同步适配。</p>
-<h4>五个常驻窗口，另有截图浮层</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">主窗口</span><span><kbd>Ctrl</kbd>+<kbd>Space</kbd> 显示 / 隐藏，承载全部页面</span></div>
-<div class="tbl-row"><span class="k">命令面板</span><span><kbd>Ctrl</kbd>+<kbd>K</kbd>，浮动窗口，失焦自动隐藏</span></div>
-<div class="tbl-row"><span class="k">剪贴板</span><span><kbd>Ctrl</kbd>+<kbd>`</kbd>，浮动窗口，失焦自动隐藏</span></div>
-<div class="tbl-row"><span class="k">快捷笔记</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd>，浮动窗口，失焦自动隐藏</span></div>
-<div class="tbl-row"><span class="k">排版浮层</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd>，九宫格布局浮层，排完自动收起</span></div>
-<div class="tbl-row"><span class="k">截图浮层</span><span><kbd>F1</kbd> 唤起的全屏浮层，用完即走，不占常驻窗口</span></div>
-</div>
-<h4>主要页面在哪</h4>
-<p>侧边栏 / 顶栏可进入：工作空间、环境管理、插件（已装 + 市场）、待办、定时、监控、端口全景、AI 助手、DeepSeek Harness、SSH 远程终端、设置（通用 / 导航 / 快捷键 / 剪贴板 / 存储与同步 / 历史 / 工具 / 窗口管理 / AI，另有日志与关于）。</p>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><rect height="16" rx="2" width="16" x="4" y="3"></rect><path d="M4 8h16M9 8V5M15 8V5"></path></svg>
-<div>同一台机器<b style="color:var(--text-1);font-weight:510">同时只能跑一个 QuickDock 实例</b>（单实例锁，开发版和正式版共用）。双击没反应时先看托盘是不是已经在了。</div>
-</div>
-</article>
-<!-- ============ 3 ============ -->
-<article class="step reveal" id="g-hotkey">
-<span class="step-no">STEP 03</span>
-<h3>快捷键</h3>
-<p>默认只有七个全局热键，先记住它们就够用一整天；窗口管理另有 15 个贴屏热键，用熟了会把鼠标拖窗口这件事忘掉。</p>
-<div class="keys">
-<div class="keys-row"><span>显示 / 隐藏主窗口</span><span><kbd>Ctrl</kbd><kbd>Space</kbd></span></div>
-<div class="keys-row"><span>命令面板</span><span><kbd>Ctrl</kbd><kbd>K</kbd></span></div>
-<div class="keys-row"><span>剪贴板历史</span><span><kbd>Ctrl</kbd><kbd>`</kbd></span></div>
-<div class="keys-row"><span>快捷笔记</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>N</kbd></span></div>
-<div class="keys-row"><span>区域截图</span><span><kbd>F1</kbd></span></div>
-<div class="keys-row"><span>SSH 远程终端</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>S</kbd></span></div>
-<div class="keys-row"><span>窗口排版浮层</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd></span></div>
-</div>
-<h4>窗口管理热键</h4>
-<p>先点一下目标窗口让它成为前台，再按热键。全部落在 <kbd>Ctrl</kbd>+<kbd>Alt</kbd> 下，特意避开 <kbd>Win</kbd>+方向键——那是系统贴靠的地盘，不跟它抢。</p>
-<div class="keys">
-<div class="keys-row"><span>贴左 / 右 / 上 / 下半屏</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd></span></div>
-<div class="keys-row"><span>四个四分之一角</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd><kbd>4</kbd></span></div>
-<div class="keys-row"><span>居中 / 置顶切换</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>C</kbd><kbd>T</kbd></span></div>
-<div class="keys-row"><span>最大化 / 还原 / 最小化</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>Enter</kbd><kbd>R</kbd><kbd>M</kbd></span></div>
-<div class="keys-row"><span>移到上一屏 / 下一屏</span><span><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>[</kbd><kbd>]</kbd></span></div>
-</div>
-<h4>自定义热键</h4>
-<p>「设置 → 快捷键」里逐条改，改完<b style="color:var(--text-1);font-weight:510">运行时动态重注册</b>，不用重启。捕获新按键时会暂停全局监听，避免和你正在按的组合撞车。改乱了想还原，设置页里有恢复默认。窗口管理的 15 个热键另在「设置 → 窗口管理」里改。</p>
-<h4>记不住？开备忘单</h4>
-<p>命令面板输入 <code>cheatsheet</code>，或者点「设置 → 快捷键」页头的备忘单按钮，一张表看完全部键位。它读的是<b style="color:var(--text-1);font-weight:510">你当前的键位</b>，改完键表就跟着更新。</p>
-<h4>命令面板内的键盘操作</h4>
-<div class="keys">
-<div class="keys-row"><span>上下移动选择</span><span><kbd>↑</kbd><kbd>↓</kbd></span></div>
-<div class="keys-row"><span>打开 / 执行选中项</span><span><kbd>Enter</kbd></span></div>
-<div class="keys-row"><span>关闭面板</span><span><kbd>Esc</kbd></span></div>
-</div>
-<p>面板里还能直接粘贴网址 —— 会自动识别并帮你建成项目，不用手动填表单。</p>
-<h4>顺便：系统命令</h4>
-<p>锁屏、关机、重启、睡眠、清空回收站也能在应用里直接触发，不用再去开始菜单点。</p>
-</article>
-<!-- ============ 4 ============ -->
-<article class="step reveal" id="g-workspace">
-<span class="step-no">STEP 04</span>
-<h3>工作空间与项目</h3>
-<p>QuickDock 用四层结构收纳一切资源。看着层级多，实际就一句话：<b style="color:var(--text-1);font-weight:510">按项目上下文分堆，再按关注点分页</b>。</p>
-<div class="code">
-<div class="code-head"><span class="file">数据模型</span></div>
-<pre>Workspace（工作空间） <span class="c-com">— 顶级容器，隔离不同项目上下文</span>
-  └── Scene（场景） <span class="c-com">— 标签 / 图标 / 颜色，快速切换关注点</span>
-       └── Collection（集合） <span class="c-com">— 逻辑分组，可设打开策略与关联工具</span>
-            └── Item（项目） <span class="c-com">— 真正要打开的那个东西</span></pre>
-</div>
-<h4>项目支持 6 种类型</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k"><code>directory</code></span><span>目录 — 用资源管理器或终端打开</span></div>
-<div class="tbl-row"><span class="k"><code>file</code></span><span>文件 — 用系统默认程序打开</span></div>
-<div class="tbl-row"><span class="k"><code>url</code></span><span>网页链接 — 用浏览器打开</span></div>
-<div class="tbl-row"><span class="k"><code>command</code></span><span>终端命令 — 在终端里执行</span></div>
-<div class="tbl-row"><span class="k"><code>app</code></span><span>应用程序 — 指定可执行文件路径</span></div>
-<div class="tbl-row"><span class="k"><code>quicklink</code></span><span>快速链接 — 带参数的快捷方式</span></div>
-</div>
-<h4>从零建一套</h4>
-<ol class="install">
-<li>侧边栏新建<b style="color:var(--text-1);font-weight:510">工作空间</b>，比如「公司项目」「个人折腾」—— 它们彼此完全隔离。</li>
-<li>在工作空间下建<b style="color:var(--text-1);font-weight:510">场景</b>，比如「开发」「运维」「日常」，配个图标和颜色方便认。</li>
-<li>场景里建<b style="color:var(--text-1);font-weight:510">集合</b>，比如「前端仓库」「常用后台」「SQL 脚本」，集合可以设置打开策略（怎么开、用什么工具开）。</li>
-<li>往集合里加<b style="color:var(--text-1);font-weight:510">项目</b>：拖拽文件 / 文件夹进来最快，也可以手动新建填类型。</li>
-</ol>
-<h4>用起来顺手的几个点</h4>
-<ul class="card">
-<li>四个层级都支持<b style="color:var(--text-1);font-weight:510">拖拽排序</b>，顺序按你的习惯排</li>
-<li>搜索基于 FTS5 全文索引，还支持<b style="color:var(--text-1);font-weight:510">拼音搜中文</b>（敲 <code>hj</code> 能找到「环境」）</li>
-<li>命令面板会按<b style="color:var(--text-1);font-weight:510">最近使用 + 最常使用</b>排序，越用越准</li>
-<li>场景的图标、颜色、标签随时改，改完立刻生效</li>
-</ul>
+    <div class="rt rise">
+      <div class="rt-row"><span>语言</span><div><b>Node.js</b><b>Go</b><b>PHP</b><b>Python</b><b>Bun</b><b>Erlang</b><b>JDK</b></div></div>
+      <div class="rt-row"><span>网络服务</span><div><b>Nginx</b><b>Caddy</b><b>Apache</b><b>Traefik</b><b>FTP</b><b>WebDAV</b></div></div>
+      <div class="rt-row"><span>数据库</span><div><b>MySQL</b><b>MariaDB</b><b>PostgreSQL</b><b>MongoDB</b></div></div>
+      <div class="rt-row"><span>中间件</span><div><b>Redis</b><b>Memcached</b><b>MinIO</b><b>RabbitMQ</b></div></div>
+      <div class="rt-row"><span>开发工具</span><div><b>Git</b><b>Composer</b><b>FFmpeg</b><b>Mailpit</b><b>frpc</b><b>GitHub CLI</b><b>mkcert</b></div></div>
+      <div class="rt-row"><span>AI 服务</span><div><b>Ollama</b><b class="accent">内置 MCP :9230</b></div></div>
+    </div>
 
-<figure class="shot"><img src="assets/img/ui-workspace.png" alt="工作空间"></figure>
-</article>
-<!-- ============ 5 ============ -->
-<article class="step reveal" id="g-palette">
-<span class="step-no">STEP 05</span>
-<h3>命令面板</h3>
-<p>整个应用的核心入口。<kbd>Ctrl</kbd>+<kbd>K</kbd> 唤起，一个框搜遍全部资源，回车即执行 —— 手不用离开键盘。</p>
-<ul class="card">
-<li><b style="color:var(--text-1);font-weight:510">全局搜索</b>：工作空间、场景、集合、项目统一索引，不用先切到对应页面</li>
-<li><b style="color:var(--text-1);font-weight:510">排序会学习</b>：最近使用 + 最常使用加权（frecency），常用项越排越前</li>
-<li><b style="color:var(--text-1);font-weight:510">智能建档</b>：粘贴一个 URL 进去，自动识别并存成项目，不用填表单</li>
-<li><b style="color:var(--text-1);font-weight:510">多选批量</b>：选中多项后一次性执行，比如批量打开一套开发环境的五个目录</li>
-<li><b style="color:var(--text-1);font-weight:510">结果分区</b>：项目、快速链接、笔记、待办、应用程序、文件、插件命令、环境服务、系统命令各有标题分区带计数，不是一长条混排；「最佳匹配」永远在最上面</li>
-<li><b style="color:var(--text-1);font-weight:510">待办也能搜</b>：输入标题、备注或标签就出现「待办」区，只列还没完成的顶层任务；回车直接站到那一条上（切到待办页、跳到它那一天、目标行高亮），动作菜单里还能直接标完成</li>
-<li><b style="color:var(--text-1);font-weight:510">剪贴板历史条目不参与搜索</b>：面板里的「剪贴板建议」只作用于<b style="color:var(--text-1);font-weight:510">刚复制的那一条</b>，历史条目要去 <kbd>Ctrl</kbd>+<kbd>`</kbd> 浮窗里搜</li>
-<li>各区有显示上限（应用 8 / 文件 20 / 快链 3），目前只有「最近」一区能展开看全部</li>
-<li>浮动窗口，<kbd>Esc</kbd> 或点外面就收起，不打断手上的活</li>
-</ul>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="m13 2-9 11h7l-1 9 9-11h-7z"></path></svg>
-<div>最省事的用法：把每天开工要开的东西（仓库目录、Swagger、日志目录、数据库控制台）放进一个集合，之后 <kbd>Ctrl</kbd>+<kbd>K</kbd> 敲集合名 → 批量打开。</div>
-</div>
-</article>
-<!-- ============ 6 ============ -->
-<article class="step reveal" id="g-clipboard">
-<span class="step-no">STEP 06</span>
-<h3>剪贴板历史</h3>
-<p>后台自动监听剪贴板，文本、图片、文件都记，<kbd>Ctrl</kbd>+<kbd>`</kbd> 随时翻旧账。</p>
-<ul class="card">
-<li><b style="color:var(--text-1);font-weight:510">常用条固定</b>：把天天要粘的地址、Token 前缀钉住，不会被清理</li>
-<li><b style="color:var(--text-1);font-weight:510">搜索</b>：历史多了直接搜内容</li>
-<li><b style="color:var(--text-1);font-weight:510">批量删除</b> / <b style="color:var(--text-1);font-weight:510">按天自动清理</b>：保留天数在设置里配，过期自动清</li>
-<li>浮动窗口失焦即隐藏；图片条目存在 <code>~/.quickdock/images/</code></li>
-<li><b style="color:var(--text-1);font-weight:510">按类型筛</b>：「图片」「文件」是独立的整类标签，点了就是全部图片 / 全部文件；「网址 / 邮箱 / 电话 / JSON / 代码」这类智能分类在入库时就算好了，切标签查的是整个历史，不受「只载入最近 1000 条」的限制</li>
-<li><b style="color:var(--text-1);font-weight:510">问 AI</b>：文本条目上点「问 AI」，翻译 / 摘要 / 格式化或者自由追问，就地弹层给答案，不用切到 AI 页再粘贴一遍</li>
-</ul>
-<h4>自动规则：复制进来就先收拾好</h4>
-<p>「设置 → 剪贴板」里给复制的内容挂规则：<b style="color:var(--text-1);font-weight:510">去首尾空白、删空行、重复行去重、行排序、JSON 格式化 / 压缩、去 ANSI 颜色、URL 解码、大小写转换</b>，按「全部 / 正则 / 来源窗口」命中后依次执行。</p>
-<ul class="card">
-<li>规则页里能<b style="color:var(--text-1);font-weight:510">先试运行</b>，粘一段样例文本直接看清洗结果，不用真的去复制一次</li>
-<li>总开关<b style="color:var(--text-1);font-weight:510">默认关闭</b>：自动改写剪贴板这种事，不该在你不知道的情况下生效</li>
-</ul>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 9v4M12 17h.01"></path><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path></svg>
-<div><b>不做脱敏</b>：规则不识别也不替换手机号、身份证、密钥。脱敏会静默改写你复制的东西，一旦误判反而更危险——真要脱敏，自己粘进 AI 处理。</div>
-</div>
-<p>想彻底不留痕迹：设置里关掉对应类型的记录（比如不记图片）。</p>
-</article>
-<!-- ============ 7 ============ -->
-<article class="step reveal" id="g-screenshot">
-<span class="step-no">STEP 07</span>
-<h3>截图与标注</h3>
-<p><kbd>F1</kbd> 唤起全屏覆盖层，拖动框选、松手即定 —— 工具栏就地浮在选区下方，不用等第二个窗口弹出来。</p>
-<ul class="card">
-<li><b style="color:var(--text-1);font-weight:510">六种标注</b>：矩形 / 椭圆 / 箭头 / 直线 / 文字 / 马赛克，配 9 种颜色、4 档线宽、6 档字号，带撤销重做</li>
-<li><b style="color:var(--text-1);font-weight:510">画错了直接改</b>：单击已画的图形即可选中并拖动位置，文字双击可重新编辑，内容清空即删除</li>
-<li><b style="color:var(--text-1);font-weight:510">窗口吸附</b>：鼠标滑过任意程序窗口即自动高亮并显示尺寸，单击直接选中整个窗口；按下 Ctrl 再移动，可下钻到按钮、输入框这一级</li>
-<li><b style="color:var(--text-1);font-weight:510">贴图钉屏</b>：把截图钉在桌面最上层，拖动移动、滚轮缩放、双击关闭，右键可复制或另存</li>
-<li>选框支持 8 点拖拽微调，尺寸实时显示；框选与调框时才出现十字对齐线</li>
-</ul>
-<h4>框选后用键盘</h4>
-<div class="keys">
-<div class="keys-row"><span>复制到剪贴板</span><span><kbd>Enter</kbd></span></div>
-<div class="keys-row"><span>存为 PNG</span><span><kbd>Ctrl</kbd><kbd>S</kbd></span></div>
-<div class="keys-row"><span>撤销 / 重做</span><span><kbd>Ctrl</kbd><kbd>Z</kbd><kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>Z</kbd></span></div>
-<div class="keys-row"><span>切换工具：矩形 / 椭圆 / 箭头 / 直线 / 马赛克</span><span><kbd>R</kbd><kbd>E</kbd><kbd>A</kbd><kbd>L</kbd><kbd>M</kbd></span></div>
-<div class="keys-row"><span>微调选区，按住 Shift 步长 ×10</span><span><kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd></span></div>
-<div class="keys-row"><span>全选屏幕</span><span><kbd>Ctrl</kbd><kbd>A</kbd></span></div>
-<div class="keys-row"><span>取消截图或退出当前工具</span><span><kbd>Esc</kbd></span></div>
-<div class="keys-row"><span>删除选中的标注</span><span><kbd>Delete</kbd></span></div>
-</div>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><rect height="14" rx="2" width="18" x="3" y="5"></rect><path d="M3 10h18"></path><path d="M8 5v5"></path></svg>
-<div>覆盖层是原生分层窗口而不是网页 —— 整帧像素一次性提交，所以它不会先白一下再显示内容。这就是 QuickDock 截图不闪屏的原因。</div>
-</div>
-</article>
-<!-- ============ 8 ============ -->
-<article class="step reveal" id="g-notes">
-<span class="step-no">STEP 08</span>
-<h3>笔记库</h3>
-<p><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd> 唤起浮动笔记，随手记；要整理时进「笔记管理」页面，用树形结构归档。</p>
-<ul class="card">
-<li><b style="color:var(--text-1);font-weight:510">文件夹 + Markdown 文档</b>，任意层级嵌套，支持搜索、重命名、删除</li>
-<li><b style="color:var(--text-1);font-weight:510">自动保存</b>：500ms 防抖，不用按 Ctrl+S，也不用担心忘存</li>
-<li>浮动窗口失焦自动隐藏，下次唤起接着上次的笔记</li>
-<li><b style="color:var(--text-1);font-weight:510">问 AI</b>：浮窗里直接开面板，总结 / 润色 / 续写 / 翻译，划选就只送选中的那段；关掉面板回到原文，内容也不会进 AI 对话历史</li>
-<li>早期版本的「快捷笔记」会自动兼容成根级文档，老数据不丢</li>
-</ul>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M5 4h9l5 5v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z"></path><path d="M14 4v5h5"></path></svg>
-<div>浮动笔记适合「临时抓一段」：报错信息、临时命令、别人发的一段配置。要长期保存的，进笔记管理页拖进对应文件夹。</div>
-</div>
-</article>
-<!-- ============ 9 ============ -->
-<article class="step reveal" id="g-todo">
-<span class="step-no">STEP 09</span>
-<h3>待办与番茄专注</h3>
-<ul class="card">
-<li><b style="color:var(--text-1);font-weight:510">双视图</b>：列表看明细，看板按「待办 / 进行中 / 已完成」三列拖着走</li>
-<li><b style="color:var(--text-1);font-weight:510">子任务</b>：单层级 checklist，拆完打勾</li>
-<li><b style="color:var(--text-1);font-weight:510">标签分类</b> + <b style="color:var(--text-1);font-weight:510">重复待办</b>（每日 / 每周 / 每月），周期性的事只建一次</li>
-<li><b style="color:var(--text-1);font-weight:510">到期提醒</b>：到点弹系统通知，不用另开提醒软件</li>
-</ul>
-<h4>番茄专注</h4>
-<p>在待办页选中一个任务启动倒计时，专注期间就盯着这一件事。倒计时结束弹系统通知，还可以配一个 Webhook 推送到手机（钉钉 / 企微 / 飞书等），离开电脑也收得到。</p>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 7v5l3 2"></path></svg>
-<div>番茄钟和待办是绑在一起的：专注记录挂在具体任务上，回头看就知道这个任务花了几轮。</div>
-</div>
-</article>
-<!-- ============ 10 ============ -->
-<article class="step reveal" id="g-monitor">
-<span class="step-no">STEP 10</span>
-<h3>网站监控与通知</h3>
-<p>给自己负责的站点挂个探活，出问题第一时间知道，不用等别人来问。</p>
-<h4>能监测什么</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">状态码</span><span>定时探测（GET / HEAD / POST），非预期码即告警</span></div>
-<div class="tbl-row"><span class="k">响应时间</span><span>记录并出趋势图，可选 24h / 7d / 全部三个区间</span></div>
-<div class="tbl-row"><span class="k">SSL 证书</span><span>到期前 N 天预警，天数自己定</span></div>
-<div class="tbl-row"><span class="k">内容匹配</span><span>关键字或正则匹配页面内容，页面被篡改能发现</span></div>
-<div class="tbl-row"><span class="k">在线率</span><span>统计可用性，配检测日志和状态翻转记录</span></div>
-</div>
-<h4>通知怎么配</h4>
-<p>「Webhook 设置」里填渠道地址即可，支持 <b style="color:var(--text-1);font-weight:510">钉钉 / 企业微信 / 飞书 / Server酱 / PushPlus / Telegram</b>。状态翻转（正常 ↔ 异常）时才推，不会一直刷屏。桌面端同时弹系统通知。</p>
-<p>站内还有个<b style="color:var(--text-1);font-weight:510">通知中心</b>（侧栏底部铃铛）：监控翻转、定时任务结果、AI 回答完成都收在这里，桌面通知错过了回来看一眼就有，点开直接跳回那条监控。</p>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.7 21a2 2 0 0 1-3.4 0"></path></svg>
-<div>监控依托 QuickDock 主进程运行，<b style="color:var(--text-1);font-weight:510">关了应用就不探了</b>。要 7×24 监控得让机器上的 QuickDock 保持运行（可以开开机自启）。</div>
-</div>
-</article>
-<!-- ============ 11 ============ -->
-<article class="step reveal" id="g-schedule">
-<span class="step-no">STEP 11</span>
-<h3>定时任务</h3>
-<p>五种动作 × 四种调度，组合出你要的自动化。</p>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">动作</span><span>打开软件 / 打开目录 / 打开网页 / 执行命令 / 发 HTTP 请求</span></div>
-<div class="tbl-row"><span class="k">调度</span><span>一次性 / 按间隔 / 每天 / 每周</span></div>
-<div class="tbl-row"><span class="k">反馈</span><span>执行后弹系统通知；列表里可以手动「立即执行」先验证一把</span></div>
-</div>
-<p>典型用法：每天早上九点自动拉起一整套开发环境（终端 + 目录 + 后台页面）；每天晚上定时调一次接口触发备份。</p>
-</article>
-<!-- ============ 12 ============ -->
-<article class="step reveal" id="g-env">
-<span class="step-no">STEP 12</span>
-<h3>环境管理</h3>
-<p>把开发环境当成可装卸的模块：装、切、启停、改配置、看日志，全在一个页面。所有版本落在 <code>~/.quickdock/runtime/&lt;name&gt;/&lt;version&gt;/</code>，<b style="color:var(--text-1);font-weight:510">不写注册表、不改系统 PATH</b>，删掉 QuickDock 就一起没了。</p>
-<h4>安装一个运行时</h4>
-<ol class="install">
-<li>左侧点运行时标签，自动拉取可安装版本列表。列表优先走 GitHub Releases API，失败自动用 HTML 解析兜底；国内源慢可以切镜像，换完点「刷新列表」重拉。</li>
-<li>选版本 → 安装。下载 / 解压 / 安装全程异步，进度实时显示在界面上；多源回退 + 代理容错，一个源挂了自动换下一个。</li>
-<li>装完可以再装别的版本，<b style="color:var(--text-1);font-weight:510">多版本共存</b>，通过环境变量切换当前激活版本。</li>
-</ol>
-<h4>服务型运行时还能这么玩</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">启停重启</span><span>一键启动 / 停止 / 重启，实时显示 PID、端口与健康状态</span></div>
-<div class="tbl-row"><span class="k">配置编辑</span><span>直接改 <code>Caddyfile</code> / <code>redis.conf</code> / <code>nginx.conf</code> / <code>traefik.yml</code> / <code>php.ini</code> / <code>frpc.toml</code> 等</span></div>
-<div class="tbl-row"><span class="k">启动前校验</span><span>Nginx / Caddy / Apache 等会先跑配置校验（<code>nginx -t</code> / <code>caddy validate</code> / <code>apache -t</code>），失败直接拦住不启动</span></div>
-<div class="tbl-row"><span class="k">日志查看</span><span>弹窗实时滚动读取进程日志尾部 8KB</span></div>
-<div class="tbl-row"><span class="k">Web 控制台</span><span>运行中直接打开：MinIO 9001 / Mailpit 8025 / Traefik 8080 / RabbitMQ 15672 / Nginx·Caddy 80</span></div>
-<div class="tbl-row"><span class="k">端口全景</span><span>顶栏汇总所有服务的运行时 / 版本 / 端口 / 控制台入口</span></div>
-</div>
-<h4>Ollama 是特例（单版本）</h4>
-<p>程序目录固定 <code>runtime/ollama/</code>，<b style="color:var(--text-1);font-weight:510">不带版本号、不做多版本并存</b> —— 单份约 1.4GB 且独占 11434 端口，多版本纯属浪费。有新版本时侧栏只提示不自动动，你点「更新」才走原地替换（下载 → 暂存 → 校验 → 替换），任何一步失败当前版本都不受影响，<code>ollama.env</code> 配置保留。</p>
-<p>模型库默认与系统安装版共用 <code>~/.ollama/models</code>，不用重下几十 GB。模型管理（列表 / 拉取 / 删除 / 查看已加载）都在界面里，走本地 REST API。卸载只删程序，绝不碰模型目录。</p>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
-<div>如果机器上已经装了官方 Ollama 且开机自启，QuickDock 会提示它会抢占 11434 端口，但<b style="color:var(--text-1);font-weight:510">不会自作主张禁用或卸载</b>，自己决定怎么处理。</div>
-</div>
-</article>
-<!-- ============ 13 ============ -->
-<article class="step reveal" id="g-plugin">
-<span class="step-no">STEP 13</span>
-<h3>插件</h3>
-<p>「插件市场」里的官方插件一键安装 / 升级 / 卸载 / 启用禁用，装完还能给插件单独绑热键。</p>
-<h4>三种运行时</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k"><code>none</code></span><span>纯前端，没有后端进程，最轻量</span></div>
-<div class="tbl-row"><span class="k"><code>goja</code></span><span>内嵌 JavaScript 沙箱，能跑逻辑不需要额外依赖</span></div>
-<div class="tbl-row"><span class="k"><code>native</code></span><span>独立子进程，能用系统级能力（如调用外部程序）</span></div>
-</div>
-<p>三者都通过 JSON-RPC 2.0 与宿主通信，能力面一致。插件装到 <code>~/.quickdock/plugins/&lt;id&gt;/</code>。</p>
-<h4>安全模型</h4>
-<ul class="card">
-<li><code>permissions.filesystem</code> 声明目录 scope，读写越界直接拒绝</li>
-<li><code>permissions.network</code> 声明域名白名单，只放行列表里的域名</li>
-<li>插件不允许自己弹系统对话框 —— 文件 / 目录选择统一走宿主 API</li>
-<li>每个插件有独立的 KV 存储，互不干扰</li>
-</ul>
-<h4>写一个插件</h4>
-<p>宿主开放 34 个 Host API（日志、通知、剪贴板、对话框、KV 存储、文件读写、网络请求、Shell 打开、进程管理、窗口显隐、加解密，复用宿主 MCP 的 <code>host.mcp.call</code>，以及复用用户已配 AI 档案的 <code>host.ai.ask</code>——带 <code>streamId</code> 即流式输出）。最小骨架：</p>
-<div class="code">
-<div class="code-head"><span class="file">plugin.json</span><button class="copy" data-copy="plugin-json">复制</button></div>
-<pre id="plugin-json"><span class="c-com">// none 运行时最小集：plugin.json + icon.svg + frontend/</span>
-{
-  <span class="c-key">"id"</span>: <span class="c-str">"io.github.parieses.my-plugin"</span>,
-  <span class="c-key">"name"</span>: <span class="c-str">"我的插件"</span>,
-  <span class="c-key">"version"</span>: <span class="c-str">"0.0.1"</span>,
-  <span class="c-key">"runtime"</span>: <span class="c-str">"none"</span>,
-  <span class="c-key">"entry"</span>: <span class="c-str">"index"</span>, <span class="c-com">// 不要写扩展名</span>
-  <span class="c-key">"permissions"</span>: {
-    <span class="c-key">"filesystem"</span>: [<span class="c-str">"~/Downloads"</span>],
-    <span class="c-key">"network"</span>: [<span class="c-str">"api.example.com"</span>]
-  }
-}</pre>
-</div>
-<p>完整开发文档与模板在 <a href="https://github.com/parieses/quickdock-plugins" rel="noopener" style="color:var(--brand-hover)" target="_blank">quickdock-plugins</a> 仓库。</p>
-</article>
-<!-- ============ 14 ============ -->
-<article class="step reveal" id="g-ai">
-<span class="step-no">STEP 14</span>
-<h3>AI 助手与 DeepSeek Harness</h3>
-<h4>内置 AI 助手（轻量对话）</h4>
-<ul class="card">
-<li><b style="color:var(--text-1);font-weight:510">多档案</b>：OpenAI / DeepSeek / Kimi / 通义千问 / Ollama / Azure OpenAI / 自定义兼容接口，随时切</li>
-<li><b style="color:var(--text-1);font-weight:510">四种模式</b>：聊天 / 解释代码 / 翻译 / 总结，模式 prompt 可叠加自定义 System Prompt</li>
-<li><b style="color:var(--text-1);font-weight:510">SSE 流式输出</b>：token 到达即显示，不是转圈等半天</li>
-<li>思考过程（reasoning）默认折叠、Markdown 安全渲染、多会话管理、<b style="color:var(--text-1);font-weight:510">Token 用量统计</b></li>
-<li><b style="color:var(--text-1);font-weight:510">回答能直接看</b>：LaTeX 公式（KaTeX）、Mermaid 流程图、代码高亮都渲染出来，配色跟主题走；表格可横向滚、点表头排序、导出 CSV；公式 / 流程图 / 代码块右键<b style="color:var(--text-1);font-weight:510">「复制为图片」</b>，贴进群里就能讲清楚</li>
-<li><b style="color:var(--text-1);font-weight:510">花了多少看得见</b>：「设置 → AI」的用量统计，近 7 天 / 30 天 / 全部的花费估算、次数、Token、每日趋势，按模型和按入口拆；缓存命中的那部分单独标出。<b style="color:var(--text-1);font-weight:510">这是估算不是账单</b>——按内置单价线性算，缓存折扣与阶梯计价都没算进去</li>
-<li>切走页面回答也不断：AI 在后台继续生成，侧栏那条带状态点（生成中呼吸 / 完成了没看是实心点）</li>
-<li>参数可调：Temperature / MaxTokens / TopP / 频率与存在惩罚</li>
-<li><b style="color:var(--text-1);font-weight:510">API Key 用 DPAPI 加密</b>存储，前端不接触密文；设置页有「测试连接」一键验 Key</li>
-<li><b style="color:var(--text-1);font-weight:510">就地也问得到</b>：同一份档案还供给 SSH 终端侧栏、剪贴板条目和笔记浮窗里的「问 AI」——看到什么就问什么，不用切到对话页再粘贴</li>
-</ul>
-<h4>DeepSeek Harness（完整 Agent 编程入口）</h4>
-<p>和上面那个聊天框不是一回事 —— 这是内嵌的完整 Agent 环境，带工具、文件、终端、会话。</p>
-<ul class="card">
-<li><b style="color:var(--text-1);font-weight:510">一键装填环境</b>：自动检测 node / npx / dsh，缺了就下便携 Node v22 并装 <code>@deepseek-ai/dsh</code>，日志逐行可见</li>
-<li><b style="color:var(--text-1);font-weight:510">原生窗口承载</b>：固定官方端口 3080，QuickDock 窗口直接打开，和浏览器访问同址</li>
-<li><b style="color:var(--text-1);font-weight:510">关窗不停服务</b>：dsh 在后台常驻，下次点开秒进；要停得手动或退出 QuickDock</li>
-<li>复用官方 <code>~/.dsh</code> 数据目录（皮肤 / 插件 / 会话），设置页可直接装 DSH 插件</li>
-</ul>
-</article>
-<!-- ============ 15 ============ -->
-<article class="step reveal" id="g-mcp">
-<span class="step-no">STEP 15</span>
-<h3>MCP 服务</h3>
-<p>QuickDock 自暴露一个 MCP（Model Context Protocol）服务，把本地能力开放给 AI 客户端 —— 让 AI 能真的操作你的环境，而不是只聊天。</p>
-<h4>接入步骤</h4>
-<ol class="install">
-<li>确认 QuickDock 正在运行（MCP 随主进程，退出即失效）。</li>
-<li>在你的 MCP 客户端里新增一个 <b style="color:var(--text-1);font-weight:510">HTTP 类型</b>的 server，地址填 <code>http://127.0.0.1:9230/mcp</code>。</li>
-<li>需要写操作（起停服务、改待办等）的，到「环境管理」页把高危等级打开。</li>
-</ol>
-<div class="code">
-<div class="code-head"><span class="file">客户端配置示例</span><button class="copy" data-copy="mcp-cfg">复制</button></div>
-<pre id="mcp-cfg">{
-  <span class="c-key">"mcpServers"</span>: {
-    <span class="c-key">"quickdock"</span>: {
-      <span class="c-key">"type"</span>: <span class="c-str">"http"</span>,
-      <span class="c-key">"url"</span>: <span class="c-str">"http://127.0.0.1:9230/mcp"</span>
-    }
-  }
-}</pre>
-</div>
-<h4>能做什么</h4>
-<p>工具分三级权限门：<b style="color:var(--text-1);font-weight:510">只读</b>（查环境、搜项目、看待办笔记、查端口、读日志）、<b style="color:var(--text-1);font-weight:510">低危写</b>（起停服务、建待办、写笔记、复制剪贴板）、<b style="color:var(--text-1);font-weight:510">高危</b>（杀进程、执行系统命令，默认关闭）。完整清单见下方 <a href="#mcp" style="color:var(--brand-hover)">MCP 章节</a>。</p>
-</article>
-<!-- ============ 16 ============ -->
-<article class="step reveal" id="g-winmgr">
-<span class="step-no">STEP 16</span>
-<h3>窗口管理</h3>
-<p>把窗口摆到该在的位置，别再拖着鼠标慢慢对边。两条路：<b style="color:var(--text-1);font-weight:510">单窗口贴屏</b>用热键，<b style="color:var(--text-1);font-weight:510">整屏排版</b>用浮层。</p>
-<h4>单窗口贴屏：点住窗口，按热键</h4>
-<ol class="install">
-<li>鼠标点一下目标窗口，让它成为前台窗口。</li>
-<li>按对应热键。比如 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>←</kbd> 贴左半屏，<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>3</kbd> 塞到左下四分之一，<kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Enter</kbd> 最大化。</li>
-</ol>
-<p>15 个动作的默认键见「快捷键」一节，也都能在「设置 → 窗口管理」里改。想要左窄右宽这类非常规分屏，去同一页调<b style="color:var(--text-1);font-weight:510">分屏比例</b>（10%–90%，默认对半）。</p>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
-<div>热键用的是 <kbd>Ctrl</kbd>+<kbd>Alt</kbd> 而不是 <kbd>Win</kbd>+方向键——后者是 Windows 自带的贴靠，故意不跟它抢，两套可以并存。</div>
-</div>
-<h4>整屏排版：一次点击排好一屏</h4>
-<ol class="install">
-<li>点一下要当主角的那个窗口。</li>
-<li>按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 唤起排版浮层，浮层上是一排布局预览。</li>
-<li>点布局里你希望主角待的那一块——<b style="color:var(--text-1);font-weight:510">当前窗口立刻进这一格，其余格子自动用本屏其他窗口依次填上</b>，窗口不够的格子就空着。排完浮层自动收起。</li>
-</ol>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">9 种布局</span><span>左右对半 / 左主右二 / 右主左二 / 上主下二 / 下主上二 / 四象限 / 三列 / 三行 / 九宫格</span></div>
-<div class="tbl-row"><span class="k">点卡片本身</span><span>等于让主角进「主位第 1 格」，一次点击就是「按这个模板整理整屏」</span></div>
-<div class="tbl-row"><span class="k">排哪块屏</span><span>鼠标所在的那块屏；单窗口热键另外支持把窗口在屏之间搬运</span></div>
-<div class="tbl-row"><span class="k">谁会被排</span><span>只有和布局同在一块屏上的可见窗口参与自动填充，别屏的窗口不会被拉过来；最小化的窗口也不参与，免得一按热键弹出一排</span></div>
-</div>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="m13 2-9 11h7l-1 9 9-11h-7z"></path></svg>
-<div>典型用法：写代码时左边编辑器、右边浏览器，点一下编辑器再点「左右对半」的左格就位；开完一堆窗口后按 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 点「四象限」，一屏就齐了。浮层开着时再按一次 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd> 或按 <kbd>Esc</kbd> 即可收起。</div>
-</div>
-</article>
-<article class="step reveal" id="g-ssh">
-<span class="step-no">STEP 17</span>
-<h3>SSH 远程终端</h3>
-<p>不用再装第三方客户端，连服务器、开终端、传文件都在 QuickDock 里完成。</p>
-<h4>三种打开方式</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">全局热键</span><span><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>S</kbd>（可在「设置 → 快捷键」自定义）</span></div>
-<div class="tbl-row"><span class="k">侧边栏</span><span>导航栏 <b style="color:var(--text-1);font-weight:510">SSH</b> 入口</span></div>
-<div class="tbl-row"><span class="k">托盘</span><span>托盘菜单同样有入口</span></div>
-</div>
-<p>终端窗口是<b style="color:var(--text-1);font-weight:510">独立的</b>：可缩放、可最小化，切换窗口或最小化都不会中断已建立的连接——会话与窗口生命周期解耦，关掉窗口后台连接仍在，重开秒连。</p>
-<h4>添加主机与首次连接</h4>
-<ol class="install">
-<li>点左侧主机树的 <b style="color:var(--text-1);font-weight:510">+</b> 新建主机，填地址、端口、用户名。</li>
-<li>选认证方式：<b style="color:var(--text-1);font-weight:510">密码</b> 或 <b style="color:var(--text-1);font-weight:510">私钥</b>（ed25519 等，私钥可带口令）。</li>
-<li>先点<b style="color:var(--text-1);font-weight:510">「测试连接」</b>——会真实握手一遍并显示耗时，避免保存后才发现连不上。</li>
-<li>保存后双击主机即可连接。</li>
-</ol>
-<h4>首次连接先核对指纹</h4>
-<p>第一次连接某台服务器时会弹出<b style="color:var(--text-1);font-weight:510">服务器指纹</b>供人工核对。可以在服务器上执行 <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> 得到指纹，与弹窗逐一比对，核对无误后选「信任并记住」。</p>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
-<div>如果<b style="color:var(--text-1);font-weight:510">已信任的主机指纹突然变了，QuickDock 会额外告警</b>——服务器重装和连接被劫持在技术上都表现为密钥变化，QuickDock 不替你猜，把决定权交给你。已信任的指纹统一在 SSH 窗口顶栏的「<b style="color:var(--text-1);font-weight:510">已信任的服务器</b>」里管理，可查看、可清除。</div>
-</div>
-<h4>主机管理</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">分组</span><span>主机 + 分组（文件夹）树形组织，拖拽调整层级</span></div>
-<div class="tbl-row"><span class="k">环境标签</span><span>可标注 生产 / 预发 / 测试，生产主机在列表里有标识，提醒谨慎操作</span></div>
-<div class="tbl-row"><span class="k">存储</span><span>凭据与配置分离存储；密码可存可清</span></div>
-<div class="tbl-row"><span class="k">兼容老设备</span><span>可单独开启 ssh-rsa / SHA-1 通道（会降低算法强度，默认关闭）</span></div>
-</div>
-<h4>多标签会话与 SFTP</h4>
-<p>同一窗口可开多个标签连不同主机，<b style="color:var(--text-1);font-weight:510">同主机的连接会复用</b>（多标签只握手一次）；终端支持复制 / 粘贴 / 全选 / 清屏、滚动回放与断线重连。连上主机后侧边可切换到 <b style="color:var(--text-1);font-weight:510">SFTP</b> 面板，直接浏览远程目录、拖拽上传下载，不必再另开 FTP 客户端。</p>
-<h4>终端里的 AI 助手</h4>
-<p>点终端右上角的 <b style="color:var(--text-1);font-weight:510">AI</b> 打开侧栏。问题里提到 <b style="color:var(--text-1);font-weight:510">「屏显」</b>，这一轮就会把终端当前画面连同环境标签（生产 / 预发 / 测试）一起给模型——提到就够了，后面不用再补别的内容；不提就不发，省 token 也不会把模型带偏。屏显<b style="color:var(--text-1);font-weight:510">不一定是报错</b>，正常输出、命令结果、正在运行的程序界面都会如实说明。</p>
-<ol class="install">
-<li><b style="color:var(--text-1);font-weight:510">选中即问</b>：在终端里选中一段输出 → 右键 → <b style="color:var(--text-1);font-weight:510">问 AI 这段输出</b>。侧栏自动打开、把选区挂成上下文并预填好问题，一个回车就能问。</li>
-<li><b style="color:var(--text-1);font-weight:510">命令卡片</b>：回答里的命令单独成卡，可<b style="color:var(--text-1);font-weight:510">一键填入终端</b>或<b style="color:var(--text-1);font-weight:510">一键执行</b>，不用复制粘贴。</li>
-<li><b style="color:var(--text-1);font-weight:510">连续追问</b>：侧栏内保留上下文，可以针对同一段输出一直问下去；更早的轮次会自动压成摘要继续沿用，问得再多也不会越问越卡。切换会话会自动清空，不会把 A 机器的屏显带给 B 机器。</li>
-<li><b style="color:var(--text-1);font-weight:510">随时可停</b>：「思考中」时发送键变成停止键，模型迟迟不返回、或你已经看清一半，点一下立刻退出等待。</li>
-<li><b style="color:var(--text-1);font-weight:510">回答方式可选</b>：面板头部一个开关，切成流式（默认，边生成边显示）或一次性返回整段；这个偏好 SSH、剪贴板、笔记三处共用。标题旁还会显示<b style="color:var(--text-1);font-weight:510">当前用的是哪个 AI 档案</b>，配了多个 Key 时不会搞混。</li>
-</ol>
-<p>侧栏头部常驻<b style="color:var(--text-1);font-weight:510">环境徽章</b>。标着<b style="color:var(--text-1);font-weight:510">生产</b>时，模型会按更保守的口径回答——<b style="color:var(--text-1);font-weight:510">默认先给只读的探查命令</b>，涉及写入、删除、重启、改配置的命令必须写明影响范围和回滚方式。</p>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"></circle><path d="M12 8h.01M12 12v4"></path></svg>
-<div><b style="color:var(--text-1);font-weight:510">AI 只给命令，不会替你执行。</b>其中 <code>rm -rf</code> / <code>dd</code> / <code>mkfs</code> / <code>iptables -F</code> / <code>reboot</code> / <code>kubectl delete</code> / <code>DROP TABLE</code> / <code>git reset --hard</code> 这类不可逆命令<b style="color:var(--text-1);font-weight:510">只有「填入」没有「执行」</b>，必须由你亲自按回车；<code>systemctl restart</code> / <code>sed -i</code> 这类中风险命令可以一键执行，但卡片上会先给出风险说明。另外<b style="color:var(--text-1);font-weight:510">生产机上「执行」要点两次</b>——风险规则表是有限收录的，总有些看着无害的命令会漏过去。生产机上没有撤销键——AI 的建议也要自己看过再跑。</div>
-</div>
-<p>AI 能力复用「设置 → AI」里的档案，不落库、不占对话上下文。没配 API Key 时点「问 AI」不会打开空面板，而是直接把你带到那个设置页。</p>
-</article>
-<!-- ============ 18 ============ -->
-<article class="step reveal" id="g-backup">
-<span class="step-no">STEP 18</span>
-<h3>备份 · 同步 · 快照</h3>
-<h4>快照（本地）</h4>
-<p>「设置 → 存储与同步」里导出：一键把全部数据存成一个 JSON 文件，换机器导入即恢复。升级前顺手存一份最保险。</p>
-<h4>WebDAV 云同步</h4>
-<p>「设置 → 存储与同步」里填任意 WebDAV 服务器（自建 / 坚果云 / 第三方都行），全量备份与恢复，支持<b style="color:var(--text-1);font-weight:510">多版本管理</b>，误操作能回滚到之前的版本。</p>
-<h4>数据都在哪</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k"><code>~/.quickdock/quickdock.db</code></span><span>SQLite 主库（WAL 模式）</span></div>
-<div class="tbl-row"><span class="k"><code>~/.quickdock/images/</code></span><span>剪贴板图片</span></div>
-<div class="tbl-row"><span class="k"><code>~/.quickdock/plugins/</code></span><span>已安装插件</span></div>
-<div class="tbl-row"><span class="k"><code>~/.quickdock/runtime/</code></span><span>各运行时版本</span></div>
-<div class="tbl-row"><span class="k"><code>~/.quickdock/logs/</code></span><span>日志，按天分文件</span></div>
-<div class="tbl-row"><span class="k"><code>%APPDATA%/QuickDock/</code></span><span>应用配置</span></div>
-</div>
-<h4>数据目录搬家</h4>
-<p>C 盘塞不下、想把整个家挪到另一块盘：「设置 → 存储与同步」改<b style="color:var(--text-1);font-weight:510">存储位置</b>，点「应用」。选 <code>D:\</code> 会自动落到 <code>D:\.quickdock</code>，选普通目录也会补一层 <code>.quickdock</code>，界面会回显「实际将迁移到」。</p>
-<ul class="card">
-<li><b style="color:var(--text-1);font-weight:510">整个目录一起搬</b>：数据库、剪贴板图片、插件、日志、便携运行时、模块缓存全在内，搬完不用重新下载任何运行时</li>
-<li><b style="color:var(--text-1);font-weight:510">环境变量一起改</b>：指向旧目录的 <code>PATH</code> / <code>GOROOT</code> / <code>GOPATH</code> 会被改写到新目录；已经开着的终端要重开才认</li>
-<li><b style="color:var(--text-1);font-weight:510">要重启才算搬完</b>：数据库正被程序独占，先导快照、重启时落到新位置，旧目录也是重启后才删——这期间两个目录一起占空间，目标盘记得留「压缩包 + 解压后」的峰值余量</li>
-<li>半路失败不慌：最后一步之前旧目录始终完好，重试即可</li>
-</ul>
-<div class="note">
-<svg fill="none" stroke-linecap="round" stroke-width="1.8" viewBox="0 0 24 24"><path d="M12 3v12m0 0 4-4m-4 4-4-4M4 19h16"></path></svg>
-<div>自动更新<b style="color:var(--text-1);font-weight:510">只替换主程序</b>，不碰数据目录下任何内容；跨版本配置迁移由数据库迁移逻辑负责。新装时安装器会问一次数据目录，<b style="color:var(--text-1);font-weight:510">只在新装时出现</b>，覆盖升级不会重置；卸载只删程序，不删数据。</div>
-</div>
-</article>
-<!-- ============ 18 ============ -->
-<article class="step reveal" id="g-trouble">
-<span class="step-no">STEP 19</span>
-<h3>更新与排错</h3>
-<h4>更新流程</h4>
-<p>启动后自动拉取签名清单并验签 → 有新版本提示 → 你点「重启更新」→ helper 进程在主程序退出后备份旧文件、覆盖新文件（失败自动回滚）→ 重新拉起应用。<b style="color:var(--text-1);font-weight:510">不弹 UAC、不跑安装器</b>。</p>
-<h4>常见问题</h4>
-<div class="tbl wide">
-<div class="tbl-row"><span class="k">反复提示同一版本</span><span>删除 <code>~/.quickdock/update-guard.json</code> 强制重试。这个文件记录「已替换但版本号没变」的目标版本，连续 2 次未生效会自动忽略该版本</span></div>
-<div class="tbl-row"><span class="k">更新失败</span><span>多半是装到了受 UAC 保护的目录（如 Program Files）。卸掉重装到用户目录</span></div>
-<div class="tbl-row"><span class="k">双击没反应</span><span>单实例锁 —— 看托盘是不是已经有一个在跑了</span></div>
-<div class="tbl-row"><span class="k">装运行时卡住</span><span>切换下载源（镜像）后点「刷新列表」重拉；下载失败会自动多源回退，也可以等它重试</span></div>
-<div class="tbl-row"><span class="k">想看报错</span><span>「设置 → 日志」按天查看主日志与崩溃记录；文件位置 <code>~/.quickdock/logs/quickdock-YYYY-MM-DD.log</code>；更新替换日志 <code>%TEMP%\wails-update-&lt;pid&gt;.log</code></span></div>
-<div class="tbl-row"><span class="k">想盯实时日志</span><span>命令面板输入 <code>logtail</code> 选文件即可 <code>tail -f</code>，支持暂停与关键字过滤高亮；文件被轮转会自动重新对齐</span></div>
-<div class="tbl-row"><span class="k">没收到通知</span><span>先点侧栏底部的铃铛看通知中心；AI 完成类通知在主窗口打开且有焦点时故意不推</span></div>
-<div class="tbl-row"><span class="k">反馈问题</span><span>带日志去 <a href="https://github.com/parieses/quickdock/issues" rel="noopener" style="color:var(--brand-hover)" target="_blank">GitHub Issues</a> 提，复现步骤写清楚</span></div>
-</div>
-</article>
-</div>
-</div>
-</div>
+    <div class="rt-notes rise">
+      <div class="rt-note">
+        <h4>版本怎么装</h4>
+        <p>下载源可以切换，地址里支持 <code>{version}</code> <code>{os}</code> <code>{arch}</code> 占位符。一个源连不上就换下一个，进度实时推回来。</p>
+      </div>
+      <div class="rt-note">
+        <h4>服务怎么管</h4>
+        <p>启动、停止、重启都在列表里点。配置改完保存，Nginx 这类服务先校验再重载，语法错就停在原地，不会把正在跑的服务弄挂。</p>
+      </div>
+      <div class="rt-note">
+        <h4>会不会污染系统</h4>
+        <p>不写注册表，不改系统 PATH，不申请管理员权限。删掉目录就干净了，机器上不留痕。</p>
+      </div>
+    </div>
+  </div>
 </section>
-<hr class="divider"/>
-<!-- ============================ MCP ============================ -->
-<section id="mcp">
-<div class="wrap">
-<div class="section-head reveal">
-<span class="eyebrow">MCP 服务</span>
-<h2>本地能力，三级权限门</h2>
-<p>把本地开发能力开放给智能体：环境、项目、待办、笔记、剪贴板、端口、日志、崩溃记录，全部可被 AI 调用。写操作分低危 / 高危，高危默认关闭。</p>
-</div>
-<div class="grid-2">
-<div class="reveal">
-<div class="tbl">
-<div class="tbl-row"><span>等级</span><span>工具</span></div>
-<div class="tbl-row">
-<span><span class="tag tag-read">只读</span></span>
-<code>app_info · env_list · env_status · env_log · env_versions · workspace_list · item_search · recent_items · todo_list · note_search · clipboard_recent · port_list · log_list · log_read · crash_list · crash_read · plugin_list</code>
-</div>
-<div class="tbl-row">
-<span><span class="tag tag-low">低危写</span></span>
-<code>env_start · env_stop · env_restart · item_open · todo_create · todo_done · clipboard_copy · note_create · note_update · note_quick · plugin_execute</code>
-</div>
-<div class="tbl-row">
-<span><span class="tag tag-high">高危</span></span>
-<code>process_kill · system_command（需在环境管理页手动开启高危等级）</code>
-</div>
-</div>
-<p style="margin-top:var(--s-4);font-size:14px;color:var(--text-3)">插件也可通过 <code>host.mcp.call</code> 复用全部工具，沿用同一套等级门，无需额外声明权限。</p>
-</div>
-<div class="reveal">
-<div class="code" style="margin-top:0">
-<div class="code-head"><span class="file">curl — 列出已装运行时</span><button class="copy" data-copy="mcp-curl">复制</button></div>
-<pre id="mcp-curl"><span class="c-com"># POST only；GET 返回 405，DELETE 关会话返回 204</span>
-curl -X POST http://127.0.0.1:9230/mcp \
-  -H <span class="c-str">"Content-Type: application/json"</span> \
-  -d <span class="c-str">'{
-    "jsonrpc": "2.0", "id": 1, "method": "tools/call",
-    "params": { "name": "env_list", "arguments": {} }
-  }'</span></pre>
-</div>
-<div class="card" style="margin-top:var(--s-4)">
-<h3>协议细节</h3>
-<ul style="margin-top:var(--s-2)">
-<li>传输：Streamable HTTP，仅 POST</li>
-<li>版本：2025-06-18</li>
-<li>生命周期：随主进程，QuickDock 退出即失效</li>
-<li>实现：门面装配在 <code>services/mcp</code>，工具经 Wails 各领域门面转发到宿主</li>
-</ul>
-</div>
-</div>
-</div>
-</div>
+
+<!-- ============================ 04 AI 与 MCP ============================ -->
+<section id="ai">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">04</div>
+      <div>
+        <h2>模型配一次，四处都能用</h2>
+        <p class="sec-sub">对话页、SSH 终端侧栏、剪贴板条目、笔记浮窗共用同一份模型档案。配一次，四处都能用。</p>
+      </div>
+    </div>
+
+    <div class="duo rise">
+      <div class="card">
+        <h3>模型与对话</h3>
+        <p class="card-sub">OpenAI、DeepSeek、Kimi、通义千问、Ollama、Azure，以及任意兼容接口。</p>
+        <ul>
+          <li>填好地址和 Key 可以一键拉取该接口的模型列表，不用手抄模型名</li>
+          <li>SSE 流式输出，思考过程默认折叠</li>
+          <li>公式走 KaTeX，流程图走 Mermaid，代码块带高亮；图和公式可以右键复制成图片</li>
+          <li>切到别的页面，回答继续生成，回来还在原位置</li>
+          <li>用量统计覆盖全部入口，按模型和场景拆开算，并注明是估算不是账单</li>
+          <li>API Key 用 Windows DPAPI 加密，前端拿不到密文</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>终端里的 AI</h3>
+        <p class="card-sub">SSH 侧栏把看到的现象转成可以执行的命令。</p>
+        <ul>
+          <li>选中终端输出，右键问 AI，选区单独作为上下文</li>
+          <li>提到「屏显」才附带当前屏幕，不提就不发，省 token 也不带偏</li>
+          <li>生产环境默认只给只读探查命令，写入类命令必须写明影响范围</li>
+          <li><code>rm -rf</code>、<code>mkfs</code>、<code>DROP TABLE</code> 只有「填入」，没有「执行」</li>
+          <li>生产环境点执行要确认两次，「填入」不会发送回车</li>
+          <li>切换会话自动清空上下文，A 机器的屏显不会带到 B 机器</li>
+        </ul>
+      </div>
+      <div class="card" id="mcp">
+        <h3>对 Agent 开放本地能力</h3>
+        <p class="card-sub">内置 MCP 服务，地址 <code>http://127.0.0.1:9230/mcp</code>。</p>
+        <ul>
+          <li>工具集分三级权限，默认只开放只读与低危写</li>
+          <li>只读涵盖环境状态、项目检索、待办、笔记、剪贴板、端口、日志、崩溃记录</li>
+          <li>低危写可以启停服务、打开项目、新建待办与笔记</li>
+          <li>杀进程和系统命令要单独在环境管理页里开启</li>
+          <li>随主进程启停，应用退出即失效</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>DeepSeek Harness</h3>
+        <p class="card-sub">内嵌完整的 Agent 编程入口，工具、文件、终端、会话都有。</p>
+        <ul>
+          <li>自动检测 node、npx、dsh，缺什么装什么，便携 Node 不用自己配</li>
+          <li>用原生窗口承载，关掉窗口服务继续跑，下次打开直接进</li>
+          <li>固定 3080 端口，被无关进程占用时才退到随机端口</li>
+          <li>下载、解压、npm 安装每一步都有日志</li>
+        </ul>
+      </div>
+    </div>
+  </div>
 </section>
-<hr class="divider"/>
-<!-- ============================ DOWNLOAD ============================ -->
-<section id="download">
-<div class="wrap">
-<div class="section-head reveal" style="margin-inline:auto;text-align:center">
-<span class="eyebrow">下载</span>
-<h2>现在就把坞装上</h2>
-<p>开源免费。装完自动检查更新，点「重启更新」就地替换，不弹 UAC、不跑安装器，数据和插件全部保留。</p>
-</div>
-<div class="dl-grid">
-<div class="dl primary reveal">
-<h3>Windows</h3>
-<p class="meta">Windows 10 1809+ / 11 · x64 · ~50MB</p>
-<div class="arch">
-<a class="btn btn-primary" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64-installer.exe">安装版 · installer.exe</a>
-<a class="btn btn-quiet" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64.exe">便携版 · exe</a>
-</div>
-</div>
-</div>
-</div>
+
+<!-- ============================ 05 更新日志 ============================ -->
+<section id="log">
+  <span id="changelog" style="position:absolute;top:0"></span>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">05</div>
+      <div>
+        <h2>最近改了什么</h2>
+        <p class="sec-sub">按时间倒序，点开看细节。更早的版本在 GitHub Releases 里。</p>
+      </div>
+    </div>
+
+    <div class="logs rise">
+      <details class="log" open>
+        <summary>
+          <span class="log-ver" data-ver></span>
+          <span class="log-date" data-ver-date></span>
+          <span class="log-title">数据目录能搬家，AI 花了多少能看见，回答里的公式和图能拿走</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>数据目录可以整体搬到别的盘，连同装好的运行时和环境变量一起，重启生效。新装时安装器也会问一次放哪。</li>
+          <li>AI 助手加了用量统计：近 7 天、30 天、全部的花费估算、问答次数、每日趋势，按模型和入口拆开看，缓存命中省下的单独标出。</li>
+          <li>AI 回答里的公式、流程图、代码高亮都能正常渲染；表格能排序、能导出 CSV；图和公式右键可以复制成图片。</li>
+          <li>点外链改成交给系统浏览器，不再把主界面导航走。切到别的页面时 AI 回答继续生成。</li>
+          <li>剪贴板的「图片」「文件」标签修好了，分类改成入库时计算，能翻到全部历史。</li>
+          <li>命令面板能搜待办，回车直接跳到那一条。定时任务删除后进回收站。</li>
+          <li>集合条目过百改虚拟滚动，日志最多渲染 5000 行，长列表不再越滚越卡。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.29</span>
+          <span class="log-date">2026-10-27</span>
+          <span class="log-title">删除能找回，界面统一，通知有了归处</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>项目、集合、场景、笔记、工作空间删掉之后进回收站，在「设置 → 历史 → 回收站」里恢复，级联删除的子内容一起回来。</li>
+          <li>侧栏底部加了通知中心，监控状态、定时任务、AI 回答完成都收在这里，点开能跳回原来那一条。</li>
+          <li>任意文件可以实时尾随，新增行增量读取，文件被轮转也能自动对齐。</li>
+          <li>剪贴板支持自动规则：去空白、删空行、排序、JSON 格式化之类，可以只对匹配的内容生效，改之前能先试运行。</li>
+          <li>命令面板输入 <code>cheatsheet</code> 打开快捷键备忘单，内容读自你当前的键位。</li>
+          <li>设置页从 14 页合并成 11 页。九个业务页的页头、按钮、面板头统一成一套。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.28</span>
+          <span class="log-date">2026-10-26</span>
+          <span class="log-title">定时任务有执行历史，结果能推到手机上</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>定时任务会记录每次执行的开始时间、耗时、退出码和输出，在运行历史里翻。</li>
+          <li>执行结果可以推送到机器人：企业微信、钉钉、飞书、Telegram 等。</li>
+          <li>MCP 服务暴露 <code>robot_notify</code>，Agent 也能往外发消息。</li>
+          <li>界面缩放改成三档，放进设置页；插件窗口跟随主窗口所在的显示器。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.27</span>
+          <span class="log-date">2026-10-24</span>
+          <span class="log-title">全屏截图、拖拽装插件、导航可以自己排</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>截图支持全屏模式，SFTP 面板能看到文件属性，SSH 主机有详情页。</li>
+          <li>把插件 zip 拖进窗口就能装，不用一层层点。</li>
+          <li>导航项可以隐藏、拖动排序，导航上也挂上了通用角标。</li>
+          <li>日志支持按范围清理，数据库索引可以重建。</li>
+        </ul>
+      </details>
+    </div>
+
+    <p class="log-more">
+      <a href="https://github.com/parieses/quickdock/releases" target="_blank" rel="noopener">查看全部版本与更新说明 →</a>
+    </p>
+  </div>
 </section>
-<!-- ============================ FAQ ============================ -->
-<section id="faq">
-<div class="wrap">
-<div class="section-head reveal">
-<span class="eyebrow">FAQ</span>
-<h2>几个常被问到的问题</h2>
-</div>
-<div class="faq reveal">
-<details class="qa" open="">
-<summary>要管理员权限吗？会污染系统环境吗？</summary>
-<div class="a">不要，也不会。所有运行时装到 <code>~/.quickdock/runtime/</code>，不写注册表、不改系统 PATH、不申请提权。删掉 QuickDock，运行时一起没。</div>
-</details>
-<details class="qa">
-<summary>更新会丢数据吗？</summary>
-<div class="a">不会。更新只替换主程序文件，<code>~/.quickdock</code> 下的数据库、插件、运行时目录全部保留。跨版本配置变化由数据库迁移逻辑处理。</div>
-</details>
-<details class="qa">
-<summary>数据存在哪？会上云吗？</summary>
-<div class="a">全在本地 SQLite。只有你主动配置 WebDAV 同步时才会上传备份；AI 助手的 API Key 在 Windows 下用 DPAPI 加密存储，前端不接触密文。</div>
-</details>
-<details class="qa">
-<summary>插件能做什么？安全吗？</summary>
-<div class="a">插件声明 <code>permissions.filesystem</code> 目录 scope 和 <code>permissions.network</code> 域名白名单，宿主逐次校验，越权直接拒绝。插件不能弹系统对话框，文件选择统一走宿主 API。</div>
-</details>
-<details class="qa">
-<summary>支持 Linux 吗？</summary>
-<div class="a">引擎层已按 <code>_windows</code> / <code>_darwin</code> / <code>_unix</code> 拆文件，但目前官方只发 Windows 产物，Linux 尚未纳入发布流程。截图与贴图是 Windows 原生实现，其他平台暂不可用。</div>
-</details>
-<details class="qa">
-<summary>怎么用 AI 控制 QuickDock？</summary>
-<div class="a">在任意 MCP 客户端（如 WorkBuddy）里把 <code>http://127.0.0.1:9230/mcp</code> 加为 HTTP 类型 server，即可调用这些工具。高危工具需要你先在环境管理页手动开启。</div>
-</details>
-</div>
-</div>
+
+<!-- ============================ 06 下载 ============================ -->
+<section id="download" style="padding-block:var(--s7) var(--s9)">
+  <div class="wrap">
+    <div class="dl rise">
+      <div>
+        <h2>下载 QuickDock</h2>
+        <p class="dl-sub">安装器和便携版是同一个可执行文件，功能没有区别。装在当前用户目录下，不需要管理员权限。</p>
+        <div class="dl-actions">
+          <a class="btn btn-solid btn-lg" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64-installer.exe">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4.2-4.2M12 15l-4.2-4.2M5 19h14"/></svg>
+            下载安装版
+          </a>
+          <a class="btn btn-line btn-lg" href="https://github.com/parieses/quickdock/releases" target="_blank" rel="noopener">全部版本</a>
+        </div>
+        <div class="dl-meta">
+          <span><span data-ver></span> · amd64 · Windows 10 1809+ / 11</span>
+          <span>安装路径保持默认，自动更新才能就地替换</span>
+        </div>
+      </div>
+      <aside class="dl-side">
+        <h4>系统要求</h4>
+        <dl>
+          <div><dt>操作系统</dt><dd>Win 10 1809+</dd></div>
+          <div><dt>运行时</dt><dd>WebView2</dd></div>
+          <div><dt>磁盘</dt><dd>约 50 MB</dd></div>
+          <div><dt>权限</dt><dd>当前用户</dd></div>
+          <div><dt>许可</dt><dd>MIT</dd></div>
+        </dl>
+      </aside>
+    </div>
+
+    <div class="faq rise" style="margin-top:var(--s8)">
+      <details>
+        <summary>需要管理员权限吗？</summary>
+        <p>不需要。安装器把程序装到 <code>%LOCALAPPDATA%\Programs\快启坞</code>，运行时和数据都放在用户目录，不写注册表、不弹 UAC。也正因为如此，如果手动把程序装到 <code>C:\Program Files</code>，自动更新会因为没有写权限而失败，只能手动覆盖。</p>
+      </details>
+      <details>
+        <summary>数据存在哪里？会上传吗？</summary>
+        <p>默认在 <code>~/.quickdock</code>，包括数据库、剪贴板图片、插件和日志。应用不做任何后台同步，只有你主动配置 WebDAV 或调用 AI 接口时才会产生网络请求。空间不够时可以在「设置 → 存储与同步」把整个目录搬到别的盘。</p>
+      </details>
+      <details>
+        <summary>卸载会删掉我的数据吗？</summary>
+        <p>不会。卸载只移除程序和注册表项，<code>~/.quickdock</code> 保留。重装后数据还在原处；确定不需要了再手动删这个目录。</p>
+      </details>
+      <details>
+        <summary>支持 macOS 吗？</summary>
+        <p>每个版本会产出 darwin arm64 与 amd64 两个包，但主力开发和测试都在 Windows 上，macOS 侧的功能覆盖不完整，遇到问题请提 Issue。目前没有 Developer ID 签名，首次打开需要在系统设置里放行。</p>
+      </details>
+    </div>
+  </div>
 </section>
-<!-- ============================ CTA ============================ -->
-<section style="padding-top:0">
-<div class="wrap">
-<div class="cta-strip reveal">
-<h2>少点几十下鼠标，从今天开始</h2>
-<p>开源、免费、数据在本地。装上试试，不满意直接删，什么都不留。</p>
-<div class="hero-cta">
-<a class="btn btn-primary btn-lg" href="#download">下载 QuickDock</a>
-<a class="btn btn-ghost btn-lg" href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">Star on GitHub</a>
-</div>
-</div>
-</div>
-</section>
+
 </main>
-<!-- ============================ FOOTER ============================ -->
+
 <footer class="footer">
-<div class="wrap">
-<div class="footer-grid">
-<div class="about">
-<a class="brand" href="#top">
-<span class="brand-mark"><img alt="QuickDock" src="assets/img/appicon-512.png"/></span>
-          快启坞 QuickDock
-        </a>
-<p>面向开发者的桌面效率工具。命令面板、环境管理、插件生态与 MCP 服务，装在一个坞里。</p>
-</div>
-<div>
-<h4>产品</h4>
-<ul>
-<li><a href="#features">功能特性</a></li>
-<li><a href="#runtime">环境管理</a></li>
-<li><a href="#plugins">插件生态</a></li>
-<li><a href="#download">下载</a></li>
-</ul>
-</div>
-<div>
-<h4>文档</h4>
-<ul>
-<li><a href="#guide">使用说明</a></li>
-<li><a href="#mcp">MCP 服务</a></li>
-<li><a href="#faq">常见问题</a></li>
-<li><a href="#changelog">更新日志</a></li>
-<li><a href="https://github.com/parieses/quickdock#readme" rel="noopener" target="_blank">README</a></li>
-</ul>
-</div>
-<div>
-<h4>开源</h4>
-<ul>
-<li><a href="https://github.com/parieses/quickdock" rel="noopener" target="_blank">quickdock</a></li>
-<li><a href="https://github.com/parieses/quickdock-plugins" rel="noopener" target="_blank">quickdock-plugins</a></li>
-<li><a href="https://github.com/parieses/quickdock/releases" rel="noopener" target="_blank">Releases</a></li>
-<li><a href="https://github.com/parieses/quickdock/issues" rel="noopener" target="_blank">反馈问题</a></li>
-</ul>
-</div>
-</div>
-<div class="footer-bottom">
-<span>© <span id="year">2026</span> 快启坞 QuickDock · MIT License</span>
-<span>基于 Wails v3 + Go + Vue 3 构建</span>
-</div>
-</div>
+  <div class="wrap foot">
+    <div>
+      <div class="foot-brand">
+        <img src="assets/img/appicon-512.png" alt="" width="24" height="24">
+        <b>快启坞 QuickDock</b>
+      </div>
+      <p class="foot-note">Go + Vue 3 + Wails v3 写的 Windows 桌面工具。MIT 许可，源码在 GitHub。</p>
+    </div>
+    <div class="foot-links">
+      <a href="guide.html">使用说明</a>
+      <a href="https://github.com/parieses/quickdock" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/parieses/quickdock/releases" target="_blank" rel="noopener">更新日志</a>
+      <a href="https://github.com/parieses/quickdock-plugins" target="_blank" rel="noopener">插件市场</a>
+      <a href="https://github.com/parieses/quickdock/issues" target="_blank" rel="noopener">问题反馈</a>
+    </div>
+  </div>
 </footer>
-<script src="assets/js/i18n.js"></script>
+
 <script src="assets/js/main.js"></script>
 </body>
 </html>

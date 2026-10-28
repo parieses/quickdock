@@ -1,97 +1,154 @@
 # QuickDock 官网
 
-纯静态站点（无构建步骤），由 `.github/workflows/pages.yml` 自动部署到 GitHub Pages。
+纯静态站点，无构建步骤，由 `.github/workflows/pages.yml` 部署到 GitHub Pages。
 
 ```
 website/
-├── index.html          # 单页，全部内容（中文为默认语言，直接写在 HTML 里）
+├── index.html          # 中文首页：定位、界面、工具、运行时、AI、更新日志、下载
+├── guide.html          # 中文使用说明，16 节，左侧目录跟随滚动
+├── en/
+│   ├── index.html      # 英文首页，结构与中文页一一对应
+│   └── guide.html      # 英文使用说明
 ├── assets/
-│   ├── css/style.css   # 设计系统：Linear（暗色 / Inter / 金色强调）+ 亮色主题
-│   ├── js/main.js      # 无依赖原生 JS（含主题与语言切换）
-│   ├── js/i18n.js      # 英文词典（中文原文 → 英文）
-│   └── img/            # 截图放这里
+│   ├── css/style.css   # 设计系统（深墨蓝 + 金）+ 亮色主题 + 说明页 + 英文覆盖
+│   ├── js/site.js      # 版本号唯一来源，填充页面上的 [data-ver] / [data-ver-date]
+│   ├── js/main.js      # 主题、顶栏分隔线、滚动入场、目录高亮
+│   └── img/            # 截图与应用图标
 ├── tools/
-│   ├── extract-i18n-strings.py   # 列出还没翻译的中文文案
-│   └── check-i18n-glue.py        # 检查行内标签两侧的英文值有没有漏空格（黏连）
+│   ├── bump.py         # 发版：改版本号 + 滚动更新日志
+│   └── check-parity.py # 校验中英两页结构没走偏
 └── README.md
 ```
 
-## 主题与语言
+## 设计系统
 
-右上角两个控件，选择存在 `localStorage`，刷新后保持。
+令牌在 `style.css` 顶部的 `:root`，亮色在 `[data-theme='light']`，**两处成对修改**。
 
-**明暗主题**（`qd-theme` = `dark` | `light`）
+**颜色**：底色取应用图标里的深墨蓝（`--ink-950` … `--ink-700`，层级越高越亮），强调色取图标里金色 Q 的 `--gold`。全站只有这一个彩色，红绿只用于状态，不做装饰。
 
-- 首次访问跟随系统 `prefers-color-scheme`，手动切换后以手动选择为准，之后系统变化不再覆盖。
-- `<head>` 里有一小段内联脚本在首屏渲染前定好 `data-theme`，避免刷新时闪一下。
-- 主题变量在 `style.css` 的 `:root`（暗色）与 `[data-theme='light']`（亮色）两处，**成对修改**。
-- 规则：暗色下用「叠加白」提亮层次（`--w002` … `--w014` 这组令牌），亮色下必须换成「叠加黑」，否则白底上完全看不见。新写样式请用这些令牌，**不要硬编码 `rgba(255,255,255,…)`**。
-- 切主题时会同步更新 `<meta name="theme-color">`。
+**字体**：`IBM Plex Sans` 做正文与标题，`IBM Plex Mono` 做编号、热键、路径、数字；中文回退 `PingFang SC` / `Microsoft YaHei`。选 Plex 是为了工程文档的气质，别换回 Inter。
 
-**中英文**（`qd-lang` = `zh` | `en`）
+**间距**：`--s1` … `--s9`，8px 基准。章节上下留白 `--s9`（112px），移动端降到 76px。
 
-中文就是 `index.html` 里的原文（默认语言，搜索引擎收录的是中文），英文只存一份词典。**HTML 里没有任何 i18n 标记**，切换靠运行时按「中文原文」查表替换文本节点。
+**圆角**：按层级递进，标签 3px、按钮 6–8px、卡片 12px、截图与下载区 16px。
 
-- 词典：`assets/js/i18n.js` 的 `QD_I18N.en`，键是中文原文、值是英文（`QD_I18N.head` 单独放 meta/og 这类属性文案，它们不是文本节点）。
-- 查表时会折叠空白（`\s+` → 单空格），所以键写成单行、词间单空格即可，不用管 HTML 里的换行缩进。
-- **键的首尾空格会被 `trim` 掉**，别在 key 两端写空格（写了就永远查不中，`extract` 会把这条一直报成「未翻译」）。行内标签断句留下的空格由 HTML 原文保留，替换时原样拼回 —— 所以英文值末尾**不用**再补空格。
-- 查不到就保持中文 —— 漏译只会显示中文，不会出错。
-- 跳过 `<pre>` `<code>` `<kbd>` 里的内容；只处理含中文的文本节点，纯 ASCII、数字、路径自动无视。
-- 切语言会同步 `<html lang>`，`style.css` 里有 `html[lang='en']` 的少量适配。
+**线**：一律半透明（`--line` = 8% 白），不用实色边框。暗色下靠亮度分层，阴影只用来把截图从背景里拔出来。
 
-**改文案 / 加新文案**
+**版心**：1160px，移动端 `padding-inline` 24px。
 
-1. 直接在 `index.html` 里写中文。
-2. 跑一下看还缺什么：
+## 页面结构
 
-   ```bash
-   python tools/extract-i18n-strings.py        # 只列未翻译的
-   ```
-3. 把列出来的中文原文翻好，填进 `assets/js/i18n.js` 的 `en` 段。
-4. 中文里没有空格，英文有 —— **文案被 `<b>` `<code>` 等行内元素切断时，记得在英文那侧补空格**（例：`一个坞，装下<b>你的整个开发流</b>` → `"One dock for "` + `"your entire dev workflow"`，值末尾那个空格就是粘合点）。改完跑一下检查器，不用靠肉眼：
+首页六段，编号 `01`–`05` 由 `.sec-num` 呈现，是页面里唯一带装饰意味的排版元素：
 
-   ```bash
-   python tools/check-i18n-glue.py     # ✅ 没有发现黏连 即可；有则按提示给前一条英文值补空格
-   ```
+| 区块 | 内容 |
+|------|------|
+| Hero | 标题、副标题、两个按钮、四个硬指标、主界面截图 |
+| `01` 界面 | 三组「说明在上、截图满宽在下」 |
+| `02` 工具 | 14 条清单，两列，带一条略亮的背景带（全站只此一处） |
+| `03` 运行时 | 按分组的 chip 表 + 三条补充说明 |
+| `04` AI | 四张卡片，2×2 |
+| `05` 更新日志 | `<details>` 折叠，只留最近四个版本，更早的指向 Releases |
+| 下载 + FAQ | 两个下载按钮、系统要求侧栏、四条折叠问答 |
 
-   它会把 `Two routes: one-window snapping` + `with hotkeys` 这类拼成 `snappingwith` 的地方指出来。查不到就切到英文页面再扫一眼。
+说明页是 `170px 目录 + 正文` 两栏。正文行宽用 `em` 控制——中文按 `ch` 算会窄一半，这个坑踩过一次。
 
-## 本地预览
+## 中英双语
+
+英文版是**独立的两份 HTML**（`en/`），不是运行时替换文本。
+
+上一版是用「中文原文当 key」的词典（`i18n.js`）加 `main.js` 逐节点替换，代价是每次改中文文案，词典的 key 就失联一条，改着改着整份词典全对不上，最后只能弃用。现在两份 HTML 各写各的，改文案就改一处，不用维护映射表。
+
+代价是两份会漂移：给中文页加一段忘了英文页，页面看着正常，只是少一截。所以有 `tools/check-parity.py`：
+
+```bash
+python tools/check-parity.py   # 结构一致返回 0，分叉会指出第几个标签
+```
+
+它只比标签序列和 `id` 集合，**不比对文字**——改文案不会报错，加删元素、改嵌套才会。
+
+几条约定：
+
+- 两页的元素顺序必须完全一致，包括语言切换那两个链接（都是一对 `<a>`，当前语言带 `class="on"` 与 `aria-current`）。
+- 路径：英文页在子目录里，资源引用写 `../assets/…`，同目录页面互链写相对名。
+- 每个页面都有三条 `hreflang`（`zh-CN` / `en` / `x-default`），指到对方语言的同一页。
+- 语言切换**不做自动跳转**：URL 已经表明语言，再按 `localStorage` 自动跳会让想切回去的人摸不着头脑。
+- 英文排版在 `style.css` 末尾的 `:lang(en)` 一节单独覆盖：中文用 `em` 控行宽，英文用 `ch`；工具清单的名称列加宽到 176px，否则 `Command palette` 会折行。
+- `main.js` 里主题按钮的 `title` 跟着 `<html lang>` 走，不用为英文单独写一份脚本。
+
+## 版本号
+
+**只有一个来源**：`assets/js/site.js` 的 `version` / `released`。页面上的 `<span data-ver></span>` 与 `<span data-ver-date></span>` 由它填充，包括首屏版本行、下载区和更新日志第一条。
+
+不要往 HTML 里手写版本号。日志里 `v0.0.29`、`v0.0.28` 这些是历史记录的文本，不参与同步。
+
+## 发版时要改的地方
 
 ```bash
 cd website
-python -m http.server 8080
-# 打开 http://localhost:8080
+python tools/bump.py 0.0.31 2026-11-02
 ```
 
-> 编辑器 / 预览面板会给 `index.html` 注入 `data-page-node-id="…"`（每个标签一个，几千处）。不影响功能，但会让 diff 很脏。提交前清一下：
->
-> ```bash
-> python -c "
-> import io, re
-> p = 'website/index.html'; s = io.open(p, encoding='utf-8').read()
-> n = len(re.findall(r'[ \t]+data-page-node-id=\"[^\"]*\"', s))
-> s = re.sub(r'[ \t]+data-page-node-id=\"[^\"]*\"', '', s)
-> io.open(p, 'w', encoding='utf-8', newline='').write(s)
-> print('removed', n)
-> "
-> ```
->
-> 别用「压掉连续空格」的写法整行处理，会把行首缩进（含 `<pre>` 内缩进）一起压掉。
+它做三件事：
 
-## 图标与配色
+1. 改 `site.js` 的 `version` / `released`；
+2. 把现有日志条目的 `data-ver` / `data-ver-date` 固化成字面量（上一条「当前版」从此变成历史）；
+3. 在 `#log` 顶部插一条新条目并默认展开，标题与正文留 `TODO`，中英各一份。
 
-图标全部来自应用图标 `build/appicon.png`（深蓝底 + 金色 Q 火箭），缩放三份存于 `assets/img/`：
+跑完填两个 `index.html` 里的 `TODO`，再 `git diff` 看一眼插入位置。旧条目超过四条时脚本会提醒删最旧的。
+
+脚本靠 `<div class="logs rise">` 与 `<details class="log" open>` 定位，改更新日志的 HTML 结构时记得回来对一眼。
+
+**更新日志的日期和内容必须去 `git log <tag>` 里核对**，不要凭印象填——有一次 v0.0.27 / v0.0.28 的条目整个写错了版本内容。发布日期用 `git log -1 --format=%ad --date=short <tag>`。
+
+**功能描述**要和主仓库 `README.md` 保持一致。`设置 → X` 这类路径最容易过期，发版前在两个 `guide.html` 里 grep 一遍 `设置 → ` 与 `Settings → `，对着应用的设置菜单核。设置页合并过一次，`导航设置`、`快捷键设置`、`打开工具`、`通用` 这些名字都改过。
+
+**运行时数量**出现在首屏 facts 与 `#runtime` 标题附近，增减运行时两页一起改，主仓库 README 也是。
+
+下载链接用的是 GitHub latest release 的稳定地址（`releases/latest/download/...`），不用带版本号。
+
+## 主题
+
+右上角一个按钮，选择存 `localStorage` 的 `qd-theme`。中英两页共用同一个键，切了语言主题不丢。
+
+- 首次访问跟随系统 `prefers-color-scheme`，手动切换后以手动选择为准。
+- `<html>` 上的初始值写死 `dark`（产品本身的默认），脚本接手后再按存储或系统偏好覆盖，避免首屏闪白。
+- 切主题会同步 `<meta name="theme-color">`。
+- 写新样式时用 `--t1` / `--surf-*` / `--line*` 这些令牌，**不要硬编码 `rgba(255,255,255,…)`**，亮色下会看不见。
+
+## 动画
+
+`.rise` 元素由 `IntersectionObserver` 在进入视口时加 `.in`，位移 14px、600ms。`prefers-reduced-motion: reduce` 下直接可见。
+
+不用 `scrollIntoView`——在 iframe 预览里会带动外层一起滚。
+
+## 截图
+
+`assets/img/` 里现有的都是 1063×740 的窗口截图，CSS 按满宽 1:1 显示，**别压到更小尺寸**，会糊。
+
+截图自带窗口标题栏（左边金色图标 + 快速坞 QuickDock），本身就是品牌标识，**不要再外套一层假窗口边框**。
+
+截图里的界面是中文的，英文页也用同一批图——产品本身有英文界面，只是还没补英文截图。
+
+| 文件 | 位置 |
+|------|------|
+| `ui-main.png` | Hero、`01` 第一组 |
+| `ui-env.png` | `01` 第二组 |
+| `ui-plugins.png` | `01` 第三组 |
+| `ui-onboarding.png` / `ui-workspace.png` | 暂未使用，可作为新增内容的素材 |
+
+新增截图保持同样的窗口尺寸和暗色主题。
+
+## 图标
+
+图标来自 `build/appicon.png`（深蓝底 + 金色 Q 火箭），缩放三份：
 
 | 文件 | 尺寸 | 用途 |
 |------|------|------|
 | `favicon-64.png` | 64×64 | 浏览器标签页 |
-| `apple-touch-icon.png` | 180×180 | iOS / macOS 添加到主屏 |
-| `appicon-512.png` | 512×512 | 导航栏与页脚品牌标 + og:image |
+| `apple-touch-icon.png` | 180×180 | 添加到主屏 |
+| `appicon-512.png` | 512×512 | 顶栏与页脚品牌标、og:image |
 
-`index.html` 里三处引用：`<link rel="icon">`、`.brand-mark > img`（导航栏与页脚各一处）。
-
-**图标换了以后重新生成**：
+图标换了以后重新生成：
 
 ```bash
 python -c "
@@ -105,65 +162,42 @@ src.resize((512,512), Image.LANCZOS).save('website/assets/img/appicon-512.png', 
 "
 ```
 
-配色跟着图标走：主题色在 `style.css` 的 `:root` 里，`--brand: #cfa93f` 取自图标金色，按钮文字用 `--on-brand: #16130a`（金底上白字对比度不够，必须是深色字）。亮色主题下金色要压深一档（`--brand: #9a7515`，配白字约 4.7:1）。想换回靛蓝紫只要改两处主题块里的这四个变量（`--brand` / `--brand-accent` / `--brand-hover` / `--on-brand`），但 CSS 里另有 11 处 `rgba(207, 169, 63, ...)` 半透明色（glow / 卡片底 / 标签）需要一并替换。
+## 本地预览
 
-## 截图
-
-5 张真实截图已就位，直接以 `<figure class="shot"><img …></figure>` 内联在 `index.html` 里：
-
-| 文件 | 位置 | 内容 |
-|------|------|------|
-| `assets/img/ui-main.png` | Hero 下方 | 主界面：命令面板 + 工作空间列表 |
-| `assets/img/ui-env.png` | 环境管理 | 侧栏运行时 + 版本下拉 + 运行状态 |
-| `assets/img/ui-plugins.png` | 插件 | 插件市场卡片网格 |
-| `assets/img/ui-onboarding.png` | 使用说明 01 | 首次启动引导页 |
-| `assets/img/ui-workspace.png` | 使用说明 03 | 工作空间四层结构 + 搜索 |
-
-**换图**：直接覆盖同名文件即可。建议 PNG、宽 1600px 左右（Hero 那张是 16:9）。
-
-**加新图**（比如笔记、待办看板、监控）：
-
-```html
-<figure class="shot reveal"><img src="assets/img/ui-todo.png" alt="待办看板"></figure>
+```bash
+cd website
+python -m http.server 8080
+# 打开 http://localhost:8080
 ```
 
-`reveal` 类保留滚动淡入；想加图注就在后面补 `<figcaption>`。
-
-**还没截图时**可以用占位样式撑版式（`.shot-frame` 斜纹底 + `.shot-label` 说明文字）：
-
-```html
-<figure class="shot reveal">
-  <div class="shot-frame" style="aspect-ratio:16/9">
-    <span class="shot-label"><b>【占位图】应用主界面</b><span>说明文字</span></span>
-  </div>
-</figure>
-```
-
-> `img` 的 `alt` 文案不参与语言切换——词典只替换文本节点，属性不处理。要跟着中英走就得手工改，或者给 `i18n.js` 加一层属性表。
-
+> 编辑器 / 预览面板会给 HTML 注入 `data-page-node-id="…"`，每个标签一个，会让 diff 变脏。提交前清一下：
+>
+> ```bash
+> python -c "
+> import io, re
+> p = 'website/index.html'; s = io.open(p, encoding='utf-8').read()
+> n = len(re.findall(r'[ \t]+data-page-node-id=\"[^\"]*\"', s))
+> s = re.sub(r'[ \t]+data-page-node-id=\"[^\"]*\"', '', s)
+> io.open(p, 'w', encoding='utf-8', newline='').write(s)
+> print('removed', n)
+> "
+> ```
+>
+> 别用「压掉连续空格」的写法整行处理，会把缩进（含 `<pre>` 内的）一起压掉。
 
 ## 部署
 
-- 触发：push 到 `main` 且改动落在 `website/**`（或手动 Run workflow）。
+- 触发：push 到 `main` 且改动落在 `website/**`，或手动 Run workflow。
 - 首次需在仓库 **Settings → Pages → Source** 选 **GitHub Actions**。
-- 自定义域名：在 `website/` 下放一个 `CNAME` 文件（内容只写域名），再到域名服务商加 CNAME 记录指向 `parieses.github.io`。
+- 自定义域名：在 `website/` 下放 `CNAME`（内容只写域名），再到域名服务商加 CNAME 记录指向 `parieses.github.io`。加域名后记得把 `hreflang` 从相对路径换成绝对地址。
 
-## 改文案时注意
+## 增删说明页章节时
 
-- **不写具体数量**：运行时 / 插件 / MCP 工具的个数会随版本漂移，Hero stats 与章节标题一律不写数字（改写「一键装切」「开箱即用」「以插件市场为准」这类表述），要数字以应用内的环境管理页 / 插件市场为准。枚举清单（运行时长表格、插件 chip、工具表格）保留。
-- **版本号**散落在三处：Hero 的 `.hero-meta`、WHAT'S NEW 的 eyebrow + 副标题、`#changelog` 顶部那条的 `.log-ver`（配 `.log-date`）。改完记得同步 `i18n.js` 里对应的 key（key 本身含版本号，不是只改 value）。
-- **发版要在 `#changelog` 顶部插一条**：复制最新那条 `<details class="log" open="">` 改成新版本，并把**上一条的 `open` 属性去掉**（只让最新版默认展开）。版本号、日期是纯 ASCII 不参与翻译；正文要点写中文，再补进 `i18n.js`。内容来源是 git 提交历史 —— GitHub Release 的 body 是 CI 自动生成的 changelog 链接，**没有实际内容**，别指望从那里抄。
-- 下载链接用的是 GitHub latest release 稳定地址（`releases/latest/download/...`），不需要改版本号。
+两页的编号都是写死的，插入或删除一节要同时改四处，漏一处就会出现「目录写 9、正文写 8」：
 
-## 增删「使用说明」章节时
+1. `<aside class="doc-nav">` 里的 `<a href="#sN">NN 标题</a>`
+2. 正文 `<section class="doc-sec" id="sN">` 的 `id` 与 `<h2><span>NN</span>标题</h2>`
+3. 说明页开头那句「从装好到用顺手。前四节…」里的节数描述
+4. 英文页的对应位置（内容自己译，编号相同）
 
-使用说明是**顺序编号**的，插入/删除一节要**五处联动**，漏一处就会出现「侧栏写着 9、正文写着 8」这类错位：
-
-1. 正文的 `<span class="step-no">STEP NN</span>`（每节一处）
-2. 正文上方的注释 `<!-- ============ N ============ -->`
-3. 侧栏 `#guideNav` 里的 `<a href="#g-xxx">N. 标题</a>`
-4. `i18n.js` 里的 `"N. 标题"` 条目 —— **key 和 value 都含编号，两处都要改**
-5. 使用说明开头的「NN 节完整教程：…N—M 节覆盖…」那句总述
-
-批量重编号建议从**大到小**替换（先 16→17，再 15→16 ……），否则会把刚改好的数字再改一遍。`main.js` 的 scrollspy 是动态取 `#guideNav a`，不用改。
-
+批量重编号从大到小改（先 16→17，再 15→16），否则会把刚改好的数字再改一遍。目录高亮是 `main.js` 里动态取 `#docNav a` 的，不用跟着改。改完跑 `python tools/check-parity.py`。

@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>使用说明 — 快启坞 QuickDock</title>
+<meta name="description" content="QuickDock 使用说明：安装、界面、快捷键、资源管理、命令面板、剪贴板、截图、笔记、待办、监控、定时任务、环境管理、AI、SSH、备份与排错。">
+<meta name="theme-color" content="#080c15">
+<link rel="icon" href="assets/img/favicon-64.png">
+<link rel="alternate" hreflang="zh-CN" href="guide.html">
+<link rel="alternate" hreflang="en" href="en/guide.html">
+<link rel="alternate" hreflang="x-default" href="guide.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+
+<header class="top" id="top-bar">
+  <div class="top-inner">
+    <a class="brand" href="index.html" aria-label="快启坞 QuickDock">
+      <img src="assets/img/appicon-512.png" alt="" width="26" height="26">
+      <b>快启坞</b><span>QuickDock</span>
+    </a>
+    <nav>
+      <a href="index.html#ui">界面</a>
+      <a href="index.html#tools">工具</a>
+      <a href="index.html#runtime">环境</a>
+      <a href="index.html#ai">AI</a>
+      <a href="index.html#log">更新</a>
+      <a href="guide.html" style="color:var(--t1)">说明</a>
+    </nav>
+    <div class="top-right">
+      <div class="lang">
+        <a class="on" aria-current="true" href="guide.html">中</a>
+        <a href="en/guide.html" hreflang="en" lang="en">EN</a>
+      </div>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="切换明暗主题" title="切换明暗主题">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.8 6.8 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <a class="btn btn-solid btn-sm" href="index.html#download">下载</a>
+    </div>
+  </div>
+</header>
+
+<main class="doc">
+  <div class="wrap">
+    <div class="doc-head">
+      <h1>使用说明</h1>
+      <p>从装好到用顺手。前四节是必须走一遍的，后面按需翻。左侧目录可以直接跳。</p>
+    </div>
+
+    <div class="doc-body">
+      <aside class="doc-nav" id="docNav">
+        <a href="#s1">01 安装</a>
+        <a href="#s2">02 界面</a>
+        <a href="#s3">03 快捷键</a>
+        <a href="#s4">04 资源管理</a>
+        <a href="#s5">05 命令面板</a>
+        <a href="#s6">06 剪贴板</a>
+        <a href="#s7">07 截图与贴图</a>
+        <a href="#s8">08 笔记</a>
+        <a href="#s9">09 待办</a>
+        <a href="#s10">10 监控与通知</a>
+        <a href="#s11">11 定时任务</a>
+        <a href="#s12">12 环境管理</a>
+        <a href="#s13">13 AI 助手</a>
+        <a href="#s14">14 SSH 终端</a>
+        <a href="#s15">15 数据与备份</a>
+        <a href="#s16">16 更新与排错</a>
+      </aside>
+
+      <div class="doc-main">
+
+        <section class="doc-sec" id="s1">
+          <h2><span>01</span>安装</h2>
+          <p>下载 <code>quickdock-amd64-installer.exe</code> 双击安装即可，全程不需要管理员权限。</p>
+          <ul>
+            <li>默认装到 <code>%LOCALAPPDATA%\Programs\快启坞</code>，装完运行 <code>QuickDock.exe</code>，托盘出现图标即可。</li>
+            <li><b>安装路径建议保持默认。</b>自动更新依赖对安装目录的写权限，装到 <code>C:\Program Files</code> 之后每次更新都要过 UAC，就只能手动覆盖。</li>
+            <li>不想装也行：直接下 <code>quickdock-amd64.exe</code> 当便携版用，放在当前用户可写的目录，同样支持就地更新。</li>
+            <li>首次启动会问一次数据目录放哪，之后不再问。想改的话到「设置 → 存储与同步」。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s2">
+          <h2><span>02</span>界面</h2>
+          <p>主窗口固定三栏，从上到下一条线对齐。</p>
+          <ul>
+            <li><b>顶栏</b>：左边切工作空间，中间是场景标签页，右边是「配置」——当前场景绑定的环境服务在这里挂。</li>
+            <li><b>侧栏</b>：上半是导航（工作空间、笔记、待办、定时、监控、剪贴板、环境管理、AI、DeepSeek Harness、插件），下半是场景列表，中间有搜索框，底部是通知铃铛和设置。</li>
+            <li><b>中栏</b>：当前场景下的集合，每个集合带类型图标和项目数量。</li>
+            <li><b>右栏</b>：选中集合里的项目。没选集合时这里显示提示，不是坏了。</li>
+            <li>整体界面可以在「设置 → 通用」里等比缩放，主界面和所有独立窗口一起放大，布局比例不变。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s3">
+          <h2><span>03</span>快捷键</h2>
+          <p>默认七个全局热键，记住这几个就够用一整天。</p>
+          <ul>
+            <li><kbd>Ctrl</kbd><kbd>Space</kbd> 显示或隐藏主窗口</li>
+            <li><kbd>Ctrl</kbd><kbd>K</kbd> 命令面板</li>
+            <li><kbd>Ctrl</kbd><kbd>`</kbd> 剪贴板历史浮窗</li>
+            <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>N</kbd> 快捷笔记</li>
+            <li><kbd>F1</kbd> 区域截图，被占用时回退 <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd></li>
+            <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd> 窗口排版浮层，另有 15 个贴屏热键在「设置 → 窗口管理」</li>
+            <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>S</kbd> SSH 远程终端</li>
+            <li>全部可在「设置 → 快捷键设置」里改，改完立即生效，不用重启。忘了按什么就在命令面板里输入 <code>cheatsheet</code>，弹出的表读的是你当前的键位。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s4">
+          <h2><span>04</span>资源管理</h2>
+          <p>四层结构：工作空间装场景，场景装集合，集合装项目。</p>
+          <ul>
+            <li><b>工作空间</b>用来隔离上下文，比如「公司」和「个人」各一个，互不干扰。</li>
+            <li><b>场景</b>是同一份资源的不同切面，可以带标签、图标和颜色。写前端时切到「前端」，运维时切到「线上」。</li>
+            <li><b>集合</b>按用途分组，有四种打开策略，决定项目是一次性全打开还是逐个点。</li>
+            <li><b>项目</b>有六种类型：目录、文件、网页、终端命令、应用、带参快速链接。</li>
+            <li>任意层都能拖拽排序。命令和网址里可以写 <code>{date}</code>、<code>{time}</code>、<code>{username}</code>、<code>{clipboard}</code>，打开的那一刻才展开成实际值。</li>
+            <li>找不到东西时按 <kbd>Ctrl</kbd><kbd>K</kbd> 搜，比在树里翻快。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s5">
+          <h2><span>05</span>命令面板</h2>
+          <p><kbd>Ctrl</kbd><kbd>K</kbd> 打开，输入即搜，回车执行。</p>
+          <ul>
+            <li>结果按来源分区：最佳匹配、最近、项目、快速链接、笔记、待办、应用程序、文件、插件命令、环境服务、系统命令、剪贴板建议，另有计算器和网页两组就地结果。</li>
+            <li>搜索待办时只列没完成的顶层任务。回车会切到待办页、跳到那一天、必要时清掉标签过滤，目标行高亮两秒；动作菜单里能直接标记完成。</li>
+            <li>输入算式直接出结果，粘贴网址会问你要不要存成项目。</li>
+            <li>输入 <code>cheatsheet</code> 看快捷键表，输入 <code>logtail</code> 打开日志尾随。</li>
+            <li>两个边界：剪贴板历史条目不参与搜索（面板里的建议只针对刚复制的那一条）；各区有显示上限，只有「最近」能展开。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s6">
+          <h2><span>06</span>剪贴板</h2>
+          <p><kbd>Ctrl</kbd><kbd>`</kbd> 唤出浮窗，失焦自动隐藏。</p>
+          <ul>
+            <li>文本、图片、文件都会记录。图片存在 <code>~/.quickdock/images/</code>。</li>
+            <li>标签分两类：<b>图片</b>、<b>文件</b>、<b>全部</b>、<b>已收藏</b> 按类型筛；<b>网址</b>、<b>邮箱</b>、<b>电话</b>、<b>JSON</b>、<b>代码</b> 是智能分类，只作用于文本条目。</li>
+            <li>分类在入库时算好存进数据库，所以切到某个标签能翻到全部历史，不受「全部」列表默认载入 1000 条的限制。</li>
+            <li>条目上可以「问 AI」：翻译、摘要、格式化，或者自己提问，回答就地弹出，不跳页。</li>
+            <li>保留天数在「设置 → 剪贴板」里配，到期自动清理。可以设自动规则清洗复制进来的内容，改之前能先试运行。</li>
+            <li>全应用的复制都走后端系统 API，不受窗口焦点影响。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s7">
+          <h2><span>07</span>截图与贴图</h2>
+          <p><kbd>F1</kbd> 进入全屏覆盖层，框选之后原地浮出工具条。</p>
+          <ul>
+            <li>六种标注：矩形、椭圆、箭头、直线、马赛克、文字。颜色 9 种、线宽 4 档、字号 6 档。</li>
+            <li>框选时把光标移到窗口上会高亮整个窗口，单击直接选中；按住 <kbd>Ctrl</kbd> 下沉到子控件。</li>
+            <li>标注画错了可以点选、拖动、删掉。文字双击能重新编辑。选框有 8 个控制点。</li>
+            <li>截完可以直接贴图钉在屏幕上，能拖、能滚轮缩放、双击关闭。</li>
+            <li>常用键：<kbd>Enter</kbd> 或 <kbd>Ctrl</kbd><kbd>C</kbd> 复制，<kbd>Ctrl</kbd><kbd>S</kbd> 保存，<kbd>Ctrl</kbd><kbd>Z</kbd> 撤销，<kbd>R</kbd><kbd>E</kbd><kbd>A</kbd><kbd>L</kbd><kbd>M</kbd><kbd>T</kbd> 切工具，<kbd>Esc</kbd> 逐层退出。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s8">
+          <h2><span>08</span>笔记</h2>
+          <p><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>N</kbd> 打开浮动笔记窗口。</p>
+          <ul>
+            <li>左侧是树形笔记库，文件夹可以嵌套，支持搜索、重命名、删除。</li>
+            <li>内容按 Markdown 保存，停下 500ms 自动存盘，没有保存按钮。</li>
+            <li>窗口失焦自动隐藏，不会挡着底下的东西。</li>
+            <li>浮窗里的「问 AI」：有选区只送选中的那段，没有就送整篇。预置总结、润色、续写、翻译，也能自由追问，整个过程不写入 AI 对话历史。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s9">
+          <h2><span>09</span>待办</h2>
+          <p>侧栏「待办任务」进入，列表和看板两种视图随时切。</p>
+          <ul>
+            <li>任务可以带子任务、标签、备注、预计时长。</li>
+            <li>重复规则支持每日、每周、每月，勾上之后到期自动生成下一条。</li>
+            <li>设了到期时间会在系统通知里提醒。</li>
+            <li>番茄专注在待办页启动倒计时，结束后发系统通知，也可以在「设置 → 打开工具」里配 Webhook 推到手机。</li>
+            <li>在命令面板里搜任务标题，回车能直接跳到那一条。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s10">
+          <h2><span>10</span>监控与通知</h2>
+          <p>侧栏「网站监控」新建一条，填地址和探测间隔就行。</p>
+          <ul>
+            <li>能看状态码、响应时间、SSL 证书剩余天数，还能要求响应体里必须出现某个关键字或匹配某条正则。</li>
+            <li>延迟抖动和真正宕机是两回事，可以在设置里调判定阈值，避免网络抖一下就报警。</li>
+            <li>状态翻转时推送到桌面通知，也能配钉钉、企业微信、飞书、Server酱、PushPlus 或 Telegram。</li>
+            <li>趋势图有 24 小时、7 天、全部三个区间，监控列表能导出 CSV。</li>
+            <li>所有通知最后都会收进侧栏底部的铃铛，点一条直接跳回对应的监控。窗口正开着的时候 AI 完成通知不会打扰你。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s11">
+          <h2><span>11</span>定时任务</h2>
+          <p>五种动作配四种调度，够覆盖日常的脚本和提醒。</p>
+          <ul>
+            <li>动作：打开软件、打开目录、打开网页、执行命令、发 HTTP 请求。</li>
+            <li>调度：一次性、按间隔、每天、每周。</li>
+            <li>列表里可以手动「立即执行」一次，不用等到点。</li>
+            <li>删掉的任务会进回收站。恢复时按当前时间重算下次运行，不会因为原定时间早就过了而立刻补跑一次。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s12">
+          <h2><span>12</span>环境管理</h2>
+          <p>侧栏「环境管理」，左边按分组列运行时，右边是版本与服务。</p>
+          <ul>
+            <li>装新版本：选版本号点安装，进度会实时推回来。一个下载源慢就换一个，也可以配自己的镜像地址。</li>
+            <li>同一个运行时可以共存多个版本，切换只是把 PATH 指过去，不卸载也不覆盖。</li>
+            <li>服务型运行时（Nginx、MySQL、Redis 这类）支持启动、停止、重启，配置能直接在应用里改，保存后按需重载。</li>
+            <li>Nginx、Apache、Caddy 在启动前会跑一遍配置校验，语法错就停住，不会把线上服务弄挂。</li>
+            <li>每个服务都有实时日志（尾部 8KB）和 Web 控制台入口；端口总览能看到谁占了哪个端口。</li>
+            <li>所有东西装在 <code>%APPDATA%\QuickDock\runtime\</code> 下，不写注册表，不改系统 PATH，不需要管理员权限。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s13">
+          <h2><span>13</span>AI 助手</h2>
+          <p>先到「设置 → AI 助手」建一个档案：选服务商，填 BaseURL 和 Key，点「拉取模型列表」挑一个模型。</p>
+          <ul>
+            <li>档案建好之后，对话页、SSH 终端侧栏、剪贴板条目的「问 AI」、笔记浮窗共用同一份，不用配四遍。</li>
+            <li>对话页支持多会话、自动起标题、切模式（聊天、解释代码、翻译、总结、使用教程），也能叠加自己的 System Prompt。</li>
+            <li>回答里的公式、流程图、代码块都会渲染。图、公式、代码块可以右键「复制为图片」，<code>html</code> 代码块能开全屏沙箱预览。</li>
+            <li>切到别的页面，回答会继续生成，回来还在原位置。</li>
+            <li>「设置 → AI 助手」里有用量统计：近 7 天、30 天、全部的花费估算，按模型和入口拆开。按内置单价线性算，不是账单，以服务商结算为准。</li>
+            <li>Key 用 Windows DPAPI 加密存储，前端拿不到密文。删掉档案时密文一并删除。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s14">
+          <h2><span>14</span>SSH 终端</h2>
+          <p><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>S</kbd> 打开独立窗口，可以缩放、最小化，切换窗口不断连。</p>
+          <ul>
+            <li>左侧主机树支持分组（文件夹），可以拖拽排序，给主机打环境标签：生产、预发、测试。</li>
+            <li>认证用密码或私钥（ed25519 等，可带口令）。老设备用 <code>ssh-rsa</code> 的话要打开 legacy 开关。</li>
+            <li><b>第一次连一台新机器会弹出指纹确认，</b>拿它跟服务器上 <code>ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub</code> 的输出对一下再信任。已信任的指纹在窗口顶栏的 known_hosts 里管理，指纹变了会主动告警。</li>
+            <li>同一个主机开多个标签只握手一次。断线会自动重连，滚动回放还在。</li>
+            <li>SFTP 面板能浏览远程目录、上传下载。</li>
+            <li>在分组上「批量执行」可以勾多台机器，先预演（只读，列出将执行的命令和风险）再运行，逐台回传输出。</li>
+            <li>右侧 AI 侧栏：选中终端输出右键就能问，高危命令只给「填入」，你自己按回车。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s15">
+          <h2><span>15</span>数据与备份</h2>
+          <p>默认所有数据都在 <code>~/.quickdock</code>，配置文件在 <code>%APPDATA%\QuickDock</code>。</p>
+          <ul>
+            <li><code>quickdock.db</code> 是主库（工作空间、待办、笔记、剪贴板索引），<code>images/</code> 放剪贴板图片，<code>plugins/</code> 放插件，<code>logs/</code> 放日志。</li>
+            <li><b>搬家</b>：在「设置 → 存储与同步」改存储位置。整个目录打包搬到新盘，装好的运行时和环境变量一起带走，重启生效。目标盘要留出压缩包加解压的峰值空间。</li>
+            <li><b>云同步</b>：同一个页面配 WebDAV 服务器，做全量 JSON 备份，保留多个版本，能一键恢复。</li>
+            <li><b>快照</b>：一键把全部数据导出成 JSON 文件，随手存一份。导入会覆盖当前数据，做之前先看一眼提示。</li>
+            <li>卸载不会删数据，重装后还能接上。</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s16">
+          <h2><span>16</span>更新与排错</h2>
+          <p>应用启动后会拉取签名清单，有新版就在设置里提示。</p>
+          <ul>
+            <li>更新是就地替换：下载新 exe，校验摘要，重启后由 helper 备份旧的、覆盖新的，失败会回滚。不弹 UAC，也不跑安装器。</li>
+            <li>更新失败大多是装到了没有写权限的目录。换成默认路径，或者手动下载新版本覆盖。</li>
+            <li>出问题先看「设置 → 日志」：按天列主日志，可以按级别过滤，同页还能看 JS 和 Go 的崩溃现场。</li>
+            <li>日志文件本身也能尾随：命令面板输入 <code>logtail</code>，选一个正在被写入的文件，每 500ms 只读新增部分。</li>
+            <li>热键没反应，多半是被别的软件占了。到「设置 → 快捷键设置」换一个，改完立即重注册。</li>
+            <li>服务起不来，先在配置页看校验输出；再看端口总览，是不是端口被别的进程占了。</li>
+          </ul>
+        </section>
+
+      </div>
+    </div>
+  </div>
+</main>
+
+<footer class="footer">
+  <div class="wrap foot">
+    <div>
+      <div class="foot-brand">
+        <img src="assets/img/appicon-512.png" alt="" width="24" height="24">
+        <b>快启坞 QuickDock</b>
+      </div>
+      <p class="foot-note">Go + Vue 3 + Wails v3 写的 Windows 桌面工具。MIT 许可，源码在 GitHub。</p>
+    </div>
+    <div class="foot-links">
+      <a href="index.html">首页</a>
+      <a href="https://github.com/parieses/quickdock" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/parieses/quickdock/releases" target="_blank" rel="noopener">更新日志</a>
+      <a href="https://github.com/parieses/quickdock/issues" target="_blank" rel="noopener">问题反馈</a>
+    </div>
+  </div>
+</footer>
+
+<script src="assets/js/main.js"></script>
+</body>
+</html>

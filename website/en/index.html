@@ -1,0 +1,488 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QuickDock — everything you build with, in one window</title>
+<meta name="description" content="A Windows desktop tool. Resource tree, command palette, clipboard, 28 runtimes, screenshots and window tiling, SSH terminal, AI assistant. Single-file installer, no admin rights, data stays local.">
+<meta name="theme-color" content="#080c15">
+<link rel="icon" href="../assets/img/favicon-64.png">
+<link rel="apple-touch-icon" href="../assets/img/apple-touch-icon.png">
+<meta property="og:type" content="website">
+<meta property="og:title" content="QuickDock — everything you build with, in one window">
+<meta property="og:description" content="Resource tree, command palette, clipboard, 28 runtimes, screenshots and window tiling, SSH and AI. Single-file installer, all data local.">
+<meta property="og:image" content="../assets/img/ui-main.png">
+<link rel="alternate" hreflang="zh-CN" href="../index.html">
+<link rel="alternate" hreflang="en" href="index.html">
+<link rel="alternate" hreflang="x-default" href="../index.html">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../assets/css/style.css">
+<script src="../assets/js/site.js" defer></script>
+</head>
+<body>
+
+<header class="top" id="top-bar">
+  <div class="top-inner">
+    <a class="brand" href="#top" aria-label="QuickDock">
+      <img src="../assets/img/appicon-512.png" alt="" width="26" height="26">
+      <b>QuickDock</b><span>快启坞</span>
+    </a>
+    <nav>
+      <a href="#ui">Interface</a>
+      <a href="#tools">Tools</a>
+      <a href="#runtime">Runtimes</a>
+      <a href="#ai">AI</a>
+      <a href="#log">Changes</a>
+      <a href="guide.html">Guide</a>
+    </nav>
+    <div class="top-right">
+      <div class="lang">
+        <a href="../index.html" hreflang="zh-CN" lang="zh-CN">中</a>
+        <a class="on" aria-current="true" href="index.html">EN</a>
+      </div>
+      <button class="icon-btn" id="themeBtn" type="button" aria-label="Toggle theme" title="Toggle theme">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"><path d="M21 12.8A8.5 8.5 0 1 1 11.2 3a6.8 6.8 0 0 0 9.8 9.8z"/></svg>
+      </button>
+      <a class="btn btn-solid btn-sm" href="#download">Download</a>
+    </div>
+  </div>
+</header>
+
+<main id="top">
+
+<!-- ============================ HERO ============================ -->
+<section class="hero">
+  <div class="wrap">
+    <p class="kicker"><i></i><span data-ver></span> · Windows 10 / 11 · MIT</p>
+    <h1>Everything you build with,<br>in <em>one window</em></h1>
+    <p class="lede">
+      Resource tree, command palette, clipboard, 28 runtimes, screenshots and window tiling,
+      SSH terminal, AI assistant. One installer, no admin rights, data stays on your machine.
+    </p>
+    <div class="cta">
+      <a class="btn btn-solid btn-lg" href="#download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4.2-4.2M12 15l-4.2-4.2M5 19h14"/></svg>
+        Download for Windows
+      </a>
+      <a class="btn btn-line btn-lg" href="https://github.com/parieses/quickdock" target="_blank" rel="noopener">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.5 2 2 6.6 2 12.2c0 4.5 2.9 8.3 6.8 9.6.5.1.7-.2.7-.5v-1.7c-2.8.6-3.4-1.2-3.4-1.2-.5-1.2-1.1-1.5-1.1-1.5-.9-.6.1-.6.1-.6 1 .1 1.5 1 1.5 1 .9 1.6 2.4 1.1 3 .9.1-.7.4-1.1.6-1.4-2.2-.3-4.6-1.1-4.6-5 0-1.1.4-2 1-2.7-.1-.3-.4-1.3.1-2.7 0 0 .8-.3 2.7 1a9.3 9.3 0 0 1 5 0c1.9-1.3 2.7-1 2.7-1 .5 1.4.2 2.4.1 2.7.6.7 1 1.6 1 2.7 0 3.9-2.3 4.7-4.6 5 .4.3.7 1 .7 1.9v2.8c0 .3.2.6.7.5A10.1 10.1 0 0 0 22 12.2C22 6.6 17.5 2 12 2z"/></svg>
+        Source on GitHub
+      </a>
+    </div>
+    <ul class="facts">
+      <li><b>&lt; 50 MB</b> installer</li>
+      <li><b>0</b> admin rights</li>
+      <li><b>28</b> runtimes</li>
+      <li><b>MIT</b> open source</li>
+    </ul>
+
+    <figure class="shot">
+      <div class="shot-inner">
+        <img src="../assets/img/ui-main.png" alt="QuickDock main window: navigation, collections and items" width="1063" height="740">
+      </div>
+    </figure>
+  </div>
+</section>
+
+<!-- ============================ 01 INTERFACE ============================ -->
+<section id="ui">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">01</div>
+      <div>
+        <h2>Three panes, one working day</h2>
+        <p class="sec-sub">Navigation on the left, collections in the middle, items on the right. The tree has four levels, and an item can be a folder, a file, a URL, a command, an app, or a shortcut with arguments.</p>
+      </div>
+    </div>
+
+    <div class="rows">
+      <article class="row rise">
+        <div class="row-copy">
+          <div>
+            <span class="row-tag">Resources</span>
+            <h3>Where things live is up to you</h3>
+            <p>Workspaces separate contexts, scenarios are different slices of the same resources, collections group by purpose. Every level can be dragged into order.</p>
+          </div>
+          <ul>
+            <li>Four levels: workspace → scenario → collection → item</li>
+            <li>FTS5 full-text search; matches Chinese and English alike</li>
+            <li>Commands and URLs accept <code>{date}</code> <code>{time}</code> <code>{clipboard}</code>, expanded on open</li>
+          </ul>
+        </div>
+        <div class="row-shot">
+          <img src="../assets/img/ui-main.png" alt="Main window: navigation, collections, items" width="1063" height="740" loading="lazy">
+        </div>
+      </article>
+
+      <article class="row rise">
+        <div class="row-copy">
+          <div>
+            <span class="row-tag">Runtimes</span>
+            <h3>28 runtimes, all under your user folder</h3>
+            <p>Languages, databases, middleware, web servers, dev tools — as many versions as you want. Switching changes one environment variable: no registry writes, no system PATH.</p>
+          </div>
+          <ul>
+            <li>Install progress streamed line by line; mirrors switchable with fallback</li>
+            <li>Nginx, Apache and Caddy run their <code>*-t</code> check before starting</li>
+            <li>Service logs, web console and port overview on one page</li>
+          </ul>
+        </div>
+        <div class="row-shot">
+          <img src="../assets/img/ui-env.png" alt="Runtimes: groups on the left, versions on the right" width="1063" height="740" loading="lazy">
+        </div>
+      </article>
+
+      <article class="row rise" id="plugins">
+        <div class="row-copy">
+          <div>
+            <span class="row-tag">Plugins</span>
+            <h3>Plugins run sandboxed, permissions are declared</h3>
+            <p>Three runtimes: plain front-end, embedded JS sandbox, separate process. Whatever a plugin needs has to be declared in <code>plugin.json</code>; anything undeclared is refused.</p>
+          </div>
+          <ul>
+            <li>34 host APIs covering files, network, clipboard, processes and crypto</li>
+            <li>Native plugins are statically audited at install time; manifest mismatches are flagged</li>
+            <li>Official plugins install and update from the built-in marketplace</li>
+          </ul>
+        </div>
+        <div class="row-shot">
+          <img src="../assets/img/ui-plugins.png" alt="Plugin marketplace: categories, search, installed markers" width="1063" height="740" loading="lazy">
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 02 TOOLS ============================ -->
+<section id="tools">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">02</div>
+      <div>
+        <h2>The dozen tools you'd otherwise open separately</h2>
+        <p class="sec-sub">None of them is remarkable on its own. The difference is that they share one window and one set of hotkeys, so taking a screenshot or glancing at a log doesn't mean launching another app.</p>
+      </div>
+    </div>
+
+    <dl class="tools rise">
+      <div class="tool">
+        <dt>Command palette <kbd>Ctrl K</kbd></dt>
+        <dd>Searches projects, notes, todos, apps, files and plugin commands at once, grouped by source. Paste a URL and it offers to save it as a project.</dd>
+      </div>
+      <div class="tool">
+        <dt>Clipboard history <kbd>Ctrl `</kbd></dt>
+        <dd>Text, images and files are all recorded. Images and files are types of their own; URLs, emails, JSON and code are classified on write, so a tag reaches the whole history.</dd>
+      </div>
+      <div class="tool">
+        <dt>Screenshot <kbd>F1</kbd></dt>
+        <dd>A layered native window acts as the overlay: selecting, annotating, copying and pinning all happen inside it, no second window.</dd>
+      </div>
+      <div class="tool">
+        <dt>Window tiling <kbd>Ctrl Alt W</kbd></dt>
+        <dd>15 snap hotkeys plus a 3×3 overlay you click once. It doesn't take over Win + arrow keys.</dd>
+      </div>
+      <div class="tool">
+        <dt>Quick notes <kbd>Ctrl Alt N</kbd></dt>
+        <dd>A tree of Markdown notes, autosaved, hidden as soon as it loses focus. Ask the AI from the same float window.</dd>
+      </div>
+      <div class="tool">
+        <dt>Todos</dt>
+        <dd>List and kanban views, subtasks, tags, repeat rules, due reminders, plus a pomodoro timer.</dd>
+      </div>
+      <div class="tool">
+        <dt>Site monitor</dt>
+        <dd>Status codes, response time, SSL expiry, keyword matching. Pushes to the desktop or a webhook when a target flips state.</dd>
+      </div>
+      <div class="tool">
+        <dt>Scheduled tasks</dt>
+        <dd>Open an app, folder or URL, run a command, send an HTTP request. Once, every N minutes, daily, weekly.</dd>
+      </div>
+      <div class="tool">
+        <dt>SSH terminal <kbd>Ctrl Alt S</kbd></dt>
+        <dd>Tabbed sessions, SFTP, host key trust, batch execution across hosts. An AI sidebar docks on the right.</dd>
+      </div>
+      <div class="tool">
+        <dt>Log tail</dt>
+        <dd><code>tail -f</code> on any local file. Realigns when the file rotates or is rewritten in place; pausable, with highlight filters.</dd>
+      </div>
+      <div class="tool">
+        <dt>Notification center</dt>
+        <dd>Monitor outages, scheduled task results and finished AI answers land in one bell. Click through to the monitor or the conversation.</dd>
+      </div>
+      <div class="tool">
+        <dt>Data directory migration</dt>
+        <dd>Move the whole data directory, installed runtimes included, to another drive; environment variables are rewritten. Useful when C: runs out.</dd>
+      </div>
+      <div class="tool">
+        <dt>Local dev sites</dt>
+        <dd>Bind a custom domain to a project and issue an HTTPS certificate automatically. Listens on no port of its own.</dd>
+      </div>
+      <div class="tool">
+        <dt>WebDAV sync</dt>
+        <dd>Full JSON export and restore, versioned snapshots, any WebDAV server.</dd>
+      </div>
+    </dl>
+  </div>
+</section>
+
+<!-- ============================ 03 RUNTIMES ============================ -->
+<section id="runtime">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">03</div>
+      <div>
+        <h2>What you can install</h2>
+        <p class="sec-sub">Everything under your user folder, portable by default, versions coexist. Uninstalling removes the program, never your projects or models.</p>
+      </div>
+    </div>
+
+    <div class="rt rise">
+      <div class="rt-row"><span>Languages</span><div><b>Node.js</b><b>Go</b><b>PHP</b><b>Python</b><b>Bun</b><b>Erlang</b><b>JDK</b></div></div>
+      <div class="rt-row"><span>Web servers</span><div><b>Nginx</b><b>Caddy</b><b>Apache</b><b>Traefik</b><b>FTP</b><b>WebDAV</b></div></div>
+      <div class="rt-row"><span>Databases</span><div><b>MySQL</b><b>MariaDB</b><b>PostgreSQL</b><b>MongoDB</b></div></div>
+      <div class="rt-row"><span>Middleware</span><div><b>Redis</b><b>Memcached</b><b>MinIO</b><b>RabbitMQ</b></div></div>
+      <div class="rt-row"><span>Dev tools</span><div><b>Git</b><b>Composer</b><b>FFmpeg</b><b>Mailpit</b><b>frpc</b><b>GitHub CLI</b><b>mkcert</b></div></div>
+      <div class="rt-row"><span>AI services</span><div><b>Ollama</b><b class="accent">built-in MCP :9230</b></div></div>
+    </div>
+
+    <div class="rt-notes rise">
+      <div class="rt-note">
+        <h4>How versions install</h4>
+        <p>Mirrors are switchable, and the address accepts <code>{version}</code> <code>{os}</code> <code>{arch}</code> placeholders. When one source fails the next is tried, with progress streamed back live.</p>
+      </div>
+      <div class="rt-note">
+        <h4>How services are managed</h4>
+        <p>Start, stop and restart from the list. Save a config and services like Nginx validate before reloading — a syntax error stops there instead of taking down a running service.</p>
+      </div>
+      <div class="rt-note">
+        <h4>Does it touch the system</h4>
+        <p>No registry writes, no changes to system PATH, no admin prompt. Delete the folder and it is gone, with nothing left behind.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 04 AI ============================ -->
+<section id="ai">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">04</div>
+      <div>
+        <h2>Configure a model once, use it in four places</h2>
+        <p class="sec-sub">The chat page, the SSH sidebar, clipboard entries and the notes window share one model profile.</p>
+      </div>
+    </div>
+
+    <div class="duo rise">
+      <div class="card">
+        <h3>Models and chat</h3>
+        <p class="card-sub">OpenAI, DeepSeek, Kimi, Qwen, Ollama, Azure, and any compatible endpoint.</p>
+        <ul>
+          <li>Enter the base URL and key, then pull that endpoint's model list in one click instead of copying names by hand</li>
+          <li>SSE streaming, with the reasoning trace collapsed by default</li>
+          <li>Math renders through KaTeX, diagrams through Mermaid, code blocks get highlighting; right-click a diagram or formula to copy it as an image</li>
+          <li>Switch to another page while an answer is generating; it keeps going and is waiting where you left it</li>
+          <li>Usage stats cover every entry point, split by model and surface, and are labelled as an estimate rather than a bill</li>
+          <li>API keys are encrypted with Windows DPAPI; the front end never sees the ciphertext</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>AI in the terminal</h3>
+        <p class="card-sub">The SSH sidebar turns what you're looking at into commands you can run.</p>
+        <ul>
+          <li>Select terminal output, right-click, ask — the selection alone becomes the context</li>
+          <li>The screen is attached only when you mention it; otherwise it isn't sent, which saves tokens and avoids misleading the model</li>
+          <li>On production hosts the default is read-only probing; write commands must state their blast radius</li>
+          <li><code>rm -rf</code>, <code>mkfs</code> and <code>DROP TABLE</code> get a fill-in button only, never a run button</li>
+          <li>Running on production asks twice; fill-in never sends a newline</li>
+          <li>Switching sessions clears the context, so machine A's screen never follows you to machine B</li>
+        </ul>
+      </div>
+      <div class="card" id="mcp">
+        <h3>Local capabilities for agents</h3>
+        <p class="card-sub">A built-in MCP server at <code>http://127.0.0.1:9230/mcp</code>.</p>
+        <ul>
+          <li>Tools are split into three permission tiers; read-only and low-risk writes are on by default</li>
+          <li>Read-only covers runtime status, project search, todos, notes, clipboard, ports, logs and crash records</li>
+          <li>Low-risk writes start and stop services, open projects, create todos and notes</li>
+          <li>Killing processes and running system commands have to be enabled separately in the runtimes page</li>
+          <li>Starts and stops with the main process; gone when the app quits</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>DeepSeek Harness</h3>
+        <p class="card-sub">A complete agent coding surface in a native window: tools, files, terminal, sessions.</p>
+        <ul>
+          <li>Detects node, npx and dsh and installs whatever is missing, a portable Node included</li>
+          <li>Runs in its own native window; closing the window leaves the service running, and reopening returns to it</li>
+          <li>Fixed port 3080, falling back to a random port only when an unrelated process holds it</li>
+          <li>Every step — download, extract, npm install — is logged</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 05 CHANGELOG ============================ -->
+<section id="log">
+  <span id="changelog" style="position:absolute;top:0"></span>
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="sec-num">05</div>
+      <div>
+        <h2>What changed recently</h2>
+        <p class="sec-sub">Newest first, expand for detail. Older versions live in GitHub Releases.</p>
+      </div>
+    </div>
+
+    <div class="logs rise">
+      <details class="log" open>
+        <summary>
+          <span class="log-ver" data-ver></span>
+          <span class="log-date" data-ver-date></span>
+          <span class="log-title">Move your data folder, see what the AI costs, take formulas and diagrams out of an answer</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>The data directory can move to another drive as a whole, installed runtimes and environment variables included; it takes effect after a restart. The installer now also asks where to put it.</li>
+          <li>The AI assistant tracks usage: cost estimates for the last 7 days, 30 days and all time, question counts, a daily trend, split by model and by entry point, with cache savings called out separately.</li>
+          <li>Formulas, diagrams and code highlighting in answers now render properly; tables sort and export to CSV; diagrams and formulas can be copied as images from the context menu.</li>
+          <li>External links open in the system browser instead of navigating the app away. AI answers keep generating while you're on another page.</li>
+          <li>The clipboard's "images" and "files" filters work again, and classification happens on write, so a filter reaches the whole history.</li>
+          <li>The command palette searches todos, and Enter jumps to the one you picked. Deleted scheduled tasks go to the recycle bin.</li>
+          <li>Collections over a hundred items scroll virtually, logs render at most 5000 lines, and long lists stop getting slower as they grow.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.29</span>
+          <span class="log-date">2026-10-27</span>
+          <span class="log-title">Deletions are recoverable, the interface is unified, notifications have a home</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Deleted projects, collections, scenes, notes and workspaces go to the recycle bin under Settings → History, and cascade-deleted children come back with them.</li>
+          <li>A notification center at the bottom of the sidebar collects monitor state, scheduled task results and finished AI answers, and each entry jumps back to its source.</li>
+          <li>Any file can be tailed live: new lines are read incrementally, and rotation realigns automatically.</li>
+          <li>The clipboard supports automatic rules — trim, drop blank lines, sort, format JSON — scoped to matching content, with a dry run before you commit.</li>
+          <li>Type <code>cheatsheet</code> in the command palette for the hotkey sheet, read from your current bindings.</li>
+          <li>Settings went from 14 pages to 11, and the headers, buttons and panel titles of nine pages now follow one set of rules.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.28</span>
+          <span class="log-date">2026-10-26</span>
+          <span class="log-title">Scheduled tasks keep a run history, results reach your phone</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Each run of a scheduled task records its start time, duration, exit code and output in a run history.</li>
+          <li>Results can be pushed to a bot: WeCom, DingTalk, Feishu, Telegram and others.</li>
+          <li>The MCP server exposes <code>robot_notify</code>, so agents can send messages out too.</li>
+          <li>Interface zoom has three steps and lives in settings; plugin windows follow the display the main window is on.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.27</span>
+          <span class="log-date">2026-10-24</span>
+          <span class="log-title">Full-screen capture, drag-and-drop plugins, rearrangeable navigation</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Screenshots gain a full-screen mode; the SFTP panel shows file attributes; SSH hosts get a detail page.</li>
+          <li>Drop a plugin zip onto the window to install it, no clicking through menus.</li>
+          <li>Navigation items can be hidden and reordered, and the sidebar carries general-purpose badges.</li>
+          <li>Logs can be cleared by range, and database indexes can be rebuilt.</li>
+        </ul>
+      </details>
+    </div>
+
+    <p class="log-more">
+      <a href="https://github.com/parieses/quickdock/releases" target="_blank" rel="noopener">All versions and release notes →</a>
+    </p>
+  </div>
+</section>
+
+<!-- ============================ 06 DOWNLOAD ============================ -->
+<section id="download" style="padding-block:var(--s7) var(--s9)">
+  <div class="wrap">
+    <div class="dl rise">
+      <div>
+        <h2>Download QuickDock</h2>
+        <p class="dl-sub">The installer and the portable build are the same executable, with no difference in features. It installs under your user profile and needs no admin rights.</p>
+        <div class="dl-actions">
+          <a class="btn btn-solid btn-lg" href="https://github.com/parieses/quickdock/releases/latest/download/quickdock-amd64-installer.exe">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11m0 0 4.2-4.2M12 15l-4.2-4.2M5 19h14"/></svg>
+            Download installer
+          </a>
+          <a class="btn btn-line btn-lg" href="https://github.com/parieses/quickdock/releases" target="_blank" rel="noopener">All versions</a>
+        </div>
+        <div class="dl-meta">
+          <span><span data-ver></span> · amd64 · Windows 10 1809+ / 11</span>
+          <span>Keep the default install path — in-place updates depend on it</span>
+        </div>
+      </div>
+      <aside class="dl-side">
+        <h4>Requirements</h4>
+        <dl>
+          <div><dt>OS</dt><dd>Win 10 1809+</dd></div>
+          <div><dt>Runtime</dt><dd>WebView2</dd></div>
+          <div><dt>Disk</dt><dd>~50 MB</dd></div>
+          <div><dt>Rights</dt><dd>Current user</dd></div>
+          <div><dt>License</dt><dd>MIT</dd></div>
+        </dl>
+      </aside>
+    </div>
+
+    <div class="faq rise" style="margin-top:var(--s8)">
+      <details>
+        <summary>Does it need admin rights?</summary>
+        <p>No. The installer puts the program in <code>%LOCALAPPDATA%\Programs\快启坞</code>, and runtimes and data stay in your user folder — no registry writes, no UAC prompt. For the same reason, installing by hand into <code>C:\Program Files</code> breaks auto-update, because there is no write permission and you'd have to overwrite it manually.</p>
+      </details>
+      <details>
+        <summary>Where is my data, and does it get uploaded?</summary>
+        <p>In <code>~/.quickdock</code> by default: the database, clipboard images, plugins and logs. Nothing syncs in the background; network requests only happen when you configure WebDAV or call an AI endpoint. If space runs short, move the whole directory to another drive under Settings → Storage &amp; Sync.</p>
+      </details>
+      <details>
+        <summary>Does uninstalling delete my data?</summary>
+        <p>No. Uninstalling removes the program and its registry entry; <code>~/.quickdock</code> stays. Reinstall and everything is where you left it. Delete the folder yourself once you're sure you don't need it.</p>
+      </details>
+      <details>
+        <summary>Is macOS supported?</summary>
+        <p>Each release ships darwin arm64 and amd64 builds, but development and testing happen on Windows, so coverage on macOS is incomplete — please file an issue if you hit something. There is no Developer ID signature yet, so the first launch has to be allowed in System Settings.</p>
+      </details>
+    </div>
+  </div>
+</section>
+
+</main>
+
+<footer class="footer">
+  <div class="wrap foot">
+    <div>
+      <div class="foot-brand">
+        <img src="../assets/img/appicon-512.png" alt="" width="24" height="24">
+        <b>QuickDock</b>
+      </div>
+      <p class="foot-note">A Windows desktop tool written in Go, Vue 3 and Wails v3. MIT licensed, source on GitHub.</p>
+    </div>
+    <div class="foot-links">
+      <a href="guide.html">Guide</a>
+      <a href="https://github.com/parieses/quickdock" target="_blank" rel="noopener">GitHub</a>
+      <a href="https://github.com/parieses/quickdock/releases" target="_blank" rel="noopener">Changelog</a>
+      <a href="https://github.com/parieses/quickdock-plugins" target="_blank" rel="noopener">Plugin marketplace</a>
+      <a href="https://github.com/parieses/quickdock/issues" target="_blank" rel="noopener">Issues</a>
+    </div>
+  </div>
+</footer>
+
+<script src="../assets/js/main.js"></script>
+</body>
+</html>
