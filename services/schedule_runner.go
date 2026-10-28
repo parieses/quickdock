@@ -347,7 +347,22 @@ func (a *AppService) checkScheduledTasks() {
 	}
 }
 
-// notifyScheduleRun 定时任务执行后，按 t.Notify 开关向系统通知 + 已配置机器人推送结果。
+// hasNotifyChannel 判断某个通知渠道是否被勾选。
+// 空值按「两个都要」处理 —— 与 db 层 normalizeNotifyChannels 同一口径，
+// 老库刚补列、或调用方漏传时都不会静默吞掉通知。
+func hasNotifyChannel(csv, want string) bool {
+	if strings.TrimSpace(csv) == "" {
+		return true
+	}
+	for _, p := range strings.Split(csv, ",") {
+		if strings.TrimSpace(p) == want {
+			return true
+		}
+	}
+	return false
+}
+
+// notifyScheduleRun 定时任务执行后，按 t.Notify 总开关与 t.NotifyChannels 渠道推送结果。
 //
 // 把原来散在自动/手动两条执行路径里的重复通知逻辑收口到一处：二者都曾各自拼 title、
 // 各自调 Notifier / sendWebhookNotify，一旦一处改了另一处忘了，就出现「手动跑有通知、
@@ -379,14 +394,18 @@ func (a *AppService) notifyScheduleRun(t *db.ScheduledTask, status, result strin
 		b.WriteString("—")
 	}
 
-	if a.Notifier != nil {
+	// 分渠道：系统通知与机器人各自可关。此前是一个 notify 布尔同时决定两者，
+	// 于是「只想在桌面看到、不想往手机机器人推」这种最普通的诉求无处表达。
+	if hasNotifyChannel(t.NotifyChannels, "system") && a.Notifier != nil {
 		_ = a.Notifier.SendNotification(notifications.NotificationOptions{
 			ID:    "schedtask-" + t.ID + "-" + time.Now().Format("150405"),
 			Title: title,
 			Body:  b.String(),
 		})
 	}
-	a.sendWebhookNotify(title, b.String())
+	if hasNotifyChannel(t.NotifyChannels, "webhook") {
+		a.sendWebhookNotify(title, b.String())
+	}
 	// 进通知中心：定时任务是「没人盯着的时候发生的事」，正是最需要事后留档的一类。
 	level := "success"
 	if status != "ok" {
@@ -486,7 +505,14 @@ func (a *AppService) executeRecurringTodo(t *db.ScheduledTask) (string, string) 
 	if orig, gErr := a.DB.GetTodo(p.TodoID); gErr == nil {
 		tags = orig.Tags
 	}
-	if _, err := a.DB.CreateTodo(p.Title, p.Priority, p.DueDate, p.Note, "", "", "", "", tags); err != nil {
+	// 截止日按「本次生成的那一天」重算：payload 里的 dueDate 是**建这条重复规则当天**
+	// 的快照，原样沿用会让每天的实例都堆在同一个旧日期上（每天新增一条"上周到期"的任务）。
+	// 原截止日在未来（提前建好的）则保留，用户显式设的日期不该被覆盖。
+	due := p.DueDate
+	if today := time.Now().Format("2006-01-02"); due != "" && due < today {
+		due = today
+	}
+	if _, err := a.DB.CreateTodo(p.Title, p.Priority, due, p.Note, "", "", "", "", tags); err != nil {
 		return "fail", "创建待办失败：" + err.Error()
 	}
 	return "ok", "已生成待办：" + p.Title

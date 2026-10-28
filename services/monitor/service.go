@@ -4,9 +4,12 @@
 package monitor
 
 import (
+	"fmt"
 	"regexp"
+	"strings"
 
 	"quickdock/internal/db"
+	"quickdock/internal/validators"
 	"quickdock/services"
 )
 
@@ -36,12 +39,24 @@ func validateContentMatch(m db.Monitor) *services.ApiResult {
 	return nil
 }
 
+// validateMonitorURL 保存前校验地址：错填的 URL 不会在保存时报错，而是让这条监控
+// 每轮都「请求失败」，用户看到的是"网站挂了"而不是"地址写错了"。
+func validateMonitorURL(m db.Monitor) *services.ApiResult {
+	if err := validators.ValidateURL(strings.TrimSpace(m.URL)); err != nil {
+		return services.Fail(err)
+	}
+	return nil
+}
+
 // CreateMonitor 新建网站监控
 func (s *MonitorService) CreateMonitor(m db.Monitor) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
 	}
 	if v := validateContentMatch(m); v != nil {
+		return v
+	}
+	if v := validateMonitorURL(m); v != nil {
 		return v
 	}
 	created, err := s.App.DB.CreateMonitor(&m)
@@ -91,6 +106,77 @@ func (s *MonitorService) DeleteMonitor(id string) *services.ApiResult {
 	return services.Ok(nil)
 }
 
+// SoftDeleteMonitor 软删：进回收站，可恢复。
+func (s *MonitorService) SoftDeleteMonitor(id string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if strings.TrimSpace(id) == "" {
+		return services.Fail(fmt.Errorf("参数不合法：id 不能为空"))
+	}
+	if err := s.App.DB.SoftDeleteMonitor(id); err != nil {
+		return services.Fail(err)
+	}
+	s.App.WakeMonitorChecker()
+	return services.Ok(nil)
+}
+
+// RestoreMonitor 从回收站恢复。
+func (s *MonitorService) RestoreMonitor(id string) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if strings.TrimSpace(id) == "" {
+		return services.Fail(fmt.Errorf("参数不合法：id 不能为空"))
+	}
+	if err := s.App.DB.RestoreMonitor(id); err != nil {
+		return services.Fail(err)
+	}
+	s.App.WakeMonitorChecker()
+	return services.Ok(nil)
+}
+
+// ListDeletedMonitors 回收站列表。
+func (s *MonitorService) ListDeletedMonitors() *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	list, err := s.App.DB.ListDeletedMonitors()
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(list)
+}
+
+// SetMonitorSort 拖拽排序。
+func (s *MonitorService) SetMonitorSort(id string, sort int) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if strings.TrimSpace(id) == "" {
+		return services.Fail(fmt.Errorf("参数不合法：id 不能为空"))
+	}
+	if err := s.App.DB.SetMonitorSort(id, sort); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// SetMonitorMaintenance 维护窗口：until=0 取消。
+func (s *MonitorService) SetMonitorMaintenance(id string, until int64) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if strings.TrimSpace(id) == "" {
+		return services.Fail(fmt.Errorf("参数不合法：id 不能为空"))
+	}
+	if err := s.App.DB.SetMonitorMaintenance(id, until); err != nil {
+		return services.Fail(err)
+	}
+	s.App.WakeMonitorChecker()
+	return services.Ok(nil)
+}
+
 // SetMonitorEnabled 启用/停用监控
 func (s *MonitorService) SetMonitorEnabled(id string, enabled bool) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
@@ -112,7 +198,15 @@ func (s *MonitorService) CheckMonitorNow(id string) *services.ApiResult {
 	if err != nil {
 		return services.Fail(err)
 	}
+	// 停用的监控不该"点了立即检测、结果什么都没说"：探针内部会直接返回空状态，
+	// 前端把空串当错误显示，用户只看到一条空白错误条。
+	if !m.Enabled {
+		return services.FailMsg("该监控已停用，未执行检测")
+	}
 	status, summary := s.App.CheckOneMonitor(m)
+	if status == "" {
+		return services.FailMsg("检测未执行（监控已停用或数据不可用）")
+	}
 	if status != "up" {
 		return services.FailMsg(summary)
 	}

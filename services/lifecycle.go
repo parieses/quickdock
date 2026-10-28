@@ -69,10 +69,13 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 			}
 		}()
 		days, _ := a.DB.GetClipboardRetentionDays()
-		if count, err := a.DB.DeleteExpiredClipboardEntries(days); err != nil {
+		count, imgs, err := a.DB.DeleteExpiredClipboardEntries(days)
+		if err != nil {
 			logger.W("QuickDock: 剪贴板过期清理失败: %v", err)
 		} else if count > 0 {
-			logger.I("QuickDock: 已清理 %d 条过期剪贴板记录", count)
+			// 图片文件同步清理：只删库会让截图目录无限增长，而用户完全无感
+			files := RemoveClipboardImages(imgs)
+			logger.I("QuickDock: 已清理 %d 条过期剪贴板记录（含 %d 张图片）", count, files)
 		}
 	}()
 

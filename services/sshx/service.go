@@ -221,13 +221,33 @@ func (s *SshService) MoveHost(id, parentID string) *services.ApiResult {
 
 // ---- 连通性与指纹 ----
 
-// TestHost 测试连通性：建连 + 认证 + 取主机指纹，成功即断开。
+// TestHost 测试已落库主机的连通性：建连 + 认证 + 取主机指纹，成功即断开。
 func (s *SshService) TestHost(id string) *services.ApiResult {
 	host, secret, err := s.loadHost(id)
 	if err != nil {
 		return failSsh(err)
 	}
+	return s.probe(host, secret)
+}
 
+// TestHostInput 用表单里还没落库的配置测试连通性。
+//
+// 为什么需要它：新建主机时用户没有任何办法先验证一遍，只能「先存一台连不上的
+// 机器，再回头改」。而 TestHost 只认 id、内部读库拿凭据，对「库里还没有的主机」
+// 无能为力；先 SaveHost 再 TestHost 又会留下脏数据（测试失败但主机已经写进列表）。
+//
+// 编辑态下密码/口令留空是「不修改」的约定（见 db.SaveSshHost），所以这里要把
+// 库里已存的凭据补回来，否则用户改个端口再去测试会被判成「空密码」。
+func (s *SshService) TestHostInput(in SshHostInput) *services.ApiResult {
+	host, secret, err := s.buildTestTarget(in)
+	if err != nil {
+		return failSsh(err)
+	}
+	return s.probe(host, secret)
+}
+
+// probe 真正的探测段：两条入口（已落库 / 未落库）共用，确保指纹确认逻辑只有一份。
+func (s *SshService) probe(host *db.SshHost, secret *db.SshHostSecret) *services.ApiResult {
 	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
 	defer cancel()
 
@@ -251,7 +271,10 @@ func (s *SshService) TestHost(id string) *services.ApiResult {
 
 	info := client.Info()
 	// 记录时间失败不影响「连接可用」的结论，不打断流程。
-	_ = s.App.DB.TouchSshHostConnected(host.ID)
+	// 未落库的表单值没有 id，跳过即可（UPDATE ... WHERE id='' 只是空跑）。
+	if host.ID != "" {
+		_ = s.App.DB.TouchSshHostConnected(host.ID)
+	}
 	return services.Ok(TestHostResult{
 		Trusted:          true,
 		ServerVersion:    info.ServerVersion,
@@ -441,6 +464,79 @@ func (s *SshService) loadHost(id string) (*db.SshHost, *db.SshHostSecret, error)
 		return nil, nil, errNoCredential
 	}
 	return host, secret, nil
+}
+
+// buildTestTarget 把表单入参整理成「可以直接拿去 dial」的 host + secret。
+//
+// 归一化规则对齐 db.normalizeSshHost，但不落库：端口非法回落 22、用户留空回落 root、
+// 认证类型只认 password/key。校验口径也保持一致——缺主机地址、缺密码、缺私钥路径
+// 都按 errInvalidInput / errNoCredential 报错，让前端拿到的错误和保存时一模一样。
+func (s *SshService) buildTestTarget(in SshHostInput) (*db.SshHost, *db.SshHostSecret, error) {
+	if s.App.DB == nil {
+		return nil, nil, errDBUnavailable
+	}
+	if in.IsFolder {
+		return nil, nil, errFolderNotConnectable
+	}
+
+	hostname := strings.TrimSpace(in.Host)
+	if hostname == "" {
+		return nil, nil, errInvalidInput
+	}
+	port := in.Port
+	if port <= 0 || port > 65535 {
+		port = 22
+	}
+	user := strings.TrimSpace(in.User)
+	if user == "" {
+		user = "root"
+	}
+
+	authType := in.AuthType
+	if authType != db.SshAuthKey {
+		authType = db.SshAuthPassword
+	}
+	secret := &db.SshHostSecret{
+		Host:             hostname,
+		Port:             port,
+		User:             user,
+		AuthType:         authType,
+		Password:         in.Password,
+		KeyPath:          strings.TrimSpace(in.KeyPath),
+		KeyPassphrase:    in.KeyPassphrase,
+		LegacyAlgorithms: in.LegacyAlgorithms,
+	}
+
+	// 编辑态：库里的值兜底（留空 = 不修改），显式清除优先。
+	if id := strings.TrimSpace(in.ID); id != "" {
+		if stored, err := s.App.DB.GetSshHostSecret(id); err == nil {
+			if secret.Password == "" {
+				secret.Password = stored.Password
+			}
+			if secret.KeyPassphrase == "" {
+				secret.KeyPassphrase = stored.KeyPassphrase
+			}
+		}
+	}
+	if in.ClearPassword {
+		secret.Password = ""
+	}
+
+	if authType == db.SshAuthPassword && secret.Password == "" {
+		return nil, nil, errNoCredential
+	}
+	if authType == db.SshAuthKey && secret.KeyPath == "" {
+		return nil, nil, errNoCredential
+	}
+
+	return &db.SshHost{
+		ID:               strings.TrimSpace(in.ID),
+		Name:             in.Name,
+		Host:             hostname,
+		Port:             port,
+		User:             user,
+		LegacyAlgorithms: in.LegacyAlgorithms,
+	}, secret, nil
 }
 
 // dial 统一装配连接参数：解密后的凭据 + 指纹校验回调。

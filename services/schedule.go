@@ -19,9 +19,13 @@ func (a *AppService) CreateScheduledTask(t db.ScheduledTask) *ApiResult {
 		return Fail(err)
 	}
 	t.NextRun = computeNextRun(&t, nowStr())
-	// 一次性任务若计算不出有效时间（如时间已过）：仍允许保存，但必须置 enabled=false
-	// 避免产出「enabled=1 且 next_run=''」的假启用任务（调度器永不触发、UI 显示已启用）
+	// 一次性任务若计算不出有效时间（时间已过）：**直接拒绝**，不再"存下来但停用"。
+	// 静默降级最误导：前端收到成功提示，用户回头却找不到一条能跑的任务，
+	// 只会以为调度器坏了。其它类型算不出时间属于兜底（参数异常），仍允许保存但停用。
 	if t.NextRun == "" {
+		if t.ScheduleKind == "once" {
+			return FailMsg("设定的执行时间已过，请选择将来的时间")
+		}
 		t.Enabled = false
 	}
 	created, err := a.DB.CreateScheduledTask(&t)
@@ -53,9 +57,21 @@ func (a *AppService) UpdateScheduledTask(t db.ScheduledTask) *ApiResult {
 		return Fail(err)
 	}
 	if t.Enabled {
-		t.NextRun = computeNextRun(&t, nowStr())
-		if t.NextRun == "" {
-			t.Enabled = false // 一次性任务时间已过：不启用
+		// 只有**调度规则本身**变了才重算 next_run。
+		// 过去无条件重算：改个名字、换条命令，间隔任务的节拍就从「3 分钟后」被推回
+		// 「一整个周期之后」，用户以为任务丢了。
+		prev, perr := a.DB.GetScheduledTask(t.ID)
+		recalc := perr != nil || prev == nil || prev.NextRun == "" || !sameSchedule(prev, &t)
+		if recalc {
+			t.NextRun = computeNextRun(&t, nowStr())
+			if t.NextRun == "" {
+				if t.ScheduleKind == "once" {
+					return FailMsg("设定的执行时间已过，请选择将来的时间")
+				}
+				t.Enabled = false // 兜底：算不出下次运行时不留假启用任务
+			}
+		} else {
+			t.NextRun = prev.NextRun
 		}
 	} else {
 		t.NextRun = ""
@@ -64,6 +80,22 @@ func (a *AppService) UpdateScheduledTask(t db.ScheduledTask) *ApiResult {
 		return Fail(err)
 	}
 	a.wakeScheduler()
+	return Ok(nil)
+}
+
+// SetScheduledTaskSort 调整任务的显示顺序（拖拽排序），不触碰调度规则与 next_run。
+// 列表按 sort ASC, created_at ASC 排；前端拖完把整段顺序按 index*10 回写，
+// 留出间隔便于以后插入。
+func (a *AppService) SetScheduledTaskSort(id string, sort int) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if id == "" {
+		return FailMsg("任务 ID 不能为空")
+	}
+	if err := a.DB.SetScheduledTaskSort(id, sort); err != nil {
+		return Fail(err)
+	}
 	return Ok(nil)
 }
 
@@ -140,6 +172,21 @@ func (a *AppService) RunScheduledTaskNow(id string) *ApiResult {
 	return OkMsg(result, result)
 }
 
+// sameSchedule 判断两次保存的**调度规则**是否等价（忽略名称/动作/通知等业务字段）。
+//
+// 只比规则本身，是为了让"改个名字"不重置节拍；只要规则没变，上次算好的 next_run
+// 就还能用。
+func sameSchedule(a, b *db.ScheduledTask) bool {
+	if a == nil || b == nil {
+		return false
+	}
+	return a.ScheduleKind == b.ScheduleKind &&
+		a.RunAt == b.RunAt &&
+		a.IntervalSec == b.IntervalSec &&
+		a.TimeOfDay == b.TimeOfDay &&
+		a.Weekdays == b.Weekdays
+}
+
 // validateScheduledTask 基础字段校验
 func validateScheduledTask(t *db.ScheduledTask) error {
 	// 验证名称
@@ -166,8 +213,10 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 		if t.IntervalSec < 5 {
 			return fmt.Errorf("间隔不能小于 5 秒")
 		}
-		if t.IntervalSec > 86400 {
-			return fmt.Errorf("间隔不能大于 24 小时")
+		// 上限放到 30 天：前端本来就提供「天」这个单位，卡在 24 小时等于
+		// 「选 2 天必定保存失败」，而这类巡检/备份任务动辄就是几天一次。
+		if t.IntervalSec > 30*86400 {
+			return fmt.Errorf("间隔不能大于 30 天")
 		}
 	}
 

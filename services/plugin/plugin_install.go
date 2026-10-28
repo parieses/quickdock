@@ -3,9 +3,12 @@ package plugin
 import "quickdock/services"
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"os"
@@ -257,4 +260,118 @@ func (p *PluginService) InstallPluginFromBytes(fileName string, fileData []byte)
 
 	// 调用标准的 InstallFromZip
 	return p.InstallPlugin(tmpPath)
+}
+
+// ---- 安装前预检（权限二次确认）----
+//
+// native 插件运行期拦不住危险调用（见 internal/plugin/permcheck.go 的背景说明），
+// 唯一能拦的时机就是安装前。这里不解压安装，只读 zip 里的 plugin.json，
+// 把声明的敏感能力翻成人话交回前端弹确认：用户看清「这个插件要联网/读写文件/杀进程」
+// 之后再见「确认安装」。
+
+// PluginZipInfo 安装前预览：zip 内 plugin.json 的元信息与权限摘要
+type PluginZipInfo struct {
+	ID          string   `json:"id"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Author      string   `json:"author"`
+	Runtime     string   `json:"runtime"`
+	Permissions []string `json:"permissions"` // 人可读的能力清单（空=未声明敏感能力）
+}
+
+// InspectPluginZip 预检本地 zip：不安装，只读 plugin.json 返回元信息与权限摘要。
+func (p *PluginService) InspectPluginZip(zipPath string) *services.ApiResult {
+	info, err := inspectZipManifest(zipPath)
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(info)
+}
+
+// InspectPluginZipData 预检拖拽进来的 zip 字节：与 InstallPluginFromBytes 一样
+// 走临时文件（复用同一套文件名防穿越校验），检完即删。
+func (p *PluginService) InspectPluginZipData(fileName string, fileData []byte) *services.ApiResult {
+	baseName := filepath.Base(fileName)
+	if baseName == "" || baseName == "." || baseName == string(filepath.Separator) {
+		return services.FailMsg("非法的文件名")
+	}
+	tmpDir := filepath.Join(os.TempDir(), "quickdock-plugin-install")
+	os.MkdirAll(tmpDir, 0755)
+	tmpPath := filepath.Join(tmpDir, baseName)
+	if err := os.WriteFile(tmpPath, fileData, 0644); err != nil {
+		return services.Fail(fmt.Errorf("写入临时文件失败: %w", err))
+	}
+	defer os.Remove(tmpPath)
+	info, err := inspectZipManifest(tmpPath)
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(info)
+}
+
+func inspectZipManifest(zipPath string) (*PluginZipInfo, error) {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return nil, fmt.Errorf("打开 zip 包失败: %w", err)
+	}
+	defer r.Close()
+	for _, f := range r.File {
+		if f.Name != "plugin.json" && f.Name != "./plugin.json" {
+			continue
+		}
+		rc, err := f.Open()
+		if err != nil {
+			return nil, fmt.Errorf("读取 plugin.json 失败: %w", err)
+		}
+		data, err := io.ReadAll(io.LimitReader(rc, 1<<20))
+		rc.Close()
+		if err != nil {
+			return nil, fmt.Errorf("读取 plugin.json 失败: %w", err)
+		}
+		var mf pluginmgr.PluginManifest
+		if err := json.Unmarshal(data, &mf); err != nil {
+			return nil, fmt.Errorf("plugin.json 解析失败: %w", err)
+		}
+		return &PluginZipInfo{
+			ID:          mf.ID,
+			Name:        mf.Name,
+			Version:     mf.Version,
+			Author:      mf.Author,
+			Runtime:     mf.Backend.Runtime,
+			Permissions: permSummary(&mf),
+		}, nil
+	}
+	return nil, fmt.Errorf("zip 包中未找到 plugin.json")
+}
+
+// permSummary 把权限声明翻成一行一条的「key: JSON 值」。
+// 展示原始 JSON 而不是自造文案：权限模型有 bool / 白名单 / scope 三种形态，
+// 自造文案容易在新增形态时漏翻，原始 JSON 至少永远忠实于清单。
+func permSummary(mf *pluginmgr.PluginManifest) []string {
+	pm := mf.Permissions
+	var out []string
+	add := func(key string, v interface{}) {
+		b, err := json.Marshal(v)
+		if err != nil {
+			out = append(out, key)
+			return
+		}
+		out = append(out, key+": "+string(b))
+	}
+	if pm.Network.Granted() {
+		add("network", pm.Network)
+	}
+	if pm.Filesystem.Granted() {
+		add("filesystem", pm.Filesystem)
+	}
+	if pm.Clipboard {
+		add("clipboard", true)
+	}
+	if pm.Shell.Granted() {
+		add("shell", pm.Shell)
+	}
+	if pm.ProcessKill.Granted() {
+		add("processKill", pm.ProcessKill)
+	}
+	return out
 }

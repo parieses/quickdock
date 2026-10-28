@@ -53,6 +53,10 @@ type DSHProcessManager struct {
 	starting bool          // 冷启动进行中（窗口已开但 dsh 未就绪）；连点/关窗时避免误判"进程已退出"而重启
 	token    string        // 冷启动从 dsh 输出解析的访问 token；导航/复用 URL 时附加 ?token= 携带
 	window   *application.WebviewWindow
+	// stopping 标记"本次退出是用户主动停止"。reaper 只看得到 cmd.Wait 返回，
+	// 分不清「用户点停止」和「进程自己崩了」：前者不该报错，后者必须告知并导航窗口，
+	// 否则设置页永远显示"运行中"、原生窗口停在死页面上。
+	stopping bool
 
 	// lastPluginBackup 最近一次「更新全部插件」前的备份目录（DSH_HOME/backups/web-<ts>）。
 	// 用于一键回滚；内存指针为空时回退到 backups/ 下最新 web-* 目录（跨重启仍可用）。
@@ -310,6 +314,9 @@ func (m *DSHProcessManager) Start() (string, error) {
 	m.ready = ready
 	m.readyErr = nil
 	m.starting = true
+	// 新进程不继承上一次的"主动停止"意图：Stop 在「无托管句柄」路径下不会产生
+	// reaper 回调，标记会一直留着，下次真崩溃时就会被误判成用户自己停的。
+	m.stopping = false
 	// reaper：进程自行退出（崩溃/被杀）后清理状态，避免后续 Start() 复用一个死进程
 	go func() {
 		defer func() {
@@ -320,7 +327,9 @@ func (m *DSHProcessManager) Start() (string, error) {
 		_ = cmd.Wait()
 		close(exit)
 		m.mu.Lock()
-		if m.cmd == cmd {
+		owned := m.cmd == cmd
+		expected := m.stopping
+		if owned {
 			m.cmd = nil
 			m.url = ""
 			m.port = 0
@@ -328,8 +337,27 @@ func (m *DSHProcessManager) Start() (string, error) {
 			m.ready = nil
 			m.readyErr = nil
 			m.starting = false
+			m.stopping = false
 		}
 		m.mu.Unlock()
+
+		// 意外退出（崩溃 / 被外部杀掉）：必须留痕 + 通知前端 + 把窗口导航到提示页。
+		// 只清内存状态是过去的行为——结果是设置页永远显示"运行中"，原生窗口停在
+		// 一个已经没人监听的地址上，用户只能自己猜发生了什么。
+		if owned && !expected {
+			if cmd.ProcessState != nil {
+				m.logf("error", fmt.Sprintf("dsh 进程意外退出（%s）", cmd.ProcessState.String()))
+			} else {
+				m.logf("error", "dsh 进程意外退出")
+			}
+			if m.app != nil {
+				m.app.Event.Emit("quickdock:dsh:exited", map[string]any{
+					"expected": false,
+					"message":  "dsh web 服务意外退出（进程已结束）",
+				})
+			}
+			m.notifyStopped("dsh web 服务已意外退出（进程崩溃或被结束）。可在「环境管理 → DeepSeek Harness」重新启动，或直接点击侧边栏 dsh 自动拉起。")
+		}
 	}()
 
 	// 就绪检查：监听端口是我们自己选的，直接构造 URL 轮询。
@@ -436,13 +464,19 @@ func (m *DSHProcessManager) Port() int {
 // 提示页，避免用户面对浏览器"无法访问此网站"式的死地址。窗口引用保留，下次点击侧边栏
 // dsh 时会因探测到服务不可达而自动销毁重建。
 func (m *DSHProcessManager) NotifyStopped() {
+	m.notifyStopped("dsh web 服务已停止。可在「环境管理 → DeepSeek Harness」重新启动，或直接点击侧边栏 dsh 自动拉起。")
+}
+
+// notifyStopped 是 NotifyStopped 的带文案版本：手动停止与意外退出要给用户
+// 不同的解释——"你停的"和"它自己崩了"是完全不同的两件事。
+func (m *DSHProcessManager) notifyStopped(msg string) {
 	m.mu.Lock()
 	w := m.window
 	m.mu.Unlock()
 	if w == nil {
 		return
 	}
-	w.SetURL(dshErrorPage("dsh web 服务已停止。可在「环境管理 → DeepSeek Harness」重新启动，或直接点击侧边栏 dsh 自动拉起。"))
+	w.SetURL(dshErrorPage(msg))
 }
 
 // noProxyClient 返回绕过一切系统/环境代理的 HTTP 客户端，仅用于本地健康检查。
@@ -540,6 +574,9 @@ func (m *DSHProcessManager) waitReady(url string, exit <-chan struct{}) error {
 func (m *DSHProcessManager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	// 先打标再发信号：reaper 可能在我们还没释放锁时就已经 Wait 返回，
+	// 靠锁顺序保证它读到的一定是 true。
+	m.stopping = true
 	m.stopLocked()
 	m.aliveCache.port = 0
 	m.aliveCache.ok = false

@@ -2,10 +2,15 @@
 package note
 
 import (
+	"errors"
 	"strings"
 
 	"quickdock/services"
 )
+
+// errEmptyID 空 id：排序/重命名这类按 id 定位的操作必须挡住，
+// 否则 UPDATE ... WHERE id=” 会静默影响 0 行，前端看起来「点了没反应」。
+var errEmptyID = errors.New("节点 id 不能为空")
 
 // NoteService 笔记树（文件夹 + Markdown 文档）绑定服务。
 type NoteService struct {
@@ -153,6 +158,20 @@ func (s *NoteService) MoveNoteNode(id, newParentId string) *services.ApiResult {
 		return r
 	}
 	if err := s.App.DB.MoveNoteNode(id, newParentId); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// SetNoteSort 调整同级排序（拖拽排序）。
+func (s *NoteService) SetNoteSort(id string, sort int) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if strings.TrimSpace(id) == "" {
+		return services.Fail(errEmptyID)
+	}
+	if err := s.App.DB.SetNoteSort(id, sort); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)

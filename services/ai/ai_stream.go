@@ -263,13 +263,14 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	// 仅落库助手回复：用户消息已在调模型前由 saveUserTurn 落库（幂等，重试不重复）。
 	// 模型成功返回但内容为空（上游限流/工具调用/内容过滤都可能）时不写空回复，避免污染历史。
-	saveAssistant := func(asst string) {
+	// stopped 标记随行落库：用户点停止后刷新会话，仍能看出这条是半截的。
+	saveAssistant := func(asst string, stopped bool) {
 		asst = strings.TrimSpace(asst)
 		if asst == "" {
-			logger.W("[ai] 模型未产出内容，跳过落库助手回复 conv=%s mode=%s", convID, mode)
+			logger.W("[ai] 模型未产出内容，跳过落库助手回复 conv=%s mode=%s stopped=%v", convID, mode, stopped)
 			return
 		}
-		if _, e := s.svc.App.DB.SaveAssistantTurn(convID, asst, reasoningBuf.String(), cfg.Model, usage); e != nil {
+		if _, e := s.svc.App.DB.SaveAssistantTurn(convID, asst, reasoningBuf.String(), cfg.Model, usage, stopped); e != nil {
 			logger.W("[ai] 保存助手回复失败 conv=%s: %v", convID, e)
 			fl.writeEvent("error", map[string]any{"message": e.Error()})
 		}
@@ -278,8 +279,8 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if ctx.Err() != nil {
 			// 用户主动取消，保存已收到部分（用户消息已在调模型前落库）
-			saveAssistant(assistant)
-			fl.writeEvent("done", doneEvent(convID, firstTokenAt, usage))
+			saveAssistant(assistant, true)
+			fl.writeEvent("done", doneEvent(convID, firstTokenAt, usage, cfg.Model))
 			return
 		}
 		// 上游报错：用户消息已落库，历史不会空。若疑似因 base64 本地图片被拒，给明确提示。
@@ -292,10 +293,10 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 正常结束，落库助手回复（用户消息已在调模型前落库）
-	saveAssistant(assistant)
+	saveAssistant(assistant, false)
 	_ = s.svc.App.DB.UpdateAIConversationMeta(convID, "", "")
 	logger.I("[ai] 流式结束 conv=%s 首字=%dms in=%d out=%d cached=%d", convID, firstTokenAt.Milliseconds(), usage.Prompt, usage.Completion, usage.Cached)
-	fl.writeEvent("done", doneEvent(convID, firstTokenAt, usage))
+	fl.writeEvent("done", doneEvent(convID, firstTokenAt, usage, cfg.Model))
 
 	// 用户已经切走了才提醒：盯着屏幕看完整段回答的人再收到一条「回答完成」纯属噪音，
 	// 而趁回答生成的时间去干别的事、回来发现早就好了，才是最需要提醒的场景。
@@ -305,14 +306,28 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 // doneEvent 组装流式结束事件：附带首字延迟与本次用量，回传前端展示。
 // 字段名与前端 AIPage 的读取保持一致（promptTokens/completionTokens）。
 // 字段缺失（上游未回 usage）时为 0，前端按 0 隐藏即可。
-func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage) map[string]any {
-	return map[string]any{
+func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, model string) map[string]any {
+	out := map[string]any{
 		"convId":           convID,
 		"firstTokenMs":     firstTokenAt.Milliseconds(),
 		"promptTokens":     usage.Prompt,
 		"completionTokens": usage.Completion,
 		"cachedTokens":     usage.Cached,
+		// 回传本次实际使用的模型：前端刚落地的那条回复要用它显示模型名，
+		// 刷新后是 DB 里同一份值，两边口径一致（不取前端的档案名，那可能是旧值）。
+		"model": strings.TrimSpace(model),
 	}
+	// 单条回复的费用估算。价目表只有一份（ai_pricing.go），前端不复制一份
+	// —— 两处价格一旦漂移，气泡上写 ¥0.03、设置页账单写 ¥0.05，谁都不再可信。
+	//
+	// 未收录的模型**不填** cost：前端据此隐藏该项，与设置页「未知模型不计价」
+	// 同一个口径。宁可少显示一个数字，也不要给一个看起来精确其实编的数字。
+	if !usage.Empty() {
+		if cost, ok := estimateCost(model, usage.Prompt, usage.Completion, usage.Cached); ok {
+			out["cost"] = cost
+		}
+	}
+	return out
 }
 
 // sseFlusher 把上游逐 token 的写入合并成批量的 SSE 帧。

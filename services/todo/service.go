@@ -92,6 +92,22 @@ func (s *TodoService) SetTodoStatus(id, status string) *services.ApiResult {
 	return services.Ok(nil)
 }
 
+// SetTodoSort 调整排序权重（看板拖拽落位 / 子任务上下移）。
+// 与 SetTodoStatus 分开：拖动既要换列又要定位置，合在一个接口里会让
+// 「只换状态」也带上 sort 语义，排查时不好判断谁改了顺序。
+func (s *TodoService) SetTodoSort(id string, sort int) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if id == "" {
+		return services.FailMsg("待办 ID 不能为空")
+	}
+	if err := s.App.DB.SetTodoSort(id, sort); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
 // ToggleTodo 切换完成状态
 func (s *TodoService) ToggleTodo(id string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {

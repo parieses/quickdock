@@ -428,7 +428,8 @@ func processImage(database *db.Database, imageData []byte, paths, src string, em
 		if err := os.WriteFile(imagePath, pngBytes, 0644); err != nil {
 			logger.W("QuickDock: save image file failed: %v, removing entry %s", err, entry.ID[:8])
 			// 文件写入失败 → 回滚数据库条目，避免悬挂记录
-			database.DeleteClipboardEntry(entry.ID)
+			// 文件写入失败 → 回滚数据库条目，避免悬挂记录（此时文件没写成功，无需删文件）
+			_, _ = database.DeleteClipboardEntry(entry.ID)
 			return
 		}
 	}

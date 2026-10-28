@@ -37,6 +37,18 @@ func (a *ClipboardService) ListClipboardEntries(limit int) *services.ApiResult {
 }
 
 // ListClipboardEntriesByType 按类型过滤列出历史（content_type 已在表内，无需新增字段）。
+// CountClipboardEntries 历史总条数（不受列表 limit 影响）
+func (a *ClipboardService) CountClipboardEntries() *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	n, err := a.App.DB.CountClipboardEntries()
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(n)
+}
+
 func (a *ClipboardService) ListClipboardEntriesByType(limit int, contentType string) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
@@ -68,7 +80,13 @@ func (a *ClipboardService) DeleteExpiredClipboardEntries() *services.ApiResult {
 		return r
 	}
 	days, _ := a.App.DB.GetClipboardRetentionDays()
-	return services.Wrap(a.App.DB.DeleteExpiredClipboardEntries(days))
+	// 图片文件必须跟着条目一起删：只删库里的行会在图片目录留下永远无人引用的 PNG。
+	// 先删库（拿到路径），再删文件；文件删失败只记日志，不影响清理结果。
+	count, imgs, err := a.App.DB.DeleteExpiredClipboardEntries(days)
+	if err == nil {
+		services.RemoveClipboardImages(imgs)
+	}
+	return services.Wrap(count, err)
 }
 
 // writeEntryToClipboard 将一条剪贴板条目写入系统剪贴板（image/file/text 三分支）。
@@ -211,7 +229,10 @@ func (a *ClipboardService) CleanupClipboardNow() *services.ApiResult {
 		return r
 	}
 	days, _ := a.App.DB.GetClipboardRetentionDays()
-	count, err := a.App.DB.DeleteExpiredClipboardEntries(days)
+	count, imgs, err := a.App.DB.DeleteExpiredClipboardEntries(days)
+	if err == nil {
+		services.RemoveClipboardImages(imgs)
+	}
 	return services.Wrap(count, err)
 }
 
@@ -227,9 +248,11 @@ func (a *ClipboardService) DeleteClipboardEntry(id string) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.App.DB.DeleteClipboardEntry(id); err != nil {
+	imgPath, err := a.App.DB.DeleteClipboardEntry(id)
+	if err != nil {
 		return services.Fail(err)
 	}
+	services.RemoveClipboardImages([]string{imgPath})
 	return services.Ok(nil)
 }
 
@@ -242,6 +265,7 @@ type exportClipboardItem struct {
 	SourceApp   string `json:"sourceApp,omitempty"`
 	IsPinned    int    `json:"isPinned"`
 	CopyCount   int    `json:"copyCount"`
+	Note        string `json:"note,omitempty"`
 	CreatedAt   int64  `json:"createdAt"`
 }
 
@@ -250,7 +274,8 @@ func (a *ClipboardService) ExportClipboard() *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	entries, err := a.App.DB.ListClipboardEntries(0)
+	// 走无 LIMIT 的专用方法：导出是备份手段，被 5000 条静默截断的备份等于没备份。
+	entries, err := a.App.DB.ListAllClipboardEntries()
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -263,7 +288,9 @@ func (a *ClipboardService) ExportClipboard() *services.ApiResult {
 			SourceApp:   e.SourceApp,
 			IsPinned:    e.IsPinned,
 			CopyCount:   e.CopyCount,
-			CreatedAt:   e.CreatedAt,
+			// 备注是用户手写的唯一信息，丢了就再也找不回来
+			Note:      e.Note,
+			CreatedAt: e.CreatedAt,
 		}
 		if e.ContentType == "image" && e.ImagePath != "" {
 			if data, rerr := os.ReadFile(e.ImagePath); rerr == nil {
@@ -280,10 +307,11 @@ func (a *ClipboardService) ClearClipboardHistory() *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	n, err := a.App.DB.ClearClipboardHistory()
+	n, imgs, err := a.App.DB.ClearClipboardHistory()
 	if err != nil {
 		return services.Fail(err)
 	}
+	services.RemoveClipboardImages(imgs)
 	return services.Ok(map[string]interface{}{"deleted": n})
 }
 

@@ -92,6 +92,10 @@ func (a *AppService) checkReminders() {
 			continue
 		}
 		_ = a.DB.MarkReminderSent(t.ID)
+		// 进通知中心：桌面通知是一闪而过的，人不在电脑前就彻底丢了。
+		// 放在 MarkReminderSent 之后，与「系统通知发失败就重试」的既有语义一致
+		// （失败时 continue 不会走到这里，所以通知中心也不会被同一提醒刷屏）。
+		a.PushNotification("todo", "warn", "⏰ "+t.Title, body, "todo", t.ID)
 	}
 }
 

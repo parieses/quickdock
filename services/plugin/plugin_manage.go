@@ -140,7 +140,10 @@ func hotkeyStringToAccel(hotkey string) string {
 	return strings.Join(parts, "+")
 }
 
-func (p *PluginService) UninstallPlugin(id string) *services.ApiResult {
+// UninstallPlugin 卸载插件。keepData=true 时只删插件本体与注册记录，
+// 保留私有数据 / 使用记录 / 执行日志——重装同 ID 插件可接回原数据
+// （换机器迁移、临时排查问题重装时不至于把插件里的积累一并抹掉）。
+func (p *PluginService) UninstallPlugin(id string, keepData bool) *services.ApiResult {
 	if p.App.PluginMgr == nil {
 		return services.FailMsg("plugin manager not initialized")
 	}
@@ -156,6 +159,14 @@ func (p *PluginService) UninstallPlugin(id string) *services.ApiResult {
 				_ = p.App.App().GlobalShortcut.Unregister(accel)
 			}
 		}
+	}
+	if keepData {
+		// 保留数据：只清注册行与文件本体。usage_frecency 里的「最近使用」记录
+		// 也一并保留——重装后命令面板排序接得上旧习惯，正是保留数据的目的之一。
+		if err := p.App.DB.DeletePlugin(id); err != nil {
+			return services.Fail(err)
+		}
+		return services.Ok(nil)
 	}
 	// 清理数据库痕迹（记录 / 私有数据 / 使用记录 / 执行日志）
 	if err := p.App.DB.PurgePlugin(id); err != nil {

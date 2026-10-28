@@ -930,6 +930,13 @@ func (m *Manager) ListPlugins() []PluginInfo {
 		if cmds == nil {
 			cmds = []Command{}
 		}
+		caps := inst.Manifest.Capabilities
+		if caps == nil {
+			caps = []string{}
+		}
+		// 复制一份再取地址：PluginInfo 会活到 RUnlock 之后，直接指向实例字段等于把
+		// 内部状态漏给调用方（且并发读到一半 manifest 被替换就是数据竞争）。
+		perms := inst.Manifest.Permissions
 		result = append(result, PluginInfo{
 			ID:              inst.Manifest.ID,
 			Name:            inst.Manifest.Name,
@@ -944,6 +951,8 @@ func (m *Manager) ListPlugins() []PluginInfo {
 			Runtime:         inst.Manifest.Backend.Runtime,
 			Commands:        cmds,
 			Disabled:        inst.disabled.Load(),
+			Capabilities:    caps,
+			Permissions:     &perms,
 		})
 	}
 	return result

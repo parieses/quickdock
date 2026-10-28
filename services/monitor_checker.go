@@ -146,6 +146,11 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	if err != nil || !current.Enabled {
 		return "", ""
 	}
+	// 维护窗口内：暂停检测且不写日志/不告警。用户维护后端时不想被一连串
+	// 误报告警刷屏，设个 1 小时窗口比临时停用再改回来省事。
+	if current.MaintenanceUntil > time.Now().Unix() {
+		return "", ""
+	}
 
 	up, code, latency, errMsg := probeMonitor(current)
 	status := "down"
@@ -211,6 +216,10 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 					})
 				}
 				a.sendWebhookNotify(title, body)
+				// 证书临期是此前唯一「静默」的告警：桌面气泡和 webhook 都发了，
+				// 却不进通知中心 —— 用户错过那一下气泡，就再也查不到"哪天提示过证书快过期"。
+				// 去重靠 LastCertWarned（续期后重置），不会刷屏，放心入库。
+				a.PushNotification("monitor", "warn", title, body, "monitor", m.ID)
 				newLastWarned = now
 			}
 			_ = a.DB.UpdateMonitorCert(m.ID, expiresAt, newLastWarned)
@@ -221,11 +230,13 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	// 误报抑制：宕机告警仅在连续失败达到阈值（downAlertThreshold）的那一次发出；
 	// 恢复通知在首次探活成功时立即发出。用 current 副本避免探针期间读到过期开关。
 	//
-	// 多条件告警：latency_alert_ms>0 时，宕机告警还要求「当次延迟也超过该阈值」——
-	// 「连续 3 次失败且延迟>500ms」这类组合条件由此表达。关闭（0）时行为不变。
+	// 多条件告警：latency_alert_ms>0 时，告警消息里会附带「延迟 Xms > 阈值」的说明。
+	// 但它**不参与是否告警的判定**：过去写成「第 N 次失败 且 当次延迟超阈值」，
+	// 第 N 次恰好延迟正常时计数继续涨到 N+1，等值条件再也不成立 → 本次故障永久不再告警。
+	// 想区分「只是慢」和「真的挂了」需要额外的「已告警」状态位（DB 加列），
+	// 在补上之前，连续 N 次失败就该告警——漏报真故障比多说一句「也变慢了」贵得多。
 	prev := current.LastStatus
-	latencyCond := current.LatencyAlertMs <= 0 || latency > current.LatencyAlertMs
-	downAlertTriggered := !up && (newDownCount == threshold) && (current.ConsecutiveDown == threshold-1) && latencyCond
+	downAlertTriggered := !up && newDownCount == threshold
 	switch {
 	case downAlertTriggered && current.NotifyDown:
 		title := "🔴 监控告警：" + m.Name
@@ -236,7 +247,7 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 		if threshold > 1 {
 			body += fmt.Sprintf("\n（连续 %d 次失败）", newDownCount)
 		}
-		if current.LatencyAlertMs > 0 {
+		if current.LatencyAlertMs > 0 && latency > current.LatencyAlertMs {
 			body += fmt.Sprintf("\n（延迟 %dms > %dms）", latency, current.LatencyAlertMs)
 		}
 		if a.Notifier != nil {
@@ -281,11 +292,20 @@ func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg strin
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(m.TimeoutSec)*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, method, m.URL, nil)
+	var body io.Reader
+	if m.HTTPBody != "" && method != "GET" && method != "HEAD" {
+		body = strings.NewReader(m.HTTPBody)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, m.URL, body)
 	if err != nil {
 		return false, 0, 0, "请求构建失败：" + err.Error()
 	}
 	req.Header.Set("User-Agent", "QuickDock-Monitor/1.0")
+	// 自定义请求头：一行一条 "Name: Value"。# 开头的行与空行忽略，方便临时停用某一行。
+	// 没有它的话，需要 Token 的接口一律 401，POST/PUT/PATCH 这些方法也就没什么用了。
+	for name, value := range parseHeaderLines(m.HTTPHeaders) {
+		req.Header.Set(name, value)
+	}
 
 	// 复用共享 Transport（连接池），不每探测新建；超时由 ctx 控制
 	transport := http.RoundTripper(monitorDefaultTransport)
@@ -308,7 +328,9 @@ func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg strin
 	}
 	defer resp.Body.Close()
 	// 读取响应体（带 2MB 上限，用于内容匹配；其余丢弃）
-	body, _ := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
+	// 变量名不能叫 body：上面那个 body 是**请求体**（io.Reader），
+	// 同名 := 会撞上「no new variables on left side」，而且类型也不同。
+	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 
 	if !matchesExpected(resp.StatusCode, m.ExpectedStatus) {
 		return false, resp.StatusCode, latency,
@@ -316,11 +338,34 @@ func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg strin
 	}
 
 	// 内容匹配（关键字/正则）
-	if !matchesContent(body, m) {
+	if !matchesContent(respBody, m) {
 		return false, resp.StatusCode, latency,
 			fmt.Sprintf("内容不符：%s '%s'", m.ContentMatchType, m.ContentMatchPattern)
 	}
 	return true, resp.StatusCode, latency, ""
+}
+
+// parseHeaderLines 把 "Name: Value" 多行文本解析成 header 表。
+// 空行、以 # 开头的行、以及没有冒号的行全部跳过：这些多半是用户留的注释或写错的
+// 半行，宁可静默忽略，也不要因为一个格式错误让整条监控永远「请求失败」。
+func parseHeaderLines(raw string) map[string]string {
+	out := map[string]string{}
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		idx := strings.Index(line, ":")
+		if idx <= 0 {
+			continue
+		}
+		name := strings.TrimSpace(line[:idx])
+		if name == "" {
+			continue
+		}
+		out[name] = strings.TrimSpace(line[idx+1:])
+	}
+	return out
 }
 
 // matchesContent 按 content_match_type 判定响应体是否满足条件。
@@ -370,9 +415,15 @@ func fetchCertExpiry(host string, port, timeoutSec int) (int64, error) {
 	return state.PeerCertificates[0].NotAfter.Unix(), nil
 }
 
-// matchesExpected 判断状态码是否满足期望（支持 2xx/3xx... 或精确码）
+// matchesExpected 判断状态码是否满足期望（支持 any / 2xx/3xx... / 精确码）
 func matchesExpected(code int, expected string) bool {
 	expected = strings.TrimSpace(expected)
+	// "any" 必须真的是任意：过去它落到默认分支按 2xx/3xx 判，于是「返回 401 才算正常」
+	// （需要鉴权的健康检查）、「返回 5xx 才算命中」（故障演练）这类监控根本配不出来。
+	// code=0 表示压根没拿到响应，那种情况在调用处已经判 down 了。
+	if strings.EqualFold(expected, "any") {
+		return code > 0
+	}
 	if expected == "" {
 		return code >= 200 && code < 400
 	}
