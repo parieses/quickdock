@@ -169,7 +169,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	// 到第一个字出现，含上下文组装（查库/摘要压缩）的耗时，这段以前是黑盒。
 	streamStart := time.Now()
 	var firstTokenAt time.Duration
-	var usageIn, usageOut int
+	var usage db.TokenUsage
 
 	var conv *db.AIConversation
 	if s.svc.App.DB == nil {
@@ -244,7 +244,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	assistant, err := s.svc.streamAIChat(ctx, cfg, messages, convID,
+	assistant, usage, err := s.svc.streamAIChat(ctx, cfg, messages, convID,
 		func(text string) {
 			// 首字延迟：从收到请求到第一个内容 token（含上下文组装耗时），只记第一次
 			if firstTokenAt == 0 {
@@ -256,11 +256,10 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 			}
 		},
 		reasonCb,
-		func(promptTokens, completionTokens int) {
-			usageIn, usageOut = promptTokens, completionTokens
-			_ = s.svc.App.DB.UpdateAIConversationUsage(convID, promptTokens, completionTokens)
-		},
 	)
+	// 记在「调用返回之后」而不是流里的 usage 回调：回调可能一次都不来（上游不回 usage），
+	// 也可能来多次（个别网关分块上报），放在这里一次写清，语义与落库的消息完全一致。
+	s.svc.recordAIUsage(convID, usageKindChat, cfg, usage)
 
 	// 仅落库助手回复：用户消息已在调模型前由 saveUserTurn 落库（幂等，重试不重复）。
 	// 模型成功返回但内容为空（上游限流/工具调用/内容过滤都可能）时不写空回复，避免污染历史。
@@ -270,7 +269,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 			logger.W("[ai] 模型未产出内容，跳过落库助手回复 conv=%s mode=%s", convID, mode)
 			return
 		}
-		if _, e := s.svc.App.DB.AddAIMessageFull(convID, "assistant", asst, reasoningBuf.String()); e != nil {
+		if _, e := s.svc.App.DB.SaveAssistantTurn(convID, asst, reasoningBuf.String(), cfg.Model, usage); e != nil {
 			logger.W("[ai] 保存助手回复失败 conv=%s: %v", convID, e)
 			fl.writeEvent("error", map[string]any{"message": e.Error()})
 		}
@@ -280,7 +279,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		if ctx.Err() != nil {
 			// 用户主动取消，保存已收到部分（用户消息已在调模型前落库）
 			saveAssistant(assistant)
-			fl.writeEvent("done", doneEvent(convID, firstTokenAt, usageIn, usageOut))
+			fl.writeEvent("done", doneEvent(convID, firstTokenAt, usage))
 			return
 		}
 		// 上游报错：用户消息已落库，历史不会空。若疑似因 base64 本地图片被拒，给明确提示。
@@ -295,8 +294,8 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	// 正常结束，落库助手回复（用户消息已在调模型前落库）
 	saveAssistant(assistant)
 	_ = s.svc.App.DB.UpdateAIConversationMeta(convID, "", "")
-	logger.I("[ai] 流式结束 conv=%s 首字=%dms in=%d out=%d", convID, firstTokenAt.Milliseconds(), usageIn, usageOut)
-	fl.writeEvent("done", doneEvent(convID, firstTokenAt, usageIn, usageOut))
+	logger.I("[ai] 流式结束 conv=%s 首字=%dms in=%d out=%d cached=%d", convID, firstTokenAt.Milliseconds(), usage.Prompt, usage.Completion, usage.Cached)
+	fl.writeEvent("done", doneEvent(convID, firstTokenAt, usage))
 
 	// 用户已经切走了才提醒：盯着屏幕看完整段回答的人再收到一条「回答完成」纯属噪音，
 	// 而趁回答生成的时间去干别的事、回来发现早就好了，才是最需要提醒的场景。
@@ -306,12 +305,13 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 // doneEvent 组装流式结束事件：附带首字延迟与本次用量，回传前端展示。
 // 字段名与前端 AIPage 的读取保持一致（promptTokens/completionTokens）。
 // 字段缺失（上游未回 usage）时为 0，前端按 0 隐藏即可。
-func doneEvent(convID string, firstTokenAt time.Duration, usageIn, usageOut int) map[string]any {
+func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage) map[string]any {
 	return map[string]any{
 		"convId":           convID,
 		"firstTokenMs":     firstTokenAt.Milliseconds(),
-		"promptTokens":     usageIn,
-		"completionTokens": usageOut,
+		"promptTokens":     usage.Prompt,
+		"completionTokens": usage.Completion,
+		"cachedTokens":     usage.Cached,
 	}
 }
 
@@ -481,14 +481,21 @@ func (s *aiStreamServer) writeSSE(w http.ResponseWriter, f http.Flusher, event s
 
 // notifyAIDone 在「主窗口没盯着」时把回答完成写进通知中心。
 //
-// 判定条件用「主窗口不可见 或 没有焦点」：AI 回答往往要等十几秒到几分钟，
-// 用户切去别的窗口干活是常态。反过来，人就在 AI 页面上看着，还弹一条完成提醒，
-// 是纯粹的打扰 —— 通知的价值在于「替你盯着」，不是复述你已经看到的东西。
+// 判定分两层：
+//  1. 主窗口有焦点 —— 人就在窗口里，不打扰；
+//  2. 窗口可见 **且** 停在前 AI 对话页 —— 窗口可能因为用户去点别的应用而失焦，
+//     但他眼睛还在 AI 页上看着这段回答一个字一个字出来，此时再提醒一次是纯粹的复述。
+//
+// 只有「窗口隐藏/最小化」或「窗口停在别的页面」才值得写通知 —— 通知的价值在于
+// 替用户盯着他看不到的地方。
 func (s *aiStreamServer) notifyAIDone(convID, question, answer string) {
 	if s.svc == nil || s.svc.App == nil || s.svc.App.DB == nil {
 		return
 	}
 	if s.svc.App.MainWindowActive() {
+		return
+	}
+	if s.svc.App.AIPageVisible() && s.svc.App.Flags != nil && s.svc.App.Flags.Main.Load() {
 		return
 	}
 	answer = strings.TrimSpace(answer)

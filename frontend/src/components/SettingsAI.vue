@@ -11,10 +11,11 @@ import {
   AIListProfiles,
   AISaveProfiles,
   AITestConnection,
+  AIUsageStats,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environmentservice'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
-import type { AIProfilesResult } from '../types/ai'
+import type { AIProfilesResult, AIUsageStatsResult } from '../types/ai'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -172,7 +173,105 @@ async function loadAIProfiles() {
   }
 }
 
-watch(() => props.visible, (v) => { if (v) loadAIProfiles() }, { immediate: true })
+// ── 用量统计与花费估算 ───────────────────────────────────────────────
+// 默认「近 30 天」：AI 花费通常按月评估，7 天样本太小，全部时间又拉不出趋势。
+const usageDays = ref(30)
+const usageLoading = ref(false)
+const usageError = ref('')
+const usage = ref<AIUsageStatsResult | null>(null)
+
+const usageRanges = computed(() => [
+  { days: 7, label: t('aiUsageRange7') },
+  { days: 30, label: t('aiUsageRange30') },
+  { days: 0, label: t('aiUsageRangeAll') },
+])
+
+async function loadUsage(days: number = usageDays.value) {
+  usageDays.value = days
+  usageLoading.value = true
+  usageError.value = ''
+  try {
+    usage.value = unwrap<AIUsageStatsResult>(await AIUsageStats(days)) ?? null
+  } catch (e) {
+    usageError.value = getErrorMessage(e)
+  } finally {
+    usageLoading.value = false
+  }
+}
+
+// token 数量级跨得很大（几百 ~ 上千万），统一折算成 k/M，否则表格列宽会被撑爆。
+function fmtTokens(n: number): string {
+  if (!n) return '0'
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M'
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'
+  return String(n)
+}
+
+// 单次问答常在 0.001 元量级，固定两位小数会全变成「¥0.00」，故按数量级自适应。
+function fmtCost(n: number): string {
+  if (!n) return '¥0'
+  if (n >= 1) return '¥' + n.toFixed(2)
+  if (n >= 0.01) return '¥' + n.toFixed(3)
+  return '¥' + n.toFixed(4)
+}
+
+// 日期轴只写 M/D 才排得下，完整日期放 tooltip。
+function fmtDay(day: string): string {
+  const p = day.split('-')
+  return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : day
+}
+
+// 缓存命中率：分母是「输入 token」。长会话里输入的大头是每轮重复的上下文，
+// 命中率 90%+ 是常态，所以这个数字比「省了多少钱」更能解释账单。
+const cachePct = computed(() => {
+  const u = usage.value
+  if (!u || u.promptTokens <= 0 || u.cachedTokens <= 0) return 0
+  return Math.round((u.cachedTokens / u.promptTokens) * 1000) / 10
+})
+
+// 来源标签：kind 是后端常量（chat/ask/title/summary/legacy），这里只做展示映射。
+// 未知值原样显示 —— 后端以后新增来源时不会因为漏配文案而整条消失。
+function sourceLabel(kind: string): string {
+  const key = `aiUsageSource_${kind}`
+  const label = t(key)
+  return label === key ? kind : label
+}
+
+function entryCachePct(e: { promptTokens: number; cachedTokens: number }): number {
+  if (e.promptTokens <= 0 || e.cachedTokens <= 0) return 0
+  return Math.round((e.cachedTokens / e.promptTokens) * 1000) / 10
+}
+
+// 每日柱状：多则只画最近 30 天（全部时间窗口可能上百天）。
+// 计价为 0 的窗口（例如全用免费模型/未收录模型）退回按 token 画，否则柱子全是空的。
+const dailyBars = computed(() => {
+  const all = usage.value?.daily ?? []
+  const list = all.slice(-30)
+  if (!list.length) return []
+  const useCost = list.some((d) => d.estimatedCost > 0)
+  const max = Math.max(1, ...list.map((d) => (useCost ? d.estimatedCost : d.totalTokens)))
+  return list.map((d) => {
+    const v = useCost ? d.estimatedCost : d.totalTokens
+    return {
+      key: d.key,
+      label: fmtDay(d.key),
+      // 最低 2px：小于 1% 的日子也该留下一条痕迹，不然看不出「那天用过」
+      height: v > 0 ? Math.max(2, Math.round((v / max) * 46)) : 0,
+      title: t('aiUsageDayTip', {
+        day: d.key,
+        requests: d.requests,
+        tokens: fmtTokens(d.totalTokens),
+        cost: fmtCost(d.estimatedCost),
+      }),
+    }
+  })
+})
+
+watch(() => props.visible, (v) => {
+  if (!v) return
+  loadAIProfiles()
+  loadUsage()
+}, { immediate: true })
 
 function selectAIProfile(id: string) { aiActive.value = id }
 function editAIProfile(id: string) { aiActive.value = id; openAIEditor() }
@@ -287,6 +386,102 @@ function saveAIModal() {
         {{ aiTesting ? t('aiTesting') : t('aiTestConnection') }}
       </button>
       <button class="btn btn-primary" @click="saveAIProfiles">{{ t('save') }}</button>
+    </div>
+
+    <!-- 用量统计：花费是按内置价目表估算的，界面里必须说清楚，别让人当账单 -->
+    <div class="ai-usage">
+      <div class="ai-usage-head">
+        <h4 class="ai-usage-title">{{ t('aiUsageTitle') }}</h4>
+        <div class="ai-usage-ranges">
+          <button
+            v-for="r in usageRanges"
+            :key="r.days"
+            type="button"
+            class="usage-range"
+            :class="{ on: usageDays === r.days }"
+            @click="loadUsage(r.days)"
+          >{{ r.label }}</button>
+        </div>
+      </div>
+
+      <p v-if="usageError" class="result-hint error">{{ usageError }}</p>
+      <p v-else-if="usageLoading && !usage" class="usage-hint">{{ t('aiUsageLoading') }}</p>
+      <template v-else-if="usage">
+        <div class="usage-tiles">
+          <div class="usage-tile">
+            <span class="usage-tile-label">{{ t('aiUsageCost') }}</span>
+            <span class="usage-tile-value">{{ fmtCost(usage.estimatedCost) }}</span>
+          </div>
+          <div class="usage-tile">
+            <span class="usage-tile-label">{{ t('aiUsageRequests') }}</span>
+            <span class="usage-tile-value">{{ usage.requests }}</span>
+          </div>
+          <div class="usage-tile">
+            <span class="usage-tile-label">Tokens</span>
+            <span class="usage-tile-value">{{ fmtTokens(usage.totalTokens) }}</span>
+          </div>
+          <div class="usage-tile">
+            <span class="usage-tile-label">{{ t('aiUsageConversations') }}</span>
+            <span class="usage-tile-value">{{ usage.conversations }}</span>
+          </div>
+        </div>
+
+        <!-- 缓存命中：长会话的输入绝大部分是重复上下文，命中率直接决定账单 -->
+        <p v-if="cachePct > 0" class="usage-cache">
+          {{ usage.savedByCache > 0
+            ? t('aiUsageCacheSaved', { pct: cachePct, saved: fmtCost(usage.savedByCache) })
+            : t('aiUsageCache', { pct: cachePct }) }}
+        </p>
+
+        <!-- 来源：SSH 面板 / 剪贴板 / 笔记 / 插件的一次性调用也计费，分开列才看得出钱花在哪 -->
+        <div v-if="usage.sources.length > 1" class="usage-sources">
+          <span v-for="src in usage.sources" :key="src.key || 'unknown'" class="usage-source">
+            {{ sourceLabel(src.key) }} <b>{{ src.requests }}</b>
+          </span>
+        </div>
+
+        <!-- 未收录模型的调用单独披露：否则「¥3.2」会被当成全部用量的价格 -->
+        <p v-if="usage.unpricedRequests > 0" class="usage-note">
+          {{ t('aiUsageUnpriced', { n: usage.unpricedRequests }) }}
+        </p>
+
+        <div v-if="dailyBars.length" class="usage-chart">
+          <div v-for="b in dailyBars" :key="b.key" class="usage-bar" :title="b.title">
+            <div class="usage-bar-fill" :style="{ height: b.height + 'px' }" />
+          </div>
+        </div>
+        <div v-if="dailyBars.length" class="usage-axis">
+          <span>{{ dailyBars[0].label }}</span>
+          <span>{{ dailyBars[dailyBars.length - 1].label }}</span>
+        </div>
+
+        <table v-if="usage.models.length" class="usage-table">
+          <thead>
+            <tr>
+              <th>{{ t('aiUsageModel') }}</th>
+              <th class="num">{{ t('aiUsageRequests') }}</th>
+              <th class="num">Tokens</th>
+              <th class="num">{{ t('aiUsageCost') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="m in usage.models" :key="m.key || 'unknown'">
+              <td class="model">{{ m.key || t('aiUsageUnknownModel') }}</td>
+              <td class="num">{{ m.requests }}</td>
+              <td class="num">
+                {{ fmtTokens(m.totalTokens) }}
+                <span v-if="entryCachePct(m) > 0" class="usage-cell-sub">缓存 {{ entryCachePct(m) }}%</span>
+              </td>
+              <td class="num" :class="{ unknown: !m.priced }">
+                {{ m.priced ? fmtCost(m.estimatedCost) : t('aiUsageNoPrice') }}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
+        <p class="usage-hint">{{ t('aiUsageHint') }}</p>
+      </template>
+      <p v-else class="usage-hint">{{ t('aiUsageEmpty') }}</p>
     </div>
 
     <!-- AI 配置编辑模态框 -->

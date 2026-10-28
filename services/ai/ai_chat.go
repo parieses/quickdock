@@ -15,16 +15,16 @@ import (
 	"quickdock/internal/logger"
 )
 
-func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []map[string]interface{}, convID string, onToken func(text string), onReasoning func(text string), onUsage func(promptTokens, completionTokens int)) (string, error) {
+func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []map[string]interface{}, convID string, onToken func(text string), onReasoning func(text string)) (string, db.TokenUsage, error) {
 	// 链路日志只记「元数据」（模型/条数/耗时/用量），绝不记消息正文——
 	// AI 对话可能含用户隐私，日志要能排障但不能泄密。
 	startedAt := time.Now()
 	var firstTokenAt time.Duration // 首字延迟：判断「慢」是上游排队还是本地处理的关键
-	var usageIn, usageOut int
+	var usage db.TokenUsage
 	logDone := func(outLen int) {
-		logger.I("[ai] 完成 model=%s conv=%s 耗时=%v 首字=%v 输出=%d字 tokens=%d/%d",
+		logger.I("[ai] 完成 model=%s conv=%s 耗时=%v 首字=%v 输出=%d字 tokens=%d/%d 缓存=%d",
 			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond),
-			firstTokenAt.Round(time.Millisecond), outLen, usageIn, usageOut)
+			firstTokenAt.Round(time.Millisecond), outLen, usage.Prompt, usage.Completion, usage.Cached)
 	}
 
 	body := map[string]interface{}{
@@ -51,12 +51,12 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return "", err
+		return "", db.TokenUsage{}, err
 	}
 	ep, authKey, authVal := apiEndpoint(cfg)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep, bytes.NewReader(raw))
 	if err != nil {
-		return "", err
+		return "", db.TokenUsage{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if authVal != "" {
@@ -72,14 +72,14 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	if err != nil {
 		logger.E("[ai] 请求失败 model=%s conv=%s 耗时=%v: %v",
 			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), err)
-		return "", err
+		return "", db.TokenUsage{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		eb, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		logger.E("[ai] 上游返回异常 model=%s conv=%s status=%d body=%s",
 			cfg.Model, convID, resp.StatusCode, logger.Trunc(string(eb), 300))
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(eb)))
+		return "", db.TokenUsage{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(eb)))
 	}
 
 	var sb strings.Builder
@@ -90,7 +90,7 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		case <-ctx.Done():
 			logger.I("[ai] 已取消 model=%s conv=%s 耗时=%v 已输出=%d字",
 				cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), len([]rune(sb.String())))
-			return sb.String(), ctx.Err()
+			return sb.String(), usage, ctx.Err()
 		default:
 		}
 		line := strings.TrimSpace(scanner.Text())
@@ -109,20 +109,13 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 					ReasoningContent string `json:"reasoning_content"` // Agnes/DeepSeek thinking 模式
 				} `json:"delta"`
 			} `json:"choices"`
-			Usage *struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-				TotalTokens      int `json:"total_tokens"`
-			} `json:"usage"`
+			Usage *openAIUsage `json:"usage"`
 		}
 		if err := json.Unmarshal([]byte(data), &chunk); err != nil {
 			continue
 		}
 		if chunk.Usage != nil {
-			usageIn, usageOut = chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens
-			if onUsage != nil {
-				onUsage(chunk.Usage.PromptTokens, chunk.Usage.CompletionTokens)
-			}
+			usage = chunk.Usage.toUsage()
 		}
 		if len(chunk.Choices) == 0 {
 			continue
@@ -145,11 +138,11 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	if err := scanner.Err(); err != nil {
 		logger.E("[ai] 流读取中断 model=%s conv=%s 耗时=%v 已输出=%d字: %v",
 			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), len([]rune(sb.String())), err)
-		return sb.String(), err
+		return sb.String(), usage, err
 	}
 	out := sb.String()
 	logDone(len([]rune(out)))
-	return out, nil
+	return out, usage, nil
 }
 
 // buildAIMessages 组装发送给模型的消息列表，并自动执行摘要压缩。
@@ -222,10 +215,11 @@ func (a *AIService) summarizeAndStore(ctx context.Context, cfg AIProfile, conv *
 		{"role": "system", "content": "你是一个压缩助手，负责把对话历史提炼为要点摘要。"},
 		{"role": "user", "content": b.String()},
 	}
-	summary, err := a.callAIOnce(ctx, cfg, msgs)
+	summary, usage, err := a.callAIOnce(ctx, cfg, msgs)
 	if err != nil {
 		return "", err
 	}
+	a.recordAIUsage(conv.ID, usageKindSummary, cfg, usage)
 	summary = strings.TrimSpace(summary)
 	if summary == "" {
 		return "", fmt.Errorf("摘要为空")
@@ -246,7 +240,7 @@ func (a *AIService) summarizeAndStore(ctx context.Context, cfg AIProfile, conv *
 }
 
 // callAIOnce 一次性（非流式）调用，用于摘要压缩 / 标题生成
-func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []map[string]string) (string, error) {
+func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []map[string]string) (string, db.TokenUsage, error) {
 	// 兜底：调用方漏传/传 nil ctx 时避免 http.NewRequestWithContext panic（如旧版标题生成）
 	if ctx == nil {
 		ctx = context.Background()
@@ -272,12 +266,12 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 	}
 	raw, err := json.Marshal(body)
 	if err != nil {
-		return "", err
+		return "", db.TokenUsage{}, err
 	}
 	ep, authKey, authVal := apiEndpoint(cfg)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep, bytes.NewReader(raw))
 	if err != nil {
-		return "", err
+		return "", db.TokenUsage{}, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if authVal != "" {
@@ -287,12 +281,12 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 	client := a.aiHTTPClient
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return "", db.TokenUsage{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		eb, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(eb)))
+		return "", db.TokenUsage{}, fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(eb)))
 	}
 	var out struct {
 		Choices []struct {
@@ -300,14 +294,15 @@ func (a *AIService) callAIOnce(ctx context.Context, cfg AIProfile, messages []ma
 				Content string `json:"content"`
 			} `json:"message"`
 		} `json:"choices"`
+		Usage *openAIUsage `json:"usage"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
+		return "", db.TokenUsage{}, err
 	}
 	if len(out.Choices) == 0 {
-		return "", fmt.Errorf("无返回内容")
+		return "", db.TokenUsage{}, fmt.Errorf("无返回内容")
 	}
-	return out.Choices[0].Message.Content, nil
+	return out.Choices[0].Message.Content, out.Usage.toUsage(), nil
 }
 
 // callAIStream 已由 streamAIChat 取代（回调式，供本地 HTTP 流式服务逐段写出 NDJSON）。

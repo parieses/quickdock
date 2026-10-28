@@ -92,13 +92,15 @@ func (a *AIService) AIRegenerateTitle(convID string) *services.ApiResult {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	title, err := a.callAIOnce(ctx, cfg, []map[string]string{
+	title, usage, err := a.callAIOnce(ctx, cfg, []map[string]string{
 		{"role": "system", "content": "你是标题生成器，输出极简。"},
 		{"role": "user", "content": b.String()},
 	})
 	if err != nil {
 		return services.Fail(err)
 	}
+	// 生成标题也是一次完整计费的调用（输入通常是整段对话），不记就会系统性少算
+	a.recordAIUsage(convID, usageKindTitle, cfg, usage)
 	title = strings.TrimSpace(title)
 	title = strings.Trim(title, "\"'")
 	title = strings.Trim(title, "。！？.!?")

@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"quickdock/internal/db"
 )
 
 // sseRecorder 记录所有写入的 SSE 帧，供断言使用。
@@ -84,7 +86,7 @@ func TestSSEFlusherMergesTokens(t *testing.T) {
 		fl.push("token", txt)
 	}
 	// done 事件应在所有 token 之后
-	if err := fl.writeEvent("done", doneEvent("conv-1", 120*time.Millisecond, 100, 200)); err != nil {
+	if err := fl.writeEvent("done", doneEvent("conv-1", 120*time.Millisecond, db.TokenUsage{Prompt: 100, Completion: 200})); err != nil {
 		t.Fatalf("writeEvent: %v", err)
 	}
 	fl.close()
@@ -124,7 +126,7 @@ func TestSSEFlusherMergesTokens(t *testing.T) {
 func TestSSEFlusherDoneEventFields(t *testing.T) {
 	rec := &sseRecorder{}
 	fl := newSSEFlusher(rec, rec, "conv-2")
-	if err := fl.writeEvent("done", doneEvent("conv-2", 350*time.Millisecond, 1234, 567)); err != nil {
+	if err := fl.writeEvent("done", doneEvent("conv-2", 350*time.Millisecond, db.TokenUsage{Prompt: 1234, Completion: 567})); err != nil {
 		t.Fatalf("writeEvent: %v", err)
 	}
 	fl.close()
@@ -160,7 +162,7 @@ func TestSSEFlusherTokenBeforeDone(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		fl.push("token", "x")
 	}
-	if err := fl.writeEvent("done", doneEvent("conv-3", 0, 0, 0)); err != nil {
+	if err := fl.writeEvent("done", doneEvent("conv-3", 0, db.TokenUsage{Prompt: 0, Completion: 0})); err != nil {
 		t.Fatalf("writeEvent: %v", err)
 	}
 	fl.close()
@@ -202,7 +204,7 @@ func TestSSEFlusherConcurrentPush(t *testing.T) {
 		}(w)
 	}
 	wg.Wait()
-	_ = fl.writeEvent("done", doneEvent("conv-4", 0, 0, 0))
+	_ = fl.writeEvent("done", doneEvent("conv-4", 0, db.TokenUsage{Prompt: 0, Completion: 0}))
 	fl.close()
 
 	var count int
@@ -221,7 +223,7 @@ func TestSSEFrameFormat(t *testing.T) {
 	rec := &sseRecorder{}
 	fl := newSSEFlusher(rec, rec, "conv-5")
 	fl.push("token", "hello")
-	if err := fl.writeEvent("done", doneEvent("conv-5", 0, 0, 0)); err != nil {
+	if err := fl.writeEvent("done", doneEvent("conv-5", 0, db.TokenUsage{Prompt: 0, Completion: 0})); err != nil {
 		t.Fatalf("writeEvent: %v", err)
 	}
 	fl.close()
@@ -247,7 +249,7 @@ func TestSSEFrameFormat(t *testing.T) {
 
 // TestDoneEventFirstTokenZero 验证首字延迟为 0 时（中断场景）字段仍存在。
 func TestDoneEventFirstTokenZero(t *testing.T) {
-	ev := doneEvent("c", 0, 0, 0)
+	ev := doneEvent("c", 0, db.TokenUsage{Prompt: 0, Completion: 0})
 	if ev["firstTokenMs"] != int64(0) {
 		t.Errorf("firstTokenMs = %v, 期望 0", ev["firstTokenMs"])
 	}

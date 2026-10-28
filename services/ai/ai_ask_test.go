@@ -97,7 +97,7 @@ func TestCallAIOnce_NilContext(t *testing.T) {
 			t.Fatalf("nil ctx 导致 panic: %v", p)
 		}
 	}()
-	_, _ = svc.callAIOnce(nil, AIProfile{}, nil)
+	_, _, _ = svc.callAIOnce(nil, AIProfile{}, nil)
 }
 
 var _ = context.Background

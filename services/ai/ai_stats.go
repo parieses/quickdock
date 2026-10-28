@@ -1,0 +1,177 @@
+package ai
+
+// AI 用量统计与花费估算。
+//
+// 数据源是 ai_usage 明细表（一次模型调用一行，见 db.RecordAIUsage）。
+// 每行的日期、模型、来源都是当时写下的，所以按天、按模型、按来源、总额
+// 四路统计口径一致，加起来必然相等 —— 这也是当初没有复用 ai_conversations
+// 累加列的原因：那种 upsert 口径只能回答「这个会话一共多少」。
+//
+// 花费一律是**估算**：单价取内置价目表（见 ai_pricing.go），命中前缀缓存的
+// 输入按缓存读取价单独折算（通常只有全价的 1/4 ~ 1/10，长会话命中率能到 99%，
+// 不区分就会把花费算高一个数量级）。未收录的模型按 0 计但会单独汇报次数。
+
+import (
+	"sort"
+	"time"
+
+	"quickdock/services"
+)
+
+// AICostEntry 一行用量（Key 为模型名 / 日期 / 来源）
+type AICostEntry struct {
+	Key              string  `json:"key"`
+	Requests         int     `json:"requests"`
+	PromptTokens     int     `json:"promptTokens"`
+	CompletionTokens int     `json:"completionTokens"`
+	CachedTokens     int     `json:"cachedTokens"`
+	TotalTokens      int     `json:"totalTokens"`
+	EstimatedCost    float64 `json:"estimatedCost"` // 元
+	// SavedByCache 命中缓存相对「全按输入价」省下的估算金额，仅用于展示
+	SavedByCache float64 `json:"savedByCache"`
+	Priced       bool    `json:"priced"` // false = 内置价目表未收录该模型
+}
+
+// AIUsageStats AI 用量统计结果（总额 + 按模型 + 按天 + 按来源）
+type AIUsageStats struct {
+	Days             int     `json:"days"` // 窗口天数（0 = 全部）
+	Conversations    int     `json:"conversations"`
+	Requests         int     `json:"requests"`
+	PromptTokens     int     `json:"promptTokens"`
+	CompletionTokens int     `json:"completionTokens"`
+	CachedTokens     int     `json:"cachedTokens"`
+	TotalTokens      int     `json:"totalTokens"`
+	EstimatedCost    float64 `json:"estimatedCost"`
+	SavedByCache     float64 `json:"savedByCache"`
+	Currency         string  `json:"currency"`
+	// UnpricedRequests：未收录模型上的调用次数（这些在总额里按 0 计）
+	UnpricedRequests int           `json:"unpricedRequests"`
+	Models           []AICostEntry `json:"models"`
+	Daily            []AICostEntry `json:"daily"`
+	// Sources 按来源拆分（对话 / 面板插件 / 标题 / 摘要），用来回答
+	// 「我明明只在 SSH 里问了几句，为什么额度掉了」这类问题
+	Sources []AICostEntry `json:"sources"`
+}
+
+// usageSince 窗口天数 → RFC3339 起点；days<=0 表示不限。
+//
+// 起点取当天 0 点再往前推 days-1 天，这样「近 7 天」包含今天在内正好 7 个自然日，
+// 而不是「从此刻往前 168 小时」——后者会让今天的数字看着比昨天少一截。
+func usageSince(days int) string {
+	if days <= 0 {
+		return ""
+	}
+	n := time.Now()
+	start := time.Date(n.Year(), n.Month(), n.Day(), 0, 0, 0, 0, n.Location()).
+		AddDate(0, 0, -(days - 1))
+	return start.Format(time.RFC3339)
+}
+
+// usageBucket 聚合中间态
+type usageBucket struct {
+	requests, prompt, completion, cached int
+	cost, saved                          float64
+}
+
+// AIUsageStats 统计指定窗口内的 AI 用量（days<=0 表示全部时间）。
+func (a *AIService) AIUsageStats(days int) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	since := usageSince(days)
+
+	groups, err := a.App.DB.ListAIUsageGroups(since)
+	if err != nil {
+		return services.Fail(err)
+	}
+
+	// 一次分组查询喂给四路聚合：分头查容易各自写错过滤条件，
+	// 界面上就会出现「总额 ≠ 各模型之和」这种自相矛盾的数字。
+	byModel := map[string]*usageBucket{}
+	byDay := map[string]*usageBucket{}
+	byKind := map[string]*usageBucket{}
+	priced := map[string]bool{}
+	total := &usageBucket{}
+	unpriced := 0
+
+	get := func(m map[string]*usageBucket, k string) *usageBucket {
+		b := m[k]
+		if b == nil {
+			b = &usageBucket{}
+			m[k] = b
+		}
+		return b
+	}
+
+	for _, g := range groups {
+		cost, ok := estimateCost(g.Model, g.PromptTokens, g.CompletionTokens, g.CachedTokens)
+		saved := cacheSaving(g.Model, g.CachedTokens)
+		if ok {
+			// 一个模型只要有一条能配上价就算「已计价」；配不上的单独计数，
+			// 否则「￥3.2」看着像全部用量的价格，实际可能有一大半没算进去。
+			priced[g.Model] = true
+		} else {
+			unpriced += g.Requests
+		}
+		for _, b := range []*usageBucket{get(byModel, g.Model), get(byDay, g.Day), get(byKind, g.Kind), total} {
+			b.requests += g.Requests
+			b.prompt += g.PromptTokens
+			b.completion += g.CompletionTokens
+			b.cached += g.CachedTokens
+			b.cost += cost
+			b.saved += saved
+		}
+	}
+
+	toEntries := func(m map[string]*usageBucket) []AICostEntry {
+		out := make([]AICostEntry, 0, len(m))
+		for k, b := range m {
+			out = append(out, AICostEntry{
+				Key: k, Requests: b.requests,
+				PromptTokens: b.prompt, CompletionTokens: b.completion, CachedTokens: b.cached,
+				TotalTokens:   b.prompt + b.completion,
+				EstimatedCost: b.cost, SavedByCache: b.saved,
+				Priced: priced[k],
+			})
+		}
+		return out
+	}
+
+	models := toEntries(byModel)
+	// token 多的在前；同量时按名字稳定排（历史折算行可能没有模型名）
+	sort.SliceStable(models, func(i, j int) bool {
+		if models[i].TotalTokens != models[j].TotalTokens {
+			return models[i].TotalTokens > models[j].TotalTokens
+		}
+		return models[i].Key < models[j].Key
+	})
+
+	daily := toEntries(byDay)
+	// 日期升序：图表横轴从左到右是时间推进
+	sort.SliceStable(daily, func(i, j int) bool { return daily[i].Key < daily[j].Key })
+
+	sources := toEntries(byKind)
+	sort.SliceStable(sources, func(i, j int) bool { return sources[i].Requests > sources[j].Requests })
+
+	conversations, err := a.App.DB.CountAIUsageConversations(since)
+	if err != nil {
+		return services.Fail(err)
+	}
+
+	return services.Ok(AIUsageStats{
+		Days:             days,
+		Conversations:    conversations,
+		Requests:         total.requests,
+		PromptTokens:     total.prompt,
+		CompletionTokens: total.completion,
+		CachedTokens:     total.cached,
+		TotalTokens:      total.prompt + total.completion,
+		EstimatedCost:    total.cost,
+		SavedByCache:     total.saved,
+		Currency:         "CNY",
+		UnpricedRequests: unpriced,
+		Models:           models,
+		Daily:            daily,
+		Sources:          sources,
+	})
+}

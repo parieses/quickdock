@@ -149,13 +149,16 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 	}
 
 	start := time.Now()
-	text, err := a.callAIOnce(ctx, cfg, []map[string]string{
+	text, usage, err := a.callAIOnce(ctx, cfg, []map[string]string{
 		{"role": "system", "content": system},
 		{"role": "user", "content": question},
 	})
 	if err != nil {
 		return services.Fail(err)
 	}
+	// 一次性调用同样花钱，必须记进统计：这条路径服务 SSH 面板、剪贴板 AI、
+	// 笔记 AI 与插件 host.ai.ask。早期只记对话流，这几处消耗在统计里完全是空白。
+	a.recordAIUsage("", usageKindAsk, cfg, usage)
 
 	truncated := false
 	if n := len([]rune(text)); n > askMaxReturnRune {
@@ -235,10 +238,11 @@ func (a *AIService) AIAskStream(req AIAskRequest, onToken func(text string)) *se
 	}
 
 	start := time.Now()
-	text, err := a.streamAIChat(ctx, cfg, messages, "ai-ask", onToken, nil, nil)
+	text, usage, err := a.streamAIChat(ctx, cfg, messages, "ai-ask", onToken, nil)
 	if err != nil {
 		return services.Fail(err)
 	}
+	a.recordAIUsage("", usageKindAsk, cfg, usage)
 
 	truncated := false
 	if n := len([]rune(text)); n > askMaxReturnRune {
