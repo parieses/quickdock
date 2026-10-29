@@ -26,6 +26,8 @@ import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { useAIAvailability } from '../composables/useAIAvailability'
+// 剪贴板里「存为待办」也是一条新建入口，角标要跟着涨
+import { refreshNavBadges } from '../composables/useNavBadges'
 import { pinyinOf } from '../utils/pinyin'
 import { filterByTag, queryPushForTag, tagPushSignature } from '../utils/clipboardFilter'
 import type { ToastAPI } from '../types'
@@ -527,6 +529,7 @@ async function saveAsTodo(entry: ClipboardEntry) {
   try {
     // 标题取首行，全文放备注，避免标题栏塞满长文本
     feedback(await CreateTodo(firstLineAsTitle(content), 'medium', '', content, '', '', '', '', ''), t('clipboardSavedTodo'))
+    refreshNavBadges()
   } catch (e) {
     toast?.error?.(getErrorMessage(e))
   }

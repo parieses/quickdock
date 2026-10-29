@@ -150,7 +150,7 @@ async function refreshAggregated() {
 }
 
 /** 立即刷新（业务操作后调用，例如改完待办希望角标马上跟上） */
-function refreshNow() {
+export function refreshNavBadges() {
   void refreshAggregated()
 }
 
@@ -161,19 +161,40 @@ function refreshAll() {
 
 // ---- 轮询：统一 60s tick（取原最快相关源 crash=60s 的节奏），每次只打 1 次后端聚合 ----
 const TICK_SEC = 60
+// 单次调用迟迟不返回时的兜底时长：见 tick() 里的说明
+const CALL_STUCK_MS = 15_000
 let timer: ReturnType<typeof setInterval> | null = null
 let running = false
 
 function tick() {
   if (running) return // 慢请求叠加保护：上一轮没跑完就不发新的
   running = true
-  void refreshAggregated().finally(() => { running = false })
+  // 兜底：一次卡住不回的应用调用不能把轮询永久锁死。running 一旦永久停在 true，
+  // 之后每次 tick 都会被这行挡回去，角标就永远停在旧数字上——表现为「待办删了，
+  // 角标还在」，而且再也不会自己恢复。所以到点直接放开，让下一轮重新发起。
+  const guard = setTimeout(() => { running = false }, CALL_STUCK_MS)
+  void refreshAggregated().finally(() => {
+    clearTimeout(guard)
+    running = false
+  })
+}
+
+// 窗口从后台回到前台：立即补一次。
+// WebView2 在窗口隐藏/最小化时会把定时器节流到每分钟甚至挂起，用户切回来看到的
+// 仍是离开时的旧角标；仅靠 60s tick 会有一段"明明已经删了还在显示"的空窗。
+function onForeground() {
+  tick()
+}
+function onVisibility() {
+  if (!document.hidden) tick()
 }
 
 function startPolling() {
   if (timer) return
   void refreshAggregated()
   timer = setInterval(tick, TICK_SEC * 1000)
+  window.addEventListener('focus', onForeground)
+  document.addEventListener('visibilitychange', onVisibility)
 }
 
 /**
@@ -187,7 +208,7 @@ export function useNavBadges(currentPage?: () => string) {
     watch(currentPage, (p) => { if (p) markSeen(p) }, { immediate: true })
   }
   startPolling()
-  return { badgeOf, settingsBadge, markSeen, refreshNow, refreshAll }
+  return { badgeOf, settingsBadge, markSeen, refreshNow: refreshNavBadges, refreshAll }
 }
 
 /** 不启动轮询、也不注册生命周期的只读取用（给独立小组件渲染用） */

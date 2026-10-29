@@ -13,6 +13,8 @@ import {
   SendTestNotification, NotifyFocusComplete, NotifyFocusStart,
 } from '../../bindings/quickdock/services/appservice'
 import { pendingOpenTodoId } from '../composables/bridge'
+// 待办的增删改都会汇流到 refresh()，在那里顺手把侧边栏角标拉齐（不用等 60s 轮询）
+import { refreshNavBadges } from '../composables/useNavBadges'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
@@ -572,7 +574,13 @@ async function refresh() {
     if (gen !== refreshGen) return
     error.value = getErrorMessage(e)
   } finally {
-    if (gen === refreshGen) loading.value = false
+    if (gen === refreshGen) {
+      loading.value = false
+      // 所有增删改都走 refresh()（新建/编辑/勾选/删除/清空/拖拽/子任务），
+      // 在这里统一补一次角标刷新：后端 CountTodosDue 是即时的，但角标原本只靠
+      // 60s 轮询，删掉一条到期待办后侧边栏数字还会杵着，看起来像没删掉。
+      refreshNavBadges()
+    }
   }
 }
 
