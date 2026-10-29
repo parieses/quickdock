@@ -2391,6 +2391,7 @@ export default {
   sshPasteMore: '还有 {n} 行…',
   sshPasteConfirm: '仍然发送',
   sshPasteCanceled: '已取消粘贴',
+  sshPasteEmpty: '剪贴板为空或读取失败，没有可粘贴的内容',
   sshPasteDangerHint: '若内容里有 rm、dd、curl 等命令，请先确认每一行都符合预期。',
 
   // ---- 错误文案（#15：前端按错误码给可操作提示，不直接展示后端中文串） ----

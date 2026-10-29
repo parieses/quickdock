@@ -2391,6 +2391,7 @@ export default {
   sshPasteMore: '{n} more lines…',
   sshPasteConfirm: 'Send anyway',
   sshPasteCanceled: 'Paste canceled',
+  sshPasteEmpty: 'Clipboard is empty or could not be read — nothing to paste',
   sshPasteDangerHint:
     'If the content contains rm, dd or curl, check that every line is what you meant before sending.',
 

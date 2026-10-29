@@ -15,14 +15,17 @@ import (
 
 // ===== 剪贴板历史 =====
 
-// CopyText 将文本写入系统剪贴板（命令面板结果复制用）。
+// CopyText 将文本写入系统剪贴板（SSH 终端 / 命令面板等处的显式复制）。
 // 直接走 platform 的 Win32 写入，避免 WebView2 中 navigator.clipboard
 // 在文档未聚焦时被静默拦截的问题。
 //
 // 写失败必须让前端看见：这条路径曾是「点了复制没反应」的源头——底层返回 void，
 // 上层只能一律报成功，用户拿到的永远是旧剪贴板内容。
+//
+// 用 SetClipboardTextRecord（不带回环令牌）而不是 SetClipboardText：这是用户显式
+// 复制的新内容，要能被剪贴板捕获协程记入历史；否则「提示复制成功、历史里却没有」。
 func (a *ClipboardService) CopyText(text string) *services.ApiResult {
-	if !services.SetClipboardText(text) {
+	if !services.SetClipboardTextRecord(text) {
 		return services.FailMsg("写入剪贴板失败：系统剪贴板可能被其他程序占用，请稍后重试")
 	}
 	return services.Ok(nil)

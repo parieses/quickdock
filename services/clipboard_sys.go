@@ -262,14 +262,34 @@ func (a *AppService) OnClipboardChange() {
 // 返回值必须如实反映结果：旧实现无返回值，界面「点了复制、粘出来还是旧内容」
 // 完全没有信号，是「无法复制」里最难排查的一类。
 func SetClipboardText(text string) bool {
+	return setClipboardText(text, true)
+}
+
+// SetClipboardTextRecord 把文本写入系统剪贴板，且**不登记回环令牌**，让剪贴板捕获
+// 协程把它当成一次正常复制记入历史。
+//
+// 用于「用户在应用内显式复制新内容」：SSH 终端选中复制、命令面板复制等。这类内容
+// 本不在历史里；若像 SetClipboardText 那样被令牌挡掉，用户复制后到历史面板一看没有，
+// 就会误以为「复制失败、剪贴板是空的」——这正是「提示成功但历史里看不到」的根因。
+//
+// 与 SetClipboardText 的区别只有一个：是否登记回环令牌。二者共用同一套写入实现。
+func SetClipboardTextRecord(text string) bool {
+	return setClipboardText(text, false)
+}
+
+// setClipboardText 是上面两个导出函数的公共实现。
+// suppressCapture=true 时登记一次性回环令牌，使这次写入不被剪贴板捕获协程记录下来。
+func setClipboardText(text string, suppressCapture bool) bool {
 	if err := platform.SetClipboardText(platform.ClipboardWindowHandle(), text); err != nil {
 		logger.W("QuickDock: 剪贴板写入失败: %v（文本长度=%d）", err, len(text))
 		return false
 	}
-	// 成功路径不记日志：从历史复制是高频操作，记日志只会把日志刷满。
-	// 登记回环令牌：这次写入同样会触发 WM_CLIPBOARDUPDATE（系统通知所有监听者，
-	// 包括我们自己），没有令牌就会被当成一次新复制入库，CopyCount 与置顶都会失真。
-	setSelfWriteText(text)
+	if suppressCapture {
+		// 成功路径不记日志：从历史复制是高频操作，记日志只会把日志刷满。
+		// 登记回环令牌：这次写入同样会触发 WM_CLIPBOARDUPDATE（系统通知所有监听者，
+		// 包括我们自己），没有令牌就会被当成一次新复制入库，CopyCount 与置顶都会失真。
+		setSelfWriteText(text)
+	}
 	// {clipboard} 变量读的是「最近一次复制到的内容」，本程序回写的也算——
 	// 用户从历史里挑一条再粘贴，那条就是对当前剪贴板的真实描述。
 	setLastClipboardText(text)

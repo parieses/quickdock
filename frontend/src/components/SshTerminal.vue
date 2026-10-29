@@ -27,6 +27,7 @@ import { createWriteQueue } from '../utils/termWriteQueue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useThemeName } from '../composables/useThemeName'
+import { useToast } from '../composables/useToast'
 import { debounce } from '../utils/debounce'
 import { isMultiLinePaste } from '../utils/ssh'
 
@@ -82,6 +83,9 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+// 复制结果要当场看得见：成功/失败都给一条轻提示，否则「点了复制没反应」时
+// 分不清是没选中、还是剪贴板被占用——这正是这个问题反复排查不下去的原因。
+const { success: toastSuccess, error: toastError } = useToast()
 
 // ---- 右键菜单（复制 / 粘贴 / 全选 / 清空） ----
 //
@@ -125,11 +129,10 @@ function applyFontSize(next: number) {
   closeMenu()
 }
 
-function hasSelection(): boolean {
-  return !!term && term.hasSelection()
-}
-
 function openMenu(e: MouseEvent) {
+  // 右键时兜底再快照一次：正常路径已在 onSelectionChange 捕获，这里防的是个别
+  // WebView2 版本 selectionchange 时机差异、而此刻选区其实还在的情况。
+  if (term && term.hasSelection()) lastSelection.value = term.getSelection()
   // 超出视口时往回收，避免菜单被屏幕边缘裁掉点不到。
   // 底部预留 260px：菜单每加一项约增高 30px，预留不足会正好压住最后一项。
   const x = Math.min(e.clientX, window.innerWidth - 180)
@@ -138,7 +141,12 @@ function openMenu(e: MouseEvent) {
 }
 
 function closeMenu() {
+  if (!menu.value) return
   menu.value = null
+  // 菜单项是 <button>，点过之后焦点会留在按钮上（按钮随后被移除，焦点掉到 body）。
+  // 那样接下来的 Ctrl+V / 直接敲字都不会进到终端，表现为「关掉菜单后还得先点一下终端」。
+  // 菜单一关就把焦点还给 xterm。
+  term?.focus()
 }
 
 /**
@@ -177,18 +185,30 @@ async function readClipboardText(): Promise<string> {
 }
 
 async function onCopy() {
-  // 用 currentSelection 而不是现读 getSelection：见其注释（选区常在点击前就被清掉）。
+  // 取值口径：快照优先（右键/点击会清掉实时选区），再兜底实时选区。
   const text = currentSelection()
-  if (text) await copyText(text)
   closeMenu()
+  if (!text) {
+    // 走到这里说明快照和实时选区都空了。给失败反馈，别让「点了复制」静默无反应。
+    toastError(t('copyFailed'))
+    return
+  }
+  const ok = await copyText(text)
+  if (ok) toastSuccess(t('copied'))
+  else toastError(t('copyFailed'))
 }
 
 async function onPaste() {
   const text = await readClipboardText()
+  closeMenu()
+  if (!text) {
+    // 读不到不能静默：用户按了 Ctrl+V 却什么都没发生，和「功能坏了」无法区分。
+    toastError(t('sshPasteEmpty'))
+    return
+  }
   // 显式粘贴：不走 isMultiLinePaste 确认（用户主动操作），
   // 直接经与按键相同的发送路径发往远端。
-  if (text) sendInput(text)
-  closeMenu()
+  sendInput(text)
 }
 
 function onSelectAll() {
@@ -230,12 +250,13 @@ function onClear() {
   closeMenu()
 }
 
-/** 快捷键：
- *  - Ctrl/Cmd+Shift+C 复制、Ctrl/Cmd+Insert 复制；
- *  - Ctrl/Cmd+V、Ctrl/Cmd+Shift+V、Shift+Insert 粘贴（都走 Wails 原生桥读取剪贴板）。
- *  普通 Ctrl+C 不介入（那是 SIGINT，交给 xterm / 远端）。
- *  普通 Ctrl+V 也要拦截：WebView2 下浏览器原生粘贴事件常拿不到剪贴板数据，
- *  直接交给原生会导致「粘贴没反应」，故统一改走原生桥读取。 */
+/**
+ * 宿主层快捷键 —— **只放「不影响发往远端字节流」的键**。
+ *
+ * 复制 / 粘贴 / 问 AI 一律不在这里：它们必须赶在 xterm 之前拦，见下面
+ * `term.attachCustomKeyEventHandler`（这里的 keydown 是冒泡阶段，
+ * 等它跑起来 xterm 早已把 \x03、\x16 等控制码发给远端了）。
+ */
 function onKeydown(e: KeyboardEvent) {
   const mod = e.ctrlKey || e.metaKey
   const k = e.key
@@ -250,39 +271,6 @@ function onKeydown(e: KeyboardEvent) {
   if (k === 'Escape' && searchOpen.value) {
     e.preventDefault()
     closeSearch()
-    return
-  }
-  if (mod && k === 'C' && e.shiftKey) {
-    e.preventDefault()
-    void onCopy()
-    return
-  }
-  // Ctrl/Cmd+Shift+A：对选中内容提问 AI。无选区时不拦截，
-  // 把这个组合留给宿主/浏览器的其它用途，避免按了没反应又拦了键。
-  if (mod && k === 'A' && e.shiftKey) {
-    if (!hasSelection()) return
-    e.preventDefault()
-    onAskAI()
-    return
-  }
-  if (mod && k === 'V' && e.shiftKey) {
-    e.preventDefault()
-    void onPaste()
-    return
-  }
-  if (mod && k === 'V') {
-    e.preventDefault()
-    void onPaste()
-    return
-  }
-  if (mod && k === 'Insert') {
-    e.preventDefault()
-    void onCopy()
-    return
-  }
-  if (e.shiftKey && k === 'Insert') {
-    e.preventDefault()
-    void onPaste()
     return
   }
 }
@@ -376,36 +364,42 @@ function closeSearch() {
 /**
  * 最近一次「非空选区」的快照。
  *
- * 为什么需要它：xterm 的选区是**实时**的，`term.getSelection()` 在右键问 AI 被点击
- * 的那一刻可能已经不是用户刚选的那段了——xterm 在用户有输入时会自动清掉选区
- * （见 xterm 源码的 `onUserInput(() => { this.hasSelection && this.clearSelection() })`），
+ * 为什么需要它：xterm 的选区是**实时**的，`term.getSelection()` 在右键菜单被点击
+ * 的那一刻经常已经是空串——xterm 会在用户点击、输入、或右键时清掉选区
+ * （见 xterm 源码 `onUserInput(() => { this.hasSelection && this.clearSelection() })`），
  * 而 WebView2 里右键 contextmenu 的时机更不可控，选区说没就没。
  *
- * 所以不能「点击问 AI 时再读一次 getSelection()」，而要在选区**成立的瞬间**
- * （onSelectionChange 回调）就把它存下来。这样即便随后选区被清，
- * 右键问 AI 仍能拿到用户真正圈出来的那一段。
+ * 所以不能「点击复制/问 AI 时再读一次 getSelection()」，而要在选区**成立的瞬间**
+ * （onSelectionChange 回调）就把它存下来，并且**选区被清除时也不清空**——
+ * 这样右键菜单弹出、用户点「复制」的那一刻，按钮仍能用这份快照。
  *
- * 只用普通变量持有：它只在组件实例内流转，不需要响应式。
+ * 做成 ref 是必须的：「复制 / 问 AI」按钮的 disabled 直接绑它。若按钮可用态只认
+ * 实时选区（term.hasSelection()），右键一清选区按钮立刻变灰 → 用户点「复制」
+ * 毫无反应，这正是「右键里复制不生效」的根因。
  */
-let lastSelection = ''
+const lastSelection = ref('')
 
 /**
  * 当前可用的选区文本 —— 复制与问 AI 的**唯一取值口径**。
  *
  * 必须优先用快照：现读 `getSelection()` 在「右键菜单点下去」「Ctrl+Shift+C 按下」
  * 这些时机经常已经是空串（xterm 会在用户输入/点击终端时清选区，WebView2 的
- * contextmenu 时机更不可控）。旧实现里复制按钮的 disabled 直接从 `hasSelection()`
- * 取，于是出现「明明选中了，复制是灰的 / 按了没反应」——问 AI 那条路已改成用快照，
- * 复制这条漏改了。
+ * contextmenu 时机更不可控）。没有快照时再退回实时选区兜底。
  */
 function currentSelection(): string {
-  if (lastSelection) return lastSelection
+  if (lastSelection.value) return lastSelection.value
   return term && term.hasSelection() ? term.getSelection() : ''
 }
 
-/** 是否存在可复制/可提问的内容（含快照兜底）。 */
+/**
+ * 是否存在可复制/可提问的内容。
+ *
+ * 读快照 ref（不是实时选区）：右键/点击会清掉实时选区，若这里读 `hasSelection()`
+ * 按钮会在用户点它的瞬间变灰，表现为「复制点了没反应」。快照一经选中就保留，
+ * 按钮可用态因此稳定。
+ */
 function canCopy(): boolean {
-  return currentSelection() !== ''
+  return lastSelection.value !== ''
 }
 
 // ---- 写入队列（rAF 分片 + 背压） ----
@@ -647,7 +641,61 @@ onMounted(async () => {
   // 选区被清除时不动它——这样右键问 AI 仍能拿到上一段被选中的内容，
   // 而不会拿到一个空值。
   term.onSelectionChange(() => {
-    if (term && term.hasSelection()) lastSelection = term.getSelection()
+    if (term && term.hasSelection()) {
+      lastSelection.value = term.getSelection()
+    }
+    // 注意：这里**不要**在选区被清空时把 lastSelection 置空。右键菜单弹出、
+    // 点击终端其它位置都会瞬间清掉实时选区，此时若把快照也清掉，「复制 / 问 AI」
+    // 按钮会在用户点它的那一刻变灰——正是「右键里复制不生效」的根因。快照保留，
+    // 复制随时可用，直到下一次选中覆盖它。
+  })
+
+  // 终端里的复制/粘贴/问 AI 快捷键全部在这里拦：
+  // host 上的 keydown 是冒泡阶段，跑在 xterm 自己的 keydown **之后**——那时 xterm 已经把
+  //   Ctrl+C 当 \x03(SIGINT)、Ctrl+V 当 \x16(quoted-insert)、Ctrl+Insert 当其它控制码
+  // 发给远端了，再 preventDefault 也收不回来。用户看到的正是「Ctrl+V 粘不出来，终端里
+  // 反而冒出一个 ^V」。attachCustomKeyEventHandler 在 xterm 判定按键**之前**执行，
+  // 返回 false 才能真正把键吞掉。
+  //
+  // 同时 stopPropagation：本键已由这里处理，别再让 host 的 onKeydown 处理第二遍
+  // （否则一次 Ctrl+V 会粘贴两次）。
+  term.attachCustomKeyEventHandler((e) => {
+    if (e.type !== 'keydown') return true
+    const mod = e.ctrlKey || e.metaKey
+    const k = e.key
+    const keyOf = (code: string, ...aliases: string[]) => e.code === code || aliases.includes(k)
+    const swallow = () => {
+      e.preventDefault()
+      e.stopPropagation()
+      return false
+    }
+    const sel = !!term && term.hasSelection()
+
+    // 普通 Ctrl+C：**有可见选区才复制**，没有选区必须放行 → 照常发 SIGINT，
+    // 否则「中断正在跑的命令」这个最常用的操作就没了。
+    if (mod && !e.shiftKey && !e.altKey && keyOf('KeyC', 'c', 'C')) {
+      if (sel) {
+        void onCopy()
+        return swallow()
+      }
+      return true
+    }
+    // Ctrl+Shift+C / Ctrl+Insert：复制（无选区时 onCopy 会给出失败提示）
+    if ((mod && e.shiftKey && keyOf('KeyC', 'c', 'C')) || (mod && keyOf('Insert'))) {
+      void onCopy()
+      return swallow()
+    }
+    // Ctrl+V / Ctrl+Shift+V / Shift+Insert：粘贴
+    if ((mod && !e.altKey && keyOf('KeyV', 'v', 'V')) || (!mod && e.shiftKey && keyOf('Insert'))) {
+      void onPaste()
+      return swallow()
+    }
+    // Ctrl+Shift+A：对选中内容提问 AI；无选区不拦，留给宿主/浏览器。
+    if (mod && e.shiftKey && keyOf('KeyA', 'a', 'A') && sel) {
+      onAskAI()
+      return swallow()
+    }
+    return true
   })
 
   term.onData(handleInput)
