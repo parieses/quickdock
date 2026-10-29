@@ -342,6 +342,25 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">AI 客户端能直接指挥插件，MCP 工具可以逐个关</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>MCP 工具从 33 个加到 35 个：AI 客户端现在能给插件命令传结构化参数（不再只有一段文本）、带参数打开插件界面（纯前端插件也能用），还能回看执行记录。</li>
+          <li>插件可以在清单里声明自己的命令接受哪些参数——键名、类型、哪些必填，AI 照着填就行，不必再靠猜。写错的声明只丢这一个字段并记一条日志，不会导致插件装不上。</li>
+          <li>新增 <code>plugin_exec_logs</code>：AI 跑过哪些插件命令、成功还是失败、用了多久都能查。AI 触发的记录来源标为「MCP」，和手动点击区分开。</li>
+          <li>环境管理页的 MCP 工具清单按用途分组，可以逐个开关；关掉的工具客户端既看不到也调不动，改完提示需要重启服务或重新握手。</li>
+          <li>SSH 终端的复制粘贴修好了：选中后立刻点复制不再失效，<code>Ctrl+V</code> 不再冒出 <code>^V</code>，应用内复制的文本也会进剪贴板历史。</li>
+          <li>定时任务和工作区项目里「打开软件」的目标可以从已安装应用里点选，不必再手打 exe 全路径。</li>
+          <li>插件窗口声明的尺寸超出屏幕时自动收敛到可用区域，标题栏和右下角不会再被裁掉；插件给 AI 的长系统提示词上限放宽到 24000 字符，超出改为截断而不是让整次调用失败。</li>
+          <li>删除待办后，侧边栏角标立即更新，不用再等下一轮轮询。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.32</span>
+          <span class="log-date">2026-10-29</span>
           <span class="log-title">DeepSeek Harness 更稳，更新器在国内网络下更可靠，更新说明更好读</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -389,23 +408,6 @@
           <li>剪贴板的「图片」「文件」标签修好了，分类改成入库时计算，能翻到全部历史。</li>
           <li>命令面板能搜待办，回车直接跳到那一条。定时任务删除后进回收站。</li>
           <li>集合条目过百改虚拟滚动，日志最多渲染 5000 行，长列表不再越滚越卡。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.29</span>
-          <span class="log-date">2026-10-27</span>
-          <span class="log-title">删除能找回，界面统一，通知有了归处</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>项目、集合、场景、笔记、工作空间删掉之后进回收站，在「设置 → 历史 → 回收站」里恢复，级联删除的子内容一起回来。</li>
-          <li>侧栏底部加了通知中心，监控状态、定时任务、AI 回答完成都收在这里，点开能跳回原来那一条。</li>
-          <li>任意文件可以实时尾随，新增行增量读取，文件被轮转也能自动对齐。</li>
-          <li>剪贴板支持自动规则：去空白、删空行、排序、JSON 格式化之类，可以只对匹配的内容生效，改之前能先试运行。</li>
-          <li>命令面板输入 <code>cheatsheet</code> 打开快捷键备忘单，内容读自你当前的键位。</li>
-          <li>设置页从 14 页合并成 11 页。九个业务页的页头、按钮、面板头统一成一套。</li>
         </ul>
       </details>
 

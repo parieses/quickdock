@@ -342,6 +342,25 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">AI clients can drive plugins directly, and MCP tools can be switched off one by one</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>MCP grew from 33 tools to 35: AI clients can now pass structured parameters to plugin commands (not just a line of text), open a plugin window with parameters (frontend-only plugins included), and read back execution records.</li>
+          <li>Plugins can declare what parameters each command takes — key names, types, which ones are required — so the model fills them in instead of guessing. A malformed declaration only drops that one field and logs a warning; it never blocks the plugin from loading.</li>
+          <li>New <code>plugin_exec_logs</code> shows which plugin commands the AI ran, whether they succeeded and how long they took. Records triggered by AI are marked as MCP, so they stay distinguishable from manual clicks.</li>
+          <li>The MCP tool list in Environment is grouped by purpose and each tool can be toggled individually. A disabled tool is invisible and uncallable to clients; the panel tells you to restart the service or re-handshake.</li>
+          <li>SSH terminal copy and paste work again: copying right after selecting no longer fails, <code>Ctrl+V</code> no longer sends a literal <code>^V</code>, and text copied in-app now lands in clipboard history.</li>
+          <li>Scheduled tasks and workspace projects can pick their “open app” target from installed applications instead of typing a full exe path.</li>
+          <li>Plugin windows larger than the screen now shrink to the usable work area, so the title bar and bottom-right corner stay reachable. The system prompt cap for plugin AI calls is raised to 24,000 characters and truncates instead of failing the whole call.</li>
+          <li>Deleting a todo updates the sidebar badge immediately instead of waiting for the next poll.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.32</span>
+          <span class="log-date">2026-10-29</span>
           <span class="log-title">DeepSeek Harness is more reliable, the updater works better on slow networks, release notes are easier to read</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -389,23 +408,6 @@
           <li>The clipboard's "images" and "files" filters work again, and classification happens on write, so a filter reaches the whole history.</li>
           <li>The command palette searches todos, and Enter jumps to the one you picked. Deleted scheduled tasks go to the recycle bin.</li>
           <li>Collections over a hundred items scroll virtually, logs render at most 5000 lines, and long lists stop getting slower as they grow.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.29</span>
-          <span class="log-date">2026-10-27</span>
-          <span class="log-title">Deletions are recoverable, the interface is unified, notifications have a home</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Deleted projects, collections, scenes, notes and workspaces go to the recycle bin under Settings → History, and cascade-deleted children come back with them.</li>
-          <li>A notification center at the bottom of the sidebar collects monitor state, scheduled task results and finished AI answers, and each entry jumps back to its source.</li>
-          <li>Any file can be tailed live: new lines are read incrementally, and rotation realigns automatically.</li>
-          <li>The clipboard supports automatic rules — trim, drop blank lines, sort, format JSON — scoped to matching content, with a dry run before you commit.</li>
-          <li>Type <code>cheatsheet</code> in the command palette for the hotkey sheet, read from your current bindings.</li>
-          <li>Settings went from 14 pages to 11, and the headers, buttons and panel titles of nine pages now follow one set of rules.</li>
         </ul>
       </details>
 
