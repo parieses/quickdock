@@ -3,15 +3,11 @@
 package dl
 
 import (
-	"context"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"sync"
 	"time"
-
-	"golang.org/x/sync/errgroup"
 )
 
 // DlProgressWriter / ProgressTracker：下载进度节流上报（plugin:download-progress 事件）。
@@ -59,6 +55,17 @@ func (t *ProgressTracker) Add(n int64) {
 	}
 }
 
+// Seed 预设已下载字节数。断点续传时把进度基线抬到断点处，否则续传的下载
+// 会从 0% 重新爬（实际已下了一半，用户看到的是「进度倒退」）。
+func (t *ProgressTracker) Seed(done int64) {
+	if done <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.done = done
+}
+
 // DlProgressWriter 单流下载用：包装目标 writer 并把字节数计入 tracker
 type DlProgressWriter struct {
 	dst io.Writer
@@ -91,75 +98,16 @@ const (
 // progress 每收到一个数据块回调一次（n 为本次写入字节数），由调用方决定
 // 是否节流与如何上报——插件市场走 ProgressTracker.add（节流 + 事件），
 // 设置页"检查更新"走同样逻辑转发 Wails onProgress。共用同一实现避免两处分叉。
+//
+// 不带续传状态：进程/调用结束后进度即丢。需要跨调用续传（自动更新）用
+// DownloadResumable + ResumeOptions.StatePath。
 func DownloadParallelTo(client *http.Client, url string, f *os.File, total int64, progress func(downloaded int64)) error {
-	chunk := (total + DownloadConcurrency - 1) / DownloadConcurrency
-	g, ctx := errgroup.WithContext(context.Background())
-	for i := 0; i < DownloadConcurrency; i++ {
-		start := int64(i) * chunk
-		end := start + chunk - 1
-		if end >= total {
-			end = total - 1
-		}
-		if start > end {
-			continue // 尾部空段
-		}
-		g.Go(func() error {
-			var lastErr error
-			for attempt := 0; attempt < 3; attempt++ {
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-time.After(time.Duration(attempt) * 500 * time.Millisecond): // 退避 0/500ms/1s
-				}
-				req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-				if err != nil {
-					return err
-				}
-				req.Header.Set("Range", fmt.Sprintf("bytes=%d-%d", start, end))
-				resp, err := client.Do(req)
-				if err != nil {
-					lastErr = err
-					continue
-				}
-				if resp.StatusCode != http.StatusPartialContent {
-					io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-					resp.Body.Close()
-					lastErr = fmt.Errorf("Range 请求返回 HTTP %d", resp.StatusCode)
-					continue
-				}
-				buf := make([]byte, 64*1024)
-				offset := start
-				var werr error
-				for {
-					n, rerr := resp.Body.Read(buf)
-					if n > 0 {
-						if _, e := f.WriteAt(buf[:n], offset); e != nil {
-							werr = e
-							break
-						}
-						offset += int64(n)
-						if progress != nil {
-							progress(int64(n))
-						}
-					}
-					if rerr != nil {
-						if rerr != io.EOF {
-							werr = rerr
-						}
-						break
-					}
-				}
-				resp.Body.Close()
-				if werr == nil && offset == end+1 {
-					return nil
-				}
-				if werr == nil {
-					werr = fmt.Errorf("分段 %d-%d 数据不完整", start, end)
-				}
-				lastErr = werr
-			}
-			return lastErr
-		})
-	}
-	return g.Wait()
+	return DownloadResumable(ResumeOptions{
+		Client:   client,
+		URL:      url,
+		File:     f,
+		Total:    total,
+		Parts:    DownloadConcurrency,
+		Progress: progress,
+	})
 }

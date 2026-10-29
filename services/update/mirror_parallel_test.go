@@ -50,7 +50,9 @@ func TestMirrorProviderDownloadParallel(t *testing.T) {
 		Metadata: map[string]any{"endpoint.artifact.url": srv.URL},
 		Artifact: updater.Artifact{Size: int64(len(data))},
 	}
-	p := NewMirrorUpdaterProvider(nil, &http.Client{}, "")
+	// CacheDir 指向临时目录：下载缓存（断点续传的 pending.part/state）不该写进
+	// 用户真实的数据目录，否则跑一次单测就在更新目录里留下几 MB 垃圾。
+	p := NewMirrorProvider(MirrorConfig{Client: &http.Client{}, CacheDir: t.TempDir()})
 
 	var buf bytes.Buffer
 	progressCalls := 0

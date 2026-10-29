@@ -147,7 +147,10 @@ func (a *UpdateService) DownloadUpdate() *services.ApiResult {
 	}
 
 	state := a.App.App().Updater.State()
-	if state != updater.StateAvailable {
+	// 失败后 wails 把状态置为 StateError，但待安装的 release 仍在（transition 不清
+	// pending）。这里只认 StateAvailable 的话，用户点「重试」会立刻收到
+	// 「没有待下载的更新」——重试入口形同虚设，下载器里的断点续传也永远跑不到。
+	if state != updater.StateAvailable && state != updater.StateError {
 		return services.FailMsg("没有待下载的更新")
 	}
 
@@ -203,6 +206,19 @@ func (a *UpdateService) GetUpdateState() *services.ApiResult {
 	}
 
 	live := a.App.App().Updater.State()
+	// 下载失败后 wails 置为 error，但 release 仍待安装（可重试）。对用户来说
+	// 「这次没下完」不等于「没有更新」，面板要继续给「下载」按钮——否则重试
+	// 入口直接消失，只能靠再点一次「检查更新」碰运气。
+	if live == updater.StateError {
+		if lc := a.getLastCheck(); lc != nil && lc.AvailableVersion != "" {
+			return services.Ok(&UpdateStatus{
+				CurrentVersion:   a.appVersion(),
+				State:            "available",
+				AvailableVersion: lc.AvailableVersion,
+				ReleaseNotes:     lc.ReleaseNotes,
+			})
+		}
+	}
 	st := &UpdateStatus{
 		CurrentVersion: a.appVersion(),
 		State:          string(live),
@@ -316,7 +332,7 @@ func friendlyError(err error) string {
 		return "TLS/SSL 连接错误。请检查系统时间或网络环境。"
 	case strings.Contains(lower, "context deadline exceeded") ||
 		strings.Contains(lower, "client.timeout") || strings.Contains(lower, "exceeded while reading"):
-		return "下载超时：安装包体积较大或网络连接较慢导致下载未完成。请检查网络，配置代理（HTTPS_PROXY 环境变量），或手动从 GitHub Releases 下载安装。"
+		return "下载超时：安装包体积较大或网络连接较慢导致下载未完成。已下载的部分已保存，点击重试会从断点继续；也可配置代理（HTTPS_PROXY 环境变量）或手动从 GitHub Releases 下载安装。"
 	case strings.Contains(lower, "github: download"):
 		return "下载安装包失败：直连 GitHub 与加速镜像均无法访问。请检查网络或配置代理（HTTPS_PROXY），也可手动从 GitHub Releases 页面下载安装。"
 	default:
