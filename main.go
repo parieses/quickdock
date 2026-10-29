@@ -716,18 +716,19 @@ func initUpdater(app *application.App, version string) error {
 	httpClient := &http.Client{Transport: transport, Timeout: 0}
 
 	// endpoint provider：从签名 manifest 拉取更新信息并验签。
-	// 镜像重试由 NewMirrorUpdaterProvider 包装（国内网络加速），它透传 Check/Download。
+	// 镜像重试由 NewMirrorUpdaterProvider 包装（国内网络加速），Check/Download
+	// 直连失败都会自动走镜像重试。
 	ep, err := endpoint.New(endpoint.Config{
-		URL:        "https://github.com/parieses/quickdock/releases/latest/download/manifest.json",
+		URL:        updatesvc.ManifestURL,
 		HTTPClient: httpClient,
 	})
 	if err != nil {
 		return fmt.Errorf("创建 endpoint provider 失败: %w", err)
 	}
 
-	// 用镜像 provider 包装：直连 GitHub 下载失败时自动尝试加速镜像（国内网络）。
+	// 用镜像 provider 包装：直连 GitHub 失败时自动尝试加速镜像（国内网络）。
 	// 签名验证不受影响（镜像只改传输 URL，无法篡改内容）。
-	provider := updater.Provider(updatesvc.NewMirrorUpdaterProvider(ep, httpClient))
+	provider := updater.Provider(updatesvc.NewMirrorUpdaterProvider(ep, httpClient, updatesvc.ManifestURL))
 
 	return app.Updater.Init(updater.Config{
 		CurrentVersion: version,
