@@ -11,6 +11,7 @@ import {
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { pluginName, pluginDesc } from '../utils/localize'
+import { applyOverflowTitle } from '../utils/overflowTitle'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { pickDownload } from '../utils/platform'
 import { setPluginUpdateBadge } from '../composables/usePluginUpdateBadge'
@@ -370,7 +371,11 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
             <div class="card-id">{{ p.id }}</div>
           </div>
         </div>
-        <p class="card-desc">{{ pluginDesc({ description: p.description, descriptionI18n: p.description_i18n }, locale) }}</p>
+        <!-- 描述：固定两行（.card-desc 的 line-clamp），超出的悬停看全文 -->
+        <p
+          class="card-desc"
+          @mouseenter="applyOverflowTitle($event, pluginDesc({ description: p.description, descriptionI18n: p.description_i18n }, locale))"
+        >{{ pluginDesc({ description: p.description, descriptionI18n: p.description_i18n }, locale) }}</p>
         <div class="card-meta">
           <span v-if="p.author" class="meta-item">{{ p.author }}</span>
           <span v-if="p.category" class="meta-item">{{ p.category }}</span>
@@ -585,9 +590,17 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .badge { font-size: 10px; padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-accent-bg); color: var(--color-accent); }
 .badge-installed { background: var(--color-success-bg); color: var(--color-success); }
 .badge-upgrade { background: var(--color-warning-bg); color: var(--color-warning); }
-/* 描述：卡片是 flex column，desc 默认 stretch 到容器宽，但超长无空格词
-   （英文描述/URL）仍会撑出这一行；anywhere 与 .card-id 同一处理 */
-.card-desc { font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; min-height: 32px; overflow-wrap: anywhere; }
+/* 描述：固定两行高度（12px × 1.5 × 2 = 36px），卡片等高、按行对齐；
+   超出部分 line-clamp 裁掉，鼠标移入由 applyOverflowTitle 补 title 看全文。
+   卡片是 flex column，desc 默认 stretch 到容器宽，但超长无空格词（英文描述/URL）
+   仍会撑出这一行，anywhere 与 .card-id 同一处理 */
+.card-desc {
+  font-size: 12px; color: var(--color-text-secondary); line-height: 1.5;
+  min-height: 36px;
+  display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow: hidden; overflow-wrap: anywhere;
+  margin: 0;
+}
 .card-meta { display: flex; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
 .card-perms { display: flex; gap: 4px; flex-wrap: wrap; }
 .perm-tag { font-size: 9px; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-muted); }

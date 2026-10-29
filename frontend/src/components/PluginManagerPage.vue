@@ -30,6 +30,7 @@ import { unwrap } from '../utils/api'
 import ConfirmDialog from './ConfirmDialog.vue'
 import PluginMarketPage from './PluginMarketPage.vue'
 import { pluginName, pluginDesc, commandTitle } from '../utils/localize'
+import { applyOverflowTitle } from '../utils/overflowTitle'
 import { useThemeName } from '../composables/useThemeName'
 import type { ToastAPI, PluginInfo, PluginExecLog, PluginCommand } from '../types'
 
@@ -753,8 +754,12 @@ onUnmounted(() => {
           <span v-if="p.commands.length > 2" class="cmd-more">+{{ p.commands.length - 2 }}</span>
         </div>
 
-        <!-- 描述 -->
-        <p v-if="p.description" class="card-desc">{{ pluginDesc(p, locale) }}</p>
+        <!-- 描述：固定两行（.card-desc 的 line-clamp），超出的悬停看全文 -->
+        <p
+          v-if="p.description"
+          class="card-desc"
+          @mouseenter="applyOverflowTitle($event, pluginDesc(p, locale))"
+        >{{ pluginDesc(p, locale) }}</p>
       </div>
     </div>
 
@@ -1018,12 +1023,14 @@ onUnmounted(() => {
 .usage-icon { font-size: 7px; }
 .usage-count { font-family: var(--font-mono, monospace); font-weight: 500; }
 
-/* 描述 */
+/* 描述：固定两行高度（10px × 1.3 × 2），卡片按行对齐；超出部分由
+   line-clamp 裁掉，鼠标移入时由 applyOverflowTitle 补上 title 看全文 */
 .card-desc {
   font-size: 10px; color: var(--color-text-muted);
   margin: 1px 0 0; line-height: 1.3;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
   overflow: hidden;
+  min-height: 26px;
   /* 卡片是 flex column + align-items:center，item 宽度=内容宽而非容器宽：
      不约束 max-width，一个超长无空格词（英文描述/URL）就会把描述撑破卡片 */
   max-width: 100%;
