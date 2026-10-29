@@ -462,9 +462,11 @@ func (d *Database) Query(query string, params ...interface{}) ([]map[string]inte
 }
 
 // appStateKeyValid 校验 key 是否允许读写 app_state 表，防止覆盖内置配置或误写。
-// 只允许已知前缀的 key：theme/locale 等用户设置、plugin_icon_* 插件图标、
+// 只允许已知前缀的 key：theme/locale 等用户设置、lastWorkspaceId/lastSceneId 工作区记忆、
+// openedSceneIds:* 已打开场景标签页（workspace.ts 按 workspaceId 拼接）、plugin_icon_* 插件图标、
 // 以及内部服务用的 ai_* / sync_config / notify_webhook / dsh_*（dsh_auto_start 等）/ qd_ 等。
-var appStateKeyValid = regexp.MustCompile(`^(theme|locale|lastWorkspaceId|lastSceneId|plugin_icon_|webdav_config|sync_config|ai_profiles|ai_active_profile|ai_config|notify_webhook|dsh_|qd_)`)
+// 注意：后端内部写入走 SetSetting（不经此校验），本白名单只守 SetValue/GetValue 这一前端 API 入口。
+var appStateKeyValid = regexp.MustCompile(`^(theme|locale|lastWorkspaceId|lastSceneId|openedSceneIds|plugin_icon_|webdav_config|sync_config|ai_profiles|ai_active_profile|ai_config|notify_webhook|dsh_|qd_)`)
 
 func validateAppStateKey(key string) error {
 	if !appStateKeyValid.MatchString(key) {
