@@ -2405,7 +2405,7 @@ export default {
   // DeepSeek Harness 集成
   navDsh: 'DeepSeek Harness',
   dshDesc: '集成 DeepSeek 官方开源 Agent 框架，提供工具调用、文件与终端执行能力',
-  dshLogTitle: '安装日志',
+  dshLogTitle: '运行日志',
   dshExportLog: '导出',
   dshOpenInBrowser: '在浏览器中打开',
   dshDownloadingNode: '正在下载 Node 运行时…',
@@ -2452,6 +2452,14 @@ export default {
   dshServiceStop: '停止服务',
   dshServiceStarting: '启动中…',
   dshServiceStopping: '停止中…',
+  dshUninstall: '卸载 DeepSeek Harness',
+  dshUninstalling: '正在卸载…',
+  dshUninstalled: 'DeepSeek Harness 已卸载，可重新一键安装',
+  dshUninstallConfirm: '确定要卸载 DeepSeek Harness 吗？将删除其软件包目录、数据目录（profile/会话/配置）与访问令牌，卸载后需重新安装才能使用。',
+  dshUninstallHint: '遇到无法修复的启动问题，或想彻底重装时可使用；卸载后所有 dsh 数据将被清除。',
+  dshWebView2TooOld: '当前 WebView2 运行时版本为 {version}，低于 dsh 要求的最低版本 {min}。dsh 前端依赖的 Promise.withResolvers / AbortSignal.any 在该版本不可用，会导致窗口内「connection lost」反复重连、无法使用。请更新 WebView2 运行时（更新 Microsoft Edge，或安装 WebView2 Runtime Evergreen 引导程序）后重试。',
+  dshWebView2Missing: '未检测到 WebView2 运行时版本（可能未安装或无法读取）。dsh 窗口需要 WebView2 才能正常加载，若打开后卡在「connection lost」，请安装 Microsoft Edge WebView2 Runtime 后重试。',
+  dshUninstallFailed: '卸载失败',
   dshAutoStart: '随 QuickDock 启动自动开启（延迟数秒）',
   dshAutoStartHint: '开启后，QuickDock 每次启动会自动在后台拉起 dsh web，点侧边栏 dsh 即可直接使用',
 

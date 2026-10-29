@@ -2409,7 +2409,7 @@ export default {
   // DeepSeek Harness integration
   navDsh: 'DeepSeek Harness',
   dshDesc: 'Integrate DeepSeek official open-source Agent framework with tool calling, file and terminal execution',
-  dshLogTitle: 'Install log',
+  dshLogTitle: 'Logs',
   dshExportLog: 'Export',
   dshOpenInBrowser: 'Open in browser',
   dshDownloadingNode: 'Downloading Node runtime…',
@@ -2456,6 +2456,14 @@ export default {
   dshServiceStop: 'Stop service',
   dshServiceStarting: 'Starting…',
   dshServiceStopping: 'Stopping…',
+  dshUninstall: 'Uninstall DeepSeek Harness',
+  dshUninstalling: 'Uninstalling…',
+  dshUninstalled: 'DeepSeek Harness uninstalled. You can reinstall with one click.',
+  dshUninstallConfirm: 'Uninstall DeepSeek Harness? This removes its package, data directory (profiles/sessions/config) and access token. Reinstall is required to use it again.',
+  dshUninstallHint: 'Use this when dsh cannot start (corrupted profile) or you want a clean reinstall. All dsh data will be wiped.',
+  dshWebView2TooOld: 'The current WebView2 runtime is {version}, below dsh\'s minimum required {min}. dsh\'s frontend relies on Promise.withResolvers / AbortSignal.any which are unavailable in this version, causing repeated "connection lost" reconnects. Please update the WebView2 runtime (update Microsoft Edge or install the WebView2 Runtime Evergreen bootstrap) and retry.',
+  dshWebView2Missing: 'WebView2 runtime version not detected (possibly not installed or unreadable). The dsh window needs WebView2 to load. If it gets stuck on "connection lost" after opening, install Microsoft Edge WebView2 Runtime and retry.',
+  dshUninstallFailed: 'Uninstall failed',
   dshAutoStart: 'Auto-start with QuickDock (delayed a few seconds)',
   dshAutoStartHint: 'When enabled, QuickDock starts dsh web in the background on launch — click dsh in the sidebar to use it directly.',
 
