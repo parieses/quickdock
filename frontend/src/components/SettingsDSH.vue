@@ -9,6 +9,7 @@ let cachedDshSvc: any = null
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle, Copy, FileDown } from '@lucide/vue'
+import ConfirmDialog from './ConfirmDialog.vue'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
@@ -28,6 +29,8 @@ import {
   DSHUpdateAllPlugins,
   DSHRollbackPlugins,
   DSHCheckPluginUpdates,
+  DSHUninstall,
+  CheckDSHWebView2,
 } from '../../bindings/quickdock/services/dsh/dshservice'
 import type { ToastAPI } from '../types'
 
@@ -80,9 +83,17 @@ const updating = ref(false)
 const checkingUpdate = ref(false)
 const dshSvc = ref<DSHStatusInfo | null>(cachedDshSvc ? { ...cachedDshSvc } : null)
 const svcBusy = ref(false) // 启动/停止操作进行中
+const uninstalling = ref(false) // 卸载进行中
+const showUninstallConfirm = ref(false) // 卸载二次确认弹窗
 const progress = ref<DshProgress | null>(null)
 const logs = ref<{ level: string; message: string }[]>([])
 const logBox = ref<HTMLElement | null>(null)
+// 承载 dsh 窗口的 WebView2 运行时版本检测结果（进入面板/点击打开时校验，
+// 版本过低会致 dsh 前端反复 "connection lost"，需提示用户升级内核）。
+const webview2 = ref<{ ok: boolean; version: string; minVersion: string } | null>(null)
+// 仅当版本「已知过低」才拦截打开；unknown（检测不到）不拦截，交由 Wails 建窗时的明确报错。
+const wvTooOld = computed(() => !!webview2.value && !webview2.value.ok && webview2.value.version !== 'unknown')
+const wvShowBanner = computed(() => !!webview2.value && !webview2.value.ok)
 const msg = ref('')
 const msgError = ref(false)
 let msgTimer: ReturnType<typeof setTimeout> | null = null
@@ -182,8 +193,29 @@ async function setup() {
   }
 }
 
+async function checkWebView2() {
+  if (!status.value?.dshInstalled) {
+    webview2.value = null
+    return
+  }
+  try {
+    const res = unwrap<{ ok: boolean; version: string; minVersion: string }>(await CheckDSHWebView2())
+    if (res) webview2.value = res
+  } catch {
+    // 检测失败（后端未就绪/异常）静默，不阻断其余 UI；未知版本不拦截打开
+    webview2.value = null
+  }
+}
+
 async function openDSH() {
   try {
+    // 打开前先校验 WebView2 版本：已知过低会导致 dsh 窗口内「connection lost」无限重连，
+    // 不如先拦下来给出明确升级提示，避免用户对着死页面反复重试。
+    if (!webview2.value) await checkWebView2()
+    if (wvTooOld.value && webview2.value) {
+      showMsg(t('dshWebView2TooOld', { version: webview2.value.version, min: webview2.value.minVersion }), true)
+      return
+    }
     const res = unwrap<{ url: string }>(await OpenDSHWindow())
     if (!res) return
   } catch (e: any) {
@@ -204,25 +236,39 @@ async function loadDSHStatus() {
   }
 }
 
+// 启动的兜底复位定时器：后端异步执行启动，正常经 quickdock:dsh:started 事件复位
+// svcBusy；若事件丢失（极端时序），30s 后强制复位避免启动按钮永久卡「启动中…」
+let startFallbackTimer: ReturnType<typeof setTimeout> | null = null
+function clearStartFallbackTimer() {
+  if (startFallbackTimer !== null) {
+    clearTimeout(startFallbackTimer)
+    startFallbackTimer = null
+  }
+}
+
 async function toggleService(start: boolean) {
   if (svcBusy.value) return
   svcBusy.value = true
   try {
     if (start) {
       unwrap(await DSHStart())
+      // 后端异步启动：svcBusy 保持到 quickdock:dsh:started 事件到达，期间按钮显示「启动中…」，
+      // 过程与结果实时输出到下方日志面板；事件丢失由 30s 兜底定时器复位
+      clearStartFallbackTimer()
+      startFallbackTimer = setTimeout(() => { svcBusy.value = false }, 30000)
     } else {
       unwrap(await DSHStop())
       // 即时反馈：先置为已停止，避免后端状态刷新（1.2s 后）前仍显示"运行中"
       if (dshSvc.value) dshSvc.value.running = false
+      showMsg(t('dshServiceStopped'))
+      // dsh 进程停止是异步的，延迟刷新一次状态
+      setTimeout(loadDSHStatus, 1200)
     }
-    showMsg(start ? t('dshServiceRunning') : t('dshServiceStopped'))
-    // dsh 进程启动/停止是异步的，延迟刷新一次状态
-    setTimeout(loadDSHStatus, start ? 2500 : 1200)
   } catch (e) {
     showMsg(getErrorMessage(e), true)
     loadDSHStatus()
   } finally {
-    svcBusy.value = false
+    if (!start) svcBusy.value = false
   }
 }
 
@@ -233,6 +279,39 @@ async function setAutoStart(enabled: boolean) {
   } catch (e: any) {
     showMsg(getErrorMessage(e), true)
     if (dshSvc.value) dshSvc.value.autoStart = !enabled // 回滚 UI
+  }
+}
+
+// 卸载 DeepSeek Harness：先弹二次确认，确认后调后端 DSHUninstall，
+// 后端停服务 + 删软件包目录 + 删数据目录（profile/会话/配置）+ 清 token，
+// 结果经 quickdock:dsh:uninstall 事件回传。
+function askUninstall() {
+  if (uninstalling.value) return
+  showUninstallConfirm.value = true
+}
+
+async function confirmUninstall() {
+  showUninstallConfirm.value = false
+  if (uninstalling.value) return
+  uninstalling.value = true
+  try {
+    await DSHUninstall()
+  } catch (e) {
+    uninstalling.value = false
+    showMsg(getErrorMessage(e), true)
+  }
+}
+
+function onUninstallEvent(payload: any) {
+  const p = (payload?.data ?? payload) as { stage: string; message?: string }
+  if (p.stage === 'done') {
+    uninstalling.value = false
+    showMsg(t('dshUninstalled'))
+    // 卸载完成：重新检测，dshInstalled 会变 false，按钮/状态翻回未安装
+    refresh().then(() => loadDSHStatus())
+  } else if (p.stage === 'error') {
+    uninstalling.value = false
+    showMsg(p.message || t('dshUninstallFailed'), true)
   }
 }
 
@@ -359,6 +438,8 @@ let offLog: (() => void) | null = null
 let offPlugin: (() => void) | null = null
 let offRollback: (() => void) | null = null
 let offExited: (() => void) | null = null
+let offUninstall: (() => void) | null = null
+let offStarted: (() => void) | null = null
 
 // 运行状态轮询：dsh 进程可能被任务管理器/崩溃/其它工具的清理脚本结束，
 // 只在「进页 + 操作后」查一次的话，状态会永远停在"运行中"。
@@ -432,9 +513,22 @@ onMounted(() => {
     void loadDSHStatus()
     showMsg(p?.message || t('dshServiceCrashed'), true)
   })
+  // 卸载进度：done/error 时复位按钮并刷新状态
+  offUninstall = Events.On('quickdock:dsh:uninstall', onUninstallEvent)
+  // 启动结果（后端 DSHStart 异步执行完毕）：复位 svcBusy 并刷新运行状态。
+  // 成功/失败都已在后端写入日志面板，这里只做按钮与状态的收尾。
+  offStarted = Events.On('quickdock:dsh:started', (payload: any) => {
+    const p = (payload?.data ?? payload) as { ok: boolean; url?: string; message?: string }
+    clearStartFallbackTimer()
+    svcBusy.value = false
+    loadDSHStatus()
+    if (p.ok) showMsg(t('dshServiceRunning'))
+    else showMsg(p.message || t('dshServiceCrashed'), true)
+  })
 })
 onUnmounted(() => {
-  offProgress?.(); offLog?.(); offPlugin?.(); offRollback?.(); offExited?.()
+  offProgress?.(); offLog?.(); offPlugin?.(); offRollback?.(); offExited?.(); offUninstall?.(); offStarted?.()
+  clearStartFallbackTimer()
   stopStatusPolling()
 })
 
@@ -446,6 +540,7 @@ watch(() => props.visible, async (v) => {
     updatingPlugins.value = false
     await refresh()
     loadDSHStatus()
+    if (status.value?.dshInstalled) checkWebView2()
     startStatusPolling()
     if (!checkRanOnce && dshReady.value) {
       checkRanOnce = true
@@ -506,6 +601,12 @@ watch(() => props.visible, async (v) => {
     <!-- 检测到的问题提示 -->
     <p v-if="status?.message" class="result-hint" style="margin-top:8px">{{ status.message }}</p>
 
+    <!-- WebView2 版本过低：打开 dsh 会卡在 connection lost，提前红字警示并拦截打开 -->
+    <p v-if="wvShowBanner" class="result-hint error" style="margin-top:8px; line-height:1.6">
+      <template v-if="webview2?.version === 'unknown'">{{ t('dshWebView2Missing') }}</template>
+      <template v-else>{{ t('dshWebView2TooOld', { version: webview2!.version, min: webview2!.minVersion }) }}</template>
+    </p>
+
     <!-- dsh web 服务运行状态 / 开关 / 自动启动（dsh 已安装时显示） -->
     <div v-if="status?.dshInstalled" class="dsh-status" style="margin-top:12px">
       <div class="dsh-status-row">
@@ -563,6 +664,20 @@ watch(() => props.visible, async (v) => {
           {{ updating ? t('dshUpdating') : t('dshUpdateNow') }}
         </button>
       </div>
+    </div>
+
+    <!-- 卸载（dsh 已安装时显示） -->
+    <div v-if="status?.dshInstalled" class="update-row" style="margin-top:12px">
+      <div class="action-row">
+        <button
+          class="btn btn-danger"
+          :disabled="uninstalling || svcBusy || settingUp || updating"
+          @click="askUninstall"
+        >
+          {{ uninstalling ? t('dshUninstalling') : t('dshUninstall') }}
+        </button>
+      </div>
+      <p class="dsh-update-hint">{{ t('dshUninstallHint') }}</p>
     </div>
 
     <!-- 一键安装 / 打开 -->
@@ -626,10 +741,12 @@ watch(() => props.visible, async (v) => {
     <div v-if="logs.length" class="dsh-log-wrap">
       <div class="dsh-log-head">
         <span>{{ t('dshLogTitle') }}</span>
-        <button class="dsh-log-copy" @click="exportLogs" :title="t('dshExportLog')">
-          <FileDown :size="11" /> {{ t('dshExportLog') }}
-        </button>
-        <button class="dsh-log-copy" @click="copyLogs">{{ t('copy') }}</button>
+        <div class="dsh-log-actions">
+          <button class="dsh-log-copy" @click="exportLogs" :title="t('dshExportLog')">
+            <FileDown :size="11" /> {{ t('dshExportLog') }}
+          </button>
+          <button class="dsh-log-copy" @click="copyLogs">{{ t('copy') }}</button>
+        </div>
       </div>
       <div ref="logBox" class="dsh-log">
         <div v-for="(l, i) in logs" :key="i" :class="['dsh-log-line', l.level]">{{ l.message }}</div>
@@ -639,6 +756,14 @@ watch(() => props.visible, async (v) => {
     <p v-if="msg" :class="['result-hint', { error: msgError }]">{{ msg }}</p>
 
     <p class="ai-hint">{{ t('dshHint') }}</p>
+
+    <ConfirmDialog
+      :visible="showUninstallConfirm"
+      :message="t('dshUninstallConfirm')"
+      :details="status?.dshHome ? [status.dshHome] : []"
+      @confirm="confirmUninstall"
+      @cancel="showUninstallConfirm = false"
+    />
   </div>
 </template>
 
@@ -872,6 +997,14 @@ watch(() => props.visible, async (v) => {
   margin-bottom: 6px;
   font-size: 12px;
   color: var(--color-text-muted);
+}
+/* 标题居左、导出/复制成组靠右：原先两个按钮是 head 的直接子元素，被 space-between
+   拉成「标题-导出-复制」三段分布，导出按钮悬在中间看着错位 */
+.dsh-log-actions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .dsh-log-copy {
   display: inline-flex; align-items: center; gap: 4px;
