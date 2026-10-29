@@ -357,10 +357,11 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 应用对外暴露 Model Context Protocol 服务，供 AI 客户端调用本地能力。
 
 - **地址**：`http://127.0.0.1:9230/mcp`，Streamable HTTP，仅接受 POST，协议版本 2025-06-18
-- **工具集分三级权限**，默认开放只读与低危写：
-  - 只读：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`workspace_list`、`item_search`、`recent_items`、`todo_list`、`note_search`、`clipboard_recent`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`plugin_list`
-  - 低危写：`env_start`、`env_stop`、`env_restart`、`item_open`、`todo_create`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`plugin_execute`
+- **工具集共 35 个，分三级权限**，默认开放只读与低危写，可在环境管理页按档位或逐个工具开关：
+  - 只读（19）：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`file_search`、`workspace_list`、`item_search`、`recent_items`、`todo_list`、`note_search`、`clipboard_recent`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`plugin_list`、`plugin_exec_logs`
+  - 低危写（14）：`env_start`、`env_stop`、`env_restart`、`robot_notify`、`item_open`、`todo_create`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`note_folder_create`、`plugin_execute`、`plugin_open`
   - 高危（需在环境管理页开启）：`process_kill`、`system_command`
+- 插件相关：`plugin_execute` 可传结构化参数（`input` 为字符串或 JSON 对象，键由插件定义）；纯前端插件（`runtime=none`）宿主无法执行，改用 `plugin_open` 带参打开界面；`plugin_exec_logs` 回看执行记录，AI 触发的记录来源标为 `mcp`
 - 插件通过 `host.mcp.call` 复用全部工具，沿用同一套等级门
 - 服务随主进程启停，应用退出即失效
 

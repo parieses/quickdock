@@ -110,7 +110,7 @@ func (p *PluginService) executePluginCommand(pluginID, commandID string) {
 	start := time.Now()
 	result, err := p.App.PluginMgr.ExecuteCommand(pluginID, commandID, nil)
 	// 记录执行日志（5.2：忽略错误，不影响主流程）
-	p.recordPluginExecLog(pluginID, commandID, "hotkey", start, result, err)
+	p.recordPluginExecLog(pluginID, commandID, TriggerHotkey, start, result, err)
 	if err != nil {
 		logger.E("插件 %s 命令 %s 执行失败，耗时=%v: %v", pluginID, commandID, time.Since(start).Round(time.Millisecond), err)
 	} else if result != nil {

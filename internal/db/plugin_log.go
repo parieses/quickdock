@@ -17,7 +17,7 @@ type PluginExecLog struct {
 	DurationMs int    `json:"durationMs"`
 	Result     string `json:"result"` // 执行返回（截断存储，首 2000 字符）
 	Error      string `json:"error"`
-	Trigger    string `json:"trigger"` // manual | hotkey | palette
+	Trigger    string `json:"trigger"` // manual | hotkey | mcp
 }
 
 const maxPluginExecLogs = 500
@@ -87,14 +87,31 @@ func (d *Database) DeletePluginExecLogs(pluginID string) error {
 }
 
 func (d *Database) ListPluginExecLogs(limit int) ([]PluginExecLog, error) {
+	return d.ListPluginExecLogsBy("", limit)
+}
+
+// ListPluginExecLogsBy 返回最近 limit 条执行日志，pluginID 非空时只取该插件的记录。
+//
+// 过滤放在 SQL 而不是取回后内存筛：日志表按时间倒序，内存筛会先被别的插件
+// （尤其 1 秒一次的 -status 轮询，虽然不落库，但其它高频命令会）挤掉目标记录，
+// 表现为「明明刚跑过，历史里查不到」。
+func (d *Database) ListPluginExecLogsBy(pluginID string, limit int) ([]PluginExecLog, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	rows, err := d.conn.Query(
-		`SELECT id, plugin_id, command_id, executed_at, executed_ts, success, duration_ms, result, error, trigger
-		 FROM plugin_exec_logs ORDER BY executed_ts DESC LIMIT ?`, limit)
+	const cols = `SELECT id, plugin_id, command_id, executed_at, executed_ts, success, duration_ms, result, error, trigger
+		 FROM plugin_exec_logs`
+	q := cols
+	args := make([]interface{}, 0, 2)
+	if pluginID != "" {
+		q += ` WHERE plugin_id = ?`
+		args = append(args, pluginID)
+	}
+	q += ` ORDER BY executed_ts DESC LIMIT ?`
+	args = append(args, limit)
+	rows, err := d.conn.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}

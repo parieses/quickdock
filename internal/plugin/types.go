@@ -119,6 +119,18 @@ type Command struct {
 	Prefix       string            `json:"prefix,omitempty"`       // Slash 命令前缀，如 "/translate"，输入 /tr 时只匹配该插件
 	MatchPattern string            `json:"matchPattern,omitempty"` // 命令面板正则匹配：命中时自动传入输入文本
 	AcceptsInput bool              `json:"acceptsInput,omitempty"` // 是否接收命令面板传入的参数（如端口号/状态码/算式），开启后 Ctrl+K 的文本会带入插件
+
+	// Description 命令的一句话说明：做什么、什么时候该用。
+	// 与插件级 description（这个插件是什么）不同，这条是给「选哪条命令」用的，
+	// plugin_list 会随命令一起交给模型，写得含糊就等于让模型乱选。
+	Description string `json:"description,omitempty"`
+
+	// Params 命令接受的结构化参数声明（JSON Schema 的受限子集，见 command_params.go）。
+	//
+	// 用 map 而不建强类型：宿主不引 JSON Schema 库，只在加载期做浅校验，
+	// 合规就原样存下、经 plugin_list 交给 AI 客户端，不合规就丢掉该字段并记警告
+	// （不清空插件、不让安装失败——一个写歪的参数声明不该毁掉整个插件）。
+	Params map[string]interface{} `json:"params,omitempty"`
 }
 
 // ---- JSON-RPC 通信结构 ----
@@ -219,6 +231,11 @@ func (inst *PluginInstance) GetStatus() string {
 // SetDisabled 设置插件显式禁用标记（供 service 层 DisablePlugin 标记，
 // 禁止 EnsureLoaded 把已禁用插件惰性复活）。
 func (inst *PluginInstance) SetDisabled(v bool) { inst.disabled.Store(v) }
+
+// IsDisabled 返回插件是否被用户显式禁用。
+// 供需要「先拦后做」的入口使用（如经 MCP 打开插件窗口）：GetStatus 会把禁用收敛成
+// stopped，与「进程被停/崩溃」同态，光看状态分不出该不该拒绝。
+func (inst *PluginInstance) IsDisabled() bool { return inst.disabled.Load() }
 
 // SetStatus 线程安全地设置插件状态
 func (inst *PluginInstance) SetStatus(s string) {

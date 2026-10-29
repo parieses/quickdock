@@ -85,6 +85,12 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		return "", fmt.Errorf("%w: zip 包中未找到 plugin.json", ErrInvalidManifest)
 	}
 
+	// 安装路径直接从 zip 里解析清单，不走 LoadManifest，因此这里要单独清一次
+	// 命令参数声明：否则装完的 manifest 原件带着写歪的 schema 进 plugin_list。
+	for _, warn := range sanitizeCommandParams(manifest) {
+		logger.W("[plugin-params] %s: %s", manifest.ID, warn)
+	}
+
 	targetDir := filepath.Join(m.pluginsDir, pluginID)
 
 	// 检查插件是否已安装：先停止旧实例释放文件句柄，再备份目录

@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	"quickdock/internal/logger"
 )
 
 // 支持的 runtime 类型
@@ -34,6 +36,12 @@ func LoadManifest(path string) (*PluginManifest, error) {
 
 	if err := validateManifest(&m); err != nil {
 		return nil, fmt.Errorf("校验 %s 失败: %w", path, err)
+	}
+
+	// 命令参数声明只做浅校验：写歪了就丢掉该字段并记警告，绝不因此让插件加载失败
+	//（一份 schema 写错不该导致整个插件消失）。
+	for _, warn := range sanitizeCommandParams(&m) {
+		logger.W("[plugin-params] %s: %s", m.ID, warn)
 	}
 
 	return &m, nil

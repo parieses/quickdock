@@ -1,8 +1,11 @@
 package plugin
 
 import (
+	"fmt"
 	"strings"
 	"time"
+
+	"quickdock/services"
 )
 
 // ===== 插件窗口管理 =====
@@ -56,6 +59,16 @@ func (p *PluginService) clearPendingInitLocked() {
 // 在命令面板模式下（PaletteMode=true）使用面板浮层（任务栏隐藏，贴合启动器「随手一开」心智）；
 // 在主窗口/插件管理页等常规入口则使用独立窗口（任务栏可见、可最小化召回，避免「打开后点别的就丢」）。
 func (p *PluginService) ShowPluginWindow(pluginID string) {
+	p.showPluginWindow(pluginID, p.App.Flags.Palette.Load())
+}
+
+// showPluginWindow 显示插件窗口，standalone=true 时固定走独立窗口（任务栏可见）。
+//
+// 复用路径补 init 的逻辑集中在这里：窗口的 iframe 早已加载完，@load 不会再触发，
+// pending init 无人消费——用户表现为「分离为独立窗口后数据没带过去，相当于重开了一个窗口」。
+// 新建路径相反：iframe onLoad 会自行消费槽位（usePluginHost.usePendingInit），
+// 这里若抢先取走，新窗口反而拿到空 init，故只处理复用路径。
+func (p *PluginService) showPluginWindow(pluginID string, standalone bool) {
 	if p.App.PluginWindowMgr == nil {
 		return
 	}
@@ -70,23 +83,60 @@ func (p *PluginService) ShowPluginWindow(pluginID string) {
 	}
 	// Show 返回 (窗口, 是否新创建)：false = 命中注册表复用已存在窗口。
 	var created bool
-	if p.App.Flags.Palette.Load() {
-		_, created = p.App.PluginWindowMgr.ShowInPanel(pluginID, title)
-	} else {
+	if standalone {
 		_, created = p.App.PluginWindowMgr.ShowAsWindow(pluginID, title)
+	} else {
+		_, created = p.App.PluginWindowMgr.ShowInPanel(pluginID, title)
 	}
-	// created=false = 命中注册表复用已存在窗口（页内 X 是隐藏复用不是销毁，
-	// 10 分钟内重开同一插件都走这条路）。复用路径必须补 init：窗口的 iframe
-	// 早已加载完，@load 不会再触发，pending init 无人消费——用户表现为
-	// 「分离为独立窗口后数据没带过去，相当于重开了一个窗口」。
-	// 新建路径相反：iframe onLoad 会自行消费槽位（usePluginHost.usePendingInit），
-	// 这里若抢先取走，新窗口反而拿到空 init，故只处理复用路径。
 	if !created {
 		text, command := p.GetAndClearPendingPluginInit(pluginID)
 		if text != "" || command != "" {
 			p.App.PluginWindowMgr.InjectInitText(pluginID, text, command)
 		}
 	}
+}
+
+// OpenPluginWindowWith 经 MCP / AI 打开插件窗口，并把命令与参数交给插件前端。
+//
+// 这是纯前端插件（runtime=none）**唯一**能被外部驱动的路径：宿主不执行它们的命令，
+// 只能把界面打开、把参数塞进去；对 native/goja 插件，它也补上了「执行完想看看结果」
+// 这类只能在界面上完成的动作。
+func (p *PluginService) OpenPluginWindowWith(pluginID, command, text string) *services.ApiResult {
+	pluginID = strings.TrimSpace(pluginID)
+	if pluginID == "" {
+		return services.FailMsg("缺少 pluginId")
+	}
+	if p.App.PluginMgr == nil {
+		return services.FailMsg("plugin manager not initialized")
+	}
+	inst := p.App.PluginMgr.GetPlugin(pluginID)
+	if inst == nil {
+		return services.FailMsg("插件不存在: " + pluginID)
+	}
+	// 显式禁用的插件不能经这条路复活：ensurePluginProcess 会吞掉 EnsureLoaded 的错误，
+	// 不拦的话会开出一个「窗口在、进程无」的空壳，用户看到的是插件坏了。
+	if inst.IsDisabled() {
+		return services.FailMsg("插件已被禁用，请先在插件管理页启用: " + pluginID)
+	}
+	// 命令必须真实存在。传错的 command 若不拦，窗口照开、命令却没人处理，
+	// 表现为「打开了但什么都没发生」——比直接报错难排查得多。
+	if command != "" {
+		found := false
+		for _, c := range inst.Manifest.Commands {
+			if c.ID == command {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return services.FailMsg(fmt.Sprintf("插件 %s 没有命令 %q（可用命令见 plugin_list）", pluginID, command))
+		}
+	}
+	p.SetPendingPluginInit(pluginID, text, command)
+	// 固定独立窗口：AI 触发时用户可能停在任意界面，甚至面板是收起的；
+	// 跟随 Flags.Palette 会出现「窗口开在隐匿的面板里」，任务栏与 Alt-Tab 都找不到。
+	p.showPluginWindow(pluginID, true)
+	return services.Ok(map[string]interface{}{"pluginId": pluginID, "command": command, "window": "standalone"})
 }
 
 // HidePluginWindow 隐藏指定插件的窗口
