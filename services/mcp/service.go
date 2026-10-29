@@ -6,7 +6,6 @@
 package mcp
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,7 +20,6 @@ import (
 	"quickdock/internal/db"
 	envengine "quickdock/internal/env"
 	mcpsrv "quickdock/internal/mcp"
-	"quickdock/internal/platform"
 	pluginmgr "quickdock/internal/plugin"
 	"quickdock/services"
 	clipboardsvc "quickdock/services/clipboard"
@@ -87,8 +85,9 @@ func (s *MCPService) MCPStatus() *services.ApiResult {
 	})
 }
 
-// MCPTools 列出全部已注册工具（名称/说明/危险等级/当前是否开放），供环境管理页展示。
-// 未开放的也要给前端：面板据此显示「被等级挡住的工具」及其原因，而不是留下空白。
+// MCPTools 列出全部已注册工具（名称/说明/危险等级/分类/是否开放），供环境管理页展示。
+// 未开放的也要给前端：面板据此显示「被等级挡住」或「被单独关掉」的工具及其原因，
+// 而不是留下空白。
 func (s *MCPService) MCPTools() *services.ApiResult {
 	cat := mcpsrv.Catalog()
 	out := make([]map[string]any, 0, len(cat))
@@ -97,7 +96,9 @@ func (s *MCPService) MCPTools() *services.ApiResult {
 			"name":        t.Name,
 			"description": t.Description,
 			"level":       t.Level,
+			"category":    t.Category,
 			"exposed":     t.Exposed,
+			"disabled":    t.Disabled,
 		})
 	}
 	return services.Ok(out)
@@ -157,6 +158,55 @@ func (s *MCPService) MCPSetLevel(level int) *services.ApiResult {
 	mcpsrv.SetMaxLevel(level)
 	return services.Ok(map[string]any{
 		"maxLevel":     mcpsrv.MaxLevel(),
+		"running":      mcpsrv.Default.Running(),
+		"needsRestart": mcpsrv.Default.Running(),
+	})
+}
+
+// MCPSetToolEnabled 单独开启/关闭某个工具（面板上逐条控制），与危险等级是两道闸。
+//
+// 等级门解决「一刀切」，但仍有人只想摘掉一条（比如允许写剪贴板、但不让 AI 建笔记）。
+// 关闭只影响 List/Call，工具仍留在注册表里，故面板能原样展示并重新开启。
+// 与等级一样要落盘，且同样需要客户端重连才生效，故返回 needsRestart。
+func (s *MCPService) MCPSetToolEnabled(name string, enabled bool) *services.ApiResult {
+	if name == "" {
+		return services.FailMsg("缺少工具名")
+	}
+	known := false
+	for _, t := range mcpsrv.Catalog() {
+		if t.Name == name {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return services.FailMsg("未知工具: " + name)
+	}
+	rt := (*envengine.MCPRuntime)(nil)
+	if s.App != nil && s.App.Env != nil {
+		rt = s.App.Env.MCPRuntime()
+	}
+	if rt != nil {
+		if err := rt.SetToolEnabled(name, enabled); err != nil {
+			return services.FailMsg("保存工具开关失败: " + err.Error())
+		}
+	} else {
+		// env 未就绪（理论上只在极端初始化顺序下发生）：至少让本次会话按用户选择生效，
+		// 而不是静默忽略点击。
+		next := make([]string, 0, len(mcpsrv.Disabled())+1)
+		for _, n := range mcpsrv.Disabled() {
+			if n != name {
+				next = append(next, n)
+			}
+		}
+		if !enabled {
+			next = append(next, name)
+		}
+		mcpsrv.SetDisabled(next)
+	}
+	return services.Ok(map[string]any{
+		"name":         name,
+		"enabled":      enabled,
 		"running":      mcpsrv.Default.Running(),
 		"needsRestart": mcpsrv.Default.Running(),
 	})
@@ -305,17 +355,58 @@ func claudeDesktopConfigPath() string {
 
 // -------- 工具注册 --------
 
-// register 注册工具。等级只存在注册表的 Tool.Level 一处——面板展示读的是
-// mcpsrv.Catalog()，早期在服务层另存一份 toolLevels 的做法让「等级」有了两个来源，
-// 加工具时漏改一份就会显示成别的档位。
-func (s *MCPService) register(run func(args map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any) {
-	mcpsrv.Register(mcpsrv.Tool{
+// toolRegistrar 单个域的工具注册入口：把域写进每个 Tool.Category，并统一补 InputSchema。
+//
+// provider 拿到的是这个薄壳而不是全局注册表：注册去向（Global / 测试用实例）
+// 由装配处决定，域文件里连 mcpsrv.Register 长什么样都不必知道。
+// 等级只存在注册表的 Tool.Level 一处——面板展示读的是 mcpsrv.Catalog()，
+// 早期在服务层另存一份 toolLevels 的做法让「等级」有了两个来源，加工具时漏改
+// 一份就会显示成别的档位。
+type toolRegistrar struct {
+	reg      mcpsrv.Registrar
+	category string
+}
+
+func (r *toolRegistrar) add(run func(args map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any) {
+	r.reg.Add(mcpsrv.Tool{
 		Name:        name,
 		Description: desc,
 		InputSchema: mcpsrv.Schema("", required, props),
 		Level:       level,
+		Category:    r.category,
 		Handler:     run,
 	})
+}
+
+// toolProvider 一个域的工具集合：分类 id + 注册函数。
+type toolProvider struct {
+	Category string
+	Register func(s *MCPService, r *toolRegistrar)
+}
+
+// toolProviders 装配清单。加一个域 = 新建 tools_<域>.go + 在下面加一行。
+//
+// 顺序不影响 tools/list 的输出（registry 的 List/Catalog 都按等级+名称排序），
+// 只决定 init 期注册先后，故按「宿主 → 环境 → 启动台 → 内容 → 诊断 → 扩展 → 高危」排列。
+func toolProviders() []toolProvider {
+	return []toolProvider{
+		{Category: mcpsrv.CategoryApp, Register: registerAppTools},             // 宿主信息、监听端口、机器人通知
+		{Category: mcpsrv.CategoryEnv, Register: registerEnvTools},             // 运行时状态/日志/版本、服务启停、Everything 检索
+		{Category: mcpsrv.CategoryItem, Register: registerItemTools},           // 快捷项、最近使用、工作空间
+		{Category: mcpsrv.CategoryNote, Register: registerNoteTools},           // 笔记与文件夹
+		{Category: mcpsrv.CategoryTodo, Register: registerTodoTools},           // 待办
+		{Category: mcpsrv.CategoryClipboard, Register: registerClipboardTools}, // 剪贴板历史与写入
+		{Category: mcpsrv.CategoryDiag, Register: registerDiagTools},           // 日志与崩溃记录
+		{Category: mcpsrv.CategoryPlugin, Register: registerPluginTools},       // 插件清单与命令执行
+		{Category: mcpsrv.CategoryRisk, Register: registerRiskTools},           // 高危：当前恒不开放
+	}
+}
+
+// registerTools 按装配清单注册全部工具。
+func (s *MCPService) registerTools() {
+	for _, p := range toolProviders() {
+		p.Register(s, &toolRegistrar{reg: mcpsrv.Global, category: p.Category})
+	}
 }
 
 // unwrap 把 ApiResult 转成工具结果：Code!=0 视为错误，错误消息直接给模型看。
@@ -327,455 +418,6 @@ func unwrap(r *services.ApiResult) (any, error) {
 		return nil, errors.New(r.Msg)
 	}
 	return r.Data, nil
-}
-
-func (s *MCPService) registerTools() {
-	const read = mcpsrv.LevelRead
-	const write = mcpsrv.LevelWrite
-	str := mcpsrv.Str
-	intp := mcpsrv.Int
-
-	// ---- 只读 ----
-
-	s.register(func(args map[string]any) (any, error) {
-		return map[string]any{
-			"app":        "QuickDock",
-			"version":    s.version,
-			"platform":   runtime.GOOS + "/" + runtime.GOARCH,
-			"dataDir":    platform.DefaultDataDir(),
-			"mcpRunning": mcpsrv.Default.Running(),
-			"mcpUrl":     mcpsrv.Default.Endpoint(),
-			"tools":      len(mcpsrv.List()),
-		}, nil
-	}, read, "app_info", "QuickDock 基本信息：版本、平台、数据目录、MCP 服务地址与已开放工具数", nil, nil)
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.App.Env == nil {
-			return nil, errors.New("环境管理未初始化")
-		}
-		list := s.App.Env.List()
-		out := make([]map[string]any, 0, len(list))
-		for _, r := range list {
-			versions := make([]string, 0, len(r.Installed))
-			for _, ins := range r.Installed {
-				versions = append(versions, ins.Version)
-			}
-			row := map[string]any{
-				"id":         r.ID,
-				"name":       r.Name,
-				"group":      r.Group,
-				"hasService": r.HasService,
-				"enabled":    r.Enabled,
-				"versions":   versions,
-			}
-			if r.HasService && len(versions) > 0 {
-				if st, err := s.App.Env.Status(envengine.Runtime(r.ID), versions[0]); err == nil {
-					row["running"] = st.Running
-					row["ports"] = st.Ports
-				}
-			}
-			out = append(out, row)
-		}
-		return out, nil
-	}, read, "env_list", "列出所有受管运行时：已装版本、是否支持服务启停、当前运行状态与端口", nil, nil)
-
-	s.register(func(args map[string]any) (any, error) {
-		id := mcpsrv.Arg(args, "runtime")
-		if id == "" {
-			return nil, errors.New("缺少参数 runtime")
-		}
-		if s.App.Env == nil {
-			return nil, errors.New("环境管理未初始化")
-		}
-		st, err := s.App.Env.Status(envengine.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")))
-		if err != nil {
-			return nil, err
-		}
-		return st, nil
-	}, read, "env_status", "查询某运行时的运行状态（是否运行、PID、端口、版本）", []string{"runtime"},
-		map[string]any{"runtime": str("运行时 id，如 node / php / redis / nginx / mcp"), "version": str("版本号，省略则用已装的第一个版本")})
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.App.Env == nil {
-			return nil, errors.New("环境管理未初始化")
-		}
-		id := mcpsrv.Arg(args, "runtime")
-		log, err := s.App.Env.LogGet(envengine.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")))
-		if err != nil {
-			return nil, err
-		}
-		if log == "" {
-			return "（无日志）", nil
-		}
-		return log, nil
-	}, read, "env_log", "读取某运行时的服务日志", []string{"runtime"},
-		map[string]any{"runtime": str("运行时 id"), "version": str("版本号，省略则用已装的第一个版本")})
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.App.Env == nil {
-			return nil, errors.New("环境管理未初始化")
-		}
-		return s.App.Env.AvailableVersions(envengine.Runtime(mcpsrv.Arg(args, "runtime"))), nil
-	}, read, "env_versions", "列出某运行时可下载的版本（需联网，慢）", []string{"runtime"},
-		map[string]any{"runtime": str("运行时 id")})
-
-	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.Workspace.ListWorkspaces())
-	}, read, "workspace_list", "列出所有工作空间", nil, nil)
-
-	s.register(func(args map[string]any) (any, error) {
-		q := mcpsrv.Arg(args, "query")
-		if q == "" {
-			return unwrap(s.App.ListAllItems())
-		}
-		return unwrap(s.App.SearchAll(q))
-	}, read, "item_search", "按名称/路径关键词搜索快捷项（项目、命令、目录、网址等），留空返回全部", nil,
-		map[string]any{"query": str("关键词，留空返回全部")})
-
-	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.Frecency.GetRecentUsage(mcpsrv.ArgInt(args, "limit", 10)))
-	}, read, "recent_items", "列出最近使用过的快捷项", nil,
-		map[string]any{"limit": intp("返回条数，默认 10")})
-
-	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.Todo.ListTodos())
-	}, read, "todo_list", "列出所有待办", nil, nil)
-
-	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.Note.SearchNotesTree(mcpsrv.Arg(args, "query")))
-	}, read, "note_search", "搜索笔记（标题与正文）", []string{"query"},
-		map[string]any{"query": str("搜索关键词")})
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.Clip == nil {
-			return nil, errors.New("剪贴板服务未就绪")
-		}
-		return s.Clip.ListClipboardEntries(mcpsrv.ArgInt(args, "limit", 20)), nil
-	}, read, "clipboard_recent", "列出最近的剪贴板历史（文本条目）", nil,
-		map[string]any{"limit": intp("返回条数，默认 20")})
-
-	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.Port.ListListeningPorts())
-	}, read, "port_list", "列出本机正在监听的端口与对应进程", nil, nil)
-
-	// ---- Everything 文件检索（只读）----
-	// 不做「启动期绝对可用性门禁」：handler 内动态校验 EverythingRuntime().IsAvailable()，
-	// 这样即使用户在 QuickDock 启动后才装好/启动 Everything，也无需重启 MCP 即可用，
-	// 且未就绪时给出明确可执行的错误，而不是默默返回一个永远为空的工具。
-	s.register(func(args map[string]any) (any, error) {
-		q := strings.TrimSpace(mcpsrv.Arg(args, "query"))
-		if q == "" {
-			return nil, errors.New("缺少参数 query（检索关键词）")
-		}
-		if s.App.Env == nil {
-			return nil, errors.New("环境管理未初始化")
-		}
-		ev := s.App.Env.EverythingRuntime()
-		if ev == nil || !ev.IsAvailable() {
-			return nil, errors.New("文件搜索不可用：请确认已安装 Everything、es.exe 在位且 Everything 正在运行")
-		}
-		limit := mcpsrv.ArgInt(args, "limit", 30)
-		if limit > 200 {
-			limit = 200
-		}
-		sortBy := mcpsrv.Arg(args, "sort")
-		results, err := ev.Search(context.Background(), q, limit, sortBy)
-		if err != nil {
-			return nil, err
-		}
-		if results == nil {
-			results = []envengine.FileSearchResult{}
-		}
-		files := make([]map[string]any, 0, len(results))
-		for _, r := range results {
-			files = append(files, map[string]any{
-				"path":     r.Path,
-				"name":     r.Name,
-				"dir":      r.Dir,
-				"modified": r.Modified,
-			})
-		}
-		return map[string]any{"query": q, "count": len(files), "files": files}, nil
-	}, read, "file_search", "通过 Everything (es.exe) 在本地全盘检索文件，返回结构化文件列表（path/name/dir/modified）。仅在 Everything 已安装、es.exe 在位且正在运行时可用；支持 Everything 检索语法（空格为与、| 为或、*.ext 按扩展名）", []string{"query"},
-		map[string]any{
-			"query": str("检索关键词，支持 Everything 语法（空格为与、| 为或、*.ext 按扩展名等）"),
-			"limit": intp("返回条数，默认 30，最大 200"),
-			"sort":  str("排序字段：name/path/size/date_modified/date_created，默认 name"),
-		})
-
-	// ---- 低危写 ----
-
-	s.register(func(args map[string]any) (any, error) {
-		return s.envStart(mcpsrv.Arg(args, "runtime"), mcpsrv.Arg(args, "version"))
-	}, write, "env_start", "启动某运行时的服务（如 nginx / redis / mysql / mcp）。已是运行状态会直接返回成功", []string{"runtime"},
-		map[string]any{"runtime": str("运行时 id"), "version": str("要启动的版本，省略则用已装的第一个版本")})
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.App.Env == nil {
-			return nil, errors.New("环境管理未初始化")
-		}
-		id := mcpsrv.Arg(args, "runtime")
-		if err := s.App.Env.Stop(envengine.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version"))); err != nil {
-			return nil, err
-		}
-		return "已停止 " + id, nil
-	}, write, "env_stop", "停止某运行时的服务", []string{"runtime"},
-		map[string]any{"runtime": str("运行时 id"), "version": str("版本号，省略则用已装的第一个版本")})
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.App.Env == nil {
-			return nil, errors.New("环境管理未初始化")
-		}
-		id := mcpsrv.Arg(args, "runtime")
-		if err := s.App.Env.Restart(envengine.Runtime(id), pickVersion(s.App.Env, id, mcpsrv.Arg(args, "version")), nil); err != nil {
-			return nil, err
-		}
-		return "已重启 " + id, nil
-	}, write, "env_restart", "重启某运行时的服务（改配置后常用）", []string{"runtime"},
-		map[string]any{"runtime": str("运行时 id"), "version": str("版本号，省略则用已装的第一个版本")})
-
-	s.register(func(args map[string]any) (any, error) {
-		id := mcpsrv.Arg(args, "id")
-		if id == "" {
-			return nil, errors.New("缺少参数 id（用 item_search 获取）")
-		}
-		items, err := s.allItems()
-		if err != nil {
-			return nil, err
-		}
-		for _, it := range items {
-			if it.ID == id {
-				if r := s.Collection.OpenItem(it); r != nil && r.Code != 0 {
-					return nil, errors.New(r.Msg)
-				}
-				return "已打开 " + it.Name, nil
-			}
-		}
-		return nil, errors.New("未找到该快捷项: " + id)
-	}, write, "item_open", "打开某个快捷项（项目/命令/目录），先用 item_search 找到 id", []string{"id"},
-		map[string]any{"id": str("快捷项 id")})
-
-	s.register(func(args map[string]any) (any, error) {
-		title := mcpsrv.Arg(args, "title")
-		if title == "" {
-			return nil, errors.New("缺少参数 title")
-		}
-		return unwrap(s.Todo.CreateTodo(title, mcpsrv.Arg(args, "priority"), mcpsrv.Arg(args, "dueDate"),
-			mcpsrv.Arg(args, "note"), "", "", "", "", ""))
-	}, write, "todo_create", "新建待办", []string{"title"},
-		map[string]any{
-			"title":    str("待办标题"),
-			"priority": str("优先级：low / normal / high，留空 normal"),
-			"dueDate":  str("截止日期，格式 YYYY-MM-DD，可留空"),
-			"note":     str("备注，可留空"),
-		})
-
-	s.register(func(args map[string]any) (any, error) {
-		id := mcpsrv.Arg(args, "id")
-		if id == "" {
-			return nil, errors.New("缺少参数 id（用 todo_list 获取）")
-		}
-		return unwrap(s.Todo.SetTodoStatus(id, "done"))
-	}, write, "todo_done", "把某待办标记为已完成", []string{"id"},
-		map[string]any{"id": str("待办 id")})
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.Clip == nil {
-			return nil, errors.New("剪贴板服务未就绪")
-		}
-		text := mcpsrv.Arg(args, "text")
-		if text == "" {
-			return nil, errors.New("缺少参数 text")
-		}
-		s.Clip.CopyText(text)
-		return "已写入剪贴板", nil
-	}, write, "clipboard_copy", "把文本写入系统剪贴板", []string{"text"},
-		map[string]any{"text": str("要写入的文本")})
-
-	// ---- 机器人通知（前提是已在「设置 → 通知」配置过机器人）----
-
-	s.register(func(args map[string]any) (any, error) {
-		title := mcpsrv.Arg(args, "title")
-		if title == "" {
-			return nil, errors.New("缺少参数 title（消息标题）")
-		}
-		res := s.App.SendWebhookMessage(title, mcpsrv.Arg(args, "body"), mcpsrv.Arg(args, "channel"))
-		return unwrap(res)
-	}, write, "robot_notify", "通过已配置的机器人（钉钉/企业微信/飞书/ServerChan/PushPlus/Telegram）发送一条消息。前提是已在「设置 → 通知」配置过至少一个机器人，未配置时会返回明确错误。channel 留空则发给所有已配置渠道，指定则只发该渠道", []string{"title"},
-		map[string]any{
-			"title":   str("消息标题，必填"),
-			"body":    str("消息正文，可留空"),
-			"channel": str("指定渠道：dingtalk / wecom / feishu / serverchan / pushplus / telegram；留空则发给所有已配置渠道"),
-		})
-
-	// ---- P0 写入闭环：笔记（让 AI 能把产出塞回 QuickDock）----
-
-	s.register(func(args map[string]any) (any, error) {
-		name := mcpsrv.Arg(args, "name")
-		if name == "" {
-			// 兼容模型常用 title：不兼容的话会白跑一次工具调用（note_create 必填 name）
-			name = mcpsrv.Arg(args, "title")
-		}
-		if name == "" {
-			return nil, errors.New("缺少参数 name（笔记标题，也可用 title）")
-		}
-		return unwrap(s.Note.CreateNoteDoc(
-			mcpsrv.Arg(args, "parentId"),
-			name,
-			mcpsrv.Arg(args, "content"),
-			mcpsrv.Arg(args, "format"),
-		))
-	}, write, "note_create", "新建一篇笔记文档（markdown/text）。parentId 留空则创建到根目录。注意：要新建的是「文件夹」请用 note_folder_create，不要用本工具", []string{"name"},
-		map[string]any{
-			"name":     str("笔记标题"),
-			"title":    str("笔记标题的别名（name 为空时使用）"),
-			"content":  str("正文内容，可留空"),
-			"format":   str("渲染格式：markdown 或 text，默认 markdown"),
-			"parentId": str("父目录 id，留空则放到根目录"),
-		})
-
-	s.register(func(args map[string]any) (any, error) {
-		name := mcpsrv.Arg(args, "name")
-		if name == "" {
-			name = mcpsrv.Arg(args, "title")
-		}
-		if name == "" {
-			return nil, errors.New("缺少参数 name（文件夹名称，也可用 title）")
-		}
-		return unwrap(s.Note.CreateNoteFolder(mcpsrv.Arg(args, "parentId"), name))
-	}, write, "note_folder_create", "新建笔记文件夹（可嵌套）。parentId 留空则建到根目录；返回的 id 可作为 note_create 的 parentId 继续建子项", []string{"name"},
-		map[string]any{
-			"name":     str("文件夹名称"),
-			"title":    str("文件夹名称的别名（name 为空时使用）"),
-			"parentId": str("父文件夹 id，留空则建到根目录"),
-		})
-
-	s.register(func(args map[string]any) (any, error) {
-		id := mcpsrv.Arg(args, "id")
-		if id == "" {
-			return nil, errors.New("缺少参数 id（用 note_search 获取）")
-		}
-		content, tags := mcpsrv.Arg(args, "content"), mcpsrv.Arg(args, "tags")
-		// 分三路：只传一个字段时不要覆盖另一个。此前空 tags 会清空标签、空 content 会清空正文，
-		// 模型「只改一半」就会造成静默数据丢失。
-		switch {
-		case content == "" && tags == "":
-			return nil, errors.New("content 与 tags 至少提供一个（需要清空正文请显式传 content 为空串的场景请改用 note_create 覆盖）")
-		case content == "":
-			return unwrap(s.Note.UpdateNoteDocTags(id, tags))
-		case tags == "":
-			return unwrap(s.Note.UpdateNoteDocContent(id, content))
-		default:
-			return unwrap(s.Note.UpdateNoteDoc(id, content, tags))
-		}
-	}, write, "note_update", "更新笔记正文与标签：只传 content 改正文（保留标签），只传 tags 改标签（保留正文），两个都传则一起覆盖。tags 为 JSON 数组字符串，如 [\"a\",\"b\"]；传 [] 清空标签", []string{"id"},
-		map[string]any{
-			"id":      str("笔记 id（用 note_search 获取）"),
-			"content": str("新的正文内容；不传则保留原正文"),
-			"tags":    str("标签 JSON 数组字符串；不传则保留原标签，传 [] 清空"),
-		})
-
-	s.register(func(args map[string]any) (any, error) {
-		content := mcpsrv.Arg(args, "content")
-		if content == "" {
-			return nil, errors.New("缺少参数 content")
-		}
-		return unwrap(s.Note.SaveNote(content))
-	}, write, "note_quick", "把一段文本写入固定「快捷笔记」（覆盖式 upsert）。适合让 AI 把产出直接塞回 QuickDock 当草稿", []string{"content"},
-		map[string]any{"content": str("要保存的文本内容")})
-
-	// ---- P1 诊断日志（对话式排障）----
-
-	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.Diag.ListLogFiles())
-	}, read, "log_list", "列出应用日志文件（含 crash/ 子目录的崩溃记录），返回文件名、大小、修改时间", nil, nil)
-
-	s.register(func(args map[string]any) (any, error) {
-		name := mcpsrv.Arg(args, "name")
-		if name == "" {
-			return nil, errors.New("缺少参数 name（用 log_list 获取）")
-		}
-		return unwrap(s.Diag.ReadLogFile(name, mcpsrv.ArgInt(args, "tail", 0)))
-	}, read, "log_read", "读取日志文件内容；tail>0 只返回末尾 N 行，适合「给我最后 200 行」式排障", []string{"name"},
-		map[string]any{
-			"name": str("日志文件名，如 quickdock-2026-09-09.log 或 crash/panic-xxx.log"),
-			"tail": intp("只取末尾 N 行，0 表示全文"),
-		})
-
-	s.register(func(args map[string]any) (any, error) {
-		return unwrap(s.Diag.ListCrashFiles())
-	}, read, "crash_list", "列出崩溃/异常记录（Go panic 与前端 JS 异常），新的在前", nil, nil)
-
-	s.register(func(args map[string]any) (any, error) {
-		name := mcpsrv.Arg(args, "name")
-		if name == "" {
-			return nil, errors.New("缺少参数 name（用 crash_list 获取）")
-		}
-		return unwrap(s.Diag.ReadCrashFile(name))
-	}, read, "crash_read", "读取单个崩溃文件内容（供 AI 分析 panic/JS 异常栈）", []string{"name"},
-		map[string]any{"name": str("崩溃文件名")})
-
-	// ---- 插件清单（让 AI 知道可调用哪些插件命令）----
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.Plugin == nil {
-			return nil, errors.New("插件服务未初始化")
-		}
-		return unwrap(s.Plugin.ListPlugins())
-	}, read, "plugin_list", "列出已安装插件及其命令、后端运行时（native/goja/none）。让 AI 知道能进一步调用哪个命令", nil, nil)
-
-	s.register(func(args map[string]any) (any, error) {
-		if s.Plugin == nil {
-			return nil, errors.New("插件服务未初始化")
-		}
-		pluginID := mcpsrv.Arg(args, "pluginId")
-		commandID := mcpsrv.Arg(args, "command")
-		if pluginID == "" {
-			return nil, errors.New("缺少参数 pluginId（用 plugin_list 获取）")
-		}
-		if commandID == "" {
-			return nil, errors.New("缺少参数 command（用 plugin_list 查看该插件有哪些命令）")
-		}
-		// runtime=none 的插件没有后端：宿主执行只会返回「假成功」，命令实际由插件自己的前端处理。
-		// 这里直接拒绝，避免 AI 误以为调用真的生效（返回值不可用于判断执行结果）。
-		if rt := s.pluginRuntime(pluginID); rt == "none" {
-			return nil, fmt.Errorf("插件 %s 是纯前端插件（runtime=none），命令由插件界面自行处理，无法经 MCP 调用", pluginID)
-		}
-		input := map[string]interface{}{}
-		if txt := mcpsrv.Arg(args, "input"); txt != "" {
-			input["text"] = txt
-		}
-		return unwrap(s.Plugin.ExecutePluginCommand(pluginID, commandID, input))
-	}, write, "plugin_execute", "执行某个已安装插件的命令（先用 plugin_list 查插件 id 与 command id）。runtime=none 的纯前端插件无法经 MCP 调用，会被直接拒绝", []string{"pluginId", "command"},
-		map[string]any{
-			"pluginId": str("插件 ID，如 io.github.parieses.port-scanner"),
-			"command":  str("命令 ID，来自 plugin_list 的 commands"),
-			"input":    str("可选：传给插件的输入文本"),
-		})
-
-	// ---- 高危（LevelRisk）----
-	// 环境管理页只提供「只读 / 只读+低危写」两档，故这两条当前恒不开放：
-	// tools/list 里看不到，Call 也会被等级门拒绝。保留注册是为了将来放开上限时
-	// 不必改注册代码，但描述必须如实——写成「去面板开启高危等级」会引导模型
-	// 反复尝试一个根本不存在的开关。
-
-	s.register(func(args map[string]any) (any, error) {
-		pid := mcpsrv.ArgInt(args, "pid", 0)
-		if pid <= 0 {
-			return nil, errors.New("缺少或无效的参数 pid")
-		}
-		return unwrap(s.Port.KillProcess(pid))
-	}, mcpsrv.LevelRisk, "process_kill", "结束指定 PID 的进程（高危：误杀会导致数据丢失）。当前版本不对外暴露，本工具不可用", []string{"pid"},
-		map[string]any{"pid": intp("要结束的进程 PID")})
-
-	s.register(func(args map[string]any) (any, error) {
-		cmd := mcpsrv.Arg(args, "cmd")
-		if cmd == "" {
-			return nil, errors.New("缺少参数 cmd")
-		}
-		return unwrap(s.System.ExecuteSystemCommand(cmd))
-	}, mcpsrv.LevelRisk, "system_command", "执行系统指令（lock/shutdown/restart/sleep/emptytrash，高危）。当前版本不对外暴露，本工具不可用", []string{"cmd"},
-		map[string]any{"cmd": str("系统指令，如 shutdown / restart / lock / sleep / emptytrash")})
 }
 
 // envStart 启动服务；已在运行时不重复拉起（避免端口冲突检测把自身占用误判为冲突）。

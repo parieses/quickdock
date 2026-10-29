@@ -567,8 +567,8 @@ function failState(r: RuntimeInfo, e: any) {
 // 3589 行单文件难以维护）。模板引用保持同名，原样解构即可，模板无需改动。
 const { certModal, loadCertStatus, ensureCertLoaded, certInstallRoot, certPickDir, certIssue } = useCertPanel(selectedId)
 const {
-  mcpInfo, mcpTools, mcpClients, mcpLoading, mcpBusy, mcpLevelHint, mcpCheck,
-  loadMCP, copyMCP, setMCPLevel, startMCP, stopMCP, restartMCP, checkMCP,
+  mcpInfo, mcpTools, mcpToolGroups, mcpClients, mcpLoading, mcpBusy, mcpLevelHint, mcpCheck,
+  loadMCP, copyMCP, setMCPLevel, setMCPToolEnabled, startMCP, stopMCP, restartMCP, checkMCP,
 } = useMCPPanel(selectedId)
 const { webdavInfo, webdavURL, webdavExposed, webdavCmds, copyWebDAV, loadWebDAV } = useWebDAVPanel(selectedId)
 
@@ -3657,19 +3657,31 @@ const s = currentRuntimeState
           <div class="mcp-cfg-head">
             <span>{{ t('mcpExposedTools') }} {{ mcpInfo.tools }} / {{ mcpInfo.total }}</span>
           </div>
+          <p class="mcp-hint">{{ t('mcpToolToggleHint') }}</p>
           <div class="mcp-tools">
-            <div
-              v-for="tool in mcpTools"
-              :key="tool.name"
-              class="mcp-tool-row"
-              :class="{ 'is-blocked': !tool.exposed }"
-            >
-              <span class="mcp-tool-name">{{ tool.name }}</span>
-              <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">
-                {{ tool.level > 1 ? t('mcpToolHighRisk') : tool.level > 0 ? t('mcpToolWritable') : t('mcpToolReadOnly') }}
-              </span>
-              <span class="mcp-tool-desc">{{ tool.description }}</span>
-            </div>
+            <template v-for="g in mcpToolGroups" :key="g.category">
+              <div class="mcp-tool-group">{{ g.label }}</div>
+              <div
+                v-for="tool in g.tools"
+                :key="tool.name"
+                class="mcp-tool-row"
+                :class="{ 'is-blocked': !tool.exposed, 'is-off': tool.disabled }"
+              >
+                <span class="mcp-tool-name">{{ tool.name }}</span>
+                <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">
+                  {{ tool.level > 1 ? t('mcpToolHighRisk') : tool.level > 0 ? t('mcpToolWritable') : t('mcpToolReadOnly') }}
+                </span>
+                <span class="mcp-tool-desc">{{ tool.description }}</span>
+                <button
+                  v-if="tool.level <= mcpInfo.maxLevel"
+                  class="op-btn small mcp-tool-toggle"
+                  :disabled="mcpBusy"
+                  @click="setMCPToolEnabled(tool)"
+                >
+                  {{ tool.disabled ? t('mcpToolEnable') : t('mcpToolDisable') }}
+                </button>
+              </div>
+            </template>
             <div v-if="!mcpTools.length" class="mcp-hint">{{ t('mcpNoTools') }}</div>
           </div>
         </section>
@@ -4981,8 +4993,11 @@ const s = currentRuntimeState
 .mcp-client-path { margin: 0 0 6px; font-size: 11px; color: var(--color-text-muted); word-break: break-all; }
 .mcp-tool-row.is-blocked { opacity: .55; }
 .mcp-tool-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; }
+.mcp-tool-row.is-off .mcp-tool-name { text-decoration: line-through; }
+.mcp-tool-group { margin: 10px 0 2px; font-size: 11px; color: var(--color-text-muted); }
+.mcp-tool-toggle { flex: none; margin-left: auto; }
 .mcp-tool-name { font-family: var(--font-mono, monospace); color: var(--color-text-primary); flex: none; min-width: 140px; }
-.mcp-tool-desc { color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mcp-tool-desc { flex: 1; min-width: 0; color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .cert-sub { font-weight: 400; color: var(--color-text-muted); font-size: 12px; }
 .cert-grid { display: grid; grid-template-columns: 130px 1fr; align-items: center; gap: 8px 12px; margin: 10px 0 4px; }
 .cert-label { font-size: 12px; color: var(--color-text-secondary); text-align: right; white-space: nowrap; }

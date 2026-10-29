@@ -102,3 +102,105 @@ func TestCallRespectsMaxLevel(t *testing.T) {
 		t.Fatal("未注册工具应报错而不是静默成功")
 	}
 }
+
+// TestDisabledToolHiddenButReopenable 锁定单工具开关的三处一致性。
+//
+// 关闭必须同时作用于 List（客户端看不到）、Catalog（面板标出「关了」而不是
+// 「没资格」）与 Call（知道工具名也调不动）。关闭不等于从注册表删除——
+// 面板要能把它列出来再打开。
+func TestDisabledToolHiddenButReopenable(t *testing.T) {
+	prevLvl, prevOff := MaxLevel(), Disabled()
+	defer func() {
+		SetMaxLevel(prevLvl)
+		SetDisabled(prevOff)
+	}()
+	SetMaxLevel(LevelWrite)
+
+	called := false
+	Register(Tool{
+		Name:        "test_toggle",
+		Description: "单测用可开关工具",
+		Level:       LevelRead,
+		Handler: func(map[string]any) (any, error) {
+			called = true
+			return "ok", nil
+		},
+	})
+
+	SetDisabled([]string{"test_toggle"})
+	for _, d := range List() {
+		if d.Name == "test_toggle" {
+			t.Fatal("被关闭的工具不应出现在 tools/list")
+		}
+	}
+
+	var info ToolInfo
+	found := false
+	for _, c := range Catalog() {
+		if c.Name == "test_toggle" {
+			info, found = c, true
+		}
+	}
+	if !found {
+		t.Fatal("Catalog 应保留被关闭的工具，否则面板无法重新开启")
+	}
+	if !info.Disabled || info.Exposed {
+		t.Fatalf("Catalog 应标记已关闭且未开放，实际 %+v", info)
+	}
+
+	if _, err := Call("test_toggle", nil); err == nil {
+		t.Fatal("被关闭的工具应拒绝调用")
+	}
+	if called {
+		t.Fatal("被关闭工具的 Handler 被执行了——单工具开关失效")
+	}
+
+	SetDisabled(nil)
+	if _, err := Call("test_toggle", nil); err != nil {
+		t.Fatalf("重新开启后应可调用: %v", err)
+	}
+}
+
+// TestAnnotationsDerivedFromLevel 锁定 annotations 由危险等级推导。
+//
+// 客户端靠 readOnlyHint 决定要不要弹确认框：写操作被标成只读，模型就能
+// 跳过确认直接改数据，等于绕过等级门。
+func TestAnnotationsDerivedFromLevel(t *testing.T) {
+	prev := MaxLevel()
+	defer SetMaxLevel(prev)
+	SetMaxLevel(LevelRisk)
+
+	Register(Tool{
+		Name:    "test_anno_read",
+		Level:   LevelRead,
+		Handler: func(map[string]any) (any, error) { return nil, nil },
+	})
+	Register(Tool{
+		Name:    "test_anno_write",
+		Level:   LevelWrite,
+		Handler: func(map[string]any) (any, error) { return nil, nil },
+	})
+	Register(Tool{
+		Name:    "test_anno_risk",
+		Level:   LevelRisk,
+		Handler: func(map[string]any) (any, error) { return nil, nil },
+	})
+
+	defs := make(map[string]map[string]any, len(List()))
+	for _, d := range List() {
+		defs[d.Name] = d.Annotations
+	}
+
+	if ro, _ := defs["test_anno_read"]["readOnlyHint"].(bool); !ro {
+		t.Error("LevelRead 应标 readOnlyHint=true")
+	}
+	if ro, _ := defs["test_anno_write"]["readOnlyHint"].(bool); ro {
+		t.Error("LevelWrite 不应标 readOnlyHint=true")
+	}
+	if de, _ := defs["test_anno_risk"]["destructiveHint"].(bool); !de {
+		t.Error("LevelRisk 应标 destructiveHint=true")
+	}
+	if de, _ := defs["test_anno_write"]["destructiveHint"].(bool); de {
+		t.Error("LevelWrite 不应标 destructiveHint=true")
+	}
+}

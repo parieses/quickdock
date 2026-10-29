@@ -62,3 +62,44 @@ func TestMCPRuntimeSetMaxLevelRejectsOutOfRange(t *testing.T) {
 		t.Fatalf("写失败不应覆盖已有配置，期望 %d，实际 %d", mcp.LevelWrite, got)
 	}
 }
+
+// TestMCPRuntimeSetToolEnabledPersists 锁定单工具开关同样落盘、且不重复堆积。
+//
+// 与等级一样，Start 每次从配置读回名单：面板关掉的工具不能因为重启服务又冒出来。
+// 反复点同一条若写成重复项，配置会越来越长且难以人工核对。
+func TestMCPRuntimeSetToolEnabledPersists(t *testing.T) {
+	prev := mcp.Disabled()
+	defer mcp.SetDisabled(prev)
+
+	m := NewMCPRuntime()
+	m.baseDir = t.TempDir()
+
+	if err := m.SetToolEnabled("note_create", false); err != nil {
+		t.Fatalf("关闭工具失败: %v", err)
+	}
+	if got := mcp.Disabled(); len(got) != 1 || got[0] != "note_create" {
+		t.Fatalf("内存应立即生效，实际 %v", got)
+	}
+	if got := m.loadConfig().DisabledTools; len(got) != 1 || got[0] != "note_create" {
+		t.Fatalf("配置应写入 close 名单，实际 %v", got)
+	}
+
+	// 重复关闭同一条：不产生重复项
+	if err := m.SetToolEnabled("note_create", false); err != nil {
+		t.Fatalf("重复关闭应成功: %v", err)
+	}
+	if got := m.loadConfig().DisabledTools; len(got) != 1 {
+		t.Fatalf("重复关闭不应堆积重复项，实际 %v", got)
+	}
+
+	// 重新开启：名单里不再有它
+	if err := m.SetToolEnabled("note_create", true); err != nil {
+		t.Fatalf("开启工具失败: %v", err)
+	}
+	if got := m.loadConfig().DisabledTools; len(got) != 0 {
+		t.Fatalf("开启后配置应为空名单，实际 %v", got)
+	}
+	if got := mcp.Disabled(); len(got) != 0 {
+		t.Fatalf("开启后内存名单应为空，实际 %v", got)
+	}
+}

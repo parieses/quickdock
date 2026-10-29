@@ -54,11 +54,14 @@ type toolCallParams struct {
 	Arguments map[string]any `json:"arguments"`
 }
 
-// toolDefinition tools/list 返回的工具描述
+// toolDefinition tools/list 返回的工具描述。
+// Annotations 是 MCP 规范里的 hints（readOnlyHint/destructiveHint 等），
+// 供客户端决定要不要弹确认；由工具的危险等级推导，不接受手填。
 type toolDefinition struct {
 	Name        string         `json:"name"`
 	Description string         `json:"description"`
 	InputSchema map[string]any `json:"inputSchema"`
+	Annotations map[string]any `json:"annotations,omitempty"`
 }
 
 // toolResult tools/call 的结果。IsError 为 true 时 Text 为错误信息（区别于协议级错误）。

@@ -46,6 +46,9 @@ type MCPConfig struct {
 	Port int `json:"port"` // 监听端口，0=由系统分配
 	// MaxLevel 允许暴露的工具危险等级上限：0=只读 1=只读+低危写 2=含高危。
 	MaxLevel int `json:"maxLevel"`
+	// DisabledTools 被用户单独关掉的工具名。与 MaxLevel 是两道独立闸：
+	// 等级按危险度一档一刀，这里是「这条我就是不想让 AI 碰」的逐条选择。
+	DisabledTools []string `json:"disabledTools,omitempty"`
 }
 
 func defaultMCPConfig() MCPConfig {
@@ -132,6 +135,42 @@ func (m *MCPRuntime) SetMaxLevel(level int) error {
 	}
 	cfg := m.loadConfig()
 	cfg.MaxLevel = level
+	if err := m.saveConfig(cfg); err != nil {
+		return err
+	}
+	mcp.SetMaxLevel(level)
+	return nil
+}
+
+// SetToolEnabled 单独开启/关闭某个工具，落盘后立即对注册表生效。
+//
+// 名单按名称去重后写回：面板反复点同一条不能把 config 堆成一串重复项。
+// 未知工具名不做校验——注册表才是工具是否存在的权威，配置里残留一个已删除的
+// 工具名最多是无害噪音，而在这里拦下来会让「先关工具、后删工具」的正常顺序报错。
+func (m *MCPRuntime) SetToolEnabled(name string, enabled bool) error {
+	if name == "" {
+		return fmt.Errorf("缺少工具名")
+	}
+	cfg := m.loadConfig()
+	next := make([]string, 0, len(cfg.DisabledTools)+1)
+	for _, n := range cfg.DisabledTools {
+		if n != name && n != "" {
+			next = append(next, n)
+		}
+	}
+	if !enabled {
+		next = append(next, name)
+	}
+	cfg.DisabledTools = next
+	if err := m.saveConfig(cfg); err != nil {
+		return err
+	}
+	mcp.SetDisabled(cfg.DisabledTools)
+	return nil
+}
+
+// saveConfig 写回配置并落一份目录（首次写入时目录可能还不存在）。
+func (m *MCPRuntime) saveConfig(cfg MCPConfig) error {
 	raw, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return err
@@ -139,11 +178,7 @@ func (m *MCPRuntime) SetMaxLevel(level int) error {
 	if err := os.MkdirAll(m.baseDir, 0o755); err != nil {
 		return err
 	}
-	if err := os.WriteFile(m.configPath(), raw, 0o644); err != nil {
-		return err
-	}
-	mcp.SetMaxLevel(level)
-	return nil
+	return os.WriteFile(m.configPath(), raw, 0o644)
 }
 
 func (m *MCPRuntime) DefaultPort() int { return m.loadConfig().Port }
@@ -162,6 +197,8 @@ func (m *MCPRuntime) ConfiguredPorts(string) []int {
 func (m *MCPRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	cfg := m.loadConfig()
 	mcp.SetMaxLevel(cfg.MaxLevel)
+	// 单工具开关同样每次启动从配置读回：面板关掉的工具不能因为重启服务又冒出来。
+	mcp.SetDisabled(cfg.DisabledTools)
 	addr, err := mcp.Default.Start(cfg.Port, getMCPAppVersion())
 	if err != nil {
 		return err

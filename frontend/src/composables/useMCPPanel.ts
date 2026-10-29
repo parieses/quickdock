@@ -1,10 +1,11 @@
-import { inject, reactive, ref, watch, type Ref } from 'vue'
+import { computed, inject, reactive, ref, watch, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   MCPStatus,
   MCPTools,
   MCPClientConfig,
   MCPSetLevel,
+  MCPSetToolEnabled,
   MCPStart,
   MCPStop,
   MCPRestart,
@@ -18,7 +19,34 @@ export interface MCPToolInfo {
   name: string
   description: string
   level: number
-  exposed: boolean // 当前工具权限等级下是否对客户端开放
+  category: string // 所属域（app/env/note…），面板据此分组
+  exposed: boolean // 等级门 + 单工具开关都通过，客户端实际能看到
+  disabled: boolean // 被单独关掉：与「没资格」区分，前者可重新开启
+}
+
+// MCPToolGroup 面板里的一个工具分组。
+export interface MCPToolGroup {
+  category: string
+  label: string
+  tools: MCPToolInfo[]
+}
+
+// MCP_CATEGORY_ORDER 分组固定顺序：与后端 toolProviders 的装配顺序对齐，
+// 让区块位置稳定（不会因为工具名首字母变化而上下跳）。
+const MCP_CATEGORY_ORDER = ['app', 'env', 'item', 'note', 'todo', 'clipboard', 'diag', 'plugin', 'risk']
+
+// MCP_CATEGORY_I18N 分类 id → i18n key。后端只给 id、文案留在前端：
+// 否则英文界面会顶着一排中文分组名。
+const MCP_CATEGORY_I18N: Record<string, string> = {
+  app: 'mcpCatApp',
+  env: 'mcpCatEnv',
+  item: 'mcpCatItem',
+  note: 'mcpCatNote',
+  todo: 'mcpCatTodo',
+  clipboard: 'mcpCatClipboard',
+  diag: 'mcpCatDiag',
+  plugin: 'mcpCatPlugin',
+  risk: 'mcpCatRisk',
 }
 
 // MCPClientSnippet 一种客户端的接入片段：config 可直接粘贴/执行，path 是它该写到哪。
@@ -142,6 +170,45 @@ export function useMCPPanel(selectedId: Ref<string>) {
     }
   }
 
+  // setMCPToolEnabled 逐条开关工具（参数取反：tool.disabled 为 true 即重新开启）。
+  // 与等级一样落盘并立即对注册表生效，但已连上的客户端要重新握手才看得到，
+  // 故复用同一条「需要重启」提示，而不是再编一句意思一样的话。
+  async function setMCPToolEnabled(tool: MCPToolInfo) {
+    mcpBusy.value = true
+    try {
+      const r = unwrap<{ needsRestart: boolean }>(await MCPSetToolEnabled(tool.name, tool.disabled))
+      toast.success(t('saved'))
+      mcpLevelHint.value = r?.needsRestart ? t('mcpToolNeedsRestart') : ''
+      mcpCheck.text = ''
+      await loadMCP()
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+    } finally {
+      mcpBusy.value = false
+    }
+  }
+
+  // mcpToolGroups 按域分组。未登记的分类排到末尾并直接用 id 当标题：
+  // 后端加了新域而前端还没补文案时，工具仍然可见，只是标题朴素一点。
+  const mcpToolGroups = computed<MCPToolGroup[]>(() => {
+    const buckets = new Map<string, MCPToolInfo[]>()
+    for (const tool of mcpTools.value) {
+      const key = tool.category || 'other'
+      const list = buckets.get(key)
+      if (list) list.push(tool)
+      else buckets.set(key, [tool])
+    }
+    const rest = [...buckets.keys()].filter((k) => !MCP_CATEGORY_ORDER.includes(k))
+    const groups: MCPToolGroup[] = []
+    for (const category of [...MCP_CATEGORY_ORDER, ...rest]) {
+      const tools = buckets.get(category)
+      if (!tools?.length) continue
+      const key = MCP_CATEGORY_I18N[category]
+      groups.push({ category, label: key ? t(key) : category, tools })
+    }
+    return groups
+  })
+
   // checkMCP 让后端像真实客户端一样走一次 initialize + tools/list。
   // 放后端做而不是前端 fetch：WebView 的源不是 127.0.0.1，跨域请求会被浏览器按
   // CORS 拦下，且服务端还会按 Origin 头拒绝——前端永远只能看到「请求失败」，
@@ -168,7 +235,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
   watch(selectedId, (id) => { if (id === 'mcp') loadMCP() })
 
   return {
-    mcpInfo, mcpTools, mcpClients, mcpLoading, mcpBusy, mcpLevelHint, mcpCheck,
-    loadMCP, copyMCP, setMCPLevel, startMCP, stopMCP, restartMCP, checkMCP,
+    mcpInfo, mcpTools, mcpToolGroups, mcpClients, mcpLoading, mcpBusy, mcpLevelHint, mcpCheck,
+    loadMCP, copyMCP, setMCPLevel, setMCPToolEnabled, startMCP, stopMCP, restartMCP, checkMCP,
   }
 }
