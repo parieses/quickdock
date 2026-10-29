@@ -89,9 +89,13 @@ type Manager struct {
 //
 // host.ai.ask 与 goja 的 api.aiStream 两条通路共用这一份数字——
 // 拆成两处的话，插件换个调用方式就能绕过长度闸门，等于没有闸门。
+//
+// System 上限放宽到 24000：插件常把完整 API 参考/领域说明作为 system 携带，
+// 一段 1~2 万字符的系统提示词是合理诉求。Question 仍保持 4000（用户单次提问本就不宜过长）。
+// 超过此线只在 host.ai.ask 入口截断（见 plugin_host.go），不再硬拒导致整次调用失败。
 const (
 	AIQuestionMaxRune = 4000
-	AISystemMaxRune   = 4000
+	AISystemMaxRune   = 24000
 )
 
 // SetAIStreamFn 注入流式问答实现（由 services 层在启动时调用一次）。

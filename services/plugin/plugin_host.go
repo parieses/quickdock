@@ -517,11 +517,15 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 		}
 		// 入参上限：插件是第三方代码，不能假设它会自觉控制长度。
 		// 与 ai_ask.go 的常量同量级，这里先拦一道，省掉一次无谓的网络往返。
+		// 超长只截断不报错：插件传来的 system 很长是常见诉求（如携带完整 API 参考），
+		// 硬拒会让整次调用直接失败；截断到上限后仍是一段可用的系统提示词，调用照常成功。
 		if n := len([]rune(question)); n > pluginAIQuestionMaxRune {
-			return nil, fmt.Errorf("question 超长（上限 %d 字符，当前 %d）", pluginAIQuestionMaxRune, n)
+			logger.PluginW(pluginID, "AI question 超长（上限 %d 字符，当前 %d），已截断", pluginAIQuestionMaxRune, n)
+			question = string([]rune(question)[:pluginAIQuestionMaxRune])
 		}
 		if n := len([]rune(arg.System)); n > pluginAISystemMaxRune {
-			return nil, fmt.Errorf("system 超长（上限 %d 字符，当前 %d）", pluginAISystemMaxRune, n)
+			logger.PluginW(pluginID, "AI system 超长（上限 %d 字符，当前 %d），已截断", pluginAISystemMaxRune, n)
+			arg.System = string([]rune(arg.System)[:pluginAISystemMaxRune])
 		}
 		// 流式：按 streamID 沿途下发增量（合批，避免逐 token 推事件）。
 		// 没有 streamId 时 onToken 为 nil，走一次性路径。

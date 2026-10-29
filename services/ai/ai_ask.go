@@ -16,7 +16,9 @@ import (
 const (
 	// askMaxSystemRune 系统提示词长度上限（rune 而非 byte：中文一个字 3 字节，
 	// 按字节算会让中文提示词在远未到语义上限时就被截断，报错还很难懂）。
-	askMaxSystemRune = 4000
+	// 放宽到 24000 以容纳插件携带的完整 API 参考等长系统提示词；
+	// SSH/剪贴板/笔记等场景使用各自固定的短系统提示词，不受此值影响。
+	askMaxSystemRune = 24000
 
 	// askMaxUserRune 用户输入 + 上下文总长度上限。
 	// 4000 rune ≈ 2000 个中文字符，够放一段典型报错 + 一次提问，
