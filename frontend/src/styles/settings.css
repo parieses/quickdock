@@ -175,28 +175,58 @@
 }
 
 .update-notes {
-  margin-top: 14px;
+  margin-top: 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
-  padding: 10px 12px;
+  overflow: hidden;
 }
 .update-notes-title {
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text-secondary);
-  margin-bottom: 6px;
+  padding: 7px 12px;
+  background: var(--color-bg-active);
+  letter-spacing: 0.02em;
+}
+.update-notes-list {
+  margin: 0;
+  padding: 8px 12px 8px 16px;
+  max-height: 200px;
+  overflow: auto;
+  list-style: none;
+}
+.update-notes-list li {
+  position: relative;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+.update-notes-list li + li {
+  margin-top: 5px;
+}
+.update-notes-list li::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
 }
 .update-notes-body {
   margin: 0;
+  padding: 10px 12px;
   max-height: 200px;
   overflow: auto;
   white-space: pre-wrap;
   word-break: break-word;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: 12px;
-  line-height: 1.6;
-  color: var(--text-primary, #e6e6e6);
+  line-height: 1.55;
+  color: var(--color-text-primary);
 }
 .spinning { animation: spin 1s linear infinite; }
 @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
@@ -250,6 +280,8 @@
 .btn-primary:hover { background: var(--color-accent-hover); }
 .btn-secondary { background: var(--color-bg-active); color: var(--color-text-secondary); }
 .btn-secondary:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
+.btn-danger { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid var(--color-danger-border); }
+.btn-danger:hover { background: var(--color-danger); color: var(--color-danger-text); }
 .action-row { margin-top: 8px; }
 .result-hint { font-size: 12px; color: var(--color-accent); margin: 8px 0 0; }
 
@@ -267,7 +299,7 @@
   color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 13px; cursor: pointer; font-family: inherit;
 }
 .btn-ghost:hover { background: var(--color-bg-hover); }
-.btn-primary:disabled, .btn-secondary:disabled, .btn-ghost:disabled { opacity: 0.5; cursor: default; }
+.btn-primary:disabled, .btn-secondary:disabled, .btn-ghost:disabled, .btn-danger:disabled { opacity: 0.5; cursor: default; }
 
 /* 切换开关 */
 .toggle-btn {

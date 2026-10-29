@@ -1,6 +1,8 @@
 <script lang="ts" setup>
+import { computed } from 'vue'
 import { X, Download, Clock, Ban } from '@lucide/vue'
 import { useI18n } from 'vue-i18n'
+import { parseReleaseNotes } from '../utils/releaseNotes'
 
 const { t } = useI18n()
 
@@ -20,6 +22,10 @@ const emit = defineEmits<{
 function onKey(e: KeyboardEvent) {
   if (e.key === 'Escape') emit('later')
 }
+
+// CI 生成的 release notes 是 `git log --pretty=format="- %s"` 的逐行要点，
+// 解析成紧凑列表渲染；无要点（纯段落文本）时回退为 <pre> 原样展示。
+const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
 </script>
 
 <template>
@@ -42,7 +48,10 @@ function onKey(e: KeyboardEvent) {
             <p class="up-sub">{{ t('updateCurrentToNew', { from: currentVersion, to: version }) }}</p>
             <div v-if="releaseNotes" class="up-notes">
               <div class="up-notes-title">{{ t('updateNotes') }}</div>
-              <pre class="up-notes-body">{{ releaseNotes }}</pre>
+              <ul v-if="noteItems.length" class="up-notes-list">
+                <li v-for="(item, i) in noteItems" :key="i">{{ item }}</li>
+              </ul>
+              <pre v-else class="up-notes-body">{{ releaseNotes }}</pre>
             </div>
           </div>
           <div class="up-footer">
@@ -127,20 +136,48 @@ function onKey(e: KeyboardEvent) {
   overflow: hidden;
 }
 .up-notes-title {
-  padding: 8px 12px;
-  font-size: 12px;
+  padding: 7px 12px;
+  font-size: 11px;
   font-weight: 600;
   color: var(--color-text-secondary);
   background: var(--color-bg-active);
+  letter-spacing: 0.02em;
+}
+.up-notes-list {
+  margin: 0;
+  padding: 8px 12px 8px 14px;
+  max-height: 220px;
+  overflow-y: auto;
+  list-style: none;
+}
+.up-notes-list li {
+  position: relative;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--color-text-primary);
+  word-break: break-word;
+}
+.up-notes-list li + li {
+  margin-top: 5px;
+}
+.up-notes-list li::before {
+  content: '';
+  position: absolute;
+  left: -8px;
+  top: 8px;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
 }
 .up-notes-body {
   margin: 0;
-  padding: 12px;
-  max-height: 240px;
+  padding: 10px 12px;
+  max-height: 220px;
   overflow-y: auto;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 12px;
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--color-text-primary);
   white-space: pre-wrap;
   word-break: break-word;

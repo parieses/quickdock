@@ -46,6 +46,7 @@ import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
 import { markSeen } from '../composables/useNavBadges'
 import ConfirmDialog from './ConfirmDialog.vue'
+import { parseReleaseNotes } from '../utils/releaseNotes'
 
 const props = defineProps<{
   visible: boolean
@@ -179,6 +180,9 @@ function onKeydown(e: KeyboardEvent) {
 // ---- 更新检查 ----
 const appVersion = ref('')
 const updateStatus = ref<UpdateStatus | null>(null)
+
+// 将 CI 生成的 release notes 解析为紧凑要点列表（无要点时为空，模板回退到 <pre>）。
+const releaseNoteItems = computed(() => parseReleaseNotes(updateStatus.value?.releaseNotes))
 const updateChecking = ref(false)
 const updateResult = ref('')
 // 更新下载实时进度：Wails updater 内部发 wails:updater:download-progress（~10次/秒），
@@ -870,7 +874,10 @@ async function toggleAutoStart() {
 
               <div v-if="updateStatus?.state === 'available' && updateStatus.releaseNotes" class="update-notes">
                 <div class="update-notes-title">{{ t('updateNotes') }}</div>
-                <pre class="update-notes-body">{{ updateStatus.releaseNotes }}</pre>
+                <ul v-if="releaseNoteItems.length" class="update-notes-list">
+                  <li v-for="(item, i) in releaseNoteItems" :key="i">{{ item }}</li>
+                </ul>
+                <pre v-else class="update-notes-body">{{ updateStatus.releaseNotes }}</pre>
               </div>
 
               <div v-if="updateStatus?.state === 'ready'" class="action-row" style="margin-top:12px">
