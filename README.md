@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.31-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.32-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -80,7 +80,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 终端内 AI | SSH 终端侧栏，可附带当前屏显、选中输出即问，命令一键填入或执行 |
 | 剪贴板 AI | 条目上「问 AI」就地弹层，预置翻译、摘要、格式化和自由提问 |
 | 笔记 AI | 笔记浮窗内嵌面板，支持总结、润色、续写、翻译 |
-| DeepSeek Harness | 内嵌完整 Agent 编程入口，自动装填便携 Node，原生窗口承载 3080 端口 |
+| DeepSeek Harness | 内嵌完整 Agent 编程入口，自动装填便携 Node，原生窗口承载 3080 端口；打开前校验 WebView2 版本，进程意外退出自动重拉 |
 | MCP 服务 | `http://127.0.0.1:9230/mcp`，工具集分只读、低危写、高危三级权限 |
 | 环境管理 | 28 种运行时，安装、切换、启停、配置、日志、控制台，全部在用户目录内；可按项目目录的版本声明做检查 |
 
@@ -118,7 +118,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 ### 系统要求
 
 - Windows 10 1809+ 或 Windows 11
-- WebView2 Runtime（Windows 自带）
+- WebView2 Runtime（Windows 自带，建议 ≥ 119；低于此版本 DeepSeek Harness 窗口会反复 `connection lost`）
 - 磁盘约 50 MB，运行时按需下载
 
 ### 步骤
@@ -297,6 +297,9 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 - **后台常驻**：关闭窗口不停止服务，下次打开即时可用。停止由设置手动触发或随应用退出
 - **安装日志**：下载、解压、npm 安装的每一步逐行推送 `quickdock:dsh:log`
 - **环境隔离**：过滤第三方注入的 `NODE_OPTIONS`，避免影响 dsh 进程
+- **版本校验**：打开前读取系统 WebView2 运行时版本，低于 dsh 要求的 119 时红字提示并拦截打开，避免窗口内反复 `connection lost`
+- **崩溃自愈**：dsh 进程意外退出时，已打开窗口自动重拉并重导航（带熔断）；状态判断改用真实进程探测，杜绝「进程已死却显示运行中」的假存活
+- **流程全可见**：安装 / 卸载 / 启动 / 停止的进度实时输出到「环境管理 → DeepSeek Harness」日志面板；卸载改为直接清理目录并支持一键重装
 
 </details>
 
