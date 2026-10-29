@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.33-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.34-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -361,7 +361,7 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
   - 只读（19）：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`file_search`、`workspace_list`、`item_search`、`recent_items`、`todo_list`、`note_search`、`clipboard_recent`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`plugin_list`、`plugin_exec_logs`
   - 低危写（14）：`env_start`、`env_stop`、`env_restart`、`robot_notify`、`item_open`、`todo_create`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`note_folder_create`、`plugin_execute`、`plugin_open`
   - 高危（需在环境管理页开启）：`process_kill`、`system_command`
-- 插件相关：`plugin_execute` 可传结构化参数（`input` 为字符串或 JSON 对象，键由插件定义）；纯前端插件（`runtime=none`）宿主无法执行，改用 `plugin_open` 带参打开界面；`plugin_exec_logs` 回看执行记录，AI 触发的记录来源标为 `mcp`
+- 插件相关：`plugin_execute` 可传结构化参数（`input` 为字符串或 JSON 对象，键由插件定义），且**只接受插件清单里声明过的命令**——未声明的命令（插件自己界面用的内部命令）会直接被拒并提示改用 `plugin_open`，模型猜命令名也没用；纯前端插件（`runtime=none`）宿主无法执行，改用 `plugin_open` 带参打开界面；`plugin_exec_logs` 回看执行记录，AI 触发的记录来源标为 `mcp`
 - 插件通过 `host.mcp.call` 复用全部工具，沿用同一套等级门
 - 服务随主进程启停，应用退出即失效
 

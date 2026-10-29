@@ -342,6 +342,22 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Updates no longer stall mid-download, and AI can't call commands a plugin keeps private</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>App updates now resume instead of restarting: bandwidth throttling, mirror switching and timeouts all continue from where they left off, because progress is written to disk. The old “downloading forever, never finishes” case should be gone.</li>
+          <li>A plugin's public command list is now enforced, not just advertised: a command that isn't declared can't be called by AI even if it guesses the ID — it gets an explanation and is pointed at the UI instead. Plugins can keep interface-only commands out of the list without losing them.</li>
+          <li>Every timeline row now shows where the action came from: you or the AI. Knowing whether you clicked something or an agent did it was exactly the detail missing when troubleshooting.</li>
+          <li>AI can now tell “this tool is switched off” apart from “this app doesn't have that feature”: the tool list reports exposed, registered and blocked counts, so it points you at the Environment page to enable it instead of refusing.</li>
+          <li>Plugin card descriptions are clamped to two lines with matched heights, so cards stay aligned; hover for the full text when it doesn't fit.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.33</span>
+          <span class="log-date">2026-10-29</span>
           <span class="log-title">AI clients can drive plugins directly, and MCP tools can be switched off one by one</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -390,24 +406,6 @@
           <li>Notes gained a table of contents, word count, drag sorting and <code>.md</code> export, and the AI panel can insert at the cursor, append, or replace the whole note. Todos are searchable, and subtasks can be renamed, reordered and given their own due date.</li>
           <li>Items can carry a mark colour and a custom icon, and can be batch-deleted or moved between collections. The clipboard clears in bulk, reveals files in Explorer, saves images, and orders rules by priority with an app-match dry run.</li>
           <li>Under the hood: Wails v3 stable and Go 1.26, and scenes are export-only.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.30</span>
-          <span class="log-date">2026-10-28</span>
-          <span class="log-title">Move your data folder, see what the AI costs, take formulas and diagrams out of an answer</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>The data directory can move to another drive as a whole, installed runtimes and environment variables included; it takes effect after a restart. The installer now also asks where to put it.</li>
-          <li>The AI assistant tracks usage: cost estimates for the last 7 days, 30 days and all time, question counts, a daily trend, split by model and by entry point, with cache savings called out separately.</li>
-          <li>Formulas, diagrams and code highlighting in answers now render properly; tables sort and export to CSV; diagrams and formulas can be copied as images from the context menu.</li>
-          <li>External links open in the system browser instead of navigating the app away. AI answers keep generating while you're on another page.</li>
-          <li>The clipboard's "images" and "files" filters work again, and classification happens on write, so a filter reaches the whole history.</li>
-          <li>The command palette searches todos, and Enter jumps to the one you picked. Deleted scheduled tasks go to the recycle bin.</li>
-          <li>Collections over a hundred items scroll virtually, logs render at most 5000 lines, and long lists stop getting slower as they grow.</li>
         </ul>
       </details>
 

@@ -342,6 +342,22 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">更新不会再卡在下不完，插件没公开的命令 AI 也调不动</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>应用更新支持断点续传：网络限速、切换镜像、超时中断都不用从 0 重来，进度会落盘，下次接着下。之前那种「一直显示更新中、永远下不完」的情况基本不会再遇到。</li>
+          <li>插件对 AI 公开的命令范围现在说到做到：清单里没声明的命令，AI 就算猜出名字也调不动，会收到一句说明并被告知改用界面操作。插件可以放心把只给界面用的内部命令留在清单外。</li>
+          <li>时间线每一行都标出操作来源——「手动」还是「AI」。之前分不清「这条是我自己点的」还是「刚让 AI 干的」，排查时最需要这个答案。</li>
+          <li>AI 现在能分清「这个工具被关掉了」和「这个应用没有这个功能」：工具清单会同时报开放数、总数与被挡数，需要时会直接提示你去环境管理页开启，而不是回一句做不到。</li>
+          <li>插件卡片的介绍固定两行、高度对齐，描述再长也不会把卡片撑得参差不齐；看不全时鼠标悬停有全文。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.33</span>
+          <span class="log-date">2026-10-29</span>
           <span class="log-title">AI 客户端能直接指挥插件，MCP 工具可以逐个关</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -390,24 +406,6 @@
           <li>笔记加了目录、字数统计、拖拽排序和导出 <code>.md</code>，AI 面板能把结果插入光标、追加到末尾或替换全文。待办支持搜索，子任务可改名、上下移动、单独设截止日。</li>
           <li>条目可以设标记颜色和自定义图标，支持批量删除与跨集合移动。剪贴板能批量清空、在资源管理器里定位、把图片另存，自动规则可以排优先级并试跑应用匹配。</li>
           <li>底层升到 Wails v3 正式版与 Go 1.26，场景只保留导出。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.30</span>
-          <span class="log-date">2026-10-28</span>
-          <span class="log-title">数据目录能搬家，AI 花了多少能看见，回答里的公式和图能拿走</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>数据目录可以整体搬到别的盘，连同装好的运行时和环境变量一起，重启生效。新装时安装器也会问一次放哪。</li>
-          <li>AI 助手加了用量统计：近 7 天、30 天、全部的花费估算、问答次数、每日趋势，按模型和入口拆开看，缓存命中省下的单独标出。</li>
-          <li>AI 回答里的公式、流程图、代码高亮都能正常渲染；表格能排序、能导出 CSV；图和公式右键可以复制成图片。</li>
-          <li>点外链改成交给系统浏览器，不再把主界面导航走。切到别的页面时 AI 回答继续生成。</li>
-          <li>剪贴板的「图片」「文件」标签修好了，分类改成入库时计算，能翻到全部历史。</li>
-          <li>命令面板能搜待办，回车直接跳到那一条。定时任务删除后进回收站。</li>
-          <li>集合条目过百改虚拟滚动，日志最多渲染 5000 行，长列表不再越滚越卡。</li>
         </ul>
       </details>
 
