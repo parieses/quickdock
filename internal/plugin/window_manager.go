@@ -112,6 +112,28 @@ func (m *PluginWindowManager) windowSize(pluginID string) (int, int) {
 	return int(float64(w) * m.zoom), int(float64(h) * m.zoom)
 }
 
+// fitToScreen 把窗口长宽收敛到当前桌面工作区：任一维度超过可用区域就取桌面尺寸兜底。
+//
+// 为什么不直接用屏幕物理尺寸：WindowOptions 的 Width/Height 是逻辑像素（已含 zoom 放大），
+// 故与屏幕的 WorkArea（同样逻辑像素）对齐比较；用 PhysicalWorkArea 会在高 DPI 下
+// 误判（物理像素远大于逻辑窗口尺寸），反而把本该收敛的窗口放过。
+// 取主窗口所在屏幕：新建窗口本就对齐到主窗口显示器（见 Show 末尾的 SetScreen），
+// 以同一块屏幕的工作区做边界最贴合用户所见。主窗口/屏幕不可用时退回原值（不收敛）。
+func (m *PluginWindowManager) fitToScreen(w, h int) (int, int) {
+	if m.mainWindow != nil {
+		if sc, err := m.mainWindow.GetScreen(); err == nil && sc != nil {
+			wa := sc.WorkArea
+			if wa.Width > 0 && w > wa.Width {
+				w = wa.Width
+			}
+			if wa.Height > 0 && h > wa.Height {
+				h = wa.Height
+			}
+		}
+	}
+	return w, h
+}
+
 // Show 显示插件窗口。如果窗口不存在则创建新窗口。
 // showInTaskbar: 是否在任务栏显示图标（分离模式 = true）
 // 返回 (窗口, 是否为新创建)
@@ -153,6 +175,10 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	// 创建窗口（不触发其它事件钩子，无重入锁风险）
 	// 尺寸：优先插件清单声明的 frontend.width/height，未声明退回通用基准；均按 zoom 放大。
 	w, h := m.windowSize(pluginID)
+	// 收敛到当前桌面工作区：插件清单声明（或基准）的长宽若超过桌面可用区域，
+	// 直接拿桌面尺寸兜底，否则窗口会超出屏幕、被任务栏/边缘裁掉且无法完整操作。
+	// 多显示器下取主窗口所在屏幕（新建窗口本就对齐到该屏幕，见下方 SetScreen）。
+	w, h = m.fitToScreen(w, h)
 	// 最小尺寸同样按 zoom 放大，但不超过窗口本身——否则声明了很小的插件（如小游戏）
 	// 会被 min 顶得比它自己声明得还大。
 	minW, minH := int(400*m.zoom), int(300*m.zoom)
