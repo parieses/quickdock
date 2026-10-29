@@ -6,6 +6,8 @@ import { useWorkspaceStore } from '../stores/workspace'
 import { useFocusTrap } from '../utils/focusTrap'
 import { unwrap } from '../utils/api'
 import { EnvList, EnvSetActive, EnvProjectVersions } from '../../bindings/quickdock/services/env/environmentservice'
+// 「应用」类型的目标值复用应用选择器：手输自定义路径 / 浏览文件 / 系统扫描的已装应用
+import AppTargetPicker from './AppTargetPicker.vue'
 import type { CollectionItem, OpenTool, EnvRuntimeInfo, ToastAPI } from '../types';
 
 const { t, tm } = useI18n()
@@ -324,7 +326,8 @@ function onKeydown(e: KeyboardEvent) {
             </label>
             <label class="field">
               <span class="field-label">{{ t('itemValue') }}</span>
-              <input v-model="value" type="text" :placeholder="type === '网页' ? 'https://...' : type === '快速链接' ? t('quicklinkUrlPlaceholder') : t('itemValue')" class="field-input" />
+              <AppTargetPicker v-if="type === '应用'" v-model="value" :placeholder="t('itemValue')" />
+              <input v-else v-model="value" type="text" :placeholder="type === '网页' ? 'https://...' : type === '快速链接' ? t('quicklinkUrlPlaceholder') : t('itemValue')" class="field-input" />
               <p class="field-hint">{{ type === '快速链接' ? t('quicklinkDesc') : t('itemValueHint') }}</p>
             </label>
             <label class="field">

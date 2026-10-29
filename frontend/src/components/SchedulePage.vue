@@ -12,6 +12,8 @@ import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 import { Events } from '@wailsio/runtime'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ScheduleRunHistoryDialog from './ScheduleRunHistoryDialog.vue'
+// 「打开软件」的目标输入复用应用选择器：支持手输自定义路径 / 浏览文件 / 系统扫描的已装应用
+import AppTargetPicker from './AppTargetPicker.vue'
 import {
   Plus, Play, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
@@ -547,7 +549,8 @@ onMounted(refresh)
 
         <!-- 目标 -->
         <label>{{ targetLabel(fAction) }}</label>
-        <input v-model="fTarget" class="modal-input" :placeholder="targetPlaceholder(fAction)" />
+        <AppTargetPicker v-if="fAction === 'app'" v-model="fTarget" :placeholder="targetPlaceholder(fAction)" />
+        <input v-else v-model="fTarget" class="modal-input" :placeholder="targetPlaceholder(fAction)" />
 
         <!-- 工作目录（app/command） -->
         <template v-if="fAction === 'app' || fAction === 'command'">
