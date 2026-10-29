@@ -40,6 +40,9 @@ interface ActivityRow {
   kind: string
   refId: string
   text: string
+  // source：这条动作是谁触发的。ui=用户自己点（含快捷键），mcp=AI 通过 MCP 工具调用。
+  // 老库升级上来的历史记录统一是 ui（当时没有来源信息）。
+  source: string
   createdAt: string
   createdTs: number // Unix 毫秒
 }
@@ -130,6 +133,17 @@ function ago(ts: number): string {
 function verb(kind: string): string {
   const key = KIND_VERB[kind]
   return key ? t(key) : kind
+}
+
+// 来源标签：两种都标出来，不靠「有没有标签」暗示。
+// AI 的动作与自己的动作写在同一张表、同一种措辞里，只给 AI 打标时，
+// 用户看到没标的行会默认是自己点的——恰恰可能是刚才让 AI 干的那件。
+function sourceLabel(source: string): string {
+  return source === 'mcp' ? t('activitySourceMcp') : t('activitySourceUi')
+}
+
+function sourceTip(source: string): string {
+  return source === 'mcp' ? t('activitySourceMcpTip') : t('activitySourceUiTip')
 }
 
 async function load() {
@@ -284,6 +298,11 @@ onUnmounted(() => {
                 <div class="tl-line">
                   <span class="tl-verb">{{ verb(a.kind) }}</span>
                   <span class="tl-name">{{ a.text || t('activityUnknown') }}</span>
+                  <!-- 操作来源：AI 的动作用强调色，自己的用弱色小字 -->
+                  <span
+                    :class="['tl-src', { 'is-mcp': a.source === 'mcp' }]"
+                    :title="sourceTip(a.source)"
+                  >{{ sourceLabel(a.source) }}</span>
                 </div>
                 <div class="tl-time">{{ ago(a.createdTs) }}</div>
               </div>
@@ -395,5 +414,18 @@ onUnmounted(() => {
 .tl-line { font-size: 12px; color: var(--color-text-primary); display: flex; gap: 4px; align-items: baseline; }
 .tl-verb { color: var(--color-text-secondary); flex-shrink: 0; }
 .tl-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 来源标签：靠右固定，不参与名字的收缩（名字再长也只截名字） */
+.tl-src {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 0 4px;
+  border-radius: var(--radius-xs);
+  font-size: 10px;
+  line-height: 1.5;
+  color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary);
+}
+/* AI 触发的动作用强调色：一眼能扫出「哪些不是我干的」 */
+.tl-src.is-mcp { color: var(--color-accent); background: var(--color-accent-bg); }
 .tl-time { font-size: 11px; color: var(--color-text-disabled); }
 </style>
