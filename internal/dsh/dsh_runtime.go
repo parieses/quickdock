@@ -24,6 +24,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"quickdock/internal/logger"
+	"quickdock/internal/platform"
 	"quickdock/internal/sysutil"
 )
 
@@ -57,6 +58,9 @@ type DSHProcessManager struct {
 	// 分不清「用户点停止」和「进程自己崩了」：前者不该报错，后者必须告知并导航窗口，
 	// 否则设置页永远显示"运行中"、原生窗口停在死页面上。
 	stopping bool
+	// relaunchTries 自动重拉尝试计数：dsh 意外退出且窗口仍开时，reaper 自动重拉并重导航窗口；
+	// 为避免 dsh 反复崩溃形成紧密重试循环，超过上限后停止自动重拉并提示用户检查日志。
+	relaunchTries int
 
 	// lastPluginBackup 最近一次「更新全部插件」前的备份目录（DSH_HOME/backups/web-<ts>）。
 	// 用于一键回滚；内存指针为空时回退到 backups/ 下最新 web-* 目录（跨重启仍可用）。
@@ -103,23 +107,45 @@ func saveDSHToken(t string) {
 }
 
 func loadDSHToken() string {
-	dir := dshTokenCacheDir()
-	if dir == "" {
-		return ""
+	// 优先读数据目录（platform.DefaultDataDir()，可能与默认家目录分离，如迁移到 D:\.quickdock）。
+	// 兜底读旧位置 os.UserHomeDir()/.quickdock：早期版本曾把 token 写在家目录下，若新进程
+	// 先读新位置发现缺失、再回退旧位置，仍能拼出可用 ?token= URL，避免「明明 dsh 在跑却连不进」。
+	// 注意：读出来只是候选，复用前仍会经 tokenWorks 校验，失效自然落到「杀旧实例→重拉→重新捕获」。
+	var dirs []string
+	if d := dshTokenCacheDir(); d != "" {
+		dirs = append(dirs, d)
 	}
-	b, err := os.ReadFile(filepath.Join(dir, "dsh_token"))
-	if err != nil {
-		return ""
+	if home, err := os.UserHomeDir(); err == nil {
+		if legacy := filepath.Join(home, ".quickdock"); legacy != "" {
+			found := false
+			for _, d := range dirs {
+				if d == legacy {
+					found = true
+					break
+				}
+			}
+			if !found {
+				dirs = append(dirs, legacy)
+			}
+		}
 	}
-	return strings.TrimSpace(string(b))
+	for _, dir := range dirs {
+		b, err := os.ReadFile(filepath.Join(dir, "dsh_token"))
+		if err == nil {
+			if s := strings.TrimSpace(string(b)); s != "" {
+				return s
+			}
+		}
+	}
+	return ""
 }
 
+// dshTokenCacheDir 返回 dsh 访问 token 的持久化目录。
+// 必须与全局数据目录保持一致（platform.DefaultDataDir()，可能被用户迁移到 D:\.quickdock 等），
+// 否则 token 会被写到家目录下的 ~/.quickdock，与数据库/日志/运行时（都在数据目录内）分家——
+// 重启后 QuickDock 读不到正确 token，复用已运行 dsh 时只能拿到 401 死地址（"卡在启动中 / 一直重连"）。
 func dshTokenCacheDir() string {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return ""
-	}
-	return filepath.Join(home, ".quickdock")
+	return platform.DefaultDataDir()
 }
 
 func NewDSHProcessManager(app *application.App, nodeEnv *NodeEnvManager) *DSHProcessManager {
@@ -143,8 +169,22 @@ const AutoStartKey = "dsh_auto_start"
 func (m *DSHProcessManager) Start() (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if m.cmd != nil && m.cmd.Process != nil {
-		return m.url, nil // 已在运行，复用
+	// 入口即留痕：设置页点「启动」后日志面板应立刻出现这一行，
+	// 后续每一步（复用/清残留/拉进程/捕获 token）都有对应日志可追。
+	m.logf("info", "收到 dsh web 启动请求")
+	// 进程退出后 m.cmd.Process 仍非 nil（reaper 尚未清状态的极短窗口也可能发生），
+	// 仅判 m.cmd!=nil 会误判为"仍在运行"，导致后端已死却把窗口导航到死地址、前端一直
+	// connection lost 重试。必须真实验证子进程是否存活（PID 仍是 node 进程）。
+	if m.cmd != nil && m.cmd.Process != nil && isNodeProcess(m.cmd.Process.Pid) {
+		m.logf("info", "dsh web 进程已在运行（PID "+strconv.Itoa(m.cmd.Process.Pid)+"），直接复用")
+		return m.url, nil
+	}
+	// 记录的子进程已退出（m.cmd 残留）→ 清理陈旧状态，下方按全新启动重拉。
+	if m.cmd != nil {
+		m.logf("warn", "记录的 dsh 进程（PID "+strconv.Itoa(m.cmd.Process.Pid)+"）已退出，清理后重新启动")
+		m.cmd = nil
+		m.url = ""
+		m.token = ""
 	}
 
 	// 以可执行入口存在与否判断 dsh 是否安装（DshBin 只认 installDir，会漏掉官方全局安装）
@@ -161,21 +201,27 @@ func (m *DSHProcessManager) Start() (string, error) {
 		// 2) 若占用者是残留 node（半死/启动失败的旧实例）→ taskkill 清理后重新绑定 3080；
 		// 3) 仍失败（无关进程占用）→ 才退回随机端口并提示。
 		if m.isDSHAlive(DefaultDSHPort) {
-			u := "http://127.0.0.1:" + strconv.Itoa(DefaultDSHPort)
-			// 复用已运行的 dsh：本进程可能没捕获过它的 token（如 wails3 dev 重编译后
-			// 新进程复用旧 dsh），从磁盘缓存读取，确保导航带 ?token= 能正常进应用。
-			if m.token == "" {
-				m.token = loadDSHToken()
+			// 复用前提：我们持有的 token 必须真能被 dsh 接受。否则（如 QuickDock 重启后
+			// 缓存的 token 与仍在跑的旧实例对不上）宁可杀掉重拉、拿到一个我们能掌控的新 token，
+			// 也不要把窗口导航到 401 死页（卡在启动中 / 一直 connection lost 重连）。
+			tok := m.token
+			if tok == "" {
+				tok = loadDSHToken()
 			}
-			if m.token != "" {
-				u = u + "?token=" + m.token
+			if tok != "" && m.tokenWorks(tok, DefaultDSHPort) {
+				u := "http://127.0.0.1:" + strconv.Itoa(DefaultDSHPort) + "?token=" + tok
+				m.token = tok
+				m.url = u
+				m.port = DefaultDSHPort
+				if m.app != nil {
+					m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "info", Message: "检测到端口 3080 已有 dsh 服务且 token 有效，直接复用（不启动新进程）"})
+				}
+				return u, nil
 			}
-			m.url = u
-			m.port = DefaultDSHPort
+			// token 失效：落到下方「清理残留 → 重绑 3080 → 拉新实例」分支，重新获取访问凭证。
 			if m.app != nil {
-				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "info", Message: "检测到端口 3080 已有 dsh 服务，直接复用（不启动新进程）"})
+				m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: "warn", Message: "端口 3080 的 dsh 服务 token 已失效，将重启以重新获取访问凭证"})
 			}
-			return u, nil
 		}
 		if pid := findPortPID(DefaultDSHPort); pid > 0 && isNodeProcess(pid) {
 			if m.app != nil {
@@ -259,6 +305,7 @@ func (m *DSHProcessManager) Start() (string, error) {
 		}
 	}
 	logf("info", "正在启动 dsh web（首次启动需初始化 profile，可能较慢）…")
+	logf("info", fmt.Sprintf("dsh web 进程已拉起（PID %d），等待服务就绪…", cmd.Process.Pid))
 	// 就绪判定用 HTTP 壳 200 即可（简单可靠）；dsh 官方前端未就绪时自带「定时常量刷新」，
 	// 不会出现「无法打开」。这里只负责把 stdout/stderr 转发到日志面板。
 	go func() {
@@ -286,8 +333,17 @@ func (m *DSHProcessManager) Start() (string, error) {
 						m.url = "http://127.0.0.1:" + strconv.Itoa(m.port) + "?token=" + t
 					}
 				}
+				win := m.window
+				u := m.url
 				m.mu.Unlock()
 				saveDSHToken(t)
+				m.logf("info", "已捕获 dsh 访问 token，服务地址: "+u)
+				// token 在 dsh 启动中后期才打印（实测约 30s，profile 初始化/杀软扫描期间）。
+				// 若窗口已先以无 token 的 base URL 打开（复用路径、或 readiness 前用户已见窗口），
+				// 这里直接重导航到带 token 的地址，让 dsh 前端完成鉴权、避免「重新连接中」死等。
+				if win != nil && u != "" {
+					win.SetURL(u)
+				}
 			}
 			logf("info", l)
 		}
@@ -356,7 +412,50 @@ func (m *DSHProcessManager) Start() (string, error) {
 					"message":  "dsh web 服务意外退出（进程已结束）",
 				})
 			}
-			m.notifyStopped("dsh web 服务已意外退出（进程崩溃或被结束）。可在「环境管理 → DeepSeek Harness」重新启动，或直接点击侧边栏 dsh 自动拉起。")
+			// 失效存活缓存：刚崩溃时绝不能再让 Running()/状态页在缓存 TTL 内误报"运行中"。
+			m.aliveCache.port = 0
+			m.aliveCache.ok = false
+			m.aliveCache.at = time.Time{}
+			// 若 dsh 窗口仍开着，自动重拉并重导航，避免窗口停在死地址上反复 connection lost；
+			// 用户已主动关窗（m.window==nil）则不复活，尊重其意图。
+			const maxRelaunch = 5
+			m.mu.Lock()
+			win := m.window
+			if win != nil && m.relaunchTries >= maxRelaunch {
+				m.mu.Unlock()
+				m.notifyStopped("dsh web 服务反复崩溃（已自动重试 " + strconv.Itoa(maxRelaunch) + " 次仍失败）。请查看下方日志中的「dsh 进程意外退出」原因，或到「环境管理 → DeepSeek Harness」手动重启。")
+				return
+			}
+			if win != nil {
+				m.relaunchTries++
+				tries := m.relaunchTries
+				m.mu.Unlock()
+				m.logf("info", "dsh 窗口仍开着，正在自动重新拉起（第 "+strconv.Itoa(tries)+" 次）…")
+				go func() {
+					// 退避 1s：避免崩溃瞬间立即重拉形成紧密循环
+					time.Sleep(time.Second)
+					u, err := m.Start()
+					if err != nil {
+						m.logf("error", "dsh 自动重拉失败: "+err.Error())
+						return
+					}
+					if u == "" {
+						return
+					}
+					m.mu.Lock()
+					cur := m.window
+					m.mu.Unlock()
+					if cur == win {
+						m.logf("info", "dsh 已自动重新拉起，正在刷新窗口…")
+						win.SetURL(u)
+					} else {
+						m.logf("info", "dsh 已自动重新拉起（窗口已关闭，跳过导航）")
+					}
+				}()
+			} else {
+				m.mu.Unlock()
+				m.notifyStopped("dsh web 服务已意外退出（进程崩溃或被结束）。可在「环境管理 → DeepSeek Harness」重新启动，或直接点击侧边栏 dsh 自动拉起。")
+			}
 		}
 	}()
 
@@ -387,11 +486,32 @@ func (m *DSHProcessManager) Start() (string, error) {
 			if m.token != "" {
 				m.url = u + "?token=" + m.token
 			}
+			// 成功就绪：重置自动重拉计数（稳定的运行会清零断路器）
+			m.relaunchTries = 0
 		}
 		m.mu.Unlock()
 		close(ready)
 	}()
-	return u, nil
+	// 返回带 token 的地址：冷启动时 token 可能尚未解析完（m.url 为空），
+	// 兜底从磁盘缓存拼出 ?token=，确保调用方拿到开箱即用的 URL。
+	//
+	// 注意：此处仍在 Start() 的持锁区间内（函数开头 defer m.mu.Unlock），
+	// 绝不能调用 m.TokenURL()——它内部会再次 m.mu.Lock()，而 sync.Mutex 不可重入，
+	// 同一 goroutine 二次加锁即永久死锁，且 m.mu 从此被永久霸占：
+	// 后续 Stop()/Running()/状态查询全部阻塞，表现为「启动永远不返回 + 卸载卡在
+	// Stop 之前一行日志都打不出」。这里直接读字段并内联与 TokenURL 相同的兜底逻辑。
+	retURL := m.url
+	if retURL == "" {
+		base := "http://127.0.0.1:" + strconv.Itoa(port)
+		if tok := m.token; tok != "" {
+			retURL = base + "?token=" + tok
+		} else if tok := loadDSHToken(); tok != "" {
+			retURL = base + "?token=" + tok
+		} else {
+			retURL = base
+		}
+	}
+	return retURL, nil
 }
 
 // isDSHAlive 探测端口上是否已有健康的 dsh 服务：占用者必须是 node 进程且 HTTP 可达
@@ -414,12 +534,16 @@ func (m *DSHProcessManager) isDSHAlive(port int) bool {
 
 	// HTTP GET 探测（锁外执行，避免慢请求阻塞其它调用方）：端口上有 dsh 服务
 	// （健康）时一次 ~10ms 请求即可判定，不再 spawn netstat/tasklist（各 ~300ms）。
-	// 3080 是 dsh 官方默认端口，被其他 HTTP 服务占用且返回 200 的概率极低，可接受该极小误判。
+	// 3080 是 dsh 官方默认端口，被其他 HTTP 服务占用且返回 2xx/3xx 的概率极低，可接受该极小误判。
+	// 关键：dsh web 对所有未带有效 token 的请求返回 401（"authentication required"），
+	// 这是「服务在跑、只是要鉴权」的信号，必须判为 alive——否则 Start()/OpenDSHWindow 会把一个
+	// 明明健康的 dsh 当成「没起来」杀掉重拉，反复搅乱 token（详见下方 tokenWorks 复用守卫）。
+	// 5xx（初始化中崩溃/未就绪）与连接拒绝才视为未存活。
 	ok := false
 	client := noProxyClient(1500 * time.Millisecond)
 	if resp, err := client.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/"); err == nil {
 		resp.Body.Close()
-		ok = resp.StatusCode >= 200 && resp.StatusCode < 400 && resp.StatusCode != 404
+		ok = resp.StatusCode >= 200 && resp.StatusCode < 500 && resp.StatusCode != 404
 	}
 	// GET 失败（端口占用者不是健康服务）→ 保持 false，由 Start() 走
 	// findPortPID + killProcessTree 清理残留 node 后重绑 3080 的路径。
@@ -433,17 +557,47 @@ func (m *DSHProcessManager) isDSHAlive(port int) bool {
 	return ok
 }
 
+// tokenWorks 校验给定 token 是否能被 dsh 接受：带 token 访问根路径，
+// 返回 2xx/3xx（dsh 对有效 token 返回 303 并重定向种下 dsh-auth cookie）即有效；
+// 401/403 表示 token 无效或已失效。用于「复用已运行 dsh」前的守卫：
+// QuickDock 重启（wails3 dev 重编译）后，缓存的 token 可能与仍在跑的旧实例对不上，
+// 此时宁可杀掉重拉、拿到一个我们能掌控的新 token，也绝不给前端一个 401 死地址
+// （表现为「卡在启动中 / 一直 connection lost 重连」）。
+func (m *DSHProcessManager) tokenWorks(token string, port int) bool {
+	if token == "" {
+		return false
+	}
+	client := noProxyClient(1500 * time.Millisecond)
+	// 关键：必须关掉重定向跟随。dsh 对「有效 token」的响应是 303 + Location 跳回根路径，
+	// 借 Set-Cookie 种下 dsh-auth。而 Go 的 http.Client 默认会自动跟随重定向：跟着跳回根路径后
+	// 因默认没有 CookieJar、cookie 带不回去，最终落到 401 —— 于是这里误判「token 无效」。
+	// 后果很严重：Start() 的复用守卫失效，每次点「启动」都会先杀掉一个本就健康运行的 dsh、
+	// 再冷启动 40s+，用户连点就变成「杀了又启、启了又杀」的死循环（表现为「一直卡在启动中」）。
+	client.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		return http.ErrUseLastResponse
+	}
+	url := "http://127.0.0.1:" + strconv.Itoa(port) + "/?token=" + neturl.QueryEscape(token)
+	resp, err := client.Get(url)
+	if err != nil {
+		return false
+	}
+	resp.Body.Close()
+	return resp.StatusCode >= 200 && resp.StatusCode < 400
+}
+
 // Running 返回 dsh web 服务当前是否在运行。优先看本管理器拉起的进程；进程不在时
 // 探测端口上是否有健康 dsh 服务（覆盖"复用外部已启动的 dsh"场景，Start() 复用路径
 // m.cmd 为 nil 但服务实际在跑）。供设置页「dsh web 运行状态」与自动启动判断使用。
 func (m *DSHProcessManager) Running() bool {
 	m.mu.Lock()
-	if m.cmd != nil && m.cmd.Process != nil {
-		m.mu.Unlock()
-		return true
-	}
+	// 同 Start()：进程退出后 m.cmd.Process 仍非 nil，必须用 isNodeProcess 真实验证存活，
+	// 否则会误报"运行中"，导致状态页/停止逻辑错乱。
+	alive := m.cmd != nil && m.cmd.Process != nil && isNodeProcess(m.cmd.Process.Pid)
 	port := m.port
 	m.mu.Unlock()
+	if alive {
+		return true
+	}
 	if port == 0 {
 		port = DefaultDSHPort
 	}
@@ -458,6 +612,29 @@ func (m *DSHProcessManager) Port() int {
 		return m.port
 	}
 	return DefaultDSHPort
+}
+
+// TokenURL 返回带访问 token 的服务地址（供设置页「运行中」状态展示与复制，
+// 开箱即用——浏览器/WebView 打开经 /?token= 种下 dsh-auth cookie 后 WS 才连得上）。
+// 优先用进程内存中已构造的 m.url（Start 解析 token / waitReady 就绪后都会写）；
+// 兜底从磁盘缓存读取 token 拼装，覆盖「QuickDock 重启复用外部已启动的 dsh」等
+// m.url 尚未填充的场景。两者皆空时退回纯 base URL（极端情况，dsh 可能要求重新授权）。
+func (m *DSHProcessManager) TokenURL() string {
+	m.mu.Lock()
+	u := m.url
+	port := m.port
+	m.mu.Unlock()
+	if u != "" {
+		return u
+	}
+	if port == 0 {
+		port = DefaultDSHPort
+	}
+	base := "http://127.0.0.1:" + strconv.Itoa(port)
+	if tok := loadDSHToken(); tok != "" {
+		return base + "?token=" + tok
+	}
+	return base
 }
 
 // NotifyStopped 服务被手动停止时调用：若 dsh 窗口还开着，把窗口导航到"服务已停止"
@@ -549,10 +726,13 @@ func (m *DSHProcessManager) waitReady(url string, exit <-chan struct{}) error {
 		resp, err := client.Get(url)
 		if err == nil {
 			resp.Body.Close()
-			if resp.StatusCode >= 200 && resp.StatusCode < 400 && resp.StatusCode != 404 {
+			// dsh web 对未带有效 token 的请求返回 401（"authentication required"），这是服务已起来的
+			// 信号——窗口会用带 token 的 URL 导航进去、由 dsh 自身流程完成鉴权。故 2xx/3xx/401/403
+			// 一律视为就绪，只有 404（资源尚未就绪）与 5xx 继续等待。
+			if resp.StatusCode >= 200 && resp.StatusCode < 500 && resp.StatusCode != 404 {
 				return nil
 			}
-			// 2xx/3xx/401/403 之外的状态（如 5xx/重定向）视为尚未就绪，继续等
+			// 5xx 等状态视为尚未就绪，继续等
 		} else {
 			lastErr = err
 		}
@@ -574,6 +754,7 @@ func (m *DSHProcessManager) waitReady(url string, exit <-chan struct{}) error {
 func (m *DSHProcessManager) Stop() {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.logf("info", "正在停止 dsh web 服务…")
 	// 先打标再发信号：reaper 可能在我们还没释放锁时就已经 Wait 返回，
 	// 靠锁顺序保证它读到的一定是 true。
 	m.stopping = true
@@ -581,6 +762,108 @@ func (m *DSHProcessManager) Stop() {
 	m.aliveCache.port = 0
 	m.aliveCache.ok = false
 	m.aliveCache.at = time.Time{}
+	m.logf("info", "dsh web 服务已停止")
+}
+
+// Uninstall 彻底卸载 dsh，按官方卸载路径执行（dsh CLI 无专用卸载子命令，官方文档的
+// 完整卸载 = 停止进程 → `npm uninstall -g @deepseek-ai/dsh` 移除全局包 → 删除数据目录
+// $DSH_HOME（profile/会话/配置）→ 清理本缓存的访问令牌）：
+//  1. Stop 停止运行中的服务（释放端口/进程占用，避免目录删除失败）；
+//  2. officialNpmUninstall 走官方 npm uninstall -g（--prefix 定向到自含安装目录，
+//     等价于安装命令 npm install -g --prefix 的逆操作，不会波及外部 node 的全局包）；
+//  3. 兜底 RemoveAll 软件包目录（installDir，npm 卸载不彻底时清残留）；
+//  4. RemoveAll 数据目录（DshHome，即 $DSH_HOME）；
+//  5. 清理 token 缓存文件。
+//
+// 用户在设置面板点「卸载」后由 service.go 在 goroutine 中调用；每一步都同步输出到
+// 「环境管理 → DeepSeek Harness」日志面板（quickdock:dsh:log），阶段结果经
+// quickdock:dsh:uninstall 事件（{stage:"uninstalling"|"done"|"error", message}）通知前端。
+func (m *DSHProcessManager) Uninstall() {
+	emit := func(stage, message string) {
+		if m.app != nil {
+			m.app.Event.Emit("quickdock:dsh:uninstall", map[string]string{"stage": stage, "message": message})
+		}
+	}
+	emit("uninstalling", "正在卸载 DeepSeek Harness…")
+	m.logf("info", "开始卸载 DeepSeek Harness…")
+	// 1. 停止运行中的服务（Stop 内部已输出停止日志，并按端口兜底强杀残留 node）
+	m.Stop()
+	// 注：dsh 官方卸载路径是 `npm uninstall -g @deepseek-ai/dsh` + 删除 $DSH_HOME。但本项目采用
+	// 自含 --prefix 安装，整个 installDir 都是 QuickDock 自有目录，不存在需要 npm 去清的外部全局
+	// 残留；npm uninstall 还会联网拉依赖树元数据、网络不通时长时间挂起。故直接整体删除 installDir
+	// 即等价于官方卸载，且瞬时、零网络依赖——这是卸载可靠的收尾方式。
+	// 2. 删除自含安装目录（软件包 + node_modules + 可能的 npm shim，一次性清干净）
+	if dir := m.nodeEnv.installDir(); dir != "" && statOk(dir) {
+		m.logf("info", "删除软件包目录（自含安装目录）: "+dir)
+		if err := removeAllWithRetry(dir); err != nil {
+			m.logf("error", "删除软件包目录失败: "+err.Error())
+			emit("error", "删除软件包目录失败: "+err.Error())
+			return
+		}
+	}
+	// 3. 删除数据目录（profile/会话/配置）。DshHome 即 $DSH_HOME（官方数据目录），
+	//    彻底重装需清掉坏 profile，否则重装后依旧卡启动。
+	//    安全兜底：DSH_HOME 取自用户环境变量，若被指到 QuickDock 数据目录或家目录，
+	//    照删会连带清掉数据库与全部设置——受保护路径一律跳过，只提示用户自行处理。
+	if home := m.nodeEnv.DshHome(); home != "" && statOk(home) {
+		if isProtectedPath(home) {
+			m.logf("warn", "数据目录指向受保护路径（QuickDock 数据目录或用户家目录），跳过删除: "+home)
+		} else {
+			m.logf("info", "删除数据目录（DSH_HOME，含 profile/会话/配置）: "+home)
+			if err := removeAllWithRetry(home); err != nil {
+				m.logf("error", "删除数据目录失败: "+err.Error())
+				emit("error", "删除数据目录失败: "+err.Error())
+				return
+			}
+		}
+	}
+	// 4. 清理 token 缓存（数据目录 dsh_token 及旧位置 ~/.quickdock/dsh_token）
+	m.logf("info", "清理访问令牌缓存…")
+	tokenDirs := []string{dshTokenCacheDir()}
+	if home, err := os.UserHomeDir(); err == nil {
+		tokenDirs = append(tokenDirs, filepath.Join(home, ".quickdock"))
+	}
+	for _, d := range tokenDirs {
+		if d == "" {
+			continue
+		}
+		_ = os.Remove(filepath.Join(d, "dsh_token"))
+	}
+	m.logf("info", "DeepSeek Harness 已卸载完成，可重新一键安装")
+	emit("done", "DeepSeek Harness 已卸载，可重新一键安装")
+}
+
+// isProtectedPath 判断卸载时的删除目标是否落在「绝不能删」的目录上：
+// QuickDock 数据目录（含数据库、全部设置与插件）或用户家目录。
+// DshHome 优先取环境变量 DSH_HOME，用户完全可能把它指到这些路径；此时照删会连带
+// 清空整个 QuickDock 数据，属不可接受的破坏。宁可留着并提示，也不能误删。
+func isProtectedPath(p string) bool {
+	if p == "" {
+		return false
+	}
+	clean := filepath.Clean(p)
+	if data := platform.DefaultDataDir(); data != "" && strings.EqualFold(filepath.Clean(data), clean) {
+		return true
+	}
+	if home, err := os.UserHomeDir(); err == nil && strings.EqualFold(filepath.Clean(home), clean) {
+		return true
+	}
+	return false
+}
+
+// removeAllWithRetry 带重试地删除目录：文件可能被残留子进程（npm/node）短暂占用导致
+// 首次 RemoveAll 失败，毫秒级重试几次通常即可释放。卸载必须保证目录被清空。
+func removeAllWithRetry(path string) error {
+	var lastErr error
+	for i := 0; i < 5; i++ {
+		if err := os.RemoveAll(path); err != nil {
+			lastErr = err
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		return nil
+	}
+	return lastErr
 }
 
 // logf 转发诊断日志到「环境管理 → DeepSeek Harness」日志面板（quickdock:dsh:log 事件）
@@ -1312,26 +1595,27 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 		return url, nil
 	}
 
-	// 复用：3080 上已有健康 dsh（如后台常驻/自动启动），且本进程可能未捕获过它的 token
-	// （wails3 dev 重编译后新进程复用旧 dsh）→ 从磁盘缓存读取，直接带 token 秒开窗口。
+	// 复用：3080 上已有健康 dsh（如后台常驻/自动启动）。本进程可能未捕获过它的 token
+	// （wails3 dev 重编译后新进程复用旧 dsh）→ 从磁盘缓存读取；但必须先用 tokenWorks
+	// 校验该 token 确实有效，否则（缓存失配）宁可冷启动拿一个新 token，避免窗口开成 401 死页。
 	if m.isDSHAlive(DefaultDSHPort) {
 		tok := m.token
 		if tok == "" {
 			tok = loadDSHToken()
 		}
-		u := "http://127.0.0.1:" + strconv.Itoa(DefaultDSHPort)
-		if tok != "" {
-			u = u + "?token=" + tok
+		if tok != "" && m.tokenWorks(tok, DefaultDSHPort) {
+			u := "http://127.0.0.1:" + strconv.Itoa(DefaultDSHPort) + "?token=" + tok
+			return m.createDSHWindow(u), nil
 		}
-		return m.createDSHWindow(u), nil
 	}
 
-	// 冷启动：拉起 dsh，等 token 出现在 stdout（约 1~2s，早于完全就绪），
-	// 直接用 token URL 创建窗口——打开即 dsh 界面，无 loading 页、无 SetURL 竞态。
+	// 冷启动：拉起 dsh，等 token 出现在 stdout；dsh 升级到 0.2.1-rc.4 后 web profile 初始化
+	// 很慢（实测 ~30s 端口才监听、token 才打印，杀软扫描 node.exe / 首次构建更久），故给 120s
+	// 余量。token 到手后用带 token 的 URL 创建窗口——打开即 dsh 界面，无 SetURL 竞态。
 	if _, err := m.Start(); err != nil {
 		return "", err
 	}
-	u := m.waitTokenURL(25 * time.Second)
+	u := m.waitTokenURL(120 * time.Second)
 	if u == "" {
 		// 兜底：未捕获到 token（极少数 dsh 版本不打印 token 行）→ 用 base URL 直接开，
 		// dsh 前端自带刷新，就绪后即呈现；后续 token 捕获后再 SetURL 跳进应用。
@@ -1341,7 +1625,8 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 }
 
 // waitTokenURL 轮询直到 m.url 被填充（token 捕获后由 Start 的 stdout 协程设置），
-// 或超时返回空串。dsh 在 bind 端口即打印 ?token=，通常 1~2s 内可得。
+// 或超时返回空串。注意：dsh 0.2.1-rc.4 的 web profile 启动很慢，token 行约在 30s 才打印
+// （bind 端口后、profile 初始化完成前），故调用方须给足超时（见 OpenDSHWindow 的 120s）。
 func (m *DSHProcessManager) waitTokenURL(timeout time.Duration) string {
 	deadline := time.Now().Add(timeout)
 	for {

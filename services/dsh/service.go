@@ -3,7 +3,6 @@ package dsh
 import (
 	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -162,22 +161,47 @@ func (s *DSHService) DSHStatus() *services.ApiResult {
 		st["running"] = s.App.DSH.Running()
 		st["port"] = port
 		if s.App.DSH.Running() {
-			st["url"] = "http://127.0.0.1:" + strconv.Itoa(port)
+			// 带上访问 token：dtoken 缺失时 dsh 对所有请求返回 401，
+			// 前端 WebSocket 拿不到授权会一直 "connection lost" 重连。
+			st["url"] = s.App.DSH.TokenURL()
 		}
 	}
 	return services.Ok(st)
 }
 
-// DSHStart 启动 dsh web 服务（只起进程，不开窗口；进程已运行则直接复用返回）
+// DSHStart 启动 dsh web 服务（只起进程，不开窗口；进程已运行则直接复用返回）。
+// 异步执行：立即返回，前端按钮不因启动耗时（端口探测/清残留/冷启动初始化）长时间卡在
+// 「启动中」；启动结果经 quickdock:dsh:started 事件（{ok,url,message}）回传，
+// 过程日志经 quickdock:dsh:log 推送到日志面板。
 func (s *DSHService) DSHStart() *services.ApiResult {
 	if s.App.DSH == nil {
 		return services.FailMsg("DSH 未初始化")
 	}
-	url, err := s.App.DSH.Start()
-	if err != nil {
-		return services.Fail(err)
-	}
-	return services.Ok(map[string]string{"url": url})
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// 与 SetupDSH/UpdateDSH 相同：goroutine 内 panic 必须消化并补发事件，
+				// 否则前端 svcBusy 永不复位，启动按钮永久禁用
+				msg := fmt.Sprintf("启动 dsh web 异常: %v", r)
+				s.App.NodeEnv.EmitLog("error", msg)
+				if app := s.App.App(); app != nil {
+					app.Event.Emit("quickdock:dsh:started", map[string]any{"ok": false, "message": msg})
+				}
+			}
+		}()
+		url, err := s.App.DSH.Start()
+		if app := s.App.App(); app != nil {
+			res := map[string]any{"ok": err == nil, "url": url}
+			if err != nil {
+				res["message"] = err.Error()
+				s.App.NodeEnv.EmitLog("error", "dsh web 启动失败: "+err.Error())
+			} else {
+				s.App.NodeEnv.EmitLog("info", "dsh web 启动完成: "+url)
+			}
+			app.Event.Emit("quickdock:dsh:started", res)
+		}
+	}()
+	return services.Ok(nil)
 }
 
 // DSHStop 停止 dsh web 服务（杀进程树，释放 3080 端口；窗口若开着会导航到"已停止"提示页）
@@ -187,6 +211,16 @@ func (s *DSHService) DSHStop() *services.ApiResult {
 	}
 	s.App.DSH.Stop()
 	s.App.DSH.NotifyStopped()
+	return services.Ok(nil)
+}
+
+// DSHUninstall 彻底卸载 dsh（停止服务 + 删除软件包与数据目录 + 清理 token），供设置页「卸载」入口。
+// 异步执行：立即返回，结果经 quickdock:dsh:uninstall 事件（{stage,message}）推前端。
+func (s *DSHService) DSHUninstall() *services.ApiResult {
+	if s.App.DSH == nil {
+		return services.FailMsg("DSH 未初始化")
+	}
+	go s.App.DSH.Uninstall()
 	return services.Ok(nil)
 }
 
@@ -215,6 +249,17 @@ func (s *DSHService) dshAutoStartEnabled() bool {
 		return true
 	}
 	return v == "1"
+}
+
+// CheckDSHWebView2 检测承载 dsh 窗口的 WebView2 运行时版本是否满足 dsh 前端要求
+// （dsh 0.2.1-rc.4 用到 Chrome 119+ 的 Promise.withResolvers / AbortSignal.any，
+// 低于此版本会在连接层抛 JS 异常 → WebSocket 无限 "connection lost, retry"）。同步返回，
+// 前端进入 dsh 面板/点击打开时调用，版本过低时给出明确红字提示与升级指引。
+func (s *DSHService) CheckDSHWebView2() *services.ApiResult {
+	if s.App.DSH == nil {
+		return services.FailMsg("DSH 未初始化")
+	}
+	return services.Ok(s.App.DSH.CheckWebView2())
 }
 
 // CheckDSHUpdate 检测已安装 dsh 是否有新版本（联网查 latest；查询失败静默返回当前状态，不阻塞 UI）
