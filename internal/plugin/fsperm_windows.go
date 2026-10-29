@@ -38,13 +38,17 @@ func knownFolderDir(sub string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	var ptr uintptr
+	// ptr 直接声明为 *uint16，而不是先接 uintptr 再转回来：SHGetKnownFolderPath
+	// 回填的是 COM 分配的一块内存，uintptr→Pointer 的回转既会被 go vet 判为 misuse，
+	// 也违反 unsafe 规则「转换必须处在同一表达式内」。该内存不在 Go 堆上、GC 不移动它，
+	// 用普通指针持有是安全的；只在交给 CoTaskMemFree 时转成 uintptr。
+	var ptr *uint16
 	hr, _, _ := procSHGetKnownFolderPath.Call(uintptr(unsafe.Pointer(&g)), 0, 0, uintptr(unsafe.Pointer(&ptr)))
-	if hr != 0 || ptr == 0 {
+	if hr != 0 || ptr == nil {
 		return "", false
 	}
-	defer procCoTaskMemFree.Call(ptr)
-	if s := utf16PtrToString((*uint16)(unsafe.Pointer(ptr))); s != "" {
+	defer procCoTaskMemFree.Call(uintptr(unsafe.Pointer(ptr)))
+	if s := utf16PtrToString(ptr); s != "" {
 		return s, true
 	}
 	return "", false
@@ -57,7 +61,8 @@ func utf16PtrToString(p *uint16) string {
 		return ""
 	}
 	n := 0
-	for *(*uint16)(unsafe.Pointer(uintptr(unsafe.Pointer(p)) + uintptr(n)*2)) != 0 {
+	base := unsafe.Pointer(p)
+	for *(*uint16)(unsafe.Add(base, n*2)) != 0 {
 		n++
 	}
 	return syscall.UTF16ToString(unsafe.Slice(p, n))
