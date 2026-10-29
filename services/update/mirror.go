@@ -7,15 +7,24 @@ import (
 	"net/http"
 	"os"
 	dlutil "quickdock/internal/dl"
+	"quickdock/internal/logger"
 	"strings"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/updater"
+	"github.com/wailsapp/wails/v3/pkg/updater/providers/endpoint"
 )
 
-// 国内直连 GitHub Releases 常超时。mirrorProvider 包装 github provider：
-// 直连下载失败时自动改用镜像前缀重试（ghfast.top 等），安装包带 Ed25519 签名验证，
-// 镜像只改传输 URL、无法篡改内容，安全性不变。
+// 国内直连 GitHub Releases 常超时。mirrorProvider 包装 endpoint provider：
+// Check（拉 manifest）与 Download（下载安装包）直连失败时都自动改用镜像前缀重试
+// （ghfast.top 等），安装包带 Ed25519 签名验证，镜像只改传输 URL、无法篡改内容，
+// 安全性不变。
+//
+// manifest 侧为何安全：CI 生成 manifest 时用 -url-prefix 写入【绝对】artifact URL，
+// 镜像命中的 Release 里 endpoint.artifact.url 仍是 GitHub 原始地址，下载加速由
+// Download 的镜像重试链负责，两层互不干扰。
+// 已知取舍：镜像对 releases/latest 的重定向有几分钟缓存，极端情况下可能取到
+// 旧 manifest 而被判"已是最新"——好过整体失败，且下次周期检查会自愈。
 //
 // 每次尝试限时 3 分钟：直连卡死时不会无限等待，镜像也失败则返回最后错误。
 // 下载先落临时文件、成功后一次性写入 dst —— wails 的 download() 用
@@ -31,26 +40,50 @@ var UpdateMirrorDefaults = []string{
 
 const perURLTimeout = 3 * time.Minute
 
+// ManifestURL 更新 manifest 的 GitHub 稳定地址。
+// initUpdater 的 endpoint provider 与镜像 Check 重试共用同一常量，
+// 避免两处字面量漂移。
+const ManifestURL = "https://github.com/parieses/quickdock/releases/latest/download/manifest.json"
+
 type mirrorProvider struct {
-	inner   updater.Provider
-	client  *http.Client
-	mirrors []string
+	inner       updater.Provider
+	client      *http.Client
+	mirrors     []string
+	manifestURL string
 }
 
-// NewMirrorUpdaterProvider 包装 github provider，Download 直连失败时自动镜像重试。
-// mirrors 为空时使用内置默认镜像列表（UpdateMirrorDefaults）。
-func NewMirrorUpdaterProvider(inner updater.Provider, client *http.Client, mirrors ...string) updater.Provider {
+// NewMirrorUpdaterProvider 包装 endpoint provider，Check/Download 直连 GitHub
+// 失败时自动镜像重试。manifestURL 为直连 manifest 地址（空则 Check 不做镜像
+// 重试，仅保留 Download 行为）；mirrors 为空时使用内置默认镜像列表
+// （UpdateMirrorDefaults）。
+func NewMirrorUpdaterProvider(inner updater.Provider, client *http.Client, manifestURL string, mirrors ...string) updater.Provider {
 	ms := mirrors
 	if len(ms) == 0 {
 		ms = UpdateMirrorDefaults
 	}
-	return &mirrorProvider{inner: inner, client: client, mirrors: ms}
+	return &mirrorProvider{inner: inner, client: client, mirrors: ms, manifestURL: manifestURL}
 }
 
 func (p *mirrorProvider) Name() string { return p.inner.Name() }
 
 func (p *mirrorProvider) Check(ctx context.Context, req updater.CheckRequest) (*updater.Release, error) {
-	return p.inner.Check(ctx, req)
+	rel, err := p.inner.Check(ctx, req)
+	if err == nil || p.manifestURL == "" || len(p.mirrors) == 0 {
+		return rel, err
+	}
+	// 直连拉 manifest 失败（国内对 github.com 常间歇性超时）→ 逐个镜像重试。
+	// 镜像 URL 形如 https://ghfast.top/https://github.com/.../manifest.json。
+	for _, m := range p.mirrors {
+		ep, cerr := endpoint.New(endpoint.Config{URL: m + p.manifestURL, HTTPClient: p.client})
+		if cerr != nil {
+			continue
+		}
+		if mRel, mErr := ep.Check(ctx, req); mErr == nil {
+			logger.I("[update] 直连拉取 manifest 失败，镜像 %s 命中", m)
+			return mRel, nil
+		}
+	}
+	return rel, err
 }
 
 func (p *mirrorProvider) Download(ctx context.Context, rel *updater.Release, dst io.Writer, onProgress func(written, total int64)) error {

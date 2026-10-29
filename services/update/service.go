@@ -307,7 +307,8 @@ func friendlyError(err error) string {
 	lower := strings.ToLower(msg)
 	switch {
 	case strings.Contains(lower, "connectex") || strings.Contains(lower, "connection refused") ||
-		strings.Contains(lower, "i/o timeout") || strings.Contains(lower, "no route to host"):
+		strings.Contains(lower, "i/o timeout") || strings.Contains(lower, "no route to host") ||
+		strings.Contains(lower, "wsarecv") || strings.Contains(lower, "connection attempt failed"):
 		return "网络连接失败，无法访问 GitHub。请检查网络或配置代理（HTTPS_PROXY），也可手动从 GitHub Releases 下载。"
 	case strings.Contains(lower, "no such host") || strings.Contains(lower, "dns lookup failed"):
 		return "DNS 解析失败，无法解析 GitHub 域名。请检查网络连接或 DNS 配置。"

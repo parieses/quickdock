@@ -50,7 +50,7 @@ func TestMirrorProviderDownloadParallel(t *testing.T) {
 		Metadata: map[string]any{"endpoint.artifact.url": srv.URL},
 		Artifact: updater.Artifact{Size: int64(len(data))},
 	}
-	p := NewMirrorUpdaterProvider(nil, &http.Client{})
+	p := NewMirrorUpdaterProvider(nil, &http.Client{}, "")
 
 	var buf bytes.Buffer
 	progressCalls := 0

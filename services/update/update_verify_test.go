@@ -218,7 +218,7 @@ func TestUpdaterMirrorWrapperE2E(t *testing.T) {
 	artifact := []byte("QuickDock payload via mirror-wrapped endpoint provider")
 
 	inner, _ := newSignedServer(t, priv, pub, artifact)
-	wrapped := NewMirrorUpdaterProvider(inner, &http.Client{Timeout: 0})
+	wrapped := NewMirrorUpdaterProvider(inner, &http.Client{Timeout: 0}, "")
 
 	// Check 经包装器委托给 endpoint
 	rel, err := wrapped.Check(context.Background(), updater.CheckRequest{
