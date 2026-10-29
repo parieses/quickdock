@@ -101,15 +101,17 @@ var baseTables = []string{
 
 	// 操作流水：谁在什么时候做了什么（打开项目 / 连主机 / 跑插件命令…）。
 	// 该表与 snapshots 同批建好但长期没有写入方，属于空置表；启用时补上
-	// kind（分类，驱动图标与配色）、ref_id（关联对象 id，供前端跳转）与
-	// created_ts（Unix 毫秒，排序与前端直接 new Date）。
+	// kind（分类，驱动图标与配色）、ref_id（关联对象 id，供前端跳转）、
+	// created_ts（Unix 毫秒，排序与前端直接 new Date）与 source（谁触发的：
+	// 用户自己点 / AI 通过 MCP 工具，见 ActivitySource*）。
 	`CREATE TABLE IF NOT EXISTS activity (
 		id TEXT PRIMARY KEY,
 		kind TEXT NOT NULL DEFAULT '',
 		ref_id TEXT NOT NULL DEFAULT '',
 		text TEXT NOT NULL,
 		created_at TEXT NOT NULL,
-		created_ts INTEGER NOT NULL DEFAULT 0
+		created_ts INTEGER NOT NULL DEFAULT 0,
+		source TEXT NOT NULL DEFAULT 'ui'
 	)`,
 	// 注意：activity 的 created_ts 索引**不能**放这里，见 postMigrations。
 
@@ -592,6 +594,10 @@ func (d *Database) migrate() error {
 		{"activity", "kind", "TEXT NOT NULL DEFAULT ''"},
 		{"activity", "ref_id", "TEXT NOT NULL DEFAULT ''"},
 		{"activity", "created_ts", "INTEGER NOT NULL DEFAULT 0"},
+		// activity: 操作来源（ui=用户自己点 / mcp=AI 通过 MCP 工具触发）。
+		// 老库的历史记录没有来源信息，一律补成 ui——它们绝大多数确实是手动操作，
+		// 且「无法追溯」比「随便标一个 mcp」安全得多（后者会让人以为 AI 动过手）。
+		{"activity", "source", "TEXT NOT NULL DEFAULT 'ui'"},
 		// tombstones: 回收站启用时补齐的展示名与恢复载荷（老表只有三元主键）
 		{"tombstones", "label", "TEXT NOT NULL DEFAULT ''"},
 		{"tombstones", "payload", "TEXT NOT NULL DEFAULT ''"},

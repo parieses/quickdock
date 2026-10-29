@@ -53,8 +53,8 @@ func TestMigrateLegacyActivityTable(t *testing.T) {
 	}
 	defer func() { _ = d2.Close() }()
 
-	// ③ 三列都补齐，且历史数据没丢
-	for _, col := range []string{"kind", "ref_id", "created_ts"} {
+	// ③ 四列都补齐，且历史数据没丢
+	for _, col := range []string{"kind", "ref_id", "created_ts", "source"} {
 		if !d2.hasColumn("activity", col) {
 			t.Errorf("升级后仍缺列 activity.%s", col)
 		}

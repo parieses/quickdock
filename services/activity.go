@@ -1,6 +1,9 @@
 package services
 
 import (
+	"runtime"
+	"strings"
+
 	"quickdock/internal/db"
 )
 
@@ -21,11 +24,56 @@ import (
 // kind 取 db.Activity* 常量；refID 是被操作对象的 id（供将来做跳转）；
 // name 是**对象名**（项目名 / 主机名 / 「插件 · 命令」），不是整句话——
 // 动作词由前端按 kind 用当前语言拼，否则英文界面会露出中文。
+//
+// 来源（自己点的 / AI 调 MCP 工具触发的）在 db 层落成 source 列，由 activitySource
+// 自动判定，埋点处不必逐处传参——漏传一处就会让时间线把 AI 的动作记成用户的。
 func (a *AppService) NoteActivity(kind, refID, name string) {
 	if a == nil || a.DB == nil {
 		return
 	}
-	_ = a.DB.AddActivity(kind, refID, name)
+	_ = a.DB.AddActivityFrom(kind, refID, name, activitySource())
+}
+
+// mcpFramePrefixes MCP 工具调用链上的包路径。命中任一即认为本次埋点由 AI 触发。
+//
+// 只要 services/mcp（工具 Handler 所在的域文件）与 internal/mcp（JSON-RPC 入口）
+// 都覆盖到即可：埋点全部落在业务层，而业务层只可能被「UI 绑定方法」或「MCP 工具」
+// 两条路径调进来，栈上没有这两个前缀就一定是用户自己点的。
+var mcpFramePrefixes = []string{
+	"quickdock/services/mcp.",
+	"quickdock/internal/mcp.",
+}
+
+// activitySource 通过调用栈判断这次埋点是不是 MCP 工具调用链发起的。
+//
+// 为什么用栈而不是「进工具时设个包级标记、退出时清掉」：MCP 请求与界面操作是
+// 并发的（每个 HTTP 请求一条 goroutine），包级标记的有效窗口内，用户自己的操作
+// 会被误标成 AI 所为——而那正是最需要准确的场景。调用栈天然是 goroutine 局部的，
+// 且这里所有埋点都是同步调用（工具 Handler 直接调业务方法），不存在跨 goroutine
+// 丢失的问题；万一哪天异步化了，结果是退化成 ui（保守），不会误报成 mcp。
+//
+// 开销：runtime.Callers 抓一帧栈约几微秒，而 AddActivity 本身要走 SQLite 写入，
+// 还要做 90 秒去重，这点开销可以忽略。
+func activitySource() string {
+	var pcs [32]uintptr
+	// skip=2：跳过 runtime.Callers 自身与 activitySource
+	n := runtime.Callers(2, pcs[:])
+	if n == 0 {
+		return db.ActivitySourceUI
+	}
+	frames := runtime.CallersFrames(pcs[:n])
+	for {
+		f, more := frames.Next()
+		for _, prefix := range mcpFramePrefixes {
+			if strings.HasPrefix(f.Function, prefix) {
+				return db.ActivitySourceMCP
+			}
+		}
+		if !more {
+			break
+		}
+	}
+	return db.ActivitySourceUI
 }
 
 // ListActivity 返回最近的操作流水（新的在前）。limit<=0 时取默认 100 条。

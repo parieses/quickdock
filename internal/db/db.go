@@ -100,6 +100,7 @@ var validColumns = map[string]bool{
 	"auth_user": true, "auth_pass": true,
 	"project_id": true, "variables": true,
 	"ref_id":    true, // activity：关联对象 id（项目/主机/插件命令），供前端跳转
+	"source":    true, // activity：操作来源（ui=用户自己点 / mcp=AI 通过 MCP 工具触发）
 	"parent_id": true, "folder_id": true,
 	"db_type": true, "host": true, "port": true, "username": true,
 	"password": true, "database": true, "file_path": true,

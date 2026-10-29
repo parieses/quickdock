@@ -16,6 +16,16 @@ const (
 	ActivitySshBatch     = "ssh_batch" // 向多台主机批量执行了同一条命令
 )
 
+// 操作来源：这条流水是谁触发的。
+//
+// 为什么需要：AI 通过 MCP 工具打开项目、跑插件命令，与用户自己点，写的是同一张表、
+// 同一种动作。时间线里不标来源时，用户看到「打开 xxx」会以为是自己点的——
+// 尤其 AI 连着开了好几个项目之后，人的记忆与流水会直接对不上。
+const (
+	ActivitySourceUI  = "ui"  // 用户自己操作（界面点击 / 快捷键）
+	ActivitySourceMCP = "mcp" // AI 通过 MCP 工具调用触发
+)
+
 // Activity 一条操作流水。
 //
 // Text 存的是**对象名**而不是整句：动作词由 Kind 在前端按当前语言渲染
@@ -26,6 +36,7 @@ type Activity struct {
 	Kind      string `json:"kind"`
 	RefID     string `json:"refId"`     // 关联对象 id，供前端将来做跳转
 	Text      string `json:"text"`      // 对象名（项目名 / 主机名 / 插件命令名）
+	Source    string `json:"source"`    // ActivitySourceUI / ActivitySourceMCP
 	CreatedAt string `json:"createdAt"` // RFC3339，人读与排查用
 	CreatedTs int64  `json:"createdTs"` // Unix 毫秒，排序 + 前端直接 new Date
 }
@@ -56,13 +67,24 @@ const activityDedupWindow = 90 * time.Second
 // 调度器、UI 点击各一条路径），读数远多于写数。
 var activitySeen sync.Map // string -> int64（UnixNano）
 
-// AddActivity 记录一条操作流水。name 为对象名（不是整句，见 Activity.Text）。
+// AddActivity 记录一条操作流水，来源按「用户自己操作」处理。
+// 需要区分来源（如 MCP 工具触发）时用 AddActivityFrom。
+func (d *Database) AddActivity(kind, refID, name string) error {
+	return d.AddActivityFrom(kind, refID, name, ActivitySourceUI)
+}
+
+// AddActivityFrom 记录一条带来源的操作流水。name 为对象名（不是整句，见 Activity.Text），
+// source 取 ActivitySourceUI / ActivitySourceMCP（其它值一律归一为 ui——
+// 「来源不明」时按用户自己操作处理，比标成 AI 更安全）。
 //
 // 全部埋点都是「主流程的旁路」：失败只返回 error，调用方一律忽略——
 // 记不上一条动态绝不该让用户打开不了项目。
-func (d *Database) AddActivity(kind, refID, name string) error {
+func (d *Database) AddActivityFrom(kind, refID, name, source string) error {
 	if name == "" {
 		return nil
+	}
+	if source != ActivitySourceMCP {
+		source = ActivitySourceUI
 	}
 	now := time.Now()
 
@@ -79,9 +101,9 @@ func (d *Database) AddActivity(kind, refID, name string) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	if _, err := d.conn.Exec(
-		`INSERT INTO activity (id, kind, ref_id, text, created_at, created_ts)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		newID(), kind, refID, name, now.Format(time.RFC3339), now.UnixMilli(),
+		`INSERT INTO activity (id, kind, ref_id, text, created_at, created_ts, source)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		newID(), kind, refID, name, now.Format(time.RFC3339), now.UnixMilli(), source,
 	); err != nil {
 		return err
 	}
@@ -109,7 +131,7 @@ func (d *Database) ListActivity(limit int) ([]Activity, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	rows, err := d.conn.Query(
-		`SELECT id, kind, ref_id, text, created_at, created_ts
+		`SELECT id, kind, ref_id, text, source, created_at, created_ts
 		 FROM activity ORDER BY created_ts DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -119,7 +141,7 @@ func (d *Database) ListActivity(limit int) ([]Activity, error) {
 	out := make([]Activity, 0, limit)
 	for rows.Next() {
 		var a Activity
-		if err := rows.Scan(&a.ID, &a.Kind, &a.RefID, &a.Text, &a.CreatedAt, &a.CreatedTs); err != nil {
+		if err := rows.Scan(&a.ID, &a.Kind, &a.RefID, &a.Text, &a.Source, &a.CreatedAt, &a.CreatedTs); err != nil {
 			return nil, err
 		}
 		out = append(out, a)
