@@ -342,6 +342,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">DeepSeek Harness 更稳，更新器在国内网络下更可靠，更新说明更好读</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>DeepSeek Harness：修好了窗口里反复「connection lost」一直重连的问题——根因是系统 WebView2 内核过旧（dsh 用到的 Promise.withResolvers / AbortSignal.any 需 ≥119）。现在打开前会先校验 WebView2 版本，过低直接红字提示并拦截打开。</li>
+          <li>dsh 进程意外退出后，已打开的窗口会自动重拉并重导航（带熔断保护），崩溃对用户基本透明；同时修掉了「进程已死却显示运行中」的假存活误判。</li>
+          <li>安装 / 卸载 / 启动 / 停止都会把进度输出到「环境管理 → DeepSeek Harness」日志面板；卸载改成直接清理目录（不再走 npm uninstall，避免网络不通时卡在「正在卸载」），并加了一键重装。</li>
+          <li>更新器拉取 manifest 直连 GitHub 失败时也会自动走镜像重试，国内网络下更新检查更稳；更新检查的网络报错提示更全。</li>
+          <li>更新弹窗与设置弹窗里的「更新说明」从大段纯文本改成要点列表，更易读；无要点时回退原样展示。</li>
+          <li>数据层放行 openedSceneIds 白名单，支持工作区已打开场景标签页的持久化记忆。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.31</span>
+          <span class="log-date">2026-10-28</span>
           <span class="log-title">SSH 更难用错，监控能找回，环境会告诉你项目缺哪个版本</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -392,20 +409,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.28</span>
-          <span class="log-date">2026-10-26</span>
-          <span class="log-title">定时任务有执行历史，结果能推到手机上</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>定时任务会记录每次执行的开始时间、耗时、退出码和输出，在运行历史里翻。</li>
-          <li>执行结果可以推送到机器人：企业微信、钉钉、飞书、Telegram 等。</li>
-          <li>MCP 服务暴露 <code>robot_notify</code>，Agent 也能往外发消息。</li>
-          <li>界面缩放改成三档，放进设置页；插件窗口跟随主窗口所在的显示器。</li>
-        </ul>
-      </details>
     </div>
 
     <p class="log-more">

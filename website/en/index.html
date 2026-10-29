@@ -342,6 +342,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">DeepSeek Harness is more reliable, the updater works better on slow networks, release notes are easier to read</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>DeepSeek Harness: fixed the window looping on "connection lost" and retrying forever. The root cause was an outdated WebView2 runtime (dsh uses Promise.withResolvers / AbortSignal.any, which need ≥119). Now the WebView2 version is checked before opening; if it is too old, a red warning shows and opening is blocked.</li>
+          <li>If the dsh process exits unexpectedly, the open window now relaunches and re-navigates automatically (with circuit-breaking), so a crash is mostly transparent. Also fixed a false "running" state when the process had already died.</li>
+          <li>Install / uninstall / start / stop now stream progress to the "Environment → DeepSeek Harness" log panel. Uninstall now deletes the directories directly (no longer via npm uninstall, which could hang on "uninstalling" when the network is down), and offers one-click reinstall.</li>
+          <li>The updater now retries the manifest fetch through the mirror when the direct GitHub connection fails, so update checks are more reliable on slow networks. Network error messages on update checks are more complete.</li>
+          <li>The "release notes" in the update prompt and settings dialog are now a bullet list instead of a raw block of text; it falls back to the original text when there are no bullets.</li>
+          <li>The data layer whitelists openedSceneIds, so the open scene tabs in a workspace now persist across restarts.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.31</span>
+          <span class="log-date">2026-10-28</span>
           <span class="log-title">SSH is harder to get wrong, monitors are recoverable, runtimes tell you which version a project needs</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -392,20 +409,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.28</span>
-          <span class="log-date">2026-10-26</span>
-          <span class="log-title">Scheduled tasks keep a run history, results reach your phone</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Each run of a scheduled task records its start time, duration, exit code and output in a run history.</li>
-          <li>Results can be pushed to a bot: WeCom, DingTalk, Feishu, Telegram and others.</li>
-          <li>The MCP server exposes <code>robot_notify</code>, so agents can send messages out too.</li>
-          <li>Interface zoom has three steps and lives in settings; plugin windows follow the display the main window is on.</li>
-        </ul>
-      </details>
     </div>
 
     <p class="log-more">
