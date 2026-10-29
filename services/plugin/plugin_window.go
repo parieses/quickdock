@@ -120,17 +120,8 @@ func (p *PluginService) OpenPluginWindowWith(pluginID, command, text string) *se
 	}
 	// 命令必须真实存在。传错的 command 若不拦，窗口照开、命令却没人处理，
 	// 表现为「打开了但什么都没发生」——比直接报错难排查得多。
-	if command != "" {
-		found := false
-		for _, c := range inst.Manifest.Commands {
-			if c.ID == command {
-				found = true
-				break
-			}
-		}
-		if !found {
-			return services.FailMsg(fmt.Sprintf("插件 %s 没有命令 %q（可用命令见 plugin_list）", pluginID, command))
-		}
+	if command != "" && !hasDeclaredCommand(inst.Manifest.Commands, command) {
+		return services.FailMsg(fmt.Sprintf("插件 %s 没有命令 %q（可用命令见 plugin_list）", pluginID, command))
 	}
 	p.SetPendingPluginInit(pluginID, text, command)
 	// 固定独立窗口：AI 触发时用户可能停在任意界面，甚至面板是收起的；

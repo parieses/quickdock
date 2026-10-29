@@ -58,8 +58,9 @@ func (p *PluginService) ExecutePluginCommand(pluginID, commandID string, input m
 
 // ExecutePluginCommandFrom 执行插件命令并记录来源。
 //
-// trigger 只影响审计（执行日志 + 操作流水），不改变执行语义；未知来源按 manual 记，
-// 宁可少一个标签，也不要在日志里写进一个没人认识的枚举值。
+// trigger 决定两件事：① 审计落哪（执行日志 + 操作流水）；② 是否过「清单声明」门禁
+// ——MCP 触发时 commandID 必须在 manifest.commands[] 里，手动/热键路径不查。
+// 未知来源按 manual 记，宁可少一个标签，也不要在日志里写进一个没人认识的枚举值。
 func (p *PluginService) ExecutePluginCommandFrom(pluginID, commandID, trigger string, input map[string]interface{}) *services.ApiResult {
 	if p.App.PluginMgr == nil {
 		return services.FailMsg("plugin manager not initialized")
@@ -68,6 +69,28 @@ func (p *PluginService) ExecutePluginCommandFrom(pluginID, commandID, trigger st
 	case TriggerManual, TriggerHotkey, TriggerMCP:
 	default:
 		trigger = TriggerManual
+	}
+	// 清单 commands[] 是「给 AI 的契约」：plugin_list 只从这里取可用命令，
+	// 但仅靠「不声明」挡不住模型猜 id 硬调（裁剪清单就形同虚设），故 MCP 路径必须回查清单。
+	//
+	// 只在 MCP 触发时校验：命令面板与插件界面会调用一些未登记在清单里的内部命令
+	//（历史插件包尤其多），手动/热键路径上加同一道门禁会当场打断这些界面。
+	if trigger == TriggerMCP {
+		inst := p.App.PluginMgr.GetPlugin(pluginID)
+		if inst == nil {
+			// 可能只是还没被拉起：EnsureLoaded 幂等，失败就原样透传，
+			// 由它给出准确原因（禁用的插件、清单损坏等）。
+			if err := p.App.PluginMgr.EnsureLoaded(pluginID); err != nil {
+				return services.FailMsg(err.Error())
+			}
+			inst = p.App.PluginMgr.GetPlugin(pluginID)
+		}
+		if inst != nil && !hasDeclaredCommand(inst.Manifest.Commands, commandID) {
+			return services.FailMsg(fmt.Sprintf(
+				"插件 %s 没有向 AI 声明命令 %q：该命令只对插件界面开放，需要时请用 plugin_open 打开界面由用户操作。"+
+					"可用命令见 plugin_list；若这是新版本才有的命令，可能是本地插件包还是旧版，升级插件后再试",
+				pluginID, commandID))
+		}
 	}
 	start := time.Now()
 	result, err := p.App.PluginMgr.ExecuteCommand(pluginID, commandID, input)
@@ -89,6 +112,19 @@ func (p *PluginService) ExecutePluginCommandFrom(pluginID, commandID, trigger st
 		return services.Fail(err)
 	}
 	return services.Ok(result)
+}
+
+// hasDeclaredCommand 判断 commandID 是否出现在插件清单的 commands[] 里。
+//
+// 只认清单声明，不看插件后端是否「实际支持」：宿主不知道插件的内部命令表，
+// 能查的契约就这一份。
+func hasDeclaredCommand(cmds []plugin.Command, commandID string) bool {
+	for _, c := range cmds {
+		if c.ID == commandID {
+			return true
+		}
+	}
+	return false
 }
 
 // recordPluginExecLog 写入一条插件命令执行日志（5.2）
