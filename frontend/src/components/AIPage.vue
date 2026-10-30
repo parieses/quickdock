@@ -39,7 +39,7 @@ import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import type { ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
-import type { AIProfilesResult } from '../types/ai'
+import type { AIConvHit, AIProfilesResult } from '../types/ai'
 
 import {
   AIListProfiles,
@@ -59,6 +59,7 @@ import {
   AIListCheckpoints,
   AIRestoreCheckpoint,
   AISuggestMentions,
+  AISearchMessages,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -1228,6 +1229,49 @@ const totalMatched = computed(() => taskConversations.value.length + shownSpaces
 watch(convQuery, () => {
   tasksExpanded.value = false
   spacesExpanded.value = false
+})
+
+// ---- 正文搜索 ----
+// 标题匹配是内存里的一次 includes（会话列表本来就在手），正文匹配必须查库：
+// 几十万条消息全读进前端不可行，所以这一段走 bound 方法。
+const msgHits = ref<AIConvHit[]>([])
+const msgHitsOpen = ref(true)
+const msgHitsLoading = ref(false)
+let msgSearchTimer: ReturnType<typeof setTimeout> | undefined
+// 后发的请求可能先回（库在忙时尤其明显），用代数把过期结果丢掉——
+// 否则列表会停在上一两个关键词的命中上，看起来像「搜错了」。
+let msgSearchGen = 0
+
+async function runMsgSearch(kw: string) {
+  const gen = ++msgSearchGen
+  msgHitsLoading.value = true
+  try {
+    const list = unwrap<AIConvHit[]>(await AISearchMessages(kw, 20)) ?? []
+    if (gen === msgSearchGen) msgHits.value = list
+  } catch (e) {
+    if (gen === msgSearchGen) {
+      msgHits.value = []
+      errorMsg.value = getErrorMessage(e)
+    }
+  } finally {
+    if (gen === msgSearchGen) msgHitsLoading.value = false
+  }
+}
+
+// 300ms 去抖：逐字符发请求会在长会话库上把读锁打满，而打一个词的间隔通常就在这个量级。
+watch(convQuery, (v) => {
+  const kw = v.trim()
+  if (msgSearchTimer) clearTimeout(msgSearchTimer)
+  msgHitsOpen.value = true
+  // 一个字不查库（后端同样判），但必须清掉上一轮的命中：
+  // 删到只剩一个字时，列表还挂着上一个关键词的结果会被当成「它在搜这个字」。
+  if (kw.length < 2) {
+    msgSearchGen++
+    msgHits.value = []
+    msgHitsLoading.value = false
+    return
+  }
+  msgSearchTimer = setTimeout(() => { void runMsgSearch(kw) }, 300)
 })
 
 async function loadSpaces() {
@@ -2489,6 +2533,7 @@ onUnmounted(() => {
   // 组件还活着，流照常继续（见下方 onActivated / onDeactivated）。
   if (streamCtrl) streamCtrl.abort()
   if (streamTimer) { clearTimeout(streamTimer); streamTimer = null }
+  if (msgSearchTimer) { clearTimeout(msgSearchTimer); msgSearchTimer = undefined }
   if (resizeObs) { resizeObs.disconnect(); resizeObs = null }
   aiGenerating.value = false
   aiFinishedUnread.value = false
@@ -2509,6 +2554,34 @@ onUnmounted(() => {
         <button v-if="convQuery" class="ai-conv-search-clear" @click="convQuery = ''"><X :size="11" /></button>
       </div>
       <div class="ai-conv-list">
+        <!-- 消息命中：搜索框同时查正文。只匹配标题的话，「上次那句报错在哪条任务里」
+             这种最常用的找法永远搜不到——而标题往往只写「修复配置」。
+             放在任务组之上：搜索时用户要的几乎总是它。 -->
+        <template v-if="msgHits.length || msgHitsLoading">
+          <div class="ai-group-head ai-group-head-btn" @click="msgHitsOpen = !msgHitsOpen">
+            <component :is="msgHitsOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
+            <span>{{ t('aiGroupMsgHits') }} ({{ msgHits.length }})</span>
+          </div>
+          <template v-if="msgHitsOpen">
+            <div
+              v-for="h in msgHits"
+              :key="h.conv_id"
+              :class="['ai-conv-item', 'is-msg-hit', { active: h.conv_id === activeId }]"
+              @click="selectConv(h.conv_id)"
+            >
+              <Search :size="11" class="ai-conv-mode" />
+              <div class="ai-msg-hit-body">
+                <div class="ai-msg-hit-head">
+                  <span class="ai-conv-title">{{ h.conv_title || t('aiNewChat') }}</span>
+                  <span v-if="h.count > 1" class="ai-msg-hit-count">+{{ h.count - 1 }}</span>
+                </div>
+                <div class="ai-msg-hit-snippet">{{ h.latest.snippet }}</div>
+              </div>
+            </div>
+            <div v-if="msgHitsLoading && !msgHits.length" class="ai-space-empty">{{ t('aiMsgHitSearching') }}</div>
+          </template>
+        </template>
+
         <!-- 任务组：不属于任何空间的任务。组标题可点 = 整组折叠 -->
         <div class="ai-group-head ai-group-head-btn" @click="tasksOpen = !tasksOpen">
           <component :is="tasksOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
@@ -2647,7 +2720,9 @@ onUnmounted(() => {
         </template>
 
         <div v-if="conversations.length === 0" class="ai-conv-empty">{{ t('aiNoConversations') }}</div>
-        <div v-else-if="totalMatched === 0" class="ai-conv-empty">{{ t('aiNoMatchConv') }}</div>
+        <!-- 正文命中也算「搜到了东西」，不算空：否则上面列着三条消息命中，
+             下面紧跟着一句「没有匹配的会话」。 -->
+        <div v-else-if="totalMatched === 0 && !msgHits.length && !msgHitsLoading" class="ai-conv-empty">{{ t('aiNoMatchConv') }}</div>
       </div>
     </aside>
 
@@ -3407,6 +3482,24 @@ select.ai-hero-select {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* 消息命中的行比普通任务行高：标题下面还要放一行片段。
+   片段限两行——侧栏是导航不是阅读器，一条工具输出能占几十行。 */
+.ai-conv-item.is-msg-hit { align-items: flex-start; padding: 7px 10px; }
+.ai-conv-item.is-msg-hit .ai-conv-mode { margin-top: 3px; }
+.ai-msg-hit-body { flex: 1; min-width: 0; }
+.ai-msg-hit-head { display: flex; align-items: center; gap: 4px; }
+/* 「还有 N 条」用数字而不是一条分隔线：同一段话被追问、被复述都会重复命中，
+   这个数说明「这条对话里提过好几次」，是选哪条进去的关键。 */
+.ai-msg-hit-count {
+  flex: none; font-size: 10px; color: var(--color-text-disabled);
+  font-variant-numeric: tabular-nums;
+}
+.ai-msg-hit-snippet {
+  margin-top: 2px; font-size: 11px; line-height: 1.45; color: var(--color-text-disabled);
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.ai-conv-item.active .ai-msg-hit-snippet { color: var(--color-text-secondary); }
 .ai-conv-del {
   background: none; border: none; color: var(--color-text-disabled);
   cursor: pointer; display: none; align-items: center; justify-content: center;

@@ -66,3 +66,22 @@ export interface AIApprovalRuleView {
   custom: boolean
   agentOnly: boolean
 }
+
+// 消息正文搜索的一条命中（对应 Go 端 db.AIMessageHit）。
+export interface AIMessageHit {
+  msg_id: string
+  conv_id: string
+  conv_title: string
+  role: string
+  snippet: string
+  created_at: string
+}
+
+// 按对话聚合后的命中（对应 Go 端 services/ai.aiConvHit）。
+// count 是这条对话里命中了几条消息，latest 是其中最新那一条。
+export interface AIConvHit {
+  conv_id: string
+  conv_title: string
+  count: number
+  latest: AIMessageHit
+}
