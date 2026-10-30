@@ -1824,6 +1824,12 @@ export default {
   aiUsageSource_summary: 'Summaries',
   aiUsageSource_legacy: 'Legacy',
   aiUsageUnpriced: '{n} requests used models missing from the price table and count as 0; the real total is higher.',
+
+  // 审批统计（设置 → AI 的用量面板里，与用量共用时间窗口）
+  aiApprovalStatTitle: 'Tool approvals',
+  aiApprovalStatAllow: 'Allowed {n}',
+  aiApprovalStatDeny: 'Denied {n}',
+  aiApprovalStatAuto: 'Timed out / cancelled {n}',
   aiUsageHint: 'Cost = built-in unit price × tokens, for reference only: cache hits, batch discounts and tiered pricing are not modeled. The provider bill is authoritative.',
   aiConfigHint: 'API Key is stored only on this device, encrypted via system DPAPI. Any OpenAI-compatible endpoint is supported (OpenAI / DeepSeek / Kimi / Qwen / Ollama, etc.).',
   aiFillRequired: 'Fill in API Key, Base URL and Model first',

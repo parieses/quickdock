@@ -38,3 +38,20 @@ export interface AIUsageStatsResult {
   daily: AICostEntry[]
   sources: AICostEntry[]
 }
+
+// 审批统计（对应 Go 端 services/ai.AIApprovalStats）。
+// deny 与 auto 分开：前者是用户明确点了拒绝，后者是超时/停止/断开——
+// 「不想让它干」和「压根没看到卡」是两种问题，混在一起会误判闸门太严。
+export interface AIApprovalToolStat {
+  tool: string
+  allow: number
+  deny: number
+  auto: number
+}
+
+export interface AIApprovalStatsResult {
+  allow: number
+  deny: number
+  auto: number
+  byTool: AIApprovalToolStat[]
+}

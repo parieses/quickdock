@@ -1826,6 +1826,12 @@ export default {
   aiUsageSource_summary: '摘要压缩',
   aiUsageSource_legacy: '历史折算',
   aiUsageUnpriced: '其中 {n} 次调用使用了价目表未收录的模型，花费按 0 计，实际总额应更高。',
+
+  // 审批统计（设置 → AI 的用量面板里，与用量共用时间窗口）
+  aiApprovalStatTitle: '工具审批',
+  aiApprovalStatAllow: '批准 {n}',
+  aiApprovalStatDeny: '拒绝 {n}',
+  aiApprovalStatAuto: '超时/中断 {n}',
   aiUsageHint: '花费 = 内置单价 × token 数，仅供参考：缓存命中、批量优惠、阶梯计价都没算进去，以服务商账单为准。',
   aiConfigHint: 'API Key 仅保存在本机，经系统 DPAPI 加密。支持任意 OpenAI 兼容接口（OpenAI / DeepSeek / Kimi / 通义千问 / Ollama 等）。',
   aiFillRequired: '请先填写 API Key、Base URL 和 Model',

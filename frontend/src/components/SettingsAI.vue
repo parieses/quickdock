@@ -7,6 +7,7 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 
 import {
+  AIApprovalStats,
   AIFetchModels,
   AIListProfiles,
   AISaveProfiles,
@@ -15,7 +16,7 @@ import {
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environmentservice'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
-import type { AIProfilesResult, AIUsageStatsResult } from '../types/ai'
+import type { AIApprovalStatsResult, AIProfilesResult, AIUsageStatsResult } from '../types/ai'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -181,6 +182,9 @@ const usageDays = ref(30)
 const usageLoading = ref(false)
 const usageError = ref('')
 const usage = ref<AIUsageStatsResult | null>(null)
+// 审批统计与用量共用同一个时间窗口：两个数字要能互相解释（花在哪些工具上、
+// 其中多少被拦下来了），分成两套筛选就会得出对不上的结论。
+const approval = ref<AIApprovalStatsResult | null>(null)
 
 const usageRanges = computed(() => [
   { days: 7, label: t('aiUsageRange7') },
@@ -193,13 +197,26 @@ async function loadUsage(days: number = usageDays.value) {
   usageLoading.value = true
   usageError.value = ''
   try {
-    usage.value = unwrap<AIUsageStatsResult>(await AIUsageStats(days)) ?? null
+    // 两条查询并发：它们是独立的统计，串起来只会让面板慢一倍。
+    const [u, ap] = await Promise.all([AIUsageStats(days), AIApprovalStats(days)])
+    usage.value = unwrap<AIUsageStatsResult>(u) ?? null
+    approval.value = unwrap<AIApprovalStatsResult>(ap) ?? null
   } catch (e) {
     usageError.value = getErrorMessage(e)
   } finally {
     usageLoading.value = false
   }
 }
+
+// 审批总数：为 0 时整块不显示——没开过审批的库不该多出一行空统计。
+const approvalTotal = computed(() => {
+  const a = approval.value
+  return a ? a.allow + a.deny + a.auto : 0
+})
+
+// 只列被拒过的工具，最多 3 个：这一段是给人看「哪里卡住了」，不是完整报表。
+const topDenied = computed(() =>
+  (approval.value?.byTool ?? []).filter((s) => s.deny > 0).slice(0, 3))
 
 // token 数量级跨得很大（几百 ~ 上千万），统一折算成 k/M，否则表格列宽会被撑爆。
 function fmtTokens(n: number): string {
@@ -434,6 +451,21 @@ function saveAIModal() {
             ? t('aiUsageCacheSaved', { pct: cachePct, saved: fmtCost(usage.savedByCache) })
             : t('aiUsageCache', { pct: cachePct }) }}
         </p>
+
+        <!-- 审批：闸门「设得太严」和「根本没生效」在界面上长得一模一样，
+             只有这组数能区分。auto（超时/停止/断开）单列——它不代表用户拒绝，
+             混进「拒绝」会让人误以为某个工具特别招人烦。 -->
+        <div v-if="approvalTotal > 0" class="usage-sources">
+          <span class="usage-approval-head">{{ t('aiApprovalStatTitle') }}</span>
+          <span class="usage-source">{{ t('aiApprovalStatAllow', { n: approval?.allow ?? 0 }) }}</span>
+          <span v-if="approval?.deny" class="usage-source">{{ t('aiApprovalStatDeny', { n: approval.deny }) }}</span>
+          <span v-if="approval?.auto" class="usage-source">{{ t('aiApprovalStatAuto', { n: approval.auto }) }}</span>
+          <!-- 只列被拒过的工具：批准多的恰恰说明闸门没问题，列出来只会把
+               真正卡住的地方挤出视野。 -->
+          <span v-for="s in topDenied" :key="s.tool" class="usage-source">
+            <code>{{ s.tool }}</code> <b>{{ s.deny }}</b>
+          </span>
+        </div>
 
         <!-- 来源：SSH 面板 / 剪贴板 / 笔记 / 插件的一次性调用也计费，分开列才看得出钱花在哪 -->
         <div v-if="usage.sources.length > 1" class="usage-sources">

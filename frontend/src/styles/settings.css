@@ -516,6 +516,13 @@
 }
 .usage-source b { font-weight: 600; color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
 
+/* 审批那一行的行首标签：与其它 chip 同高，但不带背景——
+   它是「这一行说的是什么」，不是又一个数字。 */
+.usage-approval-head {
+  display: inline-flex; align-items: center; height: 18px;
+  font-size: 10px; color: var(--color-text-muted);
+}
+
 /* 表格单元格里的次要行（模型行下挂缓存命中率） */
 .usage-cell-sub { display: block; font-size: 10px; color: var(--color-text-disabled); }
 .usage-hint { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-text-disabled); }
