@@ -162,6 +162,11 @@ var validColumns = map[string]bool{
 	"model": true, "request_count": true, "cached_tokens": true,
 	// stopped：ai_messages 的「这条回复被中断」标记
 	"stopped": true,
+	// ai_checkpoints 回滚点表列（id / conv_id / seq / tool / created_at 已在上文声明，
+	// 白名单全局共用故只补缺的）。漏一个就在「回收站恢复 / 批量导入」那一步报
+	// 「非法列名」，而那时已经和「新加了一张表」联想不到一起了。
+	"files": true, "tool_call_id": true,
+
 	// ── 多 agent 编排三表（agent_runs / agent_nodes / agent_events）─────────
 	//
 	// 这三张表的写入走的是显式列名的参数化 SQL（internal/db/agent_run.go），

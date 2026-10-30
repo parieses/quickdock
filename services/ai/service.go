@@ -67,6 +67,11 @@ func NewAIService(app *services.AppService) *AIService {
 		// 它要用 s.RunAgent 跑子 agent，还要拿 ctx 里带的编排作用域，
 		// 这两样都只有 AIService 实例才有。
 		s.registerSpawnTool()
+		// 回滚点清理注入给宿主：实现在本包（快照目录布局只有它知道），
+		// 调用点在 services 的启动后台协程里，与剪贴板、墓碑同一趟做。
+		// 不在这里直接起 goroutine：那样每次构造服务都会多一个只跑一次的协程，
+		// 而「启动时扫一遍」本来就有明确的归属地（lifecycle.go）。
+		app.PurgeAICheckpointsFn = func() { purgeAICheckpoints(app.DB) }
 	}
 	return s
 }

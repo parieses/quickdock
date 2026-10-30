@@ -26,6 +26,7 @@ import (
 
 	"quickdock/internal/logger"
 	mcpsrv "quickdock/internal/mcp"
+	aitools "quickdock/services/ai/tools"
 )
 
 const (
@@ -498,6 +499,10 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 		rec.Error = "用户已停止，未执行"
 		return rec, rec.Error
 	}
+
+	// 本次调用的 id 挂到 ctx：写盘前的快照要能与「哪一步改的」对上。
+	// 在参数解析之前就设置——参数写坏也要能对应到卡片上的那条记录。
+	ctx = aitools.WithToolCallID(ctx, c.ID)
 
 	args, aerr := parseToolArgs(c.Args)
 	rec.Args = formatToolArgs(args, c.Args)

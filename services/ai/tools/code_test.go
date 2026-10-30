@@ -1,6 +1,7 @@
 package aitools
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,7 +17,7 @@ func TestFileEditReplacesOneOccurrence(t *testing.T) {
 	if err := os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res, err := fileEdit(Deps{}, map[string]any{
+	res, err := fileEdit(context.Background(), Deps{}, map[string]any{
 		"path":       path,
 		"old_string": "line2",
 		"new_string": "LINE2",
@@ -50,7 +51,7 @@ func TestFileEditRefusesAmbiguousMatch(t *testing.T) {
 	}
 	before, _ := os.Stat(path)
 
-	_, err := fileEdit(Deps{}, map[string]any{
+	_, err := fileEdit(context.Background(), Deps{}, map[string]any{
 		"path":       path,
 		"old_string": "x = 1",
 		"new_string": "x = 9",
@@ -79,7 +80,7 @@ func TestFileEditSuggestsSimilarLine(t *testing.T) {
 	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := fileEdit(Deps{}, map[string]any{
+	_, err := fileEdit(context.Background(), Deps{}, map[string]any{
 		"path": path,
 		// 用空格代替了 tab，正是模型最常犯的错
 		"old_string": `    println("hi")`,
@@ -158,7 +159,7 @@ func TestListDirSkipsIgnoredAndSortsDirsFirst(t *testing.T) {
 func TestFileWriteCreatesFileAndParents(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "docs", "guide", "a.md")
-	res, err := fileWrite(Deps{}, map[string]any{
+	res, err := fileWrite(context.Background(), Deps{}, map[string]any{
 		"path":    path,
 		"content": "# 标题\n\n正文\n",
 		"_cwd":    dir,
@@ -189,7 +190,7 @@ func TestFileWriteRefusesExistingWithoutOverwrite(t *testing.T) {
 	if err := os.WriteFile(path, []byte("用户写的"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	_, err := fileWrite(Deps{}, map[string]any{
+	_, err := fileWrite(context.Background(), Deps{}, map[string]any{
 		"path":    path,
 		"content": "模型写的",
 		"_cwd":    dir,
@@ -212,7 +213,7 @@ func TestFileWriteOverwriteReplacesContent(t *testing.T) {
 	if err := os.WriteFile(path, []byte("old"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	res, err := fileWrite(Deps{}, map[string]any{
+	res, err := fileWrite(context.Background(), Deps{}, map[string]any{
 		"path":      path,
 		"content":   "new",
 		"overwrite": true,
@@ -237,7 +238,7 @@ func TestFileWriteSameContentIsNoop(t *testing.T) {
 		t.Fatal(err)
 	}
 	before, _ := os.Stat(path)
-	res, err := fileWrite(Deps{}, map[string]any{
+	res, err := fileWrite(context.Background(), Deps{}, map[string]any{
 		"path":    path,
 		"content": "identical",
 		"_cwd":    dir,
@@ -258,7 +259,7 @@ func TestFileWriteSameContentIsNoop(t *testing.T) {
 func TestFileWriteOutsideWriteRoots(t *testing.T) {
 	dir := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "evil.txt")
-	_, err := fileWrite(Deps{}, map[string]any{
+	_, err := fileWrite(context.Background(), Deps{}, map[string]any{
 		"path":    outside,
 		"content": "x",
 		"_cwd":    dir,

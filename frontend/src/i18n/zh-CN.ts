@@ -1925,6 +1925,10 @@ export default {
   aiApprovalRemember: '本次会话都允许',
   aiApprovalDeny: '拒绝',
   aiApprovalAllowed: '已允许，执行中…',
+  // 编辑回滚点（写盘前快照，可退回到某一步之前）
+  aiCheckpointUndo: '回滚到这一步之前',
+  aiCheckpointConfirm: '将把这些文件恢复到这一步之前的状态：{files}。消息不会改变，本次回滚本身也可以再撤销。',
+  aiCheckpointDone: '已还原 {n} 个文件',
   // 编排（多 agent 派活）
   aiToolVerbSpawn: '派活',
   aiRunTree: '编排了 {n} 个子任务',

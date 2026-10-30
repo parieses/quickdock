@@ -88,6 +88,11 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		} else if purged > 0 {
 			logger.I("QuickDock: 已清理 %d 条超过 %d 天的回收站记录", purged, db.TombstoneMaxAgeDays)
 		}
+		// AI 编辑快照（回滚点）同一趟清：行在库里、文件在数据目录，两处都要删，
+		// 而「只有 services/ai 知道目录布局」——所以走注入的函数而不是在这里写逻辑。
+		if a.PurgeAICheckpointsFn != nil {
+			a.PurgeAICheckpointsFn()
+		}
 	}()
 
 	// 注入插件 Host API 真实实现（剪贴板/通知/对话框/HTTP/存储）

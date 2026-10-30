@@ -69,6 +69,13 @@ type AppService struct {
 	// （no_profile / no_endpoint / unavailable），无具体原因时为空串。
 	AIAvailableFn func() (available bool, reason, profile, model string)
 
+	// PurgeAICheckpointsFn 清理过期的 AI 编辑快照（库行 + 磁盘目录）。
+	//
+	// 与上面几个 Fn 同因：实现在 services/ai（快照目录的布局只有它知道），
+	// 而清理要挂在 services 的启动后台协程里与剪贴板、墓碑同一趟做。
+	// 未注入时（AI 服务没起来）跳过——那种情况下本来也没有快照。
+	PurgeAICheckpointsFn func()
+
 	// 标记"这是一次真退出"，令主窗口的 WindowClosing 钩子放行而不是取消关闭并隐藏到托盘。
 	// 更新时（RestartApp 拉起安装器 → app.Quit）必须先调用，否则 cleanup() 里的
 	// window.Close() 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净。

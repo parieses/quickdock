@@ -75,7 +75,7 @@ func registerCode(d Deps) {
 	intp := mcpsrv.Int
 	boolp := mcpsrv.Bool
 
-	r.add(fileEdit, mcpsrv.LevelWrite, "file_edit",
+	r.addCtx(fileEdit, mcpsrv.LevelWrite, "file_edit",
 		"精确替换文件里的一段内容（old_string → new_string）。改代码请用这个，不要整文件重写："+
 			"old_string 必须在文件里**唯一出现**（多处就报错并列出位置），并且要带足够上下文（含缩进与前后行）避免误匹配。"+
 			"只支持用户显式授权的项目目录。改完建议用 git_diff 确认",
@@ -87,7 +87,7 @@ func registerCode(d Deps) {
 			"replace_all": boolp("可选。old_string 出现多次时是否全部替换，默认 false（此时多处会报错）"),
 		})
 
-	r.add(fileWrite, mcpsrv.LevelWrite, "file_write",
+	r.addCtx(fileWrite, mcpsrv.LevelWrite, "file_write",
 		"创建新文件并写入完整内容——**新建文件一律用它**。"+
 			"不要在 run_command 里用 echo / Set-Content / node -e 造文件：引号、换行、编码都容易出错，"+
 			"而且用户看不出到底写了什么。父目录不存在会自动创建。"+
@@ -122,7 +122,7 @@ func registerCode(d Deps) {
 
 // -------- file_edit --------
 
-func fileEdit(d Deps, args map[string]any) (any, error) {
+func fileEdit(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	path, err := fsguard.ResolveWrite(d.DB, mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args))
 	if err != nil {
 		return nil, err
@@ -191,6 +191,12 @@ func fileEdit(d Deps, args map[string]any) (any, error) {
 	}
 
 	startLine := 1 + strings.Count(content[:idx], "\n")
+	// 写前快照（A3）：把原文件复制进这次会话的回滚目录。
+	// 位置在「mtime 二次校验之后、真正写盘之前」——快照太早会记下一个不打算写的版本，
+	// 太晚就没得记了。失败一律放弃写入：改了却撤不回，比不改更糟。
+	if err := snapshotBeforeWrite(ctx, "file_edit", path); err != nil {
+		return nil, err
+	}
 	if err := writeFileAtomic(path, []byte(updated), info.Mode()); err != nil {
 		return nil, fmt.Errorf("写入失败：%v", err)
 	}
@@ -337,7 +343,7 @@ func lineAt(content string, n int) string {
 //     而「新建文件」这个诉求本身不需要覆盖。
 //   - 内容与现有文件完全一致时直接返回「无改动」，不发一次无意义的写盘
 //     （模型的重复调用会被上层拦截，但换个顺序/空格再发一次仍会走到这里）。
-func fileWrite(d Deps, args map[string]any) (any, error) {
+func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	path, err := fsguard.ResolveWrite(d.DB, mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args))
 	if err != nil {
 		return nil, err
@@ -385,6 +391,11 @@ func fileWrite(d Deps, args map[string]any) (any, error) {
 	dir := filepath.Dir(path)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return nil, fmt.Errorf("创建目录 %s 失败：%v", dir, err)
+	}
+	// 写前快照：新建文件同样要记（existed=false），否则回滚时不知道该把它删掉，
+	// 用户会看到一个「回滚了但多出一个文件」的半成品状态。
+	if err := snapshotBeforeWrite(ctx, "file_write", path); err != nil {
+		return nil, err
 	}
 	if err := writeFileAtomic(path, []byte(content), mode); err != nil {
 		return nil, fmt.Errorf("写入失败：%v", err)

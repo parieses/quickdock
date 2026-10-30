@@ -25,6 +25,7 @@ import (
 
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
+	aitools "quickdock/services/ai/tools"
 )
 
 // 执行期的前置校验错误。
@@ -276,6 +277,14 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		a.registerGate(res.ConvID, gate)
 		defer a.unregisterGate(res.ConvID)
 		ctx = withApprovalGate(ctx, gate)
+	}
+
+	// 编辑快照钩子（见 ai_checkpoint.go）。这一条子 agent **也要挂**，
+	// 与审批相反：子 agent 改的文件同样得能回滚，而它借的就是父会话的 convID，
+	// 快照因此自然归到同一条对话的回滚点列表里——用户在界面上看到的是一整串
+	// 改动，不必去猜哪一步是子 agent 干的。
+	if hook := newCheckpointStore(a.App.DB, res.ConvID); hook != nil {
+		ctx = aitools.WithCheckpointHook(ctx, hook)
 	}
 
 	// 调模型前先落库用户消息：无论后续成功 / 失败 / 被打断，历史都不会出现空会话，

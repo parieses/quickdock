@@ -387,7 +387,25 @@ var baseTables = []string{
 		created_at TEXT NOT NULL
 	)`,
 
-	// AI 用量明细：**一次模型调用一行**。
+	// AI 编辑快照（回滚点）：一次写盘操作一行，文件本体落在数据目录
+	// ai_checkpoints/<conv_id>/<seq>/ 下。
+	//
+	// 为什么文件不进库：一个快照文件动辄几百 KB，塞进 payload 会让这张表比整个库
+	// 还大，而那之后 VACUUM 与备份都会变成用户能感知的卡顿。
+	//
+	// files 是 JSON 数组（见 db.AICheckpointFile）：一条调用现在只改一个文件，
+	// 将来批量改多个时不用动表结构。
+	`CREATE TABLE IF NOT EXISTS ai_checkpoints (
+		id TEXT PRIMARY KEY,
+		conv_id TEXT NOT NULL DEFAULT '',
+		seq INTEGER NOT NULL DEFAULT 0,
+		tool_call_id TEXT NOT NULL DEFAULT '',
+		tool TEXT NOT NULL DEFAULT '',
+		files TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL
+	)`,
+
+	// AI 用量明细：一次模型调用一行。
 	//
 	// 为什么不复用 ai_conversations 上的累加列：那是 upsert 口径，只能回答「这个会话一共
 	// 用了多少」，答不了「今天花了多少钱」「哪个模型最费」。日期与模型必须跟这一次调用
@@ -779,6 +797,10 @@ func (d *Database) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_schedule_runs_task_ts ON schedule_runs(task_id, created_ts DESC)`,
 		// 回收站过期清理按 deleted_at 比较，没索引就是每次全表扫 + 把整份 payload 读一遍。
 		`CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at)`,
+		// 回滚点：列表按 (conv_id, seq DESC) 取，seq 的唯一性同时由这条索引兜住
+		// ——CreateAICheckpoint 用 MAX+1 分配编号，撞车时靠约束报错触发重试，
+		// 没有唯一约束就会静默产生两条同号回滚点（表现为「回滚到第 3 步」结果不确定）。
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_checkpoints_conv ON ai_checkpoints(conv_id, seq)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {

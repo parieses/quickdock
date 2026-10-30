@@ -7,7 +7,7 @@ import {
   Link2, X, Download, Pencil, Search, Wrench, FolderOpen, Folder, ChevronRight, ChevronDown,
   MessageSquare, Languages, FileText, GraduationCap, Lightbulb, Globe, Link as LinkIcon,
   FolderTree, FileSearch, GitBranch, PenLine, Terminal, Play, Bug, Clock, FilePlus,
-  ListChecks, Bell, LayoutList,
+  ListChecks, Bell, LayoutList, Network, Undo2,
 } from '@lucide/vue'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
@@ -54,6 +54,9 @@ import {
   AICreateSpace,
   AIRenameSpace,
   AIDeleteSpace,
+  AIApproveToolCall,
+  AIListCheckpoints,
+  AIRestoreCheckpoint,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -123,6 +126,14 @@ interface AIToolCall {
   // 这条调用所属的编排 run / 节点（只有 spawn_agent 才有）。
   // 有了它才能在回复下面挂出 run 树，不必去解析可能被截断的结果文本。
   run_id?: string; node_id?: string
+}
+
+// 一条编辑快照（回滚点）。Wails 只在 bound 参数里生成类型，返回值里的结构
+// （ApiResult.data）是 any，所以这里按后端 AICheckpointView 的 JSON 手写一份。
+interface AICheckpointView {
+  id: string; seq: number; tool: string; tool_call_id: string
+  created_at: string
+  files: { path: string; existed: boolean; mode: number; backup: string; bytes: number }[]
 }
 
 // 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
@@ -341,6 +352,53 @@ function shortPath(p: string): string {
   const parts = p.split(/[\\/]/).filter(Boolean)
   if (parts.length <= 2) return p
   return '…' + sep + parts.slice(-2).join(sep)
+}
+
+// 编辑回滚点（A3）：这条会话改过哪些文件、能退到哪一步。
+const checkpoints = ref<AICheckpointView[]>([])
+
+async function loadCheckpoints(convID: string) {
+  if (!convID) { checkpoints.value = []; return }
+  try {
+    const list = unwrap<AICheckpointView[]>(await AIListCheckpoints(convID))
+    // 只在还停在同一个会话时写入：请求在途时用户可能已经切走，
+    // 把 A 会话的回滚点画到 B 会话的卡片上，是那种「怎么都对不上」的 bug。
+    if (activeId.value === convID) checkpoints.value = list ?? []
+  } catch {
+    // 拉不到回滚点不该弹错：它是附加能力（比如老库还没迁移完），
+    // 拿它打扰正常对话不值得，卡片上少一个按钮即可。
+    checkpoints.value = []
+  }
+}
+
+// cpForCall 这条工具调用有没有对应的回滚点。
+//
+// 按 tool_call_id 匹配而不是「取最近一个」：一轮里可能并发改两个文件，
+// 按时间取会让按钮挂到错的那张卡片上——而那个按钮的后果是直接改磁盘。
+function cpForCall(tc: AIToolCall): AICheckpointView | undefined {
+  if (!tc.id) return undefined
+  return checkpoints.value.find((c) => c.tool_call_id === tc.id)
+}
+
+// restoreCheckpoint 把文件退回到某一步之前。
+//
+// 必须二次确认，且把「哪些文件会变」写进确认文案：这是整个 AI 页里唯一
+// 一个不经过模型、直接覆盖磁盘现有内容的按钮。
+async function restoreCheckpoint(cp: AICheckpointView) {
+  const names = cp.files.map((f) => shortPath(f.path)).join('、')
+  if (!(await toast.confirm(t('aiCheckpointConfirm', { files: names })))) return
+  try {
+    const res = unwrap<{ restored: number; note?: string }>(await AIRestoreCheckpoint(activeId.value, cp.seq))
+    toast.success(res?.note || t('aiCheckpointDone', { n: res?.restored ?? 0 }))
+    // 文件内容变了：卡片上的「+N/-M」与工具结果已经与磁盘不符，
+    // 重拉消息让界面回到与事实一致的状态（否则用户会对着旧 diff 判断）。
+    if (activeId.value) {
+      await loadMessages(activeId.value)
+      void loadCheckpoints(activeId.value)
+    }
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
 }
 
 // 结果要不要用等宽块：命令输出与网页正文带换行，按纯文本渲染会把缩进吃掉。
@@ -1087,6 +1145,10 @@ async function selectConv(id: string) {
   resetStreamState()
   errorMsg.value = ''
   await loadMessages(id)
+  // 回滚点跟着会话走：切回来要能看到这条对话改过哪些文件。
+  // 与消息分开拉而不是塞进 AIGetMessages：回滚点是「另一张表的东西」，
+  // 混进消息响里会让那个接口为一张很少用到的表付出每次查询的代价。
+  void loadCheckpoints(id)
 }
 
 // 打开当前任务的工作目录：AI 生成的文件都在里面。
@@ -1751,6 +1813,12 @@ async function send() {
               // 编排类工具带回 run/node：流式期就能挂出 run 树，不用等整轮回填。
               tc.run_id = String(data.runId || '')
               tc.node_id = String(data.nodeId || '')
+              // 写类工具刚产生了一个回滚点：立刻拉一次，让这张卡片上出现
+              // 「回滚到此处」。等到 done 再拉的话，「改错了想马上退回去」
+              // 这个最需要它的时刻恰好没有按钮。
+              if ((tc.name === 'file_edit' || tc.name === 'file_write') && !data.error) {
+                void loadCheckpoints(activeId.value)
+              }
             }
             break
           }
@@ -2588,6 +2656,10 @@ onUnmounted(() => {
                       <span v-if="tc.denied" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
                       <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
                       <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
+                      <!-- 回滚到这一步之前：只有真的建过快照的写类调用才有这个按钮。 -->
+                      <button v-if="cpForCall(tc)" class="ai-tool-undo" :title="t('aiCheckpointUndo')" @click.stop.prevent="restoreCheckpoint(cpForCall(tc)!)">
+                        <Undo2 :size="11" />
+                      </button>
                     </summary>
                     <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
                     <pre v-else-if="tc.result" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
@@ -2651,6 +2723,10 @@ onUnmounted(() => {
                       <span v-else-if="tc.running" class="ai-tool-ms">{{ t('aiToolRunning') }}</span>
                       <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
                       <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
+                      <!-- 流式期也能回滚：改错了最好在那一步刚结束时退回去，而不是等整轮跑完。 -->
+                      <button v-if="cpForCall(tc)" class="ai-tool-undo" :title="t('aiCheckpointUndo')" @click.stop.prevent="restoreCheckpoint(cpForCall(tc)!)">
+                        <Undo2 :size="11" />
+                      </button>
                     </summary>
                     <!-- 审批卡：写类与高危工具在这里停下来等人点（见后端 ai_approval.go）。
                          风险说明必须排在按钮之前——先让人看见「为什么问你」，再决定点哪个；
@@ -3277,6 +3353,15 @@ select.ai-hero-select {
 }
 .ai-approval-btn.is-deny { color: var(--color-danger); border-color: var(--color-danger); }
 .ai-approval-done { font-size: 11px; color: var(--color-text-muted); margin-top: 3px; }
+/* 回滚按钮：放在摘要行最右侧，平时只显示图标——它是个「事后」操作，
+   不该比「改了几行」更抢眼。 */
+.ai-tool-undo {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 2px 4px; margin-left: 2px; flex-shrink: 0;
+  border: none; background: transparent; color: var(--color-text-muted);
+  cursor: pointer; border-radius: 3px;
+}
+.ai-tool-undo:hover { color: var(--color-accent); background: var(--color-bg-hover); }
 .ai-tool-err {
   font-size: 11px; color: var(--color-danger); margin-top: 3px;
   word-break: break-word;
