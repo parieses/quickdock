@@ -211,6 +211,31 @@ func (a *AIService) AIGetMessages(convID string) *services.ApiResult {
 	return services.Ok(views)
 }
 
+// AISetConversationMode 改任务的模式（bound）。
+//
+// 模式本来是「创建时选定的属性」，但计划模式打破了这一点：计划只能想不能做，
+// 用户要动手就必须把这条任务切回对话模式。不落库的话，切走再回来
+// （selectConv 以库里的 mode 为准）又变回计划模式，工具面继续只有只读的，
+// 模型会一边说「我来改」一边什么都调不动。
+func (a *AIService) AISetConversationMode(convID, mode string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	convID, mode = strings.TrimSpace(convID), strings.TrimSpace(mode)
+	if convID == "" {
+		return services.FailMsg("任务不存在")
+	}
+	// 与创建时同一套校验：认不出的模式直接拒绝。这里不能像发送那样回落 chat——
+	// 回落会把用户的「计划模式任务」悄悄改成普通对话，而用户看不出发生过什么。
+	if aiModePrompts[mode] == "" {
+		return services.FailMsg("未知模式：" + mode)
+	}
+	if err := a.App.DB.SetAIConversationMode(convID, mode); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(mode)
+}
+
 // AIRenameConversation 手动改会话标题。
 //
 // 与 AIRegenerateTitle 分开而不是给它加个「可选标题」参数：

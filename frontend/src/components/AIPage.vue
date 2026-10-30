@@ -60,6 +60,7 @@ import {
   AIRestoreCheckpoint,
   AISuggestMentions,
   AISearchMessages,
+  AISetConversationMode,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -512,6 +513,97 @@ function renderBlock(raw: string, cacheable = true): string {
   return html
 }
 
+// ---- 计划模式 ----
+//
+// 计划模式的回答要求固定结构（### 计划 / 涉及文件 / 风险 / 验收）。解析成块再渲染，
+// 是为了让步骤变成可勾的清单并把「按此计划执行」摆在计划旁边，而不是埋在正文末尾。
+//
+// 解析不出来就整个回落到普通 markdown：一份能读的计划比一个空的计划卡片重要。
+// 模型没照结构走（或用户自己切到了计划模式却只是随口问一句）时这是常态。
+interface PlanSection { title: string; items: string[]; text: string }
+
+// 步骤章节的标题口径。中文为主（system prompt 是中文的），英文只是兜底。
+const PLAN_STEP_TITLE = /计划|步骤|plan|steps/i
+
+function parsePlanSections(src: string): PlanSection[] | null {
+  const out: PlanSection[] = []
+  let cur: PlanSection | null = null
+  // 围栏里的 `# 注释` 不是标题、`- 参数` 不是列表项：不认围栏会把一段命令示例
+  // 拆成十几个假章节。围栏原样留在 text 里，交给 markdown 渲染成代码块。
+  let inFence = false
+  for (const raw of src.split('\n')) {
+    const line = raw.trimEnd()
+    const fence = line.trimStart().startsWith('```')
+    if (fence) inFence = !inFence
+    if (!inFence && !fence) {
+      const h = /^#{1,6}\s+(.+?)\s*$/.exec(line)
+      if (h) {
+        cur = { title: h[1], items: [], text: '' }
+        out.push(cur)
+        continue
+      }
+    }
+    if (!cur) continue
+    const item = !inFence && !fence ? /^\s*(?:\d+[.、)]|[-*+])\s+(.+)$/.exec(line) : null
+    if (item) cur.items.push(item[1])
+    else if (line.trim()) cur.text += (cur.text ? '\n' : '') + line
+  }
+  // 少于两节就不算计划结构：普通回答里也常有零星 ## 小标题。
+  return out.length >= 2 ? out : null
+}
+
+const planCache = new Map<string, { src: string; secs: PlanSection[] | null }>()
+
+function planOf(m: AIMessage): PlanSection[] | null {
+  if (m.role !== 'assistant') return null
+  const src = m.content ?? ''
+  const hit = planCache.get(m.id)
+  if (hit && hit.src === src) return hit.secs
+  const secs = parsePlanSections(stripDsmlMarkup(src))
+  planCache.set(m.id, { src, secs })
+  return secs
+}
+
+// 模板里每个调用点写 `planOf(m) ?? []` 会各造一个空数组，diff 时被当成新值；
+// 空态共用一个常量引用。
+const EMPTY_PLAN: PlanSection[] = []
+function planSecs(m: AIMessage): PlanSection[] {
+  return planOf(m) ?? EMPTY_PLAN
+}
+
+// 哪一节是「步骤」：标题命中的那一节，否则取第一个有列表项的。
+// 勾选框只给这一节——涉及文件、风险也用列表写，全变成勾选框就没有主次了。
+function planStepIndex(secs: PlanSection[]): number {
+  const byTitle = secs.findIndex((s) => PLAN_STEP_TITLE.test(s.title) && s.items.length > 0)
+  if (byTitle >= 0) return byTitle
+  return secs.findIndex((s) => s.items.length > 0)
+}
+
+// 按此计划执行：切回对话模式，把计划作为要求发出去。
+//
+// 必须先切模式再发送：留在计划模式里发，工具面还是只读的，模型会一边说
+// 「我来改」一边什么都调不动。模式要落库（AISetConversationMode），
+// 否则切走再回来又被 selectConv 读回 plan。
+async function runPlan(m: AIMessage) {
+  if (streaming.value) return
+  const convID = activeId.value
+  if (convID) {
+    try {
+      unwrap(await AISetConversationMode(convID, 'chat'))
+      const c = conversations.value.find((x) => x.id === convID)
+      if (c) c.mode = 'chat'
+    } catch (e) {
+      toast.error(getErrorMessage(e))
+      return
+    }
+  }
+  mode.value = 'chat'
+  // 前缀与计划之间空两行：模型对「指令」和「材料」的边界靠空行判断，
+  // 挤在一起容易把计划里的第一句当成指令的一部分。
+  input.value = `${t('aiPlanRunPrefix')}\n\n${m.content}`
+  await send()
+}
+
 // 历史消息的块 HTML 数组：按消息 id 记忆化。
 // 消息内容不可变，故可安全缓存；src 用于兜底校验（内容若被改动则重新解析）。
 function renderMessageBlocks(m: AIMessage): string[] {
@@ -791,6 +883,9 @@ const hasKey = computed(() => {
 // 两处各写一遍的话，加一个类型就要在两个地方各补一次，漏一处就是「类型选不了」。
 const modes = [
   { key: 'chat', label: 'aiModeChat', desc: 'aiModeChatDesc', icon: MessageSquare },
+  // 计划模式排第二：它和对话是「先想后做 / 边想边做」的一对，
+  // 放在翻译、总结后面会让人以为它是个特殊用途
+  { key: 'plan', label: 'aiModePlan', desc: 'aiModePlanDesc', icon: ListChecks },
   { key: 'explain', label: 'aiModeExplain', desc: 'aiModeExplainDesc', icon: Lightbulb },
   { key: 'translate', label: 'aiModeTranslate', desc: 'aiModeTranslateDesc', icon: Languages },
   { key: 'summarize', label: 'aiModeSummarize', desc: 'aiModeSummarizeDesc', icon: FileText },
@@ -2873,12 +2968,14 @@ onUnmounted(() => {
                    · m.content / m.reasoning_content —— 正文与思考过程
                    · statMap.get(m.id)               —— 该条回复的耗时/token 统计
                    · locale                         —— 按钮 title 等文案随语言切换刷新
+                   · mode                           —— 计划卡片上的「执行」按钮只看当前模式；
+                                                       不放进依赖，点完执行它还会留在原地
                  编译器生成的代码含 `_cached.key === m.id` 校验，
                  切换会话（消息 id 变化）不会误命中旧缓存。 -->
             <div
               v-for="m in messages"
               :key="m.id"
-              v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds]"
+              v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode]"
               :class="['ai-msg', m.role]"
             >
               <div class="ai-msg-role">
@@ -2948,7 +3045,40 @@ onUnmounted(() => {
                 <span>{{ t('aiRulesActive', { n: rulesOf(m).length }) }}</span>
                 <span class="ai-rules-name">{{ rulesOf(m).map((r) => r.name).join('、') }}</span>
               </div>
-              <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md">
+              <div v-if="m.role === 'assistant' && planSecs(m).length" class="ai-plan">
+                <div class="ai-plan-head">
+                  <ListChecks :size="13" class="ai-plan-icon" />
+                  <span class="ai-plan-name">{{ t('aiPlanTitle') }}</span>
+                  <!-- 「N 步」只数步骤那一节：把涉及文件、风险也算进去，
+                       这个数就没有意义了 -->
+                  <span v-if="planSecs(m)[planStepIndex(planSecs(m))]?.items.length" class="ai-plan-count">
+                    {{ t('aiPlanSteps', { n: planSecs(m)[planStepIndex(planSecs(m))].items.length }) }}
+                  </span>
+                  <!-- 只有计划模式下才给「执行」：切回对话之后这份计划已经执行过了，
+                       再点一次等于把同一份要求重发一遍。
+                       勾选框有意做成非受控（不绑 :checked）：消息区带 v-memo，
+                       绑了状态就得把每个勾选位塞进依赖数组，等于每勾一下重渲染整个列表。 -->
+                  <button
+                    v-if="mode === 'plan' && !streaming"
+                    class="ai-plan-run"
+                    :title="t('aiPlanRunHint')"
+                    @click="runPlan(m)"
+                  >
+                    <Play :size="11" /> {{ t('aiPlanRun') }}
+                  </button>
+                </div>
+                <div v-for="(sec, si) in planSecs(m)" :key="si" class="ai-plan-sec">
+                  <div class="ai-plan-sec-title">{{ sec.title }}</div>
+                  <ul v-if="sec.items.length" class="ai-plan-items" :class="{ 'is-step': si === planStepIndex(planSecs(m)) }">
+                    <li v-for="(it, ii) in sec.items" :key="ii">
+                      <input v-if="si === planStepIndex(planSecs(m))" type="checkbox" class="ai-plan-check" />
+                      <span class="ai-plan-item-md" v-html="renderBlock(it)"></span>
+                    </li>
+                  </ul>
+                  <div v-if="sec.text" class="ai-plan-text ai-md" v-html="renderBlock(sec.text)"></div>
+                </div>
+              </div>
+              <div v-else-if="m.role === 'assistant'" class="ai-msg-content ai-md">
                 <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
               </div>
               <div v-else class="ai-msg-content ai-plain">{{ m.content }}</div>
@@ -3708,6 +3838,50 @@ select.ai-hero-select {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--font-mono);
 }
+
+/* ---- 计划卡片 ---- */
+/* 用卡片包一圈而不是直接摊成 markdown：四个章节（计划/涉及文件/风险/验收）
+   是一份要被人逐条确认的东西，和普通回答的段落不是同一种读物。 */
+.ai-plan {
+  align-self: stretch; max-width: 100%;
+  margin: 4px 0 6px; padding: 10px 12px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-bg-primary);
+}
+.ai-plan-head { display: flex; align-items: center; gap: 6px; }
+.ai-plan-icon { color: var(--color-accent); flex: none; }
+.ai-plan-name { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
+.ai-plan-count { font-size: 11px; color: var(--color-text-disabled); }
+/* 「执行」推右边：它是这张卡片唯一的动作，跟着标题挤在左边会被当成又一个标签 */
+.ai-plan-run {
+  display: inline-flex; align-items: center; gap: 4px;
+  margin-left: auto; padding: 3px 9px; flex-shrink: 0;
+  border: 1px solid var(--color-accent-border); border-radius: var(--radius-sm);
+  background: var(--color-accent-bg); color: var(--color-accent);
+  font-size: 11px; cursor: pointer;
+}
+.ai-plan-run:hover { border-color: var(--color-accent); }
+.ai-plan-sec { margin-top: 8px; }
+.ai-plan-sec-title {
+  font-size: 11px; font-weight: 600; color: var(--color-text-secondary);
+  margin-bottom: 3px;
+}
+.ai-plan-items { margin: 0; padding: 0; list-style: none; }
+.ai-plan-items li {
+  display: flex; align-items: flex-start; gap: 6px;
+  font-size: 12.5px; line-height: 1.55; color: var(--color-text-secondary);
+  padding: 1px 0;
+}
+/* 非步骤章节用短横线代替勾选框：它们不是「要执行的事」，
+   给勾选框会让人以为做完一步要勾一个 */
+.ai-plan-items:not(.is-step) li::before {
+  content: '·'; color: var(--color-text-disabled); flex: none;
+}
+.ai-plan-check { margin: 3px 0 0; flex: none; accent-color: var(--color-accent); }
+.ai-plan-item-md { flex: 1; min-width: 0; }
+/* renderBlock 会把单行包成 <p>，放进 li 里会让行高翻倍 */
+.ai-plan-item-md :deep(p) { margin: 0; }
+.ai-plan-text { font-size: 12.5px; color: var(--color-text-secondary); }
 .ai-tool-err {
   font-size: 11px; color: var(--color-danger); margin-top: 3px;
   word-break: break-word;

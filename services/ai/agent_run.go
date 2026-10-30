@@ -65,7 +65,7 @@ type convIDSetter interface {
 // AgentRunReq 一次运行的入参，与 SSE 请求体的字段同构。
 type AgentRunReq struct {
 	ConvID  string // 空 = 新建会话
-	Mode    string // chat / translate / summary / explain / tutorial
+	Mode    string // chat / plan / translate / summarize / explain / tutorial
 	SpaceID string // 仅新建会话时生效
 	Message string
 	Cwd     string

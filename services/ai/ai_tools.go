@@ -198,6 +198,14 @@ func aiToolsPayloadFor(mode string, filter *ToolFilter) []map[string]any {
 		if !aiToolVisibleInMode(mode, f.Category, f.AgentOnly) {
 			continue
 		}
+		// plan 模式只挂只读工具。
+		//
+		// 写类**不挂**而不是「挂了但不让调」：模型看不到 file_write 时只会说
+		// 「确认后我来改」；而看得到、调一次被拒，它会换个参数再试，
+		// 一路把上下文和用户耐心都烧掉。
+		if mode == aiPlanMode && f.Level > mcpsrv.LevelRead {
+			continue
+		}
 		if filter != nil {
 			// spawn_agent 的撤下要单独判：它按分类属于 code，靠 Categories
 			// 拦不住（code 角色本来就该有 code 分类的工具）。
@@ -277,6 +285,18 @@ const (
 		"这时把命令写给用户，让他在终端里自己执行。\n" +
 		"- 查环境状态、定时任务、监控、待办笔记这些系统能力在「使用教程」模式里才有；用户在这边问起时，告诉他切到那个模式。\n"
 
+	// toolHintPlan 计划模式：只有只读工具。
+	//
+	// 必须单独一份而不是复用 toolHintGeneral：那一段里讲 file_write 怎么用、
+	// file_edit 怎么精确替换，而这个模式根本没挂它们——照着讲等于教模型去调
+	// 一个不存在的函数，它会在正文里伪造调用（见 ai_dsml.go）。
+	toolHintPlan = "\n\n[可用工具·只读]\n" +
+		"本模式只挂了**只读**工具：dir_list、file_read、file_grep、git_status、git_diff、check_workdir、web_fetch。" +
+		"file_write、file_edit、run_command 这些写类工具本次**没有挂载**，你调不到，也不要把调用写成正文。\n" +
+		"用这些工具把要改的地方读清楚，然后把计划交给用户确认；真正动手要等用户点「执行」。\n" +
+		"- 没有可用工作目录时读不到项目文件：不要猜路径，直接告诉用户这个任务需要绑定一个目录。\n" +
+		"- 需要多个信息时并行调用**不同**工具，不要反复调同一个。\n"
+
 	// toolHintExhausted 工具轮次用尽后的 system 说明。
 	//
 	// 这段存在的唯一原因是一个实测出来的坏结果：轮次用尽时工具被撤下（请求里不再有
@@ -294,8 +314,11 @@ const (
 
 // toolHint 返回该模式下的工具说明正文。
 func toolHint(mode string) string {
-	if mode == aiGateMode {
+	switch mode {
+	case aiGateMode:
 		return toolHintSystem
+	case aiPlanMode:
+		return toolHintPlan
 	}
 	return toolHintGeneral
 }
