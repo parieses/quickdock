@@ -358,3 +358,38 @@
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   white-space: pre-wrap; word-break: break-word;
 }
+/* ==================== 工具改动的行级 diff ==================== */
+/* 子组件（AiDiffView.vue）不写 scoped 样式，与 run 树同一套做法：
+   页面级样式统一在 styles/ 下，前端类名一律 qd- 前缀。 */
+.qd-diff {
+  margin: 4px 0 2px;
+  max-height: 320px;
+  overflow: auto;
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.qd-diff-line { display: flex; white-space: pre; }
+.qd-diff-sign {
+  flex-shrink: 0; width: 14px; text-align: center;
+  opacity: .65; user-select: none;
+}
+.qd-diff-text { white-space: pre; }
+/* 增删行背景用语义色的半透明版本（style.css 里已有 --color-*-bg）。
+   不用 color-mix：WebView2 的版本不保证支持，而不支持的后果是整行没有背景
+   ——静默失效最难发现。 */
+.qd-diff-line.is-add { background: var(--color-success-bg); }
+.qd-diff-line.is-add .qd-diff-sign { color: var(--color-success); opacity: 1; }
+.qd-diff-line.is-del { background: var(--color-danger-bg); }
+.qd-diff-line.is-del .qd-diff-sign { color: var(--color-danger); opacity: 1; }
+.qd-diff-line.is-hunk { color: var(--color-text-muted); background: var(--color-bg-active); }
+.qd-diff-line.is-ctx { color: var(--color-text-secondary); }
+.qd-diff-more {
+  display: block; width: 100%; padding: 4px 0; border: none; cursor: pointer;
+  background: var(--color-bg-active); color: var(--color-text-secondary);
+  font-size: 11px;
+}
+.qd-diff-more:hover { color: var(--color-accent); }

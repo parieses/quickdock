@@ -113,6 +113,12 @@ type aiToolRecord struct {
 	// 放在摘要行右侧比埋在展开内容里有用得多。
 	Added   int `json:"added,omitempty"`
 	Removed int `json:"removed,omitempty"`
+	// Diff 这次改动的行级 diff（只有 file_edit / file_write 有）。
+	//
+	// 与 Added/Removed 并存而不是替代：数字用来在摘要行上一眼看到「改了多少」，
+	// diff 用来展开看「改成了什么」。只有数字时用户只知道「动了两行」，
+	// 那正是「不敢让它改代码」的原因。
+	Diff string `json:"diff,omitempty"`
 	// RunID / NodeID 这次调用所属的编排 run 与节点（只有 spawn_agent 这类
 	// 会派活的工具才有）。落库而不是让前端解析结果文本：结果可能被截断，
 	// 一旦截在中间就不是合法 JSON，前端只能整块放弃。
@@ -568,6 +574,11 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	val, cerr := callToolWithTimeout(ctx, c.Name, args, toolTimeoutFor(c.Name))
 	rec.Ms = time.Since(started).Milliseconds()
 
+	// diff 先摘出来，再序列化结果给模型：
+	// 模型刚写过这段内容，把 diff 再塞回它的上下文纯属浪费 token
+	// （一次 file_edit 的 diff 可能几百行，而对它没有任何新信息）。
+	rec.Diff = takeToolDiff(val)
+
 	text := mcpsrv.JSON(val)
 	if cerr != nil {
 		rec.Error = cerr.Error()
@@ -636,6 +647,37 @@ func callToolWithTimeout(ctx context.Context, name string, args map[string]any, 
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
+}
+
+// aiToolDiffMaxBytes diff 字段的上限。
+//
+// 20KB 大致是 300 行 diff。超过就不给逐行内容：一条 SSE 帧塞进几 MB 会让前端
+// 每次渲染都卡一下，而那个体量的 diff 没有人会读——真要看整体改动，git diff 更合适。
+const aiToolDiffMaxBytes = 20 << 10
+
+// takeToolDiff 从工具结果里取出 unified diff，并把它从结果里删掉。
+//
+// 删除这一步是有意的：diff 只给前端看，不该跟着结果回给模型。模型刚写过这段
+// 内容，把 diff 再塞回上下文纯属浪费 token，而且会把工具结果的体积放大几倍
+// ——一次 file_edit 的 diff 几百行，而模型的上下文预算要留给代码本身。
+func takeToolDiff(val any) string {
+	m, ok := val.(map[string]any)
+	if !ok {
+		return ""
+	}
+	raw, ok := m["diff"]
+	if !ok {
+		return ""
+	}
+	delete(m, "diff")
+	s, _ := raw.(string)
+	if s == "" {
+		return ""
+	}
+	if len(s) > aiToolDiffMaxBytes {
+		return "改动过大，逐行 diff 已省略（上方数字是增删行数）；要看整体改动用 git_diff"
+	}
+	return s
 }
 
 // toolDiffLines 从工具结果里取「改动行数」（added, removed）。

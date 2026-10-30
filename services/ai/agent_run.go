@@ -485,6 +485,9 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				"id": r.ID, "name": r.Name, "ok": r.Error == "", "ms": r.Ms,
 				"error": r.Error, "dedup": r.Dedup, "denied": r.Denied,
 				"added": r.Added, "removed": r.Removed,
+				// 行级 diff：卡片展开时的主体内容。只有 added/removed 时用户
+				// 只知道「改了两行」而不知道改成了什么。
+				"diff": r.Diff,
 				// 编排类工具带回 run/node，前端可以立刻挂出 run 树，
 				// 不必等整轮结束再回头查一次。
 				"runId": r.RunID, "nodeId": r.NodeID,

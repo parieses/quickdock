@@ -1929,6 +1929,8 @@ export default {
   aiCheckpointUndo: '回滚到这一步之前',
   aiCheckpointConfirm: '将把这些文件恢复到这一步之前的状态：{files}。消息不会改变，本次回滚本身也可以再撤销。',
   aiCheckpointDone: '已还原 {n} 个文件',
+  // 行级 diff（见 AiDiffView.vue）。{n} 是总行数，不是剩余行数。
+  aiDiffExpand: '展开全部 {n} 行',
   // 编排（多 agent 派活）
   aiToolVerbSpawn: '派活',
   aiRunTree: '编排了 {n} 个子任务',

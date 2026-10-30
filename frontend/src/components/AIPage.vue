@@ -13,6 +13,7 @@ import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
 import AgentRunTree from './AgentRunTree.vue'
+import AiDiffView from './AiDiffView.vue'
 import { SetAIPageVisible } from '../../bindings/quickdock/services/appservice'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
@@ -123,6 +124,9 @@ interface AIToolCall {
   approvalConvId?: string
   // 改动行数（file_edit 有值）：卡片摘要行右侧显示 +N / -M。
   added?: number; removed?: number
+  // 行级 diff（file_edit / file_write）：数字说明「改了多少」，它说明「改成了什么」。
+  // 只有数字时用户只知道动了两行，那正是「不敢让它改代码」的原因。
+  diff?: string
   // 这条调用所属的编排 run / 节点（只有 spawn_agent 才有）。
   // 有了它才能在回复下面挂出 run 树，不必去解析可能被截断的结果文本。
   run_id?: string; node_id?: string
@@ -245,6 +249,9 @@ function serializeTools(list: AIToolCall[]): string {
     ...(t.denied ? { denied: true } : {}),
     ...(t.added ? { added: t.added } : {}),
     ...(t.removed ? { removed: t.removed } : {}),
+    // diff 要落库：刷新后卡片还能展开看到「这一步改了什么」，
+    // 而这正是用户回看历史时最需要的信息。
+    ...(t.diff ? { diff: t.diff } : {}),
     // run/node 必须一起落库：刷新后 run 树面板靠它才知道该拉哪棵树。
     ...(t.run_id ? { run_id: t.run_id, node_id: t.node_id || '' } : {}),
   })))
@@ -1810,6 +1817,7 @@ async function send() {
               tc.dedup = !!data.dedup
               tc.added = Number(data.added) || 0
               tc.removed = Number(data.removed) || 0
+              tc.diff = String(data.diff || '')
               // 编排类工具带回 run/node：流式期就能挂出 run 树，不用等整轮回填。
               tc.run_id = String(data.runId || '')
               tc.node_id = String(data.nodeId || '')
@@ -2661,8 +2669,12 @@ onUnmounted(() => {
                         <Undo2 :size="11" />
                       </button>
                     </summary>
+                    <!-- 行级 diff：结果串只说「改成功了」，这里说「改成了什么」。 -->
+                    <AiDiffView v-if="tc.diff" :diff="tc.diff" />
                     <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
-                    <pre v-else-if="tc.result" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
+                    <!-- 有 diff 时不再重放一句「已编辑 xxx（替换 1 处）」：
+                         路径在摘要行上已经有了，改动在 diff 里已经有了。 -->
+                    <pre v-else-if="tc.result && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
                   </details>
                 </div>
               </details>
@@ -2741,8 +2753,9 @@ onUnmounted(() => {
                       </div>
                     </div>
                     <div v-else-if="tc.approval === 'allowed'" class="ai-approval-done">{{ t('aiApprovalAllowed') }}</div>
+                    <AiDiffView v-if="tc.diff" :diff="tc.diff" />
                     <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
-                    <pre v-else-if="tc.result" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
+                    <pre v-else-if="tc.result && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
                   </details>
                 </div>
               </details>

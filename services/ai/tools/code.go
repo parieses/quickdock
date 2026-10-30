@@ -207,6 +207,10 @@ func fileEdit(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	}
 
 	logger.I("[mcp] file_edit %s 第 %d 行 -%d +%d", path, startLine, removed, added)
+	// 行级 diff：卡片上「改了什么」的完整依据。只有 added/removed 两个数字时，
+	// 用户只能知道「改了两行」而不知道改成了什么，那正是「不敢让它动代码」的原因。
+	// 输入过大时 unifiedDiff 返回空串，前端退回只显示计数。
+	diffText, _, _ := unifiedDiff(content, updated)
 	return map[string]any{
 		"path":         path,
 		"changed":      true,
@@ -215,6 +219,7 @@ func fileEdit(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		"addedLines":   added,
 		"occurrences":  count,
 		"replacedAll":  replaceAll,
+		"diff":         diffText,
 		"tip":          "改动已落盘。要继续改同一文件请重新 file_read（行号可能已变）；确认整体改动用 git_diff",
 	}, nil
 }
@@ -363,6 +368,9 @@ func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
 
 	existed := false
 	mode := os.FileMode(0o644)
+	// 旧内容留着算 diff：只在「比较是否无改动」那里读一次是不够的，
+	// 覆盖写入时同样需要它才能画出「从什么变成什么」。
+	oldContent := ""
 	if fi, serr := os.Stat(path); serr == nil {
 		if fi.IsDir() {
 			return nil, fmt.Errorf("%s 是目录，不是文件；要往目录里加文件请把文件名写在路径里", path)
@@ -373,14 +381,17 @@ func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
 			return nil, fmt.Errorf("%s 有 %d 字节，超过 %dMB 上限；这类文件应该用命令处理",
 				path, fi.Size(), fileWriteMaxBytes>>20)
 		}
-		if old, rerr := os.ReadFile(path); rerr == nil && string(old) == content {
-			return map[string]any{
-				"path":    path,
-				"created": false,
-				"changed": false,
-				"bytes":   len(content),
-				"note":    "文件内容与要写入的完全一致，没有重复写盘",
-			}, nil
+		if old, rerr := os.ReadFile(path); rerr == nil {
+			oldContent = string(old)
+			if oldContent == content {
+				return map[string]any{
+					"path":    path,
+					"created": false,
+					"changed": false,
+					"bytes":   len(content),
+					"note":    "文件内容与要写入的完全一致，没有重复写盘",
+				}, nil
+			}
 		}
 		if !mcpsrv.ArgBool(args, "overwrite") {
 			return nil, fmt.Errorf("%s 已存在（%d 字节），本次未覆盖。要修改它请先 file_read 看原文，再用 file_edit 精确替换；"+
@@ -410,12 +421,16 @@ func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		verb = "覆盖"
 	}
 	logger.I("[mcp] file_write %s %s %d 字节 +%d 行", path, verb, len(content), added)
+	// 新建文件时 oldContent 是空串，unifiedDiff 会给出 `@@ -0,0 +1,N @@`——
+	// 与 git 对新增文件的表现一致，前端不用为此写第二个分支。
+	diffText, _, _ := unifiedDiff(oldContent, content)
 	return map[string]any{
 		"path":       path,
 		"created":    !existed,
 		"changed":    true,
 		"bytes":      len(content),
 		"addedLines": added,
+		"diff":       diffText,
 		"tip":        "已写入磁盘。要再改它请 file_read 后用 file_edit 精确替换，不要整份重写",
 	}, nil
 }
