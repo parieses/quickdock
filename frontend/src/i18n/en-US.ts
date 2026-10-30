@@ -1935,6 +1935,7 @@ export default {
   aiStatTokensCached: 'Tokens {in}/{out} · cache hit {pct}%',
   aiStatCost: 'Cost {c}',
   aiStatToolRounds: '{n} tool rounds',
+  aiJobBgNote: 'Background job {id}: keeps running, and stops when QuickDock exits (check with job_status / job_output)',
   aiToolSummary: '{n} tool calls · {rounds} rounds',
   aiToolRunning: 'running…',
   aiPickFolderTitle: 'Choose a working folder',

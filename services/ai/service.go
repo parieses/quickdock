@@ -62,7 +62,15 @@ func NewAIService(app *services.AppService) *AIService {
 	// 改文件、跑命令）不属于 QuickDock 对外提供的 MCP 能力，只有内置 AI 用得上。
 	// 注册到 mcpsrv.Agent 后，环境页的工具面板仍能看到它们并单独开关。
 	if app != nil {
-		aitools.Register(aitools.Deps{DB: app.DB, Env: app.Env})
+		// 后台任务注册表同时装一个通知出口：任务结束时说话的是它自己（没有前端在等），
+		// 而 PushNotification 是宿主唯一的通知入口（同时负责扇出 Webhook / 机器人）。
+		aitools.Register(aitools.Deps{
+			DB:  app.DB,
+			Env: app.Env,
+			Notify: func(title, body string) {
+				app.PushNotification("ai", "success", title, body, "ai", "")
+			},
+		})
 		// spawn_agent 也走同一个注册表（同样能在面板里关掉），但实现在本包：
 		// 它要用 s.RunAgent 跑子 agent，还要拿 ctx 里带的编排作用域，
 		// 这两样都只有 AIService 实例才有。
@@ -72,6 +80,15 @@ func NewAIService(app *services.AppService) *AIService {
 		// 不在这里直接起 goroutine：那样每次构造服务都会多一个只跑一次的协程，
 		// 而「启动时扫一遍」本来就有明确的归属地（lifecycle.go）。
 		app.PurgeAICheckpointsFn = func() { purgeAICheckpoints(app.DB) }
+		// 后台任务：启动时清过期日志、把上次强杀留下的 running 行改成 killed，
+		// 退出时把还在跑的进程整组杀掉。
+		// 「重启后把遗留的 running 改掉」和「退出时杀进程」是两件事：
+		// 前者是宿主被强杀（任务管理器结束进程）时的补救，后者是正常退出。
+		app.PurgeAIJobsFn = func() {
+			aitools.ResetStaleJobs(app.DB)
+			aitools.PurgeOldJobs(app.DB)
+		}
+		app.StopAIJobsFn = aitools.StopAllJobs
 	}
 	return s
 }

@@ -30,6 +30,13 @@ import (
 type Deps struct {
 	DB  *db.Database
 	Env *envengine.Manager
+	// Notify 推一条桌面通知（宿主实现，未注入时静默跳过）。
+	//
+	// 后台任务结束时要靠它来叫人：这个任务的全部意义就是「用户去干别的了」，
+	// 结果回来不提醒，模型下次被问起才说「早就跑完了」。
+	// 用函数而不是直接持 *services.AppService：services/ai/tools 反向 import
+	// services 会成环（services 已经 import 了这个包）。
+	Notify func(title, body string)
 }
 
 // Register 把全部 agent 工具注册进 mcpsrv.Agent。由 AIService 构造时调用。
@@ -38,6 +45,7 @@ func Register(d Deps) {
 	registerDir(d)
 	registerGit(d)
 	registerCode(d)
+	registerJob(d)
 }
 
 // registrar 单个域的注册入口：把域写进每个 Tool.Category，并统一补 InputSchema。

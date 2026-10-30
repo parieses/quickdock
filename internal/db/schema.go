@@ -421,6 +421,28 @@ var baseTables = []string{
 		created_at TEXT NOT NULL
 	)`,
 
+	// AI 后台任务：模型用 run_command(background=true) 起的临时进程。
+	//
+	// 不并进 scheduled_tasks：那是用户配的定时任务（有调度、有重试、用户看得见），
+	// 这是模型为了「跑个 dev server 看看」临时起的东西，生命周期完全不同，
+	// 混在一起会让「我配的定时任务呢」在列表里找不着。
+	//
+	// log_path 指向 <dataDir>/ai_jobs/<id>.log：输出可能很长（一条 build 几十 MB），
+	// 塞进库会让备份与 VACUUM 变成用户能感知的卡顿。
+	// pid 留着是为了退出时能整组杀掉——它是独立进程组，宿主退出不会带走它。
+	`CREATE TABLE IF NOT EXISTS ai_jobs (
+		id TEXT PRIMARY KEY,
+		command TEXT NOT NULL DEFAULT '',
+		cwd TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'running',
+		exit_code INTEGER NOT NULL DEFAULT 0,
+		log_path TEXT NOT NULL DEFAULT '',
+		pid INTEGER NOT NULL DEFAULT 0,
+		error TEXT NOT NULL DEFAULT '',
+		started_at TEXT NOT NULL,
+		ended_at TEXT NOT NULL DEFAULT ''
+	)`,
+
 	// AI 用量明细：一次模型调用一行。
 	//
 	// 为什么不复用 ai_conversations 上的累加列：那是 upsert 口径，只能回答「这个会话一共

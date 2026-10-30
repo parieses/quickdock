@@ -76,6 +76,18 @@ type AppService struct {
 	// 未注入时（AI 服务没起来）跳过——那种情况下本来也没有快照。
 	PurgeAICheckpointsFn func()
 
+	// PurgeAIJobsFn 清掉过期的 AI 后台任务（库行 + 日志文件），启动时调一次。
+	// 与快照同因：日志目录的布局只有 services/ai 知道。
+	PurgeAIJobsFn func()
+
+	// StopAIJobsFn 终止所有还在跑的 AI 后台任务，退出时调一次。
+	//
+	// 必须主动杀：它们是独立进程组（为了能整组杀掉 npm→node 这样的孙子进程），
+	// 宿主退出不会带走。留下的 node / dotnet 会一直占着端口，
+	// 而用户下次启动只看到「端口被占用」，完全联想不到是 AI 起的。
+	// 这也正是「关闭 QuickDock 会终止后台任务」这句话的兑现方式。
+	StopAIJobsFn func()
+
 	// 标记"这是一次真退出"，令主窗口的 WindowClosing 钩子放行而不是取消关闭并隐藏到托盘。
 	// 更新时（RestartApp 拉起安装器 → app.Quit）必须先调用，否则 cleanup() 里的
 	// window.Close() 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净。

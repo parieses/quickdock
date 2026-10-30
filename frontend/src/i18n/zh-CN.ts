@@ -1942,6 +1942,7 @@ export default {
   // 工具轮次：和 token 是同一笔钱的两个侧面（查了五轮 vs 空聊五轮），
   // 所以排在 token 后面。{n} 是轮数，不是工具个数——一轮可并发多个。
   aiStatToolRounds: '{n} 轮工具',
+  aiJobBgNote: '后台任务 {id}：正在后台运行，关闭 QuickDock 会终止它（用 job_status / job_output 查看）',
   aiToolSummary: '调用 {n} 个工具 · {rounds} 轮',
   aiToolRunning: '执行中…',
   aiPickFolderTitle: '选择工作目录',

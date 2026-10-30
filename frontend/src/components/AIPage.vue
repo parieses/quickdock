@@ -452,6 +452,17 @@ function toolResultLang(tc: AIToolCall): string {
   return ''
 }
 
+// jobIdOf 从 run_command 的结果里挑出后台任务 id（没有则空串）。
+//
+// 结果串是后端 JSON 化后的文本，这里只认带引号的 "jobId"：
+// 同步执行的结果里没有这个键，返回空串就等于「不是后台任务」，
+// 卡片上因此不会多出一行跟它无关的提示。
+function jobIdOf(tc: AIToolCall): string {
+  if (tc.name !== 'run_command' || !tc.result) return ''
+  const m = /"jobId"\s*:\s*"([^"]+)"/.exec(tc.result)
+  return m ? m[1] : ''
+}
+
 // approveTool 对一条待确认的工具调用作出决定（见后端 ai_approval.go）。
 //
 // 点完立刻把本地状态改成终态、不等后端回执：审批期间宿主整条流是阻塞的，
@@ -3160,6 +3171,10 @@ onUnmounted(() => {
                     <AiDiffView v-if="tc.diff" :diff="tc.diff" />
                     <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
                     <pre v-else-if="tc.result && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
+                    <!-- 后台任务：卡片上明写「关闭应用会终止」。工具描述里也写了同一句，
+                         但用户看的是这张卡；不在这里再说一次，关窗口时他一定以为
+                         dev server 还在后台跑着。 -->
+                    <div v-if="jobIdOf(tc)" class="ai-job-note">{{ t('aiJobBgNote', { id: jobIdOf(tc) }) }}</div>
                   </details>
                 </div>
               </details>
@@ -3899,6 +3914,14 @@ select.ai-hero-select {
   border: 1px solid var(--color-border);
   border-radius: 4px;
   padding: 6px 8px;
+}
+
+/* 后台任务那一行：左侧压一道强调色，与「结果」区分开——
+   它是「这个任务还在跑」的状态说明，不是命令输出的一部分。 */
+.ai-job-note {
+  margin-top: 4px; padding: 2px 0 2px 6px;
+  border-left: 2px solid var(--color-accent);
+  font-size: 10px; line-height: 1.5; color: var(--color-text-muted);
 }
 
 /* 消息区：滚动容器 + 内容层（内容层被 ResizeObserver 观察） */

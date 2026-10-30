@@ -102,12 +102,16 @@ func registerCode(d Deps) {
 	r.add(runCommand, mcpsrv.LevelWrite, "run_command",
 		"在当前项目目录里执行一条 shell 命令并返回输出（stdout/stderr/退出码），用于装依赖、跑测试、构建、"+
 			"查看 git log 这类必须在命令行做的事。有超时与输出上限，超时会连同子进程一起结束。"+
+			"**不会自己结束的命令**（dev server、watch、长驻服务）请用 background=true 起成后台任务，"+
+			"否则你只能等到超时，等到的也只是一句「已终止」。"+
 			"**高危命令会被拒绝执行**（删除根目录、git reset --hard、强推、发版等），此时请把命令交给用户自己运行",
 		nil,
 		map[string]any{
 			"command":     str("要执行的完整命令，如 npm test / go build ./... / git log --oneline -10"),
 			"cwd":         str("可选。在哪个目录执行，默认用当前工作目录"),
-			"timeout_sec": intp("可选。超时秒数，默认 60，最大 600"),
+			"timeout_sec": intp("可选。超时秒数，默认 60，最大 600；background=true 时忽略"),
+			"background": boolp("可选。true = 立刻返回 jobId，进程在后台继续跑，输出写到日志文件，之后用 job_status / job_output 查。" +
+				"**关闭 QuickDock 会终止它**，所以只用于「这次会话里要看效果」的临时进程"),
 		})
 
 	r.add(checkWorkdir, mcpsrv.LevelRead, "check_workdir",
@@ -460,6 +464,15 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 		if rule.re.MatchString(command) {
 			return nil, fmt.Errorf("这条命令会破坏未提交的工作，未执行：%s\n命令：%s\n"+
 				"如果确实要做，请让用户自己在终端里执行", rule.note, command)
+		}
+	}
+
+	// 后台模式：立刻返回 jobId，进程继续跑，输出写进 <dataDir>/ai_jobs/<id>.log。
+	// 放在风险判定之后、超时之前——后台任务没有超时（它的存在意义就是长跑），
+	// 但高危命令照样不执行。
+	if v, ok := args["background"]; ok {
+		if b, isb := v.(bool); isb && b {
+			return startBackgroundCommand(d, command, dir)
 		}
 	}
 

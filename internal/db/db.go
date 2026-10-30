@@ -169,6 +169,9 @@ var validColumns = map[string]bool{
 	// ai_approvals 审批明细表列（id / conv_id / tool / created_at 已在上文声明，
 	// decision 与 remember 是这张表独有的）
 	"decision": true, "remember": true,
+	// ai_jobs 后台任务表列（id / cwd / status / error / started_at / ended_at
+	// 已在上文声明）。command 与 command_id 不是一个东西：后者是插件命令的 id。
+	"command": true, "pid": true, "log_path": true, "exit_code": true,
 
 	// ── 多 agent 编排三表（agent_runs / agent_nodes / agent_events）─────────
 	//

@@ -93,6 +93,11 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		if a.PurgeAICheckpointsFn != nil {
 			a.PurgeAICheckpointsFn()
 		}
+		// AI 后台任务同一趟清：过期的日志文件连同库行一起删，顺便把上次
+		// 被强杀时留下的 running 行改成 killed（否则模型查到 running 会一直等）。
+		if a.PurgeAIJobsFn != nil {
+			a.PurgeAIJobsFn()
+		}
 	}()
 
 	// 注入插件 Host API 真实实现（剪贴板/通知/对话框/HTTP/存储）
@@ -207,6 +212,11 @@ func (a *AppService) ServiceShutdown() error {
 	// 与 main.go 的退出清理互为安全网，StopAllOnExit 幂等，重复调用无副作用。
 	if a.Env != nil {
 		a.Env.StopAllOnExit()
+	}
+	// AI 起的后台任务同样是独立进程组，不主动杀就会留下占用端口的孤儿
+	// ——而用户完全看不出是谁占的（见 StopAIJobsFn 的说明）。
+	if a.StopAIJobsFn != nil {
+		a.StopAIJobsFn()
 	}
 	// 停止 dsh 子进程（若正在运行），防止残留 Node 占用端口
 	if a.DSH != nil {
