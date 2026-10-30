@@ -362,7 +362,7 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 第三层过滤是 role（阶段 2）：子 agent 的工具面由 agentRoleSpec 收窄，
 	// 并且一旦不能再派活就把 spawn_agent 撤下——让它根本不知道有这个能力。
 	filter := spawnFilterFor(req.ToolFilter, sc.CanSpawn())
-	tools := aiToolsPayloadFor(mode, filter)
+	tools, extTrimmed := aiToolsPayloadFor(mode, filter)
 	// 这个模式本来有没有工具可用。收尾轮靠它区分「本来就没有工具」和
 	// 「有工具但轮次用完了」——后者必须给模型一句明确交代，否则它会把调用写成正文。
 	modeHasTools := len(tools) > 0
@@ -375,6 +375,11 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 多加一次 IO 没有收益，还可能读到用户正在编辑的半截文件。
 	rules := a.loadAIRules(cwd, aiMentionPaths(req.Mentions))
 	baseSystem = withRules(baseSystem, rules)
+	if extTrimmed {
+		// 外部工具因名额被截：必须说，否则模型在下一轮看到 server 报
+		// 「未知工具」时会一遍遍重试同一个名字。
+		baseSystem += extToolsOverflowHint
+	}
 	applySystemHints(messages, baseSystem, mode, cwd, modeHasTools, false)
 	// 让用户看见「这次用上了哪些规则」：改了不生效又没有任何提示，
 	// 是这类功能最常见的抱怨，而用户没法自己看出 AI 到底读没读到。

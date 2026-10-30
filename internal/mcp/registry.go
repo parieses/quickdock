@@ -38,6 +38,9 @@ const (
 	// 这里统一维护——前端的分组顺序只认一个来源，否则面板会漏掉整组。
 	CategoryWeb  = "web"
 	CategoryCode = "code"
+	// CategoryExternal 外部 MCP server 转发进来的工具。单独一类：
+	// 「别人写的 server」与宿主自带工具的信任级别不同，面板上要能一眼分开。
+	CategoryExternal = "external"
 )
 
 // Tool 一个可被 AI 调用的工具。
@@ -125,6 +128,29 @@ func (agentRegistrar) Add(t Tool) {
 
 // Register 注册工具，等价于 Global.Add（保留给既有调用方）。
 func Register(t Tool) { Global.Add(t) }
+
+// RemoveExternal 移除全部外部 MCP 工具（名字以 prefix 开头），返回移除的数量。
+//
+// 只服务于一个场景：外部 server 的清单重载——server 的工具列表变了（加了的、
+// 删了的），逐个 diff 远不如整组撤掉重注来得可靠；同名覆盖式 Add 又清不掉
+// 已经消失的工具，残留的 Handler 还指向旧 client。单工具开关（disabled）一并
+// 清掉：开关跟着工具走，工具没了开关留着只会让面板出现幽灵行。
+//
+// 名字以 prefix 开头才动：prefix 是 "mcp_<server>_" 这种带尾分隔符的完整前缀，
+// 不会误伤同名的内置工具——那是权限边界，宁可靠调用方传完整前缀。
+func RemoveExternal(prefix string) int {
+	regMu.Lock()
+	defer regMu.Unlock()
+	n := 0
+	for name := range tools {
+		if strings.HasPrefix(name, prefix) {
+			delete(tools, name)
+			delete(disabled, name)
+			n++
+		}
+	}
+	return n
+}
 
 // SetMaxLevel 设置可暴露的最高危险等级（默认 LevelWrite）。
 func SetMaxLevel(level int) {

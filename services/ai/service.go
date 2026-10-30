@@ -39,6 +39,9 @@ type AIService struct {
 	// 退出时注销，漏了注销就是每问一次泄漏一个 gate。
 	gatesMu sync.Mutex
 	gates   map[string]*approvalGate
+
+	// 外部 MCP server 接入状态（见 ext_mcp.go）。
+	ext *extManager
 }
 
 // NewAIService 创建 AI 门面服务
@@ -89,8 +92,22 @@ func NewAIService(app *services.AppService) *AIService {
 			aitools.PurgeOldJobs(app.DB)
 		}
 		app.StopAIJobsFn = aitools.StopAllJobs
+		app.ShutdownExtAIFn = s.ShutdownExtServers
+
+		// 外部 MCP server：启动时异步连接并注册工具（见 ext_mcp.go）。
+		// 构造里就建好 manager（不等待连接），bound 方法任何时候都可用。
+		s.ext = newExtManager()
+		s.loadExtOnStart()
 	}
 	return s
+}
+
+// ShutdownExtServers 退出时关闭外部 MCP 连接（stdio 会杀子进程）。
+// 宿主生命周期不知道 extManager 的存在，通过这个入口收尾。
+func (a *AIService) ShutdownExtServers() {
+	if a.ext != nil {
+		a.ext.Close()
+	}
 }
 
 // dbOK 检查宿主 DB 是否就绪（原 AppService.dbOK 的包内副本，跨包不可访问宿主私有方法）

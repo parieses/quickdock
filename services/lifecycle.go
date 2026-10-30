@@ -218,6 +218,11 @@ func (a *AppService) ServiceShutdown() error {
 	if a.StopAIJobsFn != nil {
 		a.StopAIJobsFn()
 	}
+	// 外部 MCP server 的 stdio 子进程同理：它们是 server 的宿主进程，
+	// 退出时一起收掉（HTTP client 无进程，Close 是 no-op）。
+	if a.ShutdownExtAIFn != nil {
+		a.ShutdownExtAIFn()
+	}
 	// 停止 dsh 子进程（若正在运行），防止残留 Node 占用端口
 	if a.DSH != nil {
 		a.DSH.Stop()

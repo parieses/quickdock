@@ -15,12 +15,16 @@ import {
   AISetApprovalRule,
   AITestConnection,
   AIUsageStats,
+  AIGetExtServers,
+  AISaveExtServers,
+  AIReloadExtServers,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environmentservice'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type {
   AIApprovalRuleView,
   AIApprovalStatsResult,
+  AIExtServerState,
   AIProfilesResult,
   AIUsageStatsResult,
 } from '../types/ai'
@@ -275,6 +279,80 @@ async function saveApprovalRule(rule: AIApprovalRuleView, mode: string) {
   }
 }
 
+// ── 外部 MCP 服务器（阶段 D）────────────────────────────────────────
+// 状态由后端维护（连接、注册工具都在那边），这里只负责展示与提交整份 JSON。
+const extServers = ref<AIExtServerState[]>([])
+const extLoading = ref(false)
+const extSaving = ref(false)
+const extError = ref('')
+const extEditing = ref(false)
+const extDraft = ref('')
+
+async function loadExtServers() {
+  extLoading.value = true
+  extError.value = ''
+  try {
+    extServers.value = unwrap<AIExtServerState[]>(await AIGetExtServers()) ?? []
+  } catch (e) {
+    extError.value = getErrorMessage(e)
+  } finally {
+    extLoading.value = false
+  }
+}
+
+// 从当前状态反推可编辑的 JSON：error 的 server 也要保住它的配置——
+// 用户改的往往正是那个连不上的。
+function startEditExt() {
+  const doc: Record<string, unknown> = {}
+  for (const s of extServers.value) doc[s.name] = s.config
+  extDraft.value = JSON.stringify(doc, null, 2)
+  extEditing.value = true
+}
+
+async function saveExt() {
+  let doc: Record<string, unknown>
+  try {
+    doc = JSON.parse(extDraft.value)
+  } catch {
+    extError.value = t('aiExtBadJson')
+    return
+  }
+  extSaving.value = true
+  extError.value = ''
+  try {
+    const items = Object.entries(doc).map(([name, v]) => {
+      const c = (v ?? {}) as Record<string, any>
+      return {
+        name,
+        command: String(c.command ?? ''),
+        args: Array.isArray(c.args) ? c.args.map(String) : [],
+        env: (c.env && typeof c.env === 'object') ? Object.fromEntries(Object.entries(c.env).map(([k, e]) => [k, String(e)])) : {},
+        url: String(c.url ?? ''),
+        disabled: !!c.disabled,
+      }
+    })
+    const res = unwrap<{ states: AIExtServerState[] }>(await AISaveExtServers(items))
+    extServers.value = res?.states ?? []
+    extEditing.value = false
+  } catch (e) {
+    extError.value = getErrorMessage(e)
+  } finally {
+    extSaving.value = false
+  }
+}
+
+async function reloadExt() {
+  extLoading.value = true
+  extError.value = ''
+  try {
+    extServers.value = unwrap<AIExtServerState[]>(await AIReloadExtServers()) ?? []
+  } catch (e) {
+    extError.value = getErrorMessage(e)
+  } finally {
+    extLoading.value = false
+  }
+}
+
 // token 数量级跨得很大（几百 ~ 上千万），统一折算成 k/M，否则表格列宽会被撑爆。
 function fmtTokens(n: number): string {
   if (!n) return '0'
@@ -348,6 +426,7 @@ watch(() => props.visible, (v) => {
   loadAIProfiles()
   loadUsage()
   loadApprovalRules()
+  loadExtServers()
 }, { immediate: true })
 
 function selectAIProfile(id: string) { aiActive.value = id }
@@ -644,6 +723,54 @@ function saveAIModal() {
         </tbody>
       </table>
       <p v-if="apShowReadOnly" class="usage-hint">{{ t('aiApprovalRuleReadOnlyHint') }}</p>
+      </template>
+    </div>
+
+    <!-- 外部 MCP 服务器（阶段 D）：把别的 server 的工具接进内置 AI。
+         配置直接用 JSON 文本框：字段与 Claude Desktop / Cursor 的 mcp.json 一致，
+         现成配置粘贴过来就能用——表单化每加一个字段都要改 UI，JSON 一次到位。 -->
+    <div class="ai-usage">
+      <div class="ai-usage-head">
+        <h4 class="ai-usage-title">{{ t('aiExtTitle') }}</h4>
+        <button class="approval-ro-toggle" @click="extEditing ? (extEditing = false) : startEditExt()">
+          {{ extEditing ? t('cancel') : t('aiExtEdit') }}
+        </button>
+      </div>
+      <p class="usage-hint">{{ t('aiExtDesc') }}</p>
+
+      <p v-if="extError" class="result-hint error">{{ extError }}</p>
+
+      <template v-if="extEditing">
+        <textarea
+          v-model="extDraft"
+          class="field-input ai-ext-json"
+          :placeholder="t('aiExtPh')"
+          spellcheck="false"
+        ></textarea>
+        <div class="ai-ext-actions">
+          <button class="ai-hook-ok" :disabled="extSaving" @click="saveExt">{{ t('aiExtSaveReload') }}</button>
+        </div>
+      </template>
+      <template v-else>
+        <p v-if="extLoading && !extServers.length" class="usage-hint">{{ t('aiUsageLoading') }}</p>
+        <p v-else-if="!extServers.length" class="usage-hint">{{ t('aiExtEmpty') }}</p>
+        <table v-else class="usage-table approval-rules">
+          <tbody>
+            <tr v-for="s in extServers" :key="s.name">
+              <td class="model">
+                <code>{{ s.name }}</code>
+                <span :class="['ext-status', s.status]">
+                  {{ s.status === 'ok' ? t('aiExtStatusOk', { n: s.toolCount }) : s.status === 'disabled' ? t('aiExtStatusOff') : t('aiExtStatusErr') }}
+                </span>
+                <div v-if="s.error" class="usage-cell-sub">{{ s.error }}</div>
+                <div v-else-if="s.tools.length" class="usage-cell-sub">{{ s.tools.join(' · ') }}</div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div v-if="extServers.some((s) => s.status === 'error')" class="ai-ext-actions">
+          <button class="ai-hook-no" :disabled="extLoading" @click="reloadExt">{{ t('aiExtReload') }}</button>
+        </div>
       </template>
     </div>
 

@@ -1942,6 +1942,17 @@ export default {
   // 工具轮次：和 token 是同一笔钱的两个侧面（查了五轮 vs 空聊五轮），
   // 所以排在 token 后面。{n} 是轮数，不是工具个数——一轮可并发多个。
   aiStatToolRounds: '{n} 轮工具',
+  aiExtTitle: '外部 MCP 服务器',
+  aiExtDesc: '把其它 MCP server 的工具接进内置 AI。配置格式与 Claude Desktop / Cursor 的 mcp.json 相同（command+args+env 走本地进程，url 走 HTTP）；接入的工具名会带 mcp_服务器名_ 前缀，默认每次调用前询问。',
+  aiExtPh: '{\n  "filesystem": {\n    "command": "npx",\n    "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/proj"]\n  },\n  "remote": { "url": "http://127.0.0.1:9000/mcp" }\n}',
+  aiExtEdit: '编辑配置',
+  aiExtSaveReload: '保存并重连',
+  aiExtReload: '重连',
+  aiExtEmpty: '尚未接入外部服务器。',
+  aiExtBadJson: 'JSON 解析失败，请检查格式（应为 { "名称": { ... } } 对象）。',
+  aiExtStatusOk: '已接入 {n} 个工具',
+  aiExtStatusOff: '已停用',
+  aiExtStatusErr: '连接失败',
   aiHookBannerTitle: '此项目配置了 AI 钩子',
   aiHookBannerDesc: '{path} 定义了 afterEdit {n1} 条、beforeCommand {n2} 条。批准后，AI 每次改完文件 / 执行命令前会自动运行这些命令（各 10 秒超时，失败不阻断操作）。',
   aiHookBannerBad: '{path} 解析失败，钩子未生效：{err}',

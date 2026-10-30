@@ -187,13 +187,20 @@ type ToolFilter struct {
 // 没有可用工具时返回 nil 而不是空切片：部分网关对 "tools": [] 直接报 400，
 // 而空切片经过 json.Marshal 就是 []，不会变成 null。调用方据此决定要不要设字段。
 func aiToolsPayload(mode string) []map[string]any {
-	return aiToolsPayloadFor(mode, nil)
+	t, _ := aiToolsPayloadFor(mode, nil)
+	return t
 }
 
 // aiToolsPayloadFor 同 aiToolsPayload，额外按 role 收窄（filter 为 nil 表示不收窄）。
-func aiToolsPayloadFor(mode string, filter *ToolFilter) []map[string]any {
+//
+// 第二个返回值表示外部 MCP 工具因名额被截：调用方（agent_run）据此在 system
+// 里补一句说明——不说明的话，模型会拿着一轮里根本不存在的工具名去调，
+// 然后对着「未知工具」反复重试。
+func aiToolsPayloadFor(mode string, filter *ToolFilter) ([]map[string]any, bool) {
 	fns := mcpsrv.ExposedFunctions()
 	out := make([]map[string]any, 0, len(fns))
+	var ext []map[string]any
+	extTrimmed := false
 	for _, f := range fns {
 		if !aiToolVisibleInMode(mode, f.Category, f.AgentOnly) {
 			continue
@@ -219,19 +226,33 @@ func aiToolsPayloadFor(mode string, filter *ToolFilter) []map[string]any {
 				continue
 			}
 		}
-		out = append(out, map[string]any{
+		entry := map[string]any{
 			"type": "function",
 			"function": map[string]any{
 				"name":        f.Name,
 				"description": f.Description,
 				"parameters":  f.Parameters,
 			},
-		})
+		}
+		if f.Category == mcpsrv.CategoryExternal {
+			ext = append(ext, entry)
+		} else {
+			out = append(out, entry)
+		}
 	}
+	// 外部工具名额（阶段 D）：tools[] 总数一大，一部分上游直接 400，
+	// token 账单也难看。内置工具优先，外部工具填剩余名额，超出不挂——
+	// 名额只算过了可见性过滤的，被模式/角色裁掉的外部工具不占位置。
+	// 截断后 agent_run 会在 system 里补说明，模型至少知道「有工具没挂上」。
+	if len(ext) > extToolsMax {
+		ext = ext[:extToolsMax]
+		extTrimmed = true
+	}
+	out = append(out, ext...)
 	if len(out) == 0 {
-		return nil
+		return nil, false
 	}
-	return out
+	return out, extTrimmed
 }
 
 // toolHint 交给模型的工具使用说明，只在本轮确实带了工具时追加。

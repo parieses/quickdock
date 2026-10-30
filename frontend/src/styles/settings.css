@@ -562,6 +562,30 @@
 }
 .approval-ro-toggle:hover { color: var(--color-accent); }
 .approval-ro-arrow { font-size: 10px; }
+/* 外部 MCP 服务器（阶段 D）：状态点 + JSON 编辑框。
+   .ai-hook-ok / .ai-hook-no 与 AIPage 的钩子批准条同名——两处都是
+   「一份需要签字的授权」的确认/放弃，样式一致是有意为之。 */
+.ai-hook-ok {
+  padding: 3px 12px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--color-accent); background: var(--color-accent); color: #fff;
+}
+.ai-hook-ok:disabled { opacity: .6; cursor: default; }
+.ai-hook-no {
+  padding: 3px 12px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
+}
+.ai-hook-no:hover { color: var(--color-text-primary); }
+.ai-ext-json {
+  width: 100%; min-height: 160px; resize: vertical;
+  font-family: var(--font-mono, monospace); font-size: 11px; line-height: 1.5;
+  white-space: pre; overflow: auto;
+}
+.ai-ext-actions { display: flex; gap: 8px; margin-top: 8px; }
+.ext-status { margin-left: 8px; font-size: 11px; }
+.ext-status.ok { color: var(--color-accent); }
+.ext-status.disabled { color: var(--color-text-disabled); }
+.ext-status.error { color: var(--color-danger); }
+
 /* 只读行的策略是固定的，用文字而不是下拉框——给个灰掉的 select 会让人
    以为是自己没权限点，反而更想找地方改。 */
 .approval-ro-mode { font-size: 11px; color: var(--color-text-disabled); }

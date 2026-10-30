@@ -98,3 +98,20 @@ export interface AIHooksInfo {
   approved: boolean
   error: string
 }
+
+// 一个外部 MCP server 的接入状态（对应 Go 端 services/ai.extServerState）。
+// config 就是 mcp.json 里那个 server 的对象，编辑时原样带回去。
+export interface AIExtServerState {
+  name: string
+  config: {
+    command?: string
+    args?: string[]
+    env?: Record<string, string>
+    url?: string
+    disabled?: boolean
+  }
+  status: 'ok' | 'error' | 'disabled'
+  toolCount: number
+  error?: string
+  tools: string[]
+}

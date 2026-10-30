@@ -88,6 +88,10 @@ type AppService struct {
 	// 这也正是「关闭 QuickDock 会终止后台任务」这句话的兑现方式。
 	StopAIJobsFn func()
 
+	// ShutdownExtAIFn 关闭外部 MCP server 连接（stdio 是子进程，退出时杀），
+	// 退出时调一次。与 StopAIJobsFn 同因：这些进程不随宿主退出而结束。
+	ShutdownExtAIFn func()
+
 	// 标记"这是一次真退出"，令主窗口的 WindowClosing 钩子放行而不是取消关闭并隐藏到托盘。
 	// 更新时（RestartApp 拉起安装器 → app.Quit）必须先调用，否则 cleanup() 里的
 	// window.Close() 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净。
