@@ -136,6 +136,9 @@ func (d *Database) ListAICheckpoints(convID string) ([]AICheckpoint, error) {
 //
 // 时间比较用 julianday：created_at 是带时区偏移的 RFC3339，跨时区/改过系统时间之后
 // 字典序不再等于时间序（墓碑那次的教训）。代价是用不上 created_at 索引，全表扫可接受。
+//
+// 会话被删时不主动调这里：与墓碑同一个判断——用户删完会话，很可能正想「把改坏的
+// 文件退回去」，此时连快照一起清掉等于把最后一根救命稻草也拿走。只靠 TTL 慢慢淘。
 func (d *Database) PurgeAICheckpoints(maxAgeDays, keepPerConv int) ([]AICheckpoint, error) {
 	if maxAgeDays <= 0 {
 		maxAgeDays = AICheckpointMaxAgeDays
@@ -235,21 +238,4 @@ func (d *Database) DeleteAICheckpointsByID(ids []string) (int, error) {
 		}
 	}
 	return removed, nil
-}
-
-// DeleteAIcheckpointsOfConv 删掉一个会话的全部回滚点，返回被删记录。
-//
-// 会话被删时不自动调用：与墓碑同一个判断——用户删会话之后很可能正想「把改坏的
-// 文件退回去」，此时把快照一起清掉等于把最后一根救命稻草也拿走。靠 TTL 淘汰。
-func (d *Database) DeleteAIcheckpointsOfConv(convID string) ([]AICheckpoint, error) {
-	list, err := d.ListAICheckpoints(convID)
-	if err != nil {
-		return nil, err
-	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	if _, err := d.conn.Exec(`DELETE FROM ai_checkpoints WHERE conv_id=?`, convID); err != nil {
-		return nil, err
-	}
-	return list, nil
 }
