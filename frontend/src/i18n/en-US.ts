@@ -1916,6 +1916,7 @@ export default {
   aiApprovalWaiting: 'awaiting approval',
   aiApprovalAllow: 'Allow',
   aiApprovalRemember: 'Allow for this session',
+  aiApprovalRememberScope: 'Allow all {scope} commands this session',
   aiApprovalDeny: 'Deny',
   aiApprovalAllowed: 'Allowed, running…',
   // edit checkpoints (snapshot before write; restore to a previous step)

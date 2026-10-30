@@ -67,6 +67,50 @@ func usageSince(days int) string {
 	return start.Format(time.RFC3339)
 }
 
+// AIApprovalToolStat 按工具聚合的一行审批结果。
+type AIApprovalToolStat struct {
+	Tool  string `json:"tool"`
+	Allow int    `json:"allow"`
+	Deny  int    `json:"deny"`
+	Auto  int    `json:"auto"`
+}
+
+// AIApprovalStatsResult 给前端的审批统计。
+//
+// 字段名用 camelCase，与 AIUsageStats 一致——两者并排显示在同一个面板里，
+// 一个 snake_case 一个 camelCase 会让前端类型定义变成两套规矩。
+type AIApprovalStatsResult struct {
+	Allow  int                  `json:"allow"`
+	Deny   int                  `json:"deny"`
+	Auto   int                  `json:"auto"`
+	ByTool []AIApprovalToolStat `json:"byTool"`
+}
+
+// AIApprovalStats 统计指定窗口内的审批结果（days<=0 表示全部时间）。
+//
+// 独立一个方法而不是塞进 AIUsageStats 的返回值：那是成本数据，这是「闸门调得
+// 对不对」的诊断数据，混在一起会让用量响应多出一块和钱无关的字段，
+// 而前端两个面板的刷新时机本来就不同。
+func (a *AIService) AIApprovalStats(days int) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	sum, err := a.App.DB.AIApprovalSummary(usageSince(days))
+	if err != nil {
+		return services.Fail(err)
+	}
+	out := AIApprovalStatsResult{
+		Allow: sum.Allow, Deny: sum.Deny, Auto: sum.Auto,
+		ByTool: make([]AIApprovalToolStat, 0, len(sum.ByTool)),
+	}
+	for _, s := range sum.ByTool {
+		out.ByTool = append(out.ByTool, AIApprovalToolStat{
+			Tool: s.Tool, Allow: s.Allow, Deny: s.Deny, Auto: s.Auto,
+		})
+	}
+	return services.Ok(out)
+}
+
 // usageBucket 聚合中间态
 type usageBucket struct {
 	requests, prompt, completion, cached int

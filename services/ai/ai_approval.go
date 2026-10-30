@@ -27,7 +27,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
+
 	"quickdock/internal/aiutil"
+	"quickdock/internal/db"
 	"quickdock/internal/logger"
 	mcpsrv "quickdock/internal/mcp"
 )
@@ -59,11 +62,14 @@ const (
 // approvalPolicy 一个工具本次的处置策略。
 type approvalPolicy struct {
 	mode approvalMode
-	// rememberable 是否提供「本次会话都允许」。
+	// rememberable 是否允许「本次会话都允许」。
 	//
 	// LevelRisk 不给：高危操作按单次授权，用户每点一次都要重新看一眼命令。
 	// 提供这个按钮的结果是可预料的——用户为了少点几次而勾上它，然后一条 rm -rf
 	// 在半小时后再也不问了。
+	//
+	// 注意这里只是「允许记住」，**能不能真记住由 approvalGrantKey 决定**：
+	// run_command 还要看这条命令是否单一、有没有可归纳的命令族（见那个函数）。
 	rememberable bool
 }
 
@@ -71,23 +77,102 @@ type approvalPolicy struct {
 //
 // 读类不拦是这条功能的生死线——如果读文件也要确认，三分钟内就会被关掉，
 // 而关掉之后就再也不会打开。
-func aiApprovalPolicyFor(name string, level int) approvalPolicy {
+func aiApprovalPolicyFor(_ string, level int) approvalPolicy {
 	switch level {
 	case mcpsrv.LevelRead:
 		return approvalPolicy{mode: approvalAuto}
 	case mcpsrv.LevelWrite:
-		// run_command 单独排除「本次会话都允许」：它放行的不是某个动作，而是
-		// 「之后任意一条命令」。用户此刻批准的是这一条 npm install，按工具名记住
-		// 一个「什么命令都行」的授权，等于用一次点击把整条防线关掉。
-		// 其余写类工具（file_edit / file_write / spawn_agent）动作固定，记住有意义。
-		if name == "run_command" {
-			return approvalPolicy{mode: approvalAsk}
-		}
+		// 写类一律允许记住，具体粒度交给 approvalGrantKey：
+		// file_edit / file_write 记的是工具名（动作固定），run_command 记的是
+		// 命令族（npm 记 npm，rm 仍要问）。
 		return approvalPolicy{mode: approvalAsk, rememberable: true}
 	default:
 		// LevelRisk 及以上：问，且只给单次。
 		return approvalPolicy{mode: approvalAsk}
 	}
+}
+
+// approvalShellWords 「执行壳」：它们本身不是干活的那个程序，跳过再取首词。
+//
+// 必须跳过 sudo：否则 `sudo rm -rf /` 会被记成「sudo 一族」，之后任意一条
+// sudo 命令都放行——那比不记更糟。
+var approvalShellWords = map[string]bool{
+	"sudo": true, "doas": true, "command": true, "exec": true,
+	"time": true, "nohup": true, "env": true, "nice": true, "start": true,
+}
+
+// approvalCommandHead 取一条命令的「首词」，用作命令族的标识。
+//
+// 返回空字符串表示「这条不该给记住按钮」——多段命令（含 && || ; | &）一律如此。
+// 理由：`cd repo && rm -rf build` 若按首词记成 cd，下次 `cd x && rm -rf y`
+// 就再也不问了，而用户当初批准的是「切个目录」。
+func approvalCommandHead(cmd string) string {
+	s := strings.TrimSpace(cmd)
+	if s == "" {
+		return ""
+	}
+	// 一次只批准一条命令：连接符说明这里其实有多条。
+	if strings.ContainsAny(s, "&|;\n") {
+		return ""
+	}
+	fields := strings.Fields(s)
+	for len(fields) > 0 {
+		w := fields[0]
+		// 跳过前置环境变量赋值 FOO=bar（只认「前面不像路径」的形态，
+		// 避免把 C:\a=b\npm 这种路径里的等号当成赋值）。
+		if i := strings.IndexByte(w, '='); i > 0 && !strings.ContainsAny(w[:i], `/\`) {
+			fields = fields[1:]
+			continue
+		}
+		if approvalShellWords[strings.ToLower(w)] {
+			fields = fields[1:]
+			continue
+		}
+		break
+	}
+	if len(fields) == 0 {
+		return ""
+	}
+	// 去掉路径与扩展名：C:\Program Files\nodejs\npm.cmd → npm
+	base := fields[0]
+	if i := strings.LastIndexAny(base, `/\`); i >= 0 {
+		base = base[i+1:]
+	}
+	base = strings.ToLower(base)
+	for _, ext := range []string{".exe", ".cmd", ".bat", ".ps1", ".com"} {
+		base = strings.TrimSuffix(base, ext)
+	}
+	if base == "" {
+		return ""
+	}
+	return base
+}
+
+// approvalGrantKey 「本次会话都允许」记在哪个 key 上。
+//
+// 第二个返回值为 false 表示这次不给记住按钮。除了高危等级，还有一类情况：
+// run_command 拿不到可归纳的命令族（空命令、多段命令）。此时只让用户点单次——
+// 记不住比记错安全。
+func approvalGrantKey(name string, args map[string]any) (string, bool) {
+	if name != "run_command" {
+		return name, true
+	}
+	head := approvalCommandHead(mcpsrv.Arg(args, "command"))
+	if head == "" {
+		return "", false
+	}
+	return "run_command:" + head, true
+}
+
+// aiApprovalGrantScope 描述「这次记住的是什么范围」，给前端写在按钮旁边。
+//
+// 按命令族记住必须让用户看见范围：他点的是「本次会话都允许」，如果他以为是
+// 「这一条」，后来发现 npm 之外也被静默放行（或反过来），这个按钮就再没人信了。
+func aiApprovalGrantScope(grantKey string) string {
+	if head, ok := strings.CutPrefix(grantKey, "run_command:"); ok && head != "" {
+		return head
+	}
+	return ""
 }
 
 // approvalDecision 一次点击的结果。
@@ -100,6 +185,8 @@ type approvalDecision struct {
 type approvalGate struct {
 	sink   EventSink
 	convID string
+	// database 只用于落审批明细（ai_approvals），不参与拦截判定。
+	database *db.Database
 
 	// askMu 串行化整个「问 → 等」过程。
 	//
@@ -115,12 +202,34 @@ type approvalGate struct {
 	granted map[string]bool
 }
 
-func newApprovalGate(sink EventSink, convID string) *approvalGate {
+func newApprovalGate(sink EventSink, convID string, database *db.Database) *approvalGate {
 	return &approvalGate{
-		sink:    sink,
-		convID:  convID,
-		pending: make(map[string]chan approvalDecision),
-		granted: make(map[string]bool),
+		sink:     sink,
+		convID:   convID,
+		database: database,
+		pending:  make(map[string]chan approvalDecision),
+		granted:  make(map[string]bool),
+	}
+}
+
+// record 落一条审批明细。
+//
+// 写失败只记日志、不影响审批结果：统计是治理用的，不能因为它把这半秒的
+// 用户等待变成一次失败。db 为空（单测、无库）时直接跳过。
+func (g *approvalGate) record(callID, name, decision string, remember bool) {
+	if g == nil || g.database == nil {
+		return
+	}
+	err := g.database.RecordAIApproval(db.AIApproval{
+		ID:       uuid.New().String(),
+		ConvID:   g.convID,
+		CallID:   callID,
+		Tool:     name,
+		Decision: decision,
+		Remember: remember,
+	})
+	if err != nil {
+		logger.W("[ai-approval] 记录审批结果失败: %v", err)
 	}
 }
 
@@ -154,19 +263,28 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 	g.askMu.Lock()
 	defer g.askMu.Unlock()
 
-	// 本会话已经放行过这个工具（用户点过「本次会话都允许」）。
+	// 「本次会话都允许」记在 grantKey 上：普通写工具就是工具名，
+	// run_command 是「run_command:命令首词」——批准 npm install 之后 npm 一族
+	// 不再问，而 rm / curl / git push 换了首词，照问。
+	grantKey, canRemember := approvalGrantKey(name, args)
+	rememberable := pol.rememberable && canRemember
+
+	// 本会话已经放行过这一族调用（用户点过「本次会话都允许」）。
 	// 放在 askMu 之后再查：并发轮次里两个同样的调用会排在锁上，第一个点完之后
 	// 第二个走到这里就能直接放行，不会把同一张卡再弹一次。
-	g.pMu.Lock()
-	allowed := g.granted[name]
-	g.pMu.Unlock()
-	if allowed {
-		return true, ""
+	if canRemember {
+		g.pMu.Lock()
+		allowed := g.granted[grantKey]
+		g.pMu.Unlock()
+		if allowed {
+			return true, ""
+		}
 	}
 
 	// 已经停止的提问不该再弹卡片：用户按了停止之后界面还在要确认，
 	// 是最典型的「这软件失控了」的观感。
 	if err := ctx.Err(); err != nil {
+		g.record(callID, name, db.AIDecisionStopped, false)
 		return false, "本次提问已停止"
 	}
 
@@ -189,7 +307,8 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 		"levelName":    aiApprovalLevelName(level),
 		"args":         aiApprovalArgsBrief(name, args),
 		"riskNote":     aiApprovalRiskNote(name, level, args),
-		"rememberable": pol.rememberable,
+		"rememberable": rememberable,
+		"grantScope":   aiApprovalGrantScope(grantKey),
 		"timeout":      int(aiApprovalTimeout.Seconds()),
 	})
 
@@ -201,23 +320,31 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 	for {
 		select {
 		case <-ctx.Done():
+			g.record(callID, name, db.AIDecisionStopped, false)
 			return false, "本次提问已停止"
 		case <-timer.C:
 			logger.W("[ai-approval] 等待确认超时 conv=%s tool=%s call=%s", g.convID, name, callID)
+			g.record(callID, name, db.AIDecisionTimeout, false)
 			return false, fmt.Sprintf("等待确认超时（%d 秒）", int(aiApprovalTimeout.Seconds()))
 		case <-tick.C:
 			if g.sink.Failed() {
+				g.record(callID, name, db.AIDecisionDisconnected, false)
 				return false, "连接已断开"
 			}
 		case d := <-ch:
 			if !d.Allow {
+				g.record(callID, name, db.AIDecisionDeny, false)
 				return false, "用户拒绝了这次操作"
 			}
-			if d.Remember && pol.rememberable {
+			remember := d.Remember && rememberable
+			if remember {
 				g.pMu.Lock()
-				g.granted[name] = true
+				g.granted[grantKey] = true
 				g.pMu.Unlock()
 			}
+			// 记的是「实际生效的记住」而不是「用户点没点」：高危工具与多段命令
+			// 点不了这个按钮，若按点击算，统计会显示一堆其实没生效的记住。
+			g.record(callID, name, db.AIDecisionAllow, remember)
 			return true, ""
 		}
 	}

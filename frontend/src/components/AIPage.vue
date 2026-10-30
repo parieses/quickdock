@@ -120,6 +120,9 @@ interface AIToolCall {
   approval?: 'pending' | 'allowed' | 'denied' | 'expired'
   riskNote?: string
   rememberable?: boolean
+  // 「记住」的范围：命令类工具按命令族记住，这里放族名（如 npm），
+  // 按钮上要写明「允许 npm 命令」，否则用户以为自己只批准了这一条。
+  grantScope?: string
   // 审批归属的会话：后端下发而不是读 activeId —— 用户在等待期间可能切走，
   // 切回来再点时 activeId 已经不是原来那个会话了。
   approvalConvId?: string
@@ -1963,6 +1966,7 @@ async function send() {
               at.approval = 'pending'
               at.riskNote = String(data.riskNote || '')
               at.rememberable = !!data.rememberable
+              at.grantScope = String(data.grantScope || '')
               // 会话由后端下发：用户可能在这张卡等着的时候切走再切回，
               // 那时 activeId 已经不是发起审批的那个会话了。
               at.approvalConvId = String(data.convId || '')
@@ -2943,7 +2947,7 @@ onUnmounted(() => {
                       <div v-if="tc.riskNote" class="ai-approval-risk">{{ tc.riskNote }}</div>
                       <div class="ai-approval-btns">
                         <button class="ai-approval-btn is-allow" @click.stop="approveTool(tc, 'allow')">{{ t('aiApprovalAllow') }}</button>
-                        <button v-if="tc.rememberable" class="ai-approval-btn is-allow-all" @click.stop="approveTool(tc, 'allow', true)">{{ t('aiApprovalRemember') }}</button>
+                        <button v-if="tc.rememberable" class="ai-approval-btn is-allow-all" @click.stop="approveTool(tc, 'allow', true)">{{ tc.grantScope ? t('aiApprovalRememberScope', { scope: tc.grantScope }) : t('aiApprovalRemember') }}</button>
                         <button class="ai-approval-btn is-deny" @click.stop="approveTool(tc, 'deny')">{{ t('aiApprovalDeny') }}</button>
                       </div>
                     </div>

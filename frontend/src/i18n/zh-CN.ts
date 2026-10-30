@@ -1923,6 +1923,8 @@ export default {
   aiApprovalWaiting: '等待确认',
   aiApprovalAllow: '允许执行',
   aiApprovalRemember: '本次会话都允许',
+  // 命令类工具按命令族记住：必须写清族名（npm / git），否则用户以为只批了这一条
+  aiApprovalRememberScope: '本次会话都允许 {scope} 命令',
   aiApprovalDeny: '拒绝',
   aiApprovalAllowed: '已允许，执行中…',
   // 编辑回滚点（写盘前快照，可退回到某一步之前）

@@ -405,6 +405,22 @@ var baseTables = []string{
 		created_at TEXT NOT NULL
 	)`,
 
+	// AI 审批结果明细：一次「停下来问用户」一行。
+	//
+	// 只记真的问过人的那些（auto 放行不记，否则读文件会把这张表灌满）。
+	// 为什么要有它：闸门设得太严时用户的表现是「AI 变笨了」，然后一路点拒绝，
+	// 最后把整个功能关掉——只有「拒绝了几次、卡在哪几个工具上」这个数能说明问题，
+	// 没有它就只能靠猜。
+	`CREATE TABLE IF NOT EXISTS ai_approvals (
+		id TEXT PRIMARY KEY,
+		conv_id TEXT NOT NULL DEFAULT '',
+		call_id TEXT NOT NULL DEFAULT '',
+		tool TEXT NOT NULL DEFAULT '',
+		decision TEXT NOT NULL DEFAULT '',
+		remember INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`,
+
 	// AI 用量明细：一次模型调用一行。
 	//
 	// 为什么不复用 ai_conversations 上的累加列：那是 upsert 口径，只能回答「这个会话一共
@@ -801,6 +817,9 @@ func (d *Database) migrate() error {
 		// ——CreateAICheckpoint 用 MAX+1 分配编号，撞车时靠约束报错触发重试，
 		// 没有唯一约束就会静默产生两条同号回滚点（表现为「回滚到第 3 步」结果不确定）。
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_ai_checkpoints_conv ON ai_checkpoints(conv_id, seq)`,
+		// 审批明细按时间区间聚合「哪个工具老是被拦」，日期列必须有索引：
+		// 这张表条数不少（一次提问可能问好几次），而统计永远是按天扫。
+		`CREATE INDEX IF NOT EXISTS idx_ai_approvals_created ON ai_approvals(created_at)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {

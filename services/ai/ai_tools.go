@@ -541,6 +541,17 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 		prev, hit := seen[key]
 		seenMu.Unlock()
 		if hit {
+			if prev.Denied {
+				// 被拒绝的调用也算「这次提问里已经问过了」：模型原样重试只会
+				// 再弹一张一模一样的卡，用户还得再点一次拒绝。拒绝要是一道墙，
+				// 不是一扇会自动重开的门。
+				rec.Denied = true
+				rec.Error = prev.Error
+				rec.Result = fmt.Sprintf(
+					"这个调用在第 %d 轮已被用户拒绝，本次提问内不要重试。改用别的办法，或先向用户说明为什么非它不可。",
+					prev.Round)
+				return rec, rec.Result
+			}
 			rec.Dedup = true
 			rec.Result = fmt.Sprintf(
 				"与第 %d 轮执行过的 %s 参数完全相同，已跳过、没有重复执行。上次的结果如下（无需再调）：\n%s",
@@ -556,13 +567,19 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	//     问用户等于同一件事问两遍；
 	//   - 参数坏了的调用执行必然报错，问也没有意义。
 	//
-	// 被拒绝的调用不写进 seen：拒绝的是这一次，用户下次再看到可能就同意了。
-	// 这也意味着模型若原样重试，会再弹一次卡片——那正是「拒绝」应有的效果。
+	// 被拒绝的调用也写进 seen（见上面命中分支）：拒绝是本次提问内的一道墙。
+	// seen 只活在这一次提问里，重新发问仍然会重新征求同意——所以「用户可能改主意」
+	// 的机会并没有丢，丢掉的只是「同一句话问两遍」。
 	if gate := approvalGateFrom(ctx); gate != nil {
 		if allow, note := gate.await(ctx, c.ID, c.Name, mcpsrv.ToolLevel(c.Name), args); !allow {
 			rec.Denied = true
 			rec.Error = "未获批准，未执行"
 			rec.Result = aiApprovalRejectText(c.Name, note)
+			if seen != nil {
+				seenMu.Lock()
+				seen[key] = rec
+				seenMu.Unlock()
+			}
 			return rec, rec.Result
 		}
 	}
