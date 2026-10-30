@@ -544,7 +544,7 @@ QuickDock 的精髓在于**键盘驱动**。默认全局热键：
 
 - **流式输出**：本地 HTTP 流式服务，token 到达即显示
 - **思考过程折叠**：模型的 reasoning 内容默认收起，需要时展开
-- **会话管理**：多会话、标题自动生成、重新生成标题、清空上下文、删除会话
+- **会话管理**：多会话、标题自动生成、重新生成标题、删除进回收站、任务/空间分组折叠
 - **参数可调**：Temperature / MaxTokens / TopP / FrequencyPenalty / PresencePenalty
 - **Token 用量统计**：每次对话记录 prompt 与 completion token 数
 

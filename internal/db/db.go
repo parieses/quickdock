@@ -48,6 +48,7 @@ var validTables = map[string]bool{
 	"plugin_exec_logs":  true,
 	"ai_conversations":  true,
 	"ai_messages":       true,
+	"ai_spaces":         true,
 	"plugins":           true,
 	"plugin_data":       true,
 	"ssh_hosts":         true,
@@ -90,9 +91,18 @@ var validColumns = map[string]bool{
 	"content":           true,
 	"reasoning_content": true,
 	"images":            true, // ai_messages：图片引用 JSON 数组（仅 user 消息）
-	"image_hash":        true,
-	"count":             true,
-	"prompt_tokens":     true, "completion_tokens": true,
+	"cwd":               true, // ai_conversations / ai_spaces：绑定的工作目录
+	// ai_conversations：所属空间 id（空 = 普通任务）与创建时选定的模式。
+	// 白名单是全局的、不按表分，漏一个就是写入时「非法列名」。
+	"space_id": true,
+	"mode":     true,
+	// ai_messages：工具调用记录与轮次（内置 agent）。白名单是全局的、不按表分，
+	// 漏一个就是写入时「非法列名」——而 structToMap 会把零值字段也转成列。
+	"tool_calls":    true,
+	"tool_rounds":   true,
+	"image_hash":    true,
+	"count":         true,
+	"prompt_tokens": true, "completion_tokens": true,
 	"last_used":  true,
 	"created_at": true, "updated_at": true, "deleted_at": true,
 	"method": true, "url": true, "headers": true, "body": true,
@@ -108,7 +118,13 @@ var validColumns = map[string]bool{
 	"working_dir": true, "http_method": true, "http_headers": true, "http_body": true,
 	"schedule_kind": true, "run_at": true, "interval_sec": true, "time_of_day": true,
 	"weekdays": true, "notify": true, "next_run": true,
-	"last_run": true, "last_status": true, "last_result": true,
+	// notify_channels：回收站恢复定时任务时整行都会被转成插入列，
+	// 漏它就会在「恢复」这一步报「非法列名: notify_channels」——
+	// 报错发生在删除之后，看起来像数据丢了。
+	"notify_channels": true,
+	// retry_count 同理：回收站恢复定时任务时整行转插入列，漏了就在恢复那一步炸。
+	"retry_count": true,
+	"last_run":    true, "last_status": true, "last_result": true,
 	// "action" 已在 clipboard_rules 处声明（白名单全局共用，重复声明无意义）
 	// target：回收站恢复定时任务必需——整行 21 个列都会被转成插入列，漏一个就报
 	// 「非法列名」，而且报错发生在实际删 Bespoke 定时任务之后的恢复环节，很难联想到这里。

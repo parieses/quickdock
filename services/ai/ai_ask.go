@@ -149,9 +149,15 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 	if maxTok > askMaxTokens {
 		maxTok = askMaxTokens
 	}
+	// 必须把结果挂到这次调用真正读的那份配置上：callAIOnce 只认 cfg.MaxTokens，
+	// 算出来却不用等于这两个上限（req.MaxTokens 的收紧、askMaxTokens 的兜底）
+	// 形同虚设——用户把上限调到 200 想省钱，请求里发的仍是档案里的 8192。
+	// 用局部副本而不是改 a 的缓存：一次性问答不该污染对话流用的档案。
+	askCfg := cfg
+	askCfg.MaxTokens = maxTok
 
 	start := time.Now()
-	text, usage, err := a.callAIOnce(ctx, cfg, []map[string]string{
+	text, usage, err := a.callAIOnce(ctx, askCfg, []map[string]string{
 		{"role": "system", "content": system},
 		{"role": "user", "content": question},
 	})
@@ -160,7 +166,7 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 	}
 	// 一次性调用同样花钱，必须记进统计：这条路径服务 SSH 面板、剪贴板 AI、
 	// 笔记 AI 与插件 host.ai.ask。早期只记对话流，这几处消耗在统计里完全是空白。
-	a.recordAIUsage("", usageKindAsk, cfg, usage)
+	a.recordAIUsage("", usageKindAsk, askCfg, usage)
 
 	truncated := false
 	if n := len([]rune(text)); n > askMaxReturnRune {
@@ -231,6 +237,9 @@ func (a *AIService) AIAskStream(req AIAskRequest, onToken func(text string)) *se
 	if maxTok > askMaxTokens {
 		maxTok = askMaxTokens
 	}
+	// 同上：streamAIChat 也只读 cfg.MaxTokens，不挂上去这两个上限就白算了。
+	askCfg := cfg
+	askCfg.MaxTokens = maxTok
 
 	// streamAIChat 收 []map[string]interface{}（与 buildAIMessages 同构），
 	// 这里手搓两条消息即可，不必再走一次会话/摘要逻辑。
@@ -240,12 +249,16 @@ func (a *AIService) AIAskStream(req AIAskRequest, onToken func(text string)) *se
 	}
 
 	start := time.Now()
-	text, usage, err := a.streamAIChat(ctx, cfg, messages, "ai-ask", onToken, nil)
+	// 一次性问答不带工具：它的调用方（SSH 面板 / 剪贴板 AI / 笔记 AI / 插件
+	// host.ai.ask）都在等一句短回答，没有展示工具调用卡片的位置，
+	// 也没有让它连调几轮的预算。工具只对 AI 页的对话流开放。
+	turn, err := a.streamAIChat(ctx, askCfg, messages, "ai-ask", nil, onToken, nil)
 	if err != nil {
 		return services.Fail(err)
 	}
-	a.recordAIUsage("", usageKindAsk, cfg, usage)
+	a.recordAIUsage("", usageKindAsk, askCfg, turn.Usage)
 
+	text := turn.Content
 	truncated := false
 	if n := len([]rune(text)); n > askMaxReturnRune {
 		text = string([]rune(text)[:askMaxReturnRune])

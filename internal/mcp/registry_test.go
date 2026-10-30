@@ -204,3 +204,91 @@ func TestAnnotationsDerivedFromLevel(t *testing.T) {
 		t.Error("LevelWrite 不应标 destructiveHint=true")
 	}
 }
+
+// TestAgentRegistrySeparatedFromMCP 锁定两个注册表的分工。
+//
+// 这条分界是产品决定：MCP 只对外提供「QuickDock 自身的能力」，抓网页/改文件/跑命令
+// 这类属于 AI 助手自带的手艺，外部客户端本就有。写错的表现是客户端 tools/list 里
+// 冒出一个能改磁盘的 file_edit——用户不会认为那是自己的工具。
+func TestAgentRegistrySeparatedFromMCP(t *testing.T) {
+	prev := MaxLevel()
+	defer SetMaxLevel(prev)
+	SetMaxLevel(LevelWrite)
+
+	Agent.Add(Tool{
+		Name:        "agent_probe",
+		Description: "单测用 agent 工具",
+		Level:       LevelRead,
+		Category:    CategoryCode,
+		Handler:     func(map[string]any) (any, error) { return "agent-ok", nil },
+	})
+
+	for _, d := range List() {
+		if d.Name == "agent_probe" {
+			t.Fatal("agent 工具不该出现在 MCP 的 tools/list 里")
+		}
+	}
+
+	var inAI bool
+	for _, f := range ExposedFunctions() {
+		if f.Name == "agent_probe" {
+			inAI = true
+			if !f.AgentOnly {
+				t.Error("ExposedFunctions 要标出 AgentOnly，否则模式门会把它当宿主工具")
+			}
+		}
+	}
+	if !inAI {
+		t.Fatal("内置 AI 应该看得到 agent 工具")
+	}
+
+	var info *ToolInfo
+	cat := Catalog()
+	for i := range cat {
+		if cat[i].Name == "agent_probe" {
+			info = &cat[i]
+		}
+	}
+	if info == nil {
+		t.Fatal("面板要能看到 agent 工具，否则无法单独关闭")
+	}
+	if !info.AgentOnly || info.Exposed {
+		t.Fatalf("agent 工具应标记 AgentOnly 且 Exposed=false，实际 %+v", *info)
+	}
+
+	// 执行路径同样要分开：名字是可猜的，只靠 list 隐藏等于没拦。
+	if _, err := Call("agent_probe", nil); err == nil {
+		t.Fatal("MCP 侧 Call 应拒绝 agent 工具")
+	} else if !strings.Contains(err.Error(), "仅内置 AI") {
+		t.Fatalf("错误信息应说明原因，实际: %v", err)
+	}
+	if v, err := CallAgent("agent_probe", nil); err != nil || v != "agent-ok" {
+		t.Fatalf("CallAgent 应能执行 agent 工具，实际 v=%v err=%v", v, err)
+	}
+}
+
+// TestAgentToolHonorsPerToolSwitch 单工具开关对两套注册表一样生效。
+//
+// 用户在内置 AI 的定位上比对外暴露更在意「别让它碰我的文件」，
+// 所以面板里关掉 file_edit 必须真的挡住 AI，而不是只挡住 MCP 客户端。
+func TestAgentToolHonorsPerToolSwitch(t *testing.T) {
+	prevMax, prevOff := MaxLevel(), Disabled()
+	defer func() { SetMaxLevel(prevMax); SetDisabled(prevOff) }()
+	SetMaxLevel(LevelWrite)
+
+	Agent.Add(Tool{
+		Name:    "agent_switch_probe",
+		Level:   LevelRead,
+		Handler: func(map[string]any) (any, error) { return "ok", nil },
+	})
+	SetDisabled([]string{"agent_switch_probe"})
+
+	if _, err := CallAgent("agent_switch_probe", nil); err == nil {
+		t.Fatal("关掉的工具内置 AI 也不该能调")
+	}
+	for _, f := range ExposedFunctions() {
+		if f.Name == "agent_switch_probe" {
+			t.Fatal("关掉的工具不该出现在 tools[] 里——模型看到就会去调，然后收到一串拒绝")
+		}
+	}
+}

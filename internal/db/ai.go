@@ -1,11 +1,29 @@
 package db
 
 import (
+	"database/sql"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
-// AIConversation AI 对话会话
+// AISpace AI 空间：绑定一个目录的任务容器。
+//
+// 与「任务（会话）」的界线：空间是**目录**的映射，任务是**一次对话**。
+// 用户在一个项目下会开十几条对话，但它们共享同一个目录——把这些对话聚在一个
+// 空间下，侧栏才不会变成一长串看不出归属的标题。
+type AISpace struct {
+	ID   string `json:"id"`
+	Name string `json:"name"` // 展示名，默认取目录名
+	// Cwd 空间绑定的目录（绝对路径）。空串只在用户手工创建「不带目录的空间」时出现，
+	// 目前创建入口都要求选目录，所以实践中恒非空。
+	Cwd       string `json:"cwd"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
+}
+
+// AIConversation AI 对话会话（界面上叫「任务」）
 type AIConversation struct {
 	ID               string `json:"id"`
 	Title            string `json:"title"`
@@ -14,8 +32,21 @@ type AIConversation struct {
 	CompletionTokens int    `json:"completion_tokens"`
 	RequestCount     int    `json:"request_count"`
 	Model            string `json:"model"` // 最近一次问答使用的模型名（老数据为空）
-	CreatedAt        string `json:"created_at"`
-	UpdatedAt        string `json:"updated_at"`
+	// Cwd 这个对话绑定的工作目录（绝对路径，空 = 未绑定）。
+	// 绑在会话而不是全局设置上：同时开两个项目的对话是常态，
+	// 而「AI 该在哪个目录里读文件/跑命令」必须跟着对话走，不能是全局状态。
+	//
+	// 为空且 SpaceID 非空时回退到空间的目录——换目录改空间一处即可，
+	// 不必逐条任务改。
+	Cwd string `json:"cwd"`
+	// SpaceID 所属空间；空 = 普通任务（侧栏的「任务」组）。
+	SpaceID string `json:"space_id"`
+	// Mode 创建时选定的任务类型：chat / translate / summarize / explain / tutorial。
+	// 存库而不是每次从前端带：模式是这个任务的属性（「这条对话是用来翻译的」），
+	// 跟着任务走才不会切走再回来就变了。
+	Mode      string `json:"mode"`
+	CreatedAt string `json:"created_at"`
+	UpdatedAt string `json:"updated_at"`
 }
 
 // AIMessage AI 对话消息
@@ -41,12 +72,29 @@ type AIMessage struct {
 	CachedTokens     int    `json:"cached_tokens"`
 	// Stopped 这条助手回复是被用户中途打断的（内容是半截的），
 	// 前端据此在气泡上标「已中断」，避免刷新后被当成完整回答。
-	Stopped   bool   `json:"stopped"`
-	CreatedAt string `json:"created_at"`
+	Stopped bool `json:"stopped"`
+	// ToolCalls 这一条回复期间发生的工具调用，JSON 数组（结构由 services/ai 定义，
+	// db 层不解析它——工具规格会随 MCP 面板演进，db 不该跟着改）。
+	// 空串表示没调过工具；不写 "[]"，省掉绝大多数行的无意义字节。
+	ToolCalls string `json:"tool_calls"`
+	// ToolRounds 用了几轮工具调用（0 = 纯文本回答）。
+	// 与「调用了几个工具」不同：一轮可以并发调多个，界面上「调了几轮」要看这个。
+	ToolRounds int    `json:"tool_rounds"`
+	CreatedAt  string `json:"created_at"`
+}
+
+func mapToAISpace(m map[string]interface{}) AISpace {
+	return AISpace{
+		ID:        str(m["id"]),
+		Name:      str(m["name"]),
+		Cwd:       str(m["cwd"]),
+		CreatedAt: str(m["created_at"]),
+		UpdatedAt: str(m["updated_at"]),
+	}
 }
 
 func mapToAIConversation(m map[string]interface{}) AIConversation {
-	return AIConversation{
+	c := AIConversation{
 		ID:               str(m["id"]),
 		Title:            str(m["title"]),
 		Summary:          str(m["summary"]),
@@ -54,9 +102,18 @@ func mapToAIConversation(m map[string]interface{}) AIConversation {
 		CompletionTokens: integer(m["completion_tokens"]),
 		RequestCount:     integer(m["request_count"]),
 		Model:            str(m["model"]),
+		Cwd:              str(m["cwd"]),
+		SpaceID:          str(m["space_id"]),
+		Mode:             str(m["mode"]),
 		CreatedAt:        str(m["created_at"]),
 		UpdatedAt:        str(m["updated_at"]),
 	}
+	// 老库没有 mode 列时（升级前的行）这里会是空串。按 chat 处理而不是新增一次
+	// 全表回填：空串在后端一律走「默认 chat」，效果等价，少一次迁移风险。
+	if c.Mode == "" {
+		c.Mode = "chat"
+	}
+	return c
 }
 
 func mapToAIMessage(m map[string]interface{}) AIMessage {
@@ -72,6 +129,8 @@ func mapToAIMessage(m map[string]interface{}) AIMessage {
 		CompletionTokens: integer(m["completion_tokens"]),
 		CachedTokens:     integer(m["cached_tokens"]),
 		Stopped:          integer(m["stopped"]) != 0,
+		ToolCalls:        str(m["tool_calls"]),
+		ToolRounds:       integer(m["tool_rounds"]),
 		CreatedAt:        str(m["created_at"]),
 	}
 }
@@ -85,11 +144,126 @@ func (d *Database) ListAIConversations() ([]AIConversation, error) {
 	return mapSlice(rows, mapToAIConversation), nil
 }
 
-// CreateAIConversation 新建会话
-func (d *Database) CreateAIConversation(title string) (*AIConversation, error) {
+// ---- 空间 ----
+
+// ListAISpaces 全部空间（按更新时间倒序）
+func (d *Database) ListAISpaces() ([]AISpace, error) {
+	rows, err := d.ListTableWhere("ai_spaces", "1=1 ORDER BY updated_at DESC, created_at DESC")
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, mapToAISpace), nil
+}
+
+// GetAISpace 读取单个空间
+func (d *Database) GetAISpace(id string) (*AISpace, error) {
+	row, err := d.QueryOne("SELECT * FROM ai_spaces WHERE id = ?", id)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, fmt.Errorf("空间不存在")
+	}
+	s := mapToAISpace(row)
+	return &s, nil
+}
+
+// FindAISpaceByCwd 按目录找空间（同一目录不该建出两个空间）。
+// 目录比较前统一 Clean + 小写（Windows 不区分大小写），否则「D:\pp\quickdock」
+// 与「d:/pp/quickdock」会被判成两个目录，用户每换一种写法就多一个空空间。
+func (d *Database) FindAISpaceByCwd(cwd string) (*AISpace, error) {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return nil, nil
+	}
+	list, err := d.ListAISpaces()
+	if err != nil {
+		return nil, err
+	}
+	want := strings.ToLower(filepath.Clean(cwd))
+	for i := range list {
+		if strings.ToLower(filepath.Clean(list[i].Cwd)) == want {
+			s := list[i]
+			return &s, nil
+		}
+	}
+	return nil, nil
+}
+
+// CreateAISpace 新建空间（cwd 必填：没有目录的空间只是个文件夹分组，
+// 那是 notes 的活，不该在这里重复造）。
+func (d *Database) CreateAISpace(name, cwd string) (*AISpace, error) {
+	s := &AISpace{
+		ID:        newID(),
+		Name:      strings.TrimSpace(name),
+		Cwd:       strings.TrimSpace(cwd),
+		CreatedAt: now(),
+		UpdatedAt: now(),
+	}
+	if s.Name == "" {
+		s.Name = filepath.Base(s.Cwd)
+	}
+	if err := d.BulkInsert("ai_spaces", []map[string]interface{}{structToMap(s)}); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
+// UpdateAISpaceMeta 改空间名 / 绑定目录（空字段表示不更新）。
+//
+// 与会话的 UpdateAIConversationMeta 同构：刻意保持一致的「空串 = 不改」约定，
+// 两个入口各写一套语义是最容易记反的那种不一致。
+func (d *Database) UpdateAISpaceMeta(id, name, cwd string) error {
+	sets := []string{}
+	args := []interface{}{}
+	if name != "" {
+		sets = append(sets, "name = ?")
+		args = append(args, name)
+	}
+	if cwd != "" {
+		sets = append(sets, "cwd = ?")
+		args = append(args, cwd)
+	}
+	sets = append(sets, "updated_at = ?")
+	args = append(args, now(), id)
+	return d.ExecuteParams("UPDATE ai_spaces SET "+strings.Join(sets, ", ")+" WHERE id = ?", args)
+}
+
+// ListAIConversationsInSpace 某空间下的全部任务
+func (d *Database) ListAIConversationsInSpace(spaceID string) ([]AIConversation, error) {
+	rows, err := d.ListTableWhere("ai_conversations", "space_id = ? ORDER BY updated_at DESC", spaceID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(rows, mapToAIConversation), nil
+}
+
+// ---- 任务（会话）----
+
+// NewAIConversation 新建任务的参数。
+//
+// 用结构体而不是继续往 CreateAIConversation 上加位置参数：加上 mode/spaceID/cwd
+// 之后已经有四个 string 了，调用点会变成一长串难以核对的实参，而它们的类型
+// 全都相同 —— 传错顺序编译器一声不响，出错的表现只是「这条对话的模式不对」。
+type NewAIConversation struct {
+	Title   string
+	Mode    string // 空 = chat
+	SpaceID string // 空 = 普通任务
+	Cwd     string // 空 = 未绑定（空间任务会回退到空间目录）
+}
+
+// CreateAIConversation 新建任务
+func (d *Database) CreateAIConversation(in NewAIConversation) (*AIConversation, error) {
+	mode := strings.TrimSpace(in.Mode)
+	if mode == "" {
+		mode = "chat"
+	}
 	c := &AIConversation{
 		ID:        newID(),
-		Title:     strings.TrimSpace(title),
+		Title:     strings.TrimSpace(in.Title),
+		Mode:      mode,
+		SpaceID:   strings.TrimSpace(in.SpaceID),
+		Cwd:       strings.TrimSpace(in.Cwd),
 		CreatedAt: now(),
 		UpdatedAt: now(),
 	}
@@ -97,6 +271,17 @@ func (d *Database) CreateAIConversation(title string) (*AIConversation, error) {
 		return nil, err
 	}
 	return c, nil
+}
+
+// SetAIConversationMode 改任务的模式（创建后仍允许改：用户可能开错了类型）。
+func (d *Database) SetAIConversationMode(id, mode string) error {
+	if strings.TrimSpace(mode) == "" {
+		mode = "chat"
+	}
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET mode = ?, updated_at = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(mode), now(), strings.TrimSpace(id)},
+	)
 }
 
 // GetAIConversation 读取单个会话
@@ -112,12 +297,141 @@ func (d *Database) GetAIConversation(id string) (*AIConversation, error) {
 	return &c, nil
 }
 
-// DeleteAIConversation 删除会话及其消息（级联）
+// DeleteAIConversation 硬删除（不进回收站）。
+//
+// 只给「系统自己发起的清理」用（例如恢复回收站时要先清掉同名残留）。
+// 用户主动删除一律走 DeleteAIConversationToRecycle —— 见 tombstone.go 的动机说明。
 func (d *Database) DeleteAIConversation(id string) error {
 	if err := d.ExecuteParams("DELETE FROM ai_messages WHERE conv_id = ?", []interface{}{id}); err != nil {
 		return err
 	}
 	return d.ExecuteParams("DELETE FROM ai_conversations WHERE id = ?", []interface{}{id})
+}
+
+// DeleteAIConversationToRecycle 用户主动删除任务：先拍墓碑再真删。
+//
+// 一条任务里攒着的是几十轮对话，误删等于丢掉一整段上下文；而它不像笔记那样
+// 能被「再写一遍」替代。走项目/集合/定时任务同一套 tombstone 机制，
+// 「设置 → 历史 → 回收站」里一键恢复。
+//
+// **消息一并入墓碑**：只恢复一个空会话等于什么都没恢复——用户要的是那几轮对话，
+// 不是一行标题。消息行数可能成百上千，但都是纯文本，拍进 payload 的代价可以接受。
+func (d *Database) DeleteAIConversationToRecycle(id string) error {
+	rows := map[string][]map[string]interface{}{}
+	d.mu.RLock()
+	conv, cerr := captureRows(d.conn, "ai_conversations", "id = ?", id)
+	if cerr == nil {
+		msgs, merr := captureRows(d.conn, "ai_messages", "conv_id = ?", id)
+		if merr == nil {
+			rows["ai_messages"] = msgs
+		}
+		rows["ai_conversations"] = conv
+	}
+	d.mu.RUnlock()
+	if cerr != nil {
+		return cerr
+	}
+	if len(conv) == 0 {
+		return d.DeleteAIConversation(id)
+	}
+	label := rowLabel(conv[0])
+	if label == "" {
+		// ai_conversations 没有 name 列，rowLabel 取不到值；标题是它真正的展示名。
+		if t, ok := conv[0]["title"].(string); ok && t != "" {
+			label = t
+		} else {
+			label = id
+		}
+	}
+	if err := d.AddTombstone(RecycleAITask, id, label, rows); err != nil {
+		return err
+	}
+	return d.DeleteAIConversation(id)
+}
+
+// DeleteAISpaceToRecycle 用户主动删除空间：连它下面的全部任务与消息一起进回收站。
+//
+// 只拍容器不拍内容会让「恢复空间」变成「恢复一个空文件夹」——比误删更难看。
+// 因此载荷里带上空间行、其下所有会话行，以及这些会话的全部消息行；
+// restoreOrder 保证恢复时按 空间 → 会话 → 消息 的顺序写回，不会撞外键。
+func (d *Database) DeleteAISpaceToRecycle(id string) error {
+	rows := map[string][]map[string]interface{}{}
+	d.mu.RLock()
+	space, serr := captureRows(d.conn, "ai_spaces", "id = ?", id)
+	var convs []map[string]interface{}
+	if serr == nil {
+		convs, _ = captureRows(d.conn, "ai_conversations", "space_id = ?", id)
+	}
+	d.mu.RUnlock()
+	if serr != nil {
+		return serr
+	}
+	if len(space) == 0 {
+		return d.DeleteAISpace(id)
+	}
+	rows["ai_spaces"] = space
+	msgRows := []map[string]interface{}{}
+	for _, c := range convs {
+		cid, _ := c["id"].(string)
+		if cid == "" {
+			continue
+		}
+		d.mu.RLock()
+		msgs, err := captureRows(d.conn, "ai_messages", "conv_id = ?", cid)
+		d.mu.RUnlock()
+		if err != nil {
+			return err
+		}
+		msgRows = append(msgRows, msgs...)
+	}
+	rows["ai_conversations"] = convs
+	rows["ai_messages"] = msgRows
+
+	label := rowLabel(space[0])
+	if label == "" {
+		label = id
+	}
+	if err := d.AddTombstone(RecycleAISpace, id, label, rows); err != nil {
+		return err
+	}
+	// 任务与消息要真删：它们已经在墓碑里了，留着的副本会在恢复时被 upsert 覆盖，
+	// 而「删了空间却发现侧栏还挂着那些任务」是最让人困惑的一种界面。
+	// 这里不能用 DeleteAISpace —— 那条路是把任务**降级为普通任务**保留下来。
+	for _, c := range convs {
+		cid, _ := c["id"].(string)
+		if cid == "" {
+			continue
+		}
+		if err := d.DeleteAIConversation(cid); err != nil {
+			return err
+		}
+	}
+	return d.ExecuteParams("DELETE FROM ai_spaces WHERE id = ?", []interface{}{id})
+}
+
+// DeleteAISpace 解散空间：删掉空间本身，其下任务**降级为普通任务**而不是一起删掉。
+//
+// 与 DeleteAISpaceToRecycle 的区别是任务去留：用户看到的删除入口一律走回收站
+// （连任务一起走），这条留给「只是不想再分组了」的场景——它不进回收站，
+// 因为任务都还在，没有可恢复的东西。
+func (d *Database) DeleteAISpace(id string) error {
+	if err := d.ExecuteParams(
+		`UPDATE ai_conversations SET space_id = '', updated_at = ? WHERE space_id = ?`,
+		[]interface{}{now(), id}); err != nil {
+		return err
+	}
+	return d.ExecuteParams("DELETE FROM ai_spaces WHERE id = ?", []interface{}{id})
+}
+
+// SetAIConversationCwd 设置（或清空）这个会话绑定的工作目录。
+//
+// 单独一个方法而不是塞进 UpdateAIConversationMeta：那个用空串表示「这个字段不更新」，
+// 而这里的空串是一个有意义的取值——解绑。语义冲突，不能共用一个入参。
+func (d *Database) SetAIConversationCwd(id, cwd string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET cwd = ?, updated_at = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(cwd), now(), strings.TrimSpace(id)},
+	)
 }
 
 // UpdateAIConversationMeta 更新标题/摘要/更新时间（空字段表示不更新）
@@ -165,16 +479,24 @@ func (d *Database) RecordAIUsage(convID, model, kind string, u TokenUsage) error
 
 // AddAIConversationUsage 把一次问答累加到会话行（列表要显示「这个对话花了多少」，
 // 逐次 SUM 查一遍不划算）。只有真正的一问一答才该调它。
-func (d *Database) AddAIConversationUsage(convID, model string, u TokenUsage) error {
+//
+// countRequest 控制「问答次数」是否 +1：内置 agent 一次提问可能连调五轮工具，
+// 五轮都算一次问答会让「我问了 3 句」在列表里显示成 15 次。token 每轮照加
+// （那确实是五次计费），次数只在用户自己发问的那一轮加。
+func (d *Database) AddAIConversationUsage(convID, model string, u TokenUsage, countRequest bool) error {
 	if u.Empty() || strings.TrimSpace(convID) == "" {
 		return nil
+	}
+	n := 0
+	if countRequest {
+		n = 1
 	}
 	return d.ExecuteParams(
 		`UPDATE ai_conversations SET
 		   prompt_tokens = prompt_tokens + ?, completion_tokens = completion_tokens + ?,
-		   request_count = request_count + 1, model = ?, updated_at = ?
+		   request_count = request_count + ?, model = ?, updated_at = ?
 		 WHERE id = ?`,
-		[]interface{}{u.Prompt, u.Completion, strings.TrimSpace(model), now(), strings.TrimSpace(convID)},
+		[]interface{}{u.Prompt, u.Completion, n, strings.TrimSpace(model), now(), strings.TrimSpace(convID)},
 	)
 }
 
@@ -256,6 +578,24 @@ func (d *Database) ListAIMessages(convID string) ([]AIMessage, error) {
 	return mapSlice(rows, mapToAIMessage), nil
 }
 
+// LastAIMessage 取这个会话的最后一条消息（按插入顺序），还没有消息时返回 (nil, nil)。
+//
+// 单独开这个查询而不是让调用方 ListAIMessages 之后取末位：幂等落库（见 services/ai
+// 的 saveUserTurn）每轮发送都要比对「最后一条是不是我」，而整表读会把这个会话的
+// 全部历史（含 reasoning 与几十 KB 的工具结果）拉出来，长会话里这一步会随对话
+// 长度线性变慢——而它本来只需要一行。
+func (d *Database) LastAIMessage(convID string) (*AIMessage, error) {
+	row, err := d.QueryOne("SELECT * FROM ai_messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT 1", convID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	m := mapToAIMessage(row)
+	return &m, nil
+}
+
 // AddAIMessage 追加一条消息（不含 reasoning）
 func (d *Database) AddAIMessage(convID, role, content string) (*AIMessage, error) {
 	m := &AIMessage{
@@ -287,26 +627,43 @@ func (d *Database) AddAIMessageFull(convID, role, content, reasoningContent stri
 	return m, nil
 }
 
+// AssistantTurn 一次助手回复的落库参数。
+//
+// 用结构体而不是继续往 SaveAssistantTurn 上加参数：加上工具调用后已经有 8 个位置
+// 参数了，调用点会变成一长串难以核对的实参，传错顺序编译器还不一定拦得住
+// （model 与 toolCalls 都是 string）。
+type AssistantTurn struct {
+	Content          string
+	ReasoningContent string
+	Model            string
+	Usage            TokenUsage
+	// Stopped 这条回复被用户中途打断：内容照样落库（半截也比没有强），
+	// 但要带标记，否则刷新后无法区分「模型只答了这些」与「我自己点了停止」。
+	Stopped bool
+	// ToolCalls 工具调用记录的 JSON；空串表示没调过工具。ToolRounds 是轮数。
+	ToolCalls  string
+	ToolRounds int
+}
+
 // SaveAssistantTurn 追加一条助手回复，并记下这一次调用自己的用量。
 //
 // 与 AddAIMessageFull 分开：那个签名已经被「不带用量的写入」用着（例如外部
 // 直接补一条消息），把 usage 塞成第 5 个参数会让每个调用点都要判断传什么。
 // 用量放消息上是为了「回答下面那行小字」能持久化——前端 statMap 只活在当前会话。
-//
-// stopped=true 表示这条回复被用户中途打断：内容照样落库（半截也比没有强），
-// 但要带标记，否则刷新后无法区分「模型只答了这些」与「我自己点了停止」。
-func (d *Database) SaveAssistantTurn(convID, content, reasoningContent, model string, u TokenUsage, stopped bool) (*AIMessage, error) {
+func (d *Database) SaveAssistantTurn(convID string, t AssistantTurn) (*AIMessage, error) {
 	m := &AIMessage{
 		ID:               newID(),
 		ConvID:           convID,
 		Role:             "assistant",
-		Content:          content,
-		ReasoningContent: reasoningContent,
-		Model:            strings.TrimSpace(model),
-		PromptTokens:     u.Prompt,
-		CompletionTokens: u.Completion,
-		CachedTokens:     u.Cached,
-		Stopped:          stopped,
+		Content:          t.Content,
+		ReasoningContent: t.ReasoningContent,
+		Model:            strings.TrimSpace(t.Model),
+		PromptTokens:     t.Usage.Prompt,
+		CompletionTokens: t.Usage.Completion,
+		CachedTokens:     t.Usage.Cached,
+		Stopped:          t.Stopped,
+		ToolCalls:        t.ToolCalls,
+		ToolRounds:       t.ToolRounds,
 		CreatedAt:        now(),
 	}
 	if err := d.BulkInsert("ai_messages", []map[string]interface{}{structToMap(m)}); err != nil {
@@ -332,14 +689,6 @@ func (d *Database) AddAIMessageImages(convID, role, content, images string) (*AI
 		return nil, err
 	}
 	return m, nil
-}
-
-// ClearAIConversation 清空某会话的全部消息与摘要（保留会话本身，用于"清空上下文"）
-func (d *Database) ClearAIConversation(convID string) error {
-	if err := d.ExecuteParams("DELETE FROM ai_messages WHERE conv_id = ?", []interface{}{convID}); err != nil {
-		return err
-	}
-	return d.ExecuteParams("UPDATE ai_conversations SET summary = '', updated_at = ? WHERE id = ?", []interface{}{now(), convID})
 }
 
 // DeleteOldAIMessages 仅保留最近 keep 条，删除更早的消息（摘要压缩后清理冗余上下文）

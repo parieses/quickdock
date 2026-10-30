@@ -71,6 +71,10 @@ func usageSince(days int) string {
 type usageBucket struct {
 	requests, prompt, completion, cached int
 	cost, saved                          float64
+	// unpriced 这个桶里「模型没进价目表」的调用次数。
+	// 每条分组只有一个模型，所以这个数要么等于 requests、要么等于 0；
+	// 按天 / 按来源的桶会混合多个模型，靠它才能回答「这一天的钱算全了没有」。
+	unpriced int
 }
 
 // AIUsageStats 统计指定窗口内的 AI 用量（days<=0 表示全部时间）。
@@ -120,10 +124,17 @@ func (a *AIService) AIUsageStats(days int) *services.ApiResult {
 			b.cached += g.CachedTokens
 			b.cost += cost
 			b.saved += saved
+			if !ok {
+				b.unpriced += g.Requests
+			}
 		}
 	}
 
-	toEntries := func(m map[string]*usageBucket) []AICostEntry {
+	// priced 是**按模型**记的，只能喂给 models 那一路。
+	// toEntries 因此把判定做成入参：按天 / 按来源的 key 是日期和来源名，
+	// 拿它们去查模型表必然查不到（曾经就恒为 false，界面上每一项都标成「未计价」）。
+	// 那两路的正确判定是「这一桶里是否混进了没价的调用」。
+	toEntries := func(m map[string]*usageBucket, isPriced func(k string) bool) []AICostEntry {
 		out := make([]AICostEntry, 0, len(m))
 		for k, b := range m {
 			out = append(out, AICostEntry{
@@ -131,13 +142,13 @@ func (a *AIService) AIUsageStats(days int) *services.ApiResult {
 				PromptTokens: b.prompt, CompletionTokens: b.completion, CachedTokens: b.cached,
 				TotalTokens:   b.prompt + b.completion,
 				EstimatedCost: b.cost, SavedByCache: b.saved,
-				Priced: priced[k],
+				Priced: isPriced(k),
 			})
 		}
 		return out
 	}
 
-	models := toEntries(byModel)
+	models := toEntries(byModel, func(k string) bool { return priced[k] })
 	// token 多的在前；同量时按名字稳定排（历史折算行可能没有模型名）
 	sort.SliceStable(models, func(i, j int) bool {
 		if models[i].TotalTokens != models[j].TotalTokens {
@@ -146,11 +157,17 @@ func (a *AIService) AIUsageStats(days int) *services.ApiResult {
 		return models[i].Key < models[j].Key
 	})
 
-	daily := toEntries(byDay)
+	noneUnpriced := func(m map[string]*usageBucket) func(string) bool {
+		return func(k string) bool {
+			b := m[k]
+			return b == nil || b.unpriced == 0
+		}
+	}
+	daily := toEntries(byDay, noneUnpriced(byDay))
 	// 日期升序：图表横轴从左到右是时间推进
 	sort.SliceStable(daily, func(i, j int) bool { return daily[i].Key < daily[j].Key })
 
-	sources := toEntries(byKind)
+	sources := toEntries(byKind, noneUnpriced(byKind))
 	sort.SliceStable(sources, func(i, j int) bool { return sources[i].Requests > sources[j].Requests })
 
 	conversations, err := a.App.DB.CountAIUsageConversations(since)

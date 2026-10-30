@@ -3,7 +3,9 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"sort"
+	"strings"
 	"sync"
 )
 
@@ -20,13 +22,21 @@ const (
 const (
 	CategoryApp       = "app"
 	CategoryEnv       = "env"
+	CategoryFile      = "file"
 	CategoryItem      = "item"
 	CategoryNote      = "note"
 	CategoryTodo      = "todo"
 	CategoryClipboard = "clipboard"
 	CategoryDiag      = "diag"
+	CategorySchedule  = "schedule"
+	CategoryMonitor   = "monitor"
 	CategoryPlugin    = "plugin"
 	CategoryRisk      = "risk"
+	// CategoryWeb / CategoryCode 不属于 MCP：这批工具注册在 Agent 注册表里
+	// （见 services/ai/tools），只在面板上与宿主工具一起展示，故分类 id 仍由
+	// 这里统一维护——前端的分组顺序只认一个来源，否则面板会漏掉整组。
+	CategoryWeb  = "web"
+	CategoryCode = "code"
 )
 
 // Tool 一个可被 AI 调用的工具。
@@ -58,22 +68,49 @@ type Registrar interface {
 }
 
 // Global 进程内唯一注册表，由 Default 服务与面板共用。
+//
+// 里面只放**QuickDock 自身能力**（环境、文件、快捷项、笔记、待办、剪贴板、诊断、
+// 定时、监控、插件）。这是对外契约的一部分：客户端接上我们的 MCP，拿到的应该
+// 是「这个软件能干什么」，而不是又一套通用文件读写与终端。
 var Global Registrar = globalRegistrar{}
+
+// Agent 内置 AI 专用工具的注册表（实现在 services/ai/tools）。
+//
+// 为什么是**另一个注册表**而不是同一张表加个标志位：这两批工具的归属不同。
+// Global 的内容是产品对外的能力清单，Agent 的内容是「AI 和你在某个目录里干活时
+// 顺手要用的东西」（抓网页、读目录、看 git、改文件、跑命令）。放在一起时，
+// 「新增一个 agent 工具」和「新增一个对外工具」长得一模一样，迟早有人把写文件的
+// 能力顺手注册进对外清单；分成两个注册表后，注册处写 Global 还是 Agent 这件事本身
+// 就说明了归属。
+//
+// 等级门与单工具开关**是共用的**（maxLvl / disabled 只有一份）：面板里关掉
+// file_edit，内置 AI 也就改不了文件，不存在「关了但 AI 还能用」的第二套权限。
+var Agent Registrar = agentRegistrar{}
 
 var (
 	regMu    sync.RWMutex
 	tools    = map[string]Tool{}
+	agents   = map[string]Tool{}
 	maxLvl   = LevelWrite // 默认暴露「只读 + 低危写」
 	disabled = map[string]bool{}
 )
 
 type globalRegistrar struct{}
 
-// Add 写入注册表（同名覆盖）。应在服务初始化期调用。
+// Add 写入对外注册表（同名覆盖）。应在服务初始化期调用。
 func (globalRegistrar) Add(t Tool) {
 	regMu.Lock()
 	defer regMu.Unlock()
 	tools[t.Name] = t
+}
+
+type agentRegistrar struct{}
+
+// Add 写入 agent 注册表（同名覆盖）。
+func (agentRegistrar) Add(t Tool) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	agents[t.Name] = t
 }
 
 // Register 注册工具，等价于 Global.Add（保留给既有调用方）。
@@ -121,7 +158,11 @@ func Disabled() []string {
 	return out
 }
 
-// List 返回当前允许暴露的工具（按名称排序，保证 tools/list 稳定）。
+// List 返回当前允许暴露给 MCP 客户端的工具（按名称排序，保证 tools/list 稳定）。
+//
+// 只读 Global：agent 注册表里的东西（抓网页、改文件、跑命令、看 git）不属于
+// 软件自身能力，外部客户端本来就有自己的文件与终端工具，再暴露一遍只会让模型
+// 在两套同名能力之间反复挑。
 func List() []toolDefinition {
 	regMu.RLock()
 	defer regMu.RUnlock()
@@ -146,6 +187,62 @@ func List() []toolDefinition {
 	return out
 }
 
+// AIFunction 一条给模型 function calling 用的工具规格。
+//
+// 只带 OpenAI tools[] 需要的三样：等级与开关在 ExposedFunctions 里**已经应用过**，
+// 模型不该看到「有个工具但你没资格」——那只会让它反复尝试并浪费一轮 token。
+// 与 toolDefinition 的区别：这个类型是导出的，供 services/ai 跨包使用。
+type AIFunction struct {
+	Name        string
+	Description string
+	Parameters  map[string]any
+	// Category 所属域。tools[] 本身用不到它，但内置 AI 要按域决定
+	// 「这个模式该不该看到这批工具」（宿主工具只在教程模式开放），
+	// 否则只能按工具名硬编码白名单，加一个工具就要改一次。
+	Category string
+	// AgentOnly 来自 agent 注册表。这类工具在所有模式下都可用——
+	// 它们不描述宿主状态，不涉及「AI 会不会把我的环境改坏」，因此不需要
+	// 用「只在教程模式挂」来兜底。
+	AgentOnly bool
+}
+
+// ExposedFunctions 返回当前允许内置 AI 使用的工具规格，按名称排序。
+//
+// 两个注册表合并：Global（宿主能力）+ Agent（在目录里干活的工具）。
+// 等级门与单工具开关对两边一样生效，所以用户在面板里关掉 file_edit，
+// 内置 AI 也就改不了文件——权限只有一处真相。
+//
+// 排序是为了让 tools[] 的序列化结果稳定：它在每轮请求里都作为前缀出现，
+// 顺序一变，上游的前缀缓存就全部落空。
+func ExposedFunctions() []AIFunction {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	out := make([]AIFunction, 0, len(tools)+len(agents))
+	out = append(out, exposedFrom(tools, false)...)
+	out = append(out, exposedFrom(agents, true)...)
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out
+}
+
+// exposedFrom 把一个注册表里通过等级门与开关的工具转成 AIFunction。
+// 调用方持锁。
+func exposedFrom(set map[string]Tool, agent bool) []AIFunction {
+	out := make([]AIFunction, 0, len(set))
+	for name, t := range set {
+		if t.Level > maxLvl || disabled[name] {
+			continue
+		}
+		out = append(out, AIFunction{
+			Name:        t.Name,
+			Description: t.Description,
+			Parameters:  t.InputSchema,
+			Category:    t.Category,
+			AgentOnly:   agent,
+		})
+	}
+	return out
+}
+
 // ToolInfo 工具元信息，含危险等级、分类与「在当前配置下是否开放」。
 //
 // 管理界面需要看到全量工具而不是 List()：注册在高危档的工具确实存在，
@@ -159,26 +256,36 @@ type ToolInfo struct {
 	// Disabled 用户是否单独关掉了它：面板要能区分「关掉了」和「没资格」，
 	// 这两者的补救动作不同（重新开启 vs 调等级）。
 	Disabled bool
-	// Exposed 等级与单工具开关都通过，客户端实际能看到。
+	// Exposed 等级与单工具开关都通过，且属于 Global 注册表——
+	// 也就是 **MCP 客户端**实际能看到。agent 工具恒为 false。
 	Exposed bool
+	// AgentOnly 只给内置 AI 用。面板要把这类工具标出来，
+	// 否则用户会以为「我在面板里关掉的东西，外部客户端也在用」。
+	AgentOnly bool
 }
 
-// Catalog 返回全部已注册工具（含被等级挡住/被单独关掉的），按等级升序、
-// 同级按名称排序，保证管理界面的展示顺序稳定。
+// Catalog 返回全部已注册工具（两个注册表合并，含被等级挡住/被单独关掉的），
+// 按等级升序、同级按名称排序，保证管理界面的展示顺序稳定。
 func Catalog() []ToolInfo {
 	regMu.RLock()
 	defer regMu.RUnlock()
-	out := make([]ToolInfo, 0, len(tools))
-	for name, t := range tools {
-		off := disabled[name]
-		out = append(out, ToolInfo{
-			Name:        t.Name,
-			Description: t.Description,
-			Level:       t.Level,
-			Category:    t.Category,
-			Disabled:    off,
-			Exposed:     t.Level <= maxLvl && !off,
-		})
+	out := make([]ToolInfo, 0, len(tools)+len(agents))
+	for _, set := range []struct {
+		m     map[string]Tool
+		agent bool
+	}{{tools, false}, {agents, true}} {
+		for name, t := range set.m {
+			off := disabled[name]
+			out = append(out, ToolInfo{
+				Name:        t.Name,
+				Description: t.Description,
+				Level:       t.Level,
+				Category:    t.Category,
+				Disabled:    off,
+				Exposed:     t.Level <= maxLvl && !off && !set.agent,
+				AgentOnly:   set.agent,
+			})
+		}
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].Level != out[j].Level {
@@ -189,14 +296,34 @@ func Catalog() []ToolInfo {
 	return out
 }
 
-// Call 执行工具。未注册、被单独关掉或超出等级限制时返回错误。
+// Call 执行工具（MCP 客户端路径）。只看 Global 注册表。
 func Call(name string, args map[string]any) (any, error) {
+	return callTool(name, args, false)
+}
+
+// CallAgent 执行工具（内置 AI 路径）。先查 agent 注册表，再查 Global。
+//
+// 等级门与单工具开关照样生效；两条路径的差别只有「能看到哪些工具」。
+func CallAgent(name string, args map[string]any) (any, error) {
+	return callTool(name, args, true)
+}
+
+func callTool(name string, args map[string]any, fromAgent bool) (any, error) {
 	regMu.RLock()
 	t, ok := tools[name]
+	_, inAgent := agents[name]
+	if fromAgent && !ok {
+		t, ok = agents[name]
+	}
 	allowed := ok && t.Level <= maxLvl
 	off := disabled[name]
 	regMu.RUnlock()
 	if !ok {
+		// 名字在另一个注册表里时给一条能看懂的话：外部客户端猜 file_edit
+		// 是很容易的事，回「未知工具」会让人以为是版本不对。
+		if inAgent {
+			return nil, fmt.Errorf("工具 %s 仅内置 AI 可用，不对外部 MCP 客户端开放", name)
+		}
 		return nil, fmt.Errorf("未知工具: %s", name)
 	}
 	if off {
@@ -207,6 +334,11 @@ func Call(name string, args map[string]any) (any, error) {
 	}
 	if args == nil {
 		args = map[string]any{}
+	}
+	if t.Handler == nil {
+		// 注册了名称与 schema 却没有实现：返回明确错误而不是 panic，
+		// 否则一次误注册会让整个对话流跟着崩。
+		return nil, fmt.Errorf("工具 %s 没有实现", name)
 	}
 	return t.Handler(args)
 }
@@ -281,6 +413,7 @@ func ArgInt(args map[string]any, key string, def int) int {
 	return def
 }
 
+// ArgBool 从参数里取布尔，缺失返回 false。
 func ArgBool(args map[string]any, key string) bool {
 	switch v := args[key].(type) {
 	case bool:
@@ -289,6 +422,30 @@ func ArgBool(args map[string]any, key string) bool {
 		return v == "true" || v == "1" || v == "yes"
 	}
 	return false
+}
+
+// Cwd 取宿主注入的会话工作目录。
+//
+// 这个键由 AI 服务在调工具前塞进参数（见 services/ai 的 runToolCalls），
+// **不在任何工具的 schema 里**——模型看不见它，也就无从伪造；即使它自己塞一个
+// _cwd，也会被宿主覆盖。MCP 客户端与手动调用时该键不存在，走原有的绝对路径逻辑。
+func Cwd(args map[string]any) string {
+	return strings.TrimSpace(Arg(args, "_cwd"))
+}
+
+// PathArg 取路径参数，若给的是相对路径则按会话工作目录补全；不做白名单校验。
+//
+// 单独抽出来是因为「补全」与「校验」是两件事：fsguard 负责后者，
+// 而有些地方（如 run_command 的 cwd）需要先补全才能判它是不是个目录。
+func PathArg(args map[string]any, key string) string {
+	p := strings.TrimSpace(Arg(args, key))
+	if p == "" || filepath.IsAbs(p) || strings.HasPrefix(p, "~") {
+		return p
+	}
+	if root := Cwd(args); root != "" {
+		return filepath.Join(root, p)
+	}
+	return p
 }
 
 // JSON 把任意值序列化为缩进 JSON 文本（工具结果统一走文本块）。

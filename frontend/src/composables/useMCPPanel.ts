@@ -20,8 +20,11 @@ export interface MCPToolInfo {
   description: string
   level: number
   category: string // 所属域（app/env/note…），面板据此分组
-  exposed: boolean // 等级门 + 单工具开关都通过，客户端实际能看到
+  exposed: boolean // 等级门 + 单工具开关都通过，**外部 MCP 客户端**实际能看到
   disabled: boolean // 被单独关掉：与「没资格」区分，前者可重新开启
+  // agentOnly 只给内置 AI 用（改文件、跑命令、抓网页那批）：
+  // 外部客户端看不到它，所以 exposed 为 false 是正常的，不是「被挡住」。
+  agentOnly?: boolean
 }
 
 // MCPToolGroup 面板里的一个工具分组。
@@ -33,18 +36,25 @@ export interface MCPToolGroup {
 
 // MCP_CATEGORY_ORDER 分组固定顺序：与后端 toolProviders 的装配顺序对齐，
 // 让区块位置稳定（不会因为工具名首字母变化而上下跳）。
-const MCP_CATEGORY_ORDER = ['app', 'env', 'item', 'note', 'todo', 'clipboard', 'diag', 'plugin', 'risk']
+// 前面两个（web/code）是 agent 专属域，由 services/ai/tools 注册；其余是 MCP 对外工具。
+// 顺序把 agent 域放前面：它们在面板上带「仅内置 AI」徽章，聚在一起比夹在宿主工具中间好读。
+const MCP_CATEGORY_ORDER = ['web', 'code', 'app', 'env', 'file', 'item', 'note', 'todo', 'clipboard', 'diag', 'schedule', 'monitor', 'plugin', 'risk']
 
 // MCP_CATEGORY_I18N 分类 id → i18n key。后端只给 id、文案留在前端：
 // 否则英文界面会顶着一排中文分组名。
 const MCP_CATEGORY_I18N: Record<string, string> = {
   app: 'mcpCatApp',
+  web: 'mcpCatWeb',
+  code: 'mcpCatCode',
   env: 'mcpCatEnv',
+  file: 'mcpCatFile',
   item: 'mcpCatItem',
   note: 'mcpCatNote',
   todo: 'mcpCatTodo',
   clipboard: 'mcpCatClipboard',
   diag: 'mcpCatDiag',
+  schedule: 'mcpCatSchedule',
+  monitor: 'mcpCatMonitor',
   plugin: 'mcpCatPlugin',
   risk: 'mcpCatRisk',
 }
@@ -63,7 +73,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
   const { t } = useI18n()
   const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!
 
-  const mcpInfo = reactive({ running: false, endpoint: '', port: 0, maxLevel: 1, tools: 0, total: 0, blocked: 0 })
+  const mcpInfo = reactive({ running: false, endpoint: '', port: 0, maxLevel: 1, tools: 0, total: 0, blocked: 0, agent: 0 })
   const mcpTools = ref<MCPToolInfo[]>([])
   const mcpClients = ref<MCPClientSnippet[]>([])
   const mcpLoading = ref(false)
@@ -79,7 +89,7 @@ export function useMCPPanel(selectedId: Ref<string>) {
     mcpLoading.value = true
     try {
       const [st, tools, cfg] = await Promise.all([MCPStatus(), MCPTools(), MCPClientConfig()])
-      const s = unwrap<{ running: boolean; endpoint: string; port: number; maxLevel: number; tools: number; total: number; blocked: number }>(st)
+      const s = unwrap<{ running: boolean; endpoint: string; port: number; maxLevel: number; tools: number; total: number; blocked: number; agent: number }>(st)
       if (s) Object.assign(mcpInfo, s)
       mcpTools.value = unwrap<MCPToolInfo[]>(tools) || []
       const c = unwrap<{ clients: MCPClientSnippet[] }>(cfg)

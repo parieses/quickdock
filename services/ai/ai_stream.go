@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -12,7 +13,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-	"unicode/utf8"
 
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
@@ -30,6 +30,14 @@ type aiStreamServer struct {
 	port  int
 	token string
 }
+
+// aiStreamMaxBodyBytes 单次流式请求的请求体上限。
+//
+// 按已开放的图片能力推导：最多 10 张 × 单张 10 MiB（见 ai_image.go），
+// base64 膨胀 4/3 后约 134 MB 字符，再给 JSON 转义与正文留一点余量。
+// 这不是为了省内存，是为了让「有人（或模型）构造一个巨大的请求」有明确上界，
+// 而不是把整个进程的内存交给一次请求决定。
+const aiStreamMaxBodyBytes = 160 << 20
 
 // StartAIStreamServer 启动本地流式服务（绑定 127.0.0.1:0 随机端口）
 func (a *AIService) StartAIStreamServer() {
@@ -77,7 +85,21 @@ func (a *AIService) StopAIStreamServer() {
 	}
 }
 
+// handle 只做 HTTP 外壳：握手、校验、解析、分帧；执行逻辑全在 RunAgent。
+//
+// 这条边界是刻意划的。执行核心（agent_run.go）不碰 ResponseWriter，
+// 才能单独验证（给一个测试用的 sink 就能跑完整轮循环）；而这里剩下的事
+// 没有一件能脱离真实连接。
+//
+// 错误分两截，别搞混：
+//   - 响应头写出去之前（本函数前半段）用 http.Error 回真实状态码；
+//   - 写出去之后（RunAgent 内部）只能发 event: error —— 已经回 200 了，改不了状态码。
 func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
+	// 这条 handler 里任何 panic 都只该断掉这一条流：宿主进程必须活着，
+	// 否则「问了一句引起异常的话」就等于把整个 QuickDock 搞崩。
+	// net/http 自己会为连接 recover 一次，但那样日志里什么都不留、前端也收不到提示。
+	defer recoverPanic("ai stream handler")
+
 	// CORS: 限制为请求来源或默认 127.0.0.1（不设通配符，防止本机其他页面随意访问）
 	origin := r.Header.Get("Origin")
 	if origin == "" {
@@ -108,13 +130,26 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	// 必须在写入任何响应之前读取并解析请求体。若先 WriteHeader+Flush 再读
 	// r.Body，net/http 会使请求体为空（读到 EOF），导致“请求解析失败”。
 	var req struct {
-		ConvID  string        `json:"convId"`
-		Mode    string        `json:"mode"`
+		ConvID string `json:"convId"`
+		Mode   string `json:"mode"`
+		// SpaceID 只在**新建**任务时用：把这条对话直接放进某个空间。
+		// 已有会话的归属不能被一次请求改掉——那会让「随便说句话就把任务搬了家」。
+		SpaceID string        `json:"spaceId"`
 		Message string        `json:"message"`
+		Cwd     string        `json:"cwd"`
 		Images  []AIChatImage `json:"images"`
 	}
-	raw, rerr := io.ReadAll(r.Body)
+	// 请求体必须设上限：一次可以带 10 张 10 MiB 的图（见 ai_image.go），
+	// base64 之后是 ~134 MB 字符，无脑 ReadAll 等于把这么大一块直接读进内存。
+	// 超限按 413 回，前端 finally 会把已生成的部分收尾，不会卡在转圈。
+	raw, rerr := io.ReadAll(http.MaxBytesReader(w, r.Body, aiStreamMaxBodyBytes))
 	if rerr != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(rerr, &tooLarge) {
+			logger.W("[ai] 请求体超过 %d MB，已拒绝", aiStreamMaxBodyBytes>>20)
+			http.Error(w, "请求体过大", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "请求读取失败", http.StatusBadRequest)
 		return
 	}
@@ -130,189 +165,52 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	convID := req.ConvID
-	mode := req.Mode
-	message := strings.TrimSpace(req.Message)
-
-	cfg, okp := s.svc.getActiveAIProfile()
-	if !okp || cfg.APIKey == "" {
-		// 用户报「AI 不回话」时，最常见原因就是没配 Key；这条必须留痕。
-		logger.W("[ai] 请求被拒：未配置 API Key（conv=%s mode=%s）", convID, mode)
-		s.writeSSE(w, flusher, "error", map[string]any{"message": "请在设置中配置 API Key"})
-		return
-	}
-	// 纯图片提问（“这张图里有什么”）是合法场景：文字为空但有图片时放行。
-	if message == "" && len(req.Images) == 0 {
-		s.writeSSE(w, flusher, "error", map[string]any{"message": "消息为空"})
-		return
-	}
-	if mode == "" || aiModePrompts[mode] == "" {
-		mode = "chat"
-	}
-
-	// 图片闸门 + 落盘：按档案声明的 imageInput 能力校验（见 ai_image.go），
-	// 本地图写盘后只把路径引用带去上下文。放在建会话之前——图片不合法时
-	// 不该先留下一个空会话。
-	imagesJSON, err := s.svc.prepareChatImages(cfg, req.Images)
-	if err != nil {
-		logger.W("[ai] 图片校验失败 conv=%s: %v", convID, err)
-		s.writeSSE(w, flusher, "error", map[string]any{"message": err.Error()})
-		return
-	}
-
-	// 跟随请求上下文，前端 abort 时 r.Context() 取消，立即停止读取模型流
+	// 跟随请求上下文，前端 abort 时 r.Context() 取消，立即停止读取模型流。
+	// defer 顺序要紧：cancel 先注册、fl.close 后注册，于是 close 先执行（LIFO），
+	// 与改造前一致——先把残留帧冲刷干净，再撤掉上下文。
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	// 流式统计：首字延迟（用户感知的等待时长）与本次用量，用于回传前端展示。
-	// streamStart 取「收到请求」时刻而非「调用模型」时刻——用户等的是从按下回车
-	// 到第一个字出现，含上下文组装（查库/摘要压缩）的耗时，这段以前是黑盒。
-	streamStart := time.Now()
-	var firstTokenAt time.Duration
-	var usage db.TokenUsage
-
-	var conv *db.AIConversation
-	if s.svc.App.DB == nil {
-		s.writeSSE(w, flusher, "error", map[string]any{"message": "数据库尚未就绪，请稍后重试"})
-		return
-	}
-	if convID == "" {
-		created, err := s.svc.App.DB.CreateAIConversation("")
-		if err != nil {
-			s.writeSSE(w, flusher, "error", map[string]any{"message": err.Error()})
-			return
-		}
-		conv = created
-		convID = conv.ID
-		s.writeSSE(w, flusher, "conv", map[string]any{"id": conv.ID, "title": conv.Title})
-	} else {
-		conv, _ = s.svc.App.DB.GetAIConversation(convID)
-	}
-	// 会话可能被用户在流式进行中删除：此时继续写入会产生孤儿消息，直接终止并提示。
-	if conv == nil {
-		logger.E("[ai-stream] 会话不存在或已被删除，终止流式 convID=%s", convID)
-		s.writeSSE(w, flusher, "error", map[string]any{"message": "会话不存在或已被删除"})
-		return
-	}
-
-	// 从这里开始，fl 是响应体的唯一写者（后台协程会批量写 token）。
-	// 之前的所有 writeSSE 都发生在此之前，不存在并发写 ResponseWriter 的问题。
-	fl := newSSEFlusher(w, flusher, convID)
+	// 从这里开始 fl 是响应体的唯一写者（后台协程会批量写 token）。
+	//
+	// 提前到执行之前创建（原来是等会话确定后才建）是为了让 sink 从头可用：
+	// 否则「会话确定之前」那批事件只能直写 ResponseWriter，与后面的批量写
+	// 变成两套写法、同一个格式。新建会话时 id 还不存在，由 sink.SetConvID 补上。
+	fl := newSSEFlusher(w, flusher, strings.TrimSpace(req.ConvID))
 	defer fl.close()
 
-	// 调模型前先落库用户消息：无论后续成功 / 失败 / 被打断，历史都不会出现空会话，
-	// 用户刷新或重进会话都能看到自己问了什么，而不是点进来一片空白。
-	if err := s.svc.saveUserTurn(convID, message, imagesJSON); err != nil {
-		logger.W("[ai] 保存用户消息失败 conv=%s: %v", convID, err)
-		fl.writeEvent("error", map[string]any{"message": err.Error()})
-		return
-	}
-
-	// 组装上下文（含摘要压缩）
-	// 注意：用户消息尚未存 DB，buildAIMessages 会从 DB 加载历史 + 追加 currentUser 作为最后一条。
-	// 模型回复后统一落库两条消息，避免重复。
-	messages, err := s.svc.buildAIMessages(ctx, cfg, convID, mode)
-	if err != nil {
-		logger.W("[ai] 组装上下文失败 conv=%s mode=%s: %v", convID, mode, err)
-		fl.writeEvent("error", map[string]any{"message": err.Error()})
-		return
-	}
-
-	// 首次消息自动生成标题
-	if conv != nil && conv.Title == "" {
-		title := message
-		if title == "" {
-			// 纯图片提问：用固定词兜底，否则标题为空、列表里显示“新对话”
-			title = "图片问答"
-		}
-		if utf8.RuneCountInString(title) > 30 {
-			title = string([]rune(title)[:30]) + "…"
-		}
-		_ = s.svc.App.DB.UpdateAIConversationMeta(convID, title, "")
-		fl.writeEvent("conv", map[string]any{"id": convID, "title": title})
-	}
-
-	// 流式调用模型，逐段写入响应
-	var reasoningBuf strings.Builder
-	var reasonCb func(text string)
-	if cfg.ThinkingEnabled {
-		reasonCb = func(text string) {
-			reasoningBuf.WriteString(text)
-			fl.push("reasoning", text)
-			if fl.failed() {
-				cancel()
-			}
-		}
-	}
-	assistant, usage, err := s.svc.streamAIChat(ctx, cfg, messages, convID,
-		func(text string) {
-			// 首字延迟：从收到请求到第一个内容 token（含上下文组装耗时），只记第一次
-			if firstTokenAt == 0 {
-				firstTokenAt = time.Since(streamStart)
-			}
-			fl.push("token", text)
-			if fl.failed() {
-				cancel() // 客户端已断开，取消上游请求
-			}
-		},
-		reasonCb,
-	)
-	// 记在「调用返回之后」而不是流里的 usage 回调：回调可能一次都不来（上游不回 usage），
-	// 也可能来多次（个别网关分块上报），放在这里一次写清，语义与落库的消息完全一致。
-	s.svc.recordAIUsage(convID, usageKindChat, cfg, usage)
-
-	// 仅落库助手回复：用户消息已在调模型前由 saveUserTurn 落库（幂等，重试不重复）。
-	// 模型成功返回但内容为空（上游限流/工具调用/内容过滤都可能）时不写空回复，避免污染历史。
-	// stopped 标记随行落库：用户点停止后刷新会话，仍能看出这条是半截的。
-	saveAssistant := func(asst string, stopped bool) {
-		asst = strings.TrimSpace(asst)
-		if asst == "" {
-			logger.W("[ai] 模型未产出内容，跳过落库助手回复 conv=%s mode=%s stopped=%v", convID, mode, stopped)
-			return
-		}
-		if _, e := s.svc.App.DB.SaveAssistantTurn(convID, asst, reasoningBuf.String(), cfg.Model, usage, stopped); e != nil {
-			logger.W("[ai] 保存助手回复失败 conv=%s: %v", convID, e)
-			fl.writeEvent("error", map[string]any{"message": e.Error()})
-		}
-	}
-
-	if err != nil {
-		if ctx.Err() != nil {
-			// 用户主动取消，保存已收到部分（用户消息已在调模型前落库）
-			saveAssistant(assistant, true)
-			fl.writeEvent("done", doneEvent(convID, firstTokenAt, usage, cfg.Model))
-			return
-		}
-		// 上游报错：用户消息已落库，历史不会空。若疑似因 base64 本地图片被拒，给明确提示。
-		msg := err.Error()
-		if hint := s.svc.imageErrorHint(err, req.Images); hint != "" {
-			msg += hint
-		}
-		fl.writeEvent("error", map[string]any{"message": msg})
-		return
-	}
-
-	// 正常结束，落库助手回复（用户消息已在调模型前落库）
-	saveAssistant(assistant, false)
-	_ = s.svc.App.DB.UpdateAIConversationMeta(convID, "", "")
-	logger.I("[ai] 流式结束 conv=%s 首字=%dms in=%d out=%d cached=%d", convID, firstTokenAt.Milliseconds(), usage.Prompt, usage.Completion, usage.Cached)
-	fl.writeEvent("done", doneEvent(convID, firstTokenAt, usage, cfg.Model))
+	res := s.svc.RunAgent(ctx, AgentRunReq{
+		ConvID:  req.ConvID,
+		Mode:    req.Mode,
+		SpaceID: req.SpaceID,
+		Message: req.Message,
+		Cwd:     req.Cwd,
+		Images:  req.Images,
+	}, &sseSink{fl: fl, cancel: cancel})
 
 	// 用户已经切走了才提醒：盯着屏幕看完整段回答的人再收到一条「回答完成」纯属噪音，
 	// 而趁回答生成的时间去干别的事、回来发现早就好了，才是最需要提醒的场景。
-	s.notifyAIDone(convID, message, assistant)
+	// 中断与失败不提醒——那是「没答完」，不是「答完了」。
+	if res.Err == nil && !res.Stopped {
+		s.notifyAIDone(res.ConvID, req.Message, res.Text)
+	}
 }
 
 // doneEvent 组装流式结束事件：附带首字延迟与本次用量，回传前端展示。
 // 字段名与前端 AIPage 的读取保持一致（promptTokens/completionTokens）。
 // 字段缺失（上游未回 usage）时为 0，前端按 0 隐藏即可。
-func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, model string) map[string]any {
+func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, model string, rounds, tools int) map[string]any {
 	out := map[string]any{
 		"convId":           convID,
 		"firstTokenMs":     firstTokenAt.Milliseconds(),
 		"promptTokens":     usage.Prompt,
 		"completionTokens": usage.Completion,
 		"cachedTokens":     usage.Cached,
+		// 这一条回复用了几轮工具、调了几个工具。token 里已经含了工具轮次的消耗，
+		// 但「花了同样的钱，一个是模型自己想多了、一个是真的查了五轮」对用户
+		// 是完全不同的两件事，所以要单独给出来。
+		"toolRounds": rounds,
+		"toolCalls":  tools,
 		// 回传本次实际使用的模型：前端刚落地的那条回复要用它显示模型名，
 		// 刷新后是 DB 里同一份值，两边口径一致（不取前端的档案名，那可能是旧值）。
 		"model": strings.TrimSpace(model),
@@ -372,6 +270,20 @@ func newSSEFlusher(w http.ResponseWriter, f http.Flusher, convID string) *sseFlu
 	}
 	go s.loop()
 	return s
+}
+
+// setConvID 补上会话 id。
+//
+// 新建会话时创建 fl 的那一刻这个 id 还不存在（它由 DB 生成），而每个文本帧都要
+// 带上 convId。所以由执行核心在拿到 id 后立刻告知，而不是让这里去猜、或者把
+// fl 的创建推迟到会话确定之后——后者会把 HTTP 的时序约束倒灌回执行核心。
+func (s *sseFlusher) setConvID(id string) {
+	if id == "" {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.convID = id
 }
 
 // push 把一段文本入队，等待批量下发。
@@ -478,20 +390,6 @@ func (s *sseFlusher) loop() {
 			s.mu.Unlock()
 		}
 	}
-}
-
-// writeSSE 以 SSE 格式写出一条事件并立即 Flush。返回 error 说明客户端已断开。
-func (s *aiStreamServer) writeSSE(w http.ResponseWriter, f http.Flusher, event string, data map[string]any) error {
-	b, err := json.Marshal(data)
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintf(w, "event: %s\ndata: %s\n\n", event, b)
-	if err != nil {
-		return err
-	}
-	f.Flush()
-	return nil
 }
 
 // notifyAIDone 在「主窗口没盯着」时把回答完成写进通知中心。

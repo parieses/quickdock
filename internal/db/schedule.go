@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"strings"
 	"time"
@@ -11,7 +12,11 @@ import (
 
 // ScheduledTask 定时任务
 // 动作(action)：app=打开软件/文件  dir=打开目录  url=打开网页  command=执行命令  http=HTTP 请求
-// 调度(scheduleKind)：once=一次性  interval=固定间隔  daily=每天  weekly=每周
+//
+//	todo=重复待办（由待办的重复规则在内部创建，用户不能直接新建这种动作，
+//	故 validateScheduledTask 的动作白名单里没有它）
+//
+// 调度(scheduleKind)：once=一次性  interval=固定间隔  daily=每天  weekly=每周  monthly=每月
 type ScheduledTask struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -28,6 +33,15 @@ type ScheduledTask struct {
 	Weekdays     string `json:"weekdays"`     // weekly：CSV，0=周日..6=周六
 	Enabled      bool   `json:"enabled"`
 	Notify       bool   `json:"notify"` // 执行后是否发通知（总开关）
+	// RetryCount 定时触发失败后最多重试几次（0 = 不重试，上限 3）。
+	//
+	// 为什么是逐任务配置而不是全局开关：重试意味着「同一件会失败的事再做一遍」，
+	// 而命令/HTTP 请求可能有副作用（下单、重启服务）。该不该重试只有任务的
+	// 作者知道，全局默认重试等于替所有人做了个危险决定。
+	//
+	// 只对**定时触发**生效：手动「立即运行」时用户就在屏幕前，失败了再点一次
+	// 比让 RPC 挂着等 30 秒好。
+	RetryCount int `json:"retryCount"`
 	// NotifyChannels 通知渠道 CSV：system=系统通知 / webhook=已配置机器人。
 	// 与 Notify 是「总开关 × 分渠道」的关系：Notify 关掉就都不发，
 	// Notify 开着时再按这里决定发往哪几处。
@@ -42,7 +56,7 @@ type ScheduledTask struct {
 
 const schedCols = `id, name, action, target, working_dir, http_method, http_headers, http_body,
 	schedule_kind, run_at, interval_sec, time_of_day, weekdays, enabled, notify, notify_channels,
-	next_run, last_run, last_status, last_result, sort, created_at`
+	retry_count, next_run, last_run, last_status, last_result, sort, created_at`
 
 func scanScheduledTask(rows interface{ Scan(...interface{}) error }) (ScheduledTask, error) {
 	var t ScheduledTask
@@ -50,7 +64,8 @@ func scanScheduledTask(rows interface{ Scan(...interface{}) error }) (ScheduledT
 	err := rows.Scan(&t.ID, &t.Name, &t.Action, &t.Target, &t.WorkingDir,
 		&t.HTTPMethod, &t.HTTPHeaders, &t.HTTPBody,
 		&t.ScheduleKind, &t.RunAt, &t.IntervalSec, &t.TimeOfDay, &t.Weekdays,
-		&enabled, &notify, &t.NotifyChannels, &t.NextRun, &t.LastRun, &t.LastStatus, &t.LastResult,
+		&enabled, &notify, &t.NotifyChannels, &t.RetryCount,
+		&t.NextRun, &t.LastRun, &t.LastStatus, &t.LastResult,
 		&t.Sort, &t.CreatedAt)
 	t.Enabled = enabled != 0
 	t.Notify = notify != 0
@@ -111,11 +126,11 @@ func (d *Database) CreateScheduledTask(t *ScheduledTask) (*ScheduledTask, error)
 		`INSERT INTO scheduled_tasks
 			(id, name, action, target, working_dir, http_method, http_headers, http_body,
 			 schedule_kind, run_at, interval_sec, time_of_day, weekdays, enabled, notify, notify_channels,
-			 next_run, last_run, last_status, last_result, sort, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?)`,
+			 retry_count, next_run, last_run, last_status, last_result, sort, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?)`,
 		t.ID, t.Name, t.Action, t.Target, t.WorkingDir, t.HTTPMethod, t.HTTPHeaders, t.HTTPBody,
 		t.ScheduleKind, t.RunAt, t.IntervalSec, t.TimeOfDay, t.Weekdays, b2i(t.Enabled), b2i(t.Notify),
-		t.NotifyChannels, t.NextRun, t.Sort, t.CreatedAt,
+		t.NotifyChannels, t.RetryCount, t.NextRun, t.Sort, t.CreatedAt,
 	)
 	return t, err
 }
@@ -168,11 +183,11 @@ func (d *Database) UpdateScheduledTask(t *ScheduledTask) error {
 		`UPDATE scheduled_tasks SET
 			name = ?, action = ?, target = ?, working_dir = ?, http_method = ?, http_headers = ?, http_body = ?,
 			schedule_kind = ?, run_at = ?, interval_sec = ?, time_of_day = ?, weekdays = ?, enabled = ?, notify = ?,
-			notify_channels = ?, next_run = ?
+			notify_channels = ?, retry_count = ?, next_run = ?
 		 WHERE id = ?`,
 		t.Name, t.Action, t.Target, t.WorkingDir, t.HTTPMethod, t.HTTPHeaders, t.HTTPBody,
 		t.ScheduleKind, t.RunAt, t.IntervalSec, t.TimeOfDay, t.Weekdays, b2i(t.Enabled), b2i(t.Notify),
-		t.NotifyChannels, t.NextRun, t.ID,
+		t.NotifyChannels, t.RetryCount, t.NextRun, t.ID,
 	)
 	return err
 }
@@ -216,7 +231,7 @@ func (d *Database) DeleteScheduledTaskToRecycle(id string) error {
 	if len(rows) == 0 {
 		return d.DeleteWhere("scheduled_tasks", "id = ?", id)
 	}
-	if err := d.AddTombstone("schedules", id, rowLabel(rows[0]),
+	if err := d.AddTombstone(RecycleSchedule, id, rowLabel(rows[0]),
 		map[string][]map[string]interface{}{"scheduled_tasks": rows}); err != nil {
 		return err
 	}
@@ -380,6 +395,32 @@ func (d *Database) ListScheduleRuns(taskID string, limit int) ([]ScheduleRun, er
 		return nil, err
 	}
 	defer rows.Close()
+	return scanScheduleRuns(rows)
+}
+
+// ListAllScheduleRuns 返回全部任务的执行历史（按时间倒序，最多 limit 条）。
+//
+// 与 ListScheduleRuns 并存的原因：单任务视角回答不了「昨晚有没有任务失败」，
+// 而这正是 MCP 侧最常被问的问题。让工具层逐任务各查一遍再合并，任务一多就是
+// N 次查询 + 一次重排序，不如让 SQL 一次给出。
+func (d *Database) ListAllScheduleRuns(limit int) ([]ScheduleRun, error) {
+	if limit <= 0 || limit > 1000 {
+		limit = 200
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	rows, err := d.conn.Query(
+		`SELECT id, task_id, task_name, run_at, status, result, duration_ms, created_ts
+		 FROM schedule_runs ORDER BY created_ts DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanScheduleRuns(rows)
+}
+
+// scanScheduleRuns 共用的行扫描：两个列表方法的列与顺序必须一致，抽出来避免各改各的。
+func scanScheduleRuns(rows *sql.Rows) ([]ScheduleRun, error) {
 	var out []ScheduleRun
 	for rows.Next() {
 		var r ScheduleRun

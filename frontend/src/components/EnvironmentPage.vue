@@ -3655,7 +3655,12 @@ const s = currentRuntimeState
           </template>
 
           <div class="mcp-cfg-head">
-            <span>{{ t('mcpExposedTools') }} {{ mcpInfo.tools }} / {{ mcpInfo.total }}</span>
+            <!-- agent 工具单独报一个数：它们不归 MCP 管，混进 total 会让「被挡住」的
+                 计数虚高，用户于是去调等级——怎么调都不会变。 -->
+            <span>
+              {{ t('mcpExposedTools') }} {{ mcpInfo.tools }} / {{ mcpInfo.total }}
+              <em v-if="mcpInfo.agent" class="mcp-agent-count">{{ t('mcpAgentTools', { n: mcpInfo.agent }) }}</em>
+            </span>
           </div>
           <p class="mcp-hint">{{ t('mcpToolToggleHint') }}</p>
           <div class="mcp-tools">
@@ -3665,12 +3670,15 @@ const s = currentRuntimeState
                 v-for="tool in g.tools"
                 :key="tool.name"
                 class="mcp-tool-row"
-                :class="{ 'is-blocked': !tool.exposed, 'is-off': tool.disabled }"
+                :class="{ 'is-blocked': !tool.exposed && !tool.agentOnly, 'is-off': tool.disabled }"
               >
                 <span class="mcp-tool-name">{{ tool.name }}</span>
                 <span class="badge" :class="tool.level > 0 ? 'warn' : 'plat'">
                   {{ tool.level > 1 ? t('mcpToolHighRisk') : tool.level > 0 ? t('mcpToolWritable') : t('mcpToolReadOnly') }}
                 </span>
+                <!-- agent 专用工具对外部客户端不可见（exposed=false），但那是设计而不是被挡住，
+                     所以单独标出来：否则用户会以为它「没资格」，去调等级也调不出来。 -->
+                <span v-if="tool.agentOnly" class="badge plat">{{ t('mcpToolAgentOnly') }}</span>
                 <span class="mcp-tool-desc">{{ tool.description }}</span>
                 <button
                   v-if="tool.level <= mcpInfo.maxLevel"
@@ -4974,6 +4982,7 @@ const s = currentRuntimeState
 .mcp-label { font-size: 13px; color: var(--color-text-secondary); flex: none; }
 .mcp-select { flex: none; min-width: 300px; }
 .mcp-hint { font-size: 11px; color: var(--color-text-muted); }
+.mcp-agent-count { font-style: normal; margin-left: 6px; font-size: 11px; color: var(--color-text-muted); }
 .mcp-cfg-head {
   display: flex; align-items: center; justify-content: space-between;
   margin: 14px 0 6px; font-size: 13px; color: var(--color-text-secondary);

@@ -2,11 +2,14 @@ package ai
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -24,24 +27,148 @@ func (a *AIService) AIListConversations() *services.ApiResult {
 	return services.Ok(list)
 }
 
-// AICreateConversation 新建会话
-func (a *AIService) AICreateConversation(title string) *services.ApiResult {
+// ---- 空间 ----
+
+// AIListSpaces 列出全部空间
+func (a *AIService) AIListSpaces() *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	c, err := a.App.DB.CreateAIConversation(title)
+	list, err := a.App.DB.ListAISpaces()
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(list)
+}
+
+// AICreateSpace 新建空间：绑定一个目录，把后续任务收在它下面。
+//
+// **同一目录只建一个空间**：用户换一种写法（大小写、结尾斜杠、盘符）再选一次，
+// 不该凭空多出一个并行空间——否则同一个项目在侧栏里出现两次，谁也不知道该进哪个。
+// 命中已有空间时直接返回它，而不是报错：用户的心智是「我要在这个目录里干活」，
+// 不是「我要新建一个空间」。
+//
+// 目录必须是真实存在的文件夹：把不存在的路径存进空间，之后每条任务的工具调用
+// 都会以「找不到文件」告终，而用户看不出根因在这里。
+func (a *AIService) AICreateSpace(name, cwd string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return services.FailMsg("请先选择一个目录")
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return services.FailMsg("目录路径无法解析：" + err.Error())
+	}
+	if st, err := os.Stat(abs); err != nil || !st.IsDir() {
+		return services.FailMsg("选中的不是文件夹或目录打不开：" + abs)
+	}
+	abs = filepath.Clean(abs)
+	if exist, err := a.App.DB.FindAISpaceByCwd(abs); err == nil && exist != nil {
+		return services.Ok(exist)
+	}
+	name = strings.TrimSpace(name)
+	if name == "" {
+		name = filepath.Base(abs)
+	}
+	if utf8.RuneCountInString(name) > 40 {
+		name = string([]rune(name)[:40]) + "…"
+	}
+	s, err := a.App.DB.CreateAISpace(name, abs)
+	if err != nil {
+		return services.Fail(err)
+	}
+	logger.I("[ai] 新建空间 %s → %s", s.ID, abs)
+	return services.Ok(s)
+}
+
+// AIRenameSpace 改空间名（保留绑定目录）。
+func (a *AIService) AIRenameSpace(id, name string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	id, name = strings.TrimSpace(id), strings.TrimSpace(name)
+	if id == "" {
+		return services.FailMsg("空间不存在")
+	}
+	if name == "" {
+		return services.FailMsg("名称不能为空")
+	}
+	if utf8.RuneCountInString(name) > 40 {
+		name = string([]rune(name)[:40]) + "…"
+	}
+	if err := a.App.DB.UpdateAISpaceMeta(id, name, ""); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(name)
+}
+
+// AIDeleteSpace 删除空间：连同它下面的全部任务与消息一起进回收站。
+//
+// 危险度比删单个任务高得多（一次带走十几条对话），所以提示语里要把数量说清楚，
+// 让用户在点确认前就知道这会带走什么。
+func (a *AIService) AIDeleteSpace(id string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return services.FailMsg("空间不存在")
+	}
+	if err := a.App.DB.DeleteAISpaceToRecycle(id); err != nil {
+		return services.Fail(err)
+	}
+	logger.I("[ai] 空间 %s 已删除（进回收站）", id)
+	return services.Ok(nil)
+}
+
+// ---- 任务 ----
+
+// AICreateConversation 新建任务。
+//
+// mode 是创建时选定的任务类型（对话/翻译/总结/解释/使用教程），存库后**跟着这个
+// 任务走**：之前模式只是前端一个 ref，切走再回来就掉回「对话」，于是「这条是用来
+// 翻译的」这个最关键的属性丢了。
+// 非法 mode 直接回落 chat 而不是报错：模式只是一个提示词分支，为它拦下整个创建
+// 流程不值得，而且旧客户端可能传空串。
+func (a *AIService) AICreateConversation(title, mode, spaceID string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	mode = strings.TrimSpace(mode)
+	if aiModePrompts[mode] == "" {
+		mode = "chat"
+	}
+	spaceID = strings.TrimSpace(spaceID)
+	if spaceID != "" {
+		if _, err := a.App.DB.GetAISpace(spaceID); err != nil {
+			// 空间已被删（比如在另一个窗口里）时按「普通任务」创建，而不是让新建失败：
+			// 用户此刻的意图是开一条对话，不是维护空间引用完整性。
+			logger.W("[ai] 空间 %s 不存在，任务按普通任务创建: %v", spaceID, err)
+			spaceID = ""
+		}
+	}
+	c, err := a.App.DB.CreateAIConversation(db.NewAIConversation{
+		Title:   title,
+		Mode:    mode,
+		SpaceID: spaceID,
+	})
 	if err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(c)
 }
 
-// AIDeleteConversation 删除会话
+// AIDeleteConversation 删除任务（进回收站，可恢复）。
+//
+// 走回收站而不是硬删：一条任务里攒着几十轮对话，误删等于丢掉一整段上下文。
 func (a *AIService) AIDeleteConversation(id string) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	if err := a.App.DB.DeleteAIConversation(id); err != nil {
+	if err := a.App.DB.DeleteAIConversationToRecycle(id); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
@@ -82,17 +209,6 @@ func (a *AIService) AIGetMessages(convID string) *services.ApiResult {
 		views = append(views, v)
 	}
 	return services.Ok(views)
-}
-
-// AIClearMessages 清空某会话的上下文（消息与摘要）
-func (a *AIService) AIClearMessages(convID string) *services.ApiResult {
-	if r := a.dbOK(); r != nil {
-		return r
-	}
-	if err := a.App.DB.ClearAIConversation(convID); err != nil {
-		return services.Fail(err)
-	}
-	return services.Ok(nil)
 }
 
 // AIRenameConversation 手动改会话标题。
@@ -142,8 +258,29 @@ func (a *AIService) AIRegenerateTitle(convID string) *services.ApiResult {
 	}
 	var b strings.Builder
 	b.WriteString("用不超过 15 个汉字给下面的对话起一个简洁标题，只输出标题本身，不要引号、标点或任何解释：\n\n")
-	for _, m := range msgs {
-		b.WriteString(m.Role + ": " + m.Content + "\n")
+	// 只喂最近的一小段（见 aiTitleMaxMsgs / aiTitleMaxRune 的说明）：
+	// 标题需要的只是「这段对话现在在说什么」，不是全部历史。
+	// 从后往前累积，先保证最新的内容一定在，超预算就停——
+	// 反过来从前往后截断，会把最近的话题砍掉，标题反而会答非所问。
+	tail := msgs
+	if len(tail) > aiTitleMaxMsgs {
+		tail = tail[len(tail)-aiTitleMaxMsgs:]
+	}
+	used := 0
+	kept := make([]db.AIMessage, 0, len(tail))
+	for i := len(tail) - 1; i >= 0; i-- {
+		line := tail[i].Role + ": " + tail[i].Content + "\n"
+		used += len([]rune(line))
+		if used > aiTitleMaxRune && len(kept) > 0 {
+			break
+		}
+		kept = append(kept, tail[i])
+	}
+	if len(kept) < len(tail) {
+		b.WriteString("（以下为这个会话最近的一部分）\n\n")
+	}
+	for i := len(kept) - 1; i >= 0; i-- {
+		b.WriteString(kept[i].Role + ": " + kept[i].Content + "\n")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()

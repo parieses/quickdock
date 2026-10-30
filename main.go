@@ -432,9 +432,9 @@ func main() {
 	setSshService(sshSvc)
 
 	// MCP 服务门面：协议/传输在 internal/mcp，本门面注册业务工具并提供前端启停接口。
-	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合门面（工具复用其能力），故在其后创建。
+	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合/监控门面（工具复用其能力），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
-	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, appVersion)
+	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, appVersion)
 
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()

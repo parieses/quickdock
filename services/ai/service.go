@@ -10,6 +10,7 @@ import (
 
 	"quickdock/internal/logger"
 	"quickdock/services"
+	aitools "quickdock/services/ai/tools"
 )
 
 // AIService 承载 AI 领域方法。App 回指宿主 AppService；
@@ -34,7 +35,7 @@ type AIService struct {
 
 // NewAIService 创建 AI 门面服务
 func NewAIService(app *services.AppService) *AIService {
-	return &AIService{
+	s := &AIService{
 		App: app,
 		aiHTTPClient: &http.Client{
 			// 不设总超时：流式响应可能持续数分钟，客户端总超时会在读取 body 中途强杀连接，
@@ -49,6 +50,13 @@ func NewAIService(app *services.AppService) *AIService {
 			},
 		},
 	}
+	// agent 工具在这里注册而不是在 services/mcp：那批能力（抓网页、读目录、看 git、
+	// 改文件、跑命令）不属于 QuickDock 对外提供的 MCP 能力，只有内置 AI 用得上。
+	// 注册到 mcpsrv.Agent 后，环境页的工具面板仍能看到它们并单独开关。
+	if app != nil {
+		aitools.Register(aitools.Deps{DB: app.DB, Env: app.Env})
+	}
+	return s
 }
 
 // dbOK 检查宿主 DB 是否就绪（原 AppService.dbOK 的包内副本，跨包不可访问宿主私有方法）

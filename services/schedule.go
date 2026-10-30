@@ -208,6 +208,21 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 		return fmt.Errorf("未知的调度类型: %s", t.ScheduleKind)
 	}
 
+	// 失败重试次数：钳到 0..3 而不是报错。
+	//
+	// 越界只可能来自旧前端漏传字段或手改库，为这点小事让整条任务保存失败
+	// 不值得；但也不能放任（比如 100 次会把一次失败变成十五分钟的连续重试）。
+	// 「once」任务没有下一次调度，重试次数无意义，一并归零。
+	if t.RetryCount < 0 {
+		t.RetryCount = 0
+	}
+	if t.RetryCount > 3 {
+		t.RetryCount = 3
+	}
+	if t.ScheduleKind == "once" {
+		t.RetryCount = 0
+	}
+
 	// 验证间隔时间
 	if t.ScheduleKind == "interval" {
 		if t.IntervalSec < 5 {

@@ -262,6 +262,9 @@ var baseTables = []string{
 		enabled INTEGER NOT NULL DEFAULT 1,
 		notify INTEGER NOT NULL DEFAULT 1,
 		notify_channels TEXT NOT NULL DEFAULT 'system,webhook',
+		-- retry_count：定时触发失败后的重试次数（0=不重试）。新增列，老库由
+		-- columnMigrations 补上；默认 0 保证升级后行为与之前一致。
+		retry_count INTEGER NOT NULL DEFAULT 0,
 		next_run TEXT DEFAULT '',
 		last_run TEXT DEFAULT '',
 		last_status TEXT DEFAULT '',
@@ -331,14 +334,44 @@ var baseTables = []string{
 		trigger TEXT DEFAULT 'manual'
 	)`,
 
+	// ai_spaces 空间：一组任务的容器，绑定一个目录。
+	//
+	// 为什么要单独一张表而不是把「是不是空间」打在会话上：空间与任务是一对多，
+	// 而会话表里没有「父会话」这个概念。用一条 is_space 标记表达不了
+	// 「这个空间里有哪几个任务」，最后只能去 LIKE 标题，那不是结构。
+	//
+	// 目录（cwd）绑在空间上而不是每个任务各存一份：同一个项目下的十几条对话
+	// 几乎总是同一个目录，各存一份意味着换目录要改十几行，且必然改漏。
+	// 任务自己的 cwd 仍可用（ai_conversations.cwd）——它表示「这条对话临时换了个目录」，
+	// 解析时以任务自己的为准，为空才回退到空间。
+	`CREATE TABLE IF NOT EXISTS ai_spaces (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL DEFAULT '',
+		cwd TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+	// ai_conversations: cwd 是这个对话绑定的工作目录（用户选的文件夹）；
+	// space_id 非空表示它属于某个空间（侧栏收在空间下而不是「任务」组里）；
+	// mode 是**创建时就选定**的任务类型（对话/翻译/总结/解释/使用教程），
+	// 存库是因为它要跟着这个任务走——切走再回来、甚至重启应用，模式都不该变。
+	//
+	// 新库直接带这些列，老库靠 columnMigrations 补——两处都要有，漏一边就是
+	// 「新装用户能用、老用户升级后列不存在」。
 	`CREATE TABLE IF NOT EXISTS ai_conversations (
 		id TEXT PRIMARY KEY,
 		title TEXT DEFAULT '',
 		summary TEXT DEFAULT '',
+		cwd TEXT NOT NULL DEFAULT '',
+		space_id TEXT NOT NULL DEFAULT '',
+		mode TEXT NOT NULL DEFAULT 'chat',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
-
+	// ai_messages: tool_calls 是这一条回复期间发生的工具调用（JSON 数组，由
+	// services/ai 写入，db 只当中转）。tool_rounds 是「用了几轮」——
+	// 与 len(tool_calls) 不是一回事：一轮可以并发调多个工具，两者都要留，
+	// 否则界面上「调了几轮」只能靠猜。
 	`CREATE TABLE IF NOT EXISTS ai_messages (
 		id TEXT PRIMARY KEY,
 		conv_id TEXT NOT NULL REFERENCES ai_conversations(id) ON DELETE CASCADE,
@@ -349,6 +382,8 @@ var baseTables = []string{
 		completion_tokens INTEGER NOT NULL DEFAULT 0,
 		cached_tokens INTEGER NOT NULL DEFAULT 0,
 		stopped INTEGER NOT NULL DEFAULT 0,
+		tool_calls TEXT NOT NULL DEFAULT '',
+		tool_rounds INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL
 	)`,
 
@@ -577,6 +612,18 @@ func (d *Database) migrate() error {
 		// 中断时后端会把已收到的部分落库，但没有这个标记的话，刷新后看到一句
 		// 没说完的话，用户分不清「模型就答了这些」还是「我自己点了停止」。
 		{"ai_messages", "stopped", "INTEGER NOT NULL DEFAULT 0"},
+		// ai_messages: 工具调用记录与轮次（内置 agent 的审计面）
+		{"ai_messages", "tool_calls", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_messages", "tool_rounds", "INTEGER NOT NULL DEFAULT 0"},
+		// ai_conversations: 这个对话绑定的工作目录（用户选的文件夹，绝对路径；空=没绑定）。
+		// 存库而不是只放前端内存：换个页面回来、或者重启应用，AI 还得知道自己该在哪个
+		// 目录里读文件、改代码。绑在会话上而不是全局设置，是因为同时开两个项目对话是常态。
+		{"ai_conversations", "cwd", "TEXT NOT NULL DEFAULT ''"},
+		// ai_conversations: 任务归属的空间，以及创建时选定的模式。
+		// 老会话 space_id 为空 = 普通任务（侧栏「任务」组）；mode 默认 chat，
+		// 与「以前没这个概念时的行为」一致，不需要回填。
+		{"ai_conversations", "space_id", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_conversations", "mode", "TEXT NOT NULL DEFAULT 'chat'"},
 		// notes 笔记树：新增树形/标题/标签字段
 		{"notes", "name", "TEXT DEFAULT ''"},
 		{"notes", "parent_id", "TEXT DEFAULT ''"},
@@ -611,6 +658,8 @@ func (d *Database) migrate() error {
 		// scheduled_tasks: 通知渠道拆成 CSV（system=系统通知 / webhook=机器人）。
 		// 老库一律补成「两个都要」，与升级前"notify 一开就双发"的行为一致。
 		{"scheduled_tasks", "notify_channels", "TEXT NOT NULL DEFAULT 'system,webhook'"},
+		// scheduled_tasks: 失败重试次数（0 = 不重试，与升级前行为一致）。
+		{"scheduled_tasks", "retry_count", "INTEGER NOT NULL DEFAULT 0"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {
@@ -649,6 +698,8 @@ func (d *Database) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_parent ON ssh_hosts(parent_id, sort)`,
 		`CREATE INDEX IF NOT EXISTS idx_activity_created_ts ON activity(created_ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_schedule_runs_task_ts ON schedule_runs(task_id, created_ts DESC)`,
+		// 回收站过期清理按 deleted_at 比较，没索引就是每次全表扫 + 把整份 payload 读一遍。
+		`CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {

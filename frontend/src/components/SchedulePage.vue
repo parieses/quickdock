@@ -9,6 +9,7 @@ import {
   SetScheduledTaskSort,
 } from '../../bindings/quickdock/services/appservice'
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
+
 import { Events } from '@wailsio/runtime'
 import ConfirmDialog from './ConfirmDialog.vue'
 import ScheduleRunHistoryDialog from './ScheduleRunHistoryDialog.vue'
@@ -63,13 +64,17 @@ function targetPlaceholder(a: string) {
 }
 
 // ---- 展示辅助 ----
+
 function scheduleDesc(t0: ScheduledTask): string {
+  // 重试次数拼在描述末尾：它改变了「失败了会怎样」的语义，属于该一眼看到的信息，
+  // 不该只藏在编辑弹窗里。不重试（0）时不加，避免每条任务都拖一条尾巴。
+  const retry = t0.retryCount ? ' · ' + t('sched_retry_short', { n: t0.retryCount }) : ''
   switch (t0.scheduleKind) {
     case 'once': return t('sched_kind_once') + (t0.runAt ? ' · ' + t0.runAt.slice(5, 16) : '')
-    case 'interval': return t('sched_kind_interval') + ' · ' + humanInterval(t0.intervalSec)
-    case 'daily': return t('sched_kind_daily') + ' · ' + (t0.timeOfDay || '')
-    case 'weekly': return t('sched_kind_weekly') + ' · ' + weekdayText(t0.weekdays) + ' ' + (t0.timeOfDay || '')
-    case 'monthly': return t('sched_kind_monthly') + ' · ' + (t0.timeOfDay || '')
+    case 'interval': return t('sched_kind_interval') + ' · ' + humanInterval(t0.intervalSec) + retry
+    case 'daily': return t('sched_kind_daily') + ' · ' + (t0.timeOfDay || '') + retry
+    case 'weekly': return t('sched_kind_weekly') + ' · ' + weekdayText(t0.weekdays) + ' ' + (t0.timeOfDay || '') + retry
+    case 'monthly': return t('sched_kind_monthly') + ' · ' + (t0.timeOfDay || '') + retry
   }
   return ''
 }
@@ -232,6 +237,8 @@ const fNotify = ref(true)
 // 是「总开关 + 分渠道」不是三选一：fNotify 关掉时两个渠道都不发。
 const fNotifySystem = ref(true)
 const fNotifyWebhook = ref(true)
+// 失败重试次数（0 = 不重试）。只在定时任务上有意义，once 任务后端会归零。
+const fRetry = ref(0)
 
 function toInput(s: string): string { return s ? s.replace(' ', 'T') : '' }
 function fromInput(s: string): string { return s ? s.replace('T', ' ') : '' }
@@ -261,6 +268,7 @@ function openCreate() {
   fNotify.value = true
   fNotifySystem.value = true
   fNotifyWebhook.value = true
+  fRetry.value = 0
   showModal.value = true
 }
 
@@ -288,6 +296,7 @@ function openEdit(t0: ScheduledTask) {
   const chans = t0.notifyChannels || 'system,webhook'
   fNotifySystem.value = chans.includes('system')
   fNotifyWebhook.value = chans.includes('webhook')
+  fRetry.value = t0.retryCount || 0
   showModal.value = true
 }
 
@@ -350,6 +359,9 @@ function buildPayload(): ScheduledTask {
     // 开了通知却一个渠道都没勾，等于「静默不通知」——这种组合用户多半是误操作，
     // 兜底成系统通知（本机一定能送达到），而不是让后端归一成"两个都要"往上推机器人。
     notifyChannels: buildChannels(),
+    // once 任务没有「下一次调度」，重试次数无意义：后端会归零，这里也置 0，
+    // 免得切回其他调度类型时又冒出一个用户没设过的数字。
+    retryCount: fKind.value === 'once' ? 0 : fRetry.value,
     nextRun: '', lastRun: '', lastStatus: '', lastResult: '', sort: 0, createdAt: '',
   } as ScheduledTask
 }
@@ -650,6 +662,17 @@ onMounted(refresh)
           </template>
         </div>
 
+        <!-- 失败重试：只在非一次性任务上出现——once 没有「下一次调度」，
+             重试与「已经跑完了、失败了就结束了」这个语义冲突（后端也会归零）。 -->
+        <template v-if="fKind !== 'once'">
+          <label>{{ t('sched_retry') }}</label>
+          <select v-model.number="fRetry" class="modal-input">
+            <option :value="0">{{ t('sched_retry_off') }}</option>
+            <option v-for="n in 3" :key="n" :value="n">{{ t('sched_retry_n', { n }) }}</option>
+          </select>
+          <p class="form-hint">{{ t('sched_retry_hint') }}</p>
+        </template>
+
         <!-- 校验提示必须画在弹窗里：页面级 error 被遮罩盖住，等于没提示 -->
         <p v-if="formErr" class="form-err">{{ formErr }}</p>
 
@@ -719,6 +742,12 @@ onMounted(refresh)
   margin: var(--space-3) 0 0; padding: 7px 10px; font-size: 12px;
   color: var(--color-danger); background: var(--color-danger-bg);
   border: 1px solid var(--color-danger-border); border-radius: var(--radius-md);
+}
+
+/* 表单里的说明文字（如重试的代价说明）。比标签小一号、不用危险色：
+   它是解释而不是错误，染红会让人以为填错了。 */
+.form-hint {
+  margin: 4px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-text-muted);
 }
 
 .sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 14px 20px 16px; }

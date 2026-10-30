@@ -87,7 +87,7 @@ func TestSSEFlusherMergesTokens(t *testing.T) {
 	}
 	// done 事件应在所有 token 之后
 	// 传一个价目表里有的模型：done 事件会附带这条回复的估算费用（estimateCost）
-	if err := fl.writeEvent("done", doneEvent("conv-1", 120*time.Millisecond, db.TokenUsage{Prompt: 100, Completion: 200}, "deepseek-chat")); err != nil {
+	if err := fl.writeEvent("done", doneEvent("conv-1", 120*time.Millisecond, db.TokenUsage{Prompt: 100, Completion: 200}, "deepseek-chat", 0, 0)); err != nil {
 		t.Fatalf("writeEvent: %v", err)
 	}
 	fl.close()
@@ -127,7 +127,7 @@ func TestSSEFlusherMergesTokens(t *testing.T) {
 func TestSSEFlusherDoneEventFields(t *testing.T) {
 	rec := &sseRecorder{}
 	fl := newSSEFlusher(rec, rec, "conv-2")
-	if err := fl.writeEvent("done", doneEvent("conv-2", 350*time.Millisecond, db.TokenUsage{Prompt: 1234, Completion: 567}, "deepseek-chat")); err != nil {
+	if err := fl.writeEvent("done", doneEvent("conv-2", 350*time.Millisecond, db.TokenUsage{Prompt: 1234, Completion: 567}, "deepseek-chat", 0, 0)); err != nil {
 		t.Fatalf("writeEvent: %v", err)
 	}
 	fl.close()
@@ -163,7 +163,7 @@ func TestSSEFlusherTokenBeforeDone(t *testing.T) {
 	for i := 0; i < 50; i++ {
 		fl.push("token", "x")
 	}
-	if err := fl.writeEvent("done", doneEvent("conv-3", 0, db.TokenUsage{Prompt: 0, Completion: 0}, "deepseek-chat")); err != nil {
+	if err := fl.writeEvent("done", doneEvent("conv-3", 0, db.TokenUsage{Prompt: 0, Completion: 0}, "deepseek-chat", 0, 0)); err != nil {
 		t.Fatalf("writeEvent: %v", err)
 	}
 	fl.close()
@@ -205,7 +205,7 @@ func TestSSEFlusherConcurrentPush(t *testing.T) {
 		}(w)
 	}
 	wg.Wait()
-	_ = fl.writeEvent("done", doneEvent("conv-4", 0, db.TokenUsage{Prompt: 0, Completion: 0}, "deepseek-chat"))
+	_ = fl.writeEvent("done", doneEvent("conv-4", 0, db.TokenUsage{Prompt: 0, Completion: 0}, "deepseek-chat", 0, 0))
 	fl.close()
 
 	var count int
@@ -224,7 +224,7 @@ func TestSSEFrameFormat(t *testing.T) {
 	rec := &sseRecorder{}
 	fl := newSSEFlusher(rec, rec, "conv-5")
 	fl.push("token", "hello")
-	if err := fl.writeEvent("done", doneEvent("conv-5", 0, db.TokenUsage{Prompt: 0, Completion: 0}, "deepseek-chat")); err != nil {
+	if err := fl.writeEvent("done", doneEvent("conv-5", 0, db.TokenUsage{Prompt: 0, Completion: 0}, "deepseek-chat", 0, 0)); err != nil {
 		t.Fatalf("writeEvent: %v", err)
 	}
 	fl.close()
@@ -250,7 +250,7 @@ func TestSSEFrameFormat(t *testing.T) {
 
 // TestDoneEventFirstTokenZero 验证首字延迟为 0 时（中断场景）字段仍存在。
 func TestDoneEventFirstTokenZero(t *testing.T) {
-	ev := doneEvent("c", 0, db.TokenUsage{Prompt: 0, Completion: 0}, "deepseek-chat")
+	ev := doneEvent("c", 0, db.TokenUsage{Prompt: 0, Completion: 0}, "deepseek-chat", 0, 0)
 	if ev["firstTokenMs"] != int64(0) {
 		t.Errorf("firstTokenMs = %v, 期望 0", ev["firstTokenMs"])
 	}

@@ -154,6 +154,8 @@ function newAIProfile(): AIProfile {
     presencePenalty: 0,
     thinkingEnabled: true,
     imageInput: 'both',
+    // 0 = 自动（按模型名查内置表 + 撞了 400 后按上游报的真实值校正）。
+    contextWindow: 0,
   }
 }
 
@@ -604,6 +606,19 @@ function saveAIModal() {
               </select>
             </label>
             <p class="ai-field-hint">{{ t('aiImageInputHint') }}</p>
+            <label class="field">
+              <span class="field-label">{{ t('aiContextWindow') }}</span>
+              <input
+                v-model.number="aiEditDraft.contextWindow"
+                type="number"
+                min="0"
+                max="2000000"
+                step="1024"
+                class="num-input"
+                placeholder="0"
+              />
+            </label>
+            <p class="ai-field-hint">{{ t('aiContextWindowHint') }}</p>
             <div class="field-row">
               <label class="field field-half">
                 <span class="field-label">top_p</span>

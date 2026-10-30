@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { Bot, Plus, Trash2, Copy, Square, RefreshCw, Eraser, StickyNote, ArrowDown, Image as ImageIcon, Link2, X, Download, Pencil, Search } from '@lucide/vue'
+import {
+  Bot, Plus, Trash2, Copy, Square, RefreshCw, StickyNote, ArrowDown, ArrowUp, Image as ImageIcon,
+  Link2, X, Download, Pencil, Search, Wrench, FolderOpen, Folder, ChevronRight, ChevronDown,
+  MessageSquare, Languages, FileText, GraduationCap, Lightbulb, Globe, Link as LinkIcon,
+  FolderTree, FileSearch, GitBranch, PenLine, Terminal, Play, Bug, Clock, FilePlus,
+  ListChecks, Bell, LayoutList,
+} from '@lucide/vue'
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
@@ -10,6 +16,7 @@ import { SetAIPageVisible } from '../../bindings/quickdock/services/appservice'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { splitMarkdownBlocks as splitBlocks } from '../utils/markdownBlocks'
+import { stripDsmlMarkup } from '../utils/dsmlMarkup'
 import { isMathFenceLang, mathExtension, renderMath } from '../utils/mathMarkdown'
 import {
   handleMermaidToolbarClick,
@@ -36,14 +43,19 @@ import {
   AIListProfiles,
   AISetActiveProfile,
   AIStreamInfo,
-  AIClearMessages,
   AIRegenerateTitle,
   AIRenameConversation,
   AIListConversations,
   AIDeleteConversation,
   AIGetMessages,
   AILoadImage,
+  AIListSpaces,
+  AICreateSpace,
+  AIRenameSpace,
+  AIDeleteSpace,
 } from '../../bindings/quickdock/services/ai/aiservice'
+import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
+import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 
 // 这个 name 是 App.vue 里 <KeepAlive :include> 的匹配依据，改它等于让 AI 页失去保活。
 // 为什么必须显式声明：页面是经 defineAsyncComponent(import(...)) 注册的，而 KeepAlive 判断
@@ -54,7 +66,20 @@ defineOptions({ name: 'AIPageKeepAlive' })
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
-interface AIConversation { id: string; title: string; summary: string; prompt_tokens: number; completion_tokens: number; created_at: string; updated_at: string }
+// 任务 = 一条对话。界面上叫「任务」而不是「会话」：它对应的是「我交给 AI 的一件事」，
+// 而且创建时要先选类型（翻译 / 总结 / 解释 …），本来就不是闲聊。
+interface AIConversation {
+  id: string; title: string; summary: string
+  prompt_tokens: number; completion_tokens: number
+  created_at: string; updated_at: string
+  cwd?: string
+  // 所属空间（空 = 普通任务，侧栏列在「任务」组里）
+  space_id?: string
+  // 创建时选定的类型。后端对老数据回落 chat，这里同样兜底。
+  mode?: string
+}
+// 空间 = 一个目录 + 挂在这个目录下的若干任务。
+interface AISpace { id: string; name: string; cwd: string; created_at: string; updated_at: string }
 interface AIMessage {
   id: string; conv_id: string; role: string; content: string; created_at: string
   reasoning_content?: string; images?: string; imgList?: AIMsgImage[]
@@ -64,6 +89,24 @@ interface AIMessage {
   cost?: number
   // 这条回复被用户中途停止（内容是半截的）。后端同样落库，刷新后标记仍在。
   stopped?: boolean
+  // 这条回复期间的工具调用记录（JSON 数组字符串，后端落库原文）。
+  // 空串/undefined = 没调过工具。不解析成对象是因为它只在渲染那一处用到，
+  // 提前解析会让每条消息都多一份副本，而绝大多数消息用不上。
+  tool_calls?: string
+  // 用了几轮工具调用（0/undefined = 纯文本回答）
+  tool_rounds?: number
+}
+
+// 一条工具调用（前端展示用）。running 只在流式期间为 true：
+// 历史记录从库里读回来时一定是已完成的，没有中间态。
+interface AIToolCall {
+  id: string; name: string; args?: string
+  result?: string; error?: string; ms?: number
+  round?: number; running?: boolean
+  // dedup 与本次提问里之前某次调用完全相同，宿主跳过了执行。
+  dedup?: boolean
+  // 改动行数（file_edit 有值）：卡片摘要行右侧显示 +N / -M。
+  added?: number; removed?: number
 }
 
 // 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
@@ -76,12 +119,36 @@ interface PendingImage { kind: 'file' | 'url'; url?: string; dataUrl?: string; n
 const emit = defineEmits<{ (e: 'open-settings', page?: string): void }>()
 
 const conversations = ref<AIConversation[]>([])
+const spaces = ref<AISpace[]>([])
 const activeId = ref('')
 const messages = ref<AIMessage[]>([])
 const input = ref('')
 const mode = ref('chat')
 const streaming = ref(false)
 const errorMsg = ref('')
+
+// 新建任务的待定归属：选了目录就有 spaceId，没选就是普通任务。
+//
+// 只在「任务还没发出第一条消息」这段时间内存在 —— 会话是首次发送时由后端创建的，
+// 在那之前没有 id 可写，只能先记在前端，发送时随请求带过去。
+const pendingSpaceId = ref('')
+// 侧栏里展开了的空间 id（默认收起：空间一多，全展开等于没有分组）。
+const expandedSpaces = ref<string[]>([])
+
+// 本次对话绑定的工作目录（绝对路径，空 = 没绑定）。
+//
+// 存后端而不是只放前端：切页/重启后 AI 还得知道该在哪个目录里干活。
+// 新会话在发送前还没有 id，所以这里允许「先选、发送时随请求带过去」——
+// 后端建会话时会把它写进 ai_conversations.cwd。
+const convCwd = ref('')
+// 目录名只显示最后一段（完整路径放 title），否则 toolbar 会被长路径撑开。
+// 没绑目录时是空串，工具栏那一处据此整块不显示。
+const cwdLabel = computed(() => {
+  const p = convCwd.value.trim()
+  if (!p) return ''
+  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : p
+})
 
 // —— 流式文本缓冲 ——
 // 关键性能点：token 到达时**不**直接写响应式 ref。改为先追加到普通字符串缓冲，
@@ -107,6 +174,147 @@ const STREAM_FLUSH_MS = 16
 // 因此排版逐像素一致，消息落地时不会出现视觉跳变。
 interface LiveBlock { raw: string; html: string }
 const streamBlocks = ref<LiveBlock[]>([])
+
+// —— 流式期间的工具调用卡片 ——
+// 与 streamingText 分开存放：工具卡片是离散事件（开始/结束各一次），
+// 不是逐字增长的文本，混进同一个缓冲会打乱增量渲染的「只有最后一块在变」前提。
+const streamTools = ref<AIToolCall[]>([])
+
+// toolList 把消息里的 tool_calls 解析成数组。
+//
+// 用 try/catch 兜住：这是**历史数据**，可能来自旧版本、也可能被手工改过库；
+// 解析失败就不显示卡片，而不是让整条消息渲染崩掉（一个坏 JSON 不该白屏）。
+function toolList(m: AIMessage): AIToolCall[] {
+  if (!m.tool_calls) return []
+  try {
+    const arr = JSON.parse(m.tool_calls)
+    return Array.isArray(arr) ? (arr as AIToolCall[]) : []
+  } catch {
+    return []
+  }
+}
+
+// serializeTools 把流式期收集的记录转成落库/展示同构的 JSON。
+// 丢掉 running：库里存的是「发生过什么」，不是「界面此刻什么样」。
+function serializeTools(list: AIToolCall[]): string {
+  return JSON.stringify(list.map((t) => ({
+    id: t.id, name: t.name, args: t.args || '',
+    result: t.result || '', error: t.error || '',
+    ms: t.ms || 0, round: t.round || 0,
+    ...(t.dedup ? { dedup: true } : {}),
+    ...(t.added ? { added: t.added } : {}),
+    ...(t.removed ? { removed: t.removed } : {}),
+  })))
+}
+
+// countToolRounds 数轮次而不是数条数：一轮可以调多个工具，
+// 卡片上写「5 个工具」和「3 轮」是两件事，用户问的「调了几轮」是后者。
+function countToolRounds(list: AIToolCall[]): number {
+  return new Set(list.filter((t) => t.round).map((t) => t.round)).size
+}
+
+// ---- 工具卡片的展示 ----
+//
+// 直接把 toolName + 原始参数 JSON 铺在卡片上是最省事的写法，也是最难看的：
+// 一行 `file_edit` 后面跟一坨 {"path":..., "old_string":...}，用户得在 JSON 里
+// 找自己关心的那一个值。所以卡片读的是「动作 + 目标」两件事：
+// 图标与动词说清做了什么，后面那一句说清对谁做的。
+const TOOL_ICON: Record<string, Component> = {
+  file_edit: PenLine, file_write: FilePlus, file_read: FileText, file_search: FileSearch, file_grep: FileSearch,
+  dir_list: FolderTree, git_status: GitBranch, git_diff: GitBranch,
+  web_fetch: Globe, web_links: LinkIcon, web_head: Globe,
+  run_command: Terminal, check_workdir: FolderTree,
+  plugin_execute: Play, plugin_open: LayoutList, plugin_list: LayoutList,
+  env_list: ListChecks, env_start: Play, env_stop: Square, env_status: Bug,
+  port_list: LayoutList, log_list: FileText, log_read: FileText,
+  monitor_list: Clock, monitor_check_now: Clock, monitor_logs: Clock,
+  schedule_list: Clock, schedule_runs: Clock, schedule_run_now: Play,
+  todo_list: ListChecks, todo_add: Plus, todo_done: ListChecks,
+  note_search: FileText, note_create: FileText,
+  clipboard_list: LayoutList, clipboard_search: Search,
+  robot_notify: Bell, app_info: Bot, diag_run: Bug,
+}
+// 动词按工具名前缀兜底：新工具没登记时至少能看出它是读、改、跑还是查。
+function toolIcon(name: string): Component {
+  if (TOOL_ICON[name]) return TOOL_ICON[name]
+  if (name.startsWith('file_')) return FileText
+  if (name.startsWith('git_')) return GitBranch
+  if (name.startsWith('web_')) return Globe
+  if (name.startsWith('env_')) return ListChecks
+  if (name.startsWith('monitor_') || name.startsWith('schedule_')) return Clock
+  if (name.startsWith('plugin_')) return Play
+  if (name.startsWith('todo_')) return ListChecks
+  if (name.startsWith('note_')) return FileText
+  if (name.startsWith('clipboard_')) return LayoutList
+  if (name.startsWith('log_')) return FileText
+  return Wrench
+}
+
+const TOOL_VERB: Record<string, string> = {
+  file_edit: 'aiToolVerbEdit', file_write: 'aiToolVerbWrite', file_read: 'aiToolVerbRead', file_search: 'aiToolVerbSearch',
+  file_grep: 'aiToolVerbSearch', dir_list: 'aiToolVerbList',
+  git_status: 'aiToolVerbGitStatus', git_diff: 'aiToolVerbGitDiff',
+  web_fetch: 'aiToolVerbFetch', web_links: 'aiToolVerbLinks', web_head: 'aiToolVerbHead',
+  run_command: 'aiToolVerbRun', check_workdir: 'aiToolVerbProbe',
+  plugin_execute: 'aiToolVerbPlugin', plugin_open: 'aiToolVerbOpen', plugin_list: 'aiToolVerbList',
+  env_list: 'aiToolVerbQuery', env_start: 'aiToolVerbStart', env_stop: 'aiToolVerbStop',
+  env_status: 'aiToolVerbQuery', port_list: 'aiToolVerbQuery',
+  log_list: 'aiToolVerbQuery', log_read: 'aiToolVerbRead',
+  monitor_list: 'aiToolVerbQuery', monitor_check_now: 'aiToolVerbCheck', monitor_logs: 'aiToolVerbQuery',
+  schedule_list: 'aiToolVerbQuery', schedule_runs: 'aiToolVerbQuery', schedule_run_now: 'aiToolVerbRun',
+  todo_list: 'aiToolVerbQuery', todo_add: 'aiToolVerbAdd', todo_done: 'aiToolVerbUpdate',
+  note_search: 'aiToolVerbSearch', note_create: 'aiToolVerbAdd',
+  clipboard_list: 'aiToolVerbQuery', clipboard_search: 'aiToolVerbSearch',
+  robot_notify: 'aiToolVerbNotify', app_info: 'aiToolVerbQuery', diag_run: 'aiToolVerbCheck',
+}
+function toolVerb(name: string): string {
+  const k = TOOL_VERB[name]
+  return k ? t(k) : t('aiToolVerbCall')
+}
+
+// 目标：从参数里挑一个「这条卡片在说谁」的值。
+//
+// 只挑 path / url / command / pattern / query / name / id 这几个键 ——
+// 全参数铺开的话，一条 file_edit 的摘要会有三行，而用户真正想确认的只是
+// 「它动的是不是我那个文件」。
+const TOOL_TARGET_KEYS = ['path', 'url', 'command', 'pattern', 'query', 'keyword', 'name', 'id', 'plugin', 'runtime', 'dir']
+function toolTarget(tc: AIToolCall): string {
+  const raw = (tc.args || '').trim()
+  if (!raw) return ''
+  let obj: Record<string, any> | null = null
+  try { obj = JSON.parse(raw) } catch { obj = null }
+  if (!obj) {
+    // 参数解析失败时至少给原文的前一段：模型写坏了 JSON 也要能看出它想动谁。
+    return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
+  }
+  for (const k of TOOL_TARGET_KEYS) {
+    const v = obj[k]
+    if (typeof v === 'string' && v.trim()) return shortPath(v.trim())
+    if (typeof v === 'number') return String(v)
+  }
+  // 没命中已知键就退回第一个字符串值，比整段 JSON 可读得多。
+  for (const [, v] of Object.entries(obj)) {
+    if (typeof v === 'string' && v.trim()) return shortPath(v.trim())
+  }
+  return ''
+}
+
+// 路径只留末尾两段：绝对路径在卡片上是噪音，用户要确认的是「哪个文件」，
+// 而 `E:\pp\quickdock\services\ai\tools\code.go` 里有用的只有后两截。
+function shortPath(p: string): string {
+  const sep = p.includes('\\') ? '\\' : '/'
+  const parts = p.split(/[\\/]/).filter(Boolean)
+  if (parts.length <= 2) return p
+  return '…' + sep + parts.slice(-2).join(sep)
+}
+
+// 结果要不要用等宽块：命令输出与网页正文带换行，按纯文本渲染会把缩进吃掉。
+function toolResultLang(tc: AIToolCall): string {
+  if (tc.name === 'run_command') return 'bash'
+  if (tc.name.startsWith('git_')) return 'diff'
+  if (tc.name === 'file_edit') return 'diff'
+  return ''
+}
 
 // 历史消息的块 HTML：按消息 id 记忆化。
 //
@@ -154,7 +362,9 @@ function renderMessageBlocks(m: AIMessage): string[] {
   const key = m.id
   const hit = msgBlockCache.get(key)
   if (hit && hit.src === m.content) return hit.html
-  const raws = splitMarkdownBlocks(m.content ?? '')
+  // 渲染前剥掉「被写成正文的工具调用」标记：修复前落库的历史消息里带着这些
+  // 标记，直接渲染就是满屏 <｜｜DSML｜｜>（见 utils/dsmlMarkup.ts）。
+  const raws = splitMarkdownBlocks(stripDsmlMarkup(m.content ?? ''))
   const html = raws.map((raw) => DOMPurify.sanitize(md.parse(raw, { async: false }) as string))
   msgBlockCache.set(key, { src: m.content ?? '', html })
   return html
@@ -167,7 +377,9 @@ function renderMessageBlocks(m: AIMessage): string[] {
 // 就永远匹配不上 → 每次都从第 0 块重建，导致已渲染内容被顶替（实测复现）。
 // 最后一块无条件重渲染（它的体量小，开销低），前面的块原文一旦稳定就不会再变。
 function renderLiveBlocks(src: string) {
-  const raws = splitMarkdownBlocks(src)
+  // 与历史消息同一个口径：先剥掉工具调用标记，再切块渲染。
+  // 后端已经在流式层拦过一次（services/ai/ai_dsml.go），这里是幂等的兜底。
+  const raws = splitMarkdownBlocks(stripDsmlMarkup(src))
   const arr = streamBlocks.value
   const n = raws.length
   // 已完成块的数量：raws 的前 n-1 块（最后一块是进行中的）
@@ -419,13 +631,21 @@ const hasKey = computed(() => {
   const p = aiProfiles.value.find((x) => x.id === aiActive.value)
   return !!(p && p.apiKey)
 })
+// 任务的五种类型。icon/desc 跟着类型走，落地页那一排 pill 与侧栏的任务图标都读这一份——
+// 两处各写一遍的话，加一个类型就要在两个地方各补一次，漏一处就是「类型选不了」。
 const modes = [
-  { key: 'chat', label: 'aiModeChat' },
-  { key: 'explain', label: 'aiModeExplain' },
-  { key: 'translate', label: 'aiModeTranslate' },
-  { key: 'summarize', label: 'aiModeSummarize' },
-  { key: 'tutorial', label: 'aiModeTutorial' },
+  { key: 'chat', label: 'aiModeChat', desc: 'aiModeChatDesc', icon: MessageSquare },
+  { key: 'explain', label: 'aiModeExplain', desc: 'aiModeExplainDesc', icon: Lightbulb },
+  { key: 'translate', label: 'aiModeTranslate', desc: 'aiModeTranslateDesc', icon: Languages },
+  { key: 'summarize', label: 'aiModeSummarize', desc: 'aiModeSummarizeDesc', icon: FileText },
+  { key: 'tutorial', label: 'aiModeTutorial', desc: 'aiModeTutorialDesc', icon: GraduationCap },
 ]
+
+// 侧栏任务行前面的小图标：不标出来，「这条任务是翻译还是闲聊」只能点进去看内容。
+function modeIcon(m?: string) {
+  const hit = modes.find((x) => x.key === (m || 'chat'))
+  return hit ? hit.icon : MessageSquare
+}
 
 // —— 图片附件 ——
 // attachments 为待发送预览；发送后清空。file 类存 dataUrl（base64），直接随请求发给模型；
@@ -511,6 +731,10 @@ function onInputDrop(e: DragEvent) {
 // 历史消息图片懒加载：把后端存盘（file 类）的路径读回 dataUrl，回填到消息的 imgList。
 // url 类直发链接，无需加载。返回供模板渲染用的图片数组（file 类未加载完毕时 dataUrl 为空）。
 async function resolveMessageImages(msgs: AIMessage[]) {
+  // 先解析引用结构，再把所有待加载的 file 类图一次性并发拉回。
+  // 一张一张 await 时，N 张图的总耗时是 N 次往返之和——打开一个贴过图的
+  // 长会话会明显停在「加载中」。并发后只等最慢的那一张。
+  const pending: { img: AIMsgImage; path: string }[] = []
   for (const m of msgs) {
     if (!m.images) { m.imgList = []; continue }
     let arr: AIMsgImage[] = []
@@ -521,15 +745,23 @@ async function resolveMessageImages(msgs: AIMessage[]) {
       }
     } catch { arr = [] }
     for (const img of arr) {
-      if (img.kind === 'file' && img.path) {
-        try {
-          const d = unwrap<string>(await AILoadImage(img.path))
-          if (d) img.dataUrl = d
-        } catch { /* 读不到图不阻断对话，缩略图留空 */ }
-      }
+      if (img.kind === 'file' && img.path) pending.push({ img, path: img.path })
     }
     m.imgList = arr
   }
+  // 同一张图可能在多条消息里被引用（同一张贴图问了两次），去重少读一次盘。
+  const byPath = new Map<string, AIMsgImage[]>()
+  for (const p of pending) {
+    const list = byPath.get(p.path)
+    if (list) list.push(p.img)
+    else byPath.set(p.path, [p.img])
+  }
+  await Promise.all(Array.from(byPath.entries()).map(async ([path, imgs]) => {
+    try {
+      const d = unwrap<string>(await AILoadImage(path))
+      if (d) for (const img of imgs) img.dataUrl = d
+    } catch { /* 读不到图不阻断对话，缩略图留空 */ }
+  }))
 }
 
 // 图片链接输入框（点击「图片链接」后展开的小输入框），避免每次都弹 prompt。
@@ -658,17 +890,94 @@ async function loadProfiles() {
 // 列表一次全量拉、全量渲染：上百个会话时侧栏本身就成了负担，而真正要找的
 // 往往是最近几条。搜 + 分批显示，两个毛病一起解决。
 const convQuery = ref('')
-const CONV_PAGE = 30
-const convLimit = ref(CONV_PAGE)
+// 折叠阈值：超过就只显示前 N 条，其余由「展开 / 收起」控制。
+//
+// 取「一屏放得下」的量级——侧栏是导航不是列表页，几十条任务全铺开会把当前任务挤出
+// 可视区。原来是「显示更多」只增不减，展开一次就收不回去了，条目一多照样难用。
+const FOLD_TASKS = 12
+const FOLD_SPACES = 8
+const FOLD_SPACE_TASKS = 10
 
-const filteredConversations = computed(() => {
+// 整组是否展开（「任务 (n)」「空间 (n)」标题可点）。组里的东西一多，
+// 先收起一整组往往比在里面翻找更快。
+const tasksOpen = ref(true)
+const spacesOpen = ref(true)
+// 组内是否越过阈值全展开
+const tasksExpanded = ref(false)
+const spacesExpanded = ref(false)
+// 空间内任务全展开的空间 id：与「组是否展开」分开记——一个空间也可能挂几十条任务，
+// 展开空间不等于要把它下面全部任务都铺出来。
+const expandedSpaceTasks = ref<string[]>([])
+
+// 搜索同时覆盖任务与空间：空间是任务的容器，只搜任务会让「我记得放在某个空间里了」
+// 这种最常见的查找方式失效。搜到空间时把它的任务一并算作命中。
+function matchConv(c: AIConversation, q: string): boolean {
+  return (c.title || '').toLowerCase().includes(q)
+}
+
+// 任务组：只列 **不属于任何空间** 的任务。空间下的任务归在空间那一组里，
+// 否则同一个任务在侧栏出现两次，用户分不清点哪个才是同一个。
+const taskConversations = computed(() => {
   const q = convQuery.value.trim().toLowerCase()
-  if (!q) return conversations.value
-  return conversations.value.filter((c) => (c.title || '').toLowerCase().includes(q))
+  return conversations.value.filter((c) => !(c.space_id || '').trim() && (!q || matchConv(c, q)))
 })
-const shownConversations = computed(() => filteredConversations.value.slice(0, convLimit.value))
+const shownTaskConversations = computed(() =>
+  tasksExpanded.value ? taskConversations.value : taskConversations.value.slice(0, FOLD_TASKS))
 
-watch(convQuery, () => { convLimit.value = CONV_PAGE })
+// 空间组：命中的空间（自身名字匹配，或它下面有任务匹配）+ 每个空间下的任务。
+//
+// 空间自己不匹配但下属任务匹配时也要显示这个空间：只把任务挑出来平铺，
+// 用户就看不到「这条任务是哪个项目的」——而那正是空间要回答的问题。
+const shownSpaces = computed(() => {
+  const q = convQuery.value.trim().toLowerCase()
+  const out: { space: AISpace; tasks: AIConversation[] }[] = []
+  for (const s of spaces.value) {
+    const tasks = conversations.value.filter((c) => (c.space_id || '') === s.id)
+    const selfHit = !q || (s.name || '').toLowerCase().includes(q)
+    const hits = q ? tasks.filter((c) => matchConv(c, q)) : tasks
+    if (!q) {
+      out.push({ space: s, tasks })
+      continue
+    }
+    if (selfHit) out.push({ space: s, tasks })
+    else if (hits.length) out.push({ space: s, tasks: hits })
+  }
+  return out
+})
+
+// 实际渲染的空间：在搜索命中的全集之上再叠一层折叠（命中本身也可能很多）
+const visibleSpaces = computed(() =>
+  spacesExpanded.value ? shownSpaces.value : shownSpaces.value.slice(0, FOLD_SPACES))
+
+// 空间内的任务同样按阈值折叠
+function spaceTasksShown(g: { space: AISpace; tasks: AIConversation[] }): AIConversation[] {
+  return expandedSpaceTasks.value.includes(g.space.id) ? g.tasks : g.tasks.slice(0, FOLD_SPACE_TASKS)
+}
+
+function toggleSpaceTasks(id: string) {
+  expandedSpaceTasks.value = expandedSpaceTasks.value.includes(id)
+    ? expandedSpaceTasks.value.filter((x) => x !== id)
+    : [...expandedSpaceTasks.value, id]
+}
+
+// 总数给「任务 (n) / 空间 (n)」用：搜索时显示命中数而不是总数，
+// 否则「搜到 2 条」的标题上却写着「任务 (57)」。
+const totalMatched = computed(() => taskConversations.value.length + shownSpaces.value.reduce((n, s) => n + s.tasks.length, 0))
+
+// 换搜索词回到折叠态：搜索结果通常比全量少，沿用上一次的展开状态会显得莫名其妙。
+watch(convQuery, () => {
+  tasksExpanded.value = false
+  spacesExpanded.value = false
+})
+
+async function loadSpaces() {
+  try {
+    spaces.value = (unwrap<AISpace[]>(await AIListSpaces()) ?? []) as AISpace[]
+  } catch (e) {
+    // 空间表是新增的：老库升级失败时不该把整个侧栏搞坏，静默按「没有空间」处理。
+    spaces.value = []
+  }
+}
 
 async function loadConversations() {
   try {
@@ -711,17 +1020,288 @@ async function selectConv(id: string) {
   // 如果有正在流的对话，先打断
   if (streaming.value) stop()
   activeId.value = id
+  const conv = conversations.value.find((c) => c.id === id)
+  // 工作目录跟着任务走：两条对话可以绑不同项目，切回来时要还原成它自己的那个。
+  convCwd.value = (conv?.cwd || '').trim()
+  // 模式是这个任务创建时选定的属性，切回来要还原——否则「这条是用来翻译的」
+  // 在切走再回来之后就丢了。
+  mode.value = (conv?.mode || 'chat').trim() || 'chat'
+  // 已有会话的归属以库里的为准，新建待定值在这里作废。
+  pendingSpaceId.value = ''
   resetStreamState()
   errorMsg.value = ''
   await loadMessages(id)
 }
 
-function newConv() {
+// 打开当前任务的工作目录：AI 生成的文件都在里面。
+// 只开不换——换目录的入口在新建任务时选空间。
+async function openCwd() {
+  if (!convCwd.value) return
+  try {
+    unwrap(await RevealInExplorer(convCwd.value))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// ---- 新建任务（落地页，不是弹窗）----
+//
+// 原来点「新建任务」弹一个框让你先定类型再定目录，定完才出现输入框，等于把
+// 「提一个问题」拆成三步。现在改成主区直接变成落地页：上面选类型（一排 pill）、
+// 输入框、下面一行选归属空间/模型——边选边打字，回车就走。
+//
+// 类型和空间仍然是**这条任务的**属性（首次发送时随请求带过去并落库），
+// 只是把它们从「创建前的必答项」降级成「发送前顺手改的两个开关」：
+// 不改就是默认（对话 + 普通任务），想改就在输入框下面改。
+const newTaskMode = ref('chat')
+// 归属空间：'' = 普通任务；已有空间的 id = 直接用它；NEW_SPACE = 新建（这时才要选目录）。
+//
+// 下拉优先而不是「一律选目录」：空间按目录唯一，重复选同一个目录后端也只是返回
+// 同一个空间，让用户每次都开一次文件对话框去撞这个幂等，等于白跑一趟。
+const NEW_SPACE = '__new__'
+const newTaskSpace = ref('')
+const newTaskDir = ref('')
+const heroInputEl = ref<HTMLTextAreaElement | null>(null)
+
+// 落地页上的示例问题：点一下填进输入框，省得对着空白框想「能问什么」。
+const heroTips = ['aiHeroTip1', 'aiHeroTip2', 'aiHeroTip3', 'aiHeroTip4']
+
+// 空态 = 还没进入任何任务。此时主区渲染落地页而不是「空消息区 + 底部输入框」。
+// streaming 也要算进去：新任务发出去到 conv 事件回来之间 activeId 还空着，
+// 不排除的话落地页会在第一轮请求途中闪回来。
+const isNewTask = computed(() =>
+  !activeId.value && messages.value.length === 0 && !streaming.value && !streamingText.value)
+
+function openNewTask() {
   if (streaming.value) stop()
+  // 下拉要列当前还存在的空间：从回收站恢复/删掉空间之后，挂载时那份列表就过期了。
+  void loadSpaces()
+  newTaskMode.value = 'chat'
+  newTaskSpace.value = ''
+  newTaskDir.value = ''
+  beginBlankTask()
+  nextTick(() => heroInputEl.value?.focus())
+}
+
+// 点示例问题：填进输入框并聚焦，用户接着改两个字就能发。
+// 不直接发送——示例只是起点，直接发出去常常不是用户真想问的那句话。
+function fillHeroTip(key: string) {
+  input.value = t(key)
+  nextTick(() => heroInputEl.value?.focus())
+}
+
+// 回车发送的唯一入口。
+//
+// 必须挡输入法组合：中文/日文输入中按回车是「确认候选词」，而 Chromium（WebView2 同源）
+// 在这个回车**照样**派发 keydown（isComposing=true / keyCode 229）。之前用
+// `@keydown.enter.exact.prevent="send"`，结果是打拼音时一按回车就把半截中文发出去，
+// 候选词反而没了。同理 Shift/Ctrl/Alt/Meta + 回车留给换行与快捷键。
+function onEnterSend(e: KeyboardEvent, fn: () => void) {
+  if (e.isComposing || e.keyCode === 229) return
+  if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return
+  e.preventDefault()
+  fn()
+}
+
+// 目录最后一段：落地页那行选择器放不下完整路径，全路径放 title。
+function dirTail(p: string): string {
+  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
+  return parts.length ? parts[parts.length - 1] : p
+}
+
+// 产物去向：AI 生成的文件会写到哪。
+//
+// · 空间任务 —— 直接落在空间目录里（AI 能顺手改项目已有的文件，这也是空间的意义）；
+// · 普通任务 —— 后端在首次发送时给它建一个专属目录（数据目录/ai_tasks/<任务 id 短码>），
+//   没有目录的话写操作会被白名单直接拒绝，模型只能干瞪眼。
+// 建任务时就说清楚，比等用户发现「AI 不肯写文件」再回头找原因强。
+const newTaskOutHint = computed(() => {
+  if (newTaskSpace.value === NEW_SPACE) {
+    return newTaskDir.value ? t('aiNewTaskOutDir', { dir: newTaskDir.value }) : t('aiNewTaskOutDirPending')
+  }
+  if (newTaskSpace.value) {
+    const sp = spaces.value.find((s) => s.id === newTaskSpace.value)
+    return sp?.cwd ? t('aiNewTaskOutDir', { dir: sp.cwd }) : t('aiNewTaskOutDirPending')
+  }
+  return t('aiNewTaskOutPlain')
+})
+
+// 目录比对用：Windows 上同一个目录会有盘符大小写、正斜杠、尾部斜杠的写法差异，
+// 直接字符串相等会把「已存在的空间」判成不存在，于是又建一个同目录的。
+function normDir(p: string): string {
+  return p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+}
+
+async function pickNewTaskDir() {
+  // unwrap 在 code≠0 时是**抛**异常，不是返回带 ok 的结果：不包 try 的话，
+  // 原生对话框出错会变成一条未处理的 Promise 拒绝，界面上什么都不会发生。
+  let dir: string | null = null
+  try {
+    dir = unwrap<string | null>(await PickFolderPath(t('aiPickFolderTitle')))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    return
+  }
+  if (!dir) return
+  // 选到的目录已经是某个空间：直接切到那个空间。后端同名幂等也能兜住，
+  // 但那样用户看到的是「我选了目录，下拉却跳到别处」，不如当场说清楚。
+  const hit = spaces.value.find((s) => normDir(s.cwd || '') === normDir(dir))
+  if (hit) {
+    newTaskSpace.value = hit.id
+    newTaskDir.value = ''
+    toast.success(t('aiSpaceAlreadyExists', { name: hit.name }))
+    return
+  }
+  newTaskDir.value = dir
+}
+
+// 解析这条新任务该落在哪：归属三选一（已有空间 / 新建空间（选目录，后端按目录幂等）/
+// 普通任务）。打包成一处，是因为「点创建」和「直接回车发送」两条路都要它。
+async function resolveNewTaskTarget(): Promise<{ spaceId: string; dir: string }> {
+  if (newTaskSpace.value === NEW_SPACE) {
+    const dir = newTaskDir.value.trim()
+    // 说了要新建空间却没选目录：不静默降级成普通任务，那样用户以为建了空间，
+    // 结果任务落在普通组里。
+    if (!dir) throw new Error(t('aiNewTaskDirRequired'))
+    const sp = unwrap<AISpace>(await AICreateSpace('', dir))
+    await loadSpaces()
+    return { spaceId: (sp?.id || '').trim(), dir: (sp?.cwd || dir).trim() }
+  }
+  if (newTaskSpace.value) {
+    // 已有空间：目录以库里为准，不拿前端缓存的路径去设工作目录。
+    const sp = spaces.value.find((s) => s.id === newTaskSpace.value)
+    // 空间在别处被删了（回收站、另一个窗口）：不能静默退回普通任务 ——
+    // 用户以为任务挂在这个项目下，产物却去了 ai_tasks 里，事后只会觉得「文件找不到」。
+    if (!sp) throw new Error(t('aiSpaceGone'))
+    return { spaceId: sp.id, dir: (sp.cwd || '').trim() }
+  }
+  return { spaceId: '', dir: '' }
+}
+
+// 任务落进某个空间时把它在侧栏展开，好让用户看到新任务排到哪了；
+// 整组若被收起、或这个空间落在折叠线之外，也一并打开——否则「建完了侧栏那没有」
+// 看起来像没建成。
+function revealSpace(spaceId: string) {
+  if (!spaceId) return
+  spacesOpen.value = true
+  toggleSpace(spaceId, true)
+  if (spaces.value.findIndex((s) => s.id === spaceId) >= FOLD_SPACES) spacesExpanded.value = true
+}
+
+// 落地页里直接发送：先把归属与模式定下来（会话本身仍由后端在收到第一条消息时创建），
+// 再走统一的 send()。失败就停在落地页，草稿还在。
+async function heroSend() {
+  if (!hasKey.value || streaming.value) return
+  if (!input.value.trim() && !attachments.value.length) return
+  try {
+    const target = await resolveNewTaskTarget()
+    pendingSpaceId.value = target.spaceId
+    convCwd.value = target.dir
+    mode.value = newTaskMode.value
+    revealSpace(target.spaceId)
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    return
+  }
+  await send()
+}
+
+// 清出一条空任务：会话 id 置空后，下一条消息发出去时才由后端真正创建。
+//
+// 不在「新建」这一刻就建会话，是因为那样每点一次就多一条空对话——
+// 用户往往是点了又改主意，空会话会越攒越多。
+function beginBlankTask() {
   activeId.value = ''
   messages.value = []
   resetStreamState()
   errorMsg.value = ''
+  // 回到落地页时必须是「干净的默认态」：沿用上一次选过的类型和空间，
+  // 下一条消息就会莫名其妙落进另一个项目的目录里（删掉一条任务后尤其容易中招）。
+  newTaskMode.value = 'chat'
+  newTaskSpace.value = ''
+  newTaskDir.value = ''
+}
+
+// ---- 空间 ----
+
+function isSpaceExpanded(id: string): boolean {
+  return expandedSpaces.value.includes(id)
+}
+
+function toggleSpace(id: string, force?: boolean) {
+  const on = force !== undefined ? force : !isSpaceExpanded(id)
+  if (on) {
+    if (!isSpaceExpanded(id)) expandedSpaces.value = [...expandedSpaces.value, id]
+    return
+  }
+  expandedSpaces.value = expandedSpaces.value.filter((x) => x !== id)
+}
+
+// 删空间比删任务危险得多：一次带走它下面全部任务。确认语里必须带数量。
+async function delSpace(s: AISpace) {
+  const n = conversations.value.filter((c) => (c.space_id || '') === s.id).length
+  const msg = n > 0 ? t('aiDelSpaceConfirmWithTasks', { name: s.name, n }) : t('aiDelSpaceConfirm', { name: s.name })
+  if (!(await toast.confirm(msg))) return
+  // 空间里有正在流的任务：先掐流，否则后端会往一个已被删掉的会话里写内容。
+  // 注意判的是「当前任务是否属于这个空间」而不是「当前任务是否正在流」：
+  // 停在一个**空闲**任务上删空间时，后端已经把任务硬删了，界面却还留着它的消息，
+  // 下一次发送只会得到一句「会话不存在或已被删除」——用户完全不知道自己在看一条幽灵任务。
+  const activeInSpace = !!activeId.value &&
+    conversations.value.some((c) => c.id === activeId.value && (c.space_id || '') === s.id)
+  if (streaming.value && activeInSpace) stop()
+  try {
+    unwrap(await AIDeleteSpace(s.id))
+    if (activeInSpace) beginBlankTask()
+    await Promise.all([loadConversations(), loadSpaces()])
+    toast.success(t('aiMovedToRecycle'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// 空间改名：与任务一样走行内编辑（双击名字或点铅笔）。
+//
+// 原来用的是 window.prompt —— 原生对话框在 WebView2 里是系统样式、不跟随主题，
+// 中文输入法组合期间还容易丢字（同一个理由，SSH 分组命名早就改成了自建弹窗）。
+// 一个短名字犯不上开弹窗，行内改完按回车就走。
+const renamingSpaceId = ref('')
+const spaceNameText = ref('')
+const spaceNameInput = ref<HTMLInputElement | null>(null)
+
+function startRenameSpace(s: AISpace) {
+  renamingSpaceId.value = s.id
+  spaceNameText.value = s.name || ''
+  // 等 input 渲染出来再聚焦全选：不全选就得先手动删掉旧名字。
+  nextTick(() => focusRenameInput(spaceNameInput.value))
+}
+
+function cancelRenameSpace() {
+  renamingSpaceId.value = ''
+  spaceNameText.value = ''
+}
+
+// Enter 与 blur 都会走到这里（Enter 后输入框随即失焦），所以进函数先清 id：
+// 第二次调用读到空 id 直接返回，避免同一份名字提交两遍。
+async function commitRenameSpace(s: AISpace) {
+  const id = renamingSpaceId.value
+  if (!id) return
+  const name = spaceNameText.value.trim()
+  renamingSpaceId.value = ''
+  if (!name || name === (s.name || '')) return
+  try {
+    unwrap<string>(await AIRenameSpace(id, name))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+  // 无论成败都重取：失败时界面若停在用户改过的样子，会与库里的名字不一致。
+  await loadSpaces()
+}
+
+// 在某个空间里新建任务：省得每次都回落地页从「归属空间」下拉里翻。
+function newTaskInSpace(s: AISpace) {
+  openNewTask()
+  newTaskSpace.value = s.id
+  revealSpace(s.id)
 }
 
 // 重置所有流式状态（切会话/新会话时调用）
@@ -731,6 +1311,7 @@ function resetStreamState() {
   streamReasonBuf = ''
   streamingText.value = ''
   streamBlocks.value = []
+  streamTools.value = []
   reasoningText.value = ''
   // 流式块缓存按回复隔离：一条回复的块原文可能与另一条完全相同
   // （如「好的」这类短回复），跨回复复用是安全的，但没必要长期持有。
@@ -738,14 +1319,17 @@ function resetStreamState() {
 }
 
 async function delConv(id: string) {
-  if (!(await toast.confirm(t('confirmDelete')))) return
+  // 提示语点明「可恢复」：后端已经把它连消息一起拍进回收站，
+  // 说「删除」会让用户以为再也找不回来，从而不敢清理侧栏。
+  if (!(await toast.confirm(t('aiDelTaskConfirm')))) return
   // 删的正是当前在跑的会话：先掐流再删。否则后端会先发现「会话已被删除」
   // 而把内容写失败，前端还会抱着一条指向已删会话的流继续读。
   if (streaming.value && activeId.value === id) stop()
   try {
     unwrap(await AIDeleteConversation(id))
-    if (activeId.value === id) newConv()
+    if (activeId.value === id) beginBlankTask()
     await loadConversations()
+    toast.success(t('aiMovedToRecycle'))
   } catch (e) {
     toast.error(getErrorMessage(e))
   }
@@ -828,10 +1412,18 @@ function startRename(c: AIConversation) {
   renamingId.value = c.id
   renameText.value = c.title || ''
   // 等 input 渲染出来再聚焦并全选：不全选的话，用户得先手动删掉旧标题才能打新的。
-  nextTick(() => {
-    renameInput.value?.focus()
-    renameInput.value?.select()
-  })
+  nextTick(() => focusRenameInput(renameInput.value))
+}
+
+// 聚焦并全选行内改名的输入框。
+//
+// 必须容错数组：v-for 里的字符串 ref 会被 Vue 收集成**数组**（哪怕同一时刻只渲染了一个），
+// 直接 `ref.value?.focus()` 拿到的是 [input]，`.focus` 不存在 → nextTick 里抛 TypeError，
+// 表现是「点了改名，输入框出来了但没有焦点，打字没反应」。
+function focusRenameInput(r: unknown) {
+  const el = (Array.isArray(r) ? r[0] : r) as HTMLInputElement | null
+  el?.focus()
+  el?.select()
 }
 
 function cancelRename() {
@@ -863,20 +1455,6 @@ async function commitRename(c: AIConversation) {
   }
 }
 
-async function clearContext() {
-  if (!activeId.value) return
-  if (!(await toast.confirm(t('aiClearConfirm')))) return
-  try {
-    unwrap(await AIClearMessages(activeId.value))
-    messages.value = []
-    resetStreamState()
-    errorMsg.value = ''
-    toast.success(t('aiCleared'))
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-  }
-}
-
 // 确保已拿到本地流式服务端口+令牌
 async function ensureStreamInfo() {
   if (aiStreamPort.value) return
@@ -887,7 +1465,7 @@ async function ensureStreamInfo() {
 }
 
 // 单条回复的统计信息（耗时 / 首字延迟 / token 用量）
-interface AIStreamStat { elapsedMs: number; firstTokenMs: number; promptTokens: number; completionTokens: number; cachedTokens: number; cost?: number }
+interface AIStreamStat { elapsedMs: number; firstTokenMs: number; promptTokens: number; completionTokens: number; cachedTokens: number; cost?: number; toolRounds?: number }
 // messageId -> 统计。挂在消息对象上随消息一起渲染。
 const statMap = reactive(new Map<string, AIStreamStat>())
 
@@ -906,6 +1484,11 @@ function formatStat(stat: AIStreamStat): string {
     parts.push(pct > 0
       ? t('aiStatTokensCached', { in: fmtTokens(stat.promptTokens), out: fmtTokens(stat.completionTokens), pct })
       : t('aiStatTokens', { in: fmtTokens(stat.promptTokens), out: fmtTokens(stat.completionTokens) }))
+  }
+  // 工具轮次排在 token 之后、费用之前：它与 token 是同一件事的两个侧面
+  // （同一笔钱，查了五轮还是空聊五轮），放在一起才读得通。
+  if (stat.toolRounds && stat.toolRounds > 0) {
+    parts.push(t('aiStatToolRounds', { n: stat.toolRounds }))
   }
   // 费用由后端算（价目表只有 ai_pricing.go 一份）；未收录的模型没有 cost，
   // 这里就不显示——与设置页「未知模型不计价」保持同一口径。
@@ -935,13 +1518,17 @@ function fmtCost(n: number): string {
 function msgStat(m: AIMessage): AIStreamStat | null {
   const live = statMap.get(m.id)
   if (live) return live
-  if (!m.prompt_tokens && !m.completion_tokens) return null
+  // 有工具轮次也要显示这一行：即使上游没回 usage（token 全 0），
+  // 「这条回答调了 3 轮工具」仍然是用户想知道的。
+  if (!m.prompt_tokens && !m.completion_tokens && !m.tool_rounds) return null
   return {
     elapsedMs: 0, firstTokenMs: 0,
     promptTokens: m.prompt_tokens || 0,
     completionTokens: m.completion_tokens || 0,
     cachedTokens: m.cached_tokens || 0,
     cost: m.cost || 0,
+    // 刷新后从库里的 tool_rounds 接管，与流式结束时那一眼显示的口径一致
+    toolRounds: m.tool_rounds || 0,
   }
 }
 
@@ -1007,9 +1594,27 @@ async function send() {
         'Content-Type': 'application/json',
         'X-Stream-Token': aiStreamToken.value,
       },
-      body: JSON.stringify({ convId, mode: mode.value, message: text, images: imagesPayload }),
+      body: JSON.stringify({
+        convId,
+        mode: mode.value,
+        // 归属只在新建时生效：后端忽略已有会话传来的 spaceId，
+        // 免得「随便发一句话」就把任务搬了家。
+        spaceId: convId ? undefined : (pendingSpaceId.value || undefined),
+        message: text,
+        // 新会话还没有 id，工作目录只能随这一次请求带过去（后端建会话时写库）。
+        cwd: convCwd.value || undefined,
+        images: imagesPayload,
+      }),
       signal: ctrl.signal,
     })
+    if (!resp.ok) {
+      // 服务端在进入流式之前就会拒掉一批请求（413 请求体过大 / 403 令牌失效 / 400 JSON 坏了）。
+      // 这些响应是纯文本、没有 SSE 帧：不在这里拦，下面按 SSE 解析只会读出「什么都没发生」，
+      // 用户看到的是转了一圈然后静默回到原样。把状态码和正文原样抛出来。
+      let detail = ''
+      try { detail = (await resp.text()).trim() } catch { detail = '' }
+      throw new Error(`HTTP ${resp.status}${detail ? '：' + detail : ''}`)
+    }
     if (!resp.body) throw new Error('无响应流')
     const reader = resp.body.getReader()
     const dec = new TextDecoder()
@@ -1047,12 +1652,61 @@ async function send() {
           case 'reasoning':
             if (data.text) { streamReasonBuf += data.text; scheduleStreamFlush() }
             break
+          case 'tool':
+            // 工具开始执行：先把卡片挂上去（「调用中」），不等结果。
+            // 一个工具可能跑几秒（扫端口、读大文件），这几秒界面必须看起来是活的，
+            // 否则用户会以为卡死并去点停止——那反而中断了本来正常的调用。
+            streamTools.value.push({
+              id: String(data.id || ''),
+              name: String(data.name || ''),
+              args: String(data.args || ''),
+              round: Number(data.round) || 0,
+              running: true,
+            })
+            break
+          case 'tool_result': {
+            // 结果回填到同一张卡片。按 id 找而不是按「最后一条」：
+            // 一轮里可能并发调多个工具，回来的顺序不一定与发出顺序一致。
+            const tc = streamTools.value.find((x) => x.id === String(data.id || ''))
+            if (tc) {
+              tc.running = false
+              tc.ms = Number(data.ms) || 0
+              tc.error = String(data.error || '')
+              tc.result = String(data.result || '')
+              // dedup：与本次提问里之前某次调用完全相同，宿主没真执行。
+              // 不标出来的话，两张一模一样的卡片看起来就是「工具跑了两遍」。
+              tc.dedup = !!data.dedup
+              tc.added = Number(data.added) || 0
+              tc.removed = Number(data.removed) || 0
+            }
+            break
+          }
           case 'conv':
             if (data.id) { activeId.value = data.id; streamConvId = data.id }
+            // 会话是首次发送时才建的：它这时才拿到 space_id，侧栏要重取
+            // 才知道该把它排到哪个空间下（否则要等下次刷新才出现）。
+            if (data.spaceId) loadConversations()
+            // 归属已随这次请求落库，待定值作废（下一条消息走的是 convId，不带 spaceId）。
+            pendingSpaceId.value = ''
             if (data.title !== undefined) {
               const i = conversations.value.findIndex((c) => c.id === data.id)
               if (i >= 0) conversations.value[i].title = data.title
               else loadConversations()
+            }
+            break
+          case 'notice':
+            // 后端主动告知的过程事件（目前只有「上下文超窗、已压缩历史并重试」）。
+            // 必须让用户看见：多条问题一起消失时，不说一声就像「AI 忽然忘事」。
+            if (data.message) toast.success(String(data.message))
+            break
+          case 'cwd':
+            // 后端本轮才定下工作目录（普通任务的专属目录是首次发送时才建的，
+            // 空间任务的目录也可能这时才回退到空间的）。不回传的话工具栏那条
+            // 指示要等切走再切回才出现，而用户此刻正想知道文件会写到哪。
+            if (data.cwd) {
+              convCwd.value = String(data.cwd)
+              const ci = conversations.value.findIndex((c) => c.id === activeId.value)
+              if (ci >= 0) conversations.value[ci].cwd = convCwd.value
             }
             break
           case 'done':
@@ -1062,12 +1716,20 @@ async function send() {
               flushStream()
               const content = streamingText.value
               const reasoning = reasoningText.value
-              if (content || reasoning) {
+              // 有工具记录也必须固化消息：模型可能「调了 3 个工具但没写答案」，
+              // 这时 content 是空的，但用户需要看到它做了什么、钱花在哪。
+              if (content || reasoning || streamTools.value.length) {
                 const msg: Record<string, any> = { id: `ast-${Date.now()}`, conv_id: data.convId, role: 'assistant', content: content || '', created_at: new Date().toISOString() }
                 // 模型名由后端回传（它就是落库的那份），拿不到才退回发送时的档案
                 const usedModel = String(data.model || streamModel || '').trim()
                 if (usedModel) msg.model = usedModel
                 if (reasoning) msg.reasoning_content = reasoning
+                // 工具记录落到消息上，刷新前就不用重新拉一次会话。
+                // 序列化时丢掉 running：库里存的是「发生过什么」，不是「界面此刻什么样」。
+                if (streamTools.value.length) {
+                  msg.tool_calls = serializeTools(streamTools.value)
+                  msg.tool_rounds = Number(data.toolRounds) || countToolRounds(streamTools.value)
+                }
                 messages.value.push(msg as AIMessage)
                 // 复用流式期已渲染好的块 HTML，避免落地瞬间整条重新解析
                 primeMessageBlocks(msg.id as string, content, streamBlocks.value.map((b) => b.html))
@@ -1080,6 +1742,9 @@ async function send() {
                   cachedTokens: Number(data.cachedTokens) || 0,
                   // 后端算好带回来；未收录模型没有这个字段 → 0 即隐藏
                   cost: Number(data.cost) || 0,
+                  // 工具轮次：token 里已经含了这些轮次的消耗，
+                  // 但「同一个价钱、是模型自己想多了还是真查了五轮」是两回事。
+                  toolRounds: Number(data.toolRounds) || 0,
                 }
                 statMap.set(msg.id as string, stat)
                 // 同步到消息对象：刷新后由 DB 里的同名字段接管，展示逻辑不用分两套
@@ -1092,6 +1757,9 @@ async function send() {
               }
               streamingText.value = ''
               streamBlocks.value = []
+              // 清空工具卡片：done 分支已经把记录落到消息上了，
+              // 留着会让 finally 再补一条重复气泡（那里靠它判断是否被中断）。
+              streamTools.value = []
               reasoningText.value = ''
               loadConversations()
             }
@@ -1111,19 +1779,26 @@ async function send() {
     // 结果是「AI 一直在回复」但内容卡在半截、也无法复制。
     // 必须先 flush：否则还留在缓冲里（streamBuf）的尾部文字会随 clear 一起丢掉。
     flushStream()
-    if (streamingText.value || reasoningText.value) {
+    // 中断时也可能已经有工具卡片：模型调了工具、结果还没回来用户就点了停止。
+    // 这些记录同样要固化——「调过但没结果」本身就是这次中断发生过的事实。
+    const hadTools = streamTools.value.length > 0
+    if (streamingText.value || reasoningText.value || hadTools) {
       const content = streamingText.value
       const reasoning = reasoningText.value
       // 只往「用户还停留着的那个会话」里补气泡。切走之后后端仍会把半截内容落库
       // （带 stopped 标记），但绝不能塞进另一个会话的消息列表——以前这里用的是
       // activeId.value，selectConv 先 stop 再改 activeId，半截内容就串到新会话里了。
-      if (content || reasoning) {
+      if (content || reasoning || hadTools) {
         if (streamConvId && activeId.value === streamConvId) {
           const aid = `ast-${Date.now()}-stop`
           const msg: Record<string, any> = { id: aid, conv_id: streamConvId, role: 'assistant', content: content || '', created_at: new Date().toISOString(), stopped: true }
           // 中断时后端还没发 done，模型名用发送时记下的那份
           if (streamModel) msg.model = streamModel
           if (reasoning) msg.reasoning_content = reasoning
+          if (hadTools) {
+            msg.tool_calls = serializeTools(streamTools.value)
+            msg.tool_rounds = countToolRounds(streamTools.value)
+          }
           messages.value.push(msg as AIMessage)
           // 同样复用流式期已渲染的块
           primeMessageBlocks(aid, content, streamBlocks.value.map((b) => b.html))
@@ -1133,6 +1808,7 @@ async function send() {
             promptTokens: 0,
             completionTokens: 0,
             cachedTokens: 0,
+            toolRounds: hadTools ? countToolRounds(streamTools.value) : 0,
           }
           statMap.set(aid, stat)
         }
@@ -1140,6 +1816,7 @@ async function send() {
     }
     streamingText.value = ''
     streamBlocks.value = []
+    streamTools.value = []
     reasoningText.value = ''
     streamBuf = ''
     streamReasonBuf = ''
@@ -1423,13 +2100,15 @@ onMounted(async () => {
   // 这里显式再置一次，保证「一进来就停在 AI 页」这个事实后端一定知道。
   reportAIPageVisible(true)
   await loadProfiles()
-  await loadConversations()
+  await Promise.all([loadConversations(), loadSpaces()])
 
-  // 仅保留标题重生成的单条事件；AI 问答流式已改为本地 HTTP 流式（fetch 读取）
+  // 仅保留标题同步：这条事件只由「手动改名 / 重生成标题」触发（新会话的创建走 SSE 的
+  // conv 事件）。以前这里还有一句 `activeId.value = data.id`，于是重命名侧栏里
+  // **任意一条**任务都会把当前任务切过去，而消息并没有跟着重载 —— 高亮换了一条、
+  // 内容还是上一条，接着发消息就发进了另一条任务里。
   Events.On('ai:conv', (ev: any) => {
     const data = ev?.data
     if (!data) return
-    if (data.id && data.id !== activeId.value) activeId.value = data.id
     if (data.title !== undefined) {
       const idx = conversations.value.findIndex((c) => c.id === data.id)
       if (idx >= 0) conversations.value[idx].title = data.title
@@ -1446,6 +2125,10 @@ onMounted(async () => {
   // ResizeObserver 观察消息内容容器：内容变高（流式输出、图片加载、代码块撑开）
   // 时把视口拉到底部。这是「AI 一直在回复但视口不跟随」的正确修法——
   // 滚动应由 DOM 实际高度变化驱动，而不是由某个响应式变量间接推断。
+  //
+  // 绑定必须跟着容器走：首屏是落地页（`isNewTask`），此时 msgContent 还是 null，
+  // 早先只在 onMounted 里 observe 一次 → 这条「内容变高就贴底」从来没生效过
+  // （切会话、新建任务后容器才出现，而那之后没人再 observe）。
   if (typeof ResizeObserver !== 'undefined') {
     resizeObs = new ResizeObserver(() => {
       if (!stickToBottom.value) return
@@ -1453,8 +2136,15 @@ onMounted(async () => {
       if (!el) return
       el.scrollTop = el.scrollHeight
     })
-    if (msgContent.value) resizeObs.observe(msgContent.value)
   }
+})
+
+// 消息容器会随「落地页 ↔ 聊天区」切换出现/消失：观察目标得跟着换。
+// 只在挂载时 observe 一次的话，首屏是落地页（容器还不存在）→ 观察永远没绑上。
+watch(msgContent, (el, prev) => {
+  if (!resizeObs) return
+  if (prev) resizeObs.unobserve(prev)
+  if (el) resizeObs.observe(el)
 })
 
 onUnmounted(() => {
@@ -1477,8 +2167,8 @@ onUnmounted(() => {
   <div class="ai-page">
     <!-- 左侧会话列表 -->
     <aside class="ai-sidebar">
-      <button class="ai-new-btn" @click="newConv">
-        <Plus :size="14" /> {{ t('aiNewChat') }}
+      <button class="ai-new-btn" @click="openNewTask">
+        <Plus :size="14" /> {{ t('aiNewTask') }}
       </button>
       <div v-if="conversations.length > 5" class="ai-conv-search">
         <Search :size="12" class="ai-conv-search-icon" />
@@ -1486,71 +2176,161 @@ onUnmounted(() => {
         <button v-if="convQuery" class="ai-conv-search-clear" @click="convQuery = ''"><X :size="11" /></button>
       </div>
       <div class="ai-conv-list">
-        <div
-          v-for="c in shownConversations"
-          :key="c.id"
-          :class="['ai-conv-item', { active: c.id === activeId }]"
-          @click="selectConv(c.id)"
-        >
-          <input
-            v-if="renamingId === c.id"
-            ref="renameInput"
-            v-model="renameText"
-            class="ai-conv-rename"
-            spellcheck="false"
-            maxlength="60"
-            @click.stop
-            @keydown.enter.prevent="commitRename(c)"
-            @keydown.esc.prevent="cancelRename()"
-            @blur="commitRename(c)"
-          />
-          <!-- 双击标题也能改名：改名是低频操作，给它常驻按钮不如给个不占位的手势 -->
-          <span
-            v-else
-            class="ai-conv-title"
-            :title="t('aiRenameHint')"
-            @dblclick.stop="startRename(c)"
-          >{{ c.title || t('aiNewChat') }}</span>
-          <!-- 会话累计用量：只统计「问答」，标题生成 / 摘要压缩不计入（见 ai_usage.go），
-               所以这里的数字应该等于该会话各条回复下方统计之和。
-               折算成 k/M 显示，精确值放 title。 -->
-          <span v-if="renamingId !== c.id && (c.prompt_tokens > 0 || c.completion_tokens > 0)" class="ai-conv-tokens" :title="t('aiConvTokenTip', { in: c.prompt_tokens, out: c.completion_tokens })">
-            {{ fmtTokens(c.prompt_tokens + c.completion_tokens) }}
-          </span>
-          <button
-            v-if="renamingId !== c.id"
-            class="ai-conv-ren"
-            :title="t('aiRename')"
-            @click.stop="startRename(c)"
-          >
-            <Pencil :size="12" />
-          </button>
-          <button v-if="renamingId !== c.id" class="ai-conv-del" :title="t('delete')" @click.stop="delConv(c.id)">
-            <Trash2 :size="13" />
-          </button>
+        <!-- 任务组：不属于任何空间的任务。组标题可点 = 整组折叠 -->
+        <div class="ai-group-head ai-group-head-btn" @click="tasksOpen = !tasksOpen">
+          <component :is="tasksOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
+          <span>{{ t('aiGroupTasks') }} ({{ taskConversations.length }})</span>
         </div>
-        <div v-if="conversations.length === 0" class="ai-conv-empty">{{ t('aiNoConversations') }}</div>
-        <div v-else-if="filteredConversations.length === 0" class="ai-conv-empty">{{ t('aiNoMatchConv') }}</div>
+        <template v-if="tasksOpen">
+        <template v-for="c in shownTaskConversations" :key="c.id">
+          <div
+            :class="['ai-conv-item', { active: c.id === activeId }]"
+            @click="selectConv(c.id)"
+          >
+            <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
+            <input
+              v-if="renamingId === c.id"
+              ref="renameInput"
+              v-model="renameText"
+              class="ai-conv-rename"
+              spellcheck="false"
+              maxlength="60"
+              @click.stop
+              @keydown.enter="onEnterSend($event, () => commitRename(c))"
+              @keydown.esc.prevent="cancelRename()"
+              @blur="commitRename(c)"
+            />
+            <!-- 双击标题也能改名：改名是低频操作，给它常驻按钮不如给个不占位的手势 -->
+            <span
+              v-else
+              class="ai-conv-title"
+              :title="t('aiRenameHint')"
+              @dblclick.stop="startRename(c)"
+            >{{ c.title || t('aiNewChat') }}</span>
+            <!-- 任务累计用量：只统计「问答」，标题生成 / 摘要压缩不计入（见 ai_usage.go），
+                 所以这里的数字应该等于该任务各条回复下方统计之和。
+                 折算成 k/M 显示，精确值放 title。 -->
+            <span v-if="renamingId !== c.id && (c.prompt_tokens > 0 || c.completion_tokens > 0)" class="ai-conv-tokens" :title="t('aiConvTokenTip', { in: c.prompt_tokens, out: c.completion_tokens })">
+              {{ fmtTokens(c.prompt_tokens + c.completion_tokens) }}
+            </span>
+            <button
+              v-if="renamingId !== c.id"
+              class="ai-conv-ren"
+              :title="t('aiRename')"
+              @click.stop="startRename(c)"
+            >
+              <Pencil :size="12" />
+            </button>
+            <button v-if="renamingId !== c.id" class="ai-conv-del" :title="t('delete')" @click.stop="delConv(c.id)">
+              <Trash2 :size="13" />
+            </button>
+          </div>
+        </template>
+        <!-- 超过阈值才出现：展开后同一个按钮变「收起」，来回都走这一处 -->
         <button
-          v-else-if="filteredConversations.length > shownConversations.length"
+          v-if="taskConversations.length > FOLD_TASKS"
           class="ai-conv-more"
-          @click="convLimit += CONV_PAGE"
-        >{{ t('aiShowMoreConv', { n: filteredConversations.length - shownConversations.length }) }}</button>
+          @click="tasksExpanded = !tasksExpanded"
+        >{{ tasksExpanded ? t('aiFoldList') : t('aiShowMoreConv', { n: taskConversations.length - FOLD_TASKS }) }}</button>
+        </template>
+
+        <!-- 空间组：绑定目录的任务容器 -->
+        <div class="ai-group-head ai-group-head-space ai-group-head-btn" @click="spacesOpen = !spacesOpen">
+          <component :is="spacesOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
+          <span>{{ t('aiGroupSpaces') }} ({{ shownSpaces.length }})</span>
+        </div>
+        <template v-if="spacesOpen">
+        <div v-for="g in visibleSpaces" :key="g.space.id" class="ai-space">
+          <div class="ai-space-row" @click="toggleSpace(g.space.id)">
+            <component
+              :is="isSpaceExpanded(g.space.id) ? ChevronDown : ChevronRight"
+              :size="12"
+              class="ai-space-caret"
+            />
+            <Folder :size="12" class="ai-space-icon" />
+            <!-- 与任务标题同一套行内改名：为一个短名字弹系统对话框（window.prompt）
+                 不跟主题、字体也不一致，而且输入法组合中容易丢字。 -->
+            <input
+              v-if="renamingSpaceId === g.space.id"
+              ref="spaceNameInput"
+              v-model="spaceNameText"
+              class="ai-conv-rename"
+              spellcheck="false"
+              maxlength="40"
+              @click.stop
+              @keydown.enter="onEnterSend($event, () => commitRenameSpace(g.space))"
+              @keydown.esc.prevent="cancelRenameSpace()"
+              @blur="commitRenameSpace(g.space)"
+            />
+            <span v-else class="ai-space-name" :title="g.space.cwd" @dblclick.stop="startRenameSpace(g.space)">{{ g.space.name }}</span>
+            <span class="ai-space-count">{{ g.tasks.length }}</span>
+            <!-- 在这个空间里新建任务：否则每次都要去落地页的「归属空间」下拉里翻一遍 -->
+            <button
+              v-if="renamingSpaceId !== g.space.id"
+              class="ai-conv-add"
+              :title="t('aiNewTaskInSpace')"
+              @click.stop="newTaskInSpace(g.space)"
+            >
+              <Plus :size="12" />
+            </button>
+            <button
+              v-if="renamingSpaceId !== g.space.id"
+              class="ai-conv-ren"
+              :title="t('aiRename')"
+              @click.stop="startRenameSpace(g.space)"
+            >
+              <Pencil :size="11" />
+            </button>
+            <button v-if="renamingSpaceId !== g.space.id" class="ai-conv-del" :title="t('delete')" @click.stop="delSpace(g.space)">
+              <Trash2 :size="12" />
+            </button>
+          </div>
+          <template v-if="isSpaceExpanded(g.space.id)">
+            <div
+              v-for="c in spaceTasksShown(g)"
+              :key="c.id"
+              :class="['ai-conv-item', 'is-in-space', { active: c.id === activeId }]"
+              @click="selectConv(c.id)"
+            >
+              <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
+              <span class="ai-conv-title" @dblclick.stop="startRename(c)">{{ c.title || t('aiNewChat') }}</span>
+              <button class="ai-conv-del" :title="t('delete')" @click.stop="delConv(c.id)">
+                <Trash2 :size="12" />
+              </button>
+            </div>
+            <button
+              v-if="g.tasks.length > FOLD_SPACE_TASKS"
+              class="ai-conv-more is-in-space"
+              @click="toggleSpaceTasks(g.space.id)"
+            >{{ expandedSpaceTasks.includes(g.space.id) ? t('aiFoldList') : t('aiShowMoreConv', { n: g.tasks.length - FOLD_SPACE_TASKS }) }}</button>
+            <div v-if="g.tasks.length === 0" class="ai-space-empty">{{ t('aiSpaceNoTasks') }}</div>
+          </template>
+        </div>
+        <button
+          v-if="shownSpaces.length > FOLD_SPACES"
+          class="ai-conv-more"
+          @click="spacesExpanded = !spacesExpanded"
+        >{{ spacesExpanded ? t('aiFoldList') : t('aiShowMoreSpaces', { n: shownSpaces.length - FOLD_SPACES }) }}</button>
+        </template>
+
+        <div v-if="conversations.length === 0" class="ai-conv-empty">{{ t('aiNoConversations') }}</div>
+        <div v-else-if="totalMatched === 0" class="ai-conv-empty">{{ t('aiNoMatchConv') }}</div>
       </div>
     </aside>
 
     <!-- 右侧聊天区 -->
     <section class="ai-main">
-      <!-- 模式切换 + 模型选择 + 操作 -->
-      <div class="ai-toolbar">
-        <div class="ai-modes">
-          <button
-            v-for="m in modes"
-            :key="m.key"
-            :class="['ai-mode-tab', { active: mode === m.key }]"
-            @click="mode = m.key"
-          >{{ t(m.label) }}</button>
-        </div>
+      <!-- 工具栏：只在有任务时出现。落地页不需要它（模型选择在输入框下面，
+           目录还没定）。 -->
+      <div v-if="!isNewTask" class="ai-toolbar">
+        <!-- 目录指示：绑了目录才允许 AI 改文件、跑命令（见后端 writeRoots），
+             点一下在资源管理器里打开——产物的目录在数据目录下（普通任务）或项目里（空间任务），
+             不给入口的话用户只能从 title 里抄路径自己去翻。
+             它只负责「打开」当前已绑定的目录，不是「选目录」（绑定入口在新建任务时）。 -->
+        <button v-if="convCwd" class="ai-cwd-tag" :title="t('aiCwdTip', { dir: convCwd })" @click="openCwd">
+          <FolderOpen :size="12" />
+          <span class="ai-cwd-name">{{ cwdLabel }}</span>
+        </button>
         <div class="ai-toolbar-right">
           <select v-model="aiActive" class="ai-model-select" :title="t('aiSwitchModel')" @change="onModelChange">
             <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
@@ -1558,15 +2338,118 @@ onUnmounted(() => {
           <button v-if="activeId" class="ai-icon-btn" :title="t('aiRegenTitle')" @click="regenTitle">
             <RefreshCw :size="13" />
           </button>
-          <button v-if="activeId" class="ai-icon-btn" :title="t('aiClearContext')" @click="clearContext">
-            <Eraser :size="13" />
-          </button>
           <button v-if="streaming" class="ai-stop" @click="stop">
             <Square :size="13" /> {{ t('aiStop') }}
           </button>
         </div>
       </div>
 
+      <!-- 空态落地页：新建任务不走弹窗，直接在这一页选类型、选空间、提问。
+           类型与空间仍是这条任务的属性，首次发送时随请求落库。 -->
+      <div v-if="isNewTask" class="ai-hero">
+        <div class="ai-hero-inner">
+          <h1 class="ai-hero-title">{{ t('aiHeroTitle') }}</h1>
+
+          <!-- 一排类型 pill：默认对话，点一下换成本次任务的类型 -->
+          <div class="ai-hero-modes">
+            <button
+              v-for="m in modes"
+              :key="m.key"
+              :class="['ai-hero-mode', { active: newTaskMode === m.key }]"
+              :title="t(m.desc)"
+              @click="newTaskMode = m.key"
+            >
+              <component :is="m.icon" :size="13" />
+              {{ t(m.label) }}
+            </button>
+          </div>
+
+          <div class="ai-hero-box" @dragover.prevent @drop="onInputDrop">
+            <!-- 图片链接输入（与聊天区同一套状态，落地页也保留这个入口） -->
+            <div v-if="urlInputOpen" class="ai-url-row">
+              <input
+                v-model="urlDraft"
+                type="text"
+                class="ai-url-input"
+                :placeholder="t('aiAddImageUrlPh')"
+                @keydown.enter.prevent="confirmUrlImage"
+              />
+              <button class="ai-url-ok" @click="confirmUrlImage">{{ t('add') }}</button>
+            </div>
+            <div v-if="attachments.length" class="ai-attach-preview">
+              <div v-for="(a, i) in attachments" :key="i" class="ai-attach-thumb">
+                <img v-if="a.kind === 'file' && a.dataUrl" :src="a.dataUrl" class="ai-attach-img" />
+                <img v-else-if="a.kind === 'url'" :src="a.url" class="ai-attach-img" />
+                <button class="ai-attach-del" :title="t('delete')" @click="removeAttachment(i)">×</button>
+              </div>
+            </div>
+            <textarea
+              ref="heroInputEl"
+              v-model="input"
+              class="ai-hero-input"
+              rows="3"
+              :placeholder="t('aiHeroPlaceholder')"
+              :disabled="!hasKey"
+              @keydown.enter="onEnterSend($event, heroSend)"
+              @paste="onInputPaste"
+            ></textarea>
+            <div class="ai-hero-bar">
+              <!-- 归属空间：不选就是普通任务（后端会自动给它建一个专属目录）。
+                   已有空间直接选；「新建空间…」才需要选目录——空间按目录唯一。 -->
+              <select v-model="newTaskSpace" class="ai-hero-select" :title="t('aiNewTaskSpace')">
+                <option value="">{{ t('aiNewTaskSpaceNone') }}</option>
+                <option v-for="s in spaces" :key="s.id" :value="s.id" :title="s.cwd">{{ s.name }}</option>
+                <option :value="NEW_SPACE">{{ t('aiNewTaskSpaceNew') }}</option>
+              </select>
+              <button
+                v-if="newTaskSpace === NEW_SPACE"
+                class="ai-hero-select"
+                :title="newTaskDir || t('aiPickFolderTitle')"
+                @click="pickNewTaskDir"
+              >
+                <FolderOpen :size="12" />
+                <span class="ai-hero-dir">{{ newTaskDir ? dirTail(newTaskDir) : t('aiNewTaskDirNone') }}</span>
+              </button>
+              <select v-model="aiActive" class="ai-hero-select" :title="t('aiSwitchModel')" @change="onModelChange">
+                <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
+              </select>
+              <div class="ai-hero-bar-right">
+                <button v-if="allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="openFilePicker">
+                  <ImageIcon :size="16" />
+                </button>
+                <button v-if="allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="toggleUrlInput">
+                  <Link2 :size="16" />
+                </button>
+                <button
+                  class="ai-hero-send"
+                  :disabled="!hasKey || (!input.trim() && !attachments.length)"
+                  :title="t('send')"
+                  @click="heroSend"
+                >
+                  <ArrowUp :size="16" />
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 产物去向：既是说明也是「空间是什么」的解释——比一个空下拉好懂 -->
+          <p class="ai-hero-out">{{ newTaskOutHint }}</p>
+
+          <p v-if="!hasKey" class="ai-hero-needkey">
+            {{ t('aiNeedKey') }}
+            <button class="ai-go-settings" @click="emit('open-settings', 'ai')">{{ t('aiGoSettings') }}</button>
+          </p>
+
+          <div class="ai-hero-tips">
+            <button v-for="k in heroTips" :key="k" class="ai-hero-tip" @click="fillHeroTip(k)">
+              {{ t(k) }}
+              <ArrowUp :size="11" class="ai-hero-tip-icon" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <template v-else>
       <!-- 消息区 -->
       <div ref="msgArea" class="ai-messages" @scroll="onMsgScroll" @mouseup="onMsgMouseUp" @keyup="onMsgMouseUp" @click="onMsgClick" @contextmenu="onMsgContextMenu">
         <div ref="msgContent" class="ai-msg-content-wrap">
@@ -1587,7 +2470,7 @@ onUnmounted(() => {
             <div
               v-for="m in messages"
               :key="m.id"
-              v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0)]"
+              v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds]"
               :class="['ai-msg', m.role]"
             >
               <div class="ai-msg-role">
@@ -1606,6 +2489,36 @@ onUnmounted(() => {
               <details v-if="m.reasoning_content" class="ai-reasoning">
                 <summary>{{ t('aiThought') }} · {{ t('aiThoughtChars', { n: m.reasoning_content.length }) }}</summary>
                 <div class="ai-reasoning-content">{{ m.reasoning_content }}</div>
+              </details>
+              <!-- 工具调用卡片：放在正文之前，因为调用发生在作答之前。
+                   默认折叠——一段回答调了五个工具时，全展开会把正文挤出屏幕；
+                   摘要行自己就说明了「调了几个、几轮」。 -->
+              <details v-if="m.role === 'assistant' && toolList(m).length" class="ai-tools">
+                <summary class="ai-tools-sum">
+                  <Wrench :size="12" />
+                  <span>{{ t('aiToolSummary', { n: toolList(m).length, rounds: m.tool_rounds || countToolRounds(toolList(m)) }) }}</span>
+                </summary>
+                <div class="ai-tools-body">
+                  <!-- 每条调用自带折叠：一次回答调了五六个工具时，用户只想展开
+                       其中一条看细节，而不是要么全看要么全不看。 -->
+                  <details v-for="tc in toolList(m)" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error }">
+                    <summary class="ai-tool-line">
+                      <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
+                      <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
+                      <span v-if="toolTarget(tc)" class="ai-tool-target" :title="toolTarget(tc)">{{ toolTarget(tc) }}</span>
+                      <!-- 增删行数放摘要行：改文件这一件事上，「改了几行」比「成功了」
+                           更值得先看到。 -->
+                      <span v-if="tc.added || tc.removed" class="ai-tool-diff">
+                        <em v-if="tc.added" class="ai-diff-add">+{{ tc.added }}</em>
+                        <em v-if="tc.removed" class="ai-diff-del">-{{ tc.removed }}</em>
+                      </span>
+                      <span v-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
+                      <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
+                    </summary>
+                    <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
+                    <pre v-else-if="tc.result" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
+                  </details>
+                </div>
               </details>
               <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md">
                 <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
@@ -1635,15 +2548,43 @@ onUnmounted(() => {
                 <div class="ai-reasoning-content">{{ reasoningText }}</div>
               </details>
             </div>
-            <div v-if="streamingText" class="ai-msg assistant streaming">
+            <!-- 流式区：模型先调工具时还没有正文，这里的 v-if 必须带上 streamTools，
+                 否则「正在查环境」的那几秒界面上什么都没有，看起来像卡死。 -->
+            <div v-if="streamingText || streamTools.length" class="ai-msg assistant streaming">
               <div class="ai-msg-role">AI</div>
-              <div class="ai-msg-content ai-md">
+              <!-- 流式期默认展开：用户需要看到「正在用哪个工具」，这是等待期间唯一的进度信息 -->
+              <details v-if="streamTools.length" class="ai-tools" open>
+                <summary class="ai-tools-sum">
+                  <Wrench :size="12" />
+                  <span>{{ t('aiToolSummary', { n: streamTools.length, rounds: countToolRounds(streamTools) }) }}</span>
+                </summary>
+                <div class="ai-tools-body">
+                  <!-- 正在跑的那条自动展开：等待期间它是唯一的进度信息。 -->
+                  <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running }" :open="!!tc.running">
+                    <summary class="ai-tool-line">
+                      <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
+                      <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
+                      <span v-if="toolTarget(tc)" class="ai-tool-target" :title="toolTarget(tc)">{{ toolTarget(tc) }}</span>
+                      <span v-if="tc.added || tc.removed" class="ai-tool-diff">
+                        <em v-if="tc.added" class="ai-diff-add">+{{ tc.added }}</em>
+                        <em v-if="tc.removed" class="ai-diff-del">-{{ tc.removed }}</em>
+                      </span>
+                      <span v-if="tc.running" class="ai-tool-ms">{{ t('aiToolRunning') }}</span>
+                      <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
+                      <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
+                    </summary>
+                    <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
+                    <pre v-else-if="tc.result" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
+                  </details>
+                </div>
+              </details>
+              <div v-if="streamingText" class="ai-msg-content ai-md">
                 <!-- key 用「块原文 + 序号」：原文可能重复（两段相同的话），
                      仅用原文会触发 Vue 的重复 key 警告。仅末尾块会变，
                      前面的块 key 稳定 → 不会被重建。 -->
                 <div v-for="(b, bi) in streamBlocks" :key="bi + ':' + b.raw.length + ':' + b.raw.slice(0, 24)" class="ai-md-block" v-html="b.html"></div>
               </div>
-              <span class="ai-cursor">▋</span>
+              <span v-if="streamingText" class="ai-cursor">▋</span>
             </div>
 
             <div v-if="errorMsg" class="ai-error">
@@ -1757,7 +2698,7 @@ onUnmounted(() => {
             class="ai-input"
             :placeholder="t('aiPlaceholder')"
             :disabled="!hasKey || streaming"
-            @keydown.enter.exact.prevent="send"
+            @keydown.enter="onEnterSend($event, send)"
             @paste="onInputPaste"
           />
           <div class="ai-input-tools">
@@ -1772,10 +2713,13 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
-        <input ref="fileInputEl" type="file" accept="image/*" multiple hidden @change="onPickFiles" />
       </div>
+      </template>
     </section>
-
+    <!-- 隐藏的文件选择器：放在「落地页 / 聊天区」两个分支之外。
+         两处都有「添加图片」按钮，而它原先只写在聊天区里 —— 落地页那个按钮点了
+         什么也不会发生（fileInputEl 为 null），用户只能靠拖拽或粘贴。 -->
+    <input ref="fileInputEl" type="file" accept="image/*" multiple hidden @change="onPickFiles" />
     <!-- 图片全屏查看器：点遮罩关闭，点图不关（防误触），Esc 同样关闭 -->
     <Teleport to="body">
       <div v-if="imgViewer" class="ai-img-viewer" @click="closeImgViewer">
@@ -1822,6 +2766,217 @@ onUnmounted(() => {
 }
 .ai-new-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
 .ai-conv-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
+
+/* 分组标题：任务 / 空间。两组用同一套样式，视觉上是对等的两个区域，
+   而不是「任务」为主、「空间」为附属——空间才是带目录的那个。 */
+.ai-group-head {
+  padding: 12px 10px 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-disabled);
+  letter-spacing: 0.4px;
+}
+.ai-group-head-space { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 12px; }
+/* 组标题可点（收起整组）：条目一多时，先收起一整组比在里面翻找更快。
+   箭头与空间行同一套语义——展开是向下箭头。 */
+.ai-group-head-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  user-select: none;
+  transition: color var(--transition-fast);
+}
+.ai-group-head-btn:hover { color: var(--color-text-secondary); }
+.ai-group-caret { flex-shrink: 0; opacity: 0.75; }
+
+/* 类型图标：不标出来，侧栏一长串标题里看不出哪条是翻译、哪条是闲聊 */
+.ai-conv-mode { flex-shrink: 0; opacity: 0.7; }
+.ai-conv-item.active .ai-conv-mode { opacity: 1; }
+
+.ai-space { margin-bottom: 2px; }
+.ai-space-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px 7px 4px;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  transition: background var(--transition-fast);
+}
+.ai-space-row:hover { background: var(--color-bg-hover); }
+/* 空间行复用了任务行的改名/删除按钮，但「hover 才显示」那条规则是按 .ai-conv-item 写的
+   —— 空间行不是 .ai-conv-item，于是这两个按钮一直是 display:none：
+   用户根本删不掉、也改不了空间名。这里补上同一条显示规则。 */
+.ai-space-row .ai-conv-ren,
+.ai-space-row .ai-conv-del,
+.ai-space-row .ai-conv-add { flex-shrink: 0; }
+.ai-space-row:hover .ai-conv-ren,
+.ai-space-row:hover .ai-conv-del,
+.ai-space-row:hover .ai-conv-add { display: flex; }
+.ai-space-caret { flex-shrink: 0; opacity: 0.6; }
+.ai-space-icon { flex-shrink: 0; color: var(--color-accent); opacity: 0.85; }
+.ai-space-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 任务数常驻可见（不是 hover 才出现）：空间收起时它是唯一能说明
+   「这里面有多少东西」的信息，藏起来等于逼用户一个个展开。 */
+.ai-space-count {
+  flex-shrink: 0;
+  font-size: 11px;
+  color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary);
+  border-radius: 8px;
+  padding: 0 6px;
+}
+.ai-conv-item.is-in-space { margin-left: 18px; padding: 6px 10px; font-size: 12.5px; }
+.ai-space-empty { padding: 4px 10px 8px 28px; font-size: 11px; color: var(--color-text-disabled); }
+
+/* 新建任务的落地页（空态）。
+   参考主流 AI 产品的首屏：标题 + 类型 pill + 一个大输入框，输入框下面一行放
+   归属空间 / 模型 / 发送。它替代了原来的「新建任务」弹窗——弹窗要求先答完两道题
+   才出现输入框，而用户往往只是想先打一句话。 */
+.ai-hero {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px 40px;
+}
+.ai-hero-inner {
+  width: 100%;
+  max-width: 660px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+.ai-hero-title {
+  margin: 0 0 2px;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.2px;
+  color: var(--color-text-primary);
+}
+.ai-hero-modes { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.ai-hero-mode {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12px; font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+}
+.ai-hero-mode:hover { color: var(--color-text-primary); border-color: var(--color-text-muted); }
+.ai-hero-mode.active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
+
+/* 输入框主体：一整块卡片，textarea 自身无边框，工具行贴在卡片底部 */
+.ai-hero-box {
+  width: 100%;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-tertiary);
+  padding: 10px 12px 8px;
+  transition: border-color var(--transition-fast);
+}
+.ai-hero-box:focus-within { border-color: var(--color-accent); }
+.ai-hero-input {
+  width: 100%;
+  min-height: 64px;
+  max-height: 240px;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.ai-hero-input::placeholder { color: var(--color-text-disabled); }
+.ai-hero-input:disabled { opacity: 0.6; cursor: not-allowed; }
+.ai-hero-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+.ai-hero-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+/* 归属空间与模型下拉同一套外观：这两个是「本次任务落在哪」的 chip，不是表单字段 */
+.ai-hero-select {
+  display: inline-flex; align-items: center; gap: 5px;
+  max-width: 180px;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-muted);
+  font-size: 12px; font-family: inherit;
+  cursor: pointer;
+  text-overflow: ellipsis;
+}
+.ai-hero-select:hover { color: var(--color-text-primary); border-color: var(--color-border); }
+.ai-hero-select:focus-visible { outline: none; border-color: var(--color-accent); }
+/* select 不参与 flex 排版（原生下拉对 display:inline-flex 支持不一），
+   这里退回 inline-block 并给它自己的底色——透明底在深色主题下会露出系统白。 */
+select.ai-hero-select {
+  display: inline-block;
+  background: var(--color-bg-tertiary);
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+.ai-hero-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-hero-send {
+  display: flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px;
+  border: none; border-radius: 50%;
+  background: var(--color-accent); color: #fff;
+  cursor: pointer;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast);
+}
+.ai-hero-send:disabled { background: var(--color-bg-active); color: var(--color-text-disabled); cursor: default; }
+/* 产物去向：说清「AI 生成的文件会放到哪」，顺带解释了空间是什么 */
+.ai-hero-out {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-text-disabled);
+  text-align: center;
+  line-height: 1.5;
+  word-break: break-all;
+}
+.ai-hero-needkey {
+  margin: 0;
+  display: flex; align-items: center; gap: 8px;
+  font-size: 12px; color: var(--color-warning);
+}
+.ai-hero-tips { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+.ai-hero-tip {
+  display: inline-flex; align-items: center; gap: 6px;
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 7px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 12.5px; font-family: inherit; text-align: left;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.ai-hero-tip:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+/* 示例问题后面那个小箭头：转 45 度当作 ↗（lucide 的 ArrowUp 最接近） */
+.ai-hero-tip-icon { transform: rotate(45deg); opacity: 0.55; flex-shrink: 0; }
+
 .ai-conv-item {
   display: flex;
   align-items: center;
@@ -1848,13 +3003,17 @@ onUnmounted(() => {
 }
 .ai-conv-item:hover .ai-conv-del { display: flex; }
 .ai-conv-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.ai-conv-ren {
+.ai-conv-ren,
+.ai-conv-add {
   background: none; border: none; color: var(--color-text-disabled);
   cursor: pointer; display: none; align-items: center; justify-content: center;
   width: 22px; height: 22px; border-radius: var(--radius-sm);
 }
-.ai-conv-item:hover .ai-conv-ren { display: flex; }
-.ai-conv-ren:hover { color: var(--color-text-primary); background: var(--color-bg-tertiary); }
+.ai-conv-item:hover .ai-conv-ren,
+.ai-conv-item:hover .ai-conv-add { display: flex; }
+.ai-conv-ren:hover,
+.ai-conv-add:hover { color: var(--color-text-primary); background: var(--color-bg-tertiary); }
+.ai-conv-add:hover { color: var(--color-accent); }
 /* 行内编辑：撑满标题那一格，且必须能盖住行本身的点击（改选中了会话就白改了） */
 .ai-conv-rename {
   flex: 1;
@@ -1879,26 +3038,15 @@ onUnmounted(() => {
 .ai-toolbar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  /* 右侧操作组靠右；左侧若有目录指示，由它的 margin-right:auto 顶到左边。
+     原来是 space-between + 左右两块都常驻，现在左侧那块只在绑了目录时才存在，
+     用 space-between 会在没有它时把右侧整组推到最左。 */
+  justify-content: flex-end;
   padding: 10px 16px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
   gap: 10px;
 }
-.ai-modes { display: flex; gap: 6px; flex-wrap: wrap; }
-.ai-mode-tab {
-  padding: 5px 12px;
-  border: 1px solid var(--color-border);
-  background: transparent;
-  color: var(--color-text-muted);
-  border-radius: var(--radius-lg);
-  font-size: 12px;
-  cursor: pointer;
-  font-family: inherit;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.ai-mode-tab:hover { color: var(--color-text-primary); }
-.ai-mode-tab.active { border-color: var(--color-accent); color: var(--color-accent); background: var(--color-accent-bg); }
 .ai-toolbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .ai-model-select {
   max-width: 160px;
@@ -1912,6 +3060,25 @@ onUnmounted(() => {
   outline: none;
 }
 .ai-model-select:focus { border-color: var(--color-accent); }
+/* 工作目录：显示当前绑到哪个目录，点一下在资源管理器里打开。
+   它只「打开」已绑定的目录，不是「选目录」——绑定入口已收进「新建任务 → 选空间」。
+   保留它是因为它同时回答两件事：AI 能不能改文件，以及生成的文件去哪了。
+   宽度上限必须有：项目路径动辄五六层，不夹住会把模型下拉挤到换行。 */
+.ai-cwd-tag {
+  display: inline-flex; align-items: center; gap: 5px;
+  margin-right: auto;
+  max-width: 40%; min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-text-disabled);
+  font-size: 11.5px; font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+.ai-cwd-tag:hover { color: var(--color-text-primary); border-color: var(--color-border); }
+.ai-cwd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-icon-btn {
   display: flex; align-items: center; justify-content: center;
   width: 30px; height: 30px; border: 1px solid var(--color-border);
@@ -1942,6 +3109,71 @@ onUnmounted(() => {
   margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--color-border);
   color: var(--color-text-secondary); font-size: 12px; line-height: 1.5;
   white-space: pre-wrap; word-break: break-word;
+}
+
+/* 工具调用卡片。
+   折叠时只剩一行摘要（调了几个、几轮），展开才看参数与结果——
+   一段回答连调五个工具时，全展开会把正文挤出屏幕外。 */
+.ai-tools { margin: 2px 0; max-width: 80%; }
+.ai-tools > summary {
+  display: flex; align-items: center; gap: 5px;
+  cursor: pointer; user-select: none; outline: none;
+  color: var(--color-text-muted); font-size: 11px;
+  background: var(--color-bg-active); border-radius: var(--radius-sm);
+  padding: 4px 8px; list-style: none;
+}
+/* 去掉 Chrome 默认的三角形：上面已经用图标表示「可展开」 */
+.ai-tools > summary::-webkit-details-marker { display: none; }
+.ai-tools > summary:hover { color: var(--color-text-primary); }
+.ai-tools[open] > summary { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+.ai-tools-body {
+  border: 1px solid var(--color-border); border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  padding: 4px; display: flex; flex-direction: column; gap: 4px;
+}
+.ai-tool { background: var(--color-bg-active); border-radius: 4px; padding: 2px 6px; }
+/* 失败用左侧红条而不是整块变红：结果区本来就长，整块染色太吵 */
+.ai-tool.is-err { border-left: 2px solid var(--color-danger); }
+.ai-tool.is-run { opacity: 0.85; }
+/* 每条调用自己可折叠：summary 就是那一行，不带默认三角形（图标已表示「可展开」） */
+.ai-tool > summary {
+  display: flex; align-items: center; gap: 6px;
+  cursor: pointer; user-select: none; outline: none; list-style: none;
+  padding: 3px 0;
+}
+.ai-tool > summary::-webkit-details-marker { display: none; }
+.ai-tool > summary:hover .ai-tool-target { color: var(--color-text-primary); }
+.ai-tool-icon { flex-shrink: 0; color: var(--color-accent); opacity: 0.8; }
+.ai-tool.is-err .ai-tool-icon { color: var(--color-danger); opacity: 1; }
+.ai-tool-verb {
+  font-size: 11.5px; color: var(--color-text-primary); flex-shrink: 0;
+}
+.ai-tool-target {
+  font-size: 11px; color: var(--color-text-secondary); font-family: var(--font-mono);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;
+}
+/* 增删行数：改文件这一件事上，行数比「成功」更值得先看到 */
+.ai-tool-diff { display: flex; gap: 4px; flex-shrink: 0; font-family: var(--font-mono); font-size: 11px; }
+.ai-diff-add { color: var(--color-success, #3fb950); font-style: normal; }
+.ai-diff-del { color: var(--color-danger); font-style: normal; }
+.ai-tool-ms { font-size: 11px; color: var(--color-text-muted); margin-left: auto; flex-shrink: 0; }
+.ai-tool-err {
+  font-size: 11px; color: var(--color-danger); margin-top: 3px;
+  word-break: break-word;
+}
+/* 结果区限高：file_grep 这类工具一屏放不下，内部滚动比把页面撑长好 */
+.ai-tool-res {
+  margin: 4px 0 2px; font-size: 11px; color: var(--color-text-secondary);
+  font-family: var(--font-mono); line-height: 1.45;
+  max-height: 180px; overflow: auto;
+  white-space: pre-wrap; word-break: break-word;
+}
+/* 命令输出 / diff：缩进与对齐是有意义的，按等宽块原样保留 */
+.ai-tool-res.is-code {
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  padding: 6px 8px;
 }
 
 /* 消息区：滚动容器 + 内容层（内容层被 ResizeObserver 观察） */
@@ -2004,6 +3236,8 @@ onUnmounted(() => {
   font-family: inherit; cursor: pointer;
 }
 .ai-conv-more:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+/* 空间内的「更多」跟着任务缩进，否则会和空间名对齐，看着像另一个空间 */
+.ai-conv-more.is-in-space { margin-left: 26px; margin-right: 0; }
 
 /* AI 气泡去掉底色：原来整块套 --color-bg-tertiary 灰底，
    里面再套深色代码块、外面再套引用块，三层嵌套导致视觉很乱。

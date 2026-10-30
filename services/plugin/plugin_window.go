@@ -59,7 +59,9 @@ func (p *PluginService) clearPendingInitLocked() {
 // 在命令面板模式下（PaletteMode=true）使用面板浮层（任务栏隐藏，贴合启动器「随手一开」心智）；
 // 在主窗口/插件管理页等常规入口则使用独立窗口（任务栏可见、可最小化召回，避免「打开后点别的就丢」）。
 func (p *PluginService) ShowPluginWindow(pluginID string) {
-	p.showPluginWindow(pluginID, p.App.Flags.Palette.Load())
+	// 注意取反：standalone 是「固定走独立窗口」，与「面板开着」互为否定。
+	// 面板开着 → 面板浮层（任务栏隐藏）；主窗口/插件管理页 → 独立窗口（任务栏可见）。
+	p.showPluginWindow(pluginID, !p.App.Flags.Palette.Load())
 }
 
 // showPluginWindow 显示插件窗口，standalone=true 时固定走独立窗口（任务栏可见）。

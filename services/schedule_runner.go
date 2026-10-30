@@ -317,6 +317,37 @@ func (a *AppService) checkScheduledTasks() {
 			}()
 			startedAt := time.Now()
 			status, result := a.executeTask(t)
+			// 失败重试（仅定时触发生效）：手动「立即运行」走 RunScheduledTaskNow
+			// 的同步路径，用户就在屏幕前，失败了再点一次即可，不该让 RPC 挂着等重试。
+			//
+			// 重试期间 schedInflight 一直持有，所以不会与下一个调度点重叠——
+			// 这正是重试最危险的地方：一个慢任务失败后重试，同时又到了下一轮，
+			// 两次执行撞在一起（HTTP 双发、命令双跑）。代价是短间隔任务的节拍
+			// 会被跳过几次，这比重复副作用安全。
+			attempts := 1
+			for status != "ok" && attempts <= t.RetryCount {
+				if !a.waitBeforeRetry(t, attempts) {
+					break
+				}
+				attempts++
+				status, result = a.executeTask(t)
+				if status == "ok" {
+					logger.I("[schedule] 任务「%s」第 %d 次重试成功", t.Name, attempts)
+				} else {
+					logger.W("[schedule] 任务「%s」第 %d 次重试仍失败: %s",
+						t.Name, attempts, logger.Trunc(result, 200))
+				}
+			}
+			// 结果里带上尝试次数：否则「同一时刻只留一条记录」会让用户以为
+			// 重试根本没发生，或者反过来以为只跑了一遍就成功了。
+			if attempts > 1 {
+				note := fmt.Sprintf("共尝试 %d 次", attempts)
+				if r := strings.TrimSpace(result); r != "" {
+					result = r + "（" + note + "）"
+				} else {
+					result = note
+				}
+			}
 			durationMs := time.Since(startedAt).Milliseconds()
 			// 执行结果原先只写进 DB 的 run result 字段，日志里毫无痕迹——
 			// 用户问「定时任务怎么没执行」时无法判断是没触发还是触发了但失败。
@@ -360,6 +391,30 @@ func hasNotifyChannel(csv, want string) bool {
 		}
 	}
 	return false
+}
+
+// schedRetryDelay 两次尝试之间的间隔。
+//
+// 15 秒足够越过「DNS 抖动 / 上游 502 / 文件被临时占用」这类瞬时问题，
+// 又短到不会让一次重试拖过整段合理等待。注意这期间 schedInflight 是持有的：
+// 间隔短到 5 秒的任务在重试期间会跳掉几个节拍，这是有意的（宁可少跑一次，
+// 也不让两次执行叠在一起）。
+const schedRetryDelay = 15 * time.Second
+
+// waitBeforeRetry 在两次尝试之间等待，返回 false 表示应放弃重试。
+//
+// 放弃条件是「应用正在退出」：退出流程要等 taskWG 收尾，这里还睡 15 秒
+// 会让关窗口看起来卡住；而且那时 DB 已开始关闭，重试的写回只会全部失败。
+func (a *AppService) waitBeforeRetry(t *db.ScheduledTask, attempt int) bool {
+	logger.I("[schedule] 任务「%s」第 %d 次失败，%v 后重试", t.Name, attempt, schedRetryDelay)
+	timer := time.NewTimer(schedRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-a.schedulerQuit:
+		return false
+	case <-timer.C:
+		return true
+	}
 }
 
 // notifyScheduleRun 定时任务执行后，按 t.Notify 总开关与 t.NotifyChannels 渠道推送结果。

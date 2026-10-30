@@ -380,9 +380,11 @@ func (a *AIService) AILoadImage(relPath string) *services.ApiResult {
 // 在调用模型【之前】调用：无论后续是成功、上游报错还是被用户打断，历史都不会出现
 // 空会话——这是「点进来历史是空的」这个 bug 的直接修复点。
 func (a *AIService) saveUserTurn(convID, content, imagesJSON string) error {
-	hist, err := a.App.DB.ListAIMessages(convID)
-	if err == nil && len(hist) > 0 {
-		last := hist[len(hist)-1]
+	// 只取最后一条而不是 ListAIMessages 之后取末位：那条路每轮发送都要把整个
+	// 会话的历史读一遍（含 reasoning 与工具结果），长会话里这一步会越来越慢，
+	// 而它要的只是「最后一行是不是我」。
+	last, err := a.App.DB.LastAIMessage(convID)
+	if err == nil && last != nil {
 		if last.Role == "user" && last.Content == content && last.Images == imagesJSON {
 			return nil // 本轮用户消息已落库（重试场景），不重复写入
 		}

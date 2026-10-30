@@ -77,6 +77,17 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 			files := RemoveClipboardImages(imgs)
 			logger.I("QuickDock: 已清理 %d 条过期剪贴板记录（含 %d 张图片）", count, files)
 		}
+		// 回收站过期清理与剪贴板同一趟做掉：都是「启动时扫一遍、平时不打扰」的
+		// 低频维护，再起一个 goroutine 只是多一份 panic 兜底要维护。
+		//
+		// 为什么必须在启动时清而不是删除时清：墓碑是唯一会「只增不减」的表
+		// （存整行快照，一条对话的墓碑含它全部消息）。若等用户下次删除才顺便清，
+		// 一个不再删东西的老库就永远不会清，正好是最需要清的那种库。
+		if purged, perr := a.DB.PurgeExpiredTombstones(db.TombstoneMaxAgeDays); perr != nil {
+			logger.W("QuickDock: 回收站过期清理失败: %v", perr)
+		} else if purged > 0 {
+			logger.I("QuickDock: 已清理 %d 条超过 %d 天的回收站记录", purged, db.TombstoneMaxAgeDays)
+		}
 	}()
 
 	// 注入插件 Host API 真实实现（剪贴板/通知/对话框/HTTP/存储）

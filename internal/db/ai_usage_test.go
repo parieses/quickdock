@@ -12,7 +12,7 @@ import "testing"
 func TestAIUsageAccountingBoundary(t *testing.T) {
 	d := openTestDB(t)
 
-	conv, err := d.CreateAIConversation("测试")
+	conv, err := d.CreateAIConversation(NewAIConversation{Title: "测试"})
 	if err != nil {
 		t.Fatalf("建会话失败: %v", err)
 	}
@@ -22,7 +22,7 @@ func TestAIUsageAccountingBoundary(t *testing.T) {
 	if err := d.RecordAIUsage(conv.ID, "deepseek-chat", "chat", chat); err != nil {
 		t.Fatalf("记录明细失败: %v", err)
 	}
-	if err := d.AddAIConversationUsage(conv.ID, "deepseek-chat", chat); err != nil {
+	if err := d.AddAIConversationUsage(conv.ID, "deepseek-chat", chat, true); err != nil {
 		t.Fatalf("累加会话失败: %v", err)
 	}
 

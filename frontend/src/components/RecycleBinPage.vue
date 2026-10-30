@@ -7,7 +7,7 @@ import { useWorkspaceStore } from '../stores/workspace'
 import {
   ListRecycle, RestoreRecycle, PurgeRecycle, ClearRecycle,
 } from '../../bindings/quickdock/services/recycle/recycleservice'
-import { Boxes, LayoutGrid, Layers, Bookmark, FileText, RefreshCw, Trash2, Undo2, Timer } from '@lucide/vue'
+import { Boxes, LayoutGrid, Layers, Bookmark, FileText, RefreshCw, Trash2, Undo2, Timer, MessageSquare, Folder } from '@lucide/vue'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -41,6 +41,8 @@ const TYPE_FILTERS: { value: string; labelKey: string }[] = [
   { value: 'items', labelKey: 'recycleTypeItem' },
   { value: 'notes', labelKey: 'recycleTypeNote' },
   { value: 'schedules', labelKey: 'recycleTypeSchedule' },
+  { value: 'ai_tasks', labelKey: 'recycleTypeAITask' },
+  { value: 'ai_spaces', labelKey: 'recycleTypeAISpace' },
 ]
 const typeFilter = ref('')
 
@@ -51,6 +53,9 @@ const TYPE_ICON: Record<string, Component> = {
   items: Bookmark,
   notes: FileText,
   schedules: Timer,
+  // AI 任务与空间：空间带目录（文件夹图标），任务是单条对话。
+  ai_tasks: MessageSquare,
+  ai_spaces: Folder,
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -60,6 +65,8 @@ const TYPE_LABEL: Record<string, string> = {
   items: 'recycleTypeItem',
   notes: 'recycleTypeNote',
   schedules: 'recycleTypeSchedule',
+  ai_tasks: 'recycleTypeAITask',
+  ai_spaces: 'recycleTypeAISpace',
 }
 
 // 只显示出现在筛选里的类型，避免假选项（某类型一条都没有时点进去是空页）

@@ -71,7 +71,40 @@ func (a *AIService) recordAIUsage(convID, kind string, cfg AIProfile, u db.Token
 	if kind != usageKindChat || convID == "" {
 		return
 	}
-	if err := a.App.DB.AddAIConversationUsage(convID, cfg.Model, u); err != nil {
+	if err := a.App.DB.AddAIConversationUsage(convID, cfg.Model, u, true); err != nil {
+		logger.W("[ai] 累加会话用量失败 conv=%s: %v", convID, err)
+	}
+}
+
+// addTokenUsage 累加多轮调用的用量。
+//
+// 直接相加而不是取最后一次：每轮都是完整的一次计费（上下文整份重发），
+// 只留最后一轮会让「这条回复花了多少」少算一大截，而用户拿这个数字估预算。
+func addTokenUsage(a, b db.TokenUsage) db.TokenUsage {
+	return db.TokenUsage{
+		Prompt:     a.Prompt + b.Prompt,
+		Completion: a.Completion + b.Completion,
+		Cached:     a.Cached + b.Cached,
+	}
+}
+
+// recordAIChatTurn 记录多轮工具循环里的**一轮**模型调用。
+//
+// 与 recordAIUsage 的唯一差别在会话行：
+//   - 明细（ai_usage）每轮一行 —— 那是真实的多次计费，少记就会系统性低估花费；
+//   - 会话行的问答次数只在第一轮 +1 —— 用户问的是一句话，不是五句。
+//     列表里那一栏叫「问答次数」，按轮累加会让它失去意义。
+func (a *AIService) recordAIChatTurn(convID string, cfg AIProfile, u db.TokenUsage, first bool) {
+	if a == nil || a.App == nil || a.App.DB == nil || u.Empty() {
+		return
+	}
+	if err := a.App.DB.RecordAIUsage(convID, cfg.Model, usageKindChat, u); err != nil {
+		logger.W("[ai] 记录用量失败 kind=chat model=%s: %v", cfg.Model, err)
+	}
+	if convID == "" {
+		return
+	}
+	if err := a.App.DB.AddAIConversationUsage(convID, cfg.Model, u, first); err != nil {
 		logger.W("[ai] 累加会话用量失败 conv=%s: %v", convID, err)
 	}
 }

@@ -26,6 +26,7 @@ import (
 	collectionsvc "quickdock/services/collection"
 	diagsvc "quickdock/services/diag"
 	frecencysvc "quickdock/services/frecency"
+	monitorsvc "quickdock/services/monitor"
 	notesvc "quickdock/services/note"
 	pluginsvc "quickdock/services/plugin"
 	portsvc "quickdock/services/port"
@@ -50,12 +51,14 @@ type MCPService struct {
 	Frecency   *frecencysvc.FrecencyService
 	Port       *portsvc.PortService
 	Collection *collectionsvc.CollectionService
-	version    string
+	// Monitor 监控门面：定时任务挂在 AppService 上，监控是独立子包，故单独注入。
+	Monitor *monitorsvc.MonitorService
+	version string
 }
 
 // NewMCPService 创建 MCP 绑定服务，并注册业务工具。
-func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, note *notesvc.NoteService, frecency *frecencysvc.FrecencyService, port *portsvc.PortService, collection *collectionsvc.CollectionService, version string) *MCPService {
-	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, Note: note, Frecency: frecency, Port: port, Collection: collection, version: version}
+func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, note *notesvc.NoteService, frecency *frecencysvc.FrecencyService, port *portsvc.PortService, collection *collectionsvc.CollectionService, monitor *monitorsvc.MonitorService, version string) *MCPService {
+	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, Note: note, Frecency: frecency, Port: port, Collection: collection, Monitor: monitor, version: version}
 	s.registerTools()
 	return s
 }
@@ -64,12 +67,20 @@ func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService
 
 // MCPStatus 返回 MCP 服务运行状态、监听地址与工具开放情况。
 //
-// tools / total / blocked 三个数是给面板解释「为什么工具比预期少」用的：
-// 只报一个数时，用户看到工具变少会怀疑是服务出问题，而实际是等级门正常拦截。
+// 三个计数只统计**对外工具**（Global 注册表），agent 工具单独给一个 agent 数：
+// 混在一起算的话，面板上会显示「43 / 52」，用户的第一反应是「9 个被挡住了」，
+// 然后去调等级——怎么调都不会变，因为那 9 个本来就不归 MCP 管。
 func (s *MCPService) MCPStatus() *services.ApiResult {
 	cat := mcpsrv.Catalog()
-	exposed := 0
+	exposed, total, agent := 0, 0, 0
 	for _, t := range cat {
+		if t.AgentOnly {
+			if !t.Disabled && t.Level <= mcpsrv.MaxLevel() {
+				agent++
+			}
+			continue
+		}
+		total++
 		if t.Exposed {
 			exposed++
 		}
@@ -80,14 +91,15 @@ func (s *MCPService) MCPStatus() *services.ApiResult {
 		"port":     mcpsrv.Default.Port(),
 		"maxLevel": mcpsrv.MaxLevel(),
 		"tools":    exposed,
-		"total":    len(cat),
-		"blocked":  len(cat) - exposed,
+		"total":    total,
+		"blocked":  total - exposed,
+		"agent":    agent,
 	})
 }
 
 // MCPTools 列出全部已注册工具（名称/说明/危险等级/分类/是否开放），供环境管理页展示。
 // 未开放的也要给前端：面板据此显示「被等级挡住」或「被单独关掉」的工具及其原因，
-// 而不是留下空白。
+// 而不是留下空白。agent 工具一并返回并带 agentOnly 标记，面板据此打「仅内置 AI」徽章。
 func (s *MCPService) MCPTools() *services.ApiResult {
 	cat := mcpsrv.Catalog()
 	out := make([]map[string]any, 0, len(cat))
@@ -99,6 +111,7 @@ func (s *MCPService) MCPTools() *services.ApiResult {
 			"category":    t.Category,
 			"exposed":     t.Exposed,
 			"disabled":    t.Disabled,
+			"agentOnly":   t.AgentOnly,
 		})
 	}
 	return services.Ok(out)
@@ -368,7 +381,7 @@ type toolRegistrar struct {
 }
 
 func (r *toolRegistrar) add(run func(args map[string]any) (any, error), level int, name, desc string, required []string, props map[string]any) {
-	r.reg.Add(mcpsrv.Tool{
+	r.addTool(mcpsrv.Tool{
 		Name:        name,
 		Description: desc,
 		InputSchema: mcpsrv.Schema("", required, props),
@@ -376,6 +389,10 @@ func (r *toolRegistrar) add(run func(args map[string]any) (any, error), level in
 		Category:    r.category,
 		Handler:     run,
 	})
+}
+
+func (r *toolRegistrar) addTool(t mcpsrv.Tool) {
+	r.reg.Add(t)
 }
 
 // toolProvider 一个域的工具集合：分类 id + 注册函数。
@@ -387,16 +404,19 @@ type toolProvider struct {
 // toolProviders 装配清单。加一个域 = 新建 tools_<域>.go + 在下面加一行。
 //
 // 顺序不影响 tools/list 的输出（registry 的 List/Catalog 都按等级+名称排序），
-// 只决定 init 期注册先后，故按「宿主 → 环境 → 启动台 → 内容 → 诊断 → 扩展 → 高危」排列。
+// 只决定 init 期注册先后，故按「宿主 → 环境 → 文件 → 启动台 → 内容 → 诊断 → 自动化 → 扩展 → 高危」排列。
 func toolProviders() []toolProvider {
 	return []toolProvider{
 		{Category: mcpsrv.CategoryApp, Register: registerAppTools},             // 宿主信息、监听端口、机器人通知
-		{Category: mcpsrv.CategoryEnv, Register: registerEnvTools},             // 运行时状态/日志/版本、服务启停、Everything 检索
+		{Category: mcpsrv.CategoryEnv, Register: registerEnvTools},             // 运行时状态/日志/版本、服务启停
+		{Category: mcpsrv.CategoryFile, Register: registerFileTools},           // 文件检索、读取、按内容搜索
 		{Category: mcpsrv.CategoryItem, Register: registerItemTools},           // 快捷项、最近使用、工作空间
 		{Category: mcpsrv.CategoryNote, Register: registerNoteTools},           // 笔记与文件夹
 		{Category: mcpsrv.CategoryTodo, Register: registerTodoTools},           // 待办
 		{Category: mcpsrv.CategoryClipboard, Register: registerClipboardTools}, // 剪贴板历史与写入
 		{Category: mcpsrv.CategoryDiag, Register: registerDiagTools},           // 日志与崩溃记录
+		{Category: mcpsrv.CategorySchedule, Register: registerScheduleTools},   // 定时任务与执行历史
+		{Category: mcpsrv.CategoryMonitor, Register: registerMonitorTools},     // 监控状态、检测记录
 		{Category: mcpsrv.CategoryPlugin, Register: registerPluginTools},       // 插件清单与命令执行
 		{Category: mcpsrv.CategoryRisk, Register: registerRiskTools},           // 高危：当前恒不开放
 	}

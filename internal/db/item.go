@@ -424,7 +424,7 @@ func (d *Database) DeleteItem(id string) error {
 	if len(rows) == 0 {
 		return nil // 本来就不存在，无需墓碑
 	}
-	if err := d.AddTombstone("items", id, rowLabel(rows[0]),
+	if err := d.AddTombstone(RecycleItem, id, rowLabel(rows[0]),
 		map[string][]map[string]interface{}{"items": rows}); err != nil {
 		return err
 	}
