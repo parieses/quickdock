@@ -8,7 +8,7 @@ package services
 // 和一份内存副本，而 SFTP 上传必须在 Go 侧用本地绝对路径打开真实文件。
 //
 // 与 services/plugin 的 PickFilePath / PickFolderPath 的关系：那两个是
-// **插件桥接专用**，选中路径会记进 pickedPaths 白名单，供后续 qdReadFile 放行；
+// 插件桥接专用，选中路径会记进 pickedPaths 白名单，供后续 qdReadFile 放行；
 // 契约不同（有副作用），故没有合并。新增宿主级选择器一律加在这里，
 // 不要再往业务域里塞第三份。
 

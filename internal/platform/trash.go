@@ -9,14 +9,14 @@ import (
 
 // MoveToTrash 把文件或目录移入系统回收站（Windows）/ 废纸篓（macOS）/ XDG Trash（Linux）。
 //
-// 与 os.Remove / os.RemoveAll 的本质区别是**可恢复**。宿主侧要删除用户文件时
+// 与 os.Remove / os.RemoveAll 的本质区别是可恢复。宿主侧要删除用户文件时
 // 统一走这里，插件的 host.fs.remove 也复用同一实现——
 // 插件能删的东西不该比宿主删得更彻底。
 //
 // 契约：
 //   - path 必须已存在；不存在返回错误，不静默成功（否则插件无法判断到底删没删）
 //   - 卷根（C:\ / /）一律拒绝：误删整个盘的代价无法接受
-//   - 失败时**不回退到永久删除**。宁可报错，也不让「可恢复」这个承诺落空
+//   - 失败时不回退到永久删除。宁可报错，也不让「可恢复」这个承诺落空
 func MoveToTrash(path string) error {
 	raw := strings.TrimSpace(path)
 	if raw == "" {

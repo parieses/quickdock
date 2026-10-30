@@ -7,10 +7,10 @@
 //   source(id) → raw 数量 → 减去「已读水位」→ 显示值
 //
 // 两条关键约定：
-// 1. **「已读」而不是「已消除」**：水位做出之差。打开监控页看过 3 个宕机 → 角标消失，
+// 1. 「已读」而不是「已消除」：水位做出之差。打开监控页看过 3 个宕机 → 角标消失，
 //    但宕机还在；再来第 4 个时角标是 1 而不是 4 —— 只提示新增部分。
 //    相反 sticky 源（今日到期）是「持续存在的事实」，打开页面也不该假装它不存在。
-// 2. **角标不能比业务先崩**：fetch 抛错（DB 未就绪、网络未起）一律吞掉按 0 处理。
+// 2. 角标不能比业务先崩：fetch 抛错（DB 未就绪、网络未起）一律吞掉按 0 处理。
 //    异步 numerate 一个红色小点，不值得让用户看到错误 toast。
 //
 // 自动清已读：Sidebar 监听 currentPage 变化，进入哪一页就 markSeen 哪一页。
@@ -75,7 +75,7 @@ function readSeen(): Record<string, number> {
 }
 
 // 写入合并：轮询下调水位、markSeen 都会触发写，用 150ms 防抖合并高频写，避免每次 tick 都 setItem。
-// pendingSeenJson 存的必须是**最后一次**调用传入的值：防抖窗口内的多次调用只保留最新一份，
+// pendingSeenJson 存的必须是最后一次调用传入的值：防抖窗口内的多次调用只保留最新一份，
 // 否则窗口结束时落盘的是第一次的旧水位，下次启动角标又会全部冒出来。
 let pendingSeenJson: string | null = null
 let seenWriteTimer: ReturnType<typeof setTimeout> | null = null

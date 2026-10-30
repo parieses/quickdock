@@ -366,7 +366,7 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 这个模式本来有没有工具可用。收尾轮靠它区分「本来就没有工具」和
 	// 「有工具但轮次用完了」——后者必须给模型一句明确交代，否则它会把调用写成正文。
 	modeHasTools := len(tools) > 0
-	// system 的原始正文（还没贴任何提示段）。工具说明与目录说明改成**每轮重建**
+	// system 的原始正文（还没贴任何提示段）。工具说明与目录说明改成每轮重建
 	// 而不是一次追加：收尾轮撤下 tools 之后，system 里那段「你可以调用 file_read」
 	// 也必须一起撤掉，否则模型会把这次调用输出成纯文本标记（见 ai_dsml.go）。
 	baseSystem := firstSystem(messages)
@@ -447,7 +447,7 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			if !ok {
 				break
 			}
-			// 顺带压输出预留：max_tokens 是**预扣**而非上限，上游把
+			// 顺带压输出预留：max_tokens 是预扣而非上限，上游把
 			// 「输入 + 预留输出」一起跟窗口比。只压历史不动它，仍然可能超。
 			if window <= 0 {
 				window = contextWindowOf(cfg)

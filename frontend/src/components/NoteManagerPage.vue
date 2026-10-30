@@ -326,7 +326,7 @@ async function flushPendingSave() {
 /**
  * 保存后只在本地同步 tags，不重拉整棵树。
  *
- * 自动保存每 800ms 就可能触发一次，而 ListNotesTree 返回的是**整库**节点：
+ * 自动保存每 800ms 就可能触发一次，而 ListNotesTree 返回的是整库节点：
  * 大库下每次保存都会重排/重渲染整棵树（滚动位置跳、输入卡顿），而实际上
  * 只有 tags 变了——内容不参与树渲染。
  */
@@ -431,7 +431,7 @@ function highlightParts(text: string, q: string): { s: string; hit: boolean }[] 
 // 预览区与编辑区的滚动联动。
 //
 // 两栏独立滚动时，左边改到第 40 行、右边还停在第 3 行，对照修改完全没法用。
-// 按**比例**同步而不是逐行量化：markdown 渲染后行高不等（标题/代码块/图片），
+// 按比例同步而不是逐行量化：markdown 渲染后行高不等（标题/代码块/图片），
 // 换算成行号必然错位，按滚动百分比对齐至少始终「看到大致同一段」。
 let syncing = false
 function syncScroll(from: 'input' | 'preview') {

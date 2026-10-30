@@ -17,7 +17,7 @@ import (
 const gitBaseRel = "runtime/git"
 
 // GitRuntime 管理便携 Git 运行时（git-for-windows 的 MinGit 发行包）。
-// 与其他运行时不同，Git 为**单版本**：始终安装到 runtime/git，装新版本即覆盖旧版本
+// 与其他运行时不同，Git 为单版本：始终安装到 runtime/git，装新版本即覆盖旧版本
 // （Git 版本间兼容性好，日常开发只需一份；多版本并存会让 PATH 切换变成负担）。
 // 同时探测系统 PATH 上已安装的 git（如 Git for Windows）。
 //

@@ -43,7 +43,7 @@ const UpdatePrompt = defineAsyncComponent(() => import('./components/UpdatePromp
 // SSH 终端窗口专用页：只在该独立窗口内加载，不进主窗口体积
 const SshPage = defineAsyncComponent(() => import('./components/SshPage.vue'))
 // 剪贴板面板：独立剪贴板窗口（#/clipboard）与主窗口内容页共用它。
-// 这里**必须**也是动态 import，不能静态 import —— 静态引用会把它无条件编进主 chunk，
+// 这里必须也是动态 import，不能静态 import —— 静态引用会把它无条件编进主 chunk，
 // 于是 ① pages/registry 里的动态 import 拆不出独立 chunk（Vite 报 INEFFECTIVE_DYNAMIC_IMPORT），
 // ② 笔记窗口、命令面板窗口、窗口管理浮窗也各自白载一份剪贴板面板代码。
 // 两处用的是同一个 import specifier，Rollup 会把它们合并成同一个 chunk，不会重复打包。

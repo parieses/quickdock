@@ -9,26 +9,22 @@ import (
 
 // connPool 按主机复用 SSH 连接。
 //
-// #13 的核心问题：同主机开 3 个标签，如果每次 Connect 都重新握手，就是 3 次
-// 完整 TCP + 认证（实测 CentOS 7 上握手约 200-400ms，跨网更慢），而且服务器
-// 的 MaxSessions / MaxStartups 会被无谓消耗。SSH 协议本身支持一条连接开多个
-// channel（NewSession），这正是当初连接层持 *ssh.Client 而非 *ssh.Session 的原因。
+// 同主机开 3 个标签若各拨一次，就是 3 次完整握手（实测 CentOS 7 约 200-400ms，
+// 跨网更慢），还白白消耗 MaxSessions / MaxStartups。SSH 协议支持一条连接开多个
+// channel，所以连接层持 *ssh.Client 而非 *ssh.Session。
 //
-// 复用的前提是**引用计数**：连接不能跟着任何一个会话一起死。
+// 复用靠引用计数，连接不能跟着任何一个会话死：
 //
-//	pool.Acquire("host-1")   → refs 0→1
-//	pool.Acquire("host-1")   → refs 1→2（复用，不拨号）
-//	pool.Release("host-1")   → refs 2→1
-//	pool.Release("host-1")   → refs 1→0 → Close + 从池里摘除
+//	Acquire 0→1 拨号，1→2 复用
+//	Release 2→1，1→0 时 Close 并从池里摘除
 //
-// 两条容易被忽略的规则：
+// 两条容易踩的：
 //
-//  1. **并发拨号必须串行化到同一主机**。两个标签同时打开时，若都看到池里没有
-//     就各自拨号，会建出两条连接，其中一条立刻多余。同一把锁按 hostID 加，
-//     不同主机之间仍然完全并行（不能一把全局锁串行所有拨号）。
-//  2. **断开的连接要从池里摘掉，但 refcount 不能动**。连接死了不等于会话结束——
-//     会话还留在 Manager 里供回放，它占的那个引用要等用户主动关闭时才归还。
-//     若在这里把 refs 清零，后面 Release 会把计数减成负数或误关掉新连接。
+//  1. 并发拨号必须按 hostID 串行，否则两个标签各拨一条、多出一条。不能一把
+//     全局锁串行所有主机，不同主机之间仍应并行。
+//  2. 断开的连接从池里摘掉，但 refcount 不动——会话还留在 Manager 里供回放，
+//     它占的引用要等用户主动关闭时才归还。在这里清零会让后面的 Release 减成负数
+//     或误关掉新连接。
 type connPool struct {
 	mu      sync.Mutex
 	entries map[string]*connEntry

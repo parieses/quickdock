@@ -2,7 +2,7 @@
  * 外链打开的统一出口：一律交给系统默认浏览器，绝不在 WebView 里导航。
  *
  * 背景（2026-10-28 修）：AI 回答 / markdown 预览里渲染出的 <a href> 是普通链接，
- * 点一下 WebView 就在**当前窗口**导航过去，把整个应用界面替换掉。主界面是单页
+ * 点一下 WebView 就在当前窗口导航过去，把整个应用界面替换掉。主界面是单页
  * 应用，没有地址栏也没有后退按钮，用户回不来，只能重启软件。
  *
  * 站点面板、命令面板、设置页早就是这个约定（Browser.OpenURL），只是 markdown
@@ -20,7 +20,7 @@ import { Browser } from '@wailsio/runtime'
 import { logErr } from './logger'
 
 /**
- * 是否是可交给浏览器的地址：只认**原始写法**就是绝对 http(s) 的链接。
+ * 是否是可交给浏览器的地址：只认原始写法就是绝对 http(s) 的链接。
  *
  * 用 getAttribute 而不是 a.href 判断，是因为 a.href 会把相对路径解析成当前 origin
  * 下的绝对地址，那样 hash 路由（#/settings）在开发模式下会被误判成外链。
@@ -40,7 +40,7 @@ export async function openExternal(url: string): Promise<void> {
 }
 
 /**
- * 判定某个 <a> 的**原始 href** 是否该交给系统浏览器。
+ * 判定某个 <a> 的原始 href 是否该交给系统浏览器。
  *
  * 抽成纯函数是为了能单测：判定口径一旦回退（例如改成用 a.href 判断，hash 路由
  * 在开发模式下就会被解析成 http://localhost:5173/#/xxx 而误判为外链），

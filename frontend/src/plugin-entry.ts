@@ -37,7 +37,7 @@ const pluginId = params.get('id') || ''
 // 主窗口的 App.vue.applyTheme 把 <html data-theme> 写成唯一真相，并
 // Events.Emit('quickdock:theme-changed') 广播给所有 WebView 窗口。但独立插件窗口
 // 早先并不订阅这个广播，于是出现一个很难复现的问题：
-//   usePluginHost 里的 themeObserver 观察的是**本窗口**的 documentElement，
+//   usePluginHost 里的 themeObserver 观察的是本窗口的 documentElement，
 //   而本窗口的 <html> 从来没人写 data-theme（主题实际写在 iframe 里，
 //   由宿主 BRIDGE_SCRIPT 设置）→ observer 永远不触发 →
 //   用户在主窗口切浅/深色，已经开着的插件独立窗口毫无反应。

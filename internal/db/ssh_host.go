@@ -480,7 +480,7 @@ func (d *Database) ListSshKnownHosts(host string, port int) ([]SshKnownHost, err
 
 // ListAllSshKnownHosts 返回全部已信任的主机密钥，按 host + port + key_type 排序。
 //
-// 与 ListSshKnownHosts 的区别是**不带 WHERE**：管理页要一次列出所有服务器的
+// 与 ListSshKnownHosts 的区别是不带 WHERE：管理页要一次列出所有服务器的
 // 已信任记录，让用户能看到「我到底信任过什么、能撤销哪些」。
 // 用带 WHERE 的版本去做这件事需要前端按主机逐台查，主机多了就是 N 次 IPC。
 func (d *Database) ListAllSshKnownHosts() ([]SshKnownHost, error) {

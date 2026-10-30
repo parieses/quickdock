@@ -50,7 +50,7 @@ func TestFilesystemPermParse(t *testing.T) {
 }
 
 // TestFilesystemGrantedSemantics 锁定向后兼容承诺：
-// filesystem:true 只给对话框，**不给读写**。否则升级后 40+ 个老插件
+// filesystem:true 只给对话框，不给读写。否则升级后 40+ 个老插件
 // 会凭空获得整个磁盘的读写能力。
 func TestFilesystemGrantedSemantics(t *testing.T) {
 	var p Permissions

@@ -8,12 +8,12 @@ import (
 	"time"
 )
 
-// 背景：QuickDock 发布版以 GUI 子系统链接（-H windowsgui），宿主自身没有控制台。
+// QuickDock 发布版以 GUI 子系统链接（-H windowsgui），宿主自身没有控制台。
 // Windows 此前靠 CREATE_NO_WINDOW 让每个控制台子进程"隐藏"，但该标志的语义是
 // "分配一个新控制台但不显示"——于是每个子进程都配一个 conhost.exe（实测 6.5MB）。
 // 47 插件全启用时 29 个后代进程白吃约 190MB（见 2026-09-17 实测）。
 //
-// 正解：宿主自己 AllocConsole() 建一个隐藏控制台，子进程**不带任何标志**默认继承它，
+// 正解：宿主自己 AllocConsole() 建一个隐藏控制台，子进程不带任何标志默认继承它，
 // 全系统只留 1 个 conhost。实测对照（pythonw 模拟 GUI 宿主，2026-09-17）：
 //   - 宿主 AllocConsole + SW_HIDE 后，无标志启动 console 子进程 → 新增 conhost 0 个
 //   - CREATE_NO_WINDOW 启动同样进程 → 新增 conhost 1 个
@@ -50,9 +50,9 @@ var inheritHiddenConsole atomic.Bool
 // InitHiddenConsole 尝试为宿主进程建立一个不可见的控制台，返回是否已就绪。
 //
 // 三种情形：
-//   - 宿主已有**可见**控制台（wails3 dev / 从终端启动）：返回 false，
+//   - 宿主已有可见控制台（wails3 dev / 从终端启动）：返回 false，
 //     保持既有 CREATE_NO_WINDOW 行为不变，避免 dev 下把插件日志混进终端。
-//   - 宿主已有**不可见**控制台：直接复用，返回 true。
+//   - 宿主已有不可见控制台：直接复用，返回 true。
 //   - 宿主无控制台（发布版 GUI 子系统）：AllocConsole 后立即 ShowWindow(SW_HIDE)。
 //
 // 返回 false 时 Hide() 会自动退回 CREATE_NO_WINDOW 兜底，功能不受影响。
@@ -68,7 +68,7 @@ func InitHiddenConsole() bool {
 	if ret, _, _ := procAllocConsole.Call(); ret == 0 {
 		return false
 	}
-	// AllocConsole 让独立进程 conhost 为宿主创建一个控制台窗口，默认**可见**。
+	// AllocConsole 让独立进程 conhost 为宿主创建一个控制台窗口，默认可见。
 	// 旧逻辑只在 GetConsoleWindow 立即返回非 0 句柄时才隐藏；但 conhost 建窗口
 	// 与 GetConsoleWindow 取句柄是跨进程异步的，首次调用常返回 0（窗口尚未就绪），
 	// 于是隐藏被整个跳过，窗口以可见态被 conhost 画出 → 启动闪一下黑框。

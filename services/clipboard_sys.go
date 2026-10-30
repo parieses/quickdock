@@ -28,7 +28,7 @@ var (
 	// 使用 atomic.Pointer 保证并发安全
 	AppRef atomic.Pointer[application.App]
 
-	// lastClipboardText 最近一次**入库**的剪贴板文本（本程序回写的内容不算）。
+	// lastClipboardText 最近一次入库的剪贴板文本（本程序回写的内容不算）。
 	// 命令面板的 {clipboard} 变量读它，因此这里只记录真实复制来的内容。
 	lastClipboardText   string
 	lastClipboardTextMu sync.Mutex
@@ -38,7 +38,7 @@ var (
 	lastClipboardImageHash   string
 	lastClipboardImageHashMu sync.Mutex
 
-	// selfWriteText 本程序刚写进剪贴板的文本——**一次性**回环令牌（配合 selfWriteTextAt 过期）。
+	// selfWriteText 本程序刚写进剪贴板的文本——一次性回环令牌（配合 selfWriteTextAt 过期）。
 	//
 	// 与「最近入库文本」必须分开：早前用同一个变量同时承担回环防护和去重，副作用是
 	// 用户连续两次复制同一段内容时，第二次会被永久吞掉（连置顶都不做）。
@@ -173,7 +173,7 @@ func (a *AppService) startClipboardWorker(ctx context.Context) {
 				}
 				fails++
 				if fails == clipboardProbeWarnAfter || fails%10 == 0 {
-					// 点名占用者。必须在探测**失败之后**才查——本进程一旦成功打开
+					// 点名占用者。必须在探测失败之后才查——本进程一旦成功打开
 					// 剪贴板，GetOpenClipboardWindow 报的就是本进程自己。
 					logger.E("QuickDock: 剪贴板探测失败 %d 次（每次间隔 %v），占用者：%s。"+
 						"此时系统内所有程序都无法复制，本程序的剪贴板历史也不会更新——重启占用者或注销即可恢复",
@@ -265,7 +265,7 @@ func SetClipboardText(text string) bool {
 	return setClipboardText(text, true)
 }
 
-// SetClipboardTextRecord 把文本写入系统剪贴板，且**不登记回环令牌**，让剪贴板捕获
+// SetClipboardTextRecord 把文本写入系统剪贴板，且不登记回环令牌，让剪贴板捕获
 // 协程把它当成一次正常复制记入历史。
 //
 // 用于「用户在应用内显式复制新内容」：SSH 终端选中复制、命令面板复制等。这类内容

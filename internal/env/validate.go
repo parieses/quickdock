@@ -11,7 +11,7 @@ import (
 
 // 本文件集中放置「不可信输入」的校验。
 //
-// 背景：Manager 的所有方法都经 Wails 绑定暴露给前端，而插件窗口与主界面同源、
+// Manager 的所有方法都经 Wails 绑定暴露给前端，而插件窗口与主界面同源、
 // 共享同一套绑定，因此 runtime/version/dir 都属于不可信输入。version 最终会拼进
 // filepath.Join(baseDir, version) 并交给 os.RemoveAll / os.OpenFile，缺失校验即可
 // 通过 `..\..\Users\xxx` 之类实现任意目录删除或读取。

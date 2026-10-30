@@ -81,7 +81,7 @@ type SshBatchSkipped struct {
 
 // SshBatchPlan 一次批量执行的预演结果。
 //
-// 单独一个方法而不是塞进 Run 的返回值：前端必须在用户按下执行**之前**
+// 单独一个方法而不是塞进 Run 的返回值：前端必须在用户按下执行之前
 // 就把风险说明和生产机数量摆出来（风险说明排在按钮之前是硬要求），
 // 而那时 Run 还没被调用。
 type SshBatchPlan struct {
@@ -94,7 +94,7 @@ type SshBatchPlan struct {
 
 // SshBatchRequest 执行入参。
 //
-// BatchID 由**前端生成并先登记**：事件可能在后端返回之前就发出来
+// BatchID 由前端生成并先登记：事件可能在后端返回之前就发出来
 // （第一台很快跑完时），前端只能靠一个自己已经知道的 id 过滤。
 // 后端不会改写非空的 BatchID，只在为空时兜底生成。
 type SshBatchRequest struct {
@@ -170,7 +170,7 @@ func (s *SshService) SshBatchRun(req SshBatchRequest) *services.ApiResult {
 		return failSsh(sshcore.ErrEmptyCommand)
 	}
 
-	// 主机列表重新解析，**不信任前端传来的展示数据**：
+	// 主机列表重新解析，不信任前端传来的展示数据：
 	// 前端手里的是打开对话框那一刻的快照，期间主机可能被删、环境被改成生产。
 	if len(req.HostIDs) > maxBatchHosts {
 		return failCode(CodeInvalidInput, "单批主机数超过上限")

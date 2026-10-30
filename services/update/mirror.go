@@ -19,22 +19,18 @@ import (
 )
 
 // 国内直连 GitHub Releases 常超时。mirrorProvider 包装 endpoint provider：
-// Check（拉 manifest）与 Download（下载安装包）直连失败时都自动改用镜像前缀重试
-// （ghfast.top 等），安装包带 Ed25519 签名验证，镜像只改传输 URL、无法篡改内容，
-// 安全性不变。
+// Check 与 Download 直连失败时自动改用镜像前缀重试（ghfast.top 等）。安装包带
+// Ed25519 签名，镜像只改传输 URL、动不了内容。
 //
-// manifest 侧为何安全：CI 生成 manifest 时用 -url-prefix 写入【绝对】artifact URL，
-// 镜像命中的 Release 里 endpoint.artifact.url 仍是 GitHub 原始地址，下载加速由
-// Download 的镜像重试链负责，两层互不干扰。
-// 已知取舍：镜像对 releases/latest 的重定向有几分钟缓存，极端情况下可能取到
-// 旧 manifest 而被判"已是最新"——好过整体失败，且下次周期检查会自愈。
+// manifest 侧安全：CI 用 -url-prefix 写入绝对 artifact URL，镜像命中的 Release 里
+// artifact.url 仍是 GitHub 原始地址，下载加速由 Download 的重试链负责。
+// 已知取舍：镜像对 releases/latest 的重定向有几分钟缓存，可能取到旧 manifest 被判
+// 「已是最新」；好过整体失败，下次周期检查会自愈。
 //
-// 每次尝试限时 3 分钟：直连卡死时不会无限等待，镜像也失败则返回最后错误。
-// 下载先落一份持久的缓存文件（<数据目录>/update/cache/pending.part），完整成功
-// 后才一次性写入 dst —— wails 的 download() 用 io.MultiWriter(file, hasher) 做
-// 流式哈希，半份数据进去就会污染摘要导致验签失败。缓存 + 落盘的续传状态让
-// 「3 分钟超时」「换镜像重试」「重启应用后再点下载」都能从断点继续，而不是
-// 每次从 0 重来（网络差时那样永远下不完）。
+// 每次尝试限时 3 分钟。下载先落持久缓存（<数据目录>/update/cache/pending.part），
+// 完整成功后才一次性写 dst——wails 的 download() 用 io.MultiWriter(file, hasher)
+// 流式哈希，半份数据会污染摘要导致验签失败。缓存让「3 分钟超时」「换镜像重试」
+// 「重启后再点下载」都能续传。
 
 // UpdateMirrorDefaults 默认镜像前缀（保持更新，失效可换）。可经 SetUpdateMirrors 覆盖。
 // 导出供 services/plugin 的市场下载镜像候选复用（与更新链路同一套镜像）。

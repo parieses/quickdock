@@ -10,7 +10,7 @@ import (
 
 // AISpace AI 空间：绑定一个目录的任务容器。
 //
-// 与「任务（会话）」的界线：空间是**目录**的映射，任务是**一次对话**。
+// 与「任务（会话）」的界线：空间是目录的映射，任务是一次对话。
 // 用户在一个项目下会开十几条对话，但它们共享同一个目录——把这些对话聚在一个
 // 空间下，侧栏才不会变成一长串看不出归属的标题。
 type AISpace struct {
@@ -320,7 +320,7 @@ func (d *Database) DeleteAIConversation(id string) error {
 // 能被「再写一遍」替代。走项目/集合/定时任务同一套 tombstone 机制，
 // 「设置 → 历史 → 回收站」里一键恢复。
 //
-// **消息一并入墓碑**：只恢复一个空会话等于什么都没恢复——用户要的是那几轮对话，
+// 消息一并入墓碑：只恢复一个空会话等于什么都没恢复——用户要的是那几轮对话，
 // 不是一行标题。消息行数可能成百上千，但都是纯文本，拍进 payload 的代价可以接受。
 func (d *Database) DeleteAIConversationToRecycle(id string) error {
 	rows := map[string][]map[string]interface{}{}
@@ -402,7 +402,7 @@ func (d *Database) DeleteAISpaceToRecycle(id string) error {
 	}
 	// 任务与消息要真删：它们已经在墓碑里了，留着的副本会在恢复时被 upsert 覆盖，
 	// 而「删了空间却发现侧栏还挂着那些任务」是最让人困惑的一种界面。
-	// 这里不能用 DeleteAISpace —— 那条路是把任务**降级为普通任务**保留下来。
+	// 这里不能用 DeleteAISpace —— 那条路是把任务降级为普通任务保留下来。
 	for _, c := range convs {
 		cid, _ := c["id"].(string)
 		if cid == "" {
@@ -415,7 +415,7 @@ func (d *Database) DeleteAISpaceToRecycle(id string) error {
 	return d.ExecuteParams("DELETE FROM ai_spaces WHERE id = ?", []interface{}{id})
 }
 
-// DeleteAISpace 解散空间：删掉空间本身，其下任务**降级为普通任务**而不是一起删掉。
+// DeleteAISpace 解散空间：删掉空间本身，其下任务降级为普通任务而不是一起删掉。
 //
 // 与 DeleteAISpaceToRecycle 的区别是任务去留：用户看到的删除入口一律走回收站
 // （连任务一起走），这条留给「只是不想再分组了」的场景——它不进回收站，
@@ -461,7 +461,7 @@ func (d *Database) UpdateAIConversationMeta(id, title, summary string) error {
 
 // RecordAIUsage 记录一次模型调用的用量明细（ai_usage 一行）。
 //
-// 只写明细、**不动会话上的累加列**，两者分开是有意为之：
+// 只写明细、不动会话上的累加列，两者分开是有意为之：
 // 生成标题 / 压缩摘要也是模型调用（要花钱、要进统计），但它们不属于
 // 「这个对话里的一问一答」。早期把两者混在一起累加，对话列表里的 token
 // 就会比「各条回复下面那些数字之和」大出一截 —— 用户一眼就看出不对。

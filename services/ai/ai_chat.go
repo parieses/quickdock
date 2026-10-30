@@ -30,7 +30,7 @@ type chatTurn struct {
 // streamAIChat 流式调用模型。
 //
 // tools 为 nil 时不带工具（一次性问答、摘要、标题生成都走这条路）；
-// 非 nil 时模型可能返回 tool_calls，此时 Content 可能为空——**这不代表失败**，
+// 非 nil 时模型可能返回 tool_calls，此时 Content 可能为空——这不代表失败，
 // 调用方必须看 ToolCalls 是否为空，否则会把「模型决定先查一下」误判成空回复。
 func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []map[string]interface{}, convID string, tools []map[string]any, onToken func(text string), onReasoning func(text string)) (chatTurn, error) {
 	// 链路日志只记「元数据」（模型/条数/耗时/用量），绝不记消息正文——
@@ -106,7 +106,7 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	}
 
 	var sb strings.Builder
-	// tool_calls 是**分片下发**的：第一片带 index/id/name，后续分片只带
+	// tool_calls 是分片下发的：第一片带 index/id/name，后续分片只带
 	// arguments 的字符串片段、不再带 id。必须按 index 累积，最后才是一条完整调用。
 	// 直接按片 append 会得到一堆半截 JSON，且各网关分片粒度不同，本地很难复现。
 	pendingTools := map[int]*aiToolCall{}
@@ -374,7 +374,7 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 // aiSummaryInputRune 单次摘要调用喂进去的字符上限。
 //
 // 必须有上限：原来的写法把整段待压缩历史拼成一条 user 消息发给模型，
-// 而这段历史**正是刚刚判定为「太长」的那段**——历史攒到 40 万 token 时，
+// 而这段历史正是刚刚判定为「太长」的那段——历史攒到 40 万 token 时，
 // 摘要请求自己就先超窗 400，压缩永远失败，于是每一轮都拿同一份超长历史
 // 再撞一次 400。40K 字符（≈25K token）任何模型的窗口都装得下。
 const aiSummaryInputRune = 40000
@@ -420,7 +420,7 @@ func (a *AIService) summarizeAndStore(ctx context.Context, cfg AIProfile, conv *
 
 // clipSummaryInput 把摘要输入裁到上限内。
 //
-// 保留**头 30% + 尾 70%**：头部是会话的起点（用户最初要做什么），
+// 保留头 30% + 尾 70%：头部是会话的起点（用户最初要做什么），
 // 尾部离现在最近（当前进展与结论），中间是最可以牺牲的过程细节。
 // 只留尾部会丢掉原始需求，只留头部会丢掉最近的决定，两头都留最实用。
 func clipSummaryInput(s string) string {

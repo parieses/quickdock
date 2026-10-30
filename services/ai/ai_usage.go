@@ -2,7 +2,7 @@ package ai
 
 // 用量采集。
 //
-// 一条链路只能记一次，所以记录点放在**每个入口**（对话流 / 一次性问 / 标题 / 摘要），
+// 一条链路只能记一次，所以记录点放在每个入口（对话流 / 一次性问 / 标题 / 摘要），
 // 而不是塞进 streamAIChat 里——那条函数同时被「带会话的对话」和「SSH 面板的一次性
 // 提问」调用，塞进去就拿不到正确的 kind，也没法区分有会话与无会话。
 //
@@ -28,7 +28,7 @@ const (
 //   - OpenAI / 大多数兼容网关：prompt_tokens_details.cached_tokens
 //   - DeepSeek：另给 prompt_cache_hit_tokens（没有 details 结构）
 //
-// 两者是**同一份数据**，不能相加；谁有值用谁。
+// 两者是同一份数据，不能相加；谁有值用谁。
 type openAIUsage struct {
 	PromptTokens         int `json:"prompt_tokens"`
 	CompletionTokens     int `json:"completion_tokens"`
@@ -88,7 +88,7 @@ func addTokenUsage(a, b db.TokenUsage) db.TokenUsage {
 	}
 }
 
-// recordAIChatTurn 记录多轮工具循环里的**一轮**模型调用。
+// recordAIChatTurn 记录多轮工具循环里的一轮模型调用。
 //
 // 与 recordAIUsage 的唯一差别在会话行：
 //   - 明细（ai_usage）每轮一行 —— 那是真实的多次计费，少记就会系统性低估花费；

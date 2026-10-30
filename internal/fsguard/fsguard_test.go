@@ -16,7 +16,7 @@ func TestResolveWriteJoinsCwd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("绑定工作目录后应可写: %v", err)
 	}
-	// 期望值是**解引用后**的目录：Windows 上 t.TempDir() 给的是 8.3 短名
+	// 期望值是解引用后的目录：Windows 上 t.TempDir() 给的是 8.3 短名
 	// （C:\Users\MR12C5~1.LIA\…），而白名单里的根都会展开成长名。这条不写明，
 	// 换台机器跑就会以为「路径补全错了」——实际是比对对象没对齐。
 	realDir, rerr := filepath.EvalSymlinks(dir)

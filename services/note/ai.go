@@ -17,7 +17,7 @@ import (
 // 浮窗要不要隐藏、主窗口要不要聚焦、事件到达时 AI 页是否已挂载，
 // 任何一环出岔子都表现为"点了没反应"，且各窗口的 JS 状态互不可见，很难查。
 //
-// 现在改成和 SSH / 剪贴板一致的**就地提问**：浮窗里直接弹出面板，
+// 现在改成和 SSH / 剪贴板一致的就地提问：浮窗里直接弹出面板，
 // 上下文（划选文本或整篇笔记）随请求走，一次调用拿回答案。
 // 只保留"不落库"这条性质——笔记问的是一次性问题，不该进 AI 对话历史。
 
@@ -164,7 +164,7 @@ func (s *NoteService) AskAI(req NoteAiAskRequest) *services.ApiResult {
 // 模型注意力落在末尾，而 AIAsk 超预算时从头截断，末尾最先被砍，
 // 所以这里的预算分配必须自己算（见 aiutil.BuildPrompt）。
 //
-// 正文保留**头部**而不是尾部：笔记的开头通常是标题与结论，
+// 正文保留头部而不是尾部：笔记的开头通常是标题与结论，
 // 与日志/终端（最新内容在末尾）正好相反。这也是它不能用
 // 剪贴板那套 keepTail 的原因。
 func buildNoteAiPrompt(text, action, question string, history []string) string {
@@ -181,7 +181,7 @@ func buildNoteAiPrompt(text, action, question string, history []string) string {
 		})
 	}
 
-	// 动作指令与用户提问**组合**而不是二选一：
+	// 动作指令与用户提问组合而不是二选一：
 	// 追问（"再短一点"）时只带用户那句，模型就不知道当前在做什么。
 	var parts []string
 	if p, ok := noteAiActionPrompt[action]; ok {

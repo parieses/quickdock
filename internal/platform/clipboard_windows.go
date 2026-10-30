@@ -118,7 +118,7 @@ const ClipboardOwnerProbeTimeoutMs uint32 = 200
 //
 // 【为什么所有读路径都必须走这里】
 // GetClipboardData 对延迟渲染格式会同步 SendMessage(WM_RENDERFORMAT) 到 owner，
-// 没有超时。owner 一旦卡死，调用线程就永久停在这一行——而它此时**正持有剪贴板**，
+// 没有超时。owner 一旦卡死，调用线程就永久停在这一行——而它此时正持有剪贴板，
 // 于是全系统所有程序的复制都开始返回 ERROR_ACCESS_DENIED，本程序自己的捕获也
 // 再也打不开剪贴板。表现就是「用着用着就复制不了了，重启才恢复」。
 //
@@ -143,7 +143,7 @@ func WithClipboardRead(hwnd uintptr, fn func()) (executed bool) {
 
 // ClipboardProbe 探测剪贴板当前是否可打开：打开后立刻关闭，不读任何内容。
 //
-// 只做**一次**尝试（不像 openClipboardWithRetry 那样退避 150ms）——这是周期性
+// 只做一次尝试（不像 openClipboardWithRetry 那样退避 150ms）——这是周期性
 // 健康检查，不能自己长时间占着剪贴板。返回 false 说明有别的进程正锁着它：
 // 此时系统里所有程序的「复制」都会失败，本程序的捕获也拿不到任何通知。
 func ClipboardProbe() bool {
@@ -162,7 +162,7 @@ var (
 	procGetClassNameW          = modUser32.NewProc("GetClassNameW")
 )
 
-// ClipboardHolderInfo 描述当前**锁住剪贴板**的进程，供探测失败的日志直接指名占用者。
+// ClipboardHolderInfo 描述当前锁住剪贴板的进程，供探测失败的日志直接指名占用者。
 //
 // 【能查到什么】
 // GetOpenClipboardWindow 返回持有剪贴板打开锁的窗口，再经 GetWindowThreadProcessId
@@ -174,7 +174,7 @@ var (
 // 本函数返回空串。Windows 没有「列出谁打开了剪贴板」的反向查询 API，剪贴板也不是内核
 // 句柄对象（Process Explorer 之类的句柄搜索同样找不到），这种情况只能从现象侧排查。
 //
-// 必须在 OpenClipboard 失败**之后**调用：本进程一旦成功打开，查到的就是自己。
+// 必须在 OpenClipboard 失败之后调用：本进程一旦成功打开，查到的就是自己。
 // 另注意与 GetClipboardOwner 区分——后者是「剪贴板内容的所有者」，正常状态也非 0，
 // 拿它当占用者会一直误报（实测常见值是浏览器的消息窗口）。
 func ClipboardHolderInfo() string {
@@ -251,7 +251,7 @@ type clipboardFormat struct {
 	handle w32.HANDLE
 }
 
-// writeClipboardFormats 在**同一次**剪贴板会话里写入多个格式（EmptyClipboard 只做一次）。
+// writeClipboardFormats 在同一次剪贴板会话里写入多个格式（EmptyClipboard 只做一次）。
 //
 // 多格式必须一次写完：分成两次会话时，后一次的 EmptyClipboard 会把前一次刚写的
 // 格式冲掉。剪贴板历史里「复制的是图片文件」的条目就踩过这条——先写 CF_HDROP
@@ -326,7 +326,7 @@ func SetClipboardFiles(hwnd uintptr, paths []string) error {
 // SetClipboardText 把纯文本写入系统剪贴板（CF_UNICODETEXT），返回是否成功。
 //
 // 不复用 wails 的 app.Clipboard.SetText：那条路径经 InvokeSyncWithResult 把写入
-// 调度到主线程**同步**执行，而它内部的 waitOpenClipboard 最多自旋 1 秒——剪贴板被
+// 调度到主线程同步执行，而它内部的 waitOpenClipboard 最多自旋 1 秒——剪贴板被
 // 别的程序占住时，主线程（热键、托盘、浮窗都在这条线程上）会跟着卡住；它的
 // UTF16FromString 失败分支还会在已 EmptyClipboard 之后直接 return，把剪贴板留在
 // 打开状态。自有路径与文件/图片写入共用 WithClipboard，是所有剪贴板临界区的唯一入口。
@@ -435,8 +435,8 @@ const (
 //
 // 【为什么必须存在：GetClipboardData 会同步等一个卡死的进程】
 // 剪贴板里的格式可以「延迟渲染」——程序只登记格式，真正数据等别人来取时才现做。
-// 此时 GetClipboardData 会 **SendMessage(WM_RENDERFORMAT) 到 owner 窗口**，这是
-// 同步且**没有超时**的等待。owner 进程一旦卡住（无响应窗口、调试器挂起、正在
+// 此时 GetClipboardData 会 SendMessage(WM_RENDERFORMAT) 到 owner 窗口，这是
+// 同步且没有超时的等待。owner 进程一旦卡住（无响应窗口、调试器挂起、正在
 // 退出的程序），调用方就永久卡在 GetClipboardData 里。
 //
 // 对我们来说这是致命的：调用发生在 WithClipboard 的临界区内，于是剪贴板一直被
@@ -444,7 +444,7 @@ const (
 // WM_CLIPBOARDUPDATE），本程序的捕获协程也永久不再前进。用户看到的两件事
 // 「复制没反应」和「历史里没有最新内容」其实是同一个死锁。
 //
-// 必须在**调用 GetClipboardData 之前**（剪贴板已打开状态下）用本函数探测 owner：
+// 必须在调用 GetClipboardData 之前（剪贴板已打开状态下）用本函数探测 owner：
 // 不响应的窗口一律跳过本次读取并立刻 CloseClipboard，宁可丢这一次，也不能锁死。
 //
 // 返回 true 表示可以安全读取（含无 owner 的情形）。

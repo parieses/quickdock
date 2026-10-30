@@ -79,21 +79,21 @@ type Registrar interface {
 
 // Global 进程内唯一注册表，由 Default 服务与面板共用。
 //
-// 里面只放**QuickDock 自身能力**（环境、文件、快捷项、笔记、待办、剪贴板、诊断、
+// 里面只放QuickDock 自身能力（环境、文件、快捷项、笔记、待办、剪贴板、诊断、
 // 定时、监控、插件）。这是对外契约的一部分：客户端接上我们的 MCP，拿到的应该
 // 是「这个软件能干什么」，而不是又一套通用文件读写与终端。
 var Global Registrar = globalRegistrar{}
 
 // Agent 内置 AI 专用工具的注册表（实现在 services/ai/tools）。
 //
-// 为什么是**另一个注册表**而不是同一张表加个标志位：这两批工具的归属不同。
+// 为什么是另一个注册表而不是同一张表加个标志位：这两批工具的归属不同。
 // Global 的内容是产品对外的能力清单，Agent 的内容是「AI 和你在某个目录里干活时
 // 顺手要用的东西」（抓网页、读目录、看 git、改文件、跑命令）。放在一起时，
 // 「新增一个 agent 工具」和「新增一个对外工具」长得一模一样，迟早有人把写文件的
 // 能力顺手注册进对外清单；分成两个注册表后，注册处写 Global 还是 Agent 这件事本身
 // 就说明了归属。
 //
-// 等级门与单工具开关**是共用的**（maxLvl / disabled 只有一份）：面板里关掉
+// 等级门与单工具开关是共用的（maxLvl / disabled 只有一份）：面板里关掉
 // file_edit，内置 AI 也就改不了文件，不存在「关了但 AI 还能用」的第二套权限。
 var Agent Registrar = agentRegistrar{}
 
@@ -218,7 +218,7 @@ func List() []toolDefinition {
 
 // AIFunction 一条给模型 function calling 用的工具规格。
 //
-// 只带 OpenAI tools[] 需要的三样：等级与开关在 ExposedFunctions 里**已经应用过**，
+// 只带 OpenAI tools[] 需要的三样：等级与开关在 ExposedFunctions 里已经应用过，
 // 模型不该看到「有个工具但你没资格」——那只会让它反复尝试并浪费一轮 token。
 // 与 toolDefinition 的区别：这个类型是导出的，供 services/ai 跨包使用。
 type AIFunction struct {
@@ -291,7 +291,7 @@ type ToolInfo struct {
 	// 这两者的补救动作不同（重新开启 vs 调等级）。
 	Disabled bool
 	// Exposed 等级与单工具开关都通过，且属于 Global 注册表——
-	// 也就是 **MCP 客户端**实际能看到。agent 工具恒为 false。
+	// 也就是 MCP 客户端实际能看到。agent 工具恒为 false。
 	Exposed bool
 	// AgentOnly 只给内置 AI 用。面板要把这类工具标出来，
 	// 否则用户会以为「我在面板里关掉的东西，外部客户端也在用」。
@@ -476,7 +476,7 @@ func ArgBool(args map[string]any, key string) bool {
 // Cwd 取宿主注入的会话工作目录。
 //
 // 这个键由 AI 服务在调工具前塞进参数（见 services/ai 的 runToolCalls），
-// **不在任何工具的 schema 里**——模型看不见它，也就无从伪造；即使它自己塞一个
+// 不在任何工具的 schema 里——模型看不见它，也就无从伪造；即使它自己塞一个
 // _cwd，也会被宿主覆盖。MCP 客户端与手动调用时该键不存在，走原有的绝对路径逻辑。
 func Cwd(args map[string]any) string {
 	return strings.TrimSpace(Arg(args, "_cwd"))

@@ -93,7 +93,7 @@ var (
 	procDestroyMenu     = user32.NewProc("DestroyMenu")
 
 	// 窗口吸附（snap_windows.go）用。
-	// 注意这里**不用** WindowFromPoint：覆盖层铺满整个虚拟桌面且是 topmost，
+	// 注意这里不用 WindowFromPoint：覆盖层铺满整个虚拟桌面且是 topmost，
 	// WindowFromPoint 永远只会返回覆盖层自己。只能自己按 z 序从顶往下试。
 	procGetTopWindow           = user32.NewProc("GetTopWindow")
 	procGetWindow              = user32.NewProc("GetWindow")
@@ -392,7 +392,7 @@ type rectStruct struct{ Left, Top, Right, Bottom int32 }
 //
 // 局部提交的实测契约（见 2026-10-19 的探针记录）：
 //   - DwFlags 必须带 ulwExNoResize，否则 psize 会把窗口改成脏区大小；
-//   - PptDst/Psize 仍然**必须**填窗口的完整位置与尺寸，置 nil 会导致调用成功
+//   - PptDst/Psize 仍然必须填窗口的完整位置与尺寸，置 nil 会导致调用成功
 //     但画面不更新（返回值照样是 TRUE，非常坑）；
 //   - PrcDirty 用客户区坐标，只有这块会被搬运，其余像素保持原样。
 type updateLayeredWindowInfo struct {

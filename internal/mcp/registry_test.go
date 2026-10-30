@@ -58,7 +58,7 @@ func TestCatalogIncludesBlockedTools(t *testing.T) {
 	}
 }
 
-// TestCallRespectsMaxLevel 锁定等级门在**执行路径**上也生效。
+// TestCallRespectsMaxLevel 锁定等级门在执行路径上也生效。
 //
 // 插件经 host.mcp.call 复用 Call，安全边界完全落在这里：tools/list 隐藏高危工具
 // 只是「不告诉调用方」，而 Call 才是真正的拒绝点。只测 tools/list 会漏掉

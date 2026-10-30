@@ -17,7 +17,7 @@ import (
 
 // 本文件提供 Windows 伪控制台（ConPTY）拉起子进程的能力。
 //
-// 背景：少数 Windows 控制台程序会检测自己的 stdout/stderr 是否为「真实控制台句柄」，
+// 少数 Windows 控制台程序会检测自己的 stdout/stderr 是否为「真实控制台句柄」，
 // 一旦被重定向到管道或文件就立刻自行退出（exit code 0、无任何输出）。
 // 典型是 adamyg 版 memcached_service.exe 的 "-d run" 非服务模式：
 // 走 exec.Cmd 的 StdoutPipe/StderrPipe 时 48ms 内就退出，导致服务「启动即关闭」。

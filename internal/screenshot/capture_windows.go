@@ -20,7 +20,7 @@ func VirtualDesktopBounds() Rect {
 
 // monitorFromPoint 返回屏幕坐标点 (x, y) 所在显示器的句柄；失败返回 0。
 //
-// MonitorFromPoint 的 POINT 是**按值**传入的，x64 下 8 字节的结构体走单个寄存器，
+// MonitorFromPoint 的 POINT 是按值传入的，x64 下 8 字节的结构体走单个寄存器，
 // 因此这里把 x / y 打包成一个 uintptr：低 32 位 x、高 32 位 y（小端）。
 func monitorFromPoint(x, y int) uintptr {
 	h, _, _ := procMonitorFromPoint.Call(
@@ -57,7 +57,7 @@ func monitorWork(hmon uintptr) (Rect, bool) {
 // 实现上用 CreateDIBSection 建目标位图：BitBlt 直接把像素落进我们持有的内存，
 // 省掉 GetDIBits 的二次拷贝，4K 双屏下能少一次几十 MB 的搬运。
 //
-// 返回的 Bitmap **直接引用 DIB section 的内存**，不再 copy 到 Go 堆（见 Bitmap.release）。
+// 返回的 Bitmap 直接引用 DIB section 的内存，不再 copy 到 Go 堆（见 Bitmap.release）。
 // 这对 4K 尤其重要：整屏 33MB，原来的 make+copy 等于白付一次分配、一次 33MB 拷贝，
 // 而且新页未触碰，随后补 alpha / 暗化再遍历时又要逐页缺页。线上 4K 机器首次会话
 // 「补 alpha」213ms、稳态 12.6ms，差的就是这批缺页。

@@ -49,7 +49,7 @@ type SshService struct {
 
 	// owners 记录「会话 → 主机 ID」。
 	//
-	// 生命周期比连接池**故意更长**：连接断了会话还要留着供回放，
+	// 生命周期比连接池故意更长：连接断了会话还要留着供回放，
 	// 所以主人映射必须活到用户主动关闭会话为止。
 	// 否则窗口重开后 ListSessions 会给出一堆认不出主人的孤儿 sessionId。
 	ownerMu sync.Mutex

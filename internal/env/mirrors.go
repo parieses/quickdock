@@ -20,7 +20,7 @@ import (
 //	pip      → %APPDATA%\pip\pip.ini（Windows）/ ~/.config/pip/pip.conf
 //	Composer → %APPDATA%\Composer\config.json 的 repositories.packagist
 //
-// 入口挂在**各自运行时的操作菜单**下（Node→npm、Python→pip、PHP→composer），
+// 入口挂在各自运行时的操作菜单下（Node→npm、Python→pip、PHP→composer），
 // 而不是集中成一个全局「一键开启四项」的开关：用户真正要加速的通常是某一个包管理器，
 // 一刀切会把不相关的配置文件全改一遍，也不容易看清每一项当前是什么状态。
 //
@@ -97,7 +97,7 @@ func MirrorApplyFor(key string, enable bool) (MirrorState, error) {
 //
 // Go 的镜像写入比其它三项复杂，根因是 QuickDock 自己会给每个 Go 版本注入
 // GOENV=<版本目录>/gopath/env（见 go.go 的 goVersionEnv）。GOENV 一旦存在，
-// **用户级 go.env 就被该文件整体取代**，于是出现两处错位：
+// 用户级 go.env 就被该文件整体取代，于是出现两处错位：
 //   - 一键镜像若只写用户级 go.env，对已装托管版本毫无效果（界面说开了，go 其实没读到）；
 //   - 用户在「配置环境变量」里改的单版本 GOPROXY 也不会进用户级，镜像面板读不到，
 //     显示「未开启」，两边读数打架。
@@ -147,7 +147,7 @@ func runGoEnvAt(bin, envFile string, args ...string) (string, error) {
 
 // goMirrorTargets 枚举需要同步的 Go 目标。
 //
-// 只要有 QuickDock 托管的版本，就**不再**动用户级 go.env：多版本下写用户级既不会被
+// 只要有 QuickDock 托管的版本，就不再动用户级 go.env：多版本下写用户级既不会被
 // 版本专属文件采纳，又会让「界面显示已开启、实际未生效」的错觉重现。
 // 一个托管版本都没有（用户只用系统 go）时才退回到用户级。
 func goMirrorTargets() []goTarget {

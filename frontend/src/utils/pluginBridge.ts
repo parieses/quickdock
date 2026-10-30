@@ -12,7 +12,7 @@
 // - qdReadFile(path): Promise<{type:'text',content:string}|{type:'dataurl',content:string}|null>
 //     读取 qdPickFile 选中的文件内容；文本→原文，图片/二进制→dataURL。失败/取消返回 null。
 // - qdHostCall(method, params): Promise<any> —— 通用宿主代发。iframe 内 fetch 受 CORS
-//     拦死，且拿不到任何宿主能力；本函数把调用转给宿主前端，再由宿主按**当前插件身份**
+//     拦死，且拿不到任何宿主能力；本函数把调用转给宿主前端，再由宿主按当前插件身份
 //     走与 native / goja 完全相同的 Host Method 注册表。method 如 'host.mcp.call' /
 //     'http.get' / 'host.clipboard.read' / 'db.set'。失败 reject Error(msg)。
 //     新增宿主能力无需再改前端桥，直接用本函数。
@@ -25,7 +25,7 @@
 //     为什么需要单独一个函数：流式要求「边生成边推」，而 qdHostCall 是一次性 Promise，
 //     拿不到中间态。桥内由本函数自己生成 streamId，宿主按它把增量投递回来。
 // - qdPrint(opts): Promise<true> —— 系统打印。opts: { html, page? }。
-//     html 是**一份完整的打印文档字符串**（自带全部 CSS），宿主会在顶层文档里渲染后再
+//     html 是一份完整的打印文档字符串（自带全部 CSS），宿主会在顶层文档里渲染后再
 //     调 window.print()。为什么不能在插件里直接 window.print()：WebView2 / Chromium 的
 //     打印只作用于顶层文档，iframe 内调用打印的是整个 QuickDock 应用（暗色外壳），
 //     纸面内容不在打印上下文里 —— 结果就是「打印出来一张白纸」。page 传 'A4' 等

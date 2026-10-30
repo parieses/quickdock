@@ -9,24 +9,17 @@ import (
 
 // ---- 进程结束权限（目标进程白名单）----
 //
-// permissions.processKill 支持两种写法：
+// permissions.processKill 接受两种写法：
 //
 //	"processKill": true                    允许结束任意非系统关键进程
 //	"processKill": ["chrome", "code.exe"]  仅允许结束白名单内的进程
 //
-// 为什么需要白名单：
-// sysutil.KillProcess 已经挡住了 OS 关键进程（system / csrss / svchost / explorer…），
-// 但那只是「不会把系统搞崩」的底线。声明了 processKill: true 的插件依然可以
-// 结束用户正在用的浏览器、编辑器、微信——对用户来说这同样是不可接受的破坏。
-// 白名单把「允许砍谁」的决定权交还给插件清单，与 process 的程序名白名单同构。
+// sysutil.KillProcess 已挡住 OS 关键进程，但那只是「系统不会崩」的底线。声明了
+// true 的插件仍能结束用户正在用的浏览器、编辑器、微信，这对用户同样是破坏。
+// 白名单把「允许砍谁」交还给清单，与 process 的程序名白名单同构。
 //
-// 兼容性：历史上 processKill 是裸 bool。本结构用 UnmarshalJSON 同时接受
-// bool 与数组两种写法，旧清单无需改动；空数组等价于 false（未声明任何目标）。
-//
-// 与 process 权限的区别（详见 procperm.go）：
-//   - process     是「启动」新进程，程序名白名单约束将要跑的程序；
-//   - processKill 是「结束」已有进程，白名单约束将要被砍的进程。
-// 两者互不替代，需分别声明。
+// 兼容：历史上是裸 bool，用 UnmarshalJSON 同时接受 bool 与数组，旧清单不用改；
+// 空数组等价于 false。与 process 的区别是一个「启动」一个「结束」，互不替代。
 
 // ProcessKillPerm 进程结束权限
 type ProcessKillPerm struct {
@@ -97,7 +90,7 @@ func (p ProcessKillPerm) Validate() error {
 //   - 不支持通配：一旦支持 "*.exe"，白名单就等于失效。
 //
 // 为什么路径形式也只比 basename：
-// 这里的目标不是「即将执行的程序路径」，而是从 tasklist 拿到的**进程镜像名**
+// 这里的目标不是「即将执行的程序路径」，而是从 tasklist 拿到的进程镜像名
 // （如 "chrome.exe"），拿不到完整路径。因此绝对路径条目无法做精确比对，
 // 只保留「写完整路径的人本意是限定那个程序」这一语义，退化为 basename 匹配。
 // 需要真正的路径级限制，应改用 process 权限（那边比对的是 exec.Command 的实参）。

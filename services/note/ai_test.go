@@ -8,8 +8,8 @@ import (
 )
 
 // 笔记 prompt 的行为约束与 SSH / 剪贴板一致（装配逻辑已收敛到 aiutil.BuildPrompt），
-// 这里测的是本域自己的取舍：正文保留**头部**（笔记开头是标题与结论）、
-// 动作指令与追问要**组合**、指令永远在最后。
+// 这里测的是本域自己的取舍：正文保留头部（笔记开头是标题与结论）、
+// 动作指令与追问要组合、指令永远在最后。
 func TestBuildNoteAiPrompt_Basic(t *testing.T) {
 	got := buildNoteAiPrompt("今天评审了白板的协作协议", NoteAiSummarize, "", nil)
 
@@ -39,7 +39,7 @@ func TestBuildNoteAiPrompt_ActionAndQuestionCombine(t *testing.T) {
 }
 
 func TestBuildNoteAiPrompt_KeepsHead(t *testing.T) {
-	// 笔记与日志相反：开头是标题/结论，超长时保留**头部**。
+	// 笔记与日志相反：开头是标题/结论，超长时保留头部。
 	long := "HEAD" + strings.Repeat("x", noteAiTextMaxRune+800) + "TAIL"
 	got := buildNoteAiPrompt(long, NoteAiSummarize, "", nil)
 

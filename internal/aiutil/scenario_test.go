@@ -207,9 +207,9 @@ func TestExtractSegments_KeepsMarkdownInText(t *testing.T) {
 
 // realModelOutput 是用本机真实档案（agnes-2.5-flash）实际调用一次拿到的原始返回。
 //
-// 把它固化成样本的原因：真实模型的输出形态（行内代码、**加粗**、编号列表、
+// 把它固化成样本的原因：真实模型的输出形态（行内代码、加粗、编号列表、
 // 多个围栏块交错）比构造用例更"脏"，旧实现的三个问题只有在这份原文上才暴露：
-// 正文中间出现 3~4 行连续空白、**加粗** 显示成星号、围栏未闭合时命令整条消失。
+// 正文中间出现 3~4 行连续空白、加粗 显示成星号、围栏未闭合时命令整条消失。
 const realModelOutput = "命令 `netstat -tlnp | grep 80` 没有任何输出，说明**当前没有进程在监听 TCP 80 端口**。\n" +
 	"\n" +
 	"可能的原因：\n" +
@@ -301,7 +301,7 @@ func TestExtractCommands_ShellPromptPrefix(t *testing.T) {
 
 func TestExtractCommands_PromptRescueBoundaries(t *testing.T) {
 	// 兜底回扫（把 `# ` 当 root 提示符）是一条危险的放宽：
-	// 放错方向就会**把注释变成命令**，用户一键填入的是一段中文说明。
+	// 放错方向就会把注释变成命令，用户一键填入的是一段中文说明。
 	// 下面四条是这个放宽必须守住的边界，每条都对应一种"放错就出事"的形态。
 	cases := []struct {
 		name string
@@ -356,7 +356,7 @@ func TestEvalRisk(t *testing.T) {
 
 func TestEvalRisk_HighestLevelWins(t *testing.T) {
 	// 回归：规则表是分批追加的，书写顺序不构成优先级。
-	// 一条命令同时命中多条规则时必须取**最高等级**，否则后来追加的
+	// 一条命令同时命中多条规则时必须取最高等级，否则后来追加的
 	// 中等规则会把先写的高危规则"降级"，界面上就少了一道拦截。
 	rules := RiskRules{
 		{Pattern: mustRe(`\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*f`), Level: "high", Note: "递归强制删除，不可恢复"},

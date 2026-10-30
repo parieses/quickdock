@@ -47,10 +47,10 @@ type shFileOpStructW struct {
 // moveToTrash 用 SHFileOperationW + FOF_ALLOWUNDO 把路径移入回收站。
 //
 // 两个必须在调用前挡掉的坑：
-//  1. **FOF_ALLOWUNDO 不是在所有卷上都成立。** 可移动介质、网络驱动器、光驱上的
+//  1. FOF_ALLOWUNDO 不是在所有卷上都成立。可移动介质、网络驱动器、光驱上的
 //     删除会被直接执行且不可恢复——只靠这个标志，插件以为进了回收站，实际已永久丢失。
 //     所以先查卷类型，这些卷直接拒绝。
-//  2. **SHFileOperationW 不接受 \\?\ 长路径前缀**，超长路径会失败而不是走长路径分支，
+//  2. SHFileOperationW 不接受 \\?\ 长路径前缀，超长路径会失败而不是走长路径分支，
 //     因此超过 MAX_PATH(260) 时明确报错，不留一个「静默失败」的窗口。
 func moveToTrash(abs string) error {
 	switch driveTypeOf(abs) {
@@ -62,7 +62,7 @@ func moveToTrash(abs string) error {
 		return fmt.Errorf("拒绝删除 %s：路径长度 %d 超过 MAX_PATH，无法安全移入回收站", abs, n)
 	}
 
-	// pFrom 是 PCZZWSTR：必须以**两个** NUL 结尾。不能用 UTF16PtrFromString——
+	// pFrom 是 PCZZWSTR：必须以两个 NUL 结尾。不能用 UTF16PtrFromString——
 	// 它拒绝含 NUL 的字符串，且只补一个结尾。
 	buf := append(utf16.Encode([]rune(abs)), 0, 0)
 	from := &buf[0]

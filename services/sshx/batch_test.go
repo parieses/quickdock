@@ -125,7 +125,7 @@ func TestSshBatchRunRejectsBadInput(t *testing.T) {
 
 // trustTestServer 建一台指向本地测试服务端的主机并完成指纹信任。
 //
-// 顺序不能颠倒：批量执行**不会**自动信任未知指纹（与终端/SFTP 一致），
+// 顺序不能颠倒：批量执行不会自动信任未知指纹（与终端/SFTP 一致），
 // 未信任时结果行的错误码是 CodeHostKeyUnknown，命令一条都跑不了。
 func trustTestServer(t *testing.T, svc *SshService, name string) *db.SshHost {
 	t.Helper()

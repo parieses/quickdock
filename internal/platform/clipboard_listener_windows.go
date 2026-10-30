@@ -46,7 +46,7 @@ var (
 
 // ClipboardSequenceNumber 返回系统剪贴板序号：每次有程序写入/清空剪贴板都会递增。
 //
-// 它是「剪贴板内容到底变没变」的唯一可靠判据，且**不需要 OpenClipboard**——
+// 它是「剪贴板内容到底变没变」的唯一可靠判据，且不需要 OpenClipboard——
 // 因此可以在监听器失效（WM_CLIPBOARDUPDATE 收不到）时用来兜底补抓。
 // 返回 0 表示不可用（非 Windows 平台，或系统拒绝）。
 func ClipboardSequenceNumber() uint32 {
@@ -175,7 +175,7 @@ func runClipboardListener(onChange func(), ready chan struct{}) {
 
 	// 消息泵真正退出时才复位运行标记，使 Stop→Start 的重启得以成立。
 	defer listenerRunning.Store(false)
-	// ready 必须在**任何**退出路径上关闭，否则 Stop 会白等一个超时才继续。
+	// ready 必须在任何退出路径上关闭，否则 Stop 会白等一个超时才继续。
 	closeReady := sync.OnceFunc(func() { close(ready) })
 	defer closeReady()
 

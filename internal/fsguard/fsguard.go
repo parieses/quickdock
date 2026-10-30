@@ -5,12 +5,12 @@
 // 「用户有没有授权这个位置」，各写一份的结果是两边迟早给出不同的根目录，于是出现
 // 「能读却改不了同一个文件」这种最难向用户解释的状态。
 //
-// **两套白名单的差别是刻意设计的，不要为了「一致」把它们合并：**
+// 两套白名单的差别是刻意设计的，不要为了「一致」把它们合并：
 //
 //   - 读（ReadRoots）：家目录 + 数据目录 + 快捷项里登记的目录/工作目录。
 //     用户让 AI 看一眼某个文件是很自然的诉求，拦掉会逼他去复制粘贴。
 //   - 写（WriteRoots）：只有用户显式登记过的位置（快捷项目录、工作目录），再加
-//     本次对话绑定的工作目录，**家目录被故意排除**。否则一句话就能改掉
+//     本次对话绑定的工作目录，家目录被故意排除。否则一句话就能改掉
 //     ~/Documents 里的任何东西，而用户从未做过「允许写这里」的动作。
 package fsguard
 
@@ -117,7 +117,7 @@ func ResolveRead(database *db.Database, raw, cwd string, mustBeFile bool) (strin
 		abs, strings.Join(roots, "、"))
 }
 
-// ResolveWrite 解析并校验一个**可写**的路径。raw 为空时回落到对话工作目录。
+// ResolveWrite 解析并校验一个可写的路径。raw 为空时回落到对话工作目录。
 func ResolveWrite(database *db.Database, raw, cwd string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		raw = cwd
@@ -146,7 +146,7 @@ func ResolveWrite(database *db.Database, raw, cwd string) (string, error) {
 
 // clean 展开 ~、补全相对路径、转绝对、清理并解引用符号链接。
 //
-// 解引用必须在判白名单**之前**：反过来，家目录里一个指向系统目录的软链就能绕过整个白名单。
+// 解引用必须在判白名单之前：反过来，家目录里一个指向系统目录的软链就能绕过整个白名单。
 func clean(raw, cwd string) (string, error) {
 	p := strings.Trim(strings.TrimSpace(raw), `"`) // 从资源管理器复制来的路径常带引号
 	if p == "" {
@@ -170,7 +170,7 @@ func clean(raw, cwd string) (string, error) {
 	return expandExisting(abs), nil
 }
 
-// expandExisting 把路径里**已存在的那一段**解引用成真实路径，再把还不存在的尾段拼回去。
+// expandExisting 把路径里已存在的那一段解引用成真实路径，再把还不存在的尾段拼回去。
 //
 // 为什么不能只对整条路径 EvalSymlinks：目标文件常常还不存在（新建文件、写入前），
 // 一次解引用失败就退回原字符串，而白名单里的根目录都是解引用过的——
@@ -215,7 +215,7 @@ func ReadRoots(database *db.Database) []string {
 	return out
 }
 
-// WriteRoots 返回允许**写**的根目录：对话工作目录 + 快捷项登记的目录/工作目录。
+// WriteRoots 返回允许写的根目录：对话工作目录 + 快捷项登记的目录/工作目录。
 //
 // 与 ReadRoots 刻意不同（见包注释）：家目录与数据目录不在其中。
 func WriteRoots(database *db.Database, cwd string) []string {

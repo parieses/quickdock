@@ -27,7 +27,7 @@ const SchedulePage = defineAsyncComponent(() => import('../components/SchedulePa
 const MonitorPage = defineAsyncComponent(() => import('../components/MonitorPage.vue'))
 const AI_KEEP_ALIVE_NAME = 'AIPageKeepAlive'
 const AIPage = defineAsyncComponent(() => import('../components/AIPage.vue'))
-// 注意：**不能**在这里给 AIPage 赋 name 来对齐白名单。KeepAlive 判断异步组件时读的是
+// 注意：不能在这里给 AIPage 赋 name 来对齐白名单。KeepAlive 判断异步组件时读的是
 // `vnode.type.__asyncResolved`（内层 SFC 定义）的名字，外层包装器上的 name 无人问津。
 // 所以名字写在 AIPage.vue 的 defineOptions 里，这里只保留同一个常量做对照。
 const EnvironmentPage = defineAsyncComponent(() => import('../components/EnvironmentPage.vue'))

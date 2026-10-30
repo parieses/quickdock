@@ -3,7 +3,7 @@ import { unwrap } from './api'
 import { logErr } from './logger'
 
 /**
- * 写系统剪贴板 —— **全应用唯一入口**。
+ * 写系统剪贴板 —— 全应用唯一入口。
  *
  * 主路径是 Go 侧 `CopyText` → `platform.SetClipboardText`（Win32 CF_UNICODETEXT），
  * 它不依赖 WebView2 的安全上下文、文档焦点和用户激活，因此不会被 Chromium 静默拒绝。

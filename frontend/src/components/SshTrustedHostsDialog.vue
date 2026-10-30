@@ -114,7 +114,7 @@ async function copy(text: string) {
 }
 
 /**
- * addedAt 是 **Unix 毫秒**（Go 侧 `time.Now().UnixMilli()` 写入，与仓库其它表一致），
+ * addedAt 是 Unix 毫秒（Go 侧 `time.Now().UnixMilli()` 写入，与仓库其它表一致），
  * 直接喂 Date 即可。别再乘 1000 —— 那是把毫秒当秒，会算出公元 5 万年。
  * 空值显示 '-'，避免出现「1970 年」误导用户。
  */

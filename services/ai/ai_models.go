@@ -17,7 +17,7 @@ import (
 // AIFetchModelsRequest 拉取模型列表的入参。
 //
 // 直接带上 provider / baseURL / apiKey 而不是只给 profileID，是为了支持
-// **用户刚在编辑框里填好 BaseURL+Key、尚未保存** 就想看模型的场景——
+// 用户刚在编辑框里填好 BaseURL+Key、尚未保存 就想看模型的场景——
 // 此时库里还没有这份配置。ID 用于「Key 是回填掩码」时回退到库里解密后的 Key。
 type AIFetchModelsRequest struct {
 	ID       string `json:"id"`

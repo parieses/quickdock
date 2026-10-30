@@ -55,7 +55,7 @@ var trayIcoEmbed []byte
 
 // trayIconData 从内嵌 ICO 中抽出最适合作托盘小图标的一帧的资源载荷（PNG/DIB）。
 //
-// 背景：框架 w32.CreateSmallHIconFromImage 会把传入的整份 .ico（含 ICONDIR 头）
+// 框架 w32.CreateSmallHIconFromImage 会把传入的整份 .ico（含 ICONDIR 头）
 // 直接交给 Windows CreateIconFromResourceEx，而该 API 期望的是"去掉 ICONDIR 头的
 // 帧内资源数据"；整份文件传入会创建失败，并留下误导性的
 // "The operation completed successfully."（ERROR_SUCCESS 残留）警告。

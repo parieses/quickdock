@@ -9,7 +9,7 @@ export interface AIProfilesResult {
 }
 
 // AI 用量统计（对应 Go 端 services/ai.AIUsageStats）。
-// 金额单位是人民币元，且是**估算**：按内置价目表线性折算，不是账单。
+// 金额单位是人民币元，且是估算：按内置价目表线性折算，不是账单。
 export interface AICostEntry {
   key: string
   requests: number

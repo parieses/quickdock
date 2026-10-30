@@ -278,7 +278,7 @@ type PluginInfo struct {
 	InstalledAt string    `json:"installedAt,omitempty"`
 	UpdatedAt   string    `json:"updatedAt,omitempty"`
 	Commands    []Command `json:"commands"`
-	// Capabilities / Permissions 来自 manifest，供管理页做**已装插件的权限审计**。
+	// Capabilities / Permissions 来自 manifest，供管理页做已装插件的权限审计。
 	// 安装期 permcheck 只在装的那一刻拦一次，装完之后用户就再也看不到这插件能读什么、
 	// 能连哪些域名了；DB 里那份 permissions 是留痕，这里的才是运行期实际生效的声明。
 	Capabilities []string     `json:"capabilities"`

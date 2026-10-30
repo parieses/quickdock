@@ -51,7 +51,7 @@ func CapturePanic(label string) {
 	panic(r)
 }
 
-// RecoverToLog 以 defer 方式调用：记录 panic 后**不**重新抛出。
+// RecoverToLog 以 defer 方式调用：记录 panic 后不重新抛出。
 // 适用于 goroutine 内部（看门狗、巡检循环等），避免单个后台协程把宿主带崩。
 func RecoverToLog(label string) {
 	if r := recover(); r != nil {

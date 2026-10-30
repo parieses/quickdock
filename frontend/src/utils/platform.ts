@@ -5,7 +5,7 @@
  * 而前端过去直接读 `downloads.windows` —— Windows 上恰好读对，mac/linux 上
  * 「看得到、点不动」，`platforms` 声明形同虚设。
  *
- * 为什么不用后端传：这里只用于**选择下载地址**，一次读取就够；为它加一个
+ * 为什么不用后端传：这里只用于选择下载地址，一次读取就够；为它加一个
  * 服务方法会让每次渲染都多一趟 IPC。UA 判定在 WebView2 / WKWebView / WebKitGTK
  * 三种宿主里都稳定（分别含 Windows NT / Mac OS X / Linux）。
  */

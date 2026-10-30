@@ -127,7 +127,7 @@ func ResetAppsCache() {
 // 安全校验（拒绝 URL / shell 元字符 / 不存在的路径）为跨平台通用逻辑，
 // 实际的按扩展名启动策略由平台相关实现 launchAppPath 完成。
 //
-// 背景：Windows 上 Ctrl+K 启动的「已安装应用」原先直接走 windows.ShellExecute，
+// Windows 上 Ctrl+K 启动的「已安装应用」原先直接走 windows.ShellExecute，
 // 子进程未脱离 QuickDock 进程组，主程序重启/退出时会被一并带走；
 // 现由 windows 侧实现改为解析 .lnk → CreateProcess + sysutil.Detach 脱离启动。
 func LaunchApp(appPath string) error {

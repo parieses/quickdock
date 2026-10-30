@@ -3,7 +3,7 @@
  *
  * 关键断言：
  * 1. 增量渲染的结果 == 整段渲染的结果（任何时刻都不出现「内容变形」）
- * 2. 已完成块的 HTML 在后续帧中保持**同一字符串引用** —— Vue 的 patchElement
+ * 2. 已完成块的 HTML 在后续帧中保持同一字符串引用 —— Vue 的 patchElement
  *    对 innerHTML 只在值变化时赋值（见 @vue/runtime-core patchProps：
  *    `next !== prev` 才调 hostPatchProp），引用不变即不产生 DOM 写入。
  * 3. 块分裂（最后一块长大后变成两块）时，已完成块不会错位。

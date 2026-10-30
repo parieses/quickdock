@@ -217,7 +217,7 @@ func (d *Database) ListClipboardEntries(limit int) ([]ClipboardEntry, error) {
 	return scanClipboardEntries(rows)
 }
 
-// ListAllClipboardEntries 读取全部剪贴板条目（无 LIMIT），**仅供导出使用**。
+// ListAllClipboardEntries 读取全部剪贴板条目（无 LIMIT），仅供导出使用。
 //
 // 为什么单独开一个方法而不是把 MAX_CLIPBOARD_ROWS 调大：那个常量是「误用 limit=0
 // 时不要整表读内存」的护栏，导出是唯一确实需要全量的场景，把它做成显式命名的方法，

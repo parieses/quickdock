@@ -129,7 +129,7 @@ func writePHPConfig(dir string, patch PHPConfigPatch) error {
 	var out []string
 	hasDisable, hasErrorLog := false, false
 	for _, line := range lines {
-		// 仅丢弃**激活**的 extension 行（稍后统一按启用量重写）；
+		// 仅丢弃激活的 extension 行（稍后统一按启用量重写）；
 		// 注释的 ;extension= 模板行保留，避免改一次就把可用扩展清单注释弄丢。
 		if extLineRe.MatchString(line) && !commentLineRe.MatchString(line) {
 			continue

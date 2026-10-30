@@ -71,7 +71,7 @@ const editingItem = ref<CollectionItem | null>(null)
 
 // ---- 快速链接的 {query} 占位符 ----
 //
-// 命令面板会就地替换 {query}（useCommandSearch 内联那几行），但**从列表直接点**
+// 命令面板会就地替换 {query}（useCommandSearch 内联那几行），但从列表直接点
 // 走的是 store.openItem → 后端 execOpen → expandItemVars，而它只认
 // {date}/{time}/{username}/{clipboard}，{query} 会原样留在 URL 里 → 打开必然 404。
 // 这里在点击时先问一句，把值编码后拼进去再交给后端；模板本身不改。

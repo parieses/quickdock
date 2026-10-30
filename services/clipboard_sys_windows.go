@@ -32,7 +32,7 @@ func globalSize(h uintptr) uintptr {
 
 // clipboardSnapshot 一次剪贴板变更的原始内容快照。
 //
-// 三个字段都是**已经拷进 Go 堆内存的副本**，因此拿到快照后即可立刻 CloseClipboard。
+// 三个字段都是已经拷进 Go 堆内存的副本，因此拿到快照后即可立刻 CloseClipboard。
 type clipboardSnapshot struct {
 	filePaths  []string
 	text       string
@@ -53,7 +53,7 @@ func (a *AppService) captureClipboard() {
 	}
 
 	hwnd := platform.ClipboardWindowHandle()
-	// 序号必须在**读取之前**取。读取期间别的程序写不进剪贴板（被我们占着），
+	// 序号必须在读取之前取。读取期间别的程序写不进剪贴板（被我们占着），
 	// 但万一发生，用读取前的旧序号标记已处理，兜底轮询还能发现并补抓一次。
 	seqBefore := platform.ClipboardSequenceNumber()
 	var snap clipboardSnapshot
@@ -83,11 +83,11 @@ func (a *AppService) captureClipboard() {
 	a.handleClipboardSnapshot(snap)
 }
 
-// readClipboardSnapshot 在剪贴板**已打开**的前提下读取内容快照。
+// readClipboardSnapshot 在剪贴板已打开的前提下读取内容快照。
 // 调用方必须用 platform.WithClipboard 包裹（本函数不负责 Open/Close）——
 // Open/Close 一旦被 Go 调度切到不同 OS 线程，剪贴板会被无限期锁死。
 //
-// 临界区纪律（这是本文件最重要的一条约束）：函数体内**只允许做内存拷贝**——
+// 临界区纪律（这是本文件最重要的一条约束）：函数体内只允许做内存拷贝——
 // 不解析 DIB、不做 PNG 编码、不查前台窗口标题、不碰数据库。
 // 剪贴板是全局独占资源，同一时刻只能被一个进程打开；临界区里多停留的每一毫秒，
 // 都会让别的程序的「复制」直接失败。而失败的复制不会产生 WM_CLIPBOARDUPDATE，
@@ -95,7 +95,7 @@ func (a *AppService) captureClipboard() {
 // 「复制得越多，后面复制的东西就越进不去剪贴板」。
 //
 // 【读取顺序按阻塞风险排，不是随手排的】
-// GetClipboardData 对**延迟渲染**格式会同步 SendMessage(WM_RENDERFORMAT) 到 owner
+// GetClipboardData 对延迟渲染格式会同步 SendMessage(WM_RENDERFORMAT) 到 owner
 // 窗口，而且没有超时。纯文本几乎总是「直接给内存」，文件/图片则常被延迟渲染。
 // 所以这里先读文本，并且只在确实需要时才去碰文件/图片格式：
 //   - 普通复制文字 → 只碰 CF_UNICODETEXT 一项，完全不接触可能阻塞的格式；
@@ -171,7 +171,7 @@ func readClipboardSnapshot(snap *clipboardSnapshot) {
 	}
 }
 
-// looksLikeFilePaths 判断文本形态是否**可能**是本地路径列表。
+// looksLikeFilePaths 判断文本形态是否可能是本地路径列表。
 //
 // 唯一用途是决定「要不要为它多读一次 CF_HDROP」，判错只会多读或少读一个格式，
 // 不会影响最终结果（真正的判定在 platform.IsFilePathsAsText）。所以这里只做

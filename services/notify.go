@@ -7,7 +7,7 @@ import (
 	"quickdock/internal/logger"
 )
 
-// PushNotification 是应用内通知的**唯一入口**。
+// PushNotification 是应用内通知的唯一入口。
 //
 // 为什么必须收口：通知有三个消费面——系统托盘气泡（notifications.SendNotification）、
 // 已配置机器人（sendWebhookNotify）、应用内通知中心（这张表 + notify:new 事件）。

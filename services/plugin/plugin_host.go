@@ -65,8 +65,8 @@ const (
 	// pluginAIStreamMaxBytes 单次流式下发到插件的增量总量上限。
 	//
 	// 为什么要设上限：native 插件若在等响应时不读 stdin（模板就是单线程循环），
-	// 管道写满会让 writeWithTimeout 超时并把实例标记成 writeBroken——那是**整条
-	// 通信链断掉**，代价远大于"流式体验没做好"。24 KiB 低于 Windows 管道默认
+	// 管道写满会让 writeWithTimeout 超时并把实例标记成 writeBroken——那是整条
+	// 通信链断掉，代价远大于"流式体验没做好"。24 KiB 低于 Windows 管道默认
 	// 64 KiB 缓冲，正常长度的回答触不到；超限后只停发增量，最终文本仍随响应返回。
 	pluginAIStreamMaxBytes = 24 << 10
 )
@@ -107,7 +107,7 @@ func (svc *PluginService) pluginShellPerm(pluginID string) plugin.ShellPerm {
 // 而插件 iframe 的窗口对象只有宿主前端持有（usePluginHost），Go 侧拿不到。
 // 于是路径是「Go → 宿主前端事件 → 当前插件 iframe」。
 //
-// 载荷里必须带 pluginId：事件是全局广播的，宿主前端据此只转发给**当前插件**，
+// 载荷里必须带 pluginId：事件是全局广播的，宿主前端据此只转发给当前插件，
 // 别的插件窗口收不到别人的模型输出。
 func (svc *PluginService) emitPluginAIDelta(pluginID, streamID, delta string) {
 	app := svc.App.App()
@@ -504,7 +504,7 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 			// StreamID 可选。非空即开启流式：宿主沿途下发增量，最终文本仍随响应返回。
 			//
 			// 用「有没有 streamId」而不是另开一个 host.ai.askStream 方法：
-			// 三条运行时（native / goja / web）的增量投递方式各不相同，但**请求语义相同**。
+			// 三条运行时（native / goja / web）的增量投递方式各不相同，但请求语义相同。
 			// 拆两个方法会让插件作者以为拿到了两套能力，实际只是同一件事的两个入口。
 			StreamID string `json:"streamId"`
 		}
@@ -753,7 +753,7 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 // 后续新增 host 方法前端无需再改。
 //
 // ⚠️ 安全约定：pluginID 由宿主侧状态给出（usePluginHost 的 opts.pluginId() 取自
-// 当前打开的插件），**绝不可从 iframe 的 postMessage payload 读取**，否则插件可冒充
+// 当前打开的插件），绝不可从 iframe 的 postMessage payload 读取，否则插件可冒充
 // 其它插件调用 db.* 越权读写。
 func (svc *PluginService) CallPluginHostMethod(pluginID, method, params string) *services.ApiResult {
 	if svc.App.PluginMgr == nil {

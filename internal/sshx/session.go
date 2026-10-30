@@ -34,7 +34,7 @@ const maxExecOutput = 1 << 20 // 1 MiB
 
 // ExecResult 一次命令执行的结果。
 //
-// 注意 ExitCode 与 error 的分工：命令以非零码退出是**正常结果**（`grep` 没匹配返回 1），
+// 注意 ExitCode 与 error 的分工：命令以非零码退出是正常结果（`grep` 没匹配返回 1），
 // 不当作 error；error 只表示「命令根本没跑完」——超时、断连、会话建立失败。
 type ExecResult struct {
 	Stdout    string

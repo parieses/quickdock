@@ -10,7 +10,7 @@ export interface ThemeControl {
 /**
  * 设置主题的权威消费入口。
  * App.vue 通过 provide('theme') 注入统一实现（含持久化与跨窗口广播）；
- * 此处仅做消费与兜底，避免在多个组件里重复实现主题写入逻辑（**不要引入第三份实现**）。
+ * 此处仅做消费与兜底，避免在多个组件里重复实现主题写入逻辑（不要引入第三份实现）。
  * 主题「当前解析值」的响应式读取请用 useThemeName。
  */
 export function useTheme(): ThemeControl {

@@ -16,7 +16,7 @@ import (
 
 // 插件命令的执行来源，落 plugin_exec_logs.trigger 与操作流水。
 //
-// 区分来源不是为了统计，是为了**事后能分清谁干的**：用户回看历史时，
+// 区分来源不是为了统计，是为了事后能分清谁干的：用户回看历史时，
 // 若 AI 触发的执行与手点的一样记成 manual，就永远查不出「这个插件为什么自己跑了」。
 const (
 	TriggerManual = "manual" // 面板/命令面板/插件界面点出来的
@@ -164,7 +164,7 @@ func (p *PluginService) recordPluginExecLog(pluginID, commandID, trigger string,
 	}
 
 	// 操作流水：与执行日志同源（同样已跳过 -status 轮询）。
-	// 这里要的是插件**显示名**，直接落到时间线上的是
+	// 这里要的是插件显示名，直接落到时间线上的是
 	// io.github.parieses.database 这种 id 等于没写。
 	name := pluginID
 	if p.App.PluginMgr != nil {

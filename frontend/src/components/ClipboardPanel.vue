@@ -199,7 +199,7 @@ const totalClipboardPages = computed(() =>
   Math.max(1, Math.ceil(filteredEntries.value.length / CLIPBOARD_PAGE_SIZE))
 )
 
-// 页码只在**筛选条件变化**时归 1。
+// 页码只在筛选条件变化时归 1。
 // 绑到 filteredEntries 会让每 30 秒一次的轮询刷新（以及每次复制后的刷新）
 // 把正在看的第 3 页弹回第 1 页——数据本身没变，只是重新取了一遍。
 watch([activeTag, searchQuery, timeFilter], () => { clipboardPage.value = 1 })
@@ -662,7 +662,7 @@ function onPanelKeydown(e: KeyboardEvent) {
 
 // 事件注销句柄：必须用 On 返回的 off 逐个移除。
 //
-// **不要用 Events.Off('clipboard:updated')**：Wails 的 Off 是按事件名整体移除的
+// 不要用 Events.Off('clipboard:updated')：Wails 的 Off 是按事件名整体移除的
 // （签名见 @wailsio/runtime 的 events.d.ts，只接受事件名、没有回调参数），
 // CommandPalette 也监听同名事件，面板一卸载就会把它的监听一起删掉；
 // 反过来命令面板卸载也会删掉面板的监听。被删掉的那一端此后收不到任何刷新，

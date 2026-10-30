@@ -160,7 +160,7 @@ export function usePluginHost(opts: PluginHostOptions) {
       return
     }
 
-    // 插件打印：WebView2 / Chromium 的 window.print() 只作用于**顶层文档**，
+    // 插件打印：WebView2 / Chromium 的 window.print() 只作用于顶层文档，
     // 插件在 iframe 里自己调，打印的是整个 QuickDock 应用（暗色外壳 + 纸面内容
     // 不在打印上下文里）—— 表现为「打印出来是一张白纸」。故由插件把打印用 HTML
     // 交给宿主，宿主在顶层文档渲染后打印（见 utils/printDocument.ts）。
@@ -282,7 +282,7 @@ export function usePluginHost(opts: PluginHostOptions) {
   window.addEventListener('message', messageHandler)
 
   // AI 流式增量：Go 侧按 pluginId 广播（含 native/goja/web 三种插件），
-  // 这里只转给**当前插件**的 iframe。
+  // 这里只转给当前插件的 iframe。
   // 为什么必须按 pluginId 过滤：事件是全局广播的，不过滤的话任何打开的插件窗口
   // 都能收到别的插件正在生成的模型输出——跨插件数据泄露。
   let offAIDelta: (() => void) | null = null

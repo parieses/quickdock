@@ -62,7 +62,7 @@ func Select(o *Overlay) (Result, error) {
 	return Result{Action: res.action, Rect: res.rect, Bitmap: res.image}, nil
 }
 
-// SelectFull 抓取整个虚拟桌面，并把整屏作为**已定选区**送进覆盖层。
+// SelectFull 抓取整个虚拟桌面，并把整屏作为已定选区送进覆盖层。
 //
 // 与 Select 的差别只有「要不要用户先拖一个框」：这里抓完屏工具条就在，
 // 用户直接 Enter 复制 / Ctrl+S 保存 / 点贴图。全屏截图走这条路，

@@ -154,7 +154,7 @@ type Overlay struct {
 	frameOrig Rect
 
 	// 窗口吸附（实现见 snap_windows.go）。
-	// snap 是光标下窗口在**客户区坐标**下的矩形；snapOK 为 false 时它无意义。
+	// snap 是光标下窗口在客户区坐标下的矩形；snapOK 为 false 时它无意义。
 	snap   Rect
 	snapOK bool
 	// pendingSnap 是按下左键那一刻的吸附候选：松手时若几乎没拖动过，
@@ -242,7 +242,7 @@ const (
 	// 两倍余量；再超就整帧重绘兜底。
 	maxPaintRects = 16
 
-	// 提交与还原的成本模型，来自 1920×1080 **可见**分层窗口上的实测拟合
+	// 提交与还原的成本模型，来自 1920×1080 可见分层窗口上的实测拟合
 	// （隐藏窗口测出来偏低，别用那组数）：
 	//
 	//   逐块提交 dirty 25%  0.996ms / 50% 1.742ms / 75% 2.673ms / 100% 3.064ms
@@ -586,7 +586,7 @@ func (o *Overlay) deliver(res outcome) {
 
 // finish 隐藏覆盖层并释放本轮的位图引用。
 //
-// 刻意**不**释放 DIB 与 base：下一张截图会拿到同样尺寸的画布，重建 DIB 是一次
+// 刻意不释放 DIB 与 base：下一张截图会拿到同样尺寸的画布，重建 DIB 是一次
 // VirtualAlloc + 逐页缺页中断，base 是一次 8MB 分配（4K 下 33MB），连着截几张图
 // 时这笔钱每张都要付一遍。代价是停留时多占 16MB 内存（1080p），对桌面工具可接受，
 // 真正的清理放在消息泵退出（messageLoop 里的 releaseDraw）。
@@ -1090,7 +1090,7 @@ func (o *Overlay) redraw() {
 			o.drawShapeSelection(o.shapeBounds(&o.shapes[o.selected]))
 		}
 
-		// 十字对齐辅助线：**只在拖拽过程中出现**。
+		// 十字对齐辅助线：只在拖拽过程中出现。
 		// 早先的写法是「编辑态只要鼠标在屏内就画」，那等于全程挂两条贯穿全屏的线，
 		// 既挡内容又没有信息量。对齐只在拖的时候才有意义。
 		if o.drag != dragNone {
@@ -1177,7 +1177,7 @@ func (o *Overlay) logFrameStats() {
 // 与帧统计分行打印，理由见 launchStats 的注释。五个分项之和加上十几毫秒，约等于
 // 「合计可见」；差额来自线程投递、SetWindowPos、ShowWindow 这几个短调用。
 //
-// 注意 opaque 与 capture 是**并列**的两段，不是包含关系（2026-10-19 的线上日志
+// 注意 opaque 与 capture 是并列的两段，不是包含关系（2026-10-19 的线上日志
 // 里 4 项相加与合计只差 15ms，反证过这一点）。早期注释和日志文案误写成「含」，
 // 会让读者把总时长少算一个补 alpha 的时间。
 //
@@ -1381,8 +1381,8 @@ func (o *Overlay) flush() {
 
 // flushDirty 只把 r 这块提交给分层窗口。
 //
-// 为什么要换 UpdateLayeredWindowIndirect：UpdateLayeredWindow 的 psize 会**改变
-// 窗口尺寸**，直接传脏区大小会把整个覆盖层缩成一小块。带 ULW_EX_NORESIZE 才表示
+// 为什么要换 UpdateLayeredWindowIndirect：UpdateLayeredWindow 的 psize 会改变
+// 窗口尺寸，直接传脏区大小会把整个覆盖层缩成一小块。带 ULW_EX_NORESIZE 才表示
 // 「尺寸位置按 psize/pptDst 认，但不真的改」，再靠 prcDirty 指定搬运范围。
 //
 // 实测（1080p）：整屏 2.4ms，900×600 只要 0.84ms，64×64 只要 0.125ms。
@@ -1435,7 +1435,7 @@ func (o *Overlay) restoreRect(r Rect) {
 
 // footprint 收集「这一帧可能被写到的像素」。
 //
-// 返回的矩形不需要精确，但必须是 redraw 里所有落笔范围的**超集**：多算只是多搬
+// 返回的矩形不需要精确，但必须是 redraw 里所有落笔范围的超集：多算只是多搬
 // 一点像素，漏算就会在屏幕上留下上一帧的残影。
 //
 // known=false 表示当前状态无法安全枚举（调用方必须整帧处理）。目前的绘制路径都
@@ -1570,7 +1570,7 @@ func (o *Overlay) pushSnapshot(s snapshot) {
 	o.future = o.future[:0]
 }
 
-// pushHistory 在**任何会改变结果的拖拽开始时**调用：先把当前状态存起来。
+// pushHistory 在任何会改变结果的拖拽开始时调用：先把当前状态存起来。
 //
 // 配套约定：如果这次拖拽最后什么也没改（点了一下没动、拖出的图形太小被丢弃），
 // 调用 dropLastHistory 把这条记录弹掉——否则撤销栈里会塞满「按了没反应」的空步。
@@ -1782,7 +1782,7 @@ func (o *Overlay) deleteSelected() bool {
 
 // pruneShapes 丢掉完全落在选区之外的图形。
 //
-// 用在选框被移动 / 缩放之后。图形是**钉在图像像素上**的（改框不会跟着挪，
+// 用在选框被移动 / 缩放之后。图形是钉在图像像素上的（改框不会跟着挪，
 // 这正是为了让标注始终和它标注的内容对齐），但落到框外的那些已经不在最终结果里了，
 // 留在表里只会让「撤销」弹掉一个用户根本看不见的东西。
 func (o *Overlay) pruneShapes() {
@@ -1891,7 +1891,7 @@ func (o *Overlay) onLButtonDown(hwnd uintptr, x, y int) {
 	o.snapOK = false
 
 	if o.ti.active {
-		// 输入中点在工具条 / 弹出面板上：**不提交输入**，让工具条照常工作，
+		// 输入中点在工具条 / 弹出面板上：不提交输入，让工具条照常工作，
 		// 之后把焦点交还输入框。这样「编辑一条文字时顺手改颜色 / 字号」一次做完。
 		if o.onChromeClickIfHit(x, y) {
 			o.refocusTextInput()
@@ -2018,7 +2018,7 @@ func (o *Overlay) onChromeClick(x, y int) bool {
 	return false
 }
 
-// onChromeClickIfHit 只消费**真正命中工具条或弹出面板内部**的点击。
+// onChromeClickIfHit 只消费真正命中工具条或弹出面板内部的点击。
 //
 // 与 onChromeClick 的差别：它不会因为「点在面板外」就顺手关面板——
 // 调用它的场景是文字输入中，那里「点空白」要留给「提交输入」。

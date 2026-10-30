@@ -7,7 +7,7 @@ import (
 	"quickdock/services/ai"
 )
 
-// 剪贴板 AI 的核心风险是**预算裁剪把用户的指令砍掉**：
+// 剪贴板 AI 的核心风险是预算裁剪把用户的指令砍掉：
 // AIAsk 超预算时是从头截断，而指令写在 prompt 末尾。
 // 这组测试守的就是"问题必须活下来"这条底线。
 
@@ -35,7 +35,7 @@ func TestBuildClipboardAiPrompt_QuestionWins(t *testing.T) {
 }
 
 func TestBuildClipboardAiPrompt_ActionAndQuestionCombined(t *testing.T) {
-	// 追问（"再短一点"）时，动作指令必须**保留**：
+	// 追问（"再短一点"）时，动作指令必须保留：
 	// 只带用户那句的话，模型看到的是一句没头没尾的要求。
 	got := buildClipboardAiPrompt("原始内容", ClipboardAiSummarize, "再短一点", nil)
 	if !strings.Contains(got, clipboardAiActionPrompt[ClipboardAiSummarize]) {
@@ -53,7 +53,7 @@ func TestBuildClipboardAiPrompt_ActionAndQuestionCombined(t *testing.T) {
 }
 
 func TestBuildClipboardAiPrompt_TrimsLongText(t *testing.T) {
-	// 超长正文必须裁剪，且保留**尾部**（用户刚复制的通常在末尾）。
+	// 超长正文必须裁剪，且保留尾部（用户刚复制的通常在末尾）。
 	long := strings.Repeat("x", clipboardAiTextMaxRune+500) + "TAIL"
 	got := buildClipboardAiPrompt(long, ClipboardAiSummarize, "", nil)
 

@@ -100,7 +100,7 @@ func (p *PluginService) showPluginWindow(pluginID string, standalone bool) {
 
 // OpenPluginWindowWith 经 MCP / AI 打开插件窗口，并把命令与参数交给插件前端。
 //
-// 这是纯前端插件（runtime=none）**唯一**能被外部驱动的路径：宿主不执行它们的命令，
+// 这是纯前端插件（runtime=none）唯一能被外部驱动的路径：宿主不执行它们的命令，
 // 只能把界面打开、把参数塞进去；对 native/goja 插件，它也补上了「执行完想看看结果」
 // 这类只能在界面上完成的动作。
 func (p *PluginService) OpenPluginWindowWith(pluginID, command, text string) *services.ApiResult {

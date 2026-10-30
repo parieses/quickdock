@@ -96,7 +96,7 @@ func (a *ClipboardService) DeleteExpiredClipboardEntries() *services.ApiResult {
 func (a *ClipboardService) writeEntryToClipboard(entry *db.ClipboardEntry, hwnd uintptr) error {
 	switch {
 	case entry.ContentType == "image" && entry.ImagePath != "":
-		// 回环防护的哈希必须在写入剪贴板**之前**登记：写入成功到登记之间，剪贴板
+		// 回环防护的哈希必须在写入剪贴板之前登记：写入成功到登记之间，剪贴板
 		// 工作协程可能已经把这次变更抓走，导致「从历史复制图片」被误记成一次新复制。
 		// 该哈希口径与 processImage 的 DIB→PNG MD5 一致（PNG 文件经 DIB 往返后重编码字节确定性相同）。
 		imageData, readErr := os.ReadFile(entry.ImagePath)
@@ -125,7 +125,7 @@ func (a *ClipboardService) writeEntryToClipboard(entry *db.ClipboardEntry, hwnd 
 //
 // 图片条目有两种来源，必须分开处理：
 //   - 纯图片（截图/网页图片）：只写 CF_DIB；
-//   - 「复制的图片文件」：条目上还带着文件路径，需要**一次会话**里同时写
+//   - 「复制的图片文件」：条目上还带着文件路径，需要一次会话里同时写
 //     CF_HDROP(文件) + CF_DIB(图片)。旧实现先写文件再写图片，两次 EmptyClipboard
 //     把文件格式冲掉了，粘到资源管理器没有任何反应。
 //

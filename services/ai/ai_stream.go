@@ -132,7 +132,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		ConvID string `json:"convId"`
 		Mode   string `json:"mode"`
-		// SpaceID 只在**新建**任务时用：把这条对话直接放进某个空间。
+		// SpaceID 只在新建任务时用：把这条对话直接放进某个空间。
 		// 已有会话的归属不能被一次请求改掉——那会让「随便说句话就把任务搬了家」。
 		SpaceID string        `json:"spaceId"`
 		Message string        `json:"message"`
@@ -222,7 +222,7 @@ func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, m
 	// 单条回复的费用估算。价目表只有一份（ai_pricing.go），前端不复制一份
 	// —— 两处价格一旦漂移，气泡上写 ¥0.03、设置页账单写 ¥0.05，谁都不再可信。
 	//
-	// 未收录的模型**不填** cost：前端据此隐藏该项，与设置页「未知模型不计价」
+	// 未收录的模型不填 cost：前端据此隐藏该项，与设置页「未知模型不计价」
 	// 同一个口径。宁可少显示一个数字，也不要给一个看起来精确其实编的数字。
 	if !usage.Empty() {
 		if cost, ok := estimateCost(model, usage.Prompt, usage.Completion, usage.Cached); ok {
@@ -234,12 +234,12 @@ func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, m
 
 // sseFlusher 把上游逐 token 的写入合并成批量的 SSE 帧。
 //
-// 背景：上游每吐一个 token 就 Write+Flush 一次，一次长回复能产生上千次
+// 上游每吐一个 token 就 Write+Flush 一次，一次长回复能产生上千次
 // 系统调用 + 上千个 SSE 帧，浏览器侧也要解析上千次。前端已做 16ms 合帧，
 // 服务端这层再合并一次，能进一步减少网络包与事件数。
 //
 // 并发约束：http.ResponseWriter 不是并发安全的，且 SSE 要求帧序严格。
-// 因此本类型是**响应体的唯一写者**：token 先进队列，由后台协程按 20ms 窗口
+// 因此本类型是响应体的唯一写者：token 先进队列，由后台协程按 20ms 窗口
 // 批量写出；控制类事件（error/done）走 writeEvent，会先在锁内把队列里的
 // token 冲刷干净再写自己，保证「先 token 后 done」的顺序不变。
 type sseFlusher struct {
@@ -400,7 +400,7 @@ func (s *sseFlusher) loop() {
 //
 // 判定分两层：
 //  1. 主窗口有焦点 —— 人就在窗口里，不打扰；
-//  2. 窗口可见 **且** 停在前 AI 对话页 —— 窗口可能因为用户去点别的应用而失焦，
+//  2. 窗口可见 且 停在前 AI 对话页 —— 窗口可能因为用户去点别的应用而失焦，
 //     但他眼睛还在 AI 页上看着这段回答一个字一个字出来，此时再提醒一次是纯粹的复述。
 //
 // 只有「窗口隐藏/最小化」或「窗口停在别的页面」才值得写通知 —— 通知的价值在于

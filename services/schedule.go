@@ -19,7 +19,7 @@ func (a *AppService) CreateScheduledTask(t db.ScheduledTask) *ApiResult {
 		return Fail(err)
 	}
 	t.NextRun = computeNextRun(&t, nowStr())
-	// 一次性任务若计算不出有效时间（时间已过）：**直接拒绝**，不再"存下来但停用"。
+	// 一次性任务若计算不出有效时间（时间已过）：直接拒绝，不再"存下来但停用"。
 	// 静默降级最误导：前端收到成功提示，用户回头却找不到一条能跑的任务，
 	// 只会以为调度器坏了。其它类型算不出时间属于兜底（参数异常），仍允许保存但停用。
 	if t.NextRun == "" {
@@ -57,7 +57,7 @@ func (a *AppService) UpdateScheduledTask(t db.ScheduledTask) *ApiResult {
 		return Fail(err)
 	}
 	if t.Enabled {
-		// 只有**调度规则本身**变了才重算 next_run。
+		// 只有调度规则本身变了才重算 next_run。
 		// 过去无条件重算：改个名字、换条命令，间隔任务的节拍就从「3 分钟后」被推回
 		// 「一整个周期之后」，用户以为任务丢了。
 		prev, perr := a.DB.GetScheduledTask(t.ID)
@@ -172,7 +172,7 @@ func (a *AppService) RunScheduledTaskNow(id string) *ApiResult {
 	return OkMsg(result, result)
 }
 
-// sameSchedule 判断两次保存的**调度规则**是否等价（忽略名称/动作/通知等业务字段）。
+// sameSchedule 判断两次保存的调度规则是否等价（忽略名称/动作/通知等业务字段）。
 //
 // 只比规则本身，是为了让"改个名字"不重置节拍；只要规则没变，上次算好的 next_run
 // 就还能用。

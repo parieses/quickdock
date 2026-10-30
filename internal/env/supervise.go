@@ -139,24 +139,20 @@ func (m *Manager) SetEnabled(rt Runtime, on bool) error {
 	return nil
 }
 
-// ReclaimOrphans 应用启动初期（ReconcileEnabled 之前）调用：回收上次会话异常退出
-// 遗留的孤儿服务进程，避免它们永久脱离管理、占据端口。
+// ReclaimOrphans 在应用启动初期（ReconcileEnabled 之前）调用：回收上次会话
+// 异常退出遗留的孤儿服务进程，避免它们脱离管理、占着端口。
 //
-// 背景：StopAllOnExit 只清理「本会话经 svcMgr 拉起」的进程；若宿主被强杀（kill -9 / 断电 /
-// 退出清理在 exitStopTimeout 内未完成），上一次会话的子进程会以孤儿身份存活，继续监听端口。
-// 它们不在 svcMgr 中，而本次启动 svcMgr 初始恒为空——故任何被 Status() 判为 Running 的实例，
-// 都必然是上一次会话的孤儿，而非本会话拉起（本会话尚未启动任何服务）。
+// StopAllOnExit 只清理本会话经 svcMgr 拉起的进程。宿主被强杀（kill -9、断电、
+// 退出清理超时）时，上次会话的子进程会以孤儿身份继续监听端口。本次启动 svcMgr
+// 初始恒为空，所以任何 Status() 判为 Running 的实例必然是上次会话的孤儿。
+// 不回收的话，ReconcileEnabled 见到 Running 会直接跳过，孤儿从此脱管，用户手动
+// 启动也会被「已在运行 / 端口冲突」拦下。
 //
-// 不回收的后果：ReconcileEnabled 见到 Running 会直接跳过（下方 skip 逻辑），孤儿从此脱管、
-// 占着端口，用户手动启动也会被「已在运行 / 端口冲突」拦下（即 StopAllOnExit 注释所述
-// 实测遗留 caddy+php-cgi+redis 共 54.5 MB 的场景）。
+// 回收是对每个已装版本执行 Stop（优雅关闭 + 端口兜底强杀，按镜像名匹配，
+// 不会误伤其它程序）。Stop 幂等，对已停止的版本调用也安全；回收后由
+// ReconcileEnabled 按 states.json 的期望态重新拉起。
 //
-// 回收即对每个已装版本执行 Stop（原生优雅关闭 + 端口兜底强杀，且按镜像名匹配，不会误伤
-// 其它程序）。Stop 是幂等的（无对应进程即空操作），故对已停止的版本调用也安全。
-// 回收后由随后的 ReconcileEnabled 按 states.json 的「期望态」重新拉起、重新纳入 svcMgr 管理。
-//
-// 注意：不论该运行时是否被用户设为常驻都回收——手动启动（未开常驻）的服务同样属于上次会话，
-// 异常退出后同样是孤儿，理应收回（常驻与否只决定 ReconcileEnabled 是否重新拉起它）。
+// 不论是否设为常驻都回收——手动启动的服务同样属于上次会话，异常退出后同样是孤儿。
 func (m *Manager) ReclaimOrphans(ctx context.Context) {
 	for _, rt := range runtimeOrder {
 		// 仅处理支持服务管理的运行时（与 SetEnabled 同款能力判定）

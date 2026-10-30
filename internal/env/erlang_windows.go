@@ -11,7 +11,7 @@ import (
 
 // killEpmdBeforeDelete 在删除某个 Erlang 版本目录前，先停掉属于该版本的 epmd.exe。
 //
-// 背景：epmd 是 Erlang 的端口映射守护进程（Erlang Port Mapper Daemon）。只要跑过
+// epmd 是 Erlang 的端口映射守护进程（Erlang Port Mapper Daemon）。只要跑过
 // 任何 Erlang/OTP 节点（含 RabbitMQ），epmd 就会常驻后台并锁住自身 exe，导致
 // os.RemoveAll 报 "Access is denied"（即用户看到的“没权限”）。
 //

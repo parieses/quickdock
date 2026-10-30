@@ -6,12 +6,12 @@
  *
  * 两条转换路线，按元素类型分开：
  *
- * 1. **SVG（Mermaid）走矢量序列化**：克隆 `<svg>` → 序列化 → 以 data URI 塞进 `<img>`
+ * 1. SVG（Mermaid）走矢量序列化：克隆 `<svg>` → 序列化 → 以 data URI 塞进 `<img>`
  *    → 画到 canvas。清晰、不受字体影响、60ms 级别。注意 Mermaid 输出带
  *    `style="max-width:…px"`，序列化进图片后没有父容器可参照，必须换掉。
  *
- * 2. **HTML（KaTeX）走 html-to-image**：公式是带 `katex` 类的一堆 span，字形全靠
- *    KaTeX 的 woff2 字体。html-to-image 会把整棵树的**计算样式**内联、再把
+ * 2. HTML（KaTeX）走 html-to-image：公式是带 `katex` 类的一堆 span，字形全靠
+ *    KaTeX 的 woff2 字体。html-to-image 会把整棵树的计算样式内联、再把
  *    @font-face 的字体抓成 base64 塞进 foreignObject，这是纯 DOM 转图唯一能保住
  *    字形的方式（自己写一份等于重写它的样式内联逻辑）。
  *
@@ -119,7 +119,7 @@ export async function svgToPngBlob(svg: SVGSVGElement, bg: string): Promise<Blob
  * → 拼 `<svg><foreignObject>` → 加载成 Image → 画到 canvas。
  *
  * 布局上的坑：行内公式是 `<span>`，它的尺寸来自排版结果，直接塞进 foreignObject
- * 会塌成 0 宽。所以外面套一个**确定像素尺寸**的 flex 盒子，并显式带上
+ * 会塌成 0 宽。所以外面套一个确定像素尺寸的 flex 盒子，并显式带上
  * 字号/字色/字体 —— 公式的间距全按 em 算，字号一变整张图就不是屏幕上那张了。
  */
 export async function htmlToPngBlob(el: HTMLElement, bg: string): Promise<Blob | null> {

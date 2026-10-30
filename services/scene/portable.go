@@ -163,7 +163,7 @@ func (s *SceneService) SceneExport(sceneID, path string) *services.ApiResult {
 
 // SceneImport 从 JSON 文件导入场景到指定工作空间。
 //
-// 语义：**总是新建**，不做合并。理由——合并需要「按名字匹配 + 逐字段取舍」的冲突
+// 语义：总是新建，不做合并。理由——合并需要「按名字匹配 + 逐字段取舍」的冲突
 // 策略，而条目 name 在集合内唯一，用户改过名就对不上，静默合并比新建更危险。
 // 同名场景/集合由 dedupeName 追加后缀，导入永远不会因重名失败。
 func (s *SceneService) SceneImport(workspaceID, path string) *services.ApiResult {

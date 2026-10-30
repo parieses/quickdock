@@ -11,7 +11,7 @@ import (
 	"quickdock/services"
 )
 
-// 错误码。前端按 code 决定弹哪个对话框、显示哪类文案，**不要匹配 msg 文本**。
+// 错误码。前端按 code 决定弹哪个对话框、显示哪类文案，不要匹配 msg 文本。
 //
 // 这是前后端之间唯一的稳定契约：msg 是给人看的中文，随时可能改。
 const (
@@ -42,7 +42,7 @@ const (
 	CodeRemoteIsDir      = "ssh_remote_is_dir"
 	CodeRemoteNotEmpty   = "ssh_remote_not_empty"
 	CodeSftpSubsystemOff = "ssh_sftp_unavailable"
-	// 用户主动取消了传输。前端据此**不弹错误**：取消是正常操作，
+	// 用户主动取消了传输。前端据此不弹错误：取消是正常操作，
 	// 把它渲染成红色失败提示，等于让用户以为自己把什么东西弄坏了。
 	CodeTransferCanceled = "ssh_transfer_canceled"
 

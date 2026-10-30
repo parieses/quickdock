@@ -6,7 +6,7 @@ import (
 	"testing"
 )
 
-// dsmlSample 是一段**线上真实抓到**的输出（DeepSeek 在 tools 被撤下后把调用写成正文）。
+// dsmlSample 是一段线上真实抓到的输出（DeepSeek 在 tools 被撤下后把调用写成正文）。
 // 竖线是全角 U+FF5C 且是双个——这正是不能只按规范形式匹配的原因。
 const dsmlSample = "骨架文件已经建好，我开始逐段填入内容。\n\n" +
 	"<｜｜DSML｜｜ calls>\n" +

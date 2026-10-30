@@ -1,27 +1,15 @@
 package ai
 
-// 兼容层：把模型写成**正文**的工具调用还原成真正的 tool_calls。
+// 把模型写成正文的工具调用还原成 tool_calls。
 //
-// 背景（不是预防性代码，是线上实证）：
-// DeepSeek 在「system 里说可以调工具、请求里却没有 tools 字段」时，会退化成把调用
-// 输出成一段 DSML 标记正文：
+// DeepSeek 在「system 里说可以调工具、请求里却没有 tools 字段」时，会把调用输出成
+// 一段 DSML 标记正文（`<｜｜DSML｜｜ invoke name="file_read">` 加 parameter 节点）。
+// 协议层不认识这段文本，会把它当成最终回答，对话就此中断。
 //
-//	骨架文件已经建好，我开始逐段填入内容。
-//	<｜｜DSML｜｜ calls>
-//	<｜｜DSML｜｜ invoke name="file_read">
-//	<｜｜DSML｜｜ parameter name="path" string="true">quickdock-guide.md</｜｜DSML｜｜ parameter>
-//	</｜｜DSML｜｜ invoke>
-//	</｜｜DSML｜｜ calls>
+// 根因已在 ai_stream.go 修掉（system 里不再残留工具说明），这里是第二道闸：
+// 换模型、换网关、提示词被长上下文挤掉时都可能复发。
 //
-// 协议层不认识这段文本，于是它被当成「最终回答」：用户看到半句话后面跟一串
-// 原始标记，然后对话就停了（没有下一轮、工具也没执行）。
-//
-// 根因（system 里残留工具说明）已经在 ai_stream.go 修掉，这里是第二道闸：
-// 即使模型仍然这么做（换模型、换网关、或者提示词被长上下文挤掉），
-// 也能把调用接过来继续走，而不是把标记糊到用户脸上。
-//
-// 两层职责：
-//   - dsmlFilter：流式过滤，标记段落不推给前端（用户永远看不到这些标记）
+//   - dsmlFilter：流式过滤，标记段落不推给前端
 //   - parseDSMLToolCalls：把被吞掉的那段文本解析成 aiToolCall
 
 import (

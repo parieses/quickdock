@@ -190,7 +190,7 @@ const cwdLabel = computed(() => {
 })
 
 // —— 流式文本缓冲 ——
-// 关键性能点：token 到达时**不**直接写响应式 ref。改为先追加到普通字符串缓冲，
+// 关键性能点：token 到达时不直接写响应式 ref。改为先追加到普通字符串缓冲，
 // 再按 ~16ms 的节奏批量提交到 streamingText。原因是每个 token 都触发一次
 // 响应式更新 → 整个 AIPage 组件（含全部历史消息的 v-html diff）重渲染，
 // 上游吐字越快掉帧越明显。批量提交把渲染次数从「每 token 一次」压到「每帧一次」。
@@ -201,9 +201,9 @@ let streamTimer: ReturnType<typeof setTimeout> | null = null
 const STREAM_FLUSH_MS = 16
 
 // —— Markdown 分块增量渲染 ——
-// 性能根因：流式期间若每帧都对**全文**做 md.parse + v-html 整段替换，成本随回复
+// 性能根因：流式期间若每帧都对全文做 md.parse + v-html 整段替换，成本随回复
 // 变长线性上升（实测 15KB 全文单帧 md.parse 约 10.5ms，其中 lexer 占 5ms），
-// 而 v-html 的 innerHTML 赋值会销毁并重建该消息的**全部** DOM 节点。
+// 而 v-html 的 innerHTML 赋值会销毁并重建该消息的全部 DOM 节点。
 // 两者叠加，就是「AI 一直在回复但界面发卡」的根因。
 // 改为按顶层块增量渲染：
 //   · 文本以「围栏代码块外的空行」为界切块，块内结构不跨空行拆散
@@ -228,7 +228,7 @@ const runRules = ref<AIRuleFile[]>([])
 
 // toolList 把消息里的 tool_calls 解析成数组。
 //
-// 用 try/catch 兜住：这是**历史数据**，可能来自旧版本、也可能被手工改过库；
+// 用 try/catch 兜住：这是历史数据，可能来自旧版本、也可能被手工改过库；
 // 解析失败就不显示卡片，而不是让整条消息渲染崩掉（一个坏 JSON 不该白屏）。
 function toolList(m: AIMessage): AIToolCall[] {
   if (!m.tool_calls) return []
@@ -285,7 +285,7 @@ function serializeTools(list: AIToolCall[]): string {
   })))
 }
 
-// countToolRounds 数轮次而不是数条数：一轮可以调多个工具，
+// countToolRounds 数轮次而不是数条数：一轮可以并发调多个工具，
 // 卡片上写「5 个工具」和「3 轮」是两件事，用户问的「调了几轮」是后者。
 function countToolRounds(list: AIToolCall[]): number {
   return new Set(list.filter((t) => t.round).map((t) => t.round)).size
@@ -478,7 +478,7 @@ async function approveTool(tc: AIToolCall, decision: 'allow' | 'deny', remember 
 // 无容量上限（随会话消息数自然增长）、不会抖动、也不会误伤其他会话。
 const msgBlockCache = new Map<string, { src: string; html: string[] }>()
 
-// 流式块的 HTML 缓存（与历史块**分开**存放）。
+// 流式块的 HTML 缓存（与历史块分开存放）。
 // 分开的原因：两者共用一个 LRU 时，长对话的历史块会把流式块挤出去，
 // 导致流式期间「已完成的块」每帧都被重新解析 —— 恰好是最需要流畅的时候掉帧。
 // 流式块的规模只与单次回复的段落数有关，不会无限增长，故不设上限。
@@ -494,7 +494,7 @@ function splitMarkdownBlocks(src: string): string[] {
 // 解析单个块（带缓存）。命中缓存时返回同一字符串引用，
 // Vue 的 patchElement 对 innerHTML 只在值变化时赋值 → 不会产生 DOM 写入。
 //
-// 注意：只有**已完成**的块才写入缓存。流式中最后一个未完成块每帧原文都变，
+// 注意：只有已完成的块才写入缓存。流式中最后一个未完成块每帧原文都变，
 // 若也缓存会产生大量一次性条目。未完成块每帧重解析本身开销就很小
 // （实测末块仅占全文 0.2%）。
 function renderBlock(raw: string, cacheable = true): string {
@@ -521,7 +521,7 @@ function renderMessageBlocks(m: AIMessage): string[] {
 
 // 流式增量渲染：只重新解析最后一个未完成块，其余块直接复用缓存。
 //
-// 对齐方式：只有**除最后一块外**的块才按原文做公共前缀匹配。
+// 对齐方式：只有除最后一块外的块才按原文做公共前缀匹配。
 // 原因是最后一块是「正在写」的块，它的原文每帧都在变，若也要求原文完全相等，
 // 就永远匹配不上 → 每次都从第 0 块重建，导致已渲染内容被顶替（实测复现）。
 // 最后一块无条件重渲染（它的体量小，开销低），前面的块原文一旦稳定就不会再变。
@@ -1169,7 +1169,7 @@ function matchConv(c: AIConversation, q: string): boolean {
   return (c.title || '').toLowerCase().includes(q)
 }
 
-// 任务组：只列 **不属于任何空间** 的任务。空间下的任务归在空间那一组里，
+// 任务组：只列 不属于任何空间 的任务。空间下的任务归在空间那一组里，
 // 否则同一个任务在侧栏出现两次，用户分不清点哪个才是同一个。
 const taskConversations = computed(() => {
   const q = convQuery.value.trim().toLowerCase()
@@ -1308,7 +1308,7 @@ async function openCwd() {
 // 「提一个问题」拆成三步。现在改成主区直接变成落地页：上面选类型（一排 pill）、
 // 输入框、下面一行选归属空间/模型——边选边打字，回车就走。
 //
-// 类型和空间仍然是**这条任务的**属性（首次发送时随请求带过去并落库），
+// 类型和空间仍然是这条任务的属性（首次发送时随请求带过去并落库），
 // 只是把它们从「创建前的必答项」降级成「发送前顺手改的两个开关」：
 // 不改就是默认（对话 + 普通任务），想改就在输入框下面改。
 const newTaskMode = ref('chat')
@@ -1351,7 +1351,7 @@ function fillHeroTip(key: string) {
 // 回车发送的唯一入口。
 //
 // 必须挡输入法组合：中文/日文输入中按回车是「确认候选词」，而 Chromium（WebView2 同源）
-// 在这个回车**照样**派发 keydown（isComposing=true / keyCode 229）。之前用
+// 在这个回车照样派发 keydown（isComposing=true / keyCode 229）。之前用
 // `@keydown.enter.exact.prevent="send"`，结果是打拼音时一按回车就把半截中文发出去，
 // 候选词反而没了。同理 Shift/Ctrl/Alt/Meta + 回车留给换行与快捷键。
 function onEnterSend(e: KeyboardEvent, fn: () => void) {
@@ -1405,7 +1405,7 @@ function normDir(p: string): string {
 }
 
 async function pickNewTaskDir() {
-  // unwrap 在 code≠0 时是**抛**异常，不是返回带 ok 的结果：不包 try 的话，
+  // unwrap 在 code≠0 时是抛异常，不是返回带 ok 的结果：不包 try 的话，
   // 原生对话框出错会变成一条未处理的 Promise 拒绝，界面上什么都不会发生。
   let dir: string | null = null
   try {
@@ -1516,7 +1516,7 @@ async function delSpace(s: AISpace) {
   if (!(await toast.confirm(msg))) return
   // 空间里有正在流的任务：先掐流，否则后端会往一个已被删掉的会话里写内容。
   // 注意判的是「当前任务是否属于这个空间」而不是「当前任务是否正在流」：
-  // 停在一个**空闲**任务上删空间时，后端已经把任务硬删了，界面却还留着它的消息，
+  // 停在一个空闲任务上删空间时，后端已经把任务硬删了，界面却还留着它的消息，
   // 下一次发送只会得到一句「会话不存在或已被删除」——用户完全不知道自己在看一条幽灵任务。
   const activeInSpace = !!activeId.value &&
     conversations.value.some((c) => c.id === activeId.value && (c.space_id || '') === s.id)
@@ -1694,7 +1694,7 @@ function startRename(c: AIConversation) {
 
 // 聚焦并全选行内改名的输入框。
 //
-// 必须容错数组：v-for 里的字符串 ref 会被 Vue 收集成**数组**（哪怕同一时刻只渲染了一个），
+// 必须容错数组：v-for 里的字符串 ref 会被 Vue 收集成数组（哪怕同一时刻只渲染了一个），
 // 直接 `ref.value?.focus()` 拿到的是 [input]，`.focus` 不存在 → nextTick 里抛 TypeError，
 // 表现是「点了改名，输入框出来了但没有焦点，打字没反应」。
 function focusRenameInput(r: unknown) {
@@ -2247,7 +2247,7 @@ function onMsgClick(e: MouseEvent) {
 }
 
 // —— HTML 预览（沙箱 iframe，全屏遮罩）——
-// sandbox 里**绝对不能**带 allow-same-origin：那样 iframe 与宿主同源，
+// sandbox 里绝对不能带 allow-same-origin：那样 iframe 与宿主同源，
 // 里面的脚本就能拿到 QuickDock 的 window 与 Wails 运行时。允许 scripts /
 // modals（示例页常用 alert）/ forms 就够了，opaque origin 下它连相对路径都取不到。
 const htmlPreview = ref('')
@@ -2269,7 +2269,7 @@ const ctxMenu = useFloatMenu({ placement: 'right-start', offset: 4 })
 function onMsgContextMenu(e: MouseEvent) {
   const target = e.target as HTMLElement | null
   if (!target) return
-  // 只认**已经画出来**的图和公式：未渲染的 mermaid 只是一段源码，走原生菜单更合适
+  // 只认已经画出来的图和公式：未渲染的 mermaid 只是一段源码，走原生菜单更合适
   const mmd = target.closest('.md-mermaid[data-mermaid-done="1"]') as HTMLElement | null
   const math = mmd ? null : (target.closest('.md-math') as HTMLElement | null)
   // 普通代码块（.md-code）：右键也能「复制为图片」，与图/公式体验统一
@@ -2430,7 +2430,7 @@ onMounted(async () => {
 
   // 仅保留标题同步：这条事件只由「手动改名 / 重生成标题」触发（新会话的创建走 SSE 的
   // conv 事件）。以前这里还有一句 `activeId.value = data.id`，于是重命名侧栏里
-  // **任意一条**任务都会把当前任务切过去，而消息并没有跟着重载 —— 高亮换了一条、
+  // 任意一条任务都会把当前任务切过去，而消息并没有跟着重载 —— 高亮换了一条、
   // 内容还是上一条，接着发消息就发进了另一条任务里。
   Events.On('ai:conv', (ev: any) => {
     const data = ev?.data

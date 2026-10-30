@@ -14,7 +14,7 @@ import (
 )
 
 // 本文件只做一件事：探一次「DXGI Desktop Duplication 在这台机器上能不能用」，
-// 结果写进日志。**不参与抓屏**，现有 BitBlt 路径一行都不受影响。
+// 结果写进日志。不参与抓屏，现有 BitBlt 路径一行都不受影响。
 //
 // 为什么要单独探：双屏 4K 上 BitBlt 实测稳定在 225ms（30.3 ms/百万像素），去掉
 // CAPTUREBLT、两线程/四线程分块、面积缩到 40% 都动不了它——地板在驱动把合成结果
@@ -169,7 +169,7 @@ func logDesktopDuplication() {
 	case dupes == 0:
 		logger.W("[screenshot] 渲染能力：Desktop Duplication 不可用（%d 个输出全部不可复制）—— %s，抓屏继续走 BitBlt", outputs, summary)
 	case dupes < outputs:
-		// 部分输出可用 **不等于** 不可用：双屏里只要主屏能复制，主屏就能走 DDA，
+		// 部分输出可用 不等于 不可用：双屏里只要主屏能复制，主屏就能走 DDA，
 		// 另一块继续 BitBlt。早期版本把「任一输出失败」当成整体不可用，会把一条
 		// 真正可行的路直接埋掉，所以这里必须单独成一种结论。
 		logger.I("[screenshot] 渲染能力：Desktop Duplication 部分可用（%d/%d 个输出，其余仍走 BitBlt）—— %s", dupes, outputs, summary)
@@ -300,7 +300,7 @@ func outputLabel(out unsafe.Pointer, idx int) string {
 //   - 9/10 按带参数的 Get*Rects 形式调用能返回 S_OK 并写回 required；
 //   - MapDesktopSurface(12) 返回 DXGI_ERROR_UNSUPPORTED（InSystemMemory=0 时的预期值）；
 //   - UnMapDesktopSurface(13) 返回 INVALID_CALL（未 map 时的预期值）；
-//   - 但 9/10/11 三个下标用无参形式调用**全部**返回 E_INVALIDARG。
+//   - 但 9/10/11 三个下标用无参形式调用全部返回 E_INVALIDARG。
 //
 // 下标体系与文档一致，是这两台机器的显示栈拒绝释放帧（都挂着虚拟显示 / 远程
 // 控制类驱动）。判据因此保持「释放后还能再取一帧」，并保留整条失败链。

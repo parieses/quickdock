@@ -5,25 +5,25 @@
  * （`mermaid.render()` 返回 Promise），而整条渲染链路（marked → DOMPurify → v-html）
  * 是同步的。因此这里采用两段式：
  *
- *   1. 同步阶段（marked 的 code renderer）只吐一个**占位块**，里面是源码 `<pre>`；
+ *   1. 同步阶段（marked 的 code renderer）只吐一个占位块，里面是源码 `<pre>`；
  *   2. 渲染阶段（DOM 已经挂上之后）扫描占位块，异步渲染成 SVG 替换进去。
  *
  * 三条硬约束：
  *
- * 1. **流式期间每帧都会失败**。回答逐字到达，`graph TD\nA[开` 这种半截定义必然解析失败。
+ * 1. 流式期间每帧都会失败。回答逐字到达，`graph TD\nA[开` 这种半截定义必然解析失败。
  *    失败时保留源码（占位块本来就是源码），只在前面加一行提示，绝不抛错、绝不显示红框错误图
  *    （`suppressErrorRendering` 关掉 Mermaid 自己往 body 里塞错误图的默认行为）。
  *
- * 2. **同一容器不能重复渲染**。流式期间会反复扫描；用 `data-mermaid-done` 标记已完成，
+ * 2. 同一容器不能重复渲染。流式期间会反复扫描；用 `data-mermaid-done` 标记已完成，
  *    用 `data-mermaid-failed`（源码哈希）记住「这段源码已经失败过」，避免每帧重试。
  *    源码变化时 v-html 会重建这些节点，标记自然消失 → 自动重试，无需额外失效逻辑。
  *
- * 3. **主题跟随应用**。SVG 里的颜色是渲染时定死的，CSS 变量进不去。所以每次渲染前把
+ * 3. 主题跟随应用。SVG 里的颜色是渲染时定死的，CSS 变量进不去。所以每次渲染前把
  *    当前主题的 CSS 变量值读出来喂给 Mermaid 的 `themeVariables`（base 主题），并在
  *    `data-theme` 变化时把已渲染的图按保存的源码重画一遍。
  *
  * 首次加载 Mermaid 走动态 import：它体积大（含多种图的解析器），只有回答里真的出现了
- * ```mermaid 才值得付这笔下载。**vite.config.ts 的 optimizeDeps.include 必须列出 mermaid**，
+ * ```mermaid 才值得付这笔下载。vite.config.ts 的 optimizeDeps.include 必须列出 mermaid，
  * 否则运行时发现新依赖会触发二次预构建（本项目的已知坑，见该文件里的说明）。
  */
 
@@ -62,7 +62,7 @@ function sourceHtml(code: string): string {
  * 工具栏按钮的文案。
  *
  * utils 层拿不到 i18n 的 `t()`（这里是纯函数，不该依赖组件上下文），所以文案必须由调用方传。
- * `source` / `diagram` / `fold` / `expand` 描述的都是**点下去会发生什么**，与代码块的
+ * `source` / `diagram` / `fold` / `expand` 描述的都是点下去会发生什么，与代码块的
  * 「复制代码」保持同一种语义 —— 按钮说动作，不说当前状态。
  */
 export interface MermaidLabels {
@@ -97,9 +97,9 @@ const ICONS = {
  *
  * 为什么一开始就把工具栏和源码都写进 DOM：
  *
- * - **源码不能丢**。图渲染成功后 DOM 里只剩 SVG，「看源码」「切换主题重画」都得再找回来。
+ * - 源码不能丢。图渲染成功后 DOM 里只剩 SVG，「看源码」「切换主题重画」都得再找回来。
  *   留着 `<pre>` 用 CSS 隐藏，切换是零成本的，也省掉一份 `data-mermaid-code` 拷贝。
- * - **工具栏不能被 `innerHTML` 冲掉**。所以 `draw()` 只替换 `.md-mermaid-svg` 的内容，
+ * - 工具栏不能被 `innerHTML` 冲掉。所以 `draw()` 只替换 `.md-mermaid-svg` 的内容，
  *   折叠 / 看源码这些状态都挂在容器属性上，主题切换重画也不会丢。
  */
 export function mermaidPlaceholder(code: string, labels: MermaidLabels): string {

@@ -15,7 +15,7 @@ import (
 
 // ---- Ollama 本地 REST API 客户端（/api/tags|ps|pull|delete）----
 //
-// 这里管的是**模型**，与程序版本管理彻底解耦：
+// 这里管的是模型，与程序版本管理彻底解耦：
 //   - 模型库全局共享一份（默认 ~/.ollama/models，动辄几十 GB，跨版本/系统安装版共用）；
 //   - DeleteVersion 只删程序目录、绝不碰模型（见 ollama.go）；
 //   - DeleteModel 只经 Ollama 自己的 /api/delete 删模型，绝不碰程序目录。

@@ -175,7 +175,7 @@ interface SidebarItem {
   active: boolean
 }
 // 侧栏搜索：31 个运行时只能靠滚动 + 折叠找，"那个 pb" 得翻半天。
-// 搜索时**强制展开**分组——搜到的东西藏在折叠分组里等于没搜到。
+// 搜索时强制展开分组——搜到的东西藏在折叠分组里等于没搜到。
 const sidebarQuery = ref('')
 const sidebarSearching = computed(() => sidebarQuery.value.trim().length > 0)
 
@@ -1716,7 +1716,7 @@ async function pollStatus() {
           svcUnknown[r.id + ins.version] = true
         }
       }
-      // 端口冲突探测（启动前可视化提示）：优先探测**正在运行的那个版本**。
+      // 端口冲突探测（启动前可视化提示）：优先探测正在运行的那个版本。
       // 只查 installed[0] 时，多版本并存会对着一个没跑的版本报冲突——用户照着
       // 提示去改配置，改的却不是真正占着端口的那个，问题永远解决不了。
       if (r.installed.length) {

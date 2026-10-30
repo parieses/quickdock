@@ -10,7 +10,7 @@ import (
 // TestListClipboardEntriesByTypeFiltersCorrect 验证按 content_type 过滤的
 // SQL 下推确实只返回该类型条目。
 //
-// 背景：剪贴板「图片/文件」标签曾完全筛不出东西——前端把 image/file 标签
+// 剪贴板「图片/文件」标签曾完全筛不出东西——前端把 image/file 标签
 // 和智能分类标签合用一个分支，统一套了 `contentType === 'text' &&` 前置条件，
 // 两个条件互斥。后端本来就有 ListClipboardEntriesByType，但前端压根没调用它。
 func TestListClipboardEntriesByTypeFiltersCorrect(t *testing.T) {

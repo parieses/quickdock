@@ -2,7 +2,7 @@ package screenshot
 
 // PinActions 是贴图钉屏右键菜单需要的宿主能力（复制到剪贴板 / 保存为文件）。
 //
-// 刻意放在这个**没有构建标签**的文件里，而不是 pin_windows.go：
+// 刻意放在这个没有构建标签的文件里，而不是 pin_windows.go：
 //   - services 层不分平台，它无条件调用 SetPinActions 把两个回调注入进来；
 //   - 非 Windows 的占位实现（pin_unix.go）也要引用这个类型。
 //

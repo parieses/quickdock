@@ -12,8 +12,8 @@ import (
 // 剪贴板场景的 AI 问答：把「用户选中的剪贴板文本」交给模型，拿回处理后的结果。
 //
 // 与 SSH 场景（services/sshx/ai.go）的关系：
-//   - **共用** internal/aiutil 的围栏解析与分段结构（判定"什么算命令"只有一份实现）。
-//   - **不共用**风险规则表：剪贴板场景的输出是给用户看的文本/代码，
+//   - 共用 internal/aiutil 的围栏解析与分段结构（判定"什么算命令"只有一份实现）。
+//   - 不共用风险规则表：剪贴板场景的输出是给用户看的文本/代码，
 //     不存在"在生产机上执行"这种前提，风险标注在这里没有意义。
 //
 // 三个预置动作（翻译 / 摘要 / 格式化）覆盖剪贴板里绝大多数内容的处理诉求。
@@ -46,12 +46,9 @@ const (
 
 // clipboardAiSystemPrompt 剪贴板场景的系统提示词。
 //
-// 写法上的要点：
-//   - **要求模型自己声明前提**，不要假装确定。剪贴板内容常常是残缺的
-//     （截断的日志、没有上下文的报错），模型看不见的部分应当明说。
-//   - **只输出处理结果**，不要复述原文。用户要的是译文/摘要，
-//     前面再贴一遍原文纯属噪音。
-//   - 代码类内容放围栏里（用 mdFence 拼接：反引号无法在 Go 原始字符串中转义）。
+// 三条要点：要求模型自己声明不确定的部分（剪贴板内容常是残缺日志）；只输出
+// 处理结果、不复述原文；代码类内容放围栏（用 mdFence 拼接，反引号没法在 Go
+// 原始字符串里转义）。
 var clipboardAiSystemPrompt = strings.Join([]string{
 	"你是一个文本处理助手，服务于一个剪贴板历史工具。",
 	"",
@@ -181,16 +178,16 @@ func (a *ClipboardService) AskAI(req ClipboardAiAskRequest) *services.ApiResult 
 // buildClipboardAiPrompt 组装用户提示词。
 //
 // 结构固定为「正文 → 任务说明 → 本次问题」，与 SSH 场景同一个道理：
-// **本次问题放最末尾**——模型的注意力落在最后，而 AIAsk 超预算时是
-// **从头截断**（见 services/ai.AskMaxUserRune），末尾的问题最先被砍。
+// 本次问题放最末尾——模型的注意力落在最后，而 AIAsk 超预算时是
+// 从头截断（见 services/ai.AskMaxUserRune），末尾的问题最先被砍。
 // 所以预算必须自己按优先级分配，不能依赖后端截断。
 //
-// 优先级：**本次问题 > 正文 > 历史**。
+// 优先级：本次问题 > 正文 > 历史。
 // 正文丢了模型没东西可处理，问题丢了模型不知道要干什么；
 // 历史少了最多让多轮追问没那么连贯，超预算时丢最旧的。
 func buildClipboardAiPrompt(text, action, question string, history []string) string {
 	sections := []aiutil.Section{}
-	// 正文：超长时保留**尾部**——用户刚复制的内容通常在末尾。
+	// 正文：超长时保留尾部——用户刚复制的内容通常在末尾。
 	if body := strings.TrimSpace(text); body != "" {
 		if n := len([]rune(body)); n > clipboardAiTextMaxRune {
 			body = aiutil.TrimRunes(body, clipboardAiTextMaxRune, true)
@@ -205,7 +202,7 @@ func buildClipboardAiPrompt(text, action, question string, history []string) str
 
 	// 任务说明：预置动作的指令 + 用户的自由提问。
 	//
-	// 两者**组合**而不是二选一：追问时（"再短一点"）只带用户那句，
+	// 两者组合而不是二选一：追问时（"再短一点"）只带用户那句，
 	// 模型就不知道当前在做什么——它会看到一句没头没尾的要求。
 	// 所以动作指令始终带上，用户提问追加在后面。
 	var parts []string

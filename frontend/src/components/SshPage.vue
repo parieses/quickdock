@@ -177,7 +177,7 @@ async function load() {
 /** 点主机：该主机已有标签就聚焦最近打开的那个，否则新建。 */
 async function selectHost(h: SshHost) {
   if (h.isFolder) return
-  // 从别的标签切过来时，当前标签可能正跑着命令。但**不弹确认**：
+  // 从别的标签切过来时，当前标签可能正跑着命令。但不弹确认：
   // 标签栏的意义就是随时切换，切换不销毁会话（SshSessionView 靠 v-show 保留），
   // 所以这里没有任何破坏性后果，弹框只会让多标签变得难用。
   const r = openOrFocus(tabs.value, h, findResumableFor(h.id))
@@ -201,7 +201,7 @@ async function closeTabById(tabId: string) {
   //
   // 一旦从 tabs 里摘掉这一项，v-for 会立刻卸载对应的 SshSessionView，
   // xterm 随之 dispose——用户刚看的滚动缓冲就没了。此时再点「取消」，
-  // 重建出来的是一个全新组件实例：它会重新 doConnect() 开出**第二条**
+  // 重建出来的是一个全新组件实例：它会重新 doConnect() 开出第二条
   // 会话，而原来那条在 Go 侧既没人引用、也没有 UI 入口能关掉（孤儿会话），
   // 连接池的引用计数也永远归不了零。所以先问，问完再拆。
   const target = findTab(tabs.value, tabId)
@@ -328,7 +328,7 @@ function editFromDetail(h: SshHost) {
 
 // ---- 一次性执行命令 ----
 //
-// 从详情弹窗进来：**不关详情**。用户刚在详情里看过凭据状态、环境与地址，
+// 从详情弹窗进来：不关详情。用户刚在详情里看过凭据状态、环境与地址，
 // 跑完命令往往还要回去核对，关掉再打开是纯损失。执行弹窗的 z-index 更高，
 // 直接叠在上面，Esc 先收掉它。
 const execVisible = ref(false)
@@ -352,7 +352,7 @@ async function removeHost(h: SshHost) {
     unwrap(await DeleteHost(h.id))
     // 被删的主机若有打开的标签，一并关掉并断开——否则标签会停在一块死画面上。
     //
-    // 删**文件夹**必须展开子树：后端是级联删除的，而文件夹本身不会有标签，
+    // 删文件夹必须展开子树：后端是级联删除的，而文件夹本身不会有标签，
     // 只看 tab.hostId === h.id 会一个都匹配不到。结果就是分组从树上消失了，
     // 但里面主机的标签和会话全留着——重连必然报 ssh_host_not_found，
     // 而且那条 Go 侧会话从此没有任何 UI 入口能关掉。

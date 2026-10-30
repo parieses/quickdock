@@ -560,7 +560,7 @@ func (a *AppService) executeRecurringTodo(t *db.ScheduledTask) (string, string) 
 	if orig, gErr := a.DB.GetTodo(p.TodoID); gErr == nil {
 		tags = orig.Tags
 	}
-	// 截止日按「本次生成的那一天」重算：payload 里的 dueDate 是**建这条重复规则当天**
+	// 截止日按「本次生成的那一天」重算：payload 里的 dueDate 是建这条重复规则当天
 	// 的快照，原样沿用会让每天的实例都堆在同一个旧日期上（每天新增一条"上周到期"的任务）。
 	// 原截止日在未来（提前建好的）则保留，用户显式设的日期不该被覆盖。
 	due := p.DueDate

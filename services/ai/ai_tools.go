@@ -2,7 +2,7 @@ package ai
 
 // 内置 agent：让 AI 页的对话流自己调用 MCP 工具集。
 //
-// 与「外部 AI 通过 MCP 调宿主」是**同一份工具、同一套闸门**（internal/mcp 的等级门
+// 与「外部 AI 通过 MCP 调宿主」是同一份工具、同一套闸门（internal/mcp 的等级门
 // 与单工具开关），区别只在调用方：这里是宿主自己的 AI 页，那里是 dsh / 其他客户端。
 // 不另设一套开关 —— 两套开关迟早会出现「面板里关了，内置 AI 还能调」，
 // 而那种时候没人说得清应该信哪一个。
@@ -12,8 +12,8 @@ package ai
 //   - ai_chat.go：从 SSE 分片里把 tool_calls 拼出来（协议层）
 //   - ai_stream.go：多轮循环、计费累加、事件下发、落库
 //
-// 这条链上唯一不可逆的语义在 ai_stream.go：**工具调用轮次里的 assistant 文本
-// 也会流给用户看**。模型常常先说「我查一下」再调工具，那段话不该被吞掉。
+// 这条链上唯一不可逆的语义在 ai_stream.go：工具调用轮次里的 assistant 文本
+// 也会流给用户看。模型常常先说「我查一下」再调工具，那段话不该被吞掉。
 
 import (
 	"context"
@@ -32,7 +32,7 @@ import (
 const (
 	// aiToolMaxRounds 一次提问里最多允许几轮工具调用。
 	//
-	// 8 轮够覆盖「查列表 → 读细节 → 交叉确认 → 回答」这类查询链路，但**不够分段写长文档**：
+	// 8 轮够覆盖「查列表 → 读细节 → 交叉确认 → 回答」这类查询链路，但不够分段写长文档：
 	// 实测让模型整理一份几十节的教程时，它每轮 file_edit 填一节，8 轮用完才写到第十八节，
 	// 而收尾轮只能空手总结「还差什么」。12 轮覆盖了这类「边写边改」的活儿。
 	// 再多就基本是模型在原地打转，而每多一轮都是全额计费（上下文要整份重发一遍）。
@@ -77,7 +77,7 @@ const (
 
 // aiToolCall 一次工具调用。
 //
-// Args 保留模型给出的 **JSON 字符串原文**：解析失败时要原样回给模型看
+// Args 保留模型给出的 JSON 字符串原文：解析失败时要原样回给模型看
 // （它会自己改），而不是丢一个「参数非法」让它无从下手。
 type aiToolCall struct {
 	ID   string `json:"id"`
@@ -136,7 +136,7 @@ type agentLinked interface {
 
 // aiGateMode 需要「模式门」的那批工具的唯一放行模式（与 aiModePrompts 的 key 对应）。
 //
-// 需要注意门只对**宿主工具**（mcpsrv.Global 里的东西）成立：环境、笔记、待办、插件
+// 需要注意门只对宿主工具（mcpsrv.Global 里的东西）成立：环境、笔记、待办、插件
 // 这些直接读写用户数据的能力，在普通对话里被顺手指令去执行是设计错误——
 // 用户问一句常识，AI 顺手停了他的服务。教程模式的定位本来就是「通过对话操作这个软件」，
 // 工具在那里才是本职。
@@ -147,7 +147,7 @@ type agentLinked interface {
 // run_command 里被拒——不靠「只在教程模式开放」兜底。
 const aiGateMode = "tutorial"
 
-// aiGeneralCategories 宿主工具里**所有模式**都能用的分类。
+// aiGeneralCategories 宿主工具里所有模式都能用的分类。
 //
 // 目前只有 file：file_read / file_grep / file_search 是只读的，而「让 AI 看一眼这个文件」
 // 在普通对话里同样成立；更关键的是 file_edit 的前置就是 file_read——读不到就改不了。
@@ -281,7 +281,7 @@ const (
 	//
 	// 这段存在的唯一原因是一个实测出来的坏结果：轮次用尽时工具被撤下（请求里不再有
 	// tools），但 system 里那段「可用工具」如果还留着，模型会认为工具仍然可用，
-	// 于是**把调用写成正文**——DeepSeek 会吐出一串 `<｜DSML｜invoke>` 标记
+	// 于是把调用写成正文——DeepSeek 会吐出一串 `<｜DSML｜invoke>` 标记
 	// （见 ai_dsml.go）。用户在气泡里看到一段原始标记，然后就没了下文。
 	// 所以收尾轮不仅要撤掉工具说明，还要明确告诉它「现在是纯文字收尾」。
 	toolHintExhausted = "\n\n[工具轮次已用尽]\n" +
@@ -316,7 +316,7 @@ func firstSystem(messages []map[string]interface{}) string {
 // 调用输出成正文（DeepSeek 的 DSML 标记），用户看到的是半句话 + 一堆原始标记。
 // 只有每轮按「当前到底有没有工具」重建，才能把已经说过的话收回来。
 //
-// base 必须是**没贴过任何提示**的原文，由调用方在首次组装后取一次并存着
+// base 必须是没贴过任何提示的原文，由调用方在首次组装后取一次并存着
 // （见 ai_stream.go）。重复传已贴过的内容会导致提示段层层叠加。
 func applySystemHints(messages []map[string]interface{}, base, mode, cwd string, withTools, exhausted bool) {
 	if len(messages) == 0 || messages[0]["role"] != "system" {
@@ -424,11 +424,11 @@ func canRunParallel(calls []aiToolCall) bool {
 // 少一条或顺序错了，上游会直接 400，而且报错信息通常只说
 // 「messages with role 'tool' must be a response to a preceding message with 'tool_calls'」。
 //
-// 单个工具失败**不中断整轮**：把错误文本当结果回给模型，它通常会换参数重试
+// 单个工具失败不中断整轮：把错误文本当结果回给模型，它通常会换参数重试
 // 或改用别的工具。只有 ctx 被取消（用户点了停止）才提前退出。
 //
 // seen 是「本次提问内已经成功执行过的调用」（key 见 toolCallKey），由调用方在
-// 一次提问开始时建好、跨轮复用：**只在一次提问内有效**，新提问重新建空的——
+// 一次提问开始时建好、跨轮复用：只在一次提问内有效，新提问重新建空的——
 // 用户说「再发一次」时那是新的意图，不该被上一次的记录挡掉。
 //
 // 并发只改「怎么跑」，不改「怎么拼」：结果按 calls 的下标回填，拼消息时
@@ -731,7 +731,7 @@ func parseToolArgs(raw string) (map[string]any, error) {
 
 // toolCallKey 生成「同名 + 同参数」的判重键。
 //
-// 用**解析后重新序列化**的参数而不是原始字符串：模型两次给出的 JSON 可能
+// 用解析后重新序列化的参数而不是原始字符串：模型两次给出的 JSON 可能
 // 只差空格或键的顺序（`{"a":1,"b":2}` vs `{"b":2, "a":1}`），按原文比较会漏判。
 // Go 的 json.Marshal 对 map 的键排序是固定的，所以等价参数必然得到同一个串。
 // 解析失败（调用方已单独处理）时退回原文，宁可漏判也不要误判成同一次调用。
@@ -842,7 +842,7 @@ func estimateLoopTokens(messages []map[string]interface{}) int {
 //   - 摘要要再调一次模型，在已经连调好几轮的循环里是雪上加霜（钱和时间都翻倍）；
 //   - 工具结果是最占体积、又最不需要逐字保留的部分——「查过 port_list，结论是
 //     9230 在监听」比完整 JSON 有用得多；
-//   - 最近一轮的结果**一定不折叠**：模型正要用它，折了等于让它重查。
+//   - 最近一轮的结果一定不折叠：模型正要用它，折了等于让它重查。
 //
 // budget 由 aiLoopBudget 按模型窗口算出来传进来：固定 24000 对 1M 窗口的模型
 // 是白白折叠（本可以塞进更多文件原文），对 8K 模型则根本压不住。
@@ -891,7 +891,7 @@ func compactLoopMessages(messages []map[string]interface{}, budget int) int {
 	return folded
 }
 
-// truncateKeepLines 按字符截断，但**保留换行**。
+// truncateKeepLines 按字符截断，但保留换行。
 //
 // 不用 logger.Trunc：它把换行压成空格（日志要一行一条），而工具结果多半是
 // 缩进 JSON 或带行号的匹配结果，压成一行就完全没法看了。

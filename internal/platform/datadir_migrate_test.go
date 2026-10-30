@@ -9,7 +9,7 @@ import (
 
 // TestMigrateDataDirSkipsRebuildable 验证迁移的筛选规则。
 //
-// 现在的规则：**除数据库三件套外全部搬运**（含运行时/模块缓存/依赖树）。
+// 现在的规则：除数据库三件套外全部搬运（含运行时/模块缓存/依赖树）。
 // 早期版本跳过这些「可重建」内容并在迁移后重新下载；改成「打包 → 复制 → 解压」后，
 // 跨盘搬运变成一次顺序读写，比逐文件复制快、也比重新下载快，于是不再跳过。
 //
@@ -24,7 +24,7 @@ func TestMigrateDataDirSkipsRebuildable(t *testing.T) {
 	mkFile(t, filepath.Join(src, "icons", "i.ico"), "ico")
 	mkFile(t, filepath.Join(src, "env", "settings.json"), "{}")
 
-	// 以前会被跳过的环境数据：现在**必须**一起搬走
+	// 以前会被跳过的环境数据：现在必须一起搬走
 	mkFile(t, filepath.Join(src, "runtime", "go", "1.27.2", "bin", "go.exe"), "goexe")
 	mkFile(t, filepath.Join(src, "runtime", "go", "1.27.2", "gopath", "pkg", "mod", "x.go"), "mod")
 	mkFile(t, filepath.Join(src, "runtime", "node", "v22.22.2", "node.exe"), "node")
@@ -114,7 +114,7 @@ func TestMigrateDataDirSkipsRebuildable(t *testing.T) {
 // TestReplaceBytesPath 覆盖数据目录路径改写的边界。
 //
 // 重点场景：
-//   - 内容里写的是**历史遗留**的旧目录（不是本次迁移的 oldDir），也要被替换
+//   - 内容里写的是历史遗留的旧目录（不是本次迁移的 oldDir），也要被替换
 //   - `.quickdock-backup` 这类别的目录名不能被误伤
 //   - 分隔符混用（/ 与 \）都要认
 func TestReplaceBytesPath(t *testing.T) {
@@ -159,7 +159,7 @@ func TestReplaceBytesPath(t *testing.T) {
 }
 
 // TestCleanupOldDataDirKeepsDatabase 验证旧目录清理：删掉已搬走的内容，
-// 但**保留数据库三件套**（正被 SQLite 独占，重启后还要靠它们做 VACUUM INTO 导出）。
+// 但保留数据库三件套（正被 SQLite 独占，重启后还要靠它们做 VACUUM INTO 导出）。
 func TestCleanupOldDataDirKeepsDatabase(t *testing.T) {
 	dir := t.TempDir()
 	mkFile(t, filepath.Join(dir, "plugins", "demo", "main.js"), "x")
@@ -191,7 +191,7 @@ func TestCleanupOldDataDirKeepsDatabase(t *testing.T) {
 
 // TestArchiveDataDirRewritesPaths 验证打包时会改写写死旧目录绝对路径的文本配置。
 //
-// 背景：runtime/go/<ver>/gopath/env 里写的是 GOPATH=<旧数据目录>\runtime\go\...。
+// runtime/go/<ver>/gopath/env 里写的是 GOPATH=<旧数据目录>\runtime\go\...。
 // 整体搬到新盘后若不改写，Go 会把模块缓存继续写回旧目录——等于只搬了一半。
 func TestArchiveDataDirRewritesPaths(t *testing.T) {
 	oldDir := t.TempDir()
@@ -301,7 +301,7 @@ func TestCleanupRebuildableDirs(t *testing.T) {
 
 // TestIsRebuildable 覆盖「可重建」判定。
 //
-// 现在这张清单**只用于旧目录清理**（搬完之后把旧目录里的对应内容删掉），
+// 现在这张清单只用于旧目录清理（搬完之后把旧目录里的对应内容删掉），
 // 不再用于「跳过搬运」——迁移改成整体打包搬运后，什么都不跳。
 // 所以判定本身仍需正确：判错会导致旧目录里该删的没删（占用翻倍）
 // 或不该删的被删（用户丢数据）。

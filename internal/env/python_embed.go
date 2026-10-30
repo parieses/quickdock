@@ -12,38 +12,15 @@ import (
 	"quickdock/internal/sysutil"
 )
 
-// python.org 的 Windows「embeddable 便携包」是 QuickDock 安装 Python 的下载源，
-// 但它天生缺三样东西：
+// python.org 的 Windows「embeddable」便携包是 Python 的安装来源，但它不带
+// pip、ensurepip、venv，而且 `python3XX._pth` 里的 `import site` 默认是注释掉的。
+// site 不运行，site-packages 就挂不进 sys.path——pip 即使装进去了，
+// `python -m pip` 仍会报 "No module named pip"。
 //
-//  1. pip 本身——包内不带 site-packages/pip；
-//  2. ensurepip 模块——`python -m ensurepip` 报 "No module named ensurepip"，
-//     所以「引导 pip（ensurepip）」这条老路对 embeddable 必然失败；
-//  3. venv 模块——同样不在包内（`python -m venv` 同样报 no module）。
-//
-// 更隐蔽的是第 4 点：embeddable 包里有个 `python3XX._pth` 文件，
-// 内容形如
-//
-//	python315.zip
-//	.
-//
-//	# Uncomment to run site.main() automatically
-//	#import site
-//
-// `import site` 那行**默认是注释掉的**。site 模块负责把 site-packages 挂进
-// sys.path，它不运行 → 就算 pip 装进去了，`python -m pip` 依然报 "No module named pip"
-// （pip 文件确实躺在 Lib\site-packages 下，只是没人告诉解释器去那儿找）。
-//
-// 因此本文件实现「embeddable 专用」的两步引导：
-//
-//	第一步：改写 _pth，取消 import site 的注释（必要时补 site-packages 路径行）；
-//	第二步：下载 get-pip.py 并执行，把 pip 装进 site-packages。
-//
-// 关于 get-pip.py 内嵌的那份 pip wheel：它只用来**执行安装动作**（作为 pip 客户端），
-// pip 本体仍要从 PyPI 下载（实测 --no-index 会直接失败：
-// "Could not find a version that satisfies the requirement pip"）。
-// 故引导必须联网，且源不可用时要能换源重试——见 pipIndexURLs。
-//
-// 之所以不用 ensurepip：embeddable 包里压根没有这个模块（见上）。
+// 所以引导分两步：改写 _pth 放开 import site，再用 get-pip.py 装 pip。
+// get-pip.py 内嵌的 pip wheel 只当安装客户端用，pip 本体仍要从 PyPI 取
+// （--no-index 会报 "Could not find a version that satisfies the requirement pip"），
+// 因此引导必须联网，单源失败时换源重试，见 pipIndexURLs。
 
 // getPipURLs get-pip.py 的下载地址。
 //
@@ -311,7 +288,7 @@ func pythonHasVirtualenv(exe string) bool {
 
 // installVirtualenv 为 embeddable 解释器装上 virtualenv，补齐缺失的 venv 能力。
 //
-// 背景：embeddable 包内不含 venv 模块（`python -m venv` 报 "No module named venv"），
+// embeddable 包内不含 venv 模块（`python -m venv` 报 "No module named venv"），
 // 且 ensurepip 也不在包内，没法靠标准途径补。而 virtualenv 是纯 pip 包，
 // 不依赖解释器内置的 venv 模块，能在 embeddable 上正常创建带 pip 的虚拟环境
 // （实测在 Python 3.15 embeddable 上创建成功，seeded pip==26.2.2）。

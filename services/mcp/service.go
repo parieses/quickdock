@@ -67,7 +67,7 @@ func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService
 
 // MCPStatus 返回 MCP 服务运行状态、监听地址与工具开放情况。
 //
-// 三个计数只统计**对外工具**（Global 注册表），agent 工具单独给一个 agent 数：
+// 三个计数只统计对外工具（Global 注册表），agent 工具单独给一个 agent 数：
 // 混在一起算的话，面板上会显示「43 / 52」，用户的第一反应是「9 个被挡住了」，
 // 然后去调等级——怎么调都不会变，因为那 9 个本来就不归 MCP 管。
 func (s *MCPService) MCPStatus() *services.ApiResult {

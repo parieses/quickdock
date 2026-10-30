@@ -111,7 +111,7 @@ function onDrop() {
   resetDrag()
   if (!hint || !id) return
   const res = resolveDrop(props.tree, id, hint.targetId, hint.position)
-  // resolveDrop 返回 null = 非法落点（拖进自己的子孙）。此时**什么都不做**，
+  // resolveDrop 返回 null = 非法落点（拖进自己的子孙）。此时什么都不做，
   // 静默拒绝比弹一个错误框好——用户拖错了，取消掉就行，不该被训斥。
   if (!res) return
   emit('move', { id, parentId: res.parentId })

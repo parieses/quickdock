@@ -5,14 +5,14 @@ import (
 	"unicode/utf8"
 )
 
-// 这个文件解决一个反复出现的问题：**给 AI 拼 prompt 时，被裁掉的往往是用户的问题**。
+// 这个文件解决一个反复出现的问题：给 AI 拼 prompt 时，被裁掉的往往是用户的问题。
 //
-// 背景：services/ai.AIAsk / AIAskStream 超预算时**从头截断**（见 ai.AskMaxUserRune）。
+// services/ai.AIAsk / AIAskStream 超预算时从头截断（见 ai.AskMaxUserRune）。
 // 也就是说调用方把什么排在最末尾，什么就最先被砍掉。之前 SSH 面板把「本次问题」
 // 放最后（为了注意力），结果屏显 + 历史一满，用户的问题整段消失 → 多轮追问答非所问，
 // 且极难复现。
 //
-// 所以规则是：**任何拼 prompt 的地方都必须自己按优先级做预算**，不能依赖 AIAsk 的截断。
+// 所以规则是：任何拼 prompt 的地方都必须自己按优先级做预算，不能依赖 AIAsk 的截断。
 // 这段逻辑此前在 services/sshx 与 services/clipboard 各写了一份，第三、第四个域
 // 再各写一份，优先级口径必然漂移（一个把历史算进正文预算、另一个不算，
 // 表现就是"同一个模型，这个面板答得比那个面板蠢"）。
@@ -21,14 +21,14 @@ import (
 
 // Section 提示词中的一段上下文。
 //
-// 数组顺序即渲染顺序（模型读到的顺序），**不代表优先级**：
+// 数组顺序即渲染顺序（模型读到的顺序），不代表优先级：
 // 优先级由 Pinned / MaxShare / 数组位置（越靠后越重要）共同决定。
 type Section struct {
 	// Title 小节标题（渲染为 "## 标题"）。空串表示不加标题，只放正文。
 	Title string
 	// Body 段内容。为空时整段跳过。
 	Body string
-	// KeepTail 超预算时保留**尾部**。
+	// KeepTail 超预算时保留尾部。
 	// 日志、终端屏显这类内容是「越新越相关」，砍掉开头比砍掉结尾损失小。
 	KeepTail bool
 	// Pinned 不参与裁剪：整段保留。
@@ -38,7 +38,7 @@ type Section struct {
 	// MaxShare 本段最多占用总预算的比例（0 = 不限）。
 	// 典型用法：终端屏显限 0.5，把另一半留给历史与多轮连贯性。
 	MaxShare float64
-	// DropWhenTight 放不下时**整段丢弃**，而不是截成半句残话。
+	// DropWhenTight 放不下时整段丢弃，而不是截成半句残话。
 	// 半段截断的内容对模型是噪音（"日志的前 30 个字"既不能说清楚问题，
 	// 又占掉了预算），不如干脆不给。
 	DropWhenTight bool
@@ -53,7 +53,7 @@ type Prompt struct {
 	Max int
 	// Sections 上下文段，按「越靠后越重要」排列。
 	Sections []Section
-	// History 多轮历史（从旧到新）。装配时从**新往旧**塞，塞不下就丢更旧的。
+	// History 多轮历史（从旧到新）。装配时从新往旧塞，塞不下就丢更旧的。
 	History []string
 	// HistoryTitle 历史小节标题，空则用「之前的对话」。
 	HistoryTitle string
@@ -63,7 +63,7 @@ type Prompt struct {
 	HistoryMaxTurns int
 	// Task 本次要求/问题。
 	//
-	// 它**永远最后渲染、永远不裁剪**——这是整个装配器存在的理由。
+	// 它永远最后渲染、永远不裁剪——这是整个装配器存在的理由。
 	Task string
 	// TaskTitle 本次要求的小节标题，空则用「本次要求」。
 	TaskTitle string
@@ -154,7 +154,7 @@ func BuildPrompt(p Prompt) string {
 			}
 		}
 
-		// 标题与块间距是**固定开销**，正文只能用 share 剩下的部分。
+		// 标题与块间距是固定开销，正文只能用 share 剩下的部分。
 		// 早期版本直接拿 share 当正文预算，结果块实际长度总是超出 share 一个标题，
 		// 末尾那道兜底裁剪就会回头把这一段整体砍掉——表现为"给了预算的段反而消失"。
 		overhead := runeCount(renderBlock(s.Title, "")) + blockSeparatorCost

@@ -1,4 +1,4 @@
-// Package aitools 是内置 AI 专用的工具集，**不属于 MCP 对外能力**。
+// Package aitools 是内置 AI 专用的工具集，不属于 MCP 对外能力。
 //
 // 分界很重要：MCP（services/mcp + internal/mcp）对外提供的是「QuickDock 这个软件
 // 本身能干什么」——环境管理、快捷项、笔记、待办、剪贴板、诊断、定时、监控、插件。

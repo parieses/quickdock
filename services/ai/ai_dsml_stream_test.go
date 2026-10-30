@@ -11,7 +11,7 @@ import (
 )
 
 // 端到端验证「模型把工具调用写成正文」这条路径：
-// 流式入口要把它还原成真正的 tool_calls，并且**一个标记字符都不推给前端**。
+// 流式入口要把它还原成真正的 tool_calls，并且一个标记字符都不推给前端。
 func TestStreamAIChatRecoversDSMLTextCalls(t *testing.T) {
 	chunks := []string{
 		"骨架文件已经建好，我开始逐段填入内容。\n\n",

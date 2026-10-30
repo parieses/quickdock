@@ -10,17 +10,17 @@ import (
 	"time"
 )
 
-// 数据目录迁移：把旧数据目录**整体**搬到新目录。
+// 数据目录迁移：把旧数据目录整体搬到新目录。
 //
 // 为什么整体搬而不是「只搬核心数据 + 重新下载环境数据」：
 //   - 早期实现跳过可重建内容（运行时/模块缓存/依赖树），理由是它们有 16 万余个
 //     小文件、约 5GB，逐文件复制慢到分钟级。改成「打包 → 复制 → 解压」后，
-//     跨盘搬运变成**一次顺序读写**（单个 zip 文件），比逐文件复制快一个数量级，
+//     跨盘搬运变成一次顺序读写（单个 zip 文件），比逐文件复制快一个数量级，
 //     也比重新下载快（网络往返 + 解压）。
 //   - 于是不再需要区分「核心数据 / 可重建数据」，整个目录一起搬最简单也最安全：
 //     不会漏文件、不会漏配置、用户不需要等下载。
 //
-// 唯一的例外仍是**数据库三件套**（quickdock.db / -wal / -shm）：
+// 唯一的例外仍是数据库三件套（quickdock.db / -wal / -shm）：
 // 它们正被 SQLite 独占，普通复制会得到撕裂快照，删除也会失败。
 // 由 internal/db 的 VACUUM INTO 在重启后导出一致快照，见 db.FinishDataDirMigration。
 
@@ -56,7 +56,7 @@ const (
 
 // rebuildablePrefixes 「可重建」的数据目录子路径（相对数据目录，斜杠分隔）。
 //
-// 现在**只用于旧目录清理**（搬完之后把旧目录里这些内容删掉），不再用于跳过搬运。
+// 现在只用于旧目录清理（搬完之后把旧目录里这些内容删掉），不再用于跳过搬运。
 // 保留这张清单的价值在于：整体搬运后，这些内容在新目录已就位，
 // 旧目录里的同名内容就是纯冗余，留着等于磁盘占用翻倍。
 //
@@ -67,10 +67,10 @@ const (
 //   - dsh/node_modules    pnpm 依赖树
 //
 // 判定边界（改这个清单前先想清楚「旧目录里这份删了会不会丢东西」）：
-//   - `runtime/everything`、`runtime/composer` **不能**列进来：Everything 是
+//   - `runtime/everything`、`runtime/composer` 不能列进来：Everything 是
 //     104MB 的独立可执行文件，删了旧目录就再也回不去了。
-//   - `gopath/src` 是用户的 Go 工作区代码，**不能**跳过；只跳过其下的 `pkg`（模块缓存）。
-//   - `dsh_token` 是授权令牌，**不能**跳过——它与目录无关，跳过等于强制用户重新登录。
+//   - `gopath/src` 是用户的 Go 工作区代码，不能跳过；只跳过其下的 `pkg`（模块缓存）。
+//   - `dsh_token` 是授权令牌，不能跳过——它与目录无关，跳过等于强制用户重新登录。
 var rebuildablePrefixes = []string{
 	"runtime/go",
 	"runtime/node",
@@ -81,11 +81,11 @@ var rebuildablePrefixes = []string{
 
 // rebuildableFiles 按精确相对路径排除的条目。
 //
-// 判定边界：这个表里的每一项都**必须**有明确的重建途径，否���就等于丢文件。
+// 判定边界：这个表里的每一项都必须有明确的重建途径，否���就等于丢文件。
 // 曾经的错误：`bin/wails3.exe` 被列在这里，但全仓库没有任何代码会重新下载它
 // （它既不属于 runtime/go、node、git 任何一条重装链路，也不是 dsh 的自装包），
 // 迁移后新目录里就没有它了。现在这里保持为空——
-// 有疑问的条目一律**不要**排除，宁可多搬 54MB。
+// 有疑问的条目一律不要排除，宁可多搬 54MB。
 var rebuildableFiles = map[string]bool{}
 
 // DataDirFileName 主数据库文件名（数据目录根下）。
@@ -97,7 +97,7 @@ const DataDirFileName = "quickdock.db"
 // isDatabaseFile 判断相对路径是否属于 SQLite 数据库的任一附属文件
 // （主库 / -wal 预写日志 / -shm 共享内存索引）。
 //
-// 这三个文件**既不能普通复制也不能删除**：
+// 这三个文件既不能普通复制也不能删除：
 //   - 复制：数据库正被本进程打开，WAL 模式下主库文件可能落后于 -wal，
 //     逐字节复制三者会得到「撕裂」的快照（丢事务或损坏）。
 //     正确做法见 internal/db 的 ExportDatabaseFile（VACUUM INTO，SQLite 自己保证一致性）。
@@ -137,7 +137,7 @@ type migrateFile struct {
 
 // scanMigrateFiles 遍历旧数据目录，收集需要搬走的文件清单，同时统计总量。
 //
-// 现在**只跳过数据库三件套**（见 isDatabaseFile），其余一律纳入——
+// 现在只跳过数据库三件套（见 isDatabaseFile），其余一律纳入——
 // 包括此前跳过的可重建内容（运行时/模块缓存/依赖树）。原因见文件头注释：
 // 打包成 zip 后跨盘是一次顺序读写，比逐文件复制快，也比重新下载快。
 func scanMigrateFiles(src string) (files []migrateFile, totalBytes int64, skipped []string, err error) {
@@ -282,7 +282,7 @@ func MigrateDataDir(src, dst string, progress func(MigrateProgress)) error {
 // 被跳过的（可重建）内容保留在原地——它们要么会被重新下载覆盖，要么用户还要用；
 // 真正的旧数据（数据库/插件）已经搬到新目录，留着只会让磁盘占用翻倍。
 //
-// 删除失败**不视为致命错误**：Windows 上正在被进程占用的文件（日志、数据库等）
+// 删除失败不视为致命错误：Windows 上正在被进程占用的文件（日志、数据库等）
 // 必然删不掉，此时跳过即可——旧目录的彻底清理由重启后统一完成（见 CleanupDataDir）。
 func cleanupMigratedFiles(src string, files []migrateFile) error {
 	// 先删文件，再自底向上删空目录（files 是 Walk 的前序遍历，目录在文件之前，
@@ -318,7 +318,7 @@ func cleanupMigratedFiles(src string, files []migrateFile) error {
 
 // CleanupRebuildableDirs 删除旧数据目录里的「可重建」内容（运行时/模块缓存/依赖树）。
 //
-// 调用时机：迁移完成、且运行时已在**新目录**重新下载成功之后。此时旧目录里的
+// 调用时机：迁移完成、且运行时已在新目录重新下载成功之后。此时旧目录里的
 // 这些内容已经完全冗余——留着等于磁盘占用翻倍（实测近 5GB）。
 //
 // 只删可重建内容，不碰别的：旧目录里的数据库、日志等由 CleanupDataDir 负责。
@@ -336,12 +336,12 @@ func CleanupRebuildableDirs(dir string) error {
 	return nil
 }
 
-// CleanupOldDataDir 清理旧数据目录里**已经搬走**的内容。
+// CleanupOldDataDir 清理旧数据目录里已经搬走的内容。
 //
-// 整体搬运下，旧目录里的内容除了数据库三件套外**全是冗余**（都已在新目录就位），
+// 整体搬运下，旧目录里的内容除了数据库三件套外全是冗余（都已在新目录就位），
 // 所以这里删的是「除数据库三件套外的一切」。
 //
-// 数据库三件套（quickdock.db / -wal / -shm）**保留不动**：它们正被本进程独占，
+// 数据库三件套（quickdock.db / -wal / -shm）保留不动：它们正被本进程独占，
 // Windows 上既删不掉也不能删（重启后还要靠它们做 VACUUM INTO 导出一致快照）。
 // 旧目录的最终删除由 db.FinishDataDirMigration 在下次启动时完成。
 //

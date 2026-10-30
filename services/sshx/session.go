@@ -25,7 +25,7 @@ const (
 
 // SshDataEvent 终端输出帧。
 //
-// Data 是 base64 编码的**原始字节**，不是字符串。原因：SSH 输出里可能夹着
+// Data 是 base64 编码的原始字节，不是字符串。原因：SSH 输出里可能夹着
 // 非 UTF-8 片段（比如服务端 locale 不对时的文件名），一旦在 Go 侧强制转成
 // UTF-8 字符串就会产生替换符，终端画面出现「乱码块」。前端应解码成
 // Uint8Array 直接喂给 term.write()，让 xterm 自己处理字节流。
@@ -364,7 +364,7 @@ func (s *SshService) emitState(ev SshStateEvent) {
 
 // sessionEndCode 把「会话为什么结束」翻译成前端可判断的错误码。
 //
-// shell 以非零码退出（用户敲了 exit 1、脚本失败）是**正常结束**，
+// shell 以非零码退出（用户敲了 exit 1、脚本失败）是正常结束，
 // 不能报成错误，否则每次退出登录都会弹一次红色警告。
 func sessionEndCode(cause error) (code, msg string) {
 	if cause == nil {

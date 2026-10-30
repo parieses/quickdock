@@ -20,7 +20,7 @@ import (
 //	"filesystem": true                                  仅允许弹文件/保存对话框
 //	"filesystem": { "read": [...], "write": [...] }     对话框 + 白名单内的读写
 //
-// ⚠️ `true` 的语义**不包含**读写。现有插件里的 filesystem:true 一律是「能弹框」，
+// ⚠️ `true` 的语义不包含读写。现有插件里的 filesystem:true 一律是「能弹框」，
 // 沿用该语义可保证升级后零权限扩张；要读写必须显式声明 scope 对象。
 //
 // scope 条目支持：
@@ -29,7 +29,7 @@ import (
 //   - `*` / `?` / `[...]` 单段内通配
 //   - 不含通配符的条目 = 「该路径及其整个子树」（如 ~/Documents 等价于 ~/Documents/**）
 //
-// 匹配前**必须先把目标路径解析为绝对真实路径**（见 ResolveRealPath），
+// 匹配前必须先把目标路径解析为绝对真实路径（见 ResolveRealPath），
 // 否则白名单内的 ~/Documents/link（→ /etc）能让读写落到任意位置。
 
 // 文件系统动作（scope 分组名）

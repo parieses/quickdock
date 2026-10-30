@@ -264,7 +264,7 @@ func (g *GoRuntime) versionFromBin(bin string) string {
 
 // goVersionEnv 构造某版本 go 的进程环境：注入 GOENV 指向版本专属 go.env。
 //
-// 只注入 GOENV 而**不**注入 GOPATH，并且把父进程继承来的 GOPATH 剔除——原因很实际：
+// 只注入 GOENV 而不注入 GOPATH，并且把父进程继承来的 GOPATH 剔除——原因很实际：
 // 只要进程里存在 GOPATH 环境变量，`go env -w GOPATH=...` 就会报
 // "does not override conflicting OS environment variable" 而拒绝写入。
 // 让 GOPATH 以一条配置的形式落在版本专属 go.env 里、由 go 读取时自行应用，

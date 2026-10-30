@@ -9,13 +9,13 @@ import (
 // 环境变量在数据目录迁移时的处理：删除指向旧目录的项，设置指向新目录的项。
 //
 // 与 RewriteEnvVarsForDataDir（纯字符串替换）的区别：
-//   - PATH 是分号分隔的**列表**，纯替换会在新旧路径同时存在时产生重复条目
+//   - PATH 是分号分隔的列表，纯替换会在新旧路径同时存在时产生重复条目
 //     （例如旧路径 D:\.quickdock 与新路径 E:\.quickdock，替换后可能出现两条）。
 //     这里改为「按条目删除旧的 → 按条目追加新的 → 去重」。
 //   - 其它变量（GOROOT/GOPATH/GOENV 等）值里只有一个路径，替换即可；
 //     但若替换后新旧路径都在值里（如 GOROOT 里写了两个版本目录），也要清理。
 //
-// 原则：**只动指向旧数据目录的项**，其余用户自己的环境变量一律不碰。
+// 原则：只动指向旧数据目录的项，其余用户自己的环境变量一律不碰。
 
 // EnvVarChange 一条环境变量的变更记录（供 UI 展示与调试）。
 type EnvVarChange struct {
@@ -41,14 +41,14 @@ var pathListVars = map[string]bool{
 // oldDir/newDir 为空或相同时不做任何事。
 //
 // 两条路径：
-//   - PATH（分号分隔的**列表**）：逐条目把「旧目录前缀」换成「新目录前缀」。
+//   - PATH（分号分隔的列表）：逐条目把「旧目录前缀」换成「新目录前缀」。
 //     例如 C:\Users\X\.quickdock\runtime\go\1.27.2\bin
 //     → D:\.quickdock\runtime\go\1.27.2\bin。
 //     换前缀而不是「删旧 + 加数据目录本身」——后者会把 D:\.quickdock 塞进 PATH，
 //     而数据目录不是可执行目录，PATH 里留着它毫无意义；真正需要指向的是它下面的 bin。
 //   - 其它变量（GOROOT/GOPATH/GOENV 等）：值里只有一个路径，整值替换即可。
 //
-// 原则：**只动指向旧数据目录的项**，其余用户自己的环境变量一律不碰。
+// 原则：只动指向旧数据目录的项，其余用户自己的环境变量一律不碰。
 func ApplyEnvVarsForDataDir(oldDir, newDir string) (EnvVarResult, error) {
 	res := EnvVarResult{}
 	if oldDir == "" || newDir == "" {

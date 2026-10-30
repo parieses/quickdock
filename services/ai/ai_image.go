@@ -18,7 +18,7 @@ import (
 
 // AI 会话图片的输入、落盘与内容块组装。
 //
-// 设计前提：**不同模型支持的图片传入方式不同**，且差异是厂商实现细节而非协议保证：
+// 设计前提：不同模型支持的图片传入方式不同，且差异是厂商实现细节而非协议保证：
 //   - OpenAI / DeepSeek / Kimi / Qwen / Ollama(vllm)：image_url 同时接受公网 URL 与 base64 data URL；
 //   - Agnes 2.5 Flash 等：只接受公网可访问的 image_url，传 base64 直接报错；
 //   - Gemini 系（OpenAI 兼容端点）：多数只认 base64 inline，不抓任意公网 URL。
@@ -242,7 +242,7 @@ func validateImageURL(u string) error {
 }
 
 // parseImageDataURL 解析 data URL，返回 (mime, 原始字节)。
-// 同时做两道校验：声明的 MIME 在白名单内，且**文件实际内容（magic bytes）与声明一致**——
+// 同时做两道校验：声明的 MIME 在白名单内，且文件实际内容（magic bytes）与声明一致——
 // 只信声明的话，把 .exe 改名成 image/png 就能穿过前端校验（DeepSeek 文档亦明确
 // "格式由文件实际内容判断，而非文件名或声明的 MIME 类型"，照做）。
 func parseImageDataURL(dataURL string) (string, []byte, error) {
@@ -401,7 +401,7 @@ func (a *AIService) saveUserTurn(convID, content, imagesJSON string) error {
 // 提示，引导用户把档案的「图片输入方式」改成「仅公网链接」并改用图片 URL。
 // 返回空串表示无需额外提示。
 //
-// 背景：prepareChatImages 只校验档案「声明」的能力（both/url/base64），不校验模型
+// prepareChatImages 只校验档案「声明」的能力（both/url/base64），不校验模型
 // 实际能力；base64 被模型拒收时上游报错千奇百怪，统一补一句人话比裸报错有用。
 func (a *AIService) imageErrorHint(err error, imgs []AIChatImage) string {
 	if err == nil {

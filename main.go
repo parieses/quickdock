@@ -154,7 +154,7 @@ var assets embed.FS
 // 插件共享资源（common.css / common.js）：随 exe 打包，每次启动同步到
 // ~/.quickdock/plugins/builtin/ 供历史外部插件引用。
 //
-// 目录里**不再有内置插件**：内置插件方案已搁置（插件一律来自市场或本地 zip 安装），
+// 目录里不再有内置插件：内置插件方案已搁置（插件一律来自市场或本地 zip 安装），
 // 故 plugins/ 下只留这一份共享样式，不参与插件的注册与加载。
 //
 //go:embed all:plugins/shared
@@ -176,7 +176,7 @@ const (
 // 改这一个值即统一改全部窗口的文字/图标/间距大小。
 //
 // 取值来自「设置 → 基础 → 界面缩放」，由 platform.LoadUiZoom 读持久化配置，默认 1.0（标准）。
-// 用 var 而非 const 是有意的：窗口的 Zoom 与尺寸在**创建时**即固定，而配置只有进程启动
+// 用 var 而非 const 是有意的：窗口的 Zoom 与尺寸在创建时即固定，而配置只有进程启动
 // 后才读得到（此时数据库尚未打开，缩放因此存在数据目录之外的 quickdock.json，见
 // internal/platform/uizoom.go）。包级 var 在 main() 之前完成初始化，且 Go 按依赖顺序
 // 初始化——下面各尺寸依赖 uiZoom，必然排在其后，故无需显式的初始化函数。
@@ -748,7 +748,7 @@ func initUpdater(app *application.App, version string) error {
 // 在插件加载（services/lifecycle.go 按 DB 启用列表扫描）之前调用，确保宿主注入的
 // 兼容样式/脚本是最新版本；仅覆盖内容变化的文件。
 //
-// 这里**不再有内置插件**：内置插件方案搁置，插件一律来自市场或本地 zip 安装，
+// 这里不再有内置插件：内置插件方案搁置，插件一律来自市场或本地 zip 安装，
 // 因此本函数只同步共享资源，不注册也不加载任何插件。
 func extractSharedPluginAssets(mgr *plugin.Manager, sharedFS *embed.FS) {
 	// 目标目录沿用 builtin 这个名字：它已经写进历史插件前端的 <link> 路径，

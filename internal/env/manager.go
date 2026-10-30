@@ -704,9 +704,9 @@ func (m *Manager) installedVersionFor(rt Runtime, version string) string {
 	return version
 }
 
-// RebindRuntime 把指定运行时的「环境变量指向」重新注册到**当前数据目录**下的安装。
+// RebindRuntime 把指定运行时的「环境变量指向」重新注册到当前数据目录下的安装。
 //
-// 与 ReinstallRuntime 的区别：**不下载任何东西**。数据目录迁移改成「整体打包搬运」后，
+// 与 ReinstallRuntime 的区别：不下载任何东西。数据目录迁移改成「整体打包搬运」后，
 // 运行时本体（便携 Go/Node/Git、模块缓存、依赖树）已经随压缩包搬到新目录了，
 // 这里只需要把「哪个版本处于激活状态」重新写一遍环境变量：
 //   - PATH 条目（旧目录的 bin → 新目录的 bin）
@@ -764,7 +764,7 @@ func (m *Manager) ReinstallRuntime(runtimeID, version string) error {
 
 // rebindActive 把激活版本重新绑定到当前目录下的安装（数据目录迁移后用）。
 //
-// 与 SetActive 的区别：不看「版本号是否变化」，而是**无条件**重新注册路径——
+// 与 SetActive 的区别：不看「版本号是否变化」，而是无条件重新注册路径——
 // 迁移前后版本号往往相同但实际路径已变（旧的在新目录、新的是刚下载的），
 // 按版本号判断会漏掉重新注册，PATH 会继续指向旧目录。
 //

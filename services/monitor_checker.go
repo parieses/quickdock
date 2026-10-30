@@ -231,7 +231,7 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	// 恢复通知在首次探活成功时立即发出。用 current 副本避免探针期间读到过期开关。
 	//
 	// 多条件告警：latency_alert_ms>0 时，告警消息里会附带「延迟 Xms > 阈值」的说明。
-	// 但它**不参与是否告警的判定**：过去写成「第 N 次失败 且 当次延迟超阈值」，
+	// 但它不参与是否告警的判定：过去写成「第 N 次失败 且 当次延迟超阈值」，
 	// 第 N 次恰好延迟正常时计数继续涨到 N+1，等值条件再也不成立 → 本次故障永久不再告警。
 	// 想区分「只是慢」和「真的挂了」需要额外的「已告警」状态位（DB 加列），
 	// 在补上之前，连续 N 次失败就该告警——漏报真故障比多说一句「也变慢了」贵得多。
@@ -328,7 +328,7 @@ func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg strin
 	}
 	defer resp.Body.Close()
 	// 读取响应体（带 2MB 上限，用于内容匹配；其余丢弃）
-	// 变量名不能叫 body：上面那个 body 是**请求体**（io.Reader），
+	// 变量名不能叫 body：上面那个 body 是请求体（io.Reader），
 	// 同名 := 会撞上「no new variables on left side」，而且类型也不同。
 	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 2*1024*1024))
 

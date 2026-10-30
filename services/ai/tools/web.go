@@ -2,9 +2,9 @@ package aitools
 
 // 网页工具：抓取一个 URL 并返回可读正文。
 //
-// 为什么是 agent 工具而不是 MCP 工具：它**不读写宿主任何数据**，只往外出一次
+// 为什么是 agent 工具而不是 MCP 工具：它不读写宿主任何数据，只往外出一次
 // HTTP 请求，能力上属于「一个 code agent 的标配」，和 QuickDock 能配置什么无关。
-// 也因此它在内置 AI 的**所有模式**下都可用——抓文档、看报错页不需要先切换到教程模式。
+// 也因此它在内置 AI 的所有模式下都可用——抓文档、看报错页不需要先切换到教程模式。
 //
 // 不做「搜索引擎」：搜索要 API Key、要计费、要处理结果排序，而且模型自己
 // 知道该去哪个文档站。给它一个「能打开网页」的能力，比给它一个内置搜索框有用。
@@ -299,7 +299,7 @@ func docHTML(d *webDoc) (*html.Node, error) {
 
 // fetchWebPage 抓取并按内容类型决定怎么转成文本。
 //
-// offset 是**字符**偏移（不是行、不是字节）：截断后要续读，模型只能拿到上一次
+// offset 是字符偏移（不是行、不是字节）：截断后要续读，模型只能拿到上一次
 // 返回的字数，按字符续最直观。传 0 就是从开头。
 func fetchWebPage(target string, offset, maxChars int) (any, error) {
 	d, err := fetchWebDoc(target, http.MethodGet)
@@ -635,7 +635,7 @@ func collapseBlankLines(s string) string {
 // clipWebTextAt 从第 offset 个字符起截取 maxChars 个字符，并返回
 // 「全文总字数 / 是否还有剩余 / 下次该传的 offset」。
 //
-// offset 是**字符**偏移，与返回的 chars（全文总字数）同一把尺子：
+// offset 是字符偏移，与返回的 chars（全文总字数）同一把尺子：
 // 模型只需要把上一次拿到的数字相加就能续读，不用理解字节与编码。
 //
 // 截断说明写进正文而不是只放字段里：模型看的是正文，字段它经常忽略。

@@ -317,7 +317,7 @@ func escapeLike(s string) string {
 // ClearCompletedTodos 清除所有已完成项（连同它们的子任务）
 //
 // 子任务几乎总是 "todo" 状态（父任务做完了，勾选项未必逐条勾过），只删
-// status='done' 会把它们留成**孤儿行**：列表按父行分组渲染、搜索也只返回顶层任务，
+// status='done' 会把它们留成孤儿行：列表按父行分组渲染、搜索也只返回顶层任务，
 // 于是这些行既看不见也搜不到，只会在数据库里一直躺着。
 func (d *Database) ClearCompletedTodos() error {
 	d.mu.Lock()

@@ -105,7 +105,7 @@ type SnapshotPayload struct {
 	Items       []CollectionItem `json:"items"`
 	Tools       []OpenTool       `json:"tools"`
 	// Tables 扩展表数据，key 必须存在于 syncExtraTables。
-	// 注意：恢复时只处理 map 中**存在**的 key，因此旧备份（无 tables 字段）不会清空这些表。
+	// 注意：恢复时只处理 map 中存在的 key，因此旧备份（无 tables 字段）不会清空这些表。
 	Tables map[string][]map[string]interface{} `json:"tables,omitempty"`
 }
 

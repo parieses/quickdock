@@ -196,7 +196,7 @@ func parsePHPVersion(out string) string {
 }
 
 // ---- ServiceController：PHP-FPM（FastCGI）启停 / 状态 ----
-// 说明：官方 windows.php.net 发布的 PHP 构建**不含** unix 版 php-fpm，
+// 说明：官方 windows.php.net 发布的 PHP 构建不含 unix 版 php-fpm，
 // 其 Windows 等价物是 php-cgi.exe 的 FastCGI 模式（php-cgi.exe -b 127.0.0.1:9000）。
 // 因此 QuickDock 的「PHP-FPM」以该方式拉起，端口 9000；停止按端口 + 镜像名兜底。
 

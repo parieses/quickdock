@@ -1,9 +1,9 @@
 // CSV 导出（Excel 友好）。
 //
 // 三个必须照顾的点，缺一个用户就会觉得"导出的文件打不开"：
-// 1. **BOM**：不带 BOM 的 utf-8 CSV 在中文 Windows 的 Excel 里是乱码。
-// 2. **CRLF**：Excel 对纯 LF 的解析在各版本上不一致，按 CRLF 写最稳。
-// 3. **转义**：值里含逗号/引号/换行时必须整格加引号，内部引号翻倍，
+// 1. BOM：不带 BOM 的 utf-8 CSV 在中文 Windows 的 Excel 里是乱码。
+// 2. CRLF：Excel 对纯 LF 的解析在各版本上不一致，按 CRLF 写最稳。
+// 3. 转义：值里含逗号/引号/换行时必须整格加引号，内部引号翻倍，
 //    否则一条带逗号的错误输出会把整行挤成两列。
 
 import { downloadBlob } from './download'

@@ -16,9 +16,9 @@ import (
 
 // plugincrypto.go —— 宿主侧加密能力，供前端插件替代不可用的 window.crypto.subtle。
 //
-// 背景：插件前端跑在 iframe 里，sandbox 刻意不含 allow-same-origin
+// 插件前端跑在 iframe 里，sandbox 刻意不含 allow-same-origin
 // （见 frontend/src/components/PluginFrame.vue 的安全注释），于是拿到的是
-// opaque origin，window.crypto.subtle 在该上下文里**不可用**。
+// opaque origin，window.crypto.subtle 在该上下文里不可用。
 // 结果就是 vault 这类需要加密的插件只能降级成异或混淆——那只能挡住
 // 「顺手一瞥」，挡不住拿到数据文件的人。
 //
@@ -69,7 +69,7 @@ func B64(s string) ([]byte, error) {
 	return b, nil
 }
 
-// B64Enc 编码为**标准** base64（带 padding），便于插件直接落进 JSON 存储。
+// B64Enc 编码为标准 base64（带 padding），便于插件直接落进 JSON 存储。
 func B64Enc(b []byte) string {
 	return base64.StdEncoding.EncodeToString(b)
 }

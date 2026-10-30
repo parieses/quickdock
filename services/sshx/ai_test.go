@@ -13,7 +13,7 @@ import (
 // internal/aiutil/scenario_test.go —— 那是判定"什么算命令"的唯一实现，
 // 在公共层测一次即可，各场景域不重复测同一段逻辑。
 //
-// 本文件只测 **SSH 特有**的部分：SSH 风险规则表的覆盖度、提示词组装、
+// 本文件只测 SSH 特有的部分：SSH 风险规则表的覆盖度、提示词组装、
 // 环境约束、主机描述。
 
 func TestEvalRisk(t *testing.T) {
@@ -61,7 +61,7 @@ func TestEvalRisk(t *testing.T) {
 
 func TestEvalRisk_HighestLevelWins(t *testing.T) {
 	// 回归：规则表是分批追加的，书写顺序不构成优先级。
-	// 一条命令同时命中多条规则时必须取**最高等级**，否则后来追加的
+	// 一条命令同时命中多条规则时必须取最高等级，否则后来追加的
 	// 中等规则会把先写的高危规则"降级"，界面上就少了一道拦截。
 	//
 	// 这两条同时命中「通配符删除(medium)」与「递归强制删除(high)」。
@@ -209,7 +209,7 @@ func TestBuildSshAiPrompt_LimitsHistoryTurns(t *testing.T) {
 }
 
 func TestBuildSshAiPrompt_QuestionSurvivesBudget(t *testing.T) {
-	// 回归：AIAsk 会把整段 prompt 截断到 AskMaxUserRune，**从头保留**。
+	// 回归：AIAsk 会把整段 prompt 截断到 AskMaxUserRune，从头保留。
 	// 而本次问题写在 prompt 末尾，于是超预算时被砍掉的正是用户的问题本身——
 	// 屏显 + 几轮历史很容易占满预算，表现为多轮追问时 AI 答非所问。
 	// 这里锁定「问题必须活下来」这条底线。

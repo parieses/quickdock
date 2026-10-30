@@ -32,7 +32,7 @@ const aiContextDefaultWindow = 128000
 
 // aiContextSoftCap 单次请求愿意携带的历史上限。
 //
-// 窗口 1M 不等于要把它装满：历史是**每轮重发**的，装满 70 万 token 的历史
+// 窗口 1M 不等于要把它装满：历史是每轮重发的，装满 70 万 token 的历史
 // 意味着每问一句都付一次 70 万输入的钱，延迟也随之上来。12 万 token
 // 约合 8 万汉字，已经远超「一个真实任务里需要记住的上下文」；
 // 超过这个量级就摘要压缩，是省钱又不失忆的平衡点。
@@ -44,7 +44,7 @@ const aiContextMinBudget = 8000
 
 // aiContextWindows 内置窗口表（2026-10 快照）。
 //
-// 匹配规则是「模型名包含 match」且**取最长命中**（见 contextWindowOf），
+// 匹配规则是「模型名包含 match」且取最长命中（见 contextWindowOf），
 // 所以细粒度的条目要写全（gpt-5.4-mini 必须先于 gpt-5 命中），
 // 顺序本身无所谓。数字来源是各厂商当期文档；厂商改窗口不会通知我们，
 // 所以这里只当初始值用，一旦上游报过真实值就以那个为准。
@@ -155,7 +155,7 @@ func contextWindowOf(cfg AIProfile) int {
 
 // aiContextBudget 返回「历史 + 工具结果」可用的 token 预算。
 //
-// 窗口不能全给输入：max_tokens 是**预扣**而不是上限，上游会把
+// 窗口不能全给输入：max_tokens 是预扣而不是上限，上游会把
 // 「输入 + 预留输出」一起跟窗口比（DeepSeek 的报错就直接写明
 // "10001 in the prompt, 0 for the completion"）。所以先扣掉输出预留
 // 与系统提示/工具定义的位置，再只取七成——我们自己的 token 估算

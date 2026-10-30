@@ -158,7 +158,7 @@ func TestRunToolCallsSkipsDuplicate(t *testing.T) {
 	}
 }
 
-// compactLoopMessages：超预算时折叠**最早**的工具结果，最后一轮必须原样保留——
+// compactLoopMessages：超预算时折叠最早的工具结果，最后一轮必须原样保留——
 // 模型正要用它，折了等于逼它重查一次（多花一轮的钱）。
 func TestCompactLoopMessagesFoldsOldestOnly(t *testing.T) {
 	big := strings.Repeat("x", 20000) // 单条约 12500 token，两条即超 24000 预算

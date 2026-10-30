@@ -3,7 +3,7 @@
  *
  * 这些断言直接对应用户实际遇到的现象：
  *   - 正文中间出现一大片空白（旧实现剥围栏后留下 3~4 行连续空行）
- *   - **加粗** 显示成星号（旧实现用纯文本渲染，没走 markdown）
+ *   - 加粗 显示成星号（旧实现用纯文本渲染，没走 markdown）
  *   - 模型给了命令但界面上没有（旧实现要求配对围栏，未闭合时整条丢失）
  */
 import { describe, test, expect } from 'vitest'
@@ -69,7 +69,7 @@ describe('splitAiSegments', () => {
   })
 
   // 以下用例与后端 internal/aiutil/scenario_test.go 的 TestExtractCommands_ShellPromptPrefix /
-  // TestExtractCommands_PromptRescueBoundaries **逐条对应**。
+  // TestExtractCommands_PromptRescueBoundaries 逐条对应。
   // 前后端各有一份判定实现，用例不一一对应的话，改了一边另一边会静默漂移。
 
   test('剥掉 shell 提示符前缀', () => {

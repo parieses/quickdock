@@ -11,7 +11,7 @@ import (
 // baseTables 所有表结构（首次初始化时全部创建）
 // 使用 CREATE TABLE IF NOT EXISTS 确保幂等
 //
-// **索引不写在这里**：老库的列可能少于建表语句（新增列靠 columnMigrations
+// 索引不写在这里：老库的列可能少于建表语句（新增列靠 columnMigrations
 // 补），索引一旦引用新列就会在补列之前执行而报 no such column，
 // 导致整个迁移失败、应用起不来。索引统一下方 postMigrations。
 var baseTables = []string{
@@ -113,7 +113,7 @@ var baseTables = []string{
 		created_ts INTEGER NOT NULL DEFAULT 0,
 		source TEXT NOT NULL DEFAULT 'ui'
 	)`,
-	// 注意：activity 的 created_ts 索引**不能**放这里，见 postMigrations。
+	// 注意：activity 的 created_ts 索引不能放这里，见 postMigrations。
 
 	`CREATE TABLE IF NOT EXISTS snapshots (
 		id TEXT PRIMARY KEY,
@@ -353,7 +353,7 @@ var baseTables = []string{
 	)`,
 	// ai_conversations: cwd 是这个对话绑定的工作目录（用户选的文件夹）；
 	// space_id 非空表示它属于某个空间（侧栏收在空间下而不是「任务」组里）；
-	// mode 是**创建时就选定**的任务类型（对话/翻译/总结/解释/使用教程），
+	// mode 是创建时就选定的任务类型（对话/翻译/总结/解释/使用教程），
 	// 存库是因为它要跟着这个任务走——切走再回来、甚至重启应用，模式都不该变。
 	//
 	// 新库直接带这些列，老库靠 columnMigrations 补——两处都要有，漏一边就是
@@ -764,7 +764,7 @@ func (d *Database) migrate() error {
 
 	// 补列之后才能建的索引。
 	//
-	// 顺序契约：**所有索引都放这里，不放进 baseTables**。
+	// 顺序契约：所有索引都放这里，不放进 baseTables。
 	// baseTables 里 CREATE TABLE IF NOT EXISTS 对已存在的老表是空操作，
 	// 老表的列可能比建表语句少（新增列靠下面的 columnMigrations 补），
 	// 索引若紧跟建表语句执行，引用的新列此时还不存在，直接报

@@ -39,7 +39,7 @@ type ScheduledTask struct {
 	// 而命令/HTTP 请求可能有副作用（下单、重启服务）。该不该重试只有任务的
 	// 作者知道，全局默认重试等于替所有人做了个危险决定。
 	//
-	// 只对**定时触发**生效：手动「立即运行」时用户就在屏幕前，失败了再点一次
+	// 只对定时触发生效：手动「立即运行」时用户就在屏幕前，失败了再点一次
 	// 比让 RPC 挂着等 30 秒好。
 	RetryCount int `json:"retryCount"`
 	// NotifyChannels 通知渠道 CSV：system=系统通知 / webhook=已配置机器人。

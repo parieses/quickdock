@@ -56,7 +56,7 @@ const error = ref('')
 
 // ---- 番茄钟 / 专注计时 ----
 //
-// 计时用**截止时间戳**而不是每秒递减：
+// 计时用截止时间戳而不是每秒递减：
 //   - 窗口失焦 / 系统休眠 / 后台节流会让 setInterval 的“一秒”被拉长，递减式计时
 //     越走越慢，用户回来一看还剩 18 分钟，而实际已经过了 25 分钟；
 //   - 切到别的页面时本组件会被卸载（不在 KeepAlive 白名单），状态必须落到
@@ -525,7 +525,7 @@ const unscheduledCount = computed(() => todos.value.filter(x => x.dueDate === ''
 // 页面内搜索：ListTodos 已经一次把全部待办取到内存，直接前端过滤即可 ——
 // 支持拼音、零延迟，也不必再为页面单独开一条 SearchTodos 的请求链路
 //（那个接口的价值在命令面板：那边是独立窗口，没有这份内存数据）。
-// 搜索时**跨日期**：只搜当天等于没搜，用户找的是"那条待办在哪天"。
+// 搜索时跨日期：只搜当天等于没搜，用户找的是"那条待办在哪天"。
 const searchQuery = ref('')
 const searching = computed(() => searchQuery.value.trim().length > 0)
 
@@ -539,7 +539,7 @@ const selectedTodos = computed(() => {
     list = todos.value.filter(x => x.dueDate === '' && x.parentId === '')
   } else {
     const d = selectedDate.value
-    // 看「今天」时把**逾期未完成**的一并带出来：导航角标统计的正是「今天到期 + 逾期」，
+    // 看「今天」时把逾期未完成的一并带出来：导航角标统计的正是「今天到期 + 逾期」，
     // 而页面此前只按 dueDate 精确匹配，于是角标写 8、点进去只看到 2。
     // 逾期条目挂在过去某天，不并进来就得逐个翻日历才找得到。
     list = todos.value.filter(x => x.parentId === '' && (

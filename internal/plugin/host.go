@@ -15,7 +15,7 @@ import (
 
 // fsHostSpec 声明一个 host.fs.* 方法所需的能力与必须校验的路径参数。
 //
-// 这张表是**默认拒绝**的依据：不在表内的 host.fs.* 一律按「未知方法」拒绝，
+// 这张表是默认拒绝的依据：不在表内的 host.fs.* 一律按「未知方法」拒绝，
 // 所以新增文件能力必须同时登记在这里，否则插件调用会被拒——避免再出现
 // 「注册了方法却没人管控」的情况（历史上前例是 ui.show/ui.hide 的空占位）。
 type fsHostSpec struct {
@@ -33,7 +33,7 @@ var fsHostMethods = map[string]fsHostSpec{
 	// remove 归 write：把文件从目录里挪走与往目录里写东西是同一级别的破坏力，
 	// 只读 scope 不该获得「删掉这个文件」的能力。
 	"host.fs.remove": {action: FSActionWrite, pathFields: []string{"path"}},
-	// move 需要**双路径**都在 write scope 内：源少了写权限就是「移走无权移走的文件」，
+	// move 需要双路径都在 write scope 内：源少了写权限就是「移走无权移走的文件」，
 	// 目标少了写权限等于凭空获得落点。任一越界即拒绝。
 	"host.fs.move": {action: FSActionWrite, pathFields: []string{"from", "to"}},
 }
@@ -285,7 +285,7 @@ func (m *Manager) invokeHostMethod(pluginID, method string, params json.RawMessa
 // 与 native 的 JSON-RPC 回调、goja 的 api.host 共用 invokeHostMethod，
 // 因此权限校验、方法查找与错误分类三端完全一致。
 //
-// ⚠️ 安全约定：pluginID 必须由**宿主侧状态**给出（当前打开的插件），
+// ⚠️ 安全约定：pluginID 必须由宿主侧状态给出（当前打开的插件），
 // 绝不能取自插件可伪造的 postMessage payload——否则插件能冒充其它插件调用
 // db.* 等按 plugin_id 隔离的方法，越权读写他人数据。
 func (m *Manager) InvokeHostMethod(pluginID, method string, params json.RawMessage) (interface{}, error) {

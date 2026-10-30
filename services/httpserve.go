@@ -119,7 +119,7 @@ func (h *HTTPServeManager) List() []HTTPServer {
 }
 
 // Create 新增一个服务（校验端口/名称唯一与目录存在性）。
-// port<=0 表示**自动分配空闲端口**（默认：写死端口在多个服务之间必撞，且容易和本机已有服务冲突）；
+// port<=0 表示自动分配空闲端口（默认：写死端口在多个服务之间必撞，且容易和本机已有服务冲突）；
 // 需要固定端口时才显式传具体值。
 func (h *HTTPServeManager) Create(name, dir string, port int) (*HTTPServer, error) {
 	dir = filepath.Clean(dir)

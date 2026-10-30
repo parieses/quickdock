@@ -12,30 +12,22 @@ import (
 
 // 文字标注的输入窗。
 //
-// 为什么必须另开一个顶层窗口承载标准 EDIT 控件：
-//   - 覆盖层是 WS_EX_LAYERED + UpdateLayeredWindow 的分层窗口，**它的子窗口不会
-//     被合成**——分层窗口显示什么完全由那张位图决定。所以不可能在覆盖层里塞一个
-//     EDIT 子控件。
-//   - 中文标注必须走 IME。IME 的组合串、候选列表、输入法上下文都挂在窗口的
-//     输入上下文上；自己收 WM_CHAR 再拼字符串的方案对中文完全无效。
-//     标准 EDIT 控件被系统接上 IME，零额外代码。
+// 必须另开顶层窗口，不能在覆盖层里塞 EDIT 子控件：覆盖层是
+// WS_EX_LAYERED + UpdateLayeredWindow，子窗口不会被合成，显示什么完全由位图决定。
+// 中文标注必须走 IME，自己收 WM_CHAR 拼字符串对中文无效，标准 EDIT 由系统接 IME。
 //
-// 输入窗是覆盖层的 owned window（CreateWindowExW 的 hWndParent 传覆盖层），
-// 因此它恒在覆盖层之上、且随覆盖层一起销毁。它同样是顶层窗口，所以能正常接收
-// 焦点与键盘输入——覆盖层的 SetForegroundWindow 不受影响。
+// 输入窗是覆盖层的 owned window，恒在其上、随其销毁；它同时是顶层窗口，
+// 能正常接收焦点与键盘输入，不影响覆盖层的 SetForegroundWindow。
 //
-// 外观上刻意做成**半透明深色底 + 浅色文字**（而不是系统默认的白底黑字）：
-// 输入窗浮在暗化后的截图上，一块纯白会把底图挡死，既突兀又让人看不清落点。
-// 透明度用 SetLayeredWindowAttributes(LWA_ALPHA) 实现，**不能**换成
-// UpdateLayeredWindow——后者要求整个窗口自绘，标准 EDIT 控件就没了，IME 随之失效。
+// 外观是半透明深色底 + 浅色文字，纯白会把底图挡死。透明度用
+// SetLayeredWindowAttributes(LWA_ALPHA)，不能换成 UpdateLayeredWindow——
+// 后者要求整窗自绘，EDIT 与 IME 都会失效。
 //
-// 两个后续演进（都是踩坑换来的，别改回去）：
-//   - **底色跟随标注色明暗自适应**。原先底色恒为深灰，选近黑色标注时输入框里
-//     等于什么都看不见（提交后画在未暗化的选区上又看得见），很容易被当成 bug。
-//     现在深色字配浅底、浅色字配深底，见 textInputPalette。
-//   - **EDIT 铺满整个客户区**，左右留白改用 EM_SETMARGINS 实现。这样窗口类背景刷
-//     永远不可见，底色只有 WM_CTLCOLOREDIT 一个来源，不必再去动态换类刷
-//     （SetClassLongPtr 那条路同样可行但更绕）。
+// 两处别改回去：
+//   - 底色跟着标注色的明暗自适应（见 textInputPalette）。原先恒为深灰，
+//     选近黑色标注时输入框里什么都看不见，容易被当成 bug。
+//   - EDIT 铺满客户区，左右留白走 EM_SETMARGINS。这样窗口类背景刷永远不可见，
+//     底色只剩 WM_CTLCOLOREDIT 一个来源，不必动态换类刷。
 
 const (
 	textEditPad    = 6   // 输入框左右内边距
@@ -171,7 +163,7 @@ func (o *Overlay) createTextInput() error {
 	// 整窗半透明：底图透出来，就不像一块糊在截图上的色块。
 	procSetLayeredWindowAttributes.Call(hwnd, 0, textInputAlpha, lwaAlpha)
 
-	// 单行 EDIT，不换行、超长横向滚动。**铺满整个客户区**（尺寸在
+	// 单行 EDIT，不换行、超长横向滚动。铺满整个客户区（尺寸在
 	// openTextInput 里跟一次），左右留白交给 EM_SETMARGINS。
 	editCls, _ := syscall.UTF16PtrFromString("EDIT")
 	edit, _, _ := procCreateWindowExW.Call(
@@ -398,7 +390,7 @@ func (o *Overlay) commitTextInput() {
 	}
 
 	// 焦点还给覆盖层，否则 Esc / Ctrl+C 这些快捷键全失效。
-	// 光 SetFocus 不够：隐藏掉当前**活动窗口**后，Windows 会把激活权交给别的顶层窗口，
+	// 光 SetFocus 不够：隐藏掉当前活动窗口后，Windows 会把激活权交给别的顶层窗口，
 	// 覆盖层这时候可能已经不是活动窗口，键盘消息就收不到了。
 	procSetForegroundWindow.Call(o.hwnd)
 	procSetFocus.Call(o.hwnd)

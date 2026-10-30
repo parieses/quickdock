@@ -7,16 +7,16 @@
  *
  * 三条硬约束（决定了下面的实现方式）：
  *
- * 1. **流式期间不能抛错**。回答是逐字到达的，`\frac{1}{` 这种半截公式一定会出现。
+ * 1. 流式期间不能抛错。回答是逐字到达的，`\frac{1}{` 这种半截公式一定会出现。
  *    KaTeX 的 `throwOnError: false` 会把整条染红并输出一堆 error span，比不渲染更糟；
  *    这里用 `throwOnError: true` + try/catch，失败就原样输出源码，下一帧补齐后自然变成公式。
  *
- * 2. **必须在 marked 的 inline 层也支持**，不能只做 block 层。模型经常把
+ * 2. 必须在 marked 的 inline 层也支持，不能只做 block 层。模型经常把
  *    「1. 生成函数法：利用已知恒等式」和紧随其后的 `\[ ... \]` 写在一起（中间没有空行），
  *    marked 的 paragraph 规则会把整段（含公式）当成一个段落吞掉——block 级 tokenizer
  *    根本没机会看到它。inline tokenizer 拿到的正是段落文本，能正确切开。
  *
- * 3. **`$` 不能乱认**。正文里 `$5 到 $10`、`awk '{print $1}'`（后者在围栏里，走不到这里）
+ * 3. `$` 不能乱认。正文里 `$5 到 $10`、`awk '{print $1}'`（后者在围栏里，走不到这里）
  *    都很常见。行内 `$...$` 采用「开定界符后非空白、闭定界符前非空白、闭定界符后不接数字」
  *    的判定，这是 KaTeX 生态里最通用的一套启发式。
  *
@@ -47,7 +47,7 @@ function escapeHtml(s: string): string {
 }
 
 /**
- * 把一段 TeX 渲染成 HTML。失败（公式不完整 / 用了 KaTeX 不支持的宏）时**原样返回源码**，
+ * 把一段 TeX 渲染成 HTML。失败（公式不完整 / 用了 KaTeX 不支持的宏）时原样返回源码，
  * 绝不抛错——流式渲染每帧都会调用它，抛一次整个消息就白屏。
  */
 export function renderMath(tex: string, display: boolean): string {
@@ -237,7 +237,7 @@ export function mathExtension(): MarkedExtension {  return {
 let globalMathInstalled = false
 
 /**
- * 给**全局** marked 实例装一次公式扩展。
+ * 给全局 marked 实例装一次公式扩展。
  *
  * 为什么需要这个包装：SFC 的 `<script setup>` 每创建一次组件就整体重跑一遍，
  * 直接在里面 `marked.use(...)` 会在每次进入笔记页时往全局 extensions 里再堆一份

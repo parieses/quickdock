@@ -6,9 +6,9 @@
 // 永远筛不出任何条目（用户反馈「图片文件筛选不生效」）。
 //
 // 根因是「text 前置条件」被当成了全局前提，其实它只对
-// url/email/json/code/phone 这几个**智能分类标签**成立——它们靠正则判断
+// url/email/json/code/phone 这几个智能分类标签成立——它们靠正则判断
 // 文本内容，对图片/文件条目没有意义；而 image/file 是 content_type 里的
-// **独立整类**，不是 text 的子类。
+// 独立整类，不是 text 的子类。
 //
 // 三类标签的判定语义各不相同，故显式区分，避免再被合并成一条分支：
 //
@@ -70,7 +70,7 @@ export function isSmartTextTag(tagId: string): boolean {
 /**
  * 当前标签对应的 SQL 下推方式；all/favorite 返回 none。
  *
- * 注意：image/file **不是** text 的子类，不能套 text 前置条件；
+ * 注意：image/file 不是 text 的子类，不能套 text 前置条件；
  * 智能分类下推的是 text_type（不是 content_type='text'），这样切换 url↔email
  * 也会带着不同的 text_type 重新查库，而不是在已载入的 text 集合里再筛。
  */
@@ -127,6 +127,6 @@ export function filterByTag<T extends FilterableEntry>(
       return t === tagId
     })
   }
-  // image/file：content_type 精确匹配（整类），**不套 text 前置条件**。
+  // image/file：content_type 精确匹配（整类），不套 text 前置条件。
   return list.filter(e => e.contentType === tagId)
 }

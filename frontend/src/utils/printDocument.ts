@@ -3,7 +3,7 @@
  * 在宿主顶层文档里渲染一次，然后调起系统打印。
  *
  * 为什么必须由宿主来做：
- *   WebView2 / Chromium 的 window.print() 只作用于**顶层文档**。插件跑在
+ *   WebView2 / Chromium 的 window.print() 只作用于顶层文档。插件跑在
  *   sandbox iframe 里，它自己调 window.print() 打印的是整个 QuickDock 应用
  *   —— 暗色外壳、并且纸面内容根本不在打印上下文里，结果就是「打印出来一张白纸」。
  *   约定：插件把打印用 HTML 交给宿主（qdPrint），宿主在顶层文档渲染后打印。
@@ -16,7 +16,7 @@
  *   3. 打印期间给 body 加 qd-printing 类，把顶层其它节点全部隐藏，只留内容容器；
  *   4. 打印结束后移除容器 / 样式 / 类，宿主界面完好如初。
  *
- * ⚠️ 安全：插件 iframe 是**无同源沙箱**（sandbox 不含 allow-same-origin）。
+ * ⚠️ 安全：插件 iframe 是无同源沙箱（sandbox 不含 allow-same-origin）。
  *    把插件的 <script> 搬进宿主顶层文档执行 = 沙箱逃逸，脚本可直接拿到宿主
  *    全部能力（含 Wails 绑定）。这里一律丢弃 <script>，打印也根本不需要脚本。
  */
@@ -74,7 +74,7 @@ export async function printHtmlDocument(html: string, opts: PrintHtmlOptions = {
   if (typeof html !== 'string' || !html.trim()) throw new Error('打印内容为空')
   if (typeof window.print !== 'function') throw new Error('当前环境不支持系统打印')
 
-  // 解析成一份**惰性**文档：DOMParser 产物不会执行脚本，也不会触发资源加载
+  // 解析成一份惰性文档：DOMParser 产物不会执行脚本，也不会触发资源加载
   const doc = new DOMParser().parseFromString(html, 'text/html')
 
   const injected: HTMLElement[] = []

@@ -378,7 +378,7 @@ func nginxURL(winTmpl, darwinTmpl, style string) func(version, goos, arch string
 }
 
 // gitURL 构造 git-for-windows 的 MinGit 便携包地址。
-// 注意 tag 与资产文件名**命名不对称**：发布 tag 带补丁号（v2.45.0.windows.1），
+// 注意 tag 与资产文件名命名不对称：发布 tag 带补丁号（v2.45.0.windows.1），
 // 而资产文件名不含 .windows.N 后缀（MinGit-2.45.0-64-bit.zip）。
 // 早期实现把 ".windows.1" 也拼进了文件名，导致下载一律 404，回归用例见 TestGitMinGitURL。
 // 另外，改补丁号（.windows.2 等）时文件名会带上补丁号（MinGit-2.56.0.2-64-bit.zip）；
@@ -469,7 +469,7 @@ func pythonURL(winTmpl, darwinTmpl, style string) func(version, goos, arch strin
 //	                                     ^^^^^^ 构建日期，不可由版本号推导
 //
 // 因此无法再用 "版本 → URL" 的静态模板拼装。更糟的是该站对不存在的路径返回
-// **HTTP 200 + text/html 的 404 页面**，下载器会以为成功、把 HTML 存成 .zip，
+// HTTP 200 + text/html 的 404 页面，下载器会以为成功、把 HTML 存成 .zip，
 // 最终在解压阶段才报 "zip: not a valid zip file"，掩盖了真实原因。
 // 改为抓取官方目录页，正则提取 Win64 包真实链接，建立 version → URL 映射。
 

@@ -7,7 +7,7 @@ import { describe, it, expect } from 'vitest'
  * 可能已被清掉（xterm 在用户输入时清选区；WebView2 下右键时机不可控）。
  * 旧逻辑在点击「问 AI」那一刻才去 `getSelection()`，拿到的可能是空串。
  *
- * 修复：在选区**成立的瞬间**（`onSelectionChange` 回调）把文本快照下来，
+ * 修复：在选区成立的瞬间（`onSelectionChange` 回调）把文本快照下来，
  * 点击时优先用快照。本测试用一个最小「伪终端」模拟该流程来验证。
  */
 

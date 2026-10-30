@@ -2,7 +2,7 @@
 /**
  * SSH 终端视图（xterm 封装）。
  *
- * 职责边界：**只负责渲染与输入输出**，不负责建连、不负责会话生命周期。
+ * 职责边界：只负责渲染与输入输出，不负责建连、不负责会话生命周期。
  * 父组件先挂载本组件拿到尺寸，再调 Connect，最后把 sessionId 传进来。
  *
  * 这个顺序是刻意的：Connect 一返回，远端 shell 就会吐出 banner 和提示符，
@@ -89,7 +89,7 @@ const { success: toastSuccess, error: toastError } = useToast()
 
 // ---- 右键菜单（复制 / 粘贴 / 全选 / 清空） ----
 //
-// xterm.js 只负责「选中文字」，但默认**不会把选区写进系统剪贴板**，也没有任何
+// xterm.js 只负责「选中文字」，但默认不会把选区写进系统剪贴板，也没有任何
 // 右键菜单——所以在 WebView 里选中一段输出后，用户既没法 Ctrl+C（那是发给远端的
 // SIGINT），也没法右键复制，等于「看得见拿不走」。这里补一个轻量右键菜单 +
 // 快捷键（Ctrl+Shift+C 复制 / Ctrl+Shift+V、Shift+Insert 粘贴 / Ctrl+Shift+A 问 AI），
@@ -219,7 +219,7 @@ function onSelectAll() {
 /**
  * 对选中内容提问 AI。
  *
- * 选区文本要做规整：xterm 的 getSelection 对跨行选取会保留每行的**尾随空格**
+ * 选区文本要做规整：xterm 的 getSelection 对跨行选取会保留每行的尾随空格
  * （补齐到终端宽度），并且整块包裹的长行在换行处不会补回车——直接喂给模型的话，
  * 既浪费 token，也会让日志/堆栈的行边界错位，模型因此更容易读错报错位置。
  */
@@ -251,7 +251,7 @@ function onClear() {
 }
 
 /**
- * 宿主层快捷键 —— **只放「不影响发往远端字节流」的键**。
+ * 宿主层快捷键 —— 只放「不影响发往远端字节流」的键。
  *
  * 复制 / 粘贴 / 问 AI 一律不在这里：它们必须赶在 xterm 之前拦，见下面
  * `term.attachCustomKeyEventHandler`（这里的 keydown 是冒泡阶段，
@@ -364,13 +364,13 @@ function closeSearch() {
 /**
  * 最近一次「非空选区」的快照。
  *
- * 为什么需要它：xterm 的选区是**实时**的，`term.getSelection()` 在右键菜单被点击
+ * 为什么需要它：xterm 的选区是实时的，`term.getSelection()` 在右键菜单被点击
  * 的那一刻经常已经是空串——xterm 会在用户点击、输入、或右键时清掉选区
  * （见 xterm 源码 `onUserInput(() => { this.hasSelection && this.clearSelection() })`），
  * 而 WebView2 里右键 contextmenu 的时机更不可控，选区说没就没。
  *
- * 所以不能「点击复制/问 AI 时再读一次 getSelection()」，而要在选区**成立的瞬间**
- * （onSelectionChange 回调）就把它存下来，并且**选区被清除时也不清空**——
+ * 所以不能「点击复制/问 AI 时再读一次 getSelection()」，而要在选区成立的瞬间
+ * （onSelectionChange 回调）就把它存下来，并且选区被清除时也不清空——
  * 这样右键菜单弹出、用户点「复制」的那一刻，按钮仍能用这份快照。
  *
  * 做成 ref 是必须的：「复制 / 问 AI」按钮的 disabled 直接绑它。若按钮可用态只认
@@ -380,7 +380,7 @@ function closeSearch() {
 const lastSelection = ref('')
 
 /**
- * 当前可用的选区文本 —— 复制与问 AI 的**唯一取值口径**。
+ * 当前可用的选区文本 —— 复制与问 AI 的唯一取值口径。
  *
  * 必须优先用快照：现读 `getSelection()` 在「右键菜单点下去」「Ctrl+Shift+C 按下」
  * 这些时机经常已经是空串（xterm 会在用户输入/点击终端时清选区，WebView2 的
@@ -570,7 +570,7 @@ function sendInput(data: string) {
 /**
  * 输入分流：多行内容交回父组件确认，单行直接发。
  *
- * 必须在**发送之前**判断。判据见 utils/ssh.ts 的 isMultiLinePaste——
+ * 必须在发送之前判断。判据见 utils/ssh.ts 的 isMultiLinePaste——
  * 终端里回车键发出的是 \r，不能简单按「含不含换行」判断，
  * 否则用户每敲一次回车都会弹确认框。
  */
@@ -625,7 +625,7 @@ onMounted(async () => {
   // 搜索插件：只在终端内找、不碰远端（Ctrl+F 在 readline 里是「前移一个字符」，
   // 用户按它几乎只是想找屏幕上的东西）。
   //
-  // 用 onDidChangeResults 拿「第几个 / 共几个」的前提是**开启 decorations**，
+  // 用 onDidChangeResults 拿「第几个 / 共几个」的前提是开启 decorations，
   // 关掉高亮时该事件不触发，计数会永远停在 0。所以 findNext 每次都带 decorations。
   searchAddon = new SearchAddon()
   term.loadAddon(searchAddon)
@@ -644,17 +644,17 @@ onMounted(async () => {
     if (term && term.hasSelection()) {
       lastSelection.value = term.getSelection()
     }
-    // 注意：这里**不要**在选区被清空时把 lastSelection 置空。右键菜单弹出、
+    // 注意：这里不要在选区被清空时把 lastSelection 置空。右键菜单弹出、
     // 点击终端其它位置都会瞬间清掉实时选区，此时若把快照也清掉，「复制 / 问 AI」
     // 按钮会在用户点它的那一刻变灰——正是「右键里复制不生效」的根因。快照保留，
     // 复制随时可用，直到下一次选中覆盖它。
   })
 
   // 终端里的复制/粘贴/问 AI 快捷键全部在这里拦：
-  // host 上的 keydown 是冒泡阶段，跑在 xterm 自己的 keydown **之后**——那时 xterm 已经把
+  // host 上的 keydown 是冒泡阶段，跑在 xterm 自己的 keydown 之后——那时 xterm 已经把
   //   Ctrl+C 当 \x03(SIGINT)、Ctrl+V 当 \x16(quoted-insert)、Ctrl+Insert 当其它控制码
   // 发给远端了，再 preventDefault 也收不回来。用户看到的正是「Ctrl+V 粘不出来，终端里
-  // 反而冒出一个 ^V」。attachCustomKeyEventHandler 在 xterm 判定按键**之前**执行，
+  // 反而冒出一个 ^V」。attachCustomKeyEventHandler 在 xterm 判定按键之前执行，
   // 返回 false 才能真正把键吞掉。
   //
   // 同时 stopPropagation：本键已由这里处理，别再让 host 的 onKeydown 处理第二遍
@@ -671,7 +671,7 @@ onMounted(async () => {
     }
     const sel = !!term && term.hasSelection()
 
-    // 普通 Ctrl+C：**有可见选区才复制**，没有选区必须放行 → 照常发 SIGINT，
+    // 普通 Ctrl+C：有可见选区才复制，没有选区必须放行 → 照常发 SIGINT，
     // 否则「中断正在跑的命令」这个最常用的操作就没了。
     if (mod && !e.shiftKey && !e.altKey && keyOf('KeyC', 'c', 'C')) {
       if (sel) {

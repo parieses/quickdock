@@ -383,7 +383,7 @@ const genProxyPort = ref<number>(3000)
 // 模板 = 「模块组合 + 文档根」的预设，不引入第二套生成逻辑
 // （多一套模板渲染 = 两处配置会漂移，用户切来切去还会得到互相矛盾的内容）。
 //
-// 框架模板的关键不是模块（各框架要的模块差不多），而是 **文档根**：
+// 框架模板的关键不是模块（各框架要的模块差不多），而是 文档根：
 // Laravel / ThinkPHP / Symfony 的入口在 public，Yii2 在 web。
 // root 不跟着走的话 .env、storage、vendor 会直接暴露在 web 根下。
 interface SiteTemplate {

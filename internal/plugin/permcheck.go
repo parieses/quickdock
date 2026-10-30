@@ -1,32 +1,17 @@
 package plugin
 
-// permcheck.go —— native 插件的「权限自证」静态审计器
+// native 插件的权限静态审计。
 //
-// 背景：宿主对插件的能力管控有一条明确的分界线——凡是走 host.* 桥接的调用，
-// 都会经过 checkPermission（见 host.go），受 permissions 声明严格约束。
-// 但 native 插件是独立子进程，它在自己的 Go 代码里可以直接调用标准库
-// （os.Remove / exec.Command / net.Dial …），这些调用不经过任何 Go 接口，
-// 宿主完全无法在运行期拦截。
+// 走 host.* 桥接的调用都过 checkPermission（见 host.go），受 permissions 约束；
+// 但 native 插件是独立子进程，可以直接用 os.Remove / exec.Command / net.Dial，
+// 宿主在运行期拦不住。清单声明与代码实际行为不符时，permissions 这份授权就失效了。
 //
-// 于是出现一种现实：插件清单上写着 "filesystem": true，
-// 代码里却直接 os.RemoveAll 了整个用户目录；声明了 "network": false，
-// 却用 net.Dial 硬连了任意地址。permissions 沦为一张对用户可见的授权契约，
-// 而契约与实现不符时，这份授权对用户就毫无意义。
+// 这里不改运行期行为，只读源码统计实际用到的危险能力，再与 manifest 比对。
+// 目前只告警不拦截（拦截由 CheckAgainst 的调用方决定）。
 //
-// 本文件不改变运行期行为，只做一件事：读源码，得出该插件实际用到了哪些
-// 危险能力，再与 manifest 声明比对，把"清单撒谎"的插件揪出来。
-//
-// 阶段一（当前）：只审计、只告警，输出名单供人工修清单。
-// 阶段二起：可切换为安装期拦截（见 CheckAgainst 的调用方）。
-//
-// 设计取舍：
-//   - 用 go/ast 而非正则：正则分不清 os.Remove 与 mypkg.Remove，
-//     也分不清字符串字面量里的路径与注释里的路径。
-//   - 静态分析必然漏判（路径动态拼接、网络地址来自配置），
-//     因此提供 permissions.selfAudit="skip" 逃生舱，但强制要求填写 skipReason，
-//     让绕过行为可见、可审计。
-//   - 只审计 native 插件：goja 插件跑在宿主进程内的沙箱里，
-//     它的每次 host.* 调用都过 checkPermission，天然受控。
+// 用 go/ast 而非正则：正则分不清 os.Remove 和 mypkg.Remove。静态分析必然漏判
+// （路径动态拼接等），所以留了 permissions.selfAudit="skip" 逃生舱，但必须填
+// skipReason。goja 插件不需要审计，它的 host.* 调用天然受控。
 
 import (
 	"fmt"
@@ -396,7 +381,7 @@ var ErrPermissionMismatch = fmt.Errorf("插件权限声明与实现不符")
 //   - 程序级：声明了白名单时，源码里出现的可执行程序名必须在白名单内。
 //
 // 注意 native 插件是独立子进程，它在自己的代码里调 exec.Command，
-// 宿主在运行期无法拦截——本比对是**安装期的静态核对**，
+// 宿主在运行期无法拦截——本比对是安装期的静态核对，
 // 用来发现「清单漏声明」和「白名单没覆盖实际执行的程序」。
 // 真正的运行期强制要走 host.process.exec（宿主代执行）这条路。
 func (p *Permissions) CheckAgainst(a *PermissionAudit) error {
