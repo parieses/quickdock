@@ -10,6 +10,7 @@ import (
 	"unicode/utf8"
 
 	"quickdock/internal/fsguard"
+	"quickdock/internal/platform"
 )
 
 // 项目规则文件（AGENTS.md 这类约定）的读取与注入。
@@ -18,10 +19,11 @@ import (
 // 模型不知道这个仓库用 pnpm 而不是 npm、注释写中文而不是英文、错误要包 %w 而不是 fmt.Errorf。
 // 这些约定写在人脑子里，每次提问都要重复一遍；写进文件之后，模型自己去读。
 //
-// 固定三个位置，不向上递归找：cwd 是用户亲手选的项目根，语义明确；向上递归会在
+// 固定这几个位置，不向上递归找：cwd 是用户亲手选的项目根，语义明确；向上递归会在
 // 用户把 cwd 设成某个子目录时，把家目录或上级仓库的无关文件读进来——「读到了不该读的」
 // 比「没读到」更难排查（用户根本不知道 AI 看了什么）。
 //
+//	<dataDir>/rules.md              全局，跨项目（「提交信息写中文」这类跟项目无关的约定）
 //	<cwd>/AGENTS.md                 最常见，很多工具都认这个名
 //	<cwd>/.quickdock/rules.md       单文件版
 //	<cwd>/.quickdock/rules/*.md     分主题拆开（api.md / db.md / ui.md …），文件名排序
@@ -70,9 +72,8 @@ type aiRules struct {
 // cwd 为空直接返回空：没有工作目录就没有「这个项目」，任何 .md 都不该被当成规则。
 func (a *AIService) loadAIRules(cwd string) aiRules {
 	cwd = strings.TrimSpace(cwd)
-	if cwd == "" {
-		return aiRules{}
-	}
+	// cwd 为空不早退：全局规则 <dataDir>/rules.md 与工作目录无关，
+	// 在空目录里临时问一句也该带上用户的通用约定。
 
 	var (
 		files []aiRuleFile
@@ -115,12 +116,21 @@ func (a *AIService) loadAIRules(cwd string) aiRules {
 	return aiRules{Text: b.String(), Files: files}
 }
 
-// aiRuleCandidates 列出这个 cwd 下所有可能有规则的路径，顺序即合并顺序。
+// aiRuleCandidates 列出所有可能有规则的路径，顺序即合并顺序（后者覆盖前者）。
+//
+// 全局规则排第一：它跨项目生效（「提交信息写中文」这类与项目无关的约定），
+// 项目自己的规则写在后面，同名话题上以项目为准。
 func aiRuleCandidates(cwd string) []string {
-	paths := []string{
+	paths := []string{aiGlobalRulePath()}
+	if cwd == "" {
+		// 没有工作目录时只剩全局规则。不能整个返回空——那样「在空目录里问一句」
+		// 就享受不到用户自己的通用约定了。
+		return paths
+	}
+	paths = append(paths,
 		filepath.Join(cwd, "AGENTS.md"),
 		filepath.Join(cwd, ".quickdock", "rules.md"),
-	}
+	)
 	dir := filepath.Join(cwd, ".quickdock", "rules")
 	items, err := os.ReadDir(dir)
 	if err != nil {
@@ -140,6 +150,14 @@ func aiRuleCandidates(cwd string) []string {
 		paths = append(paths, filepath.Join(dir, n))
 	}
 	return paths
+}
+
+// aiGlobalRulePath 跨项目的规则文件：<dataDir>/rules.md。
+//
+// 放数据目录而不是家目录根：家目录里塞一个 rules.md 会同时被 Cursor、Claude Code
+// 之类的工具当成自己的规则读走，而那是别的产品的文件位置。
+func aiGlobalRulePath() string {
+	return filepath.Join(platform.DefaultDataDir(), "rules.md")
 }
 
 // readRuleFile 读一个规则文件，按预算截断。
@@ -202,6 +220,10 @@ func trimToValidUTF8(s string) string {
 // 报绝对路径在 system 里既费 token 又没用：模型只需要知道「有这么个文件、内容如下」，
 // 而人在事件提示里看到 C:\Users\...\project\.quickdock\rules\api.md 也不好对照。
 func ruleDisplayName(cwd, abs string) string {
+	// 全局规则单独命名：它的绝对路径既长，又容易被读成「某个项目的文件」。
+	if filepath.Clean(abs) == aiGlobalRulePath() {
+		return "全局 rules.md"
+	}
 	if rel, err := filepath.Rel(cwd, abs); err == nil && !strings.HasPrefix(rel, "..") {
 		return filepath.ToSlash(rel)
 	}
