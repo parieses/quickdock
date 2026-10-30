@@ -138,6 +138,9 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		Message string        `json:"message"`
 		Cwd     string        `json:"cwd"`
 		Images  []AIChatImage `json:"images"`
+		// Mentions 用 @ 显式引用的文件 / 目录 / 历史对话（见 ai_mentions.go）。
+		// 引用内容由后端展开进上下文，前端只送引用目标，不送文件内容。
+		Mentions []AIMention `json:"mentions"`
 	}
 	// 请求体必须设上限：一次可以带 10 张 10 MiB 的图（见 ai_image.go），
 	// base64 之后是 ~134 MB 字符，无脑 ReadAll 等于把这么大一块直接读进内存。
@@ -180,12 +183,13 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	defer fl.close()
 
 	res := s.svc.RunAgent(ctx, AgentRunReq{
-		ConvID:  req.ConvID,
-		Mode:    req.Mode,
-		SpaceID: req.SpaceID,
-		Message: req.Message,
-		Cwd:     req.Cwd,
-		Images:  req.Images,
+		ConvID:   req.ConvID,
+		Mode:     req.Mode,
+		SpaceID:  req.SpaceID,
+		Message:  req.Message,
+		Cwd:      req.Cwd,
+		Images:   req.Images,
+		Mentions: req.Mentions,
 	}, &sseSink{fl: fl, cancel: cancel})
 
 	// 用户已经切走了才提醒：盯着屏幕看完整段回答的人再收到一条「回答完成」纯属噪音，

@@ -70,6 +70,10 @@ type AgentRunReq struct {
 	Message string
 	Cwd     string
 	Images  []AIChatImage
+	// Mentions 本次提问里用 @ 显式引用的文件 / 目录 / 历史对话（见 ai_mentions.go）。
+	// 只影响这一次请求的上下文，不落库：引用是「这次要看它」，不是长期状态。
+	Mentions []AIMention
+
 	// ── 编排维度（阶段 2）。顶层对话这四项全为零值，行为与阶段 1 完全一致 ──
 
 	// RunID / NodeID 这次执行属于哪次编排的哪个节点。
@@ -320,8 +324,23 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		}
 	}
 
-	// 首次消息自动生成标题
-	if conv != nil && conv.Title == "" {
+	// @ 引用（见 ai_mentions.go）：展开成材料贴到最后一条用户消息上。
+	//
+	// 只影响这一次请求、不落库：用户气泡里显示的是自己打的字，历史里也只存那些字。
+	// 子 agent 跳过——它的上下文只有角色提示 + 那条自包含的 task，没有「用户消息」可贴；
+	// 派活时父级已经把该给的材料写进 task 了。
+	//
+	// 不新加事件类型：展开失败已经在 buildMentionBlock 里走 notice 报给用户，
+	// 而「被截断了多少行」写在上下文里给模型看——它需要知道自己拿到的是残本，
+	// 用户那边看到的引用 chip 本来就不含内容。
+	var mentionBlock string
+	if !req.Fresh && len(req.Mentions) > 0 {
+		mentionBlock = a.buildMentionBlock(cwd, req.Mentions, sink)
+		applyMentionBlock(messages, mentionBlock)
+	}
+
+	// 首次消息自动生成标题（子 agent 不参与：它没有会话行）
+	if !req.Fresh && conv != nil && conv.Title == "" {
 		title := message
 		if title == "" {
 			// 纯图片提问：用固定词兜底，否则标题为空、列表里显示“新对话”
@@ -455,6 +474,9 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			// 漏了这一句的症状是「长对话聊到一半突然不认项目约定」，极难复现。
 			baseSystem = withRules(baseSystem, rules)
 			applySystemHints(newMsgs, baseSystem, mode, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
+			// 引用材料同样要贴回去：重建出来的 messages 里那条 user 消息是库里的原文，
+			// @ 的内容只存在于内存。漏了这步，超窗重试之后 AI 会对着「照这个改」发愣。
+			applyMentionBlock(newMsgs, mentionBlock)
 			messages = newMsgs
 			sink.Event("notice", map[string]any{
 				"message": "上下文超出模型窗口，已自动压缩历史并重试",

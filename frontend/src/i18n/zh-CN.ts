@@ -1933,6 +1933,8 @@ export default {
   aiDiffExpand: '展开全部 {n} 行',
   // 项目规则文件（AGENTS.md / .quickdock/rules*）生效提示
   aiRulesActive: '本次生效 {n} 个规则文件',
+  // @ 引用（补全弹层里的会话项标签）
+  aiMentionConv: '历史对话',
   // 编排（多 agent 派活）
   aiToolVerbSpawn: '派活',
   aiRunTree: '编排了 {n} 个子任务',

@@ -58,6 +58,7 @@ import {
   AIApproveToolCall,
   AIListCheckpoints,
   AIRestoreCheckpoint,
+  AISuggestMentions,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -142,6 +143,10 @@ interface AICheckpointView {
 
 // 一个生效的规则文件（后端 ai_rules.go 的 aiRuleFile）。
 interface AIRuleFile { name: string; bytes: number; truncated?: boolean }
+
+// @ 补全列表的一项（后端 AIMentionItem，或本地拼的会话项）。
+// 会话项没有 path，只有 convId。
+interface AIMentionItem { kind: 'file' | 'dir' | 'conv'; name: string; path?: string; convId?: string }
 
 // 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
 // path 为落盘后相对数据目录的路径，重载会话时由 AILoadImage 读回 dataUrl）。
@@ -845,6 +850,111 @@ function removeAttachment(i: number) {
   attachments.value.splice(i, 1)
 }
 
+// —— @ 引用（见后端 ai_mentions.go）——
+//
+// 输入框里打 @ 弹出补全，选中后变成一个 chip；发送时只把「引用了谁」带给后端，
+// 由后端读内容并展开进上下文。
+//
+// 为什么不在前端读文件内容：读路径必须过 fsguard 白名单，而白名单在 Go 侧；
+// 前端读等于绕过它。也不把内容塞进 message 文本——那样用户自己的气泡里会
+// 出现几千行文件内容，而且会跟着落库。
+const mentions = ref<AIMentionItem[]>([])
+const mentionItems = ref<AIMentionItem[]>([])
+const mentionIdx = ref(0)
+let mentionTimer: number | null = null
+// 上一次发送用过的引用：重试（reuseUserBubble）时输入框已清空，靠它把引用带回去。
+let lastMentions: { kind: string; path: string; convId: string; name: string }[] = []
+
+// 只识别输入框末尾的 @token。
+//
+// 光标在中间时「@」可能是已发出的正文（比如邮箱、@2x 图片名），按末尾判定
+// 能避开绝大多数误触发；代价是中间插入 @ 不弹窗，用户把光标挪到末尾即可。
+const mentionQuery = computed<string | null>(() => {
+  if (streaming.value || !hasKey.value) return null
+  const m = /(^|\s)@([^\s@]*)$/.exec(input.value)
+  return m ? m[2] : null
+})
+
+const mentionOpen = computed(() => mentionQuery.value !== null && mentionItems.value.length > 0)
+
+async function loadMentionItems(q: string) {
+  const out: AIMentionItem[] = []
+  // 会话从本地列表里筛：这些数据页面已经有了，为它再走一次 RPC 只是多一次往返。
+  const ql = q.toLowerCase()
+  for (const c of conversations.value) {
+    const title = (c.title || '').trim()
+    if (!title || (ql && !title.toLowerCase().includes(ql))) continue
+    out.push({ kind: 'conv', name: title, convId: c.id })
+    if (out.length >= 5) break
+  }
+  try {
+    const list = unwrap<AIMentionItem[]>(await AISuggestMentions(convCwd.value, q))
+    for (const it of list || []) out.push({ kind: it.kind, name: it.name, path: it.path })
+  } catch {
+    // 没有工作目录 / 目录已失效：只给会话项。这不是错误，不该弹提示打断输入。
+  }
+  mentionItems.value = out
+  mentionIdx.value = 0
+}
+
+watch(mentionQuery, (q) => {
+  if (mentionTimer) { clearTimeout(mentionTimer); mentionTimer = null }
+  if (q === null) {
+    mentionItems.value = []
+    mentionIdx.value = 0
+    return
+  }
+  // 120ms 防抖：扫目录是同步 IO，每敲一个字都扫一遍会在机械硬盘上明显卡顿。
+  mentionTimer = window.setTimeout(() => { void loadMentionItems(q) }, 120)
+})
+
+function sameMention(a: AIMentionItem, b: AIMentionItem): boolean {
+  return a.kind === b.kind && (a.path || '') === (b.path || '') && (a.convId || '') === (b.convId || '')
+}
+
+function pickMention(it: AIMentionItem) {
+  // 把输入框末尾那个 @token 删掉：chip 才是引用的载体，正文里留着 @xxx
+  // 会在发给模型的文本里多出一段既不像路径也不像名字的东西。
+  input.value = input.value.replace(/@[^\s@]*$/, '')
+  if (!mentions.value.some((m) => sameMention(m, it))) mentions.value.push(it)
+  mentionItems.value = []
+  mentionIdx.value = 0
+}
+
+function removeMention(i: number) {
+  mentions.value.splice(i, 1)
+}
+
+// onMentionKey 处理补全弹层里的方向键与回车。
+// 返回 true 表示这次按键已被弹层消费。
+function onMentionKey(e: KeyboardEvent): boolean {
+  if (!mentionOpen.value) return false
+  const n = mentionItems.value.length
+  if (e.key === 'ArrowDown') {
+    e.preventDefault()
+    mentionIdx.value = (mentionIdx.value + 1) % n
+    return true
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault()
+    mentionIdx.value = (mentionIdx.value - 1 + n) % n
+    return true
+  }
+  if (e.key === 'Enter' || e.key === 'Tab') {
+    e.preventDefault()
+    pickMention(mentionItems.value[mentionIdx.value])
+    return true
+  }
+  if (e.key === 'Escape') {
+    // 只收起弹层、保留已打的 @xxx：Esc 是「我不想选」，不是「我要清空刚打的字」。
+    e.preventDefault()
+    mentionItems.value = []
+    return true
+  }
+  return false
+}
+
+
 // 剪贴板粘贴图片：在输入框按 Ctrl+V 时，若剪贴板含图片文件则作为本地图附件。
 function onInputPaste(e: ClipboardEvent) {
   const items = e.clipboardData?.items
@@ -1251,6 +1361,20 @@ function onEnterSend(e: KeyboardEvent, fn: () => void) {
   fn()
 }
 
+// onComposerKey 是主输入框的唯一 keydown 入口。
+//
+// 不写成「两个监听器各算各的」（@keydown + @keydown.enter）：两个都会收到同一个
+// 事件，谁先谁后取决于编译顺序，而「弹层先选中、发送后触发」就是一条发出去半截
+// @xxx 的提问。一个函数里按优先级判定，顺序就是代码顺序。
+function onComposerKey(e: KeyboardEvent, fn: () => void) {
+  if (e.isComposing || e.keyCode === 229) return
+  if (onMentionKey(e)) return
+  if (e.key !== 'Enter') return
+  if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return
+  e.preventDefault()
+  fn()
+}
+
 // 目录最后一段：落地页那行选择器放不下完整路径，全路径放 title。
 function dirTail(p: string): string {
   const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
@@ -1462,6 +1586,10 @@ function resetStreamState() {
   streamTools.value = []
   runRules.value = []
   reasoningText.value = ''
+  // 待发送的 @ 引用跟着一起清：切会话之后 cwd 可能变了，
+  // 留在输入框上方的 chip 会拿着旧路径去请求，结果只是后端一堆「引用被拒」。
+  mentions.value = []
+  mentionItems.value = []
   // 流式块缓存按回复隔离：一条回复的块原文可能与另一条完全相同
   // （如「好的」这类短回复），跨回复复用是安全的，但没必要长期持有。
   liveBlockCache.clear()
@@ -1716,6 +1844,15 @@ async function send() {
   const imagesPayload = imgs.map((a) => a.kind === 'url'
     ? { kind: 'url', url: a.url, name: a.name }
     : { kind: 'file', dataUrl: a.dataUrl, name: a.name })
+  // @ 引用只送「引用了谁」：内容由后端读（过 fsguard）并展开进上下文。
+  // 先取快照再清空——下面几行会把 mentions 置空，那时再读就没了。
+  // 重试要沿用上一次的引用：失败重发时输入框已经空了，重新拼一个空数组
+  // 等于把用户 @ 过的文件默默丢掉（而他是为了这份材料才重试的）。
+  const mentionSnapshot = mentions.value.map((m) => ({
+    kind: m.kind, path: m.path || '', convId: m.convId || '', name: m.name,
+  }))
+  if (mentionSnapshot.length) lastMentions = mentionSnapshot
+  const mentionPayload = mentionSnapshot.length ? mentionSnapshot : (reuseUserBubble ? lastMentions : [])
   // 立即把用户消息显示出来，随后在消息区内等待 AI 流式回复
   const msg: AIMessage = {
     id: 'usr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), conv_id: convId, role: 'user', content: text,
@@ -1729,6 +1866,7 @@ async function send() {
   scrollToBottom()
   input.value = ''
   attachments.value = []
+  mentions.value = []
   streaming.value = true
   resetStreamState()
   errorMsg.value = ''
@@ -1753,6 +1891,7 @@ async function send() {
         // 新会话还没有 id，工作目录只能随这一次请求带过去（后端建会话时写库）。
         cwd: convCwd.value || undefined,
         images: imagesPayload,
+        mentions: mentionPayload,
       }),
       signal: ctrl.signal,
     })
@@ -1875,9 +2014,13 @@ async function send() {
               : []
             break
           case 'notice':
-            // 后端主动告知的过程事件（目前只有「上下文超窗、已压缩历史并重试」）。
+            // 后端主动告知的过程事件（上下文超窗已压缩、引用读取失败等）。
             // 必须让用户看见：多条问题一起消失时，不说一声就像「AI 忽然忘事」。
-            if (data.message) toast.success(String(data.message))
+            // level 决定颜色：引用失败是「没做成」，不该以绿条出现。
+            if (data.message) {
+              if (data.level === 'error') toast.error(String(data.message))
+              else toast.success(String(data.message))
+            }
             break
           case 'cwd':
             // 后端本轮才定下工作目录（普通任务的专属目录是首次发送时才建的，
@@ -2922,13 +3065,44 @@ onUnmounted(() => {
           />
           <button class="ai-url-ok" @click="confirmUrlImage">{{ t('add') }}</button>
         </div>
+        <!-- @ 引用（B2）：已选 chip 与补全弹层。
+             弹层用 absolute 挂在输入区上方——输入区贴着窗口底部，往下弹会被切掉。
+             @ 只在主输入框生效：落地页那个 hero 输入框是同一份 v-model，但弹出的
+             弹层是相对输入区定位的，在 hero 里打 @ 只会留下纯文本（后端 mentions 为空
+             时不会展开任何东西），不会出现「弹层在屏幕另一头」这种怪状。 -->
+        <div v-if="mentions.length" class="ai-mention-chips">
+          <span
+            v-for="(m, i) in mentions"
+            :key="m.kind + (m.path || m.convId || String(i))"
+            class="ai-mention-chip"
+            :title="m.path || m.name"
+          >
+            <component :is="m.kind === 'conv' ? MessageSquare : m.kind === 'dir' ? Folder : FileText" :size="11" />
+            <span class="ai-mention-chip-name">{{ m.kind === 'conv' ? m.name : (m.path || m.name) }}</span>
+            <button class="ai-mention-chip-del" :title="t('delete')" @click="removeMention(i)">×</button>
+          </span>
+        </div>
+        <div v-if="mentionOpen" class="ai-mention-pop">
+          <div
+            v-for="(it, i) in mentionItems"
+            :key="it.kind + (it.path || it.convId || String(i))"
+            class="ai-mention-item"
+            :class="{ 'is-active': i === mentionIdx }"
+            @mousedown.prevent="pickMention(it)"
+          >
+            <component :is="it.kind === 'conv' ? MessageSquare : it.kind === 'dir' ? Folder : FileText" :size="12" />
+            <span class="ai-mention-name">{{ it.name }}</span>
+            <span v-if="it.path" class="ai-mention-path">{{ it.path }}</span>
+            <span v-else-if="it.kind === 'conv'" class="ai-mention-path">{{ t('aiMentionConv') }}</span>
+          </div>
+        </div>
         <div class="ai-input-row">
           <textarea
             v-model="input"
             class="ai-input"
             :placeholder="t('aiPlaceholder')"
             :disabled="!hasKey || streaming"
-            @keydown.enter="onEnterSend($event, send)"
+            @keydown="onComposerKey($event, send)"
             @paste="onInputPaste"
           />
           <div class="ai-input-tools">
@@ -3954,6 +4128,9 @@ select.ai-hero-select {
   padding: 12px 16px;
   border-top: 1px solid var(--color-border);
   flex-shrink: 0;
+  /* @ 补全弹层的定位锚点：它要贴着输入区上沿向上展开，
+     而不是跟着光标跑（textarea 里算光标坐标要镜像一个 div，得不偿失）。 */
+  position: relative;
 }
 .ai-input-row { display: flex; gap: 10px; align-items: flex-end; }
 .ai-input-tools { display: flex; align-items: flex-end; gap: 6px; flex-shrink: 0; }
@@ -3967,6 +4144,43 @@ select.ai-hero-select {
 .ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
 /* 待发送图片预览缩略图 */
 .ai-attach-preview { display: flex; flex-wrap: wrap; gap: 8px; }
+
+/* —— @ 引用（chip 与补全弹层）—— */
+.ai-mention-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ai-mention-chip {
+  display: inline-flex; align-items: center; gap: 3px; max-width: 260px;
+  padding: 2px 4px 2px 6px; font-size: 11px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary); color: var(--color-text-secondary);
+}
+.ai-mention-chip-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.ai-mention-chip-del {
+  border: none; background: transparent; color: var(--color-text-muted);
+  cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px;
+}
+.ai-mention-chip-del:hover { color: var(--color-danger); }
+.ai-mention-pop {
+  position: absolute; left: 16px; right: 16px; bottom: calc(100% - 6px);
+  max-height: 240px; overflow: auto; z-index: 30; padding: 4px;
+  background: var(--color-bg-primary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+}
+.ai-mention-item {
+  display: flex; align-items: center; gap: 6px; padding: 4px 6px;
+  font-size: 12px; color: var(--color-text-secondary); cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.ai-mention-item.is-active { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.ai-mention-name { flex-shrink: 0; }
+.ai-mention-path {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--color-text-muted); text-align: right;
+}
 .ai-attach-thumb {
   position: relative; width: 56px; height: 56px; border-radius: var(--radius-sm);
   overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);

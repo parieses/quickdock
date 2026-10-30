@@ -1924,6 +1924,7 @@ export default {
   aiCheckpointDone: 'Restored {n} file(s)',
   aiDiffExpand: 'Show all {n} lines',
   aiRulesActive: 'Using {n} rule file(s)',
+  aiMentionConv: 'Earlier chat',
   // orchestration (multi-agent delegation)
   aiToolVerbSpawn: 'Delegate',
   aiRunTree: '{n} sub-agent tasks',
