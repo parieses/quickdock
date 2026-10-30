@@ -7,7 +7,7 @@ package ai
 //
 //   - 把 run_command 改成 auto 的人：他在一个只有测试命令的项目里工作，每条
 //     npm test 都要点一次是纯粹的摩擦；
-//   - 把 web_fetch 改成 deny 的人：他确实不想让模型往外发任何东西。
+//   - 把 robot_notify 改成 deny 的人：他确实不想让模型往群里发任何东西。
 //
 // 于是留一层覆盖：显式设过的以设置为准，没设过的仍按等级推导。覆盖表存 settings
 // 的一张 JSON，跟 ai_profiles 同一个位置——不另开文件，免得出现「配置在两处、
@@ -38,6 +38,12 @@ type aiApprovalRuleView struct {
 	Custom bool `json:"custom"`
 	// AgentOnly 只给内置 AI 用（外部 MCP 客户端看不到）。
 	AgentOnly bool `json:"agentOnly"`
+	// Editable 这一行的策略能否在这里改。
+	//
+	// 读类工具恒 auto：把它们列出来是为了让人看得见「git_diff 也在管着」，
+	// 而不是留一块空白让人怀疑「git 相关的是不是漏了」。要拦读类请到 MCP
+	// 面板关掉那个工具——那样连「模型知道有这个能力」都一并去掉。
+	Editable bool `json:"editable"`
 }
 
 // loadApprovalRules 读覆盖表。
@@ -87,22 +93,22 @@ func (a *AIService) saveApprovalRules(rules map[string]approvalMode) error {
 	return a.App.DB.SetSetting(aiApprovalRulesKey, string(b))
 }
 
-// AIListApprovalRules 列出会改东西的工具及当前生效策略（bound）。
+// AIListApprovalRules 列出所有工具及当前生效策略（bound）。
 //
-// 只列 LevelWrite 及以上：读类工具恒 auto，把四十多个读工具也铺出来，用户会在
-// 一堆陌生名字里找不到真正想改的那一个。要拦读类（比如不想让它读 .env）走 MCP
-// 面板的单工具开关——那里本来就是「关掉这个能力」的正确位置。
+// 读类也在列表里，但标 editable=false：一开始的做法是整个过滤掉，结果设置页
+// 只剩十几个写工具，「git 相关的一个都没有」——而项目里根本没有 git_commit /
+// git_push（提交与推送是用户自己的事），只有 git_status / git_diff 两个只读的。
+// 用户看不到它们，只能怀疑是漏了。列出来、锁定、配一句说明，比空着好。
+//
+// 排序仍把高危排最前：要调策略的时候，人找的几乎总是那几个能删库的。
 func (a *AIService) AIListApprovalRules() *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
 	custom := a.loadApprovalRules()
 	all := mcpsrv.Catalog()
-	out := make([]aiApprovalRuleView, 0, 16)
+	out := make([]aiApprovalRuleView, 0, len(all))
 	for _, t := range all {
-		if t.Level < mcpsrv.LevelWrite {
-			continue
-		}
 		pol := aiApprovalPolicyFor(t.Name, t.Level, custom)
 		_, isCustom := custom[t.Name]
 		out = append(out, aiApprovalRuleView{
@@ -112,6 +118,7 @@ func (a *AIService) AIListApprovalRules() *services.ApiResult {
 			Mode:      string(pol.mode),
 			Custom:    isCustom,
 			AgentOnly: t.AgentOnly,
+			Editable:  t.Level >= mcpsrv.LevelWrite,
 		})
 	}
 	// 高危排前面：要调策略的时候，人找的几乎总是那几个能删库的。

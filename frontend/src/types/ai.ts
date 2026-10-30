@@ -65,6 +65,8 @@ export interface AIApprovalRuleView {
   mode: 'auto' | 'ask' | 'deny'
   custom: boolean
   agentOnly: boolean
+  // editable=false 表示读类工具：策略恒 auto，只展示不可改。
+  editable: boolean
 }
 
 // 消息正文搜索的一条命中（对应 Go 端 db.AIMessageHit）。

@@ -1842,6 +1842,8 @@ export default {
   aiApprovalModeAsk: '每次询问',
   aiApprovalModeDeny: '禁止调用',
   aiApprovalRuleReset: '恢复默认',
+  aiApprovalRuleReadOnly: '只读工具 · {n} 个（恒放行）',
+  aiApprovalRuleReadOnlyHint: '这一段是只读工具，策略固定为「直接执行」：读文件、git 状态、看日志这类操作每次都要确认的话，这道闸门三分钟内就会被关掉。真要挡住某个读类工具，到「设置 → MCP」里直接关掉它——那样模型连「有这个能力」都不知道，比执行前拦更彻底。',
   aiUsageHint: '花费 = 内置单价 × token 数，仅供参考：缓存命中、批量优惠、阶梯计价都没算进去，以服务商账单为准。',
   aiConfigHint: 'API Key 仅保存在本机，经系统 DPAPI 加密。支持任意 OpenAI 兼容接口（OpenAI / DeepSeek / Kimi / 通义千问 / Ollama 等）。',
   aiFillRequired: '请先填写 API Key、Base URL 和 Model',

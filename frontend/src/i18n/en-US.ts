@@ -1840,6 +1840,8 @@ export default {
   aiApprovalModeAsk: 'Ask every time',
   aiApprovalModeDeny: 'Blocked',
   aiApprovalRuleReset: 'Reset',
+  aiApprovalRuleReadOnly: 'Read-only tools · {n} (always run)',
+  aiApprovalRuleReadOnlyHint: 'These are read-only tools; their policy is fixed to run directly. Asking every time you read a file, check git status or tail a log is how this gate gets switched off within three minutes. To actually block a read-only tool, turn it off in Settings → MCP — the model then does not even know the capability exists, which is stricter than blocking at call time.',
   aiUsageHint: 'Cost = built-in unit price × tokens, for reference only: cache hits, batch discounts and tiered pricing are not modeled. The provider bill is authoritative.',
   aiConfigHint: 'API Key is stored only on this device, encrypted via system DPAPI. Any OpenAI-compatible endpoint is supported (OpenAI / DeepSeek / Kimi / Qwen / Ollama, etc.).',
   aiFillRequired: 'Fill in API Key, Base URL and Model first',

@@ -234,6 +234,15 @@ const apError = ref('')
 // 正在保存的那一行：只锁这一行的下拉，改别的工具不必等它。
 const apSaving = ref('')
 
+// 分两段显示：可改的（写类 + 高危）在上，只读的在下且默认折叠。
+//
+// 只读工具也有二十来个，全铺在最上面会把真正想改的那十几个挤到看不见；
+// 但完全不列又让人怀疑「git 相关的是不是漏了」——这个项目里 git 只有
+// git_status / git_diff 两个只读工具，没有 git_commit / git_push。
+const apRulesEditable = computed(() => apRules.value.filter((r) => r.editable))
+const apRulesReadOnly = computed(() => apRules.value.filter((r) => !r.editable))
+const apShowReadOnly = ref(false)
+
 async function loadApprovalRules() {
   apLoading.value = true
   apError.value = ''
@@ -567,8 +576,8 @@ function saveAIModal() {
       <p v-else class="usage-hint">{{ t('aiUsageEmpty') }}</p>
     </div>
 
-    <!-- 工具审批策略：只列会改东西的工具。读类恒 auto，铺出来只会在
-         四十多个陌生名字里把真正想改的那一个埋掉。 -->
+    <!-- 工具审批策略：先列会改东西的工具，只读的在下面折叠起来（只展示、
+         恒放行）。全过滤掉会让「git 相关的一个都没有」看起来像漏了。 -->
     <div class="ai-usage">
       <div class="ai-usage-head">
         <h4 class="ai-usage-title">{{ t('aiApprovalRulesTitle') }}</h4>
@@ -577,7 +586,8 @@ function saveAIModal() {
 
       <p v-if="apError" class="result-hint error">{{ apError }}</p>
       <p v-else-if="apLoading && !apRules.length" class="usage-hint">{{ t('aiUsageLoading') }}</p>
-      <table v-else-if="apRules.length" class="usage-table approval-rules">
+      <template v-else-if="apRulesEditable.length">
+      <table class="usage-table approval-rules">
         <thead>
           <tr>
             <th>{{ t('aiApprovalRuleTool') }}</th>
@@ -585,7 +595,7 @@ function saveAIModal() {
           </tr>
         </thead>
         <tbody>
-          <tr v-for="r in apRules" :key="r.tool" :class="{ 'is-custom': r.custom }">
+          <tr v-for="r in apRulesEditable" :key="r.tool" :class="{ 'is-custom': r.custom }">
             <td class="model">
               <code>{{ r.tool }}</code>
               <span v-if="r.level >= 2" class="approval-risk-tag">{{ t('aiApprovalRuleRisk') }}</span>
@@ -613,6 +623,28 @@ function saveAIModal() {
           </tr>
         </tbody>
       </table>
+
+      <!-- 只读工具：恒放行，只展示。 -->
+      <button class="approval-ro-toggle" @click="apShowReadOnly = !apShowReadOnly">
+        <span class="approval-ro-arrow">{{ apShowReadOnly ? '▾' : '▸' }}</span>
+        {{ t('aiApprovalRuleReadOnly', { n: apRulesReadOnly.length }) }}
+      </button>
+      <table v-if="apShowReadOnly" class="usage-table approval-rules is-readonly">
+        <tbody>
+          <tr v-for="r in apRulesReadOnly" :key="r.tool">
+            <td class="model">
+              <code>{{ r.tool }}</code>
+              <span v-if="r.agentOnly" class="approval-risk-tag is-plat">{{ t('aiApprovalRuleAgentOnly') }}</span>
+              <div class="usage-cell-sub">{{ r.desc }}</div>
+            </td>
+            <td class="approval-rules-mode">
+              <span class="approval-ro-mode">{{ t('aiApprovalModeAuto') }}</span>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <p v-if="apShowReadOnly" class="usage-hint">{{ t('aiApprovalRuleReadOnlyHint') }}</p>
+      </template>
     </div>
 
     <!-- AI 配置编辑模态框 -->
