@@ -124,25 +124,6 @@ func (d *Database) ListAICheckpoints(convID string) ([]AICheckpoint, error) {
 	return out, rows.Err()
 }
 
-// GetAICheckpoint 取指定回滚点。不存在时返回 (nil, nil)：
-// 前端可能拿着一张过期的列表来点，报错不如让它自己刷新。
-func (d *Database) GetAICheckpoint(convID string, seq int) (*AICheckpoint, error) {
-	d.mu.RLock()
-	defer d.mu.RUnlock()
-	var c AICheckpoint
-	err := d.conn.QueryRow(
-		`SELECT id, conv_id, seq, tool_call_id, tool, files, created_at
-		 FROM ai_checkpoints WHERE conv_id=? AND seq=?`, convID, seq).
-		Scan(&c.ID, &c.ConvID, &c.Seq, &c.ToolCallID, &c.Tool, &c.Files, &c.CreatedAt)
-	if err != nil {
-		if strings.Contains(err.Error(), "no rows") {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return &c, nil
-}
-
 // PurgeAICheckpoints 清理过老的与超量的回滚点，返回被删掉的记录。
 //
 // 返回记录而不是只返回条数：快照文件在磁盘上，删了行却不删目录就是纯泄漏，
@@ -194,6 +175,66 @@ func (d *Database) PurgeAICheckpoints(maxAgeDays, keepPerConv int) ([]AICheckpoi
 		}
 	}
 	return doomed, nil
+}
+
+// ListAICheckpointsByAge 全部会话的回滚点，最旧的在前。
+//
+// 给「盘占用超预算时按最旧优先淘汰」用：那时比较的是跨会话的总量，
+// 所以不能沿用按会话分组的 ListAICheckpoints。
+func (d *Database) ListAICheckpointsByAge() ([]AICheckpoint, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	rows, err := d.conn.Query(
+		`SELECT id, conv_id, seq, tool_call_id, tool, files, created_at
+		 FROM ai_checkpoints
+		 ORDER BY julianday(created_at) ASC, conv_id, seq ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AICheckpoint
+	for rows.Next() {
+		var c AICheckpoint
+		if err := rows.Scan(&c.ID, &c.ConvID, &c.Seq, &c.ToolCallID, &c.Tool, &c.Files, &c.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// DeleteAICheckpointsByID 批量删回滚点行，返回实际删掉的条数。
+//
+// 分批而不是拼一个超长 IN：SQLite 的参数个数有上限（老版本 999），
+// 而快照条数没有硬上限。
+func (d *Database) DeleteAICheckpointsByID(ids []string) (int, error) {
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	const chunk = 200
+	removed := 0
+	for i := 0; i < len(ids); i += chunk {
+		end := i + chunk
+		if end > len(ids) {
+			end = len(ids)
+		}
+		part := ids[i:end]
+		marks := strings.TrimSuffix(strings.Repeat("?,", len(part)), ",")
+		args := make([]any, len(part))
+		for j, id := range part {
+			args[j] = id
+		}
+		res, err := d.conn.Exec(`DELETE FROM ai_checkpoints WHERE id IN (`+marks+`)`, args...)
+		if err != nil {
+			return removed, err
+		}
+		if n, aerr := res.RowsAffected(); aerr == nil {
+			removed += int(n)
+		}
+	}
+	return removed, nil
 }
 
 // DeleteAIcheckpointsOfConv 删掉一个会话的全部回滚点，返回被删记录。

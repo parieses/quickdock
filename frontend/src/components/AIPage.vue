@@ -421,7 +421,10 @@ function cpForCall(tc: AIToolCall): AICheckpointView | undefined {
 // 一个不经过模型、直接覆盖磁盘现有内容的按钮。
 async function restoreCheckpoint(cp: AICheckpointView) {
   const names = cp.files.map((f) => shortPath(f.path)).join('、')
-  if (!(await toast.confirm(t('aiCheckpointConfirm', { files: names })))) return
+  // 回滚是「退回到这一步之前」，会连带撤销它之后的步骤。这个数字必须摆在确认框里：
+  // 用户点的是「第 3 个点」，但如果后面还有 5 步，实际被撤销的是 6 步。
+  const steps = checkpoints.value.filter((c) => c.seq >= cp.seq).length || 1
+  if (!(await toast.confirm(t('aiCheckpointConfirm', { n: steps, files: names })))) return
   try {
     const res = unwrap<{ restored: number; note?: string }>(await AIRestoreCheckpoint(activeId.value, cp.seq))
     toast.success(res?.note || t('aiCheckpointDone', { n: res?.restored ?? 0 }))

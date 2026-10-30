@@ -1920,7 +1920,7 @@ export default {
   aiApprovalAllowed: 'Allowed, running…',
   // edit checkpoints (snapshot before write; restore to a previous step)
   aiCheckpointUndo: 'Restore to before this step',
-  aiCheckpointConfirm: 'These files will be restored to their state before this step: {files}. Messages are unchanged, and this restore can itself be undone.',
+  aiCheckpointConfirm: 'This rolls back {n} step(s) to just before this point. These files return to their content at that time: {files}. Messages are unchanged, and the rollback itself can be undone.',
   aiCheckpointDone: 'Restored {n} file(s)',
   aiDiffExpand: 'Show all {n} lines',
   aiRulesActive: 'Using {n} rule file(s)',
