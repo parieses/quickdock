@@ -373,7 +373,7 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 项目规则（AGENTS.md / .quickdock/rules*）：读一次，贯穿本次 run。
 	// 压缩后重建复用的是同一份，不重新读盘——那次重建此刻正被超窗逼着做，
 	// 多加一次 IO 没有收益，还可能读到用户正在编辑的半截文件。
-	rules := a.loadAIRules(cwd)
+	rules := a.loadAIRules(cwd, aiMentionPaths(req.Mentions))
 	baseSystem = withRules(baseSystem, rules)
 	applySystemHints(messages, baseSystem, mode, cwd, modeHasTools, false)
 	// 让用户看见「这次用上了哪些规则」：改了不生效又没有任何提示，

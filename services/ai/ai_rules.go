@@ -4,6 +4,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,6 +31,14 @@ import (
 //
 // 三处都有就都读：合并顺序即上面的顺序，后读的排在后面，不互相覆盖——
 // 「后面的覆盖前面的」会让用户永远搞不清某条约定到底生效没有。
+
+// aiRuleGlobsPrefix 条件加载的标记前缀，写在 .quickdock/rules/*.md 的首行：
+//
+//	<!-- globs: src/**/*.ts, api/** -->
+//
+// 只对 rules/*.md 生效。AGENTS.md 与全局 rules.md 是「一定适用」的那一层，
+// 给它们加条件只会让用户以为规则坏了（写了不生效，又没有提示）。
+const aiRuleGlobsPrefix = "<!-- globs:"
 
 const (
 	// aiRuleFileMaxBytes 单个规则文件的上限。
@@ -69,30 +78,38 @@ type aiRules struct {
 // 加几十 KB 读盘，比缓存失效逻辑便宜得多。缓存要判 cwd、判每个文件的 mtime 与大小，
 // 判漏一项的症状是「改了规则不生效」——正好是这条功能最不该出的毛病。
 //
-// cwd 为空直接返回空：没有工作目录就没有「这个项目」，任何 .md 都不该被当成规则。
-func (a *AIService) loadAIRules(cwd string) aiRules {
+// touched 是「这次已经确定会碰到的文件」（@ 引用 + 本轮上一段里改过的文件），
+// 只用来决定带 <!-- globs: --> 的那批规则生效与否。空表示还不知道会碰什么，此时
+// 条件规则一律按生效处理——第一轮就收窄，模型会在不知道约定的情况下选题。
+func (a *AIService) loadAIRules(cwd string, touched []string) aiRules {
 	cwd = strings.TrimSpace(cwd)
 	// cwd 为空不早退：全局规则 <dataDir>/rules.md 与工作目录无关，
 	// 在空目录里临时问一句也该带上用户的通用约定。
 
+	rel := ruleRelPaths(cwd, touched)
 	var (
 		files []aiRuleFile
 		parts []string
 		total int
 	)
-	for _, p := range aiRuleCandidates(cwd) {
+	for _, c := range aiRuleCandidates(cwd) {
 		if total >= aiRuleTotalMaxBytes {
 			break
 		}
 		// 白名单照走。规则文件的路径是我们自己拼的，但读的仍是用户磁盘上的内容，
 		// 「路径可信」不等于「内容可信」——绕过 fsguard 就多了一个读取口子。
-		abs, err := fsguard.ResolveRead(a.App.DB, p, cwd, true)
+		abs, err := fsguard.ResolveRead(a.App.DB, c.path, cwd, true)
 		if err != nil {
 			continue // 文件不存在 / 不在可读范围：都按「这个位置没有规则」处理
 		}
 		body, truncated, n, ok := readRuleFile(abs, aiRuleTotalMaxBytes-total)
 		if !ok {
 			continue
+		}
+		if c.globs && len(rel) > 0 {
+			if pats := ruleGlobsOf(body); len(pats) > 0 && !matchAnyRuleGlob(pats, rel) {
+				continue
+			}
 		}
 		name := ruleDisplayName(cwd, abs)
 		files = append(files, aiRuleFile{Name: name, Bytes: n, Truncated: truncated})
@@ -116,20 +133,31 @@ func (a *AIService) loadAIRules(cwd string) aiRules {
 	return aiRules{Text: b.String(), Files: files}
 }
 
+// ruleCandidate 一个候选规则文件。
+type ruleCandidate struct {
+	path string
+	// globs 是否解析首行的 <!-- globs: ... --> 做条件加载。
+	//
+	// 只对 .quickdock/rules/*.md 开：这是「按主题拆开」的那一层，天然适合按目录
+	// 分工（api.md 管路由、ui.md 管组件）；AGENTS.md 与全局 rules.md 是「一定适用」
+	// 的那一层，给它们加条件只会让用户以为规则坏了。
+	globs bool
+}
+
 // aiRuleCandidates 列出所有可能有规则的路径，顺序即合并顺序（后者覆盖前者）。
 //
 // 全局规则排第一：它跨项目生效（「提交信息写中文」这类与项目无关的约定），
 // 项目自己的规则写在后面，同名话题上以项目为准。
-func aiRuleCandidates(cwd string) []string {
-	paths := []string{aiGlobalRulePath()}
+func aiRuleCandidates(cwd string) []ruleCandidate {
+	paths := []ruleCandidate{{path: aiGlobalRulePath()}}
 	if cwd == "" {
 		// 没有工作目录时只剩全局规则。不能整个返回空——那样「在空目录里问一句」
 		// 就享受不到用户自己的通用约定了。
 		return paths
 	}
 	paths = append(paths,
-		filepath.Join(cwd, "AGENTS.md"),
-		filepath.Join(cwd, ".quickdock", "rules.md"),
+		ruleCandidate{path: filepath.Join(cwd, "AGENTS.md")},
+		ruleCandidate{path: filepath.Join(cwd, ".quickdock", "rules.md")},
 	)
 	dir := filepath.Join(cwd, ".quickdock", "rules")
 	items, err := os.ReadDir(dir)
@@ -147,9 +175,131 @@ func aiRuleCandidates(cwd string) []string {
 	// 换成目录遍历顺序会让同一套规则在不同机器上拼出不同前缀，白丢前缀缓存。
 	sort.Strings(names)
 	for _, n := range names {
-		paths = append(paths, filepath.Join(dir, n))
+		paths = append(paths, ruleCandidate{path: filepath.Join(dir, n), globs: true})
 	}
 	return paths
+}
+
+// ruleGlobsOf 取出规则文件首行的 globs 列表。
+//
+// 只看第一行：写在文件中间的条件没人会预期它生效，而「往上找 N 行」的规则
+// 会让格式写错时静默失效——这类功能最怕的就是「没报错、也没生效」。
+func ruleGlobsOf(body string) []string {
+	line := body
+	if i := strings.IndexByte(line, '\n'); i >= 0 {
+		line = line[:i]
+	}
+	line = strings.TrimSpace(strings.TrimSuffix(line, "\r"))
+	if !strings.HasPrefix(line, aiRuleGlobsPrefix) {
+		return nil
+	}
+	line = strings.TrimPrefix(line, aiRuleGlobsPrefix)
+	if i := strings.Index(line, "-->"); i >= 0 {
+		line = line[:i]
+	}
+	var out []string
+	for _, p := range strings.Split(line, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// aiMentionPaths 取 @ 引用里能落到文件系统上的那些路径。
+//
+// 只用来判断条件规则是否生效，所以目录也收（@ 一个 src/ 目录时，
+// 写 src/**/*.ts 的规则显然该生效）。@conv 没有路径，跳过。
+func aiMentionPaths(mentions []AIMention) []string {
+	out := make([]string, 0, len(mentions))
+	for _, m := range mentions {
+		if m.Kind == "conv" || strings.TrimSpace(m.Path) == "" {
+			continue
+		}
+		out = append(out, m.Path)
+	}
+	return out
+}
+
+// ruleRelPaths 把「会碰到的文件」统一成相对 cwd 的 slash 路径。
+//
+// 匹配用相对路径：用户在 globs 里写的是 src/**/*.ts，而工具参数里可能是
+// 绝对路径；不归一化的话，同一份规则会时灵时不灵。
+func ruleRelPaths(cwd string, touched []string) []string {
+	out := make([]string, 0, len(touched))
+	for _, t := range touched {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		if filepath.IsAbs(t) && cwd != "" {
+			if rel, err := filepath.Rel(cwd, t); err == nil && !strings.HasPrefix(rel, "..") {
+				out = append(out, filepath.ToSlash(rel))
+				continue
+			}
+		}
+		out = append(out, filepath.ToSlash(strings.TrimPrefix(t, "./")))
+	}
+	return out
+}
+
+// matchAnyRuleGlob 任一 pattern 命中即返回 true。
+func matchAnyRuleGlob(patterns, rel []string) bool {
+	for _, p := range patterns {
+		for _, r := range rel {
+			if matchRuleGlob(p, r) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// matchRuleGlob 用最小实现匹配 glob，不引依赖。
+//
+// 支持 **（跨目录）/ *（段内）/ ?（单字符），大小写不敏感——Windows 上
+// src/App.ts 与 src/app.ts 是同一个文件，按大小写区分会让规则随机失效。
+// 以 / 结尾的 pattern 视为目录前缀（team/ 等价于 team/**），这是用户最常写的形态。
+func matchRuleGlob(pattern, rel string) bool {
+	pattern = strings.TrimSpace(filepath.ToSlash(pattern))
+	if pattern == "" {
+		return false
+	}
+	if strings.HasSuffix(pattern, "/") {
+		pattern += "**"
+	}
+	var b strings.Builder
+	b.WriteString("(?i)^")
+	for i := 0; i < len(pattern); i++ {
+		ch := pattern[i]
+		switch ch {
+		case '*':
+			if i+1 < len(pattern) && pattern[i+1] == '*' {
+				i++
+				// **/ 允许零层目录：src/**/*.ts 要能匹配 src/a.ts。
+				if i+1 < len(pattern) && pattern[i+1] == '/' {
+					i++
+					b.WriteString(`(?:[^/]*/)*`)
+				} else {
+					b.WriteString(`.*`)
+				}
+			} else {
+				b.WriteString(`[^/]*`)
+			}
+		case '?':
+			b.WriteString(`[^/]`)
+		default:
+			b.WriteString(regexp.QuoteMeta(string(ch)))
+		}
+	}
+	b.WriteString("$")
+	re, err := regexp.Compile(b.String())
+	if err != nil {
+		// 走到这里说明上面拼出了非法正则，属于代码问题；按「不匹配」处理比
+		// panic 好——规则失效最多是少一条约定，崩一次对话就是另一种毛病了。
+		return false
+	}
+	return re.MatchString(rel)
 }
 
 // aiGlobalRulePath 跨项目的规则文件：<dataDir>/rules.md。
