@@ -55,3 +55,14 @@ export interface AIApprovalStatsResult {
   auto: number
   byTool: AIApprovalToolStat[]
 }
+
+// 工具审批策略的一行（对应 Go 端 services/ai.aiApprovalRuleView）。
+// custom 为 false 表示这一行显示的是按等级推导的默认值，不是用户设的。
+export interface AIApprovalRuleView {
+  tool: string
+  level: number
+  desc: string
+  mode: 'auto' | 'ask' | 'deny'
+  custom: boolean
+  agentOnly: boolean
+}

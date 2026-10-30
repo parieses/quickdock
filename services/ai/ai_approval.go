@@ -73,11 +73,25 @@ type approvalPolicy struct {
 	rememberable bool
 }
 
-// aiApprovalPolicyFor 由工具名与等级推导策略。
+// aiApprovalPolicyFor 由用户覆盖、工具名与等级推导策略。
 //
 // 读类不拦是这条功能的生死线——如果读文件也要确认，三分钟内就会被关掉，
 // 而关掉之后就再也不会打开。
-func aiApprovalPolicyFor(_ string, level int) approvalPolicy {
+//
+// rules 优先：用户显式设过的策略就是他的决定，哪怕它比默认值更宽松。
+// 唯一的例外是「设成 ask」时要按等级决定给不给「本次会话都允许」——
+// 高危工具的那个按钮一旦给出去，等于把用户刚做的收紧又打开了。
+func aiApprovalPolicyFor(name string, level int, rules map[string]approvalMode) approvalPolicy {
+	if m, ok := rules[name]; ok {
+		switch m {
+		case approvalAuto:
+			return approvalPolicy{mode: approvalAuto}
+		case approvalDeny:
+			return approvalPolicy{mode: approvalDeny}
+		default:
+			return approvalPolicy{mode: approvalAsk, rememberable: level < mcpsrv.LevelRisk}
+		}
+	}
 	switch level {
 	case mcpsrv.LevelRead:
 		return approvalPolicy{mode: approvalAuto}
@@ -187,6 +201,11 @@ type approvalGate struct {
 	convID string
 	// database 只用于落审批明细（ai_approvals），不参与拦截判定。
 	database *db.Database
+	// rules 用户为具体工具设定的策略覆盖（见 ai_approval_rules.go）。
+	//
+	// 一次 run 读一次、全程复用：一轮对话里改设置不该让同一轮的两个调用
+	// 按两套策略走。改了设置下一轮对话生效。
+	rules map[string]approvalMode
 
 	// askMu 串行化整个「问 → 等」过程。
 	//
@@ -202,11 +221,12 @@ type approvalGate struct {
 	granted map[string]bool
 }
 
-func newApprovalGate(sink EventSink, convID string, database *db.Database) *approvalGate {
+func newApprovalGate(sink EventSink, convID string, database *db.Database, rules map[string]approvalMode) *approvalGate {
 	return &approvalGate{
 		sink:     sink,
 		convID:   convID,
 		database: database,
+		rules:    rules,
 		pending:  make(map[string]chan approvalDecision),
 		granted:  make(map[string]bool),
 	}
@@ -252,7 +272,7 @@ func approvalGateFrom(ctx context.Context) *approvalGate {
 // 返回 (是否允许, 给模型看的说明)。allow=false 时说明里必须写清「因为什么没执行」：
 // 模型据此换方案，而一句空的 failed 会让它原地重试同一个调用。
 func (g *approvalGate) await(ctx context.Context, callID, name string, level int, args map[string]any) (bool, string) {
-	pol := aiApprovalPolicyFor(name, level)
+	pol := aiApprovalPolicyFor(name, level, g.rules)
 	switch pol.mode {
 	case approvalAuto:
 		return true, ""

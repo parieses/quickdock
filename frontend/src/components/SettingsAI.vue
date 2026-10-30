@@ -9,14 +9,21 @@ import { getErrorMessage } from '../utils/error'
 import {
   AIApprovalStats,
   AIFetchModels,
+  AIListApprovalRules,
   AIListProfiles,
   AISaveProfiles,
+  AISetApprovalRule,
   AITestConnection,
   AIUsageStats,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environmentservice'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
-import type { AIApprovalStatsResult, AIProfilesResult, AIUsageStatsResult } from '../types/ai'
+import type {
+  AIApprovalRuleView,
+  AIApprovalStatsResult,
+  AIProfilesResult,
+  AIUsageStatsResult,
+} from '../types/ai'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -218,6 +225,47 @@ const approvalTotal = computed(() => {
 const topDenied = computed(() =>
   (approval.value?.byTool ?? []).filter((s) => s.deny > 0).slice(0, 3))
 
+// ── 工具审批策略 ─────────────────────────────────────────────────────
+// 默认策略由工具等级推导（写类询问、高危只给单次）。这里只开放「显式覆盖」，
+// 而且必须逐项点：一个「全部改成 auto」的按钮按下去，这道闸门就只剩装饰作用了。
+const apRules = ref<AIApprovalRuleView[]>([])
+const apLoading = ref(false)
+const apError = ref('')
+// 正在保存的那一行：只锁这一行的下拉，改别的工具不必等它。
+const apSaving = ref('')
+
+async function loadApprovalRules() {
+  apLoading.value = true
+  apError.value = ''
+  try {
+    apRules.value = unwrap<AIApprovalRuleView[]>(await AIListApprovalRules()) ?? []
+  } catch (e) {
+    apError.value = getErrorMessage(e)
+  } finally {
+    apLoading.value = false
+  }
+}
+
+// mode 传空串表示恢复默认（后端把这条覆盖删掉）。
+async function saveApprovalRule(rule: AIApprovalRuleView, mode: string) {
+  apSaving.value = rule.tool
+  apError.value = ''
+  try {
+    unwrap(await AISetApprovalRule(rule.tool, mode))
+    // 重新拉一次而不是本地改：生效值可能有后端规整（比如读类直接回绝），
+    // 本地改出来的「看起来成功了」比多一次请求贵得多。
+    await loadApprovalRules()
+  } catch (e) {
+    const msg = getErrorMessage(e)
+    // 失败同样要重拉：只回改本地 ref 拨不动已经被用户改过的 <select> DOM，
+    // 界面会停在一个假的「改成功了」上。
+    await loadApprovalRules().catch(() => {})
+    apError.value = msg
+  } finally {
+    apSaving.value = ''
+  }
+}
+
 // token 数量级跨得很大（几百 ~ 上千万），统一折算成 k/M，否则表格列宽会被撑爆。
 function fmtTokens(n: number): string {
   if (!n) return '0'
@@ -290,6 +338,7 @@ watch(() => props.visible, (v) => {
   if (!v) return
   loadAIProfiles()
   loadUsage()
+  loadApprovalRules()
 }, { immediate: true })
 
 function selectAIProfile(id: string) { aiActive.value = id }
@@ -516,6 +565,54 @@ function saveAIModal() {
         <p class="usage-hint">{{ t('aiUsageHint') }}</p>
       </template>
       <p v-else class="usage-hint">{{ t('aiUsageEmpty') }}</p>
+    </div>
+
+    <!-- 工具审批策略：只列会改东西的工具。读类恒 auto，铺出来只会在
+         四十多个陌生名字里把真正想改的那一个埋掉。 -->
+    <div class="ai-usage">
+      <div class="ai-usage-head">
+        <h4 class="ai-usage-title">{{ t('aiApprovalRulesTitle') }}</h4>
+      </div>
+      <p class="usage-hint">{{ t('aiApprovalRulesDesc') }}</p>
+
+      <p v-if="apError" class="result-hint error">{{ apError }}</p>
+      <p v-else-if="apLoading && !apRules.length" class="usage-hint">{{ t('aiUsageLoading') }}</p>
+      <table v-else-if="apRules.length" class="usage-table approval-rules">
+        <thead>
+          <tr>
+            <th>{{ t('aiApprovalRuleTool') }}</th>
+            <th class="approval-rules-mode">{{ t('aiApprovalRulePolicy') }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="r in apRules" :key="r.tool" :class="{ 'is-custom': r.custom }">
+            <td class="model">
+              <code>{{ r.tool }}</code>
+              <span v-if="r.level >= 2" class="approval-risk-tag">{{ t('aiApprovalRuleRisk') }}</span>
+              <span v-if="r.agentOnly" class="approval-risk-tag is-plat">{{ t('aiApprovalRuleAgentOnly') }}</span>
+              <div class="usage-cell-sub">{{ r.desc }}</div>
+            </td>
+            <td class="approval-rules-mode">
+              <select
+                class="field-input approval-select"
+                :value="r.mode"
+                :disabled="apSaving === r.tool"
+                @change="saveApprovalRule(r, ($event.target as HTMLSelectElement).value)"
+              >
+                <option value="auto">{{ t('aiApprovalModeAuto') }}</option>
+                <option value="ask">{{ t('aiApprovalModeAsk') }}</option>
+                <option value="deny">{{ t('aiApprovalModeDeny') }}</option>
+              </select>
+              <button
+                v-if="r.custom"
+                class="approval-reset"
+                :title="t('aiApprovalRuleReset')"
+                @click="saveApprovalRule(r, '')"
+              >{{ t('aiApprovalRuleReset') }}</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     <!-- AI 配置编辑模态框 -->

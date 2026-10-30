@@ -527,6 +527,31 @@
 .usage-cell-sub { display: block; font-size: 10px; color: var(--color-text-disabled); }
 .usage-hint { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-text-disabled); }
 
+/* ── 工具审批策略表（设置 → AI） ─────────────────────────────────── */
+
+/* 每行除了工具名还挂着它的描述，比用量表高一档；沿用 .usage-table 的边框与字号。 */
+.approval-rules td { padding: 6px 0; vertical-align: top; }
+/* 描述必须能换行：用量表的 .model 是单行省略，套在这里会把整句描述吞掉，
+   只剩工具名一模一样的一列，看不出区别。 */
+.approval-rules .model { max-width: none; white-space: normal; overflow: visible; }
+.approval-rules-mode { width: 148px; text-align: right; }
+.approval-select { width: 104px; padding: 3px 6px; font-size: 11px; }
+/* 用户显式改过的行在左侧压一道强调色：不标的话「这行是我设的还是默认值」
+   得逐个去比对下拉框，而两者显示的取值完全可能一样（比如本来默认就是 ask）。 */
+.approval-rules tr.is-custom td:first-child { box-shadow: inset 2px 0 0 var(--color-accent); padding-left: 8px; }
+.approval-risk-tag {
+  margin-left: 6px; padding: 0 5px; border-radius: var(--radius-sm);
+  background: var(--color-warning-bg); color: var(--color-warning);
+  font-size: 10px; line-height: 16px; display: inline-block;
+}
+/* 「仅内置 AI」不是风险提示，用强调色：它是「外部客户端看不到」这种中性事实。 */
+.approval-risk-tag.is-plat { background: var(--color-accent-bg); color: var(--color-accent); }
+.approval-reset {
+  display: block; margin: 2px 0 0 auto; padding: 0; border: none;
+  background: none; cursor: pointer; font-size: 10px; color: var(--color-text-disabled);
+}
+.approval-reset:hover { color: var(--color-accent); }
+
 /* 小型 toggle 开关（思考模式） */
 .toggle-btn-sm {
   position: relative; width: 36px; height: 20px; border-radius: var(--radius-md);

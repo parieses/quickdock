@@ -277,7 +277,7 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// （agentRoleSpec 的 maxLevel），而派活本身（spawn_agent，LevelWrite）
 	// 已经在父级过了这道闸——「批准派一个 code 角色」就是「批准它能改文件」。
 	if !req.Fresh {
-		gate := newApprovalGate(sink, res.ConvID, a.App.DB)
+		gate := newApprovalGate(sink, res.ConvID, a.App.DB, a.loadApprovalRules())
 		a.registerGate(res.ConvID, gate)
 		defer a.unregisterGate(res.ConvID)
 		ctx = withApprovalGate(ctx, gate)
