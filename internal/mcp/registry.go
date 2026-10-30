@@ -140,6 +140,25 @@ func MaxLevel() int {
 	return maxLvl
 }
 
+// ToolLevel 按名字取工具的危险等级（agent 注册表优先）。
+//
+// 存在的理由只有一个：审批闸门在 execOneToolCall 里只看得到工具名，而「要不要
+// 停下来问用户」完全由等级决定。
+//
+// 查不到时返回 LevelRisk 而不是 LevelRead：说明名字写错或工具刚被移除，按最保守的
+// 算——少问一次的代价（一条没被拦下的写操作）与多问一次的代价（多点一下）不对称。
+func ToolLevel(name string) int {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	if t, ok := agents[name]; ok {
+		return t.Level
+	}
+	if t, ok := tools[name]; ok {
+		return t.Level
+	}
+	return LevelRisk
+}
+
 // SetDisabled 全量替换「被单独关掉的工具」名单，并立即生效。
 //
 // 与等级门是两道独立闸：等级门按危险度批量裁剪（一档一刀），这里是对单个

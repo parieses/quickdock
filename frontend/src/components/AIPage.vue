@@ -106,6 +106,18 @@ interface AIToolCall {
   round?: number; running?: boolean
   // dedup 与本次提问里之前某次调用完全相同，宿主跳过了执行。
   dedup?: boolean
+  // denied 被用户拒绝（审批闸门），没有执行。与 dedup 分开：两个都是「没跑」，
+  // 但原因不同——一个是「同样的事刚做过」，一个是「你拒绝了」，卡片上要说不同的话。
+  denied?: boolean
+  // 审批（见 ai_approval.go）：写类与高危工具在宿主侧停下来等用户点按钮。
+  // pending 只在流式期间存在；allowed / denied 是点完之后的终态，
+  // expired 表示卡片还在但后端已经不等了（会话结束 / 用户点了停止）。
+  approval?: 'pending' | 'allowed' | 'denied' | 'expired'
+  riskNote?: string
+  rememberable?: boolean
+  // 审批归属的会话：后端下发而不是读 activeId —— 用户在等待期间可能切走，
+  // 切回来再点时 activeId 已经不是原来那个会话了。
+  approvalConvId?: string
   // 改动行数（file_edit 有值）：卡片摘要行右侧显示 +N / -M。
   added?: number; removed?: number
   // 这条调用所属的编排 run / 节点（只有 spawn_agent 才有）。
@@ -217,6 +229,9 @@ function serializeTools(list: AIToolCall[]): string {
     result: t.result || '', error: t.error || '',
     ms: t.ms || 0, round: t.round || 0,
     ...(t.dedup ? { dedup: true } : {}),
+    // 拒绝是结果不是瞬时态：刷新后卡片还要显示「已拒绝」，所以必须落库。
+    // approval 状态本身不落——pending 在这条消息进库时早已有结论。
+    ...(t.denied ? { denied: true } : {}),
     ...(t.added ? { added: t.added } : {}),
     ...(t.removed ? { removed: t.removed } : {}),
     // run/node 必须一起落库：刷新后 run 树面板靠它才知道该拉哪棵树。
@@ -334,6 +349,27 @@ function toolResultLang(tc: AIToolCall): string {
   if (tc.name.startsWith('git_')) return 'diff'
   if (tc.name === 'file_edit') return 'diff'
   return ''
+}
+
+// approveTool 对一条待确认的工具调用作出决定（见后端 ai_approval.go）。
+//
+// 点完立刻把本地状态改成终态、不等后端回执：审批期间宿主整条流是阻塞的，
+// 中间没有任何进度可显示；按钮不变灰的话用户会连点，而第二次在后端只会被
+// 丢掉（缓冲区已满），表现出来就是「点了没反应」。
+// 出错要把状态退回去——否则这一次点完就再也没有机会同意了。
+async function approveTool(tc: AIToolCall, decision: 'allow' | 'deny', remember = false) {
+  if (tc.approval !== 'pending') return
+  tc.approval = decision === 'allow' ? 'allowed' : 'denied'
+  // 拒绝要留痕：随后的 tool_result 事件会把它写进卡片与库里，刷新后还能看到
+  // 「已拒绝」而不是一条普通的红色报错。
+  if (decision === 'deny') tc.denied = true
+  try {
+    await AIApproveToolCall(tc.approvalConvId || activeId.value, tc.id, decision, remember)
+  } catch (e) {
+    tc.approval = 'pending'
+    tc.denied = false
+    toast.error(getErrorMessage(e))
+  }
 }
 
 // 历史消息的块 HTML：按消息 id 记忆化。
@@ -1684,6 +1720,20 @@ async function send() {
               running: true,
             })
             break
+          case 'approval': {
+            // 写类 / 高危工具在宿主侧停下来等确认（见 ai_approval.go）。
+            // 后端保证「先发 tool 再发 approval」，所以这里一定能找到卡片。
+            const at = streamTools.value.find((x) => x.id === String(data.callId || ''))
+            if (at) {
+              at.approval = 'pending'
+              at.riskNote = String(data.riskNote || '')
+              at.rememberable = !!data.rememberable
+              // 会话由后端下发：用户可能在这张卡等着的时候切走再切回，
+              // 那时 activeId 已经不是发起审批的那个会话了。
+              at.approvalConvId = String(data.convId || '')
+            }
+            break
+          }
           case 'tool_result': {
             // 结果回填到同一张卡片。按 id 找而不是按「最后一条」：
             // 一轮里可能并发调多个工具，回来的顺序不一定与发出顺序一致。
@@ -2535,7 +2585,8 @@ onUnmounted(() => {
                         <em v-if="tc.added" class="ai-diff-add">+{{ tc.added }}</em>
                         <em v-if="tc.removed" class="ai-diff-del">-{{ tc.removed }}</em>
                       </span>
-                      <span v-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
+                      <span v-if="tc.denied" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
+                      <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
                       <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
                     </summary>
                     <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
@@ -2586,7 +2637,7 @@ onUnmounted(() => {
                 </summary>
                 <div class="ai-tools-body">
                   <!-- 正在跑的那条自动展开：等待期间它是唯一的进度信息。 -->
-                  <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running }" :open="!!tc.running">
+                  <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running, 'is-ask': tc.approval === 'pending' }" :open="!!tc.running || tc.approval === 'pending'">
                     <summary class="ai-tool-line">
                       <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
                       <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
@@ -2595,10 +2646,25 @@ onUnmounted(() => {
                         <em v-if="tc.added" class="ai-diff-add">+{{ tc.added }}</em>
                         <em v-if="tc.removed" class="ai-diff-del">-{{ tc.removed }}</em>
                       </span>
-                      <span v-if="tc.running" class="ai-tool-ms">{{ t('aiToolRunning') }}</span>
+                      <span v-if="tc.approval === 'pending'" class="ai-tool-ms is-ask">{{ t('aiApprovalWaiting') }}</span>
+                      <span v-else-if="tc.approval === 'denied'" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
+                      <span v-else-if="tc.running" class="ai-tool-ms">{{ t('aiToolRunning') }}</span>
                       <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
                       <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
                     </summary>
+                    <!-- 审批卡：写类与高危工具在这里停下来等人点（见后端 ai_approval.go）。
+                         风险说明必须排在按钮之前——先让人看见「为什么问你」，再决定点哪个；
+                         反过来等于让人盲点。高危类不给「本次会话都允许」，
+                         那是后端 rememberable 决定的，前端只管不渲染。 -->
+                    <div v-if="tc.approval === 'pending'" class="ai-approval">
+                      <div v-if="tc.riskNote" class="ai-approval-risk">{{ tc.riskNote }}</div>
+                      <div class="ai-approval-btns">
+                        <button class="ai-approval-btn is-allow" @click.stop="approveTool(tc, 'allow')">{{ t('aiApprovalAllow') }}</button>
+                        <button v-if="tc.rememberable" class="ai-approval-btn is-allow-all" @click.stop="approveTool(tc, 'allow', true)">{{ t('aiApprovalRemember') }}</button>
+                        <button class="ai-approval-btn is-deny" @click.stop="approveTool(tc, 'deny')">{{ t('aiApprovalDeny') }}</button>
+                      </div>
+                    </div>
+                    <div v-else-if="tc.approval === 'allowed'" class="ai-approval-done">{{ t('aiApprovalAllowed') }}</div>
                     <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
                     <pre v-else-if="tc.result" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
                   </details>
@@ -3183,6 +3249,34 @@ select.ai-hero-select {
 .ai-diff-add { color: var(--color-success, #3fb950); font-style: normal; }
 .ai-diff-del { color: var(--color-danger); font-style: normal; }
 .ai-tool-ms { font-size: 11px; color: var(--color-text-muted); margin-left: auto; flex-shrink: 0; }
+/* 等待审批：琥珀色左侧条，与「失败红」「执行中灰」区分开——它既不是错误也不是
+   正常执行，是「卡在这儿等人」。 */
+.ai-tool.is-ask { border-left: 2px solid var(--color-warning); }
+.ai-tool-ms.is-ask { color: var(--color-warning); }
+.ai-tool-ms.is-denied { color: var(--color-text-muted); }
+/* 审批卡：风险说明在上、按钮在下。说明必须排在按钮前——先让人看见「为什么问你」
+   再决定点哪个；反过来等于让人盲点。 */
+.ai-approval { margin: 4px 0 2px; display: flex; flex-direction: column; gap: 6px; }
+.ai-approval-risk {
+  font-size: 11px; color: var(--color-text-secondary); line-height: 1.5;
+  background: var(--color-bg-primary); border-radius: 4px; padding: 5px 7px;
+  border-left: 2px solid var(--color-warning);
+}
+.ai-approval-btns { display: flex; gap: 6px; flex-wrap: wrap; }
+.ai-approval-btn {
+  font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--color-border); background: var(--color-bg-primary);
+  color: var(--color-text-primary);
+}
+.ai-approval-btn:hover { background: var(--color-bg-hover); }
+/* 允许是主操作，给强调色；拒绝刻意不做成实心红——把「拒绝」做成醒目的红按钮，
+   人会下意识躲开它，而这恰恰是用户最该敢按的那一个。 */
+.ai-approval-btn.is-allow {
+  background: var(--color-accent); border-color: var(--color-accent);
+  color: var(--color-accent-text);
+}
+.ai-approval-btn.is-deny { color: var(--color-danger); border-color: var(--color-danger); }
+.ai-approval-done { font-size: 11px; color: var(--color-text-muted); margin-top: 3px; }
 .ai-tool-err {
   font-size: 11px; color: var(--color-danger); margin-top: 3px;
   word-break: break-word;

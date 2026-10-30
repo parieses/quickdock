@@ -31,6 +31,14 @@ type AIService struct {
 	aiCacheMu   sync.RWMutex
 	aiCachedCfg AIProfile
 	aiCachedOK  bool
+
+	// 会话 → 审批通道索引（见 ai_approval.go）。
+	//
+	// 用一张 map 而不是单个字段：前台可能同时开着几条对话，各自都有待确认的工具调用，
+	// 单字段必然串台（「点 A 的允许、放下了 B 的操作」）。RunAgent 进入时注册、
+	// 退出时注销，漏了注销就是每问一次泄漏一个 gate。
+	gatesMu sync.Mutex
+	gates   map[string]*approvalGate
 }
 
 // NewAIService 创建 AI 门面服务

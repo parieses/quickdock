@@ -266,6 +266,18 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	}
 	ctx = withAgentScope(ctx, sc)
 
+	// 审批闸门（见 ai_approval.go）。同样挂 ctx、同样只挂顶层执行：
+	// 子 agent 用 dbSink 跑在后台，没有「人」在等它，审批事件发出去只会等到超时
+	// 然后自动拒绝，把 code 角色整个废掉。子 agent 的约束是工具面
+	// （agentRoleSpec 的 maxLevel），而派活本身（spawn_agent，LevelWrite）
+	// 已经在父级过了这道闸——「批准派一个 code 角色」就是「批准它能改文件」。
+	if !req.Fresh {
+		gate := newApprovalGate(sink, res.ConvID)
+		a.registerGate(res.ConvID, gate)
+		defer a.unregisterGate(res.ConvID)
+		ctx = withApprovalGate(ctx, gate)
+	}
+
 	// 调模型前先落库用户消息：无论后续成功 / 失败 / 被打断，历史都不会出现空会话，
 	// 用户刷新或重进会话都能看到自己问了什么，而不是点进来一片空白。
 	//
@@ -462,7 +474,7 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		for _, r := range recs {
 			sink.Event("tool_result", map[string]any{
 				"id": r.ID, "name": r.Name, "ok": r.Error == "", "ms": r.Ms,
-				"error": r.Error, "dedup": r.Dedup,
+				"error": r.Error, "dedup": r.Dedup, "denied": r.Denied,
 				"added": r.Added, "removed": r.Removed,
 				// 编排类工具带回 run/node，前端可以立刻挂出 run 树，
 				// 不必等整轮结束再回头查一次。

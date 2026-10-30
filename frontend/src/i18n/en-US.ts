@@ -1911,6 +1911,13 @@ export default {
   aiPickFolderTitle: 'Choose a working folder',
   aiCwdTip: 'Working folder: {dir}. The AI can only modify files inside it, and new files go here too — click to open in Explorer',
   aiToolDedup: 'duplicate skipped',
+  // tool approval (write / high-risk tools pause for confirmation; see ai_approval.go)
+  aiToolDenied: 'denied',
+  aiApprovalWaiting: 'awaiting approval',
+  aiApprovalAllow: 'Allow',
+  aiApprovalRemember: 'Allow for this session',
+  aiApprovalDeny: 'Deny',
+  aiApprovalAllowed: 'Allowed, running…',
   // orchestration (multi-agent delegation)
   aiToolVerbSpawn: 'Delegate',
   aiRunTree: '{n} sub-agent tasks',

@@ -99,6 +99,12 @@ type aiToolRecord struct {
 	// 单独标记而不是只写在 Result 里：界面上「0ms 成功」和「压根没跑」是两件事，
 	// 用户看到两张一模一样的卡片会以为工具跑了两遍。
 	Dedup bool `json:"dedup,omitempty"`
+	// Denied 这次调用被用户拒绝（审批闸门），没有执行。
+	//
+	// 与 Dedup 分开而不是合并成一个「没跑」标志：两者在界面上要显示不同的话
+	// ——「同样的事刚做过，已跳过」和「你拒绝了这次操作」。合成一个，用户会以为
+	// 工具执行失败了。
+	Denied bool `json:"denied,omitempty"`
 	// Added / Removed 这次调用改动的行数（file_edit 有值，其它工具为 0）。
 	//
 	// 单独成字段而不是让前端去结果文本里抠：结果是一段给模型看的 JSON/文本，
@@ -528,6 +534,24 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 			rec.Result = fmt.Sprintf(
 				"与第 %d 轮执行过的 %s 参数完全相同，已跳过、没有重复执行。上次的结果如下（无需再调）：\n%s",
 				prev.Round, prev.Name, prev.Result)
+			return rec, rec.Result
+		}
+	}
+
+	// 审批闸门（见 ai_approval.go）：写类与高危工具在这里停下来等用户点确认。
+	//
+	// 位置刻意在去重与参数校验之后：
+	//   - 去重命中的是「同一轮里第二次一模一样的调用」，那时工具根本没跑，
+	//     问用户等于同一件事问两遍；
+	//   - 参数坏了的调用执行必然报错，问也没有意义。
+	//
+	// 被拒绝的调用不写进 seen：拒绝的是这一次，用户下次再看到可能就同意了。
+	// 这也意味着模型若原样重试，会再弹一次卡片——那正是「拒绝」应有的效果。
+	if gate := approvalGateFrom(ctx); gate != nil {
+		if allow, note := gate.await(ctx, c.ID, c.Name, mcpsrv.ToolLevel(c.Name), args); !allow {
+			rec.Denied = true
+			rec.Error = "未获批准，未执行"
+			rec.Result = aiApprovalRejectText(c.Name, note)
 			return rec, rec.Result
 		}
 	}

@@ -1918,6 +1918,13 @@ export default {
   aiPickFolderTitle: '选择工作目录',
   aiCwdTip: '工作目录：{dir}。AI 只能改这个目录里的文件，生成的文件也放在这里——点击在资源管理器打开',
   aiToolDedup: '重复已跳过',
+  // 工具审批（写类与高危工具执行前停下来问人，见后端 ai_approval.go）
+  aiToolDenied: '已拒绝',
+  aiApprovalWaiting: '等待确认',
+  aiApprovalAllow: '允许执行',
+  aiApprovalRemember: '本次会话都允许',
+  aiApprovalDeny: '拒绝',
+  aiApprovalAllowed: '已允许，执行中…',
   // 编排（多 agent 派活）
   aiToolVerbSpawn: '派活',
   aiRunTree: '编排了 {n} 个子任务',
