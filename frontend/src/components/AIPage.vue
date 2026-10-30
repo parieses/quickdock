@@ -140,6 +140,9 @@ interface AICheckpointView {
   files: { path: string; existed: boolean; mode: number; backup: string; bytes: number }[]
 }
 
+// 一个生效的规则文件（后端 ai_rules.go 的 aiRuleFile）。
+interface AIRuleFile { name: string; bytes: number; truncated?: boolean }
+
 // 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
 // path 为落盘后相对数据目录的路径，重载会话时由 AILoadImage 读回 dataUrl）。
 interface AIMsgImage { kind: 'file' | 'url'; url?: string; path?: string; name?: string; dataUrl?: string }
@@ -211,6 +214,13 @@ const streamBlocks = ref<LiveBlock[]>([])
 // 不是逐字增长的文本，混进同一个缓冲会打乱增量渲染的「只有最后一块在变」前提。
 const streamTools = ref<AIToolCall[]>([])
 
+// 本轮生效的项目规则文件（后端 rules 事件）。
+//
+// 为什么要显示：规则文件（AGENTS.md 等）是「改了就该生效」的东西，而生效与否
+// 用户完全看不见——写错位置、超过 8KB 被截断、cwd 不是自己想的那一层，
+// 三种情况表现一模一样（AI 没照约定做）。给一行提示，这些都能自查。
+const runRules = ref<AIRuleFile[]>([])
+
 // toolList 把消息里的 tool_calls 解析成数组。
 //
 // 用 try/catch 兜住：这是**历史数据**，可能来自旧版本、也可能被手工改过库；
@@ -223,6 +233,19 @@ function toolList(m: AIMessage): AIToolCall[] {
   } catch {
     return []
   }
+}
+
+// rulesOf 取这条回复生效过的规则文件。只有本次会话里收到的回复有（见 runRules），
+// 刷新后重新从库里读的消息没有这个字段——规则是执行时事实，不落库。
+function rulesOf(m: Record<string, any>): AIRuleFile[] {
+  const v = m?.rules
+  return Array.isArray(v) ? (v as AIRuleFile[]) : []
+}
+
+// rulesTitle 悬停时列出文件名与字节数：截断过的一定要标出来，
+// 否则「我写了 30KB 的规则，AI 只记住一半」这件事永远查不出来。
+function rulesTitle(files: AIRuleFile[]): string {
+  return files.map((f) => `${f.name} · ${f.bytes} B${f.truncated ? ' · 已截断' : ''}`).join('\n')
 }
 
 // runIDOf 取这条回复所属的编排 run（同一条回复里派了多个子任务时它们同属一个 run，
@@ -1437,6 +1460,7 @@ function resetStreamState() {
   streamingText.value = ''
   streamBlocks.value = []
   streamTools.value = []
+  runRules.value = []
   reasoningText.value = ''
   // 流式块缓存按回复隔离：一条回复的块原文可能与另一条完全相同
   // （如「好的」这类短回复），跨回复复用是安全的，但没必要长期持有。
@@ -1843,6 +1867,13 @@ async function send() {
               else loadConversations()
             }
             break
+          case 'rules':
+            // 本轮生效的项目规则文件（AGENTS.md / .quickdock/rules*）。
+            // 只存内存、不落库：规则是「这次提问读了哪些文件」的执行时事实，不是对话内容。
+            runRules.value = Array.isArray(data.files)
+              ? (data.files as any[]).map((f) => ({ name: String(f?.name || ''), bytes: Number(f?.bytes) || 0, truncated: !!f?.truncated }))
+              : []
+            break
           case 'notice':
             // 后端主动告知的过程事件（目前只有「上下文超窗、已压缩历史并重试」）。
             // 必须让用户看见：多条问题一起消失时，不说一声就像「AI 忽然忘事」。
@@ -1879,6 +1910,9 @@ async function send() {
                   msg.tool_calls = serializeTools(streamTools.value)
                   msg.tool_rounds = Number(data.toolRounds) || countToolRounds(streamTools.value)
                 }
+                // 规则文件跟着这条回复走，而不是挂在页面顶上：用户事后想问的是
+                // 「这条回答当时读了什么约定」，刷新后消失也无所谓（下次提问会重读）。
+                if (runRules.value.length) msg.rules = runRules.value.slice()
                 messages.value.push(msg as AIMessage)
                 // 复用流式期已渲染好的块 HTML，避免落地瞬间整条重新解析
                 primeMessageBlocks(msg.id as string, content, streamBlocks.value.map((b) => b.html))
@@ -2681,6 +2715,14 @@ onUnmounted(() => {
               <!-- 编排 run 树：这条回复派出去的子 agent。只有带 run_id 的回复才渲染，
                    否则每一句普通回答下面都会多一个空面板。展开时才拉数据。 -->
               <AgentRunTree v-if="runIDOf(m)" :run-id="runIDOf(m)" />
+              <!-- 本次生效的规则文件：一行小字，悬停看文件名与字节数。
+                   没有这一行的话，「规则改了不生效」在界面上没有任何线索——
+                   写错位置、被 8KB 截断、cwd 不是想的那一层，表现完全一样。 -->
+              <div v-if="rulesOf(m).length" class="ai-rules" :title="rulesTitle(rulesOf(m))">
+                <FileText :size="11" />
+                <span>{{ t('aiRulesActive', { n: rulesOf(m).length }) }}</span>
+                <span class="ai-rules-name">{{ rulesOf(m).map((r) => r.name).join('、') }}</span>
+              </div>
               <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md">
                 <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
               </div>
@@ -2713,6 +2755,13 @@ onUnmounted(() => {
                  否则「正在查环境」的那几秒界面上什么都没有，看起来像卡死。 -->
             <div v-if="streamingText || streamTools.length" class="ai-msg assistant streaming">
               <div class="ai-msg-role">AI</div>
+              <!-- 与历史卡片同款提示：流式期就能看到「这次带上了哪几个规则文件」，
+                   不然要等回答完才知道，而那时已经照错的约定做完了。 -->
+              <div v-if="runRules.length" class="ai-rules" :title="rulesTitle(runRules)">
+                <FileText :size="11" />
+                <span>{{ t('aiRulesActive', { n: runRules.length }) }}</span>
+                <span class="ai-rules-name">{{ runRules.map((r) => r.name).join('、') }}</span>
+              </div>
               <!-- 流式期默认展开：用户需要看到「正在用哪个工具」，这是等待期间唯一的进度信息 -->
               <details v-if="streamTools.length" class="ai-tools" open>
                 <summary class="ai-tools-sum">
@@ -3375,6 +3424,16 @@ select.ai-hero-select {
   cursor: pointer; border-radius: 3px;
 }
 .ai-tool-undo:hover { color: var(--color-accent); background: var(--color-bg-hover); }
+/* 生效的规则文件：一行小字，和工具卡片同一量级——它是「解释这条回答为什么这样写」
+   的背景信息，不该比正文更显眼。文件名超长时省略，全文在悬停提示里。 */
+.ai-rules {
+  display: flex; align-items: center; gap: 4px;
+  margin: 2px 0 4px; font-size: 11px; color: var(--color-text-muted);
+}
+.ai-rules-name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono);
+}
 .ai-tool-err {
   font-size: 11px; color: var(--color-danger); margin-top: 3px;
   word-break: break-word;

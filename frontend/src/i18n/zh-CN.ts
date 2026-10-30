@@ -1931,6 +1931,8 @@ export default {
   aiCheckpointDone: '已还原 {n} 个文件',
   // 行级 diff（见 AiDiffView.vue）。{n} 是总行数，不是剩余行数。
   aiDiffExpand: '展开全部 {n} 行',
+  // 项目规则文件（AGENTS.md / .quickdock/rules*）生效提示
+  aiRulesActive: '本次生效 {n} 个规则文件',
   // 编排（多 agent 派活）
   aiToolVerbSpawn: '派活',
   aiRunTree: '编排了 {n} 个子任务',

@@ -1923,6 +1923,7 @@ export default {
   aiCheckpointConfirm: 'These files will be restored to their state before this step: {files}. Messages are unchanged, and this restore can itself be undone.',
   aiCheckpointDone: 'Restored {n} file(s)',
   aiDiffExpand: 'Show all {n} lines',
+  aiRulesActive: 'Using {n} rule file(s)',
   // orchestration (multi-agent delegation)
   aiToolVerbSpawn: 'Delegate',
   aiRunTree: '{n} sub-agent tasks',

@@ -351,7 +351,17 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 而不是一次追加：收尾轮撤下 tools 之后，system 里那段「你可以调用 file_read」
 	// 也必须一起撤掉，否则模型会把这次调用输出成纯文本标记（见 ai_dsml.go）。
 	baseSystem := firstSystem(messages)
+	// 项目规则（AGENTS.md / .quickdock/rules*）：读一次，贯穿本次 run。
+	// 压缩后重建复用的是同一份，不重新读盘——那次重建此刻正被超窗逼着做，
+	// 多加一次 IO 没有收益，还可能读到用户正在编辑的半截文件。
+	rules := a.loadAIRules(cwd)
+	baseSystem = withRules(baseSystem, rules)
 	applySystemHints(messages, baseSystem, mode, cwd, modeHasTools, false)
+	// 让用户看见「这次用上了哪些规则」：改了不生效又没有任何提示，
+	// 是这类功能最常见的抱怨，而用户没法自己看出 AI 到底读没读到。
+	if len(rules.Files) > 0 {
+		sink.Event("rules", map[string]any{"files": rules.Files})
+	}
 
 	// 流式调用模型，逐段写入 sink。
 	// reasoningBuf / assistantBuf 跨轮累加：一条回复由多轮组成，但用户看到的是
@@ -441,6 +451,9 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			// 新组装的上下文里 system 是干净的（没贴提示），base 要跟着换：
 			// 它可能已经带上了这次新算出的摘要。
 			baseSystem = firstSystem(newMsgs)
+			// 规则跟着一起贴回去：buildAIMessagesWithin 组出来的 system 是干净的。
+			// 漏了这一句的症状是「长对话聊到一半突然不认项目约定」，极难复现。
+			baseSystem = withRules(baseSystem, rules)
 			applySystemHints(newMsgs, baseSystem, mode, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
 			messages = newMsgs
 			sink.Event("notice", map[string]any{
