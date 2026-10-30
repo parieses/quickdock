@@ -291,3 +291,70 @@
   border-color: var(--color-accent);
   color: var(--color-accent-text);
 }
+
+/* ==================== 编排 run 树（AI 页气泡内） ====================
+   归类在 panels.css 而不是页面组件的 <style scoped>：样式只有一处实现，
+   页面组件里再写一套，改主题时会漏掉其中一半。
+   颜色一律取 style.css 的 token——深色/浅色两套主题都要对。 */
+.qd-run { margin: 2px 0; max-width: 80%; }
+.qd-run > summary {
+  display: flex; align-items: center; gap: 6px;
+  padding: 5px 9px; cursor: pointer; user-select: none;
+  font-size: 12px; color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+.qd-run > summary::-webkit-details-marker { display: none; }
+.qd-run > summary:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.qd-run[open] > summary { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
+/* 折叠箭头：靠 details[open] 旋转，省一个状态字段。 */
+.qd-run-caret { transition: transform var(--transition-fast); transform: rotate(-90deg); flex-shrink: 0; }
+.qd-run[open] > .qd-run-sum .qd-run-caret { transform: rotate(0deg); }
+.qd-run-state { margin-left: auto; font-size: 11px; color: var(--color-text-muted); }
+.qd-run-state.is-done { color: var(--color-success); }
+.qd-run-state.is-failed { color: var(--color-danger); }
+.qd-run-state.is-canceled { color: var(--color-warning); }
+
+.qd-run-body {
+  border: 1px solid var(--color-border); border-top: none;
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  background: var(--color-bg-primary);
+  padding: 6px 9px;
+}
+.qd-run-hint { font-size: 12px; color: var(--color-text-muted); padding: 2px 0; }
+.qd-run-hint.is-err { color: var(--color-danger); }
+
+.qd-run-node { margin: 3px 0; padding-left: 8px; border-left: 2px solid var(--color-border-light); }
+/* 状态点：一眼扫出哪个子任务失败了，不用逐条读文字。 */
+.qd-run-node-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; }
+.qd-run-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--color-text-disabled); flex-shrink: 0; align-self: center;
+}
+.qd-run-dot.is-running { background: var(--color-accent); }
+.qd-run-dot.is-done { background: var(--color-success); }
+.qd-run-dot.is-failed { background: var(--color-danger); }
+.qd-run-dot.is-canceled { background: var(--color-warning); }
+.qd-run-role {
+  font-family: var(--font-mono); font-size: 11px;
+  color: var(--color-text-secondary); flex-shrink: 0;
+}
+.qd-run-task {
+  color: var(--color-text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.qd-run-tokens { margin-left: auto; font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
+.qd-run-result { margin: 3px 0 3px 12px; }
+.qd-run-result > summary {
+  font-size: 11px; color: var(--color-text-muted); cursor: pointer; user-select: none;
+}
+.qd-run-result > summary:hover { color: var(--color-text-primary); }
+.qd-run-result pre {
+  margin: 4px 0 0; padding: 6px 8px; max-height: 260px; overflow: auto;
+  font-family: var(--font-mono); font-size: 11px; line-height: 1.5;
+  color: var(--color-text-secondary); background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  white-space: pre-wrap; word-break: break-word;
+}

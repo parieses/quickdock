@@ -55,6 +55,10 @@ func NewAIService(app *services.AppService) *AIService {
 	// 注册到 mcpsrv.Agent 后，环境页的工具面板仍能看到它们并单独开关。
 	if app != nil {
 		aitools.Register(aitools.Deps{DB: app.DB, Env: app.Env})
+		// spawn_agent 也走同一个注册表（同样能在面板里关掉），但实现在本包：
+		// 它要用 s.RunAgent 跑子 agent，还要拿 ctx 里带的编排作用域，
+		// 这两样都只有 AIService 实例才有。
+		s.registerSpawnTool()
 	}
 	return s
 }

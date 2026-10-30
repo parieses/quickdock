@@ -3,9 +3,10 @@ package ai
 // 一次 agent 运行的完整生命周期。
 //
 // 这段逻辑原来整个躺在 ai_stream.go 的 SSE handler 里，事件出口直接是
-// http.ResponseWriter，于是「一条 HTTP 连接 = 一次执行」——执行核心和传输方式
-// 焊死在一起，既不能单独测，也换不了事件出口。现在抽成可重入函数：
-// 调用方给 ctx 和 sink，引擎不碰 w / flusher，也就不可能往一个不存在的连接里写事件。
+// http.ResponseWriter，于是「一条 HTTP 连接 = 一次执行、只能前台同步跑」。
+// 多 agent 编排要的三件事——后台跑、并行跑、可中断可恢复——一条都要求
+// 执行核心与 HTTP 解耦，所以把它抽成可重入函数：调用方给 ctx 和 sink，
+// 引擎不碰 w / flusher，也就不可能往一个不存在的连接里写事件。
 //
 // 边界约定（改这里之前先看）：
 //   - 本文件不写 HTTP 状态码。RunAgent 被调用时响应头早已以 200 发出去了，
@@ -41,7 +42,7 @@ var (
 // EventSink 执行期事件的唯一出口。
 //
 // 三个方法对应 sseFlusher 现成的 push / writeEvent / failed，所以 SSE 那条路的
-// 适配成本为零；换一个实现（测试桩、日志）既能验证执行流程，又不用起 HTTP。
+// 适配成本为零；而编排器可以给一个把事件写进 agent_events 的实现，引擎一行都不用改。
 type EventSink interface {
 	// Push 高频文本碎片（token / reasoning）。允许丢（下游已断时）。
 	Push(kind, text string)
@@ -68,6 +69,26 @@ type AgentRunReq struct {
 	Message string
 	Cwd     string
 	Images  []AIChatImage
+	// ── 编排维度（阶段 2）。顶层对话这四项全为零值，行为与阶段 1 完全一致 ──
+
+	// RunID / NodeID 这次执行属于哪次编排的哪个节点。
+	// 顶层为空 → 第一次派活时由 agentScope 懒创建（见 agent_scope.go）。
+	RunID  string
+	NodeID string
+	// Role 子 agent 的角色（explore / code / review），只用于系统提示里的自我说明。
+	// 工具面由 ToolFilter 决定——提示词说「你是只读的」而工具其实可写，
+	// 是比不说更糟的谎。
+	Role string
+	// Depth 当前 agent 在编排树里的深度（顶层 0），决定还能不能继续派活。
+	Depth int
+	// Fresh 子 agent 模式：不读父会话历史、不往 ai_messages 写任何东西。
+	//
+	// 为什么必须分开而不是「同一个会话继续聊」：子 agent 看到父对话会让上下文
+	// 和花费随父对话线性增长，也更容易顺手做用户没让它做的事。它的全部输入
+	// 就是那条自包含的 task。
+	Fresh bool
+	// ToolFilter 按 role 再收窄工具面；nil = 沿用现有按 mode 的规则。
+	ToolFilter *ToolFilter
 }
 
 // AgentRunResult 一次运行的结果。
@@ -75,7 +96,12 @@ type AgentRunResult struct {
 	ConvID  string
 	Text    string
 	Stopped bool // 用户中断
-	Err     error
+	// Usage 这次执行的累计用量。编排层用它做 run 级成本归集：
+	// 每次都去 ai_usage 查一遍既慢又会把「编排外的调用」混进来。
+	Usage     db.TokenUsage
+	Rounds    int
+	ToolCount int
+	Err       error
 }
 
 // RunAgent 跑完一次多轮 agent 执行：组装上下文 → 逐轮调模型 → 执行工具 → 落库。
@@ -130,37 +156,41 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		res.Err = errDBNotReady
 		return res
 	}
-	if res.ConvID == "" {
-		created, cerr := a.App.DB.CreateAIConversation(db.NewAIConversation{
-			Mode:    mode,
-			SpaceID: strings.TrimSpace(req.SpaceID),
-		})
-		if cerr != nil {
-			sink.Event("error", map[string]any{"message": cerr.Error()})
-			res.Err = cerr
-			return res
-		}
-		conv = created
-		res.ConvID = conv.ID
-		if cs, ok := sink.(convIDSetter); ok {
-			cs.SetConvID(res.ConvID)
-		}
-		sink.Event("conv", map[string]any{
-			"id": conv.ID, "title": conv.Title, "spaceId": conv.SpaceID, "mode": conv.Mode,
-		})
-	} else {
-		conv, _ = a.App.DB.GetAIConversation(res.ConvID)
-		// 请求没带模式时以任务自己的为准：模式是这个任务创建时选定的属性，
-		// 「前端这次没传」不等于「改回对话」。
-		if conv != nil && mode == "" {
-			mode = strings.TrimSpace(conv.Mode)
+	// 子 agent（Fresh）不建也不读会话行：它借父会话的 id 做成本归集，
+	// 但没有自己的消息流，也就不该在会话表里留下任何痕迹。
+	if !req.Fresh {
+		if res.ConvID == "" {
+			created, cerr := a.App.DB.CreateAIConversation(db.NewAIConversation{
+				Mode:    mode,
+				SpaceID: strings.TrimSpace(req.SpaceID),
+			})
+			if cerr != nil {
+				sink.Event("error", map[string]any{"message": cerr.Error()})
+				res.Err = cerr
+				return res
+			}
+			conv = created
+			res.ConvID = conv.ID
+			if cs, ok := sink.(convIDSetter); ok {
+				cs.SetConvID(res.ConvID)
+			}
+			sink.Event("conv", map[string]any{
+				"id": conv.ID, "title": conv.Title, "spaceId": conv.SpaceID, "mode": conv.Mode,
+			})
+		} else {
+			conv, _ = a.App.DB.GetAIConversation(res.ConvID)
+			// 请求没带模式时以任务自己的为准：模式是这个任务创建时选定的属性，
+			// 「前端这次没传」不等于「改回对话」。
+			if conv != nil && mode == "" {
+				mode = strings.TrimSpace(conv.Mode)
+			}
 		}
 	}
 	if aiModePrompts[mode] == "" {
 		mode = "chat"
 	}
 	// 会话可能被用户在流式进行中删除：此时继续写入会产生孤儿消息，直接终止并提示。
-	if conv == nil {
+	if !req.Fresh && conv == nil {
 		logger.E("[ai-stream] 会话不存在或已被删除，终止流式 convID=%s", res.ConvID)
 		sink.Event("error", map[string]any{"message": "会话不存在或已被删除"})
 		res.Err = errConvNotFound
@@ -174,18 +204,30 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 目录不存在（用户删了/盘拔了）时不报错中断，而是当作未绑定：
 	// 拿一个不存在的目录去调工具，会得到一堆「找不到文件」，用户根本看不出根因在这儿。
 	cwd := strings.TrimSpace(req.Cwd)
-	if cwd != "" {
+	if req.Fresh {
+		// 子 agent：目录由父级解析并校验过（见 resolveSubAgentCwd），这里只做存在性兜底。
+		// 不回退到会话/空间：那会让它跑到父级没授权的目录里。目录不可用就按未绑定处理，
+		// 写操作会在工具层被拒绝——比悄悄换个目录去写安全。
+		if cwd != "" {
+			if st, serr := os.Stat(cwd); serr != nil || !st.IsDir() {
+				logger.W("[ai] 子 agent 的工作目录不可用 conv=%s cwd=%s: %v", res.ConvID, cwd, serr)
+				cwd = ""
+			}
+		}
+	} else if cwd != "" {
 		if st, serr := os.Stat(cwd); serr != nil || !st.IsDir() {
 			logger.W("[ai] 请求里的工作目录不可用，忽略 conv=%s cwd=%s: %v", res.ConvID, cwd, serr)
 			cwd = ""
 		}
 	}
-	if cwd != "" && conv.Cwd != cwd {
+	// 绑定回写与空间回退都只对顶层执行：子 agent 的目录已经定了，改会话上的 cwd
+	// 会让「用户下次打开这条对话」莫名其妙换到子 agent 的目录去。
+	if !req.Fresh && cwd != "" && conv.Cwd != cwd {
 		if err := a.App.DB.SetAIConversationCwd(res.ConvID, cwd); err != nil {
 			logger.W("[ai] 保存会话工作目录失败 conv=%s: %v", res.ConvID, err)
 		}
-	} else if cwd == "" {
-		// 任务自己没绑目录时回退到**空间**的目录。换项目改空间一处即可，
+	} else if !req.Fresh && cwd == "" {
+		// 任务自己没绑目录时回退到空间的目录。换项目改空间一处即可，
 		// 不必逐条任务改；这也是空间存在的意义。
 		fallback := strings.TrimSpace(conv.Cwd)
 		if fallback == "" && strings.TrimSpace(conv.SpaceID) != "" {
@@ -210,28 +252,51 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 目录是本轮才定下来的（新分配的任务目录，或请求里刚带过来的）：回传前端，
 	// 否则工具栏上那条目录指示要等「切走再切回」才对得上——而那正是用户最需要
 	// 知道「AI 会把文件写到哪」的时刻。
-	if cwd != "" && strings.TrimSpace(conv.Cwd) != cwd {
+	if !req.Fresh && cwd != "" && strings.TrimSpace(conv.Cwd) != cwd {
 		sink.Event("cwd", map[string]any{"cwd": cwd})
 	}
 
+	// 编排作用域随 ctx 走（不是服务字段）：顶层在这里新建，子 agent 用父级传进来的
+	// RunID/NodeID/Depth 构造。两条路径共用一个类型，深度与预算的判断因此只有一处实现。
+	var sc *agentScope
+	if req.Fresh {
+		sc = newChildAgentScope(a, res.ConvID, req.RunID, req.NodeID, cwd, req.Depth, cfg)
+	} else {
+		sc = newAgentScope(a, res.ConvID, message, cwd, cfg)
+	}
+	ctx = withAgentScope(ctx, sc)
+
 	// 调模型前先落库用户消息：无论后续成功 / 失败 / 被打断，历史都不会出现空会话，
 	// 用户刷新或重进会话都能看到自己问了什么，而不是点进来一片空白。
-	if err := a.saveUserTurn(res.ConvID, message, imagesJSON); err != nil {
-		logger.W("[ai] 保存用户消息失败 conv=%s: %v", res.ConvID, err)
-		sink.Event("error", map[string]any{"message": err.Error()})
-		res.Err = err
-		return res
+	//
+	// 子 agent 跳过：它的 task 不是「用户说的话」，落进 ai_messages 会让侧栏那条
+	// 对话里凭空冒出几条不是用户写的提问。
+	if !req.Fresh {
+		if err := a.saveUserTurn(res.ConvID, message, imagesJSON); err != nil {
+			logger.W("[ai] 保存用户消息失败 conv=%s: %v", res.ConvID, err)
+			sink.Event("error", map[string]any{"message": err.Error()})
+			res.Err = err
+			return res
+		}
 	}
 
 	// 组装上下文（含摘要压缩）
 	// 注意：用户消息尚未存 DB，buildAIMessages 会从 DB 加载历史 + 追加 currentUser 作为最后一条。
 	// 模型回复后统一落库两条消息，避免重复。
-	messages, err := a.buildAIMessages(ctx, cfg, res.ConvID, mode)
-	if err != nil {
-		logger.W("[ai] 组装上下文失败 conv=%s mode=%s: %v", res.ConvID, mode, err)
-		sink.Event("error", map[string]any{"message": err.Error()})
-		res.Err = err
-		return res
+	var messages []map[string]interface{}
+	if req.Fresh {
+		// 子 agent 的上下文只有「角色提示 + 那条自包含的 task」：
+		// 不读父对话历史（那会让上下文与花费随父对话线性增长）。
+		messages = a.subAgentMessages(cfg, mode, req.Role, message)
+	} else {
+		var berr error
+		messages, berr = a.buildAIMessages(ctx, cfg, res.ConvID, mode)
+		if berr != nil {
+			logger.W("[ai] 组装上下文失败 conv=%s mode=%s: %v", res.ConvID, mode, berr)
+			sink.Event("error", map[string]any{"message": berr.Error()})
+			res.Err = berr
+			return res
+		}
 	}
 
 	// 首次消息自动生成标题
@@ -253,7 +318,11 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	//
 	// 但「同一份」不等于「每个模式都给」：系统工具只在教程模式挂（见 ai_tools.go
 	// 的 aiGeneralCategories），普通对话只拿得到 web_fetch。
-	tools := aiToolsPayload(mode)
+	//
+	// 第三层过滤是 role（阶段 2）：子 agent 的工具面由 agentRoleSpec 收窄，
+	// 并且一旦不能再派活就把 spawn_agent 撤下——让它根本不知道有这个能力。
+	filter := spawnFilterFor(req.ToolFilter, sc.CanSpawn())
+	tools := aiToolsPayloadFor(mode, filter)
 	// 这个模式本来有没有工具可用。收尾轮靠它区分「本来就没有工具」和
 	// 「有工具但轮次用完了」——后者必须给模型一句明确交代，否则它会把调用写成正文。
 	modeHasTools := len(tools) > 0
@@ -339,6 +408,11 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			rebudget := aiContextBudget(cfg) * 2 / 5
 			logger.W("[ai] 上游报上下文超窗 conv=%s model=%s window=%d 重试预算=%d",
 				res.ConvID, cfg.Model, window, rebudget)
+			// 子 agent 没有历史可压（上下文就是 system + 一条 task）：重压只会重读
+			// 父会话，把它变成「看得见父对话」——那正是 Fresh 要避免的。直接放弃这次重试。
+			if req.Fresh {
+				break
+			}
 			newMsgs, berr := a.buildAIMessagesWithin(ctx, cfg, res.ConvID, mode, rebudget, true)
 			if berr != nil {
 				break
@@ -355,7 +429,10 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		totalUsage = addTokenUsage(totalUsage, turn.Usage)
 		// 明细按轮记、问答次数只第一轮 +1：一次提问触发五轮调用时，
 		// 花费是真花了五份，但用户问的只有一句。
-		a.recordAIChatTurn(res.ConvID, cfg, turn.Usage, turnIdx == 1)
+		//
+		// run/node 在第一次派活后才存在：此前记空串（只归到会话），
+		// 此后按 run 归集——「这次编排花了多少」因此只统计真正参与编排的那些调用。
+		a.recordAIChatTurnScoped(res.ConvID, sc.RunID(), sc.CurrentNodeID(), cfg, turn.Usage, turnIdx == 1)
 
 		if err != nil {
 			lastErr = err
@@ -387,6 +464,9 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				"id": r.ID, "name": r.Name, "ok": r.Error == "", "ms": r.Ms,
 				"error": r.Error, "dedup": r.Dedup,
 				"added": r.Added, "removed": r.Removed,
+				// 编排类工具带回 run/node，前端可以立刻挂出 run 树，
+				// 不必等整轮结束再回头查一次。
+				"runId": r.RunID, "nodeId": r.NodeID,
 				// 保留换行：JSON 结果压成一行就没法读了。
 				"result": truncateKeepLines(r.Result, 400),
 			})
@@ -407,10 +487,21 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	assistant := assistantBuf.String()
 	toolCallsJSON := encodeToolRecords(records)
 	rounds := countRounds(records)
+	// 结果里带上用量与轮次：编排层要用它做 run 级成本归集与「这次派活值不值得」的判断。
+	// 在这里一次性写完，后面几条 return 分支就都带上了。
+	res.Usage = totalUsage
+	res.Rounds = rounds
+	res.ToolCount = len(records)
 
 	// 仅落库助手回复：用户消息已在调模型前由 saveUserTurn 落库（幂等，重试不重复）。
 	// stopped 标记随行落库：用户点停止后刷新会话，仍能看出这条是半截的。
 	saveAssistant := func(asst string, stopped bool) {
+		if req.Fresh {
+			// 子 agent 不落库：它的输入输出由 agent_nodes.result 与 run 树承载。
+			// 写进 ai_messages 会让侧栏那条对话里冒出几条「用户没问过的提问」，
+			// 而且下次打开对话时它们会被当成历史喂给主 agent（上下文污染）。
+			return
+		}
 		asst = strings.TrimSpace(asst)
 		// 没有正文但有工具记录时也要落库：用户看到的是「调了 3 个工具、没有回答」，
 		// 这比一条彻底消失的回复更接近事实，也解释了钱花在哪。
@@ -463,7 +554,11 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 
 	// 正常结束，落库助手回复（用户消息已在调模型前落库）
 	saveAssistant(assistant, false)
-	_ = a.App.DB.UpdateAIConversationMeta(res.ConvID, "", "")
+	if !req.Fresh {
+		// 只对顶层刷会话更新时间：子 agent 结束时改父会话的 updated_at 会让
+		// 侧栏那条对话无缘无故跳到最前面，看起来像用户刚刚发过言。
+		_ = a.App.DB.UpdateAIConversationMeta(res.ConvID, "", "")
+	}
 	logger.I("[ai] 流式结束 conv=%s 首字=%dms 轮次=%d 工具=%d in=%d out=%d cached=%d",
 		res.ConvID, firstTokenAt.Milliseconds(), rounds, len(records), totalUsage.Prompt, totalUsage.Completion, totalUsage.Cached)
 	sink.Event("done", doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records)))

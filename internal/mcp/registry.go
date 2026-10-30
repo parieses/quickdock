@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -49,6 +50,15 @@ type Tool struct {
 	Category string
 	// Handler 执行工具。返回 string 直接作为文本结果，其它类型经 JSON 序列化。
 	Handler func(args map[string]any) (any, error)
+	// HandlerCtx 带 ctx 的实现，优先于 Handler。
+	//
+	// 为什么需要它：绝大多数工具是「一问一答」的快操作，给不给 ctx 都一样；
+	// 但有一类工具会起一段长活儿（spawn_agent 起子 agent），它必须在用户点
+	// 停止时能被掐掉——否则主对话停了，后台还在烧 token，而界面上什么都看不到。
+	//
+	// 不用「把 ctx 塞进 args」代替：args 是模型可见/可伪造的 JSON，取消信号
+	// 混在里面既不合协议，也会被工具卡片序列化显示出来。
+	HandlerCtx func(ctx context.Context, args map[string]any) (any, error)
 }
 
 // annotations 生成 MCP 规范的 tool annotations：让客户端在弹确认框时知道
@@ -200,6 +210,10 @@ type AIFunction struct {
 	// 「这个模式该不该看到这批工具」（宿主工具只在教程模式开放），
 	// 否则只能按工具名硬编码白名单，加一个工具就要改一次。
 	Category string
+	// Level 危险等级。同样不进 tools[]，但子 agent 要按 role 再收窄一次
+	// （explore 只读、code 可写）。等级门已经按用户配置裁过一遍，
+	// 这里暴露的是「裁剪之后还剩下的工具各自多重」，供编排层二次过滤。
+	Level int
 	// AgentOnly 来自 agent 注册表。这类工具在所有模式下都可用——
 	// 它们不描述宿主状态，不涉及「AI 会不会把我的环境改坏」，因此不需要
 	// 用「只在教程模式挂」来兜底。
@@ -237,6 +251,7 @@ func exposedFrom(set map[string]Tool, agent bool) []AIFunction {
 			Description: t.Description,
 			Parameters:  t.InputSchema,
 			Category:    t.Category,
+			Level:       t.Level,
 			AgentOnly:   agent,
 		})
 	}
@@ -298,17 +313,26 @@ func Catalog() []ToolInfo {
 
 // Call 执行工具（MCP 客户端路径）。只看 Global 注册表。
 func Call(name string, args map[string]any) (any, error) {
-	return callTool(name, args, false)
+	return callTool(context.Background(), name, args, false)
 }
 
 // CallAgent 执行工具（内置 AI 路径）。先查 agent 注册表，再查 Global。
 //
 // 等级门与单工具开关照样生效；两条路径的差别只有「能看到哪些工具」。
 func CallAgent(name string, args map[string]any) (any, error) {
-	return callTool(name, args, true)
+	return callTool(context.Background(), name, args, true)
 }
 
-func callTool(name string, args map[string]any, fromAgent bool) (any, error) {
+// CallAgentContext 同 CallAgent，但把 ctx 交给实现了 HandlerCtx 的工具。
+//
+// 只有「会跑长活儿且需要被取消」的工具才在乎它（当前是 spawn_agent）。
+// 不使用 HandlerCtx 的工具行为完全不变——这正是保留两条执行路径的原因：
+// 让 ctx 变成可选能力，而不是逼每个工具都改签名。
+func CallAgentContext(ctx context.Context, name string, args map[string]any) (any, error) {
+	return callTool(ctx, name, args, true)
+}
+
+func callTool(ctx context.Context, name string, args map[string]any, fromAgent bool) (any, error) {
 	regMu.RLock()
 	t, ok := tools[name]
 	_, inAgent := agents[name]
@@ -334,6 +358,12 @@ func callTool(name string, args map[string]any, fromAgent bool) (any, error) {
 	}
 	if args == nil {
 		args = map[string]any{}
+	}
+	if t.HandlerCtx != nil {
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return t.HandlerCtx(ctx, args)
 	}
 	if t.Handler == nil {
 		// 注册了名称与 schema 却没有实现：返回明确错误而不是 panic，

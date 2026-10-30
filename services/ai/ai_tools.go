@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"quickdock/internal/logger"
@@ -105,6 +106,19 @@ type aiToolRecord struct {
 	// 放在摘要行右侧比埋在展开内容里有用得多。
 	Added   int `json:"added,omitempty"`
 	Removed int `json:"removed,omitempty"`
+	// RunID / NodeID 这次调用所属的编排 run 与节点（只有 spawn_agent 这类
+	// 会派活的工具才有）。落库而不是让前端解析结果文本：结果可能被截断，
+	// 一旦截在中间就不是合法 JSON，前端只能整块放弃。
+	RunID  string `json:"run_id,omitempty"`
+	NodeID string `json:"node_id,omitempty"`
+}
+
+// agentLinked 由「会建立编排节点」的工具结果实现，告诉调度处这次调用属于哪个 run/node。
+//
+// 用接口而不是在 ai_tools.go 里认具体类型：认类型意味着每加一个编排类工具就要回来
+// 改一次调度代码，而调度代码是整条链上最不该频繁动的地方。
+type agentLinked interface {
+	AgentLink() (runID, nodeID string)
 }
 
 // aiGateMode 需要「模式门」的那批工具的唯一放行模式（与 aiModePrompts 的 key 对应）。
@@ -136,6 +150,21 @@ func aiToolVisibleInMode(mode, category string, agentOnly bool) bool {
 	return mode == aiGateMode
 }
 
+// ToolFilter 在「按 mode 过滤」之上再收窄一次工具面（编排层用）。
+//
+// 为什么需要第二层：mode 过滤回答的是「这个任务类型该看到哪些工具」，
+// 而 role 过滤回答的是「这个 agent 有多大权限」。子 agent 无人值守地跑，
+// 它的边界必须由能力决定（拿不到 file_write），不能靠提示词说「别改」。
+//
+// MaxLevel 用 -1 表示不限：LevelRead 是 0，用 0 当「不限」会把 explore
+// 的只读约束悄悄变成一个不生效的开关。
+type ToolFilter struct {
+	MaxLevel   int
+	Categories map[string]bool
+	// NoSpawn 撤下 spawn_agent（子 agent 不能再派活）。
+	NoSpawn bool
+}
+
 // aiToolsPayload 把当前暴露、且该模式可见的工具转成 OpenAI tools[] 格式。
 //
 // 过滤分两层，顺序不能反：先由 ExposedFunctions 应用等级门与单工具开关
@@ -145,11 +174,29 @@ func aiToolVisibleInMode(mode, category string, agentOnly bool) bool {
 // 没有可用工具时返回 nil 而不是空切片：部分网关对 "tools": [] 直接报 400，
 // 而空切片经过 json.Marshal 就是 []，不会变成 null。调用方据此决定要不要设字段。
 func aiToolsPayload(mode string) []map[string]any {
+	return aiToolsPayloadFor(mode, nil)
+}
+
+// aiToolsPayloadFor 同 aiToolsPayload，额外按 role 收窄（filter 为 nil 表示不收窄）。
+func aiToolsPayloadFor(mode string, filter *ToolFilter) []map[string]any {
 	fns := mcpsrv.ExposedFunctions()
 	out := make([]map[string]any, 0, len(fns))
 	for _, f := range fns {
 		if !aiToolVisibleInMode(mode, f.Category, f.AgentOnly) {
 			continue
+		}
+		if filter != nil {
+			// spawn_agent 的撤下要单独判：它按分类属于 code，靠 Categories
+			// 拦不住（code 角色本来就该有 code 分类的工具）。
+			if filter.NoSpawn && f.Name == spawnAgentToolName {
+				continue
+			}
+			if filter.MaxLevel >= 0 && f.Level > filter.MaxLevel {
+				continue
+			}
+			if filter.Categories != nil && !filter.Categories[f.Category] {
+				continue
+			}
 		}
 		out = append(out, map[string]any{
 			"type": "function",
@@ -304,6 +351,55 @@ func cwdHint(cwd string) string {
 	return hint
 }
 
+// parallelSafeTools 允许在同一轮里并行执行的工具白名单。
+//
+// 用白名单常量而不是给 Tool 加一个「我可以并发」的字段：后者会让每个工具
+// 各自声明能力，而「能不能并发」取决于这一轮里还跑着什么——run_command
+// 读文件时是安全的，和 file_edit 同轮就不安全。这种判断只有调度处（这里）
+// 知道，让工具自己声明迟早会出现「两个都标了可并发、结果互相踩」。
+//
+// 目前只有 spawn_agent：它天然是「派出去各干各的」，且子 agent 之间不共享
+// 上下文；同目录写操作由 agent_spawn.go 的目录闸串行。
+var parallelSafeTools = map[string]bool{
+	spawnAgentToolName: true,
+}
+
+// canRunParallel 判断这一轮要不要并发执行。
+//
+// 条件是「每一个调用都可并发」而不是「有可并发的就并发」：一轮里
+// [file_edit, spawn, file_edit] 混着时，spawn 与 file_edit 之间存在真实
+// 依赖（子 agent 可能在读父 agent 正要改的文件），并发就是制造随机结果。
+// 混轮一律退回串行——顺序确定，代价只是慢一点。
+//
+// 另外要求「参数两两不同」：去重（seen）是在 execOneToolCall 里做的，
+// 并发时两个一模一样的 spawn 会同时通过检查、双双真的跑起来——
+// 那正是去重要防的事（同一次派活付两遍钱）。带重样的轮次退回串行，
+// 第二个就会命中 seen 直接返回上次结果。
+func canRunParallel(calls []aiToolCall) bool {
+	if len(calls) < 2 {
+		return false
+	}
+	seenKeys := make(map[string]bool, len(calls))
+	for _, c := range calls {
+		if !parallelSafeTools[c.Name] {
+			return false
+		}
+		// 解析后再比：toolCallKey 在 args 为空时会统一归一成 "{}"，
+		// 直接传空 map 会让所有同名调用都被判成重复。
+		args, err := parseToolArgs(c.Args)
+		if err != nil {
+			// 参数写坏了：这条终究会在执行时报错，不差这一次串行。
+			return false
+		}
+		k := toolCallKey(c.Name, args, c.Args)
+		if seenKeys[k] {
+			return false
+		}
+		seenKeys[k] = true
+	}
+	return true
+}
+
 // runToolCalls 执行一轮里的全部工具调用，返回要追加到 messages 的消息与记录。
 //
 // assistantText 是这一轮模型在调工具之前说的话（「我先查一下环境」）。
@@ -322,8 +418,8 @@ func cwdHint(cwd string) string {
 // 一次提问开始时建好、跨轮复用：**只在一次提问内有效**，新提问重新建空的——
 // 用户说「再发一次」时那是新的意图，不该被上一次的记录挡掉。
 //
-// 工具**串行执行**。模型一轮里给出多个调用时，它们之间很可能有真实依赖
-// （后一个要读前一个刚写的文件），并发就是制造随机结果。
+// 并发只改「怎么跑」，不改「怎么拼」：结果按 calls 的下标回填，拼消息时
+// 一律按 calls 顺序取——按完成先后拼会让 tool 消息顺序随机，上游直接 400。
 func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round int, assistantText string, seen map[string]aiToolRecord, cwd string) ([]map[string]interface{}, []aiToolRecord) {
 	// assistant 侧：把模型给出的 tool_calls 原样回传。
 	// content 用空串而不是 nil：个别网关会把 null 当成「这不是一条合法消息」。
@@ -344,17 +440,50 @@ func (a *AIService) runToolCalls(ctx context.Context, calls []aiToolCall, round 
 		"tool_calls": wireCalls,
 	}}
 
-	records := make([]aiToolRecord, 0, len(calls))
-	for _, c := range calls {
-		rec, content := a.execOneToolCall(ctx, c, round, seen, cwd)
-		records = append(records, rec)
-		out = append(out, toolMessage(c.ID, content))
+	records := make([]aiToolRecord, len(calls))
+	contents := make([]string, len(calls))
+
+	// seen 会被同一轮里的并发调用同时读写：加锁而不是给每个 goroutine 一份副本，
+	// 因为去重的语义是「全轮共享」——两次同样的派活，第二次就该被跳过。
+	var seenMu sync.Mutex
+	exec := func(i int) {
+		records[i], contents[i] = a.execOneToolCall(ctx, calls[i], round, seen, &seenMu, cwd)
+	}
+
+	if canRunParallel(calls) {
+		sem := make(chan struct{}, agentMaxParallel)
+		var wg sync.WaitGroup
+		for i := range calls {
+			i := i
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				// 并发路径里 panic 必须自己兜：主 goroutine 的 recover 管不到它，
+				// 一旦漏出去整个进程就没了。
+				defer recoverPanic("ai tool " + calls[i].Name)
+				sem <- struct{}{}
+				defer func() { <-sem }()
+				exec(i)
+			}()
+		}
+		wg.Wait()
+	} else {
+		for i := range calls {
+			exec(i)
+		}
+	}
+
+	for i := range calls {
+		out = append(out, toolMessage(calls[i].ID, contents[i]))
 	}
 	return out, records
 }
 
 // execOneToolCall 执行单个工具调用，返回记录与要回给模型的文本。
-func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int, seen map[string]aiToolRecord, cwd string) (aiToolRecord, string) {
+//
+// 抽出来是为了让「串行一轮」与「并发一轮」走完全相同的逻辑：两份实现迟早
+// 会在去重、超时、错误整形上分叉，而分叉的那一半是跑得少的那一半。
+func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int, seen map[string]aiToolRecord, seenMu *sync.Mutex, cwd string) (aiToolRecord, string) {
 	rec := aiToolRecord{ID: c.ID, Name: c.Name, Round: round}
 
 	// 用户点了停止：把剩余调用标记为未执行照常回给模型（协议要求每条
@@ -391,7 +520,10 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	// 失败过的调用不缓存：模型拿同样参数重试一次是合理的（网络抖动、临时占用）。
 	key := toolCallKey(c.Name, args, c.Args)
 	if seen != nil {
-		if prev, hit := seen[key]; hit {
+		seenMu.Lock()
+		prev, hit := seen[key]
+		seenMu.Unlock()
+		if hit {
 			rec.Dedup = true
 			rec.Result = fmt.Sprintf(
 				"与第 %d 轮执行过的 %s 参数完全相同，已跳过、没有重复执行。上次的结果如下（无需再调）：\n%s",
@@ -401,9 +533,10 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	}
 
 	started := time.Now()
-	// CallAgent 而不是 Call：内置 AI 要能用 agent 专用工具（改文件、跑命令、抓网页）。
+	// CallAgentContext 而不是 Call：内置 AI 要能用 agent 专用工具（改文件、跑命令、抓网页），
+	// 而 spawn_agent 这类会跑长活儿的工具还需要 ctx 才能被用户点停止打断。
 	// 等级门与单工具开关在 callTool 里照样生效，所以「面板关掉 = AI 也用不了」不变。
-	val, cerr := callToolWithTimeout(ctx, c.Name, args)
+	val, cerr := callToolWithTimeout(ctx, c.Name, args, toolTimeoutFor(c.Name))
 	rec.Ms = time.Since(started).Milliseconds()
 
 	text := mcpsrv.JSON(val)
@@ -415,22 +548,43 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	}
 	rec.Result = truncateToolResult(text, c.Name)
 	rec.Added, rec.Removed = toolDiffLines(val)
+	// 编排类工具（spawn_agent）额外带回它建的 run/node：前端据此在这条回复下面
+	// 挂出 run 树。其余工具走不到这里，字段留空、落库时被 omitempty 省掉。
+	if al, ok := val.(agentLinked); ok {
+		rec.RunID, rec.NodeID = al.AgentLink()
+	}
 	if seen != nil && cerr == nil {
+		seenMu.Lock()
 		seen[key] = rec
+		seenMu.Unlock()
 	}
 	return rec, rec.Result
 }
 
+// toolTimeoutFor 单个工具的超时上限。
+//
+// spawn_agent 单独放宽：它内部是一整轮 agent 循环（读文件、跑测试），
+// 用 5 分钟会把它误杀在半路，而父 agent 拿到「失败」只会重新派一次。
+func toolTimeoutFor(name string) time.Duration {
+	if name == spawnAgentToolName {
+		return agentSpawnTimeout
+	}
+	return aiToolTimeout
+}
+
 // callToolWithTimeout 执行一个工具，并给它套上超时外壳。
 //
-// 为什么只能套外壳而不是真取消：工具的 Handler 没有 ctx 参数，工具内部拿不到
+// 为什么只能套外壳而不是真取消：多数工具的 Handler 没有 ctx 参数，工具内部拿不到
 // 取消信号（命令类工具会自己结束，读文件类则本就很快）。所以超时返回的那一刻，
 // 那次调用仍在后台跑完——它不会再写这条流（结果被丢弃），代价是一次空跑。
 // 这点代价换来的是「AI 页永远不会因为一个工具挂住而停在转圈」。
 //
+// 实现了 HandlerCtx 的工具（spawn_agent）不同：它的取消是真的，内部会随 ctx 停下，
+// 不会白烧 token。
+//
 // 同理，ctx 被取消（用户点停止）时也不等它：直接按「已停止」返回，
 // 让本轮剩下的调用快速收尾，而不是让停止按钮看起来没反应。
-func callToolWithTimeout(ctx context.Context, name string, args map[string]any) (any, error) {
+func callToolWithTimeout(ctx context.Context, name string, args map[string]any, timeout time.Duration) (any, error) {
 	type outcome struct {
 		val any
 		err error
@@ -438,18 +592,18 @@ func callToolWithTimeout(ctx context.Context, name string, args map[string]any) 
 	ch := make(chan outcome, 1) // 缓冲 1：超时后 goroutine 仍能退出，不泄漏
 	go func() {
 		defer recoverPanic("ai tool " + name)
-		v, e := mcpsrv.CallAgent(name, args)
+		v, e := mcpsrv.CallAgentContext(ctx, name, args)
 		ch <- outcome{v, e}
 	}()
 
-	timer := time.NewTimer(aiToolTimeout)
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
 	select {
 	case r := <-ch:
 		return r.val, r.err
 	case <-timer.C:
-		logger.W("[ai-tool] %s 执行超过 %v 未返回，已按超时处理", name, aiToolTimeout)
-		return nil, fmt.Errorf("工具 %s 执行超过 %v 仍未返回，已放弃等待（它可能还在后台跑，结果不会再用）", name, aiToolTimeout)
+		logger.W("[ai-tool] %s 执行超过 %v 未返回，已按超时处理", name, timeout)
+		return nil, fmt.Errorf("工具 %s 执行超过 %v 仍未返回，已放弃等待（它可能还在后台跑，结果不会再用）", name, timeout)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

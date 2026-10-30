@@ -305,6 +305,12 @@ func (d *Database) DeleteAIConversation(id string) error {
 	if err := d.ExecuteParams("DELETE FROM ai_messages WHERE conv_id = ?", []interface{}{id}); err != nil {
 		return err
 	}
+	// 编排运行轨迹随会话一起删（节点与事件由外键 ON DELETE CASCADE 带走）。
+	// 不进回收站：run 树是排障用的执行轨迹，恢复一条对话不该连带恢复
+	// 半年前那次失败的执行过程——那既不是用户内容，也可能已经和当前代码不符。
+	if err := d.DeleteAgentRunsForConv(id); err != nil {
+		return err
+	}
 	return d.ExecuteParams("DELETE FROM ai_conversations WHERE id = ?", []interface{}{id})
 }
 
@@ -463,6 +469,15 @@ func (d *Database) UpdateAIConversationMeta(id, title, summary string) error {
 //
 // convID 为空表示这次调用不属于任何对话（SSH 面板 / 剪贴板 / 笔记 / 插件的一次性调用）。
 func (d *Database) RecordAIUsage(convID, model, kind string, u TokenUsage) error {
+	return d.RecordAIUsageScoped(convID, "", "", model, kind, u)
+}
+
+// RecordAIUsageScoped 同 RecordAIUsage，额外带上编排维度（runID / nodeID）。
+//
+// 为什么要独立方法而不是给 RecordAIUsage 加两个参数：后者有十几处调用点，
+// 全都要传两个空串——噪音大且容易传错位（都是 string，编译器不拦）。
+// 编排外的调用保持原样，只有编排器那条路径需要指明「这笔钱算谁的」。
+func (d *Database) RecordAIUsageScoped(convID, runID, nodeID, model, kind string, u TokenUsage) error {
 	if u.Empty() {
 		return nil
 	}
@@ -470,11 +485,38 @@ func (d *Database) RecordAIUsage(convID, model, kind string, u TokenUsage) error
 		kind = "chat"
 	}
 	return d.ExecuteParams(
-		`INSERT INTO ai_usage (id, conv_id, model, kind, prompt_tokens, completion_tokens, cached_tokens, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		[]interface{}{newID(), strings.TrimSpace(convID), strings.TrimSpace(model), kind,
-			u.Prompt, u.Completion, u.Cached, now()},
+		`INSERT INTO ai_usage (id, conv_id, run_id, node_id, model, kind, prompt_tokens, completion_tokens, cached_tokens, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		[]interface{}{newID(), strings.TrimSpace(convID), strings.TrimSpace(runID), strings.TrimSpace(nodeID),
+			strings.TrimSpace(model), kind, u.Prompt, u.Completion, u.Cached, now()},
 	)
+}
+
+// SumAIUsageByRun 按 run 汇总成本（供编排器做预算控制与事后归集）。
+//
+// 只汇总该 run 的行：编排外的一次性调用（标题生成、SSH 面板问答）run_id 为空，
+// 不会串进来，所以「本次编排花了多少」不会被别处的开销污染。
+func (d *Database) SumAIUsageByRun(runID string) (TokenUsage, error) {
+	var u TokenUsage
+	if strings.TrimSpace(runID) == "" {
+		return u, nil
+	}
+	// 必须给聚合列起别名：QueryOne 返回的是 map，无别名的表达式列名不可预测。
+	row, err := d.QueryOne(
+		`SELECT COALESCE(SUM(prompt_tokens), 0) AS p,
+		        COALESCE(SUM(completion_tokens), 0) AS c,
+		        COALESCE(SUM(cached_tokens), 0) AS k
+		 FROM ai_usage WHERE run_id = ?`, strings.TrimSpace(runID))
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return u, nil
+		}
+		return u, err
+	}
+	u.Prompt = integer(row["p"])
+	u.Completion = integer(row["c"])
+	u.Cached = integer(row["k"])
+	return u, nil
 }
 
 // AddAIConversationUsage 把一次问答累加到会话行（列表要显示「这个对话花了多少」，

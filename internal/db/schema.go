@@ -392,15 +392,79 @@ var baseTables = []string{
 	// 为什么不复用 ai_conversations 上的累加列：那是 upsert 口径，只能回答「这个会话一共
 	// 用了多少」，答不了「今天花了多少钱」「哪个模型最费」。日期与模型必须跟这一次调用
 	// 绑在一起才有意义，而累加列每次都被覆盖成最新值。
-	// 删会话时明细**不清**（conv_id 不建外键约束）：历史花费不该因为清理对话而消失。
+	// 删会话时明细不清（conv_id 不建外键约束）：历史花费不该因为清理对话而消失。
+	//
+	// run_id / node_id 是「多 agent 编排」的成本归集维度：一次 run 会把 token 摊在
+	// 多个子 agent 上，只有 conv 维度时答不了「这次编排到底烧了多少」。
+	// 归集用独立列而不是塞进 kind —— kind 已经在表达 chat/ask/title/summary 的语义，
+	// 两个维度混在一列里，以后既不能按 kind 统计也不能按 run 统计。
 	`CREATE TABLE IF NOT EXISTS ai_usage (
 		id TEXT PRIMARY KEY,
 		conv_id TEXT NOT NULL DEFAULT '',
+		run_id TEXT NOT NULL DEFAULT '',
+		node_id TEXT NOT NULL DEFAULT '',
 		model TEXT NOT NULL DEFAULT '',
 		kind TEXT NOT NULL DEFAULT 'chat',
 		prompt_tokens INTEGER NOT NULL DEFAULT 0,
 		completion_tokens INTEGER NOT NULL DEFAULT 0,
 		cached_tokens INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
+	)`,
+
+	// ── 多 agent 编排的三张表（run / node / event）──────────────────────────
+	//
+	// 为什么必须进库而不是只放在内存里：一次 run 要能「跑到一半关窗口、重开后
+	// 还能看到跑到哪一步」，也要能回答「上周那次定时编排为什么失败」。
+	// 只存在内存里的执行树，重启即失忆，且没法做 run 级成本归集。
+	//
+	// 三级关系的语义：
+	//   run   —— 一次编排（一个目标）。子 agent 共享同一个 run，不另起 run。
+	//   node  —— run 里的一个执行单元（一个 role 的一次派活），parent_id 表达谁派的谁，
+	//            这棵树就是前端要展示的 run 树。
+	//   event —— 执行过程中发生的结构化事件（tool/tool_result/notice/error/done），
+	//            按 seq 单调递增，供「轮询增量拉取」与事后回放。
+	//
+	// token / reasoning 这类流式碎片不落 event 表：一次回答能产生上千帧，
+	// 落进去只会让表爆炸；完整正文在 ai_messages 里已经有了。
+	`CREATE TABLE IF NOT EXISTS agent_runs (
+		id TEXT PRIMARY KEY,
+		conv_id TEXT NOT NULL DEFAULT '',
+		goal TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'running',
+		cwd TEXT NOT NULL DEFAULT '',
+		trigger TEXT NOT NULL DEFAULT 'chat',
+		budget_tokens INTEGER NOT NULL DEFAULT 0,
+		used_tokens INTEGER NOT NULL DEFAULT 0,
+		error TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+	// agent_nodes: seq 由库分配（同一 run 内 MAX+1），不信任调用方传入——
+	// 并发派活时两个节点可能同时拿到「我要第 3 个」，排序就乱了。
+	// ON DELETE CASCADE 让「删 run」一步到底，不必记得先删节点再删事件。
+	`CREATE TABLE IF NOT EXISTS agent_nodes (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+		parent_id TEXT NOT NULL DEFAULT '',
+		seq INTEGER NOT NULL DEFAULT 0,
+		role TEXT NOT NULL DEFAULT '',
+		task TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'pending',
+		cwd TEXT NOT NULL DEFAULT '',
+		model TEXT NOT NULL DEFAULT '',
+		result TEXT NOT NULL DEFAULT '',
+		prompt_tokens INTEGER NOT NULL DEFAULT 0,
+		completion_tokens INTEGER NOT NULL DEFAULT 0,
+		started_at TEXT NOT NULL DEFAULT '',
+		ended_at TEXT NOT NULL DEFAULT ''
+	)`,
+	`CREATE TABLE IF NOT EXISTS agent_events (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL REFERENCES agent_runs(id) ON DELETE CASCADE,
+		node_id TEXT NOT NULL DEFAULT '',
+		seq INTEGER NOT NULL DEFAULT 0,
+		kind TEXT NOT NULL DEFAULT '',
+		payload TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL
 	)`,
 
@@ -660,6 +724,9 @@ func (d *Database) migrate() error {
 		{"scheduled_tasks", "notify_channels", "TEXT NOT NULL DEFAULT 'system,webhook'"},
 		// scheduled_tasks: 失败重试次数（0 = 不重试，与升级前行为一致）。
 		{"scheduled_tasks", "retry_count", "INTEGER NOT NULL DEFAULT 0"},
+		// ai_usage: 多 agent 编排的成本归集维度（老数据为空 = 不属于任何 run）。
+		{"ai_usage", "run_id", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_usage", "node_id", "TEXT NOT NULL DEFAULT ''"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {
@@ -695,6 +762,18 @@ func (d *Database) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_plugin_exec_logs_ts ON plugin_exec_logs(executed_ts)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_usage_at ON ai_usage(created_at)`,
+		// run 级成本归集：按 run 汇总 token 走这条索引（前端不查全表）。
+		`CREATE INDEX IF NOT EXISTS idx_ai_usage_run ON ai_usage(run_id)`,
+		// 事件增量拉取是「按 run + seq 递增」的固定形态（500ms 轮询），
+		// 没有索引就是每次全表扫 + 排序。
+		//
+		// UNIQUE 而不是普通索引：seq 的唯一性本来由「同事务内 MAX+1」保证，
+		// 但那是代码约定，不是数据库事实。加唯一约束后，未来谁把 AppendAgentEvent
+		// 改成「先算后插」的并发写法，会在写入那一刻报错，而不是悄悄产生两条 seq=3
+		// ——后者表现为「前端轮询偶尔丢一半事件」，几乎无法从现象反推到原因。
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_events_run_seq ON agent_events(run_id, seq)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_nodes_run ON agent_nodes(run_id, seq)`,
+		`CREATE INDEX IF NOT EXISTS idx_agent_runs_conv ON agent_runs(conv_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_parent ON ssh_hosts(parent_id, sort)`,
 		`CREATE INDEX IF NOT EXISTS idx_activity_created_ts ON activity(created_ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_schedule_runs_task_ts ON schedule_runs(task_id, created_ts DESC)`,

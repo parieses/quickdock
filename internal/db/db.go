@@ -49,6 +49,9 @@ var validTables = map[string]bool{
 	"ai_conversations":  true,
 	"ai_messages":       true,
 	"ai_spaces":         true,
+	"agent_runs":        true,
+	"agent_nodes":       true,
+	"agent_events":      true,
 	"plugins":           true,
 	"plugin_data":       true,
 	"ssh_hosts":         true,
@@ -159,6 +162,17 @@ var validColumns = map[string]bool{
 	"model": true, "request_count": true, "cached_tokens": true,
 	// stopped：ai_messages 的「这条回复被中断」标记
 	"stopped": true,
+	// ── 多 agent 编排三表（agent_runs / agent_nodes / agent_events）─────────
+	//
+	// 这三张表的写入走的是显式列名的参数化 SQL（internal/db/agent_run.go），
+	// 不经过 structToMap，所以当前不登记也不会报错。仍然逐条补上：
+	// 白名单是全局的，一旦以后有人对这些表用 BulkInsert（例如回收站恢复、
+	// 快照导入），漏列就会变成「非法列名」——而那时的报错点在恢复流程里，
+	// 和「新加了个字段」完全联想不到一起。
+	"goal": true, "budget_tokens": true, "used_tokens": true,
+	"task": true, "seq": true, "started_at": true, "ended_at": true,
+	// run_id / node_id：agent_* 三表与 ai_usage 共用（成本归集维度）
+	"run_id": true, "node_id": true,
 }
 
 // validateTable 检查表名是否在白名单中

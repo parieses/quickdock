@@ -1918,6 +1918,16 @@ export default {
   aiPickFolderTitle: '选择工作目录',
   aiCwdTip: '工作目录：{dir}。AI 只能改这个目录里的文件，生成的文件也放在这里——点击在资源管理器打开',
   aiToolDedup: '重复已跳过',
+  // 编排（多 agent 派活）
+  aiToolVerbSpawn: '派活',
+  aiRunTree: '编排了 {n} 个子任务',
+  aiRunLoading: '正在读取执行记录…',
+  aiRunEmpty: '这次编排没有留下子任务记录',
+  aiRunResult: '子任务结论',
+  aiRunStatusRunning: '进行中',
+  aiRunStatusDone: '已完成',
+  aiRunStatusFailed: '有失败',
+  aiRunStatusCanceled: '已停止',
   // 工具卡片的动词：卡片上写的是「改了哪个文件」而不是「调用了 file_edit」，
   // 工具名是实现细节，用户不关心也不需要记住。
   aiToolVerbEdit: '编辑',

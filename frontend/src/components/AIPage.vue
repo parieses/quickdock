@@ -12,6 +12,7 @@ import {
 import { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
+import AgentRunTree from './AgentRunTree.vue'
 import { SetAIPageVisible } from '../../bindings/quickdock/services/appservice'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
@@ -107,6 +108,9 @@ interface AIToolCall {
   dedup?: boolean
   // 改动行数（file_edit 有值）：卡片摘要行右侧显示 +N / -M。
   added?: number; removed?: number
+  // 这条调用所属的编排 run / 节点（只有 spawn_agent 才有）。
+  // 有了它才能在回复下面挂出 run 树，不必去解析可能被截断的结果文本。
+  run_id?: string; node_id?: string
 }
 
 // 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
@@ -194,6 +198,17 @@ function toolList(m: AIMessage): AIToolCall[] {
   }
 }
 
+// runIDOf 取这条回复所属的编排 run（同一条回复里派了多个子任务时它们同属一个 run，
+// 所以取第一条带 run_id 的调用即可）。
+// 为空的回复（绝大多数）不渲染 run 树面板——不能对每句普通回答都挂一个空面板。
+function runIDOf(m: AIMessage): string {
+  if (m.role !== 'assistant') return ''
+  for (const tc of toolList(m)) {
+    if (tc.run_id) return tc.run_id
+  }
+  return ''
+}
+
 // serializeTools 把流式期收集的记录转成落库/展示同构的 JSON。
 // 丢掉 running：库里存的是「发生过什么」，不是「界面此刻什么样」。
 function serializeTools(list: AIToolCall[]): string {
@@ -204,6 +219,8 @@ function serializeTools(list: AIToolCall[]): string {
     ...(t.dedup ? { dedup: true } : {}),
     ...(t.added ? { added: t.added } : {}),
     ...(t.removed ? { removed: t.removed } : {}),
+    // run/node 必须一起落库：刷新后 run 树面板靠它才知道该拉哪棵树。
+    ...(t.run_id ? { run_id: t.run_id, node_id: t.node_id || '' } : {}),
   })))
 }
 
@@ -224,6 +241,8 @@ const TOOL_ICON: Record<string, Component> = {
   dir_list: FolderTree, git_status: GitBranch, git_diff: GitBranch,
   web_fetch: Globe, web_links: LinkIcon, web_head: Globe,
   run_command: Terminal, check_workdir: FolderTree,
+  // 派活：树状分叉的图示比扳手更能说明「这里分出去了几路子任务」。
+  spawn_agent: Network,
   plugin_execute: Play, plugin_open: LayoutList, plugin_list: LayoutList,
   env_list: ListChecks, env_start: Play, env_stop: Square, env_status: Bug,
   port_list: LayoutList, log_list: FileText, log_read: FileText,
@@ -256,6 +275,7 @@ const TOOL_VERB: Record<string, string> = {
   git_status: 'aiToolVerbGitStatus', git_diff: 'aiToolVerbGitDiff',
   web_fetch: 'aiToolVerbFetch', web_links: 'aiToolVerbLinks', web_head: 'aiToolVerbHead',
   run_command: 'aiToolVerbRun', check_workdir: 'aiToolVerbProbe',
+  spawn_agent: 'aiToolVerbSpawn',
   plugin_execute: 'aiToolVerbPlugin', plugin_open: 'aiToolVerbOpen', plugin_list: 'aiToolVerbList',
   env_list: 'aiToolVerbQuery', env_start: 'aiToolVerbStart', env_stop: 'aiToolVerbStop',
   env_status: 'aiToolVerbQuery', port_list: 'aiToolVerbQuery',
@@ -1678,6 +1698,9 @@ async function send() {
               tc.dedup = !!data.dedup
               tc.added = Number(data.added) || 0
               tc.removed = Number(data.removed) || 0
+              // 编排类工具带回 run/node：流式期就能挂出 run 树，不用等整轮回填。
+              tc.run_id = String(data.runId || '')
+              tc.node_id = String(data.nodeId || '')
             }
             break
           }
@@ -2520,6 +2543,9 @@ onUnmounted(() => {
                   </details>
                 </div>
               </details>
+              <!-- 编排 run 树：这条回复派出去的子 agent。只有带 run_id 的回复才渲染，
+                   否则每一句普通回答下面都会多一个空面板。展开时才拉数据。 -->
+              <AgentRunTree v-if="runIDOf(m)" :run-id="runIDOf(m)" />
               <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md">
                 <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
               </div>

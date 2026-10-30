@@ -95,10 +95,19 @@ func addTokenUsage(a, b db.TokenUsage) db.TokenUsage {
 //   - 会话行的问答次数只在第一轮 +1 —— 用户问的是一句话，不是五句。
 //     列表里那一栏叫「问答次数」，按轮累加会让它失去意义。
 func (a *AIService) recordAIChatTurn(convID string, cfg AIProfile, u db.TokenUsage, first bool) {
+	a.recordAIChatTurnScoped(convID, "", "", cfg, u, first)
+}
+
+// recordAIChatTurnScoped 同 recordAIChatTurn，额外把这次调用归到某次编排的
+// run / node 上（用于「这次编排花了多少」的归集）。
+//
+// 必须逐轮带 runID：一次编排有很多次模型调用，只在结束时补一条总量的话，
+// 统计面板里就查不出「哪个子 agent 最贵」，中途失败也留不下任何花费记录。
+func (a *AIService) recordAIChatTurnScoped(convID, runID, nodeID string, cfg AIProfile, u db.TokenUsage, first bool) {
 	if a == nil || a.App == nil || a.App.DB == nil || u.Empty() {
 		return
 	}
-	if err := a.App.DB.RecordAIUsage(convID, cfg.Model, usageKindChat, u); err != nil {
+	if err := a.App.DB.RecordAIUsageScoped(convID, runID, nodeID, cfg.Model, usageKindChat, u); err != nil {
 		logger.W("[ai] 记录用量失败 kind=chat model=%s: %v", cfg.Model, err)
 	}
 	if convID == "" {
