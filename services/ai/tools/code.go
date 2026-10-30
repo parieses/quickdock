@@ -214,7 +214,7 @@ func fileEdit(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	// 用户只能知道「改了两行」而不知道改成了什么，那正是「不敢让它动代码」的原因。
 	// 输入过大时 unifiedDiff 返回空串，前端退回只显示计数。
 	diffText, _, _ := unifiedDiff(content, updated)
-	return map[string]any{
+	res := map[string]any{
 		"path":         path,
 		"changed":      true,
 		"startLine":    startLine,
@@ -224,7 +224,9 @@ func fileEdit(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		"replacedAll":  replaceAll,
 		"diff":         diffText,
 		"tip":          "改动已落盘。要继续改同一文件请重新 file_read（行号可能已变）；确认整体改动用 git_diff",
-	}, nil
+	}
+	attachHooks(res, d, mcpsrv.Cwd(args), "afterEdit", map[string]string{"file": path})
+	return res, nil
 }
 
 // guardWritableFile 拒绝对几类文件写入。
@@ -427,7 +429,7 @@ func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	// 新建文件时 oldContent 是空串，unifiedDiff 会给出 `@@ -0,0 +1,N @@`——
 	// 与 git 对新增文件的表现一致，前端不用为此写第二个分支。
 	diffText, _, _ := unifiedDiff(oldContent, content)
-	return map[string]any{
+	res := map[string]any{
 		"path":       path,
 		"created":    !existed,
 		"changed":    true,
@@ -435,7 +437,9 @@ func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		"addedLines": added,
 		"diff":       diffText,
 		"tip":        "已写入磁盘。要再改它请 file_read 后用 file_edit 精确替换，不要整份重写",
-	}, nil
+	}
+	attachHooks(res, d, mcpsrv.Cwd(args), "afterEdit", map[string]string{"file": path})
+	return res, nil
 }
 
 // -------- run_command --------
@@ -467,12 +471,24 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 		}
 	}
 
+	// 执行前钩子（C3）：项目自己配的检查（比如「装依赖前先看 lock 有没有冲突」）。
+	// 放在风险判定之后：高危命令根本不会执行，没必要再为它跑一轮钩子；
+	// 也放在审批之后（闸门在 execOneToolCall 里，这里已经过了）。
+	hookNote := runAIHooks(d, dir, "beforeCommand", map[string]string{"command": command})
+
 	// 后台模式：立刻返回 jobId，进程继续跑，输出写进 <dataDir>/ai_jobs/<id>.log。
 	// 放在风险判定之后、超时之前——后台任务没有超时（它的存在意义就是长跑），
 	// 但高危命令照样不执行。
 	if v, ok := args["background"]; ok {
 		if b, isb := v.(bool); isb && b {
-			return startBackgroundCommand(d, command, dir)
+			bg, err := startBackgroundCommand(d, command, dir)
+			if err != nil {
+				return nil, err
+			}
+			if hookNote != "" {
+				bg["hooks"] = hookNote
+			}
+			return bg, nil
 		}
 	}
 
@@ -555,6 +571,9 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 	}
 	if level, note := aiutil.LocalCmdDangerRules.Eval(command); level == "medium" {
 		res["warning"] = note
+	}
+	if hookNote != "" {
+		res["hooks"] = hookNote
 	}
 	return res, nil
 }

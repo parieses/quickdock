@@ -1942,6 +1942,11 @@ export default {
   // 工具轮次：和 token 是同一笔钱的两个侧面（查了五轮 vs 空聊五轮），
   // 所以排在 token 后面。{n} 是轮数，不是工具个数——一轮可并发多个。
   aiStatToolRounds: '{n} 轮工具',
+  aiHookBannerTitle: '此项目配置了 AI 钩子',
+  aiHookBannerDesc: '{path} 定义了 afterEdit {n1} 条、beforeCommand {n2} 条。批准后，AI 每次改完文件 / 执行命令前会自动运行这些命令（各 10 秒超时，失败不阻断操作）。',
+  aiHookBannerBad: '{path} 解析失败，钩子未生效：{err}',
+  aiHookApprove: '批准运行',
+  aiHookDecline: '不批准',
   aiJobBgNote: '后台任务 {id}：正在后台运行，关闭 QuickDock 会终止它（用 job_status / job_output 查看）',
   aiToolSummary: '调用 {n} 个工具 · {rounds} 轮',
   aiToolRunning: '执行中…',

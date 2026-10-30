@@ -39,7 +39,7 @@ import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import type { ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
-import type { AIConvHit, AIProfilesResult } from '../types/ai'
+import type { AIConvHit, AIHooksInfo, AIProfilesResult } from '../types/ai'
 
 import {
   AIListProfiles,
@@ -61,6 +61,8 @@ import {
   AISuggestMentions,
   AISearchMessages,
   AISetConversationMode,
+  AIGetHooks,
+  AISetHooksApproved,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -193,6 +195,32 @@ const cwdLabel = computed(() => {
   const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
   return parts.length ? parts[parts.length - 1] : p
 })
+
+// —— 项目钩子（C3）——
+// cwd 变了就要重读：<cwd>/.quickdock/hooks.json 是随仓库走的文件，换项目
+// 换机器批准状态都不一样。只在 found 且未批准时出提示条：已批准的钩子不吭声
+// ——它的产出已经挂在工具卡片里了，批准状态不是用户每次都要再确认一遍的事。
+const aiHooks = ref<AIHooksInfo | null>(null)
+let aiHooksSeq = 0
+async function loadAIHooks() {
+  const dir = convCwd.value.trim()
+  if (!dir) { aiHooks.value = null; return }
+  const seq = ++aiHooksSeq
+  try {
+    const r = unwrap(await AIGetHooks(dir))
+    // 后发的请求可能先回：列表停在上一个目录的钩子上比没有钩子更糟。
+    if (seq === aiHooksSeq) aiHooks.value = r as AIHooksInfo
+  } catch { aiHooks.value = null }
+}
+async function approveHooks(on: boolean) {
+  const dir = convCwd.value.trim()
+  if (!dir) return
+  try {
+    unwrap(await AISetHooksApproved(dir, on))
+    aiHooks.value = null
+  } catch { /* 批准失败不弹错：下一次改文件时钩子还是不生效，用户会来问 */ }
+}
+watch(convCwd, loadAIHooks, { immediate: true })
 
 // —— 流式文本缓冲 ——
 // 关键性能点：token 到达时不直接写响应式 ref。改为先追加到普通字符串缓冲，
@@ -3273,6 +3301,21 @@ onUnmounted(() => {
 
       <!-- 输入区 -->
       <div class="ai-input-area" @dragover.prevent @drop="onInputDrop">
+        <!-- 项目钩子批准条（C3）：只在「配置了但还没批」时出现。 -->
+        <div v-if="aiHooks && aiHooks.found && !aiHooks.approved" class="ai-hook-banner">
+          <template v-if="aiHooks.error">
+            <div class="ai-hook-banner-title">{{ t('aiHookBannerTitle') }}</div>
+            <div class="ai-hook-banner-desc">{{ t('aiHookBannerBad', { path: aiHooks.path, err: aiHooks.error }) }}</div>
+          </template>
+          <template v-else>
+            <div class="ai-hook-banner-title">{{ t('aiHookBannerTitle') }}</div>
+            <div class="ai-hook-banner-desc">{{ t('aiHookBannerDesc', { path: aiHooks.path, n1: aiHooks.afterEdit.length, n2: aiHooks.beforeCommand.length }) }}</div>
+            <div class="ai-hook-banner-actions">
+              <button class="ai-hook-ok" @click="approveHooks(true)">{{ t('aiHookApprove') }}</button>
+              <button class="ai-hook-no" @click="approveHooks(false)">{{ t('aiHookDecline') }}</button>
+            </div>
+          </template>
+        </div>
         <!-- 待发送图片预览 -->
         <div v-if="attachments.length" class="ai-attach-preview">
           <div v-for="(a, i) in attachments" :key="i" class="ai-attach-thumb">
@@ -4440,6 +4483,27 @@ select.ai-hero-select {
 }
 .ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
 /* 待发送图片预览缩略图 */
+/* 钩子批准条（C3）：warning 色 but 低饱和——它不是错误，是一份需要签字的授权 */
+.ai-hook-banner {
+  margin: 0 12px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-primary));
+}
+.ai-hook-banner-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
+.ai-hook-banner-desc { margin-top: 2px; font-size: 11px; line-height: 1.5; color: var(--color-text-secondary); word-break: break-all; }
+.ai-hook-banner-actions { display: flex; gap: 8px; margin-top: 6px; }
+.ai-hook-ok {
+  padding: 2px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--color-accent); background: var(--color-accent); color: #fff;
+}
+.ai-hook-no {
+  padding: 2px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
+}
+.ai-hook-no:hover { color: var(--color-text-primary); }
+
 .ai-attach-preview { display: flex; flex-wrap: wrap; gap: 8px; }
 
 /* —— @ 引用（chip 与补全弹层）—— */

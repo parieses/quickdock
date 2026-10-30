@@ -87,3 +87,14 @@ export interface AIConvHit {
   count: number
   latest: AIMessageHit
 }
+
+// 一个目录的 AI 钩子情况（对应 Go 端 services/ai.aiHooksView）。
+// found=false 表示这个目录没有 hooks.json；error 有值即配置写坏了，视为未生效。
+export interface AIHooksInfo {
+  found: boolean
+  path: string
+  afterEdit: string[]
+  beforeCommand: string[]
+  approved: boolean
+  error: string
+}
