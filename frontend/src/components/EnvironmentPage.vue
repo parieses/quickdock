@@ -1,26 +1,19 @@
-<script lang="ts">
-// 模块级缓存：切走 git 区块时保留上一次 Git 检测结果，切回时立即预填，
-// 避免「空表 → 加载」闪一下（与 SettingsDSH 的模块级缓存一致）。
-// 模块级变量只在模块首次加载时执行一次，因此跨组件重挂载仍保留。
-
-// ---- Git 状态表（版本/路径/SSH/Git LFS）----
-interface GitStatusInfo {
-  installed: boolean
-  version: string
-  path: string
-  ssh: { available: boolean; keyExists: boolean; keyPath: string; result: string; command: string; output: string }
-  lfs: { installed: boolean; version: string; command: string; output: string }
-}
-
-let cachedGitInfo: GitStatusInfo | null = null
-</script>
-
 <script setup lang="ts">
+// EnvSidebar 由下方 import 引入（侧栏是纯展示壳，分组计算仍在本页）
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import ConfigEditor from './ConfigEditor.vue'
+import RuntimeLogView from './RuntimeLogView.vue'
+import EnvSidebar from './EnvSidebar.vue'
+import { usePollScheduler } from '../composables/usePollScheduler'
+import { useEnvOllama } from '../composables/useEnvOllama'
+import { useEnvGit } from '../composables/useEnvGit'
+import { useEnvEverything } from '../composables/useEnvEverything'
+import { useEnvMaintenance } from '../composables/useEnvMaintenance'
+import { useEnvPath } from '../composables/useEnvPath'
+import { useEnvRuntimeModals } from '../composables/useEnvRuntimeModals'
 import {
   HTTPServeList,
   HTTPServeCreate,
@@ -38,57 +31,19 @@ import {
   EnvStop,
   EnvStatus,
   EnvPortConflict,
-  EnvGitStatus,
   EnvSetActive,
   EnvUnsetActive,
   EnvSetMeta,
   EnvDeleteVersion,
   EnvImportVersion,
   EnvRefresh,
-  EnvConfigSupport,
-  EnvConfigGet,
-  EnvConfigSet,
-  EnvLogGet,
-  EnvPHPConfigGet,
-  EnvPHPConfigSet,
   EnvRabbitMQEnableMgmt,
   EnvRabbitMQDisableMgmt,
   EnvRabbitMQIsMgmtEnabled,
   EnvSetEnabled,
-  EnvOllamaModels,
-  EnvOllamaSearchLibrary,
-  EnvOllamaCheckUpdate,
-  EnvOllamaRunningModels,
-  EnvOllamaPullModel,
-  EnvOllamaDeleteModel,
-  EnvGoEnvKeys,
-  EnvGoEnvGet,
-  EnvGoEnvSet,
-  EnvSourceCheck,
-  EnvDiskUsage,
-  EnvMirrorState,
-  EnvMirrorToggle,
-  EnvGitHubAccelState,
-  EnvGitHubAccelSet,
-  EnvManifestExport,
-  EnvManifestImport,
-  EnvUserEnv,
-  EnvUserEnvSetVar,
-  EnvUserEnvDeleteVar,
-  EnvUserEnvSetPath,
   EnvRuntimeTasks,
   EnvRunTask,
   EnvProjectVersions,
-  EnvEverythingStatus,
-  EnvEverythingSearch,
-  EnvEverythingStart,
-  EnvEverythingStop,
-  EnvEverythingInstall,
-  EnvEverythingInstallEs,
-  EnvEverythingOpenDownload,
-  EnvEverythingOpenCliDownload,
-  EnvEverythingGetSettings,
-  EnvEverythingSetSettings,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import {
@@ -111,6 +66,7 @@ import { useWebDAVPanel } from '../composables/useWebDAVPanel'
 // D9：品牌色 / 内置工具组标识色集中到 palette（主题扩展表），组件不再散落硬编码
 import { openExternal } from '../utils/externalLinks'
 import { RUNTIME_COLORS, SPECIAL_ITEM_COLORS } from '../utils/palette'
+import { cmpVer, formatBytes, formatEta, formatSpeed, percent } from '../utils/envFormat'
 
 const { t } = useI18n()
 const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!
@@ -155,6 +111,12 @@ function loadCollapsedGroups(): Record<string, boolean> {
   }
   return {}
 }
+/** 侧栏选一个分类：顺便收起可能开着的行内菜单（否则菜单会挂在新分类上） */
+function onPickCategory(id: string) {
+  selectedId.value = id
+  openMenu.value = null
+}
+
 function toggleGroup(key: string) {
   collapsedGroups[key] = !collapsedGroups[key]
   try {
@@ -176,8 +138,8 @@ interface SidebarItem {
 }
 // 侧栏搜索：31 个运行时只能靠滚动 + 折叠找，"那个 pb" 得翻半天。
 // 搜索时强制展开分组——搜到的东西藏在折叠分组里等于没搜到。
+// 「是否在搜索」的判定已随侧栏下沉到 EnvSidebar（只影响「无匹配」提示）。
 const sidebarQuery = ref('')
-const sidebarSearching = computed(() => sidebarQuery.value.trim().length > 0)
 
 const sidebarGroups = computed(() => {
   const out: { key: string; labelKey: string; items: SidebarItem[]; collapsed: boolean; running: boolean }[] = []
@@ -413,31 +375,8 @@ interface PortConflict {
 }
 const portConflicts = reactive<Record<string, PortConflict>>({})
 
-// PATH 可视化面板：聚合所有已激活运行时的 bin 目录及其在系统 PATH 中的状态
-const pathModal = reactive<{ open: boolean }>({ open: false })
-function binDirOf(ins: any): string {
-  if (ins.scope === 'system') {
-    const parts = (ins.path || '').split(/[\\/]/)
-    parts.pop()
-    return parts.join('/')
-  }
-  return ins.path || ''
-}
-const pathEntries = computed(() => {
-  const out: { id: string; name: string; version: string; binDir: string; inPath: boolean }[] = []
-  for (const r of runtimes.value) {
-    if (!r.installed) continue
-    for (const ins of r.installed) {
-      // 激活记录（active）或实际已在 PATH 中（inSystemPath）都要显示：
-      // 后者覆盖「路径已注册但激活元数据缺失」的情况（如安装后手工改动过 PATH），
-      // 否则面板会漏掉实际生效的目录，看着像没注册。
-      if (ins.active || ins.inSystemPath) {
-        out.push({ id: r.id, name: r.name, version: ins.version, binDir: binDirOf(ins), inPath: !!ins.inSystemPath })
-      }
-    }
-  }
-  return out
-})
+// PATH 可视化面板：逻辑已抽到 composables/useEnvPath（派生自 runtimes）
+const { pathModal, pathEntries } = useEnvPath({ runtimes })
 
 // 端口全景：聚合所有运行中服务的运行时 / 版本 / 服务端口 / 控制台端口。
 const panorama = reactive<{ open: boolean }>({ open: false })
@@ -573,216 +512,26 @@ const {
 const { webdavInfo, webdavURL, webdavExposed, webdavCmds, copyWebDAV, loadWebDAV } = useWebDAVPanel(selectedId)
 
 
-// ---- Ollama 模型管理（/api/tags|ps|pull|delete）----
-// 模型与程序版本是两件事：这里动的是模型库（几十 GB，全局共享一份，默认 ~/.ollama/models），
-// 不碰 runtime/ollama/<version> 下的程序目录；反之删除程序版本也不碰模型。
-interface OllamaModel {
-  name: string
-  size: number
-  modified_at: string
-  details: { family: string; parameter_size: string; quantization_level: string }
-}
-interface OllamaRunningModel { name: string; size: number; size_vram: number; expires_at: string }
-
-const ollamaModels = ref<OllamaModel[]>([])
-const ollamaRunning = ref<OllamaRunningModel[]>([])
-const ollamaLoading = ref(false)
-const ollamaErr = ref('')
-const ollamaPullName = ref('')
-const ollamaPulling = ref(false)
-// ollamaProgress 拉取进度。status 是 Ollama 的协议文案（pulling manifest / downloading…），
-// 与界面语言无关，原样展示不做翻译。
-const ollamaProgress = ref<{ percent: number; completed: number; total: number; status: string } | null>(null)
-const ollamaDelTarget = ref<OllamaModel | null>(null)
-
-// ---- Ollama 程序版本 ----
-// 与上方 newestUpdate 不是一回事：那个比的是「受管目录里已装的最高版本 vs 上游」，
-// 而 Ollama 常常是用官方安装包/包管理器装的、根本不在 runtime 目录下，
-// 于是 newestUpdate 对它永远显示「未安装」。EnvOllamaCheckUpdate 走的是
-// DetectInstalledVersion()（系统里实际生效的那个），两套判定各管一段，别合并。
-interface OllamaUpdateInfo { installed: string; latest: string; hasUpdate: boolean }
-const ollamaUpdate = ref<OllamaUpdateInfo | null>(null)
-const ollamaChkBusy = ref(false)
-
-async function checkOllamaUpdate() {
-  if (ollamaChkBusy.value) return
-  ollamaChkBusy.value = true
-  try {
-    ollamaUpdate.value = unwrap<OllamaUpdateInfo>(await EnvOllamaCheckUpdate()) ?? null
-  } catch (e) {
-    logWarn('env/ollamaUpdate', e)
-    ollamaUpdate.value = null
-  } finally {
-    ollamaChkBusy.value = false
-  }
-}
-
-// ---- 拉取输入框的官方模型库联想 ----
-// 数据源 ollama.com/api/tags（支持 ?q=），非本机已装模型——已装的不需要再拉。
-const ollamaLibModels = ref<{ name: string; size: number }[]>([])
-const ollamaLibOpen = ref(false)
-const ollamaLibLoading = ref(false)
-let ollamaLibTimer: ReturnType<typeof setTimeout> | null = null
-// 请求序号：慢的旧响应回来时若已发起新请求，直接丢弃，避免候选列表被旧结果覆盖。
-let ollamaLibSeq = 0
-
-// searchOllamaLibrary 拉取候选。空关键字返回官方热门（默认排序）。
-async function searchOllamaLibrary(kw: string) {
-  const seq = ++ollamaLibSeq
-  ollamaLibLoading.value = true
-  try {
-    const ms = unwrap<{ name: string; size: number }[]>(await EnvOllamaSearchLibrary(kw)) || []
-    if (seq !== ollamaLibSeq) return // 已有更新的请求，丢弃本次结果
-    ollamaLibModels.value = ms
-  } catch {
-    if (seq === ollamaLibSeq) ollamaLibModels.value = []
-  } finally {
-    if (seq === ollamaLibSeq) ollamaLibLoading.value = false
-  }
-}
-
-// onOllamaPullInput 输入防抖 300ms 后查询，避免逐字符打满官方接口。
-function onOllamaPullInput() {
-  if (ollamaLibTimer) clearTimeout(ollamaLibTimer)
-  ollamaLibTimer = setTimeout(() => searchOllamaLibrary(ollamaPullName.value.trim()), 300)
-}
-
-// openOllamaLib 聚焦即展开；首次展开时拉一次热门，让空输入也有候选可点。
-function openOllamaLib() {
-  ollamaLibOpen.value = true
-  if (!ollamaLibModels.value.length) searchOllamaLibrary(ollamaPullName.value.trim())
-}
-
-function pickOllamaLib(name: string) {
-  ollamaPullName.value = name
-  ollamaLibOpen.value = false
-}
-
-function closeOllamaLibSoon() {
-  // 延迟关闭：否则 mousedown 选中项时列表已被 blur 收起，点击落空。
-  setTimeout(() => { ollamaLibOpen.value = false }, 150)
-}
-
-// ollamaBaseURL 提供给 OpenAI 兼容客户端填的 Base URL。
-// 端口取实际侦听端口（用户可能在 ollama.env 改过 OLLAMA_HOST），
-// 未取到时回退 11434；末尾带 /v1 是因为 AI 助手等客户端按 OpenAI 协议接入。
-const ollamaBaseURL = computed(() => {
-  const r = selected.value
-  const running = r ? r.installed.find((ins) => svcOn(r, ins.version)) : undefined
-  const ports = r && running ? svcPorts(r, running.version) : []
-  return `http://127.0.0.1:${ports[0] || 11434}/v1`
+// ---- Ollama 模型库：逻辑已抽到 composables/useEnvOllama ----
+// baseURL 依赖「当前运行版本的监听端口」，要读本页的 runtimes 状态，所以在页面侧算好传进去。
+const {
+  ollamaModels, ollamaRunning, ollamaLoading, ollamaErr,
+  ollamaPullName, ollamaPulling, ollamaProgress, ollamaDelTarget,
+  ollamaUpdate, ollamaChkBusy,
+  ollamaLibModels, ollamaLibOpen, ollamaLibLoading, ollamaBaseURL,
+  checkOllamaUpdate, searchOllamaLibrary, onOllamaPullInput,
+  openOllamaLib, pickOllamaLib, closeOllamaLibSoon,
+  copyOllamaText, copyOllamaModel, ollamaSize, ollamaTime,
+  loadOllama, refreshOllamaPanel, pullOllamaModel, deleteOllamaModel, onOllamaPull,
+} = useEnvOllama({
+  selectedId,
+  baseURL: () => {
+    const r = selected.value
+    const running = r ? r.installed.find((ins) => svcOn(r, ins.version)) : undefined
+    const ports = r && running ? svcPorts(r, running.version) : []
+    return `http://127.0.0.1:${ports[0] || 11434}/v1`
+  },
 })
-
-async function copyOllamaText(text: string) {
-  if (!text) return
-  if (await copyToClipboard(text)) {
-    toast.success(t('copied'))
-  } else {
-    toast.error(t('copyFailed'))
-  }
-}
-
-function copyOllamaModel(name: string) { copyOllamaText(name) }
-
-// ollamaSize 把字节格式化成人类可读体积。模型都以 GB 计，小于 1 GB 才降到 MB。
-function ollamaSize(n: number): string {
-  if (!n) return '—'
-  const gb = n / 1024 ** 3
-  return gb >= 1 ? gb.toFixed(2) + ' GB' : (n / 1024 ** 2).toFixed(0) + ' MB'
-}
-function ollamaTime(s: string): string {
-  if (!s) return '—'
-  const d = new Date(s)
-  return isNaN(d.getTime()) ? s : d.toLocaleString()
-}
-
-// loadOllama 拉取模型列表与运行中模型。未装/未启动时后端返回明确文案，
-// 落在 ollamaErr 里就地展示，不弹 toast 打扰（切到这个分类就会看到，属预期状态而非异常）。
-async function loadOllama() {
-  ollamaLoading.value = true
-  ollamaErr.value = ''
-  try {
-    const [ms, rs] = await Promise.all([EnvOllamaModels(), EnvOllamaRunningModels()])
-    ollamaModels.value = unwrap<OllamaModel[]>(ms) || []
-    ollamaRunning.value = unwrap<OllamaRunningModel[]>(rs) || []
-  } catch (e) {
-    ollamaModels.value = []
-    ollamaRunning.value = []
-    ollamaErr.value = getErrorMessage(e)
-  } finally {
-    ollamaLoading.value = false
-  }
-}
-
-// refreshOllamaPanel 在服务启停/更新后刷新 Ollama 下方模型面板。
-// 模型/运行中列表不参与 3s pollStatus，只在切分类或显式调用时重取——
-// 否则启停 Ollama 后要「切走再切回」才刷新（用户反馈的问题）。
-// delay 给刚启动的服务留出就绪时间（启动过程 ollama serve 需数百 ms 起监听）。
-function refreshOllamaPanel(delay = 0) {
-  const run = () => {
-    if (selectedId.value !== 'ollama') return
-    loadOllama()
-  }
-  if (delay > 0) setTimeout(run, delay)
-  else run()
-}
-
-// pullOllamaModel 拉取模型：后端异步执行、立即返回，进度经事件推送。
-async function pullOllamaModel() {
-  const name = ollamaPullName.value.trim()
-  if (!name || ollamaPulling.value) return
-  ollamaPulling.value = true
-  ollamaErr.value = ''
-  ollamaProgress.value = { percent: 0, completed: 0, total: 0, status: '' }
-  try {
-    unwrap(await EnvOllamaPullModel(name))
-  } catch (e) {
-    // 请求本身没发出去（如服务未启动）才算失败；发出去了就等事件收尾。
-    ollamaPulling.value = false
-    ollamaProgress.value = null
-    ollamaErr.value = getErrorMessage(e)
-  }
-}
-
-async function deleteOllamaModel() {
-  const m = ollamaDelTarget.value
-  if (!m) return
-  try {
-    unwrap(await EnvOllamaDeleteModel(m.name))
-    toast.success(t('ollamaDeleted', { name: m.name }))
-    ollamaDelTarget.value = null
-    await loadOllama()
-  } catch (e) {
-    toast.error(getErrorMessage(e))
-  }
-}
-
-// onOllamaPull 拉取进度事件。Wails v3 的 payload 在 e.data。
-function onOllamaPull(e: any) {
-  const p = e?.data ?? e
-  if (!p || typeof p !== 'object') return
-  if (p.stage === 'progress') {
-    ollamaProgress.value = {
-      percent: p.percent || 0,
-      completed: p.completed || 0,
-      total: p.total || 0,
-      status: p.status || '',
-    }
-    return
-  }
-  // done / error 都是本次拉取的终态
-  ollamaPulling.value = false
-  ollamaProgress.value = null
-  if (p.stage === 'done') {
-    toast.success(t('ollamaPullDone', { name: p.model || '' }))
-    ollamaPullName.value = ''
-    loadOllama()
-  } else {
-    toast.error(p.message || t('ollamaPullFailed'))
-  }
-}
-
-watch(selectedId, (id) => { if (id === 'ollama') { loadOllama(); void checkOllamaUpdate() } })
 
 // versionInput: 绑定到当前选中运行时的版本号，读写都经过 ui[state] 保证一致性
 const versionInput = computed({
@@ -795,23 +544,6 @@ const currentRuntimeState = computed(() => {
   const r = selected.value
   return r ? stateFor(r.id, r) : null
 })
-
-function percent(s: { written: number; total: number }): number {
-  if (s.total <= 0) return -1
-  return Math.min(100, Math.floor((s.written / s.total) * 100))
-}
-function formatSpeed(b: number): string {
-  if (!isFinite(b) || b <= 0) return ''
-  if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB/s'
-  if (b >= 1024) return (b / 1024).toFixed(0) + ' KB/s'
-  return b.toFixed(0) + ' B/s'
-}
-function formatEta(sec: number): string {
-  if (!isFinite(sec) || sec <= 0) return ''
-  if (sec >= 3600) return (sec / 3600).toFixed(1) + ' h'
-  if (sec >= 60) return Math.ceil(sec / 60) + ' min'
-  return Math.ceil(sec) + ' s'
-}
 
 function svcOn(r: RuntimeInfo, version: string): boolean {
   const st = ui[r.id]?.svc?.[version]
@@ -829,14 +561,6 @@ function svcPorts(r: RuntimeInfo, version: string): number[] {
   if (Array.isArray(st.ports) && st.ports.length) return st.ports
   return st.port ? [st.port] : []
 }
-// formatBytes 进程占用的可读格式：>1GB 用 GB，>100MB 取整，更小保留一位小数。
-function formatBytes(b: number): string {
-  if (!b || b <= 0) return '—'
-  if (b >= 1073741824) return (b / 1073741824).toFixed(2) + ' GB'
-  if (b >= 104857600) return Math.round(b / 1048576) + ' MB'
-  return (b / 1048576).toFixed(1) + ' MB'
-}
-
 // svcUsage 运行中服务的资源占用摘要（CPU 占用率 · 进程树常驻内存），未运行时返回空串。
 // CPU 需要两次采样才有基线，首次（后端给 null）只先显示内存。
 function svcUsage(r: RuntimeInfo, version: string): string {
@@ -1117,368 +841,25 @@ async function reveal(path: string) {
   }
 }
 
-// ---- PHP 配置弹窗（php.ini / 禁用函数 / 错误日志 / 扩展）----
-interface PHPExt { name: string; file: string; enabled: boolean }
-const phpModal = reactive<{
-  open: boolean; runtime: string; version: string; tab: string
-  raw: string; disableFunctions: string; errorLog: string; errorLogContent: string
-  extensions: PHPExt[]
-}>({
-  open: false, runtime: '', version: '', tab: 'ini',
-  raw: '', disableFunctions: '', errorLog: '', errorLogContent: '', extensions: [],
-})
-async function openPHPConfig(r: RuntimeInfo, ins: Install, tab: string) {
-  try {
-    const cfg = unwrap<any>(await EnvPHPConfigGet(r.id, ins.version))
-    phpModal.runtime = r.id
-    phpModal.version = ins.version
-    phpModal.tab = tab
-    phpModal.raw = cfg.raw || ''
-    phpModal.disableFunctions = cfg.disableFunctions || ''
-    phpModal.errorLog = cfg.errorLog || ''
-    phpModal.errorLogContent = cfg.errorLogContent || ''
-    phpModal.extensions = (cfg.extensions || []).map((e: any) => ({ name: e.name, file: e.file, enabled: !!e.enabled }))
-    phpModal.open = true
-    openMenu.value = null
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-function toggleExt(i: number) {
-  phpModal.extensions[i].enabled = !phpModal.extensions[i].enabled
-}
-async function savePHPConfig() {
-  try {
-    const patch: any = {}
-    if (phpModal.tab === 'ini') {
-      patch.raw = phpModal.raw
-    } else {
-      patch.disableFunctions = phpModal.disableFunctions
-      patch.errorLog = phpModal.errorLog
-      patch.extensions = phpModal.extensions.filter((e) => e.enabled).map((e) => e.name)
-    }
-    unwrap(await EnvPHPConfigSet(phpModal.runtime, phpModal.version, patch))
-    toast.success(t('saved'))
-    phpModal.open = false
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-
-// ---- Go 环境变量配置弹窗（go env -w / -u）----
-// 作用域（scope）：
-//   version → 该版本专属 go.env（runtime/go/<ver>/gopath/env），QuickDock 运行该版本时读的就是它
-//   global  → 系统全局即用户级 go.env（%APPDATA%\go\env），对没做版本隔离的 go 生效
-// 两个作用域互不覆盖，后端用 version 参数区分（空串 = 全局），因此不需要新接口。
-type GoEnvScope = 'version' | 'global'
-interface GoEnvKey { key: string; label: string; desc: string; placeholder: string; choices: string[]; secret: boolean }
-const goEnvModal = reactive<{
-  open: boolean; runtime: string; version: string; scope: GoEnvScope
-  keys: GoEnvKey[]; values: Record<string, string>; loading: boolean; saving: boolean; error: string
-  // PATH 与 go.env 是两件事，但用户常把它们混为一谈：
-  // 前者决定「go 命令能否被找到」，后者决定「go 的行为（GOPATH/代理/缓存）」。
-  // 弹窗里把前者显式摆出来（目录 + 状态 + 一键切换），避免再去菜单里翻。
-  inPath: boolean; binDir: string; pathBusy: boolean
-}>({
-  open: false, runtime: '', version: '', scope: 'version',
-  keys: [], values: {}, loading: false, saving: false, error: '',
-  inPath: false, binDir: '', pathBusy: false,
-})
-async function loadGoEnvValues() {
-  goEnvModal.loading = true
-  goEnvModal.error = ''
-  goEnvModal.values = {}
-  try {
-    // 全局作用域传空版本号，后端据此读写用户级 go.env
-    const ver = goEnvModal.scope === 'global' ? '' : goEnvModal.version
-    const vs = unwrap<Record<string, string>>(await EnvGoEnvGet(goEnvModal.runtime, ver))
-    goEnvModal.values = vs || {}
-  } catch (e: any) {
-    goEnvModal.error = getErrorMessage(e)
-  } finally {
-    goEnvModal.loading = false
-  }
-}
-async function switchGoEnvScope(scope: GoEnvScope) {
-  if (goEnvModal.scope === scope || goEnvModal.saving) return
-  goEnvModal.scope = scope
-  await loadGoEnvValues()
-}
-async function openGoEnv(r: RuntimeInfo, ins: Install) {
-  goEnvModal.runtime = r.id
-  goEnvModal.version = ins.version
-  goEnvModal.scope = 'version'
-  goEnvModal.keys = []
-  goEnvModal.values = {}
-  goEnvModal.error = ''
-  goEnvModal.loading = true
-  goEnvModal.open = true
-  goEnvModal.inPath = !!ins.inSystemPath
-  goEnvModal.binDir = binDirOf(ins)
-  openMenu.value = null
-  try {
-    const ks = unwrap<GoEnvKey[]>(await EnvGoEnvKeys(r.id))
-    goEnvModal.keys = ks || []
-  } catch (e: any) {
-    goEnvModal.error = getErrorMessage(e)
-    goEnvModal.loading = false
-    return
-  }
-  await loadGoEnvValues()
-}
-// toggleGoPath 在弹窗内直接切换「该版本 bin 是否在用户 PATH」。
-// 复用菜单里的 toggleEnvVar（同一套写入/注销逻辑），切换后 load() 会重建
-// runtimes，所以必须重新取一次 install 才能拿到最新 inSystemPath。
-async function toggleGoPath() {
-  if (goEnvModal.pathBusy) return
-  goEnvModal.pathBusy = true
-  try {
-    const r = runtimes.value.find(x => x.id === goEnvModal.runtime)
-    const ins = r?.installed?.find(i => i.version === goEnvModal.version)
-    if (!r || !ins) return
-    await toggleEnvVar(r, ins)
-    const r2 = runtimes.value.find(x => x.id === goEnvModal.runtime)
-    const ins2 = r2?.installed?.find(i => i.version === goEnvModal.version)
-    goEnvModal.inPath = !!ins2?.inSystemPath
-    goEnvModal.binDir = ins2 ? binDirOf(ins2) : goEnvModal.binDir
-    toast.success(goEnvModal.inPath ? t('goPathAdded') : t('goPathRemoved'))
-  } catch (e: any) {
-    goEnvModal.error = getErrorMessage(e)
-    logErr('env/goenv', e)
-  } finally {
-    goEnvModal.pathBusy = false
-  }
-}
-async function saveGoEnv() {
-  goEnvModal.saving = true
-  goEnvModal.error = ''
-  try {
-    const ver = goEnvModal.scope === 'global' ? '' : goEnvModal.version
-    unwrap(await EnvGoEnvSet(goEnvModal.runtime, ver, { ...goEnvModal.values }))
-    toast.success(t('saved'))
-    goEnvModal.open = false
-  } catch (e: any) {
-    goEnvModal.error = getErrorMessage(e)
-  } finally {
-    goEnvModal.saving = false
-  }
-}
-// GOPROXY 一键镜像：国内网络拉模块常常超时，提供常用镜像直选。
-const goProxyPresets = [
-  { label: '官方', value: 'https://proxy.golang.org,direct' },
-  { label: '七牛 goproxy.cn', value: 'https://goproxy.cn,direct' },
-  { label: '阿里云', value: 'https://mirrors.aliyun.com/goproxy/,direct' },
-  { label: '腾讯云', value: 'https://mirrors.tencent.com/go/,direct' },
-  { label: '关闭(直连)', value: 'direct' },
-]
-function applyGoProxy(value: string) {
-  goEnvModal.values['GOPROXY'] = value
-}
-
-// ---- Redis 配置 / 日志弹窗（redis.conf 编辑 + 运行日志查询）----
-// Redis 已实现通用 ConfigProvider，故配置读写走 EnvConfigGet/Set（与 Nginx/Apache 一致）；
-// 日志查询走通用 EnvLogGet（原 EnvRedisLog 已废弃，仅 Redis 可用 → 现所有实现 LogProvider 的运行时可用）。
-const redisModal = reactive<{
-  open: boolean; runtime: string; version: string; tab: string
-  path: string; raw: string; log: string
-  logFilter: string; logAuto: boolean
-}>({
-  open: false, runtime: '', version: '', tab: 'config',
-  path: '', raw: '', log: '', logFilter: '', logAuto: false,
-})
-async function openRedisConfig(r: RuntimeInfo, ins: Install, tab: string) {
-  try {
-    const cfg = unwrap<any>(await EnvConfigGet(r.id, ins.version))
-    redisModal.runtime = r.id
-    redisModal.version = ins.version
-    redisModal.tab = tab
-    redisModal.path = cfg.path || ''
-    redisModal.raw = cfg.raw || ''
-    if (tab === 'log') {
-      try {
-        redisModal.log = unwrap<string>(await EnvLogGet(r.id, ins.version)) || ''
-        nextTick(scrollLogBottom)
-      } catch {
-        redisModal.log = ''
-      }
-    }
-    redisModal.open = true
-    openMenu.value = null
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-async function refreshRedisLog(scroll = true) {
-  try {
-    redisModal.log = unwrap<string>(await EnvLogGet(redisModal.runtime, redisModal.version)) || ''
-    if (scroll) nextTick(scrollLogBottom)
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-async function saveRedisConfig() {
-  try {
-    unwrap(await EnvConfigSet(redisModal.runtime, redisModal.version, redisModal.raw))
-    toast.success(t('saved'))
-    closeRedisModal()
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-
-// ---- 日志查看器增强：关键字过滤 + 自动刷新（轮询）+ 自动滚到底部 ----
-const logEl = ref<HTMLElement | null>(null)
-const filteredLog = computed(() => {
-  const f = redisModal.logFilter.trim().toLowerCase()
-  if (!f) return redisModal.log
-  return redisModal.log
-    .split('\n')
-    .filter((l) => l.toLowerCase().includes(f))
-    .join('\n')
-})
-function scrollLogBottom() {
-  const el = logEl.value
-  if (el) el.scrollTop = el.scrollHeight
-}
-let logTimer: ReturnType<typeof setInterval> | null = null
-function startLogAuto() {
-  if (logTimer || !redisModal.logAuto || redisModal.tab !== 'log') return
-  logTimer = setInterval(() => { refreshRedisLog(false) }, 2000)
-}
-function stopLogAuto() {
-  if (logTimer) { clearInterval(logTimer); logTimer = null }
-}
-function toggleLogAuto() {
-  redisModal.logAuto = !redisModal.logAuto
-  if (redisModal.logAuto) {
-    refreshRedisLog()
-    startLogAuto()
-  } else {
-    stopLogAuto()
-  }
-}
-function closeRedisModal() {
-  stopLogAuto()
-  redisModal.logFilter = ''
-  redisModal.open = false
-}
-function openLogTab() {
-  redisModal.tab = 'log'
-  refreshRedisLog()
-  startLogAuto()
-}
-
-// ---- 通用配置编辑（Nginx / Apache / Caddy 等实现了 ConfigProvider 的运行时）----
-// PHP / Redis / FTP 各有专用弹窗（PHP 扩展开关、Redis 日志、FTP 结构化启动参数），不复用本裸文本弹窗，故排除。
-const SPECIAL_CONFIG_UI = ['php', 'redis', 'ftp']
-const configSupported = ref(false)
-const configModal = reactive<{ open: boolean; runtime: string; version: string; path: string; raw: string }>({
-  open: false, runtime: '', version: '', path: '', raw: '',
-})
-async function loadConfigSupport(id: string) {
-  try {
-    configSupported.value = !!unwrap<boolean>(await EnvConfigSupport(id)) && !SPECIAL_CONFIG_UI.includes(id)
-  } catch (e) {
-    console.warn('[env] 查询配置编辑支持状态失败', e)
-    configSupported.value = false
-  }
-}
-async function openConfig(r: RuntimeInfo, ins: Install) {
-  try {
-    const cfg = unwrap<any>(await EnvConfigGet(r.id, ins.version))
-    configModal.runtime = r.id
-    configModal.version = ins.version
-    configModal.path = cfg.path || ''
-    configModal.raw = cfg.raw || ''
-    configModal.open = true
-    openMenu.value = null
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
+// ---- 运行时弹窗：PHP / Go / Redis / 通用配置 / FTP / 日志 ----
+// 逻辑已抽到 composables/useEnvRuntimeModals，这里只保留编辑器引用与解构。
 const editorRef = ref<InstanceType<typeof ConfigEditor> | null>(null)
-async function saveConfig() {
-  try {
-    unwrap(await EnvConfigSet(configModal.runtime, configModal.version, configModal.raw))
-    editorRef.value?.markSaved() // 保存成功后刷新「已修改」基线
-    toast.success(t('saved'))
-    configModal.open = false
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-
-// ---- FTP 启动参数（结构化表单，底层仍是 ftpdmin.args）----
-// FTPDMIN 无配置文件，启动参数持久化在 ftpdmin.args（每行一个令牌）。这里把原始 args
-// 解析成 端口/根目录/只读 三个字段，避免用户手改裸文本写错（如 -p abc）只能启动时才发现。
-const ftpModal = reactive<{
-  open: boolean; runtime: string; version: string
-  port: number; rootDir: string; readOnly: boolean; path: string
-}>({
-  open: false, runtime: '', version: '',
-  port: 21, rootDir: '', readOnly: false, path: '',
+const {
+  phpModal, openPHPConfig, toggleExt, savePHPConfig,
+  goEnvModal, switchGoEnvScope, openGoEnv, toggleGoPath, saveGoEnv,
+  goProxyPresets, applyGoProxy,
+  redisModal, openRedisConfig, refreshRedisLog, saveRedisConfig,
+  toggleLogAuto, closeRedisModal, openLogTab,
+  configSupported, configModal, loadConfigSupport, openConfig, saveConfig,
+  ftpModal, openFTPConfig, saveFTPConfig,
+  logModal, openLog, refreshLogModal, toggleLogModalAuto, closeLogModal,
+  stopAllTimers,
+} = useEnvRuntimeModals({
+  runtimes,
+  closeMenu: () => { openMenu.value = null },
+  toggleEnvVar,
+  onConfigSaved: () => editorRef.value?.markSaved(),
 })
-function parseFtpArgs(raw: string): { port: number; rootDir: string; readOnly: boolean } {
-  const knownVal = ['-p', '-tp', '-ha']
-  const tokens: string[] = []
-  for (const line of raw.split('\n')) {
-    const l = line.trim()
-    if (!l) continue
-    const i = l.indexOf(' ')
-    if (i > 0 && knownVal.includes(l.slice(0, i))) {
-      tokens.push(l.slice(0, i), l.slice(i + 1).trim())
-    } else {
-      tokens.push(l)
-    }
-  }
-  let port = 21
-  let rootDir = ''
-  let readOnly = false
-  for (let k = 0; k < tokens.length; k++) {
-    const tk = tokens[k]
-    if (tk === '-p') {
-      const v = parseInt(tokens[k + 1], 10)
-      if (!isNaN(v)) port = v
-      k++
-    } else if (tk === '-g') {
-      readOnly = true
-    } else if (!tk.startsWith('-')) {
-      rootDir = tk
-    }
-  }
-  return { port, rootDir, readOnly }
-}
-function serializeFtpArgs(a: { port: number; rootDir: string; readOnly: boolean }): string {
-  const lines = ['-p', String(a.port), a.rootDir]
-  if (a.readOnly) lines.push('-g')
-  return lines.join('\n') + '\n'
-}
-async function openFTPConfig(r: RuntimeInfo, ins: Install) {
-  try {
-    const cfg = unwrap<any>(await EnvConfigGet(r.id, ins.version))
-    const parsed = parseFtpArgs(cfg.raw || '')
-    ftpModal.runtime = r.id
-    ftpModal.version = ins.version
-    ftpModal.path = cfg.path || ''
-    ftpModal.port = parsed.port
-    ftpModal.rootDir = parsed.rootDir
-    ftpModal.readOnly = parsed.readOnly
-    ftpModal.open = true
-    openMenu.value = null
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-async function saveFTPConfig() {
-  try {
-    const raw = serializeFtpArgs({ port: ftpModal.port, rootDir: ftpModal.rootDir, readOnly: ftpModal.readOnly })
-    unwrap(await EnvConfigSet(ftpModal.runtime, ftpModal.version, raw))
-    toast.success(t('saved'))
-    ftpModal.open = false
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
 
 // ---- HTTP 服务（目录 → 可访问的静态服务）----
 interface HTTPServerItem { id: string; name: string; dir: string; port: number; running: boolean }
@@ -1656,18 +1037,7 @@ function selectVersion(id: string, version: string) {
   s.listExpanded = false
 }
 
-// ---- 新版本检测：上游可下载版本 vs 已安装版本 ----
-// 版本号形如 "v22.22.2" / "1.25.0" / "8.3.20"，去掉前缀 v 后按数值逐段比较
-function cmpVer(a: string, b: string): number {
-  const pa = String(a || '').trim().replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0)
-  const pb = String(b || '').trim().replace(/^v/i, '').split('.').map((n) => parseInt(n, 10) || 0)
-  for (let i = 0; i < 3; i++) {
-    const x = pa[i] || 0
-    const y = pb[i] || 0
-    if (x !== y) return x < y ? -1 : 1
-  }
-  return 0
-}
+// ---- 新版本检测：上游可下载版本 vs 已安装版本（cmpVer 见 utils/envFormat）----
 // newestUpdate: 上游最新版本高于已装版本时给出升级提示。
 //
 // 只在真正拉到上游版本列表时才判定：
@@ -1692,54 +1062,67 @@ function applyUpdate(to: string) {
   install(r)
 }
 
-let polling = false
-async function pollStatus() {
-  if (polling) return // 上一次轮询（含多次 EnvStatus 调用）尚未返回时跳过，避免请求叠加导致状态闪烁
-  polling = true
-  try {
-    for (const r of runtimes.value) {
-      if (!r.hasService) { commitRuntimeCache(r); continue }
-      const s = ui[r.id]
-      if (!s) { commitRuntimeCache(r); continue }
-      for (const ins of r.installed) {
-        // linked（导入）版本一般不参与服务管理；PHP 例外——导入版 PHP 也能以 php-fpm 方式启停
-        if (ins.scope === 'linked' && r.id !== 'php') continue
-        try {
-          const st = unwrap<ServiceStatus>(await EnvStatus(r.id, ins.version))
-          if (st) {
-            s.svc[ins.version] = st
-            delete svcUnknown[r.id + ins.version]
-          }
-        } catch {
-          // 查询失败不能沿用上一次的「运行中」：服务可能已经崩了，
-          // 而 UI 还在给用户一个绿色的假象。这里标记成「状态未知」，如实显示。
-          svcUnknown[r.id + ins.version] = true
-        }
+// 单个运行时的状态同步：服务状态 + 端口冲突 + 缓存落盘。
+// 抽成独立函数是为了能按并发分批调用（见 pollStatusOnce）。
+async function syncRuntimeStatus(r: RuntimeInfo) {
+  if (!r.hasService) { commitRuntimeCache(r); return }
+  const s = ui[r.id]
+  if (!s) { commitRuntimeCache(r); return }
+  for (const ins of r.installed) {
+    // linked（导入）版本一般不参与服务管理；PHP 例外——导入版 PHP 也能以 php-fpm 方式启停
+    if (ins.scope === 'linked' && r.id !== 'php') continue
+    try {
+      const st = unwrap<ServiceStatus>(await EnvStatus(r.id, ins.version))
+      if (st) {
+        s.svc[ins.version] = st
+        delete svcUnknown[r.id + ins.version]
       }
-      // 端口冲突探测（启动前可视化提示）：优先探测正在运行的那个版本。
-      // 只查 installed[0] 时，多版本并存会对着一个没跑的版本报冲突——用户照着
-      // 提示去改配置，改的却不是真正占着端口的那个，问题永远解决不了。
-      if (r.installed.length) {
-        const running = r.installed.find((i) => s.svc[i.version] && s.svc[i.version].running)
-        const probeVer = running ? running.version : r.installed[0].version
-        try {
-          const pc = unwrap<PortConflict>(await EnvPortConflict(r.id, probeVer))
-          if (pc) portConflicts[r.id] = pc
-        } catch {
-          /* 忽略单次探测失败 */
-        }
-      }
-      commitRuntimeCache(r)
+    } catch {
+      // 查询失败不能沿用上一次的「运行中」：服务可能已经崩了，
+      // 而 UI 还在给用户一个绿色的假象。这里标记成「状态未知」，如实显示。
+      svcUnknown[r.id + ins.version] = true
     }
-    await loadDshRunning()
-    // HTTP 服务的绿点此前只在点进对应标签页或首次挂载时刷新，
-    // 在面板里启动/停止后再回侧栏，绿点仍是陈旧状态。这里并入 3s 轮询，
-    // 与 dsh 同范式，保证侧栏入口的运行态始终反映真实情况。
-    await loadHTTPServers()
-  } finally {
-    polling = false
   }
+  // 端口冲突探测（启动前可视化提示）：优先探测正在运行的那个版本。
+  // 只查 installed[0] 时，多版本并存会对着一个没跑的版本报冲突——用户照着
+  // 提示去改配置，改的却不是真正占着端口的那个，问题永远解决不了。
+  if (r.installed.length) {
+    const running = r.installed.find((i) => s.svc[i.version] && s.svc[i.version].running)
+    const probeVer = running ? running.version : r.installed[0].version
+    try {
+      const pc = unwrap<PortConflict>(await EnvPortConflict(r.id, probeVer))
+      if (pc) portConflicts[r.id] = pc
+    } catch {
+      /* 忽略单次探测失败 */
+    }
+  }
+  commitRuntimeCache(r)
 }
+
+function chunk<T>(arr: T[], size: number): T[][] {
+  const out: T[][] = []
+  for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size))
+  return out
+}
+
+// 一轮完整探测。原先这里是「一个 for 循环串行 await 到底」：版本一多，
+// 一轮就超过 3s 的轮询间隔，于是轮询永远在跑、永远等不到空闲那一刻。
+// 按 4 个运行时一批并发后，一轮的耗时从「所有版本之和」降到「最慢那一批」。
+// 调度（间隔 / 合并 / 后台暂停）全部交给 statusPoller，本函数不自己判重入。
+async function pollStatusOnce() {
+  for (const batch of chunk(runtimes.value, 4)) {
+    await Promise.all(batch.map((r) => syncRuntimeStatus(r)))
+  }
+  await loadDshRunning()
+  // HTTP 服务的绿点此前只在点进对应标签页或首次挂载时刷新，
+  // 在面板里启动/停止后再回侧栏，绿点仍是陈旧状态。这里并入轮询，
+  // 与 dsh 同范式，保证侧栏入口的运行态始终反映真实情况。
+  await loadHTTPServers()
+}
+
+// 统一调度器：3s 一轮，动作触发的刷新走 requestNow/runNow 合并，
+// 窗口最小化时自动暂停（后台轮询纯属白烧电）。
+const statusPoller = usePollScheduler(pollStatusOnce, { interval: 3000, minGap: 600 })
 
 // 下载速度/ETA 估算状态（相邻两次进度事件的时间差）
 let lastProg = { t: 0, written: 0 }
@@ -1825,228 +1208,21 @@ function installSingleLatest(r: RuntimeInfo) {
   install(r)
 }
 
-// ---- Git 状态表（版本/路径/SSH/Git LFS）----
-const gitInfo = ref<GitStatusInfo | null>(cachedGitInfo)
+// ---- Git 状态表：逻辑已抽到 composables/useEnvGit ----
+const { gitInfo, gitRows, loadGitInfo, sshStatusClass, sshResultText } = useEnvGit({ selectedId })
 
-async function loadGitInfo() {
-  if (selected.value?.id !== 'git') {
-    // 切走 git 时不清空，保留缓存供下次切回立即预填（消除闪现）
-    return
-  }
-  // 先预填上次缓存，再后台刷新最新数据；首次无缓存（null）时显示空表属正常
-  gitInfo.value = cachedGitInfo
-  try {
-    const res = unwrap<GitStatusInfo>(await EnvGitStatus())
-    cachedGitInfo = res
-    gitInfo.value = res
-  } catch (e: any) {
-    // 刷新失败保留已预填的缓存，不清空
-  }
-}
-
-function sshStatusClass(s: GitStatusInfo['ssh']): string {
-  if (s.result === 'ok') return 'ok'
-  if (s.result === 'no-key' || s.result === 'n/a') return 'warn'
-  return 'fail'
-}
-function sshResultText(s: GitStatusInfo['ssh']): string {
-  if (s.result === 'ok') return t('gitSshOk')
-  if (s.result === 'no-key') return t('gitSshNoKey')
-  if (s.result === 'n/a') return t('gitSshNA')
-  return s.output || t('gitSshFail')
-}
-
-// 状态表行：每行一个 Git 维度，列固定为 Item / Status / Command / Path / Result
-const gitRows = computed(() => {
-  const g = gitInfo.value
-  if (!g) return []
-  return [
-    { item: t('gitVersion'), status: g.installed ? 'ok' : 'missing', command: 'git --version', path: '', result: g.version || t('notInstalled') },
-    { item: t('gitPath'), status: g.installed ? 'ok' : 'missing', command: 'where git', path: g.path, result: g.path || t('notInstalled') },
-    { item: 'SSH', status: sshStatusClass(g.ssh), command: g.ssh.command, path: g.ssh.keyPath, result: sshResultText(g.ssh) },
-    { item: 'Git LFS', status: g.lfs.installed ? 'ok' : 'missing', command: g.lfs.command, path: '', result: g.lfs.version || t('notInstalled') },
-  ]
+// ---- Everything 文件搜索：逻辑已抽到 composables/useEnvEverything ----
+// 启停/安装后要刷新侧栏绿点，这一步依赖本页的运行时缓存，用回调注入。
+const {
+  evStatus, evSettings, evBusy,
+  evQuery, evSearching, evSearchErr, evSearchMsg, evResults,
+  evStateText, evStateClass, evStateHint,
+  runEvSearch, loadEverything, evRedetect, evStart, evStop,
+  evInstall, evInstallEs, evOpenDownload, evOpenCliDownload, evSaveSettings,
+} = useEnvEverything({
+  selectedId,
+  onStateChanged: () => { if (selected.value) refreshRuntimeCacheNow(selected.value) },
 })
-
-// ---- Everything 文件搜索（效率工具）：四态探测 + 启停 + 设置 ----
-// Everything 是外部程序（参考 git/ollama 的单版本语义），QuickDock 不托管下载与更新，
-// 只负责探测、启停 Everything.exe 进程、提供 es.exe 检索封装与设置。
-interface EverythingStatusInfo {
-  installed: boolean
-  hasEsExe: boolean
-  running: boolean
-  state: 'not_installed' | 'missing_es' | 'stopped' | 'running'
-  version: string
-  exePath: string
-  esExePath: string
-  searchDiag?: string
-  enabled: boolean
-  updatedAt: number
-}
-interface EverythingSettings {
-  installPath: string
-  esExePath: string
-  fileSearchEnabled: boolean
-}
-
-const evStatus = ref<EverythingStatusInfo | null>(null)
-const evSettings = ref<EverythingSettings>({ installPath: '', esExePath: '', fileSearchEnabled: true })
-const evBusy = ref(false)
-
-// ---- 测试搜索 ----
-// EnvEverythingSearch 是命令面板与 MCP 的取数口，之前在这个页面上完全没接 ——
-// 于是「诊断说 running、es.exe 也在，但文件搜不出来」这种情况用户无处自查。
-// 这里直接调同一个接口，看到的就是命令面板会拿到的东西。
-interface EvFileResult { path?: string; name?: string; dir?: string; modified?: number }
-const evQuery = ref('')
-const evSearching = ref(false)
-const evSearchErr = ref(false)
-const evSearchMsg = ref('')
-const evResults = ref<EvFileResult[]>([])
-
-async function runEvSearch() {
-  const q = evQuery.value.trim()
-  if (!q || evSearching.value) return
-  evSearching.value = true
-  evSearchErr.value = false
-  evSearchMsg.value = ''
-  evResults.value = []
-  try {
-    const rows = unwrap<EvFileResult[]>(await EnvEverythingSearch(q, 20, 'date_modified')) ?? []
-    evResults.value = rows
-    evSearchMsg.value = rows.length ? t('evTestSearchOk', { n: rows.length }) : t('evTestSearchEmpty')
-  } catch (e) {
-    evSearchErr.value = true
-    evSearchMsg.value = getErrorMessage(e)
-    logErr('env/evSearch', e)
-  } finally {
-    evSearching.value = false
-  }
-}
-
-const evStateText = computed(() => {
-  const st = evStatus.value?.state
-  if (st === 'running') return t('evStateRunning')
-  if (st === 'stopped') return t('evStateStopped')
-  if (st === 'missing_es') return t('evStateMissingEs')
-  if (st === 'not_installed') return t('evStateNotInstalled')
-  return '—'
-})
-const evStateClass = computed(() => {
-  const st = evStatus.value?.state
-  if (st === 'running') return 'ok'
-  if (st === 'missing_es' || st === 'not_installed') return 'fail'
-  return 'warn'
-})
-const evStateHint = computed(() => {
-  const st = evStatus.value?.state
-  if (st === 'running') return t('evRunningReady')
-  if (st === 'stopped') return t('evStoppedHint')
-  if (st === 'missing_es') return t('evMissingEsHint')
-  if (st === 'not_installed') return t('evNotInstalledHint')
-  return ''
-})
-
-async function loadEverything() {
-  if (selected.value?.id !== 'everything') return
-  // 先保留上次数据（消除切回时的闪现），再后台刷新
-  try {
-    const res = unwrap<EverythingStatusInfo>(await EnvEverythingStatus())
-    if (res) evStatus.value = res
-  } catch (e: any) { /* 保留旧值 */ }
-  try {
-    const s = unwrap<EverythingSettings>(await EnvEverythingGetSettings())
-    if (s) evSettings.value = s
-  } catch (e: any) { /* 保留旧值 */ }
-}
-
-async function evRedetect() {
-  if (evBusy.value) return
-  evBusy.value = true
-  try {
-    unwrap(await EnvRefresh()) // 触发后端真实重扫（与刷新按钮一致），再读新状态
-  } catch (e: any) { /* 忽略刷新失败，仍读当前状态 */ }
-  await loadEverything()
-  evBusy.value = false
-}
-
-async function evStart() {
-  if (evBusy.value) return
-  evBusy.value = true
-  try {
-    unwrap(await EnvEverythingStart())
-    toast.success(t('envStarted'))
-    await loadEverything()
-    if (selected.value) refreshRuntimeCacheNow(selected.value)
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  } finally { evBusy.value = false }
-}
-
-async function evStop() {
-  if (evBusy.value) return
-  evBusy.value = true
-  try {
-    unwrap(await EnvEverythingStop())
-    toast.success(t('envStopped'))
-    await loadEverything()
-    if (selected.value) refreshRuntimeCacheNow(selected.value)
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  } finally { evBusy.value = false }
-}
-
-// 程序托管下载 Everything 便携版（便捷版）：按系统 32/64 位自动选包，下载+解压到托管目录。
-async function evInstall() {
-  if (evBusy.value) return
-  evBusy.value = true
-  try {
-    unwrap(await EnvEverythingInstall())
-    toast.success(t('evInstallDone'))
-    await loadEverything()
-    if (selected.value) refreshRuntimeCacheNow(selected.value)
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  } finally { evBusy.value = false }
-}
-
-// 程序托管下载 es.exe 命令行工具（文件检索依赖它），落盘到 Everything 同目录。
-async function evInstallEs() {
-  if (evBusy.value) return
-  evBusy.value = true
-  try {
-    unwrap(await EnvEverythingInstallEs())
-    toast.success(t('evInstallEsDone'))
-    await loadEverything()
-    if (selected.value) refreshRuntimeCacheNow(selected.value)
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  } finally { evBusy.value = false }
-}
-
-// 兜底：跳转官网手动下载（次要入口，主路径是上面的程序托管下载）。
-async function evOpenDownload() {
-  try { unwrap(await EnvEverythingOpenDownload()) } catch (e: any) { toast.error(getErrorMessage(e)) }
-}
-async function evOpenCliDownload() {
-  try { unwrap(await EnvEverythingOpenCliDownload()) } catch (e: any) { toast.error(getErrorMessage(e)) }
-}
-
-async function evSaveSettings() {
-  if (!evSettings.value || evBusy.value) return
-  evBusy.value = true
-  try {
-    unwrap(await EnvEverythingSetSettings(
-      evSettings.value.installPath,
-      evSettings.value.esExePath,
-      evSettings.value.fileSearchEnabled,
-    ))
-    toast.success(t('evSaved'))
-    await loadEverything()
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  } finally { evBusy.value = false }
-}
 
 // 常驻开关：把运行时设为「期望态」。开=随应用自启/崩溃自愈，关=停止。
 // 不再暴露手动 start/stop 单次动作，由后端监督器对账拉起。
@@ -2059,7 +1235,7 @@ async function toggleEnabled(r: RuntimeInfo, on: boolean) {
   try {
     unwrap(await EnvSetEnabled(r.id, on))
     toast.success(r.name + ' ' + (on ? t('svcWatchOn') : t('svcWatchOff')))
-    await pollStatus()
+    await statusPoller.runNow()
     refreshRuntimeCacheNow(r)
     refreshOllamaPanel(on ? 1200 : 0)
   } catch (e: any) {
@@ -2090,7 +1266,7 @@ async function startService(r: RuntimeInfo, ins: Install) {
   try {
     unwrap(await EnvStart(r.id, ins.version))
     toast.success(r.name + ' ' + ins.version + ' ' + t('svcStarted'))
-    await pollStatus()
+    await statusPoller.runNow()
     refreshRuntimeCacheNow(r)
     refreshOllamaPanel()
   } catch (e: any) {
@@ -2114,7 +1290,7 @@ async function stopService(r: RuntimeInfo, ins: Install) {
       unwrap(await EnvStop(r.id))
     }
     toast.success(r.name + ' ' + t('svcStopped'))
-    await pollStatus()
+    await statusPoller.runNow()
     refreshRuntimeCacheNow(r)
     refreshOllamaPanel()
   } catch (e: any) {
@@ -2132,7 +1308,7 @@ async function restartService(r: RuntimeInfo, ins: Install) {
   try {
     unwrap(await EnvRestart(r.id, ins.version))
     toast.success(r.name + ' ' + ins.version + ' ' + t('svcRestartDone'))
-    await pollStatus()
+    await statusPoller.runNow()
     refreshRuntimeCacheNow(r)
     refreshOllamaPanel(1200)
   } catch (e: any) {
@@ -2158,59 +1334,6 @@ async function openConsole(port: number) {
   }
 }
 
-// ---- 通用日志查看器（任意实现了 LogProvider 的运行时）----
-// 与 Redis 弹窗共用 filteredLog 的滚动逻辑（logEl 引用），但独立维护一份状态，避免互相干扰。
-const logModal = reactive<{
-  open: boolean; runtime: string; version: string; log: string
-  logFilter: string; logAuto: boolean
-}>({
-  open: false, runtime: '', version: '', log: '',
-  logFilter: '', logAuto: false,
-})
-const filteredLogModal = computed(() => {
-  const f = logModal.logFilter.trim().toLowerCase()
-  if (!f) return logModal.log
-  return logModal.log.split('\n').filter((l) => l.toLowerCase().includes(f)).join('\n')
-})
-let logModalTimer: ReturnType<typeof setInterval> | null = null
-async function openLog(r: RuntimeInfo, ins: Install) {
-  try {
-    logModal.runtime = r.id
-    logModal.version = ins.version
-    logModal.log = unwrap<string>(await EnvLogGet(r.id, ins.version)) || ''
-    logModal.logFilter = ''
-    logModal.logAuto = false
-    logModal.open = true
-    openMenu.value = null
-    nextTick(scrollLogBottom)
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-async function refreshLogModal() {
-  try {
-    logModal.log = unwrap<string>(await EnvLogGet(logModal.runtime, logModal.version)) || ''
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-  }
-}
-function startLogModalAuto() {
-  if (logModalTimer || !logModal.logAuto) return
-  logModalTimer = setInterval(() => refreshLogModal(), 2000)
-}
-function stopLogModalAuto() {
-  if (logModalTimer) { clearInterval(logModalTimer); logModalTimer = null }
-}
-function toggleLogModalAuto() {
-  logModal.logAuto = !logModal.logAuto
-  if (logModal.logAuto) { refreshLogModal(); startLogModalAuto() }
-  else stopLogModalAuto()
-}
-function closeLogModal() {
-  stopLogModalAuto()
-  logModal.open = false
-}
-
 // 启用 RabbitMQ 管理后台插件（rabbitmq_management，端口 15672），针对运行中的节点在线启用。
 const mgmtEnabling = ref(false)
 // rabbitMgmt[version] = 管理后台是否已启用（决定是否显示「启用/关闭」以及端口是否显示两个）
@@ -2230,7 +1353,7 @@ async function enableRabbitMgmt(ins: Install) {
     toast.success(t('rabbitmqEnableMgmtDone'))
     if (out) logDebug('[RabbitMQ mgmt]', out)
     rabbitMgmt[ins.version] = true
-    pollStatus()
+    statusPoller.requestNow()
   } catch (e: any) {
     toast.error(t('rabbitmqEnableMgmtFail') + ': ' + getErrorMessage(e))
   } finally {
@@ -2245,7 +1368,7 @@ async function disableRabbitMgmt(ins: Install) {
     toast.success(t('rabbitmqDisableMgmtDone'))
     if (out) logDebug('[RabbitMQ mgmt]', out)
     rabbitMgmt[ins.version] = false
-    pollStatus()
+    statusPoller.requestNow()
   } catch (e: any) {
     toast.error(t('rabbitmqDisableMgmtFail') + ': ' + getErrorMessage(e))
   } finally {
@@ -2258,325 +1381,20 @@ async function toggleRabbitMgmt(ins: Install) {
   else await enableRabbitMgmt(ins)
 }
 
-// ===== 维护面板：源体检 / 磁盘占用 / 镜像加速 / 环境清单 =====
-// 这四件事都属于「跨运行时」的整体运维，不属于任何一个运行时卡片，
-// 故收拢到一个弹窗里按标签页组织，避免把这些按钮塞进每个运行时的详情区。
-
-interface SourceCheckItem {
-  runtime: string
-  name: string
-  sourceId: string
-  source: string
-  version: string
-  url: string
-  ok: boolean
-  code: number
-  error: string
-  latencyMs: number
-  mirrorOk: boolean
-  mirrorMs: number
-}
-interface VersionCheckItem {
-  runtime: string
-  name: string
-  url: string
-  ok: boolean
-  code: number
-  error: string
-  latencyMs: number
-  count: number
-  latest: string
-  recommended: string
-  stale: boolean
-}
-interface DiskUsageItem {
-  runtime: string
-  name: string
-  bytes: number
-  versions: { version: string; bytes: number }[]
-}
-interface MirrorStateItem {
-  key: string
-  label: string
-  available: boolean
-  enabled: boolean
-  current: string
-  target: string
-  file: string
-  detail: string
-}
-
-const MAINT_TABS = ['check', 'disk', 'manifest', 'envvar'] as const
-type MaintTab = (typeof MAINT_TABS)[number]
-
-const maint = reactive({ open: false, tab: 'check' as MaintTab })
-
-const sourceCheck = reactive({
-  running: false,
-  done: false,
-  error: '',
-  sources: [] as SourceCheckItem[],
-  versions: [] as VersionCheckItem[],
-  report: null as null | { durationMs: number; ok: number; mirrorOnly: number; failed: number },
-})
-
-const diskUsage = reactive({ loading: false, loaded: false, totalBytes: 0, items: [] as DiskUsageItem[] })
-
-// ---- 运行时级包源镜像（Node→npm / Python→pip / Composer→composer）----
-// 入口在各自运行时的操作菜单里：用户要加速的通常是某一个包管理器，
-// 不再用一个全局「一次性切四项」的开关。Go 不在此列——它的 GOPROXY 在
-// 「Go 环境配置」弹窗里有快捷预设，且要按版本写各自的 go.env，语义不同。
-const MIRROR_RUNTIMES = new Set(['node', 'python', 'composer'])
-const runtimeMirror = reactive<Record<string, MirrorStateItem | undefined>>({})
-const mirrorBusy = ref('')
-
-async function fetchRuntimeMirror(rt: string) {
-  if (!MIRROR_RUNTIMES.has(rt)) return
-  try {
-    const st = unwrap<MirrorStateItem>(await EnvMirrorState(rt))
-    if (st) runtimeMirror[rt] = st
-  } catch (e: any) {
-    // 状态读不到不影响菜单可用性，点击时后端还会再校验一次
-    logErr('env/mirror', e)
-  }
-}
-
-async function toggleRuntimeMirror(r: RuntimeInfo) {
-  if (mirrorBusy.value) return
-  const st = runtimeMirror[r.id]
-  const enable = !st?.enabled
-  mirrorBusy.value = r.id
-  try {
-    const next = unwrap<MirrorStateItem>(await EnvMirrorToggle(r.id, enable))
-    if (next) runtimeMirror[r.id] = next
-    toast.success(enable ? t('mirrorEnabledToast') : t('mirrorDisabledToast'))
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-    logErr('env/mirror', e)
-  } finally {
-    mirrorBusy.value = ''
-  }
-}
-
-// mirrorMenuLabel 菜单项文案：知道当前状态时按状态提示下一步动作。
-function mirrorMenuLabel(rt: string): string {
-  const st = runtimeMirror[rt]
-  if (!st) return t('mirrorEnable')
-  return st.enabled ? t('mirrorDisable') : t('mirrorEnable')
-}
-
-function mirrorMenuTitle(rt: string): string {
-  const st = runtimeMirror[rt]
-  if (!st) return t('mirrorEnableHint')
-  return st.enabled
-    ? t('mirrorDisableHint', { v: st.current || st.target })
-    : t('mirrorEnableHint')
-}
-
-// ---- GitHub 下载加速（gh-proxy）----
-// 源体检里「需加速」的项要靠这个开关才真正生效，否则体检说能下、实际下载仍走直连。
-const githubAccel = reactive({ loading: false, enabled: false, busy: false })
-async function loadGithubAccel() {
-  githubAccel.loading = true
-  try {
-    const d = unwrap<{ enabled: boolean }>(await EnvGitHubAccelState())
-    githubAccel.enabled = !!d?.enabled
-  } catch (e: any) {
-    logErr('env/maint', e)
-  } finally {
-    githubAccel.loading = false
-  }
-}
-async function toggleGithubAccel() {
-  if (githubAccel.busy) return
-  githubAccel.busy = true
-  const next = !githubAccel.enabled
-  try {
-    unwrap(await EnvGitHubAccelSet(next))
-    githubAccel.enabled = next
-    toast.success(next ? t('ghAccelOn') : t('ghAccelOff'))
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-    logErr('env/maint', e)
-  } finally {
-    githubAccel.busy = false
-  }
-}
-const manifestInput = ref<HTMLInputElement | null>(null)
-const manifestPanel = reactive({
-  busy: false,
-  error: '',
-  text: '',
-  report: null as any,
-  applied: [] as string[],
-})
-
-// ---- 用户环境变量（HKCU\Environment）----
-// 激活某个版本时后端会把它的 bin 目录写进用户 PATH，并写入 GOPATH/GOROOT 等变量。
-// 这些是「系统环境变量」，不在 go.env 里，此前界面上看不到也改不了——本面板补这个缺口。
-interface UserEnvVarItem { name: string; value: string; expand: boolean; managed: boolean }
-const userEnv = reactive({
-  loading: false,
-  saving: false,
-  loaded: false,
-  error: '',
-  pathEntries: [] as string[],
-  vars: [] as UserEnvVarItem[],
-  newPathEntry: '',
-  newName: '',
-  newValue: '',
-  pendingDelete: '', // 二次确认：同一行再点一次才真的删
-  // 就地编辑：后端 EnvUserEnvSetVar 对同名变量就是覆盖，所以「改值」不需要新接口。
-  // 之前只能新增/删除，想改一个已存在变量的值，得先删再建——中间那个空档里
-  // 依赖它的程序读到的是「变量不存在」。
-  editingName: '',
-  editingValue: '',
-})
-
-function isQuickdockEntry(p: string): boolean {
-  const low = p.toLowerCase()
-  return low.includes('.quickdock\\') || low.includes('.quickdock/')
-}
-
-async function loadUserEnv() {
-  userEnv.loading = true
-  userEnv.error = ''
-  try {
-    const rep: any = unwrap(await EnvUserEnv())
-    userEnv.pathEntries = rep?.path?.entries || []
-    userEnv.vars = rep?.vars || []
-    userEnv.loaded = true
-  } catch (e: any) {
-    userEnv.error = getErrorMessage(e)
-    logErr('env/envvar', e)
-  } finally {
-    userEnv.loading = false
-  }
-}
-
-async function saveUserPath(next: string[]) {
-  userEnv.saving = true
-  userEnv.error = ''
-  try {
-    unwrap(await EnvUserEnvSetPath(next))
-    await loadUserEnv()
-  } catch (e: any) {
-    userEnv.error = getErrorMessage(e)
-    logErr('env/envvar', e)
-  } finally {
-    userEnv.saving = false
-  }
-}
-
-async function addPathEntry() {
-  const v = userEnv.newPathEntry.trim()
-  if (!v) return
-  if (userEnv.pathEntries.some((x) => x.toLowerCase() === v.toLowerCase())) {
-    userEnv.error = t('maintEnvDupEntry')
-    return
-  }
-  userEnv.newPathEntry = ''
-  await saveUserPath([...userEnv.pathEntries, v])
-}
-
-async function removePathEntry(p: string) {
-  await saveUserPath(userEnv.pathEntries.filter((x) => x !== p))
-}
-
-async function saveUserVar() {
-  const name = userEnv.newName.trim().toUpperCase()
-  const value = userEnv.newValue.trim()
-  if (!name) {
-    userEnv.error = t('maintEnvNameRequired')
-    return
-  }
-  if (!value) {
-    userEnv.error = t('maintEnvValueRequired')
-    return
-  }
-  userEnv.saving = true
-  userEnv.error = ''
-  try {
-    unwrap(await EnvUserEnvSetVar(name, value))
-    userEnv.newName = ''
-    userEnv.newValue = ''
-    toast.success(t('saved'))
-    await loadUserEnv()
-  } catch (e: any) {
-    userEnv.error = getErrorMessage(e)
-    logErr('env/envvar', e)
-  } finally {
-    userEnv.saving = false
-  }
-}
-
-// ---- 就地编辑已有变量 ----
-// EnvUserEnvSetVar 对同名变量即覆盖，所以「改值」不需要新接口。
-// 此前只能新增/删除，想改一个已存在变量的值必须先删再建 ——
-// 中间那个空档里，依赖它的程序读到的是「变量不存在」。
-function startEditVar(v: UserEnvVarItem) {
-  userEnv.editingName = v.name
-  userEnv.editingValue = v.value
-  userEnv.pendingDelete = ''
-}
-
-function cancelEditVar() {
-  userEnv.editingName = ''
-  userEnv.editingValue = ''
-}
-
-async function commitEditVar() {
-  const name = userEnv.editingName
-  const value = userEnv.editingValue.trim()
-  if (!name) return
-  if (!value) {
-    userEnv.error = t('maintEnvValueRequired')
-    return
-  }
-  userEnv.saving = true
-  userEnv.error = ''
-  try {
-    unwrap(await EnvUserEnvSetVar(name, value)) // 同名 = 覆盖
-    userEnv.editingName = ''
-    userEnv.editingValue = ''
-    toast.success(t('saved'))
-    await loadUserEnv()
-  } catch (e: any) {
-    userEnv.error = getErrorMessage(e)
-    logErr('env/envvar', e)
-  } finally {
-    userEnv.saving = false
-  }
-}
-
-// deleteUserVar 两段式：第一次点亮「确认删除」，再点一次才执行。
-// 删的是系统环境变量，误删会影响其它程序，不值得为省一次点击冒险。
-async function deleteUserVar(name: string) {
-  if (userEnv.pendingDelete !== name) {
-    userEnv.pendingDelete = name
-    return
-  }
-  userEnv.saving = true
-  userEnv.error = ''
-  try {
-    unwrap(await EnvUserEnvDeleteVar(name))
-    await loadUserEnv()
-  } catch (e: any) {
-    userEnv.error = getErrorMessage(e)
-    logErr('env/envvar', e)
-  } finally {
-    userEnv.saving = false
-    userEnv.pendingDelete = ''
-  }
-}
-
-function openMaintenance(tab: MaintTab) {
-  maint.open = true
-  maint.tab = tab
-  if (tab === 'disk' && !diskUsage.loaded) loadDiskUsage()
-  if (tab === 'check' && !githubAccel.loading) loadGithubAccel()
-  if (tab === 'envvar' && !userEnv.loaded) loadUserEnv()
-}
+// ===== 维护面板 / 包源镜像 / GitHub 加速 / 用户环境变量 =====
+// 逻辑已抽到 composables/useEnvMaintenance：只有「清单应用激活版本后重建运行时列表」
+// 一处需要页面配合，用回调注入。
+const {
+  maint, sourceCheck, diskUsage, runtimeMirror, mirrorBusy, githubAccel,
+  manifestPanel, manifestInput, userEnv,
+  fetchRuntimeMirror, toggleRuntimeMirror, mirrorMenuLabel, mirrorMenuTitle,
+  MIRROR_RUNTIMES, toggleGithubAccel, isQuickdockEntry,
+  addPathEntry, removePathEntry, saveUserVar,
+  startEditVar, cancelEditVar, commitEditVar, deleteUserVar,
+  openMaintenance, runSourceCheck, onSourceCheckEvent, onSourceCheckDone,
+  loadDiskUsage, exportManifest, pickManifestFile, onManifestFile, applyManifestActive,
+  formatSize,
+} = useEnvMaintenance({ onEnvChanged: () => load() })
 
 // ---- 项目版本要求检查 ----
 // EnvProjectVersions 后端一直完整（services/env/service.go），此前只有条目编辑器在调。
@@ -2646,188 +1464,11 @@ async function setActiveFromProject(row: ProjectReqRow, version: string) {
   }
 }
 
-// formatSize 人性化字节数（磁盘统计面板用；与进程占用的 formatBytes 分开，
-// 后者只输出 MB/GB 且 0 值显示为「—」，语义不同）
-function formatSize(n: number): string {
-  if (!n || n <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let i = 0
-  let v = n
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024
-    i++
-  }
-  return (i === 0 ? v.toFixed(0) : v.toFixed(v >= 100 ? 0 : 1)) + ' ' + units[i]
-}
-
-async function runSourceCheck() {
-  if (sourceCheck.running) return
-  sourceCheck.running = true
-  sourceCheck.done = false
-  sourceCheck.error = ''
-  sourceCheck.sources = []
-  sourceCheck.versions = []
-  sourceCheck.report = null
-  try {
-    unwrap(await EnvSourceCheck())
-  } catch (e: any) {
-    sourceCheck.running = false
-    sourceCheck.error = getErrorMessage(e)
-    logErr('env/maint', e)
-  }
-}
-
-// onSourceCheckEvent 逐条接收体检结果。重复点体检时同一目标只替换不叠加。
-// 注意：Wails 事件的回调参数是 {name, data} 包装体，必须取 data
-// （本文件 onProgress / onOllamaPull 都是 `e?.data ?? e` 这个口径）。
-function onSourceCheckEvent(payload: any) {
-  const ev = payload?.data ?? payload
-  if (!ev) return
-  if (ev.kind === 'source' && ev.source) {
-    const item = ev.source as SourceCheckItem
-    const i = sourceCheck.sources.findIndex((x) => x.runtime === item.runtime && x.sourceId === item.sourceId)
-    if (i >= 0) sourceCheck.sources.splice(i, 1, item)
-    else sourceCheck.sources.push(item)
-    return
-  }
-  if (ev.kind === 'version' && ev.version) {
-    const item = ev.version as VersionCheckItem
-    const i = sourceCheck.versions.findIndex((x) => x.runtime === item.runtime)
-    if (i >= 0) sourceCheck.versions.splice(i, 1, item)
-    else sourceCheck.versions.push(item)
-  }
-}
-
-// localSourceStats 按已收到的明细统计，作为 done 事件的兜底。
-// 后端报告字段缺失（版本不一致/序列化差异）时不至于让界面显示全 0。
-function localSourceStats() {
-  let ok = 0
-  let mirror = 0
-  let failed = 0
-  for (const it of sourceCheck.sources) {
-    if (it.ok) ok++
-    else if (it.mirrorOk) mirror++
-    else failed++
-  }
-  return { ok, mirror, failed }
-}
-
-function onSourceCheckDone(payload: any) {
-  const rep = payload?.data ?? payload
-  sourceCheck.running = false
-  sourceCheck.done = true
-  if (rep && rep.error) {
-    sourceCheck.error = String(rep.error)
-    return
-  }
-  // 汇总报告带完整列表，先回填明细，兜住事件丢失/顺序问题
-  if (Array.isArray(rep?.sources) && rep.sources.length) sourceCheck.sources = rep.sources
-  if (Array.isArray(rep?.versions) && rep.versions.length) sourceCheck.versions = rep.versions
-  const local = localSourceStats()
-  const num = (v: any, fallback: number) => {
-    const n = Number(v)
-    return Number.isFinite(n) && n > 0 ? n : fallback
-  }
-  sourceCheck.report = {
-    durationMs: Number(rep?.durationMs) || 0,
-    ok: num(rep?.ok, local.ok),
-    mirrorOnly: num(rep?.mirrorOnly, local.mirror),
-    failed: num(rep?.failed, local.failed),
-  }
-}
-
-async function loadDiskUsage() {
-  diskUsage.loading = true
-  try {
-    const data = unwrap<{ totalBytes: number; runtimes: DiskUsageItem[] }>(await EnvDiskUsage())
-    diskUsage.totalBytes = data?.totalBytes || 0
-    diskUsage.items = data?.runtimes || []
-    diskUsage.loaded = true
-  } catch (e: any) {
-    toast.error(t('maintDiskFail') + ': ' + getErrorMessage(e))
-    logErr('env/maint', e)
-  } finally {
-    diskUsage.loading = false
-  }
-}
-
-// exportManifest 导出环境清单：后端给 JSON 文本，前端落成文件下载。
-async function exportManifest() {
-  if (manifestPanel.busy) return
-  manifestPanel.busy = true
-  manifestPanel.error = ''
-  try {
-    const text = unwrap<string>(await EnvManifestExport()) || ''
-    const blob = new Blob([text], { type: 'application/json' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = 'quickdock-env-' + new Date().toISOString().slice(0, 10) + '.json'
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-    toast.success(t('maintManifestExported'))
-  } catch (e: any) {
-    manifestPanel.error = getErrorMessage(e)
-    logErr('env/maint', e)
-  } finally {
-    manifestPanel.busy = false
-  }
-}
-
-function pickManifestFile() {
-  manifestInput.value?.click()
-}
-
-// onManifestFile 选文件后先只做比对（不动本机环境），
-// 需要切激活版本时再由用户点一次「应用激活版本」。
-async function onManifestFile(e: Event) {
-  const input = e.target as HTMLInputElement
-  const file = input.files?.[0]
-  input.value = '' // 允许重复选同一个文件
-  if (!file) return
-  manifestPanel.busy = true
-  manifestPanel.error = ''
-  manifestPanel.report = null
-  manifestPanel.applied = []
-  try {
-    const text = await file.text()
-    const res = unwrap<any>(await EnvManifestImport(text, false))
-    manifestPanel.text = text
-    manifestPanel.report = res?.report || null
-  } catch (err: any) {
-    manifestPanel.error = getErrorMessage(err)
-    logErr('env/maint', err)
-  } finally {
-    manifestPanel.busy = false
-  }
-}
-
-// applyManifestActive 按清单把「已装且要求激活」的版本设为激活版本
-async function applyManifestActive() {
-  if (!manifestPanel.text || manifestPanel.busy) return
-  manifestPanel.busy = true
-  try {
-    const res = unwrap<any>(await EnvManifestImport(manifestPanel.text, true))
-    manifestPanel.report = res?.report || manifestPanel.report
-    manifestPanel.applied = res?.appliedActive || []
-    if (manifestPanel.applied.length) toast.success(t('maintManifestApplied', { n: manifestPanel.applied.length }))
-    await load()
-  } catch (e: any) {
-    toast.error(getErrorMessage(e))
-    logErr('env/maint', e)
-  } finally {
-    manifestPanel.busy = false
-  }
-}
-
 let off: (() => void) | null = null
 let offRefreshed: (() => void) | null = null
 let offOllamaPull: (() => void) | null = null
 let offSourceCheck: (() => void) | null = null
 let offSourceCheckDone: (() => void) | null = null
-let timer: number | null = null
 // 点击外部时收起版本列表
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement
@@ -2838,9 +1479,9 @@ function onDocClick(e: MouseEvent) {
   }
 }
 onMounted(() => {
-  // 首次轮询必须在运行列表就绪后执行：否则 pollStatus 会空跑（runtimes 为空），
-  // 绿点缓存要等到 3s 定时器那轮才填充，导致刚进环境管理绿点不显示。
-  load().finally(() => pollStatus())
+  // 首次轮询必须在运行列表就绪后执行：否则这一轮会空跑（runtimes 为空），
+  // 绿点缓存要等到下一个 tick 才填充，导致刚进环境管理绿点不显示。
+  load().finally(() => statusPoller.runNow())
   loadHTTPServers()
   loadDshRunning()
   loadConfigSupport(selectedId.value) // 初始选中运行时的配置编辑入口
@@ -2848,12 +1489,13 @@ onMounted(() => {
   document.addEventListener('click', onDocClick)
   off = Events.On('quickdock:env:progress', onProgress)
   // 后台重扫完成（启动扫描 / 手动刷新按钮 / 安装完成后）→ 重新读取持久化缓存
-  offRefreshed = Events.On('quickdock:env:refreshed', () => { load(); ensureCertLoaded(); pollStatus(); refreshOllamaPanel() })
+  offRefreshed = Events.On('quickdock:env:refreshed', () => { load(); ensureCertLoaded(); statusPoller.requestNow(); refreshOllamaPanel() })
   offOllamaPull = Events.On('quickdock:env:ollama:pull', onOllamaPull)
   // 源体检：逐条结果 + 结束汇总（异步，避免长调用把界面卡住）
   offSourceCheck = Events.On('quickdock:env:sourcecheck', onSourceCheckEvent)
   offSourceCheckDone = Events.On('quickdock:env:sourcecheck-done', onSourceCheckDone)
-  timer = window.setInterval(pollStatus, 3000)
+  // 周期轮询统一交给 statusPoller（3s；窗口最小化/后台自动暂停）
+  statusPoller.start()
 })
 // 切换运行时时自动拉取对应可下载版本列表（harness / http / sites / ports 区块不触发）
 watch(selectedId, (id) => {
@@ -2867,8 +1509,7 @@ watch(selectedId, (id) => {
   if (id === 'mkcert') ensureCertLoaded()
   // 切到 harness（dsh）时同步其运行态，保证侧栏绿点即时刷新
   if (id === HARNESS_KEY) loadDshRunning()
-  // Git 区块切换时拉取状态表
-  loadGitInfo()
+  // Git 状态表由 useEnvGit 自己监听 selectedId 拉取，这里不再重复调用（否则切到 git 会打两次请求）
   // Everything 区块切换时拉取四态状态 + 设置
   loadEverything()
 })
@@ -2883,9 +1524,11 @@ onUnmounted(() => {
   if (offOllamaPull) offOllamaPull()
   if (offSourceCheck) offSourceCheck()
   if (offSourceCheckDone) offSourceCheckDone()
-  if (timer) clearInterval(timer)
-  if (logTimer) clearInterval(logTimer)
-  if (logModalTimer) clearInterval(logModalTimer)
+  // 兜底：调度器自身也在 onUnmounted 里 stop 了一次，这里显式停一次是为了
+  // 让「谁负责停」在本文件里可读——页面级定时器全在这一个函数里收口。
+  statusPoller.stop()
+  // Redis / 通用日志弹窗的自动刷新定时器现由 composable 持有
+  stopAllTimers()
 })
 
 // s = currentRuntimeState，模板中复用，避免反复调用 stateFor
@@ -2927,46 +1570,21 @@ const s = currentRuntimeState
 
     <div class="env-body">
       <!-- 左侧：分组导航 -->
-      <aside class="env-cats">
-        <div class="cats-title">{{ t('envCategories') }}</div>
-        <div class="cats-search">
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
-          <input v-model="sidebarQuery" class="cats-search-input" :placeholder="t('envSearchPh')" />
-          <button v-if="sidebarQuery" class="cats-search-clear" @click="sidebarQuery = ''" :title="t('clear')">×</button>
-        </div>
-        <div v-if="sidebarSearching && sidebarGroups.length === 0" class="cats-empty">{{ t('envNoMatch') }}</div>
-        <template v-for="grp in sidebarGroups" :key="grp.key">
-          <button class="cats-group-label" type="button" @click="toggleGroup(grp.key)">
-            <span v-if="grp.running" class="cat-dot" :title="t('svcRunning')"></span>
-            <span>{{ t(grp.labelKey) }}</span>
-            <span class="cats-chevron">{{ grp.collapsed ? '▸' : '▾' }}</span>
-          </button>
-          <button
-            v-for="it in grp.items"
-            :key="it.id"
-            class="cat-btn"
-            :class="{ active: it.active }"
-            @click="selectedId = it.id; openMenu = null"
-          >
-            <span class="cat-avatar" :style="{ background: it.color }" v-html="it.kind === 'runtime' ? avatarIcon(it.id) : it.avatar"></span>
-            <span class="cat-meta">
-              <span class="cat-name">{{ it.name }}</span>
-              <span class="cat-id">{{ it.id }}</span>
-            </span>
-            <span class="cat-trail">
-              <span v-if="it.running" class="cat-dot" :title="t('svcRunning')"></span>
-              <span v-if="it.count !== undefined" class="cat-count" :class="{ zero: !it.count }">{{ it.count }}</span>
-            </span>
-          </button>
-        </template>
-      </aside>
+      <EnvSidebar
+        v-model:query="sidebarQuery"
+        :groups="sidebarGroups"
+        :selected-id="selectedId"
+        :avatar-icon="avatarIcon"
+        @toggle-group="toggleGroup"
+        @select="onPickCategory"
+      />
 
       <!-- 右侧：所选分类详情 -->
       <main class="env-detail">
         <!-- DeepSeek Harness 区块：复用 SettingsDSH 组件，外壳（detail-head + detail-block）与其它区块保持同构 -->
         <template v-if="isHarness">
           <header class="detail-head">
-            <span class="detail-avatar" style="background:var(--color-accent)">DS</span>
+            <span class="detail-avatar detail-avatar--accent">DS</span>
             <div class="detail-titles">
               <div class="detail-title-row">
                 <span class="detail-name">{{ t('navDsh') }}</span>
@@ -3043,7 +1661,7 @@ const s = currentRuntimeState
               <input v-model="httpForm.name" class="env-input" :placeholder="t('httpNamePlaceholder')" />
               <button class="link-btn" @click="pickHTTPDir">{{ t('httpChooseDir') }}</button>
               <input v-model="httpForm.dir" class="env-input" :placeholder="t('httpDirPlaceholder')" readonly />
-              <input v-model.number="httpForm.port" type="number" min="1" max="65535" class="env-input" style="max-width:110px" :placeholder="t('httpPortAuto')" />
+              <input v-model.number="httpForm.port" type="number" min="1" max="65535" class="env-input env-input--narrow" :placeholder="t('httpPortAuto')" />
               <button class="env-install-btn" @click="createHTTPServer">{{ t('httpCreate') }}</button>
             </div>
           </section>
@@ -3518,7 +2136,7 @@ const s = currentRuntimeState
           </div>
 
           <!-- 检索诊断：es.exe 连不上 IPC 的典型场景（Everything 以管理员身份运行） -->
-          <div v-if="evStatus?.searchDiag === 'ipc_elevated'" class="env-msg error" style="margin-top:10px">
+          <div v-if="evStatus?.searchDiag === 'ipc_elevated'" class="env-msg error">
             {{ t('evDiagIpcElevated') }}
           </div>
 
@@ -3540,7 +2158,7 @@ const s = currentRuntimeState
           </div>
 
           <!-- 测试搜索：直接跑一次真实检索，验证 es.exe 与 Everything 的 IPC 是否通 -->
-          <div class="block-head" style="margin-top:18px">
+          <div class="block-head block-head--spaced">
             <span class="block-title">{{ t('evTestSearch') }}</span>
           </div>
           <div class="ev-test">
@@ -3572,7 +2190,7 @@ const s = currentRuntimeState
           </div>
 
           <!-- 设置：文件搜索总开关 + 自定义路径 -->
-          <div class="block-head" style="margin-top:18px">
+          <div class="block-head block-head--spaced">
             <span class="block-title">{{ t('evSettings') }}</span>
           </div>
           <div class="ev-settings">
@@ -3950,22 +2568,18 @@ const s = currentRuntimeState
       <div class="modal php-modal">
         <div class="modal-title">{{ t('viewLog') }} · {{ logModal.runtime }} · {{ logModal.version }}</div>
         <div class="php-tab-body">
-          <div class="log-toolbar">
-            <input
-              v-model="logModal.logFilter"
-              class="log-filter"
-              :placeholder="t('logFilterPlaceholder')"
-              @input="nextTick(scrollLogBottom)"
-            />
-            <button class="log-btn" :class="{ active: logModal.logAuto }" @click="toggleLogModalAuto()">
-              {{ logModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
-            </button>
-            <button class="log-btn" @click="refreshLogModal()">{{ t('logManualRefresh') }}</button>
-            <span class="log-count" v-if="logModal.logFilter.trim()">
-              {{ filteredLogModal.split('\n').filter((x: string) => x !== '').length }} / {{ logModal.log.split('\n').filter((x: string) => x !== '').length }}
-            </span>
-          </div>
-          <pre class="php-log" ref="logEl">{{ filteredLogModal || t('logEmpty') }}</pre>
+          <!-- 日志查看器自带搜索高亮 / 级别着色 / 跟随末尾；自动刷新仍由本页负责（要调后端） -->
+          <RuntimeLogView
+            :text="logModal.log"
+            :empty-text="t('logEmpty')"
+            @refresh="refreshLogModal()"
+          >
+            <template #actions>
+              <button class="log-btn" :class="{ active: logModal.logAuto }" @click="toggleLogModalAuto()">
+                {{ logModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
+              </button>
+            </template>
+          </RuntimeLogView>
         </div>
         <div class="modal-actions">
           <button class="op-btn" @click="closeLogModal()">{{ t('cancel') }}</button>
@@ -4014,7 +2628,7 @@ const s = currentRuntimeState
     <!-- 端口全景弹窗：所有运行中服务的端口与控制台一览 -->
     <!-- 项目版本要求检查：探测目录里的版本声明，与已装/激活对比 -->
     <div v-if="projectCheck.open" class="modal-overlay" @click.self="projectCheck.open = false">
-      <div class="modal path-modal" style="max-width: 760px">
+      <div class="modal path-modal path-modal--760">
         <div class="modal-actions-top">
           <div>
             <div class="modal-title">{{ t('projectCheck') }}</div>
@@ -4085,7 +2699,7 @@ const s = currentRuntimeState
     </div>
 
     <div v-if="panorama.open" class="modal-overlay" @click.self="panorama.open = false">
-      <div class="modal path-modal" style="max-width: 640px">
+      <div class="modal path-modal path-modal--640">
         <div class="modal-actions-top">
           <div>
             <div class="modal-title">{{ t('portPanorama') }}</div>
@@ -4135,7 +2749,11 @@ const s = currentRuntimeState
         <div class="php-tab-body">
           <template v-if="phpModal.tab === 'ini'">
             <label class="modal-label">{{ t('phpIni') }}（{{ t('phpIniHint') }}）</label>
-            <textarea v-model="phpModal.raw" class="env-textarea php-ini" rows="12"></textarea>
+            <!-- 原来是个 12 行的裸 textarea：php.ini 是上千行的键值配置，
+                 至少要行号、搜索和撤销，直接用配置文件编辑器 -->
+            <div class="env-cfg-embed">
+              <ConfigEditor v-model="phpModal.raw" filename="php.ini" @save="savePHPConfig" />
+            </div>
           </template>
           <template v-else-if="phpModal.tab === 'disable'">
             <label class="modal-label">{{ t('phpDisableFunctions') }}</label>
@@ -4145,7 +2763,8 @@ const s = currentRuntimeState
             <label class="modal-label">{{ t('phpErrorLog') }}</label>
             <input v-model="phpModal.errorLog" class="env-input" :placeholder="t('phpErrorLogPlaceholder')" />
             <label class="modal-label">{{ t('phpErrorLogContent') }}</label>
-            <pre class="php-log">{{ phpModal.errorLogContent || t('phpNoLog') }}</pre>
+            <!-- 只读快照：不提供刷新（内容随 php.ini 保存才更新），但搜索/高亮要有 -->
+            <RuntimeLogView :text="phpModal.errorLogContent" :empty-text="t('phpNoLog')" hide-refresh />
           </template>
           <template v-else>
             <label class="modal-label">{{ t('phpExtensions') }}</label>
@@ -4239,7 +2858,7 @@ const s = currentRuntimeState
     <!-- Redis 配置 / 日志弹窗：redis.conf 编辑 + 运行日志查询 -->
     <!-- PATH 可视化面板 -->
     <div v-if="pathModal.open" class="modal-overlay" @click.self="pathModal.open = false">
-      <div class="modal path-modal" style="max-width: 600px">
+      <div class="modal path-modal path-modal--600">
         <div class="path-modal-head">
           <span class="path-modal-icon">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0M15.5 18H10a4 4 0 0 1-4-4v0"/></svg>
@@ -4280,26 +2899,24 @@ const s = currentRuntimeState
         <div class="php-tab-body">
           <template v-if="redisModal.tab === 'config'">
             <label class="modal-label">{{ t('redisConfigFile') }}（{{ redisModal.path }}）</label>
-            <textarea v-model="redisModal.raw" class="env-textarea php-ini" rows="12"></textarea>
+            <!-- redis.conf 同样是键值配置：换成带行号/高亮/查找的编辑器 -->
+            <div class="env-cfg-embed">
+              <ConfigEditor v-model="redisModal.raw" filename="redis.conf" @save="saveRedisConfig" />
+            </div>
             <p class="env-msg">{{ t('redisConfigHint') }}</p>
           </template>
           <template v-else>
-            <div class="log-toolbar">
-              <input
-                v-model="redisModal.logFilter"
-                class="log-filter"
-                :placeholder="t('logFilterPlaceholder')"
-                @input="nextTick(scrollLogBottom)"
-              />
-              <button class="log-btn" :class="{ active: redisModal.logAuto }" @click="toggleLogAuto()">
-                {{ redisModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
-              </button>
-              <button class="log-btn" @click="refreshRedisLog()">{{ t('logManualRefresh') }}</button>
-              <span class="log-count" v-if="redisModal.logFilter.trim()">
-                {{ filteredLog.split('\n').filter((x: string) => x !== '').length }} / {{ redisModal.log.split('\n').filter((x: string) => x !== '').length }}
-              </span>
-            </div>
-            <pre class="php-log" ref="logEl">{{ filteredLog || t('redisNoLog') }}</pre>
+            <RuntimeLogView
+              :text="redisModal.log"
+              :empty-text="t('redisNoLog')"
+              @refresh="refreshRedisLog()"
+            >
+              <template #actions>
+                <button class="log-btn" :class="{ active: redisModal.logAuto }" @click="toggleLogAuto()">
+                  {{ redisModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
+                </button>
+              </template>
+            </RuntimeLogView>
           </template>
         </div>
         <div class="modal-actions">
@@ -4346,7 +2963,7 @@ const s = currentRuntimeState
           <svg class="cfg-path-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
           <code class="cfg-path-text">{{ configModal.path }}</code>
         </div>
-        <ConfigEditor ref="editorRef" v-model="configModal.raw" @save="saveConfig" />
+        <ConfigEditor ref="editorRef" v-model="configModal.raw" :filename="configModal.path" @save="saveConfig" />
         <p class="cfg-hint">{{ t('configRestartHint') }}</p>
         <footer class="cfg-foot">
           <button class="cfg-btn ghost" @click="configModal.open = false">{{ t('cancel') }}</button>
@@ -4600,74 +3217,11 @@ const s = currentRuntimeState
 .env-body { flex: 1; min-height: 0; display: flex; }
 
 /* 左侧分类导航 */
-.env-cats {
-  width: 196px; flex-shrink: 0;
-  border-right: 1px solid var(--color-border);
-  background: var(--color-bg-primary);
-  overflow-y: auto; padding: 12px 10px;
-  display: flex; flex-direction: column; gap: 4px;
-}
-.cats-search {
-  display: flex; align-items: center; gap: 5px; margin: 0 8px 8px;
-  padding: 0 7px; height: 26px; flex-shrink: 0;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); color: var(--color-text-disabled);
-}
-.cats-search:focus-within { border-color: var(--color-accent); }
-.cats-search-input {
-  flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: 11px; font-family: inherit;
-}
-.cats-search-input::placeholder { color: var(--color-text-disabled); }
-.cats-search-clear {
-  padding: 0; border: none; background: none; color: var(--color-text-disabled);
-  font-size: 14px; line-height: 1; cursor: pointer;
-}
-.cats-search-clear:hover { color: var(--color-text-primary); }
-.cats-empty {
-  padding: 16px 10px; font-size: 11px; text-align: center;
-  color: var(--color-text-disabled);
-}
 
 /* 刷新中：图标转起来。刷新要探测几十次 IPC，没有反馈时用户会连点 */
 .qd-icon-btn.spinning svg { animation: env-spin 1s linear infinite; }
 @keyframes env-spin { to { transform: rotate(360deg); } }
 
-.cats-title {
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
-  color: var(--color-text-disabled); padding: 2px 8px 8px;
-}
-.cat-btn {
-  display: flex; align-items: center; gap: 10px;
-  padding: 8px 10px; border-radius: var(--radius-sm);
-  border: 1px solid transparent; background: transparent;
-  color: var(--color-text-secondary); cursor: pointer;
-  font-family: inherit; font-size: 13px; text-align: left; width: 100%;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-.cat-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
-.cat-btn.active {
-  background: var(--color-accent-bg);
-  border-color: var(--color-border-focus);
-  color: var(--color-text-primary);
-}
-.cat-avatar {
-  width: 28px; height: 28px; border-radius: var(--radius-sm); flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 700; color: var(--color-accent-text);
-}
-.cat-avatar :deep(svg) { width: 20px; height: 20px; display: block; }
-.cat-meta { display: flex; flex-direction: column; min-width: 0; line-height: 1.25; }
-.cat-name { font-weight: 600; font-size: 13px; }
-.cat-id { font-size: 10px; color: var(--color-text-disabled); }
-.cat-trail { margin-left: auto; display: flex; align-items: center; gap: 6px; }
-.cat-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--color-success); box-shadow: 0 0 5px var(--color-success-border); flex-shrink: 0; }
-.cat-count {
-  min-width: 20px; text-align: center; font-size: 11px; padding: 1px 6px; border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-}
-.cat-count.zero { color: var(--color-text-disabled); }
-.cats-sep { height: 1px; background: var(--color-border); margin: 8px 6px; flex-shrink: 0; }
 .harness-avatar { background: var(--color-accent); }
 
 /* 右侧详情 */
@@ -4683,6 +3237,7 @@ const s = currentRuntimeState
   font-size: 16px; font-weight: 700; color: var(--color-accent-text);
 }
 .detail-avatar :deep(svg) { width: 22px; height: 22px; display: block; }
+.detail-avatar--accent { background: var(--color-accent); }
 .detail-titles { display: flex; flex-direction: column; gap: 4px; }
 .detail-title-row { display: flex; align-items: center; gap: 8px; }
 .detail-name { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
@@ -4697,7 +3252,7 @@ const s = currentRuntimeState
 .svc-switch { display: inline-flex; align-items: center; gap: 6px; margin-left: 4px; cursor: pointer; user-select: none; -webkit-user-select: none; }
 .svc-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
 .svc-switch-track { position: relative; width: 34px; height: 18px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); border: 1px solid var(--color-border, transparent); transition: background .18s ease; flex: none; }
-.svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-accent-text); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: transform .18s ease; }
+.svc-switch-thumb { position: absolute; top: 1px; left: 1px; width: 14px; height: 14px; border-radius: 50%; background: var(--color-accent-text); box-shadow: var(--shadow-sm); transition: transform .18s ease; }
 .svc-switch.on .svc-switch-track { background: var(--color-accent, var(--color-success)); }
 .svc-switch.on .svc-switch-thumb { transform: translateX(16px); }
 .svc-switch-label { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
@@ -4714,6 +3269,7 @@ const s = currentRuntimeState
 }
 .install-card { background: transparent; border-style: dashed; }
 .block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+.block-head--spaced { margin-top: var(--space-6); }
 .block-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
 .block-count {
   min-width: 20px; text-align: center; font-size: 11px; padding: 1px 7px; border-radius: var(--radius-md);
@@ -5061,6 +3617,9 @@ const s = currentRuntimeState
 .path-modal-icon { width: 34px; height: 34px; border-radius: var(--radius-md); flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--color-accent-bg); color: var(--color-accent); }
 .path-modal-icon svg { width: 18px; height: 18px; }
 .path-modal-titles { min-width: 0; }
+.path-modal--760 { max-width: 760px; }
+.path-modal--640 { max-width: 640px; }
+.path-modal--600 { max-width: 600px; }
 .path-summary { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--color-text-secondary); margin: 8px 0 2px; }
 .path-summary-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-disabled); flex: none; }
 .path-summary-dot.ok { background: var(--color-success); }
@@ -5084,6 +3643,7 @@ const s = currentRuntimeState
   font-family: inherit; outline: none;
 }
 .env-input.custom { margin-top: 10px; }
+.env-input--narrow { max-width: 110px; }
 .env-textarea {
   width: 100%; min-width: 0; resize: vertical;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
@@ -5218,24 +3778,6 @@ const s = currentRuntimeState
 .cfg-btn.primary:hover { opacity: 0.9; }
 
 /* 分组侧栏 */
-.cats-group-label {
-  display: flex; align-items: center; gap: 8px;
-  width: 100%; text-align: left; cursor: pointer; font-family: inherit;
-  font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
-  color: var(--color-text-primary);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  padding: 9px 11px; margin-top: 9px;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-.cats-group-label:hover {
-  background: var(--color-bg-hover, var(--color-bg-tertiary));
-  border-color: var(--color-border-focus);
-  border-left-color: var(--color-accent);
-}
-.cats-chevron { margin-left: auto; font-size: 11px; line-height: 1; color: var(--color-text-disabled); transition: transform 120ms ease; }
 .import-btn { margin-left: auto; font-size: 11px; padding: 3px 9px; }
 .op-sep { height: 1px; background: var(--color-border); margin: 3px 0; }
 
@@ -5286,12 +3828,11 @@ const s = currentRuntimeState
 }
 .php-tab.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
 .php-tab-body { min-height: 200px; flex: 1 1 auto; max-height: 60vh; overflow: auto; }
-.php-ini { font-family: monospace; font-size: 11px; line-height: 1.5; }
-.php-log {
-  background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); padding: 8px 10px; font-size: 11px; max-height: 260px; overflow: auto;
-  white-space: pre-wrap; word-break: break-all; color: var(--color-text-muted); margin: 0;
-}
+/* 弹窗里内嵌 ConfigEditor：它自带 margin:12px 18px 0 与 flex:1（那是给整页编辑区定的），
+   这里给一个定高容器并抹掉 margin，高度按原 12 行 textarea 的观感取 */
+.env-cfg-embed { display: flex; flex-direction: column; height: 260px; margin-top: 6px; }
+.env-cfg-embed :deep(.ce) { flex: 1 1 auto; margin: 0; min-height: 0; }
+/* 日志区域（.lv-*）已随查看器迁到 RuntimeLogView.vue 自身的 scoped 样式里 */
 /* 特色操作输出弹窗：宽度略宽于普通弹窗，输出区可滚动 */
 .task-modal { width: 680px; }
 .task-ver {
@@ -5323,13 +3864,8 @@ const s = currentRuntimeState
   color: var(--color-text-disabled); text-transform: uppercase;
 }
 
-.log-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 8px; flex-wrap: wrap; }
-.log-filter {
-  flex: 1 1 160px; min-width: 120px; height: 28px; padding: 0 8px; font-size: 12px;
-  background: var(--color-bg-primary); color: var(--color-text-primary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm); outline: none;
-}
-.log-filter:focus { border-color: var(--color-accent); }
+/* 日志工具栏只剩「自动刷新」这一个按钮（搜索/跟随由 RuntimeLogView 自带），
+   所以 .log-toolbar / .log-filter / .log-count 一并去掉，只留按钮样式给 slot 用。 */
 .log-btn {
   height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
@@ -5337,7 +3873,6 @@ const s = currentRuntimeState
 }
 .log-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 .log-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
-.log-count { font-size: 11px; color: var(--color-text-disabled); margin-left: auto; }
 .ext-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow: auto; }
 .ext-row {
   display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 8px;
