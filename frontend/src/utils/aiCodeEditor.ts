@@ -8,7 +8,15 @@
 // token 用 class 上色（HighlightStyle 的 class 规格），颜色写在 cm-theme.css。
 
 import type { Extension } from '@codemirror/state'
-import { HighlightStyle, syntaxHighlighting } from '@codemirror/language'
+// EditorView / keymap / placeholder / @codemirror/language 必须走静态 import：
+// @codemirror/language 自身就静态依赖 @codemirror/view，而本文件已被 NoteManagerPage /
+// NotePanel 静态引用，所以这两个模块本就在 eager chunk 里；从 aiCodeEditor 里再动态
+// import 它们（原写法）会被 rollup 判定为 INEFFECTIVE_DYNAMIC_IMPORT（等于没拆）。
+// 改成静态 import 只是如实反映这一事实，不改变任何加载时机，也消掉构建警告。
+// codemirror 核心、@codemirror/commands、@codemirror/state、@codemirror/search 以及
+// 各 lang-* 语言包仍走动态 import，保留「首次打开编辑器才下载」的懒加载效益。
+import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view'
+import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { i18n } from '../i18n'
 
@@ -92,10 +100,7 @@ async function languageFor(filename: string): Promise<Extension | null> {
   // 没有文件名（配置文件编辑器：nginx / my.cnf / php.ini 一堆）按 ini 着色兜底，
   // 那类「键 值 / 键 = 值」的文本至少能让注释与字符串有区分。
   if (!name) {
-    const [{ StreamLanguage }, m] = await Promise.all([
-      import('@codemirror/language'),
-      import('@codemirror/legacy-modes/mode/properties'),
-    ])
+    const m = await import('@codemirror/legacy-modes/mode/properties')
     return StreamLanguage.define(m.properties)
   }
   const base = name.slice(Math.max(name.lastIndexOf('/'), name.lastIndexOf('\\')) + 1)
@@ -136,34 +141,22 @@ async function languageFor(filename: string): Promise<Extension | null> {
     case 'yml': case 'yaml':
       return (await import('@codemirror/lang-yaml')).yaml()
     case 'sh': case 'bash': case 'zsh': {
-      const [{ StreamLanguage }, m] = await Promise.all([
-        import('@codemirror/language'),
-        import('@codemirror/legacy-modes/mode/shell'),
-      ])
+      const m = await import('@codemirror/legacy-modes/mode/shell')
       return StreamLanguage.define(m.shell)
     }
     case 'toml': {
-      const [{ StreamLanguage }, m] = await Promise.all([
-        import('@codemirror/language'),
-        import('@codemirror/legacy-modes/mode/toml'),
-      ])
+      const m = await import('@codemirror/legacy-modes/mode/toml')
       return StreamLanguage.define(m.toml)
     }
     // .conf / .cnf：nginx、apache、redis、mysql 全是这一族。nginx 的规则
     //（# 注释、directive 参数、{} 块）比 ini 更接近它们的共同形状。
     case 'conf': case 'cnf': case 'nginx': {
-      const [{ StreamLanguage }, m] = await Promise.all([
-        import('@codemirror/language'),
-        import('@codemirror/legacy-modes/mode/nginx'),
-      ])
+      const m = await import('@codemirror/legacy-modes/mode/nginx')
       return StreamLanguage.define(m.nginx)
     }
     // .ini / .properties / .env / .cfg：严格的键值对，用 properties 比 nginx 准
     case 'ini': case 'properties': case 'env': case 'cfg': {
-      const [{ StreamLanguage }, m] = await Promise.all([
-        import('@codemirror/language'),
-        import('@codemirror/legacy-modes/mode/properties'),
-      ])
+      const m = await import('@codemirror/legacy-modes/mode/properties')
       return StreamLanguage.define(m.properties)
     }
     default:
@@ -191,10 +184,9 @@ const cmTokens = HighlightStyle.define([
 ])
 
 export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts): Promise<CodeEditorHandle> {
-  const [{ basicSetup, EditorView }, { keymap, placeholder: cmPlaceholder }, { indentWithTab }, { EditorState, Transaction }, searchMod, lang] =
+  const [{ basicSetup }, { indentWithTab }, { EditorState, Transaction }, searchMod, lang] =
     await Promise.all([
       import('codemirror'),
-      import('@codemirror/view'),
       import('@codemirror/commands'),
       import('@codemirror/state'),
       import('@codemirror/search'),
