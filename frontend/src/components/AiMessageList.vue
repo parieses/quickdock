@@ -867,11 +867,72 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-md :deep(p) { margin: 5px 0; }
 
-.ai-md :deep(ul), .ai-md :deep(ol) { padding-left: 20px; margin: 5px 0; }
+/* 列表：用 CSS 自绘圆点 / 序号，避免不同字体下浏览器 disc 渲染成方块（WebView2 偶发）。
+   排除 .ai-plan-items：计划清单有自己的「·」标记与 flex 布局，不能叠加圆点。 */
+.ai-md :deep(ul:not(.ai-plan-items)), .ai-md :deep(ol) { padding-left: 22px; margin: 6px 0; }
+.ai-md :deep(ul:not(.ai-plan-items)) { list-style: none; }
+.ai-md :deep(ol) { list-style: none; counter-reset: ai-md-ol; }
 
-.ai-md :deep(li) { margin: 2px 0; line-height: 1.6; }
+.ai-md :deep(li) { margin: 2px 0; line-height: 1.6; position: relative; }
+
+/* 任务清单（- [ ] / - [x]）有自己的勾选框，不要再叠加圆点 */
+.ai-md :deep(ul:not(.ai-plan-items) > li:not(.ai-task-item))::before {
+  content: '';
+  position: absolute;
+  left: -15px;
+  top: calc(0.62em + 1px);
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--color-text-muted);
+}
+.ai-md :deep(ol > li) { counter-increment: ai-md-ol; }
+.ai-md :deep(ol > li)::before {
+  content: counter(ai-md-ol) '.';
+  position: absolute;
+  left: -22px;
+  top: 0;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
 
 .ai-md :deep(li > p) { margin: 0; }
+
+/* 任务清单：- [ ] / - [x] 渲染成带样式的勾选框（renderer 输出 .ai-task-item / .ai-task-box）。
+   已完成项加删除线 + 降透明，随 AI 把 [ ] 改成 [x] 实时更新。 */
+.ai-md :deep(li.ai-task-item) {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+.ai-md :deep(.ai-task-box) {
+  flex: none;
+  width: 15px; height: 15px;
+  margin-top: 3px;
+  border: 1.5px solid var(--color-border-strong, #b4b4b4);
+  border-radius: 4px;
+  background: var(--color-bg);
+  box-sizing: border-box;
+  position: relative;
+}
+.ai-md :deep(li.ai-task-item.is-done .ai-task-box) {
+  border-color: var(--color-success, #2fa84f);
+  background: var(--color-success, #2fa84f);
+}
+.ai-md :deep(li.ai-task-item.is-done .ai-task-box)::after {
+  content: '';
+  position: absolute;
+  left: 4px; top: 1px;
+  width: 4px; height: 8px;
+  border: solid #fff;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.ai-md :deep(li.ai-task-item.is-done) {
+  text-decoration: line-through;
+  opacity: 0.62;
+}
 
 .ai-md :deep(br) { display: inline; }
 
@@ -966,7 +1027,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-md :deep(pre code) { background: none; padding: 0; font-size: 12px; }
 
-.ai-md :deep(table) { border-collapse: collapse; }
+.ai-md :deep(table) { border-collapse: collapse; width: 100%; }
 
 .ai-md :deep(th), .ai-md :deep(td) { border: 1px solid var(--color-border); padding: 5px 9px; }
 
@@ -977,6 +1038,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   overflow-x: auto;
+  width: 100%;
 }
 
 .ai-md :deep(.md-table-bar) {

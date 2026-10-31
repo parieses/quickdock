@@ -75,6 +75,7 @@ import {
   AISetConversationMode,
   AIGetHooks,
   AISetHooksApproved,
+  AIGetGitBranch,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -148,6 +149,12 @@ async function approveHooks(on: boolean) {
     aiHooks.value = null
   } catch { /* 批准失败不弹错：下一次改文件时钩子还是不生效，用户会来问 */ }
 }
+
+// —— 当前目录的 git 分支探测（gitRepo / gitBranch / effectiveDir / loadGitBranch /
+//    对应的 watch）—— 定义见下方「新建空间」声明之后。effectiveDir 引用了 newTaskSpace /
+//    newTaskDir / NEW_SPACE（892 行才声明），整块必须放在它们之后：否则 setup 阶段 Vue 给
+//    watch 取旧值时会同步求值 effectiveDir，命中 TDZ（Cannot access 'newTaskSpace' before
+//    initialization），整页 setup 崩溃。
 watch(convCwd, loadAIHooks, { immediate: true })
 
 // —— 流式文本缓冲 ——
@@ -581,6 +588,21 @@ md.use({
         `<pre><code${lang ? ` class="language-${escapeHtml(lang)}"` : ''}>${body}</code></pre>` +
       `</div>`
     },
+    // 任务清单：- [ ] / - [x]（GitHub 风格）渲染成带样式的勾选框，而非原生 <input>。
+    // 原生 <input> 会被 DOMPurify 默认白名单剥掉（表单元素），勾选框就消失了；
+    // 改成 <span> 既能被 DOMPurify 放行，又能用 CSS 画出方框与对勾、并对已完成项加删除线。
+    // AI 在回复里维护这份清单、每完成一步把 [ ] 改成 [x]，界面随之实时打勾。
+    checkbox(token: { checked?: boolean }) {
+      const done = !!token.checked
+      return `<span class="ai-task-box${done ? ' is-done' : ''}" role="img" aria-label="${done ? '已完成' : '未完成'}"></span>`
+    },
+    listitem(token: { tokens?: any[]; task?: boolean; checked?: boolean }) {
+      const body = this.parser.parse(token.tokens ?? [])
+      if (token.task) {
+        return `<li class="ai-task-item${token.checked ? ' is-done' : ''}">${body}</li>`
+      }
+      return `<li>${body}</li>`
+    },
   },
 })
 
@@ -838,6 +860,46 @@ const newTaskMode = ref('chat')
 const NEW_SPACE = '__new__'
 const newTaskSpace = ref('')
 const newTaskDir = ref('')
+
+// —— 当前目录的 git 分支（输入框下方实时显示）——
+// 与钩子同理：cwd 变了就要重读。非仓库 / 没装 git 一律 repo=false（后端不报错，
+// 前端也就不弹错），只是那一行分支提示不显示而已。
+// 整块特意放在 newTaskSpace / newTaskDir / NEW_SPACE 声明之后：effectiveDir 计算属性
+// 引用了它们，而 Vue 的 watch 在 setup 阶段会先跑一次 getter 取旧值来建依赖，若放在
+// 它们声明之前就会命中 TDZ（Cannot access 'newTaskSpace' before initialization），
+// 整页 setup 崩溃。放在这里求值即安全。
+const gitRepo = ref(false)
+const gitBranch = ref('')
+let gitSeq = 0
+// 探测 git 分支用的「有效目录」：进了会话就用会话工作目录；还在落地页（没进会话）
+// 就看当前选中的空间目录（或新建空间时挑的目录）——这样落地页那个输入框也能显示分支。
+async function loadGitBranch() {
+  const dir = effectiveDir.value.trim()
+  if (!dir) { gitRepo.value = false; gitBranch.value = ''; return }
+  const seq = ++gitSeq
+  try {
+    const data = unwrap(await AIGetGitBranch(dir)) as { repo?: boolean; branch?: string } | null
+    if (seq !== gitSeq) return
+    gitRepo.value = !!data?.repo
+    gitBranch.value = data?.branch || ''
+  } catch {
+    if (seq === gitSeq) { gitRepo.value = false; gitBranch.value = '' }
+  }
+}
+const effectiveDir = computed(() => {
+  const c = convCwd.value.trim()
+  if (c) return c
+  if (newTaskSpace.value === NEW_SPACE) return newTaskDir.value.trim()
+  if (newTaskSpace.value) {
+    const sp = spaces.value.find((s) => s.id === newTaskSpace.value)
+    return (sp?.cwd || '').trim()
+  }
+  return ''
+})
+// 这条 watch 必须在 newTaskSpace 等声明之后建立（本块位置即保证）；首次探测由
+// onMounted 里的 loadGitBranch() 负责，这里只响应后续 cwd / 空间变化。
+watch(effectiveDir, loadGitBranch)
+
 const heroRef = ref<InstanceType<typeof AiHero> | null>(null)
 
 // 落地页上的示例问题：点一下填进输入框，省得对着空白框想「能问什么」。
@@ -1431,9 +1493,46 @@ function msgStat(m: AIMessage): AIStreamStat | null {
 }
 
 // 毫秒 → 人类可读：<1s 用 ms，否则一位小数的秒
+// 用时格式化：按量级分段，避免长任务一直堆「几百秒」不直观。
+//   <1s   → 「540ms」（短暂任务，精确）
+//   <1min → 「54s」（匹配截图「已处理 54s」）
+//   <1h   → 「5m12s」（分:秒，实时每秒跳）
+//   否则  → 「1h20m」
 function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000))
   if (ms < 1000) return `${Math.max(0, Math.round(ms))}ms`
-  return `${(ms / 1000).toFixed(1)}s`
+  if (totalSec < 60) return `${totalSec}s`
+  const min = Math.floor(totalSec / 60)
+  const sec = totalSec % 60
+  if (min < 60) return `${min}m${sec.toString().padStart(2, '0')}s`
+  const hr = Math.floor(min / 60)
+  const mLeft = min % 60
+  return `${hr}h${mLeft.toString().padStart(2, '0')}m`
+}
+
+// 本轮实时用时：从「发送」到「本轮结束」（done / 中断 / 失败）之间，
+// 输入区下方的停止按钮旁会跳动显示计时，让用户直观看到这一轮花了多久——
+// 而不是只在回合结束后的消息脚注里看到一行静态「耗时」。
+// 计时在 send() 起点 startRoundTimer() 开始，在流式收尾的 finally 里 stopRoundTimer() 停止；
+// 停止后归零，最终静态「耗时」由每条回复的 stat 接管（见 msgStat / formatStat）。
+const roundStartTs = ref(0)
+const liveElapsedMs = ref(0)
+let roundTimer: ReturnType<typeof setInterval> | null = null
+
+function startRoundTimer() {
+  roundStartTs.value = performance.now()
+  liveElapsedMs.value = 0
+  if (roundTimer !== null) clearInterval(roundTimer)
+  // 200ms 一跳：足够顺滑，又不会每帧都触发响应式刷新拖慢渲染。
+  roundTimer = setInterval(() => {
+    if (!streaming.value) { stopRoundTimer(); return }
+    liveElapsedMs.value = performance.now() - roundStartTs.value
+  }, 200)
+}
+
+function stopRoundTimer() {
+  if (roundTimer !== null) { clearInterval(roundTimer); roundTimer = null }
+  liveElapsedMs.value = 0
 }
 
 async function send() {
@@ -1489,7 +1588,7 @@ async function send() {
   streaming.value = true
   resetStreamState()
   errorMsg.value = ''
-  const startedAt = performance.now()
+  startRoundTimer()
   try {
     await ensureStreamInfo()
     const ctrl = new AbortController()
@@ -1684,7 +1783,7 @@ async function send() {
                 primeMessageBlocks(msg.id as string, content, streamBlocks.value.map((b) => b.html))
                 // 记录本条回复的耗时/token，用于在消息下方展示
                 const stat: AIStreamStat = {
-                  elapsedMs: Math.round(performance.now() - startedAt),
+                  elapsedMs: Math.round(performance.now() - roundStartTs.value),
                   firstTokenMs: Number(data.firstTokenMs) || 0,
                   promptTokens: Number(data.promptTokens) || 0,
                   completionTokens: Number(data.completionTokens) || 0,
@@ -1752,7 +1851,7 @@ async function send() {
           // 同样复用流式期已渲染的块
           primeMessageBlocks(aid, content, streamBlocks.value.map((b) => b.html))
           const stat: AIStreamStat = {
-            elapsedMs: Math.round(performance.now() - startedAt),
+            elapsedMs: Math.round(performance.now() - roundStartTs.value),
             firstTokenMs: 0,
             promptTokens: 0,
             completionTokens: 0,
@@ -1771,6 +1870,9 @@ async function send() {
     streamReasonBuf = ''
     streaming.value = false
     streamCtrl = null
+    // 本轮结束：停掉实时计时（liveElapsedMs 归零），最终静态「耗时」由
+    // 已固化的消息 stat 在脚注里接管。
+    stopRoundTimer()
     // 流式结束后尾块不再是「进行中」：补一次扫描，把最后一张图（可能就在结尾）画出来
     scheduleMermaidScan()
     // 在别的页面期间回答跑完了：给侧栏一个未读点，否则用户不知道已经能看
@@ -2059,6 +2161,9 @@ onMounted(async () => {
   window.setTimeout(() => { void import('../utils/aiCodeEditor').catch(() => { /* 预热失败无所谓，点开时会重试 */ }) }, 1200)
   await loadProfiles()
   await Promise.all([loadConversations(), loadSpaces()])
+  // 会话/空间目录此时已就绪：首次探测 git 分支（effectiveDir 的 watch 已在其定义处
+  // 建立，见「新建空间」声明之后的注释）。这里只跑一次首探，后续变化由那条 watch 接管。
+  loadGitBranch()
 
   // 仅保留标题同步：这条事件只由「手动改名 / 重生成标题」触发（新会话的创建走 SSE 的
   // conv 事件）。以前这里还有一句 `activeId.value = data.id`，于是重命名侧栏里
@@ -2173,14 +2278,12 @@ onUnmounted(() => {
         :active-conv="activeConv"
         :star-busy="starBusy"
         :side-open="sideOpen"
-        :streaming="streaming"
         @open-cwd="openCwd"
         @model-change="onModelChange"
         @regen-title="regenTitle"
         @toggle-star="toggleStar"
         @export-md="exportConvMarkdown"
         @toggle-side="toggleSidePanel"
-        @stop="stop"
       />
 
       <!-- 大纲 / 摘要：绝对定位挂在 .ai-main 上（它已是 position: relative）。
@@ -2217,6 +2320,8 @@ onUnmounted(() => {
         :ai-profiles="aiProfiles"
         :allow-file-image="allowFileImage"
         :allow-url-image="allowUrlImage"
+        :git-repo="gitRepo"
+        :git-branch="gitBranch"
         :out-hint="newTaskOutHint"
         :hero-tips="heroTips"
         @model-change="onModelChange"
@@ -2235,6 +2340,12 @@ onUnmounted(() => {
 
       <template v-else>
       <!-- 消息区 -->
+      <!-- 本轮实时用时状态条：流式进行中显示在消息区顶部，复刻「已处理 54s」式的实时计时——
+           从发送消息到本轮结束之间跳动显示；本轮结束后归零，由消息脚注的静态「耗时」接管。 -->
+      <div v-if="streaming && liveElapsedMs > 0" class="ai-round-bar" :title="t('aiRoundElapsedHint')">
+        <span class="ai-round-dot" />
+        <span class="ai-round-text">{{ t('aiRoundElapsedStatus', { ms: formatDuration(liveElapsedMs) }) }}</span>
+      </div>
       <AiMessageList
         ref="msgListRef"
         :has-key="hasKey"
@@ -2275,7 +2386,7 @@ onUnmounted(() => {
       <!-- 划词复制浮层（Teleport 到 body，floating-ui 负责定位与防溢出） -->
       <Teleport to="body">
         <button
-          v-if="selCtx.visible.value"
+          v-if="selCtx?.visible.value"
           class="ai-sel-copy"
           :ref="el => (selCtx.floatingRef.value = el as HTMLElement | null)"
           :style="selCtx.floatingStyles.value"
@@ -2289,7 +2400,7 @@ onUnmounted(() => {
       <!-- 流程图 / 公式的右键菜单：原生菜单只能复制成文本，这里要的是「一张图」 -->
       <Teleport to="body">
         <div
-          v-if="ctxMenu.visible.value"
+          v-if="ctxMenu?.visible.value"
           class="ai-ctx"
           :ref="el => (ctxMenu.floatingRef.value = el as HTMLElement | null)"
           :style="ctxMenu.floatingStyles.value"
@@ -2363,6 +2474,8 @@ onUnmounted(() => {
         :streaming="streaming"
         :allow-file-image="allowFileImage"
         :allow-url-image="allowUrlImage"
+        :git-repo="gitRepo"
+        :git-branch="gitBranch"
         @approve-hooks="approveHooks"
         @remove-attachment="removeAttachment"
         @confirm-url="confirmUrlImage"
@@ -2370,6 +2483,7 @@ onUnmounted(() => {
         @pick-mention="pickMention"
         @composer-key="onComposerKey($event, send)"
         @send="send"
+        @stop="stop"
         @paste="onInputPaste"
         @drop="onInputDrop"
         @open-file-picker="openFilePicker"
@@ -2506,6 +2620,36 @@ onUnmounted(() => {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   cursor: default;
+}
+
+/* 本轮实时用时状态条：贴在消息区顶部，复刻「已处理 54s」那种实时计时感。
+   左侧一个呼吸圆点表示「进行中」，右侧等宽数字跳动，避免宽度乱晃。 */
+.ai-round-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+.ai-round-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  flex-shrink: 0;
+  animation: ai-round-pulse 1.1s ease-in-out infinite;
+}
+@keyframes ai-round-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.35; transform: scale(0.65); }
+}
+.ai-round-text {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
 }
 </style>
 

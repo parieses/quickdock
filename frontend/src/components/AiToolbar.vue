@@ -6,7 +6,7 @@
  * 目录还没定）。这里是纯视图，所有状态归 AIPage，动作通过 emit 回传。
  */
 import { useI18n } from 'vue-i18n'
-import { Download, FolderOpen, ListTree, PanelRight, RefreshCw, Square, Star } from '@lucide/vue'
+import { Download, FolderOpen, ListTree, PanelRight, RefreshCw, Star } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConversation } from '../types/ai'
 
@@ -23,7 +23,6 @@ const props = defineProps<{
   starBusy: string
   digestOpen: boolean
   sideOpen: boolean
-  streaming: boolean
 }>()
 
 const emit = defineEmits<{
@@ -35,7 +34,6 @@ const emit = defineEmits<{
   (e: 'toggle-star', c: AIConversation): void
   (e: 'export-md'): void
   (e: 'toggle-side'): void
-  (e: 'stop'): void
 }>()
 
 const { t } = useI18n()
@@ -89,9 +87,6 @@ function onModelSelect(ev: Event) {
       <!-- 右侧面板开关：常驻最右（与常见 AI 工作台同位同快捷键） -->
       <button class="ai-icon-btn" :class="{ 'is-active': props.sideOpen }" :title="t(props.sideOpen ? 'aiSideClose' : 'aiSideOpen')" @click="emit('toggle-side')">
         <PanelRight :size="13" />
-      </button>
-      <button v-if="props.streaming" class="ai-stop" @click="emit('stop')">
-        <Square :size="13" /> {{ t('aiStop') }}
       </button>
     </div>
   </div>
@@ -162,13 +157,4 @@ function onModelSelect(ev: Event) {
    模板一直在切 is-active，但这条规则此前从未写过——三个按钮的「已开启」看不出来。 */
 .ai-icon-btn.is-active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 .ai-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
-
-.ai-stop {
-  display: flex; align-items: center; gap: 4px;
-  padding: 5px 12px; border: none; border-radius: var(--radius-sm);
-  background: var(--color-bg-active); color: var(--color-text-secondary);
-  font-size: 12px; cursor: pointer; font-family: inherit;
-}
-
-.ai-stop:hover { color: var(--color-danger); }
 </style>

@@ -8,7 +8,7 @@
  * 要镜像一个 div，得不偿失）。
  */
 import { useI18n } from 'vue-i18n'
-import { FileText, Folder, Image as ImageIcon, Link2, MessageSquare } from '@lucide/vue'
+import { FileText, Folder, GitBranch, Image as ImageIcon, Link2, MessageSquare, ArrowUp, Square } from '@lucide/vue'
 import type { AIHooksInfo, AIMentionItem } from '../types/ai'
 import type { PendingImage } from '../types'
 
@@ -26,6 +26,8 @@ const props = defineProps<{
   streaming: boolean
   allowFileImage: boolean
   allowUrlImage: boolean
+  gitRepo: boolean
+  gitBranch: string
 }>()
 
 const emit = defineEmits<{
@@ -38,6 +40,7 @@ const emit = defineEmits<{
   (e: 'pick-mention', it: AIMentionItem): void
   (e: 'composer-key', ev: KeyboardEvent): void
   (e: 'send'): void
+  (e: 'stop'): void
   (e: 'paste', ev: ClipboardEvent): void
   (e: 'drop', ev: DragEvent): void
   (e: 'open-file-picker'): void
@@ -122,25 +125,44 @@ function iconOf(kind: string) {
         <span v-else-if="it.kind === 'conv'" class="ai-mention-path">{{ t('aiMentionConv') }}</span>
       </div>
     </div>
-    <div class="ai-input-row">
-      <textarea
-        :value="props.input"
-        class="ai-input"
-        :placeholder="t('aiPlaceholder')"
-        :disabled="!props.hasKey || props.streaming"
-        @input="emit('update:input', text($event))"
-        @keydown="emit('composer-key', $event)"
-        @paste="emit('paste', $event)"
-      />
-      <div class="ai-input-tools">
+    <!-- 输入框本体：透明、无边框，靠外层圆角框承载容器质感（与「新建任务」输入框同款）。 -->
+    <textarea
+      :value="props.input"
+      class="ai-input"
+      :placeholder="t('aiPlaceholder')"
+      :disabled="!props.hasKey || props.streaming"
+      @input="emit('update:input', text($event))"
+      @keydown="emit('composer-key', $event)"
+      @paste="emit('paste', $event)"
+    />
+    <!-- 底部工具条：左上是当前目录的 git 分支（在仓库里才显示），右上是图片 / 链接 / 发送。 -->
+    <div class="ai-input-bar">
+      <div class="ai-input-bar-left">
+        <span v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
+          <GitBranch :size="12" />
+          <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
+        </span>
+      </div>
+      <div class="ai-input-bar-right">
         <button v-if="props.allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
           <ImageIcon :size="16" />
         </button>
         <button v-if="props.allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="emit('toggle-url')">
           <Link2 :size="16" />
         </button>
-        <button class="ai-send" :disabled="!props.hasKey || props.streaming || (!props.input.trim() && !props.attachments.length)" @click="emit('send')">
-          {{ props.streaming ? t('aiThinking') : t('send') }}
+        <!-- 生成中：圆形发送按钮（ArrowUp 图标）原地变成红色停止按钮（Square 图标），
+             与「新建任务」同款样式；只显示图标，不显示文字。 -->
+        <button v-if="props.streaming" class="ai-send ai-send-stop" :title="t('aiStop')" @click="emit('stop')">
+          <Square :size="15" />
+        </button>
+        <button
+          v-else
+          class="ai-send"
+          :disabled="!props.hasKey || (!props.input.trim() && !props.attachments.length)"
+          :title="t('send')"
+          @click="emit('send')"
+        >
+          <ArrowUp :size="16" />
         </button>
       </div>
     </div>
@@ -149,26 +171,59 @@ function iconOf(kind: string) {
 
 <style scoped>
 .ai-input-area {
-  /* 输入行控件的唯一高度来源：输入框 / 图标按钮 / 发送按钮全部引用它，
-     避免各处硬编码不同数值出现高度参差 */
-  --ai-input-h: 56px;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--color-border);
+  /* 单圆角框容器：去顶边框、改为整框描边 + 圆角 + 浅底，输入框本体透明无边框，
+     整体质感与落地页「新建任务」输入框一致（参考截图）。 */
+  padding: 10px 12px 8px;
+  margin: 0 16px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  background: var(--color-bg-tertiary);
   flex-shrink: 0;
   /* @ 补全弹层的定位锚点：它要贴着输入区上沿向上展开，
      而不是跟着光标跑（textarea 里算光标坐标要镜像一个 div，得不偿失）。 */
   position: relative;
+  transition: border-color var(--transition-fast);
 }
 
-.ai-input-row { display: flex; gap: 10px; align-items: flex-end; }
+.ai-input-area:focus-within { border-color: var(--color-accent); }
 
-.ai-input-tools { display: flex; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.ai-input-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ai-input-bar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+.ai-input-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+
+/* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左上角。 */
+.ai-git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+}
+
+.ai-git-branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .ai-hook-banner {
-  margin: 0 12px;
+  margin: 0;
   padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
   border-radius: 6px;
@@ -239,13 +294,14 @@ function iconOf(kind: string) {
 }
 
 .ai-input {
-  flex: 1;
+  width: 100%;
   resize: none;
-  height: var(--ai-input-h);
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
+  min-height: 44px;
+  max-height: 200px;
+  padding: 0;
+  border: none;
+  border-radius: 0;
+  background: transparent;
   color: var(--color-text-primary);
   font-size: 13px;
   font-family: inherit;
@@ -253,24 +309,28 @@ function iconOf(kind: string) {
   line-height: 1.5;
 }
 
-.ai-input:focus { border-color: var(--color-accent); }
-
 .ai-input:disabled { opacity: 0.6; cursor: not-allowed; }
 
+/* 发送 / 停止按钮：与「新建任务」同款的圆形图标按钮（只显示图标，不显示文字）。
+   32px 正圆、accent 填充、白色图标；禁用态沿用 AiHero 的灰底淡字。 */
 .ai-send {
-  align-self: flex-end;
-  padding: 0 20px;
-  height: var(--ai-input-h);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
   border: none;
-  border-radius: var(--radius-md);
+  border-radius: 50%;
   background: var(--color-accent);
-  color: var(--color-accent-text);
-  font-size: 13px;
-  font-weight: 500;
+  color: #fff;
   cursor: pointer;
-  font-family: inherit;
-  white-space: nowrap;
+  flex-shrink: 0;
+  transition: opacity var(--transition-fast), background-color var(--transition-fast);
 }
 
-.ai-send:disabled { opacity: 0.5; cursor: not-allowed; }
+.ai-send:disabled { background: var(--color-bg-active); color: var(--color-text-disabled); cursor: default; }
+
+/* 生成中：圆形发送按钮原地翻成红色停止按钮，承载「中止」语义，一眼可辨。 */
+.ai-send-stop { background: var(--color-danger); color: #fff; }
+.ai-send-stop:hover { background: color-mix(in srgb, var(--color-danger) 85%, #000); }
 </style>

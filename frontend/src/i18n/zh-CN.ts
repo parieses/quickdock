@@ -1985,6 +1985,8 @@ export default {
   aiExportCsv: '导出 CSV',
   aiBackToBottom: '回到底部',
   aiStatElapsed: '耗时 {ms}',
+  aiRoundElapsedStatus: '已处理 {ms}',
+  aiRoundElapsedHint: '本轮从发送消息到现在的实时用时',
   aiStatFirstToken: '首字 {ms}',
   aiStatTokens: 'Token {in}/{out}',
   // 命中前缀缓存时单独标注：输入里大部分是每轮重复的上下文，命中率能到 99%，
@@ -2134,6 +2136,7 @@ export default {
   portsKill: '结束',
   portsKillConfirm: '确定结束 PID {pid} 的进程？系统关键进程会被拒绝。',
   aiPlaceholder: '输入消息，Enter 发送，Shift+Enter 换行',
+  aiGitBranchTip: '当前工作目录所在的 git 分支',
   aiThinking: '思考中…',
   aiGeneratingHint: 'AI 正在后台回答，切换页面不会影响它',
   aiFinishedHint: 'AI 已回答完成，点回来看',

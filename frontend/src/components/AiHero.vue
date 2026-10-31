@@ -9,7 +9,7 @@
  */
 import { ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, FolderOpen, Image as ImageIcon, Link2 } from '@lucide/vue'
+import { ArrowUp, FolderOpen, GitBranch, Image as ImageIcon, Link2 } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
@@ -40,6 +40,9 @@ const props = defineProps<{
   aiProfiles: AIProfile[]
   allowFileImage: boolean
   allowUrlImage: boolean
+  /** 当前目录若在 git 仓库里，显示分支名（由父组件探测后传入） */
+  gitRepo: boolean
+  gitBranch: string
   /** 产物去向说明（普通任务 / 空间任务文案不同，由父组件算） */
   outHint: string
   heroTips: string[]
@@ -137,6 +140,11 @@ function onModelSelect(e: Event) {
           @paste="emit('paste', $event)"
         ></textarea>
         <div class="ai-hero-bar">
+          <!-- 当前目录若在 git 仓库里，左侧显示分支（与聊天输入框同款提示）。 -->
+          <div v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
+            <GitBranch :size="12" />
+            <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
+          </div>
           <!-- 归属空间：不选就是普通任务（后端会自动给它建一个专属目录）。
                已有空间直接选；「新建空间…」才需要选目录——空间按目录唯一。 -->
           <select :value="props.newTaskSpace" class="ai-hero-select" :title="t('aiNewTaskSpace')" @change="onSpaceSelect($event)">
@@ -275,7 +283,29 @@ function onModelSelect(e: Event) {
   margin-top: 6px;
 }
 
-.ai-hero-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
+.ai-hero-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+
+/* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左侧。 */
+.ai-git-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  flex-shrink: 0;
+}
+
+.ai-git-branch-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 
 .ai-hero-select {
   display: inline-flex; align-items: center; gap: 5px;

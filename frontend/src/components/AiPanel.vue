@@ -162,6 +162,22 @@ const { streamEnabled } = useAiStreamPreference()
 const md = new Marked({ breaks: true, gfm: true })
 // 公式渲染：SSH 面板里的 AI 回答同样会有 LaTeX，规则与主对话页共用一套。
 md.use(mathExtension())
+// 任务清单：- [ ] / - [x] 渲染成带样式勾选框（见主对话页同名 renderer 的说明）。
+md.use({
+  renderer: {
+    checkbox(token: { checked?: boolean }) {
+      const done = !!token.checked
+      return `<span class="ai-task-box${done ? ' is-done' : ''}" role="img" aria-label="${done ? '已完成' : '未完成'}"></span>`
+    },
+    listitem(token: { tokens?: any[]; task?: boolean; checked?: boolean }) {
+      const body = this.parser.parse(token.tokens ?? [])
+      if (token.task) {
+        return `<li class="ai-task-item${token.checked ? ' is-done' : ''}">${body}</li>`
+      }
+      return `<li>${body}</li>`
+    },
+  },
+})
 
 const question = ref('')
 const copied = ref('')
