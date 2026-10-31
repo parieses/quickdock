@@ -73,6 +73,24 @@ type approvalPolicy struct {
 	rememberable bool
 }
 
+// aiAgentFileWriteAuto 这些工具即便挂在写等级上，内置 AI 执行时也自动放行：
+// file_write / file_edit 只作用于用户已授权的项目目录（fsguard 写白名单不含家目录），
+// 且每次写盘前都有快照可回滚（ai_tools.go 的 snapshotBeforeWrite）。
+//
+// 在目录里干活时它们是每轮必调的高频动作——改一行弹一次确认，等于把「让 AI 写代码」
+// 这件事的摩擦拉到不可用。读类（LevelRead）天然不拦，这里补「写文件」这一档的自动放行。
+//
+// 这里的豁免刻意只覆盖「改授权目录里的文件」：run_command 仍是任意命令执行，与「改一个
+// 已登记目录里的文件」危险度不在一个量级，所以保留审批与「本次会话都允许」按钮。
+// git 相关命令（commit / push / log）走 run_command，自然落在「允许 + 记住」那一档。
+//
+// 用户若在设置页显式把 file_write / file_edit 设成 ask / deny，下面的 rules 分支优先，
+// 这条豁免不生效——它只决定「没有覆盖时的默认行为」。
+var aiAgentFileWriteAuto = map[string]bool{
+	"file_write": true,
+	"file_edit":  true,
+}
+
 // aiApprovalPolicyFor 由用户覆盖、工具名与等级推导策略。
 //
 // 读类不拦是这条功能的生死线——如果读文件也要确认，三分钟内就会被关掉，
@@ -92,13 +110,17 @@ func aiApprovalPolicyFor(name string, level int, rules map[string]approvalMode) 
 			return approvalPolicy{mode: approvalAsk, rememberable: level < mcpsrv.LevelRisk}
 		}
 	}
+	// 写文件类对内置 AI 自动放行（只限授权目录 + 写前快照回滚）：见 aiAgentFileWriteAuto。
+	// 放在等级分支之前——它是对「写等级但免确认」这一特例的显式声明，高于等级的默认值。
+	if aiAgentFileWriteAuto[name] {
+		return approvalPolicy{mode: approvalAuto}
+	}
 	switch level {
 	case mcpsrv.LevelRead:
 		return approvalPolicy{mode: approvalAuto}
 	case mcpsrv.LevelWrite:
 		// 写类一律允许记住，具体粒度交给 approvalGrantKey：
-		// file_edit / file_write 记的是工具名（动作固定），run_command 记的是
-		// 命令族（npm 记 npm，rm 仍要问）。
+		// run_command 记的是命令族（npm 记 npm，rm 仍要问）。
 		return approvalPolicy{mode: approvalAsk, rememberable: true}
 	default:
 		// LevelRisk 及以上：问，且只给单次。
