@@ -122,6 +122,16 @@ func (a *AppService) GetScheduleRuns(taskID string, limit int) *ApiResult {
 	return wrap(runs, err)
 }
 
+// GetAllScheduleRuns 返回全部任务的执行历史（按时间倒序，最多 limit 条）。
+// 单任务视角回答不了「过去一周失败了几次」，页面统计需要跨任务的一次查询。
+func (a *AppService) GetAllScheduleRuns(limit int) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	runs, err := a.DB.ListAllScheduleRuns(limit)
+	return wrap(runs, err)
+}
+
 // SetScheduledTaskEnabled 启用/停用定时任务；启用时重算 next_run
 func (a *AppService) SetScheduledTaskEnabled(id string, enabled bool) *ApiResult {
 	if r := a.dbOK(); r != nil {
@@ -143,6 +153,43 @@ func (a *AppService) SetScheduledTaskEnabled(id string, enabled bool) *ApiResult
 	}
 	a.wakeScheduler()
 	return Ok(nextRun)
+}
+
+// SetAllScheduledTasksEnabled 批量启用/停用。
+// 只处理普通定时任务：action='todo' 是待办重复的内部实现，入口在待办页，
+// 不该被这里的「暂停所有」误停（否则用户只是投个屏，重复待办也一起哑了）。
+// 启用时沿用单条启用的口径：一次性任务时间已过则保持停用，不让 nextRun 为空却标成运行中。
+func (a *AppService) SetAllScheduledTasksEnabled(enabled bool) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	list, err := a.DB.ListScheduledTasks()
+	if err != nil {
+		return Fail(err)
+	}
+	changed := 0
+	for i := range list {
+		t := &list[i]
+		if t.Action == "todo" || t.Enabled == enabled {
+			continue
+		}
+		nextRun := ""
+		on := enabled
+		if on {
+			nextRun = computeNextRun(t, nowStr())
+			if nextRun == "" {
+				on = false // 一次性任务时间已过：拒绝启用
+			}
+		}
+		if err := a.DB.SetTaskEnabled(t.ID, on, nextRun); err != nil {
+			return Fail(err)
+		}
+		if on == enabled {
+			changed++
+		}
+	}
+	a.wakeScheduler()
+	return Ok(changed)
 }
 
 // RunScheduledTaskNow 立即手动执行一次（不影响下次排期）
