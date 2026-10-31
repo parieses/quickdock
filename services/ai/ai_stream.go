@@ -194,11 +194,14 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		Mentions: req.Mentions,
 	}, &sseSink{fl: fl, cancel: cancel})
 
-	// 用户已经切走了才提醒：盯着屏幕看完整段回答的人再收到一条「回答完成」纯属噪音，
-	// 而趁回答生成的时间去干别的事、回来发现早就好了，才是最需要提醒的场景。
-	// 中断与失败不提醒——那是「没答完」，不是「答完了」。
+	// 每次回答结束都通知：用户常在别处干活，跑完/中断/失败都需要被叫回来，
+	// 否则他不知道 AI 已经答完（尤其被切到后台、或去干别的了）。
 	if res.Err == nil && !res.Stopped {
 		s.notifyAIDone(res.ConvID, req.Message, res.Text)
+	} else if res.Stopped {
+		s.svc.App.PushNotification("ai", "info", "AI 回答已停止", logger.Trunc(strings.TrimSpace(req.Message), 24), "ai", res.ConvID)
+	} else {
+		s.svc.App.PushNotification("ai", "error", "AI 回答失败", logger.Trunc(res.Err.Error(), 160), "ai", res.ConvID)
 	}
 }
 
@@ -398,32 +401,23 @@ func (s *sseFlusher) loop() {
 	}
 }
 
-// notifyAIDone 在「主窗口没盯着」时把回答完成写进通知中心。
+// notifyAIDone 在回答正常完成时把结果写进通知中心。
 //
-// 判定分两层：
-//  1. 主窗口有焦点 —— 人就在窗口里，不打扰；
-//  2. 窗口可见 且 停在前 AI 对话页 —— 窗口可能因为用户去点别的应用而失焦，
-//     但他眼睛还在 AI 页上看着这段回答一个字一个字出来，此时再提醒一次是纯粹的复述。
-//
-// 只有「窗口隐藏/最小化」或「窗口停在别的页面」才值得写通知 —— 通知的价值在于
-// 替用户盯着他看不到的地方。
+// 这里不再判断「窗口有没有盯着」——用户明确反馈过：盯着屏幕时也常常注意不到
+// AI 已经答完（尤其回答较长、他中途切去干别的），所以一律通知。
+// 中断与失败由调用方用不同的标题单独通知。
 func (s *aiStreamServer) notifyAIDone(convID, question, answer string) {
 	if s.svc == nil || s.svc.App == nil || s.svc.App.DB == nil {
 		return
 	}
-	if s.svc.App.MainWindowActive() {
-		return
-	}
-	if s.svc.App.AIPageVisible() && s.svc.App.Flags != nil && s.svc.App.Flags.Main.Load() {
-		return
-	}
 	answer = strings.TrimSpace(answer)
-	if answer == "" {
-		return
-	}
 	title := "AI 回答已完成"
 	if q := strings.TrimSpace(question); q != "" {
 		title = "AI 回答已完成：" + logger.Trunc(strings.ReplaceAll(q, "\n", " "), 24)
 	}
-	s.svc.App.PushNotification("ai", "success", title, logger.Trunc(answer, 160), "ai", convID)
+	body := answer
+	if body == "" {
+		body = "（无文本输出）"
+	}
+	s.svc.App.PushNotification("ai", "success", title, logger.Trunc(body, 160), "ai", convID)
 }
