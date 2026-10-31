@@ -358,6 +358,19 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 	if conv.Summary != "" {
 		system += "\n\n[历史对话摘要]\n" + conv.Summary
 	}
+	// 项目记忆：把 <cwd>/.quickDock 下的整体记忆与近两日活动日志注入系统提示，
+	// 让 AI 先看到「项目是什么、已经做了什么」，不必每次都重读整个项目。
+	// 没有记忆（纯聊天会话 / 还没生成过）时 readProjectMemory 返回空串，不污染提示。
+	//
+	// 先 ensureMemoryProfile：若整体记忆还不存在，确定性扫描项目写一份基线画像，
+	// 保证 .quickDock 一定被建起来（而不是让模型去根目录生成 AGENTS.md 当记忆）。
+	// 计划模式是只读的，不在此写任何文件（含 AI 自己的记忆目录）。
+	if mode != "plan" {
+		ensureMemoryProfile(conv.Cwd)
+	}
+	if mem := readProjectMemory(conv.Cwd); mem != "" {
+		system += "\n\n[项目记忆]\n" + mem + projectMemoryGuidance()
+	}
 
 	messages := []map[string]interface{}{{"role": "system", "content": system}}
 	for _, m := range hist {

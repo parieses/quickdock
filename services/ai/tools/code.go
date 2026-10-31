@@ -104,6 +104,9 @@ func registerCode(d Deps) {
 			"查看 git log 这类必须在命令行做的事。有超时与输出上限，超时会连同子进程一起结束。"+
 			"**不会自己结束的命令**（dev server、watch、长驻服务）请用 background=true 起成后台任务，"+
 			"否则你只能等到超时，等到的也只是一句「已终止」。"+
+			"**统计 / 分析类脚本**（比如数代码行数、跑一次性数据处理）：先 file_write 把脚本写成文件，"+
+			"再用 background=true 跑它，然后反复 job_status / job_output 看进度与结果，跑完再读最终输出——"+
+			"不要同步等它（会卡住整轮回答），也不要把几十 MB 的日志整份读进上下文。"+
 			"**高危命令会被拒绝执行**（删除根目录、git reset --hard、强推、发版等），此时请把命令交给用户自己运行",
 		nil,
 		map[string]any{

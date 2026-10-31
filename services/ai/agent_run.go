@@ -635,6 +635,19 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		res.ConvID, firstTokenAt.Milliseconds(), rounds, len(records), totalUsage.Prompt, totalUsage.Completion, totalUsage.Cached)
 	sink.Event("done", doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records)))
 
+	// 自动写项目每日记忆：确定性提取「用户要了什么、改了哪些文件、跑了几轮」，
+	// 不调模型所以一定存在，让下一轮/下一会话不必重读整个项目。
+	// 子 agent 跳过：它的 task 是生成的、不是用户诉求，落进每日记忆会污染口径。
+	if !req.Fresh {
+		dailyFiles := make([]string, 0, len(records))
+		for _, rec := range records {
+			if rec.Path != "" {
+				dailyFiles = append(dailyFiles, rec.Path)
+			}
+		}
+		appendDailyMemory(res.ConvID, cwd, req.Message, dailyFiles, rounds, len(records))
+	}
+
 	res.Text = assistant
 	return res
 }

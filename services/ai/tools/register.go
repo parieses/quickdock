@@ -46,6 +46,7 @@ func Register(d Deps) {
 	registerGit(d)
 	registerCode(d)
 	registerJob(d)
+	registerMemory(d)
 }
 
 // registrar 单个域的注册入口：把域写进每个 Tool.Category，并统一补 InputSchema。
