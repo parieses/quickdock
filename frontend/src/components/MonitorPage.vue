@@ -1,5 +1,7 @@
 <script setup lang="ts">
-defineOptions({ name: 'MonitorPage' })
+defineOptions({ name: KEEP_ALIVE.monitor })
+// name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
+import { KEEP_ALIVE } from '../pages/keepAlive'
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
@@ -11,6 +13,7 @@ import {
   DeleteMonitor, SoftDeleteMonitor, RestoreMonitor, ListDeletedMonitors,
   SetMonitorEnabled, SetMonitorSort, SetMonitorMaintenance, CheckMonitorNow,
   GetMonitorLogs, GetMonitorLogsSince, ClearMonitorLogs, ListMonitorStats,
+  SetMonitorMute,
 } from '../../bindings/quickdock/services/monitor/monitorservice'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import type { Monitor } from '../../bindings/quickdock/internal/db/models'
@@ -42,7 +45,7 @@ interface MonitorStat {
 import {
   Plus, Play, Pencil, Trash2, Globe, Activity, RefreshCw,
   ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download, Search, Power, X, Wrench,
-  Bell as BellIcon,
+  Bell as BellIcon, BellOff,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -257,6 +260,9 @@ const fContentMatchPattern = ref('')
 // bindings 要重新生成才会带上字段，故用交叉类型补齐，避免整页类型检查被卡住
 //（不手改 frontend/bindings，那是生成物）。
 type MonitorWithHTTP = Monitor & { httpHeaders?: string; httpBody?: string }
+// muteUntil 同理：新增列要 build 后才进 bindings，这里用交叉类型补齐，
+// 免得整页类型检查被一个生成物字段卡住。
+type MonitorWithMute = Monitor & { muteUntil?: number }
 const fHeaders = ref('')
 const fBody = ref('')
 const NEEDS_BODY = ['POST', 'PUT', 'PATCH'] as const
@@ -468,6 +474,28 @@ async function toggleMaintenance(m: Monitor) {
   } catch (e) { error.value = getErrorMessage(e) }
 }
 
+// ---- 告警静默 ----
+// 与维护窗口不是一回事：维护窗口连探测都停了（图上是一段空白），
+// 静默只是「别再弹我」。凌晨备份把站点抖宕几分钟的场景要的是后者，
+// 用维护窗口会让这几分钟直接没数据，事后分不清「没探测」和「没问题」。
+function inMute(m: Monitor): boolean {
+  return ((m as MonitorWithMute).muteUntil || 0) > Math.floor(Date.now() / 1000)
+}
+function muteRemaining(m: Monitor): string {
+  const left = ((m as MonitorWithMute).muteUntil || 0) - Math.floor(Date.now() / 1000)
+  if (left <= 0) return ''
+  if (left < 3600) return Math.ceil(left / 60) + t('mon_min_short')
+  return (left / 3600).toFixed(1) + t('mon_hour_short')
+}
+async function toggleMute(m: Monitor) {
+  try {
+    const until = inMute(m) ? 0 : Math.floor(Date.now() / 1000) + 3600
+    await unwrap(await SetMonitorMute(m.id, until))
+    await refresh()
+    toast.success(t(until ? 'mon_mute_on_toast' : 'mon_mute_off_toast', { name: m.name }))
+  } catch (e) { error.value = getErrorMessage(e) }
+}
+
 // ---- 拖拽排序 ----
 // 复用定时任务/笔记同一套「按可见顺序重写 sort=i*10」：拖一下只动 sort 一列，
 // 不碰任何编辑字段，也绝不重算运行数据。分组只是展示层——拖动会反映到全局 sort 顺序，
@@ -513,11 +541,16 @@ async function onDrop(target: Monitor) {
 function isExpanded(id: string) { return expanded.value.has(id) }
 
 // 6.3 趋势图时间范围切换
+// 1h 是后补的：24h 在「刚重启/刚改配置」时满屏都是旧数据，看不出这半小时发生了什么。
 const LOG_RANGES = [
+  { value: '1h', sec: 3600, label: '1h' },
   { value: '24h', sec: 86400, label: '24h' },
   { value: '7d', sec: 86400 * 7, label: '7d' },
-  { value: 'all', sec: 0, label: '全部' },
+  { value: 'all', sec: 0, label: '' },
 ]
+function rangeLabel(r: { value: string; label: string }): string {
+  return r.value === 'all' ? t('mon_range_all') : r.label
+}
 // 范围按监控各存一份。用单个全局值时，同页展开多条会出现
 // 「切了 A 的范围，B 的图也跟着变了，但 B 的数据没重载」——图和数据对不上。
 const logRanges = ref<Record<string, string>>({})
@@ -544,6 +577,31 @@ async function onRangeChange(id: string) {
   await loadLogs(id)
   await nextTick()
   drawChart(id)
+}
+
+// ---- 正常率环形图 ----
+// 折线图回答「什么时候慢/挂了」，回答不了「这段时间到底稳不稳」——
+// 而后者才是运维第一眼看的东西。同一个 logsMap 再算一遍 up/total，
+// 口径与图、日历完全一致（切范围一起变），不额外请求。
+interface UptimeCell { total: number; up: number; down: number; pct: number }
+const uptimeMap = computed<Record<string, UptimeCell>>(() => {
+  const out: Record<string, UptimeCell> = {}
+  for (const [id, logs] of Object.entries(logsMap.value)) {
+    let up = 0
+    for (const l of logs) if (l.status === 'up') up++
+    const total = logs.length
+    out[id] = { total, up, down: total - up, pct: total ? (up / total) * 100 : 0 }
+  }
+  return out
+})
+function uptimeOf(id: string): UptimeCell {
+  return uptimeMap.value[id] || { total: 0, up: 0, down: 0, pct: 0 }
+}
+// SVG 用 stroke-dasharray 画环：周长 2πr，r=26（viewBox 64×64）。
+const RING_C = 2 * Math.PI * 26
+function ringDash(pct: number): string {
+  const on = Math.max(0, Math.min(100, pct)) / 100 * RING_C
+  return on.toFixed(2) + ' ' + (RING_C - on).toFixed(2)
 }
 
 // 6.1 证书到期显示
@@ -1057,6 +1115,9 @@ onUnmounted(() => {
               <span v-if="inMaintenance(m)" class="meta-maint" :title="t('mon_maint_ttl')">
                 <Wrench :size="11" /> {{ t('mon_maint_on', { t: maintRemaining(m) }) }}
               </span>
+              <span v-if="inMute(m)" class="meta-mute" :title="t('mon_mute_ttl')">
+                <BellOff :size="11" /> {{ t('mon_mute_on', { t: muteRemaining(m) }) }}
+              </span>
             </div>
           </div>
           <div class="item-actions" @click.stop>
@@ -1068,6 +1129,10 @@ onUnmounted(() => {
               <RefreshCw :size="14" :class="{ spin: checkingId === m.id }" />
             </button>
             <button class="act" @click="openEdit(m)" :title="t('mon_edit')"><Pencil :size="14" /></button>
+            <button class="act" :class="{ active: inMute(m) }" @click="toggleMute(m)"
+                    :title="inMute(m) ? t('mon_mute_cancel') : t('mon_mute_1h')">
+              <BellOff :size="14" />
+            </button>
             <button class="act" :class="{ active: inMaintenance(m) }" @click="toggleMaintenance(m)"
                     :title="inMaintenance(m) ? t('mon_maint_cancel') : t('mon_maint_1h')">
               <Wrench :size="14" />
@@ -1092,18 +1157,43 @@ onUnmounted(() => {
                   :key="r.value"
                   :class="['range-tab', { active: logRangeOf(m.id) === r.value }]"
                   @click="setLogRange(m.id, r.value); onRangeChange(m.id)"
-                >{{ r.label }}</button>
+                >{{ rangeLabel(r) }}</button>
               </div>
-              <button class="clear-logs" :disabled="!logsMap[m.id]?.length" @click="exportCsv(m)" :title="t('mon_export_csv')">
+              <button class="logs-btn" :disabled="!logsMap[m.id]?.length" @click="exportCsv(m)" :title="t('mon_export_csv')">
                 <Download :size="12" /> {{ t('mon_export_csv') }}
               </button>
-              <button class="clear-logs" @click="clearLogs(m)">{{ t('mon_clear_logs') }}</button>
+              <button class="logs-btn danger" @click="clearLogs(m)">{{ t('mon_clear_logs') }}</button>
             </div>
           </div>
           <div v-if="!logsMap[m.id] || logsMap[m.id].length === 0" class="logs-empty">{{ t('mon_no_logs') }}</div>
           <template v-else>
-            <canvas :id="chartId(m.id)" class="chart-canvas"
-              @mousemove="onChartMove($event, m.id)" @mouseleave="onChartLeave"></canvas>
+            <div class="logs-viz">
+              <!-- 正常率环形图：与折线图共用同一份 logsMap，切范围一起变 -->
+              <div class="uptime-ring" :title="t('mon_uptime_ring_ttl')">
+                <div class="ring-wrap">
+                  <svg viewBox="0 0 64 64" class="ring-svg" aria-hidden="true">
+                    <circle class="ring-track" cx="32" cy="32" r="26" />
+                    <circle
+                      class="ring-value"
+                      :class="{ warn: uptimeOf(m.id).pct < 99, bad: uptimeOf(m.id).pct < 90 }"
+                      cx="32" cy="32" r="26"
+                      :stroke-dasharray="ringDash(uptimeOf(m.id).pct)"
+                      transform="rotate(-90 32 32)"
+                    />
+                  </svg>
+                  <div class="ring-center">
+                    <span class="ring-pct">{{ uptimeOf(m.id).pct.toFixed(1) }}<i>%</i></span>
+                    <span class="ring-lbl">{{ t('mon_uptime') }}</span>
+                  </div>
+                </div>
+                <div class="ring-legend">
+                  <span class="ok">{{ t('mon_up') }} {{ uptimeOf(m.id).up }}</span>
+                  <span class="bad">{{ t('mon_down') }} {{ uptimeOf(m.id).down }}</span>
+                </div>
+              </div>
+              <canvas :id="chartId(m.id)" class="chart-canvas"
+                @mousemove="onChartMove($event, m.id)" @mouseleave="onChartLeave"></canvas>
+            </div>
             <!-- 停机日历：按日看失败强度，一眼定位「哪天挂过」 -->
             <div v-if="calendarDaysFor(m.id).length" class="down-cal">
               <div class="cal-head">
@@ -1237,8 +1327,8 @@ onUnmounted(() => {
         <select v-model="fContentMatchType" class="modal-input">
           <option v-for="mt in MATCH_TYPES" :key="mt" :value="mt">{{ t('mon_match_' + mt) }}</option>
         </select>
-        <input v-if="fContentMatchType !== 'none'" v-model="fContentMatchPattern" class="modal-input"
-          :placeholder="t('mon_match_pattern_ph')" style="margin-top: var(--space-2);" />
+        <input v-if="fContentMatchType !== 'none'" v-model="fContentMatchPattern" class="modal-input mt-2"
+          :placeholder="t('mon_match_pattern_ph')" />
 
         <div class="toggle-row">
           <label class="toggle-label"><input type="checkbox" v-model="fNotifyDown" /> {{ t('mon_notify_down') }}</label>
@@ -1247,23 +1337,23 @@ onUnmounted(() => {
         </div>
 
         <!-- 误报抑制：连续 N 次失败才告警 -->
-        <div class="interval-row" style="margin-top: var(--space-2);">
+        <div class="interval-row mt-2">
           <label>{{ t('mon_suppress_threshold') }}</label>
-          <input v-model.number="fDownAlertThreshold" type="number" min="1" max="20" class="modal-input interval-num" style="flex:0 0 72px;" />
+          <input v-model.number="fDownAlertThreshold" type="number" min="1" max="20" class="modal-input interval-num interval-num--fixed" />
           <span class="unit-suffix">{{ t('mon_suppress_unit') }}</span>
         </div>
 
         <!-- 多条件告警：延迟阈值（0=关闭）。达到「连续 N 次失败」时告警，延迟超阈值
              只在消息里附加说明——它不参与是否告警的判定（否则第 N 次延迟正常就永远不告警） -->
-        <div class="interval-row" style="margin-top: var(--space-2);">
+        <div class="interval-row mt-2">
           <label>{{ t('mon_latency_alert') }}</label>
-          <input v-model.number="fLatencyAlert" type="number" min="0" step="100" class="modal-input interval-num" style="flex:0 0 72px;" placeholder="0" />
+          <input v-model.number="fLatencyAlert" type="number" min="0" step="100" class="modal-input interval-num interval-num--fixed" placeholder="0" />
           <span class="unit-suffix">{{ t('mon_latency_alert_unit') }}</span>
         </div>
         <p class="field-hint">{{ t('mon_latency_alert_hint') }}</p>
 
         <!-- 分组：列表按组分区，监控多了之后按业务线/环境一眼定位 -->
-        <label style="margin-top: var(--space-2);">{{ t('mon_group') }}</label>
+        <label class="mt-2">{{ t('mon_group') }}</label>
         <input v-model="fGroup" class="modal-input" :placeholder="t('mon_group_ph')" list="mon-group-options" />
         <datalist id="mon-group-options">
           <option v-for="g in monitorGroups" :key="g" :value="g" />
@@ -1430,6 +1520,8 @@ onUnmounted(() => {
 
 /* 维护窗口徽标：与状态徽标区分，用中性的强调色 */
 .meta-maint { color: var(--color-warning, var(--color-text-muted)); }
+/* 静默徽标：比维护更轻——探测还在跑，只是不吵人，用弱化的次要色 */
+.meta-mute { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
 .mon-item .act.active { color: var(--color-warning, var(--color-accent)); }
 
 /* 视图切换 tab：活动列表 / 回收站，像标签页一样一眼分清当前在哪 */
@@ -1496,9 +1588,11 @@ onUnmounted(() => {
 .expand-btn:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 
 .logs-panel { border-top: 1px solid var(--color-border); padding: 8px 14px 12px; }
-.logs-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; }
+/* 面板头部允许换行：范围切换 + 导出 + 清空三个控件加起来比一行还宽时，
+   原来 justify-content 会把右侧那组挤到溢出，导出按钮直接看不见。 */
+.logs-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; gap: 8px; flex-wrap: wrap; }
 .logs-head > span { font-size: 12px; color: var(--color-text-secondary); font-weight: 500; }
-.logs-head-right { display: flex; align-items: center; gap: 10px; }
+.logs-head-right { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; row-gap: 6px; }
 .range-tabs { display: inline-flex; gap: 2px; padding: 2px; background: var(--color-bg-tertiary); border-radius: var(--radius-sm); }
 .range-tab {
   font-size: 11px; padding: 2px 9px; border: none; background: transparent;
@@ -1507,12 +1601,54 @@ onUnmounted(() => {
 }
 .range-tab:hover { color: var(--color-text-primary); }
 .range-tab.active { background: var(--color-accent); color: var(--color-accent-text); }
-.clear-logs { font-size: 11px; color: var(--color-text-disabled); background: transparent; border: none; cursor: pointer; font-family: inherit; }
-.clear-logs:hover { color: var(--color-danger); }
+/* 导出/清空是一组并列的次要操作：做成同样大小的按钮，导出用强调色描边，
+   否则和「清空」一样灰，用户会以为那只是条说明文字。 */
+.logs-btn {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 2px 8px; font-size: 11px; font-family: inherit; cursor: pointer;
+  color: var(--color-text-secondary); background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  white-space: nowrap;
+}
+.logs-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
+.logs-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+.logs-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
 .logs-empty { font-size: 11px; color: var(--color-text-disabled); padding: 6px 0; }
 
 /* 曲线图 canvas */
-.chart-canvas { display: block; width: 100%; height: 200px; border-radius: var(--radius-md); }
+.logs-viz { display: flex; align-items: stretch; gap: 12px; }
+.chart-canvas { display: block; width: 100%; flex: 1; min-width: 0; height: 200px; border-radius: var(--radius-md); }
+
+/* ---- 正常率环形图 ---- */
+/* 108px 固定宽：再窄环和百分比会互相挤压，再宽就抢折线图的空间。 */
+.uptime-ring {
+  flex: 0 0 108px; width: 108px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); padding: 8px 6px;
+}
+.ring-wrap { position: relative; width: 72px; height: 72px; }
+.ring-svg { width: 72px; height: 72px; display: block; }
+.ring-track {
+  fill: none; stroke: var(--color-bg-tertiary); stroke-width: 7;
+}
+.ring-value {
+  fill: none; stroke: var(--color-success); stroke-width: 7; stroke-linecap: round;
+  transition: stroke-dasharray 0.3s ease, stroke 0.2s;
+}
+.ring-value.warn { stroke: var(--color-warning); }
+.ring-value.bad { stroke: var(--color-danger); }
+/* 居中文字压在环上：绝对定位而不是 flex，避免百分比位数变化时环被顶动 */
+.ring-center {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 0;
+}
+.ring-pct { font-size: 15px; font-weight: 600; color: var(--color-text-primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
+.ring-pct i { font-size: 9px; font-style: normal; color: var(--color-text-disabled); margin-left: 1px; }
+.ring-lbl { font-size: 9px; color: var(--color-text-disabled); }
+.ring-legend { display: flex; gap: 8px; font-size: 10px; font-variant-numeric: tabular-nums; }
+.ring-legend .ok { color: var(--color-success); }
+.ring-legend .bad { color: var(--color-danger); }
 
 /* ---- 停机日历 ---- */
 .down-cal { margin-top: 10px; }
@@ -1549,7 +1685,7 @@ onUnmounted(() => {
 .tip-line { display: flex; align-items: center; gap: 6px; margin: 1px 0; }
 .tip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .tip-dot.up { background: var(--color-success); }
-.tip-dot.down { background: #e84c4c; }
+.tip-dot.down { background: var(--color-danger); }
 .tip-status { color: var(--color-text-primary); font-weight: 500; }
 .tip-code { color: var(--color-text-muted); font-weight: 600; }
 .tip-time { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
@@ -1571,6 +1707,8 @@ onUnmounted(() => {
 
 .interval-row { display: flex; gap: var(--space-2); align-items: center; }
 .interval-num { flex: 1; min-width: 0; }
+.interval-num--fixed { flex: 0 0 72px; }
+.mt-2 { margin-top: var(--space-2); }
 .unit-suffix { font-size: 12px; color: var(--color-text-disabled); width: 90px; flex-shrink: 0; text-align: center; }
 
 .toggle-label { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; margin: var(--space-2) 0 0; }

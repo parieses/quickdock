@@ -12,8 +12,10 @@ interface Props {
   editName: string
   selectedDoc: string
   selectedFolder: string
+  selectMode?: boolean
+  selected?: boolean
 }
-const props = withDefaults(defineProps<Props>(), { depth: 0 })
+const props = withDefaults(defineProps<Props>(), { depth: 0, selectMode: false, selected: false })
 
 const emit = defineEmits<{
   (e: 'toggle', id: string): void
@@ -28,6 +30,8 @@ const emit = defineEmits<{
   (e: 'drop-node', dragId: string, targetId: string): void
   /** 同级排序：把 dragId 插到 targetId 前面（before=true）或后面 */
   (e: 'reorder', dragId: string, targetId: string, before: boolean): void
+  /** 多选：切换某节点选中状态 */
+  (e: 'toggle-select', id: string): void
 }>()
 
 const { t } = useI18n()
@@ -94,20 +98,22 @@ function onDragStart(e: DragEvent) {
 <template>
   <div>
     <div
-      draggable
+      :draggable="!selectMode"
       :style="'padding-left:' + (12 + depth * 16) + 'px'"
       :class="['tn-row', 'tn-' + (isFolder ? 'folder' : 'doc'), {
         selected: selectedDoc === node.id || selectedFolder === node.id,
+        'sel-on': selected,
         'drop-before': dropSide === 'before',
         'drop-after': dropSide === 'after',
       }]"
-      @click="isFolder ? emit('toggle', node.id) : emit('select', node)"
+      @click="selectMode ? emit('toggle-select', node.id) : (isFolder ? emit('toggle', node.id) : emit('select', node))"
       @dragstart="onDragStart"
       @dragover="onDragOver"
       @dragleave="onDragLeave"
       @drop="onDrop"
     >
-      <button v-if="isFolder" class="tn-caret" @click.stop="emit('toggle', node.id)">
+      <span v-if="selectMode" class="tn-check" :class="{ on: selected }" @click.stop="emit('toggle-select', node.id)"></span>
+      <button v-else-if="isFolder" class="tn-caret" @click.stop="emit('toggle', node.id)">
         <ChevronRight v-if="!isOpen" :size="12" /><ChevronDown v-else :size="12" />
       </button>
       <span v-else class="tn-spacer"></span>
@@ -128,7 +134,7 @@ function onDragStart(e: DragEvent) {
         <span class="tn-name">{{ node.name || node.keyword }}</span>
       </template>
       <span v-if="isFolder && hasKids" class="tn-count">{{ node.children.length }}</span>
-      <span class="tn-actions" @click.stop>
+      <span v-if="!selectMode" class="tn-actions" @click.stop>
         <button v-if="isFolder" class="tn-act" :title="'+ ' + t('notesNewFolder')" @click="emit('create-folder', node.id)"><FolderPlus :size="12" /></button>
         <button v-if="isFolder" class="tn-act" :title="'+ ' + t('notesNewDoc')" @click="emit('create-doc', node.id)"><Plus :size="12" /></button>
         <button class="tn-act" :title="t('rename')" @click="emit('rename-start', node)"><Pencil :size="12" /></button>
@@ -172,8 +178,21 @@ function onDragStart(e: DragEvent) {
 
 .tn-caret { border: none; background: none; color: var(--color-text-disabled); cursor: pointer; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .tn-spacer { width: 14px; flex-shrink: 0; }
+/* 多选 checkbox：自绘，避免引入原生 checkbox 在暗色下的样式漂移 */
+.tn-check {
+  width: 14px; height: 14px; flex-shrink: 0; border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border-focus); background: var(--color-bg-primary);
+  cursor: pointer; position: relative; transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+.tn-check.on { background: var(--color-accent); border-color: var(--color-accent); }
+.tn-check.on::after {
+  content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
+  border: solid var(--color-on-accent, #fff); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.tn-row.sel-on { background: var(--color-accent-bg); color: var(--color-text-primary); }
+.tn-row.sel-on:hover { background: var(--color-accent-bg); }
 .tn-icon { flex-shrink: 0; color: var(--color-accent); }
-.tn-doc .tn-icon { color: #d9920a; }
+.tn-doc .tn-icon { color: var(--color-warning); }
 .tn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tn-count { font-size: 10px; color: var(--color-text-muted); background: var(--color-bg-tertiary); border-radius: var(--radius-md); padding: 0 6px; flex-shrink: 0; }
 

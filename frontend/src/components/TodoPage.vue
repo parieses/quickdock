@@ -14,11 +14,11 @@ import {
 } from '../../bindings/quickdock/services/appservice'
 import { pendingOpenTodoId } from '../composables/bridge'
 // 待办的增删改都会汇流到 refresh()，在那里顺手把侧边栏角标拉齐（不用等 60s 轮询）
-import { refreshNavBadges } from '../composables/useNavBadges'
+import { navBadges } from '../composables/useNavBadges'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
-  RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown,
+  RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown, History,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -71,6 +71,58 @@ const focusTotalSec = ref(0)          // 本轮目标秒数：区分「到点完
 let focusTimer: number | null = null  // setInterval id（只负责刷新显示，不负责计时）
 let focusEndAt = 0                    // 运行中的截止时间戳（ms）；0 = 未运行
 
+// 专注历史：此前 completeFocus 只发通知、不留痕，「今天专注了几次」无从回顾。
+// 落在 localStorage：本页不在 KeepAlive 白名单、切页即卸载，内存里的记录会丢。
+const FOCUS_HISTORY_KEY = 'qd_focus_history'
+const MAX_FOCUS_HISTORY = 100
+interface FocusRecord { ts: number; minutes: number; done: boolean; title: string }
+function loadFocusHistory(): FocusRecord[] {
+  try {
+    const a = JSON.parse(localStorage.getItem(FOCUS_HISTORY_KEY) || '[]')
+    if (!Array.isArray(a)) return []
+    return a
+      .filter((x: any) => x && typeof x.ts === 'number' && typeof x.minutes === 'number')
+      .slice(0, MAX_FOCUS_HISTORY)
+  } catch { return [] }
+}
+const focusHistory = ref<FocusRecord[]>(loadFocusHistory())
+const showFocusHist = ref(false)
+function recordFocus(minutes: number, done: boolean, title: string) {
+  const m = Math.round(minutes)
+  if (!m) return
+  focusHistory.value = [{ ts: Date.now(), minutes: m, done, title }, ...focusHistory.value].slice(0, MAX_FOCUS_HISTORY)
+  try { localStorage.setItem(FOCUS_HISTORY_KEY, JSON.stringify(focusHistory.value)) } catch { /* 配额/隐私模式忽略 */ }
+}
+// 今日统计只算真正走完的会话（done=true），中途放弃不计入「今天专注 N 次」
+const todayFocusStats = computed(() => {
+  const t0 = new Date(); t0.setHours(0, 0, 0, 0)
+  const start = t0.getTime()
+  let count = 0, minutes = 0
+  for (const r of focusHistory.value) {
+    if (r.ts >= start && r.done) { count++; minutes += r.minutes }
+  }
+  return { count, minutes }
+})
+function fmtHistTime(ts: number): string {
+  const d = new Date(ts)
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const dayKey = (x: Date) => `${x.getFullYear()}-${x.getMonth()}-${x.getDate()}`
+  const now = new Date()
+  if (dayKey(d) === dayKey(now)) return hm
+  const y = new Date(); y.setDate(y.getDate() - 1)
+  if (dayKey(d) === dayKey(y)) return t('todoFocusYesterday') + ' ' + hm
+  return `${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')} ${hm}`
+}
+// 自定义时长：输入框只在「非预设值」时显示数字，否则留空并显示占位符
+const isFocusPreset = computed(() => FOCUS_DEFAULTS.includes(focusMinutes.value))
+function applyFocusCustom(e: Event) {
+  const el = e.target as HTMLInputElement
+  const v = Math.floor(Number(el.value))
+  if (!Number.isFinite(v) || v < 1) { el.value = ''; return }
+  focusMinutes.value = Math.min(180, v)
+  el.value = String(focusMinutes.value)
+}
+
 function focusTitle(id: string): string {
   return todos.value.find(t => t.id === id)?.title || ''
 }
@@ -106,7 +158,9 @@ function startTicker() {
 
 function completeFocus() {
   const title = focusTitle(focusTodoId.value) || t('focusTimerTitle')
-  try { NotifyFocusComplete(title, Math.round(focusTotalSec.value / 60) || 1) } catch (e) { logErr('TodoPage', e) }
+  const mins = Math.round(focusTotalSec.value / 60) || 1
+  try { NotifyFocusComplete(title, mins) } catch (e) { logErr('TodoPage', e) }
+  recordFocus(mins, true, title)
   stopFocusTimer()
   focusEndAt = 0
   focusTodoId.value = ''
@@ -147,6 +201,7 @@ function endFocus() {
   focusEndAt = 0
   if (finished && focusTodoId.value) {
     try { NotifyFocusComplete(title || t('focusTimerTitle'), Math.round(total / 60) || 1) } catch (e) { logErr('TodoPage', e) }
+    recordFocus(total / 60, true, title || t('focusTimerTitle'))
   }
   focusTodoId.value = ''
   focusRunning.value = false
@@ -211,6 +266,14 @@ const selectedDate = ref('')                  // '' = 未排期；否则 YYYY-MM
 const todayStr = computed(() => {
   const d = new Date()
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+})
+
+// 「今天」按钮只在点了真的会改变视图时才显示：已经选中今天、且正看着今天所在月份时，
+// 点它毫无效果、只剩占位感。翻到别的月份仍保留，方便一键跳回。
+const atToday = computed(() => {
+  if (selectedDate.value !== todayStr.value) return false
+  const d = new Date()
+  return viewYear.value === d.getFullYear() && viewMonth.value === d.getMonth()
 })
 
 const WEEKDAY_NAMES = computed(() => ['日', '一', '二', '三', '四', '五', '六'].map(w => t('toDoWeekday_' + w)))
@@ -447,9 +510,22 @@ function statusTodos(status: string): Todo[] {
 const dragId = ref('')
 const dragOverStatus = ref('')
 
-function onDragStart(id: string) {
+function onDragStart(id: string, e?: DragEvent) {
   dragId.value = id
   dragOverStatus.value = ''
+  // Chromium 不设 dataTransfer 也能拖，但 WebKit/Firefox 必须 setData 才真正启动；
+  // effectAllowed 决定光标是「移动」而不是「复制」。
+  try {
+    if (e?.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move'
+      e.dataTransfer.setData('text/plain', id)
+    }
+  } catch { /* 只读 dataTransfer 时忽略 */ }
+}
+function onDragEnd() {
+  dragId.value = ''
+  dragOverStatus.value = ''
+  calDropDate.value = ''
 }
 
 /** 拖进某一列：先换状态，再落到该列末尾。 */
@@ -472,6 +548,36 @@ async function moveToStatus(status: string) {
   } catch (e) {
     error.value = getErrorMessage(e)
   }
+}
+
+// ---- 拖拽改日期：从列表/看板把待办拖到日历格子上 ----
+const calDropDate = ref('')
+function onCalDragLeave(ds: string) {
+  if (calDropDate.value === ds) calDropDate.value = ''
+}
+async function setTodoDueDate(id: string, dueDate: string) {
+  const todo = todos.value.find(x => x.id === id)
+  if (!todo || todo.dueDate === dueDate) return
+  try {
+    // 只改 dueDate 也得走全量 UpdateTodo：后端没有单字段更新接口
+    await unwrap(await UpdateTodo(
+      todo.id, todo.title, todo.priority, dueDate, todo.note,
+      todo.startTime, todo.endTime, todo.reminderTime,
+      todo.recurrence, todo.tags, todo.status || 'todo',
+    ))
+    await refresh()
+  } catch (e) {
+    error.value = getErrorMessage(e)
+  }
+}
+async function dropOnDate(ds: string) {
+  const id = dragId.value
+  dragId.value = ''
+  calDropDate.value = ''
+  if (!id) return
+  await setTodoDueDate(id, ds)
+  // 落到目标日期后切过去，用户立刻能看到条目出现在那天（否则停在原日期像没反应）
+  selectedDate.value = ds
 }
 
 // 构建 6×7 共 42 个单元格（周一为起始列）
@@ -529,6 +635,12 @@ const unscheduledCount = computed(() => todos.value.filter(x => x.dueDate === ''
 const searchQuery = ref('')
 const searching = computed(() => searchQuery.value.trim().length > 0)
 
+// 「今天完成」的条目：即使它挂在过去日期（每日重复待办的典型形态：模板建在旧日期、
+// 今天在「今天」视图里被 `!done` 带出来完成），完成后也要留在视野里，
+// 否则用户只看到它凭空消失，不知道「今天的已经做完了」。
+function isDoneToday(x: Todo): boolean {
+  return x.done && (x.completedAt || '').slice(0, 10) === todayStr.value
+}
 const selectedTodos = computed(() => {
   const q = searchQuery.value.trim().toLowerCase()
   let list: Todo[]
@@ -543,7 +655,7 @@ const selectedTodos = computed(() => {
     // 而页面此前只按 dueDate 精确匹配，于是角标写 8、点进去只看到 2。
     // 逾期条目挂在过去某天，不并进来就得逐个翻日历才找得到。
     list = todos.value.filter(x => x.parentId === '' && (
-      x.dueDate === d || (d === todayStr.value && x.dueDate !== '' && x.dueDate < d && !x.done)
+      x.dueDate === d || (d === todayStr.value && x.dueDate !== '' && x.dueDate < d && (!x.done || isDoneToday(x)))
     ))
   }
   if (activeTag.value) {
@@ -579,7 +691,7 @@ async function refresh() {
       // 所有增删改都走 refresh()（新建/编辑/勾选/删除/清空/拖拽/子任务），
       // 在这里统一补一次角标刷新：后端 CountTodosDue 是即时的，但角标原本只靠
       // 60s 轮询，删掉一条到期待办后侧边栏数字还会杵着，看起来像没删掉。
-      refreshNavBadges()
+      navBadges().refreshNow()
     }
   }
 }
@@ -750,6 +862,19 @@ function isOverdue(todo: Todo) {
   return todo.dueDate !== '' && todo.dueDate < todayStr.value && !todo.done
 }
 
+// 完成时间文案：completedAt 是 RFC3339（带时区偏移），slice 取日期/时分即可
+function doneLabel(todo: Todo): string {
+  const s = todo.completedAt || ''
+  if (!s) return t('todoDone')
+  const day = s.slice(0, 10)
+  const hm = s.slice(11, 16)
+  if (day === todayStr.value) return t('todoDoneToday', { time: hm })
+  const y = new Date(); y.setDate(y.getDate() - 1)
+  const ys = `${y.getFullYear()}-${String(y.getMonth() + 1).padStart(2, '0')}-${String(y.getDate()).padStart(2, '0')}`
+  if (day === ys) return t('todoDoneYesterday', { time: hm })
+  return `${day.slice(5)} ${hm}`
+}
+
 // ---- 命令面板深链定位 ----
 // 面板选中一条待办后由后端广播 id，App.vue 写入 pendingOpenTodoId 并切到本页。
 // 关键点是「先把 gaze 挪过去」：列表只显示 selectedDate 那一天（或未排期），
@@ -782,6 +907,9 @@ async function focusPendingTodo() {
 
 watch(pendingOpenTodoId, (v) => { if (v) void focusPendingTodo() })
 
+function onDocClick(e: MouseEvent) {
+  if (!(e.target as HTMLElement).closest?.('.focus-hist-wrap')) showFocusHist.value = false
+}
 onMounted(() => {
   selectedDate.value = todayStr.value
   refresh()
@@ -789,8 +917,12 @@ onMounted(() => {
   restoreFocus()
   // id 可能在组件创建之前就已写入（先切页、后 mount），watch 不会回溯触发
   if (pendingOpenTodoId.value) void focusPendingTodo()
+  document.addEventListener('click', onDocClick)
 })
-onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
+onUnmounted(() => {
+  if (highlightTimer) clearTimeout(highlightTimer)
+  document.removeEventListener('click', onDocClick)
+})
 </script>
 
 <template>
@@ -811,7 +943,7 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
           <button class="qd-icon-btn" @click="prevMonth" :title="t('prevMonth')"><ChevronLeft :size="16" /></button>
           <span class="cal-month">{{ monthLabel }}</span>
           <button class="qd-icon-btn" @click="nextMonth" :title="t('nextMonth')"><ChevronRight :size="16" /></button>
-          <button class="qd-btn qd-btn-ghost" @click="goToday">{{ t('todoToday') }}</button>
+          <button v-if="!atToday" class="qd-btn qd-btn-ghost" @click="goToday">{{ t('todoToday') }}</button>
         </div>
       </div>
       <div class="qd-page-actions">
@@ -821,6 +953,33 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
             @click="focusMinutes = d">
             {{ d }}
           </button>
+          <input
+            class="focus-dur-custom"
+            type="number" min="1" max="180"
+            :value="isFocusPreset ? '' : focusMinutes"
+            :placeholder="t('todoFocusCustom')"
+            :title="t('todoFocusCustom')"
+            @change="applyFocusCustom"
+          />
+        </div>
+        <div class="focus-hist-wrap">
+          <button class="qd-icon-btn focus-hist-btn" :class="{ active: showFocusHist }"
+            :title="t('todoFocusHistory')" @click.stop="showFocusHist = !showFocusHist">
+            <History :size="15" />
+            <span v-if="todayFocusStats.count" class="focus-hist-badge">{{ todayFocusStats.count }}</span>
+          </button>
+          <div v-if="showFocusHist" class="focus-hist-pop" @click.stop>
+            <div class="fh-head">{{ t('todoFocusTodayStat', { count: todayFocusStats.count, min: todayFocusStats.minutes }) }}</div>
+            <div v-if="!focusHistory.length" class="fh-empty">{{ t('todoFocusNoHistory') }}</div>
+            <div v-else class="fh-list">
+              <div v-for="r in focusHistory.slice(0, 20)" :key="r.ts" class="fh-row">
+                <span class="fh-dot" :class="{ ok: r.done }"></span>
+                <span class="fh-title">{{ r.title || t('focusTimerTitle') }}</span>
+                <span class="fh-min">{{ r.minutes }}{{ t('todoFocusMinUnit') }}</span>
+                <span class="fh-time">{{ fmtHistTime(r.ts) }}</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -837,8 +996,11 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
           <button
             v-for="c in cells"
             :key="c.date"
-            :class="['cal-cell', { 'out-month': !c.inMonth, 'is-today': c.isToday, 'is-selected': c.isSelected }]"
+            :class="['cal-cell', { 'out-month': !c.inMonth, 'is-today': c.isToday, 'is-selected': c.isSelected, 'drop-over': calDropDate === c.date }]"
             @click="selectDate(c.date)"
+            @dragover.prevent="calDropDate = c.date"
+            @dragleave="onCalDragLeave(c.date)"
+            @drop.prevent="dropOnDate(c.date)"
           >
             <span class="cal-day">{{ c.day }}</span>
             <span class="cal-marks">
@@ -899,7 +1061,10 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
               v-for="todo in selectedTodos"
               :key="todo.id"
               :data-todo-id="todo.id"
+              draggable="true"
               :class="['todo-item', { done: todo.done, overdue: isOverdue(todo), 'todo-flash': highlightTodoId === todo.id }]"
+              @dragstart="onDragStart(todo.id, $event)"
+              @dragend="onDragEnd"
             >
               <button class="check" :class="{ checked: todo.done }" @click="toggle(todo)">
                 <Check v-if="todo.done" :size="13" />
@@ -911,6 +1076,9 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
                   <!-- 搜索是跨日期的，列表必须标出这一条属于哪天，否则只有标题看不出落点 -->
                   <span v-if="searching && todo.dueDate" class="meta-pill">{{ todo.dueDate }}</span>
                   <span v-if="isOverdue(todo)" class="overdue-text">{{ t('todoOverdue') }}</span>
+                  <span v-if="todo.done" class="meta-pill done-pill">
+                    <Check :size="11" /> {{ doneLabel(todo) }}
+                  </span>
                   <span v-if="todo.reminderTime" class="meta-pill" :class="{ sent: todo.reminderSent }">
                     <Bell v-if="!todo.reminderSent" :size="11" />
                     <BellRing v-else :size="11" />
@@ -949,7 +1117,7 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
               </div>
 
               <!-- 4.1 子任务（单层级 checklist）-->
-              <div v-if="subtasksOf(todo.id).length || addingSubFor === todo.id" class="subtasks">
+              <div v-if="subtasksOf(todo.id).length || addingSubFor === todo.id" class="subtasks" @dragstart.stop>
                 <div v-if="subtasksOf(todo.id).length" class="sub-progress">
                   <div class="sub-progress-bar"><div class="sub-progress-fill" :style="{ width: subProgress(todo.id).pct + '%' }"></div></div>
                   <span class="sub-progress-text">{{ subProgress(todo.id).done }}/{{ subProgress(todo.id).total }} ({{ subProgress(todo.id).pct }}%)</span>
@@ -1016,7 +1184,8 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
                 :key="card.id"
                 class="kanban-card"
                 draggable="true"
-                @dragstart="onDragStart(card.id)"
+                @dragstart="onDragStart(card.id, $event)"
+                @dragend="onDragEnd"
               >
                 <span class="kanban-card-name">{{ card.title }}</span>
                 <div class="kanban-card-meta">
@@ -1210,9 +1379,12 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
   overflow: hidden;
   background: var(--color-bg-primary);
 }
-.cal-nav { display: flex; align-items: center; gap: var(--space-2); }
+/* flex-shrink:0：右栏加了自定义时长输入与历史按钮后，页头中间变挤，
+   若让 cal-nav 被压缩，其内容会溢出压到「今天」按钮与右侧 25 档按钮上（重叠） */
+.cal-nav { display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0; }
 /* 页内搜索：只搜标题/备注/标签，跨日期；宽度与笔记页搜索一致 */
-.todo-search { width: 220px; flex-shrink: 0; margin-right: var(--space-3); }
+/* 空间不足时优先压缩搜索框（它可窄到 120px），保住日历导航不被挤压 */
+.todo-search { width: 220px; flex-shrink: 1; min-width: 120px; margin-right: var(--space-3); }
 .ts-input { padding-left: 28px; padding-right: 26px; }
 .ts-clear { position: absolute; right: 6px; border: none; background: none; color: var(--color-text-muted); cursor: pointer; display: flex; align-items: center; }
 .focus-dur { display: flex; align-items: center; gap: 2px; }
@@ -1223,6 +1395,42 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 }
 .focus-dur-btn:hover { color: var(--color-text-primary); }
 .focus-dur-btn.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.focus-dur-custom {
+  width: 52px; height: 24px; padding: 0 4px; text-align: center;
+  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+  color: var(--color-text-primary); border-radius: var(--radius-sm);
+  font-size: 11px; font-family: inherit; outline: none; -moz-appearance: textfield;
+  transition: border-color var(--transition-fast);
+}
+.focus-dur-custom::-webkit-outer-spin-button,
+.focus-dur-custom::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.focus-dur-custom:focus { border-color: var(--color-border-focus); }
+.focus-hist-wrap { position: relative; display: flex; align-items: center; margin-left: var(--space-2); }
+.focus-hist-btn { position: relative; }
+.focus-hist-btn.active { color: var(--color-accent); }
+.focus-hist-badge {
+  position: absolute; top: -4px; right: -4px; min-width: 14px; height: 14px;
+  padding: 0 3px; border-radius: 999px; background: var(--color-accent);
+  color: var(--color-accent-text); font-size: 9px; line-height: 14px; text-align: center; font-weight: 600;
+}
+.focus-hist-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 264px;
+  max-height: 320px; overflow: auto; padding: var(--space-3);
+  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+}
+.fh-head {
+  font-size: 12px; font-weight: 600; color: var(--color-text-primary);
+  padding-bottom: var(--space-2); margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+.fh-empty { font-size: 11px; color: var(--color-text-disabled); text-align: center; padding: var(--space-3) 0; }
+.fh-row { display: flex; align-items: center; gap: 6px; padding: 3px 0; font-size: 11px; }
+.fh-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text-disabled); flex-shrink: 0; }
+.fh-dot.ok { background: var(--color-accent); }
+.fh-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--color-text-primary); }
+.fh-min { color: var(--color-text-muted); flex-shrink: 0; }
+.fh-time { color: var(--color-text-disabled); flex-shrink: 0; font-variant-numeric: tabular-nums; }
 .cal-month { font-size: 13px; font-weight: 600; color: var(--color-text-primary); min-width: 84px; text-align: center; }
 
 .todo-error {
@@ -1252,6 +1460,11 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
   transition: background var(--transition-fast);
 }
 .cal-cell:hover { background: var(--color-bg-hover); }
+.cal-cell.drop-over {
+  background: var(--color-accent-bg);
+  outline: 1.5px dashed var(--color-accent-border);
+  outline-offset: -2px;
+}
 .cal-cell.out-month { opacity: 0.45; }
 .cal-day {
   display: flex; align-items: center; justify-content: center;
@@ -1347,7 +1560,7 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 /* 看板视图（4.3）*/
 .kanban { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); min-height: 0; overflow: hidden; }
 .kanban-col {
-  display: flex; flex-direction: column; min-height: 0;
+  display: flex; flex-direction: column; min-height: 0; height: 100%;
   background: var(--color-bg-secondary); border-radius: var(--radius-lg);
   border: 1px solid var(--color-border); padding: var(--space-3);
 }
@@ -1362,6 +1575,7 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 .kanban-card {
   padding: 9px 11px; background: var(--color-bg-primary); border: 1px solid var(--color-border);
   border-radius: var(--radius-md); cursor: grab; transition: background var(--transition-fast);
+  min-height: 46px;
 }
 .kanban-card:hover { background: var(--color-bg-hover); }
 .kanban-card:active { cursor: grabbing; }
@@ -1372,7 +1586,10 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 .kanban-due.overdue { color: var(--color-danger); font-weight: 500; }
 /* 拖拽落点：整列描边提示，比只高亮卡片更容易判断"会落到哪一列" */
 .kanban-col.drag-over { border-color: var(--color-accent); background: var(--color-accent-bg); }
-.kanban-empty { text-align: center; font-size: 11px; color: var(--color-text-disabled); padding: var(--space-5) 0; }
+.kanban-empty {
+  flex: 1; display: flex; align-items: center; justify-content: center;
+  text-align: center; font-size: 11px; color: var(--color-text-disabled); padding: var(--space-5) 0;
+}
 
 .tag-filter { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3); }
 .tag-fbtn {
@@ -1425,6 +1642,7 @@ onUnmounted(() => { if (highlightTimer) clearTimeout(highlightTimer) })
 .overdue-text { color: var(--color-danger); }
 .meta-pill { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
 .meta-pill.sent { color: var(--color-text-disabled); }
+.done-pill { color: var(--color-accent); }
 .todo-note { color: var(--color-text-muted); }
 .tag-chip {
   font-size: 10px; padding: 0 7px; line-height: 16px; border-radius: var(--radius-md);

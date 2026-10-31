@@ -886,7 +886,7 @@ watch(() => props.visible, async (v) => {
   border-radius: 50%;
   margin-right: 5px;
   vertical-align: 1px;
-  background: #8b919c;
+  background: var(--color-text-muted);
 }
 .dsh-dot.on {
   background: var(--color-success);
@@ -1025,7 +1025,7 @@ watch(() => props.visible, async (v) => {
   padding: 10px 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  background: #0d0f12;
+  background: var(--color-code-bg);
   font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
   font-size: 11px;
   line-height: 1.6;

@@ -1,10 +1,12 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { StickyNote, Check, Loader2, MessageCircleQuestion } from '@lucide/vue'
 import { GetNote, SaveNote } from '../../bindings/quickdock/services/note/noteservice'
 import { unwrap } from '../utils/api'
 import { useAIAvailability } from '../composables/useAIAvailability'
+import { createCodeEditor, type CodeEditorHandle } from '../utils/aiCodeEditor'
+import { logErr } from '../utils/logger'
 import NoteAiPanel from './NoteAiPanel.vue'
 
 const { t } = useI18n()
@@ -12,7 +14,9 @@ const { t } = useI18n()
 const note = ref('')
 const loaded = ref(false)
 const status = ref<'idle' | 'saving' | 'saved'>('idle')
-const areaRef = ref<HTMLTextAreaElement | null>(null)
+// 编辑器宿主（textarea → CodeMirror：markdown 便签也能看出结构）
+const editorHost = ref<HTMLElement | null>(null)
+let editor: CodeEditorHandle | null = null
 let timer: ReturnType<typeof setTimeout> | null = null
 let pending = ''
 
@@ -41,9 +45,44 @@ function scheduleSave() {
   }, 500)
 }
 
-watch(note, scheduleSave)
+watch(note, (v) => {
+  scheduleSave()
+  // 外部改了内容（首次加载、AI 写回）→ 同步进编辑器。
+  // 自己敲字时这里也会被调用一次，但 setValue 内部内容相同会直接 return，不必另设标志位
+  // （watch 默认 flush 是 pre，标志位在这一刻早就被重置了，写了也是假的）。
+  editor?.setValue(v)
+})
 
-onMounted(load)
+async function mountEditor() {
+  await nextTick()
+  const host = editorHost.value
+  if (!host) return
+  try {
+    editor = await createCodeEditor(host, {
+      value: note.value,
+      filename: 'note.md',
+      fontSize: '14px',
+      fontFamily: 'var(--font-family)',
+      lineWrapping: true,
+      // 便签不需要行号，Tab 也该能移出输入框
+      lineNumbers: false,
+      tabIndent: false,
+      placeholder: t('notePlaceholder'),
+      onChange: (v) => {
+        note.value = v
+      },
+      onSave: () => { void SaveNote(note.value).catch(() => {}) },
+    })
+    editor.focus()
+  } catch (e) {
+    logErr('NotePanel:editor', e)
+  }
+}
+
+onMounted(async () => {
+  await load()
+  void mountEditor()
+})
 onUnmounted(() => {
   if (timer) {
     clearTimeout(timer)
@@ -51,6 +90,8 @@ onUnmounted(() => {
     // flush 防抖 pending 内容
     SaveNote(note.value).catch(() => {})
   }
+  editor?.destroy()
+  editor = null
 })
 
 // 问 AI：优先取划选文本，否则取整篇笔记，然后在本浮窗内打开面板。
@@ -63,11 +104,9 @@ const aiText = ref('')
 const { check: checkAI, goToConfig } = useAIAvailability()
 
 async function askAI() {
-  const ta = areaRef.value
-  let text = ''
-  if (ta && ta.selectionStart !== ta.selectionEnd) {
-    text = ta.value.slice(ta.selectionStart, ta.selectionEnd)
-  }
+  // 划选了就问划选的那段，否则问整篇。选区存在 CM 的 state 里，抢焦点也不会丢。
+  const sel = editor?.getSelection()
+  let text = sel?.text ?? ''
   if (!text.trim()) text = note.value
   if (!text.trim()) return
 
@@ -101,13 +140,7 @@ async function askAI() {
         </span>
       </div>
     </div>
-    <textarea
-      ref="areaRef"
-      v-model="note"
-      class="note-area"
-      :placeholder="t('notePlaceholder')"
-      spellcheck="false"
-    ></textarea>
+    <div ref="editorHost" class="note-editor"></div>
 
     <!-- AI 面板覆盖在编辑区之上：关掉就回到原文，不打断"边看边改"。 -->
     <NoteAiPanel v-if="aiOpen" :text="aiText" @close="aiOpen = false" />
@@ -139,14 +172,9 @@ async function askAI() {
 .note-status.saved { color: var(--color-success); }
 .spin { animation: note-spin 1s linear infinite; }
 @keyframes note-spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-.note-area {
-  flex: 1; width: 100%;
-  border: none; outline: none; resize: none;
-  background: var(--color-bg-primary); color: var(--color-text-primary);
-  font-family: var(--font-family);
-  font-size: 14px; line-height: 1.6;
-  padding: 14px;
-  box-sizing: border-box;
-}
-.note-area::placeholder { color: var(--color-text-disabled); }
+/* 编辑区：CodeMirror 撑满剩余高度。内边距落在 .cm-content 上，
+   与原来 textarea 的 14px 观感一致 */
+.note-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg-primary); }
+.note-editor :deep(.cm-editor) { flex: 1; min-height: 0; }
+.note-editor :deep(.cm-content) { padding: 14px; }
 </style>

@@ -171,6 +171,7 @@ onMounted(load)
             ref="editorRef"
             v-model="draft"
             :readonly="truncated"
+            :filename="entry.name"
             @save="save"
           />
         </template>

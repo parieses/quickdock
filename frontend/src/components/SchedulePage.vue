@@ -3,10 +3,11 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { matchesTextOrPinyin } from '../utils/pinyin'
 import {
   CreateScheduledTask, ListScheduledTasks, UpdateScheduledTask,
   DeleteScheduledTask, SetScheduledTaskEnabled, RunScheduledTaskNow,
-  SetScheduledTaskSort,
+  SetScheduledTaskSort, GetAllScheduleRuns, SetAllScheduledTasksEnabled,
 } from '../../bindings/quickdock/services/appservice'
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
 
@@ -16,9 +17,9 @@ import ScheduleRunHistoryDialog from './ScheduleRunHistoryDialog.vue'
 // 「打开软件」的目标输入复用应用选择器：支持手输自定义路径 / 浏览文件 / 系统扫描的已装应用
 import AppTargetPicker from './AppTargetPicker.vue'
 import {
-  Plus, Play, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
+  Plus, Play, Pause, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
-  Search, LoaderCircle, GripVertical, Bell,
+  Search, LoaderCircle, GripVertical, Bell, BarChart3,
 } from '@lucide/vue'
 
 const { t, locale } = useI18n()
@@ -105,6 +106,50 @@ async function refresh() {
   } finally {
     loading.value = false
   }
+  // 统计与列表解耦：拉历史失败不该让整页报错，也不阻塞列表渲染
+  void loadRuns()
+}
+
+// ---- 运行统计（近 7 天）----
+// 单任务历史只能回答「这条最近怎么样」，看不到「过去一周一共失败了几次」。
+// 一次拉全量（上限 1000 条，后端按任务保留 500 条）在前端按天聚合。
+interface RunItem {
+  id: string; taskId: string; taskName: string; runAt: string
+  status: string; result: string; durationMs: number; createdTs: number
+}
+const runs = ref<RunItem[]>([])
+async function loadRuns() {
+  try {
+    runs.value = unwrap<RunItem[]>(await GetAllScheduleRuns(1000)) ?? []
+  } catch { /* 统计失败不影响主列表 */ }
+}
+const stats = computed(() => {
+  const days: { date: string; total: number; fail: number }[] = []
+  const today = new Date(); today.setHours(0, 0, 0, 0)
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(today); d.setDate(d.getDate() - i)
+    days.push({
+      date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
+      total: 0, fail: 0,
+    })
+  }
+  const idx = new Map(days.map((x, i) => [x.date, i]))
+  let total = 0, fail = 0
+  for (const r of runs.value) {
+    const i = idx.get((r.runAt || '').slice(0, 10))
+    if (i === undefined) continue
+    days[i].total++
+    total++
+    if (r.status !== 'ok') { days[i].fail++; fail++ }
+  }
+  const max = Math.max(1, ...days.map(d => d.total))
+  return { days, total, fail, max, rate: total ? Math.round((fail / total) * 100) : 0 }
+})
+function barPct(n: number): number {
+  return Math.round((n / stats.value.max) * 100)
+}
+function dayLabel(ds: string): string {
+  return ds.slice(5) // MM-DD，tooltip 用
 }
 
 // ---- 搜索与筛选 ----
@@ -121,13 +166,14 @@ const STATUS_FILTERS = computed(() => [
 ])
 
 const filteredTasks = computed(() => {
-  const q = query.value.trim().toLowerCase()
+  const q = query.value.trim()
   return tasks.value.filter((x) => {
     if (statusFilter.value === 'fail' && x.lastStatus !== 'fail') return false
     if (statusFilter.value === 'on' && !x.enabled) return false
     if (statusFilter.value === 'off' && x.enabled) return false
     if (!q) return true
-    return (x.name || '').toLowerCase().includes(q) || (x.target || '').toLowerCase().includes(q)
+    // 与待办/笔记/侧栏同口径：原文包含或拼音命中（名称、目标都参与）
+    return matchesTextOrPinyin([x.name, x.target], q, 'sched:' + x.id)
   })
 })
 
@@ -397,6 +443,23 @@ async function toggleEnabled(t0: ScheduledTask) {
   } catch (e) { error.value = getErrorMessage(e) }
 }
 
+// ---- 批量启停 ----
+// 临时全停（会议投屏等）不该一条条点。后端只处理普通任务，待办派生任务不受影响。
+const bulkBusy = ref(false)
+const allOn = computed(() => tasks.value.length > 0 && tasks.value.every(x => x.enabled))
+async function toggleAllEnabled() {
+  bulkBusy.value = true
+  error.value = ''
+  try {
+    await unwrap(await SetAllScheduledTasksEnabled(!allOn.value))
+    await refresh()
+  } catch (e) {
+    error.value = getErrorMessage(e)
+  } finally {
+    bulkBusy.value = false
+  }
+}
+
 const runningId = ref('')
 async function runNow(t0: ScheduledTask) {
   runningId.value = t0.id
@@ -452,6 +515,13 @@ onMounted(refresh)
         <span class="qd-page-sub">{{ t('sched_subtitle') }}</span>
       </div>
       <div class="qd-page-actions">
+        <!-- 临时全停（会议投屏等）不该一条条点：全启用时显示「暂停所有」，否则「恢复所有」 -->
+        <button class="qd-btn" :disabled="bulkBusy || tasks.length === 0" @click="toggleAllEnabled"
+                :title="allOn ? t('sched_pause_all') : t('sched_resume_all')">
+          <Pause v-if="allOn" :size="14" />
+          <Play v-else :size="14" />
+          {{ allOn ? t('sched_pause_all') : t('sched_resume_all') }}
+        </button>
         <!-- 机器人地址是全局一份，配置入口统一收在设置里；这里只做跳转，避免两个入口改同一份数据 -->
         <button class="qd-btn" :title="t('notifyGoSettings')" @click="openNotifySettings">
           <Bell :size="14" /> {{ t('sched_nf_title') }}
@@ -474,6 +544,26 @@ onMounted(refresh)
                 @click="statusFilter = f.v">{{ f.l }}</button>
       </div>
       <span class="sched-count">{{ t('sched_count', { n: filteredTasks.length, total: tasks.length }) }}</span>
+    </div>
+
+    <!-- 运行统计（近 7 天）：失败次数与失败率一眼可见，不用逐条点历史 -->
+    <div v-if="tasks.length" class="sched-stats">
+      <div class="stat-sum">
+        <BarChart3 :size="13" class="stat-ico" />
+        <span class="stat-label">{{ t('sched_stats_week') }}</span>
+        <span class="stat-num">{{ stats.total }}</span>
+        <span class="stat-unit">{{ t('sched_stats_runs') }}</span>
+        <span class="stat-sep">·</span>
+        <span class="stat-fail" :class="{ zero: stats.fail === 0 }">{{ t('sched_stats_fail', { n: stats.fail }) }}</span>
+        <span v-if="stats.total" class="stat-rate" :class="{ bad: stats.rate >= 20 }">{{ stats.rate }}%</span>
+      </div>
+      <div class="stat-bars">
+        <div v-for="d in stats.days" :key="d.date"
+             :class="['stat-bar', { 'has-fail': d.fail > 0, empty: d.total === 0 }]"
+             :title="dayLabel(d.date) + ' · ' + d.total">
+          <div class="bar-fill" :style="{ height: barPct(d.total) + '%' }"></div>
+        </div>
+      </div>
     </div>
 
     <!-- 列表 -->
@@ -731,6 +821,37 @@ onMounted(refresh)
 .sched-filters { display: flex; align-items: center; gap: 4px; }
 .sched-count { margin-left: auto; font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
 
+/* 运行统计条（近 7 天） */
+.sched-stats {
+  display: flex; align-items: center; gap: var(--space-4);
+  padding: 8px 20px 0; flex-shrink: 0;
+}
+.stat-sum { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--color-text-muted); }
+.stat-ico { color: var(--color-text-disabled); flex-shrink: 0; }
+.stat-label { color: var(--color-text-secondary); }
+.stat-num { font-size: 13px; font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; }
+.stat-unit { color: var(--color-text-muted); }
+.stat-sep { color: var(--color-text-disabled); }
+.stat-fail { color: var(--color-danger); }
+.stat-fail.zero { color: var(--color-text-disabled); }
+.stat-rate {
+  font-size: 10px; padding: 0 5px; border-radius: var(--radius-md);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+.stat-rate.bad { background: var(--color-danger-bg); color: var(--color-danger); }
+.stat-bars { display: flex; align-items: flex-end; gap: 3px; height: 22px; margin-left: auto; }
+.stat-bar {
+  width: 9px; height: 100%; display: flex; align-items: flex-end;
+  background: var(--color-bg-tertiary); border-radius: 2px; overflow: hidden;
+}
+.stat-bar .bar-fill {
+  width: 100%; background: var(--color-accent); border-radius: 2px;
+  min-height: 1px; transition: height var(--transition-fast);
+}
+.stat-bar.has-fail .bar-fill { background: var(--color-danger); }
+.stat-bar.empty .bar-fill { min-height: 0; }
+
 .sched-error {
   margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
   color: var(--color-danger); background: var(--color-danger-bg);
@@ -775,8 +896,8 @@ onMounted(refresh)
 .item-icon.a-app { background: var(--color-accent); }
 .item-icon.a-dir { background: var(--color-warning); }
 .item-icon.a-url { background: var(--color-success); }
-.item-icon.a-command { background: #9b6dff; }
-.item-icon.a-http { background: #e0556b; }
+.item-icon.a-command { background: var(--color-cat-command); }
+.item-icon.a-http { background: var(--color-cat-http); }
 
 .item-main { flex: 1; min-width: 0; }
 .item-line1 { display: flex; align-items: center; gap: 8px; }

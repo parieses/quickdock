@@ -1,7 +1,9 @@
 <script setup lang="ts">
-defineOptions({ name: 'NoteManagerPage' })
+defineOptions({ name: KEEP_ALIVE.notes })
+// name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
+import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onBeforeUnmount, inject, watch } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { pendingOpenNoteId } from '../composables/bridge'
 import { unwrap } from '../utils/api'
@@ -14,6 +16,7 @@ import NoteAiPanel from './NoteAiPanel.vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { installMathOnce } from '../utils/mathMarkdown'
+import { createCodeEditor, type CodeEditorHandle } from '../utils/aiCodeEditor'
 import { downloadText, safeFileName } from '../utils/download'
 import {
   ListNotesTree,
@@ -30,7 +33,8 @@ import {
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import {
   Trash2, Search, X, FolderPlus, FileText, Folder,
-  Copy as CopyIcon, PanelLeft, ChevronDown, Sparkles, FileDown, List,
+  Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
+  FileSearch, Square, CheckSquare, Clock,
 } from '@lucide/vue'
 import type { ToastAPI, Note } from '../types'
 
@@ -49,6 +53,182 @@ const selectedDocId = ref('')
 const editingId = ref('')
 const editName = ref('')
 const selectedFolderId = ref('')
+
+// ---- 多选 / 批量操作 ----
+// 进入多选模式后，树节点改为「点击切换选中」而非「打开」，行尾操作按钮隐藏，
+// 拖拽禁用；底部出现批量栏（打标签 / 移动到 / 删除）。退出多选清空选择。
+const selectMode = ref(false)
+const selectedIds = ref<Set<string>>(new Set())
+const selectedCount = computed(() => selectedIds.value.size)
+function toggleSelect(id: string) {
+  const s = new Set(selectedIds.value)
+  if (s.has(id)) s.delete(id); else s.add(id)
+  selectedIds.value = s
+}
+function clearSelection() { selectedIds.value = new Set() }
+function toggleSelectMode() {
+  selectMode.value = !selectMode.value
+  if (!selectMode.value) clearSelection()
+}
+// 当前可见文档（非搜索时取整棵树、搜索/标签时取扁平结果）
+const visibleDocs = computed(() => {
+  const pool = (searchQuery.value || activeTag.value) ? flatResults.value : flatten(tree.value)
+  return pool.filter(n => !n.isFolder)
+})
+const allSelected = computed(() =>
+  visibleDocs.value.length > 0 && visibleDocs.value.every(n => selectedIds.value.has(n.id)),
+)
+function toggleSelectAll() {
+  if (allSelected.value) clearSelection()
+  else selectedIds.value = new Set(visibleDocs.value.map(n => n.id))
+}
+// 批量移动目标：所有文件夹
+const folderOptions = computed(() =>
+  flatten(tree.value).filter(n => n.isFolder).map(n => ({ id: n.id, name: n.name || n.keyword || t('notesFolder') })),
+)
+
+// ---- 最近打开（localStorage 存最近 5 篇文档 {id, 打开时间戳}）----
+const RECENT_KEY = 'quickdock.notes.recent'
+type RecentItem = { id: string; t: number }
+const recentItems = ref<RecentItem[]>([])
+function loadRecent() {
+  try {
+    const a = JSON.parse(localStorage.getItem(RECENT_KEY) || '[]')
+    if (!Array.isArray(a)) return
+    recentItems.value = a
+      // 兼容旧版纯字符串数组：补 t:0（未知时间）
+      .map((x: any) => typeof x === 'string' ? { id: x, t: 0 } : { id: String(x.id), t: Number(x.t) || 0 })
+      .filter((x: RecentItem) => x.id)
+      .slice(0, 5)
+  } catch { /* 损坏就当没有 */ }
+}
+function pushRecent(id: string) {
+  const next = [{ id, t: Date.now() }, ...recentItems.value.filter(x => x.id !== id)].slice(0, 5)
+  recentItems.value = next
+  try { localStorage.setItem(RECENT_KEY, JSON.stringify(next)) } catch { /* 配额/隐私模式忽略 */ }
+}
+// 相对时间：让「最近」看起来像真正的 recently-opened，而不是又一个文件列表
+function relTime(ts: number): string {
+  if (!ts) return ''
+  const d = Date.now() - ts
+  const m = 60000, h = 3600000, day = 86400000, w = 7 * day
+  if (d < m) return t('notesRecentJust')
+  if (d < h) return Math.floor(d / m) + t('notesRecentMin')
+  if (d < day) return Math.floor(d / h) + t('notesRecentHour')
+  if (d < w) return Math.floor(d / day) + t('notesRecentDay')
+  return Math.floor(d / w) + t('notesRecentWeek')
+}
+// 只展示仍然存在且非文件夹的文档；搜索/标签视图下不显示（那会盖住结果列表）。
+// 顺带带出父文件夹名 + 相对时间，让「最近」列表和下面的树在信息上明显分层。
+const recentDisplay = computed(() => {
+  if (searchQuery.value || activeTag.value) return []
+  const map = new Map(nodes.value.map(n => [n.id, n]))
+  return recentItems.value
+    .map(it => {
+      const n = map.get(it.id)
+      if (!n || n.isFolder) return null
+      const par = n.parentId ? map.get(n.parentId) : null
+      return {
+        ...n,
+        parentName: (par?.name || par?.keyword || '') as string,
+        rel: relTime(it.t),
+      }
+    })
+    .filter((x): x is Note & { parentName: string; rel: string } => !!x)
+})
+
+// ---- 左侧树折叠 / 拖拽调宽 ----
+const TREE_W_KEY = 'quickdock.notes.treeWidth'
+const TREE_C_KEY = 'quickdock.notes.treeCollapsed'
+const treeWidth = ref(250)
+const treeCollapsed = ref(false)
+function loadTreePrefs() {
+  try {
+    const w = parseInt(localStorage.getItem(TREE_W_KEY) || '', 10)
+    if (w >= 160 && w <= 480) treeWidth.value = w
+  } catch { /* ignore */ }
+  treeCollapsed.value = localStorage.getItem(TREE_C_KEY) === '1'
+}
+function persistTreeWidth() { try { localStorage.setItem(TREE_W_KEY, String(treeWidth.value)) } catch { /* ignore */ } }
+function persistTreeCollapsed() { try { localStorage.setItem(TREE_C_KEY, treeCollapsed.value ? '1' : '0') } catch { /* ignore */ } }
+function toggleTreeCollapsed() { treeCollapsed.value = !treeCollapsed.value; persistTreeCollapsed() }
+
+// 分割线拖拽：按下后跟随鼠标改宽度，按 .notes-body 左缘换算（树贴着 body 左边）。
+let resizing = false
+let bodyLeft = 0
+function startResize(e: MouseEvent) {
+  resizing = true
+  const tree = (e.currentTarget as HTMLElement).parentElement
+  bodyLeft = tree?.getBoundingClientRect().left ?? 0
+  document.body.style.cursor = 'col-resize'
+  document.body.style.userSelect = 'none'
+  window.addEventListener('mousemove', onResizeMove)
+  window.addEventListener('mouseup', stopResize)
+  e.preventDefault()
+}
+function onResizeMove(e: MouseEvent) {
+  if (!resizing) return
+  treeWidth.value = Math.min(480, Math.max(160, Math.round(e.clientX - bodyLeft)))
+}
+function stopResize() {
+  if (!resizing) return
+  resizing = false
+  document.body.style.cursor = ''
+  document.body.style.userSelect = ''
+  window.removeEventListener('mousemove', onResizeMove)
+  window.removeEventListener('mouseup', stopResize)
+  persistTreeWidth()
+}
+
+// ---- 批量操作 ----
+const batchTagText = ref('')
+const moveTarget = ref('')
+const showBatchDel = ref(false)
+function askBatchDelete() { if (selectedCount.value) showBatchDel.value = true }
+async function confirmBatchDelete() {
+  const ids = [...selectedIds.value]
+  if (!ids.length) return
+  try {
+    for (const id of ids) await DeleteNoteNode(id)
+    if (ids.includes(selectedDocId.value)) { selectedDocId.value = ''; docContent.value = ''; docTagsText.value = '' }
+    toast.success(t('deleted'))
+  } catch (e) { toast.error(getErrorMessage(e)) } finally {
+    showBatchDel.value = false; clearSelection(); await load()
+  }
+}
+async function batchMove() {
+  const target = moveTarget.value
+  if (!target) return
+  const ids = [...selectedIds.value]
+  try {
+    for (const id of ids) await MoveNoteNode(id, target)
+    toast.success(t('notesBatchMoved', { count: ids.length }))
+  } catch (e) { toast.error(getErrorMessage(e)) } finally {
+    clearSelection(); moveTarget.value = ''; await load()
+  }
+}
+async function batchTag() {
+  const tag = batchTagText.value.trim()
+  if (!tag) return
+  await flushPendingSave() // 先把当前文档落盘，避免覆盖未保存正文
+  const ids = [...selectedIds.value]
+  try {
+    for (const id of ids) {
+      const node = nodes.value.find(n => n.id === id)
+      if (!node || node.isFolder) continue
+      // 当前打开的文档用编辑器实时内容，其余用库里内容，合并标签后回写（保留正文）。
+      const content = id === selectedDocId.value ? docContent.value : (node.content || '')
+      const cur = parseTagsS(node.tags)
+      if (!cur.includes(tag)) cur.push(tag)
+      const tagsJSON = JSON.stringify(cur)
+      await UpdateNoteDoc(id, content, tagsJSON)
+      applyLocalTags(id, tagsJSON)
+    }
+    toast.success(t('notesBatchTagDone', { count: ids.length }))
+  } catch (e) { toast.error(getErrorMessage(e)) } finally {
+    clearSelection(); batchTagText.value = ''; await load()
+  }
+}
 
 const docContent = ref('')
 const docTagsText = ref('')
@@ -344,6 +524,7 @@ function onDoc(d: Note) {
   selectedDocId.value = d.id
   selectedFolderId.value = d.parentId || ''
   docContent.value = d.content || ''
+  pushRecent(d.id)
   docTagsText.value = parseTagsS(d.tags).join(', ')
   // 展开祖先
   let cur = d.parentId
@@ -437,7 +618,8 @@ let syncing = false
 function syncScroll(from: 'input' | 'preview') {
   // 防止 A→B→A 的回环：由对方事件引起的设置不再反向触发。
   if (syncing) return
-  const input = docInputRef.value
+  // 输入侧的滚动容器是 CodeMirror 的 .cm-scroller（不再是 textarea）
+  const input = docEditor?.scrollEl() ?? null
   const preview = previewRef.value
   if (!input || !preview) return
   const src = from === 'input' ? input : preview
@@ -475,20 +657,85 @@ const aiOpen = ref(false)
 const aiText = ref('')
 /** 打开面板前记下的光标位置；-1 = 当时没有焦点，写回时改为追加到末尾。 */
 const savedCaret = ref(-1)
-const docInputRef = ref<HTMLTextAreaElement | null>(null)
 const previewRef = ref<HTMLElement | null>(null)
+
+// —— 正文编辑器（CodeMirror） ——
+//
+// 原来这里是两个 v-model 的 textarea。换 CM 的收益不只是高亮：撤销历史、
+// 行内查找、括号匹配这些都是白送的，markdown 源里的标题/列表/代码块也有了
+// 视觉结构——一屏里能看出文章骨架，对写长文比纯文本强得多。
+//
+// 唯一要显式开的是**软换行**（lineWrapping）：CM 默认不折行，手抄 textarea 的
+// 默认行为是折行的，不开的话一段中文会变成一条横向长龙。
+const docEditorHost = ref<HTMLElement | null>(null)
+let docEditor: CodeEditorHandle | null = null
+let docEditorGen = 0
+let offDocScroll: (() => void) | null = null
+
+async function mountDocEditor() {
+  const gen = ++docEditorGen
+  // 先拆旧的：切文档/切格式都走这里，旧实例的滚动监听要一起摘掉
+  offDocScroll?.()
+  offDocScroll = null
+  docEditor?.destroy()
+  docEditor = null
+
+  const host = docEditorHost.value
+  if (!host) return
+  const isText = selectedDoc.value?.format === 'text'
+  try {
+    const h = await createCodeEditor(host, {
+      value: docContent.value,
+      // 文件名只用于选语言：.md 出 markdown 高亮，纯文本笔记不给语言包
+      filename: isText ? 'note.txt' : 'note.md',
+      fontSize: '13px',
+      lineWrapping: true,
+      placeholder: isText ? t('notesTextPh') : t('notesMarkdownPh'),
+      // 写作场景 Tab 应该能移出输入框，而不是吃进缩进
+      tabIndent: false,
+      onChange: (v) => {
+        if (v === docContent.value) return
+        docContent.value = v
+        onDocInput()
+      },
+      onSave: () => { void flushPendingSave() },
+    })
+    // await 期间用户可能已经切到另一篇：这次的实例直接丢掉，别挂错文档
+    if (gen !== docEditorGen) { h.destroy(); return }
+    docEditor = h
+    offDocScroll = h.onScroll(() => syncScroll('input'))
+    h.focus()
+  } catch (e) {
+    logErr('NoteManager:editor', e)
+  }
+}
+
+// 切文档 / 切格式 → 重建实例。重建而不是 setValue：否则 Ctrl+Z 会退回上一篇的内容。
+watch(
+  () => [selectedDocId.value, selectedDoc.value?.format ?? ''] as const,
+  async () => {
+    await nextTick()
+    void mountDocEditor()
+  },
+  { immediate: true },
+)
+
+// 外部改内容（AI 写回、新建文档、格式化）→ 同步进编辑器。
+// 自身击键引起的变更会在这里撞上「内容相同直接 return」，不会打架。
+watch(docContent, (v) => { docEditor?.setValue(v) })
 
 function openAi() {
   if (!selectedDoc.value || selectedDoc.value.isFolder) return
-  const el = docInputRef.value
-  // 面板是覆盖层，textarea 一旦失焦，selectionStart 会归 0 —— 事后再读就会把
-  // 整段回答插到文档开头。所以必须在打开前快照。
-  const focused = !!el && document.activeElement === el
-  savedCaret.value = focused ? el!.selectionStart : -1
-  const selected = focused ? docContent.value.slice(el!.selectionStart, el!.selectionEnd) : ''
+  // CM 的选区存在 state 里，面板抢走焦点也不会丢——不像 textarea 失焦就归 0
+  const sel = docEditor?.getSelection() ?? null
+  savedCaret.value = sel ? sel.from : -1
+  const selected = sel?.text ?? ''
   aiText.value = selected.trim() ? selected : docContent.value
   aiOpen.value = true
 }
+
+// 在笔记内查找：复用编辑器自带的查找栏（Ctrl+F 同款），给一个可见按钮入口。
+function findInDoc() { docEditor?.openFind() }
 
 function onAiWriteBack(text: string, mode: 'insert' | 'replace' | 'append') {
   if (mode === 'replace') {
@@ -516,8 +763,13 @@ async function renameCurrent() {
   try { await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name); await load() } catch (e) { toast.error(getErrorMessage(e)) }
 }
 
-onMounted(() => load())
-onBeforeUnmount(() => { void flushPendingSave() })
+onMounted(() => { loadTreePrefs(); loadRecent(); load() })
+onBeforeUnmount(() => {
+  void flushPendingSave()
+  offDocScroll?.()
+  docEditor?.destroy()
+  docEditor = null
+})
 
 // 命令面板导航到本页后再写入 pendingOpenNoteId 的场景：load 完成后补开
 watch(pendingOpenNoteId, (id) => {
@@ -552,38 +804,104 @@ watch(pendingOpenNoteId, (id) => {
 
     <div class="notes-body">
       <!-- 左：树 -->
-      <div class="notes-tree">
+      <div class="notes-tree" :style="{ width: treeWidth + 'px' }" v-show="!treeCollapsed">
         <div class="tree-toolbar">
           <button class="tt-btn" :title="t('notesNewFolder')" @click="newFolderAt('')"><FolderPlus :size="13" /></button>
           <button class="tt-btn" :title="t('notesNewDoc')" @click="newDocAt('')"><FileText :size="13" /></button>
           <span class="tt-sep"></span>
           <button class="tt-btn" :title="t('notesExpandAll')" @click="expandAllOpen"><ChevronDown :size="13" /></button>
           <button class="tt-btn" :title="t('notesCollapseAll')" @click="collapseAll"><PanelLeft :size="13" /></button>
+          <span class="tt-sep"></span>
+          <button class="tt-btn" :class="{ on: selectMode }" :title="selectMode ? t('notesMultiSelectExit') : t('notesMultiSelect')" @click="toggleSelectMode">
+            <component :is="selectMode ? CheckSquare : Square" :size="13" />
+          </button>
+          <button v-if="selectMode" class="tt-btn" :title="allSelected ? t('selectedCount', { count: selectedCount }) : t('notesSelectAllDocs')" @click="toggleSelectAll">
+            <component :is="allSelected ? CheckSquare : Square" :size="13" />
+          </button>
+          <span class="tt-sep"></span>
+          <button class="tt-btn" :title="treeCollapsed ? t('notesExpandTree') : t('notesCollapseTree')" @click="toggleTreeCollapsed">
+            <component :is="treeCollapsed ? PanelLeft : PanelLeftClose" :size="13" />
+          </button>
         </div>
+
+        <!-- 多选模式下的批量操作栏 -->
+        <div v-if="selectMode" class="tree-batch">
+          <div class="tb-line">
+            <span class="tb-count">{{ t('selectedCount', { count: selectedCount }) }}</span>
+            <button class="tb-clear" :disabled="!selectedCount" @click="clearSelection">{{ t('clear') }}</button>
+          </div>
+          <div class="tb-line">
+            <input v-model="batchTagText" class="tb-input" :placeholder="t('notesBatchTagPh')" @keyup.enter="batchTag" />
+            <button class="tb-btn" :disabled="!batchTagText.trim() || !selectedCount" @click="batchTag">{{ t('notesBatchTagApply') }}</button>
+          </div>
+          <div class="tb-line">
+            <select v-model="moveTarget" class="tb-select">
+              <option value="">{{ t('notesMoveTo') }}</option>
+              <option v-for="f in folderOptions" :key="f.id" :value="f.id">{{ f.name }}</option>
+            </select>
+            <button class="tb-btn" :disabled="!moveTarget || !selectedCount" @click="batchMove">{{ t('notesBatchMove') }}</button>
+          </div>
+          <button class="tb-btn danger" :disabled="!selectedCount" @click="askBatchDelete">{{ t('notesBatchDelete') }}</button>
+        </div>
+
         <div class="tree-wrap">
           <template v-if="!searchQuery && !activeTag">
+            <!-- 最近打开：启动时为空树兜底，帮用户找回上次编辑的文档 -->
+            <div v-if="recentDisplay.length" class="recent-block">
+              <div class="recent-title">
+                <Clock :size="11" />
+                <span class="rt-label">{{ t('notesRecent') }}</span>
+                <span class="rt-count">{{ recentDisplay.length }}</span>
+              </div>
+              <div
+                v-for="n in recentDisplay" :key="'recent-'+n.id"
+                class="recent-row"
+                :class="{ 'sel-on': selectMode && selectedIds.has(n.id) }"
+                @click="selectMode ? toggleSelect(n.id) : onDoc(n)"
+              >
+                <span v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
+                <FileText :size="13" class="tn-icon" />
+                <div class="rn-text">
+                  <div class="rn-line1">
+                    <span class="rn-name">{{ n.name || n.keyword }}</span>
+                    <span v-if="n.rel" class="rn-time">{{ n.rel }}</span>
+                  </div>
+                  <div v-if="n.parentName" class="rn-path">{{ n.parentName }}</div>
+                </div>
+              </div>
+            </div>
             <div v-for="root in tree" :key="root.id">
               <NoteTreeNode
                 :node="root" :depth="0"
                 :expanded="expanded" :editing-id="editingId" :edit-name="editName"
                 :selected-doc="selectedDocId" :selected-folder="selectedFolderId"
+                :select-mode="selectMode" :selected="selectedIds.has(root.id)"
                 @toggle="toggleFolder" @select="onDoc"
                 @rename-start="startRename" @rename-commit="commitRename" @rename-input="onRenameInput" @rename-cancel="cancelRename"
                 @del="askDelete" @create-folder="newFolderAt" @create-doc="newDocAt"
                 @drop-node="handleDrop" @reorder="reorderNode"
+                @toggle-select="toggleSelect"
               />
             </div>
-            <div v-if="!tree.length && !loading" class="tree-empty">{{ t('notesEmpty') }}</div>
+            <div v-if="!tree.length && !recentDisplay.length && !loading" class="tree-empty">{{ t('notesEmpty') }}</div>
           </template>
           <!-- 搜索/标签结果：扁平展示 -->
           <template v-else>
-            <div v-for="n in flatResults" :key="'res-'+n.id" class="sr-row" @click="n.isFolder ? toggleFolder(n.id) : onDoc(n)">
+            <div v-for="n in flatResults" :key="'res-'+n.id" class="sr-row" :class="{ 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
+              <span v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
               <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
               <span class="tn-name"><template v-for="(p, i) in highlightParts(n.name || n.keyword, searchQuery)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></span>
             </div>
           </template>
         </div>
       </div>
+
+      <!-- 树收起后的恢复条 -->
+      <div v-if="treeCollapsed" class="tree-reopen" :title="t('notesExpandTree')" @click="toggleTreeCollapsed">
+        <PanelLeft :size="16" />
+      </div>
+      <!-- 可拖拽分割线：调树宽 -->
+      <div v-if="!treeCollapsed" class="tree-splitter" @mousedown="startResize"></div>
 
       <!-- 右：文档编辑 -->
       <div class="notes-editor">
@@ -598,6 +916,7 @@ watch(pendingOpenNoteId, (id) => {
               <button :class="{ active: selectedDoc.format !== 'text' }" @click="setFormat('markdown')">{{ t('notesFormatMd') }}</button>
               <button :class="{ active: selectedDoc.format === 'text' }" @click="setFormat('text')">{{ t('notesFormatText') }}</button>
             </div>
+            <button class="ne-copy" :title="t('notesFindInDoc')" @click="findInDoc()"><FileSearch :size="13" /></button>
             <button class="ne-copy" :title="t('noteAiTitle')" @click="openAi"><Sparkles :size="13" /></button>
             <button class="ne-copy" :title="t('notesExportMd')" @click="exportDoc"><FileDown :size="13" /></button>
             <button class="ne-copy" :title="t('copy')" @click="copyDoc"><CopyIcon :size="13" /></button>
@@ -615,16 +934,16 @@ watch(pendingOpenNoteId, (id) => {
               {{ t('notesStats', { words: docStats.words, chars: docStats.chars, lines: docStats.lines }) }}
             </span>
           </div>
-          <!-- markdown：分栏编辑+预览；纯文本：仅单编辑区 -->
-          <div v-if="selectedDoc.format !== 'text'" class="ne-split">
-            <textarea ref="docInputRef" v-model="docContent" class="ne-input" spellcheck="false"
-              :placeholder="t('notesMarkdownPh')" @input="onDocInput" @scroll="syncScroll('input')"></textarea>
-            <div ref="previewRef" class="ne-preview markdown-body" v-html="previewHtml"
+          <!-- markdown：左编辑 + 右预览，两栏滚动同步；纯文本：仅编辑区。
+               两栏共用同一个编辑器宿主（格式切换只重建 CM，不动 DOM 结构） -->
+          <div class="ne-split">
+            <div
+              ref="docEditorHost"
+              class="ne-editor"
+              :class="{ 'ne-editor-only': selectedDoc.format === 'text' }"
+            ></div>
+            <div v-if="selectedDoc.format !== 'text'" ref="previewRef" class="ne-preview markdown-body" v-html="previewHtml"
               @scroll="syncScroll('preview')"></div>
-          </div>
-          <div v-else class="ne-split">
-            <textarea ref="docInputRef" v-model="docContent" class="ne-input ne-textonly" spellcheck="false"
-              :placeholder="t('notesTextPh')" @input="onDocInput"></textarea>
           </div>
 
           <!-- 页内 AI：覆盖在编辑区上（与快捷笔记浮窗同一套面板） -->
@@ -641,6 +960,8 @@ watch(pendingOpenNoteId, (id) => {
 
     <ConfirmDialog :visible="showDel" :message="deletingNode?.isFolder ? t('notesDelFolder') : t('notesDelDoc')"
       @confirm="confirmDeleteNode" @cancel="showDel = false" />
+    <ConfirmDialog :visible="showBatchDel" :message="t('confirmDeleteBatch', { count: selectedCount })"
+      @confirm="confirmBatchDelete" @cancel="showBatchDel = false" />
   </div>
 </template>
 
@@ -657,7 +978,7 @@ watch(pendingOpenNoteId, (id) => {
 
 .notes-body { flex: 1; display: flex; min-height: 0; }
 .notes-tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border); display: flex; flex-direction: column; background: var(--color-bg-primary); }
-.tree-toolbar { display: flex; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--color-border); }
+.tree-toolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--color-border); }
 .tt-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: none; background: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }
 .tt-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .tt-sep { width: 1px; background: var(--color-border); margin: 0 4px; }
@@ -700,9 +1021,101 @@ watch(pendingOpenNoteId, (id) => {
 /* 搜索命中高亮：只覆盖文字底色，不用 <mark> 的默认黄底（深色主题下会刺眼） */
 .tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: 2px; padding: 0 1px; }
 .ne-split { flex: 1; display: flex; min-height: 0; }
-.ne-input { flex: 1; min-width: 0; resize: none; padding: 12px; border: none; border-right: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); font-size: 13px; font-family: 'Consolas','Monaco',monospace; line-height: 1.6; outline: none; box-sizing: border-box; }
-.ne-input.ne-textonly { border-right: none; }
+/* 编辑区宿主：CodeMirror 撑满左栏（行号/高亮/undo 都在实例里，见 utils/aiCodeEditor.ts）。
+   原来这里是 textarea，padding/border 直接写在控件上；现在要给宿主定边框，内边距落到
+   CM 的 .cm-content 上——否则右边框会贴在文字上 */
+.ne-editor { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; background: var(--color-bg-secondary); border-right: 1px solid var(--color-border); }
+.ne-editor.ne-editor-only { border-right: none; }
+.ne-editor :deep(.cm-editor) { flex: 1; min-height: 0; }
+.ne-editor :deep(.cm-content) { padding: 10px 14px 24px 4px; }
 .ne-preview { flex: 1; min-width: 0; overflow: auto; padding: 12px 16px; background: var(--color-bg-primary); }
+
+/* 工具栏按钮高亮态（多选/激活） */
+.tt-btn.on { background: var(--color-accent-bg); color: var(--color-accent); }
+
+/* 多选 checkbox（与 NoteTreeNode 内自绘一致，因 scoped 不跨组件，这里再定义一份） */
+.tn-check {
+  width: 14px; height: 14px; flex-shrink: 0; border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border-focus); background: var(--color-bg-primary);
+  cursor: pointer; position: relative; transition: background-color var(--transition-fast), border-color var(--transition-fast);
+}
+.tn-check.on { background: var(--color-accent); border-color: var(--color-accent); }
+.tn-check.on::after {
+  content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
+  border: solid var(--color-on-accent, #fff); border-width: 0 2px 2px 0; transform: rotate(45deg);
+}
+.sel-on { background: var(--color-accent-bg); color: var(--color-text-primary); }
+.sel-on:hover { background: var(--color-accent-bg); }
+
+/* 最近打开分区：融入式，靠顶部分隔线和树分开，不堆生硬卡片边框 */
+.recent-block {
+  margin: 4px 0 6px;
+  padding: 6px 4px 0;
+  border-top: 1px solid var(--color-border);
+}
+.recent-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0 4px 4px;
+}
+.recent-title :deep(svg) { color: var(--color-text-muted); opacity: 0.9; }
+.recent-title .rt-label { flex: 1; }
+.recent-title .rt-count {
+  font-size: 10px;
+  color: var(--color-text-disabled);
+  font-weight: 500;
+  background: var(--color-bg-secondary);
+  border-radius: 999px;
+  padding: 1px 6px;
+}
+.recent-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  padding: 5px 6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+.recent-row:hover { background: var(--color-bg-hover); }
+.recent-row .tn-icon { margin-top: 1px; flex-shrink: 0; color: var(--color-text-muted); }
+.recent-row .tn-check { margin-top: 1px; flex-shrink: 0; }
+.recent-row .rn-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.recent-row .rn-line1 { display: flex; align-items: baseline; gap: 6px; }
+.recent-row .rn-name { font-size: 13px; color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.recent-row .rn-time { font-size: 10px; color: var(--color-text-disabled); flex-shrink: 0; }
+.recent-row .rn-path { font-size: 11px; color: var(--color-text-disabled); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 批量操作栏 */
+.tree-batch { border-bottom: 1px solid var(--color-border); padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; background: var(--color-bg-secondary); }
+.tb-line { display: flex; gap: 4px; align-items: center; }
+.tb-count { flex: 1; font-size: 11px; color: var(--color-text-muted); }
+.tb-clear { border: none; background: none; color: var(--color-text-muted); cursor: pointer; font-size: 11px; padding: 2px 6px; border-radius: var(--radius-xs); }
+.tb-clear:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.tb-clear:disabled { opacity: 0.4; cursor: default; }
+.tb-input, .tb-select { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
+.tb-input:focus, .tb-select:focus { border-color: var(--color-accent); }
+.tb-btn { flex-shrink: 0; padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: 12px; cursor: pointer; border-radius: var(--radius-sm); font-family: inherit; }
+.tb-btn:hover:not(:disabled) { color: var(--color-text-primary); border-color: var(--color-border-focus); }
+.tb-btn:disabled { opacity: 0.4; cursor: default; }
+.tb-btn.danger { color: var(--color-danger); border-color: var(--color-danger-border); }
+.tb-btn.danger:hover:not(:disabled) { background: var(--color-danger-bg); }
+
+/* 树收起后的恢复条：窄竖条，hover 提示可展开 */
+.tree-reopen {
+  width: 14px; flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+  background: var(--color-bg-secondary); border-right: 1px solid var(--color-border);
+  color: var(--color-text-muted); cursor: pointer;
+}
+.tree-reopen:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+/* 拖拽分割线 */
+.tree-splitter { width: 4px; flex-shrink: 0; cursor: col-resize; background: transparent; transition: background-color var(--transition-fast); }
+.tree-splitter:hover { background: var(--color-accent); }
 
 /* Markdown 渲染（复用统一插件样式） */
 .markdown-body { color: var(--color-text-primary); font-size: 13px; line-height: 1.7; word-break: break-word; }

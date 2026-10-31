@@ -135,16 +135,16 @@ function copyNodeJson() {
 .jt-toggle:hover { color: var(--color-text-primary); }
 .jt-toggle :deep(svg) { transition: transform var(--transition-fast); }
 .jt-toggle :deep(svg.open) { transform: rotate(90deg); }
-.jt-key { color: #7fb7ff; }
+.jt-key { color: var(--color-syntax-key); }
 .jt-colon { color: var(--color-text-disabled); }
 .jt-bracket { color: var(--color-text-disabled); }
 .jt-summary { color: var(--color-text-disabled); font-style: italic; margin: 0 4px; }
 .jt-closing { color: var(--color-text-disabled); }
 .jt-comma { color: var(--color-text-disabled); }
-.jt-val.jt-string { color: #9ece6a; }
-.jt-val.jt-number { color: #e0af68; }
-.jt-val.jt-boolean { color: #bb9af7; }
-.jt-val.jt-null { color: #565f89; }
+.jt-val.jt-string { color: var(--color-syntax-string); }
+.jt-val.jt-number { color: var(--color-syntax-number); }
+.jt-val.jt-boolean { color: var(--color-syntax-boolean); }
+.jt-val.jt-null { color: var(--color-syntax-null); }
 .jt-val.jt-array { color: var(--color-text-muted); }
 .jt-copy {
   background: none; border: none; cursor: pointer; padding: 2px; margin-left: 4px;
