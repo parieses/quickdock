@@ -53,6 +53,12 @@ const SSH_ACCEL = "Ctrl+Alt+S"
 //go:embed build/tray.ico
 var trayIcoEmbed []byte
 
+// ICO 文件结构常量（见 ICONDIR / ICONDIRENTRY 规范）。
+const (
+	icondirSize      = 6  // ICONDIR: reserved(2) + type(2) + count(2)
+	icondirEntrySize = 16 // ICONDIRENTRY
+)
+
 // trayIconData 从内嵌 ICO 中抽出最适合作托盘小图标的一帧的资源载荷（PNG/DIB）。
 //
 // 框架 w32.CreateSmallHIconFromImage 会把传入的整份 .ico（含 ICONDIR 头）
@@ -63,18 +69,22 @@ var trayIcoEmbed []byte
 // 但保持本文件纯净（零 Win32 调用，跨平台可编译）。解析失败时回退原字节。
 func trayIconData() []byte {
 	data := trayIcoEmbed
-	if len(data) < 6+16 {
+	if len(data) < icondirSize {
 		return data
 	}
 	count := int(data[4]) | int(data[5])<<8
-	if count == 0 {
+	// 目录必须容纳 count 个 16 字节条目，否则视为损坏、回退原字节。
+	// （此前只校验 6+16 这个「头 + 单条目」下限，声称的条目多于实际时靠循环内
+	//   break 兜底；这里一次性校验完整目录，语义更明确。）
+	if count == 0 || len(data) < icondirSize+count*icondirEntrySize {
 		return data
 	}
 	// 选面积最小的一帧（托盘小图标，缩放损耗最小；同面积取首个）
 	best, bestArea := 0, 1<<30
 	for i := 0; i < count; i++ {
-		off := 6 + i*16
-		if off+16 > len(data) {
+		off := icondirSize + i*icondirEntrySize
+		// 目录已整体校验，理论不会越界；保留判断以防 int 溢出等异常。
+		if off+icondirEntrySize > len(data) {
 			break
 		}
 		w, h := int(data[off]), int(data[off+1])
@@ -89,7 +99,7 @@ func trayIconData() []byte {
 			best = i
 		}
 	}
-	eOff := 6 + best*16
+	eOff := icondirSize + best*icondirEntrySize
 	imgOff := int(data[eOff+12]) | int(data[eOff+13])<<8 | int(data[eOff+14])<<16 | int(data[eOff+15])<<24
 	imgSize := int(data[eOff+8]) | int(data[eOff+9])<<8 | int(data[eOff+10])<<16 | int(data[eOff+11])<<24
 	if imgSize == 0 || imgOff+imgSize > len(data) {
@@ -486,7 +496,12 @@ func waitForRestartPredecessor() {
 	var pid int
 	for _, arg := range os.Args[1:] {
 		if strings.HasPrefix(arg, restartWaitFlag) {
-			pid, _ = strconv.Atoi(strings.TrimPrefix(arg, restartWaitFlag))
+			p, err := strconv.Atoi(strings.TrimPrefix(arg, restartWaitFlag))
+			if err != nil {
+				logger.W("[tray] 重启：%s 参数无法解析为 PID: %q", restartWaitFlag, arg)
+				break
+			}
+			pid = p
 			break
 		}
 	}

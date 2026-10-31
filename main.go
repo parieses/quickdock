@@ -100,13 +100,23 @@ func scheduleSaveWindowState(w *application.WebviewWindow) {
 		windowStateSaveTimer.Stop()
 	}
 	windowStateSaveTimer = time.AfterFunc(400*time.Millisecond, func() {
+		// 取 Bounds 必须在 windowStateMu 内，且与退出路径的 Stop 串行：
+		// 否则「Quit.Load()==false 通过之后、w.Bounds() 之前」窗口可能已被销毁 → panic（TOCTOU）。
+		windowStateMu.Lock()
 		if windowStateQuit.Load() {
+			windowStateMu.Unlock()
 			return
 		}
 		b := w.Bounds()
+		windowStateMu.Unlock()
+
 		s := windowState{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height}
-		if data, err := json.Marshal(s); err == nil {
-			_ = os.WriteFile(windowStatePath(), data, 0644)
+		data, err := json.Marshal(s)
+		if err != nil {
+			return
+		}
+		if err := os.WriteFile(windowStatePath(), data, 0644); err != nil {
+			logger.W("[窗口状态] 保存失败: %v", err)
 		}
 	})
 	windowStateMu.Unlock()
