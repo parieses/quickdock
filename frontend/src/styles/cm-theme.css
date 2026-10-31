@@ -1,0 +1,81 @@
+/* CodeMirror 6 token 配色 —— 跟随 <html data-theme>。
+   色板与 hljs-theme.css 同源（Atom One Dark / Light），编辑态与读视图观感一致。
+   token → class 的映射在 utils/aiCodeEditor.ts 的 HighlightStyle 里。
+
+   选择器刻意写成扁平形式而不用 CSS 嵌套：WebView2 的内核版本不保证支持嵌套，
+   一旦不支持就是「整片代码没颜色」这种没法一眼看出原因的问题。 */
+
+[data-theme='dark'] .cm-tok-comment { color: #5c6370; font-style: italic; }
+[data-theme='dark'] .cm-tok-keyword { color: #c678dd; }
+[data-theme='dark'] .cm-tok-string { color: #98c379; }
+[data-theme='dark'] .cm-tok-number { color: #d19a66; }
+[data-theme='dark'] .cm-tok-func { color: #61aeee; }
+[data-theme='dark'] .cm-tok-type { color: #e6c07b; }
+[data-theme='dark'] .cm-tok-prop { color: #d19a66; }
+[data-theme='dark'] .cm-tok-var { color: #e06c75; }
+[data-theme='dark'] .cm-tok-tag { color: #e06c75; }
+[data-theme='dark'] .cm-tok-meta { color: #56b6c2; }
+[data-theme='dark'] .cm-tok-invalid { color: #be5046; }
+
+[data-theme='light'] .cm-tok-comment { color: #a0a1a7; font-style: italic; }
+[data-theme='light'] .cm-tok-keyword { color: #a626a4; }
+[data-theme='light'] .cm-tok-string { color: #50a14f; }
+[data-theme='light'] .cm-tok-number { color: #986801; }
+[data-theme='light'] .cm-tok-func { color: #4078f2; }
+[data-theme='light'] .cm-tok-type { color: #c18401; }
+[data-theme='light'] .cm-tok-prop { color: #986801; }
+[data-theme='light'] .cm-tok-var { color: #383a42; }
+[data-theme='light'] .cm-tok-tag { color: #e45649; }
+[data-theme='light'] .cm-tok-meta { color: #0184bb; }
+[data-theme='light'] .cm-tok-invalid { color: #c91243; }
+
+/* ---- 内置查找 / 替换栏 ----
+   由 utils/aiCodeEditor.ts 命令式创建，走不了 <style scoped>，所以样式放这里
+   （与 token 配色同一个动态 import 的文件，加载时机天然一致）。
+   类名统一 qd- 前缀，避免和组件内的类撞名。 */
+
+/* 宿主建立定位上下文：查找栏 absolute 覆盖在编辑器右上角，不占文档流高度 ——
+   插一条会占高度的栏等于把笔记分栏、右侧面板、配置弹窗三处布局都改一遍 */
+.qd-cmhost { position: relative; }
+
+.qd-cmfind {
+  position: absolute; top: 6px; right: 10px; z-index: 40;
+  display: flex; flex-direction: column; gap: 6px;
+  min-width: 300px; padding: 7px 8px;
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+}
+/* hidden 属性会被上面的 display:flex 盖掉，必须显式还原 */
+.qd-cmfind[hidden] { display: none; }
+.qd-cmfind-row { display: flex; align-items: center; gap: 6px; }
+.qd-cmfind-row[hidden] { display: none; }
+
+.qd-cmfind-input {
+  flex: 1 1 auto; min-width: 0;
+  height: 26px; padding: 0 8px;
+  background: var(--color-bg-primary); color: var(--color-text-primary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  font-family: inherit; font-size: 12px; outline: none;
+}
+.qd-cmfind-input:focus { border-color: var(--color-border-focus); }
+
+.qd-cmfind-count {
+  flex: none; min-width: 46px; text-align: right;
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+}
+
+.qd-cmfind-btn {
+  flex: none; height: 26px; min-width: 26px; padding: 0 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-secondary);
+  font-family: inherit; font-size: 12px; line-height: 1; cursor: pointer;
+}
+.qd-cmfind-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.qd-cmfind-btn.on {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  border-color: var(--color-accent);
+}
