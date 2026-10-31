@@ -5,6 +5,7 @@ package sysutil
 import (
 	"errors"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
 )
@@ -111,7 +112,24 @@ func reap(cmd *exec.Cmd) {
 // 注意：终端命令（命令型项目）不要走这里——它需要在终端里执行整条命令，
 // 应使用 startDetached；本函数仅用于“系统默认打开”。
 func OpenDetached(target string, workingDir string) error {
-	c := exec.Command("explorer.exe", target)
+	arg := target
+	if arg == "" {
+		return errors.New("打开目标为空")
+	}
+	// 路径标准化：清掉 ".."／冗余分隔符，相对路径转为绝对路径（有 workingDir 时
+	// 以它为基准），缩小 explorer 对相对/歧义路径的解析空间。
+	// URL/自定义协议原样传递——路径标准化会把 "//" 折叠、把协议前缀当驱动器（见 isURLTarget）。
+	if !isURLTarget(arg) {
+		arg = filepath.Clean(arg)
+		if !filepath.IsAbs(arg) {
+			if workingDir != "" {
+				arg = filepath.Clean(filepath.Join(workingDir, arg))
+			} else if abs, err := filepath.Abs(arg); err == nil {
+				arg = abs
+			}
+		}
+	}
+	c := exec.Command("explorer.exe", arg)
 	if workingDir != "" {
 		c.Dir = workingDir
 	}
@@ -121,6 +139,31 @@ func OpenDetached(target string, workingDir string) error {
 	}
 	reap(c)
 	return nil
+}
+
+// isURLTarget 判断 target 是否带协议头（http://、https://、mailto:、ms-settings: 等）。
+// 带协议的目标不做文件路径标准化——filepath.Clean/Abs 会把 "//" 折叠、把协议前缀
+// 当驱动器解析，反而破坏本可正常中转的目标。
+func isURLTarget(s string) bool {
+	if strings.Contains(s, "://") {
+		return true
+	}
+	// 自定义协议：冒号前为 [A-Za-z][A-Za-z0-9+.-]{1,}（至少 2 字符，排除盘符 "C:"）
+	i := strings.IndexByte(s, ':')
+	if i <= 1 || strings.ContainsAny(s[:i], `\/`) {
+		return false
+	}
+	for k := 0; k < i; k++ {
+		c := s[k]
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') {
+			continue
+		}
+		if k > 0 && ((c >= '0' && c <= '9') || c == '+' || c == '-' || c == '.') {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // isAccessDenied 判断错误是否为 Windows “拒绝访问”(ERROR_ACCESS_DENIED, errno 5)，
