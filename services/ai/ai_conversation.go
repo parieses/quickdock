@@ -333,3 +333,94 @@ func (a *AIService) AIRegenerateTitle(convID string) *services.ApiResult {
 	a.emitAI("ai:conv", map[string]interface{}{"id": convID, "title": title})
 	return services.Ok(title)
 }
+
+// AISetConversationStar 设置/取消星标。
+//
+// 与改名同理：不调模型、不计费，语义是本地标记。前端不做乐观更新，
+// 而是等这里返回后再落状态 —— 侧栏排序（星标组在前）依赖真值，
+// 二次点击取消时若先翻转再回滚，列表会闪一下。
+func (a *AIService) AISetConversationStar(convID string, starred bool) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	convID = strings.TrimSpace(convID)
+	if convID == "" {
+		return services.FailMsg("会话不存在")
+	}
+	if err := a.App.DB.SetAIConversationStar(convID, starred); err != nil {
+		return services.Fail(err)
+	}
+	a.emitAI("ai:conv", map[string]interface{}{"id": convID, "starred": starred})
+	return services.Ok(starred)
+}
+
+// AISummarizeConversation 调用模型生成「这段对话在干什么」的摘要。
+//
+// 与 AIRegenerateTitle 分开：两者输入的取法一样但产物与服务对象不同 ——
+// 标题是给侧栏一行字用的，摘要要能回答「我上次聊到哪了」，
+// 所以提示词要求分条、要写出结论与待办，长度上限也不同。
+//
+// 摘要写进 ai_conversations.summary（这个列一直在，此前只被上下文压缩用过）。
+// 不自动触发：它是按输入量计费的调用，不该在用户没要求时花他的钱。
+func (a *AIService) AISummarizeConversation(convID string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	cfg, ok := a.getActiveAIProfile()
+	if !ok || cfg.APIKey == "" {
+		return services.FailMsg("missing api key")
+	}
+	msgs, err := a.App.DB.ListAIMessages(convID)
+	if err != nil {
+		return services.Fail(err)
+	}
+	if len(msgs) == 0 {
+		return services.FailMsg("会话暂无消息")
+	}
+	// 与标题一样取尾部：往前往后各截一半会让「已经聊完的部分」占满预算，
+	// 而用户问的是「现在到哪了」。
+	tail := msgs
+	if len(tail) > aiDigestMaxMsgs {
+		tail = tail[len(tail)-aiDigestMaxMsgs:]
+	}
+	used := 0
+	kept := make([]db.AIMessage, 0, len(tail))
+	for i := len(tail) - 1; i >= 0; i-- {
+		line := tail[i].Role + ": " + tail[i].Content + "\n"
+		used += len([]rune(line))
+		if used > aiDigestMaxRune && len(kept) > 0 {
+			break
+		}
+		kept = append(kept, tail[i])
+	}
+	var b strings.Builder
+	b.WriteString("把下面的对话总结成 3-6 条要点，每条不超过 30 字，只输出要点本身（以「- 」开头），不要开场白、不要标题：\n")
+	b.WriteString("要说清：在解决什么问题、已经得出哪些结论、还有哪些没做完。\n\n")
+	if len(kept) < len(tail) {
+		b.WriteString("（以下为这个会话最近的一部分）\n\n")
+	}
+	for i := len(kept) - 1; i >= 0; i-- {
+		b.WriteString(kept[i].Role + ": " + kept[i].Content + "\n")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	summary, usage, err := a.callAIOnce(ctx, cfg, []map[string]string{
+		{"role": "system", "content": "你是对话摘要器，输出紧凑的要点列表。"},
+		{"role": "user", "content": b.String()},
+	})
+	if err != nil {
+		return services.Fail(err)
+	}
+	// 生成摘要同样是一次完整计费的调用，归到 summary 这一类（与上下文压缩同口径），
+	// 否则用量面板里「摘要」这一项会系统性少算。
+	a.recordAIUsage(convID, usageKindSummary, cfg, usage)
+	summary = strings.TrimSpace(summary)
+	if summary == "" {
+		return services.FailMsg("摘要生成失败")
+	}
+	if err := a.App.DB.UpdateAIConversationMeta(convID, "", summary); err != nil {
+		return services.Fail(err)
+	}
+	a.emitAI("ai:conv", map[string]interface{}{"id": convID, "summary": summary})
+	return services.Ok(summary)
+}

@@ -9,7 +9,7 @@ package ai
 // 引擎不碰 w / flusher，也就不可能往一个不存在的连接里写事件。
 //
 // 边界约定（改这里之前先看）：
-//   - 本文件不写 HTTP 状态码。RunAgent 被调用时响应头早已以 200 发出去了，
+//   - 本文件不写 HTTP 状态码。runAgent 被调用时响应头早已以 200 发出去了，
 //     之后所有失败都只能是 event: error，再想改状态码也改不了。
 //   - 本文件不发桌面通知。notifyAIDone 判断的是窗口焦点与当前页面，
 //     那是 UI 关注点，留给调用方。
@@ -55,7 +55,7 @@ type EventSink interface {
 
 // convIDSetter 由能感知会话 id 的 sink 实现。
 //
-// 会话 id 在 RunAgent 内部才确定（新建会话时由 DB 生成），而 SSE 的每个文本帧都要
+// 会话 id 在 runAgent 内部才确定（新建会话时由 DB 生成），而 SSE 的每个文本帧都要
 // 带上 convId。让引擎在拿到 id 的第一时间通知 sink，比让 sink 去猜、或者把
 // newSSEFlusher 推迟到「会话已确定」之后再创建要干净——后者会把 HTTP 细节倒灌回引擎。
 type convIDSetter interface {
@@ -109,11 +109,15 @@ type AgentRunResult struct {
 	Err       error
 }
 
-// RunAgent 跑完一次多轮 agent 执行：组装上下文 → 逐轮调模型 → 执行工具 → 落库。
+// runAgent 跑完一次多轮 agent 执行：组装上下文 → 逐轮调模型 → 执行工具 → 落库。
 //
 // ctx 的取消代表用户中断（点停止、前端断开）。中断不是错误：已经收到的部分正文
 // 会照常落库并标 stopped，这样刷新会话还能看到半截回答，而不是凭空消失。
-func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSink) AgentRunResult {
+//
+// 刻意非导出：它是内部执行核心，入口只有 HTTP 流式外壳（ai_stream.go）和子 agent
+// 派活（agent_spawn.go），都在本包内。导出版本会被 wails3 codegen 当 bound 方法
+// 分析，EventSink 接口参数过不了 JSON 绑定（编译期那条 WARNING 就是它）。
+func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSink) AgentRunResult {
 	res := AgentRunResult{ConvID: strings.TrimSpace(req.ConvID)}
 
 	// 首字延迟的起点。必须在函数入口取：用户感知的等待是「按下回车到第一个字」，
@@ -528,6 +532,10 @@ func (a *AIService) RunAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				// 行级 diff：卡片展开时的主体内容。只有 added/removed 时用户
 				// 只知道「改了两行」而不知道改成了什么。
 				"diff": r.Diff,
+				// 产物路径（file_write / file_edit）：前端据此在本条回复下面
+				// 实时挂出「产物」条，点击可预览。流式期就得有，等 done 再算
+				// 会让「文件已经写完了」和「卡片上看得见」之间隔一整轮回答。
+				"path": r.Path,
 				// 编排类工具带回 run/node，前端可以立刻挂出 run 树，
 				// 不必等整轮结束再回头查一次。
 				"runId": r.RunID, "nodeId": r.NodeID,

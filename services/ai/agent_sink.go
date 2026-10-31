@@ -5,7 +5,7 @@ package ai
 // 这里是全链路里唯一知道「事件最终长成 SSE 帧」的地方。执行核心
 // （agent_run.go）只调 Push/Event/Failed 三个方法，不知道对面是 HTTP 连接、
 // 是一张 agent_events 表，还是什么都不是——阶段 2 的编排器给一个写表的实现，
-// RunAgent 一行都不用改。
+// runAgent 一行都不用改。
 
 import (
 	"context"

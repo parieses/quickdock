@@ -119,6 +119,12 @@ type aiToolRecord struct {
 	// diff 用来展开看「改成了什么」。只有数字时用户只知道「动了两行」，
 	// 那正是「不敢让它改代码」的原因。
 	Diff string `json:"diff,omitempty"`
+	// Path 这次调用触及的文件（file_write / file_edit 有值）。
+	//
+	// 单独成字段而不是让前端从结果 JSON 里抠：结果可能被截断，截在半截的 JSON
+	// 前端只能整块放弃；而「这条回复产出了哪些文件、点开预览」靠它聚合。
+	// 落库随 tool_calls 一起走，刷新后产物条还在。
+	Path string `json:"path,omitempty"`
 	// RunID / NodeID 这次调用所属的编排 run 与节点（只有 spawn_agent 这类
 	// 会派活的工具才有）。落库而不是让前端解析结果文本：结果可能被截断，
 	// 一旦截在中间就不是合法 JSON，前端只能整块放弃。
@@ -649,6 +655,8 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	}
 	rec.Result = truncateToolResult(text, c.Name)
 	rec.Added, rec.Removed = toolDiffLines(val)
+	// 产物路径（file_write / file_edit）：回答产物条与文件预览的依据。
+	rec.Path = toolResultPath(c.Name, val)
 	// 编排类工具（spawn_agent）额外带回它建的 run/node：前端据此在这条回复下面
 	// 挂出 run 树。其余工具走不到这里，字段留空、落库时被 omitempty 省掉。
 	if al, ok := val.(agentLinked); ok {
@@ -738,6 +746,23 @@ func takeToolDiff(val any) string {
 	if len(s) > aiToolDiffMaxBytes {
 		return "改动过大，逐行 diff 已省略（上方数字是增删行数）；要看整体改动用 git_diff"
 	}
+	return s
+}
+
+// toolResultPath 从工具结果里取「这次触及的文件路径」。
+//
+// 只有 file_write / file_edit 算「产物」：dir_list / check_workdir 的结果里
+// 同样有 path 键，但那只是「看了哪里」，列进产物条是误导。其余工具一律空串——
+// 与 toolDiffLines 同一原则：宁可少给，不从任意 JSON 里猜。
+func toolResultPath(tool string, val any) string {
+	if tool != "file_write" && tool != "file_edit" {
+		return ""
+	}
+	m, ok := val.(map[string]any)
+	if !ok {
+		return ""
+	}
+	s, _ := m["path"].(string)
 	return s
 }
 

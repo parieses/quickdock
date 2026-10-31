@@ -408,7 +408,7 @@ func (a *AIService) registerGate(convID string, g *approvalGate) {
 	a.gates[convID] = g
 }
 
-// unregisterGate 必须在 RunAgent 退出时调用，否则每问一次漏一个 gate
+// unregisterGate 必须在 runAgent 退出时调用，否则每问一次漏一个 gate
 // （连带它持住的 sink 与 map），长会话里是实打实的泄漏。
 func (a *AIService) unregisterGate(convID string) {
 	a.gatesMu.Lock()

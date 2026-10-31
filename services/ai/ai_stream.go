@@ -67,7 +67,9 @@ func (a *AIService) StartAIStreamServer() {
 	a.aiStream = s
 	go func() {
 		defer recoverPanic("ai stream server")
-		_ = s.srv.Serve(ln)
+		if err := s.srv.Serve(ln); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			logger.W("QuickDock: AI 流式服务异常退出: %v", err)
+		}
 	}()
 	logger.I("QuickDock: AI 流式服务已启动 http://127.0.0.1:%d/ai/stream", s.port)
 }
@@ -85,7 +87,7 @@ func (a *AIService) StopAIStreamServer() {
 	}
 }
 
-// handle 只做 HTTP 外壳：握手、校验、解析、分帧；执行逻辑全在 RunAgent。
+// handle 只做 HTTP 外壳：握手、校验、解析、分帧；执行逻辑全在 runAgent。
 //
 // 这条边界是刻意划的。执行核心（agent_run.go）不碰 ResponseWriter，
 // 才能单独验证（给一个测试用的 sink 就能跑完整轮循环）；而这里剩下的事
@@ -93,7 +95,7 @@ func (a *AIService) StopAIStreamServer() {
 //
 // 错误分两截，别搞混：
 //   - 响应头写出去之前（本函数前半段）用 http.Error 回真实状态码；
-//   - 写出去之后（RunAgent 内部）只能发 event: error —— 已经回 200 了，改不了状态码。
+//   - 写出去之后（runAgent 内部）只能发 event: error —— 已经回 200 了，改不了状态码。
 func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	// 这条 handler 里任何 panic 都只该断掉这一条流：宿主进程必须活着，
 	// 否则「问了一句引起异常的话」就等于把整个 QuickDock 搞崩。
@@ -182,7 +184,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	fl := newSSEFlusher(w, flusher, strings.TrimSpace(req.ConvID))
 	defer fl.close()
 
-	res := s.svc.RunAgent(ctx, AgentRunReq{
+	res := s.svc.runAgent(ctx, AgentRunReq{
 		ConvID:   req.ConvID,
 		Mode:     req.Mode,
 		SpaceID:  req.SpaceID,
