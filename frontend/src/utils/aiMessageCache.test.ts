@@ -140,8 +140,14 @@ describe('换行渲染（breaks:true 与 <br>）', () => {
   test('CSS 不得隐藏 <br>（否则多行要点被挤成一行）', () => {
     // 这里断言的是「组件样式表里不存在隐藏 br 的规则」。
     // 读取源码做静态检查：CSS 规则文本中出现 br 的 display:none 即为回归。
+    //
+    // 样式跟着模板走：消息区已拆成 AiMessageList.vue，.ai-md 的规则都在那边。
+    // 两个文件一起读——将来谁把 markdown 样式挪回去，这条断言也不至于失灵。
     const here = dirname(fileURLToPath(import.meta.url))
-    const src = readFileSync(resolve(here, '../components/AIPage.vue'), 'utf8')
+    const src = [
+      readFileSync(resolve(here, '../components/AIPage.vue'), 'utf8'),
+      readFileSync(resolve(here, '../components/AiMessageList.vue'), 'utf8'),
+    ].join('\n')
     const rules = src.match(/\.ai-md\s+:deep\(br\)\s*\{[^}]*\}/g) ?? []
     expect(rules.length, '未找到 .ai-md br 规则').toBeGreaterThan(0)
     for (const r of rules) {

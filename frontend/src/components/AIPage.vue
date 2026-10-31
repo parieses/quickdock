@@ -1,25 +1,31 @@
 <script setup lang="ts">
-import { ref, computed, reactive, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick, type Component } from 'vue'
+import { ref, computed, reactive, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
+import { KEEP_ALIVE } from '../pages/keepAlive'
 import {
-  Bot, Plus, Trash2, Copy, Square, RefreshCw, StickyNote, ArrowDown, ArrowUp, Image as ImageIcon,
-  Link2, X, Download, Pencil, Search, Wrench, FolderOpen, Folder, ChevronRight, ChevronDown,
-  MessageSquare, Languages, FileText, GraduationCap, Lightbulb, Globe, Link as LinkIcon,
-  FolderTree, FileSearch, GitBranch, PenLine, Terminal, Play, Bug, Clock, FilePlus,
-  ListChecks, Bell, LayoutList, Network, Undo2,
+  Copy, Image as ImageIcon, X, Download, MessageSquare,
+  Languages, FileText, GraduationCap, Lightbulb, ListChecks,
 } from '@lucide/vue'
 import { Marked } from 'marked'
-import DOMPurify from 'dompurify'
 import { unwrap } from '../utils/api'
-import AgentRunTree from './AgentRunTree.vue'
-import AiDiffView from './AiDiffView.vue'
+import AiSidePanel from './AiSidePanel.vue'
+import AiConversationSidebar from './AiConversationSidebar.vue'
+import AiToolbar from './AiToolbar.vue'
+import AiDigestPanel from './AiDigestPanel.vue'
+import AiHero from './AiHero.vue'
+import AiComposer from './AiComposer.vue'
+import AiMessageList from './AiMessageList.vue'
+import AiApprovalBar from './AiApprovalBar.vue'
 import { SetAIPageVisible } from '../../bindings/quickdock/services/appservice'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
-import { splitMarkdownBlocks as splitBlocks } from '../utils/markdownBlocks'
-import { stripDsmlMarkup } from '../utils/dsmlMarkup'
+import { downloadText, safeFileName } from '../utils/download'
+import { useAiMarkdownBlocks } from '../composables/useAiMarkdownBlocks'
+import { useAiAttachments } from '../composables/useAiAttachments'
+import { useAiMention } from '../composables/useAiMention'
 import { isMathFenceLang, mathExtension, renderMath } from '../utils/mathMarkdown'
+import { enhanceTables, sortTableByColumn } from '../utils/tableEnhance'
 import {
   handleMermaidToolbarClick,
   isMermaidFenceLang,
@@ -37,15 +43,22 @@ import '../styles/hljs-theme.css'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
-import type { ToastAPI } from '../types'
+import type { PendingImage, ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConvHit, AIHooksInfo, AIProfilesResult } from '../types/ai'
+import type {
+  AIArtifact, AICheckpointView, AIConversation, AIMessage, AIMsgImage,
+  AIRuleFile, AISpace, AIToolCall, OutlineItem,
+} from '../types/ai'
+import { artifactsFromCalls, artifactsOf, countToolRounds, serializeTools, shortPath, toolList } from '../utils/aiTools'
 
 import {
   AIListProfiles,
   AISetActiveProfile,
   AIStreamInfo,
   AIRegenerateTitle,
+  AISetConversationStar,
+  AISummarizeConversation,
   AIRenameConversation,
   AIListConversations,
   AIDeleteConversation,
@@ -58,7 +71,6 @@ import {
   AIApproveToolCall,
   AIListCheckpoints,
   AIRestoreCheckpoint,
-  AISuggestMentions,
   AISearchMessages,
   AISetConversationMode,
   AIGetHooks,
@@ -71,96 +83,12 @@ import { RevealInExplorer } from '../../bindings/quickdock/services/system/syste
 // 为什么必须显式声明：页面是经 defineAsyncComponent(import(...)) 注册的，而 KeepAlive 判断
 // 异步组件时读的是 `vnode.type.__asyncResolved`（内层 SFC 定义）上的名字 ——
 // 在包装器上赋 name 完全无效，不声明就永远匹配不上，切页照样销毁组件。
-defineOptions({ name: 'AIPageKeepAlive' })
+// name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）。
+defineOptions({ name: KEEP_ALIVE.ai })
 
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
-// 任务 = 一条对话。界面上叫「任务」而不是「会话」：它对应的是「我交给 AI 的一件事」，
-// 而且创建时要先选类型（翻译 / 总结 / 解释 …），本来就不是闲聊。
-interface AIConversation {
-  id: string; title: string; summary: string
-  prompt_tokens: number; completion_tokens: number
-  created_at: string; updated_at: string
-  cwd?: string
-  // 所属空间（空 = 普通任务，侧栏列在「任务」组里）
-  space_id?: string
-  // 创建时选定的类型。后端对老数据回落 chat，这里同样兜底。
-  mode?: string
-}
-// 空间 = 一个目录 + 挂在这个目录下的若干任务。
-interface AISpace { id: string; name: string; cwd: string; created_at: string; updated_at: string }
-interface AIMessage {
-  id: string; conv_id: string; role: string; content: string; created_at: string
-  reasoning_content?: string; images?: string; imgList?: AIMsgImage[]
-  // 该条回复自己那一次调用的用量（assistant 才有值，老消息为 0/undefined）
-  model?: string; prompt_tokens?: number; completion_tokens?: number; cached_tokens?: number
-  // 这条回复的估算费用（元）。后端按当前价目表现算，未收录的模型没有这个字段。
-  cost?: number
-  // 这条回复被用户中途停止（内容是半截的）。后端同样落库，刷新后标记仍在。
-  stopped?: boolean
-  // 这条回复期间的工具调用记录（JSON 数组字符串，后端落库原文）。
-  // 空串/undefined = 没调过工具。不解析成对象是因为它只在渲染那一处用到，
-  // 提前解析会让每条消息都多一份副本，而绝大多数消息用不上。
-  tool_calls?: string
-  // 用了几轮工具调用（0/undefined = 纯文本回答）
-  tool_rounds?: number
-}
-
-// 一条工具调用（前端展示用）。running 只在流式期间为 true：
-// 历史记录从库里读回来时一定是已完成的，没有中间态。
-interface AIToolCall {
-  id: string; name: string; args?: string
-  result?: string; error?: string; ms?: number
-  round?: number; running?: boolean
-  // dedup 与本次提问里之前某次调用完全相同，宿主跳过了执行。
-  dedup?: boolean
-  // denied 被用户拒绝（审批闸门），没有执行。与 dedup 分开：两个都是「没跑」，
-  // 但原因不同——一个是「同样的事刚做过」，一个是「你拒绝了」，卡片上要说不同的话。
-  denied?: boolean
-  // 审批（见 ai_approval.go）：写类与高危工具在宿主侧停下来等用户点按钮。
-  // pending 只在流式期间存在；allowed / denied 是点完之后的终态，
-  // expired 表示卡片还在但后端已经不等了（会话结束 / 用户点了停止）。
-  approval?: 'pending' | 'allowed' | 'denied' | 'expired'
-  riskNote?: string
-  rememberable?: boolean
-  // 「记住」的范围：命令类工具按命令族记住，这里放族名（如 npm），
-  // 按钮上要写明「允许 npm 命令」，否则用户以为自己只批准了这一条。
-  grantScope?: string
-  // 审批归属的会话：后端下发而不是读 activeId —— 用户在等待期间可能切走，
-  // 切回来再点时 activeId 已经不是原来那个会话了。
-  approvalConvId?: string
-  // 改动行数（file_edit 有值）：卡片摘要行右侧显示 +N / -M。
-  added?: number; removed?: number
-  // 行级 diff（file_edit / file_write）：数字说明「改了多少」，它说明「改成了什么」。
-  // 只有数字时用户只知道动了两行，那正是「不敢让它改代码」的原因。
-  diff?: string
-  // 这条调用所属的编排 run / 节点（只有 spawn_agent 才有）。
-  // 有了它才能在回复下面挂出 run 树，不必去解析可能被截断的结果文本。
-  run_id?: string; node_id?: string
-}
-
-// 一条编辑快照（回滚点）。Wails 只在 bound 参数里生成类型，返回值里的结构
-// （ApiResult.data）是 any，所以这里按后端 AICheckpointView 的 JSON 手写一份。
-interface AICheckpointView {
-  id: string; seq: number; tool: string; tool_call_id: string
-  created_at: string
-  files: { path: string; existed: boolean; mode: number; backup: string; bytes: number }[]
-}
-
-// 一个生效的规则文件（后端 ai_rules.go 的 aiRuleFile）。
-interface AIRuleFile { name: string; bytes: number; truncated?: boolean }
-
-// @ 补全列表的一项（后端 AIMentionItem，或本地拼的会话项）。
-// 会话项没有 path，只有 convId。
-interface AIMentionItem { kind: 'file' | 'dir' | 'conv'; name: string; path?: string; convId?: string }
-
-// 一条图片引用：url 类直发链接；file 类本地图（dataUrl 为内存态，仅当前会话/已懒加载后存在，
-// path 为落盘后相对数据目录的路径，重载会话时由 AILoadImage 读回 dataUrl）。
-interface AIMsgImage { kind: 'file' | 'url'; url?: string; path?: string; name?: string; dataUrl?: string }
-
-// 待发送附件（发送前预览，尚未落库/组包）。
-interface PendingImage { kind: 'file' | 'url'; url?: string; dataUrl?: string; name: string }
 
 const emit = defineEmits<{ (e: 'open-settings', page?: string): void }>()
 
@@ -259,69 +187,49 @@ const streamTools = ref<AIToolCall[]>([])
 // 三种情况表现一模一样（AI 没照约定做）。给一行提示，这些都能自查。
 const runRules = ref<AIRuleFile[]>([])
 
-// toolList 把消息里的 tool_calls 解析成数组。
+
+
+
+
+// streamArtifacts 流式期的产物：file_write 返回的当下就挂出来，
+// 等 done 再显示会让「文件已经写完了」和「看得见」之间隔一整轮回答。
+const streamArtifacts = computed(() => artifactsFromCalls(streamTools.value))
+
+// 审批条要展示的那一条：取第一个还等着答复的调用。
 //
-// 用 try/catch 兜住：这是历史数据，可能来自旧版本、也可能被手工改过库；
-// 解析失败就不显示卡片，而不是让整条消息渲染崩掉（一个坏 JSON 不该白屏）。
-function toolList(m: AIMessage): AIToolCall[] {
-  if (!m.tool_calls) return []
-  try {
-    const arr = JSON.parse(m.tool_calls)
-    return Array.isArray(arr) ? (arr as AIToolCall[]) : []
-  } catch {
-    return []
+// 为什么是「第一条」而不是「全部」：后端是一次一条地等（回完一条才下发下一条），
+// 同时堆积多条只是前端事件顺序造成的短暂现象，条数用 count 标出来就够了。
+const pendingApproval = computed(() => streamTools.value.find((tc) => tc.approval === 'pending') || null)
+const pendingApprovalCount = computed(() => streamTools.value.filter((tc) => tc.approval === 'pending').length)
+
+// —— 产物预览 / 右侧面板 ——
+// 面板本体（标签页、CodeMirror、文件读写）已收进 AiSidePanel；页面只留开合状态，
+// 因为工具栏按钮的 is-active 与 Ctrl+Shift+B 都要读它。
+const sideOpen = ref(false)
+const sidePanelRef = ref<InstanceType<typeof AiSidePanel> | null>(null)
+
+// convArtifacts 本任务全部回复的产物合集（跨条消息去重，后写的覆盖先写的 op）
+const convArtifacts = computed<AIArtifact[]>(() => {
+  const map = new Map<string, AIArtifact>()
+  for (const m of messages.value) {
+    for (const a of artifactsOf(m)) map.set(a.path, a)
   }
+  return [...map.values()]
+})
+
+function toggleSidePanel() {
+  sideOpen.value = !sideOpen.value
+  // 首次打开送一个首页标签页，避免一块空白
+  if (sideOpen.value) sidePanelRef.value?.ensureTab()
 }
 
-// rulesOf 取这条回复生效过的规则文件。只有本次会话里收到的回复有（见 runRules），
-// 刷新后重新从库里读的消息没有这个字段——规则是执行时事实，不落库。
-function rulesOf(m: Record<string, any>): AIRuleFile[] {
-  const v = m?.rules
-  return Array.isArray(v) ? (v as AIRuleFile[]) : []
-}
-
-// rulesTitle 悬停时列出文件名与字节数：截断过的一定要标出来，
-// 否则「我写了 30KB 的规则，AI 只记住一半」这件事永远查不出来。
-function rulesTitle(files: AIRuleFile[]): string {
-  return files.map((f) => `${f.name} · ${f.bytes} B${f.truncated ? ' · 已截断' : ''}`).join('\n')
-}
-
-// runIDOf 取这条回复所属的编排 run（同一条回复里派了多个子任务时它们同属一个 run，
-// 所以取第一条带 run_id 的调用即可）。
-// 为空的回复（绝大多数）不渲染 run 树面板——不能对每句普通回答都挂一个空面板。
-function runIDOf(m: AIMessage): string {
-  if (m.role !== 'assistant') return ''
-  for (const tc of toolList(m)) {
-    if (tc.run_id) return tc.run_id
+// 消息区产物条（含流式产物）点击：打开面板并直接跳到那个文件。
+function openArtifactInPanel(a: AIArtifact) {
+  if (!sideOpen.value) {
+    sideOpen.value = true
+    sidePanelRef.value?.ensureTab()
   }
-  return ''
-}
-
-// serializeTools 把流式期收集的记录转成落库/展示同构的 JSON。
-// 丢掉 running：库里存的是「发生过什么」，不是「界面此刻什么样」。
-function serializeTools(list: AIToolCall[]): string {
-  return JSON.stringify(list.map((t) => ({
-    id: t.id, name: t.name, args: t.args || '',
-    result: t.result || '', error: t.error || '',
-    ms: t.ms || 0, round: t.round || 0,
-    ...(t.dedup ? { dedup: true } : {}),
-    // 拒绝是结果不是瞬时态：刷新后卡片还要显示「已拒绝」，所以必须落库。
-    // approval 状态本身不落——pending 在这条消息进库时早已有结论。
-    ...(t.denied ? { denied: true } : {}),
-    ...(t.added ? { added: t.added } : {}),
-    ...(t.removed ? { removed: t.removed } : {}),
-    // diff 要落库：刷新后卡片还能展开看到「这一步改了什么」，
-    // 而这正是用户回看历史时最需要的信息。
-    ...(t.diff ? { diff: t.diff } : {}),
-    // run/node 必须一起落库：刷新后 run 树面板靠它才知道该拉哪棵树。
-    ...(t.run_id ? { run_id: t.run_id, node_id: t.node_id || '' } : {}),
-  })))
-}
-
-// countToolRounds 数轮次而不是数条数：一轮可以并发调多个工具，
-// 卡片上写「5 个工具」和「3 轮」是两件事，用户问的「调了几轮」是后者。
-function countToolRounds(list: AIToolCall[]): number {
-  return new Set(list.filter((t) => t.round).map((t) => t.round)).size
+  void sidePanelRef.value?.openArtifact(a)
 }
 
 // ---- 工具卡片的展示 ----
@@ -330,97 +238,6 @@ function countToolRounds(list: AIToolCall[]): number {
 // 一行 `file_edit` 后面跟一坨 {"path":..., "old_string":...}，用户得在 JSON 里
 // 找自己关心的那一个值。所以卡片读的是「动作 + 目标」两件事：
 // 图标与动词说清做了什么，后面那一句说清对谁做的。
-const TOOL_ICON: Record<string, Component> = {
-  file_edit: PenLine, file_write: FilePlus, file_read: FileText, file_search: FileSearch, file_grep: FileSearch,
-  dir_list: FolderTree, git_status: GitBranch, git_diff: GitBranch,
-  web_fetch: Globe, web_links: LinkIcon, web_head: Globe,
-  run_command: Terminal, check_workdir: FolderTree,
-  // 派活：树状分叉的图示比扳手更能说明「这里分出去了几路子任务」。
-  spawn_agent: Network,
-  plugin_execute: Play, plugin_open: LayoutList, plugin_list: LayoutList,
-  env_list: ListChecks, env_start: Play, env_stop: Square, env_status: Bug,
-  port_list: LayoutList, log_list: FileText, log_read: FileText,
-  monitor_list: Clock, monitor_check_now: Clock, monitor_logs: Clock,
-  schedule_list: Clock, schedule_runs: Clock, schedule_run_now: Play,
-  todo_list: ListChecks, todo_add: Plus, todo_done: ListChecks,
-  note_search: FileText, note_create: FileText,
-  clipboard_list: LayoutList, clipboard_search: Search,
-  robot_notify: Bell, app_info: Bot, diag_run: Bug,
-}
-// 动词按工具名前缀兜底：新工具没登记时至少能看出它是读、改、跑还是查。
-function toolIcon(name: string): Component {
-  if (TOOL_ICON[name]) return TOOL_ICON[name]
-  if (name.startsWith('file_')) return FileText
-  if (name.startsWith('git_')) return GitBranch
-  if (name.startsWith('web_')) return Globe
-  if (name.startsWith('env_')) return ListChecks
-  if (name.startsWith('monitor_') || name.startsWith('schedule_')) return Clock
-  if (name.startsWith('plugin_')) return Play
-  if (name.startsWith('todo_')) return ListChecks
-  if (name.startsWith('note_')) return FileText
-  if (name.startsWith('clipboard_')) return LayoutList
-  if (name.startsWith('log_')) return FileText
-  return Wrench
-}
-
-const TOOL_VERB: Record<string, string> = {
-  file_edit: 'aiToolVerbEdit', file_write: 'aiToolVerbWrite', file_read: 'aiToolVerbRead', file_search: 'aiToolVerbSearch',
-  file_grep: 'aiToolVerbSearch', dir_list: 'aiToolVerbList',
-  git_status: 'aiToolVerbGitStatus', git_diff: 'aiToolVerbGitDiff',
-  web_fetch: 'aiToolVerbFetch', web_links: 'aiToolVerbLinks', web_head: 'aiToolVerbHead',
-  run_command: 'aiToolVerbRun', check_workdir: 'aiToolVerbProbe',
-  spawn_agent: 'aiToolVerbSpawn',
-  plugin_execute: 'aiToolVerbPlugin', plugin_open: 'aiToolVerbOpen', plugin_list: 'aiToolVerbList',
-  env_list: 'aiToolVerbQuery', env_start: 'aiToolVerbStart', env_stop: 'aiToolVerbStop',
-  env_status: 'aiToolVerbQuery', port_list: 'aiToolVerbQuery',
-  log_list: 'aiToolVerbQuery', log_read: 'aiToolVerbRead',
-  monitor_list: 'aiToolVerbQuery', monitor_check_now: 'aiToolVerbCheck', monitor_logs: 'aiToolVerbQuery',
-  schedule_list: 'aiToolVerbQuery', schedule_runs: 'aiToolVerbQuery', schedule_run_now: 'aiToolVerbRun',
-  todo_list: 'aiToolVerbQuery', todo_add: 'aiToolVerbAdd', todo_done: 'aiToolVerbUpdate',
-  note_search: 'aiToolVerbSearch', note_create: 'aiToolVerbAdd',
-  clipboard_list: 'aiToolVerbQuery', clipboard_search: 'aiToolVerbSearch',
-  robot_notify: 'aiToolVerbNotify', app_info: 'aiToolVerbQuery', diag_run: 'aiToolVerbCheck',
-}
-function toolVerb(name: string): string {
-  const k = TOOL_VERB[name]
-  return k ? t(k) : t('aiToolVerbCall')
-}
-
-// 目标：从参数里挑一个「这条卡片在说谁」的值。
-//
-// 只挑 path / url / command / pattern / query / name / id 这几个键 ——
-// 全参数铺开的话，一条 file_edit 的摘要会有三行，而用户真正想确认的只是
-// 「它动的是不是我那个文件」。
-const TOOL_TARGET_KEYS = ['path', 'url', 'command', 'pattern', 'query', 'keyword', 'name', 'id', 'plugin', 'runtime', 'dir']
-function toolTarget(tc: AIToolCall): string {
-  const raw = (tc.args || '').trim()
-  if (!raw) return ''
-  let obj: Record<string, any> | null = null
-  try { obj = JSON.parse(raw) } catch { obj = null }
-  if (!obj) {
-    // 参数解析失败时至少给原文的前一段：模型写坏了 JSON 也要能看出它想动谁。
-    return raw.length > 80 ? raw.slice(0, 80) + '…' : raw
-  }
-  for (const k of TOOL_TARGET_KEYS) {
-    const v = obj[k]
-    if (typeof v === 'string' && v.trim()) return shortPath(v.trim())
-    if (typeof v === 'number') return String(v)
-  }
-  // 没命中已知键就退回第一个字符串值，比整段 JSON 可读得多。
-  for (const [, v] of Object.entries(obj)) {
-    if (typeof v === 'string' && v.trim()) return shortPath(v.trim())
-  }
-  return ''
-}
-
-// 路径只留末尾两段：绝对路径在卡片上是噪音，用户要确认的是「哪个文件」，
-// 而 `E:\pp\quickdock\services\ai\tools\code.go` 里有用的只有后两截。
-function shortPath(p: string): string {
-  const sep = p.includes('\\') ? '\\' : '/'
-  const parts = p.split(/[\\/]/).filter(Boolean)
-  if (parts.length <= 2) return p
-  return '…' + sep + parts.slice(-2).join(sep)
-}
 
 // 编辑回滚点（A3）：这条会话改过哪些文件、能退到哪一步。
 const checkpoints = ref<AICheckpointView[]>([])
@@ -472,24 +289,11 @@ async function restoreCheckpoint(cp: AICheckpointView) {
   }
 }
 
-// 结果要不要用等宽块：命令输出与网页正文带换行，按纯文本渲染会把缩进吃掉。
-function toolResultLang(tc: AIToolCall): string {
-  if (tc.name === 'run_command') return 'bash'
-  if (tc.name.startsWith('git_')) return 'diff'
-  if (tc.name === 'file_edit') return 'diff'
-  return ''
-}
-
 // jobIdOf 从 run_command 的结果里挑出后台任务 id（没有则空串）。
 //
 // 结果串是后端 JSON 化后的文本，这里只认带引号的 "jobId"：
 // 同步执行的结果里没有这个键，返回空串就等于「不是后台任务」，
 // 卡片上因此不会多出一行跟它无关的提示。
-function jobIdOf(tc: AIToolCall): string {
-  if (tc.name !== 'run_command' || !tc.result) return ''
-  const m = /"jobId"\s*:\s*"([^"]+)"/.exec(tc.result)
-  return m ? m[1] : ''
-}
 
 // approveTool 对一条待确认的工具调用作出决定（见后端 ai_approval.go）。
 //
@@ -510,112 +314,6 @@ async function approveTool(tc: AIToolCall, decision: 'allow' | 'deny', remember 
     tc.denied = false
     toast.error(getErrorMessage(e))
   }
-}
-
-// 历史消息的块 HTML：按消息 id 记忆化。
-//
-// 为什么不用「整段文本 → 块数组」的全局 LRU：
-// 之前 mdCache 上限 200 段，缓存淘汰采用「删最旧一条」。当一个会话的消息数
-// 超过上限后，模板每帧遍历历史消息时，最早的那批条目正好被挤在淘汰线上，
-// 于是每帧都要把全部历史消息重新 md.parse 一遍。
-// 实测：400 段 × 3 块的会话，稳态帧 md.parse 次数 = 1200（= 消息数 × 块数），
-// 也就是「越长的对话越卡」，而且是持续卡，不是只在首帧卡。
-//
-// AI 消息落库后内容不再变化，按消息 id 记忆化即可：
-// 无容量上限（随会话消息数自然增长）、不会抖动、也不会误伤其他会话。
-const msgBlockCache = new Map<string, { src: string; html: string[] }>()
-
-// 流式块的 HTML 缓存（与历史块分开存放）。
-// 分开的原因：两者共用一个 LRU 时，长对话的历史块会把流式块挤出去，
-// 导致流式期间「已完成的块」每帧都被重新解析 —— 恰好是最需要流畅的时候掉帧。
-// 流式块的规模只与单次回复的段落数有关，不会无限增长，故不设上限。
-const liveBlockCache = new Map<string, string>()
-
-// 以「围栏代码块之外的空行」为界切块。
-// 切分点必须是 markdown 语义上独立的边界，否则分块渲染与整段渲染结果不一致
-// （表现为流式过程中内容突然变形）。具体规则与边界场景测试见 utils/markdownBlocks.ts。
-function splitMarkdownBlocks(src: string): string[] {
-  return splitBlocks(src)
-}
-
-// 解析单个块（带缓存）。命中缓存时返回同一字符串引用，
-// Vue 的 patchElement 对 innerHTML 只在值变化时赋值 → 不会产生 DOM 写入。
-//
-// 注意：只有已完成的块才写入缓存。流式中最后一个未完成块每帧原文都变，
-// 若也缓存会产生大量一次性条目。未完成块每帧重解析本身开销就很小
-// （实测末块仅占全文 0.2%）。
-function renderBlock(raw: string, cacheable = true): string {
-  const cached = liveBlockCache.get(raw)
-  if (cached !== undefined) return cached
-  const html = DOMPurify.sanitize(md.parse(raw, { async: false }) as string)
-  if (cacheable) liveBlockCache.set(raw, html)
-  return html
-}
-
-// ---- 计划模式 ----
-//
-// 计划模式的回答要求固定结构（### 计划 / 涉及文件 / 风险 / 验收）。解析成块再渲染，
-// 是为了让步骤变成可勾的清单并把「按此计划执行」摆在计划旁边，而不是埋在正文末尾。
-//
-// 解析不出来就整个回落到普通 markdown：一份能读的计划比一个空的计划卡片重要。
-// 模型没照结构走（或用户自己切到了计划模式却只是随口问一句）时这是常态。
-interface PlanSection { title: string; items: string[]; text: string }
-
-// 步骤章节的标题口径。中文为主（system prompt 是中文的），英文只是兜底。
-const PLAN_STEP_TITLE = /计划|步骤|plan|steps/i
-
-function parsePlanSections(src: string): PlanSection[] | null {
-  const out: PlanSection[] = []
-  let cur: PlanSection | null = null
-  // 围栏里的 `# 注释` 不是标题、`- 参数` 不是列表项：不认围栏会把一段命令示例
-  // 拆成十几个假章节。围栏原样留在 text 里，交给 markdown 渲染成代码块。
-  let inFence = false
-  for (const raw of src.split('\n')) {
-    const line = raw.trimEnd()
-    const fence = line.trimStart().startsWith('```')
-    if (fence) inFence = !inFence
-    if (!inFence && !fence) {
-      const h = /^#{1,6}\s+(.+?)\s*$/.exec(line)
-      if (h) {
-        cur = { title: h[1], items: [], text: '' }
-        out.push(cur)
-        continue
-      }
-    }
-    if (!cur) continue
-    const item = !inFence && !fence ? /^\s*(?:\d+[.、)]|[-*+])\s+(.+)$/.exec(line) : null
-    if (item) cur.items.push(item[1])
-    else if (line.trim()) cur.text += (cur.text ? '\n' : '') + line
-  }
-  // 少于两节就不算计划结构：普通回答里也常有零星 ## 小标题。
-  return out.length >= 2 ? out : null
-}
-
-const planCache = new Map<string, { src: string; secs: PlanSection[] | null }>()
-
-function planOf(m: AIMessage): PlanSection[] | null {
-  if (m.role !== 'assistant') return null
-  const src = m.content ?? ''
-  const hit = planCache.get(m.id)
-  if (hit && hit.src === src) return hit.secs
-  const secs = parsePlanSections(stripDsmlMarkup(src))
-  planCache.set(m.id, { src, secs })
-  return secs
-}
-
-// 模板里每个调用点写 `planOf(m) ?? []` 会各造一个空数组，diff 时被当成新值；
-// 空态共用一个常量引用。
-const EMPTY_PLAN: PlanSection[] = []
-function planSecs(m: AIMessage): PlanSection[] {
-  return planOf(m) ?? EMPTY_PLAN
-}
-
-// 哪一节是「步骤」：标题命中的那一节，否则取第一个有列表项的。
-// 勾选框只给这一节——涉及文件、风险也用列表写，全变成勾选框就没有主次了。
-function planStepIndex(secs: PlanSection[]): number {
-  const byTitle = secs.findIndex((s) => PLAN_STEP_TITLE.test(s.title) && s.items.length > 0)
-  if (byTitle >= 0) return byTitle
-  return secs.findIndex((s) => s.items.length > 0)
 }
 
 // 按此计划执行：切回对话模式，把计划作为要求发出去。
@@ -643,79 +341,6 @@ async function runPlan(m: AIMessage) {
   await send()
 }
 
-// 历史消息的块 HTML 数组：按消息 id 记忆化。
-// 消息内容不可变，故可安全缓存；src 用于兜底校验（内容若被改动则重新解析）。
-function renderMessageBlocks(m: AIMessage): string[] {
-  const key = m.id
-  const hit = msgBlockCache.get(key)
-  if (hit && hit.src === m.content) return hit.html
-  // 渲染前剥掉「被写成正文的工具调用」标记：修复前落库的历史消息里带着这些
-  // 标记，直接渲染就是满屏 <｜｜DSML｜｜>（见 utils/dsmlMarkup.ts）。
-  const raws = splitMarkdownBlocks(stripDsmlMarkup(m.content ?? ''))
-  const html = raws.map((raw) => DOMPurify.sanitize(md.parse(raw, { async: false }) as string))
-  msgBlockCache.set(key, { src: m.content ?? '', html })
-  return html
-}
-
-// 流式增量渲染：只重新解析最后一个未完成块，其余块直接复用缓存。
-//
-// 对齐方式：只有除最后一块外的块才按原文做公共前缀匹配。
-// 原因是最后一块是「正在写」的块，它的原文每帧都在变，若也要求原文完全相等，
-// 就永远匹配不上 → 每次都从第 0 块重建，导致已渲染内容被顶替（实测复现）。
-// 最后一块无条件重渲染（它的体量小，开销低），前面的块原文一旦稳定就不会再变。
-function renderLiveBlocks(src: string) {
-  // 与历史消息同一个口径：先剥掉工具调用标记，再切块渲染。
-  // 后端已经在流式层拦过一次（services/ai/ai_dsml.go），这里是幂等的兜底。
-  const raws = splitMarkdownBlocks(stripDsmlMarkup(src))
-  const arr = streamBlocks.value
-  const n = raws.length
-  // 已完成块的数量：raws 的前 n-1 块（最后一块是进行中的）
-  const doneCount = n > 0 ? n - 1 : 0
-  // 计算与上一帧的公共前缀（只比较已完成块）
-  let common = 0
-  const limit = Math.min(doneCount, arr.length)
-  while (common < limit && arr[common].raw === raws[common]) {
-    common++
-  }
-  // 公共前缀的 HTML 必然一致（同一原文 → 同一缓存结果），无需重写
-  for (let i = common; i < doneCount; i++) {
-    const html = renderBlock(raws[i])
-    if (i < arr.length) {
-      if (arr[i].html !== html) arr[i].html = html
-      arr[i].raw = raws[i]
-    } else {
-      arr.push({ raw: raws[i], html })
-    }
-  }
-  // 最后一块（进行中）：无条件重渲染，且不写入缓存（原文每帧都变）
-  if (n > 0) {
-    const html = renderBlock(raws[n - 1], false)
-    if (doneCount < arr.length) {
-      if (arr[doneCount].html !== html) arr[doneCount].html = html
-      arr[doneCount].raw = raws[n - 1]
-    } else {
-      arr.push({ raw: raws[n - 1], html })
-    }
-  }
-  if (arr.length > n) arr.length = n
-}
-
-// 流式结束、消息落地时，把已渲染好的块直接交给历史消息缓存。
-// 否则落地瞬间要把整条回复重新 md.parse 一遍（实测 15KB ≈ 10.5ms），
-// 恰好发生在用户刚看到完整回复的时刻 —— 表现为「回复刚出来就卡一下」。
-function primeMessageBlocks(id: string, content: string, html: string[]) {
-  msgBlockCache.set(id, { src: content, html })
-}
-
-// 只保留当前会话仍在显示的消息缓存，丢弃其他会话的条目。
-function pruneMessageBlocks(list: AIMessage[]) {
-  if (msgBlockCache.size === 0) return
-  const alive = new Set(list.map((m) => m.id))
-  for (const id of Array.from(msgBlockCache.keys())) {
-    if (!alive.has(id)) msgBlockCache.delete(id)
-  }
-}
-
 // —— Mermaid 图渲染调度 ——
 // 图不是同步渲染出来的：marked 只吐源码占位块，真正画图要等 DOM 挂上后走异步 API。
 // 这个调度点用 nextTick 合并同一批更新（流式每帧都会触发，语义上只需要「这帧之后扫一遍」）。
@@ -733,94 +358,12 @@ function scheduleMermaidScan() {
   mermaidScanPending = true
   nextTick(() => {
     mermaidScanPending = false
-    renderMermaidIn(msgContent.value, { skip: skipStreamTail })
-    enhanceTables(msgContent.value)
-  })
-}
-
-// —— 表格增强：横向滚动 / 表头点击排序 / 导出 CSV ——
-// 这些作用在 v-html 渲染出的真实 DOM 上（Vue 不托管），故走原生 API。
-// 已处理的表打 data-tbl-enhanced，避免流式每帧重扫时重复注入。
-function enhanceTables(root: HTMLElement | null) {
-  if (!root) return
-  const tables = root.querySelectorAll('table:not([data-tbl-enhanced])')
-  for (const tbl of Array.from(tables) as HTMLTableElement[]) {
-    tbl.setAttribute('data-tbl-enhanced', '1')
-    const parent = tbl.parentElement
-    // 横向滚动容器：表格可能比气泡宽，不包一层表格自己不会滚
-    let wrap = parent?.classList.contains('md-table-wrap')
-      ? (parent as HTMLElement)
-      : null
-    if (!wrap && parent) {
-      wrap = document.createElement('div')
-      wrap.className = 'md-table-wrap'
-      parent.insertBefore(wrap, tbl)
-      wrap.appendChild(tbl)
-    }
-    // 表头排序：给每个 thead th 打列索引 + 可点标记（marked 表格第一行即 thead>th）
-    tbl.querySelectorAll('thead th').forEach((th, i) => {
-      th.setAttribute('data-col', String(i))
-      th.classList.add('md-th-sortable')
+    renderMermaidIn(msgListRef.value?.contentEl() || null, { skip: skipStreamTail })
+    enhanceTables(msgListRef.value?.contentEl() || null, {
+      exportLabel: t('aiExportCsv'),
+      onExported: (name) => toast.success(t('aiDownloadOk', { name })),
     })
-    // 导出 CSV 按钮条（插在滚动容器上方）
-    if (wrap && !wrap.previousElementSibling?.classList.contains('md-table-bar')) {
-      const bar = document.createElement('div')
-      bar.className = 'md-table-bar'
-      const btn = document.createElement('button')
-      btn.type = 'button'
-      btn.className = 'md-table-export'
-      btn.textContent = t('aiExportCsv')
-      btn.addEventListener('click', () => exportTableCsv(tbl))
-      bar.appendChild(btn)
-      wrap.parentElement?.insertBefore(bar, wrap)
-    }
-  }
-}
-
-function csvCell(s: string): string {
-  const v = (s || '').replace(/\r?\n/g, ' ').trim()
-  return /[",\r\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v
-}
-
-function exportTableCsv(tbl: HTMLTableElement) {
-  const lines = Array.from(tbl.querySelectorAll('tr')).map((r) =>
-    Array.from(r.children)
-      .map((c) => csvCell(c.textContent ?? ''))
-      .join(','),
-  )
-  const csv = '﻿' + lines.join('\r\n') // 前导 BOM：避免 Excel 把中文 CSV 读成乱码
-  downloadBlob(new Blob([csv], { type: 'text/csv;charset=utf-8' }), 'table.csv')
-  toast.success(t('aiDownloadOk', { name: 'table.csv' }))
-}
-
-function sortTableByColumn(th: HTMLElement) {
-  const tbl = th.closest('table') as HTMLTableElement | null
-  if (!tbl) return
-  const col = Number(th.dataset.col ?? '0')
-  const tbody = (tbl.querySelector('tbody') as HTMLTableSectionElement | null) || tbl
-  const rows = Array.from(tbody.querySelectorAll('tr'))
-  if (!rows.length) return
-  const prevCol = tbl.dataset.sortCol
-  const prevDir = tbl.dataset.sortDir
-  const dir = prevCol === String(col) && prevDir === 'asc' ? 'desc' : 'asc'
-  const numeric = rows.every((r) => {
-    const v = (r.children[col]?.textContent ?? '').trim()
-    return v !== '' && !Number.isNaN(Number(v))
   })
-  rows.sort((a, b) => {
-    const av = (a.children[col]?.textContent ?? '').trim()
-    const bv = (b.children[col]?.textContent ?? '').trim()
-    const cmp = numeric ? Number(av) - Number(bv) : av.localeCompare(bv, undefined, { numeric: true })
-    return dir === 'asc' ? cmp : -cmp
-  })
-  rows.forEach((r) => tbody.appendChild(r))
-  tbl.dataset.sortCol = String(col)
-  tbl.dataset.sortDir = dir
-  // 指示符：只有当前列显示 ▲/▼，其余清掉
-  tbl.querySelectorAll('.md-th-sortable').forEach((el) => {
-    if (el !== th) el.removeAttribute('data-sort-dir')
-  })
-  th.setAttribute('data-sort-dir', dir)
 }
 
 // 提交缓冲区到响应式状态。done/停止时必须立即 flush，否则尾部文字会丢。
@@ -839,12 +382,23 @@ function flushStream() {
   followBottom()
 }
 
+// 刷帧间隔随回答长度放宽。单帧成本 ≈ splitMarkdownBlocks(全文) + renderBlock(最后一块)，
+// 固定 16ms 节奏下长回答会把主线程吃到接近饱和——这时点开产物要等好几秒才出来，
+// 因为交互的回调排在成堆的渲染任务后面。放宽到 60/120ms 肉眼仍是连续输出，
+// 主线程却留出了响应点击的余量。
+function streamFlushDelay(): number {
+  const n = streamingText.value.length + streamBuf.length
+  if (n > 24 * 1024) return 120
+  if (n > 8 * 1024) return 60
+  return STREAM_FLUSH_MS
+}
+
 function scheduleStreamFlush() {
   if (streamTimer) return
   streamTimer = setTimeout(() => {
     streamTimer = null
     flushStream()
-  }, STREAM_FLUSH_MS)
+  }, streamFlushDelay())
 }
 
 const reasoningText = ref('')  // 思考过程（reasoning_content），折叠显示
@@ -854,61 +408,18 @@ const aiStreamPort = ref(0)
 const aiStreamToken = ref('')
 let streamCtrl: AbortController | null = null
 
-// —— 滚动跟随 ——
-// 根因：原先用 watch(streamingText) 驱动滚动，但真正改变 DOM 高度的是
-// markdown 渲染结果，两者时间点错位，scrollHeight 读到的是旧值。
-// 现在改为：ResizeObserver 观察消息容器内容高度变化 → 变化即滚到底。
-// 同时记录用户是否主动上滑（stickToBottom），上滑后不再强制抢滚动，改为显示「回到底部」按钮。
-const msgArea = ref<HTMLElement | null>(null)
-const msgContent = ref<HTMLElement | null>(null)
-const stickToBottom = ref(true)
-const showJumpBtn = ref(false)
-let resizeObs: ResizeObserver | null = null
-const BOTTOM_THRESHOLD = 48  // 距底部小于该像素即视为「贴底」
-
-function onMsgScroll() {
-  const el = msgArea.value
-  if (!el) return
-  const dist = el.scrollHeight - el.scrollTop - el.clientHeight
-  stickToBottom.value = dist <= BOTTOM_THRESHOLD
-  showJumpBtn.value = !stickToBottom.value
-}
+// —— 滚动跟随（已下沉到 AiMessageList） ——
+// 滚动状态与消息容器 DOM 是一件事：贴底判定、ResizeObserver、"回到底部"按钮
+// 都跟着容器走。留在父组件里就得靠事件回传互相读对方状态，反而更容易漏。
+// 这里只保留三个转发入口，父组件在「发送 / 切会话 / 流式跟帧」时调用。
+const msgListRef = ref<InstanceType<typeof AiMessageList> | null>(null)
 
 function scrollToBottom(smooth = false) {
-  const el = msgArea.value
-  if (!el) return
-  nextTick(() => {
-    const e = msgArea.value
-    if (!e) return
-    if (smooth) {
-      e.scrollTo({ top: e.scrollHeight, behavior: 'smooth' })
-    } else {
-      e.scrollTop = e.scrollHeight
-    }
-  })
+  msgListRef.value?.scrollToBottom(smooth)
 }
 
-// 流式过程中跟随底部：内容追加后把视口拉到底。
-// 用户主动上滑查看历史时（stickToBottom=false）不抢滚动，只显示「回到底部」按钮。
-//
-// 必须走 nextTick：调用时 Vue 还没把新的 markdown 渲染进 DOM，
-// 此时读 scrollHeight 拿到的是上一帧的旧高度，滚不到位。
 function followBottom() {
-  if (!stickToBottom.value) return
-  nextTick(() => {
-    // 下一帧用户可能已主动上滑，这时不该再抢滚动
-    if (!stickToBottom.value) return
-    const el = msgArea.value
-    if (!el) return
-    // 直接写 scrollTop 会触发 onMsgScroll，把贴底状态重新判定为 true —— 正是期望行为
-    el.scrollTop = el.scrollHeight
-  })
-}
-
-function jumpToBottom() {
-  stickToBottom.value = true
-  showJumpBtn.value = false
-  scrollToBottom(true)
+  msgListRef.value?.followBottom()
 }
 
 // 多档案 / 模型切换
@@ -938,10 +449,8 @@ function modeIcon(m?: string) {
 }
 
 // —— 图片附件 ——
-// attachments 为待发送预览；发送后清空。file 类存 dataUrl（base64），直接随请求发给模型；
-// url 类存公网链接。imageInputMode 来自当前激活档案的声明（both/url/base64），
-// 决定允许哪种附件——Agnes 这类只收 URL 的模型要禁用本地图选择（见 ai_image.go 闸门）。
-const attachments = ref<PendingImage[]>([])
+// attachments（待发送预览）与选择/粘贴/拖拽的交互都在 useAiAttachments 里，
+// 这里只留能力判定所需的输入源：imageInputMode 来自当前激活档案的声明。
 
 // 当前激活档案的 imageInput 能力；空（旧档案）按 both 处理，与后端 normalizeImageInput 一致。
 const imageInputMode = computed<string>(() => {
@@ -950,178 +459,21 @@ const imageInputMode = computed<string>(() => {
   if (v === 'url' || v === 'base64') return v
   return 'both'
 })
-// 是否允许添加本地图片 / 公网链接（两者在 both 下都允许）。
-const allowFileImage = computed(() => imageInputMode.value === 'both' || imageInputMode.value === 'base64')
-const allowUrlImage = computed(() => imageInputMode.value === 'both' || imageInputMode.value === 'url')
+const {
+  attachments, allowFileImage, allowUrlImage,
+  removeAttachment,
+  onInputPaste, onInputDrop,
+  urlInputOpen, urlDraft, fileInputEl,
+  onPickFiles, openFilePicker, toggleUrlInput, confirmUrlImage,
+} = useAiAttachments({ imageInputMode, toast, t })
 
-// 本地图片大小上限（与后端 10 MiB 对齐，前端先拦一道，避免把巨大 base64 塞进请求体）。
-const maxImageBytes = 10 * 1024 * 1024
-
-// 把 File 转 data URL（前端预览 + 随请求发送）。仅读取为 base64，格式校验交给后端
-// （magic bytes 校验，比前端扩展名更可靠），前端不做硬性拒绝以免误伤。
-function fileToDataURL(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const r = new FileReader()
-    r.onload = () => resolve(r.result as string)
-    r.onerror = () => reject(new Error('读取失败'))
-    r.readAsDataURL(file)
-  })
-}
-
-async function addFiles(files: FileList | File[]) {
-  if (!allowFileImage.value) { toast.error(t('aiImgOnlyUrl')); return }
-  for (const file of Array.from(files)) {
-    if (!file.type.startsWith('image/')) { toast.error(t('aiImgOnlyLocal')); continue }
-    if (file.size > maxImageBytes) { toast.error(t('aiImageTooLarge')); continue }
-    const dataUrl = await fileToDataURL(file)
-    attachments.value.push({ kind: 'file', dataUrl, name: file.name || 'image' })
-  }
-  if (attachments.value.length) toast.success(t('aiImageAdded', { n: attachments.value.length }))
-}
-
-function addUrlImage(url: string) {
-  const u = url.trim()
-  if (!u) return
-  if (!allowUrlImage.value) { toast.error(t('aiImgOnlyLocal')); return }
-  if (!/^https?:\/\//i.test(u)) { toast.error(t('aiImageUrlInvalid')); return }
-  attachments.value.push({ kind: 'url', url: u, name: u })
-}
-
-function removeAttachment(i: number) {
-  attachments.value.splice(i, 1)
-}
-
-// —— @ 引用（见后端 ai_mentions.go）——
-//
-// 输入框里打 @ 弹出补全，选中后变成一个 chip；发送时只把「引用了谁」带给后端，
-// 由后端读内容并展开进上下文。
-//
-// 为什么不在前端读文件内容：读路径必须过 fsguard 白名单，而白名单在 Go 侧；
-// 前端读等于绕过它。也不把内容塞进 message 文本——那样用户自己的气泡里会
-// 出现几千行文件内容，而且会跟着落库。
-const mentions = ref<AIMentionItem[]>([])
-const mentionItems = ref<AIMentionItem[]>([])
-const mentionIdx = ref(0)
-let mentionTimer: number | null = null
-// 上一次发送用过的引用：重试（reuseUserBubble）时输入框已清空，靠它把引用带回去。
-let lastMentions: { kind: string; path: string; convId: string; name: string }[] = []
-
-// 只识别输入框末尾的 @token。
-//
-// 光标在中间时「@」可能是已发出的正文（比如邮箱、@2x 图片名），按末尾判定
-// 能避开绝大多数误触发；代价是中间插入 @ 不弹窗，用户把光标挪到末尾即可。
-const mentionQuery = computed<string | null>(() => {
-  if (streaming.value || !hasKey.value) return null
-  const m = /(^|\s)@([^\s@]*)$/.exec(input.value)
-  return m ? m[2] : null
-})
-
-const mentionOpen = computed(() => mentionQuery.value !== null && mentionItems.value.length > 0)
-
-async function loadMentionItems(q: string) {
-  const out: AIMentionItem[] = []
-  // 会话从本地列表里筛：这些数据页面已经有了，为它再走一次 RPC 只是多一次往返。
-  const ql = q.toLowerCase()
-  for (const c of conversations.value) {
-    const title = (c.title || '').trim()
-    if (!title || (ql && !title.toLowerCase().includes(ql))) continue
-    out.push({ kind: 'conv', name: title, convId: c.id })
-    if (out.length >= 5) break
-  }
-  try {
-    const list = unwrap<AIMentionItem[]>(await AISuggestMentions(convCwd.value, q))
-    for (const it of list || []) out.push({ kind: it.kind, name: it.name, path: it.path })
-  } catch {
-    // 没有工作目录 / 目录已失效：只给会话项。这不是错误，不该弹提示打断输入。
-  }
-  mentionItems.value = out
-  mentionIdx.value = 0
-}
-
-watch(mentionQuery, (q) => {
-  if (mentionTimer) { clearTimeout(mentionTimer); mentionTimer = null }
-  if (q === null) {
-    mentionItems.value = []
-    mentionIdx.value = 0
-    return
-  }
-  // 120ms 防抖：扫目录是同步 IO，每敲一个字都扫一遍会在机械硬盘上明显卡顿。
-  mentionTimer = window.setTimeout(() => { void loadMentionItems(q) }, 120)
-})
-
-function sameMention(a: AIMentionItem, b: AIMentionItem): boolean {
-  return a.kind === b.kind && (a.path || '') === (b.path || '') && (a.convId || '') === (b.convId || '')
-}
-
-function pickMention(it: AIMentionItem) {
-  // 把输入框末尾那个 @token 删掉：chip 才是引用的载体，正文里留着 @xxx
-  // 会在发给模型的文本里多出一段既不像路径也不像名字的东西。
-  input.value = input.value.replace(/@[^\s@]*$/, '')
-  if (!mentions.value.some((m) => sameMention(m, it))) mentions.value.push(it)
-  mentionItems.value = []
-  mentionIdx.value = 0
-}
-
-function removeMention(i: number) {
-  mentions.value.splice(i, 1)
-}
-
-// onMentionKey 处理补全弹层里的方向键与回车。
-// 返回 true 表示这次按键已被弹层消费。
-function onMentionKey(e: KeyboardEvent): boolean {
-  if (!mentionOpen.value) return false
-  const n = mentionItems.value.length
-  if (e.key === 'ArrowDown') {
-    e.preventDefault()
-    mentionIdx.value = (mentionIdx.value + 1) % n
-    return true
-  }
-  if (e.key === 'ArrowUp') {
-    e.preventDefault()
-    mentionIdx.value = (mentionIdx.value - 1 + n) % n
-    return true
-  }
-  if (e.key === 'Enter' || e.key === 'Tab') {
-    e.preventDefault()
-    pickMention(mentionItems.value[mentionIdx.value])
-    return true
-  }
-  if (e.key === 'Escape') {
-    // 只收起弹层、保留已打的 @xxx：Esc 是「我不想选」，不是「我要清空刚打的字」。
-    e.preventDefault()
-    mentionItems.value = []
-    return true
-  }
-  return false
-}
-
-
-// 剪贴板粘贴图片：在输入框按 Ctrl+V 时，若剪贴板含图片文件则作为本地图附件。
-function onInputPaste(e: ClipboardEvent) {
-  const items = e.clipboardData?.items
-  if (!items) return
-  const imgs: File[] = []
-  for (const it of Array.from(items)) {
-    if (it.kind === 'file' && it.type.startsWith('image/')) {
-      const f = it.getAsFile()
-      if (f) imgs.push(f)
-    }
-  }
-  if (imgs.length) {
-    e.preventDefault()
-    addFiles(imgs)
-  }
-}
-
-// 拖拽图片到输入区：drop 时取图片文件作为本地图附件。
-function onInputDrop(e: DragEvent) {
-  const files = e.dataTransfer?.files
-  if (files && files.length) {
-    e.preventDefault()
-    const imgs = Array.from(files).filter((f) => f.type.startsWith('image/'))
-    if (imgs.length) addFiles(imgs)
-  }
-}
+// —— @ 引用 ——
+// 补全弹层、@token 识别、会话/文件候选与方向键交互都在 useAiMention 里，
+// 这里只把输入框与工作目录这两份状态注入进去。
+const {
+  mentions, mentionItems, mentionIdx, mentionOpen, lastMentions,
+  pickMention, removeMention, onMentionKey,
+} = useAiMention({ input, streaming, hasKey, conversations, convCwd })
 
 // 历史消息图片懒加载：把后端存盘（file 类）的路径读回 dataUrl，回填到消息的 imgList。
 // url 类直发链接，无需加载。返回供模板渲染用的图片数组（file 类未加载完毕时 dataUrl 为空）。
@@ -1157,32 +509,6 @@ async function resolveMessageImages(msgs: AIMessage[]) {
       if (d) for (const img of imgs) img.dataUrl = d
     } catch { /* 读不到图不阻断对话，缩略图留空 */ }
   }))
-}
-
-// 图片链接输入框（点击「图片链接」后展开的小输入框），避免每次都弹 prompt。
-const urlInputOpen = ref(false)
-const urlDraft = ref('')
-const fileInputEl = ref<HTMLInputElement | null>(null)
-
-function onPickFiles(e: Event) {
-  const input = e.target as HTMLInputElement
-  if (input.files && input.files.length) addFiles(input.files)
-  input.value = '' // 允许重复选择同一文件
-}
-
-function openFilePicker() {
-  fileInputEl.value?.click()
-}
-
-function toggleUrlInput() {
-  urlInputOpen.value = !urlInputOpen.value
-  if (urlInputOpen.value) urlDraft.value = ''
-}
-
-function confirmUrlImage() {
-  addUrlImage(urlDraft.value)
-  urlDraft.value = ''
-  urlInputOpen.value = false
 }
 
 // —— Markdown 渲染 ——
@@ -1266,6 +592,17 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;')
 }
+
+// markdown 分块渲染内核（缓存/切块/增量）已抽到 composables/useAiMarkdownBlocks。
+// 必须放在 md 装配之后：md 是 const，提前引用会命中 TDZ。
+const {
+  renderBlock,
+  clearLiveCache,
+  renderMessageBlocks,
+  renderLiveBlocks,
+  primeMessageBlocks,
+  pruneMessageBlocks,
+} = useAiMarkdownBlocks({ md, streamBlocks })
 
 async function loadProfiles() {
   try {
@@ -1447,8 +784,6 @@ async function loadMessages(convID: string) {
   // 若不清理，反复切换长会话会让缓存无限增长（这是内存问题，不是性能问题）。
   pruneMessageBlocks(messages.value)
   // 切换会话后强制贴底（用户主动切会话，期望看最新一条）
-  stickToBottom.value = true
-  showJumpBtn.value = false
   scrollToBottom()
   // 历史消息里可能有 ```mermaid（图不是同步渲染的，得在 DOM 挂上后补扫一遍）
   scheduleMermaidScan()
@@ -1503,7 +838,7 @@ const newTaskMode = ref('chat')
 const NEW_SPACE = '__new__'
 const newTaskSpace = ref('')
 const newTaskDir = ref('')
-const heroInputEl = ref<HTMLTextAreaElement | null>(null)
+const heroRef = ref<InstanceType<typeof AiHero> | null>(null)
 
 // 落地页上的示例问题：点一下填进输入框，省得对着空白框想「能问什么」。
 const heroTips = ['aiHeroTip1', 'aiHeroTip2', 'aiHeroTip3', 'aiHeroTip4']
@@ -1522,14 +857,14 @@ function openNewTask() {
   newTaskSpace.value = ''
   newTaskDir.value = ''
   beginBlankTask()
-  nextTick(() => heroInputEl.value?.focus())
+  nextTick(() => heroRef.value?.focus())
 }
 
 // 点示例问题：填进输入框并聚焦，用户接着改两个字就能发。
 // 不直接发送——示例只是起点，直接发出去常常不是用户真想问的那句话。
 function fillHeroTip(key: string) {
   input.value = t(key)
-  nextTick(() => heroInputEl.value?.focus())
+  nextTick(() => heroRef.value?.focus())
 }
 
 // 回车发送的唯一入口。
@@ -1774,9 +1109,8 @@ function resetStreamState() {
   // 留在输入框上方的 chip 会拿着旧路径去请求，结果只是后端一堆「引用被拒」。
   mentions.value = []
   mentionItems.value = []
-  // 流式块缓存按回复隔离：一条回复的块原文可能与另一条完全相同
-  // （如「好的」这类短回复），跨回复复用是安全的，但没必要长期持有。
-  liveBlockCache.clear()
+  // 流式块缓存按回复隔离（细节见 useAiMarkdownBlocks.clearLiveCache）
+  clearLiveCache()
 }
 
 async function delConv(id: string) {
@@ -1856,6 +1190,109 @@ async function regenTitle() {
   } catch (e) {
     toast.error(getErrorMessage(e))
   }
+}
+
+// ---- 星标 ----
+// 不做乐观更新：星标会改变侧栏分组（星标组在前），先翻转再回滚就是闪一下。
+const starBusy = ref('')
+const starredOpen = ref(true)
+
+async function toggleStar(c: AIConversation) {
+  if (starBusy.value) return
+  starBusy.value = c.id
+  const next = !c.starred
+  try {
+    unwrap(await AISetConversationStar(c.id, next))
+    c.starred = next
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    starBusy.value = ''
+  }
+}
+
+// 星标组：横切所有空间，所以单独一组放在最上面。
+// 刻意不从原位置移走 —— 星标是「快捷入口」，不是「搬到另一个文件夹」，
+// 任务仍然应该留在它自己的空间里，否则用户会以为它被挪走了。
+const starredConvs = computed(() => {
+  const q = convQuery.value.trim().toLowerCase()
+  return conversations.value.filter((c) => c.starred && (!q || matchConv(c, q)))
+})
+
+// ---- 对话大纲 / 摘要 ----
+// 大纲是纯前端的：从消息里挑出用户提问，做成可点的目录。
+// 「几十轮之后不知道聊到哪了」不需要模型来回答 —— 用户自己的问题就是最好的目录，
+// 而且它零成本、即时、永远和当前消息一致。
+const digestOpen = ref(false)
+const digestBusy = ref(false)
+
+const outlineItems = computed<OutlineItem[]>(() =>
+  messages.value
+    .filter((m) => m.role === 'user')
+    .map((m) => {
+      // 取第一行非空文本并压掉 markdown 记号：目录要能一眼扫完，
+      // 不是把原消息再抄一遍。
+      const line =
+        (m.content || '')
+          .split('\n')
+          .map((l) => l.trim())
+          .find((l) => l) || ''
+      return { id: m.id, text: line.replace(/^[#>*\-\d.\s]+/, '').slice(0, 80) }
+    })
+    .filter((it) => it.text),
+)
+
+// 大纲里点一条：跳转本身归 AiMessageList（滚动容器在它手里），
+// 跳成功才收起大纲——找不到那条消息（比如已被截断）时面板留在原地才有意义。
+function jumpToMsg(id: string) {
+  if (msgListRef.value?.jumpToMsg(id)) digestOpen.value = false
+}
+
+const activeConv = computed(() => conversations.value.find((c) => c.id === activeId.value) || null)
+
+async function runDigest() {
+  if (!activeId.value || digestBusy.value || streaming.value) return
+  digestBusy.value = true
+  try {
+    const text = unwrap<string>(await AISummarizeConversation(activeId.value))
+    const i = conversations.value.findIndex((c) => c.id === activeId.value)
+    // unwrap 的返回类型带 null（后端可能给空 data），而 summary 是非可空字符串
+    if (i >= 0 && text) conversations.value[i].summary = text
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    digestBusy.value = false
+  }
+}
+
+// ---- 导出 Markdown ----
+// 导出当前任务的全部消息。工具调用只留「调了哪几个」一行：完整参数是执行细节，
+// 复制出去给别人看时属于噪音，需要的话库里和界面上都还在。
+function exportConvMarkdown() {
+  const c = activeConv.value
+  if (!c) return
+  const lines: string[] = []
+  lines.push(`# ${c.title || t('aiNewChat')}`, '')
+  const meta: string[] = []
+  if (c.updated_at) meta.push(`${t('aiUpdatedAt')}: ${c.updated_at}`)
+  if (c.cwd) meta.push(`${t('aiCwdLabel')}: ${c.cwd}`)
+  meta.push(`${t('aiMsgCount')}: ${messages.value.length}`)
+  lines.push(`> ${meta.join(' · ')}`, '')
+  if (c.summary) lines.push(`**${t('aiDigestTitle')}**`, '', c.summary, '')
+  for (const m of messages.value) {
+    const who = m.role === 'user' ? t('aiYou') : 'AI'
+    const head = [who, m.model, m.created_at].filter(Boolean).join(' · ')
+    lines.push(`## ${head}`, '')
+    if (m.imgList?.length) lines.push(`*（${t('aiImgCount', { n: m.imgList.length })}）*`, '')
+    lines.push((m.content || '').trim() || '_（空）_', '')
+    const tools = toolList(m)
+    if (tools.length) {
+      lines.push(`> ${t('aiToolCallsN', { n: tools.length })}: ${tools.map((x) => x.name).join(', ')}`, '')
+    }
+  }
+  const stamp = (c.updated_at || '').slice(0, 10) || new Date().toISOString().slice(0, 10)
+  downloadText(`${safeFileName(c.title || t('aiNewChat'))}-${stamp}.md`, lines.join('\n'), 'text/markdown')
+  toast.success(t('aiExportMdOk'))
 }
 
 // ---- 会话改名 ----
@@ -2035,8 +1472,8 @@ async function send() {
   const mentionSnapshot = mentions.value.map((m) => ({
     kind: m.kind, path: m.path || '', convId: m.convId || '', name: m.name,
   }))
-  if (mentionSnapshot.length) lastMentions = mentionSnapshot
-  const mentionPayload = mentionSnapshot.length ? mentionSnapshot : (reuseUserBubble ? lastMentions : [])
+  if (mentionSnapshot.length) lastMentions.value = mentionSnapshot
+  const mentionPayload = mentionSnapshot.length ? mentionSnapshot : (reuseUserBubble ? lastMentions.value : [])
   // 立即把用户消息显示出来，随后在消息区内等待 AI 流式回复
   const msg: AIMessage = {
     id: 'usr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7), conv_id: convId, role: 'user', content: text,
@@ -2045,8 +1482,6 @@ async function send() {
   // 重试：那条 user 消息本来就在列表里，别再插一个重复气泡。
   // （后端 saveUserTurn 对「同内容 + 同图片」幂等，DB 里也不会多出一行）
   if (!reuseUserBubble) messages.value.push(msg)
-  stickToBottom.value = true
-  showJumpBtn.value = false
   scrollToBottom()
   input.value = ''
   attachments.value = []
@@ -2166,6 +1601,9 @@ async function send() {
               tc.added = Number(data.added) || 0
               tc.removed = Number(data.removed) || 0
               tc.diff = String(data.diff || '')
+              // 产物路径：本条回复的「产物」条在流式期就能挂出来，
+              // 不必等 done 固化成历史消息。
+              tc.path = String(data.path || '')
               // 编排类工具带回 run/node：流式期就能挂出 run 树，不用等整轮回填。
               tc.run_id = String(data.runId || '')
               tc.node_id = String(data.nodeId || '')
@@ -2546,7 +1984,7 @@ function checkSelection() {
   const text = sel.toString().trim()
   if (!text) { hideSelPop(); return }
   const range = sel.getRangeAt(0)
-  const container = msgArea.value
+  const container = msgListRef.value?.areaEl() || null
   if (!container || !container.contains(range.commonAncestorContainer)) { hideSelPop(); return }
   selPop.text = text
   selCtx.showRect(range.getBoundingClientRect())
@@ -2600,6 +2038,12 @@ function closeImgViewer() {
   imgViewer.value = null
 }
 function onGlobalKeydown(e: KeyboardEvent) {
+  // Ctrl+Shift(B)：开合右侧面板（与常见 AI 工作台同快捷键）
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'b') {
+    e.preventDefault()
+    toggleSidePanel()
+    return
+  }
   if (e.key !== 'Escape') return
   if (imgViewer.value) closeImgViewer()
   else if (htmlPreview.value) closeHtmlPreview()
@@ -2610,6 +2054,9 @@ onMounted(async () => {
   // KeepAlive 首次挂载也会走 onActivated，但那条路依赖 App.vue 的包裹结构；
   // 这里显式再置一次，保证「一进来就停在 AI 页」这个事实后端一定知道。
   reportAIPageVisible(true)
+  // 预热编辑器 chunk：CM 核心 + 封装是动态 import 的，第一次开文件时才下载会明显
+  // 卡一下「执行中」。空闲时先取回来，等真点开产物就只剩挂载耗时。
+  window.setTimeout(() => { void import('../utils/aiCodeEditor').catch(() => { /* 预热失败无所谓，点开时会重试 */ }) }, 1200)
   await loadProfiles()
   await Promise.all([loadConversations(), loadSpaces()])
 
@@ -2625,6 +2072,15 @@ onMounted(async () => {
       if (idx >= 0) conversations.value[idx].title = data.title
       else loadConversations()
     }
+    // 星标 / 摘要同样回写本地：后端是同一次调用改的，若不跟着刷，
+    // 侧栏分组与摘要卡片会停在旧值，直到下次整表刷新。
+    {
+      const idx = conversations.value.findIndex((c) => c.id === data.id)
+      if (idx >= 0) {
+        if (data.starred !== undefined) conversations.value[idx].starred = !!data.starred
+        if (data.summary !== undefined) conversations.value[idx].summary = String(data.summary)
+      }
+    }
   })
   // 设置在 SettingsModal 中保存配置后刷新下拉列表
   Events.On('ai:profiles-updated', loadProfiles)
@@ -2633,29 +2089,6 @@ onMounted(async () => {
   // 图片查看器的 Esc 关闭（capture 不必要，普通冒泡即可；避免干扰输入框内 Esc 行为的判断）
   document.addEventListener('keydown', onGlobalKeydown)
 
-  // ResizeObserver 观察消息内容容器：内容变高（流式输出、图片加载、代码块撑开）
-  // 时把视口拉到底部。这是「AI 一直在回复但视口不跟随」的正确修法——
-  // 滚动应由 DOM 实际高度变化驱动，而不是由某个响应式变量间接推断。
-  //
-  // 绑定必须跟着容器走：首屏是落地页（`isNewTask`），此时 msgContent 还是 null，
-  // 早先只在 onMounted 里 observe 一次 → 这条「内容变高就贴底」从来没生效过
-  // （切会话、新建任务后容器才出现，而那之后没人再 observe）。
-  if (typeof ResizeObserver !== 'undefined') {
-    resizeObs = new ResizeObserver(() => {
-      if (!stickToBottom.value) return
-      const el = msgArea.value
-      if (!el) return
-      el.scrollTop = el.scrollHeight
-    })
-  }
-})
-
-// 消息容器会随「落地页 ↔ 聊天区」切换出现/消失：观察目标得跟着换。
-// 只在挂载时 observe 一次的话，首屏是落地页（容器还不存在）→ 观察永远没绑上。
-watch(msgContent, (el, prev) => {
-  if (!resizeObs) return
-  if (prev) resizeObs.unobserve(prev)
-  if (el) resizeObs.observe(el)
 })
 
 onUnmounted(() => {
@@ -2668,7 +2101,6 @@ onUnmounted(() => {
   if (streamCtrl) streamCtrl.abort()
   if (streamTimer) { clearTimeout(streamTimer); streamTimer = null }
   if (msgSearchTimer) { clearTimeout(msgSearchTimer); msgSearchTimer = undefined }
-  if (resizeObs) { resizeObs.disconnect(); resizeObs = null }
   aiGenerating.value = false
   aiFinishedUnread.value = false
   reportAIPageVisible(false)
@@ -2678,561 +2110,167 @@ onUnmounted(() => {
 <template>
   <div class="ai-page">
     <!-- 左侧会话列表 -->
-    <aside class="ai-sidebar">
-      <button class="ai-new-btn" @click="openNewTask">
-        <Plus :size="14" /> {{ t('aiNewTask') }}
-      </button>
-      <div v-if="conversations.length > 5" class="ai-conv-search">
-        <Search :size="12" class="ai-conv-search-icon" />
-        <input v-model="convQuery" class="ai-conv-search-input" :placeholder="t('aiSearchConvPh')" />
-        <button v-if="convQuery" class="ai-conv-search-clear" @click="convQuery = ''"><X :size="11" /></button>
-      </div>
-      <div class="ai-conv-list">
-        <!-- 消息命中：搜索框同时查正文。只匹配标题的话，「上次那句报错在哪条任务里」
-             这种最常用的找法永远搜不到——而标题往往只写「修复配置」。
-             放在任务组之上：搜索时用户要的几乎总是它。 -->
-        <template v-if="msgHits.length || msgHitsLoading">
-          <div class="ai-group-head ai-group-head-btn" @click="msgHitsOpen = !msgHitsOpen">
-            <component :is="msgHitsOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
-            <span>{{ t('aiGroupMsgHits') }} ({{ msgHits.length }})</span>
-          </div>
-          <template v-if="msgHitsOpen">
-            <div
-              v-for="h in msgHits"
-              :key="h.conv_id"
-              :class="['ai-conv-item', 'is-msg-hit', { active: h.conv_id === activeId }]"
-              @click="selectConv(h.conv_id)"
-            >
-              <Search :size="11" class="ai-conv-mode" />
-              <div class="ai-msg-hit-body">
-                <div class="ai-msg-hit-head">
-                  <span class="ai-conv-title">{{ h.conv_title || t('aiNewChat') }}</span>
-                  <span v-if="h.count > 1" class="ai-msg-hit-count">+{{ h.count - 1 }}</span>
-                </div>
-                <div class="ai-msg-hit-snippet">{{ h.latest.snippet }}</div>
-              </div>
-            </div>
-            <div v-if="msgHitsLoading && !msgHits.length" class="ai-space-empty">{{ t('aiMsgHitSearching') }}</div>
-          </template>
-        </template>
-
-        <!-- 任务组：不属于任何空间的任务。组标题可点 = 整组折叠 -->
-        <div class="ai-group-head ai-group-head-btn" @click="tasksOpen = !tasksOpen">
-          <component :is="tasksOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
-          <span>{{ t('aiGroupTasks') }} ({{ taskConversations.length }})</span>
-        </div>
-        <template v-if="tasksOpen">
-        <template v-for="c in shownTaskConversations" :key="c.id">
-          <div
-            :class="['ai-conv-item', { active: c.id === activeId }]"
-            @click="selectConv(c.id)"
-          >
-            <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
-            <input
-              v-if="renamingId === c.id"
-              ref="renameInput"
-              v-model="renameText"
-              class="ai-conv-rename"
-              spellcheck="false"
-              maxlength="60"
-              @click.stop
-              @keydown.enter="onEnterSend($event, () => commitRename(c))"
-              @keydown.esc.prevent="cancelRename()"
-              @blur="commitRename(c)"
-            />
-            <!-- 双击标题也能改名：改名是低频操作，给它常驻按钮不如给个不占位的手势 -->
-            <span
-              v-else
-              class="ai-conv-title"
-              :title="t('aiRenameHint')"
-              @dblclick.stop="startRename(c)"
-            >{{ c.title || t('aiNewChat') }}</span>
-            <!-- 任务累计用量：只统计「问答」，标题生成 / 摘要压缩不计入（见 ai_usage.go），
-                 所以这里的数字应该等于该任务各条回复下方统计之和。
-                 折算成 k/M 显示，精确值放 title。 -->
-            <span v-if="renamingId !== c.id && (c.prompt_tokens > 0 || c.completion_tokens > 0)" class="ai-conv-tokens" :title="t('aiConvTokenTip', { in: c.prompt_tokens, out: c.completion_tokens })">
-              {{ fmtTokens(c.prompt_tokens + c.completion_tokens) }}
-            </span>
-            <button
-              v-if="renamingId !== c.id"
-              class="ai-conv-ren"
-              :title="t('aiRename')"
-              @click.stop="startRename(c)"
-            >
-              <Pencil :size="12" />
-            </button>
-            <button v-if="renamingId !== c.id" class="ai-conv-del" :title="t('delete')" @click.stop="delConv(c.id)">
-              <Trash2 :size="13" />
-            </button>
-          </div>
-        </template>
-        <!-- 超过阈值才出现：展开后同一个按钮变「收起」，来回都走这一处 -->
-        <button
-          v-if="taskConversations.length > FOLD_TASKS"
-          class="ai-conv-more"
-          @click="tasksExpanded = !tasksExpanded"
-        >{{ tasksExpanded ? t('aiFoldList') : t('aiShowMoreConv', { n: taskConversations.length - FOLD_TASKS }) }}</button>
-        </template>
-
-        <!-- 空间组：绑定目录的任务容器 -->
-        <div class="ai-group-head ai-group-head-space ai-group-head-btn" @click="spacesOpen = !spacesOpen">
-          <component :is="spacesOpen ? ChevronDown : ChevronRight" :size="11" class="ai-group-caret" />
-          <span>{{ t('aiGroupSpaces') }} ({{ shownSpaces.length }})</span>
-        </div>
-        <template v-if="spacesOpen">
-        <div v-for="g in visibleSpaces" :key="g.space.id" class="ai-space">
-          <div class="ai-space-row" @click="toggleSpace(g.space.id)">
-            <component
-              :is="isSpaceExpanded(g.space.id) ? ChevronDown : ChevronRight"
-              :size="12"
-              class="ai-space-caret"
-            />
-            <Folder :size="12" class="ai-space-icon" />
-            <!-- 与任务标题同一套行内改名：为一个短名字弹系统对话框（window.prompt）
-                 不跟主题、字体也不一致，而且输入法组合中容易丢字。 -->
-            <input
-              v-if="renamingSpaceId === g.space.id"
-              ref="spaceNameInput"
-              v-model="spaceNameText"
-              class="ai-conv-rename"
-              spellcheck="false"
-              maxlength="40"
-              @click.stop
-              @keydown.enter="onEnterSend($event, () => commitRenameSpace(g.space))"
-              @keydown.esc.prevent="cancelRenameSpace()"
-              @blur="commitRenameSpace(g.space)"
-            />
-            <span v-else class="ai-space-name" :title="g.space.cwd" @dblclick.stop="startRenameSpace(g.space)">{{ g.space.name }}</span>
-            <span class="ai-space-count">{{ g.tasks.length }}</span>
-            <!-- 在这个空间里新建任务：否则每次都要去落地页的「归属空间」下拉里翻一遍 -->
-            <button
-              v-if="renamingSpaceId !== g.space.id"
-              class="ai-conv-add"
-              :title="t('aiNewTaskInSpace')"
-              @click.stop="newTaskInSpace(g.space)"
-            >
-              <Plus :size="12" />
-            </button>
-            <button
-              v-if="renamingSpaceId !== g.space.id"
-              class="ai-conv-ren"
-              :title="t('aiRename')"
-              @click.stop="startRenameSpace(g.space)"
-            >
-              <Pencil :size="11" />
-            </button>
-            <button v-if="renamingSpaceId !== g.space.id" class="ai-conv-del" :title="t('delete')" @click.stop="delSpace(g.space)">
-              <Trash2 :size="12" />
-            </button>
-          </div>
-          <template v-if="isSpaceExpanded(g.space.id)">
-            <div
-              v-for="c in spaceTasksShown(g)"
-              :key="c.id"
-              :class="['ai-conv-item', 'is-in-space', { active: c.id === activeId }]"
-              @click="selectConv(c.id)"
-            >
-              <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
-              <span class="ai-conv-title" @dblclick.stop="startRename(c)">{{ c.title || t('aiNewChat') }}</span>
-              <button class="ai-conv-del" :title="t('delete')" @click.stop="delConv(c.id)">
-                <Trash2 :size="12" />
-              </button>
-            </div>
-            <button
-              v-if="g.tasks.length > FOLD_SPACE_TASKS"
-              class="ai-conv-more is-in-space"
-              @click="toggleSpaceTasks(g.space.id)"
-            >{{ expandedSpaceTasks.includes(g.space.id) ? t('aiFoldList') : t('aiShowMoreConv', { n: g.tasks.length - FOLD_SPACE_TASKS }) }}</button>
-            <div v-if="g.tasks.length === 0" class="ai-space-empty">{{ t('aiSpaceNoTasks') }}</div>
-          </template>
-        </div>
-        <button
-          v-if="shownSpaces.length > FOLD_SPACES"
-          class="ai-conv-more"
-          @click="spacesExpanded = !spacesExpanded"
-        >{{ spacesExpanded ? t('aiFoldList') : t('aiShowMoreSpaces', { n: shownSpaces.length - FOLD_SPACES }) }}</button>
-        </template>
-
-        <div v-if="conversations.length === 0" class="ai-conv-empty">{{ t('aiNoConversations') }}</div>
-        <!-- 正文命中也算「搜到了东西」，不算空：否则上面列着三条消息命中，
-             下面紧跟着一句「没有匹配的会话」。 -->
-        <div v-else-if="totalMatched === 0 && !msgHits.length && !msgHitsLoading" class="ai-conv-empty">{{ t('aiNoMatchConv') }}</div>
-      </div>
-    </aside>
+    <AiConversationSidebar
+      v-model:conv-query="convQuery"
+      v-model:starred-open="starredOpen"
+      v-model:msg-hits-open="msgHitsOpen"
+      v-model:tasks-open="tasksOpen"
+      v-model:tasks-expanded="tasksExpanded"
+      v-model:spaces-open="spacesOpen"
+      v-model:spaces-expanded="spacesExpanded"
+      v-model:rename-text="renameText"
+      v-model:space-name-text="spaceNameText"
+      :conversations="conversations"
+      :spaces="spaces"
+      :active-id="activeId"
+      :starred-convs="starredConvs"
+      :msg-hits="msgHits"
+      :msg-hits-loading="msgHitsLoading"
+      :task-conversations="taskConversations"
+      :shown-task-conversations="shownTaskConversations"
+      :shown-spaces="shownSpaces"
+      :visible-spaces="visibleSpaces"
+      :expanded-space-tasks="expandedSpaceTasks"
+      :total-matched="totalMatched"
+      :renaming-id="renamingId"
+      :renaming-space-id="renamingSpaceId"
+      :fold-tasks="FOLD_TASKS"
+      :fold-spaces="FOLD_SPACES"
+      :fold-space-tasks="FOLD_SPACE_TASKS"
+      :open-new-task="openNewTask"
+      :select-conv="selectConv"
+      :mode-icon="modeIcon"
+      :toggle-star="toggleStar"
+      :del-conv="delConv"
+      :del-space="delSpace"
+      :new-task-in-space="newTaskInSpace"
+      :start-rename="startRename"
+      :cancel-rename="cancelRename"
+      :commit-rename="commitRename"
+      :start-rename-space="startRenameSpace"
+      :cancel-rename-space="cancelRenameSpace"
+      :commit-rename-space="commitRenameSpace"
+      :is-space-expanded="isSpaceExpanded"
+      :toggle-space="toggleSpace"
+      :space-tasks-shown="spaceTasksShown"
+      :toggle-space-tasks="toggleSpaceTasks"
+      :on-enter-send="onEnterSend"
+      :fmt-tokens="fmtTokens"
+    />
 
     <!-- 右侧聊天区 -->
     <section class="ai-main">
       <!-- 工具栏：只在有任务时出现。落地页不需要它（模型选择在输入框下面，
            目录还没定）。 -->
-      <div v-if="!isNewTask" class="ai-toolbar">
-        <!-- 目录指示：绑了目录才允许 AI 改文件、跑命令（见后端 writeRoots），
-             点一下在资源管理器里打开——产物的目录在数据目录下（普通任务）或项目里（空间任务），
-             不给入口的话用户只能从 title 里抄路径自己去翻。
-             它只负责「打开」当前已绑定的目录，不是「选目录」（绑定入口在新建任务时）。 -->
-        <button v-if="convCwd" class="ai-cwd-tag" :title="t('aiCwdTip', { dir: convCwd })" @click="openCwd">
-          <FolderOpen :size="12" />
-          <span class="ai-cwd-name">{{ cwdLabel }}</span>
-        </button>
-        <div class="ai-toolbar-right">
-          <select v-model="aiActive" class="ai-model-select" :title="t('aiSwitchModel')" @change="onModelChange">
-            <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
-          </select>
-          <button v-if="activeId" class="ai-icon-btn" :title="t('aiRegenTitle')" @click="regenTitle">
-            <RefreshCw :size="13" />
-          </button>
-          <button v-if="streaming" class="ai-stop" @click="stop">
-            <Square :size="13" /> {{ t('aiStop') }}
-          </button>
-        </div>
-      </div>
+      <AiToolbar
+        v-if="!isNewTask"
+        v-model:ai-active="aiActive"
+        v-model:digest-open="digestOpen"
+        :conv-cwd="convCwd"
+        :cwd-label="cwdLabel"
+        :ai-profiles="aiProfiles"
+        :active-id="activeId"
+        :active-conv="activeConv"
+        :star-busy="starBusy"
+        :side-open="sideOpen"
+        :streaming="streaming"
+        @open-cwd="openCwd"
+        @model-change="onModelChange"
+        @regen-title="regenTitle"
+        @toggle-star="toggleStar"
+        @export-md="exportConvMarkdown"
+        @toggle-side="toggleSidePanel"
+        @stop="stop"
+      />
+
+      <!-- 大纲 / 摘要：绝对定位挂在 .ai-main 上（它已是 position: relative）。
+           不做成模态框——它只是「翻一下聊到哪了」，看完点目录里的一条就该跳过去。 -->
+      <AiDigestPanel
+        v-if="digestOpen && activeId"
+        :summary="activeConv?.summary || ''"
+        :busy="digestBusy"
+        :streaming="streaming"
+        :outline="outlineItems"
+        @close="digestOpen = false"
+        @run="runDigest"
+        @jump="jumpToMsg"
+      />
 
       <!-- 空态落地页：新建任务不走弹窗，直接在这一页选类型、选空间、提问。
            类型与空间仍是这条任务的属性，首次发送时随请求落库。 -->
-      <div v-if="isNewTask" class="ai-hero">
-        <div class="ai-hero-inner">
-          <h1 class="ai-hero-title">{{ t('aiHeroTitle') }}</h1>
-
-          <!-- 一排类型 pill：默认对话，点一下换成本次任务的类型 -->
-          <div class="ai-hero-modes">
-            <button
-              v-for="m in modes"
-              :key="m.key"
-              :class="['ai-hero-mode', { active: newTaskMode === m.key }]"
-              :title="t(m.desc)"
-              @click="newTaskMode = m.key"
-            >
-              <component :is="m.icon" :size="13" />
-              {{ t(m.label) }}
-            </button>
-          </div>
-
-          <div class="ai-hero-box" @dragover.prevent @drop="onInputDrop">
-            <!-- 图片链接输入（与聊天区同一套状态，落地页也保留这个入口） -->
-            <div v-if="urlInputOpen" class="ai-url-row">
-              <input
-                v-model="urlDraft"
-                type="text"
-                class="ai-url-input"
-                :placeholder="t('aiAddImageUrlPh')"
-                @keydown.enter.prevent="confirmUrlImage"
-              />
-              <button class="ai-url-ok" @click="confirmUrlImage">{{ t('add') }}</button>
-            </div>
-            <div v-if="attachments.length" class="ai-attach-preview">
-              <div v-for="(a, i) in attachments" :key="i" class="ai-attach-thumb">
-                <img v-if="a.kind === 'file' && a.dataUrl" :src="a.dataUrl" class="ai-attach-img" />
-                <img v-else-if="a.kind === 'url'" :src="a.url" class="ai-attach-img" />
-                <button class="ai-attach-del" :title="t('delete')" @click="removeAttachment(i)">×</button>
-              </div>
-            </div>
-            <textarea
-              ref="heroInputEl"
-              v-model="input"
-              class="ai-hero-input"
-              rows="3"
-              :placeholder="t('aiHeroPlaceholder')"
-              :disabled="!hasKey"
-              @keydown.enter="onEnterSend($event, heroSend)"
-              @paste="onInputPaste"
-            ></textarea>
-            <div class="ai-hero-bar">
-              <!-- 归属空间：不选就是普通任务（后端会自动给它建一个专属目录）。
-                   已有空间直接选；「新建空间…」才需要选目录——空间按目录唯一。 -->
-              <select v-model="newTaskSpace" class="ai-hero-select" :title="t('aiNewTaskSpace')">
-                <option value="">{{ t('aiNewTaskSpaceNone') }}</option>
-                <option v-for="s in spaces" :key="s.id" :value="s.id" :title="s.cwd">{{ s.name }}</option>
-                <option :value="NEW_SPACE">{{ t('aiNewTaskSpaceNew') }}</option>
-              </select>
-              <button
-                v-if="newTaskSpace === NEW_SPACE"
-                class="ai-hero-select"
-                :title="newTaskDir || t('aiPickFolderTitle')"
-                @click="pickNewTaskDir"
-              >
-                <FolderOpen :size="12" />
-                <span class="ai-hero-dir">{{ newTaskDir ? dirTail(newTaskDir) : t('aiNewTaskDirNone') }}</span>
-              </button>
-              <select v-model="aiActive" class="ai-hero-select" :title="t('aiSwitchModel')" @change="onModelChange">
-                <option v-for="p in aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
-              </select>
-              <div class="ai-hero-bar-right">
-                <button v-if="allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="openFilePicker">
-                  <ImageIcon :size="16" />
-                </button>
-                <button v-if="allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="toggleUrlInput">
-                  <Link2 :size="16" />
-                </button>
-                <button
-                  class="ai-hero-send"
-                  :disabled="!hasKey || (!input.trim() && !attachments.length)"
-                  :title="t('send')"
-                  @click="heroSend"
-                >
-                  <ArrowUp :size="16" />
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <!-- 产物去向：既是说明也是「空间是什么」的解释——比一个空下拉好懂 -->
-          <p class="ai-hero-out">{{ newTaskOutHint }}</p>
-
-          <p v-if="!hasKey" class="ai-hero-needkey">
-            {{ t('aiNeedKey') }}
-            <button class="ai-go-settings" @click="emit('open-settings', 'ai')">{{ t('aiGoSettings') }}</button>
-          </p>
-
-          <div class="ai-hero-tips">
-            <button v-for="k in heroTips" :key="k" class="ai-hero-tip" @click="fillHeroTip(k)">
-              {{ t(k) }}
-              <ArrowUp :size="11" class="ai-hero-tip-icon" />
-            </button>
-          </div>
-        </div>
-      </div>
+      <AiHero
+        v-if="isNewTask"
+        ref="heroRef"
+        v-model:new-task-mode="newTaskMode"
+        v-model:url-draft="urlDraft"
+        v-model:input="input"
+        v-model:new-task-space="newTaskSpace"
+        v-model:ai-active="aiActive"
+        :modes="modes"
+        :url-input-open="urlInputOpen"
+        :attachments="attachments"
+        :has-key="hasKey"
+        :spaces="spaces"
+        :new-space="NEW_SPACE"
+        :new-task-dir="newTaskDir"
+        :new-task-dir-label="newTaskDir ? dirTail(newTaskDir) : ''"
+        :ai-profiles="aiProfiles"
+        :allow-file-image="allowFileImage"
+        :allow-url-image="allowUrlImage"
+        :out-hint="newTaskOutHint"
+        :hero-tips="heroTips"
+        @model-change="onModelChange"
+        @enter="onEnterSend($event, heroSend)"
+        @send="heroSend"
+        @paste="onInputPaste"
+        @drop="onInputDrop"
+        @confirm-url="confirmUrlImage"
+        @remove-attachment="removeAttachment"
+        @pick-dir="pickNewTaskDir"
+        @open-file-picker="openFilePicker"
+        @toggle-url="toggleUrlInput"
+        @fill-tip="fillHeroTip"
+        @open-settings="emit('open-settings', 'ai')"
+      />
 
       <template v-else>
       <!-- 消息区 -->
-      <div ref="msgArea" class="ai-messages" @scroll="onMsgScroll" @mouseup="onMsgMouseUp" @keyup="onMsgMouseUp" @click="onMsgClick" @contextmenu="onMsgContextMenu">
-        <div ref="msgContent" class="ai-msg-content-wrap">
-          <div v-if="!hasKey" class="ai-need-key">
-            <Bot :size="40" />
-            <p>{{ t('aiNeedKey') }}</p>
-            <button class="ai-go-settings" @click="emit('open-settings', 'ai')">{{ t('aiGoSettings') }}</button>
-          </div>
+      <AiMessageList
+        ref="msgListRef"
+        :has-key="hasKey"
+        :messages="messages"
+        :stat-map="statMap"
+        :locale="locale"
+        :mode="mode"
+        :streaming="streaming"
+        :reasoning-text="reasoningText"
+        :stream-tools="streamTools"
+        :streaming-text="streamingText"
+        :stream-blocks="streamBlocks"
+        :run-rules="runRules"
+        :stream-artifacts="streamArtifacts"
+        :error-msg="errorMsg"
+        :can-retry="canRetry"
+        :render-block="renderBlock"
+        :render-message-blocks="renderMessageBlocks"
+        :msg-stat="msgStat"
+        :format-stat="formatStat"
+        :cp-for-call="cpForCall"
+        @open-settings="emit('open-settings', 'ai')"
+        @open-artifact="openArtifactInPanel"
+        @open-img="openImgViewer"
+        @copy="copy"
+        @save-note="saveAsNote"
+        @restore-checkpoint="restoreCheckpoint"
+        @run-plan="runPlan"
+        @retry="retryLast"
+        @msg-click="onMsgClick"
+        @msg-mouseup="onMsgMouseUp"
+        @msg-contextmenu="onMsgContextMenu"
+      />
 
-          <template v-else>
-            <!-- v-memo：历史消息在流式期间内容不变，命中缓存即可整棵子树跳过重建。
-                 依赖数组必须覆盖子树内所有响应式来源，缺一个就会出现「数据变了但界面不变」：
-                   · m.content / m.reasoning_content —— 正文与思考过程
-                   · statMap.get(m.id)               —— 该条回复的耗时/token 统计
-                   · locale                         —— 按钮 title 等文案随语言切换刷新
-                   · mode                           —— 计划卡片上的「执行」按钮只看当前模式；
-                                                       不放进依赖，点完执行它还会留在原地
-                 编译器生成的代码含 `_cached.key === m.id` 校验，
-                 切换会话（消息 id 变化）不会误命中旧缓存。 -->
-            <div
-              v-for="m in messages"
-              :key="m.id"
-              v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode]"
-              :class="['ai-msg', m.role]"
-            >
-              <div class="ai-msg-role">
-                {{ m.role === 'user' ? t('aiYou') : 'AI' }}
-                <!-- 多档案（不同模型/档案）混着聊时，不写模型名就分不清这句是谁答的 -->
-                <span v-if="m.role === 'assistant' && m.model" class="ai-msg-model">{{ m.model }}</span>
-              </div>
-              <!-- 图片缩略图：url 类直发链接，file 类用已加载的 dataUrl；历史 file 图由 loadMessages 懒加载填回 -->
-              <div v-if="m.imgList && m.imgList.length" class="ai-msg-imgs">
-                <div v-for="(img, bi) in m.imgList" :key="bi" class="ai-msg-img">
-                  <img v-if="img.url" :src="img.url" :alt="img.name" class="ai-msg-img-el is-clickable" loading="lazy" @click.stop="openImgViewer(img)" />
-                  <img v-else-if="img.dataUrl" :src="img.dataUrl" :alt="img.name" class="ai-msg-img-el is-clickable" loading="lazy" @click.stop="openImgViewer(img)" />
-                  <div v-else class="ai-msg-img-el ai-img-broken">{{ t('aiImageBroken') }}</div>
-                </div>
-              </div>
-              <details v-if="m.reasoning_content" class="ai-reasoning">
-                <summary>{{ t('aiThought') }} · {{ t('aiThoughtChars', { n: m.reasoning_content.length }) }}</summary>
-                <div class="ai-reasoning-content">{{ m.reasoning_content }}</div>
-              </details>
-              <!-- 工具调用卡片：放在正文之前，因为调用发生在作答之前。
-                   默认折叠——一段回答调了五个工具时，全展开会把正文挤出屏幕；
-                   摘要行自己就说明了「调了几个、几轮」。 -->
-              <details v-if="m.role === 'assistant' && toolList(m).length" class="ai-tools">
-                <summary class="ai-tools-sum">
-                  <Wrench :size="12" />
-                  <span>{{ t('aiToolSummary', { n: toolList(m).length, rounds: m.tool_rounds || countToolRounds(toolList(m)) }) }}</span>
-                </summary>
-                <div class="ai-tools-body">
-                  <!-- 每条调用自带折叠：一次回答调了五六个工具时，用户只想展开
-                       其中一条看细节，而不是要么全看要么全不看。 -->
-                  <details v-for="tc in toolList(m)" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error }">
-                    <summary class="ai-tool-line">
-                      <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
-                      <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
-                      <span v-if="toolTarget(tc)" class="ai-tool-target" :title="toolTarget(tc)">{{ toolTarget(tc) }}</span>
-                      <!-- 增删行数放摘要行：改文件这一件事上，「改了几行」比「成功了」
-                           更值得先看到。 -->
-                      <span v-if="tc.added || tc.removed" class="ai-tool-diff">
-                        <em v-if="tc.added" class="ai-diff-add">+{{ tc.added }}</em>
-                        <em v-if="tc.removed" class="ai-diff-del">-{{ tc.removed }}</em>
-                      </span>
-                      <span v-if="tc.denied" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
-                      <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
-                      <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
-                      <!-- 回滚到这一步之前：只有真的建过快照的写类调用才有这个按钮。 -->
-                      <button v-if="cpForCall(tc)" class="ai-tool-undo" :title="t('aiCheckpointUndo')" @click.stop.prevent="restoreCheckpoint(cpForCall(tc)!)">
-                        <Undo2 :size="11" />
-                      </button>
-                    </summary>
-                    <!-- 行级 diff：结果串只说「改成功了」，这里说「改成了什么」。 -->
-                    <AiDiffView v-if="tc.diff" :diff="tc.diff" />
-                    <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
-                    <!-- 有 diff 时不再重放一句「已编辑 xxx（替换 1 处）」：
-                         路径在摘要行上已经有了，改动在 diff 里已经有了。 -->
-                    <pre v-else-if="tc.result && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
-                  </details>
-                </div>
-              </details>
-              <!-- 编排 run 树：这条回复派出去的子 agent。只有带 run_id 的回复才渲染，
-                   否则每一句普通回答下面都会多一个空面板。展开时才拉数据。 -->
-              <AgentRunTree v-if="runIDOf(m)" :run-id="runIDOf(m)" />
-              <!-- 本次生效的规则文件：一行小字，悬停看文件名与字节数。
-                   没有这一行的话，「规则改了不生效」在界面上没有任何线索——
-                   写错位置、被 8KB 截断、cwd 不是想的那一层，表现完全一样。 -->
-              <div v-if="rulesOf(m).length" class="ai-rules" :title="rulesTitle(rulesOf(m))">
-                <FileText :size="11" />
-                <span>{{ t('aiRulesActive', { n: rulesOf(m).length }) }}</span>
-                <span class="ai-rules-name">{{ rulesOf(m).map((r) => r.name).join('、') }}</span>
-              </div>
-              <div v-if="m.role === 'assistant' && planSecs(m).length" class="ai-plan">
-                <div class="ai-plan-head">
-                  <ListChecks :size="13" class="ai-plan-icon" />
-                  <span class="ai-plan-name">{{ t('aiPlanTitle') }}</span>
-                  <!-- 「N 步」只数步骤那一节：把涉及文件、风险也算进去，
-                       这个数就没有意义了 -->
-                  <span v-if="planSecs(m)[planStepIndex(planSecs(m))]?.items.length" class="ai-plan-count">
-                    {{ t('aiPlanSteps', { n: planSecs(m)[planStepIndex(planSecs(m))].items.length }) }}
-                  </span>
-                  <!-- 只有计划模式下才给「执行」：切回对话之后这份计划已经执行过了，
-                       再点一次等于把同一份要求重发一遍。
-                       勾选框有意做成非受控（不绑 :checked）：消息区带 v-memo，
-                       绑了状态就得把每个勾选位塞进依赖数组，等于每勾一下重渲染整个列表。 -->
-                  <button
-                    v-if="mode === 'plan' && !streaming"
-                    class="ai-plan-run"
-                    :title="t('aiPlanRunHint')"
-                    @click="runPlan(m)"
-                  >
-                    <Play :size="11" /> {{ t('aiPlanRun') }}
-                  </button>
-                </div>
-                <div v-for="(sec, si) in planSecs(m)" :key="si" class="ai-plan-sec">
-                  <div class="ai-plan-sec-title">{{ sec.title }}</div>
-                  <ul v-if="sec.items.length" class="ai-plan-items" :class="{ 'is-step': si === planStepIndex(planSecs(m)) }">
-                    <li v-for="(it, ii) in sec.items" :key="ii">
-                      <input v-if="si === planStepIndex(planSecs(m))" type="checkbox" class="ai-plan-check" />
-                      <span class="ai-plan-item-md" v-html="renderBlock(it)"></span>
-                    </li>
-                  </ul>
-                  <div v-if="sec.text" class="ai-plan-text ai-md" v-html="renderBlock(sec.text)"></div>
-                </div>
-              </div>
-              <div v-else-if="m.role === 'assistant'" class="ai-msg-content ai-md">
-                <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
-              </div>
-              <div v-else class="ai-msg-content ai-plain">{{ m.content }}</div>
-              <!-- 操作按钮同一行：.ai-msg 是纵向 flex，不包一层的话每个按钮都会各占一行 -->
-              <div class="ai-msg-actions">
-                <!-- 中断标记：内容照样保留（后端也把半截内容连同 stopped 一起落库），
-                     但要让人一眼看出「这是我按了停止」，而不是模型只答了这么多 -->
-                <span v-if="m.stopped" class="ai-msg-stopped" :title="t('aiStoppedHint')">{{ t('aiStopped') }}</span>
-                <button v-if="m.content" class="ai-copy" @click="copy(m.content)" :title="t('copy')">
-                  <Copy :size="12" /> {{ t('copy') }}
-                </button>
-                <button v-if="m.role === 'assistant' && m.content" class="ai-copy" @click="saveAsNote(m.content)" :title="t('aiSaveToNote')">
-                  <StickyNote :size="12" /> {{ t('aiSaveToNote') }}
-                </button>
-                <!-- 单条回复统计：耗时 / 首字延迟 / token 用量 -->
-                <span v-if="msgStat(m)" class="ai-msg-stat">
-                  {{ formatStat(msgStat(m)!) }}
-                </span>
-              </div>
-            </div>
-
-            <div v-if="reasoningText" class="ai-reasoning">
-              <details open>
-                <summary>{{ t('aiThinking') }}</summary>
-                <div class="ai-reasoning-content">{{ reasoningText }}</div>
-              </details>
-            </div>
-            <!-- 流式区：模型先调工具时还没有正文，这里的 v-if 必须带上 streamTools，
-                 否则「正在查环境」的那几秒界面上什么都没有，看起来像卡死。 -->
-            <div v-if="streamingText || streamTools.length" class="ai-msg assistant streaming">
-              <div class="ai-msg-role">AI</div>
-              <!-- 与历史卡片同款提示：流式期就能看到「这次带上了哪几个规则文件」，
-                   不然要等回答完才知道，而那时已经照错的约定做完了。 -->
-              <div v-if="runRules.length" class="ai-rules" :title="rulesTitle(runRules)">
-                <FileText :size="11" />
-                <span>{{ t('aiRulesActive', { n: runRules.length }) }}</span>
-                <span class="ai-rules-name">{{ runRules.map((r) => r.name).join('、') }}</span>
-              </div>
-              <!-- 流式期默认展开：用户需要看到「正在用哪个工具」，这是等待期间唯一的进度信息 -->
-              <details v-if="streamTools.length" class="ai-tools" open>
-                <summary class="ai-tools-sum">
-                  <Wrench :size="12" />
-                  <span>{{ t('aiToolSummary', { n: streamTools.length, rounds: countToolRounds(streamTools) }) }}</span>
-                </summary>
-                <div class="ai-tools-body">
-                  <!-- 正在跑的那条自动展开：等待期间它是唯一的进度信息。 -->
-                  <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running, 'is-ask': tc.approval === 'pending' }" :open="!!tc.running || tc.approval === 'pending'">
-                    <summary class="ai-tool-line">
-                      <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
-                      <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
-                      <span v-if="toolTarget(tc)" class="ai-tool-target" :title="toolTarget(tc)">{{ toolTarget(tc) }}</span>
-                      <span v-if="tc.added || tc.removed" class="ai-tool-diff">
-                        <em v-if="tc.added" class="ai-diff-add">+{{ tc.added }}</em>
-                        <em v-if="tc.removed" class="ai-diff-del">-{{ tc.removed }}</em>
-                      </span>
-                      <span v-if="tc.approval === 'pending'" class="ai-tool-ms is-ask">{{ t('aiApprovalWaiting') }}</span>
-                      <span v-else-if="tc.approval === 'denied'" class="ai-tool-ms is-denied">{{ t('aiToolDenied') }}</span>
-                      <span v-else-if="tc.running" class="ai-tool-ms">{{ t('aiToolRunning') }}</span>
-                      <span v-else-if="tc.dedup" class="ai-tool-ms">{{ t('aiToolDedup') }}</span>
-                      <span v-else-if="tc.ms" class="ai-tool-ms">{{ tc.ms }}ms</span>
-                      <!-- 流式期也能回滚：改错了最好在那一步刚结束时退回去，而不是等整轮跑完。 -->
-                      <button v-if="cpForCall(tc)" class="ai-tool-undo" :title="t('aiCheckpointUndo')" @click.stop.prevent="restoreCheckpoint(cpForCall(tc)!)">
-                        <Undo2 :size="11" />
-                      </button>
-                    </summary>
-                    <!-- 审批卡：写类与高危工具在这里停下来等人点（见后端 ai_approval.go）。
-                         风险说明必须排在按钮之前——先让人看见「为什么问你」，再决定点哪个；
-                         反过来等于让人盲点。高危类不给「本次会话都允许」，
-                         那是后端 rememberable 决定的，前端只管不渲染。 -->
-                    <div v-if="tc.approval === 'pending'" class="ai-approval">
-                      <div v-if="tc.riskNote" class="ai-approval-risk">{{ tc.riskNote }}</div>
-                      <div class="ai-approval-btns">
-                        <button class="ai-approval-btn is-allow" @click.stop="approveTool(tc, 'allow')">{{ t('aiApprovalAllow') }}</button>
-                        <button v-if="tc.rememberable" class="ai-approval-btn is-allow-all" @click.stop="approveTool(tc, 'allow', true)">{{ tc.grantScope ? t('aiApprovalRememberScope', { scope: tc.grantScope }) : t('aiApprovalRemember') }}</button>
-                        <button class="ai-approval-btn is-deny" @click.stop="approveTool(tc, 'deny')">{{ t('aiApprovalDeny') }}</button>
-                      </div>
-                    </div>
-                    <div v-else-if="tc.approval === 'allowed'" class="ai-approval-done">{{ t('aiApprovalAllowed') }}</div>
-                    <AiDiffView v-if="tc.diff" :diff="tc.diff" />
-                    <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
-                    <pre v-else-if="tc.result && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
-                    <!-- 后台任务：卡片上明写「关闭应用会终止」。工具描述里也写了同一句，
-                         但用户看的是这张卡；不在这里再说一次，关窗口时他一定以为
-                         dev server 还在后台跑着。 -->
-                    <div v-if="jobIdOf(tc)" class="ai-job-note">{{ t('aiJobBgNote', { id: jobIdOf(tc) }) }}</div>
-                  </details>
-                </div>
-              </details>
-              <div v-if="streamingText" class="ai-msg-content ai-md">
-                <!-- key 用「块原文 + 序号」：原文可能重复（两段相同的话），
-                     仅用原文会触发 Vue 的重复 key 警告。仅末尾块会变，
-                     前面的块 key 稳定 → 不会被重建。 -->
-                <div v-for="(b, bi) in streamBlocks" :key="bi + ':' + b.raw.length + ':' + b.raw.slice(0, 24)" class="ai-md-block" v-html="b.html"></div>
-              </div>
-              <span v-if="streamingText" class="ai-cursor">▋</span>
-            </div>
-
-            <div v-if="errorMsg" class="ai-error">
-              <span class="ai-error-text">{{ errorMsg }}</span>
-              <!-- 失败时用户消息已落库，重试就是把它再发一次（图片一起带回去） -->
-              <button v-if="canRetry()" class="ai-retry" @click="retryLast">{{ t('aiRetry') }}</button>
-            </div>
-
-            <div v-if="messages.length === 0 && !streamingText && !errorMsg" class="ai-empty">
-              <Bot :size="40" />
-              <p>{{ t('aiEmptyHint') }}</p>
-            </div>
-          </template>
-        </div>
-      </div>
-
-      <!-- 「回到底部」按钮：用户主动上滑查看历史时出现 -->
-      <button v-if="showJumpBtn" class="ai-jump-bottom" @click="jumpToBottom" :title="t('aiBackToBottom')">
-        <ArrowDown :size="14" />
-      </button>
+      <!-- 「回到底部」按钮由 AiMessageList 自己渲染：它跟着消息容器的滚动状态走，
+           放在父组件里要靠事件回传，反而多一层状态。 -->
 
       <!-- 划词复制浮层（Teleport 到 body，floating-ui 负责定位与防溢出） -->
       <Teleport to="body">
@@ -3299,102 +2337,54 @@ onUnmounted(() => {
         </div>
       </Teleport>
 
+      <!-- 工具审批条：钉在输入区上方。
+           不放消息流里是因为会话在这期间是停住的，按钮滚出视野就等于卡死。 -->
+      <AiApprovalBar
+        v-if="pendingApproval"
+        :call="pendingApproval"
+        :count="pendingApprovalCount"
+        @allow="approveTool(pendingApproval, 'allow')"
+        @remember="approveTool(pendingApproval, 'allow', true)"
+        @deny="approveTool(pendingApproval, 'deny')"
+      />
+
       <!-- 输入区 -->
-      <div class="ai-input-area" @dragover.prevent @drop="onInputDrop">
-        <!-- 项目钩子批准条（C3）：只在「配置了但还没批」时出现。 -->
-        <div v-if="aiHooks && aiHooks.found && !aiHooks.approved" class="ai-hook-banner">
-          <template v-if="aiHooks.error">
-            <div class="ai-hook-banner-title">{{ t('aiHookBannerTitle') }}</div>
-            <div class="ai-hook-banner-desc">{{ t('aiHookBannerBad', { path: aiHooks.path, err: aiHooks.error }) }}</div>
-          </template>
-          <template v-else>
-            <div class="ai-hook-banner-title">{{ t('aiHookBannerTitle') }}</div>
-            <div class="ai-hook-banner-desc">{{ t('aiHookBannerDesc', { path: aiHooks.path, n1: aiHooks.afterEdit.length, n2: aiHooks.beforeCommand.length }) }}</div>
-            <div class="ai-hook-banner-actions">
-              <button class="ai-hook-ok" @click="approveHooks(true)">{{ t('aiHookApprove') }}</button>
-              <button class="ai-hook-no" @click="approveHooks(false)">{{ t('aiHookDecline') }}</button>
-            </div>
-          </template>
-        </div>
-        <!-- 待发送图片预览 -->
-        <div v-if="attachments.length" class="ai-attach-preview">
-          <div v-for="(a, i) in attachments" :key="i" class="ai-attach-thumb">
-            <img v-if="a.kind === 'file' && a.dataUrl" :src="a.dataUrl" class="ai-attach-img" />
-            <img v-else-if="a.kind === 'url'" :src="a.url" class="ai-attach-img" />
-            <button class="ai-attach-del" :title="t('delete')" @click="removeAttachment(i)">×</button>
-          </div>
-        </div>
-        <!-- 图片链接输入框（点击「图片链接」后展开） -->
-        <div v-if="urlInputOpen" class="ai-url-row">
-          <input
-            v-model="urlDraft"
-            type="text"
-            class="ai-url-input"
-            :placeholder="t('aiAddImageUrlPh')"
-            @keydown.enter.prevent="confirmUrlImage"
-          />
-          <button class="ai-url-ok" @click="confirmUrlImage">{{ t('add') }}</button>
-        </div>
-        <!-- @ 引用（B2）：已选 chip 与补全弹层。
-             弹层用 absolute 挂在输入区上方——输入区贴着窗口底部，往下弹会被切掉。
-             @ 只在主输入框生效：落地页那个 hero 输入框是同一份 v-model，但弹出的
-             弹层是相对输入区定位的，在 hero 里打 @ 只会留下纯文本（后端 mentions 为空
-             时不会展开任何东西），不会出现「弹层在屏幕另一头」这种怪状。 -->
-        <div v-if="mentions.length" class="ai-mention-chips">
-          <span
-            v-for="(m, i) in mentions"
-            :key="m.kind + (m.path || m.convId || String(i))"
-            class="ai-mention-chip"
-            :title="m.path || m.name"
-          >
-            <component :is="m.kind === 'conv' ? MessageSquare : m.kind === 'dir' ? Folder : FileText" :size="11" />
-            <span class="ai-mention-chip-name">{{ m.kind === 'conv' ? m.name : (m.path || m.name) }}</span>
-            <button class="ai-mention-chip-del" :title="t('delete')" @click="removeMention(i)">×</button>
-          </span>
-        </div>
-        <div v-if="mentionOpen" class="ai-mention-pop">
-          <div
-            v-for="(it, i) in mentionItems"
-            :key="it.kind + (it.path || it.convId || String(i))"
-            class="ai-mention-item"
-            :class="{ 'is-active': i === mentionIdx }"
-            @mousedown.prevent="pickMention(it)"
-          >
-            <component :is="it.kind === 'conv' ? MessageSquare : it.kind === 'dir' ? Folder : FileText" :size="12" />
-            <span class="ai-mention-name">{{ it.name }}</span>
-            <span v-if="it.path" class="ai-mention-path">{{ it.path }}</span>
-            <span v-else-if="it.kind === 'conv'" class="ai-mention-path">{{ t('aiMentionConv') }}</span>
-          </div>
-        </div>
-        <div class="ai-input-row">
-          <textarea
-            v-model="input"
-            class="ai-input"
-            :placeholder="t('aiPlaceholder')"
-            :disabled="!hasKey || streaming"
-            @keydown="onComposerKey($event, send)"
-            @paste="onInputPaste"
-          />
-          <div class="ai-input-tools">
-            <button v-if="allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="openFilePicker">
-              <ImageIcon :size="16" />
-            </button>
-            <button v-if="allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="toggleUrlInput">
-              <Link2 :size="16" />
-            </button>
-            <button class="ai-send" :disabled="!hasKey || streaming || (!input.trim() && !attachments.length)" @click="send">
-              {{ streaming ? t('aiThinking') : t('send') }}
-            </button>
-          </div>
-        </div>
-      </div>
+      <AiComposer
+        v-model:input="input"
+        v-model:url-draft="urlDraft"
+        :hooks="aiHooks"
+        :attachments="attachments"
+        :url-input-open="urlInputOpen"
+        :mentions="mentions"
+        :mention-open="mentionOpen"
+        :mention-items="mentionItems"
+        :mention-idx="mentionIdx"
+        :has-key="hasKey"
+        :streaming="streaming"
+        :allow-file-image="allowFileImage"
+        :allow-url-image="allowUrlImage"
+        @approve-hooks="approveHooks"
+        @remove-attachment="removeAttachment"
+        @confirm-url="confirmUrlImage"
+        @remove-mention="removeMention"
+        @pick-mention="pickMention"
+        @composer-key="onComposerKey($event, send)"
+        @send="send"
+        @paste="onInputPaste"
+        @drop="onInputDrop"
+        @open-file-picker="openFilePicker"
+        @toggle-url="toggleUrlInput"
+      />
       </template>
     </section>
-    <!-- 隐藏的文件选择器：放在「落地页 / 聊天区」两个分支之外。
-         两处都有「添加图片」按钮，而它原先只写在聊天区里 —— 落地页那个按钮点了
-         什么也不会发生（fileInputEl 为 null），用户只能靠拖拽或粘贴。 -->
+
+    <AiSidePanel
+      ref="sidePanelRef"
+      :open="sideOpen"
+      :artifacts="convArtifacts"
+      @update:open="sideOpen = $event"
+    />
     <input ref="fileInputEl" type="file" accept="image/*" multiple hidden @change="onPickFiles" />
-    <!-- 图片全屏查看器：点遮罩关闭，点图不关（防误触），Esc 同样关闭 -->
     <Teleport to="body">
       <div v-if="imgViewer" class="ai-img-viewer" @click="closeImgViewer">
         <img :src="imgViewer.dataUrl || imgViewer.url || ''" :alt="imgViewer.name" @click.stop />
@@ -3404,6 +2394,9 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* 这里只剩「外壳」：整页布局、主区、以及三个 Teleport 到 body 的浮层与图片查看器。
+   消息区 / 落地页 / 输入区 / 工具栏 / 大纲面板都已经拆成子组件，样式跟着模板走
+   （scoped 只作用于本组件的元素，留在父组件里的规则对子组件的元素一律不生效）。 */
 .ai-page {
   flex: 1;
   display: flex;
@@ -3412,680 +2405,9 @@ onUnmounted(() => {
   overflow: hidden;
 }
 
-/* 会话列表 */
-.ai-sidebar {
-  width: 220px;
-  min-width: 220px;
-  display: flex;
-  flex-direction: column;
-  background: var(--color-bg-primary);
-  border-right: 1px solid var(--color-border);
-  overflow: hidden;
-}
-.ai-new-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin: 12px;
-  padding: 8px;
-  border: 1px dashed var(--color-border);
-  background: transparent;
-  color: var(--color-text-secondary);
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  font-family: inherit;
-  font-size: 13px;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.ai-new-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.ai-conv-list { flex: 1; overflow-y: auto; padding: 0 8px 12px; }
-
-/* 分组标题：任务 / 空间。两组用同一套样式，视觉上是对等的两个区域，
-   而不是「任务」为主、「空间」为附属——空间才是带目录的那个。 */
-.ai-group-head {
-  padding: 12px 10px 6px;
-  font-size: 11px;
-  font-weight: 600;
-  color: var(--color-text-disabled);
-  letter-spacing: 0.4px;
-}
-.ai-group-head-space { margin-top: 4px; border-top: 1px solid var(--color-border); padding-top: 12px; }
-/* 组标题可点（收起整组）：条目一多时，先收起一整组比在里面翻找更快。
-   箭头与空间行同一套语义——展开是向下箭头。 */
-.ai-group-head-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-  user-select: none;
-  transition: color var(--transition-fast);
-}
-.ai-group-head-btn:hover { color: var(--color-text-secondary); }
-.ai-group-caret { flex-shrink: 0; opacity: 0.75; }
-
-/* 类型图标：不标出来，侧栏一长串标题里看不出哪条是翻译、哪条是闲聊 */
-.ai-conv-mode { flex-shrink: 0; opacity: 0.7; }
-.ai-conv-item.active .ai-conv-mode { opacity: 1; }
-
-.ai-space { margin-bottom: 2px; }
-.ai-space-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px 10px 7px 4px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  transition: background var(--transition-fast);
-}
-.ai-space-row:hover { background: var(--color-bg-hover); }
-/* 空间行复用了任务行的改名/删除按钮，但「hover 才显示」那条规则是按 .ai-conv-item 写的
-   —— 空间行不是 .ai-conv-item，于是这两个按钮一直是 display:none：
-   用户根本删不掉、也改不了空间名。这里补上同一条显示规则。 */
-.ai-space-row .ai-conv-ren,
-.ai-space-row .ai-conv-del,
-.ai-space-row .ai-conv-add { flex-shrink: 0; }
-.ai-space-row:hover .ai-conv-ren,
-.ai-space-row:hover .ai-conv-del,
-.ai-space-row:hover .ai-conv-add { display: flex; }
-.ai-space-caret { flex-shrink: 0; opacity: 0.6; }
-.ai-space-icon { flex-shrink: 0; color: var(--color-accent); opacity: 0.85; }
-.ai-space-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-/* 任务数常驻可见（不是 hover 才出现）：空间收起时它是唯一能说明
-   「这里面有多少东西」的信息，藏起来等于逼用户一个个展开。 */
-.ai-space-count {
-  flex-shrink: 0;
-  font-size: 11px;
-  color: var(--color-text-disabled);
-  background: var(--color-bg-tertiary);
-  border-radius: 8px;
-  padding: 0 6px;
-}
-.ai-conv-item.is-in-space { margin-left: 18px; padding: 6px 10px; font-size: 12.5px; }
-.ai-space-empty { padding: 4px 10px 8px 28px; font-size: 11px; color: var(--color-text-disabled); }
-
-/* 新建任务的落地页（空态）。
-   参考主流 AI 产品的首屏：标题 + 类型 pill + 一个大输入框，输入框下面一行放
-   归属空间 / 模型 / 发送。它替代了原来的「新建任务」弹窗——弹窗要求先答完两道题
-   才出现输入框，而用户往往只是想先打一句话。 */
-.ai-hero {
-  flex: 1;
-  overflow-y: auto;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px 16px 40px;
-}
-.ai-hero-inner {
-  width: 100%;
-  max-width: 660px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 14px;
-}
-.ai-hero-title {
-  margin: 0 0 2px;
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.2px;
-  color: var(--color-text-primary);
-}
-.ai-hero-modes { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
-.ai-hero-mode {
-  display: inline-flex; align-items: center; gap: 5px;
-  padding: 5px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12px; font-family: inherit;
-  cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
-}
-.ai-hero-mode:hover { color: var(--color-text-primary); border-color: var(--color-text-muted); }
-.ai-hero-mode.active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
-
-/* 输入框主体：一整块卡片，textarea 自身无边框，工具行贴在卡片底部 */
-.ai-hero-box {
-  width: 100%;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
-  background: var(--color-bg-tertiary);
-  padding: 10px 12px 8px;
-  transition: border-color var(--transition-fast);
-}
-.ai-hero-box:focus-within { border-color: var(--color-accent); }
-.ai-hero-input {
-  width: 100%;
-  min-height: 64px;
-  max-height: 240px;
-  resize: none;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.6;
-}
-.ai-hero-input::placeholder { color: var(--color-text-disabled); }
-.ai-hero-input:disabled { opacity: 0.6; cursor: not-allowed; }
-.ai-hero-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 6px;
-}
-.ai-hero-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; }
-/* 归属空间与模型下拉同一套外观：这两个是「本次任务落在哪」的 chip，不是表单字段 */
-.ai-hero-select {
-  display: inline-flex; align-items: center; gap: 5px;
-  max-width: 180px;
-  padding: 4px 8px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--color-text-muted);
-  font-size: 12px; font-family: inherit;
-  cursor: pointer;
-  text-overflow: ellipsis;
-}
-.ai-hero-select:hover { color: var(--color-text-primary); border-color: var(--color-border); }
-.ai-hero-select:focus-visible { outline: none; border-color: var(--color-accent); }
-/* select 不参与 flex 排版（原生下拉对 display:inline-flex 支持不一），
-   这里退回 inline-block 并给它自己的底色——透明底在深色主题下会露出系统白。 */
-select.ai-hero-select {
-  display: inline-block;
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-border);
-  color: var(--color-text-primary);
-}
-.ai-hero-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-hero-send {
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px;
-  border: none; border-radius: 50%;
-  background: var(--color-accent); color: #fff;
-  cursor: pointer;
-  transition: opacity var(--transition-fast), background-color var(--transition-fast);
-}
-.ai-hero-send:disabled { background: var(--color-bg-active); color: var(--color-text-disabled); cursor: default; }
-/* 产物去向：说清「AI 生成的文件会放到哪」，顺带解释了空间是什么 */
-.ai-hero-out {
-  margin: 0;
-  font-size: 11px;
-  color: var(--color-text-disabled);
-  text-align: center;
-  line-height: 1.5;
-  word-break: break-all;
-}
-.ai-hero-needkey {
-  margin: 0;
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--color-warning);
-}
-.ai-hero-tips { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
-.ai-hero-tip {
-  display: inline-flex; align-items: center; gap: 6px;
-  align-self: flex-start;
-  max-width: 100%;
-  padding: 7px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--color-text-secondary);
-  font-size: 12.5px; font-family: inherit; text-align: left;
-  cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
-}
-.ai-hero-tip:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
-/* 示例问题后面那个小箭头：转 45 度当作 ↗（lucide 的 ArrowUp 最接近） */
-.ai-hero-tip-icon { transform: rotate(45deg); opacity: 0.55; flex-shrink: 0; }
-
-.ai-conv-item {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
-  cursor: pointer;
-  color: var(--color-text-secondary);
-  font-size: 13px;
-  transition: background var(--transition-fast);
-}
-.ai-conv-item:hover { background: var(--color-bg-hover); }
-.ai-conv-item.active { background: var(--color-bg-tertiary); color: var(--color-accent); }
-.ai-conv-title {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-/* 消息命中的行比普通任务行高：标题下面还要放一行片段。
-   片段限两行——侧栏是导航不是阅读器，一条工具输出能占几十行。 */
-.ai-conv-item.is-msg-hit { align-items: flex-start; padding: 7px 10px; }
-.ai-conv-item.is-msg-hit .ai-conv-mode { margin-top: 3px; }
-.ai-msg-hit-body { flex: 1; min-width: 0; }
-.ai-msg-hit-head { display: flex; align-items: center; gap: 4px; }
-/* 「还有 N 条」用数字而不是一条分隔线：同一段话被追问、被复述都会重复命中，
-   这个数说明「这条对话里提过好几次」，是选哪条进去的关键。 */
-.ai-msg-hit-count {
-  flex: none; font-size: 10px; color: var(--color-text-disabled);
-  font-variant-numeric: tabular-nums;
-}
-.ai-msg-hit-snippet {
-  margin-top: 2px; font-size: 11px; line-height: 1.45; color: var(--color-text-disabled);
-  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
-}
-.ai-conv-item.active .ai-msg-hit-snippet { color: var(--color-text-secondary); }
-.ai-conv-del {
-  background: none; border: none; color: var(--color-text-disabled);
-  cursor: pointer; display: none; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: var(--radius-sm);
-}
-.ai-conv-item:hover .ai-conv-del { display: flex; }
-.ai-conv-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
-.ai-conv-ren,
-.ai-conv-add {
-  background: none; border: none; color: var(--color-text-disabled);
-  cursor: pointer; display: none; align-items: center; justify-content: center;
-  width: 22px; height: 22px; border-radius: var(--radius-sm);
-}
-.ai-conv-item:hover .ai-conv-ren,
-.ai-conv-item:hover .ai-conv-add { display: flex; }
-.ai-conv-ren:hover,
-.ai-conv-add:hover { color: var(--color-text-primary); background: var(--color-bg-tertiary); }
-.ai-conv-add:hover { color: var(--color-accent); }
-/* 行内编辑：撑满标题那一格，且必须能盖住行本身的点击（改选中了会话就白改了） */
-.ai-conv-rename {
-  flex: 1;
-  min-width: 0;
-  padding: 0 4px;
-  font: inherit;
-  font-size: 13px;
-  color: var(--color-text-primary);
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-accent);
-  border-radius: var(--radius-sm);
-  outline: none;
-}
-.ai-conv-tokens {
-  font-size: 10px; color: var(--color-text-disabled); white-space: nowrap;
-  margin-right: 4px; font-variant-numeric: tabular-nums;
-}
-.ai-conv-empty { padding: 24px 12px; text-align: center; color: var(--color-text-disabled); font-size: 12px; }
-
-/* 主区 */
+/* 主区：position:relative 是两个浮层（大纲面板）与「回到底部」按钮的定位锚点，
+   拆出去的子组件靠 display:contents 让内容继续参与这里的布局。 */
 .ai-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
-.ai-toolbar {
-  display: flex;
-  align-items: center;
-  /* 右侧操作组靠右；左侧若有目录指示，由它的 margin-right:auto 顶到左边。
-     原来是 space-between + 左右两块都常驻，现在左侧那块只在绑了目录时才存在，
-     用 space-between 会在没有它时把右侧整组推到最左。 */
-  justify-content: flex-end;
-  padding: 10px 16px;
-  border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
-  gap: 10px;
-}
-.ai-toolbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.ai-model-select {
-  max-width: 160px;
-  padding: 5px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-size: 12px;
-  font-family: inherit;
-  outline: none;
-}
-.ai-model-select:focus { border-color: var(--color-accent); }
-/* 工作目录：显示当前绑到哪个目录，点一下在资源管理器里打开。
-   它只「打开」已绑定的目录，不是「选目录」——绑定入口已收进「新建任务 → 选空间」。
-   保留它是因为它同时回答两件事：AI 能不能改文件，以及生成的文件去哪了。
-   宽度上限必须有：项目路径动辄五六层，不夹住会把模型下拉挤到换行。 */
-.ai-cwd-tag {
-  display: inline-flex; align-items: center; gap: 5px;
-  margin-right: auto;
-  max-width: 40%; min-width: 0;
-  padding: 4px 6px;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  background: transparent;
-  color: var(--color-text-disabled);
-  font-size: 11.5px; font-family: inherit;
-  cursor: pointer;
-  transition: color var(--transition-fast), border-color var(--transition-fast);
-}
-.ai-cwd-tag:hover { color: var(--color-text-primary); border-color: var(--color-border); }
-.ai-cwd-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ai-icon-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 30px; height: 30px; border: 1px solid var(--color-border);
-  background: transparent; color: var(--color-text-muted);
-  border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-}
-.ai-icon-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.ai-stop {
-  display: flex; align-items: center; gap: 4px;
-  padding: 5px 12px; border: none; border-radius: var(--radius-sm);
-  background: var(--color-bg-active); color: var(--color-text-secondary);
-  font-size: 12px; cursor: pointer; font-family: inherit;
-}
-.ai-stop:hover { color: var(--color-danger); }
-
-/* 思考过程折叠块 */
-.ai-reasoning {
-  font-size: 12px; margin: 2px 0; max-width: 80%;
-}
-.ai-reasoning details { background: var(--color-bg-active); border-radius: var(--radius-sm); padding: 4px 8px; }
-.ai-reasoning summary {
-  cursor: pointer; color: var(--color-text-muted); font-size: 11px;
-  user-select: none; outline: none;
-}
-.ai-reasoning summary:hover { color: var(--color-text-primary); }
-.ai-reasoning-content {
-  margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--color-border);
-  color: var(--color-text-secondary); font-size: 12px; line-height: 1.5;
-  white-space: pre-wrap; word-break: break-word;
-}
-
-/* 工具调用卡片。
-   折叠时只剩一行摘要（调了几个、几轮），展开才看参数与结果——
-   一段回答连调五个工具时，全展开会把正文挤出屏幕外。 */
-.ai-tools { margin: 2px 0; max-width: 80%; }
-.ai-tools > summary {
-  display: flex; align-items: center; gap: 5px;
-  cursor: pointer; user-select: none; outline: none;
-  color: var(--color-text-muted); font-size: 11px;
-  background: var(--color-bg-active); border-radius: var(--radius-sm);
-  padding: 4px 8px; list-style: none;
-}
-/* 去掉 Chrome 默认的三角形：上面已经用图标表示「可展开」 */
-.ai-tools > summary::-webkit-details-marker { display: none; }
-.ai-tools > summary:hover { color: var(--color-text-primary); }
-.ai-tools[open] > summary { border-radius: var(--radius-sm) var(--radius-sm) 0 0; }
-.ai-tools-body {
-  border: 1px solid var(--color-border); border-top: none;
-  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
-  padding: 4px; display: flex; flex-direction: column; gap: 4px;
-}
-.ai-tool { background: var(--color-bg-active); border-radius: 4px; padding: 2px 6px; }
-/* 失败用左侧红条而不是整块变红：结果区本来就长，整块染色太吵 */
-.ai-tool.is-err { border-left: 2px solid var(--color-danger); }
-.ai-tool.is-run { opacity: 0.85; }
-/* 每条调用自己可折叠：summary 就是那一行，不带默认三角形（图标已表示「可展开」） */
-.ai-tool > summary {
-  display: flex; align-items: center; gap: 6px;
-  cursor: pointer; user-select: none; outline: none; list-style: none;
-  padding: 3px 0;
-}
-.ai-tool > summary::-webkit-details-marker { display: none; }
-.ai-tool > summary:hover .ai-tool-target { color: var(--color-text-primary); }
-.ai-tool-icon { flex-shrink: 0; color: var(--color-accent); opacity: 0.8; }
-.ai-tool.is-err .ai-tool-icon { color: var(--color-danger); opacity: 1; }
-.ai-tool-verb {
-  font-size: 11.5px; color: var(--color-text-primary); flex-shrink: 0;
-}
-.ai-tool-target {
-  font-size: 11px; color: var(--color-text-secondary); font-family: var(--font-mono);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 320px;
-}
-/* 增删行数：改文件这一件事上，行数比「成功」更值得先看到 */
-.ai-tool-diff { display: flex; gap: 4px; flex-shrink: 0; font-family: var(--font-mono); font-size: 11px; }
-.ai-diff-add { color: var(--color-success, #3fb950); font-style: normal; }
-.ai-diff-del { color: var(--color-danger); font-style: normal; }
-.ai-tool-ms { font-size: 11px; color: var(--color-text-muted); margin-left: auto; flex-shrink: 0; }
-/* 等待审批：琥珀色左侧条，与「失败红」「执行中灰」区分开——它既不是错误也不是
-   正常执行，是「卡在这儿等人」。 */
-.ai-tool.is-ask { border-left: 2px solid var(--color-warning); }
-.ai-tool-ms.is-ask { color: var(--color-warning); }
-.ai-tool-ms.is-denied { color: var(--color-text-muted); }
-/* 审批卡：风险说明在上、按钮在下。说明必须排在按钮前——先让人看见「为什么问你」
-   再决定点哪个；反过来等于让人盲点。 */
-.ai-approval { margin: 4px 0 2px; display: flex; flex-direction: column; gap: 6px; }
-.ai-approval-risk {
-  font-size: 11px; color: var(--color-text-secondary); line-height: 1.5;
-  background: var(--color-bg-primary); border-radius: 4px; padding: 5px 7px;
-  border-left: 2px solid var(--color-warning);
-}
-.ai-approval-btns { display: flex; gap: 6px; flex-wrap: wrap; }
-.ai-approval-btn {
-  font-size: 11px; padding: 3px 10px; border-radius: 4px; cursor: pointer;
-  border: 1px solid var(--color-border); background: var(--color-bg-primary);
-  color: var(--color-text-primary);
-}
-.ai-approval-btn:hover { background: var(--color-bg-hover); }
-/* 允许是主操作，给强调色；拒绝刻意不做成实心红——把「拒绝」做成醒目的红按钮，
-   人会下意识躲开它，而这恰恰是用户最该敢按的那一个。 */
-.ai-approval-btn.is-allow {
-  background: var(--color-accent); border-color: var(--color-accent);
-  color: var(--color-accent-text);
-}
-.ai-approval-btn.is-deny { color: var(--color-danger); border-color: var(--color-danger); }
-.ai-approval-done { font-size: 11px; color: var(--color-text-muted); margin-top: 3px; }
-/* 回滚按钮：放在摘要行最右侧，平时只显示图标——它是个「事后」操作，
-   不该比「改了几行」更抢眼。 */
-.ai-tool-undo {
-  display: inline-flex; align-items: center; justify-content: center;
-  padding: 2px 4px; margin-left: 2px; flex-shrink: 0;
-  border: none; background: transparent; color: var(--color-text-muted);
-  cursor: pointer; border-radius: 3px;
-}
-.ai-tool-undo:hover { color: var(--color-accent); background: var(--color-bg-hover); }
-/* 生效的规则文件：一行小字，和工具卡片同一量级——它是「解释这条回答为什么这样写」
-   的背景信息，不该比正文更显眼。文件名超长时省略，全文在悬停提示里。 */
-.ai-rules {
-  display: flex; align-items: center; gap: 4px;
-  margin: 2px 0 4px; font-size: 11px; color: var(--color-text-muted);
-}
-.ai-rules-name {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono);
-}
-
-/* ---- 计划卡片 ---- */
-/* 用卡片包一圈而不是直接摊成 markdown：四个章节（计划/涉及文件/风险/验收）
-   是一份要被人逐条确认的东西，和普通回答的段落不是同一种读物。 */
-.ai-plan {
-  align-self: stretch; max-width: 100%;
-  margin: 4px 0 6px; padding: 10px 12px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  background: var(--color-bg-primary);
-}
-.ai-plan-head { display: flex; align-items: center; gap: 6px; }
-.ai-plan-icon { color: var(--color-accent); flex: none; }
-.ai-plan-name { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
-.ai-plan-count { font-size: 11px; color: var(--color-text-disabled); }
-/* 「执行」推右边：它是这张卡片唯一的动作，跟着标题挤在左边会被当成又一个标签 */
-.ai-plan-run {
-  display: inline-flex; align-items: center; gap: 4px;
-  margin-left: auto; padding: 3px 9px; flex-shrink: 0;
-  border: 1px solid var(--color-accent-border); border-radius: var(--radius-sm);
-  background: var(--color-accent-bg); color: var(--color-accent);
-  font-size: 11px; cursor: pointer;
-}
-.ai-plan-run:hover { border-color: var(--color-accent); }
-.ai-plan-sec { margin-top: 8px; }
-.ai-plan-sec-title {
-  font-size: 11px; font-weight: 600; color: var(--color-text-secondary);
-  margin-bottom: 3px;
-}
-.ai-plan-items { margin: 0; padding: 0; list-style: none; }
-.ai-plan-items li {
-  display: flex; align-items: flex-start; gap: 6px;
-  font-size: 12.5px; line-height: 1.55; color: var(--color-text-secondary);
-  padding: 1px 0;
-}
-/* 非步骤章节用短横线代替勾选框：它们不是「要执行的事」，
-   给勾选框会让人以为做完一步要勾一个 */
-.ai-plan-items:not(.is-step) li::before {
-  content: '·'; color: var(--color-text-disabled); flex: none;
-}
-.ai-plan-check { margin: 3px 0 0; flex: none; accent-color: var(--color-accent); }
-.ai-plan-item-md { flex: 1; min-width: 0; }
-/* renderBlock 会把单行包成 <p>，放进 li 里会让行高翻倍 */
-.ai-plan-item-md :deep(p) { margin: 0; }
-.ai-plan-text { font-size: 12.5px; color: var(--color-text-secondary); }
-.ai-tool-err {
-  font-size: 11px; color: var(--color-danger); margin-top: 3px;
-  word-break: break-word;
-}
-/* 结果区限高：file_grep 这类工具一屏放不下，内部滚动比把页面撑长好 */
-.ai-tool-res {
-  margin: 4px 0 2px; font-size: 11px; color: var(--color-text-secondary);
-  font-family: var(--font-mono); line-height: 1.45;
-  max-height: 180px; overflow: auto;
-  white-space: pre-wrap; word-break: break-word;
-}
-/* 命令输出 / diff：缩进与对齐是有意义的，按等宽块原样保留 */
-.ai-tool-res.is-code {
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
-  border-radius: 4px;
-  padding: 6px 8px;
-}
-
-/* 后台任务那一行：左侧压一道强调色，与「结果」区分开——
-   它是「这个任务还在跑」的状态说明，不是命令输出的一部分。 */
-.ai-job-note {
-  margin-top: 4px; padding: 2px 0 2px 6px;
-  border-left: 2px solid var(--color-accent);
-  font-size: 10px; line-height: 1.5; color: var(--color-text-muted);
-}
-
-/* 消息区：滚动容器 + 内容层（内容层被 ResizeObserver 观察） */
-.ai-messages {
-  flex: 1;
-  overflow-y: auto;
-  padding: 16px 20px;
-  display: flex;
-  flex-direction: column;
-  overflow-anchor: none; /* 关掉浏览器自动锚定，避免与我们的贴底逻辑打架 */
-}
-/* 内容层的高度必须跟随内容增长，ResizeObserver 才能感知到「AI 又吐了一段」。
-   原来这里写的是 flex:1 + min-height:0 —— flex-basis:0% 让盒高被 flex 固定成
-   容器高度，内容溢出并不会改变 border-box 尺寸，观察器因此永远不触发，
-   这就是「AI 一直在回复但视口不往下走」的直接原因。
-   改为 flex:0 0 auto（高度由内容决定）+ min-height:100%（内容少时仍撑满，
-   空状态才能垂直居中）。 */
-.ai-msg-content-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  flex: 0 0 auto;
-  min-height: 100%;
-}
-.ai-msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
-.ai-msg.user { align-self: flex-end; align-items: flex-end; }
-.ai-msg.assistant { align-self: flex-start; }
-.ai-msg-role { font-size: 11px; color: var(--color-text-disabled); margin-bottom: 1px; display: flex; align-items: center; gap: 6px; }
-/* 模型名淡到几乎只作注脚，但比"猜这句是谁答的"强 */
-.ai-msg-model {
-  font-size: 10px; color: var(--color-text-disabled);
-  background: var(--color-bg-tertiary); padding: 0 5px;
-  border-radius: var(--radius-xs); opacity: 0.85;
-}
-
-/* 会话搜索：与新建按钮同宽，同一视觉层级 */
-.ai-conv-search {
-  display: flex; align-items: center; gap: 5px;
-  margin: 6px 8px 2px; padding: 0 7px; height: 26px;
-  background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); flex-shrink: 0;
-}
-.ai-conv-search:focus-within { border-color: var(--color-accent); }
-.ai-conv-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
-.ai-conv-search-input {
-  flex: 1; min-width: 0; border: none; outline: none; background: none;
-  color: var(--color-text-primary); font-size: 11px; font-family: inherit;
-}
-.ai-conv-search-input::placeholder { color: var(--color-text-disabled); }
-.ai-conv-search-clear {
-  display: flex; padding: 0; border: none; background: none;
-  color: var(--color-text-disabled); cursor: pointer;
-}
-.ai-conv-search-clear:hover { color: var(--color-text-primary); }
-/* 加载更多：整行按钮，不要做成小链接——点中的概率太低 */
-.ai-conv-more {
-  margin: 2px 8px 8px; padding: 5px 0; flex-shrink: 0;
-  border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
-  background: none; color: var(--color-text-muted); font-size: 11px;
-  font-family: inherit; cursor: pointer;
-}
-.ai-conv-more:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
-/* 空间内的「更多」跟着任务缩进，否则会和空间名对齐，看着像另一个空间 */
-.ai-conv-more.is-in-space { margin-left: 26px; margin-right: 0; }
-
-/* AI 气泡去掉底色：原来整块套 --color-bg-tertiary 灰底，
-   里面再套深色代码块、外面再套引用块，三层嵌套导致视觉很乱。
-   现在 AI 回复走「纯净排版」，只有代码块/引用块自身带底色，靠留白分层。 */
-.ai-msg-content {
-  padding: 0;
-  font-size: 13px;
-  line-height: 1.65;
-  word-break: break-word;
-  color: var(--color-text-primary);
-  user-select: text;
-  -webkit-user-select: text;
-  cursor: text;
-  min-width: 0;
-}
-/* 用户消息仍保留气泡，但改为描边风格，与 AI 的无底色形成层级区分 */
-.ai-msg.user .ai-msg-content {
-  background: var(--color-accent-bg);
-  border: 1px solid var(--color-accent-border);
-  color: var(--color-text-primary);
-  padding: 8px 12px;
-  border-radius: var(--radius-md);
-  white-space: pre-wrap;
-}
-.ai-msg-actions {
-  display: flex; align-items: center; gap: 6px;
-  flex-wrap: wrap;
-}
-.ai-msg.user .ai-msg-actions { justify-content: flex-end; }
-.ai-copy {
-  display: flex; align-items: center; gap: 3px;
-  background: none; border: none; color: var(--color-text-disabled);
-  font-size: 11px; cursor: pointer; padding: 2px 4px; border-radius: var(--radius-xs);
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.ai-copy:hover { color: var(--color-text-muted); background: var(--color-bg-active); }
-.ai-msg.user .ai-copy { color: var(--color-text-muted); }
-.ai-msg.user .ai-copy:hover { color: var(--color-accent); background: var(--color-accent-bg); }
-/* 中断标记：贴在操作行最左侧，用警示色区别于普通小字（stat 行） */
-.ai-msg-stopped {
-  font-size: 10px; padding: 1px 6px; border-radius: var(--radius-xs);
-  color: var(--color-warning);
-  background: var(--color-warning-bg);
-  border: 1px solid var(--color-warning-border);
-  cursor: default;
-}
-/* 单条回复统计：淡色小字，鼠标悬停可看完整信息 */
-.ai-msg-stat {
-  font-size: 10px;
-  color: var(--color-text-disabled);
-  font-variant-numeric: tabular-nums;
-  /* 允许换行：这行可能同时有「耗时 / 首字 / 输入输出 / 缓存命中」四段，
-     窄窗口下 nowrap 会把后面的内容顶出可视区（数字被裁比换行更难接受） */
-  white-space: normal;
-  line-height: 1.6;
-  cursor: default;
-}
 
 /* 划词复制浮层（position/left/top 由 floating-ui 注入） */
 .ai-sel-copy {
@@ -4100,9 +2422,8 @@ select.ai-hero-select {
   box-shadow: 0 4px 16px var(--color-bg-overlay);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
+
 .ai-sel-copy:hover { color: var(--color-accent); border-color: var(--color-accent); }
-.ai-cursor { animation: ai-blink 1s steps(1) infinite; color: var(--color-accent); }
-@keyframes ai-blink { 50% { opacity: 0; } }
 
 /* 图 / 公式的右键菜单（position 由 floating-ui 注入） */
 .ai-ctx {
@@ -4114,6 +2435,7 @@ select.ai-hero-select {
   background: var(--color-bg-tertiary);
   box-shadow: var(--shadow-md);
 }
+
 .ai-ctx-item {
   display: flex; align-items: center; gap: 7px;
   height: 28px; padding: 0 9px;
@@ -4122,17 +2444,20 @@ select.ai-hero-select {
   font-family: inherit; font-size: 12px; text-align: left; cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
+
 .ai-ctx-item:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+
 .ai-ctx-item svg { flex: 0 0 auto; }
 
 /* html 代码块预览：铺满窗口的遮罩 + 白色画布（示例页大多假设白底，
-   跟着应用主题变暗会让「我的网页」看起来坏了） */
+   跟随应用深色主题会把没写背景的示例页变成黑底黑字）。 */
 .ai-html-preview {
   position: fixed; inset: 0; z-index: 800;
   display: flex; align-items: center; justify-content: center;
   padding: 24px;
   background: var(--color-bg-overlay);
 }
+
 .ai-html-preview-box {
   display: flex; flex-direction: column;
   width: 100%; height: 100%;
@@ -4143,440 +2468,26 @@ select.ai-hero-select {
   box-shadow: var(--shadow-md);
   overflow: hidden;
 }
+
 .ai-html-preview-bar {
   display: flex; align-items: center; gap: 8px;
   padding: 6px 8px 6px 14px;
   border-bottom: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
 }
+
 .ai-html-preview-title {
   margin-right: auto;
   font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
   color: var(--color-text-muted);
 }
+
 .ai-html-preview-frame {
   flex: 1; width: 100%; min-height: 0;
   border: none; background: #fff;
 }
-.ai-error {
-  align-self: flex-start;
-  padding: 10px 14px; border-radius: var(--radius-lg);
-  background: var(--color-danger-bg); color: var(--color-danger);
-  font-size: 13px; max-width: 80%;
-  /* 错误文案 + 重试按钮同一行；长错误换行，按钮不跟着被挤压 */
-  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
-}
-.ai-error-text { flex: 1 1 auto; min-width: 0; word-break: break-word; }
-.ai-retry {
-  flex: 0 0 auto;
-  padding: 3px 12px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-danger-border);
-  background: transparent; color: var(--color-danger);
-  font-size: 12px; font-family: inherit; cursor: pointer;
-  transition: background-color var(--transition-fast);
-}
-.ai-retry:hover { background: var(--color-danger-bg); }
-.ai-need-key, .ai-empty {
-  margin: auto;
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
-  color: var(--color-text-disabled); text-align: center;
-}
-.ai-need-key p, .ai-empty p { font-size: 13px; margin: 0; }
-.ai-go-settings {
-  padding: 7px 16px; border: none; border-radius: var(--radius-md);
-  background: var(--color-accent); color: var(--color-accent-text);
-  font-size: 13px; cursor: pointer; font-family: inherit;
-}
 
-/* 「回到底部」浮动按钮 */
-.ai-jump-bottom {
-  position: absolute;
-  bottom: 96px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 20;
-  display: flex; align-items: center; justify-content: center;
-  width: 32px; height: 32px;
-  border-radius: var(--radius-full);
-  border: 1px solid var(--color-border);
-  background: var(--color-surface-elevated);
-  color: var(--color-text-secondary);
-  cursor: pointer;
-  box-shadow: var(--shadow-md);
-  transition: background-color var(--transition-fast), color var(--transition-fast),
-    border-color var(--transition-fast), opacity var(--transition-fast);
-}
-.ai-jump-bottom:hover { color: var(--color-accent); border-color: var(--color-accent); }
-
-/* Markdown 内容——紧凑排版 */
-/* 分块渲染容器：display:contents 让块内元素不生成盒子、直接参与父级布局，
-   因此「分块渲染」与「整段渲染」的排版结果完全一致（无额外间距/缩进差异）。 */
-.ai-md-block { display: contents; }
-.ai-md :deep(h1), .ai-md :deep(h2), .ai-md :deep(h3), .ai-md :deep(h4) {
-  font-size: 14px; margin: 10px 0 4px; font-weight: 600; line-height: 1.4;
-}
-.ai-md :deep(h1:first-child), .ai-md :deep(h2:first-child), .ai-md :deep(h3:first-child) { margin-top: 0; }
-.ai-md :deep(p) { margin: 5px 0; }
-.ai-md :deep(ul), .ai-md :deep(ol) { padding-left: 20px; margin: 5px 0; }
-.ai-md :deep(li) { margin: 2px 0; line-height: 1.6; }
-.ai-md :deep(li > p) { margin: 0; }
-/* 换行：marked 开了 breaks:true，段内单换行会渲染成 <br>。
-   这里必须让 <br> 生效，否则 AI 回复里的多行要点会被挤成一行
-   （实测 marked 输出 <p>第一行<br>第二行</p>，而 display:none 会把 <br> 抹掉）。 */
-.ai-md :deep(br) { display: inline; }
-.ai-md :deep(a) { color: var(--color-accent); text-decoration: none; }
-.ai-md :deep(a:hover) { text-decoration: underline; }
-/* 引用块：左侧竖线 + 淡底，不再嵌套成整块灰盒 */
-.ai-md :deep(blockquote) {
-  border-left: 3px solid var(--color-accent-muted);
-  padding: 6px 12px;
-  margin: 8px 0;
-  background: var(--color-bg-secondary);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  color: var(--color-text-secondary);
-}
-.ai-md :deep(blockquote p) { margin: 0; }
-
-/* 代码块：独立卡片 + 顶部工具条（语言标签 + 复制按钮） */
-.ai-md :deep(.md-code) {
-  margin: 8px 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow: hidden;
-  background: var(--color-code-bg);
-}
-.ai-md :deep(.md-code-bar) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 6px 4px 10px;
-  background: var(--color-code-bar-bg);
-  border-bottom: 1px solid var(--color-border);
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-.ai-md :deep(.md-code-lang) {
-  text-transform: lowercase;
-  letter-spacing: 0.02em;
-}
-.ai-md :deep(.md-code-copy) {
-  display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.ai-md :deep(.md-code-actions) { display: flex; align-items: center; gap: 2px; }
-/* html 代码块的「预览」按钮与复制按钮同构，只是悬停时给成主色 ——
-   它是这一行里唯一会「做事」的按钮，值得比复制更显眼一点 */
-.ai-md :deep(.md-code-run) {
-  display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.ai-md :deep(.md-code-run:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
-.ai-md :deep(.md-code-run svg) { width: 13px; height: 13px; }
-.ai-md :deep(.md-code-copy:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
-.ai-md :deep(.md-code-copy.copied) { color: var(--color-success); }
-.ai-md :deep(.md-code-copy svg) { width: 13px; height: 13px; }
-.ai-md :deep(pre) {
-  margin: 0;
-  padding: 10px 12px;
-  overflow-x: auto;
-  background: transparent;
-  font-size: 12px;
-  line-height: 1.6;
-}
-.ai-md :deep(code) {
-  font-family: var(--font-mono, monospace); font-size: 12px;
-  background: var(--color-code-inline-bg); padding: 1px 5px; border-radius: var(--radius-xs);
-}
-.ai-md :deep(pre code) { background: none; padding: 0; font-size: 12px; }
-.ai-md :deep(table) { border-collapse: collapse; }
-.ai-md :deep(th), .ai-md :deep(td) { border: 1px solid var(--color-border); padding: 5px 9px; }
-.ai-md :deep(th) { background: var(--color-bg-secondary); font-weight: 600; }
-/* 表格增强：横向滚动容器 + 导出条 + 可排序列（见 enhanceTables） */
-.ai-md :deep(.md-table-wrap) {
-  margin: 8px 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  overflow-x: auto;
-}
-.ai-md :deep(.md-table-bar) {
-  display: flex; justify-content: flex-end;
-  padding: 3px 6px;
-  border: 1px solid var(--color-border);
-  border-bottom: none;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  background: var(--color-code-bar-bg);
-}
-.ai-md :deep(.md-table-export) {
-  display: inline-flex; align-items: center; gap: 3px;
-  font-size: 11px; padding: 2px 8px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
-  background: var(--color-bg-primary); color: var(--color-text-muted); cursor: pointer;
-}
-.ai-md :deep(.md-table-export:hover) { color: var(--color-accent); border-color: var(--color-accent); }
-.ai-md :deep(.md-th-sortable) { cursor: pointer; user-select: none; white-space: nowrap; }
-.ai-md :deep(.md-th-sortable:hover) { color: var(--color-accent); }
-.ai-md :deep(.md-th-sortable[data-sort-dir="asc"]::after) { content: " ▲"; font-size: 9px; }
-.ai-md :deep(.md-th-sortable[data-sort-dir="desc"]::after) { content: " ▼"; font-size: 9px; }
-.ai-md :deep(hr) { border: none; border-top: 1px solid var(--color-border); margin: 10px 0; }
-.ai-md :deep(img) { max-width: 100%; border-radius: var(--radius-sm); }
-
-/* 数学公式。katex.min.css 负责字形，这里只管容器：块级公式横向可滚
-   （长公式会顶破消息气泡），行内公式不要影响行高节奏。 */
-.ai-md :deep(.md-math-inline) { display: inline; }
-.ai-md :deep(.md-math-inline .katex) { font-size: 1.05em; }
-.ai-md :deep(.md-math-block) {
-  display: block;
-  margin: 8px 0;
-  padding: 2px 0;
-  overflow-x: auto;
-  overflow-y: hidden;
-}
-.ai-md :deep(.md-math-block .katex-display) { margin: 0; }
-/* 公式还没写完 / 写法不支持时的降级形态：等宽小字，别跟正文混在一起看不出是源码 */
-.ai-md :deep(.md-math-raw) {
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  line-height: 1.6;
-  white-space: pre-wrap;
-  word-break: break-word;
-  color: var(--color-text-secondary);
-}
-
-/* Mermaid 图。结构是「工具栏 + 内容区」两层：
-   - 工具栏常驻（画出来之后也是），长图占满一屏时折叠 / 看源码仍然点得到；
-   - 内容区按容器属性切三种形态：图形（data-mermaid-done）/ 源码（data-mermaid-src）/
-     折叠（data-mermaid-folded）。源码 <pre> 一直留在 DOM 里，只是被藏起来。 */
-.ai-md :deep(.md-mermaid) {
-  margin: 8px 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-code-bg);
-  /* 圆角要裁得住里面的工具栏；横向滚动交给内容区，见 .md-mermaid-body */
-  overflow: hidden;
-}
-.ai-md :deep(.md-mermaid-bar) {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 4px 6px 4px 10px;
-  background: var(--color-code-bar-bg);
-  border-bottom: 1px solid var(--color-border);
-  font-size: 11px;
-  color: var(--color-text-muted);
-  /* 工具栏只是外壳，别让它参与划词复制 */
-  user-select: none;
-}
-/* 折叠后只剩这一条：分隔线留着会像半张空卡片 */
-.ai-md :deep(.md-mermaid[data-mermaid-folded] .md-mermaid-bar) {
-  border-bottom-color: transparent;
-}
-.ai-md :deep(.md-mermaid-lang) {
-  text-transform: lowercase;
-  letter-spacing: 0.02em;
-}
-.ai-md :deep(.md-mermaid-acts) { display: flex; align-items: center; gap: 2px; }
-.ai-md :deep(.md-mermaid-act) {
-  display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-xs);
-  background: transparent;
-  color: var(--color-text-muted);
-  cursor: pointer;
-  transition: background-color var(--transition-fast), color var(--transition-fast);
-}
-.ai-md :deep(.md-mermaid-act:hover) { background: var(--color-bg-hover); color: var(--color-accent); }
-.ai-md :deep(.md-mermaid-act svg) { width: 13px; height: 13px; display: block; }
-
-/* 按钮里的两个图标靠容器属性切换，JS 只改属性、不重排 DOM ——
-   看图时显示 `</>`（点了去看源码），看源码时显示眼睛（点了回来看图）。
-   ⚠️ 这里的隐藏必须写成 `.md-mermaid-act .md-mermaid-i-*`（三个 class）：
-   上面那条 `.md-mermaid-act svg { display: block }` 是「两 class + 一标签」，
-   比单纯 `.md-mermaid-i-eye`（两 class）更具体，写短了会四个图标一起显示。 */
-.ai-md :deep(.md-mermaid-act .md-mermaid-i-eye) { display: none; }
-.ai-md :deep(.md-mermaid[data-mermaid-src] .md-mermaid-act .md-mermaid-i-code) { display: none; }
-.ai-md :deep(.md-mermaid[data-mermaid-src] .md-mermaid-act .md-mermaid-i-eye) { display: block; }
-/* 折叠态：展开时是向上箭头（点了收起），折叠后换成向下箭头（点了展开） */
-.ai-md :deep(.md-mermaid-act .md-mermaid-i-down) { display: none; }
-.ai-md :deep(.md-mermaid[data-mermaid-folded] .md-mermaid-act .md-mermaid-i-up) { display: none; }
-.ai-md :deep(.md-mermaid[data-mermaid-folded] .md-mermaid-act .md-mermaid-i-down) { display: block; }
-
-.ai-md :deep(.md-mermaid-body) { overflow-x: auto; }
-/* 默认（占位块已带 data-mermaid-src）显示源码、藏起图形；点了「查看图」移除该属性就反过来。
-   刻意不用 `:not([data-mermaid-src])` 压成一条：拆成两条后写的覆盖前面的，
-   意图更直白，也不必依赖 :not 的参数写法（预览脚本抽 :deep 时会在 `:not(` 的括号上截断）。 */
-.ai-md :deep(.md-mermaid-svg) { display: none; }
-.ai-md :deep(.md-mermaid[data-mermaid-done="1"] .md-mermaid-svg) {
-  display: block;
-  padding: 10px;
-  background: var(--color-bg-primary);
-}
-.ai-md :deep(.md-mermaid[data-mermaid-done="1"] .md-mermaid-src) { display: none; }
-.ai-md :deep(.md-mermaid[data-mermaid-src] .md-mermaid-svg) { display: none; }
-/* 源码视图限高：13 个节点的图定义能有一屏长，别让它把整条回答推走 */
-.ai-md :deep(.md-mermaid[data-mermaid-src] .md-mermaid-src) {
-  display: block;
-  max-height: 320px;
-  overflow: auto;
-}
-.ai-md :deep(.md-mermaid[data-mermaid-folded] .md-mermaid-body) { display: none; }
-
-/* Mermaid 输出带内联 width/max-width，这里只兜住「别溢出、别被拉变形」 */
-.ai-md :deep(.md-mermaid svg) {
-  display: block;
-  margin: 0 auto;
-  max-width: 100%;
-  height: auto;
-}
-/* 失败提示压在源码上方：流式半截定义每帧都会失败，没有这行用户会以为是卡片坏了 */
-.ai-md :deep(.md-mermaid-err) {
-  padding: 4px 10px;
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-code-bar-bg);
-  font-size: 11px;
-  color: var(--color-text-muted);
-}
-/* 流式尾块（正在写的那一块）不显示工具栏。
-   原因：最后一块每帧都会整块重新渲染（见 renderLiveBlocks），点上去的状态下一帧
-   就被冲掉，表现成「点了没反应」；而且此时图还没画出来，两个按钮也没有可操作的对象。
-   前面已完成的块不受影响，照常可折叠。 */
-.ai-msg.streaming :deep(.ai-md-block:last-child .md-mermaid-bar) { display: none; }
-
-/* 输入 */
-.ai-input-area {
-  /* 输入行控件的唯一高度来源：输入框 / 图标按钮 / 发送按钮全部引用它，
-     避免各处硬编码不同数值出现高度参差 */
-  --ai-input-h: 56px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 12px 16px;
-  border-top: 1px solid var(--color-border);
-  flex-shrink: 0;
-  /* @ 补全弹层的定位锚点：它要贴着输入区上沿向上展开，
-     而不是跟着光标跑（textarea 里算光标坐标要镜像一个 div，得不偿失）。 */
-  position: relative;
-}
-.ai-input-row { display: flex; gap: 10px; align-items: flex-end; }
-.ai-input-tools { display: flex; align-items: flex-end; gap: 6px; flex-shrink: 0; }
-.ai-tool-btn {
-  display: flex; align-items: center; justify-content: center;
-  width: 40px; height: var(--ai-input-h); border: 1px solid var(--color-border);
-  background: var(--color-bg-tertiary); color: var(--color-text-muted);
-  border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
-  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
-}
-.ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
-/* 待发送图片预览缩略图 */
-/* 钩子批准条（C3）：warning 色 but 低饱和——它不是错误，是一份需要签字的授权 */
-.ai-hook-banner {
-  margin: 0 12px;
-  padding: 8px 12px;
-  border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
-  border-radius: 6px;
-  background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-primary));
-}
-.ai-hook-banner-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
-.ai-hook-banner-desc { margin-top: 2px; font-size: 11px; line-height: 1.5; color: var(--color-text-secondary); word-break: break-all; }
-.ai-hook-banner-actions { display: flex; gap: 8px; margin-top: 6px; }
-.ai-hook-ok {
-  padding: 2px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
-  border: 1px solid var(--color-accent); background: var(--color-accent); color: #fff;
-}
-.ai-hook-no {
-  padding: 2px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
-  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
-}
-.ai-hook-no:hover { color: var(--color-text-primary); }
-
-.ai-attach-preview { display: flex; flex-wrap: wrap; gap: 8px; }
-
-/* —— @ 引用（chip 与补全弹层）—— */
-.ai-mention-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.ai-mention-chip {
-  display: inline-flex; align-items: center; gap: 3px; max-width: 260px;
-  padding: 2px 4px 2px 6px; font-size: 11px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary); color: var(--color-text-secondary);
-}
-.ai-mention-chip-name {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono);
-}
-.ai-mention-chip-del {
-  border: none; background: transparent; color: var(--color-text-muted);
-  cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px;
-}
-.ai-mention-chip-del:hover { color: var(--color-danger); }
-.ai-mention-pop {
-  position: absolute; left: 16px; right: 16px; bottom: calc(100% - 6px);
-  max-height: 240px; overflow: auto; z-index: 30; padding: 4px;
-  background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-}
-.ai-mention-item {
-  display: flex; align-items: center; gap: 6px; padding: 4px 6px;
-  font-size: 12px; color: var(--color-text-secondary); cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-.ai-mention-item.is-active { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.ai-mention-name { flex-shrink: 0; }
-.ai-mention-path {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 11px;
-  color: var(--color-text-muted); text-align: right;
-}
-.ai-attach-thumb {
-  position: relative; width: 56px; height: 56px; border-radius: var(--radius-sm);
-  overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-}
-.ai-attach-img { width: 100%; height: 100%; object-fit: cover; display: block; }
-.ai-attach-del {
-  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px;
-  display: flex; align-items: center; justify-content: center; line-height: 1;
-  border: none; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff;
-  font-size: 12px; cursor: pointer; padding: 0;
-}
-.ai-attach-del:hover { background: var(--color-danger); }
-.ai-url-row { display: flex; gap: 6px; }
-.ai-url-input {
-  flex: 1; height: 32px; padding: 0 10px; border: 1px solid var(--color-border);
-  border-radius: var(--radius-md); background: var(--color-bg-tertiary);
-  color: var(--color-text-primary); font-size: 12px; font-family: inherit; outline: none;
-}
-.ai-url-input:focus { border-color: var(--color-accent); }
-.ai-url-ok {
-  padding: 0 14px; height: 32px; border: none; border-radius: var(--radius-md);
-  background: var(--color-accent); color: var(--color-accent-text);
-  font-size: 12px; cursor: pointer; font-family: inherit;
-}
-/* 消息内图片缩略图（用户气泡 / 历史消息） */
-.ai-msg-imgs { display: flex; flex-wrap: wrap; gap: 8px; }
-.ai-msg.user .ai-msg-imgs { justify-content: flex-end; }
-/* 缩略图尺寸：120px 在实际气泡里被 max-width 二次压缩后几乎看不清内容，
-   放大到 180px/55% 并提高 max-height，保证缩略阶段就能辨认图片主体 */
-.ai-msg-img { width: 180px; max-width: 55%; border-radius: var(--radius-sm); overflow: hidden; border: 1px solid var(--color-border); }
-.ai-msg-img-el { width: 100%; display: block; max-height: 220px; object-fit: cover; background: var(--color-bg-tertiary); }
-.ai-msg-img-el.is-clickable { cursor: zoom-in; }
-.ai-img-broken { height: 80px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--color-text-disabled); }
-
-/* 图片全屏查看器（Teleport 到 body，scoped 属性仍在元素上，样式生效） */
+/* 图片查看器（点消息里的缩略图） */
 .ai-img-viewer {
   position: fixed;
   inset: 0;
@@ -4588,6 +2499,7 @@ select.ai-hero-select {
   cursor: zoom-out;
   padding: var(--space-4);
 }
+
 .ai-img-viewer img {
   max-width: 90vw;
   max-height: 90vh;
@@ -4595,36 +2507,94 @@ select.ai-hero-select {
   box-shadow: var(--shadow-lg);
   cursor: default;
 }
-.ai-input {
-  flex: 1;
-  resize: none;
-  height: var(--ai-input-h);
-  padding: 10px 12px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-size: 13px;
-  font-family: inherit;
-  outline: none;
-  line-height: 1.5;
-}
-.ai-input:focus { border-color: var(--color-accent); }
-.ai-input:disabled { opacity: 0.6; cursor: not-allowed; }
-.ai-send {
-  align-self: flex-end;
-  padding: 0 20px;
-  height: var(--ai-input-h);
-  border: none;
-  border-radius: var(--radius-md);
-  background: var(--color-accent);
-  color: var(--color-accent-text);
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  font-family: inherit;
-  white-space: nowrap;
-}
-.ai-send:disabled { opacity: 0.5; cursor: not-allowed; }
+</style>
 
+<style>
+/* 跨子组件的共享类：必须非 scoped。
+   这些 class 同时出现在消息区（回答下方产物条）与 AiSidePanel（面板首页产物列表），
+   而 scoped 样式只作用于本组件自己的元素——放在 scoped 块里会有一半命不中。 */
+/* 回答产物：横向排的 chip，一行放不下自动换行。
+   宽度给满而不是 fit-content——fit-content 会先按 max-content 撑开，
+   只有一个短文件名时整块缩成一小截，多文件换行时的收缩点也不好判断 */
+.ai-artifacts { margin-top: 8px; width: 100%; max-width: 100%; }
+.ai-artifacts-sum {
+  display: flex; align-items: center; gap: 4px; width: fit-content;
+  padding: 3px 0; font-size: 11px; color: var(--color-text-secondary);
+  cursor: pointer; user-select: none; list-style: none;
+}
+.ai-artifacts-sum::-webkit-details-marker { display: none; }
+.ai-artifacts-chev { transition: transform 0.15s; }
+.ai-artifacts[open] > .ai-artifacts-sum .ai-artifacts-chev { transform: rotate(180deg); }
+.ai-artifacts-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0; }
+.ai-artifact {
+  display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 260px;
+  padding: 3px 9px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-primary); font-size: 11px; cursor: pointer;
+  text-align: left; font-family: inherit;
+}
+.ai-artifact:hover { border-color: var(--color-accent); }
+.ai-artifact-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-artifact-op { color: var(--color-text-secondary); flex-shrink: 0; }
+/* 右侧面板首页的产物合集：面板窄，仍是竖列、op 贴行右，chip 去掉描边融进列表 */
+.ai-side-home .ai-artifacts-list { flex-direction: column; align-items: stretch; gap: 2px; }
+.ai-side-home .ai-artifact {
+  width: 100%; max-width: none; gap: 8px; padding: 5px 8px;
+  font-size: 12px; border-color: transparent; background: transparent;
+}
+.ai-side-home .ai-artifact:hover { background: var(--color-bg-tertiary); }
+.ai-side-home .ai-artifact-op { margin-left: auto; padding-left: 12px; }
+
+/* 输入相关控件：落地页 hero（AiHero）与输入区（AiComposer）共用同一套
+   缩略图 / 链接输入 / 图标按钮；.ai-go-settings 还被消息区的「没配 key」空态用。
+   放非 scoped 块是因为两个子组件各有一份 scoped 作用域，写在哪一边另一半都命不中。 */
+.ai-go-settings {
+  padding: 7px 16px; border: none; border-radius: var(--radius-md);
+  background: var(--color-accent); color: var(--color-accent-text);
+  font-size: 13px; cursor: pointer; font-family: inherit;
+}
+
+.ai-tool-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 40px; height: var(--ai-input-h); border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted);
+  border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
+  transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+
+.ai-attach-preview { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.ai-attach-thumb {
+  position: relative; width: 56px; height: 56px; border-radius: var(--radius-sm);
+  overflow: hidden; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+}
+
+.ai-attach-img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+.ai-attach-del {
+  position: absolute; top: 1px; right: 1px; width: 16px; height: 16px;
+  display: flex; align-items: center; justify-content: center; line-height: 1;
+  border: none; border-radius: 50%; background: rgba(0,0,0,0.55); color: #fff;
+  font-size: 12px; cursor: pointer; padding: 0;
+}
+
+.ai-attach-del:hover { background: var(--color-danger); }
+
+.ai-url-row { display: flex; gap: 6px; }
+
+.ai-url-input {
+  flex: 1; height: 32px; padding: 0 10px; border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); background: var(--color-bg-tertiary);
+  color: var(--color-text-primary); font-size: 12px; font-family: inherit; outline: none;
+}
+
+.ai-url-input:focus { border-color: var(--color-accent); }
+
+.ai-url-ok {
+  padding: 0 14px; height: 32px; border: none; border-radius: var(--radius-md);
+  background: var(--color-accent); color: var(--color-accent-text);
+  font-size: 12px; cursor: pointer; font-family: inherit;
+}
 </style>
