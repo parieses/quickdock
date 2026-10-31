@@ -3,6 +3,7 @@ import { computed, inject, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import { useFloatMenu } from '../composables/useFloatMenu'
+import { useDragSort } from '../composables/useDragSort'
 import { pickExportScene } from '../utils/sceneIO'
 import { getErrorMessage } from '../utils/error'
 import type { Scene, ToastAPI } from '../types'
@@ -32,6 +33,20 @@ const openedTabs = computed(() => {
   return store.openedSceneIds
     .map(id => store.scenes.find(s => s.id === id))
     .filter((s): s is Scene => s !== undefined)
+})
+
+// ---- 标签页拖拽排序 ----
+// 复用 useDragSort 管道：落点按 openedSceneIds 顺序算，松手后写回并落库（reorderOpenedTabs）。
+const {
+  dragId: dragTabId,
+  dragOverIndex,
+  onDragStart: onDragStartTab,
+  onDragOver: onDragOverTab,
+  onDrop: onDropTab,
+  onDragEnd: onDragEndTab,
+} = useDragSort({
+  ids: () => store.openedSceneIds,
+  onReorder: (ids) => { store.reorderOpenedTabs(ids) },
 })
 
 // 右键菜单（floating-ui：跟随鼠标 + 防溢出翻转）
@@ -96,12 +111,17 @@ function onClickAway() {
   <div v-if="openedTabs.length > 0" class="tag-tabs">
     <div class="tabs-container">
       <button
-        v-for="tab in openedTabs"
+        v-for="(tab, i) in openedTabs"
         :key="tab.id"
-        :class="['tab', { active: tab.id === store.activeSceneId }]"
+        :class="['tab', { active: tab.id === store.activeSceneId, dragging: dragTabId === tab.id, 'drag-over': dragOverIndex === i }]"
         :title="tab.name"
+        draggable="true"
         @click="selectTab(tab.id)"
         @contextmenu="onContextMenu(tab.id, $event)"
+        @dragstart="onDragStartTab(tab.id, $event, i)"
+        @dragover="onDragOverTab(i, $event)"
+        @drop="onDropTab(tab.id, $event)"
+        @dragend="onDragEndTab"
       >
         <span class="tab-label">{{ tab.name }}</span>
         <span class="tab-close" @click="closeTab(tab.id, $event)">✕</span>
@@ -187,6 +207,14 @@ function onClickAway() {
   z-index: 1;
 }
 
+.tab.dragging {
+  opacity: 0.4;
+}
+
+.tab.drag-over {
+  box-shadow: inset 2px 0 0 var(--color-accent);
+}
+
 .tab.active::after {
   content: '';
   position: absolute;
@@ -199,6 +227,8 @@ function onClickAway() {
 }
 
 .tab-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   line-height: 1.3;

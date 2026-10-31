@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref, inject, computed, watch } from 'vue'
+import { ref, inject, computed, watch, reactive } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
-import { Plus, Pencil, Trash2, Play, Search, X } from '@lucide/vue'
+import { Plus, Pencil, Trash2, Play, Search, X, ChevronRight } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import CreateDialog from './CreateDialog.vue'
 import { getErrorMessage } from '../utils/error'
@@ -27,6 +27,39 @@ const visibleCollections = computed(() => {
   if (!q) return base
   return base.filter(c => matchesTextOrPinyin([c.name, c.type], q, 'c:' + c.id))
 })
+
+// ---- 按 groupName 分组折叠渲染 ----
+// 与 SceneRail 同构：同名归一组，空 groupName 视为「未分组」沉底；
+// 无任何分组时退化为单层列表（拖拽排序仍可用），一旦出现分组即禁用拖拽（跨组重排无意义）。
+const UNGROUPED = ''
+const groupedCollections = computed(() => {
+  const buckets = new Map<string, Collection[]>()
+  for (const c of visibleCollections.value) {
+    const g = (c.groupName ?? '').trim()
+    if (!buckets.has(g)) buckets.set(g, [])
+    buckets.get(g)!.push(c)
+  }
+  const out = [...buckets.entries()].map(([name, cols]) => ({
+    name,
+    label: name || t('mon_group_none'),
+    cols,
+  }))
+  out.sort((a, b) => {
+    if (a.name === UNGROUPED && b.name !== UNGROUPED) return 1
+    if (a.name !== UNGROUPED && b.name === UNGROUPED) return -1
+    return a.label.localeCompare(b.label, 'zh-Hans-CN')
+  })
+  return out
+})
+const hasGroupsCollection = computed(() => groupedCollections.value.some(g => g.name !== UNGROUPED))
+// 拖拽重排用的扁平顺序（含分组后的真实展示顺序）；分组成员 >1 时拖拽被禁用，此值仅在单层态生效。
+const flatVisibleIds = computed(() => groupedCollections.value.flatMap(g => g.cols.map(c => c.id)))
+
+const collapsedGroups = reactive(new Set<string>())
+function toggleGroupCol(name: string) {
+  if (collapsedGroups.has(name)) collapsedGroups.delete(name)
+  else collapsedGroups.add(name)
+}
 
 // 换场景时清空局部过滤：留着上个场景的关键词，新场景列表会「莫名其妙少一半」
 watch(() => store.activeSceneId, () => { localQuery.value = '' })
@@ -71,7 +104,7 @@ async function handleCreateCollection(values: Record<string, string>) {
 async function handleEditCollection(values: Record<string, string>) {
   if (!editingCollection.value) return
   try {
-    await store.updateCollectionAction(editingCollection.value.id, { name: values.name, type: values.type, openStrategy: values.openStrategy || 'single' })
+    await store.updateCollectionAction(editingCollection.value.id, { name: values.name, type: values.type, openStrategy: values.openStrategy || 'single', groupName: values.groupName })
     showEditDialog.value = false
     editingCollection.value = null
   } catch (e) {
@@ -100,11 +133,11 @@ function onDragOverCol(e: DragEvent) {
 }
 function onDropCol(e: DragEvent, targetId: string) {
   e.preventDefault()
-  if (store.hasSearch || filtering.value) {
+  if (store.hasSearch || filtering.value || hasGroupsCollection.value) {
     dragColId.value = null
     return
   }
-  const ids = store.filteredCollections.map(c => c.id)
+  const ids = flatVisibleIds.value
   const from = ids.indexOf(dragColId.value!)
   const to = ids.indexOf(targetId)
   if (from < 0 || to < 0 || from === to) {
@@ -151,44 +184,61 @@ function onDropCol(e: DragEvent, targetId: string) {
       </button>
     </div>
     <div class="qd-panel-body">
-      <ul v-if="visibleCollections.length">
-        <li
-          v-for="col in visibleCollections"
-          :key="col.id"
-          class="qd-row"
-          :class="{ active: col.id === store.activeCollectionId, dragging: dragColId === col.id }"
-          :draggable="!store.hasSearch && !filtering"
-          @click="handleCollectionClick(col.id)"
-          @dragstart="onDragStartCol($event, col.id)"
-          @dragend="onDragEndCol"
-          @dragover="onDragOverCol"
-          @drop="onDropCol($event, col.id)"
-        >
-          <span class="qd-row-icon">
-            <TypeIcon :type="col.type ?? '目录集合'" :size="17" />
-          </span>
-          <span class="qd-row-main">
-            <span class="qd-row-title">{{ col.name }}</span>
-            <span class="qd-row-sub">{{ col.type }}</span>
-          </span>
-          <span class="qd-row-actions" @click.stop>
-            <button class="qd-row-btn" @click="handleOpenByStrategy(col)" :title="openStrategyTitle(col)">
-              <Play :size="13" />
-            </button>
-            <button class="qd-row-btn" @click="editingCollection = col; showEditDialog = true" :title="t('edit')">
-              <Pencil :size="13" />
-            </button>
-            <button class="qd-row-btn danger" @click="handleDeleteCollection(col.id)" :title="t('delete')">
-              <Trash2 :size="13" />
-            </button>
-          </span>
-        </li>
-      </ul>
+      <template v-if="visibleCollections.length">
+        <template v-for="grp in groupedCollections" :key="grp.name || 'ungrouped'">
+          <div
+            v-if="hasGroupsCollection"
+            class="qd-group-header"
+            @click="toggleGroupCol(grp.name)"
+          >
+            <ChevronRight :size="13" class="qd-group-caret" :class="{ open: !collapsedGroups.has(grp.name) }" />
+            <span class="qd-group-title">{{ grp.label }}</span>
+            <span class="qd-group-count">{{ grp.cols.length }}</span>
+          </div>
+          <ul v-show="!hasGroupsCollection || !collapsedGroups.has(grp.name)" class="qd-group-list">
+            <li
+              v-for="(col, i) in grp.cols"
+              :key="col.id"
+              class="qd-row"
+              :class="{ active: col.id === store.activeCollectionId, dragging: dragColId === col.id }"
+              :draggable="!store.hasSearch && !filtering && !hasGroupsCollection"
+              @click="handleCollectionClick(col.id)"
+              @dragstart="onDragStartCol($event, col.id)"
+              @dragend="onDragEndCol"
+              @dragover="onDragOverCol"
+              @drop="onDropCol($event, col.id)"
+            >
+              <span class="qd-row-icon">
+                <TypeIcon :type="col.type ?? '目录集合'" :size="17" />
+              </span>
+              <span class="qd-row-main">
+                <span class="qd-row-title">{{ col.name }}</span>
+                <span class="qd-row-sub">{{ col.type }}</span>
+              </span>
+              <span class="qd-row-actions" @click.stop>
+                <button class="qd-row-btn" @click="handleOpenByStrategy(col)" :title="openStrategyTitle(col)">
+                  <Play :size="13" />
+                </button>
+                <button class="qd-row-btn" @click="editingCollection = col; showEditDialog = true" :title="t('edit')">
+                  <Pencil :size="13" />
+                </button>
+                <button class="qd-row-btn danger" @click="handleDeleteCollection(col.id)" :title="t('delete')">
+                  <Trash2 :size="13" />
+                </button>
+              </span>
+            </li>
+          </ul>
+        </template>
+      </template>
       <div v-else class="qd-empty">
         <template v-if="filtering || store.hasSearch">
           <p class="qd-empty-title">{{ t('noMatchCollections') }}</p>
           <p class="qd-empty-hint">{{ t('tryOtherKeywords') }}</p>
         </template>
+        <!-- 切换场景时 collectionsLoading 已置 true：此刻不渲染空状态，否则会闪一下
+             「暂无集合 + 添加集合」再变成真实列表（collectionsLoading 才是真正的加载标记，
+             原先错用 scenesLoading 导致闪烁）。 -->
+        <template v-else-if="store.collectionsLoading"></template>
         <template v-else-if="store.activeSceneId">
           <span class="qd-empty-icon"><Plus :size="18" /></span>
           <p class="qd-empty-title">{{ t('noCollections') }}</p>
@@ -198,7 +248,7 @@ function onDropCol(e: DragEvent, targetId: string) {
             <span>{{ t('addCollection') }}</span>
           </button>
         </template>
-        <template v-else-if="!store.scenesLoading">
+        <template v-else>
           <p class="qd-empty-title">{{ t('selectSceneFirst') }}</p>
         </template>
       </div>
@@ -207,7 +257,7 @@ function onDropCol(e: DragEvent, targetId: string) {
     <CreateDialog :visible="showCollectionDialog" :title="t('addCollection')" :fields="collectionFields"
       @confirm="handleCreateCollection" @cancel="showCollectionDialog = false" />
     <CreateDialog :visible="showEditDialog" :title="t('editCollection')" :fields="collectionFields"
-      :editValues="editingCollection ? { name: editingCollection.name, type: editingCollection.type ?? '目录集合', openStrategy: editingCollection.openStrategy ?? 'single' } : undefined"
+      :editValues="editingCollection ? { name: editingCollection.name, type: editingCollection.type ?? '目录集合', openStrategy: editingCollection.openStrategy ?? 'single', groupName: editingCollection.groupName ?? '' } : undefined"
       @confirm="handleEditCollection" @cancel="showEditDialog = false; editingCollection = null" />
   </section>
 </template>
@@ -224,4 +274,32 @@ function onDropCol(e: DragEvent, targetId: string) {
   background: var(--color-bg-primary);
   border-right: 1px solid var(--color-border);
 }
+
+/* 分组头（与 SceneRail 同款样式语义） */
+.qd-group-header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 10px 3px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--color-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+}
+.qd-group-header:hover { color: var(--color-text-secondary); }
+.qd-group-caret {
+  flex-shrink: 0;
+  transition: transform var(--transition-fast);
+}
+.qd-group-caret.open { transform: rotate(90deg); }
+.qd-group-title {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.qd-group-count { font-size: 10px; opacity: 0.65; }
+.qd-group-list { list-style: none; margin: 0; padding: 0; }
 </style>

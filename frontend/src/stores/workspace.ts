@@ -121,6 +121,27 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   // 防抖搜索：用户输入时延迟计算，避免频繁重算
   const debouncedSearch = debounce((query: string) => { void runSearch(query) }, 150)
 
+  // 场景匹配不止名字：描述、类型、下挂集合名、以及「命中的条目所在的场景」都算命中。
+  //
+  // 只按名字匹配时，「我记得存过这条，忘了搁在哪个场景」这条路是断的 —— 场景是唯一的
+  // 顶层分类，找不到它就等于找不到东西。hitItems 由调用方传：条目检索是异步的
+  // （内存 + 后端 FTS），场景过滤必须等它出结果才能用。
+  function matchScenes(q: string, hitItems: CollectionItem[]): Scene[] {
+    const sceneOfCollection = new Map(collections.value.map((c) => [c.id, c.sceneId]))
+    const scenesOfHitItems = new Set<string>()
+    for (const it of hitItems) {
+      const sid = sceneOfCollection.get(it.collectionId)
+      if (sid) scenesOfHitItems.add(sid)
+    }
+    return scenes.value.filter((s) => {
+      if (matchesTextOrPinyin([s.name, s.description, s.type], q, 's:' + s.id)) return true
+      if (scenesOfHitItems.has(s.id)) return true
+      return collections.value.some(
+        (c) => c.sceneId === s.id && matchesTextOrPinyin([c.name], q, 'c:' + c.id),
+      )
+    })
+  }
+
   async function runSearch(query: string) {
     const q = query.trim().toLowerCase()
     if (!q) {
@@ -130,9 +151,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
     searchLoading.value = true
     try {
-      const matchedScenes = scenes.value.filter((s) => matchesTextOrPinyin([s.name], q, 's:' + s.id))
-      const matchedCollections = collections.value.filter((c) => matchesTextOrPinyin([c.name], q, 'c:' + c.id))
       const matchedItems = await searchItemsEverywhere(q, activeWorkspaceId.value)
+      const matchedScenes = matchScenes(q, matchedItems)
+      const matchedCollections = collections.value.filter((c) => matchesTextOrPinyin([c.name], q, 'c:' + c.id))
       // 期间用户又敲了字：丢弃这次的结果，避免旧结果覆盖新查询
       if (searchQuery.value.trim().toLowerCase() !== q) return
       searchResults.value = { scenes: matchedScenes, collections: matchedCollections, items: matchedItems }
@@ -364,6 +385,12 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  // 重排已打开的场景标签页（SceneTags 拖拽排序落点）。只改顺序并落库，不影响当前激活场景。
+  function reorderOpenedTabs(orderedIDs: string[]) {
+    openedSceneIds.value = orderedIDs
+    saveOpenedTabs()
+  }
+
   // ---- 辅助函数 ----
 
   // 在数组中按 id 查找并合并更新（自动设置 updatedAt）
@@ -515,8 +542,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
-  async function addScene(name: string, type: string) {
-    const s = unwrap(await CreateScene(activeWorkspaceId.value, name, type))
+  async function addScene(name: string, type: string, group = '') {
+    const s = unwrap(await CreateScene(activeWorkspaceId.value, name, type, group))
     const normalized = normalizeRows([s])[0] as Scene
     scenes.value.push(normalized)
     // 刚建出来的是唯一场景 → 直接选中，省掉"建完还要再点一下"
@@ -524,8 +551,8 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     return normalized
   }
 
-  async function addCollection(name: string, type: string, openStrategy = 'single') {
-    const c = unwrap(await CreateCollection(activeWorkspaceId.value, activeSceneId.value, name, type, openStrategy))
+  async function addCollection(name: string, type: string, openStrategy = 'single', group = '') {
+    const c = unwrap(await CreateCollection(activeWorkspaceId.value, activeSceneId.value, name, type, openStrategy, group))
     const normalized = normalizeRows([c])[0] as Collection
     collections.value.push(normalized)
     await autoSelectSingleCollection()
@@ -660,7 +687,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     initialize, fetchTools, fetchWorkspaces, fetchScenes, fetchCollections, fetchItems,
     selectWorkspace, selectScene, selectCollection, closeSceneTab,
     closeTabsToLeft, closeTabsToRight, closeOtherTabs,
-    reorderScenes, reorderCollections, reorderItems,
+    reorderScenes, reorderCollections, reorderItems, reorderOpenedTabs,
     addWorkspace, addScene, addCollection, addItem,
     removeWorkspace,
     updateWorkspaceAction,

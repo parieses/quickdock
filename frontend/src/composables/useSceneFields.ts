@@ -31,6 +31,12 @@ export function useSceneFields() {
           value: v,
         })),
       },
+      {
+        key: 'groupName',
+        label: t('mon_group'),
+        type: 'text',
+        placeholder: t('mon_group_ph'),
+      },
     ]
   })
 }

@@ -1,15 +1,16 @@
 <script setup lang="ts">
-import { ref, computed, inject } from 'vue'
+import { computed, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GripVertical, Eye, EyeOff, RotateCcw, ListOrdered } from '@lucide/vue'
 import { useNavPrefs } from '../composables/useNavPrefs'
+import { useDragSort } from '../composables/useDragSort'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
 const props = defineProps<{ visible: boolean }>()
 
 // 侧栏与这里共用同一份偏好数据源，改完立即在侧栏生效（无需重启）
-const { orderedNav, hiddenNav, hideNav, showNav, showAllNav, moveNavTo, resetNav } = useNavPrefs()
+const { orderedNav, hiddenNav, hideNav, showNav, showAllNav, reorderNav, resetNav } = useNavPrefs()
 
 const toast = inject<ToastAPI>('toast')
 
@@ -30,36 +31,12 @@ function toggle(entry: { id: string; labelKey: string }) {
   }
 }
 
-// ---- 拖拽排序 ----
-// 原生 draggable + drop，不引第三方库：这个列表短（11 项）且只在设置里出现。
-// 注意 dragover 必须 preventDefault，否则浏览器不派发 drop。
-const dragId = ref('')
-const dragOverIndex = ref(-1)
-
-function onDragStart(id: string, index: number, e: DragEvent) {
-  dragId.value = id
-  dragOverIndex.value = index
-  e.dataTransfer?.setData('text/plain', id)
-  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
-}
-
-function onDragOver(index: number, e: DragEvent) {
-  e.preventDefault()
-  dragOverIndex.value = index
-}
-
-function onDrop(index: number, e: DragEvent) {
-  e.preventDefault()
-  const id = dragId.value || e.dataTransfer?.getData('text/plain') || ''
-  dragId.value = ''
-  dragOverIndex.value = -1
-  if (id) moveNavTo(id, index)
-}
-
-function onDragEnd() {
-  dragId.value = ''
-  dragOverIndex.value = -1
-}
+// ---- 拖拽排序（管道在 useDragSort，与场景栏共用一份）----
+// 顺序按全量有序列表（含隐藏项）：隐藏项保留自己的位置，恢复时原地回归。
+const { dragId, dragOverIndex, onDragStart, onDragOver, onDrop, onDragEnd } = useDragSort({
+  ids: () => orderedNav.value.map((e) => e.id),
+  onReorder: (ids) => { reorderNav(ids) },
+})
 
 function resetAll() {
   const changed = resetNav()
@@ -88,9 +65,9 @@ function restoreAll() {
         :key="entry.id"
         draggable="true"
         :class="['snv-row', { hidden: isHidden(entry.id), dragging: dragId === entry.id, 'drop-before': dragOverIndex === i && dragId && dragId !== entry.id }]"
-        @dragstart="onDragStart(entry.id, i, $event)"
+        @dragstart="onDragStart(entry.id, $event, i)"
         @dragover="onDragOver(i, $event)"
-        @drop="onDrop(i, $event)"
+        @drop="onDrop(entry.id, $event)"
         @dragend="onDragEnd"
       >
         <GripVertical :size="14" class="snv-grip" :title="t('navDragHint')" />

@@ -16,6 +16,7 @@ export interface Scene {
   name: string
   type?: string
   description?: string
+  groupName?: string
   icon?: string
   color?: string
   favorite?: number
@@ -33,6 +34,7 @@ export interface Collection {
   name: string
   type?: string
   description?: string
+  groupName?: string
   defaultToolId?: string
   tool?: string
   icon?: string
@@ -114,6 +116,10 @@ export interface Snapshot {
   size: number
   created_at: string
 }
+
+// AI 待发送附件（发送前预览，尚未落库/组包）。
+// file 类存 dataUrl（base64）随请求发给模型；url 类存公网链接。
+export interface PendingImage { kind: 'file' | 'url'; url?: string; dataUrl?: string; name: string }
 
 // 笔记节点
 export interface Note {

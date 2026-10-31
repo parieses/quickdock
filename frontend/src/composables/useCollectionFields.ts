@@ -41,6 +41,12 @@ export function useCollectionFields() {
           { label: strategies['all'] || '全部打开', value: 'all' },
         ],
       },
+      {
+        key: 'groupName',
+        label: t('mon_group'),
+        type: 'text',
+        placeholder: t('mon_group_ph'),
+      },
     ]
   })
 }
