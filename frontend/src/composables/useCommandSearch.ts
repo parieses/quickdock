@@ -1,101 +1,41 @@
-﻿import { ref, computed, watch, onScopeDispose, type Ref, type ComputedRef } from 'vue'
+﻿import { ref, computed, watch, onScopeDispose } from 'vue'
+import type { Ref, ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
-import type { CollectionItem } from '../types'
+import type { CollectionItem, EnvRuntimeInfo, EnvServiceStatus, FileSearchResult } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
 import { commandTitle, pluginName } from '../utils/localize'
 import { getPluginLastResult } from '../utils/pluginLastResult'
-import { evaluate, format, convertExpression } from '../utils/calc'
-import { Puzzle, Play, Power, Gauge, File, ListChecks } from '@lucide/vue'
-import type { EnvRuntimeInfo, EnvServiceStatus, FileSearchResult } from '../types'
+import { Puzzle, File } from '@lucide/vue'
 import { EnvEverythingSearch } from '../../bindings/quickdock/services/env/environmentservice'
-import { SearchAll } from '../../bindings/quickdock/services/appservice'
-import { SearchNotesTree } from '../../bindings/quickdock/services/note/noteservice'
-import { SearchTodos as SearchTodosApi } from '../../bindings/quickdock/services/todo/todoservice'
+import { SearchPalette } from '../../bindings/quickdock/services/appservice'
 import { unwrap } from '../utils/api'
+// 导航项唯一真相源：新增页面只改 registry，侧边栏 / 内容区 / 面板「快速导航」三处同时生效
+import { navEntries } from '../pages/registry'
+import { MATCHERS, matchClipboard, type MatchCtx } from './commandSearch/matchers'
+import { dropEmptyGroups, injectBestMatch, sortGroups } from './commandSearch/ranking'
+import type {
+  CmdNote, CmdTodo, InstalledApp, LcIndex, NavSearchItem, RecentEntry, ResultGroup, SearchResult, SystemCmd,
+} from './commandSearch/types'
 
-// 运行时的中文分类别名，用于 Ctrl+K 中文检索（如「数据库」「缓存」「消息队列」）。
-const ENV_GROUP_ALIASES: Record<string, string[]> = {
-  language: ['语言', '运行时', 'runtime', '开发'],
-  webserver: ['网页', 'web', 'web服务器', '服务器', '反向代理', '网关'],
-  cache: ['缓存', 'cache', '内存'],
-  database: ['数据库', 'database', 'db'],
-  tool: ['工具', 'tool', '实用'],
-  messagequeue: ['消息', '队列', 'mq', '消息队列'],
-}
-// 各运行时的中文/语义别名，补充英文 id/name 之外的检索入口。
-const ENV_RUNTIME_ALIASES: Record<string, string[]> = {
-  redis: ['缓存', 'redis', '内存数据库'],
-  memcached: ['缓存', 'memcache'],
-  nginx: ['网页', '反向代理', 'nginx', 'web服务器'],
-  caddy: ['网页', '反向代理', 'caddy'],
-  traefik: ['网页', '反向代理', '网关', 'traefik'],
-  apache: ['网页', 'apache', 'web服务器'],
-  postgresql: ['数据库', 'postgres', 'pg'],
-  mysql: ['数据库', 'mysql'],
-  mariadb: ['数据库', 'mariadb'],
-  mongodb: ['数据库', '文档数据库', 'mongo'],
-  rabbitmq: ['消息', '队列', 'mq', '消息队列', 'rabbit'],
-  minio: ['对象存储', '存储', 'minio', 's3'],
-  mailpit: ['邮件', 'mail', '邮件服务'],
-  frpc: ['内网穿透', '穿透', 'frp'],
-  ftp: ['ftp', '文件服务'],
+// 类型转发：调用方一直从本文件 import 这些类型，拆到 commandSearch/types 后
+// 在这里继续 re-export，避免改动所有引用点。
+export type {
+  CmdNote, CmdTodo, InstalledApp, NavSearchItem, RecentEntry, ResultGroup, ResultType, SearchResult, SystemCmd,
+} from './commandSearch/types'
+
+// SearchPalette 的合并载荷。后端 `Services.PaletteSearchResult` 字段名固定
+// （items/notes/todos），但 bindings 只给到 ApiResult —— notes/todos 的元素
+// 结构按 CmdNote/CmdTodo 断言（后端用的就是同一批行）。
+interface PaletteSearchPayload {
+  items?: CollectionItem[]
+  notes?: CmdNote[]
+  todos?: CmdTodo[]
 }
 
-// ---- Types ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'todo' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file'
-
-export interface SearchResult {
-  type: ResultType
-  label: string
-  desc?: string
-  icon?: any
-  iconBase64?: string
-  item?: CollectionItem
-  cmd?: any
-  calcResult?: string
-  note?: CmdNote
-  todo?: CmdTodo
-  inlineQuery?: string
-  frecencyScore?: number
-  appPath?: string
-  appCategory?: string
-  pluginId?: string
-  pluginCommandId?: string
-  pluginHasFrontend?: boolean
-  pluginNotRunning?: boolean
-  inlineInput?: string
-  pluginResult?: string
-  acceptsInput?: boolean
-  score?: number
-  matchType?: string
-  url?: string
-  clipAction?: string
-  // 环境管理运行时服务（Ctrl+K 直控启停/管理后台）
-  envRuntimeId?: string
-  envVersion?: string
-  envAction?: 'start' | 'stop' | 'mgmt'
-  // Everything 文件搜索结果（效率工具）
-  filePath?: string
-  fileDir?: string
-  fileName?: string
-}
-
-interface CmdNote { id: string; name: string; content: string; isFolder: boolean; parentId: string; keyword: string }
-// 待办命中项：命令面板只做「检索 + 跳转」，展示用字段够用即可，
-// 完整字段由待办页自行按 id 加载（避免每次输入都把备注/重复配置全量拉回来）。
-interface CmdTodo { id: string; title: string; status: string; priority: string; dueDate: string; tags: string }
-interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
-interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
-
-interface ResultGroup {
-  type: ResultType
-  label: string
-  results: SearchResult[]
-  totalCount?: number // 「最近使用」折叠时的全量条数（徽标展示用）
-}
-
-export interface RecentEntry {
-  key: string; type: string; label: string; description: string; input?: string; count: number; lastUsed: number
+// 空载荷：后端对空查询返回三个空切片，调用前也要有一份兜底，
+// 别让 null 一路传到模板的 `.length` 上。
+function emptyPalettePayload(): PaletteSearchPayload {
+  return { items: [], notes: [], todos: [] }
 }
 
 // ---- Dependencies type ----
@@ -122,25 +62,6 @@ export interface SearchDeps {
   envMgmt: Ref<Record<string, boolean>> // RabbitMQ 各版本管理后台启用状态（version → enabled）
 }
 
-// 待办结果的副标题：一行里挑最有用的那条信息——先期限（含逾期），再标签。
-// 期限比标签更容易决定「现在该处理哪条」，所以排在前面；两者都没有就留空，
-// 让标题独占一行（硬凑一个占位词反而把标题挤窄）。
-function todoSubtitle(td: CmdTodo, t: (k: string, n?: any) => string): string {
-  if (td.dueDate) {
-    // 必须用本地日期而不是 toISOString()：后者是 UTC，UTC+8 的早上八点前
-    // 会把"今天到期"判成"已逾期"。
-    const d = new Date()
-    const today = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-    const prefix = td.dueDate < today ? t('todoOverdue') : t('todoDue')
-    return `${prefix} ${td.dueDate}`
-  }
-  try {
-    const tags = JSON.parse(td.tags || '[]')
-    if (Array.isArray(tags) && tags.length) return tags.map((x: unknown) => '#' + String(x)).join(' ')
-  } catch { /* tags 是手写 JSON，坏数据不该让整条结果消失 */ }
-  return ''
-}
-
 export function useCommandSearch(deps: SearchDeps) {
   const { locale } = useI18n()
   const { items, installedApps, notes, systemCommands, query, selectedIndex,
@@ -149,6 +70,34 @@ export function useCommandSearch(deps: SearchDeps) {
           pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons, envRuntimes, envStatuses, envMgmt } = deps
 
   const recentCache = ref<RecentEntry[]>([])
+
+  // 预计算索引：小写化与应用别名展开都与 query 无关，只随底层数据变化。
+  //
+  // 这是本轮唯一的真实性能改动。原先每个 query 变化（防抖后每 80ms 一次）都要对
+  // 全部 items / notes / apps / systemCommands 重跑 toLowerCase()，items 上限 5000 条，
+  // 纯属白烧；apps 那条还要再跑一遍 getAppAliases()（30 条正则逐条匹配）。
+  // 现在这些只在数据变动时算一次。
+  //
+  // 顺带修掉一个隐性浪费：matchApps 里别名分支原来调 pinyinMatch(a, qLC) 没给
+  // cacheKey，等于每轮都把别名重新转拼音 —— 见 matchers.ts 的注释。
+  const lcIndex = computed<LcIndex>(() => ({
+    items: items.value.map(it => ({
+      item: it,
+      nameLC: (it.name || '').toLowerCase(),
+      valueLC: (it.value || '').toLowerCase(),
+    })),
+    notes: notes.value.map(n => ({
+      note: n,
+      nameLC: (n.name || n.keyword || '').toLowerCase(),
+      contentLC: (n.content || '').toLowerCase(),
+    })),
+    apps: installedApps.value.map(a => ({
+      app: a,
+      nameLC: a.name.toLowerCase(),
+      aliases: getAppAliases(a.name).map(raw => ({ raw, lc: raw.toLowerCase() })),
+    })),
+    sys: systemCommands.value.map(c => ({ cmd: c, labelLC: c.label.toLowerCase() })),
+  }))
 
   // 搜索防抖：逐键触发全量扫描（含 pinyinMatch/Levenshtein）在数据量大时卡顿，
   // 80ms 内停顿才真正重算，键盘快速打字时结果滞后几乎不可感知
@@ -180,7 +129,7 @@ export function useCommandSearch(deps: SearchDeps) {
           if (reqId !== fileReqId) return // 已被更新的输入取代
           if (res && res.length) {
             fileResults.value = res.map((f) => ({
-              type: 'file' as ResultType,
+              type: 'file' as const,
               label: f.name ?? '',
               desc: f.dir ?? '',
               icon: File,
@@ -205,14 +154,15 @@ export function useCommandSearch(deps: SearchDeps) {
   })
 
   // 后端全文检索兜底（q 长度 ≥2 才启用，140ms 防抖 + 请求代次守卫）：
-  // - SearchAll（items FTS5）：兜住 ListAllItems 的 5000 上限之外的条目——
-  //   超限条目在本地全量池里根本不存在，前端扫得再快也找不到它们。
-  //   这也让长期零引用的 SearchAll 上岗（feature-suggestions 有记）。
-  // - SearchNotesTree（notes LIKE 全文）：内容/标签匹配交给 SQLite，
-  //   前端只保留名称 + 拼音的快速通道。笔记量大时逐篇 contains 全文
-  //   是命令面板可感知的卡顿源，而标签匹配前端本来就做不到。
-  // - SearchTodos（todos LIKE）：待办没有本地池，这一路是唯一来源。
-  // 三条链路失败都静默：本地匹配仍是权威路径，后端只是补充。
+  // 一次 SearchPalette 拿三类结果，省掉面板每敲一个字打 3 次 IPC、各查一遍库：
+  // - items（FTS5）：兜住 ListAllItems 的 5000 上限之外的条目——超限条目在
+  //   本地全量池里根本不存在，前端扫得再快也找不到它们。
+  // - notes（LIKE 全文）：内容/标签匹配交给 SQLite，前端只保留名称 + 拼音的
+  //   快速通道。笔记量大时逐篇 contains 全文是面板可感知的卡顿源，而标签
+  //   匹配前端本来就做不到。
+  // - todos（LIKE）：待办没有本地池，这一路是唯一来源。
+  // 后端三段各自独立（单段失败留空），整条链路失败也静默：
+  // 本地匹配仍是权威路径，后端只是补充。
   const backendItems = ref<CollectionItem[]>([])
   const backendNotes = ref<CmdNote[]>([])
   // 待办没有本地常驻池：items/notes 在 App.vue 有一份列表喂进来，待办没有，
@@ -221,11 +171,40 @@ export function useCommandSearch(deps: SearchDeps) {
   let backendReqId = 0
   let backendTimer: ReturnType<typeof setTimeout> | null = null
 
-  // P6：后端全文检索结果缓存（按 query），TTL 30s。
-  // 命令面板连续输入同一词（删字重打）不再重复打 3 次 IPC；
+  // 后端全文检索结果缓存（按 query）：TTL 30s + 容量上限，本质是个小型 LRU。
+  // 命令面板连续输入同一词（删字重打）不再重复打一次 IPC；
   // 后端只是本地匹配的补充，TTL 自然失效不影响权威路径。
-  const backendSearchCache = new Map<string, { ts: number; items: CollectionItem[]; notes: CmdNote[]; todos: CmdTodo[] }>()
+  //
+  // 必须带容量上限：原先只判断 TTL、从不删除，Map 会随「这次会话里敲过的每个前缀」一路长下去
+  // —— TTL 只在读的时候比较，过期条目永远留在内存里。40 条足够覆盖来回删字的场景，
+  // 超了按最久未用淘汰。
+  interface BackendHit { ts: number; items: CollectionItem[]; notes: CmdNote[]; todos: CmdTodo[] }
+  const backendSearchCache = new Map<string, BackendHit>()
   const BACKEND_SEARCH_TTL = 30_000
+  const BACKEND_SEARCH_MAX = 40
+
+  function cacheGetBackend(q: string): BackendHit | null {
+    const hit = backendSearchCache.get(q)
+    if (!hit) return null
+    if (Date.now() - hit.ts >= BACKEND_SEARCH_TTL) {
+      backendSearchCache.delete(q)
+      return null
+    }
+    // 命中后挪到队尾：Map 保持插入序，淘汰时才是真的「最久未用」
+    backendSearchCache.delete(q)
+    backendSearchCache.set(q, hit)
+    return hit
+  }
+
+  function cacheSetBackend(q: string, hit: BackendHit) {
+    backendSearchCache.delete(q)
+    backendSearchCache.set(q, hit)
+    while (backendSearchCache.size > BACKEND_SEARCH_MAX) {
+      const oldest = backendSearchCache.keys().next().value
+      if (oldest === undefined) break
+      backendSearchCache.delete(oldest)
+    }
+  }
 
   watch(query, (v) => {
     if (backendTimer) clearTimeout(backendTimer)
@@ -238,8 +217,8 @@ export function useCommandSearch(deps: SearchDeps) {
       return
     }
     // 命中缓存直接填，省一次 IPC 往返
-    const cached = backendSearchCache.get(q)
-    if (cached && Date.now() - cached.ts < BACKEND_SEARCH_TTL) {
+    const cached = cacheGetBackend(q)
+    if (cached) {
       backendItems.value = cached.items
       backendNotes.value = cached.notes
       backendTodos.value = cached.todos
@@ -249,15 +228,18 @@ export function useCommandSearch(deps: SearchDeps) {
       if (reqId !== backendReqId) return // 已被更新的输入取代
       void (async () => {
         try {
-          const [its, nts, tds] = await Promise.all([SearchAll(q), SearchNotesTree(q), SearchTodosApi(q)])
+          // 一次 IPC 拿三类结果（后端 SearchPalette 内部各自独立执行，
+          // 单段 SQL 失败只让那一类为空，不拖垮整块）。
+          const res = await SearchPalette(q)
           if (reqId !== backendReqId) return
-          const items = unwrap<CollectionItem[]>(its) || []
-          const notes = unwrap<CmdNote[]>(nts) || []
-          const todos = unwrap<CmdTodo[]>(tds) || []
-          backendSearchCache.set(q, { ts: Date.now(), items, notes, todos })
-          backendItems.value = items
-          backendNotes.value = notes
-          backendTodos.value = todos
+          const payload = unwrap<PaletteSearchPayload>(res) || emptyPalettePayload()
+          const items_ = payload.items || []
+          const notes_ = (payload.notes || []) as CmdNote[]
+          const todos_ = (payload.todos || []) as CmdTodo[]
+          cacheSetBackend(q, { ts: Date.now(), items: items_, notes: notes_, todos: todos_ })
+          backendItems.value = items_
+          backendNotes.value = notes_
+          backendTodos.value = todos_
         } catch {
           if (reqId !== backendReqId) return
           backendItems.value = []
@@ -268,399 +250,64 @@ export function useCommandSearch(deps: SearchDeps) {
     }, 140)
   }, { immediate: true })
 
+  // 结果分组的编排层：准备上下文 → 按顺序跑 matcher → 插剪贴板动作 → 最佳匹配置顶 → 排序。
+  //
+  // 12 个类别的匹配逻辑都在 commandSearch/matchers.ts 里，这里只负责顺序与收尾。
+  // 顺序有语义（matcher 共享 seen 去重集），改 MATCHERS 的数组顺序等于改归属规则。
+  // 「快速导航」候选：registry 里带 component 的内容页。ssh / dsh 只有 activate
+  // （唤起独立窗口），会被这一条自动滤掉 —— 面板里选它们等于什么都没发生。
+  // 图标与文案 key 是静态的，不需要 computed；本地化在 matcher 里做（跟着语言变）。
+  const navSearchItems: NavSearchItem[] = navEntries
+    .filter((e) => !!e.component)
+    .map((e) => ({ id: e.id, labelKey: e.labelKey, icon: e.icon }))
+
   const groupedResults = computed<ResultGroup[]>(() => {
     void frecencyTick.value
     const q = debouncedQuery.value.trim()
     if (!q) return []
 
-    const qLC = q.toLowerCase()
+    const ctx: MatchCtx = {
+      q,
+      qLC: q.toLowerCase(),
+      seen: new Set<string>(),
+      t,
+      // locale 取值同时建立响应式依赖：切语言后结果文案跟着重建
+      locale: locale.value,
+      lc: lcIndex.value,
+      backendItems: backendItems.value,
+      backendNotes: backendNotes.value,
+      backendTodos: backendTodos.value,
+      fileResults: fileResults.value,
+      clipboardUrlSource: clipboardUrlSource.value,
+      navItems: navSearchItems,
+      pluginCmdIndex: pluginCmdIndex.value,
+      envRuntimes: envRuntimes.value,
+      envStatuses: envStatuses.value,
+      envMgmt: envMgmt.value,
+      pluginIcons: pluginIcons.value,
+      frecencyScore,
+      pinyinMatch,
+      itemIcon,
+      appIcon,
+      calcPluginScore,
+    }
+
     const groups: ResultGroup[] = []
-    const seen = new Set<string>()
-
-    // 0. 单位换算
-    {
-      const conv = convertExpression(q)
-      if (conv) {
-        groups.push({
-          type: 'calculator',
-          label: t('cmdGroupCalc'),
-          results: [{ type: 'calculator' as ResultType, label: conv.text, desc: t('calcHint'), calcResult: conv.text }]
-        })
-      }
+    for (const match of MATCHERS) {
+      const out = match(ctx)
+      if (!out) continue
+      if (out.groups.length) groups.push(...out.groups)
+      // `=1+1` 算出来了就到此为止：不再往下搜条目/应用/插件（原实现的 return 语义）
+      if (out.stop) return groups
     }
 
-    // 1. 计算器
-    if (q.startsWith('=')) {
-      try {
-        const expr = q.slice(1)
-        const result = evaluate(expr)
-        if (result !== undefined && result !== null) {
-          groups.push({
-            type: 'calculator',
-            label: t('cmdGroupCalc'),
-            results: [{
-              type: 'calculator' as ResultType,
-              label: `${q} = ${format(result, { precision: 14 })}`,
-              desc: t('calcHint'),
-              calcResult: String(result),
-            }]
-          })
-        }
-        return groups
-      } catch {
-        // fall through
-      }
-    }
+    // 剪贴板动作要插在最前面，且不受「最佳匹配」去重影响（它被 injectBestMatch 显式排除）
+    const clip = matchClipboard(ctx)
+    if (clip.length) groups.unshift(...clip)
 
-    // 2. URL 检测
-    let isUrl = false
-    let urlStr = q
-    if (/^https?:\/\//i.test(q)) {
-      isUrl = true
-    } else if (/^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(\/|$)/i.test(q) && !/^[\d+\-*/().%^, ]+$/.test(q)) {
-      isUrl = true
-      urlStr = 'https://' + q
-    }
-    if (isUrl) {
-      groups.push({
-        type: 'url',
-        label: '🌐 ' + t('cmdGroupWeb'),
-        results: [{ type: 'url' as ResultType, label: t('cmdOpenUrl'), desc: urlStr, url: urlStr }]
-      })
-    }
-
-    // 3. 项目 + Quicklink
-    const itemResults: SearchResult[] = []
-    for (const item of items.value) {
-      if (seen.has(item.id)) continue
-      const nameLC = item.name.toLowerCase()
-      const valueLC = (item.value || '').toLowerCase()
-      if (!(nameLC.includes(qLC) || valueLC.includes(qLC) || pinyinMatch(item.name, qLC, 'i:' + item.id))) continue
-      seen.add(item.id)
-      const isQuicklink = item.value && item.value.includes('{query}')
-      const itemScore = nameLC === qLC ? 100 : nameLC.startsWith(qLC) ? 75 : nameLC.includes(qLC) ? 60 : valueLC.includes(qLC) ? 55 : 0
-      itemResults.push({
-        type: isQuicklink ? 'quicklink' : 'item',
-        label: item.name,
-        desc: item.value || '',
-        icon: itemIcon(item),
-        iconBase64: item.icon || undefined,
-        item,
-        frecencyScore: frecencyScore('item:' + item.id),
-        score: itemScore,
-      })
-    }
-    // 3a. 后端 FTS 兜底：本地池上限之外的条目（见 backendItems 注释）
-    for (const item of backendItems.value) {
-      if (seen.has(item.id)) continue
-      seen.add(item.id)
-      const isQuicklink = item.value && item.value.includes('{query}')
-      itemResults.push({
-        type: isQuicklink ? 'quicklink' : 'item',
-        label: item.name,
-        desc: item.value || '',
-        icon: itemIcon(item),
-        iconBase64: item.icon || undefined,
-        item,
-        frecencyScore: frecencyScore('item:' + item.id),
-        score: 55,
-      })
-    }
-    // 应用类型条目优先；同权重时按相关度与频次排序
-    itemResults.sort((a, b) => {
-      const wa = (a.item?.type === '应用' ? 1000 : 0) + (a.score || 0) + Math.min(30, a.frecencyScore || 0)
-      const wb = (b.item?.type === '应用' ? 1000 : 0) + (b.score || 0) + Math.min(30, b.frecencyScore || 0)
-      return wb - wa
-    })
-    if (itemResults.length > 0) {
-      groups.push({ type: 'item', label: t('cmdGroupItems'), results: itemResults })
-    }
-
-    // 3b. Quicklink 内联
-    if (qLC.length > 1 && !/^\d+$/.test(qLC)) {
-      const qlResults: SearchResult[] = []
-      for (const item of items.value) {
-        if (!item.value || !item.value.includes('{query}')) continue
-        if (seen.has(item.id)) continue
-        const resolved = item.value.replace(/\{query\}/g, qLC)
-        qlResults.push({
-          type: 'quicklink-inline',
-          label: item.name,
-          desc: resolved,
-          icon: itemIcon(item),
-          iconBase64: item.icon || undefined,
-          item,
-          inlineQuery: qLC,
-        } as SearchResult)
-      }
-      if (qlResults.length > 0) {
-        groups.push({ type: 'quicklink-inline', label: t('cmdGroupQuicklink'), results: qlResults.slice(0, 3) })
-      }
-    }
-
-    // 4. 笔记
-    const noteResults: SearchResult[] = []
-    for (const n of notes.value) {
-      const nameLC = (n.name || n.keyword || '').toLowerCase()
-      const cid = (n.content || '').toLowerCase()
-      if (nameLC.includes(qLC) || cid.includes(qLC) || pinyinMatch(n.name || n.keyword || '', qLC, 'n:' + n.id)) {
-        if (!seen.has('note-' + n.id)) {
-          seen.add('note-' + n.id)
-          const score = nameLC === qLC ? 100 : nameLC.startsWith(qLC) ? 75 : nameLC.includes(qLC) ? 60 : cid.includes(qLC) ? 55 : 0
-          noteResults.push({
-            type: 'note',
-            label: n.name || n.keyword,
-            desc: (n.content || '').slice(0, 80),
-            note: n,
-            frecencyScore: frecencyScore('note:' + n.id),
-            score,
-          })
-        }
-      }
-    }
-    // 4a. 后端全文兜底：内容/标签命中而本地扫描漏掉的笔记（见 backendNotes 注释）
-    for (const n of backendNotes.value) {
-      if (seen.has('note-' + n.id)) continue
-      seen.add('note-' + n.id)
-      const nameLC = (n.name || n.keyword || '').toLowerCase()
-      noteResults.push({
-        type: 'note',
-        label: n.name || n.keyword,
-        desc: (n.content || '').slice(0, 80),
-        note: n,
-        frecencyScore: frecencyScore('note:' + n.id),
-        score: nameLC.includes(qLC) ? 60 : 55,
-      })
-    }
-    noteResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
-    if (noteResults.length > 0) {
-      groups.push({ type: 'note', label: t('cmdGroupNotes'), results: noteResults })
-    }
-
-    // 4b. 待办（唯一来源就是后端检索：本地没有待办池）
-    const todoResults: SearchResult[] = []
-    for (const td of backendTodos.value) {
-      if (seen.has('todo-' + td.id)) continue
-      seen.add('todo-' + td.id)
-      const titleLC = (td.title || '').toLowerCase()
-      const score = titleLC === qLC ? 100 : titleLC.startsWith(qLC) ? 75 : titleLC.includes(qLC) ? 60 : 50
-      todoResults.push({
-        type: 'todo',
-        label: td.title,
-        icon: ListChecks,
-        desc: todoSubtitle(td, t),
-        todo: td,
-        score,
-      })
-    }
-    todoResults.sort((a, b) => (b.score || 0) - (a.score || 0))
-    if (todoResults.length > 0) {
-      groups.push({ type: 'todo', label: t('cmdGroupTodos'), results: todoResults })
-    }
-
-    // 5. 已安装应用
-    const appResults: SearchResult[] = []
-    for (const app of installedApps.value) {
-      const nameLC = app.name.toLowerCase()
-      const aliases = getAppAliases(app.name)
-      const aliasMatch = aliases.some(a => a.toLowerCase().includes(qLC) || pinyinMatch(a, qLC))
-      if (nameLC.includes(qLC) || pinyinMatch(app.name, qLC, 'a:' + app.name) || aliasMatch) {
-        const appScore = nameLC === qLC ? 100 : nameLC.startsWith(qLC) ? 75 : aliasMatch ? 60 : nameLC.includes(qLC) ? 60 : 0
-        appResults.push({
-          type: 'app',
-          label: app.name,
-          desc: app.category !== '其他' && app.category !== '系统工具' ? app.category : app.path,
-          icon: appIcon(app.name),
-          iconBase64: app.iconBase64,
-          appPath: app.path,
-          appCategory: app.category,
-          frecencyScore: frecencyScore('app:' + app.name),
-          score: appScore,
-        })
-      }
-    }
-    appResults.sort((a, b) => (b.frecencyScore || 0) - (a.frecencyScore || 0))
-    if (appResults.length > 0) {
-      groups.push({ type: 'app', label: t('cmdGroupApps'), results: appResults.slice(0, 8) })
-    }
-
-    // 6. 系统命令
-    const sysResults: SearchResult[] = []
-    for (const cmd of systemCommands.value) {
-      const labelLC = cmd.label.toLowerCase()
-      if (cmd.keywords.some(k => k.includes(qLC)) || labelLC.includes(qLC) || pinyinMatch(cmd.label, qLC, 'sys:' + cmd.id)) {
-        const sysScore = labelLC === qLC ? 100 : labelLC.startsWith(qLC) ? 75 : cmd.keywords.some(k => k === qLC) ? 90 : cmd.keywords.some(k => k.startsWith(qLC)) ? 65 : labelLC.includes(qLC) ? 60 : 0
-        sysResults.push({ type: 'system', label: cmd.label, desc: cmd.desc, icon: cmd.icon, cmd, score: sysScore })
-      }
-    }
-    if (sysResults.length > 0) {
-      groups.push({ type: 'system', label: t('cmdGroupSystem'), results: sysResults })
-    }
-
-    // 7. 插件命令
-    const pluginResults: SearchResult[] = []
-    for (const idx of pluginCmdIndex.value) {
-      const { score, matchType, inlineInput } = calcPluginScore(idx, q, qLC)
-      if (score <= 0) continue
-      pluginResults.push({
-        type: 'plugin',
-        label: inlineInput ? `${commandTitle(idx.cmd, locale)}: ${inlineInput}` : commandTitle(idx.cmd, locale),
-        desc: pluginName(idx.plugin, locale) + (idx.cmd.hotkey ? `  ${idx.cmd.hotkey}` : '') + (idx.notRunning ? `  · ${t('pluginNotRunning')}` : ''),
-        icon: Puzzle,
-        iconBase64: pluginIcons.value[idx.plugin.id],
-        pluginId: idx.plugin.id,
-        pluginCommandId: idx.cmd.id,
-        pluginHasFrontend: idx.plugin.hasFrontend,
-        pluginNotRunning: idx.notRunning,
-        acceptsInput: idx.cmd.acceptsInput,
-        inlineInput,
-        score,
-        matchType,
-        frecencyScore: frecencyScore('plugin:' + idx.plugin.id + '.' + idx.cmd.id),
-      })
-    }
-    pluginResults.sort((a, b) => {
-      const sa = (a.score || 0) * 0.7 + Math.min(30, a.frecencyScore || 0) * 0.3
-      const sb = (b.score || 0) * 0.7 + Math.min(30, b.frecencyScore || 0) * 0.3
-      return sb - sa
-    })
-    if (pluginResults.length > 0) {
-      groups.push({ type: 'plugin', label: t('cmdGroupPlugins'), results: pluginResults })
-    }
-
-    // 7.5 环境管理运行时服务（启动 / 停止 / 启用管理后台 15672）
-    // 仅在 query 命中时展示：避免面板一开就铺满服务项；空 query 时 groupedResults 已提前 return。
-    {
-      const envKeyOf = (id: string, v: string) => id + ':' + v
-      const statuses = envStatuses.value
-      const envResults: SearchResult[] = []
-      const startVerb = /启动|start|运行|开服|拉起/.test(qLC)
-      const stopVerb = /停止|stop|停服|关停|关掉/.test(qLC)
-      const mgmtVerb = /15672|管理后台|management|mgmt|管理面板/.test(qLC)
-      for (const r of envRuntimes.value) {
-        if (!r.hasService || r.installed.length === 0) continue
-        // 运行中的版本（按已装版本逐一比对状态）
-        const running = r.installed.find(ins => (ins.scope === 'linked' && r.id !== 'php') ? false : statuses[envKeyOf(r.id, ins.version)]?.running)
-        const runningVersion = running?.version
-        const startVersion = r.installed.find(i => i.active)?.version || r.installed[0].version
-        const nameLC = r.name.toLowerCase()
-        const idLC = r.id.toLowerCase()
-        const aliasHit = (ENV_RUNTIME_ALIASES[r.id] || []).concat(ENV_GROUP_ALIASES[r.group] || []).some(a => {
-          const aLC = a.toLowerCase()
-          return aLC.includes(qLC) || pinyinMatch(a, qLC)
-        })
-        const nameHit = nameLC.includes(qLC) || idLC.includes(qLC) || pinyinMatch(r.name, qLC) || aliasHit
-        if (!nameHit && !startVerb && !stopVerb && !mgmtVerb) continue
-
-        const baseScore = nameLC === qLC ? 100 : idLC === qLC ? 95
-          : nameLC.startsWith(qLC) ? 80 : idLC.startsWith(qLC) ? 75 : nameHit ? 60 : 50
-
-        if (!runningVersion && (nameHit || startVerb)) {
-          envResults.push({
-            type: 'env',
-            label: t('envStart') + ' ' + r.name,
-            desc: startVersion + ' · ' + t('envNotRunning'),
-            icon: Play,
-            envRuntimeId: r.id,
-            envVersion: startVersion,
-            envAction: 'start',
-            score: baseScore,
-          })
-        }
-        if (runningVersion && (nameHit || stopVerb)) {
-          envResults.push({
-            type: 'env',
-            label: t('envStop') + ' ' + r.name,
-            desc: runningVersion + ' · ' + t('envRunning'),
-            icon: Power,
-            envRuntimeId: r.id,
-            envVersion: runningVersion,
-            envAction: 'stop',
-            score: baseScore,
-          })
-        }
-        // RabbitMQ 专属：运行中对节点启用/关闭管理后台插件（rabbitmq_management，端口 15672）
-        if (r.id === 'rabbitmq' && runningVersion && (nameHit || mgmtVerb || (idLC === 'rabbitmq' && startVerb))) {
-          const mgmtOn = envMgmt.value[runningVersion] === true
-          envResults.push({
-            type: 'env',
-            label: mgmtOn ? t('rabbitmqDisableMgmt') : t('envEnableMgmt'),
-            desc: runningVersion + ' · http://127.0.0.1:15672/',
-            icon: Gauge,
-            envRuntimeId: r.id,
-            envVersion: runningVersion,
-            envAction: 'mgmt',
-            score: baseScore + 5,
-          })
-        }
-      }
-      if (envResults.length > 0) {
-        groups.push({ type: 'env', label: t('cmdGroupEnv'), results: envResults })
-      }
-    }
-
-    // 7.6 Everything 文件搜索（效率工具）：merge 进独立 file 分组，排在资源结果之后（env 之后、plugin 之前）。
-    // fileResults 由上方 130ms 防抖异步填充，命中后本 computed 随 ref 变化自动重算。
-    {
-      const hits = fileResults.value.filter((r) => {
-        const k = 'file:' + (r.filePath || r.label)
-        if (seen.has(k)) return false
-        seen.add(k)
-        return true
-      })
-      if (hits.length > 0) {
-        groups.push({ type: 'file', label: t('cmdGroupFiles'), results: hits.slice(0, 20) })
-      }
-    }
-
-    // 剪贴板智能路由
-    if (clipboardUrlSource.value && q === clipboardUrlSource.value) {
-      const urlStr = clipboardUrlSource.value
-      const suggest: SearchResult[] = [
-        { type: 'clipboard-action', clipAction: 'open-url', label: t('cmdOpenUrl'), desc: urlStr, url: urlStr, score: 100 },
-        { type: 'clipboard-action', clipAction: 'save-url', label: t('cmdSaveAsItem'), desc: urlStr, url: urlStr, score: 99 },
-        { type: 'clipboard-action', clipAction: 'encode-url', label: t('cmdEncodeUrl'), desc: t('cmdEncodeUrlDesc'), url: urlStr, score: 98 },
-      ]
-      groups.unshift({ type: 'clipboard-action', label: t('cmdGroupClipboard'), results: suggest })
-    }
-
-    // 最佳匹配注入
-    const bestMatch: SearchResult[] = []
-    for (const g of groups) {
-      // 计算器/剪贴板为特殊交互项、插件恒排最后，均不进入最佳匹配置顶（插件不得出现在应用之前）
-      if (g.type === 'calculator' || g.type === 'clipboard-action' || g.type === 'plugin') continue
-      for (const r of g.results) {
-        if ((r.score || 0) >= 70) bestMatch.push(r)
-      }
-    }
-    if (bestMatch.length >= 1) {
-      bestMatch.sort((a, b) => (b.score || 0) - (a.score || 0))
-      const show = bestMatch.slice(0, 6)
-      function dedupKey(r: SearchResult): string {
-        if (r.pluginId && r.pluginCommandId) return 'plugin:' + r.pluginId + '.' + r.pluginCommandId
-        if (r.item?.id) return 'item:' + r.item.id
-        if (r.note?.id) return 'note:' + r.note?.id
-        if (r.todo?.id) return 'todo:' + r.todo?.id
-        if (r.cmd?.id) return 'cmd:' + r.cmd?.id
-        if (r.appPath) return 'app:' + r.appPath
-        return r.label
-      }
-      const dedupIds = new Set(show.map(dedupKey))
-      // 去重作用于所有分组：app/note/system/url 命中 ≥70 时也会进入最佳匹配，
-      // 若只在 plugin/item 分组里过滤，它们仍会同时出现在两组中造成重复。
-      for (const g of groups) {
-        g.results = g.results.filter(r => !dedupIds.has(dedupKey(r)))
-      }
-      groups.unshift({ type: 'best', label: t('cmdBestMatch'), results: show })
-    }
-
-    // 应用分组优先于其它内容分组展示（应用排在前面）
-    const GROUP_PRIORITY: Record<string, number> = {
-      best: 0, 'clipboard-action': 1, calculator: 2, url: 3,
-      app: 4, item: 5, 'quicklink-inline': 6, todo: 6.5, note: 7, system: 8, env: 8.5, file: 8.7, plugin: 9,
-    }
-    groups.sort((a, b) => (GROUP_PRIORITY[a.type] ?? 99) - (GROUP_PRIORITY[b.type] ?? 99))
-
+    injectBestMatch(groups, t)
+    dropEmptyGroups(groups)
+    sortGroups(groups)
     return groups
   })
 
@@ -832,4 +479,3 @@ export function useCommandSearch(deps: SearchDeps) {
   return { groupedResults, allResults, recentResults, displayGroups, displayFlat, previewResult, recentCache,
            RECENT_VISIBLE, recentExpanded, toggleRecentExpanded }
 }
-

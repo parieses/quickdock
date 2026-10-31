@@ -2,17 +2,75 @@ package services
 
 import (
 	"strings"
+
+	"quickdock/internal/db"
+	"quickdock/internal/logger"
 )
 
 // ===== 命令面板 =====
 
 // SearchAll 跨全部工作空间搜索项目（使用 FTS5）
+//
+// 命令面板已改走 SearchPalette（一次 IPC 拿三类结果）；本方法保留是因为
+// 工作空间页（stores/workspace.ts）与 MCP 的 item_search 仍在单独用它。
 func (a *AppService) SearchAll(query string) *ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
 	items, err := a.DB.SearchAllItems(query)
 	return wrap(items, err)
+}
+
+// PaletteSearchResult 命令面板后端检索的合并载荷。
+//
+// 三个字段一律给空切片而不是 nil：前端直接把结果塞进 ref，序列化成 null
+// 会让模板在 `.length` 上炸；这里兜住比让每个调用点各写一次 `|| []` 省心。
+type PaletteSearchResult struct {
+	Items []db.CollectionItem `json:"items"`
+	Notes []db.Note           `json:"notes"`
+	Todos []db.Todo           `json:"todos"`
+}
+
+// SearchPalette 命令面板一次性检索项目 / 笔记 / 待办。
+//
+// 合并三路只为省掉「面板每敲一个字发 3 次 IPC、各查一遍库」——三条查询仍
+// 各自独立执行：命令面板把后端检索当成本地匹配的补充，缺一段只是少几条
+// 补充结果，远好过一段 SQL 出错把另外两段一起判废。失败的那段留空并记警告，
+// 便于从日志判断「某类怎么总搜不到」。
+//
+// 空查询返回三个空切片：笔记页的 SearchNotesTree("") 语义是「列全量」，
+// 那是它自己的用法，面板不该因为清空输入就拉一整棵树回来。
+func (a *AppService) SearchPalette(query string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	out := PaletteSearchResult{
+		Items: []db.CollectionItem{},
+		Notes: []db.Note{},
+		Todos: []db.Todo{},
+	}
+	q := strings.TrimSpace(query)
+	if q == "" {
+		return Ok(out)
+	}
+	if v, err := a.DB.SearchAllItems(q); err != nil {
+		logger.W("[palette-search] 项目检索失败: %v", err)
+	} else if v != nil {
+		out.Items = v
+	}
+	if v, err := a.DB.SearchNotes(q); err != nil {
+		logger.W("[palette-search] 笔记检索失败: %v", err)
+	} else if v != nil {
+		out.Notes = v
+	}
+	// 20 条与 SearchTodos 原有上限保持一致：面板每个分组只展示前几条，
+	// 拉多了纯属浪费序列化。
+	if v, err := a.DB.SearchTodos(q, 20); err != nil {
+		logger.W("[palette-search] 待办检索失败: %v", err)
+	} else if v != nil {
+		out.Todos = v
+	}
+	return Ok(out)
 }
 
 // GetMostUsedItems 返回最常使用的项目（命令面板「最近使用」）
@@ -98,5 +156,37 @@ func (a *AppService) OpenTodoFromPalette(todoId string) *ApiResult {
 		return FailMsg("应用未就绪")
 	}
 	a.handOffToMainWindow("todo:open-request", todoId)
+	return Ok(nil)
+}
+
+// navigablePages 命令面板「快速导航」允许跳转的页面 id。
+//
+// 必须白名单：这个方法会被前端任意字符串调用，直接广播等于让面板可以
+// 把主窗口切到不存在的页面（内容区会空白）。与前端 pages/registry 的
+// 「带 component 的内容页」一一对应 —— ssh / dsh 是独立窗口入口，
+// 不在其中（面板不负责唤起它们，它们有自己的入口）。
+var navigablePages = map[string]bool{
+	"workspace":    true,
+	"notes":        true,
+	"todo":         true,
+	"schedule":     true,
+	"monitor":      true,
+	"clipboard":    true,
+	"environments": true,
+	"ai":           true,
+	"plugins":      true,
+}
+
+// NavigateMainWindow 命令面板选中「快速导航」项：交给主窗口切到对应页面。
+// 与笔记/待办同一条链路（handOffToMainWindow），只是负载换成页面 id。
+func (a *AppService) NavigateMainWindow(page string) *ApiResult {
+	page = strings.TrimSpace(page)
+	if !navigablePages[page] {
+		return FailMsg("未知的导航页面: " + page)
+	}
+	if a.app == nil {
+		return FailMsg("应用未就绪")
+	}
+	a.handOffToMainWindow("nav:goto", page)
 	return Ok(nil)
 }

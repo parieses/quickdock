@@ -6,15 +6,12 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Copy, FolderSearch, Play, Save, Gauge, Monitor, RefreshCw, Keyboard, ScrollText, ListChecks
+  Monitor, RefreshCw, Keyboard, ScrollText
 } from '@lucide/vue'
-import { ListAllItems, HidePaletteWindow, GetLastCopiedText, ScanInstalledApps, ResetInstalledAppsCache, LaunchInstalledApp, SaveUrlAsItem, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette, OpenTodoFromPalette } from '../../bindings/quickdock/services/appservice'
-import { SetTodoStatus } from '../../bindings/quickdock/services/todo/todoservice'
-import { ExecuteSystemCommand, RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
+import { HidePaletteWindow, GetLastCopiedText, CaptureSelection, CaptureFullScreen } from '../../bindings/quickdock/services/appservice'
+import { ExecuteSystemCommand } from '../../bindings/quickdock/services/system/systemservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
-import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
-import { GetAllUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
-import { DeleteItem, GetPathQuickInfo } from '../../bindings/quickdock/services/item/itemservice'
+import { GetPathQuickInfo } from '../../bindings/quickdock/services/item/itemservice'
 import {
   EnvList,
   EnvStatus,
@@ -25,35 +22,37 @@ import {
   EnvRabbitMQIsMgmtEnabled,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import {
-  ListPlugins,
-  ExecutePluginCommand,
   SetPendingPluginInit,
   ShowPluginWindow,
-  GetPluginIcon,
-  EnablePlugin,
   GetPluginNewFlags,
   MarkPluginSeen,
 } from '../../bindings/quickdock/services/plugin/pluginservice'
-import { Events, Browser } from '@wailsio/runtime'
+import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr, logWarn, logDebug } from '../utils/logger'
 import type { CollectionItem, PluginInfo, EnvRuntimeInfo, EnvServiceStatus } from '../types'
 import type { ToastAPI } from '../types'
-import { evaluate, format, convertExpression } from '../utils/calc'
-import { commandTitle } from '../utils/localize'
-import { getPluginLastResult, savePluginLastResult, pluginCmdKey } from '../utils/pluginLastResult'
+import { getPluginLastResult } from '../utils/pluginLastResult'
 import { pinyinMatch, pinyinOf, clearPinyinCache } from '../utils/pinyin'
 import { useFrecency } from '../composables/useFrecency'
 import { usePluginIndex } from '../composables/usePluginIndex'
-import { useThemeName } from '../composables/useThemeName'
 import { useCommandSearch } from '../composables/useCommandSearch'
+import { useEnvServiceControl } from '../composables/useEnvServiceControl'
+import { usePaletteExecutor } from '../composables/usePaletteExecutor'
+import { usePaletteActions } from '../composables/usePaletteActions'
+import { usePaletteData } from '../composables/usePaletteData'
 import PluginFrame from './PluginFrame.vue'
 import CheatSheetModal from './CheatSheetModal.vue'
-import type { RecentEntry } from '../composables/useCommandSearch'
+// 结果类型以 useCommandSearch（commandSearch/types）为唯一定义：本文件曾自带一份
+// 逐字重复的 SearchResult / ResultType，新增类型时两边不同步，于是每次加一种结果
+// 类型都在编译期炸一次（本次加 nav 就这样炸的）。
+import type {
+  CmdNote, CmdTodo, InstalledApp, RecentEntry, ResultType, SearchResult, SystemCmd,
+} from '../composables/useCommandSearch'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')
 
 // ---- 初始化 composables ----
@@ -200,21 +199,6 @@ const APP_NAME_ALIASES: [RegExp, string[]][] = [
   [/python/i, ['python运行时']],
 ]
 
-// ---- 类型 ----
-type ResultType = 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator' | 'note' | 'todo' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file'
-interface InstalledApp { name: string; path: string; category: string; iconBase64?: string }
-interface SystemCmd { id: string; label: string; desc: string; keywords: string[]; icon: any; action: () => Promise<void> }
-interface CmdNote { id: string; name: string; content: string; isFolder: boolean; parentId: string; keyword: string }
-interface CmdTodo { id: string; title: string; status: string; priority: string; dueDate: string; tags: string }
-interface SearchResult {
-  type: ResultType; label: string; desc?: string; icon?: any; iconBase64?: string
-  item?: CollectionItem; cmd?: SystemCmd; calcResult?: string; note?: CmdNote; todo?: CmdTodo; inlineQuery?: string
-  frecencyScore?: number; appPath?: string; appCategory?: string; pluginId?: string; pluginCommandId?: string
-  pluginHasFrontend?: boolean; pluginNotRunning?: boolean; inlineInput?: string; pluginResult?: string; score?: number; matchType?: string; url?: string; clipAction?: string; acceptsInput?: boolean
-  envRuntimeId?: string; envVersion?: string; envAction?: 'start' | 'stop' | 'mgmt'
-  filePath?: string; fileDir?: string; fileName?: string
-}
-
 // ---- 状态 ----
 const query = ref('')
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -344,86 +328,11 @@ function getAppAliases(name: string): string[] {
   return []
 }
 
+// ---- 环境运行时服务（状态 / 拉取 / 轮询 / 启停执行都在 useEnvServiceControl 里）----
+// 搜索侧只消费它导出的三个 ref（见下方 useCommandSearch 的 deps）
+const { envRuntimes, envStatuses, envMgmt, refreshEnv, executeEnvAction } = useEnvServiceControl()
+
 // ---- 搜索结果（useCommandSearch）----
-// ---- 环境管理运行时服务（Ctrl+K 直控启停 / 管理后台）----
-// 注意：ref 声明须早于下方 useCommandSearch 调用（其依赖这两个 ref）。
-const envRuntimes = ref<EnvRuntimeInfo[]>([])
-const envStatuses = ref<Record<string, EnvServiceStatus>>({})
-const envMgmt = ref<Record<string, boolean>>({}) // RabbitMQ 版本 → 管理后台是否启用
-let envPollGen = 0
-const envKeyOf = (id: string, v: string) => id + ':' + v
-
-async function loadEnvList() {
-  try {
-    const list = unwrap<EnvRuntimeInfo[]>(await EnvList())
-    envRuntimes.value = list || []
-  } catch (e) { console.error('[CmdPalette] EnvList:', e) }
-}
-
-// 轮询各服务运行时的安装版本状态，写入 envStatuses（key = runtimeId:version）；
-// 对 RabbitMQ 各版本额外查询管理后台启用状态，写入 envMgmt。
-async function pollEnvStatus() {
-  const gen = ++envPollGen
-  const next: Record<string, EnvServiceStatus> = {}
-  const nextMgmt: Record<string, boolean> = {}
-  for (const r of envRuntimes.value) {
-    if (!r.hasService || r.installed.length === 0) continue
-    for (const ins of r.installed) {
-      if (ins.scope === 'linked' && r.id !== 'php') continue
-      try {
-        const st = unwrap<EnvServiceStatus>(await EnvStatus(r.id, ins.version))
-        if (st) next[envKeyOf(r.id, ins.version)] = st
-      } catch { /* 单次失败忽略 */ }
-      if (r.id === 'rabbitmq') {
-        try {
-          nextMgmt[ins.version] = !!unwrap<boolean>(await EnvRabbitMQIsMgmtEnabled(ins.version))
-        } catch { /* 单次失败忽略 */ }
-      }
-    }
-  }
-  if (gen === envPollGen) {
-    envStatuses.value = next
-    envMgmt.value = nextMgmt
-  }
-}
-
-// 拉取列表 + 轮询状态（面板唤起时调用）
-async function refreshEnv() {
-  await loadEnvList()
-  await pollEnvStatus().catch(() => {})
-}
-
-async function executeEnvAction(r: SearchResult) {
-  if (!r.envRuntimeId || !r.envAction) return
-  try {
-    if (r.envAction === 'start') {
-      unwrap(await EnvStart(r.envRuntimeId, r.envVersion || ''))
-      toast?.success?.(t('envStarted') + ' ' + r.label)
-    } else if (r.envAction === 'stop') {
-      unwrap(await EnvStop(r.envRuntimeId))
-      toast?.success?.(t('envStopped') + ' ' + r.label)
-    } else if (r.envAction === 'mgmt') {
-      const ver = r.envVersion || ''
-      // 依据当前启用状态切换：已启用→关闭，未启用→启用
-      if (envMgmt.value[ver] === true) {
-        const out = unwrap(await EnvRabbitMQDisableMgmt(ver))
-        toast?.success?.(t('rabbitmqDisableMgmtDone'))
-        if (out) logDebug('[RabbitMQ mgmt]', out)
-      } else {
-        const out = unwrap(await EnvRabbitMQEnableMgmt(ver))
-        toast?.success?.(t('envMgmtEnabled'))
-        if (out) logDebug('[RabbitMQ mgmt]', out)
-      }
-    }
-    // 执行后重轮询状态，让结果即时翻转为相反动作（启动→停止），不关闭面板便于连续控制
-    await pollEnvStatus().catch(() => {})
-    envPollTimer = setTimeout(() => pollEnvStatus().catch(() => {}), ENV_POLL_RETRY_MS)
-  } catch (e: any) {
-    const msg = r.envAction === 'mgmt' ? (t('envMgmtFailed') + ': ' + getErrorMessage(e)) : getErrorMessage(e)
-    toast?.error?.(msg)
-  }
-}
-
 const {
   groupedResults, allResults, recentResults, displayGroups, displayFlat,
   previewResult, recentCache, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
@@ -439,10 +348,8 @@ const {
 interface PathQuickInfo { exists: boolean; isDir?: boolean; path?: string; sizeText?: string; modified?: string }
 const quickInfo = ref<PathQuickInfo | null>(null)
 let quickInfoTimer: ReturnType<typeof setTimeout> | null = null
-let envPollTimer: ReturnType<typeof setTimeout> | null = null
-// 轮询/防抖间隔集中成常量，避免散落字面量漂移
+// 防抖间隔集中成常量，避免散落字面量漂移
 const QUICKINFO_DEBOUNCE_MS = 200
-const ENV_POLL_RETRY_MS = 1500
 
 // 拉取文件/目录元数据（本地 stat，防抖 200ms 防切项风暴）
 async function loadQuickInfo(item: CollectionItem) {
@@ -646,202 +553,52 @@ function onGlobalKey(e: KeyboardEvent) {
   onKeydown(e)
 }
 
-// ---- 执行 ----
-function isOpenable(r: SearchResult): boolean {
-  return r.type === 'item' || r.type === 'url' || r.type === 'app' || r.type === 'quicklink' || r.type === 'quicklink-inline' || r.type === 'file'
+// ---- 加载数据（代次守卫 / 节流 / 图标 TTL 都在 usePaletteData 里）----
+// 面板只提供数据落点（items / apps / notes / 插件索引与图标 / 最近使用）与构建函数。
+const { loadPluginIndex, rebuildAppIndex, loadPaletteData, refreshRecentCache } = usePaletteData({
+  items,
+  installedApps,
+  notes,
+  installedPlugins,
+  pluginCmdIndex,
+  pluginIcons,
+  recentCache,
+  loading,
+  t,
+  toast,
+  buildPluginIndex,
+  loadFrecency,
+})
+
+// ---- 执行（路由在 usePaletteExecutor，这里只提供它需要的面板状态）----
+// 内联 quicklink 输入态与内联插件页都由面板持有，执行器通过这两个回调进入对应状态：
+// 它们既是 UI 状态（模板要绑），又有执行语义（执行器要设），放在持有方最省事。
+async function beginQuicklink(item: CollectionItem) {
+  inlineQuicklink.value = item
+  inlineQuery.value = ''
+  await nextTick()
+  inlineInputRef.value?.focus()
 }
 
-// Everything 命中的文件：回车不打开文件本身，而是定位到所在文件夹
-// （Windows = explorer /select，文件夹弹出且文件处于选中态）——搜文件的目的
-// 通常是接着操作它的目录，直接打开文件反而常跳出重型应用。
-// 文件结果不写使用历史：Everything 检索是即时查询，记进去只会把「最近使用」冲淡。
-async function openFileItem(r: SearchResult): Promise<boolean> {
-  if (!r.filePath) return false
-  try {
-    unwrap(await RevealInExplorer(r.filePath))
-    return true
-  } catch (e) {
-    console.error('[CmdPalette] RevealInExplorer:', e)
-    toast?.error?.(getErrorMessage(e))
-    return false
-  }
+function openInlinePlugin(pluginId: string, commandId: string, text: string) {
+  inlinePluginName.value = ''
+  inlinePluginInit.value = { text, command: commandId }
+  inlinePluginId.value = pluginId
 }
 
-async function openResultOnly(r: SearchResult): Promise<boolean> {
-  if (r.type === 'quicklink' && r.item) {
-    inlineQuicklink.value = r.item; inlineQuery.value = ''; await nextTick(); inlineInputRef.value?.focus(); return true
-  }
-  if (r.type === 'quicklink-inline' && r.item) {
-    const item = { ...r.item }; let value = item.value || ''
-    if (r.inlineQuery) value = value.replace(/\{query\}/g, r.inlineQuery)
-    item.value = value; recordUsage('item:' + item.id, 'item', item.name, item.value || '')
-    try { await OpenItem(item as any); return true } catch (e) { console.error('[CmdPalette] OpenItem:', e); toast?.error?.(getErrorMessage(e)); return false }
-  }
-  if (r.type === 'item' && r.item) {
-    recordUsage('item:' + r.item.id, 'item', r.label, r.desc)
-    try { await OpenItem(r.item as any); return true } catch (e) { console.error('[CmdPalette] OpenItem:', e); toast?.error?.(getErrorMessage(e)); return false }
-  }
-  if (r.type === 'url' && r.url) {
-    try { await Browser.OpenURL(r.url); return true } catch (e) { console.error('[CmdPalette] OpenURL:', e); toast?.error?.(getErrorMessage(e)); return false }
-  }
-  if (r.type === 'app' && r.appPath) {
-    recordUsage('app:' + r.label, 'app', r.label, r.desc)
-    try { await LaunchInstalledApp(r.appPath); return true } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e); toast?.error?.(getErrorMessage(e)); return false }
-  }
-  if (r.type === 'file' && r.filePath) {
-    const ok = await openFileItem(r)
-    return ok
-  }
-  return false
-}
-
-async function executeBatch() {
-  const indices = [...selectedSet.value].sort((a, b) => a - b); let n = 0
-  for (const idx of indices) {
-    const r = displayFlat.value[idx]
-    if (r && isOpenable(r)) { const ok = await openResultOnly(r); if (ok) n++ }
-  }
-  selectedSet.value = new Set(); lastAnchor.value = -1
-  if (n > 0) toast?.success?.(t('openedCount', { n }))
-}
-
-async function executeSelected() {
-  if (selectedSet.value.size > 0) { await executeBatch(); return }
-  const result = displayFlat.value[selectedIndex.value]
-  if (!result) return
-  if (result.type === 'system' && result.cmd) {
-    recordUsage('system:' + result.cmd.id, 'system', result.label, result.desc); await result.cmd.action()
-  } else if (result.type === 'quicklink-inline' && result.item) {
-    const item = { ...result.item }; let value = item.value || ''
-    if (result.inlineQuery) value = value.replace(/\{query\}/g, result.inlineQuery)
-    item.value = value; recordUsage('item:' + item.id, 'item', item.name, item.value || '')
-    try { await OpenItem(item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }; closePalette()
-  } else if (result.type === 'quicklink' && result.item) {
-    inlineQuicklink.value = result.item; inlineQuery.value = ''; await nextTick(); inlineInputRef.value?.focus()
-  } else if (result.type === 'item' && result.item) {
-    recordUsage('item:' + result.item.id, 'item', result.label, result.desc)
-    try { await OpenItem(result.item as any) } catch (e) { console.error('[CmdPalette] OpenItem:', e) }; closePalette()
-  } else if (result.type === 'url' && result.url) {
-    try { await Browser.OpenURL(result.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }; closePalette()
-  } else if (result.type === 'calculator' && result.calcResult) {
-    await writeClipboard(result.calcResult); closePalette()
-  } else if (result.type === 'note' && result.note) {
-    recordUsage('note:' + result.note.id, 'note', result.label, result.desc)
-    // 面板是独立浮窗，与主窗口 JS 状态不互通；交后端隐藏本窗 + 唤起主窗口
-    // 并广播笔记 id（App.vue 监听后写入 pendingOpenNoteId 并切到笔记页）。
-    // 面板内直接 navigateTo 会把完整主界面渲染进小浮窗，导致样式错乱。
-    try { await OpenNoteFromPalette(result.note.id) } catch (e) { console.error('[CmdPalette] OpenNoteFromPalette:', e) }
-    closePalette()
-  } else if (result.type === 'todo' && result.todo) {
-    recordUsage('todo:' + result.todo.id, 'todo', result.label, result.desc)
-    // 与笔记同一条链路：后端隐藏面板 + 唤起主窗口 + 广播待办 id（见 OpenNoteFromPalette 注释）
-    try { await OpenTodoFromPalette(result.todo.id) } catch (e) { console.error('[CmdPalette] OpenTodoFromPalette:', e) }
-    closePalette()
-  } else if (result.type === 'app' && result.appPath) {
-    recordUsage('app:' + result.label, 'app', result.label, result.desc)
-    try { await LaunchInstalledApp(result.appPath) } catch (e) { console.error('[CmdPalette] LaunchInstalledApp:', e) }; closePalette()
-  } else if (result.type === 'file' && result.filePath) {
-    const ok = await openFileItem(result)
-    if (ok) closePalette()
-  } else if (result.type === 'env') {
-    await executeEnvAction(result)
-  } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
-    markPluginSeen(result.pluginId)
-    // 插件未运行时先自动拉起（EnablePlugin = Reload 加载 + DB 置启用）：
-    // 面板不静默丢弃这类命令，而是「执行前自动启动」；失败则明示原因停在面板
-    if (result.pluginNotRunning) {
-      try {
-        await EnablePlugin(result.pluginId)
-      } catch (e) {
-        toast?.error?.(t('pluginStartFailed') + ': ' + getErrorMessage(e))
-        return
-      }
-      await loadPluginIndex()
-    }
-    // 仅当命令声明 acceptsInput 时，才把 Ctrl+K 文本作为插件参数带入；否则不传（"不设置就不带"）
-    let inputText: string | undefined
-    if (result.acceptsInput) {
-      inputText = result.inlineInput || undefined
-      if (!inputText && result.label) {
-        const idx = pluginCmdIndex.value.find(c => c.plugin.id === result.pluginId && c.cmd.id === result.pluginCommandId)
-        if (idx) {
-          const title = commandTitle(idx.cmd, locale)
-          if (title && result.label.startsWith(title + ': ')) {
-            inputText = result.label.slice(title.length + 2)
-          }
-        }
-      }
-    }
-    // acceptsInput 命令未带输入：回退「最近一次输入」实现一键重跑——
-    // 持久化 store（跨应用重启）优先，其次 usage 表 recentCache（input 字段自 v1 起就有）
-    if (result.acceptsInput && !inputText) {
-      const last = result.pluginId && result.pluginCommandId
-        ? getPluginLastResult(result.pluginId, result.pluginCommandId) : null
-      if (last?.input) {
-        inputText = last.input
-      } else {
-        const k = pluginCmdKey(result.pluginId, result.pluginCommandId)
-        const re = recentCache.value.find((e) => e.key === k && !!e.input)
-        if (re?.input) inputText = re.input
-      }
-    }
-    // 仍无输入：绝不空参执行——空跑 + 必报错 + 空输入写坏历史记录三害齐发。
-    // 有前端则打开页面让用户补输入；无前端则提示后停在面板，不动历史。
-    if (result.acceptsInput && !inputText) {
-      if (result.pluginHasFrontend) {
-        inlinePluginName.value = ''
-        inlinePluginInit.value = { text: '', command: result.pluginCommandId || '' }
-        inlinePluginId.value = result.pluginId
-        return
-      }
-      toast?.error?.(t('pluginNeedInput'))
-      return
-    }
-    recordUsage('plugin:' + result.pluginId + '.' + result.pluginCommandId, 'plugin', result.label, result.desc, inputText || '')
-    // 即时刷新「最近使用」：运行完立刻能看到，不必等下次重开面板
-    refreshRecentCache().catch(() => {})
-    try {
-      if (result.pluginHasFrontend) {
-        // 前端插件：交由统一 PluginFrame 宿主打开 UI；init 通过同窗口 getter 直接传入（不走全局 pending init 单例）
-        inlinePluginName.value = ''
-        inlinePluginInit.value = { text: inputText || '', command: result.pluginCommandId || '' }
-        inlinePluginId.value = result.pluginId
-      } else {
-        // 无前端插件（goja/native 无 UI）：后端执行并返回结果
-        const raw = await ExecutePluginCommand(result.pluginId, result.pluginCommandId, inputText ? { text: inputText } : null as any)
-        const pluginResult = unwrap<string | any>(raw)
-        if (pluginResult && pluginResult.error) { toast?.error?.(pluginResult.error) }
-        else if (pluginResult) {
-          const displayText = typeof pluginResult === 'object'
-            ? (pluginResult.translated || pluginResult.text || pluginResult.display || JSON.stringify(pluginResult)) : String(pluginResult)
-          const copyText = typeof pluginResult === 'object'
-            ? (pluginResult.translated || pluginResult.text || pluginResult.copy || displayText) : displayText
-          await writeClipboard(copyText)
-          // 持久化「每命令最近一次结果」：重开面板/重启后 preview 仍可展示、动作菜单可复制、acceptsInput 命令可一键重跑
-          savePluginLastResult(result.pluginId, result.pluginCommandId, {
-            result: displayText, pluginName: result.desc || result.label,
-            pluginId: result.pluginId, pluginCommandId: result.pluginCommandId,
-            pluginHasFrontend: result.pluginHasFrontend, input: inputText, acceptsInput: result.acceptsInput,
-          })
-          toast?.success?.(t('pluginResultCopied'))
-        }
-      }
-    } catch (e) { toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e)) }
-  } else if (result.type === 'clipboard-action' && result.clipAction) {
-    if (result.clipAction === 'open-url' && result.url) {
-      try { await Browser.OpenURL(result.url) } catch (e) { console.error('[CmdPalette] OpenURL:', e) }; closePalette()
-    } else if (result.clipAction === 'save-url' && result.url) {
-      try { const item = unwrap<CollectionItem>(await SaveUrlAsItem(result.url)); recordUsage('item:' + (item?.id || ''), 'item', result.url, result.url); toast?.success?.(t('savedAsItem')) } catch (e) { toast?.error?.(getErrorMessage(e)) }; closePalette()
-    } else if (result.clipAction === 'encode-url' && result.url) {
-      // 纯本地编码，不依赖任何插件：与 text-encoder 内置的
-      // urlEncode 实现完全一致（encodeURIComponent 语义），核心功能零插件耦合
-      let encoded = ''
-      try { encoded = encodeURIComponent(result.url) } catch { encoded = result.url }
-      if (await writeClipboard(encoded)) toast?.success?.(t('pluginResultCopied'))
-      closePalette()
-    }
-  }
-}
+const { executeSelected } = usePaletteExecutor({
+  displayFlat, selectedIndex, selectedSet, lastAnchor,
+  pluginCmdIndex, recentCache,
+  recordUsage,
+  refreshRecent: () => refreshRecentCache(),
+  closePalette,
+  markPluginSeen,
+  loadPluginIndex,
+  executeEnvAction,
+  writeClipboard,
+  beginQuicklink,
+  openInlinePlugin,
+})
 
 async function commitInlineQuicklink() {
   if (!inlineQuicklink.value) return
@@ -871,254 +628,25 @@ function getFlatIndex(groupIdx: number, itemIdx: number): number {
   return flatIdx + itemIdx
 }
 
-// ---- Ctrl+K 二级动作菜单 ----
-interface PaletteAction { id: string; label: string; icon: any; danger?: boolean; run: () => void | Promise<void> }
-
-const actionMenuOpen = ref(false)
-const actionMenuIndex = ref(0)
+// ---- Ctrl+K 二级动作菜单（动作表 + 菜单开关在 usePaletteActions）----
+// 这里只传面板状态：选中项、条目池、最近使用池、选中游标，以及几个动作回调。
+// 主操作用执行器那份 executeSelected，避免「动作菜单里的打开」和「回车」两套实现。
 const actionTarget = computed<SearchResult | undefined>(() => displayFlat.value[selectedIndex.value])
-
-// 结果的"主值"：文件/应用路径、链接、笔记内容等，用于复制 / 资源管理器定位
-function targetValue(r: SearchResult): string {
-  switch (r.type) {
-    case 'item': case 'quicklink': case 'quicklink-inline': return r.item?.value || ''
-    case 'app': return r.appPath || ''
-    case 'url': case 'clipboard-action': return r.url || ''
-    case 'note': return r.note?.content || ''
-    case 'todo': return r.todo?.title || ''
-    case 'calculator': return r.calcResult || ''
-    case 'plugin': return r.label || ''
-    case 'file': return r.filePath || ''
-    default: return ''
-  }
-}
-
-// 是否为可在资源管理器中定位的本地路径（排除 http/自定义协议与纯命令行）
-function isLocalPath(v: string): boolean {
-  if (!v) return false
-  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v)) return false
-  return /^[a-zA-Z]:[\\/]/.test(v) || v.startsWith('\\\\')
-}
-
-const contextActions = computed<PaletteAction[]>(() => {
-  const r = actionTarget.value
-  if (!r) return []
-  const acts: PaletteAction[] = []
-  const value = targetValue(r)
-
-  // 主操作（等价于直接回车）
-  // 文件结果（Everything 检索）的主操作是「定位所在文件夹」而非打开文件本身
-  const primaryLabel =
-    r.type === 'env' ? (r.envAction === 'stop' ? t('envStop') : r.envAction === 'mgmt' ? t('envEnableMgmt') : t('envStart'))
-      : r.type === 'app' ? t('actLaunch')
-        : r.type === 'note' ? t('actOpenNote')
-        : r.type === 'todo' ? t('actOpenTodo')
-          : r.type === 'file' ? t('actReveal')
-            : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
-              : r.type === 'calculator' ? t('actCopyResult')
-                : t('actOpen')
-  const primaryIcon = r.type === 'env' ? (r.envAction === 'stop' ? Power : r.envAction === 'mgmt' ? Gauge : Play)
-    : r.type === 'note' ? FileText : r.type === 'todo' ? ListChecks : r.type === 'file' ? FolderSearch : r.type === 'calculator' ? Copy : Play
-  acts.push({ id: 'primary', label: primaryLabel, icon: primaryIcon, run: () => executeSelected() })
-
-  if (r.label) acts.push({ id: 'copy-name', label: t('actCopyName'), icon: Copy, run: () => copyAndClose(r.label) })
-
-  if (value && value !== r.label) {
-    const label = isLocalPath(value) ? t('actCopyPath') : /^https?:/i.test(value) ? t('actCopyLink') : t('actCopyValue')
-    acts.push({ id: 'copy-value', label, icon: Copy, run: () => copyAndClose(value) })
-  }
-
-  // 插件专属动作：原生 tab 里的动作菜单太薄——补「分离为独立窗口」与「复制上次结果」
-  if (r.type === 'plugin' && r.pluginId) {
-    if (r.pluginHasFrontend) {
-      acts.push({ id: 'plugin-detach-window', label: t('actPluginDetach'), icon: ExternalLink, run: () => detachPluginFor(r) })
-    }
-    if (r.pluginCommandId) {
-      const last = getPluginLastResult(r.pluginId, r.pluginCommandId)
-      if (last?.result) {
-        acts.push({ id: 'plugin-copy-last', label: t('actCopyLastResult'), icon: Copy, run: () => copyAndClose(last.result) })
-      }
-    }
-  }
-
-  // 待办专属：不用在面板里来回切到待办页就能勾掉一条（搜索的目的往往就是"找出来处理掉"）
-  if (r.type === 'todo' && r.todo?.id && r.todo.status !== 'done') {
-    const id = r.todo.id
-    acts.push({
-      id: 'complete-todo', label: t('actCompleteTodo'), icon: Check,
-      run: async () => {
-        try { unwrap(await SetTodoStatus(id, 'done')); toast?.success?.(t('actCompleteTodo')) }
-        catch (e) { toast?.error?.(getErrorMessage(e)); nextTick(focusInput); return }
-        closePalette()
-      },
-    })
-  }
-
-  // 文件结果的主操作已是「定位所在文件夹」，不重复追加 reveal 项
-  if (isLocalPath(value) && r.type !== 'file') acts.push({ id: 'reveal', label: t('actReveal'), icon: FolderSearch, run: () => revealAndClose(value) })
-
-  if ((r.type === 'url' || r.type === 'clipboard-action') && r.url) {
-    acts.push({ id: 'save-url', label: t('cmdSaveAsItem'), icon: Save, run: () => saveUrlAndClose(r.url!) })
-  }
-
-  if ((r.type === 'item' || r.type === 'quicklink' || r.type === 'quicklink-inline') && r.item?.id) {
-    const id = r.item.id
-    acts.push({ id: 'delete-item', label: t('actDeleteItem'), icon: Trash2, danger: true, run: () => deleteItemAndRefocus(id) })
-  }
-  return acts
-})
-
-function openActionMenu() {
-  if (!actionTarget.value || contextActions.value.length === 0) return
-  actionMenuIndex.value = 0
-  actionMenuOpen.value = true
-}
-
-function closeActionMenu(refocus = true) {
-  if (!actionMenuOpen.value) return
-  actionMenuOpen.value = false
-  if (refocus) nextTick(focusInput)
-}
-
-async function runAction(a: PaletteAction) {
-  actionMenuOpen.value = false
-  await a.run()
-}
-
-async function copyAndClose(text: string) {
-  // 失败时 writeClipboard 已经弹过错误提示，这里不能再报「已复制」。
-  if (await writeClipboard(text)) toast?.success?.(t('copied'))
-  closePalette()
-}
-
-async function revealAndClose(path: string) {
-  try { unwrap(await RevealInExplorer(path)) }
-  catch (e) { toast?.error?.(getErrorMessage(e)); nextTick(focusInput); return }
-  closePalette()
-}
-
-async function saveUrlAndClose(url: string) {
-  try {
-    const item = unwrap<CollectionItem>(await SaveUrlAsItem(url))
-    recordUsage('item:' + (item?.id || ''), 'item', url, url)
-    toast?.success?.(t('savedAsItem'))
-  } catch (e) { toast?.error?.(getErrorMessage(e)) }
-  closePalette()
-}
-
-// 删除后不关闭面板：保持在结果列表里继续操作，仅同步本地缓存避免"幽灵条目"
-async function deleteItemAndRefocus(id: string) {
-  const ok = await toast?.confirm?.(t('confirmDeleteItem'))
-  if (!ok) { nextTick(focusInput); return }
-  try {
-    unwrap(await DeleteItem(id))
-    const idx = items.value.findIndex(i => i.id === id)
-    if (idx >= 0) items.value.splice(idx, 1)
-    recentCache.value = recentCache.value.filter(e => e.key !== 'item:' + id)
-    selectedIndex.value = 0
-    toast?.success?.(t('actItemDeleted'))
-  } catch (e) { toast?.error?.(getErrorMessage(e)) }
-  nextTick(focusInput)
-}
-
-// ---- 加载数据 ----
-let itemsLoadGen = 0
-let lastPluginIndexLoad = 0
-// #6 按需刷新：插件索引 500ms 节流；插件图标（每个插件一次 DB 读取）改为长 TTL 缓存，避免每次 show 全量重拉
-const PLUGIN_ICON_TTL = 30_000
-let lastPluginIconLoad = 0
-
-const themeName = useThemeName()
-
-async function loadPluginIcons(force = false) {
-  const now = Date.now()
-  if (!force && now - lastPluginIconLoad < PLUGIN_ICON_TTL) return
-  lastPluginIconLoad = now
-  // 图标分深浅两档，必须按当前主题取；主题切换时由下方 watch 强制重拉
-  const theme = themeName.value
-  await Promise.all(installedPlugins.value.map(async (p) => {
-    try { const uri = unwrap<string | null>(await GetPluginIcon(p.id, theme)); if (uri) pluginIcons.value[p.id] = uri } catch (e) { logErr('CommandPalette', e) }
-  }))
-}
-
-async function loadPluginIndex(forceIcons = false) {
-  const now = Date.now()
-  if (now - lastPluginIndexLoad < 500) return
-  lastPluginIndexLoad = now
-  try {
-    const plugins = unwrap<PluginInfo[]>(await ListPlugins())
-    // 懒加载后已启用插件多数处于 registered（进程/VM 待首次使用才起），必须一并建进索引：
-    // 否则命令面板搜不到它们，也就无从触发拉起（EnsureLoaded）——死锁。
-    // 排除的只有用户显式禁用的 stopped（DisablePlugin 只置 stopped、仍留在列表里）。
-    // 排除用户显式禁用（disabled）与已停止（stopped）的插件：状态真相源收敛后由 p.disabled
-    // 直接判定禁用态，不再依赖 status 间接推断（禁用插件不进命令面板入口）。
-    const enabled = plugins?.filter(p => !p.disabled && p.status !== 'stopped') || []
-    installedPlugins.value = enabled
-    pluginCmdIndex.value = buildPluginIndex(enabled)
-    // 预加载插件真实图标（data URI），结果列表据此展示，无图标的插件回退到 Puzzle
-    await loadPluginIcons(forceIcons)
-  } catch (e) { console.error('[CmdPalette] ListPlugins:', getErrorMessage(e)) }
-}
-
-// 主题切换：图标分档必须立刻换，旧的 TTL 缓存作废
-watch(themeName, () => {
-  lastPluginIconLoad = 0
-  pluginIcons.value = {}
-  void loadPluginIcons(true)
-})
-
-// 一次性加载全量池（项目 + 应用 + 笔记 + 最近使用），后续匹配完全在前端完成，
-// 从而支持拼音与子串搜索（后端 FTS5 前缀匹配无法覆盖这两类）。
-// 重建应用索引：清掉后端的内存缓存后立刻重扫一次。
-//
-// 为什么需要手动入口：缓存的失效依据是「开始菜单/卸载表这些来源目录的 mtime 变化」，
-// 覆盖不到绿色版、便携版、装到自定义目录的软件——它们的安装不碰任何一个被监控的目录，
-// 于是缓存永远命中，用户就一直搜不到。手动重建是这条自动链路兜不住时的出路。
-//
-// 重扫期间不关面板：扫描是磁盘活儿，耗时几百毫秒到数秒，关掉面板用户看不到
-// 「正在重建」，只会以为按了没反应；不关也能在完成后立刻用新索引搜。
-async function rebuildAppIndex() {
-  try {
-    unwrap(await ResetInstalledAppsCache())
-    installedApps.value = unwrap<InstalledApp[]>(await ScanInstalledApps()) || []
-    toast?.success?.(t('appIndexRebuilt'))
-  } catch (e) {
-    console.error('[CmdPalette] RebuildAppIndex:', getErrorMessage(e))
-    toast?.error?.(t('appIndexRebuildFailed') + ': ' + getErrorMessage(e))
-  }
-}
-
-async function loadPaletteData() {
-  loading.value = true; const gen = ++itemsLoadGen
-  await loadFrecency()
-  try { const result = unwrap<CollectionItem[]>(await ListAllItems()); if (gen !== itemsLoadGen) return; items.value = result || [] } catch (e) { console.error('[CmdPalette] ListAllItems:', getErrorMessage(e)) }
-  // 每次 Ctrl+K 唤起都主动刷新一次已安装应用：后端 GetCachedApps 采用「来源目录 mtime
-  // 惰性失效」，未装/卸软件时直接命中内存缓存（零磁盘扫描），仅当开始菜单确实变化时才重扫。
-  // 因此这里可以无条件请求，确保新装软件无需重启 QuickDock 即可被搜索到。
-  try {
-    if (gen === itemsLoadGen) {
-      const apps = unwrap<InstalledApp[]>(await ScanInstalledApps()) || []
-      if (gen === itemsLoadGen) installedApps.value = apps
-    }
-  } catch (e) { console.error('[CmdPalette] ScanInstalledApps:', getErrorMessage(e)) }
-  try { const notesData = unwrap<CmdNote[]>(await ListNotesTree()); if (gen !== itemsLoadGen) return; notes.value = notesData || [] } catch (e) { console.error('[CmdPalette] ListNotesTree:', getErrorMessage(e)) }
-  await refreshRecentCache(gen)
-  if (gen === itemsLoadGen) loading.value = false
-}
-
-// 刷新「最近使用」缓存：运行命令/打开项目后实时拉取，否则要等下次重开面板才出现
-async function refreshRecentCache(gen?: number) {
-  try {
-    const raw = await GetAllUsage()
-    if (gen === undefined || gen === itemsLoadGen) {
-      // plugin 记录 label 可能为空（某些热键/自动执行路径），但近期有 plugin 记录本身
-      // 就值得留在「最近使用」——组装时用命令标题/插件名兜底，故放宽过滤
-      // file（Everything 文件结果）不写也不读历史：即时检索不该沉淀进「最近使用」，
-      // 这里顺手滤掉旧版本可能已写入的 file 记录
-      recentCache.value = (unwrap<RecentEntry[]>(raw) || []).filter(e => e.type && e.type !== 'file' && (e.label || e.type === 'plugin'))
-    }
-  } catch (e) { console.error('[CmdPalette] GetAllUsage:', getErrorMessage(e)) }
-}
+const { actionMenuOpen, actionMenuIndex, contextActions, openActionMenu, closeActionMenu, runAction } =
+  usePaletteActions({
+    actionTarget,
+    items,
+    recentCache,
+    selectedIndex,
+    t,
+    toast,
+    executeSelected,
+    closePalette,
+    writeClipboard,
+    detachPluginFor,
+    recordUsage,
+    focusInput,
+  })
 
 // ---- 生命周期 ----
 let lastClipboardUpdate = 0
@@ -1200,7 +728,6 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onGlobalKey, true)
   window.removeEventListener('focus', focusInput)
   if (quickInfoTimer) clearTimeout(quickInfoTimer)
-  if (envPollTimer) clearTimeout(envPollTimer)
 })
 </script>
 
