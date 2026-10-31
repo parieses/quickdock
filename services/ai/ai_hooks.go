@@ -9,6 +9,7 @@ package ai
 // struct，字段对得上即可，两边各自演进时不互相牵连。
 
 import (
+	"quickdock/internal/env"
 	"quickdock/services"
 	aitools "quickdock/services/ai/tools"
 )
@@ -44,4 +45,25 @@ func (a *AIService) AISetHooksApproved(cwd string, on bool) *services.ApiResult 
 		return services.Fail(err)
 	}
 	return services.Ok(nil)
+}
+
+// AIGetGitBranch 返回某个工作目录所在的 git 分支（bound）。
+//
+// 用途：AI 聊天输入框下方实时显示「当前在哪条分支」，让用户确认 AI 即将改动的
+// 是不是自己以为的那条分支。非仓库 / 没装 git 一律返回 repo=false，不报错——
+// 这只是一个锦上添花的提示，不该因为没 git 就弹错误。
+func (a *AIService) AIGetGitBranch(cwd string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	// 把宿主的 Env 透给 gitBin：GUI 进程 PATH 未必有 git，靠它回落到便携版 git。
+	var env *env.Manager
+	if a.App != nil {
+		env = a.App.Env
+	}
+	branch, isRepo, err := aitools.GitBranch(aitools.Deps{Env: env}, cwd)
+	if err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(map[string]any{"repo": isRepo, "branch": branch})
 }

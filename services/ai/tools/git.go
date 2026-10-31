@@ -121,6 +121,42 @@ func runGit(d Deps, dir string, args ...string) (string, string, error) {
 	return out.String(), errb.String(), err
 }
 
+// GitBranch 返回 dir（或其祖先目录）所在 git 仓库的当前分支名。
+//
+// 设计取舍：
+//   - 不在任何仓库里 → isRepo=false、branch 为空，不报错（前端只是想在输入框下方
+//     显示一行分支，没装 git / 不是仓库都不该弹错）。
+//   - 分离头指针（detached HEAD）→ 用短哈希代替，避免把字面量 "HEAD" 显示成「当前分支」。
+//   - 复用 gitBin 的 PATH / 便携版查找，但只传 Deps{}（PATH 优先即可；便携版回退在
+//     绝大多数桌面环境用不上，且这里不需要 DB/Env 参与）。
+//
+// GitBranch 返回 dir 所在的 git 分支；不在仓库里或没装 git时 isRepo=false、不报错。
+//
+// d 传进来是为了让 gitBin 在 GUI 进程 PATH 里找不到 git 时，能回落到 QuickDock
+// 托管的便携版 git（注册表 PATH 与用户终端经常不一致）。d 可以为 nil（此时只靠
+// exec.LookPath 找系统 git）。
+func GitBranch(d Deps, dir string) (branch string, isRepo bool, err error) {
+	out, _, e := runGit(d, dir, "rev-parse", "--is-inside-work-tree")
+	if e != nil || strings.TrimSpace(out) != "true" {
+		return "", false, nil
+	}
+	b, _, e := runGit(d, dir, "rev-parse", "--abbrev-ref", "HEAD")
+	if e != nil {
+		return "", true, nil // 确在仓库里，但取不到分支（极端情况），仍标记为有仓库
+	}
+	branch = strings.TrimSpace(b)
+	if branch == "HEAD" {
+		// 分离头指针：rev-parse --abbrev-ref HEAD 此时返回字面量 "HEAD"，没有信息量，
+		// 改用短哈希，让界面显示 "detached@abc1234" 而不是误导性的 "HEAD"。
+		if h, _, he := runGit(d, dir, "rev-parse", "--short", "HEAD"); he == nil {
+			branch = "detached@" + strings.TrimSpace(h)
+		} else {
+			branch = "detached"
+		}
+	}
+	return branch, true, nil
+}
+
 // gitDir 解析目标目录，并确认它确实在某个 git 仓库里。
 //
 // 提前判一次仓库，是为了把 "fatal: not a git repository" 这种原始输出
