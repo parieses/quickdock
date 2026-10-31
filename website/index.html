@@ -342,6 +342,27 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">AI 能改文件、跑命令了，每一步都能拦下来，改错还能撤回</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>内置 AI 不再只是聊天：它能直接读项目、改文件、跑命令。回答里每一步单独一行「做了什么、动了哪个文件」，改动按行标出增删。</li>
+          <li>动手前逐次确认：允许 / 记住 / 拒绝三选一，待确认的条目固定停在输入框上方，往上翻历史也看得见。「记住」只对同一族命令生效——点了 <code>git</code> 就只放行 git，换个命令照样问。</li>
+          <li>哪个工具该不该问可以逐个改：把 <code>run_command</code> 设成自动（项目里只有测试命令时），或把发消息这类工具直接禁掉。每次放行与拒绝都有账，能看到这一周被问了多少次。</li>
+          <li>改错能撤回：动文件前自动存快照，按步回退，不影响别的改动；回退本身也能再撤一步。没有 git 的目录也敢让它动手。</li>
+          <li>计划模式：先只读看一遍项目、给出分步计划，一个文件都不动，看完再决定要不要它做。</li>
+          <li>项目约定不必每次重复：<code>AGENTS.md</code> 与 <code>.quickdock/rules/*.md</code> 自动读进上下文，还能按路径条件加载（改前端时才加载前端那份）；项目里的 <code>hooks.json</code> 可声明改完文件跑什么，按目录批准才执行。</li>
+          <li>输入框打 <code>@</code> 直接引用文件、目录或历史对话；dev server 这类不会自己结束的命令可以挂到后台跑，之后单独查输出。</li>
+          <li>也能把外部 MCP server 接进来：别人写的工具并进同一套开关与审批，不绕过闸门。</li>
+          <li>会话可星标置顶、一键摘要（这段在解决什么、有哪些结论、还剩什么），可导出 Markdown；回答里写过的文件挂在下面，点开即预览，配置文件能就地改。</li>
+          <li>其余：命令面板的项目 / 笔记 / 待办一次查完，还能直接跳到任一功能页；场景与集合可起组名按组折叠；笔记支持批量操作与笔记内搜索；待办日历能拖拽改期；定时任务可批量启停并跨任务统计；监控加了告警静默与正常率环形图。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.34</span>
+          <span class="log-date">2026-10-29</span>
           <span class="log-title">更新不会再卡在下不完，插件没公开的命令 AI 也调不动</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -389,26 +410,6 @@
           <li>数据层放行 openedSceneIds 白名单，支持工作区已打开场景标签页的持久化记忆。</li>
         </ul>
       </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.31</span>
-          <span class="log-date">2026-10-28</span>
-          <span class="log-title">SSH 更难用错，监控能找回，环境会告诉你项目缺哪个版本</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>SSH 加了「执行命令」窗口：一条命令跑完就断开，不留会话。生产主机会先核对风险，高危命令只给填入、不给执行，输出可以复制。</li>
-          <li>主机表单里没保存也能直接测通不通；重开窗口自动恢复上次的标签页；SFTP 支持多选批量下载、移动、删除，路径可以直接输入跳转。</li>
-          <li>监控可以进回收站，恢复时日志和配置都还在；支持搜索、批量启停、拖拽排序。临时维护能设一小时窗口，期间不检测也不告警。</li>
-          <li>定时任务加了每月频率、搜索与筛选（仅失败、启用中、已停用）、下次执行倒计时；执行历史能只看失败、导出 CSV。机器人推送收进设置里统一配，不再各页各配一份。</li>
-          <li>环境管理能按项目目录检查版本要求（<code>.nvmrc</code>、<code>.tool-versions</code>、<code>go.mod</code>、<code>package.json</code> 等），和本机已装、当前激活的版本逐个对比，缺的当场切过去。</li>
-          <li>笔记加了目录、字数统计、拖拽排序和导出 <code>.md</code>，AI 面板能把结果插入光标、追加到末尾或替换全文。待办支持搜索，子任务可改名、上下移动、单独设截止日。</li>
-          <li>条目可以设标记颜色和自定义图标，支持批量删除与跨集合移动。剪贴板能批量清空、在资源管理器里定位、把图片另存，自动规则可以排优先级并试跑应用匹配。</li>
-          <li>底层升到 Wails v3 正式版与 Go 1.26，场景只保留导出。</li>
-        </ul>
-      </details>
-
     </div>
 
     <p class="log-more">

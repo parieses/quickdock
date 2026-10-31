@@ -237,6 +237,10 @@
             <li>Formulas, diagrams and code blocks render. Diagrams, formulas and code blocks can be copied as images from the context menu, and <code>html</code> blocks open in a full-screen sandbox preview.</li>
             <li>Switch to another page and the answer keeps generating; come back and it's where you left it.</li>
             <li>Usage stats sit under Settings → AI Assistant: cost estimates for 7 days, 30 days and all time, split by model and entry point. They're linear estimates from built-in prices, not a bill — your provider's invoice is authoritative.</li>
+            <li><b>The assistant on the chat page can also do the work:</b> read the project, edit files, run commands. Writes ask first — allow, remember or deny — and pending requests stay pinned above the input box, visible even after scrolling back. "Remember" covers one command family; per-tool overrides live under Settings → AI Assistant.</li>
+            <li>Files are snapshotted before they are edited, so any step can be reverted from the timeline, and the revert itself can be reverted. Works without git too.</li>
+            <li>Plan mode is read-only: it surveys the project and hands you a step-by-step plan before touching anything.</li>
+            <li>Project conventions go in <code>AGENTS.md</code> or <code>.quickdock/rules/*.md</code> instead of being repeated each time; type <code>@</code> in the composer to pull in a file, a folder or a past conversation.</li>
             <li>Keys are encrypted with Windows DPAPI; the front end never sees the ciphertext, and deleting a profile deletes it too.</li>
           </ul>
         </section>

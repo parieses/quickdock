@@ -342,6 +342,27 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">The built-in AI can now edit files and run commands — every step is askable, every change is undoable</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>The built-in AI is no longer chat-only: it reads your project, edits files and runs commands. Each step gets its own line in the reply — what it did, which file it touched — and edits are shown line by line.</li>
+          <li>Every write asks first: allow / remember / deny. Pending requests stay pinned above the input box, so scrolling back through the history doesn't lose them. "Remember" only covers the same command family — allow <code>git</code> and a different command still asks.</li>
+          <li>You can change that per tool: set <code>run_command</code> to automatic in a project where everything is a test run, or deny tools that send messages outright. Every allow and deny is recorded, so you can see how often it was asked this week.</li>
+          <li>Mistakes can be undone: files are snapshotted before they are touched, reverted step by step without disturbing other edits, and the revert itself can be reverted. Directories without git are safe to work in too.</li>
+          <li>Plan mode: it looks around read-only, hands you a step-by-step plan, and touches nothing until you say go.</li>
+          <li>Project conventions stop being repeated by hand: <code>AGENTS.md</code> and <code>.quickdock/rules/*.md</code> are read into context automatically, with optional per-path conditions (frontend rules only when frontend files are in play). A project's <code>hooks.json</code> can declare what runs after an edit, approved per directory.</li>
+          <li>Type <code>@</code> in the composer to pull in a file, a folder or a past conversation; long-running commands such as a dev server can be started in the background and checked later.</li>
+          <li>External MCP servers can be plugged in: their tools join the same switches and approvals instead of bypassing them.</li>
+          <li>Conversations can be starred, summarised in one click (what this was about, what was concluded, what is left) and exported as Markdown; files written during a reply hang below it and open in a preview, config files editable in place.</li>
+          <li>Also: the command palette queries projects, notes and todos in one go and jumps straight to any page; scenes and collections can be grouped and collapsed; notes gained batch operations and in-note search; todos can be rescheduled by dragging on the calendar; scheduled tasks can be paused in bulk with cross-task stats; monitoring gained alert muting and an uptime ring.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.34</span>
+          <span class="log-date">2026-10-29</span>
           <span class="log-title">Updates no longer stall mid-download, and AI can't call commands a plugin keeps private</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -389,26 +410,6 @@
           <li>The data layer whitelists openedSceneIds, so the open scene tabs in a workspace now persist across restarts.</li>
         </ul>
       </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.31</span>
-          <span class="log-date">2026-10-28</span>
-          <span class="log-title">SSH is harder to get wrong, monitors are recoverable, runtimes tell you which version a project needs</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>SSH gained a "run command" window: one command, then the connection closes. On production hosts the risk is checked first, high-risk commands can only be filled in rather than executed, and output is copyable.</li>
-          <li>Hosts can be tested before you save the form; reopening the window restores the tabs you had; SFTP supports multi-select batch download, move and delete, and a path you can type to jump.</li>
-          <li>Monitors go to a recycle bin and come back with their logs and configuration. Search, batch enable/disable and drag sorting are in. A one-hour maintenance window pauses checks and alerts.</li>
-          <li>Scheduled tasks gained a monthly frequency, search and filters (failed, enabled, disabled), a countdown to the next run, and a run history you can filter to failures and export to CSV. Bot push moved into settings, configured once rather than per page.</li>
-          <li>Environment management checks what a project directory requires (<code>.nvmrc</code>, <code>.tool-versions</code>, <code>go.mod</code>, <code>package.json</code> and more) against what is installed and active, and switches to the right version on the spot.</li>
-          <li>Notes gained a table of contents, word count, drag sorting and <code>.md</code> export, and the AI panel can insert at the cursor, append, or replace the whole note. Todos are searchable, and subtasks can be renamed, reordered and given their own due date.</li>
-          <li>Items can carry a mark colour and a custom icon, and can be batch-deleted or moved between collections. The clipboard clears in bulk, reveals files in Explorer, saves images, and orders rules by priority with an app-match dry run.</li>
-          <li>Under the hood: Wails v3 stable and Go 1.26, and scenes are export-only.</li>
-        </ul>
-      </details>
-
     </div>
 
     <p class="log-more">
