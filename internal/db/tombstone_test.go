@@ -14,11 +14,11 @@ func TestTombstoneItemDeleteRestore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("建 workspace 失败: %v", err)
 	}
-	sc, err := d.CreateScene(ws.ID, "场景一", "通用")
+	sc, err := d.CreateScene(ws.ID, "场景一", "通用", "")
 	if err != nil {
 		t.Fatalf("建 scene 失败: %v", err)
 	}
-	col, err := d.CreateCollection(ws.ID, sc.ID, "集合一", "目录集合", "single")
+	col, err := d.CreateCollection(ws.ID, sc.ID, "集合一", "目录集合", "single", "")
 	if err != nil {
 		t.Fatalf("建 collection 失败: %v", err)
 	}
@@ -69,11 +69,11 @@ func TestTombstoneSceneCascade(t *testing.T) {
 	if err != nil {
 		t.Fatalf("建 workspace 失败: %v", err)
 	}
-	sc, err := d.CreateScene(ws.ID, "场景一", "通用")
+	sc, err := d.CreateScene(ws.ID, "场景一", "通用", "")
 	if err != nil {
 		t.Fatalf("建 scene 失败: %v", err)
 	}
-	col, err := d.CreateCollection(ws.ID, sc.ID, "集合一", "目录集合", "single")
+	col, err := d.CreateCollection(ws.ID, sc.ID, "集合一", "目录集合", "single", "")
 	if err != nil {
 		t.Fatalf("建 collection 失败: %v", err)
 	}
@@ -82,7 +82,7 @@ func TestTombstoneSceneCascade(t *testing.T) {
 	}
 
 	// 无子集合的场景也不能炸（IN () 空串陷阱）
-	empty, err := d.CreateScene(ws.ID, "空场景", "通用")
+	empty, err := d.CreateScene(ws.ID, "空场景", "通用", "")
 	if err != nil {
 		t.Fatalf("建空 scene 失败: %v", err)
 	}

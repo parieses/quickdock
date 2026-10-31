@@ -302,7 +302,7 @@ func (d *Database) ensureScene(workspaceID, name string) (string, error) {
 	if len(scenes) > 0 {
 		return scenes[0].ID, nil
 	}
-	sc, err := d.CreateScene(workspaceID, name, "通用")
+	sc, err := d.CreateScene(workspaceID, name, "通用", "")
 	if err != nil {
 		if scenes2, e2 := d.ListScenes(workspaceID); e2 == nil && len(scenes2) > 0 {
 			return scenes2[0].ID, nil
@@ -320,7 +320,7 @@ func (d *Database) ensureCollection(workspaceID, sceneID, name string) (string, 
 	if len(cols) > 0 {
 		return cols[0].ID, nil
 	}
-	col, err := d.CreateCollection(workspaceID, sceneID, name, "目录集合", "")
+	col, err := d.CreateCollection(workspaceID, sceneID, name, "目录集合", "", "")
 	if err != nil {
 		if cols2, e2 := d.ListCollections(sceneID); e2 == nil && len(cols2) > 0 {
 			return cols2[0].ID, nil

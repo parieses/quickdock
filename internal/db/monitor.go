@@ -43,6 +43,10 @@ type Monitor struct {
 	CreatedAt           string `json:"createdAt"`
 	DeletedAt           string `json:"deletedAt"`        // 软删标记：非空即进回收站，列表默认不显示
 	MaintenanceUntil    int64  `json:"maintenanceUntil"` // 维护窗口：unix 秒，>now 期间暂停检测
+	// 静默窗口：unix 秒，>now 期间照常探测、照常写日志，只是不推送告警。
+	// 与 MaintenanceUntil 是两件事：维护窗口是「别探测」（会留下数据缺口），
+	// 静默是「探测但别吵我」——凌晨备份导致的间歇抖动正属于后者。
+	MuteUntil int64 `json:"muteUntil"`
 }
 
 // MonitorLog 单次检测记录
@@ -76,7 +80,7 @@ const monCols = `id, name, url, method, interval_sec, timeout_sec, expected_stat
 	down_alert_threshold, consecutive_down,
 	group_name, latency_alert_ms,
 	http_headers, http_body,
-	sort, created_at, deleted_at, maintenance_until`
+	sort, created_at, deleted_at, maintenance_until, mute_until`
 
 const logWindowSec = int64(24 * 3600) // 统计窗口：近 24 小时
 // maxLogsPerMonitor 每个监控保留的检测日志上限。
@@ -101,7 +105,7 @@ func scanMonitor(rows interface{ Scan(...interface{}) error }) (Monitor, error) 
 		&alertThresh, &m.ConsecutiveDown,
 		&groupName, &latencyAlert,
 		&m.HTTPHeaders, &m.HTTPBody,
-		&m.Sort, &m.CreatedAt, &m.DeletedAt, &m.MaintenanceUntil)
+		&m.Sort, &m.CreatedAt, &m.DeletedAt, &m.MaintenanceUntil, &m.MuteUntil)
 	m.FollowRedirects = follow != 0
 	m.Enabled = enabled != 0
 	m.NotifyDown = notifyDown != 0
@@ -176,12 +180,12 @@ func (d *Database) CreateMonitor(m *Monitor) (*Monitor, error) {
 			 down_alert_threshold, consecutive_down,
 			 group_name, latency_alert_ms,
 			 http_headers, http_body,
-			 sort, created_at, deleted_at, maintenance_until)
+			 sort, created_at, deleted_at, maintenance_until, mute_until)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, 0, 0, '', ?,
 			 ?, 0, 0, ?, ?,
 			 ?, 0, ?, ?,
 			 ?, ?,
-			 ?, ?, '', 0)`,
+			 ?, ?, '', 0, 0)`,
 		m.ID, m.Name, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
 		b2i(m.FollowRedirects), b2i(m.Enabled), b2i(m.NotifyDown), b2i(m.NotifyUp),
 		b2i(m.SkipTLSVerify),
@@ -345,6 +349,14 @@ func (d *Database) SetMonitorMaintenance(id string, until int64) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	_, err := d.conn.Exec("UPDATE monitors SET maintenance_until = ? WHERE id = ?", until, id)
+	return err
+}
+
+// SetMonitorMute 告警静默：until=0 取消。探测与日志照常，只是不推送通知。
+func (d *Database) SetMonitorMute(id string, until int64) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	_, err := d.conn.Exec("UPDATE monitors SET mute_until = ? WHERE id = ?", until, id)
 	return err
 }
 

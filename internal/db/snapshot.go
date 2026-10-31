@@ -95,8 +95,8 @@ func restorePayload(tx *sql.Tx, payload *SnapshotPayload) error {
 	for i := range payload.Scenes {
 		s := &payload.Scenes[i]
 		if _, err := tx.Exec(
-			"INSERT INTO scenes (id, workspace_id, name, type, description, icon, color, favorite, unbound, usage_count, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			s.ID, s.WorkspaceID, s.Name, s.Type, s.Description, s.Icon,
+			"INSERT INTO scenes (id, workspace_id, name, type, description, group_name, icon, color, favorite, unbound, usage_count, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			s.ID, s.WorkspaceID, s.Name, s.Type, s.Description, s.GroupName, s.Icon,
 			s.Color, s.Favorite, s.Unbound, s.UsageCount, s.Sort, s.CreatedAt, s.UpdatedAt,
 		); err != nil {
 			return fmt.Errorf("恢复场景失败: %w", err)
@@ -105,8 +105,8 @@ func restorePayload(tx *sql.Tx, payload *SnapshotPayload) error {
 	for i := range payload.Collections {
 		c := &payload.Collections[i]
 		if _, err := tx.Exec(
-			"INSERT INTO collections (id, workspace_id, scene_id, name, type, description, default_tool_id, tool, icon, color, open_strategy, favorite, recent, recent_at, unbound, plugin_id, usage_count, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			c.ID, c.WorkspaceID, c.SceneID, c.Name, c.Type, c.Description,
+			"INSERT INTO collections (id, workspace_id, scene_id, name, type, description, group_name, default_tool_id, tool, icon, color, open_strategy, favorite, recent, recent_at, unbound, plugin_id, usage_count, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+			c.ID, c.WorkspaceID, c.SceneID, c.Name, c.Type, c.Description, c.GroupName,
 			c.DefaultToolID, c.Tool, c.Icon, c.Color, c.OpenStrategy, c.Favorite,
 			c.Recent, c.RecentAt, c.Unbound, c.PluginID, c.UsageCount, c.Sort, c.CreatedAt, c.UpdatedAt,
 		); err != nil {

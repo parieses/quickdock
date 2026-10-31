@@ -31,6 +31,7 @@ var baseTables = []string{
 		name TEXT NOT NULL,
 		type TEXT DEFAULT '通用',
 		description TEXT DEFAULT '',
+		group_name TEXT DEFAULT '',
 		icon TEXT DEFAULT '',
 		color TEXT DEFAULT '',
 		favorite INTEGER DEFAULT 0,
@@ -49,6 +50,7 @@ var baseTables = []string{
 		name TEXT NOT NULL,
 		type TEXT DEFAULT '目录集合',
 		description TEXT DEFAULT '',
+		group_name TEXT DEFAULT '',
 		default_tool_id TEXT DEFAULT '',
 		tool TEXT DEFAULT '',
 		icon TEXT DEFAULT '',
@@ -365,6 +367,7 @@ var baseTables = []string{
 		cwd TEXT NOT NULL DEFAULT '',
 		space_id TEXT NOT NULL DEFAULT '',
 		mode TEXT NOT NULL DEFAULT 'chat',
+		starred INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
@@ -720,6 +723,9 @@ func (d *Database) migrate() error {
 		// request_count=该会话累计问答次数 —— token 是累加的，光靠 SUM 推不出请求数）
 		{"ai_conversations", "model", "TEXT NOT NULL DEFAULT ''"},
 		{"ai_conversations", "request_count", "INTEGER NOT NULL DEFAULT 0"},
+		// ai_conversations: 星标（置顶收藏）。0/1 而不是 TEXT：只在 WHERE/排序里用，
+		// 而 SQLite 的布尔就是整数，存 'true' 反而要和前端来回转换。
+		{"ai_conversations", "starred", "INTEGER NOT NULL DEFAULT 0"},
 		// ai_usage: 输入中命中前缀缓存的部分（不含独立单价就是算不准钱的根因）
 		{"ai_usage", "cached_tokens", "INTEGER NOT NULL DEFAULT 0"},
 		// ai_messages: 单条回复自己那一次调用的用量，用于「回答下方那一行小字」
@@ -754,6 +760,9 @@ func (d *Database) migrate() error {
 		{"notes", "format", "TEXT DEFAULT 'markdown'"},
 		// scenes: 场景绑定的环境服务（JSON 数组：[{"runtime":"mysql","version":"8.4.3"}]）
 		{"scenes", "env", "TEXT NOT NULL DEFAULT ''"},
+		// scenes/collections: 侧栏分组（空=未分组）。group 是 SQL 保留字，列名用 group_name。
+		{"scenes", "group_name", "TEXT DEFAULT ''"},
+		{"collections", "group_name", "TEXT DEFAULT ''"},
 		// items: 条目绑定的运行时版本（JSON 数组，与 scenes.env 同形），
 		// 打开条目时把对应版本 bin 前置到子进程 PATH（项目级版本切换）
 		{"items", "env", "TEXT DEFAULT ''"},
@@ -775,6 +784,8 @@ func (d *Database) migrate() error {
 		// 老库删除会直接抹掉，升级后改为打标，留出"误删可恢复"的余地。
 		{"monitors", "deleted_at", "TEXT DEFAULT ''"},
 		{"monitors", "maintenance_until", "INTEGER NOT NULL DEFAULT 0"},
+		// monitors: 告警静默窗口（继续探测、只压推送），与维护窗口互补。
+		{"monitors", "mute_until", "INTEGER NOT NULL DEFAULT 0"},
 		// scheduled_tasks: 通知渠道拆成 CSV（system=系统通知 / webhook=机器人）。
 		// 老库一律补成「两个都要」，与升级前"notify 一开就双发"的行为一致。
 		{"scheduled_tasks", "notify_channels", "TEXT NOT NULL DEFAULT 'system,webhook'"},

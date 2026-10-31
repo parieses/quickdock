@@ -15,7 +15,7 @@ func (d *Database) ListCollections(sceneID string) ([]Collection, error) {
 	return mapSlice(rows, mapToCollection), nil
 }
 
-func (d *Database) CreateCollection(workspaceID, sceneID, name, collType, openStrategy string) (*Collection, error) {
+func (d *Database) CreateCollection(workspaceID, sceneID, name, collType, openStrategy, group string) (*Collection, error) {
 	name = validateName(name)
 	if name == "" {
 		return nil, fmt.Errorf("集合名称不能为空")
@@ -38,6 +38,7 @@ func (d *Database) CreateCollection(workspaceID, sceneID, name, collType, openSt
 		SceneID:      sceneID,
 		Name:         name,
 		Type:         collType,
+		GroupName:    group,
 		OpenStrategy: openStrategy,
 		CreatedAt:    now(),
 		UpdatedAt:    now(),

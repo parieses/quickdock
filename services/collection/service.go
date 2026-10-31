@@ -31,11 +31,11 @@ func (s *CollectionService) ListCollections(sceneID string) *services.ApiResult 
 }
 
 // CreateCollection 新建集合。
-func (s *CollectionService) CreateCollection(workspaceID, sceneID, name, collType, openStrategy string) *services.ApiResult {
+func (s *CollectionService) CreateCollection(workspaceID, sceneID, name, collType, openStrategy, group string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
 	}
-	data, err := s.App.DB.CreateCollection(workspaceID, sceneID, name, collType, openStrategy)
+	data, err := s.App.DB.CreateCollection(workspaceID, sceneID, name, collType, openStrategy, group)
 	return services.Wrap(data, err)
 }
 

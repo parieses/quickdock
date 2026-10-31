@@ -44,6 +44,7 @@ type SceneSpec struct {
 	Description string          `json:"description,omitempty"`
 	Icon        string          `json:"icon,omitempty"`
 	Color       string          `json:"color,omitempty"`
+	Group       string          `json:"group,omitempty"`
 	Env         []SceneEnvEntry `json:"env"`
 }
 
@@ -54,6 +55,7 @@ type CollectionSpec struct {
 	Description  string     `json:"description,omitempty"`
 	Icon         string     `json:"icon,omitempty"`
 	Color        string     `json:"color,omitempty"`
+	Group        string     `json:"group,omitempty"`
 	OpenStrategy string     `json:"openStrategy,omitempty"`
 	Items        []ItemSpec `json:"items"`
 }
@@ -95,7 +97,7 @@ func (s *SceneService) buildScenePackage(sceneID string) (*ScenePackage, error) 
 		Schema:      scenePackageSchema,
 		Version:     scenePackageVersion,
 		ExportedAt:  time.Now().Format(time.RFC3339),
-		Scene:       SceneSpec{Name: sc.Name, Type: sc.Type, Description: sc.Description, Icon: sc.Icon, Color: sc.Color, Env: parseSceneEnv(sc.Env)},
+		Scene:       SceneSpec{Name: sc.Name, Type: sc.Type, Description: sc.Description, Icon: sc.Icon, Color: sc.Color, Group: sc.GroupName, Env: parseSceneEnv(sc.Env)},
 		Collections: make([]CollectionSpec, 0, len(colls)),
 	}
 	if pkg.Scene.Env == nil {
@@ -109,7 +111,7 @@ func (s *SceneService) buildScenePackage(sceneID string) (*ScenePackage, error) 
 		}
 		cs := CollectionSpec{
 			Name: c.Name, Type: c.Type, Description: c.Description,
-			Icon: c.Icon, Color: c.Color, OpenStrategy: c.OpenStrategy,
+			Icon: c.Icon, Color: c.Color, Group: c.GroupName, OpenStrategy: c.OpenStrategy,
 			Items: make([]ItemSpec, 0, len(items)),
 		}
 		for _, it := range items {
@@ -203,7 +205,7 @@ func (s *SceneService) SceneImport(workspaceID, path string) *services.ApiResult
 	if sceneType == "" {
 		sceneType = "通用"
 	}
-	sc, err := s.App.DB.CreateScene(workspaceID, name, sceneType)
+	sc, err := s.App.DB.CreateScene(workspaceID, name, sceneType, pkg.Scene.Group)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -248,7 +250,7 @@ func (s *SceneService) SceneImport(workspaceID, path string) *services.ApiResult
 		if collType == "" {
 			collType = "目录集合"
 		}
-		c, err := s.App.DB.CreateCollection(workspaceID, sc.ID, collName, collType, cs.OpenStrategy)
+		c, err := s.App.DB.CreateCollection(workspaceID, sc.ID, collName, collType, cs.OpenStrategy, cs.Group)
 		if err != nil {
 			logger.W("QuickDock: 导入集合 %q 失败，跳过: %v", collName, err)
 			continue

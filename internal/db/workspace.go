@@ -185,7 +185,7 @@ func (d *Database) ListScenes(workspaceID string) ([]Scene, error) {
 	return mapSlice(rows, mapToScene), nil
 }
 
-func (d *Database) CreateScene(workspaceID, name, sceneType string) (*Scene, error) {
+func (d *Database) CreateScene(workspaceID, name, sceneType, group string) (*Scene, error) {
 	name = validateName(name)
 	if name == "" {
 		return nil, fmt.Errorf("场景名称不能为空")
@@ -207,6 +207,7 @@ func (d *Database) CreateScene(workspaceID, name, sceneType string) (*Scene, err
 		WorkspaceID: workspaceID,
 		Name:        name,
 		Type:        sceneType,
+		GroupName:   group,
 		CreatedAt:   now(),
 		UpdatedAt:   now(),
 	}

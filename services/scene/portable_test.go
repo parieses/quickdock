@@ -45,7 +45,7 @@ func TestSceneExportImportRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("建工作空间失败: %v", err)
 	}
-	sc, err := d.CreateScene(ws.ID, "后端开发", "通用")
+	sc, err := d.CreateScene(ws.ID, "后端开发", "通用", "")
 	if err != nil {
 		t.Fatalf("建场景失败: %v", err)
 	}
@@ -55,7 +55,7 @@ func TestSceneExportImportRoundTrip(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("更新场景失败: %v", err)
 	}
-	c, err := d.CreateCollection(ws.ID, sc.ID, "项目", "目录集合", "ask")
+	c, err := d.CreateCollection(ws.ID, sc.ID, "项目", "目录集合", "ask", "")
 	if err != nil {
 		t.Fatalf("建集合失败: %v", err)
 	}
@@ -188,7 +188,7 @@ func TestSceneImportNameConflict(t *testing.T) {
 	if err != nil {
 		t.Fatalf("建工作空间失败: %v", err)
 	}
-	sc, err := d.CreateScene(ws.ID, "重复场景", "通用")
+	sc, err := d.CreateScene(ws.ID, "重复场景", "通用", "")
 	if err != nil {
 		t.Fatalf("建场景失败: %v", err)
 	}

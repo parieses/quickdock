@@ -98,6 +98,7 @@ var validColumns = map[string]bool{
 	// ai_conversations：所属空间 id（空 = 普通任务）与创建时选定的模式。
 	// 白名单是全局的、不按表分，漏一个就是写入时「非法列名」。
 	"space_id": true,
+	"starred":  true, // ai_conversations：星标（0/1）
 	"mode":     true,
 	// ai_messages：工具调用记录与轮次（内置 agent）。白名单是全局的、不按表分，
 	// 漏一个就是写入时「非法列名」——而 structToMap 会把零值字段也转成列。
@@ -138,6 +139,9 @@ var validColumns = map[string]bool{
 	"timeout_sec": true, "expected_status": true,
 	"down_alert_threshold": true, "consecutive_down": true,
 	"group_name": true, "latency_alert_ms": true,
+	// monitors：告警静默窗口（snapshot 整表导出时会经过 structToMap，
+	// 漏这列就会在导出/导入那一步报「非法列名」）
+	"mute_until": true,
 	// HTTP 请求历史列
 	"status_code": true, "created_ts": true,
 	"ok": true,

@@ -19,12 +19,15 @@ type Scene struct {
 	Name        string `json:"name"`
 	Type        string `json:"type"`
 	Description string `json:"description"`
-	Icon        string `json:"icon"`
-	Color       string `json:"color"`
-	Favorite    int    `json:"favorite"`
-	Unbound     int    `json:"unbound"`
-	UsageCount  int    `json:"usageCount"`
-	Sort        int    `json:"sort"`
+	// GroupName 分组名（侧栏按组折叠渲染）。空串=未分组。刻意叫 group_name 而非 group：
+	// group 是 SQL 保留字，直接用会撞上 codebase 里大量 GROUP BY 查询。
+	GroupName  string `json:"groupName"`
+	Icon       string `json:"icon"`
+	Color      string `json:"color"`
+	Favorite   int    `json:"favorite"`
+	Unbound    int    `json:"unbound"`
+	UsageCount int    `json:"usageCount"`
+	Sort       int    `json:"sort"`
 	// Env 场景绑定的环境服务，JSON 数组：[{"runtime":"mysql","version":"8.4.3"}]。
 	// version 为空表示跟随激活版本（或首个已装版本）。空串/空数组=未绑定任何服务。
 	Env       string `json:"env"`
@@ -40,6 +43,7 @@ type Collection struct {
 	Name          string `json:"name"`
 	Type          string `json:"type"`
 	Description   string `json:"description"`
+	GroupName     string `json:"groupName"`
 	DefaultToolID string `json:"defaultToolId"`
 	Tool          string `json:"tool"`
 	Icon          string `json:"icon"`

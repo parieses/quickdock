@@ -62,11 +62,11 @@ func (s *SceneService) ListScenes(workspaceID string) *services.ApiResult {
 }
 
 // CreateScene 新建场景。
-func (s *SceneService) CreateScene(workspaceID, name, sceneType string) *services.ApiResult {
+func (s *SceneService) CreateScene(workspaceID, name, sceneType, group string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
 	}
-	data, err := s.App.DB.CreateScene(workspaceID, name, sceneType)
+	data, err := s.App.DB.CreateScene(workspaceID, name, sceneType, group)
 	return services.Wrap(data, err)
 }
 

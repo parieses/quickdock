@@ -44,7 +44,10 @@ type AIConversation struct {
 	// Mode 创建时选定的任务类型：chat / translate / summarize / explain / tutorial。
 	// 存库而不是每次从前端带：模式是这个任务的属性（「这条对话是用来翻译的」），
 	// 跟着任务走才不会切走再回来就变了。
-	Mode      string `json:"mode"`
+	Mode string `json:"mode"`
+	// Starred 星标：侧栏置顶收藏。单独一列而不是复用 space_id（自建「收藏」空间）：
+	// 星标是横切属性 —— 一个任务可以既属于某空间又被星标，塞进空间就二选一了。
+	Starred   bool   `json:"starred"`
 	CreatedAt string `json:"created_at"`
 	UpdatedAt string `json:"updated_at"`
 }
@@ -105,6 +108,7 @@ func mapToAIConversation(m map[string]interface{}) AIConversation {
 		Cwd:              str(m["cwd"]),
 		SpaceID:          str(m["space_id"]),
 		Mode:             str(m["mode"]),
+		Starred:          integer(m["starred"]) == 1,
 		CreatedAt:        str(m["created_at"]),
 		UpdatedAt:        str(m["updated_at"]),
 	}
@@ -142,6 +146,23 @@ func (d *Database) ListAIConversations() ([]AIConversation, error) {
 		return nil, err
 	}
 	return mapSlice(rows, mapToAIConversation), nil
+}
+
+// SetAIConversationStar 设置/取消星标。
+//
+// 单独一个方法而不是复用 UpdateAIConversationMeta：后者「空串 = 不改」，
+// 而星标是布尔量 —— 用空串/非空串表达会是另一种编码，两者混在一个签名里迟早出错。
+func (d *Database) SetAIConversationStar(id string, starred bool) error {
+	v := 0
+	if starred {
+		v = 1
+	}
+	// 不更新 updated_at：星标是「我怎么看这条任务」，不是对话内容变了。
+	// 跟着刷新会让侧栏按更新时间排序时，取消星标的一条突然跳到最前面。
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET starred = ? WHERE id = ?`,
+		[]interface{}{v, strings.TrimSpace(id)},
+	)
 }
 
 // ---- 空间 ----
