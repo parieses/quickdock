@@ -44,7 +44,7 @@ import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { ToastAPI, UpdateStatus } from '../types'
 import { useWorkspaceStore } from '../stores/workspace'
 import { getErrorMessage } from '../utils/error'
-import { markSeen } from '../composables/useNavBadges'
+import { navBadges } from '../composables/useNavBadges'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { parseReleaseNotes } from '../utils/releaseNotes'
 
@@ -54,6 +54,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{ close: [] }>()
+
+const { markSeen } = navBadges()
 
 const activePage = ref<string | null>(null)
 // 无论从哪个入口打开设置（footer 按钮 / AI 页 / 命令面板），都视为看过设置内的

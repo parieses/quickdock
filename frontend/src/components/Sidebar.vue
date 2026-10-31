@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, computed, onMounted, onUnmounted } from 'vue'
+import { ref, inject, computed, onMounted, onUnmounted, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import CreateDialog from './CreateDialog.vue'
@@ -14,6 +14,7 @@ import {
   EyeOff, ArrowUp, ArrowDown, RotateCcw,
 } from '@lucide/vue'
 // navEntries 不再直接使用：可见性/顺序交给 useNavPrefs，它内部仍以 registry 为唯一真相
+import type { NavDotKind } from '../pages/registry'
 
 import { useNavPrefs } from '../composables/useNavPrefs'
 import { useNavBadges } from '../composables/useNavBadges'
@@ -28,8 +29,9 @@ const emit = defineEmits<{
 }>()
 const props = defineProps<{
   currentPage: string
-  // 点击 dsh 导航后正在启动 DeepSeek Harness（原生窗口打开中），导航项显示加载态
-  dshOpening?: boolean
+  // 正在启动中的导航项 id（App 报告，如 dsh 唤起原生窗口期间传 'dsh'）：
+  // 该行换 spinner + 禁用 + 文案变「启动中」。Sidebar 不需要认识「dsh」是什么。
+  busyPage?: string
 }>()
 const toast = inject<ToastAPI>('toast')!
 
@@ -98,6 +100,32 @@ function toggleHidden(e: MouseEvent) {
   showHidden.value = !showHidden.value
 }
 
+// 展开/收起的高度过渡：列表条数不定（1~11 条），CSS 只能用 max-height 猜一个上限，
+// 条数一多就被截断、条数少时收尾又慢半拍。所以用 JS 钩子量真实高度。
+// 三个钩子都必须清理内联 height：留着它会让后续「取回一项」时列表高度不再自适应。
+function onCollapseEnter(el: Element) {
+  const e = el as HTMLElement
+  const h = e.scrollHeight
+  e.style.height = '0px'
+  e.style.opacity = '0'
+  void e.offsetHeight // 强制回流，否则同一帧内改 height 会被合并，动画不触发
+  e.style.height = h + 'px'
+  e.style.opacity = '1'
+}
+function onCollapseAfterEnter(el: Element) {
+  const e = el as HTMLElement
+  e.style.height = ''
+  e.style.opacity = ''
+}
+function onCollapseLeave(el: Element) {
+  const e = el as HTMLElement
+  e.style.height = e.scrollHeight + 'px'
+  e.style.opacity = '1'
+  void e.offsetHeight
+  e.style.height = '0px'
+  e.style.opacity = '0'
+}
+
 // 点击外部关闭：右键菜单 / 已隐藏浮层 / 工作空间菜单共用（避免多个浮层互相打架）
 function onDocumentClick() {
   showWorkspaceMenu.value = false
@@ -105,6 +133,8 @@ function onDocumentClick() {
   showHidden.value = false
 }
 
+// 全文件只注册这一次。这里和原先的文件末尾各写过一遍，同一实例会挂两个完全相同的
+// 全局 click 监听：onDocumentClick 幂等，所以没暴露成 bug，但每次点击都白跑两遍。
 onMounted(() => document.addEventListener('click', onDocumentClick))
 onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 
@@ -115,12 +145,59 @@ function toggleCollapse() {
   try { localStorage.setItem('qd_sidebar_collapsed', collapsed.value ? '1' : '0') } catch { /* ignore */ }
 }
 
-// 点击「插件」导航：进入即视为已读，useNavBadges 会在 currentPage 变为
-// 'plugins' 时自动 markSeen('plugins') 把「可更新」角标清零。插件更新数本身
-// 来自 usePluginUpdateBadge（在 useNavBadges 内部订阅），这里无需再手写清零。
-function goPlugins() {
-  emit('navigate', 'plugins')
+// ---- 导航项视图模型 ----
+// 差异只有三点：是否置 active、是否有 loading/禁用态、行尾是否挂「后台仍在跑」的指示点。
+// 全部来自 registry 条目的字段声明（dot / busyLabelKey / hintKey / activate），
+// 模板只有一段 <button>，这里也不再判断 kind —— 新加一种导航项行为只改数据。
+interface NavItemView {
+  id: string
+  icon: Component
+  label: string
+  active: boolean
+  /** 启动中：图标换 spinner、禁用、文字与 title 变「启动中」 */
+  busy: boolean
+  disabled: boolean
+  title?: string
+  /** 行尾「后台活动」指示点：有值才渲染（running = 还在跑 / done = 已跑完） */
+  dot?: 'running' | 'done'
+  dotTitle?: string
 }
+
+// 「后台仍在运行」指示点的取值表，键是 registry 的 NavDotKind（闭集）。
+// Record<NavDotKind, …> 的用处：新增一种 dot 时这里缺项会**编译报错**，
+// 而不是像 string key 的 map 那样静默不显示（也就是「指示点凭空消失」）。
+// 数据来源必须是响应式的（aiGenerating 等），所以表只能在 Sidebar 而不能进 registry。
+const DOT_PROVIDERS: Record<NavDotKind, () => { cls: 'running' | 'done'; title: string } | undefined> = {
+  // AI 页被 KeepAlive 保活，回答会在别的页面继续生成/完成，
+  // 不给提示用户会以为「切走了就没了」。
+  // 文案在此处就 t() 掉：模板里 v-if 无法收窄对象属性类型，
+  // 拍平成两个标量字段（dot / dotTitle）就省掉了需要窄化的写法。
+  ai: () => {
+    if (aiGenerating.value) return { cls: 'running', title: t('aiGeneratingHint') }
+    if (aiFinishedUnread.value) return { cls: 'done', title: t('aiFinishedHint') }
+    return undefined
+  },
+}
+
+const navItems = computed<NavItemView[]>(() =>
+  visibleNav.value.map((e) => {
+    const busy = props.busyPage === e.id
+    const dot = e.dot ? DOT_PROVIDERS[e.dot]() : undefined
+    return {
+      id: e.id,
+      icon: e.icon,
+      label: busy ? t(e.busyLabelKey || e.labelKey) : t(e.labelKey),
+      // 唤起独立窗口的入口（有 activate）不切页，所以永不置 active；
+      // 它点下去会跳出当前界面，需要一句 title 说明后果（hintKey）。
+      active: !e.activate && props.currentPage === e.id,
+      busy,
+      disabled: busy,
+      title: busy ? t(e.busyLabelKey || e.labelKey) : e.hintKey ? t(e.hintKey) : undefined,
+      dot: dot?.cls,
+      dotTitle: dot?.title,
+    }
+  }),
+)
 
 // ---- 工作空间 ----
 const showWorkspaceMenu = ref(false)
@@ -173,9 +250,6 @@ async function handleDeleteWorkspace(wsId: string) {
     toast.error(t('deleteFailed') + ': ' + getErrorMessage(e))
   }
 }
-
-onMounted(() => document.addEventListener('click', onDocumentClick))
-onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 </script>
 
 <template>
@@ -212,72 +286,27 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
       </Transition>
     </div>
 
-    <!-- 页面导航（由 pages/registry 驱动 + useNavPrefs 裁剪排序，新增页面只改注册表） -->
+    <!-- 页面导航（由 pages/registry 驱动 + useNavPrefs 裁剪排序，新增页面只改注册表）
+         一个模板覆盖全部导航项：active / loading / 指示点的差异由 navItems 按条目字段算好，模板不分 kind。
+         插件项的「可更新」角标同样不需要显式清零 —— 进入 plugins 页时 useNavBadges 的
+         currentPage watcher 会 markSeen('plugins')，插件更新数本身由 usePluginUpdateBadge 订阅。 -->
     <div class="sidebar-navigator">
       <div class="navigator-header">{{ t('navigation') }}</div>
-      <template v-for="entry in visibleNav" :key="entry.id">
-        <!-- 普通页 / 工作空间：点击导航，按 currentPage 高亮 -->
-        <button
-          v-if="entry.kind === 'workspace' || entry.kind === 'page'"
-          :class="['nav-item', { active: currentPage === entry.id }]"
-          @click="emit('navigate', entry.id)"
-          @contextmenu="openNavMenu(entry.id, $event)"
-        >
-          <component :is="entry.icon" :size="14" />
-          <span>{{ t(entry.labelKey) }}</span>
-          <!-- AI 生成指示：AI 页被 KeepAlive 保活，回答会在别的页面继续生成完成，
-               不给提示用户会以为"切走了就没了" -->
-          <span
-            v-if="entry.id === 'ai' && aiGenerating"
-            class="nav-ai-dot running"
-            :title="t('aiGeneratingHint')"
-          ></span>
-          <span
-            v-else-if="entry.id === 'ai' && aiFinishedUnread"
-            class="nav-ai-dot done"
-            :title="t('aiFinishedHint')"
-          ></span>
-          <NavBadge :id="entry.id" />
-        </button>
-        <!-- SSH：唤起独立终端窗口，主窗口内容不动，不置 active -->
-        <button
-          v-else-if="entry.kind === 'window'"
-          class="nav-item"
-          :title="t('navSshHint')"
-          @click="emit('navigate', entry.id)"
-          @contextmenu="openNavMenu(entry.id, $event)"
-        >
-          <component :is="entry.icon" :size="14" />
-          <span>{{ t(entry.labelKey) }}</span>
-          <NavBadge :id="entry.id" />
-        </button>
-        <!-- DSH：DeepSeek Harness 原生窗口，启动中显示 loading 且禁用 -->
-        <button
-          v-else-if="entry.kind === 'dsh'"
-          :class="['nav-item', { active: currentPage === 'dsh', opening: dshOpening }]"
-          :disabled="dshOpening"
-          :title="dshOpening ? t('dshLaunching') : undefined"
-          @click="emit('navigate', entry.id)"
-          @contextmenu="openNavMenu(entry.id, $event)"
-        >
-          <span v-if="dshOpening" class="nav-spinner"></span>
-          <component v-else :is="entry.icon" :size="14" />
-          <span>{{ dshOpening ? t('dshLaunching') : t(entry.labelKey) }}</span>
-          <NavBadge :id="entry.id" />
-        </button>
-        <!-- 插件：点击清角标后导航。角标数据源本身在 useNavBadges 里统一管了，
-             这里保留 goPlugins 的语义：进入即视为已读（markSeen 由 currentPage 变更触发） -->
-        <button
-          v-else-if="entry.kind === 'plugins'"
-          :class="['nav-item', { active: currentPage === 'plugins' }]"
-          @click="goPlugins"
-          @contextmenu="openNavMenu(entry.id, $event)"
-        >
-          <component :is="entry.icon" :size="14" />
-          <span>{{ t(entry.labelKey) }}</span>
-          <NavBadge :id="entry.id" />
-        </button>
-      </template>
+      <button
+        v-for="it in navItems"
+        :key="it.id"
+        :class="['nav-item', { active: it.active, opening: it.busy }]"
+        :disabled="it.disabled"
+        :title="it.title"
+        @click="emit('navigate', it.id)"
+        @contextmenu="openNavMenu(it.id, $event)"
+      >
+        <span v-if="it.busy" class="nav-spinner"></span>
+        <component v-else :is="it.icon" :size="14" />
+        <span>{{ it.label }}</span>
+        <span v-if="it.dot" class="nav-dot" :class="it.dot" :title="it.dotTitle"></span>
+        <NavBadge :id="it.id" />
+      </button>
 
       <!-- 已隐藏项的栖身之所：隐藏不等于删除，这里始终可以取回。
            只有在「当前可见项被隐藏」或「收起态」时才会出现；也可以从设置 → 导航管理。 -->
@@ -288,27 +317,35 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
           <ChevronDown :size="13" class="hidden-caret" :class="{ open: showHidden }" />
         </button>
         <!-- 展开态：就地列出；收起态：侧栏塞不下，用浮层向右展开 -->
-        <div :class="['hidden-list', { open: showHidden, 'as-popover': collapsed }]" @click.stop>
-          <!-- 外层必须是 div：里面还有一个「取回」按钮，<button> 不能嵌套 <button> -->
-          <div
-            v-for="e in hiddenNav"
-            :key="e.id"
-            class="nav-item hidden-item"
-            role="button"
-            tabindex="0"
-            :title="t(e.labelKey)"
-            @click="emit('navigate', e.id)"
-            @keydown.enter.prevent="emit('navigate', e.id)"
-            @keydown.space.prevent="emit('navigate', e.id)"
-            @contextmenu="openNavMenu(e.id, $event)"
-          >
-            <component :is="e.icon" :size="14" />
-            <span>{{ t(e.labelKey) }}</span>
-            <button class="hidden-restore" :title="t('navRestore')" @click.stop="showNav(e.id)">
-              <RotateCcw :size="12" />
-            </button>
+        <Transition
+          name="collapse"
+          @enter="onCollapseEnter"
+          @after-enter="onCollapseAfterEnter"
+          @leave="onCollapseLeave"
+        >
+          <div v-if="showHidden" class="hidden-list" :class="{ 'as-popover': collapsed }" @click.stop>
+            <!-- 外层必须是 div：里面还有一个「取回」按钮，<button> 不能嵌套 <button> -->
+            <div
+              v-for="e in hiddenNav"
+              :key="e.id"
+              class="nav-item hidden-item"
+              :class="{ active: e.id === currentPage }"
+              role="button"
+              tabindex="0"
+              :title="t(e.labelKey)"
+              @click="emit('navigate', e.id)"
+              @keydown.enter.prevent="emit('navigate', e.id)"
+              @keydown.space.prevent="emit('navigate', e.id)"
+              @contextmenu="openNavMenu(e.id, $event)"
+            >
+              <component :is="e.icon" :size="14" />
+              <span>{{ t(e.labelKey) }}</span>
+              <button class="hidden-restore" :title="t('navRestore')" @click.stop="showNav(e.id)">
+                <RotateCcw :size="12" />
+              </button>
+            </div>
           </div>
-        </div>
+        </Transition>
       </div>
     </div>
 
@@ -392,14 +429,21 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 .sidebar.collapsed .settings-btn span { display: none; }
 .sidebar.collapsed .workspace-selector { justify-content: center; padding: 10px 0; }
 .sidebar.collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
-.sidebar.collapsed .sidebar-footer { justify-content: center; gap: 4px; }
+/* 收起态 54px 宽放不下「通知 + 设置 + 折叠」三个横排按钮（实测超 90px），
+   居中后最右的折叠/展开箭头会被侧栏 overflow:hidden 裁掉——用户就「找不到展开按钮」。
+   改成竖向堆叠：三项各自居中，展开箭头恒定可见，也不挤占横向。 */
+.sidebar.collapsed .sidebar-footer { flex-direction: column; justify-content: center; gap: 8px; padding: 8px 0; }
 .sidebar.collapsed .settings-btn { flex: 0; padding: 6px; }
 .sidebar.collapsed .ws-dropdown { left: 6px; right: auto; width: 200px; }
 /* 收起态同样不能隐藏 span（浮层里的行要靠它显示名字），
-   只在不同的 class 上做显隐，不用 :has() —— WebView2 版本不可控 */
-.sidebar.collapsed .hidden-toggle span,
-.sidebar.collapsed .hidden-caret { display: none; }
+   只在不同的 class 上做显隐，不用 :has() —— WebView2 版本不可控。
+   但「已隐藏」分组的展开箭头必须保留：只剩一个灰色眼睛图标时毫无「可展开」提示，
+   用户会以为那是个普通图标、找不到展开入口。箭头靠 margin-left:auto 顶到行尾。 */
+.sidebar.collapsed .hidden-toggle span { display: none; }
 .sidebar.collapsed .hidden-item span { display: inline; }
+/* 收起态把分组按钮从「禁用灰」提回可点色，配合保留的箭头给出明确的可展开信号 */
+.sidebar.collapsed .hidden-toggle { color: var(--color-text-secondary); }
+.sidebar.collapsed .hidden-toggle .hidden-caret { color: var(--color-text-secondary); }
 
 /* 工作空间切换器 */
 .workspace-selector {
@@ -495,20 +539,21 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 }
 @keyframes nav-spin { to { transform: rotate(360deg); } }
 
-/* AI 生成指示点：running = 还在写（呼吸动画），done = 已写完等你回来看。
+/* 导航项行尾的「后台活动」指示点（provider 表见 DOT_PROVIDERS，键是 registry 的 NavDotKind）：
+   running = 还在跑（呼吸动画），done = 已跑完等你回来看。
    颜色不用红：红色留给监控掉线这类真故障（与通知中心角标同一口径）。 */
-.nav-ai-dot {
+.nav-dot {
   flex-shrink: 0; margin-left: auto;
   width: 7px; height: 7px; border-radius: 50%;
   background: var(--color-accent);
 }
-.nav-ai-dot.running { animation: nav-ai-pulse 1.1s ease-in-out infinite; }
-@keyframes nav-ai-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
+.nav-dot.running { animation: nav-dot-pulse 1.1s ease-in-out infinite; }
+@keyframes nav-dot-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .25; } }
 /* NavBadge 也挂在行尾，两者同排时留一点间距 */
-.nav-ai-dot + * { margin-left: 4px; }
+.nav-dot + * { margin-left: 4px; }
 /* 收起态照样要看见：`.collapsed .nav-item span` 会 display:none（0-3-1），
    这里必须同样的权重以上才能翻盘（nav-badge 是同样的坑，见上） */
-.sidebar.collapsed .nav-item .nav-ai-dot {
+.sidebar.collapsed .nav-item .nav-dot {
   display: inline-block;
   position: absolute;
   top: 5px;
@@ -521,9 +566,15 @@ onUnmounted(() => document.removeEventListener('click', onDocumentClick))
 .hidden-toggle { color: var(--color-text-disabled); }
 .hidden-caret { margin-left: auto; color: var(--color-text-disabled); transition: transform var(--transition-base); }
 .hidden-caret.open { transform: rotate(180deg); }
-.hidden-list { display: none; flex-direction: column; gap: 1px; padding-left: 8px; border-left: 1px dashed var(--color-border-secondary); margin: 2px 0 0 10px; }
-/* 展开与否只由 .open 决定；as-popover 只负责换定位方式，两者互不干涉 */
-.hidden-list.open { display: flex; }
+.hidden-list { display: flex; flex-direction: column; gap: 1px; padding-left: 8px; border-left: 1px dashed var(--color-border-secondary); margin: 2px 0 0 10px; }
+/* 显隐交给 v-if + Transition（高度由 JS 钩子量，见 onCollapseEnter）；
+   as-popover 只负责换定位方式，两者互不干涉。 */
+.collapse-enter-active,
+.collapse-leave-active {
+  overflow: hidden;
+  transition: height var(--transition-base), opacity var(--transition-base);
+}
+.collapse-enter-from, .collapse-leave-to { opacity: 0; }
 .hidden-list.as-popover {
   position: fixed;
   left: 54px;

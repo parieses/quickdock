@@ -16,24 +16,19 @@ import { unwrap } from './utils/api';
 import { logErr } from './utils/logger';
 import { getErrorMessage } from './utils/error';
 import { installExternalLinkGuard } from './utils/externalLinks';
-import { navigateTo, pendingOpenNoteId, pendingOpenTodoId } from './composables/bridge';
+import { navigate, pendingOpenNoteId, pendingOpenTodoId, setNavigator } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
-import SceneRail from './components/SceneRail.vue';
-import CollectionList from './components/CollectionList.vue';
-import ItemList from './components/ItemList.vue';
 import NotePanel from './components/NotePanel.vue';
-import SceneTags from './components/SceneTags.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 import { SkipUpdate } from '../bindings/quickdock/services/update/updateservice';
 // 页面注册表：主窗口内容页与侧边栏导航项的单一数据源（替代 currentPage 手动 switch）
-import { findContentPage, KEEP_ALIVE_PAGES, type PageContext } from './pages/registry'
+import { findContentPage, findNavEntry, KEEP_ALIVE_PAGES, type PageContext } from './pages/registry'
 
 // 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
 const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
-const OnboardingPage = defineAsyncComponent(() => import('./components/OnboardingPage.vue'))
-// 整页空状态引导（无场景 / 无集合两档共用）：此前这两档都没有可点入口
-const EmptyGuide = defineAsyncComponent(() => import('./components/EmptyGuide.vue'))
+// 主窗口内容页（含工作空间复合页 WorkspacePage）的异步组件与导航信息已收敛到
+// pages/registry，由注册表驱动渲染，替代手工 v-if 切换链。
 const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))
 // 主窗口内容页（notes/plugins/todo/schedule/monitor/ai/environments/clipboard）的
 // 异步组件与导航信息已收敛到 pages/registry，由注册表驱动渲染，替代手工 v-if 切换链。
@@ -68,54 +63,45 @@ const envInitialSection = ref<string | undefined>(undefined);
 
 // 页面路由
 const currentPage = ref('workspace')
-function setPage(page: string) {
-  if (page === 'dsh') {
-    openDSH()
-    return
-  }
-  if (page === 'ssh') {
-    // SSH 不是主窗口内的页面：点侧栏只负责把独立终端窗口唤到前台。
-    openSsh()
-    return
-  }
-  currentPage.value = page
-}
-
-// 注册跨页面导航（笔记/剪贴板等独立视图 → 侧边栏页面），供 bridge 使用
-navigateTo.value = (page: string) => {
-  if (window.location.hash) window.location.hash = ''
-  currentPage.value = page
-}
-
 // 打开设置模态框（供 AIPage 等注册页经注册表事件回调复用，替代模板内联箭头）
 function openSettings(page?: string) {
   settingsPage.value = page
   showSettings.value = true
 }
-// 页面注册表渲染上下文：向注册页传递动态 props / 事件处理器
-const pageContext: PageContext = { envInitialSection, openSettings }
+// 页面注册表运行期上下文：内容页拿它算动态 props/events，非内容页入口（ssh/dsh）
+// 拿它执行 activate。注册表只依赖这个接口，不依赖 App 内部实现。
+// openDSH / openSsh 是函数声明（提升），此处引用安全；真正调用发生在用户点击之后。
+const pageContext: PageContext = {
+  envInitialSection,
+  openSettings,
+  openDsh: () => openDSH(),
+  openSsh: () => openSsh(),
+}
 const currentContentPage = computed(() => findContentPage(currentPage.value))
 
-// 工作空间空状态引导：已选到工作空间、场景列表加载完毕、但一个场景都没有。
-// 必须带 !scenesLoading，否则切换工作空间时 scenes 先被清空，引导页会闪一下。
-// 这一档要占满整个内容区（连场景栏一起收掉），否则会留下一个空荡荡的场景列。
-const showWorkspaceGuide = computed(() =>
-  store.workspaces.length > 0 &&
-  store.scenes.length === 0 &&
-  !store.scenesLoading &&
-  !store.hasSearch
-)
+// 导航分发：条目自己声明点击行为 —— 有 activate 就执行它（唤起独立窗口），否则切页。
+// 这里刻意不认识 dsh / ssh：之前它们是两条 if 分支，等于把「哪些 id 不是内容页」
+// 这份知识同时写在注册表和 App 里，加一个窗口入口就要改两处。
+function setPage(page: string) {
+  const entry = findNavEntry(page)
+  if (entry?.activate) {
+    void entry.activate(pageContext)
+    return
+  }
+  currentPage.value = page
+}
 
-// 「当前场景下一个集合都没有」这一档：引导页占满集合 + 项目两块区域。
-// 只有两个空列表并排、各自写一句「点击上方 +」时，用户看到的是两片空白。
-// 同样要带 !collectionsLoading，否则切换场景时 collections 先被清空会闪。
-const showCollectionsGuide = computed(() =>
-  store.workspaces.length > 0 &&
-  !!store.activeSceneId &&
-  store.collections.length === 0 &&
-  !store.collectionsLoading &&
-  !store.hasSearch
-)
+// 注册跨页面导航器（笔记/剪贴板等独立视图 → 侧边栏页面），供 bridge 使用。
+// 走 setNavigator 而非直接赋值：bridge 那边会在导航器缺失时排队，注册时补发，
+// 于是「事件早于 App setup 到达」不再是一种需要靠执行顺序兜住的情况。
+setNavigator((page: string) => {
+  if (window.location.hash) window.location.hash = ''
+  currentPage.value = page
+})
+
+// 工作空间的四档状态（引导 / 无场景 / 无集合 / 三栏）已随布局一起搬到
+// components/WorkspacePage.vue —— 它们与布局强相关，留在 App 只会让内容区
+// 恢复成「注册页 + 一支特例分支」两套写法。
 
 // 从侧边栏点 DeepSeek：先探测环境——缺 node/dsh 自动安装并打开设置页展示进度；已就绪直接开原生窗口
 interface EnvProbe { nodeFound?: boolean; dshInstalled?: boolean }
@@ -296,7 +282,7 @@ onMounted(async () => {
     const id = typeof raw === 'string' ? raw : ''
     if (!id.trim()) return
     pendingOpenNoteId.value = id
-    navigateTo.value?.('notes')
+    navigate('notes')
   })
   // 命令面板选中待办：同上，写入 pendingOpenTodoId 并切到待办页
   Events.On('todo:open-request', (ev: any) => {
@@ -305,7 +291,17 @@ onMounted(async () => {
     const id = typeof raw === 'string' ? raw : ''
     if (!id.trim()) return
     pendingOpenTodoId.value = id
-    navigateTo.value?.('todos')
+    navigate('todos')
+  })
+  // 命令面板「快速导航」：面板浮窗经后端广播页面 id，主窗口直接切页。
+  // 走 setPage 而不是 navigate setNavigator 那条：这里就在主窗口内，没有
+  // 「导航器尚未注册」的问题，且需要保留 registry 的 activate 分发语义。
+  Events.On('nav:goto', (ev: any) => {
+    if (window.location.hash) return
+    const raw = ev?.data ?? ev
+    const page = typeof raw === 'string' ? raw : ''
+    if (!page.trim()) return
+    setPage(page)
   })
 });
 
@@ -421,7 +417,7 @@ const activeConfirm = computed(() =>
     <div class="app-body">
       <Sidebar class="app-sidebar"
         :currentPage="currentPage"
-        :dshOpening="dshOpening"
+        :busyPage="dshOpening ? 'dsh' : ''"
         @navigate="setPage"
         @open-settings="openSettings"
       />
@@ -429,57 +425,24 @@ const activeConfirm = computed(() =>
            否则 SceneTags 这条横栏只把集合/项目往下推，
            三栏的面板头不在同一条水平线上 —— 这才是"三栏割裂"的主因。 -->
       <div class="app-content">
-        <!-- 工作空间复合页（含首次引导 Onboarding / 场景栏，非单组件，保留显式分支） -->
-        <template v-if="currentPage === 'workspace'">
-          <!-- 空状态引导页（首次使用，无工作空间） -->
-          <OnboardingPage v-if="store.workspaces.length === 0" @open-settings="openSettings" />
-
-          <!-- 空状态引导页（已有工作空间，但里面一个场景都没有）：占满整个内容区 -->
-          <EmptyGuide
-            v-else-if="showWorkspaceGuide"
-            variant="scene"
-            @open-settings="openSettings"
-          />
-
-          <!-- 常规内容 -->
-          <template v-else>
-            <div v-if="store.error" class="ws-error-bar">
-              <span class="ws-error-text">{{ store.error }}</span>
-              <button class="ws-error-close" @click="store.error = ''" :title="t('close')">✕</button>
-            </div>
-            <SceneTags />
-            <div class="app-content-body">
-              <!-- 三栏起点：场景 → 集合 → 项目，共用同一条顶部基线 -->
-              <SceneRail />
-              <!-- 当前场景下没有集合：引导页占满「集合 + 项目」两块区域 -->
-              <EmptyGuide
-                v-if="showCollectionsGuide"
-                variant="collection"
-                @open-settings="openSettings"
-              />
-              <template v-else>
-                <CollectionList class="app-collections" />
-                <ItemList class="app-items" />
-              </template>
-            </div>
-          </template>
-        </template>
-
-        <!-- 注册页：由 pages/registry 驱动动态渲染，替代手工 v-if 切换链 -->
+        <!-- 内容区只有一套渲染：注册页（工作空间也在这里，复合布局在 WorkspacePage 内部）。
+             此前 workspace 是一支独立分支，四层条件嵌套；现在它与其它页完全同权。 -->
         <div
-          v-else-if="currentContentPage"
+          v-if="currentContentPage"
           :class="currentContentPage.wrapperClass || 'page-shell'"
         >
           <!-- KeepAlive：白名单内的页（AI / Monitor / SSH / Note / Plugin）离开后继续存活，
                切回来不重 fetch、不重建 xterm / 轮询 / 编辑态（见 KEEP_ALIVE_PAGES）。
                其余页按常规卸载重载——它们是无状态列表，重建便宜且能拿到最新数据。 -->
-          <KeepAlive :include="KEEP_ALIVE_PAGES">
-            <component
-              :is="currentContentPage.component"
-              v-bind="currentContentPage.props ? currentContentPage.props(pageContext) : {}"
-              v-on="currentContentPage.listeners ? currentContentPage.listeners(pageContext) : {}"
-            />
-          </KeepAlive>
+          <Transition name="page" mode="out-in">
+            <KeepAlive :include="KEEP_ALIVE_PAGES">
+              <component
+                :is="currentContentPage.component"
+                v-bind="currentContentPage.props ? currentContentPage.props(pageContext) : {}"
+                v-on="currentContentPage.listeners ? currentContentPage.listeners(pageContext) : {}"
+              />
+            </KeepAlive>
+          </Transition>
         </div>
       </div>
     </div>
@@ -521,6 +484,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
   user-select: none;
 }
+
+/* 切换导航的过渡：淡出→淡入（out-in）。
+   不用「同时过渡」是因为那需要两页绝对定位叠在一起，而各页容器结构不同
+   （有的是 .page-shell display:contents、有的要撑满），一叠就错位。
+   离场比入场快：切换的手感由「旧页消失得干脆」决定。 */
+.page-enter-active { transition: opacity var(--transition-base), transform var(--transition-base); }
+.page-leave-active { transition: opacity var(--transition-fast), transform var(--transition-fast); }
+.page-enter-from { opacity: 0; transform: translateY(6px); }
+.page-leave-to { opacity: 0; transform: translateY(-4px); }
 
 </style>
 
@@ -569,30 +541,11 @@ body {
   display: flex; flex-direction: column; overflow: hidden;
   background: var(--color-bg-primary);
 }
-.app-content-body {
-  flex: 1; display: flex; overflow: hidden;
-}
 /* 注册页外层：默认 display:contents 使其子组件等价于 .app-content 的直接 flex 子项，
    保持与旧 v-if 链一致的布局；clipboard 等需撑满的页由 wrapperClass 覆盖本规则。 */
 .page-shell { display: contents; }
-.ws-error-bar {
-  display: flex; align-items: center; gap: 8px;
-  margin: 8px 12px 0;
-  padding: 6px 10px;
-  border-radius: var(--radius-sm);
-  background: var(--color-danger-bg);
-  border: 1px solid var(--color-danger-border);
-  color: var(--color-danger);
-  font-size: 12px;
-}
-.ws-error-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ws-error-close {
-  background: none; border: none; cursor: pointer;
-  color: inherit; font-size: 12px; padding: 2px 4px; opacity: 0.7;
-}
-.ws-error-close:hover { opacity: 1; }
-.app-collections { flex-shrink: 0; }
-.app-items { flex: 1; min-width: 0; }
+/* 工作空间的三栏布局样式（.ws-root / .ws-body / .ws-error-bar 等）随布局
+   移到了 WorkspacePage.vue 的 scoped 样式里：父组件的 scoped 规则够不到子组件内部元素。 */
 
 /* 剪贴板页面 */
 .clipboard-page {

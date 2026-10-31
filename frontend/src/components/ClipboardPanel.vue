@@ -27,7 +27,7 @@ import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
 import { useAIAvailability } from '../composables/useAIAvailability'
 // 剪贴板里「存为待办」也是一条新建入口，角标要跟着涨
-import { refreshNavBadges } from '../composables/useNavBadges'
+import { navBadges } from '../composables/useNavBadges'
 import { pinyinOf } from '../utils/pinyin'
 import { filterByTag, queryPushForTag, tagPushSignature } from '../utils/clipboardFilter'
 import type { ToastAPI } from '../types'
@@ -529,7 +529,7 @@ async function saveAsTodo(entry: ClipboardEntry) {
   try {
     // 标题取首行，全文放备注，避免标题栏塞满长文本
     feedback(await CreateTodo(firstLineAsTitle(content), 'medium', '', content, '', '', '', '', ''), t('clipboardSavedTodo'))
-    refreshNavBadges()
+    navBadges().refreshNow()
   } catch (e) {
     toast?.error?.(getErrorMessage(e))
   }
@@ -785,9 +785,9 @@ onUnmounted(() => {
                 <ImageIcon :size="24" />
               </div>
             </div>
-            <div v-if="entry.imageHash && entry.textContent" class="file-entry" style="margin-top:6px">
+            <div v-if="entry.imageHash && entry.textContent" class="file-entry file-entry--top">
               <FileIcon :size="14" class="file-icon" />
-              <div class="file-paths" style="font-size:11px">{{ entry.textContent }}</div>
+              <div class="file-paths file-paths--sm">{{ entry.textContent }}</div>
             </div>
           </template>
           <!-- 文件条目 -->
@@ -1131,7 +1131,7 @@ onUnmounted(() => {
   background: var(--color-surface-elevated);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, .28);
+  box-shadow: var(--shadow-lg);
 }
 .save-menu-item {
   display: flex; align-items: center; gap: 8px; width: 100%;
@@ -1208,12 +1208,14 @@ onUnmounted(() => {
   display: flex; align-items: flex-start; gap: 8px;
   margin-bottom: 4px;
 }
+.file-entry--top { margin-top: var(--space-3); }
 .file-icon { flex-shrink: 0; margin-top: 2px; color: var(--color-accent); }
 .file-paths {
   flex: 1; min-width: 0;
   font-size: 12px; color: var(--color-text-secondary); line-height: 1.5;
   word-break: break-all; white-space: pre-wrap;
 }
+.file-paths--sm { font-size: 11px; }
 /* 在资源管理器定位：贴在路径右侧，hover 条目才显出来，不抢视觉 */
 .file-reveal {
   flex-shrink: 0; display: flex; align-items: center; justify-content: center;

@@ -1,5 +1,7 @@
 <script setup lang="ts">
-defineOptions({ name: 'PluginManagerPage' })
+defineOptions({ name: KEEP_ALIVE.plugins })
+// name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
+import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'

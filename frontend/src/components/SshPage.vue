@@ -1,5 +1,7 @@
 <script lang="ts" setup>
-defineOptions({ name: 'SshPage' })
+defineOptions({ name: KEEP_ALIVE.ssh })
+// name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
+import { KEEP_ALIVE } from '../pages/keepAlive'
 /**
  * SSH 独立窗口的主页面：左侧会话树 + 顶部标签栏 + 右侧终端（#13）。
  *
