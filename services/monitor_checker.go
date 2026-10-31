@@ -237,8 +237,16 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	// 在补上之前，连续 N 次失败就该告警——漏报真故障比多说一句「也变慢了」贵得多。
 	prev := current.LastStatus
 	downAlertTriggered := !up && newDownCount == threshold
+	// 静默窗口：探测、计数、写日志照常，只把「推送」这一层摘掉。
+	// 用 current 副本判断，避免探针期间用户刚点了静默却被当成生效前。
+	// 不跳过 PushNotification 之外的东西是有意为之：静默期结束前用户翻列表，
+	// 仍要能看到这条确实红过、以及停机日历上的痕迹。
+	//
+	// 已知取舍：静默期正好盖住整段故障时，恢复后不会再补发这条告警——
+	// 但这是用户自己点的「别吵我」，且 last_status 与日志仍是事实，不算丢信息。
+	muted := current.MuteUntil > time.Now().Unix()
 	switch {
-	case downAlertTriggered && current.NotifyDown:
+	case downAlertTriggered && current.NotifyDown && !muted:
 		title := "🔴 监控告警：" + m.Name
 		body := m.URL
 		if errMsg != "" {
@@ -261,7 +269,7 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 		// 同一次翻转也进通知中心：气泡弹完就没了，用户离开电脑十分钟回来
 		// 只想知道「刚才是不是炸过」，那张表就是给这个问题的。
 		a.PushNotification("monitor", "error", title, body, "monitor", m.ID)
-	case status == "up" && prev == "down" && current.NotifyUp:
+	case status == "up" && prev == "down" && current.NotifyUp && !muted:
 		title := "🟢 已恢复：" + m.Name
 		body := fmt.Sprintf("%s\n响应 %d · %dms", m.URL, code, latency)
 		if a.Notifier != nil {
@@ -273,6 +281,18 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 		}
 		a.sendWebhookNotify(title, body)
 		a.PushNotification("monitor", "success", title, body, "monitor", m.ID)
+	}
+
+	// 状态翻转（up↔down）实时广播，给前端角标用。monitorDown 角标原本只靠 60s 轮询
+	// 的 GetNavBadges 刷新：一次宕机恢复要等下一轮 tick、或用户点进监控页打已读才消失，
+	// 那个恢复瞬间本就该即时反映。这里不看 NotifyUp/NotifyDown 开关——角标是「当前有几台挂了」
+	// 的事实，与用户要不要收告警无关。首次检测（prev 为空）不算翻转，不广播。
+	if prev != "" && status != prev && a.app != nil {
+		a.app.Event.Emit("monitor:changed", map[string]any{
+			"id":     m.ID,
+			"status": status,
+			"prev":   prev,
+		})
 	}
 	return status, summary
 }

@@ -177,6 +177,24 @@ func (s *MonitorService) SetMonitorMaintenance(id string, until int64) *services
 	return services.Ok(nil)
 }
 
+// SetMonitorMute 告警静默：until=0 取消。
+//
+// 与 SetMonitorMaintenance 的区别必须记在名字旁边，否则很容易被当成同一个开关：
+// 维护窗口 = 暂停探测（不写日志，图上留缺口）；静默 = 照常探测、照常记日志，
+// 只是不弹气泡、不发 Webhook —— 凌晨备份那类「隔几分钟抖一下」的噪音应该用这个。
+func (s *MonitorService) SetMonitorMute(id string, until int64) *services.ApiResult {
+	if r := s.dbOK(); r != nil {
+		return r
+	}
+	if strings.TrimSpace(id) == "" {
+		return services.Fail(fmt.Errorf("参数不合法：id 不能为空"))
+	}
+	if err := s.App.DB.SetMonitorMute(id, until); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
 // SetMonitorEnabled 启用/停用监控
 func (s *MonitorService) SetMonitorEnabled(id string, enabled bool) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
