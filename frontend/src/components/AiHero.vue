@@ -9,10 +9,15 @@
  */
 import { ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ArrowUp, FolderOpen, GitBranch, Image as ImageIcon, Link2 } from '@lucide/vue'
+import { ArrowUp, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
-import type { AISpace } from '../types/ai'
+import type { AIConnector, AIMentionItem, AISkill, AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
+import AiPlusPanel from './AiPlusPanel.vue'
+import AiSlashPanel from './AiSlashPanel.vue'
+import AiRichInput from './AiRichInput.vue'
+import AiMentionBox from './AiMentionBox.vue'
+import AiPermissionBadge from './AiPermissionBadge.vue'
 
 /** 一排类型 pill 的一项（icon 是 lucide 组件）。script setup 里不能 export，父组件按结构传即可。 */
 interface HeroMode {
@@ -29,13 +34,16 @@ const props = defineProps<{
   urlDraft: string
   attachments: PendingImage[]
   input: string
+  /** @ 引用：已选 chip 与补全弹层（与聊天输入框共用同一份状态） */
+  mentions: AIMentionItem[]
+  mentionOpen: boolean
+  mentionItems: AIMentionItem[]
+  mentionIdx: number
   hasKey: boolean
   newTaskSpace: string
   spaces: AISpace[]
-  /** 「新建空间」的哨兵值；等于它时才显示选目录按钮 */
+  /** 「新建空间」的哨兵值；选中它时父组件会立刻弹目录选择器 */
   newSpace: string
-  newTaskDir: string
-  newTaskDirLabel: string
   aiActive: string
   aiProfiles: AIProfile[]
   allowFileImage: boolean
@@ -46,6 +54,20 @@ const props = defineProps<{
   /** 产物去向说明（普通任务 / 空间任务文案不同，由父组件算） */
   outHint: string
   heroTips: string[]
+  /** 「技能和连接器」面板：与聊天输入框共用同一份状态，见 AIPage */
+  plusOpen: boolean
+  skills: AISkill[]
+  connectors: AIConnector[]
+  /** 输入框里已选中的技能（行内胶囊，见 AiRichInput）：只给面板标「已选」用 */
+  pickedSkills: string[]
+  /** 「/ 选技能」补全 */
+  slashOpen: boolean
+  slashItems: AISkill[]
+  slashIdx: number
+  /** 正文非空：只挂了技能胶囊、正文空着时发送按钮该是灰的 */
+  canSend: boolean
+  /** 执行权限：true = 完全访问。新建任务默认是「默认权限」，在这里切的第一句就生效 */
+  permissionFull: boolean
 }>()
 
 const emit = defineEmits<{
@@ -55,7 +77,7 @@ const emit = defineEmits<{
   (e: 'update:newTaskSpace', v: string): void
   (e: 'update:aiActive', v: string): void
   (e: 'model-change'): void
-  (e: 'enter', ev: KeyboardEvent): void
+  (e: 'key', ev: KeyboardEvent): void
   (e: 'send'): void
   (e: 'paste', ev: ClipboardEvent): void
   (e: 'drop', ev: DragEvent): void
@@ -66,20 +88,33 @@ const emit = defineEmits<{
   (e: 'toggle-url'): void
   (e: 'fill-tip', key: string): void
   (e: 'open-settings'): void
+  (e: 'toggle-plus'): void
+  (e: 'pick-skill', sk: AISkill): void
+  (e: 'update:skills', names: string[]): void
+  (e: 'pick-mention', it: AIMentionItem): void
+  (e: 'remove-mention', i: number): void
+  (e: 'toggle-connector', c: AIConnector): void
+  (e: 'install-skill'): void
+  (e: 'manage-connectors'): void
+  (e: 'change-permission', full: boolean): void
 }>()
 
 const { t } = useI18n()
 
-// 落地页输入框：父组件在「新建任务 / 填示例」时要把焦点放回来，所以对外暴露 focus()
-const heroInputEl = ref<HTMLTextAreaElement | null>(null)
-defineExpose({ focus: () => heroInputEl.value?.focus() })
-
-function text(e: Event): string {
-  return (e.target as HTMLTextAreaElement).value
-}
+// 落地页输入框：父组件在「新建任务 / 填示例」时要把焦点放回来，所以对外暴露 focus()；
+// 技能胶囊是输入框内部的行内节点，插入也只能由富输入框自己完成。
+const heroInputEl = ref<InstanceType<typeof AiRichInput> | null>(null)
+defineExpose({
+  focus: () => heroInputEl.value?.focus(),
+  insertSkill: (name: string) => heroInputEl.value?.insertSkill(name),
+})
 
 function onSpaceSelect(e: Event) {
-  emit('update:newTaskSpace', (e.target as HTMLSelectElement).value)
+  const v = (e.target as HTMLSelectElement).value
+  emit('update:newTaskSpace', v)
+  // 「新建空间…」= 选一个目录（空间按目录唯一）：选中就当场上目录选择器，
+  // 而不是让下拉先停在「新建空间…」等用户再点一次右边的按钮。
+  if (v === props.newSpace) emit('pick-dir')
 }
 
 /** 先回写选中的档案，再通知父组件去应用（顺序反了 onModelChange 读到的还是旧值） */
@@ -128,43 +163,56 @@ function onModelSelect(e: Event) {
             <button class="ai-attach-del" :title="t('delete')" @click="emit('remove-attachment', i)">×</button>
           </div>
         </div>
-        <textarea
+        <!-- @ 引用：与聊天输入框同一套状态，落地页也能引用文件/历史对话 -->
+        <AiMentionBox
+          :mentions="props.mentions"
+          :open="props.mentionOpen"
+          :items="props.mentionItems"
+          :idx="props.mentionIdx"
+          @pick="emit('pick-mention', $event)"
+          @remove="emit('remove-mention', $event)"
+        />
+        <AiRichInput
           ref="heroInputEl"
-          :value="props.input"
-          class="ai-hero-input"
-          rows="3"
+          :model-value="props.input"
           :placeholder="t('aiHeroPlaceholder')"
           :disabled="!props.hasKey"
-          @input="emit('update:input', text($event))"
-          @keydown.enter="emit('enter', $event)"
+          :min-height="64"
+          :max-height="240"
+          @update:model-value="emit('update:input', $event)"
+          @update:skills="emit('update:skills', $event)"
+          @key="emit('key', $event)"
           @paste="emit('paste', $event)"
-        ></textarea>
+        />
         <div class="ai-hero-bar">
+          <!-- 技能和连接器：与聊天输入框同一个面板、同一份状态（技能按会话、连接器按本机）。 -->
+          <button
+            class="ai-hero-plus"
+            :class="{ 'is-open': props.plusOpen }"
+            :title="t('aiPlusTip')"
+            @click="emit('toggle-plus')"
+          >
+            <Plus :size="16" />
+          </button>
           <!-- 当前目录若在 git 仓库里，左侧显示分支（与聊天输入框同款提示）。 -->
           <div v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
             <GitBranch :size="12" />
             <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
           </div>
           <!-- 归属空间：不选就是普通任务（后端会自动给它建一个专属目录）。
-               已有空间直接选；「新建空间…」才需要选目录——空间按目录唯一。 -->
+               已有空间直接选；选「新建空间…」会立刻弹出目录选择器——空间按目录唯一，
+               所以不需要「先选新建、再点一个按钮选目录」这两步。选到的目录见下方产物去向。 -->
           <select :value="props.newTaskSpace" class="ai-hero-select" :title="t('aiNewTaskSpace')" @change="onSpaceSelect($event)">
             <option value="">{{ t('aiNewTaskSpaceNone') }}</option>
             <option v-for="s in props.spaces" :key="s.id" :value="s.id" :title="s.cwd">{{ s.name }}</option>
             <option :value="props.newSpace">{{ t('aiNewTaskSpaceNew') }}</option>
           </select>
-          <button
-            v-if="props.newTaskSpace === props.newSpace"
-            class="ai-hero-select"
-            :title="props.newTaskDir || t('aiPickFolderTitle')"
-            @click="emit('pick-dir')"
-          >
-            <FolderOpen :size="12" />
-            <span class="ai-hero-dir">{{ props.newTaskDir ? props.newTaskDirLabel : t('aiNewTaskDirNone') }}</span>
-          </button>
           <select :value="props.aiActive" class="ai-hero-select" :title="t('aiSwitchModel')" @change="onModelSelect($event)">
             <option v-for="p in props.aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
           </select>
           <div class="ai-hero-bar-right">
+            <!-- 当前权限：落地页也能切，第一句就按这个口径执行 -->
+            <AiPermissionBadge :full="props.permissionFull" @change="emit('change-permission', $event)" />
             <button v-if="props.allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
               <ImageIcon :size="16" />
             </button>
@@ -173,7 +221,7 @@ function onModelSelect(e: Event) {
             </button>
             <button
               class="ai-hero-send"
-              :disabled="!props.hasKey || (!props.input.trim() && !props.attachments.length)"
+              :disabled="!props.hasKey || (!props.canSend && !props.attachments.length)"
               :title="t('send')"
               @click="emit('send')"
             >
@@ -181,6 +229,25 @@ function onModelSelect(e: Event) {
             </button>
           </div>
         </div>
+        <!-- 技能和连接器面板（与聊天输入框共用组件），挂在 .ai-hero-box 内以便向上展开 -->
+        <AiSlashPanel
+          v-if="props.slashOpen"
+          :items="props.slashItems"
+          :idx="props.slashIdx"
+          :picked="props.pickedSkills"
+          @pick="emit('pick-skill', $event)"
+        />
+        <AiPlusPanel
+          v-if="props.plusOpen"
+          :skills="props.skills"
+          :connectors="props.connectors"
+          :picked="props.pickedSkills"
+          @close="emit('toggle-plus')"
+          @pick-skill="emit('pick-skill', $event)"
+          @toggle-connector="emit('toggle-connector', $event)"
+          @install-skill="emit('install-skill')"
+          @manage-connectors="emit('manage-connectors')"
+        />
       </div>
 
       <!-- 产物去向：既是说明也是「空间是什么」的解释——比一个空下拉好懂 -->
@@ -253,27 +320,33 @@ function onModelSelect(e: Event) {
   background: var(--color-bg-tertiary);
   padding: 10px 12px 8px;
   transition: border-color var(--transition-fast);
+  /* 技能和连接器面板的定位锚点（向上展开）。 */
+  position: relative;
 }
+
+/* 左下角的 +：与聊天输入区同款，只承载「技能和连接器」面板。 */
+.ai-hero-plus {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.ai-hero-plus:hover,
+.ai-hero-plus.is-open { background: var(--color-bg-active); color: var(--color-text-primary); }
 
 .ai-hero-box:focus-within { border-color: var(--color-accent); }
 
-.ai-hero-input {
-  width: 100%;
-  min-height: 64px;
-  max-height: 240px;
-  resize: none;
-  border: none;
-  outline: none;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-family: inherit;
-  font-size: 14px;
-  line-height: 1.6;
-}
-
-.ai-hero-input::placeholder { color: var(--color-text-disabled); }
-
-.ai-hero-input:disabled { opacity: 0.6; cursor: not-allowed; }
+/* 富输入框（AiRichInput）在落地页用大一号的字，与原来那个 textarea 一致 */
+.ai-hero-box :deep(.ai-rich) { font-size: 14px; line-height: 1.6; }
 
 .ai-hero-bar {
   display: flex;
@@ -330,8 +403,6 @@ select.ai-hero-select {
   border-color: var(--color-border);
   color: var(--color-text-primary);
 }
-
-.ai-hero-dir { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .ai-hero-send {
   display: flex; align-items: center; justify-content: center;

@@ -7,10 +7,16 @@
  * 输入区贴着窗口底部，往下弹会被切掉；也不跟光标跑（textarea 里算光标坐标
  * 要镜像一个 div，得不偿失）。
  */
+import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { FileText, Folder, GitBranch, Image as ImageIcon, Link2, MessageSquare, ArrowUp, Square } from '@lucide/vue'
-import type { AIHooksInfo, AIMentionItem } from '../types/ai'
+import { GitBranch, Image as ImageIcon, Link2, ArrowUp, Plus, Square } from '@lucide/vue'
+import type { AIConnector, AIHooksInfo, AIMentionItem, AISkill } from '../types/ai'
 import type { PendingImage } from '../types'
+import AiPlusPanel from './AiPlusPanel.vue'
+import AiSlashPanel from './AiSlashPanel.vue'
+import AiRichInput from './AiRichInput.vue'
+import AiMentionBox from './AiMentionBox.vue'
+import AiPermissionBadge from './AiPermissionBadge.vue'
 
 const props = defineProps<{
   hooks: AIHooksInfo | null
@@ -28,6 +34,20 @@ const props = defineProps<{
   allowUrlImage: boolean
   gitRepo: boolean
   gitBranch: string
+  // 「技能和连接器」面板：状态归 AIPage，这里只渲染。
+  plusOpen: boolean
+  skills: AISkill[]
+  connectors: AIConnector[]
+  // 输入框里已选中的技能（行内胶囊，见 AiRichInput）：只给面板标「已选」用
+  pickedSkills: string[]
+  // 「/ 选技能」补全：打字时按名字过滤候选
+  slashOpen: boolean
+  slashItems: AISkill[]
+  slashIdx: number
+  // 正文非空：只挂了技能胶囊、正文空着时发送按钮该是灰的
+  canSend: boolean
+  // 这条对话的执行权限：true = 完全访问（不再逐条确认）
+  permissionFull: boolean
 }>()
 
 const emit = defineEmits<{
@@ -45,17 +65,26 @@ const emit = defineEmits<{
   (e: 'drop', ev: DragEvent): void
   (e: 'open-file-picker'): void
   (e: 'toggle-url'): void
+  (e: 'toggle-plus'): void
+  (e: 'pick-skill', sk: AISkill): void
+  (e: 'update:skills', names: string[]): void
+  (e: 'toggle-connector', c: AIConnector): void
+  (e: 'install-skill'): void
+  (e: 'manage-connectors'): void
+  (e: 'change-permission', full: boolean): void
 }>()
 
 const { t } = useI18n()
 
-function text(e: Event): string {
-  return (e.target as HTMLTextAreaElement).value
-}
+// 从 + 面板点技能后要把焦点还给输入框，否则光标停在面板按钮上，
+// 用户得先点一下输入框才能接着打正文。
+const inputEl = ref<InstanceType<typeof AiRichInput> | null>(null)
+defineExpose({
+  focus: () => inputEl.value?.focus(),
+  // 技能胶囊在输入框内部（行内），所以「插入技能」这件事只能由富输入框自己做
+  insertSkill: (name: string) => inputEl.value?.insertSkill(name),
+})
 
-function iconOf(kind: string) {
-  return kind === 'conv' ? MessageSquare : kind === 'dir' ? Folder : FileText
-}
 </script>
 
 <template>
@@ -95,55 +124,53 @@ function iconOf(kind: string) {
       />
       <button class="ai-url-ok" @click="emit('confirm-url')">{{ t('add') }}</button>
     </div>
-    <!-- @ 引用（B2）：已选 chip 与补全弹层。
-         @ 只在主输入框生效：落地页那个 hero 输入框是同一份 v-model，但弹出的
-         弹层是相对输入区定位的，在 hero 里打 @ 只会留下纯文本（后端 mentions 为空
-         时不会展开任何东西），不会出现「弹层在屏幕另一头」这种怪状。 -->
-    <div v-if="props.mentions.length" class="ai-mention-chips">
-      <span
-        v-for="(m, i) in props.mentions"
-        :key="m.kind + (m.path || m.convId || String(i))"
-        class="ai-mention-chip"
-        :title="m.path || m.name"
-      >
-        <component :is="iconOf(m.kind)" :size="11" />
-        <span class="ai-mention-chip-name">{{ m.kind === 'conv' ? m.name : (m.path || m.name) }}</span>
-        <button class="ai-mention-chip-del" :title="t('delete')" @click="emit('remove-mention', i)">×</button>
-      </span>
-    </div>
-    <div v-if="props.mentionOpen" class="ai-mention-pop">
-      <div
-        v-for="(it, i) in props.mentionItems"
-        :key="it.kind + (it.path || it.convId || String(i))"
-        class="ai-mention-item"
-        :class="{ 'is-active': i === props.mentionIdx }"
-        @mousedown.prevent="emit('pick-mention', it)"
-      >
-        <component :is="iconOf(it.kind)" :size="12" />
-        <span class="ai-mention-name">{{ it.name }}</span>
-        <span v-if="it.path" class="ai-mention-path">{{ it.path }}</span>
-        <span v-else-if="it.kind === 'conv'" class="ai-mention-path">{{ t('aiMentionConv') }}</span>
-      </div>
-    </div>
+    <!-- @ 引用（B2）：已选 chip 与补全弹层，与落地页共用同一个组件 -->
+    <AiMentionBox
+      :mentions="props.mentions"
+      :open="props.mentionOpen"
+      :items="props.mentionItems"
+      :idx="props.mentionIdx"
+      @pick="emit('pick-mention', $event)"
+      @remove="emit('remove-mention', $event)"
+    />
     <!-- 输入框本体：透明、无边框，靠外层圆角框承载容器质感（与「新建任务」输入框同款）。 -->
-    <textarea
-      :value="props.input"
-      class="ai-input"
+    <AiRichInput
+      ref="inputEl"
+      :model-value="props.input"
       :placeholder="t('aiPlaceholder')"
       :disabled="!props.hasKey || props.streaming"
-      @input="emit('update:input', text($event))"
-      @keydown="emit('composer-key', $event)"
+      :min-height="44"
+      :max-height="200"
+      @update:model-value="emit('update:input', $event)"
+      @update:skills="emit('update:skills', $event)"
+      @key="emit('composer-key', $event)"
       @paste="emit('paste', $event)"
     />
-    <!-- 底部工具条：左上是当前目录的 git 分支（在仓库里才显示），右上是图片 / 链接 / 发送。 -->
+    <!-- 底部工具条：左边是「+ 技能和连接器」与当前目录的 git 分支（在仓库里才显示），
+         右边是图片 / 链接 / 发送。 -->
     <div class="ai-input-bar">
       <div class="ai-input-bar-left">
+        <button
+          class="ai-plus-btn"
+          :class="{ 'is-open': props.plusOpen }"
+          :title="t('aiPlusTip')"
+          @click="emit('toggle-plus')"
+        >
+          <Plus :size="16" />
+        </button>
         <span v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
           <GitBranch :size="12" />
           <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
         </span>
       </div>
       <div class="ai-input-bar-right">
+        <!-- 当前权限：默认权限会逐个问，完全访问直接做。生成中不给切——
+             这一轮已经按旧口径在跑，切了也不生效，只会让人以为切了。 -->
+        <AiPermissionBadge
+          :full="props.permissionFull"
+          :disabled="props.streaming"
+          @change="emit('change-permission', $event)"
+        />
         <button v-if="props.allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
           <ImageIcon :size="16" />
         </button>
@@ -158,7 +185,7 @@ function iconOf(kind: string) {
         <button
           v-else
           class="ai-send"
-          :disabled="!props.hasKey || (!props.input.trim() && !props.attachments.length)"
+          :disabled="!props.hasKey || (!props.canSend && !props.attachments.length)"
           :title="t('send')"
           @click="emit('send')"
         >
@@ -166,6 +193,25 @@ function iconOf(kind: string) {
         </button>
       </div>
     </div>
+    <!-- 「技能和连接器」面板：内容与「新建任务」那个输入框共用一份组件。 -->
+    <AiSlashPanel
+      v-if="props.slashOpen"
+      :items="props.slashItems"
+      :idx="props.slashIdx"
+      :picked="props.pickedSkills"
+      @pick="emit('pick-skill', $event)"
+    />
+    <AiPlusPanel
+      v-if="props.plusOpen"
+      :skills="props.skills"
+      :connectors="props.connectors"
+      :picked="props.pickedSkills"
+      @close="emit('toggle-plus')"
+      @pick-skill="emit('pick-skill', $event)"
+      @toggle-connector="emit('toggle-connector', $event)"
+      @install-skill="emit('install-skill')"
+      @manage-connectors="emit('manage-connectors')"
+    />
   </div>
 </template>
 
@@ -177,7 +223,9 @@ function iconOf(kind: string) {
   /* 单圆角框容器：去顶边框、改为整框描边 + 圆角 + 浅底，输入框本体透明无边框，
      整体质感与落地页「新建任务」输入框一致（参考截图）。 */
   padding: 10px 12px 8px;
-  margin: 0 16px 12px;
+  /* 不铺满右侧：居中 80%，两侧留白让视线落在输入框本身（审批卡也按这个宽度对齐）。 */
+  width: 80%;
+  margin: 0 auto 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
   background: var(--color-bg-tertiary);
@@ -198,6 +246,27 @@ function iconOf(kind: string) {
 }
 
 .ai-input-bar-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+
+/* 左下角的 +：与右侧图片/链接同尺寸的图标按钮，只多一个「打开中」的底色。
+   它承载「技能和连接器」——不写成文字按钮是因为这里已经有 git 分支 chip，
+   再塞一段文字会把发送按钮挤到换行。 */
+.ai-plus-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.ai-plus-btn:hover,
+.ai-plus-btn.is-open { background: var(--color-bg-active); color: var(--color-text-primary); }
 
 .ai-input-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
 
@@ -247,69 +316,6 @@ function iconOf(kind: string) {
 }
 
 .ai-hook-no:hover { color: var(--color-text-primary); }
-
-.ai-mention-chips { display: flex; flex-wrap: wrap; gap: 6px; }
-
-.ai-mention-chip {
-  display: inline-flex; align-items: center; gap: 3px; max-width: 260px;
-  padding: 2px 4px 2px 6px; font-size: 11px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary); color: var(--color-text-secondary);
-}
-
-.ai-mention-chip-name {
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono);
-}
-
-.ai-mention-chip-del {
-  border: none; background: transparent; color: var(--color-text-muted);
-  cursor: pointer; font-size: 13px; line-height: 1; padding: 0 2px;
-}
-
-.ai-mention-chip-del:hover { color: var(--color-danger); }
-
-.ai-mention-pop {
-  position: absolute; left: 16px; right: 16px; bottom: calc(100% - 6px);
-  max-height: 240px; overflow: auto; z-index: 30; padding: 4px;
-  background: var(--color-bg-primary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
-}
-
-.ai-mention-item {
-  display: flex; align-items: center; gap: 6px; padding: 4px 6px;
-  font-size: 12px; color: var(--color-text-secondary); cursor: pointer;
-  border-radius: var(--radius-sm);
-}
-
-.ai-mention-item.is-active { background: var(--color-bg-hover); color: var(--color-text-primary); }
-
-.ai-mention-name { flex-shrink: 0; }
-
-.ai-mention-path {
-  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 11px;
-  color: var(--color-text-muted); text-align: right;
-}
-
-.ai-input {
-  width: 100%;
-  resize: none;
-  min-height: 44px;
-  max-height: 200px;
-  padding: 0;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  color: var(--color-text-primary);
-  font-size: 13px;
-  font-family: inherit;
-  outline: none;
-  line-height: 1.5;
-}
-
-.ai-input:disabled { opacity: 0.6; cursor: not-allowed; }
 
 /* 发送 / 停止按钮：与「新建任务」同款的圆形图标按钮（只显示图标，不显示文字）。
    32px 正圆、accent 填充、白色图标；禁用态沿用 AiHero 的灰底淡字。 */

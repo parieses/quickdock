@@ -24,6 +24,7 @@ import { downloadText, safeFileName } from '../utils/download'
 import { useAiMarkdownBlocks } from '../composables/useAiMarkdownBlocks'
 import { useAiAttachments } from '../composables/useAiAttachments'
 import { useAiMention } from '../composables/useAiMention'
+import { useAiSlashSkill } from '../composables/useAiSlashSkill'
 import { isMathFenceLang, mathExtension, renderMath } from '../utils/mathMarkdown'
 import { enhanceTables, sortTableByColumn } from '../utils/tableEnhance'
 import {
@@ -47,8 +48,8 @@ import type { PendingImage, ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConvHit, AIHooksInfo, AIProfilesResult } from '../types/ai'
 import type {
-  AIArtifact, AICheckpointView, AIConversation, AIMessage, AIMsgImage,
-  AIRuleFile, AISpace, AIToolCall, OutlineItem,
+  AIArtifact, AICheckpointView, AIConnector, AIConversation, AIMessage, AIMsgImage,
+  AIRuleFile, AISkill, AISpace, AIToolCall, OutlineItem,
 } from '../types/ai'
 import { artifactsFromCalls, artifactsOf, countToolRounds, serializeTools, shortPath, toolList } from '../utils/aiTools'
 
@@ -73,9 +74,13 @@ import {
   AIRestoreCheckpoint,
   AISearchMessages,
   AISetConversationMode,
+  AISetConversationPermission,
   AIGetHooks,
   AISetHooksApproved,
   AIGetGitBranch,
+  AIGetSkills,
+  AIGetExtServers,
+  AISetExtServerEnabled,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -101,6 +106,36 @@ const input = ref('')
 const mode = ref('chat')
 const streaming = ref(false)
 const errorMsg = ref('')
+
+// —— 「这一轮到底是谁在跑」——
+//
+// 切会话不再打断回答（见 selectConv）：用户切走的是「我在看哪条」，不是「停掉哪条」。
+// 于是所有流式事件都必须写回**发起它的那条会话**，不能写 activeId —— 用户在 A 里
+// 提了问、切到 B 看历史，token 还在往 A 里流，按 activeId 写就会把 A 的回答拼进 B。
+const runConvId = ref('')
+// 当前正看着的会话是否在生成。
+// 模板里凡是「跟着流式变」的东西（半截气泡、计时条、审批条）都该用它而不是 streaming：
+// 后台在跑别的会话时，这一页不该出现任何属于那条会话的东西。
+const streamingHere = computed(() => streaming.value && (!runConvId.value || runConvId.value === activeId.value))
+
+// 每条会话的运行状态，只用来给左栏画一个点：
+//   running = 还在生成（用户已经切走了，或者正看着）
+//   done    = 生成完了，但用户还没回到这条会话
+//   error   = 后台那条失败了（用户切回来才看得到报错，所以先给个红点）
+// 点进这条会话就删掉 —— 这个点的含义就是「有结果你没看」，看过了它就该消失。
+type ConvRunState = 'running' | 'done' | 'error'
+const convRunState = ref<Record<string, ConvRunState>>({})
+function markConvRunning(id: string) {
+  if (id) convRunState.value[id] = 'running'
+}
+function markConvFinished(id: string, failed = false) {
+  if (!id) return
+  // 用户正停在它上面（而且确实在这一页上）：内容就在眼前，不需要任何标记。
+  // pageActive 也要算：切去别的导航页时 AI 页被 KeepAlive 保活，activeId 没变，
+  // 但用户根本看不见那条回答——这时候该留点。
+  if (activeId.value === id && pageActive.value) delete convRunState.value[id]
+  else convRunState.value[id] = failed ? 'error' : 'done'
+}
 
 // 新建任务的待定归属：选了目录就有 spaceId，没选就是普通任务。
 //
@@ -201,6 +236,23 @@ const runRules = ref<AIRuleFile[]>([])
 // streamArtifacts 流式期的产物：file_write 返回的当下就挂出来，
 // 等 done 再显示会让「文件已经写完了」和「看得见」之间隔一整轮回答。
 const streamArtifacts = computed(() => artifactsFromCalls(streamTools.value))
+
+// —— 「这一页正在跑」才给消息区的流式状态 ——
+//
+// 后台可能在跑**另一条**会话（见 runConvId）：上面这些 ref 里装的都是那条会话的内容。
+// 原样传下去有两个后果——切到一条空会话时空态画不出来（streamingText 非空），
+// 而且可能把别人的半截回答画在当前页上。这里统一按 streamingHere 兜成空值；
+// 空值用稳定常量而不是字面量 `[]`，否则每次渲染都换新引用，子组件白 diff 一遍。
+const NO_TOOLS: AIToolCall[] = []
+const NO_BLOCKS: LiveBlock[] = []
+const NO_RULES: AIRuleFile[] = []
+const NO_ARTIFACTS: AIArtifact[] = []
+const liveText = computed(() => (streamingHere.value ? streamingText.value : ''))
+const liveReasoning = computed(() => (streamingHere.value ? reasoningText.value : ''))
+const liveTools = computed(() => (streamingHere.value ? streamTools.value : NO_TOOLS))
+const liveBlocks = computed(() => (streamingHere.value ? streamBlocks.value : NO_BLOCKS))
+const liveRules = computed(() => (streamingHere.value ? runRules.value : NO_RULES))
+const liveArtifacts = computed(() => (streamingHere.value ? streamArtifacts.value : NO_ARTIFACTS))
 
 // 审批条要展示的那一条：取第一个还等着答复的调用。
 //
@@ -329,7 +381,10 @@ async function approveTool(tc: AIToolCall, decision: 'allow' | 'deny', remember 
 // 「我来改」一边什么都调不动。模式要落库（AISetConversationMode），
 // 否则切走再回来又被 selectConv 读回 plan。
 async function runPlan(m: AIMessage) {
-  if (streaming.value) return
+  if (streaming.value) {
+    if (runConvId.value && runConvId.value !== activeId.value) toast.error(t('aiOtherConvRunning'))
+    return
+  }
   const convID = activeId.value
   if (convID) {
     try {
@@ -384,6 +439,10 @@ function flushStream() {
     reasoningText.value += streamReasonBuf
     streamReasonBuf = ''
   }
+  // 后台在跑另一条会话时只攒文本、不碰 DOM：分块渲染 / 图扫描 / 贴底都是
+  // 给「用户正看着的这一页」用的。对着另一条会话做只会白烧 CPU，还会把
+  // 当前这页滚到底——用户正翻历史时最烦这个。
+  if (!streamingHere.value) return
   renderLiveBlocks(streamingText.value)
   scheduleMermaidScan()
   followBottom()
@@ -480,7 +539,8 @@ const {
 const {
   mentions, mentionItems, mentionIdx, mentionOpen, lastMentions,
   pickMention, removeMention, onMentionKey,
-} = useAiMention({ input, streaming, hasKey, conversations, convCwd })
+// 传 streamingHere 而不是 streaming：后台在跑别的会话时，这条会话照样能 @ 引用
+} = useAiMention({ input, streaming: streamingHere, hasKey, conversations, convCwd })
 
 // 历史消息图片懒加载：把后端存盘（file 类）的路径读回 dataUrl，回填到消息的 imgList。
 // url 类直发链接，无需加载。返回供模板渲染用的图片数组（file 类未加载完毕时 dataUrl 为空）。
@@ -812,18 +872,32 @@ async function loadMessages(convID: string) {
 }
 
 async function selectConv(id: string) {
-  // 如果有正在流的对话，先打断
-  if (streaming.value) stop()
+  // 不再打断正在生成的回答：切换的是「我在看哪条」，不是「停掉哪条」。
+  // 停有显式的停止按钮，不拿「切换」当停止的替代品——用户只是想去翻一眼别的
+  // 任务，回来时半截回答没了，那是最难受的一种丢内容。
   activeId.value = id
+  // 看过就消：绿点的含义是「有结果你没看」，人已经在里面了就不该再挂着。
+  // 但正在跑的那条不能删——删了之后再切走，就再也看不出它还在生成了。
+  if (streaming.value && runConvId.value === id) convRunState.value[id] = 'running'
+  else delete convRunState.value[id]
   const conv = conversations.value.find((c) => c.id === id)
   // 工作目录跟着任务走：两条对话可以绑不同项目，切回来时要还原成它自己的那个。
   convCwd.value = (conv?.cwd || '').trim()
   // 模式是这个任务创建时选定的属性，切回来要还原——否则「这条是用来翻译的」
   // 在切走再回来之后就丢了。
   mode.value = (conv?.mode || 'chat').trim() || 'chat'
+  // 权限跟着任务走：这条对话开过完全访问，切回来要还原成它自己的档位。
+  permissionFull.value = (conv?.permission || '').trim() === 'full'
   // 已有会话的归属以库里的为准，新建待定值在这里作废。
   pendingSpaceId.value = ''
-  resetStreamState()
+  // 流式缓冲只属于「正在跑的那条会话」：
+  //   · 没有在跑 → 清干净，切过来就是一条干净的会话；
+  //   · 在跑（可能是切回来、也可能是切走）→ 一个字节都不能清，否则切回来的
+  //     半截回答就没了。渲染层面由 streamingHere 挡住串会话的情况。
+  if (!streaming.value) resetStreamState()
+  // 待发送的 @ 引用必须清：切会话之后 cwd 可能变了，旧路径带过去只会被后端一堆拒。
+  mentions.value = []
+  mentionItems.value = []
   errorMsg.value = ''
   await loadMessages(id)
   // 回滚点跟着会话走：切回来要能看到这条对话改过哪些文件。
@@ -900,19 +974,174 @@ const effectiveDir = computed(() => {
 // onMounted 里的 loadGitBranch() 负责，这里只响应后续 cwd / 空间变化。
 watch(effectiveDir, loadGitBranch)
 
+// ---- 「+ 技能和连接器」----
+//
+// 两组作用域不同：
+//   - 技能是**这一条消息的指令**：选中即在输入框上方挂一枚胶囊（见 useAiSlashSkill），
+//     发送时把名字数组带给后端。没有第二套「勾选状态」——胶囊本身就是唯一的选择记录。
+//   - 连接器是**全局开关**（装着进程、占着工具名额），点一下即写 mcp.json。
+const plusOpen = ref(false)
+const skills = ref<AISkill[]>([])
+const skillsDir = ref('')
+const connectors = ref<AIConnector[]>([])
+
+// ---- 执行权限（输入框右下角）----
+//
+// 只有两档：false = 默认权限（敏感操作逐个确认），true = 完全访问（不再问）。
+// 不同「只对这条消息生效」的临时开关混着用：权限一旦临时化，用户就无法回答
+// 「刚那条 rm 到底批准过没有」。它跟着会话走（ai_conversations.permission），
+// 切换即落库，切回来看到的就是上次真正生效的那个。
+const permissionFull = ref(false)
+
+/** 切换权限：有会话就立刻落库（界面标记必须和库一致），落地页则等第一句随请求带上。 */
+async function onChangePermission(full: boolean) {
+  permissionFull.value = full
+  const id = activeId.value
+  if (!id) return
+  try {
+    unwrap(await AISetConversationPermission(id, full ? 'full' : 'default'))
+  } catch (e) {
+    // 落库失败就退回原状：留在「界面写着完全访问、实际每条都在问」的状态里，
+    // 比切不成功更让人困惑。
+    permissionFull.value = !full
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// 「/ 选技能」补全：斜杠只是输入方式，选中后变成输入框里的一枚行内胶囊。
+const pickedSkills = ref<string[]>([])
+const {
+  slashItems, slashIdx, slashOpen, slashQuery, onSlashKey, stripSkillTokens,
+} = useAiSlashSkill({
+  // 同上：按「这一页在不在生成」判断，后台跑别的会话不该锁住这里的补全
+  input, streaming: streamingHere, hasKey, skills,
+  picked: pickedSkills,
+  onPick: (sk) => onPickSkill(sk),
+})
+
+// 上一次真正发出去的技能名：失败重试时输入框与胶囊都已经清空，
+// 靠它沿用上一次的选择（与 @ 引用同一口径，见 send()）。
+const lastSkills = ref<string[]>([])
+
+function applySkills(data: { dir?: string; skills?: AISkill[] } | null) {
+  if (!data) return
+  skillsDir.value = data.dir || skillsDir.value
+  skills.value = data.skills || []
+}
+
+async function loadSkills() {
+  try {
+    applySkills(unwrap(await AIGetSkills()) as { dir?: string; skills?: AISkill[] } | null)
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// 外部 MCP 服务器：+ 菜单只要「名字 / 状态 / 工具数」。command 与 env 属于设置页，
+// 摆进对话里的菜单只会变成一屏看不懂的配置。
+function mapConnectors(raw: unknown): AIConnector[] {
+  const list = Array.isArray(raw) ? raw : []
+  return list.map((s) => {
+    const o = s as {
+      name?: string; status?: string; toolCount?: number; error?: string
+      config?: { disabled?: boolean }
+    }
+    return {
+      name: o.name || '',
+      status: o.status || '',
+      toolCount: o.toolCount || 0,
+      disabled: !!o.config?.disabled || o.status === 'disabled',
+      error: o.error || '',
+    }
+  })
+}
+
+async function loadConnectors() {
+  try {
+    connectors.value = mapConnectors(unwrap(await AIGetExtServers()))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// 打开时才拉：技能目录与 mcp.json 都可能被用户在资源管理器里改过，
+// 挂载时缓存一份，会在「刚拷进一个技能」时显示不出来。
+async function togglePlus() {
+  plusOpen.value = !plusOpen.value
+  if (plusOpen.value) {
+    // 两个弹层贴在同一个位置，重叠着谁也看不清：显示层用 `slashOpen && !plusOpen` 抑制，
+    // 这里不用再动 slashItems（它已是只读 computed）。
+    await Promise.all([loadSkills(), loadConnectors()])
+    return
+  }
+  // 收起后把焦点还给输入框：面板外面罩着一层遮罩，用户点输入框那一下
+  // 只会关掉面板、焦点落在 body 上，还得再点第二次才能真正打字。
+  nextTick(() => (activeId.value ? composerRef.value : heroRef.value)?.focus())
+}
+
+// 第一次打 / 时技能清单可能还没加载过（用户没开过 + 面板）：补拉一次，
+// 否则弹层永远是空的。扫描技能目录是磁盘 IO，不放在挂载时做。
+watch(slashQuery, (q) => {
+  if (q !== null && !skills.value.length) void loadSkills()
+})
+
+
+async function toggleConnector(c: AIConnector) {
+  try {
+    connectors.value = mapConnectors(unwrap(await AISetExtServerEnabled(c.name, c.disabled)))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// 「安装技能」= 打开 skills 目录。安装方式就是「把一个技能目录拷进去」：
+// 技能是纯文本说明，用户能先看清里面写了什么再决定装不装；
+// 做成 zip 一键装反而让人不知道刚刚往系统里放了什么。
+async function installSkill() {
+  plusOpen.value = false
+  try {
+    if (!skillsDir.value) await loadSkills()
+    if (!skillsDir.value) return
+    unwrap(await RevealInExplorer(skillsDir.value))
+    toast.success(t('aiInstallSkillHint'))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+function manageConnectors() {
+  plusOpen.value = false
+  emit('open-settings', 'ai')
+}
+
 const heroRef = ref<InstanceType<typeof AiHero> | null>(null)
+const composerRef = ref<InstanceType<typeof AiComposer> | null>(null)
+
+// 选中技能 = 在输入框里插一枚行内胶囊（插在光标处）。光标由富输入框自己放回胶囊后面，
+// 这里不再额外 focus()：那一下会把光标从胶囊后甩到末尾，正文长时看得见。
+function onPickSkill(sk: AISkill) {
+  const target = activeId.value ? composerRef.value : heroRef.value
+  target?.insertSkill(sk.name)
+}
+
+// 输入框里的胶囊变了（插入 / 点 × / 退格整颗删 / 清空）：同步一份给面板标「已选」。
+// 真源始终是 DOM 里的胶囊，这里只是投影，不要反过来去改它。
+function onSkillsChange(names: string[]) {
+  pickedSkills.value = names
+}
 
 // 落地页上的示例问题：点一下填进输入框，省得对着空白框想「能问什么」。
 const heroTips = ['aiHeroTip1', 'aiHeroTip2', 'aiHeroTip3', 'aiHeroTip4']
 
 // 空态 = 还没进入任何任务。此时主区渲染落地页而不是「空消息区 + 底部输入框」。
-// streaming 也要算进去：新任务发出去到 conv 事件回来之间 activeId 还空着，
-// 不排除的话落地页会在第一轮请求途中闪回来。
+// 判的是 streamingHere（这一页在不在生成）而不是 streaming：后台还有一条会话在跑时，
+// 用户点了「新建任务」就该看到落地页，而不是被那条会话的流式状态锁在消息区。
 const isNewTask = computed(() =>
-  !activeId.value && messages.value.length === 0 && !streaming.value && !streamingText.value)
+  !activeId.value && messages.value.length === 0 && !streamingHere.value)
 
 function openNewTask() {
-  if (streaming.value) stop()
+  // 不打断正在生成的回答：新建任务和「切到别的会话」是同一件事——换一个空白视图，
+  // 不是把上一轮砍掉。发送时如果那条还在跑，会给一句明确提示（见 send）。
   // 下拉要列当前还存在的空间：从回收站恢复/删掉空间之后，挂载时那份列表就过期了。
   void loadSpaces()
   newTaskMode.value = 'chat'
@@ -942,6 +1171,13 @@ function onEnterSend(e: KeyboardEvent, fn: () => void) {
   fn()
 }
 
+// 正文是否非空：技能已经是独立胶囊、不在正文里，所以这里只看正文（兜底剥残留 token）。
+//
+// 单独一个 `/` 不算正文：那是「我正在叫技能菜单」，不是我要说的话。
+// 以前它会一路发出去，建出一条正文为空的任务，侧栏标题写着「/」，
+// 每日记忆里也留下一串「用户：/」——没内容、还占着记忆注入的位置。
+const canSendText = computed(() => !/^[\s/／]*$/.test(stripSkillTokens(input.value)))
+
 // onComposerKey 是主输入框的唯一 keydown 入口。
 //
 // 不写成「两个监听器各算各的」（@keydown + @keydown.enter）：两个都会收到同一个
@@ -949,6 +1185,7 @@ function onEnterSend(e: KeyboardEvent, fn: () => void) {
 // @xxx 的提问。一个函数里按优先级判定，顺序就是代码顺序。
 function onComposerKey(e: KeyboardEvent, fn: () => void) {
   if (e.isComposing || e.keyCode === 229) return
+  if (onSlashKey(e)) return
   if (onMentionKey(e)) return
   if (e.key !== 'Enter') return
   if (e.shiftKey || e.ctrlKey || e.altKey || e.metaKey) return
@@ -956,10 +1193,12 @@ function onComposerKey(e: KeyboardEvent, fn: () => void) {
   fn()
 }
 
-// 目录最后一段：落地页那行选择器放不下完整路径，全路径放 title。
-function dirTail(p: string): string {
-  const parts = p.replace(/\\/g, '/').split('/').filter(Boolean)
-  return parts.length ? parts[parts.length - 1] : p
+// 落地页输入框的 keydown 入口：与聊天区同序（弹层优先，其次回车发送）。
+function onHeroKey(e: KeyboardEvent) {
+  if (e.isComposing || e.keyCode === 229) return
+  if (onSlashKey(e)) return
+  if (onMentionKey(e)) return
+  onEnterSend(e, heroSend)
 }
 
 // 产物去向：AI 生成的文件会写到哪。
@@ -995,7 +1234,12 @@ async function pickNewTaskDir() {
     toast.error(getErrorMessage(e))
     return
   }
-  if (!dir) return
+  if (!dir) {
+    // 取消选择：把下拉退回「不挂空间」。否则它会停在「新建空间…」上却没有目录，
+    // 用户看着是选中态，直到发送才被告知「请先选择目录」。
+    if (newTaskSpace.value === NEW_SPACE) newTaskSpace.value = ''
+    return
+  }
   // 选到的目录已经是某个空间：直接切到那个空间。后端同名幂等也能兜住，
   // 但那样用户看到的是「我选了目录，下拉却跳到别处」，不如当场说清楚。
   const hit = spaces.value.find((s) => normDir(s.cwd || '') === normDir(dir))
@@ -1044,8 +1288,17 @@ function revealSpace(spaceId: string) {
 // 落地页里直接发送：先把归属与模式定下来（会话本身仍由后端在收到第一条消息时创建），
 // 再走统一的 send()。失败就停在落地页，草稿还在。
 async function heroSend() {
-  if (!hasKey.value || streaming.value) return
-  if (!input.value.trim() && !attachments.value.length) return
+  if (!hasKey.value) return
+  // 后台还有一条会话在跑：说清楚原因，别让「点了发送什么都不发生」
+  if (streaming.value) {
+    if (runConvId.value) toast.error(t('aiOtherConvRunning'))
+    return
+  }
+  // 正文为空（只有空白、或只有一个正在叫技能菜单的 `/`）：不该发出一条空消息
+  if (!canSendText.value && !attachments.value.length) return
+  // 从落地页发起后 hero 会卸载、composer 挂载，面板状态是同一份——
+  // 不收起的话，一进对话就顶着一个没被要求的弹层。
+  plusOpen.value = false
   try {
     const target = await resolveNewTaskTarget()
     pendingSpaceId.value = target.spaceId
@@ -1066,13 +1319,19 @@ async function heroSend() {
 function beginBlankTask() {
   activeId.value = ''
   messages.value = []
-  resetStreamState()
+  // 后台可能还有一条在跑（用户新建任务前没有停它）：那份流式缓冲属于它，
+  // 这里清了就等于「切回来半截回答没了」。
+  if (!streaming.value) resetStreamState()
+  else { mentions.value = []; mentionItems.value = [] }
   errorMsg.value = ''
   // 回到落地页时必须是「干净的默认态」：沿用上一次选过的类型和空间，
   // 下一条消息就会莫名其妙落进另一个项目的目录里（删掉一条任务后尤其容易中招）。
   newTaskMode.value = 'chat'
   newTaskSpace.value = ''
   newTaskDir.value = ''
+  // 权限同理：上一条对话开了完全访问，新建任务不该继承——「刚开始是默认权限」
+  // 是这条功能的默认承诺，忘了切回来正是它最危险的失效方式。
+  permissionFull.value = false
 }
 
 // ---- 空间 ----
@@ -1101,7 +1360,10 @@ async function delSpace(s: AISpace) {
   // 下一次发送只会得到一句「会话不存在或已被删除」——用户完全不知道自己在看一条幽灵任务。
   const activeInSpace = !!activeId.value &&
     conversations.value.some((c) => c.id === activeId.value && (c.space_id || '') === s.id)
-  if (streaming.value && activeInSpace) stop()
+  // 后台在跑的那条也可能就在这个空间里（用户已经切到别处看了）：同样要先掐。
+  const runningInSpace = !!runConvId.value &&
+    conversations.value.some((c) => c.id === runConvId.value && (c.space_id || '') === s.id)
+  if (runningInSpace) stop()
   try {
     unwrap(await AIDeleteSpace(s.id))
     if (activeInSpace) beginBlankTask()
@@ -1181,9 +1443,11 @@ async function delConv(id: string) {
   if (!(await toast.confirm(t('aiDelTaskConfirm')))) return
   // 删的正是当前在跑的会话：先掐流再删。否则后端会先发现「会话已被删除」
   // 而把内容写失败，前端还会抱着一条指向已删会话的流继续读。
-  if (streaming.value && activeId.value === id) stop()
+  // 判 runConvId 而不是 activeId：那条可能正在后台跑（用户已经切到别处了）。
+  if (runConvId.value === id) stop()
   try {
     unwrap(await AIDeleteConversation(id))
+    delete convRunState.value[id]
     if (activeId.value === id) beginBlankTask()
     await loadConversations()
     toast.success(t('aiMovedToRecycle'))
@@ -1540,8 +1804,25 @@ async function send() {
   // 留给下一次手动发送，否则那条用户发言将不再出现在气泡里。
   const reuseUserBubble = retryPending
   retryPending = false
-  if (streaming.value) return
-  const text = input.value.trim()
+  if (streaming.value) {
+    // 同一时刻只跑一轮（一条 SSE 流、一个 streamCtrl）。用户切到别的会话时
+    // 那条还在跑，这里必须说清楚，否则点了发送什么都不会发生。
+    if (runConvId.value && runConvId.value !== activeId.value) toast.error(t('aiOtherConvRunning'))
+    return
+  }
+  // 面板开着时按回车也能发（焦点还在 textarea 上），发出去就该收起来。
+  plusOpen.value = false
+  // 技能是「这一条消息」的指令，不在正文里：直接把胶囊里的名字传给后端。
+  // 先取快照再清空——下面 input 一清，胶囊也跟着清，那时再读就没了。
+  // 重试要沿用上一次的技能：失败重发时胶囊已经空了，拼个空数组等于
+  // 把用户特意选的技能默默丢掉。
+  const skillNames = pickedSkills.value.slice()
+  if (skillNames.length) lastSkills.value = skillNames
+  const skillPayload = skillNames.length ? skillNames : (reuseUserBubble ? lastSkills.value : [])
+  const raw = stripSkillTokens(input.value)
+  // 单独一个 `/` 只是要调技能菜单（没配技能时弹层为空，回车就会落到这里）：
+  // 当成空正文挡住，别建出一条标题叫「/」、正文为空的任务。
+  const text = /^[\s/／]*$/.test(raw) ? '' : raw
   if (!text && attachments.value.length === 0) return
   if (!hasKey.value) {
     toast.error(t('aiNeedKey'))
@@ -1552,9 +1833,11 @@ async function send() {
   // 发送时的模型名：流式结束前用户可能切档案（onModelChange 会回滚），
   // 事后读 activeProfile 拿到的是新值，所以此刻先定下来。
   const streamModel = aiProfiles.value.find((x) => x.id === aiActive.value)?.model || ''
-  // 本轮流式归属的会话：新建会话时由 conv 事件回填。中断/失败时都要按它判断
-  // 「用户是否还停留在同一会话」，不能读 activeId —— 用户中途可能已经切走。
-  let streamConvId = convId
+  // 本轮流式归属的会话：新建会话时由 conv 事件回填。
+  // 放到组件级（runConvId）而不是这个函数的局部变量：用户切走之后事件还在来，
+  // finally 与 done 都要靠它判断「这一轮属于谁、用户还在不在看」。
+  runConvId.value = convId
+  markConvRunning(convId)
   // 把待发送附件组包为发送给模型的图片数组（file 带 dataUrl，url 带链接），
   // 同时生成渲染用的 imgList（file 直用 dataUrl，无需二次加载）。
   const imgs: PendingImage[] = attachments.value
@@ -1585,10 +1868,15 @@ async function send() {
   input.value = ''
   attachments.value = []
   mentions.value = []
+  // 技能胶囊随这一条消息一起用掉：输入框清空时里面的胶囊已经被富输入框一并清掉了
+  // （它会 emit update:skills []），这里同步一份，避免面板在你还没看到新内容时还标「已选」。
+  pickedSkills.value = []
   streaming.value = true
   resetStreamState()
   errorMsg.value = ''
   startRoundTimer()
+  // 这一轮是否以失败收尾：只用来决定「切走的那条会话该留绿点还是红点」。
+  let runFailed = false
   try {
     await ensureStreamInfo()
     const ctrl = new AbortController()
@@ -1610,6 +1898,12 @@ async function send() {
         cwd: convCwd.value || undefined,
         images: imagesPayload,
         mentions: mentionPayload,
+        // 技能：本次输入框里选的那些（可能为空数组 = 这条不用技能）。
+        // 总是显式带上，后端就不必再猜「沿用上次」还是「这次没选」。
+        skills: skillPayload,
+        // 权限：每次都显式带。「缺省 = 沿用上次」在这里不成立——权限是每一条消息
+        // 的执行口径，少带一次就可能按上一轮的完全访问静默执行。
+        permission: permissionFull.value ? 'full' : 'default',
       }),
       signal: ctrl.signal,
     })
@@ -1682,6 +1976,13 @@ async function send() {
               // 会话由后端下发：用户可能在这张卡等着的时候切走再切回，
               // 那时 activeId 已经不是发起审批的那个会话了。
               at.approvalConvId = String(data.convId || '')
+              // 后台那条会话在等确认：审批条只画在当前会话上（见模板），切走的人
+              // 就完全看不到它在等——而它会一直等下去。这里必须喊一声。
+              const aConv = String(data.convId || '')
+              if (aConv && aConv !== activeId.value) {
+                const name = conversations.value.find((c) => c.id === aConv)?.title || t('aiNewChat')
+                toast.success(t('aiApprovalOtherConv', { name }))
+              }
             }
             break
           }
@@ -1716,7 +2017,13 @@ async function send() {
             break
           }
           case 'conv':
-            if (data.id) { activeId.value = data.id; streamConvId = data.id }
+            if (data.id) {
+              runConvId.value = data.id
+              markConvRunning(data.id)
+              // 新会话到这一刻才有 id。只有当用户没切走、或者还停在落地页时才把它
+              // 设成当前会话 —— 否则「发出第一条消息后立刻点了别的任务」会被拽回来。
+              if (!activeId.value || activeId.value === data.id) activeId.value = data.id
+            }
             // 会话是首次发送时才建的：它这时才拿到 space_id，侧栏要重取
             // 才知道该把它排到哪个空间下（否则要等下次刷新才出现）。
             if (data.spaceId) loadConversations()
@@ -1749,70 +2056,91 @@ async function send() {
             // 空间任务的目录也可能这时才回退到空间的）。不回传的话工具栏那条
             // 指示要等切走再切回才出现，而用户此刻正想知道文件会写到哪。
             if (data.cwd) {
-              convCwd.value = String(data.cwd)
-              const ci = conversations.value.findIndex((c) => c.id === activeId.value)
-              if (ci >= 0) conversations.value[ci].cwd = convCwd.value
+              // 写回这一轮**发起时**的那条会话，不是当前打开的那条：
+              // 用户可能已经切到别的任务看历史，把 A 的目录写到 B 上就是数据错位。
+              const ci = conversations.value.findIndex((c) => c.id === runConvId.value)
+              if (ci >= 0) conversations.value[ci].cwd = String(data.cwd)
+              // 工具栏只在这一轮就是用户正在看的那条时才跟着变：切走之后把 A 的
+              // 目录显示在 B 的工具栏上，比不显示更糟。
+              if (runConvId.value === activeId.value) convCwd.value = String(data.cwd)
             }
             break
           case 'done':
             if (data.convId) {
-              if (data.convId !== activeId.value) break // 对话已被切换，忽略过期事件
-              // 立即 flush，把缓冲里的尾部文字全部落到响应式状态
-              flushStream()
-              const content = streamingText.value
-              const reasoning = reasoningText.value
-              // 有工具记录也必须固化消息：模型可能「调了 3 个工具但没写答案」，
-              // 这时 content 是空的，但用户需要看到它做了什么、钱花在哪。
-              if (content || reasoning || streamTools.value.length) {
-                const msg: Record<string, any> = { id: `ast-${Date.now()}`, conv_id: data.convId, role: 'assistant', content: content || '', created_at: new Date().toISOString() }
-                // 模型名由后端回传（它就是落库的那份），拿不到才退回发送时的档案
-                const usedModel = String(data.model || streamModel || '').trim()
-                if (usedModel) msg.model = usedModel
-                if (reasoning) msg.reasoning_content = reasoning
-                // 工具记录落到消息上，刷新前就不用重新拉一次会话。
-                // 序列化时丢掉 running：库里存的是「发生过什么」，不是「界面此刻什么样」。
-                if (streamTools.value.length) {
-                  msg.tool_calls = serializeTools(streamTools.value)
-                  msg.tool_rounds = Number(data.toolRounds) || countToolRounds(streamTools.value)
+              // 用户已经切到别的会话：这一轮的内容后端已经落库，回来时 loadMessages
+              // 会拿到。**绝不能**往 messages 里塞 —— 那是另一条会话的列表。
+              // 但「结束」这件事本身还是要处理：清缓冲、给那条会话留个绿点。
+              const here = data.convId === activeId.value
+              if (here) {
+                // 立即 flush，把缓冲里的尾部文字全部落到响应式状态
+                flushStream()
+                const content = streamingText.value
+                const reasoning = reasoningText.value
+                // 有工具记录也必须固化消息：模型可能「调了 3 个工具但没写答案」，
+                // 这时 content 是空的，但用户需要看到它做了什么、钱花在哪。
+                if (content || reasoning || streamTools.value.length) {
+                  const msg: Record<string, any> = { id: `ast-${Date.now()}`, conv_id: data.convId, role: 'assistant', content: content || '', created_at: new Date().toISOString() }
+                  // 模型名由后端回传（它就是落库的那份），拿不到才退回发送时的档案
+                  const usedModel = String(data.model || streamModel || '').trim()
+                  if (usedModel) msg.model = usedModel
+                  if (reasoning) msg.reasoning_content = reasoning
+                  // 工具记录落到消息上，刷新前就不用重新拉一次会话。
+                  // 序列化时丢掉 running：库里存的是「发生过什么」，不是「界面此刻什么样」。
+                  if (streamTools.value.length) {
+                    msg.tool_calls = serializeTools(streamTools.value)
+                    msg.tool_rounds = Number(data.toolRounds) || countToolRounds(streamTools.value)
+                  }
+                  // 规则文件跟着这条回复走，而不是挂在页面顶上：用户事后想问的是
+                  // 「这条回答当时读了什么约定」，刷新后消失也无所谓（下次提问会重读）。
+                  if (runRules.value.length) msg.rules = runRules.value.slice()
+                  messages.value.push(msg as AIMessage)
+                  // 复用流式期已渲染好的块 HTML，避免落地瞬间整条重新解析
+                  primeMessageBlocks(msg.id as string, content, streamBlocks.value.map((b) => b.html))
+                  // 记录本条回复的耗时/token，用于在消息下方展示
+                  const stat: AIStreamStat = {
+                    elapsedMs: Math.round(performance.now() - roundStartTs.value),
+                    firstTokenMs: Number(data.firstTokenMs) || 0,
+                    promptTokens: Number(data.promptTokens) || 0,
+                    completionTokens: Number(data.completionTokens) || 0,
+                    cachedTokens: Number(data.cachedTokens) || 0,
+                    // 后端算好带回来；未收录模型没有这个字段 → 0 即隐藏
+                    cost: Number(data.cost) || 0,
+                    // 工具轮次：token 里已经含了这些轮次的消耗，
+                    // 但「同一个价钱、是模型自己想多了还是真查了五轮」是两回事。
+                    toolRounds: Number(data.toolRounds) || 0,
+                  }
+                  statMap.set(msg.id as string, stat)
+                  // 同步到消息对象：刷新后由 DB 里的同名字段接管，展示逻辑不用分两套
+                  Object.assign(msg, {
+                    prompt_tokens: stat.promptTokens,
+                    completion_tokens: stat.completionTokens,
+                    cached_tokens: stat.cachedTokens,
+                  })
+                  scrollToBottom()
                 }
-                // 规则文件跟着这条回复走，而不是挂在页面顶上：用户事后想问的是
-                // 「这条回答当时读了什么约定」，刷新后消失也无所谓（下次提问会重读）。
-                if (runRules.value.length) msg.rules = runRules.value.slice()
-                messages.value.push(msg as AIMessage)
-                // 复用流式期已渲染好的块 HTML，避免落地瞬间整条重新解析
-                primeMessageBlocks(msg.id as string, content, streamBlocks.value.map((b) => b.html))
-                // 记录本条回复的耗时/token，用于在消息下方展示
-                const stat: AIStreamStat = {
-                  elapsedMs: Math.round(performance.now() - roundStartTs.value),
-                  firstTokenMs: Number(data.firstTokenMs) || 0,
-                  promptTokens: Number(data.promptTokens) || 0,
-                  completionTokens: Number(data.completionTokens) || 0,
-                  cachedTokens: Number(data.cachedTokens) || 0,
-                  // 后端算好带回来；未收录模型没有这个字段 → 0 即隐藏
-                  cost: Number(data.cost) || 0,
-                  // 工具轮次：token 里已经含了这些轮次的消耗，
-                  // 但「同一个价钱、是模型自己想多了还是真查了五轮」是两回事。
-                  toolRounds: Number(data.toolRounds) || 0,
-                }
-                statMap.set(msg.id as string, stat)
-                // 同步到消息对象：刷新后由 DB 里的同名字段接管，展示逻辑不用分两套
-                Object.assign(msg, {
-                  prompt_tokens: stat.promptTokens,
-                  completion_tokens: stat.completionTokens,
-                  cached_tokens: stat.cachedTokens,
-                })
-                scrollToBottom()
               }
+              // 无论用户是否还看着这条会话，这一轮都结束了：缓冲与卡片一律清掉。
+              // 后台跑完的那条内容已经在库里，留在内存里只会串到用户正在看的另一条会话上。
               streamingText.value = ''
               streamBlocks.value = []
               // 清空工具卡片：done 分支已经把记录落到消息上了，
               // 留着会让 finally 再补一条重复气泡（那里靠它判断是否被中断）。
               streamTools.value = []
               reasoningText.value = ''
+              streamBuf = ''
+              streamReasonBuf = ''
+              markConvFinished(data.convId)
               loadConversations()
             }
             break
           case 'error':
+            // 错误只画给「用户正在看的那条会话」：切走之后把 A 的报错横幅挂到 B 上，
+            // 用户会以为是自己刚打开的那条出了问题。后台那条改成红点（见 finally），
+            // 切回去时后端落库的失败内容会照常显示。
+            if (runConvId.value && runConvId.value !== activeId.value) {
+              runFailed = true
+              break
+            }
             flushStream()
             errorMsg.value = data.message || data.error || '未知错误'
             break
@@ -1820,13 +2148,27 @@ async function send() {
       }
     }
   } catch (e: any) {
-    if (e && e.name !== 'AbortError') errorMsg.value = getErrorMessage(e)
+    // 中断（AbortError）不算失败：那是用户自己点的停止。
+    if (e && e.name !== 'AbortError') {
+      const msg = getErrorMessage(e)
+      // 报错横幅同理只给当前会话；后台那条留红点。
+      if (!runConvId.value || runConvId.value === activeId.value) errorMsg.value = msg
+      else runFailed = true
+    }
   } finally {
+    // 这一轮属于谁、用户还在不在看它。整个收尾都按这两个值判断：
+    // 切走之后事件还在来，收尾绝不能碰用户正在看的另一条会话。
+    const runID = runConvId.value
+    const here = !runID || runID === activeId.value
     // 中断（用户点停止）时：把已生成的内容固化成一条正式消息，避免内容凭空消失。
     // 之前 stop() 只是 abort，已收到的文字既没进 messages 也没清空，
     // 结果是「AI 一直在回复」但内容卡在半截、也无法复制。
     // 必须先 flush：否则还留在缓冲里（streamBuf）的尾部文字会随 clear 一起丢掉。
-    flushStream()
+    //
+    // 后台会话跑完（用户已切走）就不必了：内容由后端落库，切回去从库里读，
+    // 在这里 flush 只会把别的会话的文字渲染进当前这页。
+    if (here) flushStream()
+    else if (streamTimer) { clearTimeout(streamTimer); streamTimer = null }
     // 中断时也可能已经有工具卡片：模型调了工具、结果还没回来用户就点了停止。
     // 这些记录同样要固化——「调过但没结果」本身就是这次中断发生过的事实。
     const hadTools = streamTools.value.length > 0
@@ -1834,12 +2176,11 @@ async function send() {
       const content = streamingText.value
       const reasoning = reasoningText.value
       // 只往「用户还停留着的那个会话」里补气泡。切走之后后端仍会把半截内容落库
-      // （带 stopped 标记），但绝不能塞进另一个会话的消息列表——以前这里用的是
-      // activeId.value，selectConv 先 stop 再改 activeId，半截内容就串到新会话里了。
+      // （带 stopped 标记），但绝不能塞进另一个会话的消息列表。
       if (content || reasoning || hadTools) {
-        if (streamConvId && activeId.value === streamConvId) {
+        if (here && runID) {
           const aid = `ast-${Date.now()}-stop`
-          const msg: Record<string, any> = { id: aid, conv_id: streamConvId, role: 'assistant', content: content || '', created_at: new Date().toISOString(), stopped: true }
+          const msg: Record<string, any> = { id: aid, conv_id: runID, role: 'assistant', content: content || '', created_at: new Date().toISOString(), stopped: true }
           // 中断时后端还没发 done，模型名用发送时记下的那份
           if (streamModel) msg.model = streamModel
           if (reasoning) msg.reasoning_content = reasoning
@@ -1870,11 +2211,15 @@ async function send() {
     streamReasonBuf = ''
     streaming.value = false
     streamCtrl = null
+    // 这一轮结束：正看着这条会话的不需要任何标记，切走了的留一个绿点（失败是红点）
+    // 等他回来 —— 否则用户永远不知道「刚才那条跑完了没有」。
+    markConvFinished(runID, runFailed)
+    runConvId.value = ''
     // 本轮结束：停掉实时计时（liveElapsedMs 归零），最终静态「耗时」由
     // 已固化的消息 stat 在脚注里接管。
     stopRoundTimer()
     // 流式结束后尾块不再是「进行中」：补一次扫描，把最后一张图（可能就在结尾）画出来
-    scheduleMermaidScan()
+    if (here) scheduleMermaidScan()
     // 在别的页面期间回答跑完了：给侧栏一个未读点，否则用户不知道已经能看
     if (!pageActive.value) aiFinishedUnread.value = true
   }
@@ -1911,6 +2256,8 @@ function reportAIPageVisible(visible: boolean) {
 onActivated(() => {
   pageActive.value = true
   aiFinishedUnread.value = false
+  // 回来时正看着的那条就算「已经看过了」：它的点是在别的页面期间攒下来的
+  if (activeId.value) delete convRunState.value[activeId.value]
   reportAIPageVisible(true)
   // 回来时停在原位会看不到后面生成的内容：流式期间一直是贴底的，直接拉到底
   if (streaming.value) nextTick(scrollToBottom)
@@ -2228,6 +2575,7 @@ onUnmounted(() => {
       :conversations="conversations"
       :spaces="spaces"
       :active-id="activeId"
+      :run-state="convRunState"
       :starred-convs="starredConvs"
       :msg-hits="msgHits"
       :msg-hits-loading="msgHitsLoading"
@@ -2292,7 +2640,7 @@ onUnmounted(() => {
         v-if="digestOpen && activeId"
         :summary="activeConv?.summary || ''"
         :busy="digestBusy"
-        :streaming="streaming"
+        :streaming="streamingHere"
         :outline="outlineItems"
         @close="digestOpen = false"
         @run="runDigest"
@@ -2312,11 +2660,13 @@ onUnmounted(() => {
         :modes="modes"
         :url-input-open="urlInputOpen"
         :attachments="attachments"
+        :mentions="mentions"
+        :mention-open="mentionOpen"
+        :mention-items="mentionItems"
+        :mention-idx="mentionIdx"
         :has-key="hasKey"
         :spaces="spaces"
         :new-space="NEW_SPACE"
-        :new-task-dir="newTaskDir"
-        :new-task-dir-label="newTaskDir ? dirTail(newTaskDir) : ''"
         :ai-profiles="aiProfiles"
         :allow-file-image="allowFileImage"
         :allow-url-image="allowUrlImage"
@@ -2324,25 +2674,43 @@ onUnmounted(() => {
         :git-branch="gitBranch"
         :out-hint="newTaskOutHint"
         :hero-tips="heroTips"
+        :plus-open="plusOpen"
+        :skills="skills"
+        :connectors="connectors"
+        :picked-skills="pickedSkills"
+        :slash-open="slashOpen && !plusOpen"
+        :slash-items="slashItems"
+        :slash-idx="slashIdx"
+        :can-send="canSendText"
+        :permission-full="permissionFull"
         @model-change="onModelChange"
-        @enter="onEnterSend($event, heroSend)"
+        @change-permission="onChangePermission"
+        @key="onHeroKey"
         @send="heroSend"
         @paste="onInputPaste"
         @drop="onInputDrop"
         @confirm-url="confirmUrlImage"
         @remove-attachment="removeAttachment"
+        @remove-mention="removeMention"
+        @pick-mention="pickMention"
         @pick-dir="pickNewTaskDir"
         @open-file-picker="openFilePicker"
         @toggle-url="toggleUrlInput"
         @fill-tip="fillHeroTip"
         @open-settings="emit('open-settings', 'ai')"
+        @toggle-plus="togglePlus"
+        @pick-skill="onPickSkill"
+        @update:skills="onSkillsChange"
+        @toggle-connector="toggleConnector"
+        @install-skill="installSkill"
+        @manage-connectors="manageConnectors"
       />
 
       <template v-else>
       <!-- 消息区 -->
       <!-- 本轮实时用时状态条：流式进行中显示在消息区顶部，复刻「已处理 54s」式的实时计时——
            从发送消息到本轮结束之间跳动显示；本轮结束后归零，由消息脚注的静态「耗时」接管。 -->
-      <div v-if="streaming && liveElapsedMs > 0" class="ai-round-bar" :title="t('aiRoundElapsedHint')">
+      <div v-if="streamingHere && liveElapsedMs > 0" class="ai-round-bar" :title="t('aiRoundElapsedHint')">
         <span class="ai-round-dot" />
         <span class="ai-round-text">{{ t('aiRoundElapsedStatus', { ms: formatDuration(liveElapsedMs) }) }}</span>
       </div>
@@ -2353,13 +2721,13 @@ onUnmounted(() => {
         :stat-map="statMap"
         :locale="locale"
         :mode="mode"
-        :streaming="streaming"
-        :reasoning-text="reasoningText"
-        :stream-tools="streamTools"
-        :streaming-text="streamingText"
-        :stream-blocks="streamBlocks"
-        :run-rules="runRules"
-        :stream-artifacts="streamArtifacts"
+        :streaming="streamingHere"
+        :reasoning-text="liveReasoning"
+        :stream-tools="liveTools"
+        :streaming-text="liveText"
+        :stream-blocks="liveBlocks"
+        :run-rules="liveRules"
+        :stream-artifacts="liveArtifacts"
         :error-msg="errorMsg"
         :can-retry="canRetry"
         :render-block="renderBlock"
@@ -2448,19 +2816,25 @@ onUnmounted(() => {
         </div>
       </Teleport>
 
-      <!-- 工具审批条：钉在输入区上方。
-           不放消息流里是因为会话在这期间是停住的，按钮滚出视野就等于卡死。 -->
-      <AiApprovalBar
-        v-if="pendingApproval"
-        :call="pendingApproval"
-        :count="pendingApprovalCount"
-        @allow="approveTool(pendingApproval, 'allow')"
-        @remember="approveTool(pendingApproval, 'allow', true)"
-        @deny="approveTool(pendingApproval, 'deny')"
-      />
+      <!-- 输入停靠区：审批卡以浮层盖在输入框上。
+           不做成流内元素有两个原因：① 会话在这期间是停住的，按钮滚出视野就等于卡死；
+           ② 待审时输入框本来就不可用，直接盖上去既省地方，也让「现在只能做这个选择」
+           一目了然。z-index 高于 composer 内的 @ 补全 / + 面板，避免被它们压住。 -->
+      <div class="ai-dock">
+        <AiApprovalBar
+          v-if="pendingApproval && streamingHere"
+          class="ai-dock-approve"
+          :call="pendingApproval"
+          :count="pendingApprovalCount"
+          @allow="approveTool(pendingApproval, 'allow')"
+          @remember="approveTool(pendingApproval, 'allow', true)"
+          @deny="approveTool(pendingApproval, 'deny')"
+          @open-rules="emit('open-settings', 'ai')"
+        />
 
-      <!-- 输入区 -->
-      <AiComposer
+        <!-- 输入区 -->
+        <AiComposer
+        ref="composerRef"
         v-model:input="input"
         v-model:url-draft="urlDraft"
         :hooks="aiHooks"
@@ -2471,11 +2845,21 @@ onUnmounted(() => {
         :mention-items="mentionItems"
         :mention-idx="mentionIdx"
         :has-key="hasKey"
-        :streaming="streaming"
+        :streaming="streamingHere"
         :allow-file-image="allowFileImage"
         :allow-url-image="allowUrlImage"
         :git-repo="gitRepo"
         :git-branch="gitBranch"
+        :plus-open="plusOpen"
+        :skills="skills"
+        :connectors="connectors"
+        :picked-skills="pickedSkills"
+        :slash-open="slashOpen && !plusOpen"
+        :slash-items="slashItems"
+        :slash-idx="slashIdx"
+        :can-send="canSendText"
+        :permission-full="permissionFull"
+        @change-permission="onChangePermission"
         @approve-hooks="approveHooks"
         @remove-attachment="removeAttachment"
         @confirm-url="confirmUrlImage"
@@ -2488,7 +2872,14 @@ onUnmounted(() => {
         @drop="onInputDrop"
         @open-file-picker="openFilePicker"
         @toggle-url="toggleUrlInput"
-      />
+        @toggle-plus="togglePlus"
+        @pick-skill="onPickSkill"
+        @update:skills="onSkillsChange"
+        @toggle-connector="toggleConnector"
+        @install-skill="installSkill"
+        @manage-connectors="manageConnectors"
+        />
+      </div>
       </template>
     </section>
 
@@ -2522,6 +2913,22 @@ onUnmounted(() => {
 /* 主区：position:relative 是两个浮层（大纲面板）与「回到底部」按钮的定位锚点，
    拆出去的子组件靠 display:contents 让内容继续参与这里的布局。 */
 .ai-main { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; position: relative; }
+
+/* 输入停靠区：审批卡相对它定位，才能「盖在输入框上」而不是把输入框往下顶。
+   flex-shrink:0 必须有——消息区是 flex:1，输入区一旦可收缩，长对话里它会被压扁。 */
+/* display:flex 是为了含住输入框自己的 12px 下边距——普通块流里它会与父级塌陷，
+   导致 .ai-dock 的实际底边比输入框底边高，审批卡就贴不准输入框下沿。 */
+.ai-dock { position: relative; flex-shrink: 0; display: flex; flex-direction: column; }
+
+/* 与输入框同宽同底边：输入框是 width:80% + margin auto，所以左右各留 10%。
+   z-index 要压过 composer 内的 @ 补全（30+）与 + 面板（40+）。 */
+.ai-dock-approve {
+  position: absolute;
+  left: 10%;
+  right: 10%;
+  bottom: 12px;
+  z-index: 60;
+}
 
 /* 划词复制浮层（position/left/top 由 floating-ui 注入） */
 .ai-sel-copy {
@@ -2692,6 +3099,35 @@ onUnmounted(() => {
 /* 输入相关控件：落地页 hero（AiHero）与输入区（AiComposer）共用同一套
    缩略图 / 链接输入 / 图标按钮；.ai-go-settings 还被消息区的「没配 key」空态用。
    放非 scoped 块是因为两个子组件各有一份 scoped 作用域，写在哪一边另一半都命不中。 */
+/* 技能胶囊：**行内**嵌在文字里（由 AiRichInput 用 DOM API 创建），所以样式必须写在
+   非 scoped 块——动态创建的节点没有 data-v 属性，写进组件的 scoped 里一条都不命中。
+   胶囊是 contenteditable=false 的原子节点：像个字符一样参与换行，退格整颗删掉。 */
+.ai-rich-chip {
+  display: inline-flex; align-items: center; gap: 3px;
+  max-width: 240px; margin: 0 1px;
+  padding: 1px 3px 1px 6px;
+  border: 1px solid var(--color-border); border-radius: 6px;
+  background: var(--color-bg-active); color: var(--color-text-secondary);
+  font-size: 11.5px; line-height: 1.6;
+  vertical-align: baseline;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.ai-rich-chip-icon { flex-shrink: 0; color: var(--color-accent); font-size: 10px; }
+
+.ai-rich-chip-name { overflow: hidden; text-overflow: ellipsis; }
+
+.ai-rich-chip-x {
+  flex-shrink: 0; padding: 0 2px; border: none; background: transparent;
+  color: var(--color-text-muted); font-size: 12px; line-height: 1;
+  cursor: pointer; opacity: 0.55; transition: opacity var(--transition-fast), color var(--transition-fast);
+}
+
+.ai-rich-chip:hover .ai-rich-chip-x { opacity: 1; }
+
+.ai-rich-chip-x:hover { color: var(--color-danger); }
+
 .ai-go-settings {
   padding: 7px 16px; border: none; border-radius: var(--radius-md);
   background: var(--color-accent); color: var(--color-accent-text);

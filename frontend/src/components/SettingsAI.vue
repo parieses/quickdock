@@ -5,18 +5,22 @@ import { Pen, Trash2, Plus, RefreshCw } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 
 import {
   AIApprovalStats,
   AIFetchModels,
+  AIGetMemoryAuto,
   AIListApprovalRules,
   AIListProfiles,
   AISaveProfiles,
   AISetApprovalRule,
+  AISetMemoryAuto,
   AITestConnection,
   AIUsageStats,
   AIGetExtServers,
   AISaveExtServers,
+  AISetExtServerEnabled,
   AIReloadExtServers,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environmentservice'
@@ -280,13 +284,40 @@ async function saveApprovalRule(rule: AIApprovalRuleView, mode: string) {
 }
 
 // ── 外部 MCP 服务器（阶段 D）────────────────────────────────────────
-// 状态由后端维护（连接、注册工具都在那边），这里只负责展示与提交整份 JSON。
+// 状态由后端维护（连接、注册工具都在那边），这里负责展示与增删改。
+//
+// 原来是「一整份 JSON 文本框」：字段确实和 Claude Desktop / Cursor 的 mcp.json
+// 一致，但每加一个服务器都要手写括号、引号、逗号，写错一个字符整份都保存不了，
+// 而且报错只说「JSON 解析失败」。现在改成表单：名字、类型、命令、参数、环境变量
+// 各一格；JSON 保留成「粘贴导入」这一条兜底通道——别人给的配置还是要能整段贴进来。
 const extServers = ref<AIExtServerState[]>([])
 const extLoading = ref(false)
 const extSaving = ref(false)
 const extError = ref('')
-const extEditing = ref(false)
-const extDraft = ref('')
+
+// 表单：origName 非空表示在改既有项（改名 = 覆盖旧名的同时删掉旧键）
+interface ExtForm {
+  origName: string
+  name: string
+  kind: 'stdio' | 'http'
+  command: string
+  argsText: string
+  envText: string
+  url: string
+}
+const extForm = ref<ExtForm | null>(null)
+const extImportOpen = ref(false)
+const extImportDraft = ref('')
+
+// 与后端 mcpclient.ServerConfig 同构的提交项
+interface ExtInput {
+  name: string
+  command: string
+  args: string[]
+  env: Record<string, string>
+  url: string
+  disabled: boolean
+}
 
 async function loadExtServers() {
   extLoading.value = true
@@ -300,45 +331,385 @@ async function loadExtServers() {
   }
 }
 
-// 从当前状态反推可编辑的 JSON：error 的 server 也要保住它的配置——
-// 用户改的往往正是那个连不上的。
-function startEditExt() {
-  const doc: Record<string, unknown> = {}
-  for (const s of extServers.value) doc[s.name] = s.config
-  extDraft.value = JSON.stringify(doc, null, 2)
-  extEditing.value = true
+function kindOf(s: { config?: { url?: string } } | null | undefined): 'stdio' | 'http' {
+  return (s?.config?.url || '').trim() ? 'http' : 'stdio'
 }
 
-async function saveExt() {
-  let doc: Record<string, unknown>
-  try {
-    doc = JSON.parse(extDraft.value)
-  } catch {
-    extError.value = t('aiExtBadJson')
-    return
+/** 参数逐行存/取：用空格分隔的话，带空格或引号的参数会被拆散 */
+function argsToText(args?: string[]): string {
+  return (args || []).join('\n')
+}
+function textToArgs(s: string): string[] {
+  return s.split('\n').map((x) => x.trim()).filter(Boolean)
+}
+
+/** 环境变量逐行 KEY=VALUE；只切第一个等号，值里带 = 不会被截断 */
+function envToText(env?: Record<string, string>): string {
+  return Object.entries(env || {}).map(([k, v]) => `${k}=${v}`).join('\n')
+}
+function textToEnv(s: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const raw of s.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const i = line.indexOf('=')
+    if (i <= 0) continue
+    out[line.slice(0, i).trim()] = line.slice(i + 1).trim()
   }
+  return out
+}
+
+/** 状态 -> 提交项：覆盖式保存时其余 server 要原样带上 */
+function stateToInput(s: AIExtServerState): ExtInput {
+  const c = s.config || {}
+  return {
+    name: s.name,
+    command: c.command || '',
+    args: c.args || [],
+    env: c.env || {},
+    url: c.url || '',
+    disabled: !!c.disabled,
+  }
+}
+
+/** 列表里那一行「它在跑什么」：URL 或 命令+参数 */
+function extTarget(s: AIExtServerState): string {
+  const c = s.config || {}
+  if ((c.url || '').trim()) return c.url as string
+  return [c.command || '', ...(c.args || [])].filter(Boolean).join(' ')
+}
+
+function openAddExt() {
+  extForm.value = { origName: '', name: '', kind: 'stdio', command: '', argsText: '', envText: '', url: '' }
+  extImportOpen.value = false
+  extError.value = ''
+}
+
+function openEditExt(s: AIExtServerState) {
+  const c = s.config || {}
+  extForm.value = {
+    origName: s.name,
+    name: s.name,
+    kind: kindOf(s),
+    command: c.command || '',
+    argsText: argsToText(c.args),
+    envText: envToText(c.env),
+    url: c.url || '',
+  }
+  extImportOpen.value = false
+  extError.value = ''
+}
+
+/** 覆盖式提交：后端把这份清单当「用户编辑后的全量」，所以删除也是提交少了某项的清单 */
+async function commitExt(items: ExtInput[]): Promise<boolean> {
   extSaving.value = true
   extError.value = ''
   try {
-    const items = Object.entries(doc).map(([name, v]) => {
-      const c = (v ?? {}) as Record<string, any>
-      return {
-        name,
-        command: String(c.command ?? ''),
-        args: Array.isArray(c.args) ? c.args.map(String) : [],
-        env: (c.env && typeof c.env === 'object') ? Object.fromEntries(Object.entries(c.env).map(([k, e]) => [k, String(e)])) : {},
-        url: String(c.url ?? ''),
-        disabled: !!c.disabled,
-      }
-    })
     const res = unwrap<{ states: AIExtServerState[] }>(await AISaveExtServers(items))
     extServers.value = res?.states ?? []
-    extEditing.value = false
+    extForm.value = null
+    extImportOpen.value = false
+    extImportDraft.value = ''
+    return true
+  } catch (e) {
+    extError.value = getErrorMessage(e)
+    return false
+  } finally {
+    extSaving.value = false
+  }
+}
+
+// 名称规则与后端 validServerName 一致，前端先拦一次：不然要等一次往返才看到错
+const EXT_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$/
+
+async function submitExtForm() {
+  const f = extForm.value
+  if (!f) return
+  const name = f.name.trim()
+  if (!EXT_NAME_RE.test(name)) {
+    extError.value = t('aiExtNameBad')
+    return
+  }
+  const isHttp = f.kind === 'http'
+  const url = f.url.trim()
+  const command = f.command.trim()
+  if (isHttp && !url) {
+    extError.value = t('aiExtNeedUrl')
+    return
+  }
+  if (!isHttp && !command) {
+    extError.value = t('aiExtNeedCommand')
+    return
+  }
+  // 同名但不同原名视为「改名」：先把旧名剔掉再追加。其余项保持原状（含 disabled）。
+  const rest = extServers.value.filter((s) => s.name !== f.origName && s.name !== name).map(stateToInput)
+  const prev = extServers.value.find((s) => s.name === f.origName)
+  const item: ExtInput = {
+    name,
+    command: isHttp ? '' : command,
+    args: isHttp ? [] : textToArgs(f.argsText),
+    env: isHttp ? {} : textToEnv(f.envText),
+    url: isHttp ? url : '',
+    disabled: prev ? !!prev.config?.disabled : false,
+  }
+  await commitExt([...rest, item])
+}
+
+async function removeExt(s: AIExtServerState) {
+  if (!(await toast.confirm(t('aiExtRemoveConfirm', { name: s.name })))) return
+  await commitExt(extServers.value.filter((x) => x.name !== s.name).map(stateToInput))
+}
+
+/** 开关直接走 mcp.json 的 disabled 字段：关掉即断开，stdio 进程会被回收 */
+async function toggleExt(s: AIExtServerState) {
+  const enable = s.status === 'disabled'
+  extSaving.value = true
+  extError.value = ''
+  try {
+    extServers.value = unwrap<AIExtServerState[]>(await AISetExtServerEnabled(s.name, enable)) ?? []
   } catch (e) {
     extError.value = getErrorMessage(e)
   } finally {
     extSaving.value = false
   }
+}
+
+// 粘贴导入要认的形态比想象中多，各家文档给的不一样：
+//   {"mcpServers": {"x": {...}}}        Claude Desktop / Cursor
+//   {"servers": {"x": {...}}}           VS Code
+//   {"x": {"command": ...}}             裸映射（这一栏的占位示例就是它）
+//   {"command": "npx", "args": [...]}   单条配置，很多 README 直接贴这一段
+//   [{"name": "x", "command": ...}]     带名字的数组
+// 早先只把非 mcpServers 的一律当「名字 → 配置」映射，于是单条配置会被读成
+// 一堆叫 command / args 的服务器（command 为空）→ 提交时后端整份打回，
+// 表现就是「点了导入没反应」。所以先认结构，认不出就直说，不猜。
+
+interface ParsedExt {
+  name: string
+  cfg: Record<string, any>
+}
+
+/** 名字落到后端的 validServerName 上：非法字符换成 -，去掉开头非字母数字，截 32 */
+function sanitizeExtName(raw: string, fallback: string): string {
+  let n = (raw || '').trim().replace(/^[^A-Za-z0-9]+/, '').replace(/[^A-Za-z0-9_-]+/g, '-')
+  if (!n) n = fallback
+  return n.slice(0, 32)
+}
+
+/** 从命令行猜个名字：`npx -y @scope/pkg@1.2` → `pkg`（通用词则取 scope）。猜不出返回空串 */
+function nameFromCommand(cmd: string): string {
+  const toks = cmd.trim().split(/\s+/).filter((x) => x && !x.startsWith('-'))
+  if (!toks.length) return ''
+  // npm 包名最像这个 server 的身份，优先用它
+  const pkg = toks.find((x) => x.startsWith('@'))
+  if (pkg) {
+    // 先摘掉开头的 scope 前缀 @ 再去版本号：否则 /@[^@]*$/ 会把整串吃掉
+    const seg = pkg.slice(1).replace(/@[^@]*$/, '').split('/').filter(Boolean) // [scope, name]
+    const last = seg[seg.length - 1] || ''
+    // @playwright/mcp → mcp 太泛，退一级用包主名
+    if (seg.length > 1 && /^(mcp|server|cli|sdk|index|main)$/i.test(last)) return seg[0]
+    return last
+  }
+  // 否则退到第一个像包/文件的 token（跳过目录参数与裸路径）
+  const pick = toks.find((x) => /\.[a-z0-9]+$/i.test(x) || /^[a-z0-9][\w.-]*$/i.test(x)) || ''
+  if (!pick) return ''
+  const base = pick.split(/[\\/]/).pop() || pick
+  return base.replace(/\.[a-z0-9]{1,4}$/i, '')
+}
+
+/** 拆一行命令行，认双引号（Windows 路径常带空格） */
+function splitCommandLine(s: string): string[] {
+  const out: string[] = []
+  let cur = ''
+  let quote = false
+  for (const ch of s) {
+    if (ch === '"') { quote = !quote; continue }
+    if (!quote && /\s/.test(ch)) { if (cur) { out.push(cur); cur = '' } continue }
+    cur += ch
+  }
+  if (cur) out.push(cur)
+  return out
+}
+
+/**
+ * 宽松解析：文档站给的片段常带 `//` 注释和尾逗号（jsonc），严格 JSON.parse 会直接失败。
+ * 按字符扫一遍去掉注释和尾逗号，字符串里的内容原样保留。
+ */
+function parseLooseJson(text: string): any {
+  try {
+    return JSON.parse(text)
+  } catch {
+    /* 走 jsonc 兜底 */
+  }
+  let out = ''
+  let q = false
+  let esc = false
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if (q) {
+      out += ch
+      if (esc) esc = false
+      else if (ch === '\\') esc = true
+      else if (ch === '"') q = false
+      continue
+    }
+    if (ch === '"') { q = true; out += ch; continue }
+    if (ch === '/' && text[i + 1] === '/') {
+      while (i < text.length && text[i] !== '\n') i++
+      out += '\n'
+      continue
+    }
+    if (ch === '/' && text[i + 1] === '*') {
+      i += 2
+      while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++
+      i++
+      continue
+    }
+    out += ch
+  }
+  return JSON.parse(out.replace(/,\s*([}\]])/g, '$1'))
+}
+
+/** 一条外部配置 → 提交项（不含名字）。headers 单独带出，好在提示里说清楚 */
+function cfgToInput(cfg: Record<string, any>): {
+  command: string
+  args: string[]
+  env: Record<string, string>
+  url: string
+  headers: string[]
+} {
+  const c = cfg || {}
+  let command = String(c.command ?? c.cmd ?? '').trim()
+  let args: string[] = []
+  if (Array.isArray(c.args)) args = c.args.map((x) => String(x))
+  else if (typeof c.args === 'string') args = splitCommandLine(c.args)
+  // 「command」里塞了整条命令（"npx -y pkg"）时拆开：后端把它当可执行文件名
+  if (command && !args.length && /\s/.test(command)) {
+    const parts = splitCommandLine(command)
+    if (parts.length > 1) { command = parts[0]; args = parts.slice(1) }
+  }
+
+  let env: Record<string, string> = {}
+  if (Array.isArray(c.env)) {
+    // 少数配置写成 ["KEY=VALUE"] 数组
+    for (const line of c.env) {
+      const s = String(line)
+      const i = s.indexOf('=')
+      if (i > 0) env[s.slice(0, i).trim()] = s.slice(i + 1).trim()
+    }
+  } else if (c.env && typeof c.env === 'object') {
+    env = Object.fromEntries(Object.entries(c.env).map(([k, v]) => [k, String(v)]))
+  }
+
+  const url = String(c.url ?? c.serverUrl ?? c.server_url ?? c.endpoint ?? c.baseUrl ?? '').trim()
+  const headers = c.headers && typeof c.headers === 'object' ? Object.keys(c.headers) : []
+  // 有 url 就是 HTTP：把 command/args/env 清空，否则后端会判「只能填一个」
+  return url ? { command: '', args: [], env: {}, url, headers } : { command, args, env, url: '', headers }
+}
+
+/** 从任意粘贴内容里认出一批「名字 + 配置」；认不出返回说明性的错误 key */
+function extractExtCandidates(doc: any): ParsedExt[] | 'unrecognized' {
+  if (Array.isArray(doc)) {
+    return doc
+      .filter((x) => x && typeof x === 'object' && !Array.isArray(x))
+      .map((x: any, i: number) => ({
+        name: sanitizeExtName(String(x.name ?? x.id ?? x.server ?? x.serverName ?? ''), `mcp${i + 1}`),
+        cfg: x,
+      }))
+  }
+  if (!doc || typeof doc !== 'object') return 'unrecognized'
+
+  const wrapKey = ['mcpServers', 'mcp_servers', 'servers', 'server'].find(
+    (k) => doc[k] && typeof doc[k] === 'object' && !Array.isArray(doc[k]),
+  )
+  if (wrapKey) {
+    return Object.entries(doc[wrapKey] as Record<string, any>)
+      .filter(([, v]) => v && typeof v === 'object' && !Array.isArray(v))
+      .map(([k, v]) => ({ name: sanitizeExtName(k, 'mcp'), cfg: v as Record<string, any> }))
+  }
+  // 单条配置：自己就是一份命令或地址
+  if (doc.command || doc.cmd || doc.url || doc.serverUrl || doc.endpoint) {
+    const cmdLine = [String(doc.command ?? doc.cmd ?? ''), ...(Array.isArray(doc.args) ? doc.args.map(String) : [])].join(' ')
+    const guess = String(doc.name ?? '') || nameFromCommand(cmdLine)
+    return [{ name: sanitizeExtName(guess, 'mcp'), cfg: doc }]
+  }
+  // 剩下的只有当「名字 → 配置」的裸映射才认
+  const entries = Object.entries(doc as Record<string, any>).filter(
+    ([, v]) => v && typeof v === 'object' && !Array.isArray(v),
+  )
+  if (!entries.length) return 'unrecognized'
+  return entries.map(([k, v]) => ({ name: sanitizeExtName(k, 'mcp'), cfg: v as Record<string, any> }))
+}
+
+async function importExtJson() {
+  let doc: any
+  try {
+    doc = parseLooseJson(extImportDraft.value)
+  } catch {
+    extError.value = t('aiExtBadJson')
+    return
+  }
+  const parsed = extractExtCandidates(doc)
+  if (parsed === 'unrecognized') {
+    extError.value = t('aiExtUnrecognized')
+    return
+  }
+  if (!parsed.length) {
+    extError.value = t('aiExtEmptyJson')
+    return
+  }
+
+  const items = extServers.value.map(stateToInput)
+  const taken = new Set<string>()
+  const built: ExtInput[] = []
+  const skipped: string[] = []
+  const withHeaders: string[] = []
+  for (const e of parsed) {
+    const c = cfgToInput(e.cfg)
+    if (!c.command && !c.url) {
+      skipped.push(e.name)
+      continue
+    }
+    if (c.headers.length) withHeaders.push(e.name)
+    // 本次导入内部 sanitize 撞名（"@a/b" 与 "a-b"）时加序号，别互相覆盖
+    let name = e.name
+    let k = 2
+    while (taken.has(name)) name = `${e.name.slice(0, 28)}-${k++}`
+    taken.add(name)
+    const prev = items.find((x) => x.name === name)
+    built.push({
+      name,
+      command: c.command,
+      args: c.args,
+      env: c.env,
+      url: c.url,
+      // 覆盖时沿用原开关状态：导进来不该把用户停用的服务器又拉起来
+      disabled: prev ? prev.disabled : !!e.cfg.disabled,
+    })
+  }
+  if (!built.length) {
+    extError.value = t('aiExtNoneValid', { names: skipped.join('、') })
+    return
+  }
+
+  for (const it of built) {
+    const i = items.findIndex((x) => x.name === it.name)
+    if (i >= 0) items[i] = it
+    else items.push(it)
+  }
+  // 后端整份校验不通过时不会落盘：红字在区块里，另外补一个 toast，
+  // 免得导入面板收起后（或页面滚动到别处）用户以为又「没反应」
+  if (!(await commitExt(items))) {
+    if (extError.value) toast.error(extError.value)
+    return
+  }
+
+  // 成功要说话：面板收起后只有列表变化，用户分不清「导入了」还是「没反应」
+  let msg = t('aiExtImported', { n: built.length })
+  const extra: string[] = []
+  if (skipped.length) extra.push(t('aiExtImportSkipped', { n: skipped.length, names: skipped.join('、') }))
+  if (withHeaders.length) extra.push(t('aiExtImportHeaders', { names: withHeaders.join('、') }))
+  toast.success(extra.length ? `${msg}（${extra.join('；')}）` : msg)
 }
 
 async function reloadExt() {
@@ -427,7 +798,38 @@ watch(() => props.visible, (v) => {
   loadUsage()
   loadApprovalRules()
   loadExtServers()
+  loadMemoryAuto()
 }, { immediate: true })
+
+// ---- 记忆自动整理 ----
+//
+// 开关状态只在后端（ai_memory_auto），前端不缓存到 localStorage：
+// 那样两台机器/两处入口会出现「这里开着、那里关着」，而它决定的是花不花钱。
+const memoryAuto = ref(true)
+const memoryAutoSaving = ref(false)
+
+async function loadMemoryAuto() {
+  try {
+    memoryAuto.value = !!unwrap<boolean>(await AIGetMemoryAuto())
+  } catch (e) {
+    // 读不到就按默认（开）显示：这是默认行为，不该因为一次读取失败变成「关」
+    logErr('ai-memory-auto', e)
+  }
+}
+
+async function onToggleMemoryAuto(on: boolean) {
+  memoryAutoSaving.value = true
+  try {
+    memoryAuto.value = !!unwrap<boolean>(await AISetMemoryAuto(on))
+    toast.success(t(memoryAuto.value ? 'aiMemoryAutoOn' : 'aiMemoryAutoOff'))
+  } catch (e) {
+    // 回滚到改之前的勾选状态，别让界面显示一个没存进去的值
+    memoryAuto.value = !on
+    toast.error(getErrorMessage(e))
+  } finally {
+    memoryAutoSaving.value = false
+  }
+}
 
 function selectAIProfile(id: string) { aiActive.value = id }
 function editAIProfile(id: string) { aiActive.value = id; openAIEditor() }
@@ -726,50 +1128,159 @@ function saveAIModal() {
       </template>
     </div>
 
+    <!-- 记忆：每轮结束后 AI 自己把结论/偏好摘进长期记忆（没有绑定空间的对话共用一份，
+         绑定空间的写在项目里的 .quickDock）。开关放这里是因为它会多花一次小调用，
+         钱得让人看得见、也随时能关。 -->
+    <div class="ai-usage">
+      <div class="ai-usage-head">
+        <h4 class="ai-usage-title">{{ t('aiMemoryTitle') }}</h4>
+      </div>
+      <label class="ai-memory-row">
+        <input
+          type="checkbox"
+          class="ai-memory-check"
+          :checked="memoryAuto"
+          :disabled="memoryAutoSaving"
+          @change="onToggleMemoryAuto(($event.target as HTMLInputElement).checked)"
+        />
+        <span class="ai-memory-label">{{ t('aiMemoryAutoLabel') }}</span>
+      </label>
+      <p class="usage-hint">{{ t('aiMemoryHint') }}</p>
+    </div>
+
     <!-- 外部 MCP 服务器（阶段 D）：把别的 server 的工具接进内置 AI。
-         配置直接用 JSON 文本框：字段与 Claude Desktop / Cursor 的 mcp.json 一致，
-         现成配置粘贴过来就能用——表单化每加一个字段都要改 UI，JSON 一次到位。 -->
+         表单化增删改，JSON 只留「粘贴导入」——加一个服务器是这里最常做的事，
+         让人手写括号引号等于每次都从报错开始。 -->
     <div class="ai-usage">
       <div class="ai-usage-head">
         <h4 class="ai-usage-title">{{ t('aiExtTitle') }}</h4>
-        <button class="approval-ro-toggle" @click="extEditing ? (extEditing = false) : startEditExt()">
-          {{ extEditing ? t('cancel') : t('aiExtEdit') }}
+        <button v-if="!extForm" class="ai-ext-add" @click="openAddExt">
+          <Plus :size="12" /> {{ t('aiExtAdd') }}
         </button>
       </div>
       <p class="usage-hint">{{ t('aiExtDesc') }}</p>
 
       <p v-if="extError" class="result-hint error">{{ extError }}</p>
 
-      <template v-if="extEditing">
-        <textarea
-          v-model="extDraft"
-          class="field-input ai-ext-json"
-          :placeholder="t('aiExtPh')"
-          spellcheck="false"
-        ></textarea>
-        <div class="ai-ext-actions">
-          <button class="ai-hook-ok" :disabled="extSaving" @click="saveExt">{{ t('aiExtSaveReload') }}</button>
+      <!-- 新增 / 编辑表单 -->
+      <div v-if="extForm" class="ai-ext-form">
+        <div class="ai-ext-grid">
+          <label class="field">
+            <span class="field-label">{{ t('aiExtName') }}</span>
+            <input v-model="extForm.name" class="field-input" :placeholder="t('aiExtNamePh')" spellcheck="false" />
+          </label>
+          <div class="field">
+            <span class="field-label">{{ t('aiExtKind') }}</span>
+            <div class="ai-ext-seg">
+              <button
+                type="button"
+                :class="{ active: extForm.kind === 'stdio' }"
+                @click="extForm.kind = 'stdio'"
+              >{{ t('aiExtKindStdio') }}</button>
+              <button
+                type="button"
+                :class="{ active: extForm.kind === 'http' }"
+                @click="extForm.kind = 'http'"
+              >{{ t('aiExtKindHttp') }}</button>
+            </div>
+          </div>
         </div>
-      </template>
+
+        <template v-if="extForm.kind === 'stdio'">
+          <label class="field">
+            <span class="field-label">{{ t('aiExtCommand') }}</span>
+            <input v-model="extForm.command" class="field-input" :placeholder="t('aiExtCommandPh')" spellcheck="false" />
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('aiExtArgs') }}</span>
+            <textarea
+              v-model="extForm.argsText"
+              class="field-input ai-ext-ta"
+              rows="3"
+              :placeholder="t('aiExtArgsPh')"
+              spellcheck="false"
+            ></textarea>
+            <span class="ai-ext-tip">{{ t('aiExtArgsHint') }}</span>
+          </label>
+          <label class="field">
+            <span class="field-label">{{ t('aiExtEnv') }}</span>
+            <textarea
+              v-model="extForm.envText"
+              class="field-input ai-ext-ta"
+              rows="2"
+              :placeholder="t('aiExtEnvPh')"
+              spellcheck="false"
+            ></textarea>
+            <span class="ai-ext-tip">{{ t('aiExtEnvHint') }}</span>
+          </label>
+        </template>
+        <label v-else class="field">
+          <span class="field-label">{{ t('aiExtUrl') }}</span>
+          <input v-model="extForm.url" class="field-input" :placeholder="t('aiExtUrlPh')" spellcheck="false" />
+        </label>
+
+        <div class="ai-ext-actions">
+          <button class="ai-hook-ok" :disabled="extSaving" @click="submitExtForm">{{ t('aiExtSaveReload') }}</button>
+          <button class="ai-hook-no" :disabled="extSaving" @click="extForm = null">{{ t('cancel') }}</button>
+        </div>
+      </div>
+
+      <!-- 已接入列表 -->
       <template v-else>
         <p v-if="extLoading && !extServers.length" class="usage-hint">{{ t('aiUsageLoading') }}</p>
         <p v-else-if="!extServers.length" class="usage-hint">{{ t('aiExtEmpty') }}</p>
-        <table v-else class="usage-table approval-rules">
-          <tbody>
-            <tr v-for="s in extServers" :key="s.name">
-              <td class="model">
-                <code>{{ s.name }}</code>
+        <div v-else class="ai-ext-list">
+          <div v-for="s in extServers" :key="s.name" class="ai-ext-item">
+            <div class="ai-ext-item-main">
+              <div class="ai-ext-item-head">
+                <code class="ai-ext-name">{{ s.name }}</code>
+                <span class="ai-ext-kind-tag">{{ kindOf(s) === 'http' ? 'HTTP' : 'stdio' }}</span>
                 <span :class="['ext-status', s.status]">
                   {{ s.status === 'ok' ? t('aiExtStatusOk', { n: s.toolCount }) : s.status === 'disabled' ? t('aiExtStatusOff') : t('aiExtStatusErr') }}
                 </span>
-                <div v-if="s.error" class="usage-cell-sub">{{ s.error }}</div>
-                <div v-else-if="s.tools.length" class="usage-cell-sub">{{ s.tools.join(' · ') }}</div>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <div v-if="extServers.some((s) => s.status === 'error')" class="ai-ext-actions">
-          <button class="ai-hook-no" :disabled="extLoading" @click="reloadExt">{{ t('aiExtReload') }}</button>
+              </div>
+              <div class="ai-ext-cmd" :title="extTarget(s)">{{ extTarget(s) }}</div>
+              <div v-if="s.error" class="usage-cell-sub ai-ext-err">{{ s.error }}</div>
+              <div v-else-if="s.tools.length" class="usage-cell-sub">{{ s.tools.join(' · ') }}</div>
+            </div>
+            <div class="ai-ext-item-ops">
+              <button
+                class="toggle-btn-sm"
+                :class="{ active: s.status !== 'disabled' }"
+                :disabled="extSaving"
+                :title="s.status === 'disabled' ? t('aiExtEnable') : t('aiExtDisable')"
+                @click="toggleExt(s)"
+              >
+                <span class="toggle-knob"></span>
+              </button>
+              <button class="ai-hook-no" :disabled="extSaving" @click="openEditExt(s)">{{ t('aiExtEdit') }}</button>
+              <button class="ai-hook-no is-danger" :disabled="extSaving" @click="removeExt(s)">{{ t('delete') }}</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="ai-ext-actions">
+          <button class="ai-hook-no" :disabled="extLoading" @click="reloadExt">
+            <RefreshCw :size="12" /> {{ t('aiExtReload') }}
+          </button>
+          <button class="ai-hook-no" @click="extImportOpen = !extImportOpen">{{ t('aiExtImport') }}</button>
+        </div>
+
+        <!-- 粘贴导入：别人给的 mcp.json 片段整段贴进来（同名覆盖） -->
+        <div v-if="extImportOpen" class="ai-ext-import">
+          <textarea
+            v-model="extImportDraft"
+            class="field-input ai-ext-json"
+            :placeholder="t('aiExtPh')"
+            spellcheck="false"
+          ></textarea>
+          <div class="ai-ext-actions">
+            <button class="ai-hook-ok" :disabled="extSaving || !extImportDraft.trim()" @click="importExtJson">
+              {{ t('aiExtImportDo') }}
+            </button>
+            <button class="ai-hook-no" @click="extImportOpen = false">{{ t('cancel') }}</button>
+          </div>
+          <span class="ai-ext-tip">{{ t('aiExtImportHint') }}</span>
         </div>
       </template>
     </div>

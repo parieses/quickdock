@@ -717,10 +717,31 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 .ai-messages {
   flex: 1;
   overflow-y: auto;
-  padding: 16px 20px;
+  /* 与输入框（width:80% 居中）同一条左右边线：留白 10% = 内容宽 80%。
+     用 max(20px, 10%) 只是兜底，窄窗口下别让正文贴到边上。 */
+  padding: 16px max(20px, 10%);
   display: flex;
   flex-direction: column;
   overflow-anchor: none; /* 关掉浏览器自动锚定，避免与我们的贴底逻辑打架 */
+  /* 整个消息区允许划词。body 上有全局 user-select:none，此前只给
+     .ai-msg-content 开了 text——从气泡留白处起手拖选就一个字符都选不中，
+     跨消息复制（正文 + 代码块 + 工具结果）更是无从谈起，用户感受就是
+     「聊天区不能复制」。这里把整区打开，纯装饰/可点击部件各自关掉。 */
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* 只关掉「按钮 / 折叠标题」这类点一下就变的东西：划中它们只会得到噪音。
+   正文、工具结果、表格、清单都不在此列——那些正是用户想复制的。 */
+.ai-msg-actions,
+.ai-tools > summary,
+.ai-tool > summary,
+.ai-reasoning summary,
+.ai-empty,
+.ai-plan-head,
+.ai-jump-bottom {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .ai-msg-content-wrap {
@@ -735,7 +756,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-msg.user { align-self: flex-end; align-items: flex-end; }
 
-.ai-msg.assistant { align-self: flex-start; }
+/* 助手消息允许铺满内容区：表格/代码块才能和输入框同宽。
+   用户消息仍收 88%，气泡太宽就失去「我说的话」那种块感。 */
+.ai-msg.assistant { align-self: flex-start; max-width: 100%; }
 
 .ai-msg-role { font-size: 11px; color: var(--color-text-disabled); margin-bottom: 1px; display: flex; align-items: center; gap: 6px; }
 
@@ -867,72 +890,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-md :deep(p) { margin: 5px 0; }
 
-/* 列表：用 CSS 自绘圆点 / 序号，避免不同字体下浏览器 disc 渲染成方块（WebView2 偶发）。
-   排除 .ai-plan-items：计划清单有自己的「·」标记与 flex 布局，不能叠加圆点。 */
-.ai-md :deep(ul:not(.ai-plan-items)), .ai-md :deep(ol) { padding-left: 22px; margin: 6px 0; }
-.ai-md :deep(ul:not(.ai-plan-items)) { list-style: none; }
-.ai-md :deep(ol) { list-style: none; counter-reset: ai-md-ol; }
-
-.ai-md :deep(li) { margin: 2px 0; line-height: 1.6; position: relative; }
-
-/* 任务清单（- [ ] / - [x]）有自己的勾选框，不要再叠加圆点 */
-.ai-md :deep(ul:not(.ai-plan-items) > li:not(.ai-task-item))::before {
-  content: '';
-  position: absolute;
-  left: -15px;
-  top: calc(0.62em + 1px);
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--color-text-muted);
-}
-.ai-md :deep(ol > li) { counter-increment: ai-md-ol; }
-.ai-md :deep(ol > li)::before {
-  content: counter(ai-md-ol) '.';
-  position: absolute;
-  left: -22px;
-  top: 0;
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
-}
-
-.ai-md :deep(li > p) { margin: 0; }
-
-/* 任务清单：- [ ] / - [x] 渲染成带样式的勾选框（renderer 输出 .ai-task-item / .ai-task-box）。
-   已完成项加删除线 + 降透明，随 AI 把 [ ] 改成 [x] 实时更新。 */
-.ai-md :deep(li.ai-task-item) {
-  list-style: none;
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-}
-.ai-md :deep(.ai-task-box) {
-  flex: none;
-  width: 15px; height: 15px;
-  margin-top: 3px;
-  border: 1.5px solid var(--color-border-strong, #b4b4b4);
-  border-radius: 4px;
-  background: var(--color-bg);
-  box-sizing: border-box;
-  position: relative;
-}
-.ai-md :deep(li.ai-task-item.is-done .ai-task-box) {
-  border-color: var(--color-success, #2fa84f);
-  background: var(--color-success, #2fa84f);
-}
-.ai-md :deep(li.ai-task-item.is-done .ai-task-box)::after {
-  content: '';
-  position: absolute;
-  left: 4px; top: 1px;
-  width: 4px; height: 8px;
-  border: solid #fff;
-  border-width: 0 2px 2px 0;
-  transform: rotate(45deg);
-}
-.ai-md :deep(li.ai-task-item.is-done) {
-  text-decoration: line-through;
-  opacity: 0.62;
-}
+/* 列表 / 任务清单的样式在 styles/app.css 的「AI 回复正文的 markdown 列表」一节。
+   放全局而非 scoped：正文由 v-html 渲染，scoped 的 :deep 依赖 data-v 属性，该组件
+   模块一旦没随 HMR 更新就整套失效（列表变回方块）。全局 CSS 走独立 style 热更新。 */
 
 .ai-md :deep(br) { display: inline; }
 

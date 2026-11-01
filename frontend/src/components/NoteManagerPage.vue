@@ -34,7 +34,7 @@ import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboards
 import {
   Trash2, Search, X, FolderPlus, FileText, Folder,
   Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
-  FileSearch, Square, CheckSquare, Clock,
+  FileSearch, Square, CheckSquare, Clock, Code2, Columns2, Eye,
 } from '@lucide/vue'
 import type { ToastAPI, Note } from '../types'
 
@@ -474,6 +474,24 @@ const selectedDoc = computed<Note | null>(() => (selectedDocId.value ? nodes.val
 // 用 installMathOnce 而不是直接 marked.use —— 本文件每次进入页面都会重跑一遍 setup。
 installMathOnce(marked)
 
+// ---- Markdown 视图模式：源码 / 分屏 / 预览 ----
+// 仅对 markdown 生效（纯文本没有预览，永远只有源码一栏）。
+// 默认「分屏」= 源码与预览都有，符合「md 默认两者都显示」的预期；
+// 偏好存 localStorage，切文档 / 重启都不丢。
+const NOTE_VIEW_KEY = 'quickdock.notes.viewMode'
+type NoteView = 'split' | 'source' | 'preview'
+const noteView = ref<NoteView>('split')
+function loadNoteView() {
+  try {
+    const v = localStorage.getItem(NOTE_VIEW_KEY)
+    if (v === 'split' || v === 'source' || v === 'preview') noteView.value = v
+  } catch { /* 隐私模式/配额忽略 */ }
+}
+function setNoteView(v: NoteView) {
+  noteView.value = v
+  try { localStorage.setItem(NOTE_VIEW_KEY, v) } catch { /* 同上 */ }
+}
+
 const previewHtml = computed(() => (docContent.value ? DOMPurify.sanitize(marked.parse(docContent.value, { async: false }) as string) : ''))
 
 // 标签以逗号分隔输入，必须序列化成合法 JSON 数组。
@@ -763,7 +781,7 @@ async function renameCurrent() {
   try { await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name); await load() } catch (e) { toast.error(getErrorMessage(e)) }
 }
 
-onMounted(() => { loadTreePrefs(); loadRecent(); load() })
+onMounted(() => { loadTreePrefs(); loadRecent(); loadNoteView(); load() })
 onBeforeUnmount(() => {
   void flushPendingSave()
   offDocScroll?.()
@@ -916,6 +934,12 @@ watch(pendingOpenNoteId, (id) => {
               <button :class="{ active: selectedDoc.format !== 'text' }" @click="setFormat('markdown')">{{ t('notesFormatMd') }}</button>
               <button :class="{ active: selectedDoc.format === 'text' }" @click="setFormat('text')">{{ t('notesFormatText') }}</button>
             </div>
+            <!-- Markdown 视图三段切换：源码 / 分屏 / 预览（默认分屏）。纯文本格式没有预览，不显示。 -->
+            <div v-if="selectedDoc.format !== 'text'" class="ne-view">
+              <button :class="{ active: noteView === 'source' }" :title="t('notesViewSource')" @click="setNoteView('source')"><Code2 :size="13" /></button>
+              <button :class="{ active: noteView === 'split' }" :title="t('notesViewSplit')" @click="setNoteView('split')"><Columns2 :size="13" /></button>
+              <button :class="{ active: noteView === 'preview' }" :title="t('notesViewPreview')" @click="setNoteView('preview')"><Eye :size="13" /></button>
+            </div>
             <button class="ne-copy" :title="t('notesFindInDoc')" @click="findInDoc()"><FileSearch :size="13" /></button>
             <button class="ne-copy" :title="t('noteAiTitle')" @click="openAi"><Sparkles :size="13" /></button>
             <button class="ne-copy" :title="t('notesExportMd')" @click="exportDoc"><FileDown :size="13" /></button>
@@ -935,14 +959,17 @@ watch(pendingOpenNoteId, (id) => {
             </span>
           </div>
           <!-- markdown：左编辑 + 右预览，两栏滚动同步；纯文本：仅编辑区。
-               两栏共用同一个编辑器宿主（格式切换只重建 CM，不动 DOM 结构） -->
-          <div class="ne-split">
+               两栏共用同一个编辑器宿主（格式切换只重建 CM，不动 DOM 结构）。
+               视图模式只切「显隐」不卸载：编辑器宿主始终在 DOM 里，避免切换时
+               CodeMirror 实例被销毁重建（丢光标/滚动/撤销历史）。隐藏用 v-show +
+               父级 class，隐藏规则以 !important 压过 v-show 的内联 display:none。 -->
+          <div class="ne-split" :class="'ne-view-' + noteView">
             <div
               ref="docEditorHost"
               class="ne-editor"
               :class="{ 'ne-editor-only': selectedDoc.format === 'text' }"
             ></div>
-            <div v-if="selectedDoc.format !== 'text'" ref="previewRef" class="ne-preview markdown-body" v-html="previewHtml"
+            <div v-show="selectedDoc.format !== 'text' && noteView !== 'source'" ref="previewRef" class="ne-preview markdown-body" v-html="previewHtml"
               @scroll="syncScroll('preview')"></div>
           </div>
 
@@ -998,6 +1025,17 @@ watch(pendingOpenNoteId, (id) => {
 .ne-format button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
 .ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-format button:hover:not(.active) { color: var(--color-text-primary); }
+/* Markdown 视图三段切换（源码 / 分屏 / 预览）：仅 markdown 格式出现，与格式按钮紧邻 */
+.ne-view { display: flex; gap: 2px; flex-shrink: 0; }
+.ne-view button { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer; font-family: inherit; border-radius: var(--radius-sm); }
+.ne-view button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.ne-view button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
+.ne-view button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.ne-view button:hover:not(.active) { color: var(--color-text-primary); }
+/* 视图模式：隐藏某一栏，另一栏撑满。预览用 v-show（内联 display:none），
+   故这里必须 !important 才能压过内联样式；编辑器无 v-show，正常隐藏即可。 */
+.ne-view-source .ne-preview { display: none !important; }
+.ne-view-preview .ne-editor { display: none !important; }
 .ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: 6px; border-radius: var(--radius-sm); }
 .ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
 .ne-tags { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); }

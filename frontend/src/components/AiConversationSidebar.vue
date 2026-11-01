@@ -9,6 +9,7 @@ import type { Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronRight, Folder, Pencil, Plus, Search, Star, Trash2, X } from '@lucide/vue'
 import type { AIConvHit, AIConversation, AISpace } from '../types/ai'
+import AiConvRunDot from './AiConvRunDot.vue'
 
 interface SpaceGroup { space: AISpace; tasks: AIConversation[] }
 
@@ -16,6 +17,8 @@ interface Props {
   conversations: AIConversation[]
   spaces: AISpace[]
   activeId: string
+  /** 每条会话的运行状态（running / done / error），键是会话 id。见 AIPage 的 convRunState */
+  runState: Record<string, 'running' | 'done' | 'error'>
 
   convQuery: string
   starredConvs: AIConversation[]
@@ -64,7 +67,6 @@ interface Props {
   fmtTokens: (n: number) => string
 }
 
-defineProps<Props>()
 const emit = defineEmits<{
   (e: 'update:convQuery', v: string): void
   (e: 'update:starredOpen', v: boolean): void
@@ -78,6 +80,24 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const props = defineProps<Props>()
+
+// 空间行上的聚合状态：空间收起时，里面那条正在跑/刚跑完的对话就完全看不见了，
+// 所以把最强的一个状态提到空间行上。优先级 running > error > done——
+// 「还在跑」最要紧，其次是「失败了」。
+function spaceRunState(g: SpaceGroup): 'running' | 'done' | 'error' | undefined {
+  let out: 'done' | 'error' | undefined
+  for (const c of g.tasks) {
+    // 用户正打开着的那条不算：内容就在眼前，行上再挂个点只是噪音
+    if (c.id === props.activeId) continue
+    const st = props.runState[c.id]
+    if (!st) continue
+    if (st === 'running') return 'running'
+    if (st === 'error') out = 'error'
+    else if (!out) out = 'done'
+  }
+  return out
+}
 
 // 三个 v-model 走 input 事件而不是 defineModel：项目 Vue 是 ^3.2，
 // defineModel 要 3.4+，这里宁可多两行也不押依赖版本。
@@ -119,6 +139,7 @@ function onSpaceNameTextInput(e: Event) {
             @click="selectConv(c.id)"
           >
             <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
+            <AiConvRunDot :state="c.id === activeId ? undefined : runState[c.id]" />
             <span class="ai-conv-title">{{ c.title || t('aiNewChat') }}</span>
             <button class="ai-conv-ren is-starred" :title="t('aiStarOff')" @click.stop="toggleStar(c)">
               <Star :size="12" fill="currentColor" />
@@ -143,6 +164,7 @@ function onSpaceNameTextInput(e: Event) {
             @click="selectConv(h.conv_id)"
           >
             <Search :size="11" class="ai-conv-mode" />
+            <AiConvRunDot :state="h.conv_id === activeId ? undefined : runState[h.conv_id]" />
             <div class="ai-msg-hit-body">
               <div class="ai-msg-hit-head">
                 <span class="ai-conv-title">{{ h.conv_title || t('aiNewChat') }}</span>
@@ -167,6 +189,7 @@ function onSpaceNameTextInput(e: Event) {
           @click="selectConv(c.id)"
         >
           <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
+          <AiConvRunDot :state="c.id === activeId ? undefined : runState[c.id]" />
           <input
             v-if="renamingId === c.id"
             ref="renameInput"
@@ -251,6 +274,7 @@ function onSpaceNameTextInput(e: Event) {
             @blur="commitRenameSpace(g.space)"
           />
           <span v-else class="ai-space-name" :title="g.space.cwd" @dblclick.stop="startRenameSpace(g.space)">{{ g.space.name }}</span>
+          <AiConvRunDot :state="spaceRunState(g)" />
           <span class="ai-space-count">{{ g.tasks.length }}</span>
           <!-- 在这个空间里新建任务：否则每次都要去落地页的「归属空间」下拉里翻一遍 -->
           <button
@@ -281,6 +305,7 @@ function onSpaceNameTextInput(e: Event) {
             @click="selectConv(c.id)"
           >
             <component :is="modeIcon(c.mode)" :size="12" class="ai-conv-mode" />
+            <AiConvRunDot :state="c.id === activeId ? undefined : runState[c.id]" />
             <span class="ai-conv-title" @dblclick.stop="startRename(c)">{{ c.title || t('aiNewChat') }}</span>
             <button
               class="ai-conv-ren"

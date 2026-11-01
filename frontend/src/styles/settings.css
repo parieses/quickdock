@@ -527,6 +527,18 @@
 .usage-cell-sub { display: block; font-size: 10px; color: var(--color-text-disabled); }
 .usage-hint { margin: 8px 0 0; font-size: 11px; line-height: 1.5; color: var(--color-text-disabled); }
 
+/* ── 记忆自动整理（设置 → AI） ───────────────────────────────────── */
+
+/* 一行「复选框 + 说明」：它是个布尔开关，用 label 包住整行，
+   点文字也能勾上——一个单独的 12px 方框很难点中。 */
+.ai-memory-row {
+  display: flex; align-items: center; gap: 8px;
+  padding: 2px 0; cursor: pointer;
+}
+.ai-memory-check { width: 13px; height: 13px; margin: 0; accent-color: var(--color-accent); cursor: pointer; }
+.ai-memory-check:disabled { cursor: progress; opacity: 0.6; }
+.ai-memory-label { font-size: 12px; color: var(--color-text-primary); }
+
 /* ── 工具审批策略表（设置 → AI） ─────────────────────────────────── */
 
 /* 每行除了工具名还挂着它的描述，比用量表高一档；沿用 .usage-table 的边框与字号。 */
@@ -581,6 +593,78 @@
   white-space: pre; overflow: auto;
 }
 .ai-ext-actions { display: flex; gap: 8px; margin-top: 8px; }
+/* 带图标的按钮（+ 添加 / 重连）要 inline-flex，否则图标和文字基线错位 */
+.ai-ext-actions .ai-hook-no,
+.ai-ext-actions .ai-hook-ok,
+.ai-ext-add { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ── 外部 MCP：表单式添加（原来是一整份 JSON 文本框） ── */
+.ai-ext-add {
+  padding: 0; border: none; background: none; cursor: pointer;
+  color: var(--color-accent); font-family: inherit; font-size: 11.5px;
+}
+.ai-ext-add:hover { text-decoration: underline; }
+
+.ai-ext-form {
+  display: flex; flex-direction: column; gap: 10px;
+  margin-top: 8px; padding: 12px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+
+/* 名称与类型同行：这两格都短，各占一半比纵向堆四行省一屏 */
+.ai-ext-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+/* 类型分段选择：两个互斥选项，用 select 会多一次展开 */
+.ai-ext-seg {
+  display: inline-flex; gap: 2px; padding: 2px; width: fit-content;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+}
+.ai-ext-seg button {
+  padding: 4px 10px; border: none; border-radius: 3px;
+  background: transparent; color: var(--color-text-secondary);
+  font-family: inherit; font-size: 11.5px; cursor: pointer;
+}
+.ai-ext-seg button.active { background: var(--color-accent); color: var(--color-accent-text); }
+
+/* 参数 / 环境变量逐行输入：等宽字体 + 允许拉高，长参数列表才看得清 */
+.ai-ext-ta {
+  min-height: 56px; resize: vertical;
+  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.6;
+}
+
+.ai-ext-tip { font-size: 11px; color: var(--color-text-disabled); }
+
+.ai-ext-list { display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+
+.ai-ext-item {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  background: var(--color-bg-secondary);
+}
+.ai-ext-item-main { flex: 1; min-width: 0; }
+.ai-ext-item-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ai-ext-name { font-family: var(--font-mono); font-size: 12px; color: var(--color-text-primary); }
+.ai-ext-kind-tag {
+  padding: 0 5px; border-radius: 3px;
+  background: var(--color-bg-active); color: var(--color-text-muted);
+  font-size: 10px; line-height: 16px; letter-spacing: 0.04em; text-transform: uppercase;
+}
+.ai-ext-cmd {
+  margin-top: 2px;
+  font-family: var(--font-mono); font-size: 11px; color: var(--color-text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ai-ext-err { color: var(--color-danger); }
+.ai-ext-item-ops { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+
+.ai-hook-no.is-danger { color: var(--color-danger); border-color: var(--color-danger-border); }
+.ai-hook-no.is-danger:hover { background: var(--color-danger-bg); }
+
+.ai-ext-import { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+
 .ext-status { margin-left: 8px; font-size: 11px; }
 .ext-status.ok { color: var(--color-accent); }
 .ext-status.disabled { color: var(--color-text-disabled); }
