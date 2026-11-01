@@ -342,6 +342,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Pick skills right in the input, memory writes itself, and switching away won't stop the reply</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Type <code>/</code> in the input to pick a skill; the chosen one becomes an inline chip, remembered for that conversation and still there when you come back.</li>
+          <li>Memory maintains itself: after each turn it files the conclusions and preferences worth keeping into the memory file — project tasks write to the project folder, plain tasks share one across tasks, so it no longer starts from zero every time.</li>
+          <li>Execution permission can flip to "full access" with one click, but that only skips the "ask" step — destructive commands, force-push, high-risk commands and the file whitelist still hold.</li>
+          <li>Switch to another conversation or page and the running reply keeps generating; come back and it's where you left it. The sidebar now shows a per-conversation status dot: in progress / done / failed.</li>
+          <li>Markdown notes get a source / split / preview switcher in the top-right, split by default.</li>
+          <li>Also: file-writing tools auto-approve inside authorised directories; a reply notifies on completion, interruption or failure; the dialog shows the current directory's git branch; the sidebar lists the first 10 tasks and folds the rest.</li>
+        </ul>
+      </details>
+
+      <details class="log" open>
+        <summary>
+          <span class="log-ver">v0.0.35</span>
+          <span class="log-date">2026-10-31</span>
           <span class="log-title">The built-in AI can now edit files and run commands — every step is askable, every change is undoable</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>

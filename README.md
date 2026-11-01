@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.35-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.36-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -368,6 +368,9 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 - **后台命令**：`run_command` 带 `background` 起 dev server、watch 这类不会自己结束的进程，立刻拿到任务号，之后用 `job_status` / `job_output` 查输出，不占住这一轮对话
 - **接入外部 MCP server**：在 `mcp.json` 里配好别人的 server，它的工具以 `mcp_<server>_<tool>` 并进同一张注册表，等级门、单工具开关、审批闸门、面板分组全部原样生效——外部工具不是旁路。等级恒按写处理、默认逐次审批：对方自称只读也只是它自己说的
 - **会话**：多会话、标题自动生成与手动重命名、会话搜索、星标置顶、一键摘要、导出 Markdown、删除进回收站
+- **输入框选技能**：打 <code>/</code> 直接选，选中的技能变成行内胶囊，随这条对话记住、下次进来还在；执行权限可一键切到「完全访问」，但只跳过「问」这一档，删库、强推、高危命令和文件白名单仍拦着
+- **记忆每轮自动整理**：每轮结束后把值得长期记的结论、偏好摘进记忆文件，项目任务记到项目目录、普通任务跨任务共享，不再每轮从零开始（之前每条新对话都只有基线模板）
+- **切走不中断**：切到别的会话或页面，正在跑的回答继续生成，回来还在原位置；侧栏每条会话多了「进行中 / 完成 / 失败」的状态点
 - **摘要与大纲**：摘要让模型读会话尾部（不是整段，最近几十轮才代表「现在聊到哪了」），产出 3–6 条要点：在解决什么、已经有哪些结论、还差什么没做完。大纲按回答里的标题生成，点一条就跳到那一条消息
 - **产物条**：这条回答写过的文件挂在回答下面，点开即预览（文本、图片、markdown 各自渲染）。配置文件可以在右侧面板直接改，改完存回去——编辑器是 CodeMirror 6，按需动态加载
 - **模型可见**：每条回答下方标注实际用的模型，流式生成和刷新后一致
