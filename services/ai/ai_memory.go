@@ -1,16 +1,25 @@
 package ai
 
-// 项目记忆：把「这个工作目录里在做什么、改过什么、踩过什么坑」沉淀到磁盘，
-// 让 AI 在后续轮次/会话里不必反复重读整个项目。
+// 记忆：把「在做什么、改过什么、踩过什么坑、问过什么」沉淀到磁盘，
+// 让 AI 在后续轮次/会话里不必反复重读项目，也不必让用户重复交代背景。
 //
-// 两个文件（都落在 <cwd>/.quickDock/ 下）：
+// 两个文件：
 //
-//   - MEMORY.md          整体记忆（长期）：项目是什么、技术栈、关键文件、约定、
-//     决策与踩过的坑。由 AI 通过 project_memory 工具主动维护——这些是需要
-//     「判断哪些值得长期记住」的事实，机器无法自动归纳，交给模型更准。
+//   - MEMORY.md          整体记忆（长期）：项目任务里是「项目是什么、技术栈、关键文件、
+//     约定、决策与踩过的坑」；无空间任务里是「用户是谁、偏好、问过什么、给过的结论」。
+//     由 AI 通过 project_memory 工具主动维护——这些需要「判断哪些值得长期记住」，
+//     机器归纳不了，交给模型更准。
 //   - memory/YYYY-MM-DD.md  每日记忆（当天活动日志）：每轮结束后由系统自动追加，
 //     记录「用户要了什么、改了哪些文件、跑了几轮」。纯确定性提取，不调模型，
 //     所以一定存在、且不会漏。AI 只读不写它（手动写会破坏自动日志的口径）。
+//
+// **记忆跟着「工作区」走，但工作区不等于每个任务的临时目录**（2026-11-01 修）：
+//
+//   - 属于空间的任务 → 记忆在 <空间目录>/.quickDock，项目事实跟着项目走。
+//   - 不属于空间的任务 → cwd 是系统在 ai_tasks 下新建的空目录，一个任务一个。
+//     按 cwd 存的话每条对话都从零开始，MEMORY.md 永远只有自动生成的空画像——
+//     用户看到的就是「记忆全是默认的、跟刚才问的没关系」。所以这类任务共用
+//     数据目录下的 ai_memory/，跨任务、跨天累积。
 //
 // 为什么能省 token：原来「优化一下网页」会让模型把整个 index.html 再读一遍，
 // 而且那份内容会留在对话历史里每轮重发。现在每轮开头把记忆块（整体 + 近两日）
@@ -28,55 +37,141 @@ import (
 	"time"
 
 	"quickdock/internal/logger"
+	"quickdock/internal/platform"
 )
 
-const memoryDirName = ".quickDock"
-
-func memoryRoot(cwd string) string { return filepath.Join(cwd, memoryDirName) }
-func overallMemoryPath(cwd string) string {
-	return filepath.Join(memoryRoot(cwd), "MEMORY.md")
-}
-func dailyMemoryPath(cwd string, day time.Time) string {
-	return filepath.Join(memoryRoot(cwd), "memory", day.Format("2006-01-02")+".md")
-}
-
-// memoryCapOverall / memoryCapDaily 注入时各自的上限（字符），防止记忆本身撑爆上下文。
 const (
-	memoryCapOverall = 6000
-	memoryCapDaily   = 2400
+	// memoryDirName 项目记忆目录名（就在工作目录下，跟着项目走）。
+	memoryDirName = ".quickDock"
+	// assistantMemoryDirName 无空间任务共用的助手记忆目录名（在数据目录下）。
+	// 为什么不复用 <数据目录>/.quickDock：那是宿主自己的数据（db、logs、plugins），
+	// 记忆混进去以后「哪些是机器在用的、哪些是 AI 的记忆」就分不清了。
+	assistantMemoryDirName = "ai_memory"
+)
+
+// memoryScope 记忆落在哪儿。
+type memoryScope struct {
+	// root MEMORY.md 与 memory/ 所在的目录。
+	root string
+	// project true = <cwd>/.quickDock（跟着项目走）；false = 数据目录下跨任务共享。
+	project bool
+}
+
+// resolveMemoryScope 决定「这个工作目录的记忆该存哪儿」。
+//
+// 唯一的判据是「cwd 是不是系统给无空间任务自动建的目录」：是就说明这里没有项目，
+// 记忆只能跨任务共用一份；否则就是用户真的在某个项目里干活，记忆跟着项目最合适。
+func resolveMemoryScope(cwd string) memoryScope {
+	cwd = strings.TrimSpace(cwd)
+	if cwd == "" {
+		return memoryScope{}
+	}
+	if isScratchWorkDir(cwd) {
+		return memoryScope{root: assistantMemoryRoot()}
+	}
+	return memoryScope{root: filepath.Join(cwd, memoryDirName), project: true}
+}
+
+// assistantMemoryRoot 无空间任务的共享记忆目录（数据目录下）。
+//
+// 每次调用现算而不是启动时算一次：数据目录可以被用户迁移，缓存下来迁移后
+// 就会写到旧目录去（而旧目录可能已经被删了）。
+func assistantMemoryRoot() string {
+	return filepath.Join(platform.DefaultDataDir(), assistantMemoryDirName)
+}
+
+// isScratchWorkDir 判断 cwd 是不是 ai_tasks 下那个「每个任务一个」的空目录。
+//
+// 用路径关系判断而不是看目录里有没有文件：任务目录里迟早会有 AI 生成的文件，
+// 那时候再「有文件就当项目」会把同一个任务的记忆从共享区搬走，前后不是一份。
+func isScratchWorkDir(cwd string) bool {
+	base, err := filepath.Abs(filepath.Join(platform.DefaultDataDir(), aiTaskDirName))
+	if err != nil {
+		return false
+	}
+	abs, err := filepath.Abs(cwd)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(base, abs)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return false
+	}
+	return true
+}
+
+func overallMemoryPath(root string) string { return filepath.Join(root, "MEMORY.md") }
+func dailyMemoryPath(root string, day time.Time) string {
+	return filepath.Join(root, "memory", day.Format("2006-01-02")+".md")
+}
+
+// memoryCapOverall / memoryCapDaily / memoryCapDailyShared 注入时各自的上限（字符），
+// 防止记忆本身撑爆上下文。共享的那份一天里会攒下所有任务的条目，给宽一点。
+const (
+	memoryCapOverall     = 6000
+	memoryCapDaily       = 2400
+	memoryCapDailyShared = 4800
 )
 
 // readProjectMemory 读取整体记忆 + 今日与昨日每日记忆，拼成一个紧凑的上下文块。
 // 没有任何记忆时返回空串，调用方据此决定是否注入（避免无谓地污染系统提示）。
 func readProjectMemory(cwd string) string {
-	if strings.TrimSpace(cwd) == "" {
-		return ""
-	}
-	if !dirExists(memoryRoot(cwd)) {
+	sc := resolveMemoryScope(cwd)
+	if sc.root == "" || !dirExists(sc.root) {
 		return ""
 	}
 	var b strings.Builder
-	if data, err := os.ReadFile(overallMemoryPath(cwd)); err == nil {
-		if s := strings.TrimSpace(string(data)); s != "" {
+	if data, err := os.ReadFile(overallMemoryPath(sc.root)); err == nil {
+		if s := strings.TrimSpace(string(data)); s != "" && !isPlaceholderProfile(s) {
 			b.WriteString("【整体记忆】\n")
 			b.WriteString(clipRunes(s, memoryCapOverall))
 			b.WriteString("\n\n")
 		}
 	}
+	dailyCap := memoryCapDaily
+	if !sc.project {
+		dailyCap = memoryCapDailyShared
+	}
 	now := time.Now()
 	// 今日 + 昨日：够覆盖「这次会话之前做到哪了」，又不把一整周的日志都塞进来。
 	for _, d := range []time.Time{now, now.AddDate(0, 0, -1)} {
-		data, err := os.ReadFile(dailyMemoryPath(cwd, d))
+		data, err := os.ReadFile(dailyMemoryPath(sc.root, d))
 		if err != nil {
 			continue
 		}
 		if s := strings.TrimSpace(string(data)); s != "" {
 			b.WriteString(fmt.Sprintf("【%s 每日记忆】\n", d.Format("2006-01-02")))
-			b.WriteString(clipRunes(s, memoryCapDaily))
+			// 日志是只追加的，最旧的在最前面：超长时该保住的是**最近**那几条，
+			// 从头截会把今天刚做的事裁掉、留下早上的闲聊。
+			b.WriteString(clipRunesTail(s, dailyCap))
 			b.WriteString("\n\n")
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// memoryBlock 组装注入系统提示的整块记忆（含指引），不需要注入时返回空串。
+//
+// 两条不同的空值规则：
+//   - 项目作用域：没内容就不注入（项目画像一生成就有内容，读不到说明这项目没记忆）。
+//   - 助手作用域：即使一个字都没写过也要给指引。否则模型压根不知道往哪写，
+//     共享记忆会一直是空的——「记忆永远是默认的」另一种成因。
+func memoryBlock(cwd string) string {
+	sc := resolveMemoryScope(cwd)
+	if sc.root == "" {
+		return ""
+	}
+	if mem := readProjectMemory(cwd); mem != "" {
+		label := "项目记忆"
+		if !sc.project {
+			label = "助手记忆"
+		}
+		return "[" + label + "]\n" + mem + memoryGuidance(sc)
+	}
+	if sc.project {
+		return ""
+	}
+	return "[助手记忆]\n（还没有长期记忆）" + memoryGuidance(sc)
 }
 
 // appendDailyMemory 在一轮正常结束后追加一条当日活动记录。
@@ -84,17 +179,24 @@ func readProjectMemory(cwd string) string {
 // 纯确定性提取（用户诉求 + 改了哪些文件 + 工具轮次），不调模型——这是记忆的
 // 可靠底座。即使 AI 从没主动写过 MEMORY.md，每日记忆也能让它下一轮知道「刚才做了什么」。
 func appendDailyMemory(convID, cwd, userMsg string, files []string, rounds, tools int) {
-	if strings.TrimSpace(cwd) == "" {
+	sc := resolveMemoryScope(cwd)
+	if sc.root == "" {
 		return
 	}
-	root := memoryRoot(cwd)
+	root := sc.root
 	if err := os.MkdirAll(filepath.Join(root, "memory"), 0o755); err != nil {
-		logger.W("[ai] 创建记忆目录失败 cwd=%s: %v", cwd, err)
+		logger.W("[ai] 创建记忆目录失败 root=%s: %v", root, err)
 		return
 	}
 	now := time.Now()
 	var b strings.Builder
-	fmt.Fprintf(&b, "\n## %s\n", now.Format("2006-01-02 15:04"))
+	head := now.Format("2006-01-02 15:04")
+	if !sc.project {
+		// 共享日志里所有任务写同一个文件：不标来源的话，看回日志根本分不清
+		// 「这条是谁问的」，而「记得问过什么」正是这份记忆存在的理由。
+		head += " · " + shortConvID(convID)
+	}
+	fmt.Fprintf(&b, "\n## %s\n", head)
 	if q := strings.TrimSpace(userMsg); q != "" {
 		b.WriteString("- 用户：")
 		b.WriteString(clipRunes(q, 300))
@@ -108,28 +210,53 @@ func appendDailyMemory(convID, cwd, userMsg string, files []string, rounds, tool
 	if rounds > 0 || tools > 0 {
 		fmt.Fprintf(&b, "- 工具：%d 轮 / %d 次调用\n", rounds, tools)
 	}
-	f, err := os.OpenFile(dailyMemoryPath(cwd, now), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := os.OpenFile(dailyMemoryPath(root, now), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
-		logger.W("[ai] 写每日记忆失败 cwd=%s: %v", cwd, err)
+		logger.W("[ai] 写每日记忆失败 root=%s: %v", root, err)
 		return
 	}
 	defer f.Close()
 	if _, err := f.WriteString(b.String()); err != nil {
-		logger.W("[ai] 写每日记忆失败 cwd=%s: %v", cwd, err)
+		logger.W("[ai] 写每日记忆失败 root=%s: %v", root, err)
 	}
 }
 
-// projectMemoryGuidance 写进系统提示的指引：让模型优先用记忆与定向读取，少整文件重读。
-func projectMemoryGuidance() string {
-	return "\n\n[记忆与读文件指引]\n当前工作目录下有 .quickDock/ 项目记忆：MEMORY.md 是长期整体记忆，" +
-		"memory/ 下是按天的活动日志（由系统自动维护，你只读不写）。MEMORY.md 已由系统在首次对话时" +
-		"自动生成基线画像，你用 project_memory 工具补充与修正即可。\n" +
+// shortConvID 任务 id 前 8 位（与 ai_tasks 下的目录名同一段），只用于在共享日志里标来源。
+func shortConvID(convID string) string {
+	id := strings.TrimSpace(convID)
+	if len(id) > 8 {
+		return id[:8]
+	}
+	if id == "" {
+		return "未知"
+	}
+	return id
+}
+
+// memoryGuidance 写进系统提示的指引：记忆在哪、该往里记什么、读文件别整篇重读。
+//
+// 两个作用域分开写，因为「值得长期记住的事实」不是一类东西：项目里是技术栈与坑，
+// 跨任务的助手记忆里是用户是谁、偏好什么、问过什么、上次给了什么结论。
+// 混着讲模型只会把项目细节写进共享记忆，或者反过来什么都不写。
+func memoryGuidance(sc memoryScope) string {
+	read := "在改动一个你已经碰过的文件前，先用 file_read 的 offset/limit 只读相关片段，或用 file_grep 定位，" +
+		"不要整文件重读——一整页 HTML/JS 重读一次就会吞掉大量 token，而且那份内容还会留在历史里每轮重发。"
+	if !sc.project {
+		return "\n\n[记忆与读文件指引]\n这个任务没有绑定项目目录，记忆不在工作目录里，而在 " + sc.root +
+			"：MEMORY.md 是长期记忆，memory/ 下是按天的活动日志（由系统自动维护，你只读不写）。" +
+			"**记忆只存在这里**：用 project_memory 工具读写 MEMORY.md；绝不要在任务目录或项目根目录创建 " +
+			"AGENTS.md / README.md / memory.md 充当记忆——AGENTS.md 是用户维护的「项目规则文件」，去改它会污染规则。" +
+			"这份记忆是跨任务共享的，所以**只记跨任务还有用的事**：用户怎么称呼、习惯与偏好、在做什么事、" +
+			"问过哪些问题且结论是什么、明确拒绝过的做法。一次性的闲聊、临时路径、随手查的资料不要写。" +
+			"用户说「记住」时，就把它写进去。" + read
+	}
+	return "\n\n[记忆与读文件指引]\n当前工作目录下有 .quickDock/ 项目记忆：" + sc.root +
+		"：MEMORY.md 是长期整体记忆，memory/ 是按天的活动日志（由系统自动维护，你只读不写）。" +
+		"MEMORY.md 已由系统在首次对话时自动生成基线画像，你用 project_memory 工具补充与修正即可。" +
 		"**记忆只存在 .quickDock/ 里**：用 project_memory 工具读写 MEMORY.md；" +
 		"绝不要在项目根目录创建或修改 AGENTS.md / README.md / memory.md——AGENTS.md 是「项目规则文件」，" +
 		"由用户在设置里维护、每轮自动注入系统提示，不是你的记忆，你去改它会污染用户的规则。" +
-		"遇到值得长期记住的项目事实（技术栈、关键文件路径、约定、踩过的坑、已做的决策），用 project_memory 写入 MEMORY.md。\n" +
-		"在改动一个你已经碰过的文件前，先用 file_read 的 offset/limit 只读相关片段，或用 file_grep 定位，" +
-		"不要整文件重读——一整页 HTML/JS 重读一次就会吞掉大量 token，而且那份内容还会留在历史里每轮重发。"
+		"遇到值得长期记住的项目事实（技术栈、关键文件路径、约定、踩过的坑、已做的决策），用 project_memory 写入 MEMORY.md。" + read
 }
 
 // ---- 自动生成基线项目画像 ----
@@ -171,21 +298,46 @@ var memoryProfileManifests = []struct {
 //
 // 确定性、不调模型：画像只描述「这是什么项目、长什么样」，判断哪些是值得长期记的
 // 事实交给模型（通过 project_memory 工具），避免机器归纳出噪声。
+//
+// 两个「不写」的分支都是 2026-11-01 补的：以前空目录也会写一份只有标题的画像，
+// 于是每条无空间任务的 MEMORY.md 都是同一段模板字——用户看到的就是「记忆全是默认的」。
 func ensureMemoryProfile(cwd string) {
-	cwd = strings.TrimSpace(cwd)
-	if cwd == "" {
+	sc := resolveMemoryScope(cwd)
+	// 无空间任务的工作目录是系统新建的空目录：这里没有项目可画像，
+	// 写出来必然是模板。它们的记忆走共享的 ai_memory/，只由模型自己写。
+	if sc.root == "" || !sc.project {
 		return
 	}
-	if fileExists(overallMemoryPath(cwd)) {
-		return
+	overall := overallMemoryPath(sc.root)
+	if data, err := os.ReadFile(overall); err == nil {
+		// 已有真实内容就别覆盖；只剩空模板时允许重生成（项目后来长出文件了）。
+		if s := strings.TrimSpace(string(data)); s != "" && !isPlaceholderProfile(s) {
+			return
+		}
 	}
 	profile := scanProjectProfile(cwd)
 	if strings.TrimSpace(profile) == "" {
 		return
 	}
-	if err := writeOverallMemory(cwd, profile); err != nil {
+	if err := writeOverallMemory(sc.root, profile); err != nil {
 		logger.W("[ai] 自动生成项目画像失败 cwd=%s: %v", cwd, err)
 	}
+}
+
+// isPlaceholderProfile 判断这份 MEMORY.md 是不是「只有标题、没有任何条目」的自动空画像。
+//
+// 旧的空目录画像长得正是这样：标题 + 两句说明 + 一行备注。它被当成「已有记忆」读进去，
+// 每轮白白占掉提示位，还让用户以为记忆是坏的。识别出来就当没有。
+func isPlaceholderProfile(s string) bool {
+	if !strings.Contains(s, "自动生成的基线") {
+		return false
+	}
+	for _, sec := range []string{"## 技术栈", "## 顶层目录", "## 文件概览"} {
+		if strings.Contains(s, sec) {
+			return false
+		}
+	}
+	return true
 }
 
 // scanProjectProfile 扫一遍顶层结构 + 一层子目录，拼出一段结构化的基线画像。
@@ -273,6 +425,11 @@ func scanProjectProfile(cwd string) string {
 	}
 
 	var b strings.Builder
+	// 一条有效信息都没有就别生成：只写标题的空画像比没有更糟——它会被当成
+	// 「这个项目已经建好记忆了」，模型不再补充，用户看到的永远是那段模板文字。
+	if len(stacks) == 0 && len(dirs) == 0 && len(extParts) == 0 {
+		return ""
+	}
 	b.WriteString("# 项目画像（自动生成的基线）\n\n")
 	b.WriteString("> 由 AI 在首次对话时自动扫描生成，可用 `project_memory` 工具补充与修正。\n")
 	b.WriteString("> 项目规则（约定、禁令）写在 AGENTS.md / .quickdock/rules 里，由用户在设置里维护、每轮自动注入，不要写在这里。\n\n")
@@ -293,18 +450,13 @@ func scanProjectProfile(cwd string) string {
 	return b.String()
 }
 
-// writeOverallMemory 写（覆盖）<cwd>/.quickDock/MEMORY.md。
-func writeOverallMemory(cwd, content string) error {
-	p := overallMemoryPath(cwd)
+// writeOverallMemory 写（覆盖）<root>/MEMORY.md。
+func writeOverallMemory(root, content string) error {
+	p := overallMemoryPath(root)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(p, []byte(content), 0o644)
-}
-
-func fileExists(p string) bool {
-	_, err := os.Stat(p)
-	return err == nil
 }
 
 func sortStrings(s []string) { sort.Strings(s) }
@@ -312,6 +464,21 @@ func sortStrings(s []string) { sort.Strings(s) }
 func itoa(n int) string { return strconv.Itoa(n) }
 
 // ---- 小工具 ----
+
+// clipRunesTail 超长时保留**末尾** max 个字符（前面加省略号）。
+//
+// 每日记忆是只追加的，超长说明这一天记了很多条；这时候要的是「刚做完的事」，
+// 而不是「今天最早那条」。整体记忆反过来——开头是标题与技术栈，用 clipRunes 截尾。
+func clipRunesTail(s string, max int) string {
+	if max <= 0 {
+		return s
+	}
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	return "…（更早的记录已省略）\n" + string(r[len(r)-max:])
+}
 
 func dirExists(p string) bool {
 	info, err := os.Stat(p)

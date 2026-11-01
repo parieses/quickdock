@@ -357,6 +357,7 @@ var baseTables = []string{
 	// space_id 非空表示它属于某个空间（侧栏收在空间下而不是「任务」组里）；
 	// mode 是创建时就选定的任务类型（对话/翻译/总结/解释/使用教程），
 	// 存库是因为它要跟着这个任务走——切走再回来、甚至重启应用，模式都不该变。
+	// skills 是这条对话选中的技能名（JSON 数组，空串 = 从未选过 → 走全局默认）。
 	//
 	// 新库直接带这些列，老库靠 columnMigrations 补——两处都要有，漏一边就是
 	// 「新装用户能用、老用户升级后列不存在」。
@@ -367,6 +368,8 @@ var baseTables = []string{
 		cwd TEXT NOT NULL DEFAULT '',
 		space_id TEXT NOT NULL DEFAULT '',
 		mode TEXT NOT NULL DEFAULT 'chat',
+		skills TEXT NOT NULL DEFAULT '',
+		permission TEXT NOT NULL DEFAULT '',
 		starred INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
@@ -750,6 +753,17 @@ func (d *Database) migrate() error {
 		// 与「以前没这个概念时的行为」一致，不需要回填。
 		{"ai_conversations", "space_id", "TEXT NOT NULL DEFAULT ''"},
 		{"ai_conversations", "mode", "TEXT NOT NULL DEFAULT 'chat'"},
+		// ai_conversations: 这条对话选中的技能名（JSON 数组）。空串 = 从未选过，
+		// 走 skills.json 的全局默认——老会话因此保持升级前的行为。
+		// 技能做成会话级而不是全局开关：「这一步要用翻译技能」是这条任务的事，
+		// 不该让另一个对话也跟着变。
+		{"ai_conversations", "skills", "TEXT NOT NULL DEFAULT ''"},
+		// ai_conversations: 这条对话的执行权限。空串 = 默认权限（敏感操作逐个确认），
+		// 'full' = 用户在这个对话里按过「允许完全访问」。
+		//
+		// 空串当默认值而不是 'default'：老会话升级后自然是空串，不必回填，
+		// 而「默认」本来就该是没写过的样子——多一个要校验的取值只会多一处漏判。
+		{"ai_conversations", "permission", "TEXT NOT NULL DEFAULT ''"},
 		// notes 笔记树：新增树形/标题/标签字段
 		{"notes", "name", "TEXT DEFAULT ''"},
 		{"notes", "parent_id", "TEXT DEFAULT ''"},

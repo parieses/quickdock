@@ -73,6 +73,9 @@ func NewAIService(app *services.AppService) *AIService {
 			Notify: func(title, body string) {
 				app.PushNotification("ai", "success", title, body, "ai", "")
 			},
+			// 记忆目录的判定留在本包：它要知道「哪些 cwd 是系统给无空间任务建的空目录」，
+			// 而那个规则跟 ai_tasks 的布局绑在一起（见 ai_workdir.go）。
+			MemoryRoot: func(cwd string) string { return resolveMemoryScope(cwd).root },
 		})
 		// spawn_agent 也走同一个注册表（同样能在面板里关掉），但实现在本包：
 		// 它要用 s.runAgent 跑子 agent，还要拿 ctx 里带的编排作用域，

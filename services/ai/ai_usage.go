@@ -20,6 +20,7 @@ const (
 	usageKindAsk     = "ask"     // 一次性调用：SSH 面板 / 剪贴板 AI / 笔记 AI / 插件 host.ai.ask
 	usageKindTitle   = "title"   // 自动生成会话标题
 	usageKindSummary = "summary" // 上下文压缩摘要
+	usageKindMemory  = "memory"  // 每轮结束后的记忆整理（见 ai_memory_auto.go）
 )
 
 // openAIUsage OpenAI 兼容接口返回的 usage 对象。

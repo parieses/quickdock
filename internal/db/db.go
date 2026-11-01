@@ -100,6 +100,12 @@ var validColumns = map[string]bool{
 	"space_id": true,
 	"starred":  true, // ai_conversations：星标（0/1）
 	"mode":     true,
+	// ai_conversations：这条对话选中的技能名（JSON 数组）。同样是全局白名单，
+	// 漏了它 = 建会话/写选择时「非法列名」，而且回收站恢复整行转插入也会在这一列炸。
+	"skills": true,
+	// ai_conversations：执行权限（空 = 默认权限，'full' = 完全访问）。同样是全局白名单，
+	// 漏了它 = 建会话/切换权限时「非法列名」，回收站恢复整行转插入也会在这一列炸。
+	"permission": true,
 	// ai_messages：工具调用记录与轮次（内置 agent）。白名单是全局的、不按表分，
 	// 漏一个就是写入时「非法列名」——而 structToMap 会把零值字段也转成列。
 	"tool_calls":    true,

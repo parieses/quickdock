@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"runtime"
 	"strings"
 )
 
@@ -45,6 +46,16 @@ type AIConversation struct {
 	// 存库而不是每次从前端带：模式是这个任务的属性（「这条对话是用来翻译的」），
 	// 跟着任务走才不会切走再回来就变了。
 	Mode string `json:"mode"`
+	// Skills 这条对话选中的技能名，JSON 数组字符串（`["translate"]`）。
+	// 空串 = 从未选过 → 后端回落到 skills.json 的全局默认；`[]` = 明确「这条不用技能」。
+	// 两者必须分得开，否则「我明明取消勾选了」和「我没动过」在库里长一个样子。
+	Skills string `json:"skills"`
+	// Permission 这条对话的执行权限：空 = 默认（敏感操作逐个确认），'full' = 完全访问。
+	//
+	// 绑在会话上而不是做成全局开关：完全访问是「这次我盯着它干活」的决定，
+	// 一条对话开完就关；做成全局设置的结果是可预料的——某天忘了关，
+	// 之后每条对话都在无人确认的情况下改文件、跑命令。
+	Permission string `json:"permission"`
 	// Starred 星标：侧栏置顶收藏。单独一列而不是复用 space_id（自建「收藏」空间）：
 	// 星标是横切属性 —— 一个任务可以既属于某空间又被星标，塞进空间就二选一了。
 	Starred   bool   `json:"starred"`
@@ -108,6 +119,8 @@ func mapToAIConversation(m map[string]interface{}) AIConversation {
 		Cwd:              str(m["cwd"]),
 		SpaceID:          str(m["space_id"]),
 		Mode:             str(m["mode"]),
+		Skills:           str(m["skills"]),
+		Permission:       str(m["permission"]),
 		Starred:          integer(m["starred"]) == 1,
 		CreatedAt:        str(m["created_at"]),
 		UpdatedAt:        str(m["updated_at"]),
@@ -187,6 +200,45 @@ func (d *Database) GetAISpace(id string) (*AISpace, error) {
 	}
 	s := mapToAISpace(row)
 	return &s, nil
+}
+
+// AIWorkDirs 返回 AI 空间与会话绑定过的全部工作目录（去重、非空）。
+//
+// 为什么让 fsguard 用它：空间目录、新建任务时临时挑的文件夹都不会进快捷项，
+// 但「在界面上亲手选一个目录」和「加一个快捷项」是同等强度的授权意图。
+// 不补这一条会出现最费解的状态——AI 能把文件写进空间目录（写路径带会话 cwd），
+// 却预览不了自己刚写的文件（预览只查白名单，不带 cwd）。
+//
+// 只取 cwd 一列而不是 ListAISpaces/ListAIConversations：后者把整行拉出来，
+// 每次判路径都要扫两张表的全部列，纯属浪费。
+func (d *Database) AIWorkDirs() []string {
+	out := make([]string, 0, 16)
+	seen := map[string]bool{}
+	for _, q := range []string{
+		`SELECT DISTINCT cwd FROM ai_spaces WHERE cwd IS NOT NULL AND TRIM(cwd) <> ''`,
+		`SELECT DISTINCT cwd FROM ai_conversations WHERE cwd IS NOT NULL AND TRIM(cwd) <> ''`,
+	} {
+		rows, err := d.Query(q)
+		if err != nil {
+			continue
+		}
+		for _, r := range rows {
+			cwd := strings.TrimSpace(str(r["cwd"]))
+			if cwd == "" {
+				continue
+			}
+			key := cwd
+			if runtime.GOOS == "windows" {
+				key = strings.ToLower(cwd)
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			out = append(out, cwd)
+		}
+	}
+	return out
 }
 
 // FindAISpaceByCwd 按目录找空间（同一目录不该建出两个空间）。
@@ -271,6 +323,14 @@ type NewAIConversation struct {
 	Mode    string // 空 = chat
 	SpaceID string // 空 = 普通任务
 	Cwd     string // 空 = 未绑定（空间任务会回退到空间目录）
+	// Skills 创建时就选中的技能名（JSON 数组字符串，空 = 没选过 → 全局默认）。
+	// 与 mode 同理：技能选择是这条任务的属性，随创建一起落库，
+	// 不然「在落地页选好技能再发第一句」这条路径就丢了选择。
+	Skills string
+	// Permission 创建时的执行权限（空 = 默认，'full' = 完全访问）。
+	// 与 skills 同理：用户可能在落地页就把权限切成完全访问再发第一句，
+	// 那条路径只有建会话能记录。
+	Permission string
 }
 
 // CreateAIConversation 新建任务
@@ -280,13 +340,15 @@ func (d *Database) CreateAIConversation(in NewAIConversation) (*AIConversation, 
 		mode = "chat"
 	}
 	c := &AIConversation{
-		ID:        newID(),
-		Title:     strings.TrimSpace(in.Title),
-		Mode:      mode,
-		SpaceID:   strings.TrimSpace(in.SpaceID),
-		Cwd:       strings.TrimSpace(in.Cwd),
-		CreatedAt: now(),
-		UpdatedAt: now(),
+		ID:         newID(),
+		Title:      strings.TrimSpace(in.Title),
+		Mode:       mode,
+		SpaceID:    strings.TrimSpace(in.SpaceID),
+		Cwd:        strings.TrimSpace(in.Cwd),
+		Skills:     strings.TrimSpace(in.Skills),
+		Permission: strings.TrimSpace(in.Permission),
+		CreatedAt:  now(),
+		UpdatedAt:  now(),
 	}
 	if err := d.BulkInsert("ai_conversations", []map[string]interface{}{structToMap(c)}); err != nil {
 		return nil, err
@@ -458,6 +520,28 @@ func (d *Database) SetAIConversationCwd(id, cwd string) error {
 	return d.ExecuteParams(
 		`UPDATE ai_conversations SET cwd = ?, updated_at = ? WHERE id = ?`,
 		[]interface{}{strings.TrimSpace(cwd), now(), strings.TrimSpace(id)},
+	)
+}
+
+// SetAIConversationSkills 写这条对话选中的技能（JSON 数组字符串）。
+//
+// 与 SetAIConversationCwd 同一个理由单独开一个方法：空串在这里是有意义的取值
+// （「从未选过 → 用全局默认」），不能塞进「空串 = 不更新」的通用更新里。
+func (d *Database) SetAIConversationSkills(id, skillsJSON string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET skills = ?, updated_at = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(skillsJSON), now(), strings.TrimSpace(id)},
+	)
+}
+
+// SetAIConversationPermission 改这条对话的执行权限（空 = 默认，'full' = 完全访问）。
+//
+// 和 SetAIConversationCwd 一样单独一个方法：空串是有效取值（回到默认权限），
+// 而 UpdateAIConversationMeta 用空串表示「这个字段不更新」，语义冲突。
+func (d *Database) SetAIConversationPermission(id, permission string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET permission = ?, updated_at = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(permission), now(), strings.TrimSpace(id)},
 	)
 }
 

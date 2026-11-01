@@ -37,6 +37,13 @@ type Deps struct {
 	// 用函数而不是直接持 *services.AppService：services/ai/tools 反向 import
 	// services 会成环（services 已经 import 了这个包）。
 	Notify func(title, body string)
+	// MemoryRoot 把「工作目录」映射成「记忆目录」（MEMORY.md 所在目录）。
+	//
+	// 由 services/ai 注入，工具自己判不了：它只拿到 cwd，而这个 cwd 可能是系统给
+	// 无空间任务新建的空目录——那种情况记忆要落在数据目录下跨任务共享的那份，
+	// 而不是空目录里再建一个 .quickDock（那会让每条对话的记忆都从零开始）。
+	// 未注入时退回 <cwd>/.quickDock，与旧行为一致。
+	MemoryRoot func(cwd string) string
 }
 
 // Register 把全部 agent 工具注册进 mcpsrv.Agent。由 AIService 构造时调用。

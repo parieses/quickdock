@@ -358,9 +358,9 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 	if conv.Summary != "" {
 		system += "\n\n[历史对话摘要]\n" + conv.Summary
 	}
-	// 项目记忆：把 <cwd>/.quickDock 下的整体记忆与近两日活动日志注入系统提示，
-	// 让 AI 先看到「项目是什么、已经做了什么」，不必每次都重读整个项目。
-	// 没有记忆（纯聊天会话 / 还没生成过）时 readProjectMemory 返回空串，不污染提示。
+	// 记忆：项目任务读到的是 <cwd>/.quickDock（跟着项目走），无空间任务读到的是
+	// 数据目录下跨任务共享的那份（它们的 cwd 是系统新建的空目录，按 cwd 存等于每条
+	// 对话都从零开始——用户看到的就是「记忆全是默认的」）。
 	//
 	// 先 ensureMemoryProfile：若整体记忆还不存在，确定性扫描项目写一份基线画像，
 	// 保证 .quickDock 一定被建起来（而不是让模型去根目录生成 AGENTS.md 当记忆）。
@@ -368,8 +368,14 @@ func (a *AIService) buildAIMessagesWithin(ctx context.Context, cfg AIProfile, co
 	if mode != "plan" {
 		ensureMemoryProfile(conv.Cwd)
 	}
-	if mem := readProjectMemory(conv.Cwd); mem != "" {
-		system += "\n\n[项目记忆]\n" + mem + projectMemoryGuidance()
+	if mem := memoryBlock(conv.Cwd); mem != "" {
+		system += "\n\n" + mem
+	}
+	// 技能：这条对话选中的 SKILL.md（没选过则回落 skills.json 的全局默认）。
+	// 只给「名字 + 适用场景 + 路径」，正文由模型需要时自己 file_read ——
+	// 技能写得多长都不占常态上下文。
+	if sk := convSkillsPrompt(conv.Skills); sk != "" {
+		system += sk
 	}
 
 	messages := []map[string]interface{}{{"role": "system", "content": system}}

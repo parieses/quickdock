@@ -1,7 +1,8 @@
 package aitools
 
-// 项目记忆工具：让内置 AI 主动读写 <cwd>/.quickDock 下的记忆，
-// 而不是每次都重读整个项目。详见 services/ai/ai_memory.go 的包注释。
+// 记忆工具：让内置 AI 主动读写自己那份长期记忆，而不是反复重读整个项目。
+// 目录由宿主决定（project_memory 见 services/ai/ai_memory.go 的包注释）：
+// 项目任务在 <cwd>/.quickDock，无空间任务在数据目录下跨任务共享的 ai_memory/。
 //
 // 分工：MEMORY.md（整体记忆）由 AI 通过本工具维护——需要「判断哪些值得长期记住」
 // 的事实机器归纳不了；memory/ 每日日志由系统自动追加，本工具只让 AI 读、不让它写，
@@ -22,10 +23,11 @@ func registerMemory(d Deps) {
 	r := registrar{d: d, category: mcpsrv.CategoryCode}
 	str := mcpsrv.Str
 	r.add(projectMemory, mcpsrv.LevelRead, "project_memory",
-		"读写当前工作目录下的 .quickDock 项目记忆，避免反复重读整个项目而浪费 token。"+
+		"读写当前任务所在工作区的长期记忆，避免反复重读整个项目或让用户重复交代背景而浪费 token。"+
 			"action=read：返回整体记忆(MEMORY.md)与最近几天的每日活动日志，让你快速了解项目现状与已做的事；"+
 			"action=write：用给定 content 整体覆盖 MEMORY.md；action=append：向 MEMORY.md 追加一段。"+
-			"每日活动日志由系统自动维护，不要手动写它（会破坏自动日志口径）。只允许工作目录内的 .quickDock。",
+			"每日活动日志由系统自动维护，不要手动写它（会破坏自动日志口径）。"+
+			"项目任务写入 <cwd>/.quickDock；没有绑定项目目录的任务写入数据目录下跨任务共享的助手记忆。",
 		[]string{"action"},
 		map[string]any{
 			"action":  str("read=读取记忆；write=整体覆盖 MEMORY.md；append=向 MEMORY.md 追加"),
@@ -36,11 +38,18 @@ func registerMemory(d Deps) {
 func projectMemory(d Deps, args map[string]any) (any, error) {
 	cwd := strings.TrimSpace(mcpsrv.Cwd(args))
 	if cwd == "" {
-		return nil, errors.New("当前对话没有绑定工作目录，无法读写项目记忆；请先把任务建在有效的空间里")
+		return nil, errors.New("当前对话没有绑定工作目录，无法读写记忆；请先把任务建在有效的空间里")
 	}
-	rootAbs, err := filepath.Abs(filepath.Join(cwd, ".quickDock"))
-	if err != nil {
-		return nil, errors.New("路径解析失败：" + cwd)
+	// 记忆目录由宿主决定（项目任务在 <cwd>/.quickDock，无空间任务在数据目录下共享）。
+	// 工具只拿得到 cwd，判断不了这个 cwd 是不是系统给任务临时建的目录，所以不自己推。
+	rootAbs := filepath.Join(cwd, ".quickDock")
+	if d.MemoryRoot != nil {
+		if r := strings.TrimSpace(d.MemoryRoot(cwd)); r != "" {
+			rootAbs = r
+		}
+	}
+	if abs, aerr := filepath.Abs(rootAbs); aerr == nil {
+		rootAbs = abs
 	}
 	overall := filepath.Join(rootAbs, "MEMORY.md")
 

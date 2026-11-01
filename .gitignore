@@ -82,3 +82,9 @@ docs/local/bugfixes/
 
 # --- 公众号文章（本地草稿，不入库）---
 articles/
+
+# --- AI 项目记忆（运行时生成，跟着工作目录走）---
+# 任何目录被 AI 当作空间打开时，都会在里面建 .quickDock/MEMORY.md 与 memory/*.md。
+# 那是「这台机器上的 AI 看到了什么」，跟仓库内容无关，不该被提交。
+# Windows 文件系统不区分大小写，一个条目同时覆盖 .quickDock 与 .quickdock。
+.quickDock/
