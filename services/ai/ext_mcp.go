@@ -342,6 +342,41 @@ func (a *AIService) AIReloadExtServers() *services.ApiResult {
 	return services.Ok(a.ext.loadExtServers())
 }
 
+// AISetExtServerEnabled 打开/关闭一个外部 server（bound，全局开关）。
+//
+// 走的是 mcp.json 里既有的 disabled 字段，而不是另造一份运行时开关：
+// 两处状态各存一份，迟早出现「面板上关着、实际还在挂工具」这种查不出来的怪事。
+//
+// 关闭即断开：写完清单立刻整组重载，stdio 进程会被回收。
+// 这是刻意的——「关掉」如果不能立刻省下那几十 MB 常驻内存，用户就没有关它的理由。
+func (a *AIService) AISetExtServerEnabled(name string, enabled bool) *services.ApiResult {
+	if a.ext == nil {
+		return services.FailMsg("外部 MCP 未初始化")
+	}
+	want := strings.TrimSpace(name)
+	if want == "" {
+		return services.Fail(fmt.Errorf("缺少参数 name"))
+	}
+	servers, err := readExtManifest()
+	if err != nil {
+		return services.Fail(err)
+	}
+	cfg, ok := servers[want]
+	if !ok {
+		return services.FailMsg(fmt.Sprintf("外部服务器 %s 不存在（mcp.json 里没有这个名字）", want))
+	}
+	if cfg.Disabled == !enabled {
+		// 状态没变化就直接回当前状态：避免无谓地重连（stdio server 重启要秒级）。
+		return services.Ok(a.ext.loadExtServers())
+	}
+	cfg.Disabled = !enabled
+	servers[want] = cfg
+	if err := writeExtManifest(servers); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(a.ext.loadExtServers())
+}
+
 // AIListExtTools 一个 server 当前挂载的工具详情（bound，展开行用）。
 func (a *AIService) AIListExtTools(server string) *services.ApiResult {
 	prefix := extToolPrefix(strings.TrimSpace(server))

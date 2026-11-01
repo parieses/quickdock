@@ -133,10 +133,43 @@ export interface AIConversation {
   mode?: string
   // 星标：侧栏置顶一组收藏。与 space_id 正交 —— 空间里的任务也能星标。
   starred?: boolean
+  // 这条对话选中的技能名，JSON 数组字符串（空串 = 从未选过 → 后端走全局默认）。
+  // 存原样而不是解析成数组：前端要区分「没选过」和「选过但全取消」，
+  // 那两种在 JSON 里是 "" 和 "[]"，解析后都成了空数组。
+  skills?: string
+  // 执行权限：空 = 默认（敏感操作逐个确认），'full' = 完全访问。
+  // 只认 'full' 一个真值——不认识的取值一律按默认权限显示，与后端同一个口径。
+  permission?: string
 }
 
 // 空间 = 一个目录 + 挂在这个目录下的若干任务。
 export interface AISpace { id: string; name: string; cwd: string; created_at: string; updated_at: string }
+
+// 技能 = skills/<名字>/SKILL.md 一份操作说明（后端 services/ai/skills.go）。
+// 与插件、外部 MCP 的区别：它不新增任何执行能力，只是让模型知道「这类活有现成套路」。
+export interface AISkill {
+  name: string
+  // description 一句话说明「什么时候该用」，来自 SKILL.md 的 front-matter
+  description: string
+  // path SKILL.md 绝对路径：模型按需 file_read 读全文
+  path: string
+  dir: string
+  // enabled 是 skills.json 里的「默认启用」，不是「此刻生效」。
+  // 生效范围是会话：勾选存在 ai_conversations.skills，见 AIConversation.skills。
+  enabled: boolean
+  // error 非空 = 目录认得出来但读不出内容（例如缺 SKILL.md）
+  error?: string
+}
+
+// 连接器 = mcp.json 里的一个外部 MCP server（QuickDock 作为 MCP 客户端接入的）。
+// 只保留 + 菜单要用的字段：command/env 这些属于设置页，列在对话里是噪音。
+export interface AIConnector {
+  name: string
+  status: string // ok / error / disabled
+  toolCount: number
+  disabled: boolean
+  error?: string
+}
 
 export interface AIMsgImage { kind: 'file' | 'url'; url?: string; path?: string; name?: string; dataUrl?: string }
 

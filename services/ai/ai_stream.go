@@ -143,6 +143,13 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		// Mentions 用 @ 显式引用的文件 / 目录 / 历史对话（见 ai_mentions.go）。
 		// 引用内容由后端展开进上下文，前端只送引用目标，不送文件内容。
 		Mentions []AIMention `json:"mentions"`
+		// Skills 这条消息要用的技能名，来自输入框里打的 /名字。前端每次都带
+		// （含空数组 =「这条不用技能」）；缺这个字段 = 前端没表态，后端沿用
+		// 会话上存的选择（老会话因此不会因为升级就丢掉技能）。
+		Skills []string `json:"skills"`
+		// Permission 这条对话的执行权限："full" = 完全访问，其余/缺省 = 默认。
+		// 缺这个字段的老前端一律按默认权限处理——安全开关断线时要倒向「问」。
+		Permission string `json:"permission"`
 	}
 	// 请求体必须设上限：一次可以带 10 张 10 MiB 的图（见 ai_image.go），
 	// base64 之后是 ~134 MB 字符，无脑 ReadAll 等于把这么大一块直接读进内存。
@@ -185,13 +192,15 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	defer fl.close()
 
 	res := s.svc.runAgent(ctx, AgentRunReq{
-		ConvID:   req.ConvID,
-		Mode:     req.Mode,
-		SpaceID:  req.SpaceID,
-		Message:  req.Message,
-		Cwd:      req.Cwd,
-		Images:   req.Images,
-		Mentions: req.Mentions,
+		ConvID:     req.ConvID,
+		Mode:       req.Mode,
+		SpaceID:    req.SpaceID,
+		Message:    req.Message,
+		Cwd:        req.Cwd,
+		Images:     req.Images,
+		Mentions:   req.Mentions,
+		Skills:     req.Skills,
+		Permission: req.Permission,
 	}, &sseSink{fl: fl, cancel: cancel})
 
 	// 每次回答结束都通知：用户常在别处干活，跑完/中断/失败都需要被叫回来，

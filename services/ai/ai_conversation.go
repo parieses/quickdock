@@ -236,6 +236,32 @@ func (a *AIService) AISetConversationMode(convID, mode string) *services.ApiResu
 	return services.Ok(mode)
 }
 
+// AISetConversationPermission 切换这条对话的执行权限（bound）：
+// "full" = 完全访问，其余一律落成默认权限。
+//
+// 与技能选择不同，这个一按就落库：权限档位决定「接下来会问、还是直接做」，
+// 界面上那个标记和库里的值必须一直是同一个。否则下次打开这条对话时显示
+// 「默认权限」、实际执行却按「完全访问」走——那是这类开关最坏的一种不一致。
+//
+// 只影响之后发出的消息：正在跑的这一轮用它是开始时的值（见 approvalGate.fullAccess），
+// 不会中途换口径，否则同一轮里前后的调用按两套规则走，事后没人说得清
+// 「那次 rm 到底批准过没有」。
+func (a *AIService) AISetConversationPermission(convID, permission string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	convID = strings.TrimSpace(convID)
+	if convID == "" {
+		return services.FailMsg("任务不存在")
+	}
+	p := aiNormalizePermission(permission)
+	if err := a.App.DB.SetAIConversationPermission(convID, p); err != nil {
+		return services.Fail(err)
+	}
+	a.emitAI("ai:conv", map[string]interface{}{"id": convID, "permission": p})
+	return services.Ok(p)
+}
+
 // AIRenameConversation 手动改会话标题。
 //
 // 与 AIRegenerateTitle 分开而不是给它加个「可选标题」参数：

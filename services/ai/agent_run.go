@@ -70,6 +70,17 @@ type AgentRunReq struct {
 	Message string
 	Cwd     string
 	Images  []AIChatImage
+	// Skills 这条对话选中的技能名。nil = 本次请求没表态（沿用会话上的选择，
+	// 建会话时按「没选过」落空串 → 走全局默认）；空切片 = 明确「本次不用技能」。
+	// 两者必须分开：否则用户在输入框里删掉 /技能名 之后，下一条消息又把全局默认挂回来。
+	Skills []string
+	// Permission 这条对话的执行权限：空 = 默认（敏感操作逐个确认），"full" = 完全访问
+	// （用户在输入框右下角按过「允许完全访问」）。
+	//
+	// 跟请求走而不是每轮从库里读：权限是「这条消息按什么口径执行」，
+	// 用户在点发送前刚切过，读库会拿到上一轮的值——而这两者的差别正是
+	// 「要不要停下来问」。库里那份只用于「切走再切回来时把开关显示回去」。
+	Permission string
 	// Mentions 本次提问里用 @ 显式引用的文件 / 目录 / 历史对话（见 ai_mentions.go）。
 	// 只影响这一次请求的上下文，不落库：引用是「这次要看它」，不是长期状态。
 	Mentions []AIMention
@@ -127,6 +138,9 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 
 	mode := strings.TrimSpace(req.Mode)
 	message := strings.TrimSpace(req.Message)
+	// 权限口径在这里归一一次：后面建会话、回写、建闸门都用这一个值，
+	// 免得「库里存 full、闸门却按默认问」这种两处各算一遍的老毛病。
+	permission := aiNormalizePermission(req.Permission)
 
 	cfg, okp := a.getActiveAIProfile()
 	if !okp || cfg.APIKey == "" {
@@ -172,6 +186,10 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			created, cerr := a.App.DB.CreateAIConversation(db.NewAIConversation{
 				Mode:    mode,
 				SpaceID: strings.TrimSpace(req.SpaceID),
+				// 技能随创建落库：在落地页勾好技能再发第一句时，这条路径是唯一记录点。
+				Skills: encodeConvSkills(req.Skills),
+				// 权限同理：落地页就能把权限切成完全访问再发第一句。
+				Permission: permission,
 			})
 			if cerr != nil {
 				sink.Event("error", map[string]any{"message": cerr.Error()})
@@ -258,6 +276,25 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		}
 	}
 
+	// 技能选择的回写：请求里带了（前端每次发消息都带输入框里的 /技能名）就以请求为准，
+	// 顺手存回会话——不然「这条对话用了哪些技能」只有前端内存记得，切走就没了。
+	// 没带（nil）时不动库里的值：那表示「这次没表态」，不是「清空」。
+	if !req.Fresh && req.Skills != nil {
+		if enc := encodeConvSkills(req.Skills); enc != conv.Skills {
+			if err := a.App.DB.SetAIConversationSkills(res.ConvID, enc); err != nil {
+				logger.W("[ai] 保存会话技能选择失败 conv=%s: %v", res.ConvID, err)
+			}
+		}
+	}
+
+	// 权限的回写：前端每次发消息都带当前开关，与库里的值不同就存回去——
+	// 「切走再切回来」看到的是上次真正执行用的权限，而不是一个可能已经过期的界面状态。
+	if !req.Fresh && permission != strings.TrimSpace(conv.Permission) {
+		if err := a.App.DB.SetAIConversationPermission(res.ConvID, permission); err != nil {
+			logger.W("[ai] 保存会话权限失败 conv=%s: %v", res.ConvID, err)
+		}
+	}
+
 	// 目录是本轮才定下来的（新分配的任务目录，或请求里刚带过来的）：回传前端，
 	// 否则工具栏上那条目录指示要等「切走再切回」才对得上——而那正是用户最需要
 	// 知道「AI 会把文件写到哪」的时刻。
@@ -281,7 +318,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// （agentRoleSpec 的 maxLevel），而派活本身（spawn_agent，LevelWrite）
 	// 已经在父级过了这道闸——「批准派一个 code 角色」就是「批准它能改文件」。
 	if !req.Fresh {
-		gate := newApprovalGate(sink, res.ConvID, a.App.DB, a.loadApprovalRules())
+		gate := newApprovalGate(sink, res.ConvID, a.App.DB, a.loadApprovalRules(), permission == aiPermissionFull)
 		a.registerGate(res.ConvID, gate)
 		defer a.unregisterGate(res.ConvID)
 		ctx = withApprovalGate(ctx, gate)
@@ -646,6 +683,12 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			}
 		}
 		appendDailyMemory(res.ConvID, cwd, req.Message, dailyFiles, rounds, len(records))
+		// 自动整理记忆：把这一轮里值得长期记住的结论 / 偏好摘进 MEMORY.md。
+		// 后台跑一次小调用——它跟「这次回答」无关，用户不该等它；失败也只是记忆少一条。
+		// 计划模式不写：那是只读模式，连 AI 自己的记忆目录都不该动（见 ai_chat.go 同款判断）。
+		if mode != "plan" {
+			a.consolidateMemoryAsync(cfg, res.ConvID, cwd, req.Message, assistant, dailyFiles)
+		}
 	}
 
 	res.Text = assistant

@@ -59,6 +59,20 @@ const (
 	approvalDeny approvalMode = "deny" // 一律拒绝
 )
 
+// aiPermissionFull 「完全访问」的落库取值。空串表示默认权限，不另设 'default'。
+const aiPermissionFull = "full"
+
+// aiNormalizePermission 归一请求里的权限取值：只认 "full"，其余一律默认权限。
+//
+// 拼错、传空、传 "default" 都落到默认这一侧——权限是安全开关，
+// 不认识的取值必须往「更严」的方向倒，绝不能因为解析失败反而全放行。
+func aiNormalizePermission(raw string) string {
+	if strings.EqualFold(strings.TrimSpace(raw), aiPermissionFull) {
+		return aiPermissionFull
+	}
+	return ""
+}
+
 // approvalPolicy 一个工具本次的处置策略。
 type approvalPolicy struct {
 	mode approvalMode
@@ -229,6 +243,13 @@ type approvalGate struct {
 	// 按两套策略走。改了设置下一轮对话生效。
 	rules map[string]approvalMode
 
+	// fullAccess 这条对话是否处于「完全访问」。
+	//
+	// 一次 run 一个值：用户在这轮进行中把权限切回来，也不影响正在跑的这条——
+	// 半路改口径会让同一轮里前后的调用按两套规则走，事后没人说得清
+	// 「那次 rm 到底是批准过还是没批准过」。
+	fullAccess bool
+
 	// askMu 串行化整个「问 → 等」过程。
 	//
 	// 并发轮次里三个工具同时要审批时，不加这个锁就会同时发三条 approval 事件，
@@ -243,14 +264,15 @@ type approvalGate struct {
 	granted map[string]bool
 }
 
-func newApprovalGate(sink EventSink, convID string, database *db.Database, rules map[string]approvalMode) *approvalGate {
+func newApprovalGate(sink EventSink, convID string, database *db.Database, rules map[string]approvalMode, fullAccess bool) *approvalGate {
 	return &approvalGate{
-		sink:     sink,
-		convID:   convID,
-		database: database,
-		rules:    rules,
-		pending:  make(map[string]chan approvalDecision),
-		granted:  make(map[string]bool),
+		sink:       sink,
+		convID:     convID,
+		database:   database,
+		rules:      rules,
+		fullAccess: fullAccess,
+		pending:    make(map[string]chan approvalDecision),
+		granted:    make(map[string]bool),
 	}
 }
 
@@ -300,6 +322,20 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 		return true, ""
 	case approvalDeny:
 		return false, "该工具已被策略禁用"
+	}
+
+	// 完全访问：用户在这个对话里显式按过「允许完全访问」，并勾了风险确认。
+	//
+	// 只绕过「问」这一档，不改 auto / deny —— deny 是用户在设置页逐个关掉的工具，
+	// 属于比「完全访问」更明确的意图，不该被一个更宽的开关重新打开。
+	//
+	// 仍然挡得住的东西（刻意保留）：
+	//   - run_command 的硬拦截：LocalCmdDangerRules 判 high 的命令（rm -rf /、
+	//     格式化磁盘之类）由工具层直接拒绝执行，不经过这道闸门；
+	//   - fsguard 写白名单：写操作只能在授权目录里，完全访问不是「整个磁盘都授权」。
+	// 这两层是能力边界，不是确认步骤，放开确认步骤不该连带放开它们。
+	if g.fullAccess {
+		return true, ""
 	}
 
 	g.askMu.Lock()
