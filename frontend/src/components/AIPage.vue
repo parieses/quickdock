@@ -648,9 +648,9 @@ const convQuery = ref('')
 //
 // 取「一屏放得下」的量级——侧栏是导航不是列表页，几十条任务全铺开会把当前任务挤出
 // 可视区。原来是「显示更多」只增不减，展开一次就收不回去了，条目一多照样难用。
-const FOLD_TASKS = 12
+const FOLD_TASKS = 10
 const FOLD_SPACES = 8
-const FOLD_SPACE_TASKS = 10
+const FOLD_SPACE_TASKS = 8
 
 // 整组是否展开（「任务 (n)」「空间 (n)」标题可点）。组里的东西一多，
 // 先收起一整组往往比在里面翻找更快。
