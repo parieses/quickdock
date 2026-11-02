@@ -6,7 +6,7 @@
  * 目录还没定）。这里是纯视图，所有状态归 AIPage，动作通过 emit 回传。
  */
 import { useI18n } from 'vue-i18n'
-import { Download, FolderOpen, ListTree, PanelRight, RefreshCw, Star } from '@lucide/vue'
+import { Download, FolderOpen, ListTree, PanelRight, RefreshCw, Star, Terminal } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConversation } from '../types/ai'
 
@@ -23,6 +23,10 @@ const props = defineProps<{
   starBusy: string
   digestOpen: boolean
   sideOpen: boolean
+  /** 后台任务面板是否打开（按钮高亮用） */
+  jobsOpen: boolean
+  /** 运行中的后台任务数：只用来在按钮上点一个小圆点，为 0 时不显示 */
+  runningJobs: number
 }>()
 
 const emit = defineEmits<{
@@ -34,6 +38,7 @@ const emit = defineEmits<{
   (e: 'toggle-star', c: AIConversation): void
   (e: 'export-md'): void
   (e: 'toggle-side'): void
+  (e: 'toggle-jobs'): void
 }>()
 
 const { t } = useI18n()
@@ -80,6 +85,17 @@ function onModelSelect(ev: Event) {
         @click="emit('update:digestOpen', !props.digestOpen)"
       >
         <ListTree :size="13" />
+      </button>
+      <!-- 后台任务：只要有任务在跑就一直亮着，和当前会话无关——
+           这类进程是宿主级的，用户在别处聊天时也该知道它还在跑。 -->
+      <button
+        class="ai-icon-btn ai-jobs-btn"
+        :class="{ 'is-active': props.jobsOpen }"
+        :title="t('aiJobsTitle')"
+        @click="emit('toggle-jobs')"
+      >
+        <Terminal :size="13" />
+        <span v-if="props.runningJobs" class="ai-jobs-badge">{{ props.runningJobs }}</span>
       </button>
       <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiExportMd')" @click="emit('export-md')">
         <Download :size="13" />
@@ -157,4 +173,25 @@ function onModelSelect(ev: Event) {
    模板一直在切 is-active，但这条规则此前从未写过——三个按钮的「已开启」看不出来。 */
 .ai-icon-btn.is-active { color: var(--color-accent); border-color: var(--color-accent); background: var(--color-accent-bg); }
 .ai-icon-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* 后台任务按钮：运行中数量做成右上角的小徽标。
+   不用「(2)」写在图标旁边——那会让按钮变宽，工具栏右组在窄窗口下要换行。 */
+.ai-jobs-btn { position: relative; }
+
+.ai-jobs-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--color-accent);
+  color: var(--color-bg-primary);
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
 </style>

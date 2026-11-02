@@ -271,6 +271,20 @@ export interface AIArtifact {
 // 大纲里的一条：从「用户提过的每一句」里取首行，点它跳到该条消息。
 export interface OutlineItem { id: string; text: string }
 
+// 后台任务的一行（对应后端 services/ai/ai_jobs.go 的 AIJobView，只取用得到的字段）。
+//
+// 消息卡片要靠它把「后台任务 job_xxx」翻成「运行中 / 已结束 · 退出码 1」：
+// 那个 id 是主键（时间戳 + pid），对用户没有信息量，不该出现在正文里。
+export interface AIJobRow {
+  id: string
+  command: string
+  status: string
+  exitCode: number
+  running: boolean
+  startedAt: string
+  durationMs: number
+}
+
 // 一条回复的用量统计（流式结束后由后端 AIStreamStat 事件逐条补齐）。
 export interface AIStreamStat {
   elapsedMs: number

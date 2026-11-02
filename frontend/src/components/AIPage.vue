@@ -13,6 +13,7 @@ import AiSidePanel from './AiSidePanel.vue'
 import AiConversationSidebar from './AiConversationSidebar.vue'
 import AiToolbar from './AiToolbar.vue'
 import AiDigestPanel from './AiDigestPanel.vue'
+import AiJobsPanel from './AiJobsPanel.vue'
 import AiHero from './AiHero.vue'
 import AiComposer from './AiComposer.vue'
 import AiMessageList from './AiMessageList.vue'
@@ -51,7 +52,7 @@ import type { PendingImage, ToastAPI } from '../types'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConvHit, AIHooksInfo, AIProfilesResult } from '../types/ai'
 import type {
-  AIArtifact, AICheckpointView, AIConnector, AIConversation, AIMessage, AIMsgImage,
+  AIArtifact, AICheckpointView, AIConnector, AIConversation, AIJobRow, AIMessage, AIMsgImage,
   AIRuleFile, AISkill, AISpace, AIToolCall, OutlineItem,
 } from '../types/ai'
 import { artifactsFromCalls, artifactsOf, countToolRounds, serializeTools, shortPath, toolList } from '../utils/aiTools'
@@ -86,6 +87,7 @@ import {
   AIGetSkills,
   AIGetExtServers,
   AISetExtServerEnabled,
+  AIJobsList,
 } from '../../bindings/quickdock/services/ai/aiservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
@@ -1728,6 +1730,107 @@ const starredConvs = computed(() => {
 const digestOpen = ref(false)
 const digestBusy = ref(false)
 
+// ---- 后台任务面板 ----
+// 徽标要回答的是「现在还有东西在跑吗」，而面板可能一直没打开过，
+// 所以数量单独轮询（20s，本地 sqlite 查询，成本可以忽略）。
+// 面板自己按 2.5s 轮询明细，两者不共享定时器：面板关掉后徽标还得继续更新。
+const jobsOpen = ref(false)
+/**
+ * 正在跑的后台任务。面板按 2.5s 拉自己的明细，这里这份只服务两个地方：
+ * 工具栏徽标的数字，以及输入框上方那条「后台运行中」横条。
+ *
+ * 存整个列表而不只是数量：横条要显示「跑的是哪条命令、已经多久」，
+ * 只留 count 的话横条只能喊一句「有任务在跑」，用户还是得点开面板才认得出是哪个。
+ */
+const runningJobList = ref<AIJobRow[]>([])
+const runningJobs = computed(() => runningJobList.value.length)
+/**
+ * 全部最近任务（含已结束）：消息卡片要把 run_command 行从「后台任务 job_xxx」
+ * 翻成「运行中 / 已结束 · 退出码 1」，只靠 running 那份不够——任务一结束
+ * 整行就从列表里消失，卡片会一直停在最后一次看到的状态。
+ */
+const jobRows = ref<Map<string, AIJobRow>>(new Map())
+/** jobRows 的版本号。Map 原地替换不会让 v-memo 失效，消息列表靠这个数字重渲染 */
+const jobSeq = ref(0)
+/** 面板要定位的任务 id：从消息卡片的「查看」进来时带上 */
+const jobsFocus = ref('')
+let jobsBadgeTimer: ReturnType<typeof setTimeout> | undefined
+/** 横条上的「已运行 3m12s」靠它每秒重算；没有任务在跑时定时器停掉 */
+const nowTick = ref(Date.now())
+let nowTickTimer: ReturnType<typeof setInterval> | undefined
+
+async function refreshJobBadge() {
+  try {
+    const list = unwrap<AIJobRow[]>(await AIJobsList()) || []
+    const map = new Map<string, AIJobRow>()
+    for (const j of list) map.set(j.id, j)
+    jobRows.value = map
+    jobSeq.value++
+    runningJobList.value = list
+      .filter((j) => j.running)
+      // 最近起的排最前：横条只放得下一条，用户关心的通常是刚点下去的那个
+      .sort((a, b) => (Date.parse(b.startedAt) || 0) - (Date.parse(a.startedAt) || 0))
+  } catch {
+    // 徽标只是提示，查不到就保持上一次的结果，不打扰用户
+  }
+}
+
+/** 消息卡片上的「查看」：开面板并定位到那条任务 */
+function openJobsAt(id: string) {
+  jobsFocus.value = id
+  jobsOpen.value = true
+  void refreshJobBadge()
+}
+
+/**
+ * 轮询节奏跟着「有没有任务在跑」走：跑着的时候 3s（横条上的时长与「已经停了」都要跟得上），
+ * 全空时 20s。用 setTimeout 自排而不是 setInterval：间隔要在每次查询后重算。
+ */
+function scheduleJobBadge() {
+  if (jobsBadgeTimer) clearTimeout(jobsBadgeTimer)
+  const delay = runningJobs.value ? 3000 : 20000
+  jobsBadgeTimer = setTimeout(async () => {
+    await refreshJobBadge()
+    scheduleJobBadge()
+  }, delay)
+}
+
+watch(runningJobs, (n) => {
+  if (n > 0 && !nowTickTimer) {
+    nowTick.value = Date.now()
+    nowTickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
+  } else if (!n && nowTickTimer) {
+    clearInterval(nowTickTimer)
+    nowTickTimer = undefined
+  }
+})
+
+/** 输入框上方那条横条的内容（没有运行中的任务时为 null） */
+const jobBar = computed(() => {
+  const first = runningJobList.value[0]
+  if (!first) return null
+  const started = Date.parse(first.startedAt) || nowTick.value
+  return {
+    command: first.command,
+    more: runningJobList.value.length - 1,
+    elapsed: formatDuration(Math.max(0, nowTick.value - started)),
+  }
+})
+
+function toggleJobs() {
+  jobsOpen.value = !jobsOpen.value
+  if (jobsOpen.value) void refreshJobBadge()
+}
+
+// 两个浮层共用同一个右上角位置：同时打开时后开的会压在先开的上面，
+// 用户点关闭关掉的是上面那个，下面那个还在——看起来像「关不掉」。
+watch(digestOpen, (v) => {
+  if (v) jobsOpen.value = false
+})
+watch(jobsOpen, (v) => {
+  if (v) digestOpen.value = false
+})
+
 const outlineItems = computed<OutlineItem[]>(() =>
   messages.value
     .filter((m) => m.role === 'user')
@@ -1970,6 +2073,136 @@ function stopRoundTimer(run: AIRun) {
   if (run.tickTimer !== null) { clearInterval(run.tickTimer); run.tickTimer = null }
 }
 
+// ---- 运行中插入（steering，后端见 services/ai/ai_inject.go） ----
+//
+// 一条会话同一时刻只跑一轮（对一条会话只有一串历史，两轮同时写就是互相踩）。
+// 所以「跑着的时候又打了一句」现在不再是拦下来让用户等，而是把这句插进正在跑的
+// 那一轮：后端在下一个节点（调模型之前）把它接进上下文，模型接着就看见了。
+//
+// 前端为什么还要自己记一份 pending：后端回执（inject_ack）之前，这句话在界面上
+// 谁都还没看到。没有这个落点，用户会以为没发出去，然后连按几次回车。
+interface PendingInject {
+  id: string
+  /** 发起它的那一轮：收尾时按它把没赶上的话退回输入框 */
+  rid: string
+  text: string
+}
+const pendingInjects = ref<PendingInject[]>([])
+/** 当前这一轮还没被接走的那些（只画属于眼前这条任务的） */
+const pendingInjectsHere = computed(() => {
+  const r = activeRun.value
+  if (!r) return [] as PendingInject[]
+  return pendingInjects.value.filter((p) => p.rid === r.rid)
+})
+
+function dropPendingInject(id: string) {
+  pendingInjects.value = pendingInjects.value.filter((p) => p.id !== id)
+}
+
+// 没赶上这一轮：把字退回输入框，而不是让它凭空消失。
+// 追加而不是覆盖——用户可能已经在写下一句了，覆盖等于把刚打的字也吃了。
+function restoreInjectText(text: string) {
+  input.value = input.value ? `${text}\n${input.value}` : text
+}
+
+// 落地页发起的第一个任务，会话 id 要等 conv 事件回来（几百毫秒）才有，
+// 而插入必须带会话 id（后端按它找正在跑的那一轮）。等不到就放弃，
+// 让用户自己再按一次——总比把话插到别的会话里强。
+function waitConvId(run: AIRun, timeoutMs = 5000): Promise<boolean> {
+  return new Promise((resolve) => {
+    const started = performance.now()
+    const tick = () => {
+      if (run.convId) return resolve(true)
+      if (!runs.value.some((r) => r.rid === run.rid)) return resolve(false)
+      if (performance.now() - started > timeoutMs) return resolve(false)
+      setTimeout(tick, 100)
+    }
+    tick()
+  })
+}
+
+/** 把一句话插进正在跑的那一轮。 */
+async function injectMessage(run: AIRun) {
+  if (!hasKey.value) {
+    toast.error(t('aiNeedKey'))
+    emit('open-settings', 'ai')
+    return
+  }
+  // 与正常发送同一套解析口径：技能胶囊只是输入框里的标记，不算正文。
+  const raw = stripSkillTokens(input.value)
+  const text = /^[\s/／]*$/.test(raw) ? '' : raw
+  if (!text) return
+  // 图片与技能要跟着「一条新消息」做上下文组装（过闸门、落盘、拼技能提示），
+  // 塞不进已经跑起来的那一轮。按钮在流式期已经禁用，这里只是兜底（键盘路径）。
+  if (attachments.value.length || pickedSkills.value.length) {
+    toast.error(t('aiInjectTextOnly'))
+    return
+  }
+  if (!run.convId && !(await waitConvId(run))) {
+    toast.error(t('aiInjectNoConv'))
+    return
+  }
+
+  const id = `inj-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+  pendingInjects.value.push({ id, rid: run.rid, text })
+  // 立刻清空输入框：字已经交出去了，留在框里会让下一次回车重复发送。
+  // 万一没赶上（下面 catch / 收尾退回），会原样塞回来。
+  input.value = ''
+  attachments.value = []
+  mentions.value = []
+  try {
+    await ensureStreamInfo()
+    const resp = await fetch(`http://127.0.0.1:${aiStreamPort.value}/ai/inject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Stream-Token': aiStreamToken.value },
+      body: JSON.stringify({ convId: run.convId, id, message: text }),
+    })
+    // 409 = 这一轮刚好结束了：没赶上，退回输入框。
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+  } catch {
+    dropPendingInject(id)
+    restoreInjectText(text)
+    toast.error(t('aiInjectMissed'))
+  }
+}
+
+// 把「流式跑到一半的这一段」定格成一条正式消息。
+//
+// 插入会在这里把一轮切成两段：用户这句话之后模型说的是对它的回答，和前面那段
+// 不是同一条回复。不切的话，用户会看到自己的话排在「已经写了一半的回答」上面，
+// 而实际上他看到的是自己插话前后各有一截回答。
+// 后端在同一个位置做同一件事（agent_run.go 的 saveSegment），两边的段落边界
+// 必须对齐，否则刷新前后同一条对话会读成不同的顺序。
+function freezeSegment(run: AIRun) {
+  flushStream(run)
+  const content = run.text
+  if (!content && !run.reasoning && !run.tools.length) return
+  const id = `ast-${Date.now()}-s${++segmentSeq}`
+  const msg: Record<string, any> = {
+    id, conv_id: run.convId, role: 'assistant', content,
+    created_at: new Date().toISOString(),
+  }
+  if (run.model) msg.model = run.model
+  if (run.reasoning) msg.reasoning_content = run.reasoning
+  if (run.tools.length) {
+    msg.tool_calls = serializeTools(run.tools)
+    msg.tool_rounds = countToolRounds(run.tools)
+  }
+  messages.value.push(msg as AIMessage)
+  // 复用流式期已经渲染好的块，避免定格那一刻整段重新解析
+  primeMessageBlocks(id, content, run.blocks.map((b) => b.html))
+  // 缓冲清空：后面的内容属于下一段，落在新的气泡里
+  run.text = ''
+  run.buf = ''
+  run.reasoning = ''
+  run.reasonBuf = ''
+  run.tools = []
+  run.blocks = []
+  clearLiveCache()
+}
+
+let segmentSeq = 0
+
 async function send() {
   // 先读后清：任何提前 return（没配 Key / 空消息 / 这条还在跑）都不能把标志
   // 留给下一次手动发送，否则那条用户发言将不再出现在气泡里。
@@ -1983,7 +2216,9 @@ async function send() {
   // 这中间几百毫秒里连按两次回车，会多出一条并行的同题任务。
   const busy = convId ? runOf(convId) : runs.value.find((r) => r.rid === draftRunId.value)
   if (busy) {
-    toast.error(t('aiSameConvRunning'))
+    // 这条会话还在跑：这一句插进正在跑的那一轮，而不是拦下来让用户等
+    // （见 injectMessage 与后端的 ai_inject.go）。
+    await injectMessage(busy)
     return
   }
   // 面板开着时按回车也能发（焦点还在 textarea 上），发出去就该收起来。
@@ -2299,9 +2534,34 @@ async function send() {
               }
             }
             break
+          case 'inject_ack': {
+            // 后端把这句话接进这一轮了（可能在几十秒之后，等模型手上那一步做完）。
+            // 到这里它才成为「真的发出去过的一句话」——之前只是排队。
+            const iid = String(data.id || '')
+            const itext = String(data.text || '')
+            dropPendingInject(iid)
+            if (!itext) break
+            // 用户可能已经把会话切走了：这一轮的内容后端已经落库，回来时 loadMessages
+            // 会拿到；这里只把排队项清掉，绝不能往眼前这条会话的消息列表里塞。
+            const here = !run.convId || run.convId === activeId.value || draftRunId.value === run.rid
+            if (!here) break
+            // 先把已经吐出来的半段定格（见 freezeSegment），再接上这句话：
+            // 顺序反过来的话，用户的话会排在自己已经看到的回答上面。
+            freezeSegment(run)
+            messages.value.push({
+              id: 'usr-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+              conv_id: run.convId, role: 'user', content: itext,
+              created_at: new Date().toISOString(),
+            } as AIMessage)
+            scrollToBottom()
+            break
+          }
           case 'done':
             if (data.convId) {
               run.done = true
+              // 这一轮里可能刚起了后台任务（模型往往「起完就收尾」）。徽标是 20s 轮询的，
+              // 不等下一次：否则用户刚看完「已在后台启动」，抬头却看不到那个数字。
+              void refreshJobBadge()
               // 用户已经切到别的会话：这一轮的内容后端已经落库，回来时 loadMessages
               // 会拿到。**绝不能**往 messages 里塞 —— 那是另一条会话的列表。
               // 但「结束」这件事本身还是要处理：给那条会话留个绿点。
@@ -2427,6 +2687,22 @@ async function send() {
           toolRounds: hadTools ? countToolRounds(run.tools) : 0,
         }
         statMap.set(aid, stat)
+      }
+    }
+    // 这一轮结束了还有没被接走的插入消息：它没进上下文（后端那侧不会再有
+    // 下一个节点来接它），得把字退回输入框，不能让用户以为已经发出去了。
+    // 只退给「还看着这条任务」的人：切走之后退进去，下一句就会发到别的任务上。
+    const stranded = pendingInjects.value.filter((p) => p.rid === run.rid)
+    if (stranded.length) {
+      pendingInjects.value = pendingInjects.value.filter((p) => p.rid !== run.rid)
+      if (here) {
+        for (const p of stranded) restoreInjectText(p.text)
+        toast.error(t('aiInjectMissed'))
+      } else {
+        // 用户已经切到别的任务上了：不能把字塞进眼前这条的输入框（下一句就发
+        // 到别的任务去了），但也不能一声不响地吞掉——说清楚是哪条没赶上。
+        const name = conversations.value.find((c) => c.id === runID)?.title || t('aiNewChat')
+        toast.error(t('aiInjectMissedAway', { name }))
       }
     }
     // 报错留在它自己的会话上：侧栏红点之外，切回来还能读到原因。
@@ -2735,6 +3011,11 @@ onMounted(async () => {
   window.setTimeout(() => { void import('../utils/aiCodeEditor').catch(() => { /* 预热失败无所谓，点开时会重试 */ }) }, 1200)
   await loadProfiles()
   await Promise.all([loadConversations(), loadSpaces()])
+  // 后台任务徽标：进页面先对一次（可能有上一次会话留下的任务还在跑），
+  // 之后按「有没有任务在跑」自适应轮询（见 scheduleJobBadge）。
+  // 面板打开时它自己按 2.5s 轮询明细，两者互不依赖。
+  void refreshJobBadge()
+  scheduleJobBadge()
   // 会话/空间目录此时已就绪：首次探测 git 分支（effectiveDir 的 watch 已在其定义处
   // 建立，见「新建空间」声明之后的注释）。这里只跑一次首探，后续变化由那条 watch 接管。
   loadGitBranch()
@@ -2782,6 +3063,8 @@ onUnmounted(() => {
     if (r.flushTimer) clearTimeout(r.flushTimer)
   }
   if (msgSearchTimer) { clearTimeout(msgSearchTimer); msgSearchTimer = undefined }
+  if (jobsBadgeTimer) { clearTimeout(jobsBadgeTimer); jobsBadgeTimer = undefined }
+  if (nowTickTimer) { clearInterval(nowTickTimer); nowTickTimer = undefined }
   aiGenerating.value = false
   aiFinishedUnread.value = false
   reportAIPageVisible(false)
@@ -2858,12 +3141,24 @@ onUnmounted(() => {
         :active-conv="activeConv"
         :star-busy="starBusy"
         :side-open="sideOpen"
+        :jobs-open="jobsOpen"
+        :running-jobs="runningJobs"
         @open-cwd="openCwd"
         @model-change="onModelChange"
         @regen-title="regenTitle"
         @toggle-star="toggleStar"
         @export-md="exportConvMarkdown"
         @toggle-side="toggleSidePanel"
+        @toggle-jobs="toggleJobs"
+      />
+
+      <!-- 后台任务面板：与大纲面板同一套浮层，挂在 .ai-main 上（相对定位）。 -->
+      <AiJobsPanel
+        v-if="jobsOpen"
+        :open="jobsOpen"
+        :focus="jobsFocus"
+        @close="jobsOpen = false; jobsFocus = ''"
+        @changed="refreshJobBadge"
       />
 
       <!-- 大纲 / 摘要：绝对定位挂在 .ai-main 上（它已是 position: relative）。
@@ -2977,12 +3272,15 @@ onUnmounted(() => {
         :msg-stat="msgStat"
         :format-stat="formatStat"
         :cp-for-call="cpForCall"
+        :job-rows="jobRows"
+        :job-seq="jobSeq"
         @open-settings="emit('open-settings', 'ai')"
         @open-artifact="openArtifactInPanel"
         @open-img="openImgViewer"
         @copy="copy"
         @save-note="saveAsNote"
         @restore-checkpoint="restoreCheckpoint"
+        @open-jobs="openJobsAt"
         @run-plan="runPlan"
         @retry="retryLast"
         @msg-click="onMsgClick"
@@ -3073,6 +3371,30 @@ onUnmounted(() => {
           @deny="approveTool(pendingApproval, 'deny')"
           @open-rules="emit('open-settings', 'ai')"
         />
+
+        <!-- 后台任务横条：贴在输入框正上方。
+             为什么放这里：后台任务最常见的用法就是「让它在后台跑着，我继续问别的」，
+             而它一旦跑起来，除了工具栏那个小终端图标就没别的地方能看见——用户会以为
+             服务没起来。这条横条把它放到视线落点上：跑的是哪条命令、跑了多久、一共几个。
+             点开就是后台任务面板（日志 / 终止都在那里）。 -->
+        <button v-if="jobBar" class="ai-jobs-bar" :title="t('aiJobsBarTip')" @click="toggleJobs">
+          <span class="ai-jobs-bar-dot" />
+          <span class="ai-jobs-bar-label">{{ t('aiJobsBarRunning') }}</span>
+          <code class="ai-jobs-bar-cmd" :title="jobBar.command">{{ jobBar.command }}</code>
+          <span class="ai-jobs-bar-meta">
+            {{ jobBar.elapsed }}<template v-if="jobBar.more > 0"> · {{ t('aiJobsBarMore', { n: jobBar.more }) }}</template>
+          </span>
+        </button>
+
+        <!-- 等待插入的消息：后端回执（inject_ack）之前这句话谁都还没看到，
+             必须有这个落点——否则用户会以为没发出去，然后连按几次回车。 -->
+        <div v-if="pendingInjectsHere.length" class="ai-inject-queue">
+          <div v-for="p in pendingInjectsHere" :key="p.id" class="ai-inject-item">
+            <span class="ai-inject-dot" />
+            <span class="ai-inject-text" :title="p.text">{{ p.text }}</span>
+            <span class="ai-inject-hint">{{ t('aiInjectWaiting') }}</span>
+          </div>
+        </div>
 
         <!-- 输入区 -->
         <AiComposer
@@ -3181,6 +3503,119 @@ onUnmounted(() => {
    绝对定位元素的 100% 是父级的 padding box，比 content box 多左右各一份 padding，
    所以这里要减掉两次 --space-6（.ai-dock 的左右内边距）。
    原来写 left/right:10% 是专门配 80% 的算法，输入框一换口径就立刻错位。 */
+/* 后台任务横条：与输入框同宽同左边（--ai-column-w + margin auto），
+   一条浅底的行内按钮，不加边框——它是状态提示，不是一张卡片。
+   高度刻意压到与等待插入那条一致，两条同时出现时不会一厚一薄。 */
+.ai-jobs-bar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: var(--ai-column-w);
+  min-width: 0;
+  margin: 0 auto 6px;
+  padding: 5px 10px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  font-family: inherit;
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-jobs-bar:hover {
+  background: var(--color-bg-hover);
+}
+
+/* 呼吸点：静态圆点会被读成「一个图标」，这一条要说的是「此刻还在跑」 */
+.ai-jobs-bar-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: ai-jobs-bar-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ai-jobs-bar-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.25; }
+}
+
+.ai-jobs-bar-label {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+
+/* 命令是这一条里唯一要认的东西：等宽、提亮、可截断（完整命令看 title） */
+.ai-jobs-bar-cmd {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-text-primary);
+}
+
+.ai-jobs-bar-meta {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 等待插入的消息：贴在输入框正上方，宽度与输入框同口径（--ai-column-w + margin auto），
+   否则它会从窗口左边一直拉到右边，比输入框宽一截，看起来像另一块区域。
+   只靠一条浅底与左侧圆点分层，不加边框——它是一条临时状态，不是一张卡片。 */
+.ai-inject-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  width: var(--ai-column-w);
+  margin: 0 auto 6px;
+}
+
+.ai-inject-item {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  font-size: 11.5px;
+  color: var(--color-text-secondary);
+}
+
+/* 呼吸点：说明「还挂着，等着被接走」——静态圆点看起来像已完成 */
+.ai-inject-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: ai-inject-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes ai-inject-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+
+.ai-inject-text {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-primary);
+}
+
+.ai-inject-hint { flex: 0 0 auto; margin-left: auto; color: var(--color-text-secondary); font-size: 11px; }
+
 .ai-dock-approve {
   position: absolute;
   left: 0;
@@ -3331,21 +3766,24 @@ onUnmounted(() => {
 .ai-artifacts { margin-top: 8px; width: 100%; max-width: 100%; }
 .ai-artifacts-sum {
   display: flex; align-items: center; gap: 4px; width: fit-content;
-  padding: 3px 0; font-size: 11px; color: var(--color-text-secondary);
+  padding: 3px 0; font-size: 12px; color: var(--color-text-muted);
   cursor: pointer; user-select: none; list-style: none;
 }
 .ai-artifacts-sum::-webkit-details-marker { display: none; }
 .ai-artifacts-chev { transition: transform 0.15s; }
 .ai-artifacts[open] > .ai-artifacts-sum .ai-artifacts-chev { transform: rotate(180deg); }
 .ai-artifacts-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 4px 0; }
+/* 产物 chip 同样无框：透明描边只是为了让 hover 底色和文字保持原有内缩，
+   在深色底上透明边框与去掉边框视觉一致，但不必再调一次 padding。 */
 .ai-artifact {
   display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 260px;
-  padding: 3px 9px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
+  padding: 3px 8px; border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent;
   color: var(--color-text-primary); font-size: 11px; cursor: pointer;
   text-align: left; font-family: inherit;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
-.ai-artifact:hover { border-color: var(--color-accent); }
+.ai-artifact:hover { background: var(--color-bg-hover); color: var(--color-accent); }
 .ai-artifact-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ai-artifact-op { color: var(--color-text-secondary); flex-shrink: 0; }
 /* 右侧面板首页的产物合集：面板窄，仍是竖列、op 贴行右，chip 去掉描边融进列表 */
@@ -3404,6 +3842,11 @@ onUnmounted(() => {
 }
 
 .ai-tool-btn:hover { color: var(--color-accent); border-color: var(--color-accent); }
+
+/* 运行中不让加图：图片要过一次闸门 + 落盘，插不进已经开始跑的那一轮。
+   灰掉而不是藏起来——藏起来会让人以为功能坏了。 */
+.ai-tool-btn:disabled { opacity: 0.4; cursor: default; }
+.ai-tool-btn:disabled:hover { color: var(--color-text-muted); border-color: var(--color-border); }
 
 .ai-attach-preview { display: flex; flex-wrap: wrap; gap: 8px; }
 

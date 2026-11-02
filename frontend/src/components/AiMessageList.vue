@@ -12,19 +12,18 @@
 import { nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  ArrowDown, Bot, ChevronDown, Copy, FileText, ListChecks, Play, StickyNote, Undo2, Wrench,
+  ArrowDown, Bot, ChevronDown, ChevronRight, Copy, FileText, Play, StickyNote, Undo2, Wrench,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
 import AiDiffView from './AiDiffView.vue'
 import type { LiveBlock } from '../composables/useAiMarkdownBlocks'
 import type {
-  AIArtifact, AICheckpointView, AIMessage, AIMsgImage, AIRuleFile, AIStreamStat, AIToolCall,
+  AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AIStreamStat, AIToolCall,
 } from '../types/ai'
 import {
   artifactsOf, countToolRounds, jobIdOf, rulesOf, rulesTitle, runIDOf, toolIcon, toolList,
   toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
 } from '../utils/aiTools'
-import { planSecs, planStepIndex } from '../utils/aiPlan'
 
 const props = defineProps<{
   hasKey: boolean
@@ -48,6 +47,16 @@ const props = defineProps<{
   msgStat: (m: AIMessage) => AIStreamStat | null
   formatStat: (s: AIStreamStat) => string
   cpForCall: (tc: AIToolCall) => AICheckpointView | undefined
+  /**
+   * 后台任务状态：job id → 一行（由父组件轮询 ai_jobs 得到，含已结束的）。
+   *
+   * 卡片上原来直接把 job id 印出来（`后台任务 job_mvzabgak_27620：…`），那是
+   * 「毫秒时间戳 base36 + 进程 pid」拼的主键，对用户零信息量。这里用它换成
+   * 「运行中 / 已结束 · 退出码 1」，id 只留在面板与日志文件名里。
+   */
+  jobRows: Map<string, AIJobRow>
+  /** jobRows 的版本号：进 v-memo 依赖，否则任务结束后历史消息里那行不会翻状态 */
+  jobSeq: number
 }>()
 
 // 命令在跑的时候输出在卡片里往下长：不跟着滚，用户看到的永远是开头几行，
@@ -81,6 +90,8 @@ const emit = defineEmits<{
   (e: 'copy', text: string): void
   (e: 'save-note', text: string): void
   (e: 'restore-checkpoint', cp: AICheckpointView): void
+  /** 点「查看」：打开后台任务面板并定位到这条任务 */
+  (e: 'open-jobs', id: string): void
   (e: 'run-plan', m: AIMessage): void
   (e: 'retry'): void
   (e: 'msg-click', ev: MouseEvent): void
@@ -119,6 +130,33 @@ function artsOf(m: AIMessage): AIArtifact[] {
 /** i18n 的 t 由本组件提供，工具动词的翻译在这里接上 */
 function toolVerb(name: string): string {
   return aiToolVerb(name, t)
+}
+
+// —— 后台任务行 ——
+// 只在「这条调用带 jobId」时出现，用来替代早先那句把主键印进正文的提示。
+//
+// strict=false 用于流式区：任务刚起、父组件的轮询还没拿到这一行（最多 3s），
+// 此时仍应显示「后台运行中」——它一定在跑。历史消息则必须严格查表，
+// 查不到（更早的任务已不在最近 50 条里）就整行不显示，而不是瞎猜成运行中。
+function jobLine(tc: AIToolCall, strict = true): string {
+  const id = jobIdOf(tc)
+  if (!id) return ''
+  const row = props.jobRows.get(id)
+  if (!row) return strict ? '' : t('aiJobBgRunning')
+  if (row.running) return t('aiJobBgRunning')
+  if (row.status === 'killed') return t('aiJobBgStopped')
+  return t('aiJobBgEnded', { code: row.exitCode })
+}
+
+function jobRunning(tc: AIToolCall): boolean {
+  const id = jobIdOf(tc)
+  return !!id && !!props.jobRows.get(id)?.running
+}
+
+// v-memo 的依赖项：只有「这条回复里带后台任务」时才跟着 jobSeq 重渲染，
+// 其余历史消息继续走缓存——否则每 3s 一次轮询会把整屏消息全部重建。
+function jobSeqOf(m: AIMessage): number {
+  return toolsOf(m).some((tc) => jobIdOf(tc)) ? props.jobSeq : 0
 }
 
 // —— 滚动跟随 ——
@@ -248,15 +286,20 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
                · m.content / m.reasoning_content —— 正文与思考过程
                · statMap.get(m.id)               —— 该条回复的耗时/token 统计
                · locale                         —— 按钮 title 等文案随语言切换刷新
-               · mode                           —— 计划卡片上的「执行」按钮只看当前模式；
-                                                   不放进依赖，点完执行它还会留在原地
+               · mode                           —— 「开始执行」按钮只看当前模式
+               · jobSeqOf(m)                    —— 后台任务行的「运行中 / 已结束」；
+                                                   只在含任务的回复上取值，其余恒为 0
+                                                   继续命中缓存（否则每 3s 轮询会把整屏
+                                                   消息全部重建）
+               · 是否最后一条                    —— 按钮只给最后一条回答；新消息到达时
+                                                   上一条要在同一份缓存里把按钮收掉
              编译器生成的代码含 `_cached.key === m.id` 校验，
              切换会话（消息 id 变化）不会误命中旧缓存。 -->
         <div
           v-for="m in messages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -306,6 +349,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
                   <button v-if="cpForCall(tc)" class="ai-tool-undo" :title="t('aiCheckpointUndo')" @click.stop.prevent="emit('restore-checkpoint', cpForCall(tc)!)">
                     <Undo2 :size="11" />
                   </button>
+                  <ChevronRight :size="12" class="ai-tool-chev" />
                 </summary>
                 <!-- 行级 diff：结果串只说「改成功了」，这里说「改成了什么」。 -->
                 <AiDiffView v-if="tc.diff" :diff="tc.diff" />
@@ -313,6 +357,13 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
                 <!-- 有 diff 时不再重放一句「已编辑 xxx（替换 1 处）」：
                      路径在摘要行上已经有了，改动在 diff 里已经有了。 -->
                 <pre v-else-if="toolOutput(tc) && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolOutput(tc) }}</pre>
+                <!-- 后台任务行：与流式区同款，历史消息里也要在——不然刷新一次就只剩
+                     「跑过了」的代码块，看不出那个进程现在还在不在跑。 -->
+                <div v-if="jobLine(tc)" class="ai-job-note" :class="{ 'is-run': jobRunning(tc) }">
+                  <span class="ai-job-note-dot"></span>
+                  <span class="ai-job-note-text">{{ jobLine(tc) }}</span>
+                  <button class="ai-job-note-open" @click.stop.prevent="emit('open-jobs', jobIdOf(tc))">{{ t('aiJobBgView') }}</button>
+                </div>
               </details>
             </div>
           </details>
@@ -327,40 +378,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
             <span>{{ t('aiRulesActive', { n: rulesOf(m).length }) }}</span>
             <span class="ai-rules-name">{{ rulesOf(m).map((r) => r.name).join('、') }}</span>
           </div>
-          <div v-if="m.role === 'assistant' && planSecs(m).length" class="ai-plan">
-            <div class="ai-plan-head">
-              <ListChecks :size="13" class="ai-plan-icon" />
-              <span class="ai-plan-name">{{ t('aiPlanTitle') }}</span>
-              <!-- 「N 步」只数步骤那一节：把涉及文件、风险也算进去，
-                   这个数就没有意义了 -->
-              <span v-if="planSecs(m)[planStepIndex(planSecs(m))]?.items.length" class="ai-plan-count">
-                {{ t('aiPlanSteps', { n: planSecs(m)[planStepIndex(planSecs(m))].items.length }) }}
-              </span>
-              <!-- 只有计划模式下才给「执行」：切回对话之后这份计划已经执行过了，
-                   再点一次等于把同一份要求重发一遍。
-                   勾选框有意做成非受控（不绑 :checked）：消息区带 v-memo，
-                   绑了状态就得把每个勾选位塞进依赖数组，等于每勾一下重渲染整个列表。 -->
-              <button
-                v-if="mode === 'plan' && !streaming"
-                class="ai-plan-run"
-                :title="t('aiPlanRunHint')"
-                @click="emit('run-plan', m)"
-              >
-                <Play :size="11" /> {{ t('aiPlanRun') }}
-              </button>
-            </div>
-            <div v-for="(sec, si) in planSecs(m)" :key="si" class="ai-plan-sec">
-              <div class="ai-plan-sec-title">{{ sec.title }}</div>
-              <ul v-if="sec.items.length" class="ai-plan-items" :class="{ 'is-step': si === planStepIndex(planSecs(m)) }">
-                <li v-for="(it, ii) in sec.items" :key="ii">
-                  <input v-if="si === planStepIndex(planSecs(m))" type="checkbox" class="ai-plan-check" />
-                  <span class="ai-plan-item-md" v-html="renderBlock(it)"></span>
-                </li>
-              </ul>
-              <div v-if="sec.text" class="ai-plan-text ai-md" v-html="renderBlock(sec.text)"></div>
-            </div>
-          </div>
-          <div v-else-if="m.role === 'assistant'" class="ai-msg-content ai-md">
+          <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md">
             <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
           </div>
           <div v-else class="ai-msg-content ai-plain">{{ m.content }}</div>
@@ -384,6 +402,17 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
             <!-- 中断标记：内容照样保留（后端也把半截内容连同 stopped 一起落库），
                  但要让人一眼看出「这是我按了停止」，而不是模型只答了这么多 -->
             <span v-if="m.stopped" class="ai-msg-stopped" :title="t('aiStoppedHint')">{{ t('aiStopped') }}</span>
+            <!-- 计划模式下的执行入口。原来挂在「计划」卡片头上，卡片去掉后
+                 没有它，计划模式就只剩只读，永远迈不出执行那一步。
+                 只给最后一条：历史回答早就执行过了，每条都挂一个只会误导。 -->
+            <button
+              v-if="mode === 'plan' && !streaming && m.role === 'assistant' && m.content && m.id === messages[messages.length - 1]?.id"
+              class="ai-copy ai-run-plan"
+              :title="t('aiPlanRunHint')"
+              @click="emit('run-plan', m)"
+            >
+              <Play :size="12" /> {{ t('aiPlanRun') }}
+            </button>
             <button v-if="m.content" class="ai-copy" @click="emit('copy', m.content)" :title="t('copy')">
               <Copy :size="12" /> {{ t('copy') }}
             </button>
@@ -441,6 +470,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
                   <button v-if="cpForCall(tc)" class="ai-tool-undo" :title="t('aiCheckpointUndo')" @click.stop.prevent="emit('restore-checkpoint', cpForCall(tc)!)">
                     <Undo2 :size="11" />
                   </button>
+                  <ChevronRight :size="12" class="ai-tool-chev" />
                 </summary>
                 <!-- 审批状态：写类与高危工具会在这里停下来（见后端 ai_approval.go）。
                      卡片只说明「为什么停下来」，按钮统一在输入区上方的审批条里。 -->
@@ -457,8 +487,12 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
                 <pre v-else-if="toolOutput(tc) && !tc.diff" :ref="(el) => setToolResEl(tc.id, el)" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolOutput(tc) }}</pre>
                 <!-- 后台任务：卡片上明写「关闭应用会终止」。工具描述里也写了同一句，
                      但用户看的是这张卡；不在这里再说一次，关窗口时他一定以为
-                     dev server 还在后台跑着。 -->
-                <div v-if="jobIdOf(tc)" class="ai-job-note">{{ t('aiJobBgNote', { id: jobIdOf(tc) }) }}</div>
+                     dev server 还在后台跑着。job id 是主键（时间戳+pid），只放面板里。 -->
+                <div v-if="jobLine(tc, false)" class="ai-job-note" :class="{ 'is-run': jobRunning(tc) }">
+                  <span class="ai-job-note-dot"></span>
+                  <span class="ai-job-note-text">{{ jobLine(tc, false) }}</span>
+                  <button class="ai-job-note-open" @click.stop.prevent="emit('open-jobs', jobIdOf(tc))">{{ t('aiJobBgView') }}</button>
+                </div>
               </details>
             </div>
           </details>
@@ -509,50 +543,68 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
    所以两者像拆分前一样直接参与 .ai-main 的 column flex；
    .ai-jump-bottom 的绝对定位锚点仍是 .ai-main。 */
 
+/* ── 思考过程 ─────────────────────────────────────────────
+   无框：一行灰字，展开后是浅竖线引出的灰正文。
+   原来 details 带 --color-bg-active 灰底，和下面的工具卡、正文叠在一起
+   会形成一块块深浅不一的方块——同一段回答里三种「容器」叠着，风格就散了。 */
 .ai-reasoning {
-  font-size: 12px; margin: 2px 0; max-width: 80%;
+  font-size: 12px; margin: 2px 0; max-width: 100%;
 }
 
-.ai-reasoning details { background: var(--color-bg-active); border-radius: var(--radius-sm); padding: 4px 8px; }
+.ai-reasoning details { background: none; border-radius: 0; padding: 0; }
 
 .ai-reasoning summary {
-  cursor: pointer; color: var(--color-text-muted); font-size: 11px;
+  width: fit-content; max-width: 100%;
+  /* 负 margin 抵消内边距：hover 底色向外扩，文字仍与正文同一条左边缘 */
+  padding: 3px 6px; margin-left: -6px;
+  border-radius: var(--radius-sm);
+  cursor: pointer; color: var(--color-text-muted); font-size: 12px;
+  /* 同 .ai-tools > summary：fit-content 下不 nowrap 会被挤到第二行 */
+  white-space: nowrap;
   user-select: none; outline: none;
+  transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
-.ai-reasoning summary:hover { color: var(--color-text-primary); }
+.ai-reasoning summary:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
 .ai-reasoning-content {
-  margin-top: 4px; padding-top: 4px; border-top: 1px solid var(--color-border);
-  color: var(--color-text-secondary); font-size: 12px; line-height: 1.5;
+  margin-top: 2px; padding: 2px 0 2px 10px; border-left: 2px solid var(--color-border);
+  color: var(--color-text-muted); font-size: 12.5px; line-height: 1.7;
   white-space: pre-wrap; word-break: break-word;
 }
 
-/* ── 工具调用卡片 ─────────────────────────────────────────────
-   一张卡片：头部是摘要行，展开后是一列可点的行。
-   原来是「灰块套灰块」——外层 summary 和每条 tool 都用 --color-bg-active，
-   11px 字号下两层边界完全糊成一片，看着又脏又没层次。
-   现在边界交给一条细边框，行之间靠 hover 区分，状态用左侧内阴影条表达。 */
+/* ── 工具调用 ───────────────────────────────────────────────
+   无框的一列行：图标 + 动词 + 目标，展开才看结果。
+   这里原来是一张带 border / 圆角 / 二级底色的卡片，和上面的思考块、
+   下面的正文各是一种容器——三种方块叠在一起，正文反而是最没存在感的那个。
+   现在统一成「正文之外的辅助信息一律无框」：只靠缩进、字号、颜色分层。
+   每行是「图标 + 动词 + 目标 + 增删 + 箭头」一句连贯的话：动词与正文同亮度，
+   目标（文件名 / 命令）用主色跳出来，状态由图标着色表达。 */
 .ai-tools {
-  margin: 6px 0 2px;
+  margin: 4px 0 2px;
   max-width: 100%;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
-  overflow: hidden;
 }
 
 .ai-tools > summary {
   display: flex;
   align-items: center;
   gap: 7px;
-  padding: 7px 10px;
+  width: fit-content;
+  max-width: 100%;
+  /* 负 margin 抵消内边距：hover 底色向外扩，文字仍与正文同一条左边缘 */
+  padding: 3px 6px;
+  margin-left: -6px;
+  border-radius: var(--radius-sm);
   list-style: none;
   cursor: pointer;
   user-select: none;
   outline: none;
-  font-size: 11.5px;
-  color: var(--color-text-secondary);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  /* 必须 nowrap：summary 是 fit-content，默认的 normal 会让「调用 N 个工具 ·
+     M 轮」按最长不可断片段算 min-content，容器一紧「轮」就被挤到第二行；
+     nowrap 之后 fit-content 的 max/min-content 都按整行算，宽度够放下整句。 */
+  white-space: nowrap;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 
@@ -560,9 +612,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-tools > summary:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
-.ai-tools[open] > summary { border-bottom: 1px solid var(--color-border); }
-
-.ai-tools-ico { flex: 0 0 auto; color: var(--color-accent); opacity: 0.85; }
+.ai-tools-ico { flex: 0 0 auto; color: var(--color-text-muted); }
 
 /* 箭头靠右、展开时翻转：这张卡现在是开是合，不必自己看内容判断 */
 .ai-tools-chev {
@@ -574,22 +624,29 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-tools[open] > summary .ai-tools-chev { transform: rotate(180deg); }
 
-.ai-tools-body { display: flex; flex-direction: column; gap: 1px; padding: 4px; }
+.ai-tools-body { display: flex; flex-direction: column; gap: 0; padding: 1px 0 0; }
 
-.ai-tool { border-radius: var(--radius-sm); transition: background-color var(--transition-fast); }
+.ai-tool { transition: background-color var(--transition-fast); }
 
-.ai-tool:hover { background: var(--color-bg-hover); }
-
-/* 状态条用 inset box-shadow：border-left 会让图标与文字在有无状态之间横向跳动 */
-.ai-tool.is-run { box-shadow: inset 2px 0 0 var(--color-accent); }
-.ai-tool.is-err { box-shadow: inset 2px 0 0 var(--color-danger); }
-.ai-tool.is-ask { box-shadow: inset 2px 0 0 var(--color-warning); }
+/* hover 高亮放在 summary 上而不是 details 上：summary 用负 margin 伸到
+   details 左边 6px（为了文字与正文对齐），高亮跟着 summary 走才不缺一角；
+   放在 details 上则展开结果时整块都会被点亮。 */
+.ai-tool > summary:hover { background: var(--color-bg-hover); }
 
 .ai-tool > summary {
   display: flex;
   align-items: center;
-  gap: 7px;
-  padding: 5px 8px;
+  gap: 6px;
+  /* 宽度跟着内容走。铺满整行时，hover 底色会从动词一直拉到右边，中间一大段
+     空白，眼睛要横穿过去才发现行尾有个箭头；fit-content 之后这行读起来就是
+     一句连续的「读了哪个文件、改了几行」。max-width 卡住 100% 是防止长路径
+     把消息区顶出横向滚动条（负 margin 已让盒子左移 6px）。 */
+  width: fit-content;
+  max-width: 100%;
+  /* 左内边距 6px 由负 margin 抵消：hover 底色向外扩，文字仍与正文同一条左边缘 */
+  padding: 4px 6px;
+  margin-left: -6px;
+  border-radius: var(--radius-sm);
   list-style: none;
   cursor: pointer;
   user-select: none;
@@ -598,22 +655,34 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-tool > summary::-webkit-details-marker { display: none; }
 
-.ai-tool > summary:hover .ai-tool-target { color: var(--color-text-primary); }
+.ai-tool > summary:hover .ai-tool-target { color: var(--color-accent-light); }
 
-.ai-tool-icon { flex: 0 0 auto; color: var(--color-accent); opacity: 0.8; }
+/* 状态全部由图标着色表达：运行中=主色、出错=红、等审批=橙。
+   原来在行首画一条 2px 竖条，但 summary 有圆角、又伸出正文 6px，画出来是一段
+   弯的短线，看着像个没闭合的括号，还和图标断开——一行辅助信息不该有第二个焦点。 */
+.ai-tool-icon { flex: 0 0 auto; color: var(--color-text-muted); }
 
 .ai-tool.is-err .ai-tool-icon { color: var(--color-danger); opacity: 1; }
 
+.ai-tool.is-run .ai-tool-icon { color: var(--color-accent); opacity: 1; }
+
+.ai-tool.is-ask .ai-tool-icon { color: var(--color-warning); opacity: 1; }
+
 .ai-tool-verb { flex: 0 0 auto; font-size: 12px; color: var(--color-text-primary); }
 
+/* 这行里唯一需要「一眼确认是谁」的就是目标（文件名 / 命令），用主色把它
+   从一串灰字里挑出来；等宽体去掉了——路径不是要对齐的代码，界面字体读得更快，
+   而下面展开的命令输出仍然是等宽。 */
 .ai-tool-target {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-text-secondary);
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 320px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-accent);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  max-width: 320px;
 }
 
 .ai-tool-diff { display: flex; gap: 4px; flex: 0 0 auto; font-family: var(--font-mono); font-size: 11px; }
@@ -622,26 +691,43 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-diff-del { color: var(--color-danger); font-style: normal; }
 
-/* 时长/状态做成小胶囊：margin-left:auto 推到最右，和左边的动词分层 */
+/* 时长/状态跟在增删数后面，用最弱的一档颜色——它只是参考信息，
+   用户真正关心的是「动的是哪个文件、改了几行」。不再用胶囊底色：
+   一列行里只有它带底，看起来像漏了一个没去掉的卡片。 */
 .ai-tool-ms {
   flex: 0 0 auto;
-  margin-left: auto;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--color-bg-tertiary);
-  font-size: 10.5px;
+  padding: 0;
+  background: none;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
-  color: var(--color-text-muted);
+  color: var(--color-text-disabled);
 }
 
-.ai-tool-ms.is-ask { background: var(--color-warning-bg); color: var(--color-warning); }
+.ai-tool-ms.is-ask { background: none; color: var(--color-warning); }
 
 .ai-tool-ms.is-denied { color: var(--color-text-muted); }
 
-/* 展开的内容统一缩进到文本列（图标 12 + gap 7 + padding 8），与摘要行的动词对齐 */
+/* 行尾箭头：说明「这行点得开」。此前只有整组一个箭头，单条调用能不能展开
+   全靠猜——那行文字看着就是个标签，不像按钮。 */
+.ai-tool-chev {
+  flex: 0 0 auto;
+  margin-left: 1px;
+  /* 比 muted 亮一档再压 0.75 透明度：muted/disabled 在深色下几乎看不见，
+     而这枚箭头是「这行点得开」的唯一提示，不能靠运气发现。 */
+  color: var(--color-text-secondary);
+  opacity: 0.75;
+  transition: transform var(--transition-fast), color var(--transition-fast);
+}
+
+.ai-tool > summary:hover .ai-tool-chev { opacity: 1; }
+
+.ai-tool[open] > summary .ai-tool-chev { transform: rotate(90deg); }
+
+/* 展开的内容缩进到文本列：summary 的 -6px 外边距 + 6px 内边距 + 图标 12 + gap 6，
+   文字起点落在 18px 处，展开内容跟动词对齐。改 gap / 图标尺寸时要同步改这里。 */
 .ai-tool-err,
 .ai-tool-res,
-.ai-approval { margin: 0 8px 6px 27px; }
+.ai-approval { margin: 0 6px 6px 18px; }
 
 .ai-approval { display: flex; flex-direction: column; gap: 6px; }
 
@@ -649,8 +735,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
   font-size: 11px;
   line-height: 1.55;
   color: var(--color-text-secondary);
-  background: var(--color-bg-primary);
-  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
   padding: 5px 8px;
   border-left: 2px solid var(--color-warning);
 }
@@ -660,7 +746,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 .ai-approval-done { font-size: 11px; color: var(--color-text-muted); }
 
 /* diff 由子组件渲染，.qd-diff 自带边框，这里只补对齐用的外边距 */
-.ai-tool :deep(.qd-diff) { margin: 0 8px 6px 27px; }
+.ai-tool :deep(.qd-diff) { margin: 0 6px 6px 18px; }
 
 .ai-tool-undo {
   display: inline-flex;
@@ -687,57 +773,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
   font-family: var(--font-mono);
 }
 
-.ai-plan {
-  align-self: stretch; max-width: 100%;
-  margin: 4px 0 6px; padding: 10px 12px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  background: var(--color-bg-primary);
-}
-
-.ai-plan-head { display: flex; align-items: center; gap: 6px; }
-
-.ai-plan-icon { color: var(--color-accent); flex: none; }
-
-.ai-plan-name { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
-
-.ai-plan-count { font-size: 11px; color: var(--color-text-disabled); }
-
-.ai-plan-run {
-  display: inline-flex; align-items: center; gap: 4px;
-  margin-left: auto; padding: 3px 9px; flex-shrink: 0;
-  border: 1px solid var(--color-accent-border); border-radius: var(--radius-sm);
-  background: var(--color-accent-bg); color: var(--color-accent);
-  font-size: 11px; cursor: pointer;
-}
-
-.ai-plan-run:hover { border-color: var(--color-accent); }
-
-.ai-plan-sec { margin-top: 8px; }
-
-.ai-plan-sec-title {
-  font-size: 11px; font-weight: 600; color: var(--color-text-secondary);
-  margin-bottom: 3px;
-}
-
-.ai-plan-items { margin: 0; padding: 0; list-style: none; }
-
-.ai-plan-items li {
-  display: flex; align-items: flex-start; gap: 6px;
-  font-size: 12.5px; line-height: 1.55; color: var(--color-text-secondary);
-  padding: 1px 0;
-}
-
-.ai-plan-items:not(.is-step) li::before {
-  content: '·'; color: var(--color-text-disabled); flex: none;
-}
-
-.ai-plan-check { margin: 3px 0 0; flex: none; accent-color: var(--color-accent); }
-
-.ai-plan-item-md { flex: 1; min-width: 0; }
-
-.ai-plan-item-md :deep(p) { margin: 0; }
-
-.ai-plan-text { font-size: 12.5px; color: var(--color-text-secondary); }
 
 .ai-tool-err {
   font-size: 11px; color: var(--color-danger);
@@ -753,17 +788,57 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* 命令/代码类结果给一层淡底就够，不加描边：消息区不再有第二种容器 */
 .ai-tool-res.is-code {
-  background: var(--color-bg-primary);
-  border: 1px solid var(--color-border);
+  background: var(--color-bg-tertiary);
+  border: none;
   border-radius: var(--radius-sm);
   padding: 7px 9px;
 }
 
+/* 后台任务行：一行放得下「圆点 + 状态 + 查看」，不换行也不撑高卡片。
+   底色/描边一概不要——它和上面的日志块同属「这一步的附注」，
+   画成小卡片会把无框正文重新切碎。 */
 .ai-job-note {
-  margin-top: 4px; padding: 2px 0 2px 6px;
-  border-left: 2px solid var(--color-accent);
+  display: flex; align-items: center; gap: 8px;
+  margin-top: 4px; padding: 2px 0;
   font-size: 10px; line-height: 1.5; color: var(--color-text-muted);
+}
+
+.ai-job-note-dot {
+  flex: 0 0 auto; width: 5px; height: 5px; border-radius: 50%;
+  background: var(--color-text-muted);
+}
+
+.ai-job-note.is-run .ai-job-note-dot {
+  background: var(--color-accent);
+  animation: ai-job-note-pulse 1.8s ease-in-out infinite;
+}
+
+@keyframes ai-job-note-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: .3; }
+}
+
+.ai-job-note-text {
+  flex: 0 1 auto; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.ai-job-note.is-run .ai-job-note-text { color: var(--color-text-secondary); }
+
+.ai-job-note-open {
+  flex: 0 0 auto; padding: 0 2px;
+  border: none; background: none;
+  font-family: inherit; font-size: 10px; color: var(--color-text-muted);
+  cursor: pointer;
+}
+
+/* 悬停才给下划线：平时它是「附注里的一句」，别做得像按钮抢走注意力。 */
+.ai-job-note-open:hover {
+  color: var(--color-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .ai-messages {
@@ -802,7 +877,6 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 .ai-tool > summary,
 .ai-reasoning summary,
 .ai-empty,
-.ai-plan-head,
 .ai-jump-bottom {
   user-select: none;
   -webkit-user-select: none;
@@ -834,8 +908,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-msg-content {
   padding: 0;
-  font-size: 13px;
-  line-height: 1.65;
+  /* 与 app.css 的 .ai-md 保持同一个值：scoped 选择器带 [data-v] 优先级更高，
+     这里写 13px 会把那边的 13.5px 盖掉，两边不同步就白改了。 */
+  font-size: 13.5px;
+  line-height: 1.75;
   word-break: break-word;
   color: var(--color-text-primary);
   user-select: text;
@@ -859,6 +935,14 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 }
 
 .ai-msg.user .ai-msg-actions { justify-content: flex-end; }
+
+/* 计划模式的「开始执行」：和复制按钮同一行，但用强调色区分——
+   它是这条回复上唯一的动作型按钮，跟「复制 / 存笔记」这类附属操作不是一类。 */
+/* 用双类名提特异性：本条写在 .ai-copy 之前，同特异性下会被它的
+   color: text-disabled 覆盖，靠书写顺序取胜太脆弱。 */
+.ai-copy.ai-run-plan { color: var(--color-accent); font-weight: 500; }
+
+.ai-copy.ai-run-plan:hover { color: var(--color-accent); background: var(--color-accent-bg); }
 
 .ai-copy {
   display: flex; align-items: center; gap: 3px;
@@ -946,17 +1030,11 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-md-block { display: contents; }
 
-.ai-md :deep(h1), .ai-md :deep(h2), .ai-md :deep(h3), .ai-md :deep(h4) {
-  font-size: 14px; margin: 10px 0 4px; font-weight: 600; line-height: 1.4;
-}
-
-.ai-md :deep(h1:first-child), .ai-md :deep(h2:first-child), .ai-md :deep(h3:first-child) { margin-top: 0; }
-
-.ai-md :deep(p) { margin: 5px 0; }
-
-/* 列表 / 任务清单的样式在 styles/app.css 的「AI 回复正文的 markdown 列表」一节。
-   放全局而非 scoped：正文由 v-html 渲染，scoped 的 :deep 依赖 data-v 属性，该组件
-   模块一旦没随 HMR 更新就整套失效（列表变回方块）。全局 CSS 走独立 style 热更新。 */
+/* 标题 / 段落 / 列表 / 任务清单 / 表格 / 引用 / 分隔线的样式都在
+   styles/app.css 的「AI 回复正文：markdown 排版」一节。放全局而非 scoped：正文
+   由 v-html 渲染，scoped 的 :deep 依赖 data-v 属性，该组件模块一旦没随 HMR 更新
+   就整套失效；全局 CSS 走独立 style 热更新，不受组件模块刷新与否影响。
+   这里只留「由组件自己拼出来」的部件：代码块外壳、表格滚动容器、排序表头。 */
 
 .ai-md :deep(br) { display: inline; }
 
@@ -964,20 +1042,11 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-md :deep(a:hover) { text-decoration: underline; }
 
-.ai-md :deep(blockquote) {
-  border-left: 3px solid var(--color-accent-muted);
-  padding: 6px 12px;
-  margin: 8px 0;
-  background: var(--color-bg-secondary);
-  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
-  color: var(--color-text-secondary);
-}
-
-.ai-md :deep(blockquote p) { margin: 0; }
-
+/* 代码块靠底色分块，不再画描边：消息区里已经有「正文无框」这条规则，
+   代码块是内容、不是容器，描边会让它看起来又变成一张卡片。 */
 .ai-md :deep(.md-code) {
   margin: 8px 0;
-  border: 1px solid var(--color-border);
+  border: none;
   border-radius: var(--radius-md);
   overflow: hidden;
   background: var(--color-code-bg);
@@ -989,7 +1058,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
   justify-content: space-between;
   padding: 4px 6px 4px 10px;
   background: var(--color-code-bar-bg);
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: none;
   font-size: 11px;
   color: var(--color-text-muted);
 }
@@ -1051,37 +1120,36 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 
 .ai-md :deep(pre code) { background: none; padding: 0; font-size: 12px; }
 
-.ai-md :deep(table) { border-collapse: collapse; width: 100%; }
-
-.ai-md :deep(th), .ai-md :deep(td) { border: 1px solid var(--color-border); padding: 5px 9px; }
-
-.ai-md :deep(th) { background: var(--color-bg-secondary); font-weight: 600; }
-
+/* 表格容器只负责横向滚动，不画框：表格本身已经是「表头底色 + 行下边线」，
+   外面再套一圈 border 就等于给数据加了个相框，比内容还抢眼。 */
 .ai-md :deep(.md-table-wrap) {
   margin: 8px 0;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
   overflow-x: auto;
   width: 100%;
 }
 
+/* 「导出 CSV」压到表格右上角，默认只是几个灰字：它是个偶尔才用的附属操作，
+   不该占一条带底色的工具条。hover 时才浮出边框和强调色。 */
 .ai-md :deep(.md-table-bar) {
   display: flex; justify-content: flex-end;
-  padding: 3px 6px;
-  border: 1px solid var(--color-border);
-  border-bottom: none;
-  border-radius: var(--radius-md) var(--radius-md) 0 0;
-  background: var(--color-code-bar-bg);
+  padding: 0 2px 3px;
 }
 
 .ai-md :deep(.md-table-export) {
   display: inline-flex; align-items: center; gap: 3px;
-  font-size: 11px; padding: 2px 8px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
-  background: var(--color-bg-primary); color: var(--color-text-muted); cursor: pointer;
+  font-size: 11px; padding: 1px 7px;
+  border: 1px solid transparent; border-radius: var(--radius-xs);
+  background: transparent; color: var(--color-text-disabled);
+  cursor: pointer;
+  transition: color var(--transition-fast), background-color var(--transition-fast),
+              border-color var(--transition-fast);
 }
 
-.ai-md :deep(.md-table-export:hover) { color: var(--color-accent); border-color: var(--color-accent); }
+.ai-md :deep(.md-table-export:hover) {
+  color: var(--color-accent);
+  border-color: var(--color-border);
+  background: var(--color-bg-secondary);
+}
 
 .ai-md :deep(.md-th-sortable) { cursor: pointer; user-select: none; white-space: nowrap; }
 

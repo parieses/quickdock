@@ -146,11 +146,14 @@ defineExpose({
       @remove="emit('remove-mention', $event)"
     />
     <!-- 输入框本体：透明、无边框，靠外层圆角框承载容器质感（与「新建任务」输入框同款）。 -->
+    <!-- 运行中**不禁用**输入：这一句会被插进正在跑的那一轮（见 ai_inject.go），
+         而不是另起一轮。禁用输入等于告诉用户「现在只能看着」，而他往往正是要
+         补一句刚想到的要求。 -->
     <AiRichInput
       ref="inputEl"
       :model-value="props.input"
-      :placeholder="t('aiPlaceholder')"
-      :disabled="!props.hasKey || props.streaming"
+      :placeholder="props.streaming ? t('aiInjectPlaceholder') : t('aiPlaceholder')"
+      :disabled="!props.hasKey"
       :min-height="44"
       :max-height="200"
       @update:model-value="emit('update:input', $event)"
@@ -162,9 +165,12 @@ defineExpose({
          右边是图片 / 链接 / 发送。 -->
     <div class="ai-input-bar">
       <div class="ai-input-bar-left">
+        <!-- 运行中只收文字：技能要跟着一条新消息一起做上下文组装，图片要过闸门
+             与落盘，两者都没法「插进已经跑起来的那一轮」。 -->
         <button
           class="ai-plus-btn"
           :class="{ 'is-open': props.plusOpen }"
+          :disabled="props.streaming"
           :title="t('aiPlusTip')"
           @click="emit('toggle-plus')"
         >
@@ -198,17 +204,28 @@ defineExpose({
           :disabled="props.streaming"
           @change="emit('change-permission', $event)"
         />
-        <button v-if="props.allowFileImage" class="ai-tool-btn" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
+        <button v-if="props.allowFileImage" class="ai-tool-btn" :disabled="props.streaming" :title="t('aiAttachImage')" @click="emit('open-file-picker')">
           <ImageIcon :size="16" />
         </button>
-        <button v-if="props.allowUrlImage" class="ai-tool-btn" :title="t('aiAddImageUrl')" @click="emit('toggle-url')">
+        <button v-if="props.allowUrlImage" class="ai-tool-btn" :disabled="props.streaming" :title="t('aiAddImageUrl')" @click="emit('toggle-url')">
           <Link2 :size="16" />
         </button>
-        <!-- 生成中：圆形发送按钮（ArrowUp 图标）原地变成红色停止按钮（Square 图标），
-             与「新建任务」同款样式；只显示图标，不显示文字。 -->
-        <button v-if="props.streaming" class="ai-send ai-send-stop" :title="t('aiStop')" @click="emit('stop')">
-          <Square :size="15" />
-        </button>
+        <!-- 生成中：红色的停止按钮 + （有字时）一枚插入按钮。
+             两个按钮并排而不是把发送换成停止：以前只有停止，用户想补一句就得先
+             打断这一轮再说——而他往往并不想打断，只是想让它知道。 -->
+        <template v-if="props.streaming">
+          <button
+            v-if="props.canSend"
+            class="ai-send ai-send-inject"
+            :title="t('aiInjectTip')"
+            @click="emit('send')"
+          >
+            <ArrowUp :size="16" />
+          </button>
+          <button class="ai-send ai-send-stop" :title="t('aiStop')" @click="emit('stop')">
+            <Square :size="15" />
+          </button>
+        </template>
         <button
           v-else
           class="ai-send"
@@ -366,6 +383,13 @@ defineExpose({
 }
 
 .ai-send:disabled { background: var(--color-bg-active); color: var(--color-text-disabled); cursor: default; }
+
+/* 插入按钮：与发送同色同形，靠颜色与右边的红色停止按钮区分（蓝=继续说，红=停）。
+   不要再描一圈「底色」环来分隔：环的颜色必须等于输入区的底色，而输入区底色
+   换主题会变，写死的环在另一套主题下就是一圈错色的光晕。 */
+
+.ai-plus-btn:disabled { opacity: 0.4; cursor: default; }
+.ai-plus-btn:disabled:hover { background: transparent; color: var(--color-text-muted); }
 
 /* 生成中：圆形发送按钮原地翻成红色停止按钮，承载「中止」语义，一眼可辨。 */
 .ai-send-stop { background: var(--color-danger); color: #fff; }

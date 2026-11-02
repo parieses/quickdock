@@ -171,10 +171,10 @@ func hooksApproved(database *db.Database, cwd string) bool {
 // 不做参数插值——不做插值是为了不给 hook 引入一套模板语法。
 func runAIHooks(d Deps, cwd, phase string, vars map[string]string) string {
 	cwd = strings.TrimSpace(cwd)
-	if cwd == "" || d.DB == nil {
+	if cwd == "" || d.db() == nil {
 		return ""
 	}
-	info := HooksFor(d.DB, cwd)
+	info := HooksFor(d.db(), cwd)
 	if !info.Found || info.Error != "" || !info.Approved {
 		return ""
 	}

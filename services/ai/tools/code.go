@@ -105,12 +105,17 @@ func registerCode(d Deps) {
 	// 一句 `go vet ./... | head -50` 就会直接报「'head' 不是内部或外部命令」，
 	// 模型拿到的是一坨乱码加退出码，还得再花一轮才反应过来。
 	cmdDesc := "在当前项目目录里执行一条 shell 命令并返回输出（stdout/stderr/退出码），用于装依赖、跑测试、构建、" +
-		"查看 git log 这类必须在命令行做的事。有超时与输出上限，超时会连同子进程一起结束。" +
-		"**不会自己结束的命令**（dev server、watch、长驻服务）请用 background=true 起成后台任务，" +
-		"否则你只能等到超时，等到的也只是一句「已终止」。" +
-		"**统计 / 分析类脚本**（比如数代码行数、跑一次性数据处理）：先 file_write 把脚本写成文件，" +
-		"再用 background=true 跑它，然后反复 job_status / job_output 看进度与结果，跑完再读最终输出——" +
-		"不要同步等它（会卡住整轮回答），也不要把几十 MB 的日志整份读进上下文。" +
+		"查看 git log 这类必须在命令行做的事。有超时与输出上限；**超时不等于失败**：" +
+		"到点后进程若还在跑，会被自动转入后台继续运行，并把 jobId 交回来，所以不必靠调大 timeout_sec 硬等。" +
+		"**不会自己结束的命令**（dev server、watch、长驻服务）请直接用 background=true 起成后台任务。" +
+		"**跑脚本也用 background=true**：`node xxx.js a b c`、`python xxx.py`、批量检查 / 生成 / 抓取页面、" +
+		"跑测试套件这类命令，耗时从几十秒到几分钟不等，同步跑会把整轮回答卡在这里，用户只看到界面不动、也不知道跑到哪了。" +
+		"做法是先 file_write 把脚本写成文件，再 background=true 起成后台任务，**然后接着干别的**：" +
+		"任务结束时会有一条通知直接送到你这里，不需要 sleep 或反复 job_status 轮询（每查一次都是一次完整的模型往返）；" +
+		"只有用户问起进度、或你想确认它是否还活着时才查一次 job_status / job_output。" +
+		"**但秒级命令不要后台**（`node -v`、`git status`、`ls`、装机检查这类）：同步跑完就是最快的方式。" +
+		"**不要自己造一个 detached 启动脚本绕过后台任务机制**（`child_process.spawn` + `unref`、`nohup`、" +
+		"`start /b` 这类）：这样起的进程不进后台任务面板，用户既看不到也没法停，应用退出时也不会被清理。" +
 		"**高危命令会被拒绝执行**（删除根目录、git reset --hard、强推、发版等），此时请把命令交给用户自己运行"
 	if runtime.GOOS == "windows" {
 		cmdDesc += "。**当前是 Windows，命令由 cmd.exe 执行**：没有 head / tail / grep / ls / rm 这些 POSIX 工具，" +
@@ -126,9 +131,10 @@ func registerCode(d Deps) {
 		map[string]any{
 			"command":     str("要执行的完整命令，如 npm test / go build ./... / git log --oneline -10"),
 			"cwd":         str("可选。在哪个目录执行，默认用当前工作目录"),
-			"timeout_sec": intp("可选。超时秒数，默认 60，最大 600；background=true 时忽略"),
-			"background": boolp("可选。true = 立刻返回 jobId，进程在后台继续跑，输出写到日志文件，之后用 job_status / job_output 查。" +
-				"**关闭 QuickDock 会终止它**，所以只用于「这次会话里要看效果」的临时进程"),
+			"timeout_sec": intp("可选。前台最多等多少秒，默认 60，最大 600；到点仍未结束会自动转后台，不会杀掉；background=true 时忽略"),
+			"background": boolp("可选。true = 立刻返回 jobId，进程在后台继续跑，输出写到日志文件。" +
+				"跑脚本与长驻命令用它，不要同步阻塞等：结束时会主动通知你，不用轮询。" +
+				"任务是会话级的：关闭 QuickDock 会终止它，长驻服务本来就该这样收场"),
 		})
 
 	r.add(checkWorkdir, mcpsrv.LevelRead, "check_workdir",
@@ -143,7 +149,7 @@ func registerCode(d Deps) {
 // -------- file_edit --------
 
 func fileEdit(ctx context.Context, d Deps, args map[string]any) (any, error) {
-	path, err := fsguard.ResolveWrite(d.DB, mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args))
+	path, err := fsguard.ResolveWrite(d.db(), mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args))
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +377,7 @@ func lineAt(content string, n int) string {
 //   - 内容与现有文件完全一致时直接返回「无改动」，不发一次无意义的写盘
 //     （模型的重复调用会被上层拦截，但换个顺序/空格再发一次仍会走到这里）。
 func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
-	path, err := fsguard.ResolveWrite(d.DB, mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args))
+	path, err := fsguard.ResolveWrite(d.db(), mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args))
 	if err != nil {
 		return nil, err
 	}
@@ -475,7 +481,7 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	if command == "" {
 		return nil, errors.New("缺少参数 command（要执行的命令）")
 	}
-	dir, err := fsguard.ResolveWrite(d.DB, mcpsrv.Arg(args, "cwd"), mcpsrv.Cwd(args))
+	dir, err := fsguard.ResolveWrite(d.db(), mcpsrv.Arg(args, "cwd"), mcpsrv.Cwd(args))
 	if err != nil {
 		return nil, err
 	}
@@ -525,9 +531,12 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 	if timeoutSec > runCmdMaxSec {
 		timeoutSec = runCmdMaxSec
 	}
-	// 超时从调用方的 ctx 派生：这样「到点」和「用户点停止」两条路都能传到
-	// CommandContext 上，而不是各管一段。
-	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
+	// 超时 = 「这次不再等它」，不是「把它杀掉」。
+	//
+	// 所以这里的 deadline 不绑到 exec.Cmd 上：一旦用 CommandContext，上下文到期时
+	// os/exec 自己就会把整组进程杀了，想接手都接不回来。到点后进程还活着就转后台
+	// （见 handoffToBackground），只有用户点停止、或纯等待命令才真的杀。
+	runCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
 	var cmd *exec.Cmd
@@ -537,23 +546,15 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 			shell = "cmd.exe"
 		}
 		// /d 关掉 AutoRun：注册表里配了 autorun 时，别的软件可能往每条命令前塞东西。
-		cmd = sysutil.CommandContext(ctx, shell, "/d", "/s", "/c", command)
+		cmd = sysutil.Command(shell, "/d", "/s", "/c", command)
 	} else {
-		cmd = sysutil.CommandContext(ctx, "/bin/sh", "-c", command)
+		cmd = sysutil.Command("/bin/sh", "-c", command)
 	}
 	cmd.Dir = dir
 	cmd.Env = commandEnv(d)
-	// 独立进程组：超时时能整组杀掉，而不是留下 npm→node 这样的孙子进程继续占端口。
+	// 独立进程组：要杀的时候能整组杀掉，而不是留下 npm→node 这样的孙子进程继续占端口。
 	setProcessGroup(cmd)
-	// 取消与超时都走 Cancel：exec 默认只 Kill **直接子进程**，而 Windows 上真正
-	// 干活的是 cmd.exe 底下那个进程（ping / node / go）。默认行为下 cmd.exe 一退，
-	// 孙子进程还活着并握着 stdout 管道，于是 Wait 干等它跑完——表现就是
-	// 「对话停了，电脑还在卡」。这里换成整组杀。
-	cmd.Cancel = func() error {
-		killCommandTree(cmd, dir)
-		return nil
-	}
-	// 兜底：真有进程不讲理地握着管道时，Wait 到点直接关掉，返回结果。
+	// 真正不讲理地握着管道的进程：进程退出后最多再等这么久就返回结果。
 	cmd.WaitDelay = runCmdKillGrace
 
 	outBuf := &cappedBuffer{max: runCmdMaxOutput}
@@ -570,22 +571,55 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		stream = newCmdStream(func(add, tail string) { emit(callID, add, tail) })
 		defer stream.Close()
 	}
+	// 输出端用 switchWriter 包一层：超时转后台时要能换成日志文件。
+	// snap 把「切换前已捕获的内容」抄进日志开头，用户翻日志时不至于只有后半截。
+	outW := newSwitchWriter(outBuf, "stdout", func() string { return platform.DecodeConsoleText(outBuf.String()) })
+	errW := newSwitchWriter(errBuf, "stderr", func() string { return platform.DecodeConsoleText(errBuf.String()) })
 	if stream != nil {
-		cmd.Stdout = io.MultiWriter(outBuf, stream)
-		cmd.Stderr = io.MultiWriter(errBuf, stream)
-	} else {
-		cmd.Stdout, cmd.Stderr = outBuf, errBuf
+		outW.w = io.MultiWriter(outBuf, stream)
+		errW.w = io.MultiWriter(errBuf, stream)
 	}
+	cmd.Stdout, cmd.Stderr = outW, errW
 
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("无法启动命令：%v", err)
 	}
-	waitErr := cmd.Wait()
+	// Wait 单独在一个 goroutine 里：主流程要能同时等「进程结束」和「到点 / 被停止」，
+	// 而 Wait 只能调一次——转后台那条路正是靠这个 channel 把结果接过去的。
+	waitCh := make(chan error, 1)
+	go func() { waitCh <- cmd.Wait() }()
+
+	var (
+		waitErr  error
+		finished bool
+	)
+	select {
+	case waitErr = <-waitCh:
+		finished = true
+	case <-runCtx.Done():
+		// 让一拍：命令可能恰好在超时那一刻退出，那它算「跑完了」，不该转后台。
+		select {
+		case waitErr = <-waitCh:
+			finished = true
+		default:
+		}
+	}
+	if !finished {
+		if errors.Is(runCtx.Err(), context.DeadlineExceeded) && !isWaitOnlyCommand(command) {
+			p := &jobProc{cmd: cmd, dir: dir, command: command, startedAt: started, col: jobCollectorFrom(ctx)}
+			if res, ok := handoffToBackground(ctx, d, p, outW, errW, waitCh, time.Since(started)); ok {
+				return res, nil
+			}
+		}
+		// 用户点停止，或纯等待命令超时：整组杀掉，别把 CPU 和端口留在后台。
+		killCommandTree(cmd, dir)
+		waitErr = <-waitCh
+	}
 	duration := time.Since(started)
 
-	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
-	canceled := errors.Is(ctx.Err(), context.Canceled)
+	timedOut := !finished && errors.Is(runCtx.Err(), context.DeadlineExceeded)
+	canceled := !finished && errors.Is(runCtx.Err(), context.Canceled)
 	if timedOut {
 		// 再等一小会儿让输出落盘，否则「超时」那条结果里常常啥都没有。
 		deadline := time.Now().Add(runCmdKillGrace)
@@ -630,7 +664,15 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 		res["note"] = "用户停止了本轮任务，命令已连同子进程一起终止"
 	}
 	if timedOut {
-		res["note"] = fmt.Sprintf("命令超过 %d 秒未结束，已连同子进程一起终止。需要更久请调大 timeout_sec（上限 %d）", timeoutSec, runCmdMaxSec)
+		// 走到这里只有两种可能：纯等待命令（sleep 类），或者转后台失败（没库 /
+		// 建不出日志）。两种都不该让模型以为「再等一下就行」，说清楚是哪一种。
+		if isWaitOnlyCommand(command) {
+			res["note"] = fmt.Sprintf("这条命令只是在等待，超过 %d 秒后已结束——等待类命令没有产出，"+
+				"转后台既不解决任何问题也看不到进度。要等一段时间再继续，请用 background=true 起，或在脚本里等", timeoutSec)
+		} else {
+			res["note"] = fmt.Sprintf("命令超过 %d 秒仍未结束，且此时无法转入后台（数据库不可用），已连同子进程一起终止。"+
+				"下次请用 background=true 起成后台任务", timeoutSec)
+		}
 	}
 	if outBuf.truncated || errBuf.truncated {
 		res["outputTruncated"] = true
@@ -653,7 +695,7 @@ func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
 // 而用户明明在终端里跑得好好的。
 func commandEnv(d Deps) []string {
 	env := os.Environ()
-	if d.Env == nil {
+	if d.env() == nil {
 		return env
 	}
 	var extra []string
@@ -661,7 +703,7 @@ func commandEnv(d Deps) []string {
 		envengine.RuntimeNode, envengine.RuntimeGo, envengine.RuntimeGit,
 		envengine.RuntimePython, envengine.RuntimeBun, envengine.RuntimePHP,
 	} {
-		if dir := d.Env.BinDirFor(rt, ""); dir != "" {
+		if dir := d.env().BinDirFor(rt, ""); dir != "" {
 			extra = append(extra, dir)
 		}
 	}
@@ -676,6 +718,27 @@ func commandEnv(d Deps) []string {
 		}
 	}
 	return append(env, "PATH="+strings.Join(extra, string(os.PathListSeparator)))
+}
+
+// isWaitOnlyCommand 判断这条命令是不是「纯等待」。
+//
+// 纯等待（sleep / 等几秒 / timeout /t）超时后不转后台：它没有输出、没有中间产物，
+// 转过去只是给任务面板塞一条永远没人看的记录，用户还得自己去找它停掉。
+// 与同类工具「超时自动转后台，sleep 除外」是同一个判断。
+//
+// 只看「整条命令就是一句等待」这一种形态：`sleep 5 && node x.js` 里有产出，
+// 属于正常命令，照常转后台。
+func isWaitOnlyCommand(command string) bool {
+	c := strings.ToLower(strings.TrimSpace(command))
+	if c == "" {
+		return false
+	}
+	for _, p := range []string{"sleep ", "sleep\t", "start-sleep", "timeout /t", "timeout/t"} {
+		if strings.HasPrefix(c, p) {
+			return true
+		}
+	}
+	return false
 }
 
 // killCommandTree 连同子进程一起终止。
@@ -734,7 +797,7 @@ func checkWorkdir(d Deps, args map[string]any) (any, error) {
 	if raw == "" {
 		return nil, errors.New("不知道要探测哪个目录：当前对话没有绑定工作目录，请传 path")
 	}
-	dir, err := fsguard.ResolveRead(d.DB, raw, mcpsrv.Cwd(args), false)
+	dir, err := fsguard.ResolveRead(d.db(), raw, mcpsrv.Cwd(args), false)
 	if err != nil {
 		return nil, err
 	}

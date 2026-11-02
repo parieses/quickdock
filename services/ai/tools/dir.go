@@ -47,7 +47,7 @@ func registerDir(d Deps) {
 }
 
 func listDir(d Deps, args map[string]any) (any, error) {
-	root, err := fsguard.ResolveRead(d.DB, mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args), false)
+	root, err := fsguard.ResolveRead(d.db(), mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args), false)
 	if err != nil {
 		return nil, err
 	}

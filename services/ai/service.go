@@ -8,6 +8,8 @@ import (
 	"sync"
 	"time"
 
+	"quickdock/internal/db"
+	envengine "quickdock/internal/env"
 	"quickdock/internal/logger"
 	"quickdock/services"
 	aitools "quickdock/services/ai/tools"
@@ -40,6 +42,13 @@ type AIService struct {
 	gatesMu sync.Mutex
 	gates   map[string]*approvalGate
 
+	// 会话 → 运行中待插入的消息队列（见 ai_inject.go）。
+	//
+	// 与审批闸门同构：一条会话同时只跑一轮，而用户可能在这一轮跑着的时候又发一句，
+	// 那句话要落到「正在跑的那一轮」里，就必须有一个按会话索引的落点。
+	injectsMu sync.Mutex
+	injects   map[string]*injectQueue
+
 	// 外部 MCP server 接入状态（见 ext_mcp.go）。
 	ext *extManager
 }
@@ -68,8 +77,10 @@ func NewAIService(app *services.AppService) *AIService {
 		// 后台任务注册表同时装一个通知出口：任务结束时说话的是它自己（没有前端在等），
 		// 而 PushNotification 是宿主唯一的通知入口（同时负责扇出 Webhook / 机器人）。
 		aitools.Register(aitools.Deps{
-			DB:  app.DB,
-			Env: app.Env,
+			// 这里必须传闭包而不是 app.DB / app.Env 的值：本构造函数在 main 里
+			// 跑，早于 ServiceStartup 打开数据库，取到的会是 nil 快照。
+			DBFn:  func() *db.Database { return app.DB },
+			EnvFn: func() *envengine.Manager { return app.Env },
 			Notify: func(title, body string) {
 				app.PushNotification("ai", "success", title, body, "ai", "")
 			},

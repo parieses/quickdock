@@ -63,6 +63,8 @@ func (a *AIService) StartAIStreamServer() {
 	s.port = ln.Addr().(*net.TCPAddr).Port
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ai/stream", s.handle)
+	// 运行中插入消息（见 ai_inject.go）：前端在这一轮还没跑完时发的下一句。
+	mux.HandleFunc("/ai/inject", s.handleInject)
 	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	a.aiStream = s
 	go func() {
@@ -219,6 +221,57 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	} else {
 		s.svc.App.PushNotification("ai", "error", "AI 回答失败", logger.Trunc(res.Err.Error(), 160), "ai", res.ConvID)
 	}
+}
+
+// handleInject 接收「运行中插入的消息」（见 ai_inject.go）。
+//
+// 为什么是独立的短请求而不是复用 /ai/stream：插入必须**立刻有回音**——这一轮还在
+// 不在跑、话有没有接住，前端要据此决定「等它接走」还是「把这句当新的一条发」。
+// 走流式的话，回音要等这一轮结束才可能出来，那就等于没有。
+//
+// 没在跑时回 409 而不是 500：这不是失败，是「这一轮刚好结束了」。前端据此改走
+// 正常的发送路径，用户看到的是一条新消息，而不是一句「插入失败」。
+func (s *aiStreamServer) handleInject(w http.ResponseWriter, r *http.Request) {
+	defer recoverPanic("ai inject handler")
+
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		origin = "http://127.0.0.1"
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Stream-Token")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if r.Header.Get("X-Stream-Token") != s.token {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return
+	}
+
+	var req struct {
+		ConvID  string `json:"convId"`
+		ID      string `json:"id"`
+		Message string `json:"message"`
+	}
+	// 插入只带文本，1 MiB 绰绰有余；仍然设上限，理由与 /ai/stream 相同。
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
+		http.Error(w, "请求解析失败", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if !s.svc.InjectAIMessage(req.ConvID, req.ID, req.Message) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = io.WriteString(w, `{"ok":false,"reason":"no-run"}`)
+		return
+	}
+	_, _ = io.WriteString(w, `{"ok":true}`)
 }
 
 // doneEvent 组装流式结束事件：附带首字延迟与本次用量，回传前端展示。

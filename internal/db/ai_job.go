@@ -127,6 +127,36 @@ func (d *Database) ListRunningAIJobs() ([]AIJob, error) {
 	return out, rows.Err()
 }
 
+// ListAIJobs 最近的若干条任务（含运行中与已结束），按开始时间倒序。
+//
+// 面板要一次看到「现在在跑什么」和「刚跑完什么」，所以不能像 ListRunningAIJobs
+// 那样只筛 running；也不用状态过滤参数——任务表每周清理一次，几十条就够覆盖
+// 一次会话里的全部记录，多一个参数只会多一处能传错的地方。
+func (d *Database) ListAIJobs(limit int) ([]AIJob, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	rows, err := d.conn.Query(
+		`SELECT id, command, cwd, status, exit_code, log_path, pid, error, started_at, ended_at
+		 FROM ai_jobs ORDER BY julianday(started_at) DESC LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []AIJob{}
+	for rows.Next() {
+		var j AIJob
+		if err := rows.Scan(&j.ID, &j.Command, &j.Cwd, &j.Status, &j.ExitCode,
+			&j.LogPath, &j.PID, &j.Error, &j.StartedAt, &j.EndedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, j)
+	}
+	return out, rows.Err()
+}
+
 // PurgeAIJobs 清掉结束时间早于 before 的任务，返回被清掉的日志路径。
 //
 // 返回路径而不是自己删文件：db 层不碰数据目录（目录布局由 services/ai 决定），

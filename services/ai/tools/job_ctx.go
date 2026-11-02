@@ -15,10 +15,29 @@ import (
 	"sync"
 )
 
+// JobDone 一条「后台任务已结束」的通知。
+//
+// 存在的理由：后台任务的结束与模型的一轮输出在时间上完全无关。没有这条通知，
+// 模型想知道结果就只能反复调 job_status（每条查询都是一次完整的模型往返），
+// 而用户在界面上看到的是一串「正在查询任务状态」——这正是同类工具明确禁止的做法。
+// 有了它，任务结束时把事实攒在收集器上，下一轮模型调用前随消息一起递过去。
+type JobDone struct {
+	ID       string
+	Command  string
+	Status   string // db.AIJob* 之一
+	ExitCode int
+	// DurationMs 从启动到结束的毫秒数。
+	DurationMs int64
+	// ErrMsg 启动失败或异常退出原因；正常结束为空。
+	ErrMsg string
+}
+
 // JobCollector 收集一次请求里起的后台任务 id。
 type JobCollector struct {
 	mu  sync.Mutex
 	ids []string
+	// done 已经结束、但还没交给模型的任务。
+	done []JobDone
 }
 
 // add 登记一个 job id。
@@ -53,6 +72,31 @@ func (c *JobCollector) KillAll() int {
 
 type jobCollectorKey struct{}
 
+// addDone 记一条「任务已结束」的通知。
+func (c *JobCollector) addDone(ev JobDone) {
+	if c == nil || ev.ID == "" {
+		return
+	}
+	c.mu.Lock()
+	c.done = append(c.done, ev)
+	c.mu.Unlock()
+}
+
+// DrainDone 取走尚未交付的通知（取完即清空）。
+//
+// 必须「取走」而不是「读一遍」：agent 循环每轮都会调它，
+// 留着重读会让同一条任务结束事件被反复塞进上下文，慢慢把窗口吃掉。
+func (c *JobCollector) DrainDone() []JobDone {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	evs := c.done
+	c.done = nil
+	c.mu.Unlock()
+	return evs
+}
+
 // WithJobCollector 把收集器挂到 ctx 上。
 func WithJobCollector(ctx context.Context, c *JobCollector) context.Context {
 	if ctx == nil || c == nil {
@@ -69,4 +113,16 @@ func recordJob(ctx context.Context, id string) {
 	if c, ok := ctx.Value(jobCollectorKey{}).(*JobCollector); ok {
 		c.add(id)
 	}
+}
+
+// jobCollectorFrom 取出 ctx 上的收集器；没挂返回 nil。
+//
+// 起后台任务时就要把它抓在手里，不能等到任务结束再从 ctx 取：任务往往在整轮
+// 结束之后才退出，那时的 ctx 早就被 cancel 了，值虽然还在、语义上已经不该用。
+func jobCollectorFrom(ctx context.Context) *JobCollector {
+	if ctx == nil {
+		return nil
+	}
+	c, _ := ctx.Value(jobCollectorKey{}).(*JobCollector)
+	return c
 }

@@ -50,6 +50,22 @@
   border-bottom: 1px solid var(--color-border);
 }
 
+/* 窄窗口下页头放不下一行：标题 + 一票按钮组实测需要 ~650px，而 800 宽的窗口
+   （最小尺寸）里主区只有 590。允许换行，按钮组落到第二行，高度由内容撑开
+   （min-height 仍是 44，单行时上下 6px 内边距正好补满，视觉不变）。
+   不换行的结果是页头横向滚动——按钮藏在视口外，用户根本看不到。
+   900px 这个阈值取自实测：主区 = 视口 - 侧栏 210 - 页头内边距 32，扣掉 650 的
+   内容宽后，视口低于 ~891 就会溢出，留一点余量取 900。
+   注意媒体查询用的是 CSS px，所以界面缩放（WebView ZoomFactor）也会走到这里
+   ——1.2 档下 1100 的窗口只有 917 CSS px，正该走窄屏布局。 */
+@media (max-width: 900px) {
+  .qd-page-header {
+    flex-wrap: wrap;
+    row-gap: 6px;
+    padding: 6px 16px;
+  }
+}
+
 /* 标题块：主标题 + 可选副标题。也允许只有标题（多数页面）。 */
 .qd-page-titles {
   display: flex;
@@ -254,49 +270,81 @@
   border-bottom: 1px solid var(--color-border);
 }
 
-/* ---- AI 回复正文的 markdown 列表 ----
-   自绘圆点 / 序号，避开不同字体下浏览器把 disc 渲染成方块（WebView2 偶发）。
-   放在全局而非组件 scoped：正文由 v-html 渲染，scoped 的 :deep 依赖 data-v 属性，
-   该组件模块一旦没随 HMR 更新就整套失效（列表又变回方块）。全局 CSS 走独立 style
-   热更新，不受组件模块刷新与否影响。排除 .ai-plan-items：计划清单有自己的「·」标记
-   与 flex 布局，不能叠加圆点。 */
-.ai-md ul:not(.ai-plan-items), .ai-md ol { padding-left: 22px; margin: 6px 0; }
-.ai-md ul:not(.ai-plan-items) { list-style: none; }
+/* ================= AI 回复正文：markdown 排版 =================
+   全部放全局：正文由 v-html 渲染，scoped 的 :deep 依赖 data-v 属性，组件模块
+   一旦没随 HMR 更新就整套失效（列表变回方块、标题失去层级）。全局 CSS 走独立的
+   style 热更新，不受影响。
+   规则只用变量，明暗主题自动跟随。 */
+
+/* ---- 基础节奏 ----
+   13.5px / 1.75 是屏幕阅读的档位：13px 偏挤，14px 在窄窗口落行太多。 */
+.ai-md { font-size: 13.5px; line-height: 1.75; color: var(--color-text-primary); }
+
+/* ---- 标题：四级，靠字号 + 装饰拉开层次 ----
+   原来 h1~h4 全是 14px/600，扫一眼分不出主次，整篇读起来是一个平面。 */
+.ai-md h1, .ai-md h2, .ai-md h3, .ai-md h4, .ai-md h5, .ai-md h6 {
+  margin: 18px 0 8px; font-weight: 650; line-height: 1.4;
+}
+.ai-md h1 { font-size: 19px; padding-bottom: 7px; border-bottom: 1px solid var(--color-border); }
+/* h2 是回答里最常用的层级，加一根竖条当锚点，长文里好扫 */
+.ai-md h2 { font-size: 16px; }
+.ai-md h2::before {
+  content: ''; display: inline-block; width: 3px; height: 0.9em;
+  margin-right: 8px; vertical-align: -0.06em;
+  border-radius: 2px; background: var(--color-accent);
+}
+.ai-md h3 { font-size: 14.5px; }
+.ai-md h4 { font-size: 13.5px; color: var(--color-text-secondary); }
+.ai-md h5, .ai-md h6 { font-size: 12.5px; color: var(--color-text-secondary); }
+
+/* 首块不要顶部留白：回答第一行该贴着消息开头，否则像空了一段 */
+.ai-md-block:first-child > :first-child { margin-top: 0; }
+
+/* ---- 段落 ---- */
+.ai-md p { margin: 9px 0; }
+.ai-md li > p { margin: 0; }
+
+/* ---- 列表 ----
+   自绘符号：部分字体下浏览器会把 disc 渲染成方块（WebView2 偶发），序号也对不齐。
+   三级三种形状（实心点 / 空心环 / 短横），嵌套时一眼看出深浅。 */
+.ai-md ul, .ai-md ol { margin: 8px 0; padding-left: 21px; }
+.ai-md ul { list-style: none; }
 .ai-md ol { list-style: none; counter-reset: ai-md-ol; }
-.ai-md li { margin: 2px 0; line-height: 1.6; position: relative; }
-.ai-md ul:not(.ai-plan-items) > li:not(.ai-task-item)::before {
-  content: '';
-  position: absolute;
-  left: -15px;
-  top: calc(0.62em + 1px);
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
+.ai-md li { position: relative; margin: 3px 0; line-height: 1.7; }
+.ai-md li > ul, .ai-md li > ol { margin: 3px 0; }
+
+.ai-md ul > li:not(.ai-task-item)::before {
+  content: ''; position: absolute; left: -14px; top: 0.68em;
+  width: 5px; height: 5px; border-radius: 50%;
   background: var(--color-text-muted);
+}
+.ai-md ul ul > li:not(.ai-task-item)::before {
+  background: transparent; border: 1px solid var(--color-text-muted);
+  box-sizing: border-box;
+}
+.ai-md ul ul ul > li:not(.ai-task-item)::before {
+  width: 6px; height: 2px; border: none; border-radius: 1px;
+  top: 0.9em; background: var(--color-text-muted);
 }
 .ai-md ol > li { counter-increment: ai-md-ol; }
 .ai-md ol > li::before {
-  content: counter(ai-md-ol) '.';
-  position: absolute;
-  left: -22px;
-  top: 0;
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
+  content: counter(ai-md-ol) '.'; position: absolute; left: -21px; top: 0;
+  color: var(--color-text-muted); font-variant-numeric: tabular-nums;
 }
-.ai-md li > p { margin: 0; }
 
-/* 任务清单：- [ ] / - [x] 渲染成带样式的勾选框（renderer 输出 .ai-task-item / .ai-task-box）。
-   已完成项加删除线 + 降透明，随 AI 把 [ ] 改成 [x] 实时更新。 */
-.ai-md li.ai-task-item { list-style: none; display: flex; align-items: flex-start; gap: 7px; }
+/* ---- 任务清单：多步任务的进度 ----
+   - [ ] / - [x] 由 renderer 输出 .ai-task-item / .ai-task-box（原生 input 会被
+   DOMPurify 默认白名单剥掉）。AI 做一项就把 [ ] 改成 [x]，界面实时打勾 + 划线。
+   只有「确实要拆步骤」的任务才该出现这份清单，简单问答不该有。 */
+.ai-md li.ai-task-item {
+  list-style: none; display: flex; align-items: flex-start; gap: 8px;
+  margin: 5px 0;
+}
 .ai-md .ai-task-box {
-  flex: none;
-  width: 15px; height: 15px;
-  margin-top: 3px;
-  border: 1.5px solid var(--color-border);
-  border-radius: 4px;
-  background: var(--color-bg-primary);
-  box-sizing: border-box;
-  position: relative;
+  flex: none; width: 15px; height: 15px; margin-top: 4px;
+  border: 1.5px solid var(--color-border); border-radius: 4px;
+  background: var(--color-bg-primary); box-sizing: border-box; position: relative;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 .ai-md li.ai-task-item.is-done .ai-task-box {
   border-color: var(--color-success, #2fa84f);
@@ -311,4 +359,43 @@
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
 }
-.ai-md li.ai-task-item.is-done { text-decoration: line-through; opacity: 0.62; }
+/* 划线只加在文字上：连勾选框一起划会把「已完成」画成一条删除杠 */
+.ai-md li.ai-task-item.is-done { color: var(--color-text-muted); }
+.ai-md li.ai-task-item.is-done > *:not(.ai-task-box) {
+  text-decoration: line-through; text-decoration-thickness: 1px;
+}
+
+/* ---- 表格 ----
+   原来只有 border-collapse + 1px 全网格，是 HTML 的默认观感：框线比内容还抢眼。
+   改成「表头底色 + 行下边线 + 无外框」：行列关系靠留白和底色读，不靠堆框线。 */
+.ai-md table {
+  width: 100%; border-collapse: separate; border-spacing: 0;
+  font-size: 12.5px; margin: 4px 0;
+}
+.ai-md thead th {
+  padding: 8px 12px; text-align: left; white-space: nowrap;
+  font-weight: 600; color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border-bottom: 1px solid var(--color-border);
+}
+.ai-md thead th:first-child { border-top-left-radius: var(--radius-sm); }
+.ai-md thead th:last-child { border-top-right-radius: var(--radius-sm); }
+.ai-md tbody td {
+  padding: 8px 12px; vertical-align: top;
+  border-bottom: 1px solid var(--color-border);
+}
+.ai-md tbody tr:last-child td { border-bottom: none; }
+.ai-md tbody tr:hover td { background: var(--color-bg-hover); }
+
+/* ---- 引用 / 分隔线 / 图片 / 强调 ---- */
+.ai-md blockquote {
+  margin: 10px 0; padding: 8px 14px;
+  border-left: 3px solid var(--color-accent-border);
+  background: var(--color-bg-secondary);
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+  color: var(--color-text-secondary);
+}
+.ai-md blockquote p { margin: 0; }
+.ai-md hr { height: 0; margin: 18px 0; border: 0; border-top: 1px solid var(--color-border); }
+.ai-md img { max-width: 100%; height: auto; border-radius: var(--radius-sm); }
+.ai-md strong { font-weight: 650; }

@@ -28,8 +28,19 @@ import (
 // 「托管运行时的 bin 目录」，拿到整个 AppService 就意味着它们随时可以去调
 // 窗口、插件宿主、AI 门面——那才是让这个包和宿主耦合的东西。
 type Deps struct {
-	DB  *db.Database
-	Env *envengine.Manager
+	// DB 直接给的库（单测与一次性调用用）；宿主请走 DBFn。
+	DB *db.Database
+	// DBFn 运行时取宿主数据库。
+	//
+	// 为什么不能只在注册时传 *db.Database：AIService 在 main 里构造，而库要到
+	// ServiceStartup 才打开——那一刻 app.DB 还是 nil，快照下来就是永久 nil。
+	// 表现是后台任务一律报「数据库不可用」，模型于是自己写一个 detached 的
+	// 启动脚本绕过去，任务从此不进 ai_jobs、面板与状态点都看不见（2026-11-02）。
+	// 顺带失效的还有 fsguard（写盘白名单）与项目 hooks——它们都读这个字段。
+	DBFn func() *db.Database
+	// Env 同上：托管运行时管理器也是启动期才挂上来的。
+	Env   *envengine.Manager
+	EnvFn func() *envengine.Manager
 	// Notify 推一条桌面通知（宿主实现，未注入时静默跳过）。
 	//
 	// 后台任务结束时要靠它来叫人：这个任务的全部意义就是「用户去干别的了」，
@@ -44,6 +55,28 @@ type Deps struct {
 	// 而不是空目录里再建一个 .quickDock（那会让每条对话的记忆都从零开始）。
 	// 未注入时退回 <cwd>/.quickDock，与旧行为一致。
 	MemoryRoot func(cwd string) string
+}
+
+// db 取数据库：手给的那份优先，否则问宿主（见 Deps.DB 的说明）。
+func (d Deps) db() *db.Database {
+	if d.DB != nil {
+		return d.DB
+	}
+	if d.DBFn != nil {
+		return d.DBFn()
+	}
+	return nil
+}
+
+// env 取运行时管理器，规则同上。
+func (d Deps) env() *envengine.Manager {
+	if d.Env != nil {
+		return d.Env
+	}
+	if d.EnvFn != nil {
+		return d.EnvFn()
+	}
+	return nil
 }
 
 // Register 把全部 agent 工具注册进 mcpsrv.Agent。由 AIService 构造时调用。

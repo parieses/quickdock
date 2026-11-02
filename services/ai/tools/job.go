@@ -17,6 +17,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -46,6 +47,14 @@ const (
 type jobProc struct {
 	cmd *exec.Cmd
 	dir string
+	// command 原始命令文本：写通知、写日志头都要用；只留在 argv 里的话
+	// 拿到的是 cmd.exe 那层包装（"/d /s /c ..."），对用户没有意义。
+	command string
+	// startedAt 启动时刻，用来算时长。
+	startedAt time.Time
+	// col 起任务时就抓住的收集器（见 jobCollectorFrom）：任务结束时它早已被
+	// cancel 过，只有提前抓住才能在结束时把通知递回本轮。
+	col *JobCollector
 	// killedByUs 由宿主主动终止（退出、清理）时置位：用来把「被杀」和
 	// 「命令自己失败」区分开，两者的结论完全不同。
 	killedByUs bool
@@ -68,20 +77,31 @@ func jobLogPath(id string) string {
 	return filepath.Join(jobDir(), id+".log")
 }
 
+// newJobID 生成任务 id。时间戳在前，列表按 id 倒序就是按时间倒序。
+func newJobID() string {
+	return "job_" + strconv.FormatInt(time.Now().UnixMilli(), 36) + "_" + strconv.Itoa(os.Getpid())
+}
+
 // startBackgroundCommand 起一个后台进程并立刻返回。
 //
 // 返回值里带着 job_id 与 log_path：模型要用它们调 job_status / job_output，
 // 用户要能自己去看日志。
 func startBackgroundCommand(ctx context.Context, d Deps, command, dir string) (map[string]any, error) {
-	if d.DB == nil {
-		return nil, errors.New("数据库不可用，无法记录后台任务")
+	database := d.db()
+	if database == nil {
+		// 拿不到库就没法落行，也就没法让用户看见/停掉这个任务。此时不退回
+		// 「照样起进程」：那样会留下一个谁都不知道它存在的常驻进程。
+		// 也明确挡住「自己写 detached 启动脚本绕过去」这条路——绕过去的任务
+		// 不进面板、不受退出清理，用户以为关掉就没了（2026-11-02 就发生过）。
+		return nil, errors.New("数据库不可用，无法记录后台任务；不要改用 detached 进程或 nohup 绕过，" +
+			"那样起的进程用户看不到也停不掉，请把情况说明给用户")
 	}
-	id := "job_" + strconv.FormatInt(time.Now().UnixMilli(), 36) + "_" + strconv.Itoa(os.Getpid())
+	id := newJobID()
 	logPath := jobLogPath(id)
 
 	// 先落库再起进程：进程如果秒退，它的状态更新会在「还没有这一行」时执行，
 	// 影响 0 行，库里就永远留着一个 running 的幽灵任务。
-	if err := d.DB.CreateAIJob(db.AIJob{
+	if err := database.CreateAIJob(db.AIJob{
 		ID: id, Command: command, Cwd: dir, Status: db.AIJobRunning, LogPath: logPath,
 	}); err != nil {
 		return nil, err
@@ -89,7 +109,7 @@ func startBackgroundCommand(ctx context.Context, d Deps, command, dir string) (m
 
 	f, ferr := os.Create(logPath)
 	if ferr != nil {
-		_ = d.DB.FinishAIJob(id, db.AIJobFailed, 0, "无法创建日志文件："+ferr.Error())
+		_ = database.FinishAIJob(id, db.AIJobFailed, 0, "无法创建日志文件："+ferr.Error())
 		return nil, fmt.Errorf("无法创建日志文件：%v", ferr)
 	}
 	// 头部写清楚这条日志属于谁：日志文件会被用户直接打开，没有这一行就分不清
@@ -115,12 +135,12 @@ func startBackgroundCommand(ctx context.Context, d Deps, command, dir string) (m
 
 	if err := cmd.Start(); err != nil {
 		f.Close()
-		_ = d.DB.FinishAIJob(id, db.AIJobFailed, 0, "无法启动命令："+err.Error())
+		_ = database.FinishAIJob(id, db.AIJobFailed, 0, "无法启动命令："+err.Error())
 		return nil, fmt.Errorf("无法启动命令：%v", err)
 	}
-	_ = d.DB.SetAIJobPID(id, cmd.Process.Pid)
+	_ = database.SetAIJobPID(id, cmd.Process.Pid)
 
-	p := &jobProc{cmd: cmd, dir: dir}
+	p := &jobProc{cmd: cmd, dir: dir, command: command, startedAt: time.Now(), col: jobCollectorFrom(ctx)}
 	jobsMu.Lock()
 	jobsProcs[id] = p
 	jobsMu.Unlock()
@@ -133,21 +153,174 @@ func startBackgroundCommand(ctx context.Context, d Deps, command, dir string) (m
 
 	logger.I("[ai-job] 后台任务 %s 已启动 pid=%d: %s", id, cmd.Process.Pid, command)
 	res := map[string]any{
-		"jobId":   id,
-		"status":  db.AIJobRunning,
-		"cwd":     dir,
-		"command": command,
-		"logPath": logPath,
-		"note": "任务已在后台启动并立刻返回。用 job_status 查它是否还在跑、用 job_output 读最新输出。" +
+		"jobId":      id,
+		"status":     db.AIJobRunning,
+		"cwd":        dir,
+		"command":    command,
+		"logPath":    logPath,
+		"background": true,
+		"note": "任务已在后台启动并立刻返回。**接着干别的事**：它结束时会有通知送到你这里，" +
+			"不要 sleep 或反复 job_status 轮询（每查一次都是一次完整的模型往返）；" +
+			"用户问起进度时用 job_output 看最新输出。" +
 			"**关闭 QuickDock 会终止这个任务**——它不是守护进程，随宿主一起结束。" +
 			"需要一条不会随应用退出的长期服务时，请让用户用系统服务 / 计划任务自己配。",
 	}
 	return res, nil
 }
 
+// -------- 前台超时 → 转入后台 --------
+
+// switchWriter 可以在命令运行中换掉输出目标。
+//
+// 为什么需要它：前台命令的输出端在 Start 那一刻就固定了（os/exec 内部起了
+// 复制管道的 goroutine，改字段没用）。超时转入后台时，进程还在往原来的
+// 缓冲里写，而我们希望此后的输出进日志文件——只能换掉写入端本身。
+//
+// 拿不到这把锁就没法安全地「先把已有内容交给日志、再切目标」：
+// 两步之间若有一次并发的 Write，那一行会两边都没有。
+type switchWriter struct {
+	mu sync.Mutex
+	w  io.Writer
+	// tag 只用在日志里：stdout / stderr 两路会各抄一段进来，
+	// 不标清楚就分不出「前半截是哪一路的」。
+	tag string
+	// snap 切换的一瞬间取一次「已写入的内容」，交给日志做开头。
+	// 在锁内调用，所以能安全读到底层缓冲。
+	snap func() string
+}
+
+func newSwitchWriter(w io.Writer, tag string, snap func() string) *switchWriter {
+	return &switchWriter{w: w, tag: tag, snap: snap}
+}
+
+func (s *switchWriter) Write(p []byte) (int, error) {
+	if s == nil || s.w == nil {
+		return len(p), nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.w.Write(p)
+}
+
+// Take 取走「切换前已捕获的内容」，之后 Redirect 不再补抄一遍。
+func (s *switchWriter) Take() string {
+	if s == nil {
+		return ""
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snap == nil {
+		return ""
+	}
+	head := s.snap()
+	s.snap = nil
+	return head
+}
+
+// Redirect 把输出改到 w，并（可选）先把已捕获的内容抄进 w。
+func (s *switchWriter) Redirect(w io.Writer) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.snap != nil {
+		if head := s.snap(); head != "" {
+			_, _ = io.WriteString(w, "# ---- 切换前已捕获的 "+s.tag+" ----\n"+head+
+				"\n# ---- "+s.tag+" 切换到本文件 ----\n")
+		}
+		s.snap = nil
+	}
+	s.w = w
+}
+
+// handoffToBackground 把「前台跑超时、但进程还活着」的命令交给后台任务管理器。
+//
+// 为什么不再杀掉：超时只说明「这次等不到它」，不说明它失败了。一条 npm install
+// 在第 61 秒被连根杀掉，下次还得从头再装；一个跑了十分钟的数据脚本被杀掉，
+// 前面十分钟全白费——用户看到的是「界面卡住，然后什么都没有」。
+// 同类工具（Claude Code / WorkBuddy）的做法都是：超时不杀，转后台继续跑，
+// 把 task_id 交回去，结束时主动通知。
+//
+// 返回 (结果, true) 表示已经接管；返回 false 表示转不了（没库、日志建不出来），
+// 调用方按老路子杀掉即可——宁可杀掉，也不能让进程既跑着又没人管。
+func handoffToBackground(ctx context.Context, d Deps, p *jobProc, out, errw *switchWriter,
+	waitCh <-chan error, elapsed time.Duration) (map[string]any, bool) {
+	if d.db() == nil || p == nil || p.cmd == nil || p.cmd.Process == nil {
+		return nil, false
+	}
+	id := newJobID()
+	logPath := jobLogPath(id)
+	if err := d.db().CreateAIJob(db.AIJob{
+		ID: id, Command: p.command, Cwd: p.dir, Status: db.AIJobRunning, LogPath: logPath,
+	}); err != nil {
+		logger.W("[ai-job] 超时转入后台失败（落库）：%v", err)
+		return nil, false
+	}
+	f, ferr := os.Create(logPath)
+	if ferr != nil {
+		_ = d.db().FinishAIJob(id, db.AIJobFailed, 0, "无法创建日志文件："+ferr.Error())
+		logger.W("[ai-job] 超时转入后台失败（建日志）：%v", ferr)
+		return nil, false
+	}
+	// 头部必须写清楚「它是前台跑的、后来才转的」：用户翻日志时看到的第一行
+	// 就是「我什么时候开的这条命令」，而时间和原因只有这里能记。
+	fmt.Fprintf(f, "# %s\n# cwd: %s\n# started: %s（前台执行 %s 后仍未结束，已自动转入后台）\n# 关闭 QuickDock 会终止这个任务\n\n",
+		p.command, p.dir, p.startedAt.Format(time.RFC3339), elapsed.Round(time.Second))
+
+	// 把前台阶段已经产生的输出抄进日志：只从切换那一刻开始记的话，
+	// 用户打开日志看到的是半截，前面那段「跑到哪了」全在对话里，翻起来很别扭。
+	stdoutHead := out.Take()
+	stderrHead := errw.Take()
+	for _, seg := range []struct{ tag, body string }{{"stdout", stdoutHead}, {"stderr", stderrHead}} {
+		if strings.TrimSpace(seg.body) != "" {
+			fmt.Fprintf(f, "# ---- 切换前已捕获的 %s ----\n%s\n", seg.tag, strings.TrimRight(seg.body, "\n"))
+		}
+	}
+
+	// 先换输出端再登记进程：反过来的话，进程恰在此时退出，finishJob 会先删掉
+	// 一条还不存在的登记，留下一个永远 running 的幽灵任务。
+	out.Redirect(f)
+	errw.Redirect(f)
+	_ = d.db().SetAIJobPID(id, p.cmd.Process.Pid)
+
+	jobsMu.Lock()
+	jobsProcs[id] = p
+	jobsMu.Unlock()
+
+	// Wait 已经在 run_command 里跑着了，这里只等它的结果——不能再 Wait 一次。
+	go func() { finishJob(d, id, p, f, <-waitCh) }()
+	// 登记到本轮：用户点停止时一并收掉，否则「对话停了、任务还在跑」。
+	recordJob(ctx, id)
+
+	logger.I("[ai-job] 前台命令超时，转入后台 %s pid=%d: %s", id, p.cmd.Process.Pid, p.command)
+	return map[string]any{
+		"jobId":        id,
+		"status":       db.AIJobRunning,
+		"cwd":          p.dir,
+		"command":      p.command,
+		"logPath":      logPath,
+		"background":   true,
+		"backgrounded": true,
+		"timeout":      true,
+		"stdout":       stdoutHead,
+		"stderr":       stderrHead,
+		"note": fmt.Sprintf("前台等待超过 %s 仍未结束，**已自动转入后台继续运行**（不是失败，也不是被终止）。"+
+			"接下来不用干等、也不用 sleep 轮询：它结束时系统会把结果通知给你；"+
+			"想确认进度可以查 job_status / job_output，用户也可以在顶部终端图标里看到它并手动终止。", elapsed.Round(time.Second)),
+	}, true
+}
+
 // waitBackgroundJob 等进程结束，落状态、发通知。
 func waitBackgroundJob(d Deps, id string, p *jobProc, logFile *os.File) {
-	err := p.cmd.Wait()
+	finishJob(d, id, p, logFile, p.cmd.Wait())
+}
+
+// finishJob 任务收尾：落状态、补日志尾、推通知。
+//
+// 单独抽出来是因为「前台超时转后台」那条路不能自己再 Wait 一次——进程是前台
+// 起的，Wait 已经在另一个 goroutine 里跑着了，它只把等到的结果交过来。
+func finishJob(d Deps, id string, p *jobProc, logFile *os.File, err error) {
 	jobsMu.Lock()
 	killed := p.killedByUs
 	delete(jobsProcs, id)
@@ -160,9 +333,13 @@ func waitBackgroundJob(d Deps, id string, p *jobProc, logFile *os.File) {
 			exitCode = ee.ExitCode()
 		} else if !killed {
 			// 不是退出码问题（比如 IO 错）：按失败记，原因写进 error 列。
-			_ = d.DB.FinishAIJob(id, db.AIJobFailed, 0, err.Error())
+			_ = d.db().FinishAIJob(id, db.AIJobFailed, 0, err.Error())
 			closeJobLog(logFile, -1, err.Error())
 			notifyJobDone(d, id, p.cmd.Args, exitCode, err.Error())
+			p.col.addDone(JobDone{
+				ID: id, Command: p.command, Status: db.AIJobFailed,
+				ExitCode: 0, DurationMs: time.Since(p.startedAt).Milliseconds(), ErrMsg: err.Error(),
+			})
 			return
 		}
 	}
@@ -173,10 +350,14 @@ func waitBackgroundJob(d Deps, id string, p *jobProc, logFile *os.File) {
 	} else if exitCode != 0 {
 		status = db.AIJobFailed
 	}
-	_ = d.DB.FinishAIJob(id, status, exitCode, "")
+	_ = d.db().FinishAIJob(id, status, exitCode, "")
 	closeJobLog(logFile, exitCode, "")
 	logger.I("[ai-job] 后台任务 %s 结束 status=%s exit=%d", id, status, exitCode)
 	notifyJobDone(d, id, p.cmd.Args, exitCode, "")
+	p.col.addDone(JobDone{
+		ID: id, Command: p.command, Status: status,
+		ExitCode: exitCode, DurationMs: time.Since(p.startedAt).Milliseconds(),
+	})
 }
 
 // closeJobLog 在日志末尾补一行结论再关文件。
@@ -220,14 +401,14 @@ func notifyJobDone(d Deps, id string, argv []string, exitCode int, errMsg string
 
 // jobStatus 查一个后台任务的状态。
 func jobStatus(d Deps, args map[string]any) (any, error) {
-	if d.DB == nil {
+	if d.db() == nil {
 		return nil, errors.New("数据库不可用")
 	}
 	id := strings.TrimSpace(mcpsrv.Arg(args, "job_id"))
 	if id == "" {
 		return nil, errors.New("缺少参数 job_id")
 	}
-	j, err := d.DB.GetAIJob(id)
+	j, err := d.db().GetAIJob(id)
 	if err != nil {
 		return nil, err
 	}
@@ -263,14 +444,14 @@ func jobStatus(d Deps, args map[string]any) (any, error) {
 // 默认只给尾部：模型要的是「跑到哪一步 / 有没有报错」，把整份日志灌进上下文
 // 会直接吃掉窗口预算。要看开头用 head=true（比如确认它到底有没有启动成功）。
 func jobOutput(d Deps, args map[string]any) (any, error) {
-	if d.DB == nil {
+	if d.db() == nil {
 		return nil, errors.New("数据库不可用")
 	}
 	id := strings.TrimSpace(mcpsrv.Arg(args, "job_id"))
 	if id == "" {
 		return nil, errors.New("缺少参数 job_id")
 	}
-	j, err := d.DB.GetAIJob(id)
+	j, err := d.db().GetAIJob(id)
 	if err != nil {
 		return nil, err
 	}
@@ -286,7 +467,7 @@ func jobOutput(d Deps, args map[string]any) (any, error) {
 			head = b
 		}
 	}
-	text, truncated, rerr := readJobLog(j.LogPath, head)
+	text, truncated, rerr := ReadJobLog(j.LogPath, head)
 	if rerr != nil {
 		return nil, rerr
 	}
@@ -306,14 +487,18 @@ func jobOutput(d Deps, args map[string]any) (any, error) {
 	return res, nil
 }
 
-// readJobLog 读日志的头或尾，最多 aiJobOutputMax 字节。
+// ReadJobLog 读日志的头或尾，最多 aiJobOutputMax 字节。
+//
+// 导出是因为后台任务面板（services/ai/ai_jobs.go）也要读同一份日志：
+// 面板里给用户看的和给模型看的内容必须是同一段，两边各写一份解码逻辑
+// 迟早出现「模型说没有报错、用户看到一片乱码」。
 //
 // 按字节截断而不是按行：一条 build 可能输出一行几百 KB 的进度条，
 // 按行读会把整行读进内存再丢掉。
 //
 // 读出后按控制台代码页补一次解码：日志里存的是子进程写出的原始字节，
 // 中文 Windows 下 cmd / 部分 CLI 是 GBK，直接当 UTF-8 给模型就是一片 U+FFFD。
-func readJobLog(path string, head bool) (string, bool, error) {
+func ReadJobLog(path string, head bool) (string, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return "", false, fmt.Errorf("打不开日志文件：%v", err)
@@ -360,6 +545,18 @@ func KillJob(id string) bool {
 	killCommandTree(p.cmd, p.dir)
 	logger.I("[ai-job] 后台任务 %s 已被主动终止", id)
 	return true
+}
+
+// JobAlive 报告某个后台任务的进程句柄是否还挂在内存表里。
+//
+// 与 job_status 的区别：那个读库里的状态行，这个读进程表。两者会短暂不一致
+// （刚杀掉、还没收尾写库），调用方要判「是不是幽灵行」就得看这一份——
+// 库里 running 而进程表里已经没有，说明收尾那条路没走完，可以安全地改状态。
+func JobAlive(id string) bool {
+	jobsMu.Lock()
+	defer jobsMu.Unlock()
+	_, ok := jobsProcs[id]
+	return ok
 }
 
 // StopAllJobs 终止所有还在跑的后台任务（应用退出时调用）。
@@ -435,11 +632,12 @@ func registerJob(d Deps) {
 	boolp := mcpsrv.Bool
 
 	r.add(jobStatus, mcpsrv.LevelRead, "job_status",
-		"查后台任务的状态（running / done / failed / killed）与退出码。只对 run_command(background=true) 起的任务有效；"+
-			"同步跑的命令不需要它",
+		"查后台任务的状态（running / done / failed / killed）与退出码。只对后台任务有效（background=true 起的，"+
+			"以及前台超时后自动转入后台的）。**不要拿它轮询**：任务结束时会主动通知你，"+
+			"这里只用于「用户问起进度」或「不确定它是否还活着」",
 		[]string{"job_id"},
 		map[string]any{
-			"job_id": str("任务 id，即 run_command 后台模式返回的 jobId"),
+			"job_id": str("任务 id，即 run_command 返回的 jobId"),
 		})
 
 	r.add(jobOutput, mcpsrv.LevelRead, "job_output",

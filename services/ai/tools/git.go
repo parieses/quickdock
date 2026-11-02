@@ -72,8 +72,8 @@ func gitBin(d Deps) (string, error) {
 	if p, err := exec.LookPath("git"); err == nil {
 		return p, nil
 	}
-	if d.Env != nil {
-		if st := d.Env.GitStatus(); strings.TrimSpace(st.Path) != "" {
+	if d.env() != nil {
+		if st := d.env().GitStatus(); strings.TrimSpace(st.Path) != "" {
 			p := strings.TrimSpace(st.Path)
 			if fi, err := os.Stat(p); err == nil && !fi.IsDir() {
 				return p, nil
@@ -169,7 +169,7 @@ func gitDir(d Deps, args map[string]any) (string, error) {
 	if raw == "" {
 		return "", errors.New("不知道在哪个目录执行：当前对话没有绑定工作目录，请传 path（仓库目录）")
 	}
-	dir, err := fsguard.ResolveRead(d.DB, raw, mcpsrv.Cwd(args), false)
+	dir, err := fsguard.ResolveRead(d.db(), raw, mcpsrv.Cwd(args), false)
 	if err != nil {
 		return "", err
 	}
