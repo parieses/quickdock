@@ -200,8 +200,8 @@ func (d *Database) CreateMonitor(m *Monitor) (*Monitor, error) {
 
 // ListMonitors 全部监控（按 sort），默认排除已软删的
 func (d *Database) ListMonitors() ([]Monitor, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors WHERE deleted_at = '' ORDER BY sort ASC, created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -220,8 +220,8 @@ func (d *Database) ListMonitors() ([]Monitor, error) {
 
 // GetMonitor 按 ID 查询
 func (d *Database) GetMonitor(id string) (*Monitor, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	row := d.conn.QueryRow(`SELECT `+monCols+` FROM monitors WHERE id = ?`, id)
 	m, err := scanMonitor(row)
 	if err != nil {
@@ -318,8 +318,8 @@ func (d *Database) RestoreMonitor(id string) error {
 
 // ListDeletedMonitors 回收站里的监控（按软删时间倒序）。
 func (d *Database) ListDeletedMonitors() ([]Monitor, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors WHERE deleted_at <> '' ORDER BY deleted_at DESC`)
 	if err != nil {
 		return nil, err
@@ -446,8 +446,8 @@ func (d *Database) GetMonitorLogs(id string, limit int) ([]MonitorLog, error) {
 	if limit <= 0 {
 		limit = 50
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT id, monitor_id, checked_at, checked_ts, status, status_code, latency_ms, error
 		 FROM monitor_logs WHERE monitor_id = ? ORDER BY checked_ts DESC LIMIT ?`, id, limit)
@@ -472,8 +472,8 @@ func (d *Database) GetMonitorLogsSince(id string, sinceTs, limit int64) ([]Monit
 	if limit <= 0 {
 		limit = 2000
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	var rows *sql.Rows
 	var err error
 	if sinceTs > 0 {
@@ -503,8 +503,8 @@ func (d *Database) GetMonitorLogsSince(id string, sinceTs, limit int64) ([]Monit
 
 // ListEnabledMonitors 返回全部已启用监控（供检查器计算最近等待时长）
 func (d *Database) ListEnabledMonitors() ([]Monitor, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(`SELECT ` + monCols + ` FROM monitors WHERE enabled = 1 AND deleted_at = '' ORDER BY sort ASC`)
 	if err != nil {
 		return nil, err
@@ -523,8 +523,8 @@ func (d *Database) ListEnabledMonitors() ([]Monitor, error) {
 
 // ListMonitorsDue 返回「已启用且到点需检测」的监控（nowTs 为 unix 秒）
 func (d *Database) ListMonitorsDue(nowTs int64) ([]Monitor, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT `+monCols+` FROM monitors
 		 WHERE enabled = 1 AND deleted_at = '' AND (last_checked_ts = 0 OR last_checked_ts + interval_sec <= ?)
@@ -547,8 +547,8 @@ func (d *Database) ListMonitorsDue(nowTs int64) ([]Monitor, error) {
 // ListMonitorStats 一次性汇总所有监控近 24h 的在线率/平均延迟/最近故障时间
 func (d *Database) ListMonitorStats() ([]MonitorStat, error) {
 	since := time.Now().Unix() - logWindowSec
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT monitor_id,
 			COUNT(*),

@@ -76,6 +76,10 @@ var syncExtraTables = []string{
 
 // restorePayload 将完整快照载荷写回数据库（在事务内调用）。
 // RestoreSnapshot 与 RestoreFromJSON 共用此逻辑，避免两份恢复代码漂移。
+//
+// 核心表一律走 structToMap + 按当前库实际列取交集（insertRow），与扩展表同一套机制：
+// 手写 INSERT 的列清单曾经漏过 scenes.env / items.env —— 恢复后场景与条目的运行时
+// 版本绑定被静默清空。改成动态列之后，实体结构体新增字段无需再同步这里。
 func restorePayload(tx *sql.Tx, payload *SnapshotPayload) error {
 	for _, t := range restoreCoreTables {
 		if _, err := tx.Exec(t.sql); err != nil {
@@ -83,55 +87,57 @@ func restorePayload(tx *sql.Tx, payload *SnapshotPayload) error {
 		}
 	}
 
+	insertAll := func(table string, rows []map[string]interface{}) error {
+		cols, err := tableColumnsTx(tx, table)
+		if err != nil {
+			return fmt.Errorf("读取%s表结构失败: %w", table, err)
+		}
+		for _, row := range rows {
+			if err := insertRow(tx, table, row, cols); err != nil {
+				return fmt.Errorf("恢复%s失败: %w", table, err)
+			}
+		}
+		return nil
+	}
+
+	workspaces := make([]map[string]interface{}, len(payload.Workspaces))
 	for i := range payload.Workspaces {
-		w := &payload.Workspaces[i]
-		if _, err := tx.Exec(
-			"INSERT INTO workspaces (id, name, storage, remark, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-			w.ID, w.Name, w.Storage, w.Remark, w.CreatedAt, w.UpdatedAt,
-		); err != nil {
-			return fmt.Errorf("恢复工作空间失败: %w", err)
-		}
+		workspaces[i] = structToMap(&payload.Workspaces[i])
 	}
+	if err := insertAll("workspaces", workspaces); err != nil {
+		return fmt.Errorf("恢复工作空间失败: %w", err)
+	}
+
+	scenes := make([]map[string]interface{}, len(payload.Scenes))
 	for i := range payload.Scenes {
-		s := &payload.Scenes[i]
-		if _, err := tx.Exec(
-			"INSERT INTO scenes (id, workspace_id, name, type, description, group_name, icon, color, favorite, unbound, usage_count, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			s.ID, s.WorkspaceID, s.Name, s.Type, s.Description, s.GroupName, s.Icon,
-			s.Color, s.Favorite, s.Unbound, s.UsageCount, s.Sort, s.CreatedAt, s.UpdatedAt,
-		); err != nil {
-			return fmt.Errorf("恢复场景失败: %w", err)
-		}
+		scenes[i] = structToMap(&payload.Scenes[i])
 	}
+	if err := insertAll("scenes", scenes); err != nil {
+		return fmt.Errorf("恢复场景失败: %w", err)
+	}
+
+	collections := make([]map[string]interface{}, len(payload.Collections))
 	for i := range payload.Collections {
-		c := &payload.Collections[i]
-		if _, err := tx.Exec(
-			"INSERT INTO collections (id, workspace_id, scene_id, name, type, description, group_name, default_tool_id, tool, icon, color, open_strategy, favorite, recent, recent_at, unbound, plugin_id, usage_count, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			c.ID, c.WorkspaceID, c.SceneID, c.Name, c.Type, c.Description, c.GroupName,
-			c.DefaultToolID, c.Tool, c.Icon, c.Color, c.OpenStrategy, c.Favorite,
-			c.Recent, c.RecentAt, c.Unbound, c.PluginID, c.UsageCount, c.Sort, c.CreatedAt, c.UpdatedAt,
-		); err != nil {
-			return fmt.Errorf("恢复集合失败: %w", err)
-		}
+		collections[i] = structToMap(&payload.Collections[i])
 	}
+	if err := insertAll("collections", collections); err != nil {
+		return fmt.Errorf("恢复集合失败: %w", err)
+	}
+
+	items := make([]map[string]interface{}, len(payload.Items))
 	for i := range payload.Items {
-		it := &payload.Items[i]
-		if _, err := tx.Exec(
-			"INSERT INTO items (id, workspace_id, collection_id, name, type, value, working_directory, tool_id, tool, args, icon, color, remark, plugin_data, usage_count, sort, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-			it.ID, it.WorkspaceID, it.CollectionID, it.Name, it.Type, it.Value,
-			it.WorkingDirectory, it.ToolID, it.Tool, it.Args, it.Icon, it.Color,
-			it.Remark, it.PluginData, it.UsageCount, it.Sort, it.CreatedAt, it.UpdatedAt,
-		); err != nil {
-			return fmt.Errorf("恢复项目失败: %w", err)
-		}
+		items[i] = structToMap(&payload.Items[i])
 	}
+	if err := insertAll("items", items); err != nil {
+		return fmt.Errorf("恢复项目失败: %w", err)
+	}
+
+	tools := make([]map[string]interface{}, len(payload.Tools))
 	for i := range payload.Tools {
-		t := &payload.Tools[i]
-		if _, err := tx.Exec(
-			"INSERT INTO tools (id, name, type, path, args, is_default) VALUES (?, ?, ?, ?, ?, ?)",
-			t.ID, t.Name, t.Type, t.Path, t.Args, t.IsDefault,
-		); err != nil {
-			return fmt.Errorf("恢复工具失败: %w", err)
-		}
+		tools[i] = structToMap(&payload.Tools[i])
+	}
+	if err := insertAll("tools", tools); err != nil {
+		return fmt.Errorf("恢复工具失败: %w", err)
 	}
 
 	// 扩展表：只有备份中确实带了这张表（map 中存在该 key）才清空并写入。
@@ -165,33 +171,41 @@ func replaceTable(tx *sql.Tx, table string, rows []map[string]interface{}) error
 		return fmt.Errorf("读取%s表结构失败: %w", table, err)
 	}
 	for _, row := range rows {
-		pairs := make([]kvPair, 0, len(row))
-		for col, val := range row {
-			if !cols[col] {
-				continue // 备份中属于其他版本的列，当前库没有，跳过
-			}
-			pairs = append(pairs, kvPair{col, val})
-		}
-		if len(pairs) == 0 {
-			continue
-		}
-		sort.Slice(pairs, func(i, j int) bool { return pairs[i].col < pairs[j].col })
-
-		names := make([]string, len(pairs))
-		values := make([]interface{}, len(pairs))
-		placeholders := make([]string, len(pairs))
-		for i, p := range pairs {
-			names[i] = p.col
-			values[i] = p.val
-			placeholders[i] = "?"
-		}
-		query := "INSERT INTO " + table + " (" + strings.Join(names, ", ") +
-			") VALUES (" + strings.Join(placeholders, ", ") + ")"
-		if _, err := tx.Exec(query, values...); err != nil {
+		if err := insertRow(tx, table, row, cols); err != nil {
 			return fmt.Errorf("恢复%s失败: %w", table, err)
 		}
 	}
 	return nil
+}
+
+// insertRow 按「当前库实际列」与 row 的交集插入一行：
+// 备份中来自其他版本的未知列会被忽略，因此对新旧库的列差异免疫。
+// cols 由调用方一次性取好（整表插入时避免每行都 PRAGMA）。
+func insertRow(tx *sql.Tx, table string, row map[string]interface{}, cols map[string]bool) error {
+	pairs := make([]kvPair, 0, len(row))
+	for col, val := range row {
+		if !cols[col] {
+			continue
+		}
+		pairs = append(pairs, kvPair{col, val})
+	}
+	if len(pairs) == 0 {
+		return nil
+	}
+	sort.Slice(pairs, func(i, j int) bool { return pairs[i].col < pairs[j].col })
+
+	names := make([]string, len(pairs))
+	values := make([]interface{}, len(pairs))
+	placeholders := make([]string, len(pairs))
+	for i, p := range pairs {
+		names[i] = p.col
+		values[i] = p.val
+		placeholders[i] = "?"
+	}
+	query := "INSERT INTO " + table + " (" + strings.Join(names, ", ") +
+		") VALUES (" + strings.Join(placeholders, ", ") + ")"
+	_, err := tx.Exec(query, values...)
+	return err
 }
 
 // kvPair 一列名与列值，用于按列名排序后再拼 SQL（map 遍历顺序随机）。

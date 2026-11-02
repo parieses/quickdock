@@ -79,8 +79,8 @@ func (d *Database) ListNotifications(limit int, onlyUnread bool) ([]NotifyItem, 
 	}
 	q += ` ORDER BY created_ts DESC LIMIT ?`
 
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(q, limit)
 	if err != nil {
 		return nil, err
@@ -100,8 +100,8 @@ func (d *Database) ListNotifications(limit int, onlyUnread bool) ([]NotifyItem, 
 
 // UnreadNotificationCount 未读数（前端徽标用，只取一个整数）。
 func (d *Database) UnreadNotificationCount() (int, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	var n int
 	err := d.conn.QueryRow(`SELECT COUNT(*) FROM notifications WHERE read = 0`).Scan(&n)
 	return n, err

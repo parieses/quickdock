@@ -104,8 +104,8 @@ func (d *Database) CreateSubtask(parentID, title string) (*Todo, error) {
 
 // ListTodos 按 未完成在前、已完成在后、再按 sort 排序返回
 func (d *Database) ListTodos() ([]Todo, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT id, title, done, priority, due_date, note, start_time, end_time, reminder_time, reminder_sent, tags, recurrence, parent_id, status, sort, created_at, completed_at
 		 FROM todos ORDER BY CASE WHEN status = 'done' THEN 1 ELSE 0 END ASC, sort ASC, created_at DESC`,
@@ -131,8 +131,8 @@ func (d *Database) ListTodos() ([]Todo, error) {
 
 // GetTodo 按 ID 查询
 func (d *Database) GetTodo(id string) (*Todo, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	row := d.conn.QueryRow(
 		`SELECT id, title, done, priority, due_date, note, start_time, end_time, reminder_time, reminder_sent, tags, recurrence, parent_id, status, sort, created_at, completed_at
 		 FROM todos WHERE id = ?`, id)
@@ -270,8 +270,8 @@ func (d *Database) SearchTodos(q string, limit int) ([]Todo, error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	pattern := "%" + escapeLike(q) + "%"
 	rows, err := d.conn.Query(
 		`SELECT id, title, done, priority, due_date, note, start_time, end_time, reminder_time, reminder_sent, tags, recurrence, parent_id, status, sort, created_at, completed_at
@@ -333,8 +333,8 @@ func (d *Database) ClearCompletedTodos() error {
 
 // ListDueReminders 返回「已到提醒时间、未发送、未完成」的待办（now 格式 YYYY-MM-DD HH:MM:SS）
 func (d *Database) ListDueReminders(now string) ([]Todo, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT id, title, done, priority, due_date, note, start_time, end_time, reminder_time, reminder_sent, tags, recurrence, parent_id, status, sort, created_at, completed_at
 		 FROM todos

@@ -200,8 +200,8 @@ func scanClipboardEntries(rows *sql.Rows) ([]ClipboardEntry, error) {
 // 之前只按 created_at 排，一条三个月前置顶的内容根本进不了「最近 1000 条」窗口，
 // 于是「收藏」标签里也看不到它 —— 置顶等于没生效。
 func (d *Database) ListClipboardEntries(limit int) ([]ClipboardEntry, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	if limit <= 0 {
 		// 无上限分支改为硬上限兜底，杜绝全表加载雪崩
@@ -226,8 +226,8 @@ func (d *Database) ListClipboardEntries(limit int) ([]ClipboardEntry, error) {
 // 列表接口带 limit（前端只拉最近 1000 条），标题上直接写 entries.length 会让
 // 用户以为历史只有这么多；配上真总数才说得清「已载入 / 共多少」。
 func (d *Database) CountClipboardEntries() (int, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	var n int
 	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM clipboard_entries`).Scan(&n); err != nil {
 		return 0, err
@@ -236,8 +236,8 @@ func (d *Database) CountClipboardEntries() (int, error) {
 }
 
 func (d *Database) ListAllClipboardEntries() ([]ClipboardEntry, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		"SELECT " + clipboardSelectCols + " FROM clipboard_entries ORDER BY is_pinned DESC, created_at DESC")
 	if err != nil {
@@ -254,8 +254,8 @@ func (d *Database) ListClipboardEntriesByType(limit int, contentType string) ([]
 	if limit <= 0 || limit > MAX_CLIPBOARD_ROWS {
 		limit = MAX_CLIPBOARD_ROWS
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	var rows *sql.Rows
 	var err error
@@ -279,8 +279,8 @@ func (d *Database) ListClipboardEntriesBySmartType(limit int, smartType string) 
 	if limit <= 0 || limit > MAX_CLIPBOARD_ROWS {
 		limit = MAX_CLIPBOARD_ROWS
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query(
 		"SELECT "+clipboardSelectCols+" FROM clipboard_entries WHERE content_type = 'text' AND text_type = ? ORDER BY is_pinned DESC, created_at DESC LIMIT ?",
@@ -295,8 +295,8 @@ func (d *Database) ListClipboardEntriesBySmartType(limit int, smartType string) 
 
 // GetClipboardEntry 根据 ID 获取单条剪贴板记录
 func (d *Database) GetClipboardEntry(id string) (*ClipboardEntry, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	var e ClipboardEntry
 	var imgPath, txtContent, imgHash, note sql.NullString

@@ -52,8 +52,8 @@ func (d *Database) RecordUsageEx(key, type_, label, desc, input string) error {
 
 // queryUsage 执行 frecency 查询并扫描结果，消除三个 GetXxxUsage 中的重复循环
 func (d *Database) queryUsage(query string, args ...interface{}) ([]FrecencyEntry, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query(query, args...)
 	if err != nil {

@@ -78,8 +78,8 @@ func (d *Database) CreateClipboardRule(r *ClipboardRule) (*ClipboardRule, error)
 
 // ListClipboardRules 全部规则（按优先级升序，同优先级按创建时间）
 func (d *Database) ListClipboardRules() ([]ClipboardRule, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(`SELECT ` + clipRuleCols + ` FROM clipboard_rules ORDER BY priority ASC, created_ts ASC`)
 	if err != nil {
 		return nil, err

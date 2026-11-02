@@ -6,8 +6,8 @@ import "fmt"
 
 // GetSetting 从 app_state 读取配置值
 func (d *Database) GetSetting(key string) (string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	var val string
 	err := d.conn.QueryRow("SELECT value FROM app_state WHERE key = ?", key).Scan(&val)
 	if err != nil {

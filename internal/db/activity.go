@@ -128,8 +128,8 @@ func (d *Database) ListActivity(limit int) ([]Activity, error) {
 	if limit <= 0 {
 		limit = 100
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT id, kind, ref_id, text, source, created_at, created_ts
 		 FROM activity ORDER BY created_ts DESC LIMIT ?`, limit)

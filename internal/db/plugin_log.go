@@ -99,8 +99,8 @@ func (d *Database) ListPluginExecLogsBy(pluginID string, limit int) ([]PluginExe
 	if limit <= 0 {
 		limit = 100
 	}
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	const cols = `SELECT id, plugin_id, command_id, executed_at, executed_ts, success, duration_ms, result, error, trigger
 		 FROM plugin_exec_logs`
 	q := cols

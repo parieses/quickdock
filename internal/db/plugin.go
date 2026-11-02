@@ -108,8 +108,8 @@ func (d *Database) InsertPluginFull(id, name, version, author, description, cate
 
 // ListAllPluginIDs 列出所有插件记录 ID（含已禁用），用于清理残留记录
 func (d *Database) ListAllPluginIDs() ([]string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query("SELECT id FROM plugins")
 	if err != nil {
@@ -154,8 +154,8 @@ func (d *Database) ListPluginVersions() (map[string]string, error) {
 
 // ListEnabledPlugins 列出所有已启用插件 ID
 func (d *Database) ListEnabledPlugins() ([]string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query("SELECT id FROM plugins WHERE enabled = 1")
 	if err != nil {

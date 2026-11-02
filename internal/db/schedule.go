@@ -137,8 +137,8 @@ func (d *Database) CreateScheduledTask(t *ScheduledTask) (*ScheduledTask, error)
 
 // ListScheduledTasks 返回全部定时任务（按 sort、创建时间）
 func (d *Database) ListScheduledTasks() ([]ScheduledTask, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(`SELECT ` + schedCols + ` FROM scheduled_tasks ORDER BY sort ASC, created_at ASC`)
 	if err != nil {
 		return nil, err
@@ -157,8 +157,8 @@ func (d *Database) ListScheduledTasks() ([]ScheduledTask, error) {
 
 // GetScheduledTask 按 ID 查询
 func (d *Database) GetScheduledTask(id string) (*ScheduledTask, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	row := d.conn.QueryRow(`SELECT `+schedCols+` FROM scheduled_tasks WHERE id = ?`, id)
 	t, err := scanScheduledTask(row)
 	if err != nil {
@@ -249,8 +249,8 @@ func (d *Database) SetTaskEnabled(id string, enabled bool, nextRun string) error
 
 // ListDueTasks 返回「已启用、有下次运行时间、已到点」的任务
 func (d *Database) ListDueTasks(now string) ([]ScheduledTask, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT `+schedCols+` FROM scheduled_tasks
 		 WHERE enabled = 1 AND next_run <> '' AND next_run <= ?
@@ -272,8 +272,8 @@ func (d *Database) ListDueTasks(now string) ([]ScheduledTask, error) {
 
 // ListEnabledWithNextRun 返回「已启用且有下次运行时间」的任务（供调度器计算最近等待时长）
 func (d *Database) ListEnabledWithNextRun() ([]ScheduledTask, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT ` + schedCols + ` FROM scheduled_tasks
 		 WHERE enabled = 1 AND next_run <> ''

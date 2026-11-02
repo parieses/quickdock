@@ -47,8 +47,8 @@ func scanNoteNode(rows interface {
 
 // ListNotesTree 返回全量笔记树节点（含文件夹与文档），由前端拼树。
 func (d *Database) ListNotesTree() ([]Note, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(`SELECT ` + noteCols + ` FROM notes ORDER BY is_folder DESC, sort ASC, name ASC`)
 	if err != nil {
 		return nil, err

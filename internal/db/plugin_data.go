@@ -6,8 +6,8 @@ import (
 
 // GetPluginData 读取插件专属存储（强制绑定 plugin_id）
 func (d *Database) GetPluginData(pluginID, key string) (string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	var value string
 	err := d.conn.QueryRow(
@@ -53,8 +53,8 @@ func (d *Database) DeletePluginData(pluginID, key string) error {
 
 // ListPluginData 列出插件的所有存储条目
 func (d *Database) ListPluginData(pluginID string) (map[string]string, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	rows, err := d.conn.Query(
 		"SELECT key, value FROM plugin_data WHERE plugin_id = ?",
