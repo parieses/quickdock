@@ -99,9 +99,12 @@ function openSettings() {
   flex: 1;
   display: flex;
   align-items: center;
-  justify-content: center;
+  /* 高度不够时用 margin:auto 居中，而不是 justify-content:center：
+     后者在内容比容器高时会把顶部推出可视区上沿，且滚不回去（负溢出），
+     矮窗口里就是「logo 少一截、底部按钮干脆看不见」。 */
+  justify-content: flex-start;
   height: 100%;
-  overflow: hidden;
+  overflow-y: auto;
   background: var(--color-bg-primary);
 }
 
@@ -112,6 +115,7 @@ function openSettings() {
   text-align: center;
   max-width: 420px;
   padding: 48px 32px;
+  margin: auto;
 }
 
 .ob-logo {

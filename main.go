@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"os"
 	"path"
@@ -57,11 +58,42 @@ import (
 // ---- 主窗口尺寸/位置记忆 ----
 // 启动时 DB 尚未初始化（ServiceStartup 在 app.Run 内执行），故用独立的 JSON 文件
 // 持久化窗口矩形，避免依赖数据库时序。启动时 loadWindowState 恢复，移动/缩放后防抖写回。
+//
+// Width/Height 存的是**逻辑尺寸**（= 物理 DIP / uiZoom），不是屏幕上量到的那两个数。
+// 为什么：窗口的 Width 是 DIP、Zoom 是 WebView 的 CSS 缩放，两者独立——同一份
+// 「1100×800」记录在 zoom 1.0 下给内容 1100 CSS px，在 zoom 1.2 下只剩 917。
+// 用户调大缩放是为了「字大一点」，不是「能看见的东西少一点」，所以记录必须按
+// 缩放归一化存储，恢复时再乘当前档位。
+//
+// Zoom 字段标记这份记录是在哪个档位下存的：0 表示旧版本写的（当时只有 1.0 档，
+// 逻辑尺寸恰好等于屏幕上的值），按当前档位直接换算即可。
 type windowState struct {
-	X      int `json:"x"`
-	Y      int `json:"y"`
-	Width  int `json:"width"`
-	Height int `json:"height"`
+	X      int     `json:"x"`
+	Y      int     `json:"y"`
+	Width  int     `json:"width"`
+	Height int     `json:"height"`
+	Zoom   float64 `json:"zoom,omitempty"`
+}
+
+// mainWinWidth/mainWinHeight 等：主窗口的尺寸同样要乘 uiZoom。
+//
+// 浮窗（剪贴板/命令面板/窗口管理）一直是这么做的，主窗口漏了——于是把缩放从
+// 1.0 调到 1.2，浮窗的内容空间不变、主窗口的内容空间却少了 1/6：
+// 167px 的宽度差看着不多，但侧栏还占 210，剩下给内容的不足 710，一票固定
+// 宽度的弹层（680 的任务弹窗）当场溢出。
+func windowPx(logical int) int {
+	if uiZoom == 1 || logical <= 0 {
+		return logical
+	}
+	return int(math.Round(float64(logical) * uiZoom))
+}
+
+// unwindowPx 是 windowPx 的逆运算，用于落盘。
+func unwindowPx(px int) int {
+	if uiZoom == 1 || px <= 0 {
+		return px
+	}
+	return int(math.Round(float64(px) / uiZoom))
 }
 
 func windowStatePath() string {
@@ -110,7 +142,13 @@ func scheduleSaveWindowState(w *application.WebviewWindow) {
 		b := w.Bounds()
 		windowStateMu.Unlock()
 
-		s := windowState{X: b.X, Y: b.Y, Width: b.Width, Height: b.Height}
+		// 落盘前归一化到逻辑尺寸：见 windowState 的注释——存屏幕上的值，
+		// 换个缩放档位打开就变成「内容被挤」或「窗口莫名变大」。
+		s := windowState{
+			X: b.X, Y: b.Y,
+			Width: unwindowPx(b.Width), Height: unwindowPx(b.Height),
+			Zoom: uiZoom,
+		}
 		data, err := json.Marshal(s)
 		if err != nil {
 			return
@@ -128,7 +166,16 @@ func logStartupDetail(app *application.App, mainOpts application.WebviewWindowOp
 	wvPath := EnsureConfigDir() + "\\WebView2"
 	rect := "默认"
 	if saved != nil {
-		rect = fmt.Sprintf("%dx%d @(%d,%d)", saved.Width, saved.Height, saved.X, saved.Y)
+		// 记录里是逻辑尺寸，日志要打实际会用的 DIP，否则「记录 917、窗口 1100」
+		// 看着像 bug（其实只是减掉缩放档位）。
+		rect = fmt.Sprintf("%dx%d @(%d,%d)", windowPx(saved.Width), windowPx(saved.Height), saved.X, saved.Y)
+		switch {
+		case saved.Zoom == 0:
+			// 旧版本写的记录没有档位字段，按当前档位当逻辑值处理（一次性迁移误差）
+			rect += "（旧记录，无档位标记）"
+		case saved.Zoom != uiZoom:
+			rect += fmt.Sprintf("（记录于 %.1f 档，已换算到当前档位）", saved.Zoom)
+		}
 	} else {
 		rect = fmt.Sprintf("%dx%d @默认", mainOpts.Width, mainOpts.Height)
 	}
@@ -136,8 +183,9 @@ func logStartupDetail(app *application.App, mainOpts application.WebviewWindowOp
 	if app != nil {
 		screens = len(app.Screen.GetAll())
 	}
-	logger.I("[启动] 应用版本=%s | WebView2 数据目录=%s | 屏幕数=%d", appVersion, wvPath, screens)
-	logger.I("[启动] 窗口计划：主窗口=%s；浮窗=剪贴板/命令面板/笔记（懒创建，Run 后预创建并 Hide）", rect)
+	logger.I("[启动] 应用版本=%s | WebView2 数据目录=%s | 屏幕数=%d | 界面缩放=%.1f", appVersion, wvPath, screens, uiZoom)
+	logger.I("[启动] 窗口计划：主窗口=%s（内容区 CSS 宽 %d）；浮窗=剪贴板/命令面板/笔记（懒创建，Run 后预创建并 Hide）",
+		rect, int(float64(mainOpts.Width)/uiZoom))
 	logger.I("[启动] WebView2 优化：附加参数 %d 项（--in-process-gpu / --renderer-process-limit=4 等），禁用特性 %d 项（%s）",
 		len(memoryOptimizedArgs), len(disabledFeatures), strings.Join(disabledFeatures, ","))
 }
@@ -180,6 +228,11 @@ const (
 	appTitle  = "快启坞 QuickDock"
 	appWidth  = 1100
 	appHeight = 800
+
+	// 主窗口允许的最小尺寸（逻辑值，见下方 windowPx）。800×600 是「侧栏 210 +
+	// 主区 590」的下限：再窄，页头的标题 + 按钮组就放不下一行（会横向滚动）。
+	appMinWidth  = 800
+	appMinHeight = 600
 )
 
 // uiZoom 是全局 UI 等比缩放（WebView ZoomFactor），主窗口与所有独立浮窗共用，
@@ -549,11 +602,13 @@ func main() {
 	// 创建主窗口（启动时恢复上次记住的尺寸/位置）
 	mainRect := loadWindowState()
 	mainOpts := application.WebviewWindowOptions{
-		Title:            appTitle,
-		Width:            appWidth,
-		Height:           appHeight,
-		MinWidth:         800,
-		MinHeight:        600,
+		Title:  appTitle,
+		Width:  windowPx(appWidth),
+		Height: windowPx(appHeight),
+		// 最小尺寸同样按档位放大：否则 zoom 1.2 时用户能把窗口拖到 CSS 视口
+		// 800/1.2 = 667，一票 680~780px 的弹层直接溢出屏幕。
+		MinWidth:         windowPx(appMinWidth),
+		MinHeight:        windowPx(appMinHeight),
 		Frameless:        false,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/",
@@ -561,10 +616,23 @@ func main() {
 		Zoom: uiZoom,
 	}
 	if mainRect != nil {
-		mainOpts.Width = mainRect.Width
-		mainOpts.Height = mainRect.Height
+		// 记录里是逻辑尺寸，还原成当前档位下的 DIP。
+		mainOpts.Width = windowPx(mainRect.Width)
+		mainOpts.Height = windowPx(mainRect.Height)
 		mainOpts.X = mainRect.X
 		mainOpts.Y = mainRect.Y
+	}
+	// 按档位放大后的初始尺寸可能超出小屏工作区（1.2 档 = 1320 宽，1280 的屏放不下）。
+	// 收到工作区的 95%，但不得低于最小尺寸——低于 min 时 Wails 会自己夹，窗口比例
+	// 会变得很怪，不如让超宽那侧由系统去处理。
+	if scr := app.Screen.GetPrimary(); scr != nil && scr.WorkArea.Width > 0 {
+		wa := scr.WorkArea
+		if maxW := wa.Width * 95 / 100; mainOpts.Width > maxW && maxW >= mainOpts.MinWidth {
+			mainOpts.Width = maxW
+		}
+		if maxH := wa.Height * 95 / 100; mainOpts.Height > maxH && maxH >= mainOpts.MinHeight {
+			mainOpts.Height = maxH
+		}
 	}
 	mainWindow := app.Window.NewWithOptions(mainOpts)
 
