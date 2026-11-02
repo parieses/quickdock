@@ -27,14 +27,14 @@ func TestDecodeConsoleOutputGBK(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			if got := decodeConsoleOutput(c.in); got != c.want {
+			if got := DecodeConsoleText(c.in); got != c.want {
 				t.Errorf("解码结果不符:\n got: %q\nwant: %q", got, c.want)
 			}
 		})
 	}
 
 	// 不出现 U+FFFD：乱码正是这个功能要消灭的东西
-	if got := decodeConsoleOutput("\xd6\xd0\xce\xc4"); strings.ContainsRune(got, '\uFFFD') {
+	if got := DecodeConsoleText("\xd6\xd0\xce\xc4"); strings.ContainsRune(got, '\uFFFD') {
 		t.Errorf("解码结果不应含替换字符: %q", got)
 	}
 }
@@ -55,5 +55,30 @@ func TestRunCommandCaptureDecodesChinese(t *testing.T) {
 	}
 	if strings.ContainsRune(out.Stdout, '\uFFFD') {
 		t.Errorf("不应出现替换字符（乱码）: %q", out.Stdout)
+	}
+}
+
+// TestDecodeConsoleTextMixed 同一条管道里混着两种编码时的行为。
+//
+// 这是真实场景：`go vet ./... 2>&1` 里 go 自己写 UTF-8，而 cmd.exe 拼错命令时的
+// 「'head' 不是内部或外部命令」是 GBK。整块按 GBK 解会把 UTF-8 那半边弄成乱码，
+// 与要修的问题正好对称——所以按行判，只动非 UTF-8 的行。
+func TestDecodeConsoleTextMixed(t *testing.T) {
+	if consoleCP() != 936 {
+		t.Skipf("系统控制台代码页为 %d，非 936(GBK)，跳过", consoleCP())
+	}
+
+	// UTF-8 行 + GBK 行：前者一个字节都不该变，后者要解成中文。
+	in := "ok: 中文正常行\n" + "'head' \xb2\xbb\xca\xc7\xc4\xda\xb2\xbf\xbb\xf2\xcd\xe2\xb2\xbf\xc3\xfc\xc1\xee\r\n"
+	want := "ok: 中文正常行\n'head' 不是内部或外部命令\r\n"
+	if got := DecodeConsoleText(in); got != want {
+		t.Errorf("混编解码不符:\n got: %q\nwant: %q", got, want)
+	}
+
+	// 整段是合法 UTF-8 时原样返回：这是 npm / node / go 这些程序的常态，
+	// 一个字节都不能被「顺手转一下」。
+	pure := "构建完成 ✓ 用时 3.2s\n"
+	if got := DecodeConsoleText(pure); got != pure {
+		t.Errorf("合法 UTF-8 不应被改写: %q", got)
 	}
 }

@@ -4,6 +4,7 @@ package platform
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"golang.org/x/text/encoding"
 	"golang.org/x/text/encoding/charmap"
@@ -49,30 +50,46 @@ func consoleCP() uint32 {
 	return uint32(cp)
 }
 
-// decodeConsoleOutput 把子进程按控制台代码页写出的字节流转成 UTF-8。
+// DecodeConsoleText 把子进程输出里的非 UTF-8 片段按控制台代码页解码成 UTF-8。
 //
 // 为什么需要：Windows 控制台程序（cmd / dir / ping / git …）按 OEM 代码页往
 // 管道里写字节，中文系统是 936(GBK)。Go 的 string 是 UTF-8，原样收下会把每个
 // 中文拆成 U+FFFD——用户跑个 dir，执行结果就是一坨 �，功能等于没有。
 //
-// 捕获缓冲按字节封顶，可能把多字节序列劈在尾部。GBK 的解码器不报错、直接吐出
-// U+FFFD（这些代码页都没有映射到 U+FFFD 的合法序列，正常输出不会以它结尾），
-// 故按「结果以 U+FFFD 结尾」判定劈坏，逐字节回退找完整边界。仍不干净则原样
-// 返回：真正损坏的输出罕见，而丢结果比留乱码更糟。
-func decodeConsoleOutput(s string) string {
-	b := []byte(s)
+// 为什么按行判、而不是整块解码：同一条管道里常常混着两种编码。cmd.exe 自己的
+// 错误提示（「'head' 不是内部或外部命令」）是 OEM 代码页，而 go / npm / node
+// 这类程序写的是 UTF-8；整块按 GBK 解会把后一半的中文变成乱码，与要修的问题
+// 正好对称。整段已经是合法 UTF-8 时直接原样返回，一个字节都不动。
+//
+// 捕获缓冲按字节封顶，可能把多字节序列劈在尾部。这几个代码页都不会把合法序列
+// 映射成 U+FFFD，故截断产生的残渣可以按「行尾连续的 U+FFFD」去掉。
+func DecodeConsoleText(s string) string {
+	if s == "" || utf8.ValidString(s) {
+		return s
+	}
 	enc := consoleEncodingByCP(consoleCP())
 	if enc == nil {
 		return s
 	}
-	for cut := 0; cut <= 3 && cut <= len(b); cut++ {
-		out, _, err := transform.Bytes(enc.NewDecoder(), b[:len(b)-cut])
-		if err != nil {
+	lines := strings.SplitAfter(s, "\n")
+	changed := false
+	for i, ln := range lines {
+		if utf8.ValidString(ln) {
 			continue
 		}
-		if !strings.HasSuffix(string(out), "\uFFFD") {
-			return string(out)
+		out, _, err := transform.String(enc.NewDecoder(), ln)
+		if err != nil || out == "" {
+			continue
 		}
+		// 只削末尾的残渣：行内出现的 U+FFFD 是源数据本身坏了，削掉等于篡改内容。
+		if trimmed := strings.TrimRight(out, "\uFFFD"); trimmed != "" {
+			out = trimmed
+		}
+		lines[i] = out
+		changed = true
 	}
-	return s
+	if !changed {
+		return s
+	}
+	return strings.Join(lines, "")
 }

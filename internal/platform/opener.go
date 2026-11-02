@@ -156,14 +156,14 @@ func RunCommandCapture(command, workingDir string, timeout time.Duration) Comman
 	select {
 	case err := <-done:
 		return CommandOutcome{
-			Stdout:   decodeConsoleOutput(stdout.String()),
-			Stderr:   decodeConsoleOutput(stderr.String()),
+			Stdout:   DecodeConsoleText(stdout.String()),
+			Stderr:   DecodeConsoleText(stderr.String()),
 			ExitCode: exitCodeOf(err),
 		}
 	case <-time.After(timeout):
 		return CommandOutcome{
-			Stdout:   decodeConsoleOutput(stdout.String()),
-			Stderr:   decodeConsoleOutput(stderr.String()),
+			Stdout:   DecodeConsoleText(stdout.String()),
+			Stderr:   DecodeConsoleText(stderr.String()),
 			ExitCode: -1,
 			TimedOut: true,
 		}
