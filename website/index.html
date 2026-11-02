@@ -342,6 +342,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">AI 跑的长任务有面板能看了，回答中途也能插话</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>AI 跑脚本、dev server、构建这类长命令会进「后台任务」：工具栏终端图标带数字，输入框上方一条「后台运行中」标出命令和已跑时长，点开看日志、随时终止。</li>
+          <li>命令到点不再整组杀掉，而是转后台继续跑，结束时把结果送回当前对话；关掉 QuickDock 会一起收掉，不会留下占着端口的孤儿进程。</li>
+          <li>回答还在生成时可以直接发下一句：它插进当前这一轮，AI 看到这句就接着做，既不用排队等下一轮，也不用先按停止。</li>
+          <li>工具轮次不再固定 36 轮硬停：连续一批没有新进展才收尾，真跑满单次预算时会说明原因，留一句「接着做」即可。</li>
+          <li>工具卡片收成一行：动作、目标、耗时同排，状态改用图标着色；后台任务那行直接写「运行中 / 已结束 · 退出码 1」，点「查看」跳到面板里对应那条。</li>
+          <li>修复后台任务在特定启动顺序下整体失效——表现为进程确实起来了，面板和输入框上方却一条都不显示。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.36</span>
+          <span class="log-date">2026-11-01</span>
           <span class="log-title">输入框能直接选技能了，记忆会自己攒，切走对话也不打断</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -355,7 +372,7 @@
         </ul>
       </details>
 
-      <details class="log" open>
+      <details class="log">
         <summary>
           <span class="log-ver">v0.0.35</span>
           <span class="log-date">2026-10-31</span>
@@ -392,41 +409,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.33</span>
-          <span class="log-date">2026-10-29</span>
-          <span class="log-title">AI 客户端能直接指挥插件，MCP 工具可以逐个关</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>MCP 工具从 33 个加到 35 个：AI 客户端现在能给插件命令传结构化参数（不再只有一段文本）、带参数打开插件界面（纯前端插件也能用），还能回看执行记录。</li>
-          <li>插件可以在清单里声明自己的命令接受哪些参数：键名、类型、哪些必填，AI 照着填就行。写错的声明只丢这一个字段并记一条日志，不会导致插件装不上。</li>
-          <li>新增 <code>plugin_exec_logs</code>：AI 跑过哪些插件命令、成功还是失败、用了多久都能查。AI 触发的记录来源标为「MCP」，和手动点击区分开。</li>
-          <li>环境管理页的 MCP 工具清单按用途分组，可以逐个开关；关掉的工具客户端既看不到也调不动，改完提示需要重启服务或重新握手。</li>
-          <li>SSH 终端的复制粘贴修好了：选中后立刻点复制不再失效，<code>Ctrl+V</code> 不再冒出 <code>^V</code>，应用内复制的文本也会进剪贴板历史。</li>
-          <li>定时任务和工作区项目里「打开软件」的目标可以从已安装应用里点选，不必再手打 exe 全路径。</li>
-          <li>插件窗口声明的尺寸超出屏幕时自动收敛到可用区域，标题栏和右下角不会再被裁掉；插件给 AI 的长系统提示词上限放宽到 24000 字符，超出改为截断而不是让整次调用失败。</li>
-          <li>删除待办后，侧边栏角标立即更新，不用再等下一轮轮询。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.32</span>
-          <span class="log-date">2026-10-29</span>
-          <span class="log-title">DeepSeek Harness 更稳，更新器在国内网络下更可靠，更新说明更好读</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>DeepSeek Harness：修好了窗口里反复「connection lost」一直重连的问题——根因是系统 WebView2 内核过旧（dsh 用到的 Promise.withResolvers / AbortSignal.any 需 ≥119）。现在打开前会先校验 WebView2 版本，过低直接红字提示并拦截打开。</li>
-          <li>dsh 进程意外退出后，已打开的窗口会自动重拉并重导航（带熔断保护），崩溃对用户基本透明；同时修掉了「进程已死却显示运行中」的假存活误判。</li>
-          <li>安装 / 卸载 / 启动 / 停止都会把进度输出到「环境管理 → DeepSeek Harness」日志面板；卸载改成直接清理目录（不再走 npm uninstall，避免网络不通时卡在「正在卸载」），并加了一键重装。</li>
-          <li>更新器拉取 manifest 直连 GitHub 失败时也会自动走镜像重试，国内网络下更新检查更稳；更新检查的网络报错提示更全。</li>
-          <li>更新弹窗与设置弹窗里的「更新说明」从大段纯文本改成要点列表，更易读；无要点时回退原样展示。</li>
-          <li>数据层放行 openedSceneIds 白名单，支持工作区已打开场景标签页的持久化记忆。</li>
-        </ul>
-      </details>
     </div>
 
     <p class="log-more">

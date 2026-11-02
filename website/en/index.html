@@ -342,6 +342,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Long AI jobs get their own panel, and you can cut in mid-reply</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Long commands the AI runs — scripts, dev servers, builds — now show up as background jobs: a numbered terminal icon in the toolbar and a "running in background" bar above the input with the command and elapsed time. Open either to read logs or stop the job.</li>
+          <li>A command that hits its timeout is handed over to the background instead of being killed, and reports back to the same conversation when it ends. Quitting QuickDock stops all of them, so nothing keeps holding a port.</li>
+          <li>You can type while a reply is still streaming: the message is injected into the running turn, so the model picks it up and keeps going — no queueing, no need to hit stop first.</li>
+          <li>Tool rounds are no longer capped at a hard 36: it wraps up only when a whole batch makes no progress, and says so if it reaches the per-question budget — just ask it to continue.</li>
+          <li>Tool cards collapse to a single line — action, target and duration together, status shown by icon colour. Job rows read "running / finished · exit code 1", and "View" jumps to that entry in the panel.</li>
+          <li>Fixed background jobs silently failing under certain startup orders — the process did start, but neither the panel nor the bar above the input showed anything.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.36</span>
+          <span class="log-date">2026-11-01</span>
           <span class="log-title">Pick skills right in the input, memory writes itself, and switching away won't stop the reply</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -355,7 +372,7 @@
         </ul>
       </details>
 
-      <details class="log" open>
+      <details class="log">
         <summary>
           <span class="log-ver">v0.0.35</span>
           <span class="log-date">2026-10-31</span>
@@ -392,41 +409,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.33</span>
-          <span class="log-date">2026-10-29</span>
-          <span class="log-title">AI clients can drive plugins directly, and MCP tools can be switched off one by one</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>MCP grew from 33 tools to 35: AI clients can now pass structured parameters to plugin commands (not just a line of text), open a plugin window with parameters (frontend-only plugins included), and read back execution records.</li>
-          <li>Plugins can declare what parameters each command takes — key names, types, which ones are required — so the model fills them in instead of guessing. A malformed declaration only drops that one field and logs a warning; it never blocks the plugin from loading.</li>
-          <li>New <code>plugin_exec_logs</code> shows which plugin commands the AI ran, whether they succeeded and how long they took. Records triggered by AI are marked as MCP, so they stay distinguishable from manual clicks.</li>
-          <li>The MCP tool list in Environment is grouped by purpose and each tool can be toggled individually. A disabled tool is invisible and uncallable to clients; the panel tells you to restart the service or re-handshake.</li>
-          <li>SSH terminal copy and paste work again: copying right after selecting no longer fails, <code>Ctrl+V</code> no longer sends a literal <code>^V</code>, and text copied in-app now lands in clipboard history.</li>
-          <li>Scheduled tasks and workspace projects can pick their “open app” target from installed applications instead of typing a full exe path.</li>
-          <li>Plugin windows larger than the screen now shrink to the usable work area, so the title bar and bottom-right corner stay reachable. The system prompt cap for plugin AI calls is raised to 24,000 characters and truncates instead of failing the whole call.</li>
-          <li>Deleting a todo updates the sidebar badge immediately instead of waiting for the next poll.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.32</span>
-          <span class="log-date">2026-10-29</span>
-          <span class="log-title">DeepSeek Harness is more reliable, the updater works better on slow networks, release notes are easier to read</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>DeepSeek Harness: fixed the window looping on "connection lost" and retrying forever. The root cause was an outdated WebView2 runtime (dsh uses Promise.withResolvers / AbortSignal.any, which need ≥119). Now the WebView2 version is checked before opening; if it is too old, a red warning shows and opening is blocked.</li>
-          <li>If the dsh process exits unexpectedly, the open window now relaunches and re-navigates automatically (with circuit-breaking), so a crash is mostly transparent. Also fixed a false "running" state when the process had already died.</li>
-          <li>Install / uninstall / start / stop now stream progress to the "Environment → DeepSeek Harness" log panel. Uninstall now deletes the directories directly (no longer via npm uninstall, which could hang on "uninstalling" when the network is down), and offers one-click reinstall.</li>
-          <li>The updater now retries the manifest fetch through the mirror when the direct GitHub connection fails, so update checks are more reliable on slow networks. Network error messages on update checks are more complete.</li>
-          <li>The "release notes" in the update prompt and settings dialog are now a bullet list instead of a raw block of text; it falls back to the original text when there are no bullets.</li>
-          <li>The data layer whitelists openedSceneIds, so the open scene tabs in a workspace now persist across restarts.</li>
-        </ul>
-      </details>
     </div>
 
     <p class="log-more">
