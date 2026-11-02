@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,7 @@ import (
 	"quickdock/internal/fsguard"
 	"quickdock/internal/logger"
 	mcpsrv "quickdock/internal/mcp"
+	"quickdock/internal/platform"
 	"quickdock/internal/sysutil"
 )
 
@@ -99,15 +101,27 @@ func registerCode(d Deps) {
 			"overwrite": boolp("可选。文件已存在时是否整份覆盖，默认 false（此时报错并提示改用 file_edit）"),
 		})
 
-	r.add(runCommand, mcpsrv.LevelWrite, "run_command",
-		"在当前项目目录里执行一条 shell 命令并返回输出（stdout/stderr/退出码），用于装依赖、跑测试、构建、"+
-			"查看 git log 这类必须在命令行做的事。有超时与输出上限，超时会连同子进程一起结束。"+
-			"**不会自己结束的命令**（dev server、watch、长驻服务）请用 background=true 起成后台任务，"+
-			"否则你只能等到超时，等到的也只是一句「已终止」。"+
-			"**统计 / 分析类脚本**（比如数代码行数、跑一次性数据处理）：先 file_write 把脚本写成文件，"+
-			"再用 background=true 跑它，然后反复 job_status / job_output 看进度与结果，跑完再读最终输出——"+
-			"不要同步等它（会卡住整轮回答），也不要把几十 MB 的日志整份读进上下文。"+
-			"**高危命令会被拒绝执行**（删除根目录、git reset --hard、强推、发版等），此时请把命令交给用户自己运行",
+	// 平台提示必须写进描述：模型习惯性地用 bash 语法，Windows 上由 cmd.exe 执行时
+	// 一句 `go vet ./... | head -50` 就会直接报「'head' 不是内部或外部命令」，
+	// 模型拿到的是一坨乱码加退出码，还得再花一轮才反应过来。
+	cmdDesc := "在当前项目目录里执行一条 shell 命令并返回输出（stdout/stderr/退出码），用于装依赖、跑测试、构建、" +
+		"查看 git log 这类必须在命令行做的事。有超时与输出上限，超时会连同子进程一起结束。" +
+		"**不会自己结束的命令**（dev server、watch、长驻服务）请用 background=true 起成后台任务，" +
+		"否则你只能等到超时，等到的也只是一句「已终止」。" +
+		"**统计 / 分析类脚本**（比如数代码行数、跑一次性数据处理）：先 file_write 把脚本写成文件，" +
+		"再用 background=true 跑它，然后反复 job_status / job_output 看进度与结果，跑完再读最终输出——" +
+		"不要同步等它（会卡住整轮回答），也不要把几十 MB 的日志整份读进上下文。" +
+		"**高危命令会被拒绝执行**（删除根目录、git reset --hard、强推、发版等），此时请把命令交给用户自己运行"
+	if runtime.GOOS == "windows" {
+		cmdDesc += "。**当前是 Windows，命令由 cmd.exe 执行**：没有 head / tail / grep / ls / rm 这些 POSIX 工具，" +
+			"`| head -50`、`$(...)` 这类写法会直接报「不是内部或外部命令」（管道 `|`、`&&`、重定向 `>` 本身是支持的）。" +
+			"只想看前几行就交给工具自己的输出上限（超了会截断并说明），需要那些工具时改用 PowerShell：" +
+			"`powershell -NoProfile -Command \"...\"`"
+	}
+
+	// addCtx 而不是 add：命令是唯一会「跑很久」的工具，用户点停止时必须能连带
+	// 把进程树杀掉。用 add 的话工具拿不到取消信号，界面停了、命令还在后台烧 CPU。
+	r.addCtx(runCommand, mcpsrv.LevelWrite, "run_command", cmdDesc,
 		nil,
 		map[string]any{
 			"command":     str("要执行的完整命令，如 npm test / go build ./... / git log --oneline -10"),
@@ -447,7 +461,16 @@ func fileWrite(ctx context.Context, d Deps, args map[string]any) (any, error) {
 
 // -------- run_command --------
 
-func runCommand(d Deps, args map[string]any) (any, error) {
+// runCommand 在项目目录里执行一条命令。
+//
+// ctx 是整个工具里唯一能「停下来」的东西：用户点停止时，上游请求的 ctx 会被取消，
+// 这里据此把进程树杀掉。以前它自己开了一个 context.Background()，等于把这条路
+// 掐断了——界面上对话已经停了，命令还在后台跑满超时（默认 60 秒，最长 600 秒），
+// 一次全盘检索或构建就能让整台机器卡住，而用户以为自己已经停了。
+func runCommand(ctx context.Context, d Deps, args map[string]any) (any, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
 	command := strings.TrimSpace(mcpsrv.Arg(args, "command"))
 	if command == "" {
 		return nil, errors.New("缺少参数 command（要执行的命令）")
@@ -484,7 +507,7 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 	// 但高危命令照样不执行。
 	if v, ok := args["background"]; ok {
 		if b, isb := v.(bool); isb && b {
-			bg, err := startBackgroundCommand(d, command, dir)
+			bg, err := startBackgroundCommand(ctx, d, command, dir)
 			if err != nil {
 				return nil, err
 			}
@@ -502,7 +525,9 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 	if timeoutSec > runCmdMaxSec {
 		timeoutSec = runCmdMaxSec
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSec)*time.Second)
+	// 超时从调用方的 ctx 派生：这样「到点」和「用户点停止」两条路都能传到
+	// CommandContext 上，而不是各管一段。
+	ctx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSec)*time.Second)
 	defer cancel()
 
 	var cmd *exec.Cmd
@@ -520,10 +545,37 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 	cmd.Env = commandEnv(d)
 	// 独立进程组：超时时能整组杀掉，而不是留下 npm→node 这样的孙子进程继续占端口。
 	setProcessGroup(cmd)
+	// 取消与超时都走 Cancel：exec 默认只 Kill **直接子进程**，而 Windows 上真正
+	// 干活的是 cmd.exe 底下那个进程（ping / node / go）。默认行为下 cmd.exe 一退，
+	// 孙子进程还活着并握着 stdout 管道，于是 Wait 干等它跑完——表现就是
+	// 「对话停了，电脑还在卡」。这里换成整组杀。
+	cmd.Cancel = func() error {
+		killCommandTree(cmd, dir)
+		return nil
+	}
+	// 兜底：真有进程不讲理地握着管道时，Wait 到点直接关掉，返回结果。
+	cmd.WaitDelay = runCmdKillGrace
 
 	outBuf := &cappedBuffer{max: runCmdMaxOutput}
 	errBuf := &cappedBuffer{max: runCmdMaxOutput}
-	cmd.Stdout, cmd.Stderr = outBuf, errBuf
+
+	// 实时输出：命令跑几十秒时，卡片上要能边跑边看（见 cmd_stream.go）。
+	// 两路共用一个 stream，卡片上的顺序因此与终端一致；缓冲区仍各自一份，
+	// 最终结果里的 stdout / stderr 语义不变。
+	//
+	// 没挂回调（单测、后台执行、子 agent）时保持原来的写法，一个字节都不多走。
+	var stream *cmdStream
+	if emit := CmdProgressFrom(ctx); emit != nil {
+		callID := ToolCallIDFrom(ctx)
+		stream = newCmdStream(func(add, tail string) { emit(callID, add, tail) })
+		defer stream.Close()
+	}
+	if stream != nil {
+		cmd.Stdout = io.MultiWriter(outBuf, stream)
+		cmd.Stderr = io.MultiWriter(errBuf, stream)
+	} else {
+		cmd.Stdout, cmd.Stderr = outBuf, errBuf
+	}
 
 	started := time.Now()
 	if err := cmd.Start(); err != nil {
@@ -533,8 +585,8 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 	duration := time.Since(started)
 
 	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	canceled := errors.Is(ctx.Err(), context.Canceled)
 	if timedOut {
-		killCommandTree(cmd, dir)
 		// 再等一小会儿让输出落盘，否则「超时」那条结果里常常啥都没有。
 		deadline := time.Now().Add(runCmdKillGrace)
 		for time.Now().Before(deadline) && errBuf.buf.Len() == 0 && outBuf.buf.Len() == 0 {
@@ -547,7 +599,7 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 		var ee *exec.ExitError
 		if errors.As(waitErr, &ee) {
 			exitCode = ee.ExitCode()
-		} else if !timedOut {
+		} else if !timedOut && !canceled {
 			return nil, fmt.Errorf("命令执行失败：%v", waitErr)
 		}
 	}
@@ -555,15 +607,27 @@ func runCommand(d Deps, args map[string]any) (any, error) {
 	logger.I("[mcp] run_command %s → exit=%d 耗时=%v 输出=%d+%d 字节",
 		dir, exitCode, duration.Round(time.Millisecond), outBuf.buf.Len(), errBuf.buf.Len())
 
+	// 解码不能省：cmd.exe 自己写的提示（「'head' 不是内部或外部命令」）按 OEM
+	// 代码页输出，中文系统是 936。原样收下就是每个汉字一个 U+FFFD，模型拿到一坨
+	// 乱码只能瞎猜，用户看到的卡片也一样。
+	stdoutText := platform.DecodeConsoleText(outBuf.String())
+	stderrText := platform.DecodeConsoleText(errBuf.String())
+
 	res := map[string]any{
 		"cwd":        dir,
 		"command":    command,
 		"exitCode":   exitCode,
-		"ok":         exitCode == 0 && !timedOut,
-		"stdout":     outBuf.String(),
-		"stderr":     errBuf.String(),
+		"ok":         exitCode == 0 && !timedOut && !canceled,
+		"stdout":     stdoutText,
+		"stderr":     stderrText,
 		"durationMs": duration.Milliseconds(),
 		"timeout":    timedOut,
+	}
+	if canceled {
+		// 落库与卡片都要能看出「这是被停掉的，不是命令自己失败」。两者在
+		// 用户眼里差别很大：前者是他按了停止，后者要他去查问题。
+		res["canceled"] = true
+		res["note"] = "用户停止了本轮任务，命令已连同子进程一起终止"
 	}
 	if timedOut {
 		res["note"] = fmt.Sprintf("命令超过 %d 秒未结束，已连同子进程一起终止。需要更久请调大 timeout_sec（上限 %d）", timeoutSec, runCmdMaxSec)

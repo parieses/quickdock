@@ -70,6 +70,12 @@ func (s *dbSink) Event(kind string, data map[string]any) {
 	if s.db == nil || s.runID == "" {
 		return
 	}
+	// tool_output 是命令执行期间的实时滚动输出（run_command 专用）。
+	// 它的读者只有「此刻盯着屏幕的人」，内容与随后那条 tool_result 大量重复，
+	// 而频率是每 120ms 一条——落表只会把事件表撑大，回放时没人会去看过程录像。
+	if kind == "tool_output" {
+		return
+	}
 	payload := ""
 	if len(data) > 0 {
 		b, err := json.Marshal(data)

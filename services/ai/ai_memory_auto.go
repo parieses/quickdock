@@ -103,7 +103,9 @@ func (a *AIService) consolidateMemoryAsync(cfg AIProfile, convID, cwd, user, rep
 	if strings.TrimSpace(cwd) == "" || strings.TrimSpace(reply) == "" {
 		return
 	}
-	if utf8.RuneCountInString(strings.TrimSpace(user)) < memoryAutoMinUserRune {
+	if utf8.RuneCountInString(strings.TrimSpace(user)) < memoryAutoMinUserRune && len(files) == 0 {
+		// 「继续」「谢谢」这类话不单独跑一次整理——但**动了文件就照整理**：
+		// 续跑往往就是同一件事的后半段，跳过它等于那半段永远进不了长期记忆。
 		return
 	}
 	if !a.memoryAutoOn() {

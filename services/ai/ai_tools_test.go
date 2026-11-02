@@ -214,3 +214,113 @@ func TestEncodeToolRecords(t *testing.T) {
 		t.Fatal("encodeToolRecords 不应修改入参")
 	}
 }
+
+// madeProgress：轮次到顶后要不要再开一批，全看这一批有没有真往前走。
+//
+// 判反的两种代价都很实：判成「有进展」→ 一个原地打转的模型被续 12 轮，
+// 每轮全额计费；判成「没进展」→ 长活儿干到一半被硬停，用户只能再打一次「继续」。
+func TestMadeProgress(t *testing.T) {
+	cases := []struct {
+		name string
+		recs []aiToolRecord
+		want bool
+	}{
+		{"空批次", nil, false},
+		{"全都去重跳过", []aiToolRecord{{Dedup: true}, {Dedup: true}}, false},
+		{"全都用户拒绝", []aiToolRecord{{Denied: true}, {Denied: true}}, false},
+		{"去重里夹一个新调用", []aiToolRecord{{Dedup: true}, {}}, true},
+		// 执行失败也算进展：模型会换参数再试，那正是它在想办法。
+		{"失败也是进展", []aiToolRecord{{Error: "no such file"}}, true},
+	}
+	for _, c := range cases {
+		if got := madeProgress(c.recs); got != c.want {
+			t.Errorf("%s: madeProgress = %v, want %v", c.name, got, c.want)
+		}
+	}
+}
+
+// toolOutputText：卡片上该显示的是「命令输出了什么」，不是那段给模型的 JSON。
+//
+// 之前卡片直接铺 Result，run_command 的结果是 `{"stdout":"line1\nline2"...}`：
+// 换行成了 \n、引号成了 \"，400 字里装不下几行，截断后连 JSON 都不成立——
+// 用户看到的就是一屏转义字符加一句「已截断」。
+func TestToolOutputText(t *testing.T) {
+	cmd := func(m map[string]any) any { return m }
+	cases := []struct {
+		name string
+		tool string
+		val  any
+		want string
+	}{
+		{
+			"stdout 优先，单独出现时不加标签",
+			"run_command",
+			cmd(map[string]any{"stdout": "ok\n", "stderr": "", "exitCode": 0}),
+			"ok",
+		},
+		{
+			"两路都有内容才给 stderr 分隔",
+			"run_command",
+			cmd(map[string]any{"stdout": "out", "stderr": "bad", "exitCode": 1}),
+			"exit 1\nout\n--- stderr ---\nbad",
+		},
+		{
+			"只有 stderr 时直接给内容",
+			"run_command",
+			cmd(map[string]any{"stdout": "", "stderr": "'head' 不是内部或外部命令", "exitCode": 255}),
+			"exit 255\n'head' 不是内部或外部命令",
+		},
+		{
+			"超时要写进正文",
+			"run_command",
+			cmd(map[string]any{"stdout": "", "stderr": "", "exitCode": 0, "timeout": true}),
+			"超时，已终止进程",
+		},
+		{
+			"成功且无输出要有明确的一句话",
+			"run_command",
+			cmd(map[string]any{"stdout": "", "stderr": "", "exitCode": 0}),
+			"（无输出）",
+		},
+		{
+			"后台任务没有 stdout 键，交回原始结果",
+			"run_command",
+			cmd(map[string]any{"jobId": "j1", "logPath": "/tmp/a.log"}),
+			"",
+		},
+		{
+			"被停止要写成一句话，而不是当成命令失败",
+			"run_command",
+			cmd(map[string]any{"stdout": "", "stderr": "", "exitCode": -1, "canceled": true}),
+			"exit -1 · 已停止（进程已终止）",
+		},
+		{
+			// 读文件的卡片：先给「读了哪一段、读全了没有」，再给正文。
+			// 没有这一行时，用户看到的是一段被截断的 JSON，只会以为 AI 只读了十几行。
+			"file_read 给正文与读到的区间",
+			"file_read",
+			cmd(map[string]any{
+				"from": 12, "to": 41, "lines": 30, "truncated": true,
+				"content": "   12→package main\n   13→func main() {}",
+			}),
+			"第 12–41 行 · 共 30 行 · 文件还有更多内容（需要时用 offset 继续读）\n" +
+				"   12→package main\n   13→func main() {}",
+		},
+		{
+			"file_read 读到末尾",
+			"file_read",
+			cmd(map[string]any{"from": 1, "to": 2, "lines": 2, "truncated": false, "content": "     1→a\n     2→b"}),
+			"第 1–2 行 · 共 2 行 · 已到文件末尾\n     1→a\n     2→b",
+		},
+		// 空文件 / offset 越界：正文为空时交回原始结果，原因由结果自己的
+		// truncatedNote 说明。
+		{"file_read 空内容", "file_read", cmd(map[string]any{"content": ""}), ""},
+		// 其它工具的结果有自己的展示分支，这里不插手。
+		{"非命令工具", "dir_list", cmd(map[string]any{"entries": []any{}}), ""},
+	}
+	for _, c := range cases {
+		if got := toolOutputText(c.tool, c.val); got != c.want {
+			t.Errorf("%s:\n got: %q\nwant: %q", c.name, got, c.want)
+		}
+	}
+}

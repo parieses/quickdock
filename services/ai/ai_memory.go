@@ -9,9 +9,15 @@ package ai
 //     约定、决策与踩过的坑」；无空间任务里是「用户是谁、偏好、问过什么、给过的结论」。
 //     由 AI 通过 project_memory 工具主动维护——这些需要「判断哪些值得长期记住」，
 //     机器归纳不了，交给模型更准。
-//   - memory/YYYY-MM-DD.md  每日记忆（当天活动日志）：每轮结束后由系统自动追加，
-//     记录「用户要了什么、改了哪些文件、跑了几轮」。纯确定性提取，不调模型，
-//     所以一定存在、且不会漏。AI 只读不写它（手动写会破坏自动日志的口径）。
+//   - memory/YYYY-MM-DD.md  每日记忆（当天的活动日志）：顶部是「今天在做什么」的
+//     工作重点（按任务合并、跨轮累加），下面是逐轮的活动记录（谁在几点要了什么、
+//     改了哪些文件、跑了几轮）。两者都是纯确定性提取，不调模型，所以一定存在、
+//     且不会漏。AI 只读不写它（手动写会破坏自动日志的口径）。
+//
+// 为什么要有「工作重点」这一层：原来只有逐轮记录，用户说一句「继续」就多一段
+// 「- 用户：继续 / - 工具：12 轮」——一整天看下来读不出今天干了什么，注入给模型
+// 也只是一串没有主语的碎片。重点块按会话去重，同一个任务续跑几次也只是把轮次
+// 累加上去。
 //
 // **记忆跟着「工作区」走，但工作区不等于每个任务的临时目录**（2026-11-01 修）：
 //
@@ -31,10 +37,13 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+	"unicode/utf8"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -135,19 +144,46 @@ func readProjectMemory(cwd string) string {
 	now := time.Now()
 	// 今日 + 昨日：够覆盖「这次会话之前做到哪了」，又不把一整周的日志都塞进来。
 	for _, d := range []time.Time{now, now.AddDate(0, 0, -1)} {
-		data, err := os.ReadFile(dailyMemoryPath(sc.root, d))
-		if err != nil {
-			continue
-		}
-		if s := strings.TrimSpace(string(data)); s != "" {
+		s := readDailyMemory(dailyMemoryPath(sc.root, d), dailyCap)
+		if s != "" {
 			b.WriteString(fmt.Sprintf("【%s 每日记忆】\n", d.Format("2006-01-02")))
-			// 日志是只追加的，最旧的在最前面：超长时该保住的是**最近**那几条，
-			// 从头截会把今天刚做的事裁掉、留下早上的闲聊。
-			b.WriteString(clipRunesTail(s, dailyCap))
+			b.WriteString(s)
 			b.WriteString("\n\n")
 		}
 	}
 	return strings.TrimSpace(b.String())
+}
+
+// readDailyMemory 读一天的活动日志并压进 cap：**工作重点块始终保留**，活动记录只留最近的。
+//
+// 不能整份 clipRunesTail：重点块在文件顶部，按尾巴截正是最先被裁掉的那部分，
+// 于是「今天在做什么」反而看不到，只剩一串「用户：继续」——那恰恰是这次要修的毛病。
+func readDailyMemory(path string, cap int) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	s := strings.TrimSpace(string(data))
+	if s == "" {
+		return ""
+	}
+	head, body := splitDailySections(s)
+	if head == "" {
+		// 旧格式（只有活动记录）：只能按尾巴截，最近的记录才有用。
+		return clipRunesTail(s, cap)
+	}
+	out := clipRunes(head, cap*2/5)
+	body = strings.TrimSpace(body)
+	if body == "" {
+		return out
+	}
+	// 换行 + clipRunesTail 那句省略号提示都要算进预算，否则拼完会超出去十几个字。
+	rest := cap - utf8.RuneCountInString(out) - 1 - utf8.RuneCountInString(clipTailEllipsis)
+	if rest <= 200 {
+		// 剩下的位置太小，塞进去只会读到半句话，不如只给重点。
+		return out
+	}
+	return out + "\n" + clipRunesTail(body, rest)
 }
 
 // memoryBlock 组装注入系统提示的整块记忆（含指引），不需要注入时返回空串。
@@ -174,11 +210,22 @@ func memoryBlock(cwd string) string {
 	return "[助手记忆]\n（还没有长期记忆）" + memoryGuidance(sc)
 }
 
-// appendDailyMemory 在一轮正常结束后追加一条当日活动记录。
+// appendDailyMemory 在一轮正常结束后追加一条当日记录。
 //
 // 纯确定性提取（用户诉求 + 改了哪些文件 + 工具轮次），不调模型——这是记忆的
 // 可靠底座。即使 AI 从没主动写过 MEMORY.md，每日记忆也能让它下一轮知道「刚才做了什么」。
-func appendDailyMemory(convID, cwd, userMsg string, files []string, rounds, tools int) {
+//
+// 结构（见文件头注释）：
+//
+//	# 2026-11-02 · 工作重点
+//	- 扫描这个项目 · 12 轮 / 35 次调用 · 09:55 · 3f2a1b
+//	## 09:55 · 3f2a1b
+//	- 用户：扫描这个项目
+//	- 工具：12 轮 / 35 次调用
+//
+// title 是这个任务的标题（会话标题，通常是首句提问）：重点块用它当条目名，
+// 续跑的「继续」才不会把条目名覆盖成「继续」。
+func appendDailyMemory(convID, cwd, title, userMsg string, files []string, rounds, tools int) {
 	sc := resolveMemoryScope(cwd)
 	if sc.root == "" {
 		return
@@ -189,14 +236,48 @@ func appendDailyMemory(convID, cwd, userMsg string, files []string, rounds, tool
 		return
 	}
 	now := time.Now()
+	path := dailyMemoryPath(root, now)
+	key := shortConvID(convID)
+
+	// 读-改-写必须串行：两个任务同时结束时会各自读到旧文件、各自覆盖，
+	// 丢的是对方那条重点与活动记录（与 MEMORY.md 的 memoryAutoMu 同理）。
+	dailyMemoryMu.Lock()
+	defer dailyMemoryMu.Unlock()
+
+	cur := ""
+	if data, err := os.ReadFile(path); err == nil {
+		cur = string(data)
+	}
+	head, body := splitDailySections(cur)
+
+	// 条目名优先用任务标题：续跑时用户只打了「继续」，那不是一个重点。
+	label := strings.TrimSpace(title)
+	if label == "" {
+		label = strings.TrimSpace(userMsg)
+	}
+	items := upsertDailyFocus(parseDailyFocus(head), dailyFocus{
+		key:    key,
+		label:  clipRunes(collapseSpaces(label), dailyFocusLabelRune),
+		rounds: rounds,
+		tools:  tools,
+		at:     now.Format("15:04"),
+	})
+
 	var b strings.Builder
-	head := now.Format("2006-01-02 15:04")
+	b.WriteString(buildDailyHead(now.Format("2006-01-02"), items))
+	b.WriteString("\n")
+	if s := strings.TrimSpace(body); s != "" {
+		b.WriteString(s)
+		b.WriteString("\n")
+	}
+
+	headTime := now.Format("2006-01-02 15:04")
 	if !sc.project {
 		// 共享日志里所有任务写同一个文件：不标来源的话，看回日志根本分不清
 		// 「这条是谁问的」，而「记得问过什么」正是这份记忆存在的理由。
-		head += " · " + shortConvID(convID)
+		headTime += " · " + key
 	}
-	fmt.Fprintf(&b, "\n## %s\n", head)
+	fmt.Fprintf(&b, "\n## %s\n", headTime)
 	if q := strings.TrimSpace(userMsg); q != "" {
 		b.WriteString("- 用户：")
 		b.WriteString(clipRunes(q, 300))
@@ -210,15 +291,141 @@ func appendDailyMemory(convID, cwd, userMsg string, files []string, rounds, tool
 	if rounds > 0 || tools > 0 {
 		fmt.Fprintf(&b, "- 工具：%d 轮 / %d 次调用\n", rounds, tools)
 	}
-	f, err := os.OpenFile(dailyMemoryPath(root, now), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		logger.W("[ai] 写每日记忆失败 root=%s: %v", root, err)
-		return
-	}
-	defer f.Close()
-	if _, err := f.WriteString(b.String()); err != nil {
+	// 一天下来活动记录能堆很长：超了从**最旧**的小节丢起，重点块在文件顶部不受影响
+	// （trimMemoryToCap 保留第一个 "## " 之前的内容）。
+	content := trimMemoryToCap(b.String(), dailyMemoryFileCap)
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
 		logger.W("[ai] 写每日记忆失败 root=%s: %v", root, err)
 	}
+}
+
+// ---- 每日记忆：工作重点块 ----
+
+const (
+	// dailyFocusMaxLines 重点块最多记几条：一天做了十几件事已经很满，
+	// 再细的追查交给下面的活动记录。
+	dailyFocusMaxLines = 12
+	// dailyFocusLabelRune 重点条目名的长度上限（与标题截断同一量级）。
+	dailyFocusLabelRune = 30
+	// dailyMemoryFileCap 单个每日记忆文件的体积上限。
+	// 一天里所有任务都写这一个文件，不限的话它会成为每次注入都要读的大文件。
+	dailyMemoryFileCap = 20000
+	// focusLineSep 重点行的分隔符。选 " · " 而不是 " | "：中文行里它更像分隔符。
+	focusLineSep = " · "
+)
+
+// dailyMemoryMu 同一时刻只改一份每日记忆（见 appendDailyMemory）。
+var dailyMemoryMu sync.Mutex
+
+// dailyFocus 重点块里的一条：一个任务（会话）今天投入了多少。
+type dailyFocus struct {
+	key    string // 会话短 id：同一个任务的多次续跑合并成一条
+	label  string // 任务标题（没有标题时用首句提问）
+	rounds int
+	tools  int
+	at     string // 最后更新的时刻 "15:04"
+}
+
+func (f dailyFocus) line() string {
+	return "- " + f.label + focusLineSep +
+		fmt.Sprintf("%d 轮 / %d 次调用", f.rounds, f.tools) + focusLineSep +
+		f.at + focusLineSep + f.key
+}
+
+// focusCountRe 匹配重点行里那段「N 轮 / M 次调用」。
+var focusCountRe = regexp.MustCompile(`^(\d+) 轮 / (\d+) 次调用$`)
+
+// parseFocusLine 解析一条重点行（格式见 dailyFocus.line）。
+//
+// 从右往左切：任务标题里本身可能带 " · "（「性能 · 首页」），从左切会把标题切碎。
+// 尾部三段（轮次 / 时刻 / 会话 id）格式固定，认不出来就整行放弃——
+// 宁可少一条，也不要写出一条对不上的（它会被下次累加成天文数字）。
+func parseFocusLine(line string) (dailyFocus, bool) {
+	s := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "- "))
+	parts := strings.Split(s, focusLineSep)
+	if len(parts) < 4 {
+		return dailyFocus{}, false
+	}
+	n := len(parts)
+	m := focusCountRe.FindStringSubmatch(parts[n-3])
+	if m == nil {
+		return dailyFocus{}, false
+	}
+	f := dailyFocus{key: parts[n-1], at: parts[n-2]}
+	f.rounds, _ = strconv.Atoi(m[1])
+	f.tools, _ = strconv.Atoi(m[2])
+	f.label = strings.Join(parts[:n-3], focusLineSep)
+	return f, true
+}
+
+// splitDailySections 把每日记忆拆成「重点块」和「活动记录」。
+//
+// 旧格式（没有 `# ` 标题、直接就是 `## 09:55` 小节）整份都算活动记录，
+// 下次写入时自动补上重点块——旧文件不需要迁移脚本。
+func splitDailySections(content string) (head, body string) {
+	s := strings.TrimLeft(content, "\n")
+	if !strings.HasPrefix(s, "# ") {
+		return "", s
+	}
+	if i := strings.Index(s, "\n## "); i >= 0 {
+		return strings.TrimRight(s[:i], "\n"), s[i+1:]
+	}
+	return strings.TrimRight(s, "\n"), ""
+}
+
+// parseDailyFocus 从重点块里取出所有能认出来的条目。
+func parseDailyFocus(head string) []dailyFocus {
+	out := make([]dailyFocus, 0, dailyFocusMaxLines)
+	for _, line := range strings.Split(head, "\n") {
+		if !strings.HasPrefix(strings.TrimSpace(line), "- ") {
+			continue
+		}
+		if f, ok := parseFocusLine(line); ok {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
+// upsertDailyFocus 按会话 id 合并：同一条任务续跑只累加，不新增条目。
+//
+// 超过上限时从**最早出现**的那条丢起：列表按首次出现排序，所以正好是「今天最早
+// 开始的那件事」先走；正在做的任务一定排在后面，不会被自己的第 N 次续跑挤掉。
+func upsertDailyFocus(items []dailyFocus, f dailyFocus) []dailyFocus {
+	for i := range items {
+		if items[i].key != f.key {
+			continue
+		}
+		if f.label != "" {
+			items[i].label = f.label
+		}
+		items[i].rounds += f.rounds
+		items[i].tools += f.tools
+		items[i].at = f.at
+		return items
+	}
+	if f.label == "" || (f.rounds == 0 && f.tools == 0) {
+		return items
+	}
+	items = append(items, f)
+	if len(items) > dailyFocusMaxLines {
+		items = items[len(items)-dailyFocusMaxLines:]
+	}
+	return items
+}
+
+func buildDailyHead(day string, items []dailyFocus) string {
+	var b strings.Builder
+	b.WriteString("# " + day + focusLineSep + "工作重点\n")
+	for _, it := range items {
+		b.WriteString(it.line() + "\n")
+	}
+	return b.String()
+}
+
+// collapseSpaces 把换行与连续空白压成单个空格：重点行必须是一行。
+func collapseSpaces(s string) string {
+	return strings.Join(strings.Fields(s), " ")
 }
 
 // shortConvID 任务 id 前 8 位（与 ai_tasks 下的目录名同一段），只用于在共享日志里标来源。
@@ -465,6 +672,9 @@ func itoa(n int) string { return strconv.Itoa(n) }
 
 // ---- 小工具 ----
 
+// clipTailEllipsis clipRunesTail 截断时补的提示。单列出来是因为它也算进注入预算。
+const clipTailEllipsis = "…（更早的记录已省略）\n"
+
 // clipRunesTail 超长时保留**末尾** max 个字符（前面加省略号）。
 //
 // 每日记忆是只追加的，超长说明这一天记了很多条；这时候要的是「刚做完的事」，
@@ -477,7 +687,7 @@ func clipRunesTail(s string, max int) string {
 	if len(r) <= max {
 		return s
 	}
-	return "…（更早的记录已省略）\n" + string(r[len(r)-max:])
+	return clipTailEllipsis + string(r[len(r)-max:])
 }
 
 func dirExists(p string) bool {

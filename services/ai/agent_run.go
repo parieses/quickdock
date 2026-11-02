@@ -18,6 +18,7 @@ package ai
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -137,6 +138,21 @@ type AgentRunResult struct {
 // 分析，EventSink 接口参数过不了 JSON 绑定（编译期那条 WARNING 就是它）。
 func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSink) AgentRunResult {
 	res := AgentRunResult{ConvID: strings.TrimSpace(req.ConvID)}
+
+	// 这一轮起的后台任务（run_command background=true）记在 ctx 上。
+	// 用户点停止时 ctx 被取消，这里把它们一并收掉：命令类工具会随 ctx 死，
+	// 后台任务却是独立进程，不收就会「对话停了、CPU 还在满」。
+	// 正常跑完时 ctx 还没取消，defer 里什么都不做。
+	jobs := &aitools.JobCollector{}
+	ctx = aitools.WithJobCollector(ctx, jobs)
+	defer func() {
+		if ctx.Err() == nil {
+			return
+		}
+		if n := jobs.KillAll(); n > 0 {
+			logger.I("[ai] 已停止本轮启动的 %d 个后台任务 conv=%s", n, res.ConvID)
+		}
+	}()
 
 	// 首字延迟的起点。必须在函数入口取：用户感知的等待是「按下回车到第一个字」，
 	// 含上下文组装（查库 + 摘要压缩）的耗时。挪到调模型之前会让这个数字凭空变小。
@@ -479,12 +495,13 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		sink.Push("token", text)
 	}
 
-	// 最多 aiToolMaxRounds 轮工具调用 + 1 轮收尾。
+	// 轮次上限按「一批」算，不是整次提问的硬天花板（见下面 madeProgress 处）。
 	// 收尾那一轮不带 tools：轮次用尽还允许调工具的话，用户会看到卡片一路往外冒、
 	// 就是等不到答案。
 	loopBudget := aiLoopBudget(cfg)
+	limit := aiToolMaxRounds
 
-	for turnIdx := 1; turnIdx <= aiToolMaxRounds+1; turnIdx++ {
+	for turnIdx := 1; turnIdx <= limit+1; turnIdx++ {
 		// 每轮按「本轮到底有没有工具」重建 system（覆盖式，见 applySystemHints）。
 		// 这一句和上面撤 tools 是一对：只撤 tools 不撤提示，模型会把调用写成正文。
 		applySystemHints(messages, baseSystem, mode, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
@@ -564,7 +581,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		if len(turn.ToolCalls) == 0 {
 			break // 没有工具调用 = 这一轮就是最终回答
 		}
-		if turnIdx > aiToolMaxRounds {
+		if turnIdx > limit {
 			// 兜底：收尾轮已经不带 tools，正常模型不会再返回 tool_calls。
 			// 真返回了也没有下一轮可以呈现结果，直接忽略并留痕。
 			logger.W("[ai] 收尾轮仍返回 %d 个工具调用，已忽略 conv=%s", len(turn.ToolCalls), res.ConvID)
@@ -579,7 +596,18 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				"args": logger.Trunc(c.Args, 200),
 			})
 		}
-		toolMsgs, recs := a.runToolCalls(ctx, turn.ToolCalls, turnIdx, turn.Content, seenCalls, cwd)
+		// 命令执行期间的实时输出（pip install / npm install / go build 这类长命令）：
+		// 卡片要能边跑边看到进度，而不是等跑完才一次性铺开。
+		//
+		// 回调挂在 ctx 上而不是给 runToolCalls 加参数：工具签名与注册表都不动，
+		// 这一组里每个调用自己的 id 由 execOneToolCall 挂在同一个 ctx 上，
+		// 所以并发跑两条命令也不会把输出写到同一张卡片上。
+		toolCtx := aitools.WithCmdProgress(ctx, func(callID, add, tail string) {
+			sink.Event("tool_output", map[string]any{
+				"id": callID, "add": add, "tail": tail,
+			})
+		})
+		toolMsgs, recs := a.runToolCalls(toolCtx, turn.ToolCalls, turnIdx, turn.Content, seenCalls, cwd)
 		records = append(records, recs...)
 		messages = append(messages, toolMsgs...)
 		for _, r := range recs {
@@ -599,6 +627,10 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				"runId": r.RunID, "nodeId": r.NodeID,
 				// 保留换行：JSON 结果压成一行就没法读了。
 				"result": truncateKeepLines(r.Result, 400),
+				// 人看的输出（命令的 stdout/stderr）：卡片上铺的是它，
+				// 不是上面那段给模型的 JSON——那段在 400 字里只剩转义字符，
+				// 截断后连 JSON 都不是，用户看到的就是一句「已截断」。
+				"output": truncateKeepLines(r.Output, aiRecordOutputMaxRune),
 			})
 		}
 
@@ -606,10 +638,37 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			lastErr = ctx.Err()
 			break
 		}
-		// 轮次用尽：下一轮不带工具。不额外塞一条 user 提示——
-		// tool 结果后面跟 user 消息在部分网关会被判成非法序列，
-		// 而 tools 消失本身就足以让模型收尾。
-		if turnIdx >= aiToolMaxRounds {
+		// 一批轮次用尽：要么再开一批，要么撤掉工具让模型收尾。
+		//
+		// 为什么不再硬停：12 轮对「扫描整个项目」「整理一份长文档」这类活儿远远不够，
+		// 硬停的表现就是干到一半自己收尾，用户只能再打一次「继续」——而那不是新的
+		// 提问，是同一件事的后半段（还会多出一条把用户诉求记成「继续」的烂记忆）。
+		// 所以只要这一批里模型确实在推进（有真正执行过的新调用，不是被去重跳过的原地
+		// 打转），就再给一批；总轮次仍受 aiToolHardMaxRounds 兜底，钱不会失控。
+		if turnIdx >= limit {
+			if limit < aiToolHardMaxRounds && madeProgress(recs) {
+				limit += aiToolMaxRounds
+				if limit > aiToolHardMaxRounds {
+					limit = aiToolHardMaxRounds
+				}
+				logger.I("[ai] 工具轮次已用满 %d 轮，仍有新调用，自动延长到 %d conv=%s",
+					turnIdx, limit, res.ConvID)
+				// 必须说一声：界面上看着像「AI 自己又开了一轮」，不说清楚会以为是卡住了。
+				sink.Event("notice", map[string]any{
+					"message": fmt.Sprintf("已连续执行 %d 轮工具，工作还没做完，自动继续（本次最多 %d 轮）", turnIdx, limit),
+				})
+				continue
+			}
+			// 收尾：不额外塞一条 user 提示——tool 结果后面跟 user 消息在部分网关
+			// 会被判成非法序列，而 tools 消失本身就足以让模型收尾。
+			//
+			// 到了绝对上限还得收：这时要给用户一句人话，而不是让回答凭空停住——
+			// 「AI 是不是坏了」和「它跑满了上限」在界面上长得一模一样。
+			if limit >= aiToolHardMaxRounds && madeProgress(recs) {
+				sink.Event("notice", map[string]any{
+					"message": fmt.Sprintf("本次已连续执行 %d 轮工具，达到单次上限；还有没做完的，再发一句「继续」接着做", turnIdx),
+				})
+			}
 			tools = nil
 		}
 	}
@@ -703,7 +762,16 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				dailyFiles = append(dailyFiles, rec.Path)
 			}
 		}
-		appendDailyMemory(res.ConvID, cwd, req.Message, dailyFiles, rounds, len(records))
+		// 重点块按任务标题归并：续跑时用户只打了「继续」，用它当条目名等于没记。
+		// 首轮标题还没生成（conv.Title 为空），这时标题就是这句提问本身。
+		dailyTitle := ""
+		if conv != nil {
+			dailyTitle = conv.Title
+		}
+		if dailyTitle == "" {
+			dailyTitle = message
+		}
+		appendDailyMemory(res.ConvID, cwd, dailyTitle, req.Message, dailyFiles, rounds, len(records))
 		// 自动整理记忆：把这一轮里值得长期记住的结论 / 偏好摘进 MEMORY.md。
 		// 后台跑一次小调用——它跟「这次回答」无关，用户不该等它；失败也只是记忆少一条。
 		// 计划模式不写：那是只读模式，连 AI 自己的记忆目录都不该动（见 ai_chat.go 同款判断）。

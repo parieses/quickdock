@@ -14,6 +14,7 @@ package aitools
 //     会一直占着端口，而那是最难排查的一类故障。
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -71,7 +72,7 @@ func jobLogPath(id string) string {
 //
 // 返回值里带着 job_id 与 log_path：模型要用它们调 job_status / job_output，
 // 用户要能自己去看日志。
-func startBackgroundCommand(d Deps, command, dir string) (map[string]any, error) {
+func startBackgroundCommand(ctx context.Context, d Deps, command, dir string) (map[string]any, error) {
 	if d.DB == nil {
 		return nil, errors.New("数据库不可用，无法记录后台任务")
 	}
@@ -125,6 +126,10 @@ func startBackgroundCommand(d Deps, command, dir string) (map[string]any, error)
 	jobsMu.Unlock()
 
 	go waitBackgroundJob(d, id, p, f)
+	// 登记到本轮：用户点停止时，runAgent 会按这份名单把任务一起收掉。
+	// 不登记的话，一个 background=true 的全盘检索在停止之后还会跑到天荒地老，
+	// 而界面上没有任何地方能停它。
+	recordJob(ctx, id)
 
 	logger.I("[ai-job] 后台任务 %s 已启动 pid=%d: %s", id, cmd.Process.Pid, command)
 	res := map[string]any{
@@ -305,6 +310,9 @@ func jobOutput(d Deps, args map[string]any) (any, error) {
 //
 // 按字节截断而不是按行：一条 build 可能输出一行几百 KB 的进度条，
 // 按行读会把整行读进内存再丢掉。
+//
+// 读出后按控制台代码页补一次解码：日志里存的是子进程写出的原始字节，
+// 中文 Windows 下 cmd / 部分 CLI 是 GBK，直接当 UTF-8 给模型就是一片 U+FFFD。
 func readJobLog(path string, head bool) (string, bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
@@ -320,7 +328,7 @@ func readJobLog(path string, head bool) (string, bool, error) {
 	if head || size <= aiJobOutputMax {
 		buf := make([]byte, aiJobOutputMax)
 		n, _ := f.Read(buf)
-		return string(buf[:n]), truncated, nil
+		return platform.DecodeConsoleText(string(buf[:n])), truncated, nil
 	}
 	if _, err := f.Seek(size-aiJobOutputMax, 0); err != nil {
 		return "", false, err
@@ -332,7 +340,26 @@ func readJobLog(path string, head bool) (string, bool, error) {
 	if i := strings.IndexByte(s, '\n'); i >= 0 && i < len(s)-1 {
 		s = s[i+1:]
 	}
-	return s, truncated, nil
+	return platform.DecodeConsoleText(s), truncated, nil
+}
+
+// KillJob 终止一个还在跑的后台任务，返回是否真的杀到了东西。
+//
+// 与 StopAllJobs 的分工：那个是「应用要退了，全部收掉」，这个是「这一轮别干了」。
+// 用户点停止时按本轮登记过的 id 逐个停，不会误伤别的会话里正在跑的任务。
+func KillJob(id string) bool {
+	jobsMu.Lock()
+	p, ok := jobsProcs[id]
+	if ok {
+		p.killedByUs = true
+	}
+	jobsMu.Unlock()
+	if !ok {
+		return false
+	}
+	killCommandTree(p.cmd, p.dir)
+	logger.I("[ai-job] 后台任务 %s 已被主动终止", id)
+	return true
 }
 
 // StopAllJobs 终止所有还在跑的后台任务（应用退出时调用）。

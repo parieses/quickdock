@@ -4,8 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"quickdock/internal/fsguard"
 )
@@ -269,5 +272,95 @@ func TestFileWriteOutsideWriteRoots(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "可写范围") && !strings.Contains(err.Error(), "可写的目录") {
 		t.Fatalf("错误应说明白名单限制: %v", err)
+	}
+}
+
+// run_command 必须跟着 ctx 走。
+//
+// 这条是「用户点了停止，命令还在后台吃 CPU」的回归防线：以前它自己开了一个
+// context.Background()，取消信号到不了进程上，一条全盘检索会跑满 60 秒。
+func TestRunCommandStopsOnCancel(t *testing.T) {
+	dir := t.TempDir()
+	cmd := "sleep 20"
+	if runtime.GOOS == "windows" {
+		// ping 是系统自带的「等 N 秒」：不依赖额外工具，且不像 timeout 那样
+		// 需要交互式控制台。
+		cmd = "ping -n 20 127.0.0.1"
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	var res any
+	var err error
+	go func() {
+		defer close(done)
+		res, err = runCommand(ctx, Deps{}, map[string]any{"command": cmd, "_cwd": dir})
+	}()
+	time.Sleep(300 * time.Millisecond)
+	start := time.Now()
+	cancel()
+
+	select {
+	case <-done:
+	case <-time.After(8 * time.Second):
+		t.Fatal("ctx 取消后命令仍在跑（没有随停止一起终止）")
+	}
+	if err != nil {
+		t.Fatalf("取消不该按失败返回：%v", err)
+	}
+	if waited := time.Since(start); waited > 5*time.Second {
+		t.Fatalf("取消后收尾太慢：%v", waited)
+	}
+	m, ok := res.(map[string]any)
+	if !ok {
+		t.Fatalf("结果类型不对：%T", res)
+	}
+	if m["canceled"] != true {
+		t.Fatalf("结果里应标明 canceled=true：%v", m)
+	}
+	if m["ok"] == true {
+		t.Fatalf("被停掉的命令不该标成成功：%v", m)
+	}
+}
+
+// 命令执行期间的实时输出：挂了回调就必须边跑边推，而不是等命令结束。
+//
+// 这条测试用真实进程跑（echo 两条），因为要验证的正是「os/exec 的管道复制
+// goroutine 会不会真的把字节送到 stream 上」——用假 Write 测不出来。
+func TestRunCommandStreamsOutput(t *testing.T) {
+	dir := t.TempDir()
+	cmd := "echo alpha; echo beta"
+	if runtime.GOOS == "windows" {
+		cmd = "echo alpha & echo beta"
+	}
+
+	type prog struct{ id, add, tail string }
+	var mu sync.Mutex
+	var events []prog
+
+	ctx := WithToolCallID(context.Background(), "call-1")
+	ctx = WithCmdProgress(ctx, func(callID, add, tail string) {
+		mu.Lock()
+		defer mu.Unlock()
+		events = append(events, prog{id: callID, add: add, tail: tail})
+	})
+
+	if _, err := runCommand(ctx, Deps{}, map[string]any{"command": cmd, "_cwd": dir}); err != nil {
+		t.Fatalf("命令执行失败：%v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(events) == 0 {
+		t.Fatal("挂了回调却一条实时输出都没收到")
+	}
+	text := ""
+	for _, e := range events {
+		if e.id != "call-1" {
+			t.Errorf("事件应带上工具调用 id，实际 %q", e.id)
+		}
+		text += e.add + e.tail
+	}
+	if !strings.Contains(text, "alpha") || !strings.Contains(text, "beta") {
+		t.Errorf("实时输出里缺命令内容：%q", text)
 	}
 }

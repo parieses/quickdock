@@ -18,6 +18,7 @@ package ai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"runtime"
 	"strings"
@@ -30,15 +31,23 @@ import (
 )
 
 const (
-	// aiToolMaxRounds 一次提问里最多允许几轮工具调用。
+	// aiToolMaxRounds 一次提问里「一批」工具调用最多几轮。
 	//
 	// 8 轮够覆盖「查列表 → 读细节 → 交叉确认 → 回答」这类查询链路，但不够分段写长文档：
 	// 实测让模型整理一份几十节的教程时，它每轮 file_edit 填一节，8 轮用完才写到第十八节，
 	// 而收尾轮只能空手总结「还差什么」。12 轮覆盖了这类「边写边改」的活儿。
-	// 再多就基本是模型在原地打转，而每多一轮都是全额计费（上下文要整份重发一遍）。
-	// 到顶后不是硬截断：见 ai_stream.go 里「轮次用尽」的处理——会再要一次
-	// 不带工具的收尾回答，否则用户看到的是半句话加一张卡片。
+	// 再多就不该无脑继续——每多一轮都是全额计费（上下文要整份重发一遍）。
+	//
+	// 所以这是「一批」而不是硬上限：到顶时看这一批有没有真进展（见 agent_run.go
+	// 的 madeProgress），有就再给一批，最多到 aiToolHardMaxRounds。
 	aiToolMaxRounds = 12
+
+	// aiToolHardMaxRounds 单次提问的工具轮次绝对上限（三批）。
+	//
+	// 「扫描整个项目」这类活儿真的会超过 12 轮，但也不能无限续：一个跑在原地的模型
+	// 会一直申请新调用（换个参数再查一遍），每轮都是全额计费。36 轮足够覆盖
+	// 一次长时间的自主排查，再多就说明方向错了，该让用户看一下中间结果。
+	aiToolHardMaxRounds = 36
 
 	// aiToolResultMaxRune 单个工具结果送去模型的字符上限。
 	// file_grep / log_read 这类结果可以是几十 KB，一条就能把上下文烧掉一半。
@@ -56,6 +65,14 @@ const (
 	// 这个是「留给人回看多少」（影响库体积）。完整结果从来没落过库——
 	// 它只在当次请求的上下文里存在过。
 	aiRecordResultMaxRune = 2000
+
+	// aiRecordOutputMaxRune 落库时「人看的输出」（Output）上限。
+	//
+	// 比 Result 宽：Result 是给模型的结构化 JSON，一段命令输出在里面是
+	// `"stdout": "line1\nline2..."` 这种转义形态，2000 字里没几行真内容；
+	// Output 是纯文本，同样 8000 字能装下两百来行日志或一段文件正文，回看时才有用。
+	// 流式下发用的也是这个值：两处不同的话，刷新一下卡片内容会突然变长/变短。
+	aiRecordOutputMaxRune = 8000
 
 	// aiLoopTokenBudget 已改为按模型窗口动态计算（见 ai_context.go 的 aiLoopBudget）。
 	// 两者边界仍然不同、不能合并：
@@ -130,6 +147,13 @@ type aiToolRecord struct {
 	// 一旦截在中间就不是合法 JSON，前端只能整块放弃。
 	RunID  string `json:"run_id,omitempty"`
 	NodeID string `json:"node_id,omitempty"`
+	// Output 这次调用「人看的」输出（目前只有 run_command 有）。
+	//
+	// 与 Result 并存而不是替代：Result 是回给模型的 JSON（要结构化、
+	// 要被工具自己解析），Output 是终端里的那几行文字。卡片上直接铺 Result
+	// 就是一团转义字符——换行成了 \n、引号成了 \"，一截断更只剩半截 JSON，
+	// 用户既看不到命令输出，也解析不了那段文本。
+	Output string `json:"output,omitempty"`
 }
 
 // agentLinked 由「会建立编排节点」的工具结果实现，告诉调度处这次调用属于哪个 run/node。
@@ -661,6 +685,7 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 		text = "工具执行失败：" + rec.Error
 	}
 	rec.Result = truncateToolResult(text, c.Name)
+	rec.Output = toolOutputText(c.Name, val)
 	rec.Added, rec.Removed = toolDiffLines(val)
 	// 产物路径（file_write / file_edit）：回答产物条与文件预览的依据。
 	rec.Path = toolResultPath(c.Name, val)
@@ -690,13 +715,14 @@ func toolTimeoutFor(name string) time.Duration {
 
 // callToolWithTimeout 执行一个工具，并给它套上超时外壳。
 //
-// 为什么只能套外壳而不是真取消：多数工具的 Handler 没有 ctx 参数，工具内部拿不到
-// 取消信号（命令类工具会自己结束，读文件类则本就很快）。所以超时返回的那一刻，
-// 那次调用仍在后台跑完——它不会再写这条流（结果被丢弃），代价是一次空跑。
-// 这点代价换来的是「AI 页永远不会因为一个工具挂住而停在转圈」。
+// 超时只能套外壳：多数工具的 Handler 没有 ctx 参数，工具内部拿不到取消信号。
+// 所以超时返回的那一刻，那次调用仍在后台跑完——它不会再写这条流（结果被丢弃），
+// 代价是一次空跑。这点代价换来的是「AI 页永远不会因为一个工具挂住而停在转圈」。
 //
-// 实现了 HandlerCtx 的工具（spawn_agent）不同：它的取消是真的，内部会随 ctx 停下，
-// 不会白烧 token。
+// 用户点停止（ctx 取消）不一样：实现了 HandlerCtx 的工具会真的停下。
+// spawn_agent 内部是 agent 循环，run_command 会连同子进程一起被 kill——
+// 后者尤其重要：一条 `go vet ./...` 或全盘检索在停止之后继续跑，用户看到的
+// 是「对话停了但电脑卡死」，而他没有任何地方能停掉它。
 //
 // 同理，ctx 被取消（用户点停止）时也不等它：直接按「已停止」返回，
 // 让本轮剩下的调用快速收尾，而不是让停止按钮看起来没反应。
@@ -721,7 +747,9 @@ func callToolWithTimeout(ctx context.Context, name string, args map[string]any, 
 		logger.W("[ai-tool] %s 执行超过 %v 未返回，已按超时处理", name, timeout)
 		return nil, fmt.Errorf("工具 %s 执行超过 %v 仍未返回，已放弃等待（它可能还在后台跑，结果不会再用）", name, timeout)
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		// 别说 "context canceled"：卡片上那句话是给用户看的，得让他认出
+		// 「这是我按的停止」，而不是以为工具自己崩了。
+		return nil, errors.New("已停止：用户中止了这一轮任务，工具调用被中断")
 	}
 }
 
@@ -984,6 +1012,97 @@ func compactLoopMessages(messages []map[string]interface{}, budget int) int {
 	return folded
 }
 
+// toolOutputText 把工具结果渲染成「人看的」文本（只给卡片，不喂模型）。
+//
+// 为什么需要：结果本身是 JSON——喂给模型要的是结构化字段，可卡片上直接铺开
+// 这段 JSON 就是一团转义字符：换行成了 \n、引号成了 \"，一旦截断更只剩半截
+// JSON。用户想看的「命令到底输出了什么」一个字节都没有，看到的是一串
+// "\ufffd\ufffd\ufffd" 和一句「已截断」。
+//
+// 目前只有 run_command 需要：它的值本来就是给人读的终端输出。其它工具的
+// 结果（文件内容 / diff / 文件列表）都有自己的展示分支。
+func toolOutputText(name string, val any) string {
+	// file_read：卡片上该显示文件正文，而不是那坨 {"path":...,"content":"..."}。
+	// 之前只有 run_command 走这条分支，读文件的结果原样铺出来，行号外面裹着 JSON
+	// 转义，再被 400 字的上限一截——用户看到的就是「只读了十几行」。
+	if name == "file_read" {
+		m, ok := val.(map[string]any)
+		if !ok {
+			return ""
+		}
+		content := mcpsrv.Arg(m, "content")
+		if content == "" {
+			// 空文件 / offset 超出末尾：真正的解释在结果自己的 truncatedNote 里，
+			// 这里不另编一句话。
+			return ""
+		}
+		from := mcpsrv.ArgInt(m, "from", 0)
+		to := mcpsrv.ArgInt(m, "to", 0)
+		if from <= 0 || to < from {
+			// 没有行号区间（老数据 / 非标准调用）：正文照样给，别硬编一个「第 0–0 行」。
+			return content
+		}
+		head := fmt.Sprintf("第 %d–%d 行 · 共 %d 行", from, to, mcpsrv.ArgInt(m, "lines", to-from+1))
+		if mcpsrv.ArgBool(m, "truncated") {
+			head += " · 文件还有更多内容（需要时用 offset 继续读）"
+		} else {
+			head += " · 已到文件末尾"
+		}
+		return head + "\n" + content
+	}
+	if name != "run_command" {
+		return ""
+	}
+	m, ok := val.(map[string]any)
+	if !ok {
+		return ""
+	}
+	// 没有 stdout 键说明这不是同步执行的命令结果（后台任务只回 jobId/logPath），
+	// 卡片上照旧展示原始结果，别在这里编一块空输出。
+	if _, has := m["stdout"]; !has {
+		return ""
+	}
+	stdout := mcpsrv.Arg(m, "stdout")
+	stderr := mcpsrv.Arg(m, "stderr")
+
+	var b strings.Builder
+	var flags []string
+	if code := mcpsrv.ArgInt(m, "exitCode", 0); code != 0 {
+		flags = append(flags, fmt.Sprintf("exit %d", code))
+	}
+	if mcpsrv.ArgBool(m, "timeout") {
+		flags = append(flags, "超时，已终止进程")
+	}
+	if mcpsrv.ArgBool(m, "canceled") {
+		// 「停了」和「失败了」在用户眼里是两件事：前者是他按的停止，后者要他去查问题。
+		flags = append(flags, "已停止（进程已终止）")
+	}
+	if mcpsrv.ArgBool(m, "outputTruncated") {
+		flags = append(flags, "输出超过上限，只保留了前段")
+	}
+	if len(flags) > 0 {
+		b.WriteString(strings.Join(flags, " · "))
+		b.WriteString("\n")
+	}
+	switch {
+	case stdout != "" && stderr != "":
+		// 两路都有内容时才给 separators：否则标签比内容还长。
+		b.WriteString(strings.TrimRight(stdout, "\n"))
+		b.WriteString("\n--- stderr ---\n")
+		b.WriteString(strings.TrimRight(stderr, "\n"))
+	case stdout != "":
+		b.WriteString(strings.TrimRight(stdout, "\n"))
+	default:
+		b.WriteString(strings.TrimRight(stderr, "\n"))
+	}
+	out := strings.TrimSpace(b.String())
+	if out == "" {
+		// 成功且没有任何输出：留一句人话，比一张空白卡片清楚。
+		return "（无输出）"
+	}
+	return out
+}
+
 // truncateKeepLines 按字符截断，但保留换行。
 //
 // 不用 logger.Trunc：它把换行压成空格（日志要一行一条），而工具结果多半是
@@ -993,7 +1112,9 @@ func truncateKeepLines(s string, maxRunes int) string {
 	if maxRunes <= 0 || len(r) <= maxRunes {
 		return s
 	}
-	return string(r[:maxRunes]) + "…（已截断）"
+	// 带上原始长度：只说「已截断」等于让人猜「少看了多少」——一行 30 万字和
+	// 一行 3000 字看起来一样，而前者才该去文件里看完整版。
+	return string(r[:maxRunes]) + fmt.Sprintf("…（已截断：共 %d 字，只显示前 %d 字）", len(r), maxRunes)
 }
 
 // encodeToolRecords 把记录序列化成落库的 JSON；空记录返回空串。
@@ -1012,6 +1133,7 @@ func encodeToolRecords(records []aiToolRecord) string {
 	copy(brief, records)
 	for i := range brief {
 		brief[i].Result = truncateKeepLines(brief[i].Result, aiRecordResultMaxRune)
+		brief[i].Output = truncateKeepLines(brief[i].Output, aiRecordOutputMaxRune)
 		brief[i].Args = truncateKeepLines(brief[i].Args, 300)
 	}
 	b, err := json.Marshal(brief)
@@ -1033,4 +1155,22 @@ func countRounds(records []aiToolRecord) int {
 		}
 	}
 	return len(seen)
+}
+
+// madeProgress 判断这一批工具调用里有没有「真的往前走」的动作。
+//
+// 只看两件事：有没有真执行过（Dedup = 与之前某次完全相同，被跳过）、
+// 有没有被用户拒绝（Denied = 用户说不行，再续一批只会重问一遍）。
+// 执行失败也算进展：模型会换参数再试，那正是它在想办法。
+//
+// 用它决定「轮次到顶后要不要再开一批」：全是去重/拒绝说明模型在原地打转，
+// 再给 12 轮就是把同一段上下文重发 12 次。
+func madeProgress(records []aiToolRecord) bool {
+	for _, r := range records {
+		if r.Dedup || r.Denied {
+			continue
+		}
+		return true
+	}
+	return false
 }
