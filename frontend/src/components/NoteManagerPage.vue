@@ -189,7 +189,7 @@ async function confirmBatchDelete() {
   const ids = [...selectedIds.value]
   if (!ids.length) return
   try {
-    for (const id of ids) await DeleteNoteNode(id)
+    for (const id of ids) unwrap(await DeleteNoteNode(id))
     if (ids.includes(selectedDocId.value)) { selectedDocId.value = ''; docContent.value = ''; docTagsText.value = '' }
     toast.success(t('deleted'))
   } catch (e) { toast.error(getErrorMessage(e)) } finally {
@@ -201,7 +201,7 @@ async function batchMove() {
   if (!target) return
   const ids = [...selectedIds.value]
   try {
-    for (const id of ids) await MoveNoteNode(id, target)
+    for (const id of ids) unwrap(await MoveNoteNode(id, target))
     toast.success(t('notesBatchMoved', { count: ids.length }))
   } catch (e) { toast.error(getErrorMessage(e)) } finally {
     clearSelection(); moveTarget.value = ''; await load()
@@ -221,7 +221,7 @@ async function batchTag() {
       const cur = parseTagsS(node.tags)
       if (!cur.includes(tag)) cur.push(tag)
       const tagsJSON = JSON.stringify(cur)
-      await UpdateNoteDoc(id, content, tagsJSON)
+      unwrap(await UpdateNoteDoc(id, content, tagsJSON))
       applyLocalTags(id, tagsJSON)
     }
     toast.success(t('notesBatchTagDone', { count: ids.length }))
@@ -390,7 +390,7 @@ async function commitRename(id: string) {
   editingId.value = ''
   editName.value = ''
   if (!name) return
-  try { await RenameNoteNode(id, name); await load() } catch (e) { toast.error(getErrorMessage(e)) }
+  try { unwrap(await RenameNoteNode(id, name)); await load() } catch (e) { toast.error(getErrorMessage(e)) }
 }
 
 // 删除
@@ -400,7 +400,7 @@ function askDelete(n: Note) { deletingNode.value = n; showDel.value = true }
 async function confirmDeleteNode() {
   if (!deletingNode.value) return
   try {
-    await DeleteNoteNode(deletingNode.value.id)
+    unwrap(await DeleteNoteNode(deletingNode.value.id))
     if (selectedDocId.value === deletingNode.value.id) { selectedDocId.value = ''; docContent.value = ''; docTagsText.value = '' }
     toast.success(t('deleted')); showDel.value = false; await load()
   } catch (e) { toast.error(getErrorMessage(e)) }
@@ -409,7 +409,7 @@ async function confirmDeleteNode() {
 // 移动（拖拽）
 async function handleDrop(dragId: string, targetId: string) {
   if (!dragId) return
-  try { await MoveNoteNode(dragId, targetId || ''); await load() } catch (e) { toast.error(getErrorMessage(e)) }
+  try { unwrap(await MoveNoteNode(dragId, targetId || '')); await load() } catch (e) { toast.error(getErrorMessage(e)) }
 }
 
 /** 某个父目录下的同级节点，按**与树完全相同的规则**排序。
@@ -514,7 +514,7 @@ async function flushPendingSave() {
   const content = docContent.value
   try {
     const tagsJSON = buildTagsJSON(docTagsText.value)
-    await UpdateNoteDoc(id, content, tagsJSON)
+    unwrap(await UpdateNoteDoc(id, content, tagsJSON))
     applyLocalTags(id, tagsJSON)
   } catch (e) {
     logErr('NoteManager:flushPendingSave', e)
@@ -655,7 +655,7 @@ async function saveDoc() {
   const id = selectedDocId.value
   try {
     const tagsJSON = buildTagsJSON(docTagsText.value)
-    await UpdateNoteDoc(id, docContent.value, tagsJSON)
+    unwrap(await UpdateNoteDoc(id, docContent.value, tagsJSON))
     applyLocalTags(id, tagsJSON)
   } catch (e) {
     logErr('NoteManager:saveDoc', e)
@@ -778,7 +778,7 @@ function onAiWriteBack(text: string, mode: 'insert' | 'replace' | 'append') {
 }
 async function renameCurrent() {
   if (!selectedDoc.value) return
-  try { await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name); await load() } catch (e) { toast.error(getErrorMessage(e)) }
+  try { unwrap(await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name)); await load() } catch (e) { toast.error(getErrorMessage(e)) }
 }
 
 onMounted(() => { loadTreePrefs(); loadRecent(); loadNoteView(); load() })

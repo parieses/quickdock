@@ -416,7 +416,7 @@ function closeNoteEditor() {
 async function saveNote(entry: ClipboardEntry) {
   if (!noteEditingId.value) return
   try {
-    await UpdateClipboardNote(noteEditingId.value, NOTE_INPUT.value)
+    unwrap(await UpdateClipboardNote(noteEditingId.value, NOTE_INPUT.value))
     entry.note = NOTE_INPUT.value
     noteEditingId.value = null
     NOTE_INPUT.value = ''
@@ -518,8 +518,10 @@ function firstLineAsTitle(text: string, max = 40): string {
 }
 
 function feedback(res: any, fallbackMsg: string) {
+  // ApiResult 的失败原因是 msg（不是 message）：直接喂 getErrorMessage 会走
+  // String(obj) 分支，toast 上显示的是 "[object Object]"。
   if (res && res.code === 0) toast?.success?.(res.msg || fallbackMsg)
-  else if (res) toast?.error?.(getErrorMessage(res))
+  else if (res) toast?.error?.(res.msg || fallbackMsg)
 }
 
 async function saveAsTodo(entry: ClipboardEntry) {

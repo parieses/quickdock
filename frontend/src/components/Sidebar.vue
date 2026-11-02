@@ -566,7 +566,7 @@ async function handleDeleteWorkspace(wsId: string) {
 .hidden-toggle { color: var(--color-text-disabled); }
 .hidden-caret { margin-left: auto; color: var(--color-text-disabled); transition: transform var(--transition-base); }
 .hidden-caret.open { transform: rotate(180deg); }
-.hidden-list { display: flex; flex-direction: column; gap: 1px; padding-left: 8px; border-left: 1px dashed var(--color-border-secondary); margin: 2px 0 0 10px; }
+.hidden-list { display: flex; flex-direction: column; gap: 1px; padding-left: 8px; border-left: 1px dashed var(--color-border); margin: 2px 0 0 10px; }
 /* 显隐交给 v-if + Transition（高度由 JS 钩子量，见 onCollapseEnter）；
    as-popover 只负责换定位方式，两者互不干涉。 */
 .collapse-enter-active,

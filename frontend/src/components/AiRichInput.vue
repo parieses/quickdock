@@ -98,12 +98,89 @@ function onInput() {
 
 // —— 外部改值：重建 DOM（清空 / 填示例 / 切会话） ——
 
-function rebuild(text: string) {
+/**
+ * 拍下当前胶囊及其在正文里的字符偏移。
+ *
+ * 为什么要存偏移：@ 引用选中后父组件会把末尾 `@token` 从正文里摘掉，这会触发
+ * 一次「外部改值」重建。原实现直接 `textContent = ''` 重建 DOM，顺手把胶囊
+ * 连同 pickedSkills 一起抹掉了（用户点完引用再发送，技能就丢了）。
+ */
+function snapshotChips(): { name: string; offset: number }[] {
+  const root = el.value
+  if (!root) return []
+  const out: { name: string; offset: number }[] = []
+  let text = ''
+  const walk = (node: Node) => {
+    for (const child of Array.from(node.childNodes)) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        text += child.textContent || ''
+        continue
+      }
+      if (!(child instanceof HTMLElement)) continue
+      if (child.dataset.skill) {
+        out.push({ name: child.dataset.skill, offset: text.length })
+        continue
+      }
+      if (child.tagName === 'BR') {
+        text += '\n'
+        continue
+      }
+      if ((child.tagName === 'DIV' || child.tagName === 'P') && text && !text.endsWith('\n')) text += '\n'
+      walk(child)
+    }
+  }
+  walk(root)
+  return out
+}
+
+function textNodesOf(root: HTMLElement): Text[] {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  const out: Text[] = []
+  let n: Node | null
+  while ((n = walker.nextNode())) out.push(n as Text)
+  return out
+}
+
+/** 把胶囊插到正文第 offset 个字符处（文本已变短则落到末尾）。胶囊后必带一个空格当落点。 */
+function insertChipAtOffset(root: HTMLElement, offset: number, chip: HTMLElement) {
+  let acc = 0
+  for (const tn of textNodesOf(root)) {
+    const len = tn.data.length
+    if (offset <= acc + len) {
+      const local = offset - acc
+      if (local >= len) {
+        tn.after(chip, document.createTextNode(' '))
+        return
+      }
+      const rest = tn.splitText(local)
+      rest.before(chip, document.createTextNode(' '))
+      return
+    }
+    acc += len
+  }
+  root.append(chip, document.createTextNode(' '))
+}
+
+/**
+ * 判断这次外部改值是不是「只摘掉了末尾的 @token」。
+ *
+ * @ 引用的 pickMention 用 `replace(/@[^\s@]*$/, '')` 摘 token，因此新文本必是旧
+ * 文本的前缀、被摘掉的部分是以 @ 开头的无空白串——只有这一种情况要保留胶囊。
+ * 发送后清空（''）、切会话（完全不同的文本）都走「连胶囊一起丢」的老行为，
+ * 否则上一轮的技能会黏到下一个任务上。
+ */
+function isMentionTokenStrip(prev: string, next: string): boolean {
+  if (!next || !prev.startsWith(next)) return false
+  return /^@[^\s@]*$/.test(prev.slice(next.length))
+}
+
+function rebuild(text: string, opts: { keepChips?: boolean } = {}) {
   const root = el.value
   if (!root) return
   // 重建会把选区连同 DOM 一起丢掉：本来就在输入框里打字的话（比如刚点完 @ 引用，
   // 父组件把 token 从正文里摘掉），重建后要把光标放回末尾，否则用户得再点一下。
   const hadFocus = document.activeElement === root
+  const chips = opts.keepChips ? snapshotChips() : []
   root.textContent = ''
   if (text) {
     text.split('\n').forEach((line, i) => {
@@ -111,14 +188,15 @@ function rebuild(text: string) {
       if (line) root.appendChild(document.createTextNode(line))
     })
   }
-  // 重建会顺手清掉胶囊：一并把「已选技能」同步回去，别让面板还标着「已选」
+  for (const c of chips) insertChipAtOffset(root, c.offset, buildChip(c.name))
+  // 重建后按 DOM 真实内容同步一次：没保留胶囊时这里会把「已选技能」清回空列表
   emitAll(true)
   if (hadFocus) placeCaretAtEnd()
 }
 
 watch(() => props.modelValue, (v) => {
   if (v === lastText) return
-  rebuild(v)
+  rebuild(v, { keepChips: isMentionTokenStrip(lastText, v) })
 })
 
 onMounted(() => rebuild(props.modelValue))

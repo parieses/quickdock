@@ -40,6 +40,14 @@ const toast = inject<ToastAPI>('toast')!
 const emit = defineEmits<{ close: [] }>()
 const props = defineProps<{ visible: boolean }>()
 
+// 外部 MCP 的两段 placeholder 是「JSON 片段 / 命令行参数」的语法示例，不走 i18n：
+//   1) 内容全是 JSON 与包名，各语言相同，翻译没有意义；
+//   2) '{' '}' 在 vue-i18n 里是插值定界符、'@' 是 linked-message 前缀，放进 messages
+//      会被当语法解析 —— 开发环境只打一条警告，生产构建直接抛 SyntaxError，
+//      整个页面渲染失败（表现为「新建任务页白屏 / 输入框消失」）。
+const EXT_IMPORT_PH = '{\n  "filesystem": {\n    "command": "npx",\n    "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/proj"]\n  },\n  "remote": { "url": "http://127.0.0.1:9000/mcp" }\n}'
+const EXT_ARGS_PH = '-y\n@modelcontextprotocol/server-filesystem\nD:/proj'
+
 const aiPresets: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
   deepseek: 'https://api.deepseek.com/v1',
@@ -1197,7 +1205,7 @@ function saveAIModal() {
               v-model="extForm.argsText"
               class="field-input ai-ext-ta"
               rows="3"
-              :placeholder="t('aiExtArgsPh')"
+              :placeholder="EXT_ARGS_PH"
               spellcheck="false"
             ></textarea>
             <span class="ai-ext-tip">{{ t('aiExtArgsHint') }}</span>
@@ -1271,7 +1279,7 @@ function saveAIModal() {
           <textarea
             v-model="extImportDraft"
             class="field-input ai-ext-json"
-            :placeholder="t('aiExtPh')"
+            :placeholder="EXT_IMPORT_PH"
             spellcheck="false"
           ></textarea>
           <div class="ai-ext-actions">

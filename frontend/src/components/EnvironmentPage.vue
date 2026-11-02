@@ -4024,7 +4024,7 @@ const s = currentRuntimeState
   font-size: 10px;
   padding: 1px var(--space-2);
   border-radius: var(--radius-full);
-  color: var(--color-primary);
+  color: var(--color-accent);
   background: var(--color-bg-tertiary);
 }
 .envvar-name-input { max-width: 170px; font-family: monospace; text-transform: uppercase; }

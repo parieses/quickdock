@@ -312,7 +312,7 @@ function duplicate(tabId: string) {
   font-size: 9px;
   font-weight: 500;
   color: var(--color-text-muted);
-  font-family: var(--font-sans);
+  font-family: var(--font-family);
 }
 
 .tab-menu-backdrop {
@@ -329,7 +329,7 @@ function duplicate(tabId: string) {
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  box-shadow: var(--shadow-pop);
+  box-shadow: var(--shadow-lg);
 }
 
 .tab-menu-item {

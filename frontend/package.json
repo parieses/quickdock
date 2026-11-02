@@ -7,8 +7,9 @@
     "dev": "vite",
     "bindings": "cd .. && wails3 generate bindings -ts -i -clean",
     "build:dev": "vue-tsc && vite build --minify false --mode development",
-    "build": "vue-tsc && vite build --mode production",
+    "build": "npm run check:i18n && vue-tsc && vite build --mode production",
     "check:bridge": "node src/utils/pluginBridge.check.mjs",
+  "check:i18n": "node src/i18n/messages.check.mjs",
     "preview": "vite preview",
     "test": "vitest run"
   },

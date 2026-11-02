@@ -931,6 +931,10 @@ let polling = false
 // setTimeout 链式轮询：上一次 refresh 完成后才排下一次，
 // 避免 setInterval 在慢请求时回调叠加（且 polling 标志兜底防重入）
 async function pollTick() {
+  // 窗口在后台时不打接口也不重绘：这里的轮询是「看着它才刷新」，
+  // 最小化 / 切到别的应用还每 5 秒发一次请求纯属白烧后端与电量。
+  // 回到前台后由 visibilitychange 立刻补一次（见下方监听）。
+  if (typeof document !== 'undefined' && document.hidden) { scheduleNext(); return }
   if (polling) { scheduleNext(); return }
   polling = true
   try {
@@ -960,13 +964,23 @@ watch(refreshSec, (v) => {
   applyAutoRefresh()
 })
 
+// 回到前台立刻补一次：后台期间轮询是跳过的，不补一次会看到一份过期数据。
+function onVisibility() {
+  if (document.hidden) return
+  if (refreshSec.value <= 0) return
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
+  void pollTick()
+}
+
 onMounted(() => {
   refresh()
   applyAutoRefresh()
+  document.addEventListener('visibilitychange', onVisibility)
 })
 
 onUnmounted(() => {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
+  document.removeEventListener('visibilitychange', onVisibility)
 })
 </script>
 

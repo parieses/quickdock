@@ -65,6 +65,32 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+// 工具 / 产物的解析缓存。
+//
+// 模板里同一条消息会调 toolList(m) 四次（摘要、轮次、列表、key），artifactsOf 内部
+// 又再 parse 一次；而每次都是 JSON.parse(tool_calls)。一屏十几条消息就是几十次解析，
+// 滚动/重渲染时白白烧掉主线程。这里按「消息 id + 原始 JSON 长度」做记忆化：
+// 内容一变签名就变，不会拿到旧结果。
+const toolCache = new Map<string, { sig: string; list: AIToolCall[] }>()
+function toolsOf(m: AIMessage): AIToolCall[] {
+  const sig = `${m.id}:${(m.tool_calls || '').length}`
+  const hit = toolCache.get(m.id)
+  if (hit && hit.sig === sig) return hit.list
+  const list = toolList(m)
+  toolCache.set(m.id, { sig, list })
+  return list
+}
+
+const artCache = new Map<string, { sig: string; list: AIArtifact[] }>()
+function artsOf(m: AIMessage): AIArtifact[] {
+  const sig = `${m.id}:${m.role}:${(m.tool_calls || '').length}`
+  const hit = artCache.get(m.id)
+  if (hit && hit.sig === sig) return hit.list
+  const list = artifactsOf(m)
+  artCache.set(m.id, { sig, list })
+  return list
+}
+
 
 /** i18n 的 t 由本组件提供，工具动词的翻译在这里接上 */
 function toolVerb(name: string): string {
@@ -229,16 +255,16 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
           <!-- 工具调用卡片：放在正文之前，因为调用发生在作答之前。
                默认折叠——一段回答调了五个工具时，全展开会把正文挤出屏幕；
                摘要行自己就说明了「调了几个、几轮」。 -->
-          <details v-if="m.role === 'assistant' && toolList(m).length" class="ai-tools">
+          <details v-if="m.role === 'assistant' && toolsOf(m).length" class="ai-tools">
             <summary class="ai-tools-sum">
               <Wrench :size="12" class="ai-tools-ico" />
-              <span>{{ t('aiToolSummary', { n: toolList(m).length, rounds: m.tool_rounds || countToolRounds(toolList(m)) }) }}</span>
+              <span>{{ t('aiToolSummary', { n: toolsOf(m).length, rounds: m.tool_rounds || countToolRounds(toolsOf(m)) }) }}</span>
               <ChevronDown :size="13" class="ai-tools-chev" />
             </summary>
             <div class="ai-tools-body">
               <!-- 每条调用自带折叠：一次回答调了五六个工具时，用户只想展开
                    其中一条看细节，而不是要么全看要么全不看。 -->
-              <details v-for="tc in toolList(m)" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error }">
+              <details v-for="tc in toolsOf(m)" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error }">
                 <summary class="ai-tool-line">
                   <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
                   <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
@@ -316,13 +342,13 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
           <div v-else class="ai-msg-content ai-plain">{{ m.content }}</div>
           <!-- 回答产物：靠右贴边的可折叠列表（同常见 AI IDE 的产物区样式）。
                数据就在 tool_calls 里，不用后端另发事件；点击预览（读磁盘现状）。 -->
-          <details v-if="m.role === 'assistant' && artifactsOf(m).length" class="ai-artifacts" open>
+          <details v-if="m.role === 'assistant' && artsOf(m).length" class="ai-artifacts" open>
             <summary class="ai-artifacts-sum">
-              {{ t('aiArtifactsCount', { n: artifactsOf(m).length }) }}
+              {{ t('aiArtifactsCount', { n: artsOf(m).length }) }}
               <ChevronDown :size="12" class="ai-artifacts-chev" />
             </summary>
             <div class="ai-artifacts-list">
-              <button v-for="a in artifactsOf(m)" :key="a.path" class="ai-artifact" :title="a.path" @click="emit('open-artifact', a)">
+              <button v-for="a in artsOf(m)" :key="a.path" class="ai-artifact" :title="a.path" @click="emit('open-artifact', a)">
                 <FileText :size="13" />
                 <span class="ai-artifact-name">{{ a.name }}</span>
                 <span class="ai-artifact-op">{{ t(a.op === 'edit' ? 'aiArtifactEdited' : 'aiArtifactWritten') }}</span>
@@ -413,10 +439,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
             </div>
           </details>
           <div v-if="streamingText" class="ai-msg-content ai-md">
-            <!-- key 用「块原文 + 序号」：原文可能重复（两段相同的话），
-                 仅用原文会触发 Vue 的重复 key 警告。仅末尾块会变，
-                 前面的块 key 稳定 → 不会被重建。 -->
-            <div v-for="(b, bi) in streamBlocks" :key="bi + ':' + b.raw.length + ':' + b.raw.slice(0, 24)" class="ai-md-block" v-html="b.html"></div>
+            <!-- key 只用序号：内容变了由 v-html 的字符串比较兜住（Vue 会就地更新）。
+                 早先把「长度 + 前缀」拼进 key，末尾那块每来一个字就换一次 key，
+                 于是每帧销毁重建整块 DOM——用户刚划中的选区被抹掉，解析结果也白丢。 -->
+            <div v-for="(b, bi) in streamBlocks" :key="bi" class="ai-md-block" v-html="b.html"></div>
           </div>
           <span v-if="streamingText" class="ai-cursor">▋</span>
           <!-- 流式期的产物列表：file_write 一返回就出现，不等回答收尾 -->

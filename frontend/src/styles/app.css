@@ -292,9 +292,9 @@
   flex: none;
   width: 15px; height: 15px;
   margin-top: 3px;
-  border: 1.5px solid var(--color-border-strong, #b4b4b4);
+  border: 1.5px solid var(--color-border);
   border-radius: 4px;
-  background: var(--color-bg);
+  background: var(--color-bg-primary);
   box-sizing: border-box;
   position: relative;
 }
