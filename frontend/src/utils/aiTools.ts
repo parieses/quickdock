@@ -68,6 +68,8 @@ export function serializeTools(list: AIToolCall[]): string {
     ...(t.diff ? { diff: t.diff } : {}),
     // 产物路径落库：刷新后产物条还在（预览读的是磁盘现状，不需要存更多东西）。
     ...(t.path ? { path: t.path } : {}),
+    // 人看的输出也要落库：刷新后卡片上仍是那几行命令输出，而不是退回原始 JSON。
+    ...(t.output ? { output: t.output } : {}),
     // run/node 必须一起落库：刷新后 run 树面板靠它才知道该拉哪棵树。
     ...(t.run_id ? { run_id: t.run_id, node_id: t.node_id || '' } : {}),
   })))
@@ -94,6 +96,9 @@ export function artifactsFromCalls(list: AIToolCall[]): AIArtifact[] {
         path: tc.path,
         name: tc.path.replace(/\\/g, '/').split('/').pop() || tc.path,
         op: tc.name === 'file_write' ? 'write' : 'edit',
+        // 带上「哪一次调用写的、写完没有」：侧栏据此判断已打开的文件该不该重读。
+        callId: tc.id,
+        done: !tc.running,
       })
     }
   }
@@ -205,7 +210,22 @@ export function toolTarget(tc: AIToolCall): string {
   return ''
 }
 
-// 工具结果该按什么语言高亮（喂给 highlight.js）：
+// toolOutput 卡片正文：优先显示「人看的输出」，没有再退回结果原文。
+//
+// run_command 的结果是给模型的 JSON（stdout/stderr/exitCode 装在一个对象里），
+// 直接铺在卡片上是一团转义字符，截断后还是半截 JSON。后端另外给一份 output
+// 纯文本，这里只在它缺失时（老数据、其它工具）才退回 result。
+export function toolOutput(tc: AIToolCall): string {
+  if (tc.output) return tc.output
+  // 流式期：命令还在跑，output 还没到，先铺「已确认的行 + 当前正在刷新的那一行」。
+  // liveTail 单独拼而不是并进 live：进度条用 \r 重写它，拼接会越滚越长。
+  // 第一个事件常常只有 tail（pip 一上来就画进度条，还没换过行），
+  // 所以判断条件必须带上 liveTail——只看 live 的话卡片会空着不动。
+  if (tc.live || tc.liveTail) return (tc.live || '') + (tc.liveTail || '')
+  return tc.result || ''
+}
+
+// toolResultLang 工具结果该按什么语言高亮（喂给 highlight.js）：
 // 只认「结果本身有固定语法」的三类，其余返回空 → 不高亮，按纯文本显示。
 // 判错比不判更糟：给一段普通输出套上 bash 高亮，颜色会盖过语义。
 export function toolResultLang(tc: AIToolCall): string {

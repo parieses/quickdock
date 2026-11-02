@@ -228,6 +228,16 @@ export interface AIToolCall {
   // 这条调用所属的编排 run / 节点（只有 spawn_agent 才有）。
   // 有了它才能在回复下面挂出 run 树，不必去解析可能被截断的结果文本。
   run_id?: string; node_id?: string
+  // 人看的输出（目前只有 run_command 有）：命令的 stdout/stderr 原样文本。
+  // 与 result 分开：result 是回给模型的 JSON，卡片上铺开就是一团转义字符，
+  // 截断后连 JSON 都不成立——用户看到的只剩一句「已截断」。
+  output?: string
+  // 实时输出（run_command 专用，见后端 tools/cmd_stream.go）。
+  // live 是已经换行的完整行，只往后加；liveTail 是还没换行的当前行，
+  // 下一次事件整段替换它——命令用 \r 重写进度条时，那一行要在原地跳，
+  // 追加进去就会变成几十行几乎一样的百分比。
+  live?: string
+  liveTail?: string
 }
 
 // 一条编辑快照（回滚点）。Wails 只在 bound 参数里生成类型，返回值里的结构
@@ -246,7 +256,17 @@ export interface AIRuleFile { name: string; bytes: number; truncated?: boolean }
 export interface AIMentionItem { kind: 'file' | 'dir' | 'conv'; name: string; path?: string; convId?: string }
 
 // 回答产物：一条回复里 AI 写过 / 改过的文件，聚合成条挂在回答下方，点击预览。
-export interface AIArtifact { path: string; name: string; op: 'write' | 'edit' }
+export interface AIArtifact {
+  path: string
+  name: string
+  op: 'write' | 'edit'
+  // 最近一次写它的工具调用 id。同一文件被改第二次时它会变——侧栏靠这个
+  // 判断「已经打开的那个标签页是不是过期了」（路径集合不变时 else 看不出来）。
+  callId?: string
+  // 这次调用是否已结束。流式期 file_write 还在跑时是 false：此时磁盘上
+  // 可能只有半截内容，列表可以先列出来，但重读文件要等它变 true。
+  done?: boolean
+}
 
 // 大纲里的一条：从「用户提过的每一句」里取首行，点它跳到该条消息。
 export interface OutlineItem { id: string; text: string }

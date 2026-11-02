@@ -22,8 +22,13 @@ export interface LiveBlock {
 interface Deps {
   /** 页面自己装配好的 Marked 实例（renderer 里要用 i18n 文案，故不在这里 new） */
   md: Marked
-  /** 流式中的块数组，由页面持有（模板直接 v-for 它） */
-  streamBlocks: Ref<LiveBlock[]>
+  /**
+   * 默认的「流式块数组」。
+   *
+   * 现在页面允许多条任务同时跑，每条流各有一份块数组（见 AIRun.blocks），
+   * 调用时要显式传进去；这个默认值只是为了让老调用点不用一次性全改。
+   */
+  streamBlocks?: Ref<LiveBlock[]>
 }
 
 export function useAiMarkdownBlocks(deps: Deps) {
@@ -85,11 +90,11 @@ export function useAiMarkdownBlocks(deps: Deps) {
   // 原因是最后一块是「正在写」的块，它的原文每帧都在变，若也要求原文完全相等，
   // 就永远匹配不上 → 每次都从第 0 块重建，导致已渲染内容被顶替（实测复现）。
   // 最后一块无条件重渲染（它的体量小，开销低），前面的块原文一旦稳定就不会再变。
-  function renderLiveBlocks(src: string) {
+  function renderLiveBlocks(src: string, blocks?: LiveBlock[]) {
     // 与历史消息同一个口径：先剥掉工具调用标记，再切块渲染。
     // 后端已经在流式层拦过一次（services/ai/ai_dsml.go），这里是幂等的兜底。
     const raws = splitMarkdownBlocks(stripDsmlMarkup(src))
-    const arr = deps.streamBlocks.value
+    const arr = blocks ?? deps.streamBlocks?.value ?? []
     const n = raws.length
     // 已完成块的数量：raws 的前 n-1 块（最后一块是进行中的）
     const doneCount = n > 0 ? n - 1 : 0

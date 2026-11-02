@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   artifactsFromCalls, artifactsOf, countToolRounds, rulesOf, rulesTitle, runIDOf,
-  serializeTools, shortPath, toolList, toolTarget,
+  serializeTools, shortPath, toolList, toolOutput, toolTarget,
 } from './aiTools'
 import type { AIMessage, AIToolCall } from '../types/ai'
 
@@ -58,6 +58,12 @@ describe('serializeTools', () => {
     expect(out.round).toBe(1)
   })
 
+  it('output 只在有值时出现（刷新后卡片仍显示命令输出，而不是原始 JSON）', () => {
+    const out = JSON.parse(serializeTools([call({ name: 'run_command', output: 'ok\nline2' })]))[0]
+    expect(out.output).toBe('ok\nline2')
+    expect('output' in JSON.parse(serializeTools([call({})]))[0]).toBe(false)
+  })
+
   it('denied / diff / added / run_id 等只在有值时出现', () => {
     const out = JSON.parse(serializeTools([call({ denied: true, diff: '@@', added: 2, removed: 1, run_id: 'r', node_id: 'n' })]))[0]
     expect(out.denied).toBe(true)
@@ -85,6 +91,15 @@ describe('artifactsFromCalls', () => {
     expect(arts.map((a) => a.name)).toEqual(['b.txt'])
     // 同一路径后写覆盖前写：预览读的是磁盘现状，op 取最后一次动作
     expect(arts[0].op).toBe('edit')
+    // 带上调用 id 与完成标记：侧栏据此判断已打开的文件该不该重读
+    expect(arts[0].callId).toBe('c1')
+    expect(arts[0].done).toBe(true)
+  })
+
+  it('流式期还没跑完的写，标记 done=false（侧栏先列出来、但不读文件）', () => {
+    const arts = artifactsFromCalls([call({ id: 'live-1', name: 'file_write', path: 'E:/p/x.md', running: true })])
+    expect(arts[0].done).toBe(false)
+    expect(arts[0].callId).toBe('live-1')
   })
 
   it('artifactsOf 只对 assistant 生效', () => {
@@ -141,5 +156,31 @@ describe('rulesOf / rulesTitle', () => {
     const title = rulesTitle([{ name: 'AGENTS.md', bytes: 1024 }, { name: 'big.md', bytes: 9000, truncated: true }])
     expect(title.split('\n')[0]).toBe('AGENTS.md · 1024 B')
     expect(title.split('\n')[1]).toContain('已截断')
+  })
+})
+
+describe('toolOutput', () => {
+  it('优先用人看的 output，缺失时退回 result（老数据 / 其它工具）', () => {
+    expect(toolOutput(call({ name: 'run_command', output: 'line1\nline2', result: '{"stdout":"ok"}' })))
+      .toBe('line1\nline2')
+    expect(toolOutput(call({ name: 'file_read', result: '{"path":"a"}' }))).toBe('{"path":"a"}')
+    expect(toolOutput(call({}))).toBe('')
+  })
+
+  it('命令还在跑时用实时输出：已确认的行 + 正在刷新的那一行', () => {
+    // add 追加、tail 替换 —— 后者是进度条用 \r 重写的同一行
+    expect(toolOutput(call({ name: 'run_command', live: 'Collecting foo\n', liveTail: ' 45%' })))
+      .toBe('Collecting foo\n 45%')
+    // 还没输出任何完整行时，tail 就是全部内容（不能因为 live 为空就显示成空卡片）
+    expect(toolOutput(call({ name: 'run_command', liveTail: ' 12%' }))).toBe(' 12%')
+  })
+
+  it('结果到达后以 output 为准，实时缓冲不再参与', () => {
+    expect(toolOutput(call({
+      name: 'run_command',
+      live: 'old\n',
+      liveTail: 'old tail',
+      output: '最终输出',
+    }))).toBe('最终输出')
   })
 })

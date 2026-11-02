@@ -197,46 +197,65 @@ function onModelSelect(e: Event) {
           @paste="emit('paste', $event)"
         />
         <div class="ai-hero-bar">
-          <!-- 技能和连接器：与聊天输入框同一个面板、同一份状态（技能按会话、连接器按本机）。 -->
-          <button
-            class="ai-hero-plus"
-            :class="{ 'is-open': props.plusOpen }"
-            :title="t('aiPlusTip')"
-            @click="emit('toggle-plus')"
-          >
-            <Plus :size="16" />
-          </button>
-          <!-- 当前目录若在 git 仓库里，左侧显示分支（与聊天输入框同款提示）。 -->
-          <div v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
-            <GitBranch :size="12" />
-            <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
+          <!-- 左组：这次任务「在哪儿做」——技能面板、当前分支、隔离工作区。
+               与聊天输入区的底栏同一套排布与尺寸，两边看起来才是同一个东西。 -->
+          <div class="ai-hero-bar-left">
+            <!-- 技能和连接器：与聊天输入框同一个面板、同一份状态（技能按会话、连接器按本机）。 -->
+            <button
+              class="ai-hero-plus"
+              :class="{ 'is-open': props.plusOpen }"
+              :title="t('aiPlusTip')"
+              @click="emit('toggle-plus')"
+            >
+              <Plus :size="16" />
+            </button>
+            <!-- 当前目录若在 git 仓库里，左侧显示分支（与聊天输入框同款提示）。 -->
+            <div v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
+              <GitBranch :size="12" />
+              <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
+            </div>
+            <!-- 隔离工作区：新建任务时也能勾，第一句就落在独立 worktree 里 -->
+            <AiWorktreeToggle
+              :git-repo="props.gitRepo"
+              :active="props.worktreeActive"
+              :path="props.worktreePath"
+              :branch="props.worktreeBranch"
+              :enabled="props.worktreeEnabled"
+              :branches="props.worktreeBranches"
+              :branch-open="props.worktreeBranchOpen"
+              :disabled="false"
+              @update:enabled="emit('update:worktreeEnabled', $event)"
+              @toggle-branch="emit('toggle-worktree-branch')"
+              @pick-branch="emit('pick-worktree-branch', $event)"
+              @remove="emit('remove-worktree')"
+            />
           </div>
-          <!-- 隔离工作区：新建任务时也能勾，第一句就落在独立 worktree 里 -->
-          <AiWorktreeToggle
-            :git-repo="props.gitRepo"
-            :active="props.worktreeActive"
-            :path="props.worktreePath"
-            :branch="props.worktreeBranch"
-            :enabled="props.worktreeEnabled"
-            :branches="props.worktreeBranches"
-            :branch-open="props.worktreeBranchOpen"
-            :disabled="false"
-            @update:enabled="emit('update:worktreeEnabled', $event)"
-            @toggle-branch="emit('toggle-worktree-branch')"
-            @pick-branch="emit('pick-worktree-branch', $event)"
-            @remove="emit('remove-worktree')"
-          />
-          <!-- 归属空间：不选就是普通任务（后端会自动给它建一个专属目录）。
-               已有空间直接选；选「新建空间…」会立刻弹出目录选择器——空间按目录唯一，
-               所以不需要「先选新建、再点一个按钮选目录」这两步。选到的目录见下方产物去向。 -->
-          <select :value="props.newTaskSpace" class="ai-hero-select" :title="t('aiNewTaskSpace')" @change="onSpaceSelect($event)">
-            <option value="">{{ t('aiNewTaskSpaceNone') }}</option>
-            <option v-for="s in props.spaces" :key="s.id" :value="s.id" :title="s.cwd">{{ s.name }}</option>
-            <option :value="props.newSpace">{{ t('aiNewTaskSpaceNew') }}</option>
-          </select>
-          <select :value="props.aiActive" class="ai-hero-select" :title="t('aiSwitchModel')" @change="onModelSelect($event)">
-            <option v-for="p in props.aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
-          </select>
+          <!-- 分隔线：左边是「在哪儿做」，右边是「这条任务算什么」。混成一排时，
+               一眼分不清哪个是上下文、哪个是设置。 -->
+          <span class="ai-hero-bar-div" aria-hidden="true"></span>
+          <!-- 中组：任务属性（归属空间 / 用哪个模型）。两者用同一种「小胶囊」，
+               窄窗口下整组一起换行，不会出现「两个下拉被拆到两行」。 -->
+          <div class="ai-hero-bar-mid">
+            <!-- 归属空间：不选就是普通任务（后端会自动给它建一个专属目录）。
+                 已有空间直接选；选「新建空间…」会立刻弹出目录选择器——空间按目录唯一，
+                 所以不需要「先选新建、再点一个按钮选目录」这两步。选到的目录见下方产物去向。 -->
+            <select :value="props.newTaskSpace" class="ai-hero-select" :title="t('aiNewTaskSpace')" @change="onSpaceSelect($event)">
+              <option value="">{{ t('aiNewTaskSpaceNone') }}</option>
+              <option v-for="s in props.spaces" :key="s.id" :value="s.id" :title="s.cwd">{{ s.name }}</option>
+              <option :value="props.newSpace">{{ t('aiNewTaskSpaceNew') }}</option>
+            </select>
+            <!-- 没有可用模型（还没配 key）时不给这个空下拉：一个没有选项的胶囊
+                 只会让人以为点它就能选。此时下方的「去设置」才是该走的路。 -->
+            <select
+              v-if="props.aiProfiles.length"
+              :value="props.aiActive"
+              class="ai-hero-select"
+              :title="t('aiSwitchModel')"
+              @change="onModelSelect($event)"
+            >
+              <option v-for="p in props.aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
+            </select>
+          </div>
           <div class="ai-hero-bar-right">
             <!-- 当前权限：落地页也能切，第一句就按这个口径执行 -->
             <AiPermissionBadge :full="props.permissionFull" @change="emit('change-permission', $event)" />
@@ -302,12 +321,15 @@ function onModelSelect(e: Event) {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: 24px 16px 40px;
+  /* 左右必须与 .ai-dock 的左右内边距同源（--space-6）：两页输入框的左边缘
+     靠它对齐，一边写字面 16px、一边用 token，改 token 时就会错开。 */
+  padding: var(--space-8) var(--space-6) var(--space-10);
 }
 
 .ai-hero-inner {
-  width: 100%;
-  max-width: 660px;
+  /* 宽度走 --ai-column-w：与对话页底部输入框同一个口径（见 style.css）。
+     这里不再重复写 min(90vw,1200px)——两处各写一份，改一处就悄悄错位。 */
+  width: var(--ai-column-w);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -375,30 +397,72 @@ function onModelSelect(e: Event) {
 /* 富输入框（AiRichInput）在落地页用大一号的字，与原来那个 textarea 一致 */
 .ai-hero-box :deep(.ai-rich) { font-size: 14px; line-height: 1.6; }
 
+/* 底栏永远一行。原来是 flex-wrap: wrap，注释说「窄窗口下整组一起换行」，
+   但实际表现是：右组 flex-shrink:0 + margin-left:auto，一旦判定放不下就整组
+   掉到第二行并且贴右，而第一行还空着一大截——看起来就是「样式溢出了」。
+   现在改成不换行：左组与中组可收缩（超长就自己截断），右组固定不缩，
+   按钮永远在第一行最右侧。 */
 .ai-hero-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 6px;
+  flex-wrap: nowrap;
+  margin-top: 8px;
+  /* 与右侧按钮同高，避免「左组矮一截、右组高一截」的错位感。 */
+  min-height: 26px;
+}
+
+/* 左组不加 overflow: hidden——AiWorktreeToggle 的分支菜单是向上弹的绝对定位元素，
+   父级一裁就整块看不见。不溢出靠子项自己收缩（.ai-git-branch 带 ellipsis）。 */
+.ai-hero-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 0 1 auto;
+}
+
+/* 中组（归属空间 / 模型）：允许收缩到 0，两个下拉才不会把右组挤走。 */
+.ai-hero-bar-mid {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* 分隔线：左边是上下文（分支 / 工作区），右边是任务属性（空间 / 模型）。
+   一条 12px 的细线比再加一种背景色干净。 */
+.ai-hero-bar-div {
+  width: 1px;
+  height: 12px;
+  margin: 0 2px;
+  flex-shrink: 0;
+  background: var(--color-border);
 }
 
 .ai-hero-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
 
-/* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左侧。 */
+/* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左侧。
+   高度与 Worktree chip、权限徽标对齐（都是 22px），否则一排控件高低不齐。 */
 .ai-git-branch {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  height: 22px;
   max-width: 100%;
-  padding: 2px 8px;
+  padding: 0 8px;
   border: 1px solid var(--color-border);
   border-radius: 999px;
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
   font-size: 11px;
   font-family: var(--font-mono);
-  flex-shrink: 0;
+  /* 可收缩：分支名可能是 feature/xxx-yyy 这种长串，固定不缩会把左组撑出底栏。
+     收缩后由 .ai-git-branch-name 的 ellipsis 收尾。 */
+  flex-shrink: 1;
+  min-width: 0;
 }
 
 .ai-git-branch-name {
@@ -407,28 +471,46 @@ function onModelSelect(e: Event) {
   white-space: nowrap;
 }
 
-.ai-hero-select {
-  display: inline-flex; align-items: center; gap: 5px;
-  max-width: 180px;
-  padding: 4px 8px;
+/* 底栏下拉（归属空间 / 模型）：做成与分支 chip、权限徽标同款的「小胶囊」。
+   原来它是一套独立的表单样式——28px 高、6px 圆角、实心边框、12px 字，
+   跟旁边 22px 的圆角 chip 摆在一排，高低、圆角、字重三种都不一样，
+   整条底栏就显乱；而且聚焦时整块描成强调色，看着像「被选中了」。 */
+select.ai-hero-select {
+  box-sizing: border-box;
+  display: inline-block;
+  height: 22px;
+  max-width: 150px;
+  /* 收缩下限放到 0：默认 min-width: auto 会让 select 撑到「最长选项」的宽度，
+     空间名一长就把右组整个挤到下一行。压缩后文字会被裁掉，但 title 里有全名。 */
+  min-width: 0;
+  flex: 0 1 auto;
+  /* 右侧留 8px：原生下拉箭头画在 padding 区里，留窄了文字会顶到箭头上。 */
+  padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
+  border-radius: 999px;
   background: transparent;
   color: var(--color-text-muted);
-  font-size: 12px; font-family: inherit;
+  font-size: 11px;
+  font-family: inherit;
   cursor: pointer;
   text-overflow: ellipsis;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background-color var(--transition-fast);
 }
 
-.ai-hero-select:hover { color: var(--color-text-primary); border-color: var(--color-border); }
-
-.ai-hero-select:focus-visible { outline: none; border-color: var(--color-accent); }
-
-select.ai-hero-select {
-  display: inline-block;
-  background: var(--color-bg-tertiary);
-  border-color: var(--color-border);
+select.ai-hero-select:hover {
   color: var(--color-text-primary);
+  border-color: var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+/* 聚焦只给一层很淡的底 + 边框：外层输入框已经会因为 focus-within 变成强调色，
+   这里再描一遍，界面上就有两处在「发光」，反而看不出焦点在哪。 */
+select.ai-hero-select:focus-visible {
+  outline: none;
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+  background: var(--color-bg-active);
 }
 
 .ai-hero-send {

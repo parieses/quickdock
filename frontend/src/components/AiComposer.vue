@@ -250,8 +250,9 @@ defineExpose({
   /* 单圆角框容器：去顶边框、改为整框描边 + 圆角 + 浅底，输入框本体透明无边框，
      整体质感与落地页「新建任务」输入框一致（参考截图）。 */
   padding: 10px 12px 8px;
-  /* 不铺满右侧：居中 80%，两侧留白让视线落在输入框本身（审批卡也按这个宽度对齐）。 */
-  width: 80%;
+  /* 与落地页 hero 的输入框同一个宽度（--ai-column-w，见 style.css）；
+     原来是不带上限的 80%，大屏上比 hero 还宽，切页面时会跳一下。 */
+  width: var(--ai-column-w);
   margin: 0 auto 12px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -297,13 +298,16 @@ defineExpose({
 
 .ai-input-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
 
-/* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左上角。 */
+/* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左上角。
+   高度与 Worktree chip、权限徽标对齐（都是 22px）——按 padding 撑开的话，字号
+   一变高度就跟着变，一排控件的上沿就开始参差。 */
 .ai-git-branch {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  height: 22px;
   max-width: 100%;
-  padding: 2px 8px;
+  padding: 0 8px;
   border: 1px solid var(--color-border);
   border-radius: 999px;
   background: var(--color-bg-secondary);

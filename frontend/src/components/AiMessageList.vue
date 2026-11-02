@@ -22,11 +22,11 @@ import type {
 } from '../types/ai'
 import {
   artifactsOf, countToolRounds, jobIdOf, rulesOf, rulesTitle, runIDOf, toolIcon, toolList,
-  toolResultLang, toolTarget, toolVerb as aiToolVerb,
+  toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
 } from '../utils/aiTools'
 import { planSecs, planStepIndex } from '../utils/aiPlan'
 
-defineProps<{
+const props = defineProps<{
   hasKey: boolean
   messages: AIMessage[]
   /** 每条回复的用量统计（父组件的 reactive Map，同一份对象，读 .get 仍会追踪） */
@@ -49,6 +49,30 @@ defineProps<{
   formatStat: (s: AIStreamStat) => string
   cpForCall: (tc: AIToolCall) => AICheckpointView | undefined
 }>()
+
+// 命令在跑的时候输出在卡片里往下长：不跟着滚，用户看到的永远是开头几行，
+// 而这恰恰是最没信息量的部分（pip 真正在动的进度在最后一行）。
+// 只跟「正在跑」的卡片——已经跑完的卡片用户可能正在往上翻，不该被拽回底部。
+const toolResEls = new Map<string, HTMLElement>()
+
+function setToolResEl(id: string, el: unknown) {
+  if (el instanceof HTMLElement) toolResEls.set(id, el)
+  else toolResEls.delete(id)
+}
+
+watch(
+  // 依赖只有「正在跑的几条的长度」：内容一变就滚，跑完的卡片不再触发。
+  () => props.streamTools.map((t) => (t.running ? (t.live?.length || 0) + (t.liveTail?.length || 0) : -1)).join(','),
+  () => {
+    nextTick(() => {
+      for (const t of props.streamTools) {
+        if (!t.running) continue
+        const el = toolResEls.get(t.id)
+        if (el) el.scrollTop = el.scrollHeight
+      }
+    })
+  },
+)
 
 const emit = defineEmits<{
   (e: 'open-settings'): void
@@ -288,7 +312,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
                 <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
                 <!-- 有 diff 时不再重放一句「已编辑 xxx（替换 1 处）」：
                      路径在摘要行上已经有了，改动在 diff 里已经有了。 -->
-                <pre v-else-if="tc.result && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
+                <pre v-else-if="toolOutput(tc) && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolOutput(tc) }}</pre>
               </details>
             </div>
           </details>
@@ -430,7 +454,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
                 <div v-else-if="tc.approval === 'allowed'" class="ai-approval-done">{{ t('aiApprovalAllowed') }}</div>
                 <AiDiffView v-if="tc.diff" :diff="tc.diff" />
                 <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
-                <pre v-else-if="tc.result && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ tc.result }}</pre>
+                <pre v-else-if="toolOutput(tc) && !tc.diff" :ref="(el) => setToolResEl(tc.id, el)" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolOutput(tc) }}</pre>
                 <!-- 后台任务：卡片上明写「关闭应用会终止」。工具描述里也写了同一句，
                      但用户看的是这张卡；不在这里再说一次，关窗口时他一定以为
                      dev server 还在后台跑着。 -->
@@ -723,7 +747,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 .ai-tool-res {
   font-size: 11px; color: var(--color-text-secondary);
   font-family: var(--font-mono); line-height: 1.55;
-  max-height: 220px; overflow: auto;
+  /* 340px ≈ 二十来行。原来 220px 只放得下十三四行，读文件的卡片看起来像
+     「AI 只读了十几行」，而它其实一次读的是几百行——内容被可视区藏起来了。 */
+  max-height: 340px; overflow: auto;
   white-space: pre-wrap; word-break: break-word;
 }
 
@@ -743,9 +769,21 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 .ai-messages {
   flex: 1;
   overflow-y: auto;
-  /* 与输入框（width:80% 居中）同一条左右边线：留白 10% = 内容宽 80%。
-     用 max(20px, 10%) 只是兜底，窄窗口下别让正文贴到边上。 */
-  padding: 16px max(20px, 10%);
+  /* 与输入框同一条左右边线。输入框的宽度是 --ai-column-w（min(90vw,1200px,100%)），
+     居中在 .ai-dock 的 16px 内边距里，所以它的左边缘恒等于
+         max(16px, (主区宽 - --ai-column-max) / 2)
+     这里用同一个公式算左右内边距，正文边线就跟输入框的边线重合。
+     原来写的是 max(20px, 10%)——那是配 width:80% 的输入框的，输入框换了口径之后
+     消息区比它窄一截，看起来就是「正文和输入框左右错开」。
+     百分号在 padding 上相对包含块（.ai-main）的宽度，与上面的推导一致。 */
+  --ai-msg-pad: max(var(--space-6), calc((100% - var(--ai-column-max)) / 2));
+  padding: var(--space-6) var(--ai-msg-pad);
+  /* 右边刻意不补滚动条那 -6px：overflow-y 的滚动条占的是 content box 内的位置，
+     理论上减掉能对齐，但 scrollbar-gutter: stable 在自定义 ::-webkit-scrollbar 下
+     并不预留槽位（实测 offsetWidth == clientWidth），补了反而在「内容不足一屏」时
+     向右溢出 6px；macOS 的 overlay 滚动条也根本不占宽。两种偏差里选「始终窄 6px」，
+     左边线（阅读起点）永远精确对齐，右边差半个字宽，看不出。
+     另外不要改成 overflow-y: scroll 去强制占位——那会把滚动条轨道常驻，跨平台不一致。 */
   display: flex;
   flex-direction: column;
   overflow-anchor: none; /* 关掉浏览器自动锚定，避免与我们的贴底逻辑打架 */

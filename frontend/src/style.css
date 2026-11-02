@@ -30,6 +30,27 @@
   --collection-width: 300px;
   --search-height: 46px;
 
+  /* 滚动条宽度：::-webkit-scrollbar 读它。抽成变量是为了「消息区与输入框对齐」
+     这类几何计算有个单一来源可查——别再各写各的 6px。 */
+  --scrollbar-w: 6px;
+
+  /* AI 输入列的宽度：落地页 hero 的输入框与对话页底部的输入区必须同宽，
+     否则「新建任务 → 开始对话」时输入框会突然变宽/变窄，像换了个控件。
+     使用点三处，改宽度只改这两行：
+       1. AiHero 的 .ai-hero-inner
+       2. AiComposer 的 .ai-input-area
+       3. AIPage 的 .ai-dock-approve（审批卡盖在输入框上，宽度必须跟）
+     拆成两个变量是因为百分比解析的参照物不同：
+       · 普通元素用 --ai-column-w，「100%」相对父级的 content box；
+       · 绝对定位元素用 --ai-column-max，再自己 calc 掉父级 padding
+         （absolute 的 100% 是 padding box，比 content box 多两侧内边距）。
+     用 vw 而不是 %：百分比相对父级 content box（hero 已扣掉左右各 16px），
+     窗口越窄差得越明显；vw 直接对窗口取九成。
+     末尾的 100% 是兜底——侧栏占掉 210px 后主区往往比 90vw 窄
+     （窗口小于 2100px 时必然如此），没有它就横向溢出。 */
+  --ai-column-max: min(90vw, 1200px);
+  --ai-column-w: min(var(--ai-column-max), 100%);
+
   --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
     'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
   --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', Consolas, monospace;
@@ -300,8 +321,8 @@ body {
 
 /* ==================== 滚动条 ==================== */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: var(--scrollbar-w);
+  height: var(--scrollbar-w);
 }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
