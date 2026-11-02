@@ -84,6 +84,13 @@ type AgentRunReq struct {
 	// Mentions 本次提问里用 @ 显式引用的文件 / 目录 / 历史对话（见 ai_mentions.go）。
 	// 只影响这一次请求的上下文，不落库：引用是「这次要看它」，不是长期状态。
 	Mentions []AIMention
+	// Worktree 本次是否要求「在隔离工作区里干活」（见 ai_worktree.go）。
+	//
+	// 只在**还没建**工作区时起作用：一旦会话上记了 worktree_path，后续轮次无论
+	// 传什么都在那个工作区里执行——否则模型上一轮改的文件下一轮就看不见了。
+	Worktree bool
+	// WorktreeBranch 基于哪条分支建工作区（空 = 当前分支）。
+	WorktreeBranch string
 
 	// ── 编排维度（阶段 2）。顶层对话这四项全为零值，行为与阶段 1 完全一致 ──
 
@@ -272,6 +279,20 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			if st, serr := os.Stat(cwd); serr != nil || !st.IsDir() {
 				logger.W("[ai] 会话/空间绑定的工作目录已不可用，本次按未绑定处理 conv=%s cwd=%s", res.ConvID, cwd)
 				cwd = ""
+			}
+		}
+	}
+
+	// 隔离工作区：勾了 Worktree 就把 cwd 换成这个任务专属的 git worktree，
+	// 原工程目录一个字节都不动。已有工作区时这里只是「续用」。
+	//
+	// 放在 cwd 回写之后：回写已经把「用户选的目录」记成会话 cwd（那是工作区的来源），
+	// 这里再用工作区路径覆盖一次。两次写的都是真实状态，只是先后有依赖。
+	if !req.Fresh && strings.TrimSpace(cwd) != "" {
+		if wt := a.applyWorktree(conv, cwd, req.Worktree, req.WorktreeBranch); wt != cwd {
+			cwd = wt
+			if err := a.App.DB.SetAIConversationCwd(res.ConvID, cwd); err != nil {
+				logger.W("[ai] 保存工作区为会话目录失败 conv=%s: %v", res.ConvID, err)
 			}
 		}
 	}

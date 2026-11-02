@@ -40,6 +40,13 @@ func FinishDataDirMigration(oldDir, newDir string) error {
 		return fmt.Errorf("迁移数据库失败: %w", err)
 	}
 
+	// --- 1.5 隔离工作区（<数据目录>/ai_worktrees）不参与搬迁 ---
+	// git worktree 的 .git 是一个**写死绝对路径**的文件，整目录搬走后必然失效；
+	// 里面的内容本来也能从仓库重新检出，因此直接丢掉。
+	// 会话上的 worktree_path 会指向旧路径，下次用到时被 applyWorktree 判为不可用
+	// 并自动清空（此处还没打开数据库，改不了库）。
+	_ = os.RemoveAll(filepath.Join(newDir, "ai_worktrees"))
+
 	// --- 2. 删除旧目录 ---
 	// 旧目录里可能还有迁移阶段删不掉的文件（数据库三件套、日志等），
 	// 此时句柄已释放，可整体删除。删除失败不阻断启动：新目录数据已就位，

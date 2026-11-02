@@ -18,6 +18,7 @@ import AiSlashPanel from './AiSlashPanel.vue'
 import AiRichInput from './AiRichInput.vue'
 import AiMentionBox from './AiMentionBox.vue'
 import AiPermissionBadge from './AiPermissionBadge.vue'
+import AiWorktreeToggle from './AiWorktreeToggle.vue'
 
 /** 一排类型 pill 的一项（icon 是 lucide 组件）。script setup 里不能 export，父组件按结构传即可。 */
 interface HeroMode {
@@ -68,6 +69,13 @@ const props = defineProps<{
   canSend: boolean
   /** 执行权限：true = 完全访问。新建任务默认是「默认权限」，在这里切的第一句就生效 */
   permissionFull: boolean
+  /** 隔离工作区（见 AiWorktreeToggle）：只在 git 仓库里显示 */
+  worktreeActive: boolean
+  worktreePath: string
+  worktreeBranch: string
+  worktreeEnabled: boolean
+  worktreeBranches: string[]
+  worktreeBranchOpen: boolean
 }>()
 
 const emit = defineEmits<{
@@ -97,6 +105,10 @@ const emit = defineEmits<{
   (e: 'install-skill'): void
   (e: 'manage-connectors'): void
   (e: 'change-permission', full: boolean): void
+  (e: 'update:worktreeEnabled', v: boolean): void
+  (e: 'toggle-worktree-branch'): void
+  (e: 'pick-worktree-branch', name: string): void
+  (e: 'remove-worktree'): void
 }>()
 
 const { t } = useI18n()
@@ -199,6 +211,21 @@ function onModelSelect(e: Event) {
             <GitBranch :size="12" />
             <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
           </div>
+          <!-- 隔离工作区：新建任务时也能勾，第一句就落在独立 worktree 里 -->
+          <AiWorktreeToggle
+            :git-repo="props.gitRepo"
+            :active="props.worktreeActive"
+            :path="props.worktreePath"
+            :branch="props.worktreeBranch"
+            :enabled="props.worktreeEnabled"
+            :branches="props.worktreeBranches"
+            :branch-open="props.worktreeBranchOpen"
+            :disabled="false"
+            @update:enabled="emit('update:worktreeEnabled', $event)"
+            @toggle-branch="emit('toggle-worktree-branch')"
+            @pick-branch="emit('pick-worktree-branch', $event)"
+            @remove="emit('remove-worktree')"
+          />
           <!-- 归属空间：不选就是普通任务（后端会自动给它建一个专属目录）。
                已有空间直接选；选「新建空间…」会立刻弹出目录选择器——空间按目录唯一，
                所以不需要「先选新建、再点一个按钮选目录」这两步。选到的目录见下方产物去向。 -->

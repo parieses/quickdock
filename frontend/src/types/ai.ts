@@ -140,6 +140,10 @@ export interface AIConversation {
   // 执行权限：空 = 默认（敏感操作逐个确认），'full' = 完全访问。
   // 只认 'full' 一个真值——不认识的取值一律按默认权限显示，与后端同一个口径。
   permission?: string
+  // 隔离工作区（git worktree）：非空 = 这条任务已经在独立工作区里跑。
+  // worktree_branch 是它**基于**的分支（不是工作区自己的 quickdock/xxxx 分支）。
+  worktree_path?: string
+  worktree_branch?: string
 }
 
 // 空间 = 一个目录 + 挂在这个目录下的若干任务。

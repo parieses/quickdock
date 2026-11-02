@@ -150,6 +150,11 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		// Permission 这条对话的执行权限："full" = 完全访问，其余/缺省 = 默认。
 		// 缺这个字段的老前端一律按默认权限处理——安全开关断线时要倒向「问」。
 		Permission string `json:"permission"`
+		// Worktree 是否在隔离工作区里跑这条任务（见 ai_worktree.go）。
+		// 老前端不带这个字段 → false，行为与升级前完全一致。
+		Worktree bool `json:"worktree"`
+		// WorktreeBranch 基于哪条分支建工作区（空 = 当前分支）。
+		WorktreeBranch string `json:"worktreeBranch"`
 	}
 	// 请求体必须设上限：一次可以带 10 张 10 MiB 的图（见 ai_image.go），
 	// base64 之后是 ~134 MB 字符，无脑 ReadAll 等于把这么大一块直接读进内存。
@@ -192,15 +197,17 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	defer fl.close()
 
 	res := s.svc.runAgent(ctx, AgentRunReq{
-		ConvID:     req.ConvID,
-		Mode:       req.Mode,
-		SpaceID:    req.SpaceID,
-		Message:    req.Message,
-		Cwd:        req.Cwd,
-		Images:     req.Images,
-		Mentions:   req.Mentions,
-		Skills:     req.Skills,
-		Permission: req.Permission,
+		ConvID:         req.ConvID,
+		Mode:           req.Mode,
+		SpaceID:        req.SpaceID,
+		Message:        req.Message,
+		Cwd:            req.Cwd,
+		Images:         req.Images,
+		Mentions:       req.Mentions,
+		Skills:         req.Skills,
+		Permission:     req.Permission,
+		Worktree:       req.Worktree,
+		WorktreeBranch: req.WorktreeBranch,
 	}, &sseSink{fl: fl, cancel: cancel})
 
 	// 每次回答结束都通知：用户常在别处干活，跑完/中断/失败都需要被叫回来，

@@ -370,6 +370,8 @@ var baseTables = []string{
 		mode TEXT NOT NULL DEFAULT 'chat',
 		skills TEXT NOT NULL DEFAULT '',
 		permission TEXT NOT NULL DEFAULT '',
+		worktree_path TEXT NOT NULL DEFAULT '',
+		worktree_branch TEXT NOT NULL DEFAULT '',
 		starred INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
@@ -764,6 +766,11 @@ func (d *Database) migrate() error {
 		// 空串当默认值而不是 'default'：老会话升级后自然是空串，不必回填，
 		// 而「默认」本来就该是没写过的样子——多一个要校验的取值只会多一处漏判。
 		{"ai_conversations", "permission", "TEXT NOT NULL DEFAULT ''"},
+		// ai_conversations: Worktree 隔离工作区。worktree_path 是这条任务独占的
+		// git worktree 目录（开任务时建的，空 = 没开），worktree_branch 记它基于
+		// 哪个分支。两列都随会话走：关掉再打开、重启应用，工作区归属都还在。
+		{"ai_conversations", "worktree_path", "TEXT NOT NULL DEFAULT ''"},
+		{"ai_conversations", "worktree_branch", "TEXT NOT NULL DEFAULT ''"},
 		// notes 笔记树：新增树形/标题/标签字段
 		{"notes", "name", "TEXT DEFAULT ''"},
 		{"notes", "parent_id", "TEXT DEFAULT ''"},

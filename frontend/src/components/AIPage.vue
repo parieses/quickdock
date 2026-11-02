@@ -41,6 +41,7 @@ import { copyElementAsImage, downloadBlob, serializeMermaidSvg, svgToPngBlob, re
 // 比全量包小很多。主题配色见 styles/hljs-theme.css（跟随 <html data-theme>）。
 import hljs from 'highlight.js/lib/common'
 import '../styles/hljs-theme.css'
+import { logErr } from '../utils/logger'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
@@ -78,6 +79,8 @@ import {
   AIGetHooks,
   AISetHooksApproved,
   AIGetGitBranch,
+  AIGitBranches,
+  AIWorktreeRemove,
   AIGetSkills,
   AIGetExtServers,
   AISetExtServerEnabled,
@@ -888,6 +891,16 @@ async function selectConv(id: string) {
   mode.value = (conv?.mode || 'chat').trim() || 'chat'
   // 权限跟着任务走：这条对话开过完全访问，切回来要还原成它自己的档位。
   permissionFull.value = (conv?.permission || '').trim() === 'full'
+  // 工作区同样跟着任务走：已开的不再显示开关，只显示「基于哪条分支 + 移除」；
+  // 没开的把草稿状态清干净，免得上一条任务的勾选黏到这一条上。
+  worktreeBranchOpen.value = false
+  if ((conv?.worktree_path || '').trim()) {
+    worktreeEnabled.value = true
+    worktreeBranch.value = (conv?.worktree_branch || '').trim()
+  } else {
+    worktreeEnabled.value = false
+    worktreeBranch.value = ''
+  }
   // 已有会话的归属以库里的为准，新建待定值在这里作废。
   pendingSpaceId.value = ''
   // 流式缓冲只属于「正在跑的那条会话」：
@@ -1006,6 +1019,87 @@ async function onChangePermission(full: boolean) {
     permissionFull.value = !full
     toast.error(getErrorMessage(e))
   }
+}
+
+// ---- 隔离工作区（git worktree，见 AiWorktreeToggle 与后端 ai_worktree.go）----
+//
+// 状态分两层，别合并：
+//   · worktreeEnabled / worktreeBranch —— 「这条消息要不要开、基于哪条分支」，
+//     只在**还没开**时有意义，随发送带给后端。
+//   · 会话上的 worktree_path —— 「这条任务已经在工作区里跑了」，由后端落库。
+// 一旦第二条成立，后端后续每个轮次都复用同一个工作区，与开关无关
+// （关开关不等于拆工作区，拆要走显式移除）。
+const worktreeEnabled = ref(false)
+const worktreeBranch = ref('')
+const worktreeBranches = ref<string[]>([])
+const worktreeBranchOpen = ref(false)
+
+// activeConv 在下方（摘要区附近）已有一份定义，这里直接复用，别重复声明。
+const worktreeActive = computed(() => !!(activeConv.value?.worktree_path || '').trim())
+const worktreePath = computed(() => (activeConv.value?.worktree_path || '').trim())
+
+async function loadWorktreeBranches() {
+  const dir = effectiveDir.value.trim()
+  if (!dir) { worktreeBranches.value = []; return }
+  try {
+    const data = unwrap(await AIGitBranches(dir)) as { branches?: string[] } | null
+    worktreeBranches.value = data?.branches || []
+  } catch (e) {
+    // 拉不到分支只是下拉空着，不该打断输入
+    logErr('AIPage:loadWorktreeBranches', e)
+    worktreeBranches.value = []
+  }
+}
+
+/** 勾选/取消 Worktree：勾上时顺手把分支预置成当前分支并拉一次列表。 */
+function onWorktreeToggle(on: boolean) {
+  worktreeEnabled.value = on
+  worktreeBranchOpen.value = false
+  if (on) {
+    if (!worktreeBranch.value) worktreeBranch.value = gitBranch.value
+    void loadWorktreeBranches()
+  }
+}
+
+function toggleWorktreeBranch() {
+  worktreeBranchOpen.value = !worktreeBranchOpen.value
+  if (worktreeBranchOpen.value) void loadWorktreeBranches()
+}
+
+function pickWorktreeBranch(name: string) {
+  worktreeBranch.value = name
+  worktreeBranchOpen.value = false
+}
+
+/**
+ * 移除这条任务的工作区。
+ *
+ * 后端在「有未提交改动」时默认拒绝，前端拿到拒绝后必须再问一次——工作区里可能
+ * 是模型刚写了一半的代码，静默 force 删掉等于替用户做了「这些改动不要了」的决定。
+ */
+async function removeWorktree() {
+  const id = activeId.value
+  if (!id) return
+  try {
+    unwrap(await AIWorktreeRemove(id, false))
+    toast.success(t('aiWorktreeRemoved'))
+  } catch (e) {
+    const msg = getErrorMessage(e)
+    if (!(await toast.confirm(msg + '\n\n' + t('aiWorktreeForceConfirm')))) return
+    try {
+      const data = unwrap(await AIWorktreeRemove(id, true)) as { cwd?: string } | null
+      if (data?.cwd) convCwd.value = data.cwd
+      toast.success(t('aiWorktreeRemoved'))
+    } catch (e2) {
+      toast.error(getErrorMessage(e2))
+      logErr('AIPage:removeWorktree', e2)
+      return
+    }
+  }
+  // 工作区没了，会话上的 cwd 与记录都变了：重拉列表让 chips 立刻回到「可再开」状态
+  void loadConversations()
+  worktreeEnabled.value = false
+  worktreeBranch.value = ''
 }
 
 // 「/ 选技能」补全：斜杠只是输入方式，选中后变成输入框里的一枚行内胶囊。
@@ -1904,6 +1998,10 @@ async function send() {
         // 权限：每次都显式带。「缺省 = 沿用上次」在这里不成立——权限是每一条消息
         // 的执行口径，少带一次就可能按上一轮的完全访问静默执行。
         permission: permissionFull.value ? 'full' : 'default',
+        // 隔离工作区：已开工作区的会话传什么都无所谓（后端按会话记录续用），
+        // 没开的才看这两个字段。分支空 = 用当前分支。
+        worktree: worktreeEnabled.value || worktreeActive.value,
+        worktreeBranch: worktreeBranch.value || undefined,
       }),
       signal: ctrl.signal,
     })
@@ -2683,6 +2781,16 @@ onUnmounted(() => {
         :slash-idx="slashIdx"
         :can-send="canSendText"
         :permission-full="permissionFull"
+        :worktree-active="worktreeActive"
+        :worktree-path="worktreePath"
+        :worktree-branch="worktreeBranch || gitBranch"
+        :worktree-enabled="worktreeEnabled"
+        :worktree-branches="worktreeBranches"
+        :worktree-branch-open="worktreeBranchOpen"
+        @update:worktree-enabled="onWorktreeToggle"
+        @toggle-worktree-branch="toggleWorktreeBranch"
+        @pick-worktree-branch="pickWorktreeBranch"
+        @remove-worktree="removeWorktree"
         @model-change="onModelChange"
         @change-permission="onChangePermission"
         @key="onHeroKey"
@@ -2859,6 +2967,16 @@ onUnmounted(() => {
         :slash-idx="slashIdx"
         :can-send="canSendText"
         :permission-full="permissionFull"
+        :worktree-active="worktreeActive"
+        :worktree-path="worktreePath"
+        :worktree-branch="worktreeBranch || gitBranch"
+        :worktree-enabled="worktreeEnabled"
+        :worktree-branches="worktreeBranches"
+        :worktree-branch-open="worktreeBranchOpen"
+        @update:worktree-enabled="onWorktreeToggle"
+        @toggle-worktree-branch="toggleWorktreeBranch"
+        @pick-worktree-branch="pickWorktreeBranch"
+        @remove-worktree="removeWorktree"
         @change-permission="onChangePermission"
         @approve-hooks="approveHooks"
         @remove-attachment="removeAttachment"
@@ -3136,7 +3254,7 @@ onUnmounted(() => {
 
 .ai-tool-btn {
   display: flex; align-items: center; justify-content: center;
-  width: 40px; height: var(--ai-input-h); border: 1px solid var(--color-border);
+  width: 40px; height: 32px; border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   border-radius: var(--radius-md); cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);

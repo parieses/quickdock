@@ -17,6 +17,7 @@ import AiSlashPanel from './AiSlashPanel.vue'
 import AiRichInput from './AiRichInput.vue'
 import AiMentionBox from './AiMentionBox.vue'
 import AiPermissionBadge from './AiPermissionBadge.vue'
+import AiWorktreeToggle from './AiWorktreeToggle.vue'
 
 const props = defineProps<{
   hooks: AIHooksInfo | null
@@ -48,6 +49,13 @@ const props = defineProps<{
   canSend: boolean
   // 这条对话的执行权限：true = 完全访问（不再逐条确认）
   permissionFull: boolean
+  // 隔离工作区（见 AiWorktreeToggle）：只在 git 仓库里显示
+  worktreeActive: boolean
+  worktreePath: string
+  worktreeBranch: string
+  worktreeEnabled: boolean
+  worktreeBranches: string[]
+  worktreeBranchOpen: boolean
 }>()
 
 const emit = defineEmits<{
@@ -72,6 +80,10 @@ const emit = defineEmits<{
   (e: 'install-skill'): void
   (e: 'manage-connectors'): void
   (e: 'change-permission', full: boolean): void
+  (e: 'update:worktreeEnabled', v: boolean): void
+  (e: 'toggle-worktree-branch'): void
+  (e: 'pick-worktree-branch', name: string): void
+  (e: 'remove-worktree'): void
 }>()
 
 const { t } = useI18n()
@@ -162,6 +174,21 @@ defineExpose({
           <GitBranch :size="12" />
           <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
         </span>
+        <!-- 隔离工作区：勾上后这条任务在独立 git worktree 里干活，原目录不动 -->
+        <AiWorktreeToggle
+          :git-repo="props.gitRepo"
+          :active="props.worktreeActive"
+          :path="props.worktreePath"
+          :branch="props.worktreeBranch"
+          :enabled="props.worktreeEnabled"
+          :branches="props.worktreeBranches"
+          :branch-open="props.worktreeBranchOpen"
+          :disabled="props.streaming"
+          @update:enabled="emit('update:worktreeEnabled', $event)"
+          @toggle-branch="emit('toggle-worktree-branch')"
+          @pick-branch="emit('pick-worktree-branch', $event)"
+          @remove="emit('remove-worktree')"
+        />
       </div>
       <div class="ai-input-bar-right">
         <!-- 当前权限：默认权限会逐个问，完全访问直接做。生成中不给切——

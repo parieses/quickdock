@@ -56,6 +56,14 @@ type AIConversation struct {
 	// 一条对话开完就关；做成全局设置的结果是可预料的——某天忘了关，
 	// 之后每条对话都在无人确认的情况下改文件、跑命令。
 	Permission string `json:"permission"`
+	// WorktreePath 这条任务独占的 git worktree 目录（绝对路径，空 = 没开工作区）。
+	//
+	// 开了之后 Cwd 会被指到这里：模型改的是工作区里的副本，原工程目录一个字节
+	// 都不动。绑在会话上而不是做成全局开关——「这一步我不想它碰我的工作区」是
+	// 针对某个任务的判断，一条任务干完就该结束。
+	WorktreePath string `json:"worktree_path"`
+	// WorktreeBranch 该工作区基于的分支（用户在下拉里选的那条）。
+	WorktreeBranch string `json:"worktree_branch"`
 	// Starred 星标：侧栏置顶收藏。单独一列而不是复用 space_id（自建「收藏」空间）：
 	// 星标是横切属性 —— 一个任务可以既属于某空间又被星标，塞进空间就二选一了。
 	Starred   bool   `json:"starred"`
@@ -121,6 +129,8 @@ func mapToAIConversation(m map[string]interface{}) AIConversation {
 		Mode:             str(m["mode"]),
 		Skills:           str(m["skills"]),
 		Permission:       str(m["permission"]),
+		WorktreePath:     str(m["worktree_path"]),
+		WorktreeBranch:   str(m["worktree_branch"]),
 		Starred:          integer(m["starred"]) == 1,
 		CreatedAt:        str(m["created_at"]),
 		UpdatedAt:        str(m["updated_at"]),
@@ -331,6 +341,10 @@ type NewAIConversation struct {
 	// 与 skills 同理：用户可能在落地页就把权限切成完全访问再发第一句，
 	// 那条路径只有建会话能记录。
 	Permission string
+	// WorktreePath / WorktreeBranch 建会话时就开好隔离工作区（落地页勾了 Worktree
+	// 再发第一句）。空 = 不开；两列随创建落库，后续轮次读会话即可复用同一个工作区。
+	WorktreePath   string
+	WorktreeBranch string
 }
 
 // CreateAIConversation 新建任务
@@ -340,15 +354,17 @@ func (d *Database) CreateAIConversation(in NewAIConversation) (*AIConversation, 
 		mode = "chat"
 	}
 	c := &AIConversation{
-		ID:         newID(),
-		Title:      strings.TrimSpace(in.Title),
-		Mode:       mode,
-		SpaceID:    strings.TrimSpace(in.SpaceID),
-		Cwd:        strings.TrimSpace(in.Cwd),
-		Skills:     strings.TrimSpace(in.Skills),
-		Permission: strings.TrimSpace(in.Permission),
-		CreatedAt:  now(),
-		UpdatedAt:  now(),
+		ID:             newID(),
+		Title:          strings.TrimSpace(in.Title),
+		Mode:           mode,
+		SpaceID:        strings.TrimSpace(in.SpaceID),
+		Cwd:            strings.TrimSpace(in.Cwd),
+		Skills:         strings.TrimSpace(in.Skills),
+		Permission:     strings.TrimSpace(in.Permission),
+		WorktreePath:   strings.TrimSpace(in.WorktreePath),
+		WorktreeBranch: strings.TrimSpace(in.WorktreeBranch),
+		CreatedAt:      now(),
+		UpdatedAt:      now(),
 	}
 	if err := d.BulkInsert("ai_conversations", []map[string]interface{}{structToMap(c)}); err != nil {
 		return nil, err
@@ -542,6 +558,17 @@ func (d *Database) SetAIConversationPermission(id, permission string) error {
 	return d.ExecuteParams(
 		`UPDATE ai_conversations SET permission = ?, updated_at = ? WHERE id = ?`,
 		[]interface{}{strings.TrimSpace(permission), now(), strings.TrimSpace(id)},
+	)
+}
+
+// SetAIConversationWorktree 设置 / 清空这条任务的隔离工作区（路径 + 基于的分支）。
+//
+// 与 SetAIConversationCwd 同样单独一个方法：空串是有效取值（关掉工作区），
+// 塞进「空串 = 不更新」的通用更新里就再也关不掉了。
+func (d *Database) SetAIConversationWorktree(id, path, branch string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET worktree_path = ?, worktree_branch = ?, updated_at = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(path), strings.TrimSpace(branch), now(), strings.TrimSpace(id)},
 	)
 }
 
