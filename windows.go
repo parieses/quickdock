@@ -304,9 +304,15 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 //  3. 显示在任务栏（显式 HiddenOnTaskbar:false，不调 applyWindowPlatformOptions）。
 //     它是主窗口之外唯一需要 Alt+Tab / 点击任务栏切回的窗口；隐藏会让用户无从下手。
 //
-// 关闭仍拦截为 Hide（这点与 DSH 的「销毁并下次重建」不同）：SSH 会话常驻 Go 侧
-// （internal/sshx 的 Manager），窗口留着比销毁再回放体验更直接——重新打开时终端
-// 的滚动缓冲原样还在，不需要等回放。真退出（托盘退出/更新重启）才放行。
+// 关闭 = 销毁，下次点击重新创建（与 DSH 窗口一致）。早期版本把关闭拦成 Hide，
+// 理由是「窗口留着，滚动缓冲原样还在，比销毁再恢复更直接」；代价是 WebView、
+// xterm 实例、以及整棵 Vue 子树在用户关掉窗口之后一直留在内存里——SSH 页是
+// 常驻重页面，这笔账不小。现在改成销毁：
+//   - 会话本身在 Go 侧（internal/sshx 的 Manager），关窗不会断连；
+//   - 窗口重建后 SshPage 挂载时 restoreTabs() 会按 sessionId 把最近开着的终端
+//     接回来（滚动缓冲由后端回放补齐），所以「重建」不等于「从头连一遍」。
+//
+// 真退出（托盘退出/更新重启）时窗口随进程消失，不走清引用这条路。
 func initSshWindow(app *application.App) *application.WebviewWindow {
 	opts := application.WebviewWindowOptions{
 		Title:  "快启坞 - SSH",
@@ -332,12 +338,22 @@ func initSshWindow(app *application.App) *application.WebviewWindow {
 	})
 	// 关闭必须用 RegisterHook，不能用 OnWindowEvent。
 	//
-	// 完整根因分析见 hideOnCloseHook 的注释（四个浮窗是同一个 bug）。
-	win.RegisterHook(events.Common.WindowClosing, hideOnCloseHook(func() {
+	// 根因分析见 hideOnCloseHook 的注释（四个浮窗是同一个 bug）。
+	//
+	// 这里刻意**不**复用 hideOnCloseHook：那个钩子会 event.Cancel() 并把窗口藏起来，
+	// 而 SSH 要的是真正销毁（见函数头注释）。不调 Cancel 即放行销毁；
+	// 同时在销毁前把包级引用清空——清晚了，销毁完成到下一次点击之间若有调用拿到
+	// getter，会把一个已经失效的窗口 Show 出去（无窗口可显示，表现为点了没反应）。
+	win.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		x, y := win.Position()
 		saveWinPos("ssh", x, y)
-		win.Hide()
-	}))
+		if trayQuitRequested.Load() {
+			return // 真退出：进程即将结束，清引用没有意义（也不必和退出路径抢锁）
+		}
+		sshWinLock.Lock()
+		sshWin = nil
+		sshWinLock.Unlock()
+	})
 	return win
 }
 
