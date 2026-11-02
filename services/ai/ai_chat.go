@@ -114,7 +114,9 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	// 既不让用户看到原始标记，也不丢掉这次调用。
 	dsml := newDSMLFilter()
 	scanner := bufio.NewScanner(resp.Body)
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	// 上限 16MB：模型整段回大 tool_calls（一次性写上百 KB 的文件、或网关不做
+	// 增量而整段回包）时，1MB 会让整条流以 "token too long" 直接中断且难归因。
+	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
 		select {
 		case <-ctx.Done():

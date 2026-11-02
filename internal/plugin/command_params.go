@@ -175,7 +175,12 @@ func normalizeParamSchema(params map[string]interface{}) {
 		seen := make(map[string]bool, len(arr))
 		uniq := make([]interface{}, 0, len(arr))
 		for _, item := range arr {
-			key := item.(string)
+			// 非字符串元素直接丢弃：normalizeParamSchema 是独立入口，
+			// 不能假设调用方已先做过 checkParamSchema 的字符串校验。
+			key, ok := item.(string)
+			if !ok || key == "" {
+				continue
+			}
 			if seen[key] {
 				continue
 			}

@@ -64,6 +64,8 @@ type extManager struct {
 	mu      sync.Mutex
 	clients map[string]mcpclient.Client // server 名 -> client（stdio 保活，HTTP 无状态）
 	states  map[string]*extServerState
+	// loadMu 串行化整轮加载（锁外连接期间不占 mu，故需要它防并发重载互相盖掉）。
+	loadMu sync.Mutex
 }
 
 func newExtManager() *extManager {
@@ -128,20 +130,30 @@ func sanitizeExtName(s string) string {
 // loadExtServers 把 manifest 里的 server 全部连接、列工具、注册进注册表。
 //
 // 逐个 server 独立处理：一个挂了不影响其它。返回各 server 的最终状态。
+//
+// **网络动作一律在 m.mu 之外做**：史上这里全程持写锁，于是「设置页点重载」
+// 期间正在跑的外部工具调用会卡在 callExt 的 Lock() 上，而 sync.Mutex 不响应
+// ctx——用户点停止也中断不了。现在改为「持锁摘旧 → 锁外连接 → 持锁装新」，
+// 加载本身用 loadMu 串行，避免并发重载互相盖掉。
 func (m *extManager) loadExtServers() []extServerState {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.loadMu.Lock()
+	defer m.loadMu.Unlock()
 
-	// 先整组撤掉旧的：server 工具列表会变（加了的、删了的），逐个 diff 远不如
-	// 撤掉重注可靠；残留的 Handler 还指着旧 client。
-	for name := range m.states {
+	// 1. 先整组撤掉旧的：server 工具列表会变（加了的、删了的），逐个 diff 远不如
+	//    撤掉重注可靠；残留的 Handler 还指着旧 client。
+	m.mu.Lock()
+	oldStates := m.states
+	oldClients := m.clients
+	m.states = map[string]*extServerState{}
+	m.clients = map[string]mcpclient.Client{}
+	m.mu.Unlock()
+
+	for name := range oldStates {
 		mcp.RemoveExternal(extToolPrefix(name))
 	}
-	for name, c := range m.clients {
+	for _, c := range oldClients {
 		_ = c.Close()
-		delete(m.clients, name)
 	}
-	m.states = map[string]*extServerState{}
 
 	servers, err := readExtManifest()
 	if err != nil {
@@ -154,10 +166,13 @@ func (m *extManager) loadExtServers() []extServerState {
 	}
 	sort.Strings(names)
 
+	// 2. 锁外连接与列工具（这一步可能要几秒，不能占着 callExt 用的锁）。
+	newStates := make(map[string]*extServerState, len(names))
+	newClients := make(map[string]mcpclient.Client, len(names))
 	for _, name := range names {
 		cfg := servers[name]
 		st := &extServerState{Name: name, Config: cfg, Tools: []string{}}
-		m.states[name] = st
+		newStates[name] = st
 		if cfg.Disabled {
 			st.Status = "disabled"
 			continue
@@ -178,7 +193,7 @@ func (m *extManager) loadExtServers() []extServerState {
 			logger.W("[ext-mcp] %s 不可用: %v", name, err)
 			continue
 		}
-		m.clients[name] = c
+		newClients[name] = c
 		st.Status = "ok"
 		st.ToolCount = len(tools)
 		for _, t := range tools {
@@ -187,6 +202,20 @@ func (m *extManager) loadExtServers() []extServerState {
 		}
 		logger.I("[ext-mcp] %s 已接入 %d 个工具", name, len(tools))
 	}
+
+	// 3. 持锁整体替换（纯内存，毫秒级）。
+	m.mu.Lock()
+	m.states = newStates
+	m.clients = newClients
+	m.mu.Unlock()
+
+	return m.allStates()
+}
+
+// allStates 返回当前状态的快照（自行加锁）。
+func (m *extManager) allStates() []extServerState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return m.allStatesLocked()
 }
 

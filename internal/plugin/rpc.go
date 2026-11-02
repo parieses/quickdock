@@ -15,10 +15,16 @@ import (
 // 超过即判定该实例的 stdin 已不可用（writeBroken），后续写入一律拒绝。
 const stdinWriteTimeout = 2 * time.Second
 
+// pluginCallbackSem 插件回调的并发闸门：每个回调都是一个独立 goroutine 做 IO，
+// 没有上限时一个写坏的插件就能把宿主协程数刷到几万（见 readLoop 里的调用点）。
+// 8 是经验值：正常插件极少并发发起超过几个 host 调用，而 8 个并发 IO 对宿主无压力。
+var pluginCallbackSem = make(chan struct{}, 8)
+
 // Call 发送 JSON-RPC 请求并等待响应
 // method: 方法名（如 "initialize"、"plugin.execute"）
 // params: 参数（会被序列化为 JSON）
 // timeout: 超时时间（0 使用默认值）
+
 func (inst *PluginInstance) Call(method string, params interface{}, timeout time.Duration) (json.RawMessage, error) {
 	// 检查进程是否已退出
 	select {
@@ -199,7 +205,21 @@ func (inst *PluginInstance) readLoop(manager *Manager) {
 						copy(raw, b)
 						var reqCopy RPCRequest
 						_ = json.Unmarshal(raw, &reqCopy)
-						go manager.handleCallback(inst, &reqCopy, raw)
+						// 并发上限：异常/恶意插件狂刷回调时，无界的 go 会瞬间堆出成千上万个
+						// 协程各自做 IO，宿主内存与句柄都会被拖垮。满了就当场回一个错误让插件
+						// 自己退避——静默丢弃会让插件永远等一个不存在的响应。
+						select {
+						case pluginCallbackSem <- struct{}{}:
+							go func() {
+								defer func() { <-pluginCallbackSem }()
+								manager.handleCallback(inst, &reqCopy, raw)
+							}()
+						default:
+							logger.PluginW(inst.Manifest.ID,
+								"并发回调查询过多（上限 %d），已拒绝 %s", cap(pluginCallbackSem), reqCopy.Method)
+							_ = inst.writeWithTimeout(MakeError(reqCopy.ID, -32603,
+								"宿主繁忙：并发回调过多，请降低调用频率后重试"))
+						}
 					}
 				} else {
 					// 再尝试解析为响应

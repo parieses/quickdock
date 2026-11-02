@@ -52,27 +52,12 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 				return "", fmt.Errorf("%w: plugin.json 解析失败: %v", ErrInvalidManifest, err)
 			}
 
-			// 校验必填字段
-			if mf.ID == "" || mf.Name == "" || mf.Version == "" || mf.Backend.Runtime == "" {
-				return "", fmt.Errorf("%w: id/name/version/backend.runtime 为必填字段", ErrInvalidManifest)
-			}
-			// none runtime 不需要 entry
-			if mf.Backend.Runtime != "none" && mf.Backend.Entry == "" {
-				return "", fmt.Errorf("%w: backend.entry 为必填字段（none runtime 除外）", ErrInvalidManifest)
-			}
-
-			// 校验 ID 格式：与 LoadManifest/validateManifest 同一白名单（pluginIDRe），
-			// 不允许 / \ 与以字母开头的约束天然阻止 "../" 等路径穿越
-			if !pluginIDRe.MatchString(mf.ID) {
-				return "", fmt.Errorf("%w: 插件 ID %q 格式无效（应匹配 com.quickdock.xxx 或 hosts-manager 形式）", ErrInvalidManifest, mf.ID)
-			}
-
-			// 校验 runtime
-			switch mf.Backend.Runtime {
-			case "native", "goja", "none":
-				// 合法
-			default:
-				return "", fmt.Errorf("%w: 不支持的 runtime %q（支持: native, goja, none）", ErrInvalidManifest, mf.Backend.Runtime)
+			// 安装路径不走 LoadManifest，因此这里必须调用同一个 validateManifest，
+			// 否则 platforms / permissions（含 selfAudit=skip 必须带 skipReason）等
+			// 全部被跳过：装完能跑、下次启动校验失败变「插件消失」。
+			// ID 格式校验也在 validateManifest 里（pluginIDRe，天然阻止 "../"）。
+			if err := validateManifest(&mf); err != nil {
+				return "", fmt.Errorf("%w: %v", ErrInvalidManifest, err)
 			}
 
 			manifest = &mf
