@@ -30,6 +30,7 @@ import (
 	dshsvc "quickdock/services/dsh"
 	envsvc "quickdock/services/env"
 	frecencysvc "quickdock/services/frecency"
+	gitsvc "quickdock/services/git"
 	itemsvc "quickdock/services/item"
 	logtailsvc "quickdock/services/logtail"
 	mcpsvc "quickdock/services/mcp"
@@ -513,6 +514,10 @@ func main() {
 	itemSvc := itemsvc.NewItemService(appService)
 	portSvc := portsvc.NewPortService(appService)
 
+	// Git 面板门面：仓库清单/状态/分支/提交历史与 fetch/pull/切分支。
+	// 仓库清单落 app_state（KV），不建表——它只是路径串，没有关联查询。
+	gitSvc := gitsvc.NewGitService(appService)
+
 	// SSH 服务门面：主机管理/指纹信任/连通性测试/命令执行（引擎在 internal/sshx），
 	// 单独绑定为独立 Wails service。
 	sshSvc := sshxsvc.NewSshService(appService)
@@ -574,6 +579,7 @@ func main() {
 			application.NewService(snapshotSvc),
 			application.NewService(itemSvc),
 			application.NewService(portSvc),
+			application.NewService(gitSvc),
 			application.NewService(sshSvc),
 			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),
