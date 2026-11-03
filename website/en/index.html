@@ -342,6 +342,22 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Faster, smarter command palette; schedule tasks pick from scenes; SSH window now gives feedback</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Ctrl+K command palette: faster ranking (precomputed plugin scoring, O(1) recent-use lookup); paste your clipboard within 5s of copying; slash-command discovery and unit conversion now support Chinese.</li>
+          <li>Schedule tasks: pick the target straight from Scene → Collection → Item instead of typing a path by hand.</li>
+          <li>Opening the standalone SSH terminal now shows a spinner ("Opening…") on the sidebar and fades the window in — no more silent wait on first launch.</li>
+          <li>AI landing page: more example prompts, shuffled each open, with a "Shuffle" button to swap them instantly.</li>
+          <li>AI engine: assorted stability and UX polish (background tasks, memory consolidation, token streaming).</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.37</span>
+          <span class="log-date">2026-11-02</span>
           <span class="log-title">Long AI jobs get their own panel, and you can cut in mid-reply</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -393,21 +409,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.34</span>
-          <span class="log-date">2026-10-29</span>
-          <span class="log-title">Updates no longer stall mid-download, and AI can't call commands a plugin keeps private</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>App updates now resume instead of restarting: bandwidth throttling, mirror switching and timeouts all continue from where they left off, because progress is written to disk. The old “downloading forever, never finishes” case should be gone.</li>
-          <li>A plugin's public command list is now enforced, not just advertised: a command that isn't declared can't be called by AI even if it guesses the ID — it gets an explanation and is pointed at the UI instead. Plugins can keep interface-only commands out of the list without losing them.</li>
-          <li>Every timeline row now shows where the action came from: you or the AI. Knowing whether you clicked something or an agent did it was exactly the detail missing when troubleshooting.</li>
-          <li>AI can now tell “this tool is switched off” apart from “this app doesn't have that feature”: the tool list reports exposed, registered and blocked counts, so it points you at the Environment page to enable it instead of refusing.</li>
-          <li>Plugin card descriptions are clamped to two lines with matched heights, so cards stay aligned; hover for the full text when it doesn't fit.</li>
-        </ul>
-      </details>
 
     </div>
 

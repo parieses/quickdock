@@ -342,6 +342,22 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">命令面板更快更准，定时任务能挑场景里的项目，SSH 窗口有反馈了</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Ctrl+K 命令面板：检索与排序更快（插件命令打分预热、最近使用回查 O(1)）；复制后 5 秒内打开可直接带入剪贴板内容；斜杠命令发现、单位换算支持中文。</li>
+          <li>定时任务的目标不再只能手填：可从「场景 → 集合 → 项目」里直接挑一个填进去。</li>
+          <li>点开 SSH 终端独立窗口时，侧栏图标转圈提示「正在打开」，窗口淡入，首开不再空等没反应。</li>
+          <li>AI 落地页示例问题扩到更多条并每次随机，可点「换一批」立即换一组。</li>
+          <li>AI 引擎若干稳定性与体验打磨（后台任务、记忆归集、逐字流等）。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.37</span>
+          <span class="log-date">2026-11-02</span>
           <span class="log-title">AI 跑的长任务有面板能看了，回答中途也能插话</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -393,21 +409,6 @@
         </ul>
       </details>
 
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.34</span>
-          <span class="log-date">2026-10-29</span>
-          <span class="log-title">更新不会再卡在下不完，插件没公开的命令 AI 也调不动</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>应用更新支持断点续传：网络限速、切换镜像、超时中断都不用从 0 重来，进度会落盘，下次接着下。</li>
-          <li>插件对 AI 公开的命令范围现在说到做到：清单里没声明的命令，AI 就算猜出名字也调不动，会收到一句说明并被告知改用界面操作。插件可以放心把只给界面用的内部命令留在清单外。</li>
-          <li>时间线每一行标出操作来源：「手动」还是「AI」，排查时不用再猜这条是谁干的。</li>
-          <li>AI 现在能分清「这个工具被关掉了」和「这个应用没有这个功能」：工具清单会同时报开放数、总数与被挡数，需要时会提示你去环境管理页开启，而不是回一句做不到。</li>
-          <li>插件卡片的介绍固定两行、高度对齐，描述再长也不会把卡片撑得参差不齐；看不全时鼠标悬停有全文。</li>
-        </ul>
-      </details>
 
     </div>
 
