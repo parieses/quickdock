@@ -96,8 +96,9 @@ export const navEntries: NavEntry[] = [
   { id: 'environments', labelKey: 'navEnvironments', icon: Server, component: EnvironmentPage,
     props: (ctx) => ({ initialSection: ctx.envInitialSection.value }) },
   // ssh：唤起独立终端窗口，主窗口内容不动
+  // 首启懒创建窗口有可见延迟，故挂 busyLabelKey：唤起中侧栏项转圈 + 文案变「正在打开…」（App 以 busyPage='ssh' 报告）
   { id: 'ssh', labelKey: 'navSsh', icon: SquareTerminal,
-    activate: (ctx) => ctx.openSsh(), hintKey: 'navSshHint' },
+    activate: (ctx) => ctx.openSsh(), hintKey: 'navSshHint', busyLabelKey: 'sshOpening' },
   // ai：被 KeepAlive 保活，回答会在别的页面继续生成 → 行尾挂活动指示点
   { id: 'ai', labelKey: 'navAi', icon: Bot, component: AIPage, dot: 'ai',
     listeners: (ctx) => ({ openSettings: ctx.openSettings }) },

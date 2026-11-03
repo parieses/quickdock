@@ -106,6 +106,7 @@ setNavigator((page: string) => {
 // 从侧边栏点 DeepSeek：先探测环境——缺 node/dsh 自动安装并打开设置页展示进度；已就绪直接开原生窗口
 interface EnvProbe { nodeFound?: boolean; dshInstalled?: boolean }
 const dshOpening = ref(false)
+const sshOpening = ref(false)
 // 本会话内已确认 node+dsh 就绪后不再重复探测：DetectNodeEnv() 每次会 spawn node/npx 子进程
 // 测版本（~1s），dsh 已装好的情况下纯属浪费。后端 Start() 仍会兜底检查入口存在。
 const dshEnvReady = ref(false)
@@ -173,12 +174,18 @@ provide('toast', { error, success, confirm });
 installExternalLinkGuard((_url, e) => error(getErrorMessage(e)));
 
 // 侧栏「SSH 终端」：唤起独立窗口（窗口由 Go 侧懒创建；已存在就 Show+Focus 复用）。
-// 与 DSH 不同，这里不含任何进程启动，打开是瞬时的，所以不做 loading 态。
+// 首次点击时 Go 侧要新建 Wails 窗口 + 加载 WebView，耗时数百毫秒到一两秒，期间主窗口没有任何反馈；
+// 复用已有窗口则是瞬时的。这里用 sshOpening 标记「唤起中」，让侧栏 SSH 项转圈 + 文案变「正在打开」，
+// 等 OpenSshWindow() 返回（窗口已创建并 Show）再清除——正好盖住「点击→窗口出现」的空窗期。
 async function openSsh() {
+  if (sshOpening.value) return // 防连点：首启可能耗时，避免重复唤起
+  sshOpening.value = true
   try {
     unwrap(await OpenSshWindow())
   } catch (e: any) {
     error(getErrorMessage(e))
+  } finally {
+    sshOpening.value = false
   }
 }
 
@@ -417,7 +424,7 @@ const activeConfirm = computed(() =>
     <div class="app-body">
       <Sidebar class="app-sidebar"
         :currentPage="currentPage"
-        :busyPage="dshOpening ? 'dsh' : ''"
+        :busyPage="dshOpening ? 'dsh' : (sshOpening ? 'ssh' : '')"
         @navigate="setPage"
         @open-settings="openSettings"
       />
@@ -522,6 +529,12 @@ body {
 .ssh-standalone {
   height: 100vh; width: 100vw; overflow: hidden;
   background: var(--color-bg-primary);
+  /* 窗口首次创建并挂载时播一次入场动画（窗口复用 Hide/Show 不重挂载，故不会每次重播） */
+  animation: ssh-win-in 0.28s ease-out both;
+}
+@keyframes ssh-win-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .plugin-standalone-empty {
