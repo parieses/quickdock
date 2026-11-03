@@ -11,6 +11,14 @@ import type { PluginCmdIndex } from './usePluginIndex'
 
 const { calcPluginScore } = usePluginIndex()
 
+// 构造 JWT 形状的样例串用于检测测试。在运行时拼接，避免源码里出现完整 JWT 字面量
+// 被密钥扫描（GitGuardian）误报为泄露凭证。探测器本身只认形状（三段 base64url），
+// 因此用 base64url(JSON) 拼出来即可，不含任何真实密钥。
+function makeJwtSample(): string {
+  const b64u = (s: string) => btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+  return [b64u('{"alg":"HS256"}'), b64u('{"sub":"123"}'), b64u('signature')].join('.')
+}
+
 function makeIdx(over: { acceptsInput?: boolean; keywords?: string[]; aliases?: string[]; prefix?: string; matchPattern?: string } = {}): PluginCmdIndex {
   const cmd = {
     id: 'json-toolbox',
@@ -70,7 +78,7 @@ describe('detectContentFormat 多格式探测', () => {
     expect(detectContentFormat('<?xml version="1.0"?><root><a>1</a></root>')).toBe('xml')
     expect(detectContentFormat('aGVsbG8gd29ybGQgdGhpcw==')).toBe('base64')
     expect(detectContentFormat('*/5 * * * *')).toBe('cron')
-    expect(detectContentFormat('eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c')).toBe('jwt')
+    expect(detectContentFormat(makeJwtSample())).toBe('jwt')
   })
 
   it('普通文本与残缺内容不算内容', () => {
@@ -151,7 +159,7 @@ describe('calcPluginScore matchPattern 分档', () => {
   })
 
   it('完整 JWT：matchPattern 命中(93) 不被 content 通道(72) 覆盖', () => {
-    const jwt = 'eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJVadQssw5c'
+    const jwt = makeJwtSample()
     const idx = makeIdx({ matchPattern: '^[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]{8,}\\.[A-Za-z0-9_-]*$', acceptsInput: true })
     const r = calcPluginScore(idx, jwt, jwt.toLowerCase())
     expect(r.matchType).toBe('match pattern')
