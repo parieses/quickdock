@@ -21,7 +21,7 @@
 import { defineAsyncComponent, type Component, type Ref } from 'vue'
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
-  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle,
+  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch,
 } from '@lucide/vue'
 // 保活白名单从零依赖模块引（名字常量与组件里 defineOptions 共用同一份）
 import { KEEP_ALIVE_PAGES } from './keepAlive'
@@ -30,6 +30,8 @@ import WorkspacePage from '../components/WorkspacePage.vue'
 
 // 主窗口内容页的异步组件集中在此定义（替代此前散落在 App.vue 的 defineAsyncComponent）。
 const NoteManagerPage = defineAsyncComponent(() => import('../components/NoteManagerPage.vue'))
+const DashboardPage = defineAsyncComponent(() => import('../components/DashboardPage.vue'))
+const GitPage = defineAsyncComponent(() => import('../components/GitPage.vue'))
 const PluginManagerPage = defineAsyncComponent(() => import('../components/PluginManagerPage.vue'))
 const TodoPage = defineAsyncComponent(() => import('../components/TodoPage.vue'))
 const SchedulePage = defineAsyncComponent(() => import('../components/SchedulePage.vue'))
@@ -81,9 +83,13 @@ export interface NavEntry {
   dot?: NavDotKind
 }
 
-// 顺序即侧边栏导航顺序（workspace → notes → todo → schedule → monitor → clipboard →
-// environments → ssh → ai → dsh → plugins），新增页请保持语义位置。
+// 顺序即侧边栏导航顺序（dashboard → workspace → notes → todo → schedule → monitor →
+// clipboard → environments → ssh → ai → dsh → plugins）。dashboard 放第一位：
+// 它是「今天要处理什么」的入口，而工作空间回答的是「打开哪个项目」，先看全局再看具体。
 export const navEntries: NavEntry[] = [
+  // 总览：待办/服务健康/常驻环境/端口占用四块聚合。它不持有任何领域状态，
+  // 每次挂载重新拉一遍最新数据，故不进 KeepAlive 白名单。
+  { id: 'dashboard', labelKey: 'navDashboard', icon: LayoutDashboard, component: DashboardPage },
   // workspace 是复合页（引导 / 空态 / 三栏），布局细节在 WorkspacePage 内部，
   // 注册表这边与其它内容页没有区别。
   { id: 'workspace', labelKey: 'navWorkspace', icon: FolderKanban, component: WorkspacePage,
@@ -95,6 +101,8 @@ export const navEntries: NavEntry[] = [
   { id: 'clipboard', labelKey: 'navClipboard', icon: Clipboard, component: ClipboardPanel, wrapperClass: 'clipboard-page' },
   { id: 'environments', labelKey: 'navEnvironments', icon: Server, component: EnvironmentPage,
     props: (ctx) => ({ initialSection: ctx.envInitialSection.value }) },
+  // git：仓库视角（分支树 / 提交历史 / 改动预览），放在环境与 SSH 之间——同属「开发现场」
+  { id: 'git', labelKey: 'navGit', icon: GitBranch, component: GitPage },
   // ssh：唤起独立终端窗口，主窗口内容不动
   // 首启懒创建窗口有可见延迟，故挂 busyLabelKey：唤起中侧栏项转圈 + 文案变「正在打开…」（App 以 busyPage='ssh' 报告）
   { id: 'ssh', labelKey: 'navSsh', icon: SquareTerminal,

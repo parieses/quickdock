@@ -61,8 +61,9 @@ const updatePromptHandled = new Set<string>();
 // 环境管理定位区块：侧边栏点击 harness 时，让 EnvironmentPage 自动选中 harness 区块
 const envInitialSection = ref<string | undefined>(undefined);
 
-// 页面路由
-const currentPage = ref('workspace')
+// 页面路由：默认落在总览（待办/健康/环境/端口一屏可见），
+// 工作空间从侧栏第二项进入——「今天要处理什么」比「打开哪个项目」更靠前。
+const currentPage = ref('dashboard')
 // 打开设置模态框（供 AIPage 等注册页经注册表事件回调复用，替代模板内联箭头）
 function openSettings(page?: string) {
   settingsPage.value = page

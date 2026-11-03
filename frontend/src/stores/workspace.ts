@@ -57,8 +57,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
 
   async function restoreOpenedTabs(wsId: string) {
     try {
-      const raw = await GetValue(openedTabsKey(wsId))
-      const ids = JSON.parse(String(raw || '[]'))
+      // GetValue 返回的是 ApiResult 包装（{code,data,msg}），不是裸字符串。
+      // 直接 String(raw) 会得到 "[object Object]"，JSON.parse 抛错被 catch 吞掉，
+      // 表现就是「标签页从来不恢复」——必须先 unwrap 拿 data。
+      const raw = unwrap<string>(await GetValue(openedTabsKey(wsId)))
+      const ids = JSON.parse(raw || '[]')
       if (!Array.isArray(ids)) return
       // 只保留当前仍存在的场景：场景可能已被删除，留下点不开的空标签更糟
       const alive = new Set(scenes.value.map((sc) => sc.id))
