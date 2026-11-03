@@ -110,6 +110,12 @@ tasks:
 
   frontend:run:npm:
     dir: frontend
+    # 关闭 WorkBuddy/CodeBuddy 的「安全删除」shim：vite build 在清空 dist 时会经该 shim
+    # 调用 genie-trash 把旧目录丢进回收站，部分环境下该二进制会卡死（spawnSync … ETIMEDOUT），
+    # 导致构建死在 prepare-out-dir 阶段、且 vite 真实报错被 npm -q 吞掉。此变量仅在该 shim
+    # 激活时生效（对应 runner 装了 WorkBuddy 代理），对标准云 CI 无任何副作用。
+    env:
+      CODEBUDDY_SAFE_DELETE_ENABLED: '0'
     cmds:
       - npm run {{.SCRIPT}} -q
     vars:
@@ -117,6 +123,8 @@ tasks:
 
   frontend:run:yarn:
     dir: frontend
+    env:
+      CODEBUDDY_SAFE_DELETE_ENABLED: '0'
     cmds:
       - yarn {{.SCRIPT}}
     vars:
@@ -124,6 +132,8 @@ tasks:
 
   frontend:run:pnpm:
     dir: frontend
+    env:
+      CODEBUDDY_SAFE_DELETE_ENABLED: '0'
     cmds:
       - pnpm run {{.SCRIPT}}
     vars:
@@ -131,6 +141,8 @@ tasks:
 
   frontend:run:bun:
     dir: frontend
+    env:
+      CODEBUDDY_SAFE_DELETE_ENABLED: '0'
     cmds:
       - bun run {{.SCRIPT}}
     vars:
