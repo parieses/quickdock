@@ -57,7 +57,7 @@ const toast = inject<ToastAPI>('toast')
 
 // ---- 初始化 composables ----
 const { frecencyTick, loadFrecency, recordUsage, frecencyScore } = useFrecency()
-const { pluginCmdIndex, buildPluginIndex, calcPluginScore, matchTypeI18nKeys } = usePluginIndex()
+const { pluginCmdIndex, buildPluginIndex, calcPluginScore, matchTypeI18nKeys, detectContentFormat } = usePluginIndex()
 
 // ---- 内联插件状态（统一走 PluginFrame 宿主；内联传参不走全局 pending init，避免跨消费竞态）----
 const inlinePluginId = ref<string | null>(null)
@@ -334,8 +334,8 @@ const { envRuntimes, envStatuses, envMgmt, refreshEnv, executeEnvAction } = useE
 
 // ---- 搜索结果（useCommandSearch）----
 const {
-  groupedResults, allResults, recentResults, displayGroups, displayFlat,
-  previewResult, recentCache, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
+  groupedResults, recentResults, displayGroups, displayFlat,
+  previewResult, recentCache, flushSearch, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
 } = useCommandSearch({
   items, installedApps, notes, systemCommands, query, selectedIndex,
   pluginCmdIndex, clipboardUrlSource,
@@ -383,15 +383,15 @@ const previewLines = computed(() => {
   const extra: string[] = []
   if ((it.type === '文件' || it.type === '目录') && quickInfo.value) {
     const q = quickInfo.value
-    if (!q.exists) extra.push('⚠ 路径不存在')
+    if (!q.exists) extra.push(t('previewPathMissing'))
     else {
-      if (!q.isDir) extra.push('大小: ' + (q.sizeText || '-'))
-      extra.push('修改时间: ' + (q.modified || '-'))
-      extra.push(q.isDir ? '类型: 文件夹' : '类型: 文件')
+      if (!q.isDir) extra.push(t('previewSize') + ': ' + (q.sizeText || '-'))
+      extra.push(t('previewModified') + ': ' + (q.modified || '-'))
+      extra.push(t('previewType') + ': ' + (q.isDir ? t('previewTypeFolder') : t('previewTypeFile')))
     }
   } else if (it.type === '命令') {
-    if (it.workingDirectory) extra.push('工作目录: ' + it.workingDirectory)
-    if (it.tool) extra.push('工具: ' + it.tool)
+    if (it.workingDirectory) extra.push(t('previewWorkingDir') + ': ' + it.workingDirectory)
+    if (it.tool) extra.push(t('previewTool') + ': ' + it.tool)
   }
   return [...base, ...extra]
 })
@@ -462,6 +462,10 @@ function scrollToSelected() {
 }
 
 function onKeydown(e: KeyboardEvent) {
+  // 中文输入法优先：选词、取消候选用的就是 Enter / Esc / 方向键。
+  // 不在最前面挡掉，拼音选词按回车会直接执行当前选中项（项目内其它输入区
+  // 统一用这两条判据，见 AIPage.vue 的 isComposing / keyCode 229）。
+  if (e.isComposing || e.keyCode === 229) return
   // 二级动作菜单打开时独占键盘，避免与结果列表导航冲突
   if (actionMenuOpen.value) {
     const acts = contextActions.value
@@ -509,7 +513,8 @@ function onKeydown(e: KeyboardEvent) {
       e.preventDefault(); selectedIndex.value = (selectedIndex.value - 1 + list.length) % Math.max(list.length, 1); scrollToSelected(); break
     case 'Enter':
       // Ctrl/Cmd+Enter 打开选中项的「动作菜单」；纯 Enter 执行选中项
-      if (e.ctrlKey || e.metaKey) { e.preventDefault(); openActionMenu() }
+      // 动作菜单锁定的是「此刻选中的那条」，同样要先把防抖里挂着的输入落成结果
+      if (e.ctrlKey || e.metaKey) { e.preventDefault(); flushSearch(); openActionMenu() }
       else { e.preventDefault(); executeSelected() }
       break
     case 'Escape':
@@ -528,11 +533,17 @@ function escFromPlugin() {
 // 仅 @keydown 绑在 <input> 上时 Esc 会丢失，故在 document 上再兜一层（capture 保证不被子组件吞掉）。
 function onGlobalEsc(e: KeyboardEvent) {
   if (e.key !== 'Escape') return
+  // 输入法正在组词时 Esc 用于取消候选，不能顺手把面板关掉
+  if (e.isComposing || e.keyCode === 229) return
   // 备忘单浮在上面时 Esc 归它，别顺手把面板也关了
   if (showCheatSheet.value) { e.preventDefault(); showCheatSheet.value = false; return }
   e.preventDefault()
   if (actionMenuOpen.value) { closeActionMenu(); return }
   if (inlineQuicklink.value) { cancelInlineQuicklink(); return }
+  // 内联插件页：Esc 是「退回搜索」，与 iframe 里转发出来的 qd:plugin-esc 同一语义。
+  // 少了这一支会直接关掉整个面板 —— 而插件页没有输入框，document 级兜底才是
+  // 唯一收到这个 Esc 的地方，输入框上的 onKeydown 根本轮不到。
+  if (inlinePluginId.value) { closeInlinePlugin(); return }
   closePalette()
 }
 
@@ -588,6 +599,7 @@ function openInlinePlugin(pluginId: string, commandId: string, text: string) {
 
 const { executeSelected } = usePaletteExecutor({
   displayFlat, selectedIndex, selectedSet, lastAnchor,
+  flushSearch,
   pluginCmdIndex, recentCache,
   recordUsage,
   refreshRecent: () => refreshRecentCache(),
@@ -598,6 +610,9 @@ const { executeSelected } = usePaletteExecutor({
   writeClipboard,
   beginQuicklink,
   openInlinePlugin,
+  // 最近使用列表只在输入框为空时出现（见 useCommandSearch.displayGroups），
+  // 用它判断「这次点击是否是一次重跑」
+  isRecentMode: () => !query.value.trim(),
 })
 
 async function commitInlineQuicklink() {
@@ -648,16 +663,47 @@ const { actionMenuOpen, actionMenuIndex, contextActions, openActionMenu, closeAc
     focusInput,
   })
 
-// ---- 生命周期 ----
-let lastClipboardUpdate = 0
-// 事件注销句柄：Wails 的 Events.Off 按事件名整体移除（没有回调参数），
-// 而 ClipboardPanel 也监听 clipboard:updated，全局 Off 会把面板的刷新监听一起删掉。
-const paletteEventOffs: Array<() => void> = []
+// ---- 剪贴板预填：刚复制完直接按 Ctrl+K，内容已经在输入框里 ----
+//
+// 判据不用前端自己听 clipboard:updated：那个事件只说「剪贴板变了」，分不清是复制了
+// 一段文字还是截图 —— 拿着上一次的旧文本预填，是纯干扰。后端随 palette:shown 一起
+// 送来「最近一次**真实捕获**的类型与时刻」，两者都吻合才预填。
+const CLIPBOARD_PREFILL_WINDOW_MS = 5000
+// 普通文本的预填上限（40 字符）：再长又不是已知结构化格式的（随手复制的一段话），
+// 填进去只会在列表里搜出一片空白 —— 用户还得先 Ctrl+A 删掉才能搜别的。
+// 结构化内容（JSON / SQL / JWT / URL …）不受这条限制，见下方 DETECT 分支。
+const CLIPBOARD_PREFILL_TEXT_MAX = 40
+// 结构化内容的上限：单行输入框能承载的量，再大就跳过。
+const CLIPBOARD_PREFILL_CONTENT_MAX = 20_000
 
+async function prefillFromClipboard(info?: { lastCopyKind?: string; lastCopyAtMs?: number }) {
+  if (info?.lastCopyKind !== 'text') return
+  const at = info?.lastCopyAtMs || 0
+  if (!at || Date.now() - at > CLIPBOARD_PREFILL_WINDOW_MS) return
+  try {
+    const copied = (unwrap<string>(await GetLastCopiedText()) || '').trim()
+    if (!copied || copied.length > CLIPBOARD_PREFILL_CONTENT_MAX) return
+    // 结构化内容一律带入：这类文本正是插件内容通道要吃的东西（粘一段 JSON →
+    // 「JSON 工具箱」出现在最佳匹配 → 回车带内容打开）。长段落则跳过。
+    if (copied.length > CLIPBOARD_PREFILL_TEXT_MAX && !detectContentFormat(copied)) return
+    const isHttp = /^https?:\/\//i.test(copied)
+    const looksDomain = !isHttp && /^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(\/|$)/i.test(copied)
+      && !/^[\d+\-*/().%^, ]+$/.test(copied)
+    if (isHttp || looksDomain) {
+      // URL 单独记进 clipboardUrlSource：剪贴板动作组（打开 / 存为条目 / 编码）靠它才出现
+      const urlStr = isHttp ? copied : 'https://' + copied
+      query.value = urlStr
+      clipboardUrlSource.value = urlStr
+      return
+    }
+    query.value = copied
+  } catch {
+    // 读不到就当没复制过：预填是锦上添花，失败不能挡住正常搜索
+  }
+}
+
+// ---- 生命周期 ----
 onMounted(async () => {
-  paletteEventOffs.push(
-    Events.On('clipboard:updated', () => { lastClipboardUpdate = Date.now() }),
-  )
   // 插件 iframe 内的 Esc 经插件桥转发（qd:plugin-esc）：iframe 抢占焦点后
   // 父级 document 收不到 keydown，这是唯一的 Esc 通路
   window.addEventListener('qd:plugin-esc', escFromPlugin)
@@ -665,7 +711,9 @@ onMounted(async () => {
   document.addEventListener('keydown', onGlobalEsc, true)
   // 文档级导航兜底：焦点不在输入框时方向键/数字/Home/End/Enter 依然可用
   document.addEventListener('keydown', onGlobalKey, true)
-  Events.On('palette:shown', () => {
+  // 载荷取 ev?.data ?? ev：Wails 的事件回调给的是事件对象，Go 侧的 data 在 .data 里
+  // （与 App.vue 各处的取法一致）。
+  Events.On('palette:shown', (ev: any) => {
     loadPluginIndex()
     loadPluginNewFlags().catch(() => {})
     // 面板唤起即拉取环境运行时列表 + 服务状态，供 Ctrl+K 直控启停（独立于内联插件页，提前拉取）
@@ -677,20 +725,10 @@ onMounted(async () => {
     }
     loadPaletteData().catch(e => console.warn('[CmdPalette] loadPaletteData:', e))
     query.value = ''; selectedIndex.value = 0; inlineQuicklink.value = null; inlineQuery.value = ''
+    clipboardUrlSource.value = ''
     recentExpanded.value = false
     actionMenuOpen.value = false
-    if (Date.now() - lastClipboardUpdate < 3000) {
-      GetLastCopiedText().then(raw => {
-        const copied = unwrap<string>(raw)
-        if (copied && copied.trim() && copied.trim().length < 200) {
-          const c = copied.trim()
-          const isHttp = /^https?:\/\//i.test(c)
-          const looksDomain = /^[a-z0-9][-a-z0-9]*\.[a-z]{2,}(\/|$)/i.test(c) && !/^[\d+\-*/().%^, ]+$/.test(c)
-          if (isHttp || looksDomain) { const urlStr = isHttp ? c : 'https://' + c; query.value = urlStr; clipboardUrlSource.value = urlStr }
-          else { query.value = c }
-        }
-      }).catch(() => {})
-    }
+    void prefillFromClipboard(ev?.data ?? ev)
     // 聚焦输入框：单次 rAF 偶发因窗口激活竞态而失效，改为主动多次重试 + 绑定窗口获得焦点事件兜底
     nextTick(() => {
       requestAnimationFrame(focusInput)
@@ -718,11 +756,8 @@ watch(inlineQuicklink, (v) => { if (v) selectedIndex.value = 0 })
 
 onUnmounted(() => {
   closeInlinePlugin()
-  // palette:shown 只有本组件监听，可以按名注销；clipboard:updated 与剪贴板面板共用，
-  // 只能移除自己注册的那个回调（见 paletteEventOffs 的说明）。
+  // palette:shown 只有本组件监听，可以按名注销
   Events.Off('palette:shown')
-  paletteEventOffs.forEach((off) => off())
-  paletteEventOffs.length = 0
   window.removeEventListener('qd:plugin-esc', escFromPlugin)
   document.removeEventListener('keydown', onGlobalEsc, true)
   document.removeEventListener('keydown', onGlobalKey, true)
@@ -820,7 +855,7 @@ onUnmounted(() => {
           </div>
           <div class="result-body">
             <span class="result-label">{{ result.label }}</span>
-            <span v-if="result.type === 'plugin' && result.pluginId && newFlags.has(result.pluginId)" class="result-new-badge">新</span>
+            <span v-if="result.type === 'plugin' && result.pluginId && newFlags.has(result.pluginId)" class="result-new-badge">{{ t('pluginNewBadge') }}</span>
             <span class="result-desc" v-if="result.desc">{{ result.desc }}</span>
           </div>
           <div class="result-meta">

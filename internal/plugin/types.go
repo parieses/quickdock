@@ -117,7 +117,7 @@ type Command struct {
 	Keywords     []string          `json:"keywords,omitempty"`     // 搜索别名，用于命令面板快速查找
 	Aliases      []string          `json:"aliases,omitempty"`      // 中文别名，如 ["计算器", "jsq"]，扩展搜索覆盖
 	Prefix       string            `json:"prefix,omitempty"`       // Slash 命令前缀，如 "/translate"，输入 /tr 时只匹配该插件
-	MatchPattern string            `json:"matchPattern,omitempty"` // 命令面板正则匹配：命中时自动传入输入文本
+	MatchPattern string            `json:"matchPattern,omitempty"` // 命令面板内容匹配正则：宿主按整串语义校验（^…$ 由宿主统一包裹），需要包含语义请自行用 [\s\S]* 包络；命中且 acceptsInput=true 时输入文本作为参数带入
 	AcceptsInput bool              `json:"acceptsInput,omitempty"` // 是否接收命令面板传入的参数（如端口号/状态码/算式），开启后 Ctrl+K 的文本会带入插件
 
 	// Description 命令的一句话说明：做什么、什么时候该用。

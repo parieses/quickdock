@@ -250,7 +250,7 @@ func (a *AppService) saveClipboardFiles(snap clipboardSnapshot, joined string) {
 				logClipboardSkip("图片+文件")
 				return
 			}
-			processImage(a.DB, snap.imageData, joined, sourceApp, a.emitClipboardEvent, snap.imageIsPNG)
+			processImage(a.DB, snap.imageData, joined, sourceApp, func() { a.emitClipboardEvent("image") }, snap.imageIsPNG)
 		}()
 		return
 	}
@@ -267,7 +267,7 @@ func (a *AppService) saveClipboardFiles(snap clipboardSnapshot, joined string) {
 			logger.W("QuickDock: file clipboard save failed: %v", err)
 		} else {
 			logger.I("QuickDock >> clipboard captured [%s] (%d files) from [%s]", entry.ID[:8], len(snap.filePaths), sourceApp)
-			a.emitClipboardEvent()
+			a.emitClipboardEvent("files")
 		}
 	}()
 }
@@ -325,7 +325,7 @@ func (a *AppService) saveClipboardText(text string) bool {
 			logger.I("QuickDock >> clipboard captured [%s] from [%s] → %s", entry.ID[:8], sourceApp, preview)
 		}
 		// 默认不记录文本捕获（复制频繁、无排查价值）；排查时设 QUICKDOCK_LOG_CLIPBOARD=1 重启。
-		a.emitClipboardEvent()
+		a.emitClipboardEvent("text")
 		// 回写系统剪贴板：只有规则显式 write_back 才会走到这里（默认关）。
 		// SetClipboardText 内部会登记回环令牌，所以这次写入不会再被当成一次新复制。
 		if needWriteBack && ruled != text {
@@ -347,7 +347,7 @@ func (a *AppService) saveClipboardImageOnly(snap clipboardSnapshot) {
 			logClipboardSkip("图片")
 			return
 		}
-		processImage(a.DB, snap.imageData, "", sourceApp, a.emitClipboardEvent, snap.imageIsPNG)
+		processImage(a.DB, snap.imageData, "", sourceApp, func() { a.emitClipboardEvent("image") }, snap.imageIsPNG)
 	}()
 }
 

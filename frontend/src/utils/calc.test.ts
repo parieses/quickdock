@@ -116,3 +116,95 @@ describe('convertExpression', () => {
     expect(convertExpression('abc to def')).toBeNull()
   })
 })
+
+// 中文输入法下身下用户敲的是一整句话（「1公斤等于多少斤」），单位名也是汉字。
+// 这组锁死中文单位名 → 换算系数的折表，以及各类中文分隔符的切分。
+describe('convertExpression：中文', () => {
+  const val = (s: string) => {
+    const r = convertExpression(s)
+    expect(r, s).not.toBeNull()
+    return r!.value
+  }
+
+  it('质量：斤 / 公斤 / 吨 / 两', () => {
+    expect(val('1公斤等于多少斤')).toBeCloseTo(2, 6)
+    expect(val('1吨等于多少斤')).toBeCloseTo(2000, 6)
+    expect(val('5斤 = 公斤')).toBeCloseTo(2.5, 6)
+    expect(val('1斤等于多少两')).toBeCloseTo(10, 6)
+    expect(val('100克换成公斤')).toBeCloseTo(0.1, 6)
+  })
+
+  it('长度：公里 / 里 / 米 / 英里', () => {
+    expect(val('1米等于多少厘米')).toBeCloseTo(100, 6)
+    expect(val('1公里等于多少里')).toBeCloseTo(2, 6)
+    expect(val('1英里是多少公里')).toBeCloseTo(1.609344, 6)
+    expect(val('1海里等于多少米')).toBeCloseTo(1852, 6)
+    expect(val('1米等于多少尺')).toBeCloseTo(3, 6)
+    expect(val('30公分等于多少厘米')).toBeCloseTo(30, 6)
+  })
+
+  it('时间：小时 / 分钟 / 天 / 周', () => {
+    expect(val('1小时等于多少分钟')).toBeCloseTo(60, 6)
+    expect(val('2天是多少小时')).toBeCloseTo(48, 6)
+    expect(val('1周等于多少天')).toBeCloseTo(7, 6)
+    expect(val('1分钟等于多少秒')).toBeCloseTo(60, 6)
+  })
+
+  it('数据量：兆 / 吉 沿用 1024 进制', () => {
+    expect(val('1024兆等于多少吉')).toBeCloseTo(1, 6)
+    expect(val('1吉字节换算成兆')).toBeCloseTo(1024, 6)
+    expect(val('2048字节等于多少千字节')).toBeCloseTo(2, 6)
+  })
+
+  it('面积 / 体积', () => {
+    expect(val('100平米换成亩')).toBeCloseTo(0.15, 6)
+    expect(val('1公顷等于多少亩')).toBeCloseTo(15, 6)
+    expect(val('1升等于多少毫升')).toBeCloseTo(1000, 6)
+    expect(val('1立方米等于多少升')).toBeCloseTo(1000, 6)
+  })
+
+  it('温度：中文单位走加减公式而非乘系数', () => {
+    expect(val('30摄氏度 = 华氏度')).toBeCloseTo(86, 6)
+    expect(val('100摄氏度等于多少华氏度')).toBeCloseTo(212, 6)
+    expect(val('0摄氏度是多少开尔文')).toBeCloseTo(273.15, 6)
+    // 口语里的「度」按摄氏度算
+    expect(val('37度等于多少华氏度')).toBeCloseTo(98.6, 6)
+  })
+
+  it('多种中文分隔符都能切分', () => {
+    for (const s of ['1公斤等于多少斤', '1公斤是多少斤', '1公斤多少斤', '1公斤换成斤', '1公斤换算成斤', '1公斤等于几斤']) {
+      expect(val(s), s).toBeCloseTo(2, 6)
+    }
+  })
+
+  it('全角等号与全角数字标点一并归一化', () => {
+    expect(val('1公斤＝多少斤')).toBeCloseTo(2, 6)
+  })
+
+  it('回显保留用户写的中文单位', () => {
+    expect(convertExpression('1公斤等于多少斤')!.text).toBe('1公斤 = 2 斤')
+  })
+
+  it('中文数字、货币、跨类别都不猜', () => {
+    // 中文数字不在能力范围内：宁可不出结果，也不给出一个闭嘴算错的数
+    expect(convertExpression('一公斤等于多少斤')).toBeNull()
+    expect(convertExpression('100元等于多少美元')).toBeNull()
+    expect(convertExpression('1米等于多少斤')).toBeNull()
+    // 「是」后面跟数字时不能被当成目标单位
+    expect(convertExpression('1米是100厘米')).toBeNull()
+  })
+})
+
+describe('全角与千分位归一化', () => {
+  it('全角运算符折回半角', () => {
+    expect(evaluate('（1＋2）×3')).toBe(9)
+    expect(evaluate('12×8＋5')).toBe(101)
+    expect(evaluate('10÷4')).toBe(2.5)
+    expect(evaluate('10％3')).toBe(1)
+  })
+
+  it('千分位逗号直接去掉', () => {
+    expect(evaluate('1,000+2')).toBe(1002)
+    expect(convertExpression('1,000克等于多少公斤')!.value).toBeCloseTo(1, 6)
+  })
+})

@@ -2,7 +2,7 @@
 import type { Ref, ComputedRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { CollectionItem, EnvRuntimeInfo, EnvServiceStatus, FileSearchResult } from '../types'
-import type { PluginCmdIndex } from './usePluginIndex'
+import type { PluginCmdIndex, PluginScore } from './usePluginIndex'
 import { commandTitle, pluginName } from '../utils/localize'
 import { getPluginLastResult } from '../utils/pluginLastResult'
 import { Puzzle, File } from '@lucide/vue'
@@ -50,7 +50,7 @@ export interface SearchDeps {
   clipboardUrlSource: Ref<string>
   frecencyScore: (key: string) => number
   frecencyTick: Ref<number>
-  calcPluginScore: (idx: PluginCmdIndex, q: string, qLC: string) => { score: number; matchType: string; inlineInput?: string }
+  calcPluginScore: (idx: PluginCmdIndex, q: string, qLC: string) => PluginScore
   pinyinMatch: (text: string, queryLC: string, cacheKey?: string) => boolean
   appIcon: (name: string) => any
   getAppAliases: (name: string) => string[]
@@ -311,14 +311,16 @@ export function useCommandSearch(deps: SearchDeps) {
     return groups
   })
 
-  const allResults = computed<SearchResult[]>(() => {
-    return groupedResults.value.flatMap(g => g.results)
-  })
-
   const recentResults = computed<SearchResult[]>(() => {
     if (debouncedQuery.value.trim()) return []
     const raw = recentCache.value
     if (!raw || raw.length === 0) return []
+
+    // 插件命令 O(1) 索引：recentResults 里每条 plugin 记录都要回查命令实体，
+    // 原先是「每条 × 全部插件命令」的线性扫描（200+ 命令 × 十几条最近使用），
+    // 只在空查询时重算，量不大但没必要 N×M。一次性建 Map，命中即取。
+    const pluginCmdMap = new Map<string, PluginCmdIndex>()
+    for (const c of pluginCmdIndex.value) pluginCmdMap.set(c.plugin.id + '.' + c.cmd.id, c)
 
     const itemByKey: Record<string, CollectionItem> = {}
     for (const it of items.value) itemByKey['item:' + it.id] = it
@@ -353,17 +355,10 @@ export function useCommandSearch(deps: SearchDeps) {
         })
       } else if (entry.type === 'plugin') {
         const keyWithoutPrefix = entry.key.replace(/^plugin:/, '')
-        let idx: PluginCmdIndex | undefined
-        let matchedPluginId = ''
-        let matchedCmdId = ''
-        for (const cand of pluginCmdIndex.value) {
-          const prefix = cand.plugin.id + '.'
-          if (keyWithoutPrefix.startsWith(prefix)) {
-            const cid = keyWithoutPrefix.slice(prefix.length)
-            if (cid === cand.cmd.id) { idx = cand; matchedPluginId = cand.plugin.id; matchedCmdId = cid; break }
-          }
-        }
+        const idx = pluginCmdMap.get(keyWithoutPrefix)
         if (!idx) continue
+        const matchedPluginId = idx.plugin.id
+        const matchedCmdId = idx.cmd.id
         // 仅当命令声明 acceptsInput 时，才把参数带回插件；否则不传（符合"不设置就不带"的意图）
         let recentInput: string | undefined
         let recentMatchType: string | undefined
@@ -441,7 +436,25 @@ export function useCommandSearch(deps: SearchDeps) {
     return displayGroups.value.flatMap(g => g.results)
   })
 
-  const previewResult = computed<{ title: string; subtitle?: string; lines: string[]; kind: string } | null>(() => {
+  /**
+   * 把挂起的输入立刻落到结果上。
+   *
+   * 本地全量扫描有 80ms 防抖：打完字**立刻**回车时，debouncedQuery 还停在上一轮，
+   * displayFlat 也就是上一轮的列表 —— 执行的是「旧列表的第 0 条」，而用户眼里
+   * 高亮的是新一轮的第 0 条。回车/开动作菜单前先调一次，把这一跳补齐。
+   *
+   * 顺带夹住 selectedIndex：新列表可能比旧列表短，越界的下标会让回车变成空操作。
+   */
+  function flushSearch() {
+    if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null }
+    if (debouncedQuery.value !== query.value) debouncedQuery.value = query.value
+    const len = displayFlat.value.length
+    if (selectedIndex.value >= len) selectedIndex.value = Math.max(0, len - 1)
+  }
+
+  // 预览面板只吃 title / subtitle / lines。早先还带一个 kind 字段，但从来没被读过
+  // （模板直接按 result.type 分支），是纯粹的负担，故删掉。
+  const previewResult = computed<{ title: string; subtitle?: string; lines: string[] } | null>(() => {
     const r = displayFlat.value[selectedIndex.value]
     if (!r) return null
     if (r.type === 'item' && r.item) {
@@ -451,13 +464,13 @@ export function useCommandSearch(deps: SearchDeps) {
         const idx = Math.max(v.lastIndexOf('/'), v.lastIndexOf('\\'))
         if (idx > 0) lines.push(t('previewParent') + ': ' + v.slice(0, idx))
       }
-      return { title: r.label, subtitle: r.item.type, lines, kind: 'item' }
+      return { title: r.label, subtitle: r.item.type, lines }
     }
     if (r.type === 'note' && r.note) {
-      return { title: r.label, subtitle: r.note.isFolder ? '📁' : '', lines: [r.note.content], kind: 'note' }
+      return { title: r.label, subtitle: r.note.isFolder ? '📁' : '', lines: [r.note.content] }
     }
     if (r.type === 'todo' && r.todo) {
-      return { title: r.label, subtitle: t('cmdGroupTodos'), lines: [r.desc || ''], kind: 'todo' }
+      return { title: r.label, subtitle: t('cmdGroupTodos'), lines: [r.desc || ''] }
     }
     if (r.type === 'plugin') {
       const last = r.pluginId && r.pluginCommandId ? getPluginLastResult(r.pluginId, r.pluginCommandId) : null
@@ -466,16 +479,15 @@ export function useCommandSearch(deps: SearchDeps) {
         subtitle: last ? t('previewLast') : (r.desc || ''),
         // 结果正文进右侧 preview 面板，列表只留命令本体
         lines: last ? [last.result] : [r.desc || ''],
-        kind: 'plugin',
       }
     }
-    if (r.type === 'url' && r.url) return { title: r.label, subtitle: t('previewUrl'), lines: [r.url], kind: 'url' }
-    if (r.type === 'app' && r.appPath) return { title: r.label, subtitle: t('previewPath'), lines: [r.appPath], kind: 'app' }
-    if (r.type === 'file' && r.filePath) return { title: r.fileName || r.label, subtitle: t('cmdGroupFiles'), lines: [r.filePath], kind: 'file' }
-    if (r.type === 'clipboard-action' && r.url) return { title: r.label, subtitle: t('previewUrl'), lines: [r.url], kind: 'clipboard-action' }
+    if (r.type === 'url' && r.url) return { title: r.label, subtitle: t('previewUrl'), lines: [r.url] }
+    if (r.type === 'app' && r.appPath) return { title: r.label, subtitle: t('previewPath'), lines: [r.appPath] }
+    if (r.type === 'file' && r.filePath) return { title: r.fileName || r.label, subtitle: t('cmdGroupFiles'), lines: [r.filePath] }
+    if (r.type === 'clipboard-action' && r.url) return { title: r.label, subtitle: t('previewUrl'), lines: [r.url] }
     return null
   })
 
-  return { groupedResults, allResults, recentResults, displayGroups, displayFlat, previewResult, recentCache,
-           RECENT_VISIBLE, recentExpanded, toggleRecentExpanded }
+  return { groupedResults, recentResults, displayGroups, displayFlat, previewResult, recentCache,
+           flushSearch, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded }
 }

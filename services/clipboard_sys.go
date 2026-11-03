@@ -52,6 +52,17 @@ var (
 	lastInsertedText   string
 	lastInsertedAt     int64
 	lastInsertedTextMu sync.Mutex
+
+	// lastCopyKind / lastCopyAtMs 最近一次**系统剪贴板捕获**的类型与时刻
+	//（text / files / image）。命令面板据此判断「用户刚复制过」，决定唤起时要不要
+	// 把内容预填进输入框。
+	//
+	// 为什么单独立一份、不复用 lastClipboardText：那个是「最近一次文本」，本程序回写
+	// 剪贴板时也会被刷新；预填要的是「真实发生了一次复制，且它是文本」。复制截图后
+	// 拿着上一次的旧文本预填，是纯干扰。
+	lastCopyKind string
+	lastCopyAtMs int64
+	lastCopyMu   sync.Mutex
 )
 
 // clipboardLogContent 控制是否把剪贴板「内容」（文本预览/文件路径/图片 self-check）
@@ -305,10 +316,28 @@ func recoverPanic(context string) {
 	}
 }
 
-func (a *AppService) emitClipboardEvent() {
+// emitClipboardEvent 广播一次剪贴板捕获并记下「捕获了什么、什么时候」。
+//
+// kind 必须由调用方如实给出（text / files / image）：命令面板靠它区分「刚复制了
+// 一段文字」和「刚截了一张图」，前者才值得把内容预填进 Ctrl+K 的输入框。
+// 事件负载同样带这两个字段，供已在前端的监听者按需使用（旧监听者忽略即可）。
+func (a *AppService) emitClipboardEvent(kind string) {
+	lastCopyMu.Lock()
+	lastCopyKind = kind
+	lastCopyAtMs = time.Now().UnixMilli()
+	at := lastCopyAtMs
+	lastCopyMu.Unlock()
 	if a.app != nil {
-		a.app.Event.Emit("clipboard:updated")
+		a.app.Event.Emit("clipboard:updated", map[string]any{"kind": kind, "atMs": at})
 	}
+}
+
+// ClipboardLastCopyInfo 返回最近一次剪贴板捕获的类型与时刻（Unix 毫秒，0 表示本次
+// 运行还没捕获过任何东西）。命令面板在唤起时用它判断「刚刚是否复制过」。
+func ClipboardLastCopyInfo() (kind string, atMs int64) {
+	lastCopyMu.Lock()
+	defer lastCopyMu.Unlock()
+	return lastCopyKind, lastCopyAtMs
 }
 
 // logClipboardSkip 剪贴板捕获因数据库未就绪/已关闭而跳过时的统一记录。

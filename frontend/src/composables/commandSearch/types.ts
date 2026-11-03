@@ -30,9 +30,19 @@ export interface SearchResult {
   pluginHasFrontend?: boolean
   pluginNotRunning?: boolean
   inlineInput?: string
+  /** 正则 / 内容嗅探命中的原文：前端插件靠 plugin:init.text 取用（与 acceptsInput 无关） */
+  hitText?: string
   pluginResult?: string
   acceptsInput?: boolean
   score?: number
+  /**
+   * 组内排序权重（命中分 + 频次的加权结果），由 matcher 在入列时算好。
+   *
+   * 存在的原因：「最佳匹配」按裸分排、插件组按 `score×0.7 + 频次×0.3` 排，
+   * 同一条命令在两处的位次会对不上（组内第一，best 里却排在别人后面）。
+   * ranking 优先读这个字段，没有才回退到 score。
+   */
+  rankScore?: number
   matchType?: string
   url?: string
   clipAction?: string

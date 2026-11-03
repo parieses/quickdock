@@ -18,23 +18,57 @@ function dedupKey(r: SearchResult): string {
 }
 
 /**
- * 把高相关度结果（score ≥ 70）提到最前面的「最佳匹配」分组，并原地把被提走的
+ * 把「用户明确指了它」的高相关结果提到最前面的「最佳匹配」分组，并原地把被提走的
  * 条目从各自原分组里删掉。无命中时不动 groups。
  *
- * 刻意排除三类：calculator / clipboard-action 是特殊交互项，plugin 恒排最后
- * （插件不得出现在应用之前）。
+ * 资格判定不能只看裸分数（2026-11-03）：
+ *   - 72 分的内容嗅探命中减去插件惩罚 3 就掉到 70 以下，等于把「粘 JSON 命中插件」
+ *     这条通道整个关掉；
+ *   - 反过来，75 分的「标题前缀」是顺手扫到的命中，敲单字母时能把最佳匹配塞满
+ *     一堆不相干的插件。
+ * 所以插件（带 matchType 的结果）按**命中类型**取资格，非插件结果仍按分数。
+ *
+ * 刻意排除 clipboard-action：它是同一件事的旁路动作（打开/存为/编码），进最佳匹配
+ * 反而把「打开链接」重复三遍。
+ *
+ * calculator 不排除：`=1+1` 那条走 stop 提前返回，压根到不了这里；能到这里的只有
+ * 单位换算（94 分）—— 用户敲「10km to mi」要的就是这个现算出来的结果，它必须排在
+ * 插件的同类命令之前。
  */
+const BEST_MATCH_PENALTY: Record<string, number> = { plugin: 3 }
+
+// 有资格进「最佳匹配」的命中类型：都是「用户明确指了这条」的口径。
+// 没列的（prefix 标题前缀 / contains 标题包含 / pinyin / fuzzy / desc …）留在各自分组里。
+const BEST_MATCH_TYPES = new Set([
+  'exact', 'keyword', 'alias', 'match pattern', 'pattern short', 'slash', 'content',
+])
+
+// 插件排序轻惩罚只影响最佳匹配**内部**的先后（保住「应用/条目排在插件之前」的体感），
+// 不参与资格判定 —— 否则 72 分的 content 命中永远进不来。
+//
+// 排序基准优先取 matcher 算好的 rankScore（含频次加权），没有再回退裸分：
+// 否则「组内按加权排、best 按裸分排」会让同一条命令在两处的位次不一致。
+function bestMatchWeight(r: SearchResult): number {
+  return (r.rankScore ?? (r.score || 0)) - (BEST_MATCH_PENALTY[r.type] ?? 0)
+}
+
+function bestMatchEligible(r: SearchResult): boolean {
+  if ((r.score || 0) < 70) return false
+  if (r.matchType) return BEST_MATCH_TYPES.has(r.matchType)
+  return true
+}
+
 export function injectBestMatch(groups: ResultGroup[], t: (k: string, n?: any) => string): void {
   const bestMatch: SearchResult[] = []
   for (const g of groups) {
-    if (g.type === 'calculator' || g.type === 'clipboard-action' || g.type === 'plugin') continue
+    if (g.type === 'clipboard-action') continue
     for (const r of g.results) {
-      if ((r.score || 0) >= 70) bestMatch.push(r)
+      if (bestMatchEligible(r)) bestMatch.push(r)
     }
   }
   if (bestMatch.length === 0) return
 
-  bestMatch.sort((a, b) => (b.score || 0) - (a.score || 0))
+  bestMatch.sort((a, b) => bestMatchWeight(b) - bestMatchWeight(a))
   const show = bestMatch.slice(0, 6)
   const dedupIds = new Set(show.map(dedupKey))
   // 去重作用于所有分组：app/note/system/url 命中 ≥70 时也会进入最佳匹配，

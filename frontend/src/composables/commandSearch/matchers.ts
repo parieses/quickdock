@@ -16,7 +16,7 @@ import { Puzzle, Play, Power, Gauge, ListChecks } from '@lucide/vue'
 import { commandTitle, pluginName } from '../../utils/localize'
 import { evaluate, format, convertExpression } from '../../utils/calc'
 import type { CollectionItem, EnvRuntimeInfo, EnvServiceStatus } from '../../types'
-import type { PluginCmdIndex } from '../usePluginIndex'
+import type { PluginCmdIndex, PluginScore } from '../usePluginIndex'
 import { ENV_GROUP_ALIASES, ENV_RUNTIME_ALIASES, todoSubtitle } from './types'
 import type { CmdNote, CmdTodo, LcIndex, NavSearchItem, ResultGroup, SearchResult } from './types'
 
@@ -45,7 +45,7 @@ export interface MatchCtx {
   pinyinMatch: (text: string, queryLC: string, cacheKey?: string) => boolean
   itemIcon: (item: CollectionItem) => any
   appIcon: (name: string) => any
-  calcPluginScore: (idx: PluginCmdIndex, q: string, qLC: string) => { score: number; matchType: string; inlineInput?: string }
+  calcPluginScore: (idx: PluginCmdIndex, q: string, qLC: string) => PluginScore
 }
 
 export interface MatchOutcome {
@@ -64,7 +64,9 @@ export function matchConvert(ctx: MatchCtx): MatchOutcome | null {
     groups: [{
       type: 'calculator',
       label: ctx.t('cmdGroupCalc'),
-      results: [{ type: 'calculator', label: conv.text, desc: ctx.t('calcHint'), calcResult: conv.text }],
+      // 94：内置换算比插件的同类命令（93 档）优先。用户敲「10km to mi」要的是这个
+      // 现算出来的结果，不是一台要再点一次的换算器。
+      results: [{ type: 'calculator', label: conv.text, desc: ctx.t('calcHint'), calcResult: conv.text, score: 94 }],
     }],
   }
 }
@@ -112,7 +114,9 @@ export function matchUrl(ctx: MatchCtx): MatchOutcome | null {
     groups: [{
       type: 'url',
       label: '🌐 ' + ctx.t('cmdGroupWeb'),
-      results: [{ type: 'url', label: ctx.t('cmdOpenUrl'), desc: urlStr, url: urlStr }],
+      // 96：粘一条链接进来，回车就该用浏览器打开它。低于标题等值（100），
+      // 但要压过插件的正则内容命中（93）——否则回车打开的是某个插件，不是链接。
+      results: [{ type: 'url', label: ctx.t('cmdOpenUrl'), desc: urlStr, url: urlStr, score: 96 }],
     }],
   }
 }
@@ -215,9 +219,15 @@ export function matchItems(ctx: MatchCtx): MatchOutcome | null {
 }
 
 // 3b. Quicklink 内联（把 query 灌进 {query} 占位符直接执行）
+/** 超过这个长度的 query 不再往快速链接模板里灌：它本来只服务「敲个关键词去搜」。 */
+const QUICKLINK_INLINE_MAX_QUERY = 60
+
 export function matchQuicklinkInline(ctx: MatchCtx): MatchOutcome | null {
   const { qLC, seen } = ctx
   if (qLC.length <= 1 || /^\d+$/.test(qLC)) return null
+  // 粘进来的一整段 JSON / SQL 也走不到这里：那类内容由插件的内容通道接，
+  // 而这条通道会把原文塞进每个快速链接的 URL 模板 —— 一屏全是没人会点的候选。
+  if (qLC.length > QUICKLINK_INLINE_MAX_QUERY) return null
 
   const qlResults: SearchResult[] = []
   for (const e of ctx.lc.items) {
@@ -365,16 +375,48 @@ export function matchSystem(ctx: MatchCtx): MatchOutcome | null {
 }
 
 // 7. 插件命令
+/** 插件分组的展示上限：单字母查询下命中数能到 90+，不截断就是把整个面板铺满。 */
+const MAX_PLUGIN_RESULTS = 30
+/** 单字母查询的最低分：40/35/30（关键字包含 / 插件名 / 命令 id）这类弱命中一律不列。 */
+const PLUGIN_MIN_SCORE_SINGLE_CHAR = 60
+/** 斜杠发现通道的固定分：高于最佳匹配门槛（70），低于 keyword 等值（90）。 */
+const SLASH_DISCOVERY_SCORE = 72
+/** 斜杠浏览时的条数上限：前缀本来就是人工声明的少量入口，全列出来才有「可发现性」。 */
+const SLASH_DISCOVERY_MAX = 80
+
+/**
+ * 插件组的排序权重：命中分 + 频次加权（频次封顶 30，权重 0.2，最多 +6 分）。
+ *
+ * 这个权重**同时**决定两件事：组内先后，以及「最佳匹配」内部的先后
+ * （injectBestMatch 读的就是这个字段，见 ranking.ts）。原先 best 按裸分排、
+ * 组内按 `score×0.7 + 频次×0.3` 排，同一个命令在两处的位次能对不上。
+ *
+ * 为什么写成「加」而不是原来的加权平均：加权平均把 93 分压成 65，和别的分组的
+ * 裸分（应用 75 / 标题等值 100）不同量纲，best 里会莫名其妙沉底。加法的上限是
+ * +6，正好压不过等值命中（100），频次再高也抢不走「用户就是敲了这个名字」那条。
+ */
+function pluginRankScore(score: number, frecency: number): number {
+  return score + Math.min(30, frecency) * 0.2
+}
+
 export function matchPlugins(ctx: MatchCtx): MatchOutcome | null {
   const { q, qLC } = ctx
   const pluginResults: SearchResult[] = []
+  // 内容嗅探命中共振抑制：一段 JSON 会让所有 keywords 含 json 的命令同分冒出来，
+  // 按插件去重、每插件只留 1 条，避免一次粘贴铺满十几行同名命令。
+  const seenContentPlugin = new Set<string>()
 
-  for (const idx of ctx.pluginCmdIndex) {
-    const { score, matchType, inlineInput } = ctx.calcPluginScore(idx, q, qLC)
-    if (score <= 0) continue
+  const push = (
+    idx: PluginCmdIndex, score: number, matchType: string,
+    inlineInput?: string, hitText?: string,
+  ) => {
+    // 命中的输入太长时不拼进 label（长 SQL / 代码会把列表行撑爆，且内容已在
+    // inlineInput 里完整带着）。这类命中只展示命令名，回车由执行器把文本交给插件。
+    const showInline = !!inlineInput && inlineInput.length < 40
+    const frecency = ctx.frecencyScore('plugin:' + idx.plugin.id + '.' + idx.cmd.id)
     pluginResults.push({
       type: 'plugin',
-      label: inlineInput ? `${commandTitle(idx.cmd, ctx.locale)}: ${inlineInput}` : commandTitle(idx.cmd, ctx.locale),
+      label: showInline ? `${commandTitle(idx.cmd, ctx.locale)}: ${inlineInput}` : commandTitle(idx.cmd, ctx.locale),
       desc: pluginName(idx.plugin, ctx.locale)
         + (idx.cmd.hotkey ? `  ${idx.cmd.hotkey}` : '')
         + (idx.notRunning ? `  · ${ctx.t('pluginNotRunning')}` : ''),
@@ -386,19 +428,57 @@ export function matchPlugins(ctx: MatchCtx): MatchOutcome | null {
       pluginNotRunning: idx.notRunning,
       acceptsInput: idx.cmd.acceptsInput,
       inlineInput,
+      hitText,
       score,
+      rankScore: pluginRankScore(score, frecency),
       matchType,
-      frecencyScore: ctx.frecencyScore('plugin:' + idx.plugin.id + '.' + idx.cmd.id),
+      frecencyScore: frecency,
     })
   }
 
-  pluginResults.sort((a, b) => {
-    const sa = (a.score || 0) * 0.7 + Math.min(30, a.frecencyScore || 0) * 0.3
-    const sb = (b.score || 0) * 0.7 + Math.min(30, b.frecencyScore || 0) * 0.3
-    return sb - sa
-  })
+  for (const idx of ctx.pluginCmdIndex) {
+    const { score, matchType, inlineInput, hitText } = ctx.calcPluginScore(idx, q, qLC)
+    if (score <= 0) continue
+    // 敲一个字母时，几乎每条命令都能在某个字段里「包含」它：这些 40/35/30 分的
+    // 弱命中没有指向性，只会把真正相关的结果挤出可见区。
+    if (q.length <= 1 && score < PLUGIN_MIN_SCORE_SINGLE_CHAR) continue
+    // 斜杠是「调命令」的显式语法：只认前缀通道（真命中 88/95/98 与发现通道 72）。
+    // 别的通道在斜杠查询下全是噪声 —— disk-analyzer 的 keywords 里就有一个 '/'、
+    // calcsheet 的正则也能匹配一个孤零零的 '/'，敲斜杠时它们反而排在真命令前面。
+    if (q.startsWith('/') && matchType !== 'slash') continue
+    if (matchType === 'content') {
+      if (seenContentPlugin.has(idx.plugin.id)) continue
+      seenContentPlugin.add(idx.plugin.id)
+    }
+    push(idx, score, matchType, inlineInput, hitText)
+  }
+
+  // 斜杠发现通道：prefix 本是插件侧声明的「可发现入口」，但原来只有把前缀敲全
+  // （`/sql`）才命中，敲 `/` 或 `/s` 全是空列表 —— 用户根本不知道存在这些命令。
+  // 这里把「prefix 以输入开头」的命令补进来；q 只有一个 `/` 时列出全部。
+  // 已经进列表的（敲全前缀那条 95/98 分）不重复添加。
+  if (q.startsWith('/')) {
+    const added = new Set(pluginResults.map(r => r.pluginId + '.' + r.pluginCommandId))
+    for (const idx of ctx.pluginCmdIndex) {
+      const px = idx.cmd.prefix
+      if (!px || !px.toLowerCase().startsWith(qLC)) continue
+      const key = idx.plugin.id + '.' + idx.cmd.id
+      if (added.has(key)) continue
+      added.add(key)
+      push(idx, SLASH_DISCOVERY_SCORE, 'slash')
+    }
+  }
+
   if (pluginResults.length === 0) return null
-  return { groups: [{ type: 'plugin', label: ctx.t('cmdGroupPlugins'), results: pluginResults }] }
+  // 组内按统一权重（含频次）排序：与「最佳匹配」用同一个数，两处位次不会打架
+  pluginResults.sort((a, b) => (b.rankScore || 0) - (a.rankScore || 0))
+  // 截断在排序之后：留下的是分数最高（+频次加权）的那批，被丢掉的本来就在底部。
+  // 斜杠查询是例外：敲 `/` 就是来看「有哪些斜杠命令」的，37 条全列出来才有意义，
+  // 截到 30 意味着有 7 条永远看不见（而且被截掉的正是频次低的那些，最需要被发现）。
+  // 不填 totalCount —— 那个字段只服务「最近使用」的展开按钮，填在这里会给出一个
+  // 点了没反应的展开箭头。
+  const limit = q.startsWith('/') ? SLASH_DISCOVERY_MAX : MAX_PLUGIN_RESULTS
+  return { groups: [{ type: 'plugin', label: ctx.t('cmdGroupPlugins'), results: pluginResults.slice(0, limit) }] }
 }
 
 // 7.5 环境管理运行时服务（启动 / 停止 / 启用管理后台 15672）

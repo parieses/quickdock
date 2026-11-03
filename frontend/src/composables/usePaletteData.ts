@@ -49,6 +49,43 @@ export function usePaletteData(deps: PaletteDataDeps) {
   const PLUGIN_ICON_TTL = 30_000
   let lastPluginIconLoad = 0
 
+  // ---- 插件图标的跨会话缓存 ----
+  //
+  // 每个插件一次 IPC + 一次 DB 读取，80 多个插件就是 80 多次往返，且每次唤起都要重来。
+  // 图标本身几乎不变（插件升级才可能换），所以把 data URI 落到 localStorage：
+  // 缓存按「主题 + 插件版本」判定有效，版本一变自然失效，不需要额外的失效信号。
+  //
+  // 单条目无图标也记（d 为空串）：否则那几个「清单里没声明 icon」的插件每次唤起
+  // 都要再问一次，白白拉长首屏。
+  const ICON_CACHE_KEY = 'qd.palette.plugin-icons.v1'
+  // 5MB 配额下留足余量：图标是一个个 SVG 转的 data URI，正常几十 KB
+  const ICON_CACHE_MAX_CHARS = 1_500_000
+  interface IconCacheEntry { v: string; d: string }
+
+  function readIconCache(theme: string): Record<string, IconCacheEntry> {
+    try {
+      const raw = localStorage.getItem(ICON_CACHE_KEY)
+      if (!raw) return {}
+      const parsed = JSON.parse(raw)
+      if (parsed?.theme !== theme || !parsed.icons || typeof parsed.icons !== 'object') return {}
+      return parsed.icons as Record<string, IconCacheEntry>
+    } catch {
+      // 坏数据 / 别的版本写的结构：当作没有缓存，下一次写入会覆盖
+      return {}
+    }
+  }
+
+  function writeIconCache(theme: string, icons: Record<string, IconCacheEntry>) {
+    try {
+      const json = JSON.stringify({ theme, icons })
+      // 超限就整份放弃（图标是可丢数据）：写一半会让下次读到的结构残缺
+      if (json.length > ICON_CACHE_MAX_CHARS) return
+      localStorage.setItem(ICON_CACHE_KEY, json)
+    } catch {
+      // 配额满 / 隐私模式禁用 storage：降级成「每次都取」，不影响功能
+    }
+  }
+
   const themeName = useThemeName()
 
   async function loadPluginIcons(force = false) {
@@ -57,9 +94,28 @@ export function usePaletteData(deps: PaletteDataDeps) {
     lastPluginIconLoad = now
     // 图标分深浅两档，必须按当前主题取；主题切换时由下方 watch 强制重拉
     const theme = themeName.value
-    await Promise.all(installedPlugins.value.map(async (p) => {
-      try { const uri = unwrap<string | null>(await GetPluginIcon(p.id, theme)); if (uri) pluginIcons.value[p.id] = uri } catch (e) { logErr('CommandPalette', e) }
+    const cached = readIconCache(theme)
+    const next: Record<string, IconCacheEntry> = {}
+    const pending: PluginInfo[] = []
+    for (const p of installedPlugins.value) {
+      const hit = cached[p.id]
+      if (hit && hit.v === p.version) {
+        next[p.id] = hit
+        if (hit.d && !pluginIcons.value[p.id]) pluginIcons.value[p.id] = hit.d
+        continue
+      }
+      pending.push(p)
+    }
+    // 只对「缓存里没有 / 版本变了」的插件发请求；常规唤起这里是空的
+    await Promise.all(pending.map(async (p) => {
+      try {
+        const uri = unwrap<string | null>(await GetPluginIcon(p.id, theme))
+        next[p.id] = { v: p.version, d: uri || '' }
+        if (uri) pluginIcons.value[p.id] = uri
+      } catch (e) { logErr('CommandPalette', e) }
     }))
+    // 插件列表还没就绪时不要写：空 map 会把上一轮（同主题）的有效缓存覆盖掉
+    if (installedPlugins.value.length > 0) writeIconCache(theme, next)
   }
 
   async function loadPluginIndex(forceIcons = false) {

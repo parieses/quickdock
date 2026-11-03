@@ -1159,7 +1159,15 @@ func registerAllHotkeys(app *application.App) {
 		pw.Show()
 		pw.Focus()
 		if a := getHotkeyApp(); a != nil {
-			a.Event.Emit("palette:shown")
+			// 带上「最近一次真实复制」的类型与时刻：面板据此决定要不要把刚复制的内容
+			// 预填进输入框（详见 services/clipboard_sys.go 的 ClipboardLastCopyInfo）。
+			// 走这里而不是让面板自己听 clipboard:updated：面板此刻可能刚被唤起，
+			// 而它需要的是一次完整的、当下的事实。
+			kind, at := services.ClipboardLastCopyInfo()
+			a.Event.Emit("palette:shown", map[string]any{
+				"lastCopyKind": kind,
+				"lastCopyAtMs": at,
+			})
 		}
 	}
 	registeredPaletteAccel := paletteAccel

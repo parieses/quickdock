@@ -76,9 +76,14 @@ const paletteRows: Row[] = [
 // 命令面板语法：给的是可直接照抄的样例，同样不是文案。
 const syntaxRows: Row[] = [
   { labelKey: 'cheatSheetCalc', keys: '= 12*8+5' },
-  // 单位换算必须带目标单位：utils/calc.ts 的正则要求 to/in/=/->/→ 之一，只输 "1km" 不会命中
+  // 单位换算必须带目标单位：utils/calc.ts 的正则要求 to/in/=/->/→/等于/是多少 之一，
+  // 只输 "1km" 不会命中
   { labelKey: 'cheatSheetUnit', keys: '1km to m' },
+  { labelKey: 'cheatSheetUnitCn', keys: '1公斤是多少斤' },
   { labelKey: 'cheatSheetQuicklink', keys: '{query}' },
+  // 斜杠命令来自插件清单的 prefix：只敲 `/` 会列出全部（发现通道），
+  // 敲全前缀（`/sql`）则直达该命令；前缀后接空格的内容作为参数带入。
+  { labelKey: 'cheatSheetSlash', keys: '/sql SELECT 1' },
 ]
 
 const copied = ref(false)

@@ -213,6 +213,11 @@ func (p *PluginService) PluginCatalog(mode string) *services.ApiResult {
 				"title":        c.Title,
 				"acceptsInput": c.AcceptsInput,
 			}
+			// matchPattern 给 AI 客户端按内容路由的线索（如把一段 URL 路由给 login-tester）。
+			// 空字段不输出：既不占 token，也不让模型误以为有隐含约束。
+			if c.MatchPattern != "" {
+				cmd["matchPattern"] = c.MatchPattern
+			}
 			// description / params 只在插件真的写了才给：空字段既占 token，
 			// 又会让模型以为「有说明但没写」，反而降低对缺省的容忍。
 			if d := strings.TrimSpace(c.Description); d != "" {

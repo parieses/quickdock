@@ -11,13 +11,14 @@
 //   quicklink        —— 资源里带 {query} 的条目，回车先进内联输入态再打开
 //   inlinePlugin     —— 前端插件的内联页（同一浮窗内切换），不是独立窗口
 
-import { inject, type Ref } from 'vue'
+import { inject, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { commandTitle } from '../utils/localize'
 import { getPluginLastResult, savePluginLastResult, pluginCmdKey } from '../utils/pluginLastResult'
+import { resolvePluginInput } from './palettePluginInput'
 import {
   LaunchInstalledApp,
   NavigateMainWindow,
@@ -36,6 +37,11 @@ export interface PaletteExecutorDeps {
   /** 当前展示的扁平结果（分组拍平后），选中下标指向它 */
   displayFlat: Ref<SearchResult[]>
   selectedIndex: Ref<number>
+  /**
+   * 把 80ms 防抖里挂着的输入立刻落成结果（见 useCommandSearch.flushSearch）。
+   * 执行前必须调一次：否则「打完字立刻回车」执行的是上一轮列表的同一下标。
+   */
+  flushSearch: () => void
   /** 多选批量执行用的下标集合 */
   selectedSet: Ref<Set<number>>
   /** 多选锚点（执行完重置） */
@@ -54,11 +60,26 @@ export interface PaletteExecutorDeps {
   beginQuicklink: (item: CollectionItem) => void | Promise<void>
   /** 打开内联插件页（由面板实现：置 inlinePluginId/Name/Init） */
   openInlinePlugin: (pluginId: string, commandId: string, text: string) => void
+  /**
+   * 面板是否处于「最近使用」列表（输入框为空）。
+   * 这条决定了「没带输入时能不能回退上次输入」—— 点历史记录就是要重跑，
+   * 而敲 keyword 命中不是（见 palettePluginInput 的注释）。
+   */
+  isRecentMode: () => boolean
 }
 
 export function usePaletteExecutor(deps: PaletteExecutorDeps) {
   const { t, locale } = useI18n()
   const toast = inject<ToastAPI>('toast')
+
+  /** 上一次执行该命令时的输入：持久化 store 优先（跨应用重启），其次 usage 表 */
+  function lastInputOf(pluginId?: string, commandId?: string): string | undefined {
+    if (!pluginId || !commandId) return undefined
+    const last = getPluginLastResult(pluginId, commandId)
+    if (last?.input) return last.input
+    const re = deps.recentCache.value.find(e => e.key === pluginCmdKey(pluginId, commandId) && !!e.input)
+    return re?.input
+  }
 
   function isOpenable(r: SearchResult): boolean {
     return r.type === 'item' || r.type === 'url' || r.type === 'app'
@@ -156,6 +177,10 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
   }
 
   async function executeSelected() {
+    // 先把防抖里挂着的输入落成结果，并等一帧让模板跟上：
+    // 命中 `Enter` 的那一刻，用户看到的是新列表，而 displayFlat 可能还是上一轮的。
+    deps.flushSearch()
+    await nextTick()
     if (deps.selectedSet.value.size > 0) {
       await executeBatch()
       return
@@ -252,54 +277,50 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
         }
         await deps.loadPluginIndex()
       }
-      // 仅当命令声明 acceptsInput 时，才把 Ctrl+K 文本作为插件参数带入；否则不传（"不设置就不带"）
-      let inputText: string | undefined
-      if (result.acceptsInput) {
-        inputText = result.inlineInput || undefined
-        if (!inputText && result.label) {
-          const idx = deps.pluginCmdIndex.value.find(
-            (c) => c.plugin.id === result.pluginId && c.cmd.id === result.pluginCommandId,
-          )
-          if (idx) {
-            const title = commandTitle(idx.cmd, locale)
-            if (title && result.label.startsWith(title + ': ')) {
-              inputText = result.label.slice(title.length + 2)
-            }
-          }
-        }
-      }
-      // acceptsInput 命令未带输入：回退「最近一次输入」实现一键重跑——
-      // 持久化 store（跨应用重启）优先，其次 usage 表 recentCache（input 字段自 v1 起就有）
-      if (result.acceptsInput && !inputText) {
-        const last = result.pluginId && result.pluginCommandId
-          ? getPluginLastResult(result.pluginId, result.pluginCommandId)
-          : null
-        if (last?.input) {
-          inputText = last.input
-        } else {
-          const k = pluginCmdKey(result.pluginId, result.pluginCommandId)
-          const re = deps.recentCache.value.find((e) => e.key === k && !!e.input)
-          if (re?.input) inputText = re.input
-        }
-      }
-      // 仍无输入：绝不空参执行——空跑 + 必报错 + 空输入写坏历史记录三害齐发。
-      // 有前端则打开页面让用户补输入；无前端则提示后停在面板，不动历史。
-      if (result.acceptsInput && !inputText) {
-        if (result.pluginHasFrontend) {
-          deps.openInlinePlugin(result.pluginId, result.pluginCommandId || '', '')
-          return
-        }
+      // 「带什么文本、走哪条通道」全部交给纯函数判定（可单测，见 palettePluginInput.test.ts）：
+      //   - acceptsInput 命令：inlineInput / label 内联输入 → 必要时才回退上次输入；
+      //   - 前端插件的内容通道：没声明 acceptsInput 也能从 plugin:init.text 取到原文；
+      //   - 后端执行路径仍严格要求 acceptsInput —— 多塞参数会改变命令语义。
+      const title = (() => {
+        const idx = deps.pluginCmdIndex.value.find(
+          (c) => c.plugin.id === result.pluginId && c.cmd.id === result.pluginCommandId,
+        )
+        return idx ? commandTitle(idx.cmd, locale) : ''
+      })()
+      const labelInput = result.label && title && result.label.startsWith(title + ': ')
+        ? result.label.slice(title.length + 2)
+        : undefined
+      const plan = resolvePluginInput({
+        acceptsInput: result.acceptsInput,
+        pluginHasFrontend: result.pluginHasFrontend,
+        matchType: result.matchType,
+        inlineInput: result.inlineInput,
+        labelInput,
+        hitText: result.hitText,
+        lastInput: lastInputOf(result.pluginId, result.pluginCommandId),
+        isRecentMode: deps.isRecentMode(),
+      })
+      const inputText = plan.text
+      if (plan.action === 'need-input') {
         toast?.error?.(t('pluginNeedInput'))
         return
       }
-      deps.recordUsage(
-        'plugin:' + result.pluginId + '.' + result.pluginCommandId,
-        'plugin', result.label, result.desc, inputText || '',
-      )
+      // acceptsInput 但没拿到参数、只能先开界面让用户补：这算「打开了一个界面」，
+      // 不算一次带参执行 —— 不写使用历史（原实现同样跳过，免得空输入把历史冲淡）。
+      const opensForInput = plan.action === 'open-inline' && !!result.acceptsInput && !inputText
+      // 只在前端分支记录使用次数：无前端分支紧接着调 ExecutePluginCommand，
+      // 后端那边已经写过一次 RecordUsageEx（services/plugin/plugin_exec.go），
+      // 两边都写等于 count +2（图标/排序用的频次直接翻倍）。
+      if (plan.action === 'open-inline' && !opensForInput) {
+        deps.recordUsage(
+          'plugin:' + result.pluginId + '.' + result.pluginCommandId,
+          'plugin', result.label, result.desc, inputText || '',
+        )
+      }
       // 即时刷新「最近使用」：运行完立刻能看到，不必等下次重开面板
       void deps.refreshRecent().catch(() => {})
       try {
-        if (result.pluginHasFrontend) {
+        if (plan.action === 'open-inline') {
           // 前端插件：交由统一 PluginFrame 宿主打开 UI；init 通过同窗口 getter 直接传入
           // （不走全局 pending init 单例）
           deps.openInlinePlugin(result.pluginId, result.pluginCommandId || '', inputText || '')
