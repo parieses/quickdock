@@ -54,6 +54,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 日志查看器 | — | 「设置 → 日志」按天查看应用日志与崩溃记录，可过滤级别、清理旧日志 |
 | 日志实时尾随 | — | 命令面板输入 `logtail`，对任意本机文件执行 `tail -f`，支持暂停与关键字高亮 |
 | 通知中心 | — | 侧栏底部铃铛，汇总监控状态、定时任务结果与 AI 回答完成，未读带角标 |
+| 总览 | — | 图表化首页：24 小时探测热力条、待办三色分布、最近提交、常驻运行时与端口占用，最近使用横排直达 |
 
 </details>
 
@@ -64,7 +65,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 |------|------|
 | 待办 | 列表 / 看板视图，子任务、标签、重复规则、到期提醒；子任务可单独设截止日，页内可搜索；日历可直接拖拽改截止日；重复任务完成后留痕而不是原地下次；番茄专注时长可自定义并留有历史，结束后发系统通知，可选机器人推送 |
 | 定时任务 | 5 种动作 × 5 种调度（一次性 / 间隔 / 每天 / 每周 / 每月），列表可拼音搜索与批量启停、显示下次执行倒计时，执行历史可跨任务统计并导出 CSV，可手动立即执行 |
-| 网站监控 | HTTP 状态码与响应时间、SSL 到期预警、关键字与正则匹配、响应趋势图、正常率环形图；状态变化推送通知并可导出 CSV。支持搜索、批量启停、拖拽排序、回收站、维护窗口与告警静默 |
+| 网站监控 | 四种探针（HTTP / TCP 端口 / 本机进程 / 自定义命令），HTTP 状态码与响应时间、SSL 到期预警、关键字与正则匹配、响应趋势图、正常率环形图；状态变化推送通知并可导出 CSV。支持搜索、批量启停、拖拽排序、回收站、维护窗口与告警静默 |
 
 </details>
 
@@ -83,6 +84,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 笔记 AI | 笔记浮窗内嵌面板，支持总结、润色、续写、翻译 |
 | DeepSeek Harness | 内嵌完整 Agent 编程入口，自动装填便携 Node，原生窗口承载 3080 端口；打开前校验 WebView2 版本，进程意外退出自动重拉 |
 | MCP 服务 | `http://127.0.0.1:9230/mcp`，工具集分只读、低危写、高危三级权限 |
+| Git 面板 | 对标 SourceTree 的仓库视角：分支 / 标签 / 远端 / 子模块管理，贮藏，文件历史与逐行归属（blame），amend、cherry-pick、revert，分支对比、side-by-side diff，SSH 密钥一键配置 GitHub / GitLab，多选批量操作与存档导出 |
 | 环境管理 | 28 种运行时，安装、切换、启停、配置、日志、控制台，全部在用户目录内；可按项目目录的版本声明做检查 |
 
 </details>
@@ -274,7 +276,7 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 <details>
 <summary><b>网站监控</b></summary>
 
-- 定时探测 HTTP 状态码与响应时间（GET / HEAD / POST）
+- 四种探针：**HTTP**（状态码与响应时间，GET / HEAD / POST）、**TCP 端口**（连上即正常，探数据库 / Redis / MQ）、**本机进程**（进程名存在即正常）、**自定义命令**（退出码 0 即正常）
 - SSL 证书到期预警，提前天数可配置
 - 关键字与正则内容匹配
 - 在线率统计、检测日志、状态变化通知（桌面通知与机器人推送：钉钉、企业微信、飞书、Server酱、PushPlus、Telegram）
@@ -451,6 +453,21 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 - **文件搜索自测**：页内可以直接调一次与命令面板相同的检索接口。返回 0 条但状态正常时，通常是 Everything 索引没建好或以管理员身份运行导致 IPC 不通
 - **Ollama**：单版本语义，程序目录在 `runtime/ollama/`；有新版本只提示不自动更新；模型库共享 `~/.ollama/models`；卸载只删程序
 - **代码位置**：门面层 `services/env/`，引擎层 `internal/env/`（注册表、下载、解压、服务生命周期、项目级版本探测，平台差异用 `_windows` `_darwin` `_unix` 分文件）
+
+</details>
+
+<details>
+<summary><b>Git 面板</b></summary>
+
+一个够用的 Git 可视化客户端（对标 SourceTree 的仓库视角），多仓库管理，切仓库有记忆，进面板先检测 git 是否可用。
+
+- **仓库与远端**：目录选择加入 / 克隆（HTTPS 弹凭据、SSH 走 agent）、远端增删改（自动识别 SSH / HTTPS）、SSH 密钥生成并一键写入 `~/.ssh/config`，公钥复制、连接测试、origin 由 HTTPS 切 SSH
+- **工作区**：已暂存 / 未暂存两组，勾选即暂存（勾选框就是 `git add`），多选批量暂存 / 丢弃 / 取消暂存（Ctrl 逐个、Shift 连选），文件树分组可折叠，右键丢弃 / 忽略（文件、目录、扩展名）/ 停止跟踪，AI 起草提交信息
+- **提交**：普通提交、amend（并入上次提交，信息可留空保留原文；已推送的提交先确认改写历史风险）、提交历史带 --graph 分支线与 refs 徽章，回车全历史搜索（所有分支的提交信息与作者）
+- **历史操作**：文件历史（`--follow` 跟随重命名）、逐行归属 blame（点哈希跳到那次提交）、查看 / 恢复历史版本、cherry-pick、revert、检出提交、导出存档 zip
+- **分支 / 标签**：新建、切换、重命名、删除（未合并拒绝 / 强制）、合并、推送分支与标签（标签默认本地，可一键推远端）、远端标签删除；分支对比（左右独有提交 + 文件差异）
+- **贮藏（Stash）**：贮藏 / 应用 / 弹出 / 删除多组记录，自定义说明
+- **其他**：side-by-side diff、子模块管理（初始化 / 更新 / 同步 / 添加）、fetch / pull（只做快进）/ push
 
 </details>
 
@@ -688,7 +705,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 ```
 quickdock/
 ├── main.go / tray.go / windows.go        # 入口、托盘、浮动窗口、单实例锁
-├── services/                             # Wails 门面层，宿主 + 23 领域子包，475 个绑定方法
+├── services/                             # Wails 门面层，宿主 + 24 领域子包，539 个绑定方法
 │   ├── service.go  api_result.go  types.go  lifecycle.go
 │   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
 │   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go  clipboard_files.go
@@ -696,7 +713,7 @@ quickdock/
 │   ├── schedule.go  schedule_runner.go  reminder.go  webhook_notify.go
 │   ├── monitor_checker.go  notify.go  visibility.go  navbadge.go
 │   ├── storage.go  storage_service.go  clipboard_image.go
-│   └── ai/ clipboard/ collection/ diag/ dsh/ env/ frecency/ item/
+│   └── ai/ clipboard/ collection/ diag/ dsh/ env/ frecency/ git/ item/
 │       logtail/ mcp/ monitor/ note/ notify/ plugin/ port/ recycle/
 │       scene/ snapshot/ sshx/ system/ todo/ update/ workspace/
 ├── internal/                             # 引擎层，被门面调用，无 Wails 绑定
