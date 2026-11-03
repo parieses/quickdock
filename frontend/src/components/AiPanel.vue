@@ -112,6 +112,8 @@ const props = withDefaults(defineProps<{
    * 有 result 时以 result 为准（增量只是过程态，避免和终态渲染打架）。
    */
   liveText?: string
+  /** 思考增量（模型开了 thinking 才有）。首字之前显示在「思考中」那行，见模板。 */
+  liveReason?: string
   draft?: { text: string; seq: number }
 }>(), {
   samples: () => [],
@@ -120,6 +122,7 @@ const props = withDefaults(defineProps<{
   showClose: true,
   hintClass: '',
   liveText: '',
+  liveReason: '',
   draft: undefined,
   stoppable: false,
 })
@@ -460,7 +463,9 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 
       <div v-if="busy && !streaming" class="ai-panel-busy">
         <Loader2 :size="14" class="spin" />
-        <span>{{ t('sshAiThinking') }}</span>
+        <!-- 有思考流就显示它：首字之前的十几秒里，这一行是唯一的「它还活着」的证据。 -->
+        <span v-if="liveReason" class="ai-panel-reason" :title="liveReason">{{ liveReason }}</span>
+        <span v-else>{{ t('sshAiThinking') }}</span>
       </div>
     </div>
 
@@ -821,8 +826,21 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
   display: flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
   font-size: 12px;
   color: var(--color-text-muted);
+}
+
+/* 思考流：模型在首字之前可能要想十几秒。只转圈的话这段时间是纯黑屏，
+   用户分不清「在想」和「卡死」——把思考内容铺出来，等待就变成了进展。
+   单行省略：思考是过程态，占多了会把下面的正文挤走。 */
+.ai-panel-reason {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-text-muted);
+  opacity: 0.85;
 }
 
 /* 纵向：底部「上下文引用条」与「输入行」是上下关系，

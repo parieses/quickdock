@@ -10,6 +10,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +66,9 @@ func (a *AIService) StartAIStreamServer() {
 	mux.HandleFunc("/ai/stream", s.handle)
 	// 运行中插入消息（见 ai_inject.go）：前端在这一轮还没跑完时发的下一句。
 	mux.HandleFunc("/ai/inject", s.handleInject)
+	// 面板类问答（SSH / 剪贴板 / 笔记，见 ai_ask_stream.go）：同一套 SSE，
+	// 让它们不必再依赖 Wails 事件来逐字显示。
+	mux.HandleFunc("/ai/ask-stream", s.handleAskStream)
 	s.srv = &http.Server{Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	a.aiStream = s
 	go func() {
@@ -223,6 +227,34 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// prepareStream 三条流式端点共用的握手：CORS + POST 校验 + 随机令牌。
+// 返回 false 表示已经回过错误（或这是 OPTIONS 预检），调用方直接 return。
+//
+// 抽出来不是为了少写几行：三处各写一遍时，改其中一处的校验（比如令牌头名）
+// 必然漏掉另外两处，而漏掉的表现是「某个面板突然 403」，很难联想到是这里。
+func (s *aiStreamServer) prepareStream(w http.ResponseWriter, r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		origin = "http://127.0.0.1"
+	}
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Stream-Token")
+	if r.Method == http.MethodOptions {
+		w.WriteHeader(http.StatusNoContent)
+		return false
+	}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return false
+	}
+	if r.Header.Get("X-Stream-Token") != s.token {
+		http.Error(w, "forbidden", http.StatusForbidden)
+		return false
+	}
+	return true
+}
+
 // handleInject 接收「运行中插入的消息」（见 ai_inject.go）。
 //
 // 为什么是独立的短请求而不是复用 /ai/stream：插入必须**立刻有回音**——这一轮还在
@@ -234,23 +266,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 func (s *aiStreamServer) handleInject(w http.ResponseWriter, r *http.Request) {
 	defer recoverPanic("ai inject handler")
 
-	origin := r.Header.Get("Origin")
-	if origin == "" {
-		origin = "http://127.0.0.1"
-	}
-	w.Header().Set("Access-Control-Allow-Origin", origin)
-	w.Header().Set("Access-Control-Allow-Methods", "POST, OPTIONS")
-	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-Stream-Token")
-	if r.Method == http.MethodOptions {
-		w.WriteHeader(http.StatusNoContent)
-		return
-	}
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-	if r.Header.Get("X-Stream-Token") != s.token {
-		http.Error(w, "forbidden", http.StatusForbidden)
+	if !s.prepareStream(w, r) {
 		return
 	}
 
@@ -258,6 +274,9 @@ func (s *aiStreamServer) handleInject(w http.ResponseWriter, r *http.Request) {
 		ConvID  string `json:"convId"`
 		ID      string `json:"id"`
 		Message string `json:"message"`
+		// Immediate 用户点了「立即发送」：打断正在生成的回答，立刻接走这句话。
+		// 老前端不带这个字段 → 行为与升级前完全一致（只入队，等当前这次调用结束）。
+		Immediate bool `json:"immediate"`
 	}
 	// 插入只带文本，1 MiB 绰绰有余；仍然设上限，理由与 /ai/stream 相同。
 	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
@@ -266,12 +285,16 @@ func (s *aiStreamServer) handleInject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if !s.svc.InjectAIMessage(req.ConvID, req.ID, req.Message) {
+	ok, cut := s.svc.InjectAIMessage(req.ConvID, req.ID, req.Message, req.Immediate)
+	if !ok {
 		w.WriteHeader(http.StatusConflict)
 		_, _ = io.WriteString(w, `{"ok":false,"reason":"no-run"}`)
 		return
 	}
-	_, _ = io.WriteString(w, `{"ok":true}`)
+	// interrupted 只对 immediate 有意义：false 表示此刻在跑工具、不在模型调用里，
+	// 这句话还在队里，那一步结束就会接走——前端据此把按钮退回去并说明原因，
+	// 而不是一直转着「正在打断…」。
+	_, _ = io.WriteString(w, `{"ok":true,"interrupted":`+strconv.FormatBool(cut)+`}`)
 }
 
 // doneEvent 组装流式结束事件：附带首字延迟与本次用量，回传前端展示。

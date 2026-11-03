@@ -11,12 +11,10 @@
  * 任何一环出问题都表现为"点了没反应"，且各窗口 JS 状态互不可见，极难排查。
  * 现在上下文随请求走，一次调用拿回答案。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Events } from '@wailsio/runtime'
 import { AlignLeft, Languages, ListTree, PenLine, CornerDownLeft, Plus, Replace } from '@lucide/vue'
-import { AskAI } from '../../bindings/quickdock/services/note/noteservice'
-import { unwrap } from '../utils/api'
+import { askOverStream } from '../utils/aiAskStream'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
@@ -55,29 +53,18 @@ const panelRef = ref<InstanceType<typeof AiPanel> | null>(null)
 
 /** 当前激活的 AI 档案：多 Key 时回答「这一问用的是哪个」。 */
 const { profile: activeProfile, model: activeModel, check: checkAI } = useAIAvailability()
-/** 回答方式：关掉流式就传空 streamId，后端退化为一次性返回。 */
+/** 回答方式：关掉「流式输出」就不再逐段渲染，等整段回来一次显示（传输仍是 SSE）。 */
 const { streamEnabled } = useAiStreamPreference()
 
+/** 流式增量与它所属的那一轮。seq 用来作废上一轮迟到的回调（见 utils/aiAskStream.ts）。 */
 const liveText = ref('')
-const streamId = ref('')
-let offDelta: (() => void) | null = null
+/** 思考增量：首字之前显示在「思考中」那一行。 */
+const liveReason = ref('')
+let askSeq = 0
 
 onMounted(() => {
   void checkAI()
-  offDelta = Events.On('ai:ask-delta', (ev: any) => {
-    const d = ev?.data ?? ev
-    if (!d || !d.id || d.id !== streamId.value) return
-    liveText.value += d.delta ?? ''
-  })
 })
-onUnmounted(() => {
-  offDelta?.()
-  offDelta = null
-})
-
-function newStreamId(): string {
-  return `note-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-}
 
 /** 四个预置动作：覆盖笔记场景的绝大多数诉求。 */
 const actions = computed(() => [
@@ -101,23 +88,28 @@ async function run(action: string, question: string) {
   busy.value = true
   errMsg.value = ''
   liveText.value = ''
-  streamId.value = newStreamId()
+  liveReason.value = ''
+  const seq = ++askSeq
   try {
-    const r = unwrap<{
+    const r = await askOverStream<{
       answer: string
       segments: { type: string; text: string; commands: { text: string; risk: string; note: string }[] | null }[] | null
       model: string
       elapsedMs: number
-    }>(
-      await AskAI({
-        text: props.text,
-        action,
-        question,
-        history: history.value.slice(-6),
-        streamId: streamEnabled.value ? streamId.value : '',
-      })
-    )
-    if (!r) throw new Error(t('sshAiFailed'))
+    }>('note', {
+      text: props.text,
+      action,
+      question,
+      history: history.value.slice(-6),
+    }, {
+      onDelta: (s) => {
+        if (seq === askSeq && streamEnabled.value) liveText.value += s
+      },
+      onReason: (s) => {
+        if (seq === askSeq && streamEnabled.value) liveReason.value += s
+      },
+    })
+    if (seq !== askSeq) return
     result.value = {
       answer: r.answer,
       commands: null,
@@ -164,7 +156,9 @@ function clearAll() {
   errMsg.value = ''
   lastAction.value = ''
   liveText.value = ''
-  streamId.value = ''
+  liveReason.value = ''
+  // 作废正在跑的那一轮：清空后迟到的增量与结果都对不上号。
+  askSeq++
   panelRef.value?.setQuestion('')
 }
 
@@ -187,6 +181,7 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
       :busy="busy"
       :err-msg="errMsg"
       :live-text="liveText"
+      :live-reason="liveReason"
       @ask="askFree"
       @clear="clearAll"
       @close="emit('close')"

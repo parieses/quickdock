@@ -15,12 +15,11 @@
  * 本文件只保留 SSH 特有的部分：环境徽章、终端选区引用条、
  * 「填入终端 / 直接执行」两个动作，以及生产环境的二次确认。
  */
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Events } from '@wailsio/runtime'
 import { Check, Monitor, Play, Terminal, TextSelect, X } from '@lucide/vue'
-import { Ask } from '../../bindings/quickdock/services/sshx/sshservice'
-import { apiErrorCode, unwrap } from '../utils/api'
+import { apiErrorCode } from '../utils/api'
+import { askOverStream } from '../utils/aiAskStream'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
@@ -117,37 +116,24 @@ function onQuestionInput(v: string) {
 /** 当前激活的 AI 档案：多 Key 场景下「问 AI 实际用的是哪一个」由它回答。 */
 const { profile: activeProfile, model: activeModel, check: checkAI } = useAIAvailability()
 
-/** 回答方式：关掉流式就传空 streamId，后端退化为一次性返回（请求/返回结构不变）。 */
+/** 回答方式：关掉「流式输出」就不再逐段渲染，等整段回来一次显示（传输仍是 SSE）。 */
 const { streamEnabled } = useAiStreamPreference()
 
 /**
- * 流式增量与它所属的请求。
+ * 流式增量与它所属的那一轮。
  *
- * 为什么按 id 过滤：ai:ask-delta 是全局广播的，同一时刻可能还有别处
- * （剪贴板问 AI、另一个 SSH 会话）在流式输出。不过滤就会把别人的内容
- * 拼进自己的回答里——而且看起来就像模型"答串了"。
+ * 现在增量走本地 SSE（见 utils/aiAskStream.ts），不再经 Wails 事件广播，
+ * 所以不必再按 streamId 过滤别人的内容——但「点停止之后不要再往里累加」
+ * 仍然需要：askSeq 每发起一轮就 +1，回调里对不上号就直接丢。
  */
 const liveText = ref('')
-const streamId = ref('')
-let offDelta: (() => void) | null = null
+/** 思考增量：首字之前显示在「思考中」那一行，让等待可见。 */
+const liveReason = ref('')
+let askSeq = 0
 
 onMounted(() => {
   void checkAI()
-  offDelta = Events.On('ai:ask-delta', (ev: any) => {
-    const d = ev?.data ?? ev
-    if (!d || !d.id || d.id !== streamId.value) return
-    liveText.value += d.delta ?? ''
-  })
 })
-onUnmounted(() => {
-  offDelta?.()
-  offDelta = null
-})
-
-/** 每次提问一个独立 id：复用同一个 id 会让上一轮迟到的增量混进新一轮。 */
-function newStreamId(): string {
-  return `ssh-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-}
 
 /**
  * 是否在生产机上提问。
@@ -188,28 +174,32 @@ async function ask() {
   busy.value = true
   cancelled.value = false
   errMsg.value = ''
-  // 新一轮开始：清掉上一轮的增量，换一个 streamId（旧 id 迟到的增量不会再匹配上）。
+  // 新一轮开始：清掉上一轮的增量，并把序号推进——上一轮迟到的增量因此对不上号。
   liveText.value = ''
-  streamId.value = newStreamId()
+  liveReason.value = ''
+  const seq = ++askSeq
   try {
-    const r = unwrap<AiPanelResult>(
-      await Ask({
-        sessionId: props.sessionId,
-        question: q,
-        // 屏显只在问题提到它时才送：没有意图信号就送，等于让模型猜我们在看什么。
-        screenText: wantsScreen.value ? props.readScreen() : '',
-        history: history.value.slice(-12),
-        // 把上一轮的摘要回传，后端据此做增量压缩（见后端 compressSshHistory）。
-        prevSummary: summary.value,
-        selection: selection.value,
-        // 关掉流式就传空：后端据此不推增量，等于一次性返回。
-        streamId: streamEnabled.value ? streamId.value : '',
-      })
-    )
-    // 中途点了「停止」：本轮结果已无意义，丢弃即可（Go 侧调用仍在后台跑完，无害）。
-    if (cancelled.value) return
-    // unwrap 只在成功时返回数据，失败已 throw；此处 null 说明调用没返回内容。
-    if (!r) throw new Error(t('sshAiFailed'))
+    // 走本地 SSE（见 utils/aiAskStream.ts）。与绑定方法返回同构，后面这一段逻辑不变。
+    const r = await askOverStream<AiPanelResult>('ssh', {
+      sessionId: props.sessionId,
+      question: q,
+      // 屏显只在问题提到它时才送：没有意图信号就送，等于让模型猜我们在看什么。
+      screenText: wantsScreen.value ? props.readScreen() : '',
+      history: history.value.slice(-12),
+      // 把上一轮的摘要回传，后端据此做增量压缩（见后端 compressSshHistory）。
+      prevSummary: summary.value,
+      selection: selection.value,
+    }, {
+      // 用户关掉「流式输出」时只收不显示，等于回到一次性返回（偏好仍然有效）。
+      onDelta: (s) => {
+        if (seq === askSeq && streamEnabled.value) liveText.value += s
+      },
+      onReason: (s) => {
+        if (seq === askSeq && streamEnabled.value) liveReason.value += s
+      },
+    })
+    // 中途点了「停止」：本轮结果已无意义，丢弃即可。
+    if (cancelled.value || seq !== askSeq) return
     result.value = r
     // 回存历史摘要：下一场提问作为 prevSummary 回传，长对话的历史因此保持有界。
     summary.value = r.summary ?? ''
@@ -282,7 +272,9 @@ function clearAll() {
   selection.value = ''
   confirmRun.value = ''
   liveText.value = ''
-  streamId.value = ''
+  liveReason.value = ''
+  // 作废正在跑的那一轮：清空后迟到的增量与结果都对不上号，不会落到新的一轮里。
+  askSeq++
   cancelled.value = false
   panelRef.value?.setQuestion('')
 }
@@ -290,17 +282,17 @@ function clearAll() {
 /**
  * 停止本轮问答。
  *
- * 后端 Go 调用无法从前端真正中断（一次性的 HTTP 请求），但这里先把视觉态复位：
- * 清除「思考中 / 转圈」并作废迟到的增量与结果，让面板不再卡在转圈不动的状态。
- * 后台那次调用会自行跑完（最多 30s 超时），不对用户造成副作用。
+ * 仍然无法真正中断后端那次请求（AskAIFnStream 自带 30s 超时，不接 ctx），
+ * 但推进 askSeq 之后，正在到达的增量与最终结果都会被丢弃，面板不会卡在转圈。
+ * 后台那次调用跑完即可，没有副作用。
  */
 function stop() {
   if (!busy.value) return
   cancelled.value = true
   busy.value = false
   liveText.value = ''
-  // 清空 streamId：后端仍在推的增量因此匹配不上而被忽略，不会污染下一轮。
-  streamId.value = ''
+  liveReason.value = ''
+  askSeq++
 }
 
 /** 空状态里的示例问题：点一下填进输入框（不直接发送——
@@ -385,6 +377,7 @@ function dropSelection() {
       :err-msg="errMsg"
       :draft="draft"
       :live-text="liveText"
+      :live-reason="liveReason"
       :stoppable="true"
       @ask="ask"
       @stop="stop"

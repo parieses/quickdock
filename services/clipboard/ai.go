@@ -1,6 +1,9 @@
 package clipboard
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -113,29 +116,12 @@ type ClipboardAiAskResult struct {
 //
 // 只做「组装上下文 + 调用 + 解析围栏」，不写任何数据：
 // 不落库（不污染用户的 AI 对话历史）、不碰剪贴板内容本身。
+//
+// 增量走 Wails 事件。前端的正经通道是本地 SSE（见 AskAIOverStream），
+// 这条路留给插件与「SSE 服务没起来」的降级：两条路共用 askOnce，
+// 提示词与解析因此不会漂移。
 func (a *ClipboardService) AskAI(req ClipboardAiAskRequest) *services.ApiResult {
-	if a.App.AskAIFn == nil {
-		return services.FailMsg("AI 能力不可用")
-	}
-
-	text := strings.TrimSpace(req.Text)
-	if text == "" {
-		return services.FailMsg("内容为空")
-	}
-
-	action := strings.TrimSpace(req.Action)
-	question := strings.TrimSpace(req.Question)
-	if action == "" && question == "" {
-		return services.FailMsg("请指定操作或问题")
-	}
-
-	if n := len([]rune(question)); n > clipboardAiQuestionMaxRune {
-		question = string([]rune(question)[:clipboardAiQuestionMaxRune])
-	}
-
-	prompt := buildClipboardAiPrompt(text, action, question, req.History)
-
-	// 流式：增量经 Wails 事件 ai:ask-delta 推给前端（batch ~40 rune 一次 IPC）。
+	// 增量经 Wails 事件 ai:ask-delta 推给前端（batch ~40 rune 一次 IPC）。
 	// 返回后再 flush 一次，避免结尾片段丢失。
 	var deltaBuf strings.Builder
 	emitDelta := func() {
@@ -157,22 +143,106 @@ func (a *ClipboardService) AskAI(req ClipboardAiAskRequest) *services.ApiResult 
 		}
 	}
 
-	start := time.Now()
-	out, model, err := a.App.AskAIFnStream(clipboardAiSystemPrompt, prompt, clipboardAiTimeoutSec, onToken)
+	res, err := a.askOnce(req, onToken, nil)
 	if onToken != nil {
 		emitDelta()
 	}
 	if err != nil {
 		return services.Fail(err)
 	}
+	return services.Ok(*res)
+}
 
-	return services.Ok(ClipboardAiAskResult{
+// AskAIOverStream 同 AskAI，但增量交给 emit（本地 SSE 端点调用）。
+//
+// 为什么不继续用 Wails 事件：事件在绑定方法执行期间会被攒到方法返回后
+// 才投递，面板上表现为「等半天、整段蹦出来」。
+//
+//wails:ignore
+func (a *ClipboardService) AskAIOverStream(ctx context.Context, body []byte, emit ai.AskStreamEmit) (any, error) {
+	var req ClipboardAiAskRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, err
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// 与 SSH 面板同一套节流：逐 token 走 IPC 反而比整段更卡。
+	var deltaBuf, reasonBuf strings.Builder
+	flush := func(b *strings.Builder, event string) {
+		if b.Len() == 0 {
+			return
+		}
+		emit(event, map[string]any{"text": b.String()})
+		b.Reset()
+	}
+	onToken := func(d string) {
+		deltaBuf.WriteString(d)
+		if deltaBuf.Len() >= 40 {
+			flush(&deltaBuf, "delta")
+		}
+	}
+	onReason := func(d string) {
+		reasonBuf.WriteString(d)
+		if reasonBuf.Len() >= 40 {
+			flush(&reasonBuf, "reason")
+		}
+	}
+
+	res, err := a.askOnce(req, onToken, onReason)
+	flush(&deltaBuf, "delta")
+	flush(&reasonBuf, "reason")
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// askOnce 是 AskAI 与 AskAIOverStream 的共同主体：校验 → 组装 → 调用 → 解析。
+func (a *ClipboardService) askOnce(req ClipboardAiAskRequest, onToken, onReason func(string)) (*ClipboardAiAskResult, error) {
+	if a.App.AskAIFn == nil {
+		return nil, errors.New("AI 能力不可用")
+	}
+
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return nil, errors.New("内容为空")
+	}
+
+	action := strings.TrimSpace(req.Action)
+	question := strings.TrimSpace(req.Question)
+	if action == "" && question == "" {
+		return nil, errors.New("请指定操作或问题")
+	}
+
+	if n := len([]rune(question)); n > clipboardAiQuestionMaxRune {
+		question = string([]rune(question)[:clipboardAiQuestionMaxRune])
+	}
+
+	prompt := buildClipboardAiPrompt(text, action, question, req.History)
+
+	start := time.Now()
+	out, model, err := a.askStream(prompt, onToken, onReason)
+	if err != nil {
+		return nil, err
+	}
+
+	return &ClipboardAiAskResult{
 		Answer: out,
 		// 规则表传 nil：剪贴板场景的围栏块是给人看的代码，没有执行风险。
 		Segments:  aiutil.ExtractSegments(out, nil),
 		Model:     model,
 		ElapsedMs: time.Since(start).Milliseconds(),
-	})
+	}, nil
+}
+
+// askStream 优先走带思考增量的通道，未装配时退回只有正文的那条（理由见 sshx 的同名方法）。
+func (a *ClipboardService) askStream(prompt string, onToken, onReason func(string)) (string, string, error) {
+	if a.App.AskAIFnStreamReason != nil {
+		return a.App.AskAIFnStreamReason(clipboardAiSystemPrompt, prompt, clipboardAiTimeoutSec, onToken, onReason)
+	}
+	return a.App.AskAIFnStream(clipboardAiSystemPrompt, prompt, clipboardAiTimeoutSec, onToken)
 }
 
 // buildClipboardAiPrompt 组装用户提示词。

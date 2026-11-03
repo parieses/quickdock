@@ -51,6 +51,14 @@ type AIService struct {
 
 	// 外部 MCP server 接入状态（见 ext_mcp.go）。
 	ext *extManager
+
+	// 面板类「问 AI」的执行入口，按 kind 注册（见 ai_ask_stream.go）。
+	//
+	// 业务（prompt 组装、命令解析）在 services/sshx 等各域，而这条 HTTP 端点
+	// 在本包——本包不能反向 import 它们。所以由 main.go 在装配阶段把
+	// 「kind → 执行函数」注册进来，与 App.AskAIFn 的注入是同一种解法。
+	askStreamMu sync.RWMutex
+	askStreams  map[string]AskStreamFn
 }
 
 // NewAIService 创建 AI 门面服务

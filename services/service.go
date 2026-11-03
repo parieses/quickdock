@@ -60,6 +60,14 @@ type AppService struct {
 	// onToken 允许为 nil（如插件这类拿不到前端通道的调用方，退化成一次性返回）。
 	AskAIFnStream func(system, question string, timeoutSec int, onToken func(text string)) (text string, model string, err error)
 
+	// AskAIFnStreamReason 与 AskAIFnStream 同源，多一个 onReason（思考增量）。
+	//
+	// 单独一个字段而不是改上面那个签名：上面那个被插件宿主 API（goja）直接
+	// 复用，改签名要动另一套调用约定；而「要不要显示思考」只有面板关心。
+	// 面板正在从 Wails 事件搬到本地 SSE（见 services/ai/ai_ask_stream.go），
+	// 顺手把思考流也接上——否则开了 thinking 的模型在首字之前是纯黑屏。
+	AskAIFnStreamReason func(system, question string, timeoutSec int, onToken, onReason func(text string)) (text string, model string, err error)
+
 	// AIAvailableFn 报告当前是否配置了可用的 AI 档案（供插件在调用 host.ai.ask 前预检，
 	// 避免「盲目调用 → 拿到未配置/不可用 的裸错」）。
 	//

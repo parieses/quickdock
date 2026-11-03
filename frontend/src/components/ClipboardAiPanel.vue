@@ -13,12 +13,10 @@
  * 面板骨架与分段渲染复用通用组件 AiPanel.vue（与 SSH 场景共用），
  * 本文件只负责剪贴板特有的部分：动作按钮、上下文引用条、请求调用。
  */
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Events } from '@wailsio/runtime'
 import { FileText, Sparkles } from '@lucide/vue'
-import { AskAI } from '../../bindings/quickdock/services/clipboard/clipboardservice'
-import { unwrap } from '../utils/api'
+import { askOverStream } from '../utils/aiAskStream'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
@@ -47,36 +45,24 @@ const panelRef = ref<InstanceType<typeof AiPanel> | null>(null)
 /** 当前激活的 AI 档案：多 Key 时回答「这一问用的是哪个」。 */
 const { profile: activeProfile, model: activeModel, check: checkAI } = useAIAvailability()
 
-/** 回答方式：关掉流式就传空 streamId，后端退化为一次性返回（请求/返回结构不变）。 */
+/** 回答方式：关掉「流式输出」就不再逐段渲染，等整段回来一次显示（传输仍是 SSE）。 */
 const { streamEnabled } = useAiStreamPreference()
 
 /**
- * 流式增量与它所属的请求。
+ * 流式增量与它所属的那一轮。
  *
- * 按 id 过滤是必须的：ai:ask-delta 全局广播，SSH 面板或另一个剪贴板条目
- * 可能同时在流式输出，不过滤就会把别人的内容拼进这条回答里。
+ * 增量现在走本地 SSE（见 utils/aiAskStream.ts），不再经 Wails 事件全局广播，
+ * 所以不必再按 streamId 过滤别人的内容；但换一轮时要作废上一轮迟到的回调，
+ * 这里用 seq 对号。
  */
 const liveText = ref('')
-const streamId = ref('')
-let offDelta: (() => void) | null = null
+/** 思考增量：首字之前显示在「思考中」那一行。 */
+const liveReason = ref('')
+let askSeq = 0
 
 onMounted(() => {
   void checkAI()
-  offDelta = Events.On('ai:ask-delta', (ev: any) => {
-    const d = ev?.data ?? ev
-    if (!d || !d.id || d.id !== streamId.value) return
-    liveText.value += d.delta ?? ''
-  })
 })
-onUnmounted(() => {
-  offDelta?.()
-  offDelta = null
-})
-
-/** 每次提问一个独立 id：复用同一个 id 会让上一轮迟到的增量混进新一轮。 */
-function newStreamId(): string {
-  return `clip-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-}
 
 /** 三个预置动作。顺序按使用频率排：翻译最常用。 */
 const actions = computed(() => [
@@ -107,26 +93,31 @@ async function run(action: string, question: string) {
   if (busy.value) return
   busy.value = true
   errMsg.value = ''
-  // 新一轮开始：清掉上一轮的增量，并换一个 streamId（旧 id 迟到的增量不再匹配）。
+  // 新一轮开始：清掉上一轮的增量，并推进序号（上一轮迟到的回调因此对不上号）。
   liveText.value = ''
-  streamId.value = newStreamId()
+  liveReason.value = ''
+  const seq = ++askSeq
   try {
-    const r = unwrap<{
+    const r = await askOverStream<{
       answer: string
       segments: { type: string; text: string; commands: { text: string; risk: string; note: string }[] | null }[] | null
       model: string
       elapsedMs: number
-    }>(
-      await AskAI({
-        text: props.text,
-        action,
-        question,
-        history: history.value.slice(-6),
-        // 关掉流式就传空：后端据此不推增量，等于一次性返回。
-        streamId: streamEnabled.value ? streamId.value : '',
-      })
-    )
-    if (!r) throw new Error(t('sshAiFailed'))
+    }>('clipboard', {
+      text: props.text,
+      action,
+      question,
+      history: history.value.slice(-6),
+    }, {
+      // 关掉「流式输出」时只收不显示，等于回到一次性返回。
+      onDelta: (s) => {
+        if (seq === askSeq && streamEnabled.value) liveText.value += s
+      },
+      onReason: (s) => {
+        if (seq === askSeq && streamEnabled.value) liveReason.value += s
+      },
+    })
+    if (seq !== askSeq) return
     result.value = {
       answer: r.answer,
       commands: null,
@@ -173,7 +164,9 @@ function clearAll() {
   errMsg.value = ''
   lastAction.value = ''
   liveText.value = ''
-  streamId.value = ''
+  liveReason.value = ''
+  // 作废正在跑的那一轮：清空后迟到的增量与结果都对不上号。
+  askSeq++
   panelRef.value?.setQuestion('')
 }
 </script>
@@ -193,6 +186,7 @@ function clearAll() {
       :busy="busy"
       :err-msg="errMsg"
       :live-text="liveText"
+      :live-reason="liveReason"
       @ask="askFree"
       @clear="clearAll"
       @close="emit('close')"

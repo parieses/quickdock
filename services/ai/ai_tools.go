@@ -429,6 +429,32 @@ func applySystemHints(messages []map[string]interface{}, base, mode, cwd string,
 	messages[0]["content"] = s
 }
 
+// planHint 任务清单工具的用法提示（见 aitools 的 plan.go）。
+//
+// 写在提示词里而不是只靠工具描述：工具描述是「这个工具能干什么」，
+// 而「什么时候必须用它」是行为约束，模型对工具描述的遵循度明显低于系统提示。
+// 只在 plan_update 真的挂给模型时才追加（见 agent_run.go）。
+const planHint = "\n\n[任务清单]\n" +
+	"- 三步以上才能做完的任务，动手前先用 plan_update 列一份步骤清单（全部 todo，当前那条 doing），每完成一步立刻更新并把那条标成 done。\n" +
+	"- 清单会实时显示在用户界面上，必须与实际进度一致：没做的事不要标 done，也不要用正文里的 `- [ ]` 代替它。\n" +
+	"- 更新清单后直接继续做下一步，不要在正文里复述整份清单。两步以内的事不用清单。\n"
+
+// hasToolPayload 判断本次挂给模型的工具里有没有某个名字。
+//
+// 只看名字：调用方用它决定「要不要在 system 里提这个工具」，与参数无关。
+func hasToolPayload(tools []map[string]any, name string) bool {
+	for _, t := range tools {
+		fn, _ := t["function"].(map[string]any)
+		if fn == nil {
+			continue
+		}
+		if s, _ := fn["name"].(string); s == name {
+			return true
+		}
+	}
+	return false
+}
+
 // cwdHint 告诉模型本次对话绑定了哪个工作目录。
 //
 // 不说清楚会有三种坏结果：拿相对路径去猜、写文件时把绝对路径猜错、

@@ -1,6 +1,9 @@
 package sshx
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
@@ -13,6 +16,12 @@ import (
 	"quickdock/services"
 	"quickdock/services/ai"
 )
+
+// errAIDisabled 当前没有可用的 AI 档案时问 AI 的报错。
+//
+// 抽成变量而不是每处 errors.New：调用方（Wails 绑定与 SSE 通道）要把同一句话
+// 展示给用户，措辞只能有一份。
+var errAIDisabled = errors.New("AI 能力不可用")
 
 // SSH 场景的 AI 问答：把当前会话与终端屏显交给模型，拿回可执行命令。
 //
@@ -295,46 +304,11 @@ type SshAiAskResult struct {
 //
 // 只做「组装上下文 + 调用 + 解析命令」，不碰 SSH 连接本身：
 // 不执行任何命令、不写任何数据，只读会话元信息。
+//
+// 增量走 Wails 事件（ai:ask-delta）。前端的正经通道是本地 SSE（见 AskOverStream），
+// 这条路留着是为了插件与「前端没起 SSE 服务」的降级：两条路共用 askOnce，
+// 提示词、裁剪、解析因此不会漂移。
 func (s *SshService) Ask(req SshAiAskRequest) *services.ApiResult {
-	if s.App.AskAIFn == nil {
-		return failCode(CodeInternal, "AI 能力不可用")
-	}
-
-	question := strings.TrimSpace(req.Question)
-	if question == "" {
-		return failSsh(errInvalidInput)
-	}
-	if n := len([]rune(question)); n > aiQuestionMaxRune {
-		question = string([]rune(question)[:aiQuestionMaxRune])
-	}
-
-	// 会话必须真实存在，否则说明前端传了个过期 sessionId。
-	// 这里只校验不建立连接：AI 问答是纯辅助能力，不该在会话已断开时偷偷重连。
-	hostLabel := ""
-	hostEnv := ""
-	if req.SessionID != "" {
-		if _, ok := s.manager.Get(req.SessionID); !ok {
-			return failSsh(sshcore.ErrSessionNotFound)
-		}
-		if hostID := s.ownerOf(req.SessionID); hostID != "" {
-			if h, err := s.App.DB.GetSshHost(hostID); err == nil && h != nil {
-				hostLabel = describeHost(h)
-				// 环境单独取一份：主机描述里的"（生产环境）"只是给模型看的背景，
-				// 而 hostEnv 要驱动一条行为约束（见 sshEnvGuidance），两者用途不同。
-				hostEnv = h.Env
-			}
-		}
-	}
-
-	// 历史摘要压缩：把过长的多轮历史压成有界摘要，避免 prompt 随轮数线性膨胀
-	// （即用户感受到的「越问越卡」）。recent 保留最近 2 轮原文，其余进摘要。
-	recent, summary := compressSshHistory(s.App.AskAIFn, req.PrevSummary, req.History)
-
-	prompt := buildSshAiPrompt(hostLabel, hostEnv, req.ScreenText, question, recent, req.Selection, summary)
-
-	// 流式：把增量经 Wails 事件推给前端。批量按 ~40 rune 做一次 IPC，
-	// 避免逐 token 高频调用把窄带 Wails 事件总线打满（SSH 答案通常不长，但翻译/摘要会）。
-	// 缓冲区在 AskAIFnStream 返回后再 flush 一次，确保结尾片段不丢。
 	var deltaBuf strings.Builder
 	emitDelta := func() {
 		if deltaBuf.Len() == 0 {
@@ -355,13 +329,116 @@ func (s *SshService) Ask(req SshAiAskRequest) *services.ApiResult {
 		}
 	}
 
-	start := time.Now()
-	text, model, err := s.App.AskAIFnStream(sshAiSystemPrompt, prompt, aiTimeoutSec, onToken)
+	res, err := s.askOnce(req, onToken, nil)
 	if onToken != nil {
 		emitDelta()
 	}
 	if err != nil {
+		// 三种「调用方传错了」的错误沿用原来的错误码，前端据 errorCode 区分
+		// 「没配 AI」「会话没了」；其余（上游报错、超时）还是当普通失败。
+		if errors.Is(err, errAIDisabled) {
+			return failCode(CodeInternal, err.Error())
+		}
+		if errors.Is(err, errInvalidInput) || errors.Is(err, sshcore.ErrSessionNotFound) {
+			return failSsh(err)
+		}
 		return services.Fail(err)
+	}
+	return services.Ok(*res)
+}
+
+// AskOverStream 同 Ask，但增量交给 emit（本地 SSE 端点调用，见 ai_ask_stream.go）。
+//
+// 为什么另开一条而不是让前端继续用 Wails 事件：事件在绑定方法执行期间会被
+// 攒到方法返回后才投递，逐字流在面板上表现为「等半天、整段蹦出来」。
+//
+//wails:ignore
+func (s *SshService) AskOverStream(ctx context.Context, body []byte, emit ai.AskStreamEmit) (any, error) {
+	var req SshAiAskRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, errInvalidInput
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	// 思考流与正文一样按 ~40 字一批推：逐 token 走 IPC 会把主线程压住，
+	// 反而比整段蹦出来更卡。
+	var deltaBuf, reasonBuf strings.Builder
+	flush := func(b *strings.Builder, event string) {
+		if b.Len() == 0 {
+			return
+		}
+		emit(event, map[string]any{"text": b.String()})
+		b.Reset()
+	}
+	onToken := func(d string) {
+		deltaBuf.WriteString(d)
+		if deltaBuf.Len() >= 40 {
+			flush(&deltaBuf, "delta")
+		}
+	}
+	onReason := func(d string) {
+		reasonBuf.WriteString(d)
+		if reasonBuf.Len() >= 40 {
+			flush(&reasonBuf, "reason")
+		}
+	}
+
+	res, err := s.askOnce(req, onToken, onReason)
+	flush(&deltaBuf, "delta")
+	flush(&reasonBuf, "reason")
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// askOnce 是 Ask 与 AskOverStream 的共同主体：校验 → 组装提示词 → 调用 → 解析。
+//
+// 分成两层是为了让「增量送到哪」成为调用方的选择，而不是写死在业务里。
+// onReason 可能为 nil（没开 thinking 或调用方不关心），此时思考内容直接丢弃。
+func (s *SshService) askOnce(req SshAiAskRequest, onToken, onReason func(string)) (*SshAiAskResult, error) {
+	if s.App.AskAIFn == nil {
+		return nil, errAIDisabled
+	}
+
+	question := strings.TrimSpace(req.Question)
+	if question == "" {
+		return nil, errInvalidInput
+	}
+	if n := len([]rune(question)); n > aiQuestionMaxRune {
+		question = string([]rune(question)[:aiQuestionMaxRune])
+	}
+
+	// 会话必须真实存在，否则说明前端传了个过期 sessionId。
+	// 这里只校验不建立连接：AI 问答是纯辅助能力，不该在会话已断开时偷偷重连。
+	hostLabel := ""
+	hostEnv := ""
+	if req.SessionID != "" {
+		if _, ok := s.manager.Get(req.SessionID); !ok {
+			return nil, sshcore.ErrSessionNotFound
+		}
+		if hostID := s.ownerOf(req.SessionID); hostID != "" {
+			if h, err := s.App.DB.GetSshHost(hostID); err == nil && h != nil {
+				hostLabel = describeHost(h)
+				// 环境单独取一份：主机描述里的"（生产环境）"只是给模型看的背景，
+				// 而 hostEnv 要驱动一条行为约束（见 sshEnvGuidance），两者用途不同。
+				hostEnv = h.Env
+			}
+		}
+	}
+
+	// 历史摘要压缩：把过长的多轮历史压成有界摘要，避免 prompt 随轮数线性膨胀
+	// （即用户感受到的「越问越卡」）。recent 保留最近 2 轮原文，其余进摘要。
+	recent, summary := compressSshHistory(s.App.AskAIFn, req.PrevSummary, req.History)
+
+	prompt := buildSshAiPrompt(hostLabel, hostEnv, req.ScreenText, question, recent, req.Selection, summary)
+
+	start := time.Now()
+	text, model, err := s.askStream(prompt, onToken, onReason)
+	if err != nil {
+		return nil, err
 	}
 
 	commands := aiutil.ExtractCommands(text, sshDangerRule)
@@ -374,7 +451,7 @@ func (s *SshService) Ask(req SshAiAskRequest) *services.ApiResult {
 		}
 	}
 
-	return services.Ok(SshAiAskResult{
+	return &SshAiAskResult{
 		Answer:      text,
 		Commands:    commands,
 		Segments:    segments,
@@ -383,7 +460,18 @@ func (s *SshService) Ask(req SshAiAskRequest) *services.ApiResult {
 		ElapsedMs:   time.Since(start).Milliseconds(),
 		Summary:     summary,
 		HistoryKept: len(recent),
-	})
+	}, nil
+}
+
+// askStream 优先走「带思考增量」的通道，未装配时退回只有正文的那条。
+//
+// 退回分支不是形式主义：AppService 的这两个 Fn 由 main.go 装配，测试与
+// 裁剪构建里可能只注入了旧的 AskAIFnStream。
+func (s *SshService) askStream(prompt string, onToken, onReason func(string)) (string, string, error) {
+	if s.App.AskAIFnStreamReason != nil {
+		return s.App.AskAIFnStreamReason(sshAiSystemPrompt, prompt, aiTimeoutSec, onToken, onReason)
+	}
+	return s.App.AskAIFnStream(sshAiSystemPrompt, prompt, aiTimeoutSec, onToken)
 }
 
 // describeHost 生成主机描述，标注环境以提醒模型（也提醒用户）。

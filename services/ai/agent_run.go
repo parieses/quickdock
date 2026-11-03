@@ -500,6 +500,11 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 而不是一次追加：收尾轮撤下 tools 之后，system 里那段「你可以调用 file_read」
 	// 也必须一起撤掉，否则模型会把这次调用输出成纯文本标记（见 ai_dsml.go）。
 	baseSystem := firstSystem(messages)
+	// 清单工具挂上了才说这一句：工具没挂却说「用 plan_update」，模型会对着
+	// 一个不存在的名字反复重试（与 extToolsOverflowHint 是同一类问题）。
+	if hasToolPayload(tools, "plan_update") {
+		baseSystem += planHint
+	}
 	// 项目规则（AGENTS.md / .quickdock/rules*）：读一次，贯穿本次 run。
 	// 压缩后重建复用的是同一份，不重新读盘——那次重建此刻正被超窗逼着做，
 	// 多加一次 IO 没有收益，还可能读到用户正在编辑的半截文件。
@@ -676,8 +681,24 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		// 让他自己想办法——「上下文超了」对普通用户是句废话。
 		var turn chatTurn
 		for attempt := 0; ; attempt++ {
-			turn, err = a.streamAIChat(ctx, cfg, messages, res.ConvID, tools, onToken, reasonCb)
+			// 每次模型调用一条可取消的子 ctx：用户的「立即发送」要能在这一轮
+			// 吐字的中途把它掐掉（见 ai_inject.go 的 interrupt）。
+			// 它必须是 ctx 的子——前端断开、点停止、应用退出仍然要能取消它。
+			turnCtx, turnCancel := context.WithCancel(ctx)
+			if injects != nil {
+				injects.attachTurn(turnCancel)
+			}
+			turn, err = a.streamAIChat(turnCtx, cfg, messages, res.ConvID, tools, onToken, reasonCb)
+			if injects != nil {
+				injects.detachTurn()
+			}
+			turnCancel()
 			if err == nil {
+				// 正常返回也要清一次：打断可能正好赶上上游发完 [DONE]，
+				// 标记留下的话，下一次真正的失败会被误判成「立即发送打断」。
+				if injects != nil {
+					injects.consumeInterrupt()
+				}
 				break
 			}
 			// 三个前置条件缺一不可：
@@ -738,6 +759,24 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 		a.recordAIChatTurnScoped(res.ConvID, sc.RunID(), sc.CurrentNodeID(), cfg, turn.Usage, turnIdx == 1)
 
 		if err != nil {
+			// 用户在这段回答往外吐字的中途点了「立即发送」：这次取消是我们自己
+			// 发起的，不是这一轮真的结束了，也不是用户点「停止」。已生成的那半段
+			// 不丢——接着回到循环开头，那里的插入接入点看到 assistantBuf 有内容
+			// 就会 saveSegment，再把排队的话接进上下文。
+			//
+			// 轮次预算也要补：这一轮可能是收尾轮，不补的话 continue 出去直接撞上
+			// for 的上界，刚插进来的那句话就永远接不走了。
+			if injects != nil && injects.consumeInterrupt() {
+				if turnIdx >= limit {
+					limit += aiToolMaxRounds
+					if limit > aiToolMaxTotalRounds {
+						limit = aiToolMaxTotalRounds
+					}
+				}
+				logger.I("[ai] 立即发送：已打断当前生成 conv=%s 已完成=%d字 turn=%d limit=%d",
+					res.ConvID, assistantBuf.Len(), turnIdx, limit)
+				continue
+			}
 			lastErr = err
 			break
 		}
@@ -786,6 +825,12 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			sink.Event("tool_output", map[string]any{
 				"id": callID, "add": add, "tail": tail,
 			})
+		})
+		// 任务清单（plan_update 工具）：清单更新不走 tool 卡片，单独一路事件。
+		// 挂在 ctx 上而不是给 runToolCalls 加参数，理由与上面那条相同；
+		// 前端因此能在步骤之间实时打勾，而不是等整轮结束看一段静态文字。
+		toolCtx = aitools.WithPlanHook(toolCtx, func(u aitools.PlanUpdate) {
+			sink.Event("plan", map[string]any{"items": u.Items, "note": u.Note})
 		})
 		toolMsgs, recs := a.runToolCalls(toolCtx, turn.ToolCalls, turnIdx, turn.Content, seenCalls, cwd)
 		records = append(records, recs...)

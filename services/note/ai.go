@@ -1,6 +1,9 @@
 package note
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"time"
 
@@ -93,28 +96,10 @@ type NoteAiAskResult struct {
 //
 // 只做「组装上下文 + 调用 + 解析围栏」，不写任何数据：
 // 不改笔记、不落库、不动窗口。浮窗与主窗口的耦合到此为止。
+//
+// 增量走 Wails 事件；前端的正经通道是本地 SSE（见 AskAIOverStream），
+// 两条路共用 askOnce。
 func (s *NoteService) AskAI(req NoteAiAskRequest) *services.ApiResult {
-	if s.App.AskAIFn == nil {
-		return services.FailMsg("AI 能力不可用")
-	}
-
-	text := strings.TrimSpace(req.Text)
-	if text == "" {
-		return services.FailMsg("内容为空")
-	}
-
-	action := strings.TrimSpace(req.Action)
-	question := strings.TrimSpace(req.Question)
-	if action == "" && question == "" {
-		return services.FailMsg("请指定操作或问题")
-	}
-	if n := len([]rune(question)); n > noteAiQuestionMaxRune {
-		question = string([]rune(question)[:noteAiQuestionMaxRune])
-	}
-
-	prompt := buildNoteAiPrompt(text, action, question, req.History)
-
-	// 流式：与 SSH / 剪贴板同一条通道（ai:ask-delta，按 id 区分），
 	// 合批 ~40 字节，避免逐 token 推事件打满 Wails 事件总线。
 	var deltaBuf strings.Builder
 	emitDelta := func() {
@@ -139,23 +124,102 @@ func (s *NoteService) AskAI(req NoteAiAskRequest) *services.ApiResult {
 		}
 	}
 
-	start := time.Now()
-	out, model, err := s.App.AskAIFnStream(noteAiSystemPrompt, prompt, noteAiTimeoutSec, onToken)
+	res, err := s.askOnce(req, onToken, nil)
 	if onToken != nil {
 		emitDelta()
 	}
 	if err != nil {
 		return services.Fail(err)
 	}
+	return services.Ok(*res)
+}
 
-	return services.Ok(NoteAiAskResult{
+// AskAIOverStream 同 AskAI，但增量交给 emit（本地 SSE 端点调用）。
+//
+//wails:ignore
+func (s *NoteService) AskAIOverStream(ctx context.Context, body []byte, emit aisvc.AskStreamEmit) (any, error) {
+	var req NoteAiAskRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		return nil, err
+	}
+	if ctx != nil && ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
+	var deltaBuf, reasonBuf strings.Builder
+	flush := func(b *strings.Builder, event string) {
+		if b.Len() == 0 {
+			return
+		}
+		emit(event, map[string]any{"text": b.String()})
+		b.Reset()
+	}
+	onToken := func(d string) {
+		deltaBuf.WriteString(d)
+		if deltaBuf.Len() >= 40 {
+			flush(&deltaBuf, "delta")
+		}
+	}
+	onReason := func(d string) {
+		reasonBuf.WriteString(d)
+		if reasonBuf.Len() >= 40 {
+			flush(&reasonBuf, "reason")
+		}
+	}
+
+	res, err := s.askOnce(req, onToken, onReason)
+	flush(&deltaBuf, "delta")
+	flush(&reasonBuf, "reason")
+	if err != nil {
+		return nil, err
+	}
+	return res, nil
+}
+
+// askOnce 是 AskAI 与 AskAIOverStream 的共同主体。
+func (s *NoteService) askOnce(req NoteAiAskRequest, onToken, onReason func(string)) (*NoteAiAskResult, error) {
+	if s.App.AskAIFn == nil {
+		return nil, errors.New("AI 能力不可用")
+	}
+
+	text := strings.TrimSpace(req.Text)
+	if text == "" {
+		return nil, errors.New("内容为空")
+	}
+
+	action := strings.TrimSpace(req.Action)
+	question := strings.TrimSpace(req.Question)
+	if action == "" && question == "" {
+		return nil, errors.New("请指定操作或问题")
+	}
+	if n := len([]rune(question)); n > noteAiQuestionMaxRune {
+		question = string([]rune(question)[:noteAiQuestionMaxRune])
+	}
+
+	prompt := buildNoteAiPrompt(text, action, question, req.History)
+
+	start := time.Now()
+	out, model, err := s.askStream(prompt, onToken, onReason)
+	if err != nil {
+		return nil, err
+	}
+
+	return &NoteAiAskResult{
 		Answer: out,
 		// 规则表传 nil：笔记里的围栏块是写作内容（代码示例、提纲），
 		// 不是要在本机执行的命令，没有风险可标。
 		Segments:  aiutil.ExtractSegments(out, nil),
 		Model:     model,
 		ElapsedMs: time.Since(start).Milliseconds(),
-	})
+	}, nil
+}
+
+// askStream 优先走带思考增量的通道，未装配时退回只有正文的那条。
+func (s *NoteService) askStream(prompt string, onToken, onReason func(string)) (string, string, error) {
+	if s.App.AskAIFnStreamReason != nil {
+		return s.App.AskAIFnStreamReason(noteAiSystemPrompt, prompt, noteAiTimeoutSec, onToken, onReason)
+	}
+	return s.App.AskAIFnStream(noteAiSystemPrompt, prompt, noteAiTimeoutSec, onToken)
 }
 
 // buildNoteAiPrompt 组装用户提示词。

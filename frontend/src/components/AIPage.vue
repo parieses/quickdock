@@ -5,7 +5,7 @@ import { Events } from '@wailsio/runtime'
 import { KEEP_ALIVE } from '../pages/keepAlive'
 import {
   Copy, Image as ImageIcon, X, Download, MessageSquare,
-  Languages, FileText, GraduationCap, Lightbulb, ListChecks,
+  Languages, FileText, GraduationCap, Lightbulb, Check,
 } from '@lucide/vue'
 import { Marked } from 'marked'
 import { unwrap } from '../utils/api'
@@ -152,6 +152,27 @@ const runs = ref<AIRun[]>([])
 let runSeq = 0
 /** 从落地页发起、还没拿到会话 id 的那条：落地页上「当前这条」就是它 */
 const draftRunId = ref('')
+
+// —— 任务清单卡片（plan_update 工具，见 services/ai/tools/plan.go） ——
+//
+// 大任务由 AI 自己拆成步骤、边做边勾（这就是「计划」模式去掉之后的行为）。
+// 清单挂在**会话 id**上而不是 run 上：回答结束、run 被回收之后清单还没看完的
+// 情况不少，跟着 run 一起消失太急；切走的会话切回来也还在。
+interface PlanCardState {
+  items: { text: string; status: string }[]
+  note: string
+}
+const planCards = reactive(new Map<string, PlanCardState>())
+
+/** 当前这一页的清单（新建任务在 conv 事件之前用 rid 当键）。 */
+const planHere = computed<PlanCardState | null>(() => {
+  const key = activeId.value || draftRunId.value
+  return key ? planCards.get(key) ?? null : null
+})
+
+function planDoneCount(p: PlanCardState): number {
+  return p.items.filter((x) => x.status === 'done').length
+}
 
 function runOf(convId: string): AIRun | undefined {
   if (!convId) return undefined
@@ -543,11 +564,13 @@ const hasKey = computed(() => {
 })
 // 任务的五种类型。icon/desc 跟着类型走，落地页那一排 pill 与侧栏的任务图标都读这一份——
 // 两处各写一遍的话，加一个类型就要在两个地方各补一次，漏一处就是「类型选不了」。
+//
+// 「计划」不再是一个可选类型：它变成了 AI 自己的行为——任务太大、一次说不完时，
+// 它自己把步骤拆出来、按顺序做、做完一项勾一项（规则写在 chat 模式的提示词里），
+// 而不是让用户先切进一个「只读、只交清单」的模式。留着那个入口的副作用是：
+// 用户以为自己在规划，实际只是拿到一份清单，还得再点一次「开始执行」。
 const modes = [
   { key: 'chat', label: 'aiModeChat', desc: 'aiModeChatDesc', icon: MessageSquare },
-  // 计划模式排第二：它和对话是「先想后做 / 边想边做」的一对，
-  // 放在翻译、总结后面会让人以为它是个特殊用途
-  { key: 'plan', label: 'aiModePlan', desc: 'aiModePlanDesc', icon: ListChecks },
   { key: 'explain', label: 'aiModeExplain', desc: 'aiModeExplainDesc', icon: Lightbulb },
   { key: 'translate', label: 'aiModeTranslate', desc: 'aiModeTranslateDesc', icon: Languages },
   { key: 'summarize', label: 'aiModeSummarize', desc: 'aiModeSummarizeDesc', icon: FileText },
@@ -2086,8 +2109,16 @@ interface PendingInject {
   /** 发起它的那一轮：收尾时按它把没赶上的话退回输入框 */
   rid: string
   text: string
+  /** 已经点过「立即发送」：按钮转成等待态，避免连点打断好几次 */
+  rushed?: boolean
 }
 const pendingInjects = ref<PendingInject[]>([])
+/** 已经落成正式气泡的回执 id。
+ *
+ *  后端已按 id 去重（services/ai/ai_inject.go 的 push），这里是第二道闸：
+ *  同一句万一被回执两次，界面上不该出现两条一模一样的话。
+ *  只留最近一小段，别让它无限涨。 */
+const ackedInjectIds = new Set<string>()
 /** 当前这一轮还没被接走的那些（只画属于眼前这条任务的） */
 const pendingInjectsHere = computed(() => {
   const r = activeRun.value
@@ -2166,8 +2197,46 @@ async function injectMessage(run: AIRun) {
   }
 }
 
-// 把「流式跑到一半的这一段」定格成一条正式消息。
-//
+/** 在「等待插入」那条上点「立即发送」：打断正在生成的回答，让它马上接这句话。
+ *
+ * 不打断的默认行为是「等模型把手上这段写完再接入」。长回答要吐十几秒，
+ * 这期间横条一直挂着不动，用户会以为消息没送出去——所以给一个能催它的按钮。
+ *
+ * 打断是后端做的（immediate 字段）。这边只负责：按钮转等待态、失败时把字退回输入框。
+ * 成功不需要做什么——后端接走时会发 inject_ack，那条横条自己就消失了。
+ */
+async function rushInject(p: PendingInject) {
+  if (p.rushed) return
+  // 会话 id 从发起它的那一轮取：排队项只记 rid，用户此刻可能已经切到别的任务了。
+  const run = runs.value.find((r) => r.rid === p.rid)
+  const convId = run?.convId
+  if (!convId) return
+  p.rushed = true
+  try {
+    await ensureStreamInfo()
+    const resp = await fetch(`http://127.0.0.1:${aiStreamPort.value}/ai/inject`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Stream-Token': aiStreamToken.value },
+      body: JSON.stringify({ convId, id: p.id, message: p.text, immediate: true }),
+    })
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
+    // 没打断成功 = 这一刻正在跑工具（模型没在生成），这句话还在队里，
+    // 那一步做完就会接走。按钮退回可点状态并说清原因，别一直挂着「正在打断…」。
+    const body = await resp.json().catch(() => null)
+    if (body && body.interrupted === false) {
+      p.rushed = false
+      toast.success(t('aiInjectRushBusy'))
+    }
+  } catch {
+    // 409 = 这一轮刚好结束了：这句话没进上下文，退回输入框（与 injectMessage 同一口径）。
+    p.rushed = false
+    dropPendingInject(p.id)
+    restoreInjectText(p.text)
+    toast.error(t('aiInjectMissed'))
+  }
+}
+
+// 把「流式跑到一半的这一段」定格成一条正式消息。//
 // 插入会在这里把一轮切成两段：用户这句话之后模型说的是对它的回答，和前面那段
 // 不是同一条回复。不切的话，用户会看到自己的话排在「已经写了一半的回答」上面，
 // 而实际上他看到的是自己插话前后各有一截回答。
@@ -2223,6 +2292,9 @@ async function send() {
   }
   // 面板开着时按回车也能发（焦点还在 textarea 上），发出去就该收起来。
   plusOpen.value = false
+  // 新一轮开始：上一轮的清单属于上一次提问，留着会让人以为这次也要做那些事。
+  const planKey = convId || draftRunId.value
+  if (planKey) planCards.delete(planKey)
   // 技能是「这一条消息」的指令，不在正文里：直接把胶囊里的名字传给后端。
   // 先取快照再清空——下面 input 一清，胶囊也跟着清，那时再读就没了。
   // 重试要沿用上一次的技能：失败重发时胶囊已经空了，拼个空数组等于
@@ -2382,6 +2454,19 @@ async function send() {
         try { data = JSON.parse(dataStr) } catch { continue }
 
         switch (event) {
+          case 'plan': {
+            // AI 更新了任务清单（plan_update 工具）：整份覆盖，不按序号增量合并。
+            // 它可能重排过顺序、加过条目，按序号改就会把完成状态标到别的行上，
+            // 而错位的勾选没人看得出来。
+            const raw = Array.isArray(data.items) ? data.items : []
+            const items = raw
+              .map((it: any) => ({ text: String(it?.text || ''), status: String(it?.status || 'todo') }))
+              .filter((it: { text: string }) => it.text)
+            if (!items.length) break
+            const key = run.convId || run.rid
+            planCards.set(key, { items, note: String(data.note || '') })
+            break
+          }
           case 'token':
             // 写入这条流自己的普通缓冲，按帧批量提交到响应式状态
             if (data.text) { run.buf += data.text; scheduleStreamFlush(run) }
@@ -2390,6 +2475,9 @@ async function send() {
             if (data.text) { run.reasonBuf += data.text; scheduleStreamFlush(run) }
             break
           case 'tool':
+            // 清单更新不画工具卡片：它已经有自己那张清单卡片了，
+            // 再挂一条「调用 plan_update」只会让人以为 AI 在刷工具。
+            if (String(data.name || '') === 'plan_update') break
             // 工具开始执行：先把卡片挂上去（「调用中」），不等结果。
             // 一个工具可能跑几秒（扫端口、读大文件），这几秒界面必须看起来是活的，
             // 否则用户会以为卡死并去点停止——那反而中断了本来正常的调用。
@@ -2541,6 +2629,15 @@ async function send() {
             const itext = String(data.text || '')
             dropPendingInject(iid)
             if (!itext) break
+            // 同一句只认第一次回执（见 ackedInjectIds）。
+            if (iid) {
+              if (ackedInjectIds.has(iid)) break
+              ackedInjectIds.add(iid)
+              if (ackedInjectIds.size > 64) {
+                const oldest = ackedInjectIds.values().next().value
+                if (oldest) ackedInjectIds.delete(oldest)
+              }
+            }
             // 用户可能已经把会话切走了：这一轮的内容后端已经落库，回来时 loadMessages
             // 会拿到；这里只把排队项清掉，绝不能往眼前这条会话的消息列表里塞。
             const here = !run.convId || run.convId === activeId.value || draftRunId.value === run.rid
@@ -3372,6 +3469,26 @@ onUnmounted(() => {
           @open-rules="emit('open-settings', 'ai')"
         />
 
+        <!-- 任务清单：AI 自己把大任务拆成步骤，完成一步勾一步（plan_update 工具）。
+             放在输入框正上方与后台任务条同一带：它是「当前这件事的进度」，
+             不属于任何一条消息，混进消息流会在下一轮里变成一条看不懂的旧记录。 -->
+        <div v-if="planHere" class="ai-plan-card">
+          <div class="ai-plan-head">
+            <span class="ai-plan-title">{{ t('aiPlanTitle') }}</span>
+            <span class="ai-plan-count">{{ t('aiPlanCount', { done: planDoneCount(planHere), total: planHere.items.length }) }}</span>
+          </div>
+          <ul class="ai-plan-list">
+            <li v-for="(it, i) in planHere.items" :key="i" class="ai-plan-item" :class="`is-${it.status}`">
+              <span class="ai-plan-box">
+                <Check v-if="it.status === 'done'" :size="10" />
+                <span v-else-if="it.status === 'doing'" class="ai-plan-doing" />
+              </span>
+              <span class="ai-plan-text">{{ it.text }}</span>
+            </li>
+          </ul>
+          <div v-if="planHere.note" class="ai-plan-note">{{ planHere.note }}</div>
+        </div>
+
         <!-- 后台任务横条：贴在输入框正上方。
              为什么放这里：后台任务最常见的用法就是「让它在后台跑着，我继续问别的」，
              而它一旦跑起来，除了工具栏那个小终端图标就没别的地方能看见——用户会以为
@@ -3393,6 +3510,13 @@ onUnmounted(() => {
             <span class="ai-inject-dot" />
             <span class="ai-inject-text" :title="p.text">{{ p.text }}</span>
             <span class="ai-inject-hint">{{ t('aiInjectWaiting') }}</span>
+            <!-- 不等模型写完手上的这段：一句话打断，让它马上接这句话。 -->
+            <button
+              class="ai-inject-rush"
+              :disabled="p.rushed"
+              :title="t('aiInjectSendNowTip')"
+              @click="rushInject(p)"
+            >{{ p.rushed ? t('aiInjectRushing') : t('aiInjectSendNow') }}</button>
           </div>
         </div>
 
@@ -3567,6 +3691,92 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 
+/* 任务清单卡片：与输入框同宽（--ai-column-w + margin auto），否则会比输入框宽一截。
+   浅底、无边框——它是一条进度，不是一张内容卡片；抢了回答的视觉重心反而碍事。 */
+.ai-plan-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: var(--ai-column-w);
+  margin: 0 auto 6px;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  font-size: 12px;
+}
+
+.ai-plan-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-text-secondary);
+}
+
+.ai-plan-title { font-weight: 600; }
+
+/* 计数靠右：扫一眼就知道还剩几步，不用逐行数 */
+.ai-plan-count {
+  margin-left: auto;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ai-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-plan-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-width: 0;
+  color: var(--color-text-secondary);
+}
+
+/* 勾选框：14px 见方，未完成是描边、进行中是呼吸点、完成是实心绿。
+   三态都能在余光里区分——用户扫过去只想知道「做到哪了」。 */
+.ai-plan-box {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 3px;
+  color: var(--color-accent-text);
+}
+
+.ai-plan-item.is-done .ai-plan-box {
+  border-color: var(--color-success);
+  background: var(--color-success);
+}
+
+.ai-plan-item.is-done .ai-plan-text {
+  color: var(--color-text-muted);
+  text-decoration: line-through;
+}
+
+.ai-plan-item.is-doing .ai-plan-box { border-color: var(--color-accent); }
+
+.ai-plan-doing {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-accent);
+  animation: ai-inject-pulse 1.2s ease-in-out infinite;
+}
+
+.ai-plan-text { min-width: 0; overflow-wrap: anywhere; }
+
+.ai-plan-note { color: var(--color-text-muted); font-size: 11.5px; }
+
 /* 等待插入的消息：贴在输入框正上方，宽度与输入框同口径（--ai-column-w + margin auto），
    否则它会从窗口左边一直拉到右边，比输入框宽一截，看起来像另一块区域。
    只靠一条浅底与左侧圆点分层，不加边框——它是一条临时状态，不是一张卡片。 */
@@ -3614,7 +3824,24 @@ onUnmounted(() => {
   color: var(--color-text-primary);
 }
 
-.ai-inject-hint { flex: 0 0 auto; margin-left: auto; color: var(--color-text-secondary); font-size: 11px; }
+.ai-inject-hint { flex: 0 0 auto; color: var(--color-text-secondary); font-size: 11px; }
+
+/* 「立即发送」：一条轻量文字按钮，不抢「等待插入」那句状态提示的注意力。
+   它是可选动作（默认会自己接走），所以不做成 primary 按钮。 */
+.ai-inject-rush {
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 1px 7px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--color-accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.ai-inject-rush:hover:not(:disabled) { background: var(--color-bg-tertiary); }
+.ai-inject-rush:disabled { color: var(--color-text-muted); cursor: default; }
 
 .ai-dock-approve {
   position: absolute;

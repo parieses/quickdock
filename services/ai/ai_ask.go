@@ -197,6 +197,17 @@ func (a *AIService) AIAsk(req AIAskRequest) *services.ApiResult {
 //
 //wails:ignore
 func (a *AIService) AIAskStream(req AIAskRequest, onToken func(text string)) *services.ApiResult {
+	return a.AIAskStreamReason(req, onToken, nil)
+}
+
+// AIAskStreamReason 在 AIAskStream 基础上把「思考增量」也交出来。
+//
+// 为什么需要它：开了 thinking 的模型在吐出第一个正文 token 前会先想十几秒。
+// 只推正文的话，面板在这段时间里一个字都不显示，用户看到的就是「一直转圈」——
+// 这跟真的卡住没有区别。把思考流推出去，等待就变成可见的进展。
+//
+//wails:ignore
+func (a *AIService) AIAskStreamReason(req AIAskRequest, onToken, onReason func(text string)) *services.ApiResult {
 	question := strings.TrimSpace(req.Question)
 	if question == "" {
 		return services.FailMsg("问题不能为空")
@@ -252,7 +263,7 @@ func (a *AIService) AIAskStream(req AIAskRequest, onToken func(text string)) *se
 	// 一次性问答不带工具：它的调用方（SSH 面板 / 剪贴板 AI / 笔记 AI / 插件
 	// host.ai.ask）都在等一句短回答，没有展示工具调用卡片的位置，
 	// 也没有让它连调几轮的预算。工具只对 AI 页的对话流开放。
-	turn, err := a.streamAIChat(ctx, askCfg, messages, "ai-ask", nil, onToken, nil)
+	turn, err := a.streamAIChat(ctx, askCfg, messages, "ai-ask", nil, onToken, onReason)
 	if err != nil {
 		return services.Fail(err)
 	}

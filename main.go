@@ -427,6 +427,31 @@ func main() {
 	// 与 Wails 事件，只能靠同步回调（api.aiStream）拿增量，故单独回注一份。
 	pluginMgr.SetAIStreamFn(appService.AskAIFnStream)
 
+	// 带思考增量的版本：只给面板用（SSH / 剪贴板 / 笔记走本地 SSE 时）。
+	// 插件拿不到前端通道，思考流对它没有意义。
+	appService.AskAIFnStreamReason = func(system, question string, timeoutSec int, onToken, onReason func(string)) (string, string, error) {
+		r := aiSvc.AIAskStreamReason(aisvc.AIAskRequest{
+			System:     system,
+			Question:   question,
+			TimeoutSec: timeoutSec,
+		}, onToken, onReason)
+		if r == nil {
+			return "", "", errors.New("AI 服务无响应")
+		}
+		if r.Code != 0 {
+			msg := r.Msg
+			if msg == "" {
+				msg = "AI 调用失败"
+			}
+			return "", "", errors.New(msg)
+		}
+		res, ok := r.Data.(aisvc.AIAskResult)
+		if !ok {
+			return "", "", errors.New("AI 返回结构异常")
+		}
+		return res.Text, res.Model, nil
+	}
+
 	// 把「AI 是否可用」能力回注宿主，供插件在调用 host.ai.ask 前预检
 	// （宿主自身面板用 Wails 绑定 AIAvailable 判断，插件走 JSON-RPC 拿不到那条路）。
 	// 解包 ApiResult.Data 里的 available/reason/profile/model，未配置时返回
@@ -493,6 +518,12 @@ func main() {
 	sshSvc := sshxsvc.NewSshService(appService)
 	// 供全局热键走同一条打开路径（见 windows.go 的 showSshWindow）
 	setSshService(sshSvc)
+	// SSH 面板的「问 AI」走本地 SSE（见 services/ai/ai_ask_stream.go）。
+	// 注册只能发生在这里：prompt 组装在 sshx、流式端点在 ai，两边互相 import 会成环。
+	aiSvc.RegisterAskStream("ssh", sshSvc.AskOverStream)
+	// 剪贴板 / 笔记的「问 AI」同理，同一条 SSE（kind 区分场景）。
+	aiSvc.RegisterAskStream("clipboard", clipSvc.AskAIOverStream)
+	aiSvc.RegisterAskStream("note", noteSvc.AskAIOverStream)
 
 	// MCP 服务门面：协议/传输在 internal/mcp，本门面注册业务工具并提供前端启停接口。
 	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合/监控门面（工具复用其能力），故在其后创建。
