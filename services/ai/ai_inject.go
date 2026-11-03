@@ -174,10 +174,15 @@ func (a *AIService) registerInjectQueue(convID string) *injectQueue {
 	return q
 }
 
-func (a *AIService) unregisterInjectQueue(convID string) {
+// unregisterInjectQueue 注销时比对指针，理由同 unregisterGate：
+// 旧 run 的 defer 迟到时不能把新 run 的队列删掉，否则新会话里插话一律 409。
+func (a *AIService) unregisterInjectQueue(convID string, q *injectQueue) {
+	convID = strings.TrimSpace(convID)
 	a.injectsMu.Lock()
 	defer a.injectsMu.Unlock()
-	delete(a.injects, strings.TrimSpace(convID))
+	if cur, ok := a.injects[convID]; ok && (q == nil || cur == q) {
+		delete(a.injects, convID)
+	}
 }
 
 func (a *AIService) injectQueueFor(convID string) *injectQueue {

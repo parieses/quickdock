@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"quickdock/internal/fsguard"
 	"quickdock/services"
 )
 
@@ -23,6 +24,12 @@ func NewItemService(app *services.AppService) *ItemService {
 func (s *ItemService) dbOK() *services.ApiResult {
 	return services.CheckDB(s.App.DB)
 }
+
+// itemsChanged 条目变更后让文件白名单缓存立刻失效。
+//
+// 不这么做的话「刚把一个目录加为快捷项、紧接着让 AI 读它」会撞上 fsguard 的 3 秒
+// 缓存窗口，报「不在可读范围内」——用户刚做完授权动作，这时候最没耐心重试。
+func itemsChanged() { fsguard.InvalidateRoots() }
 
 // GetPathQuickInfo 返回路径的文件系统元数据（命令面板 QuickLook 预览用）：
 // 存在性 / 目录标志 / 大小 / 修改时间。路径不存在或入参为空时 exists=false，不报错。
@@ -76,6 +83,7 @@ func (s *ItemService) CreateItem(workspaceID, collectionID, name, itemType, valu
 		return r
 	}
 	data, err := s.App.DB.CreateItem(workspaceID, collectionID, name, itemType, value)
+	itemsChanged()
 	return services.Wrap(data, err)
 }
 
@@ -87,6 +95,7 @@ func (s *ItemService) UpdateItem(id string, updates map[string]interface{}) *ser
 	if err := s.App.DB.UpdateItem(id, updates); err != nil {
 		return services.Fail(err)
 	}
+	itemsChanged()
 	return services.Ok(nil)
 }
 
@@ -98,6 +107,7 @@ func (s *ItemService) DeleteItem(id string) *services.ApiResult {
 	if err := s.App.DB.DeleteItem(id); err != nil {
 		return services.Fail(err)
 	}
+	itemsChanged()
 	return services.Ok(nil)
 }
 

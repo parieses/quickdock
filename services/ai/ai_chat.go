@@ -16,6 +16,22 @@ import (
 	"quickdock/internal/logger"
 )
 
+// 上游空闲看门狗的两个窗口。
+//
+// http.Client 上只配了 ResponseHeaderTimeout（等响应头），一旦上游把 200 和
+// 响应头发过来、之后再也不吐字，scanner.Scan() 会**一直**阻塞：对话停在转圈，
+// 没有超时、没有报错，用户只能自己点停止——而停止还会被当成「用户主动中断」。
+// 网络中间层（代理、网关）掐掉长连接时经常是这个形态。
+const (
+	// aiStreamIdleFirst 首个数据块的最长等待。开了 thinking 的模型在出字之前要
+	// 先想一阵，这个窗口必须比 ResponseHeaderTimeout(60s) 宽，否则会把正常的
+	// 长思考误判成挂死。
+	aiStreamIdleFirst = 180 * time.Second
+	// aiStreamIdleGap 两个数据块之间的最长静默。正常流式每几百毫秒一块，
+	// 90 秒没有任何一行（连 keep-alive 注释都没有）就基本可以断定连接死了。
+	aiStreamIdleGap = 90 * time.Second
+)
+
 // chatTurn 一次模型调用的结果。
 //
 // 用结构体而不是继续加返回值：加上工具调用后已经有四个返回值，而
@@ -77,7 +93,17 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		return chatTurn{}, err
 	}
 	ep, authKey, authVal := apiEndpoint(cfg)
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ep, bytes.NewReader(raw))
+	// 空闲看门狗：派生一个 ctx，超时后取消它，transport 会因此关掉连接，
+	// 阻塞在 scanner.Scan() 上的读立刻返回。父 ctx 取消（用户停止）照样生效。
+	streamCtx, cancelStream := context.WithCancel(ctx)
+	defer cancelStream()
+	idle := time.AfterFunc(aiStreamIdleFirst, cancelStream)
+	defer idle.Stop()
+	// idleFired 区分「看门狗掐的」和「用户/上层掐的」：后者要让调用方按中断
+	// 处理（保留半截正文、标 stopped），前者是一次可归因的失败。
+	idleFired := func() bool { return streamCtx.Err() != nil && ctx.Err() == nil }
+
+	req, err := http.NewRequestWithContext(streamCtx, http.MethodPost, ep, bytes.NewReader(raw))
 	if err != nil {
 		return chatTurn{}, err
 	}
@@ -93,6 +119,12 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	logger.I("[ai] 请求 model=%s provider=%s conv=%s messages=%d", cfg.Model, cfg.Provider, convID, len(messages))
 	resp, err := client.Do(req)
 	if err != nil {
+		// 看门狗在等响应头的阶段就掐了：报原始错误只会是 "context canceled"，
+		// 用户看不出是上游连响应头都不给。
+		if idleFired() {
+			logger.E("[ai] 上游 %v 未返回响应头，判定空闲超时 model=%s conv=%s", aiStreamIdleFirst, cfg.Model, convID)
+			return chatTurn{}, fmt.Errorf("上游超过 %v 没有返回响应（模型 %s），连接可能已断", aiStreamIdleFirst, cfg.Model)
+		}
 		logger.E("[ai] 请求失败 model=%s conv=%s 耗时=%v: %v",
 			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), err)
 		return chatTurn{}, err
@@ -118,6 +150,8 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	// 增量而整段回包）时，1MB 会让整条流以 "token too long" 直接中断且难归因。
 	scanner.Buffer(make([]byte, 0, 64*1024), 16*1024*1024)
 	for scanner.Scan() {
+		// 收到任何一行（含 keep-alive 注释）都算「连接还活着」，重置静默窗口。
+		idle.Reset(aiStreamIdleGap)
 		select {
 		case <-ctx.Done():
 			// 取消时也要把过滤器里的可见残片放出来，否则用户点了停止会连带丢掉最后半句。
@@ -213,6 +247,15 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 			// 解析不出来（排版残缺）：这段本来就不该给用户看，丢掉但留痕。
 			logger.W("[ai] 丢弃无法解析的 DSML 文本 %d 字 conv=%s", len([]rune(hidden)), convID)
 		}
+	}
+	// 先看是不是被看门狗掐的：那时 scanner.Err() 也是一个"context canceled"，
+	// 直接归到下面那条分支会写成「流读取中断」，看不出真正原因是上游不吐字。
+	if idleFired() {
+		logger.W("[ai] 上游超过 %v 无任何数据，判定空闲超时 model=%s conv=%s 耗时=%v 已输出=%d字",
+			aiStreamIdleGap, cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond), len([]rune(sb.String())))
+		// 半截正文照常返回：调用方会落库，与「用户停止」同一口径处理。
+		return chatTurn{Content: sb.String(), Usage: usage, ToolCalls: calls},
+			fmt.Errorf("上游超过 %v 没有返回任何数据，连接可能已被中间层断开（模型 %s）", aiStreamIdleGap, cfg.Model)
 	}
 	if err := scanner.Err(); err != nil {
 		logger.E("[ai] 流读取中断 model=%s conv=%s 耗时=%v 已输出=%d字: %v",

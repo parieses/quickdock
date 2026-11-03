@@ -240,7 +240,7 @@ func appendDailyMemory(convID, cwd, title, userMsg string, files []string, round
 	key := shortConvID(convID)
 
 	// 读-改-写必须串行：两个任务同时结束时会各自读到旧文件、各自覆盖，
-	// 丢的是对方那条重点与活动记录（与 MEMORY.md 的 memoryAutoMu 同理）。
+	// 丢的是对方那条重点与活动记录（与 MEMORY.md 的 memoryAutoFileMu 同理）。
 	dailyMemoryMu.Lock()
 	defer dailyMemoryMu.Unlock()
 

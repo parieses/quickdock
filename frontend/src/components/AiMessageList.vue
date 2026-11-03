@@ -9,19 +9,21 @@
  * 根元素 display:contents：它不生成盒子，`.ai-messages` 与「回到底部」按钮
  * 仍然直接参与 .ai-main 的 flex 布局 / 绝对定位，与拆分前的排版一致。
  */
-import { nextTick, ref, watch, onUnmounted } from 'vue'
+import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  ArrowDown, Bot, ChevronDown, ChevronRight, Copy, FileText, Play, StickyNote, Undo2, Wrench,
+  ArrowDown, Bot, ChevronDown, ChevronRight, Copy, FileText, Play, RotateCcw, StickyNote, Undo2, Wrench,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
 import AiDiffView from './AiDiffView.vue'
 import type { LiveBlock } from '../composables/useAiMarkdownBlocks'
+import type { AIRun } from '../utils/aiRuns'
+import { pickActiveRun } from '../utils/aiRuns'
 import type {
   AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AIStreamStat, AIToolCall,
 } from '../types/ai'
 import {
-  artifactsOf, countToolRounds, jobIdOf, rulesOf, rulesTitle, runIDOf, toolIcon, toolList,
+  artifactsFromCalls, artifactsOf, countToolRounds, jobIdOf, rulesOf, rulesTitle, runIDOf, toolIcon, toolList,
   toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
 } from '../utils/aiTools'
 
@@ -33,15 +35,29 @@ const props = defineProps<{
   /** 语言标识：进 v-memo 依赖，切语言要重渲染出新的 title 文案 */
   locale: string
   mode: string
-  streaming: boolean
-  reasoningText: string
-  streamTools: AIToolCall[]
-  streamingText: string
-  streamBlocks: LiveBlock[]
-  runRules: AIRuleFile[]
-  streamArtifacts: AIArtifact[]
+  /**
+   * 所有正在跑的流（父组件持有的原数组，读元素属性仍会追踪）。
+   *
+   * 这一层是「流式读取点下沉」的关键：父组件只把数组本身传下来，模板里不读
+   * 任何 run 的内部字段，于是 token 到达时失效的只有本组件这棵子树。
+   * 以前把 reasoning / tools / blocks / rules 一条条算好传进来，其中 blocks
+   * 每帧都换引用，等于让 4200 行的 AIPage 每帧重跑一遍模板 diff。
+   */
+  runs: AIRun[]
+  /** 当前打开的会话 id：决定这一页该画哪条流（规则见 utils/aiRuns） */
+  activeId: string
+  /** 落地页那张草稿对应的 run id（会话还没建出来时用） */
+  draftRunId: string
   errorMsg: string
   canRetry: () => boolean
+  /**
+   * 是否给「重新生成」入口：最后一条是助手回复且没有 run 在跑。
+   *
+   * 与 canRetry 分开两个 prop 而不是共用一个判据：失败时最后一条是**用户**
+   * 消息（助手回复没落库），那时要的是「重试」；而重新生成的前提是已经有一条
+   * 回答可以被重答。合成一个判据必然让其中一种情况消失。
+   */
+  canRegenerate: boolean
   renderBlock: (md: string) => string
   renderMessageBlocks: (m: AIMessage) => string[]
   msgStat: (m: AIMessage) => AIStreamStat | null
@@ -59,6 +75,27 @@ const props = defineProps<{
   jobSeq: number
 }>()
 
+// —— 流式状态从 runs 里自己取 ——
+//
+// 空值用稳定常量而不是字面量 `[]`：每次渲染都换新引用会让模板里的 .length / v-for
+// 白 diff 一遍，也不能进 v-memo 依赖。
+const NO_TOOLS: AIToolCall[] = []
+const NO_BLOCKS: LiveBlock[] = []
+const NO_RULES: AIRuleFile[] = []
+
+/** 这一页该画的那条流（多条任务同时跑时只取属于当前会话的那条） */
+const activeRun = computed<AIRun | null>(
+  () => pickActiveRun(props.runs, props.activeId, props.draftRunId) ?? null,
+)
+const streaming = computed(() => !!activeRun.value)
+const reasoningText = computed(() => activeRun.value?.reasoning ?? '')
+const streamTools = computed<AIToolCall[]>(() => activeRun.value?.tools ?? NO_TOOLS)
+const streamBlocks = computed<LiveBlock[]>(() => activeRun.value?.blocks ?? NO_BLOCKS)
+const runRules = computed<AIRuleFile[]>(() => activeRun.value?.rules ?? NO_RULES)
+// 流式期的产物：file_write 返回的当下就挂出来，等 done 再显示会让
+// 「文件已经写完了」和「看得见」之间隔一整轮回答。
+const streamArtifacts = computed<AIArtifact[]>(() => artifactsFromCalls(streamTools.value))
+
 // 命令在跑的时候输出在卡片里往下长：不跟着滚，用户看到的永远是开头几行，
 // 而这恰恰是最没信息量的部分（pip 真正在动的进度在最后一行）。
 // 只跟「正在跑」的卡片——已经跑完的卡片用户可能正在往上翻，不该被拽回底部。
@@ -71,10 +108,10 @@ function setToolResEl(id: string, el: unknown) {
 
 watch(
   // 依赖只有「正在跑的几条的长度」：内容一变就滚，跑完的卡片不再触发。
-  () => props.streamTools.map((t) => (t.running ? (t.live?.length || 0) + (t.liveTail?.length || 0) : -1)).join(','),
+  () => streamTools.value.map((t) => (t.running ? (t.live?.length || 0) + (t.liveTail?.length || 0) : -1)).join(','),
   () => {
     nextTick(() => {
-      for (const t of props.streamTools) {
+      for (const t of streamTools.value) {
         if (!t.running) continue
         const el = toolResEls.get(t.id)
         if (el) el.scrollTop = el.scrollHeight
@@ -82,6 +119,13 @@ watch(
     })
   },
 )
+
+// 有没有正文，只看块数组就够了。
+//
+// 原来还额外收一个 `streamingText` 字符串，作用是「有内容吗」。那是父组件把一个
+// 每帧都在变的全文字符串传进来，只为一个布尔判断 —— 它让 AIPage 的模板多了一条
+// 每帧失效的依赖，代价是整页重渲染。块数组本来就要传（渲染靠它），零额外成本。
+const hasStreamText = computed(() => streamBlocks.value.length > 0)
 
 const emit = defineEmits<{
   (e: 'open-settings'): void
@@ -94,6 +138,8 @@ const emit = defineEmits<{
   (e: 'open-jobs', id: string): void
   (e: 'run-plan', m: AIMessage): void
   (e: 'retry'): void
+  /** 重新生成上一条回答：旧回答保留，新回答接在后面 */
+  (e: 'regenerate'): void
   (e: 'msg-click', ev: MouseEvent): void
   (e: 'msg-mouseup', ev: MouseEvent | KeyboardEvent): void
   (e: 'msg-contextmenu', ev: MouseEvent): void
@@ -132,6 +178,89 @@ function toolVerb(name: string): string {
   return aiToolVerb(name, t)
 }
 
+// —— 工具输出的折叠 ——
+//
+// 一个 `file_read` 的结果可能是几千行，整段塞进 <pre> 意味着一条消息就排出一个
+// 几万字符的文本节点。滚动容器里这种节点不贵在渲染、贵在每次 reflow 都要为它
+// 算一遍行盒 —— 三百条消息的会话打开就是整页卡死。
+//
+// 默认只给前 aiToolResClamp 字，「展开」时再放全文：用户绝大多数时候只需要看
+// 开头几行确认「读对了没有」，而真要复制全文时点一下就行，不牺牲能力。
+const aiToolResClamp = 3000
+
+const expandedTools = ref<Set<string>>(new Set())
+
+function toolResExpanded(id: string): boolean {
+  return expandedTools.value.has(id)
+}
+
+/**
+ * 这条消息里有几个工具结果被展开过。
+ *
+ * 进 `.ai-msg` 的 v-memo 依赖用。不能直接放一个全局版本号：那样点开任意一条的
+ * 输出，整个会话的 v-memo 全部失效，等于把「长会话滚动」重新做一遍。按消息算，
+ * 只有点开的那一条会重渲染。
+ */
+function expandedInMessage(m: AIMessage): number {
+  if (expandedTools.value.size === 0) return 0
+  let n = 0
+  for (const tc of toolsOf(m)) {
+    if (expandedTools.value.has(tc.id)) n++
+  }
+  return n
+}
+
+function toolResText(tc: AIToolCall): string {
+  const full = toolOutput(tc)
+  if (full.length <= aiToolResClamp || toolResExpanded(tc.id)) return full
+  return full.slice(0, aiToolResClamp)
+}
+
+function toolResClamped(tc: AIToolCall): boolean {
+  return toolOutput(tc).length > aiToolResClamp && !toolResExpanded(tc.id)
+}
+
+function expandToolRes(id: string) {
+  const next = new Set(expandedTools.value)
+  next.add(id)
+  expandedTools.value = next
+}
+
+// —— 长会话分批渲染 ——
+//
+// content-visibility 省的是「离屏消息的排版」，创建 vnode、挂 DOM 仍然全量发生：
+// 一个两千条消息的会话打开时要建几万个节点，那才是「点开会话先卡两秒」的主因。
+//
+// 默认只挂最近 aiMsgRenderTail 条（够覆盖正常阅读与「继续追问」的上下文），
+// 往上翻时按同样批量往前放。不做真虚拟滚动：消息高度不固定（代码块、图片、
+// 折叠卡片），虚拟化要自己维护高度缓存与滚动锚定，出错时表现为「滚动位置乱跳」，
+// 比慢一点糟得多。分批渲染没有动态高度问题，代价只是「翻到很早的历史要多点一次」。
+const aiMsgRenderTail = 200
+
+const renderLimit = ref(aiMsgRenderTail)
+const olderHidden = computed(() => Math.max(0, props.messages.length - renderLimit.value))
+const shownMessages = computed(() =>
+  olderHidden.value > 0 ? props.messages.slice(olderHidden.value) : props.messages,
+)
+
+async function showOlder() {
+  // 往前插入内容会让当前阅读位置往下滑，用户点「更早」正是为了看上面的东西，
+  // 滑走等于白点。按高度差补偿 scrollTop，视线落点保持不动。
+  const el = msgArea.value
+  const beforeH = el ? el.scrollHeight : 0
+  const beforeTop = el ? el.scrollTop : 0
+  renderLimit.value = Math.min(props.messages.length, renderLimit.value + aiMsgRenderTail)
+  await nextTick()
+  if (el) el.scrollTop = beforeTop + (el.scrollHeight - beforeH)
+}
+
+// 切会话（或清空）时回到默认批量：否则上一条会话把上限顶到几千，
+// 切到新会话又变成全量渲染，等于没做。
+watch(
+  () => props.messages[0]?.id,
+  () => { renderLimit.value = aiMsgRenderTail },
+)
+
 // —— 后台任务行 ——
 // 只在「这条调用带 jobId」时出现，用来替代早先那句把主键印进正文的提示。
 //
@@ -157,6 +286,59 @@ function jobRunning(tc: AIToolCall): boolean {
 // 其余历史消息继续走缓存——否则每 3s 一次轮询会把整屏消息全部重建。
 function jobSeqOf(m: AIMessage): number {
   return toolsOf(m).some((tc) => jobIdOf(tc)) ? props.jobSeq : 0
+}
+
+// —— 工具卡片的展开状态 ——
+//
+// 早先直接 `:open="!!tc.running"`：跑完 running 变 false，卡片当场折回去。
+// 而命令类工具最该看的是**末尾几行**（构建失败的栈、测试的汇总），等它跑完
+// 才折起来等于恰好在最有用的那一刻把内容收走。
+//
+// 所以展开变成「粘性」状态：一旦开过就一直开着，只有用户自己点了摘要行才收。
+// 两个集合分工：
+//   - autoOpen 由「开始跑 / 等待审批」驱动，程序性打开
+//   - userClosed 记住用户手动收起的，之后不再自动打开
+// 判定必须与模板里的 :open 表达式完全一致（见 toolShouldOpen），否则程序性
+// 改 open 触发的 toggle 会被误当成用户操作，两个集合互相推着打架。
+const autoOpenTools = ref(new Set<string>())
+const userClosedTools = ref(new Set<string>())
+
+function toolShouldOpen(tc: AIToolCall): boolean {
+  if (userClosedTools.value.has(tc.id)) return false
+  // 等待审批时必须开着：按钮虽然在下面的审批条里，卡片上写着「为什么停下来」。
+  if (tc.approval === 'pending') return true
+  return autoOpenTools.value.has(tc.id)
+}
+
+watch(
+  () => streamTools.value.map((t) => `${t.id}:${t.running ? 1 : 0}${t.approval === 'pending' ? 'a' : ''}`).join(','),
+  () => {
+    // 一轮结束（streamTools 被清空）时把两个集合一起清掉：里面的 id 是这条流的
+    // 调用 id，下一轮不会复用，留着只会让 Set 随提问次数一直长。
+    if (streamTools.value.length === 0) {
+      if (autoOpenTools.value.size) autoOpenTools.value.clear()
+      if (userClosedTools.value.size) userClosedTools.value.clear()
+      return
+    }
+    for (const tc of streamTools.value) {
+      if (userClosedTools.value.has(tc.id)) continue
+      if (tc.running || tc.approval === 'pending') autoOpenTools.value.add(tc.id)
+    }
+  },
+  { immediate: true },
+)
+
+function onToolToggle(tc: AIToolCall, e: Event) {
+  const el = e.target as HTMLDetailsElement
+  // 与期望状态一致 = 我们自己改的，不是用户点的
+  if (el.open === toolShouldOpen(tc)) return
+  if (el.open) {
+    autoOpenTools.value.add(tc.id)
+    userClosedTools.value.delete(tc.id)
+  } else {
+    autoOpenTools.value.delete(tc.id)
+    userClosedTools.value.add(tc.id)
+  }
 }
 
 // —— 滚动跟随 ——
@@ -238,6 +420,45 @@ function jumpToMsg(id: string): boolean {
   return true
 }
 
+/**
+ * 确保某条消息已经挂上 DOM 后再跳过去（搜索命中跳转用）。
+ *
+ * 默认只挂最近 200 条（见 aiMsgRenderTail），命中更早的消息时 jumpToMsg 找不到
+ * 节点、静默返回 false——用户点了搜索命中却停在底部，只会以为这个功能坏了。
+ * 这里先把上限抬到「包含目标那条」，等一帧再跳。
+ *
+ * 抬高后不回退：这是用户主动要求往前翻，一压缩就又把它藏回去。
+ */
+async function ensureRendered(id: string): Promise<boolean> {
+  const idx = props.messages.findIndex((m) => m.id === id)
+  if (idx < 0) return false
+  const need = props.messages.length - idx
+  if (need > renderLimit.value) {
+    renderLimit.value = Math.min(
+      props.messages.length,
+      Math.ceil(need / aiMsgRenderTail) * aiMsgRenderTail,
+    )
+    await nextTick()
+  }
+  const ok = jumpToMsg(id)
+  if (ok) flashMsg(id)
+  return ok
+}
+
+/**
+ * 目标消息闪一下底。
+ *
+ * 直接改 DOM class 而不是走响应式：消息列表在 v-memo 里，加一个「高亮某条」的
+ * 响应式字段会让那次重渲染扩散到整份缓存。class 只是临时的视觉提示，1700ms
+ * 后自己消失，没有状态需要回读。
+ */
+function flashMsg(id: string) {
+  const el = msgArea.value?.querySelector<HTMLElement>(`[data-msg-id="${id}"]`)
+  if (!el) return
+  el.classList.add('is-hit-flash')
+  window.setTimeout(() => el.classList.remove('is-hit-flash'), 1700)
+}
+
 // ResizeObserver 观察消息内容容器：内容变高（流式输出、图片加载、代码块撑开）
 // 时把视口拉到底部。这是「AI 一直在回复但视口不跟随」的正确修法——
 // 滚动应由 DOM 实际高度变化驱动，而不是由某个响应式变量间接推断。
@@ -268,7 +489,7 @@ onUnmounted(() => {
 function areaEl(): HTMLElement | null { return msgArea.value }
 function contentEl(): HTMLElement | null { return msgContent.value }
 
-defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
+defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, contentEl })
 </script>
 
 <template>
@@ -281,6 +502,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
       </div>
 
       <template v-else>
+        <!-- 更早的历史按需放出来（默认只挂最近 200 条，理由见 aiMsgRenderTail） -->
+        <button v-if="olderHidden > 0" class="ai-load-older" @click="showOlder">
+          {{ t('aiLoadOlder', { n: Math.min(olderHidden, aiMsgRenderTail) }) }}
+        </button>
         <!-- v-memo：历史消息在流式期间内容不变，命中缓存即可整棵子树跳过重建。
              依赖数组必须覆盖子树内所有响应式来源，缺一个就会出现「数据变了但界面不变」：
                · m.content / m.reasoning_content —— 正文与思考过程
@@ -296,10 +521,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
              编译器生成的代码含 `_cached.key === m.id` 校验，
              切换会话（消息 id 变化）不会误命中旧缓存。 -->
         <div
-          v-for="m in messages"
+          v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m)]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -356,7 +581,12 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
                 <div v-if="tc.error" class="ai-tool-err">{{ tc.error }}</div>
                 <!-- 有 diff 时不再重放一句「已编辑 xxx（替换 1 处）」：
                      路径在摘要行上已经有了，改动在 diff 里已经有了。 -->
-                <pre v-else-if="toolOutput(tc) && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolOutput(tc) }}</pre>
+                <pre v-else-if="toolOutput(tc) && !tc.diff" class="ai-tool-res" :class="{ 'is-code': !!toolResultLang(tc) }">{{ toolResText(tc) }}</pre>
+                <button
+                  v-if="toolResClamped(tc)"
+                  class="ai-tool-more"
+                  @click.stop.prevent="expandToolRes(tc.id)"
+                >{{ t('aiToolShowAll', { n: toolOutput(tc).length }) }}</button>
                 <!-- 后台任务行：与流式区同款，历史消息里也要在——不然刷新一次就只剩
                      「跑过了」的代码块，看不出那个进程现在还在不在跑。 -->
                 <div v-if="jobLine(tc)" class="ai-job-note" :class="{ 'is-run': jobRunning(tc) }">
@@ -400,8 +630,13 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
           <!-- 操作按钮同一行：.ai-msg 是纵向 flex，不包一层的话每个按钮都会各占一行 -->
           <div class="ai-msg-actions">
             <!-- 中断标记：内容照样保留（后端也把半截内容连同 stopped 一起落库），
-                 但要让人一眼看出「这是我按了停止」，而不是模型只答了这么多 -->
-            <span v-if="m.stopped" class="ai-msg-stopped" :title="t('aiStoppedHint')">{{ t('aiStopped') }}</span>
+                 但要让人一眼看出「这是我按了停止」，而不是模型只答了这么多。
+                 断流（不是用户停的）用另一句提示，否则用户会以为自己误触过。 -->
+            <span
+              v-if="m.stopped"
+              class="ai-msg-stopped"
+              :title="m.interrupted ? t('aiInterruptedHint') : t('aiStoppedHint')"
+            >{{ t('aiStopped') }}</span>
             <!-- 计划模式下的执行入口。原来挂在「计划」卡片头上，卡片去掉后
                  没有它，计划模式就只剩只读，永远迈不出执行那一步。
                  只给最后一条：历史回答早就执行过了，每条都挂一个只会误导。 -->
@@ -434,7 +669,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
         </div>
         <!-- 流式区：模型先调工具时还没有正文，这里的 v-if 必须带上 streamTools，
              否则「正在查环境」的那几秒界面上什么都没有，看起来像卡死。 -->
-        <div v-if="streamingText || streamTools.length" class="ai-msg assistant streaming">
+        <div v-if="hasStreamText || streamTools.length" class="ai-msg assistant streaming">
           <div class="ai-msg-role">AI</div>
           <!-- 与历史卡片同款提示：流式期就能看到「这次带上了哪几个规则文件」，
                不然要等回答完才知道，而那时已经照错的约定做完了。 -->
@@ -451,8 +686,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
               <ChevronDown :size="13" class="ai-tools-chev" />
             </summary>
             <div class="ai-tools-body">
-              <!-- 正在跑的那条自动展开：等待期间它是唯一的进度信息。 -->
-              <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running, 'is-ask': tc.approval === 'pending' }" :open="!!tc.running || tc.approval === 'pending'">
+              <!-- 正在跑的那条自动展开：等待期间它是唯一的进度信息。
+                   跑完之后**不自动收起**（理由见 toolShouldOpen），用户点摘要行才收。 -->
+              <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running, 'is-ask': tc.approval === 'pending' }" :open="toolShouldOpen(tc)" @toggle="onToolToggle(tc, $event)">
                 <summary class="ai-tool-line">
                   <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
                   <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>
@@ -496,13 +732,13 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
               </details>
             </div>
           </details>
-          <div v-if="streamingText" class="ai-msg-content ai-md">
+          <div v-if="hasStreamText" class="ai-msg-content ai-md">
             <!-- key 只用序号：内容变了由 v-html 的字符串比较兜住（Vue 会就地更新）。
                  早先把「长度 + 前缀」拼进 key，末尾那块每来一个字就换一次 key，
                  于是每帧销毁重建整块 DOM——用户刚划中的选区被抹掉，解析结果也白丢。 -->
             <div v-for="(b, bi) in streamBlocks" :key="bi" class="ai-md-block" v-html="b.html"></div>
           </div>
-          <span v-if="streamingText" class="ai-cursor">▋</span>
+          <span v-if="hasStreamText" class="ai-cursor">▋</span>
           <!-- 流式期的产物列表：file_write 一返回就出现，不等回答收尾 -->
           <details v-if="streamArtifacts.length" class="ai-artifacts" open>
             <summary class="ai-artifacts-sum">
@@ -519,13 +755,24 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
           </details>
         </div>
 
+        <!-- 重新生成上一条回答。放在消息流末尾而不是每条回复的按钮组里：
+             只有最后一条重答才有意义（前面的重答会与后面已有的回答矛盾），
+             而每条都挂一个按钮等于给长会话再添 200 个可点区域。
+             旧回答**不删**：调试提示词时能对照两版反而是优点，删要连带处理
+             usage 统计、回滚点、run 节点引用。 -->
+        <div v-if="canRegenerate && !streaming" class="ai-regen">
+          <button class="ai-regen-btn" :title="t('aiRegenerateHint')" @click="emit('regenerate')">
+            <RotateCcw :size="12" /> {{ t('aiRegenerate') }}
+          </button>
+        </div>
+
         <div v-if="errorMsg" class="ai-error">
           <span class="ai-error-text">{{ errorMsg }}</span>
           <!-- 失败时用户消息已落库，重试就是把它再发一次（图片一起带回去） -->
           <button v-if="canRetry()" class="ai-retry" @click="emit('retry')">{{ t('aiRetry') }}</button>
         </div>
 
-        <div v-if="messages.length === 0 && !streamingText && !errorMsg" class="ai-empty">
+        <div v-if="messages.length === 0 && !hasStreamText && !errorMsg" class="ai-empty">
           <Bot :size="40" />
           <p>{{ t('aiEmptyHint') }}</p>
         </div>
@@ -788,6 +1035,22 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* 「展开全文」：贴在被截断的结果下方，视觉上是那条结果的附注而不是新按钮。
+   截断发生在渲染层（见 toolResText），不是 CSS —— 折叠时 DOM 里真的没有
+   后面那几万字，长会话才快得起来。 */
+.ai-tool-more {
+  align-self: flex-start;
+  margin: 0 6px 6px 18px;
+  padding: 2px 6px;
+  font-size: 10px;
+  color: var(--color-accent);
+  background: none;
+  border: none;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.ai-tool-more:hover { background: var(--color-bg-tertiary); }
+
 /* 命令/代码类结果给一层淡底就够，不加描边：消息区不再有第二种容器 */
 .ai-tool-res.is-code {
   background: var(--color-bg-tertiary);
@@ -890,7 +1153,31 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
   min-height: 100%;
 }
 
-.ai-msg { display: flex; flex-direction: column; gap: 4px; max-width: 88%; }
+/* 离屏消息跳过后面的排版：三百条消息的会话里，打开时只有最后四五条可见，
+   其余几百条的块布局/行盒计算全是白工（配合上面的工具结果截断，才是
+   「长会话打开不再卡死」的完整解法）。
+   contain-intrinsic-size 用 auto：浏览器会记住上次渲染出来的真实高度，
+   滚动回来时不会因为「先按 96px 占位」而整页跳动。
+   代价是离屏消息里的文字不参与 Ctrl+F 查找——对话页以滚动浏览为主，可以接受。 */
+.ai-msg {
+  display: flex; flex-direction: column; gap: 4px; max-width: 88%;
+  content-visibility: auto; contain-intrinsic-size: auto 96px;
+}
+
+/* 「显示更早的消息」：长会话默认只挂最近 200 条，这条按钮是往上翻的入口。
+   做成一行安静的次要按钮，不做成卡片——它只是分页，不是内容。 */
+.ai-load-older {
+  align-self: center;
+  margin: 2px 0 6px;
+  padding: 4px 12px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+}
+.ai-load-older:hover { color: var(--color-text-primary); border-color: var(--color-border-light); }
 
 .ai-msg.user { align-self: flex-end; align-items: flex-end; }
 
@@ -999,6 +1286,44 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, areaEl, contentEl })
 }
 
 .ai-retry:hover { background: var(--color-danger-bg); }
+
+/* 重新生成：整行居中的软按钮，不抢正文的注意力（它是一次可选的重复操作） */
+.ai-regen {
+  align-self: center;
+  display: flex;
+  justify-content: center;
+  margin: 2px 0 8px;
+}
+
+.ai-regen-btn {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 4px 12px;
+  font-size: 11px; font-family: inherit;
+  color: var(--color-text-secondary);
+  background: transparent;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.ai-regen-btn:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border-color: var(--color-border-light);
+}
+
+/* 搜索命中跳转后的落点高亮：只闪一次，不做常驻状态。
+   同时闪底色与一圈光晕——用户消息的底色画在气泡上，单靠容器的 background
+   会被气泡盖住，看不到「跳到了哪」。 */
+.ai-msg.is-hit-flash {
+  border-radius: var(--radius-sm);
+  animation: ai-hit-flash 1.7s ease-out;
+}
+@keyframes ai-hit-flash {
+  0%   { background: var(--color-accent-bg); box-shadow: 0 0 0 5px var(--color-accent-bg); }
+  100% { background: transparent; box-shadow: 0 0 0 0 transparent; }
+}
 
 .ai-need-key, .ai-empty {
   margin: auto;

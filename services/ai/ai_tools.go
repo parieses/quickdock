@@ -16,6 +16,7 @@ package ai
 // 也会流给用户看。模型常常先说「我查一下」再调工具，那段话不该被吞掉。
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -59,6 +60,15 @@ const (
 	// 超出部分不丢：完整结果写日志，只把头部递给模型，并在末尾说明被截断。
 	aiToolResultMaxRune = 12000
 
+	// aiToolFieldKeepRune 超限压缩时，单个字符串字段先保留多少字。
+	// 2000 够放一段文件正文或一条 diff；仍超就把这个值逐级减半。
+	aiToolFieldKeepRune = 2000
+
+	// aiToolArrayKeep 超限压缩时，单个数组最多保留几项。
+	// git_status 一次能返回 500 条变更，每条都短——按字段截救不了这种，
+	// 只能截数组，并在末尾补一条 {"_dropped": n} 让模型知道自己少看了多少。
+	aiToolArrayKeep = 200
+
 	// aiToolFoldRune 上下文压缩时，被折叠的老工具结果保留多少字符。
 	// 折叠而不是删除：模型仍需知道「我查过这个东西、结论大致是什么」，
 	// 否则它会为了同一件事再查一遍，白花一轮。
@@ -95,7 +105,30 @@ const (
 	// 卡在这条线上的次数很少，而「跑一半被告知超时」比「多等两分钟」更烦。
 	// 这条线防的是挂死（网络黑洞、子进程不退出），不是限制正常调用。
 	aiToolTimeout = 5 * time.Minute
+
+	// aiChatTurnBudgetFactor 主循环的总 token 预算＝上下文预算 × 这个倍数。
+	//
+	// 轮次上限（aiToolMaxTotalRounds = 120）只数次数，不数钱：每轮都要把整份
+	// 上下文重发一遍，一个「看着一直在动、其实在原地空转」的任务可以合法地烧掉
+	// 上百万 token 而没有任何刹车。
+	//
+	// 取 20 倍（约 240 万）是留给正常大任务的余量：写几十节文档、跑十几条命令的
+	// 长任务一般在 5~8 倍以内收工；而真正打转的循环会在几十轮内撞线。
+	//
+	// 为什么不直接用 agentScope 的 overBudget：那是 run 级 6 倍预算，专门给派活
+	// 用的。主对话自己很容易烧掉 6 倍上下文，把主循环的用量累加进去之后，
+	// spawn_agent 会在一进去就被拒——那等于把长任务里的编排能力废掉。
+	aiChatTurnBudgetFactor = 20
 )
+
+// aiChatTurnBudget 一次提问在主循环里的 token 上限（0 = 不限，配置不完整时）。
+func aiChatTurnBudget(cfg AIProfile) int {
+	b := aiContextBudget(cfg)
+	if b <= 0 {
+		return 0
+	}
+	return b * aiChatTurnBudgetFactor
+}
 
 // aiToolCall 一次工具调用。
 //
@@ -234,8 +267,9 @@ func aiToolsPayload(mode string) []map[string]any {
 func aiToolsPayloadFor(mode string, filter *ToolFilter) ([]map[string]any, bool) {
 	fns := mcpsrv.ExposedFunctions()
 	out := make([]map[string]any, 0, len(fns))
-	var ext []map[string]any
-	extTrimmed := false
+	// 外部工具按 server 分组收集：名额与体积都按**整组**判（见下面的说明）。
+	var extGroups []*extToolGroup
+	extByServer := map[string]*extToolGroup{}
 	for _, f := range fns {
 		if !aiToolVisibleInMode(mode, f.Category, f.AgentOnly) {
 			continue
@@ -261,33 +295,86 @@ func aiToolsPayloadFor(mode string, filter *ToolFilter) ([]map[string]any, bool)
 				continue
 			}
 		}
+		desc := f.Description
+		if f.Category == mcpsrv.CategoryExternal {
+			// 外部工具的描述截到 extToolDescMaxRune（理由见那个常量）。
+			desc = clipRunes(desc, extToolDescMaxRune)
+		}
 		entry := map[string]any{
 			"type": "function",
 			"function": map[string]any{
 				"name":        f.Name,
-				"description": f.Description,
+				"description": desc,
 				"parameters":  f.Parameters,
 			},
 		}
-		if f.Category == mcpsrv.CategoryExternal {
-			ext = append(ext, entry)
-		} else {
+		if f.Category != mcpsrv.CategoryExternal {
 			out = append(out, entry)
+			continue
 		}
+		// 体积按**实际要发出去的那份**算：截过的描述 + 序列化后的 schema。
+		// schema 序列化失败（理论上不会）就按 0 计——宁可多挂一个，也不要
+		// 因为一次编码错误把整组工具藏掉。
+		size := len(desc)
+		if raw, err := json.Marshal(f.Parameters); err == nil {
+			size += len(raw)
+		}
+		key := extServerOf(f.Description)
+		g, ok := extByServer[key]
+		if !ok {
+			g = &extToolGroup{server: key}
+			extByServer[key] = g
+			extGroups = append(extGroups, g)
+		}
+		g.items = append(g.items, entry)
+		g.sizes = append(g.sizes, size)
+		g.bytes += size
 	}
 	// 外部工具名额（阶段 D）：tools[] 总数一大，一部分上游直接 400，
 	// token 账单也难看。内置工具优先，外部工具填剩余名额，超出不挂——
 	// 名额只算过了可见性过滤的，被模式/角色裁掉的外部工具不占位置。
 	// 截断后 agent_run 会在 system 里补说明，模型至少知道「有工具没挂上」。
-	if len(ext) > extToolsMax {
-		ext = ext[:extToolsMax]
+	//
+	// 这里按**整组**取舍：把某个 server 挂一半比整套不挂更糟——模型手里有
+	// 「这个 server 的一部分工具」，会认为缺的那些能力根本不存在，于是换个
+	// 说法反复试，而它其实只是没挂上。
+	extTrimmed := false
+	kept, bytes := 0, 0
+	for _, g := range extGroups {
+		if kept+len(g.items) <= extToolsMax && bytes+g.bytes <= extToolsMaxBytes {
+			out = append(out, g.items...)
+			kept += len(g.items)
+			bytes += g.bytes
+			continue
+		}
+		// 一个 server 自己就超了上限（只接了一两个 MCP 时很常见）：整套跳过等于
+		// 用户刚接的 server 一个工具都调不到，比挂一半更坏。这时按顺序装到装不下
+		// 为止，至少让模型看得见这个 server 的主要能力。
+		if kept == 0 {
+			for i, it := range g.items {
+				if kept+1 > extToolsMax || bytes+g.sizes[i] > extToolsMaxBytes {
+					break
+				}
+				out = append(out, it)
+				kept++
+				bytes += g.sizes[i]
+			}
+		}
 		extTrimmed = true
 	}
-	out = append(out, ext...)
 	if len(out) == 0 {
 		return nil, false
 	}
 	return out, extTrimmed
+}
+
+// extToolGroup 一个外部 server 的工具集合，用于按整组判断名额与体积。
+type extToolGroup struct {
+	server string
+	items  []map[string]any
+	// sizes 与 items 一一对应：单条的实际字节数，整组超限时按它逐条装。
+	sizes []int
+	bytes int
 }
 
 // toolHint 交给模型的工具使用说明，只在本轮确实带了工具时追加。
@@ -719,12 +806,14 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 
 	text := mcpsrv.JSON(val)
 	if cerr != nil {
-		rec.Error = cerr.Error()
 		// 错误用文本回给模型而不是中断：模型据此可以换参数或换工具，
 		// 这比让它把整轮回答作废有用得多。
+		rec.Error = cerr.Error()
 		text = "工具执行失败：" + rec.Error
+		// 失败时没有结构化结果可压，交给纯文本兜底（见 truncateToolResult）。
+		val = nil
 	}
-	rec.Result = truncateToolResult(text, c.Name)
+	rec.Result = truncateToolResult(val, text, c.Name)
 	rec.Output = toolOutputText(c.Name, val)
 	rec.Added, rec.Removed = toolDiffLines(val)
 	// 产物路径（file_write / file_edit）：回答产物条与文件预览的依据。
@@ -737,6 +826,11 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	if seen != nil && cerr == nil {
 		seenMu.Lock()
 		seen[key] = rec
+		// 写类成功之后，读类的缓存全部作废（见 dropStaleReads）。
+		// 写类自己的条目要留着：同一句写重放一遍是第二次副作用，必须继续挡。
+		if mcpsrv.ToolLevel(c.Name) > mcpsrv.LevelRead {
+			dropStaleReads(seen)
+		}
 		seenMu.Unlock()
 	}
 	return rec, rec.Result
@@ -753,43 +847,52 @@ func toolTimeoutFor(name string) time.Duration {
 	return aiToolTimeout
 }
 
-// callToolWithTimeout 执行一个工具，并给它套上超时外壳。
+// callToolWithTimeout 执行一个工具，并给它套上超时。
 //
-// 超时只能套外壳：多数工具的 Handler 没有 ctx 参数，工具内部拿不到取消信号。
-// 所以超时返回的那一刻，那次调用仍在后台跑完——它不会再写这条流（结果被丢弃），
-// 代价是一次空跑。这点代价换来的是「AI 页永远不会因为一个工具挂住而停在转圈」。
+// 超时用 context.WithTimeout 而不是 time.Timer：前者会把取消信号真的送到
+// 实现了 HandlerCtx 的工具里——run_command 会连带子进程一起 kill、spawn_agent
+// 会停掉自己的循环。后者只是「不等了」，那条 `go vet ./...` 或全盘检索还在后台
+// 跑着占 CPU，用户看到的是「对话停了但电脑一直响」。
 //
-// 用户点停止（ctx 取消）不一样：实现了 HandlerCtx 的工具会真的停下。
-// spawn_agent 内部是 agent 循环，run_command 会连同子进程一起被 kill——
-// 后者尤其重要：一条 `go vet ./...` 或全盘检索在停止之后继续跑，用户看到的
-// 是「对话停了但电脑卡死」，而他没有任何地方能停掉它。
-//
-// 同理，ctx 被取消（用户点停止）时也不等它：直接按「已停止」返回，
-// 让本轮剩下的调用快速收尾，而不是让停止按钮看起来没反应。
+// 仍有一批工具只有 Handler、没有 ctx（见 mcp.Tool 的两个字段）：那类工具在超时
+// 后确实会跑完，只是结果被丢弃。这是工具层的现状，不是这里能解决的——所以
+// 文案里不再笼统地写「可能还在后台跑」，只在真正超时的时候这么说。
 func callToolWithTimeout(ctx context.Context, name string, args map[string]any, timeout time.Duration) (any, error) {
 	type outcome struct {
 		val any
 		err error
 	}
+	// 从父 ctx 派生而不是另起一个：父 ctx 取消（用户停止）照样能打断工具，
+	// 而这一次超时只影响这一个工具，不会波及整轮。
+	tctx, tcancel := context.WithTimeout(ctx, timeout)
+	defer tcancel()
+
 	ch := make(chan outcome, 1) // 缓冲 1：超时后 goroutine 仍能退出，不泄漏
 	go func() {
 		defer recoverPanic("ai tool " + name)
-		v, e := mcpsrv.CallAgentContext(ctx, name, args)
+		v, e := mcpsrv.CallAgentContext(tctx, name, args)
 		ch <- outcome{v, e}
 	}()
 
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
 	select {
 	case r := <-ch:
+		// 工具可能先收到了取消信号、再把它包成自己的错误返回（run_command 就是
+		// "signal: killed"）。那种错误直接透给模型毫无意义，按原因翻译一次。
+		if r.err != nil && tctx.Err() != nil {
+			if ctx.Err() != nil {
+				return nil, errors.New("已停止：用户中止了这一轮任务，工具调用被中断")
+			}
+			return nil, fmt.Errorf("工具 %s 执行超过 %v，已取消", name, timeout)
+		}
 		return r.val, r.err
-	case <-timer.C:
-		logger.W("[ai-tool] %s 执行超过 %v 未返回，已按超时处理", name, timeout)
-		return nil, fmt.Errorf("工具 %s 执行超过 %v 仍未返回，已放弃等待（它可能还在后台跑，结果不会再用）", name, timeout)
-	case <-ctx.Done():
-		// 别说 "context canceled"：卡片上那句话是给用户看的，得让他认出
-		// 「这是我按的停止」，而不是以为工具自己崩了。
-		return nil, errors.New("已停止：用户中止了这一轮任务，工具调用被中断")
+	case <-tctx.Done():
+		// 父 ctx 取消 = 用户停止；否则是这一条工具自己的超时。两者对用户的意义
+		// 完全不同，卡片文案必须分开——否则「我按了停止」会被写成「工具超时」。
+		if ctx.Err() != nil {
+			return nil, errors.New("已停止：用户中止了这一轮任务，工具调用被中断")
+		}
+		logger.W("[ai-tool] %s 执行超过 %v 未返回，已取消（支持 ctx 的工具会真的停下）", name, timeout)
+		return nil, fmt.Errorf("工具 %s 执行超过 %v，已取消", name, timeout)
 	}
 }
 
@@ -907,6 +1010,32 @@ func toolCallKey(name string, args map[string]any, raw string) string {
 	return name + "\x00" + canon
 }
 
+// toolCallName 从去重键里取回工具名（键是 name + \x00 + 规范化参数）。
+func toolCallName(key string) string {
+	if i := strings.IndexByte(key, 0); i >= 0 {
+		return key[:i]
+	}
+	return ""
+}
+
+// dropStaleReads 作废本次提问里所有「读类工具」的缓存。
+//
+// 为什么必须做：去重键只由 name+args 组成，文件内容变了而参数没变时，第二次读
+// 命中的是**改之前**的正文。典型序列 file_read A → file_edit A → file_read A，
+// 模型拿着旧内容去改第二处，file_edit 报「没找到要替换的内容」，然后重读、再改
+// ——白烧两三轮回合，用户看到的是「AI 在同一处反复改错」。
+//
+// 只删读类：写 / 命令 / 通知必须继续按「同一句只做一次」去重（重放一遍就是
+// 第二次副作用），而且它们的参数里带着要写的内容，不存在「参数相同内容却变了」。
+// 调用方持锁。
+func dropStaleReads(seen map[string]aiToolRecord) {
+	for k := range seen {
+		if name := toolCallName(k); name != "" && mcpsrv.ToolLevel(name) == mcpsrv.LevelRead {
+			delete(seen, k)
+		}
+	}
+}
+
 // formatToolArgs 生成给人看的参数文本（卡片上那一行）。
 // 解析失败时退回原文——此时「用户看到模型写了什么」比「格式整齐」重要。
 func formatToolArgs(args map[string]any, raw string) string {
@@ -948,14 +1077,98 @@ func toolMessage(callID, content string) map[string]interface{} {
 //
 // 完整结果不落库（会撑爆 ai_messages），但写一行日志保留「完整版在多长、
 // 前半截是什么」，需要复盘时能看出模型当时到底看到了多少。
-func truncateToolResult(text, tool string) string {
+// truncateToolResult 把过长的工具结果压到 aiToolResultMaxRune 以内。
+//
+// 不能简单砍头：结果几乎总是 JSON，砍在中间既不可解析，又会把排在后面的关键
+// 字段（count / truncated / nextOffset）一起砍掉——模型看到半个数组，却不知道
+// 自己在看半个数组，于是照样按「这就是全部」下结论。
+// 所以超限时先按结构压：长字符串缩短、长数组保留前 N 项并补一条 _dropped，
+// 短字段（计数、标记、路径）原样留着；结构压不下去才退回头部截断。
+func truncateToolResult(val any, text, tool string) string {
 	n := len([]rune(text))
 	if n <= aiToolResultMaxRune {
 		return text
 	}
+	// 纯文本结果（工具直接返回字符串）不走结构压缩：那一趟会把它 marshal 成
+	// 带引号的 JSON 字符串，模型看到的是多了一层转义的正文。
+	_, plainText := val.(string)
+	if val != nil && !plainText {
+		if shrunk, ok := shrinkToolJSON(val, aiToolResultMaxRune); ok {
+			logger.W("[ai-tool] %s 结果过长（%d 字），已按字段压缩到 %d 字",
+				tool, n, len([]rune(shrunk)))
+			return shrunk
+		}
+	}
 	logger.W("[ai-tool] %s 结果过长（%d 字），已截断喂给模型；头部：%s", tool, n, logger.Trunc(text, 300))
 	head := string([]rune(text)[:aiToolResultMaxRune])
 	return head + fmt.Sprintf("\n\n[结果过长，已截断：原文 %d 字，这里只给出前 %d 字。需要更多请缩小范围（比如加 glob 过滤、减少 limit）。]", n, aiToolResultMaxRune)
+}
+
+// shrinkToolJSON 按结构把工具结果压到预算内；压不下去返回 false。
+//
+// 逐级收紧「单个字段保留多少字」。大多数超限结果在第一档就够（一段文件正文、
+// 一条 diff），数组过长的靠 aiToolArrayKeep 兜住。
+func shrinkToolJSON(val any, max int) (string, bool) {
+	raw, err := json.Marshal(val)
+	if err != nil {
+		return "", false
+	}
+	// UseNumber：压完再序列化时不要把整数变成 1.234e+06，
+	// 模型看到科学计数法的行号/字节数会读错。
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.UseNumber()
+	var tree any
+	if err := dec.Decode(&tree); err != nil {
+		return "", false
+	}
+	for _, lv := range []struct{ perField, arrayKeep int }{
+		{aiToolFieldKeepRune, aiToolArrayKeep},
+		{aiToolFieldKeepRune / 2, aiToolArrayKeep / 2},
+		{aiToolFieldKeepRune / 4, aiToolArrayKeep / 4},
+		{aiToolFieldKeepRune / 8, aiToolArrayKeep / 8},
+	} {
+		out, err := json.Marshal(shrinkJSONValue(tree, lv.perField, lv.arrayKeep))
+		if err != nil {
+			return "", false
+		}
+		if len([]rune(string(out))) <= max {
+			return string(out), true
+		}
+	}
+	return "", false
+}
+
+// shrinkJSONValue 递归重建 JSON 值：长字符串截短，长数组只留前 arrayKeep 项。
+// 返回新树，原树不动（同一份结果后面还要给前端用）。
+func shrinkJSONValue(v any, perField, arrayKeep int) any {
+	switch t := v.(type) {
+	case string:
+		r := []rune(t)
+		if len(r) <= perField {
+			return t
+		}
+		return string(r[:perField]) + fmt.Sprintf("\n…[此处省略 %d 字]", len(r)-perField)
+	case []any:
+		limit := len(t)
+		if limit > arrayKeep {
+			limit = arrayKeep
+		}
+		out := make([]any, 0, limit+1)
+		for i := 0; i < limit; i++ {
+			out = append(out, shrinkJSONValue(t[i], perField, arrayKeep))
+		}
+		if dropped := len(t) - limit; dropped > 0 {
+			out = append(out, map[string]any{"_dropped": dropped})
+		}
+		return out
+	case map[string]any:
+		out := make(map[string]any, len(t))
+		for k, val := range t {
+			out[k] = shrinkJSONValue(val, perField, arrayKeep)
+		}
+		return out
+	}
+	return v
 }
 
 // estimateLoopTokens 估算一组消息的 token 数。

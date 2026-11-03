@@ -119,7 +119,13 @@ type AgentRunReq struct {
 type AgentRunResult struct {
 	ConvID  string
 	Text    string
-	Stopped bool // 用户中断
+	Stopped bool // 没跑完（用户中断或连接断开）
+	// StopCause 中断的具体原因：errStopByUser / errClientGone / 其它。
+	//
+	// Stopped 只回答「跑完了没有」，而通知文案要回答「谁停的」：用户按的停止
+	// 值得告诉他一声，页面自己断了则不是他的动作（刷个页面就弹「AI 回答已停止」
+	// 会让人以为是自己误触）。
+	StopCause error
 	// Usage 这次执行的累计用量。编排层用它做 run 级成本归集：
 	// 每次都去 ai_usage 查一遍既慢又会把「编排外的调用」混进来。
 	Usage     db.TokenUsage
@@ -403,11 +409,11 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	if !req.Fresh {
 		gate := newApprovalGate(sink, res.ConvID, a.App.DB, a.loadApprovalRules(), permission == aiPermissionFull)
 		a.registerGate(res.ConvID, gate)
-		defer a.unregisterGate(res.ConvID)
+		defer a.unregisterGate(res.ConvID, gate)
 		ctx = withApprovalGate(ctx, gate)
 
 		injects = a.registerInjectQueue(res.ConvID)
-		defer a.unregisterInjectQueue(res.ConvID)
+		defer a.unregisterInjectQueue(res.ConvID, injects)
 	}
 
 	// 编辑快照钩子（见 ai_checkpoint.go）。这一条子 agent **也要挂**，
@@ -601,8 +607,27 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 就是等不到答案。
 	loopBudget := aiLoopBudget(cfg)
 	limit := aiToolMaxRounds
+	// 本次提问的 token 预算（见 aiChatTurnBudget）。撞线不是报错，而是「收尾并说明」：
+	// 走的是与轮次用尽完全相同的那条路（撤工具 + 一句 notice + 再跑一轮），
+	// 不新增错误语义，用户说一句「接着做」就是新的一轮、预算重新计。
+	chatBudget := aiChatTurnBudget(cfg)
+	budgetClosed := false
 
 	for turnIdx := 1; turnIdx <= limit+1; turnIdx++ {
+		// 预算兜底放在这一轮的最前面：必须在 applySystemHints 之前撤工具，
+		// 否则 system 里那段「可用工具」还留着，模型会把调用写成正文（DSML 标记）。
+		if !budgetClosed && chatBudget > 0 && tokensOf(totalUsage) >= chatBudget {
+			budgetClosed = true
+			tools = nil
+			// limit 收到本轮：万一模型在没有 tools 的情况下仍返回工具调用，
+			// 底下 `turnIdx > limit` 那条兜底会忽略并跳出，不会再花一次工具的钱。
+			limit = turnIdx - 1
+			sink.Event("notice", map[string]any{
+				"message": fmt.Sprintf("本次提问已消耗约 %d token，达到单次预算，先收尾；没做完说一声「接着做」就行", tokensOf(totalUsage)),
+			})
+			logger.I("[ai] 主循环达到 token 预算 conv=%s 已用=%d 预算=%d 轮次=%d",
+				res.ConvID, tokensOf(totalUsage), chatBudget, turnIdx)
+		}
 		// 每轮按「本轮到底有没有工具」重建 system（覆盖式，见 applySystemHints）。
 		// 这一句和上面撤 tools 是一对：只撤 tools 不撤提示，模型会把调用写成正文。
 		applySystemHints(messages, baseSystem, mode, cwd, len(tools) > 0, modeHasTools && len(tools) == 0)
@@ -915,9 +940,12 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 
 	if lastErr != nil {
 		if ctx.Err() != nil {
-			// 用户主动取消，保存已收到部分（用户消息已在调模型前落库）。
-			// 正在跑的工具不会被这里打断——Tool.Handler 没有 ctx，
-			// 只能等它自己返回（见 ai_tools.go 的说明）。
+			// 用户主动取消或页面断开。这里只记原因，怎么措辞交给上层
+			// （见 ai_stream.go 的收尾通知）：执行核心不该关心通知长什么样。
+			res.StopCause = context.Cause(ctx)
+			// 保存已收到部分（用户消息已在调模型前落库）。
+			// 工具调用不需要在这里额外打断：支持 ctx 的工具在取消那一刻就已经
+			// 停下了（见 ai_tools.go 的 callToolWithTimeout）。
 			saveSegment(assistant, true)
 			sink.Event("done", doneEvent(res.ConvID, firstTokenAt, totalUsage, cfg.Model, rounds, len(records)))
 			res.Text = allText

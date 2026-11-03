@@ -17,8 +17,16 @@ import (
 
 // sseSink 把事件写回本地 SSE 流（AI 页的对话）。
 type sseSink struct {
-	fl     *sseFlusher
-	cancel context.CancelFunc
+	fl *sseFlusher
+	// cancel 用 CancelCauseFunc 而不是 CancelFunc：取消的原因要能带到执行核心
+	// 和通知逻辑里去（用户点停止 / 客户端断开 / 上游超时），否则只能一律
+	// 当成「用户中断」——刷个页面就收到一条「AI 回答已停止」。
+	cancel context.CancelCauseFunc
+	// onConvID 新会话 id 确定时的回调。
+	//
+	// 新建会话时请求里没有 convId（由后端生成），所以停止入口没法在 handler
+	// 开头注册——那条「用户点了停止」的信号会找不到落点。会话 id 一出来就补挂。
+	onConvID func(string)
 }
 
 // Push 合并写入文本碎片，顺带处理「下游已断」。
@@ -26,10 +34,13 @@ type sseSink struct {
 // 写失败就取消上游这条规则原来散在 onToken / reasonCb 里（各自写一遍
 // `if fl.failed() { cancel() }`）。收进 sink 之后只有一处，而且不会漏——
 // 漏掉的代价是前端已经断开、上游还在按 token 计费。
+//
+// 这里取消的原因固定是「客户端断开」：写失败的含义就是连接没了，
+// 与用户按停止无关（那个走 /ai/stop）。
 func (s *sseSink) Push(kind, text string) {
 	s.fl.push(kind, text)
 	if s.fl.failed() {
-		s.cancel()
+		s.cancel(errClientGone)
 	}
 }
 
@@ -43,7 +54,12 @@ func (s *sseSink) Event(kind string, data map[string]any) {
 func (s *sseSink) Failed() bool { return s.fl.failed() }
 
 // SetConvID 新建会话后把 id 交回分帧层（见 convIDSetter 的说明）。
-func (s *sseSink) SetConvID(id string) { s.fl.setConvID(id) }
+func (s *sseSink) SetConvID(id string) {
+	s.fl.setConvID(id)
+	if s.onConvID != nil && id != "" {
+		s.onConvID(id)
+	}
+}
 
 // dbSink 把执行事件写进 agent_events 表（后台执行 / 子 agent 用）。
 //

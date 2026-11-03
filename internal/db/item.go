@@ -153,6 +153,44 @@ func (d *Database) ListAllItems() ([]CollectionItem, error) {
 	return items, serr
 }
 
+// ItemAuthDirs 返回快捷项里「能当授权目录用」的目录：类型为 dir 的条目，以及任意
+// 条目上登记的工作目录。
+//
+// 为什么不能复用 ListAllItems：后者为了菜单图标回填（persistExtractedIcons）会在返回前
+// 对整个结果集做一条大 UPDATE，还要按 usage_count 排序扫 18 列。fsguard 每个工具调用
+// 都要问一次授权目录，走那条路等于每次 file_read 都搭上一次全表读 + 一次写事务，
+// 与流式落库抢写锁——表现为回答中途卡一下。
+//
+// 不带 LIMIT：条目总量本身有界，而这里一旦截断就是「排在后面的目录突然没权限」，
+// 用户完全无从理解。
+func (d *Database) ItemAuthDirs() ([]string, error) {
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	rows, err := d.conn.Query(
+		`SELECT value, working_directory FROM items
+		 WHERE (LOWER(type) = 'dir' AND TRIM(value) <> '') OR TRIM(working_directory) <> ''`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var value, wd sql.NullString
+		if err := rows.Scan(&value, &wd); err != nil {
+			return nil, err
+		}
+		if s := strings.TrimSpace(value.String); s != "" {
+			out = append(out, s)
+		}
+		if s := strings.TrimSpace(wd.String); s != "" {
+			out = append(out, s)
+		}
+	}
+	return out, rows.Err()
+}
+
 // scanItems 通用 items 行扫描器。
 // 调用方必须已持有 d.mu（本方法只被持锁的查询方法调用）。
 // 提取成功的图标只在内存里回填 item.Icon，不做 DB 写回——写回归入 persistExtractedIcons，

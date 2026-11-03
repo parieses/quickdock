@@ -49,6 +49,15 @@ type AIService struct {
 	injectsMu sync.Mutex
 	injects   map[string]*injectQueue
 
+	// 会话 → 正在跑那一轮的取消函数（见 ai_stop.go）。
+	//
+	// 存在的唯一理由：用户点停止与页面断开（刷新 / 关窗 / 网络断）在 HTTP 层
+	// 完全一样——都是 r.Context() 取消，不附带任何信息。没有这条显式信号，
+	// 后端只能把两者都当「用户中断」，于是刷一下页面，通知中心就多一条
+	// 「AI 回答已停止」，而用户根本没按过停止。
+	stopsMu sync.Mutex
+	stops   map[string]*stopSlot
+
 	// 外部 MCP server 接入状态（见 ext_mcp.go）。
 	ext *extManager
 

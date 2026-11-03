@@ -23,6 +23,8 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
+	"time"
 
 	"quickdock/internal/db"
 	"quickdock/internal/platform"
@@ -228,23 +230,57 @@ func WriteRoots(database *db.Database, cwd string) []string {
 	return normalizeRoots(roots, true)
 }
 
-// authorizedDirs 从快捷项里取出用户显式登记过的目录。
+// rootsCacheTTL 授权目录的缓存时长。
+//
+// 为什么需要缓存：ReadRoots / WriteRoots 在每一次工具调用前都会被问一遍
+// （file_read、file_edit、dir_list、file_grep、cmd_run …全部要过闸）。原来每次都
+// 查一次 items 全表（含一次大 UPDATE）加两次 ai_spaces/ai_conversations 的 DISTINCT，
+// 20 轮工具调用就是 20 次全表读 + 20 次写事务，与流式落库抢写锁 ——
+// 用户看到的是「回答中途卡一下」。
+//
+// 为什么不做成「一次 run 内快照」：fsguard 是包级函数，拿不到 ctx；而带 ctx 的
+// 那套签名要改遍所有工具。TTL 足够覆盖同一次 run 的连发调用，代价只剩一个极短窗口。
+//
+// 3 秒是权衡：用户「加个快捷项 → 立刻让 AI 读那个目录」中间几乎必然超过 3 秒
+// （要先切窗口、打字），而单次 run 里连续调工具通常远小于 3 秒。
+const rootsCacheTTL = 3 * time.Second
+
+var (
+	rootsMu    sync.Mutex
+	rootsOwner *db.Database
+	rootsDirs  []string
+	rootsAt    time.Time
+)
+
+// InvalidateRoots 丢掉授权目录缓存。条目/空间/会话目录发生写入时调用，
+// 让下一次工具调用的判断立刻反映新状态（否则最多滞后 rootsCacheTTL）。
+func InvalidateRoots() {
+	rootsMu.Lock()
+	rootsDirs = nil
+	rootsAt = time.Time{}
+	rootsMu.Unlock()
+}
+
+// authorizedDirs 从快捷项里取出用户显式登记过的目录（带短时缓存）。
 func authorizedDirs(database *db.Database) []string {
 	if database == nil {
 		return nil
 	}
-	items, err := database.ListAllItems()
+	rootsMu.Lock()
+	// 用时间戳而不是「切片非空」判断命中：目录可能真的是空的（新库、没加任何快捷项），
+	// 那时缓存结果就是 nil，用非空判断会每次重新查库。
+	if rootsOwner == database && !rootsAt.IsZero() && time.Since(rootsAt) < rootsCacheTTL {
+		out := rootsDirs
+		rootsMu.Unlock()
+		return out
+	}
+	rootsMu.Unlock()
+
+	// 查库在锁外做：ListAllItems 自己会拿 db 的读锁，若把网络/IO 也塞进 rootsMu，
+	// 并发的工具调用会在这里串行排队（原来就是这样，只是没人注意）。
+	items, err := database.ItemAuthDirs()
 	if err != nil {
 		return nil
-	}
-	out := make([]string, 0, len(items)*2)
-	for _, it := range items {
-		if strings.EqualFold(strings.TrimSpace(it.Type), "dir") && strings.TrimSpace(it.Value) != "" {
-			out = append(out, it.Value)
-		}
-		if wd := strings.TrimSpace(it.WorkingDirectory); wd != "" {
-			out = append(out, wd)
-		}
 	}
 	// AI 空间 / 会话绑定的工作目录：用户是在新建任务时亲手选的目录，
 	// 授权强度与「加个快捷项」相同，只是没在 items 表里留痕。
@@ -252,7 +288,11 @@ func authorizedDirs(database *db.Database) []string {
 	// 不加这一段会留下一个自相矛盾的状态——AI 能把文件写进空间目录
 	//（写权限会把会话 cwd 拼进白名单），却预览不了自己刚写的文件
 	//（预览走的是这个函数，此前只看快捷项）。用户看到的就是「没有权限」。
-	out = append(out, database.AIWorkDirs()...)
+	out := append(items, database.AIWorkDirs()...)
+
+	rootsMu.Lock()
+	rootsOwner, rootsDirs, rootsAt = database, out, time.Now()
+	rootsMu.Unlock()
 	return out
 }
 

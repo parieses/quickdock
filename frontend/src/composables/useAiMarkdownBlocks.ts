@@ -12,7 +12,7 @@ import type { Ref } from 'vue'
 import type { Marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { stripDsmlMarkup } from '../utils/dsmlMarkup'
-import { splitMarkdownBlocks as splitBlocks } from '../utils/markdownBlocks'
+import { createBlockSplitter, splitMarkdownBlocks as splitBlocks } from '../utils/markdownBlocks'
 
 export interface LiveBlock {
   raw: string
@@ -49,6 +49,23 @@ export function useAiMarkdownBlocks(deps: Deps) {
   // 导致流式期间「已完成的块」每帧都被重新解析 —— 恰好是最需要流畅的时候掉帧。
   // 流式块的规模只与单次回复的段落数有关，不会无限增长，故不设上限。
   const liveBlockCache = new Map<string, string>()
+
+  // 每条流各自的增量切块器。
+  //
+  // 用输出数组做 key（WeakMap，run 结束后自动回收）：一个 run 一份切块状态，
+  // 多条任务同时跑时互不干扰。用「字符串 → 状态」做全局缓存放不下这个维度——
+  // 两条 run 的文本可能一模一样（同一个问题跑两遍），共享状态会互相把对方的
+  // 已确认前缀顶掉。
+  const splitters = new WeakMap<LiveBlock[], ReturnType<typeof createBlockSplitter>>()
+
+  function splitterFor(blocks: LiveBlock[]) {
+    let s = splitters.get(blocks)
+    if (!s) {
+      s = createBlockSplitter()
+      splitters.set(blocks, s)
+    }
+    return s
+  }
 
   // 以「围栏代码块之外的空行」为界切块：切分点必须是 markdown 语义上独立的边界，
   // 否则分块渲染与整段渲染结果不一致（表现为流式过程中内容突然变形）。
@@ -93,8 +110,10 @@ export function useAiMarkdownBlocks(deps: Deps) {
   function renderLiveBlocks(src: string, blocks?: LiveBlock[]) {
     // 与历史消息同一个口径：先剥掉工具调用标记，再切块渲染。
     // 后端已经在流式层拦过一次（services/ai/ai_dsml.go），这里是幂等的兜底。
-    const raws = splitMarkdownBlocks(stripDsmlMarkup(src))
     const arr = blocks ?? deps.streamBlocks?.value ?? []
+    // 切块走增量：只扫新增部分与最后那块还没定型的文本（见 markdownBlocks.ts
+    // 的 createBlockSplitter）。原来每帧对全文 split + 状态机，回答越长越卡。
+    const raws = splitterFor(arr).feed(stripDsmlMarkup(src))
     const n = raws.length
     // 已完成块的数量：raws 的前 n-1 块（最后一块是进行中的）
     const doneCount = n > 0 ? n - 1 : 0
@@ -116,12 +135,18 @@ export function useAiMarkdownBlocks(deps: Deps) {
     }
     // 最后一块（进行中）：无条件重渲染，且不写入缓存（原文每帧都变）
     if (n > 0) {
-      const html = renderBlock(raws[n - 1], false)
-      if (doneCount < arr.length) {
-        if (arr[doneCount].html !== html) arr[doneCount].html = html
-        arr[doneCount].raw = raws[n - 1]
-      } else {
-        arr.push({ raw: raws[n - 1], html })
+      const lastRaw = raws[n - 1]
+      const slot = doneCount < arr.length ? arr[doneCount] : null
+      // 文本这一帧没变就别重解析：工具调用期间 flush 由 tool_output 事件驱动，
+      // 正文一个字都没多，末块却会被 md.parse + DOMPurify 再来一遍。
+      if (!slot || slot.raw !== lastRaw) {
+        const html = renderBlock(lastRaw, false)
+        if (slot) {
+          if (slot.html !== html) slot.html = html
+          slot.raw = lastRaw
+        } else {
+          arr.push({ raw: lastRaw, html })
+        }
       }
     }
     if (arr.length > n) arr.length = n

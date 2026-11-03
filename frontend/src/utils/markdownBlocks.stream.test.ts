@@ -10,7 +10,7 @@
  */
 import { describe, test, expect } from 'vitest'
 import { Marked } from 'marked'
-import { splitMarkdownBlocks } from './markdownBlocks'
+import { createBlockSplitter, splitMarkdownBlocks, type BlockSplitter } from './markdownBlocks'
 
 const md = new Marked({ breaks: true, gfm: true })
 
@@ -29,9 +29,22 @@ class BlockCache {
 
 interface LiveBlock { raw: string; html: string }
 
+/**
+ * 每条流一份切块器，按块数组区分（与 useAiMarkdownBlocks 的 WeakMap 同构）。
+ *
+ * 必须按流隔离：两条回复的文本可能一模一样（同一个问题跑两遍），共用一个切块器
+ * 时，后一条的「已确认前缀」会把前一条顶掉，前一条的块就全乱了。
+ */
+const splitters = new WeakMap<LiveBlock[], BlockSplitter>()
+
 /** 复刻 AIPage 的 renderLiveBlocks */
 function renderLive(blocks: LiveBlock[], src: string, cache: BlockCache): void {
-  const raws = splitMarkdownBlocks(src)
+  let sp = splitters.get(blocks)
+  if (!sp) {
+    sp = createBlockSplitter()
+    splitters.set(blocks, sp)
+  }
+  const raws = sp.feed(src)
   const n = raws.length
   const doneCount = n > 0 ? n - 1 : 0
   let common = 0
@@ -138,11 +151,42 @@ describe('流式增量渲染', () => {
     renderLive(blocks, '# 标题\n\n第一段。', cache)
     expect(blocks).toHaveLength(2)
     const firstHtml = blocks[0].html
-    renderLive(blocks, '# 标题\n\n第一段。\n\n新段落。', cache)
+    // 末尾带上换行：增量切块对「后面还没有内容」的空行不下结论（见
+    // createBlockSplitter 的注释），没有这个 \n，第二段还挂在待定区里没定型。
+    renderLive(blocks, '# 标题\n\n第一段。\n\n新段落。\n', cache)
     expect(blocks).toHaveLength(3)
     expect(blocks[0].html).toBe(firstHtml)
     expect(blocks[0].html).toContain('标题')
     expect(blocks[2].html).toContain('新段落')
+  })
+
+  test('松散列表跨空行不被切开（增量版最容易踩的坑）', () => {
+    // `- a` 空行 `- b` 在 markdown 里是同一个列表，从中间切开会渲染成两个 <ul>。
+    // 增量切块必须等到「空行后面那个非空行」到了才能判断能不能切。
+    const src = '- 一\n\n- 二\n\n- 三\n'
+    const sp = createBlockSplitter()
+    // 逐字喂入：每一步的块数都不能超过 1（中间三行属于同一个列表）
+    for (let i = 1; i <= src.length; i++) {
+      const blocks = sp.feed(src.slice(0, i))
+      expect(blocks.length, `在「${src.slice(0, i)}」处被切成了 ${blocks.length} 块`).toBe(1)
+    }
+    expect(sp.feed(src)[0]).toContain('- 二')
+  })
+
+  test('围栏代码块内部不被切开', () => {
+    const src = '说明\n\n```go\nfunc a() {}\n\nfunc b() {}\n```\n\n结尾\n'
+    const sp = createBlockSplitter()
+    for (let i = 1; i <= src.length; i++) {
+      const blocks = sp.feed(src.slice(0, i))
+      // 中途代码块是「未闭合」状态，块里出现一个 ``` 是正常的；不能出现的是
+      // 代码块被空行切开（那样话末尾会多出独立的块）。
+      expect(blocks.length, `在「${src.slice(0, i)}」处块数异常`).toBeLessThanOrEqual(3)
+    }
+    const final = sp.feed(src)
+    const codeBlock = final.find((b) => b.includes('func a()'))
+    expect(codeBlock, '代码块不见了').toBeTruthy()
+    // 内部那个空行不能成为切分点
+    expect(codeBlock).toContain('func b()')
   })
 
   test('流式结束后与落地消息的渲染结果一致', () => {

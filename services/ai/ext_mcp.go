@@ -42,6 +42,19 @@ const extManifestName = "mcp.json"
 // 可用，模型可以提示用户去面板精简。
 const extToolsMax = 80
 
+// extToolsMaxBytes 外部工具进 tools[] 的**体积**上限（description + parameters 之和）。
+//
+// 只数条数不够：一个 GitHub MCP 的单条描述实测能到 2KB，80 条就是每轮固定多付
+// 十几万 token，而且这还不算 parameters 里的 JSON Schema。48KB 大致对应一万多
+// token 的固定开销，是「接了四五个 MCP 还不至于把上下文吃掉一半」的量级。
+const extToolsMaxBytes = 48 * 1024
+
+// extToolDescMaxRune 单个外部工具的顶层描述上限。
+//
+// 截的是工具级那句说明，schema 里各 property 的说明一个字不动——那才是模型
+// 填参数时真正读的部分。长描述几乎都是 server 作者粘贴的用法文档与示例。
+const extToolDescMaxRune = 600
+
 // extServerState 一个外部 server 的运行时状态（前端展示用）。
 type extServerState struct {
 	Name   string                 `json:"name"`
@@ -286,8 +299,26 @@ func (m *extManager) Close() {
 }
 
 // extToolsOverflowHint 模型 tools[] 超限时给模型的说明。
-const extToolsOverflowHint = "\n\n[外部工具] 本次未挂载全部外部 MCP 工具（总数超过上限）。" +
+const extToolsOverflowHint = "\n\n[外部工具] 本次未挂载全部外部 MCP 工具（数量或体积超过上限）。" +
 	"没有列出的工具本次调不到；确实需要时，提示用户在「设置 → AI」精简已接入的外部服务器。\n"
+
+// extServerOf 从外部工具的 description 里取回它属于哪个 server。
+//
+// 按 `[MCP:<server>]` 前缀取，而不是拆工具名的 `mcp_<server>_` 前缀：
+// sanitizeExtName 会把 server 名里的非字母数字换成下划线，`git-hub` 与 `git_hub`
+// 拆出来是同一个前缀，靠名字反推会把两个 server 合成一组（于是「挂不下就整组
+// 跳过」会误伤另一个）。description 里那个是原始名，没有歧义。
+func extServerOf(desc string) string {
+	const p = "[MCP:"
+	if !strings.HasPrefix(desc, p) {
+		return ""
+	}
+	rest := desc[len(p):]
+	if i := strings.Index(rest, "]"); i > 0 {
+		return rest[:i]
+	}
+	return ""
+}
 
 // -------- AIService 接线 --------
 

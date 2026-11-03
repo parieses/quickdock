@@ -48,7 +48,8 @@ interface Props {
   foldSpaceTasks: number
 
   openNewTask: () => void
-  selectConv: (id: string) => void
+  /** msgId 只在「正文命中的搜索入口」传：切过去之后还要落到那句话上 */
+  selectConv: (id: string, msgId?: string) => void
   /** 这条任务的目录：隔离工作区 > 会话目录 > 所属空间目录；空串 = 还没有目录 */
   convDir: (c: AIConversation) => string
   /** 在系统文件管理器里打开某个目录（任务与空间共用；失败提示由父组件统一 toast） */
@@ -282,7 +283,7 @@ onBeforeUnmount(() => {
             v-for="h in msgHits"
             :key="h.conv_id"
             :class="['ai-conv-item', 'is-msg-hit', { active: h.conv_id === activeId }]"
-            @click="selectConv(h.conv_id)"
+            @click="selectConv(h.conv_id, h.latest.msg_id)"
             @contextmenu.stop="openCtxMenu($event, { kind: 'conv', conv: convById(h.conv_id) })"
           >
             <Search :size="11" class="ai-conv-mode" />

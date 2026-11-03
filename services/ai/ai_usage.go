@@ -89,6 +89,14 @@ func addTokenUsage(a, b db.TokenUsage) db.TokenUsage {
 	}
 }
 
+// tokensOf 一次调用/一个累计量一共多少 token（输入 + 输出）。
+//
+// 预算判断只用这两个之和：缓存命中的输入（Cached）已经在 Prompt 里算过一次，
+// 再加一遍会让「省了钱的调用」被当成「花得更多」。
+func tokensOf(u db.TokenUsage) int {
+	return u.Prompt + u.Completion
+}
+
 // recordAIChatTurn 记录多轮工具循环里的一轮模型调用。
 //
 // 与 recordAIUsage 的唯一差别在会话行：

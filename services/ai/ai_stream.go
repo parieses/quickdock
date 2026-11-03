@@ -66,6 +66,8 @@ func (a *AIService) StartAIStreamServer() {
 	mux.HandleFunc("/ai/stream", s.handle)
 	// 运行中插入消息（见 ai_inject.go）：前端在这一轮还没跑完时发的下一句。
 	mux.HandleFunc("/ai/inject", s.handleInject)
+	// 用户点停止（见 ai_stop.go）：与「页面断开」区分开，只为把话说对。
+	mux.HandleFunc("/ai/stop", s.handleStop)
 	// 面板类问答（SSH / 剪贴板 / 笔记，见 ai_ask_stream.go）：同一套 SSE，
 	// 让它们不必再依赖 Wails 事件来逐字显示。
 	mux.HandleFunc("/ai/ask-stream", s.handleAskStream)
@@ -191,8 +193,31 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	// 跟随请求上下文，前端 abort 时 r.Context() 取消，立即停止读取模型流。
 	// defer 顺序要紧：cancel 先注册、fl.close 后注册，于是 close 先执行（LIFO），
 	// 与改造前一致——先把残留帧冲刷干净，再撤掉上下文。
-	ctx, cancel := context.WithCancel(r.Context())
-	defer cancel()
+	//
+	// 用 WithCancelCause 而不是 WithCancel：取消的原因要能传下去。r.Context()
+	// 被取消时原因只能是 context.Canceled（HTTP 层不区分），但用户点停止会先在
+	// /ai/stop 里用 errStopByUser 掐一次，那个原因就留在了这条 ctx 上。
+	ctx, cancelCause := context.WithCancelCause(r.Context())
+	defer cancelCause(nil)
+
+	// 停止入口：请求里的 convId 已知就现在挂，新建会话则等 id 出来再挂
+	// （见 sseSink.onConvID）。注销放在 handler 退出时统一做，因为 id 可能是
+	// 后来才有的。
+	var stopConvID string
+	var stopSlot *stopSlot
+	registerStop := func(id string) {
+		if id == "" || stopConvID != "" {
+			return
+		}
+		stopConvID = id
+		stopSlot = s.svc.registerStop(id, cancelCause)
+	}
+	registerStop(strings.TrimSpace(req.ConvID))
+	defer func() {
+		if stopConvID != "" {
+			s.svc.unregisterStop(stopConvID, stopSlot)
+		}
+	}()
 
 	// 从这里开始 fl 是响应体的唯一写者（后台协程会批量写 token）。
 	//
@@ -214,15 +239,26 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		Permission:     req.Permission,
 		Worktree:       req.Worktree,
 		WorktreeBranch: req.WorktreeBranch,
-	}, &sseSink{fl: fl, cancel: cancel})
+	}, &sseSink{fl: fl, cancel: cancelCause, onConvID: registerStop})
 
 	// 每次回答结束都通知：用户常在别处干活，跑完/中断/失败都需要被叫回来，
 	// 否则他不知道 AI 已经答完（尤其被切到后台、或去干别的了）。
-	if res.Err == nil && !res.Stopped {
+	//
+	// 但「中断」要分两种：用户按的停止配得上一条通知；页面自己断了（刷新、
+	// 关窗、网络断）也弹「AI 回答已停止」就是在骗人——他根本没按过。
+	switch {
+	case res.Err == nil && !res.Stopped:
 		s.notifyAIDone(res.ConvID, req.Message, res.Text)
-	} else if res.Stopped {
+	case res.Stopped && errors.Is(res.StopCause, errStopByUser):
 		s.svc.App.PushNotification("ai", "info", "AI 回答已停止", logger.Trunc(strings.TrimSpace(req.Message), 24), "ai", res.ConvID)
-	} else {
+	case res.Stopped:
+		// 客户端断开：半截内容已经落库（saveSegment 里标了 stopped），这里只留痕。
+		// 之所以还发一条 warn：如果是刷新页面，用户回来会看到半条回答，需要知道
+		// 原因；如果是关掉应用，通知也跟着进程一起没了，不会造成噪音。
+		logger.I("[ai] 客户端断开导致本轮结束 conv=%s cause=%v", res.ConvID, res.StopCause)
+		s.svc.App.PushNotification("ai", "warn", "AI 回答被中断",
+			"页面连接断开了，只保存了已生成的部分（"+logger.Trunc(strings.TrimSpace(req.Message), 24)+"）", "ai", res.ConvID)
+	default:
 		s.svc.App.PushNotification("ai", "error", "AI 回答失败", logger.Trunc(res.Err.Error(), 160), "ai", res.ConvID)
 	}
 }
@@ -297,6 +333,36 @@ func (s *aiStreamServer) handleInject(w http.ResponseWriter, r *http.Request) {
 	_, _ = io.WriteString(w, `{"ok":true,"interrupted":`+strconv.FormatBool(cut)+`}`)
 }
 
+// handleStop 接收「用户点了停止」。
+//
+// 为什么需要它：点停止最直接的做法是 abort 掉 fetch，而 abort 与刷新页面、
+// 关闭窗口、网线被拔在 HTTP 层完全一样——都是 r.Context() 取消。后端没有
+// 别的通道能知道「这一次断开是用户主动的」，于是只能一律记成用户中断，
+// 症状是刷一下页面就收到一条「AI 回答已停止」。
+//
+// 只入队一个取消原因，不等待执行收尾：请求立刻返回，前端拿到 ok 就 abort，
+// 停止按钮的手感不变。
+func (s *aiStreamServer) handleStop(w http.ResponseWriter, r *http.Request) {
+	defer recoverPanic("ai stop handler")
+
+	if !s.prepareStream(w, r) {
+		return
+	}
+
+	var req struct {
+		ConvID string `json:"convId"`
+	}
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&req); err != nil {
+		http.Error(w, "请求解析失败", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	// ok=false 不是错误：这一轮可能刚好自己结束了。前端照常 abort，
+	// 只是后端不会把它记成「用户停止」（那时它本来也已经正常收尾了）。
+	_, _ = io.WriteString(w, `{"ok":`+strconv.FormatBool(s.svc.requestStop(req.ConvID))+`}`)
+}
+
 // doneEvent 组装流式结束事件：附带首字延迟与本次用量，回传前端展示。
 // 字段名与前端 AIPage 的读取保持一致（promptTokens/completionTokens）。
 // 字段缺失（上游未回 usage）时为 0，前端按 0 隐藏即可。
@@ -343,6 +409,7 @@ type sseFlusher struct {
 	mu     sync.Mutex
 	w      http.ResponseWriter
 	f      http.Flusher
+	rc     *http.ResponseController
 	convID string
 
 	pending []sseFrame // 待下发的 token 帧（按产生顺序）
@@ -361,16 +428,47 @@ type sseFrame struct {
 // sseBatchWindow 合并窗口：20ms 约 3 帧以内，人眼不可辨延迟。
 const sseBatchWindow = 20 * time.Millisecond
 
+// sseWriteTimeout 单次写响应的上限。
+//
+// 为什么必须设：对端如果变成半开连接（笔记本合盖、Wi-Fi 掉线、代理静默丢包），
+// Write 会一直阻塞在 TCP 发送缓冲里——不报错、不返回。那时后台 flush 协程卡死，
+// close() 里的 <-done 也跟着卡死，整个 handler 永远不退出，连带那条 agent 协程
+// 与它持有的 ctx。一两条这样的连接看起来只是「回答卡住」，积几条就是进程内
+// 一批永远不会结束的请求。
+const sseWriteTimeout = 15 * time.Second
+
+// sseCloseWait close() 等待后台协程退出的上限。
+//
+// 写超时已经能让阻塞的写自己失败，这里是第二道闸：万一某次写卡在
+// ResponseController 不支持的老 writer 上，handler 也不该被它拖住。
+//
+// 必须比 sseWriteTimeout 大：否则一次正在进行的写还没到截止时间，handler 就
+// 先返回了，而后台协程会往一个已经交还给 net/http 的连接上继续写——那种写入
+// 是未定义行为，可能污染同一条复用连接上的下一个响应。
+const sseCloseWait = sseWriteTimeout + 5*time.Second
+
 func newSSEFlusher(w http.ResponseWriter, f http.Flusher, convID string) *sseFlusher {
 	s := &sseFlusher{
 		w:      w,
 		f:      f,
+		rc:     http.NewResponseController(w),
 		convID: convID,
 		stop:   make(chan struct{}),
 		done:   make(chan struct{}),
 	}
 	go s.loop()
 	return s
+}
+
+// arm 给下一次写设一个截止时间。
+//
+// 用 http.ResponseController 而不是自己拿 net.Conn：经过中间件包装的
+// ResponseWriter 只有它能穿透到真正的连接。SetWriteDeadline 返回
+// ErrNotSupported 时静默放过——那是测试里的假 writer，不该因此报错。
+func (s *sseFlusher) arm() {
+	if s.rc != nil {
+		_ = s.rc.SetWriteDeadline(time.Now().Add(sseWriteTimeout))
+	}
 }
 
 // setConvID 补上会话 id。
@@ -415,6 +513,7 @@ func (s *sseFlusher) writeEvent(event string, data map[string]any) error {
 	if err != nil {
 		return err
 	}
+	s.arm()
 	if _, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, b); err != nil {
 		s.err = err
 		return err
@@ -431,6 +530,9 @@ func (s *sseFlusher) failed() bool {
 }
 
 // close 停止后台协程并冲刷残留帧。流结束后必须调用。
+//
+// 有界等待：半开连接上的一次写可能卡到写截止时间才失败，这里不能无脑
+// `<-s.done`——那会把 handler 连同它持的 ctx 一起吊死（见 sseCloseWait）。
 func (s *sseFlusher) close() {
 	s.mu.Lock()
 	if s.closed {
@@ -440,7 +542,17 @@ func (s *sseFlusher) close() {
 	s.closed = true
 	s.mu.Unlock()
 	close(s.stop)
-	<-s.done
+	select {
+	case <-s.done:
+	case <-time.After(sseCloseWait):
+		logger.W("[ai] SSE 后台写出协程未在 %v 内退出（连接多半已半开），放弃等待", sseCloseWait)
+	}
+	// 撤掉写截止时间：截止时间是设在 TCP 连接上的，而这条连接随后可能被
+	// net/http 复用给下一个请求——留着一个已经过去的截止时间，下一个请求
+	// 一写就失败，症状是「偶尔某个请求立刻 500」，且与 AI 毫无关系。
+	if s.rc != nil {
+		_ = s.rc.SetWriteDeadline(time.Time{})
+	}
 }
 
 // flushLocked 冲刷队列（调用方须持有锁）。相邻同类型帧合并成一条。
@@ -464,6 +576,7 @@ func (s *sseFlusher) flushLocked() error {
 			s.err = err
 			return err
 		}
+		s.arm()
 		if _, err := fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", fr.event, b); err != nil {
 			s.err = err
 			return err

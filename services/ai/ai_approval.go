@@ -151,6 +151,28 @@ var approvalShellWords = map[string]bool{
 	"time": true, "nohup": true, "env": true, "nice": true, "start": true,
 }
 
+// approvalInterpreterWords 能执行任意命令的解释器。
+//
+// 与 approvalShellWords 的区别：那批是「一层壳」，跳过它取下一个词还是同一个程序
+// （`sudo rm` 记成 rm 是对的）；而这批的下一词是它自己的开关（`cmd /c …`、`bash -lc …`），
+// 取到的不是被执行的程序，按它记族毫无意义。
+//
+// 也不能像 sudo 那样跳过：跳过 `cmd` 会取到 `/c`，跳过 `bash` 会取到 `-lc`。
+// 唯一安全的做法是命中就不给「记住」——批准一次 `cmd` 等于放行之后任意
+// `cmd /c del /s /q …`，那比每次多点一次确认糟得多。
+var approvalInterpreterWords = map[string]bool{
+	// shell
+	"cmd": true, "powershell": true, "pwsh": true, "wsl": true,
+	"bash": true, "sh": true, "zsh": true, "fish": true,
+	"ksh": true, "csh": true, "tcsh": true, "dash": true,
+	// 脚本宿主：参数就是代码
+	"python": true, "python3": true, "py": true, "node": true, "deno": true,
+	"bun": true, "perl": true, "ruby": true, "php": true, "lua": true,
+	"osascript": true, "expect": true,
+	// 任意 jar / 类
+	"java": true, "javaw": true,
+}
+
 // approvalCommandHead 取一条命令的「首词」，用作命令族的标识。
 //
 // 返回空字符串表示「这条不该给记住按钮」——多段命令（含 && || ; | &）一律如此。
@@ -193,6 +215,9 @@ func approvalCommandHead(cmd string) string {
 		base = strings.TrimSuffix(base, ext)
 	}
 	if base == "" {
+		return ""
+	}
+	if approvalInterpreterWords[base] {
 		return ""
 	}
 	return base
@@ -468,10 +493,17 @@ func (a *AIService) registerGate(convID string, g *approvalGate) {
 
 // unregisterGate 必须在 runAgent 退出时调用，否则每问一次漏一个 gate
 // （连带它持住的 sink 与 map），长会话里是实打实的泄漏。
-func (a *AIService) unregisterGate(convID string) {
+//
+// 传 g 而不是只传 convID，是为了在锁内比对指针再删：停止后几百毫秒内用户
+// 又发一句时，旧 run 的 defer 可能晚于新 run 的 register 执行——只按 convID
+// 删就会把**新的**那个 gate 删掉，症状是新卡片点了没反应（前端以为在问，
+// 后端查表查不到），而日志里一切正常。
+func (a *AIService) unregisterGate(convID string, g *approvalGate) {
 	a.gatesMu.Lock()
 	defer a.gatesMu.Unlock()
-	delete(a.gates, convID)
+	if cur, ok := a.gates[convID]; ok && (g == nil || cur == g) {
+		delete(a.gates, convID)
+	}
 }
 
 func (a *AIService) gateFor(convID string) *approvalGate {
@@ -564,6 +596,18 @@ func aiApprovalRiskNote(name string, level int, args map[string]any) string {
 			return note
 		}
 		return "在本机执行一条命令，输出会回给模型"
+	}
+	if name == spawnAgentToolName {
+		// 这张卡要挡住的是「派活」这个动作，但用户很容易把它理解成「改几个文件」。
+		// 差别在于点完之后：子 agent 在自己的循环里跑，非高危命令不再逐次弹确认，
+		// 用户要到结果交回主对话才看得到发生了什么。不写这半句，
+		// 用户是在完全不知情的情况下批准了一个无人值守的执行者。
+		role := strings.ToLower(strings.TrimSpace(mcpsrv.Arg(args, "role")))
+		if spec, ok := agentRoleSpecs[role]; ok {
+			return "派一个子 agent 独立执行：" + spec.summary +
+				"。批准后它在自己的循环里连续动手，中途不会再逐条向你确认（高危命令仍被拒），结果交回本对话"
+		}
+		return "派一个子 agent 独立执行，中途不会再逐条向你确认（高危命令仍被拒）"
 	}
 	switch level {
 	case mcpsrv.LevelWrite:
