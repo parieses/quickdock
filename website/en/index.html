@@ -193,7 +193,7 @@
       </div>
       <div class="tool">
         <dt>Site monitor</dt>
-        <dd>Status codes, response time, SSL expiry, keyword matching. Pushes to the desktop or a webhook when a target flips state.</dd>
+        <dd>Four probe types — HTTP / TCP port / local process / custom command — with status codes, response time and SSL expiry. Pushes to the desktop or a webhook when a target flips state.</dd>
       </div>
       <div class="tool">
         <dt>Scheduled tasks</dt>
@@ -202,6 +202,10 @@
       <div class="tool">
         <dt>SSH terminal <kbd>Ctrl Alt S</kbd></dt>
         <dd>Tabbed sessions, SFTP, host key trust, batch execution across hosts. An AI sidebar docks on the right.</dd>
+      </div>
+      <div class="tool">
+        <dt>Git panel</dt>
+        <dd>SourceTree-style: branches, tags and remotes, stashes, file history and blame, amend, cherry-pick, branch comparison and side-by-side diff.</dd>
       </div>
       <div class="tool">
         <dt>Log tail</dt>
@@ -342,6 +346,21 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Built-in Git panel, four monitor probe types, and a charted dashboard</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>New Git panel (SourceTree-style): branch / tag / remote / submodule management, full stash support, file history and blame, amend, cherry-pick, branch comparison, side-by-side diff, multi-select batch actions and zip export.</li>
+          <li>Generate SSH keys right in the panel and write them into your config in one click: copy the public key, test the connection, switch origin from HTTPS to SSH — no more passwords on pull or push.</li>
+          <li>Monitors gain four probe types: HTTP, TCP port (databases / Redis / MQ), local process, and custom command (exit code 0 means up); existing data behaves exactly as before.</li>
+          <li>Redesigned dashboard: 24-hour uptime heatmap, todo distribution, recent commits, resident runtimes (DSH and Everything included) and port usage, with recently used items one click away.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.38</span>
+          <span class="log-date">2026-11-03</span>
           <span class="log-title">Faster, smarter command palette; schedule tasks pick from scenes; SSH window now gives feedback</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -387,28 +406,6 @@
           <li>Also: file-writing tools auto-approve inside authorised directories; a reply notifies on completion, interruption or failure; the dialog shows the current directory's git branch; the sidebar lists the first 10 tasks and folds the rest.</li>
         </ul>
       </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.35</span>
-          <span class="log-date">2026-10-31</span>
-          <span class="log-title">The built-in AI can now edit files and run commands — every step is askable, every change is undoable</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>The built-in AI is no longer chat-only: it reads your project, edits files and runs commands. Each step gets its own line in the reply — what it did, which file it touched — and edits are shown line by line.</li>
-          <li>Every write asks first: allow / remember / deny. Pending requests stay pinned above the input box, so scrolling back through the history doesn't lose them. "Remember" only covers the same command family — allow <code>git</code> and a different command still asks.</li>
-          <li>You can change that per tool: set <code>run_command</code> to automatic in a project where everything is a test run, or deny tools that send messages outright. Every allow and deny is recorded, so you can see how often it was asked this week.</li>
-          <li>Mistakes can be undone: files are snapshotted before they are touched, reverted step by step without disturbing other edits, and the revert itself can be reverted. Directories without git are safe to work in too.</li>
-          <li>Plan mode: it looks around read-only, hands you a step-by-step plan, and touches nothing until you say go.</li>
-          <li>Project conventions stop being repeated by hand: <code>AGENTS.md</code> and <code>.quickdock/rules/*.md</code> are read into context automatically, with optional per-path conditions (frontend rules only when frontend files are in play). A project's <code>hooks.json</code> can declare what runs after an edit, approved per directory.</li>
-          <li>Type <code>@</code> in the composer to pull in a file, a folder or a past conversation; long-running commands such as a dev server can be started in the background and checked later.</li>
-          <li>External MCP servers can be plugged in: their tools join the same switches and approvals instead of bypassing them.</li>
-          <li>Conversations can be starred, summarised in one click (what this was about, what was concluded, what is left) and exported as Markdown; files written during a reply hang below it and open in a preview, config files editable in place.</li>
-          <li>Also: the command palette queries projects, notes and todos in one go and jumps straight to any page; scenes and collections can be grouped and collapsed; notes gained batch operations and in-note search; todos can be rescheduled by dragging on the calendar; scheduled tasks can be paused in bulk with cross-task stats; monitoring gained alert muting and an uptime ring.</li>
-        </ul>
-      </details>
-
 
     </div>
 

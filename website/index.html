@@ -193,7 +193,7 @@
       </div>
       <div class="tool">
         <dt>网站监控</dt>
-        <dd>状态码、响应时间、SSL 到期、关键字匹配。状态翻转时推送到桌面或 Webhook。</dd>
+        <dd>HTTP / TCP 端口 / 本机进程 / 自定义命令四种探针，看状态码、响应时间、SSL 到期。状态翻转时推送到桌面或 Webhook。</dd>
       </div>
       <div class="tool">
         <dt>定时任务</dt>
@@ -202,6 +202,10 @@
       <div class="tool">
         <dt>SSH 终端 <kbd>Ctrl Alt S</kbd></dt>
         <dd>多标签会话、SFTP 文件管理、指纹信任、多主机批量执行。终端右侧可以挂 AI 侧栏。</dd>
+      </div>
+      <div class="tool">
+        <dt>Git 面板</dt>
+        <dd>对标 SourceTree：分支 / 标签 / 远端管理，贮藏，文件历史与 blame，amend、cherry-pick、分支对比、side-by-side diff。</dd>
       </div>
       <div class="tool">
         <dt>日志尾随</dt>
@@ -342,6 +346,21 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">内置 Git 可视化面板，监控支持四种探针，总览改成图表</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>全新 Git 面板（对标 SourceTree）：分支 / 标签 / 远端 / 子模块管理，贮藏全套，文件历史与逐行归属（blame），amend、cherry-pick、分支对比、side-by-side diff，多选批量操作，导出存档。</li>
+          <li>SSH 密钥在面板里生成并一键写入 config：公钥复制、连接测试、origin 由 HTTPS 切 SSH，拉推代码不再要密码。</li>
+          <li>监控探针扩到四种：HTTP、TCP 端口（探数据库 / Redis / MQ）、本机进程、自定义命令（退出码 0 即正常）；老数据升级后行为不变。</li>
+          <li>总览页改版：24 小时探测热力条、待办分布、最近提交、常驻运行时（含 DSH 与 Everything）与端口占用，最近使用横排直达。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.38</span>
+          <span class="log-date">2026-11-03</span>
           <span class="log-title">命令面板更快更准，定时任务能挑场景里的项目，SSH 窗口有反馈了</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -387,28 +406,6 @@
           <li>其余：授权目录内写文件类工具默认免确认；回答结束不论完成、中断还是失败都通知；对话框能显示当前目录的 git 分支；侧栏任务列表只先展示前 10 条，多余的折叠。</li>
         </ul>
       </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.35</span>
-          <span class="log-date">2026-10-31</span>
-          <span class="log-title">AI 能改文件、跑命令了，每一步都能拦下来，改错还能撤回</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>内置 AI 不再只是聊天：它能直接读项目、改文件、跑命令。回答里每一步单独一行「做了什么、动了哪个文件」，改动按行标出增删。</li>
-          <li>动手前逐次确认：允许 / 记住 / 拒绝三选一，待确认的条目固定停在输入框上方，往上翻历史也看得见。「记住」只对同一族命令生效——点了 <code>git</code> 就只放行 git，换个命令照样问。</li>
-          <li>哪个工具该不该问可以逐个改：把 <code>run_command</code> 设成自动（项目里只有测试命令时），或把发消息这类工具直接禁掉。每次放行与拒绝都有账，能看到这一周被问了多少次。</li>
-          <li>改错能撤回：动文件前自动存快照，按步回退，不影响别的改动；回退本身也能再撤一步。没有 git 的目录也敢让它动手。</li>
-          <li>计划模式：先只读看一遍项目、给出分步计划，一个文件都不动，看完再决定要不要它做。</li>
-          <li>项目约定不必每次重复：<code>AGENTS.md</code> 与 <code>.quickdock/rules/*.md</code> 自动读进上下文，还能按路径条件加载（改前端时才加载前端那份）；项目里的 <code>hooks.json</code> 可声明改完文件跑什么，按目录批准才执行。</li>
-          <li>输入框打 <code>@</code> 直接引用文件、目录或历史对话；dev server 这类不会自己结束的命令可以挂到后台跑，之后单独查输出。</li>
-          <li>也能把外部 MCP server 接进来：别人写的工具并进同一套开关与审批，不绕过闸门。</li>
-          <li>会话可星标置顶、一键摘要（这段在解决什么、有哪些结论、还剩什么），可导出 Markdown；回答里写过的文件挂在下面，点开即预览，配置文件能就地改。</li>
-          <li>其余：命令面板的项目 / 笔记 / 待办一次查完，还能直接跳到任一功能页；场景与集合可起组名按组折叠；笔记支持批量操作与笔记内搜索；待办日历能拖拽改期；定时任务可批量启停并跨任务统计；监控加了告警静默与正常率环形图。</li>
-        </ul>
-      </details>
-
 
     </div>
 

@@ -190,10 +190,10 @@
 
         <section class="doc-sec" id="s10">
           <h2><span>10</span>Monitors</h2>
-          <p>Create one under Site Monitor in the sidebar. An address and an interval is enough.</p>
+          <p>Create one under Site Monitor in the sidebar: pick a probe type, fill in the target and an interval.</p>
           <ul>
-            <li>Shows status code, response time and days left on the SSL certificate, and can require a keyword or a regex in the response body.</li>
-            <li>Latency jitter isn't an outage; adjust the threshold in settings so a network hiccup doesn't page you.</li>
+            <li>Four probe types: HTTP (status code / keyword / regex), TCP port (a connect means up — databases, Redis, MQ), local process (present means up), and custom command (exit code 0 means up).</li>
+            <li>HTTP monitors show status code, response time and days left on the SSL certificate. Latency jitter isn't an outage; adjust the threshold in settings so a network hiccup doesn't page you.</li>
             <li>A state flip pushes a desktop notification, or DingTalk, WeCom, Feishu, ServerChan, PushPlus or Telegram.</li>
             <li>Trend charts cover 24 hours, 7 days and all time; the monitor list exports to CSV.</li>
             <li>Every notification also lands in the bell at the bottom of the sidebar, and clicking one jumps to its monitor. AI completion notices stay quiet while the window is in front of you.</li>
