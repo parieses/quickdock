@@ -95,6 +95,7 @@ const emit = defineEmits<{
   (e: 'open-file-picker'): void
   (e: 'toggle-url'): void
   (e: 'fill-tip', key: string): void
+  (e: 'shuffle-tips'): void
   (e: 'open-settings'): void
   (e: 'toggle-plus'): void
   (e: 'pick-skill', sk: AISkill): void
@@ -304,6 +305,10 @@ function onModelSelect(e: Event) {
         <button class="ai-go-settings" @click="emit('open-settings')">{{ t('aiGoSettings') }}</button>
       </p>
 
+      <div class="ai-hero-tips-head">
+        <span class="ai-hero-tips-label">{{ t('aiHeroTipsLabel') }}</span>
+        <button class="ai-hero-tips-shuffle" type="button" :title="t('aiHeroTipShuffle')" @click="emit('shuffle-tips')">{{ t('aiHeroTipShuffle') }}</button>
+      </div>
       <div class="ai-hero-tips">
         <button v-for="k in props.heroTips" :key="k" class="ai-hero-tip" @click="emit('fill-tip', k)">
           {{ t(k) }}
@@ -540,6 +545,37 @@ select.ai-hero-select:focus-visible {
 }
 
 .ai-hero-tips { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
+
+/* 示例区头部：左标签 + 右侧「换一批」（点击重新随机一批示例）。
+   与底栏同款小胶囊视觉语言，整页输入框上下风格统一。 */
+.ai-hero-tips-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.ai-hero-tips-label {
+  font-size: 11px;
+  color: var(--color-text-disabled);
+  flex-shrink: 0;
+}
+
+.ai-hero-tips-shuffle {
+  margin-left: auto;
+  padding: 3px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: color var(--transition-fast), border-color var(--transition-fast);
+}
+
+.ai-hero-tips-shuffle:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
 
 .ai-hero-tip {
   display: inline-flex; align-items: center; gap: 6px;
