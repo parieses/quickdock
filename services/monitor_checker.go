@@ -3,12 +3,16 @@ package services
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/exec"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -16,6 +20,7 @@ import (
 
 	"quickdock/internal/db"
 	"quickdock/internal/logger"
+	"quickdock/internal/sysutil"
 
 	"github.com/wailsapp/wails/v3/pkg/services/notifications"
 )
@@ -182,47 +187,59 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	}
 	_ = a.DB.UpdateMonitorConsecutiveDown(m.ID, newDownCount)
 
-	summary := fmt.Sprintf("%s · %d · %dms", status, code, latency)
+	// 摘要按类型给不同口径：tcp 没有状态码，process 的 code 是进程数，
+	// 统一按 "up · %d · %dms" 打出来会出现「up · 0 · 3ms」这种看不懂的行。
+	summary := fmt.Sprintf("%s · %dms", status, latency)
+	switch current.Kind {
+	case db.MonitorKindHTTP:
+		summary = fmt.Sprintf("%s · %d · %dms", status, code, latency)
+	case db.MonitorKindProcess:
+		summary = fmt.Sprintf("%s · %d 个进程", status, code)
+	case db.MonitorKindCmd:
+		summary = fmt.Sprintf("%s · 退出码 %d · %dms", status, code, latency)
+	}
 	if !up && errMsg != "" {
 		summary = errMsg
 	}
 
 	// SSL 证书到期检查（仅 HTTPS 监控）
 	// 用刚重查的 current 副本读取证书配置，避免使用探测期间已过期的 m 副本值
-	if u, perr := url.Parse(current.URL); perr == nil && strings.EqualFold(u.Scheme, "https") {
-		host := u.Hostname()
-		port := 443
-		if p, e := strconv.Atoi(u.Port()); e == nil {
-			port = p
-		}
-		if expiresAt, cerr := fetchCertExpiry(host, port, current.TimeoutSec); cerr == nil && expiresAt > 0 {
-			now := time.Now().Unix()
-			warnWindow := int64(current.CertWarnDays) * 86400
-			newLastWarned := current.LastCertWarned
-			// 证书被续期：新证书过期时间明显晚于上次记录（向后推移超过 1 天）说明换发了新证书，
-			// 重置告警位，使新证书临近到期时能再次提醒（否则 LastCertWarned 置位后永不再告警）。
-			if current.CertExpiresAt > 0 && expiresAt > current.CertExpiresAt+86400 {
-				newLastWarned = 0
+	if current.Kind == db.MonitorKindHTTP {
+		if u, perr := url.Parse(current.URL); perr == nil && strings.EqualFold(u.Scheme, "https") {
+			host := u.Hostname()
+			port := 443
+			if p, e := strconv.Atoi(u.Port()); e == nil {
+				port = p
 			}
-			if expiresAt-now <= warnWindow && newLastWarned == 0 {
-				daysLeft := (expiresAt - now) / 86400
-				title := "🔐 证书即将过期：" + m.Name
-				body := fmt.Sprintf("%s\n证书将于 %s 过期（剩 %d 天）", m.URL, time.Unix(expiresAt, 0).Format("2006-01-02"), daysLeft)
-				if a.Notifier != nil {
-					_ = a.Notifier.SendNotification(notifications.NotificationOptions{
-						ID:    "mon-cert-" + m.ID + "-" + time.Now().Format("150405"),
-						Title: title,
-						Body:  body,
-					})
+			if expiresAt, cerr := fetchCertExpiry(host, port, current.TimeoutSec); cerr == nil && expiresAt > 0 {
+				now := time.Now().Unix()
+				warnWindow := int64(current.CertWarnDays) * 86400
+				newLastWarned := current.LastCertWarned
+				// 证书被续期：新证书过期时间明显晚于上次记录（向后推移超过 1 天）说明换发了新证书，
+				// 重置告警位，使新证书临近到期时能再次提醒（否则 LastCertWarned 置位后永不再告警）。
+				if current.CertExpiresAt > 0 && expiresAt > current.CertExpiresAt+86400 {
+					newLastWarned = 0
 				}
-				a.sendWebhookNotify(title, body)
-				// 证书临期是此前唯一「静默」的告警：桌面气泡和 webhook 都发了，
-				// 却不进通知中心 —— 用户错过那一下气泡，就再也查不到"哪天提示过证书快过期"。
-				// 去重靠 LastCertWarned（续期后重置），不会刷屏，放心入库。
-				a.PushNotification("monitor", "warn", title, body, "monitor", m.ID)
-				newLastWarned = now
+				if expiresAt-now <= warnWindow && newLastWarned == 0 {
+					daysLeft := (expiresAt - now) / 86400
+					title := "🔐 证书即将过期：" + m.Name
+					body := fmt.Sprintf("%s\n证书将于 %s 过期（剩 %d 天）", m.URL, time.Unix(expiresAt, 0).Format("2006-01-02"), daysLeft)
+					if a.Notifier != nil {
+						_ = a.Notifier.SendNotification(notifications.NotificationOptions{
+							ID:    "mon-cert-" + m.ID + "-" + time.Now().Format("150405"),
+							Title: title,
+							Body:  body,
+						})
+					}
+					a.sendWebhookNotify(title, body)
+					// 证书临期是此前唯一「静默」的告警：桌面气泡和 webhook 都发了，
+					// 却不进通知中心 —— 用户错过那一下气泡，就再也查不到"哪天提示过证书快过期"。
+					// 去重靠 LastCertWarned（续期后重置），不会刷屏，放心入库。
+					a.PushNotification("monitor", "warn", title, body, "monitor", m.ID)
+					newLastWarned = now
+				}
+				_ = a.DB.UpdateMonitorCert(m.ID, expiresAt, newLastWarned)
 			}
-			_ = a.DB.UpdateMonitorCert(m.ID, expiresAt, newLastWarned)
 		}
 	}
 
@@ -302,8 +319,146 @@ func (a *AppService) CheckOneMonitor(m *db.Monitor) (string, string) {
 	return a.checkOneMonitor(m)
 }
 
-// probeMonitor 实际发起 HTTP 请求并判定 up/down
+// probeMonitor 按探测类型分派到具体探针。
+//
+// 四类探针共用同一套 interval/超时/日志/告警，差异只在「怎么判 up」——
+// 所以这里只做分派，状态翻转、连续失败计数、通知在上层统一处理。
 func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
+	switch strings.ToLower(strings.TrimSpace(m.Kind)) {
+	case db.MonitorKindTCP:
+		return probeTCP(m)
+	case db.MonitorKindProcess:
+		return probeProcess(m)
+	case db.MonitorKindCmd:
+		return probeCmd(m)
+	default:
+		return probeHTTP(m)
+	}
+}
+
+// probeTCP 连接一次 host:port，连上即 up。
+// 用于数据库/Redis/MQ 这类「有端口但没有可判断的 HTTP 响应」的服务——
+// 它们恰恰是本地开发环境里最容易悄悄挂掉的东西。
+func probeTCP(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
+	target := strings.TrimSpace(m.Target)
+	if target == "" {
+		return false, 0, 0, "未配置探测目标（需要 host:port）"
+	}
+	// 只填端口（如 3306）时补 127.0.0.1：本地服务探活里这是绝大多数场景，
+	// 逼用户每次都写完整地址只会让他们填错。
+	if !strings.Contains(target, ":") {
+		if _, err := strconv.Atoi(target); err == nil {
+			target = "127.0.0.1:" + target
+		}
+	}
+	timeout := m.TimeoutSec
+	if timeout <= 0 {
+		timeout = 5
+	}
+	start := time.Now()
+	conn, err := net.DialTimeout("tcp", target, time.Duration(timeout)*time.Second)
+	latency := int(time.Since(start).Milliseconds())
+	if err != nil {
+		return false, 0, latency, "连接失败：" + err.Error()
+	}
+	_ = conn.Close()
+	return true, 0, latency, ""
+}
+
+// probeProcess 判断本机进程是否存在（不区分大小写，可省略 .exe）。
+// code 复用为「匹配到的进程数」：同一个 exe 多开时用户能一眼看出开了几个。
+func probeProcess(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
+	want := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(m.Target), ".exe"))
+	if want == "" {
+		return false, 0, 0, "未配置探测目标（需要进程名）"
+	}
+	start := time.Now()
+	procs, err := sysutil.ListProcesses()
+	latency := int(time.Since(start).Milliseconds())
+	if err != nil {
+		return false, 0, latency, "无法枚举进程：" + err.Error()
+	}
+	matched := 0
+	for _, p := range procs {
+		name := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(p.Name), ".exe"))
+		if name == want {
+			matched++
+		}
+	}
+	if matched == 0 {
+		return false, 0, latency, "进程未运行：" + strings.TrimSpace(m.Target)
+	}
+	return true, matched, latency, ""
+}
+
+// probeCmd 执行一条命令，退出码 0 即 up；输出可选参与内容匹配。
+// 给「本机健康脚本」留的口子：用户已经有一条能判断好坏的脚本时，
+// 不必为了接进监控把它翻译成 HTTP 接口。
+func probeCmd(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
+	cmdline := strings.TrimSpace(m.Target)
+	if cmdline == "" {
+		return false, 0, 0, "未配置探测目标（需要可执行命令）"
+	}
+	timeout := m.TimeoutSec
+	if timeout <= 0 {
+		timeout = 10
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+
+	var cmd *exec.Cmd
+	if runtime.GOOS == "windows" {
+		shell := os.Getenv("COMSPEC")
+		if shell == "" {
+			shell = "cmd.exe"
+		}
+		cmd = sysutil.CommandContext(ctx, shell, "/d", "/s", "/c", cmdline)
+	} else {
+		cmd = sysutil.CommandContext(ctx, "/bin/sh", "-c", cmdline)
+	}
+	start := time.Now()
+	out, err := cmd.CombinedOutput()
+	latency := int(time.Since(start).Milliseconds())
+	if ctx.Err() == context.DeadlineExceeded {
+		return false, -1, latency, fmt.Sprintf("命令超时（%ds）", timeout)
+	}
+	if err != nil {
+		exitCode := -1
+		var ee *exec.ExitError
+		if errors.As(err, &ee) {
+			exitCode = ee.ExitCode()
+		}
+		return false, exitCode, latency, fmt.Sprintf("退出码 %d：%s", exitCode, clipProbeOutput(out))
+	}
+	// 内容匹配对命令同样生效：只靠退出码判断不了「脚本跑完了但输出 error」这类情况。
+	if !matchesContent(out, m) {
+		return false, 0, latency, fmt.Sprintf("输出不符：%s '%s'", m.ContentMatchType, m.ContentMatchPattern)
+	}
+	return true, 0, latency, ""
+}
+
+// clipProbeOutput 把命令输出压成一行短提示：探针结果要进 last_error 与通知正文，
+// 原样塞几百行日志既刷屏也没有信息量（用户要看全文可以去日志页）。
+func clipProbeOutput(b []byte) string {
+	s := strings.TrimSpace(string(b))
+	if s == "" {
+		return "（无输出）"
+	}
+	lines := strings.Split(s, "\n")
+	if len(lines) > 3 {
+		s = strings.Join(lines[:3], " / ") + " …"
+	} else {
+		s = strings.Join(lines, " / ")
+	}
+	r := []rune(strings.TrimSpace(s))
+	if len(r) > 200 {
+		return string(r[:200]) + "…"
+	}
+	return string(r)
+}
+
+// probeHTTP 实际发起 HTTP 请求并判定 up/down
+func probeHTTP(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
 	method := strings.ToUpper(strings.TrimSpace(m.Method))
 	if method == "" {
 		method = "GET"

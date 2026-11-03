@@ -278,6 +278,10 @@ var baseTables = []string{
 	`CREATE TABLE IF NOT EXISTS monitors (
 		id TEXT PRIMARY KEY,
 		name TEXT NOT NULL,
+		-- kind/target：探测类型与目标。http 走 url（老列，牵着证书检查与地址校验）；
+		-- tcp/process/cmd 走 target。默认 'http' 让老库升级后行为不变。
+		kind TEXT NOT NULL DEFAULT 'http',
+		target TEXT NOT NULL DEFAULT '',
 		url TEXT NOT NULL DEFAULT '',
 		method TEXT NOT NULL DEFAULT 'GET',
 		interval_sec INTEGER NOT NULL DEFAULT 60,
@@ -714,6 +718,11 @@ func (d *Database) migrate() error {
 		// 与连续失败阈值构成「连续 N 次失败且延迟>Xms」多条件告警）
 		{"monitors", "group_name", "TEXT NOT NULL DEFAULT ''"},
 		{"monitors", "latency_alert_ms", "INTEGER NOT NULL DEFAULT 0"},
+		// monitors: 多类型探活（tcp / process / cmd）。默认 'http' 让老库升级后
+		// 完全按原行为跑——不加默认值的话老行的 kind 会是 NULL，scan 到空串再归一化也行，
+		// 但 SQL 里 `WHERE kind='http'` 这类查询会把老行漏掉，不如在迁移时就定死。
+		{"monitors", "kind", "TEXT NOT NULL DEFAULT 'http'"},
+		{"monitors", "target", "TEXT NOT NULL DEFAULT ''"},
 		// todos: 子任务层级（单层级 checklist）+ 状态字段（status 权威，done 派生）
 		{"todos", "parent_id", "TEXT DEFAULT ''"},
 		{"todos", "status", "TEXT DEFAULT 'todo'"},

@@ -5,7 +5,9 @@ package monitor
 
 import (
 	"fmt"
+	"net"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"quickdock/internal/db"
@@ -39,16 +41,47 @@ func validateContentMatch(m db.Monitor) *services.ApiResult {
 	return nil
 }
 
-// validateMonitorURL 保存前校验地址：错填的 URL 不会在保存时报错，而是让这条监控
-// 每轮都「请求失败」，用户看到的是"网站挂了"而不是"地址写错了"。
-func validateMonitorURL(m db.Monitor) *services.ApiResult {
-	if err := validators.ValidateURL(strings.TrimSpace(m.URL)); err != nil {
-		return services.Fail(err)
+// validateMonitorTarget 保存前校验探测目标，按 kind 分支。
+//
+// http 用原来的 URL 校验；其余三类不校验 URL（那列根本不参与探测），
+// 而是校验各自的目标格式——错填的 host:port 不会在保存时报错，只会让这条监控
+// 每轮都「连接失败」，用户看到的是"服务挂了"而不是"地址写错了"。
+func validateMonitorTarget(m db.Monitor) *services.ApiResult {
+	switch strings.ToLower(strings.TrimSpace(m.Kind)) {
+	case "", db.MonitorKindHTTP:
+		if err := validators.ValidateURL(strings.TrimSpace(m.URL)); err != nil {
+			return services.Fail(err)
+		}
+	case db.MonitorKindTCP:
+		target := strings.TrimSpace(m.Target)
+		if target == "" {
+			return services.FailMsg("TCP 探活需要填目标，如 127.0.0.1:3306（只填端口则默认本机）")
+		}
+		if !strings.Contains(target, ":") {
+			target = "127.0.0.1:" + target
+		}
+		host, port, err := net.SplitHostPort(target)
+		if err != nil || host == "" {
+			return services.FailMsg("TCP 探活目标格式不对，应形如 127.0.0.1:3306")
+		}
+		if n, e := strconv.Atoi(port); e != nil || n <= 0 || n > 65535 {
+			return services.FailMsg("TCP 探活端口无效：" + port)
+		}
+	case db.MonitorKindProcess:
+		if strings.TrimSpace(m.Target) == "" {
+			return services.FailMsg("进程探活需要填进程名，如 mysqld 或 nginx")
+		}
+	case db.MonitorKindCmd:
+		if strings.TrimSpace(m.Target) == "" {
+			return services.FailMsg("命令探活需要填要执行的命令")
+		}
+	default:
+		return services.FailMsg("未知的探测类型：" + m.Kind)
 	}
 	return nil
 }
 
-// CreateMonitor 新建网站监控
+// CreateMonitor 新建监控
 func (s *MonitorService) CreateMonitor(m db.Monitor) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
@@ -56,7 +89,7 @@ func (s *MonitorService) CreateMonitor(m db.Monitor) *services.ApiResult {
 	if v := validateContentMatch(m); v != nil {
 		return v
 	}
-	if v := validateMonitorURL(m); v != nil {
+	if v := validateMonitorTarget(m); v != nil {
 		return v
 	}
 	created, err := s.App.DB.CreateMonitor(&m)
@@ -85,6 +118,9 @@ func (s *MonitorService) UpdateMonitor(m db.Monitor) *services.ApiResult {
 		return services.FailMsg("监控 ID 不能为空")
 	}
 	if v := validateContentMatch(m); v != nil {
+		return v
+	}
+	if v := validateMonitorTarget(m); v != nil {
 		return v
 	}
 	if err := s.App.DB.UpdateMonitor(&m); err != nil {

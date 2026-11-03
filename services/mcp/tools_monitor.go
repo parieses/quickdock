@@ -51,6 +51,8 @@ func registerMonitorTools(s *MCPService, r *toolRegistrar) {
 			row := map[string]any{
 				"id":            m.ID,
 				"name":          m.Name,
+				"kind":          m.Kind, // http | tcp | process | cmd
+				"target":        m.Target,
 				"url":           m.URL,
 				"method":        m.Method,
 				"enabled":       m.Enabled,

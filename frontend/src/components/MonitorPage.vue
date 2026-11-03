@@ -2,7 +2,7 @@
 defineOptions({ name: KEEP_ALIVE.monitor })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
-import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, nextTick, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -45,7 +45,7 @@ interface MonitorStat {
 import {
   Plus, Play, Pencil, Trash2, Globe, Activity, RefreshCw,
   ChevronDown, ChevronUp, CheckCircle2, XCircle, Radio, Download, Search, Power, X, Wrench,
-  Bell as BellIcon, BellOff,
+  Bell as BellIcon, BellOff, Network, Cpu, TerminalSquare,
 } from '@lucide/vue'
 
 const { t } = useI18n()
@@ -156,7 +156,7 @@ const monitorGroupList = computed<MonitorGroup[]>(() => {
   const q = query.value.trim()
   if (!q) return out
   const hit = out
-    .map(g => ({ name: g.name, items: g.items.filter(m => matchesTextOrPinyin([m.name, m.url, m.groupName], q, 'monitor')) }))
+    .map(g => ({ name: g.name, items: g.items.filter(m => matchesTextOrPinyin([m.name, m.url, m.target, m.groupName], q, 'monitor')) }))
     .filter(g => g.items.length > 0)
   return hit
 })
@@ -238,6 +238,11 @@ const editingId = ref('')
 const modalTitle = computed(() => editingId.value ? t('mon_edit') : t('mon_add'))
 
 const fName = ref('')
+// 探测类型：http / tcp / process / cmd。http 用 fUrl，其余用 fTarget——
+// 与后端 db.Monitor.Kind/Target 一一对应，切换类型时不清空另一侧的值，
+// 用户误点类型再切回来不会丢掉刚填的地址。
+const fKind = ref('http')
+const fTarget = ref('')
 const fUrl = ref('')
 const fMethod = ref('GET')
 const fIntervalVal = ref(300) // 默认 300 秒
@@ -270,6 +275,27 @@ const showBodyFields = computed(() => (NEEDS_BODY as readonly string[]).includes
 
 const MATCH_TYPES = ['none', 'contains', 'not_contains', 'regex']
 
+/** 探测类型清单，值与后端 db.MonitorKind* 一一对应。 */
+const KINDS = ['http', 'tcp', 'process', 'cmd'] as const
+
+/** 归一化探测类型：空值/未知值按 http（与后端 normalizeMonitorKind 同口径）。 */
+function kindOf(m: Monitor): string {
+  return m.kind && (KINDS as readonly string[]).includes(m.kind) ? m.kind : 'http'
+}
+
+/** 列表里显示的目标：http 读 url，其余读 target。 */
+function targetText(m: Monitor): string {
+  return kindOf(m) === 'http' ? m.url : (m.target || '')
+}
+
+/** 每类探针一个图标：一眼区分「网站」「端口」「进程」「脚本」，比统一用地球图标有用。 */
+const KIND_ICONS: Record<string, Component> = {
+  http: Globe, tcp: Network, process: Cpu, cmd: TerminalSquare,
+}
+function kindIcon(m: Monitor): Component {
+  return KIND_ICONS[kindOf(m)] || Globe
+}
+
 const METHODS = ['GET', 'POST', 'PUT', 'DELETE', 'HEAD', 'PATCH']
 const EXPECTED = ['2xx', '3xx', '4xx', '5xx', '200', 'any']
 
@@ -286,6 +312,8 @@ function openCreate() {
   formErr.value = ''
   editingId.value = ''
   fName.value = ''
+  fKind.value = 'http'
+  fTarget.value = ''
   fUrl.value = ''
   fMethod.value = 'GET'
   fIntervalVal.value = 300
@@ -311,6 +339,8 @@ function openEdit(m: Monitor) {
   formErr.value = ''
   editingId.value = m.id
   fName.value = m.name
+  fKind.value = kindOf(m)
+  fTarget.value = m.target || ''
   fUrl.value = m.url
   fMethod.value = m.method || 'GET'
   fIntervalVal.value = Math.max(5, m.intervalSec || 60)
@@ -334,9 +364,14 @@ function openEdit(m: Monitor) {
 }
 
 function buildPayload(): MonitorWithHTTP {
+  const kind = fKind.value
   return {
     id: editingId.value,
     name: fName.value.trim(),
+    kind,
+    // 非 http 类型不写 url、http 不写 target：两列都留着对方的旧值会让「改了类型
+    // 但忘了改目标」的监控看起来仍指向旧地址，排查时白费一轮。
+    target: kind === 'http' ? '' : fTarget.value.trim(),
     url: fUrl.value.trim(),
     method: fMethod.value,
     intervalSec: intervalVal(),
@@ -372,7 +407,14 @@ async function save() {
   const p = buildPayload()
   formErr.value = ''
   if (!p.name) { formErr.value = t('mon_err_name'); return }
-  if (!p.url) { formErr.value = t('mon_err_url'); return }
+  // 目标校验也分类型：非 http 判 url 会让「填了 TCP 目标却提示要填网址」，
+  // 用户只能去猜哪个字段才是当前类型真正要的。
+  if (p.kind === 'http') {
+    if (!p.url) { formErr.value = t('mon_err_url'); return }
+  } else if (!p.target) {
+    formErr.value = t('mon_err_target')
+    return
+  }
   saving.value = true
   try {
     if (editingId.value) await unwrap(await UpdateMonitor(p))
@@ -1114,14 +1156,20 @@ onUnmounted(() => {
                 {{ m.lastStatus === 'up' ? t('mon_up') : t('mon_down') }}
               </span>
             </div>
-            <div class="item-url" :title="m.url"><Globe :size="11" /> {{ m.url }}</div>
+            <div class="item-url" :title="targetText(m)">
+              <component :is="kindIcon(m)" :size="11" /> {{ targetText(m) }}
+            </div>
             <div class="item-meta">
               <span class="meta-up" :title="t('mon_checks_ttl')">{{ t('mon_uptime') }} {{ uptimeText(m.id) }}<template v-if="checksOf(m.id)"> · {{ t('mon_checks_n', { n: checksOf(m.id) }) }}</template></span>
               <span class="meta-lat" v-if="m.lastLatencyMs > 0">{{ m.lastLatencyMs }}ms</span>
               <span class="meta-avg" v-if="avgLatOf(m.id)" :title="t('mon_avg_ttl')">⌀ {{ avgLatOf(m.id) }}ms</span>
               <span class="meta-checked">{{ t('mon_checked') }} {{ relTime(m.lastCheckedTs) }}</span>
               <span v-if="lastDownText(m.id)" class="meta-down">{{ t('mon_last_down') }} {{ lastDownText(m.id) }}</span>
-              <span v-if="m.lastStatusCode" class="meta-code" :title="t('mon_status_code')">HTTP {{ m.lastStatusCode }}</span>
+              <!-- 状态码列复用给非 http 类型：tcp 没有码（不显示），process 的 code 是进程数，
+                   cmd 的 code 是退出码——同一格换成对应含义，比硬写 HTTP 更不容易误读 -->
+              <span v-if="m.lastStatusCode && kindOf(m) === 'http'" class="meta-code" :title="t('mon_status_code')">HTTP {{ m.lastStatusCode }}</span>
+              <span v-else-if="m.lastStatusCode && kindOf(m) === 'process'" class="meta-code" :title="t('mon_proc_count_ttl')">{{ m.lastStatusCode }}{{ t('mon_proc_count_unit') }}</span>
+              <span v-else-if="m.lastStatusCode && kindOf(m) === 'cmd'" class="meta-code" :title="t('mon_exit_code_ttl')">{{ t('mon_exit_code') }} {{ m.lastStatusCode }}</span>
               <span v-if="m.lastError" class="meta-err" :title="m.lastError">{{ m.lastError }}</span>
               <span v-if="certText(m)" :class="['meta-cert', { warn: certWarn(m) }]">
                 <component :is="certWarn(m) ? XCircle : CheckCircle2" :size="11" /> {{ certText(m) }}
@@ -1242,7 +1290,9 @@ onUnmounted(() => {
       <div v-for="m in deletedMonitors" :key="m.id" class="mon-item recycled">
         <div class="item-main">
           <div class="item-line1"><span class="item-name">{{ m.name }}</span></div>
-          <div class="item-url" :title="m.url"><Globe :size="11" /> {{ m.url }}</div>
+          <div class="item-url" :title="targetText(m)">
+            <component :is="kindIcon(m)" :size="11" /> {{ targetText(m) }}
+          </div>
           <div class="item-meta">
             <span class="meta-checked">{{ t('mon_deleted_at') }} {{ m.deletedAt?.slice(5, 16) || '' }}</span>
           </div>
@@ -1275,27 +1325,48 @@ onUnmounted(() => {
         <label>{{ t('mon_name') }}</label>
         <input v-model="fName" class="modal-input" :placeholder="t('mon_name_ph')" />
 
-        <label>{{ t('mon_url') }}</label>
-        <input v-model="fUrl" class="modal-input" placeholder="https://example.com" />
-
-        <div class="modal-grid">
-          <div>
-            <label>{{ t('mon_method') }}</label>
-            <select v-model="fMethod" class="modal-input">
-              <option v-for="mt in METHODS" :key="mt">{{ mt }}</option>
-            </select>
-          </div>
-          <div>
-            <label>{{ t('mon_expected') }}</label>
-            <select v-model="fExpected" class="modal-input">
-              <option v-for="e in EXPECTED" :key="e" :value="e">{{ expectedLabel(e) }}</option>
-            </select>
-          </div>
+        <!-- 探测类型：同一张表承载四类探针，切换只影响「目标」与 http 专属参数。
+             用横向按钮而不是下拉：四选一的场景下，能点到的选项比需要展开的列表快。 -->
+        <label>{{ t('mon_kind') }}</label>
+        <div class="kind-tabs">
+          <button v-for="k in KINDS" :key="k" type="button"
+            :class="['kind-tab', { active: fKind === k }]" @click="fKind = k">
+            <component :is="KIND_ICONS[k]" :size="13" /> {{ t('mon_kind_' + k) }}
+          </button>
         </div>
+
+        <template v-if="fKind === 'http'">
+          <label>{{ t('mon_url') }}</label>
+          <input v-model="fUrl" class="modal-input" placeholder="https://example.com" />
+        </template>
+        <template v-else>
+          <label>{{ t('mon_target_' + fKind) }}</label>
+          <textarea v-if="fKind === 'cmd'" v-model="fTarget" class="modal-input mon-textarea" rows="2"
+            :placeholder="t('mon_target_' + fKind + '_ph')"></textarea>
+          <input v-else v-model="fTarget" class="modal-input" :placeholder="t('mon_target_' + fKind + '_ph')" />
+          <p class="field-hint">{{ t('mon_target_' + fKind + '_hint') }}</p>
+        </template>
+
+        <template v-if="fKind === 'http'">
+          <div class="modal-grid">
+            <div>
+              <label>{{ t('mon_method') }}</label>
+              <select v-model="fMethod" class="modal-input">
+                <option v-for="mt in METHODS" :key="mt">{{ mt }}</option>
+              </select>
+            </div>
+            <div>
+              <label>{{ t('mon_expected') }}</label>
+              <select v-model="fExpected" class="modal-input">
+                <option v-for="e in EXPECTED" :key="e" :value="e">{{ expectedLabel(e) }}</option>
+              </select>
+            </div>
+          </div>
+        </template>
 
         <!-- 请求头 / 请求体：POST/PUT/PATCH 类探针要能带鉴权头与 payload，
              否则这些方法只能发出一个空 body，和 GET 没区别（接口一律 401/400）。 -->
-        <template v-if="showBodyFields">
+        <template v-if="showBodyFields && fKind === 'http'">
           <label>{{ t('mon_http_headers') }}</label>
           <textarea v-model="fHeaders" class="modal-input mon-textarea" rows="3"
             :placeholder="t('mon_http_headers_ph')"></textarea>
@@ -1317,32 +1388,36 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <label class="toggle-label">
-          <input type="checkbox" v-model="fFollow" /> {{ t('mon_follow_redirects') }}
-        </label>
+        <template v-if="fKind === 'http'">
+          <label class="toggle-label">
+            <input type="checkbox" v-model="fFollow" /> {{ t('mon_follow_redirects') }}
+          </label>
 
-        <label class="toggle-label">
-          <input type="checkbox" v-model="fSkipTLS" /> {{ t('mon_ignore_tls') }}
-        </label>
+          <label class="toggle-label">
+            <input type="checkbox" v-model="fSkipTLS" /> {{ t('mon_ignore_tls') }}
+          </label>
 
-        <!-- 6.1 SSL 证书到期提前告警 -->
-        <div class="modal-grid">
-          <div>
-            <label>{{ t('mon_cert_warn_days') }}</label>
-            <div class="interval-row">
-              <input v-model.number="fCertWarnDays" type="number" min="1" max="365" class="modal-input interval-num" />
-              <span class="unit-suffix">{{ t('mon_cert_warn_unit') }}</span>
+          <!-- 6.1 SSL 证书到期提前告警 -->
+          <div class="modal-grid">
+            <div>
+              <label>{{ t('mon_cert_warn_days') }}</label>
+              <div class="interval-row">
+                <input v-model.number="fCertWarnDays" type="number" min="1" max="365" class="modal-input interval-num" />
+                <span class="unit-suffix">{{ t('mon_cert_warn_unit') }}</span>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
 
-        <!-- 6.2 内容关键字 / 正则匹配 -->
-        <label>{{ t('mon_content_match') }}</label>
-        <select v-model="fContentMatchType" class="modal-input">
-          <option v-for="mt in MATCH_TYPES" :key="mt" :value="mt">{{ t('mon_match_' + mt) }}</option>
-        </select>
-        <input v-if="fContentMatchType !== 'none'" v-model="fContentMatchPattern" class="modal-input mt-2"
-          :placeholder="t('mon_match_pattern_ph')" />
+        <!-- 6.2 内容关键字 / 正则匹配：http 匹配响应体，cmd 匹配命令输出 -->
+        <template v-if="fKind === 'http' || fKind === 'cmd'">
+          <label>{{ t('mon_content_match') }}</label>
+          <select v-model="fContentMatchType" class="modal-input">
+            <option v-for="mt in MATCH_TYPES" :key="mt" :value="mt">{{ t('mon_match_' + mt) }}</option>
+          </select>
+          <input v-if="fContentMatchType !== 'none'" v-model="fContentMatchPattern" class="modal-input mt-2"
+            :placeholder="t('mon_match_pattern_ph')" />
+        </template>
 
         <div class="toggle-row">
           <label class="toggle-label"><input type="checkbox" v-model="fNotifyDown" /> {{ t('mon_notify_down') }}</label>
@@ -1718,6 +1793,22 @@ onUnmounted(() => {
 }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }
 .modal-grid > * { min-width: 0; }
+
+/* 探测类型切换：四选一的分段按钮。用按钮而非 select 是因为它同时承担
+   「告诉用户有哪些探针」的职责——展开过的下拉里看不到另外三个选项。 */
+.kind-tabs { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--space-1); margin-bottom: var(--space-2); }
+.kind-tab {
+  display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+  padding: var(--space-2) var(--space-1); font-size: 12px; cursor: pointer;
+  color: var(--color-text-secondary); background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  transition: background 150ms, color 150ms, border-color 150ms;
+}
+.kind-tab:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.kind-tab.active {
+  background: var(--color-accent-bg); color: var(--color-accent);
+  border-color: var(--color-accent-border);
+}
 
 .interval-row { display: flex; gap: var(--space-2); align-items: center; }
 .interval-num { flex: 1; min-width: 0; }

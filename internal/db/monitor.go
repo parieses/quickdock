@@ -7,11 +7,31 @@ import (
 	"time"
 )
 
-// Monitor 网站运行状态监控（仿 UptimeRobot）
+// 监控探测类型。同一张表同时承载四类探针，而不是另建「服务监控」表：
+// 它们共用 interval/timeout/告警/静默/日志/在线率这一整套运行时，拆表等于把
+// 检查循环、日志裁剪、统计聚合全部复制一份；差异只在「怎么判 up」这一处。
+const (
+	MonitorKindHTTP    = "http"    // 起 HTTP 请求，按状态码/内容判定（默认，兼容旧数据）
+	MonitorKindTCP     = "tcp"     // 连一次 host:port，连上即 up（数据库/Redis/MQ 端口探活）
+	MonitorKindProcess = "process" // 本机进程是否存在（守护进程、容器外的原生服务）
+	MonitorKindCmd     = "cmd"     // 执行一条命令，退出码 0 即 up（自定义健康脚本）
+)
+
+// Monitor 运行状态监控（仿 UptimeRobot）
 // expected_status 支持 "2xx"/"3xx"/"4xx"/"5xx" 或精确码如 "200"
 type Monitor struct {
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// Kind 探测类型，见 MonitorKind*。空值按 http 处理：老数据的列默认值就是 'http'，
+	// 但 structToMap / 手写 SQL 之外还有一条「回收站恢复整行转插入」的路径会带空串过来。
+	Kind string `json:"kind"`
+	// Target 非 http 类型的目标：
+	//   tcp     → host:port（如 127.0.0.1:3306）
+	//   process → 进程名（不区分大小写，可省略 .exe，如 mysqld）
+	//   cmd     → 要执行的命令（退出码 0 视为正常）
+	// http 不用它，仍读 URL —— URL 还牵着证书检查、地址校验与 MCP 描述，
+	// 把 http 也搬过来只会让「旧的 url 列」变成需要兼容的空壳。
+	Target              string `json:"target"`
 	URL                 string `json:"url"`
 	Method              string `json:"method"`         // GET/POST/HEAD...
 	IntervalSec         int    `json:"intervalSec"`    // 检测间隔（秒）
@@ -71,7 +91,7 @@ type MonitorStat struct {
 	LastDownAt   string  `json:"lastDownAt"` // 最近一次 down 的检测时间
 }
 
-const monCols = `id, name, url, method, interval_sec, timeout_sec, expected_status,
+const monCols = `id, name, kind, target, url, method, interval_sec, timeout_sec, expected_status,
 	follow_redirects, enabled, notify_down, notify_up,
 	last_status, last_checked_at, last_checked_ts, last_latency_ms, last_status_code, last_error,
 	skip_tls_verify,
@@ -91,12 +111,33 @@ const logWindowSec = int64(24 * 3600) // 统计窗口：近 24 小时
 // 提高上限不会拖慢写入。
 const maxLogsPerMonitor = 20000
 
+// normalizeMonitorKind 把空串与未知值收敛到 http。
+//
+// 探针、界面、统计都只认这四个值；脏数据（老库恢复、手改 DB、插件写入）落到
+// 「未知 kind」时若原样返回，会表现为「这条监控永远不检测」——收敛到 http
+// 至少让它按升级前的行为跑，用户能看见它红了/绿了，而不是一片空白。
+// 合法性校验在 services/monitor 保存前做，那一层要能对用户报错，这里只兜底。
+func normalizeMonitorKind(k string) string {
+	switch strings.ToLower(strings.TrimSpace(k)) {
+	case MonitorKindTCP:
+		return MonitorKindTCP
+	case MonitorKindProcess:
+		return MonitorKindProcess
+	case MonitorKindCmd:
+		return MonitorKindCmd
+	case MonitorKindHTTP, "":
+		return MonitorKindHTTP
+	default:
+		return MonitorKindHTTP
+	}
+}
+
 func scanMonitor(rows interface{ Scan(...interface{}) error }) (Monitor, error) {
 	var m Monitor
 	var follow, enabled, notifyDown, notifyUp, skipTLS int
 	var certWarn, alertThresh, latencyAlert int
 	var contentMatchType, contentMatchPattern, groupName string
-	err := rows.Scan(&m.ID, &m.Name, &m.URL, &m.Method, &m.IntervalSec, &m.TimeoutSec,
+	err := rows.Scan(&m.ID, &m.Name, &m.Kind, &m.Target, &m.URL, &m.Method, &m.IntervalSec, &m.TimeoutSec,
 		&m.ExpectedStatus, &follow, &enabled, &notifyDown, &notifyUp,
 		&m.LastStatus, &m.LastCheckedAt, &m.LastCheckedTs, &m.LastLatencyMs, &m.LastStatusCode,
 		&m.LastError, &skipTLS,
@@ -106,6 +147,8 @@ func scanMonitor(rows interface{ Scan(...interface{}) error }) (Monitor, error) 
 		&groupName, &latencyAlert,
 		&m.HTTPHeaders, &m.HTTPBody,
 		&m.Sort, &m.CreatedAt, &m.DeletedAt, &m.MaintenanceUntil, &m.MuteUntil)
+	m.Kind = normalizeMonitorKind(m.Kind)
+	m.Target = strings.TrimSpace(m.Target)
 	m.FollowRedirects = follow != 0
 	m.Enabled = enabled != 0
 	m.NotifyDown = notifyDown != 0
@@ -132,8 +175,16 @@ func (d *Database) CreateMonitor(m *Monitor) (*Monitor, error) {
 	if m.Name == "" {
 		return nil, fmt.Errorf("监控名称不能为空")
 	}
-	if strings.TrimSpace(m.URL) == "" {
-		return nil, fmt.Errorf("监控地址不能为空")
+	m.Kind = normalizeMonitorKind(m.Kind)
+	m.Target = strings.TrimSpace(m.Target)
+	if m.Kind == MonitorKindHTTP {
+		if strings.TrimSpace(m.URL) == "" {
+			return nil, fmt.Errorf("监控地址不能为空")
+		}
+	} else if m.Target == "" {
+		// 非 http 类型没有 target 就是一条「永远失败」的监控，且失败原因会是
+		// 「连接空地址」这种看不懂的话，故在入口挡掉。
+		return nil, fmt.Errorf("探测目标不能为空")
 	}
 	if m.IntervalSec < 5 {
 		m.IntervalSec = 60
@@ -171,7 +222,7 @@ func (d *Database) CreateMonitor(m *Monitor) (*Monitor, error) {
 
 	_, err := d.conn.Exec(
 		`INSERT INTO monitors
-			(id, name, url, method, interval_sec, timeout_sec, expected_status,
+			(id, name, kind, target, url, method, interval_sec, timeout_sec, expected_status,
 			 follow_redirects, enabled, notify_down, notify_up,
 			 last_status, last_checked_at, last_checked_ts, last_latency_ms, last_status_code, last_error,
 			 skip_tls_verify,
@@ -181,12 +232,12 @@ func (d *Database) CreateMonitor(m *Monitor) (*Monitor, error) {
 			 group_name, latency_alert_ms,
 			 http_headers, http_body,
 			 sort, created_at, deleted_at, maintenance_until, mute_until)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, 0, 0, '', ?,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', 0, 0, 0, '', ?,
 			 ?, 0, 0, ?, ?,
 			 ?, 0, ?, ?,
 			 ?, ?,
 			 ?, ?, '', 0, 0)`,
-		m.ID, m.Name, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
+		m.ID, m.Name, m.Kind, m.Target, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
 		b2i(m.FollowRedirects), b2i(m.Enabled), b2i(m.NotifyDown), b2i(m.NotifyUp),
 		b2i(m.SkipTLSVerify),
 		m.CertWarnDays, m.ContentMatchType, m.ContentMatchPattern,
@@ -264,18 +315,20 @@ func (d *Database) UpdateMonitor(m *Monitor) error {
 	if m.LatencyAlertMs < 0 {
 		m.LatencyAlertMs = 0
 	}
+	m.Kind = normalizeMonitorKind(m.Kind)
+	m.Target = strings.TrimSpace(m.Target)
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	_, err := d.conn.Exec(
 		`UPDATE monitors SET
-			name = ?, url = ?, method = ?, interval_sec = ?, timeout_sec = ?, expected_status = ?,
+			name = ?, kind = ?, target = ?, url = ?, method = ?, interval_sec = ?, timeout_sec = ?, expected_status = ?,
 			follow_redirects = ?, enabled = ?, notify_down = ?, notify_up = ?,
 			skip_tls_verify = ?,
 			cert_warn_days = ?, content_match_type = ?, content_match_pattern = ?,
 			down_alert_threshold = ?, group_name = ?, latency_alert_ms = ?,
 			http_headers = ?, http_body = ?
 		 WHERE id = ?`,
-		m.Name, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
+		m.Name, m.Kind, m.Target, m.URL, m.Method, m.IntervalSec, m.TimeoutSec, m.ExpectedStatus,
 		b2i(m.FollowRedirects), b2i(m.Enabled), b2i(m.NotifyDown), b2i(m.NotifyUp),
 		b2i(m.SkipTLSVerify),
 		m.CertWarnDays, m.ContentMatchType, m.ContentMatchPattern,
