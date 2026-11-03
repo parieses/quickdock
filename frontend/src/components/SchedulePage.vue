@@ -10,6 +10,8 @@ import {
   SetScheduledTaskSort, GetAllScheduleRuns, SetAllScheduledTasksEnabled,
 } from '../../bindings/quickdock/services/appservice'
 import type { ScheduledTask } from '../../bindings/quickdock/internal/db/models'
+import type { CollectionItem } from '../types'
+import SceneItemPicker from './SceneItemPicker.vue'
 
 import { Events } from '@wailsio/runtime'
 import ConfirmDialog from './ConfirmDialog.vue'
@@ -19,7 +21,7 @@ import AppTargetPicker from './AppTargetPicker.vue'
 import {
   Plus, Play, Pause, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
-  Search, LoaderCircle, GripVertical, Bell, BarChart3,
+  Search, LoaderCircle, GripVertical, Bell, BarChart3, FolderSearch,
 } from '@lucide/vue'
 
 const { t, locale } = useI18n()
@@ -261,6 +263,7 @@ function onDragEnd() {
 
 // ---- 表单模型（新增 / 编辑共用） ----
 const showModal = ref(false)
+const showPicker = ref(false)        // 「从场景/集合选择项目」弹层
 const editingId = ref('')            // '' = 新增
 const modalTitle = computed(() => editingId.value ? t('sched_edit') : t('sched_add'))
 
@@ -292,6 +295,24 @@ function fromInput(s: string): string { return s ? s.replace('T', ' ') : '' }
 /** 机器人 Webhook 是全局配置，跳设置页去改（本页不重复实现一份表单）。 */
 function openNotifySettings() {
   try { Events.Emit('app:open-settings', 'notify') } catch { /* 事件通道未就绪时静默，不阻塞新建任务 */ }
+}
+
+// 从场景/集合/项目选择器中选中的项目，固化进任务的 target + action：
+// 定时任务执行时只需 action+target（executeTask 对 app/dir/url 走 ShellOpen、
+// command 走命令执行），不保留对 item 的引用 —— 避免 item 被改/删后任务悬空，也无需后端感知场景概念。
+// 文件类型没有对应动作，映射到 'app' 同样经 ShellOpen 打开（系统关联打开文件）。
+function mapItemTypeToAction(item: CollectionItem): string {
+  const ty = item.type || ''
+  if (ty.includes('命令')) return 'command'
+  if (ty.includes('网页') || ty.includes('快速链接')) return 'url'
+  if (ty.includes('目录')) return 'dir'
+  return 'app'
+}
+function onPickItem(item: CollectionItem) {
+  fTarget.value = item.value || ''
+  fAction.value = mapItemTypeToAction(item)
+  fWorkingDir.value = item.workingDirectory || ''
+  showPicker.value = false
 }
 
 function openCreate() {
@@ -653,6 +674,10 @@ onMounted(refresh)
         <label>{{ targetLabel(fAction) }}</label>
         <AppTargetPicker v-if="fAction === 'app'" v-model="fTarget" :placeholder="targetPlaceholder(fAction)" />
         <input v-else v-model="fTarget" class="modal-input" :placeholder="targetPlaceholder(fAction)" />
+        <!-- 不必手填路径：从已有的场景/集合/项目里挑一个，自动带出 target 与对应动作类型 -->
+        <button type="button" class="qd-btn qd-btn-sm sched-pick-btn" @click="showPicker = true">
+          <FolderSearch :size="13" /> {{ t('sched_pick_scene_item') }}
+        </button>
 
         <!-- 工作目录（app/command） -->
         <template v-if="fAction === 'app' || fAction === 'command'">
@@ -788,6 +813,8 @@ onMounted(refresh)
       :task="historyTask"
       @cancel="showHistory = false"
     />
+
+    <SceneItemPicker :visible="showPicker" @select="onPickItem" @cancel="showPicker = false" />
   </div>
 </template>
 
@@ -797,6 +824,7 @@ onMounted(refresh)
   overflow: hidden; background: var(--color-bg-primary);
 }
 /* 页头已统一为 .qd-page-header（通栏），内边距下放到内容块 */
+.sched-pick-btn { margin-top: var(--space-2); }
 .interval-row { display: flex; align-items: center; gap: var(--space-2); }
 .interval-num { flex: 1 1 auto; min-width: 0; }
 .interval-unit { flex: 0 0 96px; width: 96px; }
