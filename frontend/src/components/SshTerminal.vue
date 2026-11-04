@@ -17,15 +17,17 @@ import { Terminal, type ITheme } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
-import { Clipboard, Events } from '@wailsio/runtime'
+import { Events } from '@wailsio/runtime'
 import '@xterm/xterm/css/xterm.css'
 
+import { ReadText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { Replay, Resize, Write } from '../../bindings/quickdock/services/sshx/sshservice'
 import { base64ToBytes, bytesToBase64, textToBytes } from '../utils/base64'
 import { copyToClipboard } from '../utils/clipboard'
 import { createWriteQueue } from '../utils/termWriteQueue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { useThemeName } from '../composables/useThemeName'
 import { useToast } from '../composables/useToast'
 import { debounce } from '../utils/debounce'
@@ -165,31 +167,54 @@ async function copyText(text: string): Promise<boolean> {
 /**
  * 读系统剪贴板。
  *
- * 同样走 Wails 原生桥（Clipboard.Text），避免 WebView2 对 readText 的授权/安全上下文
- * 拦截——那正是终端「粘贴没反应」的根因。调用方（onPaste）拿到空串会静默处理。
+ * 主路径走后端 ReadText → platform.GetClipboardText（WithClipboardRead：打开重试
+ * + owner 存活探测），与写侧 CopyText 是同一套锁策略；全站其它读路径都在这里。
+ *
+ * 不要再退回 @wailsio/runtime 的 Clipboard.Text()：它调 Wails 自己的
+ * w32.GetClipboardText，GetClipboardData 对延迟渲染格式会同步等 owner 且没有超时，
+ * owner 一卡住读线程就一直握着全局剪贴板锁——之后连「复制」都打不开剪贴板。
+ * 而且 IsClipboardFormatAvailable 瞬时返回 0 时它给的是「空串 + 无错误」，
+ * 旧写法 `(await Clipboard.Text()) || ''` 把空串当正常结果直接返回，
+ * 连下面的 Web 兜底都不会执行：这正是「偶尔按了 Ctrl+V 什么都没发生」。
+ *
+ * 空串不作最终结果：剪贴板正被别的程序改写、或 owner 无响应被主动放弃读取，
+ * 都值得隔一会儿再读一次；最后才交给 Web 标准兜底。
  */
 async function readClipboardText(): Promise<string> {
-  try {
-    return (await Clipboard.Text()) || ''
-  } catch {
-    // 退回 Web 标准方案
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const text = (unwrap(await ReadText()) as string) || ''
+      if (text) return text
+    } catch (e) {
+      logErr('ssh.clipboard.read', e)
+    }
+    if (attempt === 0) await new Promise((r) => setTimeout(r, 120))
   }
   try {
     if (navigator.clipboard && window.isSecureContext) {
       return await navigator.clipboard.readText()
     }
-  } catch {
-    /* ignore */
+  } catch (e) {
+    logErr('ssh.clipboard.read.fallback', e)
   }
   return ''
 }
 
-async function onCopy() {
-  // 取值口径：快照优先（右键/点击会清掉实时选区），再兜底实时选区。
-  const text = currentSelection()
+/**
+ * @param requireLive 快捷键（Ctrl+C / Ctrl+Shift+C / Ctrl+Insert）传 true：
+ *   这些键本身就是「复制」，必须用此刻的实时选区。快照只在下一次选中时覆盖，
+ *   选区取消后仍留着；若无选区也照快照复制，就会把几分钟前的旧内容塞进剪贴板，
+ *   看起来像「复制失败 / 复制错了」。右键菜单传 false：右键会先清掉实时选区，
+ *   只能靠快照（见 currentSelection 注释）。
+ */
+async function onCopy(requireLive = false) {
+  const text = requireLive
+    ? (term && term.hasSelection() ? term.getSelection() : '')
+    : currentSelection()
   closeMenu()
   if (!text) {
-    // 走到这里说明快照和实时选区都空了。给失败反馈，别让「点了复制」静默无反应。
+    // 快捷键路径 = 此刻没有实时选区；右键路径 = 连快照都没有。都给失败反馈，
+    // 别让「点了复制」静默无反应。
     toastError(t('copyFailed'))
     return
   }
@@ -675,14 +700,14 @@ onMounted(async () => {
     // 否则「中断正在跑的命令」这个最常用的操作就没了。
     if (mod && !e.shiftKey && !e.altKey && keyOf('KeyC', 'c', 'C')) {
       if (sel) {
-        void onCopy()
+        void onCopy(true)
         return swallow()
       }
       return true
     }
     // Ctrl+Shift+C / Ctrl+Insert：复制（无选区时 onCopy 会给出失败提示）
     if ((mod && e.shiftKey && keyOf('KeyC', 'c', 'C')) || (mod && keyOf('Insert'))) {
-      void onCopy()
+      void onCopy(true)
       return swallow()
     }
     // Ctrl+V / Ctrl+Shift+V / Shift+Insert：粘贴
@@ -880,7 +905,7 @@ defineExpose({
         @click.stop
         @contextmenu.prevent
       >
-        <button class="term-menu-item" :disabled="!canCopy()" @click="onCopy">
+        <button class="term-menu-item" :disabled="!canCopy()" @click="onCopy()">
           <span>{{ t('sshCtxCopy') }}</span>
           <span class="term-menu-kbd">Ctrl+Shift+C</span>
         </button>

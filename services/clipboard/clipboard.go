@@ -31,6 +31,22 @@ func (a *ClipboardService) CopyText(text string) *services.ApiResult {
 	return services.Ok(nil)
 }
 
+// ReadText 读系统剪贴板当前的文本，与 CopyText 成对（写/读同走一套锁策略）。
+//
+// 【为什么必须走 platform.GetClipboardText】
+// SSH 终端以前直接用 @wailsio/runtime 的 Clipboard.Text()，那条路调的是 Wails
+// 自己的 w32.GetClipboardText：GetClipboardData 对延迟渲染格式会同步等 owner
+// 且没有超时，owner 一旦卡住，读线程就一直握着全局剪贴板锁——之后本程序和系统里
+// 其它程序的「复制」全部打不开剪贴板。表现就是 SSH 里复制和粘贴一起偶发失灵，
+// 而不是只有粘贴坏。platform 的 WithClipboardRead 带 owner 存活探测与打开重试，
+// 项目里其它读路径（{clipboard} 变量、插件 host.clipboard.read、捕获协程）都走它。
+//
+// 空串是正常结果而非错误：剪贴板里可能本来就是图片/文件，或 owner 无响应被
+// 主动放弃读取。调用方据此决定重试或提示，不要在这里弹错。
+func (a *ClipboardService) ReadText() *services.ApiResult {
+	return services.Ok(platform.GetClipboardText())
+}
+
 func (a *ClipboardService) ListClipboardEntries(limit int) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
