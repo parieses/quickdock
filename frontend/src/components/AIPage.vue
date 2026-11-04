@@ -57,7 +57,7 @@ import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConvHit, AIHooksInfo, AIProfilesResult } from '../types/ai'
 import type {
   AIArtifact, AICheckpointView, AIConnector, AIConversation, AIJobRow, AIMessage, AIMsgImage,
-  AIRuleFile, AISkill, AISpace, AIToolCall, OutlineItem,
+  AIRuleFile, AISkill, AISpace, AIToolCall, OutlineItem, AIPrompt, AIMentionItem,
 } from '../types/ai'
 import { artifactsFromCalls, artifactsOf, countToolRounds, serializeTools, shortPath, toolList } from '../utils/aiTools'
 
@@ -89,6 +89,8 @@ import {
   AIGitBranches,
   AIWorktreeRemove,
   AIGetSkills,
+  AIGetPrompts,
+  AISuggestMentions,
   AIGetExtServers,
   AISetExtServerEnabled,
   AIJobsList,
@@ -535,7 +537,7 @@ const {
 // 这里只把输入框与工作目录这两份状态注入进去。
 const {
   mentions, mentionItems, mentionIdx, mentionOpen, lastMentions,
-  pickMention, removeMention, onMentionKey,
+  pickMention, addMention, removeMention, onMentionKey,
 // 传 streamingHere 而不是 streaming：后台在跑别的会话时，这条会话照样能 @ 引用
 } = useAiMention({ input, streaming: streamingHere, hasKey, conversations, convCwd })
 
@@ -1193,6 +1195,109 @@ async function loadSkills() {
   }
 }
 
+// ---- + 面板「引用」：和手打 @ 走同一条链路 ----
+//
+// 这里只负责把「本对话里出现过的文件」找出来；选中后一律落到 mentions（chip），
+// 发送时由后端按 path 读内容展开。前端绝不读文件、也绝不把文件名写进正文——
+// 那样会绕过 fsguard 与行数预算，用户还看不出自己引用了什么。
+const cwdMentionFiles = ref<AIMentionItem[]>([])
+
+const convFiles = computed<AIMentionItem[]>(() => {
+  const map = new Map<string, AIMentionItem>()
+  const add = (kind: string, name: string, path: string) => {
+    if (!path) return
+    const key = kind + '|' + path.replace(/\\/g, '/')
+    if (!map.has(key)) map.set(key, { kind: kind as AIMentionItem['kind'], name, path })
+  }
+  // AI 写过 / 改过的文件（含流式期）：刚生成的那个通常就是下一句要接着问的。
+  for (const a of convArtifacts.value) add('file', a.name, a.path)
+  // 之前 @ 引用过的：发出去后 chip 已清空，靠 lastMentions 把「老材料」留在手边。
+  for (const m of lastMentions.value) if (m.kind !== 'conv') add(m.kind, m.name, m.path)
+  // 当前已挂上的 chip：面板要能标「已引用」并支持再点一次摘掉。
+  for (const m of mentions.value) if (m.kind !== 'conv' && m.path) add(m.kind, m.name, m.path)
+  return [...map.values()]
+})
+
+const pickedFilePaths = computed(() =>
+  mentions.value.filter((m) => m.kind !== 'conv' && m.path).map((m) => m.path!),
+)
+
+// 工作目录候选与 @ 补全同源（AISuggestMentions），只是把 prefix 留空一次取回，
+// 交给面板本地过滤。不跟着搜索词反复发 RPC：列表在面板打开期间不会变，
+// 真变了下次打开会重取。没有 cwd / 目录失效时静默降级，本对话那组照样能用。
+async function loadMentionFiles() {
+  cwdMentionFiles.value = []
+  if (!convCwd.value) return
+  try {
+    cwdMentionFiles.value = unwrap<AIMentionItem[]>(await AISuggestMentions(convCwd.value, '')) || []
+  } catch {
+    // 与 useAiMention.loadMentionItems 同口径：这是状态不是错误，不弹提示。
+  }
+}
+
+// 选中 = 挂一枚 chip；已挂上的再点一次摘掉（与技能胶囊同口径）。
+// 用 addMention 而不是 pickMention：后者会删掉输入框末尾的 @token，
+// 但从 + 面板点进来时用户压根没打 @，末尾可能是邮箱、路径等正文。
+function onPickFile(it: AIMentionItem) {
+  const i = mentions.value.findIndex(
+    (m) => m.kind === it.kind && (m.path || '') === (it.path || ''),
+  )
+  if (i >= 0) removeMention(i)
+  else addMention(it)
+  plusOpen.value = false
+  // 遮罩吃掉了这次点击的焦点，选完把光标还回输入框，接着就能打字。
+  nextTick(() => (activeId.value ? composerRef.value : heroRef.value)?.focus())
+}
+
+// ---- 提示词库 ----
+//
+// 与技能是两套东西：技能插的是输入框里的胶囊（告诉模型「有这套路」），
+// 提示词插的是一段可继续编辑的正文（用户自己的话术）。见 internal/db/prompt.go。
+const prompts = ref<AIPrompt[]>([])
+
+// 打开面板时才拉：用户刚在设置里加过一条，挂载时缓存一份就会显示不出来。
+async function loadPrompts() {
+  try {
+    const data = unwrap(await AIGetPrompts()) as { prompts?: AIPrompt[] } | null
+    prompts.value = data?.prompts || []
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('AIPage:loadPrompts', e)
+  }
+}
+
+// 模板变量在插入那一刻展开：日期取今天、时间取此刻、选区取刚才选中的正文。
+//
+// 选区从富输入框取（takeSelectedText），不能直接读 window.getSelection()：
+// 点 + 面板时焦点已经移到按钮上，浏览器把选区清空了，这里读到的永远是空串。
+//
+// 没有选区时保留 {{selection}} 字面量，而不是换成空串：静默变空等于模板少了一半，
+// 用户会以为是提示词本身写漏了；留着占位符至少一眼看得见要补什么。
+function expandPromptVars(content: string, selection: string): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  const date = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+  const time = `${p(d.getHours())}:${p(d.getMinutes())}`
+  const sel = selection.trim()
+  let out = content.replace(/\{\{date\}\}/g, date).replace(/\{\{time\}\}/g, time)
+  if (sel) out = out.replace(/\{\{selection\}\}/g, sel)
+  return out
+}
+
+// 选提示词 = 把正文填进输入框（普通文本，不是胶囊），收起面板并把焦点交回输入框，
+// 用户接着补上下文就能发。
+function onPickPrompt(p: AIPrompt) {
+  plusOpen.value = false
+  const target = activeId.value ? composerRef.value : heroRef.value
+  if (!target) return
+  target.insertPromptText(expandPromptVars(p.content, target.takeSelectedText()))
+}
+
+function managePrompts() {
+  plusOpen.value = false
+  emit('open-settings', 'ai')
+}
+
 // 外部 MCP 服务器：+ 菜单只要「名字 / 状态 / 工具数」。command 与 env 属于设置页，
 // 摆进对话里的菜单只会变成一屏看不懂的配置。
 function mapConnectors(raw: unknown): AIConnector[] {
@@ -1227,7 +1332,7 @@ async function togglePlus() {
   if (plusOpen.value) {
     // 两个弹层贴在同一个位置，重叠着谁也看不清：显示层用 `slashOpen && !plusOpen` 抑制，
     // 这里不用再动 slashItems（它已是只读 computed）。
-    await Promise.all([loadSkills(), loadConnectors()])
+    await Promise.all([loadSkills(), loadConnectors(), loadPrompts(), loadMentionFiles()])
     return
   }
   // 收起后把焦点还给输入框：面板外面罩着一层遮罩，用户点输入框那一下
@@ -2580,7 +2685,11 @@ onUnmounted(() => {
         :plus-open="plusOpen"
         :skills="skills"
         :connectors="connectors"
+        :prompts="prompts"
         :picked-skills="pickedSkills"
+        :files="convFiles"
+        :cwd-files="cwdMentionFiles"
+        :picked-files="pickedFilePaths"
         :slash-open="slashOpen && !plusOpen"
         :slash-items="slashItems"
         :slash-idx="slashIdx"
@@ -2614,6 +2723,9 @@ onUnmounted(() => {
         @open-settings="emit('open-settings', 'ai')"
         @toggle-plus="togglePlus"
         @pick-skill="onPickSkill"
+        @pick-prompt="onPickPrompt"
+        @pick-file="onPickFile"
+        @manage-prompts="managePrompts"
         @update:skills="onSkillsChange"
         @toggle-connector="toggleConnector"
         @install-skill="installSkill"
@@ -2820,7 +2932,11 @@ onUnmounted(() => {
         :plus-open="plusOpen"
         :skills="skills"
         :connectors="connectors"
+        :prompts="prompts"
         :picked-skills="pickedSkills"
+        :files="convFiles"
+        :cwd-files="cwdMentionFiles"
+        :picked-files="pickedFilePaths"
         :slash-open="slashOpen && !plusOpen"
         :slash-items="slashItems"
         :slash-idx="slashIdx"
@@ -2851,6 +2967,9 @@ onUnmounted(() => {
         @toggle-url="toggleUrlInput"
         @toggle-plus="togglePlus"
         @pick-skill="onPickSkill"
+        @pick-prompt="onPickPrompt"
+        @pick-file="onPickFile"
+        @manage-prompts="managePrompts"
         @update:skills="onSkillsChange"
         @toggle-connector="toggleConnector"
         @install-skill="installSkill"

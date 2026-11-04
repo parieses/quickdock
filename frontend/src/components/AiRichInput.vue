@@ -17,7 +17,7 @@
  * - `contenteditable="plaintext-only"`：粘贴带格式的文本不会把富文本样式带进输入框，
  *   换行仍按块/`<br>` 处理（序列化时统一折成 `\n`）。
  */
-import { onMounted, ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = defineProps<{
@@ -199,7 +199,35 @@ watch(() => props.modelValue, (v) => {
   rebuild(v, { keepChips: isMentionTokenStrip(lastText, v) })
 })
 
-onMounted(() => rebuild(props.modelValue))
+onMounted(() => {
+  rebuild(props.modelValue)
+  document.addEventListener('selectionchange', onSelectionChange)
+})
+
+onBeforeUnmount(() => document.removeEventListener('selectionchange', onSelectionChange))
+
+// 输入框里「最后一次非空选区」。
+//
+// 为什么要缓存：点 + 面板的那一刻焦点就移到了按钮上，选区随即被浏览器清空——
+// 而提示词里的 {{selection}} 恰恰要在「点了面板之后」才展开，那时再去读
+// window.getSelection() 永远是空的。所以只记录发生在输入框内的非空选区，
+// 由 takeSelectedText() 取走并立即清空（同一条残留文本不该被两条提示词复用）。
+let lastSelection = ''
+
+function onSelectionChange() {
+  const root = el.value
+  const sel = window.getSelection()
+  if (!root || !sel || sel.rangeCount === 0 || !sel.anchorNode) return
+  if (!root.contains(sel.anchorNode)) return
+  const text = sel.toString()
+  if (text.trim()) lastSelection = text
+}
+
+function takeSelectedText(): string {
+  const text = lastSelection
+  lastSelection = ''
+  return text
+}
 
 // —— 胶囊 ——
 
@@ -348,10 +376,33 @@ function insertSkill(name: string) {
   el.value?.focus()
 }
 
+/**
+ * 在光标处插入一段模板正文（提示词库用）。
+ *
+ * 与 insertSkill 的区别：那个插的是不可编辑的胶囊节点（原子、删不掉半截），
+ * 这个插的是普通文本——模板只是草稿，插完还要按当前上下文改。
+ *
+ * 光标不在输入框里时（点了 + 面板、或选区还停在前一条消息上）先落到末尾：
+ * 否则 range 落在别的节点上，文本会插到用户看不见的地方。
+ */
+function insertPromptText(text: string) {
+  if (props.disabled || !text) return
+  const root = el.value
+  if (!root) return
+  root.focus()
+  const sel = window.getSelection()
+  const inRoot = !!sel && !!sel.anchorNode && root.contains(sel.anchorNode)
+  if (!inRoot) placeCaretAtEnd()
+  insertTextAtCaret(text)
+  emitAll()
+}
+
 defineExpose({
   // 聚焦并落到末尾：调用方（点示例、新建任务）要的是「接着打字」，不是「从头开始」
   focus: () => placeCaretAtEnd(),
   insertSkill,
+  insertPromptText,
+  takeSelectedText,
 })
 
 // —— 键盘删除（退格 / Delete）——

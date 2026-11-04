@@ -165,6 +165,25 @@ export interface AISkill {
   error?: string
 }
 
+/**
+ * AIPrompt 提示词库里的一条模板（见 internal/db/prompt.go）。
+ *
+ * 与 AISkill 的区别：技能是插进输入框的胶囊（告诉模型「有这套路」，正文由模型去读），
+ * 提示词是直接填进输入框的一段正文，可以带 {{date}} / {{time}} / {{selection}} 变量。
+ * builtin = 1 的条目不能删（删了下次启动还会回来），但可以改名改内容。
+ */
+export interface AIPrompt {
+  id: string
+  name: string
+  content: string
+  category: string
+  sort: number
+  builtin: number
+  sourceKey: string
+  createdAt: string
+  updatedAt: string
+}
+
 // 连接器 = mcp.json 里的一个外部 MCP server（QuickDock 作为 MCP 客户端接入的）。
 // 只保留 + 菜单要用的字段：command/env 这些属于设置页，列在对话里是噪音。
 export interface AIConnector {

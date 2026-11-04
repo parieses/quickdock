@@ -56,6 +56,9 @@ var validTables = map[string]bool{
 	"plugin_data":       true,
 	"ssh_hosts":         true,
 	"ssh_known_hosts":   true,
+	// AI 提示词库：需要走通用表操作（回收站整行恢复、快照按表遍历），
+	// 少了它这里会以「未知表」被拒。
+	"ai_prompts": true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）。
@@ -83,15 +86,19 @@ var validColumns = map[string]bool{
 	"kind": true, "label": true, "note": true, "payload": true, "size": true,
 	"key":  true,
 	"text": true, "content_type": true, "text_type": true, "text_content": true, "image_path": true,
-	"source_app":        true,
-	"title":             true,
-	"summary":           true,
-	"conv_id":           true,
-	"role":              true,
-	"copy_count":        true,
-	"category":          true,
-	"keyword":           true,
-	"content":           true,
+	"source_app": true,
+	"title":      true,
+	"summary":    true,
+	"conv_id":    true,
+	"role":       true,
+	"copy_count": true,
+	"category":   true,
+	"keyword":    true,
+	"content":    true,
+	// ai_prompts：内置条目标记与稳定身份（builtin 只影响能否删除，source_key 决定
+	// 升级时会不会重复插一份）。白名单全局共用，漏了就是写入时「非法列名」。
+	"builtin":           true,
+	"source_key":        true,
 	"reasoning_content": true,
 	"images":            true, // ai_messages：图片引用 JSON 数组（仅 user 消息）
 	"cwd":               true, // ai_conversations / ai_spaces：绑定的工作目录

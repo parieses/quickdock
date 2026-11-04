@@ -584,6 +584,29 @@ var baseTables = []string{
 		duration_ms INTEGER NOT NULL DEFAULT 0,
 		created_ts INTEGER NOT NULL DEFAULT 0
 	)`,
+
+	// AI 提示词库：用户自己的「一句话指令」模板。
+	//
+	// 为什么不复用 skills：技能是 skills/<名字>/SKILL.md，装 = 把目录拷进去，
+	// 作用是让模型知道「这类活有现成套路」，生命周期跟着文件走；
+	// 提示词是用户自己的话术，要在界面上增删改、要能带变量（{{date}} / {{selection}}），
+	// 点一下把正文填进输入框，生命周期跟着库走（进备份、进快照）。
+	// 两者入口也不同：技能是 / 里的胶囊，提示词是 + 面板里的一段正文。
+	//
+	// source_key 是内置条目的稳定身份：升级时按它判「这条是不是已经有了」。
+	// 不用 name 判断——用户改名后就匹配不上，会重复插一份新的。
+	// 空串表示用户自建（不受版本影响，也不允许被内置文案覆盖）。
+	`CREATE TABLE IF NOT EXISTS ai_prompts (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL DEFAULT '',
+		content TEXT NOT NULL DEFAULT '',
+		category TEXT NOT NULL DEFAULT '',
+		sort INTEGER NOT NULL DEFAULT 0,
+		builtin INTEGER NOT NULL DEFAULT 0,
+		source_key TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
@@ -650,6 +673,12 @@ func (d *Database) migrate() error {
 		if _, err := d.conn.Exec(sql); err != nil {
 			return fmt.Errorf("创建表失败: %w", err)
 		}
+	}
+
+	// 内置提示词：只补缺、不覆盖（详见 seedAIPrompts 注释）。
+	// 放在建表之后、列补齐之前：它只依赖 ai_prompts 自身的列，与其它表的 ALTER 无关。
+	if err := d.seedAIPrompts(); err != nil {
+		return fmt.Errorf("写入内置提示词失败: %w", err)
 	}
 
 	// 创建 FTS5 虚拟表

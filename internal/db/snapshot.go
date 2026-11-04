@@ -72,6 +72,9 @@ var syncExtraTables = []string{
 	"plugins",         // 已装插件记录与配置（不含插件文件）
 	"plugin_data",     // 插件写入的数据
 	"usage_frecency",  // 使用频率（影响列表排序）
+	// 提示词库：自己攒的话术，换台机器应该还在。
+	// 内置条目也一起带过去——source_key 相同，恢复后种子不会重复插。
+	"ai_prompts",
 }
 
 // restorePayload 将完整快照载荷写回数据库（在事务内调用）。

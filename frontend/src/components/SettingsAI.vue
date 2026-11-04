@@ -2,6 +2,7 @@
 import { ref, computed, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Pen, Trash2, Plus, RefreshCw } from '@lucide/vue'
+import SettingsPrompts from './SettingsPrompts.vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -1456,6 +1457,9 @@ function saveAIModal() {
         </div>
       </div>
     </Teleport>
+
+    <!-- 提示词库：与技能（skills/ 目录）不是一套，见 SettingsPrompts 文件头 -->
+    <SettingsPrompts :visible="visible" />
   </div>
 </template>
 

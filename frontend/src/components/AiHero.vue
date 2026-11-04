@@ -11,7 +11,7 @@ import { ref, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ArrowUp, GitBranch, Image as ImageIcon, Link2, Plus } from '@lucide/vue'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
-import type { AIConnector, AIMentionItem, AISkill, AISpace } from '../types/ai'
+import type { AIConnector, AIMentionItem, AIPrompt, AISkill, AISpace } from '../types/ai'
 import type { PendingImage } from '../types'
 import AiPlusPanel from './AiPlusPanel.vue'
 import AiSlashPanel from './AiSlashPanel.vue'
@@ -59,8 +59,14 @@ const props = defineProps<{
   plusOpen: boolean
   skills: AISkill[]
   connectors: AIConnector[]
+  /** 提示词库：与聊天输入框共用同一个 + 面板，点一下把正文填进输入框 */
+  prompts: AIPrompt[]
   /** 输入框里已选中的技能（行内胶囊，见 AiRichInput）：只给面板标「已选」用 */
   pickedSkills: string[]
+  /** + 面板「引用」：本对话文件 / 工作目录候选 / 已引用的 path */
+  files: AIMentionItem[]
+  cwdFiles: AIMentionItem[]
+  pickedFiles: string[]
   /** 「/ 选技能」补全 */
   slashOpen: boolean
   slashItems: AISkill[]
@@ -99,6 +105,9 @@ const emit = defineEmits<{
   (e: 'open-settings'): void
   (e: 'toggle-plus'): void
   (e: 'pick-skill', sk: AISkill): void
+  (e: 'pick-prompt', p: AIPrompt): void
+  (e: 'pick-file', it: AIMentionItem): void
+  (e: 'manage-prompts'): void
   (e: 'update:skills', names: string[]): void
   (e: 'pick-mention', it: AIMentionItem): void
   (e: 'remove-mention', i: number): void
@@ -120,6 +129,8 @@ const heroInputEl = ref<InstanceType<typeof AiRichInput> | null>(null)
 defineExpose({
   focus: () => heroInputEl.value?.focus(),
   insertSkill: (name: string) => heroInputEl.value?.insertSkill(name),
+  insertPromptText: (text: string) => heroInputEl.value?.insertPromptText(text),
+  takeSelectedText: () => heroInputEl.value?.takeSelectedText() || '',
 })
 
 function onSpaceSelect(e: Event) {
@@ -288,12 +299,19 @@ function onModelSelect(e: Event) {
           v-if="props.plusOpen"
           :skills="props.skills"
           :connectors="props.connectors"
+          :prompts="props.prompts"
           :picked="props.pickedSkills"
+          :files="props.files"
+          :cwd-files="props.cwdFiles"
+          :picked-files="props.pickedFiles"
           @close="emit('toggle-plus')"
           @pick-skill="emit('pick-skill', $event)"
+          @pick-prompt="emit('pick-prompt', $event)"
+          @pick-file="emit('pick-file', $event)"
           @toggle-connector="emit('toggle-connector', $event)"
           @install-skill="emit('install-skill')"
           @manage-connectors="emit('manage-connectors')"
+          @manage-prompts="emit('manage-prompts')"
         />
       </div>
 

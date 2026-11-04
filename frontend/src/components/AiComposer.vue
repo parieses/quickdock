@@ -10,7 +10,7 @@
 import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { GitBranch, Image as ImageIcon, Link2, ArrowUp, Plus, Square } from '@lucide/vue'
-import type { AIConnector, AIHooksInfo, AIMentionItem, AISkill } from '../types/ai'
+import type { AIConnector, AIHooksInfo, AIMentionItem, AIPrompt, AISkill } from '../types/ai'
 import type { PendingImage } from '../types'
 import AiPlusPanel from './AiPlusPanel.vue'
 import AiSlashPanel from './AiSlashPanel.vue'
@@ -39,8 +39,14 @@ const props = defineProps<{
   plusOpen: boolean
   skills: AISkill[]
   connectors: AIConnector[]
+  // 提示词库：点一下把正文填进输入框（与技能胶囊不是一回事，见 AiPlusPanel）
+  prompts: AIPrompt[]
   // 输入框里已选中的技能（行内胶囊，见 AiRichInput）：只给面板标「已选」用
   pickedSkills: string[]
+  // + 面板「引用」：本对话文件 / 工作目录候选 / 已引用的 path
+  files: AIMentionItem[]
+  cwdFiles: AIMentionItem[]
+  pickedFiles: string[]
   // 「/ 选技能」补全：打字时按名字过滤候选
   slashOpen: boolean
   slashItems: AISkill[]
@@ -75,6 +81,9 @@ const emit = defineEmits<{
   (e: 'toggle-url'): void
   (e: 'toggle-plus'): void
   (e: 'pick-skill', sk: AISkill): void
+  (e: 'pick-prompt', p: AIPrompt): void
+  (e: 'pick-file', it: AIMentionItem): void
+  (e: 'manage-prompts'): void
   (e: 'update:skills', names: string[]): void
   (e: 'toggle-connector', c: AIConnector): void
   (e: 'install-skill'): void
@@ -95,6 +104,10 @@ defineExpose({
   focus: () => inputEl.value?.focus(),
   // 技能胶囊在输入框内部（行内），所以「插入技能」这件事只能由富输入框自己做
   insertSkill: (name: string) => inputEl.value?.insertSkill(name),
+  // 提示词是普通正文（不是胶囊），同样只能由富输入框插到光标处
+  insertPromptText: (text: string) => inputEl.value?.insertPromptText(text),
+  // 最后一段非空选区（点面板时焦点已移走，只能靠输入框缓存的那份）
+  takeSelectedText: () => inputEl.value?.takeSelectedText() || '',
 })
 
 </script>
@@ -249,12 +262,19 @@ defineExpose({
       v-if="props.plusOpen"
       :skills="props.skills"
       :connectors="props.connectors"
+      :prompts="props.prompts"
       :picked="props.pickedSkills"
+      :files="props.files"
+      :cwd-files="props.cwdFiles"
+      :picked-files="props.pickedFiles"
       @close="emit('toggle-plus')"
       @pick-skill="emit('pick-skill', $event)"
+      @pick-prompt="emit('pick-prompt', $event)"
+      @pick-file="emit('pick-file', $event)"
       @toggle-connector="emit('toggle-connector', $event)"
       @install-skill="emit('install-skill')"
       @manage-connectors="emit('manage-connectors')"
+      @manage-prompts="emit('manage-prompts')"
     />
   </div>
 </template>

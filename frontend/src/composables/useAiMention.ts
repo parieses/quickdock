@@ -80,13 +80,22 @@ export function useAiMention(deps: AiMentionDeps) {
     return a.kind === b.kind && (a.path || '') === (b.path || '') && (a.convId || '') === (b.convId || '')
   }
 
+  /**
+   * 挂一枚 chip，不动正文。给 + 面板的「引用」分类用：那边点的是列表项，
+   * 输入框里可能压根没有 @token（甚至末尾是个邮箱），走 pickMention 的
+   * replace 会误删用户已经打好的字。去重与收起补全弹层仍然共用同一份实现。
+   */
+  function addMention(it: AIMentionItem) {
+    if (!mentions.value.some((m) => sameMention(m, it))) mentions.value.push(it)
+    mentionItems.value = []
+    mentionIdx.value = 0
+  }
+
   function pickMention(it: AIMentionItem) {
     // 把输入框末尾那个 @token 删掉：chip 才是引用的载体，正文里留着 @xxx
     // 会在发给模型的文本里多出一段既不像路径也不像名字的东西。
     input.value = input.value.replace(/@[^\s@]*$/, '')
-    if (!mentions.value.some((m) => sameMention(m, it))) mentions.value.push(it)
-    mentionItems.value = []
-    mentionIdx.value = 0
+    addMention(it)
   }
 
   function removeMention(i: number) {
@@ -124,6 +133,6 @@ export function useAiMention(deps: AiMentionDeps) {
 
   return {
     mentions, mentionItems, mentionIdx, mentionQuery, mentionOpen, lastMentions,
-    pickMention, removeMention, onMentionKey,
+    pickMention, addMention, removeMention, onMentionKey,
   }
 }
