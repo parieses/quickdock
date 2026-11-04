@@ -126,6 +126,13 @@ type tbLayout struct {
 	cells []Rect // 与 tbItems 一一对应
 }
 
+// tbCacheKey 是工具条摆放结果的完整输入。少了 bounds 那一项，跨会话换了分辨率
+// 却还命中旧缓存，工具条会按旧的屏幕尺寸避让。
+type tbCacheKey struct {
+	sel, work        Rect
+	screenW, screenH int
+}
+
 func toolbarWidth() int {
 	w := tbPadX * 2
 	for _, it := range tbItems {
@@ -168,8 +175,19 @@ func (o *Overlay) clientWorkArea(x, y int) Rect {
 }
 
 // layoutToolbar 按选区位置摆放工具条（可用区取选区所在显示器的工作区）。
+//
+// redraw 的 footprint 与 drawToolbar、updateHover 的命中检测都会问到它，一帧至少
+// 两次；摆放算法里还有一次 make([]Rect, len(tbItems))。选区不动时结果是同一个，
+// 因此按「选区 + 工作区 + 屏幕尺寸」缓存，缓存里的 cells 只读、调用方不修改。
 func (o *Overlay) layoutToolbar(sel Rect) tbLayout {
-	return layoutToolbarIn(o.clientWorkArea(sel.X+sel.W/2, sel.Y+sel.H/2), sel)
+	work := o.clientWorkArea(sel.X+sel.W/2, sel.Y+sel.H/2)
+	key := tbCacheKey{sel: sel, work: work, screenW: o.bounds.W, screenH: o.bounds.H}
+	if o.tbCached && o.tbCacheKey == key {
+		return o.tbCache
+	}
+	lay := layoutToolbarIn(work, sel)
+	o.tbCache, o.tbCacheKey, o.tbCached = lay, key, true
+	return lay
 }
 
 // layoutToolbarIn 是摆放算法本体，抽成纯函数以便脱离 Win32 单测
