@@ -6,12 +6,11 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Monitor, RefreshCw, Keyboard, ScrollText
+  Monitor, RefreshCw, Keyboard, ScrollText, Maximize2
 } from '@lucide/vue'
 import { HidePaletteWindow, GetLastCopiedText, CaptureSelection, CaptureFullScreen } from '../../bindings/quickdock/services/appservice'
 import { ExecuteSystemCommand } from '../../bindings/quickdock/services/system/systemservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
-import { GetPathQuickInfo } from '../../bindings/quickdock/services/item/itemservice'
 import {
   EnvList,
   EnvStatus,
@@ -45,6 +44,7 @@ import { usePaletteActions } from '../composables/usePaletteActions'
 import { usePaletteData } from '../composables/usePaletteData'
 import PluginFrame from './PluginFrame.vue'
 import CheatSheetModal from './CheatSheetModal.vue'
+import FilePreviewPane from './FilePreviewPane.vue'
 // 结果类型以 useCommandSearch（commandSearch/types）为唯一定义：本文件曾自带一份
 // 逐字重复的 SearchResult / ResultType，新增类型时两边不同步，于是每次加一种结果
 // 类型都在编译期炸一次（本次加 nav 就这样炸的）。
@@ -122,7 +122,6 @@ async function closePalette() {
   inlineQuicklink.value = null
   inlineQuery.value = ''
   clipboardUrlSource.value = ''
-  quickInfo.value = null
   try { await HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
 }
 
@@ -344,55 +343,56 @@ const {
   envRuntimes, envStatuses, envMgmt,
 })
 
-// ---- QuickLook 详情预览（选中即自动展示，无需按键）----
-interface PathQuickInfo { exists: boolean; isDir?: boolean; path?: string; sizeText?: string; modified?: string }
-const quickInfo = ref<PathQuickInfo | null>(null)
-let quickInfoTimer: ReturnType<typeof setTimeout> | null = null
-// 防抖间隔集中成常量，避免散落字面量漂移
-const QUICKINFO_DEBOUNCE_MS = 200
-
-// 拉取文件/目录元数据（本地 stat，防抖 200ms 防切项风暴）
-async function loadQuickInfo(item: CollectionItem) {
-  if (quickInfoTimer) { clearTimeout(quickInfoTimer); quickInfoTimer = null }
-  if (item.type !== '文件' && item.type !== '目录') { quickInfo.value = null; return }
-  quickInfoTimer = setTimeout(async () => {
-    quickInfoTimer = null
-    try {
-      const res = unwrap<PathQuickInfo | null>(await GetPathQuickInfo(item.value || ''))
-      quickInfo.value = res || null
-    } catch { quickInfo.value = null }
-  }, QUICKINFO_DEBOUNCE_MS)
-}
-
-// 选中项变化：跟随刷新元数据
-function refreshQuickInfoForSelection() {
+// ---- QuickLook 内容预览（选中即自动展示，无需按键）----
+// 选中项是文件/目录时交给 FilePreviewPane 出真实内容（图片、代码、PDF…）；
+// 其余类型（笔记 / 插件结果 / URL / 命令）继续走纯文本预览行。
+//
+// 这里刻意不再单独拉 GetPathQuickInfo：预览载荷本身已带大小 / 修改时间 / 尺寸，
+// 再 stat 一次就是为同一份信息多发一次 IPC（切换选中项时还会两路并发）。
+const selectedFilePath = computed(() => {
   const r = displayFlat.value[selectedIndex.value]
-  const item = r?.type === 'item' ? r.item : null
-  if (item) loadQuickInfo(item)
-  else quickInfo.value = null
-}
-watch(selectedIndex, refreshQuickInfoForSelection)
-watch(displayFlat, () => { if (previewResult.value) refreshQuickInfoForSelection() })
+  if (!r) return ''
+  if (r.type === 'item' && r.item) {
+    if (r.item.type !== '文件' && r.item.type !== '目录') return ''
+    return r.item.value || ''
+  }
+  // Everything 全盘搜索命中的文件（type=file）：这是本功能最常用的入口，
+  // 漏掉它等于预览区在最主要的路径上不生效。
+  if (r.type === 'file' && r.filePath) return r.filePath
+  return ''
+})
 
-// 预览正文：基础行 + 详情行（文件元数据 / 命令工作目录）
+// 预览区内的文本搜索是否打开。Esc 是文档级 capture 监听，子组件收不到也拦不住，
+// 所以这个状态必须由面板持有：收起顺序是「先退搜索、再关面板」。
+const previewSearching = ref(false)
+
+// 预览区是否放大。放大时藏掉结果列表，把整块剩余高度都给预览 ——
+// PDF 和大图在 262px 里基本等于只看得到一条边。
+// 状态放在这里是因为「藏列表」改的是本组件的 DOM，子组件碰不到。
+const previewExpanded = ref(false)
+
+// 放大态只有文件/目录预览撑得起来。如果用户在放大时用方向键切到了笔记、命令
+// 这类纯文本结果，预览体会退回 170px 而列表还藏着 —— 面板上会剩一片空白，
+// 所以这里自动退出放大，让列表回来。
+watch(selectedFilePath, (p) => {
+  if (!p) previewExpanded.value = false
+})
+
+// 底部提示要分「目录」和「文件」两句：目录能点进去，其余能放大。
+// 只看得到选中项的 type，Everything 搜出来的 file 结果没有目录信息，一律按文件算。
+const previewIsDir = computed(() => {
+  const r = displayFlat.value[selectedIndex.value]
+  return !!r && r.type === 'item' && r.item?.type === '目录'
+})
+
+// 预览正文：只服务非文件类结果（文件/目录已由 FilePreviewPane 渲染）
 const previewLines = computed(() => {
   const base = previewResult.value?.lines || []
   const r = displayFlat.value[selectedIndex.value]
-  if (r?.type !== 'item' || !r.item) return base
-  const it = r.item
+  if (r?.type !== 'item' || !r.item || r.item.type !== '命令') return base
   const extra: string[] = []
-  if ((it.type === '文件' || it.type === '目录') && quickInfo.value) {
-    const q = quickInfo.value
-    if (!q.exists) extra.push(t('previewPathMissing'))
-    else {
-      if (!q.isDir) extra.push(t('previewSize') + ': ' + (q.sizeText || '-'))
-      extra.push(t('previewModified') + ': ' + (q.modified || '-'))
-      extra.push(t('previewType') + ': ' + (q.isDir ? t('previewTypeFolder') : t('previewTypeFile')))
-    }
-  } else if (it.type === '命令') {
-    if (it.workingDirectory) extra.push(t('previewWorkingDir') + ': ' + it.workingDirectory)
-    if (it.tool) extra.push(t('previewTool') + ': ' + it.tool)
-  }
+  if (r.item.workingDirectory) extra.push(t('previewWorkingDir') + ': ' + r.item.workingDirectory)
+  if (r.item.tool) extra.push(t('previewTool') + ': ' + r.item.tool)
   return [...base, ...extra]
 })
 
@@ -539,6 +539,10 @@ function onGlobalEsc(e: KeyboardEvent) {
   if (showCheatSheet.value) { e.preventDefault(); showCheatSheet.value = false; return }
   e.preventDefault()
   if (actionMenuOpen.value) { closeActionMenu(); return }
+  // 预览区内的文本搜索：Esc 先退出搜索，再按一次才关面板（与动作菜单/内联页同一收起顺序）
+  if (previewSearching.value) { previewSearching.value = false; return }
+  // 放大后的预览：Esc 先还原成带列表的正常布局，避免「只想退出放大却把面板关了」
+  if (previewExpanded.value) { previewExpanded.value = false; return }
   if (inlineQuicklink.value) { cancelInlineQuicklink(); return }
   // 内联插件页：Esc 是「退回搜索」，与 iframe 里转发出来的 qd:plugin-esc 同一语义。
   // 少了这一支会直接关掉整个面板 —— 而插件页没有输入框，document 级兜底才是
@@ -549,8 +553,12 @@ function onGlobalEsc(e: KeyboardEvent) {
 
 // 方向键/数字直达等导航键是否握在输入框手里（避免与 input @keydown 双处理）
 function navFocused(): boolean {
-  const el = document.activeElement
-  return el === inputRef.value || el === inlineInputRef.value
+  const el = document.activeElement as HTMLElement | null
+  if (el === inputRef.value || el === inlineInputRef.value) return true
+  // 预览区里的文本搜索框：左右键要用来移动光标，不能被当成「切换结果」。
+  // 这里靠 class 判断是因为捕获阶段拿不到组件边界，而 role=searchbox 这类
+  // 语义属性又会同时命中别的输入框。
+  return !!el && !!el.closest('.fp-search-input')
 }
 
 // 文档级导航兜底（capture）：焦点不在输入框时（窗口激活竞态、点过结果/菜单项后）
@@ -728,6 +736,8 @@ onMounted(async () => {
     clipboardUrlSource.value = ''
     recentExpanded.value = false
     actionMenuOpen.value = false
+    previewSearching.value = false
+    previewExpanded.value = false
     void prefillFromClipboard(ev?.data ?? ev)
     // 聚焦输入框：单次 rAF 偶发因窗口激活竞态而失效，改为主动多次重试 + 绑定窗口获得焦点事件兜底
     nextTick(() => {
@@ -762,7 +772,6 @@ onUnmounted(() => {
   document.removeEventListener('keydown', onGlobalEsc, true)
   document.removeEventListener('keydown', onGlobalKey, true)
   window.removeEventListener('focus', focusInput)
-  if (quickInfoTimer) clearTimeout(quickInfoTimer)
 })
 </script>
 
@@ -825,7 +834,14 @@ onUnmounted(() => {
       </button>
     </div>
 
-    <div ref="listRef" class="palette-results" v-if="displayGroups.length > 0 && !inlineQuicklink">
+    <!-- 放大预览时藏掉列表：用 class 隐藏而不是 v-if 移除 DOM，
+         否则 listRef 变 null，跟着 selectedIndex 走的那套滚动逻辑会一起失效。 -->
+    <div
+      ref="listRef"
+      class="palette-results"
+      :class="{ 'is-hidden': previewExpanded }"
+      v-if="displayGroups.length > 0 && !inlineQuicklink"
+    >
       <template v-for="(group, gIdx) in displayGroups" :key="group.type">
         <div class="group-header">
           <span class="group-title">{{ group.label }}</span>
@@ -879,12 +895,23 @@ onUnmounted(() => {
       </template>
     </div>
 
-    <div class="palette-preview" v-if="previewResult && !inlineQuicklink">
+    <div
+      class="palette-preview"
+      :class="{ 'is-rich': !!selectedFilePath, 'is-expanded': previewExpanded }"
+      v-if="previewResult && !inlineQuicklink"
+    >
       <div class="preview-head">
         <span class="preview-title">{{ previewResult.title }}</span>
         <span class="preview-subtitle" v-if="previewResult.subtitle">{{ previewResult.subtitle }}</span>
       </div>
-      <div class="preview-body">
+      <FilePreviewPane
+        v-if="selectedFilePath"
+        v-model:searching="previewSearching"
+        v-model:expanded="previewExpanded"
+        class="preview-rich-body"
+        :path="selectedFilePath"
+      />
+      <div v-else class="preview-body">
         <div v-for="(line, i) in previewLines" :key="i" class="preview-line">{{ line }}</div>
       </div>
     </div>
@@ -933,6 +960,12 @@ onUnmounted(() => {
       <div class="footer-hint" v-if="contextActions.length > 0">
         <kbd>Ctrl</kbd><kbd>Enter</kbd>
         <span>{{ t('cmdActions') }}</span>
+      </div>
+      <!-- 预览区的两个隐藏能力（点文件夹进入、放大）在界面上都只有一个小图标，
+           不在这里说一句基本没人会发现。 -->
+      <div class="footer-hint" v-if="selectedFilePath">
+        <component :is="previewIsDir ? FolderOpen : Maximize2" :size="11" />
+        <span>{{ previewIsDir ? t('previewHintFolder') : t('previewHintExpand') }}</span>
       </div>
       <div class="footer-hint">
         <kbd>Esc</kbd>
@@ -1179,6 +1212,28 @@ onUnmounted(() => {
   flex-shrink: 0; max-height: 170px; overflow-y: auto;
   padding: 8px 16px; border-top: 1px solid var(--color-border); background: var(--color-bg-secondary);
 }
+/* 文件预览要高一些才看得清内容（图片/PDF/代码），滚动交给内层各区块自己管，
+   否则整个预览区被一条滚动条拖住，头部信息会跟着划走。 */
+.palette-preview.is-rich {
+  height: 262px; max-height: 55vh; overflow: hidden;
+  /* 允许收缩：窗口高度不够时优先保住结果列表，预览最多退到 140px，
+     否则禁用收缩的预览区会把列表压没，用户连按方向键都看不到选中哪条。 */
+  flex-shrink: 1; min-height: 140px;
+  display: flex; flex-direction: column; gap: var(--space-2);
+}
+/* 放大态：列表已隐藏，预览吃掉全部剩余高度。
+   height/min-height/max-height 三个都要显式覆盖，否则会被上面的 262px、
+   140px 下限和 55vh 上限按回原样 —— 那正是这次要治的问题。 */
+.palette-preview.is-rich.is-expanded {
+  height: auto;
+  max-height: none;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+.palette-results.is-hidden { display: none; }
+/* 预览体吃掉标题行剩下的高度；不给 min-height: 0 的话，内部滚动区会被
+   flex 的最小内容尺寸顶出去，长文件把面板撑破。 */
+.palette-preview.is-rich .preview-rich-body { flex: 1; min-height: 0; }
 .preview-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 4px; }
 .preview-title { font-size: 12.5px; font-weight: 600; color: var(--color-text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .preview-subtitle { font-size: 10.5px; color: var(--color-text-muted); flex-shrink: 0; }

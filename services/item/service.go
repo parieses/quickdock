@@ -6,8 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"quickdock/internal/fsguard"
+	"quickdock/internal/fsview"
+	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -31,8 +34,11 @@ func (s *ItemService) dbOK() *services.ApiResult {
 // 缓存窗口，报「不在可读范围内」——用户刚做完授权动作，这时候最没耐心重试。
 func itemsChanged() { fsguard.InvalidateRoots() }
 
-// GetPathQuickInfo 返回路径的文件系统元数据（命令面板 QuickLook 预览用）：
+// GetPathQuickInfo 返回路径的文件系统元数据：
 // 存在性 / 目录标志 / 大小 / 修改时间。路径不存在或入参为空时 exists=false，不报错。
+//
+// 命令面板已改用 PreviewPath —— 它的载荷里带了同样的元数据，一次 IPC 就够；
+// 本方法留给「只要元数据、不想读文件内容」的调用方（读内容对大文件是有代价的）。
 func (s *ItemService) GetPathQuickInfo(path string) *services.ApiResult {
 	path = strings.TrimSpace(path)
 	if path == "" {
@@ -66,6 +72,38 @@ func formatSize(n int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// 预览引擎与媒体服务都是进程级单例：媒体服务要占用一个端口，不能每次预览都新开。
+// 打包成 once 是因为第一个用它的可能是任意一次面板选择 —— 不该等到启动时才有。
+var (
+	previewEngineOnce sync.Once
+	previewEngine     *fsview.Viewer
+)
+
+func getPreviewEngine() *fsview.Viewer {
+	previewEngineOnce.Do(func() {
+		srv, err := fsview.StartMediaServer()
+		if err != nil {
+			// 端口都占不到时不让预览整体失效：文本/代码/压缩包列表仍然可用，
+			// 只有图片/PDF/音视频退化成「显示元数据」。
+			logger.W("[item] 预览媒体服务启动失败，二进制类预览将只显示元数据: %v", err)
+			previewEngine = fsview.New(nil)
+			return
+		}
+		previewEngine = fsview.New(srv.URL)
+		// 图片走服务端缩略：面板里只显示两三百像素高，没必要让 WebView 解原图。
+		previewEngine.SetThumbURL(srv.ThumbURL)
+	})
+	return previewEngine
+}
+
+// PreviewPath 返回一个路径的可预览载荷（命令面板 QuickLook 预览）。
+//
+// 与 GetPathQuickInfo 的分工：那个只给「存在/大小/修改时间」这类元数据，够列表用；
+// 这个真的把内容读出来，只在需要展示正文时才调，所以它更重、也必须带截断。
+func (s *ItemService) PreviewPath(path string) *services.ApiResult {
+	return services.Ok(getPreviewEngine().Preview(path))
 }
 
 // ListItems 列出集合内全部项。
