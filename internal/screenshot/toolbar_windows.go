@@ -23,6 +23,7 @@ const (
 	toolLine
 	toolMosaic
 	toolText
+	toolNumber
 )
 
 type iconID uint8
@@ -34,6 +35,7 @@ const (
 	iconLine
 	iconMosaic
 	iconText
+	iconNumber
 	iconFontSize
 	iconUndo
 	iconRedo
@@ -85,6 +87,7 @@ var tbItems = []tbItem{
 	{kind: tbTool, tool: toolLine, icon: iconLine},
 	{kind: tbTool, tool: toolMosaic, icon: iconMosaic},
 	{kind: tbTool, tool: toolText, icon: iconText},
+	{kind: tbTool, tool: toolNumber, icon: iconNumber},
 	{kind: tbSeparator},
 	{kind: tbColor},
 	{kind: tbWidth},
@@ -509,6 +512,13 @@ func drawIcon(p *painter, ox, oy int, id iconID, c col) {
 		// 一个「T」：顶横 + 中竖。
 		ip.fillRect(Rect{X: 2, Y: 2, W: 12, H: 2}, c)
 		ip.fillRect(Rect{X: 7, Y: 2, W: 2, H: 12}, c)
+
+	case iconNumber:
+		// 圆圈里一个「1」：外圈用空心椭圆，内里一竖加一小撇。
+		// 与 iconText 的 T 靠「有没有圆」区分，不用额外画数字占位。
+		ip.strokeEllipse(Rect{X: 1, Y: 1, W: 14, H: 14}, 2, c)
+		ip.line(8, 4, 8, 12, 2, c)
+		ip.line(6, 6, 8, 4, 1, c)
 
 	case iconFontSize:
 		// 一个「A」：两条斜边 + 中横。与 iconText 的 T 同为文字类图标，

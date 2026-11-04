@@ -19,19 +19,34 @@ import (
 // 输入窗是覆盖层的 owned window，恒在其上、随其销毁；它同时是顶层窗口，
 // 能正常接收焦点与键盘输入，不影响覆盖层的 SetForegroundWindow。
 //
-// 外观是半透明深色底 + 浅色文字，纯白会把底图挡死。透明度用
-// SetLayeredWindowAttributes(LWA_ALPHA)，不能换成 UpdateLayeredWindow——
-// 后者要求整窗自绘，EDIT 与 IME 都会失效。
+// 这个窗口**不再负责显示文字**：正在输入的内容由覆盖层用 drawText 直接画在
+// 锚点上（见 drawTextPreview），用的就是最终落字的那条路径，所以回车提交后
+// 一个像素都不会移动。早先把输入框摆在锚点右下 8px，输入完文字才「跳回去」，
+// 观感很割裂；现在输入窗退化成纯粹的键盘 / IME 接收器。
+//
+// 因此它被设成几乎全透明（LWA_ALPHA=1）+ WS_EX_TRANSPARENT：
+//   - 视觉上不遮挡底图，也不和覆盖层上的预览文字重影；
+//   - 鼠标命中测试跳过它，点击一律落到覆盖层（输入中点任意处 = 提交）；
+//   - 键盘焦点、IME 候选框定位完全不受影响，中文输入照常工作。
+// 不能换成 UpdateLayeredWindow：后者要求整窗自绘，EDIT 与 IME 都会失效。
+//
+// 配色逻辑（applyTextInputColors 那套深浅底 + WM_CTLCOLOREDIT）刻意保留：
+// 万一某个输入法在近乎透明的窗口上候选框定位异常，把 textInputAlpha 调回
+// 可见值就能立刻退回「带输入框」的旧外观，不必重写一遍。
 //
 // 两处别改回去：
-//   - 底色跟着标注色的明暗自适应（见 textInputPalette）。原先恒为深灰，
-//     选近黑色标注时输入框里什么都看不见，容易被当成 bug。
+//   - 底色跟着标注色的明暗自适应。原先恒为深灰，选近黑色标注时输入框里
+//     什么都看不见，容易被当成 bug。
 //   - EDIT 铺满客户区，左右留白走 EM_SETMARGINS。这样窗口类背景刷永远不可见，
 //     底色只剩 WM_CTLCOLOREDIT 一个来源，不必动态换类刷。
 
 const (
-	textEditPad    = 6   // 输入框左右内边距
-	textInputAlpha = 200 // 输入窗整体不透明度（0-255）
+	textEditPad = 6 // 输入框左右内边距
+
+	// 输入窗整体不透明度（0-255）。1 而不是 0：alpha=0 在 Windows 上有
+	// 「整窗不可见」的特殊语义，可能连带影响 IME 组合窗口；1 足够隐形，
+	// 又保持窗口在系统中是可见的。
+	textInputAlpha = 1
 	textInputMinW  = 220 // 输入窗宽度下限
 	textInputMaxW  = 460 // 输入窗宽度上限
 
@@ -64,6 +79,17 @@ type textInput struct {
 
 	active bool
 	anchor pt // 客户区坐标下的文字左上角落点
+
+	// 每帧刷新一次的预览状态，由 redraw 开头的 refreshTextPreview 算好，
+	// footprint 和 drawTextPreview 共用：避免两处各发一次 GetWindowText、
+	// 各量一次文本宽度，也保证脏矩形与实际落笔范围严格一致。
+	preview     string
+	caretX      int  // 插入符相对锚点的 x（按 EM_GETSEL 的前缀宽度算）
+	selStartX   int  // 选区起点相对锚点的 x（无选区时与 selEndX 相等）
+	selEndX     int  // 选区终点相对锚点的 x
+	previewW    int  // 预览文字宽度
+	previewH    int  // 预览文字高度
+	previewRect Rect // 预览 + 插入符 + 下划线的外接矩形
 
 	// editIndex 是本次输入对应的既有文字在 Overlay.shapes 中的下标；
 	// -1 表示新建（提交时追加）。据此决定提交是替换还是追加、清空是删除还是忽略。
@@ -145,10 +171,12 @@ func (o *Overlay) createTextInput() error {
 		o.ti.class = cls
 	}
 
-	// 无边框。多一圈系统边框只是往半透明底上糊脏像素。
+	// 无边框。多一圈系统边框只是往底图上糊脏像素。
+	// WS_EX_TRANSPARENT 让鼠标穿透：输入中点任意处都落到覆盖层，走「提交输入」，
+	// 不会被这个看不见的窗口吞掉点击。键盘焦点不受影响。
 	// 初始尺寸随便给，真正的尺寸在每次 openTextInput 时按字号定。
 	hwnd, _, _ := procCreateWindowExW.Call(
-		wsExTopmost|wsExToolWindow|wsExLayered,
+		wsExTopmost|wsExToolWindow|wsExLayered|wsExTransparent,
 		uintptr(unsafe.Pointer(o.ti.class)),
 		0,
 		wsPopup,
@@ -160,7 +188,7 @@ func (o *Overlay) createTextInput() error {
 	}
 	o.ti.hwnd = hwnd
 
-	// 整窗半透明：底图透出来，就不像一块糊在截图上的色块。
+	// 整窗近乎全透明：它只接键盘与 IME，可见文字全在覆盖层上。
 	procSetLayeredWindowAttributes.Call(hwnd, 0, textInputAlpha, lwaAlpha)
 
 	// 单行 EDIT，不换行、超长横向滚动。铺满整个客户区（尺寸在
@@ -220,8 +248,9 @@ func (o *Overlay) applyTextInputFont() {
 
 // applyTextInputColors 按当前标注色挑底色，并让 EDIT 立刻按新配色重画。
 //
-// 文字色恒等于标注色——只有这样输入时看到的才和落到图上的完全一致；
-// 变的只是底色：暗色字给浅底、亮色字给深底（判据见 textInputLumaSplit）。
+// 输入窗平时是隐形的，这套配色只在把 textInputAlpha 调回可见值（兼容某些
+// 输入法的候选框定位）时才起作用：文字色恒等于标注色，变的只是底色，
+// 暗色字给浅底、亮色字给深底（判据见 textInputLumaSplit）。
 func (o *Overlay) applyTextInputColors() {
 	bg := colTextBgDark
 	brush := o.ti.brushDark
@@ -241,7 +270,7 @@ func (o *Overlay) applyTextInputColors() {
 	}
 }
 
-// showTextInput 新建一条文字标注：在客户区坐标 (x, y) 落锚点并弹出输入框。
+// showTextInput 新建一条文字标注：在客户区坐标 (x, y) 落锚点并开启输入态。
 func (o *Overlay) showTextInput(x, y int) {
 	o.openTextInput(pt{x, y}, "", -1)
 }
@@ -264,7 +293,11 @@ func (o *Overlay) editTextShape(i int) {
 	o.openTextInput(pt{s.x0, s.y0}, s.text, i)
 }
 
-// layoutTextInput 按当前字号与锚点把输入窗摆好。
+// layoutTextInput 按当前字号把隐形输入窗摆到锚点附近。
+//
+// 窗口已不显示文字，位置只影响 IME 候选框的落点：贴着锚点摆，候选框就出现在
+// 正在打的字下面。所以不再需要「避免盖住落字位置」的 +8 偏移，也不做越界翻转
+// （一翻转候选框就飘走了）；只在贴着屏幕边缘时把窗口压回屏内。
 //
 // 字号在会话中可改（工具条「字号」面板），改完必须重排一遍：
 // 窗口和 EDIT 的尺寸是按字号算出来的，不重排的话大字号会被裁掉。
@@ -274,15 +307,8 @@ func (o *Overlay) layoutTextInput() {
 	}
 	w, h := textInputSize(clampInt(o.curFontSize, 8, 96))
 
-	// 输入框贴在锚点右下，避免盖住即将落字的位置；越界时翻到上方。
-	px := o.bounds.X + o.ti.anchor.x + 8
-	py := o.bounds.Y + o.ti.anchor.y + 8
-	if px+w > o.bounds.X+o.bounds.W {
-		px = o.bounds.X + o.bounds.W - w
-	}
-	if py+h > o.bounds.Y+o.bounds.H {
-		py = o.bounds.Y + o.ti.anchor.y - h - 6
-	}
+	px := o.bounds.X + o.ti.anchor.x
+	py := o.bounds.Y + o.ti.anchor.y
 	px = clampInt(px, o.bounds.X, maxInt(o.bounds.X, o.bounds.X+o.bounds.W-w))
 	py = clampInt(py, o.bounds.Y, maxInt(o.bounds.Y, o.bounds.Y+o.bounds.H-h))
 
@@ -299,7 +325,8 @@ func (o *Overlay) layoutTextInput() {
 		swpNoMove|swpNoZOrder)
 }
 
-// openTextInput 弹出文字输入窗。
+// openTextInput 开启文字输入态：隐形输入窗负责接键盘 / IME，
+// 可见文字由覆盖层画在 anchor 上（drawTextPreview）。
 //
 // editIndex >= 0 表示这是对既有文字的再编辑：提交时替换该条（清空则删除），
 // 而不是追加一条新的。
@@ -307,7 +334,7 @@ func (o *Overlay) openTextInput(anchor pt, initial string, editIndex int) {
 	if err := o.ensureTextInput(); err != nil {
 		// 原实现只打 err 正文，看不出是哪一步失败（建窗/子类化/建字体）；
 		// 补上动作名，配合 ensureTextInput 内的错误前缀即可定位。
-		logger.W("[screenshot] 文字输入窗打开失败（输入框不可用）: %v", err)
+		logger.W("[screenshot] 文字输入窗打开失败（本次无法输入文字）: %v", err)
 		return
 	}
 	o.ti.editIndex = editIndex
@@ -347,6 +374,8 @@ func (o *Overlay) refocusTextInput() {
 	}
 	procSetForegroundWindow.Call(o.ti.hwnd)
 	procSetFocus.Call(o.ti.edit)
+	// 工具条刚改过颜色 / 字号：预览得跟着变，否则所见和提交结果会不一致。
+	o.requestFrame()
 }
 
 // commitTextInput 读回输入内容：新建则追加一条，再编辑则替换原条（清空即删除）。
@@ -469,6 +498,80 @@ func (o *Overlay) readTextInput() string {
 	return syscall.UTF16ToString(buf[:got])
 }
 
+// textInputSel 读 EDIT 当前选区（UTF-16 code unit 索引）；无选区时起止相等，
+// 即插入符位置。
+//
+// 方向键 / Home / End 只挪光标、不改文字，EN_CHANGE 不会来；预览仍要跟着把
+// 插入符挪到对应位置，否则在句子中间插字时看起来像「光标钉在末尾」。
+// 双击编辑既有文字时原文是全选的，起止不相等，预览要给出选区提示。
+func (o *Overlay) textInputSel() (int, int) {
+	var start, end uint32
+	procSendMessageW.Call(o.ti.edit, emGetSel,
+		uintptr(unsafe.Pointer(&start)), uintptr(unsafe.Pointer(&end)))
+	return int(start), int(end)
+}
+
+// textWidthN 用与 drawText 同一套字体度量算前 n 个 UTF-16 单元的宽度。
+// n=0 直接给 0，避免对空切片取地址。
+func (o *Overlay) textWidthN(chars []uint16, n, fs int) int {
+	if n <= 0 || len(chars) == 0 {
+		return 0
+	}
+	if n > len(chars) {
+		n = len(chars)
+	}
+	w, _ := o.measureText(chars, n, fs)
+	return w
+}
+
+// refreshTextPreview 在每帧绘制前算一次预览状态。
+//
+// 必须在 footprint 之前调用：脏矩形要用这里的 previewRect，才能把上一帧更长的
+// 文字完整擦掉（redraw 取「上一帧落笔范围 ∪ 本帧落笔范围」做还原）。
+func (o *Overlay) refreshTextPreview() {
+	o.ti.preview = ""
+	o.ti.caretX, o.ti.previewW, o.ti.previewH = 0, 0, 0
+	o.ti.selStartX, o.ti.selEndX = 0, 0
+	o.ti.previewRect = Rect{}
+	if !o.ti.active || o.ti.edit == 0 {
+		return
+	}
+
+	fs := clampInt(o.curFontSize, 8, 96)
+	txt := o.readTextInput()
+	o.ti.preview = txt
+
+	u16, err := syscall.UTF16FromString(txt)
+	if err == nil && len(u16) > 1 {
+		chars := u16[:len(u16)-1] // 去掉结尾的 NUL
+		tw, th := o.measureText(chars, len(chars), fs)
+		s, e := o.textInputSel()
+		s = clampInt(s, 0, len(chars))
+		e = clampInt(e, 0, len(chars))
+		if s > e {
+			s, e = e, s
+		}
+		o.ti.caretX = o.textWidthN(chars, s, fs)
+		if e > s {
+			o.ti.selStartX = o.ti.caretX
+			o.ti.selEndX = o.textWidthN(chars, e, fs)
+		}
+		o.ti.previewW, o.ti.previewH = tw, maxInt(th, fs)
+	}
+	if o.ti.previewH < fs {
+		o.ti.previewH = fs // 空文本也要有插入符与下划线
+	}
+
+	// +8 留给插入符，+6 留给下划线和抗锯齿边缘。
+	a := o.ti.anchor
+	o.ti.previewRect = Rect{
+		X: a.x - 2,
+		Y: a.y - 2,
+		W: maxInt(o.ti.previewW, 8) + 8,
+		H: o.ti.previewH + 6,
+	}
+}
+
 // ===== 窗口过程 =====
 
 func textInputWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
@@ -481,12 +584,20 @@ func textInputWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 			return 0
 		case wmCtlColorEdit:
 			// EDIT 每次重绘都会问父窗口「用什么刷子擦背景、用什么颜色写字」。
-			// DefWindowProc 默认返回系统白刷，会把半透明输入框变成一块白底。
+			// DefWindowProc 默认返回系统白刷，会把输入框变成一块白底。
 			// wParam 是绘制用的 HDC。
 			if o.ti.brush != 0 {
 				procSetBkColor.Call(wParam, colorRef(o.ti.bg))
 				procSetTextColor.Call(wParam, colorRef(o.curColor))
 				return o.ti.brush
+			}
+		case wmCommand:
+			// EDIT 内容变化（打字 / 删除 / 粘贴 / IME 上屏）都走 EN_CHANGE；
+			// 光标类通知不出帧，由 editSubclassProc 的按键分支负责。
+			// 只 PostMessage：此刻还在 EDIT 的通知链里，同步 redraw 会反过来
+			// 向 EDIT 发 GetWindowText，属于重入。连续输入会被帧预算自动合帧。
+			if highWord(wParam) == enChange {
+				procPostMessageW.Call(o.hwnd, wmTextPreview, 0, 0)
 			}
 		}
 	}
@@ -496,14 +607,21 @@ func textInputWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 
 func editSubclassProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 	o := overlayInstance
-	if o != nil && msg == wmKeyDown {
-		switch wParam {
-		case vkReturn:
-			o.commitTextInput()
-			return 0
-		case vkEscape:
-			o.cancelTextInput()
-			return 0
+	if o != nil {
+		if msg == wmKeyDown {
+			switch wParam {
+			case vkReturn:
+				o.commitTextInput()
+				return 0
+			case vkEscape:
+				o.cancelTextInput()
+				return 0
+			}
+		}
+		// 方向键 / Home / End 只挪光标、不改文字，EN_CHANGE 不会来，
+		// 但预览里的插入符必须跟着动；打字时的按键也顺带催一帧。
+		if msg == wmKeyDown || msg == wmKeyUp {
+			procPostMessageW.Call(o.hwnd, wmTextPreview, 0, 0)
 		}
 	}
 	r, _, _ := procCallWindowProcW.Call(oldEditProc, hwnd, msg, wParam, lParam)

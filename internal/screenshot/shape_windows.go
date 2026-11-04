@@ -2,6 +2,8 @@
 
 package screenshot
 
+import "strconv"
+
 // 标注图形：只存矢量参数（类型 / 两端点 / 颜色 / 线宽），不存像素。
 //
 // 这样做的好处是撤销栈的内存占用与操作次数无关：撤销 = 数组末尾弹出，
@@ -17,6 +19,7 @@ const (
 	shapeLine
 	shapeMosaic
 	shapeText
+	shapeNumber // 序号标注：一个实心圆 + 白色数字，点击即放
 )
 
 type shape struct {
@@ -29,11 +32,19 @@ type shape struct {
 	// 由工具条的「字号」档位决定（见 annotFontSizes），与线宽无关。
 	text     string
 	fontSize int
+	// num 仅 shapeNumber 使用：显示的数字。(x0, y0) 是圆心而不是左上角，
+	// x1/y1 与它相同，只是为了让「移动图形」的通用位移代码不用分叉。
+	num int
 }
 
 const (
 	mosaicBlock    = 9 // 马赛克块边长（像素）
 	annotMinExtent = 3 // 小于此尺寸的图形视为误触丢弃
+
+	// 序号圆的半径由字号推出来，而不是写死：用户把字号调到 44 时，
+	// 一个 24px 的小圆塞不下两位数。下限保证默认字号下也点得中。
+	numberMinRadius = 12
+	numberOutline   = 2 // 深色外环宽度，让白/浅色序号在任何底图上都分得清
 )
 
 // colAnnot 是标注默认色（BGR 顺序的 #E53935，Snipaste 默认红）。
@@ -77,13 +88,26 @@ func shapeKindOf(t toolID) shapeKind {
 		return shapeMosaic
 	case toolText:
 		return shapeText
+	case toolNumber:
+		return shapeNumber
 	default:
 		return shapeRect
 	}
 }
 
+// numberRadius 返回序号圆的实心半径（不含深色外环）。
+//
+// 由字号推出来而不是写死：字号调到 44 时，一个 24px 的小圆塞不下两位数。
+// 下限保证默认字号下也点得中。
+func numberRadius(s *shape) int {
+	return maxInt(numberMinRadius, textHeight(s)*3/4+2)
+}
+
 // meaningful 报告这次拖拽是否够得上一笔有效图形（挡住误触产生的零点图形）。
 func (s *shape) meaningful() bool {
+	if s.kind == shapeNumber {
+		return true // 序号是「点一下即落」，没有拖拽过程
+	}
 	dx := absInt(s.x1 - s.x0)
 	dy := absInt(s.y1 - s.y0)
 	switch s.kind {
@@ -134,8 +158,28 @@ func (o *Overlay) drawShape(p *painter, s *shape) {
 
 	case shapeText:
 		o.drawText(p, s.text, s.x0, s.y0, textHeight(s), s.color)
+
+	case shapeNumber:
+		// 两层实心圆叠出「深色外环 + 当前色圆面」：白边在浅色底图上会消失，
+		// 深色环在任何底图上都把序号和背景分开。数字统一白色，因为圆面
+		// 可能是调色板里的任意一色（含近黑）。
+		r := numberRadius(s)
+		p.fillCircle(s.x0, s.y0, r+numberOutline, colNumberOutline)
+		p.fillCircle(s.x0, s.y0, r, s.color)
+
+		txt := strconv.Itoa(s.num)
+		h := textHeight(s)
+		tw, th := o.textSize(txt, h)
+		if tw > 0 && th > 0 {
+			o.drawText(p, txt, s.x0-tw/2, s.y0-th/2, h, colNumberText)
+		}
 	}
 }
+
+var (
+	colNumberOutline = col{0x20, 0x20, 0x20} // #202020
+	colNumberText    = col{0xFF, 0xFF, 0xFF}
+)
 
 // paintMosaic 在 r 范围内铺马赛克：按 mosaicBlock 网格取原始截图的块均值回填。
 //

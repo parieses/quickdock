@@ -196,7 +196,10 @@ const (
 )
 
 // 窗口类样式
-const csDblClks = 0x0008
+const (
+	csDblClks    = 0x0008
+	csDropShadow = 0x00020000 // 系统给无边框 WS_POPUP 画一圈投影（贴图窗口用）
+)
 
 // SetStretchBltMode
 const halftone = 4
@@ -210,8 +213,12 @@ const (
 // AppendMenuW
 const mfString = 0x0000
 
-// hwndTopmost 等价于 Win32 的 (HWND)-1。
-var hwndTopmost = ^uintptr(0)
+// hwndTopmost 等价于 Win32 的 (HWND)-1；hwndNoTopmost 是 (HWND)-2，
+// 两个都作为 SetWindowPos 的 hWndInsertAfter 用（贴图窗口切「取消置顶」）。
+var (
+	hwndTopmost   = ^uintptr(0)
+	hwndNoTopmost = ^uintptr(1)
+)
 
 // MonitorFromPoint
 const monitorDefaultToNearest = 0x00000002
@@ -259,16 +266,26 @@ const (
 	vkRight   = 0x27
 	vkDown    = 0x28
 
+	vk0 = 0x30
 	vkA = 0x41
 	vkC = 0x43
 	vkE = 0x45
+	vkH = 0x48
 	vkL = 0x4C
 	vkM = 0x4D
+	vkN = 0x4E
+	vkP = 0x50
 	vkR = 0x52
 	vkS = 0x53
 	vkT = 0x54
+	vkV = 0x56
 	vkY = 0x59
 	vkZ = 0x5A
+
+	// 贴图窗口调透明度用的 +/- 两键（中文键盘下按 + 要带 Shift，
+	// 但虚拟键码仍是 VK_OEM_PLUS）。
+	vkOEMPlus  = 0xBB
+	vkOEMMinus = 0xBD
 )
 
 // 窗口消息
@@ -301,6 +318,9 @@ const (
 const (
 	wmOverlayShow = wmApp + 1
 	wmOverlayStop = wmApp + 2
+	// wmTextPreview：文字输入窗通知覆盖层「EDIT 内容或光标变了，该刷新预览」。
+	// 用 PostMessage 而不是直接 redraw，是为了不在 EDIT 的通知链里重入它。
+	wmTextPreview = wmApp + 3
 )
 
 // WM_NCHITTEST 返回值
@@ -314,8 +334,12 @@ const htClient = 1
 const (
 	emSetMargins  = 0x00D3
 	emSetSel      = 0x00B1
+	emGetSel      = 0x00B0
 	ecLeftMargin  = 0x0001
 	ecRightMargin = 0x0002
+
+	// EN_CHANGE：EDIT 内容变化后发给父窗口的 WM_COMMAND 通知码。
+	enChange = 0x0300
 )
 
 // DrawTextW 格式

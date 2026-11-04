@@ -181,6 +181,14 @@ type Overlay struct {
 
 	mouseX, mouseY int
 	mouseIn        bool
+
+	// 取色器（见 colorpicker_windows.go）。pickerZoomIdx 跨会话保留：用户调过倍率，
+	// 下一张截图不该又回到默认值。pickerDrawn 记「上一帧到底画没画卡片」，
+	// 用来在卡片刚被隐藏时也排一帧，把旧位置的残影还原掉。
+	pickerShow    bool
+	pickerZoomIdx int
+	pickerCopied  string
+	pickerDrawn   bool
 }
 
 type overlayCmd struct {
@@ -277,7 +285,7 @@ var (
 )
 
 // NewOverlay 创建覆盖窗口管理器。真正建窗发生在 Start。
-func NewOverlay() *Overlay { return &Overlay{} }
+func NewOverlay() *Overlay { return &Overlay{pickerShow: true, pickerZoomIdx: 1} }
 
 // Start 创建覆盖窗口并启动其消息泵（独立 OS 线程，GetMessage 阻塞）。
 // 应在 app.Run() 之前调用：预创建后，热键触发路径只剩"抓屏 + 投递命令 + 显示窗口"。
@@ -546,6 +554,10 @@ func (o *Overlay) resetSession() {
 	o.paintLastN = 0
 	// 首帧的整屏内容由本轮 composeBase 双写生成，跨越会话残留的标记必须清掉。
 	o.dibDimmed = false
+	// 取色卡每次新会话都恢复显示、清掉上次的「已复制」；倍率刻意保留。
+	o.pickerShow = true
+	o.pickerCopied = ""
+	o.pickerDrawn = false
 }
 
 // finishWith 结束会话并按 action 交付结果。
@@ -1000,6 +1012,9 @@ func (o *Overlay) redraw() {
 	if o.dibPix == nil || len(o.base) == 0 || !o.showing.Load() {
 		return
 	}
+	// 预览状态要在 footprint 之前算：脏矩形得覆盖本帧文字，也要能靠
+	// paintLast 擦掉上一帧更长的那一段。
+	o.refreshTextPreview()
 	// 直接调用（键盘、工具条点击）说明这一帧已经画出来了，
 	// 挂着的定时器到期后不要再重复画一遍；同时刷新预算基准。
 	o.frameDue = false
@@ -1097,9 +1112,9 @@ func (o *Overlay) redraw() {
 			o.drawGuides()
 		}
 
-		// 文字输入中：在落字位置画一根插入符，告诉用户文字会从哪开始
+		// 文字输入中：正在打的字直接画在落字位置（所见即所得）。
 		if o.ti.active {
-			o.drawTextCaret()
+			o.drawTextPreview()
 		}
 
 		o.drawBorder(sel)
@@ -1116,6 +1131,9 @@ func (o *Overlay) redraw() {
 			o.drawPanel()
 		}
 	}
+
+	// 取色卡最后画：它要压在选框、工具条、尺寸提示之上，不能被它们盖住。
+	o.drawColorCard()
 
 	tDrawn := time.Now()
 	if full {
@@ -1203,11 +1221,32 @@ func ms(d time.Duration) string {
 	return fmt.Sprintf("%.2fms", float64(d)/float64(time.Millisecond))
 }
 
-// drawTextCaret 在文字锚点画一根插入符标记，高度即当前字号。
-func (o *Overlay) drawTextCaret() {
-	p := o.screenPainter()
-	h := clampInt(o.curFontSize, 8, maxInt(8, o.sel.H))
-	p.fillRect(Rect{X: o.ti.anchor.x, Y: o.ti.anchor.y, W: 2, H: h}, colActiveBg)
+// drawTextPreview 把正在输入的文字直接画在锚点上。
+//
+// 关键：走的是最终落字那条路径（drawText + shapePainter 的选区裁剪），用的
+// 也是同一份锚点 / 颜色 / 字号。提交时只是把内容存成 shape 再重放一遍，
+// 像素完全一致，所以不会再有「输入完才跳回原来的位置」的位移。
+//
+// 插入符按 EM_GETSEL 的前缀宽度摆，方向键挪光标时它会跟着走；下面那条细线
+// 是编辑态的低调提示，选中一段时那段会变成醒目的粗线（双击编辑原文默认全选，
+// 不给反馈的话「一打字整段没了」会莫名其妙）。这些都不进最终图片。
+func (o *Overlay) drawTextPreview() {
+	if !o.ti.active {
+		return
+	}
+	p := o.shapePainter()
+	fs := clampInt(o.curFontSize, 8, 96)
+	a := o.ti.anchor
+	if o.ti.preview != "" {
+		o.drawText(p, o.ti.preview, a.x, a.y, fs, o.curColor)
+	}
+	h := maxInt(o.ti.previewH, fs)
+	p.fillRect(Rect{X: a.x + o.ti.caretX, Y: a.y, W: 2, H: h}, colActiveBg)
+	lineY := a.y + h + 1
+	p.fillRect(Rect{X: a.x, Y: lineY, W: maxInt(o.ti.previewW, 8), H: 1}, o.curColor)
+	if o.ti.selEndX > o.ti.selStartX {
+		p.fillRect(Rect{X: a.x + o.ti.selStartX, Y: lineY, W: o.ti.selEndX - o.ti.selStartX, H: 2}, colActiveBg)
+	}
 }
 
 // restoreRegion 把选区内恢复成原始（未暗化）内容。
@@ -1465,6 +1504,13 @@ func (o *Overlay) footprint(dst []Rect) ([]Rect, bool) {
 		}
 	}
 
+	// 取色卡片：位置跟着光标走。这里只需登记「这一帧」的位置，上一帧的
+	// 位置已在 paintLast 里，redraw 取两者的并集做还原，残影不会留下。
+	// 必须放在 sel.Empty() 的提前返回之前——框选之前就该能取色。
+	if r := o.colorCardRect(); !r.Empty() {
+		add(r.X, r.Y, r.W, r.H)
+	}
+
 	if o.sel.Empty() {
 		return dst, true
 	}
@@ -1476,10 +1522,12 @@ func (o *Overlay) footprint(dst []Rect) ([]Rect, bool) {
 		add(hr.X, hr.Y, hr.W, hr.H)
 	}
 
-	// 文字输入中的插入符标记。
+	// 文字输入中的实时预览（文字 + 插入符 + 下划线）。
+	// 范围由 refreshTextPreview 按本帧文本量好；上一帧更长的那部分靠
+	// paintLast 与这里取并集还原，删字不会留下残影。
 	if o.ti.active {
-		h := clampInt(o.curFontSize, 8, maxInt(8, o.sel.H))
-		add(o.ti.anchor.x-1, o.ti.anchor.y, 4, h+1)
+		r := o.ti.previewRect
+		add(r.X, r.Y, r.W, r.H)
 	}
 
 	// 被选中图形的虚线框与它旁边的操作提示。
@@ -1626,6 +1674,12 @@ func (o *Overlay) clampSelected() {
 // 外扩是必需的：水平或垂直的线 / 箭头外接框有一边为 0，
 // 直接拿去判「是否还在选区内」会把它们全部当成空而误删。
 func (o *Overlay) shapeBounds(s *shape) Rect {
+	if s.kind == shapeNumber {
+		// 序号以 (x0,y0) 为圆心，x1/y1 与圆心相同（不参与几何）。
+		// 走 normRect 会得到一个 0×0 的点，命中/裁剪/拖动就全废了。
+		r := numberRadius(s) + numberOutline + 2
+		return Rect{X: s.x0 - r, Y: s.y0 - r, W: r * 2, H: r * 2}
+	}
 	var r Rect
 	if s.kind == shapeText {
 		r = o.textBounds(s)
@@ -1686,6 +1740,11 @@ func (o *Overlay) shapeHit(i, x, y int) bool {
 			return true
 		}
 		return i == o.selected
+
+	case shapeNumber:
+		// 圆内即命中（含外环与一点容差），不要用外接方框：
+		// 方框的四角明明是背景，点上去却会把序号拖走。
+		return math.Hypot(float64(x-s.x0), float64(y-s.y0)) <= float64(numberRadius(s)+numberOutline+3)
 
 	default: // 文字 / 马赛克
 		return o.shapeBounds(s).Contains(x, y)
@@ -1765,6 +1824,20 @@ func (o *Overlay) endShapeMove() {
 		o.dropLastHistory()
 	}
 	o.moveIndex = -1
+}
+
+// nextNumber 返回下一个该放的序号。
+//
+// 从现存序号里取最大值 +1，而不是维护一个只增的计数器：撤销 / 删除之后再放
+// 能补回刚消失的号，不会留下「1、2、4」这种跳号，也不需要把计数器塞进快照。
+func (o *Overlay) nextNumber() int {
+	n := 1
+	for i := range o.shapes {
+		if o.shapes[i].kind == shapeNumber && o.shapes[i].num >= n {
+			n = o.shapes[i].num + 1
+		}
+	}
+	return n
 }
 
 // deleteSelected 删除当前选中的图形，返回是否删掉了东西。
@@ -1898,7 +1971,8 @@ func (o *Overlay) onLButtonDown(hwnd uintptr, x, y int) {
 			return
 		}
 		// 其它任何位置（含选区、选区外）的点击都视为「确认输入」。
-		// （点在输入窗上的消息归输入窗自己，不会走到这里。）
+		// 输入窗带 WS_EX_TRANSPARENT，鼠标会穿透到覆盖层，所以连原来
+		// 「点在输入框上」的那块区域现在也会走到这里，行为统一。
 		// 顺带收起面板：面板开着时点空白只提交输入、不关面板会显得迟钝。
 		o.panel = panelNone
 		o.commitTextInput()
@@ -1923,6 +1997,30 @@ func (o *Overlay) onLButtonDown(hwnd uintptr, x, y int) {
 					return
 				}
 				o.showTextInput(x, y)
+				return
+			case o.activeTool == toolNumber:
+				// 序号不走拖拽：落点即圆心。命中已有标注时让位给「选中 + 移动」，
+				// 否则想在密集标注区拖一下会不停叠出新圆。
+				if i := o.hitShapeAt(x, y); i >= 0 {
+					o.selectShape(i)
+					o.beginShapeMove(hwnd, i, x, y)
+					o.redraw()
+					return
+				}
+				o.pushHistory()
+				o.selected = -1
+				o.shapes = append(o.shapes, shape{
+					kind:     shapeNumber,
+					x0:       x,
+					y0:       y,
+					x1:       x,
+					y1:       y,
+					width:    o.curWidth,
+					color:    o.curColor,
+					fontSize: o.curFontSize,
+					num:      o.nextNumber(),
+				})
+				o.redraw()
 				return
 			case o.activeTool != toolNone:
 				// 拖出一笔新的标注。历史先压一份，松手时若这笔太小被丢弃再弹掉。
@@ -2097,7 +2195,11 @@ func (o *Overlay) onMouseMove(x, y int) {
 	// 拖拽中画面每帧都在变（选区 / 草稿 / 十字辅助线），无条件排帧；
 	// 非拖拽时先比一眼关键状态——光标在空白处划来划去、什么都没变，
 	// 以前也要走一整遍整帧 memcpy + 全屏提交。
-	if o.drag != dragNone || o.frameKey() != before {
+	//
+	// 取色卡是唯一的例外：它跟着光标走，坐标变化不在 frameKey 里（frameKey 刻意
+	// 不含坐标），所以卡片可见时必须每次移动都出帧。pickerDrawn 覆盖「这一帧刚
+	// 隐藏」的情况——不出帧的话，上一帧的卡片会一直留在屏幕上。
+	if o.drag != dragNone || o.colorCardVisible() || o.pickerDrawn || o.frameKey() != before {
 		o.requestFrame()
 	}
 }
@@ -2484,6 +2586,13 @@ func (o *Overlay) onKeyDown(vk uintptr) {
 		if o.deleteSelected() {
 			o.redraw()
 		}
+	case vkC:
+		// C 复制 HEX、Shift+C 复制 RGB；Ctrl+C 走上面那条「复制整张截图」，
+		// 两者不冲突。复制颜色不结束会话，方便连着取好几个色。
+		o.copyColorAtCursor(shift)
+	case vkP:
+		o.pickerShow = !o.pickerShow
+		o.redraw()
 	case vkR:
 		o.setTool(toolRect)
 	case vkE:
@@ -2496,6 +2605,8 @@ func (o *Overlay) onKeyDown(vk uintptr) {
 		o.setTool(toolMosaic)
 	case vkT:
 		o.setTool(toolText)
+	case vkN:
+		o.setTool(toolNumber)
 	case vkLeft, vkRight, vkUp, vkDown:
 		o.nudge(vk, shift)
 	}
@@ -2557,6 +2668,12 @@ func overlayWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 		procPostQuitMessage.Call(0)
 		return 0
 
+	case wmTextPreview:
+		// 来自文字输入窗：EDIT 内容或光标位置变了。走 requestFrame 而不是
+		// 直接 redraw，连续打字会按帧预算合帧，不会每个按键全屏刷一次。
+		o.requestFrame()
+		return 0
+
 	case wmTimer:
 		o.onFrameTimer()
 		return 0
@@ -2592,6 +2709,11 @@ func overlayWndProc(hwnd, msg, wParam, lParam uintptr) uintptr {
 
 	case wmKeyDown:
 		o.onKeyDown(wParam)
+		return 0
+
+	case wmMouseWheel:
+		// 高字是有符号的滚轮增量：向前滚为正，放大取色镜。
+		o.zoomPicker(highWord(wParam))
 		return 0
 
 	case wmDestroy:
