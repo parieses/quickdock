@@ -169,7 +169,7 @@
     <dl class="tools rise">
       <div class="tool">
         <dt>命令面板 <kbd>Ctrl K</kbd></dt>
-        <dd>项目、笔记、待办、应用、文件、插件命令一起搜，结果按来源分区。粘贴网址会问要不要存成项目。</dd>
+        <dd>项目、笔记、待办、应用、文件、插件命令一起搜，结果按来源分区；文件结果可在面板里直接预览。粘贴网址会问要不要存成项目。</dd>
       </div>
       <div class="tool">
         <dt>剪贴板历史 <kbd>Ctrl `</kbd></dt>
@@ -177,7 +177,7 @@
       </div>
       <div class="tool">
         <dt>截图 <kbd>F1</kbd></dt>
-        <dd>原生分层窗口做覆盖层，框选、标注、复制、贴图都在同一层里完成，不打开第二个窗口。</dd>
+        <dd>原生分层窗口做覆盖层，框选、标注、取色、序号、复制、贴图都在同一层里完成，不打开第二个窗口。</dd>
       </div>
       <div class="tool">
         <dt>窗口排版 <kbd>Ctrl Alt W</kbd></dt>
@@ -346,6 +346,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">全站界面精修，截图补齐取色与序号标注，AI 有了自己的提示词库</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+<li>界面整体精修：深浅两套主题重做中性色阶与字重，页头、卡片、按钮、输入框的层次统一；选中态全站收敛成「淡底 + 左缘竖条」，空状态补上方底图标，顺带修掉待办日历空月份被拉伸撑高的问题。</li>
+          <li>F1 截图补齐取色、连续序号标注、贴图旋转翻转与鼠标穿透；文字标注改成所见即所得，正在打的字直接画在锚点，不再在旁边打完又跳回原位。</li>
+          <li>AI 新增内置提示词库（可在「设置 → AI 助手」里增删改），输入框的「+」面板改成分类级联，还能把本对话产物与工作目录文件挂成引用；提示词随数据快照走，与「/」技能胶囊各管各的。</li>
+          <li>命令面板选中文件结果可直接预览：图片、代码高亮、Markdown、PDF、音视频、压缩包条目与目录列表，支持目录内下钻、文本搜索与放大；大图先由本地服务降采样，快速划过不再卡住面板。</li>
+          <li>性能与稳定性：后台页不再定时轮询，1Hz 计时与工具解析挪出热路径；数据库纯读改读锁、单条写少一次 fsync；浮窗按需创建，心跳与看门狗随应用退出停止；截图帧调度按实测成本降档。</li>
+          <li>修复 SSH 终端复制 / 粘贴在部分窗口归属下读不到剪贴板内容的问题。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.39</span>
+          <span class="log-date">2026-11-04</span>
           <span class="log-title">内置 Git 可视化面板，监控支持四种探针，总览改成图表</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -387,23 +404,6 @@
           <li>工具轮次不再固定 36 轮硬停：连续一批没有新进展才收尾，真跑满单次预算时会说明原因，留一句「接着做」即可。</li>
           <li>工具卡片收成一行：动作、目标、耗时同排，状态改用图标着色；后台任务那行直接写「运行中 / 已结束 · 退出码 1」，点「查看」跳到面板里对应那条。</li>
           <li>修复后台任务在特定启动顺序下整体失效——表现为进程确实起来了，面板和输入框上方却一条都不显示。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.36</span>
-          <span class="log-date">2026-11-01</span>
-          <span class="log-title">输入框能直接选技能了，记忆会自己攒，切走对话也不打断</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>输入框里打 <code>/</code> 直接选技能，选中的技能变成行内胶囊，随这条对话记住、切走再切回来还在。</li>
-          <li>记忆会自己整理：每轮对话结束后把值得长期记的结论、偏好摘进记忆文件，项目任务记到项目目录、普通任务跨任务共享，不再每轮从零开始。</li>
-          <li>执行权限可一键切到「完全访问」，但只跳过「问」这一档——删库、强推、高危命令和文件白名单仍然拦着。</li>
-          <li>切到别的会话或页面，正在跑的回答继续生成，回来还在原位置；侧栏每条会话多了「进行中 / 完成 / 失败」的状态点。</li>
-          <li>笔记（Markdown）右上角可切「源码 / 分屏 / 预览」三种视图，默认分屏。</li>
-          <li>其余：授权目录内写文件类工具默认免确认；回答结束不论完成、中断还是失败都通知；对话框能显示当前目录的 git 分支；侧栏任务列表只先展示前 10 条，多余的折叠。</li>
         </ul>
       </details>
 

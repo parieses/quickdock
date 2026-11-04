@@ -169,7 +169,7 @@
     <dl class="tools rise">
       <div class="tool">
         <dt>Command palette <kbd>Ctrl K</kbd></dt>
-        <dd>Searches projects, notes, todos, apps, files and plugin commands at once, grouped by source. Paste a URL and it offers to save it as a project.</dd>
+        <dd>Searches projects, notes, todos, apps, files and plugin commands at once, grouped by source; file results preview inside the panel. Paste a URL and it offers to save it as a project.</dd>
       </div>
       <div class="tool">
         <dt>Clipboard history <kbd>Ctrl `</kbd></dt>
@@ -177,7 +177,7 @@
       </div>
       <div class="tool">
         <dt>Screenshot <kbd>F1</kbd></dt>
-        <dd>A layered native window acts as the overlay: selecting, annotating, copying and pinning all happen inside it, no second window.</dd>
+        <dd>A layered native window acts as the overlay: selecting, annotating, color picking, numbered markers, copying and pinning all happen inside it, no second window.</dd>
       </div>
       <div class="tool">
         <dt>Window tiling <kbd>Ctrl Alt W</kbd></dt>
@@ -346,6 +346,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">A full UI polish, screenshot upgrades, and a built-in prompt library</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+<li>A full UI polish: both themes get a rebuilt neutral scale and real font weights, with consistent hierarchy across page headers, cards, buttons and inputs. Selected rows now share one language (tinted background + a 2px left bar), empty states get a proper icon tile, and the todo calendar no longer stretches to fill empty months.</li>
+          <li>F1 screenshots gain color picking, sequential numbered markers, pin rotation / flipping and click-through. Text annotations are WYSIWYG — what you type is drawn right at the anchor instead of jumping back from a side input.</li>
+          <li>The AI gains a built-in prompt library you can edit under Settings → AI Assistant. The "+" panel is now a two-level category picker and can attach files produced in this conversation or in the working directory as references. Prompts live in the database snapshot, separate from "/" skill chips.</li>
+          <li>Command palette file results preview in place: images, highlighted code, Markdown, PDF, audio / video, archive entries and directory listings, with drill-down, in-text search and zoom. Large images are downsampled by a local service so flicking through them no longer stalls the panel.</li>
+          <li>Performance and stability: background pages stop polling, the 1Hz timer and tool parsing leave the hot path; pure reads take a read lock and single writes skip an fsync; floating windows are created on demand and heartbeat / watchdog stop with the app; screenshot frame scheduling steps down to match measured cost.</li>
+          <li>Fixed SSH terminal copy / paste failing to read clipboard content under certain window ownership cases.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.39</span>
+          <span class="log-date">2026-11-04</span>
           <span class="log-title">Built-in Git panel, four monitor probe types, and a charted dashboard</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -387,23 +404,6 @@
           <li>Tool rounds are no longer capped at a hard 36: it wraps up only when a whole batch makes no progress, and says so if it reaches the per-question budget — just ask it to continue.</li>
           <li>Tool cards collapse to a single line — action, target and duration together, status shown by icon colour. Job rows read "running / finished · exit code 1", and "View" jumps to that entry in the panel.</li>
           <li>Fixed background jobs silently failing under certain startup orders — the process did start, but neither the panel nor the bar above the input showed anything.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.36</span>
-          <span class="log-date">2026-11-01</span>
-          <span class="log-title">Pick skills right in the input, memory writes itself, and switching away won't stop the reply</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Type <code>/</code> in the input to pick a skill; the chosen one becomes an inline chip, remembered for that conversation and still there when you come back.</li>
-          <li>Memory maintains itself: after each turn it files the conclusions and preferences worth keeping into the memory file — project tasks write to the project folder, plain tasks share one across tasks, so it no longer starts from zero every time.</li>
-          <li>Execution permission can flip to "full access" with one click, but that only skips the "ask" step — destructive commands, force-push, high-risk commands and the file whitelist still hold.</li>
-          <li>Switch to another conversation or page and the running reply keeps generating; come back and it's where you left it. The sidebar now shows a per-conversation status dot: in progress / done / failed.</li>
-          <li>Markdown notes get a source / split / preview switcher in the top-right, split by default.</li>
-          <li>Also: file-writing tools auto-approve inside authorised directories; a reply notifies on completion, interruption or failure; the dialog shows the current directory's git branch; the sidebar lists the first 10 tasks and folds the rest.</li>
         </ul>
       </details>
 
