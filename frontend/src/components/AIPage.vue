@@ -18,6 +18,7 @@ import AiHero from './AiHero.vue'
 import AiComposer from './AiComposer.vue'
 import AiMessageList from './AiMessageList.vue'
 import AiRoundBar from './AiRoundBar.vue'
+import AiJobsBar from './AiJobsBar.vue'
 import AiApprovalBar from './AiApprovalBar.vue'
 import { SetAIPageVisible } from '../../bindings/quickdock/services/appservice'
 import { copyToClipboard } from '../utils/clipboard'
@@ -1883,9 +1884,8 @@ const jobSeq = ref(0)
 /** 面板要定位的任务 id：从消息卡片的「查看」进来时带上 */
 const jobsFocus = ref('')
 let jobsBadgeTimer: ReturnType<typeof setTimeout> | undefined
-/** 横条上的「已运行 3m12s」靠它每秒重算；没有任务在跑时定时器停掉 */
-const nowTick = ref(Date.now())
-let nowTickTimer: ReturnType<typeof setInterval> | undefined
+// 横条上的实时计时已搬进 AiJobsBar：父页不再持有 1Hz 的 ref，
+// 否则每秒那次赋值会把整页模板（含侧栏与消息列表 props）重新 diff 一遍。
 
 async function refreshJobBadge() {
   try {
@@ -1922,28 +1922,6 @@ function scheduleJobBadge() {
     scheduleJobBadge()
   }, delay)
 }
-
-watch(runningJobs, (n) => {
-  if (n > 0 && !nowTickTimer) {
-    nowTick.value = Date.now()
-    nowTickTimer = setInterval(() => { nowTick.value = Date.now() }, 1000)
-  } else if (!n && nowTickTimer) {
-    clearInterval(nowTickTimer)
-    nowTickTimer = undefined
-  }
-})
-
-/** 输入框上方那条横条的内容（没有运行中的任务时为 null） */
-const jobBar = computed(() => {
-  const first = runningJobList.value[0]
-  if (!first) return null
-  const started = Date.parse(first.startedAt) || nowTick.value
-  return {
-    command: first.command,
-    more: runningJobList.value.length - 1,
-    elapsed: formatDuration(Math.max(0, nowTick.value - started)),
-  }
-})
 
 function toggleJobs() {
   jobsOpen.value = !jobsOpen.value
@@ -2545,7 +2523,6 @@ onUnmounted(() => {
   }
   if (msgSearchTimer) { clearTimeout(msgSearchTimer); msgSearchTimer = undefined }
   if (jobsBadgeTimer) { clearTimeout(jobsBadgeTimer); jobsBadgeTimer = undefined }
-  if (nowTickTimer) { clearInterval(nowTickTimer); nowTickTimer = undefined }
   aiGenerating.value = false
   aiFinishedUnread.value = false
   reportAIPageVisible(false)
@@ -2884,15 +2861,9 @@ onUnmounted(() => {
              为什么放这里：后台任务最常见的用法就是「让它在后台跑着，我继续问别的」，
              而它一旦跑起来，除了工具栏那个小终端图标就没别的地方能看见——用户会以为
              服务没起来。这条横条把它放到视线落点上：跑的是哪条命令、跑了多久、一共几个。
-             点开就是后台任务面板（日志 / 终止都在那里）。 -->
-        <button v-if="jobBar" class="ai-jobs-bar" :title="t('aiJobsBarTip')" @click="toggleJobs">
-          <span class="ai-jobs-bar-dot" />
-          <span class="ai-jobs-bar-label">{{ t('aiJobsBarRunning') }}</span>
-          <code class="ai-jobs-bar-cmd" :title="jobBar.command">{{ jobBar.command }}</code>
-          <span class="ai-jobs-bar-meta">
-            {{ jobBar.elapsed }}<template v-if="jobBar.more > 0"> · {{ t('aiJobsBarMore', { n: jobBar.more }) }}</template>
-          </span>
-        </button>
+             点开就是后台任务面板（日志 / 终止都在那里）。
+             计时由 AiJobsBar 自持，父页只传列表、不跟着每秒重渲染。 -->
+        <AiJobsBar :jobs="runningJobList" :active="pageActive" @toggle="toggleJobs" />
 
         <!-- 等待插入的消息：后端回执（inject_ack）之前这句话谁都还没看到，
              必须有这个落点——否则用户会以为没发出去，然后连按几次回车。 -->
@@ -3025,69 +2996,7 @@ onUnmounted(() => {
    绝对定位元素的 100% 是父级的 padding box，比 content box 多左右各一份 padding，
    所以这里要减掉两次 --space-6（.ai-dock 的左右内边距）。
    原来写 left/right:10% 是专门配 80% 的算法，输入框一换口径就立刻错位。 */
-/* 后台任务横条：与输入框同宽同左边（--ai-column-w + margin auto），
-   一条浅底的行内按钮，不加边框——它是状态提示，不是一张卡片。
-   高度刻意压到与等待插入那条一致，两条同时出现时不会一厚一薄。 */
-.ai-jobs-bar {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  width: var(--ai-column-w);
-  min-width: 0;
-  margin: 0 auto 6px;
-  padding: 5px 10px;
-  border: none;
-  border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
-  font-family: inherit;
-  font-size: 11.5px;
-  color: var(--color-text-secondary);
-  text-align: left;
-  cursor: pointer;
-}
-
-.ai-jobs-bar:hover {
-  background: var(--color-bg-hover);
-}
-
-/* 呼吸点：静态圆点会被读成「一个图标」，这一条要说的是「此刻还在跑」 */
-.ai-jobs-bar-dot {
-  flex: 0 0 auto;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--color-accent);
-  animation: ai-jobs-bar-pulse 1.2s ease-in-out infinite;
-}
-
-@keyframes ai-jobs-bar-pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.25; }
-}
-
-.ai-jobs-bar-label {
-  flex: 0 0 auto;
-  color: var(--color-text-secondary);
-}
-
-/* 命令是这一条里唯一要认的东西：等宽、提亮、可截断（完整命令看 title） */
-.ai-jobs-bar-cmd {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--color-text-primary);
-}
-
-.ai-jobs-bar-meta {
-  flex: 0 0 auto;
-  margin-left: auto;
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
-}
+/* 后台任务横条的样式随组件一起搬到 AiJobsBar.vue，这里只保留一份实现。 */
 
 /* 任务清单卡片：与输入框同宽（--ai-column-w + margin auto），否则会比输入框宽一截。
    浅底、无边框——它是一条进度，不是一张内容卡片；抢了回答的视觉重心反而碍事。 */

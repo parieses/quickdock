@@ -2,7 +2,7 @@
 defineOptions({ name: KEEP_ALIVE.monitor })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
-import { ref, computed, onMounted, onUnmounted, nextTick, watch, type Component } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -969,10 +969,19 @@ if (typeof localStorage !== 'undefined') {
 
 let pollTimer: ReturnType<typeof setTimeout> | undefined
 let polling = false
+// 本页在 KeepAlive 白名单里：切走只触发 onDeactivated 不卸载，
+// document.hidden 只挡得住最小化，挡不住切页。没有这个标志，
+// 后台会一直每 refreshSec 秒跑一遍 refresh + loadLogs + drawChart。
+let pageActive = false
+let needsRefresh = false
 
 // setTimeout 链式轮询：上一次 refresh 完成后才排下一次，
 // 避免 setInterval 在慢请求时回调叠加（且 polling 标志兜底防重入）
 async function pollTick() {
+  // 本轮已经被触发，标记随之失效；配合 scheduleNext 的去重，
+  // 防止「切走又切回时旧 tick 收尾」与新一轮各排一个定时器。
+  pollTimer = undefined
+  if (!pageActive) return
   // 窗口在后台时不打接口也不重绘：这里的轮询是「看着它才刷新」，
   // 最小化 / 切到别的应用还每 5 秒发一次请求纯属白烧后端与电量。
   // 回到前台后由 visibilitychange 立刻补一次（见下方监听）。
@@ -992,13 +1001,13 @@ async function pollTick() {
 }
 
 function scheduleNext() {
-  if (refreshSec.value <= 0) return
+  if (!pageActive || refreshSec.value <= 0 || pollTimer) return
   pollTimer = setTimeout(pollTick, refreshSec.value * 1000)
 }
 
 function applyAutoRefresh() {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
-  if (refreshSec.value > 0) scheduleNext()
+  if (pageActive && refreshSec.value > 0) scheduleNext()
 }
 
 watch(refreshSec, (v) => {
@@ -1008,22 +1017,39 @@ watch(refreshSec, (v) => {
 
 // 回到前台立刻补一次：后台期间轮询是跳过的，不补一次会看到一份过期数据。
 function onVisibility() {
-  if (document.hidden) return
+  if (!pageActive || document.hidden) return
   if (refreshSec.value <= 0) return
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
   void pollTick()
 }
 
-onMounted(() => {
-  refresh()
-  applyAutoRefresh()
+// 启停做成幂等：首次挂载时 onMounted 先起，随后触发的 onActivated 直接返回，
+// 不会重复 refresh / 重复注册监听；页面将来若不在 KeepAlive 里渲染也仍能轮询。
+function startPolling() {
+  if (pageActive) return
+  pageActive = true
+  if (needsRefresh) {
+    needsRefresh = false
+    void refresh() // 后台期间的数据是过期的，切回来立刻补一次
+  }
   document.addEventListener('visibilitychange', onVisibility)
-})
+  applyAutoRefresh()
+}
 
-onUnmounted(() => {
+function stopPolling() {
+  pageActive = false
+  needsRefresh = true
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = undefined }
   document.removeEventListener('visibilitychange', onVisibility)
+}
+
+onMounted(() => {
+  refresh()
+  startPolling()
 })
+onActivated(startPolling)
+onDeactivated(stopPolling)
+onUnmounted(stopPolling)
 </script>
 
 <template>

@@ -3,7 +3,7 @@ defineOptions({ name: KEEP_ALIVE.plugins })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onUnmounted, watch, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X } from '@lucide/vue'
 
@@ -578,13 +578,38 @@ async function refreshStatuses() {
 
 let statusTimer: number | undefined
 let windowOpenTimer: ReturnType<typeof setTimeout> | null = null
+// 本页在 KeepAlive 白名单里：切走只触发 onDeactivated，不卸载，
+// onUnmounted 里的清理永远不会执行 → 3s 状态轮询会在后台一直跑。
+// 所以定时器启停必须挂到激活/失活钩子上，并且做成幂等（首次挂载
+// onMounted 与 onActivated 都会触发，别起两个 interval）。
+let pageActive = false
+let needsRefresh = false
+
+function startPolling() {
+  if (pageActive) return
+  pageActive = true
+  if (needsRefresh) {
+    needsRefresh = false
+    void refreshStatuses() // 切回来先补一次，免得第一眼是过期状态
+  }
+  if (statusTimer === undefined) statusTimer = window.setInterval(refreshStatuses, 3000)
+}
+
+function stopPolling() {
+  pageActive = false
+  needsRefresh = true
+  if (statusTimer !== undefined) { clearInterval(statusTimer); statusTimer = undefined }
+}
+
 onMounted(() => {
   loadPlugins(); loadLogs()
-  statusTimer = window.setInterval(refreshStatuses, 3000)
+  startPolling()
 })
+onActivated(startPolling)
+onDeactivated(stopPolling)
 onUnmounted(() => {
-  if (statusTimer !== undefined) clearInterval(statusTimer)
-  if (windowOpenTimer !== null) clearTimeout(windowOpenTimer)
+  stopPolling()
+  if (windowOpenTimer !== null) { clearTimeout(windowOpenTimer); windowOpenTimer = null }
 })
 </script>
 

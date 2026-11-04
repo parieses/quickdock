@@ -16,14 +16,31 @@ import type { AIArtifact, AIMessage, AIRuleFile, AIToolCall } from '../types/ai'
 //
 // 用 try/catch 兜住：这是历史数据，可能来自旧版本、也可能被手工改过库；
 // 解析失败就不显示卡片，而不是让整条消息渲染崩掉（一个坏 JSON 不该白屏）。
+//
+// 结果按「消息对象 + 原始 JSON 字符串」缓存：模板里同一条消息会被读好几次
+// （摘要 / 轮次 / 卡片 / key），AIPage 的 convArtifacts 每次重算又要遍历全部历史
+// 消息，流式期间每个工具事件都会触发一遍。没有缓存就是每条消息每帧一次
+// JSON.parse，长会话里这笔开销随消息数线性放大。WeakMap 保证消息被换掉后缓存
+// 自动回收；同时校验 raw，避免消息对象被原地改写（tool_calls 变了）还命中旧值。
+const toolListCache = new WeakMap<object, { raw: string; list: AIToolCall[] }>()
+const NO_TOOLS: AIToolCall[] = []
+
 export function toolList(m: AIMessage): AIToolCall[] {
-  if (!m.tool_calls) return []
+  const raw = m.tool_calls || ''
+  if (!raw) return NO_TOOLS
+  const hit = toolListCache.get(m)
+  if (hit && hit.raw === raw) return hit.list
+  let list: AIToolCall[] = NO_TOOLS
   try {
-    const arr = JSON.parse(m.tool_calls)
-    return Array.isArray(arr) ? (arr as AIToolCall[]) : []
+    const arr = JSON.parse(raw)
+    if (Array.isArray(arr)) list = arr as AIToolCall[]
   } catch {
-    return []
+    list = NO_TOOLS
   }
+  // 坏 JSON 也缓存结果（仍是 []），但 raw 一变就会失效重新解析，
+  // 不会把后来修好的数据永久钉死。调用方一律只读，不修改返回的数组。
+  toolListCache.set(m, { raw, list })
+  return list
 }
 
 // runIDOf 取这条回复所属的编排 run（同一条回复里派了多个子任务时它们同属一个 run，
