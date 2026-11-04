@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 )
 
@@ -110,6 +111,17 @@ const logWindowSec = int64(24 * 3600) // 统计窗口：近 24 小时
 // 单条 ~120B，最坏也就 2.4MB/监控。裁剪是索引上的 O(1) DELETE（见 AddMonitorLog），
 // 提高上限不会拖慢写入。
 const maxLogsPerMonitor = 20000
+
+// monitorLogTrimInterval 每写多少条日志才做一次「COUNT + 裁剪」。
+//
+// 原先每条日志都先 SELECT COUNT(*) 再决定要不要删，等于每次监控探测都要为一次
+// 写付一次全表计数（带 monitor_id 索引，但日志涨到两万条后仍是几万行扫描）。
+// 裁剪本来就是「别让表无限长」的兜底，晚 16 条再执行完全无所谓：单 monitor
+// 最多临时超出上限 16 条，且每个 monitor 自己的写入都会周期性触发裁剪。
+// 与 activity.go 的 activityTrimInterval 是同一套做法。
+const monitorLogTrimInterval = 16
+
+var monitorLogTrimTick atomic.Int64
 
 // normalizeMonitorKind 把空串与未知值收敛到 http。
 //
@@ -466,6 +478,10 @@ func (d *Database) AddMonitorLog(l *MonitorLog) error {
 		l.ID, l.MonitorID, l.CheckedAt, l.CheckedTs, l.Status, l.StatusCode, l.LatencyMs, l.Error,
 	); err != nil {
 		return err
+	}
+	// 裁剪攒批：INSERT 已经落库，绝大多数写入到这里就可以直接返回。
+	if monitorLogTrimTick.Add(1)%monitorLogTrimInterval != 0 {
+		return nil
 	}
 	// 裁剪：超出上限时删除最早的一批。
 	// 用「保留第 maxLogsPerMonitor 新的那条 checked_ts」作为阈值，删除所有比它更旧的行，

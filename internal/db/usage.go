@@ -110,8 +110,10 @@ func (d *Database) GetTopUsage(limit int) ([]FrecencyEntry, error) {
 // （只有"命令名不含点"的插件碰巧正确，如 disk-analyzer.disk-scan-root）。
 // 卸载时 usage 已被 PurgePlugin 清掉，故只统计已安装 id 足够。
 func (d *Database) GetAllPluginUsageCounts() (map[string]int, error) {
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	// 两次查询都是纯读（installedPluginIDs 也直接走 d.conn），用读锁即可。
+	// 别换成 d.Query：它内部还会取 RLock，持锁重入会死锁。
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 
 	ids, err := d.installedPluginIDs()
 	if err != nil {

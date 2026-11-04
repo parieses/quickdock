@@ -10,8 +10,14 @@ import (
 
 // ---- 快照 ----
 
+// ListSnapshots 只取列表要显示的元信息，不带 payload。
+//
+// payload 是整库导出的 JSON（几 MB 到几十 MB），设置页的快照列表一个字段都不用；
+// 原来每打开一次列表就把所有历史快照的完整备份读进内存再通过 Wails 序列化给前端，
+// 快照攒到十几个时这一步能到上百 MB。需要内容时走 GetSnapshot 按 id 单条取。
+// mapToSnapshot 对缺失的 payload 会填成空串，返回结构与生成绑定都不变。
 func (d *Database) ListSnapshots() ([]Snapshot, error) {
-	rows, err := d.Query("SELECT id, kind, label, note, payload, size, created_at FROM snapshots ORDER BY created_at DESC")
+	rows, err := d.Query("SELECT id, kind, label, note, size, created_at FROM snapshots ORDER BY created_at DESC")
 	if err != nil {
 		return nil, err
 	}

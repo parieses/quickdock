@@ -367,8 +367,11 @@ func (d *Database) SearchNotes(q string) ([]Note, error) {
 	escaped := strings.ReplaceAll(q, "%", "\\%")
 	escaped = strings.ReplaceAll(escaped, "_", "\\_")
 	like := "%" + escaped + "%"
-	d.mu.Lock()
-	defer d.mu.Unlock()
+	// 纯读用读锁：命令面板每敲一个键就跑一次三列 LIKE 全表扫，拿写锁期间
+	// 连其它 RLock 读（Query / QueryOne）都会被堵住。这里必须直接用 d.conn：
+	// d.Query 内部还会取 RLock，在外层持锁时再调就是 RWMutex 重入死锁。
+	d.mu.RLock()
+	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT `+noteCols+` FROM notes
 		 WHERE name LIKE ? ESCAPE '\' OR content LIKE ? ESCAPE '\' OR tags LIKE ? ESCAPE '\'

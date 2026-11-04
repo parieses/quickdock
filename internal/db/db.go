@@ -255,7 +255,12 @@ func Open(path string) (*Database, error) {
 	// busy_timeout / foreign_keys 是「连接级」PRAGMA，只在执行它的那条连接上生效。
 	// 连接池放开后每次新建的连接都是全新的，必须用 DSN 下发，否则新连接会静默丢失
 	// 外键约束与写锁等待（后果：外键形同虚设、并发写直接报 SQLITE_BUSY）。
-	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)"
+	//
+	// synchronous=NORMAL 是 WAL 模式下的官方推荐组合：WAL 已经保证崩溃后数据库
+	// 结构完整，NORMAL 只在检查点时才 fsync，单条写不再各自刷盘。剪贴板、监控日志、
+	// 活动流水都是「一条 INSERT 一次写事务」，默认 FULL 下每条都付一次磁盘同步。
+	// 代价仅是掉电时可能丢最后几条已提交事务（不是损坏），对本地桌面工具可接受。
+	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)"
 	conn, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("打开数据库失败: %w", err)

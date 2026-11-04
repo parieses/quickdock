@@ -189,6 +189,11 @@ type AIMessageView struct {
 }
 
 // AIGetMessages 读取某会话的消息（附带每条回复的费用估算）
+//
+// 这里刻意仍取全量：切换会话时前端要重建完整消息列表，改成分页得同时重写消息
+// 列表的增量加载、流式事件订阅和滚动定位，属于独立改动。前端已有的「200 条分批
+// 渲染」只解决了 DOM 数量，传输与 JSON 解析仍是全量——长会话要继续优化得从这里
+// 开刀。其余只读尾部的后端路径已改用 ListAIMessagesTail。
 func (a *AIService) AIGetMessages(convID string) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
@@ -300,7 +305,7 @@ func (a *AIService) AIRegenerateTitle(convID string) *services.ApiResult {
 	if !ok || cfg.APIKey == "" {
 		return services.FailMsg("missing api key")
 	}
-	msgs, err := a.App.DB.ListAIMessages(convID)
+	msgs, err := a.App.DB.ListAIMessagesTail(convID, aiTitleMaxMsgs)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -396,7 +401,7 @@ func (a *AIService) AISummarizeConversation(convID string) *services.ApiResult {
 	if !ok || cfg.APIKey == "" {
 		return services.FailMsg("missing api key")
 	}
-	msgs, err := a.App.DB.ListAIMessages(convID)
+	msgs, err := a.App.DB.ListAIMessagesTail(convID, aiDigestMaxMsgs)
 	if err != nil {
 		return services.Fail(err)
 	}

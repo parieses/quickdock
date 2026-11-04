@@ -752,6 +752,31 @@ func (d *Database) ListAIMessages(convID string) ([]AIMessage, error) {
 	return mapSlice(rows, mapToAIMessage), nil
 }
 
+// ListAIMessagesTail 取某会话最近 limit 条消息（按插入顺序正序返回）。
+//
+// 标题生成、会话摘要、@ 引用对话这几条路径都只读尾部若干条，却一直调
+// ListAIMessages 把整个会话（含 reasoning、几十 KB 的工具结果）全量载入再切
+// tail。长会话里这笔 IO 随消息数线性增长，而 SQL 加个 LIMIT 就能只传回真正要用的行。
+// 调用方原有的「len > 上限再截一次」可以留着，结果等价。
+func (d *Database) ListAIMessagesTail(convID string, limit int) ([]AIMessage, error) {
+	if limit <= 0 {
+		limit = 1
+	}
+	rows, err := d.Query(
+		"SELECT * FROM ai_messages WHERE conv_id = ? ORDER BY rowid DESC LIMIT ?",
+		convID, limit)
+	if err != nil {
+		return nil, err
+	}
+	msgs := mapSlice(rows, mapToAIMessage)
+	// SQL 是倒序取的（才能用上 rowid 索引直接拿尾部），反转回正序，
+	// 让调用方拿到的顺序与 ListAIMessages 完全一致。
+	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
+		msgs[i], msgs[j] = msgs[j], msgs[i]
+	}
+	return msgs, nil
+}
+
 // LastAIMessage 取这个会话的最后一条消息（按插入顺序），还没有消息时返回 (nil, nil)。
 //
 // 单独开这个查询而不是让调用方 ListAIMessages 之后取末位：幂等落库（见 services/ai

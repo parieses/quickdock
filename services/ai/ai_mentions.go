@@ -338,7 +338,7 @@ func (a *AIService) mentionConvText(convID string) (string, bool) {
 	if s := strings.TrimSpace(conv.Summary); s != "" {
 		return `<conversation title="` + escapeAttr(title) + `">` + "\n" + s + "\n</conversation>", true
 	}
-	msgs, merr := a.App.DB.ListAIMessages(convID)
+	msgs, merr := a.App.DB.ListAIMessagesTail(convID, aiMentionConvRecent)
 	if merr != nil || len(msgs) == 0 {
 		return "", false
 	}
