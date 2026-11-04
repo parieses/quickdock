@@ -34,7 +34,11 @@
   flex-shrink: 0;
   height: 38px;
   padding: 0 8px 0 12px;
+  /* 一档更亮的底色：三栏并排时，栏头连成一条横向的"带子"，
+     视线沿它扫一遍就知道自己在哪一栏，而不是三块同样发灰的区域。 */
+  background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
 }
 
 /* 分区名（场景 / 集合 / 项目）。项目栏也用它，当前集合名改为标题后的胶囊，
@@ -102,7 +106,10 @@
   border-radius: var(--radius-sm);
   transition: border-color var(--transition-fast);
 }
-.qd-panel-search:focus-within { border-color: var(--color-accent); }
+.qd-panel-search:focus-within {
+  border-color: var(--color-accent);
+  box-shadow: var(--ring-accent);
+}
 .qd-panel-search.is-disabled { opacity: 0.6; }
 .qd-search-icon { flex-shrink: 0; color: var(--color-text-disabled); }
 .qd-search-input {
@@ -168,7 +175,21 @@
 .qd-row:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 /* 选中态用强调色淡底 + 图标转强调色：比纯中性底色更能一眼锁定当前项，
    同时和 hover（纯中性抬起）明显区分 —— 两者早前同色，分不清哪行选中。 */
+.qd-row { position: relative; }
 .qd-row.active { background: var(--color-accent-bg); color: var(--color-text-primary); }
+/* 选中竖条与侧栏 .nav-item.active 同一套语言：整行淡底 + 左缘 2px 强调色。
+   两处都用"竖条"而不是"整行加粗"，是为了让 Ctrl 点选多行时不会一片加粗。 */
+.qd-row.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 .qd-row.dragging { opacity: 0.4; }
 .qd-row[draggable="true"] { cursor: grab; }
 .qd-row[draggable="true"]:active { cursor: grabbing; }
@@ -247,26 +268,32 @@
   padding: 36px 16px;
   text-align: center;
 }
+/* 空状态的三段式：图标（容器）→ 标题（说明这是什么）→ 提示（下一步怎么做）。
+   虚线框像"待补的占位槽"，读起来是不完整；换成实底方块后它才像一个图标。 */
 .qd-empty-icon {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  height: 40px;
-  margin-bottom: 12px;
-  border: 1px dashed var(--color-border-light);
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary);
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+  color: var(--color-text-muted);
 }
 .qd-empty-title {
-  margin: 0 0 4px;
-  font-size: 13px;
+  margin: 0 0 5px;
+  font-size: var(--text-md);
+  font-weight: 600;
   color: var(--color-text-secondary);
 }
 .qd-empty-hint {
   margin: 0;
-  font-size: 11px;
-  line-height: 1.6;
+  max-width: 34em;
+  font-size: var(--text-sm);
+  line-height: 1.65;
   color: var(--color-text-muted);
 }
 .qd-empty-cta {

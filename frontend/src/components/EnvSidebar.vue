@@ -104,7 +104,7 @@ const searching = computed(() => props.query.trim().length > 0)
   border-radius: var(--radius-sm); color: var(--color-text-disabled);
 }
 
-.cats-search:focus-within { border-color: var(--color-accent); }
+.cats-search:focus-within { border-color: var(--color-accent); box-shadow: var(--ring-accent); }
 
 .cats-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
@@ -139,7 +139,7 @@ const searching = computed(() => props.query.trim().length > 0)
   transition: background var(--transition-fast), border-color var(--transition-fast);
 }
 
-.cat-btn:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
+.cat-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 
 .cat-avatar {
   width: 28px; height: 28px; border-radius: var(--radius-sm); flex-shrink: 0;
@@ -166,32 +166,44 @@ const searching = computed(() => props.query.trim().length > 0)
 
 .cats-sep { height: 1px; background: var(--color-border); margin: 8px 6px; flex-shrink: 0; }
 
+/* 分组标题不是按钮：做成"有边框 + 左侧强调色块"的实心条后，它比下面的
+   语言项更像主操作，整列读起来有三个层级在抢。降为文字标签 + 上间距，
+   分组关系靠留白和字重表达，点击区仍是整行。 */
 .cats-group-label {
   display: flex; align-items: center; gap: 8px;
   width: 100%; text-align: left; cursor: pointer; font-family: inherit;
-  font-size: 13px; font-weight: 700; letter-spacing: 0.3px;
-  color: var(--color-text-primary);
-  background: var(--color-bg-tertiary);
-  border: 1px solid var(--color-border);
-  border-left: 3px solid var(--color-accent);
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: none;
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  padding: 9px 11px; margin-top: 9px;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
+  padding: 7px 8px; margin-top: 10px;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 
 .cats-group-label:hover {
-  background: var(--color-bg-hover, var(--color-bg-tertiary));
-  border-color: var(--color-border-focus);
-  border-left-color: var(--color-accent);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary);
 }
 
 .cats-chevron { margin-left: auto; font-size: 11px; line-height: 1; color: var(--color-text-disabled); transition: transform 120ms ease; }
 
+/* 选中项与侧栏 / 三栏同一套：整行淡底 + 左缘竖条。
+   原来用 border-color 变蓝，等于给这一行描了个亮蓝框，比页头的主按钮还抢。 */
+.cat-btn { position: relative; }
 .cat-btn.active {
   background: var(--color-accent-bg);
-  border-color: var(--color-border-focus);
+  border-color: transparent;
   color: var(--color-text-primary);
 }
+.cat-btn.active::before {
+  content: '';
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 2px; height: 18px; border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
+.cat-btn.active .cat-name { font-weight: 600; }
 
 .cat-count.zero { color: var(--color-text-disabled); }
 </style>

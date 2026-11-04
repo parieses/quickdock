@@ -1,6 +1,6 @@
 /* ===================================================================
    QuickDock v3 - Design System
-   基于 DESIGN.md 的精简系统，8px 间距基准，阴影即边框
+   8px 间距基准；1px 实线描边 + 内高光分层，阴影只留给浮层
    =================================================================== */
 
 /* 间距 & 尺寸（全局常量） */
@@ -51,13 +51,28 @@
   --ai-column-max: min(90vw, 1200px);
   --ai-column-w: min(var(--ai-column-max), 100%);
 
-  --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    'PingFang SC', 'Microsoft YaHei', 'Helvetica Neue', Arial, sans-serif;
-  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', Consolas, monospace;
+  /* 字体栈：中文优先落到「雅黑 UI」——它是雅黑的多字重版，600 权重有真字重，
+     不会像 Microsoft YaHei 那样靠合成加粗糊成一团（小字号下尤其明显）。 */
+  --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI Variable Text',
+    'Segoe UI', 'PingFang SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    'Noto Sans SC', 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SF Mono', 'Fira Code', 'Fira Mono', 'Roboto Mono', 'JetBrains Mono',
+    Consolas, 'Cascadia Mono', monospace;
 
-  --transition-fast: 100ms ease;
-  --transition-base: 150ms ease;
-  --transition-slow: 200ms ease;
+  /* 过渡曲线：桌面工具的动作要「快起慢收」——线性 ease 在 100ms 档位上
+     看起来像"闪一下"，出慢入的曲线才像东西被推出去。 */
+  --transition-fast: 110ms cubic-bezier(0.32, 0.72, 0, 1);
+  --transition-base: 160ms cubic-bezier(0.32, 0.72, 0, 1);
+  --transition-slow: 220ms cubic-bezier(0.32, 0.72, 0, 1);
+
+  /* 字号阶梯：以前散在各组件里的 11/12/13/15 现在有名字。
+     中文字面高度比同号西文大，13px 是这套工具的正文档位。 */
+  --text-2xs: 10px;
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
 }
 
 /* ==================== CSS 变量 — 深色主题 ==================== */
@@ -65,22 +80,27 @@
 [data-theme="dark"] {
   /* 中性色阶：底色压深一档、hover/active 的跳幅收窄。
      原来 hover(#282d37) 落在 bg-primary(#121419) 上跳了 22 级亮度，
-     鼠标划过一行像开了一盏灯；压深底色 + 收窄跳幅后层级靠"微微抬起"表达。 */
-  --color-bg-primary: #0f1116;
-  --color-bg-secondary: #151920;
-  --color-bg-tertiary: #1c2029;
-  --color-bg-hover: #1f242e;
-  --color-bg-active: #262d39;
-  --color-bg-overlay: rgba(0, 0, 0, 0.55);
-  --color-bg-overlay-deep: rgba(0, 0, 0, 0.78); /* 图片全屏查看器等需要深遮罩的场景 */
-  --color-surface: #151920;
-  --color-surface-elevated: #1c2029;
-  --color-text-primary: #e6e9ef;
-  --color-text-secondary: #a1a8b4;
-  --color-text-muted: #6f7784;
-  --color-text-disabled: #565d68;
-  --color-border: #22272f;
-  --color-border-light: #2e3440;
+     鼠标划过一行像开了一盏灯；压深底色 + 收窄跳幅后层级靠"微微抬起"表达。
+     2026-11 再拉一档：bg-primary 压到近墨、secondary/tertiary 逐级提亮，
+     面板才像浮在底上，而不是三块同色的灰。色相统一偏冷（蓝相 -8°），
+     与强调色同源，避免中性灰发黄。 */
+  --color-bg-primary: #0c0e13;
+  --color-bg-secondary: #14171f;
+  --color-bg-tertiary: #1b202a;
+  --color-bg-hover: #212734;
+  --color-bg-active: #2a303e;
+  --color-bg-overlay: rgba(0, 0, 0, 0.58);
+  --color-bg-overlay-deep: rgba(0, 0, 0, 0.8); /* 图片全屏查看器等需要深遮罩的场景 */
+  --color-surface: #14171f;
+  --color-surface-elevated: #1b202a;
+  --color-text-primary: #e8ecf4;
+  --color-text-secondary: #a3acbb;
+  --color-text-muted: #74808f;
+  --color-text-disabled: #59616e;
+  --color-border: #232936;
+  --color-border-light: #313948;
+  /* hairline：1px 内高光/极细分隔。深色下"白 4%"能勾出边缘又不显线 */
+  --color-hairline: rgba(255, 255, 255, 0.055);
   --color-border-focus: #5b8cff;
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;
@@ -114,11 +134,11 @@
   --color-syntax-number: #e0af68;
   --color-syntax-boolean: #bb9af7;
   --color-syntax-null: #565f89;
-  --color-scrollbar-thumb: #2c323c;
-  --color-scrollbar-hover: #3a4250;
+  --color-scrollbar-thumb: #272e39;
+  --color-scrollbar-hover: #3b4353;
   --color-scrollbar-track: transparent;
-  --color-accent-bg: rgba(91, 140, 255, 0.1);
-  --color-accent-border: rgba(91, 140, 255, 0.2);
+  --color-accent-bg: rgba(91, 140, 255, 0.085);
+  --color-accent-border: rgba(91, 140, 255, 0.24);
   --color-accent-muted: rgba(91, 140, 255, 0.5);
   --color-accent-light: #7ea6ff;
   /* 代码块：AI 助手与笔记预览共用。AI 气泡已改为透明底，
@@ -158,12 +178,20 @@
   --color-terminal-search-match: #4a3f14;
   --color-terminal-search-active: #8a6d1f;
 
-  --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.08);
-  --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.06);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.18);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.22);
+  /* 阴影分三层用途，别再在组件里手写 box-shadow：
+       card  = 静态容器（面板/卡片）：靠 1px 内高光勾边 + 极淡投影"浮起"；
+       sm/md/lg = 交互态与浮层；
+       pop   = 弹窗/菜单/命令面板这类真正离开文档流的层。 */
+  --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.4);
+  --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.4);
+  --shadow-card: inset 0 1px 0 var(--color-hairline), 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-focus: 0 0 0 2px var(--color-border-focus);
+  /* 键盘焦点环：2px 描边会被误认成"边框变粗"，改用外扩的柔和环 */
+  --ring-accent: 0 0 0 3px rgba(91, 140, 255, 0.26);
   --color-toast-error-bg: #2d1818;
   --color-toast-error-text: #fca5a5;
   --color-toast-error-border: #5c1a1a;
@@ -180,23 +208,25 @@
 
 /* ==================== CSS 变量 — 浅色主题 ==================== */
 [data-theme="light"] {
-  /* 浅色同阶：底色提亮到近白（原来 #e9ebef 偏灰，长时间看发闷），
-     面板靠 -secondary/-tertiary 拉开层级。与深色一一对应。 */
-  --color-bg-primary: #f5f6f8;
-  --color-bg-secondary: #ebedf1;
-  --color-bg-tertiary: #e3e6eb;
-  --color-bg-hover: #e1e4e9;
-  --color-bg-active: #d7dbe2;
-  --color-bg-overlay: rgba(15, 18, 24, 0.14);
-  --color-bg-overlay-deep: rgba(15, 18, 24, 0.62); /* 与暗色主题同名 token，一一对应 */
-  --color-surface: #f0f2f5;
-  --color-surface-elevated: #e6e9ee;
-  --color-text-primary: #1f242c;
-  --color-text-secondary: #565e6b;
-  --color-text-muted: #737b88;
-  --color-text-disabled: #a2a8b0;
-  --color-border: #d8dce2;
-  --color-border-light: #c6cbd3;
+  /* 浅色同阶：底色留一点灰、面板给到纯白 —— 浅色主题的纵深应该反向读
+     （深色靠"提亮"，浅色靠"更白"），以前面板灰得比底还沉，看起来像压了一层脏膜。 */
+  --color-bg-primary: #f6f7f9;
+  --color-bg-secondary: #ffffff;
+  --color-bg-tertiary: #eef0f4;
+  --color-bg-hover: #eceff4;
+  --color-bg-active: #e0e5ed;
+  --color-bg-overlay: rgba(15, 18, 24, 0.16);
+  --color-bg-overlay-deep: rgba(15, 18, 24, 0.64); /* 与暗色主题同名 token，一一对应 */
+  --color-surface: #ffffff;
+  --color-surface-elevated: #f4f6f9;
+  --color-text-primary: #1a1f27;
+  --color-text-secondary: #525b68;
+  --color-text-muted: #6e7683;
+  --color-text-disabled: #9aa2ae;
+  --color-border: #dde1e8;
+  --color-border-light: #c9cfd9;
+  /* 浅色下的 hairline 是「更白的高光」：压在卡片上边缘，白卡片才立得起来 */
+  --color-hairline: rgba(255, 255, 255, 0.9);
   --color-border-focus: #5b8cff;
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;
@@ -227,11 +257,11 @@
   --color-syntax-number: #9a6a00;
   --color-syntax-boolean: #7c3aed;
   --color-syntax-null: #6b7280;
-  --color-scrollbar-thumb: #cbd0d6;
-  --color-scrollbar-hover: #aab0b8;
+  --color-scrollbar-thumb: #d2d6dd;
+  --color-scrollbar-hover: #b5bbc4;
   --color-scrollbar-track: transparent;
-  --color-accent-bg: rgba(91, 140, 255, 0.08);
-  --color-accent-border: rgba(91, 140, 255, 0.15);
+  --color-accent-bg: rgba(91, 140, 255, 0.075);
+  --color-accent-border: rgba(91, 140, 255, 0.2);
   --color-accent-muted: rgba(91, 140, 255, 0.5);
   --color-accent-light: #7ea6ff;
   --color-code-bg: #f4f6f9;
@@ -266,12 +296,15 @@
   --color-terminal-search-match: #ffe9a8;
   --color-terminal-search-active: #ffc94d;
 
-  --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.05);
-  --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.04);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
-  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.12);
+  --shadow-border: 0 1px 0 rgba(15, 18, 24, 0.06);
+  --shadow-border-right: 1px 0 0 rgba(15, 18, 24, 0.05);
+  --shadow-card: inset 0 1px 0 var(--color-hairline), 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.07);
+  --shadow-md: 0 6px 16px rgba(16, 24, 40, 0.1);
+  --shadow-lg: 0 12px 28px rgba(16, 24, 40, 0.14);
+  --shadow-pop: 0 16px 40px rgba(16, 24, 40, 0.16), 0 2px 8px rgba(16, 24, 40, 0.08);
   --shadow-focus: 0 0 0 2px var(--color-border-focus);
+  --ring-accent: 0 0 0 3px rgba(91, 140, 255, 0.22);
   --color-toast-error-bg: #fff0f0;
   --color-toast-error-text: #d32f2f;
   --color-toast-error-border: #ffcdd2;
@@ -304,12 +337,17 @@ body {
   padding: 0;
   height: 100%;
   font-family: var(--font-family);
-  font-size: 13px;
+  font-size: var(--text-md);
   line-height: 1.5;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* 中文界面里数字/版本号/端口号出现得极密，等宽数字能让人一眼对齐比较 */
+  font-variant-numeric: tabular-nums;
+  /* 系统字体在 600 权重常常没有真字重，浏览器会"描边加粗"——小字号下发虚。
+     关掉合成后 600 会回退到最近的真实字重（通常是 Bold），笔画才是实的。 */
+  font-synthesis-weight: none;
   overflow: hidden;
   user-select: none;
 }
@@ -320,6 +358,8 @@ body {
 }
 
 /* ==================== 滚动条 ==================== */
+/* 默认几乎融进底色，只在指针接近时才显形：6px 的深灰条常驻在窄面板上
+   比内容本身更抢眼（右侧一整列看起来像没对齐的边框）。 */
 ::-webkit-scrollbar {
   width: var(--scrollbar-w);
   height: var(--scrollbar-w);
@@ -327,24 +367,29 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--color-scrollbar-thumb);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-full);
   transition: background var(--transition-base);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--color-scrollbar-hover); }
+::-webkit-scrollbar-corner { background: transparent; }
 
 /* Firefox */
 * { scrollbar-width: thin; scrollbar-color: var(--color-scrollbar-thumb) transparent; }
 
 /* ==================== 焦点环（仅键盘导航） ==================== */
+/* 1px 实线在深底上细得像没聚焦，2px 又像"边框变粗"。用 2px + offset 2px，
+   元素本身形状不变，环浮在外面，键盘操作时一眼能跟住焦点。 */
 :focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: 1px;
+  outline: 2px solid var(--color-border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
 }
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
-  outline: 1px solid var(--color-accent);
-  outline-offset: 0;
+  outline: none;
+  border-color: var(--color-border-focus);
+  box-shadow: var(--ring-accent);
 }
 
 /* ==================== 通用工具类 ==================== */
@@ -354,10 +399,18 @@ select:focus-visible {
 .text-danger { color: var(--color-danger); }
 
 /* ==================== 选中文本 ==================== */
+/* 选中文本：整块实心强调色在密集界面里像"贴了张便签"，半透明底 + 原文字色
+   既看得出选中，又不把一整行字盖掉。 */
 ::selection {
-  background: var(--color-accent);
-  color: var(--color-accent-text);
+  background: var(--color-accent-muted);
+  color: var(--color-text-primary);
 }
+
+/* ==================== 全局细节 ==================== */
+/* lucide 默认 stroke-width=2，在 13px 的密集界面里偏"重"——一排 16px 图标
+   容易连成黑块。收到 1.75 后线条更细，形状仍然清楚。
+   只匹配描边图标（fill 类图形没有 stroke，不受影响）。 */
+svg[stroke='currentColor'] { stroke-width: 1.75; }
 
 /* ==================== 过渡辅助 ==================== */
 .fade-enter-active, .fade-leave-active { transition: opacity var(--transition-base); }

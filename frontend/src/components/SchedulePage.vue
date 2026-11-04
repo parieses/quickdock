@@ -900,9 +900,22 @@ onMounted(refresh)
 }
 
 .sched-list { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: var(--space-2); padding: 14px 20px 16px; }
-.sched-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
-.empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
-.empty-hint { font-size: 11px; color: var(--color-text-muted); margin-top: var(--space-2); }
+/* 空态在整页高度里落到上 1/3 处：贴着页头会显得"这块是空的"，沉到底部又找不到 */
+.sched-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-disabled); }
+/* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
+   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
+   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+.empty-icon {
+  padding: 10px;
+  box-sizing: content-box;
+  opacity: 1;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+}
+.empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 6px; }
 
 .sched-item {
   display: flex; align-items: center; gap: var(--space-3); padding: 12px 14px;

@@ -1015,14 +1015,28 @@ watch(pendingOpenNoteId, (id) => {
 .sr-row:hover { background: var(--color-bg-hover); }
 
 .notes-editor { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
-.ne-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--color-text-disabled); gap: 6px; }
+/* 编辑区空态：与其它页的空状态同一套语汇——图标先落一个方底挂牌，
+   否则一根细线图标浮在大片深底上，像还没渲染完。 */
+.ne-empty {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--color-text-muted); gap: 10px;
+}
+.ne-empty :deep(svg) {
+  padding: 12px;
+  box-sizing: content-box;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+}
+.ne-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
 .ne-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
 .ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 14px; font-weight: 600; outline: none; font-family: inherit; }
-.ne-name:focus { border-color: var(--color-accent); }
+.ne-name:focus { border-color: var(--color-accent); box-shadow: var(--ring-accent); }
 .ne-format { display: flex; gap: 2px; flex-shrink: 0; }
 .ne-format button { padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
-.ne-format button:first-child { border-radius: var(--radius-sm) 0 0 6px; }
-.ne-format button:last-child { border-radius: 0 6px 6px 0; margin-left: -1px; }
+.ne-format button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.ne-format button:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .ne-format button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
 .ne-format button:hover:not(.active) { color: var(--color-text-primary); }
 /* Markdown 视图三段切换（源码 / 分屏 / 预览）：仅 markdown 格式出现，与格式按钮紧邻 */
@@ -1041,7 +1055,7 @@ watch(pendingOpenNoteId, (id) => {
 .ne-tags { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); }
 .ne-tags-label { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
 .ne-tags-input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
-.ne-tags-input:focus { border-color: var(--color-accent); }
+.ne-tags-input:focus { border-color: var(--color-accent); box-shadow: var(--ring-accent); }
 /* 字数统计：右对齐、弱化显示，写作时能瞄一眼但不抢注意力 */
 .ne-stats { flex-shrink: 0; font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
@@ -1072,11 +1086,14 @@ watch(pendingOpenNoteId, (id) => {
 .tt-btn.on { background: var(--color-accent-bg); color: var(--color-accent); }
 
 /* 多选 checkbox（与 NoteTreeNode 内自绘一致，因 scoped 不跨组件，这里再定义一份） */
+/* 未勾选时不该是蓝框：14px 的小方块描一圈强调色，整棵树看起来都是"待办高亮"。
+   未选中用常规边框，选中才转强调色。 */
 .tn-check {
   width: 14px; height: 14px; flex-shrink: 0; border-radius: var(--radius-xs);
-  border: 1px solid var(--color-border-focus); background: var(--color-bg-primary);
+  border: 1px solid var(--color-border-light); background: var(--color-bg-primary);
   cursor: pointer; position: relative; transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
+.tn-check:hover { border-color: var(--color-text-muted); }
 .tn-check.on { background: var(--color-accent); border-color: var(--color-accent); }
 .tn-check.on::after {
   content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;

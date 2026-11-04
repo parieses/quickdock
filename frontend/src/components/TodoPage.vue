@@ -1417,7 +1417,7 @@ onUnmounted(() => {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 264px;
   max-height: 320px; overflow: auto; padding: var(--space-3);
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.18));
+  border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
 }
 .fh-head {
   font-size: 12px; font-weight: 600; color: var(--color-text-primary);
@@ -1442,16 +1442,23 @@ onUnmounted(() => {
 .todo-body { display: flex; gap: var(--space-6); flex: 1; min-height: 0; padding: 14px 20px 16px; }
 
 /* 日历卡片 */
+/* 日历是页面里唯一的大卡片：圆角与全站统一到 md，并给它一道内高光——
+   不给阴影是因为它下面还有整列待办，卡片"浮起"会抢走列表的注意力。 */
 .cal-card {
   width: 332px; flex-shrink: 0; display: flex; flex-direction: column;
   background: var(--color-bg-secondary);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-card);
   padding: var(--space-4);
+  align-self: flex-start;
 }
 .cal-weekdays { display: grid; grid-template-columns: repeat(7, 1fr); margin-bottom: var(--space-1); }
 .cal-weekday { text-align: center; font-size: 11px; color: var(--color-text-disabled); font-weight: 500; padding-bottom: var(--space-1); }
-.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: 1fr; gap: 2px; flex: 1; }
+/* 日期格高度钉死在 46：原来用 1fr 且卡片被 flex 拉伸，空月份时日历会撑到
+   500px 高，六行数字之间各空出一大段，整块看起来像没加载完。
+   日历高度跟着内容走（日历卡自身 align-self: flex-start），右侧列表该占多高占多高。 */
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); grid-auto-rows: minmax(46px, auto); gap: 2px; }
 .cal-cell {
   position: relative;
   display: flex; flex-direction: column; align-items: center; justify-content: flex-start; gap: 3px;
@@ -1508,7 +1515,13 @@ onUnmounted(() => {
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .vt-btn + .vt-btn { border-left: 1px solid var(--color-border); }
-.vt-btn.active { background: var(--color-accent); color: var(--color-accent-text); }
+/* 视图切换是"同一组里的两档"，选中档用淡底 + 强调色文字即可；
+   刷成实心蓝会和页面里真正的主操作（新建待办）抢同一个视觉权重。 */
+.vt-btn.active {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-weight: 600;
+}
 
 /* 状态徽章（4.3）*/
 .status-pill {

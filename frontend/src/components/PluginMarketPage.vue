@@ -557,8 +557,20 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 10px; color: var(--color-text-muted);
 }
-.empty-icon { color: var(--color-text-disabled); }
-.empty-title { font-size: 13px; }
+/* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
+   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
+   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+.empty-icon {
+  padding: 10px;
+  box-sizing: content-box;
+  opacity: 1;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+}
+.empty-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-secondary); }
 /* 最小三列；主窗口加宽时逐级增加列数。
    注意两处易踩的点：
    1) 必须用 minmax(0, 1fr) 而非 1fr：1fr 的下限是 auto(=min-content)，卡片里

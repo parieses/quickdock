@@ -1234,8 +1234,16 @@ onUnmounted(() => {
   display: flex; flex-direction: column; align-items: center;
   justify-content: center; height: 100%; color: var(--color-text-disabled);
 }
-.clipboard-empty .empty-icon { color: var(--color-text-muted); margin-bottom: 12px; }
-.clipboard-empty .empty-text { font-size: 13px; }
+.clipboard-empty .empty-icon {
+  padding: 12px;
+  box-sizing: content-box;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+}
+.clipboard-empty .empty-text { font-size: var(--text-md); color: var(--color-text-secondary); }
 
 .clipboard-loading {
   display: flex; align-items: center; justify-content: center;

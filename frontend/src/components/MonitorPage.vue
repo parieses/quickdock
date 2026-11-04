@@ -1614,9 +1614,21 @@ onUnmounted(stopPolling)
 .mon-selbtn:disabled { opacity: 0.5; cursor: not-allowed; }
 .mon-check { flex-shrink: 0; width: 12px; height: 12px; accent-color: var(--color-accent); cursor: pointer; }
 .field-hint { margin: 4px 0 0; font-size: 11px; color: var(--color-text-disabled); }
-.mon-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
-.empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
-.empty-hint { font-size: 11px; color: var(--color-text-muted); margin-top: var(--space-2); }
+.mon-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-disabled); }
+/* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
+   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
+   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+.empty-icon {
+  padding: 10px;
+  box-sizing: content-box;
+  opacity: 1;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+}
+.empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 6px; }
 
 .mon-item {
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
@@ -1647,7 +1659,14 @@ onUnmounted(stopPolling)
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   color: var(--color-text-muted); font-size: 12.5px; cursor: pointer;
 }
-.vt-tab.active { background: var(--color-bg-tertiary); border-color: var(--color-accent); color: var(--color-text-primary); }
+/* 视图 tab 的选中态与全站一致：淡底 + 强调色描边 + 强调色文字。
+   原来用「灰底 + 蓝框」，蓝框在深色底上像聚焦环，反而不像"当前这一档"。 */
+.vt-tab.active {
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
+  color: var(--color-accent);
+  font-weight: 600;
+}
 .vt-count {
   min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
   display: inline-flex; align-items: center; justify-content: center;
@@ -1715,7 +1734,12 @@ onUnmounted(stopPolling)
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .range-tab:hover { color: var(--color-text-primary); }
-.range-tab.active { background: var(--color-accent); color: var(--color-accent-text); }
+/* 时间范围切换是"同一组里的一档"，实心蓝底会和主按钮抢权重 */
+.range-tab.active {
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-weight: 600;
+}
 /* 导出/清空是一组并列的次要操作：做成同样大小的按钮，导出用强调色描边，
    否则和「清空」一样灰，用户会以为那只是条说明文字。 */
 .logs-btn {

@@ -3240,7 +3240,7 @@ const s = currentRuntimeState
 .detail-avatar--accent { background: var(--color-accent); }
 .detail-titles { display: flex; flex-direction: column; gap: 4px; }
 .detail-title-row { display: flex; align-items: center; gap: 8px; }
-.detail-name { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
+.detail-name { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.01em; color: var(--color-text-primary); }
 .detail-id {
   font-size: 11px; color: var(--color-text-disabled);
   background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-xs);
@@ -3261,13 +3261,22 @@ const s = currentRuntimeState
 .svc-switch.busy .svc-switch-thumb { animation: svc-thumb-pulse .8s ease-in-out infinite; }
 @keyframes svc-thumb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
 
+/* 详情卡片：圆角收到与全站卡片一致（14 在这套 13px 界面里偏"圆润"），
+   加一道内高光把卡片从页面底上"提"起来。 */
 .detail-block {
   background: var(--color-surface);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   padding: 14px 16px;
+  box-shadow: var(--shadow-card);
 }
-.install-card { background: transparent; border-style: dashed; }
+/* 安装区是"可操作的空槽"，虚线保留但压淡：实线会让人以为已经装了东西 */
+.install-card {
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--color-border-light);
+  box-shadow: none;
+}
 .block-head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
 .block-head--spaced { margin-top: var(--space-6); }
 .block-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }

@@ -3335,8 +3335,12 @@ onUnmounted(() => {
 .ai-go-settings {
   padding: 7px 16px; border: none; border-radius: var(--radius-md);
   background: var(--color-accent); color: var(--color-accent-text);
-  font-size: 13px; cursor: pointer; font-family: inherit;
+  font-size: var(--text-md); font-weight: 600; cursor: pointer; font-family: inherit;
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+  transition: background-color var(--transition-fast), transform var(--transition-fast);
 }
+.ai-go-settings:hover { background: var(--color-accent-hover); }
+.ai-go-settings:active { transform: translateY(0.5px); }
 
 .ai-tool-btn {
   display: flex; align-items: center; justify-content: center;

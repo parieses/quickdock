@@ -757,6 +757,8 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  /* 首页的第一块内容，必须像一块抬起来的板；否则读数和页面底色几乎同层 */
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 .band > * + * { border-left: 1px solid var(--color-border); }
@@ -766,7 +768,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   display: flex; flex-direction: column; justify-content: center; gap: 3px;
 }
 .hero-title {
-  font-size: 19px; font-weight: 600; line-height: 1.3; color: var(--color-text-primary);
+  font-size: 19px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3; color: var(--color-text-primary);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .hero-sub { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -785,9 +787,11 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   display: flex; align-items: center; gap: 5px;
   font-size: 11px; color: var(--color-text-muted); white-space: nowrap;
 }
+/* 大号读数：mono 保证四位数字不跳宽，字距收一点让它更像"仪表读数"而不是代码 */
 .r-num {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 24px; font-weight: 600; line-height: 1.2; color: var(--color-text-primary);
+  font-size: 24px; font-weight: 600; letter-spacing: -0.02em;
+  line-height: 1.2; color: var(--color-text-primary);
 }
 .r-foot {
   font-size: 11px; color: var(--color-text-disabled);
@@ -813,6 +817,7 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
   overflow: hidden;
 }
 .card-head {
@@ -836,7 +841,9 @@ onUnmounted(() => { if (timer) clearInterval(timer) })
 }
 .card-link:hover { color: var(--color-accent); }
 
-.empty { margin: 0; padding: 18px 14px; font-size: 12px; color: var(--color-text-muted); }
+/* 卡片内的空态：不居中反而是对的（列表为空时上方还有热力条/分布条），
+   但留白要够，否则一行灰字像被漏掉的说明。 */
+.empty { margin: 0; padding: 22px 14px; font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-muted); }
 
 /* ---- 24h 可用率热力条 ----
  * 一格 = 30 分钟：绿=全程在线、红=挂过、暗=没有数据。放在卡头之下、列表之上，

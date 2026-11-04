@@ -34,20 +34,25 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 16px;
+  padding: 18px 20px 24px;
 }
 
 /* ---- 一级页头 ---- */
+/* 页头是每页最靠上的"第一印象"，这里做三件事：
+   1. 用一档更亮的底色把它和内容分开（原来同色，只靠一根线，页头像贴在内容上）；
+   2. 底部那根线换成 hairline + 极淡投影，分界清楚但不画一道"横杠"；
+   3. 标题字重交给真实 Bold（body 已关 font-synthesis），再收一点字距，
+      中文标题在 15px 上才不会显得松垮。 */
 .qd-page-header {
   display: flex;
   align-items: center;
   gap: 10px;
   flex-shrink: 0;
-  min-height: 44px;
+  min-height: 46px;
   padding: 0 16px;
-  /* 1px 实线而不是 shadow：底色压深后 `--shadow-border`（0 1px 0 rgba(0,0,0,.08)）
-     在深色主题几乎看不见，页头会像悬空的。 */
+  background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
+  box-shadow: 0 1px 0 var(--color-hairline) inset;
 }
 
 /* 窄窗口下页头放不下一行：标题 + 一票按钮组实测需要 ~650px，而 800 宽的窗口
@@ -80,15 +85,16 @@
   align-items: center;
   gap: 7px;
   margin: 0;
-  font-size: 15px;
+  font-size: var(--text-lg);
   font-weight: 600;
+  letter-spacing: -0.01em;
   line-height: 1.35;
   color: var(--color-text-primary);
 }
 
 .qd-page-sub {
-  font-size: 12px;
-  line-height: 1.35;
+  font-size: var(--text-sm);
+  line-height: 1.4;
   color: var(--color-text-muted);
 }
 
@@ -111,6 +117,9 @@
 }
 
 /* ---- 按钮：只有一种盒子，三种语气 ---- */
+/* 底色给到 bg-tertiary 而不是透明：桌面工具里按钮必须是"能按下去的东西"，
+   透明底 + 细边在深色主题下常被当成一段加了框的文字。内高光负责给出厚度，
+   :active 下沉半像素给按下反馈（transform 不参与布局，不会引起重排）。 */
 .qd-btn {
   display: inline-flex;
   align-items: center;
@@ -120,37 +129,47 @@
   padding: 0 11px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
-  background: none;
+  background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
+  box-shadow: inset 0 1px 0 var(--color-hairline);
   transition: background-color var(--transition-fast), color var(--transition-fast),
-    border-color var(--transition-fast);
+    border-color var(--transition-fast), box-shadow var(--transition-fast),
+    transform var(--transition-fast);
 }
 .qd-btn:hover {
   background: var(--color-bg-hover);
   border-color: var(--color-border-light);
   color: var(--color-text-primary);
 }
+.qd-btn:active:not(:disabled) {
+  background: var(--color-bg-active);
+  box-shadow: none;
+  transform: translateY(0.5px);
+}
 .qd-btn:disabled {
   color: var(--color-text-disabled);
   border-color: var(--color-border);
   background: none;
+  box-shadow: none;
   cursor: not-allowed;
 }
 
 .qd-btn-primary {
   background: var(--color-accent);
-  border-color: var(--color-accent);
+  border-color: transparent;
   color: var(--color-accent-text);
-  font-weight: 500;
+  font-weight: 600;
+  box-shadow: inset 0 1px 0 var(--color-hairline), 0 1px 2px var(--color-accent-border);
 }
 .qd-btn-primary:hover {
   background: var(--color-accent-hover);
-  border-color: var(--color-accent-hover);
+  border-color: transparent;
   color: var(--color-accent-text);
 }
 .qd-btn-primary:disabled {
@@ -160,15 +179,18 @@
   opacity: 0.6;
 }
 
-/* 无边框：用于页头里成组的心理"次要动作"，hover 才浮出底色 */
+/* 无边框：用于页头里成组的心理"次要动作"，hover 才浮出底色。
+   必须显式清掉 qd-btn 的底色与内高光，否则"幽灵"按钮会变成实心块。 */
 .qd-btn-ghost {
   border-color: transparent;
   background: none;
+  box-shadow: none;
 }
 .qd-btn-ghost:hover {
   background: var(--color-bg-hover);
   border-color: transparent;
 }
+.qd-btn-ghost:active:not(:disabled) { background: var(--color-bg-active); }
 
 .qd-btn-danger {
   border-color: var(--color-danger-border);
@@ -207,21 +229,25 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 26px;
+  height: 26px;
   border: none;
   border-radius: var(--radius-sm);
   background: none;
   color: var(--color-text-muted);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast),
-    border-color var(--transition-fast);
+    border-color var(--transition-fast), transform var(--transition-fast);
 }
-.qd-icon-btn:hover { color: var(--color-accent); background: var(--color-bg-hover); }
+.qd-icon-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.qd-icon-btn:active:not(:disabled) { background: var(--color-bg-active); transform: translateY(0.5px); }
 .qd-icon-btn:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 .qd-icon-btn:disabled:hover { color: var(--color-text-disabled); background: none; }
 
 /* ---- 输入框 ---- */
+/* 输入框是"能被填写的凹槽"：底色比所在面板亮一档（深色）/ 灰一档（浅色），
+   聚焦时边框变蓝并外扩一圈柔光环。原来聚焦只换边框色，密集表单里几乎看不出
+   焦点落在哪一格。 */
 .qd-input {
   height: 28px;
   padding: 0 9px;
@@ -230,12 +256,17 @@
   background: var(--color-bg-tertiary);
   color: var(--color-text-primary);
   font-family: inherit;
-  font-size: 12px;
+  font-size: var(--text-sm);
   outline: none;
-  transition: border-color var(--transition-fast);
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast),
+    background-color var(--transition-fast);
 }
 .qd-input::placeholder { color: var(--color-text-disabled); }
-.qd-input:focus { border-color: var(--color-accent); }
+.qd-input:hover:not(:disabled) { border-color: var(--color-border-light); }
+.qd-input:focus {
+  border-color: var(--color-accent);
+  box-shadow: var(--ring-accent);
+}
 .qd-input:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 
 /* 带图标的输入框（搜索）：图标绝对定位，输入框留左内边距 */
@@ -254,10 +285,13 @@
 .qd-input-wrap > .qd-input { padding-left: 28px; width: 100%; }
 
 /* ---- 卡片 ---- */
+/* 容器只做两件事：比底亮一点 + 上缘一道内高光。不再加投影，
+   大量卡片同时投阴影会让整页发灰（深色主题尤其明显）。 */
 .qd-card {
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
 }
 
 /* ---- 内容工具栏（页头之下的一排筛选/操作） ---- */
@@ -267,6 +301,7 @@
   gap: 6px;
   flex-shrink: 0;
   padding: 8px 16px;
+  background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
 

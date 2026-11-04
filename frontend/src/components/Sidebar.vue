@@ -413,6 +413,9 @@ async function handleDeleteWorkspace(wsId: string) {
   height: 100%;
   background: var(--color-bg-secondary);
   box-shadow: var(--shadow-border-right);
+  /* 右缘一道内高光：侧栏与内容之间原来只有一条黑线，在深色主题下两者
+     容易糊成一片；高光让"侧栏是一块独立的板"这件事看得出来。 */
+  border-right: 1px solid var(--color-hairline);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -470,13 +473,15 @@ async function handleDeleteWorkspace(wsId: string) {
   box-shadow: var(--shadow-border);
   overflow-y: auto;
 }
+/* 分组标题与三栏的 .qd-panel-title 同一套：11px / 600 / +0.08em。
+   字距是这里唯一的装饰——全大写的西文加宽才不挤，中文小字靠它拉开呼吸。 */
 .navigator-header {
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-text-muted);
   text-transform: uppercase;
-  letter-spacing: 1px;
-  padding: 2px 4px 6px;
+  letter-spacing: 0.08em;
+  padding: 6px 6px 6px;
   user-select: none;
 }
 .nav-item {
@@ -498,9 +503,21 @@ async function handleDeleteWorkspace(wsId: string) {
   text-align: left;
 }
 .nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-/* 选中态与工作空间三栏的 .qd-row.active 同一套语言：强调色淡底 + 图标转强调色。
-   原来用 bg-tertiary + 整行文字变蓝，字一多就像超链接。 */
+/* 选中态与工作空间三栏的 .qd-row.active 同一套语言：左侧一道强调色竖条
+   + 极淡底色，图标转强调色。整块铺满 accent-bg 时，一行选中会把整条侧栏
+   的视觉重心抢走（尤其侧栏只有 210px 宽），竖条能表达"当前在哪"而不喧哗。 */
 .nav-item.active { background: var(--color-accent-bg); color: var(--color-text-primary); font-weight: 500; }
+.nav-item.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 2px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 .nav-item.active svg { color: var(--color-accent); }
 .nav-badge {
   margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-md);

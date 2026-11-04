@@ -3127,7 +3127,16 @@ function seedPreview() {
 .item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .item.current { color: var(--color-text-primary); font-weight: 600; }
 .item.dim .item-name { color: var(--color-text-muted); }
-.item.active { background: var(--color-accent-bg); color: var(--color-accent); }
+/* 选中项与全站统一：淡底 + 左缘竖条 + 常规文字色。
+   原来整行文字转强调色，一列仓库名里只有它发蓝，看着像链接列表。 */
+.item { position: relative; }
+.item.active { background: var(--color-accent-bg); color: var(--color-text-primary); }
+.item.active::before {
+  content: '';
+  position: absolute; left: 0; top: 50%; transform: translateY(-50%);
+  width: 2px; height: 14px; border-radius: var(--radius-full);
+  background: var(--color-accent);
+}
 .item.active .item-ic { color: var(--color-accent); }
 .item-ic { flex-shrink: 0; color: var(--color-text-muted); }
 .item-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -3469,7 +3478,7 @@ function seedPreview() {
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; border-radius: var(--radius-sm);
   background: var(--color-bg-elevated); border: 1px solid var(--color-border);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, .18);
+  box-shadow: var(--shadow-pop);
 }
 .pb-n { font-size: 11px; color: var(--color-text-secondary); }
 .pb-btn {

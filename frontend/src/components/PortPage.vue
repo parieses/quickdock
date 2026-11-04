@@ -150,7 +150,19 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 
 .port-list { display: flex; flex-direction: column; gap: 4px; }
 .port-empty { text-align: center; padding: var(--space-9) var(--space-4); color: var(--color-text-disabled); }
-.empty-icon { opacity: 0.4; margin-bottom: var(--space-2); }
+/* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
+   给一层方底 + 细边，它才是一个完整的标识；padding 配合 content-box，
+   图标本身的尺寸不用改（各页 28/30/36/48 都成立）。 */
+.empty-icon {
+  padding: 10px;
+  box-sizing: content-box;
+  opacity: 1;
+  color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 12px;
+}
 .port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px 12px; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: var(--radius-md); transition: background var(--transition-fast); }
 .port-row:hover { background: var(--color-bg-hover); }
 /* QuickDock 自身监听的端口（内置 HTTP 静态服务等）：描边高亮，避免混在系统进程里认不出 */

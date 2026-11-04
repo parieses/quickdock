@@ -360,14 +360,14 @@ function onModelSelect(e: Event) {
 }
 
 .ai-hero-title {
-  margin: 0 0 2px;
-  font-size: 26px;
-  font-weight: 700;
-  letter-spacing: -0.2px;
+  margin: 0 0 4px;
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
   color: var(--color-text-primary);
 }
 
-.ai-hero-modes { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px; }
+.ai-hero-modes { display: flex; flex-wrap: wrap; justify-content: center; gap: 7px; }
 
 .ai-hero-mode {
   display: inline-flex; align-items: center; gap: 5px;
@@ -415,7 +415,12 @@ function onModelSelect(e: Event) {
 .ai-hero-plus:hover,
 .ai-hero-plus.is-open { background: var(--color-bg-active); color: var(--color-text-primary); }
 
-.ai-hero-box:focus-within { border-color: var(--color-accent); }
+/* 聚焦不再把整圈边框刷成强调色：这么大一个输入盒，亮蓝边框会盖住页面里
+   所有真正的强调元素（主按钮、选中项）。改成"边框提亮 + 一圈淡蓝外环"。 */
+.ai-hero-box:focus-within {
+  border-color: var(--color-accent-border-strong);
+  box-shadow: 0 0 0 3px var(--color-accent-bg);
+}
 
 /* 富输入框（AiRichInput）在落地页用大一号的字，与原来那个 textarea 一致 */
 .ai-hero-box :deep(.ai-rich) { font-size: 14px; line-height: 1.6; }
@@ -540,7 +545,7 @@ select.ai-hero-select:focus-visible {
   display: flex; align-items: center; justify-content: center;
   width: 32px; height: 32px;
   border: none; border-radius: 50%;
-  background: var(--color-accent); color: #fff;
+  background: var(--color-accent); color: var(--color-accent-text);
   cursor: pointer;
   transition: opacity var(--transition-fast), background-color var(--transition-fast);
 }
@@ -556,10 +561,30 @@ select.ai-hero-select:focus-visible {
   word-break: break-all;
 }
 
+/* 缺 API Key：原来是一行橙字 + 一颗蓝色实心按钮，两种语义色挨在一起，
+   既不像提示也不像主操作。收成一条"警示胶囊"——橙底橙边橙字，
+   按钮降为同色系的小胶囊，整条读起来是一件事。 */
 .ai-hero-needkey {
   margin: 0;
-  display: flex; align-items: center; gap: 8px;
-  font-size: 12px; color: var(--color-warning);
+  display: inline-flex; align-items: center; gap: 10px;
+  align-self: center;
+  padding: 3px 4px 3px 12px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-full);
+  background: var(--color-warning-bg);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  color: var(--color-warning);
+}
+
+.ai-hero-needkey .ai-go-settings {
+  padding: 3px 11px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
+  color: var(--color-bg-primary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.6;
 }
 
 .ai-hero-tips { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
@@ -609,7 +634,11 @@ select.ai-hero-select:focus-visible {
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }
 
-.ai-hero-tip:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+.ai-hero-tip:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-accent-border-strong);
+  background: var(--color-bg-tertiary);
+}
 
 .ai-hero-tip-icon { transform: rotate(45deg); opacity: 0.55; flex-shrink: 0; }
 </style>
