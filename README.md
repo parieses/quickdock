@@ -705,7 +705,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 ```
 quickdock/
 ├── main.go / tray.go / windows.go        # 入口、托盘、浮动窗口、单实例锁
-├── services/                             # Wails 门面层，宿主 + 24 领域子包，539 个绑定方法
+├── services/                             # Wails 门面层，宿主 + 24 领域子包，565 个绑定方法
 │   ├── service.go  api_result.go  types.go  lifecycle.go
 │   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
 │   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go  clipboard_files.go
