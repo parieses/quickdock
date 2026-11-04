@@ -828,7 +828,7 @@ func getNoteWindow() *application.WebviewWindow {
 		if app == nil {
 			return nil
 		}
-		noteWin = initNoteWindow(app)
+		noteWin = newFloatingWindowOnMainThread(initNoteWindow, app)
 	}
 	return noteWin
 }

@@ -194,6 +194,12 @@ func (a *AppService) ServiceShutdown() error {
 	logger.I("[退出] 开始清理：插件=%v 插件窗口=%v 本地服务=%v dsh=%v 调度器=%v",
 		a.PluginMgr != nil, a.PluginWindowMgr != nil, a.Env != nil, a.DSH != nil, a.schedulerQuit != nil)
 
+	// 第一件事是停掉本地服务自愈看门狗：它按固定间隔巡检「已开启但没在跑」的服务，
+	// 若留到 StopAll 之后还活着，刚停掉的服务会被重新拉起，退出清理白做一半。
+	if a.EnvWatchdogCancel != nil {
+		a.EnvWatchdogCancel()
+	}
+
 	// 先停止所有插件并关闭插件窗口，避免它们在 DB 关闭后仍尝试写入，
 	// 导致 panic 或数据丢失（原顺序先关 DB，而插件子进程/goja 仍在运行）。
 	// 注意：main.go 的退出回调也会调用一次 ShutdownAll/CloseAll；此处为 v3 生命周期主路径，

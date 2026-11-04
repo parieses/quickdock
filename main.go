@@ -194,15 +194,47 @@ func logStartupDetail(app *application.App, mainOpts application.WebviewWindowOp
 // startRenderHeartbeat 渲染进程看门狗心跳：每 5s 向所有窗口广播 qd:heartbeat。
 // 前端据此检测 WebView2 渲染/桥接卡死（日志里表现为 "Eval failed: not in correct state"），
 // 自动重载页面自我恢复，避免"时间一长页面空白"需手动重启。发射失败（前端未就绪/桥接已断）静默忽略。
-func startRenderHeartbeat(app *application.App) {
+func startRenderHeartbeat(app *application.App, quit <-chan struct{}) {
 	go func() {
 		ticker := time.NewTicker(5 * time.Second)
 		defer ticker.Stop()
-		for range ticker.C {
-			if app == nil {
-				continue
+		for {
+			select {
+			case <-quit:
+				// app.Run() 返回后窗口已销毁，再 Emit 只会打出一串
+				// "Eval failed: not in correct state"，且 goroutine 永远不退出。
+				return
+			case <-ticker.C:
+				if app == nil {
+					continue
+				}
+				app.Event.Emit("qd:heartbeat", time.Now().Unix())
 			}
-			app.Event.Emit("qd:heartbeat", time.Now().Unix())
+		}
+	}()
+}
+
+// precreateFloatingWindows 是 QD_PRECREATE_WINDOWS=1 时的可选预热路径。
+//
+// 关键不是「要不要预建」，而是「在哪儿建」：三个 WebView2 窗口必须在主线程创建，
+// 又不能挤在 app.Run() 之前拖慢首屏。所以后台 goroutine 先等主窗口跑起来，再逐个
+// 用 InvokeAsync 投递到主线程，中间留出间隔让消息循环处理完用户自己的第一批操作。
+// getter 内部还有 newFloatingWindowOnMainThread，此时已在主线程会直接执行，不会重入。
+func precreateFloatingWindows(svc *services.AppService) {
+	go func() {
+		defer logger.RecoverToLog("precreate-floating-windows")
+		time.Sleep(1500 * time.Millisecond)
+		getters := []func() *application.WebviewWindow{
+			svc.GetClipboardWindow, svc.GetPaletteWindow, svc.GetNoteWindow,
+		}
+		for _, get := range getters {
+			g := get
+			application.InvokeAsync(func() {
+				if w := g(); w != nil {
+					w.Hide()
+				}
+			})
+			time.Sleep(400 * time.Millisecond)
 		}
 	}()
 }
@@ -723,17 +755,16 @@ func main() {
 	// 将延迟工厂函数注入 AppService，供前端 Wails 绑定调用
 	InjectWindowGetters(appService, app)
 
-	// 预创建三个浮窗：主窗口已创建、WebView2 运行时就绪，此处创建均在主线程进行，
-	// 避免首次按热键时在热键回调 goroutine 上跨线程创建 WebView2 窗口
-	// （跨线程创建可能导致死锁/崩溃）。预创建后热键只需 Show/Hide，不再触发创建。
-	if w := appService.GetClipboardWindow(); w != nil {
-		w.Hide()
-	}
-	if w := appService.GetPaletteWindow(); w != nil {
-		w.Hide()
-	}
-	if w := appService.GetNoteWindow(); w != nil {
-		w.Hide()
+	// 三个 WebView2 浮窗改为「首次用到才创建」。原先在 app.Run() 之前同步预建并
+	// Hide，是为了绕开热键回调 goroutine 上跨线程建窗的死锁/白屏；代价是每个渲染
+	// 进程空闲也常驻 30–80MB，一开机就多占 100–240MB，而多数会话根本用不到命令
+	// 面板或快捷笔记。跨线程约束现在由 windows.go 的 newFloatingWindowOnMainThread
+	// 承担（投递到主线程 + 同步等结果），预建不再是必需。
+	//
+	// 想要「热键零延迟」时可设 QD_PRECREATE_WINDOWS=1：仍然挪到 app.Run() 之后、
+	// 主线程空闲时错峰创建，不阻塞首屏，也不在 Run 前碰 WebView2。
+	if os.Getenv("QD_PRECREATE_WINDOWS") == "1" {
+		precreateFloatingWindows(appService)
 	}
 
 	// 预创建截图覆盖窗口（原生 Win32 分层窗口，不走 WebView）。
@@ -745,7 +776,8 @@ func main() {
 	services.InitScreenshotPins(app)
 
 	// 渲染进程看门狗：先于 Run 启动，给前端提供自愈所需的心跳信号。
-	startRenderHeartbeat(app)
+	heartbeatQuit := make(chan struct{})
+	startRenderHeartbeat(app, heartbeatQuit)
 
 	// 运行应用
 	// 注意：Wails 框架在创建首个 WebView2 环境时会打印笼统的
@@ -754,6 +786,8 @@ func main() {
 	logStartupDetail(app, mainOpts, mainRect)
 
 	err := app.Run()
+	// Run 返回即主窗口已销毁：先停心跳，否则它还会对着已销毁窗口 Emit 到进程结束。
+	close(heartbeatQuit)
 	if err != nil {
 		// 启动失败必须让用户「当场」看到，而不只是躺在日志里。
 		//

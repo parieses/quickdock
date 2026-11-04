@@ -426,7 +426,7 @@ func paletteWindowGetter(app *application.App) func() *application.WebviewWindow
 			if app == nil {
 				return nil
 			}
-			paletteWin = initPaletteWindow(app)
+			paletteWin = newFloatingWindowOnMainThread(initPaletteWindow, app)
 		}
 		return paletteWin
 	}
@@ -442,7 +442,7 @@ func clipboardWindowGetter(app *application.App) func() *application.WebviewWind
 			if app == nil {
 				return nil
 			}
-			clipboardWin = initClipboardWindow(app)
+			clipboardWin = newFloatingWindowOnMainThread(initClipboardWindow, app)
 		}
 		return clipboardWin
 	}
@@ -458,10 +458,29 @@ func noteWindowGetter(app *application.App) func() *application.WebviewWindow {
 			if app == nil {
 				return nil
 			}
-			noteWin = initNoteWindow(app)
+			noteWin = newFloatingWindowOnMainThread(initNoteWindow, app)
 		}
 		return noteWin
 	}
+}
+
+// newFloatingWindowOnMainThread 保证 WebView2 窗口一定在主线程创建。
+//
+// 热键回调跑在 Wails 的 goroutine 上，直接在那里 app.Window.NewWithOptions 会踩
+// Wails v3 的跨线程建窗问题（死锁 / 次级窗口白屏）。原先靠「启动时同步预建三个
+// 浮窗」绕开，代价是每个渲染进程空闲也常驻 30–80MB。改成按需创建后由这里补上
+// 线程约束：InvokeSyncWithResult 会把创建投递到主线程并同步等结果；若调用方本来
+// 就在主线程，Wails 的 dispatchOnMainThread 会直接执行，不会自己等自己死锁。
+func newFloatingWindowOnMainThread(
+	init func(*application.App) *application.WebviewWindow,
+	app *application.App,
+) *application.WebviewWindow {
+	if app == nil {
+		return nil
+	}
+	return application.InvokeSyncWithResult(func() *application.WebviewWindow {
+		return init(app)
+	})
 }
 
 // InjectWindowGetters 将延迟窗口创建函数注入到 AppService（由 main.go 调用）
@@ -485,7 +504,7 @@ func getClipboardWindow() *application.WebviewWindow {
 		if app == nil {
 			return nil
 		}
-		clipboardWin = initClipboardWindow(app)
+		clipboardWin = newFloatingWindowOnMainThread(initClipboardWindow, app)
 	}
 	return clipboardWin
 }
@@ -498,7 +517,7 @@ func getPaletteWindow() *application.WebviewWindow {
 		if app == nil {
 			return nil
 		}
-		paletteWin = initPaletteWindow(app)
+		paletteWin = newFloatingWindowOnMainThread(initPaletteWindow, app)
 	}
 	return paletteWin
 }
@@ -512,7 +531,7 @@ func getWinmgrWindow() *application.WebviewWindow {
 		if app == nil {
 			return nil
 		}
-		winmgrWin = initWinmgrWindow(app)
+		winmgrWin = newFloatingWindowOnMainThread(initWinmgrWindow, app)
 	}
 	return winmgrWin
 }
@@ -526,7 +545,7 @@ func winmgrWindowGetter(app *application.App) func() *application.WebviewWindow 
 			if app == nil {
 				return nil
 			}
-			winmgrWin = initWinmgrWindow(app)
+			winmgrWin = newFloatingWindowOnMainThread(initWinmgrWindow, app)
 		}
 		return winmgrWin
 	}
@@ -544,7 +563,7 @@ func sshWindowGetter(app *application.App) func() *application.WebviewWindow {
 			if app == nil {
 				return nil
 			}
-			sshWin = initSshWindow(app)
+			sshWin = newFloatingWindowOnMainThread(initSshWindow, app)
 		}
 		return sshWin
 	}

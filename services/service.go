@@ -147,6 +147,10 @@ type AppService struct {
 	ClipboardCtx    context.Context
 	ClipboardCancel func()
 
+	// 本地服务自愈看门狗的取消函数。原先传 context.Background()，应用退出清理时
+	// 它会一直跑到进程结束，甚至把刚被 StopAll 停掉的服务又拉起来。
+	EnvWatchdogCancel func()
+
 	// 剪贴板变更信号（容量 1，丢弃式发送做合并）：Win32 消息线程只置信号，
 	// 真正的读取/解析/入库在 startClipboardWorker 起的协程上执行（见 clipboard_sys.go）。
 	clipboardWake chan struct{}
@@ -213,7 +217,10 @@ func (a *AppService) SetApp(app *application.App) {
 			app.Event.Emit("quickdock:env:refreshed")
 		})
 		// 崩溃自愈看门狗：内部自起 goroutine，首个巡检在 15s 后，不阻塞启动路径。
-		a.Env.StartWatchdog(context.Background())
+		// ctx 跟着应用生命周期走，ServiceShutdown 里先取消它再停本地服务。
+		watchdogCtx, watchdogCancel := context.WithCancel(context.Background())
+		a.EnvWatchdogCancel = watchdogCancel
+		a.Env.StartWatchdog(watchdogCtx)
 		// Everything 文件检索预热：后台无头拉起实例（内部自带全部前置条件判断：
 		// 已装/未运行/总开关开/本进程建得了索引），把冷索引的空窗挪出用户交互期。
 		if ev := a.Env.EverythingRuntime(); ev != nil {
