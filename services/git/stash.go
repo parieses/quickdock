@@ -164,6 +164,70 @@ func (s *GitService) GitStashDrop(path, ref string) *services.ApiResult {
 	return services.OkMsg(nil, "已删除 "+ref)
 }
 
+// GitStashShow 取一条贮藏的预览：改了哪些文件 + 文本差异，与提交详情（CommitDetail）
+// 同构，前端直接复用那套文件树与 diff 渲染。git 面板点贮藏条目时调用——之前点了没反应。
+//
+// 只取已跟踪文件的改动（git stash show -p 的默认范围）；贮藏若含未跟踪文件，它们
+// 不在 diff 里，与「应用」的主流场景一致，且未跟踪文件本就不在版本控制中。
+func (s *GitService) GitStashShow(path, ref string) *services.ApiResult {
+	bin, err := findGit()
+	if err != nil {
+		return services.Fail(err)
+	}
+	if _, err := s.stashRef(bin, path, ref); err != nil {
+		return services.Fail(err)
+	}
+	detail := CommitDetail{Hash: ref, Files: []FileStat{}}
+	out, errOut, e := run(bin, path, cmdTimeout, "stash", "show", "--name-status", "--no-color", ref)
+	if e != nil {
+		return services.FailMsg("读取贮藏失败：" + clip(strings.TrimSpace(errOut), 300))
+	}
+	stats := stashNumstat(bin, path, ref)
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) < 2 {
+			continue
+		}
+		code := strings.TrimSpace(fields[0])
+		p := fields[1]
+		if len(fields) == 3 {
+			p = fields[1] + " → " + fields[2] // 重命名：旧 → 新
+		}
+		f := FileStat{Status: code, Path: p, Desc: statusDesc(code)}
+		f.Add, f.Del = stats.lookup(p)
+		detail.Files = append(detail.Files, f)
+	}
+	if d, _, derr := run(bin, path, cmdTimeout, "stash", "show", "-p", "--unified=3", "--no-color", ref); derr == nil {
+		detail.Diff = clip(d, 60000)
+	}
+	return services.Ok(detail)
+}
+
+// stashNumstat 取一条贮藏的逐文件增删行数（与 commitNumstat 同构，只是 rev 是 stash@{n}）。
+// 单独一条命令，失败了就当没统计：它只是装饰，不该让它把文件清单也拖挂。
+func stashNumstat(bin, dir, ref string) numstat {
+	m := numstat{}
+	out, _, err := run(bin, dir, cmdTimeout, "stash", "show", "--numstat", "--no-color", ref)
+	if err != nil {
+		return m
+	}
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimRight(line, "\r")
+		fields := strings.SplitN(line, "\t", 3)
+		if len(fields) < 3 {
+			continue
+		}
+		add, _ := strconv.Atoi(strings.TrimSpace(fields[0]))
+		del, _ := strconv.Atoi(strings.TrimSpace(fields[1]))
+		m[fields[2]] = [2]int{add, del}
+	}
+	return m
+}
+
 // stashRef 校验 ref 仍存在。
 //
 // 为什么每次都查：列表是几秒前的快照，期间可能在终端里 stash pop 过；

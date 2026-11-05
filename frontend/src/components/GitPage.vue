@@ -47,7 +47,7 @@ import {
   GitPushBranch, GitPushTag, GitDeleteTag,
   GitCherryPick, GitArchive, GitFileHistory, GitFileBlame, GitShowFile,
   GitSearchLog, GitRestoreFile,
-  GitStashList, GitStashSave, GitStashApply, GitStashPop, GitStashDrop,
+  GitStashList, GitStashSave, GitStashApply, GitStashPop, GitStashDrop, GitStashShow,
   GitSSHStatus, GitSSHGenerate, GitSSHTest, GitRemoteInfo, GitRemoteToSSH,
   GitRemotes, GitRemoteSet, GitRemoteRemove,
   GitCompare, GitSubmodules, GitSubmoduleUpdate, GitSubmoduleSync, GitSubmoduleAdd,
@@ -113,6 +113,10 @@ const branches = ref<BranchSet>({ local: [], remote: [], tags: [] })
 const commits = ref<Commit[]>([])
 const selectedHash = ref('')
 const detail = ref<CommitDetail | null>(null)
+const selectedStash = ref<StashEntry | null>(null)
+// 详情区当前展示的来源：工作区（worktreeMode）/ 提交 / 贮藏。
+// 单独标志，避免刷新把贮藏当提交清掉，也让右侧模板能识别「非提交详情」。
+const detailKind = ref<'none' | 'commit' | 'stash'>('none')
 
 const loading = ref(false)
 const busy = ref('')      // 正在跑的网络/切换动作（按钮转圈用）
@@ -443,6 +447,8 @@ function resetRepoView() {
   worktreeDiff.value = ''
   detail.value = null
   selectedHash.value = ''
+  selectedStash.value = null
+  detailKind.value = 'none'
   selectedFile.value = ''
   fileHist.value = null
   searchResults.value = null
@@ -564,6 +570,8 @@ async function switchRepo(r: RepoRef) {
 async function selectCommit(c: Commit) {
   worktreeMode.value = false
   selectedHash.value = c.hash
+  selectedStash.value = null
+  detailKind.value = 'commit'
   selectedFile.value = ''
   detail.value = null
   try {
@@ -1072,16 +1080,46 @@ function stashApply(s: StashEntry) {
   void runGitOp(() => GitStashApply(activePath.value, s.ref))
 }
 
-function stashPop(s: StashEntry) {
-  void runGitOp(() => GitStashPop(activePath.value, s.ref))
+async function stashPop(s: StashEntry) {
+  const ok = await runGitOp(() => GitStashPop(activePath.value, s.ref))
+  // 弹出会删除记录：当前预览的就是它，清掉避免右侧继续显示已不存在的贮藏
+  if (ok && selectedStash.value?.ref === s.ref) {
+    selectedStash.value = null
+    detailKind.value = 'none'
+    detail.value = null
+  }
 }
 
 function confirmStashDrop(s: StashEntry) {
   askConfirm(
     t('git_stash_drop_confirm', { r: s.ref }),
-    () => void runGitOp(() => GitStashDrop(activePath.value, s.ref)),
+    async () => {
+      const ok = await runGitOp(() => GitStashDrop(activePath.value, s.ref))
+      if (ok && selectedStash.value?.ref === s.ref) {
+        selectedStash.value = null
+        detailKind.value = 'none'
+        detail.value = null
+      }
+    },
     [t('git_stash_drop_detail')],
   )
+}
+
+// 点击贮藏条目：右侧预览它的改动（之前点了没反应）。复用提交详情那套渲染——
+// 后端 GitStashShow 返回与 CommitDetail 同构的 files + diff，文件列表与 diff 面板都不用重写。
+async function selectStash(s: StashEntry) {
+  worktreeMode.value = false
+  selectedHash.value = ''
+  selectedStash.value = s
+  detailKind.value = 'stash'
+  selectedFile.value = ''
+  detail.value = null
+  try {
+    detail.value = unwrap<CommitDetail>(await GitStashShow(activePath.value, s.ref)) || null
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+    logErr('git.stashShow', e)
+  }
 }
 
 function openStashCtx(e: MouseEvent, s: StashEntry) {
@@ -1791,6 +1829,15 @@ function parseDiff(text: string): DiffBlock[] {
 const activeDiff = computed(() => worktreeMode.value ? worktreeDiff.value : (detail.value?.diff || ''))
 const diffBlocks = computed(() => parseDiff(activeDiff.value))
 
+// 详情区是否已选中「提交或贮藏」：右侧文件列表 / diff 面板据此区分「无内容」与「已选中」。
+const detailActive = computed(() => detailKind.value === 'commit' || detailKind.value === 'stash')
+// diff 标题处的标识：提交显示前 8 位 hash，贮藏显示 stash@{n}。
+const detailHash = computed(() => {
+  if (detailKind.value === 'stash' && selectedStash.value) return selectedStash.value.ref
+  if (selectedHash.value) return selectedHash.value.slice(0, 8)
+  return ''
+})
+
 /** 单个文件的 block 路径：name-status 的重命名写「旧 → 新」，diff 里只有新路径。 */
 function blockPath(f: FileStat): string {
   const i = f.path.indexOf(' → ')
@@ -2321,8 +2368,10 @@ function seedPreview() {
               </button>
             </div>
             <ul v-show="open.stash" class="grp-list">
-              <li v-for="s in stashes" :key="s.ref" class="item dim"
+              <li v-for="s in stashes" :key="s.ref"
+                  :class="['item', 'dim', { active: selectedStash?.ref === s.ref }]"
                   :title="`${s.ref} · ${s.branch} · ${s.message}`"
+                  @click="selectStash(s)"
                   @contextmenu.prevent="openStashCtx($event, s)">
                 <Archive :size="11" class="item-ic" />
                 <span class="item-name">{{ s.message || t('git_stash_auto') }}</span>
@@ -2428,8 +2477,8 @@ function seedPreview() {
         </div>
 
         <!-- 拖动条：上下比例由用户定 -->
-        <div class="splitter" :class="{ disabled: !selectedHash && !worktreeMode }"
-             @mousedown="(selectedHash || worktreeMode) && startSplit($event)"></div>
+        <div class="splitter" :class="{ disabled: detailKind === 'none' && !worktreeMode }"
+             @mousedown="(detailKind !== 'none' || worktreeMode) && startSplit($event)"></div>
 
         <div class="detail-wrap">
           <div class="detail">
@@ -2536,7 +2585,7 @@ function seedPreview() {
                   <ListTree v-else :size="11" />
                 </button>
               </div>
-              <div v-if="!selectedHash" class="file-state">—</div>
+              <div v-if="detailKind === 'none'" class="file-state">—</div>
               <div v-else-if="!detail" class="file-state"><Loader2 :size="13" class="spin" /></div>
               <ul v-else class="file-rows">
                 <template v-for="row in commitRows" :key="row.key">
@@ -2568,7 +2617,7 @@ function seedPreview() {
                 <span class="diff-title" :title="selectedFile || t('git_all_changes')">
                   {{ selectedFile || t('git_all_changes') }}
                 </span>
-                <span v-if="selectedHash && !worktreeMode" class="diff-hash">{{ selectedHash.slice(0, 8) }}</span>
+                <span v-if="detailHash && !worktreeMode" class="diff-hash">{{ detailHash }}</span>
                 <button class="diff-toggle" :title="t('git_diff_side_hint')" @click="diffSide = !diffSide">
                   <Columns2 v-if="!diffSide" :size="11" />
                   <Rows3 v-else :size="11" />
@@ -2609,7 +2658,7 @@ function seedPreview() {
               <p v-else-if="worktreeMode" class="pane-state">
                 {{ changeCount ? t('git_no_diff') : t('git_clean') }}
               </p>
-              <p v-else-if="selectedHash && detail" class="pane-state">{{ t('git_no_diff') }}</p>
+              <p v-else-if="detailActive && detail" class="pane-state">{{ t('git_no_diff') }}</p>
               <div v-else class="pane-state diff-idle">
                 <GitBranch :size="20" />
                 <p>{{ activePath ? t('git_select_commit') : '' }}</p>
