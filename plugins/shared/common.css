@@ -37,6 +37,8 @@
   /* ===== 描边 ===== */
   --border: #22272f;
   --border-strong: #2e3440;
+  /* 输入框聚焦边框：中性冷灰，与宿主 --color-border-focus-soft 同值 */
+  --focus-border: #4a5568;
 
   /* ===== 品牌 / 状态 ===== */
   --accent: #5b8cff;
@@ -176,15 +178,17 @@ body {
  * 输入控件
  * ========================================================== */
 .p-input { height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-primary); font-family: inherit; font-size: var(--fs-sm); outline: none; transition: border-color var(--transition); }
-.p-input:focus { border-color: var(--accent); }
+.p-input:hover { border-color: var(--border-strong); }
+.p-input:focus { outline: none; border-color: var(--focus-border); }
 .p-input::placeholder { color: var(--text-placeholder); }
 .p-input-mono { font-family: var(--font-mono); }
 
 .p-select { height: 28px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg-tertiary); color: var(--text-primary); font-family: inherit; font-size: var(--fs-sm); outline: none; cursor: pointer; transition: border-color var(--transition); }
-.p-select:focus { border-color: var(--accent); }
+.p-select:hover { border-color: var(--border-strong); }
+.p-select:focus { outline: none; border-color: var(--focus-border); }
 
-.p-textarea { flex: 1; resize: none; padding: 12px; border: none; outline: none; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-mono); font-size: var(--fs-md); line-height: 1.6; tab-size: 2; }
-.p-textarea:focus { background: var(--bg-tertiary); }
+.p-textarea { flex: 1; resize: none; padding: 12px; border: 1px solid transparent; outline: none; background: var(--bg-primary); color: var(--text-primary); font-family: var(--font-mono); font-size: var(--fs-md); line-height: 1.6; tab-size: 2; }
+.p-textarea:focus { border-color: var(--focus-border); }
 .p-textarea::placeholder { color: var(--text-placeholder); }
 
 /* 输出区域 */
@@ -264,6 +268,7 @@ html[data-theme="light"] {
 
   --border: #d8dce2;
   --border-strong: #c6cbd3;
+  --focus-border: #a8b2c0;
 
   --accent: #5b8cff;
   --accent-hover: #4a7af0;
