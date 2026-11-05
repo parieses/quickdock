@@ -3,6 +3,8 @@
 适用范围：**只限 `frontend/src/**`（宿主 UI）**。
 插件页面（`plugins/**/frontend/**`）的样式规范在**另一个仓库** `quickdock-plugins/plugin-ui-style.md`，
 本文不涉及 —— 两套令牌体系互不相通，混着写必错（见 §7）。
+要把插件样式批量对齐到宿主当前色阶，用 `quickdock-plugins/plugin-style-prompt.md`
+（可粘贴提示词，带旧值 → 新值对照表、共享组件规则与门禁验收）。
 代码组织约定见 `frontend.md`，本文只管**长什么样**。
 
 一句话原则：**同一类元素在全应用只有一份实现**。新增页面只做"使用方"，不做"再写一套"。
