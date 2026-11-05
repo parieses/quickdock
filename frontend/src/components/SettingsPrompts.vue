@@ -326,8 +326,7 @@ watch(() => props.visible, (v) => {
 
 .prompt-textarea:focus {
   outline: none;
-  border-color: var(--color-border-focus);
-  box-shadow: 0 0 0 2px var(--color-border-focus);
+  border-color: var(--color-border-focus-soft);
 }
 
 .prompt-var-hint {

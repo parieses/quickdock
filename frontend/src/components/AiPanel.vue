@@ -875,8 +875,7 @@ defineExpose({ focusInput, getQuestion, setQuestion, markCopied })
 
 .ai-panel-input:focus {
   outline: none;
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-border);
+  border-color: var(--color-border-focus-soft);
 }
 
 .ai-panel-send {

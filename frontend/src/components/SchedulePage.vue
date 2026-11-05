@@ -839,7 +839,7 @@ onMounted(refresh)
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); flex: 1 1 180px; max-width: 320px;
 }
-.sched-search:focus-within { border-color: var(--color-accent); }
+.sched-search:focus-within { border-color: var(--color-border-focus-soft); }
 .sched-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
 .sched-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;

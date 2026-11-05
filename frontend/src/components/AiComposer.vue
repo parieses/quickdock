@@ -298,14 +298,13 @@ defineExpose({
   /* @ 补全弹层的定位锚点：它要贴着输入区上沿向上展开，
      而不是跟着光标跑（textarea 里算光标坐标要镜像一个 div，得不偿失）。 */
   position: relative;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast);
 }
 
-/* 与落地页 hero 输入框同一套聚焦反馈：边框提亮 + 淡蓝外环，
+/* 与落地页 hero 输入框同一套聚焦反馈：只换中性边框色、不加外环，
    不把整圈刷成强调色（大输入盒会盖掉页面里所有的强调元素）。 */
 .ai-input-area:focus-within {
-  border-color: var(--color-accent-border-strong);
-  box-shadow: 0 0 0 3px var(--color-accent-bg);
+  border-color: var(--color-border-focus-soft);
 }
 
 .ai-input-bar {

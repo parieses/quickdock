@@ -1107,7 +1107,7 @@ onUnmounted(() => {
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
 }
-.plugin-search:focus-within { border-color: var(--color-accent); }
+.plugin-search:focus-within { border-color: var(--color-border-focus-soft); }
 .plugin-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
 .plugin-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;

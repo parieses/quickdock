@@ -1000,7 +1000,14 @@ onUnmounted(() => {
   padding: 14px 18px;
   border-bottom: 1px solid var(--color-border);
   flex-shrink: 0;
+  transition: border-color var(--transition-fast);
 }
+
+/* 全局规则统一后所有输入框聚焦都不再发光环；这里再显式声明一次：
+   命令面板搜索框是 border:none / outline:none 的无边框设计，聚焦时连 1px
+   描边都不该出现，只让底部分隔线深浅各变化一档。输入框是面板里唯一焦点，
+   闪烁的光标已经足够说明「可以输入了」。 */
+.palette-searchbar:focus-within { border-bottom-color: var(--color-border-light); }
 
 .search-icon { color: var(--color-text-muted); flex-shrink: 0; }
 
@@ -1017,6 +1024,14 @@ onUnmounted(() => {
   min-width: 0;
 }
 .search-input::placeholder { color: var(--color-text-muted); }
+/* 组件 scoped 选择器优先级高于全局规则：保证以后全局样式调整也不会让这个
+   无边框输入框重新长出描边或光环。border-color 一并归零，免得后来给它加
+   边框时又冒出亮蓝色。 */
+.search-input:focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
 
 .inline-prefix {
   display: flex;

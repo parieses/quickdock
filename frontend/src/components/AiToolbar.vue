@@ -136,7 +136,7 @@ function onModelSelect(ev: Event) {
   outline: none;
 }
 
-.ai-model-select:focus { border-color: var(--color-accent); }
+.ai-model-select:focus { border-color: var(--color-border-focus-soft); }
 
 /* 工作目录：显示当前绑到哪个目录，点一下在资源管理器里打开。
    它只「打开」已绑定的目录，不是「选目录」——绑定入口已收进「新建任务 → 选空间」。

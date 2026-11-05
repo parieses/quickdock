@@ -155,7 +155,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
   font-size: 13px; font-family: inherit; outline: none;
   transition: border-color 0.12s;
 }
-.ap-input:focus { border-color: var(--color-accent); }
+.ap-input:focus { border-color: var(--color-border-focus-soft); }
 .ap-input::placeholder { color: var(--color-text-disabled); }
 .ap-btn {
   display: flex; align-items: center; gap: 2px;

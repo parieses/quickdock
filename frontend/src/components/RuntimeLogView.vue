@@ -202,7 +202,7 @@ onMounted(() => nextTick(scrollBottom))
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); color: var(--color-text-disabled);
 }
-.rv-search:focus-within { border-color: var(--color-accent); }
+.rv-search:focus-within { border-color: var(--color-border-focus-soft); }
 .rv-input {
   flex: 1; min-width: 0; height: 100%; border: none; outline: none; background: transparent;
   font-size: 12px; font-family: inherit; color: var(--color-text-primary);

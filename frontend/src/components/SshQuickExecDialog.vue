@@ -497,7 +497,7 @@ onBeforeUnmount(() => {
   outline: none;
   resize: vertical;
 }
-.qex-textarea:focus { border-color: var(--color-accent); }
+.qex-textarea:focus { border-color: var(--color-border-focus-soft); }
 
 .qex-opts { display: flex; align-items: flex-end; gap: var(--space-4); }
 .qex-opt {
@@ -515,7 +515,7 @@ onBeforeUnmount(() => {
   border-radius: var(--radius-xs);
   outline: none;
 }
-.qex-opt input:focus { border-color: var(--color-accent); }
+.qex-opt input:focus { border-color: var(--color-border-focus-soft); }
 .qex-kbd { margin-left: auto; font-size: 10px; color: var(--color-text-disabled); }
 
 .qex-warn,

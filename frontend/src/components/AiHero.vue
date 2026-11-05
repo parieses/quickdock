@@ -416,10 +416,9 @@ function onModelSelect(e: Event) {
 .ai-hero-plus.is-open { background: var(--color-bg-active); color: var(--color-text-primary); }
 
 /* 聚焦不再把整圈边框刷成强调色：这么大一个输入盒，亮蓝边框会盖住页面里
-   所有真正的强调元素（主按钮、选中项）。改成"边框提亮 + 一圈淡蓝外环"。 */
+   所有真正的强调元素（主按钮、选中项）。只换成中性一档边框，不加外环。 */
 .ai-hero-box:focus-within {
-  border-color: var(--color-accent-border-strong);
-  box-shadow: 0 0 0 3px var(--color-accent-bg);
+  border-color: var(--color-border-focus-soft);
 }
 
 /* 富输入框（AiRichInput）在落地页用大一号的字，与原来那个 textarea 一致 */

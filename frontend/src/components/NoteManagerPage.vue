@@ -1032,7 +1032,7 @@ watch(pendingOpenNoteId, (id) => {
 .ne-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
 .ne-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
 .ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 14px; font-weight: 600; outline: none; font-family: inherit; }
-.ne-name:focus { border-color: var(--color-accent); box-shadow: var(--ring-accent); }
+.ne-name:focus { border-color: var(--color-border-focus-soft); }
 .ne-format { display: flex; gap: 2px; flex-shrink: 0; }
 .ne-format button { padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
 .ne-format button:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
@@ -1055,7 +1055,7 @@ watch(pendingOpenNoteId, (id) => {
 .ne-tags { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); }
 .ne-tags-label { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
 .ne-tags-input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
-.ne-tags-input:focus { border-color: var(--color-accent); box-shadow: var(--ring-accent); }
+.ne-tags-input:focus { border-color: var(--color-border-focus-soft); }
 /* 字数统计：右对齐、弱化显示，写作时能瞄一眼但不抢注意力 */
 .ne-stats { flex-shrink: 0; font-size: 11px; color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
 
@@ -1154,7 +1154,7 @@ watch(pendingOpenNoteId, (id) => {
 .tb-clear:hover:not(:disabled) { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .tb-clear:disabled { opacity: 0.4; cursor: default; }
 .tb-input, .tb-select { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
-.tb-input:focus, .tb-select:focus { border-color: var(--color-accent); }
+.tb-input:focus, .tb-select:focus { border-color: var(--color-border-focus-soft); }
 .tb-btn { flex-shrink: 0; padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: 12px; cursor: pointer; border-radius: var(--radius-sm); font-family: inherit; }
 .tb-btn:hover:not(:disabled) { color: var(--color-text-primary); border-color: var(--color-border-focus); }
 .tb-btn:disabled { opacity: 0.4; cursor: default; }

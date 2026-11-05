@@ -778,7 +778,7 @@ onMounted(() => { load(); loadCert() })
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 12px; font-family: inherit; outline: none; min-width: 0;
 }
-.env-input:focus { border-color: var(--color-accent); }
+.env-input:focus { border-color: var(--color-border-focus-soft); }
 .env-input::placeholder { color: var(--color-text-disabled); }
 .site-list { display: flex; flex-direction: column; }
 .site-row {
@@ -853,7 +853,7 @@ onMounted(() => { load(); loadCert() })
   font-family: ui-monospace, Consolas, monospace; font-size: 12px; line-height: 1.5;
   white-space: pre; outline: none;
 }
-.gen-code:focus { border-color: var(--color-accent); }
+.gen-code:focus { border-color: var(--color-border-focus-soft); }
 .gen-meta { display: flex; flex-direction: column; gap: 2px; flex: 0 0 auto; }
 .block-hint.ok { color: var(--color-accent); }
 .gen-foot { display: flex; justify-content: flex-end; gap: 8px; flex: 0 0 auto; }

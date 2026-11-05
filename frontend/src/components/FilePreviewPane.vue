@@ -598,7 +598,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 
 .fp-search-input:focus {
   outline: none;
-  border-color: var(--color-border-focus);
+  border-color: var(--color-border-focus-soft);
 }
 
 .fp-search-count {

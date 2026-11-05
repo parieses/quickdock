@@ -107,8 +107,7 @@
   transition: border-color var(--transition-fast);
 }
 .qd-panel-search:focus-within {
-  border-color: var(--color-accent);
-  box-shadow: var(--ring-accent);
+  border-color: var(--color-border-focus-soft);
 }
 .qd-panel-search.is-disabled { opacity: 0.6; }
 .qd-search-icon { flex-shrink: 0; color: var(--color-text-disabled); }

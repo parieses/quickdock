@@ -378,7 +378,7 @@ function matchLabel(r: ClipboardRule): string {
   border-radius: var(--radius-md);
   resize: vertical;
 }
-.cr-test-input:focus { outline: none; border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-border); }
+.cr-test-input:focus { outline: none; border-color: var(--color-border-focus-soft); }
 .cr-test-actions { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
 .cr-test-state { font-size: 11.5px; color: var(--color-text-disabled); }
 .cr-test-state.matched { color: var(--color-success); }

@@ -102,6 +102,9 @@
   /* hairline：1px 内高光/极细分隔。深色下"白 4%"能勾出边缘又不显线 */
   --color-hairline: rgba(255, 255, 255, 0.055);
   --color-border-focus: #5b8cff;
+  /* 输入框聚焦边框：中性冷灰，比 hover 明显一档，不用强调蓝、也不外扩光环。
+     --color-border-focus 只留给键盘导航的 outline（无障碍需要够显眼）。 */
+  --color-border-focus-soft: #4a5568;
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;
   --color-accent-text: #fff;
@@ -189,9 +192,6 @@
   --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45);
   --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
-  --shadow-focus: 0 0 0 2px var(--color-border-focus);
-  /* 键盘焦点环：2px 描边会被误认成"边框变粗"，改用外扩的柔和环 */
-  --ring-accent: 0 0 0 3px rgba(91, 140, 255, 0.26);
   --color-toast-error-bg: #2d1818;
   --color-toast-error-text: #fca5a5;
   --color-toast-error-border: #5c1a1a;
@@ -228,6 +228,7 @@
   /* 浅色下的 hairline 是「更白的高光」：压在卡片上边缘，白卡片才立得起来 */
   --color-hairline: rgba(255, 255, 255, 0.9);
   --color-border-focus: #5b8cff;
+  --color-border-focus-soft: #a8b2c0;
   --color-accent: #5b8cff;
   --color-accent-hover: #4a7af0;
   --color-accent-text: #fff;
@@ -303,8 +304,6 @@
   --shadow-md: 0 6px 16px rgba(16, 24, 40, 0.1);
   --shadow-lg: 0 12px 28px rgba(16, 24, 40, 0.14);
   --shadow-pop: 0 16px 40px rgba(16, 24, 40, 0.16), 0 2px 8px rgba(16, 24, 40, 0.08);
-  --shadow-focus: 0 0 0 2px var(--color-border-focus);
-  --ring-accent: 0 0 0 3px rgba(91, 140, 255, 0.22);
   --color-toast-error-bg: #fff0f0;
   --color-toast-error-text: #d32f2f;
   --color-toast-error-border: #ffcdd2;
@@ -377,19 +376,22 @@ body {
 * { scrollbar-width: thin; scrollbar-color: var(--color-scrollbar-thumb) transparent; }
 
 /* ==================== 焦点环（仅键盘导航） ==================== */
-/* 1px 实线在深底上细得像没聚焦，2px 又像"边框变粗"。用 2px + offset 2px，
-   元素本身形状不变，环浮在外面，键盘操作时一眼能跟住焦点。 */
+/* 按钮等控件 Tab 过去时保留 2px 亮蓝 outline：偏移量让环浮在元素外面，
+   键盘操作时一眼能跟住焦点，且不会被误认成"边框变粗"。
+   输入框/文本域/下拉不走这条：它们聚焦时只换 1px 边框色（见下方规则），
+   不再外扩蓝色光晕环——密集界面里那圈蓝光比表单本身还抢眼。 */
 :focus-visible {
   outline: 2px solid var(--color-border-focus);
   outline-offset: 2px;
   border-radius: var(--radius-xs);
 }
+/* 所有表单控件统一的聚焦表达：中性边框 + 光标，无发光环。
+   组件里另有 :focus / :focus-within 规则的，也统一到同一个 token。 */
 input:focus-visible,
 textarea:focus-visible,
 select:focus-visible {
   outline: none;
-  border-color: var(--color-border-focus);
-  box-shadow: var(--ring-accent);
+  border-color: var(--color-border-focus-soft);
 }
 
 /* ==================== 通用工具类 ==================== */

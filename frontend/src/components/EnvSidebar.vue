@@ -104,7 +104,7 @@ const searching = computed(() => props.query.trim().length > 0)
   border-radius: var(--radius-sm); color: var(--color-text-disabled);
 }
 
-.cats-search:focus-within { border-color: var(--color-accent); box-shadow: var(--ring-accent); }
+.cats-search:focus-within { border-color: var(--color-border-focus-soft); }
 
 .cats-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;

@@ -511,7 +511,7 @@ onBeforeUnmount(() => {
   background: var(--color-bg-secondary);
 }
 
-.ai-plus-search:focus-within { border-color: var(--color-border-focus); }
+.ai-plus-search:focus-within { border-color: var(--color-border-focus-soft); }
 
 .ai-plus-search-icon { flex: none; color: var(--color-text-muted); }
 

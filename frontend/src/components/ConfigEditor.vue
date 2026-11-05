@@ -136,11 +136,10 @@ defineExpose({ markSaved, focus })
   border-radius: var(--radius-sm);
   background: var(--color-bg-primary);
   overflow: hidden;
-  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+  transition: border-color var(--transition-fast);
 }
 .ce:focus-within {
-  border-color: var(--color-border-focus);
-  box-shadow: 0 0 0 2px var(--color-accent-bg);
+  border-color: var(--color-border-focus-soft);
 }
 
 /* ---- 编辑主体：CM 撑满剩余空间（CM 自己的主题在 utils/aiCodeEditor.ts）---- */

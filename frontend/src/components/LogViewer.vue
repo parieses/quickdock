@@ -983,7 +983,7 @@ onUnmounted(() => {
   background: var(--color-bg-secondary);
   transition: border-color var(--transition-fast);
 }
-.log-search:focus-within { border-color: var(--color-border-focus); }
+.log-search:focus-within { border-color: var(--color-border-focus-soft); }
 .log-search-icon { flex-shrink: 0; }
 .log-search-input {
   flex: 1; min-width: 0;

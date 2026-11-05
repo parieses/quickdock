@@ -1592,7 +1592,7 @@ onUnmounted(stopPolling)
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); color: var(--color-text-muted);
 }
-.mon-search:focus-within { border-color: var(--color-border-focus); }
+.mon-search:focus-within { border-color: var(--color-border-focus-soft); }
 .mon-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;
   color: var(--color-text-primary); font-size: 12px; font-family: inherit;

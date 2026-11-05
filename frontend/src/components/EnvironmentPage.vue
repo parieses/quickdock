@@ -3660,7 +3660,7 @@ const s = currentRuntimeState
   font-family: inherit; outline: none; margin-top: 6px;
 }
 .env-select { width: auto; flex-shrink: 0; }
-.env-select:focus, .env-input:focus, .env-textarea:focus { border-color: var(--color-border-focus); box-shadow: 0 0 0 2px var(--color-accent-bg); }
+.env-select:focus, .env-input:focus, .env-textarea:focus { border-color: var(--color-border-focus-soft); }
 .link-btn {
   flex-shrink: 0; font-size: 11px; padding: 7px 11px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-accent);

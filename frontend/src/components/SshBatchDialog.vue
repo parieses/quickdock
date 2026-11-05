@@ -995,7 +995,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-textarea:focus {
-  border-color: var(--color-accent);
+  border-color: var(--color-border-focus-soft);
 }
 
 .batch-opts {
@@ -1024,7 +1024,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-opt input:focus {
-  border-color: var(--color-accent);
+  border-color: var(--color-border-focus-soft);
 }
 
 /* ---- 提示块 ---- */

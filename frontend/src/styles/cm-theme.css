@@ -59,7 +59,7 @@
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   font-family: inherit; font-size: 12px; outline: none;
 }
-.qd-cmfind-input:focus { border-color: var(--color-border-focus); }
+.qd-cmfind-input:focus { border-color: var(--color-border-focus-soft); }
 
 .qd-cmfind-count {
   flex: none; min-width: 46px; text-align: right;

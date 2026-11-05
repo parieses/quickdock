@@ -567,7 +567,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .fd-input:focus {
-  border-color: var(--color-accent);
+  border-color: var(--color-border-focus-soft);
 }
 
 .fd-input::placeholder {

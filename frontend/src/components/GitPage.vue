@@ -3391,7 +3391,7 @@ function seedPreview() {
   border: 1px solid var(--color-border); background: var(--color-bg-primary);
   color: var(--color-text-primary); font: inherit; font-size: 12px; line-height: 1.5;
 }
-.cb-input:focus { outline: none; border-color: var(--color-accent-border); }
+.cb-input:focus { outline: none; border-color: var(--color-border-focus-soft); }
 .cb-input::placeholder { color: var(--color-text-disabled); }
 .cb-foot { display: flex; align-items: center; gap: var(--space-3); }
 .cb-hint { font-size: 11px; color: var(--color-text-muted); }
@@ -3631,7 +3631,7 @@ function seedPreview() {
   background: var(--color-bg-primary); border: 1px solid var(--color-border);
   border-radius: var(--radius-xs); color: var(--color-text-primary); outline: none;
 }
-.modal-input:focus { border-color: var(--color-border-focus); }
+.modal-input:focus { border-color: var(--color-border-focus-soft); }
 .modal-row { display: flex; align-items: center; gap: var(--space-2); }
 .modal-path {
   flex: 1; min-width: 0; height: 28px; line-height: 28px; padding: 0 9px;

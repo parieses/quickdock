@@ -923,7 +923,7 @@ watch(() => props.visible, async (v) => {
   outline: none;
 }
 .plugin-input:focus {
-  border-color: var(--color-accent);
+  border-color: var(--color-border-focus-soft);
 }
 .plugin-input:disabled {
   opacity: 0.5;

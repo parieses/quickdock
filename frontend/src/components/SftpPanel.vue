@@ -1412,7 +1412,7 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sftp-kw:focus {
-  border-color: var(--color-accent);
+  border-color: var(--color-border-focus-soft);
 }
 
 /* 传输进度：细条 + 一行文本，不抢正文的空间（面板本身只有 300px 宽） */
@@ -1832,7 +1832,7 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sfp-input:focus {
-  border-color: var(--color-accent);
+  border-color: var(--color-border-focus-soft);
 }
 
 /* 校验失败时边框先变红，提示文字在下面补原因——

@@ -539,8 +539,7 @@ async function setDefault(tool: OpenTool) {
   box-sizing: border-box;
 }
 .field-input:focus {
-  border-color: var(--color-accent);
-  box-shadow: 0 0 0 2px var(--color-accent-border);
+  border-color: var(--color-border-focus-soft);
 }
 .field-hint {
   font-size: 11px;

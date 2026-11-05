@@ -472,7 +472,7 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 13px; font-family: inherit; outline: none; transition: border-color 0.12s;
 }
-.field-input:focus { border-color: var(--color-accent); }
+.field-input:focus { border-color: var(--color-border-focus-soft); }
 .field-input.input-error { border-color: var(--color-danger); }
 .field-input::placeholder { color: var(--color-text-disabled); }
 .field-textarea {
@@ -481,7 +481,7 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 13px; font-family: inherit; outline: none;
 }
-.field-textarea:focus { border-color: var(--color-accent); }
+.field-textarea:focus { border-color: var(--color-border-focus-soft); }
 .field-error { font-size: 11px; color: var(--color-danger); margin-top: 2px; }
 .field-hint { font-size: 11px; color: var(--color-text-disabled); margin-top: 2px; }
 

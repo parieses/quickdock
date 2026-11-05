@@ -245,9 +245,9 @@
 .qd-icon-btn:disabled:hover { color: var(--color-text-disabled); background: none; }
 
 /* ---- 输入框 ---- */
-/* 输入框是"能被填写的凹槽"：底色比所在面板亮一档（深色）/ 灰一档（浅色），
-   聚焦时边框变蓝并外扩一圈柔光环。原来聚焦只换边框色，密集表单里几乎看不出
-   焦点落在哪一格。 */
+/* 输入框是"能被填写的凹槽"：底色比所在面板亮一档（深色）/ 灰一档（浅色）。
+   聚焦只把 1px 边框换成中性一档（--color-border-focus-soft）：够看出焦点，
+   又不像外扩的蓝色光晕环那样在密集表单里发光。 */
 .qd-input {
   height: 28px;
   padding: 0 9px;
@@ -264,8 +264,7 @@
 .qd-input::placeholder { color: var(--color-text-disabled); }
 .qd-input:hover:not(:disabled) { border-color: var(--color-border-light); }
 .qd-input:focus {
-  border-color: var(--color-accent);
-  box-shadow: var(--ring-accent);
+  border-color: var(--color-border-focus-soft);
 }
 .qd-input:disabled { color: var(--color-text-disabled); cursor: not-allowed; }
 

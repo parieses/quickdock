@@ -1404,7 +1404,7 @@ onUnmounted(() => {
 }
 .focus-dur-custom::-webkit-outer-spin-button,
 .focus-dur-custom::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
-.focus-dur-custom:focus { border-color: var(--color-border-focus); }
+.focus-dur-custom:focus { border-color: var(--color-border-focus-soft); }
 .focus-hist-wrap { position: relative; display: flex; align-items: center; margin-left: var(--space-2); }
 .focus-hist-btn { position: relative; }
 .focus-hist-btn.active { color: var(--color-accent); }

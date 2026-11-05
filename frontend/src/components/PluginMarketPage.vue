@@ -539,7 +539,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-muted);
 }
-.market-search:focus-within { border-color: var(--color-accent); }
+.market-search:focus-within { border-color: var(--color-border-focus-soft); }
 .search-icon { flex: none; }
 .market-search-input {
   flex: 1; min-width: 0; border: 0; background: transparent; outline: none;
@@ -551,7 +551,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   border: 1px solid var(--color-border); background: var(--color-bg-secondary);
   color: var(--color-text-primary); font: inherit; font-size: 13px;
 }
-.market-cat-select:focus { outline: none; border-color: var(--color-accent); }
+.market-cat-select:focus { outline: none; border-color: var(--color-border-focus-soft); }
 .market-result { font-size: 11px; color: var(--color-text-muted); white-space: nowrap; }
 .market-loading, .market-empty {
   flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;

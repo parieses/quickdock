@@ -52,9 +52,9 @@
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
-  transition: border-color 0.12s, box-shadow 0.12s;
+  transition: border-color 0.12s;
 }
-.settings-search-box:focus-within { border-color: var(--color-accent); box-shadow: var(--ring-accent); }
+.settings-search-box:focus-within { border-color: var(--color-border-focus-soft); }
 .settings-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
 .settings-search-box input {
   flex: 1; min-width: 0;
@@ -279,7 +279,7 @@
   background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px; font-family: inherit;
   outline: none;
 }
-.num-input:focus { border-color: var(--color-accent); }
+.num-input:focus { border-color: var(--color-border-focus-soft); }
 .input-suffix { font-size: 12px; color: var(--color-text-disabled); }
 .btn {
   padding: 6px 14px; border: none; border-radius: var(--radius-sm);
@@ -303,7 +303,7 @@
   border: 1px solid var(--color-border); border-radius: var(--radius-md);
   color: var(--color-text-primary); font-size: 13px; font-family: inherit; outline: none;
 }
-.modal-input:focus { border-color: var(--color-border-focus); box-shadow: 0 0 0 2px var(--color-accent-bg); }
+.modal-input:focus { border-color: var(--color-border-focus-soft); }
 .btn-ghost {
   padding: 6px 14px; border: 1px solid var(--color-border); background: transparent;
   color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 13px; cursor: pointer; font-family: inherit;
@@ -334,7 +334,7 @@
   background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px;
   font-family: inherit; outline: none; box-sizing: border-box;
 }
-.snapshot-input:focus { border-color: var(--color-accent); }
+.snapshot-input:focus { border-color: var(--color-border-focus-soft); }
 .snapshot-create-actions { display: flex; gap: 8px; }
 .snapshot-empty { text-align: center; padding: 32px 0; }
 .snapshot-empty .empty-icon { color: var(--color-text-muted); margin-bottom: 12px; }
@@ -713,7 +713,7 @@
   outline: none; transition: border-color 0.15s;
   font-family: inherit;
 }
-.field-input:focus { border-color: var(--color-accent); box-shadow: 0 0 0 2px var(--color-accent-border); }
+.field-input:focus { border-color: var(--color-border-focus-soft); }
 .field-input::placeholder { color: var(--color-text-disabled); }
 /* Ollama 本机已下载模型快捷选择（SettingsAI 复用） */
 .model-input-wrap { position: relative; display: flex; align-items: center; }

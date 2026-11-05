@@ -631,7 +631,7 @@ onBeforeUnmount(() => {
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); flex-shrink: 0;
 }
-.ai-conv-search:focus-within { border-color: var(--color-accent); }
+.ai-conv-search:focus-within { border-color: var(--color-border-focus-soft); }
 .ai-conv-search-icon { color: var(--color-text-disabled); flex-shrink: 0; }
 .ai-conv-search-input {
   flex: 1; min-width: 0; border: none; outline: none; background: none;

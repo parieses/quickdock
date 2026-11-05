@@ -754,7 +754,7 @@ defineExpose({
 }
 
 .ssh-side-search:focus-within {
-  border-color: var(--color-accent);
+  border-color: var(--color-border-focus-soft);
 }
 
 .ssh-side-search-icon {

@@ -3444,7 +3444,7 @@ onUnmounted(() => {
   color: var(--color-text-primary); font-size: 12px; font-family: inherit; outline: none;
 }
 
-.ai-url-input:focus { border-color: var(--color-accent); }
+.ai-url-input:focus { border-color: var(--color-border-focus-soft); }
 
 .ai-url-ok {
   padding: 0 14px; height: 32px; border: none; border-radius: var(--radius-md);

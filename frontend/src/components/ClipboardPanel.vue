@@ -984,7 +984,7 @@ onUnmounted(() => {
   background: var(--color-surface); color: var(--color-text-secondary); font-size: 13px;
   outline: none; font-family: inherit;
 }
-.search-input:focus { border-color: var(--color-accent); }
+.search-input:focus { border-color: var(--color-border-focus-soft); }
 .search-input::placeholder { color: var(--color-text-disabled); }
 
 .clear-btn {
