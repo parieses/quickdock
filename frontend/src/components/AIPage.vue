@@ -2141,6 +2141,33 @@ function msgStat(m: AIMessage): AIStreamStat | null {
   }
 }
 
+// 会话底部用量汇总：整个对话调用了哪些模型、各几次、共多少 Token。
+// 每条已落库的助手回复就是一次模型调用（按 model 归并），token 取 msgStat 的口径
+// （本次会话内存优先、回落到消息自带字段，刷新/换会话回来仍在）。
+// 只统计「对话记录」里已有的回复：正在生成的那一轮等它落库后再计入，
+// 否则第一条回复流式期间会一直显示「0 Token」，看着像 bug。
+// 不含积分：用量只以 Token 计，不引入任何积分/点数概念。
+const sessionUsage = computed(() => {
+  const map = new Map<string, { calls: number; tokens: number }>()
+  let total = 0
+  for (const m of messages.value) {
+    if (m.role !== 'assistant') continue
+    const model = m.model || t('aiUnknownModel')
+    let e = map.get(model)
+    if (!e) { e = { calls: 0, tokens: 0 }; map.set(model, e) }
+    e.calls += 1
+    const st = msgStat(m)
+    if (st) {
+      e.tokens += st.promptTokens + st.completionTokens
+      total += st.promptTokens + st.completionTokens
+    }
+  }
+  const models = [...map.entries()]
+    .map(([model, v]) => ({ model, calls: v.calls, tokens: v.tokens }))
+    .sort((a, b) => b.tokens - a.tokens || b.calls - a.calls)
+  return { totalTokens: total, models, modelCount: models.length, hasAny: models.length > 0 }
+})
+
 // 毫秒 → 人类可读：<1s 用 ms，否则一位小数的秒
 // 用时格式化：按量级分段，避免长任务一直堆「几百秒」不直观。
 //   <1s   → 「540ms」（短暂任务，精确）
@@ -2753,6 +2780,19 @@ onUnmounted(() => {
         @msg-contextmenu="onMsgContextMenu"
       />
 
+      <!-- 会话用量汇总：整个对话调用了哪些模型、各几次、共多少 Token。
+           不放积分——用量只以 Token 计。置在消息区与输入框之间，始终可见。 -->
+      <div v-if="sessionUsage.hasAny" class="ai-session-usage">
+        <span class="ai-su-total">{{ t('aiSessionUsageTotal', { tokens: fmtTokens(sessionUsage.totalTokens) }) }}</span>
+        <span class="ai-su-sep">·</span>
+        <span class="ai-su-models">
+          <template v-for="(e, i) in sessionUsage.models" :key="e.model">
+            <span v-if="i > 0" class="ai-su-sep">·</span>
+            <span class="ai-su-model">{{ e.model }} <em class="ai-su-calls">×{{ e.calls }}</em></span>
+          </template>
+        </span>
+      </div>
+
       <!-- 「回到底部」按钮由 AiMessageList 自己渲染：它跟着消息容器的滚动状态走，
            放在父组件里要靠事件回传，反而多一层状态。 -->
 
@@ -2991,6 +3031,27 @@ onUnmounted(() => {
   position: relative; flex-shrink: 0; display: flex; flex-direction: column;
   padding: 0 var(--space-6);
 }
+
+/* 会话用量汇总：浮在消息区与输入框之间的一行，始终可见。
+   只报 Token 与「哪些模型 × 几次」，不引入积分/点数概念。 */
+.ai-session-usage {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 6px var(--space-6);
+  font-size: 11px;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+  user-select: none;
+  -webkit-user-select: none;
+}
+.ai-su-total { color: var(--color-text-secondary); font-variant-numeric: tabular-nums; }
+.ai-su-sep { color: var(--color-text-disabled); }
+.ai-su-models { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ai-su-model { color: var(--color-text-muted); font-variant-numeric: tabular-nums; }
+.ai-su-calls { font-style: normal; color: var(--color-text-secondary); font-weight: 500; }
 
 /* 与输入框同宽同底边：输入框是 width: var(--ai-column-w) + margin auto。
    绝对定位元素的 100% 是父级的 padding box，比 content box 多左右各一份 padding，

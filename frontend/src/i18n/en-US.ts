@@ -2366,6 +2366,9 @@ export default {
   aiStatTokensCached: 'Tokens {in}/{out} · cache hit {pct}%',
   aiStatCost: 'Cost {c}',
   aiStatToolRounds: '{n} tool rounds',
+  // Session footer summary: which models were used, how many calls each, total tokens. No credits concept.
+  aiUnknownModel: 'Unknown model',
+  aiSessionUsageTotal: 'This session: {tokens} tokens',
   aiExtTitle: 'External MCP servers',
   aiExtDesc: 'Bring tools from other MCP servers into the built-in AI: local commands run as stdio child processes, server URLs go over HTTP. Imported tools get an mcp_server_ prefix and ask for approval on every call.',
   aiExtAdd: 'Add server',

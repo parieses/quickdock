@@ -2375,6 +2375,9 @@ export default {
   // 工具轮次：和 token 是同一笔钱的两个侧面（查了五轮 vs 空聊五轮），
   // 所以排在 token 后面。{n} 是轮数，不是工具个数——一轮可并发多个。
   aiStatToolRounds: '{n} 轮工具',
+  // 会话底部汇总：整个对话调用了哪些模型、各几次、共多少 Token。不含积分——用量只以 Token 计。
+  aiUnknownModel: '未知模型',
+  aiSessionUsageTotal: '本会话共 {tokens} Token',
   aiExtTitle: '外部 MCP 服务器',
   aiExtDesc: '把其它 MCP server 的工具接进内置 AI：本地命令按 stdio 起子进程，服务器地址走 HTTP。接入的工具名带 mcp_服务器名_ 前缀，默认每次调用前询问。',
   aiExtAdd: '添加服务器',
