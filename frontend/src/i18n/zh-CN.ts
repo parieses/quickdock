@@ -1854,6 +1854,7 @@ export default {
   pluginNeedInput: '该命令需要输入参数，请重新输入后执行',
   pluginDetach: '分离为独立窗口',
   pluginOpen: '打开',
+  pluginDblclickOpen: '双击打开插件',
   pluginBack: '返回插件列表',
   pluginCalcTitle: '计算器',
   pluginCalcEval: '执行计算',

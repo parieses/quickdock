@@ -1850,6 +1850,7 @@ export default {
   pluginResultCopied: 'Result copied',
   pluginDetach: 'Detach to Window',
   pluginOpen: 'Open',
+  pluginDblclickOpen: 'Double-click to open plugin',
   pluginBack: 'Back to Plugin List',
   pluginCalcTitle: 'Calculator',
   pluginCalcEval: 'Evaluate',

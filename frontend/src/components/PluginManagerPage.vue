@@ -488,7 +488,16 @@ function fileToBase64(file: File): Promise<string> {
 // ---- Emits ----
 const emit = defineEmits<{ (e: 'navigate-plugin', pluginId: string): void }>()
 
+// 打开插件的唯一判据：有界面 + 未禁用 + 进程就绪/运行中 + 没有别的操作正在跑。
+// 悬停按钮与双击卡片共用同一个函数，两个入口才不会各自漂移出不同的可用条件。
+function canOpenPlugin(p: PluginInfo): boolean {
+  return !!p.hasFrontend && !p.disabled
+    && (p.status === 'running' || p.status === 'registered')
+    && !operating.value.has(p.id)
+}
+
 function openPluginPage(p: PluginInfo) {
+  if (!canOpenPlugin(p)) return
   // 在新窗口中打开插件前端页面
   ShowPluginWindow(p.id).then(() => {
     // 首次打开 → 清除「新」角标
@@ -502,6 +511,15 @@ function openPluginPage(p: PluginInfo) {
   }).catch(e => {
     toast?.error?.(t('pluginOpFailed') + ': ' + getErrorMessage(e))
   })
+}
+
+// 双击卡片打开插件窗口（等价于悬停按钮里的「打开」）。
+// 按钮区的 click 各有语义（开关/终止/卸载），但 dblclick 仍会冒泡到卡片：
+// 不拦的话「连点两下停用」会顺带弹出一个插件窗口。
+function onCardDblClick(e: MouseEvent, p: PluginInfo) {
+  if ((e.target as HTMLElement | null)?.closest('.card-actions-top')) return
+  if (!canOpenPlugin(p)) return
+  openPluginPage(p)
 }
 
 // ---- 状态辅助 ----
@@ -694,7 +712,9 @@ onUnmounted(() => {
       <div
         v-for="p in filteredPlugins"
         :key="p.id"
-        :class="['plugin-card', { 'card-running': p.status === 'running' }]"
+        :class="['plugin-card', { 'card-running': p.status === 'running', 'card-openable': canOpenPlugin(p) }]"
+        :title="canOpenPlugin(p) ? t('pluginDblclickOpen') : undefined"
+        @dblclick="onCardDblClick($event, p)"
       >
         <!-- 「新」角标 -->
         <span v-if="newFlags.has(p.id)" class="new-badge">新</span>
@@ -721,7 +741,7 @@ onUnmounted(() => {
           <button
             v-if="p.hasFrontend"
             class="action-top-btn btn-open-top"
-            :disabled="(p.status !== 'running' && p.status !== 'registered') || p.disabled || operating.has(p.id)"
+            :disabled="!canOpenPlugin(p)"
             @click.stop="openPluginPage(p)"
             :title="(p.status === 'running' || p.status === 'registered') ? t('pluginOpen') : t('pluginNotRunning')"
           >
@@ -949,6 +969,8 @@ onUnmounted(() => {
 }
 .plugin-card:hover { border-color: var(--color-accent); box-shadow: 0 0 0 1px var(--color-accent-bg); }
 .plugin-card.card-running { border-color: var(--color-success-border); }
+/* 能双击打开的卡片给出可点光标；禁用 / 无界面 / 未就绪的保持默认光标 */
+.plugin-card.card-openable { cursor: pointer; }
 
 /* 「新」角标 */
 .new-badge {
