@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -9,8 +10,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
-	_ "modernc.org/sqlite"
+	"quickdock/internal/logger"
+
+	"modernc.org/sqlite"
 )
 
 // dbConn 接口化 *sql.DB，方便测试替换
@@ -245,6 +249,84 @@ type Database struct {
 // 读操作可并发，池大小决定并发读的上限（超过则排队，不会失败）。
 const dbMaxOpenConns = 4
 
+// WAL 初始化遇到 1546 时的重试参数。
+//
+// 1546 = SQLITE_IOERR_TRUNCATE（SQLITE_IOERR | 6<<8）。SQLite 3.50.0 起，Windows 上
+// 打开 WAL 库的第一个连接拿到 -shm 的 DMS 独占锁后会把它截断为 0；若此时另一个
+// 进程仍映射着 -shm（典型：托盘重启时旧实例刚退出，Windows 先放句柄和锁、后解除
+// 内存映射），SetEndOfFile 报 ERROR_USER_MAPPED_FILE(1224)，驱动直接返回 1546 而不是
+// 等待。上游给的临时方案就是「遇到 1546 重试打开最多 3 秒」，这里照做：不重试的话，
+// 这种几十毫秒~几秒的竞态会让 ServiceStartup 直接失败、弹「QuickDock 无法启动」，
+// 用户只能手工结束占用进程。
+const (
+	sqliteIOErrTruncate = 1546
+	walRetryTimeout     = 3 * time.Second
+	walRetryInterval    = 100 * time.Millisecond
+)
+
+// isTransientWALError 只认 1546：其它 IOERR（真磁盘故障、目录不可写、文件损坏）
+// 重试也救不回来，应立刻失败并保留原始错误，别把真实故障藏进 3 秒延迟里。
+//
+// 驱动返回的 *sqlite.Error.Code() 就是扩展码（日志里的 "disk I/O error (1546)" 正是
+// 由它格式化出来的）。文本兜底留给 DSN pragma 建连路径：那条路径上错误可能被包一层，
+// 拿不到类型时仍能识别，避免重试被静默跳过。
+func isTransientWALError(err error) bool {
+	var se *sqlite.Error
+	if errors.As(err, &se) {
+		return se.Code() == sqliteIOErrTruncate
+	}
+	return strings.Contains(err.Error(), "(1546)")
+}
+
+// openWALOnce 建一条连接并设 WAL，失败时返回失败的阶段名供上层拼错误信息。
+//
+// 为什么每轮都要重新 sql.Open：失败的连接可能已被放回连接池，复用它只会重复命中
+// 同一份未释放的 -shm 状态；换一条新连接才会重新走 DMS 锁与截断。DSN 里的
+// journal_mode(WAL) 随建连执行，所以重试必须覆盖「建连 + 显式 PRAGMA」整个过程，
+// 不能只重试最后那条 Exec。
+func openWALOnce(dsn string) (*sql.DB, string, error) {
+	conn, err := sql.Open("sqlite", dsn)
+	if err != nil {
+		return nil, "打开数据库", err
+	}
+	conn.SetMaxOpenConns(dbMaxOpenConns)
+
+	// 显式连通性检查：sql.Open 是惰性的，DSN 错误（如路径特殊字符导致解析失败）
+	// 要在这里就暴露，而不是留到第一次业务查询才炸。
+	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		_ = conn.Close()
+		return nil, "设置 WAL 模式", err
+	}
+	return conn, "", nil
+}
+
+// openWithWALRetry 正常路径只走一次；只有 1546 才进入有限重试。
+func openWithWALRetry(path, dsn string) (*sql.DB, error) {
+	deadline := time.Now().Add(walRetryTimeout)
+	for attempt := 1; ; attempt++ {
+		conn, stage, err := openWALOnce(dsn)
+		if err == nil {
+			if attempt > 1 {
+				logger.W("[db] WAL 初始化遇到 1546，第 %d 次尝试成功 path=%s", attempt, path)
+			}
+			return conn, nil
+		}
+		// 下次等待会越过 deadline 就收手：总等待不超过 walRetryTimeout。
+		if !isTransientWALError(err) || time.Now().Add(walRetryInterval).After(deadline) {
+			// 非 1546 的错误沿用原来的文案，别让日志格式无谓变化；只有重试耗尽
+			// 才补上次数，方便从一条日志看出「等了 3 秒仍被占用」。
+			if attempt > 1 {
+				return nil, fmt.Errorf("%s失败（1546 重试 %d 次仍失败）: %w", stage, attempt-1, err)
+			}
+			return nil, fmt.Errorf("%s失败: %w", stage, err)
+		}
+		if attempt == 1 {
+			logger.W("[db] %s遇到 1546（-shm 可能仍被上一实例映射），开始重试 path=%s 最长=%v", stage, path, walRetryTimeout)
+		}
+		time.Sleep(walRetryInterval)
+	}
+}
+
 // Open 创建或打开指定路径的 SQLite 数据库
 func Open(path string) (*Database, error) {
 	dir := filepath.Dir(path)
@@ -261,17 +343,9 @@ func Open(path string) (*Database, error) {
 	// 活动流水都是「一条 INSERT 一次写事务」，默认 FULL 下每条都付一次磁盘同步。
 	// 代价仅是掉电时可能丢最后几条已提交事务（不是损坏），对本地桌面工具可接受。
 	dsn := path + "?_pragma=journal_mode(WAL)&_pragma=busy_timeout(5000)&_pragma=foreign_keys(1)&_pragma=synchronous(NORMAL)"
-	conn, err := sql.Open("sqlite", dsn)
+	conn, err := openWithWALRetry(path, dsn)
 	if err != nil {
-		return nil, fmt.Errorf("打开数据库失败: %w", err)
-	}
-
-	conn.SetMaxOpenConns(dbMaxOpenConns)
-
-	// 显式连通性检查：sql.Open 是惰性的，DSN 错误（如路径特殊字符导致解析失败）
-	// 要在这里就暴露，而不是留到第一次业务查询才炸。
-	if _, err := conn.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		return nil, fmt.Errorf("设置 WAL 模式失败: %w", err)
+		return nil, err
 	}
 
 	db := &Database{conn: conn, path: path}
