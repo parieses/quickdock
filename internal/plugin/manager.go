@@ -1036,6 +1036,14 @@ func (m *Manager) UninstallPlugin(id string) error {
 	m.UnloadPlugin(id)
 	if pid > 0 {
 		killProcessTree(pid)
+		// Kill/TerminateProcess 是异步的：reapProcess 里 cmd.Process.Wait 在后台
+		// goroutine 回收，主流程可能早于进程真正退出就走到 RemoveAll，此时 exe
+		// 文件句柄仍被占用 → Windows 上 unlinkat 报 "Access is denied"。
+		// 这里同步等待进程退出（最多 3s）再进入删除重试循环，消除「杀进程」与
+		// 「删目录」之间的竞态；超时也不阻塞卸载，交给下面的重试循环兜底。
+		if !sysutil.WaitProcessExit(pid, 3*time.Second) {
+			logger.W("卸载 %s：等待进程 %d 退出超时，仍继续尝试删除", id, pid)
+		}
 	}
 
 	dir := filepath.Join(m.pluginsDir, id)

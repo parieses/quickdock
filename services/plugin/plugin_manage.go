@@ -95,9 +95,20 @@ func (p *PluginService) DisablePlugin(id string) *services.ApiResult {
 
 // KillPlugin 强制终止插件进程（进程树 + 目录内孤儿），并停止其自动重启。
 // 插件管理页「停止进程」用：插件锁住目录导致更新/卸载失败时，一键结束。
+//
+// 窗口生命周期跟着进程走：插件窗口只是后端进程的一个视图，进程被杀掉后还留着窗口
+// 就是「页面在、进程无」的空壳，用户看到的仍是插件没关。先同步 Close 再杀进程，
+// 顺序与 ForceClosePluginWindow 一致（后者是 Close + 后台 Kill）——杀目录孤儿进程
+// 可能耗时秒级，先关窗口体感即时。未开窗口时 Close 是 no-op；WindowClosing 钩子只发
+// best-effort 的 window:closed 通知，不会反过来再终止一次进程。
+// 只在这里关：插件窗口「强制关闭」按钮走 ForceClosePluginWindow（它自己已 Close），
+// 且它调的是 Manager.KillPlugin，不受此处影响，也不会误关用户刚重开的窗口。
 func (p *PluginService) KillPlugin(id string) *services.ApiResult {
 	if p.App.PluginMgr == nil {
 		return services.FailMsg("plugin manager not initialized")
+	}
+	if p.App.PluginWindowMgr != nil {
+		p.App.PluginWindowMgr.Close(id)
 	}
 	if err := p.App.PluginMgr.KillPlugin(id); err != nil {
 		return services.Fail(err)
@@ -147,7 +158,10 @@ func (p *PluginService) UninstallPlugin(id string, keepData bool) *services.ApiR
 	if p.App.PluginMgr == nil {
 		return services.FailMsg("plugin manager not initialized")
 	}
-	p.App.PluginMgr.UnloadPlugin(id)
+	// 注：不在此处单独调用 UnloadPlugin(id)。Manager.UninstallPlugin 内部会先记录进程
+	// PID、再 UnloadPlugin（停进程并同步等待其真正退出）后才删目录。若这里先 UnloadPlugin，
+	// 实例已被移出 m.plugins，Manager 端拿不到 PID → 无法等待进程退出 → Windows 上残留
+	// 的 exe 句柄会让目录删除报 "Access is denied"。
 	if err := p.App.PluginMgr.UninstallPlugin(id); err != nil {
 		return services.Fail(err)
 	}
