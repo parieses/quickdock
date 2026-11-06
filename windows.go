@@ -4,6 +4,7 @@ import (
 	"os"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
@@ -70,35 +71,85 @@ var disabledFeatures = []string{
 
 // ===== 窗口材质（Mica / Acrylic）=====
 
+// floatingWindowBackdropEnabled 控制四个无边框浮窗（剪贴板 / 笔记 / 命令面板 /
+// 窗口管理）是否套系统材质（Acrylic）。**开启**，配套措施有三条，缺一不可：
+//
+//  1. 首次唤起等首帧：浮窗是懒创建的，第一次按热键才建 WebView2 + 加载整套 SPA。
+//     窗口是 Translucent（chromium 底色 (0,0,0,0)），若建完立刻 Show，DWM 会先
+//     合成一帧只有 Acrylic、没有内容的空窗。newFloatingWindowOnMainThread 里的
+//     waitFloatingFirstPaint 把首次 Show 推到首帧画完（超时兜底，见该函数注释）。
+//  2. 隐藏系统红 ×：Win11 会给「设了 DWM 材质的 Frameless 窗口」画回原生关闭
+//     按钮，stripGhostCaptionButtons 移除 WS_SYSMENU（代价：浮窗不再响应 Alt+F4）。
+//  3. 前端 App.vue 按 effective 给浮窗也加 .qd-backdrop，根背景转透明让材质透出；
+//     否则只露出 chromium 的实色底，是半吊子样式。
+//
+// 仍需如实说明的边界：Wails v3 的 hide() 除了 SW_HIDE 还会调 chromium.Hide()，
+// show() 先 SW_SHOW 容器、再 chromium.Show()。因此**每次** Hide/Show 复用时
+// WebView2 合成层都会断开重连，DWM 有可能再出 1 帧（约 16ms）空档 —— 这是
+// 框架语义，不是 100~300ms 的加载等待，首帧门控治不了它。绕开 chromium.Hide()
+// 会重新引入 Wails 特意修过的 DirectComposition 输入死区（桌面右键点不动），
+// 所以这里不动 Hide 语义。若实机每次唤起都能看到闪，只能二选一：浮窗不套材质，
+// 或在 Show 前把窗口短暂放到屏幕外预热一帧再移回可见位置。
+const floatingWindowBackdropEnabled = true
+
+// firstPaintWaitTimeout 是「浮窗首次唤起等首帧」的兜底上限。
+// WebView2 新建 + SPA 首屏渲染实测 100~300ms；runtime ready 事件到了就立刻放行，
+// 超时也必须放行，否则任何加载异常都会表现为「按了热键没反应」（项目踩过这个坑）。
+const firstPaintWaitTimeout = 300 * time.Millisecond
+
+// firstPaintSettle 是 runtime ready 之后额外留的一点点余量：
+// wails:runtime:ready 只说明 Wails 注入完成，Vue 挂载与首个 paint 还在随后一两帧里。
+const firstPaintSettle = 40 * time.Millisecond
+
+// skipFirstPaintWait 供「启动预建」路径使用：预建跑在主线程的 InvokeAsync 回调里，
+// 在那里等 WindowRuntimeReady 会把消息循环堵死（该事件的关闭恰恰依赖消息循环派发），
+// 只能走满 300ms 超时，表现为启动后主窗口卡一下。预建本来就不 Show，不需要门控。
+// 只在预建回调执行期间置位，其余路径（热键首次唤起，跑在 goroutine）正常等待。
+var skipFirstPaintWait atomic.Bool
+
+// waitFloatingFirstPaint 只在窗口「懒创建」那一次被调用，等 WebView2 把首帧画出来
+// 再让调用方 Show()。Hide/Show 复用不会再走这里，所以后续唤起**没有**额外等待。
+//
+// 用 Wails 的 WindowRuntimeReady（前端 wails:runtime:ready 触发）而不是自定义前端
+// 事件：Go 侧内部事件，不依赖 bindings 是否重新生成，也不会因为浮窗组件还没订阅
+// 而漏掉。事件在 NewWithOptions 返回后注册，理论上极快导航可能抢先触发，故必须
+// 配 300ms 超时；即使漏事件，最坏也只是首次多等 300ms，不会卡住热键。
+func waitFloatingFirstPaint(win *application.WebviewWindow) {
+	if win == nil || !floatingWindowBackdropEnabled ||
+		platform.EffectiveWindowBackdrop() == platform.BackdropOff ||
+		skipFirstPaintWait.Load() {
+		return
+	}
+	ready := make(chan struct{})
+	var once sync.Once
+	win.OnWindowEvent(events.Common.WindowRuntimeReady, func(*application.WindowEvent) {
+		once.Do(func() { close(ready) })
+	})
+	select {
+	case <-ready:
+		time.Sleep(firstPaintSettle)
+	case <-time.After(firstPaintWaitTimeout):
+	}
+}
+
 // applyWindowBackdrop 按本次启动生效的材质给窗口选项套上系统半透明材质。
 //
 // 生效值由 main() 里的 platform.ResolveWindowBackdrop() 判定并缓存：Win10 /
 // 非 Windows / 设置「关」时恒为 off，本函数直接返回，窗口保持原来的
 // BackgroundTypeSolid + 实色 —— 这条路径与加材质功能之前完全一致。
 //
-// floating=true 的浮窗（剪贴板/笔记/命令面板/窗口管理）统一用 Acrylic：它们是
-// Frameless、短暂停留、浮在其它窗口之上的面板，Acrylic 的模糊比 Mica 的
-// 「桌面壁纸着色」更贴合；主窗口与 SSH 这类常驻窗口用用户选的档位。
+// 主窗口 / SSH / 四个浮窗 / 插件独立窗口**统一跟随用户选的档位**
+// （mica / acrylic / tabbed）；档位映射只有一份，在 platform.ApplyWindowBackdrop。
+// floating 参数只用于 floatingWindowBackdropEnabled 这个总开关。
 //
 // 这里是**保留式赋值** opts.Windows.BackdropType，不整字段覆盖 WindowsWindow：
 // 浮窗的 HiddenOnTaskbar 等属性由 applyWindowPlatformOptions 单独设置，
 // 整字段覆盖会把它们冲掉（旧的 applyWindowPlatformOptions 正是这么写的）。
 func applyWindowBackdrop(opts *application.WebviewWindowOptions, floating bool) {
-	mode := platform.EffectiveWindowBackdrop()
-	if mode == platform.BackdropOff {
+	if floating && !floatingWindowBackdropEnabled {
 		return
 	}
-	bt := application.Acrylic
-	if !floating {
-		switch mode {
-		case platform.BackdropMica:
-			bt = application.Mica
-		case platform.BackdropTabbed:
-			bt = application.Tabbed
-		}
-	}
-	opts.BackgroundType = application.BackgroundTypeTranslucent
-	opts.Windows.BackdropType = bt
+	platform.ApplyWindowBackdrop(opts)
 }
 
 // ===== 浮窗位置记忆（kvstore Service 持久化，main.go 注入）=====
@@ -279,6 +330,8 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "clipboard")
 	win := app.Window.NewWithOptions(opts)
+	stripGhostCaptionButtons(win)
+	keepBackdropOnShow(win)
 	win.Hide()
 	// 剪贴板比其它浮窗多一步：隐藏前要通知前端落盘，否则剪贴板内容会丢。
 	hide := hideFloatingWindow(win, "clipboard", &windowFlags.Clipboard)
@@ -315,6 +368,8 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "note")
 	win := app.Window.NewWithOptions(opts)
+	stripGhostCaptionButtons(win)
+	keepBackdropOnShow(win)
 	win.Hide()
 	hide := hideFloatingWindow(win, "note", &windowFlags.Note)
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
@@ -337,15 +392,21 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 //  3. 显示在任务栏（显式 HiddenOnTaskbar:false，不调 applyWindowPlatformOptions）。
 //     它是主窗口之外唯一需要 Alt+Tab / 点击任务栏切回的窗口；隐藏会让用户无从下手。
 //
-// 关闭 = 销毁，下次点击重新创建（与 DSH 窗口一致）。早期版本把关闭拦成 Hide，
-// 理由是「窗口留着，滚动缓冲原样还在，比销毁再恢复更直接」；代价是 WebView、
-// xterm 实例、以及整棵 Vue 子树在用户关掉窗口之后一直留在内存里——SSH 页是
-// 常驻重页面，这笔账不小。现在改成销毁：
-//   - 会话本身在 Go 侧（internal/sshx 的 Manager），关窗不会断连；
-//   - 窗口重建后 SshPage 挂载时 restoreTabs() 会按 sessionId 把最近开着的终端
-//     接回来（滚动缓冲由后端回放补齐），所以「重建」不等于「从头连一遍」。
+// 关闭 = 隐藏复用（与四个浮窗一致），不是销毁。
 //
-// 真退出（托盘退出/更新重启）时窗口随进程消失，不走清引用这条路。
+// 曾经为省内存改成「关闭即销毁」：SSH 页是常驻重页面，WebView / xterm 实例 /
+// 整棵 Vue 子树一直留着确实占内存；会话本身在 Go 侧 Manager、关窗不断连，重建时
+// restoreTabs() 按 sessionId 接回终端（滚动缓冲由后端回放补齐），看起来代价可控。
+// 但实测每次关掉再点开都要重新建 WebView2 + 重新加载整个 SPA + 重放会话，
+// 侧栏得转圈一两秒（App.vue 的 sshOpening 就是为盖住这段空窗期加的），
+// 比浮窗 Hide 复用的秒开差得明显。按用户反馈改回 Hide 复用：
+//   - 包级引用不清空，GetSshWindow() 直接返回既有窗口 Show + Focus；
+//   - Vue 不会重新 mount，滚动缓冲和终端状态原样保留，连回放都省了；
+//   - 清单 / 会话状态靠 OpenSshWindow() 每次唤回时发的 quickdock:ssh:shown 刷新。
+//
+// 代价就是上面那笔常驻内存；进程退出时窗口随进程一起释放。
+//
+// 真退出（托盘退出 / 更新重启）时 hook 放行销毁，不做 Cancel。
 func initSshWindow(app *application.App) *application.WebviewWindow {
 	opts := application.WebviewWindowOptions{
 		Title:  "快启坞 - SSH",
@@ -360,6 +421,9 @@ func initSshWindow(app *application.App) *application.WebviewWindow {
 		Windows:          application.WindowsWindow{HiddenOnTaskbar: false},
 		URL:              "/#/ssh",
 		Zoom:             uiZoom,
+		// 建窗即隐藏，理由同 applyWindowPlatformOptions：SSH 也用保存的位置，
+		// 让 Wails 先按可见创建会在屏幕内闪一帧再被 Hide()。
+		Hidden: true,
 	}
 	// SSH 与插件/DSH 窗口不同：它加载的是本应用主 SPA（App.vue 会跑），所以也要
 	// 套同一套材质，否则前端加了 qd-backdrop、窗口却还是实色，两边对不上。
@@ -373,23 +437,20 @@ func initSshWindow(app *application.App) *application.WebviewWindow {
 		x, y := win.Position()
 		saveWinPos("ssh", x, y)
 	})
-	// 关闭必须用 RegisterHook，不能用 OnWindowEvent。
-	//
+	// 关闭必须用 RegisterHook，不能用 OnWindowEvent：Wails 建窗时自注册的
+	// WindowClosing 监听会无条件销毁窗口，普通监听器并发派发时 Cancel() 常常晚一步。
 	// 根因分析见 hideOnCloseHook 的注释（四个浮窗是同一个 bug）。
 	//
-	// 这里刻意**不**复用 hideOnCloseHook：那个钩子会 event.Cancel() 并把窗口藏起来，
-	// 而 SSH 要的是真正销毁（见函数头注释）。不调 Cancel 即放行销毁；
-	// 同时在销毁前把包级引用清空——清晚了，销毁完成到下一次点击之间若有调用拿到
-	// getter，会把一个已经失效的窗口 Show 出去（无窗口可显示，表现为点了没反应）。
+	// 没直接复用 hideOnCloseHook，只因为它不会在真退出时保存位置；语义与浮窗一致：
+	// Cancel 关闭 + Hide，**不清空 sshWin 引用**（下次秒开就靠它）。
 	win.RegisterHook(events.Common.WindowClosing, func(event *application.WindowEvent) {
 		x, y := win.Position()
 		saveWinPos("ssh", x, y)
 		if trayQuitRequested.Load() {
-			return // 真退出：进程即将结束，清引用没有意义（也不必和退出路径抢锁）
+			return // 真退出：放行销毁，进程即将结束
 		}
-		sshWinLock.Lock()
-		sshWin = nil
-		sshWinLock.Unlock()
+		event.Cancel()
+		win.Hide()
 	})
 	return win
 }
@@ -409,6 +470,8 @@ func initWinmgrWindow(app *application.App) *application.WebviewWindow {
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "winmgr")
 	win := app.Window.NewWithOptions(opts)
+	stripGhostCaptionButtons(win)
+	keepBackdropOnShow(win)
 	win.Hide()
 	hide := hideFloatingWindow(win, "winmgr", &windowFlags.Winmgr)
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
@@ -435,6 +498,8 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "palette")
 	win := app.Window.NewWithOptions(opts)
+	stripGhostCaptionButtons(win)
+	keepBackdropOnShow(win)
 	win.Hide()
 	win.OnWindowEvent(events.Common.WindowLostFocus, func(event *application.WindowEvent) {
 		x, y := win.Position()
@@ -508,6 +573,11 @@ func noteWindowGetter(app *application.App) func() *application.WebviewWindow {
 // 浮窗」绕开，代价是每个渲染进程空闲也常驻 30–80MB。改成按需创建后由这里补上
 // 线程约束：InvokeSyncWithResult 会把创建投递到主线程并同步等结果；若调用方本来
 // 就在主线程，Wails 的 dispatchOnMainThread 会直接执行，不会自己等自己死锁。
+//
+// 建窗后调 waitFloatingFirstPaint：只有「窗口对象从无到有」这一次会经过这里，
+// 让首次 Show 落在 WebView2 首帧之后（材质开启时）。窗口复用期间的 Hide/Show
+// 不会再创建窗口，也就不会再有任何等待。SSH 同样懒创建，顺带受益于首帧门控，
+// 它首次打开慢本来也有一部分花在 SPA 首屏上。
 func newFloatingWindowOnMainThread(
 	init func(*application.App) *application.WebviewWindow,
 	app *application.App,
@@ -515,9 +585,11 @@ func newFloatingWindowOnMainThread(
 	if app == nil {
 		return nil
 	}
-	return application.InvokeSyncWithResult(func() *application.WebviewWindow {
+	win := application.InvokeSyncWithResult(func() *application.WebviewWindow {
 		return init(app)
 	})
+	waitFloatingFirstPaint(win)
+	return win
 }
 
 // InjectWindowGetters 将延迟窗口创建函数注入到 AppService（由 main.go 调用）

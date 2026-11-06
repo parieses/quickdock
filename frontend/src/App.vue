@@ -253,9 +253,13 @@ onMounted(async () => {
   // 改了但还没重启时，窗口仍是实色；此时若先把 CSS 变透明，会露出一层
   // 没有材质的白/黑底，比不改还难看。Win10 / 未启用时 effective 恒为 off，
   // 这个 class 不会被加上，下面那组半透明 token 也就完全不生效。
+  // 浮窗（剪贴板/Ctrl+K 等）同样按 effective 判断：它们也套 Acrylic，必须一起把
+  // 根背景转透明，否则只露出 chromium 的实色底。两边由同一个进程级生效值驱动，
+  // 见 windows.go 的 floatingWindowBackdropEnabled / applyWindowBackdrop。
   try {
     const st = unwrap<{ effective?: string }>(await GetWindowBackdrop())
-    document.documentElement.classList.toggle('qd-backdrop', !!st?.effective && st.effective !== 'off')
+    const backdropOn = !!st?.effective && st.effective !== 'off'
+    document.documentElement.classList.toggle('qd-backdrop', backdropOn)
   } catch (e) { logErr('App.windowBackdrop', e) }
   // 读取已保存的语言设置
   try {
@@ -542,12 +546,14 @@ body {
 .ssh-standalone {
   height: 100vh; width: 100vw; overflow: hidden;
   background: var(--color-bg-primary);
-  /* 窗口首次创建并挂载时播一次入场动画（窗口复用 Hide/Show 不重挂载，故不会每次重播） */
+  /* 窗口首次创建并挂载时播一次入场动画（窗口复用 Hide/Show 不重挂载，故不会每次重播）。
+     只做位移、不淡入：`both` 会把 from 样式提前套上，原来的 opacity:0 会让窗口刚出现
+     时整页先全透明一帧再淡入，在 Translucent 材质窗口上就是「又闪一下空白 / 感觉慢」。 */
   animation: ssh-win-in 0.28s ease-out both;
 }
 @keyframes ssh-win-in {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
+  from { transform: translateY(10px); }
+  to { transform: translateY(0); }
 }
 
 .plugin-standalone-empty {

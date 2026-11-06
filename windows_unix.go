@@ -15,3 +15,7 @@ func foregroundIsOwnedModal() bool { return false }
 func applyWindowPlatformOptions(opts *application.WebviewWindowOptions) {
 	applyWindowBackdrop(opts, true)
 }
+
+// keepBackdropOnShow 非 Windows 下无 DWM 材质需要运行期重写，是 no-op。
+// 保留同名函数是为了让 windows.go 的调用点不必加平台分支。
+func keepBackdropOnShow(win *application.WebviewWindow) {}

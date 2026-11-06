@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <meta content="width=device-width, initial-scale=1.0" name="viewport" />
     <title>快启坞 · 插件</title>
+    <!-- 首屏底色：与 index.html 同理。plugin-entry.ts 及其动态 import 完成前，
+         WebView2 会先画一帧默认白底；开启系统材质后窗口是 Translucent（chromium
+         背景被强制设成 (0,0,0,0)），那一帧就是透明窗口 + 材质，看起来像「白闪」。
+         内联样式让第一帧就是主题色，Vue 挂载后由 plugin-entry.ts 的 .qd-backdrop
+         把根背景转透明，材质才透出来。取值必须与 style.css 的 --color-bg-primary
+         一致（#0c0e13 / #f6f7f9），否则首帧与页面底色会有色差。 -->
+    <style>
+      html, body { margin: 0; height: 100%; background-color: #0c0e13; }
+      @media (prefers-color-scheme: light) {
+        html, body { background-color: #f6f7f9; }
+      }
+    </style>
+    <script>
+      // 同 index.html：保存的主题要等 GetValue('theme') 异步返回才定稿，
+      // 先按系统偏好同步落一个 data-theme，避免浅色系统看到「浅 → 深 → 浅」。
+      try {
+        document.documentElement.setAttribute('data-theme',
+          window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

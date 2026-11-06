@@ -9,6 +9,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"quickdock/internal/logger"
+	"quickdock/internal/platform"
 )
 
 // 隐藏窗口后超过该时长仍未再次打开，则回收 WebView2 渲染进程（释放内存）。
@@ -58,14 +59,15 @@ func (m *PluginWindowManager) SetMainWindow(w *application.WebviewWindow) {
 	m.mainWindow = w
 }
 
-// pluginWindowBackground 返回与主题匹配的底色：深 #0f1116 / 浅 #f5f6f8。
-// 必须与 style.css 的 --color-bg-primary 同值，否则窗口首帧会在内容渲染前
-// 闪出一块比页面更深/更浅的底（用户看到的是"窗口底色和内容不是一个色"）。
+// pluginWindowBackground 返回与主题匹配的底色：深 #0c0e13 / 浅 #f6f7f9。
+// 必须与 style.css 的 --color-bg-primary 同值、也与 plugin.html 的内联首屏底色
+// 同值，否则窗口首帧会在内容渲染前闪出一块色差。只在**未套材质**时可见：
+// 套了材质（Translucent）后 Wails 会把 chromium 底色强制设成 (0,0,0,0)。
 func pluginWindowBackground(dark bool) application.RGBA {
 	if dark {
-		return application.RGBA{Red: 15, Green: 17, Blue: 22, Alpha: 255}
+		return application.RGBA{Red: 12, Green: 14, Blue: 19, Alpha: 255}
 	}
-	return application.RGBA{Red: 245, Green: 246, Blue: 248, Alpha: 255}
+	return application.RGBA{Red: 246, Green: 247, Blue: 249, Alpha: 255}
 }
 
 // SetDarkMode 记录 App 主题并应用到所有已存在的插件窗口底色。
@@ -188,7 +190,7 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 	if minH > h {
 		minH = h
 	}
-	win := m.app.Window.NewWithOptions(application.WebviewWindowOptions{
+	opts := application.WebviewWindowOptions{
 		Title:            "快启坞 - " + title,
 		Width:            w,
 		Height:           h,
@@ -203,7 +205,18 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: !showInTaskbar,
 		},
-	})
+	}
+	// 与主窗口 / SSH / 浮窗共用同一档位（映射只有 platform.ApplyWindowBackdrop 一份）。
+	// 套上后窗口是 Translucent，plugin-entry.ts 再把 HTML 根背景转透明，材质才透得出来；
+	// 「关」或系统不支持时返回 false，仍是上面的实色底。
+	platform.ApplyWindowBackdrop(&opts)
+	win := m.app.Window.NewWithOptions(opts)
+	// 无边框窗口 + 系统材质会被 Win11 画回原生关闭按钮（红 ×），去掉它。
+	// 插件窗口自带 pw-btn-close，去掉系统菜单不影响关闭；未套材质时是 no-op。
+	platform.StripGhostCaptionButtons(uintptr(win.NativeWindow()))
+	// 无边框窗口每次激活，Wails 都会重调 DwmExtendFrameIntoClientArea 补圆角，
+	// 那之后 DWM 材质会失效（窗口退回纯色）。挂一次性监听，显示/激活后写回去。
+	platform.KeepBackdropOnShow(win)
 	// 用户点击关闭按钮 → 真正销毁窗口，并从注册表删除。新模型：关闭窗口只销毁视图，
 	// 不杀插件后端（后端常驻后台运行，下次打开窗口直接复用）；状态保持 running。
 	win.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {

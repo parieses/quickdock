@@ -4,6 +4,28 @@
     <meta charset="UTF-8"/>
     <meta content="width=device-width, initial-scale=1.0" name="viewport"/>
     <title>快启坞 · QuickDock</title>
+    <!-- 首屏底色：main.ts 及其动态 import 下载/解析完成前，WebView2 会先画一帧
+         默认白底；开启系统材质后窗口是 Translucent，chromium 背景被强制设成
+         (0,0,0,0)，那一帧就变成透明窗口 + Acrylic —— 也就是浮窗「先闪一下空白」。
+         内联样式让第一帧就是主题色，不依赖任何 JS/CSS 加载；Vue 挂载后由
+         style.css 接管（.qd-backdrop 下再转透明把材质放出来）。
+         主题存在后端需异步读取，这里只能按系统偏好兜底；手动选浅色但系统是深色
+         的用户会先看到一瞬深底再切浅，仍远好过透明/白闪。 -->
+    <style>
+      html, body { margin: 0; height: 100%; background-color: #0c0e13; }
+      @media (prefers-color-scheme: light) {
+        html, body { background-color: #f6f7f9; }
+      }
+    </style>
+    <script>
+      // 保存的主题要等 GetValue('theme') 异步返回才由 App.vue 定稿。先按系统偏好
+      // 同步落一个 data-theme，否则 style.css 一到就先套 :root 的深色变量，
+      // 浅色系统用户会看到「浅 → 深 → 浅」两次跳变。
+      try {
+        document.documentElement.setAttribute('data-theme',
+          window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

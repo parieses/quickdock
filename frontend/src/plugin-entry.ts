@@ -4,7 +4,7 @@ import { i18n } from './i18n'
 import PluginPage from './components/PluginPage.vue'
 import { Events } from '@wailsio/runtime'
 import { ReportFrontendError } from '../bindings/quickdock/services/diag/diagservice'
-import { GetValue, ApplyTheme } from '../bindings/quickdock/services/appservice'
+import { GetValue, ApplyTheme, GetWindowBackdrop } from '../bindings/quickdock/services/appservice'
 import { unwrap } from './utils/api'
 import { installExternalLinkGuard } from './utils/externalLinks'
 import './style.css'
@@ -59,6 +59,18 @@ GetValue('theme')
     if (saved === 'dark' || saved === 'light' || saved === 'system') applyThemeName(saved)
   })
   .catch(() => {})
+
+// 窗口材质：与 App.vue 同一套判断 —— 只有本次启动**真的**套上了系统材质
+// （effective 非 off）才把根背景转透明让材质透出来。窗口建窗时已按同一档位套上
+// （internal/plugin/window_manager.go 的 platform.ApplyWindowBackdrop），
+// 这里只负责把 CSS 侧对上；否则透明根背景只会露出 chromium 的实色底。
+GetWindowBackdrop()
+  .then((r) => {
+    const st = unwrap<{ effective?: string }>(r)
+    document.documentElement.classList.toggle(
+      'qd-backdrop', !!st?.effective && st.effective !== 'off')
+  })
+  .catch((e) => logErr('plugin-entry.backdrop', e))
 
 // 订阅广播：主窗口切主题时本窗口同步，从而触发 usePluginHost 的 themeObserver，
 // 把新的 theme 重新下发给插件 iframe。

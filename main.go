@@ -217,24 +217,37 @@ func startRenderHeartbeat(app *application.App, quit <-chan struct{}) {
 	}()
 }
 
-// precreateFloatingWindows 是 QD_PRECREATE_WINDOWS=1 时的可选预热路径。
+// precreateFloatingWindows 在主窗口首屏稳定后，把剪贴板 / 命令面板两个浮窗提前建好。
 //
-// 关键不是「要不要预建」，而是「在哪儿建」：三个 WebView2 窗口必须在主线程创建，
-// 又不能挤在 app.Run() 之前拖慢首屏。所以后台 goroutine 先等主窗口跑起来，再逐个
-// 用 InvokeAsync 投递到主线程，中间留出间隔让消息循环处理完用户自己的第一批操作。
-// getter 内部还有 newFloatingWindowOnMainThread，此时已在主线程会直接执行，不会重入。
+// 为什么只预建这两个：它们是热键高频入口（剪贴板热键、Ctrl+K），按下就期望立刻出现，
+// 而懒创建那一次要建 WebView2 + 加载整套 SPA（100~300ms）。代价是常驻两个渲染进程
+// （各 30–80MB）；不想要时设 QD_PRECREATE_WINDOWS=0 退回全部懒创建。
+//
+// 关键不是「要不要预建」，而是「在哪儿建」：WebView2 窗口必须在主线程创建，又不能
+// 挤在 app.Run() 之前拖慢首屏（Wails v3 在主窗口之前创建次级窗口会白屏）。所以后台
+// goroutine 先等主窗口首屏稳定，再逐个用 InvokeAsync 投递到主线程，中间留出间隔让
+// 消息循环处理完用户自己的第一批操作。getter 内部还有 newFloatingWindowOnMainThread，
+// 此时已在主线程会直接执行，不会重入。
+//
+// 预建期间置 skipFirstPaintWait：这些回调就在主线程上，等 WindowRuntimeReady 会把
+// 消息循环堵死（事件本身要靠它派发），只能走满超时，表现为启动后主窗口卡顿。
 func precreateFloatingWindows(svc *services.AppService) {
 	go func() {
 		defer logger.RecoverToLog("precreate-floating-windows")
 		time.Sleep(1500 * time.Millisecond)
 		getters := []func() *application.WebviewWindow{
-			svc.GetClipboardWindow, svc.GetPaletteWindow, svc.GetNoteWindow,
+			svc.GetClipboardWindow, svc.GetPaletteWindow,
 		}
 		for _, get := range getters {
 			g := get
 			application.InvokeAsync(func() {
-				if w := g(); w != nil {
-					w.Hide()
+				skipFirstPaintWait.Store(true)
+				// 用 defer 复位：即使建窗中途 panic（RecoverToLog 只兜住 goroutine 顶层），
+				// 也不能让这个标志一直挂着 —— 那会让之后笔记 / SSH 首次唤起都跳过首帧门控。
+				defer skipFirstPaintWait.Store(false)
+				w := g()
+				if w != nil {
+					w.Hide() // 幂等：建窗时已 Hidden，这里只是兜底
 				}
 			})
 			time.Sleep(400 * time.Millisecond)
@@ -813,15 +826,14 @@ func main() {
 	// 将延迟工厂函数注入 AppService，供前端 Wails 绑定调用
 	InjectWindowGetters(appService, app)
 
-	// 三个 WebView2 浮窗改为「首次用到才创建」。原先在 app.Run() 之前同步预建并
-	// Hide，是为了绕开热键回调 goroutine 上跨线程建窗的死锁/白屏；代价是每个渲染
-	// 进程空闲也常驻 30–80MB，一开机就多占 100–240MB，而多数会话根本用不到命令
-	// 面板或快捷笔记。跨线程约束现在由 windows.go 的 newFloatingWindowOnMainThread
-	// 承担（投递到主线程 + 同步等结果），预建不再是必需。
+	// 剪贴板 / 命令面板默认在启动后预建（热键高频入口，见 precreateFloatingWindows）。
+	// 笔记 / 窗口管理仍「首次用到才创建」：它们的渲染进程空闲也常驻 30–80MB，
+	// 而多数会话根本用不到。
 	//
-	// 想要「热键零延迟」时可设 QD_PRECREATE_WINDOWS=1：仍然挪到 app.Run() 之后、
-	// 主线程空闲时错峰创建，不阻塞首屏，也不在 Run 前碰 WebView2。
-	if os.Getenv("QD_PRECREATE_WINDOWS") == "1" {
+	// 历史：这里原本是全部懒创建，更早则是在 app.Run() 之前同步预建三个浮窗。
+	// 同步预建的代价是一开机多占 100–240MB，且把主窗口显示推后；现在改由
+	// newFloatingWindowOnMainThread 承担跨线程建窗约束，预建挪到 Run 之后错峰执行。
+	if os.Getenv("QD_PRECREATE_WINDOWS") != "0" {
 		precreateFloatingWindows(appService)
 	}
 
