@@ -56,6 +56,11 @@ type MailboxService struct {
 	watchStop chan struct{}
 	stopOnce  sync.Once
 	reload    chan struct{}
+
+	// silentNext 让下一次抓取只填快照、不推通知。启动（或首次配置）后读到的
+	// 是过去两天里的历史邮件，把它们当新验证码重推一遍既打扰人，又让人误以为
+	// 刚刚又收到一封。首轮抓取失败时这个标志会还回去，等真正同步成功再开始推。
+	silentNext bool
 }
 
 func NewMailboxService(app *services.AppService) *MailboxService {
@@ -65,6 +70,8 @@ func NewMailboxService(app *services.AppService) *MailboxService {
 		quit:      make(chan struct{}),
 		watchStop: make(chan struct{}),
 		reload:    make(chan struct{}, 1),
+		// 启动后第一次成功抓取只填卡片，不推通知（见字段注释）。
+		silentNext: true,
 	}
 }
 
@@ -373,6 +380,8 @@ func (s *MailboxService) fetchNow() ([]internalmailbox.Message, error) {
 	wait := make(chan struct{})
 	s.inflight = wait
 	cfg := s.cfg
+	silent := s.silentNext
+	s.silentNext = false
 	s.mu.Unlock()
 
 	var (
@@ -399,7 +408,7 @@ func (s *MailboxService) fetchNow() ([]internalmailbox.Message, error) {
 				continue
 			}
 			fresh = append(fresh, m)
-			if !known[m.ID] {
+			if !known[m.ID] && !silent {
 				s.pushNewCode(m)
 			}
 		}
@@ -412,6 +421,8 @@ func (s *MailboxService) fetchNow() ([]internalmailbox.Message, error) {
 	} else {
 		s.connected = false
 		s.lastErr = err.Error()
+		// 这轮什么都没读到：把「首轮静默」还回去，下次真同步成功时仍然不推历史码。
+		s.silentNext = s.silentNext || silent
 	}
 	s.inflight = nil
 	close(wait)
