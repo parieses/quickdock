@@ -21,7 +21,7 @@
 import { defineAsyncComponent, type Component, type Ref } from 'vue'
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
-  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch,
+  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search,
 } from '@lucide/vue'
 // 保活白名单从零依赖模块引（名字常量与组件里 defineOptions 共用同一份）
 import { KEEP_ALIVE_PAGES } from './keepAlive'
@@ -43,6 +43,8 @@ const AIPage = defineAsyncComponent(() => import('../components/AIPage.vue'))
 const EnvironmentPage = defineAsyncComponent(() => import('../components/EnvironmentPage.vue'))
 // 剪贴板历史页需要 .clipboard-page 容器撑满，故单独引用组件 + wrapperClass
 const ClipboardPanel = defineAsyncComponent(() => import('../components/ClipboardPanel.vue'))
+// 文件检索页：检索接口与 Everything 状态门都是现成的，这里只补展示层与批量动作
+const FileSearchPage = defineAsyncComponent(() => import('../components/FileSearchPage.vue'))
 
 /** 「行尾活动指示点」的来源标识。闭集（union）：新增一种必须同时在 Sidebar 的
  *  DOT_PROVIDERS 里加 provider，否则 TS 报缺项 —— 这是把 stringly-typed 的
@@ -84,12 +86,15 @@ export interface NavEntry {
 }
 
 // 顺序即侧边栏导航顺序（dashboard → workspace → notes → todo → schedule → monitor →
-// clipboard → environments → ssh → ai → dsh → plugins）。dashboard 放第一位：
+// clipboard → filesearch → environments → ssh → ai → dsh → plugins）。dashboard 放第一位：
 // 它是「今天要处理什么」的入口，而工作空间回答的是「打开哪个项目」，先看全局再看具体。
 export const navEntries: NavEntry[] = [
   // 总览：待办/服务健康/常驻环境/端口占用四块聚合。它不持有任何领域状态，
   // 每次挂载重新拉一遍最新数据，故不进 KeepAlive 白名单。
-  { id: 'dashboard', labelKey: 'navDashboard', icon: LayoutDashboard, component: DashboardPage },
+  { id: 'dashboard', labelKey: 'navDashboard', icon: LayoutDashboard, component: DashboardPage,
+    // 日志卡与 AI 用量卡的「全部」都指向设置里的对应面板（logs / ai），
+    // 与 workspace / ai 页同一套 open-settings 约定。
+    listeners: (ctx) => ({ 'open-settings': ctx.openSettings }) },
   // workspace 是复合页（引导 / 空态 / 三栏），布局细节在 WorkspacePage 内部，
   // 注册表这边与其它内容页没有区别。
   { id: 'workspace', labelKey: 'navWorkspace', icon: FolderKanban, component: WorkspacePage,
@@ -99,6 +104,9 @@ export const navEntries: NavEntry[] = [
   { id: 'schedule', labelKey: 'navSchedule', icon: AlarmClock, component: SchedulePage },
   { id: 'monitor', labelKey: 'navMonitor', icon: Activity, component: MonitorPage },
   { id: 'clipboard', labelKey: 'navClipboard', icon: Clipboard, component: ClipboardPanel, wrapperClass: 'clipboard-page' },
+  // filesearch：与笔记/剪贴板同属「找东西」，故紧跟其后；Everything 不可用由页面内的
+  // EverythingGate 自己兜底，注册表不需要关心运行态。
+  { id: 'filesearch', labelKey: 'navFileSearch', icon: Search, component: FileSearchPage },
   { id: 'environments', labelKey: 'navEnvironments', icon: Server, component: EnvironmentPage,
     props: (ctx) => ({ initialSection: ctx.envInitialSection.value }) },
   // git：仓库视角（分支树 / 提交历史 / 改动预览），放在环境与 SSH 之间——同属「开发现场」

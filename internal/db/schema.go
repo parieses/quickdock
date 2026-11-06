@@ -607,6 +607,18 @@ var baseTables = []string{
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
 	)`,
+
+	// 文件置物架：只记路径、不搬文件。kind 是加入时判定的 file/dir，
+	// 用于选图标；原文件后来被删也不自动清理，由 service 层 os.Stat 标失效。
+	`CREATE TABLE IF NOT EXISTS file_shelf (
+		id TEXT PRIMARY KEY,
+		path TEXT NOT NULL,
+		name TEXT NOT NULL DEFAULT '',
+		kind TEXT NOT NULL DEFAULT '',
+		sort INTEGER NOT NULL DEFAULT 0,
+		created_ts INTEGER NOT NULL DEFAULT 0,
+		last_opened_ts INTEGER NOT NULL DEFAULT 0
+	)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）

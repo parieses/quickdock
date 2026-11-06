@@ -152,8 +152,11 @@ func (a *AIService) AIUsageStats(days int) *services.ApiResult {
 	}
 
 	for _, g := range groups {
-		cost, ok := estimateCost(g.Model, g.PromptTokens, g.CompletionTokens, g.CachedTokens)
-		saved := cacheSaving(g.Model, g.CachedTokens)
+		// 峰谷按这条记录发生的时间算，不是按「此刻」：一个 7 天窗口横跨几十个
+		// 峰时/谷时段，用当前时刻统一乘倍数会把夜里跑的批量任务也算成峰价。
+		peak := isPeakBeijing(g.Hour, g.Weekday)
+		cost, ok := estimateCost(g.Model, g.PromptTokens, g.CompletionTokens, g.CachedTokens, peak)
+		saved := cacheSaving(g.Model, g.CachedTokens, peak)
 		if ok {
 			// 一个模型只要有一条能配上价就算「已计价」；配不上的单独计数，
 			// 否则「￥3.2」看着像全部用量的价格，实际可能有一大半没算进去。

@@ -24,6 +24,8 @@ export function setNavigator(fn: (page: string) => void) {
 
 /** 切到某个侧边栏页面；导航器尚未注册时排队，注册后补发 */
 export function navigate(page: string) {
+  // 去了别的页 = 上一次定位作废：留着它，下次进目标页会莫名其妙跳到一个旧条目
+  if (pendingTarget.value && pendingTarget.value.page !== page) pendingTarget.value = null
   if (navigatorFn) navigatorFn(page)
   else pendingPage = page
 }
@@ -33,6 +35,27 @@ export const pendingOpenNoteId = ref<string>('')
 
 // 待办深链：命令面板选中某条待办后写入该 id，TodoPage 监听并滚动定位 + 短暂高亮。
 export const pendingOpenTodoId = ref<string>('')
+
+// 页面内定位目标：总览卡片点的是「某个仓库 / 端口区块 / 某个常驻运行时」，
+// 落到目标页后还要停在那一条上，而不是回到该页默认的第一个。
+//
+// 为什么不是 navigate(page + '#target')：页 id 是注册表的主键，掺上片段后
+// findContentPage / findNavEntry 全部失配；而且目标页是异步组件，挂载发生在
+// navigate 之后，片段得在组件里再取一次，等于绕一圈回到这里。
+//
+// 每次 navigateTo 都造新对象：watch 比的是引用，同一个目标连点两次也能再触发一次。
+export interface PageTarget {
+  page: string
+  /** 语义由目标页自己解释：git = 仓库绝对路径，environments = 区块 id（ports/nginx/everything…） */
+  target: string
+}
+export const pendingTarget = ref<PageTarget | null>(null)
+
+/** 切页并带上定位目标。目标页在 watch(pendingTarget) 里取走并置空。 */
+export function navigateTo(page: string, target: string) {
+  pendingTarget.value = { page, target }
+  navigate(page)
+}
 
 // AI 生成状态（给侧栏用）：AI 页被 KeepAlive 保活，离开后回答仍在后台生成，
 // 但用户在别的页看不到任何迹象 —— 尤其是完成时，回来之前需要一个提示。

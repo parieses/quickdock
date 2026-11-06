@@ -32,7 +32,7 @@ const emit = defineEmits<{
 const open = ref(false)
 const unread = ref(0)
 const items = ref<NotifyItem[]>([])
-const filter = ref<'all' | 'unread' | 'monitor' | 'schedule' | 'ai'>('all')
+const filter = ref<'all' | 'unread' | 'monitor' | 'schedule' | 'ai' | 'imap'>('all')
 const loading = ref(false)
 
 // 定位：面板挂在侧栏底部，从按钮右侧弹出。
@@ -113,6 +113,7 @@ const kindLabel = (k: string) => {
     case 'monitor': return t('ncKindMonitor')
     case 'schedule': return t('ncKindSchedule')
     case 'ai': return t('ncKindAi')
+    case 'imap': return t('ncKindMail')
     default: return t('ncKindSystem')
   }
 }
@@ -241,7 +242,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 
         <div class="nc-filters">
           <button
-            v-for="f in (['all', 'unread', 'monitor', 'schedule', 'ai'] as const)"
+            v-for="f in (['all', 'unread', 'monitor', 'schedule', 'ai', 'imap'] as const)"
             :key="f"
             class="nc-chip"
             :class="{ on: filter === f }"

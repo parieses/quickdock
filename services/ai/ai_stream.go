@@ -163,6 +163,11 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		Worktree bool `json:"worktree"`
 		// WorktreeBranch 基于哪条分支建工作区（空 = 当前分支）。
 		WorktreeBranch string `json:"worktreeBranch"`
+		// Action / TargetID：重新生成（regen）与编辑重发（edit）。
+		// 老前端不带这两个字段 → 空值 → 行为与升级前完全一致。
+		// regen 的 targetID 是要重答的 assistant 消息，edit 是要改写的 user 消息。
+		Action   string `json:"action"`
+		TargetID string `json:"targetId"`
 	}
 	// 请求体必须设上限：一次可以带 10 张 10 MiB 的图（见 ai_image.go），
 	// base64 之后是 ~134 MB 字符，无脑 ReadAll 等于把这么大一块直接读进内存。
@@ -181,6 +186,28 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 	if err := json.Unmarshal(raw, &req); err != nil {
 		http.Error(w, "请求解析失败", http.StatusBadRequest)
 		return
+	}
+
+	// 重新生成 / 编辑重发：先截断历史，再进流式。
+	//
+	// 放在这里而不是 runAgent 里，有三个理由：
+	//  1. 此刻响应头还没发出，失败能直接回 400；等 200 发出去之后错误只能走
+	//     event: error，而前端已经乐观收起了旧气泡，回滚要绕一圈。
+	//  2. 引擎完全不用改：runAgent / saveUserTurn / buildAIMessages 看到的都是
+	//     截断后的库。regen 时最后一条回到原 user → saveUserTurn 幂等跳过，
+	//     不会多出一条重复提问；edit 时最后一条是上一轮回答 → 正常插入改写后的提问。
+	//  3. 截断走事务，失败时一行都没删，旧对话保持原样。
+	action := strings.TrimSpace(req.Action)
+	if action == "regen" || action == "edit" {
+		if strings.TrimSpace(req.ConvID) == "" || strings.TrimSpace(req.TargetID) == "" {
+			http.Error(w, "重新生成缺少会话或目标消息", http.StatusBadRequest)
+			return
+		}
+		if err := s.svc.App.DB.TruncateAIMessagesFrom(req.ConvID, req.TargetID); err != nil {
+			logger.W("[ai] 截断历史失败 conv=%s action=%s: %v", req.ConvID, action, err)
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
@@ -388,7 +415,9 @@ func doneEvent(convID string, firstTokenAt time.Duration, usage db.TokenUsage, m
 	// 未收录的模型不填 cost：前端据此隐藏该项，与设置页「未知模型不计价」
 	// 同一个口径。宁可少显示一个数字，也不要给一个看起来精确其实编的数字。
 	if !usage.Empty() {
-		if cost, ok := estimateCost(model, usage.Prompt, usage.Completion, usage.Cached); ok {
+		// 刚跑完的这一次：按「结束时刻」判峰谷。上游按请求到达时间计价，
+		// 与结束时刻最多差几分钟，跨峰谷边界的调用极少，误差可忽略。
+		if cost, ok := estimateCost(model, usage.Prompt, usage.Completion, usage.Cached, isPeakForPricing(time.Now())); ok {
 			out["cost"] = cost
 		}
 	}

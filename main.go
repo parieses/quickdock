@@ -33,6 +33,7 @@ import (
 	gitsvc "quickdock/services/git"
 	itemsvc "quickdock/services/item"
 	logtailsvc "quickdock/services/logtail"
+	mailboxsvc "quickdock/services/mailbox"
 	mcpsvc "quickdock/services/mcp"
 	monitorsvc "quickdock/services/monitor"
 	notesvc "quickdock/services/note"
@@ -41,11 +42,13 @@ import (
 	portsvc "quickdock/services/port"
 	recyclesvc "quickdock/services/recycle"
 	scenesvc "quickdock/services/scene"
+	shelfsvc "quickdock/services/shelf"
 	snapshotsvc "quickdock/services/snapshot"
 	sshxsvc "quickdock/services/sshx"
 	systemsvc "quickdock/services/system"
 	todosvc "quickdock/services/todo"
 	updatesvc "quickdock/services/update"
+	weathersvc "quickdock/services/weather"
 	workspacesvc "quickdock/services/workspace"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -554,6 +557,13 @@ func main() {
 	snapshotSvc := snapshotsvc.NewSnapshotService(appService)
 	itemSvc := itemsvc.NewItemService(appService)
 	portSvc := portsvc.NewPortService(appService)
+	// 天气请求必须留在宿主：WebView2 跟随系统代理，代理端口没起时前端 fetch 全超时。
+	weatherSvc := weathersvc.NewWeatherService()
+
+	// 邮件验证码与文件置物架：两个常驻/有状态能力都是宿主单例。
+	// 前者持有 IMAP 长连接与唯一快照，后者在窗口拖放事件里被直接调用。
+	mailboxSvc := mailboxsvc.NewMailboxService(appService)
+	shelfSvc := shelfsvc.NewShelfService(appService)
 
 	// Git 面板门面：仓库清单/状态/分支/提交历史与 fetch/pull/切分支。
 	// 仓库清单落 app_state（KV），不建表——它只是路径串，没有关联查询。
@@ -620,6 +630,9 @@ func main() {
 			application.NewService(snapshotSvc),
 			application.NewService(itemSvc),
 			application.NewService(portSvc),
+			application.NewService(weatherSvc),
+			application.NewService(mailboxSvc),
+			application.NewService(shelfSvc),
 			application.NewService(gitSvc),
 			application.NewService(sshSvc),
 			application.NewService(mcpSvc),
@@ -690,6 +703,10 @@ func main() {
 		Frameless:        false,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/",
+		// 文件置物架需要真实绝对路径：WebView2 下 HTML5 dataTransfer.files 只给文件名，
+		// 路径只能由宿主的 WindowFilesDropped 事件传回来。只有带
+		// data-file-drop-target 的元素会触发，不会干扰其它页面的内部拖拽排序。
+		EnableFileDrop: true,
 		// 整体等比缩放（值见常量 uiZoom，主窗口与所有独立浮窗共用同一系数）。
 		Zoom: uiZoom,
 	}
@@ -761,6 +778,35 @@ func main() {
 			logger.I("[启动] 主窗口已显示，转后台对账启动本地服务")
 			appService.StartEnvServicesAsync()
 		})
+	})
+
+	// 文件置物架：只认拖到 #qd-shelf-drop 上的文件。插件页拖 zip 安装、AI 页拖图片
+	// 附件都走各自的 HTML5 通道，这些地方不能顺手把路径塞进置物架。
+	mainWindow.RegisterHook(events.Common.WindowFilesDropped, func(event *application.WindowEvent) {
+		details := event.Context().DropTargetDetails()
+		if details == nil {
+			return
+		}
+		// ElementID 是主判据；ClassList 兜底，避免不同平台上 Wails 回填的 id 为空。
+		inShelf := details.ElementID == "qd-shelf-drop"
+		for _, cls := range details.ClassList {
+			if cls == "qc-drop" {
+				inShelf = true
+				break
+			}
+		}
+		if !inShelf {
+			return
+		}
+		files := event.Context().DroppedFiles()
+		if len(files) == 0 {
+			return
+		}
+		if res := shelfSvc.AddPaths(files); res != nil && res.Code != 0 {
+			logger.W("[WRN] shelf drop: %s", res.Msg)
+			return
+		}
+		app.Event.Emit("shelf:changed")
 	})
 
 	// 剪贴板/命令面板/插件窗口使用延迟创建（按需初始化，减少启动内存占用）

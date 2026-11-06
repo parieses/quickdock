@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getErrorMessage } from './error'
+import { getErrorMessage, isDialogCanceled } from './error'
 
 // Wails 绑定抛出的错误形态不统一（JSON 字符串 / 带前缀文本 / 普通对象 / 字符串），
 // 这里锁死每种形态的提取结果——提取错了，用户看到的就是一坨 JSON 而不是人话。
@@ -37,5 +37,26 @@ describe('getErrorMessage', () => {
 
   it('以 { 开头但不是合法 JSON 时返回原文，不抛异常', () => {
     expect(getErrorMessage('{oops')).toBe('{oops')
+  })
+})
+
+// 取消是用户主动动作，不是失败：识别不出来就会每按一次取消弹一个红 toast。
+describe('isDialogCanceled', () => {
+  it('识别 Wails 的 cancelled by user（Windows 拼法）', () => {
+    const e = new Error('Invalid dialog call: Dialog.OpenFile failed: error getting selection: cancelled by user')
+    expect(isDialogCanceled(e)).toBe(true)
+  })
+
+  it('识别 canceled by user（macOS 拼法）', () => {
+    expect(isDialogCanceled(new Error('error getting selection: canceled by user'))).toBe(true)
+  })
+
+  it('其他对话框错误不算取消', () => {
+    expect(isDialogCanceled(new Error('Invalid dialog call: no window available'))).toBe(false)
+  })
+
+  it('普通业务错误不算取消', () => {
+    expect(isDialogCanceled(new Error('路径不存在'))).toBe(false)
+    expect(isDialogCanceled(null)).toBe(false)
   })
 })

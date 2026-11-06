@@ -1296,7 +1296,7 @@ function onPickPrompt(p: AIPrompt) {
 
 function managePrompts() {
   plusOpen.value = false
-  emit('open-settings', 'ai')
+  emit('open-settings', 'ai:prompts')
 }
 
 // 外部 MCP 服务器：+ 菜单只要「名字 / 状态 / 工具数」。command 与 env 属于设置页，
@@ -1373,7 +1373,7 @@ async function installSkill() {
 
 function manageConnectors() {
   plusOpen.value = false
-  emit('open-settings', 'ai')
+  emit('open-settings', 'ai:mcp')
 }
 
 const heroRef = ref<InstanceType<typeof AiHero> | null>(null)
@@ -1811,6 +1811,84 @@ function retryLast() {
   }
 }
 
+/**
+ * 重新生成上一条回答。
+ *
+ * 与 retryLast 必须分开：失败重试时最后一条是 user（回答没落库），直接重发即可；
+ * 重新生成时最后一条是 assistant，沿用重试路径会让 saveUserTurn 的幂等判据
+ * （「最后一条是不是同内容 user」）失效，凭空多插一条重复提问 —— 刷新后就变成
+ * 两句一样的问题。现在按 targetId 让服务端在开跑前事务截断旧回答并重算会话 token。
+ */
+async function regenerateLast() {
+  if (!canRegenerate.value || !hasKey.value || !activeId.value) return
+  const convId = activeId.value
+  // 刚答完的那条 assistant 气泡是前端造的临时 id（ast-时间戳），拿它去删库会找不到行。
+  // 先从库里拉一次真实 id；用户这期间切走了就整个放弃。
+  await loadMessages(convId)
+  if (activeId.value !== convId || runOf(convId)) return
+  const last = messages.value[messages.value.length - 1]
+  if (!last || last.role !== 'assistant' || !last.id) return
+  let userIdx = -1
+  for (let i = messages.value.length - 2; i >= 0; i--) {
+    if (messages.value[i].role === 'user') { userIdx = i; break }
+  }
+  if (userIdx < 0) return
+  const m = messages.value[userIdx]
+  // 乐观收起旧回答；截断被拒（400）时把列表原样拉回来。
+  messages.value = messages.value.slice(0, userIdx + 1)
+  retryPending.value = true
+  input.value = m.content
+  attachments.value = (m.imgList || []).map((img) => ({
+    kind: img.kind,
+    url: img.url,
+    dataUrl: img.dataUrl,
+    name: img.name || 'image',
+  }))
+  setConvError(convId, '')
+  pageError.value = ''
+  send({
+    action: 'regen',
+    targetId: last.id,
+    onFailed: () => { if (activeId.value === convId) void loadMessages(convId) },
+  })
+}
+
+/** 编辑某条历史提问并重发：这条之后的所有问答会被事务截断，且不可恢复，故先确认。 */
+async function editAndResend(m: AIMessage, content: string) {
+  const text = content.trim()
+  if (!text || !activeId.value || !hasKey.value || runOf(activeId.value)) return
+  if (!(await toast.confirm(t('aiEditResendConfirm')))) return
+  // 索引要在 reload 之前算：列表里的气泡可能是临时 id（usr-/ast-），
+  // reload 之后按 id 找会落空，但顺序与库里的行是一一对应的。
+  const idx = messages.value.findIndex((x) => x.id === m.id)
+  if (idx < 0) return
+  const convId = activeId.value
+  await loadMessages(convId)
+  if (activeId.value !== convId || runOf(convId)) return
+  const target = messages.value[idx]
+  if (!target || target.role !== 'user') {
+    toast.error(t('aiEditStale'))
+    return
+  }
+  // 后端会删掉 target 及其之后的所有行；前端先呈现同样的边界，再把新提问放进去。
+  messages.value = [...messages.value.slice(0, idx), { ...target, content: text }]
+  retryPending.value = true
+  input.value = text
+  attachments.value = (target.imgList || []).map((img) => ({
+    kind: img.kind,
+    url: img.url,
+    dataUrl: img.dataUrl,
+    name: img.name || 'image',
+  }))
+  setConvError(convId, '')
+  pageError.value = ''
+  send({
+    action: 'edit',
+    targetId: target.id,
+    onFailed: () => { if (activeId.value === convId) void loadMessages(convId) },
+  })
+}
+
 async function regenTitle() {
   if (!activeId.value || runOf(activeId.value)) return
   try {
@@ -2207,7 +2285,7 @@ const {
   renderLiveBlocks, primeMessageBlocks, clearLiveCache,
   scrollToBottom, followBottom, scheduleMermaidScan,
   ensureStreamInfo, aiStreamPort, aiStreamToken,
-  toast, t, openSettings: () => emit('open-settings', 'ai'), retryPending, pageActive, plusOpen,
+  toast, t, openSettings: () => emit('open-settings', 'ai:model'), retryPending, pageActive, plusOpen,
 })
 
 // ---- 保活（KeepAlive）后的可见性 ----
@@ -2724,7 +2802,7 @@ onUnmounted(() => {
         @toggle-url="toggleUrlInput"
         @fill-tip="fillHeroTip"
         @shuffle-tips="shuffleHeroTips"
-        @open-settings="emit('open-settings', 'ai')"
+        @open-settings="emit('open-settings', 'ai:model')"
         @toggle-plus="togglePlus"
         @pick-skill="onPickSkill"
         @pick-prompt="onPickPrompt"
@@ -2765,7 +2843,7 @@ onUnmounted(() => {
         :cp-for-call="cpForCall"
         :job-rows="jobRows"
         :job-seq="jobSeq"
-        @open-settings="emit('open-settings', 'ai')"
+        @open-settings="emit('open-settings', 'ai:model')"
         @open-artifact="openArtifactInPanel"
         @open-img="openImgViewer"
         @copy="copy"
@@ -2774,7 +2852,8 @@ onUnmounted(() => {
         @open-jobs="openJobsAt"
         @run-plan="runPlan"
         @retry="retryLast"
-        @regenerate="retryLast"
+        @regenerate="regenerateLast"
+        @edit="editAndResend"
         @msg-click="onMsgClick"
         @msg-mouseup="onMsgMouseUp"
         @msg-contextmenu="onMsgContextMenu"
@@ -2874,7 +2953,7 @@ onUnmounted(() => {
           @allow="approveTool(pendingApproval, 'allow')"
           @remember="approveTool(pendingApproval, 'allow', true)"
           @deny="approveTool(pendingApproval, 'deny')"
-          @open-rules="emit('open-settings', 'ai')"
+          @open-rules="emit('open-settings', 'ai:permission')"
         />
 
         <!-- 任务清单：AI 自己把大任务拆成步骤，完成一步勾一步（plan_update 工具）。

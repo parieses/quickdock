@@ -86,7 +86,7 @@
 .menu-row {
   position: relative;
   width: 100%; display: flex; align-items: center; gap: 12px;
-  padding: 10px 20px; border: none; background: transparent;
+  padding: 9px 16px; border: none; background: transparent;
   color: var(--color-text-muted); font-size: var(--text-md); cursor: pointer;
   text-align: left; font-family: inherit;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
@@ -106,8 +106,10 @@
 .menu-row.active .menu-row-icon { opacity: 1; }
 .menu-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .menu-row-label { font-size: 13px; font-weight: 500; }
-.menu-row-desc { font-size: 11px; color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.menu-row.active .menu-row-desc { color: var(--color-accent-muted); }
+/* 描述行不显示：240px 的侧栏里它必然被省略号切断（「存储位置 / 同步…」），
+ * 半句话比没有更难看，而且十来个菜单项两行排下去要滚动才能看全。
+ * 信息不丢——完整描述挂在按钮的 title 上，设置项搜索也仍然按它匹配。 */
+.menu-row-desc { display: none; }
 .menu-row-arrow { color: var(--color-text-disabled); flex-shrink: 0; }
 .menu-row.active .menu-row-arrow { color: var(--color-accent); }
 
@@ -126,7 +128,8 @@
 .content-page {
   height: 100%; display: flex; flex-direction: column;
   align-items: center; justify-content: center;
-  padding: 48px 32px;
+  /* 底部比顶部多 16px：一页设置通常以按钮收尾，贴边会显得被切掉 */
+  padding: 40px 32px 56px;
 }
 
 .content-empty {
@@ -260,22 +263,56 @@
 .locale-btn:hover { border-color: var(--color-accent); color: var(--color-text-primary); }
 .locale-btn.active { border-color: var(--color-accent); background: var(--color-accent-bg); color: var(--color-accent); }
 
-/* 数据与备份 */
-.content-left { align-items: flex-start; justify-content: flex-start; }
+/* 普通设置页：一列内容，水平居中。
+ * 原来是「贴左侧 + 600px 上限」——最大化时整块挤在左半边、右边一片空白，
+ * 读起来像没加载完。居中限宽后，宽窗两侧留白对称，窄窗仍有 32px 内边距保底。
+ * 顶部对齐（justify-content: flex-start）：设置页从第一行开始读，不该垂直居中。 */
+.content-left { align-items: center; justify-content: flex-start; }
 /* 日志查看器：撑满设置内容区，由查看器自身管理滚动 */
 /* content-flush 是通用形态：组件自带内边距与滚动，外层只负责给满高度、不做居中。
    最近动态页与日志查看器都用它（前者两个面板各自滚动，后者整列滚动）。 */
 .content-logs, .content-flush { height: 100%; padding: 0; align-items: stretch; justify-content: flex-start; }
-.content-inner { width: 100%; max-width: 600px; }
-.section { width: 100%; max-width: 600px; }
+/* 720 而不是 600：设置页里最宽的是存储路径行（标签 + 输入框 + 两个按钮），
+   600 会把「选择目录」挤到换行；720 刚好放得下一行，同时没宽到需要扫视。 */
+.content-inner { width: 100%; max-width: 720px; }
+.section { width: 100%; max-width: 720px; }
+/* 兜底：本页直接子元素默认铺满内容列，并和其他页同宽。
+ * 有些子组件（导航项显隐 .snv、通知 .nt-panel、工具管理）根节点既没写 width 也没写
+ * max-width，靠内容自宽——父容器一旦从「贴左」改成「居中」，它们要么缩成一条挤在中间，
+ * 要么撑满整宽（比别的页宽出一截，看着像没对齐）。所以这里一次给齐 width + max-width，
+ * 子组件自己声明的更小的 max-width（如 HotkeySettings 的 660）仍然生效。 */
+.content-left > * { width: 100%; max-width: 720px; }
+
+/* 页内分段：与 AI 设置页的 .ai-tabs 同款（按钮走公共类 qd-btn/qd-btn-sm/is-on，
+   这里只负责排布）。抽到公共文件是因为现在有三个页在用，各写一份迟早会走样。 */
+.settings-tabs {
+  width: 100%; max-width: 720px;
+  display: flex; flex-wrap: wrap; gap: var(--space-3);
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
 .section + .section { margin-top: 28px; }
-.section-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 4px; }
-.section-desc { font-size: 12px; color: var(--color-text-disabled); margin: 0 0 20px; }
-.setting-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
-.setting-label { font-size: 13px; color: var(--color-text-muted); min-width: 80px; }
+.section-title { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; color: var(--color-text-primary); margin: 0 0 6px; }
+/* 说明文字用 muted 而不是 disabled：后者是「不可用」的语义色，长句读起来发虚 */
+.section-desc { font-size: 12px; line-height: 1.6; color: var(--color-text-muted); margin: 0 0 20px; }
+.setting-row { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+/* 104 而不是 80：「当前存储位置」这类 6 字标签在 80 里会被压成两行，同一列表的
+   标签列宽就会忽宽忽窄。flex-shrink:0 保证它不被长控件挤扁。 */
+.setting-label { flex-shrink: 0; font-size: 13px; color: var(--color-text-muted); min-width: 104px; }
+/* 同一行里的控件统一高度：输入框(35px)与按钮(28px)并排时中线会错位，看着像没对齐。
+ * 只作用在 .setting-control 的直接子元素，textarea（多行）不受影响。 */
+.setting-row .setting-control > .btn,
+.setting-row .setting-control > .field-input,
+.setting-row .setting-control > .num-input { height: 32px; box-sizing: border-box; }
+.setting-row .setting-control > .btn {
+  display: inline-flex; align-items: center; justify-content: center; padding: 0 14px;
+}
+/* 定了 32px 高度后，字段原有的 9px 上下 padding 会把文字挤扁，只留左右 */
+.setting-row .setting-control > .field-input { padding-top: 0; padding-bottom: 0; }
 .setting-control { display: flex; align-items: center; gap: 8px; }
 .num-input {
-  width: 80px; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  width: 80px; padding: 0 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 13px; font-family: inherit;
   outline: none;
 }
@@ -292,7 +329,7 @@
 .btn-secondary:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
 .btn-danger { background: var(--color-danger-bg); color: var(--color-danger); border: 1px solid var(--color-danger-border); }
 .btn-danger:hover { background: var(--color-danger); color: var(--color-danger-text); }
-.action-row { margin-top: 8px; }
+.action-row { margin-top: 12px; }
 .result-hint { font-size: 12px; color: var(--color-accent); margin: 8px 0 0; }
 
 /* 弹窗内部元素 / 表单输入（统一，供各组件复用，避免每处重复定义） */

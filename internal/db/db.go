@@ -63,6 +63,8 @@ var validTables = map[string]bool{
 	// AI 提示词库：需要走通用表操作（回收站整行恢复、快照按表遍历），
 	// 少了它这里会以「未知表」被拒。
 	"ai_prompts": true,
+	// 文件置物架：路径清单跟着快照走，换机器不该丢。
+	"file_shelf": true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）。
@@ -210,6 +212,9 @@ var validColumns = map[string]bool{
 	"task": true, "seq": true, "started_at": true, "ended_at": true,
 	// run_id / node_id：agent_* 三表与 ai_usage 共用（成本归集维度）
 	"run_id": true, "node_id": true,
+	// file_shelf 独有的列（id / path / name / kind / sort / created_ts 上文已登记）；
+	// 白名单全局共用，漏一个就在快照导入时变成「非法列名」。
+	"last_opened_ts": true,
 }
 
 // validateTable 检查表名是否在白名单中

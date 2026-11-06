@@ -315,7 +315,7 @@ async function saveAll() {
 </template>
 
 <style scoped>
-.wm-page { width: 100%; max-width: 600px; }
+.wm-page { width: 100%; max-width: 720px; }
 .wm-head { margin-bottom: 14px; }
 .wm-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 4px; }
 .wm-desc { font-size: 12px; color: var(--color-text-disabled); margin: 0; line-height: 1.5; }

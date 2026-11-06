@@ -95,9 +95,12 @@ function setPage(page: string) {
 // 注册跨页面导航器（笔记/剪贴板等独立视图 → 侧边栏页面），供 bridge 使用。
 // 走 setNavigator 而非直接赋值：bridge 那边会在导航器缺失时排队，注册时补发，
 // 于是「事件早于 App setup 到达」不再是一种需要靠执行顺序兜住的情况。
+// 内部走 setPage 而不是直接改 currentPage：总览卡片的「常驻服务」里 DSH 那一行
+// 的目标页 id 是 dsh（注册表里靠 activate 唤起窗口，没有 component），
+// 直接赋值会让内容区变成空白页。setPage 才有那层 activate 分发。
 setNavigator((page: string) => {
   if (window.location.hash) window.location.hash = ''
-  currentPage.value = page
+  setPage(page)
 })
 
 // 工作空间的四档状态（引导 / 无场景 / 无集合 / 三栏）已随布局一起搬到

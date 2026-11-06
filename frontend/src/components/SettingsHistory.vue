@@ -17,7 +17,10 @@ import RecycleBinPage from './RecycleBinPage.vue'
 // 为什么不用 KeepAlive：这两页的数据都会被主界面改动（继续用就产生新动态、删除就进
 // 回收站），缓存住会让人看到过期内容，而「回头看」这个动作本身就是要看最新的。
 const { t } = useI18n()
-const tab = ref<'activity' | 'recycle'>('activity')
+// 深链 'history:recycle' 直接落到回收站（回收站清空/恢复的通知点进来就是这个）。
+// 与 AI 设置页同理：本组件挂在上层的 v-if 分支里，重建即读到新值。
+const props = defineProps<{ initialTab?: string }>()
+const tab = ref<'activity' | 'recycle'>(props.initialTab === 'recycle' ? 'recycle' : 'activity')
 
 const tabs = computed(() => [
   { value: 'activity' as const, label: t('navActivity'), icon: History },

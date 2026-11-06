@@ -5,7 +5,7 @@ import { useWorkspaceStore } from '../stores/workspace'
 import { useFloatMenu } from '../composables/useFloatMenu'
 import { useDragSort } from '../composables/useDragSort'
 import { pickExportScene } from '../utils/sceneIO'
-import { getErrorMessage } from '../utils/error'
+import { getErrorMessage, isDialogCanceled } from '../utils/error'
 import type { Scene, ToastAPI } from '../types'
 
 const store = useWorkspaceStore()
@@ -22,6 +22,8 @@ async function menuExport() {
     const r = await pickExportScene(id, sc?.name || 'scene', t('sceneExportTitle'), t('sceneFileFilter'))
     if (r) toast.success(t('sceneExportDone', { collections: r.collections, items: r.items }))
   } catch (e) {
+    // 保存对话框点取消时 Wails 会抛错，那不是失败。
+    if (isDialogCanceled(e)) return
     toast.error(getErrorMessage(e))
   }
 }

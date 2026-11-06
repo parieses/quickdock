@@ -89,7 +89,7 @@ function formatDate(iso: string): string {
 
 <template>
   <div class="section">
-    <h3 class="section-title">{{ t('snapshot') }}</h3>
+    <!-- 标题由设置页的分段栏提供，这里不再重复写一遍 -->
     <p class="section-desc">{{ t('snapshotDesc') }}</p>
 
     <div class="snapshot-create-area">

@@ -49,6 +49,12 @@ type MCPConfig struct {
 	// DisabledTools 被用户单独关掉的工具名。与 MaxLevel 是两道独立闸：
 	// 等级按危险度一档一刀，这里是「这条我就是不想让 AI 碰」的逐条选择。
 	DisabledTools []string `json:"disabledTools,omitempty"`
+	// Token 访问令牌。空值由 EnsureToken 首次访问时生成并落盘：默认配置里不能
+	// 写死一个所有安装都一样的常量，也不能每次读配置都随机出一个新值。
+	Token string `json:"token,omitempty"`
+	// RequireToken 是否强制校验。默认 false——老版本客户端的配置片段不带请求头，
+	// 升级后默认开启会让所有已配好的 Claude Code / Cursor 立刻连不上。
+	RequireToken bool `json:"requireToken,omitempty"`
 }
 
 func defaultMCPConfig() MCPConfig {
@@ -60,6 +66,9 @@ func defaultMCPConfig() MCPConfig {
 // ConfigPortsProvider（把实际监听端口回显到状态列）。
 type MCPRuntime struct {
 	baseDir string
+	// tokenMu 串行化令牌的生成/轮换/开关：Status、Start、面板刷新可能同时进来，
+	// 两个 goroutine 各生成一枚不同令牌写盘的话，Start 拿到的可能不是最终留下的那枚。
+	tokenMu sync.Mutex
 }
 
 func NewMCPRuntime() *MCPRuntime {
@@ -100,7 +109,8 @@ func (m *MCPRuntime) ConfigPath(string) string {
 	_ = os.MkdirAll(m.baseDir, 0o755)
 	if _, err := os.Stat(m.configPath()); err != nil {
 		raw, _ := json.MarshalIndent(defaultMCPConfig(), "", "  ")
-		_ = os.WriteFile(m.configPath(), raw, 0o644)
+		// 0o600：这个文件从现在起会存访问令牌，不该让同机其他账户读走。
+		_ = os.WriteFile(m.configPath(), raw, 0o600)
 	}
 	return m.configPath()
 }
@@ -178,7 +188,72 @@ func (m *MCPRuntime) saveConfig(cfg MCPConfig) error {
 	if err := os.MkdirAll(m.baseDir, 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(m.configPath(), raw, 0o644)
+	// 0o600：config.json 含访问令牌。Windows 上 ACL 不受 mode 控制，但新建文件
+	// 与 macOS/Linux 侧仍按最小权限走；已存在的文件若还是 0o644，由 EnsureToken
+	// 首次落盘时顺手收紧一次。
+	return os.WriteFile(m.configPath(), raw, 0o600)
+}
+
+// ---- 访问令牌 ----
+//
+// 令牌必须持久化且稳定：客户端的 mcp.json 是一次性写死的，令牌若随进程重启变化，
+// 用户每次开软件都得重配一遍。所以只在首次访问时生成并写入 config.json，之后
+// 一直沿用，只有用户点「重新生成」才换。
+
+// MCPTokenState 面板展示与接入片段生成都读它。
+type MCPTokenState struct {
+	Token        string `json:"token"`
+	RequireToken bool   `json:"requireToken"`
+}
+
+// EnsureToken 返回稳定的访问令牌；老配置缺 token 字段时补生成并落盘。
+func (m *MCPRuntime) EnsureToken() string {
+	m.tokenMu.Lock()
+	defer m.tokenMu.Unlock()
+	cfg := m.loadConfig()
+	if cfg.Token != "" {
+		return cfg.Token
+	}
+	cfg.Token = mcp.NewToken()
+	if err := m.saveConfig(cfg); err != nil {
+		logger.W("[env] MCP 令牌落盘失败: %v", err)
+	}
+	return cfg.Token
+}
+
+// TokenState 供环境管理页读取当前令牌与校验开关。
+func (m *MCPRuntime) TokenState() MCPTokenState {
+	token := m.EnsureToken()
+	return MCPTokenState{Token: token, RequireToken: m.loadConfig().RequireToken}
+}
+
+// SetRequireToken 开启/关闭强制校验，落盘并立即对运行中的服务生效（无需重启）。
+func (m *MCPRuntime) SetRequireToken(require bool) MCPTokenState {
+	m.tokenMu.Lock()
+	defer m.tokenMu.Unlock()
+	cfg := m.loadConfig()
+	if cfg.Token == "" {
+		cfg.Token = mcp.NewToken()
+	}
+	cfg.RequireToken = require
+	if err := m.saveConfig(cfg); err != nil {
+		logger.W("[env] MCP 令牌校验开关落盘失败: %v", err)
+	}
+	mcp.Default.SetAuth(cfg.Token, cfg.RequireToken)
+	return MCPTokenState{Token: cfg.Token, RequireToken: cfg.RequireToken}
+}
+
+// RotateToken 换一枚新令牌：旧令牌立即失效，已配置的客户端必须更新接入片段。
+func (m *MCPRuntime) RotateToken() MCPTokenState {
+	m.tokenMu.Lock()
+	defer m.tokenMu.Unlock()
+	cfg := m.loadConfig()
+	cfg.Token = mcp.NewToken()
+	if err := m.saveConfig(cfg); err != nil {
+		logger.W("[env] MCP 令牌轮换落盘失败: %v", err)
+	}
+	mcp.Default.SetAuth(cfg.Token, cfg.RequireToken)
+	return MCPTokenState{Token: cfg.Token, RequireToken: cfg.RequireToken}
 }
 
 func (m *MCPRuntime) DefaultPort() int { return m.loadConfig().Port }
@@ -196,6 +271,9 @@ func (m *MCPRuntime) ConfiguredPorts(string) []int {
 
 func (m *MCPRuntime) Start(ctx context.Context, version string, onLog func(string)) error {
 	cfg := m.loadConfig()
+	// 每次启动都把令牌与开关灌回传输层：面板改过开关、或用户手改过 config.json，
+	// 重启后不能悄悄退回「不校验」。
+	mcp.Default.SetAuth(m.EnsureToken(), cfg.RequireToken)
 	mcp.SetMaxLevel(cfg.MaxLevel)
 	// 单工具开关同样每次启动从配置读回：面板关掉的工具不能因为重启服务又冒出来。
 	mcp.SetDisabled(cfg.DisabledTools)

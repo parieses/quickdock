@@ -33,7 +33,7 @@ import type { ApiResult } from '../../bindings/quickdock/services/models'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
-import { navigate } from '../composables/bridge'
+import { navigate, pendingTarget } from '../composables/bridge'
 import ConfirmDialog from './ConfirmDialog.vue'
 import {
   GitListRepos, GitAddRepo, GitRemoveRepo, GitPickRepo,
@@ -275,9 +275,32 @@ const graphCh = computed(() => {
 
 // ---- 加载 ----
 
+/** 总览卡片带来的深链仓库：仓库清单是异步拉的，先记下，清单回来后由 loadRepos 落定。 */
+let deepRepo = ''
+watch(() => pendingTarget.value, (p) => {
+  if (!p || p.page !== 'git' || !p.target) return
+  deepRepo = p.target
+  // 清单已经在了（页面重进但仓库列表命中缓存）就不用等 loadRepos
+  if (repos.value.some(r => r.path === deepRepo)) {
+    activePath.value = deepRepo
+    deepRepo = ''
+  }
+  pendingTarget.value = null // 取走即清空，别让下次正常进来又跳一次
+}, { immediate: true })
+
 async function loadRepos() {
   try {
     repos.value = (unwrap(await GitListRepos()) as RepoRef[] | null) || []
+    // 深链目标优先于一切：用户是点着某个仓库进来的，不能拿「上次那个」把它顶掉
+    if (deepRepo) {
+      const hit = repos.value.some(r => r.path === deepRepo)
+      const target = deepRepo
+      deepRepo = '' // 只生效一次：之后的刷新该回到常规的「记住上次打开的那个」
+      if (hit) {
+        activePath.value = target
+        return
+      }
+    }
     // 选中项仍然有效就不动它（刷新仓库清单不该把用户踢回第一个）
     if (activePath.value && repos.value.some(r => r.path === activePath.value)) return
     // 否则依次退回：上次打开的那个 → 清单第一个

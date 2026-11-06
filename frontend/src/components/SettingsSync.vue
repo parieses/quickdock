@@ -139,7 +139,7 @@ watch(() => props.visible, (v) => {
 
 <template>
   <div class="section">
-    <h3 class="section-title">{{ t('sync') }}</h3>
+    <!-- 标题由设置页的分段栏提供（三个 tab 之一），这里不再重复写一遍 -->
     <p class="section-desc">{{ t('syncDesc') }}</p>
 
     <!-- 后端选择器：当前只有 WebDAV，未来 Git / 对象存储只需在后端注册即出现 -->

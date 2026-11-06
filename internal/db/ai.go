@@ -674,11 +674,17 @@ func (d *Database) AddAIConversationUsage(convID, model string, u TokenUsage, co
 	)
 }
 
-// AIUsageGroup 用量明细的分组行（天 × 模型）
+// AIUsageGroup 用量明细的分组行（天 × 模型 × 来源 × 北京小时 × 北京星期）
+//
+// 多带小时与星期，是为了让上游按时段计价的厂商（DeepSeek 峰时翻倍）能算准钱。
+// 峰时的判定规则留在 services/ai（isPeakBeijing），db 层只负责把记录换算成
+// 「北京几点、星期几」——时区换算与业务规则分开，规则改一次不用动 SQL。
 type AIUsageGroup struct {
 	Day              string `json:"day"`
 	Model            string `json:"model"`
 	Kind             string `json:"kind"`
+	Hour             int    `json:"hour"`    // 北京时区 0-23
+	Weekday          int    `json:"weekday"` // 北京时区 0=周日
 	Requests         int    `json:"requests"`
 	PromptTokens     int    `json:"promptTokens"`
 	CompletionTokens int    `json:"completionTokens"`
@@ -693,21 +699,28 @@ func aiUsageFilter(since string) (string, []interface{}) {
 	return " WHERE created_at >= ?", []interface{}{since}
 }
 
-// ListAIUsageGroups 按「天 × 模型」聚合用量明细。
+// ListAIUsageGroups 按「天 × 模型 × 来源 × 北京小时」聚合用量明细。
 //
 // 一次查询同时喂给按天、按模型、总额三路统计：分三次查各写一遍过滤条件，
 // 很容易出现「总额 ≠ 各模型之和」这种自相矛盾的界面。分组交给 SQL，
 // 汇总与计价交给调用方，口径只有一处。
+//
+// 分组里带小时是为了峰谷计价：created_at 落的是 RFC3339（带机器时区偏移），
+// strftime 会先转 UTC，所以统一 +8 小时换到北京时区再取小时/星期 —— 上游的
+// 峰时是按北京时间的，跟用户机器在哪个时区无关。分组数最多多出一个量级
+// （一天里同一个模型不会横跨 24 个小时都有调用），代价可以忽略。
 func (d *Database) ListAIUsageGroups(since string) ([]AIUsageGroup, error) {
 	where, args := aiUsageFilter(since)
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
 		`SELECT substr(created_at, 1, 10) AS day, COALESCE(model, ''), COALESCE(kind, ''),
+		        COALESCE(CAST(strftime('%H', created_at, '+8 hours') AS INTEGER), 0) AS bj_hour,
+		        COALESCE(CAST(strftime('%w', created_at, '+8 hours') AS INTEGER), 0) AS bj_wd,
 		        COUNT(*), COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0),
 		        COALESCE(SUM(cached_tokens), 0)
 		 FROM ai_usage`+where+`
-		 GROUP BY day, model, kind ORDER BY day DESC`, args...)
+		 GROUP BY day, model, kind, bj_hour, bj_wd ORDER BY day DESC`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -715,7 +728,8 @@ func (d *Database) ListAIUsageGroups(since string) ([]AIUsageGroup, error) {
 	out := []AIUsageGroup{}
 	for rows.Next() {
 		var g AIUsageGroup
-		if err := rows.Scan(&g.Day, &g.Model, &g.Kind, &g.Requests, &g.PromptTokens, &g.CompletionTokens, &g.CachedTokens); err != nil {
+		if err := rows.Scan(&g.Day, &g.Model, &g.Kind, &g.Hour, &g.Weekday,
+			&g.Requests, &g.PromptTokens, &g.CompletionTokens, &g.CachedTokens); err != nil {
 			return nil, err
 		}
 		out = append(out, g)
@@ -793,6 +807,55 @@ func (d *Database) LastAIMessage(convID string) (*AIMessage, error) {
 	}
 	m := mapToAIMessage(row)
 	return &m, nil
+}
+
+// TruncateAIMessagesFrom 删除 targetID 及其之后的所有消息，并重算会话累计 token。
+//
+// 用于「重新生成 / 编辑重发」：这两种动作都是在改写历史，不能只往后面追加一个新回答。
+// 追加式重新生成会绕过 saveUserTurn 的幂等判据（它比的是「最后一条是不是同内容的
+// user」，而重新生成时最后一条是 assistant），刷新后就会冒出一条重复的提问。
+//
+// 删除 + 重算必须在一条事务里：删完却没重算会留下「历史短了、侧栏 token 没变」的不一致；
+// 目标 id 找不到时绝不能退化成「删掉之后所有消息」，那会铲掉整段对话。
+//
+// 注意 Transaction 持着 d.mu，事务内只能用 tx —— 再调 d.QueryOne / d.ExecuteParams
+// 会二次加锁，RWMutex 不可重入，启动期就死锁。
+func (d *Database) TruncateAIMessagesFrom(convID, targetID string) error {
+	convID, targetID = strings.TrimSpace(convID), strings.TrimSpace(targetID)
+	if convID == "" || targetID == "" {
+		return fmt.Errorf("会话或消息 id 为空")
+	}
+	return d.Transaction(func(tx *sql.Tx) error {
+		var rid int64
+		err := tx.QueryRow(
+			"SELECT rowid FROM ai_messages WHERE conv_id = ? AND id = ?", convID, targetID,
+		).Scan(&rid)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("这条消息已被上下文压缩清理，无法编辑")
+		}
+		if err != nil {
+			return err
+		}
+		if _, err := tx.Exec(
+			"DELETE FROM ai_messages WHERE conv_id = ? AND rowid >= ?", convID, rid,
+		); err != nil {
+			return err
+		}
+		// 会话行记的是「现存上下文的累计花费」，被删掉的 assistant 回答不该继续挂在侧栏上。
+		// ai_usage 明细刻意不清：那是一次真实发生过的模型调用，钱照样算（见 ai_usage.go）。
+		var promptTokens, completionTokens int
+		if err := tx.QueryRow(
+			"SELECT COALESCE(SUM(prompt_tokens), 0), COALESCE(SUM(completion_tokens), 0) "+
+				"FROM ai_messages WHERE conv_id = ? AND role = 'assistant'", convID,
+		).Scan(&promptTokens, &completionTokens); err != nil {
+			return err
+		}
+		_, err = tx.Exec(
+			"UPDATE ai_conversations SET prompt_tokens = ?, completion_tokens = ?, updated_at = ? WHERE id = ?",
+			promptTokens, completionTokens, now(), convID,
+		)
+		return err
+	})
 }
 
 // AddAIMessage 追加一条消息（不含 reasoning）

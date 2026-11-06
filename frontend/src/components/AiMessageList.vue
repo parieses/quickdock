@@ -12,7 +12,7 @@
 import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  ArrowDown, Bot, ChevronDown, ChevronRight, Copy, FileText, Play, RotateCcw, StickyNote, Undo2, Wrench,
+  ArrowDown, Bot, ChevronDown, ChevronRight, Copy, FileText, Pencil, Play, RotateCcw, StickyNote, Undo2, Wrench,
 } from '@lucide/vue'
 import AgentRunTree from './AgentRunTree.vue'
 import AiDiffView from './AiDiffView.vue'
@@ -96,6 +96,45 @@ const runRules = computed<AIRuleFile[]>(() => activeRun.value?.rules ?? NO_RULES
 // 「文件已经写完了」和「看得见」之间隔一整轮回答。
 const streamArtifacts = computed<AIArtifact[]>(() => artifactsFromCalls(streamTools.value))
 
+// ---- 编辑重发 ----
+// 编辑态放在消息气泡里而不是回填输入框：改的是「那条历史提问」，就地改才不会
+// 让人以为要重新发一条新消息。截断与重发交给父组件，二次确认也在它那边。
+const editingId = ref('')
+const editDraft = ref('')
+const editInputRef = ref<HTMLTextAreaElement | null>(null)
+// v-for 里的字符串 ref 会被收集成数组，用函数 ref 才拿得到那个唯一的 textarea。
+function setEditInput(el: unknown) {
+  if (el) editInputRef.value = el as HTMLTextAreaElement
+}
+
+function beginEdit(m: AIMessage) {
+  editingId.value = m.id
+  editDraft.value = m.content
+  void nextTick(() => { editInputRef.value?.focus() })
+}
+function cancelEdit() {
+  editingId.value = ''
+  editDraft.value = ''
+}
+function saveEdit(m: AIMessage) {
+  const text = editDraft.value.trim()
+  if (!text) return
+  if (text === m.content.trim()) { cancelEdit(); return }
+  emit('edit', m, editDraft.value)
+  cancelEdit()
+}
+// Esc 必须自己吃掉：AIPage 的全局 Esc 是「停止生成」，编辑到一半按 Esc
+// 不该把别的会话里正在跑的任务停掉。输入法拿 Esc 取消候选时一律不处理。
+function onEditKeydown(e: KeyboardEvent, m: AIMessage) {
+  if (e.isComposing || e.keyCode === 229) return
+  if (e.key === 'Escape') {
+    e.preventDefault(); e.stopPropagation(); cancelEdit(); return
+  }
+  if (e.key === 'Enter' && !e.shiftKey && !e.ctrlKey && !e.metaKey) {
+    e.preventDefault(); e.stopPropagation(); saveEdit(m)
+  }
+}
+
 // 命令在跑的时候输出在卡片里往下长：不跟着滚，用户看到的永远是开头几行，
 // 而这恰恰是最没信息量的部分（pip 真正在动的进度在最后一行）。
 // 只跟「正在跑」的卡片——已经跑完的卡片用户可能正在往上翻，不该被拽回底部。
@@ -138,8 +177,10 @@ const emit = defineEmits<{
   (e: 'open-jobs', id: string): void
   (e: 'run-plan', m: AIMessage): void
   (e: 'retry'): void
-  /** 重新生成上一条回答：旧回答保留，新回答接在后面 */
+  /** 重新生成上一条回答 */
   (e: 'regenerate'): void
+  /** 编辑某条历史提问并重发：父组件负责二次确认与截断重发 */
+  (e: 'edit', m: AIMessage, content: string): void
   (e: 'msg-click', ev: MouseEvent): void
   (e: 'msg-mouseup', ev: MouseEvent | KeyboardEvent): void
   (e: 'msg-contextmenu', ev: MouseEvent): void
@@ -524,7 +565,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m)]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -611,6 +652,22 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           <div v-if="m.role === 'assistant'" class="ai-msg-content ai-md">
             <div v-for="(b, bi) in renderMessageBlocks(m)" :key="bi" class="ai-md-block" v-html="b"></div>
           </div>
+          <div v-else-if="editingId === m.id" class="ai-msg-edit">
+            <textarea
+              :ref="setEditInput"
+              v-model="editDraft"
+              class="ai-msg-edit-input"
+              rows="3"
+              @keydown="onEditKeydown($event, m)"
+            ></textarea>
+            <div class="ai-msg-edit-ops">
+              <button class="qd-btn qd-btn-primary qd-btn-sm" :disabled="!editDraft.trim()" @click="saveEdit(m)">
+                {{ t('aiEditResend') }}
+              </button>
+              <button class="qd-btn qd-btn-sm" @click="cancelEdit">{{ t('cancel') }}</button>
+              <span class="ai-msg-edit-hint">{{ t('aiEditResendHint') }}</span>
+            </div>
+          </div>
           <div v-else class="ai-msg-content ai-plain">{{ m.content }}</div>
           <!-- 回答产物：靠右贴边的可折叠列表（同常见 AI IDE 的产物区样式）。
                数据就在 tool_calls 里，不用后端另发事件；点击预览（读磁盘现状）。 -->
@@ -650,6 +707,15 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             </button>
             <button v-if="m.content" class="ai-copy" @click="emit('copy', m.content)" :title="t('copy')">
               <Copy :size="12" /> {{ t('copy') }}
+            </button>
+            <!-- 编辑历史提问：只在没有流在跑时给，编辑期间后端会截断这条之后的所有消息 -->
+            <button
+              v-if="!streaming && m.role === 'user' && m.content && editingId !== m.id"
+              class="ai-copy"
+              :title="t('aiEditResendHint')"
+              @click="beginEdit(m)"
+            >
+              <Pencil :size="12" /> {{ t('aiEdit') }}
             </button>
             <button v-if="m.role === 'assistant' && m.content" class="ai-copy" @click="emit('save-note', m.content)" :title="t('aiSaveToNote')">
               <StickyNote :size="12" /> {{ t('aiSaveToNote') }}
@@ -758,8 +824,8 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
         <!-- 重新生成上一条回答。放在消息流末尾而不是每条回复的按钮组里：
              只有最后一条重答才有意义（前面的重答会与后面已有的回答矛盾），
              而每条都挂一个按钮等于给长会话再添 200 个可点区域。
-             旧回答**不删**：调试提示词时能对照两版反而是优点，删要连带处理
-             usage 统计、回滚点、run 节点引用。 -->
+             后端按 targetId 截断旧回答并重算会话 token（ai_usage 明细保留：
+             那是一次真实花过钱的调用），所以刷新后不会冒出重复的提问气泡。 -->
         <div v-if="canRegenerate && !streaming" class="ai-regen">
           <button class="ai-regen-btn" :title="t('aiRegenerateHint')" @click="emit('regenerate')">
             <RotateCcw :size="12" /> {{ t('aiRegenerate') }}
@@ -1624,4 +1690,23 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-img-broken { height: 80px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--color-text-disabled); }
 
 @keyframes ai-blink { 50% { opacity: 0; } }
+
+/* ---- 就地编辑历史提问 ---- */
+.ai-msg-edit { display: flex; flex-direction: column; gap: var(--space-3); }
+.ai-msg-edit-input {
+  width: 100%;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+.ai-msg-edit-input:focus { border-color: var(--color-accent); }
+.ai-msg-edit-ops { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
+.ai-msg-edit-hint { font-size: 11px; color: var(--color-text-muted); }
 </style>

@@ -158,11 +158,11 @@ watch(() => props.visible, (v) => {
       <div class="field-row">
         <label class="field field-half">
           <span class="field-label">{{ t('aiPromptsName') }}</span>
-          <input v-model="editing.name" type="text" maxlength="60" :placeholder="t('aiPromptsNamePh')" />
+          <input v-model="editing.name" class="field-input" type="text" maxlength="60" :placeholder="t('aiPromptsNamePh')" />
         </label>
         <label class="field field-half">
           <span class="field-label">{{ t('aiPromptsCategory') }}</span>
-          <input v-model="editing.category" type="text" maxlength="20" :placeholder="t('aiPromptsCategoryPh')" />
+          <input v-model="editing.category" class="field-input" type="text" maxlength="20" :placeholder="t('aiPromptsCategoryPh')" />
         </label>
       </div>
       <label class="field">
@@ -307,6 +307,12 @@ watch(() => props.visible, (v) => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   background: var(--color-bg-tertiary);
+}
+
+/* 名称/分类输入框沿用全局 .field-input，但底色要抬到 bg-primary：
+ * 编辑器卡片本身是 bg-tertiary，同色会让输入框只剩一圈边框，看着像没样式。 */
+.prompt-editor .field-input {
+  background: var(--color-bg-primary);
 }
 
 /* 模板正文按代码排版：缩进与换行本身是提示词的一部分 */

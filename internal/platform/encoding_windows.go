@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"bytes"
 	"strings"
 	"unicode/utf8"
 
@@ -92,4 +93,33 @@ func DecodeConsoleText(s string) string {
 		return s
 	}
 	return strings.Join(lines, "")
+}
+
+// DecodeConsoleBytes 把「确定来自同一个控制台程序」的完整输出按系统代码页解码成 UTF-8。
+//
+// 与 DecodeConsoleText 的区别：后者服务的是 cmd + 多个程序混写同一条管道的场景，
+// 只能逐行猜哪一段不是 UTF-8；这里调用方明确知道整段来自同一个程序、同一种编码
+// （典型是 es.exe 的文件检索结果），直接整块按代码页解码。逐行猜测在这里会漏：
+// GBK 双字节有可能恰好凑成合法 UTF-8 序列，整行会被误判「已是 UTF-8」而原样返回，
+// 界面上照样是乱码。
+//
+// 中文 Windows 实测（2026-11-06）：es.exe 1.1.0.38 无论默认输出还是 -json，中文路径
+// 都按 936(GBK) 写字节，且命令行没有 -utf8 开关，编码只能在接收端归一。
+func DecodeConsoleBytes(b []byte) []byte {
+	if len(b) == 0 {
+		return b
+	}
+	// 程序自己带 BOM 声明 UTF-8 时按声明走（剥掉 BOM，不再按代码页解一遍）。
+	if bytes.HasPrefix(b, []byte{0xEF, 0xBB, 0xBF}) {
+		return b[3:]
+	}
+	enc := consoleEncodingByCP(consoleCP())
+	if enc == nil { // UTF-8 代码页，或未收录的代码页：原样返回最安全
+		return b
+	}
+	out, _, err := transform.Bytes(enc.NewDecoder(), b)
+	if err != nil {
+		return b
+	}
+	return out
 }

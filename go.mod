@@ -4,6 +4,7 @@ go 1.26.0
 
 require (
 	github.com/dop251/goja v0.0.0-20261029153331-f81816846776
+	github.com/emersion/go-imap/v2 v2.0.0-beta.7
 	github.com/google/uuid v1.6.0
 	github.com/pkg/sftp v1.13.11
 	github.com/wailsapp/wails/v3 v3.0.0
@@ -23,6 +24,8 @@ require (
 	github.com/coder/websocket v1.8.14 // indirect
 	github.com/dlclark/regexp2/v2 v2.11.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
+	github.com/emersion/go-message v0.18.1 // indirect
+	github.com/emersion/go-sasl v0.0.0-20231106173351-e73c9f7bad43 // indirect
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/go-sourcemap/sourcemap v2.1.3+incompatible // indirect
 	github.com/godbus/dbus/v5 v5.2.2 // indirect

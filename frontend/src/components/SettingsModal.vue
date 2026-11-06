@@ -58,6 +58,24 @@ const emit = defineEmits<{ close: [] }>()
 const { markSeen } = navBadges()
 
 const activePage = ref<string | null>(null)
+// 二级 tab：'ai:usage' 里的 usage。只有 AI 与历史两页内部有分段，其余传空。
+// 与 activePage 分开存是因为它要**原样透传**给子组件——父组件不该知道 AI 页有哪些 tab，
+// 合法性由子组件自己校验（脏值就当没传）。
+const activeTab = ref('')
+
+// 「存储与同步」页内三段。与 AI 页的分段不同，这一页的三块内容都在本组件里，
+// 所以段值单独存一份：activeTab 只用来接深链（'backup:sync'），平时由按钮直接改这里。
+// 深链值不合法（含空）一律落回第一段——深链是「尽量帮忙」，不该因为写错就停在空白页。
+type BackupTab = 'storage' | 'sync' | 'snapshot'
+const backupTab = ref<BackupTab>('storage')
+const backupTabs = computed<{ value: BackupTab; label: string }[]>(() => [
+  { value: 'storage', label: t('storageLocation') },
+  { value: 'sync', label: t('sync') },
+  { value: 'snapshot', label: t('snapshot') },
+])
+watch(activeTab, (v) => {
+  backupTab.value = v === 'sync' || v === 'snapshot' ? v : 'storage'
+})
 // 无论从哪个入口打开设置（footer 按钮 / AI 页 / 命令面板），都视为看过设置内的
 // 待读信息（崩溃记录角标）—— 只靠侧栏 footer 清水位，会漏掉其它打开路径
 watch(() => props.visible, (v) => { if (v) markSeen('settings') })
@@ -117,6 +135,20 @@ function resolvePage(key: string): string {
   return PAGE_ALIASES[key] ?? key
 }
 
+/**
+ * 深链定位：'ai:usage' → 页 ai、页内分段 usage。
+ *
+ * 分隔符用 ':' 而不是 '/':通知中心的 refType 本来就是「settings:xxx」这种冒号式，
+ * 复用同一个符号，后端以后推 settings:ai:usage 前端不用改。
+ * 二级段原样交给子组件，合法性由子组件判断（父组件不该知道 AI 页有哪几个 tab）。
+ */
+function applyInitialPage(raw?: string) {
+  if (!raw) return
+  const idx = raw.indexOf(':')
+  activePage.value = resolvePage(idx < 0 ? raw : raw.slice(0, idx))
+  activeTab.value = idx < 0 ? '' : raw.slice(idx + 1)
+}
+
 function menuMatches(m: { key: string; label: string; desc: string }, qLC: string): boolean {
   if (m.label.toLowerCase().includes(qLC)) return true
   if (m.desc.toLowerCase().includes(qLC)) return true
@@ -173,12 +205,15 @@ watch(() => props.visible, (v) => {
 
 function selectMenu(key: string) {
   activePage.value = resolvePage(key)
+  // 手动点菜单 = 「进这一页的默认视图」；不清的话会沿用上次深链留下的页内分段
+  activeTab.value = ''
   // 选了就走：过滤条件留着，从设置页返回根菜单时反而要找半天为什么少了一半
   settingsQuery.value = ''
 }
 
 function close() {
   activePage.value = null
+  activeTab.value = ''
   emit('close')
 }
 
@@ -712,7 +747,7 @@ watch(() => props.visible, async (val) => {
     if (val) {
       if (props.initialPage) {
         // 兼容旧入口：'sync' / 'snapshot' / 'data' / 'storage' … 经 PAGE_ALIASES 落到当前页
-        activePage.value = resolvePage(props.initialPage)
+        applyInitialPage(props.initialPage)
       }
   }
 }, { immediate: false })
@@ -850,6 +885,7 @@ async function toggleAutoStart() {
                 v-for="item in group.items"
                 :key="item.key"
                 :class="['menu-row', { active: activePage === item.key }]"
+                :title="item.desc"
                 @click="selectMenu(item.key)"
               >
                 <component :is="item.icon" :size="18" class="menu-row-icon" />
@@ -871,6 +907,7 @@ async function toggleAutoStart() {
                 v-for="item in footerItems"
                 :key="item.key"
                 :class="['menu-row about-row', { active: activePage === item.key }]"
+                :title="item.desc"
                 @click="selectMenu(item.key)"
               >
                 <component :is="item.icon" :size="18" class="menu-row-icon" />
@@ -1078,10 +1115,23 @@ async function toggleAutoStart() {
             <SettingsClipboardRules />
           </div>
 
-          <!-- 数据与备份：存储位置 + 同步 + 快照（原「存储位置」「同步与快照」两项合并） -->
+          <!-- 数据与备份：存储位置 / 同步 / 快照。
+               以前是「三段竖着堆」，同步那块要滚过整张存储表单才看得见；
+               三件事互相独立（放哪 / 怎么备份到远端 / 定时留底），分段比滚动短。 -->
           <div v-else-if="activePage === 'backup'" class="content-page content-left">
-            <div class="section">
-              <h3 class="section-title">{{ t('storageLocation') }}</h3>
+            <div class="settings-tabs" role="tablist">
+              <button
+                v-for="o in backupTabs"
+                :key="o.value"
+                type="button"
+                role="tab"
+                :aria-selected="backupTab === o.value"
+                :class="['qd-btn', 'qd-btn-sm', { 'is-on': backupTab === o.value }]"
+                @click="backupTab = o.value"
+              >{{ o.label }}</button>
+            </div>
+            <!-- 存储段的首行说明保留、标题去掉：tab 已经写了「存储位置」，再说一遍是重复。 -->
+            <div v-show="backupTab === 'storage'" class="section">
               <p class="section-desc">{{ t('storageDesc') }}</p>
 
               <div class="setting-row">
@@ -1151,17 +1201,21 @@ async function toggleAutoStart() {
               <p class="field-hint">{{ t('storageRestartHint') }}</p>
               <p class="result-hint" v-if="storageMsg">{{ storageMsg }}</p>
             </div>
-            <SettingsSync :visible="activePage === 'backup'" @close="close" />
-            <SettingsSnapshot :visible="activePage === 'backup'" @close="close" />
+            <!-- v-show 而不是 v-if：两者内部都有表单草稿（WebDAV 地址、快照名），
+                 切走再切回不该丢；但加载只看 visible，没切到这一段就不发请求。 -->
+            <SettingsSync v-show="backupTab === 'sync'"
+                          :visible="activePage === 'backup' && backupTab === 'sync'" @close="close" />
+            <SettingsSnapshot v-show="backupTab === 'snapshot'"
+                              :visible="activePage === 'backup' && backupTab === 'snapshot'" @close="close" />
           </div>
           <!-- 历史：最近动态 + 回收站（页内分段切换，两者都是「回头看一眼」型信息） -->
           <div v-else-if="activePage === 'history'" class="content-page content-flush">
-            <SettingsHistory />
+            <SettingsHistory :initial-tab="activeTab" />
           </div>
 
           <!-- AI 助手 -->
           <div v-else-if="activePage === 'ai'" class="content-page content-left">
-            <SettingsAI :visible="activePage === 'ai'" />
+            <SettingsAI :visible="activePage === 'ai'" :initial-tab="activeTab" />
           </div>
 
           <!-- 导航项显隐 / 排序：被隐藏的导航项在这里总能找回来 -->

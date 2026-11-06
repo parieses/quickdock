@@ -26,14 +26,46 @@ function reportFrontendError(kind: string, message: string, stack: string) {
   }
 }
 
+// dev 期「依赖预构建换哈希」的自愈：Vite 每次（重新）启动都会重跑 optimizeDeps 并换一个
+// browserHash，而已经加载完的模块图里还留着 `/node_modules/.vite/deps/xxx.js?v=旧哈希`
+// 的地址。之后第一次打开的重型页面（文件搜索 / AI / SSH）一拉懒加载 chunk 就被
+// dev server 以 504（Outdated Optimize Dep）拒掉，页面半空白，只有手动刷新能救。
+// 这里一次性自动刷新：只跑 DEV、且 15 秒内只刷一次，避免「刷完还是坏」变成死循环。
+// 生产没有 dep 优化器，所以整块包在 DEV 判断里。
+const STALE_DEP_RELOAD_KEY = 'qd.staleDepReloadAt'
+const STALE_DEP_RE = /Outdated Optimize Dep|Failed to fetch dynamically imported module|Importing a module script failed/i
+function reloadOnStaleDep(msg: string): boolean {
+  if (!STALE_DEP_RE.test(msg)) return false
+  const now = Date.now()
+  let last = 0
+  try { last = Number(sessionStorage.getItem(STALE_DEP_RELOAD_KEY) || 0) } catch { /* 隐私模式：当作没刷过 */ }
+  if (now - last < 15000) return true // 刚刷过又坏：不再刷，交给调用方上报
+  try { sessionStorage.setItem(STALE_DEP_RELOAD_KEY, String(now)) } catch { /* 记不住就退化成每次都刷，可接受 */ }
+  location.reload()
+  return true
+}
+if (import.meta.env.DEV) {
+  // Vite 官方的预加载失败钩子：不 preventDefault 的话它还会再抛一次 unhandledrejection
+  window.addEventListener('vite:preloadError', (e: any) => {
+    e?.preventDefault?.()
+    reloadOnStaleDep(String(e?.payload?.message || e?.payload || 'Failed to fetch dynamically imported module'))
+  })
+}
+
 window.addEventListener('error', (e: ErrorEvent) => {
   const err = e.error as any
-  reportFrontendError('error', e.message || String(err || 'unknown'), err?.stack || '')
+  const msg = e.message || String(err || 'unknown')
+  // 懒加载 chunk 拉不到时，浏览器也会抛一个 error 事件（上面那条 504 就是从这里来的）
+  if (import.meta.env.DEV && reloadOnStaleDep(msg)) return
+  reportFrontendError('error', msg, err?.stack || '')
 })
 
 window.addEventListener('unhandledrejection', (e: PromiseRejectionEvent) => {
   const r: any = e.reason
-  reportFrontendError('unhandledrejection', r?.message || String(r), r?.stack || '')
+  const msg = r?.message || String(r)
+  // 先试自愈（会触发刷新），刷新请求发出后这次上报就不必了：页面马上就没了
+  if (import.meta.env.DEV && reloadOnStaleDep(msg)) return
+  reportFrontendError('unhandledrejection', msg, r?.stack || '')
 })
 
 const app = createApp(App)
@@ -53,9 +85,13 @@ function vueComponentName(vm: any): string {
 }
 
 app.config.errorHandler = (err: any, vm: any, info: string) => {
+  const msg = err?.message || String(err)
+  // defineAsyncComponent 的加载失败被 Vue 自己接住了（不会冒到 unhandledrejection），
+  // 于是「切到某个懒加载页面时 chunk 504」只会走到这里 —— 同一个自愈入口一并处理
+  if (import.meta.env.DEV && reloadOnStaleDep(msg)) return
   const name = vueComponentName(vm)
   const label = name ? `vue:${info} (${name})` : 'vue:' + info
-  reportFrontendError(label, err?.message || String(err), err?.stack || '')
+  reportFrontendError(label, msg, err?.stack || '')
 }
 
 // 渲染进程看门狗：宿主每 5s 经 qd:heartbeat 广播一次；若可见窗口连续 ~30s 收不到心跳，

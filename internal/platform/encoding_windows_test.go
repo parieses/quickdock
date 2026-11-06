@@ -82,3 +82,35 @@ func TestDecodeConsoleTextMixed(t *testing.T) {
 		t.Errorf("合法 UTF-8 不应被改写: %q", got)
 	}
 }
+
+// TestDecodeConsoleBytesBOMAndASCII 不依赖系统代码页的边界：BOM 声明优先、纯 ASCII 原样。
+func TestDecodeConsoleBytesBOMAndASCII(t *testing.T) {
+	if got := string(DecodeConsoleBytes([]byte{0xEF, 0xBB, 0xBF, 'o', 'k', '\r', '\n'})); got != "ok\r\n" {
+		t.Errorf("带 UTF-8 BOM 的输出应剥掉 BOM 后原样返回，实际 %q", got)
+	}
+	if got := string(DecodeConsoleBytes([]byte("12345\r\n"))); got != "12345\r\n" {
+		t.Errorf("纯 ASCII 不应被改写，实际 %q", got)
+	}
+	if got := DecodeConsoleBytes(nil); got != nil {
+		t.Errorf("空输入应原样返回 nil，实际 %v", got)
+	}
+}
+
+// TestDecodeConsoleBytesESChinese —— 文件搜索页中文乱码的回归防线。
+// es.exe 1.1.0.38 的结果按 936(GBK) 写字节（实测：默认输出与 -json 都是，
+// 命令行也没有 -utf8 开关）。整块解码后必须是可直接显示、可直接 os.Stat 的中文路径。
+func TestDecodeConsoleBytesESChinese(t *testing.T) {
+	if consoleCP() != 936 {
+		t.Skipf("系统控制台代码页为 %d，非 936(GBK)，跳过中文解码断言", consoleCP())
+	}
+	// 本机 es.exe -n 5 "法老之鹰六杀.mp4" 的真实 stdout（GBK 字节 + CRLF）。
+	raw := []byte("H:\\Users\\Mr.liang\\Videos\\\xd3\xce\xcf\xb7\\\xb7\xa8\xc0\xcf\xd6\xae\xd3\xa5\xc1\xf9\xc9\xb1.mp4\r\n")
+	want := "H:\\Users\\Mr.liang\\Videos\\游戏\\法老之鹰六杀.mp4\r\n"
+	got := string(DecodeConsoleBytes(raw))
+	if got != want {
+		t.Errorf("es.exe 输出解码不符:\n got: %q\nwant: %q", got, want)
+	}
+	if strings.ContainsRune(got, '\uFFFD') {
+		t.Errorf("解码结果不应含替换字符: %q", got)
+	}
+}

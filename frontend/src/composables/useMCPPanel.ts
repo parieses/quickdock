@@ -10,6 +10,9 @@ import {
   MCPStop,
   MCPRestart,
   MCPCheck,
+  MCPToken,
+  MCPSetTokenEnabled,
+  MCPRotateToken,
 } from '../../bindings/quickdock/services/mcp/mcpservice'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
@@ -71,7 +74,11 @@ export interface MCPClientSnippet {
 // 从 EnvironmentPage 抽出（页面 script 过长），模板引用保持同名，故原样解构即可。
 export function useMCPPanel(selectedId: Ref<string>) {
   const { t } = useI18n()
-  const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!
+  const toast = inject<{
+    error: (m: string) => void
+    success: (m: string) => void
+    confirm: (m: string) => Promise<boolean>
+  }>('toast')!
 
   const mcpInfo = reactive({ running: false, endpoint: '', port: 0, maxLevel: 1, tools: 0, total: 0, blocked: 0, agent: 0 })
   const mcpTools = ref<MCPToolInfo[]>([])
@@ -83,15 +90,31 @@ export function useMCPPanel(selectedId: Ref<string>) {
   // mcpCheck 自检结论：端口在监听 ≠ 服务可用，握手 + 列工具才算通。
   const mcpCheck = reactive({ busy: false, ok: false, text: '' })
 
+  // 访问令牌单独一块状态：它是敏感值，不塞进 mcpInfo（状态刷新会把整份对象
+  // Object.assign 过去，混在一起很容易被日志/调试输出带出去）。
+  const mcpToken = reactive({ value: '', require: false, visible: false, busy: false })
+  // 掩码只用于「不显示」的那一刻：复制、客户端接入片段永远用真值。
+  const mcpTokenMasked = computed(() => {
+    const v = mcpToken.value
+    if (!v) return ''
+    if (v.length <= 8) return '••••••••'
+    return v.slice(0, 4) + '••••••••••••••••••••••••' + v.slice(-4)
+  })
+
   // loadMCP 拉取 MCP 状态/工具/客户端配置。服务启停后需重新调用（版本表的启停按钮走 Env 通用接口，
   // 不经过本面板，故额外在 selectedId 变化与本面板刷新按钮时各拉一次）。
   async function loadMCP() {
     mcpLoading.value = true
     try {
-      const [st, tools, cfg] = await Promise.all([MCPStatus(), MCPTools(), MCPClientConfig()])
+      const [st, tools, cfg, tk] = await Promise.all([MCPStatus(), MCPTools(), MCPClientConfig(), MCPToken()])
       const s = unwrap<{ running: boolean; endpoint: string; port: number; maxLevel: number; tools: number; total: number; blocked: number; agent: number }>(st)
       if (s) Object.assign(mcpInfo, s)
       mcpTools.value = unwrap<MCPToolInfo[]>(tools) || []
+      const t0 = unwrap<{ token: string; requireToken: boolean }>(tk)
+      if (t0) {
+        mcpToken.value = t0.token || ''
+        mcpToken.require = !!t0.requireToken
+      }
       const c = unwrap<{ clients: MCPClientSnippet[] }>(cfg)
       mcpClients.value = (c?.clients || []).map((x) => ({
         id: x.id || '',
@@ -103,6 +126,54 @@ export function useMCPPanel(selectedId: Ref<string>) {
       toast.error(getErrorMessage(e))
     } finally {
       mcpLoading.value = false
+    }
+  }
+
+  // ---- 访问令牌 ----
+
+  function toggleMCPTokenVisible() { mcpToken.visible = !mcpToken.visible }
+
+  async function copyMCPToken() { await copyMCP(mcpToken.value) }
+
+  // setMCPTokenRequired 不用 v-model：开关要先落盘成功才改状态，失败得把
+  // checkbox 拨回去，否则界面显示「已开启」而后端其实没开。
+  async function setMCPTokenRequired(e: Event) {
+    const input = e.target as HTMLInputElement
+    const next = input.checked
+    if (mcpToken.busy || next === mcpToken.require) return
+    mcpToken.busy = true
+    try {
+      const r = unwrap<{ token: string; requireToken: boolean }>(await MCPSetTokenEnabled(next))
+      mcpToken.require = !!r?.requireToken
+      if (r?.token) mcpToken.value = r.token
+      // 开关一变，六份接入片段里的请求头也得跟着变，重拉一次而不是前端自己拼。
+      await loadMCP()
+      toast.success(t(mcpToken.require ? 'mcpTokenEnabled' : 'mcpTokenDisabled'))
+    } catch (err) {
+      input.checked = mcpToken.require
+      toast.error(getErrorMessage(err))
+    } finally {
+      mcpToken.busy = false
+    }
+  }
+
+  // rotateMCPToken 会让旧令牌立即失效，所有已配好的客户端都要重新复制片段，
+  // 所以必须先问一次；轮换后收起明文，避免新令牌长时间挂在屏幕上。
+  async function rotateMCPToken() {
+    if (mcpToken.busy) return
+    if (!(await toast.confirm(t('mcpTokenRotateConfirm')))) return
+    mcpToken.busy = true
+    try {
+      const r = unwrap<{ token: string; requireToken: boolean }>(await MCPRotateToken())
+      mcpToken.value = r?.token || ''
+      mcpToken.require = !!r?.requireToken
+      mcpToken.visible = false
+      await loadMCP()
+      toast.success(t('mcpTokenRotated'))
+    } catch (err) {
+      toast.error(getErrorMessage(err))
+    } finally {
+      mcpToken.busy = false
     }
   }
 
@@ -246,6 +317,8 @@ export function useMCPPanel(selectedId: Ref<string>) {
 
   return {
     mcpInfo, mcpTools, mcpToolGroups, mcpClients, mcpLoading, mcpBusy, mcpLevelHint, mcpCheck,
+    mcpToken, mcpTokenMasked,
     loadMCP, copyMCP, setMCPLevel, setMCPToolEnabled, startMCP, stopMCP, restartMCP, checkMCP,
+    toggleMCPTokenVisible, copyMCPToken, setMCPTokenRequired, rotateMCPToken,
   }
 }

@@ -12,6 +12,7 @@ import { useEnvOllama } from '../composables/useEnvOllama'
 import { useEnvGit } from '../composables/useEnvGit'
 import { useEnvEverything } from '../composables/useEnvEverything'
 import { useEnvMaintenance } from '../composables/useEnvMaintenance'
+import { pendingTarget } from '../composables/bridge'
 import { useEnvPath } from '../composables/useEnvPath'
 import { useEnvRuntimeModals } from '../composables/useEnvRuntimeModals'
 import {
@@ -507,7 +508,9 @@ function failState(r: RuntimeInfo, e: any) {
 const { certModal, loadCertStatus, ensureCertLoaded, certInstallRoot, certPickDir, certIssue } = useCertPanel(selectedId)
 const {
   mcpInfo, mcpTools, mcpToolGroups, mcpClients, mcpLoading, mcpBusy, mcpLevelHint, mcpCheck,
+  mcpToken, mcpTokenMasked,
   loadMCP, copyMCP, setMCPLevel, setMCPToolEnabled, startMCP, stopMCP, restartMCP, checkMCP,
+  toggleMCPTokenVisible, copyMCPToken, setMCPTokenRequired, rotateMCPToken,
 } = useMCPPanel(selectedId)
 const { webdavInfo, webdavURL, webdavExposed, webdavCmds, copyWebDAV, loadWebDAV } = useWebDAVPanel(selectedId)
 
@@ -1517,6 +1520,14 @@ watch(selectedId, (id) => {
 watch(() => props.initialSection, (v) => {
   if (v) selectedId.value = v
 })
+// 总览卡片的深链：点「端口占用」或某个常驻运行时，要直接落到那个区块，
+// 而不是回到本页默认的第一个运行时。取走即清空——留着会让下次从侧栏正常
+// 进环境管理时又跳一次。immediate 是为了吃「还没挂载就已经写好的目标」。
+watch(() => pendingTarget.value, (p) => {
+  if (!p || p.page !== 'environments' || !p.target) return
+  selectedId.value = p.target
+  pendingTarget.value = null
+}, { immediate: true })
 onUnmounted(() => {
   document.removeEventListener('click', onDocClick)
   if (off) off()
@@ -2242,6 +2253,29 @@ const s = currentRuntimeState
             {{ t('mcpNotRunning') }}
           </div>
           <p class="mcp-note">{{ t('mcpLocalOnly') }}</p>
+
+          <!-- 访问令牌：默认不强制校验，老客户端配置照常连；开启后所有 /mcp 请求
+               都要带令牌，六份接入片段由后端统一补上请求头，不自前端拼字符串。 -->
+          <div class="mcp-cfg-head"><span>{{ t('mcpTokenTitle') }}</span></div>
+          <div class="mcp-url-row">
+            <code class="mcp-url mcp-token-value">{{ mcpToken.visible ? mcpToken.value : mcpTokenMasked }}</code>
+            <button class="op-btn small" :disabled="!mcpToken.value" @click="toggleMCPTokenVisible">
+              {{ mcpToken.visible ? t('mcpTokenHide') : t('mcpTokenShow') }}
+            </button>
+            <button class="op-btn small" :disabled="!mcpToken.value" @click="copyMCPToken">{{ t('mcpTokenCopy') }}</button>
+            <button class="op-btn small" :disabled="mcpToken.busy" @click="rotateMCPToken">{{ t('mcpTokenRotate') }}</button>
+          </div>
+          <label class="mcp-token-require">
+            <input
+              type="checkbox"
+              :checked="mcpToken.require"
+              :disabled="mcpToken.busy"
+              @change="setMCPTokenRequired"
+            />
+            <span>{{ t('mcpTokenRequire') }}</span>
+          </label>
+          <p class="mcp-hint">{{ mcpToken.require ? t('mcpTokenOnHint') : t('mcpTokenOffHint') }}</p>
+          <p class="mcp-hint">{{ t('mcpTokenSecretHint') }}</p>
 
           <div class="mcp-level-row">
             <span class="mcp-label">{{ t('mcpToolLevel') }}</span>
@@ -3563,6 +3597,8 @@ const s = currentRuntimeState
 .mcp-check.ok { color: var(--color-success); }
 .mcp-check.err { color: var(--color-danger); }
 .mcp-note { margin: 0 0 6px; font-size: 11px; color: var(--color-text-muted); }
+.mcp-token-value { font-family: var(--font-mono, monospace); letter-spacing: .5px; }
+.mcp-token-require { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; }
 .mcp-level-hint { margin: 0 0 6px; font-size: 11px; color: var(--color-warning); }
 .mcp-client-path { margin: 0 0 6px; font-size: 11px; color: var(--color-text-muted); word-break: break-all; }
 .mcp-tool-row.is-blocked { opacity: .55; }

@@ -327,7 +327,7 @@ function matchLabel(r: ClipboardRule): string {
 
 <style scoped>
 /* 与 settings.css 的 .section 对齐（同宽、同段间距），合并进「剪贴板」页后视觉连续 */
-.cr-page { width: 100%; max-width: 600px; margin-top: 28px; }
+.cr-page { width: 100%; max-width: 720px; margin-top: 28px; }
 .page-title { margin: 0 0 4px; font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
 .cr-desc { margin: 0 0 16px; font-size: 12px; color: var(--color-text-disabled); line-height: 1.6; }
 

@@ -42,7 +42,7 @@ const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
 
 const emit = defineEmits<{ close: [] }>()
-const props = defineProps<{ visible: boolean }>()
+const props = defineProps<{ visible: boolean; initialTab?: string }>()
 
 // ── 页内分段 ────────────────────────────────────────────────────────
 // 原来六块内容全堆在一个滚动区里，找「外部 MCP 重连」要滚过整张用量表格。
@@ -50,7 +50,18 @@ const props = defineProps<{ visible: boolean }>()
 // 面板用 v-show 而不是 v-if：所有数据 ref 都在本组件，SettingsPrompts 的编辑草稿
 // 还在子组件里，切走再切回来不该被销毁重建，也不该每次重发一遍加载请求。
 type AiSettingsTab = 'model' | 'usage' | 'permission' | 'mcp' | 'skills' | 'prompts'
-const activeTab = ref<AiSettingsTab>('model')
+const AI_TABS: AiSettingsTab[] = ['model', 'usage', 'permission', 'mcp', 'skills', 'prompts']
+
+/**
+ * 初始分段：从总览的「AI 用量」卡、「+ 菜单 → 提示词/MCP」这类深链进来时，
+ * 应当直接落在对应面板上，而不是每次都从「模型配置」翻起。
+ *
+ * 与 activePage 一样依赖上层是 v-if 挂载（SettingsModal 的 activePage === 'ai' 分支）：
+ * 组件重建即读到新值。若哪天改成 v-show，这段要补 watch。
+ * 非法值静默回落 model —— 深链是「尽量帮忙」，不该因为传错一个字符串就白屏。
+ */
+const initial = props.initialTab as AiSettingsTab | undefined
+const activeTab = ref<AiSettingsTab>(initial && AI_TABS.includes(initial) ? initial : 'model')
 const aiTabs = computed<{ value: AiSettingsTab; label: string }[]>(() => [
   { value: 'model', label: t('aiTabModel') },
   { value: 'usage', label: t('aiTabUsage') },

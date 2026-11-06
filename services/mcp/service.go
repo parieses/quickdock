@@ -225,6 +225,55 @@ func (s *MCPService) MCPSetToolEnabled(name string, enabled bool) *services.ApiR
 	})
 }
 
+// mcpRuntime 取 MCP 运行时。令牌操作与工具开关都走它，省掉每个方法里重复一遍
+// 「App / Env 可能为 nil」的判空（初始化顺序靠后的极端情况下确实会为 nil）。
+func (s *MCPService) mcpRuntime() *envengine.MCPRuntime {
+	if s.App == nil || s.App.Env == nil {
+		return nil
+	}
+	return s.App.Env.MCPRuntime()
+}
+
+// ---- 访问令牌管理 ----
+
+// MCPToken 返回当前令牌与「是否强制校验」，供环境管理页展示。
+// 明文令牌只在本机进程内交给 WebView，不写日志、不进用量统计。
+func (s *MCPService) MCPToken() *services.ApiResult {
+	rt := s.mcpRuntime()
+	if rt == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	st := rt.TokenState()
+	return services.Ok(map[string]any{"token": st.Token, "requireToken": st.RequireToken})
+}
+
+// MCPSetTokenEnabled 开启/关闭强制校验。运行中改动立即生效，不用重启服务；
+// 返回最新状态让面板重拉接入片段（开关一变，片段里的请求头也得跟着变）。
+func (s *MCPService) MCPSetTokenEnabled(enabled bool) *services.ApiResult {
+	rt := s.mcpRuntime()
+	if rt == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	st := rt.SetRequireToken(enabled)
+	return services.Ok(map[string]any{
+		"token": st.Token, "requireToken": st.RequireToken,
+		"running": mcpsrv.Default.Running(),
+	})
+}
+
+// MCPRotateToken 轮换令牌：旧令牌立即失效，已配置的客户端必须重新复制接入片段。
+func (s *MCPService) MCPRotateToken() *services.ApiResult {
+	rt := s.mcpRuntime()
+	if rt == nil {
+		return services.FailMsg("env 未初始化")
+	}
+	st := rt.RotateToken()
+	return services.Ok(map[string]any{
+		"token": st.Token, "requireToken": st.RequireToken,
+		"running": mcpsrv.Default.Running(),
+	})
+}
+
 // mcpClient 一种 MCP 客户端的接入方式（配置片段 + 该写到哪个文件）。
 type mcpClient struct {
 	ID     string `json:"id"`
@@ -243,24 +292,38 @@ func (s *MCPService) MCPClientConfig() *services.ApiResult {
 	if ep == "" {
 		return services.Ok(map[string]any{"running": false, "clients": []mcpClient{}})
 	}
+	// 强制校验时六份片段必须一起带上令牌：漏一份就有一类客户端连不上，用户只会
+	// 看到「接了没反应」，很难想到是少了个请求头。片段里含明文令牌，面板要提醒
+	// 别把它贴到公开仓库。
+	token, require := "", false
+	if rt := s.mcpRuntime(); rt != nil {
+		st := rt.TokenState()
+		token, require = st.Token, st.RequireToken
+	}
+	headers, authHeader, cliHeader := "", "", ""
+	if require && token != "" {
+		headers = fmt.Sprintf(",\n      \"headers\": { \"Authorization\": \"Bearer %s\" }", token)
+		authHeader = fmt.Sprintf(` -H "Authorization: Bearer %s"`, token)
+		cliHeader = fmt.Sprintf(` --header "Authorization: Bearer %s"`, token)
+	}
 	serversJSON := fmt.Sprintf(`{
   "mcpServers": {
     "quickdock": {
       "type": "http",
-      "url": "%s"
+      "url": "%s"%s
     }
   }
-}`, ep)
+}`, ep, headers)
 	vsCodeJSON := fmt.Sprintf(`{
   "servers": {
     "quickdock": {
       "type": "http",
-      "url": "%s"
+      "url": "%s"%s
     }
   }
-}`, ep)
-	cli := "claude mcp add --transport http quickdock " + ep
-	curl := fmt.Sprintf("curl -s -X POST %s -H \"Content-Type: application/json\" -H \"Accept: application/json, text/event-stream\" -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'", ep)
+}`, ep, headers)
+	cli := "claude mcp add --transport http quickdock " + ep + cliHeader
+	curl := fmt.Sprintf("curl -s -X POST %s -H \"Content-Type: application/json\" -H \"Accept: application/json, text/event-stream\"%s -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}'", ep, authHeader)
 
 	clients := []mcpClient{
 		{ID: "claude-code", Label: "Claude Code", Config: cli},
@@ -270,7 +333,7 @@ func (s *MCPService) MCPClientConfig() *services.ApiResult {
 		{ID: "vscode", Label: "VS Code (Copilot)", Path: ".vscode/mcp.json", Config: vsCodeJSON},
 		{ID: "curl", Label: "curl 连通性验证", Config: curl},
 	}
-	return services.Ok(map[string]any{"running": true, "clients": clients})
+	return services.Ok(map[string]any{"running": true, "requireToken": require, "clients": clients})
 }
 
 // MCPCheck 连通性自检：像真实客户端一样走一次 initialize + tools/list。
@@ -283,8 +346,16 @@ func (s *MCPService) MCPCheck() *services.ApiResult {
 	if ep == "" {
 		return services.FailMsg("MCP 服务未启动")
 	}
+	// 自检也是走 HTTP 的真实请求，开启校验后同样得带令牌，否则面板会先报 401，
+	// 用户还以为是服务坏了。
+	token := ""
+	if rt := s.mcpRuntime(); rt != nil {
+		if st := rt.TokenState(); st.RequireToken {
+			token = st.Token
+		}
+	}
 	start := time.Now()
-	init, err := mcpRPC(ep, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"`+mcpsrv.ProtocolVersion+`","capabilities":{},"clientInfo":{"name":"quickdock-self-check","version":"1"}}}`)
+	init, err := mcpRPC(ep, `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"`+mcpsrv.ProtocolVersion+`","capabilities":{},"clientInfo":{"name":"quickdock-self-check","version":"1"}}}`, token)
 	if err != nil {
 		return services.FailMsg("握手失败: " + err.Error())
 	}
@@ -294,7 +365,7 @@ func (s *MCPService) MCPCheck() *services.ApiResult {
 		serverName, _ = info["name"].(string)
 		serverVersion, _ = info["version"].(string)
 	}
-	list, err := mcpRPC(ep, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`)
+	list, err := mcpRPC(ep, `{"jsonrpc":"2.0","id":2,"method":"tools/list"}`, token)
 	if err != nil {
 		return services.FailMsg("拉取工具清单失败: " + err.Error())
 	}
@@ -315,10 +386,13 @@ func (s *MCPService) MCPCheck() *services.ApiResult {
 
 // mcpRPC 向本机 MCP 端点发一条 JSON-RPC 请求，返回 result。
 // 显式禁用环境代理：127.0.0.1 走代理会表现为「连不上自己的服务」，很难想到是代理配置的锅。
-func mcpRPC(endpoint, body string) (map[string]any, error) {
+func mcpRPC(endpoint, body, token string) (map[string]any, error) {
 	req, err := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body))
 	if err != nil {
 		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")

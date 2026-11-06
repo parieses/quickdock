@@ -207,7 +207,10 @@ func (a *AIService) AIGetMessages(convID string) *services.ApiResult {
 		v := AIMessageView{AIMessage: m}
 		// 只有助手回复才有用量；用户消息行的 token 列恒为 0。
 		if m.Role == "assistant" {
-			if cost, ok := estimateCost(m.Model, m.PromptTokens, m.CompletionTokens, m.CachedTokens); ok {
+			// 历史消息按它自己的时间来判峰谷：翻一周前的对话时，
+			// 每条气泡下方的钱数要跟当时实际情况一致，而不是跟「现在几点」一致。
+			peak := isPeakForPricing(parseUsageTime(m.CreatedAt))
+			if cost, ok := estimateCost(m.Model, m.PromptTokens, m.CompletionTokens, m.CachedTokens, peak); ok {
 				v.Cost = &cost
 			}
 		}

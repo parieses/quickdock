@@ -25,6 +25,20 @@ export function getErrorMessage(e: unknown): string {
   return extractErrorMessage(raw)
 }
 
+/**
+ * 判断错误是不是「用户在系统对话框里点了取消」。
+ *
+ * Wails 把取消当成错误抛出来（`Dialog.OpenFile failed: error getting selection:
+ * cancelled by user`），不去区分的话，用户每按一次取消都会吃到一个红色 toast ——
+ * 而这本来是他主动做的正常操作。取消不算失败，调用方应当静默返回。
+ *
+ * 只认这两个词：Windows 用 "cancelled"，macOS 用 "canceled"，两边都覆盖。
+ */
+export function isDialogCanceled(e: unknown): boolean {
+  const msg = getErrorMessage(e) || String(e ?? '')
+  return /cancell?ed by (the )?user/i.test(msg)
+}
+
 function extractErrorMessage(raw: string): string {
   // 去掉 "Bound method returned an error: " 前缀
   const prefix = 'Bound method returned an error: '

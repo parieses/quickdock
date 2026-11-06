@@ -390,7 +390,17 @@ export function useAiRuns(deps: AiRunsDeps) {
 
   let segmentSeq = 0
 
-  async function send() {
+  /** 重新生成 / 编辑重发的附加参数（见 services/ai/ai_stream.go 的截断处理）。
+   *  普通发送不传，行为与原来完全一致。 */
+  interface SendOpts {
+    action?: 'regen' | 'edit'
+    targetId?: string
+    /** 请求没能开始（含截断被拒）：调用方把乐观改过的消息列表回滚。
+     *  SSE 中途的 event: error 不调它——那时历史已经截断，模型只是这一轮没答好。 */
+    onFailed?: () => void
+  }
+
+  async function send(opts?: SendOpts) {
     // 先读后清：任何提前 return（没配 Key / 空消息 / 这条还在跑）都不能把标志
     // 留给下一次手动发送，否则那条用户发言将不再出现在气泡里。
     const reuseUserBubble = retryPending.value
@@ -531,6 +541,10 @@ export function useAiRuns(deps: AiRunsDeps) {
           // 没开的才看这两个字段。分支空 = 用当前分支。
           worktree: worktreeEnabled.value || worktreeActive.value,
           worktreeBranch: worktreeBranch.value || undefined,
+          // 重新生成 / 编辑重发：后端在写响应头之前按 targetId 截断历史，
+          // 再让 saveUserTurn 的幂等与 buildAIMessages 按截断后的库跑这一轮。
+          action: opts?.action,
+          targetId: opts?.targetId,
         }),
         signal: ctrl.signal,
       })
@@ -833,6 +847,8 @@ export function useAiRuns(deps: AiRunsDeps) {
         run.error = msg
         // 报错横幅同理只给当前会话；后台那条留红点。
         if (run.convId && run.convId !== activeId.value) runFailed = true
+        // 请求没起来（400 = 服务端拒绝了截断）：把前端乐观收起的历史拉回来。
+        opts?.onFailed?.()
       }
     } finally {
       // 这一轮属于谁、用户还在不在看它。整个收尾都按这两个值判断：

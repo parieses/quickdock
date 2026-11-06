@@ -272,7 +272,7 @@ async function setDefault(tool: OpenTool) {
 <style scoped>
 .tool-manage {
   width: 100%;
-  max-width: 600px;
+  max-width: 720px;
   display: flex;
   flex-direction: column;
   gap: 16px;

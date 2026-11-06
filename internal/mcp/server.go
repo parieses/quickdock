@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -27,6 +28,11 @@ type Server struct {
 	addr   string
 	ver    string
 	sessID string
+	// 访问令牌。requireToken=false 时完全放行——老版本客户端的配置片段不带请求头，
+	// 升级后默认强制校验会让所有已配好的 Claude Code / Cursor 立刻连不上。
+	// 由 MCPRuntime 在 Start 与面板改动时通过 SetAuth 注入，本包不自己读配置文件。
+	token        string
+	requireToken bool
 }
 
 // Default 进程内唯一实例：环境管理（启停/状态）与业务工具注册共用。
@@ -62,6 +68,20 @@ func (s *Server) Start(port int, version string) (string, error) {
 	logger.I("[mcp] 服务已启动 url=http://%s/mcp", s.addr)
 	return s.addr, nil
 }
+
+// SetAuth 注入访问令牌与是否强制校验，运行中改动立即生效。
+// 不在 Stop 里清空：下次 Start 会重新 SetAuth，而面板在服务没启动时也要能读到令牌。
+func (s *Server) SetAuth(token string, require bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.token = token
+	// 没生成出令牌时不许把校验打开：那会让所有请求都 401 且无从恢复。
+	s.requireToken = require && token != ""
+}
+
+// NewToken 生成一枚新访问令牌（32 位十六进制）。供 env 层首次落盘与轮换复用，
+// 两处用同一个生成器，令牌格式不会出现两套答案。
+func NewToken() string { return randHex(16) }
 
 // Stop 关闭监听。未运行时返回 nil。
 func (s *Server) Stop() error {
@@ -119,6 +139,14 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden: cross-origin request rejected", http.StatusForbidden)
 		return
 	}
+	// 只把 /mcp 当受保护资源：GET / 是给浏览器确认「服务还活着」的自描述，
+	// 里面只有 endpoint 和工具数，没有令牌，放行不影响安全也方便排查。
+	// 放在路由分发之前，POST（tools/call）、DELETE、GET 405 一视同仁。
+	if r.URL.Path == "/mcp" && !s.authTokenOK(r) {
+		w.Header().Set("WWW-Authenticate", `Bearer realm="quickdock-mcp"`)
+		http.Error(w, "unauthorized: MCP token required", http.StatusUnauthorized)
+		return
+	}
 	switch {
 	case r.URL.Path == "/mcp" && r.Method == http.MethodPost:
 		s.handleRPC(w, r)
@@ -136,6 +164,27 @@ func (s *Server) handle(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.NotFound(w, r)
 	}
+}
+
+// authTokenOK 校验 /mcp 请求的访问令牌。
+// 两种写法都收：标准 Authorization: Bearer（大多数客户端的 headers 字段），
+// 以及 X-MCP-Token（只能配自定义请求头的客户端）。刻意不支持 ?token=：
+// URL 会进代理/访问日志，把长期有效的令牌写进日志得不偿失。
+func (s *Server) authTokenOK(r *http.Request) bool {
+	s.mu.Lock()
+	token, require := s.token, s.requireToken
+	s.mu.Unlock()
+	if !require || token == "" {
+		return true
+	}
+	got := ""
+	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
+		got = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
+	}
+	if got == "" {
+		got = r.Header.Get("X-MCP-Token")
+	}
+	return subtle.ConstantTimeCompare([]byte(got), []byte(token)) == 1
 }
 
 func (s *Server) handleRPC(w http.ResponseWriter, r *http.Request) {

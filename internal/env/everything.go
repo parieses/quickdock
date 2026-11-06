@@ -838,10 +838,16 @@ func (e *EverythingRuntime) Search(ctx context.Context, query string, limit int,
 
 // runEs 以 2s 超时执行一次 es.exe。每次调用独立计时——自愈重试不能共用首次那个
 // 可能已耗尽的超时窗口。
+//
+// 输出在这里统一归一化成 UTF-8：es.exe 按系统 OEM 代码页写结果（中文 Windows 是
+// 936/GBK），没有 -utf8 开关。不解码的话，路径会带着 U+FFFD 一路传到前端——
+// 文件名乱码（本次报的现象）、os.Stat 取不到修改时间、复制路径 / 资源管理器定位 /
+// 默认程序打开拿到的全是坏路径。日志与 -get-result-count 也共用这个返回值，一并受益。
 func (e *EverythingRuntime) runEs(ctx context.Context, esExe string, args []string) ([]byte, error) {
 	execCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 	defer cancel()
-	return sysutil.CommandContext(execCtx, esExe, args...).CombinedOutput()
+	out, err := sysutil.CommandContext(execCtx, esExe, args...).CombinedOutput()
+	return platform.DecodeConsoleBytes(out), err
 }
 
 // recoverInCooldown 自愈是否处于冷却期（纯内存判断，无副作用）。
