@@ -208,12 +208,20 @@
         <dd>SourceTree-style: branches, tags and remotes, stashes, file history and blame, amend, cherry-pick, branch comparison and side-by-side diff.</dd>
       </div>
       <div class="tool">
+        <dt>File search</dt>
+        <dd>A dedicated page backed by Everything: install guidance when it is missing, one-click start when it is not running; queries take Everything syntax directly, results sort, multi-select for copying paths, and files preview on the right.</dd>
+      </div>
+      <div class="tool">
         <dt>Log tail</dt>
         <dd><code>tail -f</code> on any local file. Realigns when the file rotates or is rewritten in place; pausable, with highlight filters.</dd>
       </div>
       <div class="tool">
+        <dt>Dashboard</dt>
+        <dd>A date bar with the lunar date, solar terms and the day's traditional do's and don'ts, plus local weather. Eight cards hold recent items, the file shelf, todos, mail verification codes, ports, resident services, Git and AI usage — clicking a row lands on that item.</dd>
+      </div>
+      <div class="tool">
         <dt>Notification center</dt>
-        <dd>Monitor outages, scheduled task results and finished AI answers land in one bell. Click through to the monitor or the conversation.</dd>
+        <dd>Monitor outages, scheduled task results, mail verification codes and finished AI answers land in one bell. Click through to the monitor, the task or the conversation.</dd>
       </div>
       <div class="tool">
         <dt>Data directory migration</dt>
@@ -346,6 +354,24 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">A file shelf and mail codes on the dashboard, plus a date bar with weather and daily notes</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>New file shelf on the dashboard: drop the files or folders you keep reopening onto the card and double-click to open. Use the corner button to pick a file or a folder. Only the path is stored — nothing is copied, moved or renamed, and a dead path is marked on the card.</li>
+          <li>New mail verification codes: add an IMAP mailbox and new codes show up on the dashboard. Click to copy, and a notification is pushed at the same time. The inbox is opened read-only with BODY.PEEK, so nothing is marked as read, and the app never sends, deletes or flags mail; message bodies are inspected in memory only while extracting the code.</li>
+          <li>New file search page backed by Everything: install guidance when it is missing, one-click start when it is not running, index progress while it builds. Sort by name, path, size or time, select many results to copy their paths, and preview the file on the right. The query box takes Everything syntax directly, with no extra filter form on top.</li>
+          <li>The dashboard now opens with a date bar: lunar date with leap months, sexagenary day, solar terms and festivals, current-city weather, and an expandable list of traditional do's and don'ts. Weather comes from Open-Meteo (no key) and is fetched by the host process, refreshed every 30 minutes in the background; the almanac is computed offline and labelled as folklore. The whole block can be turned off.</li>
+          <li>Dashboard cards were reordered and wired to deep links: clicking a row lands on the matching page with that item selected — a Git repository, the ports section, a resident runtime. The AI usage card now prices current models, with DeepSeek peak-hour multipliers on weekdays.</li>
+          <li>Optional access token for the MCP server (off by default): once enabled, every request must carry a Bearer token, and the panel can show, copy and rotate it.</li>
+          <li>Settings pages share one measure and control height: bot notifications and navigation items are centred at the same width, the prompt editor's text fields got their styling back, and deep links can now land on second-level tabs such as AI → Usage.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.40</span>
+          <span class="log-date">2026-11-04</span>
           <span class="log-title">A full UI polish, screenshot upgrades, and a built-in prompt library</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -387,23 +413,6 @@
           <li>Opening the standalone SSH terminal now shows a spinner ("Opening…") on the sidebar and fades the window in — no more silent wait on first launch.</li>
           <li>AI landing page: more example prompts, shuffled each open, with a "Shuffle" button to swap them instantly.</li>
           <li>AI engine: assorted stability and UX polish (background tasks, memory consolidation, token streaming).</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.37</span>
-          <span class="log-date">2026-11-02</span>
-          <span class="log-title">Long AI jobs get their own panel, and you can cut in mid-reply</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Long commands the AI runs — scripts, dev servers, builds — now show up as background jobs: a numbered terminal icon in the toolbar and a "running in background" bar above the input with the command and elapsed time. Open either to read logs or stop the job.</li>
-          <li>A command that hits its timeout is handed over to the background instead of being killed, and reports back to the same conversation when it ends. Quitting QuickDock stops all of them, so nothing keeps holding a port.</li>
-          <li>You can type while a reply is still streaming: the message is injected into the running turn, so the model picks it up and keeps going — no queueing, no need to hit stop first.</li>
-          <li>Tool rounds are no longer capped at a hard 36: it wraps up only when a whole batch makes no progress, and says so if it reaches the per-question budget — just ask it to continue.</li>
-          <li>Tool cards collapse to a single line — action, target and duration together, status shown by icon colour. Job rows read "running / finished · exit code 1", and "View" jumps to that entry in the panel.</li>
-          <li>Fixed background jobs silently failing under certain startup orders — the process did start, but neither the panel nor the bar above the input showed anything.</li>
         </ul>
       </details>
 

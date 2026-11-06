@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.40-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.41-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -53,8 +53,11 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 最近动态 | — | 「设置 → 历史」：左栏使用热度，右栏操作时间线，同页可切到回收站 |
 | 日志查看器 | — | 「设置 → 日志」按天查看应用日志与崩溃记录，可过滤级别、清理旧日志 |
 | 日志实时尾随 | — | 命令面板输入 `logtail`，对任意本机文件执行 `tail -f`，支持暂停与关键字高亮 |
-| 通知中心 | — | 侧栏底部铃铛，汇总监控状态、定时任务结果与 AI 回答完成，未读带角标 |
-| 总览 | — | 图表化首页：24 小时探测热力条、待办三色分布、最近提交、常驻运行时与端口占用，最近使用横排直达 |
+| 通知中心 | — | 侧栏底部铃铛，汇总监控状态、定时任务结果、邮件验证码与 AI 回答完成，未读带角标 |
+| 总览 | — | 首页顶部是日期条（农历 / 节气 / 今日宜忌 / 城市天气，可整块关掉）与六个概览读数，下面八张卡：最近使用、文件置物架、今日待办、邮件验证码、端口占用、常驻服务、Git 仓库状态、AI 用量；卡片上的每一行都能点进对应页面并停在那一条 |
+| 文件置物架 | — | 把今天要用的文件或目录拖到总览卡上，也可点「添加」选文件 / 选目录；双击即开，可在资源管理器定位或移出。只记路径不搬文件，上限 200 条 |
+| 邮件验证码 | — | 配一个 IMAP 邮箱（只读收件箱），新验证码直接出现在总览卡上，点一下复制，同时推通知中心；不会标记已读，也不发信、不删信 |
+| 今日天气与宜忌 | — | 免 key 的 Open-Meteo 天气加离线农历 / 节气；宜忌按建除十二神与神煞表本地算，词条保留传统写法，UI 注明属民俗参考 |
 
 </details>
 
@@ -99,6 +102,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 窗口管理 | `Ctrl+Alt+W` | 15 个贴屏热键，九宫格排版浮层，不占用 `Win+方向` |
 | 本地开发站点 | — | 为项目绑定自定义域名并自动签发 HTTPS 证书（mkcert），自身不监听端口 |
 | SSH 远程终端 | `Ctrl+Alt+S` | 多标签终端与 SFTP 文件管理（含多选批量操作），指纹信任，多主机批量执行，一次性执行命令并核对风险 |
+| 文件搜索 | — | 接 Everything 的独立检索页：四态探测（未安装 / 未运行 / 索引进度 / 正常）带安装引导，支持查询语法提示、排序与条数、多选批量复制路径，右侧直接预览文件 |
 | WebDAV 同步与快照 | — | 全量 JSON 备份恢复、多版本、任意 WebDAV 服务器 |
 | 数据目录搬家 | — | 「设置 → 存储与同步」更换存储位置，整个数据目录打包迁移，重启生效 |
 | 界面缩放 | — | 主界面与全部独立窗口统一 1.15 倍等比放大 |
@@ -212,7 +216,59 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 
 AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时不推送，窗口隐藏或最小化、已切到其他页面时才收进中心。未读角标使用强调色，红色留给监控掉线一类故障。
 
-点击通知可跳回对应对象：监控跳到那条监控，定时任务跳到那个任务，AI 跳回那次对话。支持单条删除、全部标记已读、一键清空。
+点击通知可跳回对应对象：监控跳到那条监控，定时任务跳到那个任务，AI 跳回那次对话，验证码跳到总览的邮件卡。支持单条删除、全部标记已读、一键清空。
+
+</details>
+
+<details>
+<summary><b>邮件验证码</b></summary>
+
+配一个 IMAP 邮箱（QQ、163、Gmail、Outlook 等常见服务商填地址即可自动识别服务器，也可以手填），之后收到的验证码会直接出现在总览的邮件卡上，点一下复制，同时推一条通知。
+
+边界刻意收得很紧：**只连收件箱、只读打开、只用 `BODY.PEEK`**，不会把你的邮件标成已读；不发信、不删信、不改任何 flag；正文只在识别验证码的那一瞬间过一遍内存，不落库、不外传；不读垃圾箱。凭据走 DPAPI 加密，与 AI Key 同一套。
+
+- **实时性**：优先用 IMAP IDLE 等服务器推送，服务器不支持时自然退化成轮询，断线重连后会补拉一次，不会静默漏掉
+- **只认新邮件**：按 UID 去重（不用邮件序号——删信后序号会重排，会重复弹同一封）；启动后第一次同步只把最近两天内的码填进卡片，不补推一遍通知，之后新到的才推
+- **手动兜底**：卡片上有重试与忽略，设置里可测试连接（连接失败会说明是超时、认证失败还是服务器拒绝）
+
+</details>
+
+<details>
+<summary><b>文件置物架</b></summary>
+
+总览上的一块临时收纳区：今天要反复打开的几个文件或目录拖进去，双击即开，用完移出。
+
+- **两个入口**：直接把文件 / 目录拖到卡片上，或点右上角「添加」在文件与目录之间选一个（Windows 的系统对话框只能二选一）
+- **拖放路径**：WebView2 的 `dataTransfer.files` 只给文件名，拿不到绝对路径，所以走宿主的拖放事件；只有拖到置物架卡片上才生效，插件页拖 zip 安装、AI 页拖图片附件都不受影响
+- **只记路径**：不复制、不移动、不改名，磁盘上的文件删了卡片会标「路径已失效」，点开也不会报错
+- **打开方式**：文件用默认程序打开，目录直接进资源管理器；也可以只定位不打开
+- **上限 200 条**，超出时提示先清理
+
+</details>
+
+<details>
+<summary><b>今日天气与宜忌</b></summary>
+
+总览顶部的日期条：公历、星期、农历（含闰月）、干支、节气与节日，右半边是当前城市天气，下面一行可展开的今日宜忌。整块能在齿轮里关掉，不需要的人不会看到。
+
+- **天气**：Open-Meteo，免 key、无需注册。城市名搜一次选定坐标后存下来，之后不再解析地名
+- **请求走 Go**：WebView2 跟随 WinINET 系统代理，用户机器上常见的「代理开关开着但端口没起」会让前端请求全部超时，所以天气与城市检索都由宿主发，直连优先、失败再走环境里的代理
+- **刷新归宿主**：后台每 30 分钟拉一次并持有唯一一份快照，页面只读快照。切走页面、重开窗口都不会重复请求；冷启动失败按 5 分钟重试，不会因为前端每次来读就变成每分钟打一次外网
+- **农历与节气零依赖**：农历交给 WebView2 自带的 ICU 日历（`Intl` 的 `ca-chinese`，覆盖 1900–2100），节气用太阳视黄经天文近似实时求解，不维护年份数据表；节气时刻统一按北京时间取日期
+- **宜忌离线算**：建除十二神加吉神凶煞、月建与日干支查表，由 `lunar-typescript` 本地算（MIT），不走网络。口径固定为库默认（按农历月建分月），不做「按节气分月」的切换开关——民俗数据本身口径不唯一，摆个开关只会让人觉得数据不可信。UI 里注明「民俗参考」，词条保留传统中文写法，不硬译成英文
+
+</details>
+
+<details>
+<summary><b>文件搜索</b></summary>
+
+命令面板能边打字边搜文件，但那是「看 20 条下拉」；独立的文件搜索页补的是展示层：结果列表、右侧预览、多选批量复制路径。
+
+- **四态探测**：Everything 未安装时给安装引导与一键下载，装了但没启动可以直接拉起，索引还在建时显示进度，正常时直接搜
+- **查询即 Everything 语法**：不做「目录 / 大小 / 后缀」这类二次过滤表单——Everything 的 query 本身就是完整语法，再套一层只会和它打架；页内给语法提示
+- **结果操作**：按名称 / 路径 / 大小 / 修改时间排序，条数可选；多选后一次复制全部路径，或直接在资源管理器定位
+- **预览**：选中一条，右侧按类型渲染（图片、代码、Markdown、PDF、音视频、压缩包、目录列表），与命令面板共用同一套预览组件
+- **不提供「移入回收站」**：检索页不该成为删除用户文件的入口
 
 </details>
 
@@ -603,8 +659,8 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 │                                                                   │
 │   ┌────────────────────┐      ┌────────────────────────────────┐  │
 │   │  Vue 3 前端         │◄────►│  services/  Wails 绑定门面      │  │
-│   │  (frontend/dist     │ IPC  │  AppService + 23 领域子包      │  │
-│   │   go:embed)         │      │  565 个绑定方法                 │  │
+│   │  (frontend/dist     │ IPC  │  AppService + 27 领域子包      │  │
+│   │   go:embed)         │      │  576 个绑定方法                 │  │
 │   └────────────────────┘      └───────────────┬────────────────┘  │
 │                                                │ 单向依赖          │
 │                                 ┌──────────────▼────────────────┐  │
@@ -614,19 +670,20 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 │                                 │  sync / webdav / mcp /        │  │
 │                                 │  mcpclient / fsguard /        │  │
 │                                 │  screenshot / winmgr / dl /   │  │
-│                                 │  logger / sysutil / validators│  │
+│                                 │  weather / mailbox / logger / │  │
+│                                 │  sysutil / validators         │  │
 │                                 └───────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 几点实现上的选择：
 
-- **门面分层**：领域能力下沉到 24 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 28 个 Service / 565 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
+- **门面分层**：领域能力下沉到 27 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 29 个 Service / 576 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
 - **截图层用原生窗口**：自建 Win32 分层窗口整帧提交，工具条、标注、图形都画进同一张 DIB，可以避免 WebView 流程带来的闪烁
 - **次级窗口延迟创建**：首次热键触发时才创建 WebView2，减少启动白屏；浮窗位置经 kvstore 持久化
-- **后台服务**：SQLite WAL、待办（10s）、定时与监控调度器、AI 流式 HTTP 服务、插件健康检查、DSH 隐藏进程、内置 MCP（9230）
-- **安全**：纯 Go SQLite 无 CGO，SQL 列名白名单，API Key 走 DPAPI，单实例锁防止并发写库，本地流式服务使用随机端口与随机 token；AI 的外部工具调用另过审批闸门，文件读写统一走 `fsguard` 白名单
-- **规模**：Go 源码约 7.1 万行（`services` 3.8 万 + `internal` 3.0 万 + 入口与窗口 0.3 万，含 118 个测试文件），前端约 7.2 万行（85 个 Vue 组件 + 118 个 TS 模块，其中 29 个单测文件）
+- **后台服务**：SQLite WAL、待办（10s）、定时与监控调度器、AI 流式 HTTP 服务、邮件 IMAP 长连接、天气轮询、插件健康检查、DSH 隐藏进程、内置 MCP（9230）
+- **安全**：纯 Go SQLite 无 CGO，SQL 列名白名单，API Key 与邮箱授权码走 DPAPI，单实例锁防止并发写库，本地流式服务使用随机端口与随机 token；AI 的外部工具调用另过审批闸门，文件读写统一走 `fsguard` 白名单
+- **规模**：Go 源码约 13.3 万行（`services` 4.9 万 + `internal` 8.1 万 + 入口与窗口 0.3 万，含 121 个测试文件），前端约 9.3 万行（103 个 Vue 组件 + 134 个 TS 模块，其中 34 个单测文件）
 
 ---
 
@@ -642,7 +699,8 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 | go-sql-driver/mysql + go-redis/v9 | MySQL 与 Redis 客户端 |
 | golang.org/x/sys | Windows 系统 API |
 | dop251/goja | JavaScript 沙箱，插件执行 |
-| DPAPI | Windows 数据保护 API，用于加密 Key |
+| emersion/go-imap v2 | 只读 IMAP 收件箱，邮件验证码 |
+| DPAPI | Windows 数据保护 API，用于加密 Key 与邮箱授权码 |
 
 **前端**
 
@@ -654,6 +712,7 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 | vue-i18n 11 | 国际化，简中与英文 |
 | @lucide/vue | 图标 |
 | pinyin-pro | 拼音搜索 |
+| lunar-typescript | 今日宜忌（离线规则库，农历与节气由 ICU 与天文近似自算） |
 | marked 18 + DOMPurify | Markdown 渲染与净化 |
 | KaTeX、Mermaid、highlight.js | 公式、流程图、代码高亮，按需分包 |
 | CodeMirror 6 | 配置文件与产物文件编辑，按需动态加载 |
@@ -711,7 +770,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 ```
 quickdock/
 ├── main.go / tray.go / windows.go        # 入口、托盘、浮动窗口、单实例锁
-├── services/                             # Wails 门面层，宿主 + 24 领域子包，565 个绑定方法
+├── services/                             # Wails 门面层，宿主 + 27 领域子包，576 个绑定方法
 │   ├── service.go  api_result.go  types.go  lifecycle.go
 │   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
 │   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go  clipboard_files.go
@@ -720,11 +779,12 @@ quickdock/
 │   ├── monitor_checker.go  notify.go  visibility.go  navbadge.go
 │   ├── storage.go  storage_service.go  clipboard_image.go
 │   └── ai/ clipboard/ collection/ diag/ dsh/ env/ frecency/ git/ item/
-│       logtail/ mcp/ monitor/ note/ notify/ plugin/ port/ recycle/
-│       scene/ snapshot/ sshx/ system/ todo/ update/ workspace/
+│       logtail/ mailbox/ mcp/ monitor/ note/ notify/ plugin/ port/ recycle/
+│       scene/ shelf/ snapshot/ sshx/ system/ todo/ update/ weather/ workspace/
 ├── internal/                             # 引擎层，被门面调用，无 Wails 绑定
 │   ├── db/  env/  sites/  sshx/  dsh/  plugin/  platform/  sync/  webdav/  webdavsrv/
 │   ├── mcp/  mcpclient/  fsguard/        # 宿主 MCP 服务、外部 MCP 客户端、文件读写闸门
+│   ├── mailbox/  weather/                # 只读 IMAP 收件箱、Open-Meteo 客户端（都只由宿主发请求）
 │   ├── screenshot/  winmgr/  dl/  logger/  sysutil/  validators/
 │   └── aiutil/  cliprule/  logtail/      # 提示词预算、剪贴板规则、文件尾随
 ├── frontend/src/                         # Vue 3 + TS

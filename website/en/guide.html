@@ -89,10 +89,11 @@
           <p>The main window is three fixed panes, all aligned on one line.</p>
           <ul>
             <li><b>Top bar</b>: workspace switcher on the left, scenario tabs in the middle, Config on the right — the runtime services bound to the current scenario hang there.</li>
-            <li><b>Sidebar</b>: navigation on top (workspaces, notes, todos, schedules, monitors, clipboard, runtimes, AI, DeepSeek Harness, plugins), the scenario list below, a search box between them, and the notification bell plus settings at the bottom.</li>
+            <li><b>Sidebar</b>: navigation on top (dashboard, workspaces, notes, todos, scheduled tasks, site monitors, clipboard, file search, runtimes, Git, SSH, AI, DeepSeek Harness, plugins), the scenario list below, a search box between them, and the notification bell plus settings at the bottom.</li>
             <li><b>Middle</b>: collections in the current scenario, each with a type icon and an item count.</li>
             <li><b>Right</b>: the items of the selected collection. With nothing selected it shows a hint — that's expected, not a bug.</li>
-            <li>The interface scales proportionally under Settings → Preferences. The main window and every detached window zoom together and the proportions stay put.</li>
+            <li><b>Dashboard</b>: the home page. A date bar on top carries the lunar date, solar terms, the day's traditional do's and don'ts and local weather (turn it off from the gear; the lunar calendar and almanac are computed offline). Six readouts sit above eight cards — recent items, the file shelf, today's todos, mail verification codes, ports, resident services, Git and AI usage. Clicking any row lands on that page with the item selected.</li>
+            <li>The interface scales proportionally under Settings → General. The main window and every detached window zoom together and the proportions stay put.</li>
           </ul>
         </section>
 
@@ -133,6 +134,7 @@
             <li>Todos only return unfinished top-level tasks. Enter switches to the todo page, jumps to that day, clears tag filters when needed and highlights the row for two seconds; the action menu can mark it done.</li>
             <li>Type an expression and the answer appears; paste a URL and it asks whether to save it as a project.</li>
             <li>Type <code>cheatsheet</code> for the hotkey sheet, or <code>logtail</code> to open log tailing.</li>
+            <li>When there are too many files to skim in the panel, the sidebar's File search page is a dedicated view backed by Everything: install guidance when it is missing, one-click start when it is not running, index progress while it builds. The query box takes Everything syntax directly (with a hint inside the page), results sort by name, path, size or time, selecting many lets you copy all paths at once, and the right side previews the file. The page offers no delete action.</li>
             <li>Two boundaries worth knowing: clipboard history entries aren't searched (the suggestions only cover what you just copied), and each group has a display cap — only recent can be expanded.</li>
           </ul>
         </section>
@@ -199,6 +201,7 @@
             <li>A state flip pushes a desktop notification, or DingTalk, WeCom, Feishu, ServerChan, PushPlus or Telegram.</li>
             <li>Trend charts cover 24 hours, 7 days and all time; the monitor list exports to CSV.</li>
             <li>Every notification also lands in the bell at the bottom of the sidebar, and clicking one jumps to its monitor. AI completion notices stay quiet while the window is in front of you.</li>
+            <li>Mail verification codes are set up right on that dashboard card: enter the address (servers for common providers such as QQ, 163, Gmail and Outlook are detected automatically), the port and an app password. New codes then appear on the card and in the bell, and clicking one copies it. The inbox is read-only — nothing is marked as read, no mail is sent or deleted, and bodies only pass through memory while the code is being extracted.</li>
             <li>With many monitors you can search, tick several to enable or disable, and drag them into order. Deleted ones go to a recycle bin and come back with logs and configuration; a one-hour maintenance window pauses checks and alerts.</li>
           </ul>
         </section>

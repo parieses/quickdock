@@ -208,12 +208,20 @@
         <dd>对标 SourceTree：分支 / 标签 / 远端管理，贮藏，文件历史与 blame，amend、cherry-pick、分支对比、side-by-side diff。</dd>
       </div>
       <div class="tool">
+        <dt>文件搜索</dt>
+        <dd>接 Everything 的独立检索页：没装给安装引导，装了没起可一键拉起；查询就是 Everything 语法，结果可排序、多选复制路径，右侧直接预览文件。</dd>
+      </div>
+      <div class="tool">
         <dt>日志尾随</dt>
         <dd><code>tail -f</code> 任意本机文件。文件被轮转或原地重写时自动重新对齐，可暂停、可过滤高亮。</dd>
       </div>
       <div class="tool">
+        <dt>总览</dt>
+        <dd>日期条带农历、节气与今日宜忌，加当前城市天气；八张卡收纳最近使用、文件置物架、待办、邮件验证码、端口、常驻服务、Git 与 AI 用量，点哪一条就进哪一条。</dd>
+      </div>
+      <div class="tool">
         <dt>通知中心</dt>
-        <dd>监控掉线、定时任务结果、AI 回答完成收在一个铃铛里。点通知能跳回对应的监控或那次对话。</dd>
+        <dd>监控掉线、定时任务结果、邮件验证码、AI 回答完成收在一个铃铛里。点通知能跳回对应的监控、任务或那次对话。</dd>
       </div>
       <div class="tool">
         <dt>数据目录搬家</dt>
@@ -346,6 +354,24 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">总览加文件置物架与邮件验证码，首页多了一行日期、天气与宜忌</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>总览新增「文件置物架」：今天要反复用的文件或目录拖进卡片，双击即开，也能点右上角在文件与目录之间选。只记路径，不复制、不移动、不改名，路径失效会在卡片上标出来。</li>
+          <li>新增「邮件验证码」：配一个 IMAP 邮箱，新验证码直接出现在总览上，点一下就复制，同时推一条通知。只读收件箱、只用 BODY.PEEK，不会把邮件标成已读，也不发信、不删信，正文只在识别的那一刻过一遍内存。</li>
+          <li>新增文件搜索页：接 Everything，未安装时给安装引导，未启动可直接拉起，索引进度会显示；结果可按名称 / 路径 / 大小 / 时间排序、多选批量复制路径，右侧直接预览文件。查询就是 Everything 语法，不再套一层过滤表单。</li>
+          <li>总览顶部多了一行日期：农历闰月、干支、节气与节日，加当前城市天气与可展开的今日宜忌。天气走 Open-Meteo（免 key），请求由宿主发、后台每 30 分钟刷新一次；宜忌离线本地算，标注为「民俗参考」。整块可以关掉。</li>
+          <li>总览重排并接上深链：点卡片里的某一项会直接进到对应页面并停在那一条——Git 仓库、端口区块、常驻服务都是如此。AI 用量卡按现役模型重算价目，DeepSeek 的工作日高峰时段单独算倍率。</li>
+          <li>MCP 服务可选访问令牌（默认关闭），开启后所有请求须带 Bearer 令牌，面板可显示、复制与轮换。</li>
+          <li>设置页统一版心与控件高度：机器人通知、导航项等页面居中显示并收成同宽，提示词新建的输入框补上样式；设置深链支持进到「AI 助手 → 用量」这类二级页签。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.40</span>
+          <span class="log-date">2026-11-04</span>
           <span class="log-title">全站界面精修，截图补齐取色与序号标注，AI 有了自己的提示词库</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -387,23 +413,6 @@
           <li>点开 SSH 终端独立窗口时，侧栏图标转圈提示「正在打开」，窗口淡入，首开不再空等没反应。</li>
           <li>AI 落地页示例问题扩到更多条并每次随机，可点「换一批」立即换一组。</li>
           <li>AI 引擎若干稳定性与体验打磨（后台任务、记忆归集、逐字流等）。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.37</span>
-          <span class="log-date">2026-11-02</span>
-          <span class="log-title">AI 跑的长任务有面板能看了，回答中途也能插话</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>AI 跑脚本、dev server、构建这类长命令会进「后台任务」：工具栏终端图标带数字，输入框上方一条「后台运行中」标出命令和已跑时长，点开看日志、随时终止。</li>
-          <li>命令到点不再整组杀掉，而是转后台继续跑，结束时把结果送回当前对话；关掉 QuickDock 会一起收掉，不会留下占着端口的孤儿进程。</li>
-          <li>回答还在生成时可以直接发下一句：它插进当前这一轮，AI 看到这句就接着做，既不用排队等下一轮，也不用先按停止。</li>
-          <li>工具轮次不再固定 36 轮硬停：连续一批没有新进展才收尾，真跑满单次预算时会说明原因，留一句「接着做」即可。</li>
-          <li>工具卡片收成一行：动作、目标、耗时同排，状态改用图标着色；后台任务那行直接写「运行中 / 已结束 · 退出码 1」，点「查看」跳到面板里对应那条。</li>
-          <li>修复后台任务在特定启动顺序下整体失效——表现为进程确实起来了，面板和输入框上方却一条都不显示。</li>
         </ul>
       </details>
 
