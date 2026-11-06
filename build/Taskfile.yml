@@ -117,7 +117,11 @@ tasks:
     env:
       CODEBUDDY_SAFE_DELETE_ENABLED: '0'
     cmds:
-      - npm run {{.SCRIPT}} -q
+      # 不加 -q：CI 上 node 一旦被内存/管道打断，npm 只回一个裸的退出码（116），
+      # 有 -q 时连它自己的 npm ERR! 上下文都不打印，日志里就剩一行
+      # "frontend:run:npm: exit status 116"，什么也定位不了。多出来的只有 npm
+      # 那两三行 lifecycle 横幅，不值得为它牺牲可诊断性。
+      - npm run {{.SCRIPT}}
     vars:
       SCRIPT: "{{.SCRIPT}}"
 

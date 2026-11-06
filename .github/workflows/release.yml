@@ -167,6 +167,11 @@ jobs:
         working-directory: ${{ github.workspace }}
         env:
           APP_VERSION: ${{ github.ref_name }}
+          # 116 是 npm 在 node 子进程被打断时原样抛出的裸退出码（同类案例多归于堆压力：
+          # 子进程 OOM 之后 npm 连自己的 npm ERR! 都来不及写）。vue-tsc 加 rolldown
+          # 生产构建的堆峰值本就不小，而 runner 上 Node 的默认上限按物理内存推算只有
+          # 约 2GB。显式抬到 6GB（runner 16GB，留足给 Go 编译与系统），把这类抖动挡在外面。
+          NODE_OPTIONS: --max-old-space-size=6144
         run: |
           # 解析 task 绝对路径（多重兜底，同「校验版本」步骤）
           $taskBin = $env:TASK_BIN

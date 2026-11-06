@@ -14,10 +14,21 @@ process.env.NODE_ENV = 'production'
 
 const { createServer } = await import('vite')
 const { createI18n } = await import('vue-i18n/dist/vue-i18n.esm-bundler.js')
+const { fileURLToPath } = await import('node:url')
 
 const LOCALES = ['zh-CN', 'en-US']
 
 const server = await createServer({
+  // 不读 vite.config.ts —— 这一步只需要把 .ts 字典转译成模块，而加载完整配置会
+  // 连带拉进 vue / wails 插件，并触发 client 侧依赖预构建（config 的
+  // optimizeDeps.include 里有 mermaid、katex、xterm 这些重包）。
+  // 本地 .vite 缓存是热的，看不出代价；CI 每次全新 checkout，等于在检查语法之前
+  // 先完整预构建十几个重依赖 —— 白吃一两分钟和一大截内存，也是「本地能过、发版
+  // 却挂在 exit status 116」时唯一与本地不同的那件重活。
+  // 字典是纯 `export default {}`（无 import），configFile:false 下用内置 esbuild
+  // 转译即可，与完整配置的结果完全一致。
+  configFile: false,
+  root: fileURLToPath(new URL('../../', import.meta.url)),
   // NODE_ENV 已是 production（要的是 vue-i18n 的抛错分支），但 vite 仍按开发模式
   // 起服务：这里只需要它把 .ts 字典转译出来，不要生产构建那套压缩与 tree-shaking。
   mode: 'development',
