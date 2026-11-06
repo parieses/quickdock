@@ -40,6 +40,9 @@ type dataDirConfig struct {
 	// 放在这个「数据目录之外」的配置文件里是有意的：窗口在创建时就固定了 Zoom 与尺寸，
 	// 必须能在打开数据库之前读到（数据库要等 Wails 服务启动才就绪，那时窗口早已建好）。
 	UiZoom float64 `json:"uiZoom,omitempty"`
+	// WindowBackdrop 窗口材质档位（off/mica/acrylic/tabbed），见 windowbackdrop.go。
+	// 与 UiZoom 同理：材质在窗口创建时固定，也必须在打开数据库之前读到。
+	WindowBackdrop string `json:"windowBackdrop,omitempty"`
 }
 
 var (

@@ -23,9 +23,13 @@ func foregroundIsOwnedModal() bool {
 }
 
 // applyWindowPlatformOptions 设置 Windows 专属窗口属性：
-// 浮窗（剪贴板/笔记/命令面板）从任务栏隐藏，只保留托盘与全局热键入口。
+// 浮窗（剪贴板/笔记/命令面板）从任务栏隐藏，只保留托盘与全局热键入口；
+// 并按启动期判定的材质给浮窗套上 Acrylic。
+//
+// 这里改成**保留式赋值**（原先是 opts.Windows = WindowsWindow{...} 整字段覆盖）：
+// 整字段覆盖会把调用方预设的 BackdropType 等 Windows 属性一并清掉，材质就永远
+// 加不上去。只设自己负责的字段，别的属性由别处累加。
 func applyWindowPlatformOptions(opts *application.WebviewWindowOptions) {
-	opts.Windows = application.WindowsWindow{
-		HiddenOnTaskbar: true,
-	}
+	opts.Windows.HiddenOnTaskbar = true
+	applyWindowBackdrop(opts, true)
 }

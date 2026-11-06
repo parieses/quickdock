@@ -342,6 +342,15 @@ func main() {
 	defer logger.CapturePanic("main")
 	logger.I("QuickDock 启动 -------------------------------------------------------------")
 
+	// 窗口材质（Mica / Acrylic）在「窗口创建时」就固定了，必须在下面建主窗口之前
+	// 一次性判定系统能力 + 读持久化档位。浮窗是懒创建，读同一份缓存即可。
+	// 不支持的系统（Win10 / 非 Windows）恒判定为 off，后面所有窗口都走原来的实色路径。
+	if backdrop := platform.ResolveWindowBackdrop(); platform.SupportsWindowBackdrop() {
+		logger.I("[启动] 窗口材质：系统支持，本次生效=%s", backdrop)
+	} else {
+		logger.I("[启动] 窗口材质：系统不支持（需 Win11 22621+），保持实色窗口")
+	}
+
 	// 托盘「重启」拉起的新进程带 --restart-wait=<旧PID>：先等旧进程退出再继续。
 	// 必须早于 application.New——单实例互斥在 New 里，旧进程还在的话本进程
 	// 会被判为重复启动而直接 os.Exit(0)（表现为「点了重启，应用没了」）。
@@ -703,6 +712,9 @@ func main() {
 			mainOpts.Height = maxH
 		}
 	}
+	// 主窗口用用户选的档位（浮窗在 applyWindowPlatformOptions 里统一用 Acrylic）。
+	// off 时是 no-op，不会动 BackgroundType / Windows，保持原有实色配置。
+	applyWindowBackdrop(&mainOpts, false)
 	mainWindow := app.Window.NewWithOptions(mainOpts)
 
 	// 保存主窗口引用供 tray.go 使用

@@ -356,6 +356,35 @@ body {
   width: 100%;
 }
 
+/* ==================== 窗口材质（Mica / Acrylic）====================
+   只有本次启动真的套上了系统材质，App.vue 才会给 <html> 加 .qd-backdrop。
+   Win10 / 设置「关」时这个 class 不存在，下面整块规则完全不生效 —— 所有背景
+   仍是上面的实色 token，界面与未启用材质时逐像素一致（这是「不支持就默认
+   现在这种」的实现方式，不是把半透明写进全局 token 再靠开关调透明度）。
+
+   做法：只把「大面积铺底」的三个 token 换成半透明，卡片(--color-surface)、
+   代码块、终端、iframe 内容视口仍保持实色。材质从侧栏 / 页头 / 空白区透出，
+   层级不会糊成一片；html / body 自身也必须透明，否则 WebView2 的透明底被盖住，
+   DWM 材质根本看不到。
+   alpha 取值偏保守：Mica 本身是极淡的壁纸着色，底子太透会让浅色主题下的
+   深字失去对比度；Acrylic 模糊更重，需要靠 0.5~0.7 的底色把文字压住。 */
+html.qd-backdrop,
+html.qd-backdrop body {
+  background-color: transparent;
+}
+
+html.qd-backdrop {
+  --color-bg-primary: rgba(12, 14, 19, 0.62);
+  --color-bg-secondary: rgba(20, 23, 31, 0.70);
+  --color-bg-tertiary: rgba(27, 32, 42, 0.78);
+}
+
+html.qd-backdrop[data-theme="light"] {
+  --color-bg-primary: rgba(246, 247, 249, 0.52);
+  --color-bg-secondary: rgba(255, 255, 255, 0.64);
+  --color-bg-tertiary: rgba(238, 240, 244, 0.72);
+}
+
 /* ==================== 滚动条 ==================== */
 /* 默认几乎融进底色，只在指针接近时才显形：6px 的深灰条常驻在窄面板上
    比内容本身更抢眼（右侧一整列看起来像没对齐的边框）。 */

@@ -59,6 +59,34 @@ func (a *AppService) SetUiZoom(zoom float64) *ApiResult {
 	return OkMsg(nil, "已保存，重启后生效")
 }
 
+// GetWindowBackdrop 返回窗口材质的能力/状态快照，供前端做两件事：
+//   - supported=false 时设置页**不渲染**任何材质控件（Win10 / 非 Windows 完全保持现状）；
+//   - effective 决定要不要给 document 加半透明背景 class（见 App.vue），
+//     它反映本次启动真正套上的材质，而不是用户刚改、还没重启的配置值。
+//
+// current 是持久化的档位（设置页回显用），modes 是允许值白名单。
+func (a *AppService) GetWindowBackdrop() *ApiResult {
+	return Ok(map[string]any{
+		"supported": platform.SupportsWindowBackdrop(),
+		"current":   platform.LoadWindowBackdrop(),
+		"effective": platform.EffectiveWindowBackdrop(),
+		"modes":     platform.WindowBackdropModes(),
+	})
+}
+
+// SetWindowBackdrop 设置窗口材质并持久化。
+// 不支持的系统直接拒绝（避免写进一份永远用不上的配置）；材质与 Zoom 一样在窗口
+// 创建时固定，改完需重启生效，前端保存后提示并调用 RestartApp。
+func (a *AppService) SetWindowBackdrop(mode string) *ApiResult {
+	if !platform.SupportsWindowBackdrop() {
+		return FailMsg("当前系统不支持窗口材质（需 Windows 11 22H2 或更高版本）")
+	}
+	if err := platform.SetWindowBackdrop(mode); err != nil {
+		return Fail(err)
+	}
+	return OkMsg(nil, "已保存，重启后生效")
+}
+
 // RestartApp 真正重启应用（脱离式拉起新进程 + 等待旧进程退出后统一退出）。
 // 存储位置修改必须重启才能生效：日志、数据库、运行时都已按旧目录打开。
 // 与 UpdateService.RestartApp（就地替换更新专用）语义不同，那个无待更新时会失败。

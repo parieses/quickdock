@@ -68,6 +68,39 @@ var disabledFeatures = []string{
 	"ReadingList",
 }
 
+// ===== 窗口材质（Mica / Acrylic）=====
+
+// applyWindowBackdrop 按本次启动生效的材质给窗口选项套上系统半透明材质。
+//
+// 生效值由 main() 里的 platform.ResolveWindowBackdrop() 判定并缓存：Win10 /
+// 非 Windows / 设置「关」时恒为 off，本函数直接返回，窗口保持原来的
+// BackgroundTypeSolid + 实色 —— 这条路径与加材质功能之前完全一致。
+//
+// floating=true 的浮窗（剪贴板/笔记/命令面板/窗口管理）统一用 Acrylic：它们是
+// Frameless、短暂停留、浮在其它窗口之上的面板，Acrylic 的模糊比 Mica 的
+// 「桌面壁纸着色」更贴合；主窗口与 SSH 这类常驻窗口用用户选的档位。
+//
+// 这里是**保留式赋值** opts.Windows.BackdropType，不整字段覆盖 WindowsWindow：
+// 浮窗的 HiddenOnTaskbar 等属性由 applyWindowPlatformOptions 单独设置，
+// 整字段覆盖会把它们冲掉（旧的 applyWindowPlatformOptions 正是这么写的）。
+func applyWindowBackdrop(opts *application.WebviewWindowOptions, floating bool) {
+	mode := platform.EffectiveWindowBackdrop()
+	if mode == platform.BackdropOff {
+		return
+	}
+	bt := application.Acrylic
+	if !floating {
+		switch mode {
+		case platform.BackdropMica:
+			bt = application.Mica
+		case platform.BackdropTabbed:
+			bt = application.Tabbed
+		}
+	}
+	opts.BackgroundType = application.BackgroundTypeTranslucent
+	opts.Windows.BackdropType = bt
+}
+
 // ===== 浮窗位置记忆（kvstore Service 持久化，main.go 注入）=====
 
 var winPosKV *kvstore.KVStoreService
@@ -328,6 +361,10 @@ func initSshWindow(app *application.App) *application.WebviewWindow {
 		URL:              "/#/ssh",
 		Zoom:             uiZoom,
 	}
+	// SSH 与插件/DSH 窗口不同：它加载的是本应用主 SPA（App.vue 会跑），所以也要
+	// 套同一套材质，否则前端加了 qd-backdrop、窗口却还是实色，两边对不上。
+	// 用常驻窗口档位（用户选的那个），不是浮窗的 Acrylic。
+	applyWindowBackdrop(&opts, false)
 	applySavedWinPos(app, &opts, "ssh")
 	win := app.Window.NewWithOptions(opts)
 	win.Hide()

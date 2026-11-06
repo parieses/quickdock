@@ -4,7 +4,7 @@ import { Events } from '@wailsio/runtime';
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace';
 import { useToast } from './composables/useToast';
-import { GetValue, SetValue, ApplyTheme } from '../bindings/quickdock/services/appservice'
+import { GetValue, SetValue, ApplyTheme, GetWindowBackdrop } from '../bindings/quickdock/services/appservice'
 import {
   OpenDSHWindow,
   DetectNodeEnv,
@@ -245,6 +245,15 @@ onMounted(async () => {
     }
   } catch (e) { logErr('App', e) }
   applyTheme(currentTheme.value)
+  // 窗口材质：只有本次启动真的套上了系统材质，才把根背景改透明让材质透出来。
+  // 必须读 effective（启动时判定的生效值）而不是配置里的档位 —— 用户在设置里
+  // 改了但还没重启时，窗口仍是实色；此时若先把 CSS 变透明，会露出一层
+  // 没有材质的白/黑底，比不改还难看。Win10 / 未启用时 effective 恒为 off，
+  // 这个 class 不会被加上，下面那组半透明 token 也就完全不生效。
+  try {
+    const st = unwrap<{ effective?: string }>(await GetWindowBackdrop())
+    document.documentElement.classList.toggle('qd-backdrop', !!st?.effective && st.effective !== 'off')
+  } catch (e) { logErr('App.windowBackdrop', e) }
   // 读取已保存的语言设置
   try {
     const saved = unwrap<string>(await GetValue('locale'))

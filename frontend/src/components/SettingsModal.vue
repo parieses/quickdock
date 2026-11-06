@@ -34,7 +34,7 @@ import {
   SuspendHotkeys,
   ResumeHotkeys,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
-import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, NormalizeDataDir, GetUiZoom, SetUiZoom, RestartApp as RestartAppPlain } from '../../bindings/quickdock/services/appservice'
+import { GetAutoStart, SetAutoStart, GetDataDir, SetDataDir, ResetDataDir, NormalizeDataDir, GetUiZoom, SetUiZoom, GetWindowBackdrop, SetWindowBackdrop, RestartApp as RestartAppPlain } from '../../bindings/quickdock/services/appservice'
 import { StorageMigrate } from '../../bindings/quickdock/services/storageservice'
 import { GetValue, SetValue } from '../../bindings/quickdock/services/appservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
@@ -66,6 +66,16 @@ const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panel
 const hotkeyRef = ref<InstanceType<typeof HotkeySettings> | null>(null)
 const searchRef = ref<HTMLInputElement | null>(null)
 
+// ---- 窗口材质 ----
+// 能力探测决定「有没有这个设置项」：Win10 / 非 Windows 下 supported 恒为 false，
+// 菜单描述与 preferences 页都不出现任何相关内容，界面与加这个功能之前一致。
+// 声明放在 menuItems 之前：desc 里要读 backdropSupported，避免 computed 里
+// 引用一个尚未初始化的 ref。
+const backdropSupported = ref(false)
+const backdropValue = ref('off')
+const backdropMsg = ref('')
+const backdropBusy = ref(false)
+
 // ---- 设置项搜索 ----
 // 11 个设置页靠左侧菜单逐个翻已经不快。搜索框按「标签 + 描述 + 内部 key + 拼音」
 // 过滤菜单项：key 参与匹配是为了让英文输入（如 sync、ai）在中文界面下也能命中。
@@ -78,7 +88,9 @@ const settingsQuery = ref('')
 //   · 历史 = 最近动态 + 回收站（都是「回头看一眼」型信息，页内用分段切换）
 // 日志与关于不属于配置，置底独立成行（见 footerItems）。
 const menuItems = computed(() => [
-  { key: 'preferences', label: t('preferences'), icon: Palette, desc: t('autoStart') + ' / ' + t('theme') + ' / ' + t('language') + ' / ' + t('uiZoom') },
+  // 窗口材质只在能力探测通过时才拼进描述：Win10 上菜单文案也不多出一个
+  // 用户点了却找不到的词（设置项搜索会拿 desc 参与匹配）。
+  { key: 'preferences', label: t('preferences'), icon: Palette, desc: [t('autoStart'), t('theme'), t('language'), t('uiZoom'), ...(backdropSupported.value ? [t('windowBackdrop')] : [])].join(' / ') },
   // 导航显隐与排序：它是「隐藏了怎么找回来」的唯一兜底入口，放在通用组开头。
   // 为什么必须在设置里：侧栏可以被裁剪，但这个入口不属于导航项，永远可达。
   { key: 'navigation', label: t('navSettings'), icon: ListOrdered, desc: t('navSettingsDesc') },
@@ -524,7 +536,9 @@ async function resetStorage() {
 // 切换到存储页时刷新状态（弹窗常驻，onMounted 只在首次执行）
 watch(activePage, (k) => {
   if (k === 'backup') loadStorage()
-  if (k === 'preferences') loadUiZoom()
+  // 弹窗常驻，onMounted 只跑一次；每次进 preferences 都重读一次能力/档位，
+  // 避免重启回来后还显示上一次的选中态。
+  if (k === 'preferences') { loadUiZoom(); loadWindowBackdrop() }
 })
 
 // 存储位置页的「重启」：走 AppService.RestartApp（真重启，脱离式拉起新进程）。
@@ -613,6 +627,66 @@ async function restartForUiZoom() {
   }
 }
 
+// ---- 窗口材质（Mica / Acrylic）----
+// 与界面缩放同源：材质在窗口创建时固定，配置写在 platform（quickdock.json），
+// 改完必须重启。差别是它多一道能力探测 —— 不支持的系统连设置项都不渲染，
+// 后端 SetWindowBackdrop 也会直接拒绝，不留一个「能选但没效果」的假开关。
+const backdropLevels = computed(() => [
+  { value: 'off', label: t('windowBackdropOff') },
+  { value: 'mica', label: t('windowBackdropMica') },
+  { value: 'acrylic', label: t('windowBackdropAcrylic') },
+  { value: 'tabbed', label: t('windowBackdropTabbed') },
+])
+
+async function loadWindowBackdrop() {
+  try {
+    const st = unwrap<{ supported?: boolean; current?: string }>(await GetWindowBackdrop())
+    // 探测失败或字段缺失时保持 false：宁可不显示，也不能给一个点了没反应的开关。
+    backdropSupported.value = st?.supported === true
+    if (typeof st?.current === 'string') backdropValue.value = st.current
+  } catch (e) {
+    logErr('Settings.windowBackdrop', e)
+  }
+}
+
+async function selectWindowBackdrop(v: string) {
+  if (backdropBusy.value || v === backdropValue.value) return
+  backdropBusy.value = true
+  backdropMsg.value = ''
+  try {
+    const res = await SetWindowBackdrop(v)
+    if (res && res.code === 0) {
+      backdropValue.value = v
+      backdropMsg.value = res.msg || t('windowBackdropRestartHint')
+    } else {
+      backdropMsg.value = res?.msg || t('updateError')
+    }
+  } catch (e: any) {
+    backdropMsg.value = getErrorMessage(e)
+  } finally {
+    backdropBusy.value = false
+  }
+}
+
+// 与缩放 / 存储位置同一条真重启路径（不用更新页那个就地替换专用的 restartApp）。
+async function restartForWindowBackdrop() {
+  backdropBusy.value = true
+  backdropMsg.value = t('windowBackdropRestarting')
+  try {
+    const res = await RestartAppPlain()
+    if (res && res.code === 0) {
+      // 成功时进程会在新实例接管后异步退出，不再有后续 UI 更新
+      backdropMsg.value = t('windowBackdropRestarting')
+    } else {
+      backdropMsg.value = res?.msg || t('updateError')
+    }
+  } catch (e: any) {
+    backdropMsg.value = getErrorMessage(e)
+  } finally {
+    backdropBusy.value = false
+  }
+}
+
 // ---- 主题 / 语言 ----
 // 主题状态由 App 统一管理（App.vue provide('theme')）：此处不再各存一份，否则用户切主题后
 // 主题：统一消费 App.vue 通过 provide('theme') 注入的权威入口（同步 currentTheme + applyTheme + 持久化 + 跨窗口广播）
@@ -673,6 +747,8 @@ onMounted(async () => {
   try {
     autoStart.value = unwrap<boolean>(await GetAutoStart()) ?? false
   } catch (e) { logErr('SettingsModal', e) }
+  // 能力探测要在根菜单渲染前拿到结果，否则「窗口材质」不会拼进菜单描述。
+  loadWindowBackdrop()
 })
 
 // ---- 剪贴板设置 ----
@@ -953,6 +1029,27 @@ async function toggleAutoStart() {
               <div v-if="uiZoomMsg" class="action-row">
                 <p class="result-hint">{{ uiZoomMsg }}</p>
                 <button class="btn btn-secondary" :disabled="uiZoomBusy" @click="restartForUiZoom">{{ t('uiZoomRestart') }}</button>
+              </div>
+            </div>
+            <!-- 窗口材质：能力探测通过（Win11 22621+）才渲染这一整块。
+                 Win10 / 非 Windows 下 v-if 为 false，设置页与旧版逐项一致。 -->
+            <div v-if="backdropSupported" class="section">
+              <h3 class="section-title">{{ t('windowBackdrop') }}</h3>
+              <p class="section-desc">{{ t('windowBackdropDesc') }}</p>
+              <div class="locale-selector">
+                <button
+                  v-for="lv in backdropLevels"
+                  :key="lv.value"
+                  :class="['locale-btn', { active: backdropValue === lv.value }]"
+                  :disabled="backdropBusy"
+                  @click="selectWindowBackdrop(lv.value)"
+                >{{ lv.label }}</button>
+              </div>
+              <p class="field-hint">{{ t('windowBackdropHint') }}</p>
+              <!-- 材质在窗口创建时固定，改完必须重启（复用与缩放相同的真重启路径） -->
+              <div v-if="backdropMsg" class="action-row">
+                <p class="result-hint">{{ backdropMsg }}</p>
+                <button class="btn btn-secondary" :disabled="backdropBusy" @click="restartForWindowBackdrop">{{ t('windowBackdropRestart') }}</button>
               </div>
             </div>
           </div>

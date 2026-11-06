@@ -3,6 +3,8 @@ package services
 import (
 	"reflect"
 
+	"quickdock/internal/platform"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
@@ -63,7 +65,15 @@ func (a *AppService) ApplyTheme(isDark bool) *ApiResult {
 			// 额外加 SetWindowPos/RedrawWindow 强制重绘反而会让标题栏「切了不变」，已验证。
 			applyWindowTheme(hwnd, isDark)
 		}
-		a.MainWindow.SetBackgroundColour(themeBackground(isDark))
+		colour := themeBackground(isDark)
+		// 半透明材质生效时把 Alpha 归零。Wails 在 BackgroundTypeTranslucent 下
+		// 本来就会忽略入参、强制给 WebView2 设 (0,0,0,0)，这里显式写 0 是为了
+		// 「实色」不再从宿主侧传进去 —— 免得以后改框架或加自定义底色时误盖住材质。
+		// Solid（Win10 / 未启用材质）下保持 255，行为不变。
+		if platform.EffectiveWindowBackdrop() != platform.BackdropOff {
+			colour.Alpha = 0
+		}
+		a.MainWindow.SetBackgroundColour(colour)
 	}
 
 	// 插件窗口：底色跟随主题（原生标题栏由 PluginPage 自定义、已随宿主主题）
