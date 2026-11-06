@@ -354,10 +354,14 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
-          <span class="log-title">A file shelf and mail codes on the dashboard, plus a date bar with weather and daily notes</span>
+          <span class="log-title">Windows 11 material behind the window, plus a file shelf and mail codes on the dashboard</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
         <ul class="log-body">
+          <li>Windows can now show the real Windows 11 material: Mica, Acrylic or Mica Alt, picked in Settings → General. The main window, the four floating panels (clipboard, command palette, notes, window layout), the SSH window and plugin windows all follow the same setting; unsupported systems (Windows 10, transparency disabled, high contrast) fall back to solid colours and look exactly as before, never the half-transparent without material state.</li>
+          <li>Three floating-panel bugs are gone: the frameless panels no longer draw a system close button in the corner, the first summon waits for the first frame instead of flashing an empty window, and hiding then reopening no longer loses the material. Clipboard and command palette are pre-created after startup so hotkeys open them instantly; the SSH window is hidden instead of destroyed, so reopening it no longer reloads the whole UI.</li>
+          <li>Plugin pages can use the material too: the host tells the page whether it is on, and the page just lets its page background through while cards and toolbars stay solid (effective once the plugin templates follow). Settings panels are fully opaque again, and light-theme backgrounds are denser so long forms and small text stay readable.</li>
+          <li>A desktop notification now pops when an AI answer finishes — the in-app notification centre only helps if you go and look at it.</li>
           <li>New file shelf on the dashboard: drop the files or folders you keep reopening onto the card and double-click to open. Use the corner button to pick a file or a folder. Only the path is stored — nothing is copied, moved or renamed, and a dead path is marked on the card.</li>
           <li>New mail verification codes: add an IMAP mailbox and new codes show up on the dashboard. Click to copy, and a notification is pushed at the same time. The inbox is opened read-only with BODY.PEEK, so nothing is marked as read, and the app never sends, deletes or flags mail; message bodies are inspected in memory only while extracting the code.</li>
           <li>New file search page backed by Everything: install guidance when it is missing, one-click start when it is not running, index progress while it builds. Sort by name, path, size or time, select many results to copy their paths, and preview the file on the right. The query box takes Everything syntax directly, with no extra filter form on top.</li>
