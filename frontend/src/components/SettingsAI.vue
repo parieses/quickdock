@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import { ref, computed, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Pen, Trash2, Plus, RefreshCw } from '@lucide/vue'
+import { Pen, Trash2, Plus, RefreshCw, ChevronDown } from '@lucide/vue'
 import SettingsPrompts from './SettingsPrompts.vue'
+import SettingsSkills from './SettingsSkills.vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -23,7 +24,9 @@ import {
   AISaveExtServers,
   AISetExtServerEnabled,
   AIReloadExtServers,
+  AIListExtTools,
 } from '../../bindings/quickdock/services/ai/aiservice'
+import { MCPSetToolEnabled } from '../../bindings/quickdock/services/mcp/mcpservice'
 import { EnvOllamaModels } from '../../bindings/quickdock/services/env/environmentservice'
 import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type {
@@ -40,6 +43,22 @@ const toast = inject<ToastAPI>('toast')!
 
 const emit = defineEmits<{ close: [] }>()
 const props = defineProps<{ visible: boolean }>()
+
+// ── 页内分段 ────────────────────────────────────────────────────────
+// 原来六块内容全堆在一个滚动区里，找「外部 MCP 重连」要滚过整张用量表格。
+// 分段按钮沿用「历史」页的 qd-btn / is-on 范式（SettingsHistory.vue），不另造样式。
+// 面板用 v-show 而不是 v-if：所有数据 ref 都在本组件，SettingsPrompts 的编辑草稿
+// 还在子组件里，切走再切回来不该被销毁重建，也不该每次重发一遍加载请求。
+type AiSettingsTab = 'model' | 'usage' | 'permission' | 'mcp' | 'skills' | 'prompts'
+const activeTab = ref<AiSettingsTab>('model')
+const aiTabs = computed<{ value: AiSettingsTab; label: string }[]>(() => [
+  { value: 'model', label: t('aiTabModel') },
+  { value: 'usage', label: t('aiTabUsage') },
+  { value: 'permission', label: t('aiTabPermission') },
+  { value: 'mcp', label: t('aiTabMcp') },
+  { value: 'skills', label: t('aiTabSkills') },
+  { value: 'prompts', label: t('aiTabPrompts') },
+])
 
 // 外部 MCP 的两段 placeholder 是「JSON 片段 / 命令行参数」的语法示例，不走 i18n：
 //   1) 内容全是 JSON 与包名，各语言相同，翻译没有意义；
@@ -300,6 +319,9 @@ async function saveApprovalRule(rule: AIApprovalRuleView, mode: string) {
 // 而且报错只说「JSON 解析失败」。现在改成表单：名字、类型、命令、参数、环境变量
 // 各一格；JSON 保留成「粘贴导入」这一条兜底通道——别人给的配置还是要能整段贴进来。
 const extServers = ref<AIExtServerState[]>([])
+// 失败数挂在 MCP 分段上：外部 server 启动时只连一次、失败不会自动重试
+// （services/ai/ext_mcp.go loadExtOnStart），用户往往就是看到红字才进来重连。
+const extErrorCount = computed(() => extServers.value.filter(s => s.status === 'error').length)
 const extLoading = ref(false)
 const extSaving = ref(false)
 const extError = ref('')
@@ -318,6 +340,69 @@ const extForm = ref<ExtForm | null>(null)
 const extImportOpen = ref(false)
 const extImportDraft = ref('')
 
+// ---- 工具详情展开行 ----
+// AIGetExtServers 只给工具名；描述与「是否被单独关掉」在 mcp.Catalog 里，
+// 由 AIListExtTools 按 server 取。展开状态按 server 名记，服务器停用 / 重连 /
+// 改名后一律收起，否则会展示上一轮的陈旧列表。
+interface ExtToolInfo {
+  name: string
+  desc: string
+  disabled: boolean
+}
+const extExpanded = ref<string | null>(null)
+const extTools = ref<ExtToolInfo[]>([])
+const extToolsLoading = ref(false)
+const extToolsBusy = ref('')
+// 快速连点两个 server 时，前一个请求回来不能盖掉后一个的结果。
+let extToolsSeq = 0
+
+function resetExtTools() {
+  extToolsSeq++
+  extExpanded.value = null
+  extTools.value = []
+  extToolsBusy.value = ''
+  extToolsLoading.value = false
+}
+
+async function toggleExtTools(s: AIExtServerState) {
+  if (extExpanded.value === s.name) { resetExtTools(); return }
+  resetExtTools()
+  const seq = extToolsSeq
+  extExpanded.value = s.name
+  extToolsLoading.value = true
+  try {
+    const list = unwrap<ExtToolInfo[]>(await AIListExtTools(s.name)) ?? []
+    if (seq === extToolsSeq) extTools.value = list
+  } catch (e) {
+    logErr('[SettingsAI] AIListExtTools:', e)
+    toast.error(getErrorMessage(e))
+    // 这里不能再调 resetExtTools：它会推进 extToolsSeq，finally 就判不出
+    // 「还是本次请求」而漏掉关 loading，展开行会一直转圈。
+    if (seq === extToolsSeq) {
+      extExpanded.value = null
+      extTools.value = []
+    }
+  } finally {
+    if (seq === extToolsSeq) extToolsLoading.value = false
+  }
+}
+
+async function toggleExtTool(tool: ExtToolInfo) {
+  if (extToolsBusy.value) return
+  extToolsBusy.value = tool.name
+  try {
+    // 参数取反：tool.disabled 为 true 表示当前被关掉、这次要重新开启。
+    // 与「环境管理 → MCP 服务」面板走的是同一个注册表开关，立即生效。
+    unwrap(await MCPSetToolEnabled(tool.name, tool.disabled))
+    tool.disabled = !tool.disabled
+  } catch (e) {
+    logErr('[SettingsAI] MCPSetToolEnabled:', e)
+    toast.error(getErrorMessage(e))
+  } finally {
+    extToolsBusy.value = ''
+  }
+}
+
 // 与后端 mcpclient.ServerConfig 同构的提交项
 interface ExtInput {
   name: string
@@ -333,6 +418,7 @@ async function loadExtServers() {
   extError.value = ''
   try {
     extServers.value = unwrap<AIExtServerState[]>(await AIGetExtServers()) ?? []
+    resetExtTools()
   } catch (e) {
     extError.value = getErrorMessage(e)
   } finally {
@@ -416,6 +502,7 @@ async function commitExt(items: ExtInput[]): Promise<boolean> {
   try {
     const res = unwrap<{ states: AIExtServerState[] }>(await AISaveExtServers(items))
     extServers.value = res?.states ?? []
+    resetExtTools()
     extForm.value = null
     extImportOpen.value = false
     extImportDraft.value = ''
@@ -476,6 +563,7 @@ async function toggleExt(s: AIExtServerState) {
   extError.value = ''
   try {
     extServers.value = unwrap<AIExtServerState[]>(await AISetExtServerEnabled(s.name, enable)) ?? []
+    resetExtTools()
   } catch (e) {
     extError.value = getErrorMessage(e)
   } finally {
@@ -726,6 +814,7 @@ async function reloadExt() {
   extError.value = ''
   try {
     extServers.value = unwrap<AIExtServerState[]>(await AIReloadExtServers()) ?? []
+    resetExtTools()
   } catch (e) {
     extError.value = getErrorMessage(e)
   } finally {
@@ -914,6 +1003,26 @@ function saveAIModal() {
     <h3 class="section-title">{{ t('navAi') }}</h3>
     <p class="section-desc">{{ t('aiSettingsDesc') }}</p>
 
+    <div class="ai-tabs" role="tablist">
+      <button
+        v-for="o in aiTabs"
+        :key="o.value"
+        type="button"
+        role="tab"
+        :aria-selected="activeTab === o.value"
+        :class="['qd-btn', 'qd-btn-sm', { 'is-on': activeTab === o.value }]"
+        @click="activeTab = o.value"
+      >
+        <span>{{ o.label }}</span>
+        <span
+          v-if="o.value === 'mcp' && extErrorCount"
+          class="ai-tab-badge"
+          :title="t('aiExtStatusErr')"
+        >{{ extErrorCount }}</span>
+      </button>
+    </div>
+
+    <div v-show="activeTab === 'model'" class="ai-tab-panel" role="tabpanel">
     <div class="ai-profiles">
       <div
         v-for="p in aiProfiles"
@@ -955,6 +1064,28 @@ function saveAIModal() {
       <button class="btn btn-primary" @click="saveAIProfiles">{{ t('save') }}</button>
     </div>
 
+    <!-- 记忆：每轮结束后 AI 自己把结论/偏好摘进长期记忆（没有绑定空间的对话共用一份，
+         绑定空间的写在项目里的 .quickDock）。开关放这里是因为它会多花一次小调用，
+         钱得让人看得见、也随时能关。 -->
+    <div class="ai-usage">
+      <div class="ai-usage-head">
+        <h4 class="ai-usage-title">{{ t('aiMemoryTitle') }}</h4>
+      </div>
+      <label class="ai-memory-row">
+        <input
+          type="checkbox"
+          class="ai-memory-check"
+          :checked="memoryAuto"
+          :disabled="memoryAutoSaving"
+          @change="onToggleMemoryAuto(($event.target as HTMLInputElement).checked)"
+        />
+        <span class="ai-memory-label">{{ t('aiMemoryAutoLabel') }}</span>
+      </label>
+      <p class="usage-hint">{{ t('aiMemoryHint') }}</p>
+    </div>
+    </div>
+
+    <div v-show="activeTab === 'usage'" class="ai-tab-panel" role="tabpanel">
     <!-- 用量统计：花费是按内置价目表估算的，界面里必须说清楚，别让人当账单 -->
     <div class="ai-usage">
       <div class="ai-usage-head">
@@ -1065,7 +1196,9 @@ function saveAIModal() {
       </template>
       <p v-else class="usage-hint">{{ t('aiUsageEmpty') }}</p>
     </div>
+    </div>
 
+    <div v-show="activeTab === 'permission'" class="ai-tab-panel" role="tabpanel">
     <!-- 工具审批策略：先列会改东西的工具，只读的在下面折叠起来（只展示、
          恒放行）。全过滤掉会让「git 相关的一个都没有」看起来像漏了。 -->
     <div class="ai-usage">
@@ -1136,27 +1269,9 @@ function saveAIModal() {
       <p v-if="apShowReadOnly" class="usage-hint">{{ t('aiApprovalRuleReadOnlyHint') }}</p>
       </template>
     </div>
-
-    <!-- 记忆：每轮结束后 AI 自己把结论/偏好摘进长期记忆（没有绑定空间的对话共用一份，
-         绑定空间的写在项目里的 .quickDock）。开关放这里是因为它会多花一次小调用，
-         钱得让人看得见、也随时能关。 -->
-    <div class="ai-usage">
-      <div class="ai-usage-head">
-        <h4 class="ai-usage-title">{{ t('aiMemoryTitle') }}</h4>
-      </div>
-      <label class="ai-memory-row">
-        <input
-          type="checkbox"
-          class="ai-memory-check"
-          :checked="memoryAuto"
-          :disabled="memoryAutoSaving"
-          @change="onToggleMemoryAuto(($event.target as HTMLInputElement).checked)"
-        />
-        <span class="ai-memory-label">{{ t('aiMemoryAutoLabel') }}</span>
-      </label>
-      <p class="usage-hint">{{ t('aiMemoryHint') }}</p>
     </div>
 
+    <div v-show="activeTab === 'mcp'" class="ai-tab-panel" role="tabpanel">
     <!-- 外部 MCP 服务器（阶段 D）：把别的 server 的工具接进内置 AI。
          表单化增删改，JSON 只留「粘贴导入」——加一个服务器是这里最常做的事，
          让人手写括号引号等于每次都从报错开始。 -->
@@ -1251,8 +1366,41 @@ function saveAIModal() {
               <div class="ai-ext-cmd" :title="extTarget(s)">{{ extTarget(s) }}</div>
               <div v-if="s.error" class="usage-cell-sub ai-ext-err">{{ s.error }}</div>
               <div v-else-if="s.tools.length" class="usage-cell-sub">{{ s.tools.join(' · ') }}</div>
+
+              <!-- 工具详情：名字清单上面已有，这里补描述与逐条开关 -->
+              <div v-if="extExpanded === s.name" class="ai-ext-tools">
+                <p v-if="extToolsLoading" class="usage-cell-sub">{{ t('aiExtToolsLoading') }}</p>
+                <p v-else-if="!extTools.length" class="usage-cell-sub">{{ t('aiExtToolsEmpty') }}</p>
+                <div v-else class="ai-ext-tools-list">
+                  <div v-for="tool in extTools" :key="tool.name" class="ai-ext-tool">
+                    <div class="ai-ext-tool-main">
+                      <code class="ai-ext-tool-name">{{ tool.name }}</code>
+                      <span v-if="tool.disabled" class="ai-ext-tool-off">{{ t('aiExtToolDisabled') }}</span>
+                      <span class="ai-ext-tool-desc">{{ tool.desc }}</span>
+                    </div>
+                    <button
+                      class="toggle-btn-sm"
+                      :class="{ active: !tool.disabled }"
+                      :disabled="extToolsBusy === tool.name"
+                      :title="tool.disabled ? t('aiExtToolEnable') : t('aiExtToolDisable')"
+                      @click="toggleExtTool(tool)"
+                    >
+                      <span class="toggle-knob"></span>
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
             <div class="ai-ext-item-ops">
+              <button
+                class="ai-hook-no ai-ext-expand"
+                :class="{ 'is-open': extExpanded === s.name }"
+                :disabled="extSaving || s.status === 'disabled'"
+                :title="extExpanded === s.name ? t('aiExtToolsHide') : t('aiExtToolsShow')"
+                @click="toggleExtTools(s)"
+              >
+                <ChevronDown :size="12" />
+              </button>
               <button
                 class="toggle-btn-sm"
                 :class="{ active: s.status !== 'disabled' }"
@@ -1292,6 +1440,7 @@ function saveAIModal() {
           <span class="ai-ext-tip">{{ t('aiExtImportHint') }}</span>
         </div>
       </template>
+    </div>
     </div>
 
     <!-- AI 配置编辑模态框 -->
@@ -1458,8 +1607,19 @@ function saveAIModal() {
       </div>
     </Teleport>
 
-    <!-- 提示词库：与技能（skills/ 目录）不是一套，见 SettingsPrompts 文件头 -->
-    <SettingsPrompts :visible="visible" />
+    <!-- 技能：skills/ 目录的 SKILL.md 操作手册，与提示词库（ai_prompts 表）不是一套。
+         visible 同 SettingsPrompts，只在切到本分段时触发加载；切走再切回要重拉，
+         因为技能目录可能刚被用户在资源管理器里改过。 -->
+    <div v-show="activeTab === 'skills'" class="ai-tab-panel" role="tabpanel">
+      <SettingsSkills :visible="visible && activeTab === 'skills'" />
+    </div>
+
+    <!-- 提示词库：与技能（skills/ 目录）不是一套，见 SettingsPrompts 文件头。
+         visible 只有切到本分段才为 true：它靠这个 prop 的 false→true 触发加载，
+         常驻为 true 会在打开设置时白白拉一次、切走时也不会停。 -->
+    <div v-show="activeTab === 'prompts'" class="ai-tab-panel" role="tabpanel">
+      <SettingsPrompts :visible="visible && activeTab === 'prompts'" />
+    </div>
   </div>
 </template>
 
@@ -1469,5 +1629,87 @@ function saveAIModal() {
   font-size: 11px;
   line-height: 1.5;
   color: var(--color-text-muted);
+}
+
+/* 外部 MCP 工具详情：展开区挂在 ai-ext-item-main 里，随行宽收缩 */
+.ai-ext-expand {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+}
+.ai-ext-expand svg {
+  transition: transform 0.15s ease;
+}
+.ai-ext-expand.is-open svg {
+  transform: rotate(180deg);
+}
+.ai-ext-tools {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--color-border);
+}
+.ai-ext-tools-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.ai-ext-tool {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+}
+.ai-ext-tool-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ai-ext-tool-name {
+  font-size: 11px;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+.ai-ext-tool-off {
+  font-size: 10px;
+  color: var(--color-warning);
+}
+.ai-ext-tool-desc {
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--color-text-muted);
+  word-break: break-word;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 页内分段：按钮走公共类 qd-btn/qd-btn-sm/is-on，这里只排布一行 */
+.ai-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-5);
+  border-bottom: 1px solid var(--color-border);
+}
+.ai-tab-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-sm);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 11px;
+  line-height: 1;
 }
 </style>

@@ -235,18 +235,36 @@ const notes = ref<CmdNote[]>([])
 // 若走「发事件让主窗口弹」的链路，事件到了也没人看得见。关掉备忘单后可以接着搜。
 const showCheatSheet = ref(false)
 
+// ---- 破坏性系统命令 ----
+// 面板里回车即执行、没有回收余地，而删条目走 toast.confirm —— 同一软件里两种
+// 安全级别会让人误判。这四条统一走确认，确认后仍按原链路执行。
+// toast 在独立窗口里可能没注入（现有错误提示也都用可选链），缺失时维持原行为，
+// 不能因为拿不到确认框就让命令彻底失效。
+async function runRiskySystemCommand(id: string, label: string) {
+  const ok = toast?.confirm ? await toast.confirm(t('cmdSystemConfirm', { name: label })) : true
+  if (!ok) return
+  try {
+    unwrap(await ExecuteSystemCommand(id))
+  } catch (e) {
+    logErr('[CmdPalette] ExecuteSystemCommand:', e)
+    toast?.error?.(getErrorMessage(e))
+    return
+  }
+  closePalette()
+}
+
 // ---- 系统命令 ----
 const systemCommands = computed<SystemCmd[]>(() => [
   { id: 'lock', label: t('cmdLock'), desc: t('cmdLockDesc'), keywords: ['lock', '锁屏', '锁定', 'suo ping', 'suo ding', '系统'], icon: Lock,
     action: async () => { await ExecuteSystemCommand('lock'); closePalette() } },
   { id: 'shutdown', label: t('cmdShutdown'), desc: t('cmdShutdownDesc'), keywords: ['shutdown', '关机', 'guan ji', '关闭', '系统'], icon: Power,
-    action: async () => { await ExecuteSystemCommand('shutdown'); closePalette() } },
+    action: async () => { await runRiskySystemCommand('shutdown', t('cmdShutdown')) } },
   { id: 'restart', label: t('cmdRestart'), desc: t('cmdRestartDesc'), keywords: ['restart', '重启', 'reboot', 'chong qi', '重新启动', '系统'], icon: RotateCcw,
-    action: async () => { await ExecuteSystemCommand('restart'); closePalette() } },
+    action: async () => { await runRiskySystemCommand('restart', t('cmdRestart')) } },
   { id: 'sleep', label: t('cmdsleep'), desc: t('cmdsleepDesc'), keywords: ['sleep', '休眠', '睡眠', 'shui mian', 'xiu mian', '系统'], icon: Moon,
     action: async () => { await ExecuteSystemCommand('sleep'); closePalette() } },
   { id: 'emptytrash', label: t('cmdEmptyTrash'), desc: t('cmdEmptyTrashDesc'), keywords: ['trash', '回收站', '清空', '垃圾', 'hui shou zhan', 'qing kong', '系统'], icon: Trash2,
-    action: async () => { await ExecuteSystemCommand('emptytrash'); closePalette() } },
+    action: async () => { await runRiskySystemCommand('emptytrash', t('cmdEmptyTrash')) } },
   { id: 'window-left', label: t('cmdWindowLeft'), desc: t('cmdWindowLeftDesc'), keywords: ['window', 'left', '左半屏', '左半', '窗口', 'ban ping', 'zuo ban ping', '系统'], icon: PanelLeft,
     action: async () => { await ExecuteSystemCommand('window-left'); closePalette() } },
   { id: 'window-right', label: t('cmdWindowRight'), desc: t('cmdWindowRightDesc'), keywords: ['window', 'right', '右半屏', '右半', '窗口', 'ban ping', 'you ban ping', '系统'], icon: PanelRight,
@@ -260,7 +278,7 @@ const systemCommands = computed<SystemCmd[]>(() => [
   { id: 'wifi-toggle', label: t('cmdWifiToggle'), desc: t('cmdWifiToggleDesc'), keywords: ['wifi', '无线', '网络', '开关', 'wang luo', 'kai guan', '系统'], icon: Wifi,
     action: async () => { await ExecuteSystemCommand('wifi-toggle'); closePalette() } },
   { id: 'kill-foreground', label: t('cmdKillForeground'), desc: t('cmdKillForegroundDesc'), keywords: ['kill', 'process', '结束', '进程', '终止', 'jin cheng', 'zhong zhi', '系统'], icon: XCircle,
-    action: async () => { await ExecuteSystemCommand('kill-foreground'); closePalette() } },
+    action: async () => { await runRiskySystemCommand('kill-foreground', t('cmdKillForeground')) } },
   // 区域截图：截图期间不再隐藏宿主窗口（见 services/screenshot.go 的 CaptureSelection），
   // 故无需先关面板；截完也不会弹回任何窗口。
   { id: 'screenshot', label: t('cmdScreenshot'), desc: t('cmdScreenshotDesc'), keywords: ['screenshot', 'capture', '截图', '截屏', '区域', 'jietu', 'jie tu', 'qu yu', '系统'], icon: Camera,

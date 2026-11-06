@@ -26,7 +26,7 @@ async function handleGetStarted() {
 }
 
 function openSettings() {
-  emit('open-settings', 'snapshot')
+  emit('open-settings', 'backup')
 }
 </script>
 

@@ -93,7 +93,7 @@ const menuItems = computed(() => [
 ])
 
 // ---- 旧 key 别名 ----
-// 合并后旧 key 会失效，但深链散落在各入口（Onboarding/EmptyGuide 传 'snapshot'、
+// 合并后旧 key 会失效，但历史深链散落在各入口（旧版引导页传 'snapshot'、
 // 备忘单传 'hotkeys'、AI 页传 'ai'），改一次 key 就得全局搜一遍。这里集中兜底：
 // 任何历史 key 进来都会被翻译成当前 key，命不中的原样返回。
 const PAGE_ALIASES: Record<string, string> = {
