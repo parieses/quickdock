@@ -635,11 +635,11 @@ func (s *sseFlusher) loop() {
 	}
 }
 
-// notifyAIDone 在回答正常完成时把结果写进通知中心。
+// notifyAIDone 在回答正常完成时把结果落到通知中心，并弹一条桌面气泡。
 //
 // 这里不再判断「窗口有没有盯着」——用户明确反馈过：盯着屏幕时也常常注意不到
 // AI 已经答完（尤其回答较长、他中途切去干别的），所以一律通知。
-// 中断与失败由调用方用不同的标题单独通知。
+// 中断与失败由调用方用不同的标题单独通知（且只进通知中心，不弹气泡）。
 func (s *aiStreamServer) notifyAIDone(convID, question, answer string) {
 	if s.svc == nil || s.svc.App == nil || s.svc.App.DB == nil {
 		return
@@ -654,4 +654,10 @@ func (s *aiStreamServer) notifyAIDone(convID, question, answer string) {
 		body = "（无文本输出）"
 	}
 	s.svc.App.PushNotification("ai", "success", title, logger.Trunc(body, 160), "ai", convID)
+	// 桌面气泡：左下角通知中心要用户主动点开才看得见，人切去做别的事时等于没有。
+	// 与待办「发送测试提醒」走同一条系统通知通道（宿主 NotifyDesktop），
+	// 回答越长越需要这一下——用户反馈过"盯着屏幕也会看漏"。
+	// ID 带时间戳：同一会话连问两次，相同 ID 会被系统按同一条通知就地替换、不重弹。
+	s.svc.App.NotifyDesktop("ai-done-"+convID+"-"+time.Now().Format("150405"),
+		title, logger.Trunc(body, 120))
 }
