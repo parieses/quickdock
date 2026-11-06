@@ -42,11 +42,24 @@ export function usePluginHost(opts: PluginHostOptions) {
   let messageHandler: ((e: MessageEvent) => void) | null = null
   let iframeWindow: Window | null = null
   let themeObserver: MutationObserver | null = null
+  let backdropObserver: MutationObserver | null = null
   // 随机 nonce 防止跨源消息伪造（blob URL / srcdoc 下无法指定 targetOrigin）
   const pluginNonce = Math.random().toString(36).slice(2, 12)
 
   function currentThemeName(): string {
     return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark'
+  }
+
+  /** 本窗口是否**真的**套上了系统材质：入口在 GetWindowBackdrop 返回后才给 <html> 加
+   *  .qd-backdrop，异步且可能比 iframe 的 onload 晚，所以不能只在 onload 时读一次。 */
+  function currentBackdrop(): boolean {
+    return document.documentElement.classList.contains('qd-backdrop')
+  }
+
+  /** 统一下发给插件页的主题信封。backdrop 走同一条消息，插件侧据此决定页面底色是否让开
+   *  （`html[data-backdrop] body { background: transparent }`，见 utils/pluginBridge.ts）。 */
+  function themePayload() {
+    return { theme: currentThemeName(), locale: locale.value, backdrop: currentBackdrop() }
   }
 
   function iframePostMessage(data: any) {
@@ -59,7 +72,7 @@ export function usePluginHost(opts: PluginHostOptions) {
     iframeWindow = (event.target as HTMLIFrameElement)?.contentWindow
     if (!iframeWindow) return
     const theme = currentThemeName()
-    iframePostMessage({ type: 'plugin:theme', data: { theme, locale: locale.value } })
+    iframePostMessage({ type: 'plugin:theme', data: themePayload() })
     let text = ''
     let command = ''
     if (opts.getInit) {
@@ -295,14 +308,27 @@ export function usePluginHost(opts: PluginHostOptions) {
 
   // 宿主主题切换时，实时重发 theme 给插件 iframe（浅色/深色跟随）
   themeObserver = new MutationObserver(() => {
-    iframePostMessage({ type: 'plugin:theme', data: { theme: currentThemeName(), locale: locale.value } })
+    iframePostMessage({ type: 'plugin:theme', data: themePayload() })
   })
   themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+
+  // 材质开关是异步确定的（GetWindowBackdrop 返回后才加 .qd-backdrop），很可能晚于
+  // iframe 的 onload —— 只在 onload 发一次，插件永远收不到 backdrop=true，
+  // 表现就是「窗口有材质、插件页还是没有」。这里单独盯 class，只在真的翻转时补发一次，
+  // 避免把缩放手柄/语言之类的其它 class 噪声也变成消息。
+  let lastBackdrop = currentBackdrop()
+  backdropObserver = new MutationObserver(() => {
+    const on = currentBackdrop()
+    if (on === lastBackdrop) return
+    lastBackdrop = on
+    iframePostMessage({ type: 'plugin:theme', data: themePayload() })
+  })
+  backdropObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
 
   // 切换界面语言时同步重发 locale：语言变更不产生 DOM 属性变化，
   // MutationObserver 感知不到，已打开的插件页（如 pdf-toolkit 的 onChange 重渲染）会停留在旧语言
   const stopLocaleWatch = watch(locale, () => {
-    iframePostMessage({ type: 'plugin:theme', data: { theme: currentThemeName(), locale: locale.value } })
+    iframePostMessage({ type: 'plugin:theme', data: themePayload() })
   })
 
   function cleanup() {
@@ -318,6 +344,10 @@ export function usePluginHost(opts: PluginHostOptions) {
     if (themeObserver) {
       themeObserver.disconnect()
       themeObserver = null
+    }
+    if (backdropObserver) {
+      backdropObserver.disconnect()
+      backdropObserver = null
     }
     iframeWindow = null
   }

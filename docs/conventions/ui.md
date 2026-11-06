@@ -217,6 +217,13 @@
 - **插件 iframe 拿不到宿主 CSS 变量** —— `utils/pluginBridge.ts` 只把 `data-theme` 写进 iframe 的
   `<html>` 并转发 postMessage，**不注入任何变量**。所以不要在本仓库里给插件写 `qd-*` 类或
   `var(--color-*)` 样式：写过去是空值，整条声明失效且**无任何报错**。
+- **窗口材质靠一个布尔标记传达，不注入样式**：`plugin:theme` 消息带 `backdrop: boolean`
+  （`usePluginHost.ts` 的 `themePayload()`），桥脚本据此写 `<html data-backdrop="1">`。
+  插件侧只需 `html[data-backdrop] body { background: transparent }` 就能让材质透出来；
+  标记由 MutationObserver 盯 `.qd-backdrop` 补发 —— 材质是异步确定的，常晚于 iframe onload。
+- **插件窗口只允许一层铺底**：`.plugin-standalone`（App.vue 外壳）与 `.pf-iframe` 都必须透明，
+  唯一那层在 `.plugin-window`（PluginPage.vue 根节点）。三层半透明叠乘后材质透过率只剩 12%，
+  症状是「窗口有材质、页面看不出」。
 - 本仓库 `plugins/shared/common.css` 是插件仓库模板的副本（主程序启动时同步给旧插件兜底注入），
   **不在它上面改样式**。
 - 宿主配色变更需要搬进插件模板，属插件仓库的流程，见那边文档第 3 节。

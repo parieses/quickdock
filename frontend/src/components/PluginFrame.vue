@@ -131,10 +131,15 @@ defineExpose({ reload })
   text-align: center;
   line-height: 1.6;
 }
+/* iframe 自己不铺底：底色应当由**外壳**（独立窗口的 .plugin-window / 内联时的父容器）
+   提供唯一一层，否则「.plugin-standalone + .plugin-window + iframe」三层半透明一叠，
+   材质透过率只剩 12%，看着就是「窗口有材质、页面没有」。
+   插件页自身若把 body 铺成实色（默认行为），这里透明与否都一样；
+   插件改成 html[data-backdrop] body { background: transparent } 之后，材质就从这一层透出来。 */
 .pf-iframe {
   flex: 1;
   width: 100%;
   border: none;
-  background: var(--color-bg-primary);
+  background: transparent;
 }
 </style>
