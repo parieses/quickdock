@@ -698,39 +698,50 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="clipboard-panel">
-    <!-- 头部 -->
-    <div class="clipboard-header">
-      <div class="header-left">
-        <ClipboardList :size="18" />
-        <span class="header-title">{{ t('clipboardHistoryTitle') }}</span>
-        <!-- 已载入 / 总数：单写 entries.length 会被误读成"历史就这么多" -->
-        <span v-if="totalCount || entries.length" class="header-count"
-              :title="t('clipboardCountTip', { loaded: entries.length, total: totalCount || entries.length })">
-          {{ totalCount || entries.length }}{{ entries.length < totalCount ? ' · ' + entries.length : '' }} {{ t('count') }}
-        </span>
+  <div class="clipboard-panel" :class="{ compact }">
+    <!-- 头部：与其它功能页共用 qd-page-header（标题 + 副标题在左，搜索与动作在右）。
+         原来这一排是自造的 .clipboard-header（18px 图标 + 14px 标题 + 自由宽搜索 +
+         三个 30px 图标），高度、内边距、按钮尺寸都和笔记/待办/监控那套 46px 页头
+         对不上 —— 从别的页切过来时顶部会"换一套控件"。浮窗（compact）共用同一结构，
+         只是省掉副标题（浮窗本来就窄，标题行已经说明一切）。 -->
+    <div class="qd-page-header">
+      <div class="qd-page-titles">
+        <h2 class="qd-page-title">
+          <ClipboardList :size="16" />
+          {{ t('clipboardHistoryTitle') }}
+          <!-- 已载入 / 总数：单写 entries.length 会被误读成"历史就这么多" -->
+          <span v-if="totalCount || entries.length" class="cb-count"
+                :title="t('clipboardCountTip', { loaded: entries.length, total: totalCount || entries.length })">
+            {{ totalCount || entries.length }}{{ entries.length < totalCount ? ' · ' + entries.length : '' }}
+          </span>
+        </h2>
+        <span v-if="!compact" class="qd-page-sub">{{ t('clipboardSubtitle') }}</span>
       </div>
-      <div class="header-search">
-        <Search :size="14" class="search-icon" />
-        <input
-          ref="searchInputRef"
-          v-model="searchQuery"
-          class="search-input"
-          :placeholder="t('searchClipboard')"
-        />
-        <button v-if="searchQuery" class="clear-btn" @click="searchQuery = ''">
-          <X :size="14" />
+      <div class="qd-page-fill">
+        <div class="qd-input-wrap cb-search">
+          <Search :size="14" />
+          <input
+            ref="searchInputRef"
+            v-model="searchQuery"
+            class="qd-input"
+            :placeholder="t('searchClipboard')"
+          />
+          <button v-if="searchQuery" class="cb-clear" @click="searchQuery = ''">
+            <X :size="13" />
+          </button>
+        </div>
+      </div>
+      <div class="qd-page-actions">
+        <button class="qd-icon-btn" @click="loadEntries" :title="t('refresh')">
+          <RefreshCw :size="14" />
+        </button>
+        <button class="qd-icon-btn" @click="exportClipboard" :title="t('exportClipboard')">
+          <Download :size="14" />
+        </button>
+        <button class="qd-icon-btn" @click="clearClipboard" :title="t('clearClipboard')">
+          <Trash2 :size="14" />
         </button>
       </div>
-      <button class="icon-btn" @click="loadEntries" :title="t('refresh')">
-        <RefreshCw :size="14" />
-      </button>
-      <button class="icon-btn" @click="exportClipboard" :title="t('exportClipboard')">
-        <Download :size="14" />
-      </button>
-      <button class="icon-btn" @click="clearClipboard" :title="t('clearClipboard')">
-        <Trash2 :size="14" />
-      </button>
     </div>
 
     <!-- 智能分类标签栏 + 时间过滤（合成一行，右侧时间分段） -->
@@ -951,48 +962,38 @@ onUnmounted(() => {
   position: relative;
 }
 
-.clipboard-header {
-  display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px; border-bottom: 1px solid var(--color-border);
-  flex-shrink: 0;
+/* 顶部页头不再自造：结构走 styles/app.css 的 .qd-page-header / .qd-page-fill /
+   .qd-page-actions，搜索框走 .qd-input-wrap + .qd-input，图标按钮走 .qd-icon-btn
+   —— 与笔记 / 待办 / 监控页完全同一套。下面只补本页特有的三处细节。 */
+
+/* 条数徽标：与插件页 .plugin-count 同款（10px、tertiary 底、极小圆角），
+   挂在标题后面当提示，不跟标题的字号字重抢戏。 */
+.cb-count {
+  font-size: 10px; font-weight: 400; color: var(--color-text-muted);
+  background: var(--color-bg-tertiary); padding: 1px 7px; border-radius: var(--radius-xs);
 }
 
-.header-left {
-  display: flex; align-items: center; gap: 8px;
-  color: var(--color-text-primary); font-size: 14px; font-weight: 500;
-  white-space: nowrap;
-}
+/* 搜索框：页头里不铺满整行，封顶 260px —— 窗口拉宽时搜索框不该吃掉整条页头，
+   右侧三个图标按钮也要保持贴着右缘。 */
+.cb-search { flex: 0 1 260px; min-width: 140px; }
+.cb-search > .qd-input { padding-right: 26px; }
 
-.header-count {
-  font-size: 11px; color: var(--color-text-muted); font-weight: 400;
-  background: var(--color-bg-tertiary); padding: 2px 8px; border-radius: var(--radius-md);
+/* 清空按钮：压在输入框右内侧，比 .qd-icon-btn 再小一号 */
+.cb-clear {
+  position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+  display: flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0;
+  background: none; border: none; border-radius: var(--radius-xs);
+  color: var(--color-text-muted); cursor: pointer;
 }
+.cb-clear:hover { color: var(--color-text-secondary); background: var(--color-bg-hover); }
 
-.header-search {
-  flex: 1; display: flex; align-items: center;
-  position: relative; max-width: 300px;
-}
-
-.search-icon {
-  position: absolute; left: 10px; color: var(--color-text-disabled);
-  pointer-events: none;
-}
-
-.search-input {
-  width: 100%; padding: 6px 30px 6px 32px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  background: var(--color-surface); color: var(--color-text-secondary); font-size: 13px;
-  outline: none; font-family: inherit;
-}
-.search-input:focus { border-color: var(--color-border-focus-soft); }
-.search-input::placeholder { color: var(--color-text-disabled); }
-
-.clear-btn {
-  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
-  background: none; border: none; color: var(--color-text-muted); cursor: pointer;
-  padding: 4px; border-radius: var(--radius-xs); display: flex;
-}
-.clear-btn:hover { color: var(--color-text-secondary); background: var(--color-bg-active); }
+/* 浮窗（compact）只有 480px 宽（clipWinWidth），会命中 app.css 里
+   max-width:900px 的页头换行规则 —— 浮窗没有第二行的高度，必须复原成单行：
+   搜索框让出剩余宽度（页头里只有它是可压缩的），标题降一档字号给动作区腾位置。 */
+.clipboard-panel.compact .qd-page-header { flex-wrap: nowrap; padding: 0 12px; gap: 8px; }
+.clipboard-panel.compact .qd-page-title { font-size: var(--text-md); }
+.clipboard-panel.compact .cb-search { flex: 1 1 auto; min-width: 110px; }
 
 .icon-btn {
   width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;

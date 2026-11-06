@@ -3296,9 +3296,14 @@ const s = currentRuntimeState
 @keyframes svc-thumb-pulse { 0%,100% { opacity: 1 } 50% { opacity: .4 } }
 
 /* 详情卡片：圆角收到与全站卡片一致（14 在这套 13px 界面里偏"圆润"），
-   加一道内高光把卡片从页面底上"提"起来。 */
+   加一道内高光把卡片从页面底上"提"起来。
+   底色用 --color-bg-secondary 而不是 --color-surface：静态时两者同值，但材质
+   （Mica/Acrylic）开启后 style.css 只把 bg-* 三个铺底换成半透明，surface 保持
+   不透明 —— 本页卡片就会变成一块压在半透明页面上的死黑板（已安装版本那张卡
+   尤其明显）。改用全站卡片同一档 token（.qd-card / dashboard .card / 笔记页
+   面板都是它），材质下卡片才和别处一个观感。 */
 .detail-block {
-  background: var(--color-surface);
+  background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   padding: 14px 16px;

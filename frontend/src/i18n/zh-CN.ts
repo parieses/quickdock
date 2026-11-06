@@ -656,6 +656,7 @@ export default {
 
   // 剪贴板面板
   clipboardHistoryTitle: '剪贴板历史',
+  clipboardSubtitle: '自动记录复制历史 · 点击条目即刻复制',
   searchClipboard: '搜索剪贴板内容...',
   refresh: '刷新',
   downloadSource: '下载源',

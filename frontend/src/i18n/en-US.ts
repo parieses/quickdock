@@ -655,6 +655,7 @@ export default {
 
   // Clipboard panel
   clipboardHistoryTitle: 'Clipboard History',
+  clipboardSubtitle: 'Copies are recorded automatically — click an entry to reuse it',
   searchClipboard: 'Search clipboard content...',
   refresh: 'Refresh',
   downloadSource: 'Download source',

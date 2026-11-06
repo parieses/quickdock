@@ -3106,10 +3106,14 @@ function seedPreview() {
 }
 
 /* ---- 工具栏 ---- */
+/* 高度 / 左右内边距对齐公共页头 .qd-page-header（46px、16px）：Git 是唯一
+   不用页头的一级页（顶部是工具栏而不是标题），原来 40px + 12px 内边距，
+   和相邻页面切来切去时上沿明显差一截。 */
 .git-bar {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-5);
-  height: 40px; padding: 0 var(--space-5); flex-shrink: 0;
+  height: 46px; padding: 0 var(--space-6); flex-shrink: 0;
   border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary);
+  box-shadow: 0 1px 0 var(--color-hairline) inset;
 }
 .bar-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
 /* 收起左栏：看长 diff 时把 240px 让出来，按钮留在工具栏最左，收了也能立刻展开 */
