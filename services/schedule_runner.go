@@ -128,27 +128,37 @@ func computeNextRun(t *db.ScheduledTask, fromStr string) string {
 		if !ok {
 			return ""
 		}
-		// 从本月或下月找第一个严格晚于 from 的同日（处理月末越界，如 1/31 → 2/28）
-		for i := 0; i < 2; i++ {
-			y, mo, d := from.Year(), from.Month(), from.Day()
-			if i == 1 {
-				mo++
-				if mo > 12 {
-					mo = 1
-					y++
-				}
+		// 日号显式取自 DayOfMonth：旧实现每次都用 from.Day()，1/31 的任务在
+		// 2/28 跑过一次后就永久漂到 28 号。0 = 老数据，沿用旧的创建日口径。
+		// -1 = 该月最后一天；1..31 在小月钳到月末，保证「每月都跑」。
+		dom := t.DayOfMonth
+		if dom == 0 {
+			dom = from.Day()
+		}
+		for i := 0; i < 13; i++ {
+			y, mo := from.Year(), int(from.Month())+i
+			y += (mo - 1) / 12
+			mo = (mo-1)%12 + 1
+			lastDay := daysInMonth(y, time.Month(mo))
+			d := dom
+			if d < 0 {
+				d = lastDay
+			} else if d > lastDay {
+				d = lastDay
 			}
-			lastDay := daysInMonth(y, mo)
-			dom := d
-			if dom > lastDay {
-				dom = lastDay
-			}
-			cand := time.Date(y, mo, dom, h, m, s, 0, time.Local)
+			cand := time.Date(y, time.Month(mo), d, h, m, s, 0, time.Local)
 			if cand.After(from) {
 				return cand.Format(schedTimeLayout)
 			}
 		}
 		return ""
+
+	case "cron":
+		at, ok := cronNext(t.CronExpr, from)
+		if !ok {
+			return ""
+		}
+		return at.Format(schedTimeLayout)
 	}
 	return ""
 }
@@ -181,6 +191,226 @@ func parseWeekdays(csv string) map[int]bool {
 		}
 	}
 	return out
+}
+
+// ---- 标准 5 段 cron（分 时 日 月 周）------------------------------------
+//
+// 不引第三方 cron 库：runner 已经用 next_run 字符串 + time.Timer 做好了等待、
+// 去重和错过补跑，这里只需要「给表达式 + 起点，算出下一次绝对时间」。引入
+// 完整调度库反而要处理它自带的 Ticker/Job 生命周期，还多一份时区语义。
+//
+// 支持 *、单值、a-b、逗号列表、*/n、a-b/n、a/n，以及 JAN..DEC / SUN..SAT
+// 三字母名与 @hourly/@daily/@weekly/@monthly/@yearly 宏。日与周都受限时按
+// Vixie cron 的「或」语义（任一命中即触发）；只要有一个是 * 就按「与」。
+const cronMaxYears = 5
+
+type cronField struct {
+	bits uint64 // 下标即取值，最大 dow=7 < 64
+	star bool   // 原字段就是 "*" 或 "?"，用于日/周「或」语义的判定
+}
+
+type cronSpec struct {
+	minute cronField
+	hour   cronField
+	dom    cronField
+	month  cronField
+	dow    cronField
+}
+
+var cronMonthNames = map[string]int{
+	"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6,
+	"jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+}
+var cronDayNames = map[string]int{
+	"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6,
+}
+var cronMacros = map[string]string{
+	"@yearly": "0 0 1 1 *", "@annually": "0 0 1 1 *",
+	"@monthly": "0 0 1 * *", "@weekly": "0 0 * * 0",
+	"@daily": "0 0 * * *", "@midnight": "0 0 * * *",
+	"@hourly": "0 * * * *",
+}
+
+func (f cronField) has(v int) bool {
+	return v >= 0 && v < 64 && f.bits&(uint64(1)<<uint(v)) != 0
+}
+
+// cronNum 解析单段里的一个数字，兼容三字母名。7 在「周」字段表示周日。
+func cronNum(s string, names map[string]int, min, max int) (int, bool) {
+	s = strings.ToLower(strings.TrimSpace(s))
+	if n, ok := names[s]; ok {
+		return n, true
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < min || n > max {
+		return 0, false
+	}
+	return n, true
+}
+
+func setCronValue(f *cronField, v, max int) {
+	if v < 0 || v >= 64 {
+		return
+	}
+	f.bits |= uint64(1) << uint(v)
+	if max == 7 && v == 7 {
+		f.bits |= 1 // 7 = 周日，与 0 等价
+	}
+}
+
+func parseCronField(raw string, min, max int, names map[string]int) (cronField, error) {
+	s := strings.TrimSpace(raw)
+	var out cronField
+	if s == "" {
+		return out, fmt.Errorf("空字段")
+	}
+	out.star = s == "*" || s == "?"
+	for _, part := range strings.Split(s, ",") {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			return cronField{}, fmt.Errorf("字段含空列表项: %q", s)
+		}
+		step := 1
+		base := part
+		hasStep := strings.Contains(part, "/")
+		if hasStep {
+			seg := strings.SplitN(part, "/", 2)
+			base = seg[0]
+			n, err := strconv.Atoi(strings.TrimSpace(seg[1]))
+			if err != nil || n <= 0 {
+				return cronField{}, fmt.Errorf("步长无效: %q", part)
+			}
+			step = n
+		}
+		lo, hi := min, max
+		switch {
+		case base == "*" || base == "?":
+			// 全范围
+		case strings.Contains(base, "-"):
+			seg := strings.SplitN(base, "-", 2)
+			l, ok1 := cronNum(seg[0], names, min, max)
+			h, ok2 := cronNum(seg[1], names, min, max)
+			if !ok1 || !ok2 || l > h {
+				return cronField{}, fmt.Errorf("范围无效: %q", part)
+			}
+			lo, hi = l, h
+		default:
+			v, ok := cronNum(base, names, min, max)
+			if !ok {
+				return cronField{}, fmt.Errorf("取值无效: %q", part)
+			}
+			lo = v
+			if !hasStep {
+				hi = v // "5/10" 表示从 5 到上限每 10；"5" 只是单点
+			}
+		}
+		for v := lo; v <= hi; v += step {
+			setCronValue(&out, v, max)
+		}
+	}
+	if out.bits == 0 {
+		return cronField{}, fmt.Errorf("字段无有效取值: %q", s)
+	}
+	return out, nil
+}
+
+func parseCronExpr(expr string) (cronSpec, error) {
+	var spec cronSpec
+	expr = strings.TrimSpace(expr)
+	if expr == "" {
+		return spec, fmt.Errorf("cron 表达式不能为空")
+	}
+	if len(expr) > 200 {
+		return spec, fmt.Errorf("cron 表达式过长（上限 200 字符）")
+	}
+	if strings.HasPrefix(expr, "@") {
+		macro, ok := cronMacros[strings.ToLower(expr)]
+		if !ok {
+			return spec, fmt.Errorf("未知的 cron 宏: %s", expr)
+		}
+		expr = macro
+	}
+	fields := strings.Fields(expr)
+	if len(fields) != 5 {
+		return spec, fmt.Errorf("cron 需要 5 段（分 时 日 月 周），实际 %d 段", len(fields))
+	}
+	var err error
+	if spec.minute, err = parseCronField(fields[0], 0, 59, nil); err != nil {
+		return spec, fmt.Errorf("分钟: %w", err)
+	}
+	if spec.hour, err = parseCronField(fields[1], 0, 23, nil); err != nil {
+		return spec, fmt.Errorf("小时: %w", err)
+	}
+	if spec.dom, err = parseCronField(fields[2], 1, 31, nil); err != nil {
+		return spec, fmt.Errorf("日: %w", err)
+	}
+	if spec.month, err = parseCronField(fields[3], 1, 12, cronMonthNames); err != nil {
+		return spec, fmt.Errorf("月: %w", err)
+	}
+	if spec.dow, err = parseCronField(fields[4], 0, 7, cronDayNames); err != nil {
+		return spec, fmt.Errorf("周: %w", err)
+	}
+	return spec, nil
+}
+
+// dayMatches 复刻 Vixie cron 的日/周规则：两者都写了具体值时取「或」，
+// 否则按「与」（* 天然全命中）。否则 "0 0 1 * 1" 会被误解成「1 号且周一」。
+func (s cronSpec) dayMatches(t time.Time) bool {
+	dom := s.dom.has(t.Day())
+	dow := s.dow.has(int(t.Weekday()))
+	if s.dom.star || s.dow.star {
+		return dom && dow
+	}
+	return dom || dow
+}
+
+// cronNextFromSpec 按日历日推进（不是 time.Add(1min)）：夏令时切换那天不会把
+// 同一小时跑两遍，也不会因为 Add 跳过不存在的本地时刻。上限 5 年，用于挡住
+// "0 0 31 2 *" 这种永远匹配不上的表达式。
+func cronNextFromSpec(s cronSpec, from time.Time) (time.Time, bool) {
+	start := time.Date(from.Year(), from.Month(), from.Day(), 0, 0, 0, 0, time.Local)
+	for d := 0; d <= cronMaxYears*366; d++ {
+		day := start.AddDate(0, 0, d)
+		if !s.month.has(int(day.Month())) || !s.dayMatches(day) {
+			continue
+		}
+		for h := 0; h < 24; h++ {
+			if !s.hour.has(h) {
+				continue
+			}
+			for mi := 0; mi < 60; mi++ {
+				if !s.minute.has(mi) {
+					continue
+				}
+				cand := time.Date(day.Year(), day.Month(), day.Day(), h, mi, 0, 0, time.Local)
+				if cand.After(from) {
+					return cand, true
+				}
+			}
+		}
+	}
+	return time.Time{}, false
+}
+
+func cronNext(expr string, from time.Time) (time.Time, bool) {
+	s, err := parseCronExpr(expr)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return cronNextFromSpec(s, from)
+}
+
+// validateCronExpr 保存前校验：语法合法且 5 年内至少能算出一次执行时间。
+// 不校验就会让任务以「保存成功」的姿态静默停用（computeNextRun 返回 ""）。
+func validateCronExpr(expr string) error {
+	s, err := parseCronExpr(expr)
+	if err != nil {
+		return err
+	}
+	if _, ok := cronNextFromSpec(s, time.Now()); !ok {
+		return fmt.Errorf("该 cron 表达式在 %d 年内没有匹配时间，请检查日期组合", cronMaxYears)
+	}
+	return nil
 }
 
 // StartScheduleRunner 启动定时任务调度器。

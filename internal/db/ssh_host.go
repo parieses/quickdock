@@ -32,6 +32,10 @@ type SshHost struct {
 	// Env 标记生产/预发/测试，用于标签与边框着色，避免误操作生产机。
 	Env string `json:"env"`
 
+	// JumpHostID 跳板机：另一台主机的 id，空串 = 直连。可多级链式，
+	// 环由 services 层在保存与连接时挡住（DB 不建外键，删跳板会自动解绑）。
+	JumpHostID string `json:"jumpHostId"`
+
 	ParentID string `json:"parentId"`
 	IsFolder bool   `json:"isFolder"`
 	Sort     int    `json:"sort"`
@@ -91,7 +95,7 @@ func sshInvalid(format string, args ...interface{}) error {
 // sshHostCols 列表/详情统一投影。
 // 密文字段不出现，改为输出「是否已设置」的标志位，从查询层面杜绝明文外泄。
 const sshHostCols = `id, name, host, port, user, auth_type, key_path, legacy_algorithms,
-	env, parent_id, is_folder, sort, remark, last_connected_at, created_at, updated_at,
+	env, jump_host_id, parent_id, is_folder, sort, remark, last_connected_at, created_at, updated_at,
 	CASE WHEN password <> '' THEN 1 ELSE 0 END,
 	CASE WHEN key_passphrase <> '' THEN 1 ELSE 0 END`
 
@@ -104,7 +108,7 @@ func scanSshHost(row rowScanner) (*SshHost, error) {
 	var legacy, isFolder, hasPw, hasPass int
 	err := row.Scan(
 		&h.ID, &h.Name, &h.Host, &h.Port, &h.User, &h.AuthType, &h.KeyPath, &legacy,
-		&h.Env, &h.ParentID, &isFolder, &h.Sort, &h.Remark, &h.LastConnectedAt,
+		&h.Env, &h.JumpHostID, &h.ParentID, &isFolder, &h.Sort, &h.Remark, &h.LastConnectedAt,
 		&h.CreatedAt, &h.UpdatedAt, &hasPw, &hasPass,
 	)
 	if err != nil {
@@ -243,11 +247,12 @@ func (d *Database) SaveSshHost(in SshHost) (*SshHost, error) {
 
 		_, err = d.conn.Exec(`INSERT INTO ssh_hosts
 			(id, name, host, port, user, auth_type, password, key_path, key_passphrase,
-			 legacy_algorithms, env, parent_id, is_folder, sort, remark, last_connected_at, created_at, updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			 legacy_algorithms, env, jump_host_id, parent_id, is_folder, sort, remark,
+			 last_connected_at, created_at, updated_at)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			in.ID, in.Name, in.Host, in.Port, in.User, in.AuthType, encPw, in.KeyPath, encPass,
-			b2i(in.LegacyAlgorithms), in.Env, in.ParentID, b2i(in.IsFolder), in.Sort, in.Remark,
-			"", in.CreatedAt, in.UpdatedAt)
+			b2i(in.LegacyAlgorithms), in.Env, in.JumpHostID, in.ParentID, b2i(in.IsFolder),
+			in.Sort, in.Remark, "", in.CreatedAt, in.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("保存 SSH 主机失败: %w", err)
 		}
@@ -293,12 +298,12 @@ func (d *Database) SaveSshHost(in SshHost) (*SshHost, error) {
 
 	_, err = d.conn.Exec(`UPDATE ssh_hosts SET
 		name = ?, host = ?, port = ?, user = ?, auth_type = ?, password = ?, key_path = ?,
-		key_passphrase = ?, legacy_algorithms = ?, env = ?, parent_id = ?, is_folder = ?,
-		sort = ?, remark = ?, updated_at = ?
+		key_passphrase = ?, legacy_algorithms = ?, env = ?, jump_host_id = ?,
+		parent_id = ?, is_folder = ?, sort = ?, remark = ?, updated_at = ?
 		WHERE id = ?`,
 		in.Name, in.Host, in.Port, in.User, in.AuthType, encPw, in.KeyPath, encPass,
-		b2i(in.LegacyAlgorithms), in.Env, in.ParentID, b2i(in.IsFolder), in.Sort, in.Remark,
-		in.UpdatedAt, in.ID)
+		b2i(in.LegacyAlgorithms), in.Env, in.JumpHostID, in.ParentID, b2i(in.IsFolder),
+		in.Sort, in.Remark, in.UpdatedAt, in.ID)
 	if err != nil {
 		return nil, fmt.Errorf("更新 SSH 主机失败: %w", err)
 	}
@@ -344,6 +349,14 @@ func (d *Database) DeleteSshHost(id string) error {
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return fmt.Errorf("SSH 主机不存在: %w", sql.ErrNoRows)
+	}
+	// 删掉的节点可能正被别的主机当跳板引用。删除之后这些 id 都成了悬空值，
+	// 用「不在现存主机里」一条反查全部解绑：不用先收集整棵子树的 id，
+	// 顺带把历史上可能已有的脏引用一起清掉。
+	if _, err = d.conn.Exec(
+		`UPDATE ssh_hosts SET jump_host_id = '' WHERE jump_host_id <> ''
+		   AND jump_host_id NOT IN (SELECT id FROM ssh_hosts)`); err != nil {
+		return fmt.Errorf("清理跳板引用失败: %w", err)
 	}
 	return nil
 }
@@ -403,6 +416,7 @@ func normalizeSshHost(h *SshHost) {
 	h.KeyPath = strings.TrimSpace(h.KeyPath)
 	h.Remark = strings.TrimSpace(h.Remark)
 	h.ParentID = strings.TrimSpace(h.ParentID)
+	h.JumpHostID = strings.TrimSpace(h.JumpHostID)
 
 	if h.Port <= 0 || h.Port > 65535 {
 		h.Port = 22
@@ -426,6 +440,7 @@ func normalizeSshHost(h *SshHost) {
 		h.KeyPassphrase = ""
 		h.ClearPassword = true
 		h.LegacyAlgorithms = false
+		h.JumpHostID = ""
 	}
 }
 

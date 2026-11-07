@@ -16,12 +16,11 @@ import { unwrap } from './utils/api';
 import { logErr } from './utils/logger';
 import { getErrorMessage } from './utils/error';
 import { installExternalLinkGuard } from './utils/externalLinks';
-import { navigate, pendingOpenNoteId, pendingOpenTodoId, setNavigator } from './composables/bridge';
+import { navigate, navigateTo, pendingOpenNoteId, pendingOpenTodoId, setNavigator } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
 import NotePanel from './components/NotePanel.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
-import { SkipUpdate } from '../bindings/quickdock/services/update/updateservice';
 // 页面注册表：主窗口内容页与侧边栏导航项的单一数据源（替代 currentPage 手动 switch）
 import { findContentPage, findNavEntry, KEEP_ALIVE_PAGES, type PageContext } from './pages/registry'
 
@@ -35,8 +34,24 @@ const CommandPalette = defineAsyncComponent(() => import('./components/CommandPa
 const PluginPage = defineAsyncComponent(() => import('./components/PluginPage.vue'))
 const WindowManager = defineAsyncComponent(() => import('./components/WindowManager.vue'))
 const UpdatePrompt = defineAsyncComponent(() => import('./components/UpdatePrompt.vue'))
-// SSH 终端窗口专用页：只在该独立窗口内加载，不进主窗口体积
-const SshPage = defineAsyncComponent(() => import('./components/SshPage.vue'))
+// SSH 终端窗口专用页：只在该独立窗口内加载，不进主窗口体积。
+//
+// dev 期 Vite 重跑 optimizeDeps 会换掉依赖的 ?v= 哈希，已经加载完的模块图再去拉
+// 这个懒加载 chunk 就会吃到 504（Outdated Optimize Dep）。defineAsyncComponent 没配
+// errorComponent 时渲染结果是一片空白，表现就是「SSH 窗口打开全白」。
+// 先就地重试：预构建通常几百毫秒就完成，比整页 location.reload() 温和得多——
+// SSH 窗口是 Hide/Show 保活的，刷新会清空 xterm 屏幕而 Go 侧会话还活着。
+// 连试几次仍失败就 fail()，交给 main.ts 的 stale-dep 自愈做整页重载兜底。
+const SshPage = defineAsyncComponent({
+  loader: () => import('./components/SshPage.vue'),
+  onError(_err, retry, fail, attempts) {
+    if (attempts <= 3) {
+      setTimeout(retry, 300 * attempts)
+    } else {
+      fail()
+    }
+  },
+})
 // 剪贴板面板：独立剪贴板窗口（#/clipboard）与主窗口内容页共用它。
 // 这里必须也是动态 import，不能静态 import —— 静态引用会把它无条件编进主 chunk，
 // 于是 ① pages/registry 里的动态 import 拆不出独立 chunk（Vite 报 INEFFECTIVE_DYNAMIC_IMPORT），
@@ -315,7 +330,7 @@ onMounted(async () => {
     const id = typeof raw === 'string' ? raw : ''
     if (!id.trim()) return
     pendingOpenTodoId.value = id
-    navigate('todos')
+    navigate('todo')
   })
   // 命令面板「快速导航」：面板浮窗经后端广播页面 id，主窗口直接切页。
   // 走 setPage 而不是 navigate setNavigator 那条：这里就在主窗口内，没有
@@ -326,6 +341,18 @@ onMounted(async () => {
     const page = typeof raw === 'string' ? raw : ''
     if (!page.trim()) return
     setPage(page)
+  })
+  // 命令面板选中场景/集合：浮窗已广播 NavigateMainWindow('workspace') 负责切页，
+  // 这里只把定位目标交给 bridge；WorkspacePage 在模块顶层也监听同一事件，留存
+  // workspaceId / sceneId 这类 pendingTarget 单个字符串装不下的层级信息。
+  Events.On('palette:locate', (ev: any) => {
+    if (window.location.hash) return
+    const p = ev?.data ?? ev
+    if (!p || typeof p !== 'object') return
+    const page = typeof p.page === 'string' ? p.page : ''
+    const target = typeof p.target === 'string' ? p.target : ''
+    if (!page.trim() || !target.trim()) return
+    navigateTo(page, target)
   })
 });
 
@@ -381,7 +408,14 @@ async function skipUpdate() {
     updatePromptHandled.add(v)
     try {
       localStorage.setItem('qd_update_skip_' + v, '1')
-      unwrap(await SkipUpdate(v))
+      // 与设置页「跳过此版本」共用一份清单，设置页才能列出并清除。
+      // 不调 SkipUpdate：Wails v3 的 SkipVersion 会让 Check() 直接判为最新，
+      // 连带用户在设置里手动「检查更新」也看不到这个版本。
+      const raw = unwrap<string>(await GetValue('qd_update_skipped_versions')) || '[]'
+      const parsed: unknown = JSON.parse(raw)
+      const list = Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === 'string') : []
+      if (!list.includes(v)) list.push(v)
+      unwrap(await SetValue('qd_update_skipped_versions', JSON.stringify(list)))
     } catch (e) {
       // 跳过失败也要留痕：否则用户点了「跳过」却反复被同一版本打扰，无从排查
       logErr('App:skipUpdate', e)

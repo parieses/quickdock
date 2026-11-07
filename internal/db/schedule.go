@@ -16,7 +16,9 @@ import (
 //	todo=重复待办（由待办的重复规则在内部创建，用户不能直接新建这种动作，
 //	故 validateScheduledTask 的动作白名单里没有它）
 //
-// 调度(scheduleKind)：once=一次性  interval=固定间隔  daily=每天  weekly=每周  monthly=每月
+// 调度(scheduleKind)：once=一次性  interval=固定间隔  daily=每天  weekly=每周
+//
+//	monthly=每月（dayOfMonth 指定几号）  cron=标准 5 段 cron 表达式
 type ScheduledTask struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -26,13 +28,20 @@ type ScheduledTask struct {
 	HTTPMethod   string `json:"httpMethod"`  // GET/POST/...
 	HTTPHeaders  string `json:"httpHeaders"` // 每行 "Key: Value"
 	HTTPBody     string `json:"httpBody"`
-	ScheduleKind string `json:"scheduleKind"` // once | interval | daily | weekly
+	ScheduleKind string `json:"scheduleKind"` // once | interval | daily | weekly | monthly | cron
 	RunAt        string `json:"runAt"`        // once：YYYY-MM-DD HH:MM:SS
 	IntervalSec  int    `json:"intervalSec"`  // interval：间隔秒数
-	TimeOfDay    string `json:"timeOfDay"`    // daily/weekly：HH:MM:SS
+	TimeOfDay    string `json:"timeOfDay"`    // daily/weekly/monthly：HH:MM:SS
 	Weekdays     string `json:"weekdays"`     // weekly：CSV，0=周日..6=周六
-	Enabled      bool   `json:"enabled"`
-	Notify       bool   `json:"notify"` // 执行后是否发通知（总开关）
+	// CronExpr 标准 5 段 cron（分 时 日 月 周）。只有 scheduleKind=cron 时使用，
+	// 新列默认 ''，存量行行为不变。
+	CronExpr string `json:"cronExpr"`
+	// DayOfMonth monthly 的「每月几号」：1-31；-1=该月最后一天；0=老数据（沿用以
+	// 计算当天日号为准的旧口径）。显式存下来才不会像旧实现那样，1/31 跑过 2/28
+	// 之后永久漂到 28 号。
+	DayOfMonth int  `json:"dayOfMonth"`
+	Enabled    bool `json:"enabled"`
+	Notify     bool `json:"notify"` // 执行后是否发通知（总开关）
 	// RetryCount 定时触发失败后最多重试几次（0 = 不重试，上限 3）。
 	//
 	// 为什么是逐任务配置而不是全局开关：重试意味着「同一件会失败的事再做一遍」，
@@ -55,7 +64,8 @@ type ScheduledTask struct {
 }
 
 const schedCols = `id, name, action, target, working_dir, http_method, http_headers, http_body,
-	schedule_kind, run_at, interval_sec, time_of_day, weekdays, enabled, notify, notify_channels,
+	schedule_kind, run_at, interval_sec, time_of_day, weekdays, cron_expr, day_of_month,
+	enabled, notify, notify_channels,
 	retry_count, next_run, last_run, last_status, last_result, sort, created_at`
 
 func scanScheduledTask(rows interface{ Scan(...interface{}) error }) (ScheduledTask, error) {
@@ -64,6 +74,7 @@ func scanScheduledTask(rows interface{ Scan(...interface{}) error }) (ScheduledT
 	err := rows.Scan(&t.ID, &t.Name, &t.Action, &t.Target, &t.WorkingDir,
 		&t.HTTPMethod, &t.HTTPHeaders, &t.HTTPBody,
 		&t.ScheduleKind, &t.RunAt, &t.IntervalSec, &t.TimeOfDay, &t.Weekdays,
+		&t.CronExpr, &t.DayOfMonth,
 		&enabled, &notify, &t.NotifyChannels, &t.RetryCount,
 		&t.NextRun, &t.LastRun, &t.LastStatus, &t.LastResult,
 		&t.Sort, &t.CreatedAt)
@@ -125,11 +136,13 @@ func (d *Database) CreateScheduledTask(t *ScheduledTask) (*ScheduledTask, error)
 	_, err := d.conn.Exec(
 		`INSERT INTO scheduled_tasks
 			(id, name, action, target, working_dir, http_method, http_headers, http_body,
-			 schedule_kind, run_at, interval_sec, time_of_day, weekdays, enabled, notify, notify_channels,
+			 schedule_kind, run_at, interval_sec, time_of_day, weekdays, cron_expr, day_of_month,
+			 enabled, notify, notify_channels,
 			 retry_count, next_run, last_run, last_status, last_result, sort, created_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?)`,
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?)`,
 		t.ID, t.Name, t.Action, t.Target, t.WorkingDir, t.HTTPMethod, t.HTTPHeaders, t.HTTPBody,
-		t.ScheduleKind, t.RunAt, t.IntervalSec, t.TimeOfDay, t.Weekdays, b2i(t.Enabled), b2i(t.Notify),
+		t.ScheduleKind, t.RunAt, t.IntervalSec, t.TimeOfDay, t.Weekdays, t.CronExpr, t.DayOfMonth,
+		b2i(t.Enabled), b2i(t.Notify),
 		t.NotifyChannels, t.RetryCount, t.NextRun, t.Sort, t.CreatedAt,
 	)
 	return t, err
@@ -182,11 +195,13 @@ func (d *Database) UpdateScheduledTask(t *ScheduledTask) error {
 	_, err := d.conn.Exec(
 		`UPDATE scheduled_tasks SET
 			name = ?, action = ?, target = ?, working_dir = ?, http_method = ?, http_headers = ?, http_body = ?,
-			schedule_kind = ?, run_at = ?, interval_sec = ?, time_of_day = ?, weekdays = ?, enabled = ?, notify = ?,
+			schedule_kind = ?, run_at = ?, interval_sec = ?, time_of_day = ?, weekdays = ?,
+			cron_expr = ?, day_of_month = ?, enabled = ?, notify = ?,
 			notify_channels = ?, retry_count = ?, next_run = ?
 		 WHERE id = ?`,
 		t.Name, t.Action, t.Target, t.WorkingDir, t.HTTPMethod, t.HTTPHeaders, t.HTTPBody,
-		t.ScheduleKind, t.RunAt, t.IntervalSec, t.TimeOfDay, t.Weekdays, b2i(t.Enabled), b2i(t.Notify),
+		t.ScheduleKind, t.RunAt, t.IntervalSec, t.TimeOfDay, t.Weekdays,
+		t.CronExpr, t.DayOfMonth, b2i(t.Enabled), b2i(t.Notify),
 		t.NotifyChannels, t.RetryCount, t.NextRun, t.ID,
 	)
 	return err

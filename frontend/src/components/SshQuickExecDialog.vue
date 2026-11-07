@@ -24,10 +24,21 @@
 import { computed, onBeforeUnmount, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Check, Copy, LoaderCircle, Play, ShieldAlert, SquareTerminal, X } from '@lucide/vue'
-import { Exec, SshBatchPlan } from '../../bindings/quickdock/services/sshx/sshservice'
+import {
+  DeleteSshCommand,
+  Exec,
+  ListSshCommands,
+  SaveSshCommand,
+  SshBatchPlan,
+  TouchSshCommand,
+} from '../../bindings/quickdock/services/sshx/sshservice'
+import type { SshCommandInput } from '../../bindings/quickdock/services/sshx/models'
+import type { SshCommand } from '../utils/ssh'
 import { apiErrorData, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { copyToClipboard } from '../utils/clipboard'
+import { logErr } from '../utils/logger'
+import { useToast } from '../composables/useToast'
 import { useFocusTrap } from '../utils/focusTrap'
 import {
   sshEnvClass,
@@ -49,6 +60,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const { error: toastError } = useToast()
 
 const panelRef = ref<HTMLElement | null>(null)
 const cmdRef = ref<HTMLTextAreaElement | null>(null)
@@ -67,6 +79,29 @@ const execErr = ref('')
 const copied = ref(false)
 /** 二次确认已武装 */
 const armed = ref(false)
+
+/** 命令片段：本弹窗自己维护列表与选中态（不做共享 composable）。 */
+const commands = ref<SshCommand[]>([])
+/** 选中态存片段 id，不存下标：列表刷新/重排后仍能对上。 */
+const pickedCmdId = ref('')
+/** 存为片段的内联输入行展开态 */
+const savingCmd = ref(false)
+const newCmdName = ref('')
+/** 删除片段的组件内二次确认态，不用 confirm() */
+const deletingCmd = ref(false)
+
+/** 按 category 分组供 <optgroup> 用；空分类的不套组，避免出现一个空标签的组。 */
+const cmdGrouped = computed(() => {
+  const map = new Map<string, SshCommand[]>()
+  for (const c of commands.value) {
+    if (!c.category) continue
+    const arr = map.get(c.category) || []
+    arr.push(c)
+    map.set(c.category, arr)
+  }
+  return [...map.entries()].map(([category, items]) => ({ category, items }))
+})
+const cmdUngrouped = computed(() => commands.value.filter(c => !c.category))
 
 /**
  * 请求序号：关窗重开后，上一次还在途中的 Exec 返回时不该再往界面里写。
@@ -166,6 +201,82 @@ async function loadPlan() {
   }
 }
 
+// ---- 命令片段 ----
+
+/** 弹窗打开时加载；失败静默降级为空列表（R9：不空 catch，也不打扰用户）。 */
+async function loadCommands() {
+  try {
+    commands.value = unwrap<SshCommand[]>(await ListSshCommands()) || []
+  } catch (e) {
+    commands.value = []
+    logErr('SshQuickExecDialog.loadCommands', e)
+  }
+}
+
+/**
+ * 选中片段：填命令后必须走 schedulePlan()。
+ * 直接赋值会绕过风险预演——schedulePlan() 开头就 disarm()，确认态必须绑在
+ * 具体命令上；否则会拿着上一条命令的风险判定放行这条新命令。
+ */
+function onPickCmd() {
+  const c = commands.value.find(x => x.id === pickedCmdId.value)
+  if (!c) return
+  command.value = c.command
+  disarm()
+  schedulePlan()
+}
+
+function startSaveCmd() {
+  savingCmd.value = true
+  deletingCmd.value = false
+  newCmdName.value = ''
+}
+
+function cancelSaveCmd() {
+  savingCmd.value = false
+  newCmdName.value = ''
+}
+
+async function confirmSaveCmd() {
+  const name = newCmdName.value.trim()
+  if (!name || !command.value.trim()) return
+  // 分类/描述可选：这里留空即可，不额外造第二套文案。
+  const input: SshCommandInput = {
+    id: '',
+    name,
+    command: command.value,
+    description: '',
+    category: '',
+    sort: 0,
+  }
+  try {
+    const saved = unwrap<SshCommand>(await SaveSshCommand(input))
+    await loadCommands()
+    // 后端 data 带回新记录时直接用它的 id；否则在刷新后的列表里按内容找。
+    pickedCmdId.value = saved?.id
+      || commands.value.find(c => c.name === name && c.command === command.value)?.id
+      || ''
+    cancelSaveCmd()
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    logErr('SshQuickExecDialog.saveCmd', e)
+  }
+}
+
+async function confirmDeleteCmd() {
+  const id = pickedCmdId.value
+  if (!id) return
+  try {
+    unwrap(await DeleteSshCommand(id))
+    pickedCmdId.value = ''
+    deletingCmd.value = false
+    await loadCommands()
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    logErr('SshQuickExecDialog.deleteCmd', e)
+  }
+}
+
 async function onRunClick() {
   if (!canRun.value) return
   if (needsConfirm.value && !armed.value) {
@@ -192,6 +303,14 @@ async function run() {
     const res = unwrap<SshExecResult>(await Exec(id, cmd, Number(timeoutSec.value) || 0))
     if (seq !== runSeq) return
     out.value = res
+    // 片段被执行一次后累加使用次数；失败静默降级，不影响本次结果。
+    if (pickedCmdId.value) {
+      try {
+        unwrap(await TouchSshCommand(pickedCmdId.value))
+      } catch (e) {
+        logErr('SshQuickExecDialog.touchCmd', e)
+      }
+    }
   } catch (e) {
     if (seq !== runSeq) return
     // 失败也把已收到的半截输出带回来：后端 failSshWith 把 out 放进了 data.result，
@@ -260,6 +379,12 @@ watch(
     copied.value = false
     runSeq++
     disarm()
+    // 片段库：每次打开重新拉一遍（别处可能增删过片段），并复位选中与内联态。
+    pickedCmdId.value = ''
+    savingCmd.value = false
+    newCmdName.value = ''
+    deletingCmd.value = false
+    void loadCommands()
     // 焦点落在命令框而不是开关按钮上（焦点陷阱默认聚焦第一个可聚焦元素＝关闭键，
     // 对「进来就是为了敲一条命令」的弹窗来说那是一次多余的 Tab）。
     // 用 rAF 而不是 nextTick：陷阱也在 rAF 里聚焦，注册在前所以先跑，这样能盖住它。
@@ -299,6 +424,75 @@ onBeforeUnmount(() => {
             </div>
 
             <label class="qex-label" for="qex-cmd">{{ t('sshBatchCommand') }}</label>
+
+            <!-- 片段工具条：选中后走 schedulePlan() 重新预演，绝不直接放行 -->
+            <div class="qex-snips">
+              <select
+                v-model="pickedCmdId"
+                class="qex-snip-select"
+                :disabled="running"
+                @change="onPickCmd"
+              >
+                <option value="">{{ t('sshCmdPick') }}</option>
+                <option
+                  v-for="c in cmdUngrouped"
+                  :key="c.id"
+                  :value="c.id"
+                  :title="c.description || undefined"
+                >{{ c.name }}</option>
+                <optgroup v-for="g in cmdGrouped" :key="g.category" :label="g.category">
+                  <option
+                    v-for="c in g.items"
+                    :key="c.id"
+                    :value="c.id"
+                    :title="c.description || undefined"
+                  >{{ c.name }}</option>
+                </optgroup>
+              </select>
+              <span v-if="!commands.length" class="qex-snip-empty">{{ t('sshCmdEmpty') }}</span>
+              <button
+                class="qex-snip-btn"
+                :disabled="running || !command.trim() || savingCmd"
+                @click="startSaveCmd"
+              >{{ t('sshCmdSave') }}</button>
+              <button
+                v-if="!deletingCmd"
+                class="qex-snip-btn"
+                :disabled="running || !pickedCmdId || savingCmd"
+                @click="deletingCmd = true"
+              >{{ t('sshCmdDelete') }}</button>
+              <button
+                v-if="deletingCmd"
+                class="qex-snip-btn danger"
+                :disabled="running"
+                @click="confirmDeleteCmd"
+              >{{ t('sshCmdDeleteConfirm') }}</button>
+              <button
+                v-if="deletingCmd"
+                class="qex-snip-btn"
+                :disabled="running"
+                @click="deletingCmd = false"
+              >{{ t('sshCmdCancel') }}</button>
+            </div>
+
+            <div v-if="savingCmd" class="qex-snip-save">
+              <input
+                v-model="newCmdName"
+                class="qex-snip-input"
+                type="text"
+                :placeholder="t('sshCmdName')"
+                :disabled="running"
+              />
+              <button
+                class="qex-snip-btn"
+                :disabled="running || !newCmdName.trim()"
+                @click="confirmSaveCmd"
+              >{{ t('sshCmdSaveConfirm') }}</button>
+              <button class="qex-snip-btn" :disabled="running" @click="cancelSaveCmd">
+                {{ t('sshCmdCancel') }}
+              </button>
+            </div>
+
             <textarea
               id="qex-cmd"
               ref="cmdRef"
@@ -635,6 +829,56 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* 命令片段工具条 */
+.qex-snips { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.qex-snip-select {
+  flex: 1 1 auto;
+  min-width: 120px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
+.qex-snip-select:focus { border-color: var(--color-border-focus-soft); }
+.qex-snip-select:disabled { opacity: 0.45; cursor: default; }
+.qex-snip-empty { font-size: 10.5px; color: var(--color-text-muted); }
+.qex-snip-btn {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  font-family: inherit;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.qex-snip-btn:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.qex-snip-btn.danger {
+  color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+}
+.qex-snip-btn:disabled { opacity: 0.45; cursor: default; }
+.qex-snip-save { display: flex; align-items: center; gap: var(--space-2); }
+.qex-snip-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
+.qex-snip-input:focus { border-color: var(--color-border-focus-soft); }
 
 .qex-enter-active, .qex-leave-active { transition: opacity 120ms ease; }
 .qex-enter-from, .qex-leave-to { opacity: 0; }

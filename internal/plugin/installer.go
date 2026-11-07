@@ -229,6 +229,13 @@ func (m *Manager) InstallFromZip(zipPath string) (string, error) {
 		case manifest.Permissions.SelfAuditSkip():
 			// 逃生舱：插件的写法让静态分析必然漏判（动态拼接路径/配置驱动程序名）。
 			// 允许跳过，但理由必须写进日志，让「谁绕过了这道检查、为什么」可追溯。
+			//
+			// 运行期拦不住 native 插件，安装前是唯一能让用户说「不」的时机：
+			// 插件管理页的确认框会把清单里的 permissions（含 mcp，以及这里的
+			// selfAudit / skipReason）逐项原样列出，用户确认后才继续安装。
+			// 这里保持只记日志，既不擅自替用户放行，也不改 host.mcp.call 的运行期
+			// 三道闸（声明 mcp → 等级门 → 插件路径硬拒 LevelRisk）——那是「拦得住」，
+			// 与安装期的「看得见」互不替代。
 			logger.W("[plugin-perm] %s 声明 selfAudit=skip，已跳过权限自证；原因：%s",
 				manifest.ID, strings.TrimSpace(manifest.Permissions.SkipReason))
 		default:

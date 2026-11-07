@@ -34,10 +34,22 @@ import PluginMarketPage from './PluginMarketPage.vue'
 import { pluginName, pluginDesc, commandTitle } from '../utils/localize'
 import { applyOverflowTitle } from '../utils/overflowTitle'
 import { useThemeName } from '../composables/useThemeName'
+import { usePluginCommandCatalog, type CommandTrigger } from '../composables/usePluginCommandCatalog'
+import { usePluginPermissions } from '../composables/usePluginPermissions'
+import { usePluginMarketSources, type MarketSource } from '../composables/usePluginMarketSources'
 import type { ToastAPI, PluginInfo, PluginExecLog, PluginCommand } from '../types'
 
 const { t, locale } = useI18n()
 const toast = inject<ToastAPI>('toast')!
+
+// 命令目录 / 权限确认 / 市场源三块共享状态：权限确认框只有一个实例，
+// 市场页作为子组件也调 confirmPermissions，两处安装入口共用它。
+const { catalog, loadCommandCatalog, loadCommandParams, commandTrigger } = usePluginCommandCatalog()
+const { permDialog, confirmPermissions, resolvePermissionConfirm } = usePluginPermissions()
+const {
+  marketSources, marketOffline, loadMarketSources, saveMarketSources,
+  isValidSourceUrl, newSourceId,
+} = usePluginMarketSources()
 
 const plugins = ref<PluginInfo[]>([])
 const icons = ref<Record<string, string>>({}) // pluginId → data URI（当前主题那一档）
@@ -65,7 +77,7 @@ const expandedLog = ref<string | null>(null)
 //
 // 只在卡片上列"有声明"的项：Permissions 是 Go 结构体，零值（false / 空对象）也会被
 // 序列化出来，不过滤就等于给每个插件挂一排假标签。
-const PERM_KEYS = ['network', 'filesystem', 'shell', 'process', 'processKill', 'clipboard'] as const
+const PERM_KEYS = ['network', 'filesystem', 'shell', 'process', 'processKill', 'clipboard', 'mcp'] as const
 
 function permTags(p: PluginInfo): string[] {
   const out: string[] = []
@@ -88,17 +100,65 @@ function permLabel(key: string): string {
 
 // ---- 命令与热键 ----
 //
-// PluginInfo.commands 一直在下发，此前卡片上完全不提，导致「装了插件却不知道
-// 它能干什么」。卡片宽度放不下整张命令表，所以：显示前两条（带热键），
-// 完整清单塞进 title 提示 —— 一行一条「热键 · 标题」。
+// PluginInfo.commands 一直在下发，但此前「记得名字才用得上」：卡片只露两条标题，
+// 触发方式与参数都看不见。现在把 trigger（怎么触发）、hotkey、params 一起列出来：
+// 卡片上每条带触发方式标签，点开命令清单弹窗看完整表。
+// 增强数据来自 PluginCatalog / PluginCommandParams（此前零调用）；取不到时只隐藏
+// 对应增强（description / params 行），弹窗回退到 p.commands，绝不因展示报错。
 function cmdTitle(c: PluginCommand): string {
   return commandTitle(c, locale)
 }
 
+function triggerLabelFor(c: PluginCommand): string {
+  return t('trigger_' + commandTrigger(c))
+}
+
 function cmdListTitle(p: PluginInfo): string {
   return (p.commands || [])
-    .map((c) => (c.hotkey ? `${c.hotkey} · ${cmdTitle(c)}` : cmdTitle(c)))
+    .map((c) => `[${triggerLabelFor(c)}] ${c.hotkey ? c.hotkey + ' · ' : ''}${cmdTitle(c)}`)
     .join('\n')
+}
+
+// 命令清单弹窗：卡片宽度放不下整张表，点开看完整清单。
+interface CommandRow {
+  id: string
+  title: string
+  hotkey?: string
+  trigger: CommandTrigger
+  triggerHint: string
+  description: string
+  paramsText: string
+}
+const cmdDialog = ref<{ visible: boolean; pluginId: string; pluginName: string; rows: CommandRow[] }>({
+  visible: false, pluginId: '', pluginName: '', rows: [],
+})
+
+async function openCmdList(p: PluginInfo) {
+  // 命令目录是可选增强：失败时 extraRows 为空，弹窗照样用 ListPlugins 的
+  // p.commands 打开，只是少了 description / params 这些补充字段。
+  const extraRows = catalog.value[p.id] || []
+  const rows: CommandRow[] = (p.commands || []).map((c) => {
+    const extra = extraRows.find((v) => v.id === c.id)
+    return {
+      id: c.id,
+      title: cmdTitle(c),
+      hotkey: c.hotkey,
+      trigger: commandTrigger(c),
+      triggerHint: extra?.triggerHint || c.prefix || c.matchPattern || '',
+      description: extra?.description || c.description || '',
+      paramsText: extra?.params ? JSON.stringify(extra.params) : '',
+    }
+  })
+  cmdDialog.value = { visible: true, pluginId: p.id, pluginName: pluginName(p, locale), rows }
+  // PluginCommandParams 按需核对参数声明：并发、失败静默，拿不到就隐藏参数行。
+  await Promise.all(rows.map(async (row) => {
+    const params = await loadCommandParams(p.id, row.id)
+    if (!params) return
+    const d = cmdDialog.value
+    if (!d.visible || d.pluginId !== p.id) return // 弹窗已关闭或切到了别的插件
+    const target = d.rows.find((r) => r.id === row.id)
+    if (target && !target.paramsText) target.paramsText = JSON.stringify(params)
+  }))
 }
 
 async function loadLogs() {
@@ -166,6 +226,48 @@ async function checkUpdates() {
     checkingUpdates.value = false
   }
 }
+
+// ---- 市场源管理 / 离线缓存标注 ----
+//
+// 源配置落在 app_state（qd_ 前缀，用已有的 GetValue/SetValue 绑定），
+// 后端 GetPluginMarket 读同一个 key。这里只编辑草稿，保存成功后由
+// usePluginMarketSources 发出刷新信号，市场页 watch 到就重拉索引。
+const sourcesDialog = ref(false)
+const sourcesDraft = ref<MarketSource[]>([])
+const savingSources = ref(false)
+
+async function openSourcesDialog() {
+  // onMounted 里的读取是异步的，用户一进市场页就点「市场源」时可能还没读完；
+  // 这里再等一次，避免打开一个空的编辑态把已存配置覆盖掉。
+  await loadMarketSources()
+  sourcesDraft.value = marketSources.value.map((s) => ({ ...s }))
+  sourcesDialog.value = true
+}
+function closeSourcesDialog() { sourcesDialog.value = false }
+function addSource() {
+  sourcesDraft.value.push({ id: newSourceId(), name: '', url: '', enabled: true })
+}
+function removeSource(i: number) { sourcesDraft.value.splice(i, 1) }
+async function saveSources() {
+  // 只校验自定义源；内置官方源不可编辑、不可删除，只允许停用。
+  const bad = sourcesDraft.value.find((s) => !s.builtin && (!s.name.trim() || !isValidSourceUrl(s.url)))
+  if (bad) { toast?.error?.(t('pluginMarketSourceInvalid')); return }
+  savingSources.value = true
+  try {
+    const ok = await saveMarketSources(sourcesDraft.value.map((s) => ({ ...s, url: s.url.trim() })))
+    if (!ok) { toast?.error?.(t('pluginMarketSourceInvalid')); return }
+    sourcesDialog.value = false
+    toast?.success?.(t('pluginMarketSourceSaved'))
+  } finally {
+    savingSources.value = false
+  }
+}
+
+// 缓存时间是 Unix 秒；没有时间戳时给个占位符，不编造「最新」。
+const offlineTime = computed(() => {
+  const ts = marketOffline.value.cachedAt
+  return ts ? new Date(ts * 1000).toLocaleString() : '—'
+})
 
 // 卸载确认
 const showUninstallConfirm = ref(false)
@@ -293,39 +395,47 @@ async function handleUninstall() {
 
 // ---- 安装前权限二次确认 ----
 //
-// native 插件的危险调用运行期拦不住，唯一能拦的时机就是安装前：装之前把 zip 里
-// plugin.json 声明的敏感能力（联网/读写文件/剪贴板/执行命令/杀进程）亮出来，
-// 用户看清再点确认。预检失败的包不在此阻断——真正安装时后端还有完整校验兜底。
+// native 插件的危险调用运行期拦不住，唯一能拦的时机就是安装前：把 zip 里
+// plugin.json 声明的敏感能力（联网 / 文件 / 剪贴板 / Shell / 进程 / mcp）亮出来，
+// 用户看清再点确认。后端 installer.go 对 selfAudit=skip 只记日志，所以这里
+// 绝不「预检失败 = 默认放行」——那等于替用户同意了一份根本没看到的声明。
 interface ZipPermPreview { name: string; version: string; permissions: string[] }
 
-const permDialog = ref<{ visible: boolean; details: string[] }>({ visible: false, details: [] })
-let permResolve: ((ok: boolean) => void) | null = null
-
-function confirmInstallPermissions(details: string[]): Promise<boolean> {
-  permDialog.value = { visible: true, details }
-  return new Promise((resolve) => { permResolve = resolve })
-}
-function onPermConfirm() { permDialog.value.visible = false; permResolve?.(true); permResolve = null }
-function onPermCancel() { permDialog.value.visible = false; permResolve?.(false); permResolve = null }
-
-/** 逐包预检并汇总成确认框明细行。返回 null 表示全部预检失败（直接走安装，让后端报错）。 */
+/** 逐包预检并汇总成确认框明细行；allFailed 时确认框改用「无法核对」的标题。 */
 async function buildPermDetails<T>(
   items: T[],
   inspectOf: (item: T) => Promise<ZipPermPreview | null>,
   labelOf: (item: T) => string,
-): Promise<string[] | null> {
+): Promise<{ lines: string[]; allFailed: boolean }> {
   const lines: string[] = []
-  let inspected = 0
+  let ok = 0
   for (const it of items) {
     let prev: ZipPermPreview | null = null
     try { prev = await inspectOf(it) } catch { prev = null }
-    if (!prev) continue
-    inspected++
+    if (!prev) {
+      // 预检不出来也把包名摆出来，绝不跳过这一行——跳过就是静默放行。
+      lines.push(labelOf(it))
+      continue
+    }
+    ok++
     lines.push(`${labelOf(it)} — ${prev.name} v${prev.version}`)
     if (prev.permissions.length) lines.push(...prev.permissions.map((p) => '  · ' + p))
     else lines.push(`  · ${t('pluginPermNone')}`)
   }
-  return inspected ? lines : null
+  // 声明是插件自己写的，宿主无法担保真实性；这句话必须跟着清单一起出现，
+  // 免得用户把「列出来了」误读成「宿主审核通过了」。
+  lines.push(t('pluginPermDisclaimer'))
+  return { lines, allFailed: ok === 0 }
+}
+
+/** 统一的确认入口：无论预检成败都必须弹框、必须用户点确认，不确认即取消。 */
+async function confirmInstallPermissions<T>(
+  items: T[],
+  inspectOf: (item: T) => Promise<ZipPermPreview | null>,
+  labelOf: (item: T) => string,
+): Promise<boolean> {
+  const { lines, allFailed } = await buildPermDetails(items, inspectOf, labelOf)
+  return confirmPermissions(lines, allFailed ? 'pluginPermInspectFailed' : 'pluginPermConfirmTitle')
 }
 
 // ---- 安装（多选 / 多拖：一次装多个 zip）----
@@ -392,13 +502,13 @@ async function selectAndInstall() {
     return
   }
   if (!paths.length) return // 用户取消
-  // 安装前权限确认：亮出每个包声明的敏感能力，用户确认才继续
-  const details = await buildPermDetails(
+  // 安装前权限确认：亮出每个包声明的敏感能力，用户确认才继续；
+  // 预检不出来也照样弹框（installer.go 只记日志，不能在这里默默放行）。
+  if (!(await confirmInstallPermissions(
     paths,
     async (p) => unwrap<ZipPermPreview>(await InspectPluginZip(p)),
     zipName,
-  )
-  if (details && !(await confirmInstallPermissions(details))) return
+  ))) return
   await installBatch(paths, async (p) => unwrap(await InstallPlugin(p)), zipName)
 }
 
@@ -462,13 +572,12 @@ async function onDrop(e: DragEvent) {
   // base64 只算一遍：预检和安装各要一份，重复读 50MB 文件太浪费
   const b64 = new Map<File, string>()
   for (const f of files) b64.set(f, await fileToBase64(f))
-  // 安装前权限确认（与「从文件安装」同一条规则）
-  const details = await buildPermDetails(
+  // 安装前权限确认（与「从文件安装」同一条规则：不确认就取消，不默默放行）
+  if (!(await confirmInstallPermissions(
     files,
     async (f) => unwrap<ZipPermPreview>(await InspectPluginZipData(f.name, b64.get(f) || '')),
     (f) => f.name,
-  )
-  if (details && !(await confirmInstallPermissions(details))) return
+  ))) return
   await installBatch(files, async (f) => unwrap(await InstallPluginFromBytes(f.name, b64.get(f) || '')), (f) => f.name)
 }
 
@@ -621,6 +730,8 @@ function stopPolling() {
 
 onMounted(() => {
   loadPlugins(); loadLogs()
+  void loadCommandCatalog()   // 命令目录取不到会静默降级，不阻塞页面
+  void loadMarketSources()    // 市场源编辑态；拉取索引仍由市场页自己发起
   startPolling()
 })
 onActivated(startPolling)
@@ -653,6 +764,9 @@ onUnmounted(() => {
         <button :class="['qd-btn', 'qd-btn-ghost', { 'is-on': activeView === 'market' }]" @click="activeView = activeView === 'local' ? 'market' : 'local'" :title="t('pluginMarket')">
           <Globe :size="14" />
           <span>{{ t('pluginMarket') }}</span>
+        </button>
+        <button v-if="activeView === 'market'" class="qd-btn qd-btn-ghost" @click="openSourcesDialog">
+          <span>{{ t('pluginMarketSources') }}</span>
         </button>
         <button class="qd-btn" @click="selectAndInstall" :title="t('pluginInstallFromFile')" :disabled="operating.has('_install_')">
           <Loader2 v-if="operating.has('_install_')" :size="14" class="spin" />
@@ -788,14 +902,18 @@ onUnmounted(() => {
         </div>
 
         <!--
-          命令与热键：PluginInfo.commands 一直在下发，但此前卡片上完全不提。
-          后果是「装了插件却不知道它能干什么」——只能去命令面板里瞎搜，
-          或者回去翻 plugin.json。热键尤其要露出来：它是唯一「不用先想起插件名」
-          的入口。
+          命令与热键：卡片上露触发方式 + 热键，点开看完整清单（含参数声明）。
+          取不到增强数据时 v-if 直接隐藏这一块，不抛错也不留空壳。
         -->
-        <div v-if="p.commands && p.commands.length" class="card-cmds" :title="cmdListTitle(p)">
+        <div
+          v-if="p.commands && p.commands.length"
+          class="card-cmds"
+          :title="cmdListTitle(p)"
+          @click.stop="openCmdList(p)"
+        >
           <span v-for="c in p.commands.slice(0, 2)" :key="c.id" class="cmd-chip">
             <kbd v-if="c.hotkey" class="cmd-kbd">{{ c.hotkey }}</kbd>
+            <span class="cmd-trigger">{{ triggerLabelFor(c) }}</span>
             <span class="cmd-chip-title">{{ cmdTitle(c) }}</span>
           </span>
           <span v-if="p.commands.length > 2" class="cmd-more">+{{ p.commands.length - 2 }}</span>
@@ -818,15 +936,6 @@ onUnmounted(() => {
       @update:checkbox="uninstallKeepData = $event"
       @confirm="handleUninstall"
       @cancel="showUninstallConfirm = false"
-    />
-
-    <!-- 安装前权限确认 -->
-    <ConfirmDialog
-      :visible="permDialog.visible"
-      :message="t('pluginPermConfirmTitle')"
-      :details="permDialog.details"
-      @confirm="onPermConfirm"
-      @cancel="onPermCancel"
     />
 
     <!-- 执行历史（5.2） -->
@@ -874,7 +983,80 @@ onUnmounted(() => {
     </div>
     </div>
 
-    <PluginMarketPage v-else @installed="onMarketInstalled" />
+    <template v-if="activeView === 'market'">
+      <!-- 网络失败降级时明确标注「离线缓存」，不把旧数据冒充最新 -->
+      <div v-if="marketOffline.offline" class="market-offline-banner">
+        <span class="offline-tag">{{ t('pluginMarketOffline') }}</span>
+        <span>{{ t('pluginMarketOfflineTip', { time: offlineTime }) }}</span>
+      </div>
+      <PluginMarketPage @installed="onMarketInstalled" />
+    </template>
+
+    <!--
+      安装前权限确认：必须挂在根层而不是 local 视图里——市场视图下 local 块被
+      v-if 卸载，装在里面的话市场安装/更新调用 confirmPermissions 会没有对话框。
+      本地 zip 与市场安装共用这一个实例（usePluginPermissions）。
+    -->
+    <ConfirmDialog
+      :visible="permDialog.visible"
+      :message="t(permDialog.titleKey)"
+      :details="permDialog.details"
+      @confirm="resolvePermissionConfirm(true)"
+      @cancel="resolvePermissionConfirm(false)"
+    />
+
+    <!-- 命令清单：卡片上放不下整张表，点开看完整 trigger / 热键 / 参数 -->
+    <div v-if="cmdDialog.visible" class="qd-modal-overlay" @click.self="cmdDialog.visible = false">
+      <div class="qd-modal cmd-dialog">
+        <div class="qd-modal-head">
+          <span class="qd-modal-title">{{ t('pluginCmdListTitle') }} · {{ cmdDialog.pluginName }}</span>
+          <button class="qd-modal-close" @click="cmdDialog.visible = false" :title="t('close')"><X :size="14" /></button>
+        </div>
+        <div class="cmd-dialog-body">
+          <div v-for="r in cmdDialog.rows" :key="r.id" class="cmd-row">
+            <div class="cmd-row-top">
+              <kbd v-if="r.hotkey" class="cmd-kbd">{{ r.hotkey }}</kbd>
+              <span class="cmd-trigger">{{ t('trigger_' + r.trigger) }}</span>
+              <span class="cmd-row-title">{{ r.title }}</span>
+            </div>
+            <div v-if="r.triggerHint" class="cmd-row-hint">{{ r.triggerHint }}</div>
+            <div v-if="r.description" class="cmd-row-desc">{{ r.description }}</div>
+            <div v-if="r.paramsText" class="cmd-row-params">
+              <span class="cmd-row-label">{{ t('pluginCmdParams') }}</span>
+              <code>{{ r.paramsText }}</code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 市场源：增删 / 启停。保存后由刷新信号让市场页按新配置重拉索引 -->
+    <div v-if="sourcesDialog" class="qd-modal-overlay" @click.self="closeSourcesDialog">
+      <div class="qd-modal sources-dialog">
+        <div class="qd-modal-head">
+          <span class="qd-modal-title">{{ t('pluginMarketSources') }}</span>
+          <button class="qd-modal-close" @click="closeSourcesDialog" :title="t('close')"><X :size="14" /></button>
+        </div>
+        <div class="sources-list">
+          <div v-for="(s, i) in sourcesDraft" :key="s.id" class="source-row">
+            <input v-model="s.enabled" type="checkbox" class="source-enabled" :disabled="savingSources" :title="t('pluginEnable')" />
+            <div class="source-fields">
+              <input v-if="!s.builtin" v-model="s.name" class="source-input" :placeholder="t('name')" :disabled="savingSources" />
+              <span v-else class="source-builtin-name">{{ t('pluginMarketSourceDefault') }}</span>
+              <input v-if="!s.builtin" v-model="s.url" class="source-input" :placeholder="t('pluginMarketSourceUrl')" :disabled="savingSources" />
+            </div>
+            <button v-if="!s.builtin" class="source-remove" @click="removeSource(i)" :title="t('delete')" :disabled="savingSources">
+              <Trash2 :size="12" />
+            </button>
+          </div>
+        </div>
+        <div class="sources-actions">
+          <button class="qd-btn qd-btn-ghost" @click="addSource" :disabled="savingSources"><span>{{ t('add') }}</span></button>
+          <button class="qd-btn" @click="closeSourcesDialog" :disabled="savingSources"><span>{{ t('cancel') }}</span></button>
+          <button class="qd-btn" @click="saveSources" :disabled="savingSources"><span>{{ t('save') }}</span></button>
+        </div>
+      </div>
+    </div>
 
     <!-- zip 安装遮罩动画：覆盖「选择 zip → 安装完成」全过程 -->
     <div v-if="operating.has('_install_')" class="install-overlay">
@@ -884,8 +1066,10 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 拖拽投放提示：只在真正拖着文件时出现，告诉用户「松手即安装」 -->
-    <div v-else-if="dragOver" class="drop-hint">
+    <!-- 拖拽投放提示：只在真正拖着文件时出现，告诉用户「松手即安装」。
+         用独立 v-if 而不是 else-if：中间插入了若干弹窗，v-else-if 必须紧跟
+         v-if 才会生效，装遮罩仍优先于拖放提示（同原来的 if/else 语义）。 -->
+    <div v-if="dragOver && !operating.has('_install_')" class="drop-hint">
       <div class="drop-hint-box">
         <Upload :size="24" />
         <span>{{ t('pluginDropHint') }}</span>
@@ -1267,5 +1451,112 @@ onUnmounted(() => {
 .install-overlay-text { font-size: 13px; color: var(--color-text-secondary, #bdbdbd); }
 .spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }
 @keyframes qd-spin { to { transform: rotate(360deg); } }
+
+/* ---- 离线缓存横幅：网络失败降级时必须显式标注，不能静默用旧数据 ---- */
+.market-offline-banner {
+  flex-shrink: 0;
+  display: flex; align-items: center; gap: 8px;
+  margin: 0 20px 8px;
+  padding: 7px 12px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-warning-bg);
+  color: var(--color-warning);
+  font-size: 11px;
+}
+.offline-tag {
+  flex-shrink: 0; font-weight: 700;
+  padding: 1px 7px; border-radius: var(--radius-xs);
+  background: var(--color-warning-bg);
+  border: 1px solid var(--color-warning-border);
+}
+
+/* ---- 本组件内的弹窗基类（不写全局 styles，避免影响其它页面） ---- */
+.qd-modal-overlay {
+  position: absolute; inset: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--color-bg-overlay);
+}
+.qd-modal {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 18px 56px var(--color-bg-overlay);
+  padding: 16px 18px;
+  color: var(--color-text-primary);
+  display: flex; flex-direction: column;
+  max-height: 76vh;
+}
+.qd-modal-head {
+  display: flex; align-items: center; gap: 8px;
+  padding-bottom: 10px; margin-bottom: 10px;
+  border-bottom: 1px solid var(--color-border);
+}
+.qd-modal-title { font-size: 13px; font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qd-modal-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; flex-shrink: 0;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer;
+}
+.qd-modal-close:hover { color: var(--color-text-primary); border-color: var(--color-accent); }
+
+/* ---- 命令清单 ---- */
+.card-cmds { cursor: pointer; } /* 点开完整命令表 */
+.cmd-dialog { width: 520px; max-width: 90%; }
+.cmd-dialog-body { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.cmd-row {
+  padding: 8px 10px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.cmd-row-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cmd-row-title { font-size: 12px; color: var(--color-text-primary); font-weight: 500; }
+.cmd-trigger {
+  font-size: 9px; line-height: 15px; padding: 0 5px;
+  border-radius: var(--radius-md);
+  background: var(--color-accent-bg); color: var(--color-accent);
+  white-space: nowrap;
+}
+.cmd-row-hint, .cmd-row-desc { font-size: 11px; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.cmd-row-hint { font-family: var(--font-mono, monospace); }
+.cmd-row-params { display: flex; flex-direction: column; gap: 3px; }
+.cmd-row-label { font-size: 10px; color: var(--color-text-disabled); }
+.cmd-row-params code {
+  font-family: var(--font-mono, monospace); font-size: 10px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary); border-radius: var(--radius-xs);
+  padding: 5px 7px; word-break: break-all; white-space: pre-wrap;
+}
+
+/* ---- 市场源编辑 ---- */
+.sources-dialog { width: 460px; max-width: 90%; }
+.sources-list { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
+.source-row {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-secondary);
+}
+.source-enabled { margin-top: 6px; accent-color: var(--color-accent); cursor: pointer; }
+.source-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
+.source-input {
+  width: 100%; box-sizing: border-box;
+  height: 26px; padding: 0 8px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-primary); color: var(--color-text-primary);
+  font-size: 11px; font-family: inherit; outline: none;
+}
+.source-input:focus { border-color: var(--color-border-focus-soft); }
+.source-input::placeholder { color: var(--color-text-disabled); }
+.source-builtin-name { font-size: 12px; font-weight: 500; color: var(--color-text-secondary); line-height: 26px; }
+.source-remove {
+  display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer;
+}
+.source-remove:hover { color: var(--color-danger); border-color: var(--color-danger); }
+.sources-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--color-border); }
 
 </style>

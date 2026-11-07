@@ -1,7 +1,8 @@
-/* palette.ts — 品牌色 / 图表状态色集中表。
- * 规则：硬编码品牌色、图表色不得散落在组件脚本，统一落此「主题扩展表」。
+/* palette.ts — 品牌标识色集中表。
+ * 规则：硬编码品牌色不得散落在组件脚本，统一落此「主题扩展表」。
  * 品牌色为各运行时的官方标识色（Node 绿、PHP 紫…），与明暗主题无关。
- * 图表/状态色供 canvas（无法直接吃 CSS var）与组件以具体值引用。
+ * 图表颜色不再落此表：由 composables/useChartTheme.ts 从 style.css 的设计
+ * token 经 getComputedStyle 桥接，随明暗主题切换。
  */
 
 export const RUNTIME_COLORS: Record<string, string> = {
@@ -41,17 +42,3 @@ export const SPECIAL_ITEM_COLORS = {
   ports: '#3ecf8e',
 } as const
 
-// 监控页曲线图 canvas 用色：主题无关的具体值（canvas 不支持 CSS var，运行时取此表）
-export const CHART_COLORS = {
-  bg: '#1a1a2e',
-  grid: '#2a2a3e',
-  textMuted: '#666',
-  textMuted2: '#888',
-  textMuted3: '#aaa',
-  accent: '#4a9eff',
-  ok: '#46b17b',
-  danger: '#e84c4c',
-  legendBg: 'rgba(0,0,0,0.6)',
-  timeoutLine: 'rgba(232,76,76,0.4)',
-  timeoutText: 'rgba(232,76,76,0.6)',
-} as const

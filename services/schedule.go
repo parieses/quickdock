@@ -231,7 +231,9 @@ func sameSchedule(a, b *db.ScheduledTask) bool {
 		a.RunAt == b.RunAt &&
 		a.IntervalSec == b.IntervalSec &&
 		a.TimeOfDay == b.TimeOfDay &&
-		a.Weekdays == b.Weekdays
+		a.Weekdays == b.Weekdays &&
+		a.CronExpr == b.CronExpr &&
+		a.DayOfMonth == b.DayOfMonth
 }
 
 // validateScheduledTask 基础字段校验
@@ -250,9 +252,31 @@ func validateScheduledTask(t *db.ScheduledTask) error {
 
 	// 验证调度类型
 	switch t.ScheduleKind {
-	case "once", "interval", "daily", "weekly", "monthly":
+	case "once", "interval", "daily", "weekly", "monthly", "cron":
 	default:
 		return fmt.Errorf("未知的调度类型: %s", t.ScheduleKind)
+	}
+
+	// cron：把多余空白压成单空格再校验。表达式不合法必须在这里挡住——
+	// 落到 computeNextRun 只会返回 ""，任务「保存成功」却被静默停用。
+	if t.ScheduleKind == "cron" {
+		t.CronExpr = strings.Join(strings.Fields(t.CronExpr), " ")
+		if err := validateCronExpr(t.CronExpr); err != nil {
+			return err
+		}
+	}
+
+	// monthly：几号是显式字段。-1=最后一天，0=老数据（沿用创建日），1..31=指定日。
+	if t.ScheduleKind == "monthly" && (t.DayOfMonth < -1 || t.DayOfMonth > 31) {
+		return fmt.Errorf("每月日期无效: %d（应为 1-31 或 -1 表示最后一天）", t.DayOfMonth)
+	}
+
+	// daily/weekly/monthly 缺时刻算不出 next_run，与其存一条永远不跑的任务，
+	// 不如在保存时说清楚。cron 的时刻写在表达式里，不适用。
+	if t.ScheduleKind == "daily" || t.ScheduleKind == "weekly" || t.ScheduleKind == "monthly" {
+		if strings.TrimSpace(t.TimeOfDay) == "" {
+			return fmt.Errorf("请填写执行时刻")
+		}
 	}
 
 	// 失败重试次数：钳到 0..3 而不是报错。

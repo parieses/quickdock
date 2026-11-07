@@ -64,6 +64,7 @@ type Permissions struct {
 	Shell       ShellPerm       `json:"shell,omitempty"`       // 详见 shellperm.go：bool（全放行）或目标前缀数组
 	Process     ProcessPerm     `json:"process,omitempty"`     // 详见 procperm.go：bool（全放行）或可执行程序名白名单
 	ProcessKill ProcessKillPerm `json:"processKill,omitempty"` // 详见 prockillperm.go：bool（任意非系统进程）或目标进程名白名单
+	MCP         MCPPerm         `json:"mcp,omitempty"`         // 详见 mcpperm.go：bool（全放行）或 MCP 工具名白名单
 
 	// SelfAudit 是否跳过 native 插件的权限自证审计（安装期静态比对）。
 	// 取值 "audit"（默认）/ "skip"。skip 时必须同时填 SkipReason。
@@ -104,6 +105,9 @@ func (p *Permissions) Validate() error {
 		}
 	default:
 		return fmt.Errorf(`%w: permissions.selfAudit 只能是 "audit" 或 "skip"，当前值 %q`, ErrInvalidManifest, p.SelfAudit)
+	}
+	if err := p.MCP.Validate(); err != nil {
+		return err
 	}
 	return nil
 }

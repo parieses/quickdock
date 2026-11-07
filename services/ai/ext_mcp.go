@@ -353,6 +353,7 @@ type extServerInput struct {
 	Args     []string          `json:"args"`
 	Env      map[string]string `json:"env"`
 	URL      string            `json:"url"`
+	Headers  map[string]string `json:"headers"`
 	Disabled bool              `json:"disabled"`
 }
 
@@ -370,6 +371,7 @@ func (a *AIService) AISaveExtServers(items []extServerInput) *services.ApiResult
 			Args:     it.Args,
 			Env:      it.Env,
 			URL:      strings.TrimSpace(it.URL),
+			Headers:  it.Headers,
 			Disabled: it.Disabled,
 		}
 		if err := mcpclient.ValidateConfig(name, cfg); err != nil {

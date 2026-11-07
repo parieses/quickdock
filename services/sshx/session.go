@@ -287,7 +287,11 @@ func (s *SshService) Replay(sessionID string) *services.ApiResult {
 // Shutdown 关闭全部会话与合批器（应用退出时调用）。
 func (s *SshService) Shutdown() {
 	s.shutdownOnce.Do(func() {
-		// 批次要先停：它持有独立的连接，退出后还在拨号的话会把进程拖住。
+		// 转发要先停：它们各自持有独立连接与本地监听端口，留到 DB 关闭后
+		// 还在重连会既报错又占着端口。批次同样持有独立连接，紧随其后停掉。
+		if s.forwards != nil {
+			s.forwards.stopAll()
+		}
 		s.cancelBatches()
 		if s.manager != nil {
 			s.manager.CloseAll()

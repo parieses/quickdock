@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, inject, computed, watch, reactive } from 'vue'
+import { ref, inject, computed, watch, reactive, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from '../stores/workspace'
 import { Plus, Pencil, Trash2, Play, Search, X, ChevronRight } from '@lucide/vue'
@@ -117,6 +117,49 @@ async function handleDeleteCollection(collectionId: string) {
   try { await store.removeCollection(collectionId) } catch (e) { toast?.error(t('deleteFailed') + ': ' + getErrorMessage(e)) }
 }
 
+// ---- 右键菜单 ----
+//
+// 行尾那三个按钮（打开 / 编辑 / 删除）在 240px 宽的栏里只放得下图标，而且它们
+// 只在鼠标悬停时才显眼；右键是清单类界面更自然的入口，与项目栏（ItemList）保持
+// 同一套语言：遮罩层点哪都关，菜单自身 stop 掉。
+const ctx = ref<{ x: number; y: number; col: Collection } | null>(null)
+
+function openContextMenu(e: MouseEvent, col: Collection) {
+  ctx.value = { x: e.clientX, y: e.clientY, col }
+  // 贴右/贴底往回收，否则菜单被窗口裁掉一半
+  nextTick(() => {
+    const c = ctx.value
+    if (!c) return
+    c.x = Math.min(c.x, window.innerWidth - 184)
+    c.y = Math.min(c.y, window.innerHeight - 116)
+  })
+}
+
+function closeContextMenu() {
+  ctx.value = null
+}
+
+interface CtxAction {
+  id: string
+  label: string
+  danger?: boolean
+  run: () => void
+}
+
+const ctxActions = computed<CtxAction[]>(() => {
+  const col = ctx.value?.col
+  if (!col) return []
+  return [
+    { id: 'open', label: t('open'), run: () => void handleOpenByStrategy(col) },
+    {
+      id: 'edit',
+      label: t('edit'),
+      run: () => { editingCollection.value = col; showEditDialog.value = true },
+    },
+    { id: 'delete', label: t('delete'), danger: true, run: () => void handleDeleteCollection(col.id) },
+  ]
+})
+
 // 拖拽排序
 const dragColId = ref<string | null>(null)
 
@@ -207,6 +250,7 @@ function onDropCol(e: DragEvent, targetId: string) {
               @dragend="onDragEndCol"
               @dragover="onDragOverCol"
               @drop="onDropCol($event, col.id)"
+              @contextmenu.prevent="openContextMenu($event, col)"
             >
               <span class="qd-row-icon">
                 <TypeIcon :type="col.type ?? '目录集合'" :size="17" />
@@ -251,6 +295,18 @@ function onDropCol(e: DragEvent, targetId: string) {
         <template v-else>
           <p class="qd-empty-title">{{ t('selectSceneFirst') }}</p>
         </template>
+      </div>
+    </div>
+
+    <!-- 右键菜单：遮罩点哪都关，菜单自身 stop 掉 -->
+    <div v-if="ctx" class="ctx-backdrop" @click="closeContextMenu" @contextmenu.prevent="closeContextMenu">
+      <div class="ctx-menu" :style="{ left: ctx.x + 'px', top: ctx.y + 'px' }" @click.stop>
+        <button
+          v-for="a in ctxActions"
+          :key="a.id"
+          :class="['ctx-item', { danger: a.danger }]"
+          @click="a.run(); closeContextMenu()"
+        >{{ a.label }}</button>
       </div>
     </div>
 
@@ -302,4 +358,24 @@ function onDropCol(e: DragEvent, targetId: string) {
 }
 .qd-group-count { font-size: 10px; opacity: 0.65; }
 .qd-group-list { list-style: none; margin: 0; padding: 0; }
+
+/* 右键菜单：与 ItemList / GitPage 同一套视觉（fixed + 透明遮罩） */
+.ctx-backdrop {
+  position: fixed; inset: 0; z-index: 900;
+}
+.ctx-menu {
+  position: fixed; min-width: 168px; padding: 4px;
+  background: var(--color-surface); border: 1px solid var(--color-border);
+  border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
+  display: flex; flex-direction: column; gap: 1px;
+}
+.ctx-item {
+  display: flex; align-items: center; height: 28px; padding: 0 10px;
+  border: none; border-radius: var(--radius-sm); background: none;
+  color: var(--color-text-secondary); font-size: 12px; font-family: inherit;
+  text-align: left; cursor: pointer;
+}
+.ctx-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.ctx-item.danger { color: var(--color-danger); }
+.ctx-item.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); }
 </style>

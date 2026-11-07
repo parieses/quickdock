@@ -3,6 +3,8 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -527,4 +529,50 @@ func (a *AppService) applyClipboardRules(text, sourceApp string) (string, bool) 
 		return text, false
 	}
 	return out, writeBack
+}
+
+// ClipboardIgnoredAppsKey / ClipboardPauseUntilKey：采集侧「采不采」的两个设置键。
+// 导出是因为门面 services/clipboard 要读写同一份设置，键名只在这里定义一次。
+const (
+	ClipboardIgnoredAppsKey = "clipboard_ignored_apps" // JSON 字符串数组
+	ClipboardPauseUntilKey  = "clipboard_pause_until"  // Unix 毫秒；<0=直到恢复；0/已过期=未暂停
+)
+
+// clipboardCaptureBlocked 判断本次捕获是否应被丢弃：暂停窗口内，或来源窗口标题
+// 命中忽略列表。在 captureClipboard 入口（打开剪贴板之前）统一判断一次，
+// text / file / image 三条入库路径一并覆盖，不必在四处 save* 里各写一遍。
+//
+// 只决定「采不采」：命中就不入库，不改内容、不脱敏、不碰系统剪贴板。
+// 与 internal/cliprule 的「不做脱敏」是同一条产品边界，别在这里顺手加内容改写。
+func (a *AppService) clipboardCaptureBlocked() bool {
+	if a.DB == nil {
+		return false
+	}
+	// 暂停优先判定：一次主键查询，暂停期间就不必再解析忽略列表。
+	if raw, err := a.DB.GetSetting(ClipboardPauseUntilKey); err == nil && raw != "" {
+		var until int64
+		if _, e := fmt.Sscanf(raw, "%d", &until); e == nil {
+			if until < 0 || until > time.Now().UnixMilli() {
+				return true
+			}
+		}
+	}
+	raw, err := a.DB.GetSetting(ClipboardIgnoredAppsKey)
+	if err != nil || raw == "" {
+		return false
+	}
+	var ignored []string
+	if json.Unmarshal([]byte(raw), &ignored) != nil {
+		return false // 设置坏了宁可照常采集，也不要静默吞掉用户的所有复制
+	}
+	title := strings.ToLower(platform.GetActiveWindowTitle())
+	if title == "" {
+		return false
+	}
+	for _, s := range ignored {
+		if s = strings.ToLower(strings.TrimSpace(s)); s != "" && strings.Contains(title, s) {
+			return true
+		}
+	}
+	return false
 }

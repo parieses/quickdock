@@ -9,6 +9,8 @@ import type { CollectionItem } from '../../types'
 export type ResultType =
   | 'item' | 'system' | 'quicklink' | 'quicklink-inline' | 'calculator'
   | 'note' | 'todo' | 'app' | 'plugin' | 'url' | 'clipboard-action' | 'best' | 'env' | 'file' | 'nav'
+  // 场景 / 工作空间集合：切到 workspace 页并定位到条目；create：新建笔记 / 待办动作
+  | 'scene' | 'collection' | 'create'
 
 export interface SearchResult {
   type: ResultType
@@ -56,6 +58,30 @@ export interface SearchResult {
   fileName?: string
   // 「快速导航」：软件内部页面（与 pages/registry 的 id 同源）
   navPage?: string
+  // 场景 / 集合定位：回车切到 navPage('workspace') 后，主窗口据此停在对应条目上。
+  // 面板是独立浮窗，与主窗口 JS 状态不互通，只能把目标 id 随事件带过去。
+  navTarget?: string
+  scene?: CmdScene
+  collection?: CmdCollection
+  // 新建动作：note=新建笔记 / todo=新建待办，回车进入内联标题输入态
+  createKind?: 'note' | 'todo'
+}
+
+// 场景 / 集合的检索项：只留匹配与定位需要的字段。matcher 是纯函数，不该拖进
+// 完整的领域对象；定位所需的 workspaceId / sceneId 一并带上（主窗口切页后要用）。
+export interface CmdScene {
+  id: string
+  name: string
+  description?: string
+  workspaceId?: string
+}
+
+export interface CmdCollection {
+  id: string
+  name: string
+  description?: string
+  workspaceId?: string
+  sceneId?: string
 }
 
 export interface CmdNote {
@@ -136,11 +162,20 @@ export interface LcAlias { raw: string; lc: string }
 export interface LcAppEntry { app: InstalledApp; nameLC: string; aliases: LcAlias[] }
 export interface LcSysEntry { cmd: SystemCmd; labelLC: string }
 
+// 场景 / 集合的预计算小写索引：与 items/notes 同构，逐键输入时不再重复 toLowerCase。
+export interface LcSceneEntry { scene: CmdScene; nameLC: string; descLC: string }
+export interface LcCollectionEntry { collection: CmdCollection; nameLC: string; descLC: string }
+
 export interface LcIndex {
   items: LcItemEntry[]
   notes: LcNoteEntry[]
   apps: LcAppEntry[]
   sys: LcSysEntry[]
+  // 可选：matchers.test.ts 构造的最小 LcIndex 只给四件套，生产侧
+  // （useCommandSearch.lcIndex）始终填齐。matcher 内一律用 `|| []` 兜底，
+  // 缺字段就等于「这类条目一条都没有」，不会让整套检索炸掉。
+  scenes?: LcSceneEntry[]
+  collections?: LcCollectionEntry[]
 }
 
 // ---- 环境运行时的中文别名 ----

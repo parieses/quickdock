@@ -65,6 +65,12 @@ var validTables = map[string]bool{
 	"ai_prompts": true,
 	// 文件置物架：路径清单跟着快照走，换机器不该丢。
 	"file_shelf": true,
+	// 互链边：要参与快照按表遍历与回收站整行恢复，不登记会被当成「未知表」拒掉。
+	"entity_links": true,
+	// SSH 命令片段：用户攒的常用命令，跟快照走；不登记会在恢复时整表丢。
+	"ssh_commands": true,
+	// 专注会话历史：跟快照走，不登记会在恢复时被当成「未知表」拒掉。
+	"focus_sessions": true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）。
@@ -86,8 +92,9 @@ var validColumns = map[string]bool{
 	"collection":        true,
 	"working_directory": true, "args": true,
 	"path": true, "version": true, "capability": true,
-	"env":         true, // scenes.env：场景绑定的环境服务 JSON
-	"permissions": true, "manifest": true, "configurable": true, "built_in": true,
+	"env":          true, // scenes.env：场景绑定的环境服务 JSON
+	"jump_host_id": true, // ssh_hosts：跳板机引用的另一台主机 id（空 = 直连）
+	"permissions":  true, "manifest": true, "configurable": true, "built_in": true,
 	"installed": true, "enabled": true,
 	"kind": true, "label": true, "note": true, "payload": true, "size": true,
 	"key":  true,
@@ -133,6 +140,8 @@ var validColumns = map[string]bool{
 	"prompt_tokens": true, "completion_tokens": true,
 	"last_used":  true,
 	"created_at": true, "updated_at": true, "deleted_at": true,
+	// entity_links：全局列名白名单不按表分，漏一个会在「恢复/快照导入」时才报非法列名。
+	"src_type": true, "src_id": true, "dst_type": true, "dst_id": true, "dst_label": true,
 	"method": true, "url": true, "headers": true, "body": true,
 	"body_type": true, "auth_type": true, "auth_token": true,
 	"auth_user": true, "auth_pass": true,
@@ -152,7 +161,10 @@ var validColumns = map[string]bool{
 	"notify_channels": true,
 	// retry_count 同理：回收站恢复定时任务时整行转插入列，漏了就在恢复那一步炸。
 	"retry_count": true,
-	"last_run":    true, "last_status": true, "last_result": true,
+	// cron_expr / day_of_month 同理：回收站恢复 / 快照导入时整行转插入列，
+	// 漏一个就在「恢复」那一步报非法列名（此时原记录已经删掉了）。
+	"cron_expr": true, "day_of_month": true,
+	"last_run": true, "last_status": true, "last_result": true,
 	// "action" 已在 clipboard_rules 处声明（白名单全局共用，重复声明无意义）
 	// target：回收站恢复定时任务必需——整行 21 个列都会被转成插入列，漏一个就报
 	// 「非法列名」，而且报错发生在实际删 Bespoke 定时任务之后的恢复环节，很难联想到这里。
@@ -210,6 +222,9 @@ var validColumns = map[string]bool{
 	// 和「新加了个字段」完全联想不到一起。
 	"goal": true, "budget_tokens": true, "used_tokens": true,
 	"task": true, "seq": true, "started_at": true, "ended_at": true,
+	// focus_sessions：白名单全局共用，started_at / ended_at / done / title /
+	// created_at 上面已有，这里只补本表独有的两列，漏了会在快照恢复时报错。
+	"todo_id": true, "minutes": true,
 	// run_id / node_id：agent_* 三表与 ai_usage 共用（成本归集维度）
 	"run_id": true, "node_id": true,
 	// file_shelf 独有的列（id / path / name / kind / sort / created_ts 上文已登记）；

@@ -13,7 +13,7 @@
 import { computed, reactive, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Eye, EyeOff, Loader2, X } from '@lucide/vue'
-import { SaveHost, TestHostInput } from '../../bindings/quickdock/services/sshx/sshservice'
+import { ListHosts, SaveHost, TestHostInput } from '../../bindings/quickdock/services/sshx/sshservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useFocusTrap } from '../utils/focusTrap'
@@ -79,6 +79,10 @@ const testOk = ref('')
 const showPassword = ref(false)
 const showPassphrase = ref(false)
 
+// ---- 跳板机（空串 = 直连） ----
+const jumpHostId = ref('')
+const allHosts = ref<SshHost[]>([])
+
 // ---- 指纹确认（测试连接时可能触发） ----
 const fpVisible = ref(false)
 const fpMode = ref<'unknown' | 'changed'>('unknown')
@@ -87,6 +91,47 @@ const fpInfo = ref<SshHostKeyInfo>({})
 const isEdit = computed(() => !!props.host?.id)
 const hasPassword = computed(() => !!props.host?.hasPassword)
 const hasPassphrase = computed(() => !!props.host?.hasPassphrase)
+
+// ---- 跳板机候选项 ----
+/** 沿 jumpHostId 链向上最多走 8 步，脏数据里的环也不会把 computed 卡死。 */
+const JUMP_CHAIN_LIMIT = 8
+
+interface JumpOption {
+  id: string
+  label: string
+}
+
+/**
+ * 候选跳板机：第一项固定「不使用跳板」，其后只列非文件夹、非自己、
+ * 且跳板链不会绕回当前编辑机的主机（A→B→A 会让连接无限中转）。
+ */
+const jumpOptions = computed<JumpOption[]>(() => {
+  const editingId = props.host?.id ?? ''
+  const byId = new Map(allHosts.value.map((h) => [h.id, h]))
+  const options: JumpOption[] = [{ id: '', label: t('sshHostJumpNone') }]
+  for (const h of allHosts.value) {
+    if (h.isFolder || h.id === editingId) continue
+    if (editingId && jumpChainHits(h, editingId, byId)) continue
+    options.push({ id: h.id, label: h.name || `${h.host}:${h.port}` })
+  }
+  return options
+})
+
+/** 沿候选主机的 jumpHostId 链向上走，命中当前编辑机 id 即说明会成环。 */
+function jumpChainHits(start: SshHost, editingId: string, byId: Map<string, SshHost>): boolean {
+  let cur = start
+  const seen = new Set<string>()
+  for (let step = 0; step < JUMP_CHAIN_LIMIT; step++) {
+    const nextId = cur.jumpHostId
+    if (!nextId || seen.has(nextId)) return false
+    if (nextId === editingId) return true
+    seen.add(nextId)
+    const next = byId.get(nextId)
+    if (!next) return false
+    cur = next
+  }
+  return false
+}
 
 function blankForm(): FormState {
   return {
@@ -119,6 +164,7 @@ function fillFromHost(h: SshHost | null | undefined) {
     next.remark = h.remark ?? ''
   }
   Object.assign(form, next)
+  jumpHostId.value = h?.jumpHostId ?? ''
   saving.value = false
   testing.value = false
   formErr.value = ''
@@ -128,12 +174,24 @@ function fillFromHost(h: SshHost | null | undefined) {
   showPassphrase.value = false
 }
 
+/** 拉一次主机列表供跳板下拉用；失败就静默只留「不使用跳板」。 */
+async function loadHosts() {
+  try {
+    allHosts.value = unwrap<SshHost[]>(await ListHosts()) || []
+  } catch {
+    allHosts.value = []
+  }
+}
+
 // 只在「打开」这个边沿重置：父组件重渲染会带来新的 props.host 引用，
 // 若把它放进依赖，用户正在输入的密码会被清空。
 watch(
   () => props.visible,
   (v) => {
-    if (v) fillFromHost(props.host)
+    if (v) {
+      fillFromHost(props.host)
+      void loadHosts()
+    }
   },
   { immediate: true },
 )
@@ -171,6 +229,7 @@ function toInput(): SshHostInput {
     name: form.name.trim(),
     host: form.host.trim(),
     port: Number(form.port) || 22,
+    jumpHostId: jumpHostId.value,
     user: form.user.trim() || 'root',
     authType: form.authType,
     password: form.password,
@@ -337,6 +396,15 @@ function onKeydown(e: KeyboardEvent) {
                 <input v-model="form.user" class="fd-input" spellcheck="false" placeholder="root" />
               </label>
             </div>
+
+            <!-- 跳板机 -->
+            <label class="fd">
+              <span class="fd-label">{{ t('sshHostJump') }}</span>
+              <select v-model="jumpHostId" class="fd-input">
+                <option v-for="opt in jumpOptions" :key="opt.id" :value="opt.id">{{ opt.label }}</option>
+              </select>
+              <em class="fd-hint">{{ t('sshHostJumpHint') }}</em>
+            </label>
 
             <!-- 认证 -->
             <div class="hd-section">
@@ -572,6 +640,11 @@ function onKeydown(e: KeyboardEvent) {
 
 .fd-input::placeholder {
   color: var(--color-text-disabled);
+}
+
+/* 原生 select 的下拉面板在深色主题下要显式声明配色，否则是白底黑字 */
+select.fd-input {
+  color-scheme: dark;
 }
 
 .fd-area {

@@ -17,15 +17,20 @@ import { ListAllItems, ScanInstalledApps, ResetInstalledAppsCache } from '../../
 import { ListPlugins, GetPluginIcon } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { ListNotesTree } from '../../bindings/quickdock/services/note/noteservice'
 import { GetAllUsage } from '../../bindings/quickdock/services/frecency/frecencyservice'
+import { ListWorkspaces } from '../../bindings/quickdock/services/workspace/workspaceservice'
+import { ListScenes } from '../../bindings/quickdock/services/scene/sceneservice'
+import { ListCollections } from '../../bindings/quickdock/services/collection/collectionservice'
 import type { PluginInfo } from '../types'
 import type { CollectionItem, ToastAPI } from '../types'
 import type { PluginCmdIndex } from './usePluginIndex'
-import type { CmdNote, InstalledApp, RecentEntry } from './useCommandSearch'
+import type { CmdNote, CmdScene, CmdCollection, InstalledApp, RecentEntry } from './useCommandSearch'
 
 export interface PaletteDataDeps {
   items: Ref<CollectionItem[]>
   installedApps: Ref<InstalledApp[]>
   notes: Ref<CmdNote[]>
+  scenes: Ref<CmdScene[]>
+  collections: Ref<CmdCollection[]>
   installedPlugins: Ref<PluginInfo[]>
   pluginCmdIndex: Ref<PluginCmdIndex[]>
   pluginIcons: Ref<Record<string, string>>
@@ -38,7 +43,7 @@ export interface PaletteDataDeps {
 }
 
 export function usePaletteData(deps: PaletteDataDeps) {
-  const { items, installedApps, notes, installedPlugins, pluginCmdIndex,
+  const { items, installedApps, notes, scenes, collections, installedPlugins, pluginCmdIndex,
           pluginIcons, recentCache, loading, t, toast } = deps
 
   // 加载代次：面板连续唤起时，旧一轮的若干 await 不能覆盖新一轮的结果
@@ -162,10 +167,40 @@ export function usePaletteData(deps: PaletteDataDeps) {
     }
   }
 
+  // 场景 / 集合全量池：面板是独立浮窗，与主窗口的 Pinia store 不共享状态，
+  // 读不到 workspace store 里的 scenes/collections，只能自己拉一份。
+  // 后端只按 workspaceId / sceneId 提供列表，故按 工作空间 → 场景 → 集合 逐层展开；
+  // 每层用 Promise.all 并行，且只在面板唤起时跑一次，不随每次按键打后端。
+  // 单层请求失败只让那层缺失，不拖垮其它层；整条链路失败则清空本地池。
+  async function loadWorkspaceNodes(gen: number) {
+    try {
+      const workspaces = unwrap<any[]>(await ListWorkspaces()) || []
+      const sceneRows = (await Promise.all(
+        workspaces.map(async w => { try { return await ListScenes(w.id) } catch { return null } }),
+      )).flatMap(r => (unwrap<any[]>(r) || []))
+      const collectionRows = (await Promise.all(
+        sceneRows.map(async s => { try { return await ListCollections(s.id) } catch { return null } }),
+      )).flatMap(r => (unwrap<any[]>(r) || []))
+      if (gen !== itemsLoadGen) return
+      scenes.value = sceneRows.map(s => ({
+        id: s.id, name: s.name, description: s.description || '', workspaceId: s.workspaceId,
+      }))
+      collections.value = collectionRows.map(c => ({
+        id: c.id, name: c.name, description: c.description || '',
+        workspaceId: c.workspaceId, sceneId: c.sceneId,
+      }))
+    } catch (e) {
+      logErr('CommandPalette:loadWorkspaceNodes', e)
+      if (gen === itemsLoadGen) { scenes.value = []; collections.value = [] }
+    }
+  }
+
   async function loadPaletteData() {
     loading.value = true
     const gen = ++itemsLoadGen
     await deps.loadFrecency()
+    // 与 items / notes 的全量池一起拉：面板打开一次即可，后续匹配都在前端做
+    await loadWorkspaceNodes(gen)
     try {
       const result = unwrap<CollectionItem[]>(await ListAllItems())
       if (gen !== itemsLoadGen) return

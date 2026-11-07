@@ -6,6 +6,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import {
   Copy, Image as ImageIcon, X, Download, MessageSquare,
   Languages, FileText, GraduationCap, Lightbulb, Check,
+  ChevronDown, ListChecks,
 } from '@lucide/vue'
 import { Marked } from 'marked'
 import { unwrap } from '../utils/api'
@@ -48,7 +49,7 @@ import hljs from 'highlight.js/lib/common'
 import '../styles/hljs-theme.css'
 import { logErr } from '../utils/logger'
 import { useFloatMenu } from '../composables/useFloatMenu'
-import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
+import { aiGenerating, aiFinishedUnread, pendingTarget } from '../composables/bridge'
 import { resolveConvDir } from '../utils/aiConvDir'
 import { pickActiveRun } from '../utils/aiRuns'
 import type { AIRun } from '../utils/aiRuns'
@@ -155,6 +156,25 @@ const planHere = computed<PlanCardState | null>(() => {
 
 function planDoneCount(p: PlanCardState): number {
   return p.items.filter((x) => x.status === 'done').length
+}
+
+// 折叠状态只属于「当前这条会话的这张卡」：切任务、新建任务都重新展开，
+// 否则上一条会话里点过收起，会把新任务的清单也一起藏掉。
+// 同一会话里清单被清空后重新生成时同样重置（watch planHere 从无到有）。
+// 清单持续打勾时不自动展开——用户主动收起了就别再弹回来。
+const planCollapsed = ref(false)
+watch(
+  () => activeId.value || draftRunId.value,
+  () => { planCollapsed.value = false },
+)
+watch(planHere, (now, was) => {
+  if (now && !was) planCollapsed.value = false
+})
+function onPlanToggle(e: Event) {
+  const el = e.target as HTMLDetailsElement
+  // 与期望状态一致 = 我们自己改 :open 引起的，不是用户点的
+  if (el.open === !planCollapsed.value) return
+  planCollapsed.value = !el.open
 }
 
 function runOf(convId: string): AIRun | undefined {
@@ -1967,7 +1987,10 @@ let jobsBadgeTimer: ReturnType<typeof setTimeout> | undefined
 
 async function refreshJobBadge() {
   try {
-    const list = unwrap<AIJobRow[]>(await AIJobsList()) || []
+    // 只取当前会话的任务：后台任务是在某次对话里让 AI 起的，切会话后不该
+    // 还挂着别处的一串进程（既认不出，也容易误点终止）。徽标、横条、消息卡片
+    // 三份状态都来自这次查询，过滤一次就全对齐了。
+    const list = unwrap<AIJobRow[]>(await AIJobsList(activeId.value)) || []
     const map = new Map<string, AIJobRow>()
     for (const j of list) map.set(j.id, j)
     jobRows.value = map
@@ -2000,6 +2023,16 @@ function scheduleJobBadge() {
     scheduleJobBadge()
   }, delay)
 }
+
+// 切会话要立刻丢掉旧会话的任务状态再重查：徽标/横条沿用上一个会话的数字，
+// 哪怕只闪一帧，用户也会以为「我在 B 会话，怎么还有 A 的任务在跑」。
+watch(activeId, () => {
+  runningJobList.value = []
+  jobRows.value = new Map()
+  jobSeq.value++
+  jobsFocus.value = ''
+  void refreshJobBadge()
+})
 
 function toggleJobs() {
   jobsOpen.value = !jobsOpen.value
@@ -2566,6 +2599,31 @@ function onGlobalKeydown(e: KeyboardEvent) {
   else if (!composing && streamingHere.value) stop()
 }
 
+// ---- 通知中心深链定位 ----
+// AI 通知的 refId 是会话 id（res.ConvID）：点通知要切到那一条会话，而不是停在
+// 上次看的那条。会话列表在 onMounted 里异步拉，故先补一次再找。
+async function focusConv(id: string) {
+  let conv = conversations.value.find(c => c.id === id)
+  if (!conv) { await loadConversations(); conv = conversations.value.find(c => c.id === id) }
+  // 会话已被删除：静默忽略，不弹 toast、不落到空白会话
+  if (!conv) return
+  // 侧栏搜索会把目标过滤掉，切过去也看不见它，先清掉
+  if (convQuery.value) convQuery.value = ''
+  await selectConv(id)
+}
+
+function consumePendingTarget() {
+  const p = pendingTarget.value
+  if (!p || p.page !== 'ai' || !p.target) return
+  const id = p.target
+  // 取走即清空：AI 页被 KeepAlive 保活，留着会在切走再回来时重复切到旧会话
+  pendingTarget.value = null
+  void focusConv(id)
+}
+watch(pendingTarget, consumePendingTarget, { immediate: true })
+// 双重兜底：immediate 那次若撞上会话列表未就绪，挂载后再补一次（已消费则是 no-op）
+onMounted(consumePendingTarget)
+
 onMounted(async () => {
   // KeepAlive 首次挂载也会走 onActivated，但那条路依赖 App.vue 的包裹结构；
   // 这里显式再置一次，保证「一进来就停在 AI 页」这个事实后端一定知道。
@@ -2719,6 +2777,7 @@ onUnmounted(() => {
       <AiJobsPanel
         v-if="jobsOpen"
         :open="jobsOpen"
+        :conv-id="activeId"
         :focus="jobsFocus"
         @close="jobsOpen = false; jobsFocus = ''"
         @changed="refreshJobBadge"
@@ -2857,7 +2916,41 @@ onUnmounted(() => {
         @msg-click="onMsgClick"
         @msg-mouseup="onMsgMouseUp"
         @msg-contextmenu="onMsgContextMenu"
-      />
+      >
+        <template #plan>
+          <!-- 任务清单：AI 用 plan_update 把大任务拆成步骤，边做边勾。
+               位置由 AiMessageList 的 #plan 插槽提供——它现在是消息流里的一个
+               节点，回看历史会跟着一起滚走，也不再挤占消息区高度。
+               与工具卡 / 产物卡同用 details+summary：默认展开、点标题行收起；
+               收起后标题行仍留着「n/m 已完成」，不会连进度一起藏掉。 -->
+          <details
+            v-if="planHere"
+            class="ai-plan-card"
+            :open="!planCollapsed"
+            @toggle="onPlanToggle"
+          >
+            <summary
+              class="ai-plan-head"
+              :title="planCollapsed ? t('aiPlanExpand') : t('aiPlanCollapse')"
+            >
+              <ListChecks :size="13" class="ai-plan-ico" />
+              <span class="ai-plan-title">{{ t('aiPlanTitle') }}</span>
+              <span class="ai-plan-count">{{ t('aiPlanCount', { done: planDoneCount(planHere), total: planHere.items.length }) }}</span>
+              <ChevronDown :size="13" class="ai-plan-chev" />
+            </summary>
+            <ul class="ai-plan-list">
+              <li v-for="(it, i) in planHere.items" :key="i" class="ai-plan-item" :class="`is-${it.status}`">
+                <span class="ai-plan-box">
+                  <Check v-if="it.status === 'done'" :size="10" />
+                  <span v-else-if="it.status === 'doing'" class="ai-plan-doing" />
+                </span>
+                <span class="ai-plan-text">{{ it.text }}</span>
+              </li>
+            </ul>
+            <div v-if="planHere.note" class="ai-plan-note">{{ planHere.note }}</div>
+          </details>
+        </template>
+      </AiMessageList>
 
       <!-- 会话用量汇总：整个对话调用了哪些模型、各几次、共多少 Token。
            不放积分——用量只以 Token 计。置在消息区与输入框之间，始终可见。 -->
@@ -2955,26 +3048,6 @@ onUnmounted(() => {
           @deny="approveTool(pendingApproval, 'deny')"
           @open-rules="emit('open-settings', 'ai:permission')"
         />
-
-        <!-- 任务清单：AI 自己把大任务拆成步骤，完成一步勾一步（plan_update 工具）。
-             放在输入框正上方与后台任务条同一带：它是「当前这件事的进度」，
-             不属于任何一条消息，混进消息流会在下一轮里变成一条看不懂的旧记录。 -->
-        <div v-if="planHere" class="ai-plan-card">
-          <div class="ai-plan-head">
-            <span class="ai-plan-title">{{ t('aiPlanTitle') }}</span>
-            <span class="ai-plan-count">{{ t('aiPlanCount', { done: planDoneCount(planHere), total: planHere.items.length }) }}</span>
-          </div>
-          <ul class="ai-plan-list">
-            <li v-for="(it, i) in planHere.items" :key="i" class="ai-plan-item" :class="`is-${it.status}`">
-              <span class="ai-plan-box">
-                <Check v-if="it.status === 'done'" :size="10" />
-                <span v-else-if="it.status === 'doing'" class="ai-plan-doing" />
-              </span>
-              <span class="ai-plan-text">{{ it.text }}</span>
-            </li>
-          </ul>
-          <div v-if="planHere.note" class="ai-plan-note">{{ planHere.note }}</div>
-        </div>
 
         <!-- 后台任务横条：贴在输入框正上方。
              为什么放这里：后台任务最常见的用法就是「让它在后台跑着，我继续问别的」，
@@ -3138,16 +3211,15 @@ onUnmounted(() => {
    原来写 left/right:10% 是专门配 80% 的算法，输入框一换口径就立刻错位。 */
 /* 后台任务横条的样式随组件一起搬到 AiJobsBar.vue，这里只保留一份实现。 */
 
-/* 任务清单卡片：与输入框同宽（--ai-column-w + margin auto），否则会比输入框宽一截。
-   浅底、无边框——它是一条进度，不是一张内容卡片；抢了回答的视觉重心反而碍事。 */
+/* 任务清单：消息流里的一张可折叠卡片（位置见 AiMessageList 的 #plan 插槽）。
+   宽度直接 100%——父级 .ai-msg-content-wrap 已经被 .ai-messages 的 padding 夹过
+   一次，再套 --ai-column-w 会比正文窄一截。圆角+描边与工具卡 / 产物卡同一层级，
+   收起后只剩一行标题，不再占着输入区上方的固定高度。 */
 .ai-plan-card {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: var(--ai-column-w);
-  margin: 0 auto 6px;
-  padding: 7px 10px;
-  border-radius: var(--radius-sm);
+  width: 100%;
+  padding: 8px 12px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
   background: var(--color-bg-secondary);
   font-size: 12px;
 }
@@ -3156,23 +3228,36 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
+  list-style: none;
+  cursor: pointer;
+  user-select: none;
+  outline: none;
   color: var(--color-text-secondary);
 }
+.ai-plan-head::-webkit-details-marker { display: none; }
+.ai-plan-head:hover { color: var(--color-text-primary); }
+.ai-plan-ico { flex-shrink: 0; color: var(--color-text-muted); }
+.ai-plan-title { font-weight: 600; color: var(--color-text-primary); }
 
-.ai-plan-title { font-weight: 600; }
-
-/* 计数靠右：扫一眼就知道还剩几步，不用逐行数 */
+/* 计数紧跟标题：收起时也要能一眼看到做到第几步 */
 .ai-plan-count {
-  margin-left: auto;
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
+/* 箭头靠右、收起时转 90°：与工具卡同一套开合语言 */
+.ai-plan-chev {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--color-text-disabled);
+  transition: transform var(--transition-fast);
+}
+.ai-plan-card:not([open]) .ai-plan-chev { transform: rotate(-90deg); }
 
 .ai-plan-list {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: 0;
+  gap: 4px;
+  margin: 9px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -3185,8 +3270,8 @@ onUnmounted(() => {
   color: var(--color-text-secondary);
 }
 
-/* 勾选框：14px 见方，未完成是描边、进行中是呼吸点、完成是实心绿。
-   三态都能在余光里区分——用户扫过去只想知道「做到哪了」。 */
+/* 三态圆圈：未完成空心、进行中呼吸点、完成细勾（参考任务面板的清单样式，
+   不用实心色块抢正文的视觉重心）。 */
 .ai-plan-box {
   flex: 0 0 auto;
   display: flex;
@@ -3196,19 +3281,16 @@ onUnmounted(() => {
   height: 14px;
   margin-top: 2px;
   border: 1px solid var(--color-border);
-  border-radius: 3px;
+  border-radius: 50%;
   color: var(--color-accent-text);
 }
 
 .ai-plan-item.is-done .ai-plan-box {
   border-color: var(--color-success);
-  background: var(--color-success);
+  color: var(--color-success);
 }
 
-.ai-plan-item.is-done .ai-plan-text {
-  color: var(--color-text-muted);
-  text-decoration: line-through;
-}
+.ai-plan-item.is-done .ai-plan-text { color: var(--color-text-muted); }
 
 .ai-plan-item.is-doing .ai-plan-box { border-color: var(--color-accent); }
 
@@ -3222,7 +3304,7 @@ onUnmounted(() => {
 
 .ai-plan-text { min-width: 0; overflow-wrap: anywhere; }
 
-.ai-plan-note { color: var(--color-text-muted); font-size: 11.5px; }
+.ai-plan-note { margin-top: 7px; color: var(--color-text-muted); font-size: 11.5px; }
 
 /* 等待插入的消息：贴在输入框正上方，宽度与输入框同口径（--ai-column-w + margin auto），
    否则它会从窗口左边一直拉到右边，比输入框宽一截，看起来像另一块区域。

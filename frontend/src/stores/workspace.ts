@@ -538,7 +538,9 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       return 0
     })
     try {
-      await ReorderWorkspaces(orderedIDs)
+      // 绑定返回 ApiResult：不 unwrap 的话后端 code!=0 只是「成功返回了一个失败对象」，
+      // catch 不触发，前端会一直停在乐观排序后的错序上。解包后才会走下面的回拉。
+      unwrap(await ReorderWorkspaces(orderedIDs))
     } catch (e) {
       const result = unwrap(await ListWorkspaces())
       workspaces.value = normalizeRows(result) as Workspace[]

@@ -45,6 +45,7 @@ import {
   EnvRuntimeTasks,
   EnvRunTask,
   EnvProjectVersions,
+  EnvProjectDeps,
 } from '../../bindings/quickdock/services/env/environmentservice'
 import { PickFolderPath } from '../../bindings/quickdock/services/plugin/pluginservice'
 import {
@@ -512,6 +513,17 @@ const {
   loadMCP, copyMCP, setMCPLevel, setMCPToolEnabled, startMCP, stopMCP, restartMCP, checkMCP,
   toggleMCPTokenVisible, copyMCPToken, setMCPTokenRequired, rotateMCPToken,
 } = useMCPPanel(selectedId)
+// 客户端接入：选中态只存后端给的 id（不存数组下标）。开启/轮换令牌会重新拉一遍
+// mcpClients，列表内容变了但 id 不变，用户停在哪个客户端就还是哪个。
+const mcpClientId = ref('')
+const mcpClientPicked = computed(() =>
+  mcpClients.value.find((c) => c.id === mcpClientId.value) ?? mcpClients.value[0] ?? null)
+const mcpClientConfig = computed(() => mcpClientPicked.value?.config ?? '')
+watch(mcpClients, (list) => {
+  if (!list.some((c) => c.id === mcpClientId.value)) {
+    mcpClientId.value = list[0]?.id ?? ''
+  }
+}, { immediate: true })
 const { webdavInfo, webdavURL, webdavExposed, webdavCmds, copyWebDAV, loadWebDAV } = useWebDAVPanel(selectedId)
 
 
@@ -1082,7 +1094,11 @@ async function syncRuntimeStatus(r: RuntimeInfo) {
       }
     } catch {
       // 查询失败不能沿用上一次的「运行中」：服务可能已经崩了，
-      // 而 UI 还在给用户一个绿色的假象。这里标记成「状态未知」，如实显示。
+      // 而 UI 还在给用户一个绿色的假象。除了标记「状态未知」给表格列用，
+      // 还必须丢掉 ui[r.id].svc 里的旧对象 —— 侧栏绿点走的是
+      // runningCache → anyRunning → svcOn，它不读 svcUnknown；只打标记的话
+      // 旧 running 值会一直被留着，绿点永远亮。
+      delete s.svc[ins.version]
       svcUnknown[r.id + ins.version] = true
     }
   }
@@ -1399,10 +1415,14 @@ const {
   formatSize,
 } = useEnvMaintenance({ onEnvChanged: () => load() })
 
-// ---- 项目版本要求检查 ----
+// ---- 项目体检：版本要求 + 依赖状态 ----
 // EnvProjectVersions 后端一直完整（services/env/service.go），此前只有条目编辑器在调。
 // 而环境页才是最需要它的地方：装了一堆运行时之后，想知道「这个项目要求的版本本机有没有」，
 // 以前只能去条目编辑器里找个目录绕一圈看。
+// 另起 EnvProjectDeps 是因为「检查项目」以前只管版本声明，PHP 的 composer.json /
+// composer.lock / vendor 与 Node 的 package.json / packageManager / 锁文件 / node_modules
+// 完全没人看：多数项目不写 engines.node / require.php，面板就一句「没检测到版本声明」，
+// 看起来像不支持这两个生态。
 interface ProjectReqRow {
   runtime: string
   require: string
@@ -1411,12 +1431,27 @@ interface ProjectReqRow {
   active: string
   installed: string[]
 }
+interface ProjectDepsRow {
+  kind: string
+  manifest: string
+  manifestDir: string
+  manager: string
+  managerSpec: string
+  lockFile: string
+  lockPresent: boolean
+  lockDeps: number
+  manifestDeps: number
+  depsDir: string
+  depsInstalled: boolean
+  lockStale: boolean
+}
 const projectCheck = reactive({
   open: false,
   dir: '',
   loading: false,
   error: '',
   rows: [] as ProjectReqRow[],
+  deps: [] as ProjectDepsRow[],
 })
 
 const projectMissing = computed(() => projectCheck.rows.filter((r) => r.require && !r.matched).length)
@@ -1441,8 +1476,16 @@ async function runProjectCheck() {
   projectCheck.loading = true
   projectCheck.error = ''
   projectCheck.rows = []
+  projectCheck.deps = []
   try {
-    projectCheck.rows = unwrap<ProjectReqRow[]>(await EnvProjectVersions(dir)) ?? []
+    // 两条独立的只读链路并行取：EnvProjectVersions 还被条目编辑器复用，不能往它的
+    // 数组里塞依赖行；并行调保证一次检查只等一轮 IPC 往返。
+    const [rows, deps] = await Promise.all([
+      EnvProjectVersions(dir).then(r => unwrap<ProjectReqRow[]>(r) ?? []),
+      EnvProjectDeps(dir).then(r => unwrap<ProjectDepsRow[]>(r) ?? []),
+    ])
+    projectCheck.rows = rows
+    projectCheck.deps = deps
   } catch (e) {
     projectCheck.error = getErrorMessage(e)
     logErr('env/projectCheck', e)
@@ -1472,6 +1515,8 @@ let offRefreshed: (() => void) | null = null
 let offOllamaPull: (() => void) | null = null
 let offSourceCheck: (() => void) | null = null
 let offSourceCheckDone: (() => void) | null = null
+let offDshExited: (() => void) | null = null
+let offDshStarted: (() => void) | null = null
 // 点击外部时收起版本列表
 function onDocClick(e: MouseEvent) {
   const target = e.target as HTMLElement
@@ -1497,6 +1542,11 @@ onMounted(() => {
   // 源体检：逐条结果 + 结束汇总（异步，避免长调用把界面卡住）
   offSourceCheck = Events.On('quickdock:env:sourcecheck', onSourceCheckEvent)
   offSourceCheckDone = Events.On('quickdock:env:sourcecheck-done', onSourceCheckDone)
+  // dsh 的进程生命周期：reaper 里可能顺带自动重拉（窗口开着时），也可能就此停掉。
+  // 侧栏 harness 入口那个绿点原来只在「切到 harness 区块」时刷一次，服务在后台崩了
+  // 页面就一直挂着一个绿灯。这两个事件是唯一可靠的信号（时间点由 reaper 决定，轮询抓不到）。
+  offDshExited = Events.On('quickdock:dsh:exited', () => { void loadDshRunning() })
+  offDshStarted = Events.On('quickdock:dsh:started', () => { void loadDshRunning() })
   // 周期轮询统一交给 statusPoller（3s；窗口最小化/后台自动暂停）
   statusPoller.start()
 })
@@ -1535,6 +1585,8 @@ onUnmounted(() => {
   if (offOllamaPull) offOllamaPull()
   if (offSourceCheck) offSourceCheck()
   if (offSourceCheckDone) offSourceCheckDone()
+  if (offDshExited) offDshExited()
+  if (offDshStarted) offDshStarted()
   // 兜底：调度器自身也在 onUnmounted 里 stop 了一次，这里显式停一次是为了
   // 让「谁负责停」在本文件里可读——页面级定时器全在这一个函数里收口。
   statusPoller.stop()
@@ -2292,17 +2344,32 @@ const s = currentRuntimeState
           </div>
           <p v-if="mcpLevelHint" class="mcp-level-hint">{{ mcpLevelHint }}</p>
 
+          <!-- 客户端接入片段一次只显示一种：六种格式平铺下来要滚很久，而且
+               Claude Code 的命令行 / VS Code 的 servers / curl 验证命令长得互不相干，
+               混在一起只会让人复制错。选中项按后端给的稳定 id 记忆，令牌轮换
+               触发 loadMCP 重拉片段后也不会跳回第一个。 -->
           <template v-if="mcpInfo.running">
             <div class="mcp-cfg-head">
               <span>{{ t('mcpClientsTitle') }}</span>
-            </div>
-            <template v-for="c in mcpClients" :key="c.id">
-              <div class="mcp-cfg-head">
-                <span>{{ c.label }}</span>
-                <button class="op-btn small" @click="copyMCP(c.config)">{{ t('copy') }}</button>
+              <div class="mcp-client-actions">
+                <select
+                  v-model="mcpClientId"
+                  class="env-input mcp-client-select"
+                  :disabled="!mcpClients.length"
+                >
+                  <option v-for="c in mcpClients" :key="c.id" :value="c.id">{{ c.label }}</option>
+                </select>
+                <button class="op-btn small" :disabled="!mcpClientConfig" @click="copyMCP(mcpClientConfig)">
+                  {{ t('copy') }}
+                </button>
               </div>
-              <p v-if="c.path" class="mcp-client-path">{{ t('mcpClientPath', { path: c.path }) }}</p>
-              <pre class="mcp-code">{{ c.config }}</pre>
+            </div>
+            <p class="mcp-hint mcp-client-hint">{{ t('mcpClientPickHint') }}</p>
+            <template v-if="mcpClientPicked">
+              <p v-if="mcpClientPicked.path" class="mcp-client-path">
+                {{ t('mcpClientPath', { path: mcpClientPicked.path }) }}
+              </p>
+              <pre class="mcp-code">{{ mcpClientPicked.config }}</pre>
             </template>
           </template>
 
@@ -2687,47 +2754,88 @@ const s = currentRuntimeState
         </div>
 
         <p v-if="projectCheck.error" class="env-msg error">{{ projectCheck.error }}</p>
-        <div v-else-if="!projectCheck.rows.length" class="empty-state">
+        <div v-else-if="!projectCheck.rows.length && !projectCheck.deps.length" class="empty-state">
           <div class="empty-text">{{ projectCheck.dir ? t('projectCheckNone') : t('projectCheckEmpty') }}</div>
         </div>
         <template v-else>
-          <p v-if="projectMissing" class="env-msg error">{{ t('projectCheckMissing', { n: projectMissing }) }}</p>
-          <table class="panorama-table">
-            <thead>
-              <tr>
-                <th>{{ t('runtime') }}</th>
-                <th>{{ t('projectCheckRequire') }}</th>
-                <th>{{ t('projectCheckMatched') }}</th>
-                <th>{{ t('projectCheckActive') }}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr v-for="row in projectCheck.rows" :key="row.runtime + '|' + row.require">
-                <td>{{ projectRuntimeName(row.runtime) }}</td>
-                <td>
-                  <span class="mono">{{ row.require || '—' }}</span>
-                  <span v-if="row.source" class="muted"> · {{ row.source }}</span>
-                </td>
-                <td>
-                  <span v-if="row.matched" class="pc-ok">{{ row.matched }}</span>
-                  <span v-else class="pc-bad">{{ t('projectCheckNoMatch') }}</span>
-                </td>
-                <td>
-                  <span v-if="row.active" class="mono">{{ row.active }}</span>
-                  <span v-else class="muted">—</span>
-                  <select
-                    v-if="row.installed.length"
-                    class="pc-select"
-                    :value="row.active"
-                    @change="setActiveFromProject(row, ($event.target as HTMLSelectElement).value)"
-                  >
-                    <option value="">{{ t('projectCheckSwitch') }}</option>
-                    <option v-for="v in row.installed" :key="v" :value="v">{{ v }}</option>
-                  </select>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+          <!-- 版本要求：可能为空（项目没写 engines / require.php），但依赖侧仍能识别出项目 -->
+          <template v-if="projectCheck.rows.length">
+            <div class="pc-section-head">{{ t('projectDepsVersionSection') }}</div>
+            <p v-if="projectMissing" class="env-msg error">{{ t('projectCheckMissing', { n: projectMissing }) }}</p>
+            <table class="panorama-table">
+              <thead>
+                <tr>
+                  <th>{{ t('runtime') }}</th>
+                  <th>{{ t('projectCheckRequire') }}</th>
+                  <th>{{ t('projectCheckMatched') }}</th>
+                  <th>{{ t('projectCheckActive') }}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="row in projectCheck.rows" :key="row.runtime + '|' + row.require">
+                  <td>{{ projectRuntimeName(row.runtime) }}</td>
+                  <td>
+                    <span class="mono">{{ row.require || '—' }}</span>
+                    <span v-if="row.source" class="muted"> · {{ row.source }}</span>
+                  </td>
+                  <td>
+                    <span v-if="row.matched" class="pc-ok">{{ row.matched }}</span>
+                    <span v-else class="pc-bad">{{ t('projectCheckNoMatch') }}</span>
+                  </td>
+                  <td>
+                    <span v-if="row.active" class="mono">{{ row.active }}</span>
+                    <span v-else class="muted">—</span>
+                    <select
+                      v-if="row.installed.length"
+                      class="pc-select"
+                      :value="row.active"
+                      @change="setActiveFromProject(row, ($event.target as HTMLSelectElement).value)"
+                    >
+                      <option value="">{{ t('projectCheckSwitch') }}</option>
+                      <option v-for="v in row.installed" :key="v" :value="v">{{ v }}</option>
+                    </select>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </template>
+          <p v-else class="pc-note">{{ t('projectDepsNoVersion') }}</p>
+
+          <!-- 依赖状态：PHP / Composer 与 Node 各一张卡，全部来自 EnvProjectDeps 的只读快照 -->
+          <template v-if="projectCheck.deps.length">
+            <div class="pc-section-head">
+              {{ t('projectDepsSection') }}
+              <span class="pc-section-hint">{{ t('projectDepsReadonly') }}</span>
+            </div>
+            <div class="pd-list">
+              <div v-for="d in projectCheck.deps" :key="d.kind" class="pd-card">
+                <div class="pd-head">
+                  <span class="pd-kind">{{ d.kind === 'php' ? t('projectDepsKindPhp') : t('projectDepsKindNode') }}</span>
+                  <span class="pd-manager mono">{{ d.manager }}<span v-if="d.managerSpec" class="pd-manager-ver"> {{ d.managerSpec }}</span></span>
+                  <span class="pd-manifest mono" :title="d.manifestDir">{{ d.manifest }}</span>
+                </div>
+                <div class="pd-grid">
+                  <div class="pd-item">
+                    <span class="pd-label">{{ t('projectDepsLock') }}</span>
+                    <span v-if="d.lockPresent" class="pc-ok">{{ d.lockFile }}</span>
+                    <span v-else class="pc-bad">{{ t('projectDepsLockMissing') }}</span>
+                    <span v-if="d.lockDeps >= 0" class="muted"> · {{ t('projectDepsLockCount', { n: d.lockDeps }) }}</span>
+                    <span v-if="d.lockStale" class="pd-stale" :title="t('projectDepsStale')">!</span>
+                  </div>
+                  <div class="pd-item">
+                    <span class="pd-label">{{ t('projectDepsDir') }}</span>
+                    <span v-if="d.depsInstalled" class="pc-ok mono">{{ d.depsDir }}/</span>
+                    <span v-else class="pc-bad">{{ t('projectDepsNotInstalled', { dir: d.depsDir }) }}</span>
+                  </div>
+                  <div class="pd-item">
+                    <span class="pd-label">{{ t('projectDepsDeclared') }}</span>
+                    <span class="mono">{{ d.manifestDeps }}</span>
+                  </div>
+                </div>
+                <div class="pd-path mono" :title="d.manifestDir">{{ d.manifestDir }}</div>
+              </div>
+            </div>
+          </template>
         </template>
       </div>
     </div>
@@ -3606,6 +3714,11 @@ const s = currentRuntimeState
 .mcp-token-require { display: flex; align-items: center; gap: 6px; margin: 2px 0 6px; font-size: 12px; color: var(--color-text-secondary); cursor: pointer; }
 .mcp-level-hint { margin: 0 0 6px; font-size: 11px; color: var(--color-warning); }
 .mcp-client-path { margin: 0 0 6px; font-size: 11px; color: var(--color-text-muted); word-break: break-all; }
+.mcp-client-actions { display: flex; align-items: center; gap: 8px; flex: none; }
+/* 两条类选择器压过后面的 .env-input{width:100%}：下拉要有确定宽度，
+   否则在 flex:none 的容器里 width:100% 会跟内容互相撑，布局随内容抖动。 */
+.mcp-client-actions .mcp-client-select { width: 240px; min-width: 200px; max-width: 320px; flex: none; }
+.mcp-client-hint { margin: 0 0 8px; }
 .mcp-tool-row.is-blocked { opacity: .55; }
 .mcp-tool-row { display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 3px 0; }
 .mcp-tool-row.is-off .mcp-tool-name { text-decoration: line-through; }
@@ -4047,6 +4160,43 @@ const s = currentRuntimeState
   margin-left: 6px; padding: 2px 5px; font-size: 11px;
   border: 1px solid var(--color-border); border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
+}
+
+/* 项目体检：版本要求 / 依赖状态两块，小标题与卡片共用一套间距。
+   卡片用 auto-fit 网格，760px 弹窗里两个生态并排，窄窗自动换行。 */
+.pc-section-head {
+  display: flex; align-items: baseline; gap: 8px;
+  margin: 14px 0 8px; font-size: 12px; font-weight: 600;
+  color: var(--color-text-secondary);
+}
+.pc-section-hint { font-size: 10px; font-weight: 400; color: var(--color-text-disabled); }
+.pc-note { margin: 12px 0 4px; font-size: 11px; color: var(--color-text-muted); }
+.pd-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; }
+.pd-card {
+  min-width: 0; padding: 9px 10px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+}
+.pd-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.pd-kind { font-size: 12px; font-weight: 600; color: var(--color-text-primary); white-space: nowrap; }
+.pd-manager { font-size: 10.5px; color: var(--color-accent); white-space: nowrap; }
+.pd-manager-ver { color: var(--color-text-muted); }
+.pd-manifest {
+  margin-left: auto; min-width: 0; font-size: 10px; color: var(--color-text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pd-grid { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; }
+.pd-item { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; }
+.pd-label { flex-shrink: 0; color: var(--color-text-muted); }
+.pd-stale {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 14px; height: 14px; border-radius: 50%;
+  font-size: 10px; font-weight: 700; cursor: help;
+  color: var(--color-warning); background: var(--color-warning-bg);
+}
+.pd-path {
+  margin-top: 7px; font-size: 10px; color: var(--color-text-disabled);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .envvar-path,
 .envvar-name {

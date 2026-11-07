@@ -18,6 +18,7 @@ import type { NavDotKind } from '../pages/registry'
 
 import { useNavPrefs } from '../composables/useNavPrefs'
 import { useNavBadges } from '../composables/useNavBadges'
+import { useDragSort } from '../composables/useDragSort'
 import { aiGenerating, aiFinishedUnread } from '../composables/bridge'
 
 const store = useWorkspaceStore()
@@ -43,17 +44,16 @@ const { orderedNav, visibleNav, hiddenNav, hideNav, showNav, moveNav, canMoveUp,
 const navBadge = useNavBadges(() => props.currentPage)
 const settingsBadge = navBadge.settingsBadge
 
-// 崩溃记录藏在「设置 → 日志」里，打开设置即视为看过；
-// 否则用户进了日志页，脚标上的红点还得等下一轮轮询才消失。
+// 崩溃记录藏在「设置 → 日志」里。已读水位由设置弹窗在**真正进入日志页**时打，
+// 这里不能提前清：否则侧栏红点一点开设置就消失，设置菜单里又没有任何对应标识，
+// 用户看到红点却无从知道它指的是哪一项。
 function openSettings() {
-  navBadge.markSeen('settings')
   emit('open-settings')
 }
 
 // 通知点进去要落在具体的设置页（比如崩溃记录在「日志」页）。
 // 与命令面板走同一条事件通道，避免再给 Sidebar 加一个 emit 通道。
 function openSettingsPage(page: string) {
-  navBadge.markSeen('settings')
   try { Events.Emit('app:open-settings', page) } catch { /* 主窗口未就绪时忽略 */ }
 }
 
@@ -200,6 +200,44 @@ const navItems = computed<NavItemView[]>(() =>
 )
 
 // ---- 工作空间 ----
+// 拖拽排序复用 useDragSort（集合/条目列表同一套原生 HTML5 管道），落点算好新顺序后
+// 调 store.reorderWorkspaces 持久化；该方法内部已带「失败重拉 ListWorkspaces」回退。
+// 搜索/筛选时禁用：此刻列表可能被过滤，若把过滤后的下标当全量写回，顺序必然错乱
+// （与 CollectionList/ItemList 的 !store.hasSearch 禁用是同一口径）。
+const wsDragDisabled = computed(() => store.hasSearch)
+const {
+  dragId: wsDragId,
+  dragOverIndex: wsDragOverIndex,
+  onDragStart: wsSortDragStart,
+  onDragOver: wsSortDragOver,
+  onDrop: wsSortDrop,
+  onDragEnd: wsSortDragEnd,
+} = useDragSort({
+  ids: () => store.workspaces.map(w => w.id),
+  onReorder: (ids) => {
+    if (wsDragDisabled.value) return
+    void store.reorderWorkspaces(ids).catch(async (e) => {
+      // store 内部已重拉过一次；这里再兜一层，保证界面最终与 DB 顺序一致
+      await store.fetchWorkspaces().catch(() => {})
+      toast.error(getErrorMessage(e))
+    })
+  },
+})
+
+function onWsDragStart(id: string, e: DragEvent, i: number) {
+  if (wsDragDisabled.value) { e.preventDefault(); return }
+  wsSortDragStart(id, e, i)
+}
+function onWsDragOver(i: number, e: DragEvent) {
+  // 禁用时不 preventDefault：浏览器不认为是合法落点，既不画指示线也不派发 drop
+  if (wsDragDisabled.value) return
+  wsSortDragOver(i, e)
+}
+function onWsDrop(id: string, e: DragEvent) {
+  if (wsDragDisabled.value) { e.preventDefault(); wsSortDragEnd(); return }
+  wsSortDrop(id, e)
+}
+
 const showWorkspaceMenu = ref(false)
 const showCreateWorkspaceDialog = ref(false)
 const showEditWorkspaceDialog = ref(false)
@@ -262,7 +300,18 @@ async function handleDeleteWorkspace(wsId: string) {
       <Transition name="dropdown">
         <div v-if="showWorkspaceMenu" class="ws-dropdown" @click.stop>
           <div class="ws-dropdown-header">{{ t('workspaces') }}</div>
-          <div v-for="ws in store.workspaces" :key="ws.id" class="ws-item-row">
+          <div
+            v-for="(ws, i) in store.workspaces"
+            :key="ws.id"
+            class="ws-item-row"
+            :class="{ dragging: wsDragId === ws.id, 'drop-before': !!wsDragId && wsDragOverIndex === i && wsDragId !== ws.id }"
+            :draggable="!wsDragDisabled"
+            :title="wsDragDisabled ? t('workspaceDragDisabledHint') : t('workspaceDragHint')"
+            @dragstart="onWsDragStart(ws.id, $event, i)"
+            @dragover="onWsDragOver(i, $event)"
+            @drop="onWsDrop(ws.id, $event)"
+            @dragend="wsSortDragEnd"
+          >
             <button
               :class="['ws-option', { active: ws.id === store.activeWorkspaceId }]"
               @click="selectWorkspace(ws.id)"
@@ -363,7 +412,11 @@ async function handleDeleteWorkspace(wsId: string) {
       <!-- 通知中心：与设置同级沉底。它进不了导航区——导航是「去某个地方」，
            通知是「刚才发生了什么」，混在一起会让导航项的顺序失去意义。 -->
       <NotificationCenter @navigate="(p) => emit('navigate', p)" @open-settings="openSettingsPage" />
-      <button class="settings-btn" @click="openSettings" :title="t('settings')">
+      <button
+        class="settings-btn"
+        @click="openSettings"
+        :title="settingsBadge ? t('settings') + ' · ' + t(settingsBadge.titleKey, { n: settingsBadge.count }) : t('settings')"
+      >
         <Settings :size="16" />
         <span>{{ t('settings') }}</span>
         <span
@@ -732,6 +785,14 @@ async function handleDeleteWorkspace(wsId: string) {
 
 /* 工作空间条目行 */
 .ws-item-row { display: flex; align-items: center; }
+/* 拖拽排序视觉反馈：源行淡出、落点画顶部指示线（inset 不占布局、不跳动）。
+   用属性选择器而非 :has()/:is()/:container —— WebView2 版本不可控。 */
+.ws-item-row[draggable="true"] { cursor: grab; }
+.ws-item-row[draggable="true"] .ws-option { cursor: grab; }
+.ws-item-row[draggable="true"]:active,
+.ws-item-row[draggable="true"]:active .ws-option { cursor: grabbing; }
+.ws-item-row.dragging { opacity: .4; }
+.ws-item-row.drop-before { box-shadow: inset 0 2px 0 var(--color-accent); }
 .ws-item-row .ws-option { flex: 1; min-width: 0; }
 .ws-item-action {
   flex-shrink: 0;

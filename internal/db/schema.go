@@ -261,6 +261,10 @@ var baseTables = []string{
 		interval_sec INTEGER NOT NULL DEFAULT 0,
 		time_of_day TEXT DEFAULT '',
 		weekdays TEXT DEFAULT '',
+		-- cron_expr / day_of_month：标准 cron 与「每月几号」的显式字段。老库由
+		-- columnMigrations 补列，默认 '' / 0 与升级前行为一致（0 = 沿用旧口径）。
+		cron_expr TEXT NOT NULL DEFAULT '',
+		day_of_month INTEGER NOT NULL DEFAULT 0,
 		enabled INTEGER NOT NULL DEFAULT 1,
 		notify INTEGER NOT NULL DEFAULT 1,
 		notify_channels TEXT NOT NULL DEFAULT 'system,webhook',
@@ -444,6 +448,7 @@ var baseTables = []string{
 	// pid 留着是为了退出时能整组杀掉——它是独立进程组，宿主退出不会带走它。
 	`CREATE TABLE IF NOT EXISTS ai_jobs (
 		id TEXT PRIMARY KEY,
+		conv_id TEXT NOT NULL DEFAULT '',
 		command TEXT NOT NULL DEFAULT '',
 		cwd TEXT NOT NULL DEFAULT '',
 		status TEXT NOT NULL DEFAULT 'running',
@@ -551,6 +556,9 @@ var baseTables = []string{
 		key_passphrase TEXT NOT NULL DEFAULT '',
 		legacy_algorithms INTEGER NOT NULL DEFAULT 0,
 		env TEXT NOT NULL DEFAULT 'test',
+		-- 跳板机：另一台 ssh_hosts 主机的 id，空串 = 直连。链式可多级，
+		-- 环由门面层在保存/连接时挡住（DB 不建外键，删跳板由 DeleteSshHost 解绑）。
+		jump_host_id TEXT NOT NULL DEFAULT '',
 		parent_id TEXT NOT NULL DEFAULT '',
 		is_folder INTEGER NOT NULL DEFAULT 0,
 		sort INTEGER NOT NULL DEFAULT 0,
@@ -618,6 +626,52 @@ var baseTables = []string{
 		sort INTEGER NOT NULL DEFAULT 0,
 		created_ts INTEGER NOT NULL DEFAULT 0,
 		last_opened_ts INTEGER NOT NULL DEFAULT 0
+	)`,
+
+	// 条目 / 笔记 / 待办三者的互链边。单独建表而不是在三张表里塞 JSON：
+	// 「谁链接了我」是核心体验，行内 JSON 只能全表扫三遍且要双向对称维护。
+	// 不在删除主体时级联清理 —— 回收站整行恢复后 id 不变，关联应自动回来；
+	// 悬空的边由查询侧按 label 容错展示，不假装目标还在。
+	`CREATE TABLE IF NOT EXISTS entity_links (
+		id TEXT PRIMARY KEY,
+		src_type TEXT NOT NULL,
+		src_id TEXT NOT NULL,
+		dst_type TEXT NOT NULL,
+		dst_id TEXT NOT NULL DEFAULT '',
+		dst_label TEXT NOT NULL DEFAULT '',
+		kind TEXT NOT NULL DEFAULT 'manual',
+		created_at TEXT NOT NULL
+	)`,
+
+	// SSH 命令片段：用户自己攒的常用命令，跟着快照走。
+	// 表名不能叫 snippets —— 上面的迁移会把 snippets 合并/重命名为 notes。
+	// 也不往 notes 里塞 category：那会污染笔记列表与 AI 上下文。
+	`CREATE TABLE IF NOT EXISTS ssh_commands (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL DEFAULT '',
+		command TEXT NOT NULL DEFAULT '',
+		description TEXT NOT NULL DEFAULT '',
+		category TEXT NOT NULL DEFAULT '',
+		usage_count INTEGER NOT NULL DEFAULT 0,
+		sort INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+
+	// 专注会话：番茄钟此前只把历史写进 localStorage，换设备/清缓存即丢，
+	// 也无法做周月统计与「按任务累计耗时」。这里只记「一次专注的结果」，
+	// 不记运行中的计时状态 —— 后者仍归前端的 localStorage（切页恢复用），
+	// 两者边界刻意分明：数据库里只留已结束、可统计的事实。
+	// todo_id / title 在结束时快照：待办之后被删或改名，历史仍读得懂。
+	`CREATE TABLE IF NOT EXISTS focus_sessions (
+		id TEXT PRIMARY KEY,
+		todo_id TEXT NOT NULL DEFAULT '',
+		title TEXT NOT NULL DEFAULT '',
+		minutes INTEGER NOT NULL DEFAULT 0,
+		started_at TEXT NOT NULL,
+		ended_at TEXT NOT NULL,
+		done INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL
 	)`,
 }
 
@@ -720,6 +774,10 @@ func (d *Database) migrate() error {
 		table, col, colType string
 	}
 	columnMigrations := []colMig{
+		// 后台任务归属会话：老库补成空串（未归属），升级后面板按当前会话过滤时
+		// 这些历史行自然不再出现，但行本身与日志都保留，仍由 PurgeAIJobs 到期清理。
+		{"ai_jobs", "conv_id", "TEXT NOT NULL DEFAULT ''"},
+		{"ssh_hosts", "jump_host_id", "TEXT NOT NULL DEFAULT ''"},
 		{"clipboard_entries", "copy_count", "INTEGER DEFAULT 0"},
 		{"clipboard_entries", "image_hash", "TEXT"},
 		{"clipboard_entries", "note", "TEXT DEFAULT ''"},
@@ -862,6 +920,10 @@ func (d *Database) migrate() error {
 		{"scheduled_tasks", "notify_channels", "TEXT NOT NULL DEFAULT 'system,webhook'"},
 		// scheduled_tasks: 失败重试次数（0 = 不重试，与升级前行为一致）。
 		{"scheduled_tasks", "retry_count", "INTEGER NOT NULL DEFAULT 0"},
+		// scheduled_tasks: 标准 cron 表达式 + monthly 的「每月几号」。
+		// 存量行拿到 '' / 0，分别代表「不是 cron」与「沿用旧的创建日口径」。
+		{"scheduled_tasks", "cron_expr", "TEXT NOT NULL DEFAULT ''"},
+		{"scheduled_tasks", "day_of_month", "INTEGER NOT NULL DEFAULT 0"},
 		// ai_usage: 多 agent 编排的成本归集维度（老数据为空 = 不属于任何 run）。
 		{"ai_usage", "run_id", "TEXT NOT NULL DEFAULT ''"},
 		{"ai_usage", "node_id", "TEXT NOT NULL DEFAULT ''"},
@@ -894,11 +956,17 @@ func (d *Database) migrate() error {
 	postMigrations := []string{
 		`CREATE INDEX IF NOT EXISTS idx_items_collection ON items(collection_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_entries(created_at)`,
+		// 列表默认排序与「按类型筛选后再排序」是两条固定形态，条目上万后没有索引
+		// 就是每次全表扫 + filesort；搜索下推后端后这两条路径都变频繁了。
+		`CREATE INDEX IF NOT EXISTS idx_clipboard_order ON clipboard_entries(is_pinned DESC, created_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_clipboard_type_order ON clipboard_entries(content_type, text_type, is_pinned DESC, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_text ON clipboard_entries(content_type, text_content)`,
 		`CREATE INDEX IF NOT EXISTS idx_clipboard_dedup_image ON clipboard_entries(content_type, image_hash)`,
 		`CREATE INDEX IF NOT EXISTS idx_monitor_logs_mid_ts ON monitor_logs(monitor_id, checked_ts)`,
 		`CREATE INDEX IF NOT EXISTS idx_plugin_exec_logs_ts ON plugin_exec_logs(executed_ts)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_messages_conv ON ai_messages(conv_id, created_at)`,
+		// 面板每次打开/轮询都按 conv_id 取当前会话的任务，没有这条就是全表扫。
+		`CREATE INDEX IF NOT EXISTS idx_ai_jobs_conv ON ai_jobs(conv_id, started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_ai_usage_at ON ai_usage(created_at)`,
 		// run 级成本归集：按 run 汇总 token 走这条索引（前端不查全表）。
 		`CREATE INDEX IF NOT EXISTS idx_ai_usage_run ON ai_usage(run_id)`,
@@ -913,6 +981,8 @@ func (d *Database) migrate() error {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_nodes_run ON agent_nodes(run_id, seq)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_runs_conv ON agent_runs(conv_id, created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_parent ON ssh_hosts(parent_id, sort)`,
+		// 删跳板机时要找出「谁引用了它」并解绑，没这条索引就是全表扫。
+		`CREATE INDEX IF NOT EXISTS idx_ssh_hosts_jump ON ssh_hosts(jump_host_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_activity_created_ts ON activity(created_ts DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_schedule_runs_task_ts ON schedule_runs(task_id, created_ts DESC)`,
 		// 回收站过期清理按 deleted_at 比较，没索引就是每次全表扫 + 把整份 payload 读一遍。
@@ -924,6 +994,16 @@ func (d *Database) migrate() error {
 		// 审批明细按时间区间聚合「哪个工具老是被拦」，日期列必须有索引：
 		// 这张表条数不少（一次提问可能问好几次），而统计永远是按天扫。
 		`CREATE INDEX IF NOT EXISTS idx_ai_approvals_created ON ai_approvals(created_at)`,
+		// 互链：正向列表按 (src_type,src_id) 取，反链按 (dst_type,dst_id) 取；
+		// 唯一索引让「同一篇笔记正文里重复写 [[X]]」只落一条边。
+		// 命令片段列表按分类分组后按 sort / 使用次数排，没有这条就是全表扫 + filesort。
+		`CREATE INDEX IF NOT EXISTS idx_ssh_commands_order ON ssh_commands(category, sort, usage_count DESC)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_entity_links_uniq ON entity_links(src_type,src_id,dst_type,dst_id,dst_label,kind)`,
+		`CREATE INDEX IF NOT EXISTS idx_entity_links_dst ON entity_links(dst_type,dst_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_entity_links_src ON entity_links(src_type,src_id)`,
+		// 专注统计固定按时间区间扫（今日/7 天/30 天），按任务累计则按 todo_id 分组。
+		`CREATE INDEX IF NOT EXISTS idx_focus_sessions_started ON focus_sessions(started_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_focus_sessions_todo ON focus_sessions(todo_id)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {

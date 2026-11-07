@@ -33,6 +33,8 @@ interface AIJobView {
 const props = defineProps<{
   /** 面板是否打开；关闭时停轮询 */
   open: boolean
+  /** 当前会话 id：后台任务按会话隔离，面板只列这个会话起的任务 */
+  convId: string
   /** 要定位的任务 id（从消息卡片的「查看」进来时带上）：滚动到该行并高亮 */
   focus?: string
 }>()
@@ -94,7 +96,7 @@ function syncPoll() {
 async function load() {
   loading.value = true
   try {
-    const list = unwrap<AIJobView[]>(await AIJobsList()) || []
+    const list = unwrap<AIJobView[]>(await AIJobsList(props.convId)) || []
     // 运行中的排最前：列表按开始时间倒序，昨天起的那个长跑任务会被今天跑完的
     // 几条挤到下面，而用户打开面板第一眼要找的恰恰是「还在跑的那个」。
     jobs.value = list.slice().sort((a, b) => Number(b.running) - Number(a.running))
@@ -203,6 +205,20 @@ watch(
     }
   },
   { immediate: true },
+)
+
+// 面板开着的时候切会话：立刻重查，并把旧会话展开的日志收起来。
+// 不收的话，列表换成新会话后底下还挂着一段上一个会话命令的输出，
+// 看起来像「点开 B 的任务却显示 A 的日志」。
+watch(
+  () => props.convId,
+  () => {
+    stopPoll()
+    openLog.value = ''
+    logText.value = ''
+    focusScrolled = false
+    if (props.open) void load()
+  },
 )
 
 onUnmounted(stopPoll)

@@ -49,8 +49,13 @@ func registerScheduleTools(s *MCPService, r *toolRegistrar) {
 			switch t.ScheduleKind {
 			case "interval":
 				row["intervalSec"] = t.IntervalSec
-			case "daily", "weekly", "monthly":
+			case "daily", "weekly":
 				row["timeOfDay"] = t.TimeOfDay
+			case "monthly":
+				row["timeOfDay"] = t.TimeOfDay
+				row["dayOfMonth"] = t.DayOfMonth
+			case "cron":
+				row["cronExpr"] = t.CronExpr
 			case "once":
 				row["runAt"] = t.RunAt
 			}

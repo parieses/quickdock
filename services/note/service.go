@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -115,6 +116,7 @@ func (s *NoteService) UpdateNoteDoc(id, content, tags string) *services.ApiResul
 	if err := s.App.DB.UpdateNoteDoc(id, content, tags); err != nil {
 		return services.Fail(err)
 	}
+	s.syncWikiLinks(id, content)
 	return services.Ok(nil)
 }
 
@@ -127,7 +129,17 @@ func (s *NoteService) UpdateNoteDocContent(id, content string) *services.ApiResu
 	if err := s.App.DB.UpdateNoteContent(id, content); err != nil {
 		return services.Fail(err)
 	}
+	s.syncWikiLinks(id, content)
 	return services.Ok(nil)
+}
+
+// syncWikiLinks 在正文保存成功后重建该笔记的 wiki 出边。
+// 关联是可重建的派生数据，正文才是真源：同步失败只记日志，绝不回滚已保存的正文，
+// 也绝不让一次派生数据重建失败把「保存」这个用户动作变成红色报错。
+func (s *NoteService) syncWikiLinks(id, content string) {
+	if err := s.App.DB.SyncNoteWikiLinks(id, content); err != nil {
+		logger.W("[note] 重建 wiki 关联失败（正文已保存）id=%s: %v", id, err)
+	}
 }
 
 // UpdateNoteDocTags 只更新标签、保留原有正文（MCP note_update 只传 tags 时使用）。

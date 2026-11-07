@@ -1,11 +1,16 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bell, BellOff, CheckCheck, Trash2, X } from '@lucide/vue'
+import { Bell, BellOff, CheckCheck, Trash2, X, Search } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+// 页面跳转统一复用 bridge 的 navigateTo / pendingTarget 深链，不再走组件自定义
+// emit('navigate') 那条事件链：后者只能切页、带不了 refId，还得绕过 Sidebar 转发一次。
+import { navigate, navigateTo, pendingOpenTodoId } from '../composables/bridge'
+// 用注册表校验目标页确实存在（带 component），避免跳到一个没有内容页的 id 出现空白。
+import { findContentPage } from '../pages/registry'
 import {
-  NotifyList, NotifyUnread, NotifyMarkRead, NotifyMarkAllRead, NotifyDelete, NotifyClear,
+  NotifyList, NotifyUnread, NotifyMarkRead, NotifyMarkAllRead, NotifyDelete, NotifyClear, NotifyKinds,
 } from '../../bindings/quickdock/services/notify/notifyservice'
 // 通知条目的形状。刻意在本地声明而不是从 bindings 引：
 // Wails 的模型生成只为「出现在方法签名里的具名类型」产出接口，经 ApiResult.Data
@@ -25,6 +30,8 @@ interface NotifyItem {
 
 const { t } = useI18n()
 const emit = defineEmits<{
+  // 保留 'navigate' 声明仅为兼容 Sidebar 现有的 @navigate 监听（本组件已不再触发它）：
+  // 切页改走 bridge 的 navigateTo，好把 refId 一并挂到 pendingTarget 深链上。
   (e: 'navigate', page: string): void
   (e: 'open-settings', page: string): void
 }>()
@@ -32,7 +39,14 @@ const emit = defineEmits<{
 const open = ref(false)
 const unread = ref(0)
 const items = ref<NotifyItem[]>([])
-const filter = ref<'all' | 'unread' | 'monitor' | 'schedule' | 'ai' | 'imap'>('all')
+// 三个筛选维度彼此独立、可叠加（AND）：类型 / 未读 / 关键字。
+// 原先揉成一个互斥的单选 filter，「只看未读的监控通知」这类组合做不到。
+const kindFilter = ref('all')
+const unreadOnly = ref(false)
+const search = ref('')
+// 后端 NotifyKinds 给出的类型全集（含最近 200 条之外的历史类型），
+// 用它动态生成类型标签，新增 kind 不必再改前端硬编码列表。
+const backendKinds = ref<string[]>([])
 const loading = ref(false)
 
 // 定位：面板挂在侧栏底部，从按钮右侧弹出。
@@ -53,10 +67,38 @@ function placePanel() {
   }
 }
 
+// 类型标签 = 后端统计的类型全集 ∪ 当前列表里出现过的类型，再补一个「全部」。
+// 取并集是两边各补短板：NotifyKinds 只在打开面板时抓一次，之后 notify:new 新到的
+// 类型由 items 即时补上；而 items 只留 200 条，更早出现过的类型由后端那侧补齐。
+const kindOptions = computed(() => {
+  const set = new Set<string>(backendKinds.value)
+  for (const n of items.value) set.add(n.kind)
+  set.delete('all')
+  set.delete('unread')
+  return ['all', ...[...set].sort()]
+})
+
+// 标签条数按当前列表本地算，不用 NotifyKinds 的返回快照：标记已读 / 删一条 /
+// 清空都会即时改列表，本地 computed 能自动跟随；后端计数是打开那一刻的值，
+// 留着会和眼前列表对不上。
+function kindCount(k: string): number {
+  if (k === 'all') return items.value.length
+  return items.value.filter((n) => n.kind === k).length
+}
+
 const shown = computed(() => {
-  if (filter.value === 'all') return items.value
-  if (filter.value === 'unread') return items.value.filter((n) => !n.read)
-  return items.value.filter((n) => n.kind === filter.value)
+  const q = search.value.trim().toLowerCase()
+  return items.value.filter((n) =>
+    (kindFilter.value === 'all' || n.kind === kindFilter.value) &&
+    (!unreadOnly.value || !n.read) &&
+    (!q || n.title.toLowerCase().includes(q) || n.body.toLowerCase().includes(q)),
+  )
+})
+
+const emptyText = computed(() => {
+  if (!items.value.length) return t('ncEmpty')
+  if (unreadOnly.value && kindFilter.value === 'all' && !search.value.trim()) return t('ncEmptyUnread')
+  return t('ncEmptyFiltered')
 })
 
 const hasUnread = computed(() => unread.value > 0)
@@ -75,6 +117,12 @@ async function load() {
   } finally {
     loading.value = false
   }
+  // 类型全集单独取：它只是筛选标签的数据源，失败时降级到「由当前列表推导」，
+  // 不能让一个辅助接口出错连累主列表加载。只取返回体的 key（计数见 kindCount）。
+  try {
+    const counts = unwrap<Record<string, number>>(await NotifyKinds()) || {}
+    backendKinds.value = Object.keys(counts).filter((k) => k !== 'all' && k !== 'unread')
+  } catch { /* 保留已有类型；kindOptions 会用 items 兜底 */ }
 }
 
 async function toggle() {
@@ -112,10 +160,50 @@ const kindLabel = (k: string) => {
   switch (k) {
     case 'monitor': return t('ncKindMonitor')
     case 'schedule': return t('ncKindSchedule')
+    case 'todo': return t('ncKindTodo')
     case 'ai': return t('ncKindAi')
     case 'imap': return t('ncKindMail')
     default: return t('ncKindSystem')
   }
+}
+
+// kind → 目标页面 id。以 pages/registry.ts 里真实存在的内容页为准：
+// 邮件(imap)的验证码卡片在总览页、没有独立「邮件页」，故落 dashboard；
+// 提醒(todo)落待办页。值来自各业务写入 PushNotification 时传入的 kind。
+const KIND_PAGE: Record<string, string> = {
+  monitor: 'monitor',
+  schedule: 'schedule',
+  todo: 'todo',
+  ai: 'ai',
+  imap: 'dashboard',
+}
+
+type NavTarget = { page: string; target: string } | { settingsPage: string }
+
+// 把一条通知解析成「去哪个页 + 定位哪个 id」。任一步不满足就返回 null，
+// 调用方只标已读、不跳转——沿用它一贯的保守降级：硬跳一个不存在的页面
+// 或空白详情页，比不跳更糟（用户会以为功能坏了）。
+function resolveTarget(n: NotifyItem): NavTarget | null {
+  // 设置页是模态框，不在页面注册表里，单独走原有的事件通道。
+  if (n.refType.startsWith('settings:')) {
+    const p = n.refType.slice(9).trim()
+    return p ? { settingsPage: p } : null
+  }
+  // 优先按 kind 定页；kind 表没覆盖时兼容历史数据里的 page:xxx / 直接等于页 id 的 refType。
+  let page = KIND_PAGE[n.kind] || ''
+  if (!page) {
+    const rt = n.refType
+    page = rt.startsWith('page:') ? rt.slice(5) : rt
+  }
+  // 只认注册表中确实带 component 的内容页：ssh/dsh 这类窗口入口或拼错的 id
+  // 会把内容区切到空白，findContentPage 正好把它们挡在外面。
+  if (!page || !findContentPage(page)) return null
+  // refId 为空（AI 的「回答已停止」等本就没有具体条目）时选择「不跳转」作为降级。
+  // 条目已被删除的情况前端无从预知：navigateTo 只是把 id 挂到 pendingTarget，
+  // 目标页 watch 按 id 找不到时静默忽略即可，不会抛错也不会落到空白详情页。
+  const target = (n.refId || '').trim()
+  if (!target) return null
+  return { page, target }
 }
 
 async function activate(n: NotifyItem) {
@@ -125,13 +213,17 @@ async function activate(n: NotifyItem) {
     try { unwrap(await NotifyMarkRead(n.id)) } catch { /* ignore */ }
   }
   close()
-  // 跳转：refType 决定去哪。认不出的类型就只标记已读——
-  // 硬跳一个不存在的页面比不跳更糟（用户会以为功能坏了）。
-  if (n.refType === 'monitor') emit('navigate', 'monitor')
-  else if (n.refType === 'schedule') emit('navigate', 'schedule')
-  else if (n.refType === 'ai') emit('navigate', 'ai')
-  else if (n.refType.startsWith('page:')) emit('navigate', n.refType.slice(5))
-  else if (n.refType.startsWith('settings:')) emit('open-settings', n.refType.slice(9))
+  const dest = resolveTarget(n)
+  if (!dest) return
+  if ('settingsPage' in dest) { emit('open-settings', dest.settingsPage); return }
+  // 待办页已有 pendingOpenTodoId 深链（滚动 + 高亮），复用它能真正落到那一条；
+  // 其余页统一用 bridge 的 navigateTo 把 refId 挂到 pendingTarget，目标页 watch 取走。
+  if (dest.page === 'todo') {
+    pendingOpenTodoId.value = dest.target
+    navigate('todo')
+  } else {
+    navigateTo(dest.page, dest.target)
+  }
 }
 
 async function markAll() {
@@ -242,12 +334,27 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 
         <div class="nc-filters">
           <button
-            v-for="f in (['all', 'unread', 'monitor', 'schedule', 'ai', 'imap'] as const)"
-            :key="f"
+            v-for="k in kindOptions"
+            :key="k"
             class="nc-chip"
-            :class="{ on: filter === f }"
-            @click="filter = f"
-          >{{ f === 'all' ? t('ncAll') : f === 'unread' ? t('ncUnread') : kindLabel(f) }}</button>
+            :class="{ on: kindFilter === k }"
+            @click="kindFilter = k"
+          >{{ k === 'all' ? t('ncAll') : kindLabel(k) }}<span v-if="kindCount(k)" class="nc-chip-count">{{ kindCount(k) }}</span></button>
+          <!-- 未读是独立维度，与类型/搜索叠加，而不是与「全部 + 各类型」互斥 -->
+          <span class="nc-sep" />
+          <button
+            class="nc-chip"
+            :class="{ on: unreadOnly }"
+            @click="unreadOnly = !unreadOnly"
+          >{{ t('ncUnread') }}<span v-if="unread" class="nc-chip-count">{{ unread }}</span></button>
+        </div>
+
+        <div class="nc-searchbar">
+          <Search :size="13" />
+          <input v-model="search" class="nc-search-input" type="text" :placeholder="t('ncSearch')" />
+          <button v-if="search" class="nc-search-clear" :title="t('ncSearchClear')" @click="search = ''">
+            <X :size="12" />
+          </button>
         </div>
 
         <div class="nc-list">
@@ -277,7 +384,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 
           <div v-if="!shown.length" class="nc-empty">
             <BellOff :size="22" />
-            <span>{{ filter === 'unread' ? t('ncEmptyUnread') : t('ncEmpty') }}</span>
+            <span>{{ emptyText }}</span>
           </div>
         </div>
       </div>
@@ -367,6 +474,32 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   background: var(--color-accent-bg); border-color: var(--color-accent-border);
   color: var(--color-accent);
 }
+.nc-chip-count {
+  margin-left: 4px; font-size: 9.5px; opacity: 0.72;
+  font-variant-numeric: tabular-nums;
+}
+/* 未读与类型是两个独立维度，用竖线隔开，避免被读成同一组互斥单选项 */
+.nc-sep { width: 1px; align-self: stretch; margin: 2px 3px; background: var(--color-border); }
+
+.nc-searchbar {
+  display: flex; align-items: center; gap: 6px;
+  margin: 0 12px 8px; padding: 0 8px; height: 26px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  color: var(--color-text-muted);
+}
+.nc-search-input {
+  flex: 1; min-width: 0;
+  border: none; outline: none; background: transparent;
+  font-family: inherit; font-size: 11px; color: var(--color-text-primary);
+}
+.nc-search-input::placeholder { color: var(--color-text-disabled); }
+.nc-search-clear {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0;
+  border: none; border-radius: var(--radius-xs);
+  background: transparent; color: var(--color-text-muted); cursor: pointer;
+}
+.nc-search-clear:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 
 .nc-list { flex: 1; overflow-y: auto; padding: 0 8px 8px; }
 

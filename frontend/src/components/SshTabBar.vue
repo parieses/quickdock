@@ -11,9 +11,10 @@
  */
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { HardDrive, Plus, X } from '@lucide/vue'
+import { HardDrive, Plus, X, ZoomIn, ZoomOut } from '@lucide/vue'
 import { sshEnvClass, type SshHost } from '../utils/ssh'
 import type { SshTab } from '../utils/sshTabs'
+import { sshFontSize, setSshFontSize, SSH_FONT_MIN, SSH_FONT_MAX } from '../composables/useSshFont'
 
 const { t } = useI18n()
 
@@ -118,6 +119,27 @@ function duplicate(tabId: string) {
       </button>
 
       <div class="tabs-actions">
+        <!-- 终端字号：原来只能靠终端右键菜单里的放大/缩小，入口太深且改完不知道
+             存到哪儿去了。这里给一对常驻按钮 + 当前值，一处调整所有标签同步生效。 -->
+        <div class="tabs-font" :title="t('sshFontSize')">
+          <button
+            class="tabs-act"
+            :disabled="sshFontSize <= SSH_FONT_MIN"
+            :title="t('sshCtxFontSmaller')"
+            @click="setSshFontSize(sshFontSize - 1)"
+          >
+            <ZoomOut :size="13" />
+          </button>
+          <span class="tabs-font-val">{{ sshFontSize }}</span>
+          <button
+            class="tabs-act"
+            :disabled="sshFontSize >= SSH_FONT_MAX"
+            :title="t('sshCtxFontLarger')"
+            @click="setSshFontSize(sshFontSize + 1)"
+          >
+            <ZoomIn :size="13" />
+          </button>
+        </div>
         <button
           class="tabs-act"
           :class="{ 'is-on': filesOpen }"
@@ -304,6 +326,26 @@ function duplicate(tabId: string) {
 .tabs-act:disabled {
   cursor: default;
   opacity: 0.4;
+}
+
+/* 字号控制：三个元素紧贴成一组，与右侧文件面板按钮之间留一条分隔线，
+   避免「1 3 放大」被看成三个互不相关的按钮 */
+.tabs-font {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-right: var(--space-2);
+  padding-right: var(--space-2);
+  border-right: 1px solid var(--color-border);
+}
+
+.tabs-font-val {
+  min-width: 16px;
+  text-align: center;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-muted);
+  user-select: none;
 }
 
 /* 同一主机的多个标签：右上角小序号，便于区分「哪个是跑更新的、哪个是看日志的」 */

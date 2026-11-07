@@ -79,9 +79,19 @@ func (s *Server) SetAuth(token string, require bool) {
 	s.requireToken = require && token != ""
 }
 
-// NewToken 生成一枚新访问令牌（32 位十六进制）。供 env 层首次落盘与轮换复用，
+// tokenPrefix 令牌前缀。纯 32 位十六进制和任意哈希、ID 长得一模一样：
+// 用户打开 mcp.json 分不清哪一格是密钥，GitHub secret scanning / gitleaks 之类
+// 也认不出来，误提交后不会告警。加可识别前缀是密钥的惯例（sk_ / sk-），
+// 让「这是凭据」成为机器和人都能读到的信息。
+const tokenPrefix = "sk_"
+
+// NewToken 生成一枚新访问令牌：sk_ + 32 位十六进制。供 env 层首次落盘与轮换复用，
 // 两处用同一个生成器，令牌格式不会出现两套答案。
-func NewToken() string { return randHex(16) }
+//
+// 存量令牌是升级前的裸 32 位 hex，这里刻意不做归一化：authTokenOK 是整串
+// ConstantTimeCompare，旧值照旧有效；若反过来在校验时给旧值补前缀，所有已经
+// 写进客户端配置片段的令牌会在升级后集体 401。想换格式的用户点「重新生成」即可。
+func NewToken() string { return tokenPrefix + randHex(16) }
 
 // Stop 关闭监听。未运行时返回 nil。
 func (s *Server) Stop() error {

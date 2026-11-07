@@ -37,7 +37,7 @@ import (
 //	host.process.list                            （无需权限，内置能力）
 //	host.process.kill                           （需 permissions.processKill；高危，默认拒绝）
 //	host.process.exec                           （需 permissions.process；程序名白名单，高危，默认拒绝）
-//	host.mcp.call                                （无需权限，等级门由 mcpsrv.Call 把关）
+//	host.mcp.call                                （需 permissions.mcp；等级门 + LevelRisk 硬拒另算两道）
 //	host.ai.ask                                  （无需权限，复用宿主 AI 档案，一次性问答不落库；
 //	                                              带 streamId 时沿途下发 host.ai.delta 增量）
 //	host.ai.available                            （无需权限，预检宿主是否已配置可用 AI 档案；
@@ -462,9 +462,12 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 	// ---- MCP 工具 ----
 	// 复用宿主内置 MCP Server 已注册的工具（item/note/todo/clipboard/env/port…），
 	// 插件无需重复实现检索与业务能力，且与 AI 客户端共享同一能力面。
-	// 等级门由 mcpsrv.Call 统一把关：默认 maxLvl=LevelWrite，LevelRisk 工具
-	// （process_kill / system_command 等）自动被拒——插件侧无需额外权限声明。
-	// 未注册与等级不足都归类为执行失败（-1），错误文案本身已说明原因。
+	// 三道闸互不替代：
+	//   1. permissions.mcp 声明（internal/plugin.checkPermission 统一校验，
+	//      未声明或不在工具白名单内直接拒绝）；
+	//   2. mcpsrv.Call 的等级门（默认 maxLvl=LevelWrite）；
+	//   3. 下面对 LevelRisk 的硬拒——即使宿主把等级门调到最高也不放行。
+	// 过去只靠第 2 道，声明零权限的插件照样能调 env_stop 等 LevelWrite 工具。
 	svc.App.PluginMgr.InjectHostMethod("host.mcp.call", func(pluginID string, params json.RawMessage) (interface{}, error) {
 		var arg struct {
 			Tool string         `json:"tool"`
@@ -475,6 +478,12 @@ func (svc *PluginService) RegisterPluginHostMethods() {
 		}
 		if strings.TrimSpace(arg.Tool) == "" {
 			return nil, fmt.Errorf("tool 不能为空")
+		}
+		// 权限声明在上游 checkPermission 校验过了；这里再钉一道等级硬闸：
+		// 即使宿主把 MCP 等级门调到 LevelRisk，插件路径也不开放高危工具。
+		// ToolLevel 对未注册工具同样返回 LevelRisk（fail-closed），顺带挡住拼错的名字。
+		if mcpsrv.ToolLevel(arg.Tool) >= mcpsrv.LevelRisk {
+			return nil, fmt.Errorf("MCP 工具 %s 不对插件开放（未注册或属于高危等级）", arg.Tool)
 		}
 		res, err := mcpsrv.Call(arg.Tool, arg.Args)
 		if err != nil {

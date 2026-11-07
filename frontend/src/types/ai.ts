@@ -108,6 +108,7 @@ export interface AIExtServerState {
     args?: string[]
     env?: Record<string, string>
     url?: string
+    headers?: Record<string, string>
     disabled?: boolean
   }
   status: 'ok' | 'error' | 'disabled'

@@ -8,18 +8,21 @@ let cachedDshSvc: any = null
 <script setup lang="ts">
 import { ref, computed, watch, inject, onMounted, onUnmounted, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle, Copy, FileDown } from '@lucide/vue'
+import { Terminal, Download, ExternalLink, Plug, CheckCircle2, AlertCircle, Copy, FileDown, Trash2, RefreshCw, Loader2 } from '@lucide/vue'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { Events, Browser } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import {
   DetectNodeEnv,
   SetupDSH,
   OpenDSHWindow,
   DSHInstallPlugin,
+  DSHListPlugins,
+  DSHRemovePlugin,
   CheckDSHUpdate,
   UpdateDSH,
   DSHStatus,
@@ -75,6 +78,14 @@ interface PluginUpdateInfo {
   name: string
   current: string
   latest: string
+}
+
+/** profile package.json 里的一条插件（后端 DSHListPlugins 的返回项）。 */
+interface DSHPluginInfo {
+  name: string
+  version: string
+  isGit: boolean
+  isLocal: boolean
 }
 
 const status = ref<NodeEnvStatus | null>(cachedDshStatus)
@@ -340,6 +351,44 @@ async function installPlugin() {
   }
 }
 
+// ---- 已安装插件列表 ----
+//
+// 后端只提供了「装」与「更新」：插件装进去就再也看不见，用户想问"我到底装了哪些、
+// 某个不想要了怎么删"都没有入口。列表直接读 profile 的 package.json（dsh plugin add
+// 改的就是它），卸载走同一条 CLI 通路（dsh plugin --profile web remove），
+// 与安装共享日志面板和完成事件。
+const installedPlugins = ref<DSHPluginInfo[]>([])
+const loadingPlugins = ref(false)
+const removingPlugin = ref('') // 正在卸载的插件名，非空即禁用整行按钮
+
+async function loadPlugins() {
+  if (loadingPlugins.value) return
+  loadingPlugins.value = true
+  try {
+    const list = unwrap<DSHPluginInfo[]>(await DSHListPlugins())
+    installedPlugins.value = list || []
+  } catch (e) {
+    // 读不到不该刷红：profile 还没初始化时会返回空列表，真正的错误才记一行日志
+    installedPlugins.value = []
+    logErr('dsh.listPlugins', e)
+  } finally {
+    loadingPlugins.value = false
+  }
+}
+
+async function removePlugin(name: string) {
+  if (removingPlugin.value) return
+  if (!(await toast.confirm(t('dshPluginRemoveConfirm', { name })))) return
+  removingPlugin.value = name
+  logs.value = []
+  try {
+    unwrap(await DSHRemovePlugin(name))
+  } catch (e) {
+    removingPlugin.value = ''
+    showMsg(getErrorMessage(e), true)
+  }
+}
+
 // 预检：查 registry 插件（git 依赖不纳入）是否有可用更新
 async function checkPluginUpdates() {
   if (checkingPluginUpdates.value || !dshReady.value) return
@@ -466,7 +515,7 @@ onMounted(() => {
       showMsg(t('dshReady'))
       // 更新完成后服务可能被自动重启（新版本生效），延迟刷新运行状态
       setTimeout(loadDSHStatus, 1200)
-      refresh().then(() => { if (dshReady.value) checkUpdate() })
+      refresh().then(() => { if (dshReady.value) { checkUpdate(); void loadPlugins() } })
     } else if (p.stage === 'error') {
       settingUp.value = false
       updating.value = false
@@ -489,10 +538,17 @@ onMounted(() => {
       updatingPlugins.value = false
       if (p.ok && p.backup) pluginBackup.value = p.backup
       if (!p.ok) showMsg(t('dshPluginError'), true)
+      void loadPlugins() // 版本号可能变了，列表跟着刷
+    } else if (p?.kind === 'remove') {
+      removingPlugin.value = ''
+      if (!p?.ok) showMsg(t('dshPluginError'), true)
+      else showMsg(t('dshPluginRemoved'))
+      void loadPlugins()
     } else {
       // 安装单个插件完成
       installingPlugin.value = false
       if (!p?.ok) showMsg(t('dshPluginError'), true)
+      else void loadPlugins()
     }
   })
   offRollback = Events.On('quickdock:dsh:plugin-rollback', (payload: any) => {
@@ -540,6 +596,9 @@ watch(() => props.visible, async (v) => {
     updatingPlugins.value = false
     await refresh()
     loadDSHStatus()
+    // 已装插件列表只在进入页面时读一次 package.json（本地文件，无网络）；
+    // 之后由安装/卸载/更新完成事件负责刷新，不必轮询。
+    if (dshReady.value) void loadPlugins()
     if (status.value?.dshInstalled) checkWebView2()
     startStatusPolling()
     if (!checkRanOnce && dshReady.value) {
@@ -705,6 +764,36 @@ watch(() => props.visible, async (v) => {
         <Plug :size="14" />
         {{ installingPlugin ? t('dshPluginInstalling') : t('dshInstallPlugin') }}
       </button>
+    </div>
+
+    <!-- 已装插件列表：此前插件装进去在界面上再也查不到、也删不掉（"只进不出"） -->
+    <div v-if="status?.dshInstalled" class="dsh-plugin-list">
+      <div class="dsh-plugin-head">
+        <span class="dsh-plugin-title">{{ t('dshPluginsTitle') }}</span>
+        <span v-if="installedPlugins.length" class="dsh-plugin-count">{{ installedPlugins.length }}</span>
+        <button class="dsh-plugin-reload" :disabled="loadingPlugins" :title="t('refresh')" @click="loadPlugins">
+          <Loader2 v-if="loadingPlugins" :size="12" class="dsh-spin" />
+          <RefreshCw v-else :size="12" />
+        </button>
+      </div>
+      <p v-if="!installedPlugins.length" class="dsh-plugin-empty">{{ t('dshPluginsEmpty') }}</p>
+      <ul v-else class="dsh-plugin-items">
+        <li v-for="p in installedPlugins" :key="p.name" class="dsh-plugin-item">
+          <span class="dsh-plugin-name" :title="p.name">{{ p.name }}</span>
+          <span class="dsh-plugin-ver" :title="p.version">{{ p.version }}</span>
+          <span v-if="p.isGit" class="dsh-plugin-tag">git</span>
+          <span v-if="p.isLocal" class="dsh-plugin-tag">local</span>
+          <button
+            class="dsh-plugin-del"
+            :disabled="!!removingPlugin || installingPlugin"
+            :title="t('dshPluginRemove')"
+            @click="removePlugin(p.name)"
+          >
+            <Loader2 v-if="removingPlugin === p.name" :size="12" class="dsh-spin" />
+            <Trash2 v-else :size="12" />
+          </button>
+        </li>
+      </ul>
     </div>
 
     <!-- 插件批量管理：检查更新 / 一键更新全部 / 回滚 -->
@@ -931,6 +1020,125 @@ watch(() => props.visible, async (v) => {
 .plugin-batch {
   padding-top: 10px;
   border-top: 1px dashed var(--color-border);
+}
+
+/* ---- 已装插件列表 ---- */
+.dsh-plugin-list {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--color-border);
+}
+.dsh-plugin-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+.dsh-plugin-title {
+  font-weight: 600;
+}
+.dsh-plugin-count {
+  padding: 0 5px;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-tertiary);
+  color: var(--color-text-muted);
+  font-size: 10px;
+}
+.dsh-plugin-reload {
+  display: flex;
+  margin-left: auto;
+  padding: 3px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.dsh-plugin-reload:hover:not(:disabled) {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+.dsh-plugin-reload:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.dsh-plugin-empty {
+  margin: 8px 0 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+.dsh-plugin-items {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.dsh-plugin-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary);
+}
+.dsh-plugin-item:hover {
+  background: var(--color-bg-hover);
+}
+.dsh-plugin-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--color-text-primary);
+}
+.dsh-plugin-ver {
+  flex-shrink: 0;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}
+/* git / 本地路径依赖：能从 registry 更新的和钉死在某处的不是一回事，标出来 */
+.dsh-plugin-tag {
+  flex-shrink: 0;
+  padding: 0 5px;
+  border-radius: var(--radius-xs);
+  background: var(--color-accent-bg);
+  color: var(--color-accent);
+  font-size: 10px;
+  text-transform: uppercase;
+}
+.dsh-plugin-del {
+  display: flex;
+  flex-shrink: 0;
+  padding: 3px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+}
+.dsh-plugin-del:hover:not(:disabled) {
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+}
+.dsh-plugin-del:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.dsh-spin {
+  animation: dsh-spin 1s linear infinite;
+}
+@keyframes dsh-spin {
+  to { transform: rotate(360deg); }
 }
 .dsh-update-hint {
   margin: 8px 0 0;

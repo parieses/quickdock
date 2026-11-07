@@ -41,6 +41,13 @@ export default defineConfig({
       "@xterm/addon-fit",
       "@xterm/addon-search",
       "@xterm/addon-unicode11",
+      // 图表库走 echarts/core 按需注册，四个子路径都是独立 ESM 入口。
+      // 漏一个就会在首次打开图表页时「运行时发现新依赖」→ 二次预构建 →
+      // 旧 browserHash 的请求全部 504（与上面 xterm 那次是同一个坑）。
+      "echarts/core",
+      "echarts/charts",
+      "echarts/components",
+      "echarts/renderers",
     ],
   },
   plugins: [
@@ -88,6 +95,9 @@ export default defineConfig({
           if (id.includes('katex')) return 'katex'
           if (id.includes('mermaid')) return 'mermaid'
           if (id.includes('highlight.js')) return 'highlight'
+          // zrender 是 echarts 的绘图内核，必须一起分包；否则它会被打进主 chunk，
+          // 首屏平白多背一份，图表页反而还要再拉一次 echarts。
+          if (id.includes('echarts') || id.includes('zrender')) return 'echarts'
           if (id.includes('/vue/') || id.includes('vue-router')) return 'vue'
         },
       },

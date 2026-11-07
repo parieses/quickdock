@@ -1389,7 +1389,158 @@ func (m *DSHProcessManager) CheckPluginUpdates() ([]PluginUpdateInfo, error) {
 	return res, nil
 }
 
-// emitPluginUpdateDone 更新全部插件完成事件（带 backup 路径供前端启用回滚）。
+// DSHPluginInfo 已装插件的一条（来自 profile 的 package.json dependencies）。
+//
+// 为什么不跑 `dsh plugin --profile web list`：那个子命令只是把参数原样转发给 pnpm，
+// 输出是 pnpm 的人读表格（带树形缩进、颜色控制符），解析它等于把 pnpm 的排版当协议。
+// profile 的 package.json 才是"装了什么"的唯一事实源 —— dsh plugin add 改的就是它。
+type DSHPluginInfo struct {
+	Name    string `json:"name"`    // 包名（含 scope，如 @deepseek-ai/dsh-plugin-x）
+	Version string `json:"version"` // 版本或 git/file spec 原文
+	// IsGit / IsLocal 供前端区分"能从 registry 更新"和"钉在本机路径/git 分支上"
+	IsGit   bool `json:"isGit"`
+	IsLocal bool `json:"isLocal"`
+}
+
+// ListPlugins 读取 profile package.json 里声明的插件。
+// profile 尚未初始化（从没装过插件）时返回空列表而不是错误——那是正常状态，
+// 前端要显示"还没有装任何插件"的引导，不该弹一个红 toast。
+func (m *DSHProcessManager) ListPlugins() ([]DSHPluginInfo, error) {
+	profileDir := filepath.Join(m.nodeEnv.DshHome(), "profiles", "web")
+	pkgPath := filepath.Join(profileDir, "package.json")
+	raw, err := os.ReadFile(pkgPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []DSHPluginInfo{}, nil
+		}
+		return nil, err
+	}
+	var pkg struct {
+		Dependencies    map[string]string `json:"dependencies"`
+		DevDependencies map[string]string `json:"devDependencies"`
+	}
+	if err := json.Unmarshal(raw, &pkg); err != nil {
+		return nil, fmt.Errorf("解析 profile/package.json 失败: %w", err)
+	}
+	out := make([]DSHPluginInfo, 0, len(pkg.Dependencies)+len(pkg.DevDependencies))
+	add := func(name, ver string) {
+		out = append(out, DSHPluginInfo{
+			Name:    name,
+			Version: ver,
+			IsGit:   strings.HasPrefix(ver, "git") || strings.Contains(ver, "github:") || strings.Contains(ver, "git+"),
+			IsLocal: strings.HasPrefix(ver, "file:") || strings.HasPrefix(ver, "link:") || strings.HasPrefix(ver, "portal:"),
+		})
+	}
+	for name, ver := range pkg.Dependencies {
+		add(name, ver)
+	}
+	for name, ver := range pkg.DevDependencies {
+		if _, dup := pkg.Dependencies[name]; !dup {
+			add(name, ver)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
+	return out, nil
+}
+
+// pluginNameRE 插件名白名单：npm 包名只允许这些字符。
+// exec.Command 不经过 shell，不存在注入；这里拦的是"把 -x 之类塞进参数位"——
+// cmd 的 args 是拼接的，以 - 开头的名字会被 pnpm 当成 flag（例如让 pnpm 删别的东西）。
+var pluginNameRE = regexp.MustCompile(`^(@[a-zA-Z0-9._-]+/)?[a-zA-Z0-9._-]+$`)
+
+// RemovePlugin 卸载一个插件（`dsh plugin --profile web remove <name>`，内部转 pnpm remove）。
+// 与 InstallPlugin 同构：异步、日志走 quickdock:dsh:log、结束发 quickdock:dsh:plugin{ok,kind:"remove"}。
+func (m *DSHProcessManager) RemovePlugin(name string) error {
+	finished := false
+	defer func() {
+		if !finished {
+			m.emitPluginRemoveDone(false)
+		}
+	}()
+
+	name = strings.TrimSpace(name)
+	if name == "" || !pluginNameRE.MatchString(name) {
+		return fmt.Errorf("插件名不合法: %q", name)
+	}
+	node := m.nodeEnv.NodePath()
+	if node == "" {
+		return fmt.Errorf("node 未就绪，请先安装运行环境")
+	}
+	mainJS := m.nodeEnv.DshMainJS()
+	if _, err := os.Stat(mainJS); err != nil {
+		return fmt.Errorf("dsh 入口缺失，请重新安装: %s", mainJS)
+	}
+	dshHome := m.nodeEnv.DshHome()
+	if err := os.MkdirAll(dshHome, 0755); err != nil {
+		return err
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, node, mainJS, "plugin", "--profile", "web", "remove", name)
+	cmd.Dir = dshHome
+	env := cleanNodeEnv(os.Environ())
+	env = append(env, "DSH_HOME="+dshHome)
+	if nodeDir := m.nodeEnv.runtimeDir(); nodeDir != "" {
+		if _, err := os.Stat(nodeDir); err == nil {
+			env = append(env, "PATH="+nodeDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+		}
+	}
+	cmd.Env = env
+	sysutil.Hide(cmd)
+
+	logf := func(level, msg string) {
+		if m.app != nil {
+			m.app.Event.Emit("quickdock:dsh:log", setupLog{Level: level, Message: msg})
+		}
+	}
+	logf("info", fmt.Sprintf("卸载插件 %s（dsh plugin --profile web remove %s）…", name, name))
+	if err := m.ensurePnpm(ctx, logf); err != nil {
+		logf("error", fmt.Sprintf("pnpm 不可用且自动安装失败: %v", err))
+		return err
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	if err := cmd.Start(); err != nil {
+		return err
+	}
+	for _, pipe := range []io.Reader{stdout, stderr} {
+		go func(r io.Reader) {
+			defer func() {
+				if rec := recover(); rec != nil {
+					logger.E("QuickDock: DSH remove stdout log goroutine panic: %v", rec)
+				}
+			}()
+			sc := newLogScanner(r)
+			for sc.Scan() {
+				logf("info", sc.Text())
+			}
+		}(pipe)
+	}
+	if err := cmd.Wait(); err != nil {
+		logf("error", fmt.Sprintf("卸载插件失败: %v", err))
+		return err
+	}
+	logf("info", fmt.Sprintf("插件 %s 已卸载", name))
+	finished = true
+	m.emitPluginRemoveDone(true)
+	return nil
+}
+
+// emitPluginRemoveDone 卸载结束事件。与安装共用 quickdock:dsh:plugin 通道，
+// 用 kind 区分，前端不必再订阅一个只差一个字段的事件。
+func (m *DSHProcessManager) emitPluginRemoveDone(ok bool) {
+	if m.app != nil {
+		m.app.Event.Emit("quickdock:dsh:plugin", map[string]any{"ok": ok, "kind": "remove"})
+	}
+}
+
 func (m *DSHProcessManager) emitPluginUpdateDone(ok bool, backup string) {
 	if m.app != nil {
 		m.app.Event.Emit("quickdock:dsh:plugin", map[string]any{"ok": ok, "backup": backup, "kind": "update"})
@@ -1658,6 +1809,7 @@ func (m *DSHProcessManager) createDSHWindow(url string) string {
 		URL:              url,
 		Windows:          application.WindowsWindow{HiddenOnTaskbar: false},
 	})
+	logger.I("[窗口] 已创建 name=%s source=dsh", "快启坞 - DeepSeek Harness")
 	// 关闭窗口（Wails 内部 handler 负责真正销毁）时只清窗口引用，不停 dsh 服务：
 	// dsh web 进程独立于窗口运行（自动启动/设置里手动启停负责生命周期）。
 	win.OnWindowEvent(events.Common.WindowClosing, func(e *application.WindowEvent) {

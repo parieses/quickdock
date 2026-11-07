@@ -131,7 +131,8 @@
           <h2><span>05</span>Command palette</h2>
           <p><kbd>Ctrl</kbd><kbd>K</kbd> opens it. Type to search, press Enter to run.</p>
           <ul>
-            <li>Results are grouped by source: best match, recent, projects, quick links, notes, todos, applications, files, plugin commands, runtime services, system commands, clipboard suggestions, plus inline calculator and web results.</li>
+            <li>Results are grouped by source: best match, recent, projects, scenes, workspace collections, quick links, notes, todos, applications, files, plugin commands, runtime services, system commands, clipboard suggestions, plus inline calculator and web results. Scenes and collections open the workspace page at that exact item.</li>
+            <li>Type "new note" or "new todo" to create one inline: type a title, press Enter, and the new entry opens right away.</li>
             <li>Todos only return unfinished top-level tasks. Enter switches to the todo page, jumps to that day, clears tag filters when needed and highlights the row for two seconds; the action menu can mark it done.</li>
             <li>Type an expression and the answer appears; paste a URL and it asks whether to save it as a project.</li>
             <li>Type <code>cheatsheet</code> for the hotkey sheet, or <code>logtail</code> to open log tailing.</li>
@@ -147,6 +148,9 @@
             <li>Text, images and files are all recorded. Images live in <code>~/.quickdock/images/</code>.</li>
             <li>Tags come in two kinds: <b>Images</b>, <b>Files</b>, <b>All</b> and <b>Starred</b> filter by type; <b>URL</b>, <b>Email</b>, <b>Phone</b>, <b>JSON</b> and <b>Code</b> are smart categories that only apply to text.</li>
             <li>Classification is computed and stored when an entry is written, so picking a tag reaches the whole history rather than the 1000 rows the All list loads by default.</li>
+            <li>Search runs against the whole database, not just the 1000 rows the list shows; type filters are pushed into the same query.</li>
+            <li>An entry can be pasted as plain text, Markdown text or pretty-printed JSON. Several entries can be queued and pasted in sequence, with skip and clear controls.</li>
+            <li>Under Settings → Clipboard you can ignore specific source windows, or pause capture for a number of minutes until you resume it. This affects what gets recorded, not what is stored.</li>
             <li>Ask AI on an entry to translate, summarize or reformat — or ask your own question — answered in place, without leaving the page.</li>
             <li>Retention is set under Settings → Clipboard, and entries expire on schedule. Automatic rules can clean up what you copy, with a dry run first.</li>
             <li>History can be cleared in one go, file entries reveal in Explorer, and images save to disk. Rules can be ordered by priority, and you can simulate a source window to see whether they'd match.</li>
@@ -172,7 +176,7 @@
           <h2><span>08</span>Notes</h2>
           <p><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>N</kbd> opens the floating notes window.</p>
           <ul>
-            <li>A tree of notes on the left, folders nest, with search, rename and delete.</li>
+            <li>A tree of notes on the left, folders nest, with search, rename and delete. Write <code>[[Note title]]</code>, <code>[[todo:...]]</code> or <code>[[item:...]]</code> in the body to link across notes, todos and items; the preview follows the link, and a backlinks panel shows who links here.</li>
             <li>Content is stored as Markdown and saved 500 ms after you stop typing. There is no save button.</li>
             <li>The window hides when it loses focus, so it never sits on top of your work.</li>
             <li>Ask AI in the float: with a selection only that goes, without one the whole note. Presets cover summarize, polish, continue and translate, and you can ask anything. None of it is written to the AI conversation history.</li>
@@ -187,7 +191,7 @@
             <li>Tasks can carry subtasks, tags, notes and an estimate.</li>
             <li>Repeat rules cover daily, weekly and monthly; finishing one creates the next.</li>
             <li>A due time triggers a system notification.</li>
-            <li>Pomodoro runs a countdown on the todo page and notifies when it ends; a webhook can push it to your phone under Settings → Robot Notifications.</li>
+            <li>Pomodoro runs a countdown on the todo page and notifies when it ends; a webhook can push it to your phone under Settings → Robot Notifications, where extra channels (Bark, Discord, Slack, Ntfy, Gotify and a generic JSON webhook) can be added alongside the six built-in bots.</li>
             <li>Subtasks can be renamed, moved up or down, and given their own due date; the in-page search filters by title and notes.</li>
             <li>Search a task title in the command palette and Enter jumps straight to it.</li>
           </ul>
@@ -197,22 +201,22 @@
           <h2><span>10</span>Monitors</h2>
           <p>Create one under Site Monitor in the sidebar: pick a probe type, fill in the target and an interval.</p>
           <ul>
-            <li>Four probe types: HTTP (status code / keyword / regex), TCP port (a connect means up — databases, Redis, MQ), local process (present means up), and custom command (exit code 0 means up).</li>
+            <li>Six probe types: HTTP (status code / keyword / regex), TCP port (a connect means up — databases, Redis, MQ), DNS (<code>A:</code>/<code>AAAA:</code>/<code>MX:</code>/<code>CNAME:</code> prefixes), Ping (system ping, no raw sockets), local process (present means up), and custom command (exit code 0 means up).</li>
             <li>HTTP monitors show status code, response time and days left on the SSL certificate. Latency jitter isn't an outage; adjust the threshold in settings so a network hiccup doesn't page you.</li>
             <li>A state flip pushes a desktop notification, or DingTalk, WeCom, Feishu, ServerChan, PushPlus or Telegram.</li>
-            <li>Trend charts cover 24 hours, 7 days and all time; the monitor list exports to CSV.</li>
-            <li>Every notification also lands in the bell at the bottom of the sidebar, and clicking one jumps to its monitor. AI completion notices stay quiet while the window is in front of you.</li>
+            <li>Trend charts cover 24 hours, 7 days and all time; the monitor list exports to CSV. The 24h p95 / p99 response-time percentiles are shown per monitor. A second tab, <b>Status</b>, gives a read-only overview with an exportable single-file HTML snapshot; it refreshes every 60 seconds and never opens a server port.</li>
+            <li>Every notification also lands in the bell at the bottom of the sidebar; the bell can filter by kind and search, and clicking a notification jumps to the exact monitor, scheduled task, todo or AI conversation it came from. AI completion notices stay quiet while the window is in front of you.</li>
             <li>Mail verification codes are set up right on that dashboard card: enter the address (servers for common providers such as QQ, 163, Gmail and Outlook are detected automatically), the port and an app password. New codes then appear on the card and in the bell, and clicking one copies it. The inbox is read-only — nothing is marked as read, no mail is sent or deleted, and bodies only pass through memory while the code is being extracted.</li>
-            <li>With many monitors you can search, tick several to enable or disable, and drag them into order. Deleted ones go to a recycle bin and come back with logs and configuration; a one-hour maintenance window pauses checks and alerts.</li>
+            <li>With many monitors you can search, tick several to enable or disable, and drag them into order. Deleted ones go to the single app-wide recycle bin (Settings &gt; History &gt; Recycle Bin, linked from the monitor header) and come back with logs and configuration; entries older than 30 days are purged automatically. A one-hour maintenance window pauses checks and alerts.</li>
           </ul>
         </section>
 
         <section class="doc-sec" id="s11">
           <h2><span>11</span>Schedules</h2>
-          <p>Five actions and five schedules cover everyday scripts and reminders.</p>
+          <p>Five actions and six schedules cover everyday scripts and reminders.</p>
           <ul>
             <li>Actions: open an application, open a folder, open a URL, run a command, send an HTTP request.</li>
-            <li>Schedules: once, interval, daily, weekly, monthly.</li>
+            <li>Schedules: once, interval, daily, weekly, monthly (pick a day of month or the last day) and standard five-field cron.</li>
             <li>Run one immediately from the list instead of waiting for the clock.</li>
             <li>The list searches by name and filters to failed, enabled or disabled; each row shows how long until the next run. The run history filters to failures and exports to CSV.</li>
             <li>Bot addresses are configured once under Settings → Robot Notifications; a task only decides whether to send and through which channel.</li>
@@ -274,7 +278,7 @@
             <li><code>quickdock.db</code> is the main database (workspaces, todos, notes, the clipboard index); <code>images/</code> holds clipboard images, <code>plugins/</code> plugins, <code>logs/</code> logs.</li>
             <li><b>Moving</b>: change the storage location under Settings → Storage &amp; Sync. The whole directory is packed and moved to the new drive, taking installed runtimes and environment variables with it, effective after a restart. Leave room on the target for the archive plus the unpacked copy.</li>
             <li><b>Cloud sync</b>: configure a WebDAV server on the same page for full JSON backups, keep several versions, restore in one click.</li>
-            <li><b>Snapshot</b>: export everything to a JSON file and keep it somewhere. Importing overwrites current data — read the prompt first.</li>
+            <li><b>Snapshot</b>: export everything to a JSON file and keep it somewhere. Importing overwrites current data — read the prompt first. A snapshot can be previewed to see how many items each module contains, created automatically every day or week, and older copies are pruned to a configurable maximum.</li>
             <li>Uninstalling never deletes data; reinstalling picks it up again.</li>
           </ul>
         </section>

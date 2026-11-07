@@ -5,17 +5,21 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onBeforeUnmount, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { pendingOpenNoteId } from '../composables/bridge'
+import { pendingOpenNoteId, pendingOpenTodoId, navigate, navigateTo } from '../composables/bridge'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
-import { pinyinMatch } from '../utils/pinyin'
+import { pinyinMatch, matchesTextOrPinyin } from '../utils/pinyin'
 import { debounce } from '../utils/debounce'
 import ConfirmDialog from './ConfirmDialog.vue'
 import NoteTreeNode from './NoteTreeNode.vue'
 import NoteAiPanel from './NoteAiPanel.vue'
+import EntityLinkPicker from './EntityLinkPicker.vue'
+import NoteGraphPanel from './NoteGraphPanel.vue'
+import NoteOutlinePanel from './NoteOutlinePanel.vue'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 import { installMathOnce } from '../utils/mathMarkdown'
+import { installWikiOnce } from '../utils/wikiMarkdown'
 import { createCodeEditor, type CodeEditorHandle } from '../utils/aiCodeEditor'
 import { downloadText, safeFileName } from '../utils/download'
 import {
@@ -31,12 +35,13 @@ import {
   SetNoteSort,
 } from '../../bindings/quickdock/services/note/noteservice'
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
+import { ResolveWikiTarget, ListLinkTargets } from '../../bindings/quickdock/services/appservice'
 import {
   Trash2, Search, X, FolderPlus, FileText, Folder,
   Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
-  FileSearch, Square, CheckSquare, Clock, Code2, Columns2, Eye,
+  FileSearch, Square, CheckSquare, Clock, Code2, Columns2, Eye, Link2, Network, PanelRight,
 } from '@lucide/vue'
-import type { ToastAPI, Note } from '../types'
+import type { ToastAPI, Note, WikiTarget, LinkTargetGroups, EntityType } from '../types'
 
 marked.setOptions({ breaks: true, gfm: true })
 
@@ -471,8 +476,11 @@ async function reorderNode(dragId: string, targetId: string, before: boolean) {
 const selectedDoc = computed<Note | null>(() => (selectedDocId.value ? nodes.value.find(n => n.id === selectedDocId.value) || null : null))
 // 笔记预览也认 LaTeX：AI 回答里「存为笔记」保存的就是带 `\(...\)` / `\[...\]` 的原文，
 // 不接这一步，笔记里就会重现「公式当正文」的样子。
-// 用 installMathOnce 而不是直接 marked.use —— 本文件每次进入页面都会重跑一遍 setup。
+// 用 installMathOnce / installWikiOnce 而不是直接 marked.use —— 本文件每次进入页面
+// 都会重跑一遍 setup，两个包装各自用模块级标志保证全局单例只装一次。
+// 顺序无所谓：两者都是往同一个 marked 实例的 extensions 里合并，互不覆盖。
 installMathOnce(marked)
+installWikiOnce(marked)
 
 // ---- Markdown 视图模式：源码 / 分屏 / 预览 ----
 // 仅对 markdown 生效（纯文本没有预览，永远只有源码一栏）。
@@ -493,6 +501,35 @@ function setNoteView(v: NoteView) {
 }
 
 const previewHtml = computed(() => (docContent.value ? DOMPurify.sanitize(marked.parse(docContent.value, { async: false }) as string) : ''))
+
+/** 三类目标统一的深链映射；复用 bridge 已有载荷，不另造导航机制。 */
+function jumpToEntity(type: string, id: string): boolean {
+  if (!id) return false
+  if (type === 'note') { pendingOpenNoteId.value = id; navigate('notes'); return true }
+  if (type === 'todo') { pendingOpenTodoId.value = id; navigate('todo'); return true }
+  if (type === 'item') { navigateTo('workspace', 'item:' + id); return true }
+  return false
+}
+
+/**
+ * 预览里的 wiki 链接点击。v-html 生成的 DOM 绑不了 Vue 事件，只能在容器上
+ * 做事件委托（与 AIPage.vue 代码块按钮同一套路）。data-wiki 存的是 [[ ]] 内的
+ * 完整原文（含 note:/todo:/item: 前缀），正好是 ResolveWikiTarget 的入参。
+ */
+async function onPreviewClick(e: MouseEvent) {
+  const a = (e.target as HTMLElement | null)?.closest?.('a.qd-wiki') as HTMLElement | null
+  if (!a) return
+  const label = a.dataset.wiki || ''
+  if (!label) return
+  try {
+    const target = unwrap<WikiTarget | null>(await ResolveWikiTarget(label))
+    if (!target || !jumpToEntity(target.type, target.id)) {
+      toast.error(t('wikiTargetNotFound'))
+    }
+  } catch (err) {
+    toast.error(getErrorMessage(err))
+  }
+}
 
 // 标签以逗号分隔输入，必须序列化成合法 JSON 数组。
 //
@@ -596,6 +633,47 @@ const tocItems = computed(() => {
   return out
 })
 const tocOpen = ref(false)
+
+// ---- 关系图谱 / 块级大纲 ----
+// 图谱是全局只读汇总视图，按约定挂回笔记页做 tab，不占侧栏导航；
+// 大纲是编辑区右侧的第三个 flex 栏，与源码/预览并排，不遮挡内容。
+const graphOpen = ref(false)
+const outlineOpen = ref(false)
+interface OutlineHeading { level: number; text: string; line: number }
+// 比 tocItems 多一个 1-based 行号：大纲要能把编辑器滚到该行并折叠该区段，
+// 光有标题文本做不到（同名标题会跳错）。
+const outlineHeadings = computed<OutlineHeading[]>(() => {
+  if (selectedDoc.value?.format === 'text') return []
+  const out: OutlineHeading[] = []
+  const lines = (docContent.value || '').split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^(#{1,3})\s+(.+?)\s*#*\s*$/.exec(lines[i])
+    if (m) out.push({ level: m[1].length, text: m[2].trim(), line: i + 1 })
+  }
+  return out
+})
+function onOutlineJump(line: number) {
+  docEditor?.revealLine(line)
+  const h = outlineHeadings.value.find(x => x.line === line)
+  if (h && previewRef.value) gotoHeading(h.text)
+}
+function onOutlineFold(line: number) { docEditor?.foldAt(line) }
+function onOutlineFoldAll() { docEditor?.foldAll() }
+function onOutlineUnfoldAll() { docEditor?.unfoldAll() }
+function onGraphOpenTarget(type: string, id: string, _label: string) {
+  // 悬空目标（后端用 ~hash 伪 id）前端回传空 id，静默忽略，别跳到不存在的条目。
+  if (!id) return
+  graphOpen.value = false
+  if (type === 'note') {
+    const n = nodes.value.find(x => x.id === id)
+    if (n) void onDoc(n)
+  } else if (type === 'todo') {
+    pendingOpenTodoId.value = id
+    navigate('todo')
+  } else {
+    navigateTo('workspace', id)
+  }
+}
 function gotoHeading(text: string) {
   const preview = previewRef.value
   if (!preview) return
@@ -711,6 +789,9 @@ async function mountDocEditor() {
       placeholder: isText ? t('notesTextPh') : t('notesMarkdownPh'),
       // 写作场景 Tab 应该能移出输入框，而不是吃进缩进
       tabIndent: false,
+      // 只有 markdown 开标题折叠：大纲侧栏的 foldAt/foldAll 依赖这个扩展。
+      // 其它编辑器使用者（NotePanel / 文件编辑器）不传，行为不变。
+      fold: !isText,
       onChange: (v) => {
         if (v === docContent.value) return
         docContent.value = v
@@ -776,6 +857,49 @@ function onAiWriteBack(text: string, mode: 'insert' | 'replace' | 'append') {
   void saveDoc()
   toast.success(t('noteAiWrittenBack'))
 }
+// ---- 编辑器工具条：插入 wiki 链接 ----
+// 只负责把 `[[type:标题]]` 插到当前光标处；关联表由后端保存正文时自行扫描重建，
+// 前端绝不写关联表。候选复用 ListLinkTargets，与 EntityLinkPicker 同一份数据。
+const showWikiPicker = ref(false)
+const wikiQuery = ref('')
+const wikiTargets = ref<LinkTargetGroups>({ notes: [], todos: [], items: [] })
+const wikiCandidates = computed(() => {
+  const all: { type: EntityType; id: string; label: string }[] = [
+    ...(wikiTargets.value.notes || []).map(x => ({ ...x, type: 'note' as EntityType })),
+    ...(wikiTargets.value.todos || []).map(x => ({ ...x, type: 'todo' as EntityType })),
+    ...(wikiTargets.value.items || []).map(x => ({ ...x, type: 'item' as EntityType })),
+  ]
+  return all.filter(c => matchesTextOrPinyin([c.label], wikiQuery.value, 'wiki:' + c.type + ':' + c.id))
+})
+function linkTypeLabel(type: string): string {
+  if (type === 'note') return t('linkTypeNote')
+  if (type === 'todo') return t('linkTypeTodo')
+  if (type === 'item') return t('linkTypeItem')
+  return type
+}
+async function openWikiPicker() {
+  showWikiPicker.value = !showWikiPicker.value
+  if (!showWikiPicker.value) return
+  try {
+    wikiTargets.value = unwrap<LinkTargetGroups>(await ListLinkTargets()) || { notes: [], todos: [], items: [] }
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+function insertWiki(c: { type: EntityType; label: string }) {
+  // 带类型前缀，避免同名笔记/待办/条目让 ResolveWikiTarget 歧义。
+  const text = '[[' + c.type + ':' + c.label + ']]'
+  const sel = docEditor?.getSelection() ?? null
+  const from = sel ? sel.from : docContent.value.length
+  const to = sel ? sel.to : from
+  docContent.value = docContent.value.slice(0, from) + text + docContent.value.slice(to)
+  // watch(docContent) 会把新内容同步进 CM；这里只额外落一次盘并收起浮层。
+  showWikiPicker.value = false
+  wikiQuery.value = ''
+  void saveDoc()
+  docEditor?.focus()
+}
+
 async function renameCurrent() {
   if (!selectedDoc.value) return
   try { unwrap(await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name)); await load() } catch (e) { toast.error(getErrorMessage(e)) }
@@ -923,6 +1047,15 @@ watch(pendingOpenNoteId, (id) => {
 
       <!-- 右：文档编辑 -->
       <div class="notes-editor">
+        <!-- 视图 tab：文档 / 关系图谱。图谱铺满编辑区但不卸载它，
+             切回来时 CodeMirror 的光标与撤销历史都还在。 -->
+        <div class="ne-viewtabs">
+          <button :class="{ active: !graphOpen }" @click="graphOpen = false">{{ t('notesTitle') }}</button>
+          <button :class="{ active: graphOpen }" @click="graphOpen = true"><Network :size="13" />{{ t('graphTab') }}</button>
+          <span class="ne-viewtabs-spacer"></span>
+          <button v-if="!graphOpen && selectedDoc && outlineHeadings.length" :class="{ active: outlineOpen }" :title="t('outlineTitle')" @click="outlineOpen = !outlineOpen"><PanelRight :size="13" /></button>
+        </div>
+        <NoteGraphPanel v-if="graphOpen" class="ne-graph-overlay" @close="graphOpen = false" @open-target="onGraphOpenTarget" />
         <div v-if="!selectedDoc" class="ne-empty"><FileText :size="32" /><p>{{ t('notesSelectHint') }}</p></div>
         <template v-else-if="selectedDoc.isFolder">
           <div class="ne-empty ne-folder"><Folder :size="32" /><p>{{ t('notesIsFolder') }}</p></div>
@@ -945,6 +1078,20 @@ watch(pendingOpenNoteId, (id) => {
             <button class="ne-copy" :title="t('notesExportMd')" @click="exportDoc"><FileDown :size="13" /></button>
             <button class="ne-copy" :title="t('copy')" @click="copyDoc"><CopyIcon :size="13" /></button>
             <button v-if="tocItems.length" class="ne-copy" :class="{ active: tocOpen }" :title="t('notesToc')" @click="tocOpen = !tocOpen"><List :size="13" /></button>
+            <button class="ne-copy" :title="t('wikiInsertLink')" @click="openWikiPicker"><Link2 :size="13" /></button>
+            <div v-if="showWikiPicker" class="ne-wiki-pop">
+              <div class="ne-wiki-search">
+                <Search :size="12" />
+                <input v-model="wikiQuery" class="ne-wiki-input" :placeholder="t('search')" spellcheck="false" />
+              </div>
+              <div class="ne-wiki-list">
+                <div v-if="!wikiCandidates.length" class="ne-wiki-empty">{{ t('linkEmpty') }}</div>
+                <button v-for="c in wikiCandidates" :key="c.type + ':' + c.id" class="ne-wiki-item" @click="insertWiki(c)">
+                  <span class="ne-wiki-type">{{ linkTypeLabel(c.type) }}</span>
+                  <span class="ne-wiki-label">{{ c.label }}</span>
+                </button>
+              </div>
+            </div>
           </div>
           <div v-if="tocOpen && tocItems.length" class="ne-toc">
             <button v-for="(it, i) in tocItems" :key="i" class="ne-toc-item" :style="{ paddingLeft: 8 + (it.level - 1) * 14 + 'px' }" @click="gotoHeading(it.text)">
@@ -958,6 +1105,12 @@ watch(pendingOpenNoteId, (id) => {
               {{ t('notesStats', { words: docStats.words, chars: docStats.chars, lines: docStats.lines }) }}
             </span>
           </div>
+          <!-- 条目互链：放在标签行下方，与文档正文同属一个视图；新建未保存由组件自己显示禁用态。 -->
+          <EntityLinkPicker
+            src-type="note"
+            :src-id="selectedDocId"
+            :src-label="selectedDoc?.name || ''"
+          />
           <!-- markdown：左编辑 + 右预览，两栏滚动同步；纯文本：仅编辑区。
                两栏共用同一个编辑器宿主（格式切换只重建 CM，不动 DOM 结构）。
                视图模式只切「显隐」不卸载：编辑器宿主始终在 DOM 里，避免切换时
@@ -970,7 +1123,18 @@ watch(pendingOpenNoteId, (id) => {
               :class="{ 'ne-editor-only': selectedDoc.format === 'text' }"
             ></div>
             <div v-show="selectedDoc.format !== 'text' && noteView !== 'source'" ref="previewRef" class="ne-preview markdown-body" v-html="previewHtml"
-              @scroll="syncScroll('preview')"></div>
+              @scroll="syncScroll('preview')" @click="onPreviewClick"></div>
+            <NoteOutlinePanel
+              v-if="outlineOpen && outlineHeadings.length"
+              class="ne-outline-dock"
+              :headings="outlineHeadings"
+              @jump="onOutlineJump"
+              @fold="onOutlineFold"
+              @unfold="onOutlineFold"
+              @fold-all="onOutlineFoldAll"
+              @unfold-all="onOutlineUnfoldAll"
+              @close="outlineOpen = false"
+            />
           </div>
 
           <!-- 页内 AI：覆盖在编辑区上（与快捷笔记浮窗同一套面板） -->
@@ -1030,7 +1194,7 @@ watch(pendingOpenNoteId, (id) => {
   border-radius: var(--radius-md);
 }
 .ne-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
-.ne-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); }
+.ne-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); position: relative; }
 .ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 14px; font-weight: 600; outline: none; font-family: inherit; }
 .ne-name:focus { border-color: var(--color-border-focus-soft); }
 .ne-format { display: flex; gap: 2px; flex-shrink: 0; }
@@ -1052,6 +1216,17 @@ watch(pendingOpenNoteId, (id) => {
 .ne-view-preview .ne-editor { display: none !important; }
 .ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: 6px; border-radius: var(--radius-sm); }
 .ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+/* 插入 wiki 链接的候选浮层：挂在 .ne-head 上，absolute 不占布局高度 */
+.ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: 20; width: 260px; margin-top: 4px; padding: 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-secondary); box-shadow: var(--shadow-sm); }
+.ne-wiki-search { display: flex; align-items: center; gap: 6px; color: var(--color-text-muted); }
+.ne-wiki-input { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
+.ne-wiki-input:focus { border-color: var(--color-border-focus-soft); }
+.ne-wiki-list { max-height: 180px; overflow-y: auto; margin-top: 6px; }
+.ne-wiki-empty { padding: 6px; color: var(--color-text-disabled); font-size: 12px; }
+.ne-wiki-item { display: flex; align-items: center; gap: 6px; width: 100%; padding: 4px 6px; border: none; border-radius: var(--radius-xs); background: transparent; color: var(--color-text-primary); text-align: left; cursor: pointer; font-family: inherit; font-size: 12px; }
+.ne-wiki-item:hover { background: var(--color-bg-hover); }
+.ne-wiki-type { flex-shrink: 0; color: var(--color-text-muted); }
+.ne-wiki-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ne-tags { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); }
 .ne-tags-label { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
 .ne-tags-input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
@@ -1072,6 +1247,16 @@ watch(pendingOpenNoteId, (id) => {
 .ne-toc-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 /* 搜索命中高亮：只覆盖文字底色，不用 <mark> 的默认黄底（深色主题下会刺眼） */
 .tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: 2px; padding: 0 1px; }
+/* 视图 tab：文档 / 图谱。图谱是覆盖层，tab 必须压在它上面（z-index 更高）。 */
+.ne-viewtabs { display: flex; align-items: center; gap: 4px; padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: 11; }
+.ne-viewtabs button { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
+.ne-viewtabs button:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+.ne-viewtabs button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
+.ne-viewtabs-spacer { flex: 1; }
+.ne-graph-overlay { position: absolute; inset: 0; z-index: 10; background: var(--color-bg-primary); }
+/* 大纲侧栏：作为 ne-split 的第三个 flex 栏，与源码/预览并排，不遮挡内容。 */
+.ne-outline-dock { flex: 0 0 240px; min-width: 0; border-left: 1px solid var(--color-border); }
+
 .ne-split { flex: 1; display: flex; min-height: 0; }
 /* 编辑区宿主：CodeMirror 撑满左栏（行号/高亮/undo 都在实例里，见 utils/aiCodeEditor.ts）。
    原来这里是 textarea，padding/border 直接写在控件上；现在要给宿主定边框，内边距落到
@@ -1180,6 +1365,8 @@ watch(pendingOpenNoteId, (id) => {
 .markdown-body :deep(h3) { font-size: 15px; }
 .markdown-body :deep(p) { margin: 8px 0; }
 .markdown-body :deep(a) { color: var(--color-accent); }
+/* wiki 链接没有 href（避免 DOMPurify 过滤伪协议），补手型与虚下划线让它可点 */
+.markdown-body :deep(a.qd-wiki) { cursor: pointer; border-bottom: 1px dashed var(--color-accent); }
 .markdown-body :deep(code) { background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--radius-xs); font-family: 'Consolas','Monaco',monospace; font-size: 13px; }
 .markdown-body :deep(pre) { background: var(--color-bg-tertiary); padding: 10px 12px; border-radius: var(--radius-sm); overflow: auto; }
 .markdown-body :deep(pre code) { background: none; padding: 0; }

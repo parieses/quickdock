@@ -202,3 +202,104 @@ func TestCompareVersions(t *testing.T) {
 		}
 	}
 }
+
+func TestDetectVersionHints_MiseTomlToolsOnly(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "mise.toml", "[tools]\ngo = \"1.26.0\"\nnode = \"22\"\n")
+	hints := DetectVersionHints(dir)
+	if len(hints) != 2 {
+		t.Fatalf("期望 go/node 两条，得到 %d: %+v", len(hints), hints)
+	}
+	if h, ok := findHint(hints, RuntimeGo); !ok || h.Version != "1.26.0" || h.Source != "mise.toml" {
+		t.Errorf("go 版本（带补丁号）应原样保留: %+v, ok=%v", h, ok)
+	}
+	if h, ok := findHint(hints, RuntimeNode); !ok || h.Version != "22" {
+		t.Errorf("node 版本解析错误: %+v, ok=%v", h, ok)
+	}
+}
+
+func TestDetectVersionHints_MiseTomlCommentsQuotesOtherSections(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "mise.toml", `# 顶部注释
+[tools]
+go = "1.26.0"     # setup-go '1.26'：注释里的单引号不应干扰
+node = '22'       # 单引号值
+python = "3.12.1" # 行尾注释
+php = '8.3.4'
+java = "21"       # 未纳管的运行时，静默跳过
+task = "3.53.0"   # 非运行时工具，静默跳过
+
+[env]
+GOTOOLCHAIN = "local"
+node = "999"      # 同名 key 在其它段，不得覆盖 [tools]
+
+[tasks]
+dev = "task dev"
+go = "999"        # 同名 key 在其它段，不得覆盖 [tools]
+`)
+	hints := DetectVersionHints(dir)
+	if len(hints) != 4 {
+		t.Fatalf("期望 go/node/python/php 四条（其它段与未纳管键不生效），得到 %d: %+v", len(hints), hints)
+	}
+	for rt, want := range map[Runtime]string{RuntimeGo: "1.26.0", RuntimeNode: "22", RuntimePython: "3.12.1", RuntimePHP: "8.3.4"} {
+		h, ok := findHint(hints, rt)
+		if !ok || h.Version != want {
+			t.Errorf("%s 解析错误: got=%+v want=%s", rt, h, want)
+		}
+	}
+}
+
+func TestDetectVersionHints_PackageJSONFallbackFields(t *testing.T) {
+	// 绝大多数前端项目不写 engines.node，只靠 Volta / devEngines 钉版本。
+	cases := []struct{ name, content, want string }{
+		{"volta", `{"volta":{"node":"20.11.1"}}`, "20.11.1"},
+		{"devEngines string", `{"devEngines":{"node":">=20"}}`, ">=20"},
+		{"devEngines object", `{"devEngines":{"node":{"version":"22.1.0"}}}`, "22.1.0"},
+		{"engines wins", `{"engines":{"node":">=18"},"volta":{"node":"20.11.1"}}`, ">=18"},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		writeFile(t, dir, "package.json", c.content)
+		h, ok := findHint(DetectVersionHints(dir), RuntimeNode)
+		if !ok || h.Version != c.want {
+			t.Errorf("%s 解析错误: got=%+v want=%s", c.name, h, c.want)
+		}
+	}
+}
+
+func TestDetectVersionHints_ComposerJSONFallbackFields(t *testing.T) {
+	// 只写 config.platform.php 的 Laravel 项目，以及 require.php 的优先级。
+	cases := []struct{ name, content, want string }{
+		{"require", `{"require":{"php":"^8.2"}}`, "^8.2"},
+		{"require-dev", `{"require-dev":{"php":">=8.3"}}`, ">=8.3"},
+		{"platform", `{"config":{"platform":{"php":"8.3.4"}}}`, "8.3.4"},
+		{"require wins", `{"require":{"php":"^8.2"},"config":{"platform":{"php":"8.3.4"}}}`, "^8.2"},
+	}
+	for _, c := range cases {
+		dir := t.TempDir()
+		writeFile(t, dir, "composer.json", c.content)
+		h, ok := findHint(DetectVersionHints(dir), RuntimePHP)
+		if !ok || h.Version != c.want {
+			t.Errorf("%s 解析错误: got=%+v want=%s", c.name, h, c.want)
+		}
+	}
+}
+
+func TestDetectVersionHints_MiseTomlMissingAndMalformed(t *testing.T) {
+	// 缺文件：空目录不产出条目
+	if got := DetectVersionHints(t.TempDir()); len(got) != 0 {
+		t.Fatalf("无声明文件应返回空: %+v", got)
+	}
+	// 格式错误一：没有 [tools] 段，顶层裸键值/数组一律不认
+	bad := t.TempDir()
+	writeFile(t, bad, "mise.toml", "go = \"1.26.0\"\nnode = 22\npython = [\"3.12.1\", \"3.11\"]\n[env]\nGOTOOLCHAIN = \"local\"\n")
+	if got := DetectVersionHints(bad); len(got) != 0 {
+		t.Errorf("无 [tools] 段/裸值/数组值应静默跳过: %+v", got)
+	}
+	// 格式错误二：[tools] 段内裸值、未闭合引号、数组值也不产出、不 panic
+	bad2 := t.TempDir()
+	writeFile(t, bad2, "mise.toml", "[tools]\ngo = 1.26.0\nnode = \"22\npython = [\"3.12.1\", \"3.11\"]\n")
+	if got := DetectVersionHints(bad2); len(got) != 0 {
+		t.Errorf("[tools] 段内非法写法应静默跳过: %+v", got)
+	}
+}

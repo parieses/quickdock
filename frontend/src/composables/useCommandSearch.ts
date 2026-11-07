@@ -14,13 +14,13 @@ import { navEntries } from '../pages/registry'
 import { MATCHERS, matchClipboard, type MatchCtx } from './commandSearch/matchers'
 import { dropEmptyGroups, injectBestMatch, sortGroups } from './commandSearch/ranking'
 import type {
-  CmdNote, CmdTodo, InstalledApp, LcIndex, NavSearchItem, RecentEntry, ResultGroup, SearchResult, SystemCmd,
+  CmdNote, CmdTodo, CmdScene, CmdCollection, InstalledApp, LcIndex, NavSearchItem, RecentEntry, ResultGroup, SearchResult, SystemCmd,
 } from './commandSearch/types'
 
 // 类型转发：调用方一直从本文件 import 这些类型，拆到 commandSearch/types 后
 // 在这里继续 re-export，避免改动所有引用点。
 export type {
-  CmdNote, CmdTodo, InstalledApp, NavSearchItem, RecentEntry, ResultGroup, ResultType, SearchResult, SystemCmd,
+  CmdNote, CmdTodo, CmdScene, CmdCollection, InstalledApp, NavSearchItem, RecentEntry, ResultGroup, ResultType, SearchResult, SystemCmd,
 } from './commandSearch/types'
 
 // SearchPalette 的合并载荷。后端 `Services.PaletteSearchResult` 字段名固定
@@ -43,6 +43,9 @@ export interface SearchDeps {
   items: Ref<CollectionItem[]>
   installedApps: Ref<InstalledApp[]>
   notes: Ref<CmdNote[]>
+  // 场景 / 集合全量池：面板浮窗与主窗口不共享 Pinia，故由 usePaletteData 单独拉一份
+  scenes: Ref<CmdScene[]>
+  collections: Ref<CmdCollection[]>
   systemCommands: ComputedRef<SystemCmd[]>
   query: Ref<string>
   selectedIndex: Ref<number>
@@ -64,7 +67,7 @@ export interface SearchDeps {
 
 export function useCommandSearch(deps: SearchDeps) {
   const { locale } = useI18n()
-  const { items, installedApps, notes, systemCommands, query, selectedIndex,
+  const { items, installedApps, notes, scenes, collections, systemCommands, query, selectedIndex,
           pluginCmdIndex, clipboardUrlSource,
           frecencyScore, frecencyTick, calcPluginScore,
           pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons, envRuntimes, envStatuses, envMgmt } = deps
@@ -97,6 +100,16 @@ export function useCommandSearch(deps: SearchDeps) {
       aliases: getAppAliases(a.name).map(raw => ({ raw, lc: raw.toLowerCase() })),
     })),
     sys: systemCommands.value.map(c => ({ cmd: c, labelLC: c.label.toLowerCase() })),
+    scenes: scenes.value.map(s => ({
+      scene: s,
+      nameLC: (s.name || '').toLowerCase(),
+      descLC: (s.description || '').toLowerCase(),
+    })),
+    collections: collections.value.map(c => ({
+      collection: c,
+      nameLC: (c.name || '').toLowerCase(),
+      descLC: (c.description || '').toLowerCase(),
+    })),
   }))
 
   // 搜索防抖：逐键触发全量扫描（含 pinyinMatch/Levenshtein）在数据量大时卡顿，
@@ -471,6 +484,12 @@ export function useCommandSearch(deps: SearchDeps) {
     }
     if (r.type === 'todo' && r.todo) {
       return { title: r.label, subtitle: t('cmdGroupTodos'), lines: [r.desc || ''] }
+    }
+    // 场景 / 集合 / 新建动作没有实体正文，预览只显示分组归属与说明
+    if (r.type === 'scene' || r.type === 'collection' || r.type === 'create') {
+      const subtitle = r.type === 'scene' ? t('cmdGroupScenes')
+        : r.type === 'collection' ? t('cmdGroupCollections') : t('cmdGroupCreate')
+      return { title: r.label, subtitle, lines: [r.desc || ''] }
     }
     if (r.type === 'plugin') {
       const last = r.pluginId && r.pluginCommandId ? getPluginLastResult(r.pluginId, r.pluginCommandId) : null

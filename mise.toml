@@ -1,0 +1,40 @@
+# QuickDock 工具链声明（mise / rtx）。
+# 用途：把「开发机与 CI 各用哪一版运行时」钉死在仓库里，供 mise 统一安装，
+# 同时供 internal/env 的版本探测（versionfile.go）读取，避免各人环境漂移。
+#
+# 单一事实来源：CI 的 .github/workflows/release.yml 已明确「CI 构建统一走仓库
+# Taskfile（单一事实来源）」。所以本文件只负责钉工具版本与少量通用环境变量，
+# 绝不承载构建逻辑——见下方 [tasks] 的说明。
+
+[tools]
+# 版本逐项对齐 CI 现有值，刻意不追新，避免本地与 CI 行为漂移。
+go   = "1.26.0"   # release.yml 两处 setup-go '1.26'
+node = "22"       # release.yml setup-node '22'
+task = "3.53.0"   # release.yml go install github.com/go-task/task/v3/cmd/task@v3.53.0
+# 刻意不声明 wails3：它的版本由 go.mod 里的 wailsapp/wails/v3 行动态解析后
+# go install（release.yml「Install Wails3 CLI」），真相源是 go.mod，此处不重复钉。
+
+[env]
+# 只放与机器无关、可提交的值。绝不写 GOTMPDIR / GOCACHE / 代理端口 / GOROOT：
+# 本机 Go 由 QuickDock 自己托管在 D:\.quickdock\runtime，产品运行时还会改写
+# 注册表 PATH / GOROOT，任何本机路径写进来都会污染其它开发机。
+WAILS_VITE_PORT = "9245"                      # 根 Taskfile.yml 里 VITE_PORT 的默认值
+PACKAGE_MANAGER = "npm"                       # 根 Taskfile.yml 的默认值；前端用 npm
+GOTOOLCHAIN     = "local"                     # 关键：go.mod 只有 go 1.26.0、没有 toolchain 指令，
+                                              # 默认 GOTOOLCHAIN=auto 会让 Go 自行下载工具链，
+                                              # 绕过 [tools] 钉死的 1.26.0；设 local 强制只用
+                                              # mise 提供的本地 Go，版本才可复现。
+NODE_OPTIONS    = "--max-old-space-size=6144" # CI 同款（release.yml Build 步骤）：vue-tsc/rolldown
+                                              # 生产构建堆被打断时 npm 只抛裸退出码 116，抬高
+                                              # 老生代上限把这类抖动挡在外面。
+
+[tasks]
+# 任务真相源仍是 Taskfile.yml，这里只是入口转发，刻意避免第二事实源。
+# 任务不迁：所有构建参数与任务逻辑仍留在根 Taskfile.yml / build/Taskfile.yml，
+# 这里一个参数都不搬过来，命令里的 task 名也逐个核对过、都是真实存在的任务。
+dev          = "task dev"                       # 根 Taskfile.yml: dev
+bindings     = "task common:generate:bindings"  # build/Taskfile.yml: generate:bindings（经 includes common）
+check        = "task build"                     # Taskfile 没有独立 check 任务，复用 CI「Build (via Taskfile)」
+                                               # 同款入口跑一遍完整校验（vue-tsc + bindings + go build）
+build-server = "task build:server"              # 根 Taskfile.yml: build:server
+run-server   = "task run:server"                # 根 Taskfile.yml: run:server

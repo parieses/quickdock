@@ -299,6 +299,8 @@ export interface PluginCommand {
   prefix?: string            // Slash 命令前缀，如 "/translate"，输入 /tr 时只匹配该插件
   matchPattern?: string      // 命令面板正则匹配：命中时自动传入输入文本
   acceptsInput?: boolean     // 是否接收命令面板传入的参数（Ctrl+K 文本）
+  description?: string       // 命令的一句话说明（PluginCatalog 下发）
+  params?: Record<string, unknown> // 命令参数声明（JSON Schema 受限子集）
 }
 
 export interface PluginInfo {
@@ -384,6 +386,41 @@ export interface FileSearchResult {
   name?: string // 文件名（含扩展名）
   dir?: string // 所在目录
   modified?: number // 修改时间（Unix 秒）
+}
+
+// ---- 条目互链（走 ApiResult.data，wails3 不为它们生成 model，故手写一份）----
+// 字段名与后端 EntityLink / LinkTarget 的 json tag 对齐（小写驼峰）。
+export type EntityType = 'note' | 'todo' | 'item'
+
+export interface LinkTarget {
+  id: string
+  label: string
+}
+
+export interface LinkTargetGroups {
+  notes: LinkTarget[]
+  todos: LinkTarget[]
+  items: LinkTarget[]
+}
+
+export interface EntityLink {
+  id: string
+  srcType: EntityType
+  srcId: string
+  dstType: EntityType
+  dstId: string
+  dstLabel: string
+  kind: 'manual' | 'wiki'
+  createdAt: string
+  // 反链查询里后端可能补上来源实体标题（出边表本身没有这一列）
+  srcLabel?: string
+}
+
+/** ResolveWikiTarget 的 data；找不到时为 null。 */
+export interface WikiTarget {
+  type: EntityType
+  id: string
+  label: string
 }
 
 // 更新状态（对应后端 services/update 的 UpdateStatus）。

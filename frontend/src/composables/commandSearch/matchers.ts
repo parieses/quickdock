@@ -12,7 +12,7 @@
 // 先被哪个 matcher 认领，就只出现在那个分组里。MATCHERS 的数组顺序即执行顺序，
 // 与原先的内联顺序逐条对齐，不要随意重排。
 
-import { Puzzle, Play, Power, Gauge, ListChecks } from '@lucide/vue'
+import { Puzzle, Play, Power, Gauge, ListChecks, FolderKanban, FolderOpen, FileText } from '@lucide/vue'
 import { commandTitle, pluginName } from '../../utils/localize'
 import { evaluate, format, convertExpression } from '../../utils/calc'
 import type { CollectionItem, EnvRuntimeInfo, EnvServiceStatus } from '../../types'
@@ -568,6 +568,106 @@ export function matchFiles(ctx: MatchCtx): MatchOutcome | null {
   return { groups: [{ type: 'file', label: ctx.t('cmdGroupFiles'), results: hits.slice(0, 20) }] }
 }
 
+// 7.7 场景 / 工作空间集合（侧栏能搜到、命令面板此前搜不到）。
+//
+// 与 items/notes 同构：面板唤起时拉一份全量本地池（见 usePaletteData.loadWorkspaceNodes），
+// 匹配名称 / 描述 / 拼音，逐键输入不重复 toLowerCase。选中后由执行器切到 workspace 页
+// 并定位到该条目（navTarget 带的是条目 id）—— 页面 id 复用 registry 里已有的 'workspace'，
+// 后端 navigablePages 白名单因此无需改动。
+//
+// seen 用 'scene:' / 'collection:' 前缀，与 item / note 的键不冲突：同一个名字可能既是
+// 场景又是条目，两条都应能出现在各自分组里。
+export function matchScenes(ctx: MatchCtx): MatchOutcome | null {
+  const { qLC, seen } = ctx
+  const results: SearchResult[] = []
+  for (const e of ctx.lc.scenes || []) {
+    const s = e.scene
+    const k = 'scene:' + s.id
+    if (seen.has(k)) continue
+    if (!(e.nameLC.includes(qLC) || e.descLC.includes(qLC) || ctx.pinyinMatch(s.name, qLC, k))) continue
+    seen.add(k)
+    const score =
+      e.nameLC === qLC ? 100
+        : e.nameLC.startsWith(qLC) ? 75
+          : e.nameLC.includes(qLC) ? 60
+            : e.descLC.includes(qLC) ? 55 : 50
+    results.push({
+      type: 'scene',
+      label: s.name,
+      desc: s.description || ctx.t('cmdNavHint'),
+      icon: FolderKanban,
+      navPage: 'workspace',
+      navTarget: s.id,
+      scene: s,
+      score,
+    })
+  }
+  results.sort((a, b) => (b.score || 0) - (a.score || 0))
+  if (results.length === 0) return null
+  return { groups: [{ type: 'scene', label: ctx.t('cmdGroupScenes'), results }] }
+}
+
+export function matchCollections(ctx: MatchCtx): MatchOutcome | null {
+  const { qLC, seen } = ctx
+  const results: SearchResult[] = []
+  for (const e of ctx.lc.collections || []) {
+    const c = e.collection
+    const k = 'collection:' + c.id
+    if (seen.has(k)) continue
+    if (!(e.nameLC.includes(qLC) || e.descLC.includes(qLC) || ctx.pinyinMatch(c.name, qLC, k))) continue
+    seen.add(k)
+    const score =
+      e.nameLC === qLC ? 100
+        : e.nameLC.startsWith(qLC) ? 75
+          : e.nameLC.includes(qLC) ? 60
+            : e.descLC.includes(qLC) ? 55 : 50
+    // 副标题补上所属场景名：同名集合挂在不同场景下时，光看名字分不清是哪一条。
+    const sceneName = (ctx.lc.scenes || []).find(x => x.scene.id === c.sceneId)?.scene.name
+    results.push({
+      type: 'collection',
+      label: c.name,
+      desc: sceneName || c.description || ctx.t('cmdNavHint'),
+      icon: FolderOpen,
+      navPage: 'workspace',
+      navTarget: c.id,
+      collection: c,
+      score,
+    })
+  }
+  results.sort((a, b) => (b.score || 0) - (a.score || 0))
+  if (results.length === 0) return null
+  return { groups: [{ type: 'collection', label: ctx.t('cmdGroupCollections'), results }] }
+}
+
+// 7.8 新建动作：敲「新建笔记 / new note …」时给两条可执行项，回车进内联标题输入态。
+//
+// 触发用「别名以输入开头」或「输入以别名开头」，而不是裸 includes：
+// 只敲「笔记」时该出现的是已有笔记列表，不该被「新建笔记」动作占住。
+// 不写 seen：这两条是动作而非实体，与任何检索结果都不构成重复。
+const NEW_ACTION_ALIASES: Record<'note' | 'todo', string[]> = {
+  note: ['新建笔记', '新建文档', 'new note', 'add note', 'create note'],
+  todo: ['新建待办', '新建任务', 'new todo', 'add todo', 'create todo'],
+}
+
+export function matchCreate(ctx: MatchCtx): MatchOutcome | null {
+  const { qLC } = ctx
+  if (qLC.length < 2) return null
+  const results: SearchResult[] = []
+  for (const kind of ['note', 'todo'] as const) {
+    if (!NEW_ACTION_ALIASES[kind].some(a => a.startsWith(qLC) || qLC.startsWith(a))) continue
+    results.push({
+      type: 'create',
+      createKind: kind,
+      label: ctx.t(kind === 'note' ? 'cmdNewNote' : 'cmdNewTodo'),
+      desc: ctx.t(kind === 'note' ? 'cmdNewNoteDesc' : 'cmdNewTodoDesc'),
+      icon: kind === 'note' ? FileText : ListChecks,
+      score: 78,
+    })
+  }
+  if (results.length === 0) return null
+  return { groups: [{ type: 'create', label: ctx.t('cmdGroupCreate'), results }] }
+}
+
 // 剪贴板智能路由：剪贴板里是 URL 且用户原样敲了它 → 给三个动作。
 // 不进 MATCHERS：它要插到列表最前面（unshift），由编排层单独调用。
 export function matchClipboard(ctx: MatchCtx): ResultGroup[] {
@@ -587,12 +687,15 @@ export const MATCHERS: Matcher[] = [
   matchCalculator,
   matchUrl,
   matchNav,
+  matchScenes,
+  matchCollections,
   matchItems,
   matchQuicklinkInline,
   matchNotes,
   matchTodos,
   matchApps,
   matchSystem,
+  matchCreate,
   matchPlugins,
   matchEnv,
   matchFiles,

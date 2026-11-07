@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Plus, Play, Trash2, Pencil, Check, X } from '@lucide/vue'
+import { Plus, Play, Trash2, Pencil, Check, X, Pause } from '@lucide/vue'
 import {
   ListClipboardRules, CreateClipboardRule, UpdateClipboardRule, DeleteClipboardRule,
   SetClipboardRuleEnabled, GetClipboardRulesEnabled, SetClipboardRulesEnabled, TestClipboardRule,
+  GetClipboardCaptureSettings, SetClipboardIgnoredApps, PauseClipboardCapture, ResumeClipboardCapture,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import type { ClipboardRule } from '../../bindings/quickdock/internal/db/models'
 import { unwrap } from '../utils/api'
@@ -41,12 +42,80 @@ function emptyRule(): ClipboardRule {
   }
 }
 
+// ---- 忽略来源 / 暂停捕获（决定「采不采」，不改内容）----
+// 与上面的「自动规则」是两件事：规则改的是内容，这里决定这次复制要不要进历史。
+// 项目不做脱敏/加密，此处只是丢弃不采。
+const ignoredApps = ref<string[]>([])
+const ignoreInput = ref('')
+const paused = ref(false)
+const pauseUntil = ref(0)  // <0=直到恢复；>0=到期毫秒；0=未暂停
+const pauseMinutes = ref<number | 'forever'>(15)
+const nowTick = ref(Date.now())
+let pauseTicker: number | null = null
+
+interface CaptureSettings {
+  ignoredApps: string[]
+  paused: boolean
+  pauseUntil: number
+}
+async function loadCapture() {
+  try {
+    const s = unwrap<CaptureSettings>(await GetClipboardCaptureSettings())
+    ignoredApps.value = Array.isArray(s?.ignoredApps) ? s!.ignoredApps : []
+    paused.value = s?.paused === true
+    pauseUntil.value = s?.pauseUntil ?? 0
+  } catch (e) {
+    logErr('ClipRules', e)
+  }
+}
+async function saveIgnored(apps: string[]) {
+  try {
+    // 后端收的是 JSON 字符串数组：结构化列表，用换行分隔会被来源名里的换行拆坏。
+    unwrap(await SetClipboardIgnoredApps(JSON.stringify(apps)))
+    ignoredApps.value = apps
+  } catch (e) {
+    toast?.error?.(getErrorMessage(e))
+  }
+}
+function addIgnored() {
+  const v = ignoreInput.value.trim()
+  if (!v || ignoredApps.value.includes(v)) return
+  void saveIgnored([...ignoredApps.value, v])
+  ignoreInput.value = ''
+}
+function removeIgnored(app: string) {
+  void saveIgnored(ignoredApps.value.filter((a) => a !== app))
+}
+async function doPause() {
+  try {
+    // minutes<=0 在后端表示「直到手动恢复」。
+    unwrap(await PauseClipboardCapture(pauseMinutes.value === 'forever' ? 0 : pauseMinutes.value))
+    await loadCapture()
+  } catch (e) {
+    toast?.error?.(getErrorMessage(e))
+  }
+}
+async function doResume() {
+  try {
+    unwrap(await ResumeClipboardCapture())
+    await loadCapture()
+  } catch (e) {
+    toast?.error?.(getErrorMessage(e))
+  }
+}
+// 暂停剩余分钟要自己走：设置存的是绝对到期毫秒，页面不会因时间流逝自动重渲染。
+const pauseLeftMin = computed(() => {
+  if (!paused.value || pauseUntil.value < 0) return 0
+  return Math.max(1, Math.ceil((pauseUntil.value - nowTick.value) / 60000))
+})
+
 async function load() {
   loading.value = true
   try {
     const [list, on] = await Promise.all([
       ListClipboardRules().then((r) => unwrap<ClipboardRule[]>(r)),
       GetClipboardRulesEnabled().then((r) => unwrap<boolean>(r)),
+      loadCapture(),
     ])
     rules.value = Array.isArray(list) ? list : []
     globalOn.value = on === true
@@ -57,7 +126,13 @@ async function load() {
     loading.value = false
   }
 }
-onMounted(load)
+onMounted(() => {
+  void load()
+  pauseTicker = window.setInterval(() => { nowTick.value = Date.now() }, 30000)
+})
+onUnmounted(() => {
+  if (pauseTicker !== null) clearInterval(pauseTicker)
+})
 
 async function toggleGlobal() {
   if (busy.value) return
@@ -322,6 +397,49 @@ function matchLabel(r: ClipboardRule): string {
       <Plus :size="13" />
       <span>{{ t('crNew') }}</span>
     </button>
+
+    <!-- 采不采：与「自动规则」是两件事。规则改的是内容，这里决定这次复制要不要进历史；
+         不做脱敏/加密（见 internal/cliprule 的产品决定），只是丢弃不采。 -->
+    <section class="cr-capture">
+      <h3 class="section-title">{{ t('crIgnoreTitle') }}</h3>
+      <p class="cr-capture-hint">{{ t('crIgnoreHint') }}</p>
+      <div class="cr-ignore-add">
+        <input v-model="ignoreInput" class="field-input" :placeholder="t('crIgnorePlaceholder')"
+               @keydown.enter="addIgnored" />
+        <button class="btn btn-secondary" :disabled="!ignoreInput.trim()" @click="addIgnored">
+          <Plus :size="12" /><span>{{ t('add') }}</span>
+        </button>
+      </div>
+      <div v-if="ignoredApps.length" class="cr-ignore-list">
+        <span v-for="app in ignoredApps" :key="app" class="cr-ignore-chip">
+          {{ app }}
+          <button class="cr-ignore-del" :title="t('delete')" @click="removeIgnored(app)"><X :size="11" /></button>
+        </span>
+      </div>
+    </section>
+
+    <section class="cr-capture">
+      <h3 class="section-title">{{ t('crPauseTitle') }}</h3>
+      <p class="cr-capture-hint">{{ t('crPauseHint') }}</p>
+      <div class="cr-pause-row">
+        <select v-model="pauseMinutes" class="field-input cr-pause-select">
+          <option :value="5">{{ t('crPauseMinutes', { n: 5 }) }}</option>
+          <option :value="15">{{ t('crPauseMinutes', { n: 15 }) }}</option>
+          <option :value="30">{{ t('crPauseMinutes', { n: 30 }) }}</option>
+          <option :value="60">{{ t('crPauseMinutes', { n: 60 }) }}</option>
+          <option :value="'forever'">{{ t('crPauseUntilResume') }}</option>
+        </select>
+        <button v-if="!paused" class="btn btn-secondary" @click="doPause">
+          <Pause :size="12" /><span>{{ t('crPauseNow') }}</span>
+        </button>
+        <button v-else class="btn btn-primary" @click="doResume">
+          <Play :size="12" /><span>{{ t('crResume') }}</span>
+        </button>
+        <span v-if="paused" class="cr-capture-state">
+          {{ pauseUntil < 0 ? t('crPausedIndefinite') : t('crPausedState', { n: pauseLeftMin }) }}
+        </span>
+      </div>
+    </section>
   </div>
 </template>
 
@@ -478,4 +596,29 @@ function matchLabel(r: ClipboardRule): string {
 .cr-icon-btn.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
 .cr-empty { margin: 0; padding: 18px 12px; text-align: center; font-size: 12px; color: var(--color-text-disabled); }
 .cr-add { display: inline-flex; align-items: center; gap: 6px; margin-top: 12px; }
+
+/* 捕获设置：与规则区用一条分隔线隔开，宽度仍受 .cr-page 的 720px 约束。 */
+.cr-capture {
+  margin-top: 24px; padding-top: 18px;
+  border-top: 1px solid var(--color-border);
+}
+.cr-capture-hint { margin: 0 0 12px; font-size: 11px; color: var(--color-text-disabled); line-height: 1.6; }
+.cr-ignore-add { display: flex; gap: 8px; }
+.cr-ignore-add .field-input { flex: 1; min-width: 0; }
+.cr-ignore-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.cr-ignore-chip {
+  display: inline-flex; align-items: center; gap: 4px;
+  padding: 3px 5px 3px 9px; font-size: 11px;
+  color: var(--color-text-secondary); background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-lg);
+}
+.cr-ignore-del {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 16px; height: 16px; padding: 0; border: none; border-radius: var(--radius-xs);
+  background: transparent; color: var(--color-text-disabled); cursor: pointer;
+}
+.cr-ignore-del:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+.cr-pause-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cr-pause-select { width: auto; min-width: 160px; }
+.cr-capture-state { font-size: 11px; color: var(--color-warning); }
 </style>

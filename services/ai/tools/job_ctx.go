@@ -126,3 +126,29 @@ func jobCollectorFrom(ctx context.Context) *JobCollector {
 	c, _ := ctx.Value(jobCollectorKey{}).(*JobCollector)
 	return c
 }
+
+type jobConvIDKey struct{}
+
+// WithConvID 把会话 id 挂到 ctx 上，供后台任务落库时写入 ai_jobs.conv_id。
+//
+// 单独做一个 ctx 值而不是让工具包反向 import services/ai 去读 agentScope：
+// 那样会成环（services/ai 已经 import 了本包）。和 WithJobCollector 同款，
+// 由能感知会话的一层注入，工具侧只认 ctx。
+//
+// 必须在会话 id 确定之后调用：新建会话的 id 是在 runAgent 里创建会话行时才拿到的，
+// 函数开头 req.ConvID 可能还是空串。
+func WithConvID(ctx context.Context, convID string) context.Context {
+	if ctx == nil || convID == "" {
+		return ctx
+	}
+	return context.WithValue(ctx, jobConvIDKey{}, convID)
+}
+
+// ConvIDFrom 取当前 ctx 的会话 id；没挂返回空串。
+func ConvIDFrom(ctx context.Context) string {
+	if ctx == nil {
+		return ""
+	}
+	s, _ := ctx.Value(jobConvIDKey{}).(string)
+	return s
+}

@@ -6,21 +6,25 @@ import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, next
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
+import { escapeHtml } from '../utils/echarts'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { useToast } from '../composables/useToast'
 import {
   CreateMonitor, ListMonitors, UpdateMonitor,
-  DeleteMonitor, SoftDeleteMonitor, RestoreMonitor, ListDeletedMonitors,
+  SoftDeleteMonitor,
   SetMonitorEnabled, SetMonitorSort, SetMonitorMaintenance, CheckMonitorNow,
   GetMonitorLogs, GetMonitorLogsSince, ClearMonitorLogs, ListMonitorStats,
   SetMonitorMute,
 } from '../../bindings/quickdock/services/monitor/monitorservice'
-import { useFloatMenu } from '../composables/useFloatMenu'
 import type { Monitor } from '../../bindings/quickdock/internal/db/models'
 import { Events } from '@wailsio/runtime'
 import ConfirmDialog from './ConfirmDialog.vue'
-// D9：canvas 图表用色集中到 palette（主题扩展表），canvas 无法吃 CSS var，运行时取此表
-import { CHART_COLORS } from '../utils/palette'
+// 状态页与监控列表同源，做成第三个视图而不是独立导航：用户配置完监控就地看整体状态。
+import StatusPage from './StatusPage.vue'
+import QdLineChart from './charts/QdLineChart.vue'
+// 通知中心「点通知 → 落到具体监控项」：深链目标由 bridge 的 pendingTarget 带过来
+import { pendingTarget } from '../composables/bridge'
 
 // 以下两个结构仅作为返回值中的元素出现，Wails 绑定生成器不会为其单独生成类型，
 // 故在前端本地声明（运行时为普通 JSON，字段与后端 json tag 一致）。
@@ -40,6 +44,8 @@ interface MonitorStat {
   upChecks: number
   uptimeRatio: number
   avgLatencyMs: number
+  p95LatencyMs: number
+  p99LatencyMs: number
   lastDownAt: string
 }
 import {
@@ -222,14 +228,13 @@ function uptimeText(id: string): string {
 // 10000 次里挂 10 次完全看不出来 —— totalChecks 就是这个分母。
 function checksOf(id: string): number { return statOf(id)?.totalChecks ?? 0 }
 function avgLatOf(id: string): number { return statOf(id)?.avgLatencyMs ?? 0 }
+// 分位数是近 24h 成功探测的响应时间统计；0 表示没有样本，下面模板用 >0 判断，
+// 免得把「没数据」显示成「0ms 超快」。
+function p95Of(id: string): number { return statOf(id)?.p95LatencyMs ?? 0 }
+function p99Of(id: string): number { return statOf(id)?.p99LatencyMs ?? 0 }
 function lastDownText(id: string): string {
   const v = statOf(id)?.lastDownAt || ''
   return v ? v.slice(5, 16) : '' // YYYY-MM-DD HH:MM:SS → MM-DD HH:MM
-}
-
-function expectedLabel(e: string): string {
-  if (e === '') return 'any'
-  return e
 }
 
 // ---- 表单（新增 / 编辑共用） ----
@@ -276,7 +281,15 @@ const showBodyFields = computed(() => (NEEDS_BODY as readonly string[]).includes
 const MATCH_TYPES = ['none', 'contains', 'not_contains', 'regex']
 
 /** 探测类型清单，值与后端 db.MonitorKind* 一一对应。 */
-const KINDS = ['http', 'tcp', 'process', 'cmd'] as const
+const KINDS = ['http', 'tcp', 'process', 'cmd', 'dns', 'ping'] as const
+
+/** 探测类型按钮文案。dns/ping 是后加的类型，用 camelCase 新键而不是继续往
+ *  mon_kind_<k> 这套历史下划线键里补 —— 新增键按规范一律 camelCase。 */
+function kindLabel(k: string): string {
+  if (k === 'dns') return t('monitorKindDns')
+  if (k === 'ping') return t('monitorKindPing')
+  return t('mon_kind_' + k)
+}
 
 /** 归一化探测类型：空值/未知值按 http（与后端 normalizeMonitorKind 同口径）。 */
 function kindOf(m: Monitor): string {
@@ -291,6 +304,8 @@ function targetText(m: Monitor): string {
 /** 每类探针一个图标：一眼区分「网站」「端口」「进程」「脚本」，比统一用地球图标有用。 */
 const KIND_ICONS: Record<string, Component> = {
   http: Globe, tcp: Network, process: Cpu, cmd: TerminalSquare,
+  // 复用本文件已引入的图标，不新增依赖：域名解析用地球，ICMP 探活用信号。
+  dns: Globe, ping: Radio,
 }
 function kindIcon(m: Monitor): Component {
   return KIND_ICONS[kindOf(m)] || Globe
@@ -345,7 +360,9 @@ function openEdit(m: Monitor) {
   fMethod.value = m.method || 'GET'
   fIntervalVal.value = Math.max(5, m.intervalSec || 60)
   fTimeout.value = m.timeoutSec || 10
-  fExpected.value = m.expectedStatus === '' ? 'any' : m.expectedStatus
+  // any 以字面量 'any' 落库（monitor_checker.matchesExpected 只认字面量）。
+  // 空串只是「未填」的缺眢值，DB 归一化后也是 2xx，不再当作 any 的别名。
+  fExpected.value = m.expectedStatus || '2xx'
   fFollow.value = m.followRedirects
   fEnabled.value = m.enabled
   fNotifyDown.value = m.notifyDown
@@ -376,7 +393,9 @@ function buildPayload(): MonitorWithHTTP {
     method: fMethod.value,
     intervalSec: intervalVal(),
     timeoutSec: Math.max(1, Math.floor(fTimeout.value || 10)),
-    expectedStatus: fExpected.value === 'any' ? '' : fExpected.value,
+    // 不能再把 any 转成空串：db/monitor.go 会把空串归一成 '2xx'，
+    // 于是后端 matchesExpected 的 any 分支永远走不到（选 any 实际仍按 2xx 判）。
+    expectedStatus: fExpected.value,
     followRedirects: fFollow.value,
     enabled: fEnabled.value,
     notifyDown: fNotifyDown.value,
@@ -460,40 +479,28 @@ async function confirmDel() {
   try { await unwrap(await SoftDeleteMonitor(m.id)); expanded.value.delete(m.id); await refresh() } catch (e) { error.value = getErrorMessage(e) }
 }
 
-// ---- 回收站 ----
-// 与硬删不同，软删只打标，日志与运行数据都留着。误删可一键恢复，
-// 彻底删除（真要抹掉）留在回收站里做，平时不会误触。
-const viewMode = ref<'active' | 'recycle'>('active')
-const deletedMonitors = ref<Monitor[]>([])
-const loadingDeleted = ref(false)
+// ---- 视图切换 ----
+// 回收站不再占一个 tab：全站只有一份，在「设置 → 历史 → 回收站」。
+// 监控软删仍保留日志与运行数据，只是找回/彻底删除都交给全局回收站做。
+const viewMode = ref<'active' | 'status'>('active')
 
-async function loadDeleted() {
-  loadingDeleted.value = true
-  try {
-    deletedMonitors.value = unwrap<Monitor[]>(await ListDeletedMonitors()) ?? []
-  } catch (e) { error.value = getErrorMessage(e) } finally { loadingDeleted.value = false }
+/** 回收站的唯一入口，落到设置的历史页并直接切到回收站分段。 */
+function openRecycleBin() {
+  try { Events.Emit('app:open-settings', 'history:recycle') } catch { /* 事件通道未就绪时静默 */ }
 }
 
-async function switchView(v: 'active' | 'recycle') {
+async function switchView(v: 'active' | 'status') {
   viewMode.value = v
   clearSelection()
-  if (v === 'recycle') await loadDeleted()
-  else await refresh()
+  if (v === 'active') await refresh()
+  // status 视图自带 60 秒轮询与首屏加载，父页不再重复发一轮 IPC。
 }
 
-async function restoreMonitor(m: Monitor) {
-  try { await unwrap(await RestoreMonitor(m.id)); await loadDeleted() } catch (e) { error.value = getErrorMessage(e) }
-}
-
-const purgeTarget = ref<Monitor | null>(null)
-const showPurgeConfirm = ref(false)
-function askPurge(m: Monitor) { purgeTarget.value = m; showPurgeConfirm.value = true }
-async function confirmPurge() {
-  const m = purgeTarget.value
-  if (!m) return
-  showPurgeConfirm.value = false
-  purgeTarget.value = null
-  try { await unwrap(await DeleteMonitor(m.id)); await loadDeleted() } catch (e) { error.value = getErrorMessage(e) }
+// 状态页每轮 load 拿到的就是父页汇总条所需的同一份数据。直接回灌，
+// 上方四个数字才能跟着状态页一起刷新，又不必在 status 视图再开一条父页定时器。
+function onStatusData(mons: Monitor[], st: Record<string, MonitorStat>) {
+  monitors.value = mons
+  stats.value = st
 }
 
 // ---- 维护窗口 ----
@@ -608,17 +615,18 @@ async function loadLogs(id: string) {
   try {
     const rs = rangeSec(id)
     const since = rs > 0 ? Math.floor(Date.now() / 1000) - rs : 0
-    // 绘图点上限 2000：再多 canvas 也画不出区别，但序列化与解析会明显变慢。
+    // 绘图点上限 2000：再多画布也画不出区别，但序列化与解析会明显变慢。
     // 后端保留上限已提到 20000 条，所以「7d / 全部」拿到的确实是可用区间内的数据。
     logsMap.value[id] = unwrap<MonitorLog[]>(await GetMonitorLogsSince(id, since, 2000)) ?? []
-  } catch { /* ignore */ }
+  } catch (e) {
+    // 展开面板的数据失败只让图表显示空态，不拖垮整页
+    logErr('monitor.loadLogs', e)
+  }
 }
 
-// 切换时间范围后重新加载并重绘
+// 切换时间范围后重新加载：QdLineChart watch 数据变化自动重绘
 async function onRangeChange(id: string) {
   await loadLogs(id)
-  await nextTick()
-  drawChart(id)
 }
 
 // ---- 正常率环形图 ----
@@ -661,203 +669,56 @@ function certWarn(m: Monitor): boolean {
   return m.certExpiresAt - Date.now() / 1000 < m.certWarnDays * 86400
 }
 
-// ---- 曲线图 tooltip ----
-// 存储每个图的数据点像素位置，用于鼠标悬停检测
-const chartPoints = new Map<string, Array<{ x: number; y: number; data: MonitorLog }>>()
-const tooltip = ref<{ show: boolean; data: MonitorLog | null }>({
-  show: false, data: null,
+// ---- 延迟折线图数据 ----
+// 图由 QdLineChart 渲染：x 轴是 time（毫秒时间戳），上千点靠 lttb 降采样，
+// 超时阈值走 markLine，探测失败的点单独标红。数据只在这里组装，组件不拉数据。
+interface ChartView {
+  series: { name: string; points: [number, number][]; color: 'accent' }[]
+  anomalies: { x: number; y: number }[]
+  threshold: number
+  tooltipExtra: (x: number, y: number) => string
+}
+const chartViewMap = computed<Record<string, ChartView>>(() => {
+  const out: Record<string, ChartView> = {}
+  for (const [id, logs] of Object.entries(logsMap.value)) {
+    const data = [...logs].reverse() // 后端倒序，转正序
+    const points: [number, number][] = []
+    const anomalies: { x: number; y: number }[] = []
+    for (const l of data) {
+      const ts = l.checkedTs || Date.parse(l.checkedAt)
+      if (!Number.isFinite(ts) || ts <= 0) continue
+      points.push([ts, l.latencyMs])
+      if (l.status !== 'up') anomalies.push({ x: ts, y: l.latencyMs })
+    }
+    const timeout = monitors.value.find((m) => m.id === id)?.timeoutSec || 10
+    out[id] = {
+      series: [{ name: t('chartLegendLatency'), points, color: 'accent' as const }],
+      anomalies,
+      threshold: timeout * 1000,
+      tooltipExtra: (x: number): string => {
+        const l = data.find((v) => (v.checkedTs || Date.parse(v.checkedAt)) === x)
+        if (!l) return ''
+        const status = l.status === 'up' ? t('mon_up') : t('mon_down')
+        let html = `<div>${t('chartTooltipStatus')}: ${escapeHtml(status)} ${escapeHtml(String(l.statusCode || 'ERR'))}</div>`
+        if (l.error) html += `<div>${escapeHtml(l.error)}</div>`
+        return html
+      },
+    }
+  }
+  return out
 })
-// floating-ui：跟随鼠标位置（偏移到右下方），靠边自动内收
-const tipCtx = useFloatMenu({ placement: 'right-start', offset: { mainAxis: 14, crossAxis: -8 } })
-
-function onChartMove(e: MouseEvent, id: string) {
-  const pts = chartPoints.get(id)
-  if (!pts || pts.length === 0) { tooltip.value.show = false; tipCtx.hide(); return }
-  const rect = (e.currentTarget as HTMLCanvasElement).getBoundingClientRect()
-  const mx = e.clientX - rect.left
-  const my = e.clientY - rect.top
-  const threshold = 28
-  let minDist = Infinity
-  let nearest: typeof pts[0] | null = null
-  for (const p of pts) {
-    const d = Math.sqrt((p.x - mx) ** 2 + (p.y - my) ** 2)
-    if (d < minDist && d < threshold) { minDist = d; nearest = p }
-  }
-  if (nearest) {
-    tooltip.value = { show: true, data: nearest.data }
-    if (tipCtx.visible.value) tipCtx.updateAt(e.clientX, e.clientY)
-    else tipCtx.showAt(e.clientX, e.clientY)
-  } else {
-    tooltip.value.show = false
-    tipCtx.hide()
+function chartView(id: string): ChartView {
+  return chartViewMap.value[id] ?? {
+    series: [], anomalies: [], threshold: 0, tooltipExtra: () => '',
   }
 }
-function onChartLeave() {
-  tooltip.value.show = false
-  tipCtx.hide()
-}
 
-function drawChart(id: string) {
-  const logs = logsMap.value[id]
-  if (!logs || logs.length === 0) return
-  const canvas = document.getElementById('chart-' + id) as HTMLCanvasElement | null
-  if (!canvas) return
-
-  const dpr = window.devicePixelRatio || 1
-  const rect = canvas.getBoundingClientRect()
-  canvas.width = rect.width * dpr
-  canvas.height = rect.height * dpr
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
-  ctx.scale(dpr, dpr)
-  const W = rect.width, H = rect.height
-
-  // 边距
-  const PL = 48, PR = 16, PT = 12, PB = 28
-  const CX = W - PL - PR  // chart area width
-  const CY = H - PT - PB  // chart area height
-
-  // 背景
-  ctx.fillStyle = CHART_COLORS.bg
-  ctx.fillRect(0, 0, W, H)
-
-  // 数据：取最近 50 条，时间正序（后端返回倒序）
-  const data = [...logs].reverse()
-  const n = data.length
-  if (n < 2) {
-    ctx.fillStyle = CHART_COLORS.textMuted
-    ctx.font = '12px sans-serif'
-    ctx.textAlign = 'center'
-    ctx.fillText(t('monitorNeedMoreData'), W / 2, H / 2)
-    return
-  }
-
-  // 找出延迟最大值 + 超时
-  let maxLat = 0
-  for (const d of data) {
-    if (d.latencyMs > maxLat) maxLat = d.latencyMs
-  }
-  maxLat = Math.max(maxLat, 100) // 至少 100ms
-  // Y 轴刻度：取整
-  const yStep = maxLat <= 200 ? 50 : maxLat <= 500 ? 100 : maxLat <= 2000 ? 500 : 1000
-  const yMax = Math.ceil(maxLat / yStep) * yStep
-  const timeout = monitors.value.find(m => m.id === id)?.timeoutSec || 10
-
-  function xPos(i: number): number {
-    if (n <= 1) return PL + CX / 2
-    return PL + (i / (n - 1)) * CX
-  }
-  function yPos(ms: number): number {
-    if (yMax <= 0) return PT
-    return PT + CY - (ms / yMax) * CY
-  }
-
-  // ---- 网格 ----
-  ctx.strokeStyle = CHART_COLORS.grid
-  ctx.lineWidth = 1
-  for (let y = 0; y <= yMax; y += yStep) {
-    const yy = yPos(y)
-    ctx.beginPath(); ctx.moveTo(PL, yy); ctx.lineTo(W - PR, yy); ctx.stroke()
-    ctx.fillStyle = CHART_COLORS.textMuted
-    ctx.font = '10px sans-serif'
-    ctx.textAlign = 'right'
-    ctx.fillText(y + t('monitorMsSuffix'), PL - 6, yy + 3)
-  }
-
-  // 超时线
-  const timeoutY = yPos(timeout * 1000)
-  if (timeoutY > PT) {
-    ctx.strokeStyle = CHART_COLORS.timeoutLine
-    ctx.setLineDash([4, 4])
-    ctx.beginPath(); ctx.moveTo(PL, timeoutY); ctx.lineTo(W - PR, timeoutY); ctx.stroke()
-    ctx.setLineDash([])
-    ctx.fillStyle = CHART_COLORS.timeoutText
-    ctx.font = '9px sans-serif'
-    ctx.textAlign = 'left'
-    ctx.fillText(t('monitorTimeoutLabel', { seconds: timeout }), PL + 4, timeoutY - 3)
-  }
-
-  // ---- X 轴标签（最多显示 6 个） ----
-  const xLabelCount = Math.min(n, 6)
-  const xLabelStep = Math.max(1, Math.floor((n - 1) / (xLabelCount - 1)))
-  ctx.fillStyle = CHART_COLORS.textMuted2
-  ctx.font = '9px sans-serif'
-  ctx.textAlign = 'center'
-  for (let i = 0; i < n; i += xLabelStep) {
-    const label = data[i].checkedAt.slice(11, 19) || ''
-    if (label) ctx.fillText(label, xPos(i), H - 6)
-  }
-  // 最后一个
-  const lastLabel = data[n - 1].checkedAt.slice(11, 19) || ''
-  if (lastLabel && (n - 1) % xLabelStep !== 0) ctx.fillText(lastLabel, xPos(n - 1), H - 6)
-
-  // ---- 折线 ----
-  // 先画线
-  ctx.beginPath()
-  for (let i = 0; i < n; i++) {
-    const x = xPos(i), y = yPos(data[i].latencyMs)
-    if (i === 0) ctx.moveTo(x, y)
-    else ctx.lineTo(x, y)
-  }
-  ctx.strokeStyle = CHART_COLORS.accent
-  ctx.lineWidth = 2
-  ctx.stroke()
-
-  // 再画点 + 上下箭头（根据 status）
-  for (let i = 0; i < n; i++) {
-    const d = data[i]
-    const x = xPos(i), y = yPos(d.latencyMs)
-    const r = 3.5
-    if (d.status === 'up') {
-      ctx.fillStyle = CHART_COLORS.ok
-    } else {
-      ctx.fillStyle = CHART_COLORS.danger
-    }
-    ctx.beginPath()
-    ctx.arc(x, y, r, 0, Math.PI * 2)
-    ctx.fill()
-    // 失败的显示小箭头或 x
-    if (d.status !== 'up') {
-      ctx.strokeStyle = CHART_COLORS.danger
-      ctx.lineWidth = 1.5
-      const s = 4
-      ctx.beginPath()
-      ctx.moveTo(x - s, y - s); ctx.lineTo(x + s, y + s)
-      ctx.moveTo(x + s, y - s); ctx.lineTo(x - s, y + s)
-      ctx.stroke()
-    }
-  }
-
-  // 右上角图例
-  const total = n, upCnt = data.filter(d => d.status === 'up').length
-  ctx.fillStyle = CHART_COLORS.legendBg
-  ctx.fillRect(W - PR - 110, PT + 2, 108, 38)
-  ctx.font = '10px sans-serif'
-  ctx.textAlign = 'left'
-  ctx.fillStyle = CHART_COLORS.textMuted3
-  ctx.fillText(t('monitorChecks', { count: total }), W - PR - 102, PT + 14)
-  ctx.fillStyle = CHART_COLORS.ok
-  ctx.fillText(t('monitorHealthy', { count: upCnt }), W - PR - 102, PT + 27)
-  ctx.fillStyle = CHART_COLORS.danger
-  ctx.fillText(t('monitorFaults', { count: total - upCnt }), W - PR - 50, PT + 27)
-  // 存储像素坐标供 tooltip 悬停检测
-  const pts: Array<{ x: number; y: number; data: MonitorLog }> = []
-  for (let i = 0; i < n; i++) {
-    pts.push({ x: xPos(i), y: yPos(data[i].latencyMs), data: data[i] })
-  }
-  chartPoints.set(id, pts)
-}
-
-// 展开日志时等待 DOM 渲染完再画图
+// 展开日志时才挂载 QdLineChart（v-if），组件 onMounted 自行 init；收起即销毁。
 async function toggleExpand(m: Monitor) {
   if (expanded.value.has(m.id)) { expanded.value.delete(m.id); return }
   expanded.value.add(m.id)
   await loadLogs(m.id)
-  await nextTick()
-  drawChart(m.id)
 }
-
-function chartId(id: string) { return 'chart-' + id }
 
 async function clearLogs(m: Monitor) {
   try { await unwrap(await ClearMonitorLogs(m.id)); logsMap.value[m.id] = [] } catch (e) { error.value = getErrorMessage(e) }
@@ -971,7 +832,7 @@ let pollTimer: ReturnType<typeof setTimeout> | undefined
 let polling = false
 // 本页在 KeepAlive 白名单里：切走只触发 onDeactivated 不卸载，
 // document.hidden 只挡得住最小化，挡不住切页。没有这个标志，
-// 后台会一直每 refreshSec 秒跑一遍 refresh + loadLogs + drawChart。
+// 后台会一直每 refreshSec 秒跑一遍 refresh + loadLogs。
 let pageActive = false
 let needsRefresh = false
 
@@ -990,18 +851,21 @@ async function pollTick() {
   polling = true
   try {
     await refresh()
-    // 重新加载展开的监控日志并重绘图表
+    // 重新加载展开的监控日志：图表组件 watch 数据变化自动重绘
     for (const id of expanded.value) {
       await loadLogs(id)
-      drawChart(id)
     }
-  } catch (_) { /* refresh/loadLogs 内部已处理错误，此处仅兜底 */ }
+  } catch (e) {
+    // refresh/loadLogs 内部已处理错误，此处仅兜底记录
+    logErr('monitor.pollTick', e)
+  }
   polling = false
   scheduleNext()
 }
 
 function scheduleNext() {
-  if (!pageActive || refreshSec.value <= 0 || pollTimer) return
+  // 状态页有自己的 60 秒刷新；这里继续排 timer 只会每 5 秒空转一次。
+  if (!pageActive || refreshSec.value <= 0 || pollTimer || viewMode.value === 'status') return
   pollTimer = setTimeout(pollTick, refreshSec.value * 1000)
 }
 
@@ -1014,6 +878,9 @@ watch(refreshSec, (v) => {
   if (typeof localStorage !== 'undefined') localStorage.setItem(LS_REFRESH_KEY, String(v))
   applyAutoRefresh()
 })
+
+// 切回活动/回收站时恢复父页轮询；切到状态页时 applyAutoRefresh 会清掉 timer。
+watch(viewMode, () => applyAutoRefresh())
 
 // 回到前台立刻补一次：后台期间轮询是跳过的，不补一次会看到一份过期数据。
 function onVisibility() {
@@ -1043,13 +910,61 @@ function stopPolling() {
   document.removeEventListener('visibilitychange', onVisibility)
 }
 
+// 设置里的全局回收站恢复/彻底删除监控后发这个事件。监控页是 KeepAlive
+// 常驻页，自动刷新还可能被关掉，光靠轮询会一直看到旧的软删状态。
+let offMonitorChanged: (() => void) | null = null
+
 onMounted(() => {
   refresh()
   startPolling()
+  offMonitorChanged = Events.On('monitor:changed', () => { void refresh() })
 })
 onActivated(startPolling)
 onDeactivated(stopPolling)
 onUnmounted(stopPolling)
+
+// ---- 通知中心深链定位 ----
+// 点一条监控通知后 App 把 refId 挂到 pendingTarget 再切到本页；只切页不够，
+// 得停在那一条上。与 TodoPage 的 focusPendingTodo 同一套做法。
+const flashMonitorId = ref('')
+let flashTimer: number | null = null
+
+async function focusMonitor(id: string) {
+  // 目标可能先于数据到位：切页时 refresh() 还在路上，列表是空的
+  let m = monitors.value.find(x => x.id === id)
+  if (!m) { await refresh(); m = monitors.value.find(x => x.id === id) }
+  // 条目已被删除 / 是回收站里的软删项：静默忽略，不弹 toast、不落到空白详情
+  if (!m) return
+  // 筛选会把目标藏在列表之外，DOM 里根本没这一行，先把它放回可见集合
+  if (viewMode.value !== 'active') await switchView('active')
+  if (groupFilter.value) groupFilter.value = ''
+  if (query.value) query.value = ''
+  await nextTick()
+  const el = document.querySelector<HTMLElement>(`[data-monitor-id="${id.replace(/"/g, '\\"')}"]`)
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  flashMonitorId.value = id
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = window.setTimeout(() => { flashMonitorId.value = '' }, 1800)
+}
+
+function consumePendingTarget() {
+  const p = pendingTarget.value
+  if (!p || p.page !== 'monitor' || !p.target) return
+  const id = p.target
+  // 取走即清空：留着的话下次从侧栏正常进来（或切走再回来）会重复定位到旧条目
+  pendingTarget.value = null
+  void focusMonitor(id)
+}
+// immediate 吃「navigateTo 先写好、本页还没挂载」的目标；置 null 会让 watch 再触发一次（守卫挡掉）
+watch(pendingTarget, consumePendingTarget, { immediate: true })
+// 双重兜底：异步组件竞态下若 immediate 那次被跳过，挂载后再补一次（已消费则是 no-op）
+onMounted(consumePendingTarget)
+onUnmounted(() => {
+  if (flashTimer) clearTimeout(flashTimer)
+  offMonitorChanged?.()
+  offMonitorChanged = null
+})
 </script>
 
 <template>
@@ -1061,7 +976,7 @@ onUnmounted(stopPolling)
         <span class="qd-page-sub">{{ t('mon_subtitle') }}</span>
       </div>
       <div class="qd-page-actions">
-        <div class="refresh-control">
+        <div v-if="viewMode !== 'status'" class="refresh-control">
           <RefreshCw :size="14" />
           <select v-model.number="refreshSec" class="refresh-select" :title="t('mon_auto_refresh')">
             <option v-for="o in REFRESH_OPTIONS" :key="o" :value="o">
@@ -1069,6 +984,10 @@ onUnmounted(stopPolling)
             </option>
           </select>
         </div>
+        <!-- 回收站全站只有一份（设置 → 历史 → 回收站），这里只留一个跳转入口 -->
+        <button class="qd-btn" :title="t('recycleBin')" @click="openRecycleBin">
+          <Trash2 :size="14" /> {{ t('recycleBin') }}
+        </button>
         <!-- 机器人地址是全局配置（设置 → 机器人通知），这里只跳转，不再重复弹一份表单 -->
         <button class="qd-btn" :title="t('notifyGoSettings')" @click="openNotifySettings">
           <BellIcon :size="14" /> {{ t('mon_nf_title') }}
@@ -1079,26 +998,26 @@ onUnmounted(stopPolling)
 
     <div v-if="error" class="mon-error">{{ error }}</div>
 
-    <!-- 汇总条 -->
-    <div v-if="monitors.length || (viewMode === 'recycle' && deletedMonitors.length)" class="mon-summary">
+    <!-- 汇总条：三个视图共用，状态页不许把统计顶掉，否则切 tab 时上方数字会整块消失 -->
+    <div v-if="monitors.length" class="mon-summary">
       <div class="sum-item"><span class="sum-num">{{ summary.total }}</span><span class="sum-lbl">{{ t('mon_sum_total') }}</span></div>
       <div class="sum-item up"><span class="sum-num">{{ summary.up }}</span><span class="sum-lbl">{{ t('mon_sum_up') }}</span></div>
       <div class="sum-item down"><span class="sum-num">{{ summary.down }}</span><span class="sum-lbl">{{ t('mon_sum_down') }}</span></div>
       <div class="sum-item"><span class="sum-num">{{ summary.avgLatency }}<i>ms</i></span><span class="sum-lbl">{{ t('mon_sum_latency') }}</span></div>
     </div>
 
-    <!-- 视图切换：活动列表 / 回收站 -->
+    <!-- 视图切换：活动列表 / 状态页（回收站在设置 → 历史） -->
     <div class="mon-viewtabs">
       <button :class="['vt-tab', { active: viewMode === 'active' }]" @click="switchView('active')">
         {{ t('mon_view_active') }}<span v-if="summary.total" class="vt-count">{{ summary.total }}</span>
       </button>
-      <button :class="['vt-tab', { active: viewMode === 'recycle' }]" @click="switchView('recycle')">
-        {{ t('mon_view_recycle') }}<span v-if="deletedMonitors.length" class="vt-count warn">{{ deletedMonitors.length }}</span>
+      <button :class="['vt-tab', { active: viewMode === 'status' }]" @click="switchView('status')">
+        {{ t('monitorViewStatus') }}
       </button>
     </div>
 
     <!-- 分组筛选（有命名分组时才出现，否则纯属噪音） -->
-    <div v-if="monitorGroups.length" class="group-filter">
+    <div v-if="viewMode !== 'status' && monitorGroups.length" class="group-filter">
       <button :class="['group-chip', { active: groupFilter === '' }]" @click="groupFilter = ''">
         {{ t('mon_group_all') }}
       </button>
@@ -1114,7 +1033,7 @@ onUnmounted(stopPolling)
     </div>
 
     <!-- 搜索 + 批量操作条 -->
-    <div v-if="monitors.length >= 4" class="mon-tools">
+    <div v-if="viewMode !== 'status' && monitors.length >= 4" class="mon-tools">
       <label v-if="visibleMonitors.length > 1" class="mon-selall" :title="t('mon_sel_all')">
         <input type="checkbox" :checked="allVisibleSelected" @change="toggleSelectAll" />
       </label>
@@ -1137,8 +1056,13 @@ onUnmounted(stopPolling)
       </template>
     </div>
 
+    <!-- 状态页：只读汇总 + 可导出的静态 HTML 快照，与列表互斥 -->
+    <div v-if="viewMode === 'status'" class="mon-status-wrap">
+      <StatusPage embedded @data="onStatusData" />
+    </div>
+
     <!-- 列表（活动监控） -->
-    <div v-if="viewMode === 'active'" class="mon-list">
+    <div v-else-if="viewMode === 'active'" class="mon-list">
       <div v-if="!loading && monitors.length === 0" class="mon-empty">
         <Radio :size="30" class="empty-icon" />
         <p>{{ t('mon_empty') }}</p>
@@ -1158,7 +1082,8 @@ onUnmounted(stopPolling)
         <div
           v-for="m in g.items"
           :key="m.id"
-          :class="['mon-item', { disabled: !m.enabled, picked: isSelected(m.id), dragging: dragId === m.id }]"
+          :data-monitor-id="m.id"
+          :class="['mon-item', { disabled: !m.enabled, picked: isSelected(m.id), dragging: dragId === m.id, 'mon-flash': flashMonitorId === m.id }]"
           draggable="true"
           @dragstart="onDragStart($event, m)"
           @dragover="onDragOver($event, m)"
@@ -1189,6 +1114,9 @@ onUnmounted(stopPolling)
               <span class="meta-up" :title="t('mon_checks_ttl')">{{ t('mon_uptime') }} {{ uptimeText(m.id) }}<template v-if="checksOf(m.id)"> · {{ t('mon_checks_n', { n: checksOf(m.id) }) }}</template></span>
               <span class="meta-lat" v-if="m.lastLatencyMs > 0">{{ m.lastLatencyMs }}ms</span>
               <span class="meta-avg" v-if="avgLatOf(m.id)" :title="t('mon_avg_ttl')">⌀ {{ avgLatOf(m.id) }}ms</span>
+              <!-- p95/p99 从 ListMonitorStats 读：只在有样本（>0）时显示，0 会被当成「没统计」而不是「0ms」 -->
+              <span v-if="p95Of(m.id) > 0" class="meta-pctl" :title="t('monitorPercentileTip')">p95 {{ p95Of(m.id) }}ms</span>
+              <span v-if="p99Of(m.id) > 0" class="meta-pctl" :title="t('monitorPercentileTip')">p99 {{ p99Of(m.id) }}ms</span>
               <span class="meta-checked">{{ t('mon_checked') }} {{ relTime(m.lastCheckedTs) }}</span>
               <span v-if="lastDownText(m.id)" class="meta-down">{{ t('mon_last_down') }} {{ lastDownText(m.id) }}</span>
               <!-- 状态码列复用给非 http 类型：tcp 没有码（不显示），process 的 code 是进程数，
@@ -1279,8 +1207,18 @@ onUnmounted(stopPolling)
                   <span class="bad">{{ t('mon_down') }} {{ uptimeOf(m.id).down }}</span>
                 </div>
               </div>
-              <canvas :id="chartId(m.id)" class="chart-canvas"
-                @mousemove="onChartMove($event, m.id)" @mouseleave="onChartLeave"></canvas>
+              <QdLineChart
+                class="chart-canvas"
+                :series="chartView(m.id).series"
+                :height="200"
+                :threshold="chartView(m.id).threshold"
+                :threshold-name="t('chartLegendTimeout')"
+                :anomalies="chartView(m.id).anomalies"
+                :anomalies-name="t('mon_down')"
+                :axis-name-x="t('chartAxisTime')"
+                :axis-name-y="t('chartAxisLatency')"
+                :tooltip-extra="chartView(m.id).tooltipExtra"
+              />
             </div>
             <!-- 停机日历：按日看失败强度，一眼定位「哪天挂过」 -->
             <div v-if="calendarDaysFor(m.id).length" class="down-cal">
@@ -1306,43 +1244,6 @@ onUnmounted(stopPolling)
       </template>
     </div>
 
-    <!-- 回收站 -->
-    <div v-else-if="viewMode === 'recycle'" class="mon-list recycle-list">
-      <div v-if="loadingDeleted" class="mon-state"><Loader2 :size="16" class="spin" /><span>{{ t('loading') }}</span></div>
-      <div v-else-if="!deletedMonitors.length" class="mon-empty">
-        <Trash2 :size="30" class="empty-icon" />
-        <p>{{ t('mon_recycle_empty') }}</p>
-      </div>
-      <div v-for="m in deletedMonitors" :key="m.id" class="mon-item recycled">
-        <div class="item-main">
-          <div class="item-line1"><span class="item-name">{{ m.name }}</span></div>
-          <div class="item-url" :title="targetText(m)">
-            <component :is="kindIcon(m)" :size="11" /> {{ targetText(m) }}
-          </div>
-          <div class="item-meta">
-            <span class="meta-checked">{{ t('mon_deleted_at') }} {{ m.deletedAt?.slice(5, 16) || '' }}</span>
-          </div>
-        </div>
-        <div class="item-actions" @click.stop>
-          <button class="act" @click="restoreMonitor(m)" :title="t('mon_restore')"><RefreshCw :size="14" /></button>
-          <button class="act danger" @click="askPurge(m)" :title="t('mon_purge')"><Trash2 :size="14" /></button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 曲线图 tooltip -->
-    <div v-if="tooltip.show && tooltip.data" class="chart-tooltip"
-      :ref="el => (tipCtx.floatingRef.value = el as HTMLElement | null)" :style="tipCtx.floatingStyles.value">
-      <div class="tip-line">
-        <span :class="['tip-dot', tooltip.data.status]"></span>
-        <span class="tip-status">{{ tooltip.data.status === 'up' ? t('mon_up') : t('mon_down') }}</span>
-        <span class="tip-code">{{ tooltip.data.statusCode || 'ERR' }}</span>
-      </div>
-      <div class="tip-line tip-time">{{ tooltip.data.checkedAt }}</div>
-      <div class="tip-line tip-lat">{{ tooltip.data.latencyMs }}ms</div>
-      <div v-if="tooltip.data.error" class="tip-line tip-err">{{ tooltip.data.error }}</div>
-    </div>
-
     <!-- 新增/编辑弹窗 -->
     <div v-if="showModal" class="modal-mask" @click.self="showModal = false">
       <div class="modal">
@@ -1357,13 +1258,25 @@ onUnmounted(stopPolling)
         <div class="kind-tabs">
           <button v-for="k in KINDS" :key="k" type="button"
             :class="['kind-tab', { active: fKind === k }]" @click="fKind = k">
-            <component :is="KIND_ICONS[k]" :size="13" /> {{ t('mon_kind_' + k) }}
+            <component :is="KIND_ICONS[k]" :size="13" /> {{ kindLabel(k) }}
           </button>
         </div>
 
         <template v-if="fKind === 'http'">
           <label>{{ t('mon_url') }}</label>
           <input v-model="fUrl" class="modal-input" placeholder="https://example.com" />
+        </template>
+        <!-- dns/ping 单独分支：它们的目标格式与旧四类不同，且新增 i18n 键按规范用 camelCase，
+             不复用 mon_target_<kind> 的历史下划线动态键（照 cmd 的 v-else 风格加 v-else-if）。 -->
+        <template v-else-if="fKind === 'dns'">
+          <label>{{ t('monitorTargetDns') }}</label>
+          <input v-model="fTarget" class="modal-input" :placeholder="t('monitorTargetDnsPh')" />
+          <p class="field-hint">{{ t('monitorTargetDnsHint') }}</p>
+        </template>
+        <template v-else-if="fKind === 'ping'">
+          <label>{{ t('monitorTargetPing') }}</label>
+          <input v-model="fTarget" class="modal-input" :placeholder="t('monitorTargetPingPh')" />
+          <p class="field-hint">{{ t('monitorTargetPingHint') }}</p>
         </template>
         <template v-else>
           <label>{{ t('mon_target_' + fKind) }}</label>
@@ -1384,7 +1297,7 @@ onUnmounted(stopPolling)
             <div>
               <label>{{ t('mon_expected') }}</label>
               <select v-model="fExpected" class="modal-input">
-                <option v-for="e in EXPECTED" :key="e" :value="e">{{ expectedLabel(e) }}</option>
+                <option v-for="e in EXPECTED" :key="e" :value="e">{{ e }}</option>
               </select>
             </div>
           </div>
@@ -1405,6 +1318,7 @@ onUnmounted(stopPolling)
           <div>
             <label>{{ t('mon_interval') }}{{ t('sched_unit_sec') }}</label>
             <input v-model.number="fIntervalVal" type="number" min="5" class="modal-input" />
+            <p class="field-hint">{{ t('monitorIntervalHint') }}</p>
           </div>          <div>
             <label>{{ t('mon_timeout') }}</label>
             <div class="interval-row">
@@ -1489,12 +1403,6 @@ onUnmounted(stopPolling)
       :message="t('mon_delete_confirm')"
       @confirm="confirmDel"
       @cancel="showDelConfirm = false"
-    />
-    <ConfirmDialog
-      :visible="showPurgeConfirm"
-      :message="t('mon_purge_confirm')"
-      @confirm="confirmPurge"
-      @cancel="showPurgeConfirm = false"
     />
   </div>
 </template>
@@ -1640,10 +1548,18 @@ onUnmounted(stopPolling)
 .mon-item.picked { border-color: var(--color-accent); }
 /* 拖拽中：半透明 + 虚线框，告诉用户「这条正在被拖」而不是页面卡了 */
 .mon-item.dragging { opacity: 0.45; border-style: dashed; }
+/* 通知深链定位后的短暂高亮：监控点可能几十条，不给个落点找不到滚到了哪 */
+.mon-item.mon-flash {
+  border-color: var(--color-accent);
+  animation: mon-flash 1.8s ease-out 1;
+}
+@keyframes mon-flash {
+  0%, 55% { background: var(--color-bg-hover); }
+  100% { background: var(--color-bg-secondary); }
+}
 .mon-item[draggable="true"] { cursor: grab; }
 .mon-item[draggable="true"]:active { cursor: grabbing; }
 /* 回收站里的条目：只读展示，没有展开/勾选那套交互 */
-.mon-item.recycled { cursor: default; }
 
 /* 维护窗口徽标：与状态徽标区分，用中性的强调色 */
 .meta-maint { color: var(--color-warning, var(--color-text-muted)); }
@@ -1651,8 +1567,10 @@ onUnmounted(stopPolling)
 .meta-mute { display: inline-flex; align-items: center; gap: 3px; color: var(--color-text-muted); }
 .mon-item .act.active { color: var(--color-warning, var(--color-accent)); }
 
-/* 视图切换 tab：活动列表 / 回收站，像标签页一样一眼分清当前在哪 */
+/* 视图切换 tab：活动列表 / 状态页，像标签页一样一眼分清当前在哪 */
 .mon-viewtabs { display: flex; gap: var(--space-2); padding: 0 20px 10px; }
+/* 状态页与列表互斥，继承同一块可滚动内容区，避免多出一截空白。 */
+.mon-status-wrap { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 16px; }
 .vt-tab {
   display: inline-flex; align-items: center; gap: 6px;
   padding: 5px 12px; border-radius: 999px;
@@ -1693,6 +1611,7 @@ onUnmounted(stopPolling)
 .meta-up { color: var(--color-accent); }
 .meta-lat { color: var(--color-text-muted); }
 .meta-avg { color: var(--color-text-muted); }
+.meta-pctl { color: var(--color-text-muted); }
 .meta-down { color: var(--color-warning); }
 .meta-code { color: var(--color-text-muted); }
 /* 最近一次错误：单行截断，完整内容在 title 里（错误串可能很长，撑开会把行挤爆） */
@@ -1754,9 +1673,9 @@ onUnmounted(stopPolling)
 .logs-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger); }
 .logs-empty { font-size: 11px; color: var(--color-text-disabled); padding: 6px 0; }
 
-/* 曲线图 canvas */
+/* 日志可视化：正常率环（原生 SVG）+ 延迟折线（QdLineChart） */
 .logs-viz { display: flex; align-items: stretch; gap: 12px; }
-.chart-canvas { display: block; width: 100%; flex: 1; min-width: 0; height: 200px; border-radius: var(--radius-md); }
+.chart-canvas { flex: 1; min-width: 0; }
 
 /* ---- 正常率环形图 ---- */
 /* 108px 固定宽：再窄环和百分比会互相挤压，再宽就抢折线图的空间。 */
@@ -1812,24 +1731,6 @@ onUnmounted(stopPolling)
 .cal-cell.lv1 { background: var(--color-warning-bg); border-color: var(--color-warning-border); }
 .cal-cell.lv2 { background: var(--color-warning); border-color: var(--color-warning); }
 .cal-cell.lv3 { background: var(--color-danger); border-color: var(--color-danger); }
-
-/* 曲线图 tooltip */
-.chart-tooltip {
-  position: fixed; z-index: 999; pointer-events: none;
-  background: rgba(20, 20, 35, 0.92); border: 1px solid var(--color-accent-border-strong);
-  border-radius: var(--radius-md); padding: 6px 10px; font-size: 11px;
-  box-shadow: 0 4px 16px var(--color-bg-overlay); backdrop-filter: blur(4px);
-  min-width: 100px;
-}
-.tip-line { display: flex; align-items: center; gap: 6px; margin: 1px 0; }
-.tip-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
-.tip-dot.up { background: var(--color-success); }
-.tip-dot.down { background: var(--color-danger); }
-.tip-status { color: var(--color-text-primary); font-weight: 500; }
-.tip-code { color: var(--color-text-muted); font-weight: 600; }
-.tip-time { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
-.tip-lat { color: var(--color-accent); }
-.tip-err { color: var(--color-danger); white-space: nowrap; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
 
 
 /* 弹窗 */

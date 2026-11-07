@@ -102,7 +102,7 @@ func startBackgroundCommand(ctx context.Context, d Deps, command, dir string) (m
 	// 先落库再起进程：进程如果秒退，它的状态更新会在「还没有这一行」时执行，
 	// 影响 0 行，库里就永远留着一个 running 的幽灵任务。
 	if err := database.CreateAIJob(db.AIJob{
-		ID: id, Command: command, Cwd: dir, Status: db.AIJobRunning, LogPath: logPath,
+		ID: id, Command: command, Cwd: dir, Status: db.AIJobRunning, LogPath: logPath, ConvID: ConvIDFrom(ctx),
 	}); err != nil {
 		return nil, err
 	}
@@ -252,7 +252,7 @@ func handoffToBackground(ctx context.Context, d Deps, p *jobProc, out, errw *swi
 	id := newJobID()
 	logPath := jobLogPath(id)
 	if err := d.db().CreateAIJob(db.AIJob{
-		ID: id, Command: p.command, Cwd: p.dir, Status: db.AIJobRunning, LogPath: logPath,
+		ID: id, Command: p.command, Cwd: p.dir, Status: db.AIJobRunning, LogPath: logPath, ConvID: ConvIDFrom(ctx),
 	}); err != nil {
 		logger.W("[ai-job] 超时转入后台失败（落库）：%v", err)
 		return nil, false

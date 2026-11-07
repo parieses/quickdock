@@ -16,7 +16,14 @@ import type { Extension } from '@codemirror/state'
 // codemirror 核心、@codemirror/commands、@codemirror/state、@codemirror/search 以及
 // 各 lang-* 语言包仍走动态 import，保留「首次打开编辑器才下载」的懒加载效益。
 import { EditorView, keymap, placeholder as cmPlaceholder } from '@codemirror/view'
-import { HighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
+import {
+  HighlightStyle, StreamLanguage, syntaxHighlighting,
+  // 块级折叠（仅 opts.fold=true 的笔记大纲用）。仍是同一个 @codemirror/language
+  // 模块，本就在 eager chunk 里，补具名 import 不改变加载时机，也不新增依赖。
+  // 不导入 foldGutter / codeFolding / foldKeymap：basicSetup 已自带这三项，
+  // 重复注册 foldGutter 会往 activeGutters facet 再塞一个输入，多出一列箭头。
+  foldAll, unfoldAll, foldable, foldEffect, unfoldEffect, foldedRanges,
+} from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { i18n } from '../i18n'
 
@@ -53,6 +60,14 @@ export interface CodeEditorHandle {
   onScroll(cb: () => void): () => void
   /** 主动打开查找栏（等同于在编辑器里按 Ctrl+F） */
   openFind(): void
+  /** 全部折叠。需 opts.fold=true；未开启时是安全的空操作 */
+  foldAll(): void
+  /** 全部展开。需 opts.fold=true；未开启时是安全的空操作 */
+  unfoldAll(): void
+  /** 滚到 1-based 的第 line 行并把光标放过去；越界行号自动 clamp */
+  revealLine(line: number): void
+  /** 折叠/切换 1-based 第 line 行所在标题区段；越界 clamp，无可折叠区段时是空操作 */
+  foldAt(line: number): void
 }
 
 export interface CodeEditorOpts {
@@ -92,6 +107,12 @@ export interface CodeEditorOpts {
    * 正文写作传 false：用户的 Tab 是想离开输入框，被吃成缩进会很难受。
    */
   tabIndent?: boolean
+  /**
+   * 块级折叠（笔记大纲侧栏用）：启用折叠 gutter / state / 键位，并让
+   * foldAll / unfoldAll / foldAt 生效。默认 false —— NotePanel、文件编辑器
+   * 等其它使用者完全不受影响。
+   */
+  fold?: boolean
 }
 
 // 语言按扩展名懒加载。default 返回 null = 纯文本编辑（行号/搜索/undo 照有）。
@@ -183,6 +204,12 @@ const cmTokens = HighlightStyle.define([
   { tag: t.invalid, class: 'cm-tok-invalid' },
 ])
 
+/** 1-based 行号 → clamp 到 [1, lines]；NaN / 0 / 负数一律落到第 1 行 */
+function clampLine(lines: number, line: number): number {
+  const n = Math.trunc(line) || 1
+  return Math.min(Math.max(n, 1), Math.max(lines, 1))
+}
+
 export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts): Promise<CodeEditorHandle> {
   const [{ basicSetup }, { indentWithTab }, { EditorState, Transaction }, searchMod, lang] =
     await Promise.all([
@@ -236,6 +263,11 @@ export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts):
         ...(opts.tabIndent === false ? [] : [indentWithTab]),
       ]),
       basicSetup,
+      // 块级折叠：basicSetup 已自带 foldGutter()（其内部注册 codeFolding）与
+      // foldKeymap，这里刻意**不再重复注册** —— 重复的 foldGutter 会往
+      // activeGutters facet 再塞一个输入，编辑器左侧会多出一列折叠箭头。
+      // opts.fold 只用于守卫 handle 里的 foldAll / foldAt 等方法，让笔记大纲
+      // 能明确控制折叠，其它调用方的行为完全不变。
       // 这个扩展的默认面板被上面的 Mod-f 拦掉了，但它同时提供命中高亮
       //（setSearchQuery effect 的消费者）——留着，只是永远不露出它自己的 UI
       searchMod.search({ top: true }),
@@ -547,5 +579,33 @@ export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts):
     gotoMatch,
     replaceMatch,
     replaceAllMatches,
+    foldAll: () => { if (opts.fold) foldAll(view) },
+    unfoldAll: () => { if (opts.fold) unfoldAll(view) },
+    revealLine: (line: number) => {
+      const doc = view.state.doc
+      const n = clampLine(doc.lines, line)
+      // 一次事务里同时放光标 + 滚进行视野
+      view.dispatch({ selection: { anchor: doc.line(n).from }, scrollIntoView: true })
+    },
+    foldAt: (line: number) => {
+      if (!opts.fold) return
+      const doc = view.state.doc
+      const n = clampLine(doc.lines, line)
+      const ln = doc.line(n)
+      // 先判断这行是否已有折叠区段（等价于 CM 内部 findFold / toggleFold）：
+      // 有就展开，没有就按 foldable 找区段折叠。用两个 number 存结果，避免
+      // TS 把「闭包里赋值的 let 联合类型」在后续收窄成 never。
+      let foldedFrom = -1
+      let foldedTo = -1
+      foldedRanges(view.state).between(ln.from, ln.to, (from, to) => {
+        if (foldedFrom < 0 || foldedFrom > from) { foldedFrom = from; foldedTo = to }
+      })
+      if (foldedFrom >= 0) {
+        view.dispatch({ effects: unfoldEffect.of({ from: foldedFrom, to: foldedTo }) })
+        return
+      }
+      const range = foldable(view.state, ln.from, ln.to)
+      if (range) view.dispatch({ effects: foldEffect.of(range) })
+    },
   }
 }

@@ -1,13 +1,8 @@
 package plugin
 
-import dlutil "quickdock/internal/dl"
-
-import "quickdock/services"
-
-import updatesvc "quickdock/services/update"
-
 import (
 	"archive/zip"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -19,25 +14,65 @@ import (
 	"strings"
 	"time"
 
+	dlutil "quickdock/internal/dl"
+	"quickdock/internal/env"
+	"quickdock/internal/logger"
 	pluginmgr "quickdock/internal/plugin"
+	"quickdock/services"
+	updatesvc "quickdock/services/update"
 )
 
 // 默认插件市场索引地址（QuickDock 插件中心 GitHub Pages）。
 // 由 plugins/external 仓库的 gen_site.py 生成 site/index.json 后经 CI 部署。
-// MVP 阶段硬编码；后续若需多市场源可改为存 DB 配置。
+// 现在只是「默认源」：用户可在市场页增删/启停更多源，见 loadMarketSources。
 const defaultPluginMarketURL = "https://parieses.github.io/quickdock-plugins/index.json"
+
+// 市场配置与缓存都落在 app_state 表（项目已有的 GetValue/SetValue 机制）。
+// key 必须以 qd_ 开头才能通过 db.validateAppStateKey 的白名单——前端因而可以直接
+// 用现有绑定读写源配置，无需新增任何 Go service 方法、也无需重新生成前端 bindings。
+const (
+	marketSourcesKey = "qd_plugin_market_sources"
+	marketCacheKey   = "qd_plugin_market_cache"
+)
 
 // 下载/索引的流量上限：索引 5MB、zip 包 100MB（与 InstallFromZip 解压上限对齐）
 const (
 	maxMarketIndexSize = 5 << 20
 	maxPluginZipSize   = 100 << 20
+	// 单个源的索引请求：直连两次 + 系统代理兜底一次，各 4s，总预算 12s。
+	// 多个源共享这 12s 总预算，避免用户加了几个源后市场页长时间卡在「加载中」；
+	// 预算耗尽的源会快速失败，由「至少一个源成功」的规则决定是否走缓存。
+	marketPerCallTimeout = 4 * time.Second
+	marketTotalTimeout   = 12 * time.Second
 )
+
+// marketSource 一个市场索引源。Builtin 的官方源不可删除（只能停用），
+// 保证用户把自定义源全删光后仍能恢复出至少一个可用源。
+type marketSource struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	URL     string `json:"url"`
+	Enabled bool   `json:"enabled"`
+	Builtin bool   `json:"builtin,omitempty"`
+}
+
+// marketCache 最后一次成功拉取的合并索引。整体缓存而不是按源分别缓存：
+// 多源任一失败时用户看到的是一份完整、自洽的列表，而不是半张拼图。
+type marketCache struct {
+	FetchedAt int64       `json:"fetchedAt"`
+	Index     marketIndex `json:"index"`
+}
 
 // marketIndex 机器可读的插件市场索引（对应 gen_site.py 输出的 index.json）
 type marketIndex struct {
 	Name    string         `json:"name"`
 	Updated string         `json:"updated"`
 	Plugins []marketPlugin `json:"plugins"`
+	// 以下三项只在「网络失败、用最后一次成功缓存兜底」时由后端填充。
+	// 前端据此明确标注「离线缓存」并给出缓存时间，绝不把旧数据静默冒充成最新。
+	Offline     bool  `json:"offline,omitempty"`
+	CachedAt    int64 `json:"cachedAt,omitempty"`
+	SourceCount int   `json:"sourceCount,omitempty"`
 }
 
 // marketPlugin 市场中单个插件的描述
@@ -68,34 +103,213 @@ type marketPlugin struct {
 	Supported        bool   `json:"supported,omitempty"`
 }
 
-// GetPluginMarket 拉取插件市场索引并标注每个插件的本地安装状态。
-// 前端据此渲染市场列表与"安装/升级/已安装"按钮。
-func (p *PluginService) GetPluginMarket() *services.ApiResult {
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Get(defaultPluginMarketURL)
-	if err != nil {
-		return services.Fail(fmt.Errorf("拉取插件市场失败: %w", err))
+// marketDirectHTTP 显式 Proxy:nil —— 自定义 Transport 的 Proxy 零值就是不走代理，
+// 不能复用 http.DefaultTransport（它会读 HTTP_PROXY 环境变量）。
+var marketDirectHTTP = &http.Client{
+	Timeout: marketPerCallTimeout,
+	Transport: &http.Transport{
+		Proxy:                 nil,
+		TLSHandshakeTimeout:   3 * time.Second,
+		ResponseHeaderTimeout: marketPerCallTimeout,
+	},
+}
+
+// marketProxyHTTP 走环境变量 / WinINET 系统代理，只在直连彻底不通时兜底。
+var marketProxyHTTP = &http.Client{Timeout: marketPerCallTimeout, Transport: env.ProxyTransport()}
+
+// fetchMarketIndex 直连优先、重试一次、系统代理兜底。
+// 为什么不放前端：WebView2 跟随 WinINET 系统代理，用户机器上常见
+// 「ProxyEnable=1 但本地代理端口没起」，前端 fetch 会全部 ERR_TIMED_OUT。
+// Go 侧显式直连，直连彻底不通才付 env.ProxyTransport() 那一跳。
+func fetchMarketIndex(ctx context.Context, rawURL, sourceID string) (marketIndex, error) {
+	var lastErr error
+	for _, c := range []*http.Client{marketDirectHTTP, marketDirectHTTP, marketProxyHTTP} {
+		if err := ctx.Err(); err != nil {
+			if lastErr == nil {
+				lastErr = err
+			}
+			break
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+		if err != nil {
+			return marketIndex{}, err
+		}
+		req.Header.Set("Accept", "application/json")
+		req.Header.Set("User-Agent", "QuickDock/market")
+
+		resp, err := c.Do(req)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		data, readErr := io.ReadAll(io.LimitReader(resp.Body, maxMarketIndexSize))
+		_ = resp.Body.Close()
+		if readErr != nil {
+			lastErr = readErr
+			continue
+		}
+		if resp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("HTTP %d", resp.StatusCode)
+			continue
+		}
+		var idx marketIndex
+		if err := json.Unmarshal(data, &idx); err != nil {
+			lastErr = fmt.Errorf("市场索引不是有效 JSON: %w", err)
+			continue
+		}
+		return idx, nil
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return services.FailMsg(fmt.Sprintf("插件市场返回 HTTP %d", resp.StatusCode))
+	return marketIndex{}, fmt.Errorf("市场源 %s 不可达（直连重试与系统代理均失败）: %v", sourceID, lastErr)
+}
+
+// defaultMarketSources 首次运行 / 配置损坏时的兜底：只有官方源。
+func defaultMarketSources() []marketSource {
+	return []marketSource{{
+		ID: "official", Name: "QuickDock 官方市场",
+		URL: defaultPluginMarketURL, Enabled: true, Builtin: true,
+	}}
+}
+
+// loadMarketSources 从 app_state 读用户配置的源列表。
+// 解析失败 / 空配置 / 全是非法 URL 时退回默认源，不让一份写坏的配置
+// 把市场彻底打不开。只放行 HTTPS：与 InstallPluginFromURL 的供应链防护一致。
+func (p *PluginService) loadMarketSources() []marketSource {
+	if p.App == nil || p.App.DB == nil {
+		return defaultMarketSources()
+	}
+	raw, err := p.App.DB.GetSetting(marketSourcesKey)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return defaultMarketSources()
+	}
+	var list []marketSource
+	if err := json.Unmarshal([]byte(raw), &list); err != nil || len(list) == 0 {
+		return defaultMarketSources()
+	}
+	out := make([]marketSource, 0, len(list))
+	for _, s := range list {
+		u := strings.TrimSpace(s.URL)
+		// 内置官方源在前端是不可编辑的占位（url 为空、name 由 i18n 给），
+		// 保存配置时会原样写回来。这里补回真实地址，否则用户加了一个自定义源
+		// 就会把官方源连带丢掉。
+		if u == "" && s.Builtin && s.ID == "official" {
+			u = defaultPluginMarketURL
+		}
+		if u == "" || !strings.HasPrefix(strings.ToLower(u), "https://") {
+			continue
+		}
+		s.URL = u
+		out = append(out, s)
+	}
+	if len(out) == 0 {
+		return defaultMarketSources()
+	}
+	return out
+}
+
+func (p *PluginService) saveMarketCache(idx marketIndex) {
+	if p.App == nil || p.App.DB == nil {
+		return
+	}
+	b, err := json.Marshal(marketCache{FetchedAt: time.Now().Unix(), Index: idx})
+	if err != nil {
+		return
+	}
+	// 缓存写失败不能把一次成功的拉取变成失败：只记日志，下次网络故障时
+	// 顶多没有缓存可用、明确报错，也不静默用旧数据冒充最新。
+	if err := p.App.DB.SetSetting(marketCacheKey, string(b)); err != nil {
+		logger.W("[plugin-market] 写入离线缓存失败: %v", err)
+	}
+}
+
+func (p *PluginService) loadMarketCache() (marketCache, bool) {
+	var zero marketCache
+	if p.App == nil || p.App.DB == nil {
+		return zero, false
+	}
+	raw, err := p.App.DB.GetSetting(marketCacheKey)
+	if err != nil || strings.TrimSpace(raw) == "" {
+		return zero, false
+	}
+	var c marketCache
+	if err := json.Unmarshal([]byte(raw), &c); err != nil || c.FetchedAt <= 0 || len(c.Index.Plugins) == 0 {
+		return zero, false
+	}
+	return c, true
+}
+
+// mergeMarketIndexes 按插件 id 去重，配置顺序靠前的源优先。
+// 同名插件不互相覆盖，避免后加的源悄悄把官方版本换成自己的。
+func mergeMarketIndexes(parts []marketIndex) marketIndex {
+	merged := marketIndex{Name: "QuickDock Plugin Market", Plugins: make([]marketPlugin, 0)}
+	seen := make(map[string]bool)
+	for _, part := range parts {
+		if part.Updated > merged.Updated {
+			merged.Updated = part.Updated
+		}
+		for _, p := range part.Plugins {
+			if p.ID == "" || seen[p.ID] {
+				continue
+			}
+			seen[p.ID] = true
+			merged.Plugins = append(merged.Plugins, p)
+		}
+	}
+	return merged
+}
+
+// GetPluginMarket 拉取所有启用的市场源、合并索引，并标注每个插件的本地安装状态。
+// 全部源失败时用最后一次成功缓存兜底，并在返回结构里明确标记 offline/cachedAt；
+// 连缓存都没有就报错，绝不静默用旧数据冒充最新。
+func (p *PluginService) GetPluginMarket() *services.ApiResult {
+	sources := p.loadMarketSources()
+	enabled := make([]marketSource, 0, len(sources))
+	for _, s := range sources {
+		if s.Enabled {
+			enabled = append(enabled, s)
+		}
+	}
+	if len(enabled) == 0 {
+		return services.FailMsg("没有启用的插件市场源，请在「市场源」中启用至少一个")
 	}
 
-	data, err := io.ReadAll(io.LimitReader(resp.Body, maxMarketIndexSize))
-	if err != nil {
-		return services.Fail(fmt.Errorf("读取市场索引失败: %w", err))
+	ctx, cancel := context.WithTimeout(context.Background(), marketTotalTimeout)
+	defer cancel()
+
+	parts := make([]marketIndex, 0, len(enabled))
+	for _, s := range enabled {
+		idx, err := fetchMarketIndex(ctx, s.URL, s.ID)
+		if err != nil {
+			logger.W("[plugin-market] 源 %s (%s) 拉取失败: %v", s.ID, s.URL, err)
+			continue
+		}
+		parts = append(parts, idx)
 	}
 
 	var idx marketIndex
-	if err := json.Unmarshal(data, &idx); err != nil {
-		return services.Fail(fmt.Errorf("解析市场索引失败: %w", err))
+	if len(parts) > 0 {
+		idx = mergeMarketIndexes(parts)
+		idx.SourceCount = len(parts)
+		// 只缓存「至少一个源成功」的结果：全失败时保留上一次完整快照，
+		// 不让一次事故把缓存覆盖成半张表。
+		p.saveMarketCache(idx)
+	} else {
+		cache, ok := p.loadMarketCache()
+		if !ok {
+			return services.FailMsg(fmt.Sprintf("插件市场拉取失败（%d 个源均不可达），且无可用离线缓存", len(enabled)))
+		}
+		idx = cache.Index
+		idx.Offline = true
+		idx.CachedAt = cache.FetchedAt
+		idx.SourceCount = 0
 	}
 
-	// 本地安装状态以 DB 为准，与本地插件列表（ListPlugins）保持同一判定源。
+	// 本地安装状态以实时 DB 为准，与本地插件列表（ListPlugins）保持同一判定源。
 	// 不能用磁盘目录存在性判定：pluginsDir 下可能残留「有文件但未注册」的目录
 	//（如从 plugins/external 同步的开发产物），只看磁盘会把它们全部标成「已安装」。
+	// 离线缓存分支尤其依赖这一步：缓存里的 installed/has_update 是拉取那一刻的，
+	// 用户之后装过/卸过插件，照搬就会标错。
 	installed := map[string]string{}
-	if p.App.DB != nil {
+	if p.App != nil && p.App.DB != nil {
 		vs, err := p.App.DB.ListPluginVersions()
 		if err != nil {
 			return services.Fail(fmt.Errorf("读取插件安装记录失败: %w", err))
@@ -104,6 +318,10 @@ func (p *PluginService) GetPluginMarket() *services.ApiResult {
 	}
 	applyInstalledStatus(idx.Plugins, installed)
 
+	if idx.Offline {
+		return services.OkMsg(idx, fmt.Sprintf("插件市场不可达，展示 %s 的离线缓存",
+			time.Unix(idx.CachedAt, 0).Format("2006-01-02 15:04")))
+	}
 	return services.Ok(idx)
 }
 
@@ -112,6 +330,11 @@ func (p *PluginService) GetPluginMarket() *services.ApiResult {
 func applyInstalledStatus(plugins []marketPlugin, installed map[string]string) {
 	for i := range plugins {
 		p := &plugins[i]
+		// 先清零：离线缓存恢复时旧快照带着「已安装/有新版」，必须按实时 DB 重算，
+		// 否则卸载过的插件在市场里会一直显示「已安装」。
+		p.Installed = false
+		p.InstalledVersion = ""
+		p.HasUpdate = false
 		p.Supported = isPlatformSupported(p.Platforms)
 		if v, ok := installed[p.ID]; ok {
 			p.Installed = true

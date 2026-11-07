@@ -14,6 +14,12 @@ import { formatBytes } from '../utils/ssh'
 
 const { t } = useI18n()
 
+// 进日志页时从侧栏角标快照下来的「新增崩溃数」：设置按钮上的红点在这里要有
+// 明确落点（工具栏按钮 + 崩溃分组的「新增 N」）。已读水位在进页时就清了，
+// 所以必须由父组件传快照，不能在这里现读角标。
+const props = defineProps<{ newCrashCount?: number }>()
+const emit = defineEmits<{ 'crash-cleared': [] }>()
+
 interface LogFile { name: string; size: number; time: string }
 interface CrashFile { name: string; size: number; time: string; kind: string }
 
@@ -182,6 +188,16 @@ function selectFile(name: string, crash: boolean) {
   loadContent()
 }
 
+const crashHeadRef = ref<HTMLElement | null>(null)
+// 红点落地：点工具栏的「N 条新的崩溃记录」直接选中最新一条，并把左侧分组标题
+// 滚进可视区（长日志列表会把崩溃分组挤到下面，不滚用户还是找不到）。
+function focusCrash() {
+  const first = crashFiles.value[0]
+  if (!first) return
+  selectFile(first.name, true)
+  void nextTick(() => crashHeadRef.value?.scrollIntoView({ block: 'nearest' }))
+}
+
 async function loadContent() {
   if (!selected.value) return
   loading.value = true
@@ -216,6 +232,8 @@ async function clearCrash() {
   try {
     unwrap(await ClearCrashFiles())
     crashFiles.value = []
+    // 清空后父组件的快照也要跟着失效，否则工具栏还挂着「新增 N」
+    emit('crash-cleared')
     if (isCrash.value) {
       source.value = 'log'
       selected.value = logFiles.value[0]?.name || ''
@@ -363,6 +381,17 @@ const TAIL_MAX_LINES = 5000
 const tailTabs = ref<TailTab[]>([])
 const tailId = ref('')
 const activeTab = computed(() => tailTabs.value.find((x) => x.id === tailId.value) || null)
+
+// 主区顶部上下文行的标题：原来一进日志页只有一排按钮，得回左侧列表找选中项
+// 才知道「现在在看哪个文件」。三种来源各取自己的可读名称。
+const currentSourceLabel = computed(() => {
+  if (isTail.value) return activeTab.value?.name || t('ltSection')
+  if (selected.value) return selected.value
+  return t('logEmpty')
+})
+const currentSourceKind = computed(() =>
+  isTail.value ? t('ltSection') : isCrash.value ? t('crashRecords') : t('logFiles'),
+)
 
 async function pickTailFile() {
   let path = ''
@@ -540,10 +569,15 @@ onUnmounted(() => {
         <p v-if="!logFiles.length" class="log-empty">{{ t('logEmpty') }}</p>
       </div>
 
-      <div class="log-side-head crash-head">
+      <div ref="crashHeadRef" class="log-side-head crash-head">
         <AlertTriangle :size="14" />
         <span>{{ t('crashRecords') }}</span>
         <span v-if="crashFiles.length" class="crash-num">{{ crashFiles.length }}</span>
+        <span
+          v-if="crashFiles.length && props.newCrashCount"
+          class="crash-new"
+          :title="t('crashBadgeFromHere')"
+        >{{ t('crashNewCount', { n: props.newCrashCount }) }}</span>
       </div>
       <div class="crash-list">
         <button
@@ -599,58 +633,41 @@ onUnmounted(() => {
         </div>
         <p v-if="!tailTabs.length" class="log-empty">{{ t('ltEmpty') }}</p>
       </div>
-
-      <!-- 日志占用：读数 + 占比条 + 清理入口 -->
-      <div class="storage-card">
-        <div class="storage-head">
-          <HardDrive :size="13" />
-          <span class="storage-title">{{ t('logStorage') }}</span>
-          <span v-if="storage" class="storage-total">{{ formatBytes(storage.totalSize) }}</span>
-        </div>
-
-        <template v-if="storage && storage.totalSize > 0">
-          <div class="storage-bar" role="img" :aria-label="t('logStorage')">
-            <div class="storage-seg storage-seg--log" :style="{ width: logPercent + '%' }" />
-            <div class="storage-seg storage-seg--crash" :style="{ width: (100 - logPercent) + '%' }" />
-          </div>
-          <div class="storage-meta">
-            <span>{{ t('logStorageFiles', { logs: storage.logCount, crashes: storage.crashCount }) }}</span>
-            <span v-if="storage.oldest" class="storage-range">
-              {{ storage.oldest === storage.newest ? storage.newest : storage.oldest + ' ~ ' + storage.newest }}
-            </span>
-          </div>
-          <div class="storage-legend">
-            <span class="lg lg--log">{{ t('logFiles') }} {{ formatBytes(storage.logSize) }}</span>
-            <span class="lg lg--crash">{{ t('crashRecords') }} {{ formatBytes(storage.crashSize) }}</span>
-          </div>
-        </template>
-        <div v-else class="storage-meta">{{ t('logStorageEmpty') }}</div>
-
-        <div class="storage-actions">
-          <button
-            class="log-btn"
-            :class="{ armed: cleanArmed === 'old' }"
-            :title="t('logCleanupOldTitle')"
-            @click="runCleanup('old')"
-          >
-            <Trash2 :size="12" />
-            {{ cleanArmed === 'old' ? t('logCleanupConfirm') : t('logCleanupOld') }}
-          </button>
-          <button
-            class="log-btn"
-            :class="{ armed: cleanArmed === 'all' }"
-            :title="t('logCleanupAllTitle')"
-            @click="runCleanup('all')"
-          >
-            <Trash2 :size="12" />
-            {{ cleanArmed === 'all' ? t('logCleanupConfirm') : t('logCleanupAll') }}
-          </button>
-        </div>
-        <div v-if="toastMsg" class="storage-msg">{{ toastMsg }}</div>
-      </div>
     </aside>
 
     <section class="log-main">
+      <!-- 上下文行：只放「当前在看什么」与状态提示，不放操作按钮。
+           与下一行工具条拆开后，尾随/崩溃模式按钮数量变化不会再让整条工具条随机折行。 -->
+      <div class="log-context">
+        <div class="log-context-main">
+          <AlertTriangle v-if="isCrash" :size="14" class="log-context-icon is-crash" />
+          <Radio v-else-if="isTail" :size="14" class="log-context-icon" />
+          <ScrollText v-else :size="14" class="log-context-icon" />
+          <span class="log-context-name" :title="currentSourceLabel">{{ currentSourceLabel }}</span>
+          <span class="log-context-kind">{{ currentSourceKind }}</span>
+          <span v-if="isCrash && crashMeta" class="crash-badge" :data-kind="crashMeta.kind">{{ crashMeta.kind }}</span>
+        </div>
+        <div class="log-context-stats">
+          <button
+            v-if="props.newCrashCount"
+            class="log-btn crash-jump"
+            :title="t('crashBadgeFromHere')"
+            @click="focusCrash"
+          >
+            <AlertTriangle :size="13" />{{ t('badgeNewCrash', { n: props.newCrashCount }) }}
+          </button>
+          <span v-if="isTail && activeTab" class="log-count">
+            {{ t('ltReceived', { n: activeTab.received }) }}
+          </span>
+          <span v-else-if="rawLines.length" class="log-count">
+            {{ t('logLines', { shown: renderedLines.length, total: rawLines.length }) }}
+          </span>
+          <span v-if="isRenderCapped" class="log-count log-capped">
+            {{ t('logRenderCapped', { max: RENDER_CAP }) }}
+          </span>
+        </div>
+      </div>
+
       <div class="log-toolbar">
         <div class="log-toolbar-left">
           <div class="log-levels" role="group" :aria-label="t('logFiles')">
@@ -685,15 +702,6 @@ onUnmounted(() => {
           </template>
         </div>
         <div class="log-toolbar-right">
-          <span v-if="isTail && activeTab" class="log-count">
-            {{ t('ltReceived', { n: activeTab.received }) }}
-          </span>
-          <span v-else-if="rawLines.length" class="log-count">
-            {{ t('logLines', { shown: renderedLines.length, total: rawLines.length }) }}
-          </span>
-          <span v-if="isRenderCapped" class="log-count log-capped">
-            {{ t('logRenderCapped', { max: RENDER_CAP }) }}
-          </span>
           <button v-if="!isTail" class="log-btn" :disabled="loading" @click="loadContent">
             <RefreshCw :size="13" /> {{ t('logRefresh') }}
           </button>
@@ -736,6 +744,54 @@ onUnmounted(() => {
           {{ rawLines.length ? t('logNoMatch') : t('logEmpty') }}
         </p>
       </div>
+
+      <!-- 日志占用：全目录的全局读数，横排钉在主区底部。
+           原来在 232px 侧栏里占一整张卡片，把三个文件分区挤成一条缝。 -->
+      <div class="storage-strip">
+        <div class="storage-head">
+          <HardDrive :size="13" />
+          <span class="storage-title">{{ t('logStorage') }}</span>
+          <span v-if="storage" class="storage-total">{{ formatBytes(storage.totalSize) }}</span>
+        </div>
+        <template v-if="storage && storage.totalSize > 0">
+          <div class="storage-bar" role="img" :aria-label="t('logStorage')">
+            <div class="storage-seg storage-seg--log" :style="{ width: logPercent + '%' }" />
+            <div class="storage-seg storage-seg--crash" :style="{ width: (100 - logPercent) + '%' }" />
+          </div>
+          <div class="storage-facts">
+            <span>{{ t('logStorageFiles', { logs: storage.logCount, crashes: storage.crashCount }) }}</span>
+            <span v-if="storage.oldest" class="storage-range">
+              {{ storage.oldest === storage.newest ? storage.newest : storage.oldest + ' ~ ' + storage.newest }}
+            </span>
+          </div>
+          <div class="storage-legend">
+            <span class="lg lg--log">{{ t('logFiles') }} {{ formatBytes(storage.logSize) }}</span>
+            <span class="lg lg--crash">{{ t('crashRecords') }} {{ formatBytes(storage.crashSize) }}</span>
+          </div>
+        </template>
+        <div v-else class="storage-facts">{{ t('logStorageEmpty') }}</div>
+        <div class="storage-actions">
+          <button
+            class="log-btn"
+            :class="{ armed: cleanArmed === 'old' }"
+            :title="t('logCleanupOldTitle')"
+            @click="runCleanup('old')"
+          >
+            <Trash2 :size="12" />
+            {{ cleanArmed === 'old' ? t('logCleanupConfirm') : t('logCleanupOld') }}
+          </button>
+          <button
+            class="log-btn"
+            :class="{ armed: cleanArmed === 'all' }"
+            :title="t('logCleanupAllTitle')"
+            @click="runCleanup('all')"
+          >
+            <Trash2 :size="12" />
+            {{ cleanArmed === 'all' ? t('logCleanupConfirm') : t('logCleanupAll') }}
+          </button>
+        </div>
+        <div v-if="toastMsg" class="storage-msg">{{ toastMsg }}</div>
+      </div>
     </section>
   </div>
 </template>
@@ -754,35 +810,53 @@ onUnmounted(() => {
 
 /* === 左侧文件列表 === */
 .log-side {
-  width: 216px; flex-shrink: 0;
-  display: flex; flex-direction: column; overflow: hidden;
+  width: 232px; flex-shrink: 0;
+  /* 极窄窗口下三个分区仍要都能滚到：内部列表各自滚动，外层只作兜底 */
+  display: flex; flex-direction: column; overflow-y: auto; overflow-x: hidden;
   background: var(--color-bg-secondary);
   border-right: 1px solid var(--color-border);
 }
-/* 分组标题做成小节标签而非整条 bar：侧栏里有两个分组，双 bar 会显得像两个工具栏 */
+/* 三个分区（应用日志 / 崩溃记录 / 实时尾随）共用一条标题语言：等高、同色、
+   统一上分隔线；不再让 .crash-head / .tail-head 各自带 margin 把侧栏切成五段。 */
 .log-side-head {
   display: flex; align-items: center; gap: 6px; flex-shrink: 0;
-  padding: 14px 14px 6px;
+  padding: 10px 12px 6px;
+  border-top: 1px solid var(--color-border);
   font-size: 11px; font-weight: 600; letter-spacing: 0.06em;
   color: var(--color-text-muted);
   user-select: none;
 }
+.log-side-head:first-child { border-top: none; padding-top: 12px; }
 .log-side-head svg { opacity: 0.75; flex-shrink: 0; }
-.crash-head { border-top: 1px solid var(--color-border); margin-top: 8px; padding-top: 13px; }
+.crash-head { padding-top: 10px; }
 .crash-num {
   margin-left: auto; min-width: 16px; padding: 0 5px;
   border-radius: var(--radius-full); text-align: center;
   font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
   background: var(--color-danger-bg); color: var(--color-danger-text);
 }
+/* 侧栏设置按钮的红点对应到日志页：顶栏按钮说明来源，分组标题标出「新增 N」。
+   两者共用同一份快照（进页时取、清空崩溃记录时失效）。 */
+.crash-new {
+  padding: 0 5px; border-radius: var(--radius-full);
+  font-size: 10px; font-weight: 600; white-space: nowrap;
+  background: var(--color-danger-bg); color: var(--color-danger);
+}
+.crash-jump {
+  color: var(--color-danger);
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+}
+.crash-jump:hover { color: var(--color-danger); border-color: var(--color-danger); }
 
 .log-file-list {
-  flex: 1 1 auto; min-height: 56px;
+  flex: 1 1 auto; min-height: 72px;
   overflow-y: auto; padding: 0 8px 8px;
 }
-/* 崩溃分组不抢主列表的空间：给上限，多出来的自己滚 */
+/* 崩溃 / 尾随列表给固定上限：三个分区始终同屏可见。崩溃记录是侧栏红点的
+   落点，不能藏进折叠面板，也不能被主列表挤到需要额外滚动。 */
 .crash-list {
-  flex: 0 1 auto; min-height: 0; max-height: 40%;
+  flex: 0 1 auto; min-height: 0; max-height: 140px;
   overflow-y: auto; padding: 0 8px 8px;
 }
 
@@ -840,7 +914,7 @@ onUnmounted(() => {
    状态点刻意做成「呼吸」而不是静态圆点：尾随是一个持续进行的动作，
    静止的小圆点和「已停止」分不出来。暂停时彻底停掉动画——
    还在微微呼吸的话，用户会以为它仍在读。 */
-.tail-head { border-top: 1px solid var(--color-border); margin-top: 8px; padding-top: 13px; }
+.tail-head { padding-top: 10px; }
 .tail-add {
   margin-left: auto; display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; padding: 0;
@@ -881,40 +955,34 @@ onUnmounted(() => {
   background: var(--color-warning-bg); color: var(--color-warning);
 }
 
-/* === 日志占用卡片 ===
-   钉在侧栏底部：它管的是「整个目录」而不是某一个文件，跟上面的文件列表是
-   两件事，放一起会被误读成「当前选中文件占了多少」。 */
-.storage-card {
-  margin-top: auto; flex-shrink: 0;
-  padding: 10px 12px 12px;
+/* === 日志占用：主区底部的一行状态条 ===
+   原来钉在 232px 侧栏底部做成卡片，和三个文件分区挤在一起把主列表压成一条缝。
+   占用是「整个目录」的全局读数，不是某个文件的属性，横排放到主区底部层级更对。 */
+.storage-strip {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  flex-shrink: 0; min-height: 38px;
+  padding: 6px 12px;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
+  font-size: 10.5px; color: var(--color-text-muted);
 }
-.storage-head {
-  display: flex; align-items: center; gap: 6px;
-  font-size: 11px; color: var(--color-text-muted);
-  margin-bottom: 8px;
-}
+.storage-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .storage-title { font-weight: 600; letter-spacing: 0.04em; }
 .storage-total {
-  margin-left: auto;
   font-family: var(--font-mono, monospace); font-size: 11.5px;
   color: var(--color-text-primary);
 }
 .storage-bar {
-  display: flex; height: 6px; width: 100%;
+  display: flex; height: 6px; width: 90px; flex-shrink: 0;
   border-radius: var(--radius-full, 999px);
   overflow: hidden; background: var(--color-bg-tertiary);
 }
 .storage-seg { height: 100%; }
 .storage-seg--log { background: var(--color-accent); }
 .storage-seg--crash { background: var(--color-danger); }
-.storage-meta {
-  display: flex; flex-direction: column; gap: 2px;
-  margin-top: 6px; font-size: 10.5px; color: var(--color-text-muted);
-}
+.storage-facts { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .storage-range { color: var(--color-text-disabled); }
-.storage-legend { display: flex; gap: 10px; margin-top: 6px; font-size: 10px; }
+.storage-legend { display: flex; gap: 10px; flex-shrink: 0; font-size: 10px; }
 .lg { display: inline-flex; align-items: center; gap: 4px; color: var(--color-text-muted); }
 /* 小色块用 ::before 而不是再画一个元素：这里只需要一个 6px 的点 */
 .lg::before {
@@ -922,14 +990,15 @@ onUnmounted(() => {
 }
 .lg--log::before { background: var(--color-accent); }
 .lg--crash::before { background: var(--color-danger); }
-.storage-actions { display: flex; gap: 6px; margin-top: 10px; }
-.storage-actions .log-btn { flex: 1; justify-content: center; padding: 4px 6px; font-size: 10.5px; }
+.storage-actions { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
+.storage-actions .log-btn { height: 24px; padding: 0 8px; font-size: 10.5px; }
 .storage-actions .log-btn.armed {
   border-color: var(--color-danger-border); color: var(--color-danger-text);
   background: var(--color-danger-bg);
 }
+/* 清理回执出现时才占一整行（flex-basis:100%），平时不撑高状态条 */
 .storage-msg {
-  margin-top: 8px; padding: 5px 7px;
+  flex-basis: 100%; padding: 5px 7px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
   font-size: 10.5px; color: var(--color-text-secondary);
@@ -939,9 +1008,33 @@ onUnmounted(() => {
 /* === 右侧日志区 === */
 .log-main { flex: 1; display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
 
+/* 上下文行：只回答「现在在看什么」+ 状态提示，不放操作按钮。
+   与下一行工具条拆开后，工具条只剩过滤与动作，不再因为按钮增减随机折行。 */
+.log-context {
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+  min-height: 38px; padding: 6px 12px;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+.log-context-main { display: flex; align-items: center; gap: 8px; flex: 1 1 auto; min-width: 0; }
+.log-context-icon { flex-shrink: 0; color: var(--color-accent); }
+.log-context-icon.is-crash { color: var(--color-danger); }
+.log-context-name {
+  min-width: 0;
+  font-family: var(--font-mono); font-size: 12px; font-weight: 600;
+  color: var(--color-text-primary);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.log-context-kind {
+  flex-shrink: 0; padding: 1px 6px; border-radius: var(--radius-full);
+  font-size: 10px; color: var(--color-text-muted);
+  background: var(--color-bg-tertiary);
+}
+.log-context-stats { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+
 .log-toolbar {
   display: flex; align-items: center; gap: 10px 12px; flex-wrap: wrap;
-  padding: 8px 14px; flex-shrink: 0;
+  padding: 7px 12px; flex-shrink: 0;
   border-bottom: 1px solid var(--color-border);
 }
 /* 左侧「过滤条件」与右侧「动作」分组：中间留白把它们分开，

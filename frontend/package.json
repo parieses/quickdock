@@ -9,7 +9,7 @@
     "build:dev": "vue-tsc && vite build --minify false --mode development",
     "build": "npm run check:i18n && vue-tsc && vite build --mode production",
     "check:bridge": "node src/utils/pluginBridge.check.mjs",
-  "check:i18n": "node src/i18n/messages.check.mjs",
+    "check:i18n": "node src/i18n/messages.check.mjs",
     "preview": "vite preview",
     "test": "vitest run"
   },
@@ -45,6 +45,7 @@
     "@xterm/xterm": "^6.0.0",
     "codemirror": "^6.0.2",
     "dompurify": "^3.4.12",
+    "echarts": "^6.1.0",
     "highlight.js": "^11.12.0",
     "katex": "^0.19.1",
     "lunar-typescript": "^1.8.6",

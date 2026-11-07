@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown } from '@lucide/vue'
+import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare } from '@lucide/vue'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
 import ClipboardAiPanel from './ClipboardAiPanel.vue'
@@ -10,8 +10,11 @@ import {
   ListClipboardEntries,
   ListClipboardEntriesByType,
   ListClipboardEntriesBySmartType,
+  SearchClipboardEntries,
   CopyClipboardEntry,
   PasteClipboardEntry,
+  PasteClipboardText,
+  HideWindow,
   GetClipboardImageBase64,
   HideClipboardWindow,
   TogglePinClipboardEntry,
@@ -269,6 +272,12 @@ watch(hasImages, (val) => {
   }
 }, { immediate: true })
 
+// baseEntries 是「无搜索词时按标签下推载入的基础集合」。
+// 拼音/首字母搜索无法下推 SQL（库里没有拼音列），必须保留一份本地候选；
+// 搜索态时再叠加后端全库 LIKE 的命中，两者按 id 去重，才能保证
+// 「旧记录的文本命中」与「最近记录的拼音命中」同时可用。
+const baseEntries = ref<ClipboardEntry[]>([])
+
 let entriesLoadGen = 0
 async function loadEntries() {
   const gen = ++entriesLoadGen
@@ -280,18 +289,35 @@ async function loadEntries() {
     //    content_type 固定为 text），同样在库内过滤，既快又覆盖全量历史。
     // 这样即使目标条目排在「最近 1000 条」之外，对应标签也能查到。
     const push = queryPushForTag(activeTag.value)
-    let r: any
-    if (push.push === 'contentType') {
-      r = await ListClipboardEntriesByType(limit, push.value)
-    } else if (push.push === 'smartType') {
-      r = await ListClipboardEntriesBySmartType(limit, push.value)
-    } else {
-      r = await ListClipboardEntries(limit)
-    }
-    r = unwrap(r) || []
+    const ct = push.push === 'contentType' ? push.value : ''
+    const st = push.push === 'smartType' ? push.value : ''
+    const q = searchQuery.value.trim()
+    // 基础集合始终载入；有搜索词时额外发一次全库搜索，两次并发，
+    // 别让「搜全库」把正常的 30s 刷新拖成串行两趟。
+    const baseP = push.push === 'contentType'
+      ? ListClipboardEntriesByType(limit, push.value)
+      : push.push === 'smartType'
+        ? ListClipboardEntriesBySmartType(limit, push.value)
+        : ListClipboardEntries(limit)
+    const searchP = q ? SearchClipboardEntries(limit, q, ct, st) : Promise.resolve(null)
+    const [baseR, searchR] = await Promise.all([baseP, searchP])
     if (gen !== entriesLoadGen) return // 已有更新的刷新，丢弃过期响应
+    const base = (unwrap(baseR as any) || []) as ClipboardEntry[]
+    baseEntries.value = base
+    if (!q) {
+      entries.value = base
+    } else {
+      const hits = (searchR ? (unwrap(searchR as any) || []) : []) as ClipboardEntry[]
+      const seen = new Set<string>()
+      const merged: ClipboardEntry[] = []
+      for (const e of [...hits, ...base]) {
+        if (!seen.has(e.id)) { seen.add(e.id); merged.push(e) }
+      }
+      // 合并后重排：命中项不能一律压在基础集合前面，顺序仍是置顶优先 + 时间倒序。
+      merged.sort((a, b) => (b.isPinned - a.isPinned) || (b.createdAt - a.createdAt))
+      entries.value = merged
+    }
     // 不再预加载所有图片 — 由 IntersectionObserver 懒加载
-    entries.value = r
     loading.value = false
     // 删除 / 清空 / 自动过期都会走这里刷新，总数一并跟上
     void loadTotal()
@@ -313,6 +339,14 @@ watch(() => {
   return tagPushSignature(queryPushForTag(activeTag.value))
 }, (nv, ov) => {
   if (nv !== ov) loadEntries()
+})
+
+// 搜索词下推到后端：输入过程防抖（每敲一个字都发一次全库 LIKE 太浪费），
+// 停止输入后立即重查。防抖期间保留上一轮命中，不清空列表以免闪一下空白。
+let searchDebounce: number | null = null
+watch(searchQuery, () => {
+  if (searchDebounce !== null) clearTimeout(searchDebounce)
+  searchDebounce = window.setTimeout(() => loadEntries(), 250)
 })
 
 // ---- 文件 / 图片条目的落盘入口 ----
@@ -389,6 +423,163 @@ async function handleCopy(entry: ClipboardEntry) {
       toast.error(t('copyFailed') + ': ' + getErrorMessage(e))
     }
   }
+}
+
+// ---- 粘贴为…：三种格式 ----
+// 转换放在前端做完，再交给 Go 的 PasteClipboardText 走同一条 Hide+Ctrl+V 链路：
+// 条目正文本来就在内存里，JSON / Markdown 这类变换用 JS 最省事，Go 侧只负责
+// 「写剪贴板 + 让出焦点 + 模拟粘贴」，不重复实现一遍文本处理。
+type PasteFormat = 'plain' | 'markdown' | 'json'
+const pasteAsMenuId = ref('')
+
+function togglePasteAsMenu(entry: ClipboardEntry) {
+  // 两个菜单互斥：同一条记录上不该叠出两层下拉。
+  saveMenuId.value = ''
+  pasteAsMenuId.value = pasteAsMenuId.value === entry.id ? '' : entry.id
+}
+function closePasteAsMenu() { pasteAsMenuId.value = '' }
+
+// 纯文本：网页复制常夹带富文本残留标签；历史里存的是纯文本，但标签、CRLF、
+// 控制字符粘到编辑器里就是一堆源码，先清一遍。
+function toPlainText(text: string): string {
+  return text
+    .replace(/<[^>]*>/g, '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '')
+}
+// Markdown → 格式化文本：去标题/粗斜体/行内代码标记，链接转成「文字 (URL)」，
+// 列表与引用符号保留成可读的纯文本。不引第三方渲染器：这里要的是文本，不是 HTML。
+function toMarkdownText(text: string): string {
+  return text
+    .replace(/^#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/(^|[^*])\*([^*]+)\*/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')
+    .replace(/^>\s?/gm, '')
+    .replace(/\r\n?/g, '\n')
+}
+function toPrettyJson(text: string): string | null {
+  try {
+    return JSON.stringify(JSON.parse(text), null, 2)
+  } catch {
+    return null
+  }
+}
+
+// 非浮窗入口先把主窗口也藏掉，否则焦点还在 QuickDock 的搜索框里，
+// Ctrl+V 会贴到自己身上（handleCopy 在主窗口只复制不模拟粘贴就是这个原因）。
+async function ensurePasteTarget() {
+  if (!props.compact) unwrap(await HideWindow())
+}
+
+async function pasteAs(entry: ClipboardEntry, fmt: PasteFormat) {
+  closePasteAsMenu()
+  if (entry.contentType !== 'text' || !entry.textContent) return
+  let out = entry.textContent
+  if (fmt === 'plain') out = toPlainText(out)
+  else if (fmt === 'markdown') out = toMarkdownText(out)
+  else {
+    const pretty = toPrettyJson(out)
+    if (pretty === null) {
+      toast.error(t('cbNotJson')) // 不是 JSON 就按原文贴，别让误点变成什么都没发生
+    } else {
+      out = pretty
+    }
+  }
+  try {
+    await ensurePasteTarget()
+    unwrap(await PasteClipboardText(out))
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  }
+}
+
+// ---- 队列式连续粘贴 ----
+interface PasteItem { id: string; label: string }
+const pasteQueue = ref<PasteItem[]>([])
+const pasteRunning = ref(false)
+const pasteDone = ref(0)
+const pasteTotal = ref(0)
+let pasteGen = 0
+
+// 两次 Hide+Ctrl+V 之间的间隔：浮窗隐藏后目标窗口要重新拿到焦点，上一条
+// Ctrl+V 也要等目标程序处理完；贴得太快会出现后一条覆盖前一条、或粘到错误窗口。
+// 用前端 await 逐条调度而不是把整批丢给后端，是为了让「跳过 / 清空」能在
+// 运行途中直接改队列即时生效。
+const PASTE_QUEUE_GAP_MS = 300
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms))
+
+function queuePreview(e: ClipboardEntry): string {
+  const s = (e.textContent || '').replace(/\s+/g, ' ').trim()
+  return s.length > 30 ? s.slice(0, 30) + '…' : (s || e.contentType)
+}
+function enqueue(items: ClipboardEntry[]) {
+  const known = new Set(pasteQueue.value.map((x) => x.id))
+  for (const e of items) {
+    if (known.has(e.id)) continue
+    known.add(e.id)
+    pasteQueue.value.push({ id: e.id, label: queuePreview(e) })
+  }
+}
+
+// 多选存 id 而不是对象：列表每 30s 会整体刷新，持对象会指向已失效的旧数据。
+const multiSelect = ref(false)
+const checkedIds = ref<string[]>([])
+function toggleMultiSelect() {
+  multiSelect.value = !multiSelect.value
+  if (!multiSelect.value) checkedIds.value = []
+}
+function toggleChecked(id: string) {
+  const i = checkedIds.value.indexOf(id)
+  if (i >= 0) checkedIds.value.splice(i, 1)
+  else checkedIds.value.push(id)
+}
+function enqueueChecked() {
+  // 按当前展示顺序入队：多选的语义是「按看到的顺序依次贴」。
+  enqueue(displayEntries.value.filter((e) => checkedIds.value.includes(e.id)))
+  checkedIds.value = []
+  multiSelect.value = false
+}
+
+async function runPasteQueue() {
+  if (pasteRunning.value || pasteQueue.value.length === 0) return
+  // 代次令牌：清空时 +1，让仍在 sleep 的旧循环醒来后直接退出，
+  // 不会和新启动的循环一起消费同一条队列。
+  const gen = ++pasteGen
+  pasteRunning.value = true
+  pasteTotal.value = pasteQueue.value.length
+  pasteDone.value = 0
+  try {
+    await ensurePasteTarget()
+    while (gen === pasteGen && pasteQueue.value.length) {
+      const item = pasteQueue.value.shift()!
+      try {
+        unwrap(await PasteClipboardEntry(item.id))
+      } catch (e) {
+        toast.error(getErrorMessage(e))
+      }
+      pasteDone.value++
+      if (gen !== pasteGen || !pasteQueue.value.length) break
+      await sleep(PASTE_QUEUE_GAP_MS)
+    }
+  } catch (e) {
+    toast.error(getErrorMessage(e))
+  } finally {
+    pasteRunning.value = false
+    pasteTotal.value = 0
+  }
+}
+function skipNextInQueue() {
+  // 运行中当前条已经贴出，跳过的是队首（下一条）；未运行则直接丢掉队首。
+  if (pasteQueue.value.length) pasteQueue.value.shift()
+}
+function clearPasteQueue() {
+  pasteGen++
+  pasteQueue.value = []
+  pasteRunning.value = false
+  pasteDone.value = 0
+  pasteTotal.value = 0
 }
 
 async function handleTogglePin(entry: ClipboardEntry) {
@@ -506,6 +697,7 @@ function closeAi() {
 const saveMenuId = ref('')
 
 function toggleSaveMenu(entry: ClipboardEntry) {
+  pasteAsMenuId.value = ''
   saveMenuId.value = saveMenuId.value === entry.id ? '' : entry.id
 }
 
@@ -672,6 +864,9 @@ function onPanelKeydown(e: KeyboardEvent) {
 // 项目里 App.vue 的 quickdock:dsh:progress 已有同样一处教训，口径保持一致。
 const clipboardEventOffs: Array<() => void> = []
 
+// 转存 / 粘贴为菜单：点击面板任意位置即收起（按钮自身用 @click.stop 拦截）。
+function closeMenus() { closeSaveMenu(); closePasteAsMenu() }
+
 onMounted(() => {
   loadEntries()
   refreshTimer.value = window.setInterval(loadEntries, 30000)
@@ -681,12 +876,12 @@ onMounted(() => {
     Events.On('clipboard:before-hide', resetScrollOnHide),
   )
   document.addEventListener('keydown', onPanelKeydown)
-  // 转存菜单：点击面板任意位置即收起（按钮自身用 @click.stop 拦截）
-  document.addEventListener('click', closeSaveMenu)
+  document.addEventListener('click', closeMenus)
 })
 
 onUnmounted(() => {
-  document.removeEventListener('click', closeSaveMenu)
+  document.removeEventListener('click', closeMenus)
+  if (searchDebounce !== null) clearTimeout(searchDebounce)
   if (refreshTimer.value !== null) {
     clearInterval(refreshTimer.value)
   }
@@ -732,6 +927,12 @@ onUnmounted(() => {
         </div>
       </div>
       <div class="qd-page-actions">
+        <button class="qd-icon-btn" :class="{ active: multiSelect }" @click="toggleMultiSelect" :title="t('cbMultiSelect')">
+          <CheckSquare :size="14" />
+        </button>
+        <button v-if="checkedIds.length" class="qd-icon-btn" @click="enqueueChecked" :title="t('cbBatchEnqueue', { n: checkedIds.length })">
+          <ListPlus :size="14" />
+        </button>
         <button class="qd-icon-btn" @click="loadEntries" :title="t('refresh')">
           <RefreshCw :size="14" />
         </button>
@@ -766,6 +967,25 @@ onUnmounted(() => {
       </button>
     </div>
 
+    <!-- 粘贴队列：入队后常驻，运行中显示进度与跳过/清空。放在标签栏下方是让它在
+         列表之上始终可见——浮窗隐藏后用户重新唤起即可操作队列。 -->
+    <div v-if="pasteQueue.length || pasteRunning" class="cb-queue-bar">
+      <Layers :size="13" class="cb-queue-icon" />
+      <span class="cb-queue-title">{{ t('cbQueueTitle') }}</span>
+      <span class="cb-queue-status">
+        {{ pasteRunning ? t('cbQueueRunning', { done: pasteDone, total: pasteTotal }) : t('cbQueueCount', { n: pasteQueue.length }) }}
+      </span>
+      <div class="cb-queue-chips">
+        <span v-for="(it, i) in pasteQueue.slice(0, 3)" :key="it.id" class="cb-queue-chip" :title="it.label">{{ i + 1 }}. {{ it.label }}</span>
+        <span v-if="pasteQueue.length > 3" class="cb-queue-more">+{{ pasteQueue.length - 3 }}</span>
+      </div>
+      <div class="cb-queue-actions">
+        <button class="qd-icon-btn" :disabled="!pasteQueue.length || pasteRunning" :title="t('cbQueueStart')" @click="runPasteQueue"><Play :size="14" /></button>
+        <button class="qd-icon-btn" :disabled="!pasteQueue.length" :title="t('cbQueueSkip')" @click="skipNextInQueue"><SkipForward :size="14" /></button>
+        <button class="qd-icon-btn" :disabled="!pasteQueue.length && !pasteRunning" :title="t('clear')" @click="clearPasteQueue"><Trash2 :size="14" /></button>
+      </div>
+    </div>
+
     <!-- 列表 -->
     <div ref="listRef" class="clipboard-list" v-if="!loading">
       <div v-if="filteredEntries.length === 0" class="clipboard-empty">
@@ -782,6 +1002,9 @@ onUnmounted(() => {
         @click="handleCopy(entry)"
         @mouseenter="selectedIndex = idx"
       >
+        <label v-if="multiSelect" class="cb-check" @click.stop>
+          <input type="checkbox" :checked="checkedIds.includes(entry.id)" @change="toggleChecked(entry.id)" />
+        </label>
         <div class="item-content">
           <!-- 图片条目 — 懒加载 -->
           <template v-if="entry.contentType === 'image'">
@@ -860,6 +1083,38 @@ onUnmounted(() => {
             </button>
           </div>
         </div>
+        <!--
+          粘贴为…：与「转存」同款下拉，样式直接共用 save-* 那套（都是
+          "对这条文本做点什么"的动作；纯文本 / Markdown 格式化 / JSON 美化）。
+        -->
+        <div v-if="entry.contentType === 'text'" class="save-wrap">
+          <button
+            class="note-btn"
+            :class="{ active: pasteAsMenuId === entry.id }"
+            :title="t('cbPasteAs')"
+            @click.stop="togglePasteAsMenu(entry)"
+          >
+            <ClipboardPaste :size="13" />
+          </button>
+          <div v-if="pasteAsMenuId === entry.id" class="save-menu" @click.stop>
+            <button class="save-menu-item" @click="pasteAs(entry, 'plain')">
+              <AlignLeft :size="13" /><span>{{ t('cbPastePlain') }}</span>
+            </button>
+            <button class="save-menu-item" @click="pasteAs(entry, 'markdown')">
+              <Code :size="13" /><span>{{ t('cbPasteMarkdown') }}</span>
+            </button>
+            <button class="save-menu-item" @click="pasteAs(entry, 'json')">
+              <Braces :size="13" /><span>{{ t('cbPasteJson') }}</span>
+            </button>
+          </div>
+        </div>
+        <button
+          class="note-btn"
+          :title="t('cbQueueAdd')"
+          @click.stop="enqueue([entry])"
+        >
+          <ListPlus :size="13" />
+        </button>
         <!--
           问 AI：翻译 / 摘要 / 格式化这条文本。
           与「转存」并排放在同一位置组——两个都是"对这条文本做点什么"，
@@ -1352,5 +1607,41 @@ onUnmounted(() => {
 .item-note span {
   overflow: hidden; text-overflow: ellipsis;
 }
+
+/* 多选开关高亮 / 按钮禁用态：.qd-icon-btn 来自全局 app.css，
+   scoped 下用同一类名加状态即可命中本页渲染出来的按钮。 */
+.qd-icon-btn.active {
+  color: var(--color-accent);
+  border-color: var(--color-accent-border);
+  background: var(--color-accent-bg);
+}
+.qd-icon-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* 粘贴队列条：贴在标签栏下方，队列为空时整条不渲染。 */
+.cb-queue-bar {
+  display: flex; align-items: center; gap: 8px;
+  padding: 6px 16px; flex-shrink: 0;
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-accent-bg);
+}
+.cb-queue-icon { flex-shrink: 0; color: var(--color-accent); }
+.cb-queue-title { flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--color-accent); }
+.cb-queue-status { flex-shrink: 0; font-size: 11px; color: var(--color-text-secondary); }
+.cb-queue-chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 4px; overflow: hidden; }
+.cb-queue-chip {
+  max-width: 120px; padding: 1px 6px; font-size: 10px;
+  color: var(--color-text-muted); background: var(--color-bg-tertiary);
+  border-radius: var(--radius-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.cb-queue-more { font-size: 10px; color: var(--color-text-disabled); }
+.cb-queue-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.cb-queue-actions .qd-icon-btn { width: 24px; height: 24px; }
+
+/* 多选复选框：放在条目最左侧，容器上的 @click.stop 拦住条目本身的复制动作。 */
+.cb-check {
+  flex-shrink: 0; margin-top: 3px; display: flex; align-items: center;
+  cursor: pointer;
+}
+.cb-check input { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: var(--color-accent); }
 </style>
 

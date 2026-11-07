@@ -14,6 +14,10 @@ function dedupKey(r: SearchResult): string {
   if (r.todo?.id) return 'todo:' + r.todo.id
   if (r.cmd?.id) return 'cmd:' + r.cmd.id
   if (r.appPath) return 'app:' + r.appPath
+  // 场景 / 集合用「类型 + 条目 id」，新建动作用 kind：否则同名场景只能留一条，
+  // 且 best match 会把两条新建动作按 label 之外的键算成重复。
+  if (r.navTarget) return r.type + ':' + r.navTarget
+  if (r.createKind) return 'create:' + r.createKind
   return r.label
 }
 
@@ -93,11 +97,16 @@ const GROUP_PRIORITY: Record<string, number> = {
   nav: 3.5,
   app: 4,
   item: 5,
+  // 场景 / 集合紧跟项目条目：同属工作空间，敲名字时该挨在一起
+  scene: 5.2,
+  collection: 5.4,
   'quicklink-inline': 6,
   todo: 6.5,
   note: 7,
   system: 8,
   env: 8.5,
+  // 新建动作是明确的动作，排在实体结果之后、插件之前
+  create: 8.7,
   plugin: 9,
   file: 9.5,
 }

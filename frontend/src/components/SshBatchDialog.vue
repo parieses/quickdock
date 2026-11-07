@@ -26,12 +26,19 @@ import {
   AlertTriangle, Check, ChevronDown, ChevronRight, Folder, Play, Server, ShieldAlert, Square, X,
 } from '@lucide/vue'
 import {
+  DeleteSshCommand,
+  ListSshCommands,
+  SaveSshCommand,
   SshBatchCancel,
   SshBatchPlan,
   SshBatchRun,
+  TouchSshCommand,
 } from '../../bindings/quickdock/services/sshx/sshservice'
+import type { SshCommandInput } from '../../bindings/quickdock/services/sshx/models'
+import type { SshCommand } from '../utils/ssh'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 import { useFocusTrap } from '../utils/focusTrap'
 import {
@@ -83,6 +90,29 @@ const results = ref<Record<string, SshBatchHostResult>>({})
 const order = ref<string[]>([])
 const summary = ref<SshBatchSummary | null>(null)
 const expanded = ref<Set<string>>(new Set())
+
+/** 命令片段：本弹窗自己维护列表与选中态（不做共享 composable）。 */
+const commands = ref<SshCommand[]>([])
+/** 选中态存片段 id，不存下标：列表刷新/重排后仍能对上。 */
+const pickedCmdId = ref('')
+/** 存为片段的内联输入行展开态 */
+const savingCmd = ref(false)
+const newCmdName = ref('')
+/** 删除片段的组件内二次确认态，不用 confirm() */
+const deletingCmd = ref(false)
+
+/** 按 category 分组供 <optgroup> 用；空分类的不套组，避免出现一个空标签的组。 */
+const cmdGrouped = computed(() => {
+  const map = new Map<string, SshCommand[]>()
+  for (const c of commands.value) {
+    if (!c.category) continue
+    const arr = map.get(c.category) || []
+    arr.push(c)
+    map.set(c.category, arr)
+  }
+  return [...map.entries()].map(([category, items]) => ({ category, items }))
+})
+const cmdUngrouped = computed(() => commands.value.filter(c => !c.category))
 
 /**
  * 当前展示的是不是「上一次执行」留下的结果（非 0 = 上次执行的结束时间）。
@@ -218,6 +248,82 @@ async function loadPlan() {
   }
 }
 
+// ---- 命令片段 ----
+
+/** 弹窗打开时加载；失败静默降级为空列表（R9：不空 catch，也不打扰用户）。 */
+async function loadCommands() {
+  try {
+    commands.value = unwrap<SshCommand[]>(await ListSshCommands()) || []
+  } catch (e) {
+    commands.value = []
+    logErr('SshBatchDialog.loadCommands', e)
+  }
+}
+
+/**
+ * 选中片段：填命令后必须走 schedulePlan()。
+ * 直接赋值会绕过风险预演——schedulePlan() 开头就 disarm()，确认态必须绑在
+ * 具体命令上；否则会拿着上一条命令的风险判定放行这条新命令。
+ */
+function onPickCmd() {
+  const c = commands.value.find(x => x.id === pickedCmdId.value)
+  if (!c) return
+  command.value = c.command
+  disarm()
+  schedulePlan()
+}
+
+function startSaveCmd() {
+  savingCmd.value = true
+  deletingCmd.value = false
+  newCmdName.value = ''
+}
+
+function cancelSaveCmd() {
+  savingCmd.value = false
+  newCmdName.value = ''
+}
+
+async function confirmSaveCmd() {
+  const name = newCmdName.value.trim()
+  if (!name || !command.value.trim()) return
+  // 分类/描述可选：这里留空即可，不额外造第二套文案。
+  const input: SshCommandInput = {
+    id: '',
+    name,
+    command: command.value,
+    description: '',
+    category: '',
+    sort: 0,
+  }
+  try {
+    const saved = unwrap<SshCommand>(await SaveSshCommand(input))
+    await loadCommands()
+    // 后端 data 带回新记录时直接用它的 id；否则在刷新后的列表里按内容找。
+    pickedCmdId.value = saved?.id
+      || commands.value.find(c => c.name === name && c.command === command.value)?.id
+      || ''
+    cancelSaveCmd()
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    logErr('SshBatchDialog.saveCmd', e)
+  }
+}
+
+async function confirmDeleteCmd() {
+  const id = pickedCmdId.value
+  if (!id) return
+  try {
+    unwrap(await DeleteSshCommand(id))
+    pickedCmdId.value = ''
+    deletingCmd.value = false
+    await loadCommands()
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    logErr('SshBatchDialog.deleteCmd', e)
+  }
+}
+
 const canRun = computed(() =>
   !running.value
   && selected.value.size > 0
@@ -289,6 +395,14 @@ async function startRun() {
     }))
     // 后端兜底生成 id（正常不会发生）时以它为准，否则一条事件都收不到。
     if (start?.batchId && start.batchId !== batchId.value) batchId.value = start.batchId
+    // 片段被执行一次后累加使用次数；失败静默降级，不影响批次结果。
+    if (pickedCmdId.value) {
+      try {
+        unwrap(await TouchSshCommand(pickedCmdId.value))
+      } catch (e) {
+        logErr('SshBatchDialog.touchCmd', e)
+      }
+    }
   } catch (e) {
     running.value = false
     batchId.value = ''
@@ -432,6 +546,12 @@ function reset() {
   summary.value = null
   expanded.value = new Set()
   lastAt.value = 0
+  // 片段库：每次打开重新拉一遍（别处可能增删过片段），并复位选中与内联态。
+  pickedCmdId.value = ''
+  savingCmd.value = false
+  newCmdName.value = ''
+  deletingCmd.value = false
+  void loadCommands()
   // 先把上一次的结果接回来，必要时再补预演：预演会按（可能已被上次命令填充的）
   // 命令重新算风险等级，顺序反了就会拿空命令算一次再算第二次。
   restoreLastBatch()
@@ -597,6 +717,75 @@ onBeforeUnmount(() => {
             <!-- 右：命令 + 风险 + 操作 -->
             <section class="batch-cmd">
               <label class="batch-label" for="batch-cmd-input">{{ t('sshBatchCommand') }}</label>
+
+              <!-- 片段工具条：选中后走 schedulePlan() 重新预演，绝不直接放行 -->
+              <div class="batch-snips">
+                <select
+                  v-model="pickedCmdId"
+                  class="batch-snip-select"
+                  :disabled="running"
+                  @change="onPickCmd"
+                >
+                  <option value="">{{ t('sshCmdPick') }}</option>
+                  <option
+                    v-for="c in cmdUngrouped"
+                    :key="c.id"
+                    :value="c.id"
+                    :title="c.description || undefined"
+                  >{{ c.name }}</option>
+                  <optgroup v-for="g in cmdGrouped" :key="g.category" :label="g.category">
+                    <option
+                      v-for="c in g.items"
+                      :key="c.id"
+                      :value="c.id"
+                      :title="c.description || undefined"
+                    >{{ c.name }}</option>
+                  </optgroup>
+                </select>
+                <span v-if="!commands.length" class="batch-snip-empty">{{ t('sshCmdEmpty') }}</span>
+                <button
+                  class="batch-snip-btn"
+                  :disabled="running || !command.trim() || savingCmd"
+                  @click="startSaveCmd"
+                >{{ t('sshCmdSave') }}</button>
+                <button
+                  v-if="!deletingCmd"
+                  class="batch-snip-btn"
+                  :disabled="running || !pickedCmdId || savingCmd"
+                  @click="deletingCmd = true"
+                >{{ t('sshCmdDelete') }}</button>
+                <button
+                  v-if="deletingCmd"
+                  class="batch-snip-btn danger"
+                  :disabled="running"
+                  @click="confirmDeleteCmd"
+                >{{ t('sshCmdDeleteConfirm') }}</button>
+                <button
+                  v-if="deletingCmd"
+                  class="batch-snip-btn"
+                  :disabled="running"
+                  @click="deletingCmd = false"
+                >{{ t('sshCmdCancel') }}</button>
+              </div>
+
+              <div v-if="savingCmd" class="batch-snip-save">
+                <input
+                  v-model="newCmdName"
+                  class="batch-snip-input"
+                  type="text"
+                  :placeholder="t('sshCmdName')"
+                  :disabled="running"
+                />
+                <button
+                  class="batch-snip-btn"
+                  :disabled="running || !newCmdName.trim()"
+                  @click="confirmSaveCmd"
+                >{{ t('sshCmdSaveConfirm') }}</button>
+                <button class="batch-snip-btn" :disabled="running" @click="cancelSaveCmd">
+                  {{ t('sshCmdCancel') }}
+                </button>
+              </div>
+
               <textarea
                 id="batch-cmd-input"
                 v-model="command"
@@ -1349,6 +1538,56 @@ onBeforeUnmount(() => {
   white-space: pre-wrap;
   word-break: break-all;
 }
+
+/* 命令片段工具条 */
+.batch-snips { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
+.batch-snip-select {
+  flex: 1 1 auto;
+  min-width: 120px;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
+.batch-snip-select:focus { border-color: var(--color-border-focus-soft); }
+.batch-snip-select:disabled { opacity: 0.45; cursor: default; }
+.batch-snip-empty { font-size: 10.5px; color: var(--color-text-muted); }
+.batch-snip-btn {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  font-size: 10.5px;
+  font-family: inherit;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+}
+.batch-snip-btn:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }
+.batch-snip-btn.danger {
+  color: var(--color-danger-text);
+  background: var(--color-danger-bg);
+  border-color: var(--color-danger-border);
+}
+.batch-snip-btn:disabled { opacity: 0.45; cursor: default; }
+.batch-snip-save { display: flex; align-items: center; gap: var(--space-2); }
+.batch-snip-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 3px 6px;
+  font-size: 11px;
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: var(--color-bg-secondary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
+.batch-snip-input:focus { border-color: var(--color-border-focus-soft); }
 
 /* 过渡 */
 .batch-enter-active,

@@ -66,6 +66,16 @@ type DialConfig struct {
 	// LegacyAlgorithms 打开后用 SHA-1 系列老算法兜底，用于连接老交换机/老 NAS。
 	// 默认关闭；UI 上应作为「兼容旧设备」显式开关，不能默认开启。
 	LegacyAlgorithms bool
+
+	// Connector 自定义底层建连，给跳板机 / 代理用。
+	//
+	// 返回的 net.Conn 必须已经连到 addr 所指的 SSH 服务端（典型实现是跳板机上
+	// 开一条 direct-tcpip channel）；Dial 只负责在这条连接上做握手，不再自己
+	// net.Dial。留空走默认 net.Dialer，现有直连行为完全不变。
+	//
+	// ctx 只约束「建连这一段」，握手成功后 Dial 会清掉 deadline，不会因 ctx
+	// 后续取消而掐断已建立的连接。
+	Connector func(ctx context.Context, network, addr string) (net.Conn, error)
 }
 
 // Client 是对 *ssh.Client 的薄封装，额外负责保活、断线通知与幂等关闭。
@@ -89,6 +99,11 @@ type Client struct {
 	disconnectFired bool
 	disconnectErr   error
 	localClosed     bool // 本地主动 Close，与「意外断开」区分开
+
+	// deps 建这条连接时用到的前置跳板。关闭最终连接时一并关掉，
+	// 否则「用户关了标签，跳板机上的连接还挂着」会一直累积到应用退出。
+	depsMu sync.Mutex
+	deps   []*Client
 }
 
 // lastDisconnectErr 取上一次断连的原因（供迟到注册的监听器补一次通知）。
@@ -124,12 +139,18 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 	applyLegacyAlgorithms(sshCfg, cfg.LegacyAlgorithms)
 
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	dialer := &net.Dialer{Timeout: cfg.Timeout, KeepAlive: 30 * time.Second}
 	dialCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
 	start := time.Now()
-	raw, err := dialer.DialContext(dialCtx, "tcp", addr)
+	var raw net.Conn
+	if cfg.Connector != nil {
+		// 跳板链：连接由上层在跳板机上开出的 direct-tcpip channel 提供。
+		raw, err = cfg.Connector(dialCtx, "tcp", addr)
+	} else {
+		dialer := &net.Dialer{Timeout: cfg.Timeout, KeepAlive: 30 * time.Second}
+		raw, err = dialer.DialContext(dialCtx, "tcp", addr)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrUnreachable, err)
 	}
@@ -369,7 +390,20 @@ func (c *Client) LastRTT() time.Duration { return time.Duration(c.lastRTT.Load()
 // Alive 表示连接是否仍然可用。
 func (c *Client) Alive() bool { return c != nil && !c.closed.Load() }
 
-// Close 幂等关闭连接并停止保活。
+// AddDependency 登记一个前置跳板连接，Close 时级联关闭。
+//
+// 方案 A 把整条跳板链当一个 Client 交给连接池：池只认最终那个对象，
+// 中间跳的生命周期就挂在这里，connPool 一行都不用改。
+func (c *Client) AddDependency(dep *Client) {
+	if c == nil || dep == nil || dep == c {
+		return
+	}
+	c.depsMu.Lock()
+	c.deps = append(c.deps, dep)
+	c.depsMu.Unlock()
+}
+
+// Close 幂等关闭连接并停止保活，级联关掉跳板链上的前置连接。
 func (c *Client) Close() error {
 	var err error
 	c.closeOnce.Do(func() {
@@ -384,6 +418,15 @@ func (c *Client) Close() error {
 		c.closed.Store(true)
 		if c.conn != nil {
 			err = c.conn.Close()
+		}
+		// 本连接关掉之后再关跳板，倒序（离目标最近的先关）。
+		// 不这么做的话，每关一个标签都会在跳板机上留一条连接到应用退出。
+		c.depsMu.Lock()
+		deps := append([]*Client(nil), c.deps...)
+		c.deps = nil
+		c.depsMu.Unlock()
+		for i := len(deps) - 1; i >= 0; i-- {
+			_ = deps[i].Close()
 		}
 	})
 	return err

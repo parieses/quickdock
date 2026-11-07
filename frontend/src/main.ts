@@ -30,17 +30,36 @@ function reportFrontendError(kind: string, message: string, stack: string) {
 // browserHash，而已经加载完的模块图里还留着 `/node_modules/.vite/deps/xxx.js?v=旧哈希`
 // 的地址。之后第一次打开的重型页面（文件搜索 / AI / SSH）一拉懒加载 chunk 就被
 // dev server 以 504（Outdated Optimize Dep）拒掉，页面半空白，只有手动刷新能救。
-// 这里一次性自动刷新：只跑 DEV、且 15 秒内只刷一次，避免「刷完还是坏」变成死循环。
+// 这里自动刷新：只跑 DEV、且 15 秒窗口内最多 2 次，避免「刷完还是坏」变成死循环。
 // 生产没有 dep 优化器，所以整块包在 DEV 判断里。
 const STALE_DEP_RELOAD_KEY = 'qd.staleDepReloadAt'
+const STALE_DEP_COUNT_KEY = 'qd.staleDepReloadCount'
+const STALE_DEP_WINDOW_MS = 15000
+const STALE_DEP_MAX_RELOAD = 2
 const STALE_DEP_RE = /Outdated Optimize Dep|Failed to fetch dynamically imported module|Importing a module script failed/i
 function reloadOnStaleDep(msg: string): boolean {
   if (!STALE_DEP_RE.test(msg)) return false
+  // 先留现场。下面三个调用点全是 `if (reloadOnStaleDep(msg)) return`，以前
+  // 「15 秒内刚刷过」那条分支直接 return true 会被当成「已处理」——调用方既不会
+  // 刷新也不会上报，结果第二次 504 就是一整块白屏、崩溃记录里却什么都没有。
+  // 每次命中都落一条，排查时至少能看见它发生过几次。
+  reportFrontendError('staleDep', msg, '')
+
   const now = Date.now()
   let last = 0
-  try { last = Number(sessionStorage.getItem(STALE_DEP_RELOAD_KEY) || 0) } catch { /* 隐私模式：当作没刷过 */ }
-  if (now - last < 15000) return true // 刚刷过又坏：不再刷，交给调用方上报
-  try { sessionStorage.setItem(STALE_DEP_RELOAD_KEY, String(now)) } catch { /* 记不住就退化成每次都刷，可接受 */ }
+  let count = 0
+  try {
+    last = Number(sessionStorage.getItem(STALE_DEP_RELOAD_KEY) || 0)
+    count = Number(sessionStorage.getItem(STALE_DEP_COUNT_KEY) || 0)
+  } catch { /* 隐私模式：当作没刷过 */ }
+  if (now - last >= STALE_DEP_WINDOW_MS) count = 0
+  // 窗口内允许刷 2 次：dev 重启时预构建可能要连续两次才稳定，只给一次会把
+  // 「刷新后仍白屏」变成死局；给上限则是防止真的坏了以后无限重载。
+  if (count >= STALE_DEP_MAX_RELOAD) return true
+  try {
+    sessionStorage.setItem(STALE_DEP_RELOAD_KEY, String(now))
+    sessionStorage.setItem(STALE_DEP_COUNT_KEY, String(count + 1))
+  } catch { /* 记不住就退化成每次都刷，可接受 */ }
   location.reload()
   return true
 }

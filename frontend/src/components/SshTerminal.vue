@@ -29,6 +29,7 @@ import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useThemeName } from '../composables/useThemeName'
+import { sshFontSize, setSshFontSize, SSH_FONT_MIN, SSH_FONT_MAX, SSH_FONT_DEFAULT } from '../composables/useSshFont'
 import { useToast } from '../composables/useToast'
 import { debounce } from '../utils/debounce'
 import { isMultiLinePaste } from '../utils/ssh'
@@ -98,31 +99,23 @@ const { success: toastSuccess, error: toastError } = useToast()
 // 与主流终端一致。
 const menu = ref<{ x: number; y: number } | null>(null)
 
-// ---- 字号（本地偏好） ----
+// ---- 字号（进程内共享偏好） ----
 //
-// 声明了 `fontSize` prop 但父组件从不传，等于把这项能力焊死在 13px。xterm 要求改
-// `options.fontSize` 后重新 fit（列数会变，必须同步 resized 给远端），所以调字号
-// 不是纯 CSS 改动，只能走这里的统一入口。存 localStorage 是因为它属于"这台机器
-// 这台屏幕"的偏好，不该进数据库跟着账号走。
-const FONT_SIZE_KEY = 'qd_ssh_fontsize'
-const FONT_SIZE_MIN = 10
-const FONT_SIZE_MAX = 24
-
-function readFontSize(): number {
-  try {
-    const v = Number(localStorage.getItem(FONT_SIZE_KEY))
-    if (Number.isFinite(v) && v >= FONT_SIZE_MIN && v <= FONT_SIZE_MAX) return v
-  } catch { /* localStorage 不可用时用默认值 */ }
-  return props.fontSize || 13
-}
-
-const fontSizePx = ref(readFontSize())
+// xterm 要求改 `options.fontSize` 后重新 fit（列数会变，必须同步 resized 给远端），
+// 所以调字号不是纯 CSS 改动，只能走这里的统一入口。
+//
+// 字号状态放在 composables/useSshFont.ts 的模块级 ref 里，而不是本组件私有：
+// 每个终端各读一次 localStorage 快照的话，调整只会影响「当前这个」和之后新建的，
+// 已经开着的其它标签页不会跟着变。现在统一下来，标签栏的 A- / A+ 与本组件右键
+// 菜单的放大/缩小是同一个来源，多标签并排时字号永远一致。
+const fontSizePx = ref(sshFontSize.value || props.fontSize || SSH_FONT_DEFAULT)
 
 function applyFontSize(next: number) {
-  const size = Math.min(FONT_SIZE_MAX, Math.max(FONT_SIZE_MIN, Math.round(next)))
+  const size = Math.min(SSH_FONT_MAX, Math.max(SSH_FONT_MIN, Math.round(next)))
   if (size === fontSizePx.value && term?.options.fontSize === size) return
   fontSizePx.value = size
-  try { localStorage.setItem(FONT_SIZE_KEY, String(size)) } catch { /* ignore */ }
+  // 写共享状态：其它终端实例监听到变化后各自 fit 一次（它们各有自己的列数）
+  setSshFontSize(size)
   if (!term) return
   term.options.fontSize = size
   // fit 之后再触发一次 resize 同步：只改 options 不改窗口时，远端仍按旧列数换行，
@@ -130,6 +123,12 @@ function applyFontSize(next: number) {
   fitAddon?.fit()
   closeMenu()
 }
+
+// 外部（标签栏按钮 / 另一个标签页）改了字号：本终端也要跟着重排。
+// 自己写共享状态时这里会被反向触发一次，applyFontSize 首行的相等判断直接返回，不会成环。
+watch(sshFontSize, (size) => {
+  if (size && size !== fontSizePx.value) applyFontSize(size)
+})
 
 function openMenu(e: MouseEvent) {
   // 右键时兜底再快照一次：正常路径已在 onSelectionChange 捕获，这里防的是个别
@@ -924,14 +923,14 @@ defineExpose({
           <span>{{ t('sshCtxSelectAll') }}</span>
         </button>
         <div class="term-menu-sep" />
-        <button class="term-menu-item" :disabled="fontSizePx >= FONT_SIZE_MAX" @click="applyFontSize(fontSizePx + 1)">
+        <button class="term-menu-item" :disabled="fontSizePx >= SSH_FONT_MAX" @click="applyFontSize(fontSizePx + 1)">
           <span class="mi-lead">
             <ZoomIn :size="13" />
             <span>{{ t('sshCtxFontLarger') }}</span>
           </span>
           <span class="term-menu-kbd">{{ fontSizePx }}</span>
         </button>
-        <button class="term-menu-item" :disabled="fontSizePx <= FONT_SIZE_MIN" @click="applyFontSize(fontSizePx - 1)">
+        <button class="term-menu-item" :disabled="fontSizePx <= SSH_FONT_MIN" @click="applyFontSize(fontSizePx - 1)">
           <span class="mi-lead">
             <ZoomOut :size="13" />
             <span>{{ t('sshCtxFontSmaller') }}</span>

@@ -1,9 +1,12 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { matchesTextOrPinyin } from '../utils/pinyin'
+// 通知中心「点通知 → 落到具体定时任务」：深链目标由 bridge 的 pendingTarget 带过来
+import { pendingTarget } from '../composables/bridge'
 import {
   CreateScheduledTask, ListScheduledTasks, UpdateScheduledTask,
   DeleteScheduledTask, SetScheduledTaskEnabled, RunScheduledTaskNow,
@@ -18,6 +21,7 @@ import ConfirmDialog from './ConfirmDialog.vue'
 import ScheduleRunHistoryDialog from './ScheduleRunHistoryDialog.vue'
 // 「打开软件」的目标输入复用应用选择器：支持手输自定义路径 / 浏览文件 / 系统扫描的已装应用
 import AppTargetPicker from './AppTargetPicker.vue'
+import QdBarChart from './charts/QdBarChart.vue'
 import {
   Plus, Play, Pause, Pencil, Trash2, AlarmClock, AppWindow, FolderOpen,
   Globe, TerminalSquare, Zap, CheckCircle2, XCircle, History,
@@ -41,10 +45,13 @@ const actionIcon: Record<string, any> = {
 function actionLabel(a: string) { return t('sched_action_' + a) }
 
 // ---- 调度类型 ----
-// monthly 后端一直支持（validateScheduledTask + computeNextRun 都有分支），
-// 前端漏了它，等于「每月几号跑一次」这个能力完全不可达，而派生自待办的月度任务
-// 还会在列表里显示成空白描述。
-const KINDS = ['once', 'interval', 'daily', 'weekly', 'monthly'] as const
+// monthly 以前后端有分支、前端没入口，且「每月几号」是创建日隐式决定的；
+// 现在 dayOfMonth 显式可选（含月末），并补上标准 5 段 cron。
+const KINDS = ['once', 'interval', 'daily', 'weekly', 'monthly', 'cron'] as const
+// 常用表达式做成可点选的预设：五段语法不常用的人记不住，空输入框最容易
+// 直接填一个四段或六段表达式然后被后端拒绝。
+const CRON_PRESETS = ['*/5 * * * *', '0 9 * * 1-5', '0 0 1 * *', '0 2 * * 0'] as const
+const MONTH_DAYS = Array.from({ length: 31 }, (_, i) => i + 1)
 // 周一为首列展示；v 使用 JS 星期编号（0=周日..6=周六）
 const WEEKDAYS = computed(() => {
   const zh = ['一', '二', '三', '四', '五', '六', '日']
@@ -77,9 +84,16 @@ function scheduleDesc(t0: ScheduledTask): string {
     case 'interval': return t('sched_kind_interval') + ' · ' + humanInterval(t0.intervalSec) + retry
     case 'daily': return t('sched_kind_daily') + ' · ' + (t0.timeOfDay || '') + retry
     case 'weekly': return t('sched_kind_weekly') + ' · ' + weekdayText(t0.weekdays) + ' ' + (t0.timeOfDay || '') + retry
-    case 'monthly': return t('sched_kind_monthly') + ' · ' + (t0.timeOfDay || '') + retry
+    case 'monthly': return t('sched_kind_monthly') + ' · ' + monthDayText(t0.dayOfMonth) + ' ' + (t0.timeOfDay || '') + retry
+    case 'cron': return t('sched_kind_cron') + ' · ' + (t0.cronExpr || '') + retry
   }
   return ''
+}
+// dayOfMonth: -1=月末，0=老数据（创建日口径），1..31=指定日
+function monthDayText(n: number): string {
+  if (n === -1) return t('sched_month_day_last')
+  if (!n) return t('sched_month_day_auto')
+  return t('sched_month_day_n', { n })
 }
 function humanInterval(sec: number): string {
   const [v, u] = splitInterval(sec)
@@ -123,7 +137,10 @@ const runs = ref<RunItem[]>([])
 async function loadRuns() {
   try {
     runs.value = unwrap<RunItem[]>(await GetAllScheduleRuns(1000)) ?? []
-  } catch { /* 统计失败不影响主列表 */ }
+  } catch (e) {
+    // 统计失败不影响主列表，只记日志
+    logErr('schedule.loadRuns', e)
+  }
 }
 const stats = computed(() => {
   const days: { date: string; total: number; fail: number }[] = []
@@ -144,11 +161,23 @@ const stats = computed(() => {
     total++
     if (r.status !== 'ok') { days[i].fail++; fail++ }
   }
-  const max = Math.max(1, ...days.map(d => d.total))
-  return { days, total, fail, max, rate: total ? Math.round((fail / total) * 100) : 0 }
+  return { days, total, fail, rate: total ? Math.round((fail / total) * 100) : 0 }
 })
-function barPct(n: number): number {
-  return Math.round((n / stats.value.max) * 100)
+/** 近 7 天成功/失败配色：有失败的那天整根染 danger，其余 accent。归一交给图形库。 */
+const weekChart = computed(() => ({
+  labels: stats.value.days.map((d) => dayLabel(d.date)),
+  values: stats.value.days.map((d) => d.total),
+  pointColors: stats.value.days.map((d) => (d.fail > 0 ? 'danger' as const : 'accent' as const)),
+}))
+const weekChartSeries = computed(() => [{
+  name: t('chartDailyUsage'),
+  values: weekChart.value.values,
+  pointColors: weekChart.value.pointColors,
+}])
+function weekTooltipExtra(index: number): string {
+  const d = stats.value.days[index]
+  if (!d) return ''
+  return `<div>${t('sched_stats_fail', { n: d.fail })}</div>`
 }
 function dayLabel(ds: string): string {
   return ds.slice(5) // MM-DD，tooltip 用
@@ -280,6 +309,8 @@ const fIntervalVal = ref(5)           // 数值，配合 fIntervalUnit 换算成
 const fIntervalUnit = ref<'sec' | 'min' | 'hour' | 'day'>('min')
 const fTimeOfDay = ref('09:00')
 const fWeekdays = ref<number[]>([1, 2, 3, 4, 5])
+const fCron = ref('0 9 * * 1-5')
+const fDayOfMonth = ref(new Date().getDate())
 const fEnabled = ref(true)
 const fNotify = ref(true)
 // 通知渠道：与后端 notify_channels 的 system/webhook 一一对应。
@@ -331,6 +362,8 @@ function openCreate() {
   fIntervalUnit.value = 'min'
   fTimeOfDay.value = '09:00'
   fWeekdays.value = [1, 2, 3, 4, 5]
+  fCron.value = '0 9 * * 1-5'
+  fDayOfMonth.value = new Date().getDate()
   fEnabled.value = true
   fNotify.value = true
   fNotifySystem.value = true
@@ -357,6 +390,11 @@ function openEdit(t0: ScheduledTask) {
   fIntervalUnit.value = u
   fTimeOfDay.value = (t0.timeOfDay || '09:00').slice(0, 5)
   fWeekdays.value = t0.weekdays ? t0.weekdays.split(',').filter(Boolean).map(Number) : []
+  fCron.value = t0.cronExpr || '0 9 * * 1-5'
+  // 老 monthly 任务没有存日号（0）：从 next_run 里取回「本来该跑的那天」，
+  // 否则一编辑保存就悄悄改成今天。取不到才退回今天的日号。
+  const legacyDay = Number((t0.nextRun || '').slice(8, 10))
+  fDayOfMonth.value = t0.dayOfMonth || (legacyDay >= 1 && legacyDay <= 31 ? legacyDay : new Date().getDate())
   fEnabled.value = t0.enabled
   fNotify.value = t0.notify
   // 空值视为「两个都要」，与 db 层归一化同口径
@@ -421,6 +459,8 @@ function buildPayload(): ScheduledTask {
     intervalSec: intervalVal(),
     timeOfDay: fKind.value === 'daily' || fKind.value === 'weekly' || fKind.value === 'monthly' ? fTimeOfDay.value + ':00' : '',
     weekdays: fKind.value === 'weekly' ? [...fWeekdays.value].sort((a, b) => a - b).join(',') : '',
+    cronExpr: fKind.value === 'cron' ? fCron.value.trim() : '',
+    dayOfMonth: fKind.value === 'monthly' ? Number(fDayOfMonth.value) : 0,
     enabled: fEnabled.value,
     notify: fNotify.value,
     // 开了通知却一个渠道都没勾，等于「静默不通知」——这种组合用户多半是误操作，
@@ -441,6 +481,8 @@ async function save() {
   if (!p.target) { formErr.value = t('sched_err_target'); return }
   if (p.scheduleKind === 'once' && !p.runAt) { formErr.value = t('sched_err_runat'); return }
   if (p.scheduleKind === 'weekly' && !p.weekdays) { formErr.value = t('sched_err_weekday'); return }
+  // 完整语法交给后端校验（前端只挡空值）：两边各写一份解析器迟早会不一致。
+  if (p.scheduleKind === 'cron' && !p.cronExpr) { formErr.value = t('sched_err_cron'); return }
   saving.value = true
   try {
     if (editingId.value) {
@@ -525,6 +567,42 @@ async function confirmDel() {
 }
 
 onMounted(refresh)
+
+// ---- 通知中心深链定位 ----
+// 点一条定时任务通知后停在对应那条上，而不是回到列表顶部。
+const flashTaskId = ref('')
+let flashTimer: number | null = null
+
+async function focusTask(id: string) {
+  // 目标可能先于数据到位：切页时 refresh() 还没跑完，tasks 是空的
+  let task = tasks.value.find(x => x.id === id)
+  if (!task) { await refresh(); task = tasks.value.find(x => x.id === id) }
+  // 任务已被删除：静默忽略，不弹 toast、不落到空白页
+  if (!task) return
+  // 搜索 / 状态筛选会把它藏起来，DOM 里没这一行；先放回可见集合
+  if (query.value) query.value = ''
+  if (statusFilter.value !== 'all') statusFilter.value = 'all'
+  await nextTick()
+  const el = document.querySelector<HTMLElement>(`[data-task-id="${id.replace(/"/g, '\\"')}"]`)
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  flashTaskId.value = id
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = window.setTimeout(() => { flashTaskId.value = '' }, 1800)
+}
+
+function consumePendingTarget() {
+  const p = pendingTarget.value
+  if (!p || p.page !== 'schedule' || !p.target) return
+  const id = p.target
+  // 取走即清空：下次从侧栏正常进来不会重复定位到旧条目
+  pendingTarget.value = null
+  void focusTask(id)
+}
+watch(pendingTarget, consumePendingTarget, { immediate: true })
+// 双重兜底：immediate 那次若撞上数据未就绪，挂载后再补一次（已消费则是 no-op）
+onMounted(consumePendingTarget)
+onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 </script>
 
 <template>
@@ -579,11 +657,13 @@ onMounted(refresh)
         <span v-if="stats.total" class="stat-rate" :class="{ bad: stats.rate >= 20 }">{{ stats.rate }}%</span>
       </div>
       <div class="stat-bars">
-        <div v-for="d in stats.days" :key="d.date"
-             :class="['stat-bar', { 'has-fail': d.fail > 0, empty: d.total === 0 }]"
-             :title="dayLabel(d.date) + ' · ' + d.total">
-          <div class="bar-fill" :style="{ height: barPct(d.total) + '%' }"></div>
-        </div>
+        <QdBarChart
+          :labels="weekChart.labels"
+          :series="weekChartSeries"
+          :height="24"
+          minimal
+          :tooltip-extra="weekTooltipExtra"
+        />
       </div>
     </div>
 
@@ -601,7 +681,8 @@ onMounted(refresh)
       </div>
 
       <div v-for="task in filteredTasks" :key="task.id"
-           :class="['sched-item', { disabled: !task.enabled, dragging: dragId === task.id, 'drag-over': dragOverId === task.id }]"
+           :data-task-id="task.id"
+           :class="['sched-item', { disabled: !task.enabled, dragging: dragId === task.id, 'drag-over': dragOverId === task.id, 'sched-flash': flashTaskId === task.id }]"
            :draggable="canDrag"
            @dragstart="onDragStart($event, task)"
            @dragover.prevent="onDragOver(task)"
@@ -749,10 +830,29 @@ onMounted(refresh)
           <input v-model="fTimeOfDay" type="time" class="modal-input" />
         </template>
 
-        <!-- monthly：后端按"保存当天是几号"作为每月日，所以这里只需要时间 -->
+        <!-- monthly：几号是显式字段。后端按所选日号算，小月自动钳到月末，
+             不再像旧实现那样由「创建当天是几号」隐式决定、跑过一次月末就漂移 -->
         <template v-else-if="fKind === 'monthly'">
+          <label>{{ t('sched_month_day') }}</label>
+          <select v-model.number="fDayOfMonth" class="modal-input">
+            <option v-for="d in MONTH_DAYS" :key="d" :value="d">{{ t('sched_month_day_n', { n: d }) }}</option>
+            <option :value="-1">{{ t('sched_month_day_last') }}</option>
+          </select>
+          <p class="form-hint">{{ t('sched_month_hint') }}</p>
           <label>{{ t('sched_time_of_day') }}</label>
           <input v-model="fTimeOfDay" type="time" class="modal-input" />
+        </template>
+
+        <!-- cron：五段标准表达式。预设只是帮忙填值，真正生效的始终是输入框内容；
+             完整语法由后端校验，前端只挡空值，避免两份解析器口径不一致 -->
+        <template v-else-if="fKind === 'cron'">
+          <label>{{ t('sched_cron_expr') }}</label>
+          <input v-model="fCron" class="modal-input cron-input" spellcheck="false" placeholder="0 9 * * 1-5" />
+          <p class="form-hint">{{ t('sched_cron_hint') }}</p>
+          <div class="cron-presets">
+            <span class="cron-presets-label">{{ t('sched_cron_presets') }}</span>
+            <button v-for="p in CRON_PRESETS" :key="p" type="button" class="cron-preset" @click="fCron = p">{{ p }}</button>
+          </div>
         </template>
 
         <!-- 开关 -->
@@ -828,6 +928,16 @@ onMounted(refresh)
 .interval-row { display: flex; align-items: center; gap: var(--space-2); }
 .interval-num { flex: 1 1 auto; min-width: 0; }
 .interval-unit { flex: 0 0 96px; width: 96px; }
+/* cron 表达式等宽显示：* 与 / 挤在比例字体里很容易看错列 */
+.cron-input { font-family: var(--font-mono, monospace); letter-spacing: .5px; }
+.cron-presets { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin: 8px 0 2px; }
+.cron-presets-label { font-size: 11px; color: var(--color-text-muted); margin-right: 2px; }
+.cron-preset {
+  padding: 3px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+  font-family: var(--font-mono, monospace); font-size: 11px; cursor: pointer;
+}
+.cron-preset:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
 
 /* 搜索 / 状态筛选条：跟着页头一起通栏，内边距与列表对齐 */
 .sched-toolbar {
@@ -868,17 +978,7 @@ onMounted(refresh)
   font-variant-numeric: tabular-nums;
 }
 .stat-rate.bad { background: var(--color-danger-bg); color: var(--color-danger); }
-.stat-bars { display: flex; align-items: flex-end; gap: 3px; height: 22px; margin-left: auto; }
-.stat-bar {
-  width: 9px; height: 100%; display: flex; align-items: flex-end;
-  background: var(--color-bg-tertiary); border-radius: 2px; overflow: hidden;
-}
-.stat-bar .bar-fill {
-  width: 100%; background: var(--color-accent); border-radius: 2px;
-  min-height: 1px; transition: height var(--transition-fast);
-}
-.stat-bar.has-fail .bar-fill { background: var(--color-danger); }
-.stat-bar.empty .bar-fill { min-height: 0; }
+.stat-bars { margin-left: auto; width: 168px; flex-shrink: 0; }
 
 .sched-error {
   margin: 12px 20px 0; padding: 8px 12px; font-size: 12px;
@@ -927,6 +1027,15 @@ onMounted(refresh)
 /* 拖拽：抓起来的半透明、落点给一条左侧高亮 */
 .sched-item.dragging { opacity: 0.45; }
 .sched-item.drag-over { border-color: var(--color-accent); box-shadow: inset 0 2px 0 var(--color-accent); }
+/* 通知深链定位后的短暂高亮：任务一多，不给个落点找不到滚到了哪 */
+.sched-item.sched-flash {
+  border-color: var(--color-accent);
+  animation: sched-flash 1.8s ease-out 1;
+}
+@keyframes sched-flash {
+  0%, 55% { background: var(--color-bg-hover); }
+  100% { background: var(--color-bg-secondary); }
+}
 .drag-handle { flex-shrink: 0; color: var(--color-text-disabled); cursor: grab; margin-right: -6px; }
 .sched-item:active .drag-handle { cursor: grabbing; }
 

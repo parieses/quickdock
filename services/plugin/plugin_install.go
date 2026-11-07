@@ -347,6 +347,14 @@ func inspectZipManifest(zipPath string) (*PluginZipInfo, error) {
 // permSummary 把权限声明翻成一行一条的「key: JSON 值」。
 // 展示原始 JSON 而不是自造文案：权限模型有 bool / 白名单 / scope 三种形态，
 // 自造文案容易在新增形态时漏翻，原始 JSON 至少永远忠实于清单。
+//
+// 为什么必须逐项列全（尤其是 mcp）：安装前确认框是用户唯一一次能看到
+// 「这个插件能碰什么」的机会，漏掉一项就等于替用户默认同意了那一项。
+// 2026-11-07 新增的 permissions.mcp 尤其不能漏——host.mcp.call 曾因
+// checkPermission 缺 mcp 分支、末尾 return nil，让零权限插件也能调
+// LevelWrite 工具（env_stop / clipboard_copy / plugin_execute）。现在运行期有
+// 三道闸（声明 mcp → 等级门 → 插件路径硬拒 LevelRisk），但那是「拦得住」，
+// 不是「看得见」；这里负责把声明原样摆到用户面前，不替代任何一道闸。
 func permSummary(mf *pluginmgr.PluginManifest) []string {
 	pm := mf.Permissions
 	var out []string
@@ -361,6 +369,11 @@ func permSummary(mf *pluginmgr.PluginManifest) []string {
 	if pm.Network.Granted() {
 		add("network", pm.Network)
 	}
+	// mcp 紧跟 network：它是唯一能让插件复用宿主整套 MCP 工具表的声明，
+	// 漏列会让用户在不知情下授予「启停服务 / 写剪贴板 / 执行插件命令」等能力。
+	if pm.MCP.Granted() {
+		add("mcp", pm.MCP)
+	}
 	if pm.Filesystem.Granted() {
 		add("filesystem", pm.Filesystem)
 	}
@@ -370,8 +383,19 @@ func permSummary(mf *pluginmgr.PluginManifest) []string {
 	if pm.Shell.Granted() {
 		add("shell", pm.Shell)
 	}
+	if pm.Process.Granted() {
+		add("process", pm.Process)
+	}
 	if pm.ProcessKill.Granted() {
 		add("processKill", pm.ProcessKill)
+	}
+	// selfAudit=skip 会关掉 native 插件的安装期静态自证（installer.go 只记日志），
+	// 是声明里最需要用户知情的一条：连同 skipReason 一起如实摆出来，不替用户判断。
+	if strings.TrimSpace(pm.SelfAudit) != "" {
+		add("selfAudit", pm.SelfAudit)
+	}
+	if strings.TrimSpace(pm.SkipReason) != "" {
+		add("skipReason", pm.SkipReason)
 	}
 	return out
 }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, inject } from 'vue'
+import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban, Search } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
@@ -15,6 +15,8 @@ import { applyOverflowTitle } from '../utils/overflowTitle'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import { pickDownload } from '../utils/platform'
 import { setPluginUpdateBadge } from '../composables/usePluginUpdateBadge'
+import { confirmPermissions, permissionsToLines } from '../composables/usePluginPermissions'
+import { setMarketOffline, marketRefreshSignal } from '../composables/usePluginMarketSources'
 import { logWarn } from '../utils/logger'
 import type { ToastAPI } from '../types'
 
@@ -52,6 +54,11 @@ interface MarketIndex {
   name: string
   updated: string
   plugins: MarketPlugin[]
+  // 后端在网络失败、用最后一次成功缓存兜底时填充；前端据此明确标注「离线缓存」，
+  // 绝不把旧数据静默冒充最新（横幅由常驻的插件管理页页头显示）。
+  offline?: boolean
+  cachedAt?: number
+  sourceCount?: number
 }
 
 const emit = defineEmits<{ (e: 'installed'): void }>()
@@ -202,17 +209,27 @@ async function loadMarket() {
     if (idx) {
       plugins.value = idx.plugins || []
       updated.value = idx.updated || ''
+      // 网络失败时后端用最后一次成功缓存兜底，并在返回里标记 offline/cachedAt。
+      // 写进共享状态，由常驻的插件管理页页头显示「离线缓存」横幅——不把旧数据
+      // 静默冒充最新版本。
+      setMarketOffline(!!idx.offline, idx.cachedAt || 0)
       // 同步「可更新」角标到侧栏（插件页未挂载时由本页兜底刷新）
       setPluginUpdateBadge(
         (idx.plugins || []).filter((p) => p.installed && p.has_update && p.supported && !!pickDownload(p.downloads)).length,
       )
     }
   } catch (e) {
+    // 连缓存都没有时后端直接报错：横幅复位，不显示一份不存在的「离线数据」。
+    setMarketOffline(false, 0)
     toast?.error?.(t('pluginMarketLoadFailed') + ': ' + getErrorMessage(e))
   } finally {
     loading.value = false
   }
 }
+
+// 管理页保存市场源后发出刷新信号：源配置变了，当前列表（可能是上一次的合并
+// 结果或离线缓存）已过期，按新配置重拉一次索引。
+watch(marketRefreshSignal, () => { void loadMarket() })
 
 // silent=true 时（一键更新场景）不弹单插件 toast、不在每次循环里重复 loadMarket，
 // 由调用方统一刷新与提示；返回值表示本次是否成功，便于批量更新统计。
@@ -222,6 +239,16 @@ async function install(p: MarketPlugin, silent = false): Promise<boolean> {
   if (!url) {
     if (!silent) toast?.error?.(t('pluginMarketNoDownload'))
     return false
+  }
+  // 安装/升级前把该插件在市场索引里声明的 permissions（含 2026-11-07 新增的
+  // permissions.mcp）逐项列给用户，用户确认才继续；不确认直接取消，不默默放行。
+  // 后端三道闸是运行期的「拦得住」，这里是安装期的「看得见」，两者互不替代。
+  // silent（批量更新）由 updateAll 统一弹一次汇总框，见下方。
+  if (!silent) {
+    const lines = [p.name, ...permissionsToLines(p.permissions)]
+    if (lines.length === 1) lines.push(t('pluginPermNone'))
+    lines.push(t('pluginPermDisclaimer'))
+    if (!(await confirmPermissions(lines))) return false
   }
   installing.value.add(p.id)
   delete progressMap.value[url]
@@ -249,7 +276,20 @@ async function updateAll() {
     (p) => p.installed && p.has_update && p.supported && !!pickDownload(p.downloads),
   )
   if (!todo.length || updatingAll.value) return
+  // 先占住按钮：确认框等待期间再点一次会弹第二个框、把第一个 Promise 顶成取消。
   updatingAll.value = true
+  // 批量更新同样属于「安装」：把所有待更新插件声明的权限汇总成一张清单，
+  // 用户确认一次才继续；不确认整个批量取消。逐个弹窗会把「一键更新」
+  // 变成 N 次打断，也容易让人一路点过去等于没看。
+  const lines: string[] = []
+  for (const p of todo) {
+    lines.push(p.name)
+    const perms = permissionsToLines(p.permissions)
+    if (perms.length) lines.push(...perms.map((l) => '  · ' + l))
+    else lines.push(t('pluginPermNone'))
+  }
+  lines.push(t('pluginPermDisclaimer'))
+  if (!(await confirmPermissions(lines))) { updatingAll.value = false; return }
   updateAllTotal.value = todo.length
   updateAllDone.value = 0
   let ok = 0

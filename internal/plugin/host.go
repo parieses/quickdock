@@ -66,6 +66,25 @@ func (m *Manager) checkPermission(pluginID string, method string, params json.Ra
 		if u, ok := jsonStringField(params, "url"); ok && !net.AllowsHost(u) {
 			return fmt.Errorf("%w: 插件 %q 无权访问域名 %s（不在 permissions.network 白名单内）", ErrPermissionDenied, pluginID, u)
 		}
+	case method == "host.mcp.call":
+		// host.mcp.call 直接复用宿主内置 MCP 工具表，LevelWrite 一档含服务启停、
+		// 写剪贴板、执行插件命令等写操作。不声明 permissions.mcp 一律拒绝：
+		// 否则一张空 permissions 表就能拿到整套写能力（等级门只挡 LevelRisk，
+		// 而且用户还可能把 MCP 等级调到最高）。
+		mcp := inst.Manifest.Permissions.MCP
+		if !mcp.Granted() {
+			return fmt.Errorf("%w: 插件 %q 没有 mcp 权限（调用宿主 MCP 工具需显式声明 permissions.mcp）", ErrPermissionDenied, pluginID)
+		}
+		// 白名单模式下必须能确定工具名，取不到就拒绝——证明不了在名单内就不能调。
+		if !mcp.All {
+			tool, ok := jsonStringField(params, "tool")
+			if !ok || strings.TrimSpace(tool) == "" {
+				return fmt.Errorf("%w: host.mcp.call 缺少有效的 tool 参数，无法核对 permissions.mcp 白名单，已拒绝", ErrPermissionDenied)
+			}
+			if !mcp.AllowsTool(tool) {
+				return fmt.Errorf("%w: 插件 %q 无权调用 MCP 工具 %s（不在 permissions.mcp 白名单内）", ErrPermissionDenied, pluginID, tool)
+			}
+		}
 	case strings.HasPrefix(method, "host.dialog."):
 		if !inst.Manifest.Permissions.Filesystem.Dialog {
 			return fmt.Errorf("%w: 插件 %q 没有 filesystem 权限", ErrPermissionDenied, pluginID)

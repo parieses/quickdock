@@ -20,7 +20,7 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { FolderPlus, ListChecks, Plus, RefreshCw, Search, Server, ShieldCheck, X } from '@lucide/vue'
+import { FolderPlus, ListChecks, Network, Plus, RefreshCw, Search, Server, ShieldCheck, X } from '@lucide/vue'
 import {
   DeleteHost,
   Disconnect,
@@ -59,6 +59,7 @@ import SshFolderDialog from './SshFolderDialog.vue'
 import SftpPanel from './SftpPanel.vue'
 import SshBatchDialog from './SshBatchDialog.vue'
 import SshQuickExecDialog from './SshQuickExecDialog.vue'
+import SshForwardPanel from './SshForwardPanel.vue'
 
 const { t } = useI18n()
 const { confirm, error: toastError } = useToast()
@@ -96,6 +97,8 @@ const sftpTabs = ref<Set<string>>(new Set())
 /** 批量执行弹窗；preselect 是打开时要预勾选的主机（从分组菜单进来时带整棵子树） */
 const batchVisible = ref(false)
 const batchPreselect = ref<string[]>([])
+/** 端口转发抽屉显隐：由左工具条按钮切换，面板自身负责列表刷新/轮询 */
+const forwardVisible = ref(false)
 
 let offShown: (() => void) | null = null
 
@@ -291,6 +294,7 @@ async function submitFolder(name: string) {
         keyPassphrase: '',
         legacyAlgorithms: false,
         env: '',
+        jumpHostId: '',
         parentId: folderParentId.value,
         isFolder: true,
         sort: 0,
@@ -509,6 +513,16 @@ defineExpose({
           >
             <ListChecks :size="14" />
           </button>
+          <!-- @mousedown.stop：抽屉用全局 mousedown 判「点外部关闭」，这里挡住，
+               否则点按钮切换时会被判成外部点击，刚打开又被自己关掉。 -->
+          <button
+            class="ssh-tool"
+            :title="t('sshForwardTitle')"
+            @mousedown.stop
+            @click="forwardVisible = !forwardVisible"
+          >
+            <Network :size="14" />
+          </button>
         </div>
       </header>
 
@@ -643,6 +657,14 @@ defineExpose({
       :existing="folderNames"
       @submit="submitFolder"
       @cancel="folderVisible = false"
+    />
+
+    <!-- 端口转发抽屉：绝对定位浮层，不占侧栏、不顶掉会话舞台。
+         主机清单直接复用本页的 hosts（ListHosts 结果，随 load() 刷新）。 -->
+    <SshForwardPanel
+      :open="forwardVisible"
+      :hosts="hosts"
+      @close="forwardVisible = false"
     />
   </div>
 </template>

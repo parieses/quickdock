@@ -4,6 +4,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"quickdock/internal/db"
 )
@@ -14,6 +15,85 @@ func shellCmd(body string) string {
 		return `cmd /c "` + body + `"`
 	}
 	return `sh -c "` + body + `"`
+}
+
+func TestParseCronExpr(t *testing.T) {
+	valid := []string{
+		"* * * * *", "*/5 * * * *", "0 9 * * 1-5", "0 0 1,15 * *",
+		"30 2 1 JAN MON", "@daily", "@weekly", "0 0 * * 7",
+		"0 0-23/2 * * *", "5/10 * * * *", "0 0 29 2 *",
+	}
+	for _, expr := range valid {
+		if _, err := parseCronExpr(expr); err != nil {
+			t.Errorf("合法表达式被拒 %q: %v", expr, err)
+		}
+	}
+	invalid := []string{
+		"", "* * * *", "* * * * * *", "60 * * * *", "* 24 * * *",
+		"* * 0 * *", "* * * 13 *", "* * * * 8", "*/0 * * * *",
+		"* * * * FOO", "@nope", "1-5-9 * * * *", "0 0 31 2 *",
+	}
+	for _, expr := range invalid {
+		if err := validateCronExpr(expr); err == nil {
+			t.Errorf("非法/永不匹配的表达式不该通过校验: %q", expr)
+		}
+	}
+}
+
+// 固定 2026-11-06 09:00:30（周五）作为起点，期望值全部按日历手算，
+// 不依赖 time.Now：跑测试的机器在哪天、哪个时区都不影响结论。
+func TestComputeNextRunCron(t *testing.T) {
+	const from = "2026-11-06 09:00:30"
+	cases := []struct{ name, expr, want string }{
+		{"每天 9 点，今天已过", "0 9 * * *", "2026-11-07 09:00:00"},
+		{"每 5 分钟", "*/5 * * * *", "2026-11-06 09:05:00"},
+		{"工作日 9 点，周五已过跳下周一", "0 9 * * 1-5", "2026-11-09 09:00:00"},
+		{"每月 1 号", "0 0 1 * *", "2026-12-01 00:00:00"},
+		{"宏", "@daily", "2026-11-07 00:00:00"},
+		{"日与周都受限时取或", "0 0 1 * 1", "2026-11-09 00:00:00"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := computeNextRun(&db.ScheduledTask{ScheduleKind: "cron", CronExpr: c.expr}, from)
+			if got != c.want {
+				t.Errorf("computeNextRun(%q) = %q, want %q", c.expr, got, c.want)
+			}
+		})
+	}
+	if got := computeNextRun(&db.ScheduledTask{ScheduleKind: "cron", CronExpr: "bad expr"}, from); got != "" {
+		t.Errorf("非法表达式应返回空而不是 %q", got)
+	}
+}
+
+func TestComputeNextRunMonthly(t *testing.T) {
+	// 旧的「用 from.Day()」实现：1/31 跑过 2/28 后会永久漂到 28 号。
+	// 显式 DayOfMonth 必须让下个月回到 31 号。
+	task := &db.ScheduledTask{ScheduleKind: "monthly", TimeOfDay: "09:00", DayOfMonth: 31}
+	if got, want := computeNextRun(task, "2026-01-31 10:00:00"), "2026-02-28 09:00:00"; got != want {
+		t.Errorf("1/31 后应钳到 2/28: got %q want %q", got, want)
+	}
+	if got, want := computeNextRun(task, "2026-02-28 09:00:00"), "2026-03-31 09:00:00"; got != want {
+		t.Errorf("月末钳位不该改变原始日号: got %q want %q", got, want)
+	}
+	last := &db.ScheduledTask{ScheduleKind: "monthly", TimeOfDay: "09:00", DayOfMonth: -1}
+	if got, want := computeNextRun(last, "2026-02-10 09:00:00"), "2026-02-28 09:00:00"; got != want {
+		t.Errorf("-1 应落在当月最后一天: got %q want %q", got, want)
+	}
+	legacy := &db.ScheduledTask{ScheduleKind: "monthly", TimeOfDay: "09:00"}
+	if got, want := computeNextRun(legacy, "2026-01-31 10:00:00"), "2026-02-28 09:00:00"; got != want {
+		t.Errorf("老数据（0）沿用创建日口径: got %q want %q", got, want)
+	}
+}
+
+func TestCronNextStrictlyAfter(t *testing.T) {
+	from := time.Date(2026, 11, 6, 9, 0, 0, 0, time.Local)
+	at, ok := cronNext("*/5 * * * *", from)
+	if !ok || !at.After(from) {
+		t.Errorf("cronNext 必须返回严格晚于起点的时刻: %v, %v", at, ok)
+	}
+	if at.Minute()%5 != 0 {
+		t.Errorf("步长 5 的分钟应为 5 的倍数: %v", at)
+	}
 }
 
 func TestFlattenResult(t *testing.T) {

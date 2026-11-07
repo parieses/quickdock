@@ -7,7 +7,8 @@ import { useWorkspaceStore } from '../stores/workspace'
 import {
   ListRecycle, RestoreRecycle, PurgeRecycle, ClearRecycle,
 } from '../../bindings/quickdock/services/recycle/recycleservice'
-import { Boxes, LayoutGrid, Layers, Bookmark, FileText, RefreshCw, Trash2, Undo2, Timer, MessageSquare, Folder } from '@lucide/vue'
+import { Boxes, LayoutGrid, Layers, Bookmark, FileText, RefreshCw, Trash2, Undo2, Timer, MessageSquare, Folder, Activity } from '@lucide/vue'
+import { Events } from '@wailsio/runtime'
 import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
@@ -43,6 +44,7 @@ const TYPE_FILTERS: { value: string; labelKey: string }[] = [
   { value: 'schedules', labelKey: 'recycleTypeSchedule' },
   { value: 'ai_tasks', labelKey: 'recycleTypeAITask' },
   { value: 'ai_spaces', labelKey: 'recycleTypeAISpace' },
+  { value: 'monitors', labelKey: 'recycleTypeMonitor' },
 ]
 const typeFilter = ref('')
 
@@ -56,6 +58,7 @@ const TYPE_ICON: Record<string, Component> = {
   // AI 任务与空间：空间带目录（文件夹图标），任务是单条对话。
   ai_tasks: MessageSquare,
   ai_spaces: Folder,
+  monitors: Activity,
 }
 
 const TYPE_LABEL: Record<string, string> = {
@@ -67,6 +70,7 @@ const TYPE_LABEL: Record<string, string> = {
   schedules: 'recycleTypeSchedule',
   ai_tasks: 'recycleTypeAITask',
   ai_spaces: 'recycleTypeAISpace',
+  monitors: 'recycleTypeMonitor',
 }
 
 // 只显示出现在筛选里的类型，避免假选项（某类型一条都没有时点进去是空页）
@@ -85,6 +89,12 @@ function typeLabel(c: string): string {
 
 function keyOf(e: RecycleEntry): string {
   return e.collection + '/' + e.id
+}
+
+// 监控页是 KeepAlive 常驻页，自动刷新还可能被用户关掉。在回收站里恢复 /
+// 彻底删除监控后主动喊一声，免得切回去还看到旧的软删状态。
+function notifyMonitorsChanged() {
+  try { Events.Emit('monitor:changed') } catch { /* 事件通道未就绪时静默 */ }
 }
 
 function fmtTime(iso: string): string {
@@ -127,6 +137,7 @@ async function restore(e: RecycleEntry) {
     unwrap(await RestoreRecycle(e.collection, e.id))
     entries.value = entries.value.filter(x => keyOf(x) !== k)
     toast?.success?.(t('recycleRestored', { name: e.label || typeLabel(e.collection) }))
+    if (e.collection === 'monitors') notifyMonitorsChanged()
     await refreshWorkspace()
   } catch (err: any) {
     toast?.error?.(getErrorMessage(err))
@@ -140,13 +151,19 @@ async function purge(e: RecycleEntry) {
   const k = keyOf(e)
   if (busyKey.value) return
   if (toast?.confirm) {
-    const ok = await toast.confirm(t('recyclePurgeConfirm', { name: e.label || typeLabel(e.collection) }))
+    const name = e.label || typeLabel(e.collection)
+    // 监控的彻底删除会连检测日志一起抹掉，通用文案没提这层代价。
+    const msg = e.collection === 'monitors'
+      ? t('recyclePurgeMonitorConfirm', { name })
+      : t('recyclePurgeConfirm', { name })
+    const ok = await toast.confirm(msg)
     if (!ok) return
   }
   busyKey.value = k
   try {
     unwrap(await PurgeRecycle(e.collection, e.id))
     entries.value = entries.value.filter(x => keyOf(x) !== k)
+    if (e.collection === 'monitors') notifyMonitorsChanged()
   } catch (err: any) {
     toast?.error?.(getErrorMessage(err))
   } finally {
@@ -159,9 +176,12 @@ async function clearAll() {
     const ok = await toast.confirm(t('recycleClearConfirm', { n: entries.value.length }))
     if (!ok) return
   }
+  // 清空会连带硬删所有软删监控，即便用户没在监控页也要让那边重取一次。
+  const hadMonitors = entries.value.some(e => e.collection === 'monitors')
   try {
     unwrap(await ClearRecycle())
     entries.value = []
+    if (hadMonitors) notifyMonitorsChanged()
   } catch (e: any) {
     toast?.error?.(getErrorMessage(e))
   }
@@ -283,6 +303,7 @@ onMounted(load)
 .rc-icon[data-type='scenes'] { color: var(--color-log-info); }
 .rc-icon[data-type='collections'] { color: var(--color-success); border-color: var(--color-success-border); }
 .rc-icon[data-type='notes'] { color: var(--color-warning); }
+.rc-icon[data-type='monitors'] { color: var(--color-log-info); }
 .rc-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
 .rc-line { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .rc-name {

@@ -284,6 +284,10 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			}
 		}
 	}
+	// 后台任务的会话归属：到这里 res.ConvID 才最终确定（新会话是上面刚建的），
+	// 在函数开头按 req.ConvID 挂会拿到空串，起的任务就永远查不到属于谁。
+	// 子 agent（Fresh）借父会话 id，正好一起归到父会话面板里。
+	ctx = aitools.WithConvID(ctx, res.ConvID)
 	if aiModePrompts[mode] == "" {
 		mode = "chat"
 	}

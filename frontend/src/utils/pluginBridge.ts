@@ -15,6 +15,8 @@
 //     拦死，且拿不到任何宿主能力；本函数把调用转给宿主前端，再由宿主按当前插件身份
 //     走与 native / goja 完全相同的 Host Method 注册表。method 如 'host.mcp.call' /
 //     'http.get' / 'host.clipboard.read' / 'db.set'。失败 reject Error(msg)。
+//     注意 'host.mcp.call' 需插件在 plugin.json 声明 permissions.mcp（true 或工具名
+//     白名单），否则宿主会以「没有 mcp 权限」拒绝；高危等级工具对插件一律不开放。
 //     新增宿主能力无需再改前端桥，直接用本函数。
 // - qdHttp(opts): Promise<{status,ok,headers,body,truncated}> —— qdHostCall 的 HTTP 便捷封装。
 //     opts: { url, method?, headers?, body?, contentType? }。method 为 POST 时走 http.post；

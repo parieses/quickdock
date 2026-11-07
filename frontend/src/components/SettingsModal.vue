@@ -55,7 +55,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{ close: [] }>()
 
-const { markSeen } = navBadges()
+const { markSeen, settingsBadge } = navBadges()
 
 const activePage = ref<string | null>(null)
 // 二级 tab：'ai:usage' 里的 usage。只有 AI 与历史两页内部有分段，其余传空。
@@ -76,9 +76,17 @@ const backupTabs = computed<{ value: BackupTab; label: string }[]>(() => [
 watch(activeTab, (v) => {
   backupTab.value = v === 'sync' || v === 'snapshot' ? v : 'storage'
 })
-// 无论从哪个入口打开设置（footer 按钮 / AI 页 / 命令面板），都视为看过设置内的
-// 待读信息（崩溃记录角标）—— 只靠侧栏 footer 清水位，会漏掉其它打开路径
-watch(() => props.visible, (v) => { if (v) markSeen('settings') })
+// 崩溃记录角标的已读时机 = 真正进入「设置 → 日志」页，不是打开设置弹窗。
+// 原先「打开即清」+「设置菜单没有任何标识」= 用户看到侧栏红点，点开后一瞬间消失，
+// 根本不知道它指什么。现在红点一直保留到进日志页；进入时先快照数量（必须在
+// markSeen 之前取），供日志页顶部按钮与「崩溃记录」分组的「新增 N」使用。
+// 无论从哪个入口打开（footer / 通知中心 / 命令面板 / 深链），activePage 都会收敛到这里。
+const entryCrashCount = ref(0)
+watch(activePage, (p) => {
+  if (p !== 'logs') return
+  entryCrashCount.value = settingsBadge.value?.count ?? 0
+  markSeen('settings')
+})
 const panelRef = ref<HTMLElement | null>(null)
 const { onKeydown: onKeydownTrap } = useFocusTrap(toRef(props, 'visible'), panelRef)
 const hotkeyRef = ref<InstanceType<typeof HotkeySettings> | null>(null)
@@ -173,9 +181,16 @@ const menuGroups = computed(() => {
 // 混在服务组里会让那一组看起来像四个互不相干的东西。同样参与搜索。
 const footerItems = computed(() => {
   const qLC = settingsQuery.value.trim().toLowerCase()
+  const badge = settingsBadge.value
+  // .menu-row-desc 在公共样式里是 display:none，光改 desc 或 title 用户看不到，
+  // 所以「红点指什么」必须额外用一个可见标签 + 同色数字角标说明。
+  const crashHint = badge ? t('badgeNewCrash', { n: badge.count }) : ''
   const all = [
-    { key: 'logs', label: t('navLogs'), icon: ScrollText, desc: t('logsDesc') },
-    { key: 'about', label: t('appName'), icon: Info, desc: t('aboutDesc') },
+    { key: 'logs', label: t('navLogs'), icon: ScrollText,
+      desc: crashHint || t('logsDesc'), alert: crashHint,
+      badge: badge?.count ?? 0, badgeTone: badge?.tone ?? 'danger' },
+    { key: 'about', label: t('appName'), icon: Info, desc: t('aboutDesc'),
+      alert: '', badge: 0, badgeTone: 'info' },
   ]
   if (!qLC) return all
   return all.filter((m) => menuMatches(m, qLC))
@@ -239,10 +254,43 @@ const updateResult = ref('')
 const updateDlActive = ref(false)
 const updateProgress = ref(0)
 
+// ---- 跳过版本（app_state 持久化）----
+// 为什么落盘：这里的「跳过此版本」原先只把 updateStatus.state 置 idle，是纯内存动作，
+// 刷新/重启后必然再次弹出。用现成的 GetValue/SetValue（与 SettingsSnapshot 的
+// qd_snapshot_config 同一套 app_state 配置），不新造存储、不加 RPC。
+// 结构是 availableVersion 数组：App.vue 的自动弹窗按版本分别记 localStorage key，
+// 天然是「按版本」语义；同一字段也保证两边比对的是同一个版本号字符串。
+const SKIPPED_VERSIONS_KEY = 'qd_update_skipped_versions'
+const skippedVersions = ref<string[]>([])
+function isVersionSkipped(v: string | undefined): boolean {
+  return !!v && skippedVersions.value.includes(v)
+}
+
+async function loadSkippedVersions() {
+  try {
+    const raw = unwrap<string>(await GetValue(SKIPPED_VERSIONS_KEY))
+    const arr = JSON.parse(raw || '[]')
+    skippedVersions.value = Array.isArray(arr)
+      ? arr.filter((x): x is string => typeof x === 'string' && !!x)
+      : []
+  } catch (e) {
+    logErr('SettingsModal:loadSkippedVersions', e)
+    skippedVersions.value = []
+  }
+  // App.vue 的 onUpdateStatus 是同步读 localStorage 的 qd_update_skip_<v>（App.vue:346），
+  // 不读 app_state。把 app_state 里的版本镜像成同款 key，自动弹窗才会尊重跳过；
+  // 用户清了浏览器缓存后，只要再打开设置页就能回灌恢复。
+  for (const v of skippedVersions.value) {
+    try { localStorage.setItem('qd_update_skip_' + v, '1') } catch (e) { logErr('SettingsModal:mirrorSkip', e) }
+  }
+}
+
 let offUpdateStatus: (() => void) | null = null
 let offDlProgress: (() => void) | null = null
 
 onMounted(async () => {
+  // 先于事件订阅装载跳过列表，否则后台检查先推一帧 available 就会漏判
+  await loadSkippedVersions()
   try {
     // 后端已按 R11 统一返回 ApiResult，必须 unwrap 才能拿到业务数据。
     appVersion.value = unwrap<string>(await GetAppVersion()) ?? ''
@@ -253,8 +301,15 @@ onMounted(async () => {
     logErr('SettingsModal:loadUpdateState', e)
   }
   // 订阅后台自动检查结果：与手动"检测更新"复用同一套渲染，保证流程一致。
+  // 被跳过的版本走自动推送时不再提示；用户主动点「检查更新」仍要能看到（含下载入口），
+  // 所以过滤只放在事件回调里，checkForUpdates 直接调 applyUpdateStatus 不受影响。
   offUpdateStatus = Events.On('quickdock:update:status', (payload: any) => {
-    applyUpdateStatus((payload?.data ?? payload) as UpdateStatus)
+    const st = (payload?.data ?? payload) as UpdateStatus
+    if (st?.state === 'available' && isVersionSkipped(st.availableVersion)) {
+      updateResult.value = t('updateSkipped', { version: st.availableVersion })
+      return
+    }
+    applyUpdateStatus(st)
   })
   // 订阅更新包下载进度（Wails updater 内部事件，后端并发/镜像下载的进度会汇入其中）
   offDlProgress = Events.On('wails:updater:download-progress', (payload: any) => {
@@ -301,6 +356,49 @@ async function checkForUpdates() {
   } finally {
     updateChecking.value = false
   }
+}
+
+// 「跳过此版本」接真逻辑：只写前端两份存储，任一失败都留痕并提示，避免「点了没反应」。
+// ① app_state（权威持久化）② localStorage 的 qd_update_skip_<v>（对齐 App.vue:346
+// 自动弹窗的判断 key）。刻意不调后端 SkipUpdate：Wails v3 的 Updater.SkipVersion
+// 会让之后每次 Check() 都把该版本当「已是最新」，连用户主动点「检查更新」都看不到，
+// 与「跳过的版本不再提示、但手动检查能看到」相悖。抑制提示全部交给前端两处判断。
+async function skipThisUpdate() {
+  const v = updateStatus.value?.availableVersion
+  if (!v) return
+  if (!skippedVersions.value.includes(v)) {
+    skippedVersions.value = [...skippedVersions.value, v]
+  }
+  const failures: string[] = []
+  try {
+    unwrap(await SetValue(SKIPPED_VERSIONS_KEY, JSON.stringify(skippedVersions.value)))
+  } catch (e) { logErr('SettingsModal:saveSkipped', e); failures.push(getErrorMessage(e)) }
+  try {
+    localStorage.setItem('qd_update_skip_' + v, '1')
+  } catch (e) { logErr('SettingsModal:mirrorSkip', e) }
+  // 不管写盘结果如何都先收起下载区：用户已表达意图，界面不该继续挂着被跳过的版本
+  const cur = updateStatus.value
+  if (cur) cur.state = 'idle'
+  updateResult.value = t('updateSkipped', { version: v })
+  if (failures.length) toast.error(failures[0])
+}
+
+// 恢复路径：清 app_state 与 localStorage 镜像，再拉一次更新状态，让被跳过的可用版本
+// 重新出现下载入口。后端从未被 SkipVersion 标记过，GetUpdateState 能直接返回 available。
+async function clearSkippedUpdates() {
+  const cleared = [...skippedVersions.value]
+  try {
+    unwrap(await SetValue(SKIPPED_VERSIONS_KEY, '[]'))
+  } catch (e) { logErr('SettingsModal:clearSkipped', e); toast.error(getErrorMessage(e)); return }
+  skippedVersions.value = []
+  for (const v of cleared) {
+    try { localStorage.removeItem('qd_update_skip_' + v) } catch (e) { logErr('SettingsModal:unmirrorSkip', e) }
+  }
+  try {
+    const state = unwrap<UpdateStatus>(await GetUpdateState())
+    if (state) applyUpdateStatus(state)
+  } catch (e) { logErr('SettingsModal:reloadUpdateState', e) }
+  toast.success(t('updateSkipCleared'))
 }
 
 function openUrl(url: string) {
@@ -914,7 +1012,14 @@ async function toggleAutoStart() {
                 <div class="menu-row-text">
                   <span class="menu-row-label">{{ item.label }}</span>
                   <span class="menu-row-desc">{{ item.desc }}</span>
+                  <span v-if="item.alert" class="menu-row-alert">{{ item.alert }}</span>
                 </div>
+                <span
+                  v-if="item.badge"
+                  class="menu-badge"
+                  :class="`tone-${item.badgeTone}`"
+                  :title="t('badgeNewCrash', { n: item.badge })"
+                >{{ item.badge > 99 ? '99+' : item.badge }}</span>
                 <ChevronRight :size="14" class="menu-row-arrow" />
               </button>
             </div>
@@ -982,9 +1087,15 @@ async function toggleAutoStart() {
                     ? t('updateDownloadingPct', { pct: updateProgress })
                     : t('updateDownload') + ' ' + updateStatus.availableVersion }}
                 </button>
-                <button class="btn btn-secondary" :disabled="updateDlActive" @click="updateStatus.state = 'idle'">
+                <button class="btn btn-secondary" :disabled="updateDlActive" @click="skipThisUpdate">
                   {{ t('updateSkip') }}
                 </button>
+              </div>
+
+              <!-- 恢复路径：只在有跳过记录时出现，避免常态占位 -->
+              <div v-if="skippedVersions.length" class="skip-row">
+                <span class="skip-versions">{{ t('updateSkippedLabel') }} {{ skippedVersions.join(', ') }}</span>
+                <button class="btn btn-secondary" @click="clearSkippedUpdates">{{ t('updateSkipClear') }}</button>
               </div>
 
               <div v-if="updateStatus?.state === 'available' && updateStatus.releaseNotes" class="update-notes">
@@ -1239,7 +1350,7 @@ async function toggleAutoStart() {
 
           <!-- 日志查看器（从导航栏迁入的专属设置项） -->
           <div v-else-if="activePage === 'logs'" class="content-page content-logs">
-            <LogViewer />
+            <LogViewer :new-crash-count="entryCrashCount" @crash-cleared="entryCrashCount = 0" />
           </div>
 
           <!-- 最近动态（从导航栏迁入：属于「偶尔回头看一眼」的信息，不值得占一级导航） -->
@@ -1268,4 +1379,56 @@ async function toggleAutoStart() {
     @cancel="showUpdateAdminConfirm = false"
   />
 </template>
+
+<style scoped>
+/* 已跳过版本行：标签+版本号在左、恢复按钮在右，避免与下载按钮挤成一团。
+   样式放本组件 scoped 块，不动公共 styles/*.css（WebView2 不支持 :has() 等新选择器）。 */
+.skip-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.skip-versions {
+  font-size: 12px;
+  color: var(--color-text-disabled);
+  overflow-wrap: anywhere;
+}
+
+/* 侧栏设置按钮上的红色角标 = 新增崩溃记录数。原先只有 hover title 能看出来源，
+   点开设置那一瞬间角标又被清掉，用户完全不知道它指的是哪一项。这里在「日志」
+   菜单项上补可见说明；.menu-row-desc 是 display:none，所以必须用独立标签。 */
+.menu-row-alert {
+  align-self: flex-start;
+  max-width: 100%;
+  margin-top: 2px;
+  padding: 1px 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-danger-bg);
+  color: var(--color-danger);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.menu-badge {
+  flex-shrink: 0;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--radius-full);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--color-danger-text);
+  font-variant-numeric: tabular-nums;
+}
+.menu-badge.tone-danger { background: var(--color-danger); }
+.menu-badge.tone-warning { background: var(--color-warning); }
+.menu-badge.tone-info { background: var(--color-accent); }
+</style>
 

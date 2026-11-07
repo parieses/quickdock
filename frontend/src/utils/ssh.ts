@@ -19,6 +19,8 @@ export interface SshHost {
   legacyAlgorithms: boolean
   /** prod | staging | test */
   env: string
+  /** 跳板机主机 id，空串 = 直连。可选：老版本缓存/单测构造的主机对象没有这一列 */
+  jumpHostId?: string
   parentId: string
   isFolder: boolean
   sort: number
@@ -45,6 +47,8 @@ export interface SshHostInput {
   keyPassphrase: string
   legacyAlgorithms: boolean
   env: string
+  /** 跳板机主机 id，空串 = 直连 */
+  jumpHostId: string
   parentId: string
   isFolder: boolean
   sort: number
@@ -400,6 +404,53 @@ export interface SshBatchHostResult {
   /** 非空 = 命令没跑完（连接失败/超时/取消），与退出码非 0 是两回事 */
   errorCode: string
   error: string
+}
+
+/**
+ * 一条保存的 SSH 命令片段。
+ *
+ * 结果类型不进 bindings/models.ts：门面方法统一返回 ApiResult，Data 是
+ * interface{}，Wails 不会为它生成模型。与 SshExecResult / SshBatchPlan
+ * 一样，在本文件手写一份与后端 db.SshCommand 的 json tag 对齐的声明。
+ */
+export interface SshCommand {
+  id: string
+  name: string
+  command: string
+  description: string
+  category: string
+  usageCount: number
+  sort: number
+  createdAt: string
+  updatedAt: string
+}
+
+/**
+ * 一条端口转发规则 + 运行时状态。
+ *
+ * 同样是 ApiResult.Data 的结果类型，bindings 不会生成，手写与后端
+ * sshcore.ForwardView 的 json tag 对齐。status/kind 是后端白名单字符串，
+ * 用联合类型挡住拼错的分支（新加类型时会漏到 default 分支而不是静默）。
+ */
+export interface SshForwardView {
+  id: string
+  hostId: string
+  hostName: string
+  kind: 'local' | 'remote' | 'socks'
+  bindHost: string
+  bindPort: number
+  targetHost: string
+  targetPort: number
+  autoStart: boolean
+  status: 'stopped' | 'starting' | 'running' | 'retrying' | 'error'
+  error: string
+  bytesIn: number
+  bytesOut: number
+  connections: number
+  active: number
+  retries: number
+  reconnected: boolean
+  startedAt: string
 }
 
 export interface SshBatchSummary {

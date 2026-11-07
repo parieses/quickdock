@@ -6,9 +6,9 @@ import {
   Link, Clipboard, Folder, Globe, Terminal, FileText, AppWindow, CornerDownLeft, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, X,
   MessageCircle, Code2, FolderOpen, Calculator, FileEdit, Server, Container, Palette, Music, Settings, Activity, Image, Camera, Puzzle, ExternalLink,
   Check, Bookmark, PanelLeft, PanelRight, Volume2, VolumeX, Volume1, Wifi, WifiOff, XCircle,
-  Monitor, RefreshCw, Keyboard, ScrollText, Maximize2
+  Monitor, RefreshCw, Keyboard, ScrollText, Maximize2, ListChecks
 } from '@lucide/vue'
-import { HidePaletteWindow, GetLastCopiedText, CaptureSelection, CaptureFullScreen } from '../../bindings/quickdock/services/appservice'
+import { HidePaletteWindow, GetLastCopiedText, CaptureSelection, CaptureFullScreen, OpenNoteFromPalette, OpenTodoFromPalette } from '../../bindings/quickdock/services/appservice'
 import { ExecuteSystemCommand } from '../../bindings/quickdock/services/system/systemservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
 import {
@@ -40,7 +40,7 @@ import { usePluginIndex } from '../composables/usePluginIndex'
 import { useCommandSearch } from '../composables/useCommandSearch'
 import { useEnvServiceControl } from '../composables/useEnvServiceControl'
 import { usePaletteExecutor } from '../composables/usePaletteExecutor'
-import { usePaletteActions } from '../composables/usePaletteActions'
+import { usePaletteActions, createNoteFromPalette, createTodoFromPalette } from '../composables/usePaletteActions'
 import { usePaletteData } from '../composables/usePaletteData'
 import PluginFrame from './PluginFrame.vue'
 import CheatSheetModal from './CheatSheetModal.vue'
@@ -49,7 +49,7 @@ import FilePreviewPane from './FilePreviewPane.vue'
 // 逐字重复的 SearchResult / ResultType，新增类型时两边不同步，于是每次加一种结果
 // 类型都在编译期炸一次（本次加 nav 就这样炸的）。
 import type {
-  CmdNote, CmdTodo, InstalledApp, RecentEntry, ResultType, SearchResult, SystemCmd,
+  CmdNote, CmdTodo, CmdScene, CmdCollection, InstalledApp, RecentEntry, ResultType, SearchResult, SystemCmd,
 } from '../composables/useCommandSearch'
 
 const { t } = useI18n()
@@ -121,13 +121,15 @@ async function closePalette() {
   lastAnchor.value = -1
   inlineQuicklink.value = null
   inlineQuery.value = ''
+  inlineCreateKind.value = null
+  inlineCreateTitle.value = ''
   clipboardUrlSource.value = ''
   try { await HidePaletteWindow() } catch (e) { console.error('[CmdPalette] HidePaletteWindow:', e) }
 }
 
 // 聚焦搜索输入框；仅在搜索模式（非内联插件 / 内联快速链接）下生效
 function focusInput() {
-  if (inlinePluginId.value || inlineQuicklink.value) return
+  if (inlinePluginId.value || inlineQuicklink.value || inlineCreateKind.value) return
   const el = inputRef.value
   if (el) { el.focus(); el.select() }
 }
@@ -229,6 +231,13 @@ const inlineQuicklink = ref<CollectionItem | null>(null)
 const inlineQuery = ref('')
 const inlineInputRef = ref<HTMLInputElement | null>(null)
 const notes = ref<CmdNote[]>([])
+// 场景 / 集合本地池（面板浮窗与主窗口不共享 Pinia，由 usePaletteData 单独拉）
+const scenes = ref<CmdScene[]>([])
+const collections = ref<CmdCollection[]>([])
+// 新建动作的内联标题输入态：与 inlineQuicklink 同构，但提交时是「创建」而非「打开」
+const inlineCreateKind = ref<'note' | 'todo' | null>(null)
+const inlineCreateTitle = ref('')
+const inlineCreateRef = ref<HTMLInputElement | null>(null)
 
 // ---- 快捷键备忘单 ----
 // 就地弹窗展示（不关面板）：命令面板跑在自己的独立窗口里，主窗口可能没显示，
@@ -327,8 +336,10 @@ function rebuildPinyinCache() {
   for (const n of notes.value) pinyinOf(n.name || n.keyword || '', 'n:' + n.id)
   for (const app of installedApps.value) pinyinOf(app.name, 'a:' + app.name)
   for (const cmd of systemCommands.value) pinyinOf(cmd.label, 'sys:' + cmd.id)
+  for (const s of scenes.value) pinyinOf(s.name, 'scene:' + s.id)
+  for (const c of collections.value) pinyinOf(c.name, 'collection:' + c.id)
 }
-watch([items, notes, installedApps], () => { rebuildPinyinCache() })
+watch([items, notes, installedApps, scenes, collections], () => { rebuildPinyinCache() })
 watch(systemCommands, () => { rebuildPinyinCache() })
 
 // ---- 项目类型图标 ----
@@ -354,7 +365,7 @@ const {
   groupedResults, recentResults, displayGroups, displayFlat,
   previewResult, recentCache, flushSearch, RECENT_VISIBLE, recentExpanded, toggleRecentExpanded
 } = useCommandSearch({
-  items, installedApps, notes, systemCommands, query, selectedIndex,
+  items, installedApps, notes, scenes, collections, systemCommands, query, selectedIndex,
   pluginCmdIndex, clipboardUrlSource,
   frecencyScore, frecencyTick, calcPluginScore,
   pinyinMatch, appIcon, getAppAliases, itemIcon, t, pluginIcons,
@@ -518,6 +529,11 @@ function onKeydown(e: KeyboardEvent) {
     else if (e.key === 'Escape') { e.preventDefault(); cancelInlineQuicklink() }
     return
   }
+  if (inlineCreateKind.value) {
+    if (e.key === 'Enter') { e.preventDefault(); void commitInlineCreate() }
+    else if (e.key === 'Escape') { e.preventDefault(); cancelInlineCreate() }
+    return
+  }
   const list = displayFlat.value
   if (list.length === 0 && e.key !== 'Escape') return
   switch (e.key) {
@@ -562,6 +578,7 @@ function onGlobalEsc(e: KeyboardEvent) {
   // 放大后的预览：Esc 先还原成带列表的正常布局，避免「只想退出放大却把面板关了」
   if (previewExpanded.value) { previewExpanded.value = false; return }
   if (inlineQuicklink.value) { cancelInlineQuicklink(); return }
+  if (inlineCreateKind.value) { cancelInlineCreate(); return }
   // 内联插件页：Esc 是「退回搜索」，与 iframe 里转发出来的 qd:plugin-esc 同一语义。
   // 少了这一支会直接关掉整个面板 —— 而插件页没有输入框，document 级兜底才是
   // 唯一收到这个 Esc 的地方，输入框上的 onKeydown 根本轮不到。
@@ -572,7 +589,7 @@ function onGlobalEsc(e: KeyboardEvent) {
 // 方向键/数字直达等导航键是否握在输入框手里（避免与 input @keydown 双处理）
 function navFocused(): boolean {
   const el = document.activeElement as HTMLElement | null
-  if (el === inputRef.value || el === inlineInputRef.value) return true
+  if (el === inputRef.value || el === inlineInputRef.value || el === inlineCreateRef.value) return true
   // 预览区里的文本搜索框：左右键要用来移动光标，不能被当成「切换结果」。
   // 这里靠 class 判断是因为捕获阶段拿不到组件边界，而 role=searchbox 这类
   // 语义属性又会同时命中别的输入框。
@@ -596,6 +613,8 @@ const { loadPluginIndex, rebuildAppIndex, loadPaletteData, refreshRecentCache } 
   items,
   installedApps,
   notes,
+  scenes,
+  collections,
   installedPlugins,
   pluginCmdIndex,
   pluginIcons,
@@ -623,6 +642,44 @@ function openInlinePlugin(pluginId: string, commandId: string, text: string) {
   inlinePluginId.value = pluginId
 }
 
+// 新建动作：选中「新建笔记 / 待办」后不关面板，切到内联标题输入态（与 quicklink 同构）。
+// 提交时才落库，随后复用现成的 OpenNoteFromPalette / OpenTodoFromPalette 深链跳到新条目 ——
+// 面板是独立浮窗，这两条链路会隐藏面板、唤起主窗口并广播新条目 id。
+function beginCreate(kind: 'note' | 'todo') {
+  inlineCreateKind.value = kind
+  inlineCreateTitle.value = ''
+  nextTick(() => inlineCreateRef.value?.focus())
+}
+
+function cancelInlineCreate() {
+  inlineCreateKind.value = null
+  inlineCreateTitle.value = ''
+  nextTick(() => inputRef.value?.focus())
+}
+
+async function commitInlineCreate() {
+  const kind = inlineCreateKind.value
+  const title = inlineCreateTitle.value.trim()
+  if (!kind || !title) return
+  let id: string
+  try {
+    id = kind === 'note' ? await createNoteFromPalette(title) : await createTodoFromPalette(title)
+  } catch (e) {
+    toast?.error?.(getErrorMessage(e))
+    nextTick(() => inlineCreateRef.value?.focus())
+    return
+  }
+  inlineCreateKind.value = null
+  inlineCreateTitle.value = ''
+  try {
+    if (kind === 'note') await OpenNoteFromPalette(id)
+    else await OpenTodoFromPalette(id)
+  } catch (e) {
+    console.error('[CmdPalette] open created entity:', e)
+  }
+  void closePalette()
+}
+
 const { executeSelected } = usePaletteExecutor({
   displayFlat, selectedIndex, selectedSet, lastAnchor,
   flushSearch,
@@ -636,6 +693,7 @@ const { executeSelected } = usePaletteExecutor({
   writeClipboard,
   beginQuicklink,
   openInlinePlugin,
+  beginCreate,
   // 最近使用列表只在输入框为空时出现（见 useCommandSearch.displayGroups），
   // 用它判断「这次点击是否是一次重跑」
   isRecentMode: () => !query.value.trim(),
@@ -751,6 +809,7 @@ onMounted(async () => {
     }
     loadPaletteData().catch(e => console.warn('[CmdPalette] loadPaletteData:', e))
     query.value = ''; selectedIndex.value = 0; inlineQuicklink.value = null; inlineQuery.value = ''
+    inlineCreateKind.value = null; inlineCreateTitle.value = ''
     clipboardUrlSource.value = ''
     recentExpanded.value = false
     actionMenuOpen.value = false
@@ -823,14 +882,33 @@ onUnmounted(() => {
     <div class="palette-searchbar">
       <Search :size="16" class="search-icon" />
       <input
-        v-if="!inlineQuicklink"
+        v-if="!inlineQuicklink && !inlineCreateKind"
         ref="inputRef"
         v-model="query"
         class="search-input"
         :placeholder="t('cmdPlaceholder')"
         @keydown="onKeydown"
       />
-      <template v-else>
+      <template v-else-if="inlineCreateKind">
+        <span class="inline-prefix">
+          <component :is="inlineCreateKind === 'note' ? FileText : ListChecks" :size="14" />
+          <span class="inline-name">{{ t(inlineCreateKind === 'note' ? 'cmdNewNote' : 'cmdNewTodo') }}</span>
+          <span class="inline-sep">›</span>
+        </span>
+        <input
+          ref="inlineCreateRef"
+          v-model="inlineCreateTitle"
+          class="search-input inline-input"
+          :placeholder="t('cmdNewTitlePlaceholder')"
+          @keydown="onKeydown"
+        />
+        <button class="inline-cancel" @click="cancelInlineCreate" :title="t('cancel')">
+          <X :size="13" />
+        </button>
+      </template>
+      <!-- 写 v-else-if 而不是 v-else：类型检查器能从这里窄化出 inlineQuicklink 非 null，
+           否则模板里 inlineQuicklink.name 会报 TS18047。三个分支合起来仍覆盖全部状态。 -->
+      <template v-else-if="inlineQuicklink">
         <span class="inline-prefix">
           <Link :size="14" />
           <span class="inline-name">{{ inlineQuicklink.name }}</span>
@@ -858,7 +936,7 @@ onUnmounted(() => {
       ref="listRef"
       class="palette-results"
       :class="{ 'is-hidden': previewExpanded }"
-      v-if="displayGroups.length > 0 && !inlineQuicklink"
+      v-if="displayGroups.length > 0 && !inlineQuicklink && !inlineCreateKind"
     >
       <template v-for="(group, gIdx) in displayGroups" :key="group.type">
         <div class="group-header">
@@ -877,7 +955,7 @@ onUnmounted(() => {
         </div>
         <div
           v-for="(result, iIdx) in group.results"
-          :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.note?.id || result.url || iIdx)"
+          :key="group.type + '-' + (result.item?.id || result.cmd?.id || result.note?.id || result.navTarget || result.createKind || result.url || iIdx)"
           :class="['result-item', { active: getFlatIndex(gIdx, iIdx) === selectedIndex, selected: selectedSet.has(getFlatIndex(gIdx, iIdx)) }]"
           @click="onResultClick(gIdx, iIdx, $event)"
           @mousemove="selectResult(gIdx, iIdx)"
@@ -905,6 +983,9 @@ onUnmounted(() => {
             <template v-else-if="result.type === 'note' && result.note?.name">
               <span class="meta-tag">{{ result.note.isFolder ? t('notesFolder') : t('notesDoc') }}</span>
             </template>
+            <template v-else-if="result.type === 'scene' || result.type === 'collection'">
+              <span class="meta-tag">{{ t(result.type === 'scene' ? 'cmdGroupScenes' : 'cmdGroupCollections') }}</span>
+            </template>
             <template v-else-if="result.type === 'plugin' && result.matchType">
               <span class="meta-tag">{{ matchTypeI18nKeys[result.matchType] ? t(matchTypeI18nKeys[result.matchType]) : result.matchType }}</span>
             </template>
@@ -916,7 +997,7 @@ onUnmounted(() => {
     <div
       class="palette-preview"
       :class="{ 'is-rich': !!selectedFilePath, 'is-expanded': previewExpanded }"
-      v-if="previewResult && !inlineQuicklink"
+      v-if="previewResult && !inlineQuicklink && !inlineCreateKind"
     >
       <div class="preview-head">
         <span class="preview-title">{{ previewResult.title }}</span>
@@ -934,7 +1015,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div v-if="displayGroups.length === 0 && !inlineQuicklink" class="palette-empty">
+    <div v-if="displayGroups.length === 0 && !inlineQuicklink && !inlineCreateKind" class="palette-empty">
       <Search :size="28" class="empty-icon" />
       <p class="empty-title">{{ t('cmdEmptyTitle') }}</p>
       <p class="empty-desc">{{ t('cmdEmptyDesc') }}</p>
@@ -963,7 +1044,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="palette-footer" v-if="!inlineQuicklink">
+    <div class="palette-footer" v-if="!inlineQuicklink && !inlineCreateKind">
       <div class="footer-hint">
         <kbd><ChevronLeft :size="11" /></kbd>
         <kbd><ChevronRight :size="11" /></kbd>

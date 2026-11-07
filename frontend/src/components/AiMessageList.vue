@@ -11,6 +11,7 @@
  */
 import { computed, nextTick, ref, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useAiCostPreference } from '../composables/useAiCostPreference'
 import {
   ArrowDown, Bot, ChevronDown, ChevronRight, Copy, FileText, Pencil, Play, RotateCcw, StickyNote, Undo2, Wrench,
 } from '@lucide/vue'
@@ -187,6 +188,75 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+// —— 单条费用（气泡尾部）——
+//
+// 数据全部来自后端已经算好的那一份，前端不复制价目表、也不重算钱：
+//   · 金额 msgStat(m).cost —— 本次会话刚定格时来自 done 事件的 estimateCost
+//     （ai_stream.go），刷新后回落到 AIGetMessages 的 AIMessageView.Cost
+//     （ai_conversation.go）。两条路用的是同一份 ai_pricing.go 价目表，
+//     前端再算一遍只会让「气泡 ¥0.03 / 设置页账单 ¥0.05」这种漂移发生。
+//   · token 取同一条 stat 的 prompt + completion。缓存命中（cached）已经含在
+//     prompt 里，再加一遍会把「省了钱的调用」当成「花得更多」（见 tokensOf）。
+//   · 模型名是 m.model，done 落地与刷新后都在消息行上。
+//
+// 只遍历已落库的 props.messages：流式那一轮还挂在下面的 streaming 卡片里、没进
+// messages，所以流式期间这个 computed 的依赖（messages / statMap / 开关）都不变
+// —— 不会每来一个 chunk 重算一次；done 落库那一刻才重算一次，正好是「消息定格」。
+// 结果按消息 id 存成 Map，模板里只做一次 .get，不在模板里拼字符串或调格式化。
+const { showMsgCost } = useAiCostPreference()
+
+// 与 SettingsAI.vue 的 fmtTokens / fmtCost 逐行一致：设置页总量、每日柱、模型表
+// 都用这套口径，气泡上的单条金额必须一眼看得出是同一种钱。
+function fmtTokens(n: number): string {
+  if (!n) return '0'
+  if (n >= 1e6) return (n / 1e6).toFixed(n >= 1e7 ? 1 : 2) + 'M'
+  if (n >= 1e3) return (n / 1e3).toFixed(n >= 1e4 ? 0 : 1) + 'k'
+  return String(n)
+}
+
+function fmtCost(n: number): string {
+  if (!n) return '¥0'
+  if (n >= 1) return '¥' + n.toFixed(2)
+  if (n >= 0.01) return '¥' + n.toFixed(3)
+  return '¥' + n.toFixed(4)
+}
+
+// 关掉开关时给一个稳定空 Map：每次渲染换新引用会让 v-memo 依赖白 diff 一遍。
+const NO_COST_LINES: ReadonlyMap<string, string> = new Map<string, string>()
+
+const costLines = computed<ReadonlyMap<string, string>>(() => {
+  if (!showMsgCost.value) return NO_COST_LINES
+  const out = new Map<string, string>()
+  for (const m of props.messages) {
+    if (m.role !== 'assistant') continue
+    const st = props.msgStat(m)
+    const cost = st?.cost
+    // 未收录模型 / 上游没回 usage：cost 缺失或 0 就整行不显示。
+    // 宁可少一个数字，也不要为了「有这一行」编一个 ¥0 —— 与设置页「未知模型
+    // 不计价」、统计行「0 即隐藏」是同一个口径。
+    if (!cost || cost <= 0) continue
+    const tokens = (st?.promptTokens || 0) + (st?.completionTokens || 0)
+    const parts: string[] = []
+    // 「能拿到多少显示多少」：模型名是数据不是文案，缺了就省这一段。
+    if (m.model) parts.push(m.model)
+    // 复用已有的 aiStatCost（「费用 {c}」）文案，不另造一个同义 key。
+    parts.push(t('aiStatCost', { c: fmtCost(cost) }))
+    if (tokens > 0) parts.push(t('aiMsgCostTokens', { n: fmtTokens(tokens) }))
+    out.set(m.id, parts.join(' · '))
+  }
+  return out
+})
+
+// 父组件 formatStat（AIPage.vue）拼出的统计行里本来就带一段「费用 ¥x」。
+// 单条费用现在统一由气泡尾部的 .ai-msg-cost 展示、并受设置开关控制：这里把
+// cost 从传给 formatStat 的副本里抹掉，避免同一笔钱在两行各写一遍，也避免
+// 关掉开关后统计行里仍留着「费用」那一截 —— 那样等于没关干净。
+// 只浅拷贝，不碰 statMap 里的原对象（会话底部汇总还要读它的 cost / token）。
+function statWithoutCost(s: AIStreamStat): AIStreamStat {
+  return { ...s, cost: 0 }
+}
+
 // 工具 / 产物的解析缓存。
 //
 // 模板里同一条消息会调 toolList(m) 四次（摘要、轮次、列表、key），artifactsOf 内部
@@ -551,6 +621,10 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
              依赖数组必须覆盖子树内所有响应式来源，缺一个就会出现「数据变了但界面不变」：
                · m.content / m.reasoning_content —— 正文与思考过程
                · statMap.get(m.id)               —— 该条回复的耗时/token 统计
+               · costLines.get(m.id)             —— 气泡尾部的单条费用文案。开关切换、
+                                                   done 落库填入 cost 时这一项才变，
+                                                   让缓存里的旧气泡重画；流式期间它恒为
+                                                   同一串，历史消息继续命中缓存
                · locale                         —— 按钮 title 等文案随语言切换刷新
                · mode                           —— 「开始执行」按钮只看当前模式
                · jobSeqOf(m)                    —— 后台任务行的「运行中 / 已结束」；
@@ -565,7 +639,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -722,10 +796,20 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             </button>
             <!-- 单条回复统计：耗时 / 首字延迟 / token 用量 -->
             <span v-if="msgStat(m)" class="ai-msg-stat">
-              {{ formatStat(msgStat(m)!) }}
+              {{ formatStat(statWithoutCost(msgStat(m)!)) }}
             </span>
           </div>
+          <!-- 气泡尾部：这一轮的费用（模型名 + 金额 + token）。文案由 costLines
+               预生成，这里只查一次表；关掉设置里的开关后整行不渲染。 -->
+          <div v-if="costLines.get(m.id)" class="ai-msg-cost">{{ costLines.get(m.id) }}</div>
         </div>
+
+        <!-- 任务清单卡片由父组件通过 #plan 提供。数据（planCards，按会话存）归
+             AIPage，但它必须渲染在这个滚动容器里才「跟着聊天记录」——挂在输入区
+             上方就是一块永远挡着、还挤掉消息区高度的固定面板。
+             位置放在历史消息之后、流式气泡之前：语义上就是「AI 先列了清单，
+             然后开始动手」，往上翻历史时它会跟着一起滚走。 -->
+        <slot name="plan" />
 
         <div v-if="reasoningText" class="ai-reasoning">
           <details open>
@@ -1709,4 +1793,18 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 .ai-msg-edit-input:focus { border-color: var(--color-accent); }
 .ai-msg-edit-ops { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
 .ai-msg-edit-hint { font-size: 11px; color: var(--color-text-muted); }
+
+/* 气泡尾部的单条费用：与 .ai-msg-stat 同属「一行安静的辅助信息」——
+   无框、最弱一档颜色、允许换行（模型名 + 金额 + token 在窄窗口会折行）。
+   只写在本 SFC 的 scoped 块里，不改全局 styles/*.css；
+   WebView2 不支持 :has()/:is()/:container，这里也不依赖它们。 */
+.ai-msg-cost {
+  font-size: 10px;
+  color: var(--color-text-disabled);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: break-word;
+  cursor: default;
+}
 </style>

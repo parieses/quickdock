@@ -184,6 +184,53 @@ func TestServerLifecycleAndTools(t *testing.T) {
 	}
 }
 
+// 令牌前缀是「这是密钥」的机器可读标记，别哪天为了好看又改回裸 hex。
+func TestNewTokenFormat(t *testing.T) {
+	a := NewToken()
+	if !strings.HasPrefix(a, tokenPrefix) {
+		t.Fatalf("令牌缺少 %q 前缀: %q", tokenPrefix, a)
+	}
+	suffix := strings.TrimPrefix(a, tokenPrefix)
+	if len(suffix) != 32 {
+		t.Fatalf("随机段应为 32 位十六进制，实际 %d: %q", len(suffix), suffix)
+	}
+	for _, c := range suffix {
+		if !strings.ContainsRune("0123456789abcdef", c) {
+			t.Fatalf("随机段含非十六进制字符: %q", suffix)
+		}
+	}
+	if a == NewToken() {
+		t.Fatal("连续两枚令牌不应相同")
+	}
+}
+
+// 升级前落盘的裸 hex 令牌必须继续可用：客户端的 mcp.json 是一次性写死的，
+// 校验时若给旧值补前缀，所有已配好的客户端会在升级后集体 401。
+func TestAuthAcceptsLegacyBareHexToken(t *testing.T) {
+	const legacy = "0123456789abcdef0123456789abcdef"
+	s := &Server{}
+	s.SetAuth(legacy, true)
+	req, err := http.NewRequest(http.MethodPost, "/mcp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Authorization", "Bearer "+legacy)
+	if !s.authTokenOK(req) {
+		t.Fatal("升级前的裸 hex 令牌被拒绝")
+	}
+
+	// 轮换成 sk_ 格式后，旧令牌应立即失效（校验始终是全串比较）。
+	s.SetAuth(NewToken(), true)
+	req2, err := http.NewRequest(http.MethodPost, "/mcp", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req2.Header.Set("X-MCP-Token", legacy)
+	if s.authTokenOK(req2) {
+		t.Fatal("轮换后旧令牌仍被接受")
+	}
+}
+
 func TestServerRejectsBatchNotificationOnly(t *testing.T) {
 	addr, err := Default.Start(0, "test")
 	if err != nil {

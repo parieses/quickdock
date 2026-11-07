@@ -473,8 +473,10 @@ type projectVersionStatus struct {
 
 // EnvProjectVersions 探测项目目录（及其祖先目录）内的版本声明文件——
 // .nvmrc / .node-version / .php-version / .python-version / .tool-versions /
-// package.json engines / composer.json require.php / go.mod——
+// package.json（engines/volta/devEngines 的 node）/ composer.json（require/require-dev/
+// config.platform 的 php）/ go.mod / mise.toml——
 // 逐条返回「要求什么版本 → 匹配到哪个已装版本 → 当前激活哪个」。
+// 包管理器、锁文件、依赖目录不在这里，见 EnvProjectDeps。
 //
 // dir 为空、目录不存在、无任何声明文件时一律返回空数组而不是错误：
 // 条目可能是网页/命令，本就没有项目目录，把"没探测到"当失败会污染调用方逻辑。
@@ -500,6 +502,19 @@ func (s *EnvironmentService) EnvProjectVersions(dir string) *services.ApiResult 
 		out = append(out, st)
 	}
 	return services.Ok(out)
+}
+
+// EnvProjectDeps 只读检查项目目录（及其祖先）里 PHP / Node 生态的依赖现状：
+// composer.json / composer.lock / vendor 与 package.json / packageManager / 锁文件 / node_modules。
+//
+// 单独成一个方法而不塞进 EnvProjectVersions：后者返回的是数组，条目编辑器
+// （ItemEditor.vue）也在用，改结构会破坏它的 ProjectVersionRow；前端「检查项目」
+// 面板并行调两个方法即可。纯只读，不执行任何包管理器命令。
+func (s *EnvironmentService) EnvProjectDeps(dir string) *services.ApiResult {
+	if r := s.checkEnv(); r != nil {
+		return r
+	}
+	return services.Ok(envengine.DetectProjectDeps(dir))
 }
 
 // ===== 源体检 / 磁盘占用 / 镜像加速 / 终端直开 / 清单导入导出（2026-10）=====

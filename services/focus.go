@@ -66,3 +66,60 @@ func trimTitle(s string) string {
 	}
 	return s
 }
+
+// ---- 专注会话落库 / 统计 ----
+// 前端番茄钟到点完成时先写 localStorage 保底，再异步调下面的接口把会话落进
+// focus_sessions；统计面板再用 ListFocusSessions / FocusStats 读出来。
+// 门面只做参数校验 + 委托 db 层，风格照 services/link.go。
+
+// 入参上限：id / 标题 / 时间串都远小于 500 字节，挡住异常长串避免拖慢查询。
+const maxFocusParamLen = 500
+
+// SaveFocusSession 落一条专注会话。data: db.FocusSession（落库行）
+func (a *AppService) SaveFocusSession(todoID, title, startedAt, endedAt string, minutes int, done bool) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if len(todoID) > maxFocusParamLen || len(title) > maxFocusParamLen ||
+		len(startedAt) > maxFocusParamLen || len(endedAt) > maxFocusParamLen {
+		return FailMsg("参数过长")
+	}
+	if startedAt == "" || endedAt == "" {
+		return FailMsg("时间不能为空")
+	}
+	if minutes < 1 || minutes > 1440 {
+		return FailMsg("专注时长非法")
+	}
+	return wrap(a.DB.SaveFocusSession(todoID, title, startedAt, endedAt, minutes, done))
+}
+
+// ListFocusSessions 列出 [from, to] 内开始的会话。data: []db.FocusSession
+func (a *AppService) ListFocusSessions(from, to string) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if len(from) > maxFocusParamLen || len(to) > maxFocusParamLen {
+		return FailMsg("参数过长")
+	}
+	return wrap(a.DB.ListFocusSessions(from, to))
+}
+
+// FocusStats 汇总最近 days 天的完成会话。data: map，键 sessions/minutes/byTodo/daily
+func (a *AppService) FocusStats(days int) *ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if days < 1 || days > 3650 {
+		return FailMsg("天数非法")
+	}
+	s, err := a.DB.FocusStats(days)
+	if err != nil {
+		return Fail(err)
+	}
+	return Ok(map[string]interface{}{
+		"sessions": s.Sessions,
+		"minutes":  s.Minutes,
+		"byTodo":   s.ByTodo,
+		"daily":    s.Daily,
+	})
+}

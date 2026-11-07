@@ -46,12 +46,16 @@ type AIJobView struct {
 	LogExists bool `json:"logExists"`
 }
 
-// AIJobsList 最近的若干条后台任务（含运行中与已结束）。
-func (a *AIService) AIJobsList() *services.ApiResult {
+// AIJobsList 当前会话最近的若干条后台任务（含运行中与已结束）。
+//
+// convID 由前端传「界面上正打开的那个会话」：任务是在某次对话里让 AI 起的，
+// 切到别的会话还列着一堆不相干的进程既认不出、也容易误点终止。
+// 传空串 = 不过滤，保留给宿主诊断；正常 UI 路径不会走到。
+func (a *AIService) AIJobsList(convID string) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r
 	}
-	rows, err := a.App.DB.ListAIJobs(aiJobsPanelLimit)
+	rows, err := a.App.DB.ListAIJobs(aiJobsPanelLimit, strings.TrimSpace(convID))
 	if err != nil {
 		return services.Fail(err)
 	}

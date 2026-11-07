@@ -164,6 +164,21 @@ func scheduleSaveWindowState(w *application.WebviewWindow) {
 	windowStateMu.Unlock()
 }
 
+// logWindowCreated 打印一条带窗口名的宿主侧建窗日志。
+//
+// 框架的 "[WebView2] Environment created successfully" 来自 Wails v3 模块里的
+// internal/webview2/pkg/edge，本仓库改不到那一行：日志点在 edge.Chromium 的
+// EnvironmentCompleted 回调里，结构体没有 Title 字段，上层也没把窗口名透传进来。
+// 更重要的是同一个 WebviewUserDataPath 下所有窗口共享一个底层 environment，
+// Wails 对每个窗口各发起一次创建、各打印一行（渲染进程崩溃重建还会再打一次），
+// 那一行本来就不对应唯一窗口。所以窗口名只能在宿主侧补。
+//
+// 不用 app.Window.OnCreate 统一 hook：框架的 Window 接口只有 Name()，没有
+// Title getter，而本项目建窗时都只设了 Title、没设 Name，hook 里拿不到名字。
+func logWindowCreated(source, title string) {
+	logger.I("[窗口] 已创建 name=%s source=%s", title, source)
+}
+
 // logStartupDetail 在 app.Run() 前打印宿主侧 WebView2 启动细节，
 // 补足框架那行笼统的 "[WebView2] Environment created successfully"。
 func logStartupDetail(app *application.App, mainOpts application.WebviewWindowOptions, saved *windowState) {
@@ -217,6 +232,17 @@ func startRenderHeartbeat(app *application.App, quit <-chan struct{}) {
 	}()
 }
 
+// ---- 启动后预建浮窗 ----
+const (
+	// precreateReadyTimeout 兜底：主窗口就绪事件漏掉（Vite 动态导入 504、前端加载异常）
+	// 时仍要尝试预建，否则热键首次唤起会一直走懒创建。此时 app.Run() 还在跑，框架
+	// impl 已就绪，投递是安全的。
+	precreateReadyTimeout = 8 * time.Second
+	// precreateDelay 首屏稳定后再错峰；起点是「主窗口就绪」而不是「进程启动」。
+	precreateDelay = 1500 * time.Millisecond
+	precreateGap   = 400 * time.Millisecond
+)
+
 // precreateFloatingWindows 在主窗口首屏稳定后，把剪贴板 / 命令面板两个浮窗提前建好。
 //
 // 为什么只预建这两个：它们是热键高频入口（剪贴板热键、Ctrl+K），按下就期望立刻出现，
@@ -225,22 +251,57 @@ func startRenderHeartbeat(app *application.App, quit <-chan struct{}) {
 //
 // 关键不是「要不要预建」，而是「在哪儿建」：WebView2 窗口必须在主线程创建，又不能
 // 挤在 app.Run() 之前拖慢首屏（Wails v3 在主窗口之前创建次级窗口会白屏）。所以后台
-// goroutine 先等主窗口首屏稳定，再逐个用 InvokeAsync 投递到主线程，中间留出间隔让
-// 消息循环处理完用户自己的第一批操作。getter 内部还有 newFloatingWindowOnMainThread，
+// goroutine 等主窗口就绪后再逐个用 InvokeAsync 投递到主线程，中间留出间隔让消息循环
+// 处理完用户自己的第一批操作。getter 内部还有 newFloatingWindowOnMainThread，
 // 此时已在主线程会直接执行，不会重入。
+//
+// 时序（2026-11-08 修 panic-precreate-floating-windows）：旧实现在 app.Run() 之前
+// 起 goroutine、固定 sleep 1.5s 就调 application.InvokeAsync。但框架的
+// globalApplication.impl 要到 Run() 内 newPlatformApp 才赋值；启动慢、单实例第二实例
+// 让 Run() 提前返回、或 1.5s 内关窗，dispatchOnMainThread 第一句
+// a.impl.isOnMainThread() 就是 nil 解引用（Windows 实现要读 m.mainThreadID），
+// 被 RecoverToLog 收进 crash 目录、侧栏还多一个红点。现在改成：
+//
+//	① 先等主窗口就绪事件（那时 impl 必然已赋值），超时兜底防事件漏掉；
+//	② 全程用 quit（app.Run() 返回即关闭）取消，退出后不再投递主线程任务；
+//	③ 回调执行前再查一次 quit，覆盖「投递成功但排队期间应用退出」。
 //
 // 预建期间置 skipFirstPaintWait：这些回调就在主线程上，等 WindowRuntimeReady 会把
 // 消息循环堵死（事件本身要靠它派发），只能走满超时，表现为启动后主窗口卡顿。
-func precreateFloatingWindows(svc *services.AppService) {
+func precreateFloatingWindows(svc *services.AppService, ready, quit <-chan struct{}) {
 	go func() {
 		defer logger.RecoverToLog("precreate-floating-windows")
-		time.Sleep(1500 * time.Millisecond)
+
+		readyTimer := time.NewTimer(precreateReadyTimeout)
+		select {
+		case <-quit:
+			readyTimer.Stop()
+			return
+		case <-ready:
+			readyTimer.Stop()
+		case <-readyTimer.C:
+			// 事件没来但 Run() 还在跑：按兜底继续，别让热键一直走懒创建。
+		}
+		if !sleepOrQuit(precreateDelay, quit) {
+			return
+		}
+
 		getters := []func() *application.WebviewWindow{
 			svc.GetClipboardWindow, svc.GetPaletteWindow,
 		}
 		for _, get := range getters {
+			select {
+			case <-quit:
+				return
+			default:
+			}
 			g := get
 			application.InvokeAsync(func() {
+				select {
+				case <-quit:
+					return
+				default:
+				}
 				skipFirstPaintWait.Store(true)
 				// 用 defer 复位：即使建窗中途 panic（RecoverToLog 只兜住 goroutine 顶层），
 				// 也不能让这个标志一直挂着 —— 那会让之后笔记 / SSH 首次唤起都跳过首帧门控。
@@ -250,9 +311,23 @@ func precreateFloatingWindows(svc *services.AppService) {
 					w.Hide() // 幂等：建窗时已 Hidden，这里只是兜底
 				}
 			})
-			time.Sleep(400 * time.Millisecond)
+			if !sleepOrQuit(precreateGap, quit) {
+				return
+			}
 		}
 	}()
+}
+
+// sleepOrQuit 可取消的等待；false 表示应用已退出，调用方应立刻停止预建。
+func sleepOrQuit(d time.Duration, quit <-chan struct{}) bool {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-quit:
+		return false
+	case <-t.C:
+		return true
+	}
 }
 
 //go:embed all:frontend/dist
@@ -746,6 +821,19 @@ func main() {
 	// off 时是 no-op，不会动 BackgroundType / Windows，保持原有实色配置。
 	applyWindowBackdrop(&mainOpts, false)
 	mainWindow := app.Window.NewWithOptions(mainOpts)
+	logWindowCreated("main", mainOpts.Title)
+
+	// 主窗口就绪 = Wails 平台层已初始化（app.Run 里的 newPlatformApp 已完成）。
+	// 浮窗预建必须等这个信号，不能再用「进程启动后固定睡 1.5s」去赌 impl 就绪。
+	// WindowShow / WindowRuntimeReady 谁先到都算，Once 保证 channel 只关一次；
+	// 两个事件都漏掉时由 precreateFloatingWindows 的超时兜底接住。
+	mainWindowReady := make(chan struct{})
+	var mainWindowReadyOnce sync.Once
+	markMainWindowReady := func(*application.WindowEvent) {
+		mainWindowReadyOnce.Do(func() { close(mainWindowReady) })
+	}
+	mainWindow.OnWindowEvent(events.Common.WindowShow, markMainWindowReady)
+	mainWindow.OnWindowEvent(events.Common.WindowRuntimeReady, markMainWindowReady)
 
 	// 保存主窗口引用供 tray.go 使用
 	SetMainWindow(mainWindow)
@@ -826,6 +914,10 @@ func main() {
 	// 将延迟工厂函数注入 AppService，供前端 Wails 绑定调用
 	InjectWindowGetters(appService, app)
 
+	// 应用退出信号：app.Run() 返回即关闭。心跳与浮窗预建都靠它收尾——
+	// 预建 goroutine 若在退出后还投递 InvokeAsync，框架 impl 已不可用，必然 panic。
+	appQuit := make(chan struct{})
+
 	// 剪贴板 / 命令面板默认在启动后预建（热键高频入口，见 precreateFloatingWindows）。
 	// 笔记 / 窗口管理仍「首次用到才创建」：它们的渲染进程空闲也常驻 30–80MB，
 	// 而多数会话根本用不到。
@@ -834,7 +926,7 @@ func main() {
 	// 同步预建的代价是一开机多占 100–240MB，且把主窗口显示推后；现在改由
 	// newFloatingWindowOnMainThread 承担跨线程建窗约束，预建挪到 Run 之后错峰执行。
 	if os.Getenv("QD_PRECREATE_WINDOWS") != "0" {
-		precreateFloatingWindows(appService)
+		precreateFloatingWindows(appService, mainWindowReady, appQuit)
 	}
 
 	// 预创建截图覆盖窗口（原生 Win32 分层窗口，不走 WebView）。
@@ -846,18 +938,20 @@ func main() {
 	services.InitScreenshotPins(app)
 
 	// 渲染进程看门狗：先于 Run 启动，给前端提供自愈所需的心跳信号。
-	heartbeatQuit := make(chan struct{})
-	startRenderHeartbeat(app, heartbeatQuit)
+	startRenderHeartbeat(app, appQuit)
 
 	// 运行应用
-	// 注意：Wails 框架在创建首个 WebView2 环境时会打印笼统的
-	// "[WebView2] Environment created successfully"，此处补充宿主侧细节日志，
-	// 让启动信息更具可读性（数据目录 / 版本 / 优化参数 / 窗口计划 / 屏幕数）。
+	// 注意：Wails 框架会为每个窗口各打印一行笼统的
+	// "[WebView2] Environment created successfully"（同一 UDF 下底层 environment
+	// 其实是共享的，那行日志不对应某个具体窗口；窗口名由 logWindowCreated 单独打）。
+	// 此处补充宿主侧细节日志，让启动信息更具可读性
+	//（数据目录 / 版本 / 优化参数 / 窗口计划 / 屏幕数）。
 	logStartupDetail(app, mainOpts, mainRect)
 
 	err := app.Run()
-	// Run 返回即主窗口已销毁：先停心跳，否则它还会对着已销毁窗口 Emit 到进程结束。
-	close(heartbeatQuit)
+	// Run 返回即主窗口已销毁：先广播退出信号，停掉心跳与尚未执行的浮窗预建，
+	// 否则它们还会对着已销毁窗口 Emit / 往已失效的 impl 投递主线程任务。
+	close(appQuit)
 	if err != nil {
 		// 启动失败必须让用户「当场」看到，而不只是躺在日志里。
 		//

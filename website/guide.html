@@ -229,7 +229,7 @@
             <li>服务型运行时（Nginx、MySQL、Redis 这类）支持启动、停止、重启，配置能直接在应用里改，保存后按需重载。</li>
             <li>Nginx、Apache、Caddy 在启动前会跑一遍配置校验，语法错就停住，不会把线上服务弄挂。</li>
             <li>每个服务都有实时日志（尾部 8KB）和 Web 控制台入口；端口总览能看到谁占了哪个端口。</li>
-            <li>「检查项目」会读目录里的 <code>.nvmrc</code>、<code>.tool-versions</code>、<code>go.mod</code>、<code>package.json</code> 等版本声明，和本机已装、当前激活的版本逐个对比，缺的当场切过去。Everything 搜不到文件时，页内还有个自测入口。</li>
+            <li>「检查项目」会读目录里的 <code>.nvmrc</code>、<code>.tool-versions</code>、<code>go.mod</code>、<code>package.json</code>、<code>composer.json</code> 等声明，和本机已装、当前激活的版本逐个对比，缺的当场切过去；顺带检查 PHP / Node 项目的包管理器、锁文件与依赖目录是否已就绪。Everything 搜不到文件时，页内还有个自测入口。</li>
             <li>所有东西装在 <code>%APPDATA%\QuickDock\runtime\</code> 下，不写注册表，不改系统 PATH，不需要管理员权限。</li>
           </ul>
         </section>

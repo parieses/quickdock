@@ -50,6 +50,10 @@ const (
 	// 故障：模型的 tools[] 一大，请求容易被上游拒绝，token 账单也难看。
 	// 一个正常的 server 不会超过这个数；超了说明配置错了（比如接了个网关）。
 	MaxToolsPerServer = 128
+	// maxConfigHeaders / maxHeaderValueLen 自定义请求头的上限。令牌来自用户手填的
+	// mcp.json，不能让它变成任意长的请求体或塞进换行做请求头注入。
+	maxConfigHeaders  = 16
+	maxHeaderValueLen = 4096
 )
 
 // ErrDisabled server 已被禁用：调用方据此统一报错文案。
@@ -65,6 +69,12 @@ type ServerConfig struct {
 	Args    []string          `json:"args,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	URL     string            `json:"url,omitempty"`
+	// Headers 自定义 HTTP 请求头，主要给远程 server 的认证用：
+	// Authorization: Bearer <token>、X-API-Key 之类。字段名与各家 mcp.json 的
+	// headers 一致，粘贴现成配置不用改格式；stdio 传输下不起作用。
+	// 协议相关的头（Content-Type / Accept / Mcp-Session-Id …）由客户端管理，
+	// 即使配置里写了也会被跳过，见 isReservedMCPHeader。
+	Headers map[string]string `json:"headers,omitempty"`
 	// Disabled 临时停用：配置保留、不连接、工具不注册。
 	Disabled bool `json:"disabled,omitempty"`
 }
@@ -507,6 +517,14 @@ func (c *httpClient) post(ctx context.Context, timeout time.Duration, payload an
 	if c.session != "" {
 		req.Header.Set("Mcp-Session-Id", c.session)
 	}
+	// 认证令牌等自定义请求头。协议头不在这里放行：被覆盖后 SSE 解析与会话续接
+	// 会莫名失效，现象离配置太远，用户根本查不到原因。
+	for k, v := range c.cfg.Headers {
+		if isReservedMCPHeader(k) {
+			continue
+		}
+		req.Header.Set(k, v)
+	}
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, false, err
@@ -575,9 +593,23 @@ func clampTools(tools []Tool) []Tool {
 	return tools[:MaxToolsPerServer]
 }
 
+// isReservedMCPHeader 由客户端自己管理的头，配置里写了也不覆盖。
+// Host / Content-Length 交给 net/http 计算，Mcp-Session-Id 是握手后的会话身份。
+func isReservedMCPHeader(k string) bool {
+	switch strings.ToLower(strings.TrimSpace(k)) {
+	case "content-type", "accept", "mcp-session-id", "content-length", "host":
+		return true
+	}
+	return false
+}
+
 // ValidServerName server 名字约束：注册进内置注册表时要拼进工具名
 // （mcp_<server>_<tool>），所以只允许安全字符。
 var validServerName = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_-]{0,31}$`)
+
+// header 名按 HTTP token 的常见子集收紧：Authorization / X-API-Key / X-Tenant
+// 这类都过得了，含空格、冒号、控制字符的一律在保存时就挡掉。
+var validHeaderName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
 
 // ValidateConfig 建连接前的合法性检查。错误消息面向填写配置的用户。
 func ValidateConfig(name string, cfg ServerConfig) error {
@@ -591,6 +623,18 @@ func ValidateConfig(name string, cfg ServerConfig) error {
 	}
 	if cmd != "" && url != "" {
 		return errors.New("command 与 url 只能填一个")
+	}
+	if len(cfg.Headers) > maxConfigHeaders {
+		return fmt.Errorf("自定义请求头最多 %d 个", maxConfigHeaders)
+	}
+	for k, v := range cfg.Headers {
+		kk := strings.TrimSpace(k)
+		if !validHeaderName.MatchString(kk) {
+			return fmt.Errorf("请求头名称不合法：%q（只能用字母、数字、下划线、连字符）", k)
+		}
+		if len(v) > maxHeaderValueLen || strings.ContainsAny(v, "\r\n\x00") {
+			return fmt.Errorf("请求头 %s 的值不合法（超过 %d 字符或含换行）", kk, maxHeaderValueLen)
+		}
 	}
 	return nil
 }

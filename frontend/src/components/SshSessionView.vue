@@ -139,6 +139,75 @@ const endHint = computed(() => {
   }
 })
 
+// ---- 意外断线自动重连 ----
+//
+// 只重连「网络掉线 / 服务器重启」这类带 errorCode 的断开。用户敲 exit 是
+// 正常退出、主动点「断开」是明确意图，两者都不能自动把会话拉回来。
+// 退避 1/2/4s，最多 3 次：SSH 断线大多是瞬时的，再多重试只会让一台
+// 已经关机的机器持续弹连接失败。
+const autoRetryMax = 3
+const autoNotice = ref('')
+const autoRetrying = ref(false)
+let autoRetryCount = 0
+let autoTimer: ReturnType<typeof setTimeout> | null = null
+/** 每次取消/重排都自增，让在途的旧定时器失效，避免关标签后还在拨号。 */
+let autoGeneration = 0
+
+function cancelAutoReconnect() {
+  autoGeneration += 1
+  if (autoTimer !== null) {
+    clearTimeout(autoTimer)
+    autoTimer = null
+  }
+  autoRetryCount = 0
+  autoRetrying.value = false
+}
+
+function dismissAutoNotice() {
+  cancelAutoReconnect()
+  autoNotice.value = ''
+}
+
+function scheduleAutoReconnect() {
+  if (autoRetryCount >= autoRetryMax) {
+    autoRetrying.value = false
+    autoNotice.value = t('sshAutoReconnectFailed')
+    return
+  }
+  const gen = ++autoGeneration
+  const delay = 1000 * 2 ** autoRetryCount
+  autoRetryCount += 1
+  autoRetrying.value = true
+  autoNotice.value = t('sshAutoReconnecting', { sec: delay / 1000, n: autoRetryCount, max: autoRetryMax })
+  autoTimer = setTimeout(() => {
+    autoTimer = null
+    if (gen !== autoGeneration) return
+    void runAutoReconnect()
+  }, delay)
+}
+
+async function runAutoReconnect() {
+  if (inFlight) return
+  // 旧会话已经 disconnected，先归还：不然 Go 侧 Manager 里会一直留一条
+  // 没人接的会话，窗口重开时还会被 restoreTabs 认出来。
+  await dropSession()
+  await doConnect()
+  // 指纹变更/未知要人工确认，自动重试只会反复弹窗。
+  if (fpVisible.value) {
+    cancelAutoReconnect()
+    autoNotice.value = ''
+    return
+  }
+  if (phase.value === 'connected') {
+    autoRetrying.value = false
+    // 重连建立的是一条全新的 TCP + 全新 shell：vim、sudo 提权、top、
+    // 前台进程、当前目录都不会跟过来。静默连上等于骗用户「什么都没发生」。
+    autoNotice.value = t('sshAutoReconnectedWarn')
+    return
+  }
+  scheduleAutoReconnect()
+}
+
 function currentSize() {
   const s = termRef.value?.getSize?.()
   if (s && s.cols > 0 && s.rows > 0) return s
@@ -262,6 +331,13 @@ function onState(ev: { sessionId: string; state: string; error?: string; errorCo
     // 不该被当成故障来提示。
     endReason.value = ev.errorCode ? 'lost' : 'remote'
     stopTicker()
+    // 只有意外断线才排自动重连；正常退出与主动断开保持原样。
+    // autoRetrying 为真说明这是重连流程中又一次断开，交给 runAutoReconnect
+    // 继续退避，别在这里重置计数把重试次数刷成无限。
+    if (endReason.value === 'lost' && !autoRetrying.value) {
+      autoRetryCount = 0
+      scheduleAutoReconnect()
+    }
   }
 }
 
@@ -299,6 +375,10 @@ async function dropSession() {
 }
 
 async function reconnect() {
+  // 用户自己点了重连，就把排队的自动重连撤掉：两条路径同时 Connect
+  // 会开出两条会话，父级只认最后一条，前一条变成没人管的孤儿。
+  cancelAutoReconnect()
+  autoNotice.value = ''
   endReason.value = ''
   meta.value = null
   await dropSession()
@@ -307,6 +387,8 @@ async function reconnect() {
 
 /** 主动断开当前标签的会话。会话已关，标签留着让用户看最后的输出。 */
 async function onDisconnectClick() {
+  cancelAutoReconnect()
+  autoNotice.value = ''
   endReason.value = 'user'
   await dropSession()
   // phase 必须自己落到 closed。
@@ -467,6 +549,8 @@ watch(phase, p => {
 
 onBeforeUnmount(() => {
   stopTicker()
+  // 卸载后还留着定时器会去拨一条用户看不见的新连接（孤儿会话）。
+  cancelAutoReconnect()
   // 刻意不断连：多标签下本组件可能因为「删除主机」「重建标签栏」被卸载，
   // 那些场景的断开由 SshPage 统一处理。这里断开会让用户毫不知情地丢掉会话。
   // 真正退出应用时 Go 侧 Shutdown 会关掉全部连接。
@@ -509,6 +593,15 @@ defineExpose({
       <span v-if="durationText">{{ durationText }}</span>
       <span v-if="rttText">{{ rttText }}</span>
       <span v-if="bytesText">{{ bytesText }}</span>
+    </div>
+
+    <!-- 自动重连提示：等待中与「已重连」都要显式可见。后者尤其不能省——
+         新 shell 不继承 vim/sudo/top/前台进程，静默连上等于骗用户。 -->
+    <div v-if="autoNotice" class="sess-auto" :class="{ 'is-warn': !autoRetrying }">
+      <span>{{ autoNotice }}</span>
+      <button class="sess-btn sess-btn--sm" @click="dismissAutoNotice">
+        {{ t('sshAutoReconnectCancel') }}
+      </button>
     </div>
 
     <!-- 终端 + AI 面板并列。面板默认收起：占掉 300px 对小窗口来说是实打实的损失，
@@ -723,6 +816,25 @@ defineExpose({
   color: var(--color-text-muted);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
+}
+
+.sess-auto {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-5);
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sess-auto.is-warn {
+  color: var(--color-warning);
+  background: var(--color-warning-bg);
+  border-bottom-color: var(--color-warning-border);
 }
 
 .sess-body {

@@ -8,6 +8,7 @@ import { unwrap } from '../utils/api'
 import { EnvList, EnvSetActive, EnvProjectVersions } from '../../bindings/quickdock/services/env/environmentservice'
 // 「应用」类型的目标值复用应用选择器：手输自定义路径 / 浏览文件 / 系统扫描的已装应用
 import AppTargetPicker from './AppTargetPicker.vue'
+import EntityLinkPicker from './EntityLinkPicker.vue'
 import type { CollectionItem, OpenTool, EnvRuntimeInfo, ToastAPI } from '../types';
 
 const { t, tm } = useI18n()
@@ -427,6 +428,10 @@ function onKeydown(e: KeyboardEvent) {
               <span class="field-label">{{ t('remark') }}</span>
               <textarea v-model="remark" class="field-textarea" :placeholder="t('remarkPlaceholder')"></textarea>
             </label>
+            <!-- 关联走独立 service：绝不能塞进 handleSave 的 patch payload，
+                 UpdateItem 有字段白名单，混进去会被丢弃甚至覆盖别的字段。
+                 新建时 item 为空 → srcId 为空 → 组件自己显示「先保存后再添加关联」。 -->
+            <EntityLinkPicker src-type="item" :src-id="item?.id || ''" :src-label="name" />
           </div>
           <div class="editor-footer">
             <button class="btn btn-cancel" @click="handleCancel">{{ t('cancel') }}</button>

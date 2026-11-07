@@ -142,6 +142,20 @@ func (p *connPool) release(hostID string, e *connEntry) {
 	_ = e.client.Close()
 }
 
+// Invalidate 主机配置变更后把旧连接从池里摘掉，让下一个标签重新拨号。
+//
+// 只摘不关：已有会话还持有各自的 release，会在自己关闭时把这条旧连接关掉。
+// 主动 Close 会当场掐断正在用的终端——用户只是改了个端口，不该被断线。
+// 摘掉之后 Acquire 看不到旧条目，自然按新配置（含新的跳板链）建一条。
+func (p *connPool) Invalidate(hostID string) {
+	if hostID == "" {
+		return
+	}
+	p.mu.Lock()
+	delete(p.entries, hostID)
+	p.mu.Unlock()
+}
+
 // evict 把条目从池里摘除（若它还在池中）。
 //
 // 只摘不关：真正的 Close 由 release 在引用归零时做。这里可能是断线触发的，

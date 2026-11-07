@@ -18,7 +18,8 @@ import { getPluginLastResult } from '../utils/pluginLastResult'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { DeleteItem } from '../../bindings/quickdock/services/item/itemservice'
 import { SaveUrlAsItem } from '../../bindings/quickdock/services/appservice'
-import { SetTodoStatus } from '../../bindings/quickdock/services/todo/todoservice'
+import { SetTodoStatus, CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
+import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import type { CollectionItem, ToastAPI } from '../types'
 import type { RecentEntry, SearchResult } from './useCommandSearch'
 
@@ -45,6 +46,21 @@ export interface PaletteActionsDeps {
   detachPluginFor: (r: SearchResult) => Promise<void> | void
   recordUsage: (key: string, type: string, label: string, description: string) => void
   focusInput: () => void
+}
+
+// 命令面板「新建笔记 / 新建待办」的写侧：直接复用笔记 / 待办 service 已有的创建方法，
+// 不另起一套存储，也不新增 Go service 方法（签名不变、bindings 无需重生成）。
+// 只回传新条目 id —— 打开 / 定位仍走现成的 OpenNoteFromPalette / OpenTodoFromPalette 链路。
+export async function createNoteFromPalette(name: string): Promise<string> {
+  const node = unwrap<{ id: string }>(await CreateNoteDoc('', name, '', 'markdown'))
+  if (!node?.id) throw new Error('create note: empty id')
+  return node.id
+}
+
+export async function createTodoFromPalette(title: string): Promise<string> {
+  const todo = unwrap<{ id: string }>(await CreateTodo(title, '', '', '', '', '', '', '', ''))
+  if (!todo?.id) throw new Error('create todo: empty id')
+  return todo.id
 }
 
 // 结果的"主值"：文件/应用路径、链接、笔记内容等，用于复制 / 资源管理器定位
@@ -117,19 +133,22 @@ export function usePaletteActions(deps: PaletteActionsDeps) {
     const acts: PaletteAction[] = []
     const value = targetValue(r)
 
-    // 主操作（等价于直接回车）
-    // 文件结果（Everything 检索）的主操作是「定位所在文件夹」而非打开文件本身
+    // 主操作（等价于直接回车）。文件是「定位文件夹」，nav / 场景 / 集合是「切页(并定位)」，
+    // 新建动作是「进入输入」—— 它们都不是「打开」某个对象。
+    // 统一用同级缩进的链式三元：缩进递增只是排版，链式三元本身是右结合的，
+    // 逐层对齐才不会让人误以为某条分支被嵌套进了别的分支。
     const primaryLabel =
       r.type === 'env' ? (r.envAction === 'stop' ? t('envStop') : r.envAction === 'mgmt' ? t('envEnableMgmt') : t('envStart'))
-        : r.type === 'app' ? t('actLaunch')
-          : r.type === 'note' ? t('actOpenNote')
-            : r.type === 'todo' ? t('actOpenTodo')
-              // 快速导航：主操作是切页，不是"打开"（它不是一个可打开的对象）
-              : r.type === 'nav' ? t('cmdNavHint')
-                : r.type === 'file' ? t('actReveal')
-                : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
-                  : r.type === 'calculator' ? t('actCopyResult')
-                    : t('actOpen')
+      : r.type === 'app' ? t('actLaunch')
+      : r.type === 'note' ? t('actOpenNote')
+      : r.type === 'todo' ? t('actOpenTodo')
+      : r.type === 'nav' ? t('cmdNavHint')
+      : (r.type === 'scene' || r.type === 'collection') ? t('cmdNavHint')
+      : r.type === 'create' ? t('cmdExecute')
+      : r.type === 'file' ? t('actReveal')
+      : (r.type === 'system' || r.type === 'plugin') ? t('actRun')
+      : r.type === 'calculator' ? t('actCopyResult')
+      : t('actOpen')
     const primaryIcon = r.type === 'env' ? (r.envAction === 'stop' ? Power : r.envAction === 'mgmt' ? Gauge : Play)
       : r.type === 'note' ? FileText : r.type === 'todo' ? ListChecks : r.type === 'file' ? FolderSearch : r.type === 'calculator' ? Copy : Play
     acts.push({ id: 'primary', label: primaryLabel, icon: primaryIcon, run: () => deps.executeSelected() })

@@ -43,9 +43,10 @@ func validateContentMatch(m db.Monitor) *services.ApiResult {
 
 // validateMonitorTarget 保存前校验探测目标，按 kind 分支。
 //
-// http 用原来的 URL 校验；其余三类不校验 URL（那列根本不参与探测），
+// http 用原来的 URL 校验；其余五类不校验 URL（那列根本不参与探测），
 // 而是校验各自的目标格式——错填的 host:port 不会在保存时报错，只会让这条监控
 // 每轮都「连接失败」，用户看到的是"服务挂了"而不是"地址写错了"。
+// DNS/ping 复用 services 导出的校验函数，保证保存期与运行期规则完全一致。
 func validateMonitorTarget(m db.Monitor) *services.ApiResult {
 	switch strings.ToLower(strings.TrimSpace(m.Kind)) {
 	case "", db.MonitorKindHTTP:
@@ -74,6 +75,14 @@ func validateMonitorTarget(m db.Monitor) *services.ApiResult {
 	case db.MonitorKindCmd:
 		if strings.TrimSpace(m.Target) == "" {
 			return services.FailMsg("命令探活需要填要执行的命令")
+		}
+	case db.MonitorKindDNS:
+		if err := services.ValidateDNSTarget(m.Target); err != nil {
+			return services.Fail(err)
+		}
+	case db.MonitorKindPing:
+		if err := services.ValidatePingTarget(m.Target); err != nil {
+			return services.Fail(err)
 		}
 	default:
 		return services.FailMsg("未知的探测类型：" + m.Kind)

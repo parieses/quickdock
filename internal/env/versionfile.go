@@ -21,6 +21,16 @@ type VersionHint struct {
 // versionNumRE 从版本声明里抽取数字前缀："^8.1" → "8.1"、">=3.11" → "3.11"、"v18.20.0" → "18.20.0"。
 var versionNumRE = regexp.MustCompile(`\d+(?:\.\d+)*`)
 
+// mise.toml [tools] 段一行的键值：key = "value" / key = 'value'（可带行尾 # 注释）。
+// RE2 不支持 lookahead，也不支持反向引用，不能写 (["'])…\1 去回引同一种引号，
+// 所以单/双引号各用一个独立正则；值用否定字符类 [^"]* / [^']* 收口，避免跨引号误匹配。
+// 这两个正则只服务 parseMiseToml；包级 MustCompile 一旦写错会在 init 阶段 panic 且
+// go vet 查不出来，故刻意保持最简，只用 ^ $ 定界、捕获组和可选注释组。
+var (
+	miseToolsDoubleQuotedRE = regexp.MustCompile(`^\s*([A-Za-z0-9_.+-]+)\s*=\s*"([^"]*)"\s*(#.*)?$`)
+	miseToolsSingleQuotedRE = regexp.MustCompile(`^\s*([A-Za-z0-9_.+-]+)\s*=\s*'([^']*)'\s*(#.*)?$`)
+)
+
 // asdfRuntimes .tool-versions 的插件名 → 本项目的运行时 id。
 // asdf 用插件名（nodejs/golang），与运行时 id（node/go）不同，必须显式映射。
 var asdfRuntimes = map[string]Runtime{
@@ -83,6 +93,7 @@ func DetectVersionHints(dir string) []VersionHint {
 
 // versionFileSpec 一个版本声明文件的解析规则。
 // 顺序即优先级：同一层目录里前者先命中，后者的同运行时结果被丢弃。
+// mise.toml 刻意排在末尾：它是后加入的声明，不抢占既有文件（.nvmrc/go.mod 等）的优先级。
 var versionFileSpecs = []struct {
 	name  string
 	parse func([]byte) []VersionHint
@@ -95,6 +106,7 @@ var versionFileSpecs = []struct {
 	{"composer.json", parseComposerJSON},
 	{"go.mod", parseGoMod},
 	{".tool-versions", parseToolVersions},
+	{"mise.toml", parseMiseToml},
 }
 
 // parsePlain 解析"整个文件就是一个版本串"的声明文件（.nvmrc 等）。
@@ -108,34 +120,68 @@ func parsePlain(rt Runtime) func([]byte) []VersionHint {
 	}
 }
 
-// parsePackageJSON 从 package.json 的 engines.node 取 node 版本要求。
+// parsePackageJSON 从 package.json 取 node 版本要求。
+// 只看 engines.node 会让绝大多数前端项目「检查项目」一条都不出：它们不写 engines，
+// 而是用 Volta 钉版本或干脆只留 packageManager（后者不是 node 版本，交给
+// DetectProjectDeps 的包管理器字段）。优先级 engines → volta → devEngines。
+// 值可以是字符串或 {"version":"..."} 对象（devEngines 的展开写法），用 RawMessage
+// 兼容，避免类型不一致导致整份 JSON 解析失败。
 func parsePackageJSON(b []byte) []VersionHint {
 	var doc struct {
-		Engines map[string]string `json:"engines"`
+		Engines    map[string]json.RawMessage `json:"engines"`
+		Volta      map[string]json.RawMessage `json:"volta"`
+		DevEngines map[string]json.RawMessage `json:"devEngines"`
 	}
 	if json.Unmarshal(b, &doc) != nil {
 		return nil
 	}
-	v := strings.TrimSpace(doc.Engines["node"])
-	if v == "" {
-		return nil
+	for _, src := range []map[string]json.RawMessage{doc.Engines, doc.Volta, doc.DevEngines} {
+		if v := rawVersionString(src["node"]); v != "" {
+			return []VersionHint{{Runtime: RuntimeNode, Version: v}}
+		}
 	}
-	return []VersionHint{{Runtime: RuntimeNode, Version: v}}
+	return nil
 }
 
-// parseComposerJSON 从 composer.json 的 require.php 取 php 版本要求。
+// parseComposerJSON 从 composer.json 取 php 版本要求。
+// 优先级 require.php → require-dev.php → config.platform.php：前两者是项目约束，
+// platform 是 Composer 解析依赖时「假装的」平台版本，只在前两者缺失时兜底
+// （不少 Laravel 项目只写 platform 不写 require.php）。
 func parseComposerJSON(b []byte) []VersionHint {
 	var doc struct {
-		Require map[string]string `json:"require"`
+		Require    map[string]json.RawMessage `json:"require"`
+		RequireDev map[string]json.RawMessage `json:"require-dev"`
+		Config     struct {
+			Platform map[string]json.RawMessage `json:"platform"`
+		} `json:"config"`
 	}
 	if json.Unmarshal(b, &doc) != nil {
 		return nil
 	}
-	v := strings.TrimSpace(doc.Require["php"])
-	if v == "" {
-		return nil
+	for _, src := range []map[string]json.RawMessage{doc.Require, doc.RequireDev, doc.Config.Platform} {
+		if v := rawVersionString(src["php"]); v != "" {
+			return []VersionHint{{Runtime: RuntimePHP, Version: v}}
+		}
 	}
-	return []VersionHint{{Runtime: RuntimePHP, Version: v}}
+	return nil
+}
+
+// rawVersionString 兼容版本声明的三种 JSON 形态：字符串、{"version":"..."}、null/其它。
+func rawVersionString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(raw, &s) == nil {
+		return strings.TrimSpace(s)
+	}
+	var obj struct {
+		Version string `json:"version"`
+	}
+	if json.Unmarshal(raw, &obj) == nil {
+		return strings.TrimSpace(obj.Version)
+	}
+	return ""
 }
 
 // parseGoMod 从 go.mod 取 go 版本：toolchain 指令优先（它是实际构建用的），否则用 go 指令。
@@ -182,6 +228,48 @@ func parseToolVersions(b []byte) []VersionHint {
 		}
 	}
 	return out
+}
+
+// parseMiseToml 手写轻量解析 mise.toml 的 [tools] 段：逐行扫描，遇到任意 [section]
+// 标题就切换状态，只在 [tools] 段内收集键值，因此 [env] / [tasks] 段里的同名 key
+// 不会误当成工具版本。键名走现有 asdfRuntimes 映射（与 .tool-versions 同一张表）：
+// java / task 等本项目未纳管的键没有映射，按 parseToolVersions 的语义静默跳过。
+func parseMiseToml(b []byte) []VersionHint {
+	var out []VersionHint
+	inTools := false
+	for _, line := range strings.Split(string(b), "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inTools = strings.TrimSpace(line[1:len(line)-1]) == "tools"
+			continue
+		}
+		if !inTools || line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, val, ok := parseMiseToolKV(line)
+		if !ok {
+			continue // 数组值 / 裸值 / 引号未闭合等格式错误，静默跳过
+		}
+		rt, ok := asdfRuntimes[strings.ToLower(key)]
+		if !ok {
+			continue
+		}
+		if v := stripV(val); v != "" {
+			out = append(out, VersionHint{Runtime: rt, Version: v})
+		}
+	}
+	return out
+}
+
+// parseMiseToolKV 取 key = "value" / key = 'value'（可带行尾 # 注释）里的键值。
+func parseMiseToolKV(line string) (key, val string, ok bool) {
+	if m := miseToolsDoubleQuotedRE.FindStringSubmatch(line); m != nil {
+		return m[1], m[2], true
+	}
+	if m := miseToolsSingleQuotedRE.FindStringSubmatch(line); m != nil {
+		return m[1], m[2], true
+	}
+	return "", "", false
 }
 
 // firstVersionLine 取文本首个非空、非注释行，并剥掉前缀 v。

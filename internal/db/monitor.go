@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// 监控探测类型。同一张表同时承载四类探针，而不是另建「服务监控」表：
+// 监控探测类型。同一张表同时承载六类探针，而不是另建「服务监控」表：
 // 它们共用 interval/timeout/告警/静默/日志/在线率这一整套运行时，拆表等于把
 // 检查循环、日志裁剪、统计聚合全部复制一份；差异只在「怎么判 up」这一处。
 const (
@@ -16,10 +16,19 @@ const (
 	MonitorKindTCP     = "tcp"     // 连一次 host:port，连上即 up（数据库/Redis/MQ 端口探活）
 	MonitorKindProcess = "process" // 本机进程是否存在（守护进程、容器外的原生服务）
 	MonitorKindCmd     = "cmd"     // 执行一条命令，退出码 0 即 up（自定义健康脚本）
+	MonitorKindDNS     = "dns"     // 解析一次域名，拿到结果即 up（复用 target 字段）
+	MonitorKindPing    = "ping"    // 调系统 ping 一次，收到回包即 up（复用 target 字段）
 )
 
+// RecycleMonitor 是全局回收站里「监控」这一类主体的 collection 值。
+// 它不写 tombstones：监控靠 deleted_at 软删并保留日志，恢复只清标记。
+// 常量放这里而不是 tombstone.go，是为了让「这类主体不走墓碑」一眼可见。
+const RecycleMonitor = "monitors"
+
 // Monitor 运行状态监控（仿 UptimeRobot）
-// expected_status 支持 "2xx"/"3xx"/"4xx"/"5xx" 或精确码如 "200"
+// expected_status 支持 "2xx"/"3xx"/"4xx"/"5xx"、精确码如 "200"，
+// 或 "any"（任意非 0 状态码即视为正常，用于需要鉴权的健康检查等）。
+// 注意 "any" 必须以字面量落库；空串会被下面的 normalize 归一成默认的 "2xx"。
 type Monitor struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
@@ -30,6 +39,8 @@ type Monitor struct {
 	//   tcp     → host:port（如 127.0.0.1:3306）
 	//   process → 进程名（不区分大小写，可省略 .exe，如 mysqld）
 	//   cmd     → 要执行的命令（退出码 0 视为正常）
+	//   dns     → [A:|AAAA:|MX:|CNAME:]主机名（如 A:example.com）
+	//   ping    → 主机名或 IP（如 192.168.1.1 或 ::1）
 	// http 不用它，仍读 URL —— URL 还牵着证书检查、地址校验与 MCP 描述，
 	// 把 http 也搬过来只会让「旧的 url 列」变成需要兼容的空壳。
 	Target              string `json:"target"`
@@ -89,7 +100,11 @@ type MonitorStat struct {
 	UpChecks     int     `json:"upChecks"`
 	UptimeRatio  float64 `json:"uptimeRatio"` // 0..100，近 24h
 	AvgLatencyMs int     `json:"avgLatencyMs"`
-	LastDownAt   string  `json:"lastDownAt"` // 最近一次 down 的检测时间
+	// p95/p99 只统计近 24h 内 status='up' 且 latency_ms>0 的样本（nearest-rank）。
+	// 无成功样本的监控保持 0，调用方可用它区分「没数据」和「真的 0ms」。
+	P95LatencyMs int    `json:"p95LatencyMs"`
+	P99LatencyMs int    `json:"p99LatencyMs"`
+	LastDownAt   string `json:"lastDownAt"` // 最近一次 down 的检测时间
 }
 
 const monCols = `id, name, kind, target, url, method, interval_sec, timeout_sec, expected_status,
@@ -125,7 +140,7 @@ var monitorLogTrimTick atomic.Int64
 
 // normalizeMonitorKind 把空串与未知值收敛到 http。
 //
-// 探针、界面、统计都只认这四个值；脏数据（老库恢复、手改 DB、插件写入）落到
+// 探针、界面、统计都只认这六个值；脏数据（老库恢复、手改 DB、插件写入）落到
 // 「未知 kind」时若原样返回，会表现为「这条监控永远不检测」——收敛到 http
 // 至少让它按升级前的行为跑，用户能看见它红了/绿了，而不是一片空白。
 // 合法性校验在 services/monitor 保存前做，那一层要能对用户报错，这里只兜底。
@@ -137,6 +152,10 @@ func normalizeMonitorKind(k string) string {
 		return MonitorKindProcess
 	case MonitorKindCmd:
 		return MonitorKindCmd
+	case MonitorKindDNS:
+		return MonitorKindDNS
+	case MonitorKindPing:
+		return MonitorKindPing
 	case MonitorKindHTTP, "":
 		return MonitorKindHTTP
 	default:
@@ -299,7 +318,9 @@ func (d *Database) UpdateMonitor(m *Monitor) error {
 	if m.Name == "" {
 		return fmt.Errorf("监控名称不能为空")
 	}
-	if strings.TrimSpace(m.URL) == "" {
+	// 只有 HTTP 探测读 url 列；tcp/process/cmd/dns/ping 都读 target。
+	// 无条件要求 url 会让这些类型在「编辑保存」时直接失败，而界面上根本没让它填 URL。
+	if normalizeMonitorKind(m.Kind) == MonitorKindHTTP && strings.TrimSpace(m.URL) == "" {
 		return fmt.Errorf("监控地址不能为空")
 	}
 	if m.IntervalSec < 5 {
@@ -363,6 +384,60 @@ func (d *Database) DeleteMonitor(id string) error {
 		return err
 	}
 	return nil
+}
+
+// PurgeDeletedMonitors 清空监控回收站：硬删所有软删行及其日志。
+// 与 ClearTombstones 分开做，是因为监控从没写过墓碑 —— 只清墓碑会让
+// 「清空回收站」悄悄留下一批看得见却清不掉的监控。
+func (d *Database) PurgeDeletedMonitors() (int, error) {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	tx, err := d.conn.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec("DELETE FROM monitor_logs WHERE monitor_id IN (SELECT id FROM monitors WHERE deleted_at <> '')"); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec("DELETE FROM monitors WHERE deleted_at <> ''")
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
+// PurgeExpiredDeletedMonitors 按与墓碑一致的保留天数清理过期软删监控。
+// deleted_at 是带时区偏移的 RFC3339，字符串比较会误判，必须走 julianday()。
+func (d *Database) PurgeExpiredDeletedMonitors(maxAgeDays int) (int, error) {
+	if maxAgeDays <= 0 {
+		maxAgeDays = TombstoneMaxAgeDays
+	}
+	cutoff := time.Now().AddDate(0, 0, -maxAgeDays).Format(time.RFC3339)
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	tx, err := d.conn.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	where := "deleted_at <> '' AND julianday(deleted_at) < julianday(?)"
+	if _, err = tx.Exec("DELETE FROM monitor_logs WHERE monitor_id IN (SELECT id FROM monitors WHERE "+where+")", cutoff); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec("DELETE FROM monitors WHERE "+where, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	if err = tx.Commit(); err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
 }
 
 // SoftDeleteMonitor 软删：打 deleted_at 标记进回收站，保留日志与运行数据，可恢复。
@@ -613,11 +688,14 @@ func (d *Database) ListMonitorsDue(nowTs int64) ([]Monitor, error) {
 	return out, rows.Err()
 }
 
-// ListMonitorStats 一次性汇总所有监控近 24h 的在线率/平均延迟/最近故障时间
+// ListMonitorStats 一次性汇总所有监控近 24h 的在线率/平均延迟/最近故障时间，
+// 并补算成功样本的 p95/p99 延迟分位。
 func (d *Database) ListMonitorStats() ([]MonitorStat, error) {
 	since := time.Now().Unix() - logWindowSec
 	d.mu.RLock()
 	defer d.mu.RUnlock()
+
+	// 第一条：原有聚合（在线率/平均延迟/最近故障）。
 	rows, err := d.conn.Query(
 		`SELECT monitor_id,
 			COUNT(*),
@@ -628,7 +706,7 @@ func (d *Database) ListMonitorStats() ([]MonitorStat, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer rows.Close()
+	defer rows.Close() // 幂等：出错路径也能关掉
 	var out []MonitorStat
 	for rows.Next() {
 		var s MonitorStat
@@ -646,5 +724,75 @@ func (d *Database) ListMonitorStats() ([]MonitorStat, error) {
 		}
 		out = append(out, s)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	// 显式关闭，让第二条查询复用连接（连接池虽为 4，但别依赖这个假设）。
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+
+	// 第二条：一次取回全量成功延迟样本，Go 侧算分位。
+	// SQLite 没有 percentile_cont，逐条查又是 N+1；按 (monitor_id, latency_ms)
+	// 排好序后单遍扫描即可按 id 分组，组内天然升序。单监控日志上限 2 万条，可接受。
+	// 只统计 status='up' 且 latency_ms>0：失败探测的延迟是超时值，不该混进分位。
+	latRows, err := d.conn.Query(
+		`SELECT monitor_id, latency_ms FROM monitor_logs
+		 WHERE checked_ts >= ? AND status = 'up' AND latency_ms > 0
+		 ORDER BY monitor_id, latency_ms`, since)
+	if err != nil {
+		return nil, err
+	}
+	defer latRows.Close()
+
+	// 回填目标按 id 索引；out 已定型不再 append，指针稳定。
+	byID := make(map[string]*MonitorStat, len(out))
+	for i := range out {
+		byID[out[i].MonitorID] = &out[i]
+	}
+
+	var curID string
+	var samples []int
+	flush := func() {
+		if len(samples) == 0 {
+			return
+		}
+		if st, ok := byID[curID]; ok {
+			st.P95LatencyMs = percentileNearestRank(samples, 95)
+			st.P99LatencyMs = percentileNearestRank(samples, 99)
+		}
+	}
+	for latRows.Next() {
+		var id string
+		var ms int
+		if err := latRows.Scan(&id, &ms); err != nil {
+			return nil, err
+		}
+		if id != curID {
+			flush()
+			curID = id
+			samples = samples[:0]
+		}
+		samples = append(samples, ms)
+	}
+	flush()
+	if err := latRows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// percentileNearestRank 返回升序样本里第 p 百分位（nearest-rank）对应的延迟值。
+// 索引 = ceil(p/100 * n) - 1；用整数 (p*n + 99)/100 精确表达 ceil，避免浮点边界
+// 把 20 个样本的 95 分位算成第 20 个（应为第 19 个）。调用方保证 sorted 非空且升序。
+func percentileNearestRank(sorted []int, p int) int {
+	n := len(sorted)
+	idx := (p*n+99)/100 - 1
+	if idx < 0 {
+		idx = 0
+	}
+	if idx >= n {
+		idx = n - 1
+	}
+	return sorted[idx]
 }

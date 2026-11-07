@@ -4,10 +4,12 @@ import { useI18n } from 'vue-i18n'
 import { Pen, Trash2, Plus, RefreshCw, ChevronDown } from '@lucide/vue'
 import SettingsPrompts from './SettingsPrompts.vue'
 import SettingsSkills from './SettingsSkills.vue'
+import QdBarChart from './charts/QdBarChart.vue'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
+import { useAiCostPreference } from '../composables/useAiCostPreference'
 
 import {
   AIApprovalStats,
@@ -32,6 +34,7 @@ import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type {
   AIApprovalRuleView,
   AIApprovalStatsResult,
+  AICostEntry,
   AIExtServerState,
   AIProfilesResult,
   AIUsageStatsResult,
@@ -40,6 +43,11 @@ import type { ToastAPI } from '../types'
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
+// 单条费用显示开关：与消息列表共享同一份偏好（见 useAiCostPreference），
+// 关掉只收起气泡尾部那一行，设置页的用量总量照常显示。
+// 落盘由 composable 里的 watch 负责，这里只改那一份单例 ref。
+const { showMsgCost } = useAiCostPreference()
+function onToggleShowMsgCost(on: boolean) { showMsgCost.value = on }
 
 const emit = defineEmits<{ close: [] }>()
 const props = defineProps<{ visible: boolean; initialTab?: string }>()
@@ -76,8 +84,9 @@ const aiTabs = computed<{ value: AiSettingsTab; label: string }[]>(() => [
 //   2) '{' '}' 在 vue-i18n 里是插值定界符、'@' 是 linked-message 前缀，放进 messages
 //      会被当语法解析 —— 开发环境只打一条警告，生产构建直接抛 SyntaxError，
 //      整个页面渲染失败（表现为「新建任务页白屏 / 输入框消失」）。
-const EXT_IMPORT_PH = '{\n  "filesystem": {\n    "command": "npx",\n    "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/proj"]\n  },\n  "remote": { "url": "http://127.0.0.1:9000/mcp" }\n}'
+const EXT_IMPORT_PH = '{\n  "filesystem": {\n    "command": "npx",\n    "args": ["-y", "@modelcontextprotocol/server-filesystem", "D:/proj"]\n  },\n  "remote": { "url": "http://127.0.0.1:9000/mcp",\n    "headers": { "Authorization": "Bearer sk-xxx" } }\n}'
 const EXT_ARGS_PH = '-y\n@modelcontextprotocol/server-filesystem\nD:/proj'
+const EXT_HEADERS_PH = 'X-API-Key: sk-xxx\nX-Tenant: acme'
 
 const aiPresets: Record<string, string> = {
   openai: 'https://api.openai.com/v1',
@@ -257,6 +266,7 @@ async function loadUsage(days: number = usageDays.value) {
     approval.value = unwrap<AIApprovalStatsResult>(ap) ?? null
   } catch (e) {
     usageError.value = getErrorMessage(e)
+    logErr('settingsAI.loadUsage', e)
   } finally {
     usageLoading.value = false
   }
@@ -327,8 +337,9 @@ async function saveApprovalRule(rule: AIApprovalRuleView, mode: string) {
 //
 // 原来是「一整份 JSON 文本框」：字段确实和 Claude Desktop / Cursor 的 mcp.json
 // 一致，但每加一个服务器都要手写括号、引号、逗号，写错一个字符整份都保存不了，
-// 而且报错只说「JSON 解析失败」。现在改成表单：名字、类型、命令、参数、环境变量
-// 各一格；JSON 保留成「粘贴导入」这一条兜底通道——别人给的配置还是要能整段贴进来。
+// 而且报错只说「JSON 解析失败」。现在改成表单：名字、类型、命令、参数、环境变量、
+// 认证令牌各一格；JSON 留两条通道——「编辑配置 JSON」改整份原文，
+// 「粘贴导入」把别人给的片段合并进来。两条都认 headers，不再丢认证信息。
 const extServers = ref<AIExtServerState[]>([])
 // 失败数挂在 MCP 分段上：外部 server 启动时只连一次、失败不会自动重试
 // （services/ai/ext_mcp.go loadExtOnStart），用户往往就是看到红字才进来重连。
@@ -346,10 +357,17 @@ interface ExtForm {
   argsText: string
   envText: string
   url: string
+  token: string
+  headersText: string
 }
 const extForm = ref<ExtForm | null>(null)
+// 令牌默认是掩码，编辑时也不把明文摊在屏幕上；想核对内容自己点「显示」。
+const extTokenVisible = ref(false)
 const extImportOpen = ref(false)
 const extImportDraft = ref('')
+// 「编辑配置 JSON」：一份当前 mcp.json 的原文草稿，保存即整份替换。
+const extEditOpen = ref(false)
+const extEditDraft = ref('')
 
 // ---- 工具详情展开行 ----
 // AIGetExtServers 只给工具名；描述与「是否被单独关掉」在 mcp.Catalog 里，
@@ -421,6 +439,7 @@ interface ExtInput {
   args: string[]
   env: Record<string, string>
   url: string
+  headers: Record<string, string>
   disabled: boolean
 }
 
@@ -465,6 +484,48 @@ function textToEnv(s: string): Record<string, string> {
   return out
 }
 
+// 请求头逐行「名称: 值」，也认「名称=值」。分隔符取更靠前的那个：
+// `X-Url=http://host` 若一律按冒号切，值会被截成 `http`。
+function headersToText(h?: Record<string, string>): string {
+  return Object.entries(h || {}).map(([k, v]) => `${k}: ${v}`).join('\n')
+}
+function textToHeaders(s: string): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const raw of s.split('\n')) {
+    const line = raw.trim()
+    if (!line || line.startsWith('#')) continue
+    const ci = line.indexOf(':')
+    const ei = line.indexOf('=')
+    let i = -1
+    if (ci > 0 && (ei < 0 || ci < ei)) i = ci
+    else if (ei > 0) i = ei
+    if (i <= 0) continue
+    out[line.slice(0, i).trim()] = line.slice(i + 1).trim()
+  }
+  return out
+}
+
+/** 编辑回显：Bearer 令牌抽进专用输入框，其余请求头留在逐行文本里。
+ *  Basic / 自定义 Authorization 不抽，否则提交时会被套成 Bearer Basic xxx。 */
+function splitAuth(headers?: Record<string, string>): { token: string; text: string } {
+  const h = { ...(headers || {}) }
+  const key = Object.keys(h).find((k) => k.toLowerCase() === 'authorization')
+  let token = ''
+  if (key && /^Bearer\s+/i.test(h[key])) {
+    token = h[key].replace(/^Bearer\s+/i, '').trim()
+    delete h[key]
+  }
+  return { token, text: headersToText(h) }
+}
+
+/** 表单 -> headers：令牌写进 Authorization，与自定义头合并（同名时令牌优先）。 */
+function extFormHeaders(f: ExtForm): Record<string, string> {
+  const h = textToHeaders(f.headersText)
+  const token = f.token.trim()
+  if (token) h.Authorization = /^Bearer\s+/i.test(token) ? token : `Bearer ${token}`
+  return h
+}
+
 /** 状态 -> 提交项：覆盖式保存时其余 server 要原样带上 */
 function stateToInput(s: AIExtServerState): ExtInput {
   const c = s.config || {}
@@ -474,6 +535,7 @@ function stateToInput(s: AIExtServerState): ExtInput {
     args: c.args || [],
     env: c.env || {},
     url: c.url || '',
+    headers: c.headers || {},
     disabled: !!c.disabled,
   }
 }
@@ -486,13 +548,19 @@ function extTarget(s: AIExtServerState): string {
 }
 
 function openAddExt() {
-  extForm.value = { origName: '', name: '', kind: 'stdio', command: '', argsText: '', envText: '', url: '' }
+  extForm.value = {
+    origName: '', name: '', kind: 'stdio', command: '', argsText: '', envText: '',
+    url: '', token: '', headersText: '',
+  }
+  extTokenVisible.value = false
   extImportOpen.value = false
+  extEditOpen.value = false
   extError.value = ''
 }
 
 function openEditExt(s: AIExtServerState) {
   const c = s.config || {}
+  const auth = splitAuth(c.headers)
   extForm.value = {
     origName: s.name,
     name: s.name,
@@ -501,8 +569,12 @@ function openEditExt(s: AIExtServerState) {
     argsText: argsToText(c.args),
     envText: envToText(c.env),
     url: c.url || '',
+    token: auth.token,
+    headersText: auth.text,
   }
+  extTokenVisible.value = false
   extImportOpen.value = false
+  extEditOpen.value = false
   extError.value = ''
 }
 
@@ -517,6 +589,9 @@ async function commitExt(items: ExtInput[]): Promise<boolean> {
     extForm.value = null
     extImportOpen.value = false
     extImportDraft.value = ''
+    extEditOpen.value = false
+    extEditDraft.value = ''
+    extTokenVisible.value = false
     return true
   } catch (e) {
     extError.value = getErrorMessage(e)
@@ -557,6 +632,7 @@ async function submitExtForm() {
     args: isHttp ? [] : textToArgs(f.argsText),
     env: isHttp ? {} : textToEnv(f.envText),
     url: isHttp ? url : '',
+    headers: isHttp ? extFormHeaders(f) : {},
     disabled: prev ? !!prev.config?.disabled : false,
   }
   await commitExt([...rest, item])
@@ -575,6 +651,8 @@ async function toggleExt(s: AIExtServerState) {
   try {
     extServers.value = unwrap<AIExtServerState[]>(await AISetExtServerEnabled(s.name, enable)) ?? []
     resetExtTools()
+    // 整份 JSON 草稿还开着时同步一下 disabled，否则保存会把开关状态盖回去
+    if (extEditOpen.value) extEditDraft.value = buildManifestJson()
   } catch (e) {
     extError.value = getErrorMessage(e)
   } finally {
@@ -678,13 +756,14 @@ function parseLooseJson(text: string): any {
   return JSON.parse(out.replace(/,\s*([}\]])/g, '$1'))
 }
 
-/** 一条外部配置 → 提交项（不含名字）。headers 单独带出，好在提示里说清楚 */
+/** 一条外部配置 → 提交项（不含名字）。headers 原样保留：远程 server 的
+ *  Authorization / X-API-Key 都在这里，丢了就等于配好的令牌没生效。*/
 function cfgToInput(cfg: Record<string, any>): {
   command: string
   args: string[]
   env: Record<string, string>
   url: string
-  headers: string[]
+  headers: Record<string, string>
 } {
   const c = cfg || {}
   let command = String(c.command ?? c.cmd ?? '').trim()
@@ -710,7 +789,12 @@ function cfgToInput(cfg: Record<string, any>): {
   }
 
   const url = String(c.url ?? c.serverUrl ?? c.server_url ?? c.endpoint ?? c.baseUrl ?? '').trim()
-  const headers = c.headers && typeof c.headers === 'object' ? Object.keys(c.headers) : []
+  // headers 既有对象写法，也有少数文档给的 ["KEY: VALUE"] 数组写法
+  let headers: Record<string, string> = {}
+  if (Array.isArray(c.headers)) headers = textToHeaders(c.headers.map(String).join('\n'))
+  else if (c.headers && typeof c.headers === 'object') {
+    headers = Object.fromEntries(Object.entries(c.headers).map(([k, v]) => [k, String(v)]))
+  }
   // 有 url 就是 HTTP：把 command/args/env 清空，否则后端会判「只能填一个」
   return url ? { command: '', args: [], env: {}, url, headers } : { command, args, env, url: '', headers }
 }
@@ -778,7 +862,7 @@ async function importExtJson() {
       skipped.push(e.name)
       continue
     }
-    if (c.headers.length) withHeaders.push(e.name)
+    if (Object.keys(c.headers).length) withHeaders.push(e.name)
     // 本次导入内部 sanitize 撞名（"@a/b" 与 "a-b"）时加序号，别互相覆盖
     let name = e.name
     let k = 2
@@ -791,6 +875,7 @@ async function importExtJson() {
       args: c.args,
       env: c.env,
       url: c.url,
+      headers: c.headers,
       // 覆盖时沿用原开关状态：导进来不该把用户停用的服务器又拉起来
       disabled: prev ? prev.disabled : !!e.cfg.disabled,
     })
@@ -820,12 +905,91 @@ async function importExtJson() {
   toast.success(extra.length ? `${msg}（${extra.join('；')}）` : msg)
 }
 
+/** 当前 mcp.json 的完整原文：含 headers 与令牌，给「编辑配置 JSON」直接用。
+ *  只写非空字段，避免把一堆 null / 空数组带进用户要读的配置里。 */
+function buildManifestJson(): string {
+  const servers: Record<string, Record<string, any>> = {}
+  for (const s of extServers.value) {
+    const c = s.config || {}
+    const item: Record<string, any> = {}
+    if (c.command) item.command = c.command
+    if (c.args?.length) item.args = c.args
+    if (c.env && Object.keys(c.env).length) item.env = c.env
+    if (c.url) item.url = c.url
+    if (c.headers && Object.keys(c.headers).length) item.headers = c.headers
+    if (c.disabled) item.disabled = true
+    servers[s.name] = item
+  }
+  return JSON.stringify({ mcpServers: servers }, null, 2)
+}
+
+function openEditJson() {
+  extEditOpen.value = !extEditOpen.value
+  if (!extEditOpen.value) return
+  extEditDraft.value = buildManifestJson()
+  extImportOpen.value = false
+  extError.value = ''
+}
+
+/** 与「粘贴导入」的合并语义不同：这里是整份替换，删掉一个名字就是删除它。 */
+async function saveExtManifestJson() {
+  let doc: any
+  try {
+    doc = parseLooseJson(extEditDraft.value)
+  } catch {
+    extError.value = t('aiExtBadJson')
+    return
+  }
+  let parsed: ParsedExt[] | 'unrecognized' = extractExtCandidates(doc)
+  // 空对象 {} 也当成「清空全部」的一种写法，否则结构识别会把它判成没认出来
+  if (parsed === 'unrecognized' && doc && typeof doc === 'object' && !Array.isArray(doc) && !Object.keys(doc).length) {
+    parsed = []
+  }
+  if (parsed === 'unrecognized') {
+    extError.value = t('aiExtUnrecognized')
+    return
+  }
+  const taken = new Set<string>()
+  const items: ExtInput[] = []
+  const skipped: string[] = []
+  for (const e of parsed) {
+    const c = cfgToInput(e.cfg)
+    if (!c.command && !c.url) {
+      skipped.push(e.name)
+      continue
+    }
+    let name = e.name
+    let k = 2
+    while (taken.has(name)) name = `${e.name.slice(0, 28)}-${k++}`
+    taken.add(name)
+    items.push({
+      name,
+      command: c.command,
+      args: c.args,
+      env: c.env,
+      url: c.url,
+      headers: c.headers,
+      disabled: !!e.cfg.disabled,
+    })
+  }
+  // 一个合法项都没有时等于清空全部外部 server，先问一句再落盘
+  if (!items.length && extServers.value.length && !(await toast.confirm(t('aiExtJsonClearConfirm')))) return
+  if (!(await commitExt(items))) {
+    if (extError.value) toast.error(extError.value)
+    return
+  }
+  let msg = t('aiExtJsonSaved')
+  if (skipped.length) msg += `（${t('aiExtImportSkipped', { n: skipped.length, names: skipped.join('、') })}）`
+  toast.success(msg)
+}
+
 async function reloadExt() {
   extLoading.value = true
   extError.value = ''
   try {
     extServers.value = unwrap<AIExtServerState[]>(await AIReloadExtServers()) ?? []
     resetExtTools()
+    if (extEditOpen.value) extEditDraft.value = buildManifestJson()
   } catch (e) {
     extError.value = getErrorMessage(e)
   } finally {
@@ -876,30 +1040,36 @@ function entryCachePct(e: { promptTokens: number; cachedTokens: number }): numbe
   return Math.round((e.cachedTokens / e.promptTokens) * 1000) / 10
 }
 
-// 每日柱状：多则只画最近 30 天（全部时间窗口可能上百天）。
+// 每日柱状：7/30/全部范围由 loadUsage(days) / usageDays 决定，图表组件自己不拉数据。
+// 多则只画最近 30 根：全部时间窗口可能上百天，逐根铺开会糊成一片。
 // 计价为 0 的窗口（例如全用免费模型/未收录模型）退回按 token 画，否则柱子全是空的。
-const dailyBars = computed(() => {
-  const all = usage.value?.daily ?? []
-  const list = all.slice(-30)
-  if (!list.length) return []
-  const useCost = list.some((d) => d.estimatedCost > 0)
-  const max = Math.max(1, ...list.map((d) => (useCost ? d.estimatedCost : d.totalTokens)))
-  return list.map((d) => {
-    const v = useCost ? d.estimatedCost : d.totalTokens
+const dailyChart = computed(() => {
+  const list = (usage.value?.daily ?? []).slice(-30)
+  if (!list.length) {
     return {
-      key: d.key,
-      label: fmtDay(d.key),
-      // 最低 2px：小于 1% 的日子也该留下一条痕迹，不然看不出「那天用过」
-      height: v > 0 ? Math.max(2, Math.round((v / max) * 46)) : 0,
-      title: t('aiUsageDayTip', {
-        day: d.key,
-        requests: d.requests,
-        tokens: fmtTokens(d.totalTokens),
-        cost: fmtCost(d.estimatedCost),
-      }),
+      labels: [] as string[], values: [] as number[], items: [] as AICostEntry[],
+      name: '', color: 'accent' as 'accent' | 'warning',
     }
-  })
+  }
+  const useCost = list.some((d) => d.estimatedCost > 0)
+  return {
+    labels: list.map((d) => fmtDay(d.key)),
+    values: list.map((d) => (useCost ? d.estimatedCost : d.totalTokens)),
+    items: list,
+    name: t(useCost ? 'chartLegendCost' : 'chartLegendTokens'),
+    color: (useCost ? 'warning' : 'accent') as 'accent' | 'warning',
+  }
 })
+const dailyChartSeries = computed(() => dailyChart.value.labels.length
+  ? [{ name: dailyChart.value.name, values: dailyChart.value.values, color: dailyChart.value.color }]
+  : [])
+function dailyTooltipExtra(index: number): string {
+  const d = dailyChart.value.items[index]
+  if (!d) return ''
+  return `<div>${t('chartTooltipRequests')}: ${d.requests}</div>`
+    + `<div>${t('chartTooltipTokens')}: ${fmtTokens(d.totalTokens)}</div>`
+    + `<div>${t('chartTooltipCost')}: ${fmtCost(d.estimatedCost)}</div>`
+}
 
 watch(() => props.visible, (v) => {
   if (!v) return
@@ -1113,6 +1283,20 @@ function saveAIModal() {
         </div>
       </div>
 
+      <!-- 单条费用显示：与消息列表共享偏好（useAiCostPreference），拨一下两边同时生效。
+           放在用量面板而不是模型面板——它管的是「钱看不看得见」，与下面的总量是同一件事。
+           复用「记忆自动整理」那套勾选行样式，不动全局 settings.css。 -->
+      <label class="ai-memory-row ai-cost-pref">
+        <input
+          type="checkbox"
+          class="ai-memory-check"
+          :checked="showMsgCost"
+          @change="onToggleShowMsgCost(($event.target as HTMLInputElement).checked)"
+        />
+        <span class="ai-memory-label">{{ t('aiShowMsgCost') }}</span>
+      </label>
+      <p class="usage-hint">{{ t('aiShowMsgCostHint') }}</p>
+
       <p v-if="usageError" class="result-hint error">{{ usageError }}</p>
       <p v-else-if="usageLoading && !usage" class="usage-hint">{{ t('aiUsageLoading') }}</p>
       <template v-else-if="usage">
@@ -1169,15 +1353,16 @@ function saveAIModal() {
           {{ t('aiUsageUnpriced', { n: usage.unpricedRequests }) }}
         </p>
 
-        <div v-if="dailyBars.length" class="usage-chart">
-          <div v-for="b in dailyBars" :key="b.key" class="usage-bar" :title="b.title">
-            <div class="usage-bar-fill" :style="{ height: b.height + 'px' }" />
-          </div>
-        </div>
-        <div v-if="dailyBars.length" class="usage-axis">
-          <span>{{ dailyBars[0].label }}</span>
-          <span>{{ dailyBars[dailyBars.length - 1].label }}</span>
-        </div>
+        <QdBarChart
+          v-if="dailyChart.labels.length"
+          class="usage-chart"
+          :labels="dailyChart.labels"
+          :series="dailyChartSeries"
+          :height="120"
+          :loading="usageLoading"
+          :axis-name-y="dailyChart.name"
+          :tooltip-extra="dailyTooltipExtra"
+        />
 
         <table v-if="usage.models.length" class="usage-table">
           <thead>
@@ -1284,18 +1469,59 @@ function saveAIModal() {
 
     <div v-show="activeTab === 'mcp'" class="ai-tab-panel" role="tabpanel">
     <!-- 外部 MCP 服务器（阶段 D）：把别的 server 的工具接进内置 AI。
-         表单化增删改，JSON 只留「粘贴导入」——加一个服务器是这里最常做的事，
-         让人手写括号引号等于每次都从报错开始。 -->
+         表单负责逐项增删改（最常做的事），JSON 两条通道并列放在本区块顶部：
+         「编辑配置 JSON」改当前整份 mcp.json，「粘贴导入」把别人的片段合并进来。 -->
     <div class="ai-usage">
       <div class="ai-usage-head">
         <h4 class="ai-usage-title">{{ t('aiExtTitle') }}</h4>
-        <button v-if="!extForm" class="ai-ext-add" @click="openAddExt">
-          <Plus :size="12" /> {{ t('aiExtAdd') }}
-        </button>
+        <!-- 整份 JSON 入口放在标题行：之前只有列表下方一个折叠的「粘贴导入」，
+             想直接改 mcp.json 的人根本找不到地方输入。 -->
+        <div class="ai-ext-head-ops">
+          <button v-if="!extForm" class="ai-ext-add" @click="openEditJson">{{ t('aiExtJsonEdit') }}</button>
+          <button v-if="!extForm" class="ai-ext-add" @click="extImportOpen = !extImportOpen; extEditOpen = false">
+            {{ t('aiExtImport') }}
+          </button>
+          <button v-if="!extForm" class="ai-ext-add" @click="openAddExt">
+            <Plus :size="12" /> {{ t('aiExtAdd') }}
+          </button>
+        </div>
       </div>
       <p class="usage-hint">{{ t('aiExtDesc') }}</p>
 
       <p v-if="extError" class="result-hint error">{{ extError }}</p>
+
+      <!-- 整份配置 JSON：当前 mcp.json 原文，可直接写 headers / 令牌，保存即全量替换 -->
+      <div v-if="!extForm && extEditOpen" class="ai-ext-import">
+        <textarea
+          v-model="extEditDraft"
+          class="field-input ai-ext-json"
+          spellcheck="false"
+        ></textarea>
+        <div class="ai-ext-actions">
+          <button class="ai-hook-ok" :disabled="extSaving || !extEditDraft.trim()" @click="saveExtManifestJson">
+            {{ t('aiExtJsonSaveDo') }}
+          </button>
+          <button class="ai-hook-no" @click="extEditOpen = false">{{ t('cancel') }}</button>
+        </div>
+        <span class="ai-ext-tip">{{ t('aiExtJsonHint') }}</span>
+      </div>
+
+      <!-- 粘贴导入：别人给的 mcp.json 片段整段贴进来（同名覆盖，其余保留） -->
+      <div v-if="!extForm && extImportOpen" class="ai-ext-import">
+        <textarea
+          v-model="extImportDraft"
+          class="field-input ai-ext-json"
+          :placeholder="EXT_IMPORT_PH"
+          spellcheck="false"
+        ></textarea>
+        <div class="ai-ext-actions">
+          <button class="ai-hook-ok" :disabled="extSaving || !extImportDraft.trim()" @click="importExtJson">
+            {{ t('aiExtImportDo') }}
+          </button>
+          <button class="ai-hook-no" @click="extImportOpen = false">{{ t('cancel') }}</button>
+        </div>
+        <span class="ai-ext-tip">{{ t('aiExtImportHint') }}</span>
+      </div>
 
       <!-- 新增 / 编辑表单 -->
       <div v-if="extForm" class="ai-ext-form">
@@ -1349,10 +1575,40 @@ function saveAIModal() {
             <span class="ai-ext-tip">{{ t('aiExtEnvHint') }}</span>
           </label>
         </template>
-        <label v-else class="field">
-          <span class="field-label">{{ t('aiExtUrl') }}</span>
-          <input v-model="extForm.url" class="field-input" :placeholder="t('aiExtUrlPh')" spellcheck="false" />
-        </label>
+        <template v-else>
+          <label class="field">
+            <span class="field-label">{{ t('aiExtUrl') }}</span>
+            <input v-model="extForm.url" class="field-input" :placeholder="t('aiExtUrlPh')" spellcheck="false" />
+          </label>
+          <div class="field">
+            <span class="field-label">{{ t('aiExtToken') }}</span>
+            <div class="ai-ext-secret">
+              <input
+                v-model="extForm.token"
+                :type="extTokenVisible ? 'text' : 'password'"
+                class="field-input"
+                :placeholder="t('aiExtTokenPh')"
+                spellcheck="false"
+                autocomplete="off"
+              />
+              <button type="button" class="ai-hook-no" @click="extTokenVisible = !extTokenVisible">
+                {{ extTokenVisible ? t('mcpTokenHide') : t('mcpTokenShow') }}
+              </button>
+            </div>
+            <span class="ai-ext-tip">{{ t('aiExtTokenHint') }}</span>
+          </div>
+          <label class="field">
+            <span class="field-label">{{ t('aiExtHeaders') }}</span>
+            <textarea
+              v-model="extForm.headersText"
+              class="field-input ai-ext-ta"
+              rows="2"
+              :placeholder="EXT_HEADERS_PH"
+              spellcheck="false"
+            ></textarea>
+            <span class="ai-ext-tip">{{ t('aiExtHeadersHint') }}</span>
+          </label>
+        </template>
 
         <div class="ai-ext-actions">
           <button class="ai-hook-ok" :disabled="extSaving" @click="submitExtForm">{{ t('aiExtSaveReload') }}</button>
@@ -1431,24 +1687,6 @@ function saveAIModal() {
           <button class="ai-hook-no" :disabled="extLoading" @click="reloadExt">
             <RefreshCw :size="12" /> {{ t('aiExtReload') }}
           </button>
-          <button class="ai-hook-no" @click="extImportOpen = !extImportOpen">{{ t('aiExtImport') }}</button>
-        </div>
-
-        <!-- 粘贴导入：别人给的 mcp.json 片段整段贴进来（同名覆盖） -->
-        <div v-if="extImportOpen" class="ai-ext-import">
-          <textarea
-            v-model="extImportDraft"
-            class="field-input ai-ext-json"
-            :placeholder="EXT_IMPORT_PH"
-            spellcheck="false"
-          ></textarea>
-          <div class="ai-ext-actions">
-            <button class="ai-hook-ok" :disabled="extSaving || !extImportDraft.trim()" @click="importExtJson">
-              {{ t('aiExtImportDo') }}
-            </button>
-            <button class="ai-hook-no" @click="extImportOpen = false">{{ t('cancel') }}</button>
-          </div>
-          <span class="ai-ext-tip">{{ t('aiExtImportHint') }}</span>
         </div>
       </template>
     </div>
@@ -1723,4 +1961,8 @@ function saveAIModal() {
   font-size: 11px;
   line-height: 1;
 }
+
+/* 单条费用开关：插在用量面板标题行下方，补一点上间距免得贴着标题。
+   只写在本 SFC 的 scoped 块里，不改全局 settings.css。 */
+.ai-cost-pref { margin-top: var(--space-4); }
 </style>

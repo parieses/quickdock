@@ -27,7 +27,7 @@ import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage, isDialogCanceled } from '../utils/error'
 import { logErr } from '../utils/logger'
-import { navigate, navigateTo } from '../composables/bridge'
+import { navigate, navigateTo, pendingTarget } from '../composables/bridge'
 import { useToast } from '../composables/useToast'
 import { describeDay, localISO } from '../utils/lunar'
 import type { LunarDay } from '../utils/lunar'
@@ -64,6 +64,7 @@ import {
   Coins,
 } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
+import QdBarChart from './charts/QdBarChart.vue'
 
 // 以下两个结构只在返回值里出现，Wails 绑定生成器不会单独生成类型（与 MonitorPage 的
 // MonitorLog/MonitorStat 同一处理方式），故本地声明，字段与后端 json tag 一致。
@@ -370,6 +371,41 @@ async function dismissCode(id: string) {
   } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.mailDismiss', e) }
 }
 
+// ---- 通知中心深链定位（imap）----
+// 邮件通知的 refType 是 page:dashboard、refId 是那封邮件的 id：总览没有独立邮件页，
+// 落点就是上面这张验证码卡里的对应行。验证码 10 分钟过期、也可能已被用户 dismiss，
+// 所以「找不到」是常态——静默忽略即可，绝不硬造一张卡片或弹 toast。
+const flashMailId = ref('')
+let mailFlashTimer: number | null = null
+
+async function focusMailCode(id: string) {
+  // 目标可能先于快照到位：切页时 loadMailCodes() 还没跑完
+  let hit = mailCodes.value.find(c => c.id === id)
+  if (!hit) { await loadMailCodes(); hit = mailCodes.value.find(c => c.id === id) }
+  if (!hit) return
+  await nextTick()
+  // 卡片只展示前 3 条；目标不在可见行里就没有可定位的 DOM，静默忽略
+  const el = document.querySelector<HTMLElement>(`[data-mail-id="${id.replace(/"/g, '\\"')}"]`)
+  if (!el) return
+  el.scrollIntoView({ block: 'center', behavior: 'smooth' })
+  flashMailId.value = id
+  if (mailFlashTimer) clearTimeout(mailFlashTimer)
+  mailFlashTimer = window.setTimeout(() => { flashMailId.value = '' }, 1800)
+}
+
+function consumePendingTarget() {
+  const p = pendingTarget.value
+  if (!p || p.page !== 'dashboard' || !p.target) return
+  const id = p.target
+  // 取走即清空：总览每次挂载都会重拉数据，留着会重复定位到一封已过期的邮件
+  pendingTarget.value = null
+  void focusMailCode(id)
+}
+watch(pendingTarget, consumePendingTarget, { immediate: true })
+// 双重兜底：immediate 那次若撞上快照未就绪，挂载后再补一次（已消费则是 no-op）
+onMounted(consumePendingTarget)
+onUnmounted(() => { if (mailFlashTimer) clearTimeout(mailFlashTimer) })
+
 function openMailSettings() {
   showDaySettings.value = false
   mailTestMsg.value = ''
@@ -419,6 +455,10 @@ const shelfItems = ref<ShelfItem[]>([])
 const shelfDragOver = ref(false)
 let offShelfChanged: (() => void) | null = null
 let offMailChanged: (() => void) | null = null
+// dsh 进程生命周期：常驻服务卡上那一行原来只在整页刷新时更新，
+// 服务崩了（或 reaper 自动重拉成功）卡片会一直显示旧状态。
+let offDshExited: (() => void) | null = null
+let offDshStarted: (() => void) | null = null
 
 async function loadShelf() {
   try {
@@ -838,6 +878,16 @@ async function loadTools() {
   }
 }
 
+/** 只刷 DSH 那一行：进程被杀 / 自动重拉时由事件触发，不值得整页重拉。 */
+async function loadDshOnly() {
+  try {
+    const v = unwrap<{ running?: boolean; port?: number }>(await DSHStatus())
+    dsh.value = v ? { running: !!v.running, port: v.port || 0 } : null
+  } catch (e) {
+    logErr('dashboard.dsh', e)
+  }
+}
+
 async function loadPorts() {
   try {
     ports.value = (unwrap(await ListListeningPorts()) as PortInfo[] | null) || []
@@ -931,24 +981,51 @@ const aiTodayTokens = computed(() => aiToday.value?.totalTokens ?? 0)
 /** 七日合计：今日可能还没开张，周量才说明「最近的节奏」。 */
 const aiWeekCost = computed(() => aiUsage.value?.estimatedCost ?? 0)
 const aiWeekCalls = computed(() => aiUsage.value?.requests ?? 0)
-const aiBarMax = computed(() => Math.max(1, ...(aiUsage.value?.daily ?? []).map(d => d.totalTokens)))
 /**
- * 柱高按 token 归一（不是按钱）：钱受单价影响，视觉上会变成「贵模型那根特别高」。
+ * 七日柱按 token 计（不是按钱）：钱受单价影响，视觉上会变成「贵模型那根特别高」。
  *
  * 后端 daily 只含有调用记录的日期，直接铺出来柱数会少于 7 根、横轴还会跳日。
  * 这里按本地日期补齐窗口内每一天，没调用的那天就是一根 0 高的柱——
- * 「哪天闲了」本身也是这张图要回答的。
+ * 「哪天闲了」本身也是这张图要回答的。归一与柱高交给 QdBarChart。
  */
-const aiBars = computed(() => {
-  const byDay = new Map((aiUsage.value?.daily ?? []).map(d => [d.key, d.totalTokens]))
+interface AiBarDay {
+  key: string
+  tokens: number
+  requests: number
+  cost: number
+}
+const aiChart = computed(() => {
+  const byDay = new Map((aiUsage.value?.daily ?? []).map((d) => [d.key, d]))
   const now = new Date()
-  const out: { key: string; pct: number; tokens: number }[] = []
+  const labels: string[] = []
+  const values: number[] = []
+  const items: AiBarDay[] = []
   for (let i = AI_USAGE_DAYS - 1; i >= 0; i--) {
     const key = localISO(new Date(now.getFullYear(), now.getMonth(), now.getDate() - i))
-    out.push({ key, pct: Math.round((byDay.get(key) ?? 0) / aiBarMax.value * 100), tokens: byDay.get(key) ?? 0 })
+    const d = byDay.get(key)
+    labels.push(key.slice(5))
+    values.push(d?.totalTokens ?? 0)
+    items.push({
+      key,
+      tokens: d?.totalTokens ?? 0,
+      requests: d?.requests ?? 0,
+      cost: d?.estimatedCost ?? 0,
+    })
   }
-  return out
+  return { labels, values, items }
 })
+const aiChartSeries = computed(() => [{
+  name: t('chartLegendTokens'),
+  values: aiChart.value.values,
+  color: 'accent' as const,
+}])
+function aiTooltipExtra(index: number): string {
+  const d = aiChart.value.items[index]
+  if (!d) return ''
+  return `<div>${t('chartTooltipRequests')}: ${d.requests}</div>`
+    + `<div>${t('chartTooltipTokens')}: ${tokensText(d.tokens)}</div>`
+    + `<div>${t('chartTooltipCost')}: ${moneyText(d.cost)}</div>`
+}
 const aiTopModels = computed(() => {
   const total = aiUsage.value?.totalTokens ?? 0
   return (aiUsage.value?.models ?? []).slice(0, 3).map(m => ({
@@ -1252,6 +1329,8 @@ onMounted(async () => {
   // 后端换快照 / 拖入文件后主动推事件，前端不必轮询外网。
   offMailChanged = Events.On('mailbox:changed', () => { void loadMailCodes() })
   offShelfChanged = Events.On('shelf:changed', () => { void loadShelf() })
+  offDshExited = Events.On('quickdock:dsh:exited', () => { if (!disposed) void loadDshOnly() })
+  offDshStarted = Events.On('quickdock:dsh:started', () => { if (!disposed) void loadDshOnly() })
   lastRefresh.value = new Date()
   if (PREVIEW) { seedPreview(); return }
   void refreshAll()
@@ -1275,6 +1354,8 @@ onUnmounted(() => {
   disposed = true
   offMailChanged?.()
   offShelfChanged?.()
+  offDshExited?.()
+  offDshStarted?.()
   window.removeEventListener('resize', placeAllFloating)
   window.removeEventListener('scroll', onDayScroll, true)
   document.removeEventListener('mousedown', onDayDocDown, true)
@@ -1706,7 +1787,8 @@ onUnmounted(() => {
                 <p v-else-if="!mailCodes.length" class="empty qc-empty">{{ t('mailEmpty') }}</p>
                 <ul v-else class="qc-list">
                   <li v-for="m in mailCodes.slice(0, 3)" :key="m.id" class="qc-row"
-                      :class="{ expired: isMailExpired(m.received) }">
+                      :data-mail-id="m.id"
+                      :class="{ expired: isMailExpired(m.received), 'qc-flash': flashMailId === m.id }">
                     <span class="qc-code mono">{{ m.code }}</span>
                     <div class="qc-meta">
                       <span class="qc-name" :title="m.subject">{{ m.from || m.account }}</span>
@@ -1863,14 +1945,15 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="ai-chart">
-                  <!-- 柱高是运行时按当日最大值归一的百分数，只能内联（R7 运行时值例外）。
-                       当天没有调用时给一条 2px 的底色，而不是 Math.max 保底——
-                       保底会让空日子看起来也"用过一点"，那正是这张图不该骗人的地方。 -->
-                  <div class="ai-bars" :title="t('dash_ai_bars_title')">
-                    <span v-for="b in aiBars" :key="b.key" :class="['ai-bar', { empty: !b.tokens }]"
-                          :style="{ height: b.tokens ? Math.max(6, b.pct) + '%' : '2px' }"
-                          :title="`${b.key} · ${tokensText(b.tokens)}`"></span>
-                  </div>
+                  <!-- 七日 token 柱状图：窗口补零在 aiChart，归一/柱高/tooltip 交给图形库。 -->
+                  <QdBarChart
+                    class="ai-bars"
+                    :labels="aiChart.labels"
+                    :series="aiChartSeries"
+                    :height="72"
+                    :title="t('dash_ai_bars_title')"
+                    :tooltip-extra="aiTooltipExtra"
+                  />
                   <ul class="ai-models">
                     <li v-for="m in aiTopModels" :key="m.name" class="ai-model">
                       <span class="ai-model-name" :title="m.name">{{ m.name }}</span>
@@ -2082,6 +2165,16 @@ onUnmounted(() => {
 }
 .qc-row:first-child { border-top: 0; }
 .qc-row.expired { opacity: .5; }
+/* 邮件通知深链定位后的短暂高亮：复用卡片里的行，不新增任何 UI */
+.qc-row.qc-flash {
+  background: var(--color-bg-hover);
+  box-shadow: inset 2px 0 0 var(--color-accent);
+  animation: qc-flash 1.8s ease-out 1;
+}
+@keyframes qc-flash {
+  0%, 55% { background: var(--color-bg-hover); }
+  100% { background: transparent; }
+}
 .qc-code {
   flex-shrink: 0; min-width: 78px; font-size: 16px; font-weight: 600;
   letter-spacing: .06em; color: var(--color-accent);
@@ -2129,19 +2222,6 @@ onUnmounted(() => {
 }
 .ai-sub { font-size: 10px; color: var(--color-text-disabled); white-space: nowrap; }
 .ai-chart { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
-/* 柱状条：容器给固定高度，柱高用百分比才有参照 */
-.ai-bars {
-  display: flex; align-items: flex-end; justify-content: space-between; gap: 6px;
-  height: 52px; padding-bottom: 1px; border-bottom: 1px solid var(--color-border);
-}
-.ai-bar {
-  flex: 1 1 0; max-width: 40px; border-radius: 2px 2px 0 0;
-  background: var(--color-accent); opacity: .55;
-  transition: opacity var(--transition-fast);
-}
-.ai-bar:hover { opacity: 1; }
-/* 没有调用的那天：一条贴底的浅色短线，与有量的柱子区分开 */
-.ai-bar.empty { background: var(--color-bg-tertiary); opacity: 1; }
 /* 模型占比：等分整行。
  * 这里不能用固定列数或按内容自宽——前者遇到名字长短不一会挤到一起，
  * 后者（原先的胶囊流）在 1600px 宽的卡里只排到左边半行，右边一片空白。

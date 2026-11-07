@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -17,12 +18,20 @@ const (
 	AIJobKilled  = "killed"
 )
 
+// aiJobCols 所有读取路径共用一列清单：新增 conv_id 时若只改了建表与插入，
+// 漏改任意一条 SELECT 都会在 Scan 时静默错位（值全串到后一个字段上）。
+const aiJobCols = `id, conv_id, command, cwd, status, exit_code, log_path, pid, error, started_at, ended_at`
+
 // AIJob 模型用 run_command(background=true) 起的一次临时进程。
 //
 // 输出不进库（见 schema.go 里 log_path 的说明）：一条 build 的输出可以几十 MB，
 // 塞进库里会让备份、VACUUM、回收站快照全部变慢，而它本来只是「让人能翻一下」。
 type AIJob struct {
-	ID      string `json:"id"`
+	ID string `json:"id"`
+	// ConvID 归属会话：后台任务是「某次对话里让 AI 起的」，不该在别的会话面板里出现。
+	// 空 = 升级前的历史行 / 起任务时拿不到会话 id，这类行仍留在库里等清理，
+	// 但按会话过滤时不显示（升级后立刻冒出一堆别处的历史任务更让人困惑）。
+	ConvID  string `json:"conv_id"`
 	Command string `json:"command"`
 	Cwd     string `json:"cwd"`
 	// Status 见上面 AIJob* 常量。
@@ -53,9 +62,9 @@ func (d *Database) CreateAIJob(j AIJob) error {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	_, err := d.conn.Exec(
-		`INSERT INTO ai_jobs (id, command, cwd, status, exit_code, log_path, pid, error, started_at, ended_at)
-		 VALUES (?,?,?,?,?,?,?,?,?,?)`,
-		j.ID, j.Command, j.Cwd, j.Status, j.ExitCode, j.LogPath, j.PID, j.Error, j.StartedAt, j.EndedAt)
+		`INSERT INTO ai_jobs (id, conv_id, command, cwd, status, exit_code, log_path, pid, error, started_at, ended_at)
+		 VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+		j.ID, j.ConvID, j.Command, j.Cwd, j.Status, j.ExitCode, j.LogPath, j.PID, j.Error, j.StartedAt, j.EndedAt)
 	if err != nil {
 		return fmt.Errorf("创建后台任务失败: %w", err)
 	}
@@ -83,16 +92,21 @@ func (d *Database) FinishAIJob(id, status string, exitCode int, errMsg string) e
 	return err
 }
 
+// scanAIJob 把一行扫成 AIJob。列顺序必须和 aiJobCols 完全一致。
+func scanAIJob(scanner interface{ Scan(...any) error }) (AIJob, error) {
+	var j AIJob
+	err := scanner.Scan(&j.ID, &j.ConvID, &j.Command, &j.Cwd, &j.Status, &j.ExitCode,
+		&j.LogPath, &j.PID, &j.Error, &j.StartedAt, &j.EndedAt)
+	return j, err
+}
+
 // GetAIJob 取一条任务；不存在返回 (nil, nil)。
 func (d *Database) GetAIJob(id string) (*AIJob, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	row := d.conn.QueryRow(
-		`SELECT id, command, cwd, status, exit_code, log_path, pid, error, started_at, ended_at
-		 FROM ai_jobs WHERE id=?`, id)
-	var j AIJob
-	if err := row.Scan(&j.ID, &j.Command, &j.Cwd, &j.Status, &j.ExitCode,
-		&j.LogPath, &j.PID, &j.Error, &j.StartedAt, &j.EndedAt); err != nil {
+	row := d.conn.QueryRow(`SELECT `+aiJobCols+` FROM ai_jobs WHERE id=?`, id)
+	j, err := scanAIJob(row)
+	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, nil
 		}
@@ -105,21 +119,20 @@ func (d *Database) GetAIJob(id string) (*AIJob, error) {
 //
 // 启动时用它把「上次退出没来得及收尾」的行改掉：宿主被强杀时没有任何机会
 // 更新状态，库里会留下一堆永远 running 的行，而模型查到 running 就会一直等。
+// 这里刻意不按会话过滤：退出清理是全局的，漏掉任何一个会话都会留下幽灵任务。
 func (d *Database) ListRunningAIJobs() ([]AIJob, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
 	rows, err := d.conn.Query(
-		`SELECT id, command, cwd, status, exit_code, log_path, pid, error, started_at, ended_at
-		 FROM ai_jobs WHERE status=? ORDER BY started_at DESC`, AIJobRunning)
+		`SELECT `+aiJobCols+` FROM ai_jobs WHERE status=? ORDER BY started_at DESC`, AIJobRunning)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []AIJob{}
 	for rows.Next() {
-		var j AIJob
-		if err := rows.Scan(&j.ID, &j.Command, &j.Cwd, &j.Status, &j.ExitCode,
-			&j.LogPath, &j.PID, &j.Error, &j.StartedAt, &j.EndedAt); err != nil {
+		j, err := scanAIJob(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, j)
@@ -129,27 +142,34 @@ func (d *Database) ListRunningAIJobs() ([]AIJob, error) {
 
 // ListAIJobs 最近的若干条任务（含运行中与已结束），按开始时间倒序。
 //
-// 面板要一次看到「现在在跑什么」和「刚跑完什么」，所以不能像 ListRunningAIJobs
-// 那样只筛 running；也不用状态过滤参数——任务表每周清理一次，几十条就够覆盖
-// 一次会话里的全部记录，多一个参数只会多一处能传错的地方。
-func (d *Database) ListAIJobs(limit int) ([]AIJob, error) {
+// convID 非空时只取该会话的任务：后台任务是「这次对话里起的」，切到别的会话
+// 还看见一堆不相干的进程，既认不出也容易误杀。传空串 = 不过滤，供宿主清理与
+// 诊断用（不是「只查未归属」，那种语义没有任何调用方需要）。
+func (d *Database) ListAIJobs(limit int, convID string) ([]AIJob, error) {
 	if limit <= 0 {
 		limit = 50
 	}
+	convID = strings.TrimSpace(convID)
+	q := `SELECT ` + aiJobCols + ` FROM ai_jobs`
+	args := []any{}
+	if convID != "" {
+		q += ` WHERE conv_id = ?`
+		args = append(args, convID)
+	}
+	q += ` ORDER BY julianday(started_at) DESC LIMIT ?`
+	args = append(args, limit)
+
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	rows, err := d.conn.Query(
-		`SELECT id, command, cwd, status, exit_code, log_path, pid, error, started_at, ended_at
-		 FROM ai_jobs ORDER BY julianday(started_at) DESC LIMIT ?`, limit)
+	rows, err := d.conn.Query(q, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []AIJob{}
 	for rows.Next() {
-		var j AIJob
-		if err := rows.Scan(&j.ID, &j.Command, &j.Cwd, &j.Status, &j.ExitCode,
-			&j.LogPath, &j.PID, &j.Error, &j.StartedAt, &j.EndedAt); err != nil {
+		j, err := scanAIJob(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, j)

@@ -46,7 +46,7 @@ func registerAppTools(s *MCPService, r *toolRegistrar) {
 		return unwrap(s.Port.ListListeningPorts())
 	}, mcpsrv.LevelRead, "port_list", "列出本机正在监听的端口与对应进程", nil, nil)
 
-	// ---- 机器人通知（前提是已在「设置 → 通知」配置过机器人）----
+	// ---- 通知渠道（前提是已在「设置 → 通知」配置过至少一个渠道）----
 
 	r.add(func(args map[string]any) (any, error) {
 		title := mcpsrv.Arg(args, "title")
@@ -55,10 +55,10 @@ func registerAppTools(s *MCPService, r *toolRegistrar) {
 		}
 		res := s.App.SendWebhookMessage(title, mcpsrv.Arg(args, "body"), mcpsrv.Arg(args, "channel"))
 		return unwrap(res)
-	}, mcpsrv.LevelWrite, "robot_notify", "通过已配置的机器人（钉钉/企业微信/飞书/ServerChan/PushPlus/Telegram）发送一条消息。前提是已在「设置 → 通知」配置过至少一个机器人，未配置时会返回明确错误。channel 留空则发给所有已配置渠道，指定则只发该渠道", []string{"title"},
+	}, mcpsrv.LevelWrite, "robot_notify", "通过已启用的通知渠道发送一条消息。内置 kind：dingtalk / wecom / feishu / serverchan / pushplus / telegram；扩展 kind：bark / discord / slack / ntfy / gotify / custom（在「设置 → 通知」里添加，可用 GetExtraNotifyChannels 查询已配置渠道）。未配置任何启用渠道时会返回明确错误。channel 留空则发给所有已启用渠道，指定则只发该渠道", []string{"title"},
 		map[string]any{
 			"title":   str("消息标题，必填"),
 			"body":    str("消息正文，可留空"),
-			"channel": str("指定渠道：dingtalk / wecom / feishu / serverchan / pushplus / telegram；留空则发给所有已配置渠道"),
+			"channel": str("可选。指定渠道：内置/扩展 kind，或扩展渠道的 id（GetExtraNotifyChannels 返回）；用扩展渠道的 kind 则发往该 kind 的全部渠道。留空则发给所有已启用渠道"),
 		})
 }

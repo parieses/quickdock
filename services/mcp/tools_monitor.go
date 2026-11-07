@@ -51,7 +51,7 @@ func registerMonitorTools(s *MCPService, r *toolRegistrar) {
 			row := map[string]any{
 				"id":            m.ID,
 				"name":          m.Name,
-				"kind":          m.Kind, // http | tcp | process | cmd
+				"kind":          m.Kind, // http | tcp | process | cmd | dns | ping
 				"target":        m.Target,
 				"url":           m.URL,
 				"method":        m.Method,
@@ -68,6 +68,8 @@ func registerMonitorTools(s *MCPService, r *toolRegistrar) {
 				row["uptime24h"] = round1(st.UptimeRatio)
 				row["checks24h"] = st.TotalChecks
 				row["avgLatencyMs"] = st.AvgLatencyMs
+				row["p95Ms"] = st.P95LatencyMs
+				row["p99Ms"] = st.P99LatencyMs
 				row["lastDownAt"] = st.LastDownAt
 			}
 			// 维护窗口与证书到期是「看起来挂了其实没事」的两个主要来源，
@@ -82,7 +84,7 @@ func registerMonitorTools(s *MCPService, r *toolRegistrar) {
 		}
 		return map[string]any{"count": len(out), "monitors": out}, nil
 	}, mcpsrv.LevelRead, "monitor_list",
-		"列出全部网站/接口监控及其当前状态：up/down、最近检测时间、延迟、状态码、错误、近 24h 在线率与检测次数、维护窗口、证书到期。回答「服务是不是挂了」「在线率多少」用这个；只看有问题的传 onlyAbnormal=true",
+		"列出全部监控（HTTP / TCP / 进程 / 命令 / DNS / Ping）及其当前状态：up/down、最近检测时间、延迟、状态码、错误、近 24h 在线率与检测次数、平均/p95/p99 延迟、维护窗口、证书到期。回答「服务是不是挂了」「在线率多少」用这个；只看有问题的传 onlyAbnormal=true",
 		nil,
 		map[string]any{
 			"onlyAbnormal": mcpsrv.Bool("可选。只返回异常或已停用的（跳过 up 且启用的），默认 false 返回全部"),

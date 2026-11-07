@@ -293,6 +293,64 @@ func (d *Database) ListClipboardEntriesBySmartType(limit int, smartType string) 
 	return scanClipboardEntries(rows)
 }
 
+// SearchClipboardEntries 按关键词全文搜索剪贴板历史（文本命中下推到 SQL）。
+//
+// 为什么必须下推：前端原来只在「已载入的最近 1000 条」里做 includes，
+// 排在这 1000 名之外的旧记录永远搜不到。LIKE 在库内跑完再带 LIMIT 返回，
+// 才能既覆盖全量历史、又不把整张表读进内存。
+//
+// contentType / smartType 是可选的附加下推（与 ListClipboardEntriesByType /
+// BySmartType 同一套口径）：让「搜索 + 标签」组合也在库内生效，而不是各查各的，
+// 否则先按标签载入一小类、再在前端搜，仍会漏掉该标签下的旧记录。
+//
+// 索引：ORDER BY is_pinned DESC, created_at DESC 依赖
+// idx_clipboard_order(is_pinned DESC, created_at DESC)（由 schema.go 的
+// postMigrations 创建，见交付说明）。LIKE 的前置 '%' 用不上 B-tree 索引——
+// 这是 SQLite 的固有限制，真要给内容建索引得另上 FTS5 trigram 虚表，
+// 属于后续优化，不在本次改动范围内。
+func (d *Database) SearchClipboardEntries(limit int, query, contentType, smartType string) ([]ClipboardEntry, error) {
+	if limit <= 0 || limit > MAX_CLIPBOARD_ROWS {
+		limit = MAX_CLIPBOARD_ROWS
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+
+	where := make([]string, 0, 4)
+	args := make([]interface{}, 0, 5)
+	if q := strings.TrimSpace(query); q != "" {
+		where = append(where, "text_content LIKE ? ESCAPE '!'")
+		args = append(args, "%"+escapeClipboardLike(q)+"%")
+	}
+	if contentType != "" {
+		where = append(where, "content_type = ?")
+		args = append(args, contentType)
+	}
+	if smartType != "" {
+		where = append(where, "content_type = 'text'", "text_type = ?")
+		args = append(args, smartType)
+	}
+	clause := "1=1"
+	if len(where) > 0 {
+		clause = strings.Join(where, " AND ")
+	}
+	args = append(args, limit)
+	rows, err := d.conn.Query(
+		"SELECT "+clipboardSelectCols+" FROM clipboard_entries WHERE "+clause+
+			" ORDER BY is_pinned DESC, created_at DESC LIMIT ?", args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	return scanClipboardEntries(rows)
+}
+
+// escapeClipboardLike 转义 LIKE 通配符，避免用户输入 '%' / '_' 变成「全表命中」。
+// ESCAPE 用感叹号而不是反斜杠：SQLite 里反斜杠并非默认转义符，写在 Go 字符串里
+// 还要和语言自身的转义打架；'!' 是普通字符，一眼能看懂。
+func escapeClipboardLike(s string) string {
+	return strings.NewReplacer("!", "!!", "%", "!%", "_", "!_").Replace(s)
+}
+
 // GetClipboardEntry 根据 ID 获取单条剪贴板记录
 func (d *Database) GetClipboardEntry(id string) (*ClipboardEntry, error) {
 	d.mu.RLock()

@@ -4,13 +4,16 @@ import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { useToast } from '../composables/useToast'
 import ConfirmDialog from './ConfirmDialog.vue'
+import EntityLinkPicker from './EntityLinkPicker.vue'
+import FocusStatsPanel from './FocusStatsPanel.vue'
 import {
   CreateTodo, ListTodos, UpdateTodo, ToggleTodo, DeleteTodo, ClearCompletedTodos,
   CreateSubtask, SetTodoStatus, SetTodoSort,
 } from '../../bindings/quickdock/services/todo/todoservice'
 import {
-  SendTestNotification, NotifyFocusComplete, NotifyFocusStart,
+  SendTestNotification, NotifyFocusComplete, NotifyFocusStart, SaveFocusSession,
 } from '../../bindings/quickdock/services/appservice'
 import { pendingOpenTodoId } from '../composables/bridge'
 // 待办的增删改都会汇流到 refresh()，在那里顺手把侧边栏角标拉齐（不用等 60s 轮询）
@@ -18,10 +21,11 @@ import { navBadges } from '../composables/useNavBadges'
 import { matchesTextOrPinyin } from '../utils/pinyin'
 import {
   Plus, Check, Trash2, Pencil, ChevronLeft, ChevronRight, CalendarDays, Bell, Clock, BellRing,
-  RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown, History,
+  RefreshCw, ListTree, Timer, X, Search, ChevronUp, ChevronDown, History, BarChart3,
 } from '@lucide/vue'
 
 const { t } = useI18n()
+const toast = useToast()
 
 interface Todo {
   id: string
@@ -70,6 +74,7 @@ const focusRunning = ref(false)       // 是否在倒计时
 const focusTotalSec = ref(0)          // 本轮目标秒数：区分「到点完成」与「中途放弃」
 let focusTimer: number | null = null  // setInterval id（只负责刷新显示，不负责计时）
 let focusEndAt = 0                    // 运行中的截止时间戳（ms）；0 = 未运行
+let focusStartedAt = 0                // 本轮开始时间戳（ms）：落库 startedAt，暂停不重置
 
 // 专注历史：此前 completeFocus 只发通知、不留痕，「今天专注了几次」无从回顾。
 // 落在 localStorage：本页不在 KeepAlive 白名单、切页即卸载，内存里的记录会丢。
@@ -87,11 +92,49 @@ function loadFocusHistory(): FocusRecord[] {
 }
 const focusHistory = ref<FocusRecord[]>(loadFocusHistory())
 const showFocusHist = ref(false)
-function recordFocus(minutes: number, done: boolean, title: string) {
+// 统计面板入口：与历史浮层互斥。refreshToken 每完成一次专注 +1，
+// 让已打开的面板重新拉数（面板内部 watch 它）。
+const showFocusStats = ref(false)
+const focusStatsRefresh = ref(0)
+function toggleFocusHist() {
+  showFocusHist.value = !showFocusHist.value
+  if (showFocusHist.value) showFocusStats.value = false
+}
+function toggleFocusStats() {
+  showFocusStats.value = !showFocusStats.value
+  if (showFocusStats.value) showFocusHist.value = false
+}
+
+// SQLite 对 ±HH:MM 时区后缀的支持早于 'Z'，后端 now() 也是这个格式；
+// 不用 toISOString()（Z 结尾在老版本 SQLite 可能解析成 NULL，julianday 比较会失效）。
+function toRFC3339(ms: number): string {
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+  const off = -d.getTimezoneOffset()
+  const sign = off >= 0 ? '+' : '-'
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}${sign}${p(Math.floor(Math.abs(off) / 60))}:${p(Math.abs(off) % 60)}`
+}
+
+/**
+ * 一次专注结束的记录：
+ *  1) localStorage 保底：切页恢复、历史浮层即时读数都靠它，保留不删；
+ *  2) 异步落库：只有 done=true 的完成会话才写 focus_sessions。中途放弃不落库、
+ *     也不写 localStorage 历史（见 endFocus），前后端口径一致：后端统计只认 done=1。
+ */
+async function recordFocus(minutes: number, done: boolean, title: string,
+  todoId: string, startedAt: number, endedAt: number) {
   const m = Math.round(minutes)
   if (!m) return
-  focusHistory.value = [{ ts: Date.now(), minutes: m, done, title }, ...focusHistory.value].slice(0, MAX_FOCUS_HISTORY)
+  focusHistory.value = [{ ts: endedAt, minutes: m, done, title }, ...focusHistory.value].slice(0, MAX_FOCUS_HISTORY)
   try { localStorage.setItem(FOCUS_HISTORY_KEY, JSON.stringify(focusHistory.value)) } catch { /* 配额/隐私模式忽略 */ }
+  if (!done) return
+  try {
+    unwrap(await SaveFocusSession(todoId, title, toRFC3339(startedAt), toRFC3339(endedAt), m, true))
+    focusStatsRefresh.value++
+  } catch (e) {
+    logErr('TodoPage', e)
+    toast.error(getErrorMessage(e) || t('focusSyncFailed'))
+  }
 }
 // 今日统计只算真正走完的会话（done=true），中途放弃不计入「今天专注 N 次」
 const todayFocusStats = computed(() => {
@@ -140,6 +183,7 @@ function saveFocus() {
       running: focusRunning.value,
       total: focusTotalSec.value,
       minutes: focusMinutes.value,
+      startedAt: focusStartedAt,
     }))
   } catch { /* localStorage 不可用（隐私模式等）时只影响跨页恢复 */ }
 }
@@ -157,12 +201,16 @@ function startTicker() {
 }
 
 function completeFocus() {
-  const title = focusTitle(focusTodoId.value) || t('focusTimerTitle')
+  const todoId = focusTodoId.value
+  const title = focusTitle(todoId) || t('focusTimerTitle')
   const mins = Math.round(focusTotalSec.value / 60) || 1
+  const endedAt = Date.now()
+  const startedAt = focusStartedAt || endedAt
   try { NotifyFocusComplete(title, mins) } catch (e) { logErr('TodoPage', e) }
-  recordFocus(mins, true, title)
+  void recordFocus(mins, true, title, todoId, startedAt, endedAt)
   stopFocusTimer()
   focusEndAt = 0
+  focusStartedAt = 0
   focusTodoId.value = ''
   focusRunning.value = false
   focusRemaining.value = 0
@@ -171,6 +219,9 @@ function completeFocus() {
 }
 
 function resumeFocus() {
+  // 兜底：从旧存档恢复 / 异常路径没设过开始时刻时补上，保证落库 startedAt 不为空。
+  // 正常新一轮由 startFocus 设定；暂停→继续不重置，本轮起点始终是第一次开始。
+  if (!focusStartedAt) focusStartedAt = Date.now()
   focusEndAt = Date.now() + focusRemaining.value * 1000
   focusRunning.value = true
   startTicker()
@@ -184,6 +235,7 @@ function startFocus(todo: Todo) {
   focusTodoId.value = todo.id
   focusTotalSec.value = Math.max(1, Math.floor(focusMinutes.value)) * 60
   focusRemaining.value = focusTotalSec.value
+  focusStartedAt = Date.now()   // 本轮开始时刻（落库 startedAt）
   resumeFocus()
   try { NotifyFocusStart(focusTitle(todo.id), focusMinutes.value) } catch (e) { logErr('TodoPage', e) }
 }
@@ -196,13 +248,19 @@ function endFocus() {
   const total = focusTotalSec.value
   const left = Math.max(0, focusRemaining.value)
   const finished = total > 0 && left <= 0
-  const title = focusTitle(focusTodoId.value)
+  const todoId = focusTodoId.value
+  const title = focusTitle(todoId)
+  const endedAt = Date.now()
+  const startedAt = focusStartedAt || endedAt
   stopFocusTimer()
   focusEndAt = 0
-  if (finished && focusTodoId.value) {
+  if (finished && todoId) {
     try { NotifyFocusComplete(title || t('focusTimerTitle'), Math.round(total / 60) || 1) } catch (e) { logErr('TodoPage', e) }
-    recordFocus(total / 60, true, title || t('focusTimerTitle'))
+    // 只有走完的完成会话才记录（同时写 localStorage 保底 + 异步落库）。
+    // 中途放弃不写任何记录：后端统计只认 done=1，前后端口径一致。
+    void recordFocus(total / 60, true, title || t('focusTimerTitle'), todoId, startedAt, endedAt)
   }
+  focusStartedAt = 0
   focusTodoId.value = ''
   focusRunning.value = false
   focusRemaining.value = 0
@@ -211,6 +269,7 @@ function endFocus() {
 }
 function pauseFocus() {
   if (focusRunning.value) {
+    // 暂停不动 focusStartedAt：本轮起点是第一次开始，不是每次继续。
     // 先结算一次再停，避免暂停时漏掉刚刚过去的那一秒
     tickFocus()
     focusRunning.value = false
@@ -231,13 +290,15 @@ function restoreFocus() {
   try {
     const s = JSON.parse(raw) as {
       todoId?: string; endAt?: number; remaining?: number
-      running?: boolean; total?: number; minutes?: number
+      running?: boolean; total?: number; minutes?: number; startedAt?: number
     }
     if (!s?.todoId) return
     focusTodoId.value = s.todoId
     if (s.minutes) focusMinutes.value = s.minutes
     focusTotalSec.value = s.total || 0
     focusRemaining.value = s.remaining || 0
+    // 旧存档没有 startedAt（新增字段）：按已消耗时长反推起点，保证补结算能落库。
+    focusStartedAt = s.startedAt || (Date.now() - (focusTotalSec.value - focusRemaining.value) * 1000)
     if (s.running && s.endAt) {
       const left = Math.ceil((s.endAt - Date.now()) / 1000)
       if (left <= 0) {
@@ -908,7 +969,10 @@ async function focusPendingTodo() {
 watch(pendingOpenTodoId, (v) => { if (v) void focusPendingTodo() })
 
 function onDocClick(e: MouseEvent) {
-  if (!(e.target as HTMLElement).closest?.('.focus-hist-wrap')) showFocusHist.value = false
+  if (!(e.target as HTMLElement).closest?.('.focus-hist-wrap')) {
+    showFocusHist.value = false
+    showFocusStats.value = false
+  }
 }
 onMounted(() => {
   selectedDate.value = todayStr.value
@@ -964,9 +1028,14 @@ onUnmounted(() => {
         </div>
         <div class="focus-hist-wrap">
           <button class="qd-icon-btn focus-hist-btn" :class="{ active: showFocusHist }"
-            :title="t('todoFocusHistory')" @click.stop="showFocusHist = !showFocusHist">
+            :title="t('todoFocusHistory')" @click.stop="toggleFocusHist">
             <History :size="15" />
             <span v-if="todayFocusStats.count" class="focus-hist-badge">{{ todayFocusStats.count }}</span>
+          </button>
+          <!-- 统计入口：与历史浮层互斥，v-if 挂载时 FocusStatsPanel 自行拉数 -->
+          <button class="qd-icon-btn focus-stats-btn" :class="{ active: showFocusStats }"
+            :title="t('focusStatsTitle')" @click.stop="toggleFocusStats">
+            <BarChart3 :size="15" />
           </button>
           <div v-if="showFocusHist" class="focus-hist-pop" @click.stop>
             <div class="fh-head">{{ t('todoFocusTodayStat', { count: todayFocusStats.count, min: todayFocusStats.minutes }) }}</div>
@@ -979,6 +1048,9 @@ onUnmounted(() => {
                 <span class="fh-time">{{ fmtHistTime(r.ts) }}</span>
               </div>
             </div>
+          </div>
+          <div v-if="showFocusStats" class="focus-stats-pop" @click.stop>
+            <FocusStatsPanel :refresh-token="focusStatsRefresh" />
           </div>
         </div>
       </div>
@@ -1279,6 +1351,10 @@ onUnmounted(() => {
         <label>{{ t('todoNote') }}</label>
         <input v-model="editNote" class="modal-input" />
 
+        <!-- 只在编辑已有待办时挂关联面板：新建弹窗没有 id，组件会自己显示禁用态。
+             关联走独立 service，不进 UpdateTodo 的字段。 -->
+        <EntityLinkPicker v-if="editing" src-type="todo" :src-id="editing.id" :src-label="editTitle" />
+
         <div class="modal-actions">
           <button class="qd-btn" @click="showEdit = false">{{ t('cancel') }}</button>
           <button class="qd-btn qd-btn-primary" @click="saveEdit">{{ t('save') }}</button>
@@ -1408,6 +1484,14 @@ onUnmounted(() => {
 .focus-hist-wrap { position: relative; display: flex; align-items: center; margin-left: var(--space-2); }
 .focus-hist-btn { position: relative; }
 .focus-hist-btn.active { color: var(--color-accent); }
+.focus-stats-btn { margin-left: var(--space-1); }
+.focus-stats-btn.active { color: var(--color-accent); }
+/* 统计浮层只负责定位/滚动/投影，卡片外观由 FocusStatsPanel 自带的 .fsp 提供 */
+.focus-stats-pop {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 320px;
+  max-height: 420px; overflow: auto;
+  border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
+}
 .focus-hist-badge {
   position: absolute; top: -4px; right: -4px; min-width: 14px; height: 14px;
   padding: 0 3px; border-radius: 999px; background: var(--color-accent);

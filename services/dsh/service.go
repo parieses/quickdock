@@ -83,6 +83,45 @@ func (s *DSHService) DSHInstallPlugin(plugin string) *services.ApiResult {
 	return services.Ok(nil)
 }
 
+// DSHListPlugins 返回 profile 里已安装的插件（包名 + 版本/spec）。
+// 同步返回：只读一个 package.json，没有网络与进程开销，前端进页面就能直接渲染。
+func (s *DSHService) DSHListPlugins() *services.ApiResult {
+	if s.App.DSH == nil {
+		return services.FailMsg("DSH 未初始化")
+	}
+	list, err := s.App.DSH.ListPlugins()
+	if err != nil {
+		return services.FailMsg("读取插件列表失败: " + err.Error())
+	}
+	return services.Ok(list)
+}
+
+// DSHRemovePlugin 卸载指定插件（执行 dsh plugin --profile web remove <plugin>）。
+// 异步执行，输出经 quickdock:dsh:log 推送，完成经 quickdock:dsh:plugin{ok,kind:"remove"} 通知前端。
+func (s *DSHService) DSHRemovePlugin(plugin string) *services.ApiResult {
+	if s.App.DSH == nil {
+		return services.FailMsg("DSH 未初始化")
+	}
+	plugin = strings.TrimSpace(plugin)
+	if plugin == "" {
+		return services.FailMsg("插件名不能为空")
+	}
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// 与安装路径同理：异步 goroutine 里 panic 会带走整个应用
+				msg := fmt.Sprintf("卸载插件异常: %v", r)
+				s.App.NodeEnv.EmitLog("error", msg)
+				if app := s.App.App(); app != nil {
+					app.Event.Emit("quickdock:dsh:plugin", map[string]any{"ok": false, "kind": "remove"})
+				}
+			}
+		}()
+		_ = s.App.DSH.RemovePlugin(plugin)
+	}()
+	return services.Ok(nil)
+}
+
 // DSHUpdateAllPlugins 将 profile 内所有插件升级到各自 semver 范围内最新版（git 依赖拉最新提交；
 // 精确固定版不动）。异步执行，升级前自动备份 package.json+lock 便于回滚，进度经 quickdock:dsh:log
 // 推送，完成经 quickdock:dsh:plugin{ok,backup,kind:"update"} 通知前端（含备份路径以启用回滚）。

@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"time"
@@ -67,6 +68,10 @@ type SshService struct {
 	batchMu      sync.Mutex
 	batchCancels map[string]context.CancelFunc
 
+	// forwards 端口转发规则与运行时实例。刻意不进 connPool：转发是长生命周期的
+	// 监听，池的引用计数归零即 Close，随便关一个终端标签就会把它掐死。
+	forwards *forwardManager
+
 	shutdownOnce sync.Once
 }
 
@@ -83,6 +88,7 @@ func NewSshService(app *services.AppService) *SshService {
 	}
 	s.batcher = sshcore.NewBatcher(eventSink{app: app}, sshcore.DefaultFlushInterval)
 	s.manager = sshcore.NewManager(s.batcher, sshcore.DefaultScrollback)
+	s.forwards = newForwardManager(app)
 	return s
 }
 
@@ -106,6 +112,10 @@ type SshHostInput struct {
 
 	LegacyAlgorithms bool   `json:"legacyAlgorithms"`
 	Env              string `json:"env"` // prod | staging | test
+
+	// JumpHostID 跳板机主机 id，空串 = 直连。跳板机本身就是另一条 ssh_hosts 记录，
+	// 所以它也能再挂一级跳板，形成链式；环在 SaveHost / 建链时挡住。
+	JumpHostID string `json:"jumpHostId"`
 
 	ParentID string `json:"parentId"`
 	IsFolder bool   `json:"isFolder"`
@@ -170,6 +180,9 @@ func (s *SshService) SaveHost(in SshHostInput) *services.ApiResult {
 	if r := services.CheckDB(s.App.DB); r != nil {
 		return failCode(CodeDBUnavailable, "数据库未就绪")
 	}
+	if err := s.validateJumpChain(strings.TrimSpace(in.ID), strings.TrimSpace(in.JumpHostID)); err != nil {
+		return failSsh(err)
+	}
 	h, err := s.App.DB.SaveSshHost(db.SshHost{
 		ID:               strings.TrimSpace(in.ID),
 		Name:             in.Name,
@@ -183,6 +196,7 @@ func (s *SshService) SaveHost(in SshHostInput) *services.ApiResult {
 		ClearPassword:    in.ClearPassword,
 		LegacyAlgorithms: in.LegacyAlgorithms,
 		Env:              in.Env,
+		JumpHostID:       strings.TrimSpace(in.JumpHostID),
 		ParentID:         in.ParentID,
 		IsFolder:         in.IsFolder,
 		Sort:             in.Sort,
@@ -191,6 +205,9 @@ func (s *SshService) SaveHost(in SshHostInput) *services.ApiResult {
 	if err != nil {
 		return failSsh(err)
 	}
+	// 主机配置变了（尤其是跳板/端口/凭据），池里那条旧链路不能再给新标签复用。
+	// 只从池里摘掉、不主动 Close：已有会话还持着 release，会自己关掉旧连接。
+	s.pool.Invalidate(h.ID)
 	return services.Ok(h)
 }
 
@@ -528,6 +545,12 @@ func (s *SshService) buildTestTarget(in SshHostInput) (*db.SshHost, *db.SshHostS
 	if authType == db.SshAuthKey && secret.KeyPath == "" {
 		return nil, nil, errNoCredential
 	}
+	// 表单里还没落库的跳板选择同样要挡环：否则「测试连接」能把用户带进
+	// 一次无限递归建链，而保存时才会报错，两个入口口径不一致。
+	jumpID := strings.TrimSpace(in.JumpHostID)
+	if err := s.validateJumpChain(strings.TrimSpace(in.ID), jumpID); err != nil {
+		return nil, nil, err
+	}
 
 	return &db.SshHost{
 		ID:               strings.TrimSpace(in.ID),
@@ -536,11 +559,147 @@ func (s *SshService) buildTestTarget(in SshHostInput) (*db.SshHost, *db.SshHostS
 		Port:             port,
 		User:             user,
 		LegacyAlgorithms: in.LegacyAlgorithms,
+		JumpHostID:       jumpID,
 	}, secret, nil
 }
 
-// dial 统一装配连接参数：解密后的凭据 + 指纹校验回调。
+// maxJumpDepth 允许的跳板级数。每多一跳就多一次完整握手与一次指纹校验，
+// 断链时也更难说清是哪一跳；3 级覆盖「本机 → 堡垒机 → 区域跳板 → 目标」。
+const maxJumpDepth = 3
+
+// jumpHop 链上的一跳：主机配置 + 解密后的凭据。
+type jumpHop struct {
+	host   *db.SshHost
+	secret *db.SshHostSecret
+}
+
+// validateJumpChain 保存 / 表单测试前的链路校验：只沿 jump_host_id 往上走，
+// 不解密凭据也不建连接，所以「还没落库」的表单也能用。
+//
+// 环必须在保存前挡住：真到连接时才发现，用户看到的会是一次超时而不是配置错误。
+func (s *SshService) validateJumpChain(hostID, jumpHostID string) error {
+	jumpHostID = strings.TrimSpace(jumpHostID)
+	if jumpHostID == "" {
+		return nil
+	}
+	if hostID != "" && jumpHostID == hostID {
+		return fmt.Errorf("%w: 不能把主机自己设为跳板机", errInvalidInput)
+	}
+	seen := map[string]bool{}
+	if hostID != "" {
+		seen[hostID] = true
+	}
+	cur := jumpHostID
+	for i := 0; cur != ""; i++ {
+		if i >= maxJumpDepth {
+			return fmt.Errorf("%w: 跳板机最多 %d 级", errInvalidInput, maxJumpDepth)
+		}
+		if seen[cur] {
+			return fmt.Errorf("%w: 跳板机链路成环（%s）", errInvalidInput, cur)
+		}
+		seen[cur] = true
+		h, err := s.App.DB.GetSshHost(cur)
+		if err != nil {
+			return fmt.Errorf("读取跳板机失败: %w", err)
+		}
+		if h == nil {
+			return fmt.Errorf("%w: 跳板机不存在或已被删除", errInvalidInput)
+		}
+		if h.IsFolder {
+			return fmt.Errorf("%w: 文件夹不能作为跳板机", errInvalidInput)
+		}
+		cur = strings.TrimSpace(h.JumpHostID)
+	}
+	return nil
+}
+
+// resolveJumpChain 把「目标 → 直接跳板 → 跳板的跳板」解析成从最外层开始的拨号顺序。
+//
+// 跳板机就是另一条 ssh_hosts 记录，凭据同样走 loadHost 解密，不新增任何存储。
+func (s *SshService) resolveJumpChain(host *db.SshHost) ([]jumpHop, error) {
+	chain := make([]jumpHop, 0, maxJumpDepth)
+	seen := map[string]bool{}
+	cur := ""
+	if host != nil {
+		if host.ID != "" {
+			seen[host.ID] = true
+		}
+		cur = strings.TrimSpace(host.JumpHostID)
+	}
+	for cur != "" {
+		if len(chain) >= maxJumpDepth {
+			return nil, fmt.Errorf("%w: 跳板机最多 %d 级", errInvalidInput, maxJumpDepth)
+		}
+		if seen[cur] {
+			return nil, fmt.Errorf("%w: 跳板机链路成环（%s）", errInvalidInput, cur)
+		}
+		seen[cur] = true
+		jh, sec, err := s.loadHost(cur)
+		if err != nil {
+			return nil, fmt.Errorf("跳板机不可用: %w", err)
+		}
+		chain = append(chain, jumpHop{host: jh, secret: sec})
+		cur = strings.TrimSpace(jh.JumpHostID)
+	}
+	// 反转：chain 收集时是「离目标最近的先」，拨号必须从最外层开始。
+	for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+		chain[i], chain[j] = chain[j], chain[i]
+	}
+	return chain, nil
+}
+
+// dial 统一装配连接参数：解密后的凭据 + 每跳独立的指纹校验 + 跳板链。
+//
+// 方案 A：整条链当作一个 sshcore.Client 交给连接池。中间跳挂在 final 的依赖上，
+// final.Close() 会级联关掉，connPool（key 仍是 hostID）完全不需要改。
+// 代价是 N 个目标各有一条到跳板的 TCP，但换来了「连接生命周期只有一个所有者」。
 func (s *SshService) dial(ctx context.Context, host *db.SshHost, secret *db.SshHostSecret) (*sshcore.Client, error) {
+	hops, err := s.resolveJumpChain(host)
+	if err != nil {
+		return nil, err
+	}
+	if len(hops) == 0 {
+		return s.dialOne(ctx, host, secret, nil)
+	}
+
+	built := make([]*sshcore.Client, 0, len(hops))
+	// 任何一跳失败都要把前面已经建好的跳板关掉，否则一次失败的连接尝试
+	// 会在堡垒机上留一条连接到应用退出。
+	closeBuilt := func() {
+		for i := len(built) - 1; i >= 0; i-- {
+			_ = built[i].Close()
+		}
+	}
+
+	prev, err := s.dialOne(ctx, hops[0].host, hops[0].secret, nil)
+	if err != nil {
+		return nil, err
+	}
+	built = append(built, prev)
+	for _, hop := range hops[1:] {
+		c, e := s.dialOne(ctx, hop.host, hop.secret, prev.SSH().DialContext)
+		if e != nil {
+			closeBuilt()
+			return nil, e
+		}
+		built = append(built, c)
+		prev = c
+	}
+	final, err := s.dialOne(ctx, host, secret, prev.SSH().DialContext)
+	if err != nil {
+		closeBuilt()
+		return nil, err
+	}
+	for _, c := range built {
+		final.AddDependency(c)
+	}
+	return final, nil
+}
+
+// dialOne 拨一跳。connector 为 nil 时直连，非 nil 时由上一跳开出的
+// direct-tcpip channel 提供底层 net.Conn（x/crypto 的 Client.DialContext 正好同签名）。
+func (s *SshService) dialOne(ctx context.Context, host *db.SshHost, secret *db.SshHostSecret,
+	connector func(context.Context, string, string) (net.Conn, error)) (*sshcore.Client, error) {
 	auth := sshcore.AuthSpec{Type: sshcore.AuthPassword, Password: secret.Password}
 	if secret.AuthType == db.SshAuthKey {
 		auth = sshcore.AuthSpec{
@@ -556,6 +715,9 @@ func (s *SshService) dial(ctx context.Context, host *db.SshHost, secret *db.SshH
 		Auth:             auth,
 		Timeout:          dialTimeout,
 		LegacyAlgorithms: host.LegacyAlgorithms,
-		HostKeyCallback:  s.known.Callback(host.Host, host.Port),
+		// 每一跳各自校验指纹。known.Callback 是按 host/port 造的闭包，
+		// 拿最终目标的回调去校验中间跳的话，跳板换了密钥也发现不了。
+		HostKeyCallback: s.known.Callback(host.Host, host.Port),
+		Connector:       connector,
 	})
 }

@@ -52,6 +52,15 @@ func (a *AppService) captureClipboard() {
 		return
 	}
 
+	// 「采不采」统一门：暂停 / 来源命中忽略列表时丢弃本次捕获。
+	// 必须同步剪贴板序号，否则兜底轮询会认为「序号变了却没处理」，每 2 秒
+	// 重进一次并刷 miss 告警——暂停期间用户什么都没做，日志却一直在报丢通知。
+	if a.clipboardCaptureBlocked() {
+		a.clipboardSeq.Store(platform.ClipboardSequenceNumber())
+		clipboardMissStreak.Store(0)
+		return
+	}
+
 	hwnd := platform.ClipboardWindowHandle()
 	// 序号必须在读取之前取。读取期间别的程序写不进剪贴板（被我们占着），
 	// 但万一发生，用读取前的旧序号标记已处理，兜底轮询还能发现并补抓一次。

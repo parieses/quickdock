@@ -2,6 +2,7 @@ package clipboard
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -83,6 +84,16 @@ func (a *ClipboardService) ListClipboardEntriesBySmartType(limit int, smartType 
 		return r
 	}
 	data, err := a.App.DB.ListClipboardEntriesBySmartType(limit, smartType)
+	return services.Wrap(data, err)
+}
+
+// SearchClipboardEntries 全库搜索剪贴板历史（关键词 + 可选类型标签一起下推 SQL）。
+// 前端在搜索态额外调它，把「1000 条之外的旧记录」也捞回来，见 DB 层同名方法的说明。
+func (a *ClipboardService) SearchClipboardEntries(limit int, query, contentType, smartType string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	data, err := a.App.DB.SearchClipboardEntries(limit, query, contentType, smartType)
 	return services.Wrap(data, err)
 }
 
@@ -334,6 +345,25 @@ func (a *ClipboardService) ClearClipboardHistory() *services.ApiResult {
 	return services.Ok(map[string]interface{}{"deleted": n})
 }
 
+// pasteAndHide 把「已写入系统剪贴板」的内容贴到刚才的前台窗口：
+// 隐藏浮窗 → 等焦点切回去 → 模拟 Ctrl+V。
+//
+// 延迟不能省：Hide 之后目标窗口需要时间重新拿到焦点，立刻发 Ctrl+V 会丢；
+// 连续粘贴时这个间隔还要再叠加一层（由前端队列控制两次调用之间的间隔）。
+// 抽成公共链路是因为 PasteClipboardEntry 与「粘贴为…」都走它，各自复制一遍
+// 很容易出现「一处调了间隔、另一处漏掉」。
+func (a *ClipboardService) pasteAndHide(afterPaste func()) {
+	a.HideClipboardWindow()
+	go func() {
+		defer recoverPanic("clipboard paste")
+		time.Sleep(80 * time.Millisecond)
+		platform.SimulatePaste()
+		if afterPaste != nil {
+			afterPaste()
+		}
+	}()
+}
+
 // PasteClipboardEntry 复制剪贴板条目并模拟 Ctrl+V 粘贴
 func (a *ClipboardService) PasteClipboardEntry(id string) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
@@ -347,13 +377,25 @@ func (a *ClipboardService) PasteClipboardEntry(id string) *services.ApiResult {
 	if err := a.writeEntryToClipboard(entry, hwnd); err != nil {
 		return services.Fail(err)
 	}
-	a.HideClipboardWindow()
-	go func() {
-		defer recoverPanic("clipboard paste")
-		time.Sleep(80 * time.Millisecond)
-		platform.SimulatePaste()
-		_ = a.App.DB.IncrementClipboardCopyCount(id)
-	}()
+	a.pasteAndHide(func() { _ = a.App.DB.IncrementClipboardCopyCount(id) })
+	return services.Ok(nil)
+}
+
+// PasteClipboardText 把「转换后的文本」写入系统剪贴板并贴到上一个窗口。
+//
+// 复用 PasteClipboardEntry 的 pasteAndHide 链路（Hide + 延迟 + Ctrl+V），只是内容
+// 来自前端的格式转换（纯文本 / Markdown 格式化 / JSON 美化），不再从库里取原条目，
+// 因此也不递增 copy_count。写文本走 SetClipboardText 登记回环令牌，转换结果不会被
+// 捕获协程当成一次新复制记进历史。
+//
+// 「粘贴为…」是显式要贴到别的程序的动作：主窗口入口由前端先调 HideWindow 让出焦点，
+// 否则 Ctrl+V 会落到 QuickDock 自己的搜索框（handleCopy 在主窗口只复制不模拟粘贴，
+// 正是为了避免这个后果）。
+func (a *ClipboardService) PasteClipboardText(text string) *services.ApiResult {
+	if !services.SetClipboardText(text) {
+		return services.FailMsg("写入剪贴板失败：系统剪贴板可能被其他程序占用，请稍后重试")
+	}
+	a.pasteAndHide(nil)
 	return services.Ok(nil)
 }
 
@@ -416,6 +458,97 @@ func (a *ClipboardService) UpdateClipboardNote(id, note string) *services.ApiRes
 		return r
 	}
 	if err := a.App.DB.UpdateClipboardNote(id, note); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// ===== 忽略来源 / 暂停捕获 =====
+//
+// 这组设置只回答「这次复制采不采」，不改内容、不做脱敏或加密
+// （internal/cliprule 的产品决定不变）。键名唯一定义在宿主 services 包，
+// 因为捕获协程（services 包）与这里的门面（services/clipboard 包）都要读，
+// 各写一份字面量迟早漂移。
+//
+// 持久化复用 app_state 的 GetSetting/SetSetting：与规则总开关、热键等同表，
+// 不新增列、不需要迁移，导出/快照也不用单独照顾。
+
+// GetClipboardCaptureSettings 读设置。pauseUntil：<0=直到恢复，>0=到期毫秒，0=未暂停。
+func (a *ClipboardService) GetClipboardCaptureSettings() *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	ignored := []string{}
+	if raw, err := a.App.DB.GetSetting(services.ClipboardIgnoredAppsKey); err == nil && raw != "" {
+		if json.Unmarshal([]byte(raw), &ignored) != nil || ignored == nil {
+			ignored = []string{}
+		}
+	}
+	var until int64
+	if raw, err := a.App.DB.GetSetting(services.ClipboardPauseUntilKey); err == nil && raw != "" {
+		_, _ = fmt.Sscanf(raw, "%d", &until)
+	}
+	paused := until < 0 || until > time.Now().UnixMilli()
+	if !paused {
+		until = 0
+	}
+	return services.Ok(map[string]any{
+		"ignoredApps": ignored,
+		"paused":      paused,
+		"pauseUntil":  until,
+	})
+}
+
+// SetClipboardIgnoredApps 保存忽略列表。参数是 JSON 字符串数组：列表本身是结构化数据，
+// 用 JSON 而不是换行分隔，避免用户输入的来源名里带换行被悄悄拆成两条。
+// 这里顺手去空白、去空项、去重，让捕获侧读到的就是可直接比对的关键字。
+func (a *ClipboardService) SetClipboardIgnoredApps(appsJson string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	var apps []string
+	if err := json.Unmarshal([]byte(appsJson), &apps); err != nil {
+		return services.FailMsg("忽略列表格式错误")
+	}
+	seen := make(map[string]bool, len(apps))
+	clean := make([]string, 0, len(apps))
+	for _, s := range apps {
+		s = strings.TrimSpace(s)
+		if s != "" && !seen[s] {
+			seen[s] = true
+			clean = append(clean, s)
+		}
+	}
+	b, _ := json.Marshal(clean)
+	if err := a.App.DB.SetSetting(services.ClipboardIgnoredAppsKey, string(b)); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// PauseClipboardCapture 暂停捕获：minutes>0 暂停 N 分钟，minutes<=0 直到手动恢复。
+// 到期时间用绝对毫秒而不是「剩余秒数」：设置页重开、应用重启后都能正确判断是否过期，
+// 也不需要后台跑一个倒计时的常驻协程。
+func (a *ClipboardService) PauseClipboardCapture(minutes int) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	until := int64(-1)
+	if minutes > 0 {
+		until = time.Now().UnixMilli() + int64(minutes)*60_000
+	}
+	if err := a.App.DB.SetSetting(services.ClipboardPauseUntilKey, fmt.Sprintf("%d", until)); err != nil {
+		return services.Fail(err)
+	}
+	return services.Ok(nil)
+}
+
+// ResumeClipboardCapture 立即恢复捕获（清掉暂停窗口）。
+func (a *ClipboardService) ResumeClipboardCapture() *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	if err := a.App.DB.SetSetting(services.ClipboardPauseUntilKey, "0"); err != nil {
 		return services.Fail(err)
 	}
 	return services.Ok(nil)

@@ -13,7 +13,7 @@
 
 import { inject, nextTick, type Ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Browser } from '@wailsio/runtime'
+import { Browser, Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { commandTitle } from '../utils/localize'
@@ -60,6 +60,8 @@ export interface PaletteExecutorDeps {
   beginQuicklink: (item: CollectionItem) => void | Promise<void>
   /** 打开内联插件页（由面板实现：置 inlinePluginId/Name/Init） */
   openInlinePlugin: (pluginId: string, commandId: string, text: string) => void
+  /** 进入「新建笔记 / 待办」内联标题输入态（由面板实现，提交才落库） */
+  beginCreate: (kind: 'note' | 'todo') => void
   /**
    * 面板是否处于「最近使用」列表（输入框为空）。
    * 这条决定了「没带输入时能不能回退上次输入」—— 点历史记录就是要重跑，
@@ -264,6 +266,38 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
         console.error('[CmdPalette] NavigateMainWindow:', e)
       }
       void deps.closePalette()
+    } else if ((result.type === 'scene' || result.type === 'collection') && result.navTarget) {
+      // 场景 / 集合：切到 workspace 页并停在该条目上。复用两段现成链路，不新增后端方法：
+      //  - NavigateMainWindow('workspace')：隐藏面板 + 唤起/聚焦主窗口 + 切页。页面 id
+      //    已在 services/palette.go 的 navigablePages 白名单里，后端无需同步。
+      //  - 定位目标另发前端事件：面板是独立浮窗，JS 状态与主窗口不互通，不能自己写
+      //    bridge.pendingTarget；由主窗口 App.vue 监听后用 navigateTo(page, target) 落位。
+      // 先发定位、再交后端切页：定位只是往主窗口写一个 pendingTarget ref，与「切页」
+      // 无严格先后（主窗口 watch(pendingTarget, { immediate: true }) 前后拿到都能定位），
+      // 却能赶在 HidePaletteWindow 把浮窗隐藏之前发出 —— 隐藏后 WebView 可能被节流，
+      // 那时再 Emit 有丢事件的风险。
+      const page = result.navPage || 'workspace'
+      try {
+        Events.Emit('palette:locate', {
+          page,
+          target: result.type + ':' + result.navTarget,
+          kind: result.type,
+          id: result.navTarget,
+          workspaceId: result.scene?.workspaceId || result.collection?.workspaceId || '',
+          sceneId: result.collection?.sceneId || '',
+        })
+      } catch (e) {
+        console.error('[CmdPalette] palette:locate:', e)
+      }
+      try {
+        await NavigateMainWindow(page)
+      } catch (e) {
+        console.error('[CmdPalette] NavigateMainWindow:', e)
+      }
+      void deps.closePalette()
+    } else if (result.type === 'create' && result.createKind) {
+      // 新建动作不关面板：进内联标题输入态，提交后才落库并跳到新条目
+      deps.beginCreate(result.createKind)
     } else if (result.type === 'plugin' && result.pluginId && result.pluginCommandId) {
       deps.markPluginSeen(result.pluginId)
       // 插件未运行时先自动拉起（EnablePlugin = Reload 加载 + DB 置启用）：

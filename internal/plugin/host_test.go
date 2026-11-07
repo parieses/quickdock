@@ -482,3 +482,35 @@ func TestNotifyPluginNoop(t *testing.T) {
 		t.Errorf("goja 插件应静默跳过，得到: %v", err)
 	}
 }
+
+// TestCheckPermissionMCP 锁定 host.mcp.call 必须显式声明 permissions.mcp。
+//
+// 历史上 checkPermission 没有 mcp 分支，落到末尾 return nil —— 声明零权限的
+// 插件也能调 env_stop / clipboard_copy 等 LevelWrite 工具。等级门只挡 LevelRisk，
+// 挡不住这一档，所以这道声明闸必须单独在。
+func TestCheckPermissionMCP(t *testing.T) {
+	m := newTestManager()
+	const none = "test.mcp.none"
+	const all = "test.mcp.all"
+	const list = "test.mcp.list"
+	addTestPlugin(m, none, Permissions{})
+	addTestPlugin(m, all, Permissions{MCP: MCPPerm{All: true}})
+	addTestPlugin(m, list, Permissions{MCP: MCPPerm{Tools: []string{"note_search"}}})
+
+	call := json.RawMessage(`{"tool":"note_search","args":{}}`)
+	if err := m.checkPermission(none, "host.mcp.call", call); !errors.Is(err, ErrPermissionDenied) {
+		t.Errorf("零权限插件应被拒，得到: %v", err)
+	}
+	if err := m.checkPermission(all, "host.mcp.call", call); err != nil {
+		t.Errorf("mcp:true 应放行，得到: %v", err)
+	}
+	if err := m.checkPermission(list, "host.mcp.call", call); err != nil {
+		t.Errorf("白名单内的工具应放行，得到: %v", err)
+	}
+	if err := m.checkPermission(list, "host.mcp.call", json.RawMessage(`{"tool":"env_stop"}`)); !errors.Is(err, ErrPermissionDenied) {
+		t.Errorf("白名单外的工具应被拒，得到: %v", err)
+	}
+	if err := m.checkPermission(list, "host.mcp.call", json.RawMessage(`{}`)); !errors.Is(err, ErrPermissionDenied) {
+		t.Errorf("白名单模式缺 tool 应 fail-closed，得到: %v", err)
+	}
+}

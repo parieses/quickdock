@@ -187,8 +187,9 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 	}
 	_ = a.DB.UpdateMonitorConsecutiveDown(m.ID, newDownCount)
 
-	// 摘要按类型给不同口径：tcp 没有状态码，process 的 code 是进程数，
-	// 统一按 "up · %d · %dms" 打出来会出现「up · 0 · 3ms」这种看不懂的行。
+	// 摘要按类型给不同口径：tcp/ping 没有状态码，process 的 code 是进程数，
+	// dns 的 code 是解析出的记录数，统一按 "up · %d · %dms" 打出来会出现
+	// 「up · 0 · 3ms」这种看不懂的行。
 	summary := fmt.Sprintf("%s · %dms", status, latency)
 	switch current.Kind {
 	case db.MonitorKindHTTP:
@@ -197,6 +198,10 @@ func (a *AppService) checkOneMonitor(m *db.Monitor) (string, string) {
 		summary = fmt.Sprintf("%s · %d 个进程", status, code)
 	case db.MonitorKindCmd:
 		summary = fmt.Sprintf("%s · 退出码 %d · %dms", status, code, latency)
+	case db.MonitorKindDNS:
+		summary = fmt.Sprintf("%s · %d 条记录 · %dms", status, code, latency)
+	case db.MonitorKindPing:
+		summary = fmt.Sprintf("%s · RTT %dms", status, latency)
 	}
 	if !up && errMsg != "" {
 		summary = errMsg
@@ -321,7 +326,7 @@ func (a *AppService) CheckOneMonitor(m *db.Monitor) (string, string) {
 
 // probeMonitor 按探测类型分派到具体探针。
 //
-// 四类探针共用同一套 interval/超时/日志/告警，差异只在「怎么判 up」——
+// 六类探针共用同一套 interval/超时/日志/告警，差异只在「怎么判 up」——
 // 所以这里只做分派，状态翻转、连续失败计数、通知在上层统一处理。
 func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
 	switch strings.ToLower(strings.TrimSpace(m.Kind)) {
@@ -331,6 +336,10 @@ func probeMonitor(m *db.Monitor) (up bool, code int, latencyMs int, errMsg strin
 		return probeProcess(m)
 	case db.MonitorKindCmd:
 		return probeCmd(m)
+	case db.MonitorKindDNS:
+		return probeDNS(m)
+	case db.MonitorKindPing:
+		return probePing(m)
 	default:
 		return probeHTTP(m)
 	}
@@ -435,6 +444,209 @@ func probeCmd(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
 		return false, 0, latency, fmt.Sprintf("输出不符：%s '%s'", m.ContentMatchType, m.ContentMatchPattern)
 	}
 	return true, 0, latency, ""
+}
+
+// ---- DNS / ping 目标校验（保存时与探测时共用，避免两处规则漂移）----
+//
+// RE2 没有 lookahead，所以「禁止以 - 开头」用首字符类 [A-Za-z0-9] 表达，
+// 而不是 (?!) 否定环视；包级 MustCompile 写错会在 init 期 panic 且 go vet 查不出，
+// 下面两条只用最朴素的字符类，写完已人工核对语法。
+
+// dnsTargetRe 主机名白名单：字母数字、点、连字符，首字符不得为 '-' 或 '.'。
+var dnsTargetRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9.\-]*$`)
+
+// pingTimeRe 抓系统 ping 输出里的 RTT：Windows "time=12ms"/"time<1ms"、
+// Linux/macOS "time=0.045 ms"。两者单位都是毫秒，只取数字与小数点。
+var pingTimeRe = regexp.MustCompile(`(?i)time[=<]\s*([0-9]+(?:\.[0-9]+)?)`)
+
+// parseDNSTarget 拆出可选记录类型前缀并校验主机名。
+// record 为空表示默认 A/AAAA（LookupHost）；其余为 a / aaaa / mx / cname。
+func parseDNSTarget(raw string) (record, host string, err error) {
+	target := strings.TrimSpace(raw)
+	if target == "" {
+		return "", "", fmt.Errorf("DNS 探测需要填目标，如 example.com 或 A:example.com")
+	}
+	host = target
+	if idx := strings.IndexByte(target, ':'); idx >= 0 {
+		prefix := target[:idx]
+		host = target[idx+1:]
+		switch strings.ToUpper(prefix) {
+		case "A":
+			record = "a"
+		case "AAAA":
+			record = "aaaa"
+		case "MX":
+			record = "mx"
+		case "CNAME":
+			record = "cname"
+		default:
+			return "", "", fmt.Errorf("不支持的 DNS 记录类型：%s（仅支持 A / AAAA / MX / CNAME）", prefix)
+		}
+	}
+	// 主机名只允许白名单字符；顺带挡掉空格、控制字符、shell 元字符与以 '-' 开头。
+	if !dnsTargetRe.MatchString(host) {
+		return "", "", fmt.Errorf("DNS 主机名不合法：%s（只允许字母数字、点、连字符）", host)
+	}
+	return record, host, nil
+}
+
+// ValidateDNSTarget 供 services/monitor 保存前校验（跨包复用，故导出）。
+func ValidateDNSTarget(raw string) error {
+	_, _, err := parseDNSTarget(raw)
+	return err
+}
+
+// parsePingTarget 校验 ping 目标：合法 host/IP 白名单字符，首字符不得为 '-'。
+// ':' 放行是为了 IPv6（如 ::1）；'-' 开头会被 ping 当成命令行 flag，项目里踩过同款坑。
+func parsePingTarget(raw string) (host string, err error) {
+	target := strings.TrimSpace(raw)
+	if target == "" {
+		return "", fmt.Errorf("ping 探测需要填目标，如 192.168.1.1 或 example.com")
+	}
+	if strings.HasPrefix(target, "-") {
+		return "", fmt.Errorf("ping 目标不能以 '-' 开头（会被当作命令参数）：%s", target)
+	}
+	for _, r := range target {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') ||
+			(r >= '0' && r <= '9') || r == '.' || r == '-' || r == ':' {
+			continue
+		}
+		return "", fmt.Errorf("ping 目标含非法字符：%s（只允许字母数字、点、连字符、冒号）", target)
+	}
+	return target, nil
+}
+
+// ValidatePingTarget 供 services/monitor 保存前校验（跨包复用，故导出）。
+func ValidatePingTarget(raw string) error {
+	_, err := parsePingTarget(raw)
+	return err
+}
+
+// probeDNS 解析一次域名，拿到 ≥1 条记录即 up；超时/NXDOMAIN/无结果判 down。
+// 用 PreferGo 的纯 Go Resolver，确保 context 的 deadline 真能打断卡住的查询
+// （cgo 解析器可能忽略取消，把本监控的检查协程一直占住）。
+func probeDNS(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
+	record, host, perr := parseDNSTarget(m.Target)
+	if perr != nil {
+		return false, 0, 0, perr.Error()
+	}
+	timeout := m.TimeoutSec
+	if timeout <= 0 {
+		timeout = 5
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout)*time.Second)
+	defer cancel()
+	resolver := &net.Resolver{PreferGo: true}
+
+	start := time.Now()
+	var count int
+	var err error
+	switch record {
+	case "a":
+		var ips []net.IP
+		ips, err = resolver.LookupIP(ctx, "ip4", host)
+		count = len(ips)
+	case "aaaa":
+		var ips []net.IP
+		ips, err = resolver.LookupIP(ctx, "ip6", host)
+		count = len(ips)
+	case "mx":
+		var recs []*net.MX
+		recs, err = resolver.LookupMX(ctx, host)
+		count = len(recs)
+	case "cname":
+		var cname string
+		cname, err = resolver.LookupCNAME(ctx, host)
+		if cname != "" {
+			count = 1
+		}
+	default: // 空：A/AAAA 都查
+		var addrs []string
+		addrs, err = resolver.LookupHost(ctx, host)
+		count = len(addrs)
+	}
+	latency := int(time.Since(start).Milliseconds())
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return false, 0, latency, fmt.Sprintf("DNS 解析超时（%ds）：%s", timeout, host)
+		}
+		var dnsErr *net.DNSError
+		if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
+			return false, 0, latency, "DNS 无此域名（NXDOMAIN）：" + host
+		}
+		return false, 0, latency, "DNS 解析失败：" + err.Error()
+	}
+	if count == 0 {
+		return false, 0, latency, "DNS 未返回任何记录：" + host
+	}
+	return true, count, latency, ""
+}
+
+// probePing 调系统 ping 一次，从输出判定是否收到回包。
+// 不用 raw ICMP：Windows 要管理员权限、各平台差异大；系统 ping 自带超时与重试。
+// 命令走参数数组（绝不拼 shell），目标经白名单校验且不许以 '-' 开头，避免被当成 flag。
+func probePing(m *db.Monitor) (up bool, code int, latencyMs int, errMsg string) {
+	host, perr := parsePingTarget(m.Target)
+	if perr != nil {
+		return false, 0, 0, perr.Error()
+	}
+	timeout := m.TimeoutSec
+	if timeout <= 0 {
+		timeout = 5
+	}
+	// ctx 是硬上限，比 ping 自己的 -w/-W 多留 2s 覆盖进程启动开销；
+	// 万一 ping 卡死，CommandContext 会把它杀掉，不会挂住检查协程。
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeout+2)*time.Second)
+	defer cancel()
+
+	// 各平台参数单位不同：windows -w 毫秒、linux -W 秒、darwin -W 毫秒。
+	// 全部写在本文件同一 switch 里，两个平台的代码都参与静态检查。
+	var args []string
+	switch runtime.GOOS {
+	case "windows":
+		args = []string{"-n", "1", "-w", strconv.Itoa(timeout * 1000), host}
+	case "linux":
+		args = []string{"-c", "1", "-W", strconv.Itoa(timeout), host}
+	case "darwin":
+		args = []string{"-c", "1", "-W", strconv.Itoa(timeout * 1000), host}
+	default:
+		// 其它 unix 沿用 linux 口径（秒级 -W），至少不会把毫秒当秒传进去。
+		args = []string{"-c", "1", "-W", strconv.Itoa(timeout), host}
+	}
+
+	start := time.Now()
+	out, cmdErr := sysutil.CommandContext(ctx, "ping", args...).CombinedOutput()
+	latency := int(time.Since(start).Milliseconds())
+	if ctx.Err() == context.DeadlineExceeded {
+		return false, 0, latency, fmt.Sprintf("ping 超时（%ds）：%s", timeout, host)
+	}
+	if !pingOutputOK(runtime.GOOS, string(out)) {
+		reason := clipProbeOutput(out)
+		if reason == "（无输出）" && cmdErr != nil {
+			reason = cmdErr.Error() // 命令压根没跑起来，错误比空输出有用
+		}
+		return false, 0, latency, "ping 不通：" + reason
+	}
+	// 成功时优先用输出里的 RTT（time=），取不到就退回整次耗时。
+	if mt := pingTimeRe.FindStringSubmatch(string(out)); mt != nil {
+		if f, e := strconv.ParseFloat(mt[1], 64); e == nil && f >= 0 {
+			latency = int(f + 0.5)
+		}
+	}
+	return true, 0, latency, ""
+}
+
+// pingOutputOK 按平台从 ping 输出里找「确实收到回包」的标志。
+// 不信任退出码：Windows ping 在 100% 丢包时仍可能返回 0。
+func pingOutputOK(goos, out string) bool {
+	l := strings.ToLower(out)
+	if goos == "windows" {
+		return strings.Contains(l, "ttl=") || strings.Contains(l, "reply from")
+	}
+	// Linux "1 received"，macOS "1 packets received"，两者回包行都带 ttl=。
+	return strings.Contains(l, "ttl=") ||
+		strings.Contains(l, "1 received") ||
+		strings.Contains(l, "1 packets received")
 }
 
 // clipProbeOutput 把命令输出压成一行短提示：探针结果要进 last_error 与通知正文，

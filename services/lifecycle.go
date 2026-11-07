@@ -88,6 +88,13 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		} else if purged > 0 {
 			logger.I("QuickDock: 已清理 %d 条超过 %d 天的回收站记录", purged, db.TombstoneMaxAgeDays)
 		}
+		// 软删监控不进 tombstones，按同一口径单独清一遍；否则「30 天回收站」
+		// 只对半个回收站生效，另一半会一直占着 monitors 表与日志文件。
+		if purged, perr := a.DB.PurgeExpiredDeletedMonitors(db.TombstoneMaxAgeDays); perr != nil {
+			logger.W("QuickDock: 监控回收站过期清理失败: %v", perr)
+		} else if purged > 0 {
+			logger.I("QuickDock: 已清理 %d 条超过 %d 天的监控回收站记录", purged, db.TombstoneMaxAgeDays)
+		}
 		// AI 编辑快照（回滚点）同一趟清：行在库里、文件在数据目录，两处都要删，
 		// 而「只有 services/ai 知道目录布局」——所以走注入的函数而不是在这里写逻辑。
 		if a.PurgeAICheckpointsFn != nil {

@@ -163,16 +163,21 @@ func (a *AppService) OpenTodoFromPalette(todoId string) *ApiResult {
 //
 // 必须白名单：这个方法会被前端任意字符串调用，直接广播等于让面板可以
 // 把主窗口切到不存在的页面（内容区会空白）。与前端 pages/registry 的
-// 「带 component 的内容页」一一对应 —— ssh / dsh 是独立窗口入口，
-// 不在其中（面板不负责唤起它们，它们有自己的入口）。
+// 「带 component 的内容页」一一对应（12 个，含 dashboard / filesearch / git），
+// 一一对应的意思是：前端 useCommandSearch 从 registry 自动生成的每一项
+// 都必须能过这道闸，否则用户敲到页面名、回车却只得到一句「未知的导航页面」。
+// ssh / dsh 是独立窗口入口，不在其中（面板不负责唤起它们，它们有自己的入口）。
 var navigablePages = map[string]bool{
+	"dashboard":    true,
 	"workspace":    true,
 	"notes":        true,
 	"todo":         true,
 	"schedule":     true,
 	"monitor":      true,
 	"clipboard":    true,
+	"filesearch":   true,
 	"environments": true,
+	"git":          true,
 	"ai":           true,
 	"plugins":      true,
 }
