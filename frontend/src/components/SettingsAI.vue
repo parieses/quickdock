@@ -9,6 +9,7 @@ import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
+import { localISO } from '../utils/lunar'
 import { useAiCostPreference } from '../composables/useAiCostPreference'
 
 import {
@@ -1013,7 +1014,7 @@ function fmtCost(n: number): string {
   return '¥' + n.toFixed(4)
 }
 
-// 日期轴只写 M/D 才排得下，完整日期放 tooltip。
+// 日期轴只写 M/D 才排得下，完整日期由 dailyTooltipTitle 放 tooltip 首行。
 function fmtDay(day: string): string {
   const p = day.split('-')
   return p.length === 3 ? `${Number(p[1])}/${Number(p[2])}` : day
@@ -1041,33 +1042,65 @@ function entryCachePct(e: { promptTokens: number; cachedTokens: number }): numbe
 }
 
 // 每日柱状：7/30/全部范围由 loadUsage(days) / usageDays 决定，图表组件自己不拉数据。
-// 多则只画最近 30 根：全部时间窗口可能上百天，逐根铺开会糊成一片。
-// 计价为 0 的窗口（例如全用免费模型/未收录模型）退回按 token 画，否则柱子全是空的。
+// 三条口径都是踩过的坑：
+//  1) 整窗一律按 token 画。旧判据「窗口里有一天有价就按金额画」会让 Ollama /
+//     未收录模型那些 estimatedCost=0 但跑了几万 token 的日子变成 0 柱；
+//     费用受单价影响，和 token 混在同一根轴上也没有可比性。金额仍在总量和 tooltip 里。
+//  2) 后端 daily 只含有调用记录的日期。按自然日补零，否则「近 7 天」可能只有两根柱、
+//     横轴还跳日；推进用本地日历构造 Date，跨月/跨年由 Date 自己处理。
+//  3) 「全部」不铺上百天：以最后一次调用日为终点只画最近 30 个自然日，
+//     半年没用时仍看得到当时那段的分布，而不是一片全 0 的近 30 天。
+const DAILY_CHART_MAX_DAYS = 30
+function dayShift(base: Date, delta: number): Date {
+  return new Date(base.getFullYear(), base.getMonth(), base.getDate() + delta)
+}
+function parseDayKey(key: string): Date {
+  const [y, m, d] = key.split('-').map(Number)
+  return new Date(y, (m || 1) - 1, d || 1)
+}
+const EMPTY_DAY: AICostEntry = {
+  key: '', requests: 0, promptTokens: 0, completionTokens: 0, cachedTokens: 0,
+  totalTokens: 0, estimatedCost: 0, savedByCache: 0, priced: false,
+}
 const dailyChart = computed(() => {
-  const list = (usage.value?.daily ?? []).slice(-30)
-  if (!list.length) {
+  if (!usage.value) {
     return {
       labels: [] as string[], values: [] as number[], items: [] as AICostEntry[],
-      name: '', color: 'accent' as 'accent' | 'warning',
+      name: '', color: 'accent' as const,
     }
   }
-  const useCost = list.some((d) => d.estimatedCost > 0)
+  const all = usage.value.daily ?? []
+  const byDay = new Map(all.map((d) => [d.key, d]))
+  const today = localISO(new Date())
+  const lastKey = all.length ? all[all.length - 1].key : today
+  // 后端按 since 过滤，正常不会有未来日期；仍夹一下，免得脏数据把终点推到未来。
+  const endKey = usageDays.value > 0 ? today : (lastKey > today ? today : lastKey)
+  const span = usageDays.value > 0 ? usageDays.value : DAILY_CHART_MAX_DAYS
+  const end = parseDayKey(endKey)
+  const items: AICostEntry[] = []
+  for (let i = span - 1; i >= 0; i--) {
+    const key = localISO(dayShift(end, -i))
+    items.push(byDay.get(key) ?? { ...EMPTY_DAY, key })
+  }
   return {
-    labels: list.map((d) => fmtDay(d.key)),
-    values: list.map((d) => (useCost ? d.estimatedCost : d.totalTokens)),
-    items: list,
-    name: t(useCost ? 'chartLegendCost' : 'chartLegendTokens'),
-    color: (useCost ? 'warning' : 'accent') as 'accent' | 'warning',
+    labels: items.map((d) => fmtDay(d.key)),
+    values: items.map((d) => d.totalTokens),
+    items,
+    name: t('chartLegendTokens'),
+    color: 'accent' as const,
   }
 })
 const dailyChartSeries = computed(() => dailyChart.value.labels.length
   ? [{ name: dailyChart.value.name, values: dailyChart.value.values, color: dailyChart.value.color }]
   : [])
+function dailyTooltipTitle(index: number): string {
+  return dailyChart.value.items[index]?.key ?? ''
+}
 function dailyTooltipExtra(index: number): string {
   const d = dailyChart.value.items[index]
   if (!d) return ''
+  // 主系列行已是「Tokens: 50k」，这里不再重复写一遍单位。
   return `<div>${t('chartTooltipRequests')}: ${d.requests}</div>`
-    + `<div>${t('chartTooltipTokens')}: ${fmtTokens(d.totalTokens)}</div>`
     + `<div>${t('chartTooltipCost')}: ${fmtCost(d.estimatedCost)}</div>`
 }
 
@@ -1361,7 +1394,10 @@ function saveAIModal() {
           :height="120"
           :loading="usageLoading"
           :axis-name-y="dailyChart.name"
+          :value-formatter="fmtTokens"
+          :tooltip-title="dailyTooltipTitle"
           :tooltip-extra="dailyTooltipExtra"
+          zero-as-empty
         />
 
         <table v-if="usage.models.length" class="usage-table">

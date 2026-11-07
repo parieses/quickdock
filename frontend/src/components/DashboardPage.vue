@@ -1019,12 +1019,18 @@ const aiChartSeries = computed(() => [{
   values: aiChart.value.values,
   color: 'accent' as const,
 }])
+// 轴标签只有 MM-DD，tooltip 首行给完整日期（跨年时不会看不出年份）。
+function aiTooltipTitle(index: number): string {
+  return aiChart.value.items[index]?.key ?? ''
+}
 function aiTooltipExtra(index: number): string {
   const d = aiChart.value.items[index]
   if (!d) return ''
+  // 主系列那行已经是「Tokens: 50k」，额外再写一遍单位只会挤在一起。
+  // 柱高含义原来的原生 title 也不放了（会和 ECharts tooltip 双层叠加），挪到这里收尾。
   return `<div>${t('chartTooltipRequests')}: ${d.requests}</div>`
-    + `<div>${t('chartTooltipTokens')}: ${tokensText(d.tokens)}</div>`
     + `<div>${t('chartTooltipCost')}: ${moneyText(d.cost)}</div>`
+    + `<div style="opacity:.6;margin-top:2px">${t('dash_ai_bars_title')}</div>`
 }
 const aiTopModels = computed(() => {
   const total = aiUsage.value?.totalTokens ?? 0
@@ -1945,15 +1951,22 @@ onUnmounted(() => {
                   </div>
                 </div>
                 <div class="ai-chart">
-                  <!-- 七日 token 柱状图：窗口补零在 aiChart，归一/柱高/tooltip 交给图形库。 -->
-                  <QdBarChart
-                    class="ai-bars"
-                    :labels="aiChart.labels"
-                    :series="aiChartSeries"
-                    :height="72"
-                    :title="t('dash_ai_bars_title')"
-                    :tooltip-extra="aiTooltipExtra"
-                  />
+                  <!-- 七日 token 柱状图：窗口补零在 aiChart，归一/柱高/tooltip 交给图形库。
+                       minimal 去掉坐标轴（窄卡里几十像素塞不下 x/y 轴），barMinHeight 给空日子
+                       留一条浅色短线，外层 .ai-bars 补回基线——这三点合起来才是重写前的观感。 -->
+                  <div class="ai-bars">
+                    <QdBarChart
+                      :labels="aiChart.labels"
+                      :series="aiChartSeries"
+                      :height="52"
+                      minimal
+                      :bar-min-height="2"
+                      :bar-max-width="40"
+                      :bar-opacity="0.55"
+                      :tooltip-title="aiTooltipTitle"
+                      :tooltip-extra="aiTooltipExtra"
+                    />
+                  </div>
                   <ul class="ai-models">
                     <li v-for="m in aiTopModels" :key="m.name" class="ai-model">
                       <span class="ai-model-name" :title="m.name">{{ m.name }}</span>
@@ -2222,6 +2235,9 @@ onUnmounted(() => {
 }
 .ai-sub { font-size: 10px; color: var(--color-text-disabled); white-space: nowrap; }
 .ai-chart { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-3); }
+/* 柱条基线：重写前由 .ai-bars 自己画，换成图形库后图表组件只管画布，
+   基线留在外层，免得和图表内部的圆角/overflow 样式打架。 */
+.ai-bars { border-bottom: 1px solid var(--color-border); }
 /* 模型占比：等分整行。
  * 这里不能用固定列数或按内容自宽——前者遇到名字长短不一会挤到一起，
  * 后者（原先的胶囊流）在 1600px 宽的卡里只排到左边半行，右边一片空白。

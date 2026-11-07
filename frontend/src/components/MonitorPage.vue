@@ -669,6 +669,15 @@ function certWarn(m: Monitor): boolean {
   return m.certExpiresAt - Date.now() / 1000 < m.certWarnDays * 86400
 }
 
+// 后端 monitor_logs.checked_ts 是 Unix 秒（services/monitor_checker.go 用 time.Now().Unix()），
+// 而 Date / ECharts time 轴一律要毫秒。凡是拿它去 new Date() 的地方都走这里，
+// 否则折线图与可用日历会整片落到 1970。relTime() 本来就是按秒算的，不走这里。
+function logTsMs(l: MonitorLog): number {
+  if (l.checkedTs) return l.checkedTs * 1000
+  const parsed = Date.parse(l.checkedAt)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
 // ---- 延迟折线图数据 ----
 // 图由 QdLineChart 渲染：x 轴是 time（毫秒时间戳），上千点靠 lttb 降采样，
 // 超时阈值走 markLine，探测失败的点单独标红。数据只在这里组装，组件不拉数据。
@@ -685,8 +694,8 @@ const chartViewMap = computed<Record<string, ChartView>>(() => {
     const points: [number, number][] = []
     const anomalies: { x: number; y: number }[] = []
     for (const l of data) {
-      const ts = l.checkedTs || Date.parse(l.checkedAt)
-      if (!Number.isFinite(ts) || ts <= 0) continue
+      const ts = logTsMs(l)
+      if (!ts || ts <= 0) continue
       points.push([ts, l.latencyMs])
       if (l.status !== 'up') anomalies.push({ x: ts, y: l.latencyMs })
     }
@@ -696,7 +705,7 @@ const chartViewMap = computed<Record<string, ChartView>>(() => {
       anomalies,
       threshold: timeout * 1000,
       tooltipExtra: (x: number): string => {
-        const l = data.find((v) => (v.checkedTs || Date.parse(v.checkedAt)) === x)
+        const l = data.find((v) => logTsMs(v) === x)
         if (!l) return ''
         const status = l.status === 'up' ? t('mon_up') : t('mon_down')
         let html = `<div>${t('chartTooltipStatus')}: ${escapeHtml(status)} ${escapeHtml(String(l.statusCode || 'ERR'))}</div>`
@@ -775,7 +784,7 @@ function calendarDaysFor(id: string): CalDay[] {
   const byDay = new Map<string, { down: number; total: number }>()
   let minTs = Infinity, maxTs = -Infinity
   for (const l of logs) {
-    const ts = l.checkedTs || Date.parse(l.checkedAt)
+    const ts = logTsMs(l)
     if (!ts || isNaN(ts)) continue
     if (ts < minTs) minTs = ts
     if (ts > maxTs) maxTs = ts
