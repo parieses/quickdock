@@ -1494,13 +1494,13 @@ onUnmounted(() => {
 }
 .focus-hist-badge {
   position: absolute; top: -4px; right: -4px; min-width: 14px; height: 14px;
-  padding: 0 3px; border-radius: 999px; background: var(--color-accent);
-  color: var(--color-accent-text); font-size: 9px; line-height: 14px; text-align: center; font-weight: 600;
+  padding: 0 3px; border-radius: var(--radius-full); background: var(--color-accent);
+  color: var(--color-accent-text); font-size: 10px; line-height: 14px; text-align: center; font-weight: 600;
 }
 .focus-hist-pop {
   position: absolute; top: calc(100% + 6px); right: 0; z-index: 30; width: 264px;
   max-height: 320px; overflow: auto; padding: var(--space-3);
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); box-shadow: var(--shadow-pop);
 }
 .fh-head {
@@ -1530,9 +1530,9 @@ onUnmounted(() => {
    不给阴影是因为它下面还有整列待办，卡片"浮起"会抢走列表的注意力。 */
 .cal-card {
   width: 332px; flex-shrink: 0; display: flex; flex-direction: column;
-  background: var(--color-bg-secondary);
+  background: var(--color-card-bg);
   border-radius: var(--radius-md);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--card-border-color);
   box-shadow: var(--shadow-card);
   padding: var(--space-4);
   align-self: flex-start;
@@ -1571,7 +1571,7 @@ onUnmounted(() => {
 .dot { width: 4px; height: 4px; border-radius: 50%; display: inline-block; }
 .dot.done { opacity: 0.3; }
 .cal-bell { color: var(--color-accent); }
-.cal-more { font-size: 9px; color: var(--color-text-disabled); font-style: normal; }
+.cal-more { font-size: 10px; color: var(--color-text-disabled); font-style: normal; }
 
 .unscheduled-chip {
   display: flex; align-items: center; gap: 6px; margin-top: var(--space-3);
@@ -1593,9 +1593,9 @@ onUnmounted(() => {
 
 /* 视图切换（列表 / 看板）*/
 .view-toggle { display: inline-flex; border: 1px solid var(--color-border); border-radius: var(--radius-md); overflow: hidden; }
-.vt-btn {
-  padding: 4px 10px; border: none; background: var(--color-bg-tertiary);
-  color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit;
+.vt-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 22px; padding: 0 9px; border: none; background: var(--color-bg-tertiary);
+  color: var(--color-text-muted); font-size: 11px; cursor: pointer; font-family: inherit;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .vt-btn + .vt-btn { border-left: 1px solid var(--color-border); }
@@ -1658,8 +1658,8 @@ onUnmounted(() => {
 .kanban { flex: 1; display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--space-3); min-height: 0; overflow: hidden; }
 .kanban-col {
   display: flex; flex-direction: column; min-height: 0; height: 100%;
-  background: var(--color-bg-secondary); border-radius: var(--radius-lg);
-  border: 1px solid var(--color-border); padding: var(--space-3);
+  background: var(--color-card-bg); border-radius: var(--radius-lg);
+  border: 1px solid var(--card-border-color); padding: var(--space-3);
 }
 .kanban-col-head { display: flex; align-items: center; gap: 6px; margin-bottom: var(--space-2); flex-shrink: 0; }
 .kanban-dot { width: 8px; height: 8px; border-radius: 50%; }
@@ -1689,8 +1689,8 @@ onUnmounted(() => {
 }
 
 .tag-filter { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: var(--space-3); }
-.tag-fbtn {
-  font-size: 11px; padding: 2px 10px; border-radius: var(--radius-md); cursor: pointer;
+.tag-fbtn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  font-size: 11px; height: 22px; padding: 0 9px; border-radius: var(--radius-full); cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
   color: var(--color-text-muted); font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -1710,7 +1710,7 @@ onUnmounted(() => {
 
 .todo-item {
   display: flex; align-items: center; gap: var(--space-3); padding: 10px 12px;
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .todo-item:hover { background: var(--color-bg-hover); }
@@ -1761,16 +1761,16 @@ onUnmounted(() => {
 .focus-act.running { background: var(--color-accent-bg); color: var(--color-accent); }
 
 .panel-foot { margin-top: var(--space-3); flex-shrink: 0; display: flex; align-items: center; gap: var(--space-3); }
-.clear-btn {
-  padding: 6px 12px; border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-disabled); border-radius: var(--radius-md); font-size: 12px;
+.clear-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: transparent;
+  color: var(--color-text-disabled); border-radius: var(--radius-sm); font-size: 12px;
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .clear-btn:hover { color: var(--color-danger); border-color: var(--color-danger-border); }
 .test-btn {
   display: inline-flex; align-items: center; gap: 5px; margin-left: auto;
-  padding: 6px 12px; border: 1px solid var(--color-border); background: transparent;
-  color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 12px;
+  height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: transparent;
+  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: 12px;
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .test-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent-border); }
@@ -1789,7 +1789,7 @@ onUnmounted(() => {
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {
-  width: 380px; max-height: 94vh; overflow: visible; background: var(--color-surface);
+  width: 380px; max-height: 94vh; overflow: visible; background: var(--color-popover-bg);
   border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
 }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }

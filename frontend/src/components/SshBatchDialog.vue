@@ -931,8 +931,8 @@ onBeforeUnmount(() => {
   width: 780px;
   max-width: 94vw;
   max-height: 86vh;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 16px 56px var(--color-bg-overlay);
   overflow: hidden;
@@ -1006,13 +1006,13 @@ onBeforeUnmount(() => {
 }
 
 .batch-pick-title {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 .batch-pick-count {
-  font-size: 10.5px;
+  font-size: 11px;
   font-style: normal;
   color: var(--color-text-muted);
 }
@@ -1025,7 +1025,7 @@ onBeforeUnmount(() => {
 
 .batch-mini {
   padding: 2px 7px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
@@ -1056,7 +1056,7 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
   width: 100%;
   padding: 5px 8px 5px 8px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   text-align: left;
   color: var(--color-text-secondary);
@@ -1127,7 +1127,7 @@ onBeforeUnmount(() => {
 .batch-env {
   flex: 0 0 auto;
   padding: 0 5px;
-  font-size: 9.5px;
+  font-size: 10px;
   line-height: 1.6;
   border-radius: var(--radius-full);
   border: 1px solid transparent;
@@ -1164,7 +1164,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-label {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -1173,7 +1173,7 @@ onBeforeUnmount(() => {
   width: 100%;
   padding: var(--space-3);
   font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
@@ -1196,14 +1196,14 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   gap: 3px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
 .batch-opt input {
   width: 76px;
   padding: 3px 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
@@ -1316,7 +1316,7 @@ onBeforeUnmount(() => {
 
 .batch-run-hint {
   margin-right: auto;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -1324,10 +1324,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 5px 14px;
-  font-size: 11.5px;
+  height: 28px; padding: 0 11px;
+  font-size: 12px;
   font-family: inherit;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
@@ -1392,7 +1392,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-results-title {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -1400,7 +1400,7 @@ onBeforeUnmount(() => {
 .batch-results-sum {
   display: inline-flex;
   gap: var(--space-2);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -1481,7 +1481,7 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   min-width: 44px;
   padding: 1px 6px;
-  font-size: 9.5px;
+  font-size: 10px;
   text-align: center;
   border-radius: var(--radius-full);
   border: 1px solid transparent;
@@ -1529,11 +1529,11 @@ onBeforeUnmount(() => {
   max-height: 180px;
   overflow: auto;
   font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.55;
   color: var(--color-text-primary);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-xs);
   white-space: pre-wrap;
   word-break: break-all;
@@ -1555,11 +1555,11 @@ onBeforeUnmount(() => {
 }
 .batch-snip-select:focus { border-color: var(--color-border-focus-soft); }
 .batch-snip-select:disabled { opacity: 0.45; cursor: default; }
-.batch-snip-empty { font-size: 10.5px; color: var(--color-text-muted); }
+.batch-snip-empty { font-size: 11px; color: var(--color-text-muted); }
 .batch-snip-btn {
   flex: 0 0 auto;
   padding: 3px 8px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);

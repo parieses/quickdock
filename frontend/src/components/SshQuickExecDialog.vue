@@ -592,8 +592,8 @@ onBeforeUnmount(() => {
   width: 560px;
   max-width: calc(100vw - 40px);
   max-height: 84vh;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 16px 48px var(--color-bg-overlay);
   overflow: hidden;
@@ -610,7 +610,7 @@ onBeforeUnmount(() => {
 .qex-head-icon { color: var(--color-accent); margin-top: 1px; }
 .qex-head-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .qex-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
-.qex-sub { font-size: 10.5px; color: var(--color-text-muted); }
+.qex-sub { font-size: 11px; color: var(--color-text-muted); }
 .qex-x {
   margin-left: auto;
   display: flex; align-items: center;
@@ -635,7 +635,7 @@ onBeforeUnmount(() => {
   gap: var(--space-2);
   min-width: 0;
   padding: var(--space-2) var(--space-3);
-  font-size: 11.5px;
+  font-size: 12px;
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-xs);
 }
@@ -647,7 +647,7 @@ onBeforeUnmount(() => {
 .qex-target-addr {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
@@ -655,7 +655,7 @@ onBeforeUnmount(() => {
 .qex-env {
   flex: 0 0 auto;
   padding: 0 5px;
-  font-size: 9.5px;
+  font-size: 10px;
   line-height: 1.6;
   border-radius: var(--radius-full);
   border: 1px solid transparent;
@@ -676,13 +676,13 @@ onBeforeUnmount(() => {
   border-color: var(--color-border);
 }
 
-.qex-label { font-size: 11.5px; font-weight: 600; color: var(--color-text-primary); }
+.qex-label { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
 
 .qex-textarea {
   width: 100%;
   padding: var(--space-3);
   font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
@@ -696,12 +696,12 @@ onBeforeUnmount(() => {
 .qex-opts { display: flex; align-items: flex-end; gap: var(--space-4); }
 .qex-opt {
   display: flex; flex-direction: column; gap: 3px;
-  font-size: 10.5px; color: var(--color-text-muted);
+  font-size: 11px; color: var(--color-text-muted);
 }
 .qex-opt input {
   width: 72px;
   padding: 3px 6px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
@@ -742,11 +742,11 @@ onBeforeUnmount(() => {
 .qex-risk-text strong { font-weight: 600; }
 
 .qex-actions { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-3); }
-.qex-run-hint { margin-right: auto; font-size: 10.5px; color: var(--color-text-muted); }
+.qex-run-hint { margin-right: auto; font-size: 11px; color: var(--color-text-muted); }
 .qex-run {
   display: inline-flex; align-items: center; gap: var(--space-2);
   padding: 5px 14px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-accent-text);
   background: var(--color-accent);
@@ -781,7 +781,7 @@ onBeforeUnmount(() => {
   border-top: 1px solid var(--color-border);
 }
 .qex-result-head { display: flex; align-items: center; gap: var(--space-2); }
-.qex-result-title { font-size: 11.5px; font-weight: 600; color: var(--color-text-primary); }
+.qex-result-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
 .qex-result-meta {
   display: inline-flex; align-items: center; gap: var(--space-2);
   margin-left: auto;
@@ -820,7 +820,7 @@ onBeforeUnmount(() => {
   max-height: 260px;
   overflow: auto;
   font-family: var(--font-mono, monospace);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.55;
   color: var(--color-text-primary);
   background: var(--color-bg-primary);
@@ -846,11 +846,11 @@ onBeforeUnmount(() => {
 }
 .qex-snip-select:focus { border-color: var(--color-border-focus-soft); }
 .qex-snip-select:disabled { opacity: 0.45; cursor: default; }
-.qex-snip-empty { font-size: 10.5px; color: var(--color-text-muted); }
+.qex-snip-empty { font-size: 11px; color: var(--color-text-muted); }
 .qex-snip-btn {
   flex: 0 0 auto;
   padding: 3px 8px;
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: var(--color-bg-tertiary);

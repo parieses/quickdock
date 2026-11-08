@@ -1283,7 +1283,7 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sftp-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -1356,7 +1356,7 @@ async function copyPath(e: SftpEntry) {
 .sftp-crumb {
   flex: 0 0 auto;
   padding: 2px var(--space-2);
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: none;
@@ -1384,7 +1384,7 @@ async function copyPath(e: SftpEntry) {
   min-width: 0;
   height: 22px;
   padding: 0 var(--space-2);
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-tertiary);
@@ -1445,7 +1445,7 @@ async function copyPath(e: SftpEntry) {
 .sftp-progress-meta {
   flex: 0 0 auto;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -1457,7 +1457,7 @@ async function copyPath(e: SftpEntry) {
   align-items: center;
   gap: 3px;
   padding: 0 var(--space-2);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   background: none;
   border: 1px solid var(--color-border);
@@ -1518,7 +1518,7 @@ async function copyPath(e: SftpEntry) {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-2) var(--space-4);
-  font-size: 11.5px;
+  font-size: 12px;
   background: var(--color-accent-bg);
   border-bottom: 1px solid var(--color-border);
 }
@@ -1533,12 +1533,12 @@ async function copyPath(e: SftpEntry) {
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
-  padding: 3px var(--space-3);
+  height: 24px; padding: 0 8px;
   font-size: 11px;
   color: var(--color-text-secondary);
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   white-space: nowrap;
 }
@@ -1585,17 +1585,14 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sftp-check {
-  width: 12px;
-  height: 12px;
   margin: 0;
-  accent-color: var(--color-accent);
   cursor: pointer;
 }
 
 .sftp-err {
   margin: var(--space-4) var(--space-5);
   padding: var(--space-3) var(--space-4);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-danger);
   background: var(--color-danger-bg);
   border-radius: var(--radius-xs);
@@ -1614,7 +1611,7 @@ async function copyPath(e: SftpEntry) {
 .sftp-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .sftp-table th {
@@ -1622,7 +1619,7 @@ async function copyPath(e: SftpEntry) {
   top: 0;
   z-index: 1;
   padding: var(--space-3) var(--space-4);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 500;
   text-align: left;
   color: var(--color-text-muted);
@@ -1674,7 +1671,7 @@ async function copyPath(e: SftpEntry) {
 .tag-link {
   flex: 0 0 auto;
   padding: 0 var(--space-2);
-  font-size: 9.5px;
+  font-size: 10px;
   color: var(--color-text-muted);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
@@ -1696,7 +1693,7 @@ async function copyPath(e: SftpEntry) {
      两个都要，任一单独出现都会让另一拨用户去心算。112px 是二者并排的最小值。 */
   width: 112px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
 }
 
 /* 内层按钮而不是给 td 加 display:flex——td 一旦不是 table-cell，
@@ -1779,7 +1776,7 @@ async function copyPath(e: SftpEntry) {
 
 .sftp-note {
   margin: var(--space-4) var(--space-5);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -1801,14 +1798,14 @@ async function copyPath(e: SftpEntry) {
   width: 420px;
   max-width: 92vw;
   padding: var(--space-6);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 48px var(--color-bg-overlay);
 }
 
 .sfp-title {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -1843,7 +1840,7 @@ async function copyPath(e: SftpEntry) {
 }
 
 .sfp-hint {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-danger);
 }
 
@@ -1853,14 +1850,14 @@ async function copyPath(e: SftpEntry) {
   gap: var(--space-3);
 }
 
-.sfp-btn {
-  padding: var(--space-2) var(--space-5);
-  font-size: 11.5px;
+.sfp-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 28px; padding: 0 11px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 
@@ -1892,8 +1889,8 @@ async function copyPath(e: SftpEntry) {
   position: fixed;
   min-width: 160px;
   padding: 4px;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 8px 24px var(--color-bg-overlay);
   display: flex;
@@ -1908,7 +1905,7 @@ async function copyPath(e: SftpEntry) {
   background: none;
   color: var(--color-text-primary);
   font: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
 }
@@ -1951,14 +1948,14 @@ async function copyPath(e: SftpEntry) {
   font-size: 11px;
   word-break: break-all;
 }
-.props-sub { color: var(--color-text-muted); font-size: 10.5px; margin-left: 4px; }
+.props-sub { color: var(--color-text-muted); font-size: 11px; margin-left: 4px; }
 .props-oct {
   font-family: var(--font-mono);
   color: var(--color-accent);
 }
 .props-note {
   margin-top: 6px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 .props-note--warn { color: var(--color-warning); }

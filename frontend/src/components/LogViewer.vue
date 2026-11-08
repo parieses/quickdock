@@ -882,7 +882,7 @@ onUnmounted(() => {
    容器的 text-overflow: ellipsis 就不再作用于它，长文件名会直接溢出。 */
 .log-file-name {
   display: block;
-  font-family: var(--font-mono); font-size: 11.5px; line-height: 1.5;
+  font-family: var(--font-mono); font-size: 12px; line-height: 1.5;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .log-file-meta {
@@ -894,8 +894,8 @@ onUnmounted(() => {
 .crash-badge {
   display: inline-block; flex-shrink: 0;
   margin-right: 5px; padding: 0 4px; border-radius: var(--radius-xs);
-  font-family: var(--font-family); font-size: 9.5px; font-weight: 700;
-  line-height: 15px; letter-spacing: 0.02em; text-transform: uppercase;
+  font-family: var(--font-family); font-size: 10px; font-weight: 700;
+  line-height: 15px; letter-spacing: 0.02em; 
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
 }
 .crash-badge[data-kind='panic'] { background: var(--color-danger-bg); color: var(--color-danger-text); }
@@ -908,7 +908,7 @@ onUnmounted(() => {
   border-color: var(--color-danger-border); color: var(--color-danger-text);
   background: var(--color-danger-bg);
 }
-.log-empty { padding: 12px 6px; font-size: 11.5px; color: var(--color-text-disabled); }
+.log-empty { padding: 12px 6px; font-size: 12px; color: var(--color-text-disabled); }
 
 /* === 实时尾随 ===
    状态点刻意做成「呼吸」而不是静态圆点：尾随是一个持续进行的动作，
@@ -964,12 +964,12 @@ onUnmounted(() => {
   padding: 6px 12px;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-secondary);
-  font-size: 10.5px; color: var(--color-text-muted);
+  font-size: 11px; color: var(--color-text-muted);
 }
 .storage-head { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .storage-title { font-weight: 600; letter-spacing: 0.04em; }
 .storage-total {
-  font-family: var(--font-mono, monospace); font-size: 11.5px;
+  font-family: var(--font-mono, monospace); font-size: 12px;
   color: var(--color-text-primary);
 }
 .storage-bar {
@@ -991,7 +991,7 @@ onUnmounted(() => {
 .lg--log::before { background: var(--color-accent); }
 .lg--crash::before { background: var(--color-danger); }
 .storage-actions { display: flex; gap: 6px; margin-left: auto; flex-shrink: 0; }
-.storage-actions .log-btn { height: 24px; padding: 0 8px; font-size: 10.5px; }
+.storage-actions .log-btn { height: 24px; padding: 0 8px; font-size: 11px; }
 .storage-actions .log-btn.armed {
   border-color: var(--color-danger-border); color: var(--color-danger-text);
   background: var(--color-danger-bg);
@@ -1001,7 +1001,7 @@ onUnmounted(() => {
   flex-basis: 100%; padding: 5px 7px;
   border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary);
-  font-size: 10.5px; color: var(--color-text-secondary);
+  font-size: 11px; color: var(--color-text-secondary);
   word-break: break-all;
 }
 
@@ -1092,29 +1092,12 @@ onUnmounted(() => {
   transition: color var(--transition-fast);
 }
 .log-follow:hover { color: var(--color-text-primary); }
-/* 自绘复选框：项目没有全局 checkbox 样式，WebView2 在暗色主题下仍渲染成白底方块，
-   与周围按钮明显割裂。这里不引 color-scheme（会影响整个页面），只就地画一个。 */
-.log-follow input {
-  appearance: none; -webkit-appearance: none;
-  position: relative; width: 13px; height: 13px; margin: 0;
-  border: 1px solid var(--color-border); border-radius: 3px;
-  background: var(--color-bg-secondary); cursor: pointer;
-  transition: background var(--transition-fast), border-color var(--transition-fast);
-}
-.log-follow input:checked {
-  background: var(--color-accent); border-color: var(--color-accent);
-}
-.log-follow input:checked::after {
-  content: ''; position: absolute; left: 3.5px; top: 0.5px;
-  width: 4px; height: 7.5px;
-  border: solid var(--color-accent-text);
-  border-width: 0 1.5px 1.5px 0;
-  transform: rotate(45deg);
-}
+/* 勾选框外观已由 style.css 的全局 input[type=checkbox] 统一绘制，
+   这里只保留「跟随」标签自身的排版。原先就地自绘一份，是全局还没统一时的临时做法。 */
 
 .log-btn {
   display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  height: 26px; padding: 0 10px;
+  height: 28px; padding: 0 11px;
   font-family: var(--font-family); font-size: 12px; white-space: nowrap;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-secondary); color: var(--color-text-muted);
@@ -1185,17 +1168,17 @@ onUnmounted(() => {
 .log-line-row:hover .line-copy { opacity: 1; }
 .line-copy:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
 
-.log-empty-body { padding: 48px 0; text-align: center; font-size: 12.5px; }
+.log-empty-body { padding: 48px 0; text-align: center; font-size: 13px; }
 
 /* 崩溃现场头块：把 time/kind/label/message 从「正文堆」里拎出来做成卡片，
    下方堆栈每行才有统一的现场时间与级别上色。否则这些头字段会和堆栈混在一块，
    时间列要么空着要么在「time: ...」这种伪行上重复。 */
 .crash-meta {
   margin: 6px 12px 10px; padding: 9px 12px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--card-border-color);
   border-left: 3px solid var(--color-log-error);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
+  background: var(--color-card-bg);
 }
 .crash-meta[data-kind='js'] { border-left-color: var(--color-warning); }
 .crash-meta-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -1204,7 +1187,7 @@ onUnmounted(() => {
   font-variant-numeric: tabular-nums;
 }
 .crash-meta-label {
-  font-size: 11.5px; color: var(--color-text-secondary); font-weight: 600;
+  font-size: 12px; color: var(--color-text-secondary); font-weight: 600;
 }
 .crash-meta-msg {
   margin-top: 5px;

@@ -211,7 +211,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   height: 22px;
   padding: 0 8px;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
   font-family: inherit;
@@ -256,7 +256,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
+  
   color: var(--color-text-muted);
 }
 
@@ -308,9 +308,9 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   max-height: 86vh;
   overflow: auto;
   padding: 16px 18px 14px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
-  background: var(--color-bg-secondary);
+  background: var(--color-popover-bg);
   box-shadow: var(--shadow-lg);
 }
 
@@ -382,7 +382,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
   height: 15px;
   padding: 0;
   border: 1px solid var(--color-border-light);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   background: transparent;
   color: #fff;
   cursor: pointer;

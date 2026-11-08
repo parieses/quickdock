@@ -35,25 +35,27 @@
   height: 38px;
   padding: 0 8px 0 12px;
   /* 一档更亮的底色：三栏并排时，栏头连成一条横向的"带子"，
-     视线沿它扫一遍就知道自己在哪一栏，而不是三块同样发灰的区域。 */
+     视线沿它扫一遍就知道自己在哪一栏，而不是三块同样发灰的区域。
+     与一级页头同一套：纯色块 + 一条下缘线，不再叠 inset 内高光。 */
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
-  box-shadow: inset 0 1px 0 var(--color-hairline);
 }
 
 /* 分区名（场景 / 集合 / 项目）。项目栏也用它，当前集合名改为标题后的胶囊，
-   否则三栏标题一式两样，头一眼就割裂。 */
+   否则三栏标题一式两样，头一眼就割裂。
+   不再写 text-transform: uppercase + letter-spacing: .08em ——
+   那套是西文排版语法：中文本来就没有大小写，剩下的只有"字距被拉开"，
+   在 11px 的短标签上读起来是散而不是透气。西文标签去掉大写后也更符合
+   现在的工具类界面（大写标签正在从主流桌面应用里消失）。 */
 .qd-panel-title {
   min-width: 0;
   flex-shrink: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   user-select: none;
 }
 
@@ -73,10 +75,8 @@
   border-radius: var(--radius-xs);
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
-  font-size: 11px;
+  font-size: var(--text-xs);
   font-weight: 500;
-  letter-spacing: 0;
-  text-transform: none;
 }
 
 .qd-panel-actions {
@@ -172,19 +172,20 @@
   transition: background-color var(--transition-fast), color var(--transition-fast), opacity var(--transition-fast);
 }
 .qd-row:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-/* 选中态用强调色淡底 + 图标转强调色：比纯中性底色更能一眼锁定当前项，
-   同时和 hover（纯中性抬起）明显区分 —— 两者早前同色，分不清哪行选中。 */
+/* 选中态：底色 + 左缘竖条，两个信号，都做足。
+   以前是三个信号同时上但每个都弱——accent-bg 只有 8.5% 蓝（几乎看不出）、
+   竖条 2px、图标再转蓝。三个"微微"叠起来仍然读不出"这行被选中"。
+   现在底色提到 --color-select-bg（14%），竖条加粗到 3px 只负责"定位在左边缘"，
+   图标保持中性色 —— 颜色只用来表达一件事（当前项），不再兼任装饰。 */
 .qd-row { position: relative; }
-.qd-row.active { background: var(--color-accent-bg); color: var(--color-text-primary); }
-/* 选中竖条与侧栏 .nav-item.active 同一套语言：整行淡底 + 左缘 2px 强调色。
-   两处都用"竖条"而不是"整行加粗"，是为了让 Ctrl 点选多行时不会一片加粗。 */
+.qd-row.active { background: var(--color-select-bg); color: var(--color-text-primary); }
 .qd-row.active::before {
   content: '';
   position: absolute;
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 2px;
+  width: 3px;
   height: 16px;
   border-radius: var(--radius-full);
   background: var(--color-accent);
@@ -202,7 +203,6 @@
   flex-shrink: 0;
   color: var(--color-text-muted);
 }
-.qd-row.active .qd-row-icon { color: var(--color-accent); }
 
 .qd-row-main {
   display: flex;
@@ -327,8 +327,8 @@
   display: flex; align-items: center; gap: 6px;
   padding: 5px 9px; cursor: pointer; user-select: none;
   font-size: 12px; color: var(--color-text-secondary);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
@@ -393,7 +393,7 @@
   overflow: auto;
   background: var(--color-bg-primary);
   border: 1px solid var(--color-border);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   font-family: var(--font-mono);
   font-size: 11px;
   line-height: 1.5;

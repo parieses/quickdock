@@ -309,7 +309,7 @@ function formatDate(iso: string): string {
    颜色、圆角、字体一律复用项目已有的 CSS token。 */
 .snapshot-settings {
   margin-bottom: 16px; padding: 12px 14px;
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
 }
 .snapshot-settings-title { font-size: 13px; font-weight: 500; color: var(--color-text-primary); margin-bottom: 10px; }
@@ -321,7 +321,7 @@ function formatDate(iso: string): string {
 
 .snapshot-preview {
   margin: -2px 0 4px; padding: 10px 14px;
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
 }
 .snapshot-preview-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }

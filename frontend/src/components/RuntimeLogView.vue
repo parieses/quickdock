@@ -216,7 +216,7 @@ onMounted(() => nextTick(scrollBottom))
 .rv-nav:hover { background: var(--color-accent-bg); color: var(--color-accent); }
 
 .rv-btn {
-  height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer; white-space: nowrap;
+  height: 28px; padding: 0 11px; font-size: 12px; cursor: pointer; white-space: nowrap;
   display: inline-flex; align-items: center; gap: 4px; font-family: inherit;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
@@ -224,7 +224,7 @@ onMounted(() => nextTick(scrollBottom))
 .rv-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
 .rv-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .rv-badge {
-  min-width: 14px; padding: 0 3px; border-radius: 7px; font-size: 9px; line-height: 14px;
+  min-width: 14px; padding: 0 3px; border-radius: var(--radius-sm); font-size: 10px; line-height: 14px;
   text-align: center; background: var(--color-danger); color: #fff;
 }
 .rv-btn.active .rv-badge { background: var(--color-bg-primary); color: var(--color-danger); }

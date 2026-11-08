@@ -212,7 +212,7 @@ watch(() => props.visible, (v) => {
 <style scoped>
 .prompt-count {
   margin-left: auto;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-muted);
 }
 
@@ -225,7 +225,7 @@ watch(() => props.visible, (v) => {
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.06em;
-  text-transform: uppercase;
+  
   color: var(--color-text-muted);
 }
 
@@ -268,7 +268,7 @@ watch(() => props.visible, (v) => {
 .prompt-preview {
   margin-top: 2px;
   overflow: hidden;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -325,7 +325,7 @@ watch(() => props.visible, (v) => {
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
   font-family: var(--font-mono);
-  font-size: 12.5px;
+  font-size: 13px;
   line-height: 1.6;
   resize: vertical;
 }

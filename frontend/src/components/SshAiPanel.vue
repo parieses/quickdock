@@ -560,7 +560,7 @@ function dropSelection() {
 .ssh-ai-quote-line {
   margin-top: 2px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.45;
   color: var(--color-text-muted);
   white-space: pre;
@@ -575,17 +575,17 @@ function dropSelection() {
   align-items: center;
   gap: 4px;
   padding: 3px 6px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
 }
 
 /* 历史压缩提示：一行弱化的说明，不抢输入区的注意力。 */
 .ssh-ai-summary-note {
   padding: 2px 2px 0;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.4;
   color: var(--color-text-disabled);
 }

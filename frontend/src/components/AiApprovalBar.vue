@@ -238,7 +238,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   background: transparent;
   color: var(--color-text-muted);
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
   white-space: nowrap;
 }
@@ -250,7 +250,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-muted);
 }
@@ -268,7 +268,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 
 .ai-approve-risk {
   margin-top: 7px;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.55;
   color: var(--color-warning);
   word-break: break-word;
@@ -294,7 +294,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast);
@@ -311,7 +311,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
 .ai-approve-num {
   flex: none;
   width: 12px;
-  font-size: 11.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
   color: var(--color-text-muted);
 }

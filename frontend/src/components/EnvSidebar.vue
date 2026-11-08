@@ -126,7 +126,7 @@ const searching = computed(() => props.query.trim().length > 0)
 }
 
 .cats-title {
-  font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px;
+  font-size: 11px; letter-spacing: 0.5px;
   color: var(--color-text-disabled); padding: 2px 8px 8px;
 }
 
@@ -173,7 +173,7 @@ const searching = computed(() => props.query.trim().length > 0)
   display: flex; align-items: center; gap: 8px;
   width: 100%; text-align: left; cursor: pointer; font-family: inherit;
   font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.08em;
-  text-transform: uppercase;
+  
   color: var(--color-text-muted);
   background: none;
   border: 1px solid transparent;

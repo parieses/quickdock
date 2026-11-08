@@ -3136,7 +3136,7 @@ function seedPreview() {
   display: inline-flex; align-items: center; justify-content: center;
   min-width: 15px; height: 15px; padding: 0 3px; border-radius: var(--radius-full);
   background: var(--color-accent); color: var(--color-accent-text);
-  font-family: var(--font-mono); font-size: 9px;
+  font-family: var(--font-mono); font-size: 10px;
 }
 
 .git-error {
@@ -3178,7 +3178,7 @@ function seedPreview() {
   height: 24px; padding: 0 var(--space-2);
   background: none; border: 0; cursor: pointer; font: inherit;
   font-size: 11px; font-weight: 600; letter-spacing: 0.03em;
-  color: var(--color-text-muted); text-transform: uppercase;
+  color: var(--color-text-muted); 
 }
 .grp-toggle:hover { color: var(--color-text-secondary); }
 .grp-n {
@@ -3206,7 +3206,7 @@ function seedPreview() {
 /* 选中项与全站统一：淡底 + 左缘竖条 + 常规文字色。
    原来整行文字转强调色，一列仓库名里只有它发蓝，看着像链接列表。 */
 .item { position: relative; }
-.item.active { background: var(--color-accent-bg); color: var(--color-text-primary); }
+.item.active { background: var(--color-select-bg); color: var(--color-text-primary); }
 .item.active::before {
   content: '';
   position: absolute; left: 0; top: 50%; transform: translateY(-50%);
@@ -3323,7 +3323,7 @@ function seedPreview() {
 .avatar {
   width: 16px; height: 16px; border-radius: 50%; flex-shrink: 0;
   display: grid; place-items: center;
-  font-size: 9px; font-weight: 600; line-height: 1;
+  font-size: 10px; font-weight: 600; line-height: 1;
 }
 .avatar.av0 { background: var(--color-accent-bg); color: var(--color-accent); }
 .avatar.av1 { background: var(--color-success-bg); color: var(--color-success); }
@@ -3381,10 +3381,8 @@ function seedPreview() {
    但组名是这两组的坐标系，不该跟着滚没。 */
 .pane-head.sticky { position: sticky; top: 0; z-index: 1; background: var(--color-bg-secondary); }
 .wt-rows + .pane-head { border-top: 1px solid var(--color-border); }
-.stage-box {
-  width: 12px; height: 12px; margin: 0; flex-shrink: 0;
-  accent-color: var(--color-accent); cursor: pointer;
-}
+/* 尺寸与外观由 style.css 的全局 input[type=checkbox] 负责，这里只管不被挤扁。 */
+.stage-box { margin: 0; flex-shrink: 0; cursor: pointer; }
 .pane-n { font-family: var(--font-mono); font-size: 10px; color: var(--color-text-muted); }
 .pane-act {
   margin-left: auto; padding: 0 2px; border: 0; background: none;
@@ -3465,7 +3463,7 @@ function seedPreview() {
 .tree-dir:hover { background: var(--color-bg-hover); }
 .td-ic { color: var(--color-text-disabled); }
 .td-name { font-family: var(--font-mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.file-row.active { background: var(--color-accent-bg); }
+.file-row.active { background: var(--color-select-bg); }
 .file-badge {
   width: 14px; flex-shrink: 0; text-align: center;
   font-family: var(--font-mono); font-size: 10px; color: var(--color-text-secondary);
@@ -3553,7 +3551,7 @@ function seedPreview() {
   position: sticky; bottom: 8px; z-index: 3; margin: 4px 8px 0;
   display: flex; align-items: center; gap: 6px;
   padding: 5px 8px; border-radius: var(--radius-sm);
-  background: var(--color-bg-elevated); border: 1px solid var(--color-border);
+  background: var(--color-surface-elevated); border: 1px solid var(--color-border);
   box-shadow: var(--shadow-pop);
 }
 .pb-n { font-size: 11px; color: var(--color-text-secondary); }
@@ -3610,7 +3608,7 @@ function seedPreview() {
 .ctx-backdrop { position: fixed; inset: 0; z-index: 900; }
 .ctx-menu {
   position: fixed; min-width: 208px; padding: 4px;
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column; gap: 1px;
 }
@@ -3685,7 +3683,7 @@ function seedPreview() {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .rm-tag {
-  flex-shrink: 0; font-size: 9px; line-height: 15px; padding: 0 5px;
+  flex-shrink: 0; font-size: 10px; line-height: 15px; padding: 0 5px;
   border-radius: var(--radius-xs); font-family: var(--font-mono);
 }
 .rm-tag.https { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
@@ -3757,7 +3755,7 @@ function seedPreview() {
 .cmp-body { display: flex; flex-direction: column; gap: var(--space-4); }
 .cmp-sum { display: flex; align-items: center; gap: var(--space-3); }
 .cmp-pill {
-  font-size: 11px; padding: 1px 7px; border-radius: 999px;
+  font-size: 11px; padding: 1px 7px; border-radius: var(--radius-full);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 .cmp-pill.add { color: var(--color-success); background: var(--color-success-bg); }
@@ -3847,7 +3845,7 @@ function seedPreview() {
 }
 .blame-head {
   position: sticky; top: 0; height: 24px; flex-shrink: 0;
-  font-size: 10px; letter-spacing: .03em; text-transform: uppercase; color: var(--color-text-muted);
+  font-size: 10px; letter-spacing: .03em; color: var(--color-text-muted);
   background: var(--color-bg-secondary); border-bottom: 1px solid var(--color-border);
 }
 .blame-list { overflow: auto; max-height: 58vh; }

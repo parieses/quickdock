@@ -215,7 +215,7 @@ onUnmounted(() => {
 /* 目标窗口提示 */
 .wm-target {
   display: inline-flex; align-items: center; gap: 6px; min-width: 0;
-  max-width: 460px; padding: 2px 9px; border-radius: 999px;
+  max-width: 460px; padding: 2px 9px; border-radius: var(--radius-full);
   background: var(--color-accent-bg); color: var(--color-accent); font-size: 11px;
 }
 .wm-target-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; flex-shrink: 0; }
@@ -237,8 +237,8 @@ onUnmounted(() => {
 .wm-tpl-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .wm-tpl {
   display: flex; flex-direction: column; align-items: center; gap: 5px;
-  padding: 8px; background: var(--color-surface);
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  padding: 8px; background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color); border-radius: var(--radius-md);
   transition: border-color 0.15s, background 0.15s; cursor: pointer;
 }
 .wm-tpl:hover { border-color: var(--color-border-focus); background: var(--color-bg-hover); }

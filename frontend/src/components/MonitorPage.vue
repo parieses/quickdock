@@ -1455,7 +1455,7 @@ onUnmounted(() => {
 }
 .sum-item {
   flex: 1; display: flex; flex-direction: column; gap: 2px; padding: 10px 14px;
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
 }
 .sum-num { font-size: 18px; font-weight: 600; color: var(--color-text-primary); }
@@ -1484,9 +1484,9 @@ onUnmounted(() => {
   margin: var(--space-2) 0 0; flex-shrink: 0;
   font-size: 11px; font-weight: 600; color: var(--color-text-muted);
 }
-.group-head-name { text-transform: uppercase; letter-spacing: 0.06em; }
+.group-head-name { letter-spacing: 0.06em; }
 .group-head-count {
-  font-weight: 400; padding: 0 6px; border-radius: 8px;
+  font-weight: 400; padding: 0 6px; border-radius: var(--radius-md);
   background: var(--color-bg-tertiary); color: var(--color-text-disabled);
 }
 /* 组头右侧的全选本组：只在组内多于一条时出现 */
@@ -1522,14 +1522,14 @@ onUnmounted(() => {
 .mon-tools-fill { flex: 1; }
 .mon-sel-count { font-size: 11px; font-weight: 500; color: var(--color-accent); }
 .mon-selbtn {
-  padding: 3px 9px; font-size: 11px; font-family: inherit; cursor: pointer;
+  height: 24px; padding: 0 8px; font-size: 11px; font-family: inherit; cursor: pointer;
   color: var(--color-text-secondary); background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   display: inline-flex; align-items: center; gap: 4px; white-space: nowrap;
 }
 .mon-selbtn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
 .mon-selbtn:disabled { opacity: 0.5; cursor: not-allowed; }
-.mon-check { flex-shrink: 0; width: 12px; height: 12px; accent-color: var(--color-accent); cursor: pointer; }
+.mon-check { flex-shrink: 0; cursor: pointer; }
 .field-hint { margin: 4px 0 0; font-size: 11px; color: var(--color-text-disabled); }
 .mon-empty { text-align: center; padding: 72px var(--space-4); color: var(--color-text-disabled); }
 /* 空状态图标：一根细线图标直接浮在深底上，容易被读成「没加载出来」。
@@ -1548,7 +1548,7 @@ onUnmounted(() => {
 .empty-hint { font-size: var(--text-sm); color: var(--color-text-muted); margin-top: 6px; }
 
 .mon-item {
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .mon-item:hover { background: var(--color-bg-hover); }
@@ -1582,9 +1582,9 @@ onUnmounted(() => {
 .mon-status-wrap { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 16px; }
 .vt-tab {
   display: inline-flex; align-items: center; gap: 6px;
-  padding: 5px 12px; border-radius: 999px;
+  padding: 5px 12px; border-radius: var(--radius-full);
   background: var(--color-bg-secondary); border: 1px solid var(--color-border);
-  color: var(--color-text-muted); font-size: 12.5px; cursor: pointer;
+  color: var(--color-text-muted); font-size: 13px; cursor: pointer;
 }
 /* 视图 tab 的选中态与全站一致：淡底 + 强调色描边 + 强调色文字。
    原来用「灰底 + 蓝框」，蓝框在深色底上像聚焦环，反而不像"当前这一档"。 */
@@ -1595,7 +1595,7 @@ onUnmounted(() => {
   font-weight: 600;
 }
 .vt-count {
-  min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px;
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--radius-md);
   display: inline-flex; align-items: center; justify-content: center;
   background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 11px;
 }
@@ -1672,9 +1672,9 @@ onUnmounted(() => {
    否则和「清空」一样灰，用户会以为那只是条说明文字。 */
 .logs-btn {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 2px 8px; font-size: 11px; font-family: inherit; cursor: pointer;
+  height: 24px; padding: 0 8px; font-size: 11px; font-family: inherit; cursor: pointer;
   color: var(--color-text-secondary); background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 .logs-btn:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
@@ -1691,7 +1691,7 @@ onUnmounted(() => {
 .uptime-ring {
   flex: 0 0 108px; width: 108px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px;
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md); padding: 8px 6px;
 }
 .ring-wrap { position: relative; width: 72px; height: 72px; }
@@ -1711,8 +1711,8 @@ onUnmounted(() => {
   align-items: center; justify-content: center; gap: 0;
 }
 .ring-pct { font-size: 15px; font-weight: 600; color: var(--color-text-primary); line-height: 1.1; font-variant-numeric: tabular-nums; }
-.ring-pct i { font-size: 9px; font-style: normal; color: var(--color-text-disabled); margin-left: 1px; }
-.ring-lbl { font-size: 9px; color: var(--color-text-disabled); }
+.ring-pct i { font-size: 10px; font-style: normal; color: var(--color-text-disabled); margin-left: 1px; }
+.ring-lbl { font-size: 10px; color: var(--color-text-disabled); }
 .ring-legend { display: flex; gap: 8px; font-size: 10px; font-variant-numeric: tabular-nums; }
 .ring-legend .ok { color: var(--color-success); }
 .ring-legend .bad { color: var(--color-danger); }
@@ -1748,7 +1748,7 @@ onUnmounted(() => {
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {
-  width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-surface);
+  width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-popover-bg);
   border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
 }
 .modal-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3); }

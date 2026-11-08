@@ -211,8 +211,8 @@ onMounted(load)
   width: min(920px, 92vw);
   height: min(720px, 86vh);
   min-height: 0;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 48px var(--color-bg-overlay);
   overflow: hidden;
@@ -236,14 +236,14 @@ onMounted(load)
 }
 
 .sfe-name {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
 
 /* 路径可能很长，单行截断 + title 兜底，不要让它把弹窗顶宽 */
 .sfe-path {
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: var(--font-mono);
   color: var(--color-text-muted);
   white-space: nowrap;
@@ -330,7 +330,7 @@ onMounted(load)
 
 .sfe-dirty {
   margin-left: auto;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-warning);
 }
 
@@ -347,13 +347,13 @@ onMounted(load)
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  padding: var(--space-2) var(--space-5);
-  font-size: 11.5px;
+  height: 28px; padding: 0 11px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   cursor: pointer;
 }
 

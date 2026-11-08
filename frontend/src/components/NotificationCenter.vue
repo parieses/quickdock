@@ -415,12 +415,12 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   position: absolute; top: -1px; right: -3px;
   min-width: 14px; height: 14px; padding: 0 3px;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 7px;
+  border-radius: var(--radius-sm);
   /* 用主色而不是红色：红色留给真正的故障（监控宕机）。
      通知里大部分是「完成任务」，全用红色会和角标的语义脱节。 */
   background: var(--color-accent);
   color: var(--color-accent-text);
-  font-size: 9.5px; font-weight: 700; line-height: 1;
+  font-size: 10px; font-weight: 700; line-height: 1;
   font-variant-numeric: tabular-nums;
   box-shadow: 0 0 0 1.5px var(--color-bg-secondary);
 }
@@ -431,8 +431,8 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   position: fixed; z-index: 600;
   width: 360px; max-height: 460px;
   display: flex; flex-direction: column;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
   overflow: hidden;
@@ -443,11 +443,11 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   padding: 10px 10px 8px 14px;
   border-bottom: 1px solid var(--color-border);
 }
-.nc-head-title { font-size: 12.5px; font-weight: 600; color: var(--color-text-primary); }
+.nc-head-title { font-size: 13px; font-weight: 600; color: var(--color-text-primary); }
 .nc-head-count {
   min-width: 17px; height: 17px; padding: 0 5px; margin-right: auto;
   display: inline-flex; align-items: center; justify-content: center;
-  border-radius: 9px; background: var(--color-danger-bg); color: var(--color-danger-text);
+  border-radius: var(--radius-md); background: var(--color-danger-bg); color: var(--color-danger-text);
   font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
 }
 .nc-icon-btn {
@@ -464,7 +464,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 .nc-filters { display: flex; gap: 4px; padding: 8px 12px; flex-wrap: wrap; }
 .nc-chip {
   height: 22px; padding: 0 9px;
-  border: 1px solid var(--color-border); border-radius: 11px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-lg);
   background: transparent; color: var(--color-text-muted);
   font-family: inherit; font-size: 11px; cursor: pointer;
   transition: all var(--transition-fast);
@@ -475,7 +475,7 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
   color: var(--color-accent);
 }
 .nc-chip-count {
-  margin-left: 4px; font-size: 9.5px; opacity: 0.72;
+  margin-left: 4px; font-size: 10px; opacity: 0.72;
   font-variant-numeric: tabular-nums;
 }
 /* 未读与类型是两个独立维度，用竖线隔开，避免被读成同一组互斥单选项 */
@@ -558,6 +558,6 @@ watch(open, (v) => { if (v) void nextTick(placePanel) })
 
 .nc-empty {
   display: flex; flex-direction: column; align-items: center; gap: 8px;
-  padding: 44px 0; color: var(--color-text-disabled); font-size: 11.5px;
+  padding: 44px 0; color: var(--color-text-disabled); font-size: 12px;
 }
 </style>

@@ -96,10 +96,10 @@ const { t } = useI18n()
   max-height: 180px; overflow: auto;
 }
 
-.ai-digest-empty { font-size: 11.5px; color: var(--color-text-disabled); padding: 2px 0 6px; }
+.ai-digest-empty { font-size: 12px; color: var(--color-text-disabled); padding: 2px 0 6px; }
 
 .ai-digest-gen {
-  font-size: 11.5px; font-family: inherit; padding: 4px 10px; cursor: pointer;
+  font-size: 12px; font-family: inherit; padding: 4px 10px; cursor: pointer;
   color: var(--color-accent); background: var(--color-accent-bg);
   border: 1px solid var(--color-accent-border); border-radius: var(--radius-sm);
 }

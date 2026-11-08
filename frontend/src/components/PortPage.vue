@@ -138,7 +138,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .port-tools { display: flex; align-items: center; gap: var(--space-3); }
 .port-search { display: flex; align-items: center; gap: 5px; padding: 5px 9px; border-radius: var(--radius-sm); background: var(--color-bg-secondary); color: var(--color-text-disabled); min-width: 200px; }
 .port-search-input { flex: 1; border: none; outline: none; background: transparent; color: var(--color-text-primary); font-size: 13px; }
-.port-btn { display: flex; align-items: center; gap: 4px; font-size: 12px; padding: 5px 10px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
+.port-btn { display: flex; align-items: center; gap: 4px; font-size: 12px; height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer; border: 1px solid var(--color-border); background: var(--color-bg-secondary); color: var(--color-text-primary); }
 .port-btn:disabled { opacity: 0.5; cursor: default; }
 .port-btn.is-loading .port-btn-icon { animation: port-spin 0.8s linear infinite; }
 @keyframes port-spin { to { transform: rotate(360deg); } }
@@ -163,7 +163,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
   border-radius: var(--radius-md);
   margin-bottom: 12px;
 }
-.port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px 12px; background: var(--color-bg-secondary); border: 1px solid var(--color-border); border-radius: var(--radius-md); transition: background var(--transition-fast); }
+.port-row { display: flex; align-items: center; gap: var(--space-3); padding: 9px 12px; background: var(--color-card-bg); border: 1px solid var(--card-border-color); border-radius: var(--radius-md); transition: background var(--transition-fast); }
 .port-row:hover { background: var(--color-bg-hover); }
 /* QuickDock 自身监听的端口（内置 HTTP 静态服务等）：描边高亮，避免混在系统进程里认不出 */
 .port-row.is-self { border: 1px solid var(--color-accent); background: var(--color-accent-bg); }

@@ -549,8 +549,8 @@ function onKeydown(e: KeyboardEvent) {
   max-height: 88vh;
   display: flex;
   flex-direction: column;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 48px var(--color-bg-overlay);
   overflow: hidden;
@@ -693,7 +693,6 @@ select.fd-input {
 
 .fd-check input {
   margin-top: 2px;
-  accent-color: var(--color-accent);
   cursor: pointer;
 }
 
@@ -710,8 +709,8 @@ select.fd-input {
   flex-direction: column;
   gap: var(--space-5);
   padding: var(--space-5) var(--space-6);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
 }
 
@@ -729,15 +728,15 @@ select.fd-input {
   align-self: flex-start;
 }
 
-.seg-btn {
+.seg-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
   flex: 1 1 auto;
-  padding: var(--space-2) var(--space-5);
+  height: 28px; padding: 0 11px;
   font-size: 12px;
   font-family: inherit;
   color: var(--color-text-muted);
   background: transparent;
   border: none;
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast);
 }
@@ -812,7 +811,7 @@ select.fd-input {
   display: inline-flex;
   align-items: center;
   gap: var(--space-3);
-  padding: var(--space-3) var(--space-6);
+  height: 32px; padding: 0 16px;
   font-size: 13px;
   font-weight: 500;
   font-family: inherit;

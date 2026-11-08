@@ -282,8 +282,8 @@ function onClickAway() {
   display: flex;
   flex-direction: column;
   min-width: 120px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   padding: 4px;
   box-shadow: 0 8px 32px var(--color-bg-overlay);

@@ -316,7 +316,7 @@ onUnmounted(stopPoll)
   min-width: 15px;
   height: 15px;
   padding: 0 4px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--color-accent-bg);
   color: var(--color-accent);
   font-size: 10px;
@@ -410,7 +410,7 @@ onUnmounted(stopPoll)
 
 .ai-job-cmd {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-primary);
   overflow: hidden;
@@ -423,7 +423,7 @@ onUnmounted(stopPoll)
   align-items: center;
   gap: 6px;
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
@@ -500,14 +500,14 @@ onUnmounted(stopPoll)
 
 .ai-job-trunc {
   margin: 3px 0 0 13px;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-disabled);
 }
 
 .ai-jobs-empty {
   padding: 14px 8px;
   text-align: center;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-disabled);
 }
 
@@ -519,7 +519,7 @@ onUnmounted(stopPoll)
   margin: 0;
   padding: 7px 10px;
   border-top: 1px solid var(--color-border);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.45;
   color: var(--color-text-disabled);
 }

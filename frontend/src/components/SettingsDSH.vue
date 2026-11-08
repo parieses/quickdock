@@ -991,10 +991,7 @@ watch(() => props.visible, async (v) => {
   cursor: pointer;
   user-select: none;
 }
-.dsh-auto-start input {
-  accent-color: var(--color-accent);
-  cursor: pointer;
-}
+.dsh-auto-start input { cursor: pointer; }
 .plugin-row {
   display: flex;
   align-items: center;
@@ -1114,7 +1111,7 @@ watch(() => props.visible, async (v) => {
   background: var(--color-accent-bg);
   color: var(--color-accent);
   font-size: 10px;
-  text-transform: uppercase;
+  
 }
 .dsh-plugin-del {
   display: flex;

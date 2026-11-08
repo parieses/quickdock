@@ -593,7 +593,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   border-radius: var(--radius-xs);
   background: var(--color-bg-primary);
   color: var(--color-text-primary);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .fp-search-input:focus {
@@ -604,7 +604,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 .fp-search-count {
   min-width: 26px;
   text-align: right;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -672,7 +672,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 .fp-code {
   margin: 0;
   font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.5;
   color: var(--color-text-secondary);
   white-space: pre;
@@ -708,7 +708,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 
 .fp-markdown :deep(code) {
   font-family: var(--font-mono, monospace);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .fp-markdown :deep(a) {
@@ -720,7 +720,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
   align-items: center;
   gap: var(--space-4);
   padding: var(--space-1) 0;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
@@ -749,7 +749,7 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 
 .fp-entry-size {
   flex-shrink: 0;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 

@@ -440,7 +440,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 12.5px;
+  font-size: 13px;
   text-align: left;
   cursor: pointer;
 }
@@ -609,7 +609,7 @@ onBeforeUnmount(() => {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.4;
   color: var(--color-text-muted);
 }
@@ -643,7 +643,7 @@ onBeforeUnmount(() => {
 /* 「引用」这组没有可跳转的设置页，底部改成一句等价性说明 */
 .ai-plus-hint {
   padding: 5px 8px;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.4;
   color: var(--color-text-disabled);
 }
@@ -659,7 +659,7 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--color-text-secondary);
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   cursor: pointer;
 }
 
@@ -671,7 +671,7 @@ onBeforeUnmount(() => {
   flex: none;
   width: 26px;
   height: 15px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--color-bg-active);
   position: relative;
   transition: background-color var(--transition-fast);

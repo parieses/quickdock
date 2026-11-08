@@ -625,7 +625,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 @media (min-width: 1560px) { .market-grid { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
 @media (min-width: 1870px) { .market-grid { grid-template-columns: repeat(6, minmax(0, 1fr)); } }
 .market-card {
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md); padding: 14px; display: flex; flex-direction: column; gap: 10px;
   /* grid item 默认 min-width:auto(=min-content)，不置 0 的话即使列设为 minmax(0,1fr)
      卡片仍会溢出列宽 */
@@ -655,7 +655,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 .card-meta { display: flex; gap: 8px; font-size: 11px; color: var(--color-text-muted); }
 .card-perms { display: flex; gap: 4px; flex-wrap: wrap; }
-.perm-tag { font-size: 9px; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+.perm-tag { font-size: 10px; padding: 1px 6px; border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .card-actions { margin-top: auto; }
 .dl-bar {
   height: 3px; margin-bottom: 6px; border-radius: var(--radius-xs);
@@ -675,7 +675,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 @keyframes dl-spin { to { transform: rotate(360deg); } }
 .action-btn {
   display: inline-flex; align-items: center; gap: 5px; width: 100%; justify-content: center;
-  padding: 7px 10px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);
+  height: 28px; padding: 0 11px; border-radius: var(--radius-sm); border: 1px solid var(--color-border);
   background: var(--color-bg-tertiary); color: var(--color-text-primary);
   font-size: 12px; cursor: pointer; transition: all .15s;
 }
@@ -694,8 +694,8 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 }
 /* 弹窗卡片基类：同 EnvironmentPage 标准。此前缺失导致弹框裸奔（无遮罩/无卡片背景/无内边距/无圆角阴影） */
 .modal {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: 0 18px 56px var(--color-bg-overlay);
   padding: 20px 22px;
@@ -706,8 +706,8 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border);
 }
-.op-btn {
-  font-size: 12px; padding: 7px 14px; border-radius: var(--radius-sm); cursor: pointer;
+.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  font-size: 12px; height: 28px; padding: 0 11px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
   font-family: inherit; transition: background .15s, color .15s; white-space: nowrap;
 }
@@ -724,12 +724,12 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .detail-icon-fallback { color: var(--color-text-muted); }
 .detail-titles { min-width: 0; }
 .detail-name-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.detail-name { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
+.detail-name { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
 .detail-id { font-size: 10px; color: var(--color-text-disabled); font-family: var(--font-mono, monospace); margin-top: 2px; }
 .detail-body { display: flex; flex-direction: column; gap: 14px; margin: 14px 0; }
 .detail-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .detail-section { display: flex; flex-direction: column; gap: 5px; }
-.detail-h { font-size: 11px; font-weight: 700; letter-spacing: .3px; color: var(--color-text-disabled); text-transform: uppercase; margin: 0; }
+.detail-h { font-size: 11px; font-weight: 700; letter-spacing: .3px; color: var(--color-text-disabled); margin: 0; }
 .detail-desc, .detail-meta { font-size: 12px; color: var(--color-text-secondary); line-height: 1.55; margin: 0; white-space: pre-wrap; }
 .detail-muted { color: var(--color-text-disabled); }
 .detail-tags { display: flex; flex-wrap: wrap; gap: 5px; }

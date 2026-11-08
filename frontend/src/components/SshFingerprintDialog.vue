@@ -208,8 +208,8 @@ function onKeydown(e: KeyboardEvent) {
   max-height: 86vh;
   display: flex;
   flex-direction: column;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 48px var(--color-bg-overlay);
   overflow: hidden;
@@ -306,7 +306,7 @@ function onKeydown(e: KeyboardEvent) {
 .fp-key,
 .fp-cmd {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
   word-break: break-all;
   user-select: text;
 }
@@ -349,7 +349,7 @@ function onKeydown(e: KeyboardEvent) {
 .fp-note {
   margin: 0;
   padding: var(--space-4) var(--space-5);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--color-warning);
   background: var(--color-warning-bg);
@@ -389,7 +389,8 @@ function onKeydown(e: KeyboardEvent) {
 
 .fp-ack input {
   margin-top: 2px;
-  accent-color: var(--color-danger);
+  /* 指纹确认是破坏性动作的守门勾选，用红色区分于普通勾选。 */
+  --qd-check-color: var(--color-danger);
   cursor: pointer;
 }
 
@@ -411,8 +412,8 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--color-bg-tertiary);
 }
 
-.btn {
-  padding: var(--space-3) var(--space-6);
+.btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 32px; padding: 0 16px;
   font-size: 13px;
   font-weight: 500;
   font-family: inherit;

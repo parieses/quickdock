@@ -3218,9 +3218,9 @@ onUnmounted(() => {
 .ai-plan-card {
   width: 100%;
   padding: 8px 12px 10px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
+  background: var(--color-card-bg);
   font-size: 12px;
 }
 
@@ -3304,7 +3304,7 @@ onUnmounted(() => {
 
 .ai-plan-text { min-width: 0; overflow-wrap: anywhere; }
 
-.ai-plan-note { margin-top: 7px; color: var(--color-text-muted); font-size: 11.5px; }
+.ai-plan-note { margin-top: 7px; color: var(--color-text-muted); font-size: 12px; }
 
 /* 等待插入的消息：贴在输入框正上方，宽度与输入框同口径（--ai-column-w + margin auto），
    否则它会从窗口左边一直拉到右边，比输入框宽一截，看起来像另一块区域。
@@ -3324,8 +3324,8 @@ onUnmounted(() => {
   min-width: 0;
   padding: 4px 10px;
   border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
-  font-size: 11.5px;
+  background: var(--color-card-bg);
+  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
@@ -3451,7 +3451,7 @@ onUnmounted(() => {
 
 .ai-html-preview-title {
   margin-right: auto;
-  font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase;
+  font-size: 11px; letter-spacing: 0.04em; 
   color: var(--color-text-muted);
 }
 
@@ -3532,9 +3532,9 @@ onUnmounted(() => {
   display: inline-flex; align-items: center; gap: 3px;
   max-width: 240px; margin: 0 1px;
   padding: 1px 3px 1px 6px;
-  border: 1px solid var(--color-border); border-radius: 6px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-active); color: var(--color-text-secondary);
-  font-size: 11.5px; line-height: 1.6;
+  font-size: 12px; line-height: 1.6;
   vertical-align: baseline;
   user-select: none;
   white-space: nowrap;

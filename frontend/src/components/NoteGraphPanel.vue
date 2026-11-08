@@ -621,7 +621,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   color: var(--color-text-secondary);
 }
-.qd-graph-toggle-input { accent-color: var(--color-accent); cursor: pointer; }
+.qd-graph-toggle-input { cursor: pointer; }
 .qd-graph-icon-btn {
   display: inline-flex;
   align-items: center;
@@ -696,9 +696,9 @@ onBeforeUnmount(() => {
   left: var(--space-3);
   bottom: var(--space-3);
   padding: var(--space-3);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
+  background: var(--color-popover-bg);
   box-shadow: var(--shadow-sm);
   font-size: var(--text-xs);
   z-index: 2;
@@ -749,9 +749,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: var(--space-3);
   padding: var(--space-5) var(--space-6);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
+  background: var(--color-popover-bg);
   box-shadow: var(--shadow-md);
 }
 .qd-graph-overlay-btn {

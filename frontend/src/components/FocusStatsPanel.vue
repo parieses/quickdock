@@ -149,8 +149,8 @@ watch([range, () => props.refreshToken], () => { void load() }, { immediate: tru
 
 <style scoped>
 .fsp {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   padding: var(--space-3);
   font-size: var(--text-xs);

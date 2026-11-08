@@ -223,8 +223,8 @@ function onKeydown(e: KeyboardEvent) {
   width: 560px;
   max-width: 94vw;
   max-height: 76vh;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 48px var(--color-bg-overlay);
   overflow: hidden;
@@ -294,14 +294,14 @@ function onKeydown(e: KeyboardEvent) {
 
 .th-hint {
   margin: 0;
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.6;
   color: var(--color-text-muted);
 }
 
 .th-error {
   padding: var(--space-3) var(--space-4);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-danger);
   background: var(--color-danger-bg);
   border-radius: var(--radius-xs);
@@ -373,14 +373,14 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .th-group-name {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--color-text-primary);
 }
 
 .th-group-target {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -390,7 +390,7 @@ function onKeydown(e: KeyboardEvent) {
   gap: var(--space-2);
   flex: 0 0 auto;
   padding: var(--space-2) var(--space-4);
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-danger);
   background: transparent;
@@ -431,7 +431,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .th-fp {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -447,7 +447,7 @@ function onKeydown(e: KeyboardEvent) {
 
 .th-copy {
   padding: 2px var(--space-3);
-  font-size: 10.5px;
+  font-size: 11px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
@@ -462,7 +462,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .th-added {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 

@@ -38,11 +38,10 @@
 }
 
 /* ---- 一级页头 ---- */
-/* 页头是每页最靠上的"第一印象"，这里做三件事：
-   1. 用一档更亮的底色把它和内容分开（原来同色，只靠一根线，页头像贴在内容上）；
-   2. 底部那根线换成 hairline + 极淡投影，分界清楚但不画一道"横杠"；
-   3. 标题字重交给真实 Bold（body 已关 font-synthesis），再收一点字距，
-      中文标题在 15px 上才不会显得松垮。 */
+/* 页头只做一件事：用一档更亮的底色把它和内容分开，下缘一根 1px 线收口。
+   之前还叠了一道 inset 内高光（"板子有厚度"），但页头本身已经是整条通栏，
+   高光只在上边缘画出一条断断续续的亮线，和下面的卡片高光互相打架。
+   去掉后页头是纯平的色块 + 一条线，与卡片的"纯亮度分层"同一套语言。 */
 .qd-page-header {
   display: flex;
   align-items: center;
@@ -52,7 +51,6 @@
   padding: 0 16px;
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
-  box-shadow: 0 1px 0 var(--color-hairline) inset;
 }
 
 /* 窄窗口下页头放不下一行：标题 + 一票按钮组实测需要 ~650px，而 800 宽的窗口
@@ -71,7 +69,10 @@
   }
 }
 
-/* 标题块：主标题 + 可选副标题。也允许只有标题（多数页面）。 */
+/* 标题块：主标题 + 可选副标题。也允许只有标题（多数页面）。
+   不写 letter-spacing: -0.01em —— 负字距是给西文大字"收紧字间空气"用的，
+   中文字面本身占满字身框，再收紧只会让笔画挨在一起（"环 境 服 务"变成一坨）。
+   中文标题的紧凑感靠字重和字号档位表达，不靠字距。 */
 .qd-page-titles {
   display: flex;
   flex-direction: column;
@@ -87,7 +88,6 @@
   margin: 0;
   font-size: var(--text-lg);
   font-weight: 600;
-  letter-spacing: -0.01em;
   line-height: 1.35;
   color: var(--color-text-primary);
 }
@@ -284,11 +284,14 @@
 .qd-input-wrap > .qd-input { padding-left: 28px; width: 100%; }
 
 /* ---- 卡片 ---- */
-/* 容器只做两件事：比底亮一点 + 上缘一道内高光。不再加投影，
-   大量卡片同时投阴影会让整页发灰（深色主题尤其明显）。 */
+/* 容器只做一件事：比底亮一档。不描边、不投影、不叠内高光。
+   深色下靠 --color-card-bg 的亮度差分块——以前是「底色 + 1px 描边 + 内高光
+   + 投影」四层，一堆卡片同屏时每张都带一圈亮边，整页发毛；
+   浅色下 --card-border-color 会补回 1px 边界（白压白必须有边界）。
+   推论：卡片里不许再套 .qd-card —— 套了就没有更高一档的亮度可用。 */
 .qd-card {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
 }
@@ -312,24 +315,24 @@
 
 /* ---- 基础节奏 ----
    13.5px / 1.75 是屏幕阅读的档位：13px 偏挤，14px 在窄窗口落行太多。 */
-.ai-md { font-size: 13.5px; line-height: 1.75; color: var(--color-text-primary); }
+.ai-md { font-size: 14px; line-height: 1.75; color: var(--color-text-primary); }
 
 /* ---- 标题：四级，靠字号 + 装饰拉开层次 ----
    原来 h1~h4 全是 14px/600，扫一眼分不出主次，整篇读起来是一个平面。 */
 .ai-md h1, .ai-md h2, .ai-md h3, .ai-md h4, .ai-md h5, .ai-md h6 {
   margin: 18px 0 8px; font-weight: 650; line-height: 1.4;
 }
-.ai-md h1 { font-size: 19px; padding-bottom: 7px; border-bottom: 1px solid var(--color-border); }
+.ai-md h1 { font-size: 18px; padding-bottom: 7px; border-bottom: 1px solid var(--color-border); }
 /* h2 是回答里最常用的层级，加一根竖条当锚点，长文里好扫 */
-.ai-md h2 { font-size: 16px; }
+.ai-md h2 { font-size: 15px; }
 .ai-md h2::before {
   content: ''; display: inline-block; width: 3px; height: 0.9em;
   margin-right: 8px; vertical-align: -0.06em;
   border-radius: 2px; background: var(--color-accent);
 }
-.ai-md h3 { font-size: 14.5px; }
-.ai-md h4 { font-size: 13.5px; color: var(--color-text-secondary); }
-.ai-md h5, .ai-md h6 { font-size: 12.5px; color: var(--color-text-secondary); }
+.ai-md h3 { font-size: 15px; }
+.ai-md h4 { font-size: 14px; color: var(--color-text-secondary); }
+.ai-md h5, .ai-md h6 { font-size: 13px; color: var(--color-text-secondary); }
 
 /* 首块不要顶部留白：回答第一行该贴着消息开头，否则像空了一段 */
 .ai-md-block:first-child > :first-child { margin-top: 0; }
@@ -376,7 +379,7 @@
 }
 .ai-md .ai-task-box {
   flex: none; width: 15px; height: 15px; margin-top: 4px;
-  border: 1.5px solid var(--color-border); border-radius: 4px;
+  border: 1.5px solid var(--color-border); border-radius: var(--radius-xs);
   background: var(--color-bg-primary); box-sizing: border-box; position: relative;
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
@@ -404,7 +407,7 @@
    改成「表头底色 + 行下边线 + 无外框」：行列关系靠留白和底色读，不靠堆框线。 */
 .ai-md table {
   width: 100%; border-collapse: separate; border-spacing: 0;
-  font-size: 12.5px; margin: 4px 0;
+  font-size: 13px; margin: 4px 0;
 }
 .ai-md thead th {
   padding: 8px 12px; text-align: left; white-space: nowrap;

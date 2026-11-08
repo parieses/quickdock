@@ -554,10 +554,10 @@ onBeforeUnmount(() => {
   font-size: 11px;
   color: var(--color-text-disabled);
   background: var(--color-bg-tertiary);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   padding: 0 6px;
 }
-.ai-conv-item.is-in-space { margin-left: 18px; padding: 6px 10px; font-size: 12.5px; }
+.ai-conv-item.is-in-space { margin-left: 18px; padding: 6px 10px; font-size: 13px; }
 .ai-space-empty { padding: 4px 10px 8px 28px; font-size: 11px; color: var(--color-text-disabled); }
 
 .ai-conv-item {
@@ -690,7 +690,7 @@ onBeforeUnmount(() => {
   width: 100%; height: 30px; padding: 0 9px;
   border: none; border-radius: var(--radius-sm); background: none;
   color: var(--color-text-secondary);
-  font-size: 12.5px; line-height: 1; font-family: inherit;
+  font-size: 13px; line-height: 1; font-family: inherit;
   text-align: left; cursor: pointer;
   transition: background var(--transition-fast), color var(--transition-fast);
 }

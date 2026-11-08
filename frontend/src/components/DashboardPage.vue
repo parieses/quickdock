@@ -1995,8 +1995,8 @@ onUnmounted(() => {
  * 既补上留白，也把读数从四个扩到六个（新增两项取本页已有数据，不发新请求）。 */
 .band {
   display: flex; flex-direction: column;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   /* 抬起来的板：否则读数和页面底色几乎同层 */
   box-shadow: var(--shadow-card);
@@ -2061,8 +2061,8 @@ onUnmounted(() => {
 .span-6 { grid-column: 1 / -1; }
 
 .card {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   overflow: hidden;
@@ -2111,7 +2111,7 @@ onUnmounted(() => {
 .ribbon-pct.bad { color: var(--color-danger); }
 
 .ribbon { display: flex; gap: 2px; height: 16px; }
-.cell { flex: 1 1 0; min-width: 0; border-radius: 1.5px; background: var(--color-bg-tertiary); }
+.cell { flex: 1 1 0; min-width: 0; border-radius: 2px; background: var(--color-bg-tertiary); }
 /* 整条全绿会炸：up 用 55% 透明度压成「在线但不刺眼」，down 保持饱和 */
 .cell.up { background: var(--color-success); opacity: .5; }
 .cell.down { background: var(--color-danger); opacity: .85; }
@@ -2189,7 +2189,7 @@ onUnmounted(() => {
   100% { background: transparent; }
 }
 .qc-code {
-  flex-shrink: 0; min-width: 78px; font-size: 16px; font-weight: 600;
+  flex-shrink: 0; min-width: 78px; font-size: 15px; font-weight: 600;
   letter-spacing: .06em; color: var(--color-accent);
 }
 .qc-file-ic {
@@ -2230,7 +2230,7 @@ onUnmounted(() => {
 .ai-label { font-size: 10px; color: var(--color-text-muted); }
 .ai-num {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 22px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25;
+  font-size: 24px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25;
   color: var(--color-text-primary);
 }
 .ai-sub { font-size: 10px; color: var(--color-text-disabled); white-space: nowrap; }
@@ -2393,8 +2393,8 @@ onUnmounted(() => {
 .daybar {
   position: relative;
   display: flex; flex-direction: column;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
   overflow: hidden;
@@ -2405,7 +2405,7 @@ onUnmounted(() => {
   border-bottom: 1px solid var(--color-border);
 }
 .db-greeting {
-  font-size: 18px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.3;
+  font-size: 18px; font-weight: 600; line-height: 1.3;
   color: var(--color-text-primary); white-space: nowrap; flex-shrink: 0;
 }
 .db-note {

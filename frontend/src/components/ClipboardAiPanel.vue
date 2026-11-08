@@ -328,7 +328,7 @@ function clearAll() {
 .clip-ai-quote-line {
   margin-top: 2px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.45;
   color: var(--color-text-muted);
   white-space: pre;

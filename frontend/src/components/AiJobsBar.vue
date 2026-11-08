@@ -89,7 +89,7 @@ function formatDuration(ms: number): string {
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   font-family: inherit;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-secondary);
   text-align: left;
   cursor: pointer;

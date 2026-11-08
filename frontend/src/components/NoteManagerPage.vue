@@ -1217,7 +1217,7 @@ watch(pendingOpenNoteId, (id) => {
 .ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: 6px; border-radius: var(--radius-sm); }
 .ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
 /* 插入 wiki 链接的候选浮层：挂在 .ne-head 上，absolute 不占布局高度 */
-.ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: 20; width: 260px; margin-top: 4px; padding: 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-secondary); box-shadow: var(--shadow-sm); }
+.ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: 20; width: 260px; margin-top: 4px; padding: 6px; border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
 .ne-wiki-search { display: flex; align-items: center; gap: 6px; color: var(--color-text-muted); }
 .ne-wiki-input { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
 .ne-wiki-input:focus { border-color: var(--color-border-focus-soft); }
@@ -1282,7 +1282,7 @@ watch(pendingOpenNoteId, (id) => {
 .tn-check.on { background: var(--color-accent); border-color: var(--color-accent); }
 .tn-check.on::after {
   content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
-  border: solid var(--color-on-accent, #fff); border-width: 0 2px 2px 0; transform: rotate(45deg);
+  border: solid var(--color-accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 .sel-on { background: var(--color-accent-bg); color: var(--color-text-primary); }
 .sel-on:hover { background: var(--color-accent-bg); }
@@ -1310,7 +1310,7 @@ watch(pendingOpenNoteId, (id) => {
   color: var(--color-text-disabled);
   font-weight: 500;
   background: var(--color-bg-secondary);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   padding: 1px 6px;
 }
 .recent-row {
@@ -1340,7 +1340,7 @@ watch(pendingOpenNoteId, (id) => {
 .tb-clear:disabled { opacity: 0.4; cursor: default; }
 .tb-input, .tb-select { flex: 1; min-width: 0; padding: 4px 6px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
 .tb-input:focus, .tb-select:focus { border-color: var(--color-border-focus-soft); }
-.tb-btn { flex-shrink: 0; padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: 12px; cursor: pointer; border-radius: var(--radius-sm); font-family: inherit; }
+.tb-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px;  flex-shrink: 0; height: 28px; padding: 0 11px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-secondary); font-size: 12px; cursor: pointer; border-radius: var(--radius-sm); font-family: inherit; }
 .tb-btn:hover:not(:disabled) { color: var(--color-text-primary); border-color: var(--color-border-focus); }
 .tb-btn:disabled { opacity: 0.4; cursor: default; }
 .tb-btn.danger { color: var(--color-danger); border-color: var(--color-danger-border); }
@@ -1361,7 +1361,7 @@ watch(pendingOpenNoteId, (id) => {
 .markdown-body { color: var(--color-text-primary); font-size: 13px; line-height: 1.7; word-break: break-word; }
 .markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3), .markdown-body :deep(h4) { margin: 12px 0 8px; line-height: 1.3; }
 .markdown-body :deep(h1) { font-size: 20px; border-bottom: 1px solid var(--color-border); padding-bottom: 6px; }
-.markdown-body :deep(h2) { font-size: 17px; border-bottom: 1px solid var(--color-border); padding-bottom: 4px; }
+.markdown-body :deep(h2) { font-size: 18px; border-bottom: 1px solid var(--color-border); padding-bottom: 4px; }
 .markdown-body :deep(h3) { font-size: 15px; }
 .markdown-body :deep(p) { margin: 8px 0; }
 .markdown-body :deep(a) { color: var(--color-accent); }

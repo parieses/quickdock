@@ -750,7 +750,7 @@ onMounted(() => { load(); loadCert() })
 }
 .detail-titles { display: flex; flex-direction: column; gap: 4px; }
 .detail-title-row { display: flex; align-items: baseline; gap: 8px; }
-.detail-name { font-size: 16px; font-weight: 600; color: var(--color-text-primary); }
+.detail-name { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
 .detail-id { font-size: 11px; color: var(--color-text-disabled); }
 .detail-badges { display: flex; gap: 6px; }
 .badge {
@@ -758,8 +758,8 @@ onMounted(() => { load(); loadCert() })
   background: var(--color-bg-active); color: var(--color-text-muted);
 }
 .detail-block {
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  padding: 14px 16px; background: var(--color-surface);
+  border: 1px solid var(--card-border-color); border-radius: var(--radius-md);
+  padding: 14px 16px; background: var(--color-card-bg);
   display: flex; flex-direction: column; gap: 10px;
 }
 .block-head { display: flex; align-items: center; justify-content: space-between; }
@@ -801,8 +801,8 @@ onMounted(() => { load(); loadCert() })
 }
 .site-off { font-size: 11px; color: var(--color-danger); }
 .site-ops { display: flex; gap: 6px; flex: 0 0 auto; }
-.op-btn {
-  padding: 4px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 24px; padding: 0 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   font-size: 11px; font-family: inherit; cursor: pointer;
 }
@@ -829,7 +829,7 @@ onMounted(() => { load(); loadCert() })
 .gen-panel {
   width: 720px; max-width: 92vw; max-height: 84vh; overflow: hidden;
   display: flex; flex-direction: column; gap: 10px; padding: 16px 18px;
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg); box-shadow: 0 12px 40px var(--color-bg-overlay);
 }
 .gen-head { display: flex; align-items: center; justify-content: space-between; flex: 0 0 auto; }

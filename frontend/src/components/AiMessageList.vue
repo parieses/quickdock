@@ -966,7 +966,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-reasoning-content {
   margin-top: 2px; padding: 2px 0 2px 10px; border-left: 2px solid var(--color-border);
-  color: var(--color-text-muted); font-size: 12.5px; line-height: 1.7;
+  color: var(--color-text-muted); font-size: 13px; line-height: 1.7;
   white-space: pre-wrap; word-break: break-word;
 }
 
@@ -1324,7 +1324,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   color: var(--color-text-secondary);
   background: var(--color-bg-secondary);
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   cursor: pointer;
 }
 .ai-load-older:hover { color: var(--color-text-primary); border-color: var(--color-border-light); }
@@ -1347,7 +1347,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   padding: 0;
   /* 与 app.css 的 .ai-md 保持同一个值：scoped 选择器带 [data-v] 优先级更高，
      这里写 13px 会把那边的 13.5px 盖掉，两边不同步就白改了。 */
-  font-size: 13.5px;
+  font-size: 14px;
   line-height: 1.75;
   word-break: break-word;
   color: var(--color-text-primary);
@@ -1452,7 +1452,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast), background-color var(--transition-fast);
 }
@@ -1630,9 +1630,9 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-md :deep(.md-th-sortable:hover) { color: var(--color-accent); }
 
-.ai-md :deep(.md-th-sortable[data-sort-dir="asc"]::after) { content: " ▲"; font-size: 9px; }
+.ai-md :deep(.md-th-sortable[data-sort-dir="asc"]::after) { content: " ▲"; font-size: 10px; }
 
-.ai-md :deep(.md-th-sortable[data-sort-dir="desc"]::after) { content: " ▼"; font-size: 9px; }
+.ai-md :deep(.md-th-sortable[data-sort-dir="desc"]::after) { content: " ▼"; font-size: 10px; }
 
 .ai-md :deep(hr) { border: none; border-top: 1px solid var(--color-border); margin: 10px 0; }
 

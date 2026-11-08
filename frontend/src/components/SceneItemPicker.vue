@@ -169,7 +169,7 @@ function close() { emit('cancel') }
 .modal {
   width: 460px; max-width: 92vw; max-height: 86vh;
   display: flex; flex-direction: column;
-  background: var(--color-surface); border-radius: var(--radius-lg);
+  background: var(--color-popover-bg); border-radius: var(--radius-lg);
   padding: var(--space-5); box-shadow: var(--shadow-lg);
 }
 h3 {

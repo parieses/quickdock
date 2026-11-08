@@ -3376,13 +3376,13 @@ const s = currentRuntimeState
 .detail-avatar {
   width: 34px; height: 34px; border-radius: var(--radius-md); flex-shrink: 0;
   display: flex; align-items: center; justify-content: center;
-  font-size: 16px; font-weight: 700; color: var(--color-accent-text);
+  font-size: 15px; font-weight: 700; color: var(--color-accent-text);
 }
 .detail-avatar :deep(svg) { width: 22px; height: 22px; display: block; }
 .detail-avatar--accent { background: var(--color-accent); }
 .detail-titles { display: flex; flex-direction: column; gap: 4px; }
 .detail-title-row { display: flex; align-items: center; gap: 8px; }
-.detail-name { font-size: var(--text-xl); font-weight: 600; letter-spacing: -0.01em; color: var(--color-text-primary); }
+.detail-name { font-size: var(--text-xl); font-weight: 600; color: var(--color-text-primary); }
 .detail-id {
   font-size: 11px; color: var(--color-text-disabled);
   background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-xs);
@@ -3411,8 +3411,8 @@ const s = currentRuntimeState
    尤其明显）。改用全站卡片同一档 token（.qd-card / dashboard .card / 笔记页
    面板都是它），材质下卡片才和别处一个观感。 */
 .detail-block {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   padding: 14px 16px;
   box-shadow: var(--shadow-card);
@@ -3448,7 +3448,7 @@ const s = currentRuntimeState
 .ver-row.ver-head {
   background: transparent; border: none; border-left: none;
   padding: 0 12px 4px; font-size: 11px; color: var(--color-text-disabled);
-  text-transform: uppercase; letter-spacing: 0.4px;
+  letter-spacing: 0.4px;
 }
 .ver-row:not(.ver-head):hover { background: var(--color-bg-secondary); }
 .ver-row.portable { border-left-color: var(--color-accent); }
@@ -3481,7 +3481,7 @@ const s = currentRuntimeState
 .lib-dropdown {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 30;
   max-height: 220px; overflow-y: auto; padding: 4px;
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm); box-shadow: 0 6px 20px var(--color-bg-overlay);
 }
 .lib-option {
@@ -3491,7 +3491,7 @@ const s = currentRuntimeState
 }
 .lib-option:hover { background: var(--color-bg-tertiary); color: var(--color-text-primary); }
 .lib-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lib-size { flex: 0 0 auto; font-size: 10.5px; color: var(--color-text-disabled); }
+.lib-size { flex: 0 0 auto; font-size: 11px; color: var(--color-text-disabled); }
 .lib-loading { padding: 8px 9px; font-size: 11px; color: var(--color-text-disabled); }
 /* Ollama 更新提示横幅（检测到新版时出现，用户确认才替换） */
 .update-banner {
@@ -3502,7 +3502,7 @@ const s = currentRuntimeState
 }
 .ub-icon { font-size: 15px; color: var(--color-accent); flex: 0 0 auto; }
 .ub-text { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 0; }
-.ub-title { font-size: 12.5px; color: var(--color-text-primary); font-weight: 500; }
+.ub-title { font-size: 13px; color: var(--color-text-primary); font-weight: 500; }
 .ub-desc { font-size: 11px; color: var(--color-text-muted); }
 /* 模型下载后的使用引导：给出可直接粘贴的 Base URL 与模型名 */
 .ollama-usage {
@@ -3514,7 +3514,7 @@ const s = currentRuntimeState
 .usage-row { display: flex; align-items: center; gap: 8px; font-size: 12px; }
 .usage-k { flex: 0 0 96px; color: var(--color-text-muted); }
 .usage-v {
-  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
   color: var(--color-text-primary); background: var(--color-bg-primary);
   padding: 2px 7px; border-radius: var(--radius-xs); border: 1px solid var(--color-border);
 }
@@ -3550,7 +3550,7 @@ const s = currentRuntimeState
 .git-row.git-head {
   background: transparent; border: none; border-left: none;
   padding: 0 12px 2px; font-size: 11px; color: var(--color-text-disabled);
-  text-transform: uppercase; letter-spacing: 0.4px;
+  letter-spacing: 0.4px;
 }
 .git-row:not(.git-head) .g-item { font-weight: 600; color: var(--color-text-primary); }
 .g-status { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; text-transform: capitalize; }
@@ -3599,8 +3599,8 @@ const s = currentRuntimeState
 .status-dot.warn { background: var(--color-warning); box-shadow: 0 0 5px var(--color-warning-border); }
 .status-dot.fail { background: var(--color-danger); box-shadow: 0 0 5px var(--color-danger-border); }
 .status-dot.missing { background: var(--color-text-disabled); }
-.svc-btn {
-  font-size: 11px; padding: 4px 12px; border-radius: var(--radius-sm); border: none; cursor: pointer;
+.svc-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); border: none; cursor: pointer;
   font-family: inherit; color: var(--color-accent-text); transition: opacity var(--transition-fast);
 }
 .svc-btn.start { background: var(--color-success); }
@@ -3657,8 +3657,8 @@ const s = currentRuntimeState
 .muted { color: var(--color-text-muted); }
 
 .col-ops { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.op-btn {
-  font-size: 11px; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer;
+.op-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
   font-family: inherit; transition: background var(--transition-fast), color var(--transition-fast);
   white-space: nowrap;
@@ -3667,7 +3667,7 @@ const s = currentRuntimeState
 .op-btn.on { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
 .op-btn.danger:hover { background: var(--color-danger-bg); color: var(--color-danger); border-color: var(--color-danger); }
 .op-btn:disabled { opacity: 0.4; cursor: default; }
-.op-btn.small { padding: 2px 9px; font-size: 11px; }
+.op-btn.small { border-radius: var(--radius-sm); padding: 2px 9px; font-size: 11px; }
 .op-btn.primary { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .op-btn.primary:hover:not(:disabled) { background: var(--color-accent-hover); }
 .badge.ok { background: var(--color-success-bg); color: var(--color-success); }
@@ -3737,10 +3737,10 @@ const s = currentRuntimeState
 
 /* 操作列下拉菜单 */
 .menu-trigger { display: inline-flex; align-items: center; gap: 4px; }
-.caret { font-size: 9px; opacity: 0.7; }
+.caret { font-size: 10px; opacity: 0.7; }
 .op-menu {
   position: absolute; z-index: 30; min-width: 160px;
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm); padding: 4px; margin-top: 4px;
   box-shadow: 0 8px 28px var(--color-bg-overlay);
   display: flex; flex-direction: column; gap: 2px;
@@ -3761,7 +3761,6 @@ const s = currentRuntimeState
 .env-install-btn.danger:hover { opacity: 0.9; }
 .modal-text { font-size: 12px; color: var(--color-text-muted); margin: 6px 0 0; line-height: 1.5; }
 .modal-check { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; font-size: 12px; color: var(--color-text-primary); cursor: pointer; user-select: none; }
-.modal-check input { width: 14px; height: 14px; accent-color: var(--color-accent); }
 .env-header-actions { display: flex; align-items: center; gap: 8px; }
 .path-list { display: flex; flex-direction: column; gap: 7px; margin: 4px 0 12px; max-height: 52vh; overflow: auto; }
 .path-row { display: grid; grid-template-columns: 26px 130px 1fr auto; align-items: center; gap: 10px; padding: 9px 11px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: 12px; transition: border-color .12s ease, background .12s ease; }
@@ -3771,7 +3770,7 @@ const s = currentRuntimeState
 .path-name { font-weight: 600; color: var(--color-text-primary); white-space: nowrap; }
 .path-name em { font-style: normal; color: var(--color-text-muted); font-weight: 400; margin-left: 5px; }
 .path-dir { color: var(--color-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; min-width: 0; }
-.path-flag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; font-weight: 600; }
+.path-flag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 9px; border-radius: var(--radius-full); white-space: nowrap; font-weight: 600; }
 .path-flag-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .path-flag.ok { color: var(--color-success); background: var(--color-success-bg); }
 .path-flag.no { color: var(--color-danger); background: var(--color-danger-bg); }
@@ -3815,8 +3814,8 @@ const s = currentRuntimeState
 }
 .env-select { width: auto; flex-shrink: 0; }
 .env-select:focus, .env-input:focus, .env-textarea:focus { border-color: var(--color-border-focus-soft); }
-.link-btn {
-  flex-shrink: 0; font-size: 11px; padding: 7px 11px; border-radius: var(--radius-sm); cursor: pointer;
+.link-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  flex-shrink: 0; font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-accent);
   font-family: inherit; transition: background var(--transition-fast);
 }
@@ -3844,7 +3843,6 @@ const s = currentRuntimeState
 .ftp-form { padding: 4px 2px 0; display: flex; flex-direction: column; gap: 4px; }
 .ftp-form .env-input { margin-bottom: 6px; }
 .ftp-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 13px; color: var(--color-text-primary); cursor: pointer; }
-.ftp-check input { width: 15px; height: 15px; accent-color: var(--color-accent); }
 .env-update-hint {
   display: flex; align-items: center; gap: 8px; margin-top: 12px;
   padding: 7px 10px; border-radius: var(--radius-sm);
@@ -3869,8 +3867,8 @@ const s = currentRuntimeState
   width: 560px;
   max-width: 94vw;
   max-height: 88vh;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: 0 18px 56px var(--color-bg-overlay);
   display: flex;
@@ -3892,7 +3890,7 @@ const s = currentRuntimeState
 .cfg-overlay { background: var(--color-bg-overlay); backdrop-filter: blur(2px); }
 .cfg-modal {
   width: 860px; max-width: 94vw; height: 82vh; max-height: 88vh;
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg); box-shadow: 0 18px 56px var(--color-bg-overlay);
   display: flex; flex-direction: column; overflow: hidden;
 }
@@ -3904,7 +3902,7 @@ const s = currentRuntimeState
 .cfg-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
 .cfg-version {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
-  color: var(--color-accent); background: var(--color-accent-bg); padding: 2px 8px; border-radius: 999px;
+  color: var(--color-accent); background: var(--color-accent-bg); padding: 2px 8px; border-radius: var(--radius-full);
   white-space: nowrap;
 }
 .cfg-close {
@@ -3922,7 +3920,7 @@ const s = currentRuntimeState
 }
 .cfg-path-ico { color: var(--color-text-muted); flex: none; }
 .cfg-path-text {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11.5px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
   color: var(--color-text-secondary); word-break: break-all;
 }
 .cfg-hint { margin: 9px 18px 0; font-size: 11px; color: var(--color-text-disabled); }
@@ -3930,8 +3928,8 @@ const s = currentRuntimeState
   display: flex; align-items: center; justify-content: flex-end; gap: 9px;
   padding: 13px 18px 16px; border-top: 1px solid var(--color-border); flex-shrink: 0;
 }
-.cfg-btn {
-  font-family: inherit; font-size: 13px; padding: 8px 18px; border-radius: var(--radius-sm);
+.cfg-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  font-family: inherit; font-size: 13px; height: 32px; padding: 0 16px; border-radius: var(--radius-sm);
   cursor: pointer; border: 1px solid transparent;
   transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
 }
@@ -3941,7 +3939,7 @@ const s = currentRuntimeState
 .cfg-btn.primary:hover { opacity: 0.9; }
 
 /* 分组侧栏 */
-.import-btn { margin-left: auto; font-size: 11px; padding: 3px 9px; }
+.import-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px;  margin-left: auto; font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); }
 .op-sep { height: 1px; background: var(--color-border); margin: 3px 0; }
 
 /* PHP 配置弹窗 */
@@ -3951,24 +3949,24 @@ const s = currentRuntimeState
 /* PATH 区块：与下方 go.env 表单明确分区——前者管「命令找不找得到」，后者管「命令的行为」 */
 .go-path-box {
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  border-radius: 10px; padding: 10px 12px; margin: 4px 0 14px;
+  border-radius: var(--radius-md); padding: 10px 12px; margin: 4px 0 14px;
 }
 .go-path-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .go-path-label { font-size: 12px; color: var(--color-text-secondary); flex: none; }
 .go-path-value {
   flex: 1 1 200px; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11.5px; color: var(--color-text-primary); background: var(--color-bg-primary);
-  border: 1px solid var(--color-border); border-radius: 6px; padding: 3px 8px;
+  font-size: 12px; color: var(--color-text-primary); background: var(--color-bg-primary);
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 3px 8px;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.go-path-hint { margin: 7px 0 0; font-size: 11.5px; line-height: 1.5; color: var(--color-text-muted); }
+.go-path-hint { margin: 7px 0 0; font-size: 12px; line-height: 1.5; color: var(--color-text-muted); }
 .go-env-desc { font-size: 12px; color: var(--color-text-muted); margin: 0 0 12px; line-height: 1.5; }
 .go-env-form { max-height: 64vh; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; }
 .go-env-row { display: flex; flex-direction: column; gap: 5px; }
 .go-env-label { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
 .go-env-key {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600;
-  color: var(--color-accent); background: var(--color-accent-bg); padding: 1px 7px; border-radius: 999px;
+  color: var(--color-accent); background: var(--color-accent-bg); padding: 1px 7px; border-radius: var(--radius-full);
 }
 .go-env-name { font-size: 12px; color: var(--color-text-secondary); }
 .go-env-input { width: 100%; }
@@ -4024,13 +4022,13 @@ const s = currentRuntimeState
 .task-hint { margin: 6px 0 0; font-size: 11px; color: var(--color-text-muted); }
 .op-group {
   padding: 4px 10px 2px; font-size: 10px; letter-spacing: 0.04em;
-  color: var(--color-text-disabled); text-transform: uppercase;
+  color: var(--color-text-disabled); 
 }
 
 /* 日志工具栏只剩「自动刷新」这一个按钮（搜索/跟随由 RuntimeLogView 自带），
    所以 .log-toolbar / .log-filter / .log-count 一并去掉，只留按钮样式给 slot 用。 */
-.log-btn {
-  height: 28px; padding: 0 10px; font-size: 12px; cursor: pointer;
+.log-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 28px; padding: 0 11px; font-size: 12px; cursor: pointer;
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   border: 1px solid var(--color-border); border-radius: var(--radius-sm); white-space: nowrap;
 }
@@ -4179,7 +4177,7 @@ const s = currentRuntimeState
 }
 .pd-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .pd-kind { font-size: 12px; font-weight: 600; color: var(--color-text-primary); white-space: nowrap; }
-.pd-manager { font-size: 10.5px; color: var(--color-accent); white-space: nowrap; }
+.pd-manager { font-size: 11px; color: var(--color-accent); white-space: nowrap; }
 .pd-manager-ver { color: var(--color-text-muted); }
 .pd-manifest {
   margin-left: auto; min-width: 0; font-size: 10px; color: var(--color-text-muted);
@@ -4231,8 +4229,8 @@ const s = currentRuntimeState
 .disk-list { display: flex; flex-direction: column; gap: var(--space-3); }
 .disk-row {
   padding: var(--space-3) var(--space-4);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
 }
 .disk-head {
@@ -4266,9 +4264,9 @@ const s = currentRuntimeState
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-secondary); cursor: pointer;
 }
-.gh-accel input { width: 14px; height: 14px; accent-color: var(--color-accent); cursor: pointer; flex: none; }
+.gh-accel input { flex: none; }
 .gh-accel-label { font-size: 13px; color: var(--color-text-primary); }
-.gh-accel-hint { font-size: 11.5px; color: var(--color-text-muted); font-style: normal; }
+.gh-accel-hint { font-size: 12px; color: var(--color-text-muted); font-style: normal; }
 .manifest-report {
   margin-top: var(--space-4);
   display: flex;
@@ -4282,7 +4280,7 @@ const s = currentRuntimeState
   align-items: center;
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-xs);
-  background: var(--color-bg-secondary);
+  background: var(--color-card-bg);
 }
 .manifest-name { font-weight: 600; font-size: 12px; min-width: 110px; }
 .manifest-tag {
@@ -4304,7 +4302,6 @@ const s = currentRuntimeState
 .ev-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .ev-settings { margin-top: 4px; }
 .ev-toggle { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--color-text-primary); }
-.ev-toggle input { width: 15px; height: 15px; accent-color: var(--color-accent); }
 .ev-hint { display: block; margin: 6px 0 14px; font-size: 12px; color: var(--color-text-secondary); line-height: 1.5; }
 .ev-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
 .ev-field label { font-size: 12px; color: var(--color-text-secondary); }

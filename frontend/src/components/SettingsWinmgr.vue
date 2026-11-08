@@ -317,12 +317,12 @@ async function saveAll() {
 <style scoped>
 .wm-page { width: 100%; max-width: 720px; }
 .wm-head { margin-bottom: 14px; }
-.wm-title { font-size: 16px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 4px; }
+.wm-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); margin: 0 0 4px; }
 .wm-desc { font-size: 12px; color: var(--color-text-disabled); margin: 0; line-height: 1.5; }
 
 .wm-card {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   padding: 12px 14px;
   margin-bottom: 12px;
@@ -372,7 +372,7 @@ async function saveAll() {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-bottom-width: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: border-color 0.12s, background-color 0.12s, color 0.12s, box-shadow 0.12s;
 }
@@ -416,8 +416,8 @@ async function saveAll() {
 .wm-hint { font-size: 11px; color: var(--color-text-disabled); margin: 8px 0 0; line-height: 1.5; }
 
 .wm-actions { display: flex; gap: 8px; margin-top: 2px; }
-.wm-btn {
-  padding: 7px 18px;
+.wm-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 32px; padding: 0 16px;
   border: 1px solid transparent;
   border-radius: var(--radius-sm);
   font-size: 13px;

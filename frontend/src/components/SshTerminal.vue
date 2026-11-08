@@ -982,8 +982,8 @@ defineExpose({
   gap: var(--space-2);
   max-width: calc(100% - var(--space-8));
   padding: var(--space-2) var(--space-3);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
 }
@@ -997,7 +997,7 @@ defineExpose({
   flex: 1 1 auto;
   min-width: 120px;
   padding: 1px 0;
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text-primary);
   background: transparent;
@@ -1009,7 +1009,7 @@ defineExpose({
   flex: 0 0 auto;
   min-width: 34px;
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   text-align: right;
   color: var(--color-text-muted);
 }
@@ -1043,8 +1043,8 @@ defineExpose({
   z-index: 2000;
   min-width: 160px;
   padding: var(--space-1);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm);
   box-shadow: 0 8px 28px var(--color-bg-overlay);
 }
@@ -1094,7 +1094,7 @@ defineExpose({
 }
 
 .term-menu-kbd {
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   font-family: var(--font-mono);
 }

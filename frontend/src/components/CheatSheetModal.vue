@@ -184,8 +184,8 @@ function goHotkeySettings() {
   width: 520px;
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 64px);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-lg);
   overflow: hidden;
@@ -230,7 +230,7 @@ function goHotkeySettings() {
   font-size: 11px;
   font-weight: 600;
   color: var(--color-text-muted);
-  text-transform: uppercase;
+  
   letter-spacing: 0.5px;
 }
 .cs-row {
@@ -267,7 +267,7 @@ function goHotkeySettings() {
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-bottom-width: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   white-space: nowrap;
 }
 /* 语法样例不是键位，去掉"键帽"的下沿厚度，避免被误读成要按的键 */
@@ -296,13 +296,13 @@ function goHotkeySettings() {
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0 12px;
+  padding: 0 11px;
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px;
   font-family: inherit;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
 }

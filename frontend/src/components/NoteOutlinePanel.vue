@@ -253,7 +253,7 @@ function indentStyle(level: number): { paddingLeft: string } {
 .qd-outline-row:hover { background: var(--color-bg-hover); }
 
 /* active 规则写在 hover 之后：当前标题的高亮不该被鼠标划过冲掉 */
-.qd-outline-item.is-active .qd-outline-row { background: var(--color-accent-bg); }
+.qd-outline-item.is-active .qd-outline-row { background: var(--color-select-bg); }
 .qd-outline-item.is-active .qd-outline-text { color: var(--color-accent); }
 
 .qd-outline-caret {

@@ -323,7 +323,7 @@ function writeBack(mode: 'insert' | 'replace' | 'append') {
 
 .note-ai-quote-line {
   margin-top: 2px;
-  font-size: 10.5px;
+  font-size: 11px;
   line-height: 1.45;
   color: var(--color-text-muted);
   white-space: pre;

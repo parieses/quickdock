@@ -144,7 +144,7 @@ function close() {
 }
 .dialog {
   width: 460px; max-width: 92vw; max-height: 80vh; display: flex; flex-direction: column;
-  background: var(--color-surface); border-radius: var(--radius-lg);
+  background: var(--color-popover-bg); border-radius: var(--radius-lg);
   padding: var(--space-5); box-shadow: var(--shadow-lg);
 }
 .dlg-head {
@@ -171,8 +171,8 @@ function close() {
 .run-list { display: flex; flex-direction: column; gap: 6px; }
 .run-row {
   display: grid; grid-template-columns: 18px 1fr 72px 2fr; align-items: center; gap: 10px;
-  padding: 8px 10px; background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
+  padding: 8px 10px; background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color); border-radius: var(--radius-md);
 }
 .run-status { display: flex; align-items: center; }
 .run-row.ok .run-status { color: var(--color-success); }

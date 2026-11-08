@@ -397,8 +397,8 @@ defineExpose({ capturing })
 
 /* 列表容器：细边框 + 圆角，行间用 1px 分隔线而不再各自成卡，密度更高 */
 .hk-panel {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   overflow: hidden;
 }
@@ -411,7 +411,7 @@ defineExpose({ capturing })
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
 }
-.hk-panel-title { font-size: 11px; font-weight: 600; color: var(--color-text-muted); text-transform: uppercase; letter-spacing: 0.6px; }
+.hk-panel-title { font-size: 11px; font-weight: 600; color: var(--color-text-muted); letter-spacing: 0.6px; }
 .hk-panel-hint { font-size: 11px; color: var(--color-text-disabled); }
 
 /* 单行栅格：图标 / 功能名 / 说明（可伸长可省略） / 键帽 / 重置 */
@@ -432,7 +432,7 @@ defineExpose({ capturing })
 .hk-row.capturing .hk-icon { color: var(--color-accent); }
 .hk-name { font-size: 13px; font-weight: 500; color: var(--color-text-primary); white-space: nowrap; }
 .hk-desc {
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-disabled);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -455,7 +455,7 @@ defineExpose({ capturing })
   background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
   border-bottom-width: 2px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: border-color var(--transition-fast), background-color var(--transition-fast), color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -495,10 +495,10 @@ defineExpose({ capturing })
   align-items: center;
   gap: 6px;
   height: 28px;
-  padding: 0 14px;
+  padding: 0 11px;
   border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  font-size: 13px;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);

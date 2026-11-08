@@ -563,7 +563,7 @@ function onDropItem(e: DragEvent, targetId: string) {
 }
 .ctx-menu {
   position: fixed; min-width: 168px; padding: 4px;
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column; gap: 1px;
 }
@@ -635,7 +635,7 @@ function onDropItem(e: DragEvent, targetId: string) {
 .batch-move-item {
   text-align: left; padding: 6px 10px; border: none; background: transparent;
   border-radius: var(--radius-sm); cursor: pointer;
-  color: var(--color-text-primary); font-size: 12.5px; white-space: nowrap;
+  color: var(--color-text-primary); font-size: 13px; white-space: nowrap;
 }
 .batch-move-item:hover { background: var(--color-bg-hover); }
 </style>

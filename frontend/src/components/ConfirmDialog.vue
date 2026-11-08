@@ -75,7 +75,7 @@ function onConfirm() {
   display: flex; align-items: center; justify-content: center;
 }
 .confirm-panel {
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); width: 360px; max-width: 90vw;
   padding: 24px; text-align: center;
   box-shadow: 0 12px 48px var(--color-bg-overlay);
@@ -88,7 +88,7 @@ function onConfirm() {
   max-height: 180px; overflow-y: auto;
   background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   list-style: none;
-  font-family: ui-monospace, Consolas, monospace; font-size: 11.5px;
+  font-family: ui-monospace, Consolas, monospace; font-size: 12px;
   color: var(--color-text-secondary); line-height: 1.7;
   word-break: break-all;
 }
@@ -96,10 +96,9 @@ function onConfirm() {
   display: flex; align-items: center; gap: 6px; justify-content: center;
   margin: -8px 0 16px; font-size: 13px; color: var(--color-text-secondary); cursor: pointer;
 }
-.confirm-check input { accent-color: var(--color-accent); }
 .confirm-footer { display: flex; justify-content: center; gap: 12px; }
-.btn {
-  padding: 8px 24px; border-radius: var(--radius-sm); font-size: 13px;
+.btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 32px; padding: 0 16px; border-radius: var(--radius-sm); font-size: 13px;
   cursor: pointer; border: none; font-family: inherit;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s; font-weight: 500;
 }

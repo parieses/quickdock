@@ -290,7 +290,7 @@ onMounted(load)
 .rc-row {
   display: flex; align-items: center; gap: 10px;
   padding: 8px 10px; border-radius: var(--radius-sm);
-  border: 1px solid var(--color-border); background: var(--color-bg-secondary);
+  border: 1px solid var(--card-border-color); background: var(--color-card-bg);
 }
 .rc-row:hover { background: var(--color-bg-hover); }
 .rc-icon {
@@ -311,7 +311,7 @@ onMounted(load)
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .rc-badge {
-  flex-shrink: 0; font-size: 10px; padding: 0 5px; border-radius: 7px;
+  flex-shrink: 0; font-size: 10px; padding: 0 5px; border-radius: var(--radius-sm);
   color: var(--color-text-secondary); background: var(--color-bg-tertiary);
   border: 1px solid var(--color-border);
 }
@@ -319,14 +319,14 @@ onMounted(load)
 .rc-actions { display: flex; align-items: center; gap: 4px; flex-shrink: 0; }
 .rc-btn {
   display: flex; align-items: center; gap: 4px; font-size: 11px;
-  padding: 3px 8px; border-radius: var(--radius-sm); cursor: pointer;
+  height: 24px; padding: 0 8px; border-radius: var(--radius-sm); cursor: pointer;
   border: 1px solid var(--color-border); background: var(--color-bg-primary);
   color: var(--color-text-primary); font-family: inherit;
 }
 .rc-btn:hover:not(:disabled) { background: var(--color-bg-active); }
 .rc-btn:disabled { opacity: 0.4; cursor: default; }
 .rc-btn.restore:hover:not(:disabled) { color: var(--color-accent); border-color: var(--color-accent); }
-.rc-btn.danger { padding: 3px 6px; color: var(--color-text-disabled); }
+.rc-btn.danger { border-radius: var(--radius-sm); padding: 3px 6px; color: var(--color-text-disabled); }
 .rc-btn.danger:hover:not(:disabled) { color: var(--color-danger); border-color: var(--color-danger-border); }
 
 .rc-empty {

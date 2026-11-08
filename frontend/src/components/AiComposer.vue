@@ -350,7 +350,7 @@ defineExpose({
   max-width: 100%;
   padding: 0 8px;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
   font-size: 11px;
@@ -367,7 +367,7 @@ defineExpose({
   margin: 0;
   padding: 8px 12px;
   border: 1px solid color-mix(in srgb, var(--color-warning) 45%, transparent);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: color-mix(in srgb, var(--color-warning) 10%, var(--color-bg-primary));
 }
 
@@ -378,12 +378,12 @@ defineExpose({
 .ai-hook-banner-actions { display: flex; gap: 8px; margin-top: 6px; }
 
 .ai-hook-ok {
-  padding: 2px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  padding: 2px 10px; font-size: 11px; border-radius: var(--radius-xs); cursor: pointer;
   border: 1px solid var(--color-accent); background: var(--color-accent); color: var(--color-accent-text);
 }
 
 .ai-hook-no {
-  padding: 2px 10px; font-size: 11px; border-radius: 4px; cursor: pointer;
+  padding: 2px 10px; font-size: 11px; border-radius: var(--radius-xs); cursor: pointer;
   border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
 }
 

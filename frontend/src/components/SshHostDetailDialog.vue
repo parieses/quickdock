@@ -218,8 +218,8 @@ async function copyTarget() {
   max-height: calc(100vh - 80px);
   display: flex;
   flex-direction: column;
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 16px 48px var(--color-bg-overlay);
 }
@@ -278,9 +278,9 @@ async function copyTarget() {
 .hdd-v--mono { font-family: var(--font-mono); font-size: 11px; }
 /* 路径与 ID 会比面板宽，截断之后剩下的那点信息恰恰没用（看不出是哪台机器） */
 .hdd-v--wrap { word-break: break-all; }
-.hdd-sub { color: var(--color-text-muted); font-size: 10.5px; margin-left: 3px; }
+.hdd-sub { color: var(--color-text-muted); font-size: 11px; margin-left: 3px; }
 
-.hdd-note { margin-top: 8px; font-size: 10.5px; color: var(--color-text-muted); }
+.hdd-note { margin-top: 8px; font-size: 11px; color: var(--color-text-muted); }
 .hdd-note--warn { color: var(--color-warning); }
 
 .hdd-foot {
@@ -292,12 +292,12 @@ async function copyTarget() {
 .hdd-foot-spacer { flex: 1; }
 .hdd-btn {
   display: inline-flex; align-items: center; gap: 4px;
-  padding: 5px 11px;
+  height: 28px; padding: 0 11px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
-  font: inherit; font-size: 11.5px; cursor: pointer;
+  font: inherit; font-size: 12px; cursor: pointer;
 }
 .hdd-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .hdd-btn--primary {

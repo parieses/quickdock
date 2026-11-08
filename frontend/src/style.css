@@ -17,13 +17,14 @@
   --space-10: 40px;
   --space-11: 48px;
 
-  /* 圆角阶梯：13px 正文的桌面工具里，5/8/12/16 读起来像移动端卡片。
-     收到 4/6/10/14 后，控件与容器的层级仍能区分，但整体更"硬"。
-     改这四个值等于全应用换一套圆角，不要再在组件里写死 px。 */
+  /* 圆角阶梯：收到 4/6/8/12 四档。控件 6、卡片 8、浮层 12。
+     卡片 10→8、浮层 14→12，是为了让"控件 → 容器 → 浮层"之间只差 2px：
+     半径差越大越像移动端卡片，越小越像桌面工具的分区。
+     改这五个值等于全应用换一套圆角，不要再在组件里写死 px。 */
   --radius-xs: 4px;
   --radius-sm: 6px;
-  --radius-md: 10px;
-  --radius-lg: 14px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
   --radius-full: 9999px;
 
   --sidebar-width: 210px;
@@ -65,7 +66,15 @@
   --transition-base: 160ms cubic-bezier(0.32, 0.72, 0, 1);
   --transition-slow: 220ms cubic-bezier(0.32, 0.72, 0, 1);
 
-  /* 字号阶梯：以前散在各组件里的 11/12/13/15 现在有名字。
+  /* 字号阶梯：七档，一档一个用途。不许再写 10.5 / 11.5 / 12.5 这类半像素值——
+     100% 缩放下 0.5px 字号不产生可辨差异，只让阶梯失去参照（存量已抹平）。
+       10 角标 / 计数徽章
+       11 分区标题、行副标题、时间与 meta
+       12 控件文字（按钮 / 输入框）、页头副标题
+       13 正文基准（列表标题、表单值）
+       15 一级页标题
+       18 区块标题 / 引导页标题
+       24 数据展示（统计读数）—— 不进列表
      中文字面高度比同号西文大，13px 是这套工具的正文档位。 */
   --text-2xs: 10px;
   --text-xs: 11px;
@@ -73,6 +82,7 @@
   --text-md: 13px;
   --text-lg: 15px;
   --text-xl: 18px;
+  --text-2xl: 24px;
 }
 
 /* ==================== CSS 变量 — 深色主题 ==================== */
@@ -181,16 +191,42 @@
   --color-terminal-search-match: #4a3f14;
   --color-terminal-search-active: #8a6d1f;
 
-  /* 阴影分三层用途，别再在组件里手写 box-shadow：
-       card  = 静态容器（面板/卡片）：靠 1px 内高光勾边 + 极淡投影"浮起"；
-       sm/md/lg = 交互态与浮层；
-       pop   = 弹窗/菜单/命令面板这类真正离开文档流的层。 */
+  /* ---- 卡片与选中态 ------------------------------------------------
+     --color-card-bg：深色下卡片**不描边也不投影**，全靠比
+     --color-bg-secondary 亮一档来分层（bg-secondary 留给侧栏 / 页头这类"外壳"）。
+     以前卡片是「底色 + 1px 描边 + 内高光 + 投影」四层叠，一堆卡片同屏时
+     每张都带一圈亮边，整页发毛。
+     --card-border-color：浅色主题反向——白卡片压白底没有边界会散，
+     所以浅色保留 1px 边（同 --color-border）；深色用 transparent 让 border 声明失效。
+     --color-select-bg：原选中态用 accent-bg（8.5% 蓝），压在深底上几乎看不出，
+     于是又叠了竖条 + 图标变色去凑信号，三个指示器各自都很弱。现在把底色做实，
+     竖条只负责"定位在左边缘"，图标不再变色——两个信号，都做足。 */
+  --color-card-bg: #171b22;
+  --card-border-color: transparent;
+  --color-select-bg: rgba(91, 140, 255, 0.14);
+  /* 勾选框：未选底比卡片再暗一档（"一个凹槽"），选中由 --qd-check-color 铺实。
+     单列 token 而不是复用 bg-tertiary：Mica 材质下 bg-tertiary 是半透明的，
+     勾选框会跟着透出壁纸，14px 的小方块一旦发虚就糊成一团。 */
+  --color-check-bg: #101419;
+  --color-check-border: #3a4353;
+  /* --color-popover-bg：真正"离开文档流"的那一层（下拉/右键菜单/浮层卡片）。
+     卡片提到 #171b22 后，浮层如果仍用 bg-secondary(#14171f)，就会比它盖住的
+     卡片还暗——看起来像个洞。浮层必须比任何静态层都亮一档。 */
+  --color-popover-bg: #1e232d;
+  --popover-border-color: rgba(255, 255, 255, 0.08);
+
+  /* 阴影只保留三层视觉用途（变量名不删：删了存量引用会静默失效）：
+       card = 静态容器 —— 深色下彻底去掉，卡片靠上面的 --color-card-bg 分层；
+       md   = 中浮层：下拉 / popover / 右键菜单；
+       pop  = 大浮层：模态 / 命令面板 / 通知；
+       lg   = pop 的别名（实测 24 处浮层都写 lg、md 只 9 处，分级早已失效）。
+     sm / toast-hover 保留名字、值并入邻近档，新代码不许再用它们分级。 */
   --shadow-border: 0 1px 0 rgba(0, 0, 0, 0.4);
-  --shadow-border-right: 1px 0 0 rgba(0, 0, 0, 0.4);
-  --shadow-card: inset 0 1px 0 var(--color-hairline), 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --shadow-md: 0 6px 16px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 12px 28px rgba(0, 0, 0, 0.5);
+  --shadow-border-right: none;
+  --shadow-card: none;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.45);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.4);
   --color-toast-error-bg: #2d1818;
   --color-toast-error-text: #fca5a5;
@@ -297,12 +333,26 @@
   --color-terminal-search-match: #ffe9a8;
   --color-terminal-search-active: #ffc94d;
 
+  /* 与深色同名 token 一一对应：浅色卡片是纯白压 --color-bg-primary，
+     白压白没有边界，所以必须保留 1px 描边（用 --color-border），
+     投影只留一层极淡的，不再叠内高光。 */
+  --color-card-bg: #ffffff;
+  --card-border-color: var(--color-border);
+  --color-select-bg: rgba(91, 140, 255, 0.12);
+  /* 浅色未选框是白底 + 灰边：和白卡片同色时才不会像一块脏印子，
+     边界靠 --color-check-border 表达（见上：深色是"凹"，浅色是"框"）。 */
+  --color-check-bg: #ffffff;
+  --color-check-border: #c2c9d4;
+  /* 浅色浮层就是纯白：它靠 shadow + 边框和底下的白卡片分开，不需要再压暗。 */
+  --color-popover-bg: #ffffff;
+  --popover-border-color: var(--color-border);
+
   --shadow-border: 0 1px 0 rgba(15, 18, 24, 0.06);
-  --shadow-border-right: 1px 0 0 rgba(15, 18, 24, 0.05);
-  --shadow-card: inset 0 1px 0 var(--color-hairline), 0 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-border-right: none;
+  --shadow-card: 0 1px 2px rgba(16, 24, 40, 0.06);
   --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.07);
-  --shadow-md: 0 6px 16px rgba(16, 24, 40, 0.1);
-  --shadow-lg: 0 12px 28px rgba(16, 24, 40, 0.14);
+  --shadow-md: 0 6px 20px rgba(16, 24, 40, 0.12);
+  --shadow-lg: 0 16px 40px rgba(16, 24, 40, 0.16), 0 2px 8px rgba(16, 24, 40, 0.08);
   --shadow-pop: 0 16px 40px rgba(16, 24, 40, 0.16), 0 2px 8px rgba(16, 24, 40, 0.08);
   --color-toast-error-bg: #fff0f0;
   --color-toast-error-text: #d32f2f;
@@ -337,7 +387,10 @@ body {
   height: 100%;
   font-family: var(--font-family);
   font-size: var(--text-md);
-  line-height: 1.5;
+  /* 1.6 而不是 1.5：13px 中文在 1.5 下行间只剩 6.5px，多行段落读起来发挤；
+     西文 1.5 够用，中文字面更满，同一档位必须更松。
+     紧凑布局（列表行、表格单元格）自己写更小的 line-height，不受这条牵连。 */
+  line-height: 1.6;
   background-color: var(--color-bg-primary);
   color: var(--color-text-primary);
   -webkit-font-smoothing: antialiased;
@@ -510,6 +563,75 @@ select:focus-visible {
   border-color: var(--color-border-focus-soft);
 }
 
+/* ==================== 勾选框 ==================== */
+/* 原生 checkbox 由 WebView2 按系统主题绘制：深色界面里是块发白的小方块，
+   亮度和任何一层底色都对不上，混在 13px 文本里像贴了张纸。这里 appearance:none
+   自己画——未选是「比卡片下沉一档的小方块」，选中是 accent 实底 + 白勾。
+   勾用 background-image 而不是伪元素：各组件把尺寸写成 12/14/15px 不等，
+   SVG 背景能跟着盒子缩放，不必逐个改宽度（input 是替换元素，伪元素在 Chromium
+   下本就不可靠）。SVG 里的 #fff 与 --color-accent-text 同值，勾永远落在 accent
+   实底上，深/浅主题都是白勾，属于"图标墨色"而非主题色。 */
+input[type='checkbox'] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-check-border);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-check-bg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 100%;
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  /* 选中色抽成组件级变量：全局默认 accent，个别地方要红勾（如指纹确认）
+     就在自己那条规则里改这一个值，不必再自绘一套。 */
+  --qd-check-color: var(--color-accent);
+}
+/* hover 只抬边框不抬底色：勾选框常成排出现，整排一起变色会像被选中了。 */
+input[type='checkbox']:hover:not(:disabled) { border-color: var(--color-text-disabled); }
+input[type='checkbox']:checked,
+input[type='checkbox']:indeterminate {
+  background-color: var(--qd-check-color);
+  border-color: var(--qd-check-color);
+}
+input[type='checkbox']:checked {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.7 8.5l2.9 2.9 5.7-6.2' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+}
+/* 批量选择的表头勾选框会用 :indeterminate（部分选中），画一道横杠。 */
+input[type='checkbox']:indeterminate {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4 8h8' fill='none' stroke='%23fff' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E");
+}
+input[type='checkbox']:disabled { cursor: not-allowed; opacity: 0.45; }
+
+/* 单选框：应用本体目前没有用到，但插件窗口共用这份样式表，插件里的
+   <input type="radio"> 同样会被画成系统白块，所以一并给出圆形版本。 */
+input[type='radio'] {
+  appearance: none;
+  -webkit-appearance: none;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--color-check-border);
+  border-radius: var(--radius-full);
+  background-color: var(--color-check-bg);
+  cursor: pointer;
+  transition: background-color var(--transition-fast), border-color var(--transition-fast);
+  --qd-check-color: var(--color-accent);
+}
+input[type='radio']:hover:not(:disabled) { border-color: var(--color-text-disabled); }
+input[type='radio']:checked {
+  border-color: var(--qd-check-color);
+  /* 实心圆环：外圈 1px 选中色 + 中心 6px 圆点，中间留一圈底色当白边。 */
+  background-image: radial-gradient(circle, var(--qd-check-color) 0 3px, transparent 3px);
+}
+input[type='radio']:disabled { cursor: not-allowed; opacity: 0.45; }
+
 /* ==================== 通用工具类 ==================== */
 .text-muted { color: var(--color-text-muted); }
 .text-disabled { color: var(--color-text-disabled); }
@@ -581,7 +703,7 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   overflow-y: auto;
   background: var(--color-surface, #1e1e1e);
   border: 1px solid var(--color-border, #333);
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
 .version-list-loading,

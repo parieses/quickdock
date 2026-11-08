@@ -363,7 +363,6 @@ function onModelSelect(e: Event) {
   margin: 0 0 4px;
   font-size: 24px;
   font-weight: 600;
-  letter-spacing: -0.015em;
   color: var(--color-text-primary);
 }
 
@@ -373,7 +372,7 @@ function onModelSelect(e: Event) {
   display: inline-flex; align-items: center; gap: 5px;
   padding: 5px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 12px; font-family: inherit;
@@ -481,7 +480,7 @@ function onModelSelect(e: Event) {
   max-width: 100%;
   padding: 0 8px;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--color-bg-secondary);
   color: var(--color-text-secondary);
   font-size: 11px;
@@ -514,7 +513,7 @@ select.ai-hero-select {
   /* 右侧留 8px：原生下拉箭头画在 padding 区里，留窄了文字会顶到箭头上。 */
   padding: 0 8px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
   font-size: 11px;
@@ -608,7 +607,7 @@ select.ai-hero-select:focus-visible {
   margin-left: auto;
   padding: 3px 10px;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-secondary);
   font-size: 11px;
@@ -625,10 +624,10 @@ select.ai-hero-select:focus-visible {
   max-width: 100%;
   padding: 7px 12px;
   border: 1px solid var(--color-border);
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12.5px; font-family: inherit; text-align: left;
+  font-size: 13px; font-family: inherit; text-align: left;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }

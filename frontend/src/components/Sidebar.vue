@@ -465,10 +465,11 @@ async function handleDeleteWorkspace(wsId: string) {
   min-width: var(--sidebar-width);
   height: 100%;
   background: var(--color-bg-secondary);
-  box-shadow: var(--shadow-border-right);
-  /* 右缘一道内高光：侧栏与内容之间原来只有一条黑线，在深色主题下两者
-     容易糊成一片；高光让"侧栏是一块独立的板"这件事看得出来。 */
-  border-right: 1px solid var(--color-hairline);
+  /* 侧栏与内容之间只留一条 1px 分隔线。
+     以前是「border-right: hairline 白线 + box-shadow: 1px 黑线」双写，
+     一条黑一条白模拟"板子有厚度"，属于拟物残留；现在统一成单条
+     --color-border —— 深色下比侧栏亮，浅色下比侧栏暗，两套主题都能描出边界。 */
+  border-right: 1px solid var(--color-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -526,14 +527,12 @@ async function handleDeleteWorkspace(wsId: string) {
   box-shadow: var(--shadow-border);
   overflow-y: auto;
 }
-/* 分组标题与三栏的 .qd-panel-title 同一套：11px / 600 / +0.08em。
-   字距是这里唯一的装饰——全大写的西文加宽才不挤，中文小字靠它拉开呼吸。 */
+/* 分组标题与三栏的 .qd-panel-title 同一套：11px / 600 / 中性色。
+   不再大写 + 加字距：中文没有大小写，剩下的只有被拉开的字距。 */
 .navigator-header {
   font-size: var(--text-xs);
   font-weight: 600;
   color: var(--color-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
   padding: 6px 6px 6px;
   user-select: none;
 }
@@ -556,22 +555,22 @@ async function handleDeleteWorkspace(wsId: string) {
   text-align: left;
 }
 .nav-item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-/* 选中态与工作空间三栏的 .qd-row.active 同一套语言：左侧一道强调色竖条
-   + 极淡底色，图标转强调色。整块铺满 accent-bg 时，一行选中会把整条侧栏
-   的视觉重心抢走（尤其侧栏只有 210px 宽），竖条能表达"当前在哪"而不喧哗。 */
-.nav-item.active { background: var(--color-accent-bg); color: var(--color-text-primary); font-weight: 500; }
+/* 选中态与工作空间三栏的 .qd-row.active 同一套语言：底色 + 左缘竖条。
+   底色用 --color-select-bg（14% 蓝）而不是 accent-bg（8.5%）——8.5% 压在
+   侧栏底色上几乎看不出，于是又叠竖条、又给图标变色去凑信号，三个都弱。
+   现在两个信号都做足，图标保持中性：颜色只表达"当前在哪"，不兼任装饰。 */
+.nav-item.active { background: var(--color-select-bg); color: var(--color-text-primary); font-weight: 500; }
 .nav-item.active::before {
   content: '';
   position: absolute;
   left: 0;
   top: 50%;
   transform: translateY(-50%);
-  width: 2px;
+  width: 3px;
   height: 16px;
   border-radius: var(--radius-full);
   background: var(--color-accent);
 }
-.nav-item.active svg { color: var(--color-accent); }
 .nav-badge {
   margin-left: auto; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--radius-md);
   background: var(--color-danger); color: var(--color-accent-text); font-size: 10px; font-weight: 700; line-height: 16px; text-align: center;
@@ -595,7 +594,7 @@ async function handleDeleteWorkspace(wsId: string) {
   height: 14px;
   padding: 0 3px;
   line-height: 14px;
-  font-size: 9px;
+  font-size: 10px;
 }
 .sidebar.collapsed .settings-btn .footer-badge { top: 0; right: 2px; }
 .nav-item.opening { cursor: default; opacity: .7; }
@@ -656,8 +655,8 @@ async function handleDeleteWorkspace(wsId: string) {
   margin: 0;
   padding: 6px;
   border-left: none;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
 }
@@ -694,8 +693,8 @@ async function handleDeleteWorkspace(wsId: string) {
   z-index: 200;
   min-width: 150px;
   padding: 4px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
 }
@@ -751,8 +750,8 @@ async function handleDeleteWorkspace(wsId: string) {
   left: var(--space-4);
   right: var(--space-4);
   z-index: 100;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
   overflow: hidden;
@@ -762,7 +761,7 @@ async function handleDeleteWorkspace(wsId: string) {
   font-size: 11px;
   font-weight: 500;
   color: var(--color-text-disabled);
-  text-transform: uppercase;
+  
   letter-spacing: 0.5px;
 }
 .ws-option {
@@ -832,14 +831,14 @@ async function handleDeleteWorkspace(wsId: string) {
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  padding: 6px 10px;
+  height: 28px; padding: 0 11px;
   border: none;
   background: transparent;
   color: var(--color-text-disabled);
   font-size: 12px;
   cursor: pointer;
   font-family: inherit;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .settings-btn:hover { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
@@ -854,7 +853,7 @@ async function handleDeleteWorkspace(wsId: string) {
   background: transparent;
   color: var(--color-text-disabled);
   cursor: pointer;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .collapse-btn:hover { color: var(--color-text-muted); background: var(--color-bg-tertiary); }

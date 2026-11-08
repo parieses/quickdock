@@ -602,11 +602,11 @@ onBeforeUnmount(() => {
 }
 .sfp-lan-warn { margin: 0 0 var(--space-3); font-size: var(--text-xs); line-height: 1.5; color: var(--color-warning); }
 .sfp-foot { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
-.sfp-btn {
-  padding: var(--space-2) var(--space-5);
-  font: inherit; font-size: var(--text-xs);
+.sfp-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 28px; padding: 0 11px;
+  font: inherit; font-size: 12px;
   color: var(--color-text-secondary); background: transparent;
-  border: 1px solid var(--color-border); border-radius: var(--radius-xs); cursor: pointer;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm); cursor: pointer;
 }
 .sfp-btn:hover { color: var(--color-text-primary); background: var(--color-bg-hover); }
 .sfp-btn--primary { color: var(--color-accent-text); background: var(--color-accent); border-color: var(--color-accent); }

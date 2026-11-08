@@ -337,8 +337,8 @@ onUnmounted(() => {
 }
 .pane {
   display: flex; flex-direction: column; overflow: hidden;
-  border: 1px solid var(--color-border); border-radius: var(--radius-md);
-  background: var(--color-bg-secondary);
+  border: 1px solid var(--card-border-color); border-radius: var(--radius-md);
+  background: var(--color-card-bg);
 }
 .pane-head {
   display: flex; align-items: center; gap: 6px; padding: 9px 12px; flex-shrink: 0;
@@ -347,7 +347,7 @@ onUnmounted(() => {
 }
 .pane-count {
   margin-left: auto; font-weight: 400; font-size: 11px; padding: 0 6px;
-  border-radius: 8px; background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+  border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-secondary);
 }
 .pane-head-btn {
   display: flex; align-items: center; justify-content: center;

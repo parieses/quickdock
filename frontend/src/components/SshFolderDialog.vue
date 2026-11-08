@@ -137,8 +137,8 @@ function onKeydown(e: KeyboardEvent) {
   flex-direction: column;
   width: 380px;
   max-width: 92vw;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 12px 48px var(--color-bg-overlay);
   overflow: hidden;
@@ -192,7 +192,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 
 .fd-x-glyph {
-  font-size: 17px;
+  font-size: 18px;
   line-height: 1;
 }
 
@@ -207,7 +207,7 @@ function onKeydown(e: KeyboardEvent) {
 .fd-label {
   display: block;
   margin-bottom: var(--space-3);
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
@@ -215,7 +215,7 @@ function onKeydown(e: KeyboardEvent) {
   width: 100%;
   box-sizing: border-box;
   padding: var(--space-3) var(--space-4);
-  font-size: 12.5px;
+  font-size: 13px;
   font-family: inherit;
   color: var(--color-text-primary);
   background: var(--color-bg-secondary);
@@ -254,14 +254,14 @@ function onKeydown(e: KeyboardEvent) {
   background: var(--color-bg-tertiary);
 }
 
-.fd-btn {
-  padding: var(--space-2) var(--space-5);
+.fd-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 28px; padding: 0 11px;
   font-size: 12px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast);
 }

@@ -284,7 +284,7 @@ async function setDefault(tool: OpenTool) {
   gap: 12px;
 }
 .tool-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--color-text-primary);
   margin: 0 0 4px;
@@ -354,8 +354,8 @@ async function setDefault(tool: OpenTool) {
   align-items: center;
   gap: 12px;
   padding: 12px 14px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   transition: border-color 0.12s;
 }
@@ -555,16 +555,11 @@ async function setDefault(tool: OpenTool) {
   color: var(--color-text-muted);
   cursor: pointer;
 }
-.tool-default-toggle input {
-  width: 16px;
-  height: 16px;
-  accent-color: var(--color-accent);
-  cursor: pointer;
-}
+.tool-default-toggle input { cursor: pointer; }
 
 /* 复用设置页通用按钮样式 */
 .btn {
-  padding: 6px 14px;
+  height: 28px; padding: 0 11px;
   border: none;
   border-radius: var(--radius-sm);
   font-size: 12px;

@@ -379,7 +379,7 @@ function onRowClick(n: SshTreeNode) {
 
 .tree-hint-text {
   margin: 0;
-  font-size: 11.5px;
+  font-size: 12px;
   text-align: center;
 }
 
@@ -388,7 +388,7 @@ function onRowClick(n: SshTreeNode) {
   align-items: center;
   gap: var(--space-2);
   padding: var(--space-3) var(--space-5);
-  font-size: 11.5px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-accent);
   background: var(--color-accent-bg);
@@ -533,7 +533,7 @@ function onRowClick(n: SshTreeNode) {
   display: flex;
   align-items: center;
   gap: var(--space-2);
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -554,7 +554,7 @@ function onRowClick(n: SshTreeNode) {
 
 .tree-target {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -564,7 +564,7 @@ function onRowClick(n: SshTreeNode) {
 .tree-count {
   flex: 0 0 auto;
   padding: 0 var(--space-2);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   background: var(--color-bg-tertiary);
   border-radius: var(--radius-full);
@@ -648,8 +648,8 @@ function onRowClick(n: SshTreeNode) {
   z-index: 2000;
   min-width: 168px;
   padding: var(--space-1);
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm);
   box-shadow: 0 8px 28px var(--color-bg-overlay);
 }

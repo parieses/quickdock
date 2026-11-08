@@ -451,7 +451,7 @@ function onKeydown(e: KeyboardEvent) {
 }
 .editor-panel {
   width: 480px; max-height: 80vh;
-  background: var(--color-surface); border: 1px solid var(--color-border); border-radius: var(--radius-lg);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color); border-radius: var(--radius-lg);
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 12px 40px var(--color-bg-overlay);
 }
@@ -534,8 +534,8 @@ function onKeydown(e: KeyboardEvent) {
   display: flex; justify-content: flex-end; gap: 8px;
   padding: 14px 20px; border-top: 1px solid var(--color-border);
 }
-.btn {
-  padding: 8px 18px; border: none; border-radius: var(--radius-sm); font-size: 13px;
+.btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 32px; padding: 0 16px; border: none; border-radius: var(--radius-sm); font-size: 13px;
   cursor: pointer; font-family: inherit; transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
 }
 .btn-cancel { background: var(--color-bg-active); color: var(--color-text-muted); }

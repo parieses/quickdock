@@ -365,7 +365,7 @@ function onDropCol(e: DragEvent, targetId: string) {
 }
 .ctx-menu {
   position: fixed; min-width: 168px; padding: 4px;
-  background: var(--color-surface); border: 1px solid var(--color-border);
+  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md); box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column; gap: 1px;
 }

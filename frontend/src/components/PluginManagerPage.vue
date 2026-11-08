@@ -1136,8 +1136,8 @@ onUnmounted(() => {
 
 /* ---- 插件卡片 ---- */
 .plugin-card {
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
   padding: 10px;
   display: flex; flex-direction: column;
@@ -1159,7 +1159,7 @@ onUnmounted(() => {
 /* 「新」角标 */
 .new-badge {
   position: absolute; top: 4px; left: 4px;
-  font-size: 9px; line-height: 14px; font-weight: 600;
+  font-size: 10px; line-height: 14px; font-weight: 600;
   padding: 0 5px; border-radius: var(--radius-sm);
   background: var(--color-accent); color: var(--color-accent-text);
   z-index: 1; letter-spacing: 0.5px;
@@ -1197,10 +1197,10 @@ onUnmounted(() => {
 /* 名称 */
 .card-name { font-size: 12px; font-weight: 500; color: var(--color-text-primary); line-height: 1.3; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
 .card-meta { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
-.card-version { font-size: 9px; color: var(--color-text-muted); }
+.card-version { font-size: 10px; color: var(--color-text-muted); }
 
 /* 状态 */
-.status-badge { font-size: 9px; padding: 0 6px; border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
+.status-badge { font-size: 10px; padding: 0 6px; border-radius: var(--radius-md); font-weight: 500; line-height: 16px; }
 .badge-running { background: var(--color-success-bg); color: var(--color-success); }
 .badge-stopped { background: var(--color-border); color: var(--color-text-muted); }
 .badge-disabled { background: var(--color-danger-bg); color: var(--color-danger); }
@@ -1213,7 +1213,7 @@ onUnmounted(() => {
    给它们上色会和运行状态抢注意力 */
 .card-perms { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; justify-content: center; }
 .perm-tag {
-  font-size: 9px;
+  font-size: 10px;
   line-height: 15px;
   padding: 0 5px;
   border-radius: var(--radius-md);
@@ -1235,13 +1235,13 @@ onUnmounted(() => {
 .cmd-chip {
   display: inline-flex; align-items: center; gap: 4px;
   max-width: 100%;
-  font-size: 9px;
+  font-size: 10px;
   color: var(--color-text-secondary);
 }
 .cmd-kbd {
   padding: 0 4px;
   font-family: var(--font-mono, monospace);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 14px;
   color: var(--color-text-secondary);
   background: var(--color-bg-primary);
@@ -1255,7 +1255,7 @@ onUnmounted(() => {
   color: var(--color-text-muted);
 }
 .cmd-more {
-  font-size: 9px;
+  font-size: 10px;
   line-height: 15px;
   padding: 0 4px;
   border-radius: var(--radius-md);
@@ -1264,8 +1264,8 @@ onUnmounted(() => {
 }
 
 /* 使用次数 */
-.card-usage { display: inline-flex; align-items: center; gap: 2px; font-size: 9px; color: var(--color-text-muted); }
-.usage-icon { font-size: 7px; }
+.card-usage { display: inline-flex; align-items: center; gap: 2px; font-size: 10px; color: var(--color-text-muted); }
+.usage-icon { font-size: 10px; }
 .usage-count { font-family: var(--font-mono, monospace); font-weight: 500; }
 
 /* 描述：固定两行高度（10px × 1.3 × 2），卡片按行对齐；超出部分由
@@ -1367,7 +1367,7 @@ onUnmounted(() => {
 .exec-row {
   display: flex; align-items: center; gap: 8px;
   padding: 5px 6px; border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
+  background: var(--color-card-bg);
   border: 1px solid transparent;
   cursor: pointer; font-size: 11px;
 }
@@ -1416,8 +1416,8 @@ onUnmounted(() => {
 .install-overlay-box {
   display: flex; flex-direction: column; align-items: center; gap: 12px;
   padding: 24px 34px;
-  background: var(--color-bg-secondary, #1e1e1e);
-  border: 1px solid var(--color-border, #2a2a2a);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: 0 10px 32px var(--color-bg-overlay);
 }
@@ -1436,7 +1436,7 @@ onUnmounted(() => {
 .drop-hint-box {
   display: flex; flex-direction: column; align-items: center; gap: 10px;
   padding: 20px 30px;
-  background: var(--color-bg-secondary);
+  background: var(--color-card-bg);
   border: 1px dashed var(--color-accent);
   border-radius: var(--radius-md);
   color: var(--color-accent); font-size: 13px;
@@ -1478,8 +1478,8 @@ onUnmounted(() => {
   background: var(--color-bg-overlay);
 }
 .qd-modal {
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-lg);
   box-shadow: 0 18px 56px var(--color-bg-overlay);
   padding: 16px 18px;
@@ -1507,14 +1507,14 @@ onUnmounted(() => {
 .cmd-dialog-body { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .cmd-row {
   padding: 8px 10px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
+  border: 1px solid var(--card-border-color); border-radius: var(--radius-sm);
+  background: var(--color-card-bg);
   display: flex; flex-direction: column; gap: 4px;
 }
 .cmd-row-top { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .cmd-row-title { font-size: 12px; color: var(--color-text-primary); font-weight: 500; }
 .cmd-trigger {
-  font-size: 9px; line-height: 15px; padding: 0 5px;
+  font-size: 10px; line-height: 15px; padding: 0 5px;
   border-radius: var(--radius-md);
   background: var(--color-accent-bg); color: var(--color-accent);
   white-space: nowrap;
@@ -1535,10 +1535,10 @@ onUnmounted(() => {
 .sources-list { overflow-y: auto; display: flex; flex-direction: column; gap: 6px; }
 .source-row {
   display: flex; align-items: flex-start; gap: 8px;
-  padding: 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
+  padding: 8px; border: 1px solid var(--card-border-color); border-radius: var(--radius-sm);
+  background: var(--color-card-bg);
 }
-.source-enabled { margin-top: 6px; accent-color: var(--color-accent); cursor: pointer; }
+.source-enabled { margin-top: 6px; cursor: pointer; }
 .source-fields { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .source-input {
   width: 100%; box-sizing: border-box;

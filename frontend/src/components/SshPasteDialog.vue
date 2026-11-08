@@ -99,8 +99,8 @@ watch(
   display: flex;
   flex-direction: column;
   padding: var(--space-6);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-toast);
 }
@@ -126,7 +126,7 @@ watch(
 
 .paste-desc {
   margin: 0 0 var(--space-4);
-  font-size: 11.5px;
+  font-size: 12px;
   line-height: 1.7;
   color: var(--color-text-secondary);
 }
@@ -140,7 +140,7 @@ watch(
 
 .paste-preview-label {
   margin-bottom: var(--space-2);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -159,7 +159,7 @@ watch(
 
 .paste-more {
   margin: var(--space-2) 0 0;
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
 }
 
@@ -177,14 +177,14 @@ watch(
   margin-top: var(--space-6);
 }
 
-.paste-btn {
-  padding: var(--space-2) var(--space-5);
-  font-size: 11.5px;
+.paste-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 28px; padding: 0 11px;
+  font-size: 12px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast),
     border-color var(--transition-fast);

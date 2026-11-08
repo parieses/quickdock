@@ -87,9 +87,9 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
   max-height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 14px;
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-lg);
   box-shadow: var(--shadow-toast);
   overflow: hidden;
 }
@@ -101,7 +101,7 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
   border-bottom: 1px solid var(--color-border);
 }
 .up-title {
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--color-text-primary);
 }
@@ -112,7 +112,7 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
   width: 28px;
   height: 28px;
   border: none;
-  border-radius: 8px;
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-secondary);
   cursor: pointer;
@@ -132,7 +132,7 @@ const noteItems = computed(() => parseReleaseNotes(props.releaseNotes))
 }
 .up-notes {
   border: 1px solid var(--color-border);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   overflow: hidden;
 }
 .up-notes-title {

@@ -151,7 +151,7 @@ function onModelSelect(ev: Event) {
   border-radius: var(--radius-sm);
   background: transparent;
   color: var(--color-text-disabled);
-  font-size: 11.5px; font-family: inherit;
+  font-size: 12px; font-family: inherit;
   cursor: pointer;
   transition: color var(--transition-fast), border-color var(--transition-fast);
 }
@@ -185,10 +185,10 @@ function onModelSelect(ev: Event) {
   min-width: 14px;
   height: 14px;
   padding: 0 3px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: var(--color-accent);
   color: var(--color-bg-primary);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 14px;
   text-align: center;
   font-variant-numeric: tabular-nums;

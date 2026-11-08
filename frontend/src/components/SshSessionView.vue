@@ -718,7 +718,7 @@ defineExpose({
 }
 
 .sess-name {
-  font-size: 12.5px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--color-text-primary);
   overflow: hidden;
@@ -728,7 +728,7 @@ defineExpose({
 
 .sess-target {
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   overflow: hidden;
   text-overflow: ellipsis;
@@ -776,13 +776,13 @@ defineExpose({
   align-items: center;
   gap: var(--space-2);
   flex: 0 0 auto;
-  padding: var(--space-2) var(--space-5);
-  font-size: 11.5px;
+  height: 24px; padding: 0 8px;
+  font-size: 11px;
   font-family: inherit;
   color: var(--color-text-secondary);
   background: transparent;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-xs);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color var(--transition-fast), background var(--transition-fast),
     border-color var(--transition-fast);
@@ -812,7 +812,7 @@ defineExpose({
   flex: 0 0 auto;
   padding: 3px var(--space-5);
   font-family: var(--font-mono);
-  font-size: 10.5px;
+  font-size: 11px;
   color: var(--color-text-muted);
   background: var(--color-bg-secondary);
   border-bottom: 1px solid var(--color-border);
@@ -894,8 +894,8 @@ defineExpose({
   width: 340px;
   max-width: 80%;
   padding: var(--space-6);
-  background: var(--color-bg-secondary);
-  border: 1px solid var(--color-border);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md);
 }
 
@@ -939,12 +939,12 @@ defineExpose({
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-size: 11.5px;
+  font-size: 12px;
   color: var(--color-text-secondary);
 }
 
 .sess-banner-hint {
-  font-size: 10.5px;
+  font-size: 11px;
   font-style: normal;
   color: var(--color-text-muted);
 }

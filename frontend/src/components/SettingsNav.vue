@@ -147,14 +147,14 @@ function restoreAll() {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 6px 12px;
+  height: 28px; padding: 0 11px;
   border: 1px solid var(--color-border);
   background: transparent;
   color: var(--color-text-secondary);
-  font-size: 12.5px;
+  font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-sm);
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .snv-btn:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-hover); }

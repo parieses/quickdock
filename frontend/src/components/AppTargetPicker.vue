@@ -159,7 +159,7 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .ap-input::placeholder { color: var(--color-text-disabled); }
 .ap-btn {
   display: flex; align-items: center; gap: 2px;
-  padding: 0 9px;
+  height: 28px; padding: 0 11px;
   border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-muted);
   cursor: pointer; flex-shrink: 0;
@@ -171,8 +171,8 @@ onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 .ap-mask { position: fixed; inset: 0; z-index: 20; }
 .ap-panel {
   position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 21;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm);
   box-shadow: 0 8px 24px var(--color-bg-overlay);
   overflow: hidden;
 }

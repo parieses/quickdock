@@ -1669,9 +1669,9 @@ onScopeDispose(() => {
 
 .kb-cite {
   padding: 2px 7px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary);
+  background: var(--color-card-bg);
   color: var(--color-text-secondary);
   font-family: inherit;
   font-size: 11px;

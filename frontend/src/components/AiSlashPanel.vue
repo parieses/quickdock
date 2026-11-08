@@ -89,7 +89,7 @@ function isPicked(sk: AISkill): boolean {
   text-overflow: ellipsis;
   white-space: nowrap;
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: 12px;
 }
 
 .ai-slash-row.is-picked .ai-slash-name { color: var(--color-accent); }

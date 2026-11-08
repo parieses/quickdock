@@ -23,6 +23,8 @@ import {
   DeleteClipboardEntry,
   UpdateClipboardNote,
   CountClipboardEntries,
+  GetPasteQueue,
+  SavePasteQueue,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
 import { Events } from '@wailsio/runtime'
@@ -496,12 +498,46 @@ async function pasteAs(entry: ClipboardEntry, fmt: PasteFormat) {
 }
 
 // ---- 队列式连续粘贴 ----
+// 队列存后端而不是只放组件里：主窗口导航页与 Ctrl+~ 浮窗是两个 WebView 实例，
+// 各持一份 ref 的话，在一边入队到另一边就看不见 —— 而「主窗口挑几条 → 浮窗里
+// 逐条贴」正是这个功能最常用的走法。后端是两者唯一共用的地方。
 interface PasteItem { id: string; label: string }
 const pasteQueue = ref<PasteItem[]>([])
 const pasteRunning = ref(false)
 const pasteDone = ref(0)
 const pasteTotal = ref(0)
 let pasteGen = 0
+
+// persistQueue 把当前队列写回后端并广播给另一个窗口。
+// 失败只记日志：入队这个动作本身已经在界面上完成了，不该因为一次写库失败
+// 就把队列回滚掉，让用户以为自己没点到。
+async function persistQueue() {
+  try {
+    await SavePasteQueue(pasteQueue.value)
+  } catch (e) {
+    logErr('clipboard', e)
+  }
+}
+
+// applyRemoteQueue 应用另一端窗口广播来的队列。
+// 内容一致直接跳过：自己写入产生的回声若照单全收，会让列表每 300ms 无谓重建一次。
+function applyRemoteQueue(items: PasteItem[]) {
+  if (!Array.isArray(items)) return
+  const next = items
+    .map((x) => ({ id: String(x?.id ?? ''), label: String(x?.label ?? '') }))
+    .filter((x) => x.id)
+  if (JSON.stringify(next) === JSON.stringify(pasteQueue.value)) return
+  pasteQueue.value = next
+}
+
+async function loadPasteQueue() {
+  try {
+    const items = unwrap<PasteItem[]>(await GetPasteQueue())
+    if (items) applyRemoteQueue(items)
+  } catch (e) {
+    logErr('clipboard', e)
+  }
+}
 
 // 两次 Hide+Ctrl+V 之间的间隔：浮窗隐藏后目标窗口要重新拿到焦点，上一条
 // Ctrl+V 也要等目标程序处理完；贴得太快会出现后一条覆盖前一条、或粘到错误窗口。
@@ -516,11 +552,14 @@ function queuePreview(e: ClipboardEntry): string {
 }
 function enqueue(items: ClipboardEntry[]) {
   const known = new Set(pasteQueue.value.map((x) => x.id))
+  let added = false
   for (const e of items) {
     if (known.has(e.id)) continue
     known.add(e.id)
     pasteQueue.value.push({ id: e.id, label: queuePreview(e) })
+    added = true
   }
+  if (added) void persistQueue()
 }
 
 // 多选存 id 而不是对象：列表每 30s 会整体刷新，持对象会指向已失效的旧数据。
@@ -554,6 +593,9 @@ async function runPasteQueue() {
     await ensurePasteTarget()
     while (gen === pasteGen && pasteQueue.value.length) {
       const item = pasteQueue.value.shift()!
+      // 每贴一条就同步一次：另一个窗口的队列条要跟着减少，
+      // 否则浮窗上还挂着已经贴过的条目，用户会以为还要再点一次。
+      void persistQueue()
       try {
         unwrap(await PasteClipboardEntry(item.id))
       } catch (e) {
@@ -572,7 +614,10 @@ async function runPasteQueue() {
 }
 function skipNextInQueue() {
   // 运行中当前条已经贴出，跳过的是队首（下一条）；未运行则直接丢掉队首。
-  if (pasteQueue.value.length) pasteQueue.value.shift()
+  if (pasteQueue.value.length) {
+    pasteQueue.value.shift()
+    void persistQueue()
+  }
 }
 function clearPasteQueue() {
   pasteGen++
@@ -580,6 +625,7 @@ function clearPasteQueue() {
   pasteRunning.value = false
   pasteDone.value = 0
   pasteTotal.value = 0
+  void persistQueue()
 }
 
 async function handleTogglePin(entry: ClipboardEntry) {
@@ -869,11 +915,16 @@ function closeMenus() { closeSaveMenu(); closePasteAsMenu() }
 
 onMounted(() => {
   loadEntries()
+  // 队列也跨窗口共享：进面板先拉一次，之后靠事件跟随另一端的改动。
+  void loadPasteQueue()
   refreshTimer.value = window.setInterval(loadEntries, 30000)
   clipboardEventOffs.push(
     Events.On('clipboard:updated', loadEntries),
-    Events.On('clipboard:shown', clearSearch),
+    // 每次唤起再对齐一次：事件监听虽然常驻，但窗口隐藏期间的广播一旦漏掉，
+    // 浮窗就会一直挂着过期的队列，直到下次入队才自愈。
+    Events.On('clipboard:shown', () => { clearSearch(); void loadPasteQueue() }),
     Events.On('clipboard:before-hide', resetScrollOnHide),
+    Events.On('clipboard:queue', (ev: any) => applyRemoteQueue(ev?.data ?? ev)),
   )
   document.addEventListener('keydown', onPanelKeydown)
   document.addEventListener('click', closeMenus)
@@ -1251,7 +1302,7 @@ onUnmounted(() => {
 .clipboard-panel.compact .cb-search { flex: 1 1 auto; min-width: 110px; }
 
 .icon-btn {
-  width: 30px; height: 30px; display: flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; display: flex; align-items: center; justify-content: center;
   background: transparent; border: none; color: var(--color-text-muted); border-radius: var(--radius-sm);
   cursor: pointer; flex-shrink: 0;
   transition: background-color 0.12s, color 0.12s, border-color 0.12s, opacity 0.12s;
@@ -1278,10 +1329,10 @@ onUnmounted(() => {
 }
 
 /* 时间筛选：同排的轻量分段，选中用蓝字+淡蓝底 */
-.time-btn {
-  padding: 3px 9px;
+.time-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
+  height: 22px; padding: 0 9px;
   border: 1px solid transparent;
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
   font-size: 11px;
@@ -1302,9 +1353,9 @@ onUnmounted(() => {
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 4px 10px;
+  height: 22px; padding: 0 9px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-full);
   background: transparent;
   color: var(--color-text-muted);
   font-size: 11px;
@@ -1369,7 +1420,7 @@ onUnmounted(() => {
 .pin-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-xs);
+  padding: 2px; border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1401,7 +1452,7 @@ onUnmounted(() => {
 .note-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-xs);
+  padding: 2px; border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1413,7 +1464,7 @@ onUnmounted(() => {
 .delete-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-xs);
+  padding: 2px; border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1427,7 +1478,7 @@ onUnmounted(() => {
 .ai-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-xs);
+  padding: 2px; border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1458,8 +1509,8 @@ onUnmounted(() => {
 }
 .image-placeholder {
   width: 160px; height: 100px; display: flex; align-items: center; justify-content: center;
-  background: var(--color-surface); border-radius: var(--radius-sm); margin-bottom: 6px;
-  border: 1px solid var(--color-border); color: var(--color-text-disabled);
+  background: var(--color-card-bg); border-radius: var(--radius-sm); margin-bottom: 6px;
+  border: 1px solid var(--card-border-color); color: var(--color-text-disabled);
 }
 
 .file-entry {
@@ -1514,8 +1565,8 @@ onUnmounted(() => {
 }
 .clipboard-pagination .page-btn {
   display: flex; align-items: center; justify-content: center;
-  min-width: 26px; height: 26px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
+  min-width: 24px; height: 24px;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
   background: var(--color-bg-tertiary); color: var(--color-text-secondary);
   font-size: 11px; font-family: inherit; cursor: pointer;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
@@ -1530,7 +1581,7 @@ onUnmounted(() => {
 .note-btn {
   flex-shrink: 0; margin-top: 3px;
   background: none; border: none; cursor: pointer;
-  padding: 2px; border-radius: var(--radius-xs);
+  padding: 2px; border-radius: var(--radius-sm);
   color: var(--color-text-disabled); opacity: 0;
   transition: opacity 0.15s, color 0.15s;
   display: flex; align-items: center; justify-content: center;
@@ -1551,8 +1602,8 @@ onUnmounted(() => {
 
 .note-editor {
   width: 320px; max-width: 90vw;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
   display: flex; flex-direction: column;
@@ -1582,7 +1633,8 @@ onUnmounted(() => {
   border-top: 1px solid var(--color-border);
 }
 .cancel-btn, .save-btn {
-  padding: 5px 14px; border-radius: var(--radius-sm);
+  display: inline-flex; align-items: center; justify-content: center;
+  height: 28px; padding: 0 11px; border-radius: var(--radius-sm);
   font-size: 12px; font-family: inherit; font-weight: 500;
   cursor: pointer; transition: background-color 0.12s, color 0.12s, border-color 0.12s;
   border: 1px solid var(--color-border);
@@ -1637,11 +1689,15 @@ onUnmounted(() => {
 .cb-queue-actions { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
 .cb-queue-actions .qd-icon-btn { width: 24px; height: 24px; }
 
+/* 浮窗只有 480px 宽，队列条必须再收一圈，否则第三条预览会把按钮挤出去。 */
+.clipboard-panel.compact .cb-queue-bar { padding: 6px 12px; gap: 6px; }
+.clipboard-panel.compact .cb-queue-title { display: none; }
+.clipboard-panel.compact .cb-queue-chip { max-width: 88px; }
+
 /* 多选复选框：放在条目最左侧，容器上的 @click.stop 拦住条目本身的复制动作。 */
 .cb-check {
   flex-shrink: 0; margin-top: 3px; display: flex; align-items: center;
   cursor: pointer;
 }
-.cb-check input { width: 14px; height: 14px; margin: 0; cursor: pointer; accent-color: var(--color-accent); }
 </style>
 

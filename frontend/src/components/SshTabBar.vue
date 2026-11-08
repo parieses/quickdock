@@ -351,7 +351,7 @@ function duplicate(tabId: string) {
 /* 同一主机的多个标签：右上角小序号，便于区分「哪个是跑更新的、哪个是看日志的」 */
 .tab-ord {
   margin-left: 2px;
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 500;
   color: var(--color-text-muted);
   font-family: var(--font-family);

@@ -187,7 +187,7 @@ function onDragStart(e: DragEvent) {
 .tn-check.on { background: var(--color-accent); border-color: var(--color-accent); }
 .tn-check.on::after {
   content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
-  border: solid var(--color-on-accent, #fff); border-width: 0 2px 2px 0; transform: rotate(45deg);
+  border: solid var(--color-accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
 .tn-row.sel-on { background: var(--color-accent-bg); color: var(--color-text-primary); }
 .tn-row.sel-on:hover { background: var(--color-accent-bg); }

@@ -1019,7 +1019,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 
 .sched-item {
   display: flex; align-items: center; gap: var(--space-3); padding: 12px 14px;
-  background: var(--color-bg-secondary); border: 1px solid var(--color-border);
+  background: var(--color-card-bg); border: 1px solid var(--card-border-color);
   border-radius: var(--radius-md); transition: background var(--transition-fast);
 }
 .sched-item:hover { background: var(--color-bg-hover); }
@@ -1087,7 +1087,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
   align-items: center; justify-content: center; z-index: 100;
 }
 .modal {
-  width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-surface);
+  width: 440px; max-height: 90vh; overflow-y: auto; background: var(--color-popover-bg);
   border-radius: var(--radius-lg); padding: var(--space-5); box-shadow: var(--shadow-lg);
 }
 .modal-area { height: auto; padding: 8px 10px; resize: vertical; line-height: 1.5; }
@@ -1097,9 +1097,9 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 /* 分段选择 */
 .seg { display: flex; flex-wrap: wrap; gap: 6px; }
 .seg-btn {
-  display: inline-flex; align-items: center; gap: 4px; padding: 6px 10px;
+  display: inline-flex; align-items: center; gap: 4px; height: 28px; padding: 0 11px;
   border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 12px;
+  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: 12px;
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .seg-btn:hover { color: var(--color-text-primary); }
@@ -1108,7 +1108,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .wd-row { display: flex; gap: 5px; }
 .wd-btn {
   width: 34px; height: 32px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary); border-radius: var(--radius-md); font-size: 12px;
+  color: var(--color-text-secondary); border-radius: var(--radius-sm); font-size: 12px;
   cursor: pointer; font-family: inherit; transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
 }
 .wd-btn:hover { color: var(--color-text-primary); }
