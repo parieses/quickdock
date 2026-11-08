@@ -48,6 +48,37 @@ export default defineConfig({
       "echarts/charts",
       "echarts/components",
       "echarts/renderers",
+      // CodeMirror：utils/aiCodeEditor.ts 把核心包和 14 个语言包**全部**写成动态
+      // import（首次打开笔记/配置编辑器才拉）。与上面 xterm、echarts 是同一个坑：
+      // 运行时发现新依赖 → 二次预构建 → 504 → createCodeEditor 的 catch 吞掉异常，
+      // 宿主 div 就成了永久空白；而预览走静态 marked 不受影响，于是表现为
+      // 「源码视图一片空白、分屏时只有右边预览有内容」。这里必须把每一个动态
+      // import 的裸模块说明符列全，漏一个语言包就会在打开对应文件时复现。
+      "codemirror",
+      "@codemirror/commands",
+      "@codemirror/state",
+      "@codemirror/search",
+      "@codemirror/view",
+      "@codemirror/language",
+      "@lezer/highlight",
+      "@codemirror/lang-javascript",
+      "@codemirror/lang-vue",
+      "@codemirror/lang-html",
+      "@codemirror/lang-css",
+      "@codemirror/lang-json",
+      "@codemirror/lang-markdown",
+      "@codemirror/lang-python",
+      "@codemirror/lang-go",
+      "@codemirror/lang-rust",
+      "@codemirror/lang-java",
+      "@codemirror/lang-cpp",
+      "@codemirror/lang-php",
+      "@codemirror/lang-sql",
+      "@codemirror/lang-yaml",
+      "@codemirror/legacy-modes/mode/properties",
+      "@codemirror/legacy-modes/mode/shell",
+      "@codemirror/legacy-modes/mode/toml",
+      "@codemirror/legacy-modes/mode/nginx",
     ],
   },
   plugins: [

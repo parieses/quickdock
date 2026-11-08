@@ -2025,6 +2025,7 @@ export default {
   notesTagsPh: 'Comma-separated tags, e.g. work, notes',
   notesMarkdownPh: 'Write Markdown / text here…',
   notesTextPh: 'Write plain text here…',
+  notesEditorLoadFailed: 'Editor failed to load. Refresh the window or restart the dev server, then retry',
   notesFormatMd: 'Markdown',
   notesFormatText: 'Plain text',
   notesViewSource: 'Source only',

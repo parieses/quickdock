@@ -21,14 +21,16 @@ import {
   ListLinkTargets,
   ResolveWikiTarget,
 } from '../../bindings/quickdock/services/appservice'
-import { Link2, FileText, ListTodo, Box, Trash2, Search, Plus, ArrowUpRight } from '@lucide/vue'
+import { Link2, FileText, ListTodo, Box, Trash2, Search, Plus, ArrowUpRight, ChevronDown } from '@lucide/vue'
 import type { EntityLink, EntityType, LinkTarget, LinkTargetGroups, ToastAPI, WikiTarget } from '../types'
 
 const props = withDefaults(defineProps<{
   srcType: EntityType
   srcId: string
   srcLabel?: string
-}>(), { srcLabel: '' })
+  /** 高度吃紧的宿主（笔记编辑区）：默认收成一行，展开用浮层，不挤占正文高度 */
+  compact?: boolean
+}>(), { srcLabel: '', compact: false })
 
 const { t } = useI18n()
 const toast = inject<ToastAPI>('toast')!
@@ -46,6 +48,8 @@ const query = ref('')
 const selectedTarget = ref<Candidate | null>(null)
 // 候选默认收起：三处宿主里笔记页的编辑区最吃高度，不能让一个还没用的下拉常驻占位。
 const candsOpen = ref(false)
+// compact 模式下的整块面板；默认收起，只有用户主动点开才展开
+const expanded = ref(false)
 
 const manual = computed(() => links.value.filter(l => l.kind !== 'wiki'))
 const wiki = computed(() => links.value.filter(l => l.kind === 'wiki'))
@@ -111,7 +115,8 @@ async function loadAll() {
   }
 }
 
-watch(() => [props.srcType, props.srcId], () => { void loadAll() }, { immediate: true })
+// 切换实体时把 compact 浮层收回去：不然在 A 文档点开后切到 B，浮层会一直盖在正文上
+watch(() => [props.srcType, props.srcId], () => { expanded.value = false; void loadAll() }, { immediate: true })
 
 function pickCandidate(c: Candidate) {
   selectedTarget.value = { type: c.type, id: c.id, label: c.label }
@@ -163,17 +168,26 @@ function openBacklink(b: BacklinkRow) {
 </script>
 
 <template>
-  <div class="elp">
-    <div class="elp-head">
+  <div class="elp" :class="{ 'elp-compact': compact, 'elp-open': expanded }">
+    <div
+      class="elp-head"
+      :role="compact ? 'button' : undefined"
+      :tabindex="compact ? 0 : undefined"
+      :aria-expanded="compact ? expanded : undefined"
+      @click="compact && (expanded = !expanded)"
+      @keydown.enter="compact && (expanded = !expanded)"
+    >
       <Link2 :size="13" class="elp-head-icon" />
       <span class="elp-title">{{ t('linkTitle') }}</span>
       <span v-if="loading" class="elp-loading">{{ t('loading') }}</span>
+      <span v-if="!srcId && compact" class="elp-hint">{{ t('linkSaveFirst') }}</span>
       <span class="elp-count">{{ manual.length + wiki.length }} / {{ backlinks.length }}</span>
+      <ChevronDown v-if="compact" :size="12" class="elp-chev" :class="{ on: expanded }" />
     </div>
 
-    <div v-if="!srcId" class="elp-disabled">{{ t('linkSaveFirst') }}</div>
+    <div v-if="!srcId && !compact" class="elp-disabled">{{ t('linkSaveFirst') }}</div>
 
-    <div v-if="srcId" class="elp-scroll">
+    <div v-if="srcId && (!compact || expanded)" class="elp-scroll">
       <div class="elp-add">
         <div class="elp-add-row">
           <Search :size="12" class="elp-search-icon" />
@@ -244,6 +258,22 @@ function openBacklink(b: BacklinkRow) {
 .elp-title { flex: 1; font-weight: 600; color: var(--color-text-primary); }
 .elp-loading { color: var(--color-text-muted); }
 .elp-count { color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }
+/* compact：高度吃紧的宿主（笔记编辑区）专用。默认只剩一行摘要，
+   展开的内容浮在正文上、不占文档流高度 —— 否则空面板也能吃掉一百多像素。 */
+.elp-compact { position: relative; }
+.elp-compact > .elp-head { padding: 4px 12px; cursor: pointer; }
+.elp-compact > .elp-head:hover { background: var(--color-bg-hover); }
+.elp-compact > .elp-head:focus-visible { outline: 1px solid var(--color-border-focus-soft); }
+.elp-hint { color: var(--color-text-disabled); font-size: var(--text-xs); }
+.elp-chev { flex-shrink: 0; color: var(--color-text-muted); transition: transform var(--transition-fast); }
+.elp-chev.on { transform: rotate(180deg); }
+.elp-compact.elp-open .elp-scroll {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  max-height: 280px; padding: 8px 12px 10px;
+  border: 1px solid var(--popover-border-color); border-top: none;
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
+  background: var(--color-popover-bg); box-shadow: var(--shadow-md);
+}
 .elp-disabled { padding: var(--space-3) var(--space-4); color: var(--color-text-disabled); border-top: 1px solid var(--color-border); }
 
 /* 整个面板只有一个滚动容器：三个页面都要嵌在既有布局里（弹窗/编辑面板/文档头部），

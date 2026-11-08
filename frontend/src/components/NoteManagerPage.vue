@@ -764,11 +764,14 @@ const previewRef = ref<HTMLElement | null>(null)
 // 唯一要显式开的是**软换行**（lineWrapping）：CM 默认不折行，手抄 textarea 的
 // 默认行为是折行的，不开的话一段中文会变成一条横向长龙。
 const docEditorHost = ref<HTMLElement | null>(null)
+// CM 走动态 import，加载失败时给一条可见提示，别让用户对着空白猜是不是样式坏了
+const editorError = ref('')
 let docEditor: CodeEditorHandle | null = null
 let docEditorGen = 0
 let offDocScroll: (() => void) | null = null
 
 async function mountDocEditor() {
+  editorError.value = ''
   const gen = ++docEditorGen
   // 先拆旧的：切文档/切格式都走这里，旧实例的滚动监听要一起摘掉
   offDocScroll?.()
@@ -806,6 +809,7 @@ async function mountDocEditor() {
     h.focus()
   } catch (e) {
     logErr('NoteManager:editor', e)
+    editorError.value = e instanceof Error ? e.message : String(e)
   }
 }
 
@@ -947,23 +951,27 @@ watch(pendingOpenNoteId, (id) => {
     <div class="notes-body">
       <!-- 左：树 -->
       <div class="notes-tree" :style="{ width: treeWidth + 'px' }" v-show="!treeCollapsed">
+        <!-- 两组就够了：新建（会改变内容）/ 树与选择（只改变看法）。
+             原来每两个图标就插一根分隔线，7 个按钮被切成 4 段，反而比不分组更碎。 -->
         <div class="tree-toolbar">
-          <button class="tt-btn" :title="t('notesNewFolder')" @click="newFolderAt('')"><FolderPlus :size="13" /></button>
-          <button class="tt-btn" :title="t('notesNewDoc')" @click="newDocAt('')"><FileText :size="13" /></button>
+          <div class="tt-group">
+            <button class="tt-btn" :title="t('notesNewFolder')" @click="newFolderAt('')"><FolderPlus :size="13" /></button>
+            <button class="tt-btn" :title="t('notesNewDoc')" @click="newDocAt('')"><FileText :size="13" /></button>
+          </div>
           <span class="tt-sep"></span>
-          <button class="tt-btn" :title="t('notesExpandAll')" @click="expandAllOpen"><ChevronDown :size="13" /></button>
-          <button class="tt-btn" :title="t('notesCollapseAll')" @click="collapseAll"><PanelLeft :size="13" /></button>
-          <span class="tt-sep"></span>
-          <button class="tt-btn" :class="{ on: selectMode }" :title="selectMode ? t('notesMultiSelectExit') : t('notesMultiSelect')" @click="toggleSelectMode">
-            <component :is="selectMode ? CheckSquare : Square" :size="13" />
-          </button>
-          <button v-if="selectMode" class="tt-btn" :title="allSelected ? t('selectedCount', { count: selectedCount }) : t('notesSelectAllDocs')" @click="toggleSelectAll">
-            <component :is="allSelected ? CheckSquare : Square" :size="13" />
-          </button>
-          <span class="tt-sep"></span>
-          <button class="tt-btn" :title="treeCollapsed ? t('notesExpandTree') : t('notesCollapseTree')" @click="toggleTreeCollapsed">
-            <component :is="treeCollapsed ? PanelLeft : PanelLeftClose" :size="13" />
-          </button>
+          <div class="tt-group">
+            <button class="tt-btn" :title="t('notesExpandAll')" @click="expandAllOpen"><ChevronDown :size="13" /></button>
+            <button class="tt-btn" :title="t('notesCollapseAll')" @click="collapseAll"><PanelLeft :size="13" /></button>
+            <button class="tt-btn" :class="{ on: selectMode }" :title="selectMode ? t('notesMultiSelectExit') : t('notesMultiSelect')" @click="toggleSelectMode">
+              <component :is="selectMode ? CheckSquare : Square" :size="13" />
+            </button>
+            <button v-if="selectMode" class="tt-btn" :title="allSelected ? t('selectedCount', { count: selectedCount }) : t('notesSelectAllDocs')" @click="toggleSelectAll">
+              <component :is="allSelected ? CheckSquare : Square" :size="13" />
+            </button>
+            <button class="tt-btn" :title="treeCollapsed ? t('notesExpandTree') : t('notesCollapseTree')" @click="toggleTreeCollapsed">
+              <component :is="treeCollapsed ? PanelLeft : PanelLeftClose" :size="13" />
+            </button>
+          </div>
         </div>
 
         <!-- 多选模式下的批量操作栏 -->
@@ -1110,6 +1118,7 @@ watch(pendingOpenNoteId, (id) => {
             src-type="note"
             :src-id="selectedDocId"
             :src-label="selectedDoc?.name || ''"
+            compact
           />
           <!-- markdown：左编辑 + 右预览，两栏滚动同步；纯文本：仅编辑区。
                两栏共用同一个编辑器宿主（格式切换只重建 CM，不动 DOM 结构）。
@@ -1145,6 +1154,13 @@ watch(pendingOpenNoteId, (id) => {
             @close="aiOpen = false"
             @writeback="onAiWriteBack"
           />
+          <!-- 编辑器动态 import 失败（dev 下依赖预构建 504 最常见）时，
+               原来的 catch 只写日志，界面上就是一整片空白，极易误判成样式问题。
+               详情放 title，正文给一句可操作的提示 + 重试入口。 -->
+          <div v-if="editorError" class="ne-load-error" :title="editorError">
+            <span>{{ t('notesEditorLoadFailed') }}</span>
+            <button class="qd-btn qd-btn-ghost" @click="mountDocEditor()">{{ t('retry') }}</button>
+          </div>
         </template>
       </div>
     </div>
@@ -1169,10 +1185,14 @@ watch(pendingOpenNoteId, (id) => {
 
 .notes-body { flex: 1; display: flex; min-height: 0; }
 .notes-tree { width: 250px; flex-shrink: 0; border-right: 1px solid var(--color-border); display: flex; flex-direction: column; background: var(--color-bg-primary); }
-.tree-toolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--color-border); }
-.tt-btn { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border: none; background: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }
+/* 整组一起换行，单个图标不会散到第二行：树宽是用户可拖的，窄栏下
+   原来 7 个图标各自折行，看起来像工具栏被拆坏了。 */
+.tree-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 6px 8px; border-bottom: 1px solid var(--color-border); }
+.tt-group { display: flex; align-items: center; gap: 2px; flex-shrink: 0; }
+.tt-btn { width: 26px; height: 26px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; border: none; background: none; color: var(--color-text-muted); cursor: pointer; border-radius: var(--radius-sm); }
 .tt-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.tt-sep { width: 1px; background: var(--color-border); margin: 0 4px; }
+/* 分组线只占图标高度的一半，不再是拉满整条工具栏的一根长线 */
+.tt-sep { width: 1px; height: 14px; flex-shrink: 0; background: var(--color-border); margin: 0 2px; }
 .tree-wrap { flex: 1; overflow-y: auto; padding: 4px; }
 .tree-empty { color: var(--color-text-disabled); font-size: 12px; padding: 20px; text-align: center; }
 .sr-row { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
@@ -1194,8 +1214,8 @@ watch(pendingOpenNoteId, (id) => {
   border-radius: var(--radius-md);
 }
 .ne-empty p { margin: 0; font-size: var(--text-md); color: var(--color-text-secondary); }
-.ne-head { display: flex; align-items: center; gap: 6px; padding: 8px 12px; border-bottom: 1px solid var(--color-border); position: relative; }
-.ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 14px; font-weight: 600; outline: none; font-family: inherit; }
+.ne-head { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); position: relative; }
+.ne-name { flex: 1; padding: 6px 10px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: var(--text-base); font-weight: 600; outline: none; font-family: inherit; }
 .ne-name:focus { border-color: var(--color-border-focus-soft); }
 .ne-format { display: flex; gap: 2px; flex-shrink: 0; }
 .ne-format button { padding: 4px 10px; border: 1px solid var(--color-border); background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
@@ -1227,7 +1247,7 @@ watch(pendingOpenNoteId, (id) => {
 .ne-wiki-item:hover { background: var(--color-bg-hover); }
 .ne-wiki-type { flex-shrink: 0; color: var(--color-text-muted); }
 .ne-wiki-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ne-tags { display: flex; align-items: center; gap: 6px; padding: 6px 12px; border-bottom: 1px solid var(--color-border); }
+.ne-tags { display: flex; align-items: center; gap: 6px; padding: 4px 12px; border-bottom: 1px solid var(--color-border); }
 .ne-tags-label { font-size: 11px; color: var(--color-text-muted); flex-shrink: 0; }
 .ne-tags-input { flex: 1; padding: 4px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm); background: var(--color-bg-tertiary); color: var(--color-text-primary); font-size: 12px; outline: none; font-family: inherit; }
 .ne-tags-input:focus { border-color: var(--color-border-focus-soft); }
@@ -1248,7 +1268,7 @@ watch(pendingOpenNoteId, (id) => {
 /* 搜索命中高亮：只覆盖文字底色，不用 <mark> 的默认黄底（深色主题下会刺眼） */
 .tn-hl { background: var(--color-accent-bg); color: var(--color-accent); border-radius: 2px; padding: 0 1px; }
 /* 视图 tab：文档 / 图谱。图谱是覆盖层，tab 必须压在它上面（z-index 更高）。 */
-.ne-viewtabs { display: flex; align-items: center; gap: 4px; padding: 4px 8px; flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: 11; }
+.ne-viewtabs { display: flex; align-items: center; gap: 4px; padding: 2px 8px; flex-shrink: 0; border-bottom: 1px solid var(--color-border); background: var(--color-bg-secondary); position: relative; z-index: 11; }
 .ne-viewtabs button { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border: 1px solid transparent; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted); font-size: 12px; cursor: pointer; font-family: inherit; }
 .ne-viewtabs button:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .ne-viewtabs button.active { color: var(--color-accent); background: var(--color-accent-bg); border-color: var(--color-accent-border); }
@@ -1266,6 +1286,13 @@ watch(pendingOpenNoteId, (id) => {
 .ne-editor :deep(.cm-editor) { flex: 1; min-height: 0; }
 .ne-editor :deep(.cm-content) { padding: 10px 14px 24px 4px; }
 .ne-preview { flex: 1; min-width: 0; overflow: auto; padding: 12px 16px; background: var(--color-bg-primary); }
+.ne-load-error {
+  position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 12;
+  display: flex; align-items: center; gap: 10px; padding: 12px 14px;
+  border: 1px solid var(--popover-border-color); border-radius: var(--radius-md);
+  background: var(--color-popover-bg); box-shadow: var(--shadow-md);
+  color: var(--color-text-primary); font-size: var(--text-md);
+}
 
 /* 工具栏按钮高亮态（多选/激活） */
 .tt-btn.on { background: var(--color-accent-bg); color: var(--color-accent); }
@@ -1360,7 +1387,7 @@ watch(pendingOpenNoteId, (id) => {
 /* Markdown 渲染（复用统一插件样式） */
 .markdown-body { color: var(--color-text-primary); font-size: 13px; line-height: 1.7; word-break: break-word; }
 .markdown-body :deep(h1), .markdown-body :deep(h2), .markdown-body :deep(h3), .markdown-body :deep(h4) { margin: 12px 0 8px; line-height: 1.3; }
-.markdown-body :deep(h1) { font-size: 20px; border-bottom: 1px solid var(--color-border); padding-bottom: 6px; }
+.markdown-body :deep(h1) { font-size: var(--text-2xl); border-bottom: 1px solid var(--color-border); padding-bottom: 6px; }
 .markdown-body :deep(h2) { font-size: 18px; border-bottom: 1px solid var(--color-border); padding-bottom: 4px; }
 .markdown-body :deep(h3) { font-size: 15px; }
 .markdown-body :deep(p) { margin: 8px 0; }

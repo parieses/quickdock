@@ -2029,6 +2029,7 @@ export default {
   notesTagsPh: '用逗号分隔的标签，如 工作, 笔记',
   notesMarkdownPh: '在此输入 Markdown / 文本…',
   notesTextPh: '在此输入纯文本…',
+  notesEditorLoadFailed: '编辑器组件加载失败，刷新窗口或重启开发服务后重试',
   notesFormatMd: 'Markdown',
   notesFormatText: '纯文本',
   notesViewSource: '仅源码',
