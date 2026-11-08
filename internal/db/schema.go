@@ -628,6 +628,78 @@ var baseTables = []string{
 		last_opened_ts INTEGER NOT NULL DEFAULT 0
 	)`,
 
+	// 知识库分组（多库隔离）。
+	//
+	// 为什么单独一张表而不是在 kb_sources 上放个字符串分类：分类要能改名、
+	// 排序、显示文档数，而且删库时要连带清掉整个库的索引——那是三张表的事务，
+	// 没有实体表就没地方挂这个操作。
+	//
+	// name 允许为空串：默认库用空名字，界面按当前语言显示「默认知识库」，
+	// 这样中英文界面不会出现一份写死的「默认知识库」文案。
+	// icon 存一个 emoji，仅作视觉区分，不参与逻辑。
+	`CREATE TABLE IF NOT EXISTS kb_libraries (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL DEFAULT '',
+		icon TEXT NOT NULL DEFAULT '',
+		sort INTEGER NOT NULL DEFAULT 0,
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+
+	// 知识库源文件：只登记路径与指纹，不搬文件本体。
+	//
+	// 为什么原地引用：用户的文档在自己的目录里持续演进，复制进 dataDir 就等于
+	// 制造一份永不更新的死副本。这里存 mtime+size 做快筛、hash 做确认，
+	// 变化时按 hash 判要不要重建索引（同一份文件反复「另存」不会重复调 embedding）。
+	//
+	// status 是索引流水线的状态机：
+	//   pending → parsing → chunking → embedding → ready
+	//   任一步失败 → failed（err 带原因）；文件不见了 → missing；
+	//   换过 embedding 模型 → stale（旧向量与新模型不可比，等用户点重建）
+	// 刻意区分 failed 与「向量未建立」：后者源仍是 ready，检索降级为纯关键词。
+	//
+	// path 仍然是全局 UNIQUE 而不是 (library_id, path)：一份文档只属于一个库。
+	// 允许重复登记会让「改了文件、两个库各自重建」产生两份向量，
+	// 检索时还会因为 source 去重逻辑把另一份挤掉。
+	`CREATE TABLE IF NOT EXISTS kb_sources (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL DEFAULT '',
+		library_id TEXT NOT NULL DEFAULT '',
+		path TEXT NOT NULL UNIQUE,
+		ext TEXT NOT NULL DEFAULT '',
+		size INTEGER NOT NULL DEFAULT 0,
+		mtime INTEGER NOT NULL DEFAULT 0,
+		hash TEXT NOT NULL DEFAULT '',
+		status TEXT NOT NULL DEFAULT 'pending',
+		chunk_count INTEGER NOT NULL DEFAULT 0,
+		page_count INTEGER NOT NULL DEFAULT 0,
+		err TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+
+	// 知识库切片：检索的最小单位。
+	//
+	// vec 是归一化后的 float32 小端数组（dim*4 字节）。归一化之后余弦退化成点积，
+	// 检索时省掉每行一次开方——这是纯 Go 无 CGO 环境下唯一可行的向量方案
+	// （sqlite-vec 需要加载 C 扩展，modernc 驱动不支持）。
+	//
+	// embed_model 存在行上而不是全局配置：换模型时按行比对就知道哪些要重算，
+	// 也允许分两批用不同模型建索引而不互相污染。
+	`CREATE TABLE IF NOT EXISTS kb_chunks (
+		id TEXT PRIMARY KEY,
+		source_id TEXT NOT NULL,
+		idx INTEGER NOT NULL DEFAULT 0,
+		heading TEXT NOT NULL DEFAULT '',
+		text TEXT NOT NULL DEFAULT '',
+		char_count INTEGER NOT NULL DEFAULT 0,
+		page INTEGER NOT NULL DEFAULT 0,
+		vec BLOB,
+		dim INTEGER NOT NULL DEFAULT 0,
+		embed_model TEXT NOT NULL DEFAULT '',
+		UNIQUE(source_id, idx)
+	)`,
+
 	// 条目 / 笔记 / 待办三者的互链边。单独建表而不是在三张表里塞 JSON：
 	// 「谁链接了我」是核心体验，行内 JSON 只能全表扫三遍且要双向对称维护。
 	// 不在删除主体时级联清理 —— 回收站整行恢复后 id 不变，关联应自动回来；
@@ -684,6 +756,24 @@ var ftsTables = []string{
 		content='items',
 		content_rowid='rowid',
 		tokenize='unicode61'
+	)`,
+
+	// 知识库切片索引。两处和 items_fts 不同，都是刻意的：
+	//
+	// 1) tokenize='trigram'：unicode61 对中文完全无效——中文没有空格，整句会变成
+	//    一个 token，搜「数据库」永远命中不了。trigram 按 3 字滑窗切，中文子串
+	//    匹配可用，且零依赖（jieba 那一档的分词器是另一个量级的依赖）。
+	//    代价是索引膨胀约 3 倍、查询短于 3 字无结果。
+	//
+	// 2) 不用 content=''（contentless）：contentless 表删行时必须回传原始文本，
+	//    只有 SQLite 3.43+ 且显式开 contentless_delete 才能直接 DELETE。为省一半
+	//    空间去赌驱动打包的版本特性不划算——个人规模多存一份正文就是几百 MB。
+	//
+	// rowid 与 kb_chunks.rowid 对齐，检索时 JOIN 回主表取 vec 与来源信息。
+	`CREATE VIRTUAL TABLE IF NOT EXISTS kb_chunks_fts USING fts5(
+		text,
+		heading,
+		tokenize='trigram'
 	)`,
 }
 
@@ -927,6 +1017,10 @@ func (d *Database) migrate() error {
 		// ai_usage: 多 agent 编排的成本归集维度（老数据为空 = 不属于任何 run）。
 		{"ai_usage", "run_id", "TEXT NOT NULL DEFAULT ''"},
 		{"ai_usage", "node_id", "TEXT NOT NULL DEFAULT ''"},
+		// kb_sources: 知识库分组归属。老库补成空串，由下面的数据迁移统一
+		// 归到默认库——注意顺序：补列在前、建索引在后、写数据最后，
+		// 挪动任意一步都会在升级路径上炸。
+		{"kb_sources", "library_id", "TEXT NOT NULL DEFAULT ''"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {
@@ -1004,6 +1098,14 @@ func (d *Database) migrate() error {
 		// 专注统计固定按时间区间扫（今日/7 天/30 天），按任务累计则按 todo_id 分组。
 		`CREATE INDEX IF NOT EXISTS idx_focus_sessions_started ON focus_sessions(started_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_focus_sessions_todo ON focus_sessions(todo_id)`,
+		// 知识库：切片永远按来源取（重建索引时整份删、预览时整份列），没有这条
+		// 就是每次全表扫。source_id+idx 的唯一性已由建表的 UNIQUE 约束保证。
+		`CREATE INDEX IF NOT EXISTS idx_kb_chunks_source ON kb_chunks(source_id, idx)`,
+		// 向量补齐靠「vec IS NULL」找待办，扫描全库时按 embed_model 判是否过期。
+		`CREATE INDEX IF NOT EXISTS idx_kb_chunks_vec ON kb_chunks(embed_model)`,
+		`CREATE INDEX IF NOT EXISTS idx_kb_sources_status ON kb_sources(status)`,
+		// 分组视图按 library_id 过滤，删除知识库时也靠它找「这个库有哪些源」。
+		`CREATE INDEX IF NOT EXISTS idx_kb_sources_library ON kb_sources(library_id, name)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {
@@ -1078,6 +1180,23 @@ func (d *Database) migrate() error {
 	// 新条目在 InsertClipboardEntry 时已写入；这里只补老数据，幂等。
 	if err := d.backfillClipboardTextType(); err != nil {
 		return fmt.Errorf("回填 clipboard_entries.text_type 失败: %w", err)
+	}
+
+	// 数据迁移：知识库分组。
+	//
+	// 两步都幂等：① 只在 kb_libraries 为空时建默认库——用户把库全删了再启动
+	// 不会莫名其妙多出一个空库；② 只补 library_id 为空的行，已经是别的库的
+	// 源不会被抢回来。默认库的 name 故意留空，界面按当前语言显示，
+	// 免得英文界面里冒出一个写死的中文库名。
+	if _, err := d.conn.Exec(`INSERT INTO kb_libraries (id, name, icon, sort, created_at, updated_at)
+		SELECT ?, '', '📚', 0, ?, ?
+		WHERE NOT EXISTS (SELECT 1 FROM kb_libraries)`,
+		KBLibraryDefaultID, now, now); err != nil {
+		return fmt.Errorf("初始化知识库默认分组失败: %w", err)
+	}
+	if _, err := d.conn.Exec(`UPDATE kb_sources SET library_id = ?
+		WHERE library_id IS NULL OR library_id = ''`, KBLibraryDefaultID); err != nil {
+		return fmt.Errorf("回填知识库分组失败: %w", err)
 	}
 
 	return nil

@@ -77,6 +77,16 @@ type AppService struct {
 	// （no_profile / no_endpoint / unavailable），无具体原因时为空串。
 	AIAvailableFn func() (available bool, reason, profile, model string)
 
+	// EmbedConfigFn 注入「当前激活 AI 档案的接口地址与明文 API Key」（实现在 services/ai 包）。
+	//
+	// 知识库的 embedding 复用聊天那套供应商配置，只有模型名单独配（见 kb_settings）：
+	// 用户填一次模型名就能建向量索引，不必再抄一遍 Key 和 BaseURL。
+	// 返回 ok=false 表示没有可用档案，知识库自动降级为纯关键词检索，
+	// 而不是让整个功能不可用。
+	//
+	// 与上面几个 Fn 同因：services/ai 反向 import services，不能直接持具体类型。
+	EmbedConfigFn func() (baseURL, apiKey string, ok bool)
+
 	// PurgeAICheckpointsFn 清理过期的 AI 编辑快照（库行 + 磁盘目录）。
 	//
 	// 与上面几个 Fn 同因：实现在 services/ai（快照目录的布局只有它知道），

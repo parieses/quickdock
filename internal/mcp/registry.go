@@ -33,6 +33,8 @@ const (
 	CategoryMonitor   = "monitor"
 	CategoryPlugin    = "plugin"
 	CategoryRisk      = "risk"
+	// CategoryKnowledge 本地文档知识库：按内容检索，只读。
+	CategoryKnowledge = "knowledge"
 	// CategoryWeb / CategoryCode 不属于 MCP：这批工具注册在 Agent 注册表里
 	// （见 services/ai/tools），只在面板上与宿主工具一起展示，故分类 id 仍由
 	// 这里统一维护——前端的分组顺序只认一个来源，否则面板会漏掉整组。

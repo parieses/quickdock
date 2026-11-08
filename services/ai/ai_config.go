@@ -213,8 +213,26 @@ func (a *AIService) invalidateAICache() {
 	a.aiCacheMu.Unlock()
 }
 
+// AIActiveEndpoint 返回当前激活档案的接口地址、明文 API Key 与聊天模型名。
+//
+// 供后端内部组件（知识库的 embedding）复用同一套供应商配置：用户只需在知识库
+// 设置里填一个 embedding 模型名，不必再抄一遍 Key 和 BaseURL。
+//
+// 与 AIListProfiles 的区别：那个是给前端的，Key 必须掩码（防注入脚本窃取）；
+// 这个只在本进程内被调用，所以返回明文。
+//
+//wails:ignore
+func (a *AIService) AIActiveEndpoint() (baseURL, apiKey, model string, ok bool) {
+	p, found := a.getActiveAIProfile()
+	if !found {
+		return "", "", "", false
+	}
+	return p.BaseURL, p.APIKey, p.Model, true
+}
+
 // AIListProfiles 列出所有档案（API Key 已解密）与当前激活项
 func (a *AIService) AIListProfiles() *services.ApiResult {
+
 	if r := a.dbOK(); r != nil {
 		return r
 	}

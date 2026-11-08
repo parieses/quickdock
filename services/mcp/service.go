@@ -26,6 +26,7 @@ import (
 	collectionsvc "quickdock/services/collection"
 	diagsvc "quickdock/services/diag"
 	frecencysvc "quickdock/services/frecency"
+	kbsvc "quickdock/services/kb"
 	monitorsvc "quickdock/services/monitor"
 	notesvc "quickdock/services/note"
 	pluginsvc "quickdock/services/plugin"
@@ -53,12 +54,14 @@ type MCPService struct {
 	Collection *collectionsvc.CollectionService
 	// Monitor 监控门面：定时任务挂在 AppService 上，监控是独立子包，故单独注入。
 	Monitor *monitorsvc.MonitorService
+	// KB 知识库门面：只读（kb_search / kb_list），写入路径不开放给模型。
+	KB      *kbsvc.KBService
 	version string
 }
 
 // NewMCPService 创建 MCP 绑定服务，并注册业务工具。
-func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, note *notesvc.NoteService, frecency *frecencysvc.FrecencyService, port *portsvc.PortService, collection *collectionsvc.CollectionService, monitor *monitorsvc.MonitorService, version string) *MCPService {
-	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, Note: note, Frecency: frecency, Port: port, Collection: collection, Monitor: monitor, version: version}
+func NewMCPService(app *services.AppService, clip *clipboardsvc.ClipboardService, plugin *pluginsvc.PluginService, workspace *workspacesvc.WorkspaceService, todo *todosvc.TodoService, diag *diagsvc.DiagService, sys *systemsvc.SystemService, note *notesvc.NoteService, frecency *frecencysvc.FrecencyService, port *portsvc.PortService, collection *collectionsvc.CollectionService, monitor *monitorsvc.MonitorService, kb *kbsvc.KBService, version string) *MCPService {
+	s := &MCPService{App: app, Clip: clip, Plugin: plugin, Workspace: workspace, Todo: todo, Diag: diag, System: sys, Note: note, Frecency: frecency, Port: port, Collection: collection, Monitor: monitor, KB: kb, version: version}
 	s.registerTools()
 	return s
 }
@@ -488,6 +491,7 @@ func toolProviders() []toolProvider {
 		{Category: mcpsrv.CategoryNote, Register: registerNoteTools},           // 笔记与文件夹
 		{Category: mcpsrv.CategoryTodo, Register: registerTodoTools},           // 待办
 		{Category: mcpsrv.CategoryClipboard, Register: registerClipboardTools}, // 剪贴板历史与写入
+		{Category: mcpsrv.CategoryKnowledge, Register: registerKBTools},        // 本地文档知识库（只读）
 		{Category: mcpsrv.CategoryDiag, Register: registerDiagTools},           // 日志与崩溃记录
 		{Category: mcpsrv.CategorySchedule, Register: registerScheduleTools},   // 定时任务与执行历史
 		{Category: mcpsrv.CategoryMonitor, Register: registerMonitorTools},     // 监控状态、检测记录

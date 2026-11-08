@@ -32,6 +32,7 @@ import (
 	frecencysvc "quickdock/services/frecency"
 	gitsvc "quickdock/services/git"
 	itemsvc "quickdock/services/item"
+	kbsvc "quickdock/services/kb"
 	logtailsvc "quickdock/services/logtail"
 	mailboxsvc "quickdock/services/mailbox"
 	mcpsvc "quickdock/services/mcp"
@@ -615,6 +616,16 @@ func main() {
 		return available, reason, profile, model
 	}
 
+	// 知识库的 embedding 复用激活档案的接口地址与 Key（模型名由知识库设置单独配）。
+	// 不配 Key 也没关系：知识库会降级成纯关键词检索，而不是整个功能不可用。
+	appService.EmbedConfigFn = func() (string, string, bool) {
+		baseURL, apiKey, _, ok := aiSvc.AIActiveEndpoint()
+		if !ok || baseURL == "" {
+			return "", "", false
+		}
+		return baseURL, apiKey, true
+	}
+
 	// 更新服务门面：承载自动更新领域方法（检测/下载/重启/后台检查），单独绑定为独立 Wails service
 	updateSvc := updatesvc.NewUpdateService(appService)
 
@@ -657,6 +668,11 @@ func main() {
 	// 仓库清单落 app_state（KV），不建表——它只是路径串，没有关联查询。
 	gitSvc := gitsvc.NewGitService(appService)
 
+	// 知识库：本地文档（Word/Excel/PDF/Markdown）解析 → 切片 → 关键词 + 向量混合检索。
+	// 文件本体不复制，只登记路径与指纹；向量存 SQLite BLOB 并在进程内暴力扫描
+	// （纯 Go 无 CGO，用不了 sqlite-vec；个人规模也用不上 ANN）。
+	kbSvc := kbsvc.NewKBService(appService)
+
 	// SSH 服务门面：主机管理/指纹信任/连通性测试/命令执行（引擎在 internal/sshx），
 	// 单独绑定为独立 Wails service。
 	sshSvc := sshxsvc.NewSshService(appService)
@@ -672,7 +688,7 @@ func main() {
 	// MCP 服务门面：协议/传输在 internal/mcp，本门面注册业务工具并提供前端启停接口。
 	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合/监控门面（工具复用其能力），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
-	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, appVersion)
+	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, kbSvc, appVersion)
 
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()
@@ -722,6 +738,7 @@ func main() {
 			application.NewService(mailboxSvc),
 			application.NewService(shelfSvc),
 			application.NewService(gitSvc),
+			application.NewService(kbSvc),
 			application.NewService(sshSvc),
 			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),

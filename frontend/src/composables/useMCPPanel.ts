@@ -41,7 +41,7 @@ export interface MCPToolGroup {
 // 让区块位置稳定（不会因为工具名首字母变化而上下跳）。
 // 前面两个（web/code）是 agent 专属域，由 services/ai/tools 注册；其余是 MCP 对外工具。
 // 顺序把 agent 域放前面：它们在面板上带「仅内置 AI」徽章，聚在一起比夹在宿主工具中间好读。
-const MCP_CATEGORY_ORDER = ['web', 'code', 'app', 'env', 'file', 'item', 'note', 'todo', 'clipboard', 'diag', 'schedule', 'monitor', 'plugin', 'risk']
+const MCP_CATEGORY_ORDER = ['web', 'code', 'app', 'env', 'file', 'item', 'note', 'knowledge', 'todo', 'clipboard', 'diag', 'schedule', 'monitor', 'plugin', 'risk']
 
 // MCP_CATEGORY_I18N 分类 id → i18n key。后端只给 id、文案留在前端：
 // 否则英文界面会顶着一排中文分组名。
@@ -53,6 +53,7 @@ const MCP_CATEGORY_I18N: Record<string, string> = {
   file: 'mcpCatFile',
   item: 'mcpCatItem',
   note: 'mcpCatNote',
+  knowledge: 'mcpCatKnowledge',
   todo: 'mcpCatTodo',
   clipboard: 'mcpCatClipboard',
   diag: 'mcpCatDiag',

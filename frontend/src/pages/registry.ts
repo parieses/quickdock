@@ -21,7 +21,7 @@
 import { defineAsyncComponent, type Component, type Ref } from 'vue'
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
-  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search,
+  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen,
 } from '@lucide/vue'
 // 保活白名单从零依赖模块引（名字常量与组件里 defineOptions 共用同一份）
 import { KEEP_ALIVE_PAGES } from './keepAlive'
@@ -45,6 +45,10 @@ const EnvironmentPage = defineAsyncComponent(() => import('../components/Environ
 const ClipboardPanel = defineAsyncComponent(() => import('../components/ClipboardPanel.vue'))
 // 文件检索页：检索接口与 Everything 状态门都是现成的，这里只补展示层与批量动作
 const FileSearchPage = defineAsyncComponent(() => import('../components/FileSearchPage.vue'))
+// 知识库：本地文档（Word/Excel/PDF/Markdown）解析 + 切片 + 关键词/向量混合检索，
+// 自带问答与分段预览。与「文件搜索」是两件事：那边按文件名找文件、不建索引，
+// 这边打开文件内容建索引、能问问题。
+const KnowledgePage = defineAsyncComponent(() => import('../components/KnowledgePage.vue'))
 
 /** 「行尾活动指示点」的来源标识。闭集（union）：新增一种必须同时在 Sidebar 的
  *  DOT_PROVIDERS 里加 provider，否则 TS 报缺项 —— 这是把 stringly-typed 的
@@ -107,6 +111,11 @@ export const navEntries: NavEntry[] = [
   // filesearch：与笔记/剪贴板同属「找东西」，故紧跟其后；Everything 不可用由页面内的
   // EverythingGate 自己兜底，注册表不需要关心运行态。
   { id: 'filesearch', labelKey: 'navFileSearch', icon: Search, component: FileSearchPage },
+  // knowledge：按内容找（打开文档建索引），与 filesearch 的「按名字找」互补，故相邻。
+  //   open-settings：知识库设置里语义检索要沿用 AI 档案的 BaseURL/Key，
+  //   缺档案时由页面直接把人送到 AI 设置，否则只有一句「尚未配置」没人知道去哪配。
+  { id: 'knowledge', labelKey: 'navKnowledge', icon: BookOpen, component: KnowledgePage,
+    listeners: (ctx) => ({ 'open-settings': ctx.openSettings }) },
   { id: 'environments', labelKey: 'navEnvironments', icon: Server, component: EnvironmentPage,
     props: (ctx) => ({ initialSection: ctx.envInitialSection.value }) },
   // git：仓库视角（分支树 / 提交历史 / 改动预览），放在环境与 SSH 之间——同属「开发现场」

@@ -71,6 +71,11 @@ var validTables = map[string]bool{
 	"ssh_commands": true,
 	// 专注会话历史：跟快照走，不登记会在恢复时被当成「未知表」拒掉。
 	"focus_sessions": true,
+	// 知识库：源与切片要能走通用表操作（回收站整行恢复、按表遍历统计）。
+	// kb_chunks_fts 是 FTS5 虚拟表，与 items_fts 一样不登记。
+	"kb_libraries": true,
+	"kb_sources":   true,
+	"kb_chunks":    true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）。
@@ -194,6 +199,16 @@ var validColumns = map[string]bool{
 	"is_folder": true, "is_note": true, "format": true,
 	// notifications 通知中心列（kind / title / body / ref_id 已在上文声明）
 	"level": true, "ref_type": true, "read": true,
+
+	// 知识库列。白名单全局共用、不按表分，漏一个就是写入/恢复时「非法列名」。
+	// err 与 error 是两个不同的列名（错误表用 error，知识库用 err），不要合并。
+	"ext": true, "mtime": true, "hash": true,
+	"chunk_count": true, "page_count": true, "err": true,
+	"source_id": true, "idx": true, "heading": true, "char_count": true,
+	"page": true, "vec": true, "dim": true, "embed_model": true,
+	// 知识库分组：library_id 给 kb_sources（icon 在上文 plugins 处已声明，
+	// 白名单全局共用，重复声明会编译失败）。sort 同理。
+	"library_id": true,
 
 	// clipboard_rules 剪贴板自动规则列（priority 已在上文 todos 处声明）
 	"match_kind": true, "match_expr": true,
