@@ -136,7 +136,7 @@
   color: var(--color-text-disabled);
 }
 .content-empty .empty-icon { font-size: 48px; margin-bottom: 16px; }
-.content-empty .empty-text { font-size: 14px; }
+.content-empty .empty-text { font-size: var(--text-base); }
 
 /* 关于 */
 .about-hero {
@@ -151,7 +151,7 @@
   font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: var(--radius-full);
   background: var(--color-accent); color: var(--color-accent-text);
 }
-.about-desc { font-size: 14px; color: var(--color-text-muted); margin: 0 0 4px; }
+.about-desc { font-size: var(--text-base); color: var(--color-text-muted); margin: 0 0 4px; }
 .about-tech { font-size: 12px; color: var(--color-text-disabled); margin: 0 0 20px; }
 .about-links { display: flex; flex-direction: column; gap: 6px; margin: 0 0 16px; }
 .about-link {
@@ -504,7 +504,7 @@
 .ai-modal-header h3 { font-size: 15px; font-weight: 600; margin: 0; color: var(--color-text-primary); }
 .ai-modal-close {
   background: none; border: none; color: var(--color-text-muted);
-  font-size: 20px; cursor: pointer; width: 28px; height: 28px;
+  font-size: var(--text-xl); cursor: pointer; width: 28px; height: 28px;
   display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm);
 }
 .ai-modal-close:hover { background: var(--color-bg-active); color: var(--color-text-primary); }
@@ -541,7 +541,7 @@
 }
 .usage-tile-label { font-size: 10px; color: var(--color-text-muted); white-space: nowrap; }
 .usage-tile-value {
-  font-size: 14px; font-weight: 600; color: var(--color-text-primary);
+  font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
 }
 

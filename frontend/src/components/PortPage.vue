@@ -169,7 +169,7 @@ onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
 .port-row.is-self { border: 1px solid var(--color-accent); background: var(--color-accent-bg); }
 .port-row.is-self:hover { background: var(--color-accent-bg); }
 .port-self-badge { margin-left: 6px; font-size: 10px; font-weight: 600; padding: 1px 5px; border-radius: var(--radius-xs); background: var(--color-accent); color: var(--color-accent-text); white-space: nowrap; }
-.port-num { font-size: 14px; font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; min-width: 64px; }
+.port-num { font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); font-variant-numeric: tabular-nums; min-width: 64px; }
 .port-proto { font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: var(--radius-xs); background: var(--color-bg-tertiary); color: var(--color-text-muted); min-width: 38px; text-align: center; }
 .port-proto.proto-udp { color: var(--color-warning); }
 .port-pid { font-size: 11px; color: var(--color-text-disabled); font-variant-numeric: tabular-nums; }

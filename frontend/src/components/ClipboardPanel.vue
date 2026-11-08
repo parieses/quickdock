@@ -1402,19 +1402,27 @@ onUnmounted(() => {
 }
 
 .clipboard-item {
+  position: relative;
   display: flex; align-items: flex-start; gap: 10px;
   padding: 10px 12px; border-radius: var(--radius-md);
-  cursor: pointer; transition: background 0.1s;
+  cursor: pointer; transition: background-color var(--transition-fast);
 }
-.clipboard-item:hover {
-  background: var(--color-accent-bg);
-  outline: 1px solid var(--color-accent-border);
-  outline-offset: -1px;
-}
-.clipboard-item.selected {
-  background: var(--color-accent-bg);
-  outline: 1px solid var(--color-accent-border);
-  outline-offset: -1px;
+/* hover 与选中必须用不同强度：原来两者都是「淡蓝底 + 1px 蓝 outline」，
+   鼠标划过一整列时每条都像被选中。现在 hover 只给中性底色。 */
+.clipboard-item:hover { background: var(--color-bg-hover); }
+/* 选中态与 .qd-row.active 同一套：--color-select-bg 实底 + 3px 左标记。
+   outline 是「焦点环」的语言，不该拿来表达列表当前项。 */
+.clipboard-item.selected { background: var(--color-select-bg); }
+.clipboard-item.selected::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
 }
 
 .pin-btn {

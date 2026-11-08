@@ -635,7 +635,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .card-icon { width: 36px; height: 36px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); padding: 5px; }
 .card-icon-fallback { color: var(--color-text-muted); }
 .card-title-wrap { flex: 1; display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
-.card-title { font-size: 14px; font-weight: 600; color: var(--color-text-primary); }
+.card-title { font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); }
 /* 插件 ID 是无空格的长串（如 io.github.parieses.database），默认不可断行，
    会撑出很大的 min-content 宽度把列顶宽；anywhere 让它在窄列里也能断行。 */
 .card-id { font-size: 10px; color: var(--color-text-disabled); font-family: var(--font-mono, monospace); width: 100%; overflow-wrap: anywhere; }

@@ -174,7 +174,7 @@ function close() { emit('cancel') }
 }
 h3 {
   margin: 0; display: flex; align-items: center; justify-content: space-between;
-  font-size: 14px; font-weight: 600; color: var(--color-text-primary);
+  font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary);
 }
 .modal-x {
   border: none; background: none; color: var(--color-text-disabled);

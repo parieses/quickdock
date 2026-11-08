@@ -318,7 +318,7 @@ onBeforeUnmount(() => document.removeEventListener('keydown', onEsc, true))
 
 .ai-perm-dialog-icon { flex: none; color: var(--color-danger); }
 
-.ai-perm-dialog-title { flex: 1; min-width: 0; font-size: 14px; font-weight: 600; color: var(--color-text-primary); }
+.ai-perm-dialog-title { flex: 1; min-width: 0; font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary); }
 
 .ai-perm-dialog-x {
   flex: none;

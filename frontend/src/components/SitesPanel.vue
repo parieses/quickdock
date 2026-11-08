@@ -817,7 +817,7 @@ onMounted(() => { load(); loadCert() })
 .link-btn:hover:not(:disabled) { text-decoration: underline; }
 .link-btn:disabled { color: var(--color-text-disabled); cursor: default; }
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 24px 0; }
-.empty-icon { font-size: 20px; color: var(--color-text-disabled); }
+.empty-icon { font-size: var(--text-xl); color: var(--color-text-disabled); }
 .empty-text { font-size: 12px; color: var(--color-text-disabled); }
 
 /* 配置生成弹窗：Teleport 到 body，避免被面板的 overflow 裁掉 */

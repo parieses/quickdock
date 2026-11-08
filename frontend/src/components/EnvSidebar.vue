@@ -115,7 +115,7 @@ const searching = computed(() => props.query.trim().length > 0)
 
 .cats-search-clear {
   padding: 0; border: none; background: none; color: var(--color-text-disabled);
-  font-size: 14px; line-height: 1; cursor: pointer;
+  font-size: var(--text-base); line-height: 1; cursor: pointer;
 }
 
 .cats-search-clear:hover { color: var(--color-text-primary); }

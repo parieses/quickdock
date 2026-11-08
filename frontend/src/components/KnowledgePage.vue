@@ -1256,23 +1256,28 @@ onScopeDispose(() => {
   background: var(--color-bg-hover);
 }
 
+/* 选中态与 .qd-row.active 同一套：实底 + 左缘 3px 竖条。
+   不再让文字和图标一起转蓝 —— 颜色只表达「当前项」，不兼任装饰；
+   蓝底蓝边蓝字三层叠上去，整行会像被高亮笔涂过。 */
 .kb-doc.active {
-  background: var(--color-accent-bg);
-  border-color: var(--color-accent-border);
+  background: var(--color-select-bg);
+  border-color: transparent;
 }
-
-.kb-doc.active .kb-doc-name {
-  color: var(--color-accent);
-  font-weight: 500;
+.kb-doc.active::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-accent);
 }
 
 .kb-doc-icon {
   flex-shrink: 0;
   color: var(--color-text-muted);
-}
-
-.kb-doc.active .kb-doc-icon {
-  color: var(--color-accent);
 }
 
 .kb-doc-main {
@@ -2171,7 +2176,7 @@ onScopeDispose(() => {
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm);
   background: transparent;
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1;
   cursor: pointer;
 }

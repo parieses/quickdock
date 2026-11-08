@@ -116,6 +116,28 @@
   margin-left: auto;
 }
 
+/* ---- 页头动作的规则 ----
+   右侧只允许两段：最多 1 个主按钮（.qd-btn-primary，给这一页的主操作），
+   加一组次要动作（.qd-action-group，一律 ghost / 图标按钮）；两者之间用
+   .qd-action-sep 一条 16px 短竖线分开。没有主操作的页面只放一组，不画线。
+   为什么定死：页头只有 46px 高，5~7 个同级按钮平铺时「这页要做的事」和
+   「顺手的工具」一样重，视线没有落点，窗口一窄还会整排挤到换行。
+   类名刻意不带 .qd-page-actions 前缀：Git 顶部是工具栏 .bar-actions 而不是
+   标准页头，也要能用同一套分组。 */
+.qd-action-group {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.qd-action-sep {
+  width: 1px;
+  height: 16px;
+  flex-shrink: 0;
+  margin: 0 2px;
+  background: var(--color-border);
+}
+
 /* ---- 按钮：只有一种盒子，三种语气 ---- */
 /* 底色给到 bg-tertiary 而不是透明：桌面工具里按钮必须是"能按下去的东西"，
    透明底 + 细边在深色主题下常被当成一段加了框的文字。内高光负责给出厚度，
@@ -314,8 +336,9 @@
    规则只用变量，明暗主题自动跟随。 */
 
 /* ---- 基础节奏 ----
-   13.5px / 1.75 是屏幕阅读的档位：13px 偏挤，14px 在窄窗口落行太多。 */
-.ai-md { font-size: 14px; line-height: 1.75; color: var(--color-text-primary); }
+   --text-base(14px) / 1.75 是长文阅读档位：13px 的 --text-md 是界面正文，
+   放在 AI 回复这种宽栏里连读几行偏挤。这一档只给长文，不进列表行。 */
+.ai-md { font-size: var(--text-base); line-height: 1.75; color: var(--color-text-primary); }
 
 /* ---- 标题：四级，靠字号 + 装饰拉开层次 ----
    原来 h1~h4 全是 14px/600，扫一眼分不出主次，整篇读起来是一个平面。 */
@@ -331,7 +354,7 @@
   border-radius: 2px; background: var(--color-accent);
 }
 .ai-md h3 { font-size: 15px; }
-.ai-md h4 { font-size: 14px; color: var(--color-text-secondary); }
+.ai-md h4 { font-size: var(--text-base); color: var(--color-text-secondary); }
 .ai-md h5, .ai-md h6 { font-size: 13px; color: var(--color-text-secondary); }
 
 /* 首块不要顶部留白：回答第一行该贴着消息开头，否则像空了一段 */

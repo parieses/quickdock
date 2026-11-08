@@ -159,7 +159,7 @@ function onKeydown(e: KeyboardEvent) {
   padding: 16px 20px; border-bottom: 1px solid var(--color-border);
 }
 .dialog-title {
-  font-size: 14px; font-weight: 600; color: var(--color-text-primary);
+  font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary);
 }
 .dialog-close {
   background: none; border: none; color: var(--color-text-disabled); cursor: pointer;

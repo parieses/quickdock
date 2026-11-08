@@ -1607,26 +1607,29 @@ const s = currentRuntimeState
           <span class="env-info" :title="t('envSubtitle')" role="img" aria-label="info">?</span>
         </h2>
       </div>
+      <!-- 按页头动作规则收成「一组工具图标 + 1 个主操作」，中间一条短竖线。
+           原来 4 个带文字的次要按钮和刷新平铺成同级，整排一样重，
+           窗口一窄还会挤到第二行。次要动作只留图标，含义靠 title 兜住。 -->
       <div class="qd-page-actions">
-        <button class="qd-btn qd-btn-ghost" @click="openMaintenance('check')" :title="t('maintTitle')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9 9a2.8 2.8 0 0 1-4-4l9-9z"/><path d="M19.7 11.3 21 10a3 3 0 0 0-4-4l-1.3 1.3"/></svg>
+        <div class="qd-action-group">
+          <button class="qd-icon-btn" @click="projectCheck.open = true" :title="t('projectCheck')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m9 14 2 2 4-4"/></svg>
+          </button>
+          <button class="qd-icon-btn" @click="pathModal.open = true" :title="t('pathPanel')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0M15.5 18H10a4 4 0 0 1-4-4v0"/></svg>
+          </button>
+          <button class="qd-icon-btn" @click="openPanorama" :title="t('portPanorama')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h2M8 17h2M14 14h2M14 17h2"/></svg>
+          </button>
+          <button class="qd-icon-btn" :class="{ spinning: refreshing }" :disabled="refreshing"
+                  @click="refresh" :title="refreshing ? t('refreshing') : t('refresh')">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg>
+          </button>
+        </div>
+        <span class="qd-action-sep"></span>
+        <button class="qd-btn qd-btn-primary" @click="openMaintenance('check')" :title="t('maintTitle')">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a4 4 0 0 0 5 5l-9 9a2.8 2.8 0 0 1-4-4l9-9z"/><path d="M19.7 11.3 21 10a3 3 0 0 0-4-4l-1.3 1.3"/></svg>
           <span>{{ t('maintTitle') }}</span>
-        </button>
-        <button class="qd-btn qd-btn-ghost" @click="projectCheck.open = true" :title="t('projectCheck')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="m9 14 2 2 4-4"/></svg>
-          <span>{{ t('projectCheck') }}</span>
-        </button>
-        <button class="qd-btn qd-btn-ghost" @click="pathModal.open = true" :title="t('pathPanel')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0M15.5 18H10a4 4 0 0 1-4-4v0"/></svg>
-          <span>PATH</span>
-        </button>
-        <button class="qd-btn qd-btn-ghost" @click="openPanorama" :title="t('portPanorama')">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M8 14h2M8 17h2M14 14h2M14 17h2"/></svg>
-          <span>{{ t('portPanorama') }}</span>
-        </button>
-        <button class="qd-icon-btn" :class="{ spinning: refreshing }" :disabled="refreshing"
-                @click="refresh" :title="refreshing ? t('refreshing') : t('refresh')">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9"/><path d="M3 3v6h6"/></svg>
         </button>
       </div>
     </div>
@@ -3625,7 +3628,7 @@ const s = currentRuntimeState
   line-height: 1.5;
 }
 .dark .port-conflict-banner { color: var(--color-warning); }
-.pc-icon { font-size: 14px; line-height: 1; }
+.pc-icon { font-size: var(--text-base); line-height: 1; }
 .svc-port-link { text-decoration: none; transition: color var(--transition-fast); }
 .svc-port-link:hover { color: var(--color-accent); text-decoration: underline; }
 .svc-port-link.disabled { cursor: default; opacity: 0.5; }
@@ -3908,7 +3911,7 @@ const s = currentRuntimeState
 .cfg-close {
   width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm);
   border: 1px solid transparent; background: transparent; color: var(--color-text-muted);
-  font-size: 20px; line-height: 1; cursor: pointer;
+  font-size: var(--text-xl); line-height: 1; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   transition: background var(--transition-fast), color var(--transition-fast);
 }

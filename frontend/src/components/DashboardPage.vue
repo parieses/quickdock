@@ -2504,7 +2504,9 @@ onUnmounted(() => {
 .db-w-line { display: flex; align-items: baseline; gap: var(--space-3); }
 .db-w-temp {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
-  font-size: 20px; font-weight: 600; line-height: 1.2; color: var(--color-text-primary);
+  /* 20px 归到 18：这颗读数和 12px 的天气描述挤在同一条横栏里，
+     用 24px 数据档会把整条撑高。24 只给独立的大数字卡。 */
+  font-size: var(--text-xl); font-weight: 600; line-height: 1.2; color: var(--color-text-primary);
 }
 .db-w-kind { font-size: 12px; color: var(--color-text-secondary); white-space: nowrap; }
 .db-w-city {

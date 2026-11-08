@@ -336,15 +336,17 @@ function buildSnapshotHtml(): string {
     return `<section><h2>${esc(g.name)}</h2><div class="grid">${cards}</div></section>`
   }).join('')
 
-  // 快照是独立文档，离开应用就没有 CSS 变量了，故色值直接内联写死。
+  // 快照是独立文档，离开应用就没有 CSS 变量了，故色值、圆角一律写具体值。
+  // 别在这里用 var(--radius-*)：独立文档里变量未定义，border-radius 会静默
+  // 退化成 0，导出的卡片和横幅全是直角，和界面里看到的完全不是一回事。
   return `<!DOCTYPE html>
 <html>
 <head><meta charset="utf-8"><title>${esc(t('statusTitle'))}</title>
 <style>
   body{margin:0;padding:24px;background:#f6f7f9;color:#1a1f27;font-family:-apple-system,Segoe UI,Arial,sans-serif}
-  h1{font-size:20px;margin:0 0 4px}
+  h1{font-size:18px;margin:0 0 4px}
   .sub{font-size:12px;color:#6e7683;margin:0 0 20px}
-  .banner{border-radius: var(--radius-lg);padding:18px 20px;margin-bottom:24px;background:#e8f7ee;border:1px solid #bfe6cd}
+  .banner{border-radius:12px;padding:18px 20px;margin-bottom:24px;background:#e8f7ee;border:1px solid #bfe6cd}
   .banner.statusPartial{background:#fff6e8;border-color:#f3d9a8}
   .banner.statusAllDown{background:#fdeaea;border-color:#f3c0c0}
   .bhead{display:flex;align-items:center;gap:10px;font-size:18px;font-weight:600}
@@ -355,7 +357,7 @@ function buildSnapshotHtml(): string {
   .bmeta b{font-size: 15px;color:#1a1f27;margin-right:4px}
   h2{font-size:14px;margin:22px 0 10px;color:#525b68}
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
-  .card{background:#fff;border:1px solid #dde1e8;border-radius: var(--radius-md);padding:14px}
+  .card{background:#fff;border:1px solid #dde1e8;border-radius:8px;padding:14px}
   .chead{display:flex;align-items:center;gap:8px}
   .nm{font-weight:600;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .st{font-size:12px;color:#6e7683}

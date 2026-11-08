@@ -486,7 +486,7 @@ async function setDefault(tool: OpenTool) {
   background: none;
   border: none;
   color: var(--color-text-muted);
-  font-size: 20px;
+  font-size: var(--text-xl);
   cursor: pointer;
   width: 28px;
   height: 28px;

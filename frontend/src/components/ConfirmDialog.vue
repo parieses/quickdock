@@ -81,7 +81,7 @@ function onConfirm() {
   box-shadow: 0 12px 48px var(--color-bg-overlay);
 }
 .confirm-icon { color: var(--color-warning); margin-bottom: 12px; }
-.confirm-message { font-size: 14px; color: var(--color-text-primary); margin: 0 0 24px; line-height: 1.6; }
+.confirm-message { font-size: var(--text-base); color: var(--color-text-primary); margin: 0 0 24px; line-height: 1.6; }
 /* 明细清单：等宽左对齐，权限声明这类内容需要逐字可核对 */
 .confirm-details {
   margin: -12px 0 16px; padding: 8px 12px; text-align: left;

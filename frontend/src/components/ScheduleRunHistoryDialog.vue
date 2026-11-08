@@ -155,7 +155,7 @@ function close() {
 .dlg-close {
   position: absolute; right: -6px; top: -4px; width: 28px; height: 28px;
   border: none; background: transparent; color: var(--color-text-disabled);
-  font-size: 20px; line-height: 1; cursor: pointer; border-radius: var(--radius-sm);
+  font-size: var(--text-xl); line-height: 1; cursor: pointer; border-radius: var(--radius-sm);
 }
 .dlg-close:hover { color: var(--color-text-primary); background: var(--color-bg-active); }
 

@@ -956,7 +956,7 @@ onBeforeUnmount(() => {
 }
 
 .batch-title {
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 600;
   color: var(--color-text-primary);
 }

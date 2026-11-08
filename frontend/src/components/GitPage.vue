@@ -2229,48 +2229,55 @@ function seedPreview() {
         <span v-if="activeRepo" class="bar-path" :title="activePath">{{ activePath }}</span>
         <span v-if="changeCount" class="bar-dirty">{{ t('git_changes', { n: changeCount }) }}</span>
       </div>
+      <!-- 按 .qd-page-header 的动作规则收成两段：一组次要动作 + 1 个主按钮，
+           中间一条短竖线。原来 7 个同级 ghost 平铺，看不出哪个是主操作。 -->
       <div class="bar-actions">
-        <!-- 转圈类挂在按钮上、动画作用到内部 svg：这样在 Download 与 Loader2
-             之间切换图标时不用各写一份 class。类名必须避开 .spinning：
-             全局 settings.css 有「.spinning { animation: spin }」，用它会连按钮一起转。 -->
-        <button class="qd-btn qd-btn-ghost" :class="{ 'is-spinning': busy === 'fetch' }"
-                :disabled="!activePath || !!busy" :aria-busy="busy === 'fetch'" @click="doFetch">
-          <Loader2 v-if="busy === 'fetch'" :size="13" />
-          <Download v-else :size="13" />
-          {{ t('git_fetch') }}
-        </button>
-        <button class="qd-btn qd-btn-ghost" :class="{ 'is-spinning': busy === 'pull' }"
-                :disabled="!activePath || !!busy" :aria-busy="busy === 'pull'" @click="doPull">
-          <Loader2 v-if="busy === 'pull'" :size="13" />
-          <ArrowDownToLine v-else :size="13" />
-          {{ t('git_pull') }}
-          <span v-if="status?.behind" class="btn-badge">{{ status.behind }}</span>
-        </button>
-        <button class="qd-btn qd-btn-ghost" :class="{ 'is-spinning': busy === 'push' }"
+        <div class="qd-action-group">
+          <!-- 转圈类挂在按钮上、动画作用到内部 svg：这样在 Download 与 Loader2
+               之间切换图标时不用各写一份 class。类名必须避开 .spinning：
+               全局 settings.css 有「.spinning { animation: spin }」，用它会连按钮一起转。 -->
+          <button class="qd-btn qd-btn-ghost" :class="{ 'is-spinning': busy === 'fetch' }"
+                  :disabled="!activePath || !!busy" :aria-busy="busy === 'fetch'" @click="doFetch">
+            <Loader2 v-if="busy === 'fetch'" :size="13" />
+            <Download v-else :size="13" />
+            {{ t('git_fetch') }}
+          </button>
+          <button class="qd-btn qd-btn-ghost" :class="{ 'is-spinning': busy === 'pull' }"
+                  :disabled="!activePath || !!busy" :aria-busy="busy === 'pull'" @click="doPull">
+            <Loader2 v-if="busy === 'pull'" :size="13" />
+            <ArrowDownToLine v-else :size="13" />
+            {{ t('git_pull') }}
+            <span v-if="status?.behind" class="btn-badge">{{ status.behind }}</span>
+          </button>
+          <button class="qd-btn qd-btn-ghost" :class="{ 'is-spinning': loading }" :disabled="!activePath || loading"
+                  :title="t('git_history')" @click="loadRepo()">
+            <RefreshCw :size="13" />
+          </button>
+          <!-- 远端管理：多远端（origin + upstream）与地址改错，都只能在这里改 -->
+          <button class="qd-btn qd-btn-ghost" :title="t('git_remotes')" :disabled="!activePath"
+                  @click="openRemotes">
+            <Link2 :size="13" />
+          </button>
+          <!-- 子模块：数量少但「clone 后目录是空的」最容易让人以为仓库坏了 -->
+          <button class="qd-btn qd-btn-ghost" :title="t('git_submodules')" :disabled="!activePath"
+                  @click="openSubmodules">
+            <Boxes :size="13" />
+          </button>
+          <!-- SSH 密钥：生成/写 config/测连通都在这一个入口里，用完即走 -->
+          <button class="qd-btn qd-btn-ghost" :title="t('git_ssh')" @click="openSSH">
+            <KeyRound :size="13" />
+          </button>
+        </div>
+        <span class="qd-action-sep"></span>
+        <!-- 推送是这一页唯一「会改动远端」的主操作，给实心主按钮；
+             ahead 徽章仍挂在按钮上，未推送数量一眼可见。 -->
+        <button class="qd-btn qd-btn-primary" :class="{ 'is-spinning': busy === 'push' }"
                 :disabled="!activePath || !!busy" :aria-busy="busy === 'push'"
                 :title="status?.ahead ? t('git_push_n', { n: status.ahead }) : t('git_push')" @click="doPush">
           <Loader2 v-if="busy === 'push'" :size="13" />
           <Upload v-else :size="13" />
           {{ t('git_push') }}
           <span v-if="status?.ahead" class="btn-badge">{{ status.ahead }}</span>
-        </button>
-        <button class="qd-btn qd-btn-ghost" :class="{ 'is-spinning': loading }" :disabled="!activePath || loading"
-                :title="t('git_history')" @click="loadRepo()">
-          <RefreshCw :size="13" />
-        </button>
-        <!-- 远端管理：多远端（origin + upstream）与地址改错，都只能在这里改 -->
-        <button class="qd-btn qd-btn-ghost" :title="t('git_remotes')" :disabled="!activePath"
-                @click="openRemotes">
-          <Link2 :size="13" />
-        </button>
-        <!-- 子模块：数量少但「clone 后目录是空的」最容易让人以为仓库坏了 -->
-        <button class="qd-btn qd-btn-ghost" :title="t('git_submodules')" :disabled="!activePath"
-                @click="openSubmodules">
-          <Boxes :size="13" />
-        </button>
-        <!-- SSH 密钥：生成/写 config/测连通都在这一个入口里，用完即走 -->
-        <button class="qd-btn qd-btn-ghost" :title="t('git_ssh')" @click="openSSH">
-          <KeyRound :size="13" />
         </button>
       </div>
     </header>
@@ -3138,6 +3145,8 @@ function seedPreview() {
   background: var(--color-accent); color: var(--color-accent-text);
   font-family: var(--font-mono); font-size: 10px;
 }
+/* 徽章挂在实心的主按钮上时，蓝底压蓝底会糊成一团：反成白底蓝字 */
+.qd-btn-primary .btn-badge { background: var(--color-accent-text); color: var(--color-accent); }
 
 .git-error {
   margin: 0; padding: 6px var(--space-5); font-size: 12px; flex-shrink: 0;
@@ -3286,10 +3295,12 @@ function seedPreview() {
   font-size: 12px; cursor: pointer;
 }
 .commit-item:hover { background: var(--color-bg-hover); }
-/* 选中用内阴影画左标记：grid 布局里加 border-left 会让整行列宽位移 2px */
+/* 选中态与 .qd-row.active 同一套：--color-select-bg 实底 + 3px accent 左标记。
+   grid 布局里加 border-left 会让整行列宽位移，故这里用 inset 画竖条；
+   实现因布局而异，但「底色 + 3px 竖条」这组信号与全局范式完全一致。 */
 .commit-item.active {
-  background: var(--color-accent-bg);
-  box-shadow: inset 2px 0 0 var(--color-accent);
+  background: var(--color-select-bg);
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 /* graph 前缀必须等宽 + 保留空格，否则线会歪 */
 .commit-graph {
@@ -3306,7 +3317,6 @@ function seedPreview() {
   min-width: 0; flex: 0 1 auto;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.commit-item.active .commit-subject { color: var(--color-text-primary); }
 .ref {
   flex: 0 0 auto; max-width: 140px;
   font-size: 10px; line-height: 15px; padding: 0 6px; border-radius: var(--radius-full);
@@ -3345,13 +3355,13 @@ function seedPreview() {
   border-bottom: 1px solid var(--color-border);
   font: inherit; font-size: 12px; color: var(--color-text-secondary);
   text-align: left; cursor: pointer;
-  box-shadow: inset 2px 0 0 transparent;
+  box-shadow: inset 3px 0 0 transparent;
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .wt-bar:hover { background: var(--color-bg-hover); }
 .wt-bar.active {
-  background: var(--color-accent-bg); color: var(--color-text-primary);
-  box-shadow: inset 2px 0 0 var(--color-accent);
+  background: var(--color-select-bg); color: var(--color-text-primary);
+  box-shadow: inset 3px 0 0 var(--color-accent);
 }
 .wt-ic { flex-shrink: 0; color: var(--color-text-muted); }
 .wt-bar.dirty .wt-ic { color: var(--color-warning); }
@@ -3539,8 +3549,8 @@ function seedPreview() {
 .sd-full.meta { color: var(--color-text-disabled); }
 
 /* ---- 多选 ---- */
-.file-row.picked { background: var(--color-accent-bg); }
-.file-row.picked.active { box-shadow: inset 2px 0 0 var(--color-accent); }
+.file-row.picked { background: var(--color-select-bg); }
+.file-row.picked.active { box-shadow: inset 3px 0 0 var(--color-accent); }
 .pane-ic {
   margin-left: auto; padding: 0 2px; border: 0; background: none; cursor: pointer;
   color: var(--color-text-muted); display: inline-flex; align-items: center;

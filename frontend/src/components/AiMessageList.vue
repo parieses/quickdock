@@ -1347,7 +1347,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
   padding: 0;
   /* 与 app.css 的 .ai-md 保持同一个值：scoped 选择器带 [data-v] 优先级更高，
      这里写 13px 会把那边的 13.5px 盖掉，两边不同步就白改了。 */
-  font-size: 14px;
+  font-size: var(--text-base);
   line-height: 1.75;
   word-break: break-word;
   color: var(--color-text-primary);
@@ -1771,7 +1771,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-msg-img-el.is-clickable { cursor: zoom-in; }
 
-.ai-img-broken { height: 80px; display: flex; align-items: center; justify-content: center; font-size: 20px; color: var(--color-text-disabled); }
+.ai-img-broken { height: 80px; display: flex; align-items: center; justify-content: center; font-size: var(--text-xl); color: var(--color-text-disabled); }
 
 @keyframes ai-blink { 50% { opacity: 0; } }
 

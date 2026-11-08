@@ -132,7 +132,7 @@ function openSettings() {
 }
 
 .ob-desc {
-  font-size: 14px;
+  font-size: var(--text-base);
   color: var(--color-text-muted);
   margin: 0 0 32px;
   line-height: 1.6;
@@ -189,7 +189,7 @@ function openSettings() {
   border-radius: 50%;
   background: var(--color-accent-bg);
   color: var(--color-accent);
-  font-size: 14px;
+  font-size: var(--text-base);
   font-weight: 700;
   display: flex;
   align-items: center;

@@ -257,7 +257,7 @@ async function copyTarget() {
   margin-bottom: 10px;
 }
 .hdd-hero-name {
-  font-size: 14px; font-weight: 600; color: var(--color-text-primary);
+  font-size: var(--text-base); font-weight: 600; color: var(--color-text-primary);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .hdd-env {

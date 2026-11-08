@@ -16,7 +16,7 @@
 | 圆角 | `--radius-xs`(4) `-sm`(6) `-md`(8) `-lg`(12) `-full` | 控件 6 / 卡片 8 / 浮层 12，无裸 `--radius` |
 | 阴影 | `--shadow-card` `-md` `-lg` `-pop` `-toast`（`-sm` / `-border-right` / `-toast-hover` 保留名字但已并入邻近档，新代码不得使用） | 静态容器深色无阴影、靠 `--color-card-bg` 分层；阴影只留给浮层 |
 | 面层 | `--color-card-bg` + `--card-border-color`（卡片/行）、`--color-popover-bg` + `--popover-border-color`（下拉/菜单/模态） | 三级自下而上：`bg-primary` → `card-bg` → `popover-bg`；`bg-secondary` 只给外壳与卡片内下沉区 |
-| 字号 | `--text-2xs`(10) `-xs`(11) `-sm`(12) `-md`(13) `-lg`(15) `-xl`(18) `-2xl`(24) | 七档，禁止半像素值 |
+| 字号 | `--text-2xs`(10) `-xs`(11) `-sm`(12) `-md`(13) `-base`(14) `-lg`(15) `-xl`(18) `-2xl`(24) | 八档，禁止半像素值；`-base` 只给长文正文/对话框，不进列表行；独立 HTML 快照才允许写裸值 |
 | 背景 | `--color-bg-primary` `-secondary` `-tertiary` `-hover` `-active` `-overlay` | 层级由浅入深 |
 | 面 | `--color-surface`、`--color-surface-elevated` | 卡片 / 浮层 |
 | 文字 | `--color-text-primary` `-secondary` `-muted` `-disabled` | 无裸 `--color-text` |

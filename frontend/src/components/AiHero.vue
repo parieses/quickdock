@@ -421,7 +421,7 @@ function onModelSelect(e: Event) {
 }
 
 /* 富输入框（AiRichInput）在落地页用大一号的字，与原来那个 textarea 一致 */
-.ai-hero-box :deep(.ai-rich) { font-size: 14px; line-height: 1.6; }
+.ai-hero-box :deep(.ai-rich) { font-size: var(--text-base); line-height: 1.6; }
 
 /* 底栏永远一行。原来是 flex-wrap: wrap，注释说「窄窗口下整组一起换行」，
    但实际表现是：右组 flex-shrink:0 + margin-left:auto，一旦判定放不下就整组
@@ -559,31 +559,43 @@ select.ai-hero-select:focus-visible {
   word-break: break-all;
 }
 
-/* 缺 API Key：原来是一行橙字 + 一颗蓝色实心按钮，两种语义色挨在一起，
-   既不像提示也不像主操作。收成一条"警示胶囊"——橙底橙边橙字，
-   按钮降为同色系的小胶囊，整条读起来是一件事。 */
+/* 缺 API Key：橙底 + 橙边 + 橙字 + 橙实心按钮，四层同色叠在深底上像贴了块
+   膏药，把落地页的视觉重心从输入框拽走。降饱和后只留一颗 6px 语义点，
+   容器和按钮都回到中性面层 —— 提示仍在，但不再和主操作抢注意力。 */
 .ai-hero-needkey {
   margin: 0;
-  display: inline-flex; align-items: center; gap: 10px;
+  display: inline-flex; align-items: center; gap: 8px;
   align-self: center;
-  padding: 3px 4px 3px 12px;
-  border: 1px solid var(--color-warning-border);
+  padding: 3px 4px 3px 10px;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
-  background: var(--color-warning-bg);
+  background: var(--color-bg-tertiary);
   font-size: var(--text-sm);
   line-height: 1.5;
-  color: var(--color-warning);
+  color: var(--color-text-secondary);
+}
+.ai-hero-needkey::before {
+  content: '';
+  flex-shrink: 0;
+  width: 6px; height: 6px;
+  border-radius: var(--radius-full);
+  background: var(--color-warning);
 }
 
 .ai-hero-needkey .ai-go-settings {
   padding: 3px 11px;
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-full);
-  background: var(--color-warning);
-  color: var(--color-bg-primary);
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+  font-family: inherit;
   font-size: var(--text-xs);
   font-weight: 600;
   line-height: 1.6;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
 }
+.ai-hero-needkey .ai-go-settings:hover { background: var(--color-bg-active); }
 
 .ai-hero-tips { width: 100%; display: flex; flex-direction: column; gap: 8px; margin-top: 4px; }
 

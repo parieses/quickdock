@@ -125,7 +125,7 @@
 
 ### 2.3 字号阶梯
 
-七档，一档一个用途。**禁止再出现 `10.5` / `11.5` / `12.5` 这类半像素值**——
+八档，一档一个用途。**禁止再出现 `10.5` / `11.5` / `12.5` 这类半像素值**——
 100% 缩放下 0.5px 字号不产生可辨差异，只会让阶梯失去参照（2026-11 已全量抹平）。
 
 | 字号 | token | 用途 |
@@ -133,13 +133,19 @@
 | 10 | `--text-2xs` | 角标、计数徽章、图表刻度 |
 | 11 | `--text-xs` | 分区标题（`.qd-panel-title` / `.navigator-header`）、行副标题、时间与 meta |
 | 12 | `--text-sm` | 控件文字（按钮、输入框）、页头副标题 `.qd-page-sub`、表格单元格 |
-| 13 | `--text-md` | **正文基准**：列表行标题、表单值、AI 回复正文 |
-| 14 | — | 对话框标题、卡片内区块标题（无 token，直接写 14px） |
+| 13 | `--text-md` | **界面正文基准**：列表行标题、表单值 |
+| 14 | `--text-base` | **长文正文**：AI 回复 / Markdown、对话框正文与标题；只用于「读」，不进列表行 |
 | 15 | `--text-lg` | 一级页头标题 `.qd-page-title`（600） |
-| 18 | `--text-xl` | 引导页标题、仪表盘问候语 |
-| 24 | `--text-2xl` | 数据展示（统计读数），**不进列表** |
+| 18 | `--text-xl` | 引导页标题、区块标题、仪表盘问候语、图标占位字号 |
+| 24 | `--text-2xl` | 数据展示（统计读数）、长文 h1，**不进列表** |
 
-序号 14 是唯一允许直接写字号的档位（对话框标题场景固定，不需要跟随 token）。
+`--text-base` 名字里的 base **不是阶梯起点**：13px 的 `--text-md` 才是界面正文基准，
+14px 是给「需要连读几行」的长文单独加的一级。
+**不再有「允许直接写 14px」的例外**：2026-11 已把散落的 14px / 20px 全量收进
+`--text-base` / `--text-xl` / `--text-2xl`。唯一还能写裸字号的地方是
+`StatusPage` 导出的**独立 HTML 快照** —— 那份文档不加载本仓库 CSS，所有
+`var(--…)` 都会静默失效，色值、圆角、字号必须写具体值（尤其别写 `var(--radius-*)`，
+会退化成直角）。
 28 / 34 / 48 只出现在图标字号与超大数字读数上，属特例，不要复用。
 
 > 分区标题不再大写、不再加 `letter-spacing`：中文没有大小写，`uppercase` 对中文无效，
@@ -163,7 +169,11 @@
     <span class="qd-page-sub">可选副标题</span>
   </div>
   <div class="qd-page-actions">
-    <button class="qd-btn">刷新</button>
+    <div class="qd-action-group">
+      <button class="qd-btn qd-btn-ghost">刷新</button>
+      <button class="qd-icon-btn">…</button>
+    </div>
+    <span class="qd-action-sep"></span>
     <button class="qd-btn qd-btn-primary">新建</button>
   </div>
 </div>
@@ -177,6 +187,12 @@
 ```
 
 - 页头需要中间控件（搜索、标签）时用 `.qd-page-fill` 占位，动作区靠 `.qd-page-actions` 的 `margin-left:auto` 自己贴右。
+- **右侧动作规则**：最多 1 个主按钮（`.qd-btn-primary`，给这一页的主操作）+ 一组
+  `.qd-action-group`（次要动作，一律 ghost / 图标按钮），两者之间用 `.qd-action-sep`
+  一条 16px 短竖线分开；没有主操作的页面只放一组、不画线。46px 的页头里平铺
+  5~7 个同级按钮时，「这页要做的事」和「顺手的工具」一样重，视线没有落点。
+  类名刻意不带 `.qd-page-actions` 前缀：Git 顶部是 `.bar-actions` 工具栏，也用同一套。
+  已落地：Git（Push 为主按钮）、环境页（环境体检为主按钮，另 3 个工具收成图标）。
 - **任何页面不许再写 `xxx-header`。** 存量 5 种写法（10/14/16/20px 内边距、14/15/18px 标题、有无分隔线）已全部迁移；新增一律用上面两个类。
 
 ### 3.2 按钮（四种尺寸，四种语气）
@@ -264,6 +280,15 @@
 | 键盘焦点 | `:focus-visible` 2px accent 外框 | 去掉 outline 又不给替代 |
 | 禁用 | 底色不动，文字转 `text-disabled`，`cursor: not-allowed` | 用 `opacity`（叠在 muted 上对比度只剩 ~1.6:1，等于消失） |
 | 加载中 | 原位换成 `<Loader2 class="spin">`，宽度不变 | 按钮变宽/抖动 |
+
+> 「选中（列表行/导航项）」覆盖**所有**列表当前项：三栏 `.qd-row`、知识库文档行、
+> 剪贴板条目、Git 提交行 / 工作区条 / 文件行。grid 布局里不能加 `border-left`
+> （会顶偏列宽），改用 `box-shadow: inset 3px 0 0 var(--color-accent)` 画同一根竖条
+> —— 实现可以因布局而异，信号必须只有「`--color-select-bg` 实底 + 3px accent 竖条
+> + 图标中性」这一组。`outline` 是焦点环的语言，不拿来画选中；`hover` 也不能和
+> 选中长得一样，否则鼠标划过一整列时每条都像被选中。
+> 2026-11 已把 Git 的 2px inset、知识库的文字/图标变蓝、剪贴板的 1px outline
+> 三种画法全部收编到这一条。chip / 开关型按钮仍用 `accent-bg`，两者语义不同。
 
 对比度底线：正文 ≥ 7:1，次要 ≥ 4.5:1，禁用态允许低但必须**仍可辨认**。
 
