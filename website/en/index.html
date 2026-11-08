@@ -354,6 +354,26 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Rebuilt visual layering and typography, plus a document knowledge base and SSH jump hosts</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>The whole UI got a new visual hierarchy: cards are now told apart purely by being one step lighter than the background, with no extra 1px border, inner highlight or drop shadow in the dark theme, so a dozen cards on one screen no longer look fuzzy. Overlays sit one level above cards, so a dropdown no longer looks like a hole punched in the card underneath. Light theme goes the other way: a white card on a white page needs its 1px edge.</li>
+          <li>Typography is tightened up: corner radii come in four steps only (4 / 6 / 8 / 12), font sizes are down to seven steps with 177 half-pixel values removed (10.5px and 11.5px are indistinguishable at 100% zoom and only blur the scale), and Chinese headings no longer use uppercase plus wide letter-spacing, which was a Latin-script convention to begin with.</li>
+          <li>Controls are consistent: buttons come in four heights (32 / 28 / 24 / 22) and the sizes hand-written across thirty-odd pages are all aligned; checkboxes and radios are drawn by the app, because the system renders them as a pale square in dark mode that looks like a slip of paper among 13px text. Selection everywhere is a tinted row plus a 3px bar on the left edge, and the icon no longer turns blue with it.</li>
+          <li>New Document Library: import local files (Word, Excel, PDF, Markdown, text, code) and search them. Chinese text goes through FTS5 trigram tokenisation, and if an embedding model is configured a vector pass runs alongside it; the two are merged by rank. Hits point at the exact chunk and the source pane opens next to the results. Without a model it is keyword-only and nothing turns red.</li>
+          <li>SSH gained four things: jump chains (up to three hops, loops rejected, the whole chain is one connection), a command snippet library, port forwarding (local, remote and SOCKS5, reconnecting with backoff), and auto-reconnect that only fires on unexpected drops, telling you plainly that foreground state such as vim or sudo is gone.</li>
+          <li>Notes gained a link graph (force-directed, with an isolated-only filter) and a block outline that folds by heading level. Focus timers only persist finished sessions, so per-note totals are real.</li>
+          <li>Charts were rewritten to load on demand (bar and line) and now take their colours from theme tokens. AI usage counts tokens rather than money: the old rule of drawing costs as soon as one day had a price turned cheap-model days into zero bars. The monitor line chart no longer lands its time axis in 1970.</li>
+          <li>The project check on the Environments page is now a read-only health check: every version declaration is compared against what is installed and active, and a dependency snapshot is produced. The page never runs install commands for you.</li>
+          <li>Stability: floating panels are pre-created from a main-window-ready event instead of a fixed delay, fixing an occasional crash during startup; the settings badge now points at the crash group in the logs.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.41</span>
+          <span class="log-date">2026-11-06</span>
           <span class="log-title">Windows 11 material behind the window, plus a file shelf and mail codes on the dashboard</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -401,22 +421,6 @@
           <li>Generate SSH keys right in the panel and write them into your config in one click: copy the public key, test the connection, switch origin from HTTPS to SSH — no more passwords on pull or push.</li>
           <li>Monitors gain four probe types: HTTP, TCP port (databases / Redis / MQ), local process, and custom command (exit code 0 means up); existing data behaves exactly as before.</li>
           <li>Redesigned dashboard: 24-hour uptime heatmap, todo distribution, recent commits, resident runtimes (DSH and Everything included) and port usage, with recently used items one click away.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.38</span>
-          <span class="log-date">2026-11-03</span>
-          <span class="log-title">Faster, smarter command palette; schedule tasks pick from scenes; SSH window now gives feedback</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Ctrl+K command palette: faster ranking (precomputed plugin scoring, O(1) recent-use lookup); paste your clipboard within 5s of copying; slash-command discovery and unit conversion now support Chinese.</li>
-          <li>Schedule tasks: pick the target straight from Scene → Collection → Item instead of typing a path by hand.</li>
-          <li>Opening the standalone SSH terminal now shows a spinner ("Opening…") on the sidebar and fades the window in — no more silent wait on first launch.</li>
-          <li>AI landing page: more example prompts, shuffled each open, with a "Shuffle" button to swap them instantly.</li>
-          <li>AI engine: assorted stability and UX polish (background tasks, memory consolidation, token streaming).</li>
         </ul>
       </details>
 

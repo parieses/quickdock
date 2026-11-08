@@ -354,6 +354,26 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">界面重做分层与排版，新增知识库、SSH 跳板与端口转发</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>界面整体重做了一遍视觉分层：卡片改成「比底亮一档」的纯亮度差，深色下不再叠 1px 描边、内高光和投影，同屏十几张卡也不再发毛；浮层单独提亮一档，下拉盖在卡片上不再像挖了个洞。浅色反过来——白卡片压白底必须留一条边。</li>
+          <li>排版收口：圆角只剩 4 / 6 / 8 / 12 四档，字号收成七档并清掉 177 处半像素值（10.5、11.5 这类在 100% 缩放下不产生可辨差异，只会让阶梯失真），中文标题不再套「全大写 + 加宽字距」这种给西文准备的写法。</li>
+          <li>控件统一：按钮只有四档高度（32 / 28 / 24 / 22），三十多个页面各自写过的按钮尺寸全部对齐；勾选框和单选框改成自绘 —— 深色主题下系统会画成一块发白的方块，混在 13px 文字里像贴了张纸；选中态全站统一成「淡底 + 左缘 3px 竖条」，图标不再跟着变蓝。</li>
+          <li>新增「知识库」：把本地文档（Word / Excel / PDF / Markdown / 文本 / 代码）导进来，中文走 FTS5 trigram 分词，配了 embedding 模型就同时跑向量召回，两路按名次融合；命中给到具体分段，右侧并排显示原文可直接核对。没配模型只走关键词，不会把整库标红。</li>
+          <li>SSH 四项：跳板链（最多三跳，成环会被拦，整条链当一个连接用）、命令片段库、端口转发（本地 / 远程 / SOCKS5，断线按退避重连），以及只有意外断开才触发的自动重连 —— 恢复后会明确提示 vim、sudo 这类前台状态已经丢了。</li>
+          <li>笔记新增关联图谱（按链接画力导向图，可只看孤立节点）与块级大纲（按标题层级折叠）；专注计时只有已结束的记录落库，可以按篇统计。</li>
+          <li>图表全部按需重写（柱状 / 折线），配色跟随主题 token。AI 用量改按 token 画 —— 原来「有一天有价就整窗按金额画」会让 Ollama 这类零成本模型的日子变成 0 柱；监控折线修掉时间轴整片落到 1970 的问题。</li>
+          <li>环境页的项目检查升级为只读体检：版本声明逐条对照本机已装与激活版本，另出一份依赖清单快照；这个页面不会替你执行任何安装命令。</li>
+          <li>稳定性：浮窗预建改成主窗口就绪事件驱动，修掉启动早期偶发的崩溃；设置红点补齐「崩溃 → 日志分组」的线索。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.41</span>
+          <span class="log-date">2026-11-06</span>
           <span class="log-title">窗口套上 Win11 系统材质，总览加文件置物架与邮件验证码</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -401,22 +421,6 @@
           <li>SSH 密钥在面板里生成并一键写入 config：公钥复制、连接测试、origin 由 HTTPS 切 SSH，拉推代码不再要密码。</li>
           <li>监控探针扩到四种：HTTP、TCP 端口（探数据库 / Redis / MQ）、本机进程、自定义命令（退出码 0 即正常）；老数据升级后行为不变。</li>
           <li>总览页改版：24 小时探测热力条、待办分布、最近提交、常驻运行时（含 DSH 与 Everything）与端口占用，最近使用横排直达。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.38</span>
-          <span class="log-date">2026-11-03</span>
-          <span class="log-title">命令面板更快更准，定时任务能挑场景里的项目，SSH 窗口有反馈了</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Ctrl+K 命令面板：检索与排序更快（插件命令打分预热、最近使用回查 O(1)）；复制后 5 秒内打开可直接带入剪贴板内容；斜杠命令发现、单位换算支持中文。</li>
-          <li>定时任务的目标不再只能手填：可从「场景 → 集合 → 项目」里直接挑一个填进去。</li>
-          <li>点开 SSH 终端独立窗口时，侧栏图标转圈提示「正在打开」，窗口淡入，首开不再空等没反应。</li>
-          <li>AI 落地页示例问题扩到更多条并每次随机，可点「换一批」立即换一组。</li>
-          <li>AI 引擎若干稳定性与体验打磨（后台任务、记忆归集、逐字流等）。</li>
         </ul>
       </details>
 
