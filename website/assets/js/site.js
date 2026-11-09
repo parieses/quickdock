@@ -3,7 +3,7 @@
    处理更新日志的升降级（见 README「发版时要改的地方」）。 */
 window.QD_SITE = {
   version: 'v0.0.42',
-  released: '2026-11-08'
+  released: '2026-11-09'
 };
 
 (function () {

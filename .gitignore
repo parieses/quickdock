@@ -52,6 +52,8 @@ desktop.ini
 
 # --- 本地构建 / 诊断日志（go build、打包等产生的临时输出）---
 *.log
+# GOTMPDIR 与临时诊断截图都放这里，不入库
+tmp/
 # 改动前的文件备份（如 release.yml 移除 mac job 前的原文与回滚 patch）
 backup/
 

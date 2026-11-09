@@ -354,7 +354,7 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
-          <span class="log-title">Rebuilt visual layering and typography, plus a document knowledge base and SSH jump hosts</span>
+          <span class="log-title">Rebuilt visual layering and typography, plus a knowledge base, SSH jump hosts and tighter AI/mailbox behaviour</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
         <ul class="log-body">
@@ -367,6 +367,12 @@
           <li>Charts were rewritten to load on demand (bar and line) and now take their colours from theme tokens. AI usage counts tokens rather than money: the old rule of drawing costs as soon as one day had a price turned cheap-model days into zero bars. The monitor line chart no longer lands its time axis in 1970.</li>
           <li>The project check on the Environments page is now a read-only health check: every version declaration is compared against what is installed and active, and a dependency snapshot is produced. The page never runs install commands for you.</li>
           <li>Stability: floating panels are pre-created from a main-window-ready event instead of a fixed delay, fixing an occasional crash during startup; the settings badge now points at the crash group in the logs.</li>
+          <li>AI file access is scoped: reads and writes stay inside the directory bound to the current conversation. Reading outside it raises a one-shot confirmation, writing outside it is refused, absolute paths from error messages cannot widen the scope, and unattended sub-agents are refused too. The old permissive allow-list is gone.</li>
+          <li>Each conversation picks its own model from a control in the composer. The choice is stored with that conversation, and entry points without a picker (SSH sidebar, clipboard, notes, plugins) reuse the last selected profile.</li>
+          <li>Switching pages no longer flashes a blank screen: frequently used pages keep their previous content and refresh in the background, while a first visit shows a skeleton. The AI usage chart was restyled, prompt editing moved into a centred dialog, and the right-hand artifacts panel has its own close button.</li>
+          <li>Mail codes now work with several mailboxes at once. Each account has its own connection and status, old single-account settings migrate on startup, and the card distinguishes "connected, no codes" from "syncing" and from a concrete error, with links to the official setup guides.</li>
+          <li>Fixed the "credentials are fine but it never connects" case on QQ-style IMAP servers: the client waits for the server greeting before sending LOGIN, and fetching and connection tests both have a hard timeout so an unresponsive server cannot block the background loop.</li>
+          <li>Plugin windows no longer show the WebView2 native context menu, and the marketplace and installed-plugins pages gained a reinstall action.</li>
         </ul>
       </details>
 
