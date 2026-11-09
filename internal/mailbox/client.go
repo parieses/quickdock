@@ -25,6 +25,8 @@ import (
 	"net/mail"
 	"regexp"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
 
@@ -40,6 +42,11 @@ const (
 	// 单封邮件最多读前 64KB：验证码永远在开头，没必要为一张卡片拉附件。
 	maxMessageBytes int64 = 64 << 10
 	dialTimeout           = 8 * time.Second
+	// 单次抓取 / 测试连接（登录 + 搜索 + 拉 20 封）的总时限。imapclient 的
+	// Wait()/Collect() 没有内置超时：服务器不回完整响应时会永久挂住，而 service
+	// 层的 inflight 单飞会把后续所有抓取堵死在 <-wait —— 表现为「凭据没问题、
+	// 993 连接也建着，卡片却永远空、状态永远连不上」，日志里连一条成败都没有。
+	fetchTimeout = 30 * time.Second
 )
 
 // Config 是一个 IMAP 账号。Password 在 services 层落库前已加密，这里是明文。
@@ -63,13 +70,31 @@ type Message struct {
 	Received int64  `json:"received"`
 }
 
-// publicConfig 之外的展示副本：给前端的账号信息绝不含密码。
+// PublicAccount 是一个邮箱账号的展示副本：绝不含密码/授权码。
+// 每个账号独立记连接状态与错误，一个账号填错授权码不该让其它账号一起显示红点。
+type PublicAccount struct {
+	ID        string `json:"id"`
+	Host      string `json:"host"`
+	Port      int    `json:"port"`
+	Email     string `json:"email"`
+	Enabled   bool   `json:"enabled"`
+	Connected bool   `json:"connected"`
+	LastErr   string `json:"lastErr"`
+}
+
+// PublicConfig 是 GetConfig 的返回值。前六个字段是旧版单账号口径，保留给
+// 「有没有启用」「能不能显示状态点」这类聚合判断；Accounts 才是多账号下的真相。
 type PublicConfig struct {
 	Host      string `json:"host"`
 	Port      int    `json:"port"`
 	Email     string `json:"email"`
 	Enabled   bool   `json:"enabled"`
 	Connected bool   `json:"connected"`
+	// 最近一次抓取失败的原因，成功时为空。前端据此显示具体错误，而不是拿一个
+	// 瞬时布尔值猜「是不是授权码填错了」——connected=false 也可能只是首次同步未完成。
+	LastErr string `json:"lastErr"`
+	// 全部已配置账号（含禁用）。旧构建没有这个字段，前端要按 ? 处理。
+	Accounts []PublicAccount `json:"accounts"`
 }
 
 // GuessHost 按邮箱域名给常见服务商的 IMAP 主机；未知域名返回空串，让用户手填。
@@ -119,10 +144,58 @@ func (c Config) validate() error {
 	return nil
 }
 
+// dialReady 建立 TLS 连接并等服务器 greeting 到齐，之后才允许发任何命令。
+//
+// go-imap v2 的 DialTLS 是异步读 greeting 的：拿到 *Client 就发 LOGIN，命令会
+// 抢在 greeting 之前到达。QQ 邮箱的 XMIMAP4Server 会直接丢掉这种命令，只回一句
+// greeting，之后永远不回 tagged OK —— Login().Wait() 就此挂死。现场原始 IO：
+//
+//	> T1 LOGIN "..." "..."
+//	< * OK [CAPABILITY ...] QQMail XMIMAP4Server ready
+//	（再无 T1 OK）
+//
+// 而「先读 greeting 再发 LOGIN」0.5 秒即 Success login ok。库提供了 WaitGreeting()
+// 正是为此；它没有显式超时，但 greeting 阶段库自带 30s 读超时兜底。
+func dialReady(cfg Config, opts *imapclient.Options) (*imapclient.Client, error) {
+	c, err := imapclient.DialTLS(cfg.address(), opts)
+	if err != nil {
+		return nil, fmt.Errorf("连接 IMAP 服务器失败: %w", err)
+	}
+	if err := c.WaitGreeting(); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("读取 IMAP 服务器问候失败: %w", err)
+	}
+	return c, nil
+}
+
+// fetchGuard 是「到点强制断开底层连接」的看门狗，用来打断挂起的 Wait()/Collect()。
+// hit 记录是否真的超时，让上层把 io.ErrUnexpectedEOF 这类底层噪音翻译成人话——
+// 否则用户会看到「IMAP 登录失败（请确认用的是授权码）: unexpected EOF」，
+// 被误导去反复重填完全正确的授权码。
+type fetchGuard struct {
+	stop func()
+	hit  *atomic.Bool
+}
+
+func newFetchGuard(c *imapclient.Client, d time.Duration) *fetchGuard {
+	done := make(chan struct{})
+	var once sync.Once
+	hit := &atomic.Bool{}
+	go func() {
+		select {
+		case <-time.After(d):
+			hit.Store(true)
+			_ = c.Close()
+		case <-done:
+		}
+	}()
+	return &fetchGuard{stop: func() { once.Do(func() { close(done) }) }, hit: hit}
+}
+
 // FetchRecent 拉取 since 之后最近 limit 封邮件的摘要与验证码。
 // 每次调用都是一条独立连接：不持有长连接，断线重连的成本就是一次 TLS 握手，
 // 而「连接已死却以为还活着」才是这类功能最致命的失败。IDLE 长连接在 service 层。
-func FetchRecent(cfg Config, since time.Time, limit int) ([]Message, error) {
+func FetchRecent(cfg Config, since time.Time, limit int) (out []Message, retErr error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
@@ -139,13 +212,24 @@ func FetchRecent(cfg Config, since time.Time, limit int) ([]Message, error) {
 			MinVersion: tls.VersionTLS12,
 		},
 	}
-	c, err := imapclient.DialTLS(cfg.address(), opts)
+	c, err := dialReady(cfg, opts)
 	if err != nil {
-		return nil, fmt.Errorf("连接 IMAP 服务器失败: %w", err)
+		return nil, err
 	}
 	defer func() {
 		// Logout 可能因为连接已断而卡住；不等它，直接关底层连接更可靠。
 		_ = c.Close()
+	}()
+
+	// 总时限看门狗：到点强制断开底层连接，让卡在 Wait()/Collect() 的调用立刻带错
+	// 返回，inflight 得以释放、下一轮能重试。defer 后进先出：先判超时、再停看门狗、
+	// 最后关连接，正常完成时不留 goroutine。
+	guard := newFetchGuard(c, fetchTimeout)
+	defer guard.stop()
+	defer func() {
+		if retErr != nil && guard.hit.Load() {
+			retErr = fmt.Errorf("等待 IMAP 服务器响应超时（%s）: %w", fetchTimeout, retErr)
+		}
 	}()
 
 	if err := c.Login(cfg.Email, cfg.Password).Wait(); err != nil {
@@ -166,6 +250,9 @@ func FetchRecent(cfg Config, since time.Time, limit int) ([]Message, error) {
 	}
 	uids := search.AllUIDs()
 	if len(uids) == 0 {
+		// 成功路径原来一个字都不记：用户看到空卡片只能怀疑「没连上」，
+		// 而实际上只是近两日没有邮件。这条日志让「连上了但没码」可被自证。
+		logger.I("[mailbox] 抓取完成 account=%s 近两日无新邮件", cfg.Email)
 		return nil, nil
 	}
 	if len(uids) > limit {
@@ -184,7 +271,7 @@ func FetchRecent(cfg Config, since time.Time, limit int) ([]Message, error) {
 		return nil, fmt.Errorf("读取邮件失败: %w", err)
 	}
 
-	out := make([]Message, 0, len(bufs))
+	out = make([]Message, 0, len(bufs))
 	for _, b := range bufs {
 		var raw []byte
 		if len(b.BodySection) > 0 {
@@ -223,11 +310,16 @@ func FetchRecent(cfg Config, since time.Time, limit int) ([]Message, error) {
 			Received: received,
 		})
 	}
+	// 三个数字分别回答：有没有搜到邮件、FETCH 有没有真的拿到正文、抽码有没有命中。
+	// 「读到=0 但候选UID>0」说明服务器没回 BODY.PEEK 段（静默失败，不报错），
+	// 「含验证码=0」才是正常的「最近没收到验证码」。排障时这三者不能混为一谈。
+	logger.I("[mailbox] 抓取完成 account=%s 候选UID=%d 读到=%d 含验证码=%d",
+		cfg.Email, len(uids), len(bufs), len(out))
 	return out, nil
 }
 
 // TestConnection 只验证账号能否登录与打开收件箱，不抓取任何正文。
-func TestConnection(cfg Config) error {
+func TestConnection(cfg Config) (retErr error) {
 	if err := cfg.validate(); err != nil {
 		return err
 	}
@@ -235,11 +327,19 @@ func TestConnection(cfg Config) error {
 		Dialer:    &net.Dialer{Timeout: dialTimeout},
 		TLSConfig: &tls.Config{ServerName: strings.TrimSpace(cfg.Host), MinVersion: tls.VersionTLS12},
 	}
-	c, err := imapclient.DialTLS(cfg.address(), opts)
+	c, err := dialReady(cfg, opts)
 	if err != nil {
-		return fmt.Errorf("连接 IMAP 服务器失败: %w", err)
+		return err
 	}
 	defer func() { _ = c.Close() }()
+	// 测试连接同样要有总时限：否则设置面板点一下「测试连接」可能永远转圈。
+	guard := newFetchGuard(c, fetchTimeout)
+	defer guard.stop()
+	defer func() {
+		if retErr != nil && guard.hit.Load() {
+			retErr = fmt.Errorf("等待 IMAP 服务器响应超时（%s）: %w", fetchTimeout, retErr)
+		}
+	}()
 	if err := c.Login(cfg.Email, cfg.Password).Wait(); err != nil {
 		return fmt.Errorf("IMAP 登录失败（请确认用的是授权码而非登录密码）: %w", err)
 	}
@@ -270,9 +370,9 @@ func WatchRecent(cfg Config, stop <-chan struct{}, wake <-chan struct{}, onMail 
 		TLSConfig:             &tls.Config{ServerName: strings.TrimSpace(cfg.Host), MinVersion: tls.VersionTLS12},
 		UnilateralDataHandler: handler,
 	}
-	c, err := imapclient.DialTLS(cfg.address(), opts)
+	c, err := dialReady(cfg, opts)
 	if err != nil {
-		return fmt.Errorf("连接 IMAP 服务器失败: %w", err)
+		return err
 	}
 	defer func() { _ = c.Close() }()
 	if err := c.Login(cfg.Email, cfg.Password).Wait(); err != nil {

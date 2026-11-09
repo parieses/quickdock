@@ -20,13 +20,16 @@
  * 唯一快照（Go 直连 Open-Meteo），前端只在挂载/每分钟读一次快照、配置变更时报给
  * 后端，不再自己起 30 分钟定时器。它独立于 refreshAll 的并发，失败只让天气区降级。
  */
-import { ref, reactive, computed, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, onActivated, onDeactivated, nextTick, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { KEEP_ALIVE } from '../pages/keepAlive'
+defineOptions({ name: KEEP_ALIVE.dashboard })
 import { Events, Dialogs } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage, isDialogCanceled } from '../utils/error'
 import { logErr } from '../utils/logger'
+import { openExternal } from '../utils/externalLinks'
 import { navigate, navigateTo, pendingTarget } from '../composables/bridge'
 import { useToast } from '../composables/useToast'
 import { describeDay, localISO } from '../utils/lunar'
@@ -47,7 +50,7 @@ import { GetValue, GetMostUsedItems, SetValue } from '../../bindings/quickdock/s
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
 import { GitListRepos, GitRepoStatus } from '../../bindings/quickdock/services/git/gitservice'
 import {
-  GetConfig, SetConfig, TestConnection, GetCodes, Refresh as RefreshMail, Dismiss,
+  GetConfig, SetConfig, TestConnection, GetCodes, Refresh as RefreshMail, Dismiss, RemoveAccount,
 } from '../../bindings/quickdock/services/mailbox/mailboxservice'
 import {
   List as ListShelf, AddPaths, Remove as RemoveShelf,
@@ -158,6 +161,7 @@ const daySettingsPos = ref<Record<string, string>>({})
 const showMailSettings = ref(false)
 const mailGearEl = ref<HTMLElement | null>(null)
 const mailSettingsEl = ref<HTMLElement | null>(null)
+const mailBodyEl = ref<HTMLElement | null>(null)
 const mailSettingsPos = ref<Record<string, string>>({})
 
 // 两个浮层只差锚点、宽度和位置 ref，定位逻辑必须只有一份：右边沿对齐锚点、
@@ -295,8 +299,16 @@ interface MailCode {
   id: string; uid: number; account: string; from: string
   subject: string; code: string; preview: string; received: number
 }
+interface MailAccount {
+  id: string; host: string; port: number; email: string; enabled: boolean
+  connected: boolean; lastErr?: string
+}
 interface MailConfig {
   host: string; port: number; email: string; enabled: boolean; connected: boolean
+  /** 最近一次后台抓取失败的原因，空串表示没错误 */
+  lastErr?: string
+  /** 多账号列表；后端为旧构建时缺失，按空数组处理 */
+  accounts?: MailAccount[]
 }
 const MAIL_EXPIRE_MS = 10 * 60 * 1000
 const mailCodes = ref<MailCode[]>([])
@@ -308,7 +320,40 @@ const mailNow = ref(Date.now())
 const mailTestBusy = ref(false)
 const mailTestMsg = ref('')
 const mailTestOk = ref(false)
-const mailForm = reactive({ email: '', host: '', port: 993, password: '', enabled: false })
+const mailForm = reactive({ id: '', email: '', host: '', port: 993, password: '', enabled: true })
+// 后端旧构建没有 accounts 字段时退化为「单账号」展示，避免整块卡片空白。
+const mailAccounts = computed<MailAccount[]>(() => mailCfg.value.accounts || [])
+const mailEnabled = computed(() => mailAccounts.value.length
+  ? mailAccounts.value.some(a => a.enabled)
+  : mailCfg.value.enabled)
+const mailAccountSummary = computed(() => mailAccounts.value
+  .map(a => `${a.email} ${a.connected ? '✓' : a.lastErr ? '✗' : '…'}`)
+  .join('\n') || mailCfg.value.email)
+
+// 第一次配 IMAP 几乎都卡在同两步：网页端没开启 IMAP 服务、或把网页登录密码
+// 当成了授权码。所以设置浮层里直接给可展开的步骤 + 官方图文教程入口。
+// 链接只收已核对过的服务商官方帮助页；认不出的域名只显示内置步骤，不猜 URL
+// （编一个 404 的帮助页比没有链接更糟）。
+const MAIL_GUIDE_URLS: Record<string, string> = {
+  'qq.com': 'https://help.mail.qq.com/detail/106/985',
+  'foxmail.com': 'https://help.mail.qq.com/detail/106/985',
+  'exmail.qq.com': 'https://help.mail.qq.com/detail/106/985',
+  '163.com': 'https://help.mail.163.com/',
+  '126.com': 'https://help.mail.163.com/',
+  'yeah.net': 'https://help.mail.163.com/',
+  'gmail.com': 'https://support.google.com/accounts/answer/185833',
+}
+const showMailGuide = ref(false)
+const mailGuideUrl = computed(() => {
+  const at = mailForm.email.lastIndexOf('@')
+  if (at < 0) return ''
+  return MAIL_GUIDE_URLS[mailForm.email.slice(at + 1).trim().toLowerCase()] || ''
+})
+function openMailGuide() {
+  if (!mailGuideUrl.value) return
+  // 走系统默认浏览器：裸 <a> 在 WebView 里会把整个应用界面导航走（见 externalLinks.ts）。
+  void openExternal(mailGuideUrl.value).catch((e: unknown) => logErr('dashboard.mailGuide', e))
+}
 
 function isMailExpired(received: number) { return mailNow.value - received > MAIL_EXPIRE_MS }
 function mailTimeText(received: number) {
@@ -320,13 +365,9 @@ function mailTimeText(received: number) {
 async function loadMailConfig() {
   try {
     const cfg = unwrap<MailConfig>(await GetConfig())
-    if (!cfg) return
-    mailCfg.value = cfg
-    // 授权码刻意不回显：连自己都别把它渲染进 DOM。password 留空 = 保存时不改。
-    Object.assign(mailForm, {
-      email: cfg.email, host: cfg.host, port: cfg.port || 993,
-      enabled: cfg.enabled, password: '',
-    })
+    if (cfg) mailCfg.value = cfg
+    // 刻意不回写 mailForm：设置浮层可能正开着、用户正在填第二个账号的授权码，
+    // 后台轮询触发的一次 GetConfig 不该把他填了一半的内容冲掉。
   } catch (e) { logErr('dashboard.mailConfig', e) }
 }
 
@@ -343,7 +384,7 @@ async function loadMailCodes() {
 }
 
 async function refreshMailCodes() {
-  if (mailBusy.value || !mailCfg.value.enabled) return
+  if (mailBusy.value || !mailEnabled.value) return
   mailBusy.value = true
   try {
     unwrap(await RefreshMail())
@@ -410,19 +451,83 @@ function openMailSettings() {
   showDaySettings.value = false
   mailTestMsg.value = ''
   showMailSettings.value = !showMailSettings.value
+  if (!showMailSettings.value) return
+  // 先拉一次最新配置再初始化表单：组件刚挂载、GetConfig 还没回来时点齿轮，
+  // 否则会拿空账号列表把表单清成「新增」态，看起来像之前一个邮箱都没配过。
+  void loadMailConfig().then(() => {
+    if (!showMailSettings.value) return
+    const list = mailAccounts.value
+    if (!list.length) resetMailForm()
+    else if (!list.some(a => a.id === mailForm.id)) editMailAccount(list[0])
+  })
+}
+
+// 切换编辑对象 / 保存后都把滚动区带回顶部：新账号出现在上方列表里，
+// 停在表单中部就看不见它，填新账号时也会从半截字段开始。
+function scrollMailBodyTop() {
+  void nextTick(() => { if (mailBodyEl.value) mailBodyEl.value.scrollTop = 0 })
+}
+
+function resetMailForm() {
+  Object.assign(mailForm, { id: '', email: '', host: '', port: 993, password: '', enabled: true })
+  mailTestMsg.value = ''
+  scrollMailBodyTop()
+}
+
+function editMailAccount(a: MailAccount) {
+  Object.assign(mailForm, {
+    id: a.id, email: a.email, host: a.host, port: a.port || 993,
+    password: '', enabled: a.enabled,
+  })
+  mailTestMsg.value = ''
+  scrollMailBodyTop()
+}
+
+// 列表里的圆点与状态文字必须同口径：lastErr 优先于 connected（同步失败时
+// connected 可能还留着上一次的 true），禁用态单独走中性灰。
+function mailAccountDot(a: MailAccount) {
+  if (!a.enabled) return 'pending'
+  if (a.lastErr) return 'down'
+  return a.connected ? 'up' : 'pending'
+}
+function mailAccountStateClass(a: MailAccount) {
+  if (!a.enabled) return 'off'
+  if (a.lastErr) return 'bad'
+  return a.connected ? 'ok' : 'pending'
+}
+function mailAccountState(a: MailAccount) {
+  if (!a.enabled) return t('mailDisabledShort')
+  if (a.lastErr) return t('mailAcctError')
+  return a.connected ? t('mailAcctConnected') : t('mailAcctSyncing')
+}
+
+async function removeMailAccount(a: MailAccount) {
+  if (!window.confirm(t('mailRemoveConfirm', { email: a.email }))) return
+  try {
+    unwrap(await RemoveAccount(a.id))
+    if (mailForm.id === a.id) resetMailForm()
+    await loadMailConfig()
+    await loadMailCodes()
+    toast.success(t('mailRemoved'))
+  } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.mailRemove', e) }
 }
 
 async function saveMailConfig() {
+  const savedEmail = mailForm.email.trim()
   try {
     unwrap(await SetConfig(
-      mailForm.host.trim(), Number(mailForm.port) || 993,
-      mailForm.email.trim(), mailForm.password, mailForm.enabled,
+      mailForm.id, mailForm.host.trim(), Number(mailForm.port) || 993,
+      savedEmail, mailForm.password, mailForm.enabled,
     ))
-    mailForm.password = ''
     await loadMailConfig()
-    closeMailSettings()
+    // 保留浮层：多账号下用户常常要连着加第二个。保存后选中刚保存的账号，
+    // 既能看到它的连接状态，也不会把授权码留在输入框里。
+    const saved = mailAccounts.value.find(a => a.email.toLowerCase() === savedEmail.toLowerCase())
+    if (saved) editMailAccount(saved)
+    else resetMailForm()
+    scrollMailBodyTop()
     toast.success(t('mailSaved'))
-    if (mailCfg.value.enabled) void refreshMailCodes()
+    if (mailEnabled.value) void refreshMailCodes()
   } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.mailSave', e) }
 }
 
@@ -1026,11 +1131,14 @@ function aiTooltipTitle(index: number): string {
 function aiTooltipExtra(index: number): string {
   const d = aiChart.value.items[index]
   if (!d) return ''
-  // 主系列那行已经是「Tokens: 50k」，额外再写一遍单位只会挤在一起。
-  // 柱高含义原来的原生 title 也不放了（会和 ECharts tooltip 双层叠加），挪到这里收尾。
-  return `<div>${t('chartTooltipRequests')}: ${d.requests}</div>`
-    + `<div>${t('chartTooltipCost')}: ${moneyText(d.cost)}</div>`
-    + `<div style="opacity:.6;margin-top:2px">${t('dash_ai_bars_title')}</div>`
+  // 请求数与费用压成一行。这张图的 tooltip 本来就比柱子高，四行叠上去会顶出
+  // 卡片、第一行日期先被裁掉；「柱高代表 token 量」是图的说明，不该每次悬停
+  // 都重复一遍，已挪到卡片头的 title 上。
+  // 费用要转义：moneyText 在不足一分时返回「<0.01」，直接拼进 innerHTML
+  // 会被当成标签开头，那一段连同后面的文字一起消失。
+  const cost = moneyText(d.cost).replace(/</g, '&lt;')
+  return `<div>${t('chartTooltipRequests')}: ${d.requests}`
+    + ` · ${t('chartTooltipCost')}: ${cost}</div>`
 }
 const aiTopModels = computed(() => {
   const total = aiUsage.value?.totalTokens ?? 0
@@ -1325,9 +1433,20 @@ let timer: ReturnType<typeof setInterval> | null = null
 // onMounted 是 async：HMR 换模块时旧组件已卸载，但它的 await 链可能还在往下跑。
 // 卸载即置位，每个 await 之后都判一次，别让旧模块继续写状态、发 IPC，
 // 更别在卸载钩子里碰到「上一次热更新已经删掉」的变量。
+// 注意：只有真正卸载才置 true。KeepAlive 的 deactivate 不算卸载，置了会掐断
+// 正在跑的 await 链，切回来反而少加载几块。
 let disposed = false
-onMounted(async () => {
-  // 浮层监听要先注册：预览模式下面也要能开设置面板，不能被下面的 return 跳过。
+
+// 本页在 KeepAlive 白名单里：切走只触发 onDeactivated，不卸载。原来全部挂在
+// onUnmounted 上清理的 4 个全局 DOM 监听 + 4 个事件订阅 + 60s 轮询，会一直在
+// 后台跑，且用户在别的页面按键/点鼠标还会命中 onDayKeydown / onDayDocDown。
+// 按 MonitorPage 的范式把注册与注销抽成幂等的一对，跟着激活态挂/摘。
+// 用独立的 attached 标记而不是拿 timer 判空：预览模式（PREVIEW）故意不起
+// 定时器，拿它当哨兵会重复注册监听。
+let attached = false
+function attachGlobal() {
+  if (attached) return
+  attached = true
   window.addEventListener('resize', placeAllFloating)
   window.addEventListener('scroll', onDayScroll, true)
   document.addEventListener('mousedown', onDayDocDown, true)
@@ -1337,16 +1456,58 @@ onMounted(async () => {
   offShelfChanged = Events.On('shelf:changed', () => { void loadShelf() })
   offDshExited = Events.On('quickdock:dsh:exited', () => { if (!disposed) void loadDshOnly() })
   offDshStarted = Events.On('quickdock:dsh:started', () => { if (!disposed) void loadDshOnly() })
-  lastRefresh.value = new Date()
-  if (PREVIEW) { seedPreview(); return }
-  void refreshAll()
-  timer = setInterval(() => {
-    void loadMonitors()
+  if (!PREVIEW && timer === null) {
+    timer = setInterval(() => {
+      void loadMonitors()
+      refreshDayIfNeeded()
+      void loadWeather()
+      mailNow.value = Date.now()      // 验证码 10 分钟过期态要自己走动
+      void loadMailCodes()            // 纯本地 IPC，兼作事件丢失时的兜底
+    }, 60000)
+  }
+}
+function detachGlobal() {
+  if (!attached) return
+  attached = false
+  window.removeEventListener('resize', placeAllFloating)
+  window.removeEventListener('scroll', onDayScroll, true)
+  document.removeEventListener('mousedown', onDayDocDown, true)
+  document.removeEventListener('keydown', onDayKeydown)
+  offMailChanged?.(); offMailChanged = null
+  offShelfChanged?.(); offShelfChanged = null
+  offDshExited?.(); offDshExited = null
+  offDshStarted?.(); offDshStarted = null
+  if (timer !== null) { clearInterval(timer); timer = null }
+}
+
+// stale-while-revalidate：切回来先整块显示上次的卡片，再静默补一次。
+// refreshAll(true) 不置 loading、不清空任何 ref，所以补数据期间不会闪白。
+let pageActive = false
+let needsRefresh = false
+function startPage() {
+  if (pageActive) return // 首次挂载时 onMounted 已 refreshAll，紧随的 onActivated 不重复
+  pageActive = true
+  attachGlobal()
+  if (needsRefresh) {
+    needsRefresh = false
     refreshDayIfNeeded()
-    void loadWeather()
-    mailNow.value = Date.now()      // 验证码 10 分钟过期态要自己走动
-    void loadMailCodes()            // 纯本地 IPC，兼作事件丢失时的兜底
-  }, 60000)
+    if (!PREVIEW) void refreshAll(true)
+    else lastRefresh.value = new Date()
+  }
+}
+function stopPage() {
+  pageActive = false
+  needsRefresh = true
+  detachGlobal()
+}
+
+onMounted(async () => {
+  // 浮层监听要先注册：预览模式下面也要能开设置面板，不能被下面的 return 跳过。
+  attachGlobal()
+  lastRefresh.value = new Date()
+  if (PREVIEW) { seedPreview(); startPage(); return }
+  void refreshAll()
+  startPage()
   await loadDayPrefs()
   if (disposed) return
   await loadWeatherCfg()
@@ -1356,17 +1517,11 @@ onMounted(async () => {
   void loadMailCodes()
   void loadShelf()
 })
+onActivated(startPage)
+onDeactivated(stopPage)
 onUnmounted(() => {
   disposed = true
-  offMailChanged?.()
-  offShelfChanged?.()
-  offDshExited?.()
-  offDshStarted?.()
-  window.removeEventListener('resize', placeAllFloating)
-  window.removeEventListener('scroll', onDayScroll, true)
-  document.removeEventListener('mousedown', onDayDocDown, true)
-  document.removeEventListener('keydown', onDayKeydown)
-  if (timer) clearInterval(timer)
+  detachGlobal()
 })
 </script>
 
@@ -1607,10 +1762,38 @@ onUnmounted(() => {
         <!-- 邮箱账号浮层：与日期/天气共用 .db-settings 外壳与定位算法。
              授权码输入框永远不回填，且从不进入任何日志或 DOM 常量。 -->
         <Teleport to="body">
-          <div v-if="showMailSettings" ref="mailSettingsEl" class="db-settings" :style="mailSettingsPos">
+          <div v-if="showMailSettings" ref="mailSettingsEl" class="db-settings qd-mail-settings" :style="mailSettingsPos">
             <div class="db-settings-head">
               <span>{{ t('mailSettingsTitle') }}</span>
               <button class="db-icon-btn" @click="closeMailSettings"><X :size="13" /></button>
+            </div>
+            <div ref="mailBodyEl" class="qd-mail-body">
+            <!-- 账号区：标题 + 添加按钮一行，列表紧跟其下。添加过账号才出现列表，
+                 没账号时给一句引导，不摆一个空框占地方。列表本身即导航，点邮箱
+                 载入下方表单；每行自带独立状态，一个账号挂了不会把整张卡片说成挂了。 -->
+            <div class="qc-acct-head">
+              <span class="qc-acct-title">
+                {{ t('mailAccountsTitle') }}<em v-if="mailAccounts.length">{{ mailAccounts.length }}</em>
+              </span>
+              <button type="button" class="qc-acct-add" @click="resetMailForm()">
+                <Plus :size="12" /> {{ t('mailAdd') }}
+              </button>
+            </div>
+            <div v-if="mailAccounts.length" class="qc-acct-list">
+              <div v-for="a in mailAccounts" :key="a.id" class="qc-acct-row"
+                   :class="{ active: mailForm.id === a.id }">
+                <span class="qc-dot" :class="mailAccountDot(a)" :title="a.lastErr || a.email"></span>
+                <button type="button" class="qc-acct-name" :title="a.email"
+                        @click="editMailAccount(a)">{{ a.email }}</button>
+                <span class="qc-acct-state" :class="mailAccountStateClass(a)">{{ mailAccountState(a) }}</span>
+                <button type="button" class="db-icon-btn qc-acct-del" :title="t('mailRemove')"
+                        @click="removeMailAccount(a)"><Trash2 :size="12" /></button>
+              </div>
+            </div>
+            <p v-else class="qc-acct-empty">{{ t('mailAccountsEmpty') }}</p>
+            <div class="qc-acct-form-head">
+              <span>{{ mailForm.id ? t('mailEdit') : t('mailAdd') }}</span>
+              <span v-if="mailForm.id" class="qc-acct-form-target">{{ mailForm.email }}</span>
             </div>
             <label class="field toggle-field">
               <span class="field-label">{{ t('mailEnable') }}</span>
@@ -1637,7 +1820,23 @@ onUnmounted(() => {
                      autocomplete="new-password" :placeholder="t('mailPasswordPlaceholder')" />
             </div>
             <span class="db-pref-hint">{{ t('mailPasswordHint') }}</span>
-            <div v-if="mailTestMsg" class="result-hint" :class="mailTestOk ? 'qc-ok' : 'qc-error'">{{ mailTestMsg }}</div>
+            <div v-if="mailTestMsg" class="result-hint" :class="mailTestOk ? 'qc-ok' : 'qc-error'">
+              {{ mailTestMsg }}
+              <button v-if="!mailTestOk" type="button" class="mail-guide-inline" @click="showMailGuide = true">{{ t('mailGuideRetryHint') }} ›</button>
+            </div>
+            <!-- 教程默认收起，免得挤占本来就不宽的浮层；测试失败时上面那行会把它点亮。 -->
+            <div class="mail-guide">
+              <button type="button" class="mail-guide-toggle" @click="showMailGuide = !showMailGuide">
+                <ChevronDown :size="12" :class="{ collapsed: !showMailGuide }" />
+                {{ t('mailGuideTitle') }}
+              </button>
+              <div v-if="showMailGuide" class="mail-guide-body">
+                <p class="db-pref-hint">{{ t('mailGuideSteps') }}</p>
+                <button v-if="mailGuideUrl" type="button" class="mail-guide-link" @click="openMailGuide">{{ t('mailGuideLink') }}</button>
+                <p v-else class="db-pref-hint">{{ t('mailGuideFallback') }}</p>
+              </div>
+            </div>
+            </div>
             <div class="db-settings-foot">
               <button class="btn btn-secondary" :disabled="mailTestBusy" @click="testMailConfig()">
                 {{ mailTestBusy ? t('mailTesting') : t('mailTest') }}
@@ -1770,9 +1969,11 @@ onUnmounted(() => {
               <header class="card-head">
                 <Mail :size="13" class="t-ic" />
                 <span class="card-title">{{ t('mailTitle') }}</span>
-                <span v-if="mailCfg.enabled" class="qc-dot" :class="mailCfg.connected ? 'up' : 'down'"></span>
+                <span v-if="mailEnabled" class="qc-dot"
+                      :class="mailCfg.connected ? 'up' : (mailCfg.lastErr ? 'down' : 'pending')"
+                      :title="mailAccountSummary"></span>
                 <div class="qc-actions">
-                  <button v-if="mailCfg.enabled" class="db-icon-btn" :title="t('dash_refresh')"
+                  <button v-if="mailEnabled" class="db-icon-btn" :title="t('dash_refresh')"
                           :disabled="mailBusy" @click="refreshMailCodes()">
                     <RefreshCw :size="13" :class="{ spin: mailBusy }" />
                   </button>
@@ -1782,7 +1983,7 @@ onUnmounted(() => {
                 </div>
               </header>
               <div class="qc-body">
-                <p v-if="!mailCfg.enabled" class="empty qc-empty">
+                <p v-if="!mailEnabled" class="empty qc-empty">
                   {{ t('mailDisabled') }}
                   <button class="qc-link" @click="openMailSettings()">{{ t('mailSetup') }}</button>
                 </p>
@@ -1790,7 +1991,26 @@ onUnmounted(() => {
                   {{ mailError }}
                   <button class="qc-link" @click="refreshMailCodes()">{{ t('mailRetry') }}</button>
                 </p>
-                <p v-else-if="!mailCodes.length" class="empty qc-empty">{{ t('mailEmpty') }}</p>
+                <p v-else-if="!mailCodes.length" class="empty qc-empty">
+                  {{ t('mailEmpty') }}
+                  <!-- 空卡片必须说清「连上了但没码」/「同步失败」/「首次同步中」。
+                       connected 只是瞬时结果：首次抓取未完成、或后端是旧构建没这个字段时
+                       它都是 false，不能据此断言「授权码错了」——那会把人引去反复改授权码。
+                       只有 lastErr 非空才是真失败，且要显示具体原因。 -->
+                  <span v-if="mailCfg.connected" class="qc-conn ok">
+                    {{ mailAccounts.length > 1
+                      ? t('mailConnectedMulti', { n: mailAccounts.length })
+                      : t('mailConnected', { email: mailCfg.email }) }}
+                  </span>
+                  <span v-else-if="mailCfg.lastErr" class="qc-conn bad">
+                    {{ t('mailSyncError', { error: mailCfg.lastErr }) }}
+                    <button class="qc-link" @click="refreshMailCodes()">{{ t('mailRetry') }}</button>
+                  </span>
+                  <span v-else class="qc-conn">
+                    {{ t('mailSyncing') }}
+                    <button class="qc-link" @click="refreshMailCodes()">{{ t('mailRetry') }}</button>
+                  </span>
+                </p>
                 <ul v-else class="qc-list">
                   <li v-for="m in mailCodes.slice(0, 3)" :key="m.id" class="qc-row"
                       :data-mail-id="m.id"
@@ -1928,7 +2148,7 @@ onUnmounted(() => {
                  纯回顾型，放最后一行；没配模型时整张卡不出现——一张恒为 ¥0.00 的卡
                  对没在用 AI 的人是噪音。钱是估算（内置价目表线性折算），口径在设置页。 -->
             <section v-if="aiConfigured" class="card span-3">
-              <header class="card-head">
+              <header class="card-head" :title="t('dash_ai_bars_title')">
                 <Coins :size="13" class="t-ic" />
                 <span class="card-title">{{ t('dash_ai_usage') }}</span>
                 <button class="card-link" @click="emit('open-settings', 'ai:usage')">
@@ -1953,12 +2173,14 @@ onUnmounted(() => {
                 <div class="ai-chart">
                   <!-- 七日 token 柱状图：窗口补零在 aiChart，归一/柱高/tooltip 交给图形库。
                        minimal 去掉坐标轴（窄卡里几十像素塞不下 x/y 轴），barMinHeight 给空日子
-                       留一条浅色短线，外层 .ai-bars 补回基线——这三点合起来才是重写前的观感。 -->
+                       留一条浅色短线，外层 .ai-bars 补回基线——这三点合起来才是重写前的观感。
+                       高度 64 而不是先前的 52：三行 tooltip 约 56px，52 的容器放不下，
+                       浮层会顶出卡片被裁掉第一行。 -->
                   <div class="ai-bars">
                     <QdBarChart
                       :labels="aiChart.labels"
                       :series="aiChartSeries"
-                      :height="52"
+                      :height="64"
                       minimal
                       :bar-min-height="2"
                       :bar-max-width="40"
@@ -2169,6 +2391,9 @@ onUnmounted(() => {
 }
 .qc-link:hover { text-decoration: underline; }
 .qc-error { color: var(--color-danger); }
+.qc-conn { display: block; margin-top: 6px; font-size: 10px; line-height: 1.4; }
+.qc-conn.ok { color: var(--color-text-disabled); }
+.qc-conn.bad { color: var(--color-danger); word-break: break-word; }
 .qc-ok { color: var(--color-success); }
 .qc-list { list-style: none; margin: 0; padding: 0; }
 .qc-row {
@@ -2208,6 +2433,77 @@ onUnmounted(() => {
 .qc-dot { width: 6px; height: 6px; border-radius: var(--radius-full); flex-shrink: 0; }
 .qc-dot.up { background: var(--color-success); }
 .qc-dot.down { background: var(--color-danger); }
+/* 首次同步尚未出结果：中性灰，别用红点把「正在连」说成「连不上」 */
+.qc-dot.pending { background: var(--color-text-disabled); }
+/* 邮箱设置浮层里的账号列表：选中态用 bg-hover，不要再套一层卡片面层——
+   浮层里再挖一块更暗的面，看起来会像个洞。列表只用一圈描边分组。 */
+.qc-acct-head {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-2);
+}
+.qc-acct-title { font-size: 11px; font-weight: 600; color: var(--color-text-secondary); }
+.qc-acct-title em {
+  margin-left: 5px; font-style: normal; font-weight: 400; color: var(--color-text-disabled);
+}
+.qc-acct-add {
+  display: inline-flex; align-items: center; gap: 4px; flex-shrink: 0;
+  padding: 3px 8px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: none; font: inherit; font-size: 11px; color: var(--color-accent); cursor: pointer;
+}
+.qc-acct-add:hover { background: var(--color-accent-bg); border-color: var(--color-accent); }
+.qc-acct-list {
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 136px; overflow-y: auto; scrollbar-width: thin;
+  padding: 3px; border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+}
+.qc-acct-row {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: 6px 7px; border: 1px solid transparent; border-radius: var(--radius-xs);
+}
+.qc-acct-row:hover { background: var(--color-bg-hover); }
+.qc-acct-row.active { background: var(--color-bg-hover); border-color: var(--color-border); }
+.qc-acct-name {
+  flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  background: none; border: 0; padding: 0; text-align: left;
+  font: inherit; font-size: 12px; color: var(--color-text-secondary); cursor: pointer;
+}
+.qc-acct-row.active .qc-acct-name { color: var(--color-text-primary); }
+.qc-acct-state { font-size: 10px; flex-shrink: 0; }
+.qc-acct-state.ok { color: var(--color-success); }
+.qc-acct-state.bad { color: var(--color-danger); }
+.qc-acct-state.pending, .qc-acct-state.off { color: var(--color-text-disabled); }
+.qc-acct-del { opacity: .55; }
+.qc-acct-row:hover .qc-acct-del, .qc-acct-row.active .qc-acct-del { opacity: 1; }
+.qc-acct-row .qc-acct-del:hover { color: var(--color-danger); }
+.qc-acct-empty {
+  margin: 0; padding: 9px 10px;
+  border: 1px dashed var(--color-border); border-radius: var(--radius-sm);
+  font-size: 11px; color: var(--color-text-disabled);
+}
+.qc-acct-form-head {
+  display: flex; align-items: baseline; gap: 6px;
+  padding-top: var(--space-2); border-top: 1px solid var(--color-border);
+  font-size: 11px; font-weight: 600; color: var(--color-text-secondary);
+}
+.qc-acct-form-target {
+  min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; font-weight: 400; color: var(--color-text-disabled);
+}
+/* 邮箱浮层比日期面板高，视口一矮内容就要滚；「测试连接 / 保存」是唯一出口，
+   滚到看不见等于加不了邮箱。改成三段式：标题与操作栏固定，只有中间滚。
+   不用 sticky 底栏——它会盖住还没滚到的输入框，最后一行永远点不到。 */
+.db-settings.qd-mail-settings { overflow: hidden; }
+.qd-mail-settings .qd-mail-body {
+  display: flex; flex-direction: column; gap: var(--space-3);
+  /* 面板只有 max-height、没有固定 height，flex-basis:0 会让它被算成 0 高。
+     用 auto 撑内容 + 允许收缩：内容少时面板自然收拢，超高时压缩这一段并内部滚动。 */
+  flex: 0 1 auto; min-height: 0; overflow-y: auto; scrollbar-width: thin;
+  padding-right: 2px;
+}
+/* 滚动区内部同样禁止收缩：否则 body 一被压缩，列表又会被挤成一条线。 */
+.qd-mail-body > * { flex-shrink: 0; }
+.qd-mail-settings .db-settings-foot {
+  flex-shrink: 0; padding-top: var(--space-3); border-top-color: var(--color-border-light);
+}
 .qc-drop.over, .qc-drop.file-drop-target-active { background: var(--color-accent-bg); }
 .qc-port { width: 76px; flex-shrink: 0; }
 
@@ -2246,12 +2542,15 @@ onUnmounted(() => {
   list-style: none; margin: 0; padding: 0;
   display: flex; flex-wrap: wrap; gap: 6px var(--space-3);
 }
-/* 基宽 130 起、可换行：半行卡里三个模型会折成两行，宽卡里仍是一行均分 */
+/* 基宽 130 起、可换行：半行卡里三个模型会折成两行，宽卡里仍是一行均分。
+ * 底色用 bg-hover 而不是 bg-tertiary：卡片底 #171b22 与 tertiary #1b202a 只差
+ * 4~5 级亮度，胶囊底等于不存在，右端那个「89%」看起来像悬在柱子下面的横轴刻度，
+ * 而不是和左边模型名一组。 */
 .ai-model {
   flex: 1 1 130px; min-width: 0;
   display: inline-flex; align-items: center; gap: 6px;
   padding: 3px 9px; border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary); font-size: 11px;
+  background: var(--color-bg-hover); font-size: 11px;
 }
 .ai-model-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
@@ -2494,6 +2793,20 @@ onUnmounted(() => {
 .yj-disclaimer { font-size: 10px; color: var(--color-text-disabled); }
 .db-pref-hint { font-size: 10px; line-height: 1.5; color: var(--color-text-disabled); }
 
+/* 邮箱配置教程：链接用按钮 + openExternal，不用裸 <a>（WebView 会把应用界面导航走）。 */
+.mail-guide { margin-top: 6px; }
+.mail-guide-toggle, .mail-guide-link, .mail-guide-inline {
+  padding: 0; border: 0; background: none; cursor: pointer;
+  color: var(--color-accent); font-family: inherit; font-size: 11px;
+}
+.mail-guide-toggle { display: flex; align-items: center; gap: 4px; }
+.mail-guide-toggle svg { transition: transform 120ms ease; }
+.mail-guide-toggle svg.collapsed { transform: rotate(-90deg); }
+.mail-guide-body { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.mail-guide-body p { margin: 0; }
+.mail-guide-link, .mail-guide-inline { text-decoration: underline; align-self: flex-start; }
+.mail-guide-inline { margin-left: 6px; }
+
 .db-weather {
   display: flex; align-items: center; gap: var(--space-4); min-width: 0;
   margin-left: auto; padding-left: var(--space-6);
@@ -2558,6 +2871,10 @@ onUnmounted(() => {
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-lg);
 }
+/* flex 列容器的子项默认 flex-shrink:1：内容超过 maxHeight 时会被一起压缩，
+   账号列表能被压成 0 高度、文字只剩半截（就是截图里「添加了却看不到列表」）。
+   禁止收缩，超高统一交给容器自己滚动。 */
+.db-settings > * { flex-shrink: 0; }
 .db-settings-head {
   display: flex; align-items: center; justify-content: space-between;
   font-size: 13px; font-weight: 600; color: var(--color-text-primary);

@@ -28,7 +28,7 @@ const props = withDefaults(defineProps<{
   /** 迷你模式：隐藏坐标轴/网格，只画柱（用于顶部统计条这类紧凑场景）。 */
   minimal?: boolean
   /** 柱条最小高度 / 最大宽度（px）。最小高度用于给 0 值日留一条贴底短线，
-   *  否则「哪天闲了」在图上完全消失；开启后 0 值点自动用 bgTertiary 着色。 */
+   *  否则「哪天闲了」在图上完全消失。 */
   barMinHeight?: number
   barMaxWidth?: number
   /** 柱身不透明度：紧凑场景用半透明，免得一块实心色压过旁边的数字。 */
@@ -117,8 +117,11 @@ function buildOption() {
       const pc = s.pointColors?.[j]
       if (pc) return { value: v, itemStyle: { color: resolveChartColor(c, pc, i) } }
       // 空日子留一条浅色短线，和有量的柱子明确区分（重写前纯 CSS 柱条的语义）。
+      // 用 borderLight 而不是 bgTertiary：实测深色主题下卡片底 #171b22 与
+      // bgTertiary #1b202a 只差 4~5 级亮度，2px 短线整根融进背景，
+      // 看上去像「柱子缺了两天」而不是「那两天没调用」。
       if (props.barMinHeight > 0 && !v) {
-        return { value: v, itemStyle: { color: c.bgTertiary } }
+        return { value: v, itemStyle: { color: c.borderLight } }
       }
       return v
     })
@@ -147,6 +150,10 @@ function buildOption() {
     },
     tooltip: {
       trigger: 'axis',
+      // 迷你图（五六十像素高）里浮层比容器还高，不 confine 时它会顶出卡片，
+      // 第一行直接被裁掉（实测 AI 用量的 tooltip 只剩「请求数」往下三行）。
+      // 只在 minimal 时开：正常高度的图表留 overflow 放行，tooltip 出容器更宽松。
+      confine: props.minimal,
       // 不挂 body：挂到 body 后定位要跨容器换算，窄卡里容易算到视口外「整个看不到」。
       // 改为留在图表容器（ECharts 默认，定位最稳），由容器 overflow:visible 放行，
       // 再用高 z-index 压住相邻卡片。pointer-events:none 免得它自己吃掉 hover 闪烁。
