@@ -171,6 +171,9 @@
      SshTerminal.vue 用 getComputedStyle 读出实际值再喂给 xterm。
      16 个 ANSI 色 + 背景/前景/光标/选区，两套主题必须一一对应。 */
   --color-terminal-bg: #0f1116;
+  /* 同色的不透明副本：光标反色文字、连接遮罩这类「必须盖住底下内容」的地方用。
+     材质档位下 --color-terminal-bg 会变成 rgba，拿它当遮罩/文字色会发虚。 */
+  --color-terminal-bg-solid: #0f1116;
   --color-terminal-fg: #c6cad3;
   --color-terminal-cursor: #5b8cff;
   --color-terminal-selection: rgba(91, 140, 255, 0.28);
@@ -315,6 +318,7 @@
   /* 浅色终端调色板：对比度按浅底重算过，直接复用深色色值会偏灰、
      在 #fbfaf7 上读不清（尤其 yellow / cyan）。 */
   --color-terminal-bg: #ffffff;
+  --color-terminal-bg-solid: #ffffff;
   --color-terminal-fg: #1a1d24;
   --color-terminal-cursor: #4a7af0;
   --color-terminal-selection: rgba(91, 140, 255, 0.22);
@@ -439,6 +443,9 @@ html.qd-backdrop {
   --color-bg-primary: rgba(12, 14, 19, 0.50);
   --color-bg-secondary: rgba(20, 23, 31, 0.58);
   --color-bg-tertiary: rgba(27, 32, 42, 0.68);
+  /* 终端比内容区更实一档：文字多、要压住亮壁纸，但仍留出 45% 透过率。
+     与 .ssh-page 那层 bg-primary 叠完约 22% 材质可见，不再是整块死黑。 */
+  --color-terminal-bg: rgba(15, 17, 22, 0.55);
 }
 
 html.qd-backdrop[data-theme="light"] {
@@ -448,6 +455,8 @@ html.qd-backdrop[data-theme="light"] {
   --color-bg-primary: rgba(246, 247, 249, 0.72);
   --color-bg-secondary: rgba(255, 255, 255, 0.80);
   --color-bg-tertiary: rgba(238, 240, 244, 0.84);
+  /* 浅色是深字压亮壁纸，容错小，终端底比深色档更实（0.72）。 */
+  --color-terminal-bg: rgba(255, 255, 255, 0.72);
 }
 
 /* 铺底只留一层，位置很关键。
@@ -460,10 +469,26 @@ html.qd-backdrop[data-theme="light"] {
    选择器带 html.qd-backdrop，能压过 App.vue 的 scoped 规则（scoped 会多一个
    [data-v-xxx] 属性选择器，单靠类名压不住）。
    .ssh-standalone 同理：它下面还有 .ssh-page / .ssh-side 两层铺底，不去掉最外层
-   的话 SSH 窗口会叠三层，材质几乎为零（终端区仍是实色 --color-terminal-bg，
-   那是刻意的，不动）。 */
+   的话 SSH 窗口会叠三层，材质几乎为零。终端区另铺的 .sess / .ssh-term 两层实色
+   由下面那条规则收掉，否则「连接后右侧一整片死黑」和左侧透材质对不上。 */
 html.qd-backdrop .app-container,
 html.qd-backdrop .ssh-standalone {
+  background: transparent;
+}
+
+/* SSH 终端区：连接后右侧不再是一整块实色。
+   xterm 6 是 DOM renderer，theme.background 会被原样写成
+   .xterm-scrollable-element 的内联 background-color（rgba 直接生效，不需要
+   allowTransparency，也没有 canvas 拖影）；.xterm-viewport 的默认黑底已在
+   SshTerminal.vue 清成 transparent。因此让 .sess / .ssh-term 两层外壳让开后，
+   终端只剩「.ssh-page 的 bg-primary + xterm 自己那层 rgba」两层，材质能透出来，
+   文字仍压在足够实的底上。
+   带 html.qd-backdrop 前缀才能压过两个组件里的 scoped 规则；关掉材质时本规则
+   不生效、--color-terminal-bg 仍是实色，界面与从前逐像素一致。
+   ⚠️ .sess-overlay 是「连接中 / 失败」遮罩，必须盖住旧画面，不能跟着透明，
+   它改用 --color-terminal-bg-solid。 */
+html.qd-backdrop .sess,
+html.qd-backdrop .ssh-term {
   background: transparent;
 }
 

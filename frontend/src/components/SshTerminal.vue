@@ -464,6 +464,11 @@ function reportError(err: unknown) {
 //
 // xterm 的 theme 是 JS 对象，只认具体色值。直接写死 `#1b1b1b` 会绕开主题体系
 // （浅色主题下终端仍是黑的），所以必须每次从 getComputedStyle 读 token 实际值。
+// 材质档位下 background 是 rgba(...)：xterm 6 是 DOM renderer，会把它原样写成
+// .xterm-scrollable-element 的内联 background-color，半透明直接生效，不需要
+// allowTransparency，也不存在 canvas 每帧叠加变深的拖影；.xterm-viewport 的
+// 默认黑底已在下方 CSS 清成 transparent。cursorAccent 必须用实色 token ——
+// 那是光标块里的文字色，用 rgba 会发虚。
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim()
 }
@@ -473,7 +478,7 @@ function readTermTheme(): ITheme {
     background: cssVar('--color-terminal-bg'),
     foreground: cssVar('--color-terminal-fg'),
     cursor: cssVar('--color-terminal-cursor'),
-    cursorAccent: cssVar('--color-terminal-bg'),
+    cursorAccent: cssVar('--color-terminal-bg-solid'),
     selectionBackground: cssVar('--color-terminal-selection'),
     black: cssVar('--color-terminal-black'),
     red: cssVar('--color-terminal-red'),

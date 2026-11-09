@@ -76,6 +76,11 @@
 - `--color-check-bg` / `--color-check-border` 专给勾选框和单选框。**不要复用
   `bg-tertiary`**：Mica 材质下它是半透明的，14px 的小方块会透出壁纸、糊成一团。
   深色是"凹槽"（比卡片暗）、浅色是"白底框"，两种语义在同一个 token 名下一一对应。
+- `--color-terminal-bg` 在 `html.qd-backdrop` 下是**半透明**（深 `rgba(15,17,22,.55)` /
+  浅 `rgba(255,255,255,.72)`），关掉材质时是实色。它喂给 xterm 6 的 `theme.background`，
+  会被原样写成 `.xterm-scrollable-element` 的内联背景（DOM renderer，不需要
+  `allowTransparency`）。凡是「必须盖住底下内容」的地方（光标反色文字 `cursorAccent`、
+  `.sess-overlay` 连接中/失败遮罩）一律用 `--color-terminal-bg-solid`。
 
 ### 勾选框 / 单选框
 
@@ -307,6 +312,7 @@
 | 圆角随手写 10/14/16 | 与 token 阶梯对不上，将来改全局圆角必漏 | 只用 4/6/8/12 四档（`--radius-xs/sm/md/lg`） |
 | 按钮只写 padding 不定高 | 26/30/35 三种"差不多高"的按钮同屏，看着像三个产品拼的 | 定高 + `0 Npx` + `inline-flex` 居中，见 §3.2 四档 |
 | 浮层用 `bg-secondary` / `--color-surface` | 比卡片暗一档，下拉盖在卡片上像挖了个洞 | `--color-popover-bg` |
+| 材质档位下给 `.sess` / `.ssh-term` 铺实色 | 连接后右侧终端整片死黑，和左侧透材质割裂；半透明叠三层后材质只剩 2% | `style.css` 里 `html.qd-backdrop .sess, .ssh-term { background: transparent }`，只留 `.ssh-page` 与 xterm 两层 |
 | 卡片写 `1px solid var(--color-border)` | 深色主题下每张卡片一圈亮边 | `var(--card-border-color)` |
 | 半像素字号（10.5 / 11.5 / 12.5） | 100% 缩放下不可辨，只让字号阶梯失去参照 | 落到最近的一档，见 §2.3 |
 | 组件里给 `input[type=checkbox]` 写尺寸或 `accent-color` | 12/13/15/16px 五个尺寸并存，系统绘制在深色下是发白方块 | 全局只有 `style.css` 那一份；换色改 `--qd-check-color` |

@@ -887,7 +887,9 @@ defineExpose({
   gap: var(--space-4);
   font-size: 12px;
   color: var(--color-text-muted);
-  background: var(--color-terminal-bg);
+  /* 必须实色：材质档位下 --color-terminal-bg 是半透明，用它当连接中/失败遮罩
+     会漏出底下的旧终端画面。 */
+  background: var(--color-terminal-bg-solid);
 }
 
 .sess-card {
