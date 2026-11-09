@@ -1983,6 +1983,14 @@ export default {
   pluginInstallBatchMore: '，另有 {n} 个也失败',
   pluginHasUpdate: '有新版',
   pluginInstalled: '已安装',
+  // 重新安装：文件损坏时覆盖程序文件，插件私有数据不删（数据目录与插件目录分开）
+  pluginReinstall: '重新安装',
+  pluginReinstallHint: '文件损坏时点此重新覆盖安装；插件数据、配置与使用记录都会保留',
+  pluginReinstallKeepsData: '只覆盖程序文件；插件私有数据、配置、使用记录与执行日志保留，旧版本目录会备份为 .bak',
+  pluginReinstallConfirmTitle: '重新安装插件？数据不会丢失',
+  pluginReinstallSuccess: '重新安装完成，数据已保留',
+  pluginReinstallFailed: '重新安装失败',
+  pluginReinstallPickZip: '选择该插件的 .zip 安装包以重新安装',
   pluginNotInstalled: '未安装',
   pluginNotSupportedPlatform: '不支持当前平台',
   // 在线市场：可更新筛选 + 一键更新

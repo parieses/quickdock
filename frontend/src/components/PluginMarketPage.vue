@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted, inject, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Store, RefreshCw, Download, CheckCircle2, ArrowUpCircle, Ban, Search } from '@lucide/vue'
+import { Store, RefreshCw, Download, ArrowUpCircle, Ban, Search, RotateCcw } from '@lucide/vue'
 import { Events } from '@wailsio/runtime'
 
 import {
@@ -235,6 +235,8 @@ watch(marketRefreshSignal, () => { void loadMarket() })
 // 由调用方统一刷新与提示；返回值表示本次是否成功，便于批量更新统计。
 async function install(p: MarketPlugin, silent = false): Promise<boolean> {
   if (installing.value.has(p.id)) return false
+  // 已安装且没有新版 = 同版本覆盖重装（修损坏文件），文案与确认标题跟「升级」区分开
+  const isReinstall = !!p.installed && !p.has_update
   const url = pickDownload(p.downloads)
   if (!url) {
     if (!silent) toast?.error?.(t('pluginMarketNoDownload'))
@@ -247,21 +249,26 @@ async function install(p: MarketPlugin, silent = false): Promise<boolean> {
   if (!silent) {
     const lines = [p.name, ...permissionsToLines(p.permissions)]
     if (lines.length === 1) lines.push(t('pluginPermNone'))
+    // 同版本覆盖重装（文件损坏时修复）走的是同一条安装链路：后端只换插件目录里的
+    // 程序文件，私有数据目录 <dataDir>/data/<id> 与 plugin_data 表都不在覆盖范围内。
+    // 确认框里把这句写死，避免用户把「重新安装」误当卸载重装、不敢点。
+    if (isReinstall) lines.push(t('pluginReinstallKeepsData'))
     lines.push(t('pluginPermDisclaimer'))
-    if (!(await confirmPermissions(lines))) return false
+    const titleKey = isReinstall ? 'pluginReinstallConfirmTitle' : 'pluginPermConfirmTitle'
+    if (!(await confirmPermissions(lines, titleKey))) return false
   }
   installing.value.add(p.id)
   delete progressMap.value[url]
   try {
     await unwrap(await InstallPluginFromURL(url)) // code!=0 抛错，防止下载失败误报成功
     if (!silent) {
-      toast?.success?.(t('pluginInstallSuccess'))
+      toast?.success?.(t(isReinstall ? 'pluginReinstallSuccess' : 'pluginInstallSuccess'))
       await loadMarket() // 刷新 installed/has_update 状态
       emit('installed')              // 通知父页刷新本地插件列表
     }
     return true
   } catch (e) {
-    if (!silent) toast?.error?.(t('pluginInstallFailed') + ': ' + getErrorMessage(e))
+    if (!silent) toast?.error?.(t(isReinstall ? 'pluginReinstallFailed' : 'pluginInstallFailed') + ': ' + getErrorMessage(e))
     else logWarn('market', 'update failed for', p.id, e)
     return false
   } finally {
@@ -439,8 +446,14 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
             <ArrowUpCircle v-else :size="14" />
             <span>{{ installing.has(p.id) ? dlLabel(p) : t('pluginUpgrade') }}</span>
           </button>
-          <button v-else-if="p.installed" class="action-btn btn-done" disabled>
-            <CheckCircle2 :size="14" /><span>{{ t('pluginInstalled') }}</span>
+          <!-- 已安装且无新版：原来是禁用的「已安装」，文件损坏时无从修复。
+               同版本覆盖重装的后端检查本来就放行（checkPluginVersion 只拒绝降级），
+               这里把入口打开；「已安装」状态仍由卡片上的 badge 表达。 -->
+          <button v-else-if="p.installed" class="action-btn btn-reinstall"
+            :disabled="installing.has(p.id)" :title="t('pluginReinstallHint')" @click="install(p)">
+            <RefreshCw v-if="installing.has(p.id)" :size="14" class="spin" />
+            <RotateCcw v-else :size="14" />
+            <span>{{ installing.has(p.id) ? dlLabel(p) : t('pluginReinstall') }}</span>
           </button>
           <button v-else class="action-btn btn-install"
             :disabled="installing.has(p.id)" @click="install(p)">
@@ -539,10 +552,11 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
           <button class="op-btn" @click="closeDetail()">{{ t('close') }}</button>
           <a v-if="pickDownload(detail.downloads)" class="action-btn btn-install detail-install"
             :class="{ 'is-installing': installing.has(detail.id) }"
+            :title="detail.installed && !detail.has_update ? t('pluginReinstallHint') : undefined"
             @click="install(detail)">
             <RefreshCw v-if="installing.has(detail.id)" :size="14" class="spin" />
             <Download v-else :size="14" />
-            <span>{{ installing.has(detail.id) ? dlLabel(detail) : (detail.installed ? (detail.has_update ? t('pluginUpgrade') : t('pluginInstalled')) : t('pluginInstallFromMarket')) }}</span>
+            <span>{{ installing.has(detail.id) ? dlLabel(detail) : (detail.installed ? (detail.has_update ? t('pluginUpgrade') : t('pluginReinstall')) : t('pluginInstallFromMarket')) }}</span>
           </a>
         </div>
       </div>
@@ -684,7 +698,7 @@ let autoTimer: ReturnType<typeof setInterval> | null = null
 .btn-install { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
 .btn-install:hover:not(:disabled) { opacity: .9; color: var(--color-accent-text); }
 .btn-upgrade { background: var(--color-warning-bg); color: var(--color-warning); border-color: var(--color-warning-border); }
-.btn-done { color: var(--color-success); }
+.btn-reinstall { color: var(--color-text-secondary); }
 .btn-disabled { color: var(--color-text-disabled); }
 
 /* 插件详情弹窗 */

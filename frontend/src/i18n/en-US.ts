@@ -1979,6 +1979,14 @@ export default {
   pluginInstallBatchMore: ', {n} more failed',
   pluginHasUpdate: 'Update available',
   pluginInstalled: 'Installed',
+  // Reinstall: replace program files when they are damaged; private data lives outside the plugin dir
+  pluginReinstall: 'Reinstall',
+  pluginReinstallHint: 'Re-download and replace program files if they are damaged; plugin data, settings and usage history are kept',
+  pluginReinstallKeepsData: 'Only program files are replaced. Private data, settings, usage history and logs are kept; the old folder is kept as .bak',
+  pluginReinstallConfirmTitle: 'Reinstall this plugin? Your data is kept',
+  pluginReinstallSuccess: 'Reinstalled; your data was kept',
+  pluginReinstallFailed: 'Reinstall failed',
+  pluginReinstallPickZip: 'Pick the .zip package for this plugin to reinstall',
   pluginNotInstalled: 'Not installed',
   pluginNotSupportedPlatform: 'Not supported on this platform',
   // Online market: updatable filter + one-click update

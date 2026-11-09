@@ -2,10 +2,10 @@
 defineOptions({ name: KEEP_ALIVE.plugins })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
-import { logErr } from '../utils/logger'
+import { logErr, logWarn } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, inject } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Puzzle, Power, PowerOff, Trash2, RefreshCw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X } from '@lucide/vue'
+import { Puzzle, Power, PowerOff, Trash2, RefreshCw, RotateCcw, Upload, ExternalLink, History, ChevronDown, ChevronRight, CheckCircle2, XCircle, Globe, Square, Loader2, Search, DownloadCloud, X } from '@lucide/vue'
 
 import {
   ListPlugins,
@@ -13,6 +13,7 @@ import {
   EnablePlugin,
   UninstallPlugin,
   InstallPlugin,
+  InstallPluginFromURL,
   InstallPluginFromBytes,
   InspectPluginZip,
   InspectPluginZipData,
@@ -33,6 +34,7 @@ import ConfirmDialog from './ConfirmDialog.vue'
 import PluginMarketPage from './PluginMarketPage.vue'
 import { pluginName, pluginDesc, commandTitle } from '../utils/localize'
 import { applyOverflowTitle } from '../utils/overflowTitle'
+import { pickDownload } from '../utils/platform'
 import { useThemeName } from '../composables/useThemeName'
 import { usePluginCommandCatalog, type CommandTrigger } from '../composables/usePluginCommandCatalog'
 import { usePluginPermissions } from '../composables/usePluginPermissions'
@@ -45,7 +47,7 @@ const toast = inject<ToastAPI>('toast')!
 // 命令目录 / 权限确认 / 市场源三块共享状态：权限确认框只有一个实例，
 // 市场页作为子组件也调 confirmPermissions，两处安装入口共用它。
 const { catalog, loadCommandCatalog, loadCommandParams, commandTrigger } = usePluginCommandCatalog()
-const { permDialog, confirmPermissions, resolvePermissionConfirm } = usePluginPermissions()
+const { permDialog, confirmPermissions, resolvePermissionConfirm, permissionsToLines } = usePluginPermissions()
 const {
   marketSources, marketOffline, loadMarketSources, saveMarketSources,
   isValidSourceUrl, newSourceId,
@@ -390,6 +392,46 @@ async function handleUninstall() {
     toast?.error?.(t('pluginUninstallFailed') + ': ' + getErrorMessage(e))
   } finally {
     operating.value.delete(id)
+  }
+}
+
+// ---- 重新安装：文件损坏时只覆盖程序文件，私有数据不丢 ----
+//
+// 与「卸载再装」的区别：这里只走覆盖安装（InstallFromZip），从不调 UninstallPlugin。
+// 插件私有库在 <dataDir>/data/<id>/data.db，plugin_data / usage_frecency / exec_logs
+// 在主库里，都不在 pluginsDir/<id> 内；旧目录被重命名为 .bak 而非删除，
+// InsertPluginFull 是 UPSERT，连 enabled / installed_at 都保留。
+// 市场里的插件按 id 取当前平台的包重下（同版本覆盖放行，后端只拒绝降级）；
+// 当初用本地 zip 装、市场索引里没有的，退回让用户选本地 zip，两条路都不经过卸载。
+async function onReinstall(p: PluginInfo) {
+  if (operating.value.has(p.id)) return
+  const lines = [pluginName(p, locale), ...permissionsToLines(p.permissions)]
+  lines.push(t('pluginReinstallKeepsData'))
+  if (!(await confirmPermissions(lines, 'pluginReinstallConfirmTitle'))) return
+  operating.value.add(p.id)
+  try {
+    let url = ''
+    try {
+      const idx = unwrap<{ plugins?: Array<{ id: string; downloads?: Record<string, string> }> }>(await GetPluginMarket())
+      const item = (idx?.plugins || []).find((x) => x.id === p.id)
+      url = item ? pickDownload(item.downloads) : ''
+    } catch (e) {
+      // 市场不可达 / 无离线缓存不该阻断本地修复：降级到让用户选本地 zip
+      logWarn('PluginManagerPage', 'market lookup failed, fall back to local zip:', e)
+    }
+    if (url) {
+      await unwrap(await InstallPluginFromURL(url))
+    } else {
+      const paths = (unwrap(await SelectLocalFiles(t('pluginReinstallPickZip'), '插件包', '*.zip')) || []) as string[]
+      if (!paths.length) return // 用户取消，不算失败
+      await unwrap(await InstallPlugin(paths[0]))
+    }
+    toast?.success?.(t('pluginReinstallSuccess'))
+    await reloadPlugins()
+  } catch (e) {
+    toast?.error?.(t('pluginReinstallFailed') + ': ' + getErrorMessage(e))
+  } finally {
+    operating.value.delete(p.id)
   }
 }
 
@@ -862,6 +904,15 @@ onUnmounted(() => {
             <ExternalLink :size="12" />
           </button>
           <button
+            class="action-top-btn btn-reinstall-top"
+            :disabled="operating.has(p.id)"
+            @click.stop="onReinstall(p)"
+            :title="t('pluginReinstallHint')"
+          >
+            <Loader2 v-if="operating.has(p.id)" :size="11" class="spin" />
+            <RotateCcw v-else :size="11" />
+          </button>
+          <button
             class="action-top-btn btn-uninstall-top"
             :disabled="operating.has(p.id)"
             @click.stop="onUninstall(p)"
@@ -1183,6 +1234,7 @@ onUnmounted(() => {
 .action-top-btn.btn-stop-top:hover { color: var(--color-warning); }
 .action-top-btn.btn-kill-top:hover { color: var(--color-danger); }
 .action-top-btn.btn-open-top:hover { color: var(--color-accent); }
+.action-top-btn.btn-reinstall-top:hover { color: var(--color-accent); }
 .action-top-btn.btn-uninstall-top:hover { color: var(--color-danger); }
 
 /* 图标 */
