@@ -102,6 +102,15 @@
   --color-bg-primary: #0c0e13;
   --color-bg-secondary: #14171f;
   --color-bg-tertiary: #1b202a;
+  /* 窗口铺底专用的一层。关材质时它们只是上面三个 token 的别名（值逐像素相同）；
+     只有 html.qd-backdrop 下才被换成 rgba。把「窗口底」和「控件底色」拆成两组
+     变量是关键：bg-* 被 90 多个组件当作输入框 / 表格行 / 代码块的底色用，
+     若为了透材质把 bg-* 本身改半透明，这些承载文字的控件会一起透出壁纸。
+     值里写 var() 而不是抄色值，浅色主题重定义 bg-* 后别名会自动跟随。 */
+  --color-window-bg: var(--color-bg-primary);
+  --color-window-bg-2: var(--color-bg-secondary);
+  --color-acrylic-bg: var(--color-bg-primary);
+  --color-settings-bg: var(--color-bg-primary);
   --color-bg-hover: #212734;
   --color-bg-active: #2a303e;
   --color-bg-overlay: rgba(0, 0, 0, 0.58);
@@ -213,8 +222,10 @@
   --card-border-color: transparent;
   --color-select-bg: rgba(91, 140, 255, 0.14);
   /* 勾选框：未选底比卡片再暗一档（"一个凹槽"），选中由 --qd-check-color 铺实。
-     单列 token 而不是复用 bg-tertiary：Mica 材质下 bg-tertiary 是半透明的，
-     勾选框会跟着透出壁纸，14px 的小方块一旦发虚就糊成一团。 */
+     单列 token 而不是复用 bg-tertiary：它需要的是"永远实色的凹槽"，
+     与 bg-tertiary 的"控件底色"职责不同。旧版材质档把 bg-* 改成半透明时，
+     正是这个独立 token 保住了 14px 小方块不发虚；现在 bg-* 恒实色，
+     但语义仍独立，不要合并。 */
   --color-check-bg: #101419;
   --color-check-border: #3a4353;
   /* --color-popover-bg：真正"离开文档流"的那一层（下拉/右键菜单/浮层卡片）。
@@ -421,59 +432,88 @@ body {
 /* ==================== 窗口材质（Mica / Acrylic）====================
    只有本次启动真的套上了系统材质，App.vue 才会给 <html> 加 .qd-backdrop。
    Win10 / 设置「关」时这个 class 不存在，下面整块规则完全不生效 —— 所有背景
-   仍是上面的实色 token，界面与未启用材质时逐像素一致（这是「不支持就默认
-   现在这种」的实现方式，不是把半透明写进全局 token 再靠开关调透明度）。
+   仍是上面的实色 token，界面与未启用材质时逐像素一致。
 
-   做法：只把「大面积铺底」的三个 token 换成半透明，卡片(--color-surface)、
-   代码块、终端、iframe 内容视口仍保持实色。材质从侧栏 / 页头 / 空白区透出，
-   层级不会糊成一片；html / body 自身也必须透明，否则 WebView2 的透明底被盖住，
-   DWM 材质根本看不到。
-   alpha 现在的取值：深色 0.50 / 0.58 / 0.68，浅色 0.72 / 0.80 / 0.84（同一层
-   token，浅色必须更实）。两档不再是同一套数字，原因是容错方向相反：深色是浅字
-   压深壁纸，多透一点只损失一点背景厚度；浅色是深字压亮壁纸，壁纸一深（很多用户
-   用深色壁纸配浅色主题）整页就没对比度，实测 0.4 档连正文都读不清。
-   卡片、工具栏、代码块、终端视口始终是实色/独立底色，正文对比度不受这两档影响；
-   设置面板整体实色（见下方 .settings-panel）。 */
+   ⚠️ 2026-11 改过一次做法，别再改回去：
+   旧版把 --color-bg-primary / -secondary / -tertiary 这三个全局 token 直接换成
+   rgba，理由是「只让大面积铺底透材质」。但 90 多个组件把这组 token 当作输入框、
+   textarea、代码块、表头、表格行、选中态的底色用（全项目 494 处声明），
+   于是材质一开，承载文字的控件全部跟着透出壁纸：浅色主题整页发灰、正文压在
+   彩色壁纸上；多栏页左栏又在 .app-content 之上再铺一层，透过率连乘后
+   左 25% / 右 50%（浅色 7.8% / 28%），左右明显一深一浅。
+
+   现在反过来：**bg-* 永远保持实色**，只给「窗口铺底」单独一组 --color-window-bg*
+   （关材质时它们只是 bg-* 的别名，值完全相同）。这样材质档 =
+   「半透明窗口底 + 关材质时那套已验证过的实色组件」，组件之间的层级关系原样保留，
+   输入框 / 代码块 / 表格行自动获得实底，不用去 90 多个组件里逐个改。
+   材质只从三处透出：主侧栏、内容区的留白、卡片与面板之间的缝隙。
+   html / body 自身必须透明，否则 WebView2 的透明底被盖住，DWM 材质根本看不到。
+
+   alpha：深色窗口底 0.50 / 侧栏 0.58，浅色 0.72 / 0.80。两档不同是因为容错方向
+   相反——深色是浅字压深壁纸，多透一点只损失背景厚度；浅色是深字压亮壁纸，
+   壁纸一深（很多人深色壁纸配浅色主题）整页就没对比度，实测 0.4 档连正文都读不清。
+   Acrylic 浮窗另用更实的一档（深 0.90 / 浅 0.94）；设置面板保持实色，原因见下方。 */
 html.qd-backdrop,
 html.qd-backdrop body {
   background-color: transparent;
 }
 
 html.qd-backdrop {
-  --color-bg-primary: rgba(12, 14, 19, 0.50);
-  --color-bg-secondary: rgba(20, 23, 31, 0.58);
-  --color-bg-tertiary: rgba(27, 32, 42, 0.68);
+  --color-window-bg: rgba(12, 14, 19, 0.50);
+  --color-window-bg-2: rgba(20, 23, 31, 0.58);
+  --color-acrylic-bg: rgba(12, 14, 19, 0.90);
+  /* 设置面板刻意**不**在这里改半透明：它是 inset:0 的全屏覆盖层，
+     试过 0.92，结果会隐约透出底下被盖住的 Dashboard 卡片轮廓（不只是壁纸），
+     像两层界面叠在一起。保持 :root 那个实性别名；命令面板那档才是"中间值"。 */
+  /* 选中态原本是 14% 蓝，材质档下会混进壁纸色变成脏蓝；换成实色蓝灰，
+     关材质时仍用 :root 那档半透明，不受影响。 */
+  --color-select-bg: #1e283d;
   /* 终端比内容区更实一档：文字多、要压住亮壁纸，但仍留出 45% 透过率。
-     与 .ssh-page 那层 bg-primary 叠完约 22% 材质可见，不再是整块死黑。 */
+     与 .ssh-page 那层窗口底叠完约 22% 材质可见，不再是整块死黑。 */
   --color-terminal-bg: rgba(15, 17, 22, 0.55);
 }
 
 html.qd-backdrop[data-theme="light"] {
-  /* 浅色下 alpha 必须比深色高得多：深字压在亮壁纸上，0.42 那档实测整页发灰、
-     小字号几乎读不出来（深色是浅字压深壁纸，容错本来就更大）。现在改成
-     「材质只在侧栏 / 页头 / 空白区露一点」，正文区必须能直接读。 */
-  --color-bg-primary: rgba(246, 247, 249, 0.72);
-  --color-bg-secondary: rgba(255, 255, 255, 0.80);
-  --color-bg-tertiary: rgba(238, 240, 244, 0.84);
+  --color-window-bg: rgba(246, 247, 249, 0.72);
+  --color-window-bg-2: rgba(255, 255, 255, 0.80);
+  --color-acrylic-bg: rgba(246, 247, 249, 0.94);
+  --color-select-bg: #e4eaf9;
   /* 浅色是深字压亮壁纸，容错小，终端底比深色档更实（0.72）。 */
   --color-terminal-bg: rgba(255, 255, 255, 0.72);
 }
 
 /* 铺底只留一层，位置很关键。
-   .app-container / .app-content / 页面根节点(.qd-page / .notes-page …) / 编辑器或
-   预览区，此前各自都铺一层 --color-bg-primary，叠成三到四层半透明；材质透过率按
-   (1-alpha) 连乘：侧栏只有「容器 + .sidebar」两层 ≈ 11%，右侧内容区三到四层 ≈ 2%,
-   等于完全盖住 —— 表现就是「左边看得出壁纸着色、右边像实色」。
-   现在保留且只保留 .app-content 这一层（见下方），其它无语义铺底一律让开；
-   卡片 / 页头 / 工具栏 / 编辑器这些有层级含义的底色保持不动，对比度不受影响。
+   外壳（.app-container / 各 .xxx-standalone）一律让开 —— 它们只是撑满窗口的容器，
+   各自再铺一份底色就会和内层叠乘，材质按 (1-alpha) 连乘后几乎为零。
    选择器带 html.qd-backdrop，能压过 App.vue 的 scoped 规则（scoped 会多一个
-   [data-v-xxx] 属性选择器，单靠类名压不住）。
-   .ssh-standalone 同理：它下面还有 .ssh-page / .ssh-side 两层铺底，不去掉最外层
-   的话 SSH 窗口会叠三层，材质几乎为零。终端区另铺的 .sess / .ssh-term 两层实色
-   由下面那条规则收掉，否则「连接后右侧一整片死黑」和左侧透材质对不上。 */
+   [data-v-xxx] 属性选择器，单靠类名压不住）。 */
 html.qd-backdrop .app-container,
-html.qd-backdrop .ssh-standalone {
+html.qd-backdrop .ssh-standalone,
+html.qd-backdrop .clipboard-standalone,
+html.qd-backdrop .winmgr-standalone,
+html.qd-backdrop .plugin-standalone {
   background: transparent;
+}
+
+/* 独立窗口：内层组件根承载**唯一**那一层窗口底（外壳已在上面让开）。
+   用「外壳 > 组件根」限定，避免误伤同名类在主窗口里的实例 —— 例如
+   .clipboard-panel 在主窗口剪贴板页是 .app-content 的孙级（下面会被透明化），
+   在 Ctrl+` 浮窗里才是承载窗口底的那一层。
+   .palette-standalone 本来就是 transparent；命令面板与插件窗口改走更实的
+   --color-acrylic-bg：它们内容区没有铺满的实色卡片，窗口底太透会让搜索框 /
+   iframe 内容直接压在壁纸上。
+   ⚠️ 不能把 .note-standalone 外壳也透明化：App.vue 里它是外壳，但 NotePanel.vue
+   里同名类是组件自己的根节点，两层同名嵌套，只有内层该铺底。 */
+html.qd-backdrop .clipboard-standalone > .clipboard-panel,
+html.qd-backdrop .winmgr-standalone > .wm-root,
+html.qd-backdrop .ssh-standalone > .ssh-page,
+html.qd-backdrop .note-standalone > .note-standalone {
+  background: var(--color-window-bg);
+}
+
+html.qd-backdrop .palette-standalone > .palette-root,
+html.qd-backdrop .plugin-standalone > .plugin-window {
+  background: var(--color-acrylic-bg);
 }
 
 /* SSH 终端区：连接后右侧不再是一整块实色。
@@ -481,10 +521,8 @@ html.qd-backdrop .ssh-standalone {
    .xterm-scrollable-element 的内联 background-color（rgba 直接生效，不需要
    allowTransparency，也没有 canvas 拖影）；.xterm-viewport 的默认黑底已在
    SshTerminal.vue 清成 transparent。因此让 .sess / .ssh-term 两层外壳让开后，
-   终端只剩「.ssh-page 的 bg-primary + xterm 自己那层 rgba」两层，材质能透出来，
+   终端只剩「.ssh-page 的窗口底 + xterm 自己那层 rgba」两层，材质能透出来，
    文字仍压在足够实的底上。
-   带 html.qd-backdrop 前缀才能压过两个组件里的 scoped 规则；关掉材质时本规则
-   不生效、--color-terminal-bg 仍是实色，界面与从前逐像素一致。
    ⚠️ .sess-overlay 是「连接中 / 失败」遮罩，必须盖住旧画面，不能跟着透明，
    它改用 --color-terminal-bg-solid。 */
 html.qd-backdrop .sess,
@@ -492,17 +530,24 @@ html.qd-backdrop .ssh-term {
   background: transparent;
 }
 
-/* 内容区承载**唯一**那一层铺底。
-   为什么是 .app-content 而不是页面根节点：内容区外面套着
+/* SSH 左栏刻意保留两层：终端区是「窗口底 0.50 + xterm 0.55」≈ 22% 透过，
+   左栏若跟着 transparent 就只剩一层（50%），会明显比右侧亮。这里补回一层
+   窗口底，让左右都落在 22~25%，与上轮修完的终端材质对得上。 */
+html.qd-backdrop .ssh-standalone .ssh-side {
+  background: var(--color-window-bg);
+}
+
+/* 内容区与主侧栏：各一层，互不叠乘。
+   为什么铺底在 .app-content 而不是页面根节点：内容区外面套着
    <Transition name="page" mode="out-in">，切页是「旧页淡出 → 新页淡入」。
-   铺底若写在页面根节点（.qd-page / .notes-page / .mon-page …）上，淡出时这层
-   alpha 一起降到 0，底下就露出未着色的 DWM 材质 —— 比页面亮一大截，看起来是
-   「闪一下」，等新页淡入又把材质盖回去，就是「然后就被覆盖了」。
-   .app-content 不参与过渡，底色恒定，切页时只有文字和卡片在淡入淡出。
-   顺带解决另一半不一致：AI / 待办 / 环境这些页根节点本来就没有底色，之前直接
-   露着裸材质，和笔记 / 监控页差一档；现在所有页共用同一层。 */
+   铺底若写在页面根节点上，淡出时这层 alpha 一起降到 0，底下就露出未着色的
+   DWM 材质 —— 比页面亮一大截，看起来是「闪一下」。.app-content 不参与过渡，
+   底色恒定；顺带让 AI / 待办 / 环境这些「根节点本来没有底色」的页共用同一层。 */
 html.qd-backdrop .app-content {
-  background: var(--color-bg-primary);
+  background: var(--color-window-bg);
+}
+html.qd-backdrop .sidebar {
+  background: var(--color-window-bg-2);
 }
 
 /* 页面根节点统一让开（wrapperClass 会多包一层，故取两级子代）。
@@ -513,46 +558,28 @@ html.qd-backdrop .app-content > * > * {
   background: transparent;
 }
 
-/* 浮窗的外层容器让开，页面组件根节点承载唯一那一层 —— 与 .app-content 同一原则。
-   这些 .xxx-standalone 只是撑满窗口的外壳（height/width 100vh/100vw），本身没有
-   布局语义，但各自写了一份 --color-bg-primary；里面组件的根节点（.clipboard-panel /
-   .wm-root / .ssh-page）**也**写了一份，叠起来 0.50×0.50 → 材质只剩 25% 透过，
-   表现就是「这个窗口好像没套材质」（Ctrl+` 的剪贴板浮窗就是这个毛病）。
-   窗口管理浮窗同样叠了两层，但它整窗是 9 个实色模板格子（--color-surface），
-   即使只留一层，材质也主要从格缝透出——这是它自己的设计，本次不动。
-   .palette-standalone 本来就是 transparent，所以命令面板一直正常。
-   .plugin-standalone 同样要透明：它的子节点 .plugin-window（PluginPage.vue 根节点）
-   已经铺了一层 --color-bg-primary，外壳再铺一层就是叠乘；里面 iframe 也早已改成
-   透明（.pf-iframe），材质只该由 .plugin-window 这一层决定。
-   同理不能碰 .note-standalone：它在 App.vue 里是外壳，但在 NotePanel.vue 里
-   同时是组件自己的根节点（唯一那层底色），一起透明化就变成裸材质了。 */
-html.qd-backdrop .clipboard-standalone,
-html.qd-backdrop .winmgr-standalone,
-html.qd-backdrop .plugin-standalone {
+/* 多栏页左栏 / 全屏引导层：它们处在 L3 及更深，上面两级子代选择器够不到。
+   旧版这些层各自铺一份半透明 bg-*，和 .app-content 连乘后左栏只剩 25% 透过
+   （浅色 7.8%），右侧却是 50%（浅色 28%）—— 截图里就是「左边像实色、右边透壁纸」。
+   统一让开后左右共用 .app-content 那一层；这些层本身不是文字承载区，
+   里面的输入框 / 行 / 卡片由反转后的实色 bg-* 自己兜底。 */
+html.qd-backdrop .app-content .notes-tree,
+html.qd-backdrop .app-content .git-side,
+html.qd-backdrop .app-content .env-cats,
+html.qd-backdrop .app-content .ai-sidebar,
+html.qd-backdrop .app-content .kb-side,
+html.qd-backdrop .app-content .onboarding {
   background: transparent;
 }
 
-/* 设置面板**完全不透明**。
-   设置页是「长时间阅读 + 一堆表单」的场景：它整屏盖在内容区上，里面每一页
-   （通用 / AI / 快照 / 技能 …）都靠 --color-bg-primary / -secondary 铺底。
-   材质一旦透进来，浅色主题就是深字压着带纹理的壁纸，小字号和输入框边界都糊掉，
-   实测「看不清东西」。所以这里就地重定义三个底色 token 为实色，整棵
-   .settings-panel 子树（含卡片 / 侧栏 / 分组）一次性回到实色，不用逐个页面改；
-   面板之外的主界面仍保留材质。
-   注意必须带 html.qd-backdrop 前缀：settings.css 里 .settings-panel 的规则只改了
-   背景声明本身，token 得在这里被压掉，否则卡片拿到的还是半透明值。 */
+/* 设置面板保持**实色**。
+   它是 position:fixed; inset:0 的全屏覆盖层，尝试过"取中间值"给它 0.92：
+   实机截图里除了透出壁纸，还会隐约透出被它盖住的主窗口卡片轮廓，
+   像两层界面叠在一起，比纯实色更难读。这里没有"边缘留白"可以只透材质，
+   所以维持实色，由面板外的主窗口继续提供材质感。
+   反转 token 后不必再就地重定义 bg-* 了 —— 它们本来就是实色。 */
 html.qd-backdrop .settings-panel {
-  --color-bg-primary: #0c0e13;
-  --color-bg-secondary: #14171f;
-  --color-bg-tertiary: #1b202a;
-  background-color: #0c0e13;
-}
-
-html.qd-backdrop[data-theme="light"] .settings-panel {
-  --color-bg-primary: #f6f7f9;
-  --color-bg-secondary: #ffffff;
-  --color-bg-tertiary: #eef0f4;
-  background-color: #f6f7f9;
+  background-color: var(--color-settings-bg);
 }
 
 /* ==================== 滚动条 ==================== */

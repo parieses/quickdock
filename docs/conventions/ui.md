@@ -74,13 +74,33 @@
 - `--color-select-bg` 只给「列表行 / 导航项当前选中」，`--color-accent-bg` 留给
   chip、开关型按钮（`.qd-btn.is-on`、`.seg-btn.active` 这类）。两者不要混用。
 - `--color-check-bg` / `--color-check-border` 专给勾选框和单选框。**不要复用
-  `bg-tertiary`**：Mica 材质下它是半透明的，14px 的小方块会透出壁纸、糊成一团。
-  深色是"凹槽"（比卡片暗）、浅色是"白底框"，两种语义在同一个 token 名下一一对应。
+  `bg-tertiary`**：它需要的是「永远实色的凹槽」，与控件底色职责不同。旧版材质档
+  曾把 `bg-*` 改成半透明，正是这个独立 token 保住了 14px 小方块不发虚；
+  现在 `bg-*` 恒实色，语义仍独立，不要合并。
 - `--color-terminal-bg` 在 `html.qd-backdrop` 下是**半透明**（深 `rgba(15,17,22,.55)` /
   浅 `rgba(255,255,255,.72)`），关掉材质时是实色。它喂给 xterm 6 的 `theme.background`，
   会被原样写成 `.xterm-scrollable-element` 的内联背景（DOM renderer，不需要
   `allowTransparency`）。凡是「必须盖住底下内容」的地方（光标反色文字 `cursorAccent`、
   `.sess-overlay` 连接中/失败遮罩）一律用 `--color-terminal-bg-solid`。
+
+**材质档位（`html.qd-backdrop`）另有一组窗口底 token，只给大面积铺底层用**：
+
+| token | 深色 | 浅色 | 用在哪 |
+|---|---|---|---|
+| `--color-window-bg` | `rgba(12,14,19,.50)` | `rgba(246,247,249,.72)` | `.app-content`、独立窗口内层根 |
+| `--color-window-bg-2` | `rgba(20,23,31,.58)` | `rgba(255,255,255,.80)` | 主侧栏 `.sidebar` |
+| `--color-acrylic-bg` | `rgba(12,14,19,.90)` | `rgba(246,247,249,.94)` | 命令面板 / 插件窗口 |
+| `--color-settings-bg` | 实色（= `bg-primary`） | 实色 | 设置面板 |
+
+关材质时这四个都是 `bg-primary/secondary` 的**别名**（值逐像素相同），只有材质档才换成 rgba。
+**永远不要在 `html.qd-backdrop` 里重定义 `--color-bg-primary/-secondary/-tertiary`**：
+90 多个组件把这组 token 当作输入框、textarea、代码块、表头、表格行、选中态的底色
+（全项目 494 处声明），一旦改成半透明，承载文字的控件会一起透出壁纸。
+正确做法是「窗口底单独一组半透明 + 组件层保持实色」，材质只从主侧栏、内容区留白、
+卡片缝隙透出。多栏页左栏与 L3 及更深的全屏铺底必须在材质档让开（`style.css` 里
+那组 `.app-content .notes-tree / .git-side / .env-cats / .ai-sidebar / .kb-side /
+.onboarding` 规则），否则和 `.app-content` 连乘后左 25% / 右 50% 透过，左右割裂。
+材质档还把 `--color-select-bg` 换成实色蓝灰，避免 14% 蓝底混进壁纸变脏蓝。
 
 ### 勾选框 / 单选框
 
@@ -313,6 +333,8 @@
 | 按钮只写 padding 不定高 | 26/30/35 三种"差不多高"的按钮同屏，看着像三个产品拼的 | 定高 + `0 Npx` + `inline-flex` 居中，见 §3.2 四档 |
 | 浮层用 `bg-secondary` / `--color-surface` | 比卡片暗一档，下拉盖在卡片上像挖了个洞 | `--color-popover-bg` |
 | 材质档位下给 `.sess` / `.ssh-term` 铺实色 | 连接后右侧终端整片死黑，和左侧透材质割裂；半透明叠三层后材质只剩 2% | `style.css` 里 `html.qd-backdrop .sess, .ssh-term { background: transparent }`，只留 `.ssh-page` 与 xterm 两层 |
+| 在 `html.qd-backdrop` 里把 `bg-primary/secondary/tertiary` 改成 rgba | 494 处控件底色一起透壁纸；多栏页左栏再叠一层后左右透过率差一倍 | 窗口铺底改用 `--color-window-bg*`，组件层保持实色，见 §2.1 |
+| 给设置面板（`inset:0` 全屏覆盖层）留半透明 | 除了壁纸，还会隐约透出被它盖住的主窗口卡片轮廓，像两层界面叠在一起 | 保持实色 `--color-settings-bg`（默认就是实色） |
 | 卡片写 `1px solid var(--color-border)` | 深色主题下每张卡片一圈亮边 | `var(--card-border-color)` |
 | 半像素字号（10.5 / 11.5 / 12.5） | 100% 缩放下不可辨，只让字号阶梯失去参照 | 落到最近的一档，见 §2.3 |
 | 组件里给 `input[type=checkbox]` 写尺寸或 `accent-color` | 12/13/15/16px 五个尺寸并存，系统绘制在深色下是发白方块 | 全局只有 `style.css` 那一份；换色改 `--qd-check-color` |
@@ -336,8 +358,9 @@
   插件侧只需 `html[data-backdrop] body { background: transparent }` 就能让材质透出来；
   标记由 MutationObserver 盯 `.qd-backdrop` 补发 —— 材质是异步确定的，常晚于 iframe onload。
 - **插件窗口只允许一层铺底**：`.plugin-standalone`（App.vue 外壳）与 `.pf-iframe` 都必须透明，
-  唯一那层在 `.plugin-window`（PluginPage.vue 根节点）。三层半透明叠乘后材质透过率只剩 12%，
-  症状是「窗口有材质、页面看不出」。
+  唯一那层在 `.plugin-window`（PluginPage.vue 根节点），材质档用更实的
+  `--color-acrylic-bg`（0.90 / 0.94）—— iframe 内容是透明的，窗口底太透会让插件正文
+  直接压在壁纸上。三层半透明叠乘后材质透过率只剩 12%，症状是「窗口有材质、页面看不出」。
 - 本仓库 `plugins/shared/common.css` 是插件仓库模板的副本（主程序启动时同步给旧插件兜底注入），
   **不在它上面改样式**。
 - 宿主配色变更需要搬进插件模板，属插件仓库的流程，见那边文档第 3 节。
@@ -348,6 +371,7 @@
 - **插件窗口外壳 `PluginPage.vue`** 的标题栏是 36px（窗口小，不套 44px 页头），颜色与描边仍走 token。
 - **插件窗口底色**由 Go 侧 `pluginWindowBackground()` 决定，**必须与 `--color-bg-primary` 同值**
   （当前深 `#0c0e13` / 浅 `#f6f7f9`）。改配色时两处一起改，否则内容渲染前首帧会闪一块异色底。
+  材质档 `.plugin-window` 是 0.90 / 0.94，与首帧实色只差 10%，比旧版 0.50 更不容易看出闪。
 
 ---
 
