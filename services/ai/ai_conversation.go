@@ -270,6 +270,38 @@ func (a *AIService) AISetConversationPermission(convID, permission string) *serv
 	return services.Ok(p)
 }
 
+// AISetConversationProfile 记下这条任务选中的模型档案，并同步全局「最后选择」。
+//
+// 一次调用写两处是有意的：会话列决定「切走再回来还用它」，全局 ai_active_profile
+// 决定插件、SSH 屏显、笔记问答这些没有模型选择器的页面用哪家网关。用户在聊天页
+// 亲手挑过一次模型，那些页面就该跟着变；分成两个前端调用的话，中途失败会让
+// 「界面显示的」和「别的页面实际用的」长期对不上。
+//
+// 反过来，切换会话时前端只是把选择显示回来，不调这里——否则翻一条老任务
+// 就会把全局最后选择悄悄改掉。
+func (a *AIService) AISetConversationProfile(convID, profileID string) *services.ApiResult {
+	if r := a.dbOK(); r != nil {
+		return r
+	}
+	convID = strings.TrimSpace(convID)
+	if convID == "" {
+		return services.FailMsg("任务不存在")
+	}
+	pid := strings.TrimSpace(profileID)
+	if _, found := a.findStoredProfile(pid); !found {
+		return services.FailMsg("模型档案不存在或已被删除")
+	}
+	if err := a.App.DB.SetAIConversationProfile(convID, pid); err != nil {
+		return services.Fail(err)
+	}
+	if err := a.App.DB.SetSetting(aiActiveKey, pid); err != nil {
+		return services.Fail(err)
+	}
+	a.invalidateAICache()
+	a.emitAI("ai:conv", map[string]interface{}{"id": convID, "profileId": pid})
+	return services.Ok(pid)
+}
+
 // AIRenameConversation 手动改会话标题。
 //
 // 与 AIRegenerateTitle 分开而不是给它加个「可选标题」参数：

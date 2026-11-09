@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onUnmounted, inject, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { KEEP_ALIVE } from '../pages/keepAlive'
+defineOptions({ name: KEEP_ALIVE.clipboard })
 import { ClipboardList, Search, X, RefreshCw, Download, Trash2, Image as ImageIcon, File as FileIcon, Star, Globe, Mail, Braces, Code, Phone, Tag, StickyNote, ChevronLeft, ChevronRight, ListTodo, FilePlus, Sparkles, FolderSearch, ImageDown, ClipboardPaste, AlignLeft, ListPlus, Layers, Play, SkipForward, CheckSquare } from '@lucide/vue'
 import { CreateNoteDoc } from '../../bindings/quickdock/services/note/noteservice'
 import { CreateTodo } from '../../bindings/quickdock/services/todo/todoservice'
@@ -913,10 +915,12 @@ const clipboardEventOffs: Array<() => void> = []
 // 转存 / 粘贴为菜单：点击面板任意位置即收起（按钮自身用 @click.stop 拦截）。
 function closeMenus() { closeSaveMenu(); closePasteAsMenu() }
 
-onMounted(() => {
-  loadEntries()
-  // 队列也跨窗口共享：进面板先拉一次，之后靠事件跟随另一端的改动。
-  void loadPasteQueue()
+// 本页既在 KeepAlive 白名单里（主窗口内容页），也被独立剪贴板窗口单独渲染
+// （那边没有 KeepAlive）。所以所有全局监听必须跟着激活态挂/摘，且启停要幂等：
+// 首次挂载时 onMounted 与 onActivated 都会触发，重复注册会出现两个 30s 轮询、
+// 两次事件回调，还会在别的页面响应本页的 keydown / click。
+function attachGlobal() {
+  if (refreshTimer.value !== null) return
   refreshTimer.value = window.setInterval(loadEntries, 30000)
   clipboardEventOffs.push(
     Events.On('clipboard:updated', loadEntries),
@@ -928,17 +932,50 @@ onMounted(() => {
   )
   document.addEventListener('keydown', onPanelKeydown)
   document.addEventListener('click', closeMenus)
-})
-
-onUnmounted(() => {
+}
+function detachGlobal() {
   document.removeEventListener('click', closeMenus)
-  if (searchDebounce !== null) clearTimeout(searchDebounce)
+  document.removeEventListener('keydown', onPanelKeydown)
   if (refreshTimer.value !== null) {
     clearInterval(refreshTimer.value)
+    refreshTimer.value = null
   }
   clipboardEventOffs.forEach((off) => off())
   clipboardEventOffs.length = 0
-  document.removeEventListener('keydown', onPanelKeydown)
+}
+
+// stale-while-revalidate：切回来先显示上次的列表，再静默补一次。
+// loadEntries 里会置 loading=true，所以模板不能再用 v-if="!loading" 把整张列表
+// 藏掉（那正是「切过去先空白」的元凶），见下方 .clipboard-list 的条件。
+let pageActive = false
+let needsRefresh = false
+function startPage() {
+  if (pageActive) return
+  pageActive = true
+  attachGlobal()
+  if (needsRefresh) {
+    needsRefresh = false
+    void loadEntries()
+    void loadPasteQueue()
+  }
+}
+function stopPage() {
+  pageActive = false
+  needsRefresh = true
+  detachGlobal()
+}
+
+onMounted(() => {
+  loadEntries()
+  // 队列也跨窗口共享：进面板先拉一次，之后靠事件跟随另一端的改动。
+  void loadPasteQueue()
+  startPage()
+})
+onActivated(startPage)
+onDeactivated(stopPage)
+onUnmounted(() => {
+  if (searchDebounce !== null) clearTimeout(searchDebounce)
+  detachGlobal()
   observerRef.value?.disconnect()
 })
 </script>
@@ -1038,7 +1075,9 @@ onUnmounted(() => {
     </div>
 
     <!-- 列表 -->
-    <div ref="listRef" class="clipboard-list" v-if="!loading">
+    <!-- 只在「首次加载、还没有任何数据」时让位给加载占位；后台刷新期间
+         loading 也为 true，但列表必须继续显示上一次的条目（SWR）。 -->
+    <div ref="listRef" class="clipboard-list" v-if="!loading || entries.length > 0">
       <div v-if="filteredEntries.length === 0" class="clipboard-empty">
         <ClipboardList :size="36" class="empty-icon" />
         <p class="empty-text">{{ searchQuery ? t('noMatchClipboard') : t('noClipboardRecords') }}</p>
@@ -1225,7 +1264,8 @@ onUnmounted(() => {
     </div>
 
     <!-- 剪贴板分页（弹窗模式不显示） -->
-    <div v-if="!compact && !loading && filteredEntries.length > CLIPBOARD_PAGE_SIZE" class="clipboard-pagination">
+    <!-- 同列表：后台静默刷新时 loading 也会置 true，拿它做条件会让分页条闪一下。 -->
+    <div v-if="!compact && filteredEntries.length > CLIPBOARD_PAGE_SIZE" class="clipboard-pagination">
       <button class="page-btn" :disabled="clipboardPage <= 1" @click="clipboardPage--">
         <ChevronLeft :size="14" />
       </button>
@@ -1243,7 +1283,7 @@ onUnmounted(() => {
       <span class="page-total">{{ t('paginationTotal', { total: filteredEntries.length }) }}</span>
     </div>
 
-    <div v-if="loading" class="clipboard-loading">
+    <div v-if="loading && !entries.length" class="clipboard-loading">
       <p>{{ t('loading') }}</p>
     </div>
 

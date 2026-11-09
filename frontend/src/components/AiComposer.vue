@@ -12,6 +12,7 @@ import { useI18n } from 'vue-i18n'
 import { GitBranch, Image as ImageIcon, Link2, ArrowUp, Plus, Square } from '@lucide/vue'
 import type { AIConnector, AIHooksInfo, AIMentionItem, AIPrompt, AISkill } from '../types/ai'
 import type { PendingImage } from '../types'
+import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import AiPlusPanel from './AiPlusPanel.vue'
 import AiSlashPanel from './AiSlashPanel.vue'
 import AiRichInput from './AiRichInput.vue'
@@ -30,6 +31,10 @@ const props = defineProps<{
   mentionIdx: number
   input: string
   hasKey: boolean
+  // 模型选择放在这个输入框里：它是「这条任务用哪个模型」的属性，
+  // 与技能、权限、工作区同属一排，而不是右上角的全局开关。
+  aiProfiles: AIProfile[]
+  aiActive: string
   streaming: boolean
   allowFileImage: boolean
   allowUrlImage: boolean
@@ -67,12 +72,14 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: 'update:urlDraft', v: string): void
   (e: 'update:input', v: string): void
+  (e: 'update:aiActive', v: string): void
   (e: 'approve-hooks', on: boolean): void
   (e: 'remove-attachment', i: number): void
   (e: 'confirm-url'): void
   (e: 'remove-mention', i: number): void
   (e: 'pick-mention', it: AIMentionItem): void
   (e: 'composer-key', ev: KeyboardEvent): void
+  (e: 'model-change'): void
   (e: 'send'): void
   (e: 'stop'): void
   (e: 'paste', ev: ClipboardEvent): void
@@ -96,6 +103,12 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+
+/** 先回写选中的档案再通知父组件落库（顺序反了父组件读到的还是旧值） */
+function onModelSelect(ev: Event) {
+  emit('update:aiActive', (ev.target as HTMLSelectElement).value)
+  emit('model-change')
+}
 
 // 从 + 面板点技能后要把焦点还给输入框，否则光标停在面板按钮上，
 // 用户得先点一下输入框才能接着打正文。
@@ -174,8 +187,8 @@ defineExpose({
       @key="emit('composer-key', $event)"
       @paste="emit('paste', $event)"
     />
-    <!-- 底部工具条：左边是「+ 技能和连接器」与当前目录的 git 分支（在仓库里才显示），
-         右边是图片 / 链接 / 发送。 -->
+    <!-- 底部工具条：左边是「+ 技能」、模型选择、当前目录的 git 分支（在仓库里才显示），
+         右边是权限 / 图片 / 链接 / 发送。 -->
     <div class="ai-input-bar">
       <div class="ai-input-bar-left">
         <!-- 运行中只收文字：技能要跟着一条新消息一起做上下文组装，图片要过闸门
@@ -189,6 +202,17 @@ defineExpose({
         >
           <Plus :size="16" />
         </button>
+        <!-- 这条任务用哪个模型：落地页输入框同款胶囊。没配档案时不给一个空下拉，
+             那只会让人以为点它就能选（此时该走「去设置」）。 -->
+        <select
+          v-if="props.aiProfiles.length"
+          :value="props.aiActive"
+          class="ai-composer-model"
+          :title="t('aiSwitchModel')"
+          @change="onModelSelect($event)"
+        >
+          <option v-for="p in props.aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
+        </select>
         <span v-if="props.gitRepo" class="ai-git-branch" :title="t('aiGitBranchTip')">
           <GitBranch :size="12" />
           <span class="ai-git-branch-name">{{ props.gitBranch }}</span>
@@ -338,6 +362,41 @@ defineExpose({
 .ai-plus-btn.is-open { background: var(--color-bg-active); color: var(--color-text-primary); }
 
 .ai-input-bar-right { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-shrink: 0; }
+
+/* 模型胶囊：与落地页输入框底栏、以及本排的 git 分支 / 权限徽标同一套尺寸
+   （22px 全圆角）。做成实心边而不是纯文字，是因为它挨着同样有底的分支 chip，
+   光秃秃一个下拉会像标签而不是能点的控件。
+   max-width + min-width:0 必须留：模型名动辄二三十字符，默认 min-width:auto
+   会把右侧整组（含发送按钮）挤到下一行。 */
+.ai-composer-model {
+  box-sizing: border-box;
+  height: 22px;
+  max-width: 150px;
+  min-width: 0;
+  flex: 0 1 auto;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-full);
+  background: var(--color-bg-secondary);
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  font-family: inherit;
+  cursor: pointer;
+  text-overflow: ellipsis;
+  transition: color var(--transition-fast), border-color var(--transition-fast),
+    background-color var(--transition-fast);
+}
+
+.ai-composer-model:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-light);
+  background: var(--color-bg-active);
+}
+
+.ai-composer-model:focus-visible {
+  outline: none;
+  border-color: var(--color-border-focus-soft);
+}
 
 /* 当前目录的 git 分支：在仓库里才出现的轻量提示 chip，放在底部工具条左上角。
    高度与 Worktree chip、权限徽标对齐（都是 22px）——按 padding 撑开的话，字号

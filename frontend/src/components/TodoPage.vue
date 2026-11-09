@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { logErr } from '../utils/logger'
-import { ref, computed, onMounted, onUnmounted, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { KEEP_ALIVE } from '../pages/keepAlive'
+defineOptions({ name: KEEP_ALIVE.todo })
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { useToast } from '../composables/useToast'
@@ -974,19 +976,46 @@ function onDocClick(e: MouseEvent) {
     showFocusStats.value = false
   }
 }
+// 全局 click 监听要跟着激活态走：本页保活后切走不卸载，若一直挂着，
+// 用户在别的页面点一下也会触发本页的 onDocClick（收起浮层），属于串台。
+function attachGlobal() { document.addEventListener('click', onDocClick) }
+function detachGlobal() { document.removeEventListener('click', onDocClick) }
+
+// stale-while-revalidate：切回来直接显示上次列表，再静默补一次。
+// refresh() 只覆盖 todos.value、不清空，加载期间旧数据照常可见；
+// 首次挂载时 onMounted 已刷过，紧随的 onActivated 由 pageActive 挡掉，不重复请求。
+let pageActive = false
+let needsRefresh = false
+function startPage() {
+  if (pageActive) return
+  pageActive = true
+  attachGlobal()
+  if (needsRefresh) { needsRefresh = false; void refresh() }
+}
+function stopPage() {
+  pageActive = false
+  needsRefresh = true
+  detachGlobal()
+}
+
 onMounted(() => {
   selectedDate.value = todayStr.value
-  refresh()
+  void refresh()
   // 专注计时可能在上次离开本页时仍在跑（状态在 localStorage 里），先接上再渲染
   restoreFocus()
   // id 可能在组件创建之前就已写入（先切页、后 mount），watch 不会回溯触发
   if (pendingOpenTodoId.value) void focusPendingTodo()
-  document.addEventListener('click', onDocClick)
+  startPage()
 })
+onActivated(startPage)
+onDeactivated(stopPage)
 onUnmounted(() => {
   if (highlightTimer) clearTimeout(highlightTimer)
-  document.removeEventListener('click', onDocClick)
+  detachGlobal()
 })
+// 注意：focusTimer 刻意不停。它只负责刷新显示，但计时完成通知也在 tickFocus 里
+// 发出；切到别的页面时专注仍在继续，停掉会让用户错过完成提醒。LRU 淘汰真正
+// 卸载时由上方已有的 onUnmounted(stopFocusTimer) 收尾。
 </script>
 
 <template>

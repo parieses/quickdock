@@ -82,6 +82,12 @@ type AgentRunReq struct {
 	// 用户在点发送前刚切过，读库会拿到上一轮的值——而这两者的差别正是
 	// 「要不要停下来问」。库里那份只用于「切走再切回来时把开关显示回去」。
 	Permission string
+	// ProfileID 这一轮用哪个模型档案（ai_profiles.id）。前端每次发消息都带输入框里
+	// 选中的那个；空 = 没表态，后端按「会话上存过的 → 全局激活项」回落。
+	//
+	// 跟请求走而不是每轮从库里读：用户可能刚在输入框里切完模型就按发送，
+	// 那时库里还是上一轮的值。库里那份只负责「切走再切回来时把选择显示回去」。
+	ProfileID string
 	// Mentions 本次提问里用 @ 显式引用的文件 / 目录 / 历史对话（见 ai_mentions.go）。
 	// 只影响这一次请求的上下文，不落库：引用是「这次要看它」，不是长期状态。
 	Mentions []AIMention
@@ -219,7 +225,10 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// 免得「库里存 full、闸门却按默认问」这种两处各算一遍的老毛病。
 	permission := aiNormalizePermission(req.Permission)
 
-	cfg, okp := a.getActiveAIProfile()
+	// 模型跟着这条任务走：优先本次请求，其次会话上存过的，最后才是全局激活项。
+	// 全局那份仍然有用——插件、SSH 屏显、摘要压缩这些没有模型选择器的入口靠它，
+	// 且用户最后一次主动选的模型会写回它（见 AISetConversationProfile）。
+	cfg, okp := a.aiProfileForRun(req.ProfileID, res.ConvID)
 	if !okp || cfg.APIKey == "" {
 		// 用户报「AI 不回话」时，最常见原因就是没配 Key；这条必须留痕。
 		logger.W("[ai] 请求被拒：未配置 API Key（conv=%s mode=%s）", res.ConvID, mode)
@@ -267,6 +276,9 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 				Skills: encodeConvSkills(req.Skills),
 				// 权限同理：落地页就能把权限切成完全访问再发第一句。
 				Permission: permission,
+				// 落地页输入框里选好的模型随建会话落库：少了这一步，第一句用的
+				// 是请求带来的值、第二句却会回落到全局，出现「越聊越换了模型」。
+				ProfileID: cfg.ID,
 			})
 			if cerr != nil {
 				sink.Event("error", map[string]any{"message": cerr.Error()})
@@ -280,6 +292,9 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 			}
 			sink.Event("conv", map[string]any{
 				"id": conv.ID, "title": conv.Title, "spaceId": conv.SpaceID, "mode": conv.Mode,
+				// 新建会话时前端列表里那条是本地占位，带回去它才知道这条任务
+				// 用的是哪个档案（切走再切回来才不会跳回全局默认）。
+				"profileId": conv.ProfileID,
 			})
 		} else {
 			conv, _ = a.App.DB.GetAIConversation(res.ConvID)
@@ -387,6 +402,18 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	if !req.Fresh && permission != strings.TrimSpace(conv.Permission) {
 		if err := a.App.DB.SetAIConversationPermission(res.ConvID, permission); err != nil {
 			logger.W("[ai] 保存会话权限失败 conv=%s: %v", res.ConvID, err)
+		}
+	}
+
+	// 模型的回写：用 cfg.ID 而不是 req.ProfileID——请求里那个 id 可能已被删掉，
+	// aiProfileForRun 会回落到别的档案，把无效 id 存进库只会让下次选择显示空白。
+	//
+	// 只在值真的变了时写：这个 UPDATE 会改 updated_at，每轮都写会把这条任务
+	// 一直顶在侧栏最前。也刻意不在这里动全局 ai_active_profile——切到一条老
+	// 任务发消息不该把「用户最后选的模型」悄悄换成它当年用的那个。
+	if !req.Fresh && strings.TrimSpace(req.ProfileID) != "" && cfg.ID != strings.TrimSpace(conv.ProfileID) {
+		if err := a.App.DB.SetAIConversationProfile(res.ConvID, cfg.ID); err != nil {
+			logger.W("[ai] 保存会话模型失败 conv=%s: %v", res.ConvID, err)
 		}
 	}
 

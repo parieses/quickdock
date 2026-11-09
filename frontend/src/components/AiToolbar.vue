@@ -1,13 +1,14 @@
 <script setup lang="ts">
 /**
- * 聊天区顶部工具栏：目录指示 + 模型切换 + 几个会话级动作。
+ * 聊天区顶部工具栏：目录指示 + 几个会话级动作。
  *
- * 只在「有任务」时由父组件挂载（落地页不显示它——模型选择在 hero 输入框下面，
- * 目录还没定）。这里是纯视图，所有状态归 AIPage，动作通过 emit 回传。
+ * 只在「有任务」时由父组件挂载。这里是纯视图，所有状态归 AIPage，动作通过 emit 回传。
+ *
+ * 模型选择已移到输入框底部：它现在是「这条任务用哪个模型」的属性，
+ * 和输入框里的技能、权限、工作区摆在一起，而不是一个全局开关藏在右上角。
  */
 import { useI18n } from 'vue-i18n'
 import { Download, FolderOpen, ListTree, PanelRight, RefreshCw, Star, Terminal } from '@lucide/vue'
-import type { AIProfile } from '../../bindings/quickdock/services/ai/models'
 import type { AIConversation } from '../types/ai'
 
 const props = defineProps<{
@@ -15,8 +16,6 @@ const props = defineProps<{
   convCwd: string
   /** 目录显示名（尾部几段，见父组件 cwdLabel） */
   cwdLabel: string
-  aiActive: string
-  aiProfiles: AIProfile[]
   activeId: string
   activeConv: AIConversation | null
   /** 正在切换星标的会话 id，用来禁用按钮防连点 */
@@ -30,10 +29,8 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: 'update:aiActive', v: string): void
   (e: 'update:digestOpen', v: boolean): void
   (e: 'open-cwd'): void
-  (e: 'model-change'): void
   (e: 'regen-title'): void
   (e: 'toggle-star', c: AIConversation): void
   (e: 'export-md'): void
@@ -42,12 +39,6 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
-
-/** 先回写选中的档案，再通知父组件去应用（顺序反了 onModelChange 读到的还是旧值） */
-function onModelSelect(ev: Event) {
-  emit('update:aiActive', (ev.target as HTMLSelectElement).value)
-  emit('model-change')
-}
 </script>
 
 <template>
@@ -61,9 +52,6 @@ function onModelSelect(ev: Event) {
       <span class="ai-cwd-name">{{ props.cwdLabel }}</span>
     </button>
     <div class="ai-toolbar-right">
-      <select :value="props.aiActive" class="ai-model-select" :title="t('aiSwitchModel')" @change="onModelSelect">
-        <option v-for="p in props.aiProfiles" :key="p.id" :value="p.id">{{ p.name || p.model }}</option>
-      </select>
       <button v-if="props.activeId" class="ai-icon-btn" :title="t('aiRegenTitle')" @click="emit('regen-title')">
         <RefreshCw :size="13" />
       </button>
@@ -123,20 +111,6 @@ function onModelSelect(ev: Event) {
 }
 
 .ai-toolbar-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-
-.ai-model-select {
-  max-width: 160px;
-  padding: 5px 8px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-primary);
-  font-size: 12px;
-  font-family: inherit;
-  outline: none;
-}
-
-.ai-model-select:focus { border-color: var(--color-border-focus-soft); }
 
 /* 工作目录：显示当前绑到哪个目录，点一下在资源管理器里打开。
    它只「打开」已绑定的目录，不是「选目录」——绑定入口已收进「新建任务 → 选空间」。

@@ -181,7 +181,15 @@ function closeTab(id: number) {
   }
   // 关掉最后一个标签页 = 用户要收工，连同面板一起收起（不是自动补首页——
   // 那样关 × 永远关不掉，只能再点工具栏按钮，反直觉）
-  if (!tabs.value.length) emit('update:open', false)
+  if (!tabs.value.length) closePanel()
+}
+
+// 面板级关闭：给标签行最右那个 × 用。
+// 开合状态只有父组件 sideOpen 一份，工具栏按钮和 Ctrl+Shift+B 读的都是它，
+// 所以这里只发 update:open；标签页与未保存的草稿都留着（aside 是 v-if，组件没卸载），
+// 下次打开仍停在原来那几个文件上，不丢编辑内容。
+function closePanel() {
+  emit('update:open', false)
 }
 
 // ensureTab 面板打开时保证有一个首页标签页，避免一块空白（父组件 externally 也能调）。
@@ -383,20 +391,29 @@ defineExpose({ ensureTab, openArtifact })
       @dblclick="resetSideWidth"
     ></div>
     <div class="ai-side-tabs">
-      <div
-        v-for="tab in tabs"
-        :key="tab.id"
-        :class="['ai-side-tab', { active: tab.id === activeTabId }]"
-        @click="activeTabId = tab.id"
-      >
-        <FileText v-if="tab.kind === 'file'" :size="11" />
-        <span class="ai-side-tab-title">{{ tab.kind === 'home' ? t('aiSideNewTab') : tab.title }}</span>
-        <button class="ai-side-tab-close" :title="t('aiSideCloseTab')" @click.stop="closeTab(tab.id)">
-          <X :size="11" />
+      <!-- 标签行只有这一层横向滚动：关闭按钮留在外层固定位。整行都可滚时，
+           开得多几个标签 × 就被卷出可视区，等于又回到「找不到关闭」的老问题。 -->
+      <div class="ai-side-tabs-scroll">
+        <div
+          v-for="tab in tabs"
+          :key="tab.id"
+          :class="['ai-side-tab', { active: tab.id === activeTabId }]"
+          @click="activeTabId = tab.id"
+        >
+          <FileText v-if="tab.kind === 'file'" :size="11" />
+          <span class="ai-side-tab-title">{{ tab.kind === 'home' ? t('aiSideNewTab') : tab.title }}</span>
+          <button class="ai-side-tab-close" :title="t('aiSideCloseTab')" @click.stop="closeTab(tab.id)">
+            <X :size="11" />
+          </button>
+        </div>
+        <button class="ai-side-new" :title="t('aiSideNewTab')" @click="newTab">
+          <Plus :size="13" />
         </button>
       </div>
-      <button class="ai-side-new" :title="t('aiSideNewTab')" @click="newTab">
-        <Plus :size="13" />
+      <!-- 面板级关闭：常驻右上角，不用再横跨半个窗口回聊天区工具栏点开关。
+           与大纲/后台任务面板的头部 × 同一位置同一语义。 -->
+      <button class="ai-side-close" :title="t('aiSideClose')" @click="closePanel">
+        <X :size="14" />
       </button>
     </div>
     <div v-if="activeTab" class="ai-side-body">
@@ -509,8 +526,19 @@ defineExpose({ ensureTab, openArtifact })
 .ai-side-tabs {
   display: flex; align-items: center; gap: 4px; padding: 6px 8px;
   border-bottom: 1px solid var(--color-border); flex-shrink: 0;
-  overflow-x: auto; scrollbar-width: thin;
 }
+/* 横向滚动只发生在标签区，右侧关闭按钮始终占着固定位 */
+.ai-side-tabs-scroll {
+  display: flex; align-items: center; gap: 4px;
+  flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: thin;
+}
+.ai-side-close {
+  display: flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; flex-shrink: 0;
+  border: none; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-secondary); cursor: pointer;
+}
+.ai-side-close:hover { color: var(--color-text-primary); background: var(--color-bg-tertiary); }
 .ai-side-tab {
   display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0;
   max-width: 170px; padding: 4px 8px; border-radius: var(--radius-sm);

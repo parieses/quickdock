@@ -57,9 +57,13 @@ type agentScope struct {
 	//
 	// 必须与 cwd 分开：子 agent 可以被派到项目里的某个子目录（cwd=src/api），
 	// 但「这次对话属于哪个项目」没变。拿 cwd 当范围，它连 go.mod 都读不到。
-	scope  string
-	depth  int // 当前 agent 在树里的深度，顶层为 0
-	budget int // run 级 token 上限，0 = 不限
+	scope string
+	// profileID 这次编排用的模型档案：子 agent 必须跟父级同一个，
+	// 不能各自回落到全局激活项——否则父任务用 A 家网关、派出去的子任务
+	// 却用 B 家，能力和价格都对不上，日志里还看不出为什么。
+	profileID string
+	depth     int // 当前 agent 在树里的深度，顶层为 0
+	budget    int // run 级 token 上限，0 = 不限
 
 	mu    sync.Mutex
 	runID string
@@ -75,12 +79,13 @@ type agentScope struct {
 func newAgentScope(svc *AIService, convID, goal, cwd string, cfg AIProfile) *agentScope {
 	cwd = strings.TrimSpace(cwd)
 	return &agentScope{
-		svc:    svc,
-		convID: convID,
-		goal:   clipRunes(strings.TrimSpace(goal), 300),
-		cwd:    cwd,
-		scope:  cwd,
-		budget: agentRunTokenBudget(cfg),
+		svc:       svc,
+		convID:    convID,
+		goal:      clipRunes(strings.TrimSpace(goal), 300),
+		cwd:       cwd,
+		scope:     cwd,
+		profileID: cfg.ID,
+		budget:    agentRunTokenBudget(cfg),
 	}
 }
 

@@ -378,6 +378,7 @@ var baseTables = []string{
 		mode TEXT NOT NULL DEFAULT 'chat',
 		skills TEXT NOT NULL DEFAULT '',
 		permission TEXT NOT NULL DEFAULT '',
+		profile_id TEXT NOT NULL DEFAULT '',
 		worktree_path TEXT NOT NULL DEFAULT '',
 		worktree_branch TEXT NOT NULL DEFAULT '',
 		starred INTEGER NOT NULL DEFAULT 0,
@@ -964,6 +965,9 @@ func (d *Database) migrate() error {
 		// 空串当默认值而不是 'default'：老会话升级后自然是空串，不必回填，
 		// 而「默认」本来就该是没写过的样子——多一个要校验的取值只会多一处漏判。
 		{"ai_conversations", "permission", "TEXT NOT NULL DEFAULT ''"},
+		// ai_conversations: 这条任务选中的模型档案 id。老会话补成空串 = 从未单独
+		// 选过 → 继续用全局 ai_active_profile，升级不会把用户已经在用的模型换掉。
+		{"ai_conversations", "profile_id", "TEXT NOT NULL DEFAULT ''"},
 		// ai_conversations: Worktree 隔离工作区。worktree_path 是这条任务独占的
 		// git worktree 目录（开任务时建的，空 = 没开），worktree_branch 记它基于
 		// 哪个分支。两列都随会话走：关掉再打开、重启应用，工作区归属都还在。

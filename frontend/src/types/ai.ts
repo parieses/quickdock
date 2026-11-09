@@ -141,6 +141,9 @@ export interface AIConversation {
   // 执行权限：空 = 默认（敏感操作逐个确认），'full' = 完全访问。
   // 只认 'full' 一个真值——不认识的取值一律按默认权限显示，与后端同一个口径。
   permission?: string
+  // 这条任务选中的模型档案 id（ai_profiles.id）。空 = 从未单独选过 →
+  // 显示全局「最后选择」；老数据升级后也是空，不能当成「没配模型」。
+  profile_id?: string
   // 隔离工作区（git worktree）：非空 = 这条任务已经在独立工作区里跑。
   // worktree_branch 是它**基于**的分支（不是工作区自己的 quickdock/xxxx 分支）。
   worktree_path?: string

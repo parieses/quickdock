@@ -131,6 +131,9 @@ var validColumns = map[string]bool{
 	// ai_conversations：执行权限（空 = 默认权限，'full' = 完全访问）。同样是全局白名单，
 	// 漏了它 = 建会话/切换权限时「非法列名」，回收站恢复整行转插入也会在这一列炸。
 	"permission": true,
+	// ai_conversations：这条任务选中的模型档案 id。全局白名单漏一个就是写入时
+	// 「非法列名」，而且 structToMap 会把零值字段也转成列、回收站恢复整行转插入也会在这一列炸。
+	"profile_id": true,
 	// ai_conversations：Worktree 隔离工作区。worktree_path 是这个任务独占的
 	// git worktree 目录（空 = 没开），worktree_branch 是它基于的分支名。
 	// 同样是全局白名单，漏了它 = 开/关工作区时「非法列名」。

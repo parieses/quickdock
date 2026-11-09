@@ -141,35 +141,14 @@ func (a *AIService) loadActiveProfileID(profiles []aiProfileStored) string {
 	return ""
 }
 
-// getActiveAIProfile 返回解密后的当前激活档案；无档案时返回 (cfg, false)。
-// 结果带内存缓存（聊天高频调用时避免反复读库 + DPAPI 解密）；保存档案会失效。
-func (a *AIService) getActiveAIProfile() (AIProfile, bool) {
-	a.aiCacheMu.RLock()
-	ok := a.aiCachedOK
-	cfg := a.aiCachedCfg
-	a.aiCacheMu.RUnlock()
-	if ok {
-		return cfg, true
-	}
-
-	stored := a.loadAIProfiles()
-	if len(stored) == 0 {
-		return AIProfile{}, false
-	}
-	id := a.loadActiveProfileID(stored)
-	var s AIProfile
-	found := false
-	for _, p := range stored {
-		if p.ID == id {
-			s = p
-			found = true
-			break
-		}
-	}
-	if !found {
-		s = stored[0]
-	}
-	cfg = AIProfile{
+// buildAIProfile 把一条落库档案变成可直接发请求的档案：解密 Key、补默认值、归一图片能力。
+//
+// 单独抽出来是因为现在有两条取档案的路：全局激活项（getActiveAIProfile，带缓存）
+// 和按 id 指定（getAIProfileByID，会话选的模型）。两者的解密与默认值口径必须
+// 完全一致，否则「同一个档案在 A 会话能发图、切到 B 会话就不行」这类问题
+// 查起来毫无头绪。
+func (a *AIService) buildAIProfile(s AIProfile) (AIProfile, bool) {
+	cfg := AIProfile{
 		ID:               s.ID,
 		Name:             s.Name,
 		Provider:         s.Provider,
@@ -199,11 +178,102 @@ func (a *AIService) getActiveAIProfile() (AIProfile, bool) {
 	if cfg.Temperature == 0 {
 		cfg.Temperature = aiDefaultTemp
 	}
+	return cfg, true
+}
+
+// findStoredProfile 按 id 找落库档案（未解密）。找不到返回 false，不做任何回落——
+// 调用方要区分「选了但档案已被删」和「没选」：前者写库前就该被拦下。
+func (a *AIService) findStoredProfile(id string) (AIProfile, bool) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return AIProfile{}, false
+	}
+	for _, p := range a.loadAIProfiles() {
+		if p.ID == id {
+			return p, true
+		}
+	}
+	return AIProfile{}, false
+}
+
+// getActiveAIProfile 返回解密后的当前激活档案；无档案时返回 (cfg, false)。
+// 结果带内存缓存（聊天高频调用时避免反复读库 + DPAPI 解密）；保存档案会失效。
+//
+// 这一份现在是「全局默认」：设置页、插件、SSH 屏显、摘要压缩、子 agent 的
+// 兜底都读它。聊天页里用户为某条任务选的模型不写进这个缓存——见 aiProfileForRun。
+func (a *AIService) getActiveAIProfile() (AIProfile, bool) {
+	a.aiCacheMu.RLock()
+	ok := a.aiCachedOK
+	cfg := a.aiCachedCfg
+	a.aiCacheMu.RUnlock()
+	if ok {
+		return cfg, true
+	}
+
+	stored := a.loadAIProfiles()
+	if len(stored) == 0 {
+		return AIProfile{}, false
+	}
+	id := a.loadActiveProfileID(stored)
+	s, found := AIProfile{}, false
+	for _, p := range stored {
+		if p.ID == id {
+			s, found = p, true
+			break
+		}
+	}
+	if !found {
+		s = stored[0]
+	}
+	cfg, ok = a.buildAIProfile(s)
+	if !ok {
+		return AIProfile{}, false
+	}
 	a.aiCacheMu.Lock()
 	a.aiCachedCfg = cfg
 	a.aiCachedOK = true
 	a.aiCacheMu.Unlock()
 	return cfg, true
+}
+
+// getAIProfileByID 取指定档案（解密后）；id 无效时回落到全局激活项。
+//
+// 为什么不缓存：全局那份 aiCachedCfg 只能放一个档案，把按 id 查的结果写进去
+// 会让下一次 getActiveAIProfile 拿到别的档案的 Key。命中全局缓存时直接复用，
+// 其余情况每轮一次读库+解密，代价远小于一次模型请求。
+func (a *AIService) getAIProfileByID(id string) (AIProfile, bool) {
+	a.aiCacheMu.RLock()
+	ok, cached := a.aiCachedOK, a.aiCachedCfg
+	a.aiCacheMu.RUnlock()
+	if ok && cached.ID == strings.TrimSpace(id) {
+		return cached, true
+	}
+	s, found := a.findStoredProfile(id)
+	if !found {
+		return a.getActiveAIProfile()
+	}
+	return a.buildAIProfile(s)
+}
+
+// aiProfileForRun 决定这一轮真正用哪个档案。
+//
+// 优先级：请求里显式带的 > 会话上存过的 > 全局激活项。
+//
+// 第一项必须最高：用户在输入框里刚切完模型就按发送，库里还是上一轮的值，
+// 读库会拿到旧模型。第二项让老前端、插件、子 agent 这些不带 profileId 的调用
+// 也能沿用「这条任务上次选的」，而不是突然跳回全局。第三项是那些根本没有
+// 会话的入口（AIAsk、摘要、连接测试）唯一能依赖的值。
+func (a *AIService) aiProfileForRun(profileID, convID string) (AIProfile, bool) {
+	id := strings.TrimSpace(profileID)
+	if id == "" && strings.TrimSpace(convID) != "" && a.App.DB != nil {
+		if c, err := a.App.DB.GetAIConversation(strings.TrimSpace(convID)); err == nil && c != nil {
+			id = strings.TrimSpace(c.ProfileID)
+		}
+	}
+	if id == "" {
+		return a.getActiveAIProfile()
+	}
+	return a.getAIProfileByID(id)
 }
 
 // invalidateAICache 使激活档案缓存失效（保存/删除/切换档案后调用）。
@@ -343,7 +413,13 @@ func (a *AIService) AISaveProfiles(req AISaveProfilesRequest) *services.ApiResul
 	return services.Ok(nil)
 }
 
-// AISetActiveProfile 设置当前激活的档案（聊天中切换模型用）
+// AISetActiveProfile 设置全局激活档案。
+//
+// 现在它有两重身份：设置页里用户指定的默认档，以及「最后一次主动选过的模型」——
+// 插件、SSH 屏显、笔记问答、摘要压缩这些没有模型选择器的入口，都靠这个值决定
+// 用哪家网关。聊天页里给某条任务选模型走的是 AISetConversationProfile，
+// 它在写会话的同时也会更新这里；切换会话时只读不写，免得翻一条老任务
+// 就把全局最后选择悄悄换掉。
 func (a *AIService) AISetActiveProfile(id string) *services.ApiResult {
 	if r := a.dbOK(); r != nil {
 		return r

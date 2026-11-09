@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onBeforeUnmount, watch, nextTick } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { KEEP_ALIVE } from '../pages/keepAlive'
+defineOptions({ name: KEEP_ALIVE.schedule })
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
@@ -215,8 +217,19 @@ const canDrag = computed(() => !query.value.trim() && statusFilter.value === 'al
 // next_run 是后端算好的绝对时间（'YYYY-MM-DD HH:MM:SS' 本地时区），前端只做差。
 // 30 秒一跳：够看清「还有几分钟」，又不至于像秒表那样整页重渲染。
 const nowTs = ref(Date.now())
-const tickTimer = setInterval(() => { nowTs.value = Date.now() }, 30_000)
-onBeforeUnmount(() => clearInterval(tickTimer))
+// 本页在 KeepAlive 白名单里：切走只触发 onDeactivated，不卸载，原来挂在
+// onBeforeUnmount 上的清理不会执行 → 倒计时定时器会在后台一直跑。
+// 按 MonitorPage / PluginManagerPage 的范式做成幂等启停。
+let tickTimer: ReturnType<typeof setInterval> | null = null
+function startTick() {
+  if (tickTimer !== null) return
+  nowTs.value = Date.now() // 切回来先校准一次，别让「还有 3 分钟」停在离开那一刻
+  tickTimer = setInterval(() => { nowTs.value = Date.now() }, 30_000)
+}
+function stopTick() {
+  if (tickTimer !== null) { clearInterval(tickTimer); tickTimer = null }
+}
+onBeforeUnmount(stopTick)
 
 function parseLocal(s: string): number {
   if (!s) return 0
@@ -566,7 +579,24 @@ async function confirmDel() {
   } catch (e) { error.value = getErrorMessage(e) }
 }
 
-onMounted(refresh)
+// stale-while-revalidate：切回来先让 KeepAlive 把上次的列表整块还回来（不空白），
+// 再静默补一次。refresh() 只覆盖 tasks.value、不清空，所以加载期间旧数据照常可见。
+let pageActive = false
+let needsRefresh = false
+function startPage() {
+  if (pageActive) return // 首次挂载时 onMounted 已 refresh 过，紧随的 onActivated 不再重复
+  pageActive = true
+  startTick()
+  if (needsRefresh) { needsRefresh = false; void refresh() }
+}
+function stopPage() {
+  pageActive = false
+  needsRefresh = true
+  stopTick()
+}
+onMounted(() => { void refresh(); startPage() })
+onActivated(startPage)
+onDeactivated(stopPage)
 
 // ---- 通知中心深链定位 ----
 // 点一条定时任务通知后停在对应那条上，而不是回到列表顶部。

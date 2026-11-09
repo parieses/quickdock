@@ -78,6 +78,8 @@ export interface AiRunsDeps {
   convCwd: Ref<string>
   /** 发送那一刻的模型名（用户可能在流式期间切档案，事后读会拿到新值） */
   streamModelOf: () => string
+  /** 同上，但取的是档案 id：随请求发给后端，决定这一轮真正用哪个模型 */
+  profileIdOf: () => string
 
   // —— 会话状态标记 ——
   planCards: Map<string, PlanCardState>
@@ -122,7 +124,7 @@ export function useAiRuns(deps: AiRunsDeps) {
     activeId, conversations, messages, runs, draftRunId,
     input, attachments, mentions, lastMentions, pickedSkills, lastSkills, stripSkillTokens,
     hasKey, mode, permissionFull, worktreeEnabled, worktreeActive, worktreeBranch,
-    pendingSpaceId, convCwd, streamModelOf,
+    pendingSpaceId, convCwd, streamModelOf, profileIdOf,
     planCards, statMap, setConvError, markConvRunning, markConvFinished,
     loadConversations, loadCheckpoints, refreshJobBadge,
     renderLiveBlocks, primeMessageBlocks, clearLiveCache,
@@ -443,6 +445,9 @@ export function useAiRuns(deps: AiRunsDeps) {
     // 发送时的模型名：流式结束前用户可能切档案（onModelChange 会回滚），
     // 事后读 activeProfile 拿到的是新值，所以此刻先定下来。
     const streamModel = streamModelOf()
+    // 档案 id 同理要在这一刻定下来：流式期间用户可能给输入框换了模型，
+    // 而这一轮已经按旧档案在跑，事后读会记错。
+    const profileId = profileIdOf()
     // 这一轮自己的那份流式状态。放在 runs 里而不是几个全局 ref：
     // 用户切走之后事件还在来，必须写回**发起它的那条**；两条任务同时跑时更不能共用。
     runs.value.push({
@@ -537,6 +542,9 @@ export function useAiRuns(deps: AiRunsDeps) {
           // 权限：每次都显式带。「缺省 = 沿用上次」在这里不成立——权限是每一条消息
           // 的执行口径，少带一次就可能按上一轮的完全访问静默执行。
           permission: permissionFull.value ? 'full' : 'default',
+          // 模型档案：每次都带输入框里选中的那个。用户在发送前刚切过模型时，
+          // 库里还是上一轮的值，后端必须以这次请求为准。
+          profileId,
           // 隔离工作区：已开工作区的会话传什么都无所谓（后端按会话记录续用），
           // 没开的才看这两个字段。分支空 = 用当前分支。
           worktree: worktreeEnabled.value || worktreeActive.value,
@@ -685,10 +693,15 @@ export function useAiRuns(deps: AiRunsDeps) {
             if (data.spaceId) loadConversations()
             // 归属已随这次请求落库，待定值作废（下一条消息走的是 convId，不带 spaceId）。
             pendingSpaceId.value = ''
-            if (data.title !== undefined) {
+            // 首次发送时才建的会话，侧栏那条是本地占位：把库和后端实际采用的
+            // 档案 id 补回去。少了 profile_id，切走再切回来就会回落到全局
+            // 「最后选择」——如果用户之后在别处换过模型，这条任务的显示就错了。
+            if (data.title !== undefined || data.profileId) {
               const i = conversations.value.findIndex((c) => c.id === data.id)
-              if (i >= 0) conversations.value[i].title = data.title
-              else loadConversations()
+              if (i >= 0) {
+                if (data.title !== undefined) conversations.value[i].title = data.title
+                if (data.profileId) conversations.value[i].profile_id = String(data.profileId)
+              } else loadConversations()
             }
             break
           case 'rules':

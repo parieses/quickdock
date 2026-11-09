@@ -18,7 +18,7 @@
 // Sidebar 模板、App 的分发分支，而三处各自只看到 kind 的一小部分语义。现在改成
 // 「条目自己声明行为」，App 的分发只有一句 `if (entry.activate)`，不需要认识 dsh/ssh。
 
-import { defineAsyncComponent, type Component, type Ref } from 'vue'
+import { defineAsyncComponent, type AsyncComponentLoader, type Component, type Ref } from 'vue'
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
   Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen,
@@ -27,28 +27,44 @@ import {
 import { KEEP_ALIVE_PAGES } from './keepAlive'
 // 工作空间复合页是首屏默认页，静态引（异步会让启动时内容区先空一拍）
 import WorkspacePage from '../components/WorkspacePage.vue'
+import PageLoading from '../components/PageLoading.vue'
+
+/**
+ * 内容页懒加载的统一入口。
+ *
+ * 原来每页是裸的 defineAsyncComponent(loader)：chunk 没回来之前 Vue 渲染一个
+ * 注释节点，内容区就是纯空白；而 loadingComponent 默认的 delay 是 200ms，
+ * 就算配了占位，短于 200ms 的加载也照样一路空白。这里统一 delay: 0。
+ *
+ * 只有「首次进入某页」会看到骨架：defineAsyncComponent 内部缓存 resolvedComp，
+ * 之后再创建同名包装器会同步拿到组件，不再经过 loading 分支。也就是说这个
+ * 占位专治 chunk 加载，不管数据等待——切回非保活页时的数据空白见 KEEP_ALIVE_PAGES。
+ */
+function lazy(loader: AsyncComponentLoader) {
+  return defineAsyncComponent({ loader, loadingComponent: PageLoading, delay: 0 })
+}
 
 // 主窗口内容页的异步组件集中在此定义（替代此前散落在 App.vue 的 defineAsyncComponent）。
-const NoteManagerPage = defineAsyncComponent(() => import('../components/NoteManagerPage.vue'))
-const DashboardPage = defineAsyncComponent(() => import('../components/DashboardPage.vue'))
-const GitPage = defineAsyncComponent(() => import('../components/GitPage.vue'))
-const PluginManagerPage = defineAsyncComponent(() => import('../components/PluginManagerPage.vue'))
-const TodoPage = defineAsyncComponent(() => import('../components/TodoPage.vue'))
-const SchedulePage = defineAsyncComponent(() => import('../components/SchedulePage.vue'))
-const MonitorPage = defineAsyncComponent(() => import('../components/MonitorPage.vue'))
-const AIPage = defineAsyncComponent(() => import('../components/AIPage.vue'))
+const NoteManagerPage = lazy(() => import('../components/NoteManagerPage.vue'))
+const DashboardPage = lazy(() => import('../components/DashboardPage.vue'))
+const GitPage = lazy(() => import('../components/GitPage.vue'))
+const PluginManagerPage = lazy(() => import('../components/PluginManagerPage.vue'))
+const TodoPage = lazy(() => import('../components/TodoPage.vue'))
+const SchedulePage = lazy(() => import('../components/SchedulePage.vue'))
+const MonitorPage = lazy(() => import('../components/MonitorPage.vue'))
+const AIPage = lazy(() => import('../components/AIPage.vue'))
 // 注意：不能在这里给 AIPage 赋 name 来对齐白名单。KeepAlive 判断异步组件时读的是
 // `vnode.type.__asyncResolved`（内层 SFC 定义）的名字，外层包装器上的 name 无人问津。
 // 所以名字写在 AIPage.vue 的 defineOptions 里（值来自 pages/keepAlive.ts 的常量）。
-const EnvironmentPage = defineAsyncComponent(() => import('../components/EnvironmentPage.vue'))
+const EnvironmentPage = lazy(() => import('../components/EnvironmentPage.vue'))
 // 剪贴板历史页需要 .clipboard-page 容器撑满，故单独引用组件 + wrapperClass
-const ClipboardPanel = defineAsyncComponent(() => import('../components/ClipboardPanel.vue'))
+const ClipboardPanel = lazy(() => import('../components/ClipboardPanel.vue'))
 // 文件检索页：检索接口与 Everything 状态门都是现成的，这里只补展示层与批量动作
-const FileSearchPage = defineAsyncComponent(() => import('../components/FileSearchPage.vue'))
+const FileSearchPage = lazy(() => import('../components/FileSearchPage.vue'))
 // 知识库：本地文档（Word/Excel/PDF/Markdown）解析 + 切片 + 关键词/向量混合检索，
 // 自带问答与分段预览。与「文件搜索」是两件事：那边按文件名找文件、不建索引，
 // 这边打开文件内容建索引、能问问题。
-const KnowledgePage = defineAsyncComponent(() => import('../components/KnowledgePage.vue'))
+const KnowledgePage = lazy(() => import('../components/KnowledgePage.vue'))
 
 /** 「行尾活动指示点」的来源标识。闭集（union）：新增一种必须同时在 Sidebar 的
  *  DOT_PROVIDERS 里加 provider，否则 TS 报缺项 —— 这是把 stringly-typed 的
@@ -93,8 +109,9 @@ export interface NavEntry {
 // clipboard → filesearch → environments → ssh → ai → dsh → plugins）。dashboard 放第一位：
 // 它是「今天要处理什么」的入口，而工作空间回答的是「打开哪个项目」，先看全局再看具体。
 export const navEntries: NavEntry[] = [
-  // 总览：待办/服务健康/常驻环境/端口占用四块聚合。它不持有任何领域状态，
-  // 每次挂载重新拉一遍最新数据，故不进 KeepAlive 白名单。
+  // 总览：待办/服务健康/常驻环境/端口占用四块聚合。进 KeepAlive 白名单：
+  // 它聚合了九路 IPC，每次切回来全部重拉是「先空白再刷出内容」最明显的一页。
+  // onActivated 走 refreshAll(true) 静默补数据，不清空现有卡片。
   { id: 'dashboard', labelKey: 'navDashboard', icon: LayoutDashboard, component: DashboardPage,
     // 日志卡与 AI 用量卡的「全部」都指向设置里的对应面板（logs / ai），
     // 与 workspace / ai 页同一套 open-settings 约定。
@@ -146,8 +163,10 @@ export function findContentPage(id: string): NavEntry | undefined {
   return navEntries.find((e) => e.id === id && e.component)
 }
 
-// KeepAlive 白名单：这些页离开后继续存活，切回来不重 fetch / 不重建（如 SSH 的 xterm 会话、
-// Monitor 的轮询状态、Note 的编辑态、AI 的回答流）。其余页（workspace/todo/schedule/
-// clipboard/environments）仍按常规卸载重载 —— 它们是无状态列表，重建便宜且能拿到最新数据。
+// KeepAlive 白名单：这些页离开后继续存活。第一批是有状态/有连接的（SSH 的 xterm 会话、
+// Monitor 的轮询、Note 的编辑态、AI 的回答流），第二批是「切回来先空白」的聚合与列表页
+// （总览/待办/日程/剪贴板/文件搜索）——它们靠 onActivated 静默刷新做 stale-while-revalidate。
+// 仍未列入的（workspace / environments / git / knowledge）按常规卸载重载：要么本来就是
+// 首屏常驻，要么持有大对象与复杂配置态，常驻不划算。
 // 名字的唯一来源在 pages/keepAlive.ts（组件 defineOptions 与这里引同一个常量）。
 export { KEEP_ALIVE_PAGES }

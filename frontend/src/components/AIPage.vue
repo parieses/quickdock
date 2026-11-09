@@ -85,6 +85,7 @@ import {
   AISearchMessages,
   AISetConversationMode,
   AISetConversationPermission,
+  AISetConversationProfile,
   AIGetHooks,
   AISetHooksApproved,
   AIGetGitBranch,
@@ -711,9 +712,17 @@ async function loadProfiles() {
     const res = unwrap<AIProfilesResult>(await AIListProfiles())
     if (!res) return
     aiProfiles.value = res.profiles ?? []
-    aiActive.value = res.active || (aiProfiles.value[0]?.id ?? '')
-    // 以服务端返回的「当前生效档案」为准，作为切模型失败时的还原基准
-    lastActiveProfile = aiActive.value
+    // 服务端返回的 active 是全局「最后选过的模型」：落地页、以及插件 / SSH
+    // 屏显这些没有模型选择器的页面都用它，切模型失败时还原的也是它。
+    lastActiveProfile = res.active || (aiProfiles.value[0]?.id ?? '')
+    aiActive.value = lastActiveProfile
+    // 已经打开一条任务时，那条任务自己的选择优先。否则从设置页返回、
+    // 档案列表重新拉一次，就会把当前任务的模型悄悄换回全局默认。
+    // 存过的 id 若已被删掉同样回落，免得下拉框显示成空白。
+    if (activeId.value) {
+      const own = (conversations.value.find((c) => c.id === activeId.value)?.profile_id || '').trim()
+      if (own && aiProfiles.value.some((p) => p.id === own)) aiActive.value = own
+    }
   } catch (e) {
     aiProfiles.value = []
     pageError.value = getErrorMessage(e)
@@ -908,6 +917,13 @@ async function selectConv(id: string, msgId?: string) {
   mode.value = (conv?.mode || 'chat').trim() || 'chat'
   // 权限跟着任务走：这条对话开过完全访问，切回来要还原成它自己的档位。
   permissionFull.value = (conv?.permission || '').trim() === 'full'
+  // 模型也是任务属性，不是全局开关：A 任务用 flash、B 任务用 reasoning，
+  // 两边切来切去不该互相串。老会话没存过，或存的档案已被删掉，就回落到
+  // 全局「最后选择」——否则 <select> 的 value 匹配不到任何 option，会显示空白。
+  const ownProfile = (conv?.profile_id || '').trim()
+  aiActive.value = ownProfile && aiProfiles.value.some((p) => p.id === ownProfile)
+    ? ownProfile
+    : lastActiveProfile
   // 工作区同样跟着任务走：已开的不再显示开关，只显示「基于哪条分支 + 移除」；
   // 没开的把草稿状态清干净，免得上一条任务的勾选黏到这一条上。
   worktreeBranchOpen.value = false
@@ -1769,7 +1785,7 @@ async function delConv(id: string) {
   }
 }
 
-// 上一个真正生效的模型：切模型失败时把下拉框拉回去。
+// 全局「最后选过的模型」：落地页的默认值，也是切模型失败时的还原基准。
 // 不还原的话，界面显示的是新模型、后端实际请求还是旧模型——
 // 这种「看起来切了其实没切」的不一致是最难排查的一类问题。
 let lastActiveProfile = ''
@@ -1777,12 +1793,27 @@ let lastActiveProfile = ''
 async function onModelChange() {
   const want = aiActive.value
   if (!want) return
+  const convId = activeId.value
+  // 失败时要还原到「切换前这条任务显示的那个」，不是无条件还原到全局值：
+  // 一条老任务可能用的是和全局不同的档案。
+  const restore = convId
+    ? ((conversations.value.find((x) => x.id === convId)?.profile_id || '').trim() || lastActiveProfile)
+    : lastActiveProfile
   try {
-    unwrap(await AISetActiveProfile(want))
+    if (convId) {
+      // 有任务：一次调用同时写会话与全局。后者是给没有模型选择器的页面
+      // （插件、SSH 屏显、笔记问答）用的「最后选择」，后端保证两者一起成功。
+      unwrap(await AISetConversationProfile(convId, want))
+      const c = conversations.value.find((x) => x.id === convId)
+      if (c) c.profile_id = want
+    } else {
+      // 落地页还没建会话，只更新全局；发第一句时后端建会话会把这个值落库。
+      unwrap(await AISetActiveProfile(want))
+    }
     lastActiveProfile = want
   } catch (e: any) {
     toast.error(getErrorMessage(e))
-    aiActive.value = lastActiveProfile
+    aiActive.value = restore
   }
 }
 
@@ -2313,6 +2344,9 @@ const {
   hasKey, mode, permissionFull, worktreeEnabled, worktreeActive, worktreeBranch,
   pendingSpaceId, convCwd,
   streamModelOf: () => aiProfiles.value.find((x) => x.id === aiActive.value)?.model || '',
+  // 发给后端的是档案 id 而不是模型名：两个档案可以指向同一个 model 却配不同
+  // 的网关 / Key / 系统提示，只传名字会丢掉「用的哪家」。
+  profileIdOf: () => aiActive.value,
   planCards, statMap, setConvError, markConvRunning, markConvFinished,
   loadConversations, loadCheckpoints, refreshJobBadge,
   renderLiveBlocks, primeMessageBlocks, clearLiveCache,
@@ -2749,15 +2783,13 @@ onUnmounted(() => {
 
     <!-- 右侧聊天区 -->
     <section class="ai-main">
-      <!-- 工具栏：只在有任务时出现。落地页不需要它（模型选择在输入框下面，
-           目录还没定）。 -->
+      <!-- 工具栏：只在有任务时出现。落地页不需要它（目录还没定）。
+           模型选择已移到输入框底部，跟技能/权限/工作区摆在一起。 -->
       <AiToolbar
         v-if="!isNewTask"
-        v-model:ai-active="aiActive"
         v-model:digest-open="digestOpen"
         :conv-cwd="convCwd"
         :cwd-label="cwdLabel"
-        :ai-profiles="aiProfiles"
         :active-id="activeId"
         :active-conv="activeConv"
         :star-busy="starBusy"
@@ -2765,7 +2797,6 @@ onUnmounted(() => {
         :jobs-open="jobsOpen"
         :running-jobs="runningJobs"
         @open-cwd="openCwd"
-        @model-change="onModelChange"
         @regen-title="regenTitle"
         @toggle-star="toggleStar"
         @export-md="exportConvMarkdown"
@@ -3079,6 +3110,8 @@ onUnmounted(() => {
         ref="composerRef"
         v-model:input="input"
         v-model:url-draft="urlDraft"
+        v-model:ai-active="aiActive"
+        :ai-profiles="aiProfiles"
         :hooks="aiHooks"
         :attachments="attachments"
         :url-input-open="urlInputOpen"
@@ -3116,6 +3149,7 @@ onUnmounted(() => {
         @pick-worktree-branch="pickWorktreeBranch"
         @remove-worktree="removeWorktree"
         @change-permission="onChangePermission"
+        @model-change="onModelChange"
         @approve-hooks="approveHooks"
         @remove-attachment="removeAttachment"
         @confirm-url="confirmUrlImage"

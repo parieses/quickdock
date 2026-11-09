@@ -142,7 +142,7 @@ func (a *AIService) handleSpawnAgent(ctx context.Context, args map[string]any) (
 		return nil, err
 	}
 
-	cfg, okp := a.getActiveAIProfile()
+	cfg, okp := a.aiProfileForRun(sc.profileID, sc.convID)
 	model := ""
 	if okp {
 		model = cfg.Model
@@ -183,7 +183,10 @@ func (a *AIService) handleSpawnAgent(ctx context.Context, args map[string]any) (
 		Message: task,
 		Cwd:     cwd,
 		// 范围跟着编排的根走，不跟子目录走（理由见 AgentRunReq.ScopeCwd）。
-		ScopeCwd:   sc.scope,
+		ScopeCwd: sc.scope,
+		// 子 agent 跟父级用同一个档案：Fresh 的 runAgent 不读父会话的
+		// profile_id，不显式带就会回落到全局激活项。
+		ProfileID:  sc.profileID,
 		Fresh:      true,
 		Role:       role,
 		RunID:      node.RunID,

@@ -21,6 +21,15 @@ export const KEEP_ALIVE = {
   notes: 'NoteManagerPage',
   plugins: 'PluginManagerPage',
   ssh: 'SshPage',
+  // 第二批（2026-11-09）：这五页是「切过去先空白、再刷出内容」抱怨最集中的。
+  // 它们都是列表/聚合视图，切回来先显示上次数据、再静默补一次即可（SWR）。
+  // 环境 / Git / 知识库不在此列：环境页有大量配置态与定时器，Git 的日志树和
+  // 知识库的索引切片都是大对象，常驻内存不划算，且它们本来就有自己的加载态。
+  dashboard: 'DashboardPage',
+  todo: 'TodoPage',
+  schedule: 'SchedulePage',
+  clipboard: 'ClipboardPanel',
+  filesearch: 'FileSearchPage',
 } as const
 
 // 类型写成 string[] 而不是 readonly：KeepAlive 的 include 声明是可变的

@@ -489,11 +489,14 @@ const activeConfirm = computed(() =>
           v-if="currentContentPage"
           :class="currentContentPage.wrapperClass || 'page-shell'"
         >
-          <!-- KeepAlive：白名单内的页（AI / Monitor / SSH / Note / Plugin）离开后继续存活，
-               切回来不重 fetch、不重建 xterm / 轮询 / 编辑态（见 KEEP_ALIVE_PAGES）。
-               其余页按常规卸载重载——它们是无状态列表，重建便宜且能拿到最新数据。 -->
+          <!-- KeepAlive：白名单内的页离开后继续存活，切回来直接显示上次内容，
+               再由各页 onActivated 静默补一次数据（stale-while-revalidate）。
+               白名单见 KEEP_ALIVE_PAGES；max 是 LRU 上限——保活页多了以后不能让
+               十几个组件实例（含 Git / 知识库之外的大列表）一直占着内存，
+               最久没访问的会被真正 unmount，各页的 onUnmounted 清理照常生效。
+               未列入白名单的页仍是常规卸载重载，保证每次都拿最新数据。 -->
           <Transition name="page" mode="out-in">
-            <KeepAlive :include="KEEP_ALIVE_PAGES">
+            <KeepAlive :include="KEEP_ALIVE_PAGES" :max="8">
               <component
                 :is="currentContentPage.component"
                 v-bind="currentContentPage.props ? currentContentPage.props(pageContext) : {}"

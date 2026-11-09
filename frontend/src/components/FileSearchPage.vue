@@ -12,6 +12,10 @@
 // 2) 不做「移入回收站」。批量删除用户文件不可逆，检索页不该成为删除入口。
 import { computed, onScopeDispose, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { KEEP_ALIVE } from '../pages/keepAlive'
+// 显式名字：KeepAlive 的 include 按组件 name 匹配，异步组件解析后读的是内层 SFC
+// 的名字，靠文件名推断容易在重构时静默失效（见 pages/keepAlive.ts 的说明）。
+defineOptions({ name: KEEP_ALIVE.filesearch })
 import {
   Search, RefreshCw, File as FileIcon, FolderOpen, ExternalLink, Copy, Loader2, X,
 } from '@lucide/vue'

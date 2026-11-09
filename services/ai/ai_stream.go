@@ -158,6 +158,9 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		// Permission 这条对话的执行权限："full" = 完全访问，其余/缺省 = 默认。
 		// 缺这个字段的老前端一律按默认权限处理——安全开关断线时要倒向「问」。
 		Permission string `json:"permission"`
+		// ProfileID 输入框里当前选中的模型档案。前端每次都带；老前端不带 → 空串，
+		// 后端按「会话上存过的 → 全局激活项」回落，升级不会丢已有对话的模型。
+		ProfileID string `json:"profileId"`
 		// Worktree 是否在隔离工作区里跑这条任务（见 ai_worktree.go）。
 		// 老前端不带这个字段 → false，行为与升级前完全一致。
 		Worktree bool `json:"worktree"`
@@ -264,6 +267,7 @@ func (s *aiStreamServer) handle(w http.ResponseWriter, r *http.Request) {
 		Mentions:       req.Mentions,
 		Skills:         req.Skills,
 		Permission:     req.Permission,
+		ProfileID:      req.ProfileID,
 		Worktree:       req.Worktree,
 		WorktreeBranch: req.WorktreeBranch,
 	}, &sseSink{fl: fl, cancel: cancelCause, onConvID: registerStop})

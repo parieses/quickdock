@@ -11,10 +11,11 @@
  */
 import { computed, inject, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Copy, Pencil, Plus, Trash2 } from '@lucide/vue'
+import { Copy, Pencil, Plus, Trash2, X } from '@lucide/vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
+import { useFocusTrap } from '../utils/focusTrap'
 import type { AIPrompt } from '../types/ai'
 import type { ToastAPI } from '../types'
 import { AIDeletePrompt, AIGetPrompts, AISavePrompt } from '../../bindings/quickdock/services/ai/aiservice'
@@ -32,6 +33,12 @@ const saving = ref(false)
 
 // 编辑态：id 为空表示新建。内置条目也能编辑（改文案/分类），只是删不掉。
 const editing = ref<{ id: string; name: string; category: string; content: string; builtin: number } | null>(null)
+// 弹框内的错误提示。不走 toast：设置弹框的层级本来就在 toast 之上，
+// 保存失败时弹框还开着，toast 会被压在下面看不见。
+const formError = ref('')
+const panelRef = ref<HTMLElement | null>(null)
+const editingVisible = computed(() => !!editing.value)
+const { onKeydown: onKeydownTrap } = useFocusTrap(editingVisible, panelRef)
 
 // 按分类分组展示：内置条目已经带好分类，用户自建的多半不填，归到「未分类」。
 const groups = computed(() => {
@@ -59,28 +66,40 @@ async function load() {
 }
 
 function startNew() {
+  formError.value = ''
   editing.value = { id: '', name: '', category: '', content: '', builtin: 0 }
 }
 
 function startEdit(p: AIPrompt) {
+  formError.value = ''
   editing.value = { id: p.id, name: p.name, category: p.category, content: p.content, builtin: p.builtin }
 }
 
 function cancelEdit() {
   editing.value = null
+  formError.value = ''
+}
+
+function onDialogKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    cancelEdit()
+    return
+  }
+  onKeydownTrap(e)
 }
 
 async function save() {
   const draft = editing.value
   if (!draft || saving.value) return
   if (!draft.name.trim()) {
-    toast?.error(t('aiPromptsNameRequired'))
+    formError.value = t('aiPromptsNameRequired')
     return
   }
   if (!draft.content.trim()) {
-    toast?.error(t('aiPromptsContentRequired'))
+    formError.value = t('aiPromptsContentRequired')
     return
   }
+  formError.value = ''
   saving.value = true
   try {
     unwrap(await AISavePrompt(
@@ -95,7 +114,7 @@ async function save() {
     await load()
     toast?.success(t('aiPromptsSaved'))
   } catch (e) {
-    toast?.error(getErrorMessage(e))
+    formError.value = getErrorMessage(e)
     logErr('SettingsPrompts:save', e)
   } finally {
     saving.value = false
@@ -153,38 +172,8 @@ watch(() => props.visible, (v) => {
       <span class="prompt-count">{{ t('aiPromptsCount', { n: list.length }) }}</span>
     </div>
 
-    <!-- 编辑器放在列表上方：新建后不用滚动就能开始写 -->
-    <div v-if="editing" class="prompt-editor">
-      <div class="field-row">
-        <label class="field field-half">
-          <span class="field-label">{{ t('aiPromptsName') }}</span>
-          <input v-model="editing.name" class="field-input" type="text" maxlength="60" :placeholder="t('aiPromptsNamePh')" />
-        </label>
-        <label class="field field-half">
-          <span class="field-label">{{ t('aiPromptsCategory') }}</span>
-          <input v-model="editing.category" class="field-input" type="text" maxlength="20" :placeholder="t('aiPromptsCategoryPh')" />
-        </label>
-      </div>
-      <label class="field">
-        <span class="field-label">{{ t('aiPromptsContent') }}</span>
-        <textarea
-          v-model="editing.content"
-          class="prompt-textarea"
-          maxlength="8000"
-          :placeholder="t('aiPromptsContentPh')"
-        ></textarea>
-      </label>
-      <p class="prompt-var-hint">
-        {{ t('aiPromptsVarHint') }}
-        <code>&#123;&#123;date&#125;&#125;</code>
-        <code>&#123;&#123;time&#125;&#125;</code>
-        <code>&#123;&#123;selection&#125;&#125;</code>
-      </p>
-      <div class="action-row">
-        <button class="btn btn-primary" :disabled="saving" @click="save">{{ saving ? t('saving') : t('save') }}</button>
-        <button class="btn btn-secondary" @click="cancelEdit">{{ t('cancel') }}</button>
-      </div>
-    </div>
+    <!-- 编辑器走弹框而不是列表上方：编辑列表最后一条时，内联编辑器会把内容
+         顶到顶部，用户得先往上滚很远、再滚回来确认改的是哪一条。 -->
 
     <div v-if="loading" class="result-hint">{{ t('loading') }}</div>
     <div v-else-if="!list.length" class="result-hint">{{ t('aiPromptsEmpty') }}</div>
@@ -207,6 +196,60 @@ watch(() => props.visible, (v) => {
       </div>
     </div>
   </div>
+
+  <!-- 编辑弹框挂到 body：设置面板自己是一个 fixed 全屏层（z-index 10001），
+       留在面板内部会被它的 overflow 裁掉，也拦不住面板自己的键盘处理。 -->
+  <Teleport to="body">
+    <Transition name="prompt-dialog">
+      <div
+        v-if="editing"
+        class="prompt-dialog-overlay"
+        @mousedown.self="cancelEdit"
+        @keydown="onDialogKeydown"
+      >
+        <div ref="panelRef" class="prompt-dialog" @mousedown.stop>
+          <header class="prompt-dialog-head">
+            <span class="prompt-dialog-title">{{ editing.id ? t('aiPromptsEdit') : t('aiPromptsNew') }}</span>
+            <button class="prompt-dialog-close" @click="cancelEdit"><X :size="16" /></button>
+          </header>
+          <div class="prompt-dialog-body">
+            <div class="field-row">
+              <label class="field field-half">
+                <span class="field-label">{{ t('aiPromptsName') }}</span>
+                <input v-model="editing.name" class="field-input" type="text" maxlength="60" :placeholder="t('aiPromptsNamePh')" />
+              </label>
+              <label class="field field-half">
+                <span class="field-label">{{ t('aiPromptsCategory') }}</span>
+                <input v-model="editing.category" class="field-input" type="text" maxlength="20" :placeholder="t('aiPromptsCategoryPh')" />
+              </label>
+            </div>
+            <label class="field">
+              <span class="field-label">{{ t('aiPromptsContent') }}</span>
+              <textarea
+                v-model="editing.content"
+                class="prompt-textarea"
+                maxlength="8000"
+                :placeholder="t('aiPromptsContentPh')"
+              ></textarea>
+            </label>
+            <p class="prompt-var-hint">
+              {{ t('aiPromptsVarHint') }}
+              <code>&#123;&#123;date&#125;&#125;</code>
+              <code>&#123;&#123;time&#125;&#125;</code>
+              <code>&#123;&#123;selection&#125;&#125;</code>
+            </p>
+            <p v-if="formError" class="prompt-dialog-error">{{ formError }}</p>
+          </div>
+          <footer class="prompt-dialog-foot">
+            <button class="btn btn-secondary" @click="cancelEdit">{{ t('cancel') }}</button>
+            <button class="btn btn-primary" :disabled="saving" @click="save">
+              {{ saving ? t('saving') : t('save') }}
+            </button>
+          </footer>
+        </div>
+      </div>
+    </Transition>
+  </Teleport>
 </template>
 
 <style scoped>
@@ -298,21 +341,117 @@ watch(() => props.visible, (v) => {
   color: var(--color-text-primary);
 }
 
-.prompt-editor {
+/* ---- 编辑弹框 ----
+ * 层级必须压过设置面板（10000/10001，见 styles/settings.css），否则整个弹框
+ * 会被设置页盖住、点了没反应。面层用 popover-bg：它是「离开文档流」的那一档，
+ * 比设置页的 bg-primary 高一层，浮起来才不像挖了个洞。 */
+.prompt-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10002;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--color-bg-overlay);
+  backdrop-filter: blur(2px);
+}
+
+.prompt-dialog {
+  display: flex;
+  flex-direction: column;
+  width: 560px;
+  max-width: 92vw;
+  max-height: 86vh;
+  overflow: hidden;
+  border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-md);
+  background: var(--color-popover-bg);
+  box-shadow: 0 16px 56px var(--color-bg-overlay-deep);
+}
+
+.prompt-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.prompt-dialog-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--color-text-primary);
+}
+
+.prompt-dialog-close {
+  display: flex;
+  padding: 3px;
+  border: none;
+  border-radius: var(--radius-xs);
+  background: none;
+  color: var(--color-text-disabled);
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.prompt-dialog-close:hover {
+  background: var(--color-bg-hover);
+  color: var(--color-text-primary);
+}
+
+.prompt-dialog-body {
   display: flex;
   flex-direction: column;
   gap: var(--space-4);
-  margin-top: var(--space-5);
-  padding: var(--space-5);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  padding: 18px 20px;
+  overflow-y: auto;
+}
+
+/* 名称/分类输入框沿用全局 .field-input，但底色要落到 bg-primary：
+ * 弹框本身是 popover-bg，同色会让输入框只剩一圈边框，看着像没样式。 */
+.prompt-dialog .field-input {
+  background: var(--color-bg-primary);
+}
+
+/* 弹框就是为长文本来的：正文区比原先内联时高一截，长提示词不用挤在小框里写 */
+.prompt-dialog .prompt-textarea {
+  min-height: 240px;
+}
+
+.prompt-dialog-error {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-danger);
+}
+
+.prompt-dialog-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding: 12px 20px;
+  border-top: 1px solid var(--color-border);
   background: var(--color-bg-tertiary);
 }
 
-/* 名称/分类输入框沿用全局 .field-input，但底色要抬到 bg-primary：
- * 编辑器卡片本身是 bg-tertiary，同色会让输入框只剩一圈边框，看着像没样式。 */
-.prompt-editor .field-input {
-  background: var(--color-bg-primary);
+/* 过渡与 CreateDialog 同形，但类名前缀独立：同名 transition 类会跨组件互相套用 */
+.prompt-dialog-enter-active,
+.prompt-dialog-leave-active {
+  transition: opacity 0.18s ease;
+}
+
+.prompt-dialog-enter-active .prompt-dialog,
+.prompt-dialog-leave-active .prompt-dialog {
+  transition: transform 0.18s ease;
+}
+
+.prompt-dialog-enter-from,
+.prompt-dialog-leave-to {
+  opacity: 0;
+}
+
+.prompt-dialog-enter-from .prompt-dialog,
+.prompt-dialog-leave-to .prompt-dialog {
+  transform: scale(0.96) translateY(-6px);
 }
 
 /* 模板正文按代码排版：缩进与换行本身是提示词的一部分 */

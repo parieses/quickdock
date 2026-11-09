@@ -56,6 +56,14 @@ type AIConversation struct {
 	// 一条对话开完就关；做成全局设置的结果是可预料的——某天忘了关，
 	// 之后每条对话都在无人确认的情况下改文件、跑命令。
 	Permission string `json:"permission"`
+	// ProfileID 这条任务用哪个模型档案（ai_profiles 里的 id，不是模型名）。
+	//
+	// 存档案 id 而不是 model 字符串：两个档案可以指向同一个 model 但配不同的
+	// baseURL / Key / 系统提示，只记名字会丢掉「用的哪家网关」。
+	//
+	// 空串 = 老数据或从未单独选过 → 回落到全局 ai_active_profile。这个回落必须
+	// 保留：插件、SSH 屏显、摘要压缩这些没有模型选择器的入口，靠的就是全局值。
+	ProfileID string `json:"profile_id"`
 	// WorktreePath 这条任务独占的 git worktree 目录（绝对路径，空 = 没开工作区）。
 	//
 	// 开了之后 Cwd 会被指到这里：模型改的是工作区里的副本，原工程目录一个字节
@@ -129,6 +137,7 @@ func mapToAIConversation(m map[string]interface{}) AIConversation {
 		Mode:             str(m["mode"]),
 		Skills:           str(m["skills"]),
 		Permission:       str(m["permission"]),
+		ProfileID:        str(m["profile_id"]),
 		WorktreePath:     str(m["worktree_path"]),
 		WorktreeBranch:   str(m["worktree_branch"]),
 		Starred:          integer(m["starred"]) == 1,
@@ -341,6 +350,9 @@ type NewAIConversation struct {
 	// 与 skills 同理：用户可能在落地页就把权限切成完全访问再发第一句，
 	// 那条路径只有建会话能记录。
 	Permission string
+	// ProfileID 落地页选好模型再发第一句时，随建会话一起落库。
+	// 少了这一步，用户在输入框里刚切的模型要等第二句才生效。
+	ProfileID string
 	// WorktreePath / WorktreeBranch 建会话时就开好隔离工作区（落地页勾了 Worktree
 	// 再发第一句）。空 = 不开；两列随创建落库，后续轮次读会话即可复用同一个工作区。
 	WorktreePath   string
@@ -361,6 +373,7 @@ func (d *Database) CreateAIConversation(in NewAIConversation) (*AIConversation, 
 		Cwd:            strings.TrimSpace(in.Cwd),
 		Skills:         strings.TrimSpace(in.Skills),
 		Permission:     strings.TrimSpace(in.Permission),
+		ProfileID:      strings.TrimSpace(in.ProfileID),
 		WorktreePath:   strings.TrimSpace(in.WorktreePath),
 		WorktreeBranch: strings.TrimSpace(in.WorktreeBranch),
 		CreatedAt:      now(),
@@ -558,6 +571,17 @@ func (d *Database) SetAIConversationPermission(id, permission string) error {
 	return d.ExecuteParams(
 		`UPDATE ai_conversations SET permission = ?, updated_at = ? WHERE id = ?`,
 		[]interface{}{strings.TrimSpace(permission), now(), strings.TrimSpace(id)},
+	)
+}
+
+// SetAIConversationProfile 记下这条任务选中的模型档案。
+//
+// 同样单独一个方法：空串是有效取值（「回到全局默认」），不能走
+// UpdateAIConversationMeta 里「空串 = 不更新」的口径。
+func (d *Database) SetAIConversationProfile(id, profileID string) error {
+	return d.ExecuteParams(
+		`UPDATE ai_conversations SET profile_id = ?, updated_at = ? WHERE id = ?`,
+		[]interface{}{strings.TrimSpace(profileID), now(), strings.TrimSpace(id)},
 	)
 }
 

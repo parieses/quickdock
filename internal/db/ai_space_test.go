@@ -69,6 +69,47 @@ func TestAIConversationModePersists(t *testing.T) {
 	}
 }
 
+// TestAIConversationProfilePersists 模型选择是任务属性，不是全局开关。
+//
+// 两条写库路径都要能存住并回读：落地页选好模型发第一句（随建会话）、
+// 以及在聊天页里改选（单独 setter）。空串也是有效取值（回到全局默认），
+// 不能因为通用更新里「空串 = 不更新」的口径就再也清不掉。
+func TestAIConversationProfilePersists(t *testing.T) {
+	d := openTestDB(t)
+
+	c, err := d.CreateAIConversation(NewAIConversation{Title: "用 A 模型", ProfileID: "profile-a"})
+	if err != nil {
+		t.Fatalf("建任务失败: %v", err)
+	}
+	if c.ProfileID != "profile-a" {
+		t.Fatalf("建会话时 profile_id 应随创建落库，实际 %q", c.ProfileID)
+	}
+	if back, err := d.GetAIConversation(c.ID); err != nil || back == nil || back.ProfileID != "profile-a" {
+		t.Fatalf("回读 profile_id 错误: %+v err=%v", back, err)
+	}
+
+	if err := d.SetAIConversationProfile(c.ID, "profile-b"); err != nil {
+		t.Fatalf("改模型失败: %v", err)
+	}
+	if back, _ := d.GetAIConversation(c.ID); back == nil || back.ProfileID != "profile-b" {
+		t.Fatalf("改后应为 profile-b，实际 %+v", back)
+	}
+	if err := d.SetAIConversationProfile(c.ID, ""); err != nil {
+		t.Fatalf("清空 profile_id 不该报错: %v", err)
+	}
+	if back, _ := d.GetAIConversation(c.ID); back == nil || back.ProfileID != "" {
+		t.Fatalf("清空后应回落到全局默认（空串），实际 %+v", back)
+	}
+
+	blank, err := d.CreateAIConversation(NewAIConversation{})
+	if err != nil {
+		t.Fatalf("建任务失败: %v", err)
+	}
+	if blank.ProfileID != "" {
+		t.Fatalf("未指定模型时应为空串（老数据回落全局），实际 %q", blank.ProfileID)
+	}
+}
+
 // TestAITaskRecycleRoundTrip 删任务 → 回收站 → 恢复：消息必须一起回来。
 //
 // 只恢复一行会话等于什么都没恢复——用户要的是那几轮对话，不是一行标题。
