@@ -797,7 +797,7 @@ func checkWorkdir(d Deps, args map[string]any) (any, error) {
 	if raw == "" {
 		return nil, errors.New("不知道要探测哪个目录：当前对话没有绑定工作目录，请传 path")
 	}
-	dir, err := fsguard.ResolveRead(d.db(), raw, mcpsrv.Cwd(args), false)
+	dir, err := fsguard.ResolveReadScopedExtra(d.db(), raw, mcpsrv.Scope(args), mcpsrv.Allowed(args), false)
 	if err != nil {
 		return nil, err
 	}

@@ -53,6 +53,11 @@ type agentScope struct {
 	convID string
 	goal   string
 	cwd    string
+	// scope 这次编排的「读取范围」根：顶层就是 cwd，子 agent 沿用父级的根。
+	//
+	// 必须与 cwd 分开：子 agent 可以被派到项目里的某个子目录（cwd=src/api），
+	// 但「这次对话属于哪个项目」没变。拿 cwd 当范围，它连 go.mod 都读不到。
+	scope  string
 	depth  int // 当前 agent 在树里的深度，顶层为 0
 	budget int // run 级 token 上限，0 = 不限
 
@@ -68,11 +73,13 @@ type agentScope struct {
 }
 
 func newAgentScope(svc *AIService, convID, goal, cwd string, cfg AIProfile) *agentScope {
+	cwd = strings.TrimSpace(cwd)
 	return &agentScope{
 		svc:    svc,
 		convID: convID,
 		goal:   clipRunes(strings.TrimSpace(goal), 300),
-		cwd:    strings.TrimSpace(cwd),
+		cwd:    cwd,
+		scope:  cwd,
 		budget: agentRunTokenBudget(cfg),
 	}
 }
@@ -81,8 +88,13 @@ func newAgentScope(svc *AIService, convID, goal, cwd string, cfg AIProfile) *age
 //
 // 子 agent 的预算沿用同一个 run 的（sc.budget 只是本地镜像，
 // 真正的超限判断看 overBudget —— 它按已用量比，不按剩余量分配）。
-func newChildAgentScope(svc *AIService, convID, runID, nodeID, cwd string, depth int, cfg AIProfile) *agentScope {
+//
+// scope 是父级的读取范围，空则退回子 agent 自己的 cwd（顶层执行的老行为）。
+func newChildAgentScope(svc *AIService, convID, runID, nodeID, cwd, scope string, depth int, cfg AIProfile) *agentScope {
 	sc := newAgentScope(svc, convID, "", cwd, cfg)
+	if s := strings.TrimSpace(scope); s != "" {
+		sc.scope = s
+	}
 	sc.runID = runID
 	sc.nodeID = nodeID
 	sc.depth = depth

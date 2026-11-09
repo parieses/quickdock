@@ -340,8 +340,18 @@ func approvalGateFrom(ctx context.Context) *approvalGate {
 //
 // 返回 (是否允许, 给模型看的说明)。allow=false 时说明里必须写清「因为什么没执行」：
 // 模型据此换方案，而一句空的 failed 会让它原地重试同一个调用。
-func (g *approvalGate) await(ctx context.Context, callID, name string, level int, args map[string]any) (bool, string) {
+//
+// forceAsk 用于「等级上是只读、但这次目标越界」的场景（读取当前对话目录之外的文件）：
+// 工具策略本来是 auto，这里强制升到 ask，让用户点名同意。noteOverride 非空时
+// 覆盖卡片上的风险说明——通用文案（「高危操作」）在越界读取这件事上等于没说。
+func (g *approvalGate) await(ctx context.Context, callID, name string, level int, args map[string]any, forceAsk bool, noteOverride string) (bool, string) {
 	pol := aiApprovalPolicyFor(name, level, g.rules)
+	if pol.mode == approvalAuto && forceAsk {
+		// 刻意不给 rememberable：按目录记一份永久白名单，会把「只看这一次」
+		// 悄悄变成「这个项目以后都能读」。要长期读，用户该去把目录设为工作目录，
+		// 那是界面上一个看得见的动作，而不是一次误点的复选框。
+		pol = approvalPolicy{mode: approvalAsk}
+	}
 	switch pol.mode {
 	case approvalAuto:
 		return true, ""
@@ -402,6 +412,10 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 		g.pMu.Unlock()
 	}()
 
+	riskNote := aiApprovalRiskNote(name, level, args)
+	if strings.TrimSpace(noteOverride) != "" {
+		riskNote = noteOverride
+	}
 	g.sink.Event("approval", map[string]any{
 		"callId":       callID,
 		"convId":       g.convID,
@@ -409,7 +423,7 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 		"level":        level,
 		"levelName":    aiApprovalLevelName(level),
 		"args":         aiApprovalArgsBrief(name, args),
-		"riskNote":     aiApprovalRiskNote(name, level, args),
+		"riskNote":     riskNote,
 		"rememberable": rememberable,
 		"grantScope":   aiApprovalGrantScope(grantKey),
 		"timeout":      int(aiApprovalTimeout.Seconds()),
@@ -437,6 +451,11 @@ func (g *approvalGate) await(ctx context.Context, callID, name string, level int
 		case d := <-ch:
 			if !d.Allow {
 				g.record(callID, name, db.AIDecisionDeny, false)
+				if strings.TrimSpace(noteOverride) != "" {
+					// 带上具体路径：模型要知道「是哪个位置被拒了」，
+					// 只说「用户拒绝」它会换个写法再问一遍同一个地方。
+					return false, noteOverride + "；用户拒绝了这次操作"
+				}
 				return false, "用户拒绝了这次操作"
 			}
 			remember := d.Remember && rememberable

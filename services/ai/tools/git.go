@@ -169,7 +169,7 @@ func gitDir(d Deps, args map[string]any) (string, error) {
 	if raw == "" {
 		return "", errors.New("不知道在哪个目录执行：当前对话没有绑定工作目录，请传 path（仓库目录）")
 	}
-	dir, err := fsguard.ResolveRead(d.db(), raw, mcpsrv.Cwd(args), false)
+	dir, err := fsguard.ResolveReadScopedExtra(d.db(), raw, mcpsrv.Scope(args), mcpsrv.Allowed(args), false)
 	if err != nil {
 		return "", err
 	}

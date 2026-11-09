@@ -107,7 +107,8 @@ func registerFileTools(s *MCPService, r *toolRegistrar) {
 		return readFileText(s, args)
 	}, mcpsrv.LevelRead, "file_read", "读取一个文本文件的内容。**返回的 content 每行前面是行号**（形如 `  42→代码`），行号不是文件内容，"+
 		"引用/修改时用这个行号才和后续工具对得上。path 可以传绝对路径，也可以传相对当前工作目录的路径。"+
-		"只能读用户已授权的目录：家目录、数据目录、以及快捷项里登记过的目录/工作目录；路径不在范围内会报错并列出可用目录。"+
+		"可读范围：**默认只能读当前对话的工作目录及其子目录**。工作目录之外的路径会先请用户点确认，"+
+		"同意只对这一次生效；被拒绝时不要换个写法重试——需要长期读它，就让用户把那个目录设为工作目录。"+
 		"私钥类文件、二进制文件（含 NUL 字节）与 UTF-16 编码文件会被拒绝。大文件请配合 offset/limit 分段读"+
 		"（默认一次 400 行，最大 2000；不要用 10、20 行这种很小的 limit 一段段啃整份文件——同样的内容要多跑好几轮）", []string{"path"},
 		map[string]any{
@@ -119,12 +120,12 @@ func registerFileTools(s *MCPService, r *toolRegistrar) {
 	r.add(func(args map[string]any) (any, error) {
 		res, err := grepFiles(s, mcpsrv.PathArg(args, "path"), mcpsrv.Arg(args, "pattern"),
 			mcpsrv.Arg(args, "glob"), mcpsrv.ArgBool(args, "ignoreCase"), mcpsrv.ArgInt(args, "limit", grepDefaultLimit),
-			mcpsrv.Cwd(args))
+			mcpsrv.Scope(args), mcpsrv.Allowed(args))
 		if err != nil {
 			return nil, err
 		}
 		return res, nil
-	}, mcpsrv.LevelRead, "file_grep", "在某个目录（白名单内的）里按正则逐行搜索文本内容，返回 path:line 与命中行。自动跳过 .git/node_modules/dist 等目录、跳过二进制与超过 1MB 的文件，单次有命中数/文件数/时间预算（触发上限时会说明 truncated 原因）。用来在项目里定位「某个函数在哪定义」「哪份配置引用了这个 key」", []string{"path", "pattern"},
+	}, mcpsrv.LevelRead, "file_grep", "在某个目录（当前可读范围内的）里按正则逐行搜索文本内容，返回 path:line 与命中行。自动跳过 .git/node_modules/dist 等目录、跳过二进制与超过 1MB 的文件，单次有命中数/文件数/时间预算（触发上限时会说明 truncated 原因）。用来在项目里定位「某个函数在哪定义」「哪份配置引用了这个 key」", []string{"path", "pattern"},
 		map[string]any{
 			"path":       str("要搜索的目录（或单个文件）：绝对路径，或相对当前工作目录的路径"),
 			"pattern":    str("正则表达式（Go 语法）。字面量特殊字符记得转义，如 \\bfunc main\\b"),
@@ -161,7 +162,11 @@ func readFileText(s *MCPService, args map[string]any) (any, error) {
 	if limit > readMaxLines {
 		limit = readMaxLines
 	}
-	path, err := fsguard.ResolveRead(dbOf(s), mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args), true)
+	// 走 Scoped 版：内置 AI 调用时宿主注入 _scope（恒等于对话工作目录），读取被限定在
+	// 该目录内；越界的那一次会在执行前弹确认卡，用户同意后宿主注入 _allow 放行本次。
+	// 外部 MCP 客户端两个键都没有，自动退回原白名单行为。
+	path, err := fsguard.ResolveReadScopedExtra(dbOf(s), mcpsrv.PathArg(args, "path"),
+		mcpsrv.Scope(args), mcpsrv.Allowed(args), true)
 	if err != nil {
 		return nil, err
 	}
@@ -328,7 +333,7 @@ func guardReadableFile(path string) error {
 
 // -------- file_grep --------
 
-func grepFiles(s *MCPService, rawPath, pattern, glob string, ignoreCase bool, limit int, cwd string) (any, error) {
+func grepFiles(s *MCPService, rawPath, pattern, glob string, ignoreCase bool, limit int, scope string, allowed []string) (any, error) {
 	if strings.TrimSpace(pattern) == "" {
 		return nil, errors.New("缺少参数 pattern（正则表达式）")
 	}
@@ -338,7 +343,8 @@ func grepFiles(s *MCPService, rawPath, pattern, glob string, ignoreCase bool, li
 	if limit > grepMaxLimit {
 		limit = grepMaxLimit
 	}
-	root, err := fsguard.ResolveRead(dbOf(s), rawPath, cwd, false)
+	// 同 file_read：内置 AI 受对话目录约束，越界的单次由 _allow 放行；外部 MCP 客户端不受影响。
+	root, err := fsguard.ResolveReadScopedExtra(dbOf(s), rawPath, scope, allowed, false)
 	if err != nil {
 		return nil, err
 	}

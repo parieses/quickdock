@@ -178,10 +178,12 @@ func (a *AIService) handleSpawnAgent(ctx context.Context, args map[string]any) (
 	res := a.runAgent(ctx, AgentRunReq{
 		// 子 agent 挂在父会话上（成本归集与事件归属都靠它），但 Fresh：
 		// 不读父对话历史、不往 ai_messages 里写任何东西。
-		ConvID:     sc.convID,
-		Mode:       "chat",
-		Message:    task,
-		Cwd:        cwd,
+		ConvID:  sc.convID,
+		Mode:    "chat",
+		Message: task,
+		Cwd:     cwd,
+		// 范围跟着编排的根走，不跟子目录走（理由见 AgentRunReq.ScopeCwd）。
+		ScopeCwd:   sc.scope,
 		Fresh:      true,
 		Role:       role,
 		RunID:      node.RunID,

@@ -75,6 +75,67 @@ func TestSkipDirCaseInsensitive(t *testing.T) {
 	}
 }
 
+// 绑定工作目录后，读必须限定在该目录内。
+//
+// 这条钉的是一个真实越界：用户贴了本地项目的报错，报错文本里带另一个项目的绝对路径，
+// 模型顺着它把源码读了——从旧白名单看不算犯规（都在家目录里），但用户的心智是
+// 「这次对话是这个项目」。所以这里同时断言「同一个越界文件在宽松路径下是能读的」，
+// 否则测试在临时目录不在家目录的机器上会静默变成空断言。
+func TestResolveReadScopedRejectsOutside(t *testing.T) {
+	root := t.TempDir()
+	outside := filepath.Join(t.TempDir(), "b.go")
+	inside := filepath.Join(root, "a.go")
+
+	if _, err := ResolveReadScoped(nil, inside, root, true); err != nil {
+		t.Fatalf("工作目录内的文件应可读: %v", err)
+	}
+	if _, err := ResolveRead(nil, outside, "", true); err != nil {
+		t.Skipf("临时目录不在宽松白名单内，本用例无法证明 scoped 更严: %v", err)
+	}
+	if _, err := ResolveReadScoped(nil, outside, root, true); err == nil {
+		t.Fatalf("工作目录外的文件不该被读: %s", outside)
+	}
+	// 没绑定工作目录时要退回宽松白名单，否则没有目录的对话连随手提到的文件都读不了。
+	if _, err := ResolveReadScoped(nil, outside, "", true); err != nil {
+		t.Fatalf("未绑定工作目录时应退回宽松白名单: %v", err)
+	}
+}
+
+// 用户当场同意的那一次读取必须能过闸，但只对那一次有效。
+//
+// 这是「默认只能操作当前目录」的配套通道：没有它，越界读取就只有拒绝一条路，
+// 用户想让 AI 看一眼别处的文件只能先切工作目录。
+func TestResolveReadScopedExtra(t *testing.T) {
+	root := t.TempDir()
+	outsideDir := t.TempDir()
+	outside := filepath.Join(outsideDir, "b.go")
+
+	if _, err := ResolveReadScopedExtra(nil, outside, root, nil, true); err == nil {
+		t.Fatal("没有授权时越界读取应被拒")
+	}
+	if _, err := ResolveReadScopedExtra(nil, outside, root, []string{outsideDir}, true); err != nil {
+		t.Fatalf("用户同意后应放行这一次: %v", err)
+	}
+	// 授权的是那个目录，不是整个磁盘。
+	if _, err := ResolveReadScopedExtra(nil, filepath.Join(t.TempDir(), "c.go"), root, []string{outsideDir}, true); err == nil {
+		t.Fatal("授权目录之外的路径不该被放行")
+	}
+}
+
+// Outside 只做判断不报错：宿主据此决定要不要弹确认卡。
+func TestOutside(t *testing.T) {
+	root := t.TempDir()
+	if _, out := Outside(filepath.Join(root, "a.go"), root); out {
+		t.Fatal("目录内的文件不该判为越界")
+	}
+	if _, out := Outside(filepath.Join(t.TempDir(), "b.go"), root); !out {
+		t.Fatal("目录外的文件应判为越界")
+	}
+	if _, out := Outside(filepath.Join(t.TempDir(), "b.go"), ""); out {
+		t.Fatal("没有声明范围时不该判越界")
+	}
+}
+
 // 凭据类文件按名字判：内容判据要读完才知道，而读完就已经进了日志。
 func TestSecretFile(t *testing.T) {
 	yes := []string{"id_rsa", "/home/u/.ssh/id_ed25519", "a/b/server.pem", "cert.P12", ".git-credentials", "credentials.json"}

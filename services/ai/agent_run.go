@@ -113,6 +113,12 @@ type AgentRunReq struct {
 	Fresh bool
 	// ToolFilter 按 role 再收窄工具面；nil = 沿用现有按 mode 的规则。
 	ToolFilter *ToolFilter
+	// ScopeCwd 子 agent 的读取范围（= 父级的范围），只有 Fresh 时传。
+	//
+	// 不用 Cwd：Cwd 是子 agent 干活的位置，可以是项目里的某个子目录，而
+	// 「这个对话属于哪个项目」不会因为子任务缩到 src/ 就变。拿 Cwd 当范围会让
+	// 子 agent 连项目的 go.mod 都读不到。
+	ScopeCwd string
 }
 
 // AgentRunResult 一次运行的结果。
@@ -395,7 +401,7 @@ func (a *AIService) runAgent(ctx context.Context, req AgentRunReq, sink EventSin
 	// RunID/NodeID/Depth 构造。两条路径共用一个类型，深度与预算的判断因此只有一处实现。
 	var sc *agentScope
 	if req.Fresh {
-		sc = newChildAgentScope(a, res.ConvID, req.RunID, req.NodeID, cwd, req.Depth, cfg)
+		sc = newChildAgentScope(a, res.ConvID, req.RunID, req.NodeID, cwd, req.ScopeCwd, req.Depth, cfg)
 	} else {
 		sc = newAgentScope(a, res.ConvID, message, cwd, cfg)
 	}

@@ -9,10 +9,14 @@
 //
 //   - 读（ReadRoots）：家目录 + 数据目录 + 快捷项里登记的目录/工作目录 + AI 空间与
 //     会话绑定过的目录（同样是在界面上亲手选的）。用户让 AI 看一眼某个文件是很自然的
-//     诉求，拦掉会逼他去复制粘贴。
+//     诉求，拦掉会逼他去复制粘贴。但这只是「这次对话没声明范围」时的兜底：
+//     绑定了用户选的项目目录时，实际判据换成 ResolveReadScoped（只许该目录内），
+//     否则模型会顺着报错文本里的路径去读另一个项目的源码。
 //   - 写（WriteRoots）：只有用户显式登记过的位置（快捷项目录、工作目录、AI 空间/会话
 //     目录），再加本次对话绑定的工作目录；家目录被故意排除。否则一句话就能改掉
 //     ~/Documents 里的任何东西，而用户从未做过「允许写这里」的动作。
+//     这层是「没绑定工作目录」时的兜底：一旦绑了，ResolveWrite 只允许写在该目录内，
+//     与读取的默认边界一致。
 package fsguard
 
 import (
@@ -100,10 +104,8 @@ func ResolveRead(database *db.Database, raw, cwd string, mustBeFile bool) (strin
 	if err != nil {
 		return "", err
 	}
-	if mustBeFile {
-		if info, err := os.Stat(abs); err == nil && info.IsDir() {
-			return "", fmt.Errorf("%s 是目录，不是文件；要列目录内容请用 dir_list", abs)
-		}
+	if err := checkFileTarget(abs, mustBeFile); err != nil {
+		return "", err
 	}
 	roots := ReadRoots(database)
 	if r := strings.TrimSpace(cwd); r != "" {
@@ -120,7 +122,104 @@ func ResolveRead(database *db.Database, raw, cwd string, mustBeFile bool) (strin
 		abs, strings.Join(roots, "、"))
 }
 
+// ResolveReadScoped 是「本次对话绑定了用户选的项目目录」时的读校验：只允许该目录及其子目录。
+//
+// 与 ResolveRead 的唯一差别在有 scope 时——不再回退到全局读白名单（家目录、别的快捷项）。
+// 起因是一个真实越界：用户把本地项目的报错贴进来，报错文本里带着另一个项目的绝对路径，
+// 模型顺着那个路径就把源码读了。从白名单看它没犯规（都在家目录/快捷项里），
+// 但用户的心智是「这次对话是这个项目」，读到别处就是越权。
+//
+// scope 为空时完全退回 ResolveRead：没声明范围的对话仍然要能读用户随手提到的一个文件，
+// 否则每个任务都得先选目录才能开口。注意「没有项目目录」与「cwd 为空」不是一回事——
+// 无目录任务会被分配 ai_tasks/<id>，那种空壳由调用方判掉、不当作 scope 传进来。
+//
+// 为什么不给 ResolveRead 加一个 bool：那个布尔会散布到 8 个调用点，而 @ 引用、
+// 前端预览、规则文件这三处必须保持宽松（它们不是模型自主发起的读取），
+// 统一改签名等于让每个调用点都得回答一个它不关心的问题。
+func ResolveReadScoped(database *db.Database, raw, scope string, mustBeFile bool) (string, error) {
+	return ResolveReadScopedExtra(database, raw, scope, nil, mustBeFile)
+}
+
+// ResolveReadScopedExtra 在 Scoped 的基础上额外允许 extra 里的目录。
+//
+// extra 来自「用户当场点了允许」的那一次读取：模型想读当前目录之外的文件时，
+// 宿主先弹一张确认卡，用户同意后把该文件的目录塞进参数（键 _allow）。
+// 只对这一次调用有效——用户同意「看一眼这个报错文件」不等于永久开放那个项目，
+// 要长期读就应该把目录设为工作目录，那是界面上一个明确动作。
+func ResolveReadScopedExtra(database *db.Database, raw, scope string, extra []string, mustBeFile bool) (string, error) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" {
+		return ResolveRead(database, raw, "", mustBeFile)
+	}
+	// 范围目录本身也要解引用：Windows 短名（8.3 形式）与真实路径不一致时，
+	// 直接拿原始字符串做 within 比较会把目录内的文件判成越界。
+	root, err := clean(scope, "")
+	if err != nil {
+		return "", fmt.Errorf("工作目录不可用（%s）：%w", scope, err)
+	}
+	abs, err := clean(raw, root)
+	if err != nil {
+		return "", err
+	}
+	if err := checkFileTarget(abs, mustBeFile); err != nil {
+		return "", err
+	}
+	if within(abs, root) {
+		return abs, nil
+	}
+	for _, e := range extra {
+		if strings.TrimSpace(e) == "" {
+			continue
+		}
+		if r, cerr := clean(e, ""); cerr == nil && within(abs, r) {
+			return abs, nil
+		}
+	}
+	// 报错要同时服务两方：模型据此知道「换个地方/换个办法」，用户据此知道
+	// 「要读别处得先切工作目录」。只说「无权限」会让模型换个写法再试一次。
+	return "", fmt.Errorf("路径 %s 不在本次对话的工作目录 %s 之内，已拒绝读取。"+
+		"AI 只在这个目录里干活；要读别的位置，请用户先把那个目录设为工作目录，或把内容直接发给 AI", abs, root)
+}
+
+// Outside 判断一个路径是否在 scope 之外，用于「先问用户再读」那条路。
+//
+// 与 ResolveReadScoped 的分工：这个只做判断、不报错，供宿主在调用工具之前
+// 决定要不要弹确认卡；真正的放行仍由 ResolveReadScopedExtra 完成。
+// scope 为空表示这次对话没声明范围（未绑定目录），一律不算越界。
+func Outside(raw, scope string) (abs string, outside bool) {
+	scope = strings.TrimSpace(scope)
+	if scope == "" || strings.TrimSpace(raw) == "" {
+		return "", false
+	}
+	root, err := clean(scope, "")
+	if err != nil {
+		return "", false
+	}
+	abs, err = clean(raw, root)
+	if err != nil {
+		return "", false
+	}
+	return abs, !within(abs, root)
+}
+
+// checkFileTarget 对「必须是个文件」的调用做个早判。
+//
+// 抽出来是因为两条读路径（宽松 / 限定工作目录）都要判，而文案分叉过一次就会
+// 让模型对同一个错误给出两种反应。
+func checkFileTarget(abs string, mustBeFile bool) error {
+	if !mustBeFile {
+		return nil
+	}
+	if info, err := os.Stat(abs); err == nil && info.IsDir() {
+		return fmt.Errorf("%s 是目录，不是文件；要列目录内容请用 dir_list", abs)
+	}
+	return nil
+}
+
 // ResolveWrite 解析并校验一个可写的路径。raw 为空时回落到对话工作目录。
+//
+// 有工作目录时只允许写在其中；cwd 为空才退回 WriteRoots 那套「快捷项授权目录」。
+// 写与读用同一套边界：只收窄读会让模型改得动一个它读不到的项目。
 func ResolveWrite(database *db.Database, raw, cwd string) (string, error) {
 	if strings.TrimSpace(raw) == "" {
 		raw = cwd
@@ -133,7 +232,21 @@ func ResolveWrite(database *db.Database, raw, cwd string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	roots := WriteRoots(database, cwd)
+	// 绑定工作目录时写只允许在其中（与读取同一套「默认只操作当前目录」的语义）。
+	// 不加这一层，写白名单里的「所有快捷项目录」就会让模型在一个对话里改到另一个项目去——
+	// 读收窄了、写没收，等于边界只挡住看、挡不住改。
+	if wd := strings.TrimSpace(cwd); wd != "" {
+		root, rerr := clean(wd, "")
+		if rerr != nil {
+			return "", fmt.Errorf("工作目录不可用（%s）：%w", wd, rerr)
+		}
+		if within(abs, root) {
+			return abs, nil
+		}
+		return "", fmt.Errorf("路径 %s 不在本次对话的工作目录 %s 之内，不能写入。"+
+			"要改其他项目，请先把那个目录设为工作目录——AI 不会跨目录改文件", abs, root)
+	}
+	roots := WriteRoots(database, "")
 	for _, root := range roots {
 		if within(abs, root) {
 			return abs, nil

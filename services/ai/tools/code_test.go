@@ -141,7 +141,9 @@ func TestListDirSkipsIgnoredAndSortsDirsFirst(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := listDir(Deps{}, map[string]any{"path": dir, "_cwd": dir})
+	// _scope 是宿主注入的读取范围（对话绑了项目目录才有）：测试目录在临时区，
+	// 不在全局读白名单里，必须显式给出范围才能过闸。
+	res, err := listDir(Deps{}, map[string]any{"path": dir, "_cwd": dir, "_scope": dir})
 	if err != nil {
 		t.Fatalf("列目录失败: %v", err)
 	}
@@ -270,8 +272,10 @@ func TestFileWriteOutsideWriteRoots(t *testing.T) {
 	if err == nil {
 		t.Fatal("写白名单外的路径应被拒绝")
 	}
-	if !strings.Contains(err.Error(), "可写范围") && !strings.Contains(err.Error(), "可写的目录") {
-		t.Fatalf("错误应说明白名单限制: %v", err)
+	// 绑定工作目录时，拒绝理由是「不在本次对话的目录内」——这比「不在可写范围内」
+	// 更准确，也不会让模型以为去加个快捷项就能写：加快捷项不会越过对话目录这条边界。
+	if !strings.Contains(err.Error(), "工作目录") && !strings.Contains(err.Error(), "可写范围") {
+		t.Fatalf("错误应说明边界: %v", err)
 	}
 }
 

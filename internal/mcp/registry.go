@@ -510,6 +510,37 @@ func Cwd(args map[string]any) string {
 	return strings.TrimSpace(Arg(args, "_cwd"))
 }
 
+// Scope 取宿主注入的「读取范围」，为空表示不限制（走全局读白名单）。
+//
+// 与 Cwd 分开是因为两者不同：Cwd 是「干活的地方」（相对路径补全、写操作的默认目录），
+// 它总是一个真实目录；Scope 是「这次对话被允许看的范围」，只在 cwd 是用户亲手选的
+// 项目目录时才存在——系统给无目录任务自动开的 ai_tasks/<id> 不是项目，
+// 拿它当范围会让普通聊天连一个文件都读不到。
+//
+// 同样由 AI 服务注入、同样不在任何工具的 schema 里；MCP 客户端调用时不存在，
+// 于是对外部客户端保持原有的宽松行为。
+func Scope(args map[string]any) string {
+	return strings.TrimSpace(Arg(args, "_scope"))
+}
+
+// Allowed 取「用户当场批准过的额外目录」，只对本次调用有效。
+//
+// 与 Scope 的关系：Scope 是这次对话声明的范围，Allowed 是本次调用被单独放行的一次例外
+// （用户确认卡上点了允许）。宿主在审批通过后注入，工具执行完随参数一起丢掉——
+// 一次同意不等于永久开放，否则「只读这一次」会悄悄变成「以后都能读」。
+func Allowed(args map[string]any) []string {
+	switch v := args["_allow"].(type) {
+	case []string:
+		return v
+	case string:
+		if strings.TrimSpace(v) == "" {
+			return nil
+		}
+		return []string{v}
+	}
+	return nil
+}
+
 // PathArg 取路径参数，若给的是相对路径则按会话工作目录补全；不做白名单校验。
 //
 // 单独抽出来是因为「补全」与「校验」是两件事：fsguard 负责后者，

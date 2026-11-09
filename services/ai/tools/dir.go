@@ -47,7 +47,9 @@ func registerDir(d Deps) {
 }
 
 func listDir(d Deps, args map[string]any) (any, error) {
-	root, err := fsguard.ResolveRead(d.db(), mcpsrv.PathArg(args, "path"), mcpsrv.Cwd(args), false)
+	// Scoped：只能在当前对话目录内；越界的那一次由用户的确认卡放行（_allow）。
+	root, err := fsguard.ResolveReadScopedExtra(d.db(), mcpsrv.PathArg(args, "path"),
+		mcpsrv.Scope(args), mcpsrv.Allowed(args), false)
 	if err != nil {
 		return nil, err
 	}

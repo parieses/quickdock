@@ -21,11 +21,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"quickdock/internal/fsguard"
 	"quickdock/internal/logger"
 	mcpsrv "quickdock/internal/mcp"
 	aitools "quickdock/services/ai/tools"
@@ -564,12 +566,31 @@ func cwdHint(cwd string) string {
 		hint = "\n\n[工作目录]\n本次对话绑定的工作目录是：" + cwd + "\n" +
 			"相对路径都按它解析；dir_list / file_read / file_write / file_edit / run_command 不传路径时默认就是这里。" +
 			"要新建文件时默认建在这个目录里（不要散落到别处），所有落盘改动都必须落在这个目录内，其它位置会被拒绝。\n"
+		// 默认边界必须提前说清：否则模型看到报错里的外部路径会直接去读，
+		// 撞一次确认卡（或一次拒绝）才回头，白烧一轮。
+		hint += "**默认只在这个目录内操作**：读目录之外的路径会先请用户点确认（同意只对那一次生效），" +
+			"写操作直接拒绝。如果用户发来的报错或线索指向另一个项目，不要自己改路径反复试——" +
+			"要么说明「需要你同意读取 <路径>」，要么让用户把那个目录设为工作目录。\n"
 	}
 	if runtime.GOOS == "windows" {
 		hint += "run_command 由 **cmd.exe** 执行（不是 PowerShell）：命令按 cmd 语法写，" +
 			"不要为了确认 shell 或找 node / powershell 先跑探测命令——写文件用 file_write 就够了。\n"
 	}
 	return hint
+}
+
+// pathReadTools 带 path 参数、且只读的那批工具。
+//
+// 越界读取的确认只对这批成立：写类本来就走审批闸门（并且写白名单另有约束），
+// 在这里再判一次等于同一个动作问两遍；不带 path 的工具默认落在工作目录，
+// 没有越界的可能。
+var pathReadTools = map[string]bool{
+	"file_read":     true,
+	"file_grep":     true,
+	"dir_list":      true,
+	"git_status":    true,
+	"git_diff":      true,
+	"check_workdir": true,
 }
 
 // parallelSafeTools 允许在同一轮里并行执行的工具白名单。
@@ -726,11 +747,28 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 		return rec, "参数解析失败：" + rec.Error + "\n原始参数：" + c.Args
 	}
 
-	// 工作目录由宿主注入，不信任模型传的值：这个键不在任何工具的 schema 里，
-	// 模型既看不见也无从伪造；即使它自己编一个 _cwd，也会被这里覆盖。
-	// 没绑定目录时不注入，工具退回「绝对路径 + 读白名单」那套逻辑。
+	// 工作目录与读取范围都由宿主注入，不信任模型传的值：这些键不在任何工具的
+	// schema 里，模型既看不见也无从伪造。这里无条件先删再按实际情况注入——
+	// 旧写法只在 cwd 非空时覆盖，cwd 为空时模型自己编一个 _cwd 就能让写白名单
+	// 凭空多出一个根目录。
+	//
+	// _scope 默认就是 cwd：**默认只能操作当前目录**，包括系统给「没选目录」的对话
+	// 分配的 ai_tasks/<id>（那也确实是它当前唯一的目录）。想读别处只有两条路——
+	// 用户把它设为工作目录，或在下面对这次越界读取当场点允许。
+	delete(args, "_cwd")
+	delete(args, "_scope")
+	delete(args, "_allow")
 	if cwd != "" {
 		args["_cwd"] = cwd
+	}
+	// 范围跟编排的根走（见 agentScope.scope）：子 agent 被派到子目录时，
+	// 「这次对话属于哪个项目」没有变，它仍然要能读项目根下的文件。
+	scope := cwd
+	if sc := agentScopeFrom(ctx); sc != nil && sc.scope != "" {
+		scope = sc.scope
+	}
+	if scope != "" {
+		args["_scope"] = scope
 	}
 
 	// 同一次提问内，同一个工具 + 完全相同的参数只真执行一次。
@@ -768,6 +806,24 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 		}
 	}
 
+	// 越界读取：只读工具平时不弹卡（读个文件都要确认，三分钟内就会被关掉），
+	// 但目标在当前对话目录之外时必须由用户点名同意——这就是「默认只能操作当前目录」
+	// 的落地点。判定只对带 path 的读类工具做：没有 path 时默认用工作目录，不可能越界。
+	outsideAbs := ""
+	if scope := mcpsrv.Scope(args); scope != "" && pathReadTools[c.Name] {
+		if p := mcpsrv.Arg(args, "path"); p != "" {
+			if abs, out := fsguard.Outside(p, scope); out {
+				outsideAbs = abs
+			}
+		}
+	}
+	outsideNote := ""
+	if outsideAbs != "" {
+		outsideNote = "这次读取不在当前对话的目录内：" + outsideAbs +
+			"；当前目录是 " + mcpsrv.Scope(args) +
+			"。同意只对这一次生效——要长期读它，请把该目录设为工作目录"
+	}
+
 	// 审批闸门（见 ai_approval.go）：写类与高危工具在这里停下来等用户点确认。
 	//
 	// 位置刻意在去重与参数校验之后：
@@ -778,8 +834,9 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 	// 被拒绝的调用也写进 seen（见上面命中分支）：拒绝是本次提问内的一道墙。
 	// seen 只活在这一次提问里，重新发问仍然会重新征求同意——所以「用户可能改主意」
 	// 的机会并没有丢，丢掉的只是「同一句话问两遍」。
-	if gate := approvalGateFrom(ctx); gate != nil {
-		if allow, note := gate.await(ctx, c.ID, c.Name, mcpsrv.ToolLevel(c.Name), args); !allow {
+	gate := approvalGateFrom(ctx)
+	if gate != nil {
+		if allow, note := gate.await(ctx, c.ID, c.Name, mcpsrv.ToolLevel(c.Name), args, outsideAbs != "", outsideNote); !allow {
 			rec.Denied = true
 			rec.Error = "未获批准，未执行"
 			rec.Result = aiApprovalRejectText(c.Name, note)
@@ -790,6 +847,25 @@ func (a *AIService) execOneToolCall(ctx context.Context, c aiToolCall, round int
 			}
 			return rec, rec.Result
 		}
+	}
+
+	// 越界的读取必须有一次明确的「允许」。没有闸门的执行者（子 agent）走不到确认这一步，
+	// 所以直接拒绝：无人值守的循环不该自己决定跨目录。
+	if outsideAbs != "" {
+		if gate == nil {
+			rec.Denied = true
+			rec.Error = "未获批准，未执行"
+			rec.Result = "未执行 " + c.Name + "：" + outsideAbs + " 不在当前目录内，" +
+				"这个执行上下文无法向用户确认权限。请只用当前目录里的内容，或让用户把该目录设为工作目录。"
+			if seen != nil {
+				seenMu.Lock()
+				seen[key] = rec
+				seenMu.Unlock()
+			}
+			return rec, rec.Result
+		}
+		// 只放行这一次调用：_allow 跟着 args 走，工具执行完就没了。
+		args["_allow"] = []string{filepath.Dir(outsideAbs)}
 	}
 
 	started := time.Now()
