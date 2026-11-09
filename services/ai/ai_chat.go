@@ -54,10 +54,23 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 	startedAt := time.Now()
 	var firstTokenAt time.Duration // 首字延迟：判断「慢」是上游排队还是本地处理的关键
 	var usage db.TokenUsage
+	// 上游分块统计。只有「首字 / 总耗时」两个数字时，分不清「上游整段回包」
+	// 和「上游逐块、只是吐得快」——这两种在页面上都是「一下全出来」。
+	// 记块数与相邻块最大间隔，复现一次就能定论：块=1 是上游不分块，
+	// 块=200 且间隔很小就是输出本身太快，前端没有责任。
+	var chunkN int
+	var lastChunkAt, maxChunkGap time.Duration
 	logDone := func(outLen, toolCount int) {
-		logger.I("[ai] 完成 model=%s conv=%s 耗时=%v 首字=%v 输出=%d字 工具=%d tokens=%d/%d 缓存=%d",
+		note := ""
+		// 长文本只收到一两块 = 上游没做增量（中转网关 buffering / 忽略 stream），
+		// 这条标记让下次排查不用再猜。短文本本来就可能只有一块，不打标。
+		if chunkN <= 2 && outLen > 200 {
+			note = " 上游疑似未分块下发"
+		}
+		logger.I("[ai] 完成 model=%s conv=%s 耗时=%v 首字=%v 输出=%d字 工具=%d 块=%d 块间隔max=%v tokens=%d/%d 缓存=%d%s",
 			cfg.Model, convID, time.Since(startedAt).Round(time.Millisecond),
-			firstTokenAt.Round(time.Millisecond), outLen, toolCount, usage.Prompt, usage.Completion, usage.Cached)
+			firstTokenAt.Round(time.Millisecond), outLen, toolCount, chunkN,
+			maxChunkGap.Round(time.Millisecond), usage.Prompt, usage.Completion, usage.Cached, note)
 	}
 
 	body := map[string]interface{}{
@@ -196,6 +209,16 @@ func (a *AIService) streamAIChat(ctx context.Context, cfg AIProfile, messages []
 		if len(chunk.Choices) == 0 {
 			continue
 		}
+		// 分块统计放在 choices 判定之后：include_usage 那一块（choices 为空）
+		// 和 keep-alive 注释都不算内容块，混进来会把「上游只回一块」洗白。
+		nowChunkAt := time.Since(startedAt)
+		if chunkN > 0 {
+			if gap := nowChunkAt - lastChunkAt; gap > maxChunkGap {
+				maxChunkGap = gap
+			}
+		}
+		chunkN++
+		lastChunkAt = nowChunkAt
 		delta := chunk.Choices[0].Delta
 		if delta.Content != "" {
 			// 先过 DSML 过滤器：工具调用段落不推给前端，也不进 sb（那是要被展示与落库的正文）。
