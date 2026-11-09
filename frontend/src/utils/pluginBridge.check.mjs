@@ -10,6 +10,7 @@
 //   2. 新老桥函数都在（新增时不会顺手删掉旧的）
 //   3. qdHostCall / qdHttp 的请求构造、resolve/reject 语义正确
 //   4. 被 __qdBridge 拦住、不重复注入
+//   5. WebView2 原生右键菜单在 iframe 文档里被拦、输入/可编辑区放行
 // 退出码非 0 即失败，可直接接进 CI。
 //
 // 放在 src/utils/ 而不是 frontend/scripts/：`.gitignore` 的 `scripts/` 规则会匹配
@@ -35,6 +36,7 @@ if (!inner.startsWith('<script>')) {
 inner = inner.slice('<script>'.length).replace(/<\\?\/script>\s*$/, '')
 
 const listeners = {}
+const docListeners = {} // document 级监听（右键菜单拦截），与 window 的分开记
 const posted = []
 const attrs = {} // 记录 setAttribute 调用，供主题跟随断言核对
 const docEl = {
@@ -46,7 +48,16 @@ const win = {
     ;(listeners[t] = listeners[t] || []).push(fn)
   },
   parent: { postMessage(msg) { posted.push(msg) } },
-  document: { documentElement: docEl },
+  document: {
+    documentElement: docEl,
+    // 桥脚本第一行就往 document 装 contextmenu 捕获监听。stub 缺这个方法时，
+    // 整段桥在 vm 里抛 "document.addEventListener is not a function"，CI 的
+    // Plugin bridge self-check 会在打包前 1 秒失败、后续 build 全被跳过。
+    // 真实 iframe 文档必然有它，这里做最小模拟并保留 capture 供断言。
+    addEventListener(t, fn, capture) {
+      ;(docListeners[t] = docListeners[t] || []).push({ fn, capture })
+    },
+  },
 }
 // Date.now 可控：异常上报的去重逻辑依赖时间窗（10s 内同错只报一次），
 // 用真实时钟无法稳定复现「同一窗口内重复报错」这个分支。
@@ -310,6 +321,27 @@ ok(lastLogError() && lastLogError().params.message.length < 1000, '超长消息�
 // 重复注入被拦
 vm.runInNewContext(inner, ctx)
 ok((listeners.message || []).length === 1, '重复注入被 __qdBridge 拦下', (listeners.message || []).length)
+
+// ---- WebView2 原生右键菜单拦截 ----
+// iframe 是 blob: 独立文档，宿主 document 上的监听管不到，桥内必须自己装一份。
+// 只 preventDefault、不阻断传播，插件自定义菜单照常；输入/可编辑区放行以保留
+// 「剪切 / 复制 / 粘贴」那份编辑菜单。
+const menu = docListeners.contextmenu || []
+ok(menu.length === 1, 'document 上装了 1 个 contextmenu 监听（重复注入未叠加）', menu.length)
+ok(menu[0] && menu[0].capture === true, 'contextmenu 监听在捕获阶段', menu[0] && menu[0].capture)
+
+function fireContextMenu(target) {
+  let prevented = false
+  const ev = { target, preventDefault() { prevented = true } }
+  menu.forEach((h) => h.fn(ev))
+  return prevented
+}
+ok(fireContextMenu({ tagName: 'DIV' }) === true, '普通元素右键被拦（原生菜单不弹）')
+ok(fireContextMenu({ tagName: 'INPUT' }) === false, 'INPUT 右键放行')
+ok(fireContextMenu({ tagName: 'TEXTAREA' }) === false, 'TEXTAREA 右键放行')
+ok(fireContextMenu({ tagName: 'SELECT' }) === false, 'SELECT 右键放行')
+ok(fireContextMenu({ isContentEditable: true }) === false, 'contentEditable 右键放行')
+ok(fireContextMenu(null) === true, 'target 缺失时仍拦且不抛错')
 
 const r1 = await p1
 ok(r1 && r1.tool === 'port_list', 'resolve 拿到宿主返回', r1)
