@@ -814,6 +814,14 @@ func main() {
 		EnableFileDrop: true,
 		// 整体等比缩放（值见常量 uiZoom，主窗口与所有独立浮窗共用同一系数）。
 		Zoom: uiZoom,
+
+		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
+		// 这是给正式包用的框架级开关：Wails v3 的 Windows 实现写成
+		//   AreDefaultContextMenusEnabled = debugMode || !DefaultContextMenuDisabled
+		// 调试模式（本机常开的 wails3 dev）会无条件把菜单打开、把本选项短路，
+		// 所以 dev 下还要靠 index.html / plugin.html / 插件桥脚本里的
+		// contextmenu 捕获监听兜底。两层都留着，release 与 dev 才一致。
+		DefaultContextMenuDisabled: true,
 	}
 	if mainRect != nil {
 		// 记录里是逻辑尺寸，还原成当前档位下的 DIP。

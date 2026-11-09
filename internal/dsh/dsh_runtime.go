@@ -1808,6 +1808,10 @@ func (m *DSHProcessManager) createDSHWindow(url string) string {
 		BackgroundColour: application.RGBA{Red: 23, Green: 24, Blue: 27, Alpha: 255},
 		URL:              url,
 		Windows:          application.WindowsWindow{HiddenOnTaskbar: false},
+
+		// DSH 窗口加载的是外部前端页，不走 index.html，页面侧注入覆盖不到，
+		// 只能靠这个框架级开关关掉 WebView2 原生右键菜单（正式包生效）。
+		DefaultContextMenuDisabled: true,
 	})
 	logger.I("[窗口] 已创建 name=%s source=dsh", "快启坞 - DeepSeek Harness")
 	// 关闭窗口（Wails 内部 handler 负责真正销毁）时只清窗口引用，不停 dsh 服务：

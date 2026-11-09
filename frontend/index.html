@@ -18,6 +18,18 @@
       }
     </style>
     <script>
+      // 关掉 WebView2 的原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
+      // Wails v3 在调试模式下把 AreDefaultContextMenusEnabled 无条件设为 true
+      // （webview_window_windows.go: debugMode || !DefaultContextMenuDisabled），
+      // 窗口选项在 dev 下被短路，只能由页面事件兜底；正式包还有 Go 侧开关双重保障。
+      // 捕获阶段只 preventDefault、不 stopPropagation：应用自定义右键菜单照常弹，
+      // 输入框 / 可编辑区保留「剪切 / 复制 / 粘贴」那份编辑菜单。
+      document.addEventListener('contextmenu', function (e) {
+        var t = e.target
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+                  t.tagName === 'SELECT' || t.isContentEditable)) return
+        e.preventDefault()
+      }, true)
       // 保存的主题要等 GetValue('theme') 异步返回才由 App.vue 定稿。先按系统偏好
       // 同步落一个 data-theme，否则 style.css 一到就先套 :root 的深色变量，
       // 浅色系统用户会看到「浅 → 深 → 浅」两次跳变。

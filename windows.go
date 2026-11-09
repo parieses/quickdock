@@ -326,6 +326,10 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/#/clipboard",
 		Zoom:             uiZoom,
+
+		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
+		// dev 下框架会强制开启，页面侧另有 contextmenu 兜底；详见 main.go 主窗口注释。
+		DefaultContextMenuDisabled: true,
 	}
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "clipboard")
@@ -365,6 +369,10 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/#/note",
 		Zoom:             uiZoom,
+
+		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
+		// dev 下框架会强制开启，页面侧另有 contextmenu 兜底；详见 main.go 主窗口注释。
+		DefaultContextMenuDisabled: true,
 	}
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "note")
@@ -426,6 +434,9 @@ func initSshWindow(app *application.App) *application.WebviewWindow {
 		// 建窗即隐藏，理由同 applyWindowPlatformOptions：SSH 也用保存的位置，
 		// 让 Wails 先按可见创建会在屏幕内闪一帧再被 Hide()。
 		Hidden: true,
+
+		// 同上：关掉 WebView2 原生右键菜单（终端有自己的复制/粘贴菜单）。
+		DefaultContextMenuDisabled: true,
 	}
 	// SSH 与插件/DSH 窗口不同：它加载的是本应用主 SPA（App.vue 会跑），所以也要
 	// 套同一套材质，否则前端加了 qd-backdrop、窗口却还是实色，两边对不上。
@@ -469,6 +480,10 @@ func initWinmgrWindow(app *application.App) *application.WebviewWindow {
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
 		URL:              "/#/window-manager",
 		Zoom:             uiZoom,
+
+		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
+		// dev 下框架会强制开启，页面侧另有 contextmenu 兜底；详见 main.go 主窗口注释。
+		DefaultContextMenuDisabled: true,
 	}
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "winmgr")
@@ -498,6 +513,10 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 		BackgroundColour: application.RGBA{Red: 0, Green: 0, Blue: 0, Alpha: 1},
 		URL:              "/#/command-palette",
 		Zoom:             uiZoom,
+
+		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
+		// dev 下框架会强制开启，页面侧另有 contextmenu 兜底；详见 main.go 主窗口注释。
+		DefaultContextMenuDisabled: true,
 	}
 	applyWindowPlatformOptions(&opts)
 	applySavedWinPos(app, &opts, "palette")

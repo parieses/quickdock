@@ -17,6 +17,15 @@
       }
     </style>
     <script>
+      // 同 index.html：关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印）。
+      // 插件独立窗口走 plugin.html 这个入口，不加载主 SPA，所以必须自己装一次；
+      // 插件内容区是 blob: iframe（独立文档），由 pluginBridge.ts 的桥脚本再装一次。
+      document.addEventListener('contextmenu', function (e) {
+        var t = e.target
+        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
+                  t.tagName === 'SELECT' || t.isContentEditable)) return
+        e.preventDefault()
+      }, true)
       // 同 index.html：保存的主题要等 GetValue('theme') 异步返回才定稿，
       // 先按系统偏好同步落一个 data-theme，避免浅色系统看到「浅 → 深 → 浅」。
       try {

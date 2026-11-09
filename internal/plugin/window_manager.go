@@ -205,6 +205,11 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 		Windows: application.WindowsWindow{
 			HiddenOnTaskbar: !showInTaskbar,
 		},
+
+		// 插件窗口尤其不能留 WebView2 的「刷新」：点一下会重载 plugin.html +
+		// blob iframe，用户正在编辑的半截状态直接丢掉。dev 下框架短路本选项，
+		// 由 plugin.html 与插件桥脚本的 contextmenu 监听兜底。
+		DefaultContextMenuDisabled: true,
 	}
 	// 与主窗口 / SSH / 浮窗共用同一档位（映射只有 platform.ApplyWindowBackdrop 一份）。
 	// 套上后窗口是 Translucent，plugin-entry.ts 再把 HTML 根背景转透明，材质才透得出来；
