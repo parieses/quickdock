@@ -23,6 +23,11 @@ type UpdateService struct {
 	lastUpdateCheck   *UpdateStatus
 	lastUpdateCheckMu sync.RWMutex
 	updateCheckMu     sync.Mutex
+
+	// autoStop 自动更新循环的退出信号：应用退出路径要能收尾常驻 goroutine，
+	// 与 reminder/monitor 等循环的 schedulerQuit 同一纪律。
+	autoStop     chan struct{}
+	autoStopOnce sync.Once
 }
 
 // NewUpdateService 创建更新门面服务
@@ -260,10 +265,28 @@ func (a *UpdateService) StartAutoUpdateChecker() {
 	if a.App.App() == nil || a.App.App().Updater == nil {
 		return
 	}
+	if a.autoStop == nil {
+		a.autoStop = make(chan struct{})
+	}
+	stop := a.autoStop
 	go func() {
 		defer recoverPanic("auto update checker")
 
-		time.Sleep(autoCheckFirstDelay)
+		// sleep 全部走 timer + select：stop 关闭时立刻退出，不等 sleep 醒。
+		wait := func(d time.Duration) bool {
+			t := time.NewTimer(d)
+			defer t.Stop()
+			select {
+			case <-stop:
+				return false
+			case <-t.C:
+				return true
+			}
+		}
+
+		if !wait(autoCheckFirstDelay) {
+			return
+		}
 		for attempt := 1; attempt <= autoCheckMaxAttempts; attempt++ {
 			if a.backgroundCheck() {
 				break
@@ -275,15 +298,30 @@ func (a *UpdateService) StartAutoUpdateChecker() {
 			}
 			logger.W("[update] 启动自动检查失败（第 %d/%d 次），%s 后重试",
 				attempt, autoCheckMaxAttempts, autoCheckRetryInterval)
-			time.Sleep(autoCheckRetryInterval)
+			if !wait(autoCheckRetryInterval) {
+				return
+			}
 		}
 
 		ticker := time.NewTicker(autoCheckInterval)
 		defer ticker.Stop()
-		for range ticker.C {
-			a.backgroundCheck()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				a.backgroundCheck()
+			}
 		}
 	}()
+}
+
+// StopAutoUpdateChecker 令自动更新循环退出（幂等）。退出路径在关 DB 之前调。
+func (a *UpdateService) StopAutoUpdateChecker() {
+	if a.autoStop == nil {
+		return
+	}
+	a.autoStopOnce.Do(func() { close(a.autoStop) })
 }
 
 // backgroundCheck 单次后台检查。

@@ -1097,6 +1097,9 @@ func (d *Database) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_schedule_runs_task_ts ON schedule_runs(task_id, created_ts DESC)`,
 		// 回收站过期清理按 deleted_at 比较，没索引就是每次全表扫 + 把整份 payload 读一遍。
 		`CREATE INDEX IF NOT EXISTS idx_tombstones_deleted_at ON tombstones(deleted_at)`,
+		// 待办提醒扫描（每 10s 一次）：WHERE reminder_sent=0 AND status<>'done'
+		// AND reminder_time<=?，提醒列上有索引就不用全表扫。
+		`CREATE INDEX IF NOT EXISTS idx_todos_reminder ON todos(reminder_sent, reminder_time)`,
 		// 回滚点：列表按 (conv_id, seq DESC) 取，seq 的唯一性同时由这条索引兜住
 		// ——CreateAICheckpoint 用 MAX+1 分配编号，撞车时靠约束报错触发重试，
 		// 没有唯一约束就会静默产生两条同号回滚点（表现为「回滚到第 3 步」结果不确定）。

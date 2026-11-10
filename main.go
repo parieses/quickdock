@@ -784,6 +784,8 @@ func main() {
 
 	// 启动后台定时检查（仅"检查+通知"，下载/重启复用手动检测路径）
 	updateSvc.StartAutoUpdateChecker()
+	// 退出路径统一收尾：常驻循环要能被退出信号终止（与 StopAIJobsFn 同纪律）
+	appService.StopUpdateCheckerFn = updateSvc.StopAutoUpdateChecker
 
 	// 注入版本号到 AppService（供前端获取）
 	appService.AppVersion = appVersion
@@ -901,18 +903,28 @@ func main() {
 		windowFlags.Main.Store(true)
 	})
 
-	// 主窗口首次显示后，才在后台对账拉起「已开启常驻」的本地服务（redis / caddy / php ...）。
+	// 主窗口就绪后，才在后台对账拉起「已开启常驻」的本地服务（redis / caddy / php ...）。
 	// 这些服务启动前的探测与校验（端口占用 / caddy validate / 版本扫描）全是子进程调用，
 	// 串行耗时 7s 以上；原先同步跑在 SetApp 里、也就是 app.Run() 之前，把主窗口显示拖到 16s。
 	// 拆开后主界面先可用，本地服务随后在后台按期望态补齐。
-	// 用 sync.Once：WM_SHOWWINDOW 在每次显示（含最小化还原）都会发，只认首次。
-	var envServicesOnce sync.Once
-	mainWindow.RegisterHook(events.Common.WindowShow, func(*application.WindowEvent) {
-		envServicesOnce.Do(func() {
-			logger.I("[启动] 主窗口已显示，转后台对账启动本地服务")
-			appService.StartEnvServicesAsync()
-		})
-	})
+	//
+	// 锚点是 mainWindowReady（WindowShow 或 WindowRuntimeReady 谁先到就算），**不是** WindowShow：
+	// 对账是进程级的后台动作，跟「窗口有没有画出来」没有逻辑关系。挂在 WindowShow 上时，
+	// 只要窗口不以可见态出现（启动密码保护的初始隐藏、将来的静默启动），WindowShow 就不发，
+	// 对账被无限期拖住——端口干净时 watchdog 15s 后还能兜住，但上次异常退出留下的孤儿
+	// 会一直占着端口（ReclaimOrphans 只在 ReconcileEnabled 之前跑一次，watchdog 没有等价逻辑），
+	// 表现为「开机后 redis/caddy 一直不起」。
+	//
+	// 8s 兜底：两个就绪事件都漏掉（窗口创建失败等）也不能把对账拖死。
+	go func() {
+		select {
+		case <-mainWindowReady:
+		case <-time.After(8 * time.Second):
+			logger.W("[启动] 主窗口 8s 内未就绪，仍开始后台对账本地服务")
+		}
+		logger.I("[启动] 主窗口已就绪，转后台对账启动本地服务")
+		appService.StartEnvServicesAsync()
+	}()
 
 	// 文件置物架：只认拖到 #qd-shelf-drop 上的文件。插件页拖 zip 安装、AI 页拖图片
 	// 附件都走各自的 HTML5 通道，这些地方不能顺手把路径塞进置物架。

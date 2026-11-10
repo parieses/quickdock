@@ -106,6 +106,10 @@ type AppService struct {
 	// 这也正是「关闭 QuickDock 会终止后台任务」这句话的兑现方式。
 	StopAIJobsFn func()
 
+	// StopUpdateCheckerFn 令自动更新定时循环退出，退出时调一次。
+	// 与 StopAIJobsFn 同理：常驻 goroutine 不随宿主退出自然结束，要给退出信号。
+	StopUpdateCheckerFn func()
+
 	// ShutdownExtAIFn 关闭外部 MCP server 连接（stdio 是子进程，退出时杀），
 	// 退出时调一次。与 StopAIJobsFn 同因：这些进程不随宿主退出而结束。
 	ShutdownExtAIFn func()

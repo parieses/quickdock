@@ -112,6 +112,13 @@ func parseIntParts(s string, min, max int) (int, *ValidationErr) {
 
 // ---- 路径验证 ----
 
+// 与项目其余模块一致的写法：正则包级预编译一次，不在调用现场 Compile。
+var (
+	reAbsPath   = regexp.MustCompile(`^[A-Za-z]:`)
+	reNameChars = regexp.MustCompile(`[<>\:\"|?*]`)
+	reURL       = regexp.MustCompile(`^https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$`)
+)
+
 // ValidatePath 验证路径安全性
 func ValidatePath(path string) error {
 	path = strings.TrimSpace(path)
@@ -120,7 +127,7 @@ func ValidatePath(path string) error {
 	}
 
 	// 检查是否是绝对路径
-	if !regexp.MustCompile(`^[A-Za-z]:`).MatchString(path) && !strings.HasPrefix(path, "/") {
+	if !reAbsPath.MatchString(path) && !strings.HasPrefix(path, "/") {
 		return &ValidationErr{Field: "path", Msg: "必须是绝对路径"}
 	}
 
@@ -154,7 +161,7 @@ func ValidateName(name string, minLen, maxLen int) error {
 	}
 
 	// 检查非法字符
-	if regexp.MustCompile(`[<>\:\"|?*]`).MatchString(name) {
+	if reNameChars.MatchString(name) {
 		return &ValidationErr{Field: "name", Msg: "名称包含非法字符"}
 	}
 
@@ -171,8 +178,7 @@ func ValidateURL(url string) error {
 	}
 
 	// 简单的 URL 格式验证
-	pattern := `^https?://[a-zA-Z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+$`
-	if !regexp.MustCompile(pattern).MatchString(url) {
+	if !reURL.MatchString(url) {
 		return &ValidationErr{Field: "url", Msg: "URL 格式无效"}
 	}
 

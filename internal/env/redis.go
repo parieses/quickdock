@@ -257,12 +257,9 @@ func (r *RedisRuntime) LogGet(version string) (string, error) {
 	if version == "" {
 		return "", fmt.Errorf("版本为空")
 	}
-	data, err := os.ReadFile(r.LogPath(version))
+	data, err := readFileTail(r.LogPath(version), 8192)
 	if err != nil {
 		return "", err
-	}
-	if len(data) > 8192 {
-		data = data[len(data)-8192:]
 	}
 	return strings.TrimSpace(string(data)), nil
 }

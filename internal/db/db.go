@@ -286,6 +286,11 @@ type Database struct {
 	// 读方法只持 mu.RLock 也会写它，因此由 colMu 单独保护，不能依赖 mu。
 	colMu    sync.RWMutex
 	colCache map[string]map[string]bool
+
+	// settingCache app_state 键值缓存（sync.Map 自带并发安全）：剪贴板捕获
+	// 每次复制要查 2-3 个几乎不变的设置键，全部走缓存后热路径零 DB 往返。
+	// 一致性由「app_state 全部写入收敛在 SetSetting（写穿）+ 快照不含本表」保证。
+	settingCache sync.Map
 }
 
 // dbMaxOpenConns 连接池上限。写操作被 mu 串行化，同一时刻最多一个写者；
@@ -566,6 +571,15 @@ func (d *Database) BulkInsert(table string, rows []map[string]interface{}) error
 	}
 	defer tx.Rollback()
 
+	// 同构行共用 prepared statement：prepare 一次、逐行 Exec，省掉每行
+	// 重新编译 SQL。键是最终 SQL 串（各行列集可能不同，按串分组天然覆盖）。
+	stmts := map[string]*sql.Stmt{}
+	defer func() {
+		for _, s := range stmts {
+			_ = s.Close()
+		}
+	}()
+
 	for _, row := range rows {
 		placeholders := make([]string, 0, len(row))
 		values := make([]interface{}, 0, len(row))
@@ -604,7 +618,16 @@ func (d *Database) BulkInsert(table string, rows []map[string]interface{}) error
 				table, colList, placeholderList, strings.Join(updateParts, ", "))
 		}
 
-		if _, err := tx.Exec(query, values...); err != nil {
+		stmt, ok := stmts[query]
+		if !ok {
+			var err error
+			stmt, err = tx.Prepare(query)
+			if err != nil {
+				return err
+			}
+			stmts[query] = stmt
+		}
+		if _, err := stmt.Exec(values...); err != nil {
 			return err
 		}
 	}

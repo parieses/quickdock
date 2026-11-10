@@ -113,8 +113,33 @@ func restorePayload(tx *sql.Tx, payload *SnapshotPayload) error {
 		if err != nil {
 			return fmt.Errorf("读取%s表结构失败: %w", table, err)
 		}
+		// 同构行（列交集一致）共用一条 prepared statement：事务内 prepare 一次、
+		// 逐行 Exec，省掉每行重新拼 SQL + 编译。快照恢复动辄几千行，这笔开销可观。
+		// 键是最终 SQL 串：同一张表里不同行的列交集可能不同（老快照缺列），
+		// 按 SQL 串分组天然覆盖这种情况。与 KB 切片导入同款做法。
+		stmts := map[string]*sql.Stmt{}
+		defer func() {
+			for _, s := range stmts {
+				_ = s.Close()
+			}
+		}()
 		for _, row := range rows {
-			if err := insertRow(tx, table, row, cols); err != nil {
+			query, values, err := buildInsertRow(table, row, cols)
+			if err != nil {
+				return fmt.Errorf("恢复%s失败: %w", table, err)
+			}
+			if query == "" {
+				continue
+			}
+			stmt, ok := stmts[query]
+			if !ok {
+				stmt, err = tx.Prepare(query)
+				if err != nil {
+					return fmt.Errorf("恢复%s失败: %w", table, err)
+				}
+				stmts[query] = stmt
+			}
+			if _, err := stmt.Exec(values...); err != nil {
 				return fmt.Errorf("恢复%s失败: %w", table, err)
 			}
 		}
@@ -203,6 +228,18 @@ func replaceTable(tx *sql.Tx, table string, rows []map[string]interface{}) error
 // 备份中来自其他版本的未知列会被忽略，因此对新旧库的列差异免疫。
 // cols 由调用方一次性取好（整表插入时避免每行都 PRAGMA）。
 func insertRow(tx *sql.Tx, table string, row map[string]interface{}, cols map[string]bool) error {
+	query, values, err := buildInsertRow(table, row, cols)
+	if err != nil || query == "" {
+		return err
+	}
+	_, err = tx.Exec(query, values...)
+	return err
+}
+
+// buildInsertRow 由 row 与实际列的交集拼出 INSERT 语句与参数值。
+// row 没有任何有效列时返回空串（无字段可插）。
+// 供 insertRow 与快照恢复的 prepared statement 复用两条路径共用。
+func buildInsertRow(table string, row map[string]interface{}, cols map[string]bool) (string, []interface{}, error) {
 	pairs := make([]kvPair, 0, len(row))
 	for col, val := range row {
 		if !cols[col] {
@@ -211,7 +248,7 @@ func insertRow(tx *sql.Tx, table string, row map[string]interface{}, cols map[st
 		pairs = append(pairs, kvPair{col, val})
 	}
 	if len(pairs) == 0 {
-		return nil
+		return "", nil, nil
 	}
 	sort.Slice(pairs, func(i, j int) bool { return pairs[i].col < pairs[j].col })
 
@@ -225,8 +262,7 @@ func insertRow(tx *sql.Tx, table string, row map[string]interface{}, cols map[st
 	}
 	query := "INSERT INTO " + table + " (" + strings.Join(names, ", ") +
 		") VALUES (" + strings.Join(placeholders, ", ") + ")"
-	_, err := tx.Exec(query, values...)
-	return err
+	return query, values, nil
 }
 
 // kvPair 一列名与列值，用于按列名排序后再拼 SQL（map 遍历顺序随机）。

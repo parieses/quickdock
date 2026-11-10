@@ -93,12 +93,9 @@ func readPHPConfig(dir string) (*PHPConfig, error) {
 		}
 	}
 
-	// 错误日志文件尾部预览（最多 4KB）
+	// 错误日志文件尾部预览（最多 4KB，尾读避免全量载入大日志）
 	if cfg.ErrorLog != "" {
-		if lb, rerr := os.ReadFile(cfg.ErrorLog); rerr == nil {
-			if len(lb) > 4096 {
-				lb = lb[len(lb)-4096:]
-			}
+		if lb, rerr := readFileTail(cfg.ErrorLog, 4096); rerr == nil {
 			cfg.ErrorLogContent = strings.TrimSpace(string(lb))
 		}
 	}

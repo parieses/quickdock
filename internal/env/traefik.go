@@ -220,12 +220,9 @@ func (t *TraefikRuntime) Start(ctx context.Context, version string, onLog func(s
 
 // LogGet 读取某版本运行日志尾部（实现 LogProvider）。
 func (t *TraefikRuntime) LogGet(version string) (string, error) {
-	data, err := os.ReadFile(t.LogPath(version))
+	data, err := readFileTail(t.LogPath(version), 8192)
 	if err != nil {
 		return "", fmt.Errorf("读取日志失败: %w", err)
-	}
-	if len(data) > 8192 {
-		data = data[len(data)-8192:]
 	}
 	return strings.TrimSpace(string(data)), nil
 }

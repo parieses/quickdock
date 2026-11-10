@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"unicode/utf8"
 
 	"quickdock/internal/fsguard"
@@ -255,6 +256,12 @@ func matchAnyRuleGlob(patterns, rel []string) bool {
 	return false
 }
 
+// ruleGlobRegexCache 按归一化后的 pattern 缓存编译出的正则。
+// matchAnyRuleGlob 是 pattern × 文件的双重循环，一次请求里同一 pattern
+// 会对几十个文件反复匹配，不缓存就是几百次 regexp.Compile 的纯浪费。
+// 与 monitor_checker.go 的 monitorRegexCache 同一套写法。
+var ruleGlobRegexCache sync.Map // normalized pattern → *regexp.Regexp
+
 // matchRuleGlob 用最小实现匹配 glob，不引依赖。
 //
 // 支持 **（跨目录）/ *（段内）/ ?（单字符），大小写不敏感——Windows 上
@@ -267,6 +274,9 @@ func matchRuleGlob(pattern, rel string) bool {
 	}
 	if strings.HasSuffix(pattern, "/") {
 		pattern += "**"
+	}
+	if re, ok := ruleGlobRegexCache.Load(pattern); ok {
+		return re.(*regexp.Regexp).MatchString(rel)
 	}
 	var b strings.Builder
 	b.WriteString("(?i)^")
@@ -297,8 +307,10 @@ func matchRuleGlob(pattern, rel string) bool {
 	if err != nil {
 		// 走到这里说明上面拼出了非法正则，属于代码问题；按「不匹配」处理比
 		// panic 好——规则失效最多是少一条约定，崩一次对话就是另一种毛病了。
+		// 编译失败不进缓存（此路径是代码 bug，不该把失败结果长期记住）。
 		return false
 	}
+	ruleGlobRegexCache.Store(pattern, re)
 	return re.MatchString(rel)
 }
 

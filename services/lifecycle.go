@@ -231,6 +231,10 @@ func (a *AppService) ServiceShutdown() error {
 	if a.StopAIJobsFn != nil {
 		a.StopAIJobsFn()
 	}
+	// 自动更新定时循环同理：给退出信号再关 DB，避免它把检查结果写进已关闭的库
+	if a.StopUpdateCheckerFn != nil {
+		a.StopUpdateCheckerFn()
+	}
 	// 外部 MCP server 的 stdio 子进程同理：它们是 server 的宿主进程，
 	// 退出时一起收掉（HTTP client 无进程，Close 是 no-op）。
 	if a.ShutdownExtAIFn != nil {

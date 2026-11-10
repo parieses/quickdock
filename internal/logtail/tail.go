@@ -32,6 +32,12 @@ const FingerprintBytes = 512
 // 用户打开一个 2GB 的日志时，只关心最近发生的事，从头灌等于卡死界面。
 const MaxBufferedLines = 500
 
+// MaxTailBytes ReadLastLines 倒读的最大字节预算。
+// 换行数达标之前先撞到这个预算就停：一个换行数很少但体积巨大的文件
+// （单行 JSON dump、被写歪的超长行）不该被整份读进内存。
+// 截断时返回的是末尾窗口的最后 n 行，语义仍正确，只是窗口有限。
+const MaxTailBytes = 8 << 20 // 8MB
+
 // Snapshot 一次读取的结果。
 type Snapshot struct {
 	Lines   []string // 本次新增的完整行；可能为 nil
@@ -44,10 +50,11 @@ type Snapshot struct {
 // 它不是并发安全的：一个 Tailer 只由一个轮询 goroutine 持有。
 // 需要并发访问时由调用方（services/logtail）加锁。
 type Tailer struct {
-	path   string
-	offset int64
-	stat   os.FileInfo
-	fp     []byte // 已消费的最后 FingerprintBytes 个字节，用于识别原地重写
+	path    string
+	offset  int64
+	stat    os.FileInfo
+	fp      []byte // 已消费的最后 FingerprintBytes 个字节，用于识别原地重写
+	pollBuf []byte // 轮询读缓冲，跨轮询复用（Tailer 单 goroutine 持有，无并发问题）
 }
 
 // NewTailer 创建一个 Tailer。文件不存在时返回错误：打开文件对人的心智而言是
@@ -120,7 +127,9 @@ func (t *Tailer) setFingerprint(data []byte) {
 	if len(data) < n {
 		n = len(data)
 	}
-	t.fp = []byte(data[len(data)-n:])
+	// 显式拷贝：data 可能是复用的 pollBuf 的切片（[]byte 对切片的转换是
+	// 别名不是拷贝），不拷的话指纹会跟着缓冲被下一轮轮询覆盖掉。
+	t.fp = append(make([]byte, 0, n), data[len(data)-n:]...)
 }
 
 // Poll 读取自上次消费位置之后新增的完整行。
@@ -204,7 +213,12 @@ func (t *Tailer) readSince(size int64) ([]string, error) {
 	if _, err := f.Seek(t.offset, io.SeekStart); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, MaxPollBytes)
+	// 缓冲跨轮询复用：活跃会话每 500ms 进来一次，每次都新分配 4MB
+	// 纯属 GC 垃圾（实际读到的往往只有几 KB），按需扩容后反复借用。
+	if cap(t.pollBuf) < MaxPollBytes {
+		t.pollBuf = make([]byte, MaxPollBytes)
+	}
+	buf := t.pollBuf[:MaxPollBytes]
 	// Read 在读满 buf 之外还可能返回 (0, io.EOF)（正好读到末尾）或 (n, nil)；
 	// (n, io.EOF) 也可能出现。只有非 EOF 的错误才是真失败。
 	n, err := f.Read(buf)
@@ -241,24 +255,35 @@ func ReadLastLines(path string, size int64, n int) ([]string, []byte, error) {
 	defer f.Close()
 	const chunk = 8192
 	var (
-		buf   []byte
-		lines int
-		pos   = size
+		chunks [][]byte // 倒序累积的块，最后一次性正序拼接
+		lines  int
+		total  int
+		pos    = size
 	)
-	// 倒着读，直到累计换行数超过 n —— 多读一个换行才能确定倒数第 n 行是完整的。
-	// 中途撞到文件头说明整个文件都不够 n 行，那时 buf 就是全文。
-	for pos > 0 && lines <= n {
+	// 倒着读，直到累计换行数超过 n 或撞到字节预算 —— 多读一个换行才能确定
+	// 倒数第 n 行是完整的。中途撞到文件头说明整个文件都不够 n 行，那时 buf 就是全文。
+	// 各块先入切片、最后一次拼回：逐轮 append(b, buf...) 会把已累计的整段
+	// 反复拷贝一遍，是 O(n²) 的 memcpy，大文件上放大成秒级卡顿。
+	for pos > 0 && lines <= n && total < MaxTailBytes {
 		want := int64(chunk)
 		if pos < want {
 			want = pos
+		}
+		if remain := int64(MaxTailBytes - total); want > remain {
+			want = remain
 		}
 		pos -= want
 		b := make([]byte, want)
 		if _, err := f.ReadAt(b, pos); err != nil && !errors.Is(err, io.EOF) {
 			return nil, nil, err
 		}
-		buf = append(b, buf...)
+		chunks = append(chunks, b)
+		total += int(want)
 		lines += bytes.Count(b, []byte{'\n'})
+	}
+	buf := make([]byte, 0, total)
+	for i := len(chunks) - 1; i >= 0; i-- {
+		buf = append(buf, chunks[i]...)
 	}
 	all := SplitLines(string(buf))
 	if len(all) > n {

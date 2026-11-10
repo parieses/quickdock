@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -153,15 +154,36 @@ func truncateDoc(doc *Document, maxRunes int) error {
 
 // ---- 纯文本类 ----
 
+// maxReadBytes 本地文本导入的单文件读取上限。
+// 入库最终只保留 MaxTextRunes（2M rune），UTF-8 最坏 4 字节/rune 也就 8MB，
+// 16MB 之外的字节注定会被 truncateDoc 丢掉——先全量读进来再截属于纯浪费，
+// 几百 MB 的源文件会造成一次性内存尖峰。与网页抓取路径的 32MB 预算同思路。
+const maxReadBytes = 16 << 20
+
 // readDecoded 读文件并解出字符串。
 //
 // 编码探测是必须的：Windows 上的老 .txt / .md 大量是 GBK，当 UTF-8 读
 // 不会报错，只会得到一屏「锟斤拷」——而且这种文本能正常入库、正常切片，
 // 只是永远检索不到，属于最难排查的那类问题。
 func readDecoded(path string) (string, error) {
-	raw, err := os.ReadFile(path)
+	f, err := os.Open(path)
 	if err != nil {
 		return "", err
+	}
+	defer f.Close()
+	st, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	size := st.Size()
+	if size > maxReadBytes {
+		size = maxReadBytes
+	}
+	raw := make([]byte, size)
+	if size > 0 {
+		if _, err := f.ReadAt(raw, 0); err != nil && err != io.EOF {
+			return "", err
+		}
 	}
 	if len(raw) == 0 {
 		return "", ErrNoText
