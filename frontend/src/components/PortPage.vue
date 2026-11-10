@@ -62,9 +62,22 @@ async function confirmKill() {
 
 onMounted(() => {
   load()
-  refreshTimer = setInterval(load, 5000)
+  // 轮询加可见性门控：本页每次刷新都要后端枚举一次系统进程表，
+  // 窗口最小化/被遮挡时照跑是白烧 CPU（对齐 MonitorPage 的既有范式）。
+  refreshTimer = setInterval(() => {
+    if (document.hidden) return
+    load()
+  }, 5000)
+  document.addEventListener('visibilitychange', onVisibility)
 })
-onUnmounted(() => { if (refreshTimer) clearInterval(refreshTimer) })
+// 回前台立刻补一次，避免后台期间积压的 5s 间隔造成数据过期感
+function onVisibility() {
+  if (!document.hidden) load()
+}
+onUnmounted(() => {
+  if (refreshTimer) clearInterval(refreshTimer)
+  document.removeEventListener('visibilitychange', onVisibility)
+})
 </script>
 
 <template>

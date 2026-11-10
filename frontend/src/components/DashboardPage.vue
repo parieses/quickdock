@@ -787,11 +787,32 @@ function bucketsOf(id: string): ('up' | 'down' | 'none')[] {
   return out
 }
 
+/** 全部启用监控的热力格，一次算完存 Map：模板 v-for 与 globalRibbon 共用同一份结果。
+ *  原来是模板里直接调 bucketsOf(m.id)，页面任何 ref 变化（时钟/天气/加载态）都触发
+ *  O(监控数×日志量) 的全量重扫，且 globalRibbon 再算一遍。 */
+const bucketMap = computed<Map<string, ('up' | 'down' | 'none')[]>>(() => {
+  const map = new Map<string, ('up' | 'down' | 'none')[]>()
+  for (const m of monitors.value) {
+    if (!m.enabled) continue
+    map.set(m.id, bucketsOf(m.id))
+  }
+  return map
+})
+
+/** 模板入口：启用监控取缓存结果，停用的监控显示全 none。 */
+function bucketsFor(id: string): ('up' | 'down' | 'none')[] {
+  return bucketMap.value.get(id) ?? Array(RIBBON_CELLS).fill('none')
+}
+
 /** 全局条：启用中的监控一起聚合——一格红 = 这半小时里至少有一个服务挂过。 */
 const globalRibbon = computed<( 'up' | 'down' | 'none' )[]>(() => {
   const ids = monitors.value.filter(m => m.enabled).map(m => m.id)
   if (!ids.length) return Array(RIBBON_CELLS).fill('none')
-  const per = ids.map(bucketsOf)
+  const per: ('up' | 'down' | 'none')[][] = []
+  for (const id of ids) {
+    const b = bucketMap.value.get(id)
+    if (b) per.push(b)
+  }
   return Array.from({ length: RIBBON_CELLS }, (_, i) =>
     per.some(b => b[i] === 'down') ? 'down' : per.some(b => b[i] === 'up') ? 'up' : 'none')
 })
@@ -2136,7 +2157,7 @@ onUnmounted(() => {
                     <span v-if="m.lastStatus === 'down'" class="due warn">{{ t('dash_down') }}</span>
                     <span v-else-if="!m.lastStatus" class="due">{{ t('dash_never_checked') }}</span>
                     <span class="ribbon mini">
-                      <span v-for="(b, i) in bucketsOf(m.id)" :key="i" :class="['cell', b]"></span>
+                      <span v-for="(b, i) in bucketsFor(m.id)" :key="i" :class="['cell', b]"></span>
                     </span>
                     <span class="up-pct mono">{{ upPct(m.id) }}</span>
                   </li>

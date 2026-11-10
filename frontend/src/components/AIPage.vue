@@ -548,7 +548,7 @@ const imageInputMode = computed<string>(() => {
 })
 const {
   attachments, allowFileImage, allowUrlImage,
-  removeAttachment,
+  removeAttachment, attachmentsFromImages,
   onInputPaste, onInputDrop,
   urlInputOpen, urlDraft, fileInputEl,
   onPickFiles, openFilePicker, toggleUrlInput, confirmUrlImage,
@@ -625,6 +625,10 @@ md.use(mathExtension())
 // 因此复制按钮可以安全地写在 v-html 里，用事件委托处理点击。
 // 注意：viewBox 在白名单里是全小写 'viewbox'，DOMPurify 会把属性名统一转小写后比对，
 // 故 SVG 必须用小写 viewbox 才能通过。
+// highlightAuto 的候选语言集：只试 AI 高频输出的语言，长代码块的自动猜语言
+// 从「几十种语言逐个打分」降到十种，首渲卡顿随之消失。
+const AUTO_HL_LANGS = ['javascript', 'typescript', 'python', 'go', 'rust', 'java', 'bash', 'json', 'sql', 'css']
+
 md.use({
   renderer: {
     code(token: { text: string; lang?: string }) {
@@ -644,7 +648,9 @@ md.use({
         const langLower = lang.toLowerCase()
         body = lang && hljs.getLanguage(langLower)
           ? hljs.highlight(codeText, { language: langLower }).value
-          : hljs.highlightAuto(codeText).value
+          // highlightAuto 不传 subset 会用全部公共语言逐个试探，几百行的
+          // 未知语言代码块首渲可卡数百毫秒。限制到 AI 常输出的语言集合。
+          : hljs.highlightAuto(codeText, AUTO_HL_LANGS).value
       } catch {
         body = escapeHtml(codeText)
       }
@@ -1851,12 +1857,7 @@ function retryLast() {
     pageError.value = ''
     retryPending.value = true
     input.value = m.content
-    attachments.value = (m.imgList || []).map((img) => ({
-      kind: img.kind,
-      url: img.url,
-      dataUrl: img.dataUrl,
-      name: img.name || 'image',
-    }))
+    attachments.value = attachmentsFromImages(m.imgList)
     send()
     return
   }
@@ -1889,12 +1890,7 @@ async function regenerateLast() {
   messages.value = messages.value.slice(0, userIdx + 1)
   retryPending.value = true
   input.value = m.content
-  attachments.value = (m.imgList || []).map((img) => ({
-    kind: img.kind,
-    url: img.url,
-    dataUrl: img.dataUrl,
-    name: img.name || 'image',
-  }))
+  attachments.value = attachmentsFromImages(m.imgList)
   setConvError(convId, '')
   pageError.value = ''
   send({
@@ -1925,12 +1921,7 @@ async function editAndResend(m: AIMessage, content: string) {
   messages.value = [...messages.value.slice(0, idx), { ...target, content: text }]
   retryPending.value = true
   input.value = text
-  attachments.value = (target.imgList || []).map((img) => ({
-    kind: img.kind,
-    url: img.url,
-    dataUrl: img.dataUrl,
-    name: img.name || 'image',
-  }))
+  attachments.value = attachmentsFromImages(target.imgList)
   setConvError(convId, '')
   pageError.value = ''
   send({

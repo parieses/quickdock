@@ -311,8 +311,10 @@ async function runImportScan() {
     importPreview.value = p
     importDir.value = p.rootDir
     // 浅拷贝每一行：表格里的编辑不能改到上一次扫描的快照。
+    // rowId 只在本次扫描结果内分配，作为表格 v-for 的稳定 key。
+    let rowSeq = 0
     importItems.value = p.items.map((it) => ({
-      ...it, uris: [...(it.uris || [])], options: { ...(it.options || {}) },
+      ...it, rowId: `imp-${++rowSeq}`, uris: [...(it.uris || [])], options: { ...(it.options || {}) },
     }))
   } catch (e) {
     logErr('download/importScan', e)
@@ -744,7 +746,7 @@ async function pasteLinks() {
 function openSettings() {
   showAdd.value = false
   showImport.value = false
-  settingsForm.value = JSON.parse(JSON.stringify(options.value)) as DlOptionsView
+  settingsForm.value = structuredClone(options.value) as DlOptionsView
   settingsForm.value.categoryRules = { ...(options.value.categoryRules || {}) }
   settingsForm.value.schedule = { ...(options.value.schedule || { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' }) }
   categoryText.value = Object.entries(settingsForm.value.categoryRules).map(([k, v]) => `${k}=${v}`).join('\n')
@@ -1243,7 +1245,7 @@ onUnmounted(() => {
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="(it, i) in importItems" :key="i" :class="{ 'is-off': !it.checked }">
+                      <tr v-for="(it, i) in importItems" :key="it.rowId" :class="{ 'is-off': !it.checked }">
                         <td><input v-model="it.checked" type="checkbox" class="dl-check" :aria-label="it.name" /></td>
                         <td>
                           <input v-model="it.name" class="qd-input dl-import-input" :aria-label="t('dlImportColName')" />

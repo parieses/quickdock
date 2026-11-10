@@ -652,8 +652,18 @@ function docMeta(s: KBSource) {
   return t(statusKey(s.status))
 }
 
+// 高亮切片缓存：computed 只在 hits / query 变化时重算一次。
+// 原来是模板 v-for 里直接调 hitParts(h)，内部每次 new RegExp + split 全文——
+// 任何无关状态变化（索引进度事件、面板开关）都会把所有命中片段重算一遍。
+const hitPartsMap = computed(() => {
+  const m = new Map<SearchHit, { t: string; hit: boolean }[]>()
+  const q = query.value.trim()
+  for (const h of hits.value) m.set(h, highlightParts(h.text, q))
+  return m
+})
+
 function hitParts(h: SearchHit) {
-  return highlightParts(h.text, query.value.trim())
+  return hitPartsMap.value.get(h) ?? highlightParts(h.text, query.value.trim())
 }
 
 const unsubscribers: Array<() => void> = []

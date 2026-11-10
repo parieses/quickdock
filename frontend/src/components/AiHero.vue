@@ -181,7 +181,7 @@ function onModelSelect(e: Event) {
           <button class="ai-url-ok" @click="emit('confirm-url')">{{ t('add') }}</button>
         </div>
         <div v-if="props.attachments.length" class="ai-attach-preview">
-          <div v-for="(a, i) in props.attachments" :key="i" class="ai-attach-thumb">
+          <div v-for="(a, i) in props.attachments" :key="a.id" class="ai-attach-thumb">
             <img v-if="a.kind === 'file' && a.dataUrl" :src="a.dataUrl" class="ai-attach-img" />
             <img v-else-if="a.kind === 'url'" :src="a.url" class="ai-attach-img" />
             <button class="ai-attach-del" :title="t('delete')" @click="emit('remove-attachment', i)">×</button>

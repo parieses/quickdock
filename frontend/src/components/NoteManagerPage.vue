@@ -705,6 +705,23 @@ function highlightParts(text: string, q: string): { s: string; hit: boolean }[] 
   return out.length ? out : [{ s: src, hit: false }]
 }
 
+/** 高亮切片缓存：只在 flatResults / searchQuery 变化时对每行重算一次。
+ *  原来是模板 v-for 里直接调 highlightParts(...)，每次渲染全列表重跑正则。 */
+const rowHighlightCache = computed(() => {
+  const m = new Map<string, { s: string; hit: boolean }[]>()
+  const q = searchQuery.value
+  for (const n of flatResults.value) {
+    const text = n.name || n.keyword || ''
+    if (!m.has(text)) m.set(text, highlightParts(text, q))
+  }
+  return m
+})
+
+function rowHighlight(n: { name?: string; keyword?: string }) {
+  const text = n.name || n.keyword || ''
+  return rowHighlightCache.value.get(text) ?? highlightParts(text, searchQuery.value)
+}
+
 // 预览区与编辑区的滚动联动。
 //
 // 两栏独立滚动时，左边改到第 40 行、右边还停在第 3 行，对照修改完全没法用。
@@ -1040,7 +1057,7 @@ watch(pendingOpenNoteId, (id) => {
             <div v-for="n in flatResults" :key="'res-'+n.id" class="sr-row" :class="{ 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
               <span v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
               <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
-              <span class="tn-name"><template v-for="(p, i) in highlightParts(n.name || n.keyword, searchQuery)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></span>
+              <span class="tn-name"><template v-for="(p, i) in rowHighlight(n)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></span>
             </div>
           </template>
         </div>

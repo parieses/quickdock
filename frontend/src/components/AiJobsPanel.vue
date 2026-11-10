@@ -87,14 +87,16 @@ function syncPoll() {
     return
   }
   if (runningCount.value > 0) {
-    if (!timer) timer = setInterval(() => void load(), 2500)
+    if (!timer) timer = setInterval(() => void load(true), 2500)
   } else {
     stopPoll()
   }
 }
 
-async function load() {
-  loading.value = true
+async function load(fromPoll = false) {
+  // 轮询路径不翻转 loading：面板开着且有任务运行时每 2.5s 翻一次
+  // loading 会让条件渲染分支白白重渲染；只有手动刷新才需要转圈反馈。
+  if (!fromPoll) loading.value = true
   try {
     const list = unwrap<AIJobView[]>(await AIJobsList(props.convId)) || []
     // 运行中的排最前：列表按开始时间倒序，昨天起的那个长跑任务会被今天跑完的
@@ -102,9 +104,9 @@ async function load() {
     jobs.value = list.slice().sort((a, b) => Number(b.running) - Number(a.running))
     errMsg.value = ''
   } catch (e: any) {
-    errMsg.value = e?.message || String(e)
+    if (!fromPoll) errMsg.value = e?.message || String(e)
   } finally {
-    loading.value = false
+    if (!fromPoll) loading.value = false
     syncPoll()
     void scrollToFocus()
   }

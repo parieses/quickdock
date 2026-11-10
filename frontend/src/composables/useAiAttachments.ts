@@ -5,6 +5,7 @@
 // 闸门在前端拦一道只是体验，真正的校验在后端 ai_image.go。
 import { computed, ref, type ComputedRef } from 'vue'
 import type { PendingImage, ToastAPI } from '../types'
+import type { AIMsgImage } from '../types/ai'
 
 export interface AiAttachmentsDeps {
   // 当前档案允许的图片输入形态（both / url / base64），由页面按档案算好注入
@@ -19,6 +20,14 @@ export function useAiAttachments(deps: AiAttachmentsDeps) {
   // 待发送预览；发送后由页面清空。file 类存 dataUrl（base64），直接随请求发给模型；
   // url 类存公网链接。
   const attachments = ref<PendingImage[]>([])
+
+  // 附件自增 id：v-for 用它作 key（列表可增删，index 作 key 删除中间项会让
+  // 缩略图错位复用、大 dataUrl 重赋值引发闪烁）。
+  let attachSeq = 0
+  function nextAttachId() {
+    attachSeq += 1
+    return `att-${attachSeq}`
+  }
 
   // 是否允许添加本地图片 / 公网链接（两者在 both 下都允许）。
   const allowFileImage = computed(() => imageInputMode.value === 'both' || imageInputMode.value === 'base64')
@@ -44,7 +53,7 @@ export function useAiAttachments(deps: AiAttachmentsDeps) {
       if (!file.type.startsWith('image/')) { toast.error(t('aiImgOnlyLocal')); continue }
       if (file.size > maxImageBytes) { toast.error(t('aiImageTooLarge')); continue }
       const dataUrl = await fileToDataURL(file)
-      attachments.value.push({ kind: 'file', dataUrl, name: file.name || 'image' })
+      attachments.value.push({ id: nextAttachId(), kind: 'file', dataUrl, name: file.name || 'image' })
     }
     if (attachments.value.length) toast.success(t('aiImageAdded', { n: attachments.value.length }))
   }
@@ -54,11 +63,19 @@ export function useAiAttachments(deps: AiAttachmentsDeps) {
     if (!u) return
     if (!allowUrlImage.value) { toast.error(t('aiImgOnlyLocal')); return }
     if (!/^https?:\/\//i.test(u)) { toast.error(t('aiImageUrlInvalid')); return }
-    attachments.value.push({ kind: 'url', url: u, name: u })
+    attachments.value.push({ id: nextAttachId(), kind: 'url', url: u, name: u })
   }
 
   function removeAttachment(i: number) {
     attachments.value.splice(i, 1)
+  }
+
+  // 从历史消息的 imgList 重建待发送附件（重试 / 重新生成 / 编辑重发）。
+  // 重建也要分配新 id：这三条路径都会整组替换 attachments，稳定 key 靠它维持。
+  function attachmentsFromImages(images: AIMsgImage[] | undefined): PendingImage[] {
+    return (images || []).map((img) => ({
+      id: nextAttachId(), kind: img.kind, url: img.url, dataUrl: img.dataUrl, name: img.name || 'image',
+    }))
   }
 
   // 剪贴板粘贴图片：在输入框按 Ctrl+V 时，若剪贴板含图片文件则作为本地图附件。
@@ -116,7 +133,7 @@ export function useAiAttachments(deps: AiAttachmentsDeps) {
 
   return {
     attachments, allowFileImage, allowUrlImage, maxImageBytes,
-    addFiles, addUrlImage, removeAttachment,
+    addFiles, addUrlImage, removeAttachment, attachmentsFromImages,
     onInputPaste, onInputDrop,
     urlInputOpen, urlDraft, fileInputEl,
     onPickFiles, openFilePicker, toggleUrlInput, confirmUrlImage,

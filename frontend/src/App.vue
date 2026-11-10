@@ -18,7 +18,6 @@ import { getErrorMessage } from './utils/error';
 import { installExternalLinkGuard } from './utils/externalLinks';
 import { navigate, navigateTo, pendingOpenNoteId, pendingOpenTodoId, setNavigator } from './composables/bridge';
 import Sidebar from './components/Sidebar.vue';
-import NotePanel from './components/NotePanel.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
 // 页面注册表：主窗口内容页与侧边栏导航项的单一数据源（替代 currentPage 手动 switch）
@@ -26,6 +25,10 @@ import { findContentPage, findNavEntry, KEEP_ALIVE_PAGES, type PageContext } fro
 
 // 异步加载的页面级组件（仅在主窗口中用，减少独立窗口的加载体积）
 const SettingsModal = defineAsyncComponent(() => import('./components/SettingsModal.vue'))
+// NotePanel（含 CodeMirror 编辑器内核）只在 #/note 独立窗口分支渲染，主窗口从不显示。
+// 必须动态 import：静态引用会把 CodeMirror 全链路（约 300KB）无条件编进主 chunk，
+// 主窗口首屏白付这笔下载与解析。与下方 ClipboardPanel 同因同解。
+const NotePanel = defineAsyncComponent(() => import('./components/NotePanel.vue'))
 // 主窗口内容页（含工作空间复合页 WorkspacePage）的异步组件与导航信息已收敛到
 // pages/registry，由注册表驱动渲染，替代手工 v-if 切换链。
 const CommandPalette = defineAsyncComponent(() => import('./components/CommandPalette.vue'))

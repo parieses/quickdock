@@ -296,18 +296,28 @@ export function useEnvRuntimeModals(deps: Deps) {
     logAuto: false,
   })
   let redisLogTimer: ReturnType<typeof setInterval> | null = null
+  let redisLogFetching = false
 
   async function fetchRedisLog() {
+    // 防堆积：上一轮还没回来就跳过（后端枚举/读盘偶发变慢时轮询会排队）
+    if (redisLogFetching) return
+    redisLogFetching = true
     try {
-      redisModal.log = unwrap<string>(await EnvLogGet(redisModal.runtime, redisModal.version)) || ''
+      const next = unwrap<string>(await EnvLogGet(redisModal.runtime, redisModal.version)) || ''
+      // 无变化不写响应式：EnvLogGet 返回整份日志全文，每次轮询无条件替换
+      // 会把 RuntimeLogView 的 split/逐行高亮/截断全部重算一遍。
+      if (next !== redisModal.log) redisModal.log = next
     } catch (e: any) {
       toast.error(getErrorMessage(e))
+    } finally {
+      redisLogFetching = false
     }
   }
 
   function startLogAuto() {
     if (redisLogTimer || !redisModal.logAuto || redisModal.tab !== 'log') return
     redisLogTimer = setInterval(() => {
+      if (document.hidden) return // 窗口在后台时不拉
       void fetchRedisLog()
     }, 2000)
   }
@@ -522,6 +532,7 @@ export function useEnvRuntimeModals(deps: Deps) {
     logAuto: false,
   })
   let logModalTimer: ReturnType<typeof setInterval> | null = null
+  let logModalFetching = false
 
   async function openLog(r: RuntimeLike, ins: InstallLike) {
     try {
@@ -537,16 +548,23 @@ export function useEnvRuntimeModals(deps: Deps) {
   }
 
   async function refreshLogModal() {
+    // 与 fetchRedisLog 同一纪律：防堆积 + 无变化不写响应式 + 后台不拉
+    if (logModalFetching) return
+    logModalFetching = true
     try {
-      logModal.log = unwrap<string>(await EnvLogGet(logModal.runtime, logModal.version)) || ''
+      const next = unwrap<string>(await EnvLogGet(logModal.runtime, logModal.version)) || ''
+      if (next !== logModal.log) logModal.log = next
     } catch (e: any) {
       toast.error(getErrorMessage(e))
+    } finally {
+      logModalFetching = false
     }
   }
 
   function startLogModalAuto() {
     if (logModalTimer || !logModal.logAuto) return
     logModalTimer = setInterval(() => {
+      if (document.hidden) return
       void refreshLogModal()
     }, 2000)
   }

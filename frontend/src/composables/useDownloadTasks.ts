@@ -106,6 +106,9 @@ export interface DlProbeResult {
 
 // 换电脑续传：扫描结果里 state 是本机文件状态，reason 是 i18n key（后端给）。
 export interface DlImportItem {
+  // 行标识（仅前端用）：表格行可编辑可过滤移除，v-for 不能用 index 作 key
+  // （删除中间行会错位复用输入框内容）。后端不认识此字段，序列化过去会被忽略。
+  rowId: string
   name: string
   uris: string[]
   dir: string
