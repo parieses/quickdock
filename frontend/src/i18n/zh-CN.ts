@@ -4542,6 +4542,7 @@ export default {
   lockRecoverBtn: '用恢复码重置密码',
   lockRecoveryHint: '恢复码通过后会清除启动密码，请随后重新设置。',
   lockEnterHint: '按 Enter 解锁',
+  lockAutoUnlockHint: '输满后自动解锁，也可按 Enter',
   lockHotkey: '锁定',
   lockHotkeyDesc: '立即锁定所有窗口（需先设置启动密码）',
 

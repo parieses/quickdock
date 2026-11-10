@@ -29,6 +29,9 @@ const errMsg = ref('')
 const shaking = ref(false)
 // retryLeft 由后端计时，前端只负责每秒减一：倒计时放前端等于给人留了绕过退避的入口。
 const retryLeft = ref(0)
+// pwdLen 是设密码时后端记下的字符数：输满即自动提交，不用再按回车。
+// 0 表示未知（旧版本设的密码没有这个记录），此时退回「回车提交」。
+const pwdLen = ref(0)
 
 const rootEl = ref<HTMLElement | null>(null)
 const inputEl = ref<HTMLInputElement | null>(null)
@@ -57,12 +60,30 @@ function triggerShake() {
 
 async function refreshRetry() {
   try {
-    const st = unwrap<{ retryAfterSec?: number }>(await LockStatus())
+    const st = unwrap<{ retryAfterSec?: number; passwordLength?: number }>(await LockStatus())
     retryLeft.value = Math.max(0, Number(st?.retryAfterSec) || 0)
+    pwdLen.value = Math.max(0, Number(st?.passwordLength) || 0)
   } catch (e) {
     logErr('LockScreen.refreshRetry', e)
   }
   if (retryLeft.value > 0) startCountdown()
+}
+
+// 密码输满自动提交。
+//
+// 只认「刚好等于记录长度」这一种情形：多打一个字符说明用户还在改，不抢跑；
+// 长度未知（pwdLen=0）时完全不插手，保持回车提交。
+// 计数必须按 code point（[...str].length）——后端存的是 len([]rune(pwd))，
+// 用 String.length 会让含 emoji 的密码永远对不上（代理对算 2）。
+function onPasswordInput(e: Event) {
+  if (recoveryMode.value || pwdLen.value <= 0 || busy.value || retryLeft.value > 0) return
+  // 输入法组合中不判长度：拼音中途的字符数可能刚好撞上密码长度，会抢在选字前提交
+  if ((e as InputEvent).isComposing) return
+  const el = e.target as HTMLInputElement | null
+  if (!el) return
+  if ([...el.value].length !== pwdLen.value) return
+  // nextTick 再提交：v-model 与 @input 挂在同一个事件上，此刻 password.value 未必已同步
+  void nextTick(() => { if (!busy.value) submit() })
 }
 
 function startCountdown() {
@@ -199,6 +220,7 @@ onUnmounted(() => {
             spellcheck="false"
             :placeholder="t('lockPasswordPlaceholder')"
             :disabled="busy || retryLeft > 0"
+            @input="onPasswordInput"
             @keydown.enter.prevent="submit"
           />
           <input
@@ -229,7 +251,7 @@ onUnmounted(() => {
         <p v-else-if="recoveryMode" class="lock-hint">
           <ShieldCheck :size="12" />{{ t('lockRecoveryHint') }}
         </p>
-        <p v-else class="lock-hint">{{ t('lockEnterHint') }}</p>
+        <p v-else class="lock-hint">{{ pwdLen > 0 ? t('lockAutoUnlockHint') : t('lockEnterHint') }}</p>
 
         <p v-if="errMsg" class="lock-error">{{ errMsg }}</p>
 

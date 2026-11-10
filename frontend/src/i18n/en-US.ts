@@ -4530,6 +4530,7 @@ export default {
   lockRecoverBtn: 'Reset password with recovery code',
   lockRecoveryHint: 'A valid recovery code clears the startup password. Set a new one afterwards.',
   lockEnterHint: 'Press Enter to unlock',
+  lockAutoUnlockHint: 'Unlocks automatically when complete; Enter also works',
   lockHotkey: 'Lock',
   lockHotkeyDesc: 'Lock all windows immediately (requires a startup password)',
 

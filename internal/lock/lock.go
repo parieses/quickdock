@@ -13,6 +13,7 @@ import (
 	"crypto/rand"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -29,6 +30,13 @@ const (
 	settingPasswordHash = "startup_password_hash"
 	// settingRecoveryHash 一次性恢复码的 bcrypt 哈希。
 	settingRecoveryHash = "startup_password_recovery"
+	// settingPasswordLen 密码的字符数（明文整数）。
+	//
+	// 只为「输满即自动解锁」服务：前端拿到长度后不必再按一次回车。它和哈希同表
+	// 存放（app_state 不进快照/备份），刻意不加密 —— 长度本身不是秘密，肩窥与
+	// 键盘记录最先拿到的就是它；加密只会多一层无谓判断。旧版本设过密码的用户
+	// 没有这个键，读出来是 0，前端据此退回「回车提交」的老行为。
+	settingPasswordLen = "startup_password_len"
 
 	// freeAttempts 免退避的连续失败次数。
 	freeAttempts = 5
@@ -56,11 +64,13 @@ var (
 // manager 锁状态机。所有字段由 mu 保护；bcrypt 比对（约 50~100ms）在锁外做，
 // 避免热键回调里的 IsLocked 被一次校验卡住。
 type manager struct {
-	mu   sync.Mutex
-	db   *db.Database
-	pwd  []byte // bcrypt 哈希；空表示未设密码
-	rec  []byte // 恢复码的 bcrypt 哈希
-	lock bool   // 是否处于锁定态
+	mu  sync.Mutex
+	db  *db.Database
+	pwd []byte // bcrypt 哈希；空表示未设密码
+	rec []byte // 恢复码的 bcrypt 哈希
+	// pwdLen 密码字符数，供前端「输满自动解锁」；0 表示未知（旧数据 / 未设密码）。
+	pwdLen int
+	lock   bool // 是否处于锁定态
 	// fails/until 连续失败计数与退避截止时间。只存内存：重启后清零，
 	// 否则一次遗忘的密码会把用户锁到下一次开机。
 	fails int
@@ -110,8 +120,12 @@ func Init(d *db.Database) {
 	}
 	pwd := readHash(settingPasswordHash)
 	rec := readHash(settingRecoveryHash)
+	var pwdLen int
+	if len(pwd) > 0 {
+		pwdLen = readPasswordLen()
+	}
 	std.mu.Lock()
-	std.pwd, std.rec = pwd, rec
+	std.pwd, std.rec, std.pwdLen = pwd, rec, pwdLen
 	std.lock = len(pwd) > 0
 	locked := std.lock
 	std.mu.Unlock()
@@ -138,6 +152,50 @@ func readHash(key string) []byte {
 		return nil
 	}
 	return []byte(plain)
+}
+
+// readPasswordLen 读取密码字符数；未设置或旧数据缺失时返回 0（前端据此退回回车提交）。
+func readPasswordLen() int {
+	std.mu.Lock()
+	d := std.db
+	std.mu.Unlock()
+	if d == nil {
+		return 0
+	}
+	raw, err := d.GetSetting(settingPasswordLen)
+	if err != nil {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(raw))
+	if err != nil || n <= 0 {
+		return 0
+	}
+	return n
+}
+
+// writePasswordLen 落库密码字符数；0 表示清除（移除密码 / 恢复码重置）。
+func writePasswordLen(n int) error {
+	std.mu.Lock()
+	d := std.db
+	std.mu.Unlock()
+	if d == nil {
+		return ErrNotInitialized
+	}
+	return d.SetSetting(settingPasswordLen, strconv.Itoa(n))
+}
+
+// rememberPasswordLen 把新密码长度写进内存与库，并同步给前端。
+//
+// 写库失败不阻断设密流程：密码已经设好了，只是少了「输满自动解锁」这一层便利，
+// 用户仍可按回车。为此只记一条警告，不把错误抛给调用方（否则用户会看到「设置失败」
+// 却已经设上了，反而更慌）。
+func rememberPasswordLen(n int) {
+	std.mu.Lock()
+	std.pwdLen = n
+	std.mu.Unlock()
+	if err := writePasswordLen(n); err != nil {
+		logger.W("[lock] 密码长度落库失败（不影响解锁，回车仍可用）: %v", err)
+	}
 }
 
 func writeHash(key string, hash []byte) error {
@@ -169,6 +227,13 @@ func HasPassword() bool {
 	std.mu.Lock()
 	defer std.mu.Unlock()
 	return len(std.pwd) > 0
+}
+
+// PasswordLength 返回密码字符数，供锁层「输满即自动解锁」；0 表示未知。
+func PasswordLength() int {
+	std.mu.Lock()
+	defer std.mu.Unlock()
+	return std.pwdLen
 }
 
 // RetryAfter 返回距离可以再次尝试还差多久；0 表示可以立刻尝试。
@@ -268,7 +333,14 @@ func Verify(pwd string) error {
 	}
 	std.mu.Lock()
 	std.lock = false
+	lenUnknown := std.pwdLen <= 0
 	std.mu.Unlock()
+	if lenUnknown {
+		// 旧数据自愈：这个键是「输满自动解锁」加进来之后才有的，老用户库里只有哈希。
+		// 既然这次密码已经被验证通过，长度就是确定信息，顺手补上——不必逼用户
+		// 特意去改一次密码才能用上新行为。下次锁定起就生效。
+		rememberPasswordLen(len([]rune(pwd)))
+	}
 	logger.I("[lock] 密码校验通过，已解锁")
 	notify(false)
 	return nil
@@ -303,6 +375,8 @@ func SetPassword(pwd string) (string, error) {
 	std.mu.Lock()
 	std.pwd, std.rec = hash, codeHash
 	std.mu.Unlock()
+	// 长度按「字符」计（rune），前端也用 code point 计，两边才对得上（emoji 是 2 个 UTF-16 单元）。
+	rememberPasswordLen(len([]rune(pwd)))
 	logger.I("[lock] 启动密码已设置（恢复码已生成）")
 	return code, nil
 }
@@ -332,6 +406,7 @@ func ChangePassword(oldPwd, newPwd string) (string, error) {
 	std.mu.Lock()
 	std.pwd, std.rec = hash, codeHash
 	std.mu.Unlock()
+	rememberPasswordLen(len([]rune(newPwd)))
 	logger.I("[lock] 启动密码已修改（旧恢复码作废）")
 	return code, nil
 }
@@ -352,6 +427,7 @@ func RemovePassword(pwd string) error {
 	std.pwd, std.rec = nil, nil
 	std.lock = false
 	std.mu.Unlock()
+	rememberPasswordLen(0)
 	logger.I("[lock] 启动密码已移除")
 	if wasLocked {
 		notify(false)
@@ -395,6 +471,7 @@ func Recover(code string) error {
 	std.pwd, std.rec = nil, nil
 	std.lock = false
 	std.mu.Unlock()
+	rememberPasswordLen(0)
 	logger.I("[lock] 已用恢复码清除启动密码并解锁")
 	notify(false)
 	return nil

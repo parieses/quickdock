@@ -12,6 +12,8 @@ type LockStatusView struct {
 	// RetryAfterSec 失败退避剩余秒数；0 表示可以立刻尝试。
 	// 由后端计时，前端只负责展示倒计时——把计时放前端等于让调用方绕过退避。
 	RetryAfterSec int `json:"retryAfterSec"`
+	// PasswordLength 密码字符数，锁层据此「输满即自动解锁」；0 表示未知（旧数据）。
+	PasswordLength int `json:"passwordLength"`
 }
 
 func lockStatusView() LockStatusView {
@@ -20,9 +22,10 @@ func lockStatusView() LockStatusView {
 		sec = int(wait.Seconds() + 0.999) // 向上取整：剩 0.2s 也显示 1s，避免显示 0 却仍被拒
 	}
 	return LockStatusView{
-		HasPassword:   lock.HasPassword(),
-		Locked:        lock.IsLocked(),
-		RetryAfterSec: sec,
+		HasPassword:    lock.HasPassword(),
+		Locked:         lock.IsLocked(),
+		RetryAfterSec:  sec,
+		PasswordLength: lock.PasswordLength(),
 	}
 }
 
