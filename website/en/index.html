@@ -358,6 +358,20 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Fix the downloader falsely reporting "engine not installed" after switching pages</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Fixed the downloader reporting "Download engine is not installed" after switching away and back. The page is deliberately excluded from the keep-alive list, so leaving it destroys the component and returning rebuilds it; the engine status defaults to "not installed" and the install card was rendered before the asynchronous status request came back, even though aria2 was installed and running all along. Returning now shows the last real status first and refreshes quietly, first load says "Checking engine…", and a failed status read shows the error with a retry button instead of blaming a missing engine.</li>
+          <li>This is a frontend-only change: Vite hot reload applies it, so there is no need to restart the app or the aria2 engine, and downloads in progress are untouched.</li>
+          <li>Also corrected the MCP tool count in the README: 53 registered (31 read / 19 low-risk write / 3 high-risk), 50 exposed by default, with the three high-risk tools never available; two knowledge-base search tools that were missing from the list were added.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.43</span>
+          <span class="log-date">2026-11-10</span>
           <span class="log-title">A built-in downloader, aria2 in Runtimes, and download tools in MCP</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -419,23 +433,6 @@
           <li>Dashboard cards were reordered and wired to deep links: clicking a row lands on the matching page with that item selected — a Git repository, the ports section, a resident runtime. The AI usage card now prices current models, with DeepSeek peak-hour multipliers on weekdays.</li>
           <li>Optional access token for the MCP server (off by default): once enabled, every request must carry a Bearer token, and the panel can show, copy and rotate it.</li>
           <li>Settings pages share one measure and control height: bot notifications and navigation items are centred at the same width, the prompt editor's text fields got their styling back, and deep links can now land on second-level tabs such as AI → Usage.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.40</span>
-          <span class="log-date">2026-11-04</span>
-          <span class="log-title">A full UI polish, screenshot upgrades, and a built-in prompt library</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-<li>A full UI polish: both themes get a rebuilt neutral scale and real font weights, with consistent hierarchy across page headers, cards, buttons and inputs. Selected rows now share one language (tinted background + a 2px left bar), empty states get a proper icon tile, and the todo calendar no longer stretches to fill empty months.</li>
-          <li>F1 screenshots gain color picking, sequential numbered markers, pin rotation / flipping and click-through. Text annotations are WYSIWYG — what you type is drawn right at the anchor instead of jumping back from a side input.</li>
-          <li>The AI gains a built-in prompt library you can edit under Settings → AI Assistant. The "+" panel is now a two-level category picker and can attach files produced in this conversation or in the working directory as references. Prompts live in the database snapshot, separate from "/" skill chips.</li>
-          <li>Command palette file results preview in place: images, highlighted code, Markdown, PDF, audio / video, archive entries and directory listings, with drill-down, in-text search and zoom. Large images are downsampled by a local service so flicking through them no longer stalls the panel.</li>
-          <li>Performance and stability: background pages stop polling, the 1Hz timer and tool parsing leave the hot path; pure reads take a read lock and single writes skip an fsync; floating windows are created on demand and heartbeat / watchdog stop with the app; screenshot frame scheduling steps down to match measured cost.</li>
-          <li>Fixed SSH terminal copy / paste failing to read clipboard content under certain window ownership cases.</li>
         </ul>
       </details>
 
