@@ -48,8 +48,16 @@ const query = ref('')
 const selectedTarget = ref<Candidate | null>(null)
 // 候选默认收起：三处宿主里笔记页的编辑区最吃高度，不能让一个还没用的下拉常驻占位。
 const candsOpen = ref(false)
-// compact 模式下的整块面板；默认收起，只有用户主动点开才展开
+// 关联面板默认收起：三处宿主（条目编辑、待办弹窗、笔记编辑区）里它都排在表单末尾，
+// 展开态会把搜索框 + 前向链接 + 反链一口气铺开，没有关联的实体也占掉小半屏高度。
+// 收起时只留一行标题 + 计数，点标题才展开。
 const expanded = ref(false)
+const canToggle = computed(() => !!props.srcId)
+
+function toggle() {
+  if (!canToggle.value) return
+  expanded.value = !expanded.value
+}
 
 const manual = computed(() => links.value.filter(l => l.kind !== 'wiki'))
 const wiki = computed(() => links.value.filter(l => l.kind === 'wiki'))
@@ -171,23 +179,22 @@ function openBacklink(b: BacklinkRow) {
   <div class="elp" :class="{ 'elp-compact': compact, 'elp-open': expanded }">
     <div
       class="elp-head"
-      :role="compact ? 'button' : undefined"
-      :tabindex="compact ? 0 : undefined"
-      :aria-expanded="compact ? expanded : undefined"
-      @click="compact && (expanded = !expanded)"
-      @keydown.enter="compact && (expanded = !expanded)"
+      :class="{ 'is-toggle': canToggle }"
+      :role="canToggle ? 'button' : undefined"
+      :tabindex="canToggle ? 0 : undefined"
+      :aria-expanded="canToggle ? expanded : undefined"
+      @click="toggle"
+      @keydown.enter="toggle"
     >
       <Link2 :size="13" class="elp-head-icon" />
       <span class="elp-title">{{ t('linkTitle') }}</span>
       <span v-if="loading" class="elp-loading">{{ t('loading') }}</span>
-      <span v-if="!srcId && compact" class="elp-hint">{{ t('linkSaveFirst') }}</span>
-      <span class="elp-count">{{ manual.length + wiki.length }} / {{ backlinks.length }}</span>
-      <ChevronDown v-if="compact" :size="12" class="elp-chev" :class="{ on: expanded }" />
+      <span v-if="!srcId" class="elp-hint">{{ t('linkSaveFirst') }}</span>
+      <span v-if="srcId" class="elp-count">{{ manual.length + wiki.length }} / {{ backlinks.length }}</span>
+      <ChevronDown v-if="canToggle" :size="12" class="elp-chev" :class="{ on: expanded }" />
     </div>
 
-    <div v-if="!srcId && !compact" class="elp-disabled">{{ t('linkSaveFirst') }}</div>
-
-    <div v-if="srcId && (!compact || expanded)" class="elp-scroll">
+    <div v-if="srcId && expanded" class="elp-scroll">
       <div class="elp-add">
         <div class="elp-add-row">
           <Search :size="12" class="elp-search-icon" />
@@ -253,7 +260,16 @@ function openBacklink(b: BacklinkRow) {
 
 <style scoped>
 .elp { border-top: 1px solid var(--color-border); background: var(--color-bg-secondary); font-size: 12px; color: var(--color-text-secondary); }
+/* 弹窗/表单里的宿主（非 compact）不铺二级底色：宿主已经是 popover-bg，
+   再叠一层更暗的横带会像挖了个洞；内容也与表单字段左对齐，不二次缩进。 */
+.elp:not(.elp-compact) { background: transparent; }
+.elp:not(.elp-compact) > .elp-head { padding: var(--space-2) 0; border-radius: var(--radius-sm); }
+.elp:not(.elp-compact) > .elp-scroll { padding: 0 0 var(--space-2); }
 .elp-head { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-4); }
+/* 头部即开关：收起态只有这一行，必须一眼看出可点 */
+.elp-head.is-toggle { cursor: pointer; }
+.elp-head.is-toggle:hover { background: var(--color-bg-hover); }
+.elp-head.is-toggle:focus-visible { outline: 1px solid var(--color-border-focus-soft); }
 .elp-head-icon { color: var(--color-text-muted); flex-shrink: 0; }
 .elp-title { flex: 1; font-weight: 600; color: var(--color-text-primary); }
 .elp-loading { color: var(--color-text-muted); }
@@ -261,9 +277,7 @@ function openBacklink(b: BacklinkRow) {
 /* compact：高度吃紧的宿主（笔记编辑区）专用。默认只剩一行摘要，
    展开的内容浮在正文上、不占文档流高度 —— 否则空面板也能吃掉一百多像素。 */
 .elp-compact { position: relative; }
-.elp-compact > .elp-head { padding: 4px 12px; cursor: pointer; }
-.elp-compact > .elp-head:hover { background: var(--color-bg-hover); }
-.elp-compact > .elp-head:focus-visible { outline: 1px solid var(--color-border-focus-soft); }
+.elp-compact > .elp-head { padding: 4px 12px; }
 .elp-hint { color: var(--color-text-disabled); font-size: var(--text-xs); }
 .elp-chev { flex-shrink: 0; color: var(--color-text-muted); transition: transform var(--transition-fast); }
 .elp-chev.on { transform: rotate(180deg); }
@@ -274,7 +288,6 @@ function openBacklink(b: BacklinkRow) {
   border-radius: 0 0 var(--radius-md) var(--radius-md);
   background: var(--color-popover-bg); box-shadow: var(--shadow-md);
 }
-.elp-disabled { padding: var(--space-3) var(--space-4); color: var(--color-text-disabled); border-top: 1px solid var(--color-border); }
 
 /* 整个面板只有一个滚动容器：三个页面都要嵌在既有布局里（弹窗/编辑面板/文档头部），
    高度必须可预期，不能让关联列表把编辑区或弹窗撑爆。 */
