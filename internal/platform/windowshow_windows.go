@@ -33,9 +33,10 @@ const (
 	showWarmupOffscreen = -32000
 
 	// showWarmupDelay 是「移到屏外 → 移回目标位置」之间的等待。
-	// WebView2 还原 surface 并重新合成约需 2~3 帧（60Hz 下 32~48ms），取 60ms：
-	// 再长用户会感到「按了热键，窗口出得慢半拍」，再短则可能移回时还没画完。
-	showWarmupDelay = 60 * time.Millisecond
+	// WebView2 还原 surface 到重新出帧约 1~2 帧（60Hz 下 16~33ms）。取 30ms：
+	// 只够一帧多，用户察觉不到「窗口出得慢半拍」；若实机偶发一丝白边，说明这一帧
+	// 没画完，往上回调到 40ms / 50ms 即可。
+	showWarmupDelay = 30 * time.Millisecond
 )
 
 // ShowFloatingWindow 把浮窗定位到光标所在屏幕并显示，且不闪白帧。
