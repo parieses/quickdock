@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"time"
 
 	"quickdock/internal/aria2"
 	"quickdock/internal/logger"
@@ -192,7 +193,30 @@ func (a *Aria2Runtime) Start(ctx context.Context, version string, onLog func(str
 		return err
 	}
 	if isPortOpen(cfg.Port) {
-		return fmt.Errorf("端口 %d 已被占用，aria2 daemon 可能已在运行", cfg.Port)
+		// 大文件把盘写满 / 刷 write cache 阻塞时，aria2 的单线程事件循环会卡在磁盘 I/O：
+		// 端口仍在 Listen，但所有 RPC 都超时（日志表现为 timeout awaiting response headers）。
+		// 这种「假活」实例会让看门狗误判为运行中、重启又一律被端口占用挡回来，必须区分处理。
+		healthy, stuck := daemonProbe(cfg)
+		if healthy {
+			// 健康的 daemon（另一个 QuickDock 实例刚拉起的、或用户自己启动的）直接复用。
+			// 早期实现无条件报「端口已占用」+ 孤儿回收杀进程，会造成「刚启动 1 秒就被杀
+			// → connectex: actively refused」的重启风暴。
+			logger.I("[env][aria2] 端口 %d 上已有健康 daemon，直接复用", cfg.Port)
+			return nil
+		}
+		if !stuck {
+			// 有服务在响应、但不是我们配置里的 aria2（secret 不符 / 别的 HTTP 服务）：
+			// 保持原有的「端口被占用」语义，绝不能去杀用户自己的进程。
+			return fmt.Errorf("端口 %d 已被其它服务占用，且不是当前配置的 aria2 daemon", cfg.Port)
+		}
+		logger.W("[env][aria2] 端口 %d 上的 daemon 无响应，先清理再重启", cfg.Port)
+		stopByPort(cfg.Port, "aria2c.exe")
+		for i := 0; i < 10 && isPortOpen(cfg.Port); i++ {
+			time.Sleep(200 * time.Millisecond)
+		}
+		if isPortOpen(cfg.Port) {
+			return fmt.Errorf("端口 %d 上的无响应 aria2 进程未能清理，请手动结束 aria2c.exe", cfg.Port)
+		}
 	}
 	args := aria2.DaemonArgs(cfg)
 	logger.I("[env][aria2] Start exe=%s port=%d dir=%s", exe, cfg.Port, cfg.DownloadDir)
@@ -200,6 +224,22 @@ func (a *Aria2Runtime) Start(ctx context.Context, version string, onLog func(str
 		onLog(fmt.Sprintf("启动 aria2 daemon（127.0.0.1:%d）…", cfg.Port))
 	}
 	return svcMgr.start(RuntimeAria2, version, exe, wd, args, a.LogPath(version), onLog)
+}
+
+// daemonProbe 用一次短超时 RPC 判断端口上实例的真实状态。只看 TCP 端口会把
+// 「卡死但仍 Listen」的实例当成健康：大文件下载时 aria2 单线程卡在写盘，
+// RPC 全超时而端口照常接受连接，是长时间起不来的关键误判。
+//   - healthy: RPC 正常，直接复用
+//   - stuck:   端口在但网络层无响应，可安全清理后重启
+//   - 两者都否: 有服务响应但鉴权/协议不符，不能动（可能是用户自己的 aria2）
+func daemonProbe(cfg *aria2.Config) (healthy, stuck bool) {
+	c := aria2.NewClient(cfg)
+	c.HTTP.Timeout = 1500 * time.Millisecond
+	_, err := c.GetVersion()
+	if err == nil {
+		return true, false
+	}
+	return false, aria2.IsTransportError(err)
 }
 
 func (a *Aria2Runtime) Stop(version string) error {

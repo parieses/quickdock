@@ -1,6 +1,8 @@
 package download
 
 import (
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -171,5 +173,126 @@ func TestParseInt64(t *testing.T) {
 	}
 	if got := parseInt64("-42"); got != -42 {
 		t.Errorf("负数应保留，实际 %d", got)
+	}
+}
+
+func TestApplyKnownSize(t *testing.T) {
+	s := &DownloadService{knownSize: map[string]taskSize{}}
+
+	active := aria2.TaskView{GID: "a", Status: "active", Total: 500, Completed: 100, Progress: 20}
+	s.applyKnownSize(&active)
+	if active.Total != 500 || active.Completed != 100 {
+		t.Fatalf("活跃任务不应被改写: %+v", active)
+	}
+
+	// aria2 暂停后把两个长度都报成 0，这里必须用最后一次已知值回填。
+	paused := aria2.TaskView{GID: "a", Status: "paused"}
+	s.applyKnownSize(&paused)
+	if paused.Total != 500 || paused.Completed != 100 {
+		t.Fatalf("暂停后应回填最后已知大小: %+v", paused)
+	}
+	if paused.Progress != 20 {
+		t.Errorf("回填后进度要按回填值重算，实际 %v", paused.Progress)
+	}
+
+	other := aria2.TaskView{GID: "b", Status: "paused"}
+	s.applyKnownSize(&other)
+	if other.Total != 0 || other.Completed != 0 {
+		t.Errorf("没有历史记录的任务不能凭空补大小: %+v", other)
+	}
+
+	resumed := aria2.TaskView{GID: "a", Status: "active", Total: 500, Completed: 120, Progress: 24}
+	s.applyKnownSize(&resumed)
+	if resumed.Completed != 120 {
+		t.Errorf("aria2 重新报告的真实进度不能被旧缓存覆盖: %+v", resumed)
+	}
+}
+
+func TestProbeFillsKnownTotal(t *testing.T) {
+	s := &DownloadService{knownSize: map[string]taskSize{}}
+	// 从未下载过 / 会话恢复的任务：缓存里原本也没有任何大小。
+	s.applyKnownSize(&aria2.TaskView{GID: "cold", Status: "waiting"})
+	s.setKnownTotal("cold", 536870912000)
+
+	paused := aria2.TaskView{GID: "cold", Status: "paused"}
+	s.applyKnownSize(&paused)
+	if paused.Total != 536870912000 {
+		t.Fatalf("URL 探测得到的总大小应回填到 0/0 任务，实际 %d", paused.Total)
+	}
+	if paused.Completed != 0 {
+		t.Errorf("探测只能补总大小，已下载量不能凭空生成: %d", paused.Completed)
+	}
+}
+
+// 设置表单里 fileAllocation 为空（旧前端）或传入非法值时，不能把用户已选的
+// falloc 静默改回 none；合法值要规范化后再落盘。
+func TestApplyOptionsInputFileAllocation(t *testing.T) {
+	cfg := &aria2.Config{FileAllocation: "falloc"}
+	applyOptionsInput(cfg, DlOptionsView{})
+	if cfg.FileAllocation != "falloc" {
+		t.Fatalf("空串不应覆盖已有策略: %q", cfg.FileAllocation)
+	}
+	applyOptionsInput(cfg, DlOptionsView{FileAllocation: "not-a-method"})
+	if cfg.FileAllocation != "falloc" {
+		t.Fatalf("非法值不应覆盖已有策略: %q", cfg.FileAllocation)
+	}
+	applyOptionsInput(cfg, DlOptionsView{FileAllocation: " PREALLOC "})
+	if cfg.FileAllocation != "prealloc" {
+		t.Fatalf("合法值应规范化后落盘: %q", cfg.FileAllocation)
+	}
+	if got := optionsView(cfg).FileAllocation; got != "prealloc" {
+		t.Errorf("optionsView 回传的应是可直接填进下拉框的值: %q", got)
+	}
+}
+
+// 目录名来自不可信的 URL：必须 URL 解码、去扩展名、清掉路径分隔符与控制字符，
+// 拿不到可靠名字时宁可不分组，也不能让任务写进目录外的位置。
+func TestTaskFolderName(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"https://oss.example.com/dl/ubuntu-24.04.iso?Expires=123", "ubuntu-24.04"},
+		{"https://x.com/dl/m-8vbe08r7rq8lx1c1u9wy_data_xvdc.raw", "m-8vbe08r7rq8lx1c1u9wy_data_xvdc"},
+		{"https://x.com/dl/%E4%B8%AD%E6%96%87%20%E5%90%8D.zip", "中文 名"},
+		{"https://x.com/dl/a%3Ab%3Fc.iso", "a_b_c"},
+		{"https://x.com/dl/..%2Fetc.iso", "_etc"},
+		{"https://x.com/dl/CON.exe", "_CON"},
+		{"https://x.com/dl/...iso", ""},
+		{"https://x.com/", ""},
+		{"magnet:?xt=urn:btih:abc&dn=ubuntu.iso", ""},
+		{"not a url", ""},
+	}
+	for _, c := range cases {
+		if got := taskFolderName(c.in); got != c.want {
+			t.Errorf("taskFolderName(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	long := "https://x.com/dl/" + strings.Repeat("a", 120) + ".iso"
+	if got := taskFolderName(long); len([]rune(got)) != 80 {
+		t.Errorf("超长目录名应截断到 80 字符，实际 %d", len([]rune(got)))
+	}
+}
+
+func TestTaskFolderDir(t *testing.T) {
+	const uri = "https://x.com/dl/ubuntu.iso"
+	cfg := &aria2.Config{}
+	if got := taskFolderDir(cfg, "D:/dl", uri); got != "D:/dl" {
+		t.Fatalf("未开启时不应改目录: %q", got)
+	}
+	cfg.PerTaskFolder = true
+	want := filepath.Join(filepath.Clean("D:/dl"), "ubuntu")
+	if got := taskFolderDir(cfg, "D:/dl", uri); got != want {
+		t.Fatalf("子目录不对: got %q want %q", got, want)
+	}
+	if got := taskFolderDir(cfg, "D:/dl", "magnet:?xt=urn:btih:abc"); got != filepath.Clean("D:/dl") {
+		t.Errorf("磁力链接不该建子目录: %q", got)
+	}
+	if got := taskFolderDir(cfg, "", uri); got != "" {
+		t.Errorf("保存目录为空时不该拼路径: %q", got)
+	}
+	cfg.RemoteEnabled, cfg.RemoteHost = true, "192.168.1.5"
+	if got := taskFolderDir(cfg, "/mnt/dl", uri); got != "/mnt/dl/ubuntu" {
+		t.Errorf("远程 Linux 路径应保持斜杠: %q", got)
+	}
+	if got := taskFolderDir(cfg, `F:\Downloads`, uri); got != `F:\Downloads\ubuntu` {
+		t.Errorf("远程 Windows 路径应保持反斜杠: %q", got)
 	}
 }

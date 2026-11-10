@@ -198,3 +198,30 @@ func TestRemoteEndpoint(t *testing.T) {
 		})
 	}
 }
+
+// 预分配策略：老 rpc.json 缺字段时必须是 none（prealloc 会真实写 500GiB 零，
+// 不能因为反序列化出零值就变成默认行为），显式选择要真传到 aria2c 命令行。
+func TestFileAllocationArg(t *testing.T) {
+	c := &Config{Port: 16800, Secret: "s", DownloadDir: "D:/dl"}
+	if got := c.FileAllocationArg(); got != "none" {
+		t.Fatalf("老配置默认应为 none，实际 %q", got)
+	}
+	if !strings.Contains(strings.Join(DaemonArgs(c), "\n"), "--file-allocation=none") {
+		t.Fatal("默认 DaemonArgs 缺 --file-allocation=none")
+	}
+
+	c.FileAllocation = " FALLOC "
+	if got := c.FileAllocationArg(); got != "falloc" {
+		t.Fatalf("大小写/空白未被规范化: %q", got)
+	}
+	if !strings.Contains(strings.Join(DaemonArgs(c), "\n"), "--file-allocation=falloc") {
+		t.Fatal("DaemonArgs 未使用配置中的 falloc")
+	}
+
+	if _, ok := NormalizeFileAllocation(""); ok {
+		t.Fatal("空串应表示「调用方没带该项」，不能当成合法策略")
+	}
+	if _, ok := NormalizeFileAllocation("bogus"); ok {
+		t.Fatal("非法策略应被拒绝")
+	}
+}

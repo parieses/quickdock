@@ -18,10 +18,11 @@ import {
   DlAddTorrent, DlAddMetalink, DlOptions, DlSetOptions,
   DlDetail, DlSetTaskOption, DlSetFileSelection,
   DlGlobalStat, DlGlobalOptions, DlSetGlobalOption,
-  DlEngineInfo, DlShutdown, DlReveal, DlDiskSpace,
+  DlEngineInfo, DlShutdown, DlReveal, DlDiskSpace, DlProbeUrl,
+  DlImportScan, DlImportCommit,
   DlChangePosition, DlChangeUri,
 } from '../../bindings/quickdock/services/download/downloadservice'
-import { SelectLocalFile } from '../../bindings/quickdock/services/appservice'
+import { SelectLocalFile, SelectLocalDirectory } from '../../bindings/quickdock/services/appservice'
 
 // DlBatch 的返回结构：ApiResult.data 是 any，Wails 不会为它生成模型，
 // 与 DlDiskSpace 一样由前端手写，字段名与 Go 的 json tag 对齐。
@@ -86,6 +87,61 @@ export interface DlDiskSpace {
   used: number
 }
 
+// DlProbeUrl 的返回结构：ApiResult.data 是 any，Wails 不生成模型，字段与 Go 的 json tag 对齐。
+// size 为 -1 表示源站没给出长度，此时不计入 total。
+export interface DlProbeItem {
+  url: string
+  name: string
+  size: number
+  method: string
+  ranges: boolean
+  error: string
+}
+
+export interface DlProbeResult {
+  items: DlProbeItem[]
+  total: number
+  unknown: number
+}
+
+// 换电脑续传：扫描结果里 state 是本机文件状态，reason 是 i18n key（后端给）。
+export interface DlImportItem {
+  name: string
+  uris: string[]
+  dir: string
+  size: number
+  hasControl: boolean
+  hasData: boolean
+  state: string
+  reason: string
+  gid: string
+  options: Record<string, string>
+  checked: boolean
+}
+
+export interface DlImportPreview {
+  items: DlImportItem[]
+  rootDir: string
+  sessionPath: string
+  localSession: string
+  remote: boolean
+  controls: number
+  sessionTasks: number
+}
+
+export interface DlImportAction {
+  name: string
+  gid: string
+  ok: boolean
+  error: string
+}
+
+export interface DlImportResult {
+  added: number
+  skipped: number
+  actions: DlImportAction[]
+}
+
 export interface DlSchedule {
   enabled: boolean
   start: string
@@ -100,6 +156,7 @@ export interface DlOptionsView {
   split: number
   downloadLimit: string
   uploadLimit: string
+  fileAllocation: string
   listenPort: number
   dhtListenPort: number
   btTracker: string
@@ -120,6 +177,7 @@ export interface DlOptionsView {
   checkIntegrity: boolean
   autoOpenFolder: boolean
   autoCategory: boolean
+  perTaskFolder: boolean
   categoryRules: Record<string, string>
   schedule: DlSchedule
   remoteEnabled: boolean
@@ -238,12 +296,14 @@ const status = ref<DlEngineStatus>({
 })
 const options = ref<DlOptionsView>({
   downloadDir: '', maxConcurrent: 5, split: 8, downloadLimit: '', uploadLimit: '',
+  fileAllocation: 'none',
   listenPort: 6881, dhtListenPort: 6881, btTracker: '', btMaxPeers: 55,
   seedRatio: '0.0', seedTime: '0', minSplitSize: '', userAgent: '', proxy: '',
   disableDht: false, disableDht6: false, disablePeerExchange: false,
   disableSaveMetadata: false, disableFollowTorrent: false,
   btForceEncryption: false, btRequireCrypto: false, btRemoveUnselected: false,
   checkIntegrity: false, autoOpenFolder: false, autoCategory: false,
+  perTaskFolder: false,
   categoryRules: {}, schedule: { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' },
   remoteEnabled: false, remoteHost: '', remotePort: 6800, remoteSecret: '',
   remoteSecretSet: false, remoteSecure: false, remotePath: '/jsonrpc', notifyDisabled: false,
@@ -267,6 +327,7 @@ export function useDownloadTasks() {
   let offNotice: (() => void) | null = null
   let offGlobal: (() => void) | null = null
   let offWs: (() => void) | null = null
+  let offEngine: (() => void) | null = null
 
   async function refreshStatus() {
     try {
@@ -322,6 +383,20 @@ export function useDownloadTasks() {
       logErr('download/disk', e)
       return null
     }
+  }
+
+  // 下载前探测远端文件大小。错误向上抛，由页面按 R9 统一 toast + logErr。
+  async function probeUrls(uris: string[]): Promise<DlProbeResult | null> {
+    return unwrap<DlProbeResult>(await DlProbeUrl(JSON.stringify(uris)))
+  }
+
+  // 换电脑续传：扫描旧会话 + 本机下载目录；错误向上抛给导入弹框。
+  async function scanImport(rootDir: string, sessionPath: string): Promise<DlImportPreview | null> {
+    return unwrap<DlImportPreview>(await DlImportScan(rootDir, sessionPath))
+  }
+
+  async function commitImport(items: DlImportItem[], paused: boolean, checkIntegrity: boolean): Promise<DlImportResult | null> {
+    return unwrap<DlImportResult>(await DlImportCommit(JSON.stringify({ items, paused, checkIntegrity })))
   }
 
   // 事件 1s 一次；兜底放到 8s，别和后端 ticker 一起挤 aria2 的单线程 RPC 队列。
@@ -383,17 +458,33 @@ export function useDownloadTasks() {
     }
   }
 
-  async function addBatch(uris: string[], dir = ''): Promise<boolean> {
+  // silent 供「每行单独目录」的多分组提交用：分组逐批调后端，
+  // 但成功提示和任务刷新只在最后统一做一次，避免弹 N 条 toast。
+  async function addBatch(uris: string[], dir = '', silent = false): Promise<boolean> {
     if (!uris.length) return false
     try {
       unwrap(await DlBatchAdd(JSON.stringify(uris), dir))
-      toast.success(t('dlAdded'))
-      await refreshTasks()
+      if (!silent) {
+        toast.success(t('dlAdded'))
+        await refreshTasks()
+      }
       return true
     } catch (e) {
       toast.error(getErrorMessage(e))
       logErr('download/batch', e)
       return false
+    }
+  }
+
+  // 新建任务里给单个下载挑保存目录，复用宿主的原生「选择目录」对话框。
+  async function pickDir(title: string): Promise<string> {
+    try {
+      const p = unwrap<string>(await SelectLocalDirectory(title))
+      return typeof p === 'string' ? p : ''
+    } catch (e) {
+      logErr('download/pickDir', e)
+      toast.error(getErrorMessage(e))
+      return ''
     }
   }
 
@@ -693,6 +784,14 @@ export function useDownloadTasks() {
       status.value = { ...status.value, wsConnected: data === true }
     })
     offWs = typeof off4 === 'function' ? (off4 as () => void) : null
+    const off5 = Events.On('quickdock:dl:engine', (ev: any) => {
+      const data = ev?.data ?? ev
+      const phase = data && typeof data === 'object' ? String(data.phase || '') : ''
+      if (phase === 'recovering') toast.error(t('dlEngineRecovering'))
+      else if (phase === 'recovered') toast.success(t('dlEngineRecovered'))
+      else if (phase === 'failed') toast.error(t('dlEngineRecoverFailed'))
+    })
+    offEngine = typeof off5 === 'function' ? (off5 as () => void) : null
     await refreshStatus()
     await refreshOptions()
     if (status.value.installed) {
@@ -707,13 +806,15 @@ export function useDownloadTasks() {
     offNotice?.(); offNotice = null
     offGlobal?.(); offGlobal = null
     offWs?.(); offWs = null
+    offEngine?.(); offEngine = null
     poll.stop()
   })
 
   return {
     status, statusReady, options, tasks, busy, error, speedHistory, uploadHistory, global,
-    refreshStatus, refreshOptions, refreshTasks, refreshGlobal, checkDisk,
-    enable, disable, add, addBatch, addTorrent, addMetalink, pickFile,
+    refreshStatus, refreshOptions, refreshTasks, refreshGlobal, checkDisk, probeUrls,
+    scanImport, commitImport,
+    enable, disable, add, addBatch, addTorrent, addMetalink, pickFile, pickDir,
     pause, forcePause, resume, remove, pauseMany, resumeMany, removeMany,
     pauseAll, resumeAll, purgeResults, changePosition, changeUri,
     detailOf, setTaskOption, setFileSelection,

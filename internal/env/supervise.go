@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"quickdock/internal/aria2"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 )
@@ -181,6 +182,18 @@ func (m *Manager) ReclaimOrphans(ctx context.Context) {
 			st, e := m.Status(rt, ins.Version)
 			if e != nil || !st.Running {
 				continue
+			}
+			// aria2 特例：端口能连上、RPC 也有响应，说明它正在正常工作（可能是
+			// 另一个 QuickDock 实例刚拉起的，或用户自己启动的 daemon）。回收它只会
+			// 制造 connectex「连接被拒绝」，实测曾出现「启动 1 秒后即被杀」的重启风暴。
+			// 代价是这个实例不被本会话 svcMgr 托管，但功能正常，优于误杀。
+			if rt == RuntimeAria2 {
+				if cfg, e := aria2.LoadConfig(); e == nil {
+					if healthy, _ := daemonProbe(cfg); healthy {
+						logger.I("[env] %s(%s) daemon RPC 健康，跳过孤儿回收", rt, ins.Version)
+						continue
+					}
+				}
 			}
 			logger.I("[env] 检测到 %s(%s) 上次会话遗留的孤儿进程，开始回收", rt, ins.Version)
 			if err := m.Stop(rt, ins.Version); err != nil {

@@ -15,13 +15,14 @@ import {
   ClipboardPaste, Info, Folder, Clock, RotateCcw, Plus, AlertCircle,
   ChevronDown, ChevronUp, Gauge, Activity, Link, Timer,
   ArrowUp, ArrowDown, Magnet, FileArchive, Users,
-  Shield, Zap, ExternalLink, Hash, Cpu, Radio, Check,
+  Shield, Zap, ExternalLink, Hash, Cpu, Radio, Check, FolderInput,
 } from '@lucide/vue'
 import {
   useDownloadTasks, formatBytes, formatSpeed, formatEta, formatTime, formatRatio,
 } from '../composables/useDownloadTasks'
 import type {
-  DlTask, DlDetail, DlOptionsView, DlEngineInfo,
+  DlTask, DlDetail, DlOptionsView, DlEngineInfo, DlProbeResult,
+  DlImportItem, DlImportPreview, DlImportResult,
 } from '../composables/useDownloadTasks'
 import { useToast } from '../composables/useToast'
 import { copyToClipboard } from '../utils/clipboard'
@@ -38,7 +39,8 @@ const {
   pause, forcePause, resume, remove, pauseMany, resumeMany, removeMany,
   pauseAll, resumeAll, purgeResults, changePosition, changeUri,
   detailOf, setTaskOption, setFileSelection, globalOptions, setGlobalOption,
-  engineInfo, shutdown, reveal, saveOptions, checkDisk,
+  engineInfo, shutdown, reveal, saveOptions, checkDisk, probeUrls, pickDir,
+  scanImport, commitImport,
 } = useDownloadTasks()
 
 // ===== 新建任务（弹框） =====
@@ -62,6 +64,21 @@ const advForm = ref({
 })
 const diskSpace = ref<{ path: string; total: number; free: number; used: number } | null>(null)
 let diskTimer: ReturnType<typeof setTimeout> | null = null
+// 下载前探测：拿到远端真实大小后，才能判断目标盘能不能装下。
+const probe = ref<DlProbeResult | null>(null)
+const probing = ref(false)
+const probeError = ref('')
+const enoughSpace = computed(() => {
+  if (status.value.remote) return true
+  const need = probe.value?.total ?? 0
+  if (need <= 0) return true
+  const free = diskSpace.value?.free ?? 0
+  return free <= 0 || free >= need
+})
+
+function clearProbe() { probe.value = null; probeError.value = '' }
+// 链接或模式一变，旧的检测结果就不再适用，避免拿 A 链接的大小去判断 B 链接。
+watch([url, batchText, addMode], clearProbe)
 
 async function refreshDisk() {
   diskSpace.value = await checkDisk(dir.value.trim() || options.value.downloadDir)
@@ -73,13 +90,124 @@ function scheduleDiskRefresh() {
 }
 watch(dir, scheduleDiskRefresh)
 
+interface BatchLine { uri: string; dir: string }
+interface BatchGroup { dir: string; uris: string[] }
+
+// 批量行支持「链接 | 目录」：给了目录的下载单独存到那里，没给的用统一保存目录。
+// Windows 路径不含 |，取第一个分隔符即可；同行重复链接只保留第一次。
+function parseBatchLines(): BatchLine[] {
+  const seen = new Set<string>()
+  const out: BatchLine[] = []
+  for (const line of batchText.value.split(/\r?\n/)) {
+    const idx = line.indexOf('|')
+    const uri = (idx < 0 ? line : line.slice(0, idx)).trim()
+    const customDir = idx < 0 ? '' : line.slice(idx + 1).trim()
+    if (!uri || !isSupportedUri(uri) || seen.has(uri)) continue
+    seen.add(uri)
+    out.push({ uri, dir: customDir })
+  }
+  return out
+}
+
+// 按目标目录分组，一次 DlBatchAdd 只处理同目录的一批链接。
+function batchGroups(): BatchGroup[] {
+  const fallback = dir.value.trim() || options.value.downloadDir
+  const map = new Map<string, string[]>()
+  for (const line of parseBatchLines()) {
+    const d = line.dir || fallback
+    map.set(d, [...(map.get(d) || []), line.uri])
+  }
+  return [...map].map(([d, uris]) => ({ dir: d, uris }))
+}
+
+async function chooseDir() {
+  const p = await pickDir(t('dlPickDirTitle'))
+  if (p) dir.value = p
+}
+
 async function confirmDiskSpace(): Promise<boolean> {
   // 远程引擎把文件写在远端，本机剩余空间说明不了问题，直接放行。
   if (status.value.remote) return true
-  const d = await checkDisk(dir.value.trim() || options.value.downloadDir)
-  diskSpace.value = d
-  if (!d || d.free <= 0 || d.free >= 1024 ** 3) return true
-  return toast.confirm(t('dlDiskLowConfirm', { free: formatBytes(d.free) }))
+  const mainDir = dir.value.trim() || options.value.downloadDir
+  const sizeByUri = new Map<string, number>()
+  for (const it of probe.value?.items ?? []) {
+    if (it.size > 0) sizeByUri.set(it.url, it.size)
+  }
+  // 每行可以指定不同目录：按目录分别累加所需大小、分别查空间，
+  // 否则会把 A 盘的文件算到 B 盘上，误报或漏报。
+  const groups: { dir: string; need: number }[] = addMode.value === 'batch'
+    ? batchGroups().map((g) => ({
+        dir: g.dir,
+        need: g.uris.reduce((sum, u) => sum + (sizeByUri.get(u) ?? 0), 0),
+      }))
+    : [{ dir: mainDir, need: probe.value?.total ?? 0 }]
+  for (const g of groups) {
+    const d = await checkDisk(g.dir)
+    if (g.dir === mainDir) diskSpace.value = d
+    if (!d || d.free <= 0) continue
+    if (g.need > 0 && g.need > d.free) {
+      return toast.confirm(t('dlProbeNotEnoughConfirm', {
+        size: formatBytes(g.need), free: formatBytes(d.free),
+      }))
+    }
+    if (d.free < 1024 ** 3) {
+      return toast.confirm(t('dlDiskLowConfirm', { free: formatBytes(d.free) }))
+    }
+  }
+  return true
+}
+
+// 探测只覆盖 http / https：磁力、种子、Metalink 的大小要等 aria2 拿到元数据才知道。
+function probeUris(): string[] {
+  const lines = addMode.value === 'batch'
+    ? parseBatchLines().map((x) => x.uri)
+    : [url.value.trim()]
+  const valid = [...new Set(lines.filter(Boolean).filter(isSupportedUri))]
+  return valid.filter((x) => /^https?:\/\//i.test(x))
+}
+
+async function doProbe() {
+  if (probing.value) return
+  const lines = addMode.value === 'batch'
+    ? batchText.value.split(/\r?\n/).map((x) => x.split('|')[0].trim()).filter(Boolean)
+    : (url.value.trim() ? [url.value.trim()] : [])
+  const all = lines.filter(isSupportedUri)
+  if (!all.length) { toast.error(t('dlProbeNoUrl')); return }
+  const uris = probeUris()
+  if (!uris.length) { toast.error(t('dlProbeUnsupported')); return }
+  probing.value = true
+  clearProbe()
+  try {
+    const r = await probeUrls(uris)
+    if (!r) { probeError.value = t('dlProbeFailed', { error: t('dlProbeEmpty') }); return }
+    probe.value = r
+    await refreshDisk()
+  } catch (e) {
+    logErr('download/probe', e)
+    toast.error(getErrorMessage(e))
+    probeError.value = t('dlProbeFailed', { error: getErrorMessage(e) })
+  } finally {
+    probing.value = false
+  }
+}
+
+// 提交前兜底探测：用户没手动点「检测大小」也要拿到真实大小，
+// 否则 confirmDiskSpace 只能退回「盘快满了」的模糊提示，500G 的文件照样
+// 会被加进只剩 92G 的盘，最后把 aria2 写盘卡死。
+// 探测失败 / 协议不支持时静默放行，不阻断添加。
+async function ensureProbe() {
+  if (status.value.remote || probe.value) return
+  const uris = probeUris()
+  if (!uris.length) return
+  probing.value = true
+  try {
+    const r = await probeUrls(uris)
+    if (r) probe.value = r
+  } catch (e) {
+    logErr('download/probe', e)
+  } finally {
+    probing.value = false
+  }
 }
 
 function modeLabel(m: AddMode): string {
@@ -94,12 +222,13 @@ function openAdd() {
   ctx.value = null
   selectedId.value = ''
   showSettings.value = false
+  showImport.value = false
   showAdd.value = true
   void focusAddInput()
   void refreshDisk()
 }
 
-function closeAdd() { showAdd.value = false }
+function closeAdd() { showAdd.value = false; clearProbe() }
 
 async function focusAddInput() {
   await nextTick()
@@ -125,6 +254,155 @@ const engine = ref<DlEngineInfo | null>(null)
 const globalOpts = ref<Record<string, string>>({})
 const globalKey = ref('max-overall-download-limit')
 const globalVal = ref('')
+
+// ===== 换电脑续传（导入） =====
+// 会话文件给 URL，本机目录给 .aria2 / 数据文件；两者按文件名对上号后
+// 用新的 dir 重新 addUri。所有可编辑字段提交前都要回传后端重新校验。
+const showImport = ref(false)
+const importDir = ref('')
+const importSession = ref('')
+const importPreview = ref<DlImportPreview | null>(null)
+const importItems = ref<DlImportItem[]>([])
+const importScanning = ref(false)
+const importSubmitting = ref(false)
+const importPaused = ref(false)
+const importCheckIntegrity = ref(false)
+const importResult = ref<DlImportResult | null>(null)
+const importError = ref('')
+
+const importCheckedCount = computed(() =>
+  importItems.value.filter((x) => x.checked && x.name.trim() && x.uris[0]?.trim()).length)
+const importAllChecked = computed(() =>
+  importItems.value.length > 0 && importItems.value.every((x) => x.checked))
+const importFailedActions = computed(() =>
+  (importResult.value?.actions || []).filter((a) => !a.ok))
+// 模板里不写可选链 + 非空断言：vue-tsc 对 v-if 的窄化不覆盖插值表达式。
+const importRootDir = computed(() => importPreview.value?.rootDir || '')
+const importLocalSession = computed(() => importPreview.value?.localSession || '')
+const importIsRemote = computed(() => !!importPreview.value?.remote)
+const importSummary = computed(() => {
+  const p = importPreview.value
+  return p ? t('dlImportScanSummary', { controls: p.controls, tasks: p.sessionTasks, count: p.items.length }) : ''
+})
+
+function openImport() {
+  ctx.value = null
+  selectedId.value = ''
+  showAdd.value = false
+  showSettings.value = false
+  showImport.value = true
+  importResult.value = null
+  importError.value = ''
+  if (!importDir.value) importDir.value = options.value.downloadDir || ''
+  if (importItems.value.length === 0 && importDir.value.trim()) void runImportScan()
+}
+
+function closeImport() { showImport.value = false }
+
+async function runImportScan() {
+  if (importScanning.value) return
+  if (!importDir.value.trim()) { importError.value = t('dlImportNeedDir'); return }
+  importScanning.value = true
+  importError.value = ''
+  importResult.value = null
+  try {
+    const p = await scanImport(importDir.value.trim(), importSession.value.trim())
+    if (!p) { importError.value = t('dlImportScanEmpty'); return }
+    importPreview.value = p
+    importDir.value = p.rootDir
+    // 浅拷贝每一行：表格里的编辑不能改到上一次扫描的快照。
+    importItems.value = p.items.map((it) => ({
+      ...it, uris: [...(it.uris || [])], options: { ...(it.options || {}) },
+    }))
+  } catch (e) {
+    logErr('download/importScan', e)
+    importError.value = getErrorMessage(e)
+  } finally {
+    importScanning.value = false
+  }
+}
+
+async function chooseImportDir() {
+  const p = await pickDir(t('dlImportPickFolder'))
+  if (!p) return
+  importDir.value = p
+  await runImportScan()
+}
+
+async function chooseImportSession() {
+  const p = await pickFile(t('dlImportPickSession'))
+  if (!p) return
+  importSession.value = p
+  await runImportScan()
+}
+
+function useLocalSession() {
+  const p = importPreview.value?.localSession
+  if (!p) { importError.value = t('dlImportNeedDir'); return }
+  importSession.value = p
+  void runImportScan()
+}
+
+function clearImportSession() {
+  importSession.value = ''
+  void runImportScan()
+}
+
+// 多条镜像链接只露出第一条可改；编辑首条时保留其余镜像。
+function onImportUriInput(i: number, e: Event) {
+  const it = importItems.value[i]
+  if (!it) return
+  const v = (e.target as HTMLInputElement).value.trim()
+  it.uris = v ? [v, ...it.uris.slice(1)] : it.uris.slice(1)
+}
+
+function toggleImportAll() {
+  const next = !importAllChecked.value
+  importItems.value.forEach((x) => { x.checked = next })
+}
+
+function importStateLabel(s: string): string {
+  const map: Record<string, string> = {
+    resume: 'dlImportStateResume', partial: 'dlImportStatePartial', fresh: 'dlImportStateFresh',
+  }
+  return t(map[s] || s)
+}
+
+function importReasonText(r: string): string {
+  if (!r) return ''
+  return r.startsWith('dlImportReason') ? t(r) : r
+}
+
+async function submitImport() {
+  const items = importItems.value.filter((x) => x.checked && x.name.trim() && x.uris[0]?.trim())
+  if (!items.length) { toast.error(t('dlImportNoSelection')); return }
+  if (!status.value.running) { toast.error(t('dlEngineNotReady')); return }
+  importSubmitting.value = true
+  importError.value = ''
+  try {
+    const r = await commitImport(items, importPaused.value, importCheckIntegrity.value)
+    if (!r) { importError.value = t('dlImportScanEmpty'); return }
+    importResult.value = r
+    if (r.added > 0) {
+      toast.success(t('dlImportDone', { added: r.added, skipped: r.skipped }))
+      await refreshTasks()
+      if (r.skipped === 0) showImport.value = false
+      else {
+        // 成功的行从表里去掉，用户修好失败项后可以直接再提交一次。
+        const okNames = new Set(r.actions.filter((a) => a.ok).map((a) => a.name))
+        importItems.value = importItems.value.filter((x) => !okNames.has(x.name))
+      }
+    } else {
+      toast.error(t('dlImportDone', { added: 0, skipped: r.skipped }))
+    }
+  } catch (e) {
+    logErr('download/importCommit', e)
+    toast.error(getErrorMessage(e))
+    importError.value = getErrorMessage(e)
+  } finally {
+    importSubmitting.value = false
+  }
+}
 
 // ===== 详情弹框 =====
 type DetailTab = 'overview' | 'files' | 'uris' | 'peers' | 'servers' | 'options' | 'torrent'
@@ -259,6 +537,7 @@ function statusKey(s: string): string {
 function sourceLabel(s: string): string {
   if (s === 'manual') return t('dlSourceManual')
   if (s === 'batch') return t('dlSourceBatch')
+  if (s === 'import') return t('dlSourceImport')
   if (s === 'torrent') return t('dlModeTorrent')
   if (s === 'metalink') return t('dlModeMetalink')
   return s || '-'
@@ -408,6 +687,7 @@ async function submit() {
   if (!status.value.running || submitting.value) return
   submitting.value = true
   try {
+    await ensureProbe()
     if (!await confirmDiskSpace()) return
     let ok = false
     if (addMode.value === 'torrent' || addMode.value === 'metalink') {
@@ -417,11 +697,19 @@ async function submit() {
         : await addMetalink(filePath.value, dir.value.trim(), buildOpts())
     } else if (addMode.value === 'batch') {
       const raw = batchText.value.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)
-      const uris = [...new Set(raw.filter(isSupportedUri))]
-      if (!uris.length) { toast.error(t('dlInvalidUrls')); return }
-      const skipped = raw.length - uris.length
+      const lines = parseBatchLines()
+      if (!lines.length) { toast.error(t('dlInvalidUrls')); return }
+      const skipped = raw.length - lines.length
       if (skipped > 0) toast.success(t('dlSkippedUrls', { count: skipped }))
-      ok = await addBatch(uris, dir.value.trim())
+      // 不同目录分组提交；成功提示与刷新统一做一次，避免多组弹多条 toast。
+      ok = true
+      for (const g of batchGroups()) {
+        if (!await addBatch(g.uris, g.dir, true)) { ok = false; break }
+      }
+      if (ok) {
+        toast.success(t('dlAdded'))
+        await refreshTasks()
+      }
     } else {
       if (!isSupportedUri(url.value)) { toast.error(t('dlInvalidUrl')); return }
       ok = await add(url.value.trim(), dir.value.trim(), buildOpts())
@@ -431,6 +719,7 @@ async function submit() {
       batchText.value = ''
       filePath.value = ''
       advanced.value = false
+      clearProbe()
       showAdd.value = false
     }
   } finally {
@@ -453,6 +742,8 @@ async function pasteLinks() {
 
 // ===== 设置 =====
 function openSettings() {
+  showAdd.value = false
+  showImport.value = false
   settingsForm.value = JSON.parse(JSON.stringify(options.value)) as DlOptionsView
   settingsForm.value.categoryRules = { ...(options.value.categoryRules || {}) }
   settingsForm.value.schedule = { ...(options.value.schedule || { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' }) }
@@ -472,7 +763,7 @@ function resetOptions() {
     disableSaveMetadata: false, disableFollowTorrent: false,
     btForceEncryption: false, btRequireCrypto: false,
     btRemoveUnselected: false, checkIntegrity: false,
-    autoOpenFolder: false, autoCategory: false,
+    autoOpenFolder: false, autoCategory: false, perTaskFolder: false,
     categoryRules: {},
     schedule: { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' },
     remoteEnabled: false, remoteHost: '', remotePort: 6800, remoteSecret: '',
@@ -651,7 +942,8 @@ function onKeydown(e: KeyboardEvent) {
   if (e.isComposing || e.keyCode === 229) return
   if (e.key === 'Escape') {
     ctx.value = null
-    if (showAdd.value) showAdd.value = false
+    if (showImport.value) showImport.value = false
+    else if (showAdd.value) showAdd.value = false
     else if (showSettings.value) showSettings.value = false
     else if (selectedId.value) selectedId.value = ''
   }
@@ -686,6 +978,10 @@ onUnmounted(() => {
           class="qd-btn qd-btn-primary" :disabled="!status.running"
           :title="status.running ? t('dlAddTitle') : t('dlEngineNotReady')" @click="openAdd"
         ><Plus :size="14" />{{ t('dlAddTitle') }}</button>
+        <button
+          class="qd-btn qd-btn-ghost" :disabled="!status.running"
+          :title="status.running ? t('dlImportTitle') : t('dlEngineNotReady')" @click="openImport"
+        ><FolderInput :size="14" />{{ t('dlImportTitle') }}</button>
         <span class="qd-action-sep"></span>
         <div class="qd-action-group">
           <button class="qd-btn qd-btn-ghost" @click="openSettings">
@@ -877,6 +1173,123 @@ onUnmounted(() => {
       <button class="dl-ctx-item is-danger" @click="ctxRemove"><Trash2 :size="14" />{{ t('dlRemove') }}</button>
     </div>
 
+    <!-- 换电脑续传：旧会话给 URL，本机目录给 .aria2 / 数据文件 -->
+    <Teleport to="body">
+      <Transition name="dl-modal">
+        <div v-if="showImport" class="dl-modal-overlay" @mousedown.self="closeImport">
+          <div class="dl-modal dl-modal-import" role="dialog" :aria-label="t('dlImportTitle')">
+            <header class="dl-modal-head">
+              <FolderInput :size="15" class="dl-modal-head-icon" />
+              <span class="dl-modal-title">{{ t('dlImportTitle') }}</span>
+              <span class="dl-modal-sub">{{ importRootDir }}</span>
+              <button class="qd-icon-btn" :title="t('dlClose')" @click="closeImport"><X :size="14" /></button>
+            </header>
+
+            <div class="dl-modal-body">
+              <section class="dl-modal-section">
+                <h4>{{ t('dlImportSectionPrepare') }}</h4>
+                <p class="dl-hint">{{ t('dlImportIntro') }}</p>
+                <p class="dl-hint">{{ t('dlImportSessionHint', { path: importLocalSession }) }}</p>
+                <p v-if="importIsRemote" class="dl-hint is-warn">{{ t('dlImportRemoteHint') }}</p>
+              </section>
+
+              <section class="dl-modal-section">
+                <h4>{{ t('dlImportSectionSource') }}</h4>
+                <label class="dl-field">
+                  <span>{{ t('dlImportDir') }}</span>
+                  <div class="dl-add-input-row">
+                    <input v-model="importDir" class="qd-input" :placeholder="t('dlImportDirPlaceholder')" @keydown.enter="runImportScan" />
+                    <button class="qd-btn qd-btn-sm dl-row-btn" :title="status.remote ? t('dlPickDirRemoteHint') : t('dlBrowseDir')" @click="chooseImportDir">
+                      <Folder :size="14" />{{ t('dlBrowseDir') }}
+                    </button>
+                  </div>
+                </label>
+                <label class="dl-field">
+                  <span>{{ t('dlImportSession') }}</span>
+                  <div class="dl-add-input-row">
+                    <input v-model="importSession" class="qd-input" :placeholder="t('dlImportSessionPlaceholder')" @keydown.enter="runImportScan" />
+                    <button class="qd-btn qd-btn-sm dl-row-btn" @click="chooseImportSession">
+                      <FileArchive :size="14" />{{ t('dlImportPickSession') }}
+                    </button>
+                  </div>
+                </label>
+                <div class="dl-table-tools">
+                  <button class="qd-btn qd-btn-primary qd-btn-sm" :disabled="importScanning || !importDir.trim()" @click="runImportScan">
+                    <RefreshCw :size="14" />{{ importScanning ? t('dlImportScanning') : t('dlImportScan') }}
+                  </button>
+                  <button class="qd-btn qd-btn-sm" :disabled="importScanning" @click="useLocalSession">{{ t('dlImportUseLocalSession') }}</button>
+                  <button class="qd-btn qd-btn-sm" :disabled="importScanning || !importSession" @click="clearImportSession">{{ t('dlImportClearSession') }}</button>
+                  <span class="dl-grow"></span>
+                  <span v-if="importSummary" class="dl-hint">{{ importSummary }}</span>
+                </div>
+                <p v-if="importError" class="dl-hint is-warn">{{ importError }}</p>
+              </section>
+
+              <section class="dl-modal-section">
+                <h4>{{ t('dlImportSectionTasks') }}</h4>
+                <div v-if="!importItems.length" class="dl-table-empty">{{ t('dlImportEmpty') }}</div>
+                <div v-else class="dl-import-scroll">
+                  <table class="dl-table dl-import-table">
+                    <thead>
+                      <tr>
+                        <th class="is-check">
+                          <input type="checkbox" class="dl-check" :checked="importAllChecked" :disabled="!importItems.length" :aria-label="t('dlSelectAll')" @change="toggleImportAll" />
+                        </th>
+                        <th>{{ t('dlImportColName') }}</th>
+                        <th>{{ t('dlImportColUrl') }}</th>
+                        <th>{{ t('dlImportColDir') }}</th>
+                        <th>{{ t('dlImportColSize') }}</th>
+                        <th>{{ t('dlImportColState') }}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="(it, i) in importItems" :key="i" :class="{ 'is-off': !it.checked }">
+                        <td><input v-model="it.checked" type="checkbox" class="dl-check" :aria-label="it.name" /></td>
+                        <td>
+                          <input v-model="it.name" class="qd-input dl-import-input" :aria-label="t('dlImportColName')" />
+                          <div v-if="importReasonText(it.reason)" class="dl-import-note">{{ importReasonText(it.reason) }}</div>
+                        </td>
+                        <td>
+                          <input
+                            class="qd-input dl-import-input" :value="it.uris[0] || ''"
+                            :placeholder="t('dlImportUrlPlaceholder')" :aria-label="t('dlImportColUrl')"
+                            @input="onImportUriInput(i, $event)"
+                          />
+                          <div v-if="it.uris.length > 1" class="dl-import-note">{{ t('dlImportMirrors', { count: it.uris.length - 1 }) }}</div>
+                        </td>
+                        <td><input v-model="it.dir" class="qd-input dl-import-input" :title="it.dir" :aria-label="t('dlImportColDir')" /></td>
+                        <td class="is-nowrap">{{ it.size > 0 ? formatBytes(it.size) : '-' }}</td>
+                        <td><span class="dl-import-state" :class="'is-' + it.state">{{ importStateLabel(it.state) }}</span></td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="dl-import-options">
+                  <label class="dl-check-field"><input v-model="importCheckIntegrity" type="checkbox" class="dl-check" /><span>{{ t('dlImportCheckIntegrity') }}</span></label>
+                  <label class="dl-check-field"><input v-model="importPaused" type="checkbox" class="dl-check" /><span>{{ t('dlImportPaused') }}</span></label>
+                </div>
+                <p class="dl-hint">{{ t('dlImportOptionsHint') }}</p>
+                <div v-if="importResult" class="dl-import-result">
+                  <p class="dl-hint">{{ t('dlImportResult', { added: importResult.added, skipped: importResult.skipped }) }}</p>
+                  <p v-for="(a, j) in importFailedActions" :key="j" class="dl-hint is-warn">{{ a.name }}：{{ a.error }}</p>
+                </div>
+              </section>
+            </div>
+
+            <footer class="dl-modal-foot">
+              <span class="dl-grow"></span>
+              <button class="qd-btn qd-btn-sm" @click="closeImport">{{ t('cancel') }}</button>
+              <button
+                class="qd-btn qd-btn-primary qd-btn-sm"
+                :disabled="!status.running || importSubmitting || !importCheckedCount"
+                @click="submitImport"
+              ><FolderInput :size="14" />{{ t('dlImportSubmit', { count: importCheckedCount }) }}</button>
+            </footer>
+          </div>
+        </div>
+      </Transition>
+    </Teleport>
+
     <!-- 新建下载弹框：与详情 / 设置共用同一套遮罩与面层 -->
     <Teleport to="body">
       <Transition name="dl-modal">
@@ -910,13 +1323,20 @@ onUnmounted(() => {
                     @keydown.enter="submit"
                   />
                   <button class="qd-icon-btn" :title="t('dlPaste')" @click="pasteLinks"><ClipboardPaste :size="14" /></button>
+                  <button class="qd-btn qd-btn-sm dl-row-btn" :disabled="probing" @click="doProbe">
+                    <Search :size="14" />{{ probing ? t('dlProbing') : t('dlProbe') }}
+                  </button>
                 </div>
                 <template v-else-if="addMode === 'batch'">
                   <textarea
                     ref="batchInput" v-model="batchText" class="qd-input dl-add-textarea"
                     :placeholder="t('dlBatchPlaceholder')" @keydown.ctrl.enter="submit"
                   ></textarea>
+                  <p class="dl-hint">{{ t('dlBatchDirHint') }}</p>
                   <div class="dl-add-tools">
+                    <button class="qd-btn qd-btn-sm" :disabled="probing" @click="doProbe">
+                      <Search :size="14" />{{ probing ? t('dlProbing') : t('dlProbe') }}
+                    </button>
                     <button class="qd-btn qd-btn-sm" @click="pasteLinks">
                       <ClipboardPaste :size="14" />{{ t('dlPaste') }}
                     </button>
@@ -934,13 +1354,42 @@ onUnmounted(() => {
                 <h4>{{ t('dlAddSectionTarget') }}</h4>
                 <label class="dl-field">
                   <span>{{ t('dlAddDir') }}</span>
-                  <input v-model="dir" class="qd-input" :placeholder="t('dlDirPlaceholder')" />
+                  <div class="dl-add-input-row">
+                    <input v-model="dir" class="qd-input" :placeholder="t('dlDirPlaceholder')" />
+                    <button
+                      class="qd-btn qd-btn-sm dl-row-btn"
+                      :title="status.remote ? t('dlPickDirRemoteHint') : t('dlBrowseDir')"
+                      @click="chooseDir"
+                    >
+                      <Folder :size="14" />{{ t('dlBrowseDir') }}
+                    </button>
+                  </div>
                 </label>
                 <p class="dl-hint">{{ t('dlAddDirHint') }}</p>
+                <p v-if="options.perTaskFolder" class="dl-hint">{{ t('dlPerTaskFolderOn') }}</p>
+                <p v-else class="dl-hint">{{ t('dlPerTaskFolderOff') }}</p>
                 <p v-if="diskSpace" class="dl-hint">
                   {{ t('dlDiskSpace', { free: formatBytes(diskSpace.free), total: formatBytes(diskSpace.total) }) }}
                 </p>
                 <p v-else-if="status.remote" class="dl-hint">{{ t('dlDiskRemoteHint') }}</p>
+                <template v-if="probe">
+                  <p class="dl-hint">
+                    {{ t('dlProbeResult', {
+                      size: probe.total > 0 ? formatBytes(probe.total) : t('dlProbeUnknownSize'),
+                      count: probe.items.length,
+                    }) }}
+                  </p>
+                  <p v-if="status.remote" class="dl-hint">{{ t('dlProbeRemote') }}</p>
+                  <p v-else-if="probe.total > 0 && diskSpace" class="dl-hint" :class="{ 'is-warn': !enoughSpace }">
+                    {{ t(enoughSpace ? 'dlProbeEnough' : 'dlProbeNotEnough', {
+                      size: formatBytes(probe.total), free: formatBytes(diskSpace.free),
+                    }) }}
+                  </p>
+                  <p v-if="probe.unknown" class="dl-hint">
+                    {{ t('dlProbeUnknown', { count: probe.unknown }) }}
+                  </p>
+                </template>
+                <p v-if="probeError" class="dl-hint is-warn">{{ probeError }}</p>
               </div>
 
               <div v-if="advanced && addMode !== 'batch'" class="dl-modal-section">
@@ -1237,8 +1686,17 @@ onUnmounted(() => {
                   <label class="dl-field"><span>{{ t('dlSetMinSplit') }}</span><input v-model="settingsForm.minSplitSize" class="qd-input" placeholder="20M" /></label>
                   <label class="dl-field"><span>{{ t('dlSetUserAgent') }}</span><input v-model="settingsForm.userAgent" class="qd-input" /></label>
                   <label class="dl-field"><span>{{ t('dlSetProxy') }}</span><input v-model="settingsForm.proxy" class="qd-input" /></label>
+                  <label class="dl-field"><span>{{ t('dlSetFileAlloc') }}</span>
+                    <select v-model="settingsForm.fileAllocation" class="qd-input">
+                      <option value="none">{{ t('dlAllocNone') }}</option>
+                      <option value="falloc">{{ t('dlAllocFalloc') }}</option>
+                      <option value="trunc">{{ t('dlAllocTrunc') }}</option>
+                      <option value="prealloc">{{ t('dlAllocPrealloc') }}</option>
+                    </select>
+                  </label>
                 </div>
                 <p class="dl-hint">{{ t('dlOptionsHint') }}</p>
+                <p class="dl-hint">{{ t('dlSetFileAllocHint') }}</p>
               </template>
 
               <template v-else-if="settingsTab === 'bt'">
@@ -1269,9 +1727,11 @@ onUnmounted(() => {
                 <div class="dl-switch-grid">
                   <label class="dl-check-field"><input v-model="settingsForm.autoOpenFolder" type="checkbox" class="dl-check" /><span>{{ t('dlSetAutoOpen') }}</span></label>
                   <label class="dl-check-field"><input v-model="settingsForm.autoCategory" type="checkbox" class="dl-check" /><span>{{ t('dlSetAutoCategory') }}</span></label>
+                  <label class="dl-check-field"><input v-model="settingsForm.perTaskFolder" type="checkbox" class="dl-check" /><span>{{ t('dlSetPerTaskFolder') }}</span></label>
                 </div>
                 <label class="dl-field dl-field-block"><span>{{ t('dlSetCategoryRules') }}</span><textarea v-model="categoryText" class="qd-input" rows="5"></textarea></label>
                 <p class="dl-hint">{{ t('dlSetCategoryHint') }}</p>
+                <p class="dl-hint">{{ t('dlSetPerTaskFolderHint') }}</p>
                 <h4 class="dl-sub-title"><Zap :size="14" />{{ t('dlSetSchedule') }}</h4>
                 <div class="dl-switch-grid">
                   <label class="dl-check-field"><input v-model="settingsForm.schedule.enabled" type="checkbox" class="dl-check" /><span>{{ t('dlSetSchedule') }}</span></label>
@@ -1406,13 +1866,15 @@ onUnmounted(() => {
 .dl-field-block .qd-input { min-height: 88px; resize: vertical; }
 .dl-card-actions { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-5); }
 .dl-hint { margin: var(--space-3) 0 0; font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-disabled); }
+.dl-hint.is-warn { color: var(--color-danger); }
 
 /* 新建弹框内的输入区：不占列表宽度，source / target / 高级选项分段 */
 .dl-add-input-row { display: flex; align-items: center; gap: var(--space-2); }
-.dl-add-input-row .qd-input { flex: 1; min-width: 0; }
+.dl-add-input-row .qd-input { flex: 1; min-width: 0; width: auto; }
 .dl-add-textarea { min-height: 132px; height: auto; padding-top: var(--space-2); resize: vertical; }
 .dl-adv-headers { min-height: 64px; height: auto; padding-top: var(--space-2); resize: vertical; font-family: var(--font-mono); font-size: var(--text-xs); }
-.dl-add-tools { display: flex; justify-content: flex-end; margin-top: var(--space-2); }
+.dl-add-tools { display: flex; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-2); }
+.dl-row-btn { flex: none; white-space: nowrap; }
 .dl-add-file-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .dl-picked { flex: 1 1 200px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-xs); color: var(--color-text-muted); }
 .dl-check-field { display: flex; align-items: center; gap: var(--space-2); align-self: end; font-size: var(--text-sm); color: var(--color-text-secondary); }
@@ -1492,6 +1954,33 @@ onUnmounted(() => {
   background: var(--color-popover-bg); box-shadow: var(--shadow-pop);
 }
 .dl-modal-wide { width: 720px; }
+.dl-modal-import { width: 980px; max-height: calc(100vh - 60px); }
+/* 导入表：列宽固定，长 URL / 长路径靠输入框内部横向滚动，不把弹框撑爆 */
+.dl-import-scroll { max-height: 320px; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-sm); }
+.dl-import-table { table-layout: fixed; min-width: 880px; }
+.dl-import-table th.is-check { width: 34px; }
+.dl-import-table th:nth-child(2) { width: 190px; }
+.dl-import-table th:nth-child(3) { width: 280px; }
+.dl-import-table th:nth-child(4) { width: 210px; }
+.dl-import-table th:nth-child(5) { width: 82px; }
+.dl-import-table th:nth-child(6) { width: 84px; }
+.dl-import-table td.is-nowrap { white-space: nowrap; }
+.dl-import-table tr.is-off { opacity: 0.55; }
+.dl-import-input { width: 100%; min-width: 0; font-size: var(--text-2xs); }
+.dl-import-note { margin-top: 2px; font-size: var(--text-2xs); line-height: 1.4; color: var(--color-text-disabled); }
+.dl-import-state {
+  display: inline-block; padding: 1px var(--space-2); border-radius: var(--radius-full);
+  font-size: var(--text-2xs); white-space: nowrap;
+  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
+}
+.dl-import-state.is-resume { background: var(--color-success-bg); color: var(--color-success); }
+.dl-import-state.is-partial { background: var(--color-warning-bg); color: var(--color-warning); }
+.dl-import-state.is-fresh { background: var(--color-bg-tertiary); color: var(--color-text-muted); }
+.dl-import-options { display: flex; align-items: center; gap: var(--space-5); flex-wrap: wrap; }
+.dl-import-options .dl-check-field { align-self: auto; font-size: var(--text-xs); }
+.dl-import-result { padding: var(--space-3); border-radius: var(--radius-sm); background: var(--color-bg-secondary); }
+.dl-import-result .dl-hint { margin-top: 0; }
+.dl-import-result .dl-hint + .dl-hint { margin-top: var(--space-1); }
 .dl-modal-head { display: flex; align-items: center; gap: var(--space-2); flex: none; padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--color-border); }
 .dl-modal-head-icon { flex: none; color: var(--color-accent); }
 .dl-modal-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }

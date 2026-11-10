@@ -46,11 +46,12 @@ type StatusView struct {
 // DlOptionsView 是下发给前端的可编辑设置（完整表单，提交时整体回写）。
 // ⚠️ 刻意不含 secret / port：RPC 凭据只留在 Go 侧，绝不能出现在 ApiResult.data 里。
 type DlOptionsView struct {
-	DownloadDir   string `json:"downloadDir"`
-	MaxConcurrent int    `json:"maxConcurrent"`
-	Split         int    `json:"split"`
-	DownloadLimit string `json:"downloadLimit"`
-	UploadLimit   string `json:"uploadLimit"`
+	DownloadDir    string `json:"downloadDir"`
+	MaxConcurrent  int    `json:"maxConcurrent"`
+	Split          int    `json:"split"`
+	DownloadLimit  string `json:"downloadLimit"`
+	UploadLimit    string `json:"uploadLimit"`
+	FileAllocation string `json:"fileAllocation"`
 
 	ListenPort           int    `json:"listenPort"`
 	DhtListenPort        int    `json:"dhtListenPort"`
@@ -74,6 +75,7 @@ type DlOptionsView struct {
 	AutoOpenFolder bool                 `json:"autoOpenFolder"`
 	AutoCategory   bool                 `json:"autoCategory"`
 	CategoryRules  map[string]string    `json:"categoryRules"`
+	PerTaskFolder  bool                 `json:"perTaskFolder"`
 	Schedule       aria2.ScheduleConfig `json:"schedule"`
 
 	// 远程连接：RemoteSecret 是「只写」字段，optionsView 永远返回空串；
@@ -90,11 +92,12 @@ type DlOptionsView struct {
 
 func optionsView(c *aria2.Config) DlOptionsView {
 	return DlOptionsView{
-		DownloadDir:   c.DownloadDir,
-		MaxConcurrent: c.MaxConcurrent,
-		Split:         c.Split,
-		DownloadLimit: c.DownloadLimit,
-		UploadLimit:   c.UploadLimit,
+		DownloadDir:    c.DownloadDir,
+		MaxConcurrent:  c.MaxConcurrent,
+		Split:          c.Split,
+		DownloadLimit:  c.DownloadLimit,
+		UploadLimit:    c.UploadLimit,
+		FileAllocation: c.FileAllocationArg(),
 
 		ListenPort:           c.ListenPort,
 		DhtListenPort:        c.DhtListenPort,
@@ -118,6 +121,7 @@ func optionsView(c *aria2.Config) DlOptionsView {
 		AutoOpenFolder: c.AutoOpenFolder,
 		AutoCategory:   c.AutoCategory,
 		CategoryRules:  c.CategoryRules,
+		PerTaskFolder:  c.PerTaskFolder,
 		Schedule:       c.Schedule,
 
 		RemoteEnabled:   c.RemoteEnabled,
@@ -136,6 +140,10 @@ func applyOptionsInput(cfg *aria2.Config, in DlOptionsView) {
 	}
 	cfg.DownloadLimit = strings.TrimSpace(in.DownloadLimit)
 	cfg.UploadLimit = strings.TrimSpace(in.UploadLimit)
+	// 空串 / 非法值保持原样，避免旧前端把用户已选的策略改回 none。
+	if v, ok := aria2.NormalizeFileAllocation(in.FileAllocation); ok {
+		cfg.FileAllocation = v
+	}
 	if in.MaxConcurrent > 0 && in.MaxConcurrent <= 64 {
 		cfg.MaxConcurrent = in.MaxConcurrent
 	}
@@ -168,6 +176,7 @@ func applyOptionsInput(cfg *aria2.Config, in DlOptionsView) {
 	cfg.CheckIntegrity = in.CheckIntegrity
 	cfg.AutoOpenFolder = in.AutoOpenFolder
 	cfg.AutoCategory = in.AutoCategory
+	cfg.PerTaskFolder = in.PerTaskFolder
 	if in.CategoryRules != nil {
 		cfg.CategoryRules = in.CategoryRules
 	}
@@ -304,13 +313,32 @@ type DownloadService struct {
 	restCache []aria2.Status
 	tickCount int
 	forceFull atomic.Bool
+	// knownSize 记住每个任务最后一次报出的真实大小。aria2 暂停后会把它清空，
+	// 详见 taskSize 的注释。用独立锁：snapshotLocked 持 snapMu 时也要访问。
+	sizeMu    sync.RWMutex
+	knownSize map[string]taskSize
+	// aria2 只有在真正连上源站后才知道 Content-Length。排队中 / 从会话恢复 /
+	// QuickDock 刚重启的任务会一直是 0/0，此时主动探测 URL 补回总大小。
+	// tried 受 sizeMu 保护，失败也冷却，避免签名过期时每轮轮询刷网络。
+	sizeProbeTried map[string]time.Time
+	sizeProbing    atomic.Bool
 	// scheduleOn 记录当前是否处在限速时段内，避免每分钟重复下发同样的选项。
 	scheduleOn atomic.Bool
+
+	// 大文件把目标盘写满时，aria2 会卡在 write cache flush（日志实锤
+	// errNum=112 / errorCode=9 / There is not enough space on the disk），
+	// 主线程被磁盘 I/O 堵住后端口仍 Listen、RPC 却全部超时。看门狗只按端口
+	// 判断「运行中」，识别不出这种假活，所以这里自己做守卫与自愈。
+	diskCheckedAt time.Time
+	diskPaused    atomic.Bool
+	lastRecover   time.Time
+	recovering    atomic.Bool
 }
 
 func NewDownloadService(app *services.AppService) *DownloadService {
 	s := &DownloadService{
 		App: app, prev: map[string]string{}, notified: map[string]bool{},
+		knownSize: map[string]taskSize{}, sizeProbeTried: map[string]time.Time{},
 	}
 	s.forceFull.Store(true)
 	return s
@@ -461,6 +489,39 @@ func (s *DownloadService) DlDiskSpace(dir string) *services.ApiResult {
 		return services.Fail(err)
 	}
 	return services.Ok(d)
+}
+
+// DlProbeUrl 在添加任务前探测远端文件大小，供前端比对目标盘剩余空间能不能装下。
+// urlsJSON 是字符串数组；只读响应头、不下载文件字节。HEAD 拿不到长度时内部会
+// 自动回退到 GET + Range: bytes=0-0（OSS 预签名链接按 GET 签发，HEAD 会 403）。
+// 探测走独立 HTTP 客户端，与 aria2 引擎是否在本机、RPC 是否繁忙都无关。
+func (s *DownloadService) DlProbeUrl(urlsJSON string) *services.ApiResult {
+	var raw []string
+	if err := json.Unmarshal([]byte(strings.TrimSpace(urlsJSON)), &raw); err != nil {
+		return services.FailMsg("下载链接格式无效")
+	}
+	seen := make(map[string]struct{}, len(raw))
+	urls := make([]string, 0, len(raw))
+	for _, u := range raw {
+		u = strings.TrimSpace(u)
+		if u == "" {
+			continue
+		}
+		if _, ok := seen[u]; ok {
+			continue
+		}
+		seen[u] = struct{}{}
+		urls = append(urls, u)
+		if len(urls) >= aria2.ProbeMaxURLs {
+			break
+		}
+	}
+	if len(urls) == 0 {
+		return services.FailMsg("请先填写下载链接")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+	defer cancel()
+	return services.Ok(aria2.ProbeURLs(ctx, urls))
 }
 
 // DlEngineInfo 给设置页看引擎特性 / 会话 / 实际生效的全局选项（诊断用途）。
@@ -632,6 +693,17 @@ func (s *DownloadService) addOne(uri, dir, optsJSON, source string) (string, err
 			dir = d
 			opts["dir"] = d
 		}
+		if d := taskFolderDir(cfg, dir, uri); d != dir {
+			// 本机引擎先建出子目录：aria2 对不存在的 dir 行为不一致，且前端磁盘预检
+			// 与断点续传都依赖这个真实路径。远程引擎的路径属于远端机器，不能在本机建。
+			if !cfg.IsRemote() {
+				if err := os.MkdirAll(d, 0o755); err != nil {
+					return "", fmt.Errorf("创建下载子目录失败: %w", err)
+				}
+			}
+			dir = d
+			opts["dir"] = d
+		}
 	}
 	pos := takePosition(opts)
 	gid, err := c.AddURIAt([]string{uri}, opts, pos)
@@ -709,6 +781,89 @@ func categoryDir(cfg *aria2.Config, dir, uri string) string {
 		return ""
 	}
 	return filepath.Join(dir, sub)
+}
+
+// taskFolderName 从链接解析出一个可安全用作目录名的名字（不含扩展名）。
+// 拿不到可靠文件名时返回空串，调用方就不建子目录——宁可不分组也别造出怪目录。
+func taskFolderName(uri string) string {
+	if strings.HasPrefix(strings.ToLower(uri), "magnet:") {
+		// 磁力 / BT 的真实名字要等元数据，dn 也未必是文件名，交给 aria2 自己决定。
+		return ""
+	}
+	u, err := url.Parse(uri)
+	if err != nil || u.Host == "" {
+		return ""
+	}
+	name := path.Base(u.Path)
+	if decoded, e := url.PathUnescape(name); e == nil {
+		name = decoded
+	}
+	// nameFromURL 解析失败时会把整条 URL 原样返回，不能拿它当目录名。
+	if name == "" || name == "." || name == "/" || strings.Contains(name, "://") {
+		return ""
+	}
+	stem := strings.TrimSuffix(name, filepath.Ext(name))
+	if stem == "" {
+		stem = name
+	}
+	stem = strings.NewReplacer(
+		"/", "_", "\\", "_", ":", "_", "*", "_", "?", "_",
+		"\"", "_", "<", "_", ">", "_", "|", "_",
+	).Replace(stem)
+	stem = strings.Map(func(r rune) rune {
+		if r < 32 || r == 127 {
+			return -1
+		}
+		return r
+	}, stem)
+	stem = strings.Trim(stem, " .")
+	if stem == "" || stem == "." || stem == ".." {
+		return ""
+	}
+	// 80 个 rune 足够区分，也避免叠上分类目录后撞 Windows MAX_PATH。
+	if rs := []rune(stem); len(rs) > 80 {
+		stem = strings.Trim(string(rs[:80]), " .")
+	}
+	if stem == "" {
+		return ""
+	}
+	// Windows 设备保留名不能直接做目录名。
+	switch strings.ToUpper(stem) {
+	case "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5",
+		"COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4",
+		"LPT5", "LPT6", "LPT7", "LPT8", "LPT9":
+		stem = "_" + stem
+	}
+	return stem
+}
+
+// taskFolderDir 开启「每个下载单独文件夹」后返回 <dir>/<文件名>/。
+// 自动分类在前（<默认目录>/<分类>/），文件名子目录接在它下面；同名文件复用
+// 同一个目录，重新添加同一 URL 才能命中已有的 .aria2 续传控制文件。
+func taskFolderDir(cfg *aria2.Config, dir, uri string) string {
+	if !cfg.PerTaskFolder || strings.TrimSpace(dir) == "" {
+		return dir
+	}
+	folder := taskFolderName(uri)
+	if folder == "" {
+		return dir
+	}
+	if cfg.IsRemote() {
+		// 远端可能是 Linux：不能拿本机的分隔符去拼它的路径。
+		// 按原路径风格保留盘符/斜杠，避免把 /mnt/dl 拼成 \mnt\dl。
+		out := path.Join(strings.ReplaceAll(dir, "\\", "/"), folder)
+		if strings.Contains(dir, "\\") {
+			out = strings.ReplaceAll(out, "/", "\\")
+		}
+		return out
+	}
+	clean := filepath.Clean(dir)
+	out := filepath.Join(clean, folder)
+	// 双保险：清洗后的名字绝不能逃出目标目录。
+	if !strings.HasPrefix(out, clean+string(filepath.Separator)) {
+		return dir
+	}
+	return out
 }
 
 // ===== 任务控制 =====
@@ -986,6 +1141,16 @@ func (s *DownloadService) DlDetail(gid string) *services.ApiResult {
 	}
 	if files, e := c.GetFiles(gid); e == nil {
 		out.Files = toFileViews(files)
+		// 暂停后 aria2 连 files[].length / completedLength 也报 0，
+		// 详情弹框的「文件」页同样用最后一次已知值补齐（仅单文件任务）。
+		if k, ok := s.sizeOf(gid); ok && len(out.Files) == 1 {
+			if out.Files[0].Length == 0 {
+				out.Files[0].Length = k.total
+			}
+			if out.Files[0].Completed == 0 {
+				out.Files[0].Completed = k.completed
+			}
+		}
 	} else {
 		logger.W("[download] 读取文件列表失败 gid=%s: %v", gid, e)
 	}
@@ -1266,9 +1431,128 @@ func (s *DownloadService) applyRuntimeOptions(cfg *aria2.Config, reason string) 
 	if err := c.ChangeGlobalOption(bt); err != nil {
 		logger.W("[download] %s：下发 BT 选项失败（已保存，重启后生效）: %v", reason, err)
 	}
+	// file-allocation 是启动参数类选项，单独一批下发：部分 aria2 构建不接受热改，
+	// 失败也不影响前面的 core / bt，落盘后重启引擎即可生效。
+	if err := c.ChangeGlobalOption(map[string]string{"file-allocation": cfg.FileAllocationArg()}); err != nil {
+		logger.W("[download] %s：预分配策略不支持热改（已保存，重启后生效）: %v", reason, err)
+	}
 }
 
 // ===== 轮询与事件 =====
+
+// taskSize 记住 aria2 最后一次报出的真实大小。pause / forcePause 会把任务移进
+// waiting 队列并释放下载上下文，此时 tellStatus / tellWaiting 把 totalLength、
+// completedLength 乃至 files[].length 全报成 "0"（实测 500GiB 任务暂停后返回
+// 0/0/空 path、URI 全是 waiting），要等 unpause 重新连上服务器才恢复。
+// 直接把 0 渲染出去，用户会以为进度丢了。
+type taskSize struct {
+	total     int64
+	completed int64
+}
+
+// applyKnownSize 每轮快照用真实值刷新缓存；只在两个长度都为 0 时回填，
+// 免得拿旧值盖住 aria2 重新报告的真实进度。
+func (s *DownloadService) applyKnownSize(v *aria2.TaskView) {
+	s.sizeMu.Lock()
+	defer s.sizeMu.Unlock()
+	if s.knownSize == nil {
+		s.knownSize = map[string]taskSize{}
+	}
+	k := s.knownSize[v.GID]
+	if v.Total > 0 {
+		k.total = v.Total
+	}
+	if v.Completed > 0 {
+		k.completed = v.Completed
+	}
+	if v.Total == 0 && v.Completed == 0 && (k.total > 0 || k.completed > 0) {
+		v.Total, v.Completed = k.total, k.completed
+		if v.Total > 0 {
+			v.Progress = float64(v.Completed) * 100 / float64(v.Total)
+			if v.Progress > 100 {
+				v.Progress = 100
+			}
+		}
+	}
+	s.knownSize[v.GID] = k
+}
+
+func (s *DownloadService) sizeOf(gid string) (taskSize, bool) {
+	s.sizeMu.RLock()
+	defer s.sizeMu.RUnlock()
+	k, ok := s.knownSize[gid]
+	return k, ok
+}
+
+func (s *DownloadService) setKnownTotal(gid string, total int64) {
+	s.sizeMu.Lock()
+	defer s.sizeMu.Unlock()
+	if s.knownSize == nil {
+		s.knownSize = map[string]taskSize{}
+	}
+	k := s.knownSize[gid]
+	if total > k.total {
+		k.total = total
+	}
+	s.knownSize[gid] = k
+}
+
+// probeUnknownSizes 给「暂停 / 排队且长度还是 0/0」的任务异步补一次总大小。
+// 只取响应头，不下载任何字节；单飞 + 每个 gid 冷却，失败不再重试到冷却结束。
+func (s *DownloadService) probeUnknownSizes(tasks []aria2.TaskView) {
+	if len(tasks) == 0 || !s.sizeProbing.CompareAndSwap(false, true) {
+		return
+	}
+	type candidate struct{ gid, url string }
+	s.sizeMu.Lock()
+	if s.sizeProbeTried == nil {
+		s.sizeProbeTried = map[string]time.Time{}
+	}
+	now := time.Now()
+	list := make([]candidate, 0, len(tasks))
+	for _, v := range tasks {
+		if v.Total != 0 || v.Completed != 0 || v.GID == "" {
+			continue
+		}
+		if v.Status != "paused" && v.Status != "waiting" {
+			continue
+		}
+		lower := strings.ToLower(v.URL)
+		if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+			continue
+		}
+		if last, ok := s.sizeProbeTried[v.GID]; ok && now.Sub(last) < sizeProbeCooldown {
+			continue
+		}
+		s.sizeProbeTried[v.GID] = now
+		list = append(list, candidate{v.GID, v.URL})
+	}
+	s.sizeMu.Unlock()
+	if len(list) == 0 {
+		s.sizeProbing.Store(false)
+		return
+	}
+	go func() {
+		defer s.sizeProbing.Store(false)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		urls := make([]string, len(list))
+		for i, c := range list {
+			urls[i] = c.url
+		}
+		r := aria2.ProbeURLs(ctx, urls)
+		hit := false
+		for i, it := range r.Items {
+			if it.Size > 0 {
+				s.setKnownTotal(list[i].gid, it.Size)
+				hit = true
+			}
+		}
+		if hit {
+			s.invalidate()
+		}
+	}()
+}
 
 func (s *DownloadService) snapshot() ([]aria2.TaskView, error) {
 	s.snapMu.Lock()
@@ -1327,6 +1611,7 @@ func (s *DownloadService) snapshotLocked(full bool) ([]aria2.TaskView, error) {
 	out := make([]aria2.TaskView, 0, len(statuses))
 	for _, st := range statuses {
 		v := st.ToView()
+		s.applyKnownSize(&v)
 		if m, ok := byGID[v.GID]; ok {
 			v.Source = m.Source
 			v.CreatedAt = m.CreatedAt
@@ -1339,6 +1624,7 @@ func (s *DownloadService) snapshotLocked(full bool) ([]aria2.TaskView, error) {
 		}
 		out = append(out, v)
 	}
+	s.probeUnknownSizes(out)
 	return out, nil
 }
 
@@ -1442,10 +1728,16 @@ func (s *DownloadService) emitSnapshot() {
 			s.forceFull.Store(true)
 		}
 		s.failStreak++
-		if s.failStreak == 3 || s.failStreak%30 == 0 {
-			logger.W("[download] 轮询 aria2 连续失败 %d 次: %v", s.failStreak, err)
+		streak := s.failStreak
+		if streak == 3 || streak%30 == 0 {
+			logger.W("[download] 轮询 aria2 连续失败 %d 次: %v", streak, err)
 		}
 		s.mu.Unlock()
+		// 连续失败到阈值才自愈：单次超时可能只是 daemon 正在保存会话 / 合并分片。
+		// 异步执行，别把 Stop+Start 阻塞在快照推送链路上。
+		if streak >= 6 {
+			go s.recoverEngine(err)
+		}
 		return
 	}
 	if s.failStreak >= 3 {
@@ -1481,6 +1773,18 @@ func (s *DownloadService) emitSnapshot() {
 			delete(s.prev, gid)
 		}
 	}
+	s.sizeMu.Lock()
+	for gid := range s.knownSize {
+		if !alive[gid] {
+			delete(s.knownSize, gid)
+		}
+	}
+	for gid := range s.sizeProbeTried {
+		if !alive[gid] {
+			delete(s.sizeProbeTried, gid)
+		}
+	}
+	s.sizeMu.Unlock()
 	s.mu.Unlock()
 
 	if app := s.App.App(); app != nil {
@@ -1511,6 +1815,144 @@ func (s *DownloadService) emitSnapshot() {
 	// 同时完成多个任务时只打开第一个所在目录，避免一次弹出一堆资源管理器窗口。
 	if len(newly) > 0 {
 		s.onCompleted(newly[0])
+	}
+	s.maybeGuardDisk(tasks)
+}
+
+// ===== 磁盘守卫 / 引擎自愈 =====
+
+const (
+	// 0/0 任务的 URL 大小探测：失败（预签名过期等）也冷却，别每轮发请求。
+	sizeProbeCooldown = 5 * time.Minute
+	// 磁盘检查是本地系统调用，但别跟 1s 轮询一起跑；30s 足够在写满前拦住。
+	diskGuardInterval = 30 * time.Second
+	// 低于 1GiB 就暂停：aria2 的 write cache 刷盘失败会让整个 daemon 卡死，
+	// 等真的写到 0 字节再处理已经来不及了。
+	diskGuardMinFree = uint64(1) << 30
+	// 自愈冷却：避免卡死实例反复 Stop+Start 形成重启风暴。
+	engineRecoverCooldown = 60 * time.Second
+)
+
+// maybeGuardDisk 只在间隔到了时才起一次检查，避免每轮快照都创建 goroutine。
+func (s *DownloadService) maybeGuardDisk(tasks []aria2.TaskView) {
+	s.mu.Lock()
+	if time.Since(s.diskCheckedAt) < diskGuardInterval {
+		s.mu.Unlock()
+		return
+	}
+	s.diskCheckedAt = time.Now()
+	s.mu.Unlock()
+	go s.guardDiskSpace(tasks)
+}
+
+// guardDiskSpace 在活跃任务把目标盘写满之前强制暂停全部任务。
+// 这是「下载过大文件 → aria2 daemon 无响应」的治本兜底：新建弹框的大小预检
+// 只能覆盖添加瞬间，多任务并行/其它程序占盘仍会把剩余空间吃到 0。
+func (s *DownloadService) guardDiskSpace(tasks []aria2.TaskView) {
+	if s.App == nil {
+		return
+	}
+	cfg, err := aria2.LoadConfig()
+	if err != nil || cfg.IsRemote() {
+		return // 文件写在远端，本机剩余空间不适用
+	}
+	dirs := make(map[string]bool)
+	active := false
+	for _, t := range tasks {
+		if t.Status != "active" {
+			continue
+		}
+		active = true
+		d := strings.TrimSpace(t.Dir)
+		if d == "" {
+			d = cfg.DownloadDir
+		}
+		if d != "" {
+			// Windows 路径大小写不敏感，按盘去重免得同一卷查 N 次。
+			dirs[strings.ToLower(filepath.Clean(d))] = true
+		}
+	}
+	if !active {
+		// 任务都停了，允许下次空间再次吃紧时重新触发。
+		s.diskPaused.Store(false)
+		return
+	}
+	if s.diskPaused.Load() {
+		return
+	}
+	var minFree uint64
+	found := false
+	for d := range dirs {
+		ds, e := aria2.CheckDiskSpace(d)
+		if e != nil || ds.Free == 0 {
+			continue
+		}
+		if !found || ds.Free < minFree {
+			minFree, found = ds.Free, true
+		}
+	}
+	if !found || minFree >= diskGuardMinFree {
+		return
+	}
+	if err := s.simpleCall(func(c *aria2.Client) error { return c.PauseAll(true) }); err != nil {
+		logger.W("[download] 磁盘空间不足，自动暂停全部任务失败: %v", err)
+		return
+	}
+	s.diskPaused.Store(true)
+	s.invalidate()
+	logger.W("[download] 目标盘仅剩 %d 字节，已自动暂停全部任务，避免 aria2 写盘卡死", minFree)
+	title := "磁盘空间不足"
+	body := "目标盘剩余空间不足 1 GiB，已自动暂停全部下载任务。清理磁盘或更换保存目录后可继续。"
+	s.App.PushNotification("system", "error", title, body, "page:download", "disk-guard")
+	s.App.NotifyDesktop("dl-disk-guard", title, body)
+}
+
+// recoverEngine 处理「进程还在但 RPC 全超时 / 进程已退出」两种掉线。
+// 环境层看门狗只看端口，识别不出卡死的 daemon，所以由轮询链路自己兜底。
+func (s *DownloadService) recoverEngine(lastErr error) {
+	if s.App == nil || s.App.Env == nil || s.disconnected.Load() {
+		return
+	}
+	cfg, err := aria2.LoadConfig()
+	if err != nil || cfg.IsRemote() {
+		return // 远程引擎不归本机管，别去动用户机器上的进程
+	}
+	if !s.recovering.CompareAndSwap(false, true) {
+		return
+	}
+	defer s.recovering.Store(false)
+	s.mu.Lock()
+	if time.Since(s.lastRecover) < engineRecoverCooldown {
+		s.mu.Unlock()
+		return
+	}
+	s.lastRecover = time.Now()
+	s.mu.Unlock()
+
+	logger.W("[download] aria2 连续无响应，尝试自愈重启: %v", lastErr)
+	s.emitEnginePhase("recovering")
+	ver := aria2Version()
+	// Stop 内部按端口杀进程树（带镜像校验），能清掉卡死但还占着端口的实例。
+	_ = s.App.Env.Stop(envengine.RuntimeAria2, ver)
+	if err := s.App.Env.Start(envengine.RuntimeAria2, ver, nil); err != nil {
+		logger.E("[download] aria2 自愈重启失败: %v", err)
+		s.emitEnginePhase("failed")
+		s.App.PushNotification("system", "error", "下载引擎异常",
+			"引擎无响应且自动重启失败，请在环境管理中手动启动 aria2", "page:download", "engine")
+		return
+	}
+	logger.I("[download] aria2 自愈重启完成，任务将从会话恢复")
+	s.emitEnginePhase("recovered")
+	s.App.PushNotification("system", "warning", "下载引擎已重启",
+		"引擎曾无响应，已自动恢复；未完成任务从会话继续下载。", "page:download", "engine")
+	s.invalidate()
+}
+
+// emitEnginePhase 把自愈进度推给下载页：卡死时界面原本会一直停在旧快照，
+// 用户只看到日志里刷「daemon 未响应」，不知道引擎正在自动恢复。
+func (s *DownloadService) emitEnginePhase(phase string) {
+	if app := s.App.App(); app != nil {
+		app.Event.Emit("quickdock:dl:engine", map[string]string{"phase": phase})
 	}
 }
 

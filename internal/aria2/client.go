@@ -77,6 +77,14 @@ type transportError struct{ err error }
 func (e *transportError) Error() string { return e.err.Error() }
 func (e *transportError) Unwrap() error { return e.err }
 
+// IsTransportError 判断错误是否来自网络层（连不上 / 等响应头超时 / 读 body 失败）。
+// 环境层用它区分「daemon 卡死但端口仍 Listen」与「端口上是另一个能响应的服务」：
+// 只有前者可以安全清理，后者杀掉会误伤用户自己启动的 aria2。
+func IsTransportError(err error) bool {
+	var te *transportError
+	return errors.As(err, &te)
+}
+
 func NewClient(c *Config) *Client {
 	// 远程要跨网络，拨号上限放宽到 5s；本机保留 2s。
 	dialTimeout := 2 * time.Second

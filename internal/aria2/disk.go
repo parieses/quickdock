@@ -7,8 +7,9 @@ import (
 	"strings"
 )
 
-// DiskSpace 是目标盘的容量快照：新建任务提交前用它做「盘快满了」的拦截。
-// 不预估文件大小（HTTP HEAD 不可靠且会阻塞 UI），只按剩余空间给风险提示。
+// DiskSpace 是目标盘的容量快照。新建任务提交前会用 probe.go 探测远端真实大小，
+// 再拿这里的 free 做精确比对；下载过程中另由 services/download 的磁盘守卫
+// 低频复查，剩余空间见底时自动暂停，避免 aria2 写盘卡死。
 type DiskSpace struct {
 	Path  string `json:"path"`
 	Total uint64 `json:"total"`

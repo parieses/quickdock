@@ -53,6 +53,11 @@ type Config struct {
 	MaxConnPerSrv int    `json:"maxConnPerServer"`
 	DownloadLimit string `json:"downloadLimit"`
 	UploadLimit   string `json:"uploadLimit"`
+	// 磁盘预分配策略：none / falloc / trunc / prealloc。默认 none（不占空间、零等待）；
+	// prealloc 会真实写满整块空间，500GiB 文件能把单线程事件循环卡几十分钟。
+	// 本项目安装的 Windows MinGW 构建（见运行时目录 README.mingw）的 falloc 走
+	// SetFileValidData，不写零：NTFS + 管理员权限下瞬时，非 NTFS 会退化成慢速分配。
+	FileAllocation string `json:"fileAllocation"`
 
 	// BT / DHT
 	ListenPort           int    `json:"listenPort"`
@@ -78,7 +83,10 @@ type Config struct {
 	AutoOpenFolder bool              `json:"autoOpenFolder"`
 	AutoCategory   bool              `json:"autoCategory"`
 	CategoryRules  map[string]string `json:"categoryRules"` // 扩展名（小写、不含点）→ 子目录名
-	Schedule       ScheduleConfig    `json:"schedule"`
+	// 每个链接下载单独放进「保存目录/<文件名>/」，避免多个任务挤在一个目录。
+	// 纯 QuickDock 侧行为，不对应 aria2 选项，因此不下发 changeGlobalOption。
+	PerTaskFolder bool           `json:"perTaskFolder"`
+	Schedule      ScheduleConfig `json:"schedule"`
 
 	// 远程 aria2：开启后 DownloadService 不再启动本机 daemon，Client 直接连远端 RPC。
 	// RemoteSecret 只落本机 0600 配置，optionsView 只回传「是否已设置」，不回传明文。
@@ -118,7 +126,38 @@ func configPath() string { return filepath.Join(Dir(), configFileName) }
 func SessionPath() string { return filepath.Join(Dir(), SessionFileName) }
 
 // applyDefaults 补齐零值：旧配置文件缺字段时不改变既有行为，同时让 BT 开箱可用。
+// NormalizeFileAllocation 校验 aria2 的磁盘预分配策略。空串返回 ok=false，
+// 表示「调用方没带这一项，保持原值」，避免旧前端 / 老配置把用户已选的 falloc
+// 静默改回 none；非法值同样不改。
+func NormalizeFileAllocation(v string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "none":
+		return "none", true
+	case "falloc":
+		return "falloc", true
+	case "trunc":
+		return "trunc", true
+	case "prealloc":
+		return "prealloc", true
+	default:
+		return "none", false
+	}
+}
+
+// FileAllocationArg 返回可直接拼进 --file-allocation= 的值。老 rpc.json 缺字段
+// （零值）与非法值一律回落到 none，保持「预分配永不默认开启」的既有行为。
+func (c *Config) FileAllocationArg() string {
+	v, ok := NormalizeFileAllocation(c.FileAllocation)
+	if !ok {
+		return "none"
+	}
+	return v
+}
+
 func (c *Config) applyDefaults() {
+	if _, ok := NormalizeFileAllocation(c.FileAllocation); !ok {
+		c.FileAllocation = "none"
+	}
 	if c.MaxConcurrent <= 0 {
 		c.MaxConcurrent = 5
 	}
@@ -365,11 +404,15 @@ func DaemonArgs(c *Config) []string {
 		// 默认 NOTICE 会把每个任务每秒的进度刷到 stdout，宿主用 StdoutPipe 逐行
 		// 收集再写 aria2.log：实测一个 50GiB 任务几分钟就写到 200KB+ 且持续增长。
 		"--console-log-level=warn",
+		// 进度摘要不受 console-log-level 控制，默认每 60s 仍会往 stdout 写一段。
+		// aria2 是单线程事件循环，stdout 管道一旦写阻塞，RPC 会跟着一起卡住
+		// （端口仍 Listen、请求全部超时）。直接关掉，只保留真正的 WARN/ERROR。
+		"--summary-interval=0",
 		"--dir=" + c.DownloadDir,
 		fmt.Sprintf("--max-concurrent-downloads=%d", c.MaxConcurrent),
 		fmt.Sprintf("--split=%d", c.Split),
 		fmt.Sprintf("--max-connection-per-server=%d", c.MaxConnPerSrv),
-		"--file-allocation=none",
+		"--file-allocation=" + c.FileAllocationArg(),
 		// ===== BT / DHT =====
 		"--enable-dht=" + boolArg(!c.DisableDht),
 		"--enable-dht6=" + boolArg(!c.DisableDht6),
