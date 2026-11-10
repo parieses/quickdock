@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"quickdock/internal/lock"
 )
 
 // Level 工具危险等级，用于按用户配置裁剪暴露面。
@@ -383,6 +385,16 @@ func CallAgentContext(ctx context.Context, name string, args map[string]any) (an
 }
 
 func callTool(ctx context.Context, name string, args map[string]any, fromAgent bool) (any, error) {
+	// 启动锁生效时对外部 MCP 客户端一律拒绝，只读也不例外：
+	// note_list / file_read / clipboard_list 返回的就是用户数据本身，
+	// 「只读放行」等于把整库交给本机任意进程（WorkBuddy 默认连着 9230）。
+	//
+	// 内置 AI（fromAgent）不拦：它属于后台任务。锁的语义是「不让人看界面」，
+	// 不是「掐掉正在跑的活」——这与「后台监控、定时任务照常」是同一条原则。
+	if !fromAgent && lock.IsLocked() {
+		return nil, fmt.Errorf("QuickDock 已锁定：请先在主窗口解锁后再调用工具 %s", name)
+	}
+
 	regMu.RLock()
 	t, ok := tools[name]
 	_, inAgent := agents[name]

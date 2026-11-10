@@ -7,6 +7,7 @@ import (
 	"time"
 
 	dshcore "quickdock/internal/dsh"
+	"quickdock/internal/lock"
 	"quickdock/services"
 )
 
@@ -179,6 +180,11 @@ func (s *DSHService) DSHCheckPluginUpdates() *services.ApiResult {
 func (s *DSHService) OpenDSHWindow() *services.ApiResult {
 	if s.App.DSH == nil {
 		return services.FailMsg("DSH 未初始化")
+	}
+	// 启动锁生效时禁止打开：dsh 窗口加载的是它自己的前端页，不是本地 SPA，
+	// 锁层无法覆盖，只能整体拒绝。dsh 服务本身不受影响（后台照常运行）。
+	if lock.IsLocked() {
+		return services.FailMsg("QuickDock 已锁定，请先解锁")
 	}
 	url, err := s.App.DSH.OpenDSHWindow()
 	if err != nil {

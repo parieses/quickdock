@@ -14,6 +14,7 @@ import {
 import { SuspendHotkeys, ResumeHotkeys } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import { isAppLocked } from '../utils/appLock'
 import type { HotkeyConfig } from '../types'
 
 const { t } = useI18n()
@@ -114,6 +115,8 @@ function toLabel(mods: number, vk: number): string {
 }
 
 function onGlobalKeyDown(e: KeyboardEvent) {
+  // 同 HotkeySettings：捕获阶段的录制监听会在锁定时把密码框的按键记成快捷键。
+  if (isAppLocked()) return
   const tgt = captureTarget.value
   if (!tgt) return
   if (e.code === 'Escape' || e.key === 'Escape') {

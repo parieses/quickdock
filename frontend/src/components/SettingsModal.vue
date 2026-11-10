@@ -2,7 +2,7 @@
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, toRef, watch, inject, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { X, Palette, Keyboard, Database, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard, Bell } from '@lucide/vue'
+import { X, Palette, Keyboard, Database, Info, ChevronRight, Sun, Moon, Monitor as MonitorIcon, RotateCcw, Bot, Wrench, ExternalLink, ScrollText, History, ListOrdered, Search, Clipboard, Bell, ShieldCheck } from '@lucide/vue'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useTheme } from '../composables/useTheme'
 import { unwrap } from '../utils/api'
@@ -26,6 +26,7 @@ import RecycleBinPage from './RecycleBinPage.vue'
 import SettingsWinmgr from './SettingsWinmgr.vue'
 import SettingsNotify from './SettingsNotify.vue'
 import SettingsNav from './SettingsNav.vue'
+import SettingsSecurity from './SettingsSecurity.vue'
 
 import {
   GetClipboardRetentionDays,
@@ -121,6 +122,7 @@ const menuItems = computed(() => [
   // 为什么必须在设置里：侧栏可以被裁剪，但这个入口不属于导航项，永远可达。
   { key: 'navigation', label: t('navSettings'), icon: ListOrdered, desc: t('navSettingsDesc') },
   { key: 'hotkeys',    label: t('hotkeySettings'), icon: Keyboard, desc: t('setHotkeysDesc') },
+  { key: 'security',   label: t('securityTitle'),  icon: ShieldCheck, desc: t('setSecurityDesc') },
   { key: 'clipboard',  label: t('clipboard'),      icon: Clipboard, desc: t('setClipboardDesc') },
   { key: 'backup',     label: t('setBackup'),      icon: Database,  desc: t('setBackupDesc') },
   { key: 'history',    label: t('setHistory'),     icon: History,   desc: t('setHistoryDesc') },
@@ -168,7 +170,7 @@ const menuGroups = computed(() => {
   const qLC = settingsQuery.value.trim().toLowerCase()
   const byKey = Object.fromEntries(menuItems.value.map((m) => [m.key, m]))
   const defs: { title: string; keys: string[] }[] = [
-    { title: t('menuGroupBasics'), keys: ['preferences', 'navigation', 'hotkeys'] },
+    { title: t('menuGroupBasics'), keys: ['preferences', 'navigation', 'hotkeys', 'security'] },
     { title: t('menuGroupData'), keys: ['clipboard', 'backup', 'history'] },
     { title: t('menuGroupService'), keys: ['tools', 'winmgr', 'notify', 'ai'] },
   ]
@@ -1203,6 +1205,11 @@ async function toggleAutoStart() {
           </div>
           <div v-else-if="activePage === 'hotkeys'" class="content-page content-left">
             <HotkeySettings ref="hotkeyRef" />
+          </div>
+          <!-- 安全：启动密码。独立成页而不是塞进「通用」——它改的是入口凭证，
+               和主题/语言不是一类东西，且页内要放恢复码这种强提示块。 -->
+          <div v-else-if="activePage === 'security'" class="content-page content-left">
+            <SettingsSecurity :visible="activePage === 'security'" />
           </div>
           <!-- 剪贴板：历史保留/清理 + 自动规则（原「剪贴板历史」只有保留天数一个控件，
                单独占一页是浪费一次点击，合并进规则页由「自动规则」带标题区分） -->

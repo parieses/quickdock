@@ -5,6 +5,8 @@ import (
 	"strings"
 	"time"
 
+	"quickdock/internal/lock"
+	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -72,6 +74,14 @@ func (p *PluginService) ShowPluginWindow(pluginID string) {
 // 这里若抢先取走，新窗口反而拿到空 init，故只处理复用路径。
 func (p *PluginService) showPluginWindow(pluginID string, standalone bool) {
 	if p.App.PluginWindowMgr == nil {
+		return
+	}
+	// 启动锁生效时禁止新开：插件窗口走 plugin.html 独立入口，宿主侧的统一锁层
+	// 覆盖不到它，允许打开等于锁形同虚设（插件可读文件、剪贴板、数据库）。
+	// 这是所有打开路径的唯一收口——ShowPluginWindow / OpenPluginWindowWith / 命令面板
+	// 最终都到这里，故只需守一处。
+	if lock.IsLocked() {
+		logger.W("[plugin-window] 应用已锁定，拒绝打开插件窗口 %s", pluginID)
 		return
 	}
 	// 窗口标题用清单里的显示名；清单缺 name 时才退回 id（否则任务栏/Alt-Tab 会只剩 "快启坞 - "）。

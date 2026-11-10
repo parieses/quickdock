@@ -2,10 +2,12 @@ package main
 
 import (
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"quickdock/internal/lock"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/services"
@@ -15,6 +17,24 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 	"github.com/wailsapp/wails/v3/pkg/services/kvstore"
 )
+
+// lockAwareURL 给浮窗 URL 附加「建窗时是否已锁定」。
+//
+// 浮窗是懒创建 + 复用的：锁定态下首次按热键打开剪贴板，Vue 还没挂载完，
+// 会先画一帧窗内的真实内容——剪贴板浮窗闪一帧历史列表，等于锁没生效。
+// 把锁状态放进 query（必须放在 hash 之前，否则会变成 hash 的一部分），
+// 前端首帧就能直接渲染锁层。窗口复用后 URL 不再更新，后续状态变化由
+// lock:changed 事件同步，所以这里只是首帧兜底。
+//
+// 窗口排版浮层例外：它锁定期间照常可用（只对别的应用贴边/等分，不读 QuickDock
+// 数据），前端对 #/window-manager 也不渲染锁层。若给它也带上 locked=1，
+// index.html 会保留启动遮罩等 LockStatus 回来，白白多闪一下遮罩。
+func lockAwareURL(path string) string {
+	if !lock.IsLocked() || strings.HasPrefix(path, "/#/window-manager") {
+		return path
+	}
+	return "/?locked=1" + strings.TrimPrefix(path, "/")
+}
 
 // 单实例检查已迁移到 Wails v3 框架：main.go 中 application.Options.SingleInstance。
 // 框架实现为 CreateMutex + 隐藏事件窗口：二次启动自动通知首实例（OnSecondInstanceLaunch
@@ -301,6 +321,66 @@ func hideOnCloseHook(onHide func()) func(event *application.WindowEvent) {
 	}
 }
 
+// hideAllFloatingWindows 收起全部浮窗（锁定触发时由 services 注入回调调用）。
+//
+// 只处理已经创建出来的窗口：getXxxWindow 是懒创建工厂，为了隐藏去调它会把从没
+// 打开过的窗口建出来（还带一次 300ms 的首次绘制等待），完全没必要——没创建的窗口
+// 本来就不在屏幕上。
+//
+// 只 Hide 不销毁：SSH 会话在 Go 侧保持连接、笔记草稿留在前端内存里、命令面板的
+// 输入也还在，解锁后按热键重开就是原样。按方案约定也不自动恢复，避免解锁瞬间
+// 弹出一堆窗口。
+func hideAllFloatingWindows() {
+	// 先各自持锁取出指针再统一操作：与 saveAllFloatingPositions 同理由，
+	// 直接读全局变量会和窗口创建/销毁 goroutine 的写构成 data race。
+	clipboardWinLock.Lock()
+	clipboardW := clipboardWin
+	clipboardWinLock.Unlock()
+	paletteWinLock.Lock()
+	paletteW := paletteWin
+	paletteWinLock.Unlock()
+	noteWinLock.Lock()
+	noteW := noteWin
+	noteWinLock.Unlock()
+	winmgrWinLock.Lock()
+	winmgrW := winmgrWin
+	winmgrWinLock.Unlock()
+	sshWinLock.Lock()
+	sshW := sshWin
+	sshWinLock.Unlock()
+
+	if clipboardW != nil {
+		// 与失焦隐藏保持一致：先让前端复位滚动位置，再收起
+		if a := getHotkeyApp(); a != nil {
+			a.Event.Emit("clipboard:before-hide")
+		}
+		clipboardW.Hide()
+	}
+	// 命令面板走服务方法：它要同步 Flags.Palette，否则解锁后热键会判成「面板还开着」
+	// 而走隐藏分支，表现为第一次按 Ctrl+K 没反应。
+	if paletteW != nil {
+		if svc := appSvc.Load(); svc != nil {
+			svc.HidePaletteWindow()
+		} else {
+			paletteW.Hide()
+		}
+	}
+	if noteW != nil {
+		noteW.Hide()
+	}
+	if winmgrW != nil {
+		winmgrW.Hide()
+	}
+	if sshW != nil {
+		sshW.Hide()
+	}
+
+	windowFlags.Clipboard.Store(false)
+	windowFlags.Note.Store(false)
+	windowFlags.Winmgr.Store(false)
+	logger.I("[lock] 已收起全部浮窗")
+}
+
 // hideFloatingWindow 是四个浮窗（剪贴板/笔记/命令面板/窗口管理）共用的失焦隐藏逻辑：
 // 记位置 → 清标志位 → 隐藏。closeHook 额外复用它，保证 Alt+F4 与失焦两条路径
 // 收尾完全一致，不会出现「Alt+F4 关掉后标志位还留着，热键以为它开着」的状态错位。
@@ -324,7 +404,7 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 		Frameless:        true,
 		AlwaysOnTop:      true,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
-		URL:              "/#/clipboard",
+		URL:              lockAwareURL("/#/clipboard"),
 		Zoom:             uiZoom,
 
 		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
@@ -367,7 +447,7 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 		Frameless:        true,
 		AlwaysOnTop:      true,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
-		URL:              "/#/note",
+		URL:              lockAwareURL("/#/note"),
 		Zoom:             uiZoom,
 
 		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
@@ -429,7 +509,7 @@ func initSshWindow(app *application.App) *application.WebviewWindow {
 		AlwaysOnTop:      false,
 		BackgroundColour: application.RGBA{Red: 22, Green: 24, Blue: 29, Alpha: 255},
 		Windows:          application.WindowsWindow{HiddenOnTaskbar: false},
-		URL:              "/#/ssh",
+		URL:              lockAwareURL("/#/ssh"),
 		Zoom:             uiZoom,
 		// 建窗即隐藏，理由同 applyWindowPlatformOptions：SSH 也用保存的位置，
 		// 让 Wails 先按可见创建会在屏幕内闪一帧再被 Hide()。
@@ -479,7 +559,7 @@ func initWinmgrWindow(app *application.App) *application.WebviewWindow {
 		Frameless:        true,
 		AlwaysOnTop:      true,
 		BackgroundColour: application.RGBA{Red: 27, Green: 27, Blue: 27, Alpha: 255},
-		URL:              "/#/window-manager",
+		URL:              lockAwareURL("/#/window-manager"),
 		Zoom:             uiZoom,
 
 		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
@@ -512,7 +592,7 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 		Frameless:        true,
 		AlwaysOnTop:      true,
 		BackgroundColour: application.RGBA{Red: 0, Green: 0, Blue: 0, Alpha: 1},
-		URL:              "/#/command-palette",
+		URL:              lockAwareURL("/#/command-palette"),
 		Zoom:             uiZoom,
 
 		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
@@ -714,6 +794,10 @@ func setSshService(s *sshxsvc.SshService) { sshServiceRef = s }
 // 只转调服务层的 OpenSshWindow，不自己写一套 Show+Focus+Emit：显示逻辑一旦分成两份，
 // 迟早会出现「热键打开的不刷新清单、侧栏打开的才刷新」这类不一致。
 func showSshWindow() {
+	// 锁定期间不弹 SSH 窗口：主机列表、凭据、终端输出都是高敏感数据
+	if lockBlocksHotkey() {
+		return
+	}
 	if sshServiceRef == nil {
 		logger.W("QuickDock: SSH 服务未就绪，热键忽略")
 		return

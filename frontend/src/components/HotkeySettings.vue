@@ -2,14 +2,15 @@
 import { logErr } from '../utils/logger'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Keyboard, RotateCcw, Monitor, Clipboard, Command, FileText, Camera, SquareTerminal } from '@lucide/vue'
-import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig, GetScreenshotHotkeyConfig, SetScreenshotHotkeyConfig, GetSshHotkeyConfig, SetSshHotkeyConfig } from '../../bindings/quickdock/services/appservice'
+import { Keyboard, RotateCcw, Monitor, Clipboard, Command, FileText, Camera, SquareTerminal, Lock } from '@lucide/vue'
+import { GetHotkeyConfig, SetHotkeyConfig, GetClipboardHotkeyConfig, SetClipboardHotkeyConfig, GetPaletteHotkeyConfig, SetPaletteHotkeyConfig, GetNoteHotkeyConfig, SetNoteHotkeyConfig, GetScreenshotHotkeyConfig, SetScreenshotHotkeyConfig, GetSshHotkeyConfig, SetSshHotkeyConfig, GetLockHotkeyConfig, SetLockHotkeyConfig } from '../../bindings/quickdock/services/appservice'
 import {
   SuspendHotkeys,
   ResumeHotkeys,
 } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import { isAppLocked } from '../utils/appLock'
 import CheatSheetModal from './CheatSheetModal.vue'
 import type { HotkeyConfig } from '../types'
 
@@ -35,7 +36,11 @@ const shotVk = ref(0x70)
 const sshLabel = ref('Ctrl+Alt+S')
 const sshModifiers = ref(3)
 const sshVk = ref(0x53)
-const capturing = ref<'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh' | null>(null)
+// 启动锁默认 Ctrl+Alt+L：与 tray.go 的默认值、hotkeySettings 表保持一致
+const lockLabel = ref('Ctrl+Alt+L')
+const lockModifiers = ref(3)
+const lockVk = ref(0x4C)
+const capturing = ref<'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh' | 'lock' | null>(null)
 const showCheatSheet = ref(false)
 const message = ref('')
 // 提示色调：冲突/失败是 err（红），保存成功/恢复默认是 ok（绿）。
@@ -102,6 +107,9 @@ function vkToName(vk: number): string {
 
 // 全局 keydown 监听（不依赖元素焦点）
 function onGlobalKeyDown(e: KeyboardEvent) {
+  // 锁定期间设置页被锁层盖着，但这条捕获监听仍在跑：用户在密码框里打的每个键
+  // 都会被当成「录制快捷键」写进配置。必须短路。
+  if (isAppLocked()) return
   if (!capturing.value) return
 
   // Escape 只取消捕获，不关闭页面（不透传到 SettingsModal）
@@ -134,6 +142,8 @@ function onGlobalKeyDown(e: KeyboardEvent) {
     shotVk.value = vk; shotModifiers.value = mods; shotLabel.value = toLabel(mods, vk)
   } else if (capturing.value === 'ssh') {
     sshVk.value = vk; sshModifiers.value = mods; sshLabel.value = toLabel(mods, vk)
+  } else if (capturing.value === 'lock') {
+    lockVk.value = vk; lockModifiers.value = mods; lockLabel.value = toLabel(mods, vk)
   }
   capturing.value = null
   ResumeHotkeys()
@@ -165,6 +175,10 @@ onMounted(async () => {
     const c = unwrap<HotkeyConfig>(await GetSshHotkeyConfig())
     if (c) { sshLabel.value = c.label; sshModifiers.value = c.modifiers; sshVk.value = c.vk }
   } catch (e) { logErr('HotkeySettings', e) }
+  try {
+    const c = unwrap<HotkeyConfig>(await GetLockHotkeyConfig())
+    if (c) { lockLabel.value = c.label; lockModifiers.value = c.modifiers; lockVk.value = c.vk }
+  } catch (e) { logErr('HotkeySettings', e) }
 })
 
 onUnmounted(() => {
@@ -176,7 +190,7 @@ onUnmounted(() => {
   }
 })
 
-async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh') {
+async function startCapture(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh' | 'lock') {
   if (capturing.value === type) {
     capturing.value = null
     await ResumeHotkeys()
@@ -198,6 +212,7 @@ async function saveAll() {
     [noteModifiers.value, noteVk.value],
     [shotModifiers.value, shotVk.value],
     [sshModifiers.value, sshVk.value],
+    [lockModifiers.value, lockVk.value],
   ]
   for (let i = 0; i < pairs.length; i++) {
     for (let j = i + 1; j < pairs.length; j++) {
@@ -215,6 +230,7 @@ async function saveAll() {
     await SetNoteHotkeyConfig(noteModifiers.value, noteVk.value)
     await SetScreenshotHotkeyConfig(shotModifiers.value, shotVk.value)
     await SetSshHotkeyConfig(sshModifiers.value, sshVk.value)
+    await SetLockHotkeyConfig(lockModifiers.value, lockVk.value)
     // 重新注册全局快捷键（含调色板/笔记/SSH 窗口），使新配置立即生效。
     await ResumeHotkeys()
     setMsgAndClear(t('hotkeySaved'), 2000)
@@ -249,12 +265,17 @@ async function resetSshDefault() {
   try { await SetSshHotkeyConfig(3, 0x53); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
+async function resetLockDefault() {
+  lockModifiers.value = 3; lockVk.value = 0x4C; lockLabel.value = 'Ctrl+Alt+L'
+  try { await SetLockHotkeyConfig(3, 0x4C); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
+}
+
 async function resetScreenshotDefault() {
   shotModifiers.value = 0; shotVk.value = 0x70; shotLabel.value = 'F1'
   try { await SetScreenshotHotkeyConfig(0, 0x70); await ResumeHotkeys(); setMsgAndClear(t('restoreOk'), 2000) } catch (e) { logErr('HotkeySettings', e) }
 }
 
-function isDefault(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh'): boolean {
+function isDefault(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot' | 'ssh' | 'lock'): boolean {
   switch (type) {
     case 'app': return currentModifiers.value === 2 && currentVk.value === 32
     case 'clipboard': return clipModifiers.value === 2 && clipVk.value === 0xC0
@@ -262,6 +283,7 @@ function isDefault(type: 'app' | 'clipboard' | 'palette' | 'note' | 'screenshot'
     case 'note': return noteModifiers.value === 3 && noteVk.value === 0x4E
     case 'screenshot': return shotModifiers.value === 0 && shotVk.value === 0x70
     case 'ssh': return sshModifiers.value === 3 && sshVk.value === 0x53
+    case 'lock': return lockModifiers.value === 3 && lockVk.value === 0x4C
   }
   return false
 }
@@ -364,6 +386,20 @@ defineExpose({ capturing })
           <span v-else class="hk-keys">{{ sshLabel }}</span>
         </button>
         <button class="hk-reset" :class="{ 'is-idle': isDefault('ssh') }" :title="t('restoreDefault')" @click="resetSshDefault">
+          <RotateCcw :size="13" />
+        </button>
+      </div>
+
+      <!-- 启动锁：未设密码时按下无效（后端不注册），因此描述里点明前置条件 -->
+      <div class="hk-row" :class="{ capturing: capturing === 'lock' }">
+        <span class="hk-icon"><Lock :size="14" /></span>
+        <span class="hk-name">{{ t('lockHotkey') }}</span>
+        <span class="hk-desc" :title="t('lockHotkeyDesc')">{{ t('lockHotkeyDesc') }}</span>
+        <button class="hk-kbd" :class="{ capturing: capturing === 'lock' }" :title="t('clickToModify')" @click="startCapture('lock')">
+          <span v-if="capturing === 'lock'" class="hk-capturing">{{ t('pressKeys') }}</span>
+          <span v-else class="hk-keys">{{ lockLabel }}</span>
+        </button>
+        <button class="hk-reset" :class="{ 'is-idle': isDefault('lock') }" :title="t('restoreDefault')" @click="resetLockDefault">
           <RotateCcw :size="13" />
         </button>
       </div>

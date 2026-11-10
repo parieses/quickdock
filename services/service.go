@@ -119,6 +119,18 @@ type AppService struct {
 	// window.Close() 会被钩子 event.Cancel() 掉，窗口不销毁、进程退出不干净。
 	PrepareQuitFn func()
 
+	// RebuildTrayFn 重建托盘菜单（实现在 main 包 tray.go）。
+	// 锁状态变化时菜单要按锁定/解锁分叉，而 services 不能反向 import main，
+	// 故沿用上面一批 Fn 的注入方式。未注入时（如测试）跳过即可。
+	RebuildTrayFn func()
+
+	// HideFloatingWindowsFn 收起全部浮窗（剪贴板 / 命令面板 / 笔记 / 窗口排版 / SSH）。
+	//
+	// 锁定触发时调用：锁定期间浮窗不再渲染锁层输入框（那要每个窗口各维护一套尺寸与
+	// 紧凑样式），而是由热键拦截直接不打开，所以锁定瞬间还开着的浮窗必须先收掉，
+	// 否则它们会带着锁层后面的真实内容留在屏幕上。只 Hide 不销毁，会话与草稿都还在。
+	HideFloatingWindowsFn func()
+
 	// RestartAppFn 注入「重启应用」能力（实现在 main 包 tray.go：脱离式拉起新进程 +
 	// --restart-wait 等待旧进程退出，再走统一退出路径）。存储位置切换等场景需要
 	// 真正重启才能让新数据目录生效——注意与 UpdateService.RestartApp 区分：
@@ -211,12 +223,16 @@ func NewAppService() *AppService {
 	})
 	// 内置站点服务的证书由 mkcert 签发；sites 包只认 CertIssuer 接口，不 import env。
 	siteMgr.SetCertIssuer(envMgr)
-	return &AppService{
+	a := &AppService{
 		NodeEnv: nodeEnv,
 		DSH:     dshcore.NewDSHProcessManager(nil, nodeEnv),
 		Env:     envMgr,
 		Flags:   &WindowFlags{},
 	}
+	// 锁状态变化的副作用（隐藏插件/DSH 窗、重建托盘、广播事件）只挂一次。
+	// 放在构造器里而非 ServiceStartup：Init 触发首次通知时订阅必须已经就位。
+	a.initLockBridge()
+	return a
 }
 
 // SetApp 设置 App 引用（由 main.go 在创建后调用）

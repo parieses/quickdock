@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"quickdock/internal/db"
+	"quickdock/internal/lock"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 
@@ -29,6 +30,9 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 		return err
 	}
 	a.DB = database
+	// 启动锁：在 DB 就绪后立刻载入密码哈希并置锁定态。必须早于任何窗口内容
+	// 渲染完成——前端首次 LockStatus 查询要拿到真实状态，否则会有一瞬解锁界面。
+	lock.Init(database)
 	// 合并原「正在打开」+「已打开」两条：成功路径只留一条，带上路径与耗时（迁移耗时是大头）
 	logger.I("[db] 已就绪 path=%s 耗时=%v", dbPath, time.Since(openStart).Round(time.Millisecond))
 

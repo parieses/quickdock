@@ -32,6 +32,7 @@ import { RevealInExplorer } from '../../bindings/quickdock/services/system/syste
 import { Events } from '@wailsio/runtime'
 import { getErrorMessage } from '../utils/error'
 import { unwrap } from '../utils/api'
+import { isAppLocked } from '../utils/appLock'
 import { useAIAvailability } from '../composables/useAIAvailability'
 // 剪贴板里「存为待办」也是一条新建入口，角标要跟着涨
 import { navBadges } from '../composables/useNavBadges'
@@ -836,6 +837,9 @@ function scrollToSelected() {
 }
 
 function onPanelKeydown(e: KeyboardEvent) {
+  // 锁定期间这条必须让路：Enter 是「复制选中项并关闭窗口」，
+  // 用户在密码框里按回车会直接把浮窗关掉（锁层挡得住视觉，挡不住这条 document 监听）。
+  if (isAppLocked()) return
   const list = displayEntries.value
   if (list.length === 0) return
 

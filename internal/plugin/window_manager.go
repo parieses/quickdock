@@ -291,6 +291,24 @@ func (m *PluginWindowManager) Hide(pluginID string) {
 	}
 }
 
+// HideAll 隐藏所有已打开的插件窗口（启动锁生效时调用）。
+//
+// 插件窗口加载的是 plugin.html 独立入口，不挂主 SPA，宿主侧的统一锁层覆盖不到，
+// 所以锁定动作必须把这些窗口藏起来，否则插件内容（可读写文件、剪贴板）直接裸露。
+//
+// 先快照 id 再逐个 Hide：Hide 内部会拿 m.mu，持锁遍历会自锁。
+func (m *PluginWindowManager) HideAll() {
+	m.mu.Lock()
+	ids := make([]string, 0, len(m.windows))
+	for id := range m.windows {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	for _, id := range ids {
+		m.Hide(id)
+	}
+}
+
 // Close 立即销毁插件窗口（用户点窗口关闭按钮 = 明确不要了，不做保活复用）。
 //
 // 与 Hide 的区别：Hide 只隐藏并起回收计时器，窗口的 WebView2 renderer（实测 60~130 MB）

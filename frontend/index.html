@@ -36,6 +36,62 @@
   </head>
   <body>
     <div id="app"></div>
+    <!-- 启动遮罩：主窗口建窗时数据库还没打开，Go 侧不可能知道有没有设启动密码，
+         所以第一帧一律先铺这层实色遮罩。App.vue 拿到 LockStatus 后把它淡出
+         （已解锁）或直接由锁层接管（仍锁定）—— 两种情况都不会先闪出真实界面。
+         浮窗（hash 非空）同样要铺：建窗时若处于锁定态，URL 会带 ?locked=1，
+         而锁定期间解锁的事件可能在本窗口脚本就绪之前就广播完了（监听器还没注册），
+         结果状态停在过期的 true 上，等 LockStatus 回来才纠正——那一瞬就是
+         「浮窗先闪一下锁层再正常」。遮罩留到状态确认之后再撤即可根治。
+         内联写死颜色，理由同 head 里的首屏底色：不能依赖任何外部 CSS。 -->
+    <div id="qd-boot-mask" aria-hidden="true">
+      <div class="qd-boot-spinner"></div>
+    </div>
+    <style>
+      #qd-boot-mask {
+        position: fixed;
+        inset: 0;
+        /* 必须高过锁层（30000）：首帧若先露出锁层、下一帧才被遮罩盖住，
+           或者反过来，都会闪。压在锁层上面，状态确认后一次性撤掉就没有过渡痕迹。 */
+        z-index: 30001;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0c0e13;
+        transition: opacity 160ms ease;
+      }
+      #qd-boot-mask.qd-boot-mask-out { opacity: 0; }
+      .qd-boot-spinner {
+        width: 26px;
+        height: 26px;
+        border: 2px solid rgba(232, 236, 244, 0.16);
+        border-top-color: #5b8cff;
+        border-radius: 50%;
+        animation: qd-boot-spin 720ms linear infinite;
+      }
+      @keyframes qd-boot-spin { to { transform: rotate(360deg); } }
+      @media (prefers-color-scheme: light) {
+        #qd-boot-mask { background: #f6f7f9; }
+        .qd-boot-spinner {
+          border-color: rgba(26, 31, 39, 0.14);
+          border-top-color: #5b8cff;
+        }
+      }
+    </style>
+    <script>
+      // 浮窗（hash 非空）只在「建窗那一刻就已锁定」时才需要留遮罩：
+      // 那种窗口的 URL 带 ?locked=1，要先等 LockStatus 确认是否已被解锁，
+      // 否则首帧会先画一帧锁层（详见 App.vue 的 syncLockOnShow）。
+      //
+      // 未锁态建窗的浮窗必须立刻撤掉：它没有任何状态需要确认，而遮罩要等
+      // LockStatus 一次 IPC 往返、再走 160ms 淡出——正好是「按 Ctrl+` 先空一下
+      // 才出内容」的那几百毫秒（浅色主题下遮罩接近白色，看起来就是「白一下」）。
+      // 撤掉不会露馅：浮窗是懒创建 + 建完立刻 Hide，等到 Show 时内容早已渲染完成。
+      if (location.hash && !/[?&]locked=1/.test(location.search)) {
+        var bootMask = document.getElementById('qd-boot-mask')
+        if (bootMask) bootMask.remove()
+      }
+    </script>
     <script src="./src/main.ts" type="module"></script>
   </body>
 </html>

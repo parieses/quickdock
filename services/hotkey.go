@@ -25,6 +25,7 @@ var hotkeySettings = []hotkeySetting{
 	{"note_hotkey", 3, 0x4E, "Ctrl+Alt+N"},  // 笔记热键（Ctrl+Alt+N：N=Note，与 SSH 的 Ctrl+Alt+S 同族）
 	{"screenshot_hotkey", 0, 0x70, "F1"},    // 截图热键（无修饰键，故 modifiers 为 0）
 	{"ssh_hotkey", 3, 0x53, "Ctrl+Alt+S"},   // SSH 终端窗口热键（S=SSH）
+	{"lock_hotkey", 3, 0x4C, "Ctrl+Alt+L"},  // 启动锁热键（L=Lock）
 }
 
 // ===== 热键配置 =====
@@ -87,6 +88,16 @@ func (a *AppService) GetScreenshotHotkeyConfig() *ApiResult {
 // SetScreenshotHotkeyConfig 设置截图热键配置
 func (a *AppService) SetScreenshotHotkeyConfig(modifiers, vk int) *ApiResult {
 	return a.setHotkeyConfigByKey("screenshot_hotkey", modifiers, vk)
+}
+
+// GetLockHotkeyConfig 获取启动锁热键配置（默认 Ctrl+Alt+L）
+func (a *AppService) GetLockHotkeyConfig() *ApiResult {
+	return a.getHotkeyConfigByKey("lock_hotkey", 3, 0x4C, "Ctrl+Alt+L")
+}
+
+// SetLockHotkeyConfig 设置启动锁热键配置
+func (a *AppService) SetLockHotkeyConfig(modifiers, vk int) *ApiResult {
+	return a.setHotkeyConfigByKey("lock_hotkey", modifiers, vk)
 }
 
 // getHotkeyConfigByKey 通用热键配置获取（工厂函数）

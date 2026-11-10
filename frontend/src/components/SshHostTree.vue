@@ -22,6 +22,7 @@ import {
   Server,
   Trash2,
 } from '@lucide/vue'
+import { isAppLocked } from '../utils/appLock'
 import { sshEnvClass, sshEnvKey, sshTargetFull, type SshHost } from '../utils/ssh'
 import { flattenSshTree, filterSshTree, resolveDrop, type DropPosition, type SshTreeNode } from '../utils/sshTree'
 
@@ -166,6 +167,7 @@ function onMenuDocDown(e: MouseEvent) {
 }
 
 function onMenuDocKey(e: KeyboardEvent) {
+  if (isAppLocked()) return
   if (folderMenu.value && e.key === 'Escape') {
     e.preventDefault()
     e.stopPropagation()

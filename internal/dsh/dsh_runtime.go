@@ -1775,6 +1775,19 @@ func (m *DSHProcessManager) OpenDSHWindow() (string, error) {
 	return m.createDSHWindow(u), nil
 }
 
+// HideWindow 隐藏已打开的 dsh 窗口（启动锁生效时调用）。
+//
+// 与关闭的区别：只 Hide，窗口引用与 dsh 进程都保留——锁的是「不让看」，
+// 不是「停服务」，解锁后用户再点侧边栏即可复用同一窗口。
+func (m *DSHProcessManager) HideWindow() {
+	m.mu.Lock()
+	win := m.window
+	m.mu.Unlock()
+	if win != nil {
+		win.Hide()
+	}
+}
+
 // waitTokenURL 轮询直到 m.url 被填充（token 捕获后由 Start 的 stdout 协程设置），
 // 或超时返回空串。注意：dsh 0.2.1-rc.4 的 web profile 启动很慢，token 行约在 30s 才打印
 // （bind 端口后、profile 初始化完成前），故调用方须给足超时（见 OpenDSHWindow 的 120s）。

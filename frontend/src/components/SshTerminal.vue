@@ -26,6 +26,7 @@ import { base64ToBytes, bytesToBase64, textToBytes } from '../utils/base64'
 import { copyToClipboard } from '../utils/clipboard'
 import { createWriteQueue } from '../utils/termWriteQueue'
 import { unwrap } from '../utils/api'
+import { isAppLocked } from '../utils/appLock'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useThemeName } from '../composables/useThemeName'
@@ -307,6 +308,8 @@ function onDocMouseDown(e: MouseEvent) {
 }
 
 function onDocKeydown(e: KeyboardEvent) {
+  // 锁定期间别动终端菜单：这条是捕获阶段，会抢在锁层之前跑。
+  if (isAppLocked()) return
   // 捕获阶段拦截：菜单开着时 Esc 只关菜单，别漏给终端（否则会把 Esc 发到远端）。
   if (menu.value && e.key === 'Escape') {
     e.preventDefault()

@@ -4,7 +4,7 @@ import { Events } from '@wailsio/runtime';
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceStore } from './stores/workspace';
 import { useToast } from './composables/useToast';
-import { GetValue, SetValue, ApplyTheme, GetWindowBackdrop } from '../bindings/quickdock/services/appservice'
+import { GetValue, SetValue, ApplyTheme, GetWindowBackdrop, LockStatus } from '../bindings/quickdock/services/appservice'
 import {
   OpenDSHWindow,
   DetectNodeEnv,
@@ -20,6 +20,10 @@ import { navigate, navigateTo, pendingOpenNoteId, pendingOpenTodoId, setNavigato
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
+// 启动锁层：静态 import 而非 defineAsyncComponent —— 它必须在首帧之后立刻可用，
+// 懒加载会留出一段「内容已经可见、锁层还没到」的空窗。组件本身只有几十行。
+import LockScreen from './components/LockScreen.vue';
+import LockedNotice from './components/LockedNotice.vue';
 // 页面注册表：主窗口内容页与侧边栏导航项的单一数据源（替代 currentPage 手动 switch）
 import { findContentPage, findNavEntry, KEEP_ALIVE_PAGES, type PageContext } from './pages/registry'
 
@@ -72,6 +76,51 @@ const { t } = useI18n()
 const { items, remove, error, success, confirm, confirmItems, resolveConfirm } = useToast();
 const showSettings = ref(false);
 const settingsPage = ref<string | undefined>(undefined);
+// ---- 启动锁 ----
+// 唯一真相源在 Go（internal/lock），这里只是它的投影。主窗口与 5 个浮窗
+// 共用本 SPA（index.html + hash 路由），所以锁层只写在模板最外层一处，
+// 就同时锁住了所有窗口——这也是热键回调不需要逐个加锁判断的原因。
+// 初值读 URL 上的 locked=1：Go 侧建窗时若已锁定会带上（见 windows.go lockAwareURL），
+// 让浮窗首帧就是锁层——否则剪贴板浮窗会先闪一帧历史列表，等于没锁。
+// 之后以 LockStatus 与实际事件为准。
+const locked = ref(new URLSearchParams(window.location.search).get('locked') === '1');
+
+// releaseBootMask 撤掉 index.html 里的启动遮罩。
+// 遮罩挡的是「Vue 挂载前」那几帧：主窗口建窗时 DB 还没打开、不可能知道锁没锁，
+// 所以第一帧一律先铺遮罩，拿到真实状态后要么淡出（未锁）要么被锁层接住（已锁）。
+function releaseBootMask() {
+  const mask = document.getElementById('qd-boot-mask')
+  if (!mask) return
+  mask.classList.add('qd-boot-mask-out')
+  window.setTimeout(() => mask.remove(), 180)
+}
+
+// syncLockState 向后端校准锁状态。晚一步就会先闪一帧解锁界面，故由 onMounted 最先发起。
+// 末次校准时间用于 show 校准的节流（见 syncLockOnShow）。
+let lastLockSyncAt = 0
+async function syncLockState() {
+  lastLockSyncAt = Date.now()
+  try {
+    const st = unwrap<{ locked?: boolean }>(await LockStatus())
+    locked.value = !!st?.locked
+  } catch (e) {
+    logErr('App.lockStatus', e)
+    // 查不到时按「未锁」处理：误锁一个没设密码的用户比漏锁更糟（后者至少后台还在）
+  } finally {
+    releaseBootMask()
+  }
+}
+
+// 窗口重新获焦 / 从隐藏恢复时，用真相源再校准一次。
+//
+// 浮窗是 Hide/Show 保活的：隐藏期间收到的 lock:changed 可能只改了 JS 状态、
+// 来得及保存但没来得及重合成，显示出来的一瞬仍是旧帧（锁层）。启动遮罩能兜住
+// 「首次加载」那一种，这一条兜「已经加载过、只是被藏起来过」那一种。
+// 400ms 节流：切焦点很频繁，没必要每次都问。
+function syncLockOnShow() {
+  if (Date.now() - lastLockSyncAt < 400) return
+  void syncLockState()
+}
 // 后台自动更新提示弹窗状态
 const updatePromptVisible = ref(false);
 const updatePromptData = ref<{ version: string; currentVersion: string; releaseNotes: string } | null>(null);
@@ -218,6 +267,8 @@ window.addEventListener('hashchange', () => {
   hashRef.value = window.location.hash
 })
 
+// 主窗口：不带 hash。锁定态只有它渲染可输入的锁层，浮窗只显示只读提示（见模板）。
+const isMainWindow = computed(() => hashRef.value === '')
 const isClipboardWindow = computed(() => hashRef.value === '#/clipboard')
 const isNoteWindow = computed(() => hashRef.value === '#/note')
 const isWinmgrWindow = computed(() => hashRef.value === '#/window-manager')
@@ -257,6 +308,20 @@ prefersDark.addEventListener('change', () => {
 })
 
 onMounted(async () => {
+  // 锁状态最先要：放在 store.initialize 之前且不 await，避免初始化耗时把锁层推迟，
+  // 让用户先看到一帧真实界面。
+  void syncLockState();
+  // 锁状态漂移兜底（见 syncLockOnShow）：窗口每次重新可见就校准一次
+  window.addEventListener('focus', syncLockOnShow)
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) syncLockOnShow()
+  })
+  // 锁定/解锁：Go 侧全局广播，所有窗口同步。（主题之外第二个必须全窗口处理的事件）
+  Events.On('lock:changed', (payload: any) => {
+    const p = payload?.data ?? payload
+    locked.value = !!p?.locked
+    if (locked.value) releaseBootMask() // 极端时序：锁层已渲染，遮罩还没撤
+  })
   await store.initialize();
   // 读取已保存的主题
   try {
@@ -440,6 +505,17 @@ const activeConfirm = computed(() =>
 </script>
 
 <template>
+  <!-- 启动锁层只在主窗口出现：密码输入只保留这一处。
+       浮窗（剪贴板/命令面板/笔记/SSH）在锁定期间由 tray.go 的 lockBlocksHotkey
+       拦住不打开，锁定动作本身也会收起已开的浮窗，所以它们只需要一个只读提示兜底，
+       不需要能输密码的锁层——那要求每个窗口各适配一套尺寸与紧凑样式，还要逐处确认
+       底层键盘监听不会把密码按键漏下去（回车被当成"复制并关闭"、字符被发给 SSH 远端）。
+       下面的 LockedNotice 是防漏：将来若有新入口忘了加锁判断，最坏也只露出提示。 -->
+  <!-- 例外：窗口排版浮层锁定期间照常可用（它只对别的应用的窗口贴边/等分，
+       不读 QuickDock 数据），所以它既不显示锁层也不显示提示。 -->
+  <LockScreen v-if="locked && isMainWindow" @unlocked="locked = false" />
+  <LockedNotice v-else-if="locked && !isWinmgrWindow" />
+
   <!-- 独立剪贴板窗口：仅显示剪贴板列表 -->
   <div v-if="isClipboardWindow" class="clipboard-standalone">
     <ClipboardPanel compact />

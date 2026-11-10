@@ -28,6 +28,7 @@ import {
 } from '../../bindings/quickdock/services/plugin/pluginservice'
 import { Events } from '@wailsio/runtime'
 import { unwrap } from '../utils/api'
+import { isAppLocked } from '../utils/appLock'
 import { copyToClipboard } from '../utils/clipboard'
 import { getErrorMessage } from '../utils/error'
 import { logErr, logWarn, logDebug } from '../utils/logger'
@@ -566,6 +567,9 @@ function escFromPlugin() {
 // 文档级 Esc 兜底：frameless 窗口激活竞态下输入框可能未获得键盘焦点，
 // 仅 @keydown 绑在 <input> 上时 Esc 会丢失，故在 document 上再兜一层（capture 保证不被子组件吞掉）。
 function onGlobalEsc(e: KeyboardEvent) {
+  // 锁定期间面板被锁层盖着，这里的 Esc 必须让位：否则用户在密码框按 Esc
+  // 会把这层「关掉面板」理解成窗口消失，而窗口其实是 Hide，热键再开还是锁层。
+  if (isAppLocked()) return
   if (e.key !== 'Escape') return
   // 输入法正在组词时 Esc 用于取消候选，不能顺手把面板关掉
   if (e.isComposing || e.keyCode === 229) return
@@ -600,6 +604,10 @@ function navFocused(): boolean {
 // 方向键、1-9、Home/End、Enter 依然可靠——与 onGlobalEsc 同思路，根治「方向键时灵时不灵」。
 // Escape 专由 onGlobalEsc 处理，这里跳过避免双触发。
 function onGlobalKey(e: KeyboardEvent) {
+  // 这条最致命：它在捕获阶段、且只看「焦点是不是面板自己的输入框」。
+  // 锁定时焦点在密码框，判据不成立，于是 Enter 会走到 onKeydown 去「执行当前
+  // 选中项」——用户输完密码一按回车，面板执行动作甚至直接关窗。
+  if (isAppLocked()) return
   if (e.key === 'Escape') return
   // 备忘单打开时导航键归它，方向键别去动背后的结果列表
   if (showCheatSheet.value) return

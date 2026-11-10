@@ -20,6 +20,7 @@ import (
 	"time"
 
 	envengine "quickdock/internal/env"
+	"quickdock/internal/lock"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/internal/sysutil"
@@ -132,6 +133,7 @@ var (
 	currentNoteAccel        string
 	currentShotAccel        string
 	currentSshAccel         string
+	currentLockAccel        string
 	currentWinmgrAccels     []string
 	currentWinmgrFloatAccel string
 	accelMu                 sync.Mutex
@@ -188,6 +190,52 @@ func hideMainWindow(win *application.WebviewWindow) {
 	windowFlags.Clipboard.Store(false)
 }
 
+// ===== 锁定期间的热键拦截 =====
+//
+// 锁定态下浮窗**不打开、也不渲染密码框**。这样做是为了避开「每个窗口都要有一份
+// 解锁界面」的一致性难题：剪贴板 480×540、命令面板、笔记、SSH、窗口排版各有各的
+// 尺寸和紧凑样式，锁层得逐个适配；更麻烦的是浮窗底下的面板都挂着 document 级
+// 键盘监听，密码框里的按键会漏下去（回车被当成「复制并关闭」、被发给 SSH 远端）。
+// 改成「热键一律不弹浮窗，只唤出主窗口」，密码输入就只剩主窗口一处。
+//
+// 拦截范围：剪贴板 Ctrl+` / 命令面板 Ctrl+K / 笔记 Ctrl+Alt+N / SSH Ctrl+Alt+S。
+// **窗口排版 Ctrl+Alt+W 放行**，截图 F1 与贴边 Ctrl+Alt+方向键同样放行——三者都只
+// 操作别的应用的窗口或屏幕像素，不读 QuickDock 的任何用户数据。
+//
+// 不做成「静默无效」：按了热键没有任何反应，第一反应是程序卡死了。唤出主窗口是
+// 最直接的提示，再补一条桌面气泡（5 秒节流，连按几次不会刷屏），以防主窗口开在
+// 另一块显示器上、或者被别的窗口挡住时用户找不到。
+var lastLockHotkeyNotice atomic.Int64
+
+// lockBlocksHotkey 在锁定期间统一拦截浮窗类热键，返回 true 表示调用方应直接 return。
+func lockBlocksHotkey() bool {
+	if !lock.IsLocked() {
+		return false
+	}
+	if win := GetMainWindow(); win != nil {
+		if windowFlags.Main.Load() || win.IsVisible() {
+			// 已经在屏幕上就只前置，别把窗口从别的显示器拽到鼠标这边
+			win.Focus()
+		} else {
+			showMainWindow(win)
+		}
+	}
+	notifyLockedOnce()
+	return true
+}
+
+// notifyLockedOnce 提醒用户去主窗口解锁（5 秒内只发一次）。
+func notifyLockedOnce() {
+	now := time.Now().Unix()
+	prev := lastLockHotkeyNotice.Load()
+	if now-prev < 5 || !lastLockHotkeyNotice.CompareAndSwap(prev, now) {
+		return
+	}
+	if svc := appSvc.Load(); svc != nil {
+		svc.NotifyDesktop("qd-locked-hotkey", "快启坞已锁定", "请前往主窗口输入密码解锁")
+	}
+}
+
 // toggleMainWindow 切换主窗口显隐，供热键/托盘回调统一调用。
 func toggleMainWindow() {
 	win := GetMainWindow()
@@ -210,6 +258,11 @@ func StartHotkeyListener(app *application.App, svc *services.AppService) {
 	appSvc.Store(svc)
 
 	createSystemTray(app)
+	// 锁状态变化要按锁定/解锁切换菜单项（services 不能反向 import main，故注入）。
+	// 必须放在 createSystemTray 之后：rebuildTrayMenu 依赖 trayInstance 就位。
+	svc.RebuildTrayFn = rebuildTrayMenu
+	// 锁定触发时要收起所有浮窗（services 同样不能 import main）。
+	svc.HideFloatingWindowsFn = hideAllFloatingWindows
 	registerAllHotkeys(app)
 
 	// 回调在 Win32 消息线程上触发，OnClipboardChange 内部的入库逻辑自行异步。
@@ -245,8 +298,24 @@ func createSystemTray(app *application.App) {
 
 // buildTrayMenu 构建托盘右键菜单（框架 smart default 已处理右键弹出）。
 // 每次重建都实时反映服务运行状态，托盘切换启停后会调用 rebuildTrayMenu 刷新。
+// 锁定态与解锁态是两套菜单：锁定时「服务启停 / 打开设置 / 重启」都能绕过锁层
+// 改动应用状态，必须整体隐藏，只留下「解锁」（唤出锁层）与退出。
 func buildTrayMenu(app *application.App) *application.Menu {
 	menu := app.Menu.New()
+
+	if lock.IsLocked() {
+		menu.Add("解锁").OnClick(func(*application.Context) {
+			if win := GetMainWindow(); win != nil {
+				showMainWindow(win) // 主窗口里是锁层，密码在那边输
+			}
+		})
+		menu.AddSeparator()
+		menu.Add("退出").OnClick(func(*application.Context) {
+			requestQuit()
+		})
+		return menu
+	}
+
 	menu.Add("显示窗口").OnClick(func(*application.Context) {
 		if win := GetMainWindow(); win != nil {
 			showMainWindow(win)
@@ -265,6 +334,13 @@ func buildTrayMenu(app *application.App) *application.Menu {
 			}
 		}
 	})
+	// 未设密码时点「锁定」会失败（LockNow 返回未设密码），这里直接不显示，
+	// 避免用户点了一个永远报错的菜单项。
+	if svc := appSvc.Load(); svc != nil && lock.HasPassword() {
+		menu.Add("锁定").OnClick(func(*application.Context) {
+			svc.LockNow()
+		})
+	}
 	menu.Add("重启").OnClick(func(*application.Context) {
 		restartApp()
 	})
@@ -408,14 +484,29 @@ func toggleService(rt envengine.Runtime) {
 	}
 }
 
+// trayRebuildSeq 托盘重建序号，用于丢弃「构建慢、提交晚」的过期菜单。
+//
+// buildTrayMenu 的服务子菜单要对每个已装运行时跑一次状态探测（进程树 / 端口），
+// 已装运行时一多就是几百毫秒起。所以解锁路径上它被丢到后台跑（见 services/lock.go），
+// 后台跑就可能乱序：先发的请求后完成，把旧状态盖在新菜单上。有了序号就能丢弃过期结果。
+var trayRebuildSeq atomic.Uint64
+
 // rebuildTrayMenu 重建托盘菜单以反映最新服务状态（切换启停后调用）。
+//
+// 可以在任意 goroutine 调用：SystemTray.SetMenu 内部用 InvokeSync 回主线程。
+// 但构建（buildTrayMenu）是本函数里最慢的部分，调用方在意时延的话应把它放后台。
 func rebuildTrayMenu() {
 	tray := trayInstance
 	app := getHotkeyApp()
 	if tray == nil || app == nil {
 		return
 	}
-	tray.SetMenu(buildTrayMenu(app))
+	seq := trayRebuildSeq.Add(1)
+	menu := buildTrayMenu(app)
+	if trayRebuildSeq.Load() != seq {
+		return // 期间有更新的重建请求，本次结果已过期
+	}
+	tray.SetMenu(menu)
 }
 
 // requestQuit 统一退出路径：置真退出标记 → 移除剪贴板监听 → app.Quit()。
@@ -571,6 +662,19 @@ func getShotAccel() string {
 	accelMu.Lock()
 	defer accelMu.Unlock()
 	return currentShotAccel
+}
+
+// 启动锁热键（默认 Ctrl+Alt+L）同样单独存取，理由同上。
+func getLockAccel() string {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	return currentLockAccel
+}
+
+func setLockAccel(accel string) {
+	accelMu.Lock()
+	defer accelMu.Unlock()
+	currentLockAccel = accel
 }
 
 func setShotAccel(accel string) {
@@ -804,6 +908,10 @@ func handleScreenshotHotkey() {
 
 // showNoteWindow 切换笔记独立窗口的显隐状态
 func showNoteWindow() {
+	// 锁定期间不弹浮窗，改为唤出主窗口锁层（见 lockBlocksHotkey 的说明）
+	if lockBlocksHotkey() {
+		return
+	}
 	nw := getNoteWindow()
 	if nw == nil {
 		return
@@ -862,6 +970,12 @@ func SuspendHotkeys() {
 	if sshAccel != "" {
 		app.GlobalShortcut.Unregister(sshAccel)
 	}
+	// 锁定热键也要挂起：设置页捕获时不挂，用户想把它改成某个组合键，
+	// 按下旧键会直接把应用锁上，根本没有捕获的机会。
+	lockAccel := getLockAccel()
+	if lockAccel != "" {
+		app.GlobalShortcut.Unregister(lockAccel)
+	}
 	for _, w := range getWinmgrAccels() {
 		if w != "" {
 			app.GlobalShortcut.Unregister(w)
@@ -882,6 +996,10 @@ func ResumeHotkeys() {
 
 // toggleClipboardWindow 切换剪贴板独立窗口的显隐状态
 func toggleClipboardWindow() {
+	// 锁定期间不弹浮窗（剪贴板历史是用户数据）。注意监听本身照常记录，解锁后历史完整。
+	if lockBlocksHotkey() {
+		return
+	}
 	cw := getClipboardWindow()
 	if cw == nil {
 		return
@@ -992,6 +1110,9 @@ func registerWinmgrHotkeys(app *application.App) []string {
 // 关键顺序：先把「当前前台窗口」记为排版目标，再显示浮层——浮层一旦拿到焦点，
 // GetForegroundWindow 就指向 QuickDock 自己了。浮层已开着时再按一次 = 收起。
 func handleWinmgrFloatHotkey() {
+	// 锁定期间照常可用：它只对其他应用的窗口做贴边/等分，不暴露任何 QuickDock 数据
+	// （9 个布局格子 + 目标窗口标题，标题来自 CaptureTilingTarget，不是库里的内容）。
+	// 因此窗口排版是唯一放行的浮窗热键，App.vue 里对 #/window-manager 也不渲染锁层。
 	// ① 先捕获目标窗口，必须在「取/建窗口」与 Show 之前：
 	//   浮窗的创建动作会抢一次前台，Show+Focus 更是直接把自己变成前台，
 	//   之后 GetForegroundWindow 就拿不到用户想排的窗口了。
@@ -1058,7 +1179,7 @@ func registerAllHotkeys(app *application.App) {
 	// 重注册前先注销上一轮已注册的快捷键，避免修改设置保存后旧热键残留、
 	// 新旧热键同时生效直到进程重启。与 Reregister* 系列保持一致。
 	resetHotkeyWarnings()
-	for _, old := range append([]string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel(), getSshAccel(), getWinmgrFloatAccel()}, getWinmgrAccels()...) {
+	for _, old := range append([]string{getAppAccel(), getClipAccel(), getPaletteAccel(), getNoteAccel(), getShotAccel(), getSshAccel(), getLockAccel(), getWinmgrFloatAccel()}, getWinmgrAccels()...) {
 		if old != "" {
 			app.GlobalShortcut.Unregister(old)
 		}
@@ -1071,6 +1192,8 @@ func registerAllHotkeys(app *application.App) {
 	shotMods, shotVk := 0, 0x70
 	// SSH 终端窗口热键默认 Ctrl+Alt+S（S=SSH，与快捷笔记的 Ctrl+Alt+N 同族）。
 	sshMods, sshVk := MOD_CONTROL|MOD_ALT, int(0x53)
+	// 启动锁热键默认 Ctrl+Alt+L（L=Lock）。
+	lockMods, lockVk := MOD_CONTROL|MOD_ALT, int(0x4C)
 	if svc := appSvc.Load(); svc != nil && svc.DB != nil {
 		if raw, err := svc.DB.GetSetting("hotkey"); err == nil && raw != "" {
 			appMods, appVk = parseHotkeySetting(raw)
@@ -1090,6 +1213,9 @@ func registerAllHotkeys(app *application.App) {
 		if raw, err := svc.DB.GetSetting("ssh_hotkey"); err == nil && raw != "" {
 			sshMods, sshVk = parseHotkeySetting(raw)
 		}
+		if raw, err := svc.DB.GetSetting("lock_hotkey"); err == nil && raw != "" {
+			lockMods, lockVk = parseHotkeySetting(raw)
+		}
 	}
 
 	appAccel := modVKToAccelerator(appMods, appVk)
@@ -1098,6 +1224,7 @@ func registerAllHotkeys(app *application.App) {
 	noteAccel := modVKToAccelerator(noteMods, noteVk)
 	shotAccel := modVKToAccelerator(shotMods, shotVk)
 	sshAccel := modVKToAccelerator(sshMods, sshVk)
+	lockAccel := modVKToAccelerator(lockMods, lockVk)
 
 	// 主窗口热键回调
 	registeredAppAccel := appAccel
@@ -1144,6 +1271,10 @@ func registerAllHotkeys(app *application.App) {
 	// 面板内的「动作菜单」改用 Ctrl+Enter 触发（见 CommandPalette.vue），
 	// 避免系统级热键与页面 keydown 抢焦点、导致菜单永远不可达的问题。
 	handlePaletteHotkey := func() {
+		// 锁定期间不弹面板：它能搜工作空间、笔记、待办，是数据入口
+		if lockBlocksHotkey() {
+			return
+		}
 		pw := getPaletteWindow()
 		if pw == nil {
 			return
@@ -1241,6 +1372,26 @@ func registerAllHotkeys(app *application.App) {
 		logger.I("SSH 快捷键 [%s] 已注册", sshAccel)
 	}
 	setSshAccel(registeredSshAccel)
+
+	// 启动锁热键（默认 Ctrl+Alt+L）：只在已设密码时有意义，未设密码时直接不注册，
+	// 免得用户按下后什么都没发生却以为热键坏了。
+	// 锁定状态下按下同样无效（Lock 幂等），不需要额外判断。
+	registeredLockAccel := ""
+	if lock.HasPassword() {
+		registeredLockAccel = lockAccel
+		if err := app.GlobalShortcut.Register(lockAccel, func() {
+			if svc := appSvc.Load(); svc != nil {
+				svc.LockNow()
+			}
+		}); err != nil {
+			logger.W("启动锁热键 [%s] 注册失败: %v", lockAccel, err)
+			addHotkeyWarning(lockAccel)
+			registeredLockAccel = ""
+		} else {
+			logger.I("启动锁快捷键 [%s] 已注册", lockAccel)
+		}
+	}
+	setLockAccel(registeredLockAccel)
 
 	setAccelerators(registeredAppAccel, registeredClipAccel, registeredPaletteAccel, registeredNoteAccel)
 
