@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guide — QuickDock</title>
-<meta name="description" content="QuickDock guide: installation, interface, hotkeys, resources, command palette, clipboard, screenshots, notes, todos, monitors, schedules, runtimes, downloader, AI, SSH, backup and troubleshooting.">
+<meta name="description" content="QuickDock guide: installation, interface, hotkeys, resources, command palette, clipboard, screenshots, notes, todos, monitors, schedules, runtimes, downloader, AI, SSH, backup, troubleshooting and the startup lock.">
 <meta name="theme-color" content="#080c15">
 <link rel="icon" href="../assets/img/favicon-64.png">
 <link rel="alternate" hreflang="zh-CN" href="../guide.html">
@@ -70,6 +70,7 @@
         <a href="#s15">15 Data &amp; backup</a>
         <a href="#s16">16 Updates &amp; fixes</a>
         <a href="#s17">17 Downloader</a>
+        <a href="#s18">18 Startup lock</a>
       </aside>
 
       <div class="doc-main">
@@ -101,7 +102,7 @@
 
         <section class="doc-sec" id="s3">
           <h2><span>03</span>Hotkeys</h2>
-          <p>Seven global hotkeys by default. These are the ones you'll reach for all day.</p>
+          <p>Eight global hotkeys by default. These are the ones you'll reach for all day.</p>
           <ul>
             <li><kbd>Ctrl</kbd><kbd>Space</kbd> show or hide the main window</li>
             <li><kbd>Ctrl</kbd><kbd>K</kbd> command palette</li>
@@ -110,6 +111,7 @@
             <li><kbd>F1</kbd> region screenshot, falling back to <kbd>Ctrl</kbd><kbd>Shift</kbd><kbd>A</kbd> when it's taken</li>
             <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd> window tiling overlay, plus 15 more snap hotkeys under Settings → Window Management</li>
             <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>S</kbd> SSH terminal</li>
+            <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>L</kbd> lock the UI (set a startup password under Settings → Security first)</li>
             <li>All of them can be rebound under Settings → Hotkey Settings, effective immediately, no restart. If you forget one, type <code>cheatsheet</code> in the command palette; the sheet reads your current bindings.</li>
           </ul>
         </section>
@@ -234,7 +236,7 @@
             <li>Service runtimes — Nginx, MySQL, Redis and the like — start, stop and restart from here. Configs can be edited in the app and reloaded on save.</li>
             <li>Nginx, Apache and Caddy validate their config before starting; a syntax error stops there instead of breaking a live service.</li>
             <li>Every service has live logs (last 8 KB) and a web console entry; the port overview shows which process holds which port.</li>
-            <li>Check Project reads the version declarations in a directory — <code>.nvmrc</code>, <code>.tool-versions</code>, <code>go.mod</code>, <code>package.json</code> and more — compares them against what is installed and active, and switches to the missing version on the spot. If Everything returns nothing, the page has a self-test too.</li>
+            <li>Check Project reads the version declarations in a directory — <code>.nvmrc</code>, <code>.tool-versions</code>, <code>go.mod</code>, <code>package.json</code>, <code>composer.json</code> and more — compares them against what is installed and active, and switches to the missing version on the spot. If Everything returns nothing, the page has a self-test too.</li>
             <li>Everything installs under <code>%APPDATA%\QuickDock\runtime\</code>: no registry writes, no system PATH changes, no admin rights.</li>
           </ul>
         </section>
@@ -311,6 +313,19 @@
             <li>Separate folder per download: click "Browse" next to the folder, or use "url | folder" per line in batch mode; turn on per-file folders in Settings → Automation so downloads stop piling into one directory, and same-name links reuse the folder so resume hits the control file.</li>
             <li>Protection on full disks: a download that fills the disk auto-pauses with a warning, and a stuck engine (write failures, RPC timeouts) restarts itself while the page shows "Restarting / Recovered", avoiding the restart storm.</li>
             <li>Continue on another PC: copy the old PC's aria2.session plus the unfinished data file and its .aria2 control file, click "Import resume", pick the folder and session, fix names / urls / folders and submit — it resumes from the new PC's real path; magnets get no file name and expired signed URLs are swapped inline.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s18">
+          <h2><span>18</span>Startup lock</h2>
+          <p>For when someone borrows the machine for a minute, or you step away and would rather not sign out.</p>
+          <ul>
+            <li>Set a startup password under Settings → Security, six characters minimum. A one-time recovery code is shown right after — it appears once, so write it down.</li>
+            <li><kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>L</kbd> locks immediately, and the tray menu offers Lock / Unlock depending on state. Once a password is set, every launch — auto-start at login included — asks for it first.</li>
+            <li>The lock covers the interface only. The main window and every detached window collapse to one unlock box, and panel hotkeys bring up the main window with a hint instead. Everything behind keeps running: monitors, scheduled tasks, mail codes, weather, the clipboard listener, SSH sessions, the MCP listener.</li>
+            <li>Clipboard history is hidden while locked, but ordinary copy and paste still works. Window tiling <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd> and screenshots <kbd>F1</kbd> stay allowed — neither reads this app's data.</li>
+            <li>It unlocks by itself once the password is fully typed; no Enter needed. Forgotten it? The recovery code clears the password and unlocks, then set a new one.</li>
+            <li>The password lives in local app_state and is deliberately left out of WebDAV backups. Restoring onto another machine leaves you with no password set, so set it again there.</li>
           </ul>
         </section>
 
