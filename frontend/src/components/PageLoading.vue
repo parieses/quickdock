@@ -6,9 +6,14 @@
  * Promise 落地前渲染的是一个注释节点 —— 表现就是「点导航后内容区先空一拍」。
  * 这里给它们统一配 loadingComponent（见 pages/registry.ts 的 lazy()）。
  *
- * 刻意只做「页面轮廓」而不是转圈：转圈和空白一样没有信息量，而页头 + 卡片网格
- * 至少告诉用户「这个页面正在来，它大致长这样」。形状是多数列表/总览页的公约数，
- * 不模仿任何一页的具体布局，免得骨架和真实内容对不上反而像闪了一下。
+ * 版式刻意去贴真实页面的公共框架（styles/app.css 的 .qd-page-header /
+ * .qd-page-body / .qd-card）：页头 46px 通栏、内容区左右 20、卡片只靠亮度分层。
+ * 旧版是「整页 24px padding + 页头两条占位 + 四张 1px 描边卡片」，跟任何一页
+ * 都对不上：真实页头出现时凭空多出一条通栏、整页往下跳，卡片还多一圈亮边。
+ * 贴框架之后，骨架到真实内容的切换只剩下「灰条变成文字」这一层变化。
+ *
+ * 内容形状仍取公约数（通栏概览 + 两列卡 + 列表），不模仿某一页的具体布局，
+ * 免得骨架和真实内容对不上反而像闪了一下。
  */
 import { useI18n } from 'vue-i18n'
 
@@ -17,16 +22,37 @@ const { t } = useI18n()
 
 <template>
   <div class="page-loading" role="status" :aria-label="t('loading')">
-    <div class="pl-head">
-      <div class="pl-line pl-title"></div>
-      <div class="pl-line pl-sub"></div>
+    <!-- 页头：与 .qd-page-header 同高、同底色、同分隔线 -->
+    <div class="pl-header">
+      <div class="pl-bar pl-header-title"></div>
+      <div class="pl-actions">
+        <div class="pl-bar pl-action"></div>
+        <div class="pl-bar pl-action pl-action-sm"></div>
+      </div>
     </div>
-    <div class="pl-grid">
-      <div v-for="n in 4" :key="n" class="pl-card">
-        <div class="pl-line pl-card-title"></div>
-        <div class="pl-line pl-row"></div>
-        <div class="pl-line pl-row pl-mid"></div>
-        <div class="pl-line pl-row pl-short"></div>
+
+    <div class="pl-body">
+      <!-- 通栏概览：多数页第一块是横向状态带 / 今日卡 -->
+      <div class="pl-card pl-overview">
+        <div class="pl-bar pl-card-title"></div>
+        <div class="pl-bar pl-line pl-w-55"></div>
+      </div>
+
+      <div class="pl-columns">
+        <div v-for="col in 2" :key="col" class="pl-card">
+          <div class="pl-bar pl-card-title"></div>
+          <div class="pl-bar pl-line"></div>
+          <div class="pl-bar pl-line pl-w-70"></div>
+          <div class="pl-bar pl-line pl-w-40"></div>
+        </div>
+      </div>
+
+      <!-- 列表区：列表 / 日志 / 历史类页面的主体 -->
+      <div class="pl-card pl-list">
+        <div v-for="n in 3" :key="n" class="pl-list-row">
+          <div class="pl-bar pl-dot"></div>
+          <div class="pl-bar pl-line" :class="n === 2 ? 'pl-row-short' : 'pl-row-long'"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -34,68 +60,108 @@ const { t } = useI18n()
 
 <style scoped>
 /* .page-shell 是 display:contents，这里就是 .app-content 的直接 flex 子项，
-   必须自己撑满；clipboard-page 那条分支是 flex column，flex:1 同样成立。 */
+   必须自己撑满；clipboard-page 那条分支是 flex column，flex:1 同样成立。
+   材质档下 style.css 的 .app-content > * > * 会把这层底透明化，与真实页面
+   根节点一致，由 .app-content 提供唯一那层窗口底。 */
 .page-loading {
   flex: 1;
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  padding: 24px;
+  overflow: hidden;
+  background: var(--color-bg-primary);
+}
+
+.pl-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-shrink: 0;
+  min-height: 46px;
+  padding: 0 var(--space-6);
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.pl-actions { display: flex; gap: var(--space-2); margin-left: auto; }
+
+/* 与 .qd-page-body 的 18/20/24 对齐：上边取 20，2px 差在切换瞬间看不出来，
+   但换来全部取值走 token。 */
+.pl-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-7) var(--space-7) var(--space-8);
   overflow: hidden;
 }
 
-.pl-head { display: flex; flex-direction: column; gap: 10px; flex-shrink: 0; }
-
-.pl-grid {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  grid-auto-rows: minmax(120px, auto);
-  gap: 14px;
-  align-content: start;
-}
-
+/* 卡片三件套直接复刻 .qd-card：card-bg + 浅色专用描边 + 无阴影。
+   旧版自己写 1px solid --color-border，深色下比真实卡片多一圈亮边。 */
 .pl-card {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  gap: var(--space-4);
+  flex-shrink: 0;
+  padding: var(--space-6);
   background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
 }
 
-/* 灰条用 bg-tertiary：它比卡片底高一级，深浅主题下都看得见但不刺眼。
-   shimmer 叠一层中性灰半透明，避免在深色主题里泛白、浅色主题里发黑。 */
-.pl-line {
-  position: relative;
+.pl-overview { gap: var(--space-5); }
+
+.pl-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-5);
+  flex-shrink: 0;
+}
+.pl-columns .pl-card { min-height: 132px; }
+
+.pl-list { gap: var(--space-2); padding: var(--space-4) var(--space-6); }
+.pl-list-row { display: flex; align-items: center; gap: var(--space-4); height: 28px; }
+/* 行内按「方块 + 条」的比例给宽，条可收缩，避免百分比宽度 + 固定方块溢出卡片。
+   不能复用卡片里的 pl-w-*（那些是相对整卡的 100% 宽度）。 */
+.pl-list-row .pl-line { flex-shrink: 1; }
+.pl-list-row .pl-row-long { width: 62%; }
+.pl-list-row .pl-row-short { width: 40%; }
+
+/* 占位条用「活动态」实色 token：深色提亮、浅色压深，两套主题都成立。
+   旧版叠半透明中性灰 shimmer，深色泛白、浅色发黑，和周围 token 不同源。
+   所有条同步呼吸，不逐条扫光 —— 骨架常只出现一两百毫秒，扫光扫不完
+   一轮，只会看见一堆条在乱动。 */
+.pl-bar {
+  flex-shrink: 0;
   height: 10px;
-  border-radius: 5px;
-  background: var(--color-bg-tertiary);
-  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--color-bg-active);
+  animation: pl-breathe 1.5s ease-in-out infinite;
 }
 
-.pl-line::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  transform: translateX(-100%);
-  background: linear-gradient(90deg, transparent, rgba(127, 127, 127, .16), transparent);
-  animation: pl-shimmer 1.3s ease-in-out infinite;
+.pl-header-title { width: 96px; height: 14px; }
+.pl-action { width: 64px; height: 24px; border-radius: var(--radius-sm); }
+.pl-action-sm { width: 24px; }
+.pl-card-title { width: 34%; height: 12px; }
+.pl-line { width: 100%; height: 9px; }
+.pl-dot { width: 14px; height: 14px; }
+.pl-w-70 { width: 70%; }
+.pl-w-55 { width: 55%; }
+.pl-w-40 { width: 40%; }
+
+@keyframes pl-breathe {
+  0%, 100% { opacity: .55; }
+  50% { opacity: 1; }
 }
-
-.pl-title { width: 150px; height: 18px; }
-.pl-sub { width: 240px; height: 10px; }
-.pl-card-title { width: 45%; height: 12px; }
-.pl-row { width: 100%; }
-.pl-mid { width: 78%; }
-.pl-short { width: 55%; }
-
-@keyframes pl-shimmer { to { transform: translateX(100%); } }
 
 @media (prefers-reduced-motion: reduce) {
-  .pl-line::after { animation: none; }
+  .pl-bar { animation: none; opacity: .75; }
+}
+
+@media (max-width: 760px) {
+  .pl-columns { grid-template-columns: 1fr; }
+  .pl-columns .pl-card:last-child { display: none; }
 }
 </style>

@@ -27,6 +27,7 @@ import (
 	clipboardsvc "quickdock/services/clipboard"
 	collectionsvc "quickdock/services/collection"
 	diagsvc "quickdock/services/diag"
+	downloadsvc "quickdock/services/download"
 	dshsvc "quickdock/services/dsh"
 	envsvc "quickdock/services/env"
 	frecencysvc "quickdock/services/frecency"
@@ -673,6 +674,10 @@ func main() {
 	// （纯 Go 无 CGO，用不了 sqlite-vec；个人规模也用不上 ANN）。
 	kbSvc := kbsvc.NewKBService(appService)
 
+	// 下载器：aria2 daemon 由环境管理托管（安装 / 启停 / 崩溃自愈），
+	// 本门面只代理任务指令、合并任务元数据并推送进度快照。
+	downloadSvc := downloadsvc.NewDownloadService(appService)
+
 	// SSH 服务门面：主机管理/指纹信任/连通性测试/命令执行（引擎在 internal/sshx），
 	// 单独绑定为独立 Wails service。
 	sshSvc := sshxsvc.NewSshService(appService)
@@ -686,9 +691,10 @@ func main() {
 	aiSvc.RegisterAskStream("note", noteSvc.AskAIOverStream)
 
 	// MCP 服务门面：协议/传输在 internal/mcp，本门面注册业务工具并提供前端启停接口。
-	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合/监控门面（工具复用其能力），故在其后创建。
+	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合/监控/知识库/下载器门面
+	// （工具复用其能力，且必须复用同一实例而非另建），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
-	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, kbSvc, appVersion)
+	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, kbSvc, downloadSvc, appVersion)
 
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()
@@ -739,6 +745,7 @@ func main() {
 			application.NewService(shelfSvc),
 			application.NewService(gitSvc),
 			application.NewService(kbSvc),
+			application.NewService(downloadSvc),
 			application.NewService(sshSvc),
 			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),
@@ -819,8 +826,9 @@ func main() {
 		// 这是给正式包用的框架级开关：Wails v3 的 Windows 实现写成
 		//   AreDefaultContextMenusEnabled = debugMode || !DefaultContextMenuDisabled
 		// 调试模式（本机常开的 wails3 dev）会无条件把菜单打开、把本选项短路，
-		// 所以 dev 下还要靠 index.html / plugin.html / 插件桥脚本里的
-		// contextmenu 捕获监听兜底。两层都留着，release 与 dev 才一致。
+		// 这个默认菜单正是留给右键「检查」调试用的，故主窗口 index.html 不再做
+		// 页面级拦截；插件 / DSH 独立窗口仍由 plugin.html 与插件桥脚本兜底，
+		// 避免 dev 下右键刷新丢掉编辑中的状态。
 		DefaultContextMenuDisabled: true,
 	}
 	if mainRect != nil {

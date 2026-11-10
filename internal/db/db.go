@@ -76,6 +76,8 @@ var validTables = map[string]bool{
 	"kb_libraries": true,
 	"kb_sources":   true,
 	"kb_chunks":    true,
+	// 下载任务元数据：只存 gid / 链接 / 目录 / 来源，不存进度（进度实时问 aria2）。
+	"dl_tasks": true,
 }
 
 // 已知列名的白名单（允许在 SQL 拼接中出现的列名，不含反引号/引号）。
@@ -154,8 +156,11 @@ var validColumns = map[string]bool{
 	"body_type": true, "auth_type": true, "auth_token": true,
 	"auth_user": true, "auth_pass": true,
 	"project_id": true, "variables": true,
-	"ref_id":    true, // activity：关联对象 id（项目/主机/插件命令），供前端跳转
-	"source":    true, // activity：操作来源（ui=用户自己点 / mcp=AI 通过 MCP 工具触发）
+	"ref_id": true, // activity：关联对象 id（项目/主机/插件命令），供前端跳转
+	"source": true, // activity：操作来源（ui=用户自己点 / mcp=AI 通过 MCP 工具触发）
+	// dl_tasks：全局列名白名单不按表分，新增表列必须在这里同步登记，
+	// 漏了会在快照/回收站整行恢复时才报「非法列名」。
+	"gid": true, "save_dir": true,
 	"parent_id": true, "folder_id": true,
 	"db_type": true, "host": true, "port": true, "username": true,
 	"password": true, "database": true, "file_path": true,

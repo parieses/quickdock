@@ -67,6 +67,8 @@ var restoreCoreTables = []struct {
 //   - 隐私且量大：clipboard_entries
 //   - 会自我嵌套：snapshots
 //   - 机器绑定：app_state（存 sync_config / webdav_config，密码为本机密钥加密，换机解不开）
+//   - 下载任务：dl_tasks（gid 与磁盘上的 .aria2 控制文件绑定，换机即失效；
+//     未完成任务靠 aria2.session 恢复，故快照里不登记这张表）
 //
 // 这些表行数多、列随版本演进（CREATE TABLE + ALTER 叠加），故不做强类型映射，
 // 统一走 SnapshotPayload.Tables 的通用通道。

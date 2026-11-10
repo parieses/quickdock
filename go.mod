@@ -3,6 +3,7 @@ module quickdock
 go 1.26.0
 
 require (
+	github.com/coder/websocket v1.8.14
 	github.com/dop251/goja v0.0.0-20261029153331-f81816846776
 	github.com/emersion/go-imap/v2 v2.0.0-beta.7
 	github.com/google/uuid v1.6.0
@@ -23,7 +24,6 @@ require (
 require (
 	git.sr.ht/~jackmordaunt/go-toast/v2 v2.0.3 // indirect
 	github.com/adrg/xdg v0.5.3 // indirect
-	github.com/coder/websocket v1.8.14 // indirect
 	github.com/dlclark/regexp2/v2 v2.11.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/emersion/go-message v0.18.1 // indirect

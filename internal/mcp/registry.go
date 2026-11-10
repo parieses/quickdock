@@ -35,6 +35,9 @@ const (
 	CategoryRisk      = "risk"
 	// CategoryKnowledge 本地文档知识库：按内容检索，只读。
 	CategoryKnowledge = "knowledge"
+	// CategoryDownload 下载器（aria2）任务：状态/列表/详情与控制已存在的任务。
+	// 单独成域是为了让「建任务」这类写操作能按域收窄等级，不牵连只读查询。
+	CategoryDownload = "download"
 	// CategoryWeb / CategoryCode 不属于 MCP：这批工具注册在 Agent 注册表里
 	// （见 services/ai/tools），只在面板上与宿主工具一起展示，故分类 id 仍由
 	// 这里统一维护——前端的分组顺序只认一个来源，否则面板会漏掉整组。

@@ -208,7 +208,8 @@ func (m *PluginWindowManager) Show(pluginID, title string, showInTaskbar bool) (
 
 		// 插件窗口尤其不能留 WebView2 的「刷新」：点一下会重载 plugin.html +
 		// blob iframe，用户正在编辑的半截状态直接丢掉。dev 下框架短路本选项，
-		// 由 plugin.html 与插件桥脚本的 contextmenu 监听兜底。
+		// 由 plugin.html 与插件桥脚本的 contextmenu 监听兜底（主窗口不做这层拦截，
+		// 要保留 dev 右键「检查」，详见 main.go 注释）。
 		DefaultContextMenuDisabled: true,
 	}
 	// 与主窗口 / SSH / 浮窗共用同一档位（映射只有 platform.ApplyWindowBackdrop 一份）。

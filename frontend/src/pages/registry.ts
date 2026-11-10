@@ -21,7 +21,7 @@
 import { defineAsyncComponent, type AsyncComponentLoader, type Component, type Ref } from 'vue'
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
-  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen,
+  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen, Download,
 } from '@lucide/vue'
 // 保活白名单从零依赖模块引（名字常量与组件里 defineOptions 共用同一份）
 import { KEEP_ALIVE_PAGES } from './keepAlive'
@@ -65,6 +65,8 @@ const FileSearchPage = lazy(() => import('../components/FileSearchPage.vue'))
 // 自带问答与分段预览。与「文件搜索」是两件事：那边按文件名找文件、不建索引，
 // 这边打开文件内容建索引、能问问题。
 const KnowledgePage = lazy(() => import('../components/KnowledgePage.vue'))
+// 下载器：aria2 daemon 由环境管理托管，页面只调 DownloadService 绑定方法。
+const DownloadPage = lazy(() => import('../components/DownloadPage.vue'))
 
 /** 「行尾活动指示点」的来源标识。闭集（union）：新增一种必须同时在 Sidebar 的
  *  DOT_PROVIDERS 里加 provider，否则 TS 报缺项 —— 这是把 stringly-typed 的
@@ -135,6 +137,9 @@ export const navEntries: NavEntry[] = [
     listeners: (ctx) => ({ 'open-settings': ctx.openSettings }) },
   { id: 'environments', labelKey: 'navEnvironments', icon: Server, component: EnvironmentPage,
     props: (ctx) => ({ initialSection: ctx.envInitialSection.value }) },
+  // download：引擎（aria2）是环境管理里注册的一个运行时，这里是任务面板；
+  // 不进 KeepAlive 白名单——引擎状态与进度都是易失的，切走时停掉轮询更省电。
+  { id: 'download', labelKey: 'navDownload', icon: Download, component: DownloadPage },
   // git：仓库视角（分支树 / 提交历史 / 改动预览），放在环境与 SSH 之间——同属「开发现场」
   { id: 'git', labelKey: 'navGit', icon: GitBranch, component: GitPage },
   // ssh：唤起独立终端窗口，主窗口内容不动

@@ -18,18 +18,13 @@
       }
     </style>
     <script>
-      // 关掉 WebView2 的原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
-      // Wails v3 在调试模式下把 AreDefaultContextMenusEnabled 无条件设为 true
-      // （webview_window_windows.go: debugMode || !DefaultContextMenuDisabled），
-      // 窗口选项在 dev 下被短路，只能由页面事件兜底；正式包还有 Go 侧开关双重保障。
-      // 捕获阶段只 preventDefault、不 stopPropagation：应用自定义右键菜单照常弹，
-      // 输入框 / 可编辑区保留「剪切 / 复制 / 粘贴」那份编辑菜单。
-      document.addEventListener('contextmenu', function (e) {
-        var t = e.target
-        if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' ||
-                  t.tagName === 'SELECT' || t.isContentEditable)) return
-        e.preventDefault()
-      }, true)
+      // 主窗口刻意不拦 contextmenu。
+      // 之前为关掉「独立窗口」的 WebView2 原生菜单，在所有入口页统一装了捕获监听，
+      // 结果 dev 下主窗口连右键「检查」也没了 —— 而 Wails v3 在 debugMode 下本来就
+      // 强制打开默认菜单（webview_window_windows.go: debugMode || !选项），
+      // 那正是留给开发调试的通道，不该由页面脚本抹掉。
+      // 正式包由 main.go 的 DefaultContextMenuDisabled 在窗口级关掉原生菜单；
+      // 插件 / DSH 等独立窗口仍由 plugin.html 与插件桥脚本兜底（刷新会丢编辑状态）。
       // 保存的主题要等 GetValue('theme') 异步返回才由 App.vue 定稿。先按系统偏好
       // 同步落一个 data-theme，否则 style.css 一到就先套 :root 的深色变量，
       // 浅色系统用户会看到「浅 → 深 → 浅」两次跳变。

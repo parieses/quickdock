@@ -668,7 +668,7 @@ export function matchCreate(ctx: MatchCtx): MatchOutcome | null {
   return { groups: [{ type: 'create', label: ctx.t('cmdGroupCreate'), results }] }
 }
 
-// 剪贴板智能路由：剪贴板里是 URL 且用户原样敲了它 → 给三个动作。
+// 剪贴板智能路由：剪贴板里是 URL 且用户原样敲了它 → 给四个动作。
 // 不进 MATCHERS：它要插到列表最前面（unshift），由编排层单独调用。
 export function matchClipboard(ctx: MatchCtx): ResultGroup[] {
   const src = ctx.clipboardUrlSource
@@ -677,6 +677,8 @@ export function matchClipboard(ctx: MatchCtx): ResultGroup[] {
     { type: 'clipboard-action', clipAction: 'open-url', label: ctx.t('cmdOpenUrl'), desc: src, url: src, score: 100 },
     { type: 'clipboard-action', clipAction: 'save-url', label: ctx.t('cmdSaveAsItem'), desc: src, url: src, score: 99 },
     { type: 'clipboard-action', clipAction: 'encode-url', label: ctx.t('cmdEncodeUrl'), desc: ctx.t('cmdEncodeUrlDesc'), url: src, score: 98 },
+    // 用户主动选这个动作才发任务，不做「复制链接就自动下载」。
+    { type: 'clipboard-action', clipAction: 'download-url', label: ctx.t('cmdDownloadUrl'), desc: src, url: src, score: 97 },
   ]
   return [{ type: 'clipboard-action', label: ctx.t('cmdGroupClipboard'), results: suggest }]
 }

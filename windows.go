@@ -328,7 +328,7 @@ func initClipboardWindow(app *application.App) *application.WebviewWindow {
 		Zoom:             uiZoom,
 
 		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
-		// dev 下框架会强制开启，页面侧另有 contextmenu 兜底；详见 main.go 主窗口注释。
+		// dev 下框架强制开启默认菜单供调试，正式包由本开关关闭；详见 main.go。
 		DefaultContextMenuDisabled: true,
 	}
 	applyWindowPlatformOptions(&opts)
@@ -371,7 +371,7 @@ func initNoteWindow(app *application.App) *application.WebviewWindow {
 		Zoom:             uiZoom,
 
 		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
-		// dev 下框架会强制开启，页面侧另有 contextmenu 兜底；详见 main.go 主窗口注释。
+		// dev 下框架强制开启默认菜单供调试，正式包由本开关关闭；详见 main.go。
 		DefaultContextMenuDisabled: true,
 	}
 	applyWindowPlatformOptions(&opts)
@@ -436,6 +436,7 @@ func initSshWindow(app *application.App) *application.WebviewWindow {
 		Hidden: true,
 
 		// 同上：关掉 WebView2 原生右键菜单（终端有自己的复制/粘贴菜单）。
+		// dev 下走框架默认菜单，右键「检查」仍可用。
 		DefaultContextMenuDisabled: true,
 	}
 	// SSH 与插件/DSH 窗口不同：它加载的是本应用主 SPA（App.vue 会跑），所以也要
@@ -482,7 +483,7 @@ func initWinmgrWindow(app *application.App) *application.WebviewWindow {
 		Zoom:             uiZoom,
 
 		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
-		// dev 下框架会强制开启，页面侧另有 contextmenu 兜底；详见 main.go 主窗口注释。
+		// dev 下框架强制开启默认菜单供调试，正式包由本开关关闭；详见 main.go。
 		DefaultContextMenuDisabled: true,
 	}
 	applyWindowPlatformOptions(&opts)
@@ -515,7 +516,7 @@ func initPaletteWindow(app *application.App) *application.WebviewWindow {
 		Zoom:             uiZoom,
 
 		// 关掉 WebView2 原生右键菜单（返回 / 刷新 / 另存为 / 打印 / 更多工具）。
-		// dev 下框架会强制开启，页面侧另有 contextmenu 兜底；详见 main.go 主窗口注释。
+		// dev 下框架强制开启默认菜单供调试，正式包由本开关关闭；详见 main.go。
 		DefaultContextMenuDisabled: true,
 	}
 	applyWindowPlatformOptions(&opts)

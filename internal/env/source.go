@@ -78,6 +78,10 @@ const (
 	// 只负责探测安装、封装 es.exe 检索、控制 Everything.exe 进程启停。与 git/ollama 同构，
 	// 但额外区分「缺少 es.exe」态（es.exe 与 Everything.exe 分开发行）。
 	RuntimeEverything Runtime = "everything"
+
+	// RuntimeAria2：下载器引擎。单版本语义，Windows 便携 zip 由 QuickDock 首次启用时下载；
+	// 以 daemon 常驻，任务与进度经 JSON-RPC 由 services/download 门面代理。
+	RuntimeAria2 Runtime = "aria2"
 )
 
 // 环境管理分组（侧边栏按职责归类：语言 / 网络服务 / 数据库 / 中间件 / AI / 开发工具）
@@ -268,6 +272,12 @@ var (
 		RuntimeWebDAV: {display: "WebDAV", group: GroupNetwork},
 		// Everything：外部文件检索工具，单版本、无下载源；状态四态（未安装/缺 es/已停止/运行中）。
 		RuntimeEverything: {display: "Everything", group: GroupTool, singleVersion: true},
+		// aria2：下载器引擎，单版本。官方 Windows 便携 zip 仅 2.4 MB，
+		// 国内直连 GitHub 不稳，故 gh-proxy 镜像排在官方直连之前（与 git/ollama 同一约定）。
+		RuntimeAria2: {display: "aria2", group: GroupTool, singleVersion: true, versions: []string{"1.37.0"}, sources: []Source{
+			{ID: "ghproxy", Name: "GitHub 加速 (gh-proxy.com)", Build: aria2URL("https://gh-proxy.com/https://github.com/aria2/aria2/releases/download/release-{version}/aria2-{version}-win-64bit-build1.zip")},
+			{ID: "official", Name: "aria2 官方 (GitHub)", Build: aria2URL("https://github.com/aria2/aria2/releases/download/release-{version}/aria2-{version}-win-64bit-build1.zip")},
+		}},
 		// Ollama：本地大模型推理服务，体积巨大（1.4 GB/版本，其中 1.36 GB 是 CUDA v12/v13 双轨 dll），
 		// 故虽为多版本骨架，实际按「单活跃版本 + 可保留旧版回退」使用。
 		// 下载：官方 ollama.com/download 只做 307 跳转到 GitHub Releases（不托管文件），
@@ -374,6 +384,17 @@ func nginxURL(winTmpl, darwinTmpl, style string) func(version, goos, arch string
 			return buildDarwin(darwinTmpl, version, arch, style, mm)
 		}
 		return ""
+	}
+}
+
+// aria2URL 构造 aria2 官方 Windows 便携 zip 地址（Release tag 形如 release-1.37.0）。
+// 非 Windows 返回空串：macOS/Linux 用系统包管理器自行安装，QuickDock 只做探测与接管。
+func aria2URL(winTmpl string) func(version, goos, arch string) string {
+	return func(version, goos, arch string) string {
+		if goos != "windows" {
+			return ""
+		}
+		return strings.NewReplacer("{version}", version).Replace(winTmpl)
 	}
 }
 

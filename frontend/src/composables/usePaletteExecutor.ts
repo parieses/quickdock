@@ -28,6 +28,7 @@ import {
 } from '../../bindings/quickdock/services/appservice'
 import { OpenItem } from '../../bindings/quickdock/services/collection/collectionservice'
 import { RevealInExplorer } from '../../bindings/quickdock/services/system/systemservice'
+import { DlAdd, DlEnable } from '../../bindings/quickdock/services/download/downloadservice'
 import { ExecutePluginCommand, EnablePlugin } from '../../bindings/quickdock/services/plugin/pluginservice'
 import type { CollectionItem, ToastAPI } from '../types'
 import type { SearchResult, RecentEntry } from './useCommandSearch'
@@ -416,6 +417,27 @@ export function usePaletteExecutor(deps: PaletteExecutorDeps) {
           encoded = result.url
         }
         if (await deps.writeClipboard(encoded)) toast?.success?.(t('pluginResultCopied'))
+        void deps.closePalette()
+      } else if (result.clipAction === 'download-url' && result.url) {
+        // 用户主动选「用 QuickDock 下载」才发任务，不做复制链接自动下载。
+        // 引擎没跑时先启用再重试一次（首次启用会拉 2.4 MB 官方便携包）。
+        try {
+          unwrap(await DlAdd(result.url, '', ''))
+          toast?.success?.(t('dlAdded'))
+        } catch {
+          try {
+            unwrap(await DlEnable())
+            unwrap(await DlAdd(result.url, '', ''))
+            toast?.success?.(t('dlAdded'))
+          } catch (e) {
+            toast?.error?.(getErrorMessage(e))
+          }
+        }
+        try {
+          Events.Emit('nav:goto', 'download')
+        } catch (e) {
+          console.error('[CmdPalette] nav:goto:', e)
+        }
         void deps.closePalette()
       }
     }

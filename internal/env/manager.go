@@ -155,7 +155,10 @@ type Manager struct {
 // runtimeOrder 运行时固定展示顺序
 var runtimeOrder = []Runtime{RuntimeNode, RuntimePHP, RuntimeGo, RuntimeBun, RuntimeErlang, RuntimeRedis, RuntimeNginx, RuntimeGit, RuntimeCaddy, RuntimeTraefik, RuntimeComposer,
 	RuntimeFFmpeg, RuntimePython, RuntimeApache, RuntimeMemcached, RuntimeMariaDB, RuntimeMySQL, RuntimePostgreSQL, RuntimeMongoDB,
-	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeWebDAV, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeJDK, RuntimeMCP, RuntimeEverything}
+	RuntimeMailpit, RuntimeMinIO, RuntimeRabbitMQ, RuntimeFrpc, RuntimeFTP, RuntimeWebDAV, RuntimeGh, RuntimeMkcert, RuntimeOllama, RuntimeJDK, RuntimeMCP, RuntimeEverything, RuntimeAria2}
+
+// aria2 与其它工具一样在环境管理侧栏暴露（tool 分组、单版本）：安装、启停、
+// 常驻开关都走环境管理那套，下载器页只是它的任务门面，一键启用复用同一适配器。
 
 // newAdapters 创建全部运行时适配器。
 //
@@ -195,6 +198,7 @@ func newAdapters() map[Runtime]RuntimeAdapter {
 		RuntimeMCP:        NewMCPRuntime(),
 		RuntimeWebDAV:     NewWebDAVRuntime(),
 		RuntimeEverything: NewEverythingRuntime(),
+		RuntimeAria2:      NewAria2Runtime(),
 	}
 }
 
@@ -572,6 +576,14 @@ func orEmpty[T any](s []T) []T {
 
 // Install 安装指定运行时的指定版本（先切换下载源，再委托 adapter）。
 func (m *Manager) Install(rt Runtime, version, sourceID, custom string, cb InstallCallback) error {
+	// 单版本运行时（aria2/git/ollama 等）允许调用方不传版本：用 registry 推荐版本兜底，
+	// 避免前端 EnvList 尚未回填 recommended 时被「版本号为空」拦下。未知运行时仍会
+	// 在 validateVersion 处照常报错（Versions 对未知运行时返回空清单）。
+	if version == "" {
+		if vs := Versions(rt); len(vs) > 0 {
+			version = vs[0]
+		}
+	}
 	if err := validateVersion(version); err != nil {
 		return err
 	}

@@ -746,6 +746,17 @@ var baseTables = []string{
 		done INTEGER NOT NULL DEFAULT 0,
 		created_at TEXT NOT NULL
 	)`,
+
+	// 下载任务元数据。进度/速度/状态刻意不落库：aria2 是唯一真相源，
+	// 双写必然出现「界面 62% 但文件已经下完」这类不一致。
+	`CREATE TABLE IF NOT EXISTS dl_tasks (
+		gid TEXT PRIMARY KEY,
+		url TEXT NOT NULL DEFAULT '',
+		name TEXT NOT NULL DEFAULT '',
+		save_dir TEXT NOT NULL DEFAULT '',
+		source TEXT NOT NULL DEFAULT '',
+		created_at INTEGER NOT NULL DEFAULT 0
+	)`,
 }
 
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
@@ -1052,6 +1063,7 @@ func (d *Database) migrate() error {
 	// 应用起不来，而日志里只有一句 SQL 报错，完全看不出是顺序问题。
 	// v0.0.25 的 activity.created_ts 就是这么崩的。
 	postMigrations := []string{
+		`CREATE INDEX IF NOT EXISTS idx_dl_tasks_created_at ON dl_tasks(created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_items_collection ON items(collection_id)`,
 		`CREATE INDEX IF NOT EXISTS idx_clipboard_created_at ON clipboard_entries(created_at)`,
 		// 列表默认排序与「按类型筛选后再排序」是两条固定形态，条目上万后没有索引

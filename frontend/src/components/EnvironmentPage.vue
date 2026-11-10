@@ -294,7 +294,10 @@ function avatarIcon(id: string): string {
 // 运行时目录是写死的（与后端 services/env/source.go registry 一一对应）：
 // 侧栏挂载即静态渲染，EnvList 只负责填充已装版本/下载源/推荐版本等动态数据，
 // 页面切换重挂载时列表恒在，杜绝「空列表 → 加载后填充」的闪烁。后端新增运行时需同步此表。
-const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boolean; singleVersion?: boolean }[] = [
+// aria2 在 tool 分组、单版本，安装/启停与其它工具一样由本页承担。
+// recommended 允许静态兜底：EnvList 是异步回填的，后端刚新增运行时（或 Go 进程仍是旧二进制）
+// 时该条目拿不到推荐版本，一键安装会被「没有可安装版本」挡死。
+const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boolean; singleVersion?: boolean; recommended?: string[] }[] = [
   { id: 'node', name: 'Node.js', group: 'language', hasService: false },
   { id: 'php', name: 'PHP', group: 'language', hasService: false },
   { id: 'go', name: 'Go', group: 'language', hasService: false },
@@ -313,6 +316,7 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
   { id: 'rabbitmq', name: 'RabbitMQ', group: 'middleware', hasService: true },
   { id: 'git', name: 'Git', group: 'tool', hasService: false, singleVersion: true },
   { id: 'everything', name: 'Everything', group: 'tool', hasService: true, singleVersion: true },
+  { id: 'aria2', name: 'aria2', group: 'tool', hasService: true, singleVersion: true, recommended: ['1.37.0'] },
   { id: 'composer', name: 'Composer', group: 'tool', hasService: false },
   { id: 'ffmpeg', name: 'FFmpeg', group: 'tool', hasService: false },
   { id: 'mailpit', name: 'Mailpit', group: 'tool', hasService: true },
@@ -330,7 +334,7 @@ const STATIC_CATALOG: { id: string; name: string; group: string; hasService: boo
 function staticRuntime(s: typeof STATIC_CATALOG[number]): RuntimeInfo {
   return {
     id: s.id, name: s.name, group: s.group,
-    platforms: [], recommended: [],
+    platforms: [], recommended: s.recommended ?? [],
     installed: [], sources: [], activeSource: '',
     hasService: s.hasService, hasLog: false, webConsolePort: 0, enabled: false,
     singleVersion: s.singleVersion ?? false,
@@ -964,7 +968,8 @@ async function load() {
           continue
         }
         target.platforms = info.platforms
-        target.recommended = info.recommended
+        // 后端返回空数组时（旧二进制不认识新运行时）别抹掉静态兜底版本
+        target.recommended = info.recommended?.length ? info.recommended : target.recommended
         target.installed = info.installed
         target.sources = info.sources
         target.activeSource = info.activeSource
@@ -991,6 +996,8 @@ async function load() {
       loadEverything()
     }
   } catch (e: any) {
+    // toast 只给了「前缀: 错误」，完整堆栈写日志，便于定位偶发的 EnvList 失败。
+    logErr('EnvironmentPage.load', e)
     toast.error(t('envLoadFailed') + ': ' + getErrorMessage(e))
   }
 }
@@ -1213,18 +1220,28 @@ async function install(r: RuntimeInfo) {
   }
 }
 
-// 单版本运行时一键装最新：用上游推荐列表（拉取后）第一项，未拉到则用 EnvList 返回的 recommended 兜底。
+// 单版本运行时一键装最新：优先已选版本 / 上游列表 / EnvList 推荐版本，都拿不到时
+// 再主动拉一次版本列表；静态目录对新增运行时还留有一份 recommended 兜底。
 // git/ollama/gh/frpc 均走此入口，统一隐藏版本下拉框。
-function installSingleLatest(r: RuntimeInfo) {
+async function installSingleLatest(r: RuntimeInfo) {
   if (!r || !r.singleVersion) return
   const s = stateFor(r.id, r)
-  const latest = s.available?.[0] || r.recommended?.[0] || ''
+  let latest = s.version || s.available?.[0] || r.recommended?.[0] || ''
+  if (!latest && !s.fetching) {
+    await loadAvailable(r.id)
+    latest = s.available?.[0] || ''
+  }
   if (!latest) {
-    toast.error(t('envLoadFailed'))
+    // 通常是 Go 进程仍是旧二进制（不认识新运行时），EnvList 不返回该条目，
+    // 此时必须完全重启应用而不是刷新页面。把诊断数据写进日志便于定位。
+    logErr('EnvironmentPage.installSingleLatest', {
+      id: r.id, available: s.available, recommended: r.recommended, loadError: s.loadError,
+    })
+    toast.error(t('envNoAvailableVersion', { name: r.name || r.id }))
     return
   }
   s.version = latest
-  install(r)
+  await install(r)
 }
 
 // ---- Git 状态表：逻辑已抽到 composables/useEnvGit ----
