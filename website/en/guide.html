@@ -307,6 +307,10 @@
             <li>BitTorrent and seeding: settings cover DHT, listen ports, trackers, encryption and seed ratio. These are read only when the engine starts, so stop and start it once from Runtimes after changing them. Inbound ports 6881–6980 need TCP/UDP allowed.</li>
             <li>Remote engine: Settings → Connection can point at aria2 on another machine, with host, port and an optional secret. In remote mode files land on that host, so local disk checks and "open file location" are skipped.</li>
             <li>Failures and completions: both reach the notification centre and can raise a desktop toast; failed tasks retry from the list, the context menu or the details dialog. A task that will not delete is usually a finished result — the page picks the right call and syncs the session, so there is no file to clean up by hand.</li>
+            <li>Check space before downloading: in the New dialog click "Check size" to learn the real file size and compare it with free space on the save drive; shortfalls are blocked. Remote mode only shows the size.</li>
+            <li>Separate folder per download: click "Browse" next to the folder, or use "url | folder" per line in batch mode; turn on per-file folders in Settings → Automation so downloads stop piling into one directory, and same-name links reuse the folder so resume hits the control file.</li>
+            <li>Protection on full disks: a download that fills the disk auto-pauses with a warning, and a stuck engine (write failures, RPC timeouts) restarts itself while the page shows "Restarting / Recovered", avoiding the restart storm.</li>
+            <li>Continue on another PC: copy the old PC's aria2.session plus the unfinished data file and its .aria2 control file, click "Import resume", pick the folder and session, fix names / urls / folders and submit — it resumes from the new PC's real path; magnets get no file name and expired signed URLs are swapped inline.</li>
           </ul>
         </section>
 

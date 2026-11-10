@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.44-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.45-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -91,7 +91,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | MCP 服务 | `http://127.0.0.1:9230/mcp`，53 个工具分只读、低危写、高危三级权限（默认开放 50 个）；新增下载器工具域，可查任务与进度、暂停 / 恢复 / 删除 |
 | Git 面板 | 对标 SourceTree 的仓库视角：分支 / 标签 / 远端 / 子模块管理，贮藏，文件历史与逐行归属（blame），amend、cherry-pick、revert，分支对比、side-by-side diff，SSH 密钥一键配置 GitHub / GitLab，多选批量操作与存档导出 |
 | 环境管理 | 29 种运行时，安装、切换、启停、配置、日志、控制台，全部在用户目录内；可对项目目录做只读体检：版本声明逐个对照已装与激活版本，依赖清单（`package.json` / `go.mod` / `pyproject.toml` 等）出一份快照 |
-| 下载器 | 以 aria2 为引擎：链接、批量、磁力、种子、Metalink；状态分页与七标签详情、多选批量、速度曲线、磁盘预检、失败重试、完成通知。支持 BT 与远程引擎，也能在 MCP 里查进度 |
+| 下载器 | 以 aria2 为引擎：链接、批量、磁力、种子、Metalink；状态分页与七标签详情、多选批量、速度曲线、下载前空间预检、失败重试、完成通知。可逐任务指定目录、按文件名独立建文件夹；大文件写满有磁盘守卫与引擎自愈，还支持换机续传导入。支持 BT 与远程引擎，也能在 MCP 里查进度 |
 | 知识库 | 把本地文档（Word / Excel / PDF / Markdown / 纯文本）导进来做问答与检索：中文走 FTS5 trigram，配了 embedding 模型就同时跑向量召回，两路按 RRF 融合。检索结果给到出处片段，可点回原文核对；文档按库分组，同一份文件只入库一次 |
 
 </details>
@@ -570,6 +570,13 @@ aria2 作为第 29 个运行时装在「环境管理」里，下载页只是它�
 - **BT**：DHT / DHT6 / PEX、监听端口、tracker 列表、加密、做种，以及完成后的自动归类与打开文件夹，都在设置里配；入站端口 6881–6980 需防火墙放行 TCP/UDP
 - **远程引擎**：设置 → 连接 可指向另一台机器的 aria2（HTTP / HTTPS + 可选 secret）。远程模式下文件落在远端，本机磁盘预检与「打开文件位置」自动跳过
 - **完成与失败**：写通知中心并可弹桌面气泡；失败任务能从列表、右键和详情里重试；删除按状态分派 `remove` / `removeDownloadResult` 并同步会话，不会让 `aria2.session` 把已删任务复活
+- **下载前空间预检**：新建弹框「检测大小」按钮，HEAD 优先、失败回退 Range 拿真实体积，和目标盘剩余空间比对；不够先拦。远程引擎只显示大小、不拿本机空间误判
+- **逐任务保存位置**：目录可「浏览」选，批量支持「链接 | 目录」逐行指定；空间预检按目录分组算，不会拿 A 盘空间去拦 B 盘文件
+- **磁盘守卫与自愈**：活跃任务所在盘快满（<1GiB）自动暂停并告警；引擎卡死（写盘失败 / RPC 超时）连续失败 6 次后自动停启，并实时显示重启状态，消除「越重启越乱」的孤儿风暴
+- **暂停不丢进度**：暂停 / 排队任务长度读不到时，用内存缓存兜底，未知大小异步探测总大小，已下载量保持诚实显示
+- **预分配可配置**：设置里切 none / falloc / trunc / prealloc，默认仍 none（预分配只解决「提前知道空间够不够」，已被预检 + 守卫替代，且零等待、不占空间）
+- **每个下载单独文件夹**：设置「自动化」开关，按文件名建子目录，同名链接复用保证续传命中控制文件
+- **换机续传导入**：把旧机 `aria2.session` + 数据文件 + 同名 `.aria2` 拷过来，点「导入续传」按新机实际路径重写提交；磁力不设文件名，签名过期直接换链接
 - **代码位置**：门面 `services/download/`，RPC 客户端与配置 `internal/aria2/`，任务元数据在 `dl_tasks`。状态真相源是引擎，`dl_tasks` 只存 gid / url / dir 且**不进快照** —— GID 与本机 `.aria2` 控制文件绑定，换机无效
 - **MCP**：见「MCP 服务」的 `download_*` 工具域；`download_add` 归高危且当前不开放
 

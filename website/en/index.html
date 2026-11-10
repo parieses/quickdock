@@ -213,7 +213,7 @@
       </div>
       <div class="tool">
         <dt>Downloader</dt>
-        <dd>aria2 under the hood: links, magnets, torrents and Metalink in one list, with status tabs, batch actions, a seven-tab detail dialog, speed charts and disk checks. BitTorrent, remote engines and completion notices live in settings.</dd>
+        <dd>aria2 under the hood: links, magnets, torrents and Metalink in one list, with status tabs, batch actions, a seven-tab detail dialog, speed charts and a pre-flight space check. Per-task save folders, file-named sub-folders, a disk guard and cross-machine resume import all live in settings.</dd>
       </div>
       <div class="tool">
         <dt>Log tail</dt>
@@ -358,6 +358,24 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Downloader polish: guard against full-disk on large files, pre-flight space checks and cross-machine resume import</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Check the real file size before downloading: the New task dialog now has a "Check size" button. It tries HEAD first and falls back to a ranged GET to read the total length, then compares it against free space on the target drive and blocks if there isn't enough — the same logic IDM uses. In remote-engine mode it only shows the size and never judges by the local disk.</li>
+          <li>Per-task save location: click "Browse" next to the folder field to pick one directly; batch mode also accepts "url | folder" per line, and the space check sums per folder so a file destined for drive B is never blocked by drive A's free space.</li>
+          <li>Large files no longer take the engine down when the disk fills: a disk guard checks the drive of active tasks every 30 seconds and auto-pauses with a warning when it drops below 1 GiB; if the engine gets stuck (write-cache flush failures, every RPC timing out), it restarts automatically after 6 consecutive failures and shows "Restarting / Recovered" live, avoiding the orphan storm of repeated restarts.</li>
+          <li>Paused tasks no longer show 0/0: aria2 releases its context on pause and the sizes go unreadable, so an in-memory cache now fills the gap, and unknown paused tasks are probed asynchronously for their total size on cold start while completed bytes stay honest.</li>
+          <li>Disk pre-allocation is now configurable: settings offer none / falloc / trunc / prealloc, still defaulting to none. Pre-allocation only answered "will there be enough space", which is now covered by the pre-flight probe plus the live guard, with zero wait and no space reserved upfront.</li>
+          <li>Each download gets its own folder: a switch in Settings → Automation creates a sub-folder named after the file, so multiple downloads no longer pile into one directory; same-name links reuse the same folder so resume hits the control file.</li>
+          <li>Continue a download on another PC (import resume): new. Copy the old PC's aria2.session plus the unfinished data file and its matching .aria2 control file, click "Import resume", pick the folder and session, then edit file name / url / folder per row in the scan preview and submit — the path is rewritten to the new machine's real location, never copying the old one; magnets get no file name and expired signed URLs are swapped inline.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.44</span>
+          <span class="log-date">2026-11-10</span>
           <span class="log-title">Fix the downloader falsely reporting "engine not installed" after switching pages</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -411,28 +429,6 @@
           <li>Mail codes now work with several mailboxes at once. Each account has its own connection and status, old single-account settings migrate on startup, and the card distinguishes "connected, no codes" from "syncing" and from a concrete error, with links to the official setup guides.</li>
           <li>Fixed the "credentials are fine but it never connects" case on QQ-style IMAP servers: the client waits for the server greeting before sending LOGIN, and fetching and connection tests both have a hard timeout so an unresponsive server cannot block the background loop.</li>
           <li>Plugin windows no longer show the WebView2 native context menu, and the marketplace and installed-plugins pages gained a reinstall action.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.41</span>
-          <span class="log-date">2026-11-06</span>
-          <span class="log-title">Windows 11 material behind the window, plus a file shelf and mail codes on the dashboard</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Windows can now show the real Windows 11 material: Mica, Acrylic or Mica Alt, picked in Settings → General. The main window, the four floating panels (clipboard, command palette, notes, window layout), the SSH window and plugin windows all follow the same setting; unsupported systems (Windows 10, transparency disabled, high contrast) fall back to solid colours and look exactly as before, never the half-transparent without material state.</li>
-          <li>Three floating-panel bugs are gone: the frameless panels no longer draw a system close button in the corner, the first summon waits for the first frame instead of flashing an empty window, and hiding then reopening no longer loses the material. Clipboard and command palette are pre-created after startup so hotkeys open them instantly; the SSH window is hidden instead of destroyed, so reopening it no longer reloads the whole UI.</li>
-          <li>Plugin pages can use the material too: the host tells the page whether it is on, and the page just lets its page background through while cards and toolbars stay solid (effective once the plugin templates follow). Settings panels are fully opaque again, and light-theme backgrounds are denser so long forms and small text stay readable.</li>
-          <li>A desktop notification now pops when an AI answer finishes — the in-app notification centre only helps if you go and look at it.</li>
-          <li>New file shelf on the dashboard: drop the files or folders you keep reopening onto the card and double-click to open. Use the corner button to pick a file or a folder. Only the path is stored — nothing is copied, moved or renamed, and a dead path is marked on the card.</li>
-          <li>New mail verification codes: add an IMAP mailbox and new codes show up on the dashboard. Click to copy, and a notification is pushed at the same time. The inbox is opened read-only with BODY.PEEK, so nothing is marked as read, and the app never sends, deletes or flags mail; message bodies are inspected in memory only while extracting the code.</li>
-          <li>New file search page backed by Everything: install guidance when it is missing, one-click start when it is not running, index progress while it builds. Sort by name, path, size or time, select many results to copy their paths, and preview the file on the right. The query box takes Everything syntax directly, with no extra filter form on top.</li>
-          <li>The dashboard now opens with a date bar: lunar date with leap months, sexagenary day, solar terms and festivals, current-city weather, and an expandable list of traditional do's and don'ts. Weather comes from Open-Meteo (no key) and is fetched by the host process, refreshed every 30 minutes in the background; the almanac is computed offline and labelled as folklore. The whole block can be turned off.</li>
-          <li>Dashboard cards were reordered and wired to deep links: clicking a row lands on the matching page with that item selected — a Git repository, the ports section, a resident runtime. The AI usage card now prices current models, with DeepSeek peak-hour multipliers on weekdays.</li>
-          <li>Optional access token for the MCP server (off by default): once enabled, every request must carry a Bearer token, and the panel can show, copy and rotate it.</li>
-          <li>Settings pages share one measure and control height: bot notifications and navigation items are centred at the same width, the prompt editor's text fields got their styling back, and deep links can now land on second-level tabs such as AI → Usage.</li>
         </ul>
       </details>
 
