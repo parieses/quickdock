@@ -920,10 +920,8 @@ func showNoteWindow() {
 		windowFlags.Note.Store(false)
 		nw.Hide()
 	} else {
-		platform.SetWindowToCursorScreen(nw, clipWinWidth, clipWinHeight)
 		windowFlags.Note.Store(true)
-		nw.Show()
-		nw.Focus()
+		platform.ShowFloatingWindow(nw, clipWinWidth, clipWinHeight)
 	}
 }
 
@@ -1011,10 +1009,8 @@ func toggleClipboardWindow() {
 		}
 		cw.Hide()
 	} else {
-		platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
 		windowFlags.Clipboard.Store(true)
-		cw.Show()
-		cw.Focus()
+		platform.ShowFloatingWindow(cw, clipWinWidth, clipWinHeight)
 		if a := getHotkeyApp(); a != nil {
 			a.Event.Emit("clipboard:shown")
 		}
@@ -1128,9 +1124,7 @@ func handleWinmgrFloatHotkey() {
 		windowFlags.Winmgr.Store(false)
 		return
 	}
-	platform.SetWindowToCursorScreen(win, winmgrWinWidth, winmgrWinHeight)
-	win.Show()
-	win.Focus()
+	platform.ShowFloatingWindow(win, winmgrWinWidth, winmgrWinHeight)
 	windowFlags.Winmgr.Store(true)
 	// ② 通知前端「浮层又显示了一次」：窗口是懒创建 + 复用的，Vue 组件只在首次
 	//    加载时 mount，Hide/Show 不会重新 mount。少了这个事件，前端会一直停在
@@ -1251,9 +1245,7 @@ func registerAllHotkeys(app *application.App) {
 				return
 			}
 			windowFlags.Clipboard.Store(true)
-			platform.SetWindowToCursorScreen(cw, clipWinWidth, clipWinHeight)
-			cw.Show()
-			cw.Focus()
+			platform.ShowFloatingWindow(cw, clipWinWidth, clipWinHeight)
 			if a := getHotkeyApp(); a != nil {
 				a.Event.Emit("clipboard:shown")
 			}
@@ -1285,10 +1277,8 @@ func registerAllHotkeys(app *application.App) {
 			}
 			return
 		}
-		platform.SetWindowToCursorScreen(pw, paletteWinWidth, paletteWinHeight)
 		windowFlags.Palette.Store(true)
-		pw.Show()
-		pw.Focus()
+		platform.ShowFloatingWindow(pw, paletteWinWidth, paletteWinHeight)
 		if a := getHotkeyApp(); a != nil {
 			// 带上「最近一次真实复制」的类型与时刻：面板据此决定要不要把刚复制的内容
 			// 预填进输入框（详见 services/clipboard_sys.go 的 ClipboardLastCopyInfo）。

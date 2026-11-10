@@ -105,11 +105,13 @@ var disabledFeatures = []string{
 //
 // 仍需如实说明的边界：Wails v3 的 hide() 除了 SW_HIDE 还会调 chromium.Hide()，
 // show() 先 SW_SHOW 容器、再 chromium.Show()。因此**每次** Hide/Show 复用时
-// WebView2 合成层都会断开重连，DWM 有可能再出 1 帧（约 16ms）空档 —— 这是
-// 框架语义，不是 100~300ms 的加载等待，首帧门控治不了它。绕开 chromium.Hide()
-// 会重新引入 Wails 特意修过的 DirectComposition 输入死区（桌面右键点不动），
-// 所以这里不动 Hide 语义。若实机每次唤起都能看到闪，只能二选一：浮窗不套材质，
-// 或在 Show 前把窗口短暂放到屏幕外预热一帧再移回可见位置。
+// WebView2 合成层都会断开重连，那一次重连会丢一帧内容。实测这一帧在深色与浅色
+// 主题下都是**纯白**（与材质、BackgroundColour 无关：它画在 WebView2 子窗口内部，
+// 压在我们客户区之上），所以不能靠调底色或补写材质盖掉。
+// 现在的处理在 platform.ShowFloatingWindow：Show 之前先把窗口挪到屏幕外，让重连的
+// 那一帧落在用户看不到的地方，90ms 后移回目标位置。详见 windowshow_windows.go。
+// 不能改成「不调 chromium.Hide()」——那会重新引入 Wails 特意修过的
+// DirectComposition 输入死区（桌面右键点不动）。
 const floatingWindowBackdropEnabled = true
 
 // firstPaintWaitTimeout 是「浮窗首次唤起等首帧」的兜底上限。

@@ -54,9 +54,13 @@ func KeepBackdropOnShow(win *application.WebviewWindow) {
 	//
 	// 热键唤起的固定动作是 Show() 紧跟 Focus()，两个事件都会走到这里，各自排一个
 	// 40ms 后的 AfterFunc，于是几乎同时执行两次 EnableTranslucency。每改一次
-	// DWMWA_SYSTEMBACKDROP_TYPE，DWM 都要重新合成这个窗口——两次连改正好落在
-	// 窗口刚显示出来的那几帧上，表现为「按热键唤出浮窗，先白一下才出内容」。
-	// 40ms 内只认第一次排程，其余丢弃。
+	// DWMWA_SYSTEMBACKDROP_TYPE，DWM 都要重新合成这个窗口，两次连改等于白多合成
+	// 一遍。40ms 内只认第一次排程，其余丢弃。
+	//
+	// 如实说明：这层去重**不解决**「按热键唤出浮窗先白一下」。那条的真因是 WebView2
+	// 控制器释放 / 重建 GPU surface（Wails hide() 会调 chromium.Hide()），修复在
+	// windowshow_windows.go 的「屏外预热」。另外 Win10 走 Solid 时本文件整条链路
+	// 根本不执行（windowBackdropType 返回 false，KeepBackdropOnShow 首行 return）。
 	var restorePending atomic.Bool
 	restore := func(*application.WindowEvent) {
 		if !restorePending.CompareAndSwap(false, true) {
