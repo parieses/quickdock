@@ -3,6 +3,7 @@
 package platform
 
 import (
+	"sync/atomic"
 	"time"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
@@ -49,8 +50,22 @@ func KeepBackdropOnShow(win *application.WebviewWindow) {
 	if _, ok := windowBackdropType(); !ok {
 		return
 	}
+	// restorePending 给「同一次唤起」的多次排程去重。
+	//
+	// 热键唤起的固定动作是 Show() 紧跟 Focus()，两个事件都会走到这里，各自排一个
+	// 40ms 后的 AfterFunc，于是几乎同时执行两次 EnableTranslucency。每改一次
+	// DWMWA_SYSTEMBACKDROP_TYPE，DWM 都要重新合成这个窗口——两次连改正好落在
+	// 窗口刚显示出来的那几帧上，表现为「按热键唤出浮窗，先白一下才出内容」。
+	// 40ms 内只认第一次排程，其余丢弃。
+	var restorePending atomic.Bool
 	restore := func(*application.WindowEvent) {
-		time.AfterFunc(backdropRestoreDelay, func() { ReapplyWindowBackdrop(win) })
+		if !restorePending.CompareAndSwap(false, true) {
+			return
+		}
+		time.AfterFunc(backdropRestoreDelay, func() {
+			defer restorePending.Store(false)
+			ReapplyWindowBackdrop(win)
+		})
 	}
 	win.OnWindowEvent(events.Common.WindowShow, restore)
 	win.OnWindowEvent(events.Common.WindowFocus, restore)
