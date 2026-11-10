@@ -33,8 +33,8 @@ import { ReadText } from '../../bindings/quickdock/services/clipboard/clipboards
 const { t } = useI18n()
 const toast = useToast()
 const {
-  status, options, tasks, busy, error, speedHistory, uploadHistory, global,
-  refreshTasks, refreshGlobal, enable, disable, add, addBatch, addTorrent, addMetalink, pickFile,
+  status, statusReady, options, tasks, busy, error, speedHistory, uploadHistory, global,
+  refreshStatus, refreshTasks, refreshGlobal, enable, disable, add, addBatch, addTorrent, addMetalink, pickFile,
   pause, forcePause, resume, remove, pauseMany, resumeMany, removeMany,
   pauseAll, resumeAll, purgeResults, changePosition, changeUri,
   detailOf, setTaskOption, setFileSelection, globalOptions, setGlobalOption,
@@ -675,12 +675,13 @@ onUnmounted(() => {
         <span class="dl-engine" :class="status.running ? 'is-on' : 'is-off'">
           <span class="dl-dot"></span>
           <span v-if="status.remote" class="dl-badge" :title="status.host">{{ t('dlRemoteBadge') }}</span>
-          <span v-if="status.running">{{ t('dlEngineOn', { version: status.version, port: status.port }) }}</span>
+          <span v-if="!statusReady">{{ t('dlChecking') }}</span>
+          <span v-else-if="status.running">{{ t('dlEngineOn', { version: status.version, port: status.port }) }}</span>
           <span v-else-if="status.installed">{{ t('dlInstalledOff') }}</span>
           <span v-else>{{ t('dlNotInstalled') }}</span>
         </span>
       </div>
-      <div v-if="status.installed" class="qd-page-actions">
+      <div v-if="statusReady && status.installed" class="qd-page-actions">
         <button
           class="qd-btn qd-btn-primary" :disabled="!status.running"
           :title="status.running ? t('dlAddTitle') : t('dlEngineNotReady')" @click="openAdd"
@@ -703,9 +704,18 @@ onUnmounted(() => {
     </div>
 
     <div class="qd-page-body dl-page-body">
-      <div v-if="error" class="dl-error">{{ error }}</div>
+      <div v-if="error && statusReady" class="dl-error">{{ error }}</div>
 
-      <div v-if="!status.installed" class="qd-card dl-setup">
+      <!-- 首次 DlStatus() 还没回来时不能按默认 false 渲染「未安装」：
+           下载页不进 KeepAlive，切走即销毁重建，这一帧曾被误报成引擎没装。 -->
+      <div v-if="!statusReady" class="qd-card dl-setup">
+        <div class="dl-setup-icon is-loading"><RefreshCw :size="20" /></div>
+        <h3>{{ error ? t('dlStatusFailed') : t('dlChecking') }}</h3>
+        <p>{{ error || t('dlCheckingHint') }}</p>
+        <button v-if="error" class="qd-btn qd-btn-primary" @click="refreshStatus">{{ t('dlRefresh') }}</button>
+      </div>
+
+      <div v-else-if="!status.installed" class="qd-card dl-setup">
         <div class="dl-setup-icon"><Download :size="20" /></div>
         <h3>{{ t('dlNotInstalled') }}</h3>
         <p>{{ t('dlNotInstalledDesc') }}</p>
@@ -1363,6 +1373,8 @@ onUnmounted(() => {
 .dl-setup h3 { margin: 0; font-size: var(--text-lg); font-weight: 600; color: var(--color-text-primary); }
 .dl-setup p { margin: 0; max-width: 560px; font-size: var(--text-sm); line-height: 1.7; color: var(--color-text-secondary); }
 .dl-setup .dl-license { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.dl-setup-icon.is-loading svg { animation: dl-spin 1.2s linear infinite; }
+@keyframes dl-spin { to { transform: rotate(360deg); } }
 
 .dl-notice {
   display: flex; align-items: center; gap: var(--space-3);

@@ -227,33 +227,41 @@ const EMPTY_GLOBAL: DlGlobalStat = {
   downloadSpeed: 0, uploadSpeed: 0, active: 0, waiting: 0, stopped: 0, stoppedTotal: 0,
 }
 
+// 下载页刻意不进 KeepAlive 白名单（切走要停 8s 兜底轮询省电），组件会被销毁重建。
+// 这几个 ref 提到模块级做 stale-while-revalidate：切回来先显示上次的真实状态，
+// 再静默刷新，避免组件刚挂载、DlStatus() 还没回来时先渲染出「引擎未安装」。
+// 目前只有 DownloadPage.vue 一个调用方，共享不会串实例；事件订阅与 poll 仍是组件级。
+const status = ref<DlEngineStatus>({
+  installed: false, running: false, port: 0, version: '',
+  downloadDir: '', maxConcurrent: 5, split: 8, downloadLimit: '', uploadLimit: '',
+  remote: false, host: '', wsConnected: false,
+})
+const options = ref<DlOptionsView>({
+  downloadDir: '', maxConcurrent: 5, split: 8, downloadLimit: '', uploadLimit: '',
+  listenPort: 6881, dhtListenPort: 6881, btTracker: '', btMaxPeers: 55,
+  seedRatio: '0.0', seedTime: '0', minSplitSize: '', userAgent: '', proxy: '',
+  disableDht: false, disableDht6: false, disablePeerExchange: false,
+  disableSaveMetadata: false, disableFollowTorrent: false,
+  btForceEncryption: false, btRequireCrypto: false, btRemoveUnselected: false,
+  checkIntegrity: false, autoOpenFolder: false, autoCategory: false,
+  categoryRules: {}, schedule: { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' },
+  remoteEnabled: false, remoteHost: '', remotePort: 6800, remoteSecret: '',
+  remoteSecretSet: false, remoteSecure: false, remotePath: '/jsonrpc', notifyDisabled: false,
+})
+const tasks = ref<DlTask[]>([])
+const global = ref<DlGlobalStat>({ ...EMPTY_GLOBAL })
+// statusReady：至少成功拿到过一次 DlStatus()。首次结果回来前不显示未安装引导卡片，
+// 否则一次普通切页会被误报成「引擎没装」；失败时保持 false，由 error 文案 + 重试承接。
+const statusReady = ref(false)
+
 export function useDownloadTasks() {
   const { t } = useI18n()
   const toast = useToast()
 
-  const status = ref<DlEngineStatus>({
-    installed: false, running: false, port: 0, version: '',
-    downloadDir: '', maxConcurrent: 5, split: 8, downloadLimit: '', uploadLimit: '',
-    remote: false, host: '', wsConnected: false,
-  })
-  const options = ref<DlOptionsView>({
-    downloadDir: '', maxConcurrent: 5, split: 8, downloadLimit: '', uploadLimit: '',
-    listenPort: 6881, dhtListenPort: 6881, btTracker: '', btMaxPeers: 55,
-    seedRatio: '0.0', seedTime: '0', minSplitSize: '', userAgent: '', proxy: '',
-    disableDht: false, disableDht6: false, disablePeerExchange: false,
-    disableSaveMetadata: false, disableFollowTorrent: false,
-    btForceEncryption: false, btRequireCrypto: false, btRemoveUnselected: false,
-    checkIntegrity: false, autoOpenFolder: false, autoCategory: false,
-    categoryRules: {}, schedule: { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' },
-    remoteEnabled: false, remoteHost: '', remotePort: 6800, remoteSecret: '',
-    remoteSecretSet: false, remoteSecure: false, remotePath: '/jsonrpc', notifyDisabled: false,
-  })
-  const tasks = ref<DlTask[]>([])
   const busy = ref(false)
   const error = ref('')
   const speedHistory = ref<number[]>([])
   const uploadHistory = ref<number[]>([])
-  const global = ref<DlGlobalStat>({ ...EMPTY_GLOBAL })
 
   let offTasks: (() => void) | null = null
   let offNotice: (() => void) | null = null
@@ -263,10 +271,16 @@ export function useDownloadTasks() {
   async function refreshStatus() {
     try {
       const s = unwrap<DlEngineStatus>(await DlStatus())
-      if (s) status.value = { ...s, uploadLimit: s.uploadLimit || '' }
+      if (s) {
+        status.value = { ...s, uploadLimit: s.uploadLimit || '' }
+        statusReady.value = true
+        error.value = ''
+      }
     } catch (e) {
       error.value = getErrorMessage(e)
       logErr('download/status', e)
+      // 刷新失败时不能把上次成功的状态抹成「未安装」；statusReady 保持原值，
+      // 首次就失败则停在检测态，由页面显示错误文案和重试按钮。
     }
   }
 
@@ -697,7 +711,7 @@ export function useDownloadTasks() {
   })
 
   return {
-    status, options, tasks, busy, error, speedHistory, uploadHistory, global,
+    status, statusReady, options, tasks, busy, error, speedHistory, uploadHistory, global,
     refreshStatus, refreshOptions, refreshTasks, refreshGlobal, checkDisk,
     enable, disable, add, addBatch, addTorrent, addMetalink, pickFile,
     pause, forcePause, resume, remove, pauseMany, resumeMany, removeMany,
