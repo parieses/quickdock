@@ -243,7 +243,18 @@ watch(addMode, () => { void focusAddInput() })
 type SettingsTab = 'general' | 'bt' | 'auto' | 'connection' | 'engine'
 const showSettings = ref(false)
 const settingsTab = ref<SettingsTab>('general')
-const settingsForm = ref<DlOptionsView>({ ...options.value })
+// 拷贝设置表单不能用 structuredClone：options 是 ref，取 .value 得到的是 Vue 的
+// reactive proxy，而结构化克隆算法遇到 Proxy 一律抛 DataCloneError（点「下载设置」
+// 直接报错，弹窗打不开）。这里字段全是原始类型，只有 categoryRules / schedule 两个
+// 普通对象需要各自新建，浅展开就够了。
+function cloneOptions(src: DlOptionsView): DlOptionsView {
+  return {
+    ...src,
+    categoryRules: { ...(src.categoryRules || {}) },
+    schedule: { ...(src.schedule || { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' }) },
+  }
+}
+const settingsForm = ref<DlOptionsView>(cloneOptions(options.value))
 // 后端用反向布尔 notifyDisabled（老配置零值 = 开启），UI 用正向复选框。
 const notifyEnabled = computed({
   get: () => !settingsForm.value.notifyDisabled,
@@ -746,9 +757,7 @@ async function pasteLinks() {
 function openSettings() {
   showAdd.value = false
   showImport.value = false
-  settingsForm.value = structuredClone(options.value) as DlOptionsView
-  settingsForm.value.categoryRules = { ...(options.value.categoryRules || {}) }
-  settingsForm.value.schedule = { ...(options.value.schedule || { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' }) }
+  settingsForm.value = cloneOptions(options.value)
   categoryText.value = Object.entries(settingsForm.value.categoryRules).map(([k, v]) => `${k}=${v}`).join('\n')
   settingsTab.value = 'general'
   showSettings.value = true
