@@ -4,13 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>快启坞 QuickDock — 把开发要用的东西收进一个窗口</title>
-<meta name="description" content="Windows 桌面工具。资源树、命令面板、剪贴板、28 种运行时环境、截图与窗口排版、SSH 终端、AI 助手。单文件安装，不需要管理员权限，数据留在本机。">
+<meta name="description" content="Windows 桌面工具。资源树、命令面板、剪贴板、29 种运行时环境、下载器、截图与窗口排版、SSH 终端、AI 助手。单文件安装，不需要管理员权限，数据留在本机。">
 <meta name="theme-color" content="#080c15">
 <link rel="icon" href="assets/img/favicon-64.png">
 <link rel="apple-touch-icon" href="assets/img/apple-touch-icon.png">
 <meta property="og:type" content="website">
 <meta property="og:title" content="快启坞 QuickDock — 把开发要用的东西收进一个窗口">
-<meta property="og:description" content="资源树、命令面板、剪贴板、28 种运行时、截图与窗口排版、SSH 与 AI。单文件安装，数据全在本机。">
+<meta property="og:description" content="资源树、命令面板、剪贴板、29 种运行时、下载器、截图与窗口排版、SSH 与 AI。单文件安装，数据全在本机。">
 <meta property="og:image" content="assets/img/ui-main.png">
 <link rel="alternate" hreflang="zh-CN" href="index.html">
 <link rel="alternate" hreflang="en" href="en/index.html">
@@ -58,7 +58,7 @@
     <p class="kicker"><i></i><span data-ver></span> · Windows 10 / 11 · MIT</p>
     <h1>把开发要用的东西<br>收进<em>一个窗口</em></h1>
     <p class="lede">
-      资源树、命令面板、剪贴板、28 种运行时、截图与窗口排版、SSH 终端、AI 助手。
+      资源树、命令面板、剪贴板、29 种运行时、下载器、截图与窗口排版、SSH 终端、AI 助手。
       单文件安装，不需要管理员权限，数据留在本机。
     </p>
     <div class="cta">
@@ -74,7 +74,7 @@
     <ul class="facts">
       <li><b>&lt; 50 MB</b> 安装包</li>
       <li><b>0</b> 管理员权限</li>
-      <li><b>28</b> 种运行时</li>
+      <li><b>29</b> 种运行时</li>
       <li><b>MIT</b> 开源</li>
     </ul>
 
@@ -120,7 +120,7 @@
         <div class="row-copy">
           <div>
             <span class="row-tag">环境</span>
-            <h3>28 种运行时，装在用户目录里</h3>
+            <h3>29 种运行时，装在用户目录里</h3>
             <p>语言、数据库、中间件、网络服务、开发工具，版本想装几个装几个。切换只改一个环境变量，不写注册表，不动系统 PATH。</p>
           </div>
           <ul>
@@ -212,6 +212,10 @@
         <dd>接 Everything 的独立检索页：没装给安装引导，装了没起可一键拉起；查询就是 Everything 语法，结果可排序、多选复制路径，右侧直接预览文件。</dd>
       </div>
       <div class="tool">
+        <dt>下载器</dt>
+        <dd>aria2 做引擎：链接、磁力、种子与 Metalink 一起管，状态分页、批量操作、七标签详情、速度曲线与磁盘预检；BT、远程引擎和完成通知都在设置里。</dd>
+      </div>
+      <div class="tool">
         <dt>日志尾随</dt>
         <dd><code>tail -f</code> 任意本机文件。文件被轮转或原地重写时自动重新对齐，可暂停、可过滤高亮。</dd>
       </div>
@@ -255,7 +259,7 @@
       <div class="rt-row"><span>网络服务</span><div><b>Nginx</b><b>Caddy</b><b>Apache</b><b>Traefik</b><b>FTP</b><b>WebDAV</b></div></div>
       <div class="rt-row"><span>数据库</span><div><b>MySQL</b><b>MariaDB</b><b>PostgreSQL</b><b>MongoDB</b></div></div>
       <div class="rt-row"><span>中间件</span><div><b>Redis</b><b>Memcached</b><b>MinIO</b><b>RabbitMQ</b></div></div>
-      <div class="rt-row"><span>开发工具</span><div><b>Git</b><b>Composer</b><b>FFmpeg</b><b>Mailpit</b><b>frpc</b><b>GitHub CLI</b><b>mkcert</b></div></div>
+      <div class="rt-row"><span>开发工具</span><div><b>Git</b><b>Composer</b><b>FFmpeg</b><b>Mailpit</b><b>frpc</b><b>GitHub CLI</b><b>mkcert</b><b>aria2</b></div></div>
       <div class="rt-row"><span>AI 服务</span><div><b>Ollama</b><b class="accent">内置 MCP :9230</b></div></div>
     </div>
 
@@ -354,6 +358,26 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">新增下载器与 MCP 下载工具域，aria2 进环境管理</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>新增下载器：aria2 作为第 29 个运行时装在「环境管理」里，下载页只管任务。链接、批量链接、磁力、种子、Metalink 都能下；引擎没装或没跑时页面给引导，不会自己悄悄拉一个回来。aria2 1.37 不自带 Web UI，界面是 QuickDock 自己写的，RPC secret 不落到页面里。</li>
+          <li>界面按成熟 aria2 前端的路子做齐：状态分页、搜索与排序、多选批量与右键菜单、速度曲线与全局统计；详情是七标签弹框（概览 / 文件 / URI / Peers / 服务器 / 选项 / 种子信息），能改 URI、勾选要下的文件、单独调任务选项。</li>
+          <li>新建下载改成弹框，分链接 / 批量 / 种子 / Metalink 四种模式。高级选项能设请求头、Referer、代理、校验和、上下行限速、做种比例与队列位置；保存前查磁盘剩余空间，低于 1 GiB 先问一句，失败任务在列表、右键和详情里都能重试。</li>
+          <li>BT 参数全接上：DHT / DHT6 / PEX、监听端口、tracker、加密、做种比例，完成后可自动归类与打开文件夹，设置里还能配定时限速。这些参数只在引擎启动时读取，改完要停一次再启动；入站端口 6881–6980 需防火墙放行。</li>
+          <li>进度刷新改成活跃任务 1 秒一次、等待与已结束每 5 轮补齐，另有 WebSocket 事件（开始 / 暂停 / 完成 / 失败）一到就出快照；WS 在线时轮询降到 3 秒，断线自动退回。完成与失败同时写通知中心并可弹桌面气泡。</li>
+          <li>修掉「aria2 明明在跑却报超时」：1.37 的成功响应不带 <code>Connection: close</code>，复用被对端关掉的连接会一路卡到 context 超时，现在只读幂等调用关掉 keep-alive 并在网络错误时重试一次。失败任务也删得掉了——已结束的结果要走 <code>removeDownloadResult</code>，删完同步会话，不会被 <code>aria2.session</code> 复活。</li>
+          <li>设置 → 连接 可指向另一台机器的 aria2（HTTP / HTTPS + 可选 secret）；远程模式下文件落在远端，本机磁盘预检与「打开文件位置」自动跳过。</li>
+          <li>MCP 服务新增「下载器」工具域：7 个工具看引擎状态、任务列表、任务详情、全局统计并暂停 / 恢复 / 删除。<code>download_add</code> 刻意归高危且当前不开放——让宿主向模型给出的任意地址发请求还写盘，是 SSRF 的经典形状。</li>
+          <li>批量选中从逐个串行调用改成 <code>system.multicall</code>：暂停 / 恢复固定一次往返，删除两次，选几十个不再卡界面；同时补了 4 个测试文件，覆盖启动参数、限速时段、队列位置与 RPC 响应解析。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.42</span>
+          <span class="log-date">2026-11-09</span>
           <span class="log-title">界面重做分层与排版，新增知识库、SSH 跳板，AI 边界与多邮箱精修</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -412,21 +436,6 @@
           <li>命令面板选中文件结果可直接预览：图片、代码高亮、Markdown、PDF、音视频、压缩包条目与目录列表，支持目录内下钻、文本搜索与放大；大图先由本地服务降采样，快速划过不再卡住面板。</li>
           <li>性能与稳定性：后台页不再定时轮询，1Hz 计时与工具解析挪出热路径；数据库纯读改读锁、单条写少一次 fsync；浮窗按需创建，心跳与看门狗随应用退出停止；截图帧调度按实测成本降档。</li>
           <li>修复 SSH 终端复制 / 粘贴在部分窗口归属下读不到剪贴板内容的问题。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.39</span>
-          <span class="log-date">2026-11-04</span>
-          <span class="log-title">内置 Git 可视化面板，监控支持四种探针，总览改成图表</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>全新 Git 面板（对标 SourceTree）：分支 / 标签 / 远端 / 子模块管理，贮藏全套，文件历史与逐行归属（blame），amend、cherry-pick、分支对比、side-by-side diff，多选批量操作，导出存档。</li>
-          <li>SSH 密钥在面板里生成并一键写入 config：公钥复制、连接测试、origin 由 HTTPS 切 SSH，拉推代码不再要密码。</li>
-          <li>监控探针扩到四种：HTTP、TCP 端口（探数据库 / Redis / MQ）、本机进程、自定义命令（退出码 0 即正常）；老数据升级后行为不变。</li>
-          <li>总览页改版：24 小时探测热力条、待办分布、最近提交、常驻运行时（含 DSH 与 Everything）与端口占用，最近使用横排直达。</li>
         </ul>
       </details>
 

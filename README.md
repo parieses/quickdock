@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.42-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.43-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -31,7 +31,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 
 - **资源树**：工作空间 → 场景 → 集合 → 项目 四级结构，支持拖拽排序、FTS5 全文搜索、变量展开
 - **快捷键**：`Ctrl+Space` 主窗口、`Ctrl+K` 命令面板、`` Ctrl+` `` 剪贴板、`F1` 截图，均可改键
-- **运行环境**：28 种语言与服务，安装、切换版本、启停、看日志都在应用内完成
+- **运行环境**：29 种语言与服务，安装、切换版本、启停、看日志都在应用内完成
 - **AI**：能改文件、跑命令的本地 agent（每步可审批、可回滚），多模型对话、SSH 终端侧栏、剪贴板与笔记的快捷问答，对外提供 MCP 服务
 - **安装**：单文件，用户态安装，不需要管理员权限，更新就地替换
 
@@ -88,9 +88,10 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 剪贴板 AI | 条目上「问 AI」就地弹层，预置翻译、摘要、格式化和自由提问 |
 | 笔记 AI | 笔记浮窗内嵌面板，支持总结、润色、续写、翻译 |
 | DeepSeek Harness | 内嵌完整 Agent 编程入口，自动装填便携 Node，原生窗口承载 3080 端口；打开前校验 WebView2 版本，进程意外退出自动重拉 |
-| MCP 服务 | `http://127.0.0.1:9230/mcp`，工具集分只读、低危写、高危三级权限 |
+| MCP 服务 | `http://127.0.0.1:9230/mcp`，51 个工具分只读、低危写、高危三级权限；新增下载器工具域，可查任务与进度、暂停 / 恢复 / 删除 |
 | Git 面板 | 对标 SourceTree 的仓库视角：分支 / 标签 / 远端 / 子模块管理，贮藏，文件历史与逐行归属（blame），amend、cherry-pick、revert，分支对比、side-by-side diff，SSH 密钥一键配置 GitHub / GitLab，多选批量操作与存档导出 |
-| 环境管理 | 28 种运行时，安装、切换、启停、配置、日志、控制台，全部在用户目录内；可对项目目录做只读体检：版本声明逐个对照已装与激活版本，依赖清单（`package.json` / `go.mod` / `pyproject.toml` 等）出一份快照 |
+| 环境管理 | 29 种运行时，安装、切换、启停、配置、日志、控制台，全部在用户目录内；可对项目目录做只读体检：版本声明逐个对照已装与激活版本，依赖清单（`package.json` / `go.mod` / `pyproject.toml` 等）出一份快照 |
+| 下载器 | 以 aria2 为引擎：链接、批量、磁力、种子、Metalink；状态分页与七标签详情、多选批量、速度曲线、磁盘预检、失败重试、完成通知。支持 BT 与远程引擎，也能在 MCP 里查进度 |
 | 知识库 | 把本地文档（Word / Excel / PDF / Markdown / 纯文本）导进来做问答与检索：中文走 FTS5 trigram，配了 embedding 模型就同时跑向量召回，两路按 RRF 融合。检索结果给到出处片段，可点回原文核对；文档按库分组，同一份文件只入库一次 |
 
 </details>
@@ -516,10 +517,11 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 应用对外暴露 Model Context Protocol 服务，供 AI 客户端调用本地能力。
 
 - **地址**：`http://127.0.0.1:9230/mcp`，Streamable HTTP，仅接受 POST，协议版本 2025-06-18
-- **对 MCP 客户端开放 43 个工具，分三级权限**，默认开放只读与低危写，可在环境管理页按档位或逐个工具开关：
-  - 只读（25）：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`file_search`、`file_read`、`file_grep`、`workspace_list`、`item_search`、`recent_items`、`todo_list`、`note_search`、`clipboard_recent`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`schedule_list`、`schedule_runs`、`monitor_list`、`monitor_logs`、`plugin_list`、`plugin_exec_logs`
-  - 低危写（16）：`env_start`、`env_stop`、`env_restart`、`robot_notify`、`item_open`、`todo_create`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`note_folder_create`、`schedule_run_now`、`monitor_check_now`、`plugin_execute`、`plugin_open`
-  - 高危（需在环境管理页开启）：`process_kill`、`system_command`
+- **对 MCP 客户端开放 51 个工具，分三级权限**，默认开放只读与低危写，可在环境管理页按档位或逐个工具开关：
+  - 只读（29）：`app_info`、`env_list`、`env_status`、`env_log`、`env_versions`、`file_search`、`file_read`、`file_grep`、`workspace_list`、`item_search`、`recent_items`、`todo_list`、`note_search`、`clipboard_recent`、`port_list`、`log_list`、`log_read`、`crash_list`、`crash_read`、`schedule_list`、`schedule_runs`、`monitor_list`、`monitor_logs`、`plugin_list`、`plugin_exec_logs`、`download_status`、`download_list`、`download_detail`、`download_global_stat`
+  - 低危写（19）：`env_start`、`env_stop`、`env_restart`、`robot_notify`、`item_open`、`todo_create`、`todo_done`、`clipboard_copy`、`note_create`、`note_update`、`note_quick`、`note_folder_create`、`schedule_run_now`、`monitor_check_now`、`plugin_execute`、`plugin_open`、`download_pause`、`download_resume`、`download_remove`
+  - 高危（当前版本恒不开放，环境管理页只有「只读 / 只读+低危写」两档）：`process_kill`、`system_command`、`download_add`
+- **下载器工具域**：四个只读工具看引擎状态、任务列表、单个任务详情与全局统计，三个写工具作用于用户自己建的 gid。`download_add` 刻意归高危且当前不开放 —— 让宿主向模型给出的任意地址发请求并写盘是 SSRF 的经典形状，新建任务请走下载页
 - **只对外提供 QuickDock 自身的能力**。抓网页、列目录、看 git、改文件、跑命令这 9 个工具只给内置 AI 用（见「AI 助手 → 工具调用」），不在这份清单里：外部客户端不缺这类工具，而「任意路径写」是最不该外包出去的那类权限
 - 文件相关：`file_search` 只按文件名检索（Everything），`file_read` 读内容（**返回的 content 每行前带行号**），`file_grep` 在目录里按正则搜内容。**读取有白名单**：只能读家目录、数据目录、快捷项里登记过的目录与工作目录，以及当前对话绑定的工作目录；路径不在范围内会报错并列出可用目录。私钥类文件（`id_rsa`、`*.pem`、`*.key` 等）、二进制与 UTF-16 文件一律拒绝，单次调用有行数/文件数/时间预算
 - 定时任务与监控：`schedule_list` / `schedule_runs` 看任务与执行历史，`monitor_list` / `monitor_logs` 看监控状态与逐次检测记录；只给了「立即跑一次」（`schedule_run_now` / `monitor_check_now`）两个写工具，**不提供创建与删除**——建任务是用户的排期决定，删监控会连历史一起没，且给 `action=command` 开写入口等于架空 `system_command` 的高危门
@@ -534,7 +536,7 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 <details>
 <summary><b>环境管理</b></summary>
 
-28 种运行时的版本管理，安装、切换、启停都在用户目录内完成，不写注册表，不改系统 PATH，不申请管理员权限。
+29 种运行时的版本管理，安装、切换、启停都在用户目录内完成，不写注册表，不改系统 PATH，不申请管理员权限。
 
 | 分组 | 运行时 |
 |------|--------|
@@ -542,7 +544,7 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 | 网络服务 | Nginx、Caddy、Apache、Traefik、FTP、WebDAV（内置 9080） |
 | 数据库 | MariaDB、MySQL、PostgreSQL、MongoDB |
 | 中间件 | Redis、Memcached、MinIO、RabbitMQ |
-| 开发工具 | Git、Composer、FFmpeg、Mailpit、frpc、GitHub CLI、mkcert |
+| 开发工具 | Git、Composer、FFmpeg、Mailpit、frpc、GitHub CLI、mkcert、aria2 |
 | AI 服务 | Ollama、MCP 服务（内置 9230） |
 
 - **存储结构**：`%APPDATA%\QuickDock\runtime\<name>\<version>`，便携优先，多版本共存
@@ -551,7 +553,25 @@ AI 完成通知有前置判断：主窗口可见且当前停在 AI 对话页时�
 - **项目体检**：选一个目录，读 `.nvmrc` / `.tool-versions` / `go.mod` / `package.json` 等版本声明（含上级目录），和本机已装、当前激活的版本逐条对比，缺的当场切过去；同时按 `packageManager` / 锁文件出一份依赖清单快照，只看不装 —— 这个页面不会替你执行任何安装命令
 - **文件搜索自测**：页内可以直接调一次与命令面板相同的检索接口。返回 0 条但状态正常时，通常是 Everything 索引没建好或以管理员身份运行导致 IPC 不通
 - **Ollama**：单版本语义，程序目录在 `runtime/ollama/`；有新版本只提示不自动更新；模型库共享 `~/.ollama/models`；卸载只删程序
+- **aria2**：单版本语义，挂在「开发工具」组，是下载器的引擎。安装 / 启停 / 常驻开关都走环境管理那套，下载页只管任务；DHT、监听端口这类参数只在引擎启动时读取，改完要停一次再启动
 - **代码位置**：门面层 `services/env/`，引擎层 `internal/env/`（注册表、下载、解压、服务生命周期、项目级版本探测，平台差异用 `_windows` `_darwin` `_unix` 分文件）
+
+</details>
+
+<details>
+<summary><b>下载器</b></summary>
+
+aria2 作为第 29 个运行时装在「环境管理」里，下载页只是它的任务门面：安装、启停、常驻开关全走环境管理那套，引擎没装或没跑时页面给引导，不会自己悄悄拉一个 aria2 回来。aria2 1.37 不自带 Web UI，界面是 QuickDock 自己写的，通过 `127.0.0.1:16800/jsonrpc` 与引擎通信 —— 做成独立窗口或直接分发 AriaNg 会把 RPC secret 暴露在页面里。
+
+- **下载源**：HTTP / HTTPS / FTP / SFTP 链接、批量链接、`magnet:`、`.torrent`、`.metalink` / `.meta4`；命令面板里粘贴下载链接可以直接「用 QuickDock 下载」
+- **任务列表**：状态分页、搜索、排序、多选批量与右键菜单、速度曲线与全局统计；活跃任务 1 秒刷新，等待 / 已结束每 5 轮补齐，WebSocket 事件到达立刻出快照，断线自动退回轮询
+- **详情弹框**：概览、文件、URI、Peers、服务器、选项、种子信息七个标签，可改 URI、勾选要下的文件、单独调任务选项
+- **新建弹框**：链接 / 批量 / 种子 / Metalink 四种模式，高级选项透传请求头、Referer、代理、校验和、上下行限速、做种比例与时间、队列位置；保存前查磁盘剩余空间，低于 1 GiB 先确认
+- **BT**：DHT / DHT6 / PEX、监听端口、tracker 列表、加密、做种，以及完成后的自动归类与打开文件夹，都在设置里配；入站端口 6881–6980 需防火墙放行 TCP/UDP
+- **远程引擎**：设置 → 连接 可指向另一台机器的 aria2（HTTP / HTTPS + 可选 secret）。远程模式下文件落在远端，本机磁盘预检与「打开文件位置」自动跳过
+- **完成与失败**：写通知中心并可弹桌面气泡；失败任务能从列表、右键和详情里重试；删除按状态分派 `remove` / `removeDownloadResult` 并同步会话，不会让 `aria2.session` 把已删任务复活
+- **代码位置**：门面 `services/download/`，RPC 客户端与配置 `internal/aria2/`，任务元数据在 `dl_tasks`。状态真相源是引擎，`dl_tasks` 只存 gid / url / dir 且**不进快照** —— GID 与本机 `.aria2` 控制文件绑定，换机无效
+- **MCP**：见「MCP 服务」的 `download_*` 工具域；`download_add` 归高危且当前不开放
 
 </details>
 

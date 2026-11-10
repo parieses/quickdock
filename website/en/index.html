@@ -4,13 +4,13 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>QuickDock — everything you build with, in one window</title>
-<meta name="description" content="A Windows desktop tool. Resource tree, command palette, clipboard, 28 runtimes, screenshots and window tiling, SSH terminal, AI assistant. Single-file installer, no admin rights, data stays local.">
+<meta name="description" content="A Windows desktop tool. Resource tree, command palette, clipboard, 29 runtimes, a downloader, screenshots and window tiling, SSH terminal, AI assistant. Single-file installer, no admin rights, data stays local.">
 <meta name="theme-color" content="#080c15">
 <link rel="icon" href="../assets/img/favicon-64.png">
 <link rel="apple-touch-icon" href="../assets/img/apple-touch-icon.png">
 <meta property="og:type" content="website">
 <meta property="og:title" content="QuickDock — everything you build with, in one window">
-<meta property="og:description" content="Resource tree, command palette, clipboard, 28 runtimes, screenshots and window tiling, SSH and AI. Single-file installer, all data local.">
+<meta property="og:description" content="Resource tree, command palette, clipboard, 29 runtimes, a downloader, screenshots and window tiling, SSH and AI. Single-file installer, all data local.">
 <meta property="og:image" content="../assets/img/ui-main.png">
 <link rel="alternate" hreflang="zh-CN" href="../index.html">
 <link rel="alternate" hreflang="en" href="index.html">
@@ -58,7 +58,7 @@
     <p class="kicker"><i></i><span data-ver></span> · Windows 10 / 11 · MIT</p>
     <h1>Everything you build with,<br>in <em>one window</em></h1>
     <p class="lede">
-      Resource tree, command palette, clipboard, 28 runtimes, screenshots and window tiling,
+      Resource tree, command palette, clipboard, 29 runtimes, a downloader, screenshots and window tiling,
       SSH terminal, AI assistant. One installer, no admin rights, data stays on your machine.
     </p>
     <div class="cta">
@@ -74,7 +74,7 @@
     <ul class="facts">
       <li><b>&lt; 50 MB</b> installer</li>
       <li><b>0</b> admin rights</li>
-      <li><b>28</b> runtimes</li>
+      <li><b>29</b> runtimes</li>
       <li><b>MIT</b> open source</li>
     </ul>
 
@@ -120,7 +120,7 @@
         <div class="row-copy">
           <div>
             <span class="row-tag">Runtimes</span>
-            <h3>28 runtimes, all under your user folder</h3>
+            <h3>29 runtimes, all under your user folder</h3>
             <p>Languages, databases, middleware, web servers, dev tools — as many versions as you want. Switching changes one environment variable: no registry writes, no system PATH.</p>
           </div>
           <ul>
@@ -212,6 +212,10 @@
         <dd>A dedicated page backed by Everything: install guidance when it is missing, one-click start when it is not running; queries take Everything syntax directly, results sort, multi-select for copying paths, and files preview on the right.</dd>
       </div>
       <div class="tool">
+        <dt>Downloader</dt>
+        <dd>aria2 under the hood: links, magnets, torrents and Metalink in one list, with status tabs, batch actions, a seven-tab detail dialog, speed charts and disk checks. BitTorrent, remote engines and completion notices live in settings.</dd>
+      </div>
+      <div class="tool">
         <dt>Log tail</dt>
         <dd><code>tail -f</code> on any local file. Realigns when the file rotates or is rewritten in place; pausable, with highlight filters.</dd>
       </div>
@@ -255,7 +259,7 @@
       <div class="rt-row"><span>Web servers</span><div><b>Nginx</b><b>Caddy</b><b>Apache</b><b>Traefik</b><b>FTP</b><b>WebDAV</b></div></div>
       <div class="rt-row"><span>Databases</span><div><b>MySQL</b><b>MariaDB</b><b>PostgreSQL</b><b>MongoDB</b></div></div>
       <div class="rt-row"><span>Middleware</span><div><b>Redis</b><b>Memcached</b><b>MinIO</b><b>RabbitMQ</b></div></div>
-      <div class="rt-row"><span>Dev tools</span><div><b>Git</b><b>Composer</b><b>FFmpeg</b><b>Mailpit</b><b>frpc</b><b>GitHub CLI</b><b>mkcert</b></div></div>
+      <div class="rt-row"><span>Dev tools</span><div><b>Git</b><b>Composer</b><b>FFmpeg</b><b>Mailpit</b><b>frpc</b><b>GitHub CLI</b><b>mkcert</b><b>aria2</b></div></div>
       <div class="rt-row"><span>AI services</span><div><b>Ollama</b><b class="accent">built-in MCP :9230</b></div></div>
     </div>
 
@@ -354,6 +358,26 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">A built-in downloader, aria2 in Runtimes, and download tools in MCP</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>New downloader: aria2 is installed as the 29th runtime under Runtimes, and the download page only manages its tasks. Links, batch links, magnet URIs, torrents and Metalink files all work; if the engine is missing or stopped the page shows guidance instead of quietly fetching one. aria2 1.37 ships no web UI, so the interface is QuickDock's own and the RPC secret never reaches the page.</li>
+          <li>The list borrows from mature aria2 frontends: status tabs, search and sorting, multi-select batch actions and a context menu, speed charts and global stats. Details open in a seven-tab dialog (overview / files / URIs / peers / servers / options / torrent info) where URIs can be changed, files selected and per-task options edited.</li>
+          <li>Creating a download is now a dialog with four modes — link, batch, torrent and Metalink. Advanced options cover request headers, Referer, proxy, checksum, up/down speed limits, seed ratio and queue position; free disk space is checked before saving, with a prompt under 1 GiB. Failed tasks can be retried from the list, the context menu and the details dialog.</li>
+          <li>BitTorrent settings are wired through: DHT / DHT6 / PEX, listen ports, trackers, encryption, seed ratio, plus auto-categorising and opening the folder on completion and a scheduled speed limit. These are read only when the engine starts, so restart it once after changing them; inbound ports 6881–6980 need TCP/UDP allowed by the firewall.</li>
+          <li>Progress now refreshes active tasks every second and fills in waiting / finished tasks every fifth round, with WebSocket events (start / pause / complete / error) triggering an immediate snapshot. While WS is up polling drops to three seconds and falls back automatically. Completions and failures also land in the notification centre and can raise a desktop toast.</li>
+          <li>Fixed "aria2 is running but polling times out": 1.37 successful responses omit <code>Connection: close</code>, so reusing a connection the peer had closed stalls until the context deadline. Read-only idempotent calls now disable keep-alive and retry once on network errors. Failed tasks can also be removed — finished results need <code>removeDownloadResult</code>, and the session is synced afterwards so <code>aria2.session</code> cannot resurrect them.</li>
+          <li>Settings → Connection can point at aria2 on another machine (HTTP / HTTPS with an optional secret). In remote mode files land on that host, so local disk checks and "open file location" are skipped.</li>
+          <li>The MCP server gains a Downloader tool group: seven tools read engine status, task lists, task details and global stats, and pause / resume / remove existing tasks. <code>download_add</code> is deliberately high-risk and unavailable for now — having the host fetch an arbitrary URL supplied by a model and write it to disk is the classic shape of SSRF.</li>
+          <li>Batch selection moved from one serial call per task to <code>system.multicall</code>: pause / resume is a single round trip, remove takes two, so selecting dozens no longer stalls the UI. Four test files were added covering daemon arguments, speed-limit windows, queue position and RPC response parsing.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.42</span>
+          <span class="log-date">2026-11-09</span>
           <span class="log-title">Rebuilt visual layering and typography, plus a knowledge base, SSH jump hosts and tighter AI/mailbox behaviour</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -412,21 +436,6 @@
           <li>Command palette file results preview in place: images, highlighted code, Markdown, PDF, audio / video, archive entries and directory listings, with drill-down, in-text search and zoom. Large images are downsampled by a local service so flicking through them no longer stalls the panel.</li>
           <li>Performance and stability: background pages stop polling, the 1Hz timer and tool parsing leave the hot path; pure reads take a read lock and single writes skip an fsync; floating windows are created on demand and heartbeat / watchdog stop with the app; screenshot frame scheduling steps down to match measured cost.</li>
           <li>Fixed SSH terminal copy / paste failing to read clipboard content under certain window ownership cases.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.39</span>
-          <span class="log-date">2026-11-04</span>
-          <span class="log-title">Built-in Git panel, four monitor probe types, and a charted dashboard</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>New Git panel (SourceTree-style): branch / tag / remote / submodule management, full stash support, file history and blame, amend, cherry-pick, branch comparison, side-by-side diff, multi-select batch actions and zip export.</li>
-          <li>Generate SSH keys right in the panel and write them into your config in one click: copy the public key, test the connection, switch origin from HTTPS to SSH — no more passwords on pull or push.</li>
-          <li>Monitors gain four probe types: HTTP, TCP port (databases / Redis / MQ), local process, and custom command (exit code 0 means up); existing data behaves exactly as before.</li>
-          <li>Redesigned dashboard: 24-hour uptime heatmap, todo distribution, recent commits, resident runtimes (DSH and Everything included) and port usage, with recently used items one click away.</li>
         </ul>
       </details>
 

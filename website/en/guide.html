@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Guide — QuickDock</title>
-<meta name="description" content="QuickDock guide: installation, interface, hotkeys, resources, command palette, clipboard, screenshots, notes, todos, monitors, schedules, runtimes, AI, SSH, backup and troubleshooting.">
+<meta name="description" content="QuickDock guide: installation, interface, hotkeys, resources, command palette, clipboard, screenshots, notes, todos, monitors, schedules, runtimes, downloader, AI, SSH, backup and troubleshooting.">
 <meta name="theme-color" content="#080c15">
 <link rel="icon" href="../assets/img/favicon-64.png">
 <link rel="alternate" hreflang="zh-CN" href="../guide.html">
@@ -69,6 +69,7 @@
         <a href="#s14">14 SSH</a>
         <a href="#s15">15 Data &amp; backup</a>
         <a href="#s16">16 Updates &amp; fixes</a>
+        <a href="#s17">17 Downloader</a>
       </aside>
 
       <div class="doc-main">
@@ -89,7 +90,7 @@
           <p>The main window is three fixed panes, all aligned on one line.</p>
           <ul>
             <li><b>Top bar</b>: workspace switcher on the left, scenario tabs in the middle, Config on the right — the runtime services bound to the current scenario hang there.</li>
-            <li><b>Sidebar</b>: navigation on top (dashboard, workspaces, notes, todos, scheduled tasks, site monitors, clipboard, file search, runtimes, Git, SSH, AI, DeepSeek Harness, plugins), the scenario list below, a search box between them, and the notification bell plus settings at the bottom.</li>
+            <li><b>Sidebar</b>: navigation on top (dashboard, workspaces, notes, todos, scheduled tasks, site monitors, clipboard, file search, runtimes, downloader, Git, SSH, AI, DeepSeek Harness, plugins), the scenario list below, a search box between them, and the notification bell plus settings at the bottom.</li>
             <li><b>Middle</b>: collections in the current scenario, each with a type icon and an item count.</li>
             <li><b>Right</b>: the items of the selected collection. With nothing selected it shows a hint — that's expected, not a bug.</li>
             <li><b>Dashboard</b>: the home page. A date bar on top carries the lunar date, solar terms, the day's traditional do's and don'ts and local weather (turn it off from the gear; the lunar calendar and almanac are computed offline). Six readouts sit above eight cards — recent items, the file shelf, today's todos, mail verification codes, ports, resident services, Git and AI usage. Clicking any row lands on that page with the item selected.</li>
@@ -226,7 +227,7 @@
 
         <section class="doc-sec" id="s12">
           <h2><span>12</span>Runtimes</h2>
-          <p>Open Runtimes from the sidebar: groups on the left, versions and services on the right.</p>
+          <p>Open Runtimes from the sidebar: groups on the left, versions and services on the right. aria2 lives in Dev tools too; install and start it before the downloader can work.</p>
           <ul>
             <li>Install a version by picking it and clicking install; progress streams back live. Switch mirror when one is slow, or point at your own address.</li>
             <li>Several versions of the same runtime coexist. Switching just moves PATH — nothing is uninstalled or overwritten.</li>
@@ -293,6 +294,19 @@
             <li>Log files can themselves be tailed: type <code>logtail</code> in the command palette, pick a file being written, and only new bytes are read every 500 ms.</li>
             <li>If a hotkey does nothing, something else probably claimed it. Change it under Settings → Hotkey Settings; it re-registers immediately.</li>
             <li>If a service won't start, check the validation output on its config page first, then the port overview to see whether another process holds the port.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s17">
+          <h2><span>17</span>Downloader</h2>
+          <p>The engine is aria2. Install it under Runtimes → Dev tools and start it first, then create tasks from the Downloader page.</p>
+          <ul>
+            <li>Create a task: click New download, pick link, batch links, torrent file or Metalink, then fill in the address and destination. Magnet URIs go in as ordinary links.</li>
+            <li>Advanced options: the lower half of the dialog sets request headers, Referer, proxy, checksum, speed limits, seed ratio and queue position. Free space on the target drive is shown before saving, with a prompt when it runs low.</li>
+            <li>Watch progress: the list has status tabs, search, sorting and multi-select pause / resume / remove. Details opens a seven-tab dialog where URIs can be changed, files inside a torrent selected and options tuned for just that task.</li>
+            <li>BitTorrent and seeding: settings cover DHT, listen ports, trackers, encryption and seed ratio. These are read only when the engine starts, so stop and start it once from Runtimes after changing them. Inbound ports 6881–6980 need TCP/UDP allowed.</li>
+            <li>Remote engine: Settings → Connection can point at aria2 on another machine, with host, port and an optional secret. In remote mode files land on that host, so local disk checks and "open file location" are skipped.</li>
+            <li>Failures and completions: both reach the notification centre and can raise a desktop toast; failed tasks retry from the list, the context menu or the details dialog. A task that will not delete is usually a finished result — the page picks the right call and syncs the session, so there is no file to clean up by hand.</li>
           </ul>
         </section>
 
