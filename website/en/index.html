@@ -358,6 +358,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">PDF search in the knowledge base works again; embeddings can use their own provider</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Fixed "search returns nothing" after importing a PDF: WPS / Word exports place every Chinese character and every digit as a separate text block, so the "insert a space when the gap exceeds the font size" heuristic fired on every single gap and turned a page into "項 目 立 項" or "6 0 分". The index stored those space-riddled strings while queries match three-character windows, so nothing ever hit. The file was indexed fine — the text was broken. Spaces are no longer inserted between CJK characters, digits and percent signs (spaces between CJK and Latin text are kept), and already-indexed documents recover with one rebuild.</li>
+          <li>Search now understands multi-word and full-sentence queries: the whole query used to be wrapped in one phrase, requiring a verbatim contiguous match — multi-word queries with spaces failed outright, and asking a natural-language question (which Q&amp;A passes straight through) almost always came back empty. Queries are now split into terms, Chinese terms match on three-character windows joined by OR, terms are joined by AND, and when the strict pass finds nothing it falls back to OR.</li>
+          <li>Mixed tokens such as "60分", "80分" and "70%" used to be split by script, each fragment dropped for being under three characters, leaving an empty query — now the whole token is used as a fallback.</li>
+          <li>Knowledge base settings actually persist now: the app_state key whitelist was missing <code>kb_settings</code>, so saving failed with <code>invalid app_state key</code> and reading silently fell back to defaults — the embedding model typed into the settings dialog was never used and rebuilds never produced vectors, without leaving a trace.</li>
+          <li>Embeddings can use a dedicated provider: a separate endpoint and key can be set for the embedding model, falling back to the active AI profile when left empty. DeepSeek and several relays only serve chat models without an <code>/embeddings</code> endpoint, so pointing the knowledge base at a provider like SiliconFlow's <code>BAAI/bge-m3</code> is now enough. The key is masked on every read.</li>
+          <li>With an embedding model configured, Q&amp;A upgrades from keyword-only to keyword + semantic retrieval fused with RRF, which noticeably improves hits for conversational questions.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.47</span>
+          <span class="log-date">2026-11-11</span>
           <span class="log-title">Mail source view, runtime info cards, and a round of fixes</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -403,20 +420,6 @@
           <li>Disk pre-allocation is now configurable: settings offer none / falloc / trunc / prealloc, still defaulting to none. Pre-allocation only answered "will there be enough space", which is now covered by the pre-flight probe plus the live guard, with zero wait and no space reserved upfront.</li>
           <li>Each download gets its own folder: a switch in Settings → Automation creates a sub-folder named after the file, so multiple downloads no longer pile into one directory; same-name links reuse the same folder so resume hits the control file.</li>
           <li>Continue a download on another PC (import resume): new. Copy the old PC's aria2.session plus the unfinished data file and its matching .aria2 control file, click "Import resume", pick the folder and session, then edit file name / url / folder per row in the scan preview and submit — the path is rewritten to the new machine's real location, never copying the old one; magnets get no file name and expired signed URLs are swapped inline.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.44</span>
-          <span class="log-date">2026-11-10</span>
-          <span class="log-title">Fix the downloader falsely reporting "engine not installed" after switching pages</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Fixed the downloader reporting "Download engine is not installed" after switching away and back. The page is deliberately excluded from the keep-alive list, so leaving it destroys the component and returning rebuilds it; the engine status defaults to "not installed" and the install card was rendered before the asynchronous status request came back, even though aria2 was installed and running all along. Returning now shows the last real status first and refreshes quietly, first load says "Checking engine…", and a failed status read shows the error with a retry button instead of blaming a missing engine.</li>
-          <li>This is a frontend-only change: Vite hot reload applies it, so there is no need to restart the app or the aria2 engine, and downloads in progress are untouched.</li>
-          <li>Also corrected the MCP tool count in the README: 53 registered (31 read / 19 low-risk write / 3 high-risk), 50 exposed by default, with the three high-risk tools never available; two knowledge-base search tools that were missing from the list were added.</li>
         </ul>
       </details>
 

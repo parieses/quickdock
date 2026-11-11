@@ -358,6 +358,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">知识库导入 PDF 后搜不到的问题修好了，语义检索可以单配供应商</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>导入 PDF 后「搜什么都搜不到」修好了：WPS / Word 导出的 PDF 把每个汉字、每个数字都当独立文本块摆放，解析时「间距大于字号就补一个空格」的启发式因此必然误触发，整页中文被插成「项 目 立 项」、「6 0 分」。索引里存的是带空格的串，检索按三字滑窗匹配，于是任何查询都 0 命中——文件本身索引是成功的，坏的是文本。现在汉字、数字、百分号相邻不再插空格（中英文之间的空格保留），已入库的文档点一次重建即可恢复。</li>
+          <li>检索能听懂多词与整句提问：以前整句被包成一个短语，要求原文逐字连续出现——带空格的多词查询必挂，问答里把整个自然语言问句当检索词更是几乎必然空结果。现在按词切分、中文按三字滑窗取「或」，词与词之间用「且」，全不中时自动放宽为「或」，问「60分以下绩效怎么发」也能召回对应段落。</li>
+          <li>「60分」「80分」「70%」这类数字加中文的混合词以前会被按中英文切碎、每段都不足三字而整词丢弃，查询变成空串，现在整词兜底。</li>
+          <li>知识库设置终于真的生效了：app_state 的键白名单漏了 <code>kb_settings</code>，保存直接报 <code>invalid app_state key</code>、读取静默回退默认值，于是设置页填的语义检索模型从来没被用上，重建索引也不走向量，还不留错误痕迹。</li>
+          <li>语义检索可以单独配供应商：embedding 支持独立的接口地址与密钥，留空仍沿用当前 AI 档案。DeepSeek 和不少中转站只提供聊天、没有 <code>/embeddings</code> 端点，现在单独填一家（如硅基流动的 <code>BAAI/bge-m3</code>）即可，密钥读写全程掩码。</li>
+          <li>配好 embedding 后，问答从纯关键词升级为「关键词 + 语义」双路召回并按 RRF 融合，口语化提问的命中率明显提升。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.47</span>
+          <span class="log-date">2026-11-11</span>
           <span class="log-title">邮件能看原文、环境管理有「?」资料卡，顺手收掉一批卡手的小问题</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -403,20 +420,6 @@
           <li>磁盘预分配策略可配置：设置里可切 none / falloc / trunc / prealloc，默认仍是 none。预分配只解决「提前知道空间够不够」，已被提交前探测 + 实时守卫替代，还零等待、不占空间。</li>
           <li>每个下载单独建文件夹：设置「自动化」里开开关，按文件名建子目录，多个下载不再挤在一个目录；同名链接复用同一目录，保证续传能命中控制文件。</li>
           <li>换电脑继续下载（导入续传）：新功能。把旧电脑的 aria2.session 和没下完的数据文件、同名 .aria2 控制文件拷过来，点「导入续传」选目录与会话，扫描后逐行改文件名 / 链接 / 目录，按新机器实际路径重写并提交续传，绝不照抄旧机器的目录；磁力不设文件名，签名链接过期直接在表里换新。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.44</span>
-          <span class="log-date">2026-11-10</span>
-          <span class="log-title">修复下载页切走再切回误报「引擎未安装」</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>修复下载页切走再切回来时误报「下载引擎未安装」：下载页不进页面保活白名单，切走即销毁重建，而引擎状态默认是「未安装」，异步状态请求回来之前，模板先把安装引导卡片渲染出来了；aria2 其实一直装好且在跑。现在切回来先显示上次的真实状态再静默刷新，首次加载显示「正在检测引擎…」，状态读取失败则给出错误文案与重试按钮，不再把一次普通切页误判成引擎没装。</li>
-          <li>这次只改前端，Vite 热更新即可生效，不用重启应用、也不用重启 aria2 引擎，正在下载的任务不受影响。</li>
-          <li>顺带校正 README 里 MCP 工具数量的口径：注册 53 个（只读 31 / 低危写 19 / 高危 3），默认开放 50 个，3 个高危恒不开放；并补上漏列的两个知识库检索工具。</li>
         </ul>
       </details>
 
