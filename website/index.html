@@ -221,7 +221,7 @@
       </div>
       <div class="tool">
         <dt>总览</dt>
-        <dd>日期条带农历、节气与今日宜忌，加当前城市天气；八张卡收纳最近使用、文件置物架、待办、邮件验证码、端口、常驻服务、Git 与 AI 用量，点哪一条就进哪一条。</dd>
+        <dd>日期条带农历、节气与今日宜忌，加当前城市天气；八张卡收纳最近使用、文件置物架、待办、邮件验证码、端口、常驻服务、Git 与 AI 用量，点哪一条就进哪一条。城市搜索支持省份、简称与中英文，输省名自动定位省会；邮件卡可点开看原文。</dd>
       </div>
       <div class="tool">
         <dt>通知中心</dt>
@@ -358,6 +358,24 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">邮件能看原文、环境管理有「?」资料卡，顺手收掉一批卡手的小问题</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>邮件验证码能点开看原文了：HTML 正文按卡片样式渲染，不加载外链、不执行脚本；MaxMind 两种安全告警模板也能识别，密码变更 / 异地登录类邮件单独标注并推通知中心。多账号模板兼容与连接失败提示一并收拾。</li>
+          <li>环境管理每个运行时标题旁的「?」从一句话扩成一张资料卡：分组、本页能做什么、首次上手提示、实时状态（已装版本 / 受管服务 / 常驻开关 / 控制台端口）与官网 / 文档 / 源码链接。浮层按真实高度决定往上还是往下弹，内容过长自己滚动。</li>
+          <li>天气城市搜索不再冒出一堆同名村镇：以前输「河南」会返回黑龙江 / 浙江 / 北京 / 朝鲜 / 四川那些恰好叫「河南」的村街，现在省名、简称与中英文输入都自动定位到省会，结果按人口与行政级别筛选，机场、村庄和同点多语言别名都不再混进备选；「海口」「台北」这类中文索引不全的城市也一并修好。</li>
+          <li>AI 助手的思考过程与工具调用统一默认收起，流式期间也一样：摘要行给实时字数 / 调用数当进度，点开才铺开内容，长推理与五六个工具调用不会把正文挤出屏幕。</li>
+          <li>修掉「点任何导航，整块内容区全空」：总览页模板曾变成 fragment 根，与内容区的 out-in 切换动画相撞，离场钩子不回调、占位注释一直留着。现在弹窗回到单根内部，注册页也写明了内容页必须单根的约束。</li>
+          <li>「使用说明」入口补齐：设置 → 关于与工作空间的空状态引导都放了教程地址，地址在代码里只写一份，两处共用。</li>
+          <li>稳定性：aria2 保存目录指向已拔掉的移动硬盘不再让启动无限自愈，便携 / 系统同一份不再显示成两个已安装版本；剪贴板探测失败日志收敛、命令面板 FTS5 查询、SFTP 权限弹窗、笔记与下载设置几处交互也一并修了。</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.46</span>
+          <span class="log-date">2026-11-10</span>
           <span class="log-title">启动密码锁，浮窗唤出不再闪白</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -399,26 +417,6 @@
           <li>修复下载页切走再切回来时误报「下载引擎未安装」：下载页不进页面保活白名单，切走即销毁重建，而引擎状态默认是「未安装」，异步状态请求回来之前，模板先把安装引导卡片渲染出来了；aria2 其实一直装好且在跑。现在切回来先显示上次的真实状态再静默刷新，首次加载显示「正在检测引擎…」，状态读取失败则给出错误文案与重试按钮，不再把一次普通切页误判成引擎没装。</li>
           <li>这次只改前端，Vite 热更新即可生效，不用重启应用、也不用重启 aria2 引擎，正在下载的任务不受影响。</li>
           <li>顺带校正 README 里 MCP 工具数量的口径：注册 53 个（只读 31 / 低危写 19 / 高危 3），默认开放 50 个，3 个高危恒不开放；并补上漏列的两个知识库检索工具。</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.43</span>
-          <span class="log-date">2026-11-10</span>
-          <span class="log-title">新增下载器与 MCP 下载工具域，aria2 进环境管理</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>新增下载器：aria2 作为第 29 个运行时装在「环境管理」里，下载页只管任务。链接、批量链接、磁力、种子、Metalink 都能下；引擎没装或没跑时页面给引导，不会自己悄悄拉一个回来。aria2 1.37 不自带 Web UI，界面是 QuickDock 自己写的，RPC secret 不落到页面里。</li>
-          <li>界面按成熟 aria2 前端的路子做齐：状态分页、搜索与排序、多选批量与右键菜单、速度曲线与全局统计；详情是七标签弹框（概览 / 文件 / URI / Peers / 服务器 / 选项 / 种子信息），能改 URI、勾选要下的文件、单独调任务选项。</li>
-          <li>新建下载改成弹框，分链接 / 批量 / 种子 / Metalink 四种模式。高级选项能设请求头、Referer、代理、校验和、上下行限速、做种比例与队列位置；保存前查磁盘剩余空间，低于 1 GiB 先问一句，失败任务在列表、右键和详情里都能重试。</li>
-          <li>BT 参数全接上：DHT / DHT6 / PEX、监听端口、tracker、加密、做种比例，完成后可自动归类与打开文件夹，设置里还能配定时限速。这些参数只在引擎启动时读取，改完要停一次再启动；入站端口 6881–6980 需防火墙放行。</li>
-          <li>进度刷新改成活跃任务 1 秒一次、等待与已结束每 5 轮补齐，另有 WebSocket 事件（开始 / 暂停 / 完成 / 失败）一到就出快照；WS 在线时轮询降到 3 秒，断线自动退回。完成与失败同时写通知中心并可弹桌面气泡。</li>
-          <li>修掉「aria2 明明在跑却报超时」：1.37 的成功响应不带 <code>Connection: close</code>，复用被对端关掉的连接会一路卡到 context 超时，现在只读幂等调用关掉 keep-alive 并在网络错误时重试一次。失败任务也删得掉了——已结束的结果要走 <code>removeDownloadResult</code>，删完同步会话，不会被 <code>aria2.session</code> 复活。</li>
-          <li>设置 → 连接 可指向另一台机器的 aria2（HTTP / HTTPS + 可选 secret）；远程模式下文件落在远端，本机磁盘预检与「打开文件位置」自动跳过。</li>
-          <li>MCP 服务新增「下载器」工具域：7 个工具看引擎状态、任务列表、任务详情、全局统计并暂停 / 恢复 / 删除。<code>download_add</code> 刻意归高危且当前不开放——让宿主向模型给出的任意地址发请求还写盘，是 SSRF 的经典形状。</li>
-          <li>批量选中从逐个串行调用改成 <code>system.multicall</code>：暂停 / 恢复固定一次往返，删除两次，选几十个不再卡界面；同时补了 4 个测试文件，覆盖启动参数、限速时段、队列位置与 RPC 响应解析。</li>
         </ul>
       </details>
 
@@ -478,6 +476,7 @@
         <summary>支持 macOS 吗？</summary>
         <p>每个版本会产出 darwin arm64 与 amd64 两个包，但主力开发和测试都在 Windows 上，macOS 侧的功能覆盖不完整，遇到问题请提 Issue。目前没有 Developer ID 签名，首次打开需要在系统设置里放行。</p>
       </details>
+
     </div>
   </div>
 </section>

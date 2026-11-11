@@ -221,7 +221,7 @@
       </div>
       <div class="tool">
         <dt>Dashboard</dt>
-        <dd>A date bar with the lunar date, solar terms and the day's traditional do's and don'ts, plus local weather. Eight cards hold recent items, the file shelf, todos, mail verification codes, ports, resident services, Git and AI usage — clicking a row lands on that item.</dd>
+        <dd>A date bar with the lunar date, solar terms and the day's traditional do's and don'ts, plus local weather. Eight cards hold recent items, the file shelf, todos, mail verification codes, ports, resident services, Git and AI usage — clicking a row lands on that item. City search accepts provinces, abbreviations and both languages, resolving a province to its capital; mail cards open the original message.</dd>
       </div>
       <div class="tool">
         <dt>Notification center</dt>
@@ -358,6 +358,24 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">Mail source view, runtime info cards, and a round of fixes</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>Mail codes now open the original message: HTML is rendered with the card's own styles, no remote assets and no scripts. Both MaxMind security-alert templates are recognized too, and password-change / new-location sign-in alerts are flagged separately and pushed to the notification center. Multi-account template quirks and connection error messages were tidied up along the way.</li>
+          <li>The "?" next to each runtime in Environment grew from a single sentence into an info card: group, what you can actually do on this page, a first-use tip, live status (installed versions / managed service / always-on switch / console port), plus website, docs and source links. The popover measures its real height to pick a side and scrolls internally when the content is long.</li>
+          <li>Weather city search no longer returns a pile of same-named villages. Typing "Henan" used to surface places literally called Henan in Heilongjiang, Zhejiang, Beijing, North Korea and Sichuan; provinces, abbreviations and both Chinese / English input now resolve to the provincial capital. Results are ranked by population and administrative level, with airports, hamlets and duplicate multilingual aliases filtered out. Cities with patchy Chinese indexing such as Haikou and Taipei are fixed as well.</li>
+          <li>Thoughts and tool calls in the AI assistant are now collapsed by default, including while streaming. The summary lines show a live character count / call count as progress, and only a click expands the content, so a long chain of thought or half a dozen tool calls no longer pushes the answer off screen.</li>
+          <li>Fixed "click any nav item and the whole content area goes blank": the dashboard template had become a fragment root, which collided with the out-in page transition. The leave hook never fired, so the placeholder stayed forever. The dialog is back inside the single root, and the page registry now spells out the single-root rule.</li>
+          <li>The first-use guide is easier to find: both Settings -&gt; About and the workspace empty-state guide link to it, with the URL kept in one place in the code.</li>
+          <li>Reliability: an aria2 download directory on a removed external drive no longer traps startup in an endless self-heal loop, and the same portable / system install no longer shows up as two versions. Clipboard probe failure logging, command-palette FTS5 queries, the SFTP permissions dialog, and a few note / download-settings interactions were fixed too.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.46</span>
+          <span class="log-date">2026-11-10</span>
           <span class="log-title">Startup lock, and no more white flash when a panel opens</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -399,26 +417,6 @@
           <li>Fixed the downloader reporting "Download engine is not installed" after switching away and back. The page is deliberately excluded from the keep-alive list, so leaving it destroys the component and returning rebuilds it; the engine status defaults to "not installed" and the install card was rendered before the asynchronous status request came back, even though aria2 was installed and running all along. Returning now shows the last real status first and refreshes quietly, first load says "Checking engine…", and a failed status read shows the error with a retry button instead of blaming a missing engine.</li>
           <li>This is a frontend-only change: Vite hot reload applies it, so there is no need to restart the app or the aria2 engine, and downloads in progress are untouched.</li>
           <li>Also corrected the MCP tool count in the README: 53 registered (31 read / 19 low-risk write / 3 high-risk), 50 exposed by default, with the three high-risk tools never available; two knowledge-base search tools that were missing from the list were added.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.43</span>
-          <span class="log-date">2026-11-10</span>
-          <span class="log-title">A built-in downloader, aria2 in Runtimes, and download tools in MCP</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>New downloader: aria2 is installed as the 29th runtime under Runtimes, and the download page only manages its tasks. Links, batch links, magnet URIs, torrents and Metalink files all work; if the engine is missing or stopped the page shows guidance instead of quietly fetching one. aria2 1.37 ships no web UI, so the interface is QuickDock's own and the RPC secret never reaches the page.</li>
-          <li>The list borrows from mature aria2 frontends: status tabs, search and sorting, multi-select batch actions and a context menu, speed charts and global stats. Details open in a seven-tab dialog (overview / files / URIs / peers / servers / options / torrent info) where URIs can be changed, files selected and per-task options edited.</li>
-          <li>Creating a download is now a dialog with four modes — link, batch, torrent and Metalink. Advanced options cover request headers, Referer, proxy, checksum, up/down speed limits, seed ratio and queue position; free disk space is checked before saving, with a prompt under 1 GiB. Failed tasks can be retried from the list, the context menu and the details dialog.</li>
-          <li>BitTorrent settings are wired through: DHT / DHT6 / PEX, listen ports, trackers, encryption, seed ratio, plus auto-categorising and opening the folder on completion and a scheduled speed limit. These are read only when the engine starts, so restart it once after changing them; inbound ports 6881–6980 need TCP/UDP allowed by the firewall.</li>
-          <li>Progress now refreshes active tasks every second and fills in waiting / finished tasks every fifth round, with WebSocket events (start / pause / complete / error) triggering an immediate snapshot. While WS is up polling drops to three seconds and falls back automatically. Completions and failures also land in the notification centre and can raise a desktop toast.</li>
-          <li>Fixed "aria2 is running but polling times out": 1.37 successful responses omit <code>Connection: close</code>, so reusing a connection the peer had closed stalls until the context deadline. Read-only idempotent calls now disable keep-alive and retry once on network errors. Failed tasks can also be removed — finished results need <code>removeDownloadResult</code>, and the session is synced afterwards so <code>aria2.session</code> cannot resurrect them.</li>
-          <li>Settings → Connection can point at aria2 on another machine (HTTP / HTTPS with an optional secret). In remote mode files land on that host, so local disk checks and "open file location" are skipped.</li>
-          <li>The MCP server gains a Downloader tool group: seven tools read engine status, task lists, task details and global stats, and pause / resume / remove existing tasks. <code>download_add</code> is deliberately high-risk and unavailable for now — having the host fetch an arbitrary URL supplied by a model and write it to disk is the classic shape of SSRF.</li>
-          <li>Batch selection moved from one serial call per task to <code>system.multicall</code>: pause / resume is a single round trip, remove takes two, so selecting dozens no longer stalls the UI. Four test files were added covering daemon arguments, speed-limit windows, queue position and RPC response parsing.</li>
         </ul>
       </details>
 
@@ -478,6 +476,7 @@
         <summary>Is macOS supported?</summary>
         <p>Each release ships darwin arm64 and amd64 builds, but development and testing happen on Windows, so coverage on macOS is incomplete — please file an issue if you hit something. There is no Developer ID signature yet, so the first launch has to be allowed in System Settings.</p>
       </details>
+
     </div>
   </div>
 </section>
