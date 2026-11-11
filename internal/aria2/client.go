@@ -2,6 +2,7 @@ package aria2
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -251,6 +252,60 @@ func (c *Client) MultiCall(calls []MethodCall) ([]MultiCallResult, error) {
 		out = append(out, MultiCallResult{OK: true, Raw: item})
 	}
 	return out, nil
+}
+
+// ===== 存活探测 =====
+
+// Ping 是一次「无重试、可超时」的存活探测，只回答「这个 aria2 实例现在能不能处理 RPC」。
+//
+// 为什么不能复用 GetVersion：它在 readMethods 里，callRaw 遇到网络错误会自动重试一次，
+// 健康探测的实际耗时与失败次数都因此翻倍；而「假活」判定需要可预算的探测次数和明确的
+// 错误分类。返回值的分类由 IsTransportError 消费：
+//   - transportError：网络层失败（连不上 / 等响应头超时 / 读 body 失败）→ 疑似假活；
+//   - 其它 error：端口上有服务正常应答，但不是配置里的 aria2（secret 不符、HTTP 非
+//     200、响应不是 JSON-RPC）→ 绝不能据此清理进程，那可能是用户自己的服务。
+//
+// 与 Call 一样自动带 token：aria2 对 getVersion 也校验 secret，漏带会拿到
+// "Unauthorized" 被误判成「别人的服务」。
+func (c *Client) Ping(ctx context.Context) error {
+	if c == nil || c.Base == "" {
+		return fmt.Errorf("aria2 RPC 未配置")
+	}
+	params := []any{}
+	if c.Secret != "" {
+		params = append(params, "token:"+c.Secret)
+	}
+	body, err := json.Marshal(rpcRequest{
+		JSONRPC: "2.0", ID: "quickdock-ping", Method: "aria2.getVersion", Params: params,
+	})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.Base, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return &transportError{fmt.Errorf("aria2 daemon 未响应: %w", err)}
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("aria2 探测 HTTP %d", resp.StatusCode)
+	}
+	b, err := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
+	if err != nil {
+		return &transportError{err}
+	}
+	var out rpcResponse
+	if err := json.Unmarshal(b, &out); err != nil {
+		return fmt.Errorf("aria2 探测响应不是 JSON-RPC: %w", err)
+	}
+	if out.Error != nil {
+		return fmt.Errorf("aria2 探测被拒绝(%d): %s", out.Error.Code, out.Error.Message)
+	}
+	return nil
 }
 
 // ===== 引擎 / 会话 =====

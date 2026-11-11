@@ -63,10 +63,11 @@ import {
   RefreshCw, ListTodo, Activity, Server, Plug, ChevronRight, ChevronDown, FolderOpen, Check,
   FolderGit2, CalendarDays, Settings2, MapPin, X,
   Sun, CloudSun, Cloud, CloudFog, CloudRain, CloudSnow, CloudLightning, CloudOff,
-  Mail, Layers, Copy, Trash2, Plus, File, Folder, AlertCircle,
+  Mail, Layers, Copy, Trash2, Plus, File, Folder, AlertCircle, ShieldAlert,
   Coins,
 } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
+import MailDetailDialog from './MailDetailDialog.vue'
 import QdBarChart from './charts/QdBarChart.vue'
 
 // 以下两个结构只在返回值里出现，Wails 绑定生成器不会单独生成类型（与 MonitorPage 的
@@ -292,12 +293,14 @@ watch(showShelfMenu, (v) => {
   void nextTick(placeShelfMenu)
 })
 
-// ---- 邮件验证码卡片 ----
+// ---- 邮件验证码 / 安全提醒卡片 ----
 // 后端持有 IMAP 长连接与唯一快照，这里只做「读快照 / 报配置 / 点一下复制」。
 // 前端绝不碰外网：WebView2 跟随系统代理时外部请求会全超时，这条坑已经踩过一次。
 interface MailCode {
   id: string; uid: number; account: string; from: string
   subject: string; code: string; preview: string; received: number
+  /** code | password | login；旧构建没有这个字段，按 code 处理 */
+  kind?: string
 }
 interface MailAccount {
   id: string; host: string; port: number; email: string; enabled: boolean
@@ -356,6 +359,12 @@ function openMailGuide() {
 }
 
 function isMailExpired(received: number) { return mailNow.value - received > MAIL_EXPIRE_MS }
+// 安全提醒没有验证码，也不受 10 分钟时效约束；它只是「发生过的一件事」。
+function isSecurityMail(m: MailCode) { return m.kind === 'password' || m.kind === 'login' }
+function mailKindText(kind?: string) {
+  return kind === 'password' ? t('mailSecurityPassword')
+    : kind === 'login' ? t('mailSecurityLogin') : ''
+}
 function mailTimeText(received: number) {
   return new Date(received).toLocaleTimeString(locale.value === 'en-US' ? 'en-US' : 'zh-CN', {
     hour: '2-digit', minute: '2-digit',
@@ -410,6 +419,17 @@ async function dismissCode(id: string) {
     unwrap(await Dismiss(id))
     await loadMailCodes()
   } catch (e) { toast.error(getErrorMessage(e)); logErr('dashboard.mailDismiss', e) }
+}
+
+// ---- 邮件原文查看（双击整行打开，不占操作列）----
+// 只把 id 和卡片快照传给弹窗；正文由弹窗按需 FETCH，拉完即弃，
+// 不进 GetCodes 的内存快照（见 internal/mailbox 的包约定）。
+// 行内按钮自己带 @dblclick.stop，避免连点复制/忽略时冒泡把弹框一起打开。
+const mailDetailId = ref('')
+const mailDetailFallback = ref<{ subject: string; from: string; account: string; received: number } | null>(null)
+function openMailDetail(m: MailCode) {
+  mailDetailFallback.value = { subject: m.subject, from: m.from, account: m.account, received: m.received }
+  mailDetailId.value = m.id
 }
 
 // ---- 通知中心深链定位（imap）----
@@ -858,7 +878,10 @@ const todoDist = computed(() => {
 const residentServices = computed<ResidentRow[]>(() => {
   const rows: ResidentRow[] = residentRuntimes.value.map(r => ({
     id: 'env:' + r.id,
-    name: r.name,
+    // 这一行只有「名字 + 版本数」两列，没有图标也没有说明。aria2 在后端的展示名
+    // 可能被写成「下载引擎」这类功能名，摆在这里看不出是哪个程序，所以技术名优先；
+    // 其余运行时的展示名本身就是技术名（Node.js / PostgreSQL），原样用即可。
+    name: r.id === 'aria2' ? 'aria2' : r.name,
     meta: t('dash_env_versions', { n: r.installed?.length || 0 }),
     page: 'environments',
     // env 的区块 id 就是运行时 id：点哪一行就定位到那个运行时的面板
@@ -1764,9 +1787,12 @@ onUnmounted(() => {
             <div v-if="cityBusy" class="result-hint">{{ t('daybarSearching') }}</div>
             <div v-else-if="citySearched && !cityHits.length" class="result-hint">{{ t('daybarNoResult') }}</div>
             <div v-if="cityHits.length" class="db-city-hits">
-              <button v-for="(c, i) in cityHits" :key="i" class="db-city-hit" @click="pickCity(c)">
+              <!-- 同名地名靠「省 · 市」才分得清；窄弹窗里路径会被省略，
+                   完整路径放 title，鼠标悬停仍能看到全貌。 -->
+              <button v-for="(c, i) in cityHits" :key="i" class="db-city-hit"
+                      :title="[c.name, c.region, c.country].filter(Boolean).join(' · ')" @click="pickCity(c)">
                 <MapPin :size="11" />
-                <span>{{ c.name }}</span>
+                <span class="db-city-hit-name">{{ c.name }}</span>
                 <small>{{ [c.region, c.country].filter(Boolean).join(' · ') }}</small>
               </button>
             </div>
@@ -2034,17 +2060,25 @@ onUnmounted(() => {
                 </p>
                 <ul v-else class="qc-list">
                   <li v-for="m in mailCodes.slice(0, 3)" :key="m.id" class="qc-row"
-                      :data-mail-id="m.id"
-                      :class="{ expired: isMailExpired(m.received), 'qc-flash': flashMailId === m.id }">
-                    <span class="qc-code mono">{{ m.code }}</span>
+                      :data-mail-id="m.id" :title="t('mailDetailOpen')"
+                      :class="{ security: isSecurityMail(m), expired: !isSecurityMail(m) && isMailExpired(m.received), 'qc-flash': flashMailId === m.id }"
+                      @dblclick="openMailDetail(m)">
+                    <span v-if="isSecurityMail(m)" class="qc-alert" :title="mailKindText(m.kind)">
+                      <ShieldAlert :size="13" /><span>{{ t('mailSecurityTag') }}</span>
+                    </span>
+                    <span v-else class="qc-code mono">{{ m.code }}</span>
                     <div class="qc-meta">
-                      <span class="qc-name" :title="m.subject">{{ m.from || m.account }}</span>
+                      <span class="qc-name" :title="m.subject">{{ isSecurityMail(m) ? mailKindText(m.kind) : (m.from || m.account) }}</span>
                       <span class="qc-sub">{{ m.subject }} · {{ mailTimeText(m.received) }}</span>
                     </div>
-                    <button class="db-icon-btn" :title="t('mailCopy')" @click="copyCode(m)">
+                    <button v-if="!isSecurityMail(m)" class="db-icon-btn" :title="t('mailCopy')"
+                            @click.stop="copyCode(m)" @dblclick.stop>
                       <Check v-if="mailCopied === m.id" :size="13" /><Copy v-else :size="13" />
                     </button>
-                    <button class="db-icon-btn" :title="t('mailDismiss')" @click="dismissCode(m.id)"><X :size="13" /></button>
+                    <!-- 安全行没有复制按钮：占位让各行的操作图标严格对齐 -->
+                    <span v-else class="db-icon-btn qc-slot" aria-hidden="true"></span>
+                    <button class="db-icon-btn" :title="t('mailDismiss')"
+                            @click="dismissCode(m.id)" @dblclick.stop><X :size="13" /></button>
                   </li>
                 </ul>
               </div>
@@ -2222,6 +2256,18 @@ onUnmounted(() => {
           </div>
       </div>
     </div>
+
+    <!-- 邮件原文：组件内部自己 Teleport 到 body，放在根节点内部不占文档流。
+         必须待在 .qd-page 里面 —— App 的内容区是 <Transition mode="out-in">，
+         它只能动画「单元素根」；多一个同级节点就成了 fragment（根不唯一），
+         Vue 会报 "Component inside <Transition> renders non-element root node"，
+         并且 out-in 切页时旧节点撤掉、新节点进不来，整块内容区变空白。 -->
+    <MailDetailDialog
+      :visible="!!mailDetailId"
+      :mail-id="mailDetailId"
+      :fallback="mailDetailFallback"
+      @close="mailDetailId = ''"
+    />
   </div>
 </template>
 
@@ -2438,6 +2484,16 @@ onUnmounted(() => {
   flex-shrink: 0; min-width: 78px; font-size: 15px; font-weight: 600;
   letter-spacing: .06em; color: var(--color-accent);
 }
+/* 安全提醒没有码：同一列只留「图标 + 文字」，不套橙色背景块。
+   之前带底色的胶囊 + 橙色标题，两行安全提醒会把中间的验证码行夹成一块
+   突兀的补丁；标题也回到普通行的颜色，语义交给左侧小盾牌表达。 */
+.qc-alert {
+  flex-shrink: 0; min-width: 78px;
+  display: inline-flex; align-items: center; gap: 5px;
+  color: var(--color-warning); font-size: 11px; font-weight: 500;
+}
+.qc-alert span { color: var(--color-text-secondary); font-size: 11px; font-weight: 400; }
+.qc-slot { pointer-events: none; }
 .qc-file-ic {
   display: grid; place-items: center; flex-shrink: 0;
   width: 24px; height: 24px; color: var(--color-text-muted);
@@ -2910,7 +2966,13 @@ onUnmounted(() => {
   font: inherit; font-size: 12px; color: var(--color-text-primary); cursor: pointer;
 }
 .db-city-hit:hover { background: var(--color-bg-hover); }
-.db-city-hit small { margin-left: auto; font-size: 10px; color: var(--color-text-muted); }
+/* 名字不能被长路径挤掉；路径超宽时省略，完整值在按钮 title 里。 */
+.db-city-hit .db-city-hit-name { flex-shrink: 0; }
+.db-city-hit small {
+  margin-left: auto; max-width: 62%; min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 10px; color: var(--color-text-muted);
+}
 .db-settings-foot {
   display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
   padding-top: var(--space-2); border-top: 1px solid var(--color-border);

@@ -66,11 +66,19 @@ func ShowFloatingWindow(win *application.WebviewWindow, winWidth, winHeight int)
 
 	setWindowPosPhysical(win, showWarmupOffscreen, showWarmupOffscreen)
 	win.Show()
-	win.Focus()
+	// Focus 不能紧跟 Show：此刻窗口还在 -32000 的屏外，WebView2 控制器的
+	// MoveFocus 拿不到有效目标，必然返回 E_INVALIDARG（"The parameter is
+	// incorrect"）——每次唤起浮窗都刷一条 [WebView2] Focus failed，焦点也
+	// 没真正设上。挪到 30ms 回调里、窗口回到屏幕内之后再聚焦。
 	time.AfterFunc(showWarmupDelay, func() {
 		// 不判可见性：窗口若在预热期间被收起（失焦自动隐藏 / 再按一次热键），
 		// 这里把位置挪回目标坐标仍然是对的 —— 下次唤起的起点就在屏幕内，
 		// 不会出现「窗口停在屏外、热键越按越找不到」的状态。
 		setWindowPosPhysical(win, x, y)
+		// 但焦点必须判可见性：给已收起的窗口 Focus 既没意义，又会再触发一次
+		// E_INVALIDARG。Focus / IsVisible 内部都是 InvokeSync，跨线程调用安全。
+		if win.IsVisible() {
+			win.Focus()
+		}
 	})
 }

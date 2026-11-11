@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"quickdock/internal/aria2"
@@ -67,6 +69,7 @@ func (a *Aria2Runtime) LogPath(version string) string {
 
 func (a *Aria2Runtime) InstalledVersions() []Install {
 	var out []Install
+	dirs := managedDirs{}
 	if _, err := os.Stat(a.ExeFor("")); err == nil {
 		v := reAria2Version.FindString(RunVersion(a.ExeFor(""), "--version"))
 		if v == "" {
@@ -78,6 +81,10 @@ func (a *Aria2Runtime) InstalledVersions() []Install {
 			}
 		}
 		out = append(out, Install{Version: v, Scope: "portable", Path: a.baseDir})
+		// 登记的是 exe 所在目录，不是 Install.Path：portable 的 Path 本身是目录，
+		// system 的 Path 是 exe 全路径，早期拿两边各套一次 filepath.Dir 会错一层
+		// （目录的 Dir 是父目录），去重恒不命中，同一份 1.37.0 会显示「便携 + 系统」两行。
+		dirs.record(filepath.Dir(a.ExeFor("")))
 	}
 	if p, err := exec.LookPath("aria2c"); err == nil {
 		v := reAria2Version.FindString(RunVersion(p, "--version"))
@@ -85,10 +92,9 @@ func (a *Aria2Runtime) InstalledVersions() []Install {
 			return out
 		}
 		// 便携版被写进 PATH 时 LookPath 会命中自己，别重复登记成 system。
-		for _, ins := range out {
-			if strings.EqualFold(filepath.Clean(filepath.Dir(ins.Path)), filepath.Clean(filepath.Dir(p))) {
-				return out
-			}
+		// 与 nginx/ffmpeg/go 等适配器统一走 managedDirs 范式。
+		if dirs.dedupeByDir(p) {
+			return out
 		}
 		out = append(out, Install{Version: v, Scope: "system", Path: p})
 	}
@@ -189,27 +195,23 @@ func (a *Aria2Runtime) Start(ctx context.Context, version string, onLog func(str
 	if err := aria2.EnsureSessionFile(); err != nil {
 		return err
 	}
-	if err := os.MkdirAll(cfg.DownloadDir, 0o755); err != nil {
-		return err
-	}
-	if isPortOpen(cfg.Port) {
-		// 大文件把盘写满 / 刷 write cache 阻塞时，aria2 的单线程事件循环会卡在磁盘 I/O：
-		// 端口仍在 Listen，但所有 RPC 都超时（日志表现为 timeout awaiting response headers）。
-		// 这种「假活」实例会让看门狗误判为运行中、重启又一律被端口占用挡回来，必须区分处理。
-		healthy, stuck := daemonProbe(cfg)
-		if healthy {
-			// 健康的 daemon（另一个 QuickDock 实例刚拉起的、或用户自己启动的）直接复用。
-			// 早期实现无条件报「端口已占用」+ 孤儿回收杀进程，会造成「刚启动 1 秒就被杀
-			// → connectex: actively refused」的重启风暴。
-			logger.I("[env][aria2] 端口 %d 上已有健康 daemon，直接复用", cfg.Port)
-			return nil
-		}
-		if !stuck {
-			// 有服务在响应、但不是我们配置里的 aria2（secret 不符 / 别的 HTTP 服务）：
-			// 保持原有的「端口被占用」语义，绝不能去杀用户自己的进程。
-			return fmt.Errorf("端口 %d 已被其它服务占用，且不是当前配置的 aria2 daemon", cfg.Port)
-		}
-		logger.W("[env][aria2] 端口 %d 上的 daemon 无响应，先清理再重启", cfg.Port)
+	// 端口上是否已有 daemon、以及它是否真的能用，统一由 probeAria2Daemon 判定。
+	// 旧实现只看 TCP 端口 + 一次 GetVersion：卡死但仍 Listen 的实例被当成健康复用，
+	// 或反过来因一次偶发超时就把正忙着保存会话的健康 daemon 强杀掉。
+	switch probeAria2Daemon(cfg, true) {
+	case aria2Healthy:
+		logger.I("[env][aria2] 端口 %d 上已有健康 daemon，直接复用", cfg.Port)
+		return nil
+	case aria2Foreign:
+		return fmt.Errorf("端口 %d 上有服务响应，但不是当前配置的 aria2 daemon，已保留不清理", cfg.Port)
+	case aria2Stuck:
+		logger.W("[env][aria2] 端口 %d 上的 daemon 连续 %d 次 RPC 无响应，判定假活，先清理再重启",
+			cfg.Port, aria2ProbeAttempts)
+		// 句柄优先 + 端口兜底，两者都做：卡死实例可能不再 Listen（stopByPort 找不到），
+		// 而 svcMgr 里那条旧记录不先清掉，下面的 start 会被「服务已在运行」直接拒绝，
+		// 于是「清理了但没重启」。
+		svcMgr.killTracked(RuntimeAria2)
+		svcMgr.forget(RuntimeAria2)
 		stopByPort(cfg.Port, "aria2c.exe")
 		for i := 0; i < 10 && isPortOpen(cfg.Port); i++ {
 			time.Sleep(200 * time.Millisecond)
@@ -217,32 +219,219 @@ func (a *Aria2Runtime) Start(ctx context.Context, version string, onLog func(str
 		if isPortOpen(cfg.Port) {
 			return fmt.Errorf("端口 %d 上的无响应 aria2 进程未能清理，请手动结束 aria2c.exe", cfg.Port)
 		}
+	case aria2Offline:
+		// 端口空闲，走正常启动。
+	}
+	// 只有真的要拉起新进程时才校验保存目录：复用健康 daemon 时别去改用户配置。
+	// 移动硬盘拔掉后旧配置里的 E:\Downloads 会让 MkdirAll 直接失败，旧行为是
+	// 整个 Start 报错 → 下载页每轮轮询自愈、日志无限刷、引擎永远起不来。
+	if err := ensureDownloadDir(cfg); err != nil {
+		return err
 	}
 	args := aria2.DaemonArgs(cfg)
 	logger.I("[env][aria2] Start exe=%s port=%d dir=%s", exe, cfg.Port, cfg.DownloadDir)
 	if onLog != nil {
 		onLog(fmt.Sprintf("启动 aria2 daemon（127.0.0.1:%d）…", cfg.Port))
 	}
-	return svcMgr.start(RuntimeAria2, version, exe, wd, args, a.LogPath(version), onLog)
+	err = svcMgr.start(RuntimeAria2, version, exe, wd, args, a.LogPath(version), onLog)
+	// 旧的健康结论（尤其是刚清掉的 stuck）对「刚拉起的新实例」已经失效，
+	// 不清掉会让 TTL 内的状态面又把新实例判成假活，触发一次多余重启。
+	invalidateAria2Health()
+	return err
 }
 
-// daemonProbe 用一次短超时 RPC 判断端口上实例的真实状态。只看 TCP 端口会把
-// 「卡死但仍 Listen」的实例当成健康：大文件下载时 aria2 单线程卡在写盘，
-// RPC 全超时而端口照常接受连接，是长时间起不来的关键误判。
-//   - healthy: RPC 正常，直接复用
-//   - stuck:   端口在但网络层无响应，可安全清理后重启
-//   - 两者都否: 有服务响应但鉴权/协议不符，不能动（可能是用户自己的 aria2）
-func daemonProbe(cfg *aria2.Config) (healthy, stuck bool) {
-	c := aria2.NewClient(cfg)
-	c.HTTP.Timeout = 1500 * time.Millisecond
-	_, err := c.GetVersion()
-	if err == nil {
-		return true, false
+// ensureDownloadDir 保证 --dir 指向一个真能写的目录。
+// 旧配置里可能留着已拔掉的移动硬盘盘符（E:\Downloads），MkdirAll 会直接报
+// "The system cannot find the path specified"，旧行为是让整个 Start 失败，
+// 下载页于是每轮轮询自愈、日志无限刷、引擎永远起不来、设置页也跟着被当成异常。
+// 这里只在「创建或写入失败」时把这一项切回用户默认下载目录并持久化，
+// 端口 / secret / 限速等其余配置一律不动；写盘前会再确认默认目录可用。
+func ensureDownloadDir(cfg *aria2.Config) error {
+	dir := strings.TrimSpace(cfg.DownloadDir)
+	if dir == "" {
+		dir = aria2.DefaultDownloadDir()
 	}
-	return false, aria2.IsTransportError(err)
+	firstErr := os.MkdirAll(dir, 0o755)
+	if firstErr == nil {
+		firstErr = dirWritable(dir) // 目录在但只读，aria2 一样写不进去
+	}
+	if firstErr == nil {
+		cfg.DownloadDir = dir
+		return nil
+	}
+
+	fallback := aria2.DefaultDownloadDir()
+	if strings.EqualFold(filepath.Clean(fallback), filepath.Clean(dir)) {
+		return fmt.Errorf("下载目录 %s 不可用: %w", dir, firstErr)
+	}
+	if err := os.MkdirAll(fallback, 0o755); err != nil {
+		return fmt.Errorf("下载目录 %s 不可用（%v），默认目录 %s 也无法创建: %w", dir, firstErr, fallback, err)
+	}
+	if err := dirWritable(fallback); err != nil {
+		return fmt.Errorf("下载目录 %s 不可用（%v），默认目录 %s 不可写: %w", dir, firstErr, fallback, err)
+	}
+	old := dir
+	cfg.DownloadDir = fallback
+	if err := aria2.SaveConfig(cfg); err != nil {
+		return fmt.Errorf("下载目录 %s 不可用，切回 %s 后保存配置失败: %w", old, fallback, err)
+	}
+	logger.W("[env][aria2] 下载目录 %s 不可用（%v），已自动切回 %s 并保存；可在下载设置里重新指定",
+		old, firstErr, fallback)
+	return nil
+}
+
+// dirWritable 用一个立刻删掉的临时文件确认目录可写。MkdirAll 对「存在但只读」
+// 的目录也返回 nil，而 aria2 之后会在写盘时卡死，光看创建结果不够。
+func dirWritable(dir string) error {
+	f, err := os.CreateTemp(dir, ".quickdock-write-*")
+	if err != nil {
+		return err
+	}
+	name := f.Name()
+	_ = f.Close()
+	_ = os.Remove(name)
+	return nil
+}
+
+// invalidateAria2Health 丢弃健康探测缓存，下一轮查询强制重新探测。
+func invalidateAria2Health() {
+	aria2HealthMu.Lock()
+	aria2HealthCache = aria2HealthSnapshot{}
+	aria2HealthMu.Unlock()
+}
+
+// ===== aria2 假活（端口在 Listen、RPC 无响应）统一判定 =====
+//
+// 大文件写盘 / 刷 write cache 阻塞时，aria2 的单线程事件循环会卡在磁盘 I/O：
+// 端口仍在 Listen，但所有 RPC 都超时。这种「假活」实例只看 TCP 端口就会被当成
+// 运行中，看门狗跳过、Start 又因端口占用被挡回来，用户看到的是下载彻底不动。
+//
+// 判定必须收敛到一处：Start（能不能复用/要不要清）、Status（看门狗与对账的
+// 输入）、ReclaimOrphans（启动期孤儿回收）此前各用各的判据，正是「状态面显示
+// 运行中、下载页却一直转圈」的来源。
+type aria2DaemonState uint8
+
+const (
+	aria2Offline aria2DaemonState = iota // 端口没监听（含进程已退出、尚未启动完成）
+	aria2Healthy                         // RPC 往返正常，可直接复用
+	aria2Stuck                           // 端口在、监听者确实是 aria2c，但 RPC 连续无响应
+	aria2Foreign                         // 端口上有服务应答，但不是配置里的 daemon；绝不能清理
+)
+
+const (
+	// 连续多次短探测都失败才判卡死：aria2 保存会话 / 合并大分片时会暂缓 RPC，
+	// 单次超时就强杀会丢掉正在下载的任务（旧实现正是单次 GetVersion 判 stuck）。
+	aria2ProbeAttempts = 3
+	aria2ProbeTimeout  = 1200 * time.Millisecond
+	aria2ProbeGap      = 200 * time.Millisecond
+	// 状态面 3s 一刷、看门狗 15s 一巡；健康结果缓存一小段，避免同一秒内
+	// 几个调用点各发一轮 RPC。异常路径上探测本身要花约 4s，缓存同样防重入。
+	aria2HealthTTL = 2 * time.Second
+)
+
+type aria2HealthSnapshot struct {
+	port  int
+	at    time.Time
+	state aria2DaemonState
+}
+
+var (
+	aria2HealthMu    sync.Mutex // 保护下面的缓存
+	aria2HealthCache aria2HealthSnapshot
+	// 同一时刻只允许一次真实探测。状态面走 TryLock（拿不到就用旧结论，不阻塞 UI），
+	// Start / 回收走 Lock（必须拿到属于本次决策的新鲜结论）。
+	aria2ProbeMu sync.Mutex
+
+	aria2StuckLogAt atomic.Int64
+)
+
+// logAria2Stuck 状态面对假活的告警做节流：状态面每 3s 查一次，不节流会刷日志。
+func logAria2Stuck(port int) {
+	now := time.Now().UnixMilli()
+	last := aria2StuckLogAt.Load()
+	if last > 0 && now-last < 60_000 {
+		return
+	}
+	if !aria2StuckLogAt.CompareAndSwap(last, now) {
+		return
+	}
+	logger.W("[env][aria2] 端口 %d 上的 daemon 仍在监听但 RPC 连续无响应（假活），状态按不可用处理，等待看门狗清理重启", port)
+}
+
+// probeAria2Daemon 返回 aria2 实例的真实可用性。force=true 时强制重新探测，
+// 用于「据此决定是否杀进程」的路径；false 允许读短 TTL 缓存（状态面/看门狗）。
+func probeAria2Daemon(cfg *aria2.Config, force bool) aria2DaemonState {
+	if cfg == nil || cfg.IsRemote() {
+		// 远程实例不归本机管，也不该被本机端口上的任何东西影响。
+		return aria2Foreign
+	}
+	aria2HealthMu.Lock()
+	cached, hasCache, fresh := aria2HealthCache.state, !aria2HealthCache.at.IsZero() && aria2HealthCache.port == cfg.Port,
+		!force && aria2HealthCache.port == cfg.Port && time.Since(aria2HealthCache.at) < aria2HealthTTL
+	aria2HealthMu.Unlock()
+	if fresh {
+		return cached
+	}
+
+	if force {
+		aria2ProbeMu.Lock()
+		defer aria2ProbeMu.Unlock()
+	} else if !aria2ProbeMu.TryLock() {
+		// 已有探测在跑：别把状态面卡在这里。没有旧结论时保守当健康——
+		// 下一轮（3s 后）自然会拿到真实结果，误判一次的代价远小于阻塞。
+		if hasCache {
+			return cached
+		}
+		return aria2Healthy
+	} else {
+		defer aria2ProbeMu.Unlock()
+	}
+
+	state := aria2DaemonStateOf(cfg)
+	aria2HealthMu.Lock()
+	aria2HealthCache = aria2HealthSnapshot{port: cfg.Port, at: time.Now(), state: state}
+	aria2HealthMu.Unlock()
+	return state
+}
+
+// aria2DaemonStateOf 执行一次完整判定。只在 probeAria2Daemon 持有探测锁时调用。
+func aria2DaemonStateOf(cfg *aria2.Config) aria2DaemonState {
+	if !isPortOpen(cfg.Port) {
+		return aria2Offline
+	}
+	c := aria2.NewClient(cfg)
+	for i := 0; i < aria2ProbeAttempts; i++ {
+		if i > 0 {
+			time.Sleep(aria2ProbeGap)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), aria2ProbeTimeout)
+		err := c.Ping(ctx)
+		cancel()
+		if err == nil {
+			return aria2Healthy
+		}
+		if !aria2.IsTransportError(err) {
+			// 有应答但不是我们的 daemon（secret 不符 / HTTP 非 200 / 非 JSON-RPC）。
+			// 这类进程一律保留，杀掉就是误伤用户自己的服务。
+			return aria2Foreign
+		}
+	}
+	// 端口在、连续多次都是网络层失败。判「卡死」之前还要确认监听者确实是 aria2c：
+	// 也可能是别的程序占着端口且恰好不响应，误杀代价远高于多等一轮。
+	pid := findListenPID(cfg.Port)
+	if pid == 0 || !processIsExeAny(pid, "aria2c.exe", "aria2c") {
+		logger.W("[env][aria2] 端口 %d 连续无响应，但监听进程 pid=%d 不是 aria2c，按外部服务保留", cfg.Port, pid)
+		return aria2Foreign
+	}
+	return aria2Stuck
 }
 
 func (a *Aria2Runtime) Stop(version string) error {
+	// 先按句柄精确终止：aria2 卡死时不写日志、也可能已经不再 Listen，
+	// 只靠 stopByPort（netstat 反查监听 PID）会找不到目标，进程变孤儿继续占着
+	// 会话文件与内存；下一轮 Start 起来后两个实例抢同一个 RPC 端口，后者即以
+	// code=1 退出。killTracked 不依赖端口，覆盖这条路径。
+	svcMgr.killTracked(RuntimeAria2)
 	if cfg, err := aria2.LoadConfig(); err == nil {
 		stopByPort(cfg.Port, "aria2c.exe")
 	}
@@ -268,6 +457,16 @@ func (a *Aria2Runtime) Status(version string) ServiceStatus {
 	st.Running = true
 	st.PID = r.PID
 	st.Version = r.Version
+	// 端口在 Listen 但 RPC 连续无响应 = 假活。按「未运行」返回，看门狗 / 启动对账 /
+	// 「设为常驻」才会走 Start 的清理重启闭环。旧实现只看 TCP 端口，假活实例会被
+	// 当成健康永久跳过自愈，只能靠下载页轮询链路兜底，两条链路还会抢着重启。
+	// aria2Offline（端口还没 Listen = 刚拉起或刚退出）不介入，避免把启动中的实例
+	// 判成掉线、触发重复启动。
+	if cfg, e := aria2.LoadConfig(); e == nil && !cfg.IsRemote() &&
+		probeAria2Daemon(cfg, false) == aria2Stuck {
+		st.Running = false
+		logAria2Stuck(cfg.Port)
+	}
 	return st
 }
 

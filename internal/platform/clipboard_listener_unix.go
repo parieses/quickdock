@@ -2,6 +2,8 @@
 
 package platform
 
+import "time"
+
 // 非 Windows 平台的剪贴板变更监听占位实现。
 //
 // 各平台接入方式：
@@ -27,7 +29,14 @@ func ClipboardListenerAlive() bool { return false }
 func ClipboardOwnerResponsive(timeoutMs uint32) bool { return true }
 
 // ClipboardProbe 非 Windows 平台没有可探测的独占剪贴板，恒为可用。
-func ClipboardProbe() bool { return true }
+// 返回值形状与 Windows 版一致：ok / 会话长时间空闲 / 失败诊断串。
+func ClipboardProbe() (ok, idle bool, detail string) { return true, false, "" }
 
 // ClipboardHolderInfo 非 Windows 平台没有「打开锁」，也就不存在可指名的持有者。
 func ClipboardHolderInfo() string { return "" }
+
+// ClipboardSelfHold 非 Windows 平台没有打开锁，不存在「本进程卡住临界区」。
+func ClipboardSelfHold(min time.Duration) (time.Duration, bool) { return 0, false }
+
+// ClipboardContentOwnerInfo 非 Windows 平台没有 GetClipboardOwner 语义。
+func ClipboardContentOwnerInfo() string { return "" }

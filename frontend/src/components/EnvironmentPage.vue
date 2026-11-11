@@ -69,8 +69,9 @@ import { useWebDAVPanel } from '../composables/useWebDAVPanel'
 import { openExternal } from '../utils/externalLinks'
 import { RUNTIME_COLORS, SPECIAL_ITEM_COLORS } from '../utils/palette'
 import { cmpVer, formatBytes, formatEta, formatSpeed, percent } from '../utils/envFormat'
+import { RUNTIME_DOCS } from '../utils/runtimeDocs'
 
-const { t } = useI18n()
+const { t, locale } = useI18n()
 const toast = inject<{ error: (m: string) => void; success: (m: string) => void }>('toast')!
 
 const props = defineProps<{ initialSection?: string }>()
@@ -349,6 +350,133 @@ const loadedOnce = ref(false)
 const selected = computed<RuntimeInfo | null>(() => {
   return runtimes.value.find((r) => r.id === selectedId.value) || runtimes.value[0] || null
 })
+
+// ---- 运行时介绍浮层 ----
+//
+// 侧栏和标题上只有一个名字，"aria2 / frpc / MinIO 到底干什么、和我有什么关系"
+// 只能靠外部搜索。标题右边的问号是一张资料卡：一句话定性 + 本页能做什么 +
+// 上手提示 + 当前状态 + 官网/文档/源码（资料见 utils/runtimeDocs.ts，查不到条目的
+// 运行时不显示问号）。
+//
+// 定位用 fixed + 按钮 rect，与 SSH 右键菜单同一套做法：父容器 .env-detail 是
+// 可滚动区域，absolute 浮层会被 overflow 裁掉。
+const docRuntime = computed(() => (selected.value ? RUNTIME_DOCS[selected.value.id] : undefined))
+// 资料自带双语，不走 i18n 字典：一个运行时的定性 / 要点 / 提示必须成组维护，
+// 拆成上百个 key 后改一个运行时要翻遍几千行（理由见 utils/runtimeDocs.ts 文件头）。
+const isZhDoc = computed(() => locale.value.startsWith('zh'))
+const docText = computed(() => {
+  const d = docRuntime.value
+  if (!d) return ''
+  return isZhDoc.value ? d.zh : d.en
+})
+const docPoints = computed(() => {
+  const d = docRuntime.value
+  if (!d) return [] as string[]
+  return isZhDoc.value ? d.points.zh : d.points.en
+})
+const docTip = computed(() => {
+  const d = docRuntime.value
+  if (!d?.tip) return ''
+  return isZhDoc.value ? d.tip.zh : d.tip.en
+})
+// 分组标签复用侧栏的 GROUP_LABEL，别在资料卡里另写一份同义映射。
+const docGroupLabel = computed(() => t(GROUP_LABEL[selected.value?.group || ''] || 'groupTool'))
+// 实时状态：与静态资料分开取，切换版本 / 启停服务后不用重开浮层也会跟着变。
+const docState = computed(() => {
+  const r = selected.value
+  if (!r) return [] as string[]
+  const out = [
+    r.installed.length ? t('envDocInstalled', { n: r.installed.length }) : t('envDocNotInstalled'),
+    r.hasService ? t('envDocManaged') : t('envDocCli'),
+  ]
+  if (r.hasService) out.push(r.enabled ? t('svcWatchOn') : t('svcWatchOff'))
+  if (r.webConsolePort) out.push(t('envDocConsole', { port: r.webConsolePort }))
+  return out
+})
+const docOpen = ref(false)
+const docPos = ref({ x: 0, y: 0 })
+const docMaxHeight = ref(0)
+const docPopRef = ref<HTMLElement | null>(null)
+
+function toggleDoc(e: MouseEvent) {
+  if (docOpen.value) {
+    closeDoc()
+    return
+  }
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+  // 宽度写死一个上限：资料卡内容多，宽度再浮动会让每次打开都左右跳。
+  const w = Math.min(368, window.innerWidth - 16)
+  const x = Math.min(Math.max(8, rect.left), window.innerWidth - w - 8)
+  const below = rect.bottom + 8
+  const spaceBelow = window.innerHeight - 8 - below
+  const spaceAbove = rect.top - 16
+  // 先按「按钮上/下哪边空间大」限高：内容超高时浮层内部滚动，而不是溢出视口。
+  docMaxHeight.value = Math.max(180, spaceBelow, spaceAbove)
+  docPos.value = { x, y: below }
+  docOpen.value = true
+  // 高度不再猜 180：要点 2~3 条 + 提示 + 状态，各运行时差一百多像素。
+  // 先按「按钮下方」渲染一帧，挂载后拿真实高度决定翻到上方还是留在下方。
+  void nextTick(() => {
+    const el = docPopRef.value
+    if (!el || !docOpen.value) return
+    const h = el.getBoundingClientRect().height
+    const y = h <= spaceBelow ? below
+      : h <= spaceAbove ? Math.max(8, rect.top - h - 8)
+      : spaceBelow >= spaceAbove ? below : 8
+    docPos.value = { x, y }
+  })
+}
+
+function closeDoc() {
+  docOpen.value = false
+}
+
+function openDoc(url?: string) {
+  if (!url) return
+  openExternal(url).catch((e: unknown) => logErr('env.runtimeDoc', e))
+}
+
+function onDocDown(e: MouseEvent) {
+  if (!docOpen.value) return
+  const el = e.target as HTMLElement | null
+  // 按钮自己不能算「外部点击」：document 是捕获阶段监听，点按钮时这里先于 click
+  // 执行，若在这里关掉，紧接着的 click 会把浮层又打开一次，表现为「点不关」。
+  if (!el || el.closest('.doc-pop') || el.closest('.doc-btn')) return
+  closeDoc()
+}
+
+function onDocKey(e: KeyboardEvent) {
+  if (docOpen.value && e.key === 'Escape') {
+    e.preventDefault()
+    e.stopPropagation()
+    closeDoc()
+  }
+}
+
+// 滚动就关：浮层是 fixed 的，页面一滚它就悬在无关内容上方了。
+// 例外是浮层自己内部滚动（内容变长后 max-height 会让它滚），那是用户在读资料，
+// 不能一滚就把卡片关掉。
+function onDocScroll(e: Event) {
+  if (!docOpen.value) return
+  const el = e.target as HTMLElement | null
+  if (el?.closest?.('.doc-pop')) return
+  closeDoc()
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', onDocDown, true)
+  document.addEventListener('keydown', onDocKey, true)
+  window.addEventListener('scroll', onDocScroll, true)
+})
+
+onUnmounted(() => {
+  document.removeEventListener('mousedown', onDocDown, true)
+  document.removeEventListener('keydown', onDocKey, true)
+  window.removeEventListener('scroll', onDocScroll, true)
+})
+
+// 切运行时立刻收起：留着上一个运行时的介绍就是错误信息。
+watch(selectedId, closeDoc)
 
 // 每个运行时的交互态，按 id 索引
 interface UiState {
@@ -1762,6 +1890,16 @@ const s = currentRuntimeState
           <div class="detail-titles">
             <div class="detail-title-row">
               <span class="detail-name">{{ selected.name }}</span>
+              <!-- 这里放问号而不是在侧栏每项后面塞图标：介绍是「点进来之后才想知道」的信息，
+                   侧栏 30 多个问号只会变成噪音，还会挤掉版本数角标。 -->
+              <button
+                v-if="docRuntime"
+                class="doc-btn"
+                :class="{ on: docOpen }"
+                :title="t('envDocOpen')"
+                :aria-label="t('envDocOpen')"
+                @click.stop="toggleDoc"
+              >?</button>
               <span class="detail-id">{{ selected.id }}</span>
             </div>
             <div class="detail-badges">
@@ -1780,6 +1918,53 @@ const s = currentRuntimeState
             </div>
           </div>
         </header>
+
+        <!-- 运行时介绍：Teleport 到 body 才能绕过 .env-detail 的滚动裁剪；
+             点遮罩外部 / Esc / 页面滚动 / 换运行时都会关（逻辑见 script 里 toggleDoc 一带）。
+             left/top/maxHeight 是按按钮 rect 与视口空间算出来的运行时值，是内联样式的例外用法。
+             内容从「一句话」扩成资料卡：分组 / 本页能做什么 / 上手提示 / 实时状态 / 三个链接。 -->
+        <Teleport to="body">
+          <div
+            v-if="docOpen && docRuntime"
+            ref="docPopRef"
+            class="doc-pop"
+            :style="{ left: docPos.x + 'px', top: docPos.y + 'px', maxHeight: docMaxHeight ? docMaxHeight + 'px' : undefined }"
+            role="dialog"
+            :aria-label="t('envDocOpen')"
+          >
+            <div class="doc-pop-head">
+              <span class="doc-pop-name">{{ selected?.name }}</span>
+              <span class="doc-pop-id">{{ selected?.id }}</span>
+              <span class="doc-pop-kind">{{ docGroupLabel }}</span>
+            </div>
+            <p class="doc-pop-text">{{ docText }}</p>
+
+            <div class="doc-pop-section">
+              <div class="doc-pop-label">{{ t('envDocWhatCanDo') }}</div>
+              <ul class="doc-pop-points">
+                <li v-for="(p, i) in docPoints" :key="i">{{ p }}</li>
+              </ul>
+            </div>
+
+            <div v-if="docTip" class="doc-pop-tip">
+              <span class="doc-pop-label">{{ t('envDocTip') }}</span>
+              <span>{{ docTip }}</span>
+            </div>
+
+            <div class="doc-pop-section">
+              <div class="doc-pop-label">{{ t('envDocState') }}</div>
+              <div class="doc-pop-chips">
+                <span v-for="(s, i) in docState" :key="i" class="doc-chip">{{ s }}</span>
+              </div>
+            </div>
+
+            <div class="doc-pop-actions">
+              <button class="doc-link" @click="openDoc(docRuntime.home)">{{ t('envDocHome') }} ↗</button>
+              <button v-if="docRuntime.docs" class="doc-link" @click="openDoc(docRuntime.docs)">{{ t('envDocDocs') }} ↗</button>
+              <button v-if="docRuntime.repo" class="doc-link" @click="openDoc(docRuntime.repo)">{{ t('envDocRepo') }} ↗</button>
+            </div>
+          </div>
+        </Teleport>
 
         <!-- Ollama 模型管理：管的是模型库（全局共享、几十 GB），与上方程序版本互不越界 -->
         <section v-if="selected.id === 'ollama'" class="detail-block">
@@ -2022,7 +2207,7 @@ const s = currentRuntimeState
             </div>
             <div
               v-for="ins in selected.installed"
-              :key="ins.version"
+              :key="ins.scope + '|' + ins.path + '|' + ins.version"
               class="ver-row"
               :class="[ins.scope, { active: ins.active }]"
             >
@@ -3407,6 +3592,87 @@ const s = currentRuntimeState
   font-size: 11px; color: var(--color-text-disabled);
   background: var(--color-bg-tertiary); padding: 1px 6px; border-radius: var(--radius-xs);
 }
+/* 运行时介绍：标题右边的小问号。默认跟次级文字同色，hover 才亮成强调色，
+   不跟标题抢注意力；尺寸固定 16px，避免不同字号的运行时名把标题行撑高。 */
+.doc-btn {
+  width: 16px; height: 16px; flex-shrink: 0; padding: 0; margin: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  border-radius: 50%; border: 1px solid var(--color-border);
+  background: transparent; color: var(--color-text-disabled);
+  font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer;
+  transition: color .15s ease, border-color .15s ease;
+}
+.doc-btn:hover, .doc-btn.on { color: var(--color-accent); border-color: var(--color-accent); }
+/* 浮层走 popover 面层：卡片是 card-bg，浮层要再上一层才不会看起来"挖"进卡片。
+   位置由 script 算好（fixed + 按钮 rect），这里只管外观。
+   资料卡内容变长：限高 + 内部滚动，避免长要点把卡片顶出屏幕；
+   script 的 onDocScroll 会放行浮层自己内部的滚动。 */
+.doc-pop {
+  position: fixed; z-index: 9000;
+  width: 368px; max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px); overflow-y: auto;
+  padding: 14px 16px; border-radius: var(--radius-md);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-pop);
+}
+.doc-pop-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.doc-pop-name { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
+.doc-pop-id {
+  font-size: 10px; color: var(--color-text-disabled);
+  background: var(--color-bg-tertiary); padding: 1px 5px; border-radius: var(--radius-xs);
+}
+.doc-pop-kind {
+  margin-left: auto; padding: 1px 7px; border-radius: var(--radius-full);
+  background: var(--color-accent-bg); color: var(--color-accent); font-size: var(--text-2xs);
+}
+.doc-pop-text {
+  margin: 10px 0 0; font-size: var(--text-xs); line-height: 1.65;
+  color: var(--color-text-secondary);
+}
+.doc-pop-section { margin-top: 12px; }
+.doc-pop-label {
+  margin-bottom: 6px; font-size: var(--text-2xs); font-weight: 600;
+  color: var(--color-text-disabled);
+}
+.doc-pop-points {
+  margin: 0; padding: 0; list-style: none;
+  display: flex; flex-direction: column; gap: 5px;
+}
+.doc-pop-points li {
+  position: relative; padding-left: 14px;
+  font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-secondary);
+}
+.doc-pop-points li::before {
+  content: ''; position: absolute; left: 3px; top: 7px;
+  width: 4px; height: 4px; border-radius: 50%; background: var(--color-accent);
+}
+/* 上手提示是整张卡里唯一带底色的块：它是「第一次用最容易踩的坑」，
+   用 warning 的边框和底色跟中性资料区隔开，不靠加粗硬抢注意力。 */
+.doc-pop-tip {
+  display: flex; align-items: flex-start; gap: 8px;
+  margin-top: 12px; padding: 8px 10px;
+  border: 1px solid var(--color-warning-border);
+  border-radius: var(--radius-sm); background: var(--color-warning-bg);
+  font-size: var(--text-xs); line-height: 1.6; color: var(--color-text-secondary);
+}
+.doc-pop-tip .doc-pop-label { margin: 0; flex-shrink: 0; color: var(--color-warning); }
+.doc-pop-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+.doc-chip {
+  padding: 1px 7px; border-radius: var(--radius-full);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted); font-size: var(--text-2xs);
+}
+.doc-pop-actions {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--color-border);
+}
+.doc-link {
+  padding: 3px 10px; border-radius: var(--radius-sm); cursor: pointer;
+  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
+  color: var(--color-text-secondary); font-size: var(--text-2xs);
+  transition: color .15s ease, border-color .15s ease;
+}
+.doc-link:hover { color: var(--color-accent); border-color: var(--color-accent); }
 .detail-badges { display: flex; align-items: center; gap: 6px; }
 .badge { font-size: 11px; padding: 1px 7px; border-radius: var(--radius-md); background: var(--color-bg-tertiary); color: var(--color-text-muted); }
 .badge.svc { background: var(--color-accent-bg); color: var(--color-accent); }

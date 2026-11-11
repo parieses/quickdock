@@ -1,4 +1,4 @@
-// Package mailbox 是「邮件验证码卡片」面向前端的薄门面。
+// Package mailbox 是「邮件验证码 + 账号安全提醒卡片」面向前端的薄门面。
 //
 // 为什么常驻循环留在这里而不是 internal：它持有进程级单例状态（账号配置、
 // 内存快照、正在跑的长连接），且要往宿主的通知中心 / Wails 事件总线推消息 ——
@@ -16,6 +16,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -468,6 +469,46 @@ func (s *MailboxService) GetCodes() *services.ApiResult {
 	return services.Ok(s.snapshot())
 }
 
+// GetMessage 按卡片里的 id 按需读取一封邮件原文（独立短连接 + BODY.PEEK，
+// 不标已读），拉完即弃：结果不进快照、不落库、不缓存。
+// id 形如 "邮箱/UID"，且必须仍在当前快照里 —— 只允许查看卡片上这封，
+// 不接受前端拼任意 UID 去遍历收件箱。
+func (s *MailboxService) GetMessage(id string) *services.ApiResult {
+	at := strings.LastIndex(id, "/")
+	if at <= 0 || at == len(id)-1 {
+		return services.FailMsg("邮件编号不合法")
+	}
+	email := id[:at]
+	uid, err := strconv.ParseUint(id[at+1:], 10, 32)
+	if err != nil || uid == 0 {
+		return services.FailMsg("邮件编号不合法")
+	}
+	s.mu.RLock()
+	inSnapshot := false
+	var cfg internalmailbox.Config
+	for _, m := range s.codes {
+		if m.ID == id {
+			inSnapshot = true
+			break
+		}
+	}
+	found := false
+	for _, a := range s.accounts {
+		if strings.EqualFold(a.cfg.Email, email) {
+			cfg, found = a.cfg, true
+			break
+		}
+	}
+	s.mu.RUnlock()
+	if !inSnapshot {
+		return services.FailMsg("这封邮件已不在最近列表中，请刷新后再试")
+	}
+	if !found || cfg.Host == "" || cfg.Password == "" {
+		return services.FailMsg("该邮箱未配置或已停用，无法读取原文")
+	}
+	return services.Wrap(internalmailbox.FetchMessage(cfg, uint32(uid)))
+}
+
 // Dismiss 手动忽略一条，之后不再出现在卡片里。
 func (s *MailboxService) Dismiss(id string) *services.ApiResult {
 	s.mu.Lock()
@@ -678,7 +719,7 @@ func (s *MailboxService) fetchAccount(id string) ([]internalmailbox.Message, err
 			}
 			fresh = append(fresh, m)
 			if !known[m.ID] && !silent {
-				s.pushNewCode(m)
+				s.pushNew(m)
 			}
 		}
 		// 保留其它账号的码，只替换本账号这一槽，再整体按时间裁剪。
@@ -720,15 +761,25 @@ func (s *MailboxService) snapshot() []internalmailbox.Message {
 	return out
 }
 
-func (s *MailboxService) pushNewCode(m internalmailbox.Message) {
+// pushNew 把新识别出的邮件推进通知中心。安全提醒没有码，用 warn 级让通知条
+// 的竖条变橙——它比「可以复制的码」更需要被看见，但不该冒充错误。
+// 通知体只带发件人 + 主题 + 分类结论，不带正文（包约定：正文不落库）。
+func (s *MailboxService) pushNew(m internalmailbox.Message) {
 	// 持锁期间只做入队：PushNotification 会写库，别把它放进锁里。
 	go func() {
 		title := fmt.Sprintf("验证码 %s", m.Code)
+		level := "info"
+		switch m.Kind {
+		case "password":
+			title, level = "安全提醒：账号密码已变更", "warn"
+		case "login":
+			title, level = "安全提醒：账号在新设备或新地点登录", "warn"
+		}
 		body := m.Subject
 		if m.From != "" {
 			body = m.From + " · " + m.Subject
 		}
-		s.app.PushNotification("imap", "info", title, body, "page:dashboard", m.ID)
+		s.app.PushNotification("imap", level, title, body, "page:dashboard", m.ID)
 	}()
 }
 

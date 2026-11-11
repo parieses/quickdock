@@ -333,6 +333,11 @@ type DownloadService struct {
 	diskPaused    atomic.Bool
 	lastRecover   time.Time
 	recovering    atomic.Bool
+	// 连续自愈失败到上限就熔断：配置类故障（保存目录在已拔掉的硬盘上、
+	// aria2 没装、端口被占）重试一万次也不会自己好，只会把日志和通知刷爆。
+	// 用户改设置或手动点「启动」时解除熔断并立刻重试一次。
+	recoverFails  int
+	engineBlocked atomic.Bool
 }
 
 func NewDownloadService(app *services.AppService) *DownloadService {
@@ -415,6 +420,7 @@ func (s *DownloadService) DlEnable() *services.ApiResult {
 	if s.App == nil || s.App.Env == nil {
 		return services.FailMsg("环境管理未初始化")
 	}
+	s.resetEngineBlock() // 手动点「启动」= 明确重试意图，别让熔断挡着
 	cfg, err := aria2.LoadConfig()
 	if err != nil {
 		return services.Fail(err)
@@ -687,6 +693,14 @@ func (s *DownloadService) addOne(uri, dir, optsJSON, source string) (string, err
 	opts, dir, err := baseOptions(cfg, dir, optsJSON)
 	if err != nil {
 		return "", err
+	}
+	// 前端可能还缓存着已拔硬盘上的旧目录（配置在启动时已被拉回默认目录，但页面
+	// 没刷新）。这里预建一次，失败就给一句能照着做的提示，别让 aria2 在写盘时
+	// 才含糊报错、更别静默把任务塞到别的盘去。
+	if !cfg.IsRemote() && dir != "" {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return "", fmt.Errorf("保存目录 %s 不可用（%v），请到下载设置更换保存目录", dir, err)
+		}
 	}
 	if source == "manual" || source == "batch" {
 		if d := categoryDir(cfg, dir, uri); d != "" {
@@ -1360,6 +1374,12 @@ func (s *DownloadService) DlSetOptions(optsJSON string) *services.ApiResult {
 	if err := aria2.SaveConfig(cfg); err != nil {
 		return services.Fail(err)
 	}
+	// 保存设置是「修正配置」的明确信号：解除自愈熔断并立刻重试，别再等 60s 冷却。
+	wasBlocked := s.engineBlocked.Load()
+	s.resetEngineBlock()
+	if wasBlocked && !cfg.IsRemote() {
+		go s.recoverEngine(fmt.Errorf("下载设置已更新，重新尝试启动"))
+	}
 	s.applyRuntimeOptions(cfg, "设置保存")
 	if before != cfg.RPCBase()+"|"+cfg.RPCSecret() {
 		// 连接目标变了：旧 WS / 轮询全停，按新配置重新握手后再起。
@@ -1729,13 +1749,19 @@ func (s *DownloadService) emitSnapshot() {
 		}
 		s.failStreak++
 		streak := s.failStreak
-		if streak == 3 || streak%30 == 0 {
+		blocked := s.engineBlocked.Load()
+		if blocked {
+			// 熔断后不再每 30 轮刷 W：10 分钟一条 I 足够提醒，日志别再滚屏。
+			if streak == 3 || streak%600 == 0 {
+				logger.I("[download] aria2 启动已被配置阻断，等待下载设置修正后重试（连续失败 %d 次）", streak)
+			}
+		} else if streak == 3 || streak%30 == 0 {
 			logger.W("[download] 轮询 aria2 连续失败 %d 次: %v", streak, err)
 		}
 		s.mu.Unlock()
 		// 连续失败到阈值才自愈：单次超时可能只是 daemon 正在保存会话 / 合并分片。
 		// 异步执行，别把 Stop+Start 阻塞在快照推送链路上。
-		if streak >= 6 {
+		if streak >= 6 && !blocked {
 			go s.recoverEngine(err)
 		}
 		return
@@ -1831,6 +1857,8 @@ const (
 	diskGuardMinFree = uint64(1) << 30
 	// 自愈冷却：避免卡死实例反复 Stop+Start 形成重启风暴。
 	engineRecoverCooldown = 60 * time.Second
+	// 连续这么多次自愈都失败就停手，等配置被修正；3 次 × 60s 足够排除偶发抖动。
+	engineRecoverMaxFails = 3
 )
 
 // maybeGuardDisk 只在间隔到了时才起一次检查，避免每轮快照都创建 goroutine。
@@ -1910,7 +1938,7 @@ func (s *DownloadService) guardDiskSpace(tasks []aria2.TaskView) {
 // recoverEngine 处理「进程还在但 RPC 全超时 / 进程已退出」两种掉线。
 // 环境层看门狗只看端口，识别不出卡死的 daemon，所以由轮询链路自己兜底。
 func (s *DownloadService) recoverEngine(lastErr error) {
-	if s.App == nil || s.App.Env == nil || s.disconnected.Load() {
+	if s.App == nil || s.App.Env == nil || s.disconnected.Load() || s.engineBlocked.Load() {
 		return
 	}
 	cfg, err := aria2.LoadConfig()
@@ -1935,17 +1963,64 @@ func (s *DownloadService) recoverEngine(lastErr error) {
 	// Stop 内部按端口杀进程树（带镜像校验），能清掉卡死但还占着端口的实例。
 	_ = s.App.Env.Stop(envengine.RuntimeAria2, ver)
 	if err := s.App.Env.Start(envengine.RuntimeAria2, ver, nil); err != nil {
-		logger.E("[download] aria2 自愈重启失败: %v", err)
+		// 环境层看门狗现在也认「假活」并会走同一条清理重启路径，两边可能撞在一起。
+		// 「服务已在运行」说明对方刚把引擎拉起来，属于自愈已成功，不能再报失败、
+		// 更不能把 phase 标成 failed 再弹一条「请手动启动」的通知。
+		if strings.Contains(err.Error(), "服务已在运行") {
+			logger.I("[download] aria2 已由环境层看门狗拉起，跳过重复自愈")
+			s.noteRecoverSuccess()
+			s.emitEnginePhase("recovered")
+			s.invalidate()
+			return
+		}
+		s.mu.Lock()
+		s.recoverFails++
+		fails := s.recoverFails
+		if fails >= engineRecoverMaxFails {
+			s.engineBlocked.Store(true)
+		}
+		s.mu.Unlock()
+		if fails >= engineRecoverMaxFails {
+			logger.E("[download] aria2 连续 %d 次自愈失败，已停止自动重启；最后一次错误: %v", fails, err)
+			s.emitEnginePhase("failed")
+			s.App.PushNotification("system", "error", "下载引擎无法启动",
+				"已停止反复重试。请到「下载设置 - 常规」检查保存目录与端口，保存后会自动重试。",
+				"page:download", "engine")
+			return
+		}
+		logger.E("[download] aria2 自愈重启失败（第 %d/%d 次）: %v", fails, engineRecoverMaxFails, err)
 		s.emitEnginePhase("failed")
 		s.App.PushNotification("system", "error", "下载引擎异常",
 			"引擎无响应且自动重启失败，请在环境管理中手动启动 aria2", "page:download", "engine")
 		return
 	}
 	logger.I("[download] aria2 自愈重启完成，任务将从会话恢复")
+	s.noteRecoverSuccess()
 	s.emitEnginePhase("recovered")
 	s.App.PushNotification("system", "warning", "下载引擎已重启",
 		"引擎曾无响应，已自动恢复；未完成任务从会话继续下载。", "page:download", "engine")
 	s.invalidate()
+}
+
+// noteRecoverSuccess 清掉失败累计：任何一次成功（含看门狗先拉起）都说明
+// 引擎本身没问题，不该把旧账带进下一次掉线、平白触发熔断。
+func (s *DownloadService) noteRecoverSuccess() {
+	s.mu.Lock()
+	s.recoverFails = 0
+	s.mu.Unlock()
+	s.engineBlocked.Store(false)
+}
+
+// resetEngineBlock 用户改了设置或手动点「启动」时调用：解除熔断、清冷却，
+// 让下一次轮询立刻重试，而不是再等一个 60s。
+func (s *DownloadService) resetEngineBlock() {
+	s.mu.Lock()
+	s.recoverFails = 0
+	s.lastRecover = time.Time{}
+	s.failStreak = 0
+	s.mu.Unlock()
+	s.engineBlocked.Store(false)
+	s.forceFull.Store(true)
 }
 
 // emitEnginePhase 把自愈进度推给下载页：卡死时界面原本会一直停在旧快照，

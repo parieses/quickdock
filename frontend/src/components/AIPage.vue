@@ -61,7 +61,7 @@ import type {
   AIArtifact, AICheckpointView, AIConnector, AIConversation, AIJobRow, AIMessage, AIMsgImage,
   AIRuleFile, AISkill, AISpace, AIToolCall, OutlineItem, AIPrompt, AIMentionItem,
 } from '../types/ai'
-import { artifactsFromCalls, artifactsOf, countToolRounds, serializeTools, shortPath, toolList } from '../utils/aiTools'
+import { artifactsFromCalls, artifactsOf, shortPath, toolList } from '../utils/aiTools'
 
 import {
   AIListProfiles,
@@ -2206,7 +2206,8 @@ async function ensureStreamInfo() {
   aiStreamToken.value = info.token
 }
 
-// 单条回复的统计信息（耗时 / 首字延迟 / token 用量）
+// 单条回复的统计信息（耗时 / 首字延迟 / token 用量）。
+// toolRounds 仍由流事件写入并落库（用量/排障要用），但 11-11 起不在界面展示轮数。
 interface AIStreamStat { elapsedMs: number; firstTokenMs: number; promptTokens: number; completionTokens: number; cachedTokens: number; cost?: number; toolRounds?: number }
 // messageId -> 统计。挂在消息对象上随消息一起渲染。
 const statMap = reactive(new Map<string, AIStreamStat>())
@@ -2227,11 +2228,8 @@ function formatStat(stat: AIStreamStat): string {
       ? t('aiStatTokensCached', { in: fmtTokens(stat.promptTokens), out: fmtTokens(stat.completionTokens), pct })
       : t('aiStatTokens', { in: fmtTokens(stat.promptTokens), out: fmtTokens(stat.completionTokens) }))
   }
-  // 工具轮次排在 token 之后、费用之前：它与 token 是同一件事的两个侧面
-  // （同一笔钱，查了五轮还是空聊五轮），放在一起才读得通。
-  if (stat.toolRounds && stat.toolRounds > 0) {
-    parts.push(t('aiStatToolRounds', { n: stat.toolRounds }))
-  }
+  // 工具轮次不再展示（11-11 起）：和工具卡片摘要里的「N 轮」一起去掉，
+  // 界面上不出现轮数。数据仍随流写入 statMap / 落库，用量统计要留着。
   // 费用由后端算（价目表只有 ai_pricing.go 一份）；未收录的模型没有 cost，
   // 这里就不显示——与设置页「未知模型不计价」保持同一口径。
   if (stat.cost && stat.cost > 0) parts.push(t('aiStatCost', { c: fmtCost(stat.cost) }))
@@ -2260,17 +2258,15 @@ function fmtCost(n: number): string {
 function msgStat(m: AIMessage): AIStreamStat | null {
   const live = statMap.get(m.id)
   if (live) return live
-  // 有工具轮次也要显示这一行：即使上游没回 usage（token 全 0），
-  // 「这条回答调了 3 轮工具」仍然是用户想知道的。
-  if (!m.prompt_tokens && !m.completion_tokens && !m.tool_rounds) return null
+  // 没有 token 用量就不显示这一行。工具轮次已不再展示，不能再当作「有内容」
+  // 的依据：上游没回 usage（token 全 0）时会得到一条空白统计行。
+  if (!m.prompt_tokens && !m.completion_tokens) return null
   return {
     elapsedMs: 0, firstTokenMs: 0,
     promptTokens: m.prompt_tokens || 0,
     completionTokens: m.completion_tokens || 0,
     cachedTokens: m.cached_tokens || 0,
     cost: m.cost || 0,
-    // 刷新后从库里的 tool_rounds 接管，与流式结束时那一眼显示的口径一致
-    toolRounds: m.tool_rounds || 0,
   }
 }
 

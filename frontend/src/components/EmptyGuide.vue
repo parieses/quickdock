@@ -18,6 +18,10 @@ import { useWorkspaceStore } from '../stores/workspace'
 import { useSceneFields } from '../composables/useSceneFields'
 import { useCollectionFields } from '../composables/useCollectionFields'
 import { getErrorMessage } from '../utils/error'
+// 首次使用教程入口：地址与「设置 → 关于」共用一份（见 utils/siteLinks.ts）
+import { openExternal } from '../utils/externalLinks'
+import { SITE_GUIDE_URL, SITE_GUIDE_TEXT } from '../utils/siteLinks'
+import { logErr } from '../utils/logger'
 import CreateDialog from './CreateDialog.vue'
 import type { ToastAPI } from '../types'
 
@@ -78,6 +82,15 @@ async function handleCreate(values: Record<string, string>) {
     isCreating.value = false
   }
 }
+
+// openGuide 用系统浏览器打开使用说明。
+// 不用裸 <a href>：WebView 会把这套 SPA 整个导航走，用户回不到应用（见 utils/externalLinks）。
+function openGuide() {
+  openExternal(SITE_GUIDE_URL).catch((e: unknown) => {
+    logErr('EmptyGuide.openGuide', e)
+    toast.error(getErrorMessage(e))
+  })
+}
 </script>
 
 <template>
@@ -119,6 +132,17 @@ async function handleCreate(values: Record<string, string>) {
       </div>
 
       <div class="qd-guide-footer">
+        <!-- 首次使用教程排在最前：引导页只在「什么内容都没有」时出现，
+             这正是新人最需要看文档的时刻。地址与「设置 → 关于」里的同一个来源。 -->
+        <button class="qd-guide-link" :title="SITE_GUIDE_URL" @click="openGuide">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+            stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+            <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+          </svg>
+          {{ t('firstUseGuide') }}
+          <span class="qd-guide-link-url">{{ SITE_GUIDE_TEXT }}</span>
+        </button>
         <button class="qd-guide-link" @click="emit('open-settings', 'backup')">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor"
             stroke-width="2" stroke-linecap="round" stroke-linejoin="round">

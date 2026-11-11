@@ -807,6 +807,29 @@ function openRowMenu(e: MouseEvent, entry: SftpEntry) {
 }
 function closeRowMenu() { rowMenu.value = null }
 
+/**
+ * 右键菜单动作的唯一入口：先取出 entry → 关菜单 → 再执行动作。
+ *
+ * 顺序不能反。模板里曾写成 `(closeRowMenu(), startChmod(rowMenu.entry))`：
+ * 逗号表达式从左到右求值，closeRowMenu 先把 rowMenu 置 null，第二位再读
+ * rowMenu.entry 就抛 "Cannot read properties of null (reading 'entry')"。
+ * 表现是菜单消失了、动作却没执行（用户看到「弹框弹不出来」），而且打开 /
+ * 下载 / 改名 / 改权限 / 删除都踩同一个坑。现在把「取快照 + 关闭」收在一处，
+ * 菜单项只管传动作函数，不再依赖手写表达式的求值顺序。
+ */
+function runRowMenuAction(action: (entry: SftpEntry) => unknown) {
+  const entry = rowMenu.value?.entry
+  if (!entry) return
+  closeRowMenu()
+  action(entry)
+}
+
+/** 菜单里的重命名：startRename 依赖 selected，先把行锁定再开输入框。 */
+function renameFromMenu(e: SftpEntry) {
+  selectRow(e)
+  startRename()
+}
+
 // ---- 属性弹窗 ----
 //
 // 现取（SftpStat）而不用列表里那条记录：列表可能是几十秒前拉的，
@@ -1150,41 +1173,38 @@ async function copyPath(e: SftpEntry) {
           @click.stop
           @contextmenu.prevent
         >
-          <button class="sfp-menu-item" @click="(closeRowMenu(), onRowDblClick(rowMenu.entry))">
+          <button class="sfp-menu-item" @click="runRowMenuAction(onRowDblClick)">
             {{ rowMenu.entry.isDir ? t('sshFileEnter') : t('sshFileOpen') }}
           </button>
-          <button class="sfp-menu-item" @click="showProps(rowMenu.entry)">
+          <button class="sfp-menu-item" @click="runRowMenuAction(showProps)">
             {{ t('sshFileProps') }}
           </button>
-          <button class="sfp-menu-item" @click="copyPath(rowMenu.entry)">
+          <button class="sfp-menu-item" @click="runRowMenuAction(copyPath)">
             {{ t('sshFileCopyPath') }}
           </button>
           <div class="sfp-menu-sep" />
           <button
             class="sfp-menu-item"
             :disabled="!!rowBusy"
-            @click="(closeRowMenu(), downloadEntry(rowMenu.entry))"
+            @click="runRowMenuAction(downloadEntry)"
           >
             {{ t('sshFileDownload') }}
           </button>
           <button
             class="sfp-menu-item"
             :disabled="!!rowBusy"
-            @click="(selectRow(rowMenu.entry), closeRowMenu(), startRename())"
+            @click="runRowMenuAction(renameFromMenu)"
           >
             {{ t('sshFileRename') }}
           </button>
-          <button
-            class="sfp-menu-item"
-            @click="(closeRowMenu(), startChmod(rowMenu.entry))"
-          >
+          <button class="sfp-menu-item" @click="runRowMenuAction(startChmod)">
             {{ t('sshFileChmod') }}
           </button>
           <div class="sfp-menu-sep" />
           <button
             class="sfp-menu-item sfp-menu-item--danger"
             :disabled="rowBusy === rowMenu.entry.path"
-            @click="(closeRowMenu(), removeEntry(rowMenu.entry))"
+            @click="runRowMenuAction(removeEntry)"
           >
             {{ t('sshDelete') }}
           </button>

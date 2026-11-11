@@ -48,25 +48,31 @@ func (d *Database) ListItems(collectionID string) ([]CollectionItem, error) {
 	return mapSlice(rows, mapToItem), nil
 }
 
-// fts5Escape 清理 FTS5 查询中的特殊字符（移除会导致 FTS5 解析错误的运算符和关键字）
-func fts5Escape(q string) string {
-	// FTS5 保留关键字（AND/OR/NOT/NEAR）仅当以独立 token 出现时才剥离，
-	// 绝不能按子串替换——否则会把 COMMAND、SANDWICH、NOTE 等正常词里的子串误删。
-	reserved := map[string]bool{"AND": true, "OR": true, "NOT": true, "NEAR": true}
-	// 单字符运算符直接移除（unicode61 分词器本就会按这些符号切词；"-" 等若残留会破坏查询）。
-	specials := []string{"\"", "*", "+", "-", "(", ")", "~", "^", "<", ">", ","}
-	result := q
-	for _, s := range specials {
-		result = strings.ReplaceAll(result, s, " ")
+// fts5MatchQuery 把用户输入转成 FTS5 MATCH 表达式：每个词写成 `"词"*`。
+//
+// 【为什么必须加引号】MATCH 右侧不是「搜索词」而是一门查询语言，旧实现靠枚举
+// 特殊字符替换，漏掉三个就整条 SQL 失败：
+//   - `C:\Users`、`E:/pp` 里的 `:` 是列过滤 → no such column: C / E
+//   - `/` 属于 NEAR 语法 → fts5: syntax error near "/"
+//   - `v1.2.3`、`main.ts` 里的 `.` → fts5: syntax error near "."
+//
+// 命令面板里贴路径、文件名、版本号是常态，每敲一个字符就发一次检索，
+// 于是日志里连刷 W，面板也只剩前端全量池的结果。双引号内一切都是字面量，
+// 从语法层面免疫，不必再维护一张永远会漏项的黑名单。
+//
+// 【为什么 * 必须放在引号外】`"词*"` 里的星号会被字面化：实测 `quick*` 能命中
+// `quickdock`，`"quick*"` 一条都命中不了；只有 `"词"*` 才是前缀短语，与改造前
+// 「每词加 *」的语义一致，中文前缀（`"数据库"*`）同样成立。
+//
+// 双引号翻倍是唯一需要的转义（FTS5 用 `""` 表示一个字面 `"`）。空格分词保留 =
+// 隐式 AND，与改造前的多词行为一致；AND/OR/NOT/NEAR 在引号内已是字面量，
+// 不需要再剥离，顺带也能搜到名字就叫 AND 的项目。
+func fts5MatchQuery(query string) string {
+	var parts []string
+	for _, tok := range strings.Fields(query) {
+		parts = append(parts, `"`+strings.ReplaceAll(tok, `"`, `""`)+`"*`)
 	}
-	var out []string
-	for _, tok := range strings.Fields(result) {
-		if reserved[strings.ToUpper(tok)] {
-			continue
-		}
-		out = append(out, tok)
-	}
-	return strings.Join(out, " ")
+	return strings.Join(parts, " ")
 }
 
 // SearchAllItems 跨全部工作空间搜索项目（使用 FTS5 全文索引）
@@ -76,17 +82,12 @@ func (d *Database) SearchAllItems(query string) ([]CollectionItem, error) {
 		return nil, nil
 	}
 
-	// FTS5 前缀匹配：每个词 + *
-	safe := fts5Escape(query)
-	if safe == "" {
+	// FTS5 前缀匹配：每个词 `"词"*`（构造规则见 fts5MatchQuery）。
+	// 空串只可能是输入全为空白，此时不查库，前端已有最近使用兜底。
+	ftsQuery := fts5MatchQuery(query)
+	if ftsQuery == "" {
 		return nil, nil
 	}
-	words := strings.Fields(safe)
-	var parts []string
-	for _, w := range words {
-		parts = append(parts, w+"*")
-	}
-	ftsQuery := strings.Join(parts, " ")
 
 	// items_fts 虚拟表自身含 id/name/value 列，与 items 表同名，SELECT 必须加 items. 前缀限定
 	// 只读路径用读锁（RLock）：命令面板全量池扫描不再阻塞写操作（OpenItem 的 usage_count 自增等）。

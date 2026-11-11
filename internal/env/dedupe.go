@@ -13,6 +13,10 @@ import (
 // 同名程序。当某个便携版被注册进系统 PATH 后，LookPath 会再次命中它，导致同一版本在结果中
 // 出现两条记录（portable + system），进而在 UI 中重复显示“取消环境变量”等开关。
 // 通过把便携版的 exe 目录登记进 managedDirs，LookPath 命中自管目录时即可跳过。
+//
+// 注意 Install.Path 的语义并不统一：portable 记的是「版本目录」，system 记的是
+// 「exe 全路径」。record 必须传 filepath.Dir(ExeFor(version))，不要直接传
+// Install.Path，也不要给两边各套一次 filepath.Dir（目录的 Dir 是父目录，会错一层）。
 type managedDirs map[string]bool
 
 // record 记录一个便携版可执行文件所在的目录（自动小写、Clean）。

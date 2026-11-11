@@ -41,6 +41,7 @@ export interface WeatherData {
 
 export interface CityHit {
   name: string
+  /** 上级行政区，形如「河南 · 郑州市」；同名地名靠它区分。港澳台由后端统一成中国省级行政区。 */
   region: string
   country: string
   latitude: number

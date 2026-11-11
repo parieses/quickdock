@@ -148,9 +148,13 @@
   color: var(--color-text-muted);
 }
 
+/* 页脚两个入口：使用说明 + 导入快照。窄窗口（引导页占满「集合 + 项目」时会被
+   侧栏压窄）换行而不是把地址截成省略号 —— 被截掉的恰好是最想让人看到的地址。 */
 .qd-guide-footer {
   display: flex;
   justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .qd-guide-link {
@@ -172,3 +176,13 @@
   border-color: var(--color-accent-border);
   background: var(--color-accent-bg);
 }
+
+/* 按钮内附带的裸地址：比标签更弱一级，让「首次使用教程」仍是可读的主体，
+   同时把地址明写出来（用户可以在另一台机器上照着敲）。等宽字体避免字母挤在一起。 */
+.qd-guide-link-url {
+  color: var(--color-text-disabled);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  letter-spacing: -0.1px;
+}
+.qd-guide-link:hover .qd-guide-link-url { color: var(--color-text-muted); }

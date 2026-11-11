@@ -89,7 +89,14 @@ export interface NavEntry {
   labelKey: string
   icon: Component
   /** 内容区渲染的组件：有 component 即被渲染（与「是不是导航页」无关）。
-   *  无 component 的是独立窗口入口（ssh/dsh），它们靠 activate 响应点击。 */
+   *  无 component 的是独立窗口入口（ssh/dsh），它们靠 activate 响应点击。
+   *
+   *  ⚠ 该组件的模板必须是**单根**：App 的内容区是 `<Transition mode="out-in">`，
+   *  它只能动画单元素根。多挂一个同级节点（例如把一个 Teleport 自己的弹窗放在
+   *  根 div 外面）就成了 fragment，Vue 只给一句 "renders non-element root node
+   *   that cannot be animated" 的警告，接着 out-in 切页时旧节点撤掉、新节点进不来，
+   *  整块内容区变空白 —— 看起来像「所有页面都没内容」。要挂弹窗就放进根元素内部
+   *  （弹窗自己 Teleport 到 body，不影响布局）。 */
   component?: Component
   /** 包裹容器 class（如 clipboard 需要 .clipboard-page 撑满） */
   wrapperClass?: string

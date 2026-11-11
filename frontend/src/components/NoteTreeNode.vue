@@ -11,11 +11,16 @@ interface Props {
   editingId: string
   editName: string
   selectedDoc: string
-  selectedFolder: string
   selectMode?: boolean
-  selected?: boolean
+  /** 多选勾选集合：整棵树共用同一个 Set，递归必须原样往下传。
+   *  旧实现只传一个 boolean，子节点既拿不到自己的勾选态、也发不出切换事件。 */
+  selectedSet?: Set<string>
 }
-const props = withDefaults(defineProps<Props>(), { depth: 0, selectMode: false, selected: false })
+const props = withDefaults(defineProps<Props>(), {
+  depth: 0,
+  selectMode: false,
+  selectedSet: () => new Set<string>(),
+})
 
 const emit = defineEmits<{
   (e: 'toggle', id: string): void
@@ -39,6 +44,7 @@ const n = computed<any>(() => props.node)
 const isFolder = computed(() => n.value.isFolder)
 const isOpen = computed(() => props.expanded.has(n.value.id))
 const hasKids = computed(() => n.value.children?.length > 0)
+const isChecked = computed(() => props.selectedSet.has(n.value.id))
 
 // 进入编辑态时自动聚焦并全选，否则焦点未进入输入框，点走不会触发 blur → 编辑态卡死去不掉
 const inputRef = ref<HTMLInputElement | null>(null)
@@ -97,12 +103,13 @@ function onDragStart(e: DragEvent) {
 
 <template>
   <div>
+    <!-- 缩进按层级运行时计算，只能走内联样式（R7 的计算值例外） -->
     <div
       :draggable="!selectMode"
       :style="'padding-left:' + (12 + depth * 16) + 'px'"
-      :class="['tn-row', 'tn-' + (isFolder ? 'folder' : 'doc'), {
-        selected: selectedDoc === node.id || selectedFolder === node.id,
-        'sel-on': selected,
+      :class="['qd-row', 'tn-row', 'tn-' + (isFolder ? 'folder' : 'doc'), {
+        active: !selectMode && selectedDoc === node.id,
+        'sel-on': isChecked,
         'drop-before': dropSide === 'before',
         'drop-after': dropSide === 'after',
       }]"
@@ -112,7 +119,7 @@ function onDragStart(e: DragEvent) {
       @dragleave="onDragLeave"
       @drop="onDrop"
     >
-      <span v-if="selectMode" class="tn-check" :class="{ on: selected }" @click.stop="emit('toggle-select', node.id)"></span>
+      <span v-if="selectMode" class="tn-check" :class="{ on: isChecked }" @click.stop="emit('toggle-select', node.id)"></span>
       <button v-else-if="isFolder" class="tn-caret" @click.stop="emit('toggle', node.id)">
         <ChevronRight v-if="!isOpen" :size="12" /><ChevronDown v-else :size="12" />
       </button>
@@ -142,39 +149,45 @@ function onDragStart(e: DragEvent) {
       </span>
     </div>
     <template v-if="isFolder && isOpen && hasKids">
+      <!-- 递归必须把「多选开关 + 勾选集合 + 切换事件」原样透传。旧实现三个都漏了：
+           子节点在多选态下仍按单选渲染（点击变成打开文档、行尾按钮照常出现、
+           draggable 没禁用），勾选态发不出去 —— 看起来就像选中「漂」了一层。 -->
       <NoteTreeNode
         v-for="c in node.children" :key="c.id"
         :node="c" :depth="depth + 1"
         :expanded="expanded" :editing-id="editingId" :edit-name="editName"
-        :selected-doc="selectedDoc" :selected-folder="selectedFolder"
+        :selected-doc="selectedDoc" :select-mode="selectMode" :selected-set="selectedSet"
         @toggle="emit('toggle', $event)" @select="emit('select', $event)"
         @rename-start="emit('rename-start', $event)" @rename-commit="emit('rename-commit', $event)"
         @rename-input="(v: string) => emit('rename-input', v)" @rename-cancel="emit('rename-cancel')"
         @del="emit('del', $event)" @create-folder="emit('create-folder', $event)" @create-doc="emit('create-doc', $event)"
         @drop-node="(d: string, t: string) => emit('drop-node', d, t)"
         @reorder="(d: string, t: string, b: boolean) => emit('reorder', d, t, b)"
+        @toggle-select="(id: string) => emit('toggle-select', id)"
       />
     </template>
   </div>
 </template>
 
 <style scoped>
-/* 树节点行：对齐应用内 HttpFolderTreeNode 风格 */
+/* 树节点行只补与全局 .qd-row 的差异（密度、缩进、字号）。
+   选中态一律复用 panels.css 的 .qd-row.active：--color-select-bg 实底 +
+   3px accent 竖条 + 图标不变色。11-08 全站统一选中范式时漏了笔记页，
+   这里曾经另写 bg-tertiary + 文档文字变蓝，于是跟其它页面越走越远。 */
 .tn-row {
   display: flex; align-items: center; gap: 5px;
   padding: 5px 6px; border-radius: var(--radius-sm); cursor: pointer;
   font-size: 12px; min-height: 26px; box-sizing: border-box;
-  color: var(--color-text-secondary);
+  margin-bottom: 0; /* 抵消 .qd-row 的 2px 行距，树要更密 */
   transition: background-color var(--transition-fast), color var(--transition-fast);
 }
 .tn-row:hover { background: var(--color-bg-hover); }
-.tn-row.selected { background: var(--color-bg-tertiary); }
 
-/* 拖拽落点提示：上下边缘一条线，比整行高亮更清楚「会插到哪」 */
+/* 拖拽落点提示：上下边缘一条线，比整行高亮更清楚「会插到哪」。
+   用 box-shadow 而不是 ::before，与 .qd-row.active 的竖条互不覆盖。 */
 .tn-row.drop-before { box-shadow: inset 0 2px 0 var(--color-accent); }
 .tn-row.drop-after { box-shadow: inset 0 -2px 0 var(--color-accent); }
 .tn-row.tn-folder { font-weight: 600; }
-.tn-row.tn-doc.selected { color: var(--color-accent); }
 
 .tn-caret { border: none; background: none; color: var(--color-text-disabled); cursor: pointer; width: 14px; height: 14px; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .tn-spacer { width: 14px; flex-shrink: 0; }
@@ -189,8 +202,11 @@ function onDragStart(e: DragEvent) {
   content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
   border: solid var(--color-accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
-.tn-row.sel-on { background: var(--color-accent-bg); color: var(--color-text-primary); }
-.tn-row.sel-on:hover { background: var(--color-accent-bg); }
+/* 多选勾选：与单选同底（--color-select-bg），但不画竖条 —— 竖条只表示
+   「当前打开的文档」，勾选由左侧实心 checkbox 表达，两个信号不打架。
+   同一条规则在 NoteManagerPage.vue 里给 recent-row / sr-row 也有一份，改值需同步。 */
+.tn-row.sel-on { background: var(--color-select-bg); color: var(--color-text-primary); }
+.tn-row.sel-on:hover, .tn-row.active:hover { background: var(--color-select-bg); }
 .tn-icon { flex-shrink: 0; color: var(--color-accent); }
 .tn-doc .tn-icon { color: var(--color-warning); }
 .tn-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -198,7 +214,7 @@ function onDragStart(e: DragEvent) {
 
 /* hover 操作按钮：常在 hover 显示半透明，hover 变实 */
 .tn-actions { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; opacity: 0; transition: opacity var(--transition-fast); }
-.tn-row:hover .tn-actions, .tn-row.selected .tn-actions { opacity: 1; }
+.tn-row:hover .tn-actions, .tn-row.active .tn-actions { opacity: 1; }
 .tn-act {
   display: inline-flex; align-items: center; justify-content: center;
   width: 20px; height: 20px; border: none; background: transparent;

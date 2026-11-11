@@ -54,10 +54,12 @@ const loading = ref(true)
 const expanded = ref<Set<string>>(new Set())
 const searchQuery = ref('')
 const activeTag = ref('')
+// 单选只认「当前打开的文档」一个 id。旧实现另设 selectedFolderId = 父文件夹 id，
+// 树行再用 OR 判定，结果父行和文档行同时高亮、换文档时高亮在文件夹之间跳，
+// 看起来就是选中态自己漂走了。祖先路径由 expanded 展开即可，不需要第二个选中态。
 const selectedDocId = ref('')
 const editingId = ref('')
 const editName = ref('')
-const selectedFolderId = ref('')
 
 // ---- 多选 / 批量操作 ----
 // 进入多选模式后，树节点改为「点击切换选中」而非「打开」，行尾操作按钮隐藏，
@@ -354,7 +356,6 @@ function expandAllOpen() {
   expanded.value = next
 }
 function collapseAll() { expanded.value = new Set() }
-function selectNodeIntoFolder(folderId: string) { selectedFolderId.value = folderId || '' }
 
 // 新建（直接在目标文件夹下创建，无弹菜单）
 async function newFolderAt(folderId: string) {
@@ -577,7 +578,6 @@ function onDoc(d: Note) {
   aiOpen.value = false // 切走文档时关掉 AI 覆盖层：它贴在旧文档上，留着会写错地方
   savedCaret.value = -1
   selectedDocId.value = d.id
-  selectedFolderId.value = d.parentId || ''
   docContent.value = d.content || ''
   pushRecent(d.id)
   docTagsText.value = parseTagsS(d.tags).join(', ')
@@ -1022,8 +1022,8 @@ watch(pendingOpenNoteId, (id) => {
               </div>
               <div
                 v-for="n in recentDisplay" :key="'recent-'+n.id"
-                class="recent-row"
-                :class="{ 'sel-on': selectMode && selectedIds.has(n.id) }"
+                class="qd-row recent-row"
+                :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }"
                 @click="selectMode ? toggleSelect(n.id) : onDoc(n)"
               >
                 <span v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
@@ -1041,8 +1041,8 @@ watch(pendingOpenNoteId, (id) => {
               <NoteTreeNode
                 :node="root" :depth="0"
                 :expanded="expanded" :editing-id="editingId" :edit-name="editName"
-                :selected-doc="selectedDocId" :selected-folder="selectedFolderId"
-                :select-mode="selectMode" :selected="selectedIds.has(root.id)"
+                :selected-doc="selectedDocId"
+                :select-mode="selectMode" :selected-set="selectedIds"
                 @toggle="toggleFolder" @select="onDoc"
                 @rename-start="startRename" @rename-commit="commitRename" @rename-input="onRenameInput" @rename-cancel="cancelRename"
                 @del="askDelete" @create-folder="newFolderAt" @create-doc="newDocAt"
@@ -1054,7 +1054,7 @@ watch(pendingOpenNoteId, (id) => {
           </template>
           <!-- 搜索/标签结果：扁平展示 -->
           <template v-else>
-            <div v-for="n in flatResults" :key="'res-'+n.id" class="sr-row" :class="{ 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
+            <div v-for="n in flatResults" :key="'res-'+n.id" class="qd-row sr-row" :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
               <span v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
               <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
               <span class="tn-name"><template v-for="(p, i) in rowHighlight(n)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></span>
@@ -1212,7 +1212,7 @@ watch(pendingOpenNoteId, (id) => {
 .tt-sep { width: 1px; height: 14px; flex-shrink: 0; background: var(--color-border); margin: 0 2px; }
 .tree-wrap { flex: 1; overflow-y: auto; padding: 4px; }
 .tree-empty { color: var(--color-text-disabled); font-size: 12px; padding: 20px; text-align: center; }
-.sr-row { display: flex; align-items: center; gap: 6px; padding: 6px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
+.sr-row { display: flex; align-items: center; gap: 6px; padding: 6px; margin-bottom: 0; min-height: 26px; border-radius: var(--radius-sm); cursor: pointer; font-size: 13px; }
 .sr-row:hover { background: var(--color-bg-hover); }
 
 .notes-editor { flex: 1; display: flex; flex-direction: column; min-width: 0; position: relative; }
@@ -1328,8 +1328,16 @@ watch(pendingOpenNoteId, (id) => {
   content: ''; position: absolute; left: 4px; top: 1px; width: 4px; height: 8px;
   border: solid var(--color-accent-text); border-width: 0 2px 2px 0; transform: rotate(45deg);
 }
-.sel-on { background: var(--color-accent-bg); color: var(--color-text-primary); }
-.sel-on:hover { background: var(--color-accent-bg); }
+/* 单选高亮走 panels.css 的全局 .qd-row.active（select-bg 实底 + 3px accent 竖条），
+   树行 / 最近打开 / 搜索结果三处共用，不再各写一份必然漂移的样式。
+   多选只铺同一层底色，竖条留给「当前打开的文档」，勾选由实心 checkbox 表达。
+   注意：NoteTreeNode.vue 里有一条等价的 .tn-row.sel-on，改值要两边同步。 */
+.sel-on { background: var(--color-select-bg); color: var(--color-text-primary); }
+.sel-on:hover { background: var(--color-select-bg); }
+/* 本组件 scoped 的 .recent-row:hover / .sr-row:hover 特异性会压过上面那条，
+   补一条更高特异性的，让选中/勾选行在 hover 时不闪回普通 hover 底色。 */
+.recent-row.sel-on:hover, .sr-row.sel-on:hover,
+.recent-row.active:hover, .sr-row.active:hover { background: var(--color-select-bg); }
 
 /* 最近打开分区：融入式，靠顶部分隔线和树分开，不堆生硬卡片边框 */
 .recent-block {
@@ -1362,6 +1370,8 @@ watch(pendingOpenNoteId, (id) => {
   align-items: flex-start;
   gap: 7px;
   padding: 5px 6px;
+  margin-bottom: 0; /* 抵消全局 .qd-row 的 2px 行距 */
+  min-height: 0;    /* 抵消全局 .qd-row 的 34px 行高，保持双行文字自然高度 */
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background-color var(--transition-fast);

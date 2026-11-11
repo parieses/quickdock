@@ -110,14 +110,45 @@ var (
 	clipboardMissStreak  atomic.Int64
 )
 
-// clipboardHolderDesc 返回「当前锁住剪贴板的进程」的可读描述，查不到时说清原因。
+// clipboardHolderDesc 返回「当前锁住剪贴板的进程」的可读描述，查不到时说清原因与下一步。
 //
 // 只在 OpenClipboard 已经失败之后调用：持有锁时查询，报的是本进程自己。
 func clipboardHolderDesc() string {
+	// 先查是不是本程序自己。OpenClipboard(NULL) 打开的临界区不关联任何窗口，
+	// GetOpenClipboardWindow 返回 0，从外部一律查不到——而这恰恰是本程序卡在
+	// GetClipboardData 上时唯一可能的表现。两种情形用户该做的事相反：
+	// 外部占用要去结束那个程序，自己卡住只能重启 QuickDock。所以必须先自检。
+	if held, ok := platform.ClipboardSelfHold(2 * time.Second); ok {
+		return fmt.Sprintf("本程序自身（pid=%d，剪贴板临界区已持续 %v 未结束，重启 QuickDock 即可恢复）",
+			os.Getpid(), held.Truncate(time.Second))
+	}
 	if h := platform.ClipboardHolderInfo(); h != "" {
 		return h
 	}
-	return "无法定位（持有者未关联窗口，或以 NULL 句柄打开）"
+	// 查不到打开锁的持有者：Windows 没有「谁打开了剪贴板」的反向查询 API，
+	// NULL 句柄持有者在任何工具里都看不到。至少给旁证 + 可执行的下一步，
+	// 而不是一句「无法定位」让排查停在这儿。
+	desc := "无法定位（持有者未关联窗口 / 以 NULL 句柄打开 / 当前桌面或会话不可交互）"
+	if o := platform.ClipboardContentOwnerInfo(); o != "" {
+		desc += "；旁证：最后写入剪贴板的程序为 " + o
+	}
+	return desc
+}
+
+// probeWarnDue 指数退避：只在第 2、4、8、16… 次连续失败时各报一条。
+//
+// 旧实现是 fails%10==0，过夜连续 630 次会刷出 64 条一字不差的 E 级日志，
+// 把同一时段里真正有用的错误全淹掉。退避后同样 10.5 小时只剩 9 条，
+// 且首次（第 2 次）依然及时，不影响真实故障的发现速度。
+func probeWarnDue(fails int) bool {
+	if fails < clipboardProbeWarnAfter {
+		return false
+	}
+	n := clipboardProbeWarnAfter
+	for n < fails {
+		n *= 2
+	}
+	return n == fails
 }
 
 // startClipboardWorker 启动剪贴板捕获协程（ServiceStartup 调用，随 ClipboardCtx 退出）。
@@ -165,9 +196,10 @@ func (a *AppService) startClipboardWorker(ctx context.Context) {
 		}
 	}()
 
-	// 可用性探测：剪贴板被别的进程锁死时，本程序既收不到通知、也没有任何入口
-	// 能感知（用户复制失败发生在别的程序里）。定期探一次，把「复制不了」这件
-	// 事写进日志，避免又变成一次无据可查的「用着用着就不行了」。
+	// 可用性探测：剪贴板拿不到时，本程序既收不到 WM_CLIPBOARDUPDATE，也没有别的
+	// 入口能感知。定期探一次，但必须把「真的被锁死」与「锁屏 / RDP 断开的无人值守」
+	// 分开——后者在过夜时段会连续失败十小时，此刻根本没有人在复制，旧实现却把
+	// 每一段都断言成「系统内所有程序都无法复制」并按 E 级刷屏。
 	go func() {
 		ticker := time.NewTicker(clipboardProbeInterval)
 		defer ticker.Stop()
@@ -177,21 +209,35 @@ func (a *AppService) startClipboardWorker(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
-				if platform.ClipboardProbe() {
+				ok, idle, detail := platform.ClipboardProbe()
+				if ok {
 					if fails >= clipboardProbeWarnAfter {
-						logger.I("QuickDock: 剪贴板已恢复可用")
+						logger.I("QuickDock: 剪贴板已恢复可用（此前连续 %d 次探测失败，约 %v）",
+							fails, time.Duration(fails)*clipboardProbeInterval)
 					}
 					fails = 0
 					continue
 				}
 				fails++
-				if fails == clipboardProbeWarnAfter || fails%10 == 0 {
-					// 点名占用者。必须在探测失败之后才查——本进程一旦成功打开
-					// 剪贴板，GetOpenClipboardWindow 报的就是本进程自己。
-					logger.E("QuickDock: 剪贴板探测失败 %d 次（每次间隔 %v），占用者：%s。"+
-						"此时系统内所有程序都无法复制，本程序的剪贴板历史也不会更新——重启占用者或注销即可恢复",
-						fails, clipboardProbeInterval, clipboardHolderDesc())
+				if !probeWarnDue(fails) {
+					continue
 				}
+				// 点名占用者。必须在探测失败之后才查——本进程一旦成功打开
+				// 剪贴板，GetOpenClipboardWindow 报的就是本进程自己。
+				desc := clipboardHolderDesc()
+				if idle {
+					// 无人值守：没有程序在复制，也没有用户被挡住。留一条 W 级线索，
+					// 桌面恢复交互后探测会自行转绿并打 I 级恢复日志。
+					logger.W("QuickDock: 剪贴板探测连续 %d 次失败（约 %v），但系统已长时间无用户输入，"+
+						"判定为锁屏 / 远程会话断开 / 安全桌面；%s；%s。桌面恢复交互后自动重试，通常无需处理",
+						fails, time.Duration(fails)*clipboardProbeInterval, detail, desc)
+					continue
+				}
+				logger.E("QuickDock: 剪贴板探测失败 %d 次（每次间隔 %v），占用者：%s；%s。"+
+					"若此刻确实无法复制，重启占用者或注销即可恢复；"+
+					"查不到持有者时常见成因是 cbdhsvc（剪贴板历史/云同步）、rdpclip（远程桌面）"+
+					"或虚拟机剪贴板共享卡住，可先试 taskkill /f /im cbdhsvc* 或 taskkill /f /im rdpclip.exe",
+					fails, clipboardProbeInterval, desc, detail)
 			}
 		}
 	}()

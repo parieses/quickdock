@@ -44,9 +44,25 @@ type runningService struct {
 type serviceManager struct {
 	mu   sync.Mutex
 	svcs map[Runtime]*runningService
+	// stoppedAt 记录「本会话最近一次主动要求该运行时停止」的时刻。
+	//
+	// 为什么不能只看 runningService.stopping：forget 会把条目从 svcs 里删掉，
+	// stopping 标记随之消失，等 cmd.Wait 返回时读 svcs[rt] 必然是 nil ——
+	// 于是「用户点了停止 / 退出清理 / 自愈重启」全都被记成 error 级
+	// 「进程异常退出 code=1」。Windows 上 Process.Kill / taskkill /F 的退出码就是 1，
+	// 与被杀进程自己崩掉无法从退出码区分，只能靠这份旁证。
+	stoppedAt map[Runtime]int64
 }
 
-var svcMgr = &serviceManager{svcs: make(map[Runtime]*runningService)}
+// stoppedExitWindow 主动停止后，把这段时间内（同一 runtime）的退出都归因为「按指令停止」。
+// 取 10s 是因为 taskkill 是异步生效的：进程真正退出可能比 Stop 返回晚几百毫秒到数秒，
+// 卡死的进程更久。窗口过短会让误报重新出现，过长则会把「停止后紧接着又崩一次」吞掉。
+const stoppedExitWindow = 10 * time.Second
+
+var svcMgr = &serviceManager{
+	svcs:      make(map[Runtime]*runningService),
+	stoppedAt: make(map[Runtime]int64),
+}
 
 func (s *serviceManager) running(rt Runtime) bool {
 	s.mu.Lock()
@@ -103,6 +119,8 @@ func (s *serviceManager) forget(rt Runtime) {
 		c.stopping = true // 记为主动停止，避免退出时刷 error 日志
 	}
 	delete(s.svcs, rt)
+	// 条目已删，stopping 标记没法再被 Wait 协程读到，必须在这里补一份时刻旁证。
+	s.stoppedAt[rt] = time.Now().UnixMilli()
 	s.mu.Unlock()
 	// 不记日志：forget 只是清掉内存里的进程句柄，属内部实现细节；
 	// 对外的「Stop 完成」已由各运行时的 Stop 记录，重复打只会稀释有效信息。
@@ -117,6 +135,9 @@ func (s *serviceManager) killTracked(rt Runtime) {
 		// 在锁内标记 stopping，与 forget 的写入互斥，避免二者并发写同一字段触发 data race
 		c.stopping = true // 主动停止：退出时按 info 记，不刷 error
 	}
+	// 与 forget 同理：Wait 协程可能比 forget 先读到条目，也可能在之后才返回，
+	// killing 期间一律记时刻旁证，两条路径都能识别成「按指令停止」。
+	s.stoppedAt[rt] = time.Now().UnixMilli()
 	s.mu.Unlock()
 	if !ok || c == nil {
 		return
@@ -178,7 +199,10 @@ func (s *serviceManager) startWithEnv(rt Runtime, version, exe, wd string, args 
 		return err
 	}
 	pid := cmd.Process.Pid
+	startedAt := time.Now()
 	s.svcs[rt] = &runningService{cmd: cmd, pid: pid, version: version, exe: exe}
+	// 新实例已起来：清掉上一次主动停止的时刻，否则它会把这次的真实崩溃误判成「按指令停止」。
+	delete(s.stoppedAt, rt)
 	s.mu.Unlock()
 	logger.I("[env] start %s 成功 pid=%d", rt, pid)
 
@@ -209,24 +233,65 @@ func (s *serviceManager) startWithEnv(rt Runtime, version, exe, wd string, args 
 		if ee, ok := err.(*exec.ExitError); ok {
 			code = ee.ExitCode()
 		}
+		// 判定本次退出是不是「我们让它退出的」。两条依据缺一不可：
+		//   - stopping：条目还在 svcs 里（killTracked 路径，只标记不删除）；
+		//   - stoppedAt：条目已被 forget 删掉，只能靠时刻旁证（Stop 路径）。
+		// 只看前者的旧实现把「回写 stopping 标记」变成了死代码——Windows 上
+		// Process.Kill / taskkill /F 都以 1 退出，于是每次正常停止都会刷一条
+		// error 级「进程异常退出 code=1」。
 		s.mu.Lock()
-		if s.svcs[rt] != nil && s.svcs[rt].cmd == cmd {
+		stopping := false
+		if cur, ok := s.svcs[rt]; ok && cur.cmd == cmd {
+			stopping = cur.stopping
 			delete(s.svcs, rt)
 		}
+		if at := s.stoppedAt[rt]; at > 0 && time.Since(time.UnixMilli(at)) < stoppedExitWindow {
+			stopping = true
+		}
 		s.mu.Unlock()
-		if err != nil {
-			logger.E("[env] %s 进程异常退出 pid=%d code=%d err=%v", rt, pid, code, err)
-			if lines := collector.drain(); len(lines) > 0 {
-				logger.E("[env] %s 启动失败 stderr（末 %d 行）:", rt, len(lines))
+		if err != nil && !stopping {
+			logger.E("[env] %s 进程异常退出 pid=%d code=%d 存活=%v err=%v",
+				rt, pid, code, time.Since(startedAt).Truncate(time.Second), err)
+			// 回写最近输出辅助排障。优先用 collector（stderr，最贴近崩溃现场），
+			// 为空时再读运行日志末尾——大量服务（aria2 / redis / nginx）把诊断信息
+			// 写 stdout，只挂 stderr 的 collector 对它们永远是空的，主日志就只剩一个退出码。
+			lines := collector.drain()
+			if len(lines) == 0 {
+				lines = tailLogLines(logPath, 20)
+			}
+			if len(lines) > 0 {
+				logger.E("[env] %s 退出前输出（末 %d 行）:", rt, len(lines))
 				for _, l := range lines {
 					logger.E("[env]   %s", l)
 				}
 			}
+		} else if stopping {
+			logger.I("[env] %s 进程已按宿主指令停止 pid=%d code=%d", rt, pid, code)
 		} else {
 			logger.I("[env] %s 进程正常退出 pid=%d code=%d", rt, pid, code)
 		}
 	}()
 	return nil
+}
+
+// tailLogLines 读取运行日志文件的最后 n 行（供进程异常退出时回写主日志）。
+// 文件不存在或为空时返回 nil。
+func tailLogLines(path string, n int) []string {
+	if path == "" || n <= 0 {
+		return nil
+	}
+	b, err := readFileTail(path, 16*1024)
+	if err != nil || len(b) == 0 {
+		return nil
+	}
+	lines := strings.Split(strings.TrimRight(string(b), "\r\n"), "\n")
+	if len(lines) > n {
+		lines = lines[len(lines)-n:]
+	}
+	for i := range lines {
+		lines[i] = strings.TrimRight(lines[i], "\r")
+	}
+	return lines
 }
 
 // startPTY 与 start 等价，但改用 Windows 伪控制台（ConPTY）拉起子进程。
@@ -254,6 +319,8 @@ func (s *serviceManager) startPTY(rt Runtime, version, exe, wd string, args []st
 		return fmt.Errorf("以伪控制台启动失败: %w", err)
 	}
 	s.svcs[rt] = &runningService{pty: pty, version: version, exe: exe}
+	// 与 startWithEnv 同理：新实例已起来，清掉上次主动停止的时刻。
+	delete(s.stoppedAt, rt)
 	s.mu.Unlock()
 	pid := pty.Pid()
 	logger.I("[env] startPTY %s version=%s exe=%s wd=%s args=%v logPath=%s pid=%d（伪控制台）",
@@ -292,6 +359,10 @@ func (s *serviceManager) startPTY(rt Runtime, version, exe, wd string, args []st
 		if c, ok := s.svcs[rt]; ok && c.pty == pty {
 			stopping = c.stopping
 			delete(s.svcs, rt)
+		}
+		// 条目可能已被 forget 删除，stopping 标记随之消失，靠时刻旁证补判。
+		if at := s.stoppedAt[rt]; at > 0 && time.Since(time.UnixMilli(at)) < stoppedExitWindow {
+			stopping = true
 		}
 		s.mu.Unlock()
 		if !stopping && (werr != nil || code != 0) {

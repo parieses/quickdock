@@ -24,7 +24,7 @@ import type {
   AIArtifact, AICheckpointView, AIJobRow, AIMessage, AIMsgImage, AIRuleFile, AIStreamStat, AIToolCall,
 } from '../types/ai'
 import {
-  artifactsFromCalls, artifactsOf, countToolRounds, jobIdOf, rulesOf, rulesTitle, runIDOf, toolIcon, toolList,
+  artifactsFromCalls, artifactsOf, jobIdOf, rulesOf, rulesTitle, runIDOf, toolIcon, toolList,
   toolOutput, toolResultLang, toolTarget, toolVerb as aiToolVerb,
 } from '../utils/aiTools'
 
@@ -401,56 +401,17 @@ function jobSeqOf(m: AIMessage): number {
 
 // —— 工具卡片的展开状态 ——
 //
-// 早先直接 `:open="!!tc.running"`：跑完 running 变 false，卡片当场折回去。
-// 而命令类工具最该看的是**末尾几行**（构建失败的栈、测试的汇总），等它跑完
-// 才折起来等于恰好在最有用的那一刻把内容收走。
+// 工具详情一律默认收起，历史消息和流式期同一口径，是否展开完全交给用户点
+// <summary> 决定（原生 <details> 自己记状态）。
 //
-// 所以展开变成「粘性」状态：一旦开过就一直开着，只有用户自己点了摘要行才收。
-// 两个集合分工：
-//   - autoOpen 由「开始跑 / 等待审批」驱动，程序性打开
-//   - userClosed 记住用户手动收起的，之后不再自动打开
-// 判定必须与模板里的 :open 表达式完全一致（见 toolShouldOpen），否则程序性
-// 改 open 触发的 toggle 会被误当成用户操作，两个集合互相推着打架。
-const autoOpenTools = ref(new Set<string>())
-const userClosedTools = ref(new Set<string>())
-
-function toolShouldOpen(tc: AIToolCall): boolean {
-  if (userClosedTools.value.has(tc.id)) return false
-  // 等待审批时必须开着：按钮虽然在下面的审批条里，卡片上写着「为什么停下来」。
-  if (tc.approval === 'pending') return true
-  return autoOpenTools.value.has(tc.id)
-}
-
-watch(
-  () => streamTools.value.map((t) => `${t.id}:${t.running ? 1 : 0}${t.approval === 'pending' ? 'a' : ''}`).join(','),
-  () => {
-    // 一轮结束（streamTools 被清空）时把两个集合一起清掉：里面的 id 是这条流的
-    // 调用 id，下一轮不会复用，留着只会让 Set 随提问次数一直长。
-    if (streamTools.value.length === 0) {
-      if (autoOpenTools.value.size) autoOpenTools.value.clear()
-      if (userClosedTools.value.size) userClosedTools.value.clear()
-      return
-    }
-    for (const tc of streamTools.value) {
-      if (userClosedTools.value.has(tc.id)) continue
-      if (tc.running || tc.approval === 'pending') autoOpenTools.value.add(tc.id)
-    }
-  },
-  { immediate: true },
-)
-
-function onToolToggle(tc: AIToolCall, e: Event) {
-  const el = e.target as HTMLDetailsElement
-  // 与期望状态一致 = 我们自己改的，不是用户点的
-  if (el.open === toolShouldOpen(tc)) return
-  if (el.open) {
-    autoOpenTools.value.add(tc.id)
-    userClosedTools.value.delete(tc.id)
-  } else {
-    autoOpenTools.value.delete(tc.id)
-    userClosedTools.value.add(tc.id)
-  }
-}
+// 早先这里有一套「程序性自动展开」：running / 待审批的调用由 :open 强制打开，
+// 并用 autoOpen / userClosed 两个 Set 做粘性。实测一轮调五六个工具时，整屏全是
+// 命令输出，正文被挤出视野；回复结束后又留下一排展开的卡片。现在改为默认收起：
+// 摘要行给出工具数，点开后每条调用自带状态（运行中 / 待审批 / 耗时）与输出。
+// 待审批的风险说明在输入区上方的审批条里另有一份，不依赖卡片展开。
+//
+// 注意别再加回 `:open` 绑定：流式期 streamTools 每次更新都会 patch，绑定会把
+// 用户手动点开的状态覆盖回去。
 
 // —— 滚动跟随 ——
 // 根因：原先用 watch(streamingText) 驱动滚动，但真正改变 DOM 高度的是
@@ -639,7 +600,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           v-for="m in shownMessages"
           :key="m.id"
           :data-msg-id="m.id"
-          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, m.tool_rounds, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id]"
+          v-memo="[m.content, m.reasoning_content, statMap.get(m.id), costLines.get(m.id), locale, (m.imgList?.length ?? 0), m.tool_calls, mode, jobSeqOf(m), m.id === messages[messages.length - 1]?.id, expandedInMessage(m), editingId === m.id]"
           :class="['ai-msg', m.role]"
         >
           <div class="ai-msg-role">
@@ -661,11 +622,11 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
           </details>
           <!-- 工具调用卡片：放在正文之前，因为调用发生在作答之前。
                默认折叠——一段回答调了五个工具时，全展开会把正文挤出屏幕；
-               摘要行自己就说明了「调了几个、几轮」。 -->
+               摘要行只说「调了几个」，要看细节自己点开。 -->
           <details v-if="m.role === 'assistant' && toolsOf(m).length" class="ai-tools">
             <summary class="ai-tools-sum">
               <Wrench :size="12" class="ai-tools-ico" />
-              <span>{{ t('aiToolSummary', { n: toolsOf(m).length, rounds: m.tool_rounds || countToolRounds(toolsOf(m)) }) }}</span>
+              <span>{{ t('aiToolSummary', { n: toolsOf(m).length }) }}</span>
               <ChevronDown :size="13" class="ai-tools-chev" />
             </summary>
             <div class="ai-tools-body">
@@ -811,9 +772,15 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
              然后开始动手」，往上翻历史时它会跟着一起滚走。 -->
         <slot name="plan" />
 
+        <!-- 流式思考：与历史消息、工具卡片同一口径，默认收起。
+             长推理动辄几千字，常驻展开会把正文挤到屏幕外；摘要行给出实时字数，
+             首字之前那十几秒仍有「它还在动」的进度可看，想看过程自己点开。
+             details 没有 open 属性 → 浏览器自带三角提示可展开；点开后本轮内
+             Vue 只 patch 文本节点，展开态会一直保留到这一轮定格。
+             正文开始输出后文案从「思考中」切成历史消息用的「已思考」。 -->
         <div v-if="reasoningText" class="ai-reasoning">
-          <details open>
-            <summary>{{ t('aiThinking') }}</summary>
+          <details>
+            <summary>{{ hasStreamText ? t('aiThought') : t('aiThinking') }} · {{ t('aiThoughtChars', { n: reasoningText.length }) }}</summary>
             <div class="ai-reasoning-content">{{ reasoningText }}</div>
           </details>
         </div>
@@ -828,17 +795,18 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
             <span>{{ t('aiRulesActive', { n: runRules.length }) }}</span>
             <span class="ai-rules-name">{{ runRules.map((r) => r.name).join('、') }}</span>
           </div>
-          <!-- 流式期默认展开：用户需要看到「正在用哪个工具」，这是等待期间唯一的进度信息 -->
-          <details v-if="streamTools.length" class="ai-tools" open>
+          <!-- 流式期与历史消息同一口径：默认收起。摘要行给出工具数，
+               想看正在跑哪个、看输出，点开一层即可。 -->
+          <details v-if="streamTools.length" class="ai-tools">
             <summary class="ai-tools-sum">
               <Wrench :size="12" class="ai-tools-ico" />
-              <span>{{ t('aiToolSummary', { n: streamTools.length, rounds: countToolRounds(streamTools) }) }}</span>
+              <span>{{ t('aiToolSummary', { n: streamTools.length }) }}</span>
               <ChevronDown :size="13" class="ai-tools-chev" />
             </summary>
             <div class="ai-tools-body">
-              <!-- 正在跑的那条自动展开：等待期间它是唯一的进度信息。
-                   跑完之后**不自动收起**（理由见 toolShouldOpen），用户点摘要行才收。 -->
-              <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running, 'is-ask': tc.approval === 'pending' }" :open="toolShouldOpen(tc)" @toggle="onToolToggle(tc, $event)">
+              <!-- 每条也默认收起，交给原生 details 自己记展开状态。
+                   is-run / is-ask 只改图标与状态文字，不再驱动自动展开。 -->
+              <details v-for="tc in streamTools" :key="tc.id" class="ai-tool" :class="{ 'is-err': !!tc.error, 'is-run': tc.running, 'is-ask': tc.approval === 'pending' }">
                 <summary class="ai-tool-line">
                   <component :is="toolIcon(tc.name)" :size="12" class="ai-tool-icon" />
                   <span class="ai-tool-verb">{{ toolVerb(tc.name) }}</span>

@@ -48,6 +48,8 @@ import { getErrorMessage } from '../utils/error'
 import { navBadges } from '../composables/useNavBadges'
 import ConfirmDialog from './ConfirmDialog.vue'
 import { parseReleaseNotes } from '../utils/releaseNotes'
+// 官方站点地址唯一来源：关于页与工作空间引导共用一份（见 utils/siteLinks.ts）
+import { SITE_GUIDE_URL, SITE_GUIDE_TEXT } from '../utils/siteLinks'
 
 const props = defineProps<{
   visible: boolean
@@ -1041,6 +1043,14 @@ async function toggleAutoStart() {
               <p class="about-desc">{{ t('appDesc') }}</p>
               <p class="about-tech">{{ t('aboutTech') }}</p>
               <div class="about-links">
+                <!-- 使用说明放第一位：新用户装完之后第一个该点的就是它，
+                     首页 / 仓库属于「了解项目」的次要入口。地址来自 utils/siteLinks，
+                     与工作空间空状态引导里的入口共用一份，避免两处指向不同的文档。 -->
+                <a class="about-link" href="#" @click.prevent="openUrl(SITE_GUIDE_URL)">
+                  <ExternalLink :size="12" />
+                  <span class="about-link-tag">{{ t('aboutSiteGuide') }}</span>
+                  {{ SITE_GUIDE_TEXT }}
+                </a>
                 <a class="about-link" href="#" @click.prevent="openUrl('https://parieses.github.io/quickdock/')">
                   <ExternalLink :size="12" />
                   <span class="about-link-tag">{{ t('aboutSiteMain') }}</span>

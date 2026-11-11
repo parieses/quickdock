@@ -7,7 +7,7 @@
  * 覆盖 aria2 的主要能力：HTTP/FTP/SFTP、磁力、种子、Metalink、原生批量暂停、
  * 队列位置、URI 编辑、文件勾选、任务级选项、Peers / 服务器 / 全局统计 / 全局选项。
  */
-import { ref, computed, watch, watchEffect, nextTick, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, watchEffect, nextTick, onMounted, onUnmounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
 import {
@@ -35,7 +35,7 @@ const { t } = useI18n()
 const toast = useToast()
 const {
   status, statusReady, options, tasks, busy, error, speedHistory, uploadHistory, global,
-  refreshStatus, refreshTasks, refreshGlobal, enable, disable, add, addBatch, addTorrent, addMetalink, pickFile,
+  refreshStatus, refreshOptions, refreshTasks, refreshGlobal, enable, disable, add, addBatch, addTorrent, addMetalink, pickFile,
   pause, forcePause, resume, remove, pauseMany, resumeMany, removeMany,
   pauseAll, resumeAll, purgeResults, changePosition, changeUri,
   detailOf, setTaskOption, setFileSelection, globalOptions, setGlobalOption,
@@ -246,12 +246,14 @@ const settingsTab = ref<SettingsTab>('general')
 // 拷贝设置表单不能用 structuredClone：options 是 ref，取 .value 得到的是 Vue 的
 // reactive proxy，而结构化克隆算法遇到 Proxy 一律抛 DataCloneError（点「下载设置」
 // 直接报错，弹窗打不开）。这里字段全是原始类型，只有 categoryRules / schedule 两个
-// 普通对象需要各自新建，浅展开就够了。
+// 普通对象需要各自新建，浅展开就够了；toRaw 再兜一层，防止以后有人给这两个
+// 子对象也套上 reactive。
 function cloneOptions(src: DlOptionsView): DlOptionsView {
+  const raw = toRaw(src)
   return {
-    ...src,
-    categoryRules: { ...(src.categoryRules || {}) },
-    schedule: { ...(src.schedule || { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' }) },
+    ...raw,
+    categoryRules: { ...(toRaw(raw.categoryRules || {})) },
+    schedule: { ...(toRaw(raw.schedule || { enabled: false, start: '23:00', end: '07:00', downloadLimit: '', uploadLimit: '' })) },
   }
 }
 const settingsForm = ref<DlOptionsView>(cloneOptions(options.value))
@@ -754,13 +756,22 @@ async function pasteLinks() {
 }
 
 // ===== 设置 =====
-function openSettings() {
+async function openSettings() {
   showAdd.value = false
   showImport.value = false
-  settingsForm.value = cloneOptions(options.value)
-  categoryText.value = Object.entries(settingsForm.value.categoryRules).map(([k, v]) => `${k}=${v}`).join('\n')
   settingsTab.value = 'general'
+  // 先把弹窗打开：引擎起不来时恰恰最需要「改保存目录」的入口，别让表单初始化
+  // 里的任何异常（旧构建踩过 structuredClone 的 Proxy 坑）把整个设置页堵死。
   showSettings.value = true
+  try {
+    // 后端启动时会把失效的保存目录自动切回默认值并写回配置，打开前重新拉一次，
+    // 否则表单里还是已拔硬盘的 E:\Downloads，一保存又把坏目录写回去。
+    await refreshOptions()
+    settingsForm.value = cloneOptions(options.value)
+    categoryText.value = Object.entries(settingsForm.value.categoryRules).map(([k, v]) => `${k}=${v}`).join('\n')
+  } catch (e) {
+    logErr('download/openSettings', e)
+  }
   void loadEngine()
 }
 

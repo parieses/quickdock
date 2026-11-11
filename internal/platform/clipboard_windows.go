@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"runtime"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf16"
@@ -99,7 +100,17 @@ func WithClipboard(hwnd uintptr, fn func()) bool {
 	if !openClipboardWithRetry(hwnd) {
 		return false
 	}
+	// 记录「本进程正持有剪贴板」：以 NULL 句柄（OpenClipboard(0)）进入临界区时，
+	// 外部任何查询（含本程序自己查 GetOpenClipboardWindow）都定位不到持有者，
+	// 日志只会写「无法定位」。而这两种情形用户要做的事完全不同——
+	// 外部进程占用要去结束它，本程序自己卡住只能重启 QuickDock。
+	// 所以这里自留一份在途记录，供探测告警时点名（见 ClipboardSelfHold）。
+	if clipboardHoldCount.Add(1) == 1 {
+		clipboardHoldSince.Store(time.Now().UnixMilli())
+	}
 	defer func() {
+		clipboardHoldCount.Add(-1)
+		clipboardHoldSince.Store(0)
 		if !w32.CloseClipboard() {
 			logger.E("[platform] CloseClipboard 失败：剪贴板可能被无限期占用，其他程序的复制将全部失败，需重启进程恢复")
 		}
@@ -107,6 +118,28 @@ func WithClipboard(hwnd uintptr, fn func()) bool {
 
 	fn()
 	return true
+}
+
+// 剪贴板临界区在途状态（见 WithClipboard 的说明）。
+var (
+	clipboardHoldCount atomic.Int64
+	clipboardHoldSince atomic.Int64 // Unix 毫秒；0 表示当前没有在途临界区
+)
+
+// ClipboardSelfHold 报告本进程是否有一个「已持续超过 min」仍未结束的剪贴板临界区。
+//
+// 只在探测/捕获失败后调用：它是区分「锁是自己搞的」与「锁是别人搞的」的唯一依据，
+// 因为 OpenClipboard(NULL) 的持有不关联任何窗口，GetOpenClipboardWindow 返回 0。
+func ClipboardSelfHold(min time.Duration) (time.Duration, bool) {
+	if clipboardHoldCount.Load() <= 0 {
+		return 0, false
+	}
+	since := clipboardHoldSince.Load()
+	if since <= 0 {
+		return 0, false
+	}
+	held := time.Since(time.UnixMilli(since))
+	return held, held >= min
 }
 
 // ClipboardOwnerProbeTimeoutMs 读取前探测 owner 是否响应的上限。
@@ -141,19 +174,79 @@ func WithClipboardRead(hwnd uintptr, fn func()) (executed bool) {
 	return executed
 }
 
-// ClipboardProbe 探测剪贴板当前是否可打开：打开后立刻关闭，不读任何内容。
+// 探测专用 Win32 入口。w32.OpenClipboard 把 GetLastError 丢掉了，而
+// ERROR_ACCESS_DENIED(5) 与「当前桌面/会话拿不到剪贴板」必须分开处理，
+// 所以这里自行声明，用 Call 的第三个返回值取 errno。
+var (
+	procOpenClipboardForProbe  = modUser32.NewProc("OpenClipboard")
+	procCloseClipboardForProbe = modUser32.NewProc("CloseClipboard")
+	procGetLastInputInfo       = modUser32.NewProc("GetLastInputInfo")
+	procGetTickCount           = syscall.NewLazyDLL("kernel32.dll").NewProc("GetTickCount")
+)
+
+// clipboardIdleThreshold 判定「当前会话无人交互」的空闲阈值。
 //
-// 只做一次尝试（不像 openClipboardWithRetry 那样退避 150ms）——这是周期性
-// 健康检查，不能自己长时间占着剪贴板。返回 false 说明有别的进程正锁着它：
-// 此时系统里所有程序的「复制」都会失败，本程序的捕获也拿不到任何通知。
-func ClipboardProbe() bool {
+// 锁屏（Win+L）、RDP 断开、切到 UAC 安全桌面后，用户态输入停滞，
+// GetLastInputInfo 会一直停在最后一次输入那一刻，空闲时长持续增长。
+// 这类状态下 OpenClipboard 拿不到剪贴板是常态，但此刻并没有人在复制，
+// 不能据此断言「系统内所有程序都无法复制」——过夜 10 小时的连续失败
+// 绝大多数属于这一种，旧实现却每分钟刷一条 E 级灾难告警。
+const clipboardIdleThreshold = 5 * time.Minute
+
+// sessionIdle 返回距最后一次用户输入的时长，false 表示系统不支持/查询失败。
+// GetTickCount 约 49.7 天回绕，无符号减法在回绕处依然给出正确差值。
+func sessionIdle() (time.Duration, bool) {
+	var li struct {
+		cbSize uint32
+		dwTime uint32
+	}
+	li.cbSize = uint32(unsafe.Sizeof(li))
+	if ret, _, _ := procGetLastInputInfo.Call(uintptr(unsafe.Pointer(&li))); ret == 0 {
+		return 0, false
+	}
+	now, _, _ := procGetTickCount.Call()
+	return time.Duration(uint32(now)-li.dwTime) * time.Millisecond, true
+}
+
+// ClipboardProbe 探测剪贴板当前是否可打开：打开后立刻关闭，不读任何内容。
+// 只做一次尝试（不像 openClipboardWithRetry 那样退避 150ms）——周期性健康检查
+// 不能自己长时间占着剪贴板。
+//
+// 返回：
+//   - ok:     可打开，且 CloseClipboard 也成功
+//   - idle:   失败时系统已长时间无用户输入（锁屏 / 远程会话断开 / 安全桌面）。
+//     这类失败不代表有人正在被挡住，调用方应降级为 W 级且不催用户处理
+//   - detail: 失败原因的可读诊断（Win32 errno、打开锁持有窗口、会话空闲时长）
+//
+// 【必须检查 CloseClipboard】剪贴板锁绑定调用线程，Close 静默失败就等于本进程
+// 无限期持锁。本函数此前是全项目唯一忽略该返回值的临界区，而且偏偏是唯一每分钟
+// 必跑的常驻路径，还以 OpenClipboard(NULL) 打开——一旦发生，GetOpenClipboardWindow
+// 永远返回 0（查不到自己），此后每次探测必然继续失败。日志里的「无法定位 + 连续
+// 630 次」正是这个自证闭环的外观。现在失败时立即点名，不再让排查停在「无法定位」。
+func ClipboardProbe() (ok, idle bool, detail string) {
 	runtime.LockOSThread()
 	defer runtime.UnlockOSThread()
-	if !w32.OpenClipboard(0) {
-		return false
+
+	ret, _, callErr := procOpenClipboardForProbe.Call(0)
+	if ret == 0 {
+		errno := uint32(0)
+		if e, yes := callErr.(syscall.Errno); yes {
+			errno = uint32(e)
+		}
+		d, known := sessionIdle()
+		holder, _, _ := procGetOpenClipboardWindow.Call()
+		idle = known && d >= clipboardIdleThreshold
+		detail = fmt.Sprintf("OpenClipboard errno=%d，打开锁持有窗口=0x%X，会话空闲=%v（可判定=%v）",
+			errno, holder, d.Truncate(time.Second), known)
+		return false, idle, detail
 	}
-	w32.CloseClipboard()
-	return true
+	if c, _, _ := procCloseClipboardForProbe.Call(); c == 0 {
+		// 这是本进程自己造成的死锁，且以 NULL 句柄持有，外部任何工具都查不到。
+		logger.E("[platform] CloseClipboard 失败：剪贴板锁留在本线程，本进程已自我锁死，" +
+			"其他程序的复制将全部失败，重启 QuickDock 才能恢复")
+		return false, false, "CloseClipboard 失败（本进程自身剪贴板临界区未释放，重启 QuickDock 才能恢复）"
+	}
+	return true, false, ""
 }
 
 // 剪贴板「打开锁」持有者查询所需的 Win32 入口（w32 包未提供）。
@@ -204,6 +297,32 @@ func ClipboardHolderInfo() string {
 		detail += fmt.Sprintf("，窗口标题「%s」", clipRunes(title, 60))
 	}
 	return detail
+}
+
+// ClipboardContentOwnerInfo 描述「剪贴板内容的所有者」（GetClipboardOwner），仅作旁证。
+//
+// 与 ClipboardHolderInfo 的区别必须说清，否则会误导排查：
+//   - ClipboardHolderInfo 查的是「打开锁」的持有者（谁正卡着 OpenClipboard）；
+//   - 本函数查的是「最后一次写入内容」的窗口，正常状态也非 0（常见是浏览器的消息窗口），
+//     所以绝不能当占用者直接报。
+//
+// 唯一用途：锁持有者无窗口（GetOpenClipboardWindow 返回 0）时给出线索——以 NULL 句柄
+// 打开剪贴板又没关的程序，通常正是最后写入内容的那个。返回空串表示无可参考信息。
+func ClipboardContentOwnerInfo() string {
+	owner, _, _ := procGetClipboardOwner.Call()
+	if owner == 0 {
+		return ""
+	}
+	var pid uint32
+	modUser32.NewProc("GetWindowThreadProcessId").Call(owner, uintptr(unsafe.Pointer(&pid)))
+	if pid == 0 || int(pid) == os.Getpid() {
+		return ""
+	}
+	name, err := processNameByPID(pid)
+	if err != nil || name == "" {
+		return fmt.Sprintf("pid=%d（进程名未知）", pid)
+	}
+	return fmt.Sprintf("pid=%d %s", pid, name)
 }
 
 // windowClassName 取窗口类名（诊断用，失败返回空串）。

@@ -201,6 +201,8 @@ func (s *WeatherService) ServiceShutdown() error {
 }
 
 // SearchCities 按名称检索城市坐标，language 只接受 zh / en，其余按 zh 处理。
+// 输入中国省级行政区名时会改查其省会（检索接口不认「省」这一级，只按地名匹配，
+// 直接搜「河南」会返回各省恰好叫「河南」的村镇）；详见 internal/weather/regions.go。
 // 这是用户主动触发的一次性查询，不进轮询缓存。
 func (s *WeatherService) SearchCities(name, language string) *services.ApiResult {
 	return services.Wrap(internalweather.SearchCities(name, language))

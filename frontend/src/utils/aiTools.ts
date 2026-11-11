@@ -92,8 +92,8 @@ export function serializeTools(list: AIToolCall[]): string {
   })))
 }
 
-// countToolRounds 数轮次而不是数条数：一轮可以并发调多个工具，
-// 卡片上写「5 个工具」和「3 轮」是两件事，用户问的「调了几轮」是后者。
+// countToolRounds 数轮次而不是数条数：一轮可以并发调多个工具。
+// 结果写进消息的 tool_rounds 供用量统计 / 排障使用；界面已不再展示轮数。
 export function countToolRounds(list: AIToolCall[]): number {
   return new Set(list.filter((t) => t.round).map((t) => t.round)).size
 }

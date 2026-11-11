@@ -355,20 +355,24 @@ func checkVersionSource(rt Runtime) VersionSourceCheck {
 		return vc
 	}
 
-	// 失败：GitHub API 的 403 基本都是匿名限流（1 小时 60 次），而实际安装时
-	// AvailableVersions 会自动退到 Releases 页面 HTML 解析。这里复现同一条兜底，
-	// 并把「为什么 403」写清楚，避免面板把限流误报成「上游挂了」。
+	// 失败：GitHub API 的 403 多为匿名限流（1 小时 60 次），Go 这类则是主站在
+	// 部分网络下不可达。实际安装时 AvailableVersions 会退到备用地址，这里复现
+	// 同一条兜底，避免面板把「限流 / 主站被拦」误报成「上游挂了」。
 	if def.versHTMLFallbackParse != nil && def.fallbackHTMLURL != "" {
-		if body2, _, err2 := fetchURLCode(def.fallbackHTMLURL); err2 == nil {
+		if body2, err2 := fetchURLFallback(def.fallbackHTMLURL); err2 == nil {
 			if vs := sortVersionsDesc(def.versHTMLFallbackParse(body2)); len(vs) > 0 {
+				vc.LatencyMs = time.Since(t0).Milliseconds() // 含备用地址的往返
 				vc.OK = true
 				vc.Count = len(vs)
 				vc.Latest = vs[0]
 				vc.Stale = vc.Recommended != "" && vc.Latest != vc.Recommended
-				if code == http.StatusForbidden {
-					vc.Error = "API 匿名限流（每小时 60 次），已改用 Releases 页面解析"
-				} else {
-					vc.Error = "API 不可用，已改用 Releases 页面解析"
+				switch {
+				case code == http.StatusForbidden:
+					vc.Error = "API 匿名限流（每小时 60 次），已改用备用地址解析"
+				case code == 0:
+					vc.Error = "主地址不可达，已改用备用地址 " + def.fallbackHTMLURL
+				default:
+					vc.Error = fmt.Sprintf("主地址返回 HTTP %d，已改用备用地址 %s", code, def.fallbackHTMLURL)
 				}
 				return vc
 			}

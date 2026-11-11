@@ -211,6 +211,17 @@ func portFree(port int) bool {
 	return true
 }
 
+// DefaultDownloadDir 是保存目录的兜底值：用户主目录下的 Downloads。
+// 配置里可能还留着已经拔掉的移动硬盘盘符（E:\Downloads），启动层会用这个
+// 函数把 --dir 拉回一个确定存在的位置，避免整个引擎起不来。
+func DefaultDownloadDir() string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		home = platform.DefaultDataDir()
+	}
+	return filepath.Join(home, "Downloads")
+}
+
 // LoadConfig 读取连接配置；文件缺失/损坏时按默认值新建（只写文件，不启动进程）。
 func LoadConfig() (*Config, error) {
 	cfgMu.Lock()
@@ -240,14 +251,10 @@ func loadLocked() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	home, err := os.UserHomeDir()
-	if err != nil || home == "" {
-		home = platform.DefaultDataDir()
-	}
 	c := &Config{
 		Port:          port,
 		Secret:        secret,
-		DownloadDir:   filepath.Join(home, "Downloads"),
+		DownloadDir:   DefaultDownloadDir(),
 		MaxConcurrent: 5,
 		Split:         8,
 		MaxConnPerSrv: 8,

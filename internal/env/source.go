@@ -124,8 +124,9 @@ type runtimeDef struct {
 	// versValidateTopN 只复核头部 N 个版本（0=不复核）。越老的版本越不可能有这种幽灵目录，
 	// 全量 HEAD 会把一次版本拉取变成几十次网络往返。
 	versValidateTopN int
-	// fallbackHTMLURL 该运行时 GitHub Releases 页面的 HTML 地址（API 不可用时兜底解析版本）。
-	// 大多数 GitHub Releases 可共用默认 HTML tag 解析器，故直接作为自描述字段，新增运行时无需改中心 switch。
+	// fallbackHTMLURL 上游版本列表的备用地址（主地址不通或被限流时改拉这里），由
+	// versHTMLFallbackParse 解析。多数运行时是 GitHub Releases 页面（API 限流兜底），
+	// 也可用于同一份列表的镜像站点（如 Go 的 golang.google.cn ↔ go.dev）。
 	fallbackHTMLURL string
 	// singleVersion 单版本语义：始终安装到固定目录（runtime/<rt>），装新版本即原地覆盖旧版本，
 	// 不支持多版本并存。前端据此隐藏版本下拉框、改为「一键装最新 / 一键更新」。
@@ -140,7 +141,11 @@ var (
 			{ID: "npmmirror", Name: "npmmirror 镜像", Build: nodeURL("https://registry.npmmirror.com/-/binary/node/{v}/node-{v}-{os}-{arch}.{ext}")},
 			{ID: "official", Name: "Node.js 官方", Build: nodeURL("https://nodejs.org/dist/{v}/node-{v}-{os}-{arch}.{ext}")},
 		}},
-		RuntimeGo: {display: "Go", group: GroupLanguage, versions: []string{"1.27.3", "1.26.10", "1.25.14"}, versURL: "https://go.dev/dl/", versParse: parseGoVersionsFromHTML, sources: []Source{
+		// Go 的下载源早就有 golang.google.cn 国内镜像，版本列表却一直写死 go.dev/dl，
+		// 两边不对称：国内网络下 go.dev 常在 TLS 握手阶段就被拦断，用户每进一次环境页
+		// 都要等 30s 超时，再静默退回内置推荐清单。主源改走镜像域名，官方站留作备用
+		// （两站 /dl/ 页面结构一致，可复用同一个正则解析器）。
+		RuntimeGo: {display: "Go", group: GroupLanguage, versions: []string{"1.27.3", "1.26.10", "1.25.14"}, versURL: "https://golang.google.cn/dl/", versParse: parseGoVersionsFromHTML, versHTMLFallbackParse: parseGoVersionsFromHTML, fallbackHTMLURL: "https://go.dev/dl/", sources: []Source{
 			{ID: "official", Name: "Go 官方", Build: goURL("https://go.dev/dl/go{version}.{os}-{arch}.{ext}")},
 			{ID: "golangcn", Name: "golang.google.cn (国内)", Build: goURL("https://golang.google.cn/dl/go{version}.{os}-{arch}.{ext}")},
 		}},
@@ -1040,26 +1045,33 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 	def := registry[rt]
 	var vs []string
 	fetched := false
+	primaryFailed := false
 	if def.versURL != "" && def.versParse != nil {
 		if body, err := fetchURL(def.versURL); err == nil {
 			if parsed := def.versParse(body); len(parsed) > 0 {
 				vs = sortVersionsDesc(parsed)
 				fetched = true
-				logger.I("[env][source] %s 上游版本拉取成功 fetched=%d len(vs)=%d first=%s", rt, len(parsed), len(vs), vs[0])
+				logger.I("[env][source] %s 上游版本拉取成功 url=%s fetched=%d first=%s", rt, def.versURL, len(parsed), vs[0])
 			} else {
-				logger.W("[env][source] %s 上游版本解析返回 0 条", rt)
+				logger.W("[env][source] %s 上游版本解析返回 0 条 url=%s", rt, def.versURL)
 			}
 		} else {
-			logger.E("[env][source] %s 上游版本拉取失败: %v", rt, err)
+			primaryFailed = true
+			// 单个上游地址不可达是预期内的网络状况（还有备用地址和内置清单两层兜底），
+			// 打 E 会把「网不通」伪装成程序故障，且每次切换运行时都会刷一条。
+			logger.W("[env][source] %s 上游版本列表拉取失败 url=%s err=%v（将尝试备用地址）", rt, def.versURL, err)
 		}
 	}
-	// HTML 兜底：GitHub API 限流或网络不通时，尝试解析 Releases 页面 HTML
+	// 备用地址：GitHub API 匿名限流、主站被网络拦截时，改拉 Releases 页面或镜像站。
 	if len(vs) == 0 && def.versHTMLFallbackParse != nil && def.fallbackHTMLURL != "" {
-		if body, err := fetchURL(def.fallbackHTMLURL); err == nil {
+		if body, err := fetchURLFallback(def.fallbackHTMLURL); err == nil {
 			if parsed := def.versHTMLFallbackParse(body); len(parsed) > 0 {
 				vs = sortVersionsDesc(parsed)
 				fetched = true
+				logger.I("[env][source] %s 已改用备用地址 %s，解析到 %d 个版本", rt, def.fallbackHTMLURL, len(parsed))
 			}
+		} else {
+			logger.W("[env][source] %s 备用地址 %s 拉取失败: %v", rt, def.fallbackHTMLURL, err)
 		}
 	}
 	// 上游列表的「可下载性」复核：只查头部 N 个（python 幽灵预发布目录就出在头部）。
@@ -1069,6 +1081,12 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 	}
 	if len(vs) == 0 {
 		vs = Versions(rt)
+		if primaryFailed && len(vs) > 0 {
+			// 说清「现在给用户看的是内置清单、可能滞后」：前端拿到的仍是 ApiResult Ok，
+			// 会把这三个版本当成上游实时列表并自动选中第一个，界面上没有任何降级提示。
+			logger.W("[env][source] %s 上游与备用地址均不可用，已回退内置推荐清单（%d 个，最新 %s，可能滞后）",
+				rt, len(vs), vs[0])
+		}
 	}
 	// Node.js: parseNodeVersions 内部已做智能筛选（LTS + 近 3 年，上限 60 条，
 	// 并补回每个维护线的最新版）。注意上面的 sortVersionsDesc 会按版本号重排，
@@ -1085,44 +1103,87 @@ func AvailableVersions(rt Runtime, sourceID, custom string) []string {
 	return vs
 }
 
-// fetchURL 拉取 URL 内容（带代理与 30s 超时），最多 32MB。
+// fetchURL 拉取 URL 内容（带代理与超时兜底），最多 32MB。
 // 上限设这么高是因为 GitHub Releases API（per_page=100）单个响应就接近 5MB——
 // 早期只放 4MB，响应被 io.LimitReader 截断成非法 JSON，json.Unmarshal 静默失败，
 // 表现为"上游版本解析返回 0 条"而静默退回 HTML 兜底列表（只剩 4 个版本）。
-// 若代理模式下失败，自动重试无代理直连（兼容部分场景下代理配置异常的情况）。
+// 若代理模式下连接失败，自动重试无代理直连（兼容部分场景下代理配置异常的情况）。
 func fetchURL(url string) ([]byte, error) {
 	body, _, err := fetchURLCode(url)
 	return body, err
 }
 
+const (
+	// 主尝试沿用原来的 30s 预算：GitHub Releases API 单响应近 5MB，慢网下缩短
+	// 会把 body 截断成非法 JSON（历史 bug：静默退回只剩 4 个版本的兜底列表）。
+	proxyFetchTimeout = 30 * time.Second
+	// 直连重试单独给 8s，只在连接层失败时才有机会执行；网络全断时最坏 38s。
+	directFetchTimeout = 8 * time.Second
+	// 备用地址（镜像站 / Releases 页）单次短尝试的预算，见 fetchURLFallback。
+	// 取 15s 是留给 GitHub Releases 页面与 3MB 级 /dl/ 页面的下载时间，别让
+	// 限流兜底自己先超时。
+	fallbackFetchTimeout = 15 * time.Second
+)
+
 // fetchURLCode 同 fetchURL，但同时带回 HTTP 状态码（0 表示连接层失败、没有响应）。
 // 供「源体检」区分「404 地址已失效」与「连不上」两类完全不同的故障。
-func fetchURLCode(url string) ([]byte, int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+//
+// 两次尝试必须用各自独立的 ctx。早期实现共用一个 30s ctx：代理尝试一旦把
+// ctx 耗光（黑洞代理会一直挂到超时），「自动重试直连」拿到的是已过期的 ctx，
+// 请求根本没发出就立刻返回 context deadline exceeded，还把第一次的真实错误
+// 覆盖掉了 —— 日志里只剩一句无信息量的 "Get ... context deadline exceeded"，
+// 无法区分「代理挂了」还是「站点本身不通」。
+func fetchURLCode(rawURL string) ([]byte, int, error) {
+	body, code, err := fetchURLOnce(rawURL, proxyFetchTimeout, ProxyTransport())
+	if err == nil {
+		return body, code, nil
+	}
+	if code != 0 {
+		// 服务端已给出非 2xx 响应：换直连也不会改变状态码，重试只是白等 8s。
+		return nil, code, err
+	}
+	// 只有连接层失败才可能是「代理配置异常 / 黑洞代理」，直连重试才有意义。
+	body2, code2, err2 := fetchURLOnce(rawURL, directFetchTimeout, &http.Transport{TLSHandshakeTimeout: 10 * time.Second})
+	if err2 == nil {
+		return body2, code2, nil
+	}
+	// 两次错误都带上，日志才能区分「代理挂了」和「站点本身不通」；
+	// 两个 %w 保留 errors.Is(err, context.DeadlineExceeded) 之类的判定能力。
+	return nil, 0, fmt.Errorf("代理: %w；直连: %w", err, err2)
+}
+
+// fetchURLFallback 备用版本列表地址专用：单次带代理的短超时尝试。
+// 走到兜底说明主地址已失败，若再让它串行跑一遍「代理 30s + 直连 8s」，
+// 两个地址都不通时界面要转圈 70s 以上。代理本身异常的情形主地址的直连
+// 重试早已成功返回，不会流到这里，所以兜底不必再重复双尝试。
+func fetchURLFallback(rawURL string) ([]byte, error) {
+	body, _, err := fetchURLOnce(rawURL, fallbackFetchTimeout, ProxyTransport())
+	return body, err
+}
+
+// fetchURLOnce 单次 GET：独立 ctx、独立超时，最多读 32MB。
+func fetchURLOnce(rawURL string, timeout time.Duration, transport http.RoundTripper) ([]byte, int, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, 0, err
 	}
 	req.Header.Set("User-Agent", "QuickDock/1.0")
-
-	// 先尝试带代理
-	resp, err := (&http.Client{Transport: ProxyTransport()}).Do(req)
+	resp, err := (&http.Client{Transport: transport}).Do(req)
 	if err != nil {
-		// 代理失败，尝试直连
-		req2, _ := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-		req2.Header.Set("User-Agent", "QuickDock/1.0")
-		resp, err = (&http.Client{Transport: &http.Transport{}}).Do(req2)
-		if err != nil {
-			return nil, 0, err
-		}
+		return nil, 0, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, resp.StatusCode, fmt.Errorf("HTTP %d", resp.StatusCode)
 	}
 	body, rerr := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
-	return body, resp.StatusCode, rerr
+	if rerr != nil {
+		// 读 body 失败同属连接层故障，code 归 0 才不会挡住直连重试。
+		return nil, 0, rerr
+	}
+	return body, resp.StatusCode, nil
 }
 
 // ---- 上游版本列表解析 ----
@@ -1300,11 +1361,13 @@ func parseNodeVersions(body []byte) []string {
 	return out
 }
 
-// parseGoVersionsFromHTML 从 go.dev/dl/ 页面 HTML 提取所有稳定版版本号。
-// 该页面列出了所有已发布版本，无 API 配额限制，不受网络环境影响。
+// parseGoVersionsFromHTML 从 /dl/ 页面 HTML 提取所有稳定版版本号。
+// go.dev/dl 与 golang.google.cn/dl 页面结构相同，可共用本解析器；
+// 无 API 配额限制，但 go.dev 在部分网络下不可达 —— 可达性由 versURL /
+// fallbackHTMLURL 两个地址负责，与解析逻辑无关。
 func parseGoVersionsFromHTML(body []byte) []string {
 	html := string(body)
-	// go.dev/dl/ 中版本以 "go1.23.4" 形式出现在 <a> 标签和 <td> 文本中
+	// /dl/ 页面中版本以 "go1.23.4" 形式出现在 <a> 标签和 <td> 文本中
 	re := regexp.MustCompile(`go(\d+\.\d+\.\d+)`)
 	matches := re.FindAllSubmatch([]byte(html), -1)
 	out := make([]string, 0, len(matches))

@@ -183,15 +183,19 @@ func (m *Manager) ReclaimOrphans(ctx context.Context) {
 			if e != nil || !st.Running {
 				continue
 			}
-			// aria2 特例：端口能连上、RPC 也有响应，说明它正在正常工作（可能是
-			// 另一个 QuickDock 实例刚拉起的，或用户自己启动的 daemon）。回收它只会
-			// 制造 connectex「连接被拒绝」，实测曾出现「启动 1 秒后即被杀」的重启风暴。
-			// 代价是这个实例不被本会话 svcMgr 托管，但功能正常，优于误杀。
 			if rt == RuntimeAria2 {
-				if cfg, e := aria2.LoadConfig(); e == nil {
-					if healthy, _ := daemonProbe(cfg); healthy {
+				if cfg, e := aria2.LoadConfig(); e == nil && !cfg.IsRemote() {
+					switch probeAria2Daemon(cfg, true) {
+					case aria2Healthy:
 						logger.I("[env] %s(%s) daemon RPC 健康，跳过孤儿回收", rt, ins.Version)
 						continue
+					case aria2Foreign:
+						// 端口上有服务应答但不是本配置的 aria2（secret 不符 / 别的程序），
+						// 或监听者根本不是 aria2c：回收它会误杀用户自己的进程。
+						logger.I("[env] %s(%s) 端口上的实例不属于本配置，跳过孤儿回收", rt, ins.Version)
+						continue
+					case aria2Stuck:
+						logger.W("[env] %s(%s) daemon 假活（RPC 连续无响应），按孤儿回收后重新拉起", rt, ins.Version)
 					}
 				}
 			}
