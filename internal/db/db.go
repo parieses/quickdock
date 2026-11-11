@@ -673,10 +673,12 @@ func (d *Database) Query(query string, params ...interface{}) ([]map[string]inte
 // appStateKeyValid 校验 key 是否允许读写 app_state 表，防止覆盖内置配置或误写。
 // 只允许已知前缀的 key：theme/locale 等用户设置、lastWorkspaceId/lastSceneId 工作区记忆、
 // openedSceneIds:* 已打开场景标签页（workspace.ts 按 workspaceId 拼接）、plugin_icon_* 插件图标、
-// 以及内部服务用的 ai_* / sync_config / notify_webhook / dsh_*（dsh_auto_start 等）/ git_*
+// 以及内部服务用的 ai_* / kb_settings / sync_config / notify_webhook / dsh_*（dsh_auto_start 等）/ git_*
 // （git_repos 仓库清单等，git 面板专用）/ qd_ 等。
 // 注意：后端内部写入走 SetSetting（不经此校验），本白名单只守 SetValue/GetValue 这一前端 API 入口。
-var appStateKeyValid = regexp.MustCompile(`^(theme|locale|lastWorkspaceId|lastSceneId|openedSceneIds|plugin_icon_|webdav_config|sync_config|ai_profiles|ai_active_profile|ai_config|notify_webhook|dsh_|git_|qd_)`)
+// 新增服务级配置键时必须同步加进这里——漏加的表现是「设置页保存报 invalid app_state key、
+// 读取静默回退默认值」，知识库的设置（kb_settings）就这么丢过一整轮（11-11 事故）。
+var appStateKeyValid = regexp.MustCompile(`^(theme|locale|lastWorkspaceId|lastSceneId|openedSceneIds|plugin_icon_|webdav_config|sync_config|ai_profiles|ai_active_profile|ai_config|kb_settings|notify_webhook|dsh_|git_|qd_)`)
 
 func validateAppStateKey(key string) error {
 	if !appStateKeyValid.MatchString(key) {

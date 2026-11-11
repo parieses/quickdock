@@ -159,7 +159,7 @@ const asking = ref(false)
 const askListEl = ref<HTMLElement | null>(null)
 
 const settingsOpen = ref(false)
-const settings = reactive({ embedModel: '', topN: 5, vectorOn: true })
+const settings = reactive({ embedModel: '', embedBaseURL: '', embedAPIKey: '', topN: 5, vectorOn: true })
 const settingsSaving = ref(false)
 
 // 左栏文档筛选。文档上百之后「翻列表找文件」比搜索还慢，
@@ -229,9 +229,11 @@ async function loadStatus() {
 
 async function loadSettings() {
   try {
-    const cfg = unwrap<{ embedModel: string; topN: number; vectorOn: boolean }>(await GetKBSettings())
+    const cfg = unwrap<{ embedModel: string; embedBaseURL?: string; embedAPIKey?: string; topN: number; vectorOn: boolean }>(await GetKBSettings())
     if (cfg) {
       settings.embedModel = cfg.embedModel || ''
+      settings.embedBaseURL = cfg.embedBaseURL || ''
+      settings.embedAPIKey = cfg.embedAPIKey || ''
       settings.topN = cfg.topN || 5
       settings.vectorOn = cfg.vectorOn !== false
     }
@@ -604,6 +606,9 @@ async function saveSettings() {
   try {
     await SaveKBSettings({
       embedModel: settings.embedModel.trim(),
+      embedBaseURL: settings.embedBaseURL.trim(),
+      // 掩码原样回传（= 不改 Key），用户清空 = 回退到激活档案。
+      embedAPIKey: settings.embedAPIKey.trim(),
       topN: settings.topN,
       vectorOn: settings.vectorOn,
     })
@@ -1025,6 +1030,12 @@ onScopeDispose(() => {
             <span class="kb-field-label">{{ t('kbSetEmbedModel') }}</span>
             <input v-model="settings.embedModel" class="kb-input" :placeholder="t('kbSetEmbedModelPlaceholder')" spellcheck="false" />
             <span class="kb-field-hint">{{ t('kbSetEmbedModelHint') }}</span>
+          </label>
+          <label class="kb-field">
+            <span class="kb-field-label">{{ t('kbSetEmbedEndpoint') }}</span>
+            <input v-model="settings.embedBaseURL" class="kb-input" :placeholder="t('kbSetEmbedEndpointPlaceholder')" spellcheck="false" />
+            <input v-model="settings.embedAPIKey" class="kb-input" type="password" autocomplete="off" :placeholder="t('kbSetEmbedKeyPlaceholder')" spellcheck="false" />
+            <span class="kb-field-hint">{{ t('kbSetEmbedEndpointHint') }}</span>
           </label>
           <label class="kb-field">
             <span class="kb-field-label">{{ t('kbSetTopN') }}</span>

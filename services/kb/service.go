@@ -27,6 +27,7 @@ import (
 
 	"quickdock/internal/db"
 	ikb "quickdock/internal/kb"
+	"quickdock/internal/logger"
 	"quickdock/services"
 )
 
@@ -49,6 +50,13 @@ type Settings struct {
 	// 单独配置而不是复用聊天模型：聊天模型做不了 embedding，
 	// 而让用户去改聊天档案来换 embedding 模型会把两件事绑死。
 	EmbedModel string `json:"embedModel"`
+	// EmbedBaseURL / EmbedAPIKey 独立的 embedding 端点，留空则复用
+	// 激活 AI 档案的地址与 Key。很多供应商（DeepSeek、部分中转站）
+	// 只提供聊天没有 /embeddings，绑死在激活档案上会让「想配向量
+	// 检索的用户被迫连聊天一起换供应商」（实测：两个档案都没有
+	// embedding 模型，bge-m3 无处安放）。
+	EmbedBaseURL string `json:"embedBaseURL"`
+	EmbedAPIKey  string `json:"embedAPIKey"`
 	// TopN 检索返回条数。
 	TopN int `json:"topN"`
 	// VectorOn 向量检索总开关。关掉后连"补向量"也不做，纯本地跑。
@@ -110,18 +118,32 @@ func (s *KBService) emit(name string, data interface{}) {
 
 // ---- 设置 ----
 
-// GetKBSettings 读取设置（未设置时返回默认值）。
+// kbKeyMask 掩码占位，与 AI 档案列表的口径一致：前端回传掩码 = 不改 Key。
+const kbKeyMask = "******"
+
+// GetKBSettings 读取设置（未设置时返回默认值）。API Key 掩码返回，
+// 明文只留在后端——前端是 WebView，任何能注入脚本的代码都能读响应体。
 func (s *KBService) GetKBSettings() *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
 	}
-	return services.Ok(s.settings())
+	cfg := s.settings()
+	if cfg.EmbedAPIKey != "" {
+		cfg.EmbedAPIKey = kbKeyMask
+	}
+	return services.Ok(cfg)
 }
 
 func (s *KBService) settings() Settings {
 	cfg := defaultSettings()
 	raw, err := s.App.DB.GetValue(kbSettingsKey)
-	if err != nil || strings.TrimSpace(raw) == "" {
+	if err != nil {
+		// 读失败不能静默吞掉：白名单漏配时曾让整轮设置形同不存在——
+		// 用户填了模型名、检索却一直走纯关键词（11-11 事故）。
+		logger.E("[kb] 读取设置失败，回退默认值: %v", err)
+		return cfg
+	}
+	if strings.TrimSpace(raw) == "" {
 		return cfg
 	}
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
@@ -143,8 +165,15 @@ func (s *KBService) SaveKBSettings(cfg Settings) *services.ApiResult {
 		cfg.TopN = 5
 	}
 	cfg.EmbedModel = strings.TrimSpace(cfg.EmbedModel)
+	cfg.EmbedBaseURL = strings.TrimSpace(cfg.EmbedBaseURL)
+	cfg.EmbedBaseURL = strings.TrimSuffix(cfg.EmbedBaseURL, "/")
 
 	old := s.settings()
+	// 前端回传的是掩码（GetKBSettings 返回的形态），不是新 Key：保留原值。
+	// 传空串 = 用户主动清掉独立 Key（回退到激活档案）。
+	if cfg.EmbedAPIKey == kbKeyMask {
+		cfg.EmbedAPIKey = old.EmbedAPIKey
+	}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		return services.Fail(err)
@@ -579,7 +608,14 @@ func contextWithTimeout(d time.Duration) (context.Context, context.CancelFunc) {
 var errNoEmbedConfig = errors.New("未配置 embedding 模型或 AI 档案")
 
 // embedConfig 取 embedding 所需的三个值。任一缺失就代表不可用。
+//
+// 端点优先级：知识库设置里的独立地址 > 激活 AI 档案。独立 Key 允许为空
+// ——本地推理服务（ollama 之类）不需要 Key。
 func (s *KBService) embedConfig() (baseURL, apiKey string, ok bool) {
+	cfg := s.settings()
+	if cfg.EmbedBaseURL != "" {
+		return cfg.EmbedBaseURL, cfg.EmbedAPIKey, true
+	}
 	if s.App.EmbedConfigFn == nil {
 		return "", "", false
 	}
