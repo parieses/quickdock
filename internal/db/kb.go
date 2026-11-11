@@ -473,9 +473,20 @@ func (d *Database) SearchChunksFTS(query string, limit int, libraryID string) ([
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	// 这里刻意不给 kb_chunks_fts 起别名：bm25() 的参数必须是 FTS 表在查询里
-	// 的实际表名，写成 bm25(f, ...) 会报 "no such column: f"（实测）。
-	// 于是 MATCH 与 bm25 都直接用真表名，主表用 c 区分列名。
+	hits, err := d.ftsQuery(q, limit, libraryID)
+	// AND 全不中 → 降级 OR：用户给的关键词只要有一个出现在文档里就值得
+	// 返回（bm25 自动把命中多的排前面）。典型场景是问答把口语化提问拆词
+	// 后个别词在原文里没有逐字对应——整查询全空比给出弱相关结果更糟。
+	if err == nil && len(hits) == 0 && strings.Contains(q, " AND ") {
+		hits, err = d.ftsQuery(strings.ReplaceAll(q, " AND ", " OR "), limit, libraryID)
+	}
+	return hits, err
+}
+
+// ftsQuery 执行一次 FTS 匹配。这里刻意不给 kb_chunks_fts 起别名：
+// bm25() 的参数必须是 FTS 表在查询里的实际表名，写成 bm25(f, ...) 会报
+// "no such column: f"（实测）。于是 MATCH 与 bm25 都直接用真表名，主表用 c 区分列名。
+func (d *Database) ftsQuery(match string, limit int, libraryID string) ([]KBHit, error) {
 	sqlStr := `
 		SELECT c.rowid, c.id, c.source_id, s.name, s.path, s.library_id, s.ext,
 		       c.heading, c.text, c.page, c.idx
@@ -483,7 +494,7 @@ func (d *Database) SearchChunksFTS(query string, limit int, libraryID string) ([
 		JOIN kb_chunks c ON c.rowid = kb_chunks_fts.rowid
 		JOIN kb_sources s ON s.id = c.source_id
 		WHERE kb_chunks_fts MATCH ?`
-	args := []interface{}{q}
+	args := []interface{}{match}
 	if libraryID != "" {
 		sqlStr += ` AND s.library_id = ?`
 		args = append(args, libraryID)
@@ -553,31 +564,93 @@ func (d *Database) ChunksByRowIDs(rowIDs []int64) ([]KBHit, error) {
 	return out, nil
 }
 
-// kbFTSEscape 把用户输入变成 trigram 下可用的短语查询。
+// kbFTSEscape 把用户输入变成 trigram 下可用的查询。
 //
-// 只做两件事：双引号翻倍、压掉多余空白，然后整串包成短语。
+// 规则：按空白拆词 → 每个词再按「CJK 段 / 非 CJK 段」切开 →
+// 短段（≤6 字的中文、普通英文词）整段作短语，长中文段切成 3-gram 取 OR，
+// 不足 3 字的段（trigram 根本索引不到）直接丢弃，各部分之间 AND。
+//
+// 为什么长中文段不能整段作短语：短语匹配要求**在原文里逐字连续出现**。
+// 「任务指标」是检索词，原文里有；但问答把「任务指标如何考核」整个
+// 问题传进来时，这句话不可能在文档里逐字出现，实测必然 0 命中（11-11
+// 事故）。切成 3-gram 取 OR，靠 bm25 把命中 gram 最多的块排前面，
+// 召回和排序都够用。
 //
 // 为什么只处理双引号：FTS5 的查询语法里，**双引号内的一切都是字面量**，
-// 所以 * ^ : ( ) - + 这些在引号里根本不需要转义。早先的版本把它们全换成
-// 空格，代价是 "gpt-4" 变成 "gpt 4"、"C++" 变成 "C"——短语匹配要求相邻，
-// 用户搜的明明是原文里的确切写法却命中不了。
+// 所以 * ^ : ( ) - + 这些在引号里根本不需要转义。
 //
-// 短语而不是散词也很关键：散词把「数据库备份」拆成任意组合，
-// 「数据库」三个字单独命中就排前面，精度掉一大截。
-//
-// 不足 3 个字符返回空：trigram 的索引单位就是 3-gram，更短的查询
+// 总 rune 数不足 3 返回空：trigram 的索引单位就是 3-gram，更短的查询
 // 不会命中任何东西，前端会提示「至少 3 个字」。
 func kbFTSEscape(query string) string {
 	q := strings.TrimSpace(query)
 	if q == "" {
 		return ""
 	}
-	q = strings.ReplaceAll(q, `"`, `""`)
-	q = strings.Join(strings.Fields(q), " ")
-	if len([]rune(q)) < 3 {
+	fields := strings.Fields(q)
+	if len([]rune(strings.Join(fields, ""))) < 3 {
 		return ""
 	}
-	return `"` + q + `"`
+	var parts []string
+	for _, f := range fields {
+		parts = append(parts, kbFTSSegment(f)...)
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return strings.Join(parts, " AND ")
+}
+
+// kbFTSSegment 把一个词切成可检索的 FTS5 条件，见 kbFTSEscape 注释。
+//
+// 词按 CJK/非 CJK 切段，段内再处理；但如果所有段都因不足 3 字被丢弃
+// （「60分」→"60"+"分"），整词作为单个短语兜底——中文文档里混合词
+// 太常见（80分、70%、第3页），不能因为切分就把整词弄丢。
+func kbFTSSegment(word string) []string {
+	runes := []rune(word)
+	var out []string
+	i := 0
+	for i < len(runes) {
+		j := i
+		cjk := kbIsCJK(runes[i])
+		for j < len(runes) && kbIsCJK(runes[j]) == cjk {
+			j++
+		}
+		seg := runes[i:j]
+		i = j
+		if len(seg) < 3 {
+			continue // 3-gram 索引不到，留着只会把 AND 拖死
+		}
+		if !cjk {
+			// 英文/数字段：原文里怎么写就怎么搜，短语保精度。
+			lit := strings.ReplaceAll(string(seg), `"`, `""`)
+			out = append(out, `"`+lit+`"`)
+			continue
+		}
+		// 中文段：3-gram 滑窗取 OR。原文包含完整词时所有 gram 同时命中，
+		// bm25 自然把它排最前——不需要再叠一个整段短语保精度。
+		var grams []string
+		for k := 0; k+3 <= len(seg); k++ {
+			grams = append(grams, `"`+string(seg[k:k+3])+`"`)
+		}
+		if len(grams) == 1 {
+			out = append(out, grams[0])
+		} else if len(grams) > 1 {
+			out = append(out, "("+strings.Join(grams, " OR ")+")")
+		}
+	}
+	if len(out) == 0 && len(runes) >= 3 {
+		// 整词兜底：混合短词（「60分」「70%」）切段后全被丢弃，但整词
+		// 本身就是 3 个以上的连续字符，trigram 索引得到，直接短语搜。
+		lit := strings.ReplaceAll(word, `"`, `""`)
+		out = append(out, `"`+lit+`"`)
+	}
+	return out
+}
+
+// kbIsCJK 判断 rune 是否属于中日韩文字（含假名），与 internal/kb 的
+// 判定口径一致；db 层不引 kb 包，这里单独留一份最小实现。
+func kbIsCJK(r rune) bool {
+	return r >= 0x2E80 && r <= 0x9FFF || r >= 0xF900 && r <= 0xFAFF
 }
 
 // KBStats 库容量与状态汇总（页面顶部展示）。

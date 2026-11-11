@@ -146,6 +146,9 @@ func extractPDFPageText(p pdf.Page) string {
 	var b strings.Builder
 	var line []pdf.Text
 	prevY, prevFont := math.NaN(), 0.0
+	// lastRune 记录上一行行尾字符：判断行内空格该不该插时要用到
+	// 「上一个写出的字符是不是 CJK」，而不是每个文本块各自为政。
+	lastRune := rune(0)
 
 	flushLine := func() {
 		if len(line) == 0 {
@@ -156,11 +159,20 @@ func extractPDFPageText(p pdf.Page) string {
 		prevEnd := math.NaN()
 		for _, t := range line {
 			// 两个文本块之间的间距明显大于字宽 → 中间应该有个空格。
-			// 没有这一步，英文会变成 "Thequickbrownfox"（中文不受影响）。
-			if !math.IsNaN(prevEnd) && t.X-prevEnd > t.FontSize*0.3 {
+			// 没有这一步，英文会变成 "Thequickbrownfox"。
+			// 但 CJK/数字之间例外：Word/WPS 导出的 PDF 常把每个汉字（甚至
+			// 每个数字）作为独立文本对象摆放，字距判断在这里几乎必然误触发，
+			// 把整页中文插成「项 目 立 项」、「6 0 分」，trigram 索引直接
+			// 废掉（实测事故）。这些字符本来就不需要词间空格，直接不插。
+			rs := []rune(t.S)
+			if !math.IsNaN(prevEnd) && t.X-prevEnd > t.FontSize*0.3 &&
+				!(gluedRune(lastRune) && len(rs) > 0 && gluedRune(rs[0])) {
 				lb.WriteString(" ")
 			}
 			lb.WriteString(t.S)
+			if len(rs) > 0 {
+				lastRune = rs[len(rs)-1]
+			}
 			prevEnd = t.X + t.W
 		}
 		y, fs := line[0].Y, line[0].FontSize
@@ -212,7 +224,55 @@ func normalizePDFPage(s string) string {
 		blank = 0
 		out = append(out, l)
 	}
-	return strings.TrimSpace(strings.Join(out, "\n"))
+	// CJK 间空格压缩是兜底防线：不管空格来自纯 Go 的字距判断还是
+	// pdftotext -layout 的版面还原，中文词间空格对检索都是纯噪声——
+	// trigram 把「项 目 立 项」当带空格的串索引，用户搜「立项」永远搜不到。
+	return collapseCJKSpaces(strings.TrimSpace(strings.Join(out, "\n")))
+}
+
+// isCJK 判断 rune 是否属于中日韩文字、假名或全角标点。
+// 全角标点也要算：它们与汉字之间的空格同样该压掉（「一 、 总 则」→「一、总则」）。
+func isCJK(r rune) bool {
+	switch {
+	case r >= 0x2E80 && r <= 0x9FFF: // CJK 部首、汉字、日文假名、注音
+		return true
+	case r >= 0xF900 && r <= 0xFAFF: // CJK 兼容表意文字
+		return true
+	case r >= 0xFF00 && r <= 0xFFEF: // 全角标点与全角字母数字
+		return true
+	}
+	return false
+}
+
+// gluedRune 空格可以安全压掉的字符类别：CJK/全角标点、ASCII 数字、百分号。
+// 这三类相邻时的空格在 PDF 抽取结果里几乎都是版面噪声（「6 0 分」「7 0 %」），
+// 而拉丁字母参与时（「使用 Docker」「PDF 文件」）空格是有信息量的分隔，要保留。
+func gluedRune(r rune) bool {
+	return isCJK(r) || (r >= '0' && r <= '9') || r == '%'
+}
+
+// collapseCJKSpaces 删除夹在两段 CJK/数字文字之间的空白（连续空格/制表符整段删）。
+// 中英文之间的空格（「使用 Docker 部署」）保留不动——那才是有信息量的分隔。
+func collapseCJKSpaces(s string) string {
+	runes := []rune(s)
+	out := make([]rune, 0, len(runes))
+	i := 0
+	for i < len(runes) {
+		r := runes[i]
+		if (r == ' ' || r == '\t') && i > 0 && gluedRune(runes[i-1]) {
+			j := i
+			for j < len(runes) && (runes[j] == ' ' || runes[j] == '\t') {
+				j++
+			}
+			if j < len(runes) && gluedRune(runes[j]) {
+				i = j
+				continue
+			}
+		}
+		out = append(out, r)
+		i++
+	}
+	return string(out)
 }
 
 // quality 有效字符占比。
