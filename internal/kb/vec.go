@@ -81,6 +81,16 @@ type VectorEntry struct {
 	Dim   int
 	// Tag 归属标签（知识库 id）。检索时可按标签过滤，空串表示不限。
 	Tag string
+	// SourceID 切片所属的源文件。只用于「限定在某一份文档内提问」，
+	// 与 Tag 一样在扫描期过滤。
+	SourceID string
+}
+
+// VectorFilter 检索时的范围限定。两个字段互不冲突：
+// 都为空 = 全库；只给 LibraryID = 单库；再给 SourceID = 单文件。
+type VectorFilter struct {
+	LibraryID string
+	SourceID  string
 }
 
 // VectorIndex 连续内存的行优先矩阵，便于顺序扫描。
@@ -92,9 +102,11 @@ type VectorIndex struct {
 	// Tags 与 RowIDs 一一对应，值已去重（整库共用同一个字符串实例）。
 	// 不存一份 map[rowid]tag：矩阵扫描是顺序的，按下标直取比哈希命中快，
 	// 也不用为每次检索重建映射。
-	Tags   []string
-	Matrix []float32
-	Dim    int
+	Tags []string
+	// SourceIDs 与 RowIDs 一一对应，同样去重。
+	SourceIDs []string
+	Matrix    []float32
+	Dim       int
 	// Skipped 维度与主流不一致而被跳过的条数（换模型过渡期会出现）。
 	Skipped int
 }
@@ -125,9 +137,11 @@ func BuildIndex(entries []VectorEntry) *VectorIndex {
 	idx := &VectorIndex{Dim: dim}
 	idx.RowIDs = make([]int64, 0, best)
 	idx.Tags = make([]string, 0, best)
+	idx.SourceIDs = make([]string, 0, best)
 	idx.Matrix = make([]float32, 0, best*dim)
 	// 标签去重：整库几千块共用同一个库 id，不去重就是几千份同内容字符串头。
 	interned := make(map[string]string, 8)
+	internedSrc := make(map[string]string, 64)
 	for _, e := range entries {
 		if e.Dim != dim || len(e.Vec) != dim*4 {
 			idx.Skipped++
@@ -143,8 +157,14 @@ func BuildIndex(entries []VectorEntry) *VectorIndex {
 			tag = e.Tag
 			interned[e.Tag] = tag
 		}
+		src, ok := internedSrc[e.SourceID]
+		if !ok {
+			src = e.SourceID
+			internedSrc[e.SourceID] = src
+		}
 		idx.RowIDs = append(idx.RowIDs, e.RowID)
 		idx.Tags = append(idx.Tags, tag)
+		idx.SourceIDs = append(idx.SourceIDs, src)
 		idx.Matrix = append(idx.Matrix, v...)
 	}
 	return idx
@@ -166,13 +186,12 @@ type ScoredRow struct {
 
 // TopK 暴力扫描取前 k 个。
 //
-// tag 非空时只统计该标签下的行（按知识库检索）。过滤在扫描时做，
-// 不是先取 TopK 再筛：先筛后取的差别在「整个库只占全库的 5%」时非常明显，
-// 那时 Top30 里可能一条都不属于目标库，检索直接空手而归。
+// 过滤在扫描时做，不是先取 TopK 再筛：先筛后取的差别在「目标范围只占
+// 全库的 5%」时非常明显——那时 Top30 里可能一条都不属于目标，检索直接空手而归。
 //
 // 全排序而不是堆：k 通常 30、n 通常几万，全排序 n log n 在这个量级
 // 比维护小顶堆更快（没有堆操作的常数开销），代码也短。
-func (x *VectorIndex) TopK(query []float32, k int, tag string) []ScoredRow {
+func (x *VectorIndex) TopK(query []float32, k int, f VectorFilter) []ScoredRow {
 	if x == nil || len(x.RowIDs) == 0 || k <= 0 || len(query) != x.Dim {
 		return nil
 	}
@@ -180,8 +199,11 @@ func (x *VectorIndex) TopK(query []float32, k int, tag string) []ScoredRow {
 	scored := make([]ScoredRow, 0, n)
 	dim := x.Dim
 	for i := 0; i < n; i++ {
-		// Tags 可能与 RowIDs 不等长（老版本构造的索引），越界时按「不过滤」处理。
-		if tag != "" && i < len(x.Tags) && x.Tags[i] != tag {
+		// Tags/SourceIDs 可能与 RowIDs 不等长（老版本构造的索引），越界时按「不过滤」处理。
+		if f.LibraryID != "" && i < len(x.Tags) && x.Tags[i] != f.LibraryID {
+			continue
+		}
+		if f.SourceID != "" && i < len(x.SourceIDs) && x.SourceIDs[i] != f.SourceID {
 			continue
 		}
 		off := i * dim

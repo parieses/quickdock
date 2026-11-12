@@ -2,6 +2,7 @@ package kb
 
 import (
 	"bytes"
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -9,6 +10,7 @@ import (
 	"os/exec"
 	"sort"
 	"strings"
+	"time"
 	"unicode"
 
 	"github.com/ledongthuc/pdf"
@@ -43,6 +45,11 @@ func parsePDF(path string) (*Document, error) {
 
 	// 路线 1：pdftotext（若本机有 poppler）。\f 是它的分页符。
 	if pages, ok := pdfTextViaExec(path); ok {
+		// 去掉尾部空页：末尾那个 \f 之后常跟一个空串，直接 len() 会多算一页。
+		for len(pages) > 0 && strings.TrimSpace(pages[len(pages)-1]) == "" {
+			pages = pages[:len(pages)-1]
+		}
+		var joined strings.Builder
 		for i, page := range pages {
 			if i >= pdfMaxPages {
 				doc.Truncated = true
@@ -56,13 +63,18 @@ func parsePDF(path string) (*Document, error) {
 				text = string([]rune(text)[:pdfPageMaxRunes])
 				doc.Truncated = true
 			}
+			joined.WriteString(text)
 			doc.Blocks = append(doc.Blocks, Block{Heading: fmt.Sprintf("第 %d 页", i+1), Text: text, Page: i + 1})
 		}
-		doc.Pages = len(pages)
-		if len(doc.Blocks) > 0 {
+		// 质量校验与纯 Go 路线对齐：pdftotext 遇到没有 ToUnicode 映射的字体
+		// 会吐一堆 (cid:123) 之类的垃圾，此前这条路径不做检查就当正常文本入库，
+		// 同一份 PDF 走两条路线得到两种结论（11-12 修）。
+		if len(doc.Blocks) > 0 && quality(joined.String()) >= pdfQualityFloor {
+			doc.Pages = len(pages)
 			return doc, nil
 		}
-		// pdftotext 一个字都没抽出来 → 大概率扫描件，继续用纯 Go 兜一遍。
+		// 质量不达标或一个字都没抽出来 → 丢掉这批块，继续用纯 Go 兜一遍。
+		doc.Blocks = nil
 	}
 
 	// 路线 2：纯 Go。
@@ -316,6 +328,13 @@ func isPDFEncryptedErr(err error) bool {
 	return strings.Contains(msg, "encrypt") || strings.Contains(msg, "password")
 }
 
+// pdfExecTimeout 外部 pdftotext 的单次调用上限。
+//
+// 索引流水线是单 goroutine 串行的，一个畸形 PDF 让 pdftotext 卡住，
+// 后面的文件全部排队等它，而且此时点「停止」也无效（取消只在取队列时判）。
+// 正常的几百页 PDF 一两秒就出结果，90 秒已经是极端宽裕。
+const pdfExecTimeout = 90 * time.Second
+
 // pdfTextViaExec 尝试用 pdftotext 抽取。
 //
 // 只做「有没有」的探测，不做安装提示：没有 poppler 的机器上，
@@ -325,8 +344,13 @@ func pdfTextViaExec(path string) ([]string, bool) {
 	if err != nil {
 		return nil, false
 	}
-	cmd := exec.Command(bin, "-layout", "-enc", "UTF-8", path, "-")
+	ctx, cancel := context.WithTimeout(context.Background(), pdfExecTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, bin, "-layout", "-enc", "UTF-8", path, "-")
 	hideCmdWindow(cmd)
+	// 进程被杀后，若还有子进程握着 stdout，Wait 会一直等下去。
+	// WaitDelay 兜住这最后 5 秒（Go 1.20+）。
+	cmd.WaitDelay = 5 * time.Second
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {

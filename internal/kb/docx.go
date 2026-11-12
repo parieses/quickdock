@@ -31,7 +31,14 @@ var docxTitleRe = regexp.MustCompile(`<dc:title>([^<]*)</dc:title>`)
 // 否则用户只会看到一句 "zip: not a valid zip file"。
 var cfwMagic = []byte{0xD0, 0xCF, 0x11, 0xE0}
 
+// docxMaxSize docx 的读取上限。PDF/纯文本都有各自的门禁（200MB/16MB），
+// 这里没有的话一个几百 MB 的 docx 会把整份文件读进内存。
+const docxMaxSize = 100 << 20
+
 func parseDocx(path string) (*Document, error) {
+	if st, err := os.Stat(path); err == nil && st.Size() > docxMaxSize {
+		return nil, fmt.Errorf("%w: docx 超过 100MB", ErrUnsupported)
+	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
@@ -156,7 +163,10 @@ func (w *docxWalker) onStart(t xml.StartElement) {
 	case "tab":
 		w.write("\t")
 	case "br", "cr":
-		w.write("\n")
+		// 段落内的换行（Shift+Enter）。写成空格而不是 \n：这点空白落在两个
+		// 汉字之间会把「项目立项」拆成「项目 立项」，trigram 索引就搜不到了。
+		// 换成空格后由 ParseFile 的 normalizeDocWhitespace 统一压掉。
+		w.write(" ")
 	case "tbl":
 		// 表格开始前先把挂着的段落收掉，避免表格内容被拼进上一段。
 		w.flushParagraph()

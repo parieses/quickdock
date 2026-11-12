@@ -501,6 +501,9 @@ function isChunkExpanded(id: string) {
 // ---- 检索 ----
 
 let searchTimer: ReturnType<typeof setTimeout> | null = null
+// 请求序号：检索要走向量接口（几百毫秒），没有序号的话慢的旧请求会
+// 后到覆盖新结果；出错时旧结果也还挂在新查询下面，高亮词都对不上。
+let searchSeq = 0
 
 watch(query, () => {
   if (searchTimer) clearTimeout(searchTimer)
@@ -517,21 +520,28 @@ watch(query, () => {
 async function runSearch() {
   const q = query.value.trim()
   if (q.length < 3) return
+  const seq = ++searchSeq
   searching.value = true
   try {
     const res = unwrap<{ hits: SearchHit[]; mode: string; elapsedMs: number; vecFallback: boolean }>(
       await SearchKB(q, settings.topN, libId.value),
     )
+    if (seq !== searchSeq) return // 已有更新的查询，丢弃这次的结果
     hits.value = res?.hits ?? []
     searchMode.value = res?.mode ?? 'fts'
     searchElapsed.value = res?.elapsedMs ?? 0
     searchFallback.value = !!res?.vecFallback
     searched.value = true
   } catch (e) {
-    toast.error(getErrorMessage(e))
+    if (seq === searchSeq) {
+      // 只在仍是最新查询时清结果并提示：旧请求的失败不该干扰新查询的展示。
+      hits.value = []
+      searched.value = true
+      toast.error(getErrorMessage(e))
+    }
     logErr('kb', e)
   } finally {
-    searching.value = false
+    if (seq === searchSeq) searching.value = false
   }
 }
 

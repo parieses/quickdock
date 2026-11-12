@@ -39,6 +39,11 @@ func parseXlsx(path string) (*Document, error) {
 		}
 	}
 
+	// GetRows 是整表载入内存，先挡掉离谱的大文件（与 docx 的门禁同思路）。
+	if st, err := os.Stat(path); err == nil && st.Size() > 100<<20 {
+		return nil, fmt.Errorf("%w: xlsx 超过 100MB", ErrUnsupported)
+	}
+
 	f, err := excelize.OpenFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", ErrCorrupted, err)
@@ -121,7 +126,12 @@ func rowIsEmpty(r []string) bool {
 func joinCells(r []string) string {
 	cells := make([]string, 0, len(r))
 	for _, c := range r {
+		// 单元格内的换行（Alt+Enter）改成一个空格：既保住「两个词别粘一起」，
+		// 又不会在汉字之间留下空白把 trigram 索引切断——汉字间的空格
+		// 由 ParseFile 的 normalizeDocWhitespace 统一压掉。
+		c = strings.ReplaceAll(c, "\r\n", " ")
 		c = strings.ReplaceAll(c, "\n", " ")
+		c = strings.ReplaceAll(c, "\r", " ")
 		c = strings.TrimSpace(c)
 		if c == "" {
 			continue

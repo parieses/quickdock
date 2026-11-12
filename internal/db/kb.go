@@ -413,24 +413,32 @@ type KBVectorRow struct {
 	Vec       []byte
 	Dim       int
 	LibraryID string
+	SourceID  string
 }
 
-// AllVectors 读出全部已建立向量的切片（只读 rowid/chunk_id/vec/dim/库归属五列）。
+// AllVectors 读出指定模型下已建立向量的切片。
+//
+// 必须按 embed_model 过滤：换模型后旧向量与新向量不在同一空间，混在一起算
+// 余弦相似度是噪声，而且现象是「结果看起来正常、只是不准」。此前不过滤，
+// 同维度的两个模型（都 1024）会直接混算（11-12 修）。
 //
 // 调用方必须自己缓存：1 万块 × 1024 维 = 40MB，每次检索都全量读盘
 // 会让「点一下搜索」变成几百毫秒的磁盘 IO。services/kb 里有一份
 // 按版本号失效的矩阵缓存（见 KBVecVersion）。
 //
-// 顺带带出 library_id：向量检索要支持「只搜某个知识库」，
-// 而矩阵里只有 rowid，没有库归属就没法在扫描时过滤——
-// 事后过滤等于把 TopK 名额浪费在别的库上，缩小范围后结果会明显变差。
-func (d *Database) AllVectors() ([]KBVectorRow, error) {
+// 顺带带出 library_id / source_id：向量检索要支持「只搜某个知识库」
+// 「只搜某份文档」，而矩阵里只有 rowid，没有归属就没法在扫描时过滤——
+// 事后过滤等于把 TopK 名额浪费在别的范围上，缩小范围后结果会明显变差。
+func (d *Database) AllVectors(model string) ([]KBVectorRow, error) {
+	if strings.TrimSpace(model) == "" {
+		return nil, nil
+	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	rows, err := d.conn.Query(`SELECT c.rowid, c.id, c.vec, c.dim, s.library_id
+	rows, err := d.conn.Query(`SELECT c.rowid, c.id, c.vec, c.dim, s.library_id, c.source_id
 		FROM kb_chunks c
 		JOIN kb_sources s ON s.id = c.source_id
-		WHERE c.vec IS NOT NULL AND c.dim > 0`)
+		WHERE c.vec IS NOT NULL AND c.dim > 0 AND c.embed_model = ?`, model)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +446,7 @@ func (d *Database) AllVectors() ([]KBVectorRow, error) {
 	out := []KBVectorRow{}
 	for rows.Next() {
 		var r KBVectorRow
-		if err := rows.Scan(&r.RowID, &r.ChunkID, &r.Vec, &r.Dim, &r.LibraryID); err != nil {
+		if err := rows.Scan(&r.RowID, &r.ChunkID, &r.Vec, &r.Dim, &r.LibraryID, &r.SourceID); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -446,13 +454,30 @@ func (d *Database) AllVectors() ([]KBVectorRow, error) {
 	return out, rows.Err()
 }
 
-// KBVecStats 向量覆盖率（前端提示「N 个片段尚未建立语义索引」）。
-func (d *Database) KBVecStats() (total, withVec int, err error) {
+// KBSourcesPendingVecs 统计「还没用当前模型建向量」的切片数，按源聚合。
+//
+// 用于两处：重建完成后判断这份源是不是真的补全了；扫描时把「ready 但
+// 向量没建全」的源重新排队——此前这类源会被指纹比对直接跳过，
+// 部分块永远没有向量，进度条却显示 100%（11-12 修）。
+func (d *Database) KBSourcesPendingVecs(model string) (map[string]int, error) {
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	row := d.conn.QueryRow(`SELECT COUNT(*), COUNT(vec) FROM kb_chunks`)
-	err = row.Scan(&total, &withVec)
-	return
+	rows, err := d.conn.Query(`SELECT source_id, COUNT(*) FROM kb_chunks
+		WHERE vec IS NULL OR embed_model <> ? GROUP BY source_id`, model)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var n int
+		if err := rows.Scan(&id, &n); err != nil {
+			return nil, err
+		}
+		out[id] = n
+	}
+	return out, rows.Err()
 }
 
 // SearchChunksFTS 关键词路召回。
@@ -464,21 +489,22 @@ func (d *Database) KBVecStats() (total, withVec int, err error) {
 // bm25 的第二列是 heading 的权重：标题路径（"部署/数据库"）命中
 // 比正文某处顺带提到一次更能说明这一块讲的就是这件事。
 //
-// libraryID 非空时只在该库内召回。过滤放在 SQL 里而不是事后筛：
-// LIMIT 是在 WHERE 之后生效的，事后筛会让「TopK 里全是别的库」变成空结果。
-func (d *Database) SearchChunksFTS(query string, limit int, libraryID string) ([]KBHit, error) {
+// libraryID / sourceID 非空时只在该库 / 该文档内召回。过滤放在 SQL 里
+// 而不是事后筛：LIMIT 是在 WHERE 之后生效的，事后筛会让「TopK 里全是
+// 别的范围」变成空结果。
+func (d *Database) SearchChunksFTS(query string, limit int, libraryID, sourceID string) ([]KBHit, error) {
 	q := kbFTSEscape(query)
 	if q == "" || limit <= 0 {
 		return nil, nil
 	}
 	d.mu.RLock()
 	defer d.mu.RUnlock()
-	hits, err := d.ftsQuery(q, limit, libraryID)
+	hits, err := d.ftsQuery(q, limit, libraryID, sourceID)
 	// AND 全不中 → 降级 OR：用户给的关键词只要有一个出现在文档里就值得
 	// 返回（bm25 自动把命中多的排前面）。典型场景是问答把口语化提问拆词
 	// 后个别词在原文里没有逐字对应——整查询全空比给出弱相关结果更糟。
 	if err == nil && len(hits) == 0 && strings.Contains(q, " AND ") {
-		hits, err = d.ftsQuery(strings.ReplaceAll(q, " AND ", " OR "), limit, libraryID)
+		hits, err = d.ftsQuery(strings.ReplaceAll(q, " AND ", " OR "), limit, libraryID, sourceID)
 	}
 	return hits, err
 }
@@ -486,7 +512,7 @@ func (d *Database) SearchChunksFTS(query string, limit int, libraryID string) ([
 // ftsQuery 执行一次 FTS 匹配。这里刻意不给 kb_chunks_fts 起别名：
 // bm25() 的参数必须是 FTS 表在查询里的实际表名，写成 bm25(f, ...) 会报
 // "no such column: f"（实测）。于是 MATCH 与 bm25 都直接用真表名，主表用 c 区分列名。
-func (d *Database) ftsQuery(match string, limit int, libraryID string) ([]KBHit, error) {
+func (d *Database) ftsQuery(match string, limit int, libraryID, sourceID string) ([]KBHit, error) {
 	sqlStr := `
 		SELECT c.rowid, c.id, c.source_id, s.name, s.path, s.library_id, s.ext,
 		       c.heading, c.text, c.page, c.idx
@@ -498,6 +524,10 @@ func (d *Database) ftsQuery(match string, limit int, libraryID string) ([]KBHit,
 	if libraryID != "" {
 		sqlStr += ` AND s.library_id = ?`
 		args = append(args, libraryID)
+	}
+	if sourceID != "" {
+		sqlStr += ` AND c.source_id = ?`
+		args = append(args, sourceID)
 	}
 	sqlStr += ` ORDER BY bm25(kb_chunks_fts, 1.0, 2.0) LIMIT ?`
 	args = append(args, limit)
@@ -582,7 +612,7 @@ func (d *Database) ChunksByRowIDs(rowIDs []int64) ([]KBHit, error) {
 // 总 rune 数不足 3 返回空：trigram 的索引单位就是 3-gram，更短的查询
 // 不会命中任何东西，前端会提示「至少 3 个字」。
 func kbFTSEscape(query string) string {
-	q := strings.TrimSpace(query)
+	q := strings.TrimSpace(kbFoldWidth(query))
 	if q == "" {
 		return ""
 	}
@@ -590,9 +620,10 @@ func kbFTSEscape(query string) string {
 	if len([]rune(strings.Join(fields, ""))) < 3 {
 		return ""
 	}
+	budget := maxQueryGrams
 	var parts []string
 	for _, f := range fields {
-		parts = append(parts, kbFTSSegment(f)...)
+		parts = append(parts, kbFTSSegment(f, &budget)...)
 	}
 	if len(parts) == 0 {
 		return ""
@@ -600,12 +631,39 @@ func kbFTSEscape(query string) string {
 	return strings.Join(parts, " AND ")
 }
 
+// maxQueryGrams 单次查询最多生成多少个 3-gram。
+//
+// 不设上限时，一段两百字的提问会产生近两百个 OR 项——查询本身变慢是小事，
+// 召回噪声才是大问题：几乎每个块都能命中某个 gram，排序退化成随机。
+const maxQueryGrams = 40
+
+// kbFoldWidth 全角 ASCII（＋数字与字母）折成半角。
+//
+// WPS/中文输入法导出的文档里「６０分」和「60分」混着出现是常态；
+// 解析侧已做同样的折叠（internal/kb 的 foldWidth），两边口径必须一致，
+// 否则用户搜全角、原文是半角，永远命中不了。
+func kbFoldWidth(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == 0x3000:
+			b.WriteRune(' ')
+		case r >= 0xFF01 && r <= 0xFF5E:
+			b.WriteRune(r - 0xFEE0)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
 // kbFTSSegment 把一个词切成可检索的 FTS5 条件，见 kbFTSEscape 注释。
 //
 // 词按 CJK/非 CJK 切段，段内再处理；但如果所有段都因不足 3 字被丢弃
 // （「60分」→"60"+"分"），整词作为单个短语兜底——中文文档里混合词
 // 太常见（80分、70%、第3页），不能因为切分就把整词弄丢。
-func kbFTSSegment(word string) []string {
+func kbFTSSegment(word string, budget *int) []string {
 	runes := []rune(word)
 	var out []string
 	i := 0
@@ -632,6 +690,17 @@ func kbFTSSegment(word string) []string {
 		for k := 0; k+3 <= len(seg); k++ {
 			grams = append(grams, `"`+string(seg[k:k+3])+`"`)
 		}
+		if len(grams) > *budget && *budget > 0 {
+			// 超预算时均匀抽样：只取开头会让句子后半段的语义完全丢失。
+			keep := *budget
+			stride := float64(len(grams)) / float64(keep)
+			sampled := make([]string, 0, keep)
+			for m := 0; m < keep; m++ {
+				sampled = append(sampled, grams[int(float64(m)*stride)])
+			}
+			grams = sampled
+		}
+		*budget -= len(grams)
 		if len(grams) == 1 {
 			out = append(out, grams[0])
 		} else if len(grams) > 1 {
@@ -647,10 +716,10 @@ func kbFTSSegment(word string) []string {
 	return out
 }
 
-// kbIsCJK 判断 rune 是否属于中日韩文字（含假名），与 internal/kb 的
+// kbIsCJK 判断 rune 是否属于中日韩文字（含假名、全角区），与 internal/kb 的
 // 判定口径一致；db 层不引 kb 包，这里单独留一份最小实现。
 func kbIsCJK(r rune) bool {
-	return r >= 0x2E80 && r <= 0x9FFF || r >= 0xF900 && r <= 0xFAFF
+	return r >= 0x2E80 && r <= 0x9FFF || r >= 0xF900 && r <= 0xFAFF || r >= 0xFF00 && r <= 0xFFEF
 }
 
 // KBStats 库容量与状态汇总（页面顶部展示）。
@@ -703,10 +772,10 @@ func (d *Database) MarkKBSourcesStale(model string) (int64, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	res, err := d.conn.Exec(`UPDATE kb_sources SET status = ?, updated_at = ?
-		WHERE status = ? AND id IN (
+		WHERE status IN (?, ?, ?) AND id IN (
 			SELECT DISTINCT source_id FROM kb_chunks
 			WHERE embed_model <> '' AND embed_model <> ?)`,
-		KBSourceStale, now(), KBSourceReady, model)
+		KBSourceStale, now(), KBSourceReady, KBSourceFailed, KBSourceMissing, model)
 	if err != nil {
 		return 0, err
 	}

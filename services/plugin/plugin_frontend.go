@@ -49,10 +49,16 @@ func (p *PluginService) GetPluginIcon(pluginID string, theme string) *services.A
 	}
 
 	// 优先从数据库读取图标（键含主题与插件版本：主题各存一份，插件升级后自然失效）
+	// 读失败必须留日志：err 被 err == nil && 吞掉的话，白名单漏配这类持久层
+	// 故障会表现为「图标缓存永远不生效」且日志一片干净（11-12 修）。
 	cacheKey := iconCacheKey(theme, inst.Manifest.Version, pluginID)
 	if p.App.DB != nil {
-		if iconData, err := p.App.DB.GetValue(cacheKey); err == nil && iconData != "" {
-			return services.Ok(iconData)
+		if iconData, err := p.App.DB.GetValue(cacheKey); err == nil {
+			if iconData != "" {
+				return services.Ok(iconData)
+			}
+		} else {
+			logger.W("[plugin] 读取图标缓存失败 key=%s: %v", cacheKey, err)
 		}
 	}
 
@@ -79,9 +85,12 @@ func (p *PluginService) GetPluginIcon(pluginID string, theme string) *services.A
 	mime := platform.IconMIME(filepath.Ext(iconPath))
 	dataURI := fmt.Sprintf("data:%s;base64,%s", mime, base64Encode(data))
 
-	// 写入数据库缓存
+	// 写入数据库缓存。返回值此前被直接丢弃：白名单漏配这类故障
+	// 会变成「每次都重新读图标文件」且无迹可查。
 	if p.App.DB != nil {
-		p.App.DB.SetValue(cacheKey, dataURI)
+		if err := p.App.DB.SetValue(cacheKey, dataURI); err != nil {
+			logger.W("[plugin] 写入图标缓存失败 key=%s: %v", cacheKey, err)
+		}
 	}
 
 	return services.Ok(dataURI)

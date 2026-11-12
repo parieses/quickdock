@@ -94,6 +94,9 @@ type KBService struct {
 	// 每批都失效会让索引期间每次检索都重新读一遍几十 MB。
 	cacheMu  sync.RWMutex
 	vecIndex *ikb.VectorIndex
+	// vecIndexModel 缓存矩阵对应的 embedding 模型名。换模型后旧矩阵
+	// 必须作废——同维度的两个模型混算相似度是噪声（11-12 修）。
+	vecIndexModel string
 }
 
 // NewKBService 创建知识库服务。
@@ -155,8 +158,9 @@ func (s *KBService) settings() Settings {
 	return cfg
 }
 
-// SaveKBSettings 保存设置。改 embedding 模型会把已有的 ready 源标成 stale：
-// 旧向量与新模型不在同一空间，混用算出来的相似度是噪声。
+// SaveKBSettings 保存设置。换 embedding 模型，或同名模型换了端点/Key，
+// 会把已有向量的源标成 stale：旧向量与新配置不在同一空间，混用算出来的
+// 相似度是噪声。
 func (s *KBService) SaveKBSettings(cfg Settings) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
@@ -182,8 +186,20 @@ func (s *KBService) SaveKBSettings(cfg Settings) *services.ApiResult {
 		return services.Fail(err)
 	}
 
-	if old.EmbedModel != cfg.EmbedModel && cfg.EmbedModel != "" {
+	// 标 stale 的两个触发条件：
+	// ① 模型名变了：旧向量与新模型不在同一空间（MarkKBSourcesStale 按
+	//    embed_model 过滤，精确命中）。
+	// ② 模型名没变但端点/Key 变了：同名模型跨供应商的向量空间同样无法
+	//    保证一致，而切片上只记了模型名，DB 层分辨不出来——传空模型名
+	//    让「有任何向量的源」全量标 stale，宁可重算也不混用。
+	modelChanged := old.EmbedModel != cfg.EmbedModel && cfg.EmbedModel != ""
+	endpointChanged := old.EmbedBaseURL != cfg.EmbedBaseURL || old.EmbedAPIKey != cfg.EmbedAPIKey
+	if modelChanged {
 		if _, err := s.App.DB.MarkKBSourcesStale(cfg.EmbedModel); err != nil {
+			return services.Fail(err)
+		}
+	} else if endpointChanged && cfg.EmbedModel != "" {
+		if _, err := s.App.DB.MarkKBSourcesStale(""); err != nil {
 			return services.Fail(err)
 		}
 	}
@@ -362,8 +378,12 @@ func (s *KBService) AddKBFiles(libraryID string, paths []string) *services.ApiRe
 		}
 		if existing != nil {
 			src.ID = existing.ID
+			// 保留已存的 hash：Upsert 会用本次算的 hash（可能为空）覆盖，
+			// 把「按 hash 判变化」的依据抹掉，重复添加就会白白重建整份索引。
 			// 指纹没变且已经就绪 → 什么都不用做，计入 skipped。
-			// 用户重复拖同一批文件是常态，每次都重切重算既慢又费钱。
+			if existing.Hash != "" {
+				src.Hash = existing.Hash
+			}
 			if existing.Status == db.KBSourceReady &&
 				existing.Size == src.Size && existing.Mtime == src.Mtime {
 				res.Skipped++
@@ -386,7 +406,7 @@ func (s *KBService) AddKBFiles(libraryID string, paths []string) *services.ApiRe
 		res.Added++
 	}
 
-	s.startWorker()
+	s.resume()
 	return services.Ok(res)
 }
 
@@ -473,6 +493,14 @@ func (s *KBService) ScanKB() *services.ApiResult {
 		return services.Fail(err)
 	}
 	queued, missing := 0, 0
+	// ready 但向量没建全的源（上次重建时 embedding 批次失败）：指纹比对会
+	// 直接跳过它们，部分块永远没有向量。这里按当前模型统计一次，一并补队。
+	var pendingVecs map[string]int
+	if cfg := s.settings(); cfg.VectorOn && cfg.EmbedModel != "" {
+		if m, err := s.App.DB.KBSourcesPendingVecs(cfg.EmbedModel); err == nil {
+			pendingVecs = m
+		}
+	}
 	for _, src := range list {
 		st, statErr := os.Stat(src.Path)
 		if statErr != nil {
@@ -486,6 +514,12 @@ func (s *KBService) ScanKB() *services.ApiResult {
 		}
 		if src.Status == db.KBSourceReady &&
 			src.Size == st.Size() && src.Mtime == st.ModTime().Unix() {
+			// 指纹没变，但向量可能没建全（上次 embedding 失败）→ 只补向量。
+			if pendingVecs == nil || pendingVecs[src.ID] == 0 {
+				continue
+			}
+			s.enqueue(src.ID)
+			queued++
 			continue
 		}
 		if src.Status == db.KBSourceMissing {
@@ -494,7 +528,7 @@ func (s *KBService) ScanKB() *services.ApiResult {
 		s.enqueue(src.ID)
 		queued++
 	}
-	s.startWorker()
+	s.resume()
 	return services.Ok(map[string]interface{}{"queued": queued, "missing": missing})
 }
 
@@ -510,7 +544,7 @@ func (s *KBService) ReindexKBSource(id string) *services.ApiResult {
 		return services.Fail(err)
 	}
 	s.enqueue(id)
-	s.startWorker()
+	s.resume()
 	return services.Ok(nil)
 }
 
@@ -529,7 +563,7 @@ func (s *KBService) ReindexAll() *services.ApiResult {
 		}
 		s.enqueue(src.ID)
 	}
-	s.startWorker()
+	s.resume()
 	return services.Ok(map[string]interface{}{"queued": len(list)})
 }
 
@@ -558,6 +592,9 @@ type KBStatus struct {
 	Stats       db.KBStats `json:"stats"`
 	VectorOn    bool       `json:"vectorOn"`
 	EmbedModel  string     `json:"embedModel"`
+	// VecMissing 还没用当前模型建向量的切片数（含断点续做失败的部分）。
+	// 非零意味着语义召回不完整，前端可提示用户扫一遍补齐。
+	VecMissing int `json:"vecMissing"`
 	// ProfileReady 有无可用的 AI 档案（接口地址 + Key）。
 	// 与 EmbedReady 分开报：两者都缺时都显示「尚未配置 AI 档案」，
 	// 但「档案有、模型名没填」是另一种状态，提示得指对地方，否则用户
@@ -591,6 +628,13 @@ func (s *KBService) GetKBStatus() *services.ApiResult {
 	st.Stats = stats
 	st.VectorOn = cfg.VectorOn
 	st.EmbedModel = cfg.EmbedModel
+	if cfg.VectorOn && cfg.EmbedModel != "" {
+		if m, err := s.App.DB.KBSourcesPendingVecs(cfg.EmbedModel); err == nil {
+			for _, n := range m {
+				st.VecMissing += n
+			}
+		}
+	}
 	_, _, ok := s.embedConfig()
 	st.ProfileReady = ok
 	st.EmbedReady = ok && cfg.EmbedModel != ""
@@ -653,12 +697,18 @@ type SearchResult struct {
 	VecFallback bool `json:"vecFallback"`
 }
 
-// SearchKB 混合检索。libraryID 为空 = 跨全部知识库。
+// SearchKB 混合检索。libraryID 为空 = 跨全部知识库（前端入口）。
+func (s *KBService) SearchKB(query string, topN int, libraryID string) *services.ApiResult {
+	return s.searchKB(query, topN, libraryID, "")
+}
+
+// searchKB 混合检索实现。sourceID 非空时限定在某一份文档内
+// （问答的「只问这份文档」场景）。
 //
 // 两路各取 TopK，用 RRF 按名次融合——不做分数加权：BM25 是负分、
 // 余弦是 [-1,1]，量纲不同，归一化再调权重是给自己找麻烦，
 // 而且某一路没召回时加权会直接把结果带偏。
-func (s *KBService) SearchKB(query string, topN int, libraryID string) *services.ApiResult {
+func (s *KBService) searchKB(query string, topN int, libraryID, sourceID string) *services.ApiResult {
 	if r := s.dbOK(); r != nil {
 		return r
 	}
@@ -673,7 +723,7 @@ func (s *KBService) SearchKB(query string, topN int, libraryID string) *services
 	libraryID = strings.TrimSpace(libraryID)
 	start := time.Now()
 
-	ftsHits, err := s.App.DB.SearchChunksFTS(q, searchTopK, libraryID)
+	ftsHits, err := s.App.DB.SearchChunksFTS(q, searchTopK, libraryID, sourceID)
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -689,23 +739,31 @@ func (s *KBService) SearchKB(query string, topN int, libraryID string) *services
 	vecFallback := false
 	var vecIDs []int64
 	if s.vectorUsable() {
-		ids, ok := s.vectorSearch(q, searchTopK, libraryID)
+		ids, ok := s.vectorSearch(q, searchTopK, libraryID, sourceID)
 		if ok {
-			vecIDs = ids
-			mode = "hybrid"
 			missing := make([]int64, 0, len(ids))
 			for _, id := range ids {
 				if _, exists := byRow[id]; !exists {
 					missing = append(missing, id)
 				}
 			}
+			// 回表失败就把向量路整条丢弃并如实降级：带着 hybrid 的 mode
+			// 却丢掉一半召回，调用方拿到的是一份假象（11-12 修）。
 			if len(missing) > 0 {
 				extra, dbErr := s.App.DB.ChunksByRowIDs(missing)
-				if dbErr == nil {
+				if dbErr != nil {
+					logger.W("[kb] 向量命中回表失败，降级纯关键词: %v", dbErr)
+					vecFallback = true
+					ids = nil
+				} else {
 					for _, h := range extra {
 						byRow[h.RowID] = h
 					}
 				}
+			}
+			if ids != nil {
+				vecIDs = ids
+				mode = "hybrid"
 			}
 		} else {
 			vecFallback = true
@@ -785,9 +843,9 @@ func (s *KBService) vectorUsable() bool {
 // vectorSearch 查向量路，返回按相似度降序的 rowid。
 // ok=false 表示这次查不了（embedding 失败），调用方降级为纯 FTS。
 //
-// libraryID 直接传给索引做扫描期过滤，不在这里事后剔除：
-// 事后剔除会让 TopK 名额被别的库占满，小库检索直接返回空。
-func (s *KBService) vectorSearch(query string, k int, libraryID string) ([]int64, bool) {
+// libraryID / sourceID 直接传给索引做扫描期过滤，不在这里事后剔除：
+// 事后剔除会让 TopK 名额被别的范围占满，小范围检索直接返回空。
+func (s *KBService) vectorSearch(query string, k int, libraryID, sourceID string) ([]int64, bool) {
 	baseURL, apiKey, ok := s.embedConfig()
 	if !ok {
 		return nil, false
@@ -798,14 +856,19 @@ func (s *KBService) vectorSearch(query string, k int, libraryID string) ([]int64
 	ctx, cancel := contextWithTimeout(12 * time.Second)
 	defer cancel()
 	vecs, err := emb.EmbedBatch(ctx, []string{query})
-	if err != nil || len(vecs) == 0 {
+	if err != nil {
+		// 此前 err 被直接丢弃，用户只看到「语义不亮」，日志里一个字都没有。
+		logger.W("[kb] 查询向量计算失败（model=%s）: %v", cfg.EmbedModel, err)
+		return nil, false
+	}
+	if len(vecs) == 0 {
 		return nil, false
 	}
 	qv := vecs[0]
 	ikb.Normalize(qv)
 
 	idx := s.getVectorIndex()
-	rows := idx.TopK(qv, k, libraryID)
+	rows := idx.TopK(qv, k, ikb.VectorFilter{LibraryID: libraryID, SourceID: sourceID})
 	if len(rows) == 0 {
 		return nil, false
 	}
@@ -817,9 +880,12 @@ func (s *KBService) vectorSearch(query string, k int, libraryID string) ([]int64
 }
 
 // getVectorIndex 取（或懒加载）向量矩阵缓存。
+// 缓存按模型名绑定：换模型后必须重读，否则旧模型的向量会被拿去和新模型的
+// 查询向量算相似度（AllVectors 已按模型过滤，这里的双保险是避免用错缓存）。
 func (s *KBService) getVectorIndex() *ikb.VectorIndex {
+	model := s.settings().EmbedModel
 	s.cacheMu.RLock()
-	if s.vecIndex != nil {
+	if s.vecIndex != nil && s.vecIndexModel == model {
 		idx := s.vecIndex
 		s.cacheMu.RUnlock()
 		return idx
@@ -828,26 +894,30 @@ func (s *KBService) getVectorIndex() *ikb.VectorIndex {
 
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
-	if s.vecIndex != nil {
+	if s.vecIndex != nil && s.vecIndexModel == model {
 		return s.vecIndex
 	}
-	rows, err := s.App.DB.AllVectors()
+	rows, err := s.App.DB.AllVectors(model)
 	if err != nil {
 		// 读失败不缓存空结果：下次检索再试，否则一次瞬时错误会让
-		// 向量检索在本次进程生命周期内永久失效。
+		// 向量检索在本次进程生命周期内永久失效。但要留日志——
+		// 此前静默返回空索引，语义检索暗下去没人知道为什么。
+		logger.W("[kb] 读取向量矩阵失败: %v", err)
 		return &ikb.VectorIndex{}
 	}
 	entries := make([]ikb.VectorEntry, 0, len(rows))
 	for _, r := range rows {
-		entries = append(entries, ikb.VectorEntry{RowID: r.RowID, Vec: r.Vec, Dim: r.Dim, Tag: r.LibraryID})
+		entries = append(entries, ikb.VectorEntry{RowID: r.RowID, Vec: r.Vec, Dim: r.Dim, Tag: r.LibraryID, SourceID: r.SourceID})
 	}
 	s.vecIndex = ikb.BuildIndex(entries)
+	s.vecIndexModel = model
 	return s.vecIndex
 }
 
 func (s *KBService) invalidateVecCache() {
 	s.cacheMu.Lock()
 	s.vecIndex = nil
+	s.vecIndexModel = ""
 	s.cacheMu.Unlock()
 }
 
@@ -899,7 +969,7 @@ func (s *KBService) AskKB(req AskKBRequest) *services.ApiResult {
 		return services.FailMsg("AI 能力不可用，请先在设置里配置模型")
 	}
 
-	search, err := unwrapSearch(s.SearchKB(q, req.TopN, req.LibraryID))
+	search, err := unwrapSearch(s.searchKB(q, req.TopN, req.LibraryID, req.SourceID))
 	if err != nil {
 		return services.Fail(err)
 	}
@@ -962,7 +1032,10 @@ func unwrapSearch(r *services.ApiResult) (SearchResult, error) {
 	if v, ok := r.Data.(SearchResult); ok {
 		return v, nil
 	}
-	return SearchResult{}, nil
+	// Data 类型不对（如 nil）时此前返回空结果 + nil error，
+	// AskKB 会把它当成「0 命中」给用户一句「资料中没有提到」，
+	// 真实故障被伪装成正常空结果。
+	return SearchResult{}, fmt.Errorf("检索结果类型异常")
 }
 
 const kbAskSystemPrompt = `你是文档问答助手，基于用户提供的资料回答问题。

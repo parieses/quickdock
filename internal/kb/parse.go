@@ -108,10 +108,49 @@ func ParseFile(path string) (*Document, error) {
 	if doc.Title == "" {
 		doc.Title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
 	}
+	normalizeDocWhitespace(doc)
 	if err := truncateDoc(doc, MaxTextRunes); err != nil {
 		return nil, err
 	}
 	return doc, nil
+}
+
+// normalizeDocWhitespace 所有格式的收尾归一。
+//
+// 各解析器都有自己的空白来源：PDF 按坐标重排会插空格、xlsx 单元格内的
+// 换行被换成空格、docx 的 <w:br/> 也是一次换行。这些空白一旦落在两个
+// 汉字之间，就会把「项目立项」切成「项 目 立 项」，而 FTS5 用的是
+// trigram 分词——索引里存什么，用户就必须原样搜什么，中间多一个空格
+// 等于这段文字永远搜不到（11-11 事故，PDF 路径已经踩过）。
+//
+// 所以不再在每个解析器里各修一遍，统一在这里收口：任何格式进来，
+// 汉字之间都不允许留空白。中英文之间（「使用 Docker」）保留空格。
+func normalizeDocWhitespace(doc *Document) {
+	for i := range doc.Blocks {
+		doc.Blocks[i].Text = collapseCJKSpaces(foldWidth(doc.Blocks[i].Text))
+		doc.Blocks[i].Heading = collapseCJKSpaces(foldWidth(doc.Blocks[i].Heading))
+	}
+}
+
+// foldWidth 全角 ASCII 折成半角（＋全角空格→半角空格）。
+//
+// 中文排版里「６０分」和「60分」混用是常态；FTS 是字面匹配，不折叠的话
+// 用户搜半角、原文是全角（或反过来）就永远命中不了。查询侧
+// (internal/db 的 kbFoldWidth) 做同样的折叠，两边口径必须一致。
+func foldWidth(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for _, r := range s {
+		switch {
+		case r == 0x3000:
+			b.WriteRune(' ')
+		case r >= 0xFF01 && r <= 0xFF5E:
+			b.WriteRune(r - 0xFEE0)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func modernExt(ext string) string {
@@ -188,10 +227,12 @@ func readDecoded(path string) (string, error) {
 	if len(raw) == 0 {
 		return "", ErrNoText
 	}
-	return decodeBytes(raw)
+	// 只有真截断过才允许「削掉尾部不完整的字节」：整份读入的文件
+	// 尾部非法就是真的编码有问题，不该被削成合法 UTF-8。
+	return decodeBytes(raw, size < st.Size())
 }
 
-func decodeBytes(raw []byte) (string, error) {
+func decodeBytes(raw []byte, truncated bool) (string, error) {
 	switch {
 	case bytes.HasPrefix(raw, []byte{0xEF, 0xBB, 0xBF}):
 		return string(raw[3:]), nil
@@ -205,14 +246,34 @@ func decodeBytes(raw []byte) (string, error) {
 	if utf8.Valid(raw) {
 		return string(raw), nil
 	}
+	// 16MB 硬截断正好切在一个汉字中间时，utf8.Valid 会为假，整份文件
+	// 被误判成 GBK —— 于是几万字的正常中文变成一屏乱码，而且照样入库、
+	// 照样能切片，只是永远搜不到（最难排查的那类）。
+	// 削掉尾部 1~3 个字节（不足一个 rune）再判一次即可。
+	if truncated {
+		if fixed := trimIncompleteUTF8(raw); utf8.Valid(fixed) {
+			return string(fixed), nil
+		}
+	}
 	// 不是合法 UTF-8 就当 GBK。GBK 解码几乎不会失败（任意字节都有映射），
-	// 所以这条回退是「尽力而为」而不是「可靠判定」——真正的乱码会在
-	// services 层的可读性检查里被拦下。
+	// 所以这条回退是「尽力而为」而不是「可靠判定」。
 	out, err := simplifiedchinese.GBK.NewDecoder().Bytes(raw)
 	if err != nil {
 		return string(raw), nil
 	}
 	return string(out), nil
+}
+
+// trimIncompleteUTF8 从一个可能被切断的尾部往前退，最多 3 个字节
+// （UTF-8 单个 rune 最长 4 字节）。只用于「确实按字节截断过」的场景。
+func trimIncompleteUTF8(b []byte) []byte {
+	for i := 0; i < 3 && len(b) > 0; i++ {
+		b = b[:len(b)-1]
+		if utf8.Valid(b) {
+			return b
+		}
+	}
+	return b
 }
 
 func parsePlain(path string) (*Document, error) {

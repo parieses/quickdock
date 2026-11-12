@@ -9,9 +9,11 @@ import (
 	"io"
 	"os"
 	"sync/atomic"
+	"time"
 
 	"quickdock/internal/db"
 	ikb "quickdock/internal/kb"
+	"quickdock/internal/logger"
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 )
@@ -54,11 +56,18 @@ func (s *KBService) ServiceShutdown() error {
 // 这些状态只可能来自「上次进程被杀」，正常流程里它们存在的时间以秒计。
 // 不恢复的话，这些源会永远卡在 embedding，用户看到转圈的图标但什么也不会发生。
 func (s *KBService) recoverUnfinished() {
+	// App.DB 在服务启动早期可能还没装配好（构造顺序不定）。此前直接 return，
+	// 于是卡在 parsing/embedding 的源永远没人管，只能靠用户手动点扫描。
+	for i := 0; i < 10 && s.App.DB == nil; i++ {
+		time.Sleep(time.Second)
+	}
 	if s.App.DB == nil {
+		logger.W("[kb] 启动恢复跳过：数据库未就绪")
 		return
 	}
 	list, err := s.App.DB.ListKBSources("")
 	if err != nil {
+		logger.W("[kb] 启动恢复失败: %v", err)
 		return
 	}
 	for _, src := range list {
@@ -67,6 +76,17 @@ func (s *KBService) recoverUnfinished() {
 			s.enqueue(src.ID)
 		}
 	}
+}
+
+// resume 清掉「停止」标记并确保 worker 在跑。
+//
+// 用户点过停止之后 cancelFlag 会一直是 1，但 worker 只在取队列时判它——
+// 此前没有任何地方复位，结果是「停止」之后所有重建/添加都显示成功、
+// 队列却永远被丢弃，只能重启应用（11-12 修）。任何「重新发起索引」的
+// 入口都必须先调这里。
+func (s *KBService) resume() {
+	atomic.StoreInt32(&s.cancelFlag, 0)
+	s.startWorker()
 }
 
 func (s *KBService) startWorker() {
@@ -80,7 +100,16 @@ func (s *KBService) enqueue(id string) {
 	select {
 	case s.queue <- id:
 	default:
-		// 队列满（>1024）：不改状态，下次扫描会再排一遍。
+		// 队列满（>1024）不能丢：被丢的源如果已经是 ready 且指纹未变，
+		// 下次扫描会直接跳过，这个任务就此蒸发。挪到后台阻塞补投，
+		// 数量上界是知识库里的文件数，不会失控。
+		logger.W("[kb] 索引队列已满，排队等待投递: %s", id)
+		go func() {
+			select {
+			case s.queue <- id:
+			case <-s.quit:
+			}
+		}()
 	}
 }
 
@@ -125,6 +154,18 @@ func (s *KBService) processSource(id string) {
 		return
 	}
 
+	// failSource 统一收口失败：改状态 + 清运行时 + 发事件。
+	// 此前「切不出文本 / 写切片失败 / 写 meta 失败」三条只改状态不发事件，
+	// 而前端进度条完全靠事件驱动（没有轮询），于是会一直转在 running、
+	// 「添加/重建」一直灰着，直到用户手动刷新页面（11-12 修）。
+	failSource := func(msg string) {
+		_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceFailed, msg)
+		s.setRun(false, "", "", "", 0, 0)
+		s.emit("kb:index-progress", map[string]interface{}{
+			"sourceId": id, "name": src.Name, "stage": "failed", "error": msg,
+		})
+	}
+
 	st, statErr := os.Stat(src.Path)
 	if statErr != nil {
 		_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceMissing, "文件不存在")
@@ -153,11 +194,7 @@ func (s *KBService) processSource(id string) {
 		s.setRun(true, "parsing", id, src.Name, 0, 0)
 		doc, perr := ikb.ParseFile(src.Path)
 		if perr != nil {
-			_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceFailed, describeParseErr(perr))
-			s.setRun(false, "", "", "", 0, 0)
-			s.emit("kb:index-progress", map[string]interface{}{
-				"sourceId": id, "name": src.Name, "stage": "failed", "error": describeParseErr(perr),
-			})
+			failSource(describeParseErr(perr))
 			return
 		}
 		ocrHint = doc.OCRHint
@@ -165,8 +202,7 @@ func (s *KBService) processSource(id string) {
 		s.setRun(true, "chunking", id, src.Name, 0, 0)
 		chunks := ikb.Split(doc)
 		if len(chunks) == 0 {
-			_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceFailed, "切不出有效文本")
-			s.setRun(false, "", "", "", 0, 0)
+			failSource("切不出有效文本")
 			return
 		}
 
@@ -181,14 +217,12 @@ func (s *KBService) processSource(id string) {
 			})
 		}
 		if err := s.App.DB.ReplaceChunks(id, rows); err != nil {
-			_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceFailed, "写入索引失败："+err.Error())
-			s.setRun(false, "", "", "", 0, 0)
+			failSource("写入索引失败：" + err.Error())
 			return
 		}
 		chunkCount, pageCount = len(chunks), doc.Pages
 		if err := s.App.DB.UpdateKBSourceMeta(id, hash, size, mtime, chunkCount, pageCount); err != nil {
-			_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceFailed, "写入索引失败："+err.Error())
-			s.setRun(false, "", "", "", 0, 0)
+			failSource("写入索引失败：" + err.Error())
 			return
 		}
 	} else {
@@ -200,32 +234,53 @@ func (s *KBService) processSource(id string) {
 	}
 
 	// 到这里文本已可检索。向量是增量能力：失败不影响源可用，
-	// 只是检索降级为纯关键词——所以不把它算进源状态。
+	// 只是检索降级为纯关键词——所以不把它算进源状态，但必须把
+	// 「还没建全」如实报出去，否则进度条 100% 而实际一半没向量。
 	_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceEmbedding, "")
-	s.embedSource(id, src.Name, ocrHint)
+	embedded, pending, embErr := s.embedSource(id, src.Name)
 
 	_ = s.App.DB.UpdateKBSourceStatus(id, db.KBSourceReady, "")
 	s.invalidateVecCache()
 	s.setRun(false, "", "", "", 0, 0)
+	stage, errMsg := "ready", ""
+	if pending > 0 {
+		stage = "embed-partial"
+		if embErr != nil {
+			errMsg = embErr.Error()
+		} else {
+			errMsg = fmt.Sprintf("%d 个切片未建立语义索引，下次扫描会自动补", pending)
+		}
+	}
 	s.emit("kb:index-progress", map[string]interface{}{
-		"sourceId": id, "name": src.Name, "stage": "ready", "done": chunkCount, "total": chunkCount,
+		"sourceId": id, "name": src.Name, "stage": stage, "done": chunkCount, "total": chunkCount,
+		"embedded": embedded, "vecPending": pending, "error": errMsg,
+		// OCRHint：扫描件 / 没有文本层的 PDF 抽不出字时由解析层标出。
+		// 此前这个值一路传到这里就断了，用户只看到「ready 但搜不到」。
+		"ocrHint": ocrHint,
 	})
 }
 
 // embedSource 给还没建立向量的切片补向量（断点续做的入口）。
-func (s *KBService) embedSource(sourceID, name string, ocrHint bool) {
+// 返回：成功建向量的条数、剩余未建条数、最后一个错误。
+//
+// 此前批次失败只是静默 continue，函数也无返回值：部分块永远没有向量，
+// 源却照样标 ready、进度条照样 100%，只有「全部重建」能救（11-12 修）。
+func (s *KBService) embedSource(sourceID, name string) (embedded, pendingCount int, firstErr error) {
 	cfg := s.settings()
 	if !cfg.VectorOn || cfg.EmbedModel == "" {
-		return
+		return 0, 0, nil
 	}
 	baseURL, apiKey, ok := s.embedConfig()
 	if !ok {
-		return
+		return 0, 0, nil
 	}
 
 	pending, err := s.App.DB.KBPendingVecChunks(sourceID, cfg.EmbedModel)
-	if err != nil || len(pending) == 0 {
-		return
+	if err != nil {
+		return 0, 0, err
+	}
+	if len(pending) == 0 {
+		return 0, 0, nil
 	}
 
 	emb := ikb.NewEmbedder(ikb.EmbedConfig{BaseURL: baseURL, APIKey: apiKey, Model: cfg.EmbedModel})
@@ -237,43 +292,94 @@ func (s *KBService) embedSource(sourceID, name string, ocrHint bool) {
 		if len(batch) == 0 {
 			break
 		}
-		texts := make([]string, len(batch))
-		for j, c := range batch {
-			texts[j] = embedInput(c)
-		}
 
 		s.setRun(true, "embedding", sourceID, name, done, total)
 		ctx, cancel := contextWithTimeout(0)
-		vecs, embErr := emb.EmbedBatch(ctx, texts)
+		vecs, embErr := emb.EmbedBatch(ctx, embedInputs(batch))
 		cancel()
 
-		if embErr != nil {
-			// 整批失败不中断：可能只是这一批里有超长文本。
-			// 剩下的批继续试，最后没建上的靠下次扫描补。
-			done += len(batch)
-			i = next
-			continue
+		if embErr == nil && len(vecs) != len(batch) {
+			embErr = fmt.Errorf("embedding 返回条数不匹配：要 %d 条得到 %d 条", len(batch), len(vecs))
 		}
 
-		updates := make([]db.KBVecUpdate, 0, len(batch))
-		for j := range batch {
-			vec := vecs[j]
-			ikb.Normalize(vec)
-			updates = append(updates, db.KBVecUpdate{
-				ChunkID: batch[j].ID,
-				Vec:     ikb.EncodeVec(vec),
-				Dim:     len(vec),
-			})
+		if embErr != nil {
+			// 整批失败：多半是批里有超长/异常文本（400）或限流（429）。
+			// 退化成逐条重试——单条失败只丢那一条，不至于整批陪葬。
+			// 空间对半分治，深度 log2(16)，不会失控。
+			stored := s.embedBatchSplit(emb, cfg.EmbedModel, batch, &firstErr)
+			done += stored
+		} else {
+			if uerr := s.storeVecs(cfg.EmbedModel, batch, vecs); uerr != nil {
+				if firstErr == nil {
+					firstErr = uerr
+				}
+				stored := s.embedBatchSplit(emb, cfg.EmbedModel, batch, &firstErr)
+				done += stored
+			} else {
+				done += len(batch)
+			}
 		}
-		if err := s.App.DB.UpdateChunkVecs(cfg.EmbedModel, updates); err != nil {
-			done += len(batch)
-			i = next
-			continue
-		}
-		done += len(batch)
 		i = next
 		s.setRun(true, "embedding", sourceID, name, done, total)
 	}
+
+	left, lerr := s.App.DB.KBPendingVecChunks(sourceID, cfg.EmbedModel)
+	if lerr != nil {
+		return done, -1, firstErr
+	}
+	return done, len(left), firstErr
+}
+
+// embedInputs 送模型的文本列表：标题路径 + 正文。
+func embedInputs(batch []db.KBChunk) []string {
+	texts := make([]string, len(batch))
+	for j, c := range batch {
+		texts[j] = embedInput(c)
+	}
+	return texts
+}
+
+// storeVecs 把一批向量写回库。
+func (s *KBService) storeVecs(model string, batch []db.KBChunk, vecs [][]float32) error {
+	updates := make([]db.KBVecUpdate, 0, len(batch))
+	for j := range batch {
+		vec := vecs[j]
+		ikb.Normalize(vec)
+		updates = append(updates, db.KBVecUpdate{
+			ChunkID: batch[j].ID,
+			Vec:     ikb.EncodeVec(vec),
+			Dim:     len(vec),
+		})
+	}
+	return s.App.DB.UpdateChunkVecs(model, updates)
+}
+
+// embedBatchSplit 整批失败后的兜底：对半分治到单条，单条再失败只丢那一条。
+// 返回成功写库的条数。
+func (s *KBService) embedBatchSplit(emb *ikb.Embedder, model string, batch []db.KBChunk, firstErr *error) int {
+	if len(batch) == 0 {
+		return 0
+	}
+	if len(batch) > 1 {
+		mid := len(batch) / 2
+		return s.embedBatchSplit(emb, model, batch[:mid], firstErr) +
+			s.embedBatchSplit(emb, model, batch[mid:], firstErr)
+	}
+	ctx, cancel := contextWithTimeout(0)
+	vecs, err := emb.EmbedBatch(ctx, embedInputs(batch))
+	cancel()
+	if err == nil && len(vecs) == 1 {
+		err = s.storeVecs(model, batch, vecs)
+	}
+	if err != nil {
+		// 至少留一条日志：此前整个链路一片干净，没人知道向量为什么缺。
+		logger.W("[kb] 单条 embedding 失败（chunk=%s）: %v", batch[0].ID, err)
+		if *firstErr == nil {
+			*firstErr = err
+		}
+		return 0
+	}
+	return 1
 }
 
 // nextBatch 按 token 预算切一批。
