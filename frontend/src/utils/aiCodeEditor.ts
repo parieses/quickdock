@@ -276,7 +276,10 @@ export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts):
       EditorView.theme({
         '&': { height: '100%', fontSize: opts.fontSize || '12px', backgroundColor: 'transparent' },
         '.cm-scroller': { fontFamily: opts.fontFamily || 'var(--font-mono)', lineHeight: '1.6' },
-        '.cm-content': { caretColor: 'var(--color-text-primary)', paddingBottom: '24px' },
+        // user-select 必须显式放开：全局 body/html 是 user-select:none（防 UI 误选），
+        // 继承下来后 Chromium 在 copy 时会把整个选区当作「不可选内容」丢弃——
+        // 表现为「看着选中了、Ctrl+C 粘贴出来是空的」（11-12 实测 clipboardData 为空串）。
+        '.cm-content': { caretColor: 'var(--color-text-primary)', paddingBottom: '24px', userSelect: 'text' },
         '.cm-gutters': {
           backgroundColor: 'var(--color-bg-tertiary)',
           color: 'var(--color-text-muted)',
@@ -286,10 +289,16 @@ export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts):
           // 拆掉它得自己重装整套扩展，代价远大于一行 display:none）
           ...(opts.lineNumbers === false ? { display: 'none' } : {}),
         },
-        '.cm-activeLine': { backgroundColor: 'var(--color-bg-tertiary)' },
-        '.cm-activeLineGutter': { backgroundColor: 'var(--color-bg-tertiary)' },
-        '.cm-selectionBackground': { backgroundColor: 'var(--color-accent-muted) !important' },
-        '&.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--color-accent-muted) !important' },
+        // 活动行必须半透明（token 注释详述）：选区层画在内容层之下，
+        // 不透明底色会把光标所在行的选区盖没，表现为「选中漏一行」。
+        '.cm-activeLine': { backgroundColor: 'var(--color-active-line)' },
+        '.cm-activeLineGutter': { backgroundColor: 'var(--color-active-line)' },
+        // 选中底色分两档：CM 自带的 baseTheme 在深色下仍是浅紫 #d7d4f0，
+        // 且 focused 那条选择器特异性更高，只能 !important 压过。
+        // 之前两档都用 --color-accent-muted（50% 蓝），文字被糊住、
+        // 失焦后还保持满强度；现在焦点内 28%、失焦 14%（11-12 修）。
+        '.cm-selectionBackground': { backgroundColor: 'var(--color-text-selection-dim) !important' },
+        '&.cm-focused .cm-selectionBackground': { backgroundColor: 'var(--color-text-selection) !important' },
         '.cm-cursor': { borderLeftColor: 'var(--color-text-primary)' },
         // 搜索命中：与项目其它地方的黄底一致（cm-theme.css 里没有这块）
         '.cm-searchMatch': { backgroundColor: 'var(--color-search-hit-bg)', outline: 'none' },

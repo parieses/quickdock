@@ -1253,6 +1253,9 @@ watch(pendingOpenNoteId, (id) => {
 .ne-view-preview .ne-editor { display: none !important; }
 .ne-copy { border: none; background: none; color: var(--color-text-muted); cursor: pointer; padding: 6px; border-radius: var(--radius-sm); }
 .ne-copy:hover { background: var(--color-bg-hover); color: var(--color-accent); }
+/* 大纲按钮的开启态。此前只有 :class="{ active: tocOpen }" 而没有任何 .active 规则，
+   点了完全没反馈（11-12 补）。 */
+.ne-copy.active { background: var(--color-accent-bg); color: var(--color-accent); }
 /* 插入 wiki 链接的候选浮层：挂在 .ne-head 上，absolute 不占布局高度 */
 .ne-wiki-pop { position: absolute; top: 100%; right: 12px; z-index: 20; width: 260px; margin-top: 4px; padding: 6px; border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm); background: var(--color-popover-bg); box-shadow: var(--shadow-sm); }
 .ne-wiki-search { display: flex; align-items: center; gap: 6px; color: var(--color-text-muted); }
@@ -1302,7 +1305,10 @@ watch(pendingOpenNoteId, (id) => {
 .ne-editor.ne-editor-only { border-right: none; }
 .ne-editor :deep(.cm-editor) { flex: 1; min-height: 0; }
 .ne-editor :deep(.cm-content) { padding: 10px 14px 24px 4px; }
-.ne-preview { flex: 1; min-width: 0; overflow: auto; padding: 12px 16px; background: var(--color-bg-primary); }
+/* 预览区必须显式放开划选：全局 body/html 是 user-select:none，继承下来后
+   选区根本建立不起来（程序化 addRange 也会被立刻清空），
+   表现为「预览没办法复制」。 */
+.ne-preview { flex: 1; min-width: 0; overflow: auto; padding: 12px 16px; background: var(--color-bg-primary); user-select: text; }
 .ne-load-error {
   position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); z-index: 12;
   display: flex; align-items: center; gap: 10px; padding: 12px 14px;

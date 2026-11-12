@@ -168,6 +168,13 @@
   --color-accent-border: rgba(91, 140, 255, 0.24);
   --color-accent-muted: rgba(91, 140, 255, 0.5);
   --color-accent-light: #7ea6ff;
+  /* 文本选中底色：与 --color-select-bg（列表/行选中）是两回事——
+     后者只要"这行被选中"的弱信号，前者要压住正文文字还能读清。
+     旧版借了 --color-accent-muted（50% 蓝），文字直接被糊住，且失去焦点
+     后仍是满强度。这里分两档：焦点内 28%、失焦 14%，失焦态由
+     CodeMirror 的 .cm-selectionBackground 消费，全局 ::selection 只用焦点档。 */
+  --color-text-selection: rgba(91, 140, 255, 0.28);
+  --color-text-selection-dim: rgba(91, 140, 255, 0.14);
   /* 代码块：AI 助手与笔记预览共用。AI 气泡已改为透明底，
      代码块需要自带底色才能与正文拉开层级，故单列一组 token。 */
   --color-code-bg: #12161c;
@@ -221,6 +228,10 @@
   --color-card-bg: #171b22;
   --card-border-color: transparent;
   --color-select-bg: rgba(91, 140, 255, 0.14);
+  /* 编辑器活动行底色。必须是半透明：CM 的选区层画在内容层之下，
+     不透明的活动行背景会把光标所在行的选区高亮整行盖掉（表现为
+     「选中时漏一行」，漏的永远是光标那一行，11-12 事故）。 */
+  --color-active-line: rgba(255, 255, 255, 0.05);
   /* 勾选框：未选底比卡片再暗一档（"一个凹槽"），选中由 --qd-check-color 铺实。
      单列 token 而不是复用 bg-tertiary：它需要的是"永远实色的凹槽"，
      与 bg-tertiary 的"控件底色"职责不同。旧版材质档把 bg-* 改成半透明时，
@@ -320,6 +331,9 @@
   --color-accent-border: rgba(91, 140, 255, 0.2);
   --color-accent-muted: rgba(91, 140, 255, 0.5);
   --color-accent-light: #7ea6ff;
+  /* 浅色下 28% 蓝会把正文压灰，降到 22%；失焦更淡一档。 */
+  --color-text-selection: rgba(91, 140, 255, 0.22);
+  --color-text-selection-dim: rgba(91, 140, 255, 0.1);
   --color-code-bg: #f4f6f9;
   --color-code-bar-bg: #e9ecf1;
   --color-code-inline-bg: #e4e7ec;
@@ -359,6 +373,7 @@
   --color-card-bg: #ffffff;
   --card-border-color: var(--color-border);
   --color-select-bg: rgba(91, 140, 255, 0.12);
+  --color-active-line: rgba(15, 18, 24, 0.045);
   /* 浅色未选框是白底 + 灰边：和白卡片同色时才不会像一块脏印子，
      边界靠 --color-check-border 表达（见上：深色是"凹"，浅色是"框"）。 */
   --color-check-bg: #ffffff;
@@ -393,6 +408,13 @@
 *::before,
 *::after {
   box-sizing: border-box;
+}
+
+/* 全站文本选中色。不给浏览器默认（浅色下是深蓝底白字、深色下是亮蓝，
+   与主题完全不搭），统一走 token。只设背景不设 color：正文各自有自己的
+   前景色，强改会把代码高亮、链接色一起抹平。 */
+::selection {
+  background-color: var(--color-text-selection);
 }
 
 html {
@@ -468,6 +490,9 @@ html.qd-backdrop {
   /* 选中态原本是 14% 蓝，材质档下会混进壁纸色变成脏蓝；换成实色蓝灰，
      关材质时仍用 :root 那档半透明，不受影响。 */
   --color-select-bg: #1e283d;
+  /* 文本选中在材质档要更实一点：半透明蓝压在亮壁纸上会被冲淡到看不出选区。 */
+  --color-text-selection: rgba(91, 140, 255, 0.44);
+  --color-text-selection-dim: rgba(91, 140, 255, 0.22);
   /* 终端比内容区更实一档：文字多、要压住亮壁纸，但仍留出 45% 透过率。
      与 .ssh-page 那层窗口底叠完约 22% 材质可见，不再是整块死黑。 */
   --color-terminal-bg: rgba(15, 17, 22, 0.55);
@@ -478,6 +503,8 @@ html.qd-backdrop[data-theme="light"] {
   --color-window-bg-2: rgba(255, 255, 255, 0.80);
   --color-acrylic-bg: rgba(246, 247, 249, 0.94);
   --color-select-bg: #e4eaf9;
+  --color-text-selection: rgba(91, 140, 255, 0.34);
+  --color-text-selection-dim: rgba(91, 140, 255, 0.16);
   /* 浅色是深字压亮壁纸，容错小，终端底比深色档更实（0.72）。 */
   --color-terminal-bg: rgba(255, 255, 255, 0.72);
 }

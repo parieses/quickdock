@@ -671,6 +671,8 @@ const archiveUnsupported = computed(() => res.value?.note === 'archive_unsupport
 
 .fp-code {
   margin: 0;
+  /* 全局 body 是 user-select:none，不放开就划选不了、复制出来是空的（与笔记预览同坑） */
+  user-select: text;
   font-family: var(--font-mono, monospace);
   font-size: 12px;
   line-height: 1.5;
