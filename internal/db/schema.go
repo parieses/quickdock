@@ -580,6 +580,39 @@ var baseTables = []string{
 		PRIMARY KEY (host, port, key_type)
 	)`,
 
+	// 密码库：跨场景复用的账号密码（浏览器自动填充、SSH、数据库、WebDAV、API Key 共用一张表）。
+	//
+	// 为什么单独一张表而不是继续塞 app_state：app_state 是「一个键一个值」的扁平存储，
+	// 没法按 host/kind 检索、没法记使用次数、也没法让用户逐条管理。
+	//
+	// 安全取舍（与 ssh_hosts 同一套）：secret 列存密文，读取接口一律不投影这一列，
+	// 只回 has_secret 布尔；明文只在「即将使用」的瞬间由 GetCredentialSecret 解出。
+	//
+	// 刻意不加进 snapshot.go 的 syncExtraTables：密码库不随 WebDAV 备份/快照离开本机。
+	// 代价是换机后需要重新录入 —— 这与「密码不外泄」是同一个取舍的两面。
+	//
+	// source/source_id 记录来源（如 source='ssh_host' + source_id=<主机 id>），
+	// 用于「从密码库填充」时的单向溯源，本表不反写来源。
+	`CREATE TABLE IF NOT EXISTS credentials (
+		id TEXT PRIMARY KEY,
+		name TEXT NOT NULL DEFAULT '',
+		kind TEXT NOT NULL DEFAULT 'login',
+		username TEXT NOT NULL DEFAULT '',
+		secret TEXT NOT NULL DEFAULT '',
+		host TEXT NOT NULL DEFAULT '',
+		port INTEGER NOT NULL DEFAULT 0,
+		url TEXT NOT NULL DEFAULT '',
+		notes TEXT NOT NULL DEFAULT '',
+		tags TEXT NOT NULL DEFAULT '',
+		source TEXT NOT NULL DEFAULT '',
+		source_id TEXT NOT NULL DEFAULT '',
+		favorite INTEGER NOT NULL DEFAULT 0,
+		use_count INTEGER NOT NULL DEFAULT 0,
+		last_used_at TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL
+	)`,
+
 	// 定时任务执行历史（append-only）。每条执行（自动到点 / 手动「立即运行」）
 	// 落一条；任务名做快照，重命名/删除后仍可追溯。保留策略在 InsertScheduleRun 内执行，
 	// 避免无限增长：每任务仅留最近 N 条，并清理超过 D 天的记录。
@@ -1125,6 +1158,9 @@ func (d *Database) migrate() error {
 		`CREATE INDEX IF NOT EXISTS idx_kb_sources_status ON kb_sources(status)`,
 		// 分组视图按 library_id 过滤，删除知识库时也靠它找「这个库有哪些源」。
 		`CREATE INDEX IF NOT EXISTS idx_kb_sources_library ON kb_sources(library_id, name)`,
+		// 密码库：浏览器扩展按 host 精确匹配、内部弹层按 kind 过滤，两条都是高频只读路径。
+		`CREATE INDEX IF NOT EXISTS idx_credentials_host ON credentials(host)`,
+		`CREATE INDEX IF NOT EXISTS idx_credentials_kind ON credentials(kind, favorite DESC, last_used_at DESC)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {
