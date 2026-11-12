@@ -6,7 +6,7 @@
  * 运行时列表、选中项、运行态缓存、搜索词与四个入口开关，抽出来是个十几个
  * 参数的 composable，比留在页面更难读。这里只负责渲染与把交互 emit 回去。
  */
-import { computed } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 /** 侧栏的一项：运行时分两类，special 是 git / everything 这种非服务入口 */
@@ -50,10 +50,36 @@ const { t } = useI18n()
 
 // 搜索态：清空输入框即回到「按分组浏览」
 const searching = computed(() => props.query.trim().length > 0)
+
+const rootEl = ref<HTMLElement | null>(null)
+
+/**
+ * 把选中项滚进可视区。
+ *
+ * 侧栏自己是滚动容器（31 个运行时 + 7 个分组，高度远超视口），
+ * 深链定位到靠后的区块时（aria2 在倒数第二组），右侧详情换了、左侧却
+ * 看不见选中项，用户会以为「没跳对」。这里只调整侧栏的 scrollTop，
+ * 不用 scrollIntoView —— 那会连带滚动外层可滚动的祖先。
+ */
+function revealActive() {
+  const scroller = rootEl.value
+  const el = scroller?.querySelector<HTMLElement>('.cat-btn.active')
+  if (!scroller || !el) return
+  const box = scroller.getBoundingClientRect()
+  const item = el.getBoundingClientRect()
+  const pad = 8
+  if (item.top < box.top) {
+    scroller.scrollTop -= box.top - item.top + pad
+  } else if (item.bottom > box.bottom) {
+    scroller.scrollTop += item.bottom - box.bottom + pad
+  }
+}
+
+watch(() => props.selectedId, () => { void nextTick(revealActive) }, { immediate: true })
 </script>
 
 <template>
-  <aside class="env-cats">
+  <aside class="env-cats" ref="rootEl">
     <div class="cats-title">{{ t('envCategories') }}</div>
     <div class="cats-search">
       <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>

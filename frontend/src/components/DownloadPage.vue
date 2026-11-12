@@ -9,7 +9,6 @@
  */
 import { ref, computed, watch, watchEffect, nextTick, onMounted, onUnmounted, toRaw } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Events } from '@wailsio/runtime'
 import {
   Download, RefreshCw, Settings2, Search, X, Pause, Play, Trash2, Copy,
   ClipboardPaste, Info, Folder, Clock, RotateCcw, Plus, AlertCircle,
@@ -25,6 +24,7 @@ import type {
   DlImportItem, DlImportPreview, DlImportResult,
 } from '../composables/useDownloadTasks'
 import { useToast } from '../composables/useToast'
+import { navigateTo } from '../composables/bridge'
 import { copyToClipboard } from '../utils/clipboard'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -574,7 +574,14 @@ const primaryLabel = computed(() => {
   return t('dlStartEngine')
 })
 
-function goInstall() { Events.Emit('nav:goto', 'environments') }
+/**
+ * 「去环境管理安装」的落点必须是 aria2 区块本身。
+ *
+ * 原来只广播 nav:goto('environments')：切过去停在默认选中的第一个运行时（node），
+ * 用户还得自己在 31 个运行时里翻到「工具 → aria2」。走 navigateTo 把区块 id 一起带过去，
+ * 环境管理页的 pendingTarget 监听会选中它并展开所在分组。
+ */
+function goInstall() { navigateTo('environments', 'aria2') }
 
 function limitArg(v: string): string {
   const s = v.trim()

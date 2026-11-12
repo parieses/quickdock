@@ -33,7 +33,7 @@ import type { ApiResult } from '../../bindings/quickdock/services/models'
 import { getErrorMessage } from '../utils/error'
 import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
-import { navigate, pendingTarget } from '../composables/bridge'
+import { navigateTo, pendingTarget } from '../composables/bridge'
 import ConfirmDialog from './ConfirmDialog.vue'
 import {
   GitListRepos, GitAddRepo, GitRemoveRepo, GitPickRepo,
@@ -335,7 +335,8 @@ async function checkGitEnv() {
 }
 
 function goEnvInstall() {
-  navigate('environments')
+  // 落到 git 区块本身，而不是环境管理的默认选中项。
+  navigateTo('environments', 'git')
 }
 
 // ---- 远端管理 ----

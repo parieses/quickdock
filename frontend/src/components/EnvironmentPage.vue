@@ -120,12 +120,33 @@ function onPickCategory(id: string) {
   openMenu.value = null
 }
 
-function toggleGroup(key: string) {
-  collapsedGroups[key] = !collapsedGroups[key]
+function persistCollapsed() {
   try {
     localStorage.setItem(COLLAPSE_KEY, JSON.stringify(collapsedGroups))
   } catch (e) {
     console.warn('[env] 读取/保存分组折叠状态失败', e)
+  }
+}
+
+function toggleGroup(key: string) {
+  collapsedGroups[key] = !collapsedGroups[key]
+  persistCollapsed()
+}
+
+/**
+ * 深链定位：选中某个运行时区块，并把它所在的分组展开。
+ *
+ * 只设 selectedId 是不够的 —— 侧栏分组可折叠、状态还持久化在 localStorage。
+ * 目标藏在折叠组里时，右侧详情确实换了，左侧列表却看不出选中了谁，
+ * 用户看到的就是「点过来没跳到该去的地方」。下载器与 git 页的
+ * 「去环境管理安装」都走这里。
+ */
+function locateSection(id: string) {
+  selectedId.value = id
+  const group = runtimes.value.find((r) => r.id === id)?.group
+  if (group && collapsedGroups[group]) {
+    collapsedGroups[group] = false
+    persistCollapsed()
   }
 }
 
@@ -1713,14 +1734,14 @@ watch(selectedId, (id) => {
 })
 // 侧边栏 harness 入口要求切换区块时同步定位
 watch(() => props.initialSection, (v) => {
-  if (v) selectedId.value = v
+  if (v) locateSection(v)
 })
 // 总览卡片的深链：点「端口占用」或某个常驻运行时，要直接落到那个区块，
 // 而不是回到本页默认的第一个运行时。取走即清空——留着会让下次从侧栏正常
 // 进环境管理时又跳一次。immediate 是为了吃「还没挂载就已经写好的目标」。
 watch(() => pendingTarget.value, (p) => {
   if (!p || p.page !== 'environments' || !p.target) return
-  selectedId.value = p.target
+  locateSection(p.target)
   pendingTarget.value = null
 }, { immediate: true })
 onUnmounted(() => {
