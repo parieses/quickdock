@@ -1,6 +1,7 @@
 package services
 
 import (
+	"quickdock/internal/credentials"
 	"quickdock/internal/lock"
 	"quickdock/internal/logger"
 )
@@ -98,6 +99,14 @@ func (a *AppService) LockNow() *ApiResult {
 func (a *AppService) initLockBridge() {
 	lock.Subscribe(func(locked bool) {
 		if locked {
+			// 锁定即让密码库失效：内存里的数据密钥清零。
+			//
+			// 这一步几乎不要钱（下次访问时用 DPAPI 重新解出 DEK，用户不必再输密码），
+			// 却换掉了「锁了屏但进程内存里还躺着密钥」这个最难解释的口子。
+			// 只清内存、不动磁盘：解锁后的第一次读写会自动重建，行为上完全无感。
+			if credentials.Wipe() {
+				logger.I("[credentials] 应用已锁定，密码库密钥已清零")
+			}
 			a.hideUnlockableWindows()
 		}
 		// 托盘菜单按锁状态分叉，两个方向都要重建（main 包注入，未注入时跳过：

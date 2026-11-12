@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"quickdock/internal/credentials"
 	"quickdock/internal/db"
 	"quickdock/internal/lock"
 	"quickdock/internal/logger"
@@ -33,6 +34,9 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	// 启动锁：在 DB 就绪后立刻载入密码哈希并置锁定态。必须早于任何窗口内容
 	// 渲染完成——前端首次 LockStatus 查询要拿到真实状态，否则会有一瞬解锁界面。
 	lock.Init(database)
+	// 密码库：只绑库引用，不加载密钥（首次读写时才唤起 DPAPI）。
+	// 必须紧跟 lock.Init —— 锁定联动依赖两者都已就绪。
+	credentials.Init(database)
 	// 合并原「正在打开」+「已打开」两条：成功路径只留一条，带上路径与耗时（迁移耗时是大头）
 	logger.I("[db] 已就绪 path=%s 耗时=%v", dbPath, time.Since(openStart).Round(time.Millisecond))
 
@@ -62,6 +66,13 @@ func (a *AppService) ServiceStartup(ctx context.Context, options application.Ser
 	// 确保默认工具存在
 	if err := a.DB.EnsureDefaultTools(); err != nil {
 		logger.W("QuickDock: 默认工具初始化失败: %v", err)
+	}
+
+	// 浏览器扩展的本地 API（127.0.0.1:9240）。
+	// 启动失败只降级：应用内密码库照常可用，只是扩展连不上——
+	// 这个取舍比「端口被占就启动不了应用」好得多。
+	if a.StartCredentialAPIFn != nil {
+		a.StartCredentialAPIFn()
 	}
 
 	// 清理过期剪贴板条目（后台执行：大批量删除可能耗时数百毫秒~数秒，
@@ -243,6 +254,11 @@ func (a *AppService) ServiceShutdown() error {
 	// 退出时一起收掉（HTTP client 无进程，Close 是 no-op）。
 	if a.ShutdownExtAIFn != nil {
 		a.ShutdownExtAIFn()
+	}
+	// 密码库的本地 API 是监听套接字，不关会留下一个「进程已退、端口还占着」的假象，
+	// 下次启动被动换端口，扩展就要重新配对。
+	if a.StopCredentialAPIFn != nil {
+		a.StopCredentialAPIFn()
 	}
 	// 停止 dsh 子进程（若正在运行），防止残留 Node 占用端口
 	if a.DSH != nil {

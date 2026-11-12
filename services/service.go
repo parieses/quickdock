@@ -124,6 +124,19 @@ type AppService struct {
 	// 故沿用上面一批 Fn 的注入方式。未注入时（如测试）跳过即可。
 	RebuildTrayFn func()
 
+	// StartCredentialAPIFn 启动密码库的本地 HTTP 服务（供浏览器扩展调用），返回实际端口。
+	//
+	// 只有在用户开着「浏览器集成」时才真正监听（注入的是 StartAPIIfEnabled），
+	// 关掉开关的用户不该有一个常驻回环端口在那儿等请求。
+	//
+	// 为什么走注入而不是在这里直接调：实现在 services/credentials 子包，
+	// 而那个包反过来 import services（取 ApiResult），直接引用会成环。
+	// 未注入时（测试 / 精简构建）密码库在应用内仍可用，只是扩展连不上。
+	StartCredentialAPIFn func() int
+
+	// StopCredentialAPIFn 关闭本地 HTTP 服务，退出时调一次。
+	StopCredentialAPIFn func()
+
 	// HideFloatingWindowsFn 收起全部浮窗（剪贴板 / 命令面板 / 笔记 / 窗口排版 / SSH）。
 	//
 	// 锁定触发时调用：锁定期间浮窗不再渲染锁层输入框（那要每个窗口各维护一套尺寸与

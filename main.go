@@ -26,6 +26,7 @@ import (
 	aisvc "quickdock/services/ai"
 	clipboardsvc "quickdock/services/clipboard"
 	collectionsvc "quickdock/services/collection"
+	credentialssvc "quickdock/services/credentials"
 	diagsvc "quickdock/services/diag"
 	downloadsvc "quickdock/services/download"
 	dshsvc "quickdock/services/dsh"
@@ -683,6 +684,13 @@ func main() {
 	sshSvc := sshxsvc.NewSshService(appService)
 	// 供全局热键走同一条打开路径（见 windows.go 的 showSshWindow）
 	setSshService(sshSvc)
+
+	// 密码库门面：条目管理 + 浏览器扩展本地 API（引擎在 internal/credentials）。
+	// 注入的两个函数让 services 生命周期能启动/关闭本地 API，而 services 包
+	// 不必 import 本子包（会成环：子包要取 services.ApiResult）。
+	credentialsSvc := credentialssvc.NewCredentialsService(appService)
+	appService.StartCredentialAPIFn = credentialsSvc.StartAPIIfEnabled
+	appService.StopCredentialAPIFn = credentialsSvc.StopAPI
 	// SSH 面板的「问 AI」走本地 SSE（见 services/ai/ai_ask_stream.go）。
 	// 注册只能发生在这里：prompt 组装在 sshx、流式端点在 ai，两边互相 import 会成环。
 	aiSvc.RegisterAskStream("ssh", sshSvc.AskOverStream)
@@ -747,6 +755,7 @@ func main() {
 			application.NewService(kbSvc),
 			application.NewService(downloadSvc),
 			application.NewService(sshSvc),
+			application.NewService(credentialsSvc),
 			application.NewService(mcpSvc),
 			application.NewService(pluginSvc),
 			application.NewService(notifier),
