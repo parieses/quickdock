@@ -358,6 +358,23 @@
         <summary>
           <span class="log-ver" data-ver></span>
           <span class="log-date" data-ver-date></span>
+          <span class="log-title">The password vault is here: web logins autofill, SSH passwords get a home</span>
+          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
+        </summary>
+        <ul class="log-body">
+          <li>A new password vault: web logins, SSH, databases, Git, WebDAV and API keys in one place. AES-256-GCM at rest, with the key itself wrapped by the system DPAPI. Stored on this machine only and excluded from WebDAV backups — which is exactly what keeps passwords off the wire. Copied passwords clear from the clipboard after 30 seconds, and the in-memory key is wiped when you lock the app and rebuilt silently on unlock.</li>
+          <li>With the Chrome / Edge extension, web forms fill themselves: a suggestion strip appears next to the password field listing only entries that match the current domain, so the whole vault never lands on someone else's screen. Filled values submit correctly on React / Vue sites too. After login it offers to save, new passwords save automatically and changed ones still ask for confirmation, tracked per site so two different logins can't overwrite each other. One switch in the vault page controls the extension; turning it off stops the local listener immediately.</li>
+          <li>SSH hosts no longer require a password up front: you are asked at connect time, and the answer goes into the vault and is remembered for that host. If the password changed, entering the new one overwrites both the host and the vault entry. The host form also has a "fill from vault" button.</li>
+          <li>Note previews and code panes can finally be selected and copied. The app disables selection globally (to keep UI text from being dragged along), and that rule was inherited into the note pages — the preview could not even form a selection, and the code pane showed a highlight while Ctrl+C produced nothing. Selection and active-line colors were rebuilt too: the active line used to be opaque and painted over the selection on the cursor's line, which looked like "one line goes missing".</li>
+          <li>Knowledge base: after pressing Stop, rebuild requests were silently dropped — the queue now recovers. Switching embedding models now gives accurate semantic search: vectors from two different models used to be mixed into one similarity space, and the symptom was "results look fine, just wrong", which is far harder to spot than an error. A malformed PDF can no longer stall indexing.</li>
+          <li>"Go to environments" on the downloader and Git pages now lands on the right runtime. It used to stop at the default node entry, leaving you to scroll through thirty-odd runtimes yourself.</li>
+        </ul>
+      </details>
+
+      <details class="log">
+        <summary>
+          <span class="log-ver">v0.0.48</span>
+          <span class="log-date">2026-11-11</span>
           <span class="log-title">PDF search in the knowledge base works again; embeddings can use their own provider</span>
           <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
         </summary>
@@ -402,24 +419,6 @@
           <li>Unlocks on the last keystroke: the length is recorded when the password is set or changed, and the box submits as soon as that many characters are in — no Enter needed. Counted in characters, so emoji work; IME composition is skipped so pinyin can't trigger it mid-word. Passwords set before this release pick the length up on their first successful unlock.</li>
           <li>The white flash when a panel opens is gone. When Wails hides a window it also makes the WebView2 controller invisible, which releases the GPU surface; the first frame after showing again is empty, and it is drawn inside the WebView2 child window, above our client area — window background and DWM material cannot cover it (both themes flash the same pure white). Windows are now moved off-screen before showing and moved back 60ms later. The material rewrite on a single wake-up also went from two passes to one.</li>
           <li>Performance: the notes panel's CodeMirror core loads on demand, saving about 300KB on the main window's first paint; log tailing gets an 8MB budget and drops an O(n²) prepend, so multi-hundred-megabyte runtime logs no longer load whole; app_state reads get an in-process cache, cutting three DB round-trips per clipboard copy; the dashboard heat grid and two search highlighters moved into computed caches.</li>
-        </ul>
-      </details>
-
-      <details class="log">
-        <summary>
-          <span class="log-ver">v0.0.45</span>
-          <span class="log-date">2026-11-10</span>
-          <span class="log-title">Downloader polish: guard against full-disk on large files, pre-flight space checks and cross-machine resume import</span>
-          <svg class="log-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>
-        </summary>
-        <ul class="log-body">
-          <li>Check the real file size before downloading: the New task dialog now has a "Check size" button. It tries HEAD first and falls back to a ranged GET to read the total length, then compares it against free space on the target drive and blocks if there isn't enough — the same logic IDM uses. In remote-engine mode it only shows the size and never judges by the local disk.</li>
-          <li>Per-task save location: click "Browse" next to the folder field to pick one directly; batch mode also accepts "url | folder" per line, and the space check sums per folder so a file destined for drive B is never blocked by drive A's free space.</li>
-          <li>Large files no longer take the engine down when the disk fills: a disk guard checks the drive of active tasks every 30 seconds and auto-pauses with a warning when it drops below 1 GiB; if the engine gets stuck (write-cache flush failures, every RPC timing out), it restarts automatically after 6 consecutive failures and shows "Restarting / Recovered" live, avoiding the orphan storm of repeated restarts.</li>
-          <li>Paused tasks no longer show 0/0: aria2 releases its context on pause and the sizes go unreadable, so an in-memory cache now fills the gap, and unknown paused tasks are probed asynchronously for their total size on cold start while completed bytes stay honest.</li>
-          <li>Disk pre-allocation is now configurable: settings offer none / falloc / trunc / prealloc, still defaulting to none. Pre-allocation only answered "will there be enough space", which is now covered by the pre-flight probe plus the live guard, with zero wait and no space reserved upfront.</li>
-          <li>Each download gets its own folder: a switch in Settings → Automation creates a sub-folder named after the file, so multiple downloads no longer pile into one directory; same-name links reuse the same folder so resume hits the control file.</li>
-          <li>Continue a download on another PC (import resume): new. Copy the old PC's aria2.session plus the unfinished data file and its matching .aria2 control file, click "Import resume", pick the folder and session, then edit file name / url / folder per row in the scan preview and submit — the path is rewritten to the new machine's real location, never copying the old one; magnets get no file name and expired signed URLs are swapped inline.</li>
         </ul>
       </details>
 

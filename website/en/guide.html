@@ -71,6 +71,7 @@
         <a href="#s16">16 Updates &amp; fixes</a>
         <a href="#s17">17 Downloader</a>
         <a href="#s18">18 Startup lock</a>
+        <a href="#s19">19 Password vault</a>
       </aside>
 
       <div class="doc-main">
@@ -326,6 +327,20 @@
             <li>Clipboard history is hidden while locked, but ordinary copy and paste still works. Window tiling <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>W</kbd> and screenshots <kbd>F1</kbd> stay allowed — neither reads this app's data.</li>
             <li>It unlocks by itself once the password is fully typed; no Enter needed. Forgotten it? The recovery code clears the password and unlocks, then set a new one.</li>
             <li>The password lives in local app_state and is deliberately left out of WebDAV backups. Restoring onto another machine leaves you with no password set, so set it again there.</li>
+          </ul>
+        </section>
+
+        <section class="doc-sec" id="s19">
+          <h2><span>19</span>Password vault</h2>
+          <p>Web logins, SSH and database credentials kept in one place. Not to be confused with the startup lock above: that one locks the interface, this one stores accounts.</p>
+          <ul>
+            <li>The vault lives in the sidebar, list on the left and details on the right. A new entry takes a name, a type (web login / SSH / database / WebDAV / Git / API key / other), username, password, host or URL, tags and notes; anything important can be pinned. The list searches by name, username and host.</li>
+            <li>Entries are encrypted with AES-256-GCM before they touch the local database, and the key itself is random and wrapped by the system DPAPI. The vault stays <b>on this machine only and is excluded from WebDAV backups</b> — that is what keeps passwords from leaving, and the price is re-entering them on a new machine.</li>
+            <li>A copied password clears from the clipboard after 30 seconds. Locking with <kbd>Ctrl</kbd><kbd>Alt</kbd><kbd>L</kbd> also wipes the in-memory key; the first read after unlocking rebuilds it, so you are not asked again. New entries can generate a strong password in one click.</li>
+            <li><b>Web autofill needs the browser extension</b> (Chrome / Edge, in <code>browser-ext/</code> in the repo): turn on "browser integration" in the vault page, click "copy connection key" and paste it into the extension's settings. It stays valid until you switch the toggle off, which revokes the key and stops the local listener immediately.</li>
+            <li>The extension only offers entries that match the current domain — the whole vault never lands on someone else's screen — and filled values submit correctly on React / Vue sites. After login it offers to save, new passwords save automatically while changes still ask for confirmation, tracked per site so two different logins cannot overwrite each other.</li>
+            <li>SSH hosts no longer need a password up front: you get asked at connect time, the answer goes into the vault and the host is remembered. If the password changed, entering the new one overwrites both the host and the vault entry. The host form also has a "fill from vault" button.</li>
+            <li>Anything else that needs a password uses the same channel: the caller asks once, a prompt appears inside the app where you can pick a saved entry or type one and save it in passing. Concurrent requests queue up instead of stacking two boxes.</li>
           </ul>
         </section>
 

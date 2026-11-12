@@ -2,8 +2,8 @@
    由本文件填充。改版本号请用 `python tools/bump.py <版本> <日期>`，它会顺带
    处理更新日志的升降级（见 README「发版时要改的地方」）。 */
 window.QD_SITE = {
-  version: 'v0.0.48',
-  released: '2026-11-11'
+  version: 'v0.0.49',
+  released: '2026-11-12'
 };
 
 (function () {

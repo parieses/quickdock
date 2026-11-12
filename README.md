@@ -8,7 +8,7 @@
 Windows 桌面工具。资源集合、快速启动、本地开发环境、若干常用工具，都放在一个窗口里。
 
 ![Platform](https://img.shields.io/badge/Platform-Windows%2010%2F11-4a9eff)
-![Version](https://img.shields.io/badge/Version-v0.0.47-4a9eff)
+![Version](https://img.shields.io/badge/Version-v0.0.49-4a9eff)
 ![License](https://img.shields.io/badge/License-MIT-4a9eff)
 ![Built with](https://img.shields.io/badge/Built%20with-Go%20%2B%20Vue-4a9eff)
 ![Framework](https://img.shields.io/badge/Framework-Wails%20v3-4a9eff)
@@ -33,6 +33,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 - **快捷键**：`Ctrl+Space` 主窗口、`Ctrl+K` 命令面板、`` Ctrl+` `` 剪贴板、`F1` 截图，均可改键
 - **运行环境**：29 种语言与服务，安装、切换版本、启停、看日志都在应用内完成
 - **AI**：能改文件、跑命令的本地 agent（每步可审批、可回滚），多模型对话、SSH 终端侧栏、剪贴板与笔记的快捷问答，对外提供 MCP 服务
+- **密码库**：SSH、网站登录等场景共用一处，AES-256-GCM 本地加密、密钥由系统 DPAPI 包裹；配浏览器扩展可在网页里自动填充，不联网、不外传
 - **安装**：单文件，用户态安装，不需要管理员权限，更新就地替换
 - **锁定**：`Ctrl+Alt+L` 一键锁界面，后台任务照常跑；密码输满自动解锁，忘密码用一次性恢复码
 
@@ -107,6 +108,7 @@ QuickDock 把它们收进同一个窗口，按资源树和快捷键组织，另�
 | 窗口管理 | `Ctrl+Alt+W` | 15 个贴屏热键，九宫格排版浮层，不占用 `Win+方向` |
 | 本地开发站点 | — | 为项目绑定自定义域名并自动签发 HTTPS 证书（mkcert），自身不监听端口 |
 | SSH 远程终端 | `Ctrl+Alt+S` | 多标签终端与 SFTP 文件管理（含多选批量操作），指纹信任，多主机批量执行，一次性执行命令并核对风险 |
+| 密码库 | — | 网页登录 / SSH / 数据库 / Git / WebDAV / API Key 集中管理，AES-256-GCM 本地加密、密钥由系统 DPAPI 包裹，只存本机、不随备份同步。配 Chrome / Edge 扩展可在网页里自动填充与提示保存；SSH 没存密码时连接前就地询问 |
 | 文件搜索 | — | 接 Everything 的独立检索页：四态探测（未安装 / 未运行 / 索引进度 / 正常）带安装引导，支持查询语法提示、排序与条数、多选批量复制路径，右侧直接预览文件 |
 | WebDAV 同步与快照 | — | 全量 JSON 备份恢复、多版本、任意 WebDAV 服务器 |
 | 数据目录搬家 | — | 「设置 → 存储与同步」更换存储位置，整个数据目录打包迁移，重启生效 |
@@ -691,6 +693,32 @@ SSH 终端右侧的 AI 侧栏，把终端里看到的现象转成可执行的命
 </details>
 
 <details>
+<summary><b>密码库与浏览器扩展</b></summary>
+
+一处管理各种场景的账号密码，并在需要的地方直接给出来。
+
+- **条目**：名称、类型（网页登录 / SSH / 数据库 / WebDAV / Git / API Key / 其他）、用户名、密码、主机与端口、网址、标签、备注、收藏；左列表右详情，可搜索名称 / 用户名 / 主机
+- **加密**：数据用 AES-256-GCM，密文格式 `v1:nonce:ct`；密钥是独立随机生成的 32 字节 DEK，本身再由系统 DPAPI 包裹后落库。目的是将来加主密码保护只需重包这一把 DEK，已存的密文一条都不用动
+- **锁定联动**：应用锁定时清掉内存里的密钥（`Ctrl+Alt+L`），后台照常跑；解锁后第一次读写自动重建，不需要再输一次密码
+- **不进备份**：密码库不随 WebDAV 同步与快照离开本机。代价是换机要重新录入 —— 与「密码不外传」是同一个取舍的两面
+- **复制即焚**：复制密码后 30 秒自动清空剪贴板
+- **密码生成**：内置强密码生成，新建条目时可一键填进密码框
+- **索取弹层**：调用方（SSH 连接、将来的 Git 推送等）说一句「这次需要密码」，弹层就浮出来，可选择密码库里的条目或直接输入，顺带把新密码存进库。同时有多处请求时排队弹，不会叠成两层
+- **从密码库填充**：SSH 主机表单上的按钮，按主机地址匹配条目填入；连接时发现主机没有密码，就在这里问一次，填完继续连并记住
+
+**浏览器扩展**（Chrome / Edge，MV3）
+
+- **为什么必须有扩展**：浏览器的安全模型不允许桌面进程往网页里注入脚本，所以「在登录框旁边弹出来」只能由扩展做，QuickDock 当后端
+- **连接方式**：本地 HTTP，`127.0.0.1` 的 9240 起顺延，不是 Native Messaging（那会拉起第二个进程，撞单实例锁）。三道门：只绑回环、校验 `Origin` 是扩展、再校验 Bearer token
+- **开关制**：密码库页面上一个开关，打开即常驻、一直可用；关掉立刻吊销密钥并停止监听，不常用的用户不会有一个回环端口在那儿等请求
+- **填充**：识别登录表单，在密码框旁浮出建议条；只列与当前域名相关的条目，不把整个库摊开。填充走原生 setter 并派发 `input` / `change`，React / Vue 的受控输入框不会出现「看着填了、提交是空」
+- **保存提示**：登录提交后提示存入密码库，默认自动保存新密码，改密码仍要确认。按站点分开记录，登录两个不同网站不会互相顶掉
+- **跨页不丢**：提交瞬间页面常常要跳转，待确认的密码在跳转前就缓存下来，新页面加载后补弹
+- **缩放不受限**：面板挂在独立的 0×0 定位层里，不占布局、不撑高页面，也不受站点自身的 `!important` 样式影响
+
+</details>
+
+<details>
 <summary><b>数据目录搬家</b></summary>
 
 「设置 → 存储与同步」中可以更换存储位置。C 盘空间不足时，可把整个数据目录迁到其他磁盘。
@@ -751,8 +779,8 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 │                                                                   │
 │   ┌────────────────────┐      ┌────────────────────────────────┐  │
 │   │  Vue 3 前端         │◄────►│  services/  Wails 绑定门面      │  │
-│   │  (frontend/dist     │ IPC  │  AppService + 27 领域子包      │  │
-│   │   go:embed)         │      │  576 个绑定方法                 │  │
+│   │  (frontend/dist     │ IPC  │  AppService + 30 领域子包      │  │
+│   │   go:embed)         │      │  691 个绑定方法                 │  │
 │   └────────────────────┘      └───────────────┬────────────────┘  │
 │                                                │ 单向依赖          │
 │                                 ┌──────────────▼────────────────┐  │
@@ -763,19 +791,20 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 │                                 │  mcpclient / fsguard /        │  │
 │                                 │  screenshot / winmgr / dl /   │  │
 │                                 │  weather / mailbox / logger / │  │
-│                                 │  sysutil / validators         │  │
+│                                 │  credentials / kb / sysutil / │  │
+│                                 │  validators                   │  │
 │                                 └───────────────────────────────┘  │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
 几点实现上的选择：
 
-- **门面分层**：领域能力下沉到 27 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 29 个 Service / 576 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
+- **门面分层**：领域能力下沉到 30 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 32 个 Service / 691 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
 - **截图层用原生窗口**：自建 Win32 分层窗口整帧提交，工具条、标注、图形都画进同一张 DIB，可以避免 WebView 流程带来的闪烁
 - **次级窗口延迟创建**：首次热键触发时才创建 WebView2，减少启动白屏；浮窗位置经 kvstore 持久化
 - **后台服务**：SQLite WAL、待办（10s）、定时与监控调度器、AI 流式 HTTP 服务、邮件 IMAP 长连接、天气轮询、插件健康检查、DSH 隐藏进程、内置 MCP（9230）
-- **安全**：纯 Go SQLite 无 CGO，SQL 列名白名单，API Key 与邮箱授权码走 DPAPI，单实例锁防止并发写库，本地流式服务使用随机端口与随机 token；AI 的外部工具调用另过审批闸门，文件读写统一走 `fsguard` 白名单
-- **规模**：Go 源码约 13.3 万行（`services` 4.9 万 + `internal` 8.1 万 + 入口与窗口 0.3 万，含 121 个测试文件），前端约 9.3 万行（103 个 Vue 组件 + 134 个 TS 模块，其中 34 个单测文件）
+- **安全**：纯 Go SQLite 无 CGO，SQL 列名白名单，API Key、邮箱授权码与密码库统一走 DPAPI，单实例锁防止并发写库，本地流式服务使用随机端口与随机 token；AI 的外部工具调用另过审批闸门，文件读写统一走 `fsguard` 白名单。给浏览器扩展用的本地 API 只绑回环、校验扩展 Origin 与 Bearer token，且只在开关打开时监听
+- **规模**：Go 源码约 15.5 万行（`services` 5.9 万 + `internal` 9.3 万 + 入口与窗口 0.36 万，含 130 个测试文件），前端约 11.4 万行（120 个 Vue 组件 + 149 个 TS 模块，其中 34 个单测文件）
 
 ---
 
@@ -862,7 +891,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 ```
 quickdock/
 ├── main.go / tray.go / windows.go        # 入口、托盘、浮动窗口、单实例锁
-├── services/                             # Wails 门面层，宿主 + 27 领域子包，576 个绑定方法
+├── services/                             # Wails 门面层，宿主 + 30 领域子包，691 个绑定方法
 │   ├── service.go  api_result.go  types.go  lifecycle.go
 │   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
 │   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go  clipboard_files.go
@@ -870,20 +899,23 @@ quickdock/
 │   ├── schedule.go  schedule_runner.go  reminder.go  webhook_notify.go
 │   ├── monitor_checker.go  notify.go  visibility.go  navbadge.go
 │   ├── storage.go  storage_service.go  clipboard_image.go
-│   └── ai/ clipboard/ collection/ diag/ dsh/ env/ frecency/ git/ item/
-│       logtail/ mailbox/ mcp/ monitor/ note/ notify/ plugin/ port/ recycle/
-│       scene/ shelf/ snapshot/ sshx/ system/ todo/ update/ weather/ workspace/
+│   └── ai/ clipboard/ collection/ credentials/ diag/ download/ dsh/ env/
+│       frecency/ git/ item/ kb/ logtail/ mailbox/ mcp/ monitor/ note/ notify/
+│       plugin/ port/ recycle/ scene/ shelf/ snapshot/ sshx/ system/ todo/
+│       update/ weather/ workspace/
 ├── internal/                             # 引擎层，被门面调用，无 Wails 绑定
 │   ├── db/  env/  sites/  sshx/  dsh/  plugin/  platform/  sync/  webdav/  webdavsrv/
-│   ├── mcp/  mcpclient/  fsguard/        # 宿主 MCP 服务、外部 MCP 客户端、文件读写闸门
-│   ├── mailbox/  weather/                # 只读 IMAP 收件箱、Open-Meteo 客户端（都只由宿主发请求）
+│   ├── mcp/  mcpclient/  fsguard/  fsview/   # 宿主 MCP、外部 MCP 客户端、文件读写闸门与浏览器
+│   ├── credentials/  lock/  kb/               # 密码库引擎、启动密码锁、知识库解析与向量
+│   ├── mailbox/  weather/  aria2/             # 只读 IMAP、Open-Meteo、下载引擎 RPC（都只由宿主发请求）
 │   ├── screenshot/  winmgr/  dl/  logger/  sysutil/  validators/
-│   └── aiutil/  cliprule/  logtail/      # 提示词预算、剪贴板规则、文件尾随
+│   └── aiutil/  cliprule/  logtail/  linkutil/  # 提示词预算、剪贴板规则、文件尾随、链接识别
 ├── frontend/src/                         # Vue 3 + TS
 │   ├── App.vue  main.ts  style.css  pages/  i18n/  stores/  types/  styles/
 │   ├── composables/                      # AI / 环境 / 命令面板的逻辑，commandSearch/ 检索编排
 │   └── components/                       # 三栏主界面、面板、设置、插件、环境、监控等
 ├── plugins/                              # 宿主骨架与开发模板，外部插件在独立仓库
+├── browser-ext/                          # Chrome / Edge 扩展（MV3），与桌面同仓；出包见 pack.py
 ├── build/  docs/  website/  image/  Taskfile.yml
 ├── DESIGN.md  AGENTS.md  LICENSE
 └── main_unix.go  main_windows.go  windows_unix.go  windows_windows.go
