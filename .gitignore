@@ -65,6 +65,9 @@ updater.key
 
 # --- CI 发布流程生成物（不入版本库）---
 manifest.json
+# 例外：浏览器扩展的 MV3 清单是源码，必须入库。
+# 必须写在上面那条之后 —— 忽略规则后出现的例外才生效。
+!/browser-ext/manifest.json
 release_notes.md
 
 # 本地 Ed25519 验签回归测试：仅本地保留用于守护更新签名链路，不纳入版本库
@@ -74,6 +77,15 @@ scripts/
 # --- 外部插件（独立开发，不在主仓库管理）---
 plugins/external/
 .qd-devpage.js
+
+# --- 浏览器扩展：源码入库，凭据与产物不入库 ---
+# 和 plugins/external/ 不同：扩展调用的 /vault/* 六个端点、token 与 Origin 校验
+# 全在 services/credentials/ 里，改契约必须两端同一个 commit 改完，
+# 拆成独立仓库只会让两边长期不同步。
+# 扩展不单独发版：版本号跟着桌面 tag 走，由 pack.py 在出包时注入 zip 内的
+# manifest（源码里的 version 恒 0.0.0 占位），所以这里不需要包版本号。
+/browser-ext/keys/
+/browser-ext/dist/
 
 # --- 本地文档（方案 / 报告 / 草稿）---
 # 新写的 md 一律放docs/local/ 或 .workbuddy/ 下，整目录忽略，

@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "QuickDock 密码库",
+  "version": "0.0.0",
+  "description": "把 QuickDock 密码库接到浏览器：自动识别登录表单、一键填充、提交后提示保存。",
+  "minimum_chrome_version": "102",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAt10oRhZCNKKLGOXyKsaiOfpLuS5dH3lvt4FkZGFGYGWcMe7CLmkPDoQhXr9Jqo8npFSHpstUy/hD5xa+T1OM8ZH+DhwISMGw6lgAnivUGgIV4Q3XYqbe3fqOGpheW4kgpRrwfgFug/Vlog2R8GaXYHvBfDRMQ8gTaodW80tPZdyKf3vRT8emMP8PdaUlaXmkA4I7nzLh5ffIzJ9sz4C12o6GeDWHIDnHbS/TiTW/p6uC5uyI01SqZS951h9sCjKUoGwg0YLJsnBCYPrbQcZguc0bfoM7hjy7ff64GQK9M7oO6HrnLt0ZzVJid3/7EsZBy2MbOj+EwnJFCZDXlYnNpwIDAQAB",
+  "permissions": ["storage", "activeTab", "scripting"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "icons": {
+    "16": "icons/16.png",
+    "32": "icons/32.png",
+    "48": "icons/48.png",
+    "128": "icons/128.png"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "QuickDock 密码库",
+    "default_icon": {
+      "16": "icons/16.png",
+      "32": "icons/32.png"
+    }
+  },
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": true
+  }
+}

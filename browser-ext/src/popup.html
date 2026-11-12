@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <style>
+    :root {
+      --bg: #171b22;
+      --card: #1e232d;
+      --line: #2f3745;
+      --text: #e6eaf2;
+      --muted: #8b95a8;
+      --accent: #4a9eff;
+      --danger: #ff6b6b;
+    }
+    * { box-sizing: border-box; }
+    body {
+      width: 320px;
+      margin: 0;
+      padding: 10px;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      font-size: 13px;
+    }
+    .head {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 2px 2px 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--danger); }
+    .dot.ok { background: var(--accent); }
+    input[type="search"] {
+      width: 100%;
+      height: 30px;
+      padding: 0 9px;
+      margin-bottom: 8px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--text);
+      font: inherit;
+      outline: none;
+    }
+    input[type="search"]:focus { border-color: var(--accent); }
+    .list { max-height: 320px; overflow-y: auto; }
+    .item {
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      padding: 7px 8px;
+      margin-bottom: 2px;
+      background: none;
+      border: none;
+      border-radius: 6px;
+      color: var(--text);
+      font: inherit;
+      text-align: left;
+      cursor: pointer;
+    }
+    .item:hover { background: var(--card); }
+    .name { font-size: 13px; }
+    .sub { font-size: 11px; color: var(--muted); }
+    .empty {
+      padding: 14px 8px;
+      font-size: 12px;
+      line-height: 1.6;
+      color: var(--muted);
+    }
+    .empty a { color: var(--accent); }
+    .foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 10px;
+      padding-top: 8px;
+      border-top: 1px solid var(--line);
+      font-size: 11px;
+    }
+    .foot button {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font: inherit;
+      cursor: pointer;
+      padding: 2px 4px;
+    }
+    .foot button:hover { color: var(--accent); }
+    .diag {
+      margin: 0 2px 8px;
+      font-size: 11px;
+      line-height: 1.5;
+      color: var(--muted);
+    }
+    .diag.warn { color: #e0b341; }
+  </style>
+</head>
+<body>
+  <div class="head">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">正在连接 QuickDock…</span>
+  </div>
+  <div class="diag" id="diag"></div>
+  <input id="search" type="search" placeholder="搜索全库（含其他站点）" autocomplete="off" />
+  <div class="list" id="list"></div>
+  <div class="foot">
+    <span id="count"></span>
+    <button id="openOptions">设置 / 密钥</button>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
