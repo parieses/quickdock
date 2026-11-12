@@ -21,7 +21,8 @@
 import { defineAsyncComponent, type AsyncComponentLoader, type Component, type Ref } from 'vue'
 import {
   FolderKanban, FileText, ListTodo, AlarmClock, Activity,
-  Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen, Download,
+	Clipboard, Server, SquareTerminal, Bot, Terminal, Puzzle, LayoutDashboard, GitBranch, Search, BookOpen, Download,
+	KeyRound,
 } from '@lucide/vue'
 // 保活白名单从零依赖模块引（名字常量与组件里 defineOptions 共用同一份）
 import { KEEP_ALIVE_PAGES } from './keepAlive'
@@ -67,6 +68,9 @@ const FileSearchPage = lazy(() => import('../components/FileSearchPage.vue'))
 const KnowledgePage = lazy(() => import('../components/KnowledgePage.vue'))
 // 下载器：aria2 daemon 由环境管理托管，页面只调 DownloadService 绑定方法。
 const DownloadPage = lazy(() => import('../components/DownloadPage.vue'))
+// 密码库：条目管理 + 浏览器扩展配对入口。与「设置 → 安全」的启动密码是两件事——
+// 那边锁的是整个应用，这边存的是各种场景的账号密码。
+const CredentialsPage = lazy(() => import('../components/CredentialsPage.vue'))
 
 /** 「行尾活动指示点」的来源标识。闭集（union）：新增一种必须同时在 Sidebar 的
  *  DOT_PROVIDERS 里加 provider，否则 TS 报缺项 —— 这是把 stringly-typed 的
@@ -149,6 +153,9 @@ export const navEntries: NavEntry[] = [
   { id: 'download', labelKey: 'navDownload', icon: Download, component: DownloadPage },
   // git：仓库视角（分支树 / 提交历史 / 改动预览），放在环境与 SSH 之间——同属「开发现场」
   { id: 'git', labelKey: 'navGit', icon: GitBranch, component: GitPage },
+  // 密码库：放在「开发现场」那组（git → 密码库 → ssh）之后。
+  // 不进 KeepAlive：密码明文只在选中时短暂存在，切走就该卸载。
+  { id: 'credentials', labelKey: 'navCredentials', icon: KeyRound, component: CredentialsPage },
   // ssh：唤起独立终端窗口，主窗口内容不动
   // 首启懒创建窗口有可见延迟，故挂 busyLabelKey：唤起中侧栏项转圈 + 文案变「正在打开…」（App 以 busyPage='ssh' 报告）
   { id: 'ssh', labelKey: 'navSsh', icon: SquareTerminal,

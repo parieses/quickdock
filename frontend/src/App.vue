@@ -20,6 +20,10 @@ import { navigate, navigateTo, pendingOpenNoteId, pendingOpenTodoId, setNavigato
 import Sidebar from './components/Sidebar.vue';
 import Toast from './components/Toast.vue';
 import ConfirmDialog from './components/ConfirmDialog.vue';
+// 密码索取弹层：与 ConfirmDialog 同款「全局唯一实例 + 幂等挂载」。
+// 挂在这里而不是各页面，是因为调用方遍布全应用（SSH 连接、Git 推送、设置页……），
+// 每个页面各挂一份会出现两层输入框同时弹出。
+import CredentialPrompt from './components/CredentialPrompt.vue';
 // 启动锁层：静态 import 而非 defineAsyncComponent —— 它必须在首帧之后立刻可用，
 // 懒加载会留出一段「内容已经可见、锁层还没到」的空窗。组件本身只有几十行。
 import LockScreen from './components/LockScreen.vue';
@@ -608,6 +612,9 @@ const activeConfirm = computed(() =>
     @confirm="resolveConfirm(activeConfirm.id, true)"
     @cancel="resolveConfirm(activeConfirm.id, false)"
   />
+  <!-- 密码索取弹层自己从队列取任务，不需要父组件传 visible：
+       App 只负责挂一次，其余交给 composables/useCredential。 -->
+  <CredentialPrompt />
 </template>
 
 <style>
