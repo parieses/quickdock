@@ -12,10 +12,12 @@
  */
 import { computed, reactive, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Eye, EyeOff, Loader2, X } from '@lucide/vue'
+import { Eye, EyeOff, KeyRound, Loader2, X } from '@lucide/vue'
 import { ListHosts, SaveHost, TestHostInput } from '../../bindings/quickdock/services/sshx/sshservice'
+import { MatchCredentials, RevealCredential } from '../../bindings/quickdock/services/credentials/credentialsservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { useFocusTrap } from '../utils/focusTrap'
 import { useToast } from '../composables/useToast'
 import {
@@ -33,6 +35,41 @@ const { t } = useI18n()
 // toast 是 white-space: nowrap 的单行容器，长句会撑出屏幕，
 // 所以失败仍走行内结果条 —— 现在它已钉在按钮栏上方，不会再被滚动吞掉。
 const { success: toastSuccess } = useToast()
+
+/**
+ * 从密码库填充这台主机的密码。
+ *
+ * 只填第一条匹配项（按主机名 + 端口 + 用户名打分，见 internal/credentials/match.go）。
+ * 不做「弹一个选择列表」是因为这里已经有输入框：多条时用 toast 告知条数，
+ * 想看全部就去密码库页 —— 在编辑对话框里再叠一层选择器反而更绕。
+ */
+async function fillFromVault() {
+  if (!form.host.trim()) {
+    toastSuccess(t('credNeedHostFirst'))
+    return
+  }
+  try {
+    const res = await MatchCredentials('ssh', form.host.trim(), Number(form.port) || 22, form.user.trim())
+    const items = unwrap<Array<{ id: string; name: string; hasSecret: boolean }>>(res) ?? []
+    const withSecret = items.filter((it) => it.hasSecret)
+    if (!withSecret.length) {
+      toastSuccess(t('credNoMatchForHost'))
+      return
+    }
+    const data = unwrap<{ username: string; secret: string }>(await RevealCredential(withSecret[0].id))
+    if (data?.secret) {
+      form.password = data.secret
+      showPassword.value = true
+      toastSuccess(withSecret.length > 1
+        ? t('credFilledOneOfMany', { n: withSecret.length })
+        : t('credFilledFromVault'))
+    }
+  } catch (e) {
+    // 密码库不可用（未设密钥 / 平台不支持）不该阻断手动填密码，
+    // 所以这里只记日志，界面上不弹错误。
+    logErr('SshHostDialog.fillFromVault', e)
+  }
+}
 
 const props = defineProps<{
   visible: boolean
@@ -442,6 +479,14 @@ function onKeydown(e: KeyboardEvent) {
                       <EyeOff v-if="showPassword" :size="14" />
                       <Eye v-else :size="14" />
                     </button>
+                    <button
+                      type="button"
+                      class="fd-eye fd-vault"
+                      :title="t('credFillFromVault')"
+                      @click="fillFromVault"
+                    >
+                      <KeyRound :size="14" />
+                    </button>
                   </span>
                 </label>
                 <label v-if="hasPassword" class="fd-check">
@@ -659,7 +704,13 @@ select.fd-input {
 }
 
 .fd-secret .fd-input {
-  padding-right: var(--space-9);
+  /* 右侧要同时容纳「显示密码」与「从密码库填充」两个图标按钮 */
+  padding-right: calc(var(--space-9) + 22px);
+}
+
+/* 第二个图标按钮：往左让开一个位，避免与眼睛按钮重叠 */
+.fd-vault {
+  right: calc(var(--space-3) + 22px);
 }
 
 .fd-eye {

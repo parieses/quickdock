@@ -13,7 +13,9 @@ import (
 	"sync"
 	"time"
 
+	"quickdock/internal/credentials"
 	"quickdock/internal/db"
+	"quickdock/internal/logger"
 	sshcore "quickdock/internal/sshx"
 	"quickdock/services"
 )
@@ -208,7 +210,71 @@ func (s *SshService) SaveHost(in SshHostInput) *services.ApiResult {
 	// 主机配置变了（尤其是跳板/端口/凭据），池里那条旧链路不能再给新标签复用。
 	// 只从池里摘掉、不主动 Close：已有会话还持着 release，会自己关掉旧连接。
 	s.pool.Invalidate(h.ID)
+	// 密码顺手进密码库：用户在主机表单里填的密码本来只想「连得上」，
+	// 但下次换台机器、或者要在密码库页里找它时，那条记录不该是空的。
+	// 失败只记日志——密码库不可用不该拦住「改 SSH 配置」这件正事。
+	if !h.IsFolder && h.AuthType == db.SshAuthPassword {
+		switch {
+		case strings.TrimSpace(in.Password) != "":
+			s.syncVaultPassword(h, in.Password)
+		case in.ClearPassword:
+			s.clearVaultPassword(h.ID)
+		}
+	}
 	return services.Ok(h)
+}
+
+// sourceSSHHost 密码库条目的来源标记。
+//
+// 一条 SSH 主机对应至多一条凭据，用 source+source_id 判重：
+// 每次改主机都新建一条的话，密码库会被同一台机器的历史密码塞满。
+const sourceSSHHost = "ssh_host"
+
+// syncVaultPassword 把主机密码写进密码库（新建或更新同源条目）。
+func (s *SshService) syncVaultPassword(h *db.SshHost, password string) {
+	name := h.Name
+	if name == "" {
+		name = h.Host
+	}
+	in := db.Credential{
+		Name:     name,
+		Kind:     db.CredKindSSH,
+		Username: h.User,
+		Secret:   password,
+		Host:     h.Host,
+		Port:     h.Port,
+		Source:   sourceSSHHost,
+		SourceID: h.ID,
+	}
+	// 已有条目时保留用户自己改过的展示字段：密码库页里那条可能被重命名、
+	// 加了备注/标签，仅仅因为改了主机端口就把它覆盖回默认值太粗暴。
+	if old, err := s.App.DB.FindCredentialBySource(sourceSSHHost, h.ID); err == nil && old != nil {
+		in.ID = old.ID
+		in.Name = old.Name
+		in.URL = old.URL
+		in.Notes = old.Notes
+		in.Tags = old.Tags
+		in.Favorite = old.Favorite
+	}
+	if _, err := credentials.Save(in); err != nil {
+		logger.W("[ssh] 同步主机密码到密码库失败: %v", err)
+	}
+}
+
+// clearVaultPassword 主机清空密码时同步清掉密码库里的那份密文（保留条目本身）。
+func (s *SshService) clearVaultPassword(hostID string) {
+	old, err := s.App.DB.FindCredentialBySource(sourceSSHHost, hostID)
+	if err != nil || old == nil {
+		return
+	}
+	if _, err := credentials.Save(db.Credential{
+		ID: old.ID, Name: old.Name, Kind: old.Kind, Username: old.Username,
+		Host: old.Host, Port: old.Port, URL: old.URL, Notes: old.Notes, Tags: old.Tags,
+		Source: old.Source, SourceID: old.SourceID, Favorite: old.Favorite,
+		ClearSecret: true,
+	}); err != nil {
+		logger.W("[ssh] 清除密码库中的主机密码失败: %v", err)
+	}
 }
 
 // DeleteHost 删除主机或文件夹（文件夹会连同子树一起删除）。
@@ -475,12 +541,49 @@ func (s *SshService) loadHost(id string) (*db.SshHost, *db.SshHostSecret, error)
 		return nil, nil, err
 	}
 	if secret.AuthType == db.SshAuthPassword && secret.Password == "" {
-		return nil, nil, errNoCredential
+		// 主机自己没存密码时回落到密码库：用户可能是在密码库页里维护这台机器的
+		// 账号，而不是在主机表单里。两者指向同一台机，没理由要他再填一遍。
+		if pw := s.vaultPassword(host); pw != "" {
+			secret.Password = pw
+		} else {
+			return nil, nil, errNoCredential
+		}
 	}
 	if secret.AuthType == db.SshAuthKey && secret.KeyPath == "" {
 		return nil, nil, errNoCredential
 	}
 	return host, secret, nil
+}
+
+// vaultPassword 按 host/port/user 从密码库找一条 SSH 密码。
+//
+// 取分数最高的一条并解出明文；任何一步失败都返回空串——
+// 密码库被锁（内存密钥已清零）不该让「主机自己存了密码」的连接也连不上。
+func (s *SshService) vaultPassword(host *db.SshHost) string {
+	list, err := credentials.Match(credentials.MatchQuery{
+		Kind:     db.CredKindSSH,
+		Host:     host.Host,
+		Port:     host.Port,
+		Username: host.User,
+	})
+	if err != nil {
+		logger.W("[ssh] 从密码库匹配主机密码失败: %v", err)
+		return ""
+	}
+	for _, c := range list {
+		if !c.HasSecret {
+			continue
+		}
+		sec, err := credentials.Reveal(c.ID)
+		if err != nil {
+			logger.W("[ssh] 解开密码库条目失败: %v", err)
+			continue
+		}
+		if sec.Secret != "" {
+			return sec.Secret
+		}
+	}
+	return ""
 }
 
 // buildTestTarget 把表单入参整理成「可以直接拿去 dial」的 host + secret。

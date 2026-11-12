@@ -15,8 +15,11 @@
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Loader2, RotateCw, Sparkles, Unplug } from '@lucide/vue'
-import { Connect, Disconnect, ListSessions, Resize } from '../../bindings/quickdock/services/sshx/sshservice'
+import { Connect, Disconnect, ListSessions, Resize, SaveHost } from '../../bindings/quickdock/services/sshx/sshservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
+import { getErrorMessage } from '../utils/error'
+import { requestCredential } from '../composables/useCredential'
+import { SSH_ERR } from '../utils/ssh'
 import { useAIAvailability } from '../composables/useAIAvailability'
 import { useToast } from '../composables/useToast'
 import {
@@ -191,7 +194,9 @@ async function runAutoReconnect() {
   // 旧会话已经 disconnected，先归还：不然 Go 侧 Manager 里会一直留一条
   // 没人接的会话，窗口重开时还会被 restoreTabs 认出来。
   await dropSession()
-  await doConnect()
+  // 自动重连不弹密码框：它由定时器驱动，用户可能不在跟前；
+  // 在这里弹会变成「每隔几秒蹦一个输入框」。
+  await doConnect(false)
   // 指纹变更/未知要人工确认，自动重试只会反复弹窗。
   if (fpVisible.value) {
     cancelAutoReconnect()
@@ -214,7 +219,7 @@ function currentSize() {
   return lastSize ?? { cols: 80, rows: 24 }
 }
 
-async function doConnect() {
+async function doConnect(allowPrompt = true) {
   if (inFlight) return
   const size = currentSize()
   inFlight = true
@@ -222,6 +227,10 @@ async function doConnect() {
   errMsg.value = ''
   endReason.value = ''
   emit('busy', true)
+  // 无凭据不能当场弹层：弹层是 await，放在 try 里会占着 inFlight，
+  // 用户输完再调 doConnect 会直接被上面的守卫挡回去。先出 finally 再问。
+  let needPassword = false
+  let askReason: 'missing' | 'failed' = 'missing'
   try {
     const res = unwrap<SshConnectResult>(await Connect(props.host.id, size.cols, size.rows))
     if (!res?.sessionId) throw new Error(t('sshConnectFailed'))
@@ -248,21 +257,85 @@ async function doConnect() {
     if (isFingerprintError(code)) {
       // 未知/变更的服务器身份交给弹窗处理；信任后自动重连，
       // 用户不需要「连一次失败 → 再点一次连接」。
-      openFingerprint(code === SSH_ERR_HOSTKEY_CHANGED ? 'changed' : 'unknown', data)
+      openFingerprint(code === SSH_ERR.HOSTKEY_CHANGED ? 'changed' : 'unknown', data)
       phase.value = 'idle'
       return
     }
-    errMsg.value = sshErrorText(e, code, t)
-    phase.value = 'error'
+    if (allowPrompt && props.host.authType !== 'key' &&
+        (code === SSH_ERR.NO_CREDENTIAL || code === SSH_ERR.AUTH_FAILED)) {
+      // 认证失败也问一次：服务器密码改过是常见事，让用户去主机对话框里改
+      // 再回来重连，比在这里补一次密码麻烦得多。问过之后就不再问（见下面的 false）。
+      askReason = code === SSH_ERR.AUTH_FAILED ? 'failed' : 'missing'
+      needPassword = true
+    } else {
+      errMsg.value = sshErrorText(e, code, t)
+      phase.value = 'error'
+    }
   } finally {
     inFlight = false
     emit('busy', false)
   }
+  if (needPassword) {
+    phase.value = 'idle'
+    await askPassword(askReason)
+  }
 }
 
-// 与 utils/ssh.ts 的 SSH_ERR.HOSTKEY_CHANGED 同值；这里单独常量是为了
-// 避免为一个比较就把整个常量表引进模板层。
-const SSH_ERR_HOSTKEY_CHANGED = 'ssh_hostkey_changed'
+/**
+ * 向用户要一次密码，存好再重连。
+ *
+ * 存两处：主机自己那份（ssh_hosts，下次连接不再问）+ 密码库
+ * （用户能在密码库页看到它、换台机器也能复用）。后端 SaveHost 一次写全，
+ * 所以这里不需要额外的「顺手保存」分支。
+ */
+async function askPassword(reason: 'missing' | 'failed') {
+  const target = `${props.host.user}@${props.host.host}:${props.host.port}`
+  const r = await requestCredential({
+    kind: 'ssh',
+    title: t('sshAskPasswordTitle', { target }),
+    hint: reason === 'failed' ? t('sshAskPasswordRetryHint') : t('sshAskPasswordHint'),
+    host: props.host.host,
+    port: props.host.port,
+    username: props.host.user,
+    // 这里不是「可选项」：不落库就没法重连，勾选框只会让人以为可以不存。
+    allowSave: false,
+  })
+  if (!r) {
+    // 用 closed 而不是 error：用户主动取消不算失败，底部横条也不会挡住终端。
+    errMsg.value = t('sshAskPasswordCancelled')
+    phase.value = 'closed'
+    return
+  }
+  try {
+    unwrap(await SaveHost({
+      id: props.host.id,
+      name: props.host.name,
+      host: props.host.host,
+      port: props.host.port,
+      // 用户在弹层里可能改了用户名（比如从 root 换成 ubuntu），以他填的为准；
+      // 不改的话存下去的是「新密码 + 旧账号」，下一次连接仍然认证失败。
+      user: r.username || props.host.user,
+      authType: props.host.authType || 'password',
+      password: r.secret,
+      clearPassword: false,
+      keyPath: props.host.keyPath || '',
+      keyPassphrase: '',
+      legacyAlgorithms: !!props.host.legacyAlgorithms,
+      env: props.host.env || '',
+      jumpHostId: props.host.jumpHostId || '',
+      parentId: props.host.parentId || '',
+      isFolder: false,
+      sort: props.host.sort || 0,
+      remark: props.host.remark || '',
+    }))
+  } catch (e) {
+    errMsg.value = getErrorMessage(e) || t('sshErrNoCredential')
+    phase.value = 'error'
+    return
+  }
+  // 密码已落库，这次不再允许再弹（否则存进去又读不出来会无限循环）。
+  void doConnect(false)
+}
 
 function openFingerprint(mode: 'unknown' | 'changed', data: SshHostKeyInfo) {
   fpMode.value = mode
