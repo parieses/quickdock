@@ -162,13 +162,13 @@ function onClickAway() {
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  /* 高度对齐一级页头（.qd-page-header 44px）：工作空间没有传统页头，
+  /* 高度对齐一级页头（.qd-page-header 46px）：工作空间没有传统页头，
      这条标签栏就是它的顶栏；不等高的话从工作空间切到其它页会上下跳。
      减去 1px 是因为下面还有 .tab-line 那条分隔线。 */
-  min-height: 43px;
+  min-height: 45px;
   padding: 6px 10px 0;
   overflow: hidden;
-  -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
 }
 
 .tab {
@@ -184,11 +184,11 @@ function onClickAway() {
   border-bottom: none;
   border-radius: var(--radius-md) var(--radius-md) 0 0;
   color: var(--color-text-muted);
-  font-size: 12px;
+  font-size: var(--text-sm);
   cursor: pointer;
   white-space: nowrap;
   transition: background-color var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-  -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
 }
 
 .tab:hover {

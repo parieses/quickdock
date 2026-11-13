@@ -64,12 +64,11 @@ type Secret struct {
 	Secret   string
 }
 
-// Reveal 解出单条明文，并在库里记一次使用。
+// decrypt 解出单条明文，不记使用、不打审计日志。
 //
-// 这是全库唯一把明文交出去的入口。调用方只有三处：前端「显示/复制」、
-// 本地 HTTP 的 /vault/reveal、内部弹层填充表单。审计日志记在这里，
-// 保证「谁看过密码」有迹可循。
-func Reveal(id string) (*Secret, error) {
+// 导出备份走这里而不是 Reveal：搬家不是「使用」，不该把每条 use_count
+// 刷一遍，也不该在审计日志里留下 N 条假的「查看密码」记录。
+func decrypt(id string) (*Secret, error) {
 	d := database()
 	if d == nil {
 		return nil, ErrLocked
@@ -96,11 +95,23 @@ func Reveal(id string) (*Secret, error) {
 		return nil, fmt.Errorf("解开「%s」的密码失败: %w", meta.Name, err)
 	}
 	out.Secret = plain
-	logger.I("[credentials] reveal id=%s kind=%s", meta.ID, meta.Kind)
+	return out, nil
+}
+
+// Reveal 用户「取用」一条密码的入口：前端显示/复制、HTTP /vault/reveal、
+// 内部弹层填充表单都走这里，审计日志与使用统计收敛在这一处。
+func Reveal(id string) (*Secret, error) {
+	out, err := decrypt(id)
+	if err != nil {
+		return nil, err
+	}
+	logger.I("[credentials] reveal id=%s", out.ID)
 
 	// 使用统计失败不影响取用（见 db.TouchCredential 的注释）。
-	if err := d.TouchCredential(id); err != nil {
-		logger.W("[credentials] 记录使用次数失败: %v", err)
+	if d := database(); d != nil {
+		if err := d.TouchCredential(id); err != nil {
+			logger.W("[credentials] 记录使用次数失败: %v", err)
+		}
 	}
 	return out, nil
 }

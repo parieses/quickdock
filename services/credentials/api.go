@@ -14,6 +14,7 @@ import (
 
 	"quickdock/internal/credentials"
 	"quickdock/internal/db"
+	"quickdock/internal/lock"
 	"quickdock/internal/logger"
 	"quickdock/internal/platform"
 	"quickdock/services"
@@ -236,11 +237,18 @@ func (s *CredentialsService) extensionPaired() bool {
 	return err == nil && strings.TrimSpace(raw) != ""
 }
 
-// StartAPIIfEnabled 只在「已开启」时才起监听（应用启动钩子用）。
+// StartAPIIfEnabled 只在「已开启 且 未锁定」时才起监听（启动与解锁钩子共用）。
 //
 // 关掉开关的用户不该有一个常驻的回环端口在那儿等请求——
 // 端口不监听，本地其它进程连试探的机会都没有。
+//
+// 锁定这道判断不能省：设了锁屏密码时 lock.Init 会先通知一次「已锁定」，
+// 而 lifecycle 在它之后无条件调用本函数。少了这道闸，应用一启动就带着
+// 「锁着但端口开着」的状态，锁屏期间扩展照样能取走全库明文。
 func (s *CredentialsService) StartAPIIfEnabled() int {
+	if lock.IsLocked() {
+		return 0
+	}
 	if !s.extensionPaired() {
 		return 0
 	}
@@ -288,8 +296,9 @@ func (s *CredentialsService) readToken() string {
 
 // handleAPI 路由分发。
 //
-// 用最朴素的方法+路径分派而不是引入路由器：总共 6 个端点，
-// 且路径前缀统一，多一个依赖换不来任何东西。
+// 用最朴素的方法+路径分派而不是引入路由器：总共 7 个端点
+// （status/match/reveal/save/touch/list/clip-note），且路径前缀统一，
+// 多一个依赖换不来任何东西。
 func (s *CredentialsService) handleAPI(w http.ResponseWriter, r *http.Request) {
 	// 记一行请求日志：扩展侧出问题（密钥不对、应用没开）时，用户往往
 	// 只看到「登录完了密码没进库」，日志是唯一能分清「没请求」和「请求被拒」的地方。
@@ -339,6 +348,18 @@ func (s *CredentialsService) handleAPI(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 第二道闸：lock bridge 已经会在锁定时 StopAPI，这里是防御层 ——
+	// 万一将来有人改了联动、或端口被别的路径重新拉起，请求也不能落到
+	// 解密逻辑上。DEK 在锁定后会自动重建，光靠 Wipe 挡不住 HTTP 这一路。
+	// status 放在前面放行，是为了让扩展仍能把「已锁定」和「没开开关」区分开。
+	if lock.IsLocked() {
+		writeAPI(w, http.StatusLocked, map[string]any{
+			"code": CodeVaultLocked,
+			"msg":  "QuickDock 已锁定，请先解锁",
+		})
+		return
+	}
+
 	if !s.checkBearer(r) {
 		writeAPI(w, http.StatusUnauthorized, map[string]any{
 			"code": 1,
@@ -358,6 +379,8 @@ func (s *CredentialsService) handleAPI(w http.ResponseWriter, r *http.Request) {
 		s.apiTouch(w, r)
 	case "/vault/list":
 		s.apiList(w)
+	case "/vault/clip-note":
+		s.apiClipNote(w, r)
 	default:
 		writeAPI(w, http.StatusNotFound, map[string]any{"code": 1, "msg": "not found"})
 	}
@@ -383,6 +406,7 @@ func (s *CredentialsService) apiStatus(w http.ResponseWriter) {
 		"ok":         true,
 		"enabled":    s.extensionPaired(),
 		"needsPair":  !s.extensionPaired(),
+		"locked":     lock.IsLocked(),
 		"app":        "quickdock",
 		"apiVersion": 1,
 		"port":       s.apiPort(),
@@ -442,6 +466,50 @@ func (s *CredentialsService) apiReveal(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// apiClipNote 浏览器扩展把当前页 / 选中文本存成一篇笔记。
+//
+// 端点放在 /vault/* 下不是为了复用密码逻辑，而是为了复用同一套
+// Origin 白名单 + Bearer token + 锁定状态拦截：网页 JS 伪造不了
+// chrome-extension:// Origin，剪藏也就不会被任意站点拿来往笔记里灌内容。
+// 落库实现由宿主注入（ClipNoteFn），本包不反向依赖 services/note。
+func (s *CredentialsService) apiClipNote(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeAPI(w, http.StatusMethodNotAllowed, map[string]any{"code": 1, "msg": "method not allowed"})
+		return
+	}
+	var req struct {
+		Title     string `json:"title"`
+		Content   string `json:"content"`
+		URL       string `json:"url"`
+		Selection string `json:"selection"`
+	}
+	if err := json.NewDecoder(limitedBody(r)).Decode(&req); err != nil {
+		writeAPI(w, http.StatusBadRequest, map[string]any{"code": 1, "msg": "请求格式错误"})
+		return
+	}
+	body := req.Content
+	if strings.TrimSpace(body) == "" {
+		body = req.Selection
+	}
+	if strings.TrimSpace(body) == "" {
+		writeAPI(w, http.StatusOK, map[string]any{"code": 1, "msg": "没有可剪藏的内容"})
+		return
+	}
+	if s.App == nil || s.App.ClipNoteFn == nil {
+		writeAPI(w, http.StatusOK, map[string]any{"code": 1, "msg": "笔记服务不可用"})
+		return
+	}
+	res := s.App.ClipNoteFn(req.Title, body, req.URL, `["剪藏"]`)
+	if res == nil {
+		writeAPI(w, http.StatusOK, map[string]any{"code": 1, "msg": "笔记服务未返回结果"})
+		return
+	}
+	// ok 与 code 都给：扩展现有 api() 按 code 判错，别的客户端按 ok 判断也行。
+	writeAPI(w, http.StatusOK, map[string]any{
+		"code": res.Code, "msg": res.Msg, "data": res.Data, "ok": res.Code == 0,
+	})
+}
+
 func (s *CredentialsService) apiSave(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		writeAPI(w, http.StatusMethodNotAllowed, map[string]any{"code": 1, "msg": "method not allowed"})
@@ -452,11 +520,37 @@ func (s *CredentialsService) apiSave(w http.ResponseWriter, r *http.Request) {
 		writeAPI(w, http.StatusBadRequest, map[string]any{"code": 1, "msg": "请求格式错误"})
 		return
 	}
-	// 扩展只会存网页登录：类型固定为 login，来源标记为 browser，
+	// 扩展只会存网页登录：类型固定为 login，来源默认标记为 browser，
 	// 这样用户能在密码库页里一眼分清「网页密码」和「我手动建的」。
 	in.Kind = db.CredKindLogin
-	if in.Source == "" {
-		in.Source = "browser"
+	in.Source = "browser"
+
+	// 更新时以库里的值为准，补齐扩展压根不认识的那几列。
+	//
+	// /vault/save 的更新是整行覆盖，而扩展只懂「网址 / 账号 / 密码」，
+	// 请求体里 notes、tags、favorite、port 永远是空串、0、false ——
+	// 用户手填的备注、打的标签、收藏星标、自定义端口会在网页上改个密码
+	// 就被无声清掉。这里按 id 先把既有值读回来盖上去，让「浏览器改密码」
+	// 只改密码。
+	//
+	// url / name / sourceId 是「有值就用新的」：扩展抓到的地址通常比
+	// 库里那条更准（比如同一站点换了登录入口），没抓到才保留旧值。
+	if id := strings.TrimSpace(in.ID); id != "" {
+		cur, err := credentials.Get(id)
+		if err != nil {
+			res := classify(err)
+			writeAPI(w, http.StatusOK, map[string]any{"code": res.Code, "msg": res.Msg})
+			return
+		}
+		in.Name = firstNonEmpty(in.Name, cur.Name)
+		in.Kind = cur.Kind
+		in.URL = firstNonEmpty(in.URL, cur.URL)
+		in.Notes = cur.Notes
+		in.Tags = cur.Tags
+		in.Port = cur.Port
+		in.Favorite = cur.Favorite
+		in.Source = firstNonEmpty(cur.Source, in.Source)
+		in.SourceID = firstNonEmpty(in.SourceID, cur.SourceID)
 	}
 	res := s.SaveCredential(in)
 	writeAPI(w, http.StatusOK, map[string]any{"code": res.Code, "msg": res.Msg, "data": res.Data})
@@ -495,6 +589,16 @@ func (s *CredentialsService) apiList(w http.ResponseWriter) {
 		})
 	}
 	writeAPI(w, http.StatusOK, map[string]any{"ok": true, "items": out})
+}
+
+// firstNonEmpty 取第一个非空串（更新时「新的有值就用新的，没有就留旧的」）。
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // limitedBody 返回限长后的请求体。

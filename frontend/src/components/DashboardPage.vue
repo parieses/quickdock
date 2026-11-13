@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 /**
  * 总览仪表盘：一屏看清「今天要做什么 / 服务有没有挂 / 环境在跑什么 / 端口被谁占」。
  *
@@ -1571,18 +1572,18 @@ onUnmounted(() => {
 
 <template>
   <div class="qd-page">
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">{{ t('navDashboard') }}</h2>
         <span class="qd-page-sub">{{ t('dash_subtitle') }}</span>
-      </div>
+      </template>
       <div class="qd-page-actions">
         <button class="qd-btn qd-btn-ghost" :disabled="loading" @click="refreshAll()">
           <RefreshCw :size="13" :class="{ spin: loading }" />
           {{ t('dash_refresh') }}
         </button>
       </div>
-    </div>
+    </PageHeader>
 
     <div class="qd-page-body">
       <div class="dash">
@@ -2293,8 +2294,7 @@ onUnmounted(() => {
 }
 .band-head {
   display: flex; align-items: center; gap: var(--space-3);
-  padding: 7px var(--space-6);
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-4) var(--space-6);
 }
 .band-head-dot {
   width: 6px; height: 6px; flex-shrink: 0;
@@ -2310,7 +2310,7 @@ onUnmounted(() => {
 /* 读数三行全部左对齐：数字是主角，foot 只是注脚，右对齐的对角线留白反而显得散 */
 .readout {
   display: flex; flex-direction: column; gap: 2px; min-width: 0;
-  padding: 10px var(--space-5) 11px;
+  padding: var(--space-4) var(--space-5);
   background: none; border: 0; font: inherit; text-align: left; color: inherit;
   cursor: pointer; transition: background-color var(--transition-fast);
 }
@@ -2358,11 +2358,10 @@ onUnmounted(() => {
 }
 .card-head {
   display: flex; align-items: center; gap: var(--space-3);
-  padding: 9px 14px;
-  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-4) var(--space-6);
 }
 .t-ic { color: var(--color-text-muted); flex-shrink: 0; }
-.card-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
+.card-title { font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .card-count {
   font-family: var(--font-mono); font-variant-numeric: tabular-nums;
   font-size: 10px; line-height: 15px; padding: 0 6px; border-radius: var(--radius-full);
@@ -2379,7 +2378,7 @@ onUnmounted(() => {
 
 /* 卡片内的空态：不居中反而是对的（列表为空时上方还有热力条/分布条），
    但留白要够，否则一行灰字像被漏掉的说明。 */
-.empty { margin: 0; padding: 22px 14px; font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-muted); }
+.empty { margin: 0; padding: var(--space-8) var(--space-6); font-size: var(--text-sm); line-height: 1.6; color: var(--color-text-muted); }
 
 /* ---- 24h 可用率热力条 ----
  * 一格 = 30 分钟：绿=全程在线、红=挂过、暗=没有数据。放在卡头之下、列表之上，

@@ -43,23 +43,26 @@ var validTables = map[string]bool{
 	"clipboard_rules":   true,
 	"notifications":     true,
 	"notes":             true,
-	"usage_frecency":    true,
-	"todos":             true,
-	"scheduled_tasks":   true,
-	"schedule_runs":     true,
-	"monitors":          true,
-	"monitor_logs":      true,
-	"plugin_exec_logs":  true,
-	"ai_conversations":  true,
-	"ai_messages":       true,
-	"ai_spaces":         true,
-	"agent_runs":        true,
-	"agent_nodes":       true,
-	"agent_events":      true,
-	"plugins":           true,
-	"plugin_data":       true,
-	"ssh_hosts":         true,
-	"ssh_known_hosts":   true,
+	// 笔记修订历史：要参与快照按表遍历与回收站整行恢复，不登记会以「未知表」被拒。
+	// notes_fts 是 FTS5 虚拟表，与 items_fts / kb_chunks_fts 一样不登记。
+	"note_revisions":   true,
+	"usage_frecency":   true,
+	"todos":            true,
+	"scheduled_tasks":  true,
+	"schedule_runs":    true,
+	"monitors":         true,
+	"monitor_logs":     true,
+	"plugin_exec_logs": true,
+	"ai_conversations": true,
+	"ai_messages":      true,
+	"ai_spaces":        true,
+	"agent_runs":       true,
+	"agent_nodes":      true,
+	"agent_events":     true,
+	"plugins":          true,
+	"plugin_data":      true,
+	"ssh_hosts":        true,
+	"ssh_known_hosts":  true,
 	// AI 提示词库：需要走通用表操作（回收站整行恢复、快照按表遍历），
 	// 少了它这里会以「未知表」被拒。
 	"ai_prompts": true,
@@ -101,7 +104,12 @@ var validColumns = map[string]bool{
 	"path": true, "version": true, "capability": true,
 	"env":          true, // scenes.env：场景绑定的环境服务 JSON
 	"jump_host_id": true, // ssh_hosts：跳板机引用的另一台主机 id（空 = 直连）
-	"permissions":  true, "manifest": true, "configurable": true, "built_in": true,
+	// ssh_hosts 增强列（2026-11-13）。tags/icon/color 早就在白名单里（其它表用），
+	// 这里只补真正新增的 6 个；全局白名单不按表分，漏一个就会在快照恢复整行
+	// 转插入时才报「非法列名」，那时原记录已经删掉了。
+	"mcp_allowed": true, "post_login_command": true, "auto_reply_sudo": true,
+	"proxy_command": true, "proxy_command_enabled": true, "keepalive_interval": true,
+	"permissions": true, "manifest": true, "configurable": true, "built_in": true,
 	"installed": true, "enabled": true,
 	"kind": true, "label": true, "note": true, "payload": true, "size": true,
 	"key":  true,
@@ -115,6 +123,10 @@ var validColumns = map[string]bool{
 	"category":   true,
 	"keyword":    true,
 	"content":    true,
+	// note_revisions：修订归属与留痕原因（save/import/rollback/clip）。
+	// 白名单是全局共用的，漏一个就是回收站整行恢复时该表插入被拒。
+	"note_id": true,
+	"reason":  true,
 	// ai_prompts：内置条目标记与稳定身份（builtin 只影响能否删除，source_key 决定
 	// 升级时会不会重复插一份）。白名单全局共用，漏了就是写入时「非法列名」。
 	"builtin":           true,

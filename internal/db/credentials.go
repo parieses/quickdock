@@ -211,6 +211,11 @@ func (d *Database) SaveCredential(in Credential) (*Credential, error) {
 	}
 
 	// 更新：先取既有密文与创建时间，按「留空不修改」语义合并。
+	//
+	// 注意只有 secret 走「留空＝保持原值」；name/notes/tags/favorite/port 等
+	// 都是整行覆盖（表单要能真的清空备注）。只带部分字段的调用方必须自己
+	// 先读回旧值再提交，否则会把用户填过的东西清掉 —— 浏览器扩展那条路
+	// 在 services/credentials/api.go 的 apiSave 里就是这么补的。
 	var cipher, createdAt string
 	err := d.conn.QueryRow(
 		`SELECT secret, created_at FROM credentials WHERE id = ?`, in.ID).
@@ -221,10 +226,11 @@ func (d *Database) SaveCredential(in Credential) (*Credential, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取密码条目失败: %w", err)
 	}
+	// ClearSecret 必须压过 Secret：前端「显示过密码」再勾「清除」时两个字段
+	// 会同时有值（见 CredentialsPage.save 的注释），用 else if 保证清除生效。
 	if in.ClearSecret {
 		cipher = ""
-	}
-	if in.Secret != "" {
+	} else if in.Secret != "" {
 		cipher = in.Secret
 	}
 

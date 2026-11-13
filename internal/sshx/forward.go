@@ -61,6 +61,9 @@ type ForwardRule struct {
 	TargetHost string `json:"targetHost"`
 	TargetPort int    `json:"targetPort"`
 	AutoStart  bool   `json:"autoStart"`
+	// OwnerTabID 把规则绑到某个终端标签，空串 = 全局规则（旧数据的默认值）。
+	// 只有显式绑了 tab 的规则才随标签关闭而停，默认值保持不变。
+	OwnerTabID string `json:"ownerTabId"`
 }
 
 // ForwardView 前端展示用：规则 + 运行时状态。
@@ -85,6 +88,9 @@ type ForwardView struct {
 	// 提示一次「已重连，期间的连接断了」；轮询列表不重复弹。
 	Reconnected bool   `json:"reconnected"`
 	StartedAt   string `json:"startedAt"`
+	// OwnerTabID 为空表示全局规则。前端「所属标签」列与关标签时的停止筛选都靠它，
+	// 必须从规则原样带出；否则列表永远显示「全局」，用户会以为绑定没生效。
+	OwnerTabID string `json:"ownerTabId"`
 }
 
 // View 把规则转成「未启动」状态的展示对象。
@@ -94,6 +100,7 @@ func (r ForwardRule) View() ForwardView {
 		BindHost: r.BindHost, BindPort: r.BindPort,
 		TargetHost: r.TargetHost, TargetPort: r.TargetPort,
 		AutoStart: r.AutoStart, Status: ForwardStateStopped,
+		OwnerTabID: r.OwnerTabID,
 	}
 }
 

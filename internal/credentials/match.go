@@ -95,9 +95,11 @@ func scoreOne(c db.Credential, q MatchQuery, host string) int {
 		switch {
 		case credHost == host:
 			score += 100
-		case hostSuffixMatch(host, credHost):
-			// 登录框常在 sso.example.com / accounts.example.com，
-			// 而用户存的是 example.com —— 这种父子域关系必须认。
+		case hostRelated(host, credHost):
+			// 父子域关系要认，且双向都认：登录框常在 sso.example.com 而用户
+			// 存的是 example.com，反过来也有「在 passport.baidu.com 存过、
+			// 回主站 baidu.com 登录」的情况。早期只认一个方向，后者直接 0 分，
+			// 用户看到的就是「明明存了却不弹」。
 			score += 70
 		default:
 			return 0
@@ -125,15 +127,23 @@ func scoreOne(c db.Credential, q MatchQuery, host string) int {
 	return score
 }
 
-// hostSuffixMatch 判断 a 是否为 b 的子域（按标签边界，不做裸字符串后缀）。
+// hostRelated 判断两个域名是否属于同一站点：互为父子域（按标签边界）。
 //
 // 必须按 "." 切：裸 HasSuffix 会让 notexample.com 匹配 example.com，
 // 那会把密码填到钓鱼站上 —— 这是这个功能唯一不能出的安全事故。
-func hostSuffixMatch(a, b string) bool {
+// 双向是对称的：查询 host 是条目子域、或条目 host 是查询子域，都算关联。
+//
+// 单标签域名（localhost、com、内网主机名）一律不做父子域匹配：
+// 一旦允许，「com」就会跟所有 .com 站点关联，等于把公共后缀当成一个站点。
+// 这类 host 只能靠精确相等命中（由 scoreOne 的第一个 case 处理）。
+func hostRelated(a, b string) bool {
 	if a == "" || b == "" {
 		return false
 	}
-	return strings.HasSuffix(a, "."+b)
+	if !strings.Contains(a, ".") || !strings.Contains(b, ".") {
+		return false
+	}
+	return strings.HasSuffix(a, "."+b) || strings.HasSuffix(b, "."+a)
 }
 
 // normalizeHost 把「URL / host:port / 裸域名」统一成小写域名。

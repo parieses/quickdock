@@ -266,6 +266,14 @@ func (d *Database) SyncNoteWikiLinks(noteID, content string) error {
 	if noteID == "" {
 		return fmt.Errorf("笔记 id 不能为空")
 	}
+	// 快捷笔记与树共用 notes 表，但它不进树、不进搜索，也就不该在图谱里
+	// 变成一个谁也点不到的悬空节点。统一在这里挡掉，上层所有「写了正文」
+	// 的入口都能无脑调本函数，不必各自记「这个要跳过」。
+	var kw string
+	if err := d.conn.QueryRow(`SELECT keyword FROM notes WHERE id = ?`, noteID).Scan(&kw); err == nil &&
+		kw == NoteQuickKeyword {
+		return nil
+	}
 	refs := linkutil.ExtractWikiLabels(content)
 	return d.Transaction(func(tx *sql.Tx) error {
 		if _, err := tx.Exec(

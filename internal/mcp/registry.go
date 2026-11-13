@@ -35,6 +35,10 @@ const (
 	CategoryMonitor   = "monitor"
 	CategoryPlugin    = "plugin"
 	CategoryRisk      = "risk"
+	// CategorySSH 远程主机：会话与文件的读、以及受限的命令执行。
+	// 单独成域是因为它有一条别的工具都没有的边界——主机级授权
+	// （只有用户显式打开的主机才对 Agent 可见），不能混进通用的 file/env 分组。
+	CategorySSH = "ssh"
 	// CategoryKnowledge 本地文档知识库：按内容检索，只读。
 	CategoryKnowledge = "knowledge"
 	// CategoryDownload 下载器（aria2）任务：状态/列表/详情与控制已存在的任务。

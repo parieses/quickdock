@@ -54,6 +54,8 @@ export interface CodeEditorHandle {
    * CM 的选区存在 state 里，不像 textarea 那样失焦就归 0。
    */
   getSelection(): { from: number; to: number; text: string }
+  /** 在当前选区处插入文本（替换选区），光标移到插入内容末尾；供图片粘贴等外部写入 */
+  insertAtCursor(text: string): void
   /** 滚动容器（CM 的 .cm-scroller）。用于与预览栏做滚动同步 */
   scrollEl(): HTMLElement | null
   /** 订阅滚动；返回取消订阅函数（实例销毁后调用也无害） */
@@ -577,6 +579,16 @@ export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts):
     getSelection: () => {
       const r = view.state.selection.main
       return { from: r.from, to: r.to, text: view.state.sliceDoc(r.from, r.to) }
+    },
+    insertAtCursor: (text: string) => {
+      const r = view.state.selection.main
+      // 走 CM 的 dispatch：粘贴图片转出的 dataURL 进正文后会触发 updateListener，
+      // 由调用方照常做 800ms 防抖落盘；不新增后端接口，图片随笔记正文进快照。
+      view.dispatch({
+        changes: { from: r.from, to: r.to, insert: text },
+        selection: { anchor: r.from + text.length },
+      })
+      view.focus()
     },
     scrollEl: () => view.scrollDOM,
     onScroll: (cb) => {

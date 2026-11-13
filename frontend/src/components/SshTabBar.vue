@@ -25,14 +25,18 @@ const props = defineProps<{
   filesOpen: boolean
 }>()
 
+// emits 统一用元组式（docs/conventions/frontend.md §3）；新增 reorder 时一并把
+// 历史遗留的回调式签名收拢过来，避免两种风格混在同一个 defineEmits 里。
 const emit = defineEmits<{
-  (e: 'select', tabId: string): void
-  (e: 'close', tabId: string): void
-  (e: 'new'): void
+  select: [tabId: string]
+  close: [tabId: string]
+  new: []
   /** 切换当前标签的文件面板 */
-  (e: 'files'): void
+  files: []
   /** 复制该标签的会话到新标签（同主机第二个独立会话） */
-  (e: 'duplicate', tabId: string): void
+  duplicate: [tabId: string]
+  /** 标签拖拽重排：只交下标，由父组件 reorderSshTabs 后回传新数组 */
+  reorder: [from: number, to: number]
 }>()
 
 const hostOf = computed(() => {
@@ -83,22 +87,76 @@ function duplicate(tabId: string) {
   emit('duplicate', tabId)
   closeMenu()
 }
+
+// ---- 标签拖拽重排（原生 HTML5 DnD）----
+//
+// 只把「从哪个下标拖到哪个下标」emit 出去，绝不改 props.tabs：
+// 数组归父组件所有，重排要由父组件调 reorderSshTabs 后回传新数组。
+// 拖拽反馈靠下面的 CSS class，颜色/描边一律取 style.css 的 token。
+const dragFrom = ref<number | null>(null)
+const dragOver = ref<number | null>(null)
+
+function onDragStart(index: number, ev: DragEvent) {
+  dragFrom.value = index
+  dragOver.value = index
+  if (ev.dataTransfer) {
+    ev.dataTransfer.effectAllowed = 'move'
+    // Firefox 必须 setData 才会真正进入拖拽；值仅用于调试，不参与落点判断。
+    ev.dataTransfer.setData('text/plain', props.tabs[index]?.id ?? '')
+  }
+}
+
+function onDragOver(index: number, ev: DragEvent) {
+  if (dragFrom.value === null) return
+  ev.preventDefault() // 不 preventDefault，drop 不会触发
+  if (ev.dataTransfer) ev.dataTransfer.dropEffect = 'move'
+  dragOver.value = index
+}
+
+function onDrop(index: number, ev: DragEvent) {
+  ev.preventDefault()
+  const from = dragFrom.value
+  clearDrag()
+  if (from === null || from === index) return
+  emit('reorder', from, index)
+}
+
+function onDragEnd() {
+  clearDrag()
+}
+
+function clearDrag() {
+  dragFrom.value = null
+  dragOver.value = null
+}
 </script>
 
 <template>
   <div class="tabs" role="tablist">
     <div class="tabs-strip">
       <button
-        v-for="tab in tabs"
+        v-for="(tab, i) in tabs"
         :key="tab.id"
         class="tab"
-        :class="[sshEnvClass(tab.host.env), { 'is-active': tab.id === activeId }]"
+        :class="[
+          sshEnvClass(tab.host.env),
+          {
+            'is-active': tab.id === activeId,
+            'is-dragging': dragFrom === i,
+            'is-drop-target': dragOver === i && dragFrom !== null && dragFrom !== i,
+          },
+        ]"
+        draggable="true"
         role="tab"
         :aria-selected="tab.id === activeId"
         :title="titleOf(tab)"
         @click="emit('select', tab.id)"
         @dblclick="emit('duplicate', tab.id)"
         @contextmenu.prevent="openMenu(tab.id, $event)"
+        @dragstart="onDragStart(i, $event)"
+        @dragover="onDragOver(i, $event)"
+        @drop="onDrop(i, $event)"
+        @dragend="onDragEnd"
       >
         <!-- 生产环境标签用实心红点 + 危险色：多标签并排时颜色是唯一能一眼分辨的线索 -->
         <i class="tab-dot" :class="sshEnvClass(tab.host.env)" />
@@ -222,6 +280,20 @@ function duplicate(tabId: string) {
 
 .tab.env-staging.is-active {
   box-shadow: inset 0 2px 0 var(--color-warning);
+}
+
+/* 拖拽反馈：源标签半透明表示「已拿起」，落点标签用底部强调线 + 抬起的底色
+   表示「会插到这里」。底色/描边/阴影颜色全取 style.css 的 token，无硬编码色值。
+   选择器带 [draggable] 把特异性提到与 .tab.env-prod.is-active 同级，
+   放在其后即可盖住生产标签的 box-shadow，避免落点提示被吞掉。 */
+.tab.is-dragging {
+  opacity: 0.4;
+  cursor: grabbing;
+}
+
+.tab[draggable].is-drop-target {
+  background: var(--color-bg-active);
+  box-shadow: inset 0 -2px 0 var(--color-accent);
 }
 
 .tab-dot {

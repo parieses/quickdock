@@ -137,6 +137,12 @@ type AppService struct {
 	// StopCredentialAPIFn 关闭本地 HTTP 服务，退出时调一次。
 	StopCredentialAPIFn func()
 
+	// ClipNoteFn 把浏览器扩展的网页剪藏写进笔记树。
+	// 同 StartCredentialAPIFn 的原因：实现在 services/note 子包，宿主不能反向引用。
+	// HTTP 端点在 services/credentials，笔记服务在 services/note，两边都只认宿主，
+	// 靠这个注入点对接，不必让两个子包互相 import。
+	ClipNoteFn func(title, content, url, tags string) *ApiResult
+
 	// HideFloatingWindowsFn 收起全部浮窗（剪贴板 / 命令面板 / 笔记 / 窗口排版 / SSH）。
 	//
 	// 锁定触发时调用：锁定期间浮窗不再渲染锁层输入框（那要每个窗口各维护一套尺寸与

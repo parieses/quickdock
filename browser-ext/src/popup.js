@@ -192,4 +192,21 @@ $('search').addEventListener('input', () => {
 
 $('openOptions').addEventListener('click', () => chrome.runtime.openOptionsPage())
 
+/** 剪藏当前页：标题/URL/选中文本交给 background 走 /vault/clip-note，结果用现有状态条反馈。 */
+async function clipNote() {
+  setStatus('正在剪藏…', true)
+  try {
+    const res = await chrome.runtime.sendMessage({ type: 'CLIP_NOTE' })
+    if (res?.ok) {
+      setStatus('已剪藏到笔记', true)
+    } else {
+      setStatus(res?.error || '剪藏失败', false)
+    }
+  } catch (e) {
+    setStatus(e.message || '剪藏失败', false)
+  }
+}
+
+$('clipNote').addEventListener('click', () => void clipNote())
+
 void init()

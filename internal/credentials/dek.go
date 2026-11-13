@@ -25,6 +25,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 
 	"quickdock/internal/db"
@@ -83,6 +84,32 @@ func Loaded() bool {
 	mu.Lock()
 	defer mu.Unlock()
 	return dek != nil
+}
+
+// KeyReadable 检查磁盘上的密钥能否解开，只做诊断、不把 DEK 载入内存。
+//
+// Status() 用它把「表读得通」和「密码真能用」分开：DPAPI 绑定 Windows 用户，
+// 换账户/重装后密钥就解不开了，这时列表还能看、保存和显示却全失败。
+// 刻意不复用 ensureDEK —— 那会把 DEK 缓存进内存，锁定后调用等于把刚
+// Wipe 掉的密钥又重建回来，把「锁定」的意义抹掉。
+func KeyReadable() bool {
+	d := database()
+	if d == nil {
+		return false
+	}
+	raw, err := d.GetSetting(settingDEK)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return false
+	}
+	if strings.TrimSpace(raw) == "" {
+		return true // 全新库：首次保存时才会生成密钥，现在没得可坏
+	}
+	plain, err := platform.DecryptSecret(raw)
+	if err != nil {
+		return false
+	}
+	key, err := b64.DecodeString(plain)
+	return err == nil && len(key) == dekLen
 }
 
 // ensureDEK 返回可用的 DEK，必要时从 app_state 解出或首次生成。

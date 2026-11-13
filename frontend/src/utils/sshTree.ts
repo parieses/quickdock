@@ -11,9 +11,30 @@
  */
 import type { SshHost } from './ssh'
 
+/**
+ * db.SshHost 新增的可展示字段（见 bindings/.../models.ts 的 SshHostInput）。
+ *
+ * 这份清单只给「读」用：Wails 生成器只为入参生成模型，回包是 db.SshHost 结构体，
+ * 而 utils/ssh.ts 里手写的 SshHost 还没跟上这些列，直接用会拿不到类型。
+ * 用交叉类型就近补一份，且全部声明为可选 —— 老缓存 / 单测构造的主机对象没有这几列
+ * 时按默认值处理即可；若以后 utils/ssh.ts 把这些列补成必填，交叉结果仍是同一类型。
+ * 树节点与新建/编辑表单共用这一个视图，避免两处各写一份字段清单走样。
+ */
+export type SshHostDisplay = SshHost & {
+  mcpAllowed?: boolean
+  tags?: string
+  color?: string
+  icon?: string
+  postLoginCommand?: string
+  autoReplySudo?: boolean
+  proxyCommand?: string
+  proxyCommandEnabled?: boolean
+  keepaliveInterval?: number
+}
+
 /** 树节点。文件夹与主机同表，靠 kind 区分。 */
 export interface SshTreeNode {
-  host: SshHost
+  host: SshHostDisplay
   /** folder | host */
   kind: 'folder' | 'host'
   /** 直接子节点，已按 sort → name 排好 */
@@ -236,8 +257,9 @@ export function treeHasHost(nodes: SshTreeNode[]): boolean {
  *     把子项按关键字再筛一遍等于告诉他「分组在，里都没了」，与意图相反。
  *  2. 只有子孙命中的文件夹要保留（否则命中项无处挂），并重算 hostCount，
  *     数字必须和眼前能点开的主机数一致。
- *  3. 匹配 name / host / user / remark / env 五个字段：库里那台机器叫什么、
- *     备注写了什么，用户自己也不一定记得，多匹配几个字段的成本只是几次字符串比较。
+ *  3. 匹配 name / host / user / remark / env / tags 六个字段：库里那台机器叫什么、
+ *     备注写了什么、打了什么标签，用户自己也不一定记得，多匹配几个字段的成本只是
+ *     几次字符串比较。tags 是逗号分隔串，直接整串匹配即可（标签里带关键字就命中）。
  *
  * 不处理大小写以外的模糊匹配（拼音首字母等）——主机名本来就是 ASCII，
  * 真要按拼音找，搜索框里那几个字母和直接输主机名的成本差不多。
@@ -246,8 +268,8 @@ export function filterSshTree(nodes: SshTreeNode[], keyword: string): SshTreeNod
   const kw = String(keyword || '').trim().toLowerCase()
   if (!kw) return nodes
 
-  const hit = (h: SshHost): boolean =>
-    [h.name, h.host, h.user, h.remark, h.env].some(
+  const hit = (h: SshHostDisplay): boolean =>
+    [h.name, h.host, h.user, h.remark, h.env, h.tags].some(
       v => typeof v === 'string' && v.toLowerCase().includes(kw),
     )
 

@@ -22,7 +22,10 @@ const toast = inject<ToastAPI>('toast')!
 
 // 后端边数上限，同时也是前端渲染节点上限：力导向是 O(n^2)，
 // 打开「显示孤立节点」后候选可能上千，截断后由 graphTooMany 提示。
-const GRAPH_LIMIT = 800
+// 后端 GraphData 的 graphMaxLimit 是 5000，这里取 1500：力导向改用空间哈希后
+// 邻域计算近似 O(n·k)，不再随节点数平方增长，1500 节点仍能保持流畅。
+// 别只调这个数字却把斥力循环改回去，否则帧耗时会直接翻三倍多。
+const GRAPH_LIMIT = 1500
 const SIM_FRAMES = 120
 
 type GraphNode = { id: string; type: string; label: string }
@@ -203,21 +206,44 @@ function tick() {
   const CENTER = 0.006
   const DAMPING = 0.85
   const MAX_SPEED = 30
-  const CUTOFF2 = 220 * 220
+  const CUTOFF = 220
+  const CUTOFF2 = CUTOFF * CUTOFF
 
-  // 斥力：两两之间的库仑斥力，太远的点对直接跳过以省算力。
+  // 斥力：空间哈希网格取代两两遍历。
+  //
+  // 原来即使写了 `if (d2 > CUTOFF2) continue`，仍要把 n(n-1)/2 个点对
+  // 全部走一遍循环（800 点 = 32 万次/帧），节点数翻到 1500 就是 112 万次。
+  // 格边长取 CUTOFF，距离小于 CUTOFF 的两点必然落在同格或相邻 8 格内，
+  // 所以只查这 9 个桶与原来的物理效果完全等价（保留 d2 判断兜住斜角格）。
+  // j <= i 跳过，保证每个点对只算一次，不会把斥力算两遍。
+  const grid = new Map<string, number[]>()
   for (let i = 0; i < n; i++) {
-    for (let j = i + 1; j < n; j++) {
-      const dx = arr[j].x - arr[i].x
-      const dy = arr[j].y - arr[i].y
-      const d2 = dx * dx + dy * dy + 0.01
-      if (d2 > CUTOFF2) continue
-      const d = Math.sqrt(d2)
-      const f = REPULSION / d2
-      fx[i] -= (f * dx) / d
-      fy[i] -= (f * dy) / d
-      fx[j] += (f * dx) / d
-      fy[j] += (f * dy) / d
+    const key = Math.floor(arr[i].x / CUTOFF) + ',' + Math.floor(arr[i].y / CUTOFF)
+    const bucket = grid.get(key)
+    if (bucket) bucket.push(i)
+    else grid.set(key, [i])
+  }
+  for (let i = 0; i < n; i++) {
+    const gx = Math.floor(arr[i].x / CUTOFF)
+    const gy = Math.floor(arr[i].y / CUTOFF)
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        const bucket = grid.get(gx + ox + ',' + (gy + oy))
+        if (!bucket) continue
+        for (const j of bucket) {
+          if (j <= i) continue
+          const dx = arr[j].x - arr[i].x
+          const dy = arr[j].y - arr[i].y
+          const d2 = dx * dx + dy * dy + 0.01
+          if (d2 > CUTOFF2) continue
+          const d = Math.sqrt(d2)
+          const f = REPULSION / d2
+          fx[i] -= (f * dx) / d
+          fy[i] -= (f * dy) / d
+          fx[j] += (f * dx) / d
+          fy[j] += (f * dy) / d
+        }
+      }
     }
   }
   // 弹簧：有边的两节点被拉向自然长度 REST。

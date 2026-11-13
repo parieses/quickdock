@@ -238,6 +238,18 @@ func (d *Database) RestoreTombstone(collection, id string) error {
 			return fmt.Errorf("恢复 %s 失败: %w", table, err)
 		}
 	}
+	// 墓碑恢复走通用 BulkInsert（upsert）直接写 notes，绕开了所有 Create*/Update*
+	// 方法，索引不会自动同步。尤其「恢复覆盖已有行」时行数不变，migrate 的行数
+	// 比对发现不了，会留下永久陈旧索引。这里在写回完成后、删墓碑前显式重建一次。
+	// BulkInsert 各自加锁且已提交，此处单独取写锁调用不加锁的重建。
+	if len(p.Rows["notes"]) > 0 {
+		d.mu.Lock()
+		rerr := d.rebuildNoteIndex()
+		d.mu.Unlock()
+		if rerr != nil {
+			return fmt.Errorf("恢复后重建笔记全文索引失败: %w", rerr)
+		}
+	}
 	return d.DeleteTombstone(collection, id)
 }
 

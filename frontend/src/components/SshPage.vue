@@ -17,10 +17,10 @@ import { KEEP_ALIVE } from '../pages/keepAlive'
  * 这样切标签、拖拽排序这些高频交互都能用 vitest 直接覆盖，
  * 不用起 Vue、不用 mock Wails 绑定。
  */
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Events } from '@wailsio/runtime'
-import { FolderPlus, ListChecks, Network, Plus, RefreshCw, Search, Server, ShieldCheck, X } from '@lucide/vue'
+import { FolderPlus, ListChecks, MapPin, Network, Plus, Radio, RefreshCw, Search, Send, Server, ShieldCheck, X, Zap } from '@lucide/vue'
 import {
   DeleteHost,
   Disconnect,
@@ -28,9 +28,13 @@ import {
   ListSessions,
   MoveHost,
   SaveHost,
+  SshStopForwardsByTab,
+  Write,
 } from '../../bindings/quickdock/services/sshx/sshservice'
 import { unwrap } from '../utils/api'
+import { logErr } from '../utils/logger'
 import { getErrorMessage } from '../utils/error'
+import { bytesToBase64, textToBytes } from '../utils/base64'
 import { useToast } from '../composables/useToast'
 import {
   isSessionRetained,
@@ -45,6 +49,7 @@ import {
   openOrFocus,
   openTab,
   patchTab,
+  reorderSshTabs,
   syncHost,
   tabSessionId,
   type SshTab,
@@ -99,6 +104,61 @@ const batchVisible = ref(false)
 const batchPreselect = ref<string[]>([])
 /** 端口转发抽屉显隐：由左工具条按钮切换，面板自身负责列表刷新/轮询 */
 const forwardVisible = ref(false)
+
+// ---- OSC 7 终端目录跟随（默认关闭） ----
+const FOLLOW_CWD_KEY = 'qd_ssh_follow_cwd'
+const followCwd = ref(false)
+/** 下发给「当前激活且已打开文件面板」那一个标签的目标路径；空串 = 不下发。 */
+const followSftpPath = ref('')
+
+function loadFollowCwd() {
+  try {
+    followCwd.value = localStorage.getItem(FOLLOW_CWD_KEY) === 'true'
+  } catch (e) {
+    // 隐私模式 / 配额满时 localStorage 会抛：回落默认关，不让一个偏好读失败挡住整页。
+    logErr('SshPage.loadFollowCwd', e)
+    followCwd.value = false
+  }
+}
+
+function toggleFollowCwd() {
+  followCwd.value = !followCwd.value
+  // 关掉开关时立刻撤掉待下发的路径，否则下次打开会把上次那条旧目录灌进面板。
+  if (!followCwd.value) followSftpPath.value = ''
+  try {
+    localStorage.setItem(FOLLOW_CWD_KEY, String(followCwd.value))
+  } catch (e) {
+    logErr('SshPage.toggleFollowCwd', e)
+  }
+}
+
+// 切换标签也要清空：留在 ref 里的是上一个标签的目录，直接传给新标签的面板
+// 会把 B 主机的文件列表指到 A 主机上报的路径上。
+watch(activeId, () => {
+  followSftpPath.value = ''
+})
+
+/**
+ * OSC 7 事件 → 只驱动「当前激活且已打开文件面板」的那一个标签。
+ *
+ * 每个标签都有一份 SshTerminal，全局 DOM 事件是所有实例共用的；事件里带
+ * sessionId 就是为了在这里反查标签，避免后台主机的一条 cd 把用户正在看的
+ * 文件面板切走。路径已由终端侧做过安全校验（绝对路径、无 ..、无控制字符），
+ * 但那仍是远端可伪造的输入，所以开关默认关闭，且只影响可视化目录导航，
+ * 不会触发任何上传/下载/删除。
+ */
+function onSshCwd(ev: Event) {
+  if (!followCwd.value) return
+  const detail = (ev as CustomEvent<{ path?: string; sessionId?: string }>).detail
+  const path = detail?.path || ''
+  const sid = detail?.sessionId || ''
+  if (!path || !sid) return
+  const active = activeId.value
+  if (!active || !sftpTabs.value.has(active)) return
+  const tab = findTab(tabs.value, active)
+  if (!tab || tabSessionId(tab) !== sid) return
+  followSftpPath.value = path
+}
 
 let offShown: (() => void) | null = null
 
@@ -229,6 +289,16 @@ async function closeTabById(tabId: string) {
     sftpTabs.value = next
   }
 
+  // 显式绑到这个标签的转发规则要随标签一起停。全局规则（ownerTabId 为空）
+  // 不受影响——那是有意做成跨标签常驻的，不能因为关了一个终端就掐掉。
+  // 失败只记日志：端口没停成会在转发面板里显示为仍在运行，用户可以手动停，
+  // 不该因为一个清理动作把「关标签」整个卡住。
+  try {
+    unwrap(await SshStopForwardsByTab(tabId))
+  } catch (e: unknown) {
+    logErr('SshPage.closeTabById.stopForwards', e)
+  }
+
   // 必须断开：不断的话 Go 侧那条 session 永远留着，回放缓冲占内存，
   // 连接池的引用计数也减不下去（最后一个引用不归零，TCP 会一直吊着）。
   if (!sid) return
@@ -263,12 +333,198 @@ function onTabSession(tabId: string, sessionId: string) {
   tabs.value = patchTab(tabs.value, tabId, { sessionId })
 }
 
+// ---- 广播输入 ----
+//
+// 安全取舍（刻意如此，别「顺手优化」掉）：
+//  · 不做全局/页面级快捷键：Enter 只绑在广播输入条自己的 @keydown.enter 上，
+//    焦点在终端里敲回车绝不会把当前这一行打到所有机器；
+//  · 不做记住开关：broadcastOpen 是普通 ref，不写 localStorage，页面重开即关，
+//    杜绝「上次开着广播、这次没注意就发到一堆机器」；
+//  · 每次都 confirm：哪怕刚发过、哪怕只有 2 个标签也重新问一次，把 N 与命令原文
+//    摆到用户眼前；含 prod 标签时再在确认文案前拼一段点名生产机数量的醒目告警。
+// 根因就一句：广播是「一次输入打到多台机器」，误操作没有撤销键，代价远高于
+// 单标签输入，所以宁可多点一下、多按一次回车。
+const broadcastOpen = ref(false)
+const broadcastText = ref('')
+/** 防连发：confirm 与逐条 Write 都是 await，期间第二次回车不能重入。 */
+const broadcastSending = ref(false)
+
+/**
+ * 「已连接标签」= 本页已知 sessionId 非空、且不在连接中的标签。
+ * tab.sessionId 由 SshSessionView 的 @session 在 Connect 成功 / 接回时回填，
+ * 与关标签时用来 Disconnect 的是同一个 id，也是 Write 唯一认的入参。
+ * 远端意外断线时父级不会立刻收到清空事件，那条 Write 会报 session_not_found，
+ * 由下面逐条 try/catch 兜住，不影响其余标签。
+ */
+const broadcastTargets = computed(() =>
+  tabs.value.filter(tb => !tb.busy && !!tabSessionId(tb)),
+)
+
+async function sendBroadcast() {
+  if (broadcastSending.value) return
+  const cmd = broadcastText.value.trim()
+  const targets = broadcastTargets.value
+  if (!cmd || !targets.length) {
+    toastError(t('sshBroadcastEmpty'))
+    return
+  }
+  const prod = targets.filter(tb => tb.host.env === 'prod').length
+  const base = t('sshBroadcastConfirm', { n: targets.length, prod, cmd })
+  // 含 prod 标签时，把醒目告警（sshBroadcastHint）拼到确认文案前，并把 prod 数量
+  // 一并交给字典：useToast.confirm 只收一个字符串、ConfirmDialog 也没有 danger
+  // 变体，所以「更醒目」只能靠更长、且点名生产机数量的告警文案来表达（R8 全走 t()）。
+  const message = prod > 0 ? `${t('sshBroadcastHint')} ${base}` : base
+  broadcastSending.value = true
+  try {
+    if (!(await confirm(message))) return
+    // 编码照抄 SshTerminal.sendInput：UTF-8 字节 → base64；命令末尾补 \r 才会执行
+    // （与 SshSessionView.sendToTerm 的 execute 分支一致）。
+    const b64 = bytesToBase64(textToBytes(cmd + '\r'))
+    for (const tb of targets) {
+      const sid = tabSessionId(tb)
+      if (!sid) continue
+      try {
+        unwrap(await Write(sid, b64))
+      } catch (e: unknown) {
+        // 逐条上报而不是整批中止：一条会话写失败不该让其它机器收不到命令，
+        // 用户也需要知道是哪台没执行。R9：unwrap + try/catch + toast + logErr。
+        toastError(getErrorMessage(e))
+        logErr('SshPage.sendBroadcast', e)
+      }
+    }
+    // 无论个别成败都清空：广播命令已发出且不可撤销，留着旧命令被二次回车
+    // 会重复执行，务必清掉。
+    broadcastText.value = ''
+  } finally {
+    broadcastSending.value = false
+  }
+}
+
 // ---- 主机 CRUD ----
 
 function openNew(parentId = '') {
   editingHost.value = null
   creatingParentId.value = parentId
   dialogVisible.value = true
+}
+
+// ---- 快速连接（host:port 直连入口） ----
+//
+// 【为什么「不落库直连」这条路走不通】
+// 原本的设想是：解析 → 造一个 SshHost → openTab(tabs, host, null) 打开标签 →
+// 让 SshSessionView 走 requestCredential 补录密码，全程不写库。把整条链路读完
+// 后确认在当前架构下不成立，卡点有两层，且都在 SshSessionView.vue：
+//   1) doConnect() 调的是 Connect(props.host.id, cols, rows)（:238），后端
+//      services/sshx/session.go:115 第一步就 s.loadHost(hostID) 按 id 查库。
+//      这是唯一一条交互连接入口，入参只有 hostID，没有「传连接参数」的重载
+//      （TestHostInput 是另一条只测不连的路径）。未落库主机的 id 必然是空串或
+//      伪造值，Connect 会直接报 ssh_host_not_found，连认证阶段都到不了。
+//   2) 即便能走到认证，补录密码的 askPassword()（:294）拿到密码后调的是
+//      SaveHost({ id: props.host.id, ... })（:313）——它本就是把主机整行写回库，
+//      requestCredential 的 allowSave:false 注释也写明「不落库就没法重连」；
+//      而且 needPassword 只在 NO_CREDENTIAL / AUTH_FAILED 分支置位，HOST_NOT_FOUND
+//      根本不会触发 askPassword。
+// 所以「不落库 + requestCredential 补录」在 Connect 这一关就断了，硬做只会留下
+// 一个点了报「主机不存在」的死按钮（任务明确禁止）。按兜底要求改走可工作的路径：
+//   解析 → 造 SshHost（id 空）→ 预填 SshHostDialog（按新建处理）→ 用户补密码点保存
+//   → 主机上左树 → 点它连接。
+// 每一步都有真实后端支撑，不是空壳；解析与构造仍复用 SshHost 形状，不落库由
+// 「用户亲自点保存」这一步显式完成。
+
+const quickInput = ref('')
+
+interface QuickTarget { user: string; host: string; port: number }
+
+/** 解析 user@host:port / host:port / host / [::1]:2222；非法返回 null。 */
+function parseQuickConnect(raw: string): QuickTarget | null {
+  const s = raw.trim()
+  if (!s) return null
+
+  // '@' 是 user 与 host 的唯一分隔（地址/IPv6 里不会出现 @）。取最后一个 @，
+  // 顺带兼容「登录名里带 @」这种少见但合法的情况。
+  const at = s.lastIndexOf('@')
+  let user = 'root'
+  let hostPort = s
+  if (at >= 0) {
+    const u = s.slice(0, at).trim()
+    if (!u) return null
+    user = u
+    hostPort = s.slice(at + 1).trim()
+  }
+  if (!hostPort) return null
+
+  let host = ''
+  let port = 22
+  if (hostPort.startsWith('[')) {
+    // IPv6 字面量：[::1]:2222 / [2001:db8::1]，方括号里的原样留作 host。
+    const m = /^\[([^\]]+)\](?::(\d+))?$/.exec(hostPort)
+    if (!m) return null
+    host = m[1]
+    if (m[2] !== undefined) port = Number(m[2])
+  } else {
+    const colons = (hostPort.match(/:/g) || []).length
+    if (colons >= 2) {
+      // 裸 IPv6（如 ::1）无法区分端口，整段当主机、端口取默认 22。
+      host = hostPort
+    } else if (colons === 1) {
+      const i = hostPort.lastIndexOf(':')
+      host = hostPort.slice(0, i)
+      port = Number(hostPort.slice(i + 1))
+    } else {
+      host = hostPort
+    }
+  }
+
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) return null
+  return { user, host, port }
+}
+
+/** 把解析结果拼成一个「未落库」的 SshHost（id 留空，9 个新列给默认值）。 */
+function makeQuickHost(p: QuickTarget): SshHost {
+  return {
+    id: '',
+    name: p.host,
+    host: p.host,
+    port: p.port,
+    user: p.user,
+    authType: 'password',
+    keyPath: '',
+    legacyAlgorithms: false,
+    env: 'test',
+    jumpHostId: '',
+    parentId: '',
+    isFolder: false,
+    sort: 0,
+    remark: '',
+    lastConnectedAt: '',
+    createdAt: '',
+    updatedAt: '',
+    hasPassword: false,
+    hasPassphrase: false,
+    mcpAllowed: false,
+    tags: '',
+    color: '',
+    icon: '',
+    postLoginCommand: '',
+    autoReplySudo: false,
+    proxyCommand: '',
+    proxyCommandEnabled: false,
+    keepaliveInterval: 0,
+  }
+}
+
+function onQuickConnect() {
+  const p = parseQuickConnect(quickInput.value)
+  if (!p) {
+    toastError(t('sshQuickConnectInvalid'))
+    return
+  }
+  // 不落库直连走不通（见上方长注释），改由「预填的新建主机表单」承接：
+  // id 为空使 SshHostDialog 按新建处理，字段已带好，用户只需补密码并点保存。
+  editingHost.value = makeQuickHost(p)
+  creatingParentId.value = ''
+  dialogVisible.value = true
+  quickInput.value = ''
 }
 
 /** 新建文件夹：不走主机表单（那里全是地址/凭据字段，对文件夹无意义）。 */
@@ -295,6 +551,15 @@ async function submitFolder(name: string) {
         legacyAlgorithms: false,
         env: '',
         jumpHostId: '',
+        mcpAllowed: false,
+        tags: '',
+        color: '',
+        icon: '',
+        postLoginCommand: '',
+        autoReplySudo: false,
+        proxyCommand: '',
+        proxyCommandEnabled: false,
+        keepaliveInterval: 0,
         parentId: folderParentId.value,
         isFolder: true,
         sort: 0,
@@ -458,6 +723,9 @@ onMounted(async () => {
   //
   // 挂载期间若发生卸载（窗口 hash 切换、组件被替换），onBeforeUnmount 会先跑，
   // 那时 offShown 还是 null；等 await 返回后再注册，就再没有人对它解绑了。
+  loadFollowCwd()
+  // OSC 7 目录跟随：订阅 SshTerminal 发出的自定义 DOM 事件（另一组实现）。
+  window.addEventListener('quickdock:ssh:cwd', onSshCwd)
   offShown = Events.On('quickdock:ssh:shown', () => {
     if (loading.value) return
     void (async () => {
@@ -476,6 +744,7 @@ onMounted(async () => {
 onBeforeUnmount(() => {
   offShown?.()
   offShown = null
+  window.removeEventListener('quickdock:ssh:cwd', onSshCwd)
 })
 
 /** 供调试：当前标签与连接状态。 */
@@ -547,6 +816,25 @@ defineExpose({
         </button>
       </div>
 
+      <!-- 快速连接：始终可见（0 台主机时也能用）。不落库直连走不通，见脚本注释；
+           这里解析后把结果预填进新建主机表单，由用户点保存。 -->
+      <div class="ssh-side-search ssh-quick">
+        <input
+          v-model="quickInput"
+          class="ssh-side-search-input"
+          :placeholder="t('sshQuickConnectPlaceholder')"
+          spellcheck="false"
+          @keydown.enter="onQuickConnect"
+        />
+        <button
+          class="ssh-side-search-clear"
+          :title="t('sshQuickConnect')"
+          @click="onQuickConnect"
+        >
+          <Zap :size="12" />
+        </button>
+      </div>
+
       <SshHostTree
         :tree="tree"
         :loading="loading"
@@ -563,6 +851,7 @@ defineExpose({
         @create="openNew"
         @create-folder="createFolder"
         @move="moveHost"
+        @refresh="load"
         @batch="(folderId: string) => openBatch(collectSubtreeIds(tree, folderId))"
       />
     </aside>
@@ -578,7 +867,51 @@ defineExpose({
         @new="onNewTab"
         @files="toggleSftp(activeId)"
         @duplicate="duplicateTab"
+        @reorder="(from: number, to: number) => (tabs = reorderSshTabs(tabs, from, to))"
       />
+
+      <!-- 标签栏工具条：目录跟随（页面级开关）+ 广播（多标签才出现）。 -->
+      <div class="ssh-toolbar">
+        <button
+          class="ssh-tool"
+          :class="{ 'is-on': followCwd }"
+          :title="t('sshFollowCwdHint')"
+          @click="toggleFollowCwd"
+        >
+          <MapPin :size="14" />
+          <span>{{ t('sshFollowCwd') }}</span>
+        </button>
+        <span class="ssh-toolbar-spacer" />
+        <button
+          v-if="tabs.length >= 2"
+          class="ssh-tool"
+          :class="{ 'is-on': broadcastOpen }"
+          :title="t('sshBroadcast')"
+          @click="broadcastOpen = !broadcastOpen"
+        >
+          <Radio :size="14" />
+          <span>{{ t('sshBroadcast') }}</span>
+        </button>
+      </div>
+
+      <!-- 广播输入条：只在广播打开且确有 >=2 个标签时出现；Enter 只绑在这个输入框上。 -->
+      <div v-if="broadcastOpen && tabs.length >= 2" class="ssh-broadcast-bar">
+        <span class="text-muted ssh-broadcast-hint">{{ t('sshBroadcastHint') }}</span>
+        <input
+          v-model="broadcastText"
+          class="ssh-broadcast-input"
+          spellcheck="false"
+          @keydown.enter="sendBroadcast"
+        />
+        <button
+          class="ssh-tool"
+          :disabled="!broadcastText.trim() || !broadcastTargets.length || broadcastSending"
+          :title="t('sshBroadcast')"
+          @click="sendBroadcast"
+        >
+          <Send :size="13" />
+        </button>
+      </div>
 
       <div class="ssh-stage">
         <!--
@@ -608,6 +941,7 @@ defineExpose({
             class="ssh-sftp"
             :host="tab.host"
             :active="tab.id === activeId && sftpTabs.has(tab.id)"
+            :follow-path="tab.id === activeId && sftpTabs.has(tab.id) ? followSftpPath : ''"
             @close="toggleSftp(tab.id)"
           />
         </template>
@@ -875,6 +1209,79 @@ defineExpose({
   max-width: 320px;
   font-size: 11px;
   line-height: 1.6;
+}
+
+/* ---- 标签栏工具条 ----
+   按钮复用左树现成的 .ssh-tool 图标按钮，hint 复用全局 .text-muted（R6）；
+   颜色/间距/圆角一律取 style.css 已有 token（R4/R5），无硬编码色值。 */
+.ssh-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-primary);
+}
+
+.ssh-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+/* 工具条里的 .ssh-tool 多了文字标签，只补间距与字号，其余外观仍完全来自公共类 */
+.ssh-toolbar .ssh-tool {
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  font-family: inherit;
+}
+
+.ssh-tool.is-on {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+}
+
+/* ---- 广播输入条 ---- */
+.ssh-broadcast-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+
+.ssh-broadcast-hint {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+}
+
+.ssh-broadcast-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm);
+  font-family: var(--font-mono);
+  color: var(--color-text-primary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  outline: none;
+}
+
+.ssh-broadcast-input:focus {
+  border-color: var(--color-border-focus-soft);
+}
+
+/* 快速连接行整体复用 .ssh-side-search（含 :focus-within），
+   只把「连接」按钮染成强调色，与上方搜索框的「清空」按钮区分开。 */
+.ssh-quick .ssh-side-search-clear {
+  color: var(--color-accent);
+}
+
+.ssh-quick .ssh-side-search-clear:hover {
+  color: var(--color-accent-hover);
 }
 
 /* 窗口最小宽度 640：窄屏时压缩侧栏，把宽度让给终端（一行命令别被折成两行） */

@@ -1463,19 +1463,23 @@ onUnmounted(() => {
 
 .palette-plugin-mode { background: var(--color-bg-primary); }
 
+/* 插件子页头：二级面板头，与 panels.css 的 .qd-panel-header 同高（38px）。
+   拖拽一律用 Wails v3 的 --wails-draggable：-webkit-app-region 在本程序未开启
+   NonClientRegionSupport 时不生效，还会吞掉 mousedown 让整扇窗口拖不动。
+   分隔线用 border-bottom，不用 inset shadow（底色压深后几乎看不见）。 */
 .palette-plugin-header {
-  display: flex; align-items: center; gap: 6px; height: 36px; flex-shrink: 0;
-  padding: 0 6px; background: var(--color-bg-secondary);
-  box-shadow: inset 0 -1px 0 0 var(--color-border);
-  -webkit-app-region: drag; user-select: none;
+  display: flex; align-items: center; gap: 6px; height: 38px; flex-shrink: 0;
+  padding: 0 10px; background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+  --wails-draggable: drag; user-select: none;
 }
 
 .plugin-back-btn {
   display: flex; align-items: center; gap: 2px; height: 28px; padding: 0 6px;
   border: none; border-radius: var(--radius-sm); background: transparent; color: var(--color-text-muted);
-  font-size: 12px; font-weight: 500; font-family: inherit; cursor: pointer;
-  -webkit-app-region: no-drag;
-  transition: background 0.1s, color 0.1s;
+  font-size: var(--text-sm); font-weight: 500; font-family: inherit; cursor: pointer;
+  --wails-draggable: no-drag;
+  transition: background var(--transition-fast), color var(--transition-fast);
 }
 .plugin-back-btn:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
 .plugin-back-btn:active { background: var(--color-bg-active); }
@@ -1493,7 +1497,7 @@ onUnmounted(() => {
   display: flex; align-items: center; justify-content: center;
   width: 28px; height: 28px; border: none; border-radius: var(--radius-sm);
   background: transparent; color: var(--color-text-disabled); cursor: pointer;
-  -webkit-app-region: no-drag;
+  --wails-draggable: no-drag;
   transition: background 0.12s, color 0.12s;
 }
 .plugin-detach-btn:hover { background: var(--color-bg-hover); color: var(--color-accent); }

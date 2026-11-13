@@ -84,6 +84,12 @@ const props = defineProps<{
    * 30 秒的拨号超时，并把连接池引用顶上去。
    */
   active: boolean
+  /**
+   * OSC 7 目录跟随的目标路径，由 SshPage 在「跟随终端目录」开关打开时下发。
+   * 空串表示不下发。目录仍是本组件内部状态，父级只给一个「请切到这里」的信号，
+   * 不接管 pwd，这样手动点目录、刷新、选中行等既有行为都不受影响。
+   */
+  followPath?: string
 }>()
 
 const emit = defineEmits<{ (e: 'close'): void }>()
@@ -282,6 +288,21 @@ watch(
     if (props.active) void load(pwd.value)
   },
   { immediate: true },
+)
+
+// OSC 7 跟随：只在面板可见时响应。父级已经按「激活标签 + 已打开文件面板」
+// 筛过一遍，这里再挡一次是为了避免隐藏实例（v-show 保留着组件）在后台做
+// 无谓的 SFTP 请求；同目录不重复 load，避免每次提示符都重列一遍目录。
+// 路径来自远端且可伪造，终端侧已挡掉非绝对路径 / .. / 控制字符，这里再走一次
+// normalizeRemotePath 兜底，并且只用于列目录，不触发任何写操作。
+watch(
+  () => props.followPath,
+  (next) => {
+    if (!props.active || !next) return
+    const normalized = normalizeRemotePath(next)
+    if (!normalized || normalized === pwd.value) return
+    void load(normalized)
+  },
 )
 
 function openEntry(e: SftpEntry) {

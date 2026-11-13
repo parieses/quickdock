@@ -18,11 +18,13 @@ import { useI18n } from 'vue-i18n'
 import { AlertTriangle, Download, Loader, Save, X } from '@lucide/vue'
 import ConfigEditor from './ConfigEditor.vue'
 import {
+  SftpFileDigest,
   SftpReadText,
-  SftpWriteText,
+  SftpWriteTextChecked,
 } from '../../bindings/quickdock/services/sshx/sshservice'
-import { unwrap } from '../utils/api'
+import { apiErrorCode, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { useToast } from '../composables/useToast'
 import { formatBytes } from '../utils/ssh'
 import { isPreviewable, looksBinary, type SftpEntry } from '../utils/sshSftp'
@@ -58,6 +60,11 @@ const draft = ref('')
 const binary = ref(false)
 /** 远端文件比 READ_LIMIT 大：只读。 */
 const truncated = ref(false)
+/**
+ * 打开时记录的远端摘要基线，保存时透传给后端比对。空串表示取摘要失败
+ * （或刷新失败），降级为不做并发校验——绝不拿过期摘要把后续保存全挡掉。
+ */
+const baseDigest = ref<string>('')
 
 const editorRef = ref<InstanceType<typeof ConfigEditor> | null>(null)
 
@@ -65,6 +72,26 @@ const dirty = computed(() => !binary.value && draft.value !== original.value)
 const canSave = computed(
   () => !binary.value && !truncated.value && dirty.value && !saving.value,
 )
+
+/**
+ * 单独取一次远端摘要。内容读取与摘要是两次独立的一次性调用，这里抽出来
+ * 供 load（并行取基线）与 save（保存后刷新基线）共用。
+ *
+ * 失败一律降级为空串而不是向上抛：摘要只服务于「保存时的并发校验」，
+ * 拿不到它文件照样能看、能存。按 R9 记日志、不空 catch，也不弹 toast
+ * 打扰用户（与 SshBatchDialog.loadCommands 的静默降级一致）。
+ */
+async function fetchDigest(): Promise<string> {
+  try {
+    const res = unwrap<{ digest: string }>(
+      await SftpFileDigest(props.hostId, props.entry.path),
+    )
+    return res?.digest ?? ''
+  } catch (e) {
+    logErr('sftp-editor', e)
+    return ''
+  }
+}
 
 async function load() {
   loading.value = true
@@ -77,17 +104,25 @@ async function load() {
     return
   }
   try {
-    const res = unwrap<{ content: string }>(
-      await SftpReadText(props.hostId, props.entry.path, READ_LIMIT),
-    )
-    const text = res?.content ?? ''
+    // 内容与摘要并行取：两者都是「一次性借连接」的独立往返，串行会让打开
+    // 慢一倍；摘要还必须对应这次读到的同一份内容快照，否则等于拿 A 时刻
+    // 的摘要去守 B 时刻的内容。fetchDigest 自带降级，Promise.all 只会在
+    // 读内容失败时 reject，交给外层 catch 按 R9 呈现 + 记日志。
+    const [text, digest] = await Promise.all([
+      SftpReadText(props.hostId, props.entry.path, READ_LIMIT)
+        .then((r) => unwrap<{ content: string }>(r)?.content ?? ''),
+      fetchDigest(),
+    ])
     original.value = text
     draft.value = text
     binary.value = looksBinary(text)
     // 远端 size 来自列表接口的 Stat；比上限大就说明读到的不是完整内容。
     truncated.value = props.entry.size > READ_LIMIT
+    baseDigest.value = digest
   } catch (e) {
+    // 错误沿用本组件既有的面板内 loadErr 呈现，R9 要求补日志且不空 catch。
     loadErr.value = getErrorMessage(e)
+    logErr('sftp-editor', e)
   } finally {
     loading.value = false
   }
@@ -98,14 +133,31 @@ async function save() {
   saving.value = true
   try {
     // mode 传 0：不改权限。把 600 的私钥配置改成 644 是没人想要的副作用。
-    unwrap(await SftpWriteText(props.hostId, props.entry.path, draft.value, 0))
+    // baseDigest 必须透传：withSftp 每次借完就还，服务端两次调用之间不共享
+    // 任何句柄，没有地方能替编辑器记住「打开时」的摘要。
+    unwrap(await SftpWriteTextChecked(
+      props.hostId, props.entry.path, draft.value, baseDigest.value, 0,
+    ))
     original.value = draft.value
+    // 保存成功后必须刷新摘要基线：内容已变，旧摘要会在下一次保存时被判成
+    // 「远端已修改」，把用户自己的连续编辑全挡掉。门面方法不返回新摘要，
+    // 只能再取一次；取不到就由 fetchDigest 降级为空串，宁可不校验也不留脏基线。
+    baseDigest.value = await fetchDigest()
     // 基线要在「保存成功后」刷新，否则编辑器的「已修改」标记会一直亮着。
     editorRef.value?.markSaved()
     toastSuccess(t('sshFileEditorSaved', { name: props.entry.name }))
     emit('saved')
   } catch (e) {
+    // 并发变更单独提示：通用文案只会让用户反复点保存，反而把别人的改动
+    // 覆盖掉。按项目既有模式用 apiErrorCode 取业务码；该码尚未收进 SSH_ERR，
+    // 与 SftpPanel 对 ssh_transfer_canceled 一样用字面量比较。
+    if (apiErrorCode(e) === 'ssh_remote_changed') {
+      toastError(t('sshFileEditorRemoteChanged'))
+      logErr('sftp-editor', e)
+      return
+    }
     toastError(getErrorMessage(e))
+    logErr('sftp-editor', e)
   } finally {
     saving.value = false
   }

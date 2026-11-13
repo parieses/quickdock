@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -1021,11 +1022,11 @@ onUnmounted(() => {
 <template>
   <div class="todo-page">
     <!-- 顶部栏 -->
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">{{ t('todoTitle') }}</h2>
         <span class="qd-page-sub">{{ t('todoSubtitle') }}</span>
-      </div>
+      </template>
       <div class="qd-page-fill">
         <div class="qd-input-wrap todo-search">
           <Search :size="14" />
@@ -1083,7 +1084,7 @@ onUnmounted(() => {
           </div>
         </div>
       </div>
-    </div>
+    </PageHeader>
 
     <div v-if="error" class="todo-error">{{ error }}</div>
 

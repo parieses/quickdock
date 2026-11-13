@@ -135,6 +135,7 @@ export interface Note {
   isNote: boolean
   format: string
   createdAt: string
+  updatedAt: string
 }
 
 // HTTP 客户端：保存的请求

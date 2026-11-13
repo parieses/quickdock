@@ -652,6 +652,11 @@ func main() {
 
 	// 笔记/收藏/场景/快照/项目/端口/频率 门面：承载剩余纯 CRUD 领域方法，单独绑定为独立 Wails service
 	noteSvc := notesvc.NewNoteService(appService)
+	// 浏览器扩展 /vault/clip-note 的落库口：credentials 的 HTTP handler 只认宿主，
+	// 不直接依赖 note 子包。必须在 API 启动前注入，否则剪藏会报「笔记服务不可用」。
+	appService.ClipNoteFn = func(title, content, url, tags string) *services.ApiResult {
+		return noteSvc.ClipNote(title, content, url, tags)
+	}
 	collectionSvc := collectionsvc.NewCollectionService(appService)
 	frecencySvc := frecencysvc.NewFrecencyService(appService)
 	sceneSvc := scenesvc.NewSceneService(appService)
@@ -702,7 +707,7 @@ func main() {
 	// 依赖剪贴板/工作空间/待办/诊断/系统/笔记/收藏/端口/集合/监控/知识库/下载器门面
 	// （工具复用其能力，且必须复用同一实例而非另建），故在其后创建。
 	envengine.SetMCPAppVersion(appVersion)
-	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, kbSvc, downloadSvc, appVersion)
+	mcpSvc := mcpsvc.NewMCPService(appService, clipSvc, pluginSvc, workspaceSvc, todoSvc, diagSvc, systemSvc, noteSvc, frecencySvc, portSvc, collectionSvc, monitorSvc, kbSvc, downloadSvc, sshSvc, appVersion)
 
 	// 系统通知服务（用于待办定时提醒）
 	notifier := notifications.New()

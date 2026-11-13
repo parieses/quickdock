@@ -42,6 +42,11 @@ const (
 	CodeRemoteIsDir      = "ssh_remote_is_dir"
 	CodeRemoteNotEmpty   = "ssh_remote_not_empty"
 	CodeSftpSubsystemOff = "ssh_sftp_unavailable"
+	// 编辑器保存时远端文件已被别人改过。必须单独一个码：把它混进普通写入
+	// 失败，用户会以为「没保存成功」而反复点保存，把对方的改动覆盖掉。
+	CodeRemoteChanged = "ssh_remote_changed"
+	// 服务端要求多轮 keyboard-interactive（密码 + OTP 等），需要前端弹窗收答案。
+	CodeChallengeRequired = "ssh_challenge_required"
 	// 用户主动取消了传输。前端据此不弹错误：取消是正常操作，
 	// 把它渲染成红色失败提示，等于让用户以为自己把什么东西弄坏了。
 	CodeTransferCanceled = "ssh_transfer_canceled"
@@ -177,6 +182,10 @@ func classifySshError(err error) (string, map[string]interface{}) {
 		return CodeRemoteNotEmpty, nil
 	case errors.Is(err, sshcore.ErrSftpUnavailable):
 		return CodeSftpSubsystemOff, nil
+	case errors.Is(err, sshcore.ErrRemoteChanged):
+		// 排在 net.Error 之前：这个哨兵的 Unwrap 链里带着 SFTP 层错误，
+		// 掉到兜底会被显示成「主机连不上」，用户就找不到该刷新的提示了。
+		return CodeRemoteChanged, nil
 	case errors.Is(err, sshcore.ErrInvalidRemotePath):
 		return CodeInvalidInput, nil
 	// 传输被用户取消。必须排在网络的兜底判断之前——context.Canceled 在

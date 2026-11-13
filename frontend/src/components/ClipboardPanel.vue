@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 import { logErr } from '../utils/logger'
 import { ref, computed, onMounted, onUnmounted, onActivated, onDeactivated, inject, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
@@ -991,8 +992,8 @@ onUnmounted(() => {
          三个 30px 图标），高度、内边距、按钮尺寸都和笔记/待办/监控那套 46px 页头
          对不上 —— 从别的页切过来时顶部会"换一套控件"。浮窗（compact）共用同一结构，
          只是省掉副标题（浮窗本来就窄，标题行已经说明一切）。 -->
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">
           <ClipboardList :size="16" />
           {{ t('clipboardHistoryTitle') }}
@@ -1003,7 +1004,7 @@ onUnmounted(() => {
           </span>
         </h2>
         <span v-if="!compact" class="qd-page-sub">{{ t('clipboardSubtitle') }}</span>
-      </div>
+      </template>
       <div class="qd-page-fill">
         <div class="qd-input-wrap cb-search">
           <Search :size="14" />
@@ -1035,7 +1036,7 @@ onUnmounted(() => {
           <Trash2 :size="14" />
         </button>
       </div>
-    </div>
+    </PageHeader>
 
     <!-- 智能分类标签栏 + 时间过滤（合成一行，右侧时间分段） -->
     <div class="clipboard-tags">
@@ -1166,7 +1167,7 @@ onUnmounted(() => {
             :title="t('clipboardSaveAs')"
             @click.stop="toggleSaveMenu(entry)"
           >
-            <StickyNote :size="13" />
+            <Download :size="13" />
           </button>
           <div v-if="saveMenuId === entry.id" class="save-menu" @click.stop>
             <button class="save-menu-item" @click="saveAsTodo(entry)">

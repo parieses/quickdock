@@ -533,6 +533,17 @@ func buildSshAiPrompt(hostLabel, hostEnv, screenText, question string, history [
 		{Title: "连接信息", Body: head.String(), Pinned: true},
 	}
 
+	// 屏显/选区/摘要/历史在进入分节之前统一脱敏。
+	// 为什么在 buildSshAiPrompt 里做，而不是让调用方各自处理：这两条路
+	// （Wails 事件降级通道 Ask、本地 SSE 通道 AskOverStream）共用本函数，
+	// 在调用方做就得写两遍，漏一处就等于给凭据开了后门。
+	// question 刻意不脱敏：用户可能就是在问「这串 sk-xxx 是什么格式」，
+	// 抹掉会让问答失去对象。风险由用户自己这一次输入决定，不是屏显旁路。
+	screenText = aiutil.RedactSecrets(screenText)
+	selection = aiutil.RedactSecrets(selection)
+	summary = aiutil.RedactSecrets(summary)
+	history = aiutil.RedactSecretsIn(history)
+
 	// 选区是用户主动圈出的重点，单独成节且不参与屏显裁剪。
 	if sel := strings.TrimSpace(selection); sel != "" {
 		// 上限比屏显严格得多：既然是"圈出来的几行"，超过这个长度基本是误操作全选，

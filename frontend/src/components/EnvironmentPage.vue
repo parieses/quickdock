@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 // EnvSidebar 由下方 import 引入（侧栏是纯展示壳，分组计算仍在本页）
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
 import { matchesTextOrPinyin } from '../utils/pinyin'
@@ -1766,13 +1767,13 @@ const s = currentRuntimeState
 
 <template>
   <div class="env-page">
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">
           {{ t('navEnvironments') }}
           <span class="env-info" :title="t('envSubtitle')" role="img" aria-label="info">?</span>
         </h2>
-      </div>
+      </template>
       <!-- 按页头动作规则收成「一组工具图标 + 1 个主操作」，中间一条短竖线。
            原来 4 个带文字的次要按钮和刷新平铺成同级，整排一样重，
            窗口一窄还会挤到第二行。次要动作只留图标，含义靠 title 兜住。 -->
@@ -1798,7 +1799,7 @@ const s = currentRuntimeState
           <span>{{ t('maintTitle') }}</span>
         </button>
       </div>
-    </div>
+    </PageHeader>
 
     <div class="env-body">
       <!-- 左侧：分组导航 -->

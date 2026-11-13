@@ -19,6 +19,7 @@
  *   DISMISS         content → bg   用户点了「不用了」，别再弹
  *   TOUCH           content → bg   密码一致，只记一次使用
  *   SET_CREDENTIAL  popup   → bg   填充指定条目（转给当前 tab 的 content）
+ *   CLIP_NOTE       popup   → bg   剪藏当前页（标题/URL/选中文本）到笔记
  */
 
 /** 默认端口；QuickDock 侧被占用时会顺延，options 页可探测。 */
@@ -253,12 +254,27 @@ async function reveal(id) {
 }
 
 /**
+ * 用户名比较一律走这里。
+ *
+ * 全角空格、前后空白、大小写都不该让同一个账号被当成两个：判错的代价不是
+ * 多一条记录，而是把已存好的密码当成「另一个账号」再存一条，从此两条都
+ * 可能是旧密码。
+ */
+function normUser(s) {
+  return String(s || '').replace(/\u3000/g, ' ').trim().toLowerCase()
+}
+
+/**
  * 判断刚提交的密码该不该提示保存。
  *
- * 三种结果：
+ * 结果：
  *   'same'    库里已有完全相同的一条 → 只 touch，不打扰
- *   'update'  同用户名但密码不同 → 提示「更新这条」
- *   'new'     没有 → 提示「保存」
+ *   'update'  **同一个账号**、密码不同 → 提示「更新这条」
+ *   'new'     没有这个账号 → 提示「保存」（同站还有别的账号也一样新建）
+ *
+ * 「同一个账号」的判据只有用户名：同域名不同用户名是两个账号，各存各的。
+ * 以前用户名对不上时会退化成「拿本站第一条当更新目标」，于是给第二个账号
+ * 登录一次就把第一个账号的密码覆盖掉——这种破坏事后很难发现。
  *
  * 为什么必须在这里比对（而不是让 content 自己决定）：比对要解密，
  * 而解密只能发生在拿到 token 的这一层。
@@ -271,31 +287,51 @@ async function classifySubmission(payload) {
   if (!host) return { action: 'none' }
 
   const items = await matchByHost(host)
-  if (!items.length) return { action: 'new' }
+  const want = normUser(username)
+  const sameUser = want ? items.filter((it) => normUser(it.username) === want) : []
 
-  // 先按用户名缩小范围；用户名也可能为空（分步登录时第一屏没填用户名）。
-  const sameUser = username
-    ? items.filter((it) => (it.username || '').toLowerCase() === username.toLowerCase())
-    : items
-  // 本站有记录、但没有一条是这个用户名 → 这是本站在存新账号，
-  // 不能拿另一个账号的条目当「更新目标」，否则会把人家密码覆盖掉。
-  if (username && !sameUser.length) return { action: 'new' }
-  const pool = sameUser.length ? sameUser : items
-
-  for (const it of pool) {
-    if (!it.hasSecret) continue
-    try {
-      const full = await reveal(it.id)
-      if (full.secret === secret) {
-        await api('/vault/touch', { method: 'POST', body: { id: it.id } })
-        return { action: 'same', id: it.id }
+  /** 密码一字不差的就算已经存过（并记一次使用），返回 true。 */
+  const keepIfSameSecret = async (pool) => {
+    for (const it of pool) {
+      if (!it.hasSecret) continue
+      try {
+        const full = await reveal(it.id)
+        if (full.secret === secret) {
+          await api('/vault/touch', { method: 'POST', body: { id: it.id } })
+          return true
+        }
+      } catch {
+        // 单条解密失败（密钥换了 / 数据坏了）不该打断整个判断，
+        // 继续比下一条；全都失败时自然往下走。
       }
-    } catch {
-      // 单条解密失败（密钥换了 / 数据坏了）不该打断整个判断，
-      // 继续比下一条；全都失败时自然会走到 'new'。
     }
+    return false
   }
-  return { action: 'update', id: pool[0]?.id, name: pool[0]?.name }
+
+  if (want) {
+    // 只和同名条目比：不同账号即使密码相同，也该各存一条。
+    if (await keepIfSameSecret(sameUser)) return { action: 'same' }
+    if (!sameUser.length) {
+      // 本站已有别的账号 → 这是第二个账号，新建。已有记录时强制让用户看一眼：
+      // 用户名打错一个字就会多出一条永远用不上的记录。
+      return items.length
+        ? { action: 'new', existing: items.length, needsConfirm: true }
+        : { action: 'new', existing: 0 }
+    }
+    return { action: 'update', id: sameUser[0].id, name: sameUser[0].name, username: sameUser[0].username || '' }
+  }
+
+  // 没抓到用户名：分步登录的第二屏（只输密码）、用户名框被拆进别的 iframe 等。
+  // 只能靠密码内容认人：和全站比一遍，相同就当已经存过。
+  if (await keepIfSameSecret(items)) return { action: 'same' }
+  if (!items.length) return { action: 'new', existing: 0 }
+  if (items.length === 1) {
+    // 全站只有一条，只可能是它，照旧更新。
+    return { action: 'update', id: items[0].id, name: items[0].name, username: items[0].username || '' }
+  }
+  // 有多条却不知道是哪一条：新建比覆盖别人的密码安全，但必须问过 ——
+  // 否则每次登录都会悄悄多一条重复记录。
+  return { action: 'new', existing: items.length, needsConfirm: true, ambiguous: true }
 }
 
 async function saveEntry(payload) {
@@ -327,13 +363,26 @@ async function saveEntry(payload) {
 async function updateEntry(id, payload) {
   // payload.host 为空会把既有条目的域名清成空串 —— 那条从此再也匹配不到。
   if (!payload.host) throw new Error('识别不到当前网站的域名，未更新')
+  // 用户名留空会把库里存着的用户名一起清掉（/vault/save 的更新是整行覆盖，
+  // 留空不等于「不修改」）。分步登录的第二屏抓不到用户名，走的就是这条路，
+  // 清掉之后按用户名匹配再也对不上，下次登录就会多出一条重复记录。
+  let username = payload.username || ''
+  if (!username) {
+    try {
+      username = (await reveal(id)).username || ''
+    } catch {
+      // 取不到就按空处理：宁可少存一个用户名，也不要让「更新」失败。
+    }
+  }
   await api('/vault/save', {
     method: 'POST',
     body: {
       id,
-      name: payload.name || payload.host || '',
+      // 名称只在真的拿着旧条目名时才带（verdict.name）。用 host 兜底等于
+      // 把用户在应用里改过的名字改成域名 —— 后端对空名称会保留原值。
+      name: payload.name || '',
       kind: 'login',
-      username: payload.username || '',
+      username,
       secret: payload.secret || '',
       clearSecret: false,
       host: payload.host || '',
@@ -370,6 +419,9 @@ async function autoSaveEnabled() {
 async function applyVerdict(verdict, payload) {
   if (!verdict || verdict.action === 'none' || verdict.action === 'same') return verdict
   if (verdict.action !== 'new') return verdict
+  // needsConfirm：同站已有账号、或是没识别出用户的第二种情况。这类「新建」
+  // 无人看着就落库，用户名的错字、抓不到用户名时的重复记录都会静默积累。
+  if (verdict.needsConfirm) return verdict
   if (!(await autoSaveEnabled())) return verdict
   try {
     await saveEntry(payload)
@@ -514,6 +566,41 @@ async function handleMessage(msg, sender) {
       if (!tab?.id) return { ok: false, error: '找不到当前标签页' }
       const res = await chrome.tabs.sendMessage(tab.id, { type: 'FILL', credential: msg.credential }).catch(() => null)
       return res || { ok: false, error: '页面未响应，尝试刷新后再试' }
+    }
+    // popup 点「剪藏当前页到笔记」：取当前页标题/URL/选中文本，POST /vault/clip-note。
+    // 和 PING_TAB 一样走 executeScript，权限（activeTab + scripting）已经够，不用动 manifest。
+    case 'CLIP_NOTE': {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true })
+      if (!tab?.id) return { ok: false, error: '找不到当前标签页' }
+      const url = tab.url || tab.pendingUrl || ''
+      if (isNoInjectUrl(url)) {
+        return { ok: false, error: noInjectReason(url) }
+      }
+      let frames
+      try {
+        frames = await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          // func 序列化后在页面里执行，必须自包含，不能引用模块作用域的常量/函数。
+          func: () => {
+            const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim()
+            const selection = norm(window.getSelection()?.toString())
+            const pageText = norm(document.body?.innerText)
+            return {
+              title: document.title || '',
+              content: (selection || pageText).slice(0, 20000),
+              url: location.href || '',
+              selection,
+            }
+          },
+        })
+      } catch (e) {
+        return { ok: false, error: describeInjectError(e) }
+      }
+      const clip = frames?.[0]?.result
+      if (!clip) return { ok: false, error: '读取当前页面内容失败' }
+      // api() 统一带 token 头、校验 {code:0}，失败会抛错由外层转成 {ok:false,error}。
+      await api('/vault/clip-note', { method: 'POST', body: clip })
+      return { ok: true }
     }
     default:
       return { ok: false, error: 'unknown message' }

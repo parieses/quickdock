@@ -119,6 +119,18 @@ type SshHostInput struct {
 	// 所以它也能再挂一级跳板，形成链式；环在 SaveHost / 建链时挡住。
 	JumpHostID string `json:"jumpHostId"`
 
+	// 以下字段与 db.SshHost 一一对应，含义见那里的注释。
+	// 颜色存的是设计 token 名而不是色值（R4：色值只能来自 style.css）。
+	MCPAllowed          bool   `json:"mcpAllowed"`
+	Tags                string `json:"tags"`
+	Color               string `json:"color"`
+	Icon                string `json:"icon"`
+	PostLoginCommand    string `json:"postLoginCommand"`
+	AutoReplySudo       bool   `json:"autoReplySudo"`
+	ProxyCommand        string `json:"proxyCommand"`
+	ProxyCommandEnabled bool   `json:"proxyCommandEnabled"`
+	KeepaliveInterval   int    `json:"keepaliveInterval"`
+
 	ParentID string `json:"parentId"`
 	IsFolder bool   `json:"isFolder"`
 	Sort     int    `json:"sort"`
@@ -186,23 +198,32 @@ func (s *SshService) SaveHost(in SshHostInput) *services.ApiResult {
 		return failSsh(err)
 	}
 	h, err := s.App.DB.SaveSshHost(db.SshHost{
-		ID:               strings.TrimSpace(in.ID),
-		Name:             in.Name,
-		Host:             in.Host,
-		Port:             in.Port,
-		User:             in.User,
-		AuthType:         in.AuthType,
-		Password:         in.Password,
-		KeyPath:          in.KeyPath,
-		KeyPassphrase:    in.KeyPassphrase,
-		ClearPassword:    in.ClearPassword,
-		LegacyAlgorithms: in.LegacyAlgorithms,
-		Env:              in.Env,
-		JumpHostID:       strings.TrimSpace(in.JumpHostID),
-		ParentID:         in.ParentID,
-		IsFolder:         in.IsFolder,
-		Sort:             in.Sort,
-		Remark:           in.Remark,
+		ID:                  strings.TrimSpace(in.ID),
+		Name:                in.Name,
+		Host:                in.Host,
+		Port:                in.Port,
+		User:                in.User,
+		AuthType:            in.AuthType,
+		Password:            in.Password,
+		KeyPath:             in.KeyPath,
+		KeyPassphrase:       in.KeyPassphrase,
+		ClearPassword:       in.ClearPassword,
+		LegacyAlgorithms:    in.LegacyAlgorithms,
+		Env:                 in.Env,
+		JumpHostID:          strings.TrimSpace(in.JumpHostID),
+		MCPAllowed:          in.MCPAllowed,
+		Tags:                in.Tags,
+		Color:               in.Color,
+		Icon:                in.Icon,
+		PostLoginCommand:    in.PostLoginCommand,
+		AutoReplySudo:       in.AutoReplySudo,
+		ProxyCommand:        in.ProxyCommand,
+		ProxyCommandEnabled: in.ProxyCommandEnabled,
+		KeepaliveInterval:   in.KeepaliveInterval,
+		ParentID:            in.ParentID,
+		IsFolder:            in.IsFolder,
+		Sort:                in.Sort,
+		Remark:              in.Remark,
 	})
 	if err != nil {
 		return failSsh(err)
@@ -656,13 +677,16 @@ func (s *SshService) buildTestTarget(in SshHostInput) (*db.SshHost, *db.SshHostS
 	}
 
 	return &db.SshHost{
-		ID:               strings.TrimSpace(in.ID),
-		Name:             in.Name,
-		Host:             hostname,
-		Port:             port,
-		User:             user,
-		LegacyAlgorithms: in.LegacyAlgorithms,
-		JumpHostID:       jumpID,
+		ID:                  strings.TrimSpace(in.ID),
+		Name:                in.Name,
+		Host:                hostname,
+		Port:                port,
+		User:                user,
+		LegacyAlgorithms:    in.LegacyAlgorithms,
+		JumpHostID:          jumpID,
+		ProxyCommand:        in.ProxyCommand,
+		ProxyCommandEnabled: in.ProxyCommandEnabled,
+		KeepaliveInterval:   in.KeepaliveInterval,
 	}, secret, nil
 }
 
@@ -811,6 +835,27 @@ func (s *SshService) dialOne(ctx context.Context, host *db.SshHost, secret *db.S
 			KeyPassphrase: secret.KeyPassphrase,
 		}
 	}
+	// 只有「有 UI 的交互终端」这条链路会在 ctx 上挂回调；Exec / SFTP /
+	// 批量 / 转发 / 连通性测试 / MCP 一律 nil，引擎自动退回旧的单密码行为，
+	// 不会因为多轮问答把后台路径挂住。
+	if fn := challengeFrom(ctx); fn != nil && auth.Type == sshcore.AuthPassword {
+		auth.Challenge = fn
+	}
+
+	// ProxyCommand 只作用于「最外层」那一跳，也就是 connector == nil、本来要
+	// 走真实 TCP 的一跳。中间跳/最终目标的底层 net.Conn 已由上一跳的
+	// direct-tcpip channel 提供，再叠一个外部命令会把整条跳板链短路掉。
+	dialConnector := connector
+	if dialConnector == nil && host.ProxyCommandEnabled && strings.TrimSpace(host.ProxyCommand) != "" {
+		c, err := sshcore.ProxyCommandDialer(host.ProxyCommand, host.Host, host.Port, host.User)
+		if err != nil {
+			// 模板非法 / 前导 '-' 拒绝要在建连前就报出来，别被 classify 成
+			// 「主机不可达」让用户去查网络。
+			return nil, fmt.Errorf("%w: %v", errInvalidInput, err)
+		}
+		dialConnector = c
+	}
+
 	return sshcore.Dial(ctx, sshcore.DialConfig{
 		Host:             host.Host,
 		Port:             host.Port,
@@ -818,9 +863,12 @@ func (s *SshService) dialOne(ctx context.Context, host *db.SshHost, secret *db.S
 		Auth:             auth,
 		Timeout:          dialTimeout,
 		LegacyAlgorithms: host.LegacyAlgorithms,
+		// OpenSSH 的 ServerAliveInterval 0 = 显式关闭，db 里已映射成 -1；
+		// 0 是「没配」，走引擎默认 45s。两者不能混。
+		KeepaliveInterval: time.Duration(host.KeepaliveInterval) * time.Second,
 		// 每一跳各自校验指纹。known.Callback 是按 host/port 造的闭包，
 		// 拿最终目标的回调去校验中间跳的话，跳板换了密钥也发现不了。
 		HostKeyCallback: s.known.Callback(host.Host, host.Port),
-		Connector:       connector,
+		Connector:       dialConnector,
 	})
 }

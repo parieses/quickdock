@@ -384,7 +384,7 @@ onUnmounted(stopPoll)
 }
 
 .ai-job.is-done .ai-job-dot {
-  background: var(--color-success, #3fb950);
+  background: var(--color-success);
 }
 
 .ai-job.is-failed .ai-job-dot {

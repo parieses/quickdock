@@ -65,7 +65,7 @@ async function mount() {
     value: text.value,
     filename: props.filename,
     readOnly: props.readonly,
-    fontSize: '12.5px',
+    fontSize: '13px',
     onChange: (v) => emit('update:modelValue', v),
     onSave: () => emit('save'),
     onSelectionChange: (line, col) => {

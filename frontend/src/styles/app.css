@@ -138,11 +138,14 @@
   background: var(--color-border);
 }
 
-/* ---- 按钮：只有一种盒子，三种语气 ---- */
+/* ---- 按钮：只有一种盒子，三种语气 ----
+   选择器组里的 .btn / .btn-* 是 settings.css 的历史别名：盒模型、
+   hover/active/disabled、primary/ghost/danger 全部只在这里定义一次。
+   用逗号选择器组而非 :is()/:where() —— WebView2 版本不可控（ui.md §6）。 */
 /* 底色给到 bg-tertiary 而不是透明：桌面工具里按钮必须是"能按下去的东西"，
    透明底 + 细边在深色主题下常被当成一段加了框的文字。内高光负责给出厚度，
    :active 下沉半像素给按下反馈（transform 不参与布局，不会引起重排）。 */
-.qd-btn {
+.qd-btn, .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -164,17 +167,17 @@
     border-color var(--transition-fast), box-shadow var(--transition-fast),
     transform var(--transition-fast);
 }
-.qd-btn:hover {
+.qd-btn:hover, .btn:hover {
   background: var(--color-bg-hover);
   border-color: var(--color-border-light);
   color: var(--color-text-primary);
 }
-.qd-btn:active:not(:disabled) {
+.qd-btn:active:not(:disabled), .btn:active:not(:disabled) {
   background: var(--color-bg-active);
   box-shadow: none;
   transform: translateY(0.5px);
 }
-.qd-btn:disabled {
+.qd-btn:disabled, .btn:disabled {
   color: var(--color-text-disabled);
   border-color: var(--color-border);
   background: none;
@@ -182,19 +185,19 @@
   cursor: not-allowed;
 }
 
-.qd-btn-primary {
+.qd-btn-primary, .btn-primary {
   background: var(--color-accent);
   border-color: transparent;
   color: var(--color-accent-text);
   font-weight: 600;
   box-shadow: inset 0 1px 0 var(--color-hairline), 0 1px 2px var(--color-accent-border);
 }
-.qd-btn-primary:hover {
+.qd-btn-primary:hover, .btn-primary:hover {
   background: var(--color-accent-hover);
   border-color: transparent;
   color: var(--color-accent-text);
 }
-.qd-btn-primary:disabled {
+.qd-btn-primary:disabled, .btn-primary:disabled {
   background: var(--color-accent-muted);
   border-color: transparent;
   color: var(--color-accent-text);
@@ -203,23 +206,23 @@
 
 /* 无边框：用于页头里成组的心理"次要动作"，hover 才浮出底色。
    必须显式清掉 qd-btn 的底色与内高光，否则"幽灵"按钮会变成实心块。 */
-.qd-btn-ghost {
+.qd-btn-ghost, .btn-ghost {
   border-color: transparent;
   background: none;
   box-shadow: none;
 }
-.qd-btn-ghost:hover {
+.qd-btn-ghost:hover, .btn-ghost:hover {
   background: var(--color-bg-hover);
   border-color: transparent;
 }
-.qd-btn-ghost:active:not(:disabled) { background: var(--color-bg-active); }
+.qd-btn-ghost:active:not(:disabled), .btn-ghost:active:not(:disabled) { background: var(--color-bg-active); }
 
-.qd-btn-danger {
+.qd-btn-danger, .btn-danger {
   border-color: var(--color-danger-border);
   background: var(--color-danger-bg);
   color: var(--color-danger);
 }
-.qd-btn-danger:hover {
+.qd-btn-danger:hover, .btn-danger:hover {
   background: var(--color-danger);
   border-color: var(--color-danger);
   color: var(--color-danger-text);
@@ -407,8 +410,8 @@
   transition: background-color var(--transition-fast), border-color var(--transition-fast);
 }
 .ai-md li.ai-task-item.is-done .ai-task-box {
-  border-color: var(--color-success, #2fa84f);
-  background: var(--color-success, #2fa84f);
+  border-color: var(--color-success);
+  background: var(--color-success);
 }
 .ai-md li.ai-task-item.is-done .ai-task-box::after {
   content: '';

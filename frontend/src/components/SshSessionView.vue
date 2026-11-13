@@ -12,12 +12,14 @@
  * 删除主机等场景会卸载，那时直接断线会让其它标签之外的东西莫名断掉。
  * 断开统一由 SshPage 在「用户明确要关这个标签」时调用。
  */
-import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { Events } from '@wailsio/runtime'
 import { Loader2, RotateCw, Sparkles, Unplug } from '@lucide/vue'
-import { Connect, Disconnect, ListSessions, Resize, SaveHost } from '../../bindings/quickdock/services/sshx/sshservice'
+import { AnswerSshChallenge, Connect, Disconnect, ListSessions, Resize, SaveHost } from '../../bindings/quickdock/services/sshx/sshservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
+import { logErr } from '../utils/logger'
 import { requestCredential } from '../composables/useCredential'
 import { SSH_ERR } from '../utils/ssh'
 import { useAIAvailability } from '../composables/useAIAvailability'
@@ -37,6 +39,7 @@ import SshTerminal from './SshTerminal.vue'
 import SshAiPanel from './SshAiPanel.vue'
 import SshFingerprintDialog from './SshFingerprintDialog.vue'
 import SshPasteDialog from './SshPasteDialog.vue'
+import SshChallengeDialog from './SshChallengeDialog.vue'
 
 const { t } = useI18n()
 const { error: toastError } = useToast()
@@ -323,6 +326,18 @@ async function askPassword(reason: 'missing' | 'failed') {
       legacyAlgorithms: !!props.host.legacyAlgorithms,
       env: props.host.env || '',
       jumpHostId: props.host.jumpHostId || '',
+      // 这里只是「补录密码」，不是编辑主机：高级选项必须原样带回，
+      // 否则 SaveHost 的整行覆盖会把用户配的 MCP 授权 / ProxyCommand /
+      // 标签色全清掉。用 ?? 兜底是为了兼容老版本缓存里没有这些列的对象。
+      mcpAllowed: props.host.mcpAllowed ?? false,
+      tags: props.host.tags ?? '',
+      color: props.host.color ?? '',
+      icon: props.host.icon ?? '',
+      postLoginCommand: props.host.postLoginCommand ?? '',
+      autoReplySudo: props.host.autoReplySudo ?? false,
+      proxyCommand: props.host.proxyCommand ?? '',
+      proxyCommandEnabled: props.host.proxyCommandEnabled ?? false,
+      keepaliveInterval: props.host.keepaliveInterval ?? 0,
       parentId: props.host.parentId || '',
       isFolder: false,
       sort: props.host.sort || 0,
@@ -476,6 +491,59 @@ async function onDisconnectClick() {
 
 function onTermError(msg: string) {
   toastError(msg)
+}
+
+// ---- 交互式问答（密码 + OTP）----
+
+const EVENT_SSH_CHALLENGE = 'quickdock:ssh:challenge'
+
+/** 与 Go 侧 SshChallengeEvent 的 json 字段对齐；事件负载在 Wails 信封的 data 里。 */
+type ChallengeEvent = {
+  id: string
+  hostId: string
+  name: string
+  instruction: string
+  questions: string[]
+  echos: boolean[]
+}
+
+const challengeEvent = ref<ChallengeEvent | null>(null)
+let offChallenge: (() => void) | null = null
+
+onMounted(() => {
+  offChallenge = Events.On(EVENT_SSH_CHALLENGE, (ev: unknown) => {
+    const payload = (ev as { data?: ChallengeEvent })?.data
+    if (!payload?.id) return
+    // 全局事件每个标签都会收到：按 hostId 放行本会话，避免 A 标签弹出 B 主机的验证框。
+    if (payload.hostId && payload.hostId !== props.host.id) return
+    challengeEvent.value = payload
+  })
+})
+
+onUnmounted(() => {
+  offChallenge?.()
+  offChallenge = null
+})
+
+/** 提交或取消都走这一个出口：取消即 (event.id, [], true)，让后端立刻放行连接。 */
+async function submitChallenge(answers: string[], canceled: boolean) {
+  const id = challengeEvent.value?.id
+  challengeEvent.value = null
+  if (!id) return
+  try {
+    unwrap(await AnswerSshChallenge(id, answers, canceled))
+  } catch (e) {
+    toastError(getErrorMessage(e))
+    logErr('SshSessionView.submitChallenge', e)
+  }
+}
+
+function onChallengeSubmit(answers: string[], canceled: boolean) {
+  void submitChallenge(answers, canceled)
+}
+
+function onChallengeCancel() {
+  void submitChallenge([], true)
 }
 
 // ---- 多行粘贴确认 ----
@@ -733,6 +801,13 @@ defineExpose({
           :data="pasteData"
           @confirm="onPasteConfirm"
           @cancel="onPasteCancel"
+        />
+
+        <SshChallengeDialog
+          v-if="challengeEvent"
+          :event="challengeEvent"
+          @submit="onChallengeSubmit"
+          @cancel="onChallengeCancel"
         />
       </div>
 

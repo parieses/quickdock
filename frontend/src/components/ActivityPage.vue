@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 import { ref, computed, onMounted, onUnmounted, inject, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
@@ -220,15 +221,15 @@ onUnmounted(() => {
 
 <template>
   <div class="activity-page" :class="{ embedded: props.embedded }">
-    <div class="qd-page-header">
+    <PageHeader>
       <!-- titles 插槽：嵌进设置的「历史」页时，由外层把「最近动态 / 回收站」分段控件
            放进标题位，避免再加一层工具条（两层 40px 会白吃 80px 高度） -->
-      <div class="qd-page-titles">
+      <template #titles>
         <slot name="titles">
           <h2 v-if="!props.embedded" class="qd-page-title">{{ t('navActivity') }}</h2>
           <span class="qd-page-sub">{{ t('activitySubtitle') }}</span>
         </slot>
-      </div>
+      </template>
       <div class="qd-page-actions">
         <button class="qd-btn" :disabled="loading" @click="load">
           <RefreshCw :size="13" /> {{ t('logRefresh') }}
@@ -237,7 +238,7 @@ onUnmounted(() => {
           <Trash2 :size="13" /> {{ filterActive ? t('activityClearFilteredBtn') : t('activityClear') }}
         </button>
       </div>
-    </div>
+    </PageHeader>
 
     <div v-if="error" class="activity-error">{{ error }}</div>
 

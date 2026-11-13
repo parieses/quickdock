@@ -13,7 +13,14 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ChevronDown, ChevronUp, Search, Sparkles, X, ZoomIn, ZoomOut } from '@lucide/vue'
-import { Terminal, type ITheme } from '@xterm/xterm'
+import {
+  Terminal,
+  type ITheme,
+  type ILinkHandler,
+  type ILinkProvider,
+  type ILink,
+  type IDisposable,
+} from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import { SearchAddon } from '@xterm/addon-search'
 import { Unicode11Addon } from '@xterm/addon-unicode11'
@@ -33,6 +40,7 @@ import { useThemeName } from '../composables/useThemeName'
 import { sshFontSize, setSshFontSize, SSH_FONT_MIN, SSH_FONT_MAX, SSH_FONT_DEFAULT } from '../composables/useSshFont'
 import { useToast } from '../composables/useToast'
 import { debounce } from '../utils/debounce'
+import { openExternal } from '../utils/externalLinks'
 import { isMultiLinePaste } from '../utils/ssh'
 
 /** 与 services/sshx/session.go 里的常量一一对应。 */
@@ -328,6 +336,184 @@ const hostEl = ref<HTMLElement | null>(null)
 let term: Terminal | null = null
 let fitAddon: FitAddon | null = null
 let searchAddon: SearchAddon | null = null
+let linkProviderDisposable: IDisposable | null = null
+
+// ---- 终端内链接：OSC 8（xterm core 解析）+ 可见 URL（正则 provider）----
+//
+// 选型理由（分两条链路，不是二选一）：
+//  · OSC 8：xterm 6.0 的 core 自带解析器（OscLinkService + 内建
+//    OscLinkProvider）。终端收到 `OSC 8 ;; <uri>` 后给单元格打 urlId 标记，
+//    内建 provider 会逐 cell 还原链接文本与 range 并产出 ILink；默认点击走
+//    core 的 window.open()（会把 WebView2 整个窗口导航走，且没有后退）。
+//    因此这里用构造参数 linkHandler 接管它的 activate/hover/leave —— 这就是
+//    「OSC 8 走 xterm 的 osc 链接解析」，不需要也不该自己再写一套解析器。
+//  · 可见 URL：屏幕上只是被打印出来、没有 OSC 8 标记的 http(s) 文本，core
+//    不会识别，用 term.registerLinkProvider + 正则逐行补上。本期这个自定义
+//    provider 只覆盖可见 URL；OSC 8 的跨行与参数解析完全由 xterm core 负责，
+//    不在此重复实现（也不假装做了第二套）。
+//
+// 两条链路的点击都汇到 openSshLink：走系统默认浏览器，绝不 window.open。
+const LINK_RE = /https?:\/\/[^\s<>"']+/g
+/** URL 尾部常见的句读/包裹符，不属于 URL 本身，带进浏览器会 404。 */
+const LINK_TRAILING_RE = /[.,;:!?)\]}'"`]/
+
+/** 链接 hover 提示：由 linkHandler 与自定义 ILink 的 hover 回调共同驱动。 */
+const linkTip = ref<{ x: number; y: number; text: string } | null>(null)
+
+function showLinkTip(e: MouseEvent, text: string) {
+  linkTip.value = { x: e.clientX, y: e.clientY, text }
+}
+
+function hideLinkTip() {
+  linkTip.value = null
+}
+
+/**
+ * 用系统默认浏览器打开链接。
+ *
+ * 走 utils/externalLinks 的 openExternal（→ @wailsio/runtime 的
+ * Browser.OpenURL），绝不在 WebView2 里 window.open：本组件是单页应用内的
+ * 终端，一旦当前窗口被导航走就回不来（没有地址栏也没有后退）。
+ *
+ * 关于 R9：已全量 grep frontend/bindings，没有任何「打开外链」的后端
+ * service；openExternal 是 Wails runtime 门面，返回 Promise<void> 而非
+ * ApiResult，没有可 unwrap 的结果——对它调 unwrap() 只会恒返回 null，属于
+ * 「假装解包」。因此保留 R9 的 try/catch + toast.error(getErrorMessage(e))
+ * + logErr，但不做无意义的 unwrap。toast.error 在本组件里沿用既有别名
+ * toastError（= useToast().error），避免无关重命名（R2）。
+ */
+async function openSshLink(url: string): Promise<void> {
+  try {
+    await openExternal(url)
+  } catch (e) {
+    logErr('ssh.link.open', e)
+    toastError(getErrorMessage(e))
+  }
+}
+
+/** 把一行的「列对齐文本」里的可见 http(s) URL 转成 ILink。 */
+function visibleLinksForLine(text: string, bufferLineNumber: number): ILink[] {
+  const links: ILink[] = []
+  LINK_RE.lastIndex = 0
+  let m: RegExpExecArray | null
+  while ((m = LINK_RE.exec(text)) !== null) {
+    let end = m[0].length
+    while (end > 0 && LINK_TRAILING_RE.test(m[0][end - 1])) end--
+    if (end === 0) continue
+    const url = m[0].slice(0, end)
+    links.push({
+      // 坐标口径照抄 core 内建 OscLinkProvider：bufferLineNumber 与
+      // range.x / range.y 都是 1-based，end.x 是「最后一个字符所在列」。
+      range: {
+        start: { x: m.index + 1, y: bufferLineNumber },
+        end: { x: m.index + end, y: bufferLineNumber },
+      },
+      text: url,
+      decorations: { pointerCursor: true, underline: true },
+      activate: (_e, linkText) => { void openSshLink(linkText) },
+      hover: (e, linkText) => showLinkTip(e, linkText),
+      leave: () => hideLinkTip(),
+    })
+  }
+  return links
+}
+
+/** OSC 8：core 内建 provider 的 activate/hover/leave 全部转到这里。 */
+const linkHandler: ILinkHandler = {
+  // 不设 allowNonHttpProtocols（默认 false）：core 只放行 http(s)，
+  // javascript: 之类会被它先过滤掉，activate 里 openExternal 再校验一次。
+  activate: (_e, text) => { void openSshLink(text) },
+  hover: (e, text) => showLinkTip(e, text),
+  leave: () => hideLinkTip(),
+}
+
+/** 可见 URL 的 provider：xterm 只在鼠标所在行回调 provideLinks。 */
+const visibleLinkProvider: ILinkProvider = {
+  provideLinks(bufferLineNumber, callback) {
+    if (!term) { callback(undefined); return }
+    // bufferLineNumber 是 1-based（core 内建 provider 用 lines.get(t-1) 取行）。
+    const line = term.buffer.active.getLine(bufferLineNumber - 1)
+    if (!line) { callback(undefined); return }
+    // 逐 cell 拼「一列一字符」的串，而不是 translateToString：后者里 CJK
+    // 占 1 个字符串下标却占 2 列，直接用 match.index 当列号会让链接框左移、
+    // 点不中。宽字符的次单元格 getChars() 为空，补一个空格即保持下标==列号。
+    const cell = term.buffer.active.getNullCell()
+    let text = ''
+    for (let x = 0; x < line.length; x++) {
+      const c = line.getCell(x, cell)
+      text += c ? (c.getChars() || ' ') : ' '
+    }
+    const links = visibleLinksForLine(text, bufferLineNumber)
+    callback(links.length ? links : undefined)
+  },
+}
+
+// ---- OSC 7：广播远端当前工作目录（本组件只广播，不驱动 SFTP 面板）----
+//
+// 实现路径（已到 node_modules/@xterm/xterm/typings/xterm.d.ts 核实签名）：
+//   registerOscHandler 声明在 IParser 上，经 `term.parser` 访问——Terminal 上
+//   并没有同名方法，写 `term.registerOscHandler(...)` 会直接编译不过。真实签名：
+//     registerOscHandler(ident: number, callback: (data: string) => boolean | Promise<boolean>): IDisposable
+//   返回值是 IDisposable（不是 boolean），所以注销就是调它的 dispose()。
+//   （任务里担心的「返回 boolean、没有 disposer」是部分旧封装/其它库的行为，
+//     本项目 xterm 6.0 不适用；但下面仍保留 cwdDisposed 标志作双保险，
+//     见 onBeforeUnmount 注释。）
+//
+// 取舍（为什么不用「term.write 前的原始数据正则拦截 \x1b]7;file://...\x07」备选）：
+//   那条路要自己在字节流里拼跨 write 分片的 OSC 序列、识别 BEL(\x07)/ST(\x1b\)
+//   结尾，等于重造 xterm 已内建的 OSC 状态机，且与内建解析重复。既然 6.0 原生
+//   提供 handler（回调拿到的是「已收齐的完整序列」），就直接用它。
+//
+// 安全：OSC 7 是远端服务器 shell 可任意伪造的输入（恶意/被控主机只要打印一段
+//   假序列即可）。远端不可信，不能让它把本地文件面板指到任意位置——只广播
+//   「以 / 开头、不含 ..、不含控制字符」的绝对路径，其余一律丢弃（见下）。
+//
+// 解耦：这里只 dispatchEvent，是否让 SFTP 面板跟随由 SshPage 的开关决定（另一组
+//   实现）。把「默认关闭」这个安全默认放在页面级，组件不碰文件面板。
+const CWD_EVENT = 'quickdock:ssh:cwd'
+
+/** 远端不可信，见上方安全说明；返回可广播的安全绝对路径，否则 null。 */
+function safeOsc7Path(data: string): string | null {
+  // 回调 data 通常是标识符 7 之后的载荷 `file://hostname/path`；宽松处理个别
+  // 实现可能把整段 `7;file://...` 或 `;file://...` 传进来的情况。
+  const raw = data.replace(/^(?:7)?;/, '')
+  const m = /^file:\/\/[^/]*(\/.*)?$/.exec(raw)
+  if (!m) return null
+  // decodeURIComponent 只解 %XX，不会把 '+' 转成空格（+ 转空格是
+  // URLSearchParams / form 解码的行为），正好满足「路径里 + 是字面加号」；
+  // 不要用 decodeURI 或手动 replace(/\+/g, ' ') 替代。
+  let path: string
+  try {
+    path = decodeURIComponent(m[1] || '')
+  } catch {
+    // 非法 % 转义（如 %ZZ）视作投毒，丢弃。
+    return null
+  }
+  // 校验必须放在解码之后：%2e%2e → .. 、%0a → 换行 同样要被挡住。
+  if (!path.startsWith('/')) return null
+  if (path.includes('..')) return null
+  if (/[\u0000-\u001f\u007f]/.test(path)) return null
+  return path
+}
+
+let osc7Disposable: IDisposable | null = null
+/** 卸载兜底：见 onBeforeUnmount。置 true 后 handler 直接 return——既覆盖
+ *  「返回 boolean、没有 disposer」的旧封装（本版本不适用），也挡住拆卸窗口里
+ *  in-flight 的 write 回调在组件销毁后再广播一次。 */
+let cwdDisposed = false
+
+function onOsc7(data: string): boolean {
+  // 返回 true = 序列已处理，阻止再交给更早注册的 handler；OSC 7 在 xterm 里
+  // 没有内建消费者（OSC 本就不会被当文本打印），这里就是唯一监听者，吞掉即可。
+  if (cwdDisposed) return true
+  const path = safeOsc7Path(data)
+  if (path === null) return true // 不安全 / 非法：丢弃，不广播
+  // 必须带 sessionId：页面里每个标签都有一份本组件实例，全局 DOM 事件会被所有
+  // 实例发出。页面靠 sessionId 反查标签，只让「当前激活的那个」跟随，否则后台
+  // 主机的一条 cd 会把用户正在看的文件面板切到别的机器的同名目录上。
+  window.dispatchEvent(new CustomEvent(CWD_EVENT, { detail: { path, sessionId: props.sessionId } }))
+  return true
+}
 
 // ---- 终端内搜索（Ctrl+F）----
 const searchOpen = ref(false)
@@ -386,6 +572,75 @@ function closeSearch() {
   searchAddon?.clearDecorations()
   searchScore.value = { index: -1, count: 0 }
   term?.focus()
+}
+
+// ---- 关键词（退化路径：可编辑词库 + 搜索跳转）----
+//
+// 选型理由（为什么不做「常驻行内高亮」）：
+//  1. term.registerDecoration 基于 registerMarker 定位「某一行」并挂一个
+//     DOM 覆盖层，只能表达整行/矩形块，无法给一行里任意位置的多段文字上色；
+//     覆盖层压在 xterm 的 DOM renderer 之上，正是 R7 明令禁止的「硬造一套
+//     CSS 覆盖层」，会破坏渲染。
+//  2. SearchAddon 的 decorations 一次只服务一个查询串（"highlight all
+//     instances of the word"），每次 findNext 都会重建/清掉上一批高亮，
+//     多个关键词互相覆盖，做不到「同时常驻高亮」；它的语义本就是
+//     「搜索 + 跳转」，不是多关键词着色。
+//  3. 因此退化到「关键词列表 + 搜索跳转」：关键词是可编辑词库（localStorage
+//     持久化），点一下填进搜索框并走现有 runSearch → SearchAddon 高亮该词
+//     的全部命中，命中数量沿用已有的 onDidChangeResults → searchScore 显示。
+//     零新增渲染层，复用既有搜索能力，不碰 canvas/DOM 渲染。
+const KEYWORDS_STORAGE_KEY = 'qd_ssh_keywords'
+const KEYWORDS_MAX = 10
+
+/** 解析逗号分隔的关键词：去空白/空项/重复，最多 KEYWORDS_MAX 个。 */
+function parseKeywords(raw: string): string[] {
+  const out: string[] = []
+  for (const part of (raw || '').split(',')) {
+    const kw = part.trim()
+    if (kw && !out.includes(kw)) out.push(kw)
+    if (out.length >= KEYWORDS_MAX) break
+  }
+  return out
+}
+
+function loadKeywords(): string[] {
+  try {
+    return parseKeywords(localStorage.getItem(KEYWORDS_STORAGE_KEY) || '')
+  } catch (e) {
+    // 隐私模式 / 配额满时 localStorage 会抛；不能空 catch，记录但不打扰用户。
+    logErr('ssh.keywords.load', e)
+    return []
+  }
+}
+
+const keywords = ref<string[]>(loadKeywords())
+/** 输入框原始文本：与规范后的 keywords 分开，打字过程中不粗暴回写。 */
+const keywordsRaw = ref(keywords.value.join(', '))
+
+function saveKeywords(): void {
+  try {
+    localStorage.setItem(KEYWORDS_STORAGE_KEY, keywords.value.join(','))
+  } catch (e) {
+    logErr('ssh.keywords.save', e)
+  }
+}
+
+/** 输入即生效：解析 + 上限 + 落盘，chips 实时跟随。 */
+function onKeywordsInput(): void {
+  keywords.value = parseKeywords(keywordsRaw.value)
+  saveKeywords()
+}
+
+/** 失焦时把输入框规范化为实际生效的列表，让用户看到「去重/截断」结果。 */
+function onKeywordsBlur(): void {
+  keywordsRaw.value = keywords.value.join(', ')
+}
+
+/** 点关键词 chip：填进搜索框并立即搜索，命中数沿用 onDidChangeResults。 */
+function applyKeyword(kw: string): void {
+  searchText.value = kw
+  runSearch('next')
+  searchInputEl.value?.focus()
 }
 
 /**
@@ -633,6 +888,13 @@ onMounted(async () => {
     lineHeight: 1.2,
     cursorBlink: true,
     scrollback: 5000,
+    // 字体连字：xterm 6.0 的 ITerminalOptions 全文没有 fontLigatures 字段
+    // （typings 里仅 registerCharacterJoiner 的注释提到 ligatures，且它只被
+    // webgl renderer 使用，与 xterm 6 的 DOM renderer 不匹配）。连字需
+    // @xterm/addon-ligatures，本项目未安装；不擅自 npm install，故本期不
+    // 提供该开关，也不引入 sshLigatures 文案。
+    // OSC 8 链接：core 内建 provider 的点击/hover 全部转交这里，见上方注释。
+    linkHandler,
     // Unicode11Addon 依赖 term.unicode，那是 proposed API：不开这个开关，
     // loadAddon 内部访问 unicode 会直接抛 _checkProposedApi 错误。
     // 异常发生在 mounted 里，会中断整个挂载流程——终端不渲染、事件不订阅，
@@ -666,6 +928,14 @@ onMounted(async () => {
   })
 
   term.open(hostEl.value)
+  // 可见 URL 的 provider 在 open 之后注册：LinkProviderService 已随 Terminal
+  // 构造就绪，open 后注册最稳，也确保 renderer 已挂上。
+  linkProviderDisposable = term.registerLinkProvider(visibleLinkProvider)
+  // OSC 7 工作目录：必须注册在任何 term.write 之前。数据流只有两条——attach()
+  // 的回放帧与 Events.On(EVENT_DATA) 的实时帧，二者都在本行之后才经 writeQueue
+  // 进 term.write，所以这里注册能接住首批输出里的 OSC 7。
+  cwdDisposed = false
+  osc7Disposable = term.parser.registerOscHandler(7, onOsc7)
   await nextTick()
   fitAddon.fit()
 
@@ -809,6 +1079,14 @@ watch(
 )
 
 onBeforeUnmount(() => {
+  // 先置标志：拆卸窗口内若有 in-flight 的 write 回调，onOsc7 会直接 return，
+  // 不会在组件销毁后再广播一次 cwd 事件。
+  cwdDisposed = true
+  // @xterm/xterm 6.0 的 registerOscHandler 返回 IDisposable（已核实签名），
+  // 这里与注册配对 dispose；若换成「返回 boolean、没有 disposer」的旧封装，
+  // 靠上面的 cwdDisposed 兜底即可，别硬调不存在的 dispose。
+  osc7Disposable?.dispose()
+  osc7Disposable = null
   offData?.()
   offState?.()
   observer?.disconnect()
@@ -819,6 +1097,8 @@ onBeforeUnmount(() => {
   writeQueue.dispose()
   pending = []
   duringReplay = []
+  linkProviderDisposable?.dispose()
+  linkProviderDisposable = null
   // 只销毁渲染器，不关会话：会话常驻 Go 侧，关窗后重开要能接回来。
   term?.dispose()
   term = null
@@ -869,39 +1149,74 @@ defineExpose({
       @keydown="onKeydown"
     />
 
+    <!-- 链接 hover 提示：文案走 sshLinkOpen；left/top 是鼠标运行时坐标，
+         属于 R7 允许的「动态计算」内联样式，就近说明。 -->
+    <div
+      v-if="linkTip"
+      class="term-link-tip"
+      :style="{ left: linkTip.x + 'px', top: linkTip.y + 'px' }"
+    >
+      <span>{{ t('sshLinkOpen') }}</span>
+      <span class="term-link-tip-url">{{ linkTip.text }}</span>
+    </div>
+
     <!-- 搜索条绝对定位于右上角：不参与 flex 布局，免得把终端渲染宽度挤窄
          （挤窄会触发 fit → cols 变化 → 远端 PS1 重排，画面来回跳）。 -->
     <div v-if="searchOpen" class="term-search" @mousedown.stop>
-      <Search :size="12" class="term-search-icon" />
-      <input
-        ref="searchInputEl"
-        v-model="searchText"
-        class="term-search-input"
-        :placeholder="t('sshTermSearch')"
-        spellcheck="false"
-        @input="runSearch('next', true)"
-        @keydown.enter.exact.prevent="runSearch('next')"
-        @keydown.shift.enter.prevent="runSearch('prev')"
-        @keydown.esc.prevent.stop="closeSearch"
-      />
-      <span class="term-search-count">{{ searchCountText }}</span>
-      <button
-        class="term-search-btn"
-        :title="t('sshTermSearchPrev')"
-        @click="runSearch('prev')"
-      >
-        <ChevronUp :size="12" />
-      </button>
-      <button
-        class="term-search-btn"
-        :title="t('sshTermSearchNext')"
-        @click="runSearch('next')"
-      >
-        <ChevronDown :size="12" />
-      </button>
-      <button class="term-search-btn" :title="t('cancel')" @click="closeSearch">
-        <X :size="12" />
-      </button>
+      <div class="term-search-row">
+        <Search :size="12" class="term-search-icon" />
+        <input
+          ref="searchInputEl"
+          v-model="searchText"
+          class="term-search-input"
+          :placeholder="t('sshTermSearch')"
+          spellcheck="false"
+          @input="runSearch('next', true)"
+          @keydown.enter.exact.prevent="runSearch('next')"
+          @keydown.shift.enter.prevent="runSearch('prev')"
+          @keydown.esc.prevent.stop="closeSearch"
+        />
+        <span class="term-search-count">{{ searchCountText }}</span>
+        <button
+          class="term-search-btn"
+          :title="t('sshTermSearchPrev')"
+          @click="runSearch('prev')"
+        >
+          <ChevronUp :size="12" />
+        </button>
+        <button
+          class="term-search-btn"
+          :title="t('sshTermSearchNext')"
+          @click="runSearch('next')"
+        >
+          <ChevronDown :size="12" />
+        </button>
+        <button class="term-search-btn" :title="t('cancel')" @click="closeSearch">
+          <X :size="12" />
+        </button>
+      </div>
+      <!-- 关键词词库：点 chip 即填入上面的搜索框并搜索，命中数沿用第一行计数。 -->
+      <div class="term-keywords">
+        <span class="term-keywords-label" :title="t('sshKeywordsHint')">{{ t('sshKeywords') }}</span>
+        <input
+          v-model="keywordsRaw"
+          class="term-keywords-input"
+          :placeholder="t('sshKeywordsHint')"
+          spellcheck="false"
+          @input="onKeywordsInput"
+          @blur="onKeywordsBlur"
+        />
+        <button
+          v-for="kw in keywords"
+          :key="kw"
+          class="term-keyword"
+          :class="{ 'is-current': kw === searchText }"
+          :title="t('sshKeywordsHint')"
+          @click="applyKeyword(kw)"
+        >
+          {{ kw }}
+        </button>
+      </div>
     </div>
 
     <Teleport to="body">
@@ -986,7 +1301,8 @@ defineExpose({
   right: var(--space-5);
   z-index: 20;
   display: flex;
-  align-items: center;
+  flex-direction: column;
+  align-items: stretch;
   gap: var(--space-2);
   max-width: calc(100% - var(--space-8));
   padding: var(--space-2) var(--space-3);
@@ -994,6 +1310,98 @@ defineExpose({
   border: 1px solid var(--popover-border-color);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
+}
+
+/* 第一行：搜索输入 + 命中计数 + 上/下/关闭，沿用改前的横向布局。 */
+.term-search-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 链接 hover 提示：position:fixed 配鼠标 clientX/clientY（运行时计算），
+   不拦截指针事件，免得鼠标移到提示上就触发 link 的 leave 把提示自己关掉。 */
+.term-link-tip {
+  position: fixed;
+  z-index: 2100;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-width: 320px;
+  margin-top: var(--space-3);
+  margin-left: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--color-text-primary);
+  background: var(--color-popover-bg);
+  border: 1px solid var(--popover-border-color);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-md);
+  pointer-events: none;
+}
+
+.term-link-tip-url {
+  max-width: 100%;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  color: var(--color-text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第二行：关键词词库（可编辑输入框 + 可点 chip）。 */
+.term-keywords {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-1);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--color-border);
+}
+
+.term-keywords-label {
+  flex: 0 0 auto;
+  font-size: var(--text-xs);
+  color: var(--color-text-muted);
+}
+
+.term-keywords-input {
+  flex: 1 1 auto;
+  min-width: 120px;
+  padding: var(--space-1) 0;
+  font-size: var(--text-sm);
+  font-family: inherit;
+  color: var(--color-text-primary);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.term-keyword {
+  flex: 0 0 auto;
+  max-width: 120px;
+  overflow: hidden;
+  padding: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-tertiary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xs);
+  cursor: pointer;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.term-keyword:hover {
+  color: var(--color-text-primary);
+  background: var(--color-bg-hover);
+}
+
+.term-keyword.is-current {
+  color: var(--color-accent);
+  background: var(--color-accent-bg);
+  border-color: var(--color-accent-border);
 }
 
 .term-search-icon {

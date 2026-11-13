@@ -12,8 +12,12 @@
  */
 import { computed, reactive, ref, toRef, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Eye, EyeOff, KeyRound, Loader2, X } from '@lucide/vue'
+import { ChevronDown, ChevronRight, Eye, EyeOff, KeyRound, Loader2, X } from '@lucide/vue'
 import { ListHosts, SaveHost, TestHostInput } from '../../bindings/quickdock/services/sshx/sshservice'
+// 入参类型用 bindings 重新生成后的那份（含 mcpAllowed/tags/... 九个新字段），
+// 而不是 utils/ssh.ts 里手写的旧 SshHostInput —— 后者缺列，SaveHost/TestHostInput
+// 现在都要求新字段，toInput() 直接返回新类型才对得上。
+import type { SshHostInput } from '../../bindings/quickdock/services/sshx/models'
 import { MatchCredentials, RevealCredential } from '../../bindings/quickdock/services/credentials/credentialsservice'
 import { apiErrorCode, apiErrorData, unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -24,10 +28,10 @@ import {
   SSH_ERR,
   sshErrorText,
   type SshHost,
-  type SshHostInput,
   type SshHostKeyInfo,
   type TestHostResult,
 } from '../utils/ssh'
+import type { SshHostDisplay } from '../utils/sshTree'
 import SshFingerprintDialog from './SshFingerprintDialog.vue'
 
 const { t } = useI18n()
@@ -74,7 +78,7 @@ async function fillFromVault() {
 const props = defineProps<{
   visible: boolean
   /** 传入表示编辑，为空表示新建 */
-  host?: SshHost | null
+  host?: SshHostDisplay | null
   /**
    * 新建时的所属分组（#13）。
    *
@@ -102,6 +106,16 @@ interface FormState {
   legacyAlgorithms: boolean
   env: string
   remark: string
+  // ---- 高级（与 bindings/models.ts SshHostInput 新增字段一一对应） ----
+  mcpAllowed: boolean
+  tags: string
+  color: string
+  icon: string
+  postLoginCommand: string
+  autoReplySudo: boolean
+  proxyCommand: string
+  proxyCommandEnabled: boolean
+  keepaliveInterval: number
 }
 
 const form = reactive<FormState>(blankForm())
@@ -115,6 +129,43 @@ const testErr = ref('')
 const testOk = ref('')
 const showPassword = ref(false)
 const showPassphrase = ref(false)
+/** 「高级」折叠区开关：默认收起，别让一屏表单把常用字段挤到要滚动。 */
+const advancedOpen = ref(false)
+
+/**
+ * 颜色下拉：value 存的是设计 token 的**变量名**（R4：色值只能来自 style.css），
+ * 不是色值。'' = 跟随环境色。选项与树里 ssh-color-* 预定义 class 一一对应。
+ */
+const colorOptions = [
+  { value: '', key: 'sshHostColorFollow' },
+  { value: '--color-accent', key: 'sshHostColorAccent' },
+  { value: '--color-danger', key: 'sshHostColorDanger' },
+  { value: '--color-warning', key: 'sshHostColorWarning' },
+  { value: '--color-success', key: 'sshHostColorSuccess' },
+]
+
+/** 保活：0 = 默认 45s，-1 = 关闭，其余合法区间 5..600；越界钳到边界。 */
+const KEEPALIVE_MIN = 5
+const KEEPALIVE_MAX = 600
+function clampKeepalive(v: number | string): number {
+  const raw = Number(v)
+  if (!Number.isFinite(raw)) return 0
+  const n = Math.round(raw)
+  if (n === 0 || n === -1) return n
+  if (n < 0) return -1 // 其它负数统一按「关闭」
+  if (n < KEEPALIVE_MIN) return KEEPALIVE_MIN
+  if (n > KEEPALIVE_MAX) return KEEPALIVE_MAX
+  return n
+}
+function onKeepaliveBlur() {
+  form.keepaliveInterval = clampKeepalive(form.keepaliveInterval)
+}
+
+// 生产机自动送密码风险太大：切到 prod 时立刻清掉勾选，保存时 toInput 再兜一道，
+// 避免「先勾上、再切环境」把残留值写进库。理由同 SSH 表单里其它保守默认值。
+watch(() => form.env, (env) => {
+  if (env === 'prod') form.autoReplySudo = false
+})
 
 // ---- 跳板机（空串 = 直连） ----
 const jumpHostId = ref('')
@@ -184,10 +235,19 @@ function blankForm(): FormState {
     legacyAlgorithms: false,
     env: 'test',
     remark: '',
+    mcpAllowed: false,
+    tags: '',
+    color: '',
+    icon: '',
+    postLoginCommand: '',
+    autoReplySudo: false,
+    proxyCommand: '',
+    proxyCommandEnabled: false,
+    keepaliveInterval: 0,
   }
 }
 
-function fillFromHost(h: SshHost | null | undefined) {
+function fillFromHost(h: SshHostDisplay | null | undefined) {
   const next = blankForm()
   if (h) {
     next.name = h.name ?? ''
@@ -199,6 +259,17 @@ function fillFromHost(h: SshHost | null | undefined) {
     next.legacyAlgorithms = !!h.legacyAlgorithms
     next.env = h.env || 'test'
     next.remark = h.remark ?? ''
+    // 高级字段按同一套 fillFromHost 逻辑补齐（与上面基础字段保持一致），
+    // 不另起一份 watch / onMounted 赋值链。全部走 ?? / !!，老数据缺列时回落到默认值。
+    next.mcpAllowed = !!h.mcpAllowed
+    next.tags = h.tags ?? ''
+    next.color = h.color ?? ''
+    next.icon = h.icon ?? ''
+    next.postLoginCommand = h.postLoginCommand ?? ''
+    next.autoReplySudo = !!h.autoReplySudo
+    next.proxyCommand = h.proxyCommand ?? ''
+    next.proxyCommandEnabled = !!h.proxyCommandEnabled
+    next.keepaliveInterval = typeof h.keepaliveInterval === 'number' ? h.keepaliveInterval : 0
   }
   Object.assign(form, next)
   jumpHostId.value = h?.jumpHostId ?? ''
@@ -209,6 +280,7 @@ function fillFromHost(h: SshHost | null | undefined) {
   testOk.value = ''
   showPassword.value = false
   showPassphrase.value = false
+  advancedOpen.value = false
 }
 
 /** 拉一次主机列表供跳板下拉用；失败就静默只留「不使用跳板」。 */
@@ -275,6 +347,18 @@ function toInput(): SshHostInput {
     keyPassphrase: form.keyPassphrase,
     legacyAlgorithms: form.legacyAlgorithms,
     env: form.env,
+    // ---- 高级 ----
+    mcpAllowed: form.mcpAllowed,
+    tags: form.tags.trim(),
+    color: form.color,
+    icon: form.icon.trim(),
+    postLoginCommand: form.postLoginCommand,
+    // 生产机强制 false：UI 已禁用勾选，这里再兜一道，防止切环境前的残留值入库。
+    autoReplySudo: form.env === 'prod' ? false : form.autoReplySudo,
+    // 只填命令绝不自动启用：proxyCommandEnabled 完全由用户单独勾选（见下方高级区）。
+    proxyCommand: form.proxyCommand,
+    proxyCommandEnabled: form.proxyCommandEnabled,
+    keepaliveInterval: clampKeepalive(form.keepaliveInterval),
     // parentId / sort / isFolder 本表单不编辑，但必须原样带回：
     // 漏掉 sort 会让这台主机在列表里的排序被重置成 0，看起来像「自己跳到了最前面」。
     // 新建时 parentId 取自 props（从哪个文件夹点「+」进来的），
@@ -536,6 +620,88 @@ function onKeydown(e: KeyboardEvent) {
               <span class="fd-label">{{ t('sshRemark') }}</span>
               <textarea v-model="form.remark" class="fd-input fd-area" rows="2" :placeholder="t('sshRemarkPlaceholder')" />
             </label>
+
+            <!-- 高级：折叠区一律复用 settings.css 的公共类（.section / .field* / .btn），
+                 不新造一套表单样式。 -->
+            <div class="section hd-adv">
+              <button type="button" class="btn btn-outline hd-adv-toggle" @click="advancedOpen = !advancedOpen">
+                <ChevronDown v-if="advancedOpen" :size="13" />
+                <ChevronRight v-else :size="13" />
+                <span>{{ t('sshHostAdvanced') }}</span>
+              </button>
+
+              <div v-show="advancedOpen" class="hd-adv-body">
+                <!-- 1. 允许 MCP Agent 使用：默认关，必须带明确警示 -->
+                <div class="field">
+                  <label class="hd-adv-check field-checkbox">
+                    <input v-model="form.mcpAllowed" type="checkbox" />
+                    <span>{{ t('sshHostMcpAllowed') }}</span>
+                  </label>
+                  <p class="field-hint hd-adv-warn">{{ t('sshHostMcpAllowedWarn') }}</p>
+                </div>
+
+                <!-- 2. 标签 / 颜色 / 图标：颜色只选设计 token 名，不是色值 -->
+                <div class="field-row">
+                  <label class="field field-half">
+                    <span class="field-label">{{ t('sshHostTags') }}</span>
+                    <input v-model="form.tags" class="field-input" :placeholder="t('sshHostTagsPlaceholder')" />
+                    <p class="field-hint">{{ t('sshHostTagsHint') }}</p>
+                  </label>
+                  <label class="field field-half">
+                    <span class="field-label">{{ t('sshHostColor') }}</span>
+                    <select v-model="form.color" class="field-input">
+                      <option v-for="o in colorOptions" :key="o.value" :value="o.value">{{ t(o.key) }}</option>
+                    </select>
+                  </label>
+                </div>
+                <div class="field-row">
+                  <label class="field field-half">
+                    <span class="field-label">{{ t('sshHostIcon') }}</span>
+                    <input v-model="form.icon" class="field-input" :placeholder="t('sshHostIconPlaceholder')" />
+                  </label>
+                  <label class="field field-half">
+                    <span class="field-label">{{ t('sshHostKeepalive') }}</span>
+                    <input
+                      v-model.number="form.keepaliveInterval"
+                      class="field-input"
+                      type="number"
+                      @blur="onKeepaliveBlur"
+                    />
+                    <p class="field-hint">{{ t('sshHostKeepaliveHint') }}</p>
+                  </label>
+                </div>
+
+                <!-- 3. 登录后自动执行 -->
+                <label class="field">
+                  <span class="field-label">{{ t('sshHostPostLogin') }}</span>
+                  <input v-model="form.postLoginCommand" class="field-input" :placeholder="t('sshHostPostLoginPlaceholder')" />
+                  <p class="field-hint">{{ t('sshHostPostLoginHint') }}</p>
+                </label>
+
+                <!-- 4. sudo 自动应答：生产机自动送密码风险太大，prod 时禁用并提示。
+                     理由见脚本里 watch(() => form.env) 的注释。 -->
+                <div class="field">
+                  <label class="hd-adv-check field-checkbox">
+                    <input v-model="form.autoReplySudo" type="checkbox" :disabled="form.env === 'prod'" />
+                    <span>{{ t('sshHostSudo') }}</span>
+                  </label>
+                  <p v-if="form.env === 'prod'" class="field-hint hd-adv-warn">{{ t('sshHostSudoProdHint') }}</p>
+                </div>
+
+                <!-- 5. ProxyCommand：命令与「启用」是两个独立控件，
+                     只填命令绝不自动勾选 proxyCommandEnabled。 -->
+                <div class="field">
+                  <span class="field-label">{{ t('sshHostProxy') }}</span>
+                  <textarea v-model="form.proxyCommand" class="field-input" rows="2" :placeholder="t('sshHostProxyPlaceholder')" />
+                  <label class="hd-adv-check field-checkbox">
+                    <input v-model="form.proxyCommandEnabled" type="checkbox" />
+                    <span>{{ t('sshHostProxyEnabled') }}</span>
+                  </label>
+                  <p class="field-hint hd-adv-warn">{{ t('sshHostProxyWarn') }}</p>
+                  <p class="field-hint">{{ t('sshHostProxyPlaceholders') }}</p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- 结果区：故意放在滚动区外，钉在按钮栏正上方。
@@ -763,6 +929,55 @@ select.fd-input {
   background: var(--color-card-bg);
   border: 1px solid var(--card-border-color);
   border-radius: var(--radius-sm);
+}
+
+/* 「高级」折叠区：只补新元素（折叠头 / 勾选行 / 颜色警告）的排布，
+   字段本身全部复用 settings.css 的 .field* 公共类，不新造表单体系。 */
+.hd-adv {
+  padding: var(--space-4) var(--space-5);
+  background: var(--color-card-bg);
+  border: 1px solid var(--card-border-color);
+  border-radius: var(--radius-sm);
+}
+
+.hd-adv-toggle {
+  width: 100%;
+  justify-content: flex-start;
+}
+
+.hd-adv-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  margin-top: var(--space-5);
+}
+
+/* 全局 .field-row 是 align-items:center（给单行控件用），这里两列高度不等，
+   顶对齐才不会把矮的那列吊在中间。 */
+.hd-adv .field-row {
+  align-items: flex-start;
+}
+
+/* 原生 select 在深色主题下要声明 color-scheme，否则下拉面板白底黑字。 */
+.hd-adv select.field-input {
+  color-scheme: dark;
+}
+
+.hd-adv textarea.field-input {
+  min-height: 56px;
+  resize: vertical;
+}
+
+.hd-adv-check {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-3);
+  font-size: 12px;
+  color: var(--color-text-secondary);
+}
+
+.hd-adv-warn {
+  color: var(--color-warning);
 }
 
 /* 分段选择器：比 select 少一次点击，也避免下拉框在深色下样式跳变 */

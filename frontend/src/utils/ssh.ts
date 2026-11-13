@@ -31,6 +31,19 @@ export interface SshHost {
   /** 已保存密码/口令的标志位——明文永远不会下发到前端 */
   hasPassword: boolean
   hasPassphrase: boolean
+
+  // 2026-11-13 新增的 9 列。全部声明成可选：老版本缓存、单测里手写的主机
+  // 对象都没有这些字段，标成必填会让所有调用点一起报错。后端 ListHosts
+  // 现在确实会回这些值，读的时候一律用 `?? 默认值` 兜底。
+  mcpAllowed?: boolean
+  tags?: string
+  color?: string
+  icon?: string
+  postLoginCommand?: string
+  autoReplySudo?: boolean
+  proxyCommand?: string
+  proxyCommandEnabled?: boolean
+  keepaliveInterval?: number
 }
 
 /** 新建/编辑主机的入参。密码与口令留空表示「不修改」。 */
@@ -451,6 +464,8 @@ export interface SshForwardView {
   retries: number
   reconnected: boolean
   startedAt: string
+  /** 绑定的终端标签 id；空串 = 全局规则，关闭标签时不停它。 */
+  ownerTabId: string
 }
 
 export interface SshBatchSummary {

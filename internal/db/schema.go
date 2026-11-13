@@ -1,6 +1,7 @@
 package db
 
 import (
+	"database/sql"
 	"fmt"
 	"regexp"
 	"time"
@@ -199,6 +200,20 @@ var baseTables = []string{
 		tags TEXT DEFAULT '',
 		is_note INTEGER DEFAULT 0,
 		format TEXT DEFAULT 'markdown',
+		created_at TEXT NOT NULL,
+		updated_at TEXT NOT NULL DEFAULT ''
+	)`,
+
+	// 笔记修订历史：每次保存前把「旧内容」拍下来，供误覆盖 / 误删后回滚。
+	// 刻意不建外键：删笔记时修订由墓碑一并带走，恢复时和主体一起回来；
+	// 加了 FK 反而会在恢复顺序上多一层约束。
+	`CREATE TABLE IF NOT EXISTS note_revisions (
+		id TEXT PRIMARY KEY,
+		note_id TEXT NOT NULL,
+		name TEXT NOT NULL DEFAULT '',
+		content TEXT NOT NULL,
+		tags TEXT NOT NULL DEFAULT '[]',
+		reason TEXT NOT NULL DEFAULT 'save',
 		created_at TEXT NOT NULL
 	)`,
 
@@ -564,6 +579,22 @@ var baseTables = []string{
 		is_folder INTEGER NOT NULL DEFAULT 0,
 		sort INTEGER NOT NULL DEFAULT 0,
 		remark TEXT NOT NULL DEFAULT '',
+		-- 以下 9 列一次加齐（2026-11-13 SSH 增强）：主机级 MCP 授权、自定义
+		-- 标签/颜色/图标、登录后命令与自动应答、ProxyCommand 及其显式确认、
+		-- 可配保活间隔。分多次迁移要反复动 baseTables + columnMigrations +
+		-- sshHostCols + INSERT/UPDATE 五处，老用户每升一次级都要跑一遍 ALTER，
+		-- 不如一次补齐；所有默认值都刻意等于升级前的行为。
+		-- proxy_command 只存字符串，导入进来的默认 enabled=0：外部命令不能在
+		-- 用户没看过、没点确认的情况下被自动执行（见 internal/sshconfig）。
+		mcp_allowed INTEGER NOT NULL DEFAULT 0,
+		tags TEXT NOT NULL DEFAULT '',
+		color TEXT NOT NULL DEFAULT '',
+		icon TEXT NOT NULL DEFAULT '',
+		post_login_command TEXT NOT NULL DEFAULT '',
+		auto_reply_sudo INTEGER NOT NULL DEFAULT 0,
+		proxy_command TEXT NOT NULL DEFAULT '',
+		proxy_command_enabled INTEGER NOT NULL DEFAULT 0,
+		keepalive_interval INTEGER NOT NULL DEFAULT 45,
 		last_connected_at TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		updated_at TEXT NOT NULL
@@ -792,6 +823,16 @@ var baseTables = []string{
 	)`,
 }
 
+// notesFtsDDL 笔记全文索引（trigram 普通内容表）的建表语句。
+// 抽成常量是因为重建索引（rebuildNoteIndex）在 DROP 损坏表后也要用同一句，
+// 不能和 ftsTables 里的副本各写一份、改一处漏一处。
+const notesFtsDDL = `CREATE VIRTUAL TABLE IF NOT EXISTS notes_fts USING fts5(
+	name,
+	content,
+	tags,
+	tokenize='trigram'
+)`
+
 // ftsTables FTS5 全文索引（虚拟表，必须用 CREATE VIRTUAL TABLE）
 var ftsTables = []string{
 	`CREATE VIRTUAL TABLE IF NOT EXISTS items_fts USING fts5(
@@ -820,6 +861,16 @@ var ftsTables = []string{
 		heading,
 		tokenize='trigram'
 	)`,
+
+	// 笔记正文/标题/标签的全文索引。
+	// 与 items_fts（unicode61）不同，这里必须用 trigram：笔记以中文为主，
+	// unicode61 没有空格就把整句切成一个 token，搜「数据库」永远 0 命中。
+	// 用「普通内容表」（索引里自己存一份 name/content/tags，与 kb_chunks_fts 同范式），
+	// 而非 external content：本构建下 trigram + external content + 命令式 'delete' 触发器
+	// 在写入时会把虚拟表写坏（SQLITE_CORRUPT_VTAB / 267），实测复现。普通内容表配
+	// 直接 DELETE 删除则稳定。正文在索引里多存一份，个人量级可接受（知识库亦如此）。
+	// 重建逻辑见 rebuildNoteIndex；索引的增量同步已由整表重建取代（触发器会死锁，见该注释）。
+	notesFtsDDL,
 }
 
 // ftsTriggers 同步 items ↔ items_fts 的触发器
@@ -896,6 +947,38 @@ func (d *Database) migrate() error {
 		}
 	}
 
+	// 清理旧版 notes_fts 触发器（notes_ai / notes_ad / notes_au）。
+	// 早期版本用 external content + trigram + 命令式 'delete' 触发器维护索引，
+	// 在写入时会把虚拟表写坏（SQLITE_CORRUPT_VTAB / 267），存量损坏库里这些触发器
+	// 还在。新方案改用写入后整表重建（见 rebuildNoteIndex）、不再依赖触发器，
+	// 但这里必须显式 DROP 掉残留的旧触发器——否则下面的迁移 UPDATE notes 仍会触发
+	// 它们再次写坏 notes_fts，启动即 267。IF EXISTS 保证全新库也能安全跳过。
+	for _, tr := range []string{"notes_ai", "notes_ad", "notes_au"} {
+		if _, err := d.conn.Exec(`DROP TRIGGER IF EXISTS ` + tr); err != nil {
+			return fmt.Errorf("删除旧笔记索引触发器 %s 失败: %w", tr, err)
+		}
+	}
+
+	// 结构升级：旧版 notes_fts 是 external content / contentless 表（DDL 里带 content=）。
+	// 上面 ftsTables 用的是 CREATE VIRTUAL TABLE IF NOT EXISTS，遇到已存在的旧表会直接
+	// 跳过，旧结构就残留了——外部内容表不自己存正文，后续整表重灌 / 删除语义完全不同，
+	// 而且正是 267 的根源。必须在这里按 DDL 判定并 DROP 重建为普通内容表。
+	// 新的普通内容表 DDL 不含 content=，判定不会误伤；rebuildNoteIndex 末尾会重新灌入。
+	var existingFtsDDL string
+	err := d.conn.QueryRow(`SELECT COALESCE(sql,'') FROM sqlite_master WHERE type='table' AND name='notes_fts'`).Scan(&existingFtsDDL)
+	if err != nil && err != sql.ErrNoRows {
+		return fmt.Errorf("读取 notes_fts 定义失败: %w", err)
+	}
+	if regexp.MustCompile(`(?i)content\s*=`).MatchString(existingFtsDDL) {
+		if _, err := d.conn.Exec(`DROP TABLE notes_fts`); err != nil {
+			return fmt.Errorf("删除旧结构 notes_fts 失败: %w", err)
+		}
+		if _, err := d.conn.Exec(notesFtsDDL); err != nil {
+			return fmt.Errorf("重建 notes_fts 失败: %w", err)
+		}
+		logger.I("[db] 笔记全文索引结构升级：external content → 普通内容表")
+	}
+
 	// 填充已有的 items 数据到 FTS5 索引
 	d.conn.Exec(`INSERT INTO items_fts(rowid, id, name, value)
 		SELECT rowid, id, name, value FROM items
@@ -913,6 +996,18 @@ func (d *Database) migrate() error {
 		// 这些历史行自然不再出现，但行本身与日志都保留，仍由 PurgeAIJobs 到期清理。
 		{"ai_jobs", "conv_id", "TEXT NOT NULL DEFAULT ''"},
 		{"ssh_hosts", "jump_host_id", "TEXT NOT NULL DEFAULT ''"},
+		// SSH 增强（2026-11-13）：9 列一次性补齐。默认值全部对齐升级前行为——
+		// MCP 授权默认关、ProxyCommand 默认不启用、保活仍是 45 秒，
+		// 升级后不会出现「莫名多开了一个监听」或「Agent 突然能连生产机」。
+		{"ssh_hosts", "mcp_allowed", "INTEGER NOT NULL DEFAULT 0"},
+		{"ssh_hosts", "tags", "TEXT NOT NULL DEFAULT ''"},
+		{"ssh_hosts", "color", "TEXT NOT NULL DEFAULT ''"},
+		{"ssh_hosts", "icon", "TEXT NOT NULL DEFAULT ''"},
+		{"ssh_hosts", "post_login_command", "TEXT NOT NULL DEFAULT ''"},
+		{"ssh_hosts", "auto_reply_sudo", "INTEGER NOT NULL DEFAULT 0"},
+		{"ssh_hosts", "proxy_command", "TEXT NOT NULL DEFAULT ''"},
+		{"ssh_hosts", "proxy_command_enabled", "INTEGER NOT NULL DEFAULT 0"},
+		{"ssh_hosts", "keepalive_interval", "INTEGER NOT NULL DEFAULT 45"},
 		{"clipboard_entries", "copy_count", "INTEGER DEFAULT 0"},
 		{"clipboard_entries", "image_hash", "TEXT"},
 		{"clipboard_entries", "note", "TEXT DEFAULT ''"},
@@ -1069,6 +1164,9 @@ func (d *Database) migrate() error {
 		// 归到默认库——注意顺序：补列在前、建索引在后、写数据最后，
 		// 挪动任意一步都会在升级路径上炸。
 		{"kb_sources", "library_id", "TEXT NOT NULL DEFAULT ''"},
+		// 笔记修改时间：老库补成空串，由 migrate 末尾统一回填成 created_at，
+		// 升级后「最近编辑」不会把所有历史笔记都挤到 1970。
+		{"notes", "updated_at", "TEXT NOT NULL DEFAULT ''"},
 	}
 	var addedCols []string
 	for _, m := range columnMigrations {
@@ -1161,6 +1259,9 @@ func (d *Database) migrate() error {
 		// 密码库：浏览器扩展按 host 精确匹配、内部弹层按 kind 过滤，两条都是高频只读路径。
 		`CREATE INDEX IF NOT EXISTS idx_credentials_host ON credentials(host)`,
 		`CREATE INDEX IF NOT EXISTS idx_credentials_kind ON credentials(kind, favorite DESC, last_used_at DESC)`,
+		// 笔记「最近编辑」按 updated_at 倒序取；修订列表按单篇 + 时间倒序分页。
+		`CREATE INDEX IF NOT EXISTS idx_notes_updated_at ON notes(updated_at DESC)`,
+		`CREATE INDEX IF NOT EXISTS idx_note_revisions_note ON note_revisions(note_id, created_at DESC)`,
 	}
 	for _, sql := range postMigrations {
 		if _, err := d.conn.Exec(sql); err != nil {
@@ -1252,6 +1353,38 @@ func (d *Database) migrate() error {
 	if _, err := d.conn.Exec(`UPDATE kb_sources SET library_id = ?
 		WHERE library_id IS NULL OR library_id = ''`, KBLibraryDefaultID); err != nil {
 		return fmt.Errorf("回填知识库分组失败: %w", err)
+	}
+
+	// 老库新增的 updated_at 是空串，用 created_at 兜底。放在所有数据迁移之后：
+	// notes_fts 已改用「写入后整表重建」（不再有 notes_au 触发器），这些迁移
+	// UPDATE 不会碰索引；末尾的 rebuildNoteIndex 会一次性按最终正文灌入，
+	// 顺序不必严格。回填本身也不改 name/content/tags。
+	if _, err := d.conn.Exec(`UPDATE notes SET updated_at = created_at
+		WHERE updated_at IS NULL OR updated_at = ''`); err != nil {
+		return fmt.Errorf("回填 notes.updated_at 失败: %w", err)
+	}
+
+	// notes_fts 是普通内容表（trigram）：存量库在触发器创建之前就已有笔记行，
+	// 那些行不会自动进索引；更早的损坏库里 notes_fts 本身可能已经 267（虚拟表损坏）。
+	// 这里统一交给 rebuildNoteIndex：它先 DELETE 再整表重灌，若表已损坏则 DROP 重建
+	// （自愈）。只在不一致 / 损坏时才重建，正常启动跳过不重扫正文。
+	// 调用方需持 d.mu；migrate 已持锁（见函数开头）。
+	var noteRows, ftsRows int
+	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM notes`).Scan(&noteRows); err != nil {
+		return fmt.Errorf("统计 notes 行数失败: %w", err)
+	}
+	corrupt := false
+	if err := d.conn.QueryRow(`SELECT COUNT(*) FROM notes_fts`).Scan(&ftsRows); err != nil {
+		// 计数都读不出来，说明 notes_fts 已损坏（267 等）——交给 rebuildNoteIndex 自愈。
+		logger.W("[db] 笔记全文索引统计失败，将重建自愈: %v", err)
+		corrupt = true
+		ftsRows = -1
+	}
+	if corrupt || ftsRows != noteRows {
+		if err := d.rebuildNoteIndex(); err != nil {
+			return fmt.Errorf("重建笔记全文索引失败: %w", err)
+		}
+		logger.I("[db] 重建笔记全文索引：notes=%d fts=%d corrupt=%v", noteRows, ftsRows, corrupt)
 	}
 
 	return nil

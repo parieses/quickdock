@@ -574,3 +574,73 @@ func mustWrite(t *testing.T, path, content string) {
 		t.Fatal(err)
 	}
 }
+
+// TestSafeReplaceLocal 覆盖本地原子替换的落地结果：目标不存在、目标已存在、
+// 替换后内容正确、以及目录里不残留 .qd-part- / .qd-backup- 垃圾。
+//
+// 纯文件系统用例，不依赖 SFTP 服务端。注意两个平台走的分支不同：POSIX 的
+// os.Rename 覆盖已存在文件会直接成功，不进入备份分支；Windows 若不允许覆盖，
+// 会先把旧文件挪成 .qd-backup-* 再替换、成功后删备份。断言只盯「最终
+// localPath 是新内容、目录里只剩目标文件」，不依赖具体走哪条分支。
+func TestSafeReplaceLocal(t *testing.T) {
+	t.Run("目标不存在", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "out.txt")
+		tmp := filepath.Join(dir, ".out.txt.qd-part-aaa")
+		mustWrite(t, tmp, "new-content")
+
+		if err := safeReplaceLocal(tmp, local); err != nil {
+			t.Fatalf("替换失败: %v", err)
+		}
+		assertLocalContent(t, local, "new-content")
+		if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+			t.Fatalf("临时文件应已被移走，实际: %v", err)
+		}
+		assertDirOnly(t, dir, "out.txt")
+	})
+
+	t.Run("目标已存在", func(t *testing.T) {
+		dir := t.TempDir()
+		local := filepath.Join(dir, "out.txt")
+		mustWrite(t, local, "old-content")
+		tmp := filepath.Join(dir, ".out.txt.qd-part-bbb")
+		mustWrite(t, tmp, "new-content")
+
+		if err := safeReplaceLocal(tmp, local); err != nil {
+			t.Fatalf("覆盖替换失败: %v", err)
+		}
+		// 必须是整份替换，不能是旧内容、也不能是新旧拼接的半截。
+		assertLocalContent(t, local, "new-content")
+		if _, err := os.Stat(tmp); !os.IsNotExist(err) {
+			t.Fatalf("临时文件应已被移走，实际: %v", err)
+		}
+		assertDirOnly(t, dir, "out.txt")
+	})
+}
+
+func assertLocalContent(t *testing.T, p, want string) {
+	t.Helper()
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatalf("读取 %s 失败: %v", p, err)
+	}
+	if string(b) != want {
+		t.Fatalf("%s 内容 = %q，期望 %q", p, string(b), want)
+	}
+}
+
+// assertDirOnly 确认替换后目录里只剩目标文件，没有遗留的 .part / .qd-backup-。
+func assertDirOnly(t *testing.T, dir, wantName string) {
+	t.Helper()
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != wantName {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("替换后目录应只剩 %q，实际: %v", wantName, names)
+	}
+}

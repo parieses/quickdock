@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 // KnowledgePage.vue — 本地文档知识库
 //
 // 形态参考 ima / Cherry Studio 的知识库：左边是文档清单（带索引状态），
@@ -722,14 +723,14 @@ onScopeDispose(() => {
 
 <template>
   <div class="qd-page">
-    <header class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h1 class="qd-page-title">
           <BookOpen :size="16" />
           {{ t('kbTitle') }}
         </h1>
         <p class="qd-page-sub">{{ subtitle }}</p>
-      </div>
+      </template>
       <div class="qd-page-actions">
         <button v-if="status?.running" class="qd-btn qd-btn-danger" @click="stopIndex">
           <Square :size="12" />
@@ -753,7 +754,7 @@ onScopeDispose(() => {
           <Settings2 :size="15" />
         </button>
       </div>
-    </header>
+    </PageHeader>
 
     <div v-if="status?.running" class="kb-progress">
       <Loader2 :size="12" class="kb-spin" />

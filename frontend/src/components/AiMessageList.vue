@@ -1052,7 +1052,7 @@ defineExpose({ scrollToBottom, followBottom, jumpToMsg, ensureRendered, areaEl, 
 
 .ai-tool-diff { display: flex; gap: 4px; flex: 0 0 auto; font-family: var(--font-mono); font-size: 11px; }
 
-.ai-diff-add { color: var(--color-success, #3fb950); font-style: normal; }
+.ai-diff-add { color: var(--color-success); font-style: normal; }
 
 .ai-diff-del { color: var(--color-danger); font-style: normal; }
 

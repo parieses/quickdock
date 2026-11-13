@@ -35,6 +35,7 @@ type SshForwardInput struct {
 	TargetHost string `json:"targetHost"`
 	TargetPort int    `json:"targetPort"`
 	AutoStart  bool   `json:"autoStart"`
+	OwnerTabID string `json:"ownerTabId"`
 }
 
 func (in SshForwardInput) rule() sshcore.ForwardRule {
@@ -43,6 +44,7 @@ func (in SshForwardInput) rule() sshcore.ForwardRule {
 		Kind: strings.TrimSpace(in.Kind), BindHost: strings.TrimSpace(in.BindHost),
 		BindPort: in.BindPort, TargetHost: strings.TrimSpace(in.TargetHost),
 		TargetPort: in.TargetPort, AutoStart: in.AutoStart,
+		OwnerTabID: strings.TrimSpace(in.OwnerTabID),
 	}
 }
 
@@ -394,4 +396,49 @@ func (s *SshService) StopSshForward(id string) *services.ApiResult {
 	v := f.Snapshot()
 	s.forwards.fillHostName(&v)
 	return services.Ok(v)
+}
+
+// SshStopForwardsByTab 关标签时停掉挂在该标签下的转发规则。
+//
+// 转发刻意不进 connPool，生命周期与终端标签解耦，所以「关了标签、监听端口还在」
+// 本来就是默认行为。这个方法补上可选的绑定语义：只有显式带 ownerTabId 的规则才
+// 随标签停；OwnerTabID 为空的全局规则是用户主动开的长期监听，不受影响，默认值
+// 保持不变。data: {stopped: n}
+func (s *SshService) SshStopForwardsByTab(tabID string) *services.ApiResult {
+	tabID = strings.TrimSpace(tabID)
+	if tabID == "" {
+		// 未绑定标签的调用是常态（旧前端、全局规则），不该为此查库或记日志。
+		return services.Ok(map[string]interface{}{"stopped": 0})
+	}
+	if r := services.CheckDB(s.App.DB); r != nil {
+		return failCode(CodeDBUnavailable, "数据库未就绪")
+	}
+	rules, err := s.forwards.load()
+	if err != nil {
+		return failSsh(err)
+	}
+	stopped := 0
+	for _, r := range rules {
+		if r.OwnerTabID != tabID {
+			continue
+		}
+		// running map 存的是「实例」而非「正在跑」：Stop 过的实例会留在 map 里
+		// 等下次 Start 复用。先看状态，避免把已停止的规则重复计入停止条数。
+		f := s.forwards.get(r.ID)
+		if f == nil {
+			continue
+		}
+		switch f.Snapshot().Status {
+		case sshcore.ForwardStateRunning, sshcore.ForwardStateStarting, sshcore.ForwardStateRetrying:
+		default:
+			continue
+		}
+		// 复用 StopSshForward：Stop + 发状态事件 + 错误码归一都走同一条路径，
+		// 不另起一套直接操作 running map 的逻辑。
+		if res := s.StopSshForward(r.ID); res.Code != 0 {
+			return res
+		}
+		stopped++
+	}
+	return services.Ok(map[string]interface{}{"stopped": stopped})
 }

@@ -15,6 +15,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -123,10 +124,17 @@ func (s *CredentialsService) Status() *services.ApiResult {
 		ExtensionPort:     s.apiPort(),
 	}
 	// 用一次 Count 探活：它会先取 DB 引用，再走到表上。
-	// 不主动 ensureDEK —— 只看「有没有密码」不该触发密钥解密。
+	//
+	// Available 不能只看 Count：表读得通但 DEK 坏了（换过 Windows 账户、
+	// DPAPI 数据损坏）时，界面会显示「可用」，直到用户保存或显示密码才报错。
+	// KeyReadable 只读 app_state 解一次，不把 DEK 载入内存 —— 否则锁定后
+	// 打开这个页面就会把刚 Wipe 掉的密钥自动重建回来。
 	if n, err := credentials.Count(); err == nil {
-		st.Available = true
 		st.Count = n
+		st.Available = credentials.KeyReadable()
+		if !st.Available {
+			logger.W("[credentials] 密码库密钥不可读（DPAPI 解不开或格式异常）")
+		}
 	} else {
 		logger.W("[credentials] 状态查询失败: %v", err)
 	}
@@ -315,33 +323,127 @@ func (s *CredentialsService) GeneratePassword(length int, digits, symbols, upper
 	return services.Ok(map[string]any{"password": pw})
 }
 
-// generatePassword 从字符池里取 length 个随机字符。
+// 字符池。刻意排除 ` " ' \ 这几个：粘进 shell / 配置文件 / SQL 时最容易出事。
+const (
+	pwLower   = "abcdefghijklmnopqrstuvwxyz"
+	pwUpper   = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	pwDigits  = "0123456789"
+	pwSymbols = "!#$%&()*+,-./:;<=>?@[]^_{|}~"
+)
+
+// generatePassword 生成随机密码，且保证勾选的每一类字符至少出现一次。
+//
+// 早期版本只是把勾选的字符并进一个大池子再随机取，结果「勾了数字」仍可能
+// 生成纯字母（20 位时约 10% 概率），要求「必须含数字/符号」的站点会直接拒绝。
+// 现在先按类各取一个、再填满剩余长度，最后洗牌打散位置。
 //
 // 用 crypto/rand 而不是 math/rand：后者是可预测的 PRNG，
 // 用它生成的「密码」等于把强度交给种子。
 func generatePassword(length int, digits, symbols, upper bool) (string, error) {
-	pool := "abcdefghijklmnopqrstuvwxyz"
+	groups := []string{pwLower}
 	if upper {
-		pool += "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		groups = append(groups, pwUpper)
 	}
 	if digits {
-		pool += "0123456789"
+		groups = append(groups, pwDigits)
 	}
 	if symbols {
-		// 刻意排除 ` " ' \ 这几个：粘进 shell / 配置文件 / SQL 时最容易出事。
-		pool += "!#$%&()*+,-./:;<=>?@[]^_{|}~"
+		groups = append(groups, pwSymbols)
 	}
-	max := big.NewInt(int64(len(pool)))
-	var b strings.Builder
-	b.Grow(length)
-	for i := 0; i < length; i++ {
-		n, err := rand.Int(rand.Reader, max)
+	// 上层已把长度夹在 8~128，这里只是兜住「类别比长度还多」的极端调用。
+	if length < len(groups) {
+		length = len(groups)
+	}
+
+	pick := func(pool string) (byte, error) {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(pool))))
+		if err != nil {
+			return 0, fmt.Errorf("生成随机密码失败: %w", err)
+		}
+		return pool[n.Int64()], nil
+	}
+
+	out := make([]byte, 0, length)
+	for _, g := range groups {
+		c, err := pick(g)
+		if err != nil {
+			return "", err
+		}
+		out = append(out, c)
+	}
+	all := strings.Join(groups, "")
+	for len(out) < length {
+		c, err := pick(all)
+		if err != nil {
+			return "", err
+		}
+		out = append(out, c)
+	}
+	// Fisher-Yates：否则「每类保底的那一个」永远排在最前几位，等于给猜解省事。
+	for i := len(out) - 1; i > 0; i-- {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(i+1)))
 		if err != nil {
 			return "", fmt.Errorf("生成随机密码失败: %w", err)
 		}
-		b.WriteByte(pool[n.Int64()])
+		j := int(n.Int64())
+		out[i], out[j] = out[j], out[i]
 	}
-	return b.String(), nil
+	return string(out), nil
+}
+
+// ExportCredentials 把整库导出成口令加密的可移植备份。
+//
+// 文件对话框由前端调 AppService.SelectSavePath，这里只负责写文件：
+// 宿主对话框能力不该在每个业务域里各实现一份（见 services/dialog.go）。
+// 口令不落日志、不进数据库，只在本次调用里参与派生密钥。
+func (s *CredentialsService) ExportCredentials(path, password string) *services.ApiResult {
+	if r := services.CheckDB(s.App.DB); r != nil {
+		return failCode(CodeDBUnavailable, "数据库未就绪")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return failCode(CodeValidation, "没有选择保存位置")
+	}
+	if len([]rune(password)) < 8 {
+		return failCode(CodeValidation, "导出口令至少 8 位")
+	}
+	data, err := credentials.ExportPortable(password)
+	if err != nil {
+		return classify(err)
+	}
+	// 0600：备份里虽然是密文，也不该让同机其它账户随手读走做离线爆破。
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return services.Fail(fmt.Errorf("写入备份文件失败: %w", err))
+	}
+	count, _ := credentials.Count() // 只用于结果文案，统计失败不该让导出「失败」
+	return services.Ok(map[string]any{"bytes": len(data), "count": count, "path": path})
+}
+
+// ImportCredentials 从加密备份或浏览器导出的 CSV 导入。
+//
+// 格式识别与解密全在 internal/credentials，门面只做路径与错误归一。
+// 导入逐条走 Save，用**本机当前 DEK** 重新加密，因此换机后照样能解开。
+func (s *CredentialsService) ImportCredentials(path, password string) *services.ApiResult {
+	if r := services.CheckDB(s.App.DB); r != nil {
+		return failCode(CodeDBUnavailable, "数据库未就绪")
+	}
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return failCode(CodeValidation, "没有选择要导入的文件")
+	}
+	// 先按文件大小挡一道：误选了一个几 GB 的文件时不该把它整个读进内存。
+	if st, err := os.Stat(path); err == nil && st.Size() > credentials.MaxImportBytes {
+		return failCode(CodeValidation, fmt.Sprintf("文件超过 %d MB，不像是密码库备份", credentials.MaxImportBytes>>20))
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return services.Fail(fmt.Errorf("读取备份文件失败: %w", err))
+	}
+	rep, err := credentials.ImportAuto(data, password)
+	if err != nil {
+		return failCode(CodeValidation, err.Error())
+	}
+	return services.Ok(rep)
 }
 
 // normalizeKind 归一化类型；未知值落到 other 而不是报错。

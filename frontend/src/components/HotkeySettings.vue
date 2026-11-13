@@ -420,7 +420,7 @@ defineExpose({ capturing })
 </template>
 
 <style scoped>
-.hotkey-page { width: 100%; max-width: 660px; }
+.hotkey-page { width: 100%; max-width: 720px; }
 
 .hk-header {
   display: flex;

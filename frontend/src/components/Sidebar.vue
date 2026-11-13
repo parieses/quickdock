@@ -340,7 +340,6 @@ async function handleDeleteWorkspace(wsId: string) {
          插件项的「可更新」角标同样不需要显式清零 —— 进入 plugins 页时 useNavBadges 的
          currentPage watcher 会 markSeen('plugins')，插件更新数本身由 usePluginUpdateBadge 订阅。 -->
     <div class="sidebar-navigator">
-      <div class="navigator-header">{{ t('navigation') }}</div>
       <button
         v-for="it in navItems"
         :key="it.id"
@@ -481,10 +480,9 @@ async function handleDeleteWorkspace(wsId: string) {
 .sidebar.collapsed { width: 54px; min-width: 54px; }
 .sidebar.collapsed .ws-name,
 .sidebar.collapsed .ws-arrow,
-.sidebar.collapsed .navigator-header,
 .sidebar.collapsed .nav-item span,
 .sidebar.collapsed .settings-btn span { display: none; }
-.sidebar.collapsed .workspace-selector { justify-content: center; padding: 10px 0; }
+.sidebar.collapsed .workspace-selector { justify-content: center; margin: 6px 8px 0; padding: 0; }
 .sidebar.collapsed .nav-item { justify-content: center; padding-left: 0; padding-right: 0; }
 /* 收起态 54px 宽放不下「通知 + 设置 + 折叠」三个横排按钮（实测超 90px），
    居中后最右的折叠/展开箭头会被侧栏 overflow:hidden 裁掉——用户就「找不到展开按钮」。
@@ -502,18 +500,21 @@ async function handleDeleteWorkspace(wsId: string) {
 .sidebar.collapsed .hidden-toggle { color: var(--color-text-secondary); }
 .sidebar.collapsed .hidden-toggle .hidden-caret { color: var(--color-text-secondary); }
 
-/* 工作空间切换器 */
+/* 工作空间切换器：并入导航区，不再是独立的一条 44px 横带。
+   顶部从「系统标题栏 + 44px 横带 + 46px 页头」收成「系统标题栏 + 46px 页头」；
+   切换器与 .nav-item 同高、同左右内边距，视觉上是导航列表的第一项。 */
 .workspace-selector {
   position: relative;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: var(--space-4);
-  padding: 10px 14px;
-  min-height: 44px;
+  min-height: 32px;
+  margin: 6px 10px 0;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
   cursor: pointer;
   user-select: none;
-  box-shadow: var(--shadow-border);
   transition: background var(--transition-fast);
 }
 .workspace-selector:hover { background: var(--color-bg-hover); }
@@ -526,15 +527,6 @@ async function handleDeleteWorkspace(wsId: string) {
   padding: 6px 10px 10px;
   box-shadow: var(--shadow-border);
   overflow-y: auto;
-}
-/* 分组标题与三栏的 .qd-panel-title 同一套：11px / 600 / 中性色。
-   不再大写 + 加字距：中文没有大小写，剩下的只有被拉开的字距。 */
-.navigator-header {
-  font-size: var(--text-xs);
-  font-weight: 600;
-  color: var(--color-text-muted);
-  padding: 6px 6px 6px;
-  user-select: none;
 }
 .nav-item {
   display: flex;

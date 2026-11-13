@@ -785,8 +785,8 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   margin-top: 4px;
   max-height: 280px;
   overflow-y: auto;
-  background: var(--color-surface, #1e1e1e);
-  border: 1px solid var(--color-border, #333);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
   box-shadow: 0 8px 24px rgba(0,0,0,0.5);
 }
@@ -799,10 +799,10 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   cursor: default;
 }
 .version-list-loading { color: var(--color-text-muted); }
-.version-list-error { color: var(--color-danger, #e06c75); }
-.version-list-empty { color: var(--color-accent, #4a9eff); cursor: pointer; }
+.version-list-error { color: var(--color-danger); }
+.version-list-empty { color: var(--color-accent); cursor: pointer; }
 .version-list-empty:hover { opacity: 0.8; }
-.retry-link { color: var(--color-accent, #4a9eff); margin-left: 6px; }
+.retry-link { color: var(--color-accent); margin-left: 6px; }
 .version-item {
   padding: 7px 12px;
   font-size: 13px;
@@ -814,11 +814,11 @@ svg[stroke='currentColor'] { stroke-width: 1.75; }
   transition: background 0.1s;
 }
 .version-item:hover { background: var(--color-bg-hover); }
-.version-item.active { background: var(--color-accent, #4a9eff); color: var(--color-accent-text); }
+.version-item.active { background: var(--color-accent); color: var(--color-accent-text); }
 .version-list-note {
   padding: 6px 12px;
   font-size: 11px;
   color: var(--color-text-muted);
   text-align: center;
-  border-top: 1px solid var(--color-border, #2a2a2a);
+  border-top: 1px solid var(--color-border);
 }

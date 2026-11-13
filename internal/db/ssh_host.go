@@ -36,6 +36,34 @@ type SshHost struct {
 	// 环由 services 层在保存与连接时挡住（DB 不建外键，删跳板会自动解绑）。
 	JumpHostID string `json:"jumpHostId"`
 
+	// MCPAllowed 主机级授权：只有显式打开的主机才能被本地 MCP Server 访问。
+	// 默认关，且刻意不跟随快照/同步——换台机器不该把「Agent 能连生产机」
+	// 这个决定悄悄带过去（与 motty 的 authorized-host 边界同一口径）。
+	MCPAllowed bool `json:"mcpAllowed"`
+
+	// 自定义标签 / 颜色 / 图标。颜色存的是设计 token 名（如 'danger'），
+	// 不是色值：色值写死在库里会绕开深浅主题，且 R4 只认 style.css 的 token。
+	Tags  string `json:"tags"`
+	Color string `json:"color"`
+	Icon  string `json:"icon"`
+
+	// PostLoginCommand 登录成功后自动送入 shell 的一行命令（如 cd /srv/app）。
+	// 只送一次、不进 shell 历史由引擎层保证；空串 = 不送。
+	PostLoginCommand string `json:"postLoginCommand"`
+	// AutoReplySudo 在检测到 sudo 密码提示时用本主机已存密码自动应答。
+	// 默认关且每会话首次要先确认；生产环境主机不该开这个。
+	AutoReplySudo bool `json:"autoReplySudo"`
+
+	// ProxyCommand 是外部命令模板（%h/%p/%r/%% 占位），只存字符串。
+	// ProxyCommandEnabled 必须显式打开才执行：从 ~/.ssh/config 导入的命令
+	// 是用户机器上的外部程序，未经确认就运行等于把导入动作变成任意执行。
+	ProxyCommand        string `json:"proxyCommand"`
+	ProxyCommandEnabled bool   `json:"proxyCommandEnabled"`
+
+	// KeepaliveInterval 保活间隔（秒）。0 = 沿用引擎默认 45s；
+	// OpenSSH config 里显式写 0 是「关掉保活」，由门面层映射成 -1 存这里。
+	KeepaliveInterval int `json:"keepaliveInterval"`
+
 	ParentID string `json:"parentId"`
 	IsFolder bool   `json:"isFolder"`
 	Sort     int    `json:"sort"`
@@ -93,9 +121,15 @@ func sshInvalid(format string, args ...interface{}) error {
 }
 
 // sshHostCols 列表/详情统一投影。
+//
 // 密文字段不出现，改为输出「是否已设置」的标志位，从查询层面杜绝明文外泄。
+// MCPAllowed / ProxyCommand / PostLoginCommand 等运行时字段也一并投影：连接前
+// 的 loadHost 只查一次 GetSshHost，若这些值不在投影里就得为每次连接再开一条
+// 查询，而列表多带几个短字符串的成本可以忽略。
 const sshHostCols = `id, name, host, port, user, auth_type, key_path, legacy_algorithms,
-	env, jump_host_id, parent_id, is_folder, sort, remark, last_connected_at, created_at, updated_at,
+	env, jump_host_id, mcp_allowed, tags, color, icon, post_login_command, auto_reply_sudo,
+	proxy_command, proxy_command_enabled, keepalive_interval,
+	parent_id, is_folder, sort, remark, last_connected_at, created_at, updated_at,
 	CASE WHEN password <> '' THEN 1 ELSE 0 END,
 	CASE WHEN key_passphrase <> '' THEN 1 ELSE 0 END`
 
@@ -106,9 +140,13 @@ type rowScanner interface {
 func scanSshHost(row rowScanner) (*SshHost, error) {
 	var h SshHost
 	var legacy, isFolder, hasPw, hasPass int
+	var mcpAllowed, autoReplySudo, proxyEnabled int
 	err := row.Scan(
 		&h.ID, &h.Name, &h.Host, &h.Port, &h.User, &h.AuthType, &h.KeyPath, &legacy,
-		&h.Env, &h.JumpHostID, &h.ParentID, &isFolder, &h.Sort, &h.Remark, &h.LastConnectedAt,
+		&h.Env, &h.JumpHostID, &mcpAllowed, &h.Tags, &h.Color, &h.Icon,
+		&h.PostLoginCommand, &autoReplySudo, &h.ProxyCommand, &proxyEnabled,
+		&h.KeepaliveInterval,
+		&h.ParentID, &isFolder, &h.Sort, &h.Remark, &h.LastConnectedAt,
 		&h.CreatedAt, &h.UpdatedAt, &hasPw, &hasPass,
 	)
 	if err != nil {
@@ -118,6 +156,9 @@ func scanSshHost(row rowScanner) (*SshHost, error) {
 	h.IsFolder = isFolder != 0
 	h.HasPassword = hasPw != 0
 	h.HasPassphrase = hasPass != 0
+	h.MCPAllowed = mcpAllowed != 0
+	h.AutoReplySudo = autoReplySudo != 0
+	h.ProxyCommandEnabled = proxyEnabled != 0
 	return &h, nil
 }
 
@@ -247,12 +288,18 @@ func (d *Database) SaveSshHost(in SshHost) (*SshHost, error) {
 
 		_, err = d.conn.Exec(`INSERT INTO ssh_hosts
 			(id, name, host, port, user, auth_type, password, key_path, key_passphrase,
-			 legacy_algorithms, env, jump_host_id, parent_id, is_folder, sort, remark,
+			 legacy_algorithms, env, jump_host_id, mcp_allowed, tags, color, icon,
+			 post_login_command, auto_reply_sudo, proxy_command, proxy_command_enabled,
+			 keepalive_interval, parent_id, is_folder, sort, remark,
 			 last_connected_at, created_at, updated_at)
-			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
 			in.ID, in.Name, in.Host, in.Port, in.User, in.AuthType, encPw, in.KeyPath, encPass,
-			b2i(in.LegacyAlgorithms), in.Env, in.JumpHostID, in.ParentID, b2i(in.IsFolder),
-			in.Sort, in.Remark, "", in.CreatedAt, in.UpdatedAt)
+			b2i(in.LegacyAlgorithms), in.Env, in.JumpHostID,
+			b2i(in.MCPAllowed), in.Tags, in.Color, in.Icon, in.PostLoginCommand,
+			b2i(in.AutoReplySudo), in.ProxyCommand, b2i(in.ProxyCommandEnabled),
+			in.KeepaliveInterval,
+			in.ParentID, b2i(in.IsFolder), in.Sort, in.Remark,
+			"", in.CreatedAt, in.UpdatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("保存 SSH 主机失败: %w", err)
 		}
@@ -299,11 +346,17 @@ func (d *Database) SaveSshHost(in SshHost) (*SshHost, error) {
 	_, err = d.conn.Exec(`UPDATE ssh_hosts SET
 		name = ?, host = ?, port = ?, user = ?, auth_type = ?, password = ?, key_path = ?,
 		key_passphrase = ?, legacy_algorithms = ?, env = ?, jump_host_id = ?,
+		mcp_allowed = ?, tags = ?, color = ?, icon = ?, post_login_command = ?,
+		auto_reply_sudo = ?, proxy_command = ?, proxy_command_enabled = ?,
+		keepalive_interval = ?,
 		parent_id = ?, is_folder = ?, sort = ?, remark = ?, updated_at = ?
 		WHERE id = ?`,
 		in.Name, in.Host, in.Port, in.User, in.AuthType, encPw, in.KeyPath, encPass,
-		b2i(in.LegacyAlgorithms), in.Env, in.JumpHostID, in.ParentID, b2i(in.IsFolder),
-		in.Sort, in.Remark, in.UpdatedAt, in.ID)
+		b2i(in.LegacyAlgorithms), in.Env, in.JumpHostID,
+		b2i(in.MCPAllowed), in.Tags, in.Color, in.Icon, in.PostLoginCommand,
+		b2i(in.AutoReplySudo), in.ProxyCommand, b2i(in.ProxyCommandEnabled),
+		in.KeepaliveInterval,
+		in.ParentID, b2i(in.IsFolder), in.Sort, in.Remark, in.UpdatedAt, in.ID)
 	if err != nil {
 		return nil, fmt.Errorf("更新 SSH 主机失败: %w", err)
 	}
@@ -417,6 +470,20 @@ func normalizeSshHost(h *SshHost) {
 	h.Remark = strings.TrimSpace(h.Remark)
 	h.ParentID = strings.TrimSpace(h.ParentID)
 	h.JumpHostID = strings.TrimSpace(h.JumpHostID)
+	h.Tags = strings.TrimSpace(h.Tags)
+	h.Color = strings.TrimSpace(h.Color)
+	h.Icon = strings.TrimSpace(h.Icon)
+	h.PostLoginCommand = normalizePostLoginCommand(h.PostLoginCommand)
+	h.ProxyCommand = strings.TrimSpace(h.ProxyCommand)
+	// 以 - 开头的主机名/用户名不该在这里被静默改掉（TrimLeft 会把
+	// "--weird-host" 变成另一台机器）。真正的拒绝放在 ProxyCommand 构造处：
+	// 只有启用了外部命令时它才会被当成选项，那时报错才有意义。
+	// 保活间隔合法区间 0（引擎默认）或 5..600。-1 是「显式关闭」的哨兵，
+	// 由门面层从 OpenSSH config 的 ServerAliveInterval 0 映射而来。
+	if h.KeepaliveInterval != -1 && h.KeepaliveInterval != 0 &&
+		(h.KeepaliveInterval < 5 || h.KeepaliveInterval > 600) {
+		h.KeepaliveInterval = 0
+	}
 
 	if h.Port <= 0 || h.Port > 65535 {
 		h.Port = 22
@@ -441,7 +508,28 @@ func normalizeSshHost(h *SshHost) {
 		h.ClearPassword = true
 		h.LegacyAlgorithms = false
 		h.JumpHostID = ""
+		h.MCPAllowed = false
+		h.PostLoginCommand = ""
+		h.AutoReplySudo = false
+		h.ProxyCommand = ""
+		h.ProxyCommandEnabled = false
 	}
+}
+
+// normalizePostLoginCommand 把「登录后自动执行」压成一行。
+//
+// 多行输入会在 shell 里变成多条命令：用户以为自己填了 `cd /srv/app` 加一个
+// 换行，实际可能把粘贴进来的第二段也执行掉。只取第一行、去掉 CR，并且在
+// 门面层还要过一次风险规则表——这里是存储层的最后一道形状约束。
+func normalizePostLoginCommand(raw string) string {
+	line := strings.TrimSpace(raw)
+	if i := strings.IndexAny(line, "\r\n"); i >= 0 {
+		line = strings.TrimSpace(line[:i])
+	}
+	if len(line) > 512 {
+		line = line[:512]
+	}
+	return line
 }
 
 func encryptOptional(plain string) (string, error) {

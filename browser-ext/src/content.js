@@ -562,6 +562,11 @@
     }
     .title { font-size: 13px; font-weight: 600; margin-bottom: 4px; }
     .desc { font-size: 12px; line-height: 1.5; color: #8b95a8; margin-bottom: 12px; word-break: break-all; }
+    /* 与 desc 同一段说明，只是更弱一档：上负下正，视觉上贴着上一行、离按钮留白 */
+    .hint {
+      font-size: 11.5px; line-height: 1.5; color: #7a8496;
+      margin: -6px 0 12px; word-break: break-all;
+    }
     .row { display: flex; gap: 8px; justify-content: flex-end; }
     button {
       height: 28px; padding: 0 12px; border-radius: 6px; border: none;
@@ -650,6 +655,10 @@
 
     const isError = verdict.action === 'error'
     const isUpdate = verdict.action === 'update'
+    // 同站已有别的账号时，这次是「新建一条」而不是覆盖 —— 标题和副文案都要
+    // 说清楚，否则用户看到「保存到密码库」会以为把原来那条改掉了。
+    const existing = verdict.existing || 0
+    const isNewAccount = !isError && !isUpdate && existing > 0
 
     const my = openSaveCard(() => {
       const card = document.createElement('div')
@@ -659,13 +668,24 @@
       title.className = 'title'
       title.textContent = isError
         ? '暂时连不上密码库'
-        : (isUpdate ? '更新 QuickDock 里的密码？' : '保存到 QuickDock 密码库？')
+        : (isUpdate
+          ? '更新 QuickDock 里的密码？'
+          : (isNewAccount ? '存成这个网站的另一个账号？' : '保存到 QuickDock 密码库？'))
 
       const desc = document.createElement('div')
       desc.className = 'desc'
       desc.textContent = isError
         ? (verdict.message || '请确认 QuickDock 正在运行，且「浏览器集成」开关是开的')
         : `${payload.username || '（无用户名）'} · ${payload.host}`
+
+      // 说清「新建」到底发生了什么：不说的话，用户会以为站上原来的账号被改了。
+      const hint = document.createElement('div')
+      hint.className = 'hint'
+      if (isNewAccount) {
+        hint.textContent = verdict.ambiguous
+          ? `本站已有 ${existing} 个账号，但这次没识别到当前用户名，将新建一条，原有账号不动。`
+          : `本站已有 ${existing} 个账号，这一条会新建，原有账号的密码不变。`
+      }
 
       const row = document.createElement('div')
       row.className = 'row'
@@ -709,7 +729,9 @@
             ? await chrome.runtime.sendMessage({
               type: 'UPDATE',
               id: verdict.id,
-              payload: { ...payload, name: verdict.name },
+              // 带上条目里存着的用户名：这一屏抓不到用户名时（只输密码的第二屏）
+              // 传空串会把库里的用户名一起清掉。
+              payload: { ...payload, name: verdict.name, username: payload.username || verdict.username || '' },
             })
             : await chrome.runtime.sendMessage({ type: 'SAVE', payload })
           if (!res?.ok) throw new Error(res?.error || '保存失败')
@@ -723,7 +745,14 @@
       })
 
       row.append(skip, save)
-      card.append(title, desc, row, autoLabel)
+      // hint 必须夹在说明和按钮之间（放在按钮下面就没人读了）。
+      // 「同站存另一个账号」这类必须确认的场合不提供「以后直接保存」：
+      // 勾了也不会生效（后台对 needsConfirm 一律不自动存），留着只会骗人。
+      const parts = [title, desc]
+      if (isNewAccount) parts.push(hint)
+      parts.push(row)
+      if (!isNewAccount) parts.push(autoLabel)
+      card.append(...parts)
       return card
     })
 

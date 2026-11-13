@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 // FileSearchPage.vue — Everything 文件检索独立页
 //
 // 命令面板（Ctrl+K）早就能搜文件，但那是「一边打字一边看 20 条下拉」：
@@ -185,17 +186,17 @@ function onKeydown(e: KeyboardEvent) {
 
 <template>
   <div class="qd-page fs-page" @keydown="onKeydown">
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">{{ t('fileSearchTitle') }}</h2>
         <span class="qd-page-sub">{{ t('fileSearchSubtitle') }}</span>
-      </div>
+      </template>
       <div class="qd-page-actions">
         <button class="qd-btn qd-btn-sm" :disabled="loading" @click="doSearch">
           <RefreshCw :size="13" /> {{ t('evTestSearch') }}
         </button>
       </div>
-    </div>
+    </PageHeader>
 
     <EverythingGate>
       <template #default="{ redetect }">

@@ -122,6 +122,29 @@ export function patchTab(tabs: SshTab[], tabId: string, patch: Partial<SshTab>):
 }
 
 /**
+ * 标签拖拽重排：把 from 下标的标签挪到 to 下标，返回新数组。
+ *
+ * 纯函数、不改入参：SshTabBar 只通过 emit('reorder', from, to) 把下标交给
+ * 父组件，由父组件调用本函数后把新数组回传，绝不直接改 props.tabs。
+ *
+ * 边界一律原样返回同一引用（非整数 / 越界 / from === to）：既是安全的空操作，
+ * 也让调用方能据此跳过无谓的状态更新，与 syncHost「无变化返回同一引用」一致。
+ */
+export function reorderSshTabs<T>(tabs: T[], from: number, to: number): T[] {
+  if (
+    !Number.isInteger(from) || !Number.isInteger(to) ||
+    from < 0 || to < 0 || from >= tabs.length || to >= tabs.length ||
+    from === to
+  ) {
+    return tabs
+  }
+  const next = tabs.slice()
+  const [moved] = next.splice(from, 1)
+  next.splice(to, 0, moved)
+  return next
+}
+
+/**
  * 同步主机信息：用户在表单里改了名字/环境，已打开的标签要跟着更新，
  * 否则标签上还是旧名字，直到用户关掉重开才变。
  */

@@ -7,6 +7,7 @@ import (
 	"io"
 	"sort"
 	"strconv"
+	"time"
 
 	"golang.org/x/crypto/ssh"
 
@@ -22,6 +23,11 @@ const (
 	EventTerminalData  = "quickdock:ssh:data"
 	EventTerminalState = "quickdock:ssh:state"
 )
+
+// interactiveConnectTimeout 带交互式问答时的整体拨号上限。
+// 门面层等人输 OTP 是 90s，引擎层握手窗口 120s，这里也取 120s：
+// 比 challengeTimeout 长才能让人答完，又不至于让无人应答的连接永远挂着。
+const interactiveConnectTimeout = 120 * time.Second
 
 // SshDataEvent 终端输出帧。
 //
@@ -114,8 +120,12 @@ func (s *SshService) Connect(hostID string, cols, rows int) *services.ApiResult 
 		return failSsh(sshcore.ErrInvalidPtySize)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+	// 交互式问答（PAM 密码 + OTP）是人在输入，15s 的普通拨号窗口会把弹窗
+	// 掐断。只在 Connect 这条有 UI 的路径放宽，且把问答回调挂在 ctx 上——
+	// 其它拨号入口拿不到回调，行为完全不变。上限与引擎层的握手窗口一致。
+	ctx, cancel := context.WithTimeout(context.Background(), interactiveConnectTimeout)
 	defer cancel()
+	ctx = withChallenge(ctx, s.challengeFor(host.ID))
 
 	// 走连接池：同主机的第二个标签直接复用，不会再握手一次（#13）。
 	// release 必须在这个函数里归还，且恰好一次 —— Start 失败也要还，
@@ -127,11 +137,18 @@ func (s *SshService) Connect(hostID string, cols, rows int) *services.ApiResult 
 		return failSsh(err)
 	}
 
-	sess, err := s.manager.Start(client, sshcore.PtyOptions{
-		Cols:  cols,
-		Rows:  rows,
-		Label: host.User + "@" + host.Host + ":" + strconv.Itoa(host.Port),
-	})
+	opts := sshcore.PtyOptions{
+		Cols:             cols,
+		Rows:             rows,
+		Label:            host.User + "@" + host.Host + ":" + strconv.Itoa(host.Port),
+		PostLoginCommand: host.PostLoginCommand,
+		AutoReplySudo:    host.AutoReplySudo,
+	}
+	// 没开自动应答就别把明文密码带进引擎层：那是另一份不该常驻内存的副本。
+	if host.AutoReplySudo {
+		opts.SudoPassword = secret.Password
+	}
+	sess, err := s.manager.Start(client, opts)
 	if err != nil {
 		release()
 		return failSsh(err)

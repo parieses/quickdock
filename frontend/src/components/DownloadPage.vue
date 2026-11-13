@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 /**
  * 下载器页面：QuickDock 只做「遥控器 + 仪表盘」。
  * 添加任务 → Go 门面转 JSON-RPC → aria2c 下载并直接写盘；
@@ -987,11 +988,11 @@ onUnmounted(() => {
 
 <template>
   <div class="qd-page dl-page" @click="closeCtx">
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title"><Download :size="16" />{{ t('dlTitle') }}</h2>
         <span class="qd-page-sub">{{ t('dlSubtitle') }}</span>
-      </div>
+      </template>
       <div class="qd-page-fill">
         <span class="dl-engine" :class="status.running ? 'is-on' : 'is-off'">
           <span class="dl-dot"></span>
@@ -1026,7 +1027,7 @@ onUnmounted(() => {
         </button>
         <button v-else class="qd-btn qd-btn-primary" :disabled="busy" @click="enable">{{ primaryLabel }}</button>
       </div>
-    </div>
+    </PageHeader>
 
     <div class="qd-page-body dl-page-body">
       <div v-if="error && statusReady" class="dl-error">{{ error }}</div>

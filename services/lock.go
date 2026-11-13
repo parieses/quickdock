@@ -107,7 +107,17 @@ func (a *AppService) initLockBridge() {
 			if credentials.Wipe() {
 				logger.I("[credentials] 应用已锁定，密码库密钥已清零")
 			}
+			// 只 Wipe 是不够的：DEK 会从 app_state 自动重建，而浏览器扩展
+			// 走的是本地 HTTP API，它不经过锁层。锁定期间不关端口的话，
+			// 扩展照样能 /vault/reveal 把全库明文取走 —— 「锁定」就只是个 UI 遮罩。
+			// 两个注入钩子由 main.go 提供；StartCredentialAPIFn 指向 StartAPIIfEnabled，
+			// 所以解锁时只会在用户原本开着「浏览器集成」的情况下恢复监听。
+			if a.StopCredentialAPIFn != nil {
+				a.StopCredentialAPIFn()
+			}
 			a.hideUnlockableWindows()
+		} else if a.StartCredentialAPIFn != nil {
+			a.StartCredentialAPIFn()
 		}
 		// 托盘菜单按锁状态分叉，两个方向都要重建（main 包注入，未注入时跳过：
 		// 托盘还没建，也就不需要刷新）。

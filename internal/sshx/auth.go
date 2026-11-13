@@ -20,12 +20,20 @@ const (
 	AuthKey AuthType = "key"
 )
 
+// ErrChallengeRequired 表示交互式问答回调没能给出与问题一一对应的答案。
+// 调用方用 errors.Is 判断「前端与服务端问答协议对不上」：这不等于密码错误，
+// 不该当成认证失败去重试，否则会被服务端记成暴力尝试。
+var ErrChallengeRequired = errors.New("sshx: 需要交互式问答答案")
+
 // AuthSpec 认证参数。密码与私钥口令由调用方从数据库解密后传入，本包不碰存储。
 type AuthSpec struct {
 	Type          AuthType
 	Password      string
 	KeyPath       string
 	KeyPassphrase string
+
+	// Challenge 交互式问答回调。nil 时退回「所有问题回同一个密码」的旧行为。
+	Challenge func(name, instruction string, questions []string, echos []bool) ([]string, error)
 }
 
 // buildAuthMethods 构造认证方法链。
@@ -50,7 +58,7 @@ func buildAuthMethods(spec AuthSpec) ([]ssh.AuthMethod, error) {
 			return nil, ErrNoAuthMethod
 		}
 		return []ssh.AuthMethod{
-			keyboardInteractivePassword(spec.Password),
+			keyboardInteractive(spec),
 			ssh.Password(spec.Password),
 		}, nil
 
@@ -59,16 +67,50 @@ func buildAuthMethods(spec AuthSpec) ([]ssh.AuthMethod, error) {
 	}
 }
 
-// keyboardInteractivePassword 对所有提问都回同一个密码。
-// 常见服务器只问一条 "Password:"，但少数会二次确认，所以按 questions 长度填充而不是固定返回一条。
-func keyboardInteractivePassword(password string) ssh.AuthMethod {
-	return ssh.KeyboardInteractive(func(_, _ string, questions []string, _ []bool) ([]string, error) {
-		answers := make([]string, len(questions))
-		for i := range answers {
-			answers[i] = password
+// keyboardInteractive 构造 keyboard-interactive 认证方法。
+//
+// 为什么 Challenge == nil 必须保留「所有问题回同一个密码」的旧行为：
+// Exec、SFTP、批量执行、端口转发、MCP 这些非交互路径都没有 UI 能弹窗问用户，
+// 一旦在这里等回调就会把整条连接卡死。回调只由确实有交互能力的调用方
+// （例如终端登录）显式注入；没注入就代表当前路径不支持多轮问答，只能退回旧行为。
+//
+// 另外 OTP / PAM 是多轮问答：服务端会先问 "Password:" 再问 "Verification code:"，
+// 甚至分多轮下发。绝不能把同一个密码重复填进第二问——那会被判为认证失败，
+// 连续几次还会触发账号锁定或暴力尝试告警。因此有回调时答案必须由回调按
+// questions 逐条给出，且条数必须严格相等，缺一不能擅自补齐（长度不符说明
+// 前端与服务端的问答协议不一致，自行补答案只会把错答案喂给服务端）。
+func keyboardInteractive(spec AuthSpec) ssh.AuthMethod {
+	return ssh.KeyboardInteractive(func(name, instruction string, questions []string, echos []bool) ([]string, error) {
+		// 没有问题就不必打扰回调，直接回一个空 slice。
+		if len(questions) == 0 {
+			return []string{}, nil
+		}
+
+		if spec.Challenge == nil {
+			// 兼容旧行为：未注入回调时，所有问题都回同一个密码。
+			answers := make([]string, len(questions))
+			for i := range answers {
+				answers[i] = spec.Password
+			}
+			return answers, nil
+		}
+
+		answers, err := spec.Challenge(name, instruction, questions, echos)
+		if err != nil {
+			return nil, err
+		}
+		if len(answers) != len(questions) {
+			return nil, ErrChallengeRequired
 		}
 		return answers, nil
 	})
+}
+
+// keyboardInteractivePassword 保留旧函数名，等价于 Challenge 为 nil 的
+// keyboardInteractive；给只想用纯密码、不注入回调的调用点使用，也避免破坏
+// 既有测试对该名字的引用。
+func keyboardInteractivePassword(password string) ssh.AuthMethod {
+	return keyboardInteractive(AuthSpec{Password: password})
 }
 
 // loadSigner 读取并解析私钥文件。

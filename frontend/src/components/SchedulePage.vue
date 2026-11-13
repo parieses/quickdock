@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 import { ref, computed, onMounted, onBeforeUnmount, onActivated, onDeactivated, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -638,11 +639,11 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 <template>
   <div class="sched-page">
     <!-- 顶部栏 -->
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">{{ t('sched_title') }}</h2>
         <span class="qd-page-sub">{{ t('sched_subtitle') }}</span>
-      </div>
+      </template>
       <div class="qd-page-actions">
         <!-- 临时全停（会议投屏等）不该一条条点：全启用时显示「暂停所有」，否则「恢复所有」 -->
         <button class="qd-btn" :disabled="bulkBusy || tasks.length === 0" @click="toggleAllEnabled"
@@ -657,7 +658,7 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
         </button>
         <button class="qd-btn qd-btn-primary" @click="openCreate"><Plus :size="14" /> {{ t('sched_add') }}</button>
       </div>
-    </div>
+    </PageHeader>
 
     <div v-if="error" class="sched-error">{{ error }}</div>
 
@@ -1106,6 +1107,12 @@ onBeforeUnmount(() => { if (flashTimer) clearTimeout(flashTimer) })
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
 .act:disabled { opacity: 0.4; cursor: default; }
 .act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+/* 行操作默认收起，只留启用开关（状态信号）。
+   disabled 的「立即执行」常驻可见，同步阻塞期间的转圈才有落点。 */
+.item-actions .act { opacity: 0; transition: opacity var(--transition-fast); }
+.sched-item:hover .item-actions .act,
+.item-actions:focus-within .act,
+.item-actions .act:disabled { opacity: 1; }
 
 /* 同步执行中的转圈 */
 .spin { animation: sched-spin 1s linear infinite; }

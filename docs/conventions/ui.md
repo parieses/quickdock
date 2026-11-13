@@ -186,6 +186,32 @@
 
 ### 3.1 页头（只有两级）
 
+**一级页头一律用组件 `components/PageHeader.vue`，不要再手写三段式 DOM。**
+2026-11 已把 14 个页面里逐字复制的 `.qd-page-header` 外壳收敛到组件：组件输出
+`.qd-page-header > .qd-page-titles`，标题内容走 `#titles` 插槽，中间的搜索/标签条
+和右侧动作走默认插槽（原样透传，各页的 `v-if`、事件、scoped 样式都不受影响）。
+纯文本标题的新页面可以直接 `:title` / `:subtitle`；带图标、badge、外层转发插槽
+的页面用 `#titles`。组件根元素仍会被父页面 scoped 样式命中，所以
+`.clipboard-panel.compact .qd-page-header` 这类覆写继续生效。
+
+插槽内容属于**调用方作用域**，这一点很关键：标题里的 `.qd-page-title` 仍带父页面
+的 `data-v`，父页面的 scoped 规则（如紧凑模式改字号）不会因组件化而失效。
+
+```html
+<!-- 新页面首选（纯文本） -->
+<PageHeader :title="t('xxxTitle')" :subtitle="t('xxxSubtitle')">
+  <div class="qd-page-actions">…</div>
+</PageHeader>
+
+<!-- 带图标 / badge / 外层转发插槽 -->
+<PageHeader>
+  <template #titles><h2 class="qd-page-title">…</h2></template>
+  <div class="qd-page-fill">…</div>
+  <div class="qd-page-actions">…</div>
+</PageHeader>
+```
+
+<!-- 存量页面迁移前的等价 DOM（仅供理解，不要再新写） -->
 ```html
 <!-- 一级页面：46px，标题 15px，右侧动作区自动靠右 -->
 <div class="qd-page-header">
@@ -242,6 +268,12 @@
 | `.qd-btn.is-on` | 开关型已选中（视图切换、分组筛选） |
 | `.qd-btn-sm` | 表格行尾、卡片内部 |
 
+> **`.btn` 系列是 `.qd-btn` 的别名，不是第二套按钮**：`settings.css` 里那份重复的
+> 盒模型定义已删除，`app.css` 的 `.qd-btn*` 规则用逗号选择器组同时承接
+> `.btn` / `.btn-primary` / `.btn-ghost` / `.btn-danger`。用逗号而非 `:is()` /
+> `:where()`，因为宿主是 WebView2（见 §6）。设置页只在 `settings.css` 留了一条
+> `:disabled` 透明度补遗。新增代码仍只准用 `qd-btn*`。
+>
 > **历史类名（`.op-btn` / `.log-btn` / `.svc-btn` / `.tb-btn` / `.sess-btn` …）**：
 > 分散在 30 多个组件的 scoped 样式里，改名风险远大于收益，2026-11 已把它们的
 > **盒子值**逐条对齐到上表四档（不再有 26/30/35 这类中间高度，圆角统一 `radius-sm`）。
@@ -282,7 +314,9 @@
 ```html
 <template>
   <div class="qd-page">
-    <div class="qd-page-header">…</div>
+    <PageHeader :title="t('xxxTitle')">
+      <div class="qd-page-actions">…</div>
+    </PageHeader>
     <div class="qd-page-body"><!-- 可滚动内容，padding 16 --></div>
   </div>
 </template>
@@ -324,6 +358,8 @@
 | 做法 | 后果 | 正确做法 |
 |---|---|---|
 | 自造 `xxx-header` / `xxx-btn` | 同类元素多套实现，改一处漏两处 | 用 `qd-*` |
+| 直接手写 `<div class="qd-page-header">` 三段式 | 页头外壳又多一份来源，以后改高度会漏 | 用 `<PageHeader>` 组件（§3.1） |
+| 列表行操作按钮常驻显示 | 一屏几十个图标按钮，视线没有落点 | 常驻占位 + `opacity` 切换：`.row:hover .actions` / `:focus-within` / 选中行时为 1；**不用 `display:none`**（hover 时行宽会跳）。参见 `KnowledgePage.vue` 的 `.kb-doc-actions` |
 | 无前缀的公共类名（`.action-btn` / `.btn`） | 与 `settings.css` 全局类撞车：`border-box` 下 `padding:7px 14px` 把 24px 按钮内容盒算成负数，**SVG 被收缩到 0 宽**，按钮有框、hover 有底色、图标完全没有，且**无任何报错** | 公共类一律 `qd-` 前缀；自查时量 `button` 与内部 `svg` 的 `getBoundingClientRect()` |
 | `var(--x, #333)` | 掩盖变量不存在 | 只写 `var(--x)` |
 | 用 `--shadow-border` 做页头分隔 | 底色压深后 `0 1px 0 rgba(0,0,0,.08)` 几乎不可见，页头悬空 | `border-bottom: 1px solid var(--color-border)` |

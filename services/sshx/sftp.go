@@ -111,6 +111,36 @@ func (s *SshService) SftpWriteText(hostID, remotePath, content string, mode int)
 	})
 }
 
+// 摘要为什么由前端透传、而不是服务端持有状态：
+// withSftp 是「一次性借连接」——每次调用都新建 SftpSession，干完立刻 Close
+// 并把连接引用还回池。SftpFileDigest 与 SftpWriteTextChecked 是两次独立调用，
+// 之间不共享任何句柄、会话或内存状态，服务端没有一处能跨这两次调用存放
+// 「打开时的摘要」。硬要存就得按 host+path 维护一份带过期与并发控制的全局表，
+// 既平白引入状态清理的复杂度，多窗口 / 重连后还容易读到别人的脏基线。
+// 所以基线只能由前端在打开时记下、保存时作为 expectedDigest 透传回来；
+// 引擎层对空串明确跳过校验，前端取摘要失败时降级为不做并发校验即可。
+
+// SftpFileDigest 取远端文件摘要，供编辑器打开时记录基线。
+func (s *SshService) SftpFileDigest(hostID, remotePath string) *services.ApiResult {
+	return s.withSftp(hostID, func(sess *sshcore.SftpSession) (interface{}, error) {
+		digest, size, err := sess.FileDigest(remotePath)
+		if err != nil {
+			return nil, err
+		}
+		return map[string]interface{}{"digest": digest, "size": size}, nil
+	})
+}
+
+// SftpWriteTextChecked 带并发校验的保存。
+func (s *SshService) SftpWriteTextChecked(hostID, remotePath, content, expectedDigest string, mode int) *services.ApiResult {
+	if mode < 0 || mode > 0o7777 {
+		return failCode(CodeInvalidInput, "文件权限取值无效")
+	}
+	return s.withSftp(hostID, func(sess *sshcore.SftpSession) (interface{}, error) {
+		return nil, sess.WriteTextChecked(remotePath, content, expectedDigest, os.FileMode(mode))
+	})
+}
+
 // SftpChmod 修改远端路径的权限位。mode 是八进制数值（如 0o644），不是字符串。
 //
 // 上限放到 0o7777 而不是 0o777：setuid/setgid/sticky 在部署脚本里是常用手段

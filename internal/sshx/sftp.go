@@ -9,6 +9,9 @@ package sshx
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -49,6 +52,9 @@ var (
 	// 值得单独给一个哨兵：这种情况 SSH 终端完全正常，用户会以为是
 	// 「文件面板坏了」，实际需要在服务器上配 Subsystem。
 	ErrSftpUnavailable = errors.New("sshx: 服务端未启用 SFTP 子系统")
+	// ErrRemoteChanged 编辑器保存前的并发变更检测失败：打开文件时读到的内容
+	// 与即将覆盖时的远端摘要不一致，说明期间被别人改过，绝不静默覆盖。
+	ErrRemoteChanged = errors.New("远端文件已被修改")
 )
 
 // FileEntry 一条远端文件记录。
@@ -389,6 +395,76 @@ func (s *SftpSession) WriteText(remotePath, content string, mode os.FileMode) er
 	return nil
 }
 
+// FileDigest 返回远端文件的 SHA-256 十六进制摘要与大小。
+// 用于编辑器保存前的并发变更检测：读到的内容若期间被别人改过，hash 就对不上。
+//
+// 只做流式 io.Copy：摘要用于比对，不需要把内容留在内存里，GB 级日志也只占
+// 一个 32KB 缓冲区。
+func (s *SftpSession) FileDigest(remotePath string) (digest string, size int64, err error) {
+	abs, err := s.RealPath(remotePath)
+	if err != nil {
+		return "", 0, err
+	}
+	info, err := s.client.Stat(abs)
+	if err != nil {
+		return "", 0, classifySftpErr(abs, err)
+	}
+	if info.IsDir() {
+		return "", 0, fmt.Errorf("%w: %s", ErrRemoteIsDir, abs)
+	}
+	f, err := s.client.Open(abs)
+	if err != nil {
+		return "", 0, classifySftpErr(abs, err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", 0, fmt.Errorf("sshx: 计算远端文件摘要失败: %w", err)
+	}
+	return hex.EncodeToString(h.Sum(nil)), info.Size(), nil
+}
+
+// WriteTextChecked 带并发校验的文本写入。
+// expectedDigest 为打开文件时 FileDigest 得到的 hex；为空则不做校验
+// （调用方明确跳过）。远端当前摘要与 expectedDigest 不一致时返回
+// ErrRemoteChanged，绝不覆盖。
+//
+// 与 WriteText 的区别只在「校验 + 原子替换」：WriteText 直接 O_TRUNC 覆盖，
+// 保存时若别人改过同一文件会静默丢掉对方的改动；这里先把内容写到 .part
+// 再原子 Rename，替换前后远端看到的都是完整文件。
+func (s *SftpSession) WriteTextChecked(remotePath, content, expectedDigest string, mode os.FileMode) error {
+	abs, err := s.RealPath(remotePath)
+	if err != nil {
+		return err
+	}
+	if expectedDigest != "" {
+		cur, _, err := s.FileDigest(abs)
+		if err != nil {
+			return err
+		}
+		if cur != expectedDigest {
+			return fmt.Errorf("%w: %s", ErrRemoteChanged, abs)
+		}
+	}
+
+	// Chmod 必须在 Rename 之前、对 .part 做：先改 abs 再 Rename 的话，
+	// 一旦 Rename 被服务端拒绝，旧文件的权限已经被我们改掉了。
+	var beforeRename func(part string) error
+	if mode != 0 {
+		beforeRename = func(part string) error {
+			if err := s.client.Chmod(part, mode); err != nil {
+				return fmt.Errorf("sshx: 设置远端权限失败: %w", err)
+			}
+			return nil
+		}
+	}
+	return s.atomicWriteRemote(
+		context.Background(), abs, strings.NewReader(content),
+		int64(len(content)), nil, "sshx: 写入远端文件失败", beforeRename,
+	)
+}
+
 // Download 把远端文件或目录拉到本地。
 //
 // dst 落在已存在的本地目录时按源文件名拼到它下面；否则当作完整目标路径，
@@ -451,6 +527,116 @@ func (s *SftpSession) Chmod(remotePath string, mode os.FileMode) error {
 	return nil
 }
 
+// randSuffix 给 .qd-part-* / .qd-backup-* 生成随机后缀。
+//
+// 用 crypto/rand 而不是时间戳：同一秒内并发写同一个目标，时间戳会撞名，
+// 两个 .part 互相覆盖，先传完的那个会被后传完的顶掉。转成 hex 只是为了让
+// 名字在日志里可读，也不踩文件名非法字符。
+func randSuffix() (string, error) {
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b[:]), nil
+}
+
+// safeReplaceLocal 把已写完的临时文件 tmpPath 原子替换到 localPath。
+//
+// Windows 的 MoveFileEx 不带 REPLACE_EXISTING，os.Rename 遇到目标已存在会
+// 直接失败；而 Go 标准库没有暴露「允许覆盖」的开关。这里绝不能先
+// os.Remove(localPath) 再 Rename——那样一旦后续 Rename 失败，旧文件就彻底
+// 没了，用户会以为下载把原文件弄丢了。正确做法是把旧文件先改名成同目录的
+// .qd-backup-*，腾出名字后再 Rename；成功后删掉备份，中间任何一步失败都把
+// 备份改回去，保证旧文件不丢。
+//
+// POSIX 上 os.Rename 覆盖已存在文件本身就是原子的且会直接成功，不会进入
+// 备份分支——那正是我们想要的，不必为 Unix 单独造备份。
+func safeReplaceLocal(tmpPath, localPath string) error {
+	if err := os.Rename(tmpPath, localPath); err == nil {
+		return nil
+	} else if _, statErr := os.Stat(localPath); statErr != nil {
+		// 目标本来就不存在还 Rename 失败，是权限 / 跨设备之类的问题，
+		// 不是「覆盖已存在」触发的；别去动不存在的东西，把原错误交回去。
+		return err
+	}
+
+	// 走到这里：目标已存在，且直接 Rename 覆盖失败（典型是 Windows）。
+	suffix, err := randSuffix()
+	if err != nil {
+		return fmt.Errorf("sshx: 生成备份文件名失败: %w", err)
+	}
+	backup := filepath.Join(filepath.Dir(localPath), ".qd-backup-"+suffix)
+	if err := os.Rename(localPath, backup); err != nil {
+		return fmt.Errorf("sshx: 备份旧文件失败: %w", err)
+	}
+	// 旧文件此刻只在 backup 里。往后任何失败都必须把它改回 localPath，
+	// 否则一次失败的下载会让用户的旧文件凭空消失。
+	rollback := func() { _ = os.Rename(backup, localPath) }
+
+	if err := os.Rename(tmpPath, localPath); err != nil {
+		rollback()
+		return fmt.Errorf("sshx: 替换目标文件失败: %w", err)
+	}
+	// 新文件已就位，删掉备份；删失败不影响正确性（目标已经是对的），
+	// 只是会留一个 .qd-backup-* 垃圾，尽力清掉即可。
+	_ = os.Remove(backup)
+	return nil
+}
+
+// atomicWriteRemote 把 r 写到与 abs 同目录的 .qd-part-* 临时文件，成功后
+// 原子 Rename 覆盖 abs。它是 uploadFile 与 WriteTextChecked 共用的替换原语。
+//
+// ctx 只用于取消（copyTrack 每块检查一次）；WriteTextChecked 这类非交互写入
+// 传 context.Background()。beforeRename 在 part 写完、关闭之后、Rename 之前
+// 调用，用来在替换生效前对新文件设置权限。
+//
+// 关于 .part：它目前只用于原子替换，不是可恢复的续传点——传输一中断就整份
+// 丢弃，要做 resume 得额外校验已传前缀与远端大小/时间，本轮不实现，别假装
+// 支持。任何失败（含 ctx 取消、beforeRename 失败、Rename 被拒绝）都会删掉
+// part，不在远端留垃圾；目标 abs 始终不会被主动 Remove。
+func (s *SftpSession) atomicWriteRemote(ctx context.Context, abs string, r io.Reader, size int64, onProgress func(done, total int64), copyErrPrefix string, beforeRename func(part string) error) error {
+	suffix, err := randSuffix()
+	if err != nil {
+		return fmt.Errorf("sshx: 生成临时文件名失败: %w", err)
+	}
+	part := abs + ".qd-part-" + suffix
+
+	f, err := s.client.OpenFile(part, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
+	if err != nil {
+		return classifySftpErr(part, err)
+	}
+	committed := false
+	defer func() {
+		// 先关再删：Windows 上打开着的文件删不掉，顺序不能反。
+		_ = f.Close()
+		if !committed {
+			_ = s.client.Remove(part)
+		}
+	}()
+
+	if _, err := copyTrack(ctx, r, f, size, onProgress); err != nil {
+		return wrapCanceled(err, copyErrPrefix)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("sshx: 关闭远端临时文件失败: %w", err)
+	}
+	if beforeRename != nil {
+		if err := beforeRename(part); err != nil {
+			return err
+		}
+	}
+
+	// 优先直接 Rename：多数 SFTP 服务端底层是 rename(2)，同分区内原子且可覆盖。
+	// 若服务端拒绝覆盖已存在目标，这里绝不先 Remove(abs) 再 Rename——那样会露出
+	// 「目标已删、新文件还没就位」的窗口期，别人此刻读会读到不存在。取舍是：
+	// 清理 part 并返回带路径的明确错误，让用户手动处理，目标全程保持原样。
+	if err := s.client.Rename(part, abs); err != nil {
+		return fmt.Errorf("sshx: 原子替换远端文件 %s 失败（服务端可能拒绝覆盖已存在目标；临时文件 %s 将被清理，目标保持原样，请手动确认后再试）: %w", abs, part, err)
+	}
+	committed = true
+	return nil
+}
+
 func (s *SftpSession) downloadFile(ctx context.Context, remotePath, localPath string, size int64, onProgress func(done, total int64)) error {
 	src, err := s.client.Open(remotePath)
 	if err != nil {
@@ -458,18 +644,43 @@ func (s *SftpSession) downloadFile(ctx context.Context, remotePath, localPath st
 	}
 	defer src.Close()
 
-	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+	dir := filepath.Dir(localPath)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return fmt.Errorf("sshx: 创建本地目录失败: %w", err)
 	}
-	dst, err := os.Create(localPath)
-	if err != nil {
-		return fmt.Errorf("sshx: 创建本地文件失败: %w", err)
-	}
-	defer dst.Close()
 
-	if _, err := copyTrack(ctx, src, dst, size, onProgress); err != nil {
+	// .part 只用于原子替换，不是可恢复的续传点：传输中断就整份丢弃，
+	// 要做 resume 得额外校验已传前缀与远端大小/时间，本轮不实现。
+	// 落在同目录，保证后面的 Rename 不会跨设备。
+	tmp, err := os.CreateTemp(dir, "."+filepath.Base(localPath)+".qd-part-*")
+	if err != nil {
+		return fmt.Errorf("sshx: 创建本地临时文件失败: %w", err)
+	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		_ = tmp.Close()
+		if !committed {
+			// 任何失败（含 ctx 取消）都不在本地留下半截 .part。
+			_ = os.Remove(tmpPath)
+		}
+	}()
+
+	if _, err := copyTrack(ctx, src, tmp, size, onProgress); err != nil {
 		return wrapCanceled(err, "sshx: 下载失败")
 	}
+	// 先 Sync 把页缓存刷下去再改名：少了这步，Rename 之后断电仍可能得到
+	// 一个名字已经就位、内容却还没落盘的半截文件。
+	if err := tmp.Sync(); err != nil {
+		return fmt.Errorf("sshx: 同步本地文件失败: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("sshx: 关闭本地临时文件失败: %w", err)
+	}
+	if err := safeReplaceLocal(tmpPath, localPath); err != nil {
+		return err
+	}
+	committed = true
 	return nil
 }
 
@@ -557,16 +768,9 @@ func (s *SftpSession) uploadFile(ctx context.Context, localPath, remotePath stri
 	}
 	defer src.Close()
 
-	dst, err := s.client.OpenFile(remotePath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC)
-	if err != nil {
-		return classifySftpErr(remotePath, err)
-	}
-	defer dst.Close()
-
-	if _, err := copyTrack(ctx, src, dst, size, onProgress); err != nil {
-		return wrapCanceled(err, "sshx: 上传失败")
-	}
-	return nil
+	// 流式拷贝 + 原子替换交给共用原语：失败时 .part 一定被清掉，
+	// 不会像原来的 O_TRUNC 那样把远端目标截成半截。
+	return s.atomicWriteRemote(ctx, remotePath, src, size, onProgress, "sshx: 上传失败", nil)
 }
 
 // wrapCanceled 取消原样返回，其余错误加中文前缀。

@@ -90,7 +90,7 @@ async function openMain() {
 
 .notice-desc {
   margin: 0;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   line-height: 1.6;
   color: var(--color-text-secondary);
 }
@@ -99,7 +99,7 @@ async function openMain() {
   margin-top: 4px;
   padding: 0 14px;
   height: 34px;
-  font-size: 12.5px;
+  font-size: var(--text-sm);
   font-weight: 500;
   color: var(--color-accent-text);
   background: var(--color-accent);

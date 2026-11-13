@@ -39,6 +39,10 @@ const (
 	defaultKeepalive = 45 * time.Second
 	defaultPort      = 22
 	keepaliveRequest = "keepalive@openssh.com"
+	// interactiveHandshakeTimeout 带交互式问答（密码 + OTP）时的握手上限。
+	// 门面层等人输 OTP 是 90s，这里留 30s 余量给真正的网络握手与认证往返。
+	// 只在 AuthSpec.Challenge 非 nil 时启用，普通连接不受影响。
+	interactiveHandshakeTimeout = 120 * time.Second
 )
 
 // HandshakeInfo 握手结果，用于 UI 展示与排障。
@@ -57,7 +61,18 @@ type DialConfig struct {
 	Auth AuthSpec
 
 	Timeout   time.Duration // TCP 建连与握手各自的超时，默认 15s
-	Keepalive time.Duration // 保活间隔，默认 45s（NAT/防火墙通常 5 分钟掐连接）
+	Keepalive time.Duration // 兼容旧调用方保留；保活实际以 KeepaliveInterval 为准
+
+	// KeepaliveInterval 保活间隔，三态语义：
+	//   - 0：未配置（Go 零值），沿用 defaultKeepalive，默认仍抗 NAT 超时；
+	//   - 负数：显式关闭保活，不启动 ticker（对应 OpenSSH ServerAliveInterval 0）；
+	//   - 正数：钳制到 5s..600s，避免填 1ms 打爆服务端 / 填几小时形同虚设。
+	//
+	// 为什么 0 与 -1 语义不同：OpenSSH 里「关掉保活」写的是 0，但 time.Duration
+	// 的零值也是 0，两者无法区分——「没填」和「明确要关」必须分开，否则一台没配
+	// 保活间隔的主机也会被当成「关掉保活」，静默退化成死连接。所以门面层把
+	// OpenSSH 的显式 0 映射成 -1 传进来，0 专门留给「未配置回落默认值」。
+	KeepaliveInterval time.Duration
 
 	// HostKeyCallback 必须有值。留空直接报错而不是「跳过校验」——
 	// 远程登录器的第一安全红线是不能静默接受未知主机密钥。
@@ -139,7 +154,15 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 	applyLegacyAlgorithms(sshCfg, cfg.LegacyAlgorithms)
 
 	addr := net.JoinHostPort(cfg.Host, strconv.Itoa(cfg.Port))
-	dialCtx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	// 有交互式问答回调时，握手里会停下来等人在弹窗里输 OTP，15 秒远远不够。
+	// 放宽的不是「网络等待」而是「认证等待」：普通连接仍走 cfg.Timeout，
+	// 只有明确挂了 Challenge 的交互终端才会用到这个更长的窗口。
+	// 上限刻意与门面层 challengeTimeout 对齐（90s）再加一点余量。
+	handshakeTimeout := cfg.Timeout
+	if cfg.Auth.Challenge != nil && handshakeTimeout < interactiveHandshakeTimeout {
+		handshakeTimeout = interactiveHandshakeTimeout
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, handshakeTimeout)
 	defer cancel()
 
 	start := time.Now()
@@ -157,7 +180,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 
 	// 握手阶段没有 context 可传，只能靠连接层 deadline 兜底：
 	// 服务器接受了 TCP 但打死不回握手包时，没有这行会一直挂着。
-	if err := raw.SetDeadline(time.Now().Add(cfg.Timeout)); err != nil {
+	if err := raw.SetDeadline(time.Now().Add(handshakeTimeout)); err != nil {
 		raw.Close()
 		return nil, fmt.Errorf("%w: 设置握手超时失败: %v", ErrUnreachable, err)
 	}
@@ -176,7 +199,7 @@ func Dial(ctx context.Context, cfg DialConfig) (*Client, error) {
 	info.ServerVersion = string(cc.ServerVersion())
 
 	c := &Client{conn: ssh.NewClient(cc, chans, reqs), cfg: cfg, info: info}
-	c.startKeepalive(cfg.Keepalive)
+	c.startKeepalive(cfg.KeepaliveInterval)
 	c.watchConn()
 	return c, nil
 }
@@ -198,9 +221,13 @@ func (c *DialConfig) normalize() error {
 	if c.Timeout <= 0 {
 		c.Timeout = defaultTimeout
 	}
+	// Keepalive 是保留的旧字段，照旧补默认值（既有调用方 / 测试仍读它）。
 	if c.Keepalive <= 0 {
 		c.Keepalive = defaultKeepalive
 	}
+	// 刻意不在这里碰 KeepaliveInterval：0 / 负数 / 正数三态由 startKeepalive
+	// 解释。若在此把 <=0 一并兜成默认，「负数 = 显式关闭」的信号就被抹掉了，
+	// 用户将永远无法关掉保活。
 	return nil
 }
 
@@ -258,7 +285,27 @@ func withExtra(base []string, extra ...string) []string {
 //
 // 不保活的实际后果是：NAT/防火墙通常在 5 分钟无流量后静默丢弃映射，
 // 用户回来看到一个「界面还在但敲什么都没反应」的死连接——比直接报错更难排查。
+//
+// interval 三态见 KeepaliveInterval 字段注释。0 与 -1 不能合并：0 是「没填」
+// 要保默认，-1 是照着 OpenSSH ServerAliveInterval 0 明确要关；若把负数也兜成
+// 默认，用户就再也关不掉保活了。
 func (c *Client) startKeepalive(interval time.Duration) {
+	// 负数 = 显式关闭：必须在建 context / 起 goroutine 之前返回，
+	// 否则 stopKeepalive 会指向一个没人用的 cancel，Close 时还得空转一次。
+	if interval < 0 {
+		return
+	}
+	if interval == 0 {
+		interval = defaultKeepalive
+	}
+	// 正数钳制：下限 5s 防止过密的 global request 把服务端/中间设备打爆，
+	// 上限 600s 防止「配了保活却比 NAT 5 分钟超时还长」，等于没配。
+	if interval < 5*time.Second {
+		interval = 5 * time.Second
+	} else if interval > 600*time.Second {
+		interval = 600 * time.Second
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	c.stopKeepalive = cancel
 	go func() {

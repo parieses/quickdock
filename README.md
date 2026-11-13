@@ -780,7 +780,7 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 │   ┌────────────────────┐      ┌────────────────────────────────┐  │
 │   │  Vue 3 前端         │◄────►│  services/  Wails 绑定门面      │  │
 │   │  (frontend/dist     │ IPC  │  AppService + 30 领域子包      │  │
-│   │   go:embed)         │      │  691 个绑定方法                 │  │
+│   │   go:embed)         │      │  693 个绑定方法                 │  │
 │   └────────────────────┘      └───────────────┬────────────────┘  │
 │                                                │ 单向依赖          │
 │                                 ┌──────────────▼────────────────┐  │
@@ -799,7 +799,7 @@ macOS 每个 release 产出 `quickdock-darwin-arm64` 与 `quickdock-darwin-amd64
 
 几点实现上的选择：
 
-- **门面分层**：领域能力下沉到 30 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 32 个 Service / 691 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
+- **门面分层**：领域能力下沉到 30 个门面子包，宿主核心留在 AppService；`wails3 generate bindings` 生成 32 个 Service / 693 个绑定方法（口径以 bindings 导出函数为准，见下方项目结构）
 - **截图层用原生窗口**：自建 Win32 分层窗口整帧提交，工具条、标注、图形都画进同一张 DIB，可以避免 WebView 流程带来的闪烁
 - **次级窗口延迟创建**：首次热键触发时才创建 WebView2，减少启动白屏；浮窗位置经 kvstore 持久化
 - **后台服务**：SQLite WAL、待办（10s）、定时与监控调度器、AI 流式 HTTP 服务、邮件 IMAP 长连接、天气轮询、插件健康检查、DSH 隐藏进程、内置 MCP（9230）
@@ -891,7 +891,7 @@ wails3 generate bindings -ts -i -clean   # 等价于 cd frontend && npm run bind
 ```
 quickdock/
 ├── main.go / tray.go / windows.go        # 入口、托盘、浮动窗口、单实例锁
-├── services/                             # Wails 门面层，宿主 + 30 领域子包，691 个绑定方法
+├── services/                             # Wails 门面层，宿主 + 30 领域子包，693 个绑定方法
 │   ├── service.go  api_result.go  types.go  lifecycle.go
 │   ├── hotkey.go  theme.go  autostart.go  winmgr_service.go
 │   ├── app_launcher.go  focus.go  tool.go  clipboard_sys.go  clipboard_files.go

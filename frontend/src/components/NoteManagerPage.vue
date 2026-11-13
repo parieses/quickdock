@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 defineOptions({ name: KEEP_ALIVE.notes })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -21,7 +22,7 @@ import DOMPurify from 'dompurify'
 import { installMathOnce } from '../utils/mathMarkdown'
 import { installWikiOnce } from '../utils/wikiMarkdown'
 import { createCodeEditor, type CodeEditorHandle } from '../utils/aiCodeEditor'
-import { downloadText, safeFileName } from '../utils/download'
+import { downloadText, downloadBlob, safeFileName } from '../utils/download'
 import {
   ListNotesTree,
   SearchNotesTree,
@@ -33,6 +34,13 @@ import {
   DeleteNoteNode,
   SetNoteDocFormat,
   SetNoteSort,
+  GetNoteDoc,
+  ListNoteRevisions,
+  GetNoteRevision,
+  RestoreNoteRevision,
+  ListNoteTags,
+  ExportNotes,
+  ImportNotes,
 } from '../../bindings/quickdock/services/note/noteservice'
 import { CopyText } from '../../bindings/quickdock/services/clipboard/clipboardservice'
 import { ResolveWikiTarget, ListLinkTargets } from '../../bindings/quickdock/services/appservice'
@@ -40,6 +48,7 @@ import {
   Trash2, Search, X, FolderPlus, FileText, Folder,
   Copy as CopyIcon, PanelLeft, PanelLeftClose, ChevronDown, Sparkles, FileDown, List,
   FileSearch, Square, CheckSquare, Clock, Code2, Columns2, Eye, Link2, Network, PanelRight,
+  Download, Upload, History, FilePlus2, Loader2, Check, AlertTriangle, RefreshCw,
 } from '@lucide/vue'
 import type { ToastAPI, Note, WikiTarget, LinkTargetGroups, EntityType } from '../types'
 
@@ -243,6 +252,10 @@ const docTagsText = ref('')
 /** 快捷笔记（浮窗用）在 notes 表里的固定 keyword，见 internal/db/note_tree.go。 */
 const QUICK_NOTE_KEYWORD = '__quicknote__'
 let saveTimer: ReturnType<typeof setTimeout> | null = null
+// 保存态：防抖窗口内显示「保存中」，落盘成功「已保存」，失败「保存失败」。
+// 挤在编辑器头部现有那一行里，idle 时整个 span 不渲染，不新增一行高度。
+const saveStatus = ref<'idle' | 'saving' | 'saved' | 'failed'>('idle')
+let savedResetTimer: ReturnType<typeof setTimeout> | null = null
 
 interface TreeNode extends Note { children: TreeNode[] }
 
@@ -295,6 +308,7 @@ async function load() {
     const list = (r || []).filter(n => n.keyword !== QUICK_NOTE_KEYWORD)
     nodes.value = list
     allNodes.value = list
+    void loadTags()
     if (selectedDocId.value && !nodes.value.find(n => n.id === selectedDocId.value)) {
       selectedDocId.value = ''; docContent.value = ''; docTagsText.value = ''
     }
@@ -330,14 +344,17 @@ watch(searchQuery, () => runSearch())
 function clearSearch() { searchQuery.value = '' }
 
 // ---- 标签 ----
-// 基于 allNodes（全量树）而不是 nodes：搜索时 nodes 被换成命中子集，
-// 用它聚合会让标签栏跟着塌缩成一个标签，用户就没法在搜索结果里换标签了。
-// 也不需要额外的「列出全部标签」后端接口 —— ListNotesTree 本来就返回全部 tags。
-const allTags = computed<string[]>(() => {
-  const set = new Set<string>()
-  for (const n of allNodes.value) for (const tg of parseTagsS(n.tags)) set.add(tg)
-  return [...set].sort()
-})
+// 候选与顶部筛选 chip 都改用后端聚合结果（ListNoteTags），不再前端解析整棵树。
+const backendTags = ref<string[]>([])
+async function loadTags() {
+  try {
+    const r = unwrap<string[]>(await ListNoteTags())
+    backendTags.value = Array.isArray(r) ? r.filter((x): x is string => typeof x === 'string') : []
+  } catch (e) {
+    logErr('NoteManager:listTags', e)
+    toast.error(getErrorMessage(e))
+  }
+}
 
 // ---- 左侧树 ----
 function toggleFolder(id: string) {
@@ -374,6 +391,35 @@ async function newDocAt(folderId: string) {
     await load()
     if (r) { const found = nodes.value.find(x => x.id === r.id); if (found) onDoc(found) }
   } catch (e) { toast.error(getErrorMessage(e)) }
+}
+
+// ---- 模板 / 日志笔记 ----
+// 标题与 Markdown 骨架都走 i18n，按当前语言拼；工作日志标题带当天日期。
+function pad2(n: number): string { return n < 10 ? '0' + n : String(n) }
+const tplOpen = ref(false)
+interface NoteTemplate { key: string; label: string; body: string }
+const templateMenu = computed<NoteTemplate[]>(() => [
+  { key: 'worklog', label: t('notesTplWorklog'), body: t('notesTplWorklogBody') },
+  { key: 'bug', label: t('notesTplBug'), body: t('notesTplBugBody') },
+  { key: 'meeting', label: t('notesTplMeeting'), body: t('notesTplMeetingBody') },
+  { key: 'research', label: t('notesTplResearch'), body: t('notesTplResearchBody') },
+])
+async function createFromTemplate(tpl: NoteTemplate) {
+  tplOpen.value = false
+  const d = new Date()
+  const date = `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`
+  const title = tpl.key === 'worklog' ? `${tpl.label} ${date}` : tpl.label
+  try {
+    const r = unwrap<Note>(await CreateNoteDoc('', title, tpl.body, 'markdown'))
+    await load()
+    if (r) {
+      const found = nodes.value.find(x => x.id === r.id)
+      if (found) await onDoc(found)
+    }
+  } catch (e) {
+    logErr('NoteManager:createTemplate', e)
+    toast.error(getErrorMessage(e))
+  }
 }
 
 // 切换笔记渲染格式（markdown | text）
@@ -475,6 +521,13 @@ async function reorderNode(dragId: string, targetId: string, before: boolean) {
 
 // ---- 右侧文档编辑/预览 ----
 const selectedDoc = computed<Note | null>(() => (selectedDocId.value ? nodes.value.find(n => n.id === selectedDocId.value) || null : null))
+/** updatedAt 是 Go 侧新增的 JSON 字段，格式化成本地可读时间；解析失败就显示原串。 */
+function formatTime(s: string): string {
+  if (!s) return ''
+  const d = new Date(s)
+  return isNaN(d.getTime()) ? s : d.toLocaleString()
+}
+const formattedUpdated = computed(() => formatTime(selectedDoc.value?.updatedAt || ''))
 // 笔记预览也认 LaTeX：AI 回答里「存为笔记」保存的就是带 `\(...\)` / `\[...\]` 的原文，
 // 不接这一步，笔记里就会重现「公式当正文」的样子。
 // 用 installMathOnce / installWikiOnce 而不是直接 marked.use —— 本文件每次进入页面
@@ -542,9 +595,7 @@ function buildTagsJSON(text: string): string {
 }
 
 // 落盘当前文档（切文档/离开前调用）。先同步快照再 await，避免调用后被切换污染把内容存错文档。
-//
-// 自动保存此处刻意不弹 toast：它在 800ms 防抖里高频触发，失败就弹会持续打断
-// 用户写作。但也不该彻底无痕（原写法是空 catch），故记为 error 日志留证。
+// 失败按 R9 给 toast + 日志：flush 是显式落盘，失败必须让用户知道内容没存上。
 async function flushPendingSave() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null }
   const id = selectedDocId.value
@@ -556,6 +607,8 @@ async function flushPendingSave() {
     applyLocalTags(id, tagsJSON)
   } catch (e) {
     logErr('NoteManager:flushPendingSave', e)
+    saveStatus.value = 'failed'
+    toast.error(getErrorMessage(e))
   }
 }
 
@@ -572,11 +625,12 @@ function applyLocalTags(id: string, tagsJSON: string) {
   }
 }
 
-function onDoc(d: Note) {
+async function onDoc(d: Note) {
   if (d.isFolder) return
-  void flushPendingSave() // 切文档前先落盘当前文档，避免防抖窗口内切换丢失内容
+  await flushPendingSave() // 切文档前先落盘当前文档，避免防抖窗口内切换丢失内容
   aiOpen.value = false // 切走文档时关掉 AI 覆盖层：它贴在旧文档上，留着会写错地方
   savedCaret.value = -1
+  if (saveStatus.value !== 'failed') saveStatus.value = 'idle'
   selectedDocId.value = d.id
   docContent.value = d.content || ''
   pushRecent(d.id)
@@ -592,6 +646,7 @@ function onDoc(d: Note) {
   expanded.value = s
 }
 function onDocInput() {
+  saveStatus.value = 'saving'
   if (saveTimer) clearTimeout(saveTimer)
   saveTimer = setTimeout(saveDoc, 800)
 }
@@ -619,6 +674,42 @@ function exportDoc() {
   const base = safeFileName(doc.name || doc.keyword || '', 'note')
   downloadText(`${base}.md`, docContent.value, 'text/markdown')
   toast.success(t('notesExported', { name: `${base}.md` }))
+}
+
+// ---- 批量导入 / 导出（整库）----
+interface NoteExportItem { path: string; content: string; tags: string; format: string }
+function dateStamp(): string {
+  const d = new Date()
+  return `${d.getFullYear()}${pad2(d.getMonth() + 1)}${pad2(d.getDate())}`
+}
+async function exportAll() {
+  try {
+    const list = unwrap<NoteExportItem[]>(await ExportNotes()) || []
+    const blob = new Blob([JSON.stringify(list, null, 2)], { type: 'application/json;charset=utf-8' })
+    downloadBlob(`quickdock-notes-${dateStamp()}.json`, blob)
+    toast.success(t('notesExportDone', { count: list.length }))
+  } catch (e) {
+    logErr('NoteManager:exportAll', e)
+    toast.error(getErrorMessage(e))
+  }
+}
+const importInput = ref<HTMLInputElement | null>(null)
+function pickImportFile() { importInput.value?.click() }
+async function onImportFile(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  if (!file) return
+  try {
+    const text = await file.text()
+    const res = unwrap<{ created: number }>(await ImportNotes(text, '', file.name))
+    toast.success(t('notesImportDone', { count: res?.created ?? 0 }))
+    await load()
+  } catch (err) {
+    logErr('NoteManager:importNotes', err)
+    toast.error(getErrorMessage(err))
+  } finally {
+    input.value = '' // 允许连续选同一个文件
+  }
 }
 
 // 目录：从 markdown 源里抽 #/##/### 三级标题，纯前端、不依赖渲染结果。
@@ -686,6 +777,105 @@ function gotoHeading(text: string) {
   }
 }
 
+// ---- 修订历史（覆盖层 tab，不卸载 CodeMirror）----
+// 与「图谱」同级：作为覆盖层叠在编辑区上，编辑器宿主始终在 DOM 里，
+// 切回文档时光标与撤销历史都还在（同 NoteGraphPanel 的挂法）。
+interface NoteRevision {
+  id: string
+  noteId: string
+  name: string
+  content: string
+  tags: string
+  reason: string
+  createdAt: string
+}
+const historyOpen = ref(false)
+const historyLoading = ref(false)
+const revisions = ref<NoteRevision[]>([])
+const historyPreview = ref<NoteRevision | null>(null)
+const restoringRevId = ref('')
+const showRestoreConfirm = ref(false)
+function closeOverlays() {
+  graphOpen.value = false
+  historyOpen.value = false
+  historyPreview.value = null
+}
+function openGraph() {
+  historyOpen.value = false
+  historyPreview.value = null
+  graphOpen.value = true
+}
+function openHistory() {
+  graphOpen.value = false
+  historyOpen.value = true
+  historyPreview.value = null
+  void loadRevisions()
+}
+async function loadRevisions() {
+  const id = selectedDocId.value
+  if (!id) { revisions.value = []; return }
+  historyLoading.value = true
+  try {
+    revisions.value = unwrap<NoteRevision[]>(await ListNoteRevisions(id, 50)) || []
+  } catch (e) {
+    logErr('NoteManager:listRevisions', e)
+    toast.error(getErrorMessage(e))
+  } finally { historyLoading.value = false }
+}
+async function previewRevision(revId: string) {
+  try {
+    const r = unwrap<NoteRevision>(await GetNoteRevision(revId))
+    if (r) historyPreview.value = r
+  } catch (e) {
+    logErr('NoteManager:getRevision', e)
+    toast.error(getErrorMessage(e))
+  }
+}
+function askRestore(revId: string) {
+  restoringRevId.value = revId
+  showRestoreConfirm.value = true
+}
+/** 恢复后重新载入当前文档（GetNoteDoc 带正文与 updatedAt），并刷新版本列表。 */
+async function reloadCurrentDoc() {
+  const id = selectedDocId.value
+  if (!id) return
+  try {
+    const d = unwrap<Note | null>(await GetNoteDoc(id))
+    if (!d) return
+    for (const list of [nodes.value, allNodes.value]) {
+      const i = list.findIndex(n => n.id === id)
+      if (i >= 0) list[i] = { ...list[i], ...d }
+    }
+    docContent.value = d.content || ''
+    docTagsText.value = parseTagsS(d.tags).join(', ')
+  } catch (e) {
+    logErr('NoteManager:reloadDoc', e)
+    toast.error(getErrorMessage(e))
+  }
+}
+async function confirmRestore() {
+  const revId = restoringRevId.value
+  showRestoreConfirm.value = false
+  restoringRevId.value = ''
+  if (!revId) return
+  try {
+    unwrap(await RestoreNoteRevision(revId))
+    toast.success(t('notesHistoryRestored'))
+    await reloadCurrentDoc()
+    await loadRevisions()
+    historyPreview.value = null
+  } catch (e) {
+    logErr('NoteManager:restoreRevision', e)
+    toast.error(getErrorMessage(e))
+  }
+}
+/** 版本列表里的「内容前 60 字」，rune 安全截断、压掉换行。 */
+function revisionExcerpt(s: string): string {
+  const chars = Array.from(String(s || '').replace(/\s+/g, ' ').trim())
+  const cut = chars.slice(0, 60).join('')
+  return chars.length > 60 ? cut + '…' : cut
+}
+
 /** 搜索高亮切片：返回「命中段 / 普通段」交替的数组，模板里用 span 渲染。 */
 function highlightParts(text: string, q: string): { s: string; hit: boolean }[] {
   const src = String(text || '')
@@ -722,6 +912,41 @@ function rowHighlight(n: { name?: string; keyword?: string }) {
   return rowHighlightCache.value.get(text) ?? highlightParts(text, searchQuery.value)
 }
 
+/**
+ * 正文命中片段：把 content 压平换行后，围绕查询词截约 100 个 Unicode 码点
+ * （rune 安全用 Array.from 切片，中文/emoji 都不会被从中间劈开），命中词照样高亮。
+ * 文件夹、空正文、以及没有查询词（纯标签筛选）时返回空数组，不显示这一行。
+ */
+function snippetParts(content: string, q: string): { s: string; hit: boolean }[] {
+  const flat = String(content || '').replace(/[\r\n\t]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!flat) return []
+  const chars = Array.from(flat)
+  const needle = q.trim()
+  let start = 0
+  if (needle) {
+    const at = flat.toLowerCase().indexOf(needle.toLowerCase())
+    if (at >= 0) start = Math.max(0, Array.from(flat.slice(0, at)).length - 30)
+  }
+  const parts = highlightParts(chars.slice(start, start + 100).join(''), needle)
+  if (start > 0) parts.unshift({ s: '…', hit: false })
+  if (start + 100 < chars.length) parts.push({ s: '…', hit: false })
+  return parts
+}
+
+/** 片段缓存：只在 flatResults / searchQuery 变化时对每行算一次，避免模板里重复跑正则。 */
+const rowSnippetCache = computed(() => {
+  const m = new Map<string, { s: string; hit: boolean }[]>()
+  const q = searchQuery.value
+  if (!q.trim()) return m
+  for (const n of flatResults.value) {
+    if (n.isFolder) continue
+    const p = snippetParts(n.content || '', q)
+    if (p.length) m.set(n.id, p)
+  }
+  return m
+})
+function rowSnippet(n: { id: string }) { return rowSnippetCache.value.get(n.id) ?? [] }
+
 // 预览区与编辑区的滚动联动。
 //
 // 两栏独立滚动时，左边改到第 40 行、右边还停在第 3 行，对照修改完全没法用。
@@ -748,12 +973,24 @@ function syncScroll(from: 'input' | 'preview') {
 async function saveDoc() {
   if (!selectedDocId.value) return
   const id = selectedDocId.value
+  saveStatus.value = 'saving'
   try {
     const tagsJSON = buildTagsJSON(docTagsText.value)
     unwrap(await UpdateNoteDoc(id, docContent.value, tagsJSON))
     applyLocalTags(id, tagsJSON)
+    // 保存成功顺带把本地 updatedAt 推前，文档头部时间跟着刷新（不重拉整棵树）。
+    const stamp = new Date().toISOString()
+    for (const list of [nodes.value, allNodes.value]) {
+      const n = list.find(x => x.id === id)
+      if (n) n.updatedAt = stamp
+    }
+    saveStatus.value = 'saved'
+    if (savedResetTimer) clearTimeout(savedResetTimer)
+    savedResetTimer = setTimeout(() => { if (saveStatus.value === 'saved') saveStatus.value = 'idle' }, 2000)
   } catch (e) {
     logErr('NoteManager:saveDoc', e)
+    saveStatus.value = 'failed'
+    toast.error(getErrorMessage(e))
   }
 }
 async function copyDoc() {
@@ -828,6 +1065,54 @@ async function mountDocEditor() {
     logErr('NoteManager:editor', e)
     editorError.value = e instanceof Error ? e.message : String(e)
   }
+}
+
+/** 粘贴图片：canvas 等比压到最长边 1600px、JPEG 0.82 转 dataURL。
+ *  不新增后端接口，图片随笔记正文进快照；失败由调用方按 R9 提示。 */
+function imageToDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file)
+    const img = new Image()
+    img.onload = () => {
+      try {
+        const max = 1600
+        const scale = Math.min(1, max / Math.max(img.naturalWidth, img.naturalHeight))
+        const w = Math.max(1, Math.round(img.naturalWidth * scale))
+        const h = Math.max(1, Math.round(img.naturalHeight * scale))
+        const canvas = document.createElement('canvas')
+        canvas.width = w
+        canvas.height = h
+        const ctx = canvas.getContext('2d')
+        if (!ctx) throw new Error('canvas context unavailable')
+        ctx.drawImage(img, 0, 0, w, h)
+        resolve(canvas.toDataURL('image/jpeg', 0.82))
+      } catch (err) { reject(err) } finally { URL.revokeObjectURL(url) }
+    }
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('image decode failed')) }
+    img.src = url
+  })
+}
+async function insertPastedImage(file: File) {
+  try {
+    const dataUrl = await imageToDataUrl(file)
+    docEditor?.insertAtCursor(`![](${dataUrl})`)
+  } catch (err) {
+    logErr('NoteManager:pasteImage', err)
+    toast.error(getErrorMessage(err) || t('notesImagePasteFailed'))
+  }
+}
+// 宿主 DOM 上捕获阶段监听：只拦带 image 文件的 paste，其余交给 CodeMirror 自己处理。
+function onEditorPaste(e: ClipboardEvent) {
+  if (!docEditor) return
+  const items = e.clipboardData?.items
+  if (!items) return
+  const file = Array.from(items)
+    .find(it => it.kind === 'file' && it.type.startsWith('image/'))
+    ?.getAsFile()
+  if (!file) return
+  e.preventDefault()
+  e.stopPropagation()
+  void insertPastedImage(file)
 }
 
 // 切文档 / 切格式 → 重建实例。重建而不是 setValue：否则 Ctrl+Z 会退回上一篇的内容。
@@ -926,8 +1211,13 @@ async function renameCurrent() {
   try { unwrap(await RenameNoteNode(selectedDoc.value.id, selectedDoc.value.name)); await load() } catch (e) { toast.error(getErrorMessage(e)) }
 }
 
-onMounted(() => { loadTreePrefs(); loadRecent(); loadNoteView(); load() })
+onMounted(() => {
+  loadTreePrefs(); loadRecent(); loadNoteView(); load()
+  docEditorHost.value?.addEventListener('paste', onEditorPaste, true)
+})
 onBeforeUnmount(() => {
+  docEditorHost.value?.removeEventListener('paste', onEditorPaste, true)
+  if (savedResetTimer) clearTimeout(savedResetTimer)
   void flushPendingSave()
   offDocScroll?.()
   docEditor?.destroy()
@@ -946,12 +1236,13 @@ watch(pendingOpenNoteId, (id) => {
 
 <template>
   <div class="notes-page">
+    <input ref="importInput" type="file" class="ns-file-input" accept=".json,.md,.markdown,text/markdown,text/plain" @change="onImportFile" />
     <!-- 顶部 -->
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">{{ t('notesTitle') }}</h2>
         <span class="qd-page-sub">{{ t('notesSubtitle') }}</span>
-      </div>
+      </template>
       <div class="qd-page-fill">
         <div class="qd-input-wrap notes-search">
           <Search :size="14" />
@@ -960,10 +1251,10 @@ watch(pendingOpenNoteId, (id) => {
         </div>
         <div class="notes-tags">
           <button class="nt-chip" :class="{ active: activeTag === '' }" @click="activeTag = ''">{{ t('notesAllTags') }}</button>
-          <button v-for="tg in allTags" :key="tg" class="nt-chip" :class="{ active: activeTag === tg }" @click="activeTag = activeTag === tg ? '' : tg">{{ tg }}</button>
+          <button v-for="tg in backendTags" :key="tg" class="nt-chip" :class="{ active: activeTag === tg }" @click="activeTag = activeTag === tg ? '' : tg">{{ tg }}</button>
         </div>
       </div>
-    </div>
+    </PageHeader>
 
     <div class="notes-body">
       <!-- 左：树 -->
@@ -974,6 +1265,12 @@ watch(pendingOpenNoteId, (id) => {
           <div class="tt-group">
             <button class="tt-btn" :title="t('notesNewFolder')" @click="newFolderAt('')"><FolderPlus :size="13" /></button>
             <button class="tt-btn" :title="t('notesNewDoc')" @click="newDocAt('')"><FileText :size="13" /></button>
+            <div class="tt-menu-anchor">
+              <button class="tt-btn" :class="{ on: tplOpen }" :title="t('notesTplMenu')" @click="tplOpen = !tplOpen"><FilePlus2 :size="13" /></button>
+              <div v-if="tplOpen" class="tt-pop">
+                <button v-for="tpl in templateMenu" :key="tpl.key" class="tt-pop-item" @click="createFromTemplate(tpl)">{{ tpl.label }}</button>
+              </div>
+            </div>
           </div>
           <span class="tt-sep"></span>
           <div class="tt-group">
@@ -988,6 +1285,11 @@ watch(pendingOpenNoteId, (id) => {
             <button class="tt-btn" :title="treeCollapsed ? t('notesExpandTree') : t('notesCollapseTree')" @click="toggleTreeCollapsed">
               <component :is="treeCollapsed ? PanelLeft : PanelLeftClose" :size="13" />
             </button>
+          </div>
+          <span class="tt-sep"></span>
+          <div class="tt-group">
+            <button class="tt-btn" :title="t('notesExportAll')" @click="exportAll"><Download :size="13" /></button>
+            <button class="tt-btn" :title="t('notesImport')" @click="pickImportFile"><Upload :size="13" /></button>
           </div>
         </div>
 
@@ -1057,7 +1359,10 @@ watch(pendingOpenNoteId, (id) => {
             <div v-for="n in flatResults" :key="'res-'+n.id" class="qd-row sr-row" :class="{ active: !selectMode && selectedDocId === n.id, 'sel-on': selectMode && selectedIds.has(n.id) }" @click="selectMode ? toggleSelect(n.id) : (n.isFolder ? toggleFolder(n.id) : onDoc(n))">
               <span v-if="selectMode" class="tn-check" :class="{ on: selectedIds.has(n.id) }" @click.stop="toggleSelect(n.id)"></span>
               <component :is="n.isFolder ? Folder : FileText" :size="13" class="tn-icon" />
-              <span class="tn-name"><template v-for="(p, i) in rowHighlight(n)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></span>
+              <div class="sr-text">
+                <div class="sr-title"><template v-for="(p, i) in rowHighlight(n)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></div>
+                <div v-if="rowSnippet(n).length" class="sr-snippet"><template v-for="(p, i) in rowSnippet(n)" :key="i"><mark v-if="p.hit" class="tn-hl">{{ p.s }}</mark><template v-else>{{ p.s }}</template></template></div>
+              </div>
             </div>
           </template>
         </div>
@@ -1075,12 +1380,58 @@ watch(pendingOpenNoteId, (id) => {
         <!-- 视图 tab：文档 / 关系图谱。图谱铺满编辑区但不卸载它，
              切回来时 CodeMirror 的光标与撤销历史都还在。 -->
         <div class="ne-viewtabs">
-          <button :class="{ active: !graphOpen }" @click="graphOpen = false">{{ t('notesTitle') }}</button>
-          <button :class="{ active: graphOpen }" @click="graphOpen = true"><Network :size="13" />{{ t('graphTab') }}</button>
+          <button :class="{ active: !graphOpen && !historyOpen }" @click="closeOverlays()">{{ t('notesTitle') }}</button>
+          <button :class="{ active: graphOpen }" @click="openGraph()"><Network :size="13" />{{ t('graphTab') }}</button>
+          <button :class="{ active: historyOpen }" @click="openHistory()"><History :size="13" />{{ t('notesHistory') }}</button>
           <span class="ne-viewtabs-spacer"></span>
-          <button v-if="!graphOpen && selectedDoc && outlineHeadings.length" :class="{ active: outlineOpen }" :title="t('outlineTitle')" @click="outlineOpen = !outlineOpen"><PanelRight :size="13" /></button>
+          <button v-if="!graphOpen && !historyOpen && selectedDoc && outlineHeadings.length" :class="{ active: outlineOpen }" :title="t('outlineTitle')" @click="outlineOpen = !outlineOpen"><PanelRight :size="13" /></button>
         </div>
         <NoteGraphPanel v-if="graphOpen" class="ne-graph-overlay" @close="graphOpen = false" @open-target="onGraphOpenTarget" />
+        <!-- 修订历史：与图谱同级的覆盖层，不卸载编辑器宿主（光标/撤销历史保留） -->
+        <div v-if="historyOpen" class="ne-history-overlay">
+          <div class="nh-head">
+            <History :size="14" class="nh-head-icon" />
+            <span class="nh-title">{{ t('notesHistoryTitle') }}</span>
+            <span class="nh-count">{{ t('notesHistoryCount', { count: revisions.length }) }}</span>
+            <span class="nh-spacer"></span>
+            <button class="nh-icon-btn" :title="t('notesHistoryRefresh')" @click="loadRevisions()"><RefreshCw :size="13" /></button>
+            <button class="nh-icon-btn" :title="t('close')" @click="closeOverlays()"><X :size="13" /></button>
+          </div>
+          <div class="nh-body">
+            <div class="nh-list">
+              <div v-if="!selectedDocId" class="nh-empty">{{ t('notesHistoryNoDoc') }}</div>
+              <div v-else-if="historyLoading" class="nh-loading"><span class="nh-spinner"></span></div>
+              <div v-else-if="!revisions.length" class="nh-empty">{{ t('notesHistoryEmpty') }}</div>
+              <template v-else>
+                <button
+                  v-for="r in revisions" :key="r.id"
+                  class="nh-item"
+                  :class="{ active: historyPreview?.id === r.id }"
+                  @click="previewRevision(r.id)"
+                >
+                  <div class="nh-item-top">
+                    <span class="nh-time">{{ formatTime(r.createdAt) }}</span>
+                    <span class="nh-reason">{{ r.reason || t('notesHistoryAuto') }}</span>
+                  </div>
+                  <div class="nh-excerpt">{{ revisionExcerpt(r.content) }}</div>
+                </button>
+              </template>
+            </div>
+            <div class="nh-preview">
+              <template v-if="historyPreview">
+                <div class="nh-preview-meta">
+                  <span class="nh-time">{{ formatTime(historyPreview.createdAt) }}</span>
+                  <span class="nh-reason">{{ historyPreview.reason || t('notesHistoryAuto') }}</span>
+                </div>
+                <pre class="nh-preview-text">{{ historyPreview.content }}</pre>
+                <div class="nh-preview-foot">
+                  <button class="tb-btn" @click="askRestore(historyPreview.id)">{{ t('notesHistoryRestore') }}</button>
+                </div>
+              </template>
+              <div v-else class="nh-empty">{{ t('notesHistoryPick') }}</div>
+            </div>
+          </div>
+        </div>
         <div v-if="!selectedDoc" class="ne-empty"><FileText :size="32" /><p>{{ t('notesSelectHint') }}</p></div>
         <template v-else-if="selectedDoc.isFolder">
           <div class="ne-empty ne-folder"><Folder :size="32" /><p>{{ t('notesIsFolder') }}</p></div>
@@ -1088,6 +1439,14 @@ watch(pendingOpenNoteId, (id) => {
         <template v-else>
           <div class="ne-head">
             <input v-model="selectedDoc.name" class="ne-name" @change="renameCurrent" />
+            <span v-if="saveStatus !== 'idle'" class="ne-save" :class="saveStatus">
+              <Loader2 v-if="saveStatus === 'saving'" :size="12" class="ne-save-spin" />
+              <Check v-else-if="saveStatus === 'saved'" :size="12" />
+              <AlertTriangle v-else-if="saveStatus === 'failed'" :size="12" />
+              <template v-if="saveStatus === 'saving'">{{ t('notesSaveSaving') }}</template>
+              <template v-else-if="saveStatus === 'saved'">{{ t('notesSaveSaved') }}</template>
+              <template v-else-if="saveStatus === 'failed'">{{ t('notesSaveFailed') }}</template>
+            </span>
             <div class="ne-format">
               <button :class="{ active: selectedDoc.format !== 'text' }" @click="setFormat('markdown')">{{ t('notesFormatMd') }}</button>
               <button :class="{ active: selectedDoc.format === 'text' }" @click="setFormat('text')">{{ t('notesFormatText') }}</button>
@@ -1125,7 +1484,11 @@ watch(pendingOpenNoteId, (id) => {
           </div>
           <div class="ne-tags">
             <span class="ne-tags-label">{{ t('notesTag') }}</span>
-            <input v-model="docTagsText" class="ne-tags-input" :placeholder="t('notesTagsPh')" @change="saveDoc" />
+            <input v-model="docTagsText" class="ne-tags-input" list="note-tag-options" :placeholder="t('notesTagsPh')" @change="saveDoc" />
+            <datalist id="note-tag-options">
+              <option v-for="tg in backendTags" :key="tg" :value="tg"></option>
+            </datalist>
+            <span v-if="formattedUpdated" class="ne-updated">{{ t('notesUpdatedAt', { time: formattedUpdated }) }}</span>
             <span class="ne-stats" :title="t('notesStatsTitle')">
               {{ t('notesStats', { words: docStats.words, chars: docStats.chars, lines: docStats.lines }) }}
             </span>
@@ -1186,6 +1549,8 @@ watch(pendingOpenNoteId, (id) => {
       @confirm="confirmDeleteNode" @cancel="showDel = false" />
     <ConfirmDialog :visible="showBatchDel" :message="t('confirmDeleteBatch', { count: selectedCount })"
       @confirm="confirmBatchDelete" @cancel="showBatchDel = false" />
+    <ConfirmDialog :visible="showRestoreConfirm" :message="t('notesHistoryConfirm')"
+      @confirm="confirmRestore" @cancel="showRestoreConfirm = false" />
   </div>
 </template>
 
@@ -1442,5 +1807,107 @@ watch(pendingOpenNoteId, (id) => {
 .markdown-body :deep(.md-math-raw) {
   font-family: 'Consolas','Monaco',monospace; font-size: 12px;
   white-space: pre-wrap; word-break: break-word; color: var(--color-text-secondary);
+}
+
+/* 隐藏的导入 file input */
+.ns-file-input { display: none; }
+
+/* 保存态：挤在 ne-head 那一行，不新增高度 */
+.ne-save { display: inline-flex; align-items: center; gap: var(--space-1); flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
+.ne-save.saving { color: var(--color-text-muted); }
+.ne-save.saved { color: var(--color-success); }
+.ne-save.failed { color: var(--color-danger); }
+.ne-save-spin { animation: ne-save-rotate 1s linear infinite; }
+@keyframes ne-save-rotate { to { transform: rotate(360deg); } }
+.ne-updated { flex-shrink: 0; font-size: var(--text-xs); color: var(--color-text-disabled); }
+.ne-tags datalist { display: none; }
+
+/* 搜索结果：标题 + 正文命中片段两行 */
+.sr-row .tn-icon { flex-shrink: 0; color: var(--color-text-muted); }
+.sr-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.sr-title { font-size: var(--text-md); color: var(--color-text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sr-snippet { font-size: var(--text-xs); color: var(--color-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 新建模板下拉：复用浮层那套 token（popover 底 + 边框 + 阴影），不另造色彩 */
+.tt-menu-anchor { position: relative; flex-shrink: 0; }
+.tt-pop {
+  position: absolute; top: 100%; left: 0; z-index: 30; min-width: 160px;
+  margin-top: var(--space-1); padding: var(--space-1);
+  display: flex; flex-direction: column; gap: var(--space-1);
+  border: 1px solid var(--popover-border-color); border-radius: var(--radius-sm);
+  background: var(--color-popover-bg); box-shadow: var(--shadow-md);
+}
+.tt-pop-item {
+  padding: var(--space-2) var(--space-3); border: none; border-radius: var(--radius-xs);
+  background: transparent; color: var(--color-text-primary); text-align: left;
+  font-family: inherit; font-size: var(--text-sm); cursor: pointer; white-space: nowrap;
+}
+.tt-pop-item:hover { background: var(--color-bg-hover); }
+
+/* 修订历史覆盖层：与 ne-graph-overlay 同款，铺满编辑区、z-index 10 压在内容上；
+   顶部留一条 tab 高度，tab 栏（z-index 11）浮在最上面仍可点。 */
+.ne-history-overlay {
+  position: absolute; inset: 0; z-index: 10; padding-top: var(--space-9);
+  display: flex; flex-direction: column; background: var(--color-bg-primary);
+}
+.nh-head {
+  display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
+  padding: var(--space-2) var(--space-4); border-bottom: 1px solid var(--color-border);
+  background: var(--color-bg-secondary);
+}
+.nh-head-icon { color: var(--color-accent); flex-shrink: 0; }
+.nh-title { font-size: var(--text-md); font-weight: 600; color: var(--color-text-primary); }
+.nh-count { font-size: var(--text-xs); color: var(--color-text-disabled); }
+.nh-spacer { flex: 1; }
+.nh-icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0;
+  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
+  background: var(--color-bg-tertiary); color: var(--color-text-muted); cursor: pointer;
+}
+.nh-icon-btn:hover { color: var(--color-accent); border-color: var(--color-accent-border); }
+.nh-body { flex: 1; min-height: 0; display: flex; }
+.nh-list {
+  width: 300px; flex-shrink: 0; overflow-y: auto; padding: var(--space-2);
+  border-right: 1px solid var(--color-border); background: var(--color-bg-secondary);
+}
+.nh-empty { padding: var(--space-6) var(--space-4); color: var(--color-text-disabled); font-size: var(--text-xs); }
+.nh-loading { display: flex; align-items: center; justify-content: center; padding: var(--space-8); }
+.nh-spinner {
+  width: 22px; height: 22px; border: 2px solid var(--color-border);
+  border-top-color: var(--color-accent); border-radius: var(--radius-full);
+  animation: ne-save-rotate 0.9s linear infinite;
+}
+.nh-item {
+  display: block; width: 100%; text-align: left; margin-bottom: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid transparent; border-radius: var(--radius-sm);
+  background: transparent; color: var(--color-text-primary); cursor: pointer; font-family: inherit;
+}
+.nh-item:hover { background: var(--color-bg-hover); }
+.nh-item.active { background: var(--color-select-bg); border-color: var(--color-accent-border); }
+.nh-item-top { display: flex; align-items: baseline; gap: var(--space-2); }
+.nh-time { font-size: var(--text-xs); color: var(--color-text-secondary); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.nh-reason {
+  font-size: var(--text-2xs); color: var(--color-accent); flex-shrink: 0;
+  padding: 0 var(--space-2); border-radius: var(--radius-full); background: var(--color-accent-bg);
+}
+.nh-excerpt {
+  margin-top: var(--space-1); font-size: var(--text-xs); color: var(--color-text-muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.nh-preview { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--color-bg-primary); }
+.nh-preview-meta {
+  display: flex; align-items: center; gap: var(--space-2); flex-shrink: 0;
+  padding: var(--space-3) var(--space-4); border-bottom: 1px solid var(--color-border);
+}
+.nh-preview-text {
+  flex: 1; min-height: 0; margin: 0; padding: var(--space-4);
+  overflow: auto; white-space: pre-wrap; word-break: break-word;
+  color: var(--color-text-primary); font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.6;
+}
+.nh-preview-foot {
+  flex-shrink: 0; display: flex; justify-content: flex-end;
+  padding: var(--space-3) var(--space-4); border-top: 1px solid var(--color-border);
 }
 </style>

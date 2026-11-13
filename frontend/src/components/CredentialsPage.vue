@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 /**
  * 密码库页面：条目管理 + 浏览器扩展配对。
  *
@@ -12,7 +13,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  Check, Copy, Eye, EyeOff, Globe, KeyRound, Plus, RefreshCw, Trash2, Wand2,
+  Check, Copy, Download, Eye, EyeOff, Globe, KeyRound, Plus, RefreshCw, Trash2, Upload, Wand2,
 } from '@lucide/vue'
 import { unwrap } from '../utils/api'
 import { getErrorMessage } from '../utils/error'
@@ -21,8 +22,10 @@ import { useToast } from '../composables/useToast'
 import type { CredentialSummary } from '../composables/useCredential'
 import {
   CopyCredentialSecret, CopyExtensionKey, DeleteCredential, DisableExtension, EnableExtension,
-  GeneratePassword, ListCredentials, RevealCredential, SaveCredential, Status,
+  ExportCredentials, GeneratePassword, ImportCredentials, ListCredentials,
+  RevealCredential, SaveCredential, Status,
 } from '../../bindings/quickdock/services/credentials/credentialsservice'
+import { SelectLocalFile, SelectSavePath } from '../../bindings/quickdock/services/appservice'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -64,6 +67,21 @@ const revealedSecret = ref('')
 
 /** 浏览器集成：一次开关，长期有效。extBusy 防连点（开关是幂等接口，但连点会闪）。 */
 const extBusy = ref(false)
+
+/** 导出/导入面板。口令只在内存里待到这次调用结束，不进 ref 之外的任何地方。 */
+const transferMode = ref<'export' | 'import' | ''>('')
+const transferPassword = ref('')
+const transferBusy = ref(false)
+const transferResult = ref('')
+
+interface TransferReport {
+  total: number
+  created: number
+  updated: number
+  skipped: number
+  failed: number
+  errors?: string[]
+}
 
 const selected = computed(() => list.value.find((c) => c.id === selectedId.value) ?? null)
 const filtered = computed(() => {
@@ -161,7 +179,9 @@ async function save() {
       name: form.name.trim(),
       kind: form.kind,
       username: form.username.trim(),
-      secret: form.secret,
+      // 点过「显示密码」后 form.secret 里是明文；此时若又勾了「清除密码」，
+      // 两边同时传会让后端先清空、再被非空 secret 覆盖回来。以勾选项为准。
+      secret: form.clearSecret ? '' : form.secret,
       clearSecret: form.clearSecret,
       host: form.host.trim(),
       port: Number(form.port) || 0,
@@ -292,6 +312,74 @@ async function copyExtKey() {
   }
 }
 
+/** 展开/收起面板。切换模式时清空口令，免得导出口令被顺手带进导入框。 */
+function openTransfer(mode: 'export' | 'import') {
+  transferMode.value = transferMode.value === mode ? '' : mode
+  transferPassword.value = ''
+  transferResult.value = ''
+}
+
+function closeTransfer() {
+  transferMode.value = ''
+  transferPassword.value = ''
+  transferResult.value = ''
+}
+
+/**
+ * 导出 / 导入。
+ *
+ * 文件对话框走 AppService 的宿主能力（SelectSavePath / SelectLocalFile），
+ * 拿到绝对路径后交给后端读写：WebView2 里 <input type="file"> 只有伪造路径
+ * 和内存副本，拿不到真实文件（见 services/dialog.go）。
+ */
+async function runTransfer() {
+  if (transferBusy.value || !transferMode.value) return
+  const mode = transferMode.value
+  if (mode === 'export' && transferPassword.value.length < 8) {
+    toast.error(t('credTransferPwShort'))
+    return
+  }
+  // 导入会覆盖同站点同账号的已有条目，先问一次，别让用户事后才发现旧密码没了。
+  if (mode === 'import') {
+    const ok = await toast.confirm(t('credTransferImportConfirm'))
+    if (!ok) return
+  }
+  transferBusy.value = true
+  transferResult.value = ''
+  try {
+    if (mode === 'export') {
+      const day = new Date().toISOString().slice(0, 10)
+      const dest = (unwrap<string>(
+        await SelectSavePath(t('credTransferSaveTitle'), `quickdock-vault-${day}.qdvault`)) ?? '').trim()
+      if (!dest) return // 用户在「另存为」点了取消
+      const data = unwrap<{ count: number; bytes: number }>(
+        await ExportCredentials(dest, transferPassword.value))
+      transferResult.value = t('credTransferExported', { n: data?.count ?? 0, size: data?.bytes ?? 0 })
+      toast.success(t('credTransferExportedShort'))
+      await loadStatus()
+    } else {
+      const src = (unwrap<string>(await SelectLocalFile(t('credTransferOpenTitle'))) ?? '').trim()
+      if (!src) return
+      const rep = unwrap<TransferReport>(await ImportCredentials(src, transferPassword.value))
+      if (!rep) throw new Error(t('credTransferFailed'))
+      transferResult.value = t('credTransferImported', {
+        total: rep.total, created: rep.created, updated: rep.updated,
+        skipped: rep.skipped, failed: rep.failed,
+      })
+      if (rep.errors?.length) transferResult.value += ` ${rep.errors.join('; ')}`
+      toast.success(t('credTransferImportedShort'))
+      await load()
+      await loadStatus()
+    }
+    transferPassword.value = ''
+  } catch (e) {
+    toast.error(getErrorMessage(e) || t('credTransferFailed'))
+    logErr('CredentialsPage.transfer', e)
+  } finally {
+    transferBusy.value = false
+  }
+}
+
 onMounted(async () => {
   await Promise.all([load(), loadStatus()])
 })
@@ -299,31 +387,42 @@ onMounted(async () => {
 
 <template>
   <div class="cred-page">
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">{{ t('navCredentials') }}</h2>
         <span class="qd-page-sub">{{ t('credSubtitle', { n: status?.count ?? 0 }) }}</span>
-      </div>
+      </template>
+      <!-- 页头动作按 ui.md §3.1：一组次要动作（ghost）+ 1 个主按钮，
+           中间一条短竖线。原来 5 个同级按钮平铺，「新建」和「刷新」一样重。 -->
       <div class="qd-page-actions">
-        <button
-          class="cred-switch"
-          :class="{ 'is-on': status?.extensionEnabled }"
-          type="button"
-          role="switch"
-          :aria-checked="!!status?.extensionEnabled"
-          :disabled="extBusy"
-          @click="toggleExtension"
-        >
-          <Globe :size="14" />
-          {{ t('credExtTitle') }}
-          <span class="cred-switch-dot"></span>
-        </button>
-        <button class="qd-btn" @click="load()"><RefreshCw :size="14" /></button>
+        <div class="qd-action-group">
+          <button
+            class="cred-switch"
+            :class="{ 'is-on': status?.extensionEnabled }"
+            type="button"
+            role="switch"
+            :aria-checked="!!status?.extensionEnabled"
+            :disabled="extBusy"
+            @click="toggleExtension"
+          >
+            <Globe :size="14" />
+            {{ t('credExtTitle') }}
+            <span class="cred-switch-dot"></span>
+          </button>
+          <button class="qd-btn qd-btn-ghost" @click="load()"><RefreshCw :size="14" /></button>
+          <button class="qd-btn qd-btn-ghost" :disabled="transferBusy" @click="openTransfer('export')">
+            <Download :size="14" /> {{ t('credTransferExport') }}
+          </button>
+          <button class="qd-btn qd-btn-ghost" :disabled="transferBusy" @click="openTransfer('import')">
+            <Upload :size="14" /> {{ t('credTransferImport') }}
+          </button>
+        </div>
+        <span class="qd-action-sep"></span>
         <button class="qd-btn qd-btn-primary" @click="createNew">
           <Plus :size="14" /> {{ t('credNew') }}
         </button>
       </div>
-    </div>
+    </PageHeader>
 
     <!-- 开启状态：常驻一条说明条。密钥只在用户点「复制」时由后端写剪贴板，
          页面上不显示明文——它等价于密码库的读取权限，没必要挂在屏幕上。 -->
@@ -337,6 +436,30 @@ onMounted(async () => {
         <span class="cred-ext-badge">{{ t('credExtOn') }}</span>
       </div>
       <p class="cred-ext-hint">{{ t('credExtKeyHint') }}</p>
+    </div>
+
+    <!-- 导出/导入：内联面板而不是第二个弹窗，输入与按钮沿用本页既有类。 -->
+    <div v-if="transferMode" class="cred-transfer">
+      <p class="cred-transfer-desc">
+        {{ transferMode === 'export' ? t('credTransferExportDesc') : t('credTransferImportDesc') }}
+      </p>
+      <div class="cred-ext-row">
+        <span class="cred-ext-label">{{ t('credTransferPassword') }}</span>
+        <input
+          v-model="transferPassword"
+          type="password"
+          class="qd-input cred-transfer-pw"
+          autocomplete="new-password"
+          spellcheck="false"
+          :placeholder="t('credTransferPasswordHint')"
+          @keydown.enter.stop="runTransfer"
+        />
+        <button class="qd-btn qd-btn-primary qd-btn-sm" :disabled="transferBusy" @click="runTransfer">
+          {{ transferMode === 'export' ? t('credTransferRunExport') : t('credTransferRunImport') }}
+        </button>
+        <button class="qd-btn qd-btn-sm" @click="closeTransfer">{{ t('cancel') }}</button>
+      </div>
+      <p v-if="transferResult" class="cred-ext-hint cred-transfer-result">{{ transferResult }}</p>
     </div>
 
     <div v-if="status && !status.platformProtected" class="cred-warn">
@@ -553,6 +676,31 @@ onMounted(async () => {
   font-size: var(--text-xs);
   line-height: 1.6;
   color: var(--color-text-secondary);
+}
+
+/* 导出/导入面板：与浏览器集成条同构，但用中性底色区分它是一次性操作。 */
+.cred-transfer {
+  flex-shrink: 0;
+  padding: 10px 16px;
+  background: var(--color-bg-secondary);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.cred-transfer-desc {
+  margin: 0 0 8px;
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--color-text-secondary);
+}
+
+.cred-transfer-pw {
+  width: 220px;
+  flex-shrink: 0;
+}
+
+.cred-transfer-result {
+  color: var(--color-accent);
+  word-break: break-all;
 }
 
 .cred-warn {

@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 import { ref, computed, onMounted, inject, type Component } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { unwrap } from '../utils/api'
@@ -192,14 +193,14 @@ onMounted(load)
 
 <template>
   <div class="recycle-page" :class="{ embedded: props.embedded }">
-    <div class="qd-page-header">
+    <PageHeader>
       <!-- titles 插槽：见 ActivityPage 同名插槽（同一套嵌入契约） -->
-      <div class="qd-page-titles">
+      <template #titles>
         <slot name="titles">
           <h2 v-if="!props.embedded" class="qd-page-title">{{ t('recycleBin') }}</h2>
           <span v-if="!props.embedded" class="qd-page-sub">{{ t('recycleSubtitle') }}</span>
         </slot>
-      </div>
+      </template>
       <div class="qd-page-actions">
         <button class="qd-btn" :disabled="loading" @click="load">
           <RefreshCw :size="13" /> {{ t('logRefresh') }}
@@ -208,7 +209,7 @@ onMounted(load)
           <Trash2 :size="13" /> {{ t('recycleClear') }}
         </button>
       </div>
-    </div>
+    </PageHeader>
 
     <div class="recycle-filters">
       <button

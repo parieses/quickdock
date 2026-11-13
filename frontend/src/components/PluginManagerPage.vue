@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 defineOptions({ name: KEEP_ALIVE.plugins })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -794,14 +795,14 @@ onUnmounted(() => {
     @drop="onDrop"
   >
     <!-- 头部 -->
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">
           <Puzzle :size="17" />
           {{ t('pluginManager') }}
           <span v-if="plugins.length" class="plugin-count">{{ plugins.length }}</span>
         </h2>
-      </div>
+      </template>
       <div class="qd-page-actions">
         <button :class="['qd-btn', 'qd-btn-ghost', { 'is-on': activeView === 'market' }]" @click="activeView = activeView === 'local' ? 'market' : 'local'" :title="t('pluginMarket')">
           <Globe :size="14" />
@@ -824,7 +825,7 @@ onUnmounted(() => {
           <RefreshCw :size="14" />
         </button>
       </div>
-    </div>
+    </PageHeader>
 
     <div v-if="activeView === 'local'" class="plugin-local">
     <!-- 分类 Tabs -->
@@ -1500,7 +1501,7 @@ onUnmounted(() => {
 .plugin-empty:hover .empty-title { color: var(--color-accent); }
 
 .install-overlay-spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }
-.install-overlay-text { font-size: 13px; color: var(--color-text-secondary, #bdbdbd); }
+.install-overlay-text { font-size: var(--text-md); color: var(--color-text-secondary); }
 .spin { color: var(--color-accent); animation: qd-spin 0.9s linear infinite; }
 @keyframes qd-spin { to { transform: rotate(360deg); } }
 

@@ -73,7 +73,10 @@ var restoreCoreTables = []struct {
 // 这些表行数多、列随版本演进（CREATE TABLE + ALTER 叠加），故不做强类型映射，
 // 统一走 SnapshotPayload.Tables 的通用通道。
 var syncExtraTables = []string{
-	"notes",           // 笔记树
+	"notes", // 笔记树
+	// 修订历史跟笔记主体一起走：换机后正文回来了、能回滚的版本全丢了，
+	// 比不做修订还糟（用户会以为有历史）。
+	"note_revisions",  // 笔记修订历史
 	"todos",           // 待办 / 看板
 	"scheduled_tasks", // 定时任务
 	"monitors",        // 站点监控
@@ -381,9 +384,16 @@ func (d *Database) RestoreSnapshot(id string) error {
 		return fmt.Errorf("解析快照载荷失败: %w", err)
 	}
 
-	return d.Transaction(func(tx *sql.Tx) error {
+	if err := d.Transaction(func(tx *sql.Tx) error {
 		return restorePayload(tx, &payload)
-	})
+	}); err != nil {
+		return err
+	}
+	// notes 在事务里被 replaceTable 整表覆盖，而 notes_fts 已无触发器可自动同步
+	// （items_fts 靠 external-content 触发器能自同步，notes_fts 是普通内容表不行）。
+	// 事务提交、写锁释放后再重建一次，让索引与恢复后的正文一致。重建失败不回滚
+	// 已恢复的数据（正文是主体，索引是派生），下次启动 migrate 也会按行数差异自愈。
+	return d.rebuildNoteIndexWithLock()
 }
 
 // ExportFullDataAsJSON 导出全部数据为 JSON 字符串（不创建快照记录）
@@ -407,7 +417,11 @@ func (d *Database) RestoreFromJSON(jsonStr string) error {
 		return fmt.Errorf("解析数据失败: %w", err)
 	}
 
-	return d.Transaction(func(tx *sql.Tx) error {
+	if err := d.Transaction(func(tx *sql.Tx) error {
 		return restorePayload(tx, &payload)
-	})
+	}); err != nil {
+		return err
+	}
+	// 同 RestoreSnapshot：事务内整表覆盖了 notes，提交后重建全文索引。
+	return d.rebuildNoteIndexWithLock()
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"strings"
 
+	"quickdock/internal/db"
 	"quickdock/internal/logger"
 	"quickdock/services"
 )
@@ -23,8 +24,8 @@ func NewNoteService(app *services.AppService) *NoteService {
 	return &NoteService{App: app}
 }
 
-// quickNoteKeyword 快捷笔记固定关键词。
-const quickNoteKeyword = "__quicknote__"
+// quickNoteKeyword 快捷笔记固定关键词，口径以 db 包为准（树/搜索/图谱共用）。
+const quickNoteKeyword = db.NoteQuickKeyword
 
 func (s *NoteService) dbOK() *services.ApiResult {
 	return services.CheckDB(s.App.DB)
@@ -54,6 +55,9 @@ func (s *NoteService) SaveNote(content string) *services.ApiResult {
 	if err := s.App.DB.UpdateNote(n.ID, content); err != nil {
 		return services.Fail(err)
 	}
+	// 与文档保存走同一条派生链路；db 层会识别快捷笔记并跳过建边，
+	// 所以这里不用（也不该）特判，免得以后又漏一个入口。
+	s.syncWikiLinks(n.ID, content)
 	return services.Ok(nil)
 }
 
@@ -94,7 +98,14 @@ func (s *NoteService) CreateNoteDoc(parentId, name, content, format string) *ser
 		return r
 	}
 	node, err := s.App.DB.CreateNoteDoc(parentId, name, content, format)
-	return services.Wrap(node, err)
+	if err != nil {
+		return services.Fail(err)
+	}
+	// 新建时正文就可能带 [[wiki]]（模板、导入、MCP 建文档都是这条路径）。
+	// 以前只有 Update* 重建边，导致图谱里「正文有链接但没有线」，
+	// 而且要等用户再编辑保存一次才出现。派生数据失败不回滚新建。
+	s.syncWikiLinks(node.ID, content)
+	return services.Ok(node)
 }
 
 // RenameNoteNode 重命名文件夹/文档。

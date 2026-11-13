@@ -17,10 +17,41 @@ func registerNoteTools(s *MCPService, r *toolRegistrar) {
 
 	// ---- 只读 ----
 
+	// 只回精简项：旧实现把整篇 content 塞进结果，一篇几千字笔记就能吃掉
+	// 大半上下文。模型要全文时再用 note_read 按 id 精确取。
 	r.add(func(args map[string]any) (any, error) {
-		return unwrap(s.Note.SearchNotesTree(mcpsrv.Arg(args, "query")))
-	}, mcpsrv.LevelRead, "note_search", "搜索笔记（标题与正文）", []string{"query"},
-		map[string]any{"query": str("搜索关键词")})
+		return unwrap(s.Note.SearchNotesBrief(
+			mcpsrv.Arg(args, "query"), mcpsrv.ArgInt(args, "limit", 30)))
+	}, mcpsrv.LevelRead, "note_search", "搜索笔记（标题/正文/标签）。返回精简列表，每条只带 160 字命中片段，不含整篇正文；需要全文请用 note_read", []string{},
+		map[string]any{
+			"query": str("搜索关键词；留空返回全部笔记的前 N 条"),
+			"limit": mcpsrv.Int("最多返回条数，默认 30，上限 100"),
+		})
+
+	r.add(func(args map[string]any) (any, error) {
+		id, err := requireNoteID(args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrap(s.Note.GetNoteDoc(id))
+	}, mcpsrv.LevelRead, "note_read", "按 id 读取一篇笔记的完整内容（含正文、标签、修改时间）", []string{"id"},
+		map[string]any{"id": str("笔记 id（用 note_search 获取）")})
+
+	r.add(func(args map[string]any) (any, error) {
+		return unwrap(s.Note.ListNoteTags())
+	}, mcpsrv.LevelRead, "note_tags", "列出笔记库里已用过的全部标签", []string{}, map[string]any{})
+
+	r.add(func(args map[string]any) (any, error) {
+		id, err := requireNoteID(args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrap(s.Note.ListNoteRevisions(id, mcpsrv.ArgInt(args, "limit", 20)))
+	}, mcpsrv.LevelRead, "note_revisions", "列出某篇笔记的历史版本（自动保存点/导入/回滚），新的在前", []string{"id"},
+		map[string]any{
+			"id":    str("笔记 id"),
+			"limit": mcpsrv.Int("最多返回条数，默认 20"),
+		})
 
 	// ---- 低危写 ----
 
@@ -97,4 +128,51 @@ func registerNoteTools(s *MCPService, r *toolRegistrar) {
 		return unwrap(s.Note.SaveNote(content))
 	}, mcpsrv.LevelWrite, "note_quick", "把一段文本写入固定「快捷笔记」（覆盖式 upsert）。适合让 AI 把产出直接塞回 QuickDock 当草稿", []string{"content"},
 		map[string]any{"content": str("要保存的文本内容")})
+
+	r.add(func(args map[string]any) (any, error) {
+		id, err := requireNoteID(args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrap(s.Note.MoveNoteNode(id, mcpsrv.Arg(args, "parentId")))
+	}, mcpsrv.LevelWrite, "note_move", "把笔记或文件夹移到另一个文件夹下；parentId 留空表示移到根目录", []string{"id"},
+		map[string]any{
+			"id":       str("要移动的节点 id"),
+			"parentId": str("目标文件夹 id，留空则移到根目录"),
+		})
+
+	r.add(func(args map[string]any) (any, error) {
+		revID := mcpsrv.Arg(args, "revisionId")
+		if revID == "" {
+			return nil, errors.New("缺少参数 revisionId（用 note_revisions 获取）")
+		}
+		return unwrap(s.Note.RestoreNoteRevision(revID))
+		// 等级说明：环境页只有「只读 / 只读+低危写」两档，LevelRisk 恒不注册，
+		// 标成高危等于这个工具不存在。回滚虽覆盖当前正文，但 RestoreNoteRevision
+		// 会先把当前内容另存一个 rollback 修订点，随时能再滚回来 —— 可逆操作
+		// 与「建待办 / 启停服务」同档，放 LevelWrite 才真的可用。
+	}, mcpsrv.LevelWrite, "note_restore", "把某条历史版本回滚成笔记当前内容。会覆盖现有正文，但旧内容会自动另存一个回滚点，可再滚回来", []string{"revisionId"},
+		map[string]any{"revisionId": str("历史版本 id（用 note_revisions 获取）")})
+
+	r.add(func(args map[string]any) (any, error) {
+		id, err := requireNoteID(args)
+		if err != nil {
+			return nil, err
+		}
+		return unwrap(s.Note.DeleteNoteNode(id))
+		// 同 note_restore：不标 LevelRisk（默认恒不注册）。删除会写墓碑、子树
+		// 整份进回收站可一键恢复，属于可逆操作；描述里把连带删除讲清楚，
+		// 免得模型以为只是删一行。
+	}, mcpsrv.LevelWrite, "note_delete", "删除笔记或文件夹（文件夹会连带整棵子树）。删除会写墓碑，可在 QuickDock 设置→历史→回收站恢复", []string{"id"},
+		map[string]any{"id": str("要删除的节点 id")})
+}
+
+// requireNoteID 统一取 id 并给出可执行提示：模型拿到「缺少 id」时
+// 至少知道下一步该调哪个工具，而不是再盲试一次。
+func requireNoteID(args map[string]any) (string, error) {
+	id := mcpsrv.Arg(args, "id")
+	if id == "" {
+		return "", errors.New("缺少参数 id（用 note_search 获取）")
+	}
+	return id, nil
 }

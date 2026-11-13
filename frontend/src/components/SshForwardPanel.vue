@@ -33,12 +33,22 @@ import { getErrorMessage } from '../utils/error'
 import { useToast } from '../composables/useToast'
 import { logErr } from '../utils/logger'
 
-const props = defineProps<{
-  /** 抽屉是否打开；关闭时停轮询 */
-  open: boolean
-  /** 主机清单（SshPage 的 ListHosts 结果），供表单下拉；为空时面板自行回源 */
-  hosts?: SshHost[]
-}>()
+const props = withDefaults(
+  defineProps<{
+    /** 抽屉是否打开；关闭时停轮询 */
+    open: boolean
+    /** 主机清单（SshPage 的 ListHosts 结果），供表单下拉；为空时面板自行回源 */
+    hosts?: SshHost[]
+    /**
+     * 当前打开的终端标签，供「所属标签」下拉。抽屉本身没有 tabs 上下文，
+     * 不能自己调 ListSessions() 去猜 id——它拿不到用户看到的标签 id
+     * （SshTab.id 形如 `${hostId}::${序号}`），必须由 SshPage 传入。
+     * 数组默认值用工厂函数，避免多实例共享同一个数组引用。
+     */
+    tabs?: Array<{ id: string; label: string }>
+  }>(),
+  { tabs: () => [] },
+)
 
 const emit = defineEmits<{
   (e: 'close'): void
@@ -69,7 +79,18 @@ const form = reactive<SshForwardInput>({
   targetHost: '',
   targetPort: 0,
   autoStart: false,
+  // 新建表单不绑定任何终端标签页；留空串才符合 SshForwardInput 的必填契约。
+  // 重新生成 bindings 后该字段成了必填，漏了会让整个前端类型检查挂在这一行。
+  ownerTabId: '',
 })
+
+/** 列表「所属标签」列展示值：全局 → 全局文案；仍开着的标签 → 标签名；
+ *  绑定到一个已关闭的标签 → 退回显示原始 id（不冒称全局、也不丢信息）。 */
+function ownerTabLabel(v: SshForwardView): string {
+  const id = v.ownerTabId || ''
+  if (!id) return t('sshForwardOwnerGlobal')
+  return props.tabs.find((tb) => tb.id === id)?.label || id
+}
 
 // —— 行内删除二次确认态（组件内态，不用 confirm()）——
 const deleteId = ref('')
@@ -187,6 +208,8 @@ function openForm(v: SshForwardView | null) {
       targetHost: v.targetHost,
       targetPort: v.targetPort,
       autoStart: v.autoStart,
+      // 编辑已有规则要带回原绑定，否则一保存会把 ownerTabId 悄悄抹成全局。
+      ownerTabId: v.ownerTabId || '',
     })
   } else {
     editingId.value = ''
@@ -199,6 +222,8 @@ function openForm(v: SshForwardView | null) {
       targetHost: '',
       targetPort: 0,
       autoStart: false,
+      // 「全局（不随标签停止）」是默认值：留空串即不绑定任何标签。
+      ownerTabId: '',
     })
   }
   formVisible.value = true
@@ -403,6 +428,16 @@ onBeforeUnmount(() => {
         </label>
       </div>
 
+      <label class="sfp-field">
+        <span class="sfp-label">{{ t('sshForwardOwnerTab') }}</span>
+        <select v-model="form.ownerTabId" class="sfp-input">
+          <!-- 空串 = 全局（不随标签停止），也是默认值 -->
+          <option :value="''">{{ t('sshForwardOwnerGlobal') }}</option>
+          <option v-for="tb in tabs" :key="tb.id" :value="tb.id">{{ tb.label }}</option>
+        </select>
+        <span class="sfp-hint">{{ t('sshForwardOwnerHint') }}</span>
+      </label>
+
       <label class="sfp-check">
         <input type="checkbox" v-model="form.autoStart" />
         <span>{{ t('sshForwardAutoStart') }}</span>
@@ -436,6 +471,10 @@ onBeforeUnmount(() => {
         <div class="sfp-line">
           <span class="sfp-k">{{ t('sshForwardAddr') }}</span>
           <span class="sfp-addr">{{ addr(v) }}</span>
+        </div>
+        <div class="sfp-line">
+          <span class="sfp-k">{{ t('sshForwardOwnerTab') }}</span>
+          <span class="sfp-owner">{{ ownerTabLabel(v) }}</span>
         </div>
         <div class="sfp-meta">
           <span>{{ t('sshForwardTraffic') }} ↓{{ formatBytes(v.bytesIn) }} ↑{{ formatBytes(v.bytesOut) }}</span>
@@ -583,6 +622,10 @@ onBeforeUnmount(() => {
 .sfp-form-title { margin-bottom: var(--space-4); font-size: var(--text-sm); font-weight: 600; color: var(--color-text-primary); }
 .sfp-field { display: block; margin-bottom: var(--space-3); }
 .sfp-label { display: block; margin-bottom: var(--space-1); font-size: var(--text-2xs); color: var(--color-text-muted); }
+/* 「所属标签」下拉下方的说明：复用表单小字层级，只用已有 token，无内联 style。 */
+.sfp-hint { display: block; margin-top: var(--space-1); font-size: var(--text-2xs); line-height: 1.5; color: var(--color-text-disabled); }
+/* 列表里「所属标签」的值：比 sfp-k 标签高一档，便于和键区分。 */
+.sfp-owner { font-size: var(--text-xs); color: var(--color-text-secondary); }
 .sfp-input {
   width: 100%; box-sizing: border-box;
   padding: var(--space-2) var(--space-3);

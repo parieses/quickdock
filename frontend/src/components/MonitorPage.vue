@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import PageHeader from './PageHeader.vue'
 defineOptions({ name: KEEP_ALIVE.monitor })
 // name 的唯一来源：pages/keepAlive.ts（与 KeepAlive 白名单共用同一常量）
 import { KEEP_ALIVE } from '../pages/keepAlive'
@@ -979,11 +980,11 @@ onUnmounted(() => {
 <template>
   <div class="mon-page">
     <!-- 顶部栏 -->
-    <div class="qd-page-header">
-      <div class="qd-page-titles">
+    <PageHeader>
+      <template #titles>
         <h2 class="qd-page-title">{{ t('mon_title') }}</h2>
         <span class="qd-page-sub">{{ t('mon_subtitle') }}</span>
-      </div>
+      </template>
       <div class="qd-page-actions">
         <div v-if="viewMode !== 'status'" class="refresh-control">
           <RefreshCw :size="14" />
@@ -1003,7 +1004,7 @@ onUnmounted(() => {
         </button>
         <button class="qd-btn qd-btn-primary" @click="openCreate"><Plus :size="14" /> {{ t('mon_add') }}</button>
       </div>
-    </div>
+    </PageHeader>
 
     <div v-if="error" class="mon-error">{{ error }}</div>
 
@@ -1640,6 +1641,15 @@ onUnmounted(() => {
 .act:hover:not(:disabled) { color: var(--color-text-primary); background: var(--color-bg-active); }
 .act:disabled { opacity: 0.4; cursor: default; }
 .act.danger:hover { color: var(--color-danger); background: var(--color-danger-bg); }
+/* 行操作默认收起，只留启用开关（那是状态信号，必须常驻）。
+   与知识库 .kb-doc-actions 同一套「常驻占位 + 透明度切换」，不用
+   display:none —— 那会让 hover 时行凭空变宽、整行跳一下。
+   disabled 的按钮（正在检测）保持可见，转圈才有落点。 */
+.item-actions .act { opacity: 0; transition: opacity var(--transition-fast); }
+.mon-item:hover .item-actions .act,
+.mon-item.picked .item-actions .act,
+.item-actions:focus-within .act,
+.item-actions .act:disabled { opacity: 1; }
 .spin { animation: mon-spin 0.8s linear infinite; }
 @keyframes mon-spin { to { transform: rotate(360deg); } }
 .expand-btn {
