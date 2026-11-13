@@ -234,7 +234,95 @@ jobs:
           if-no-files-found: error
 
   # ─────────────────────────────────────────────────────────────
-  # 2) macOS：**暂时移除**（2026-09-17）。原 build-macos job（matrix 双架构 macos-15 /
+  # 2) 浏览器扩展：打 zip（版本号由 tag 注入），产物上传为 artifact
+  #    pack.py 会按白名单收文件并自查三件事（manifest 在 zip 根、无反斜杠路径、
+  #    没混进 keys/ 私钥）。这里再加一道：包内 manifest.version 必须等于 tag ——
+  #    扩展版本完全跟随桌面 tag，两者不一致时商店会因为「版本没递增」拒收。
+  # ─────────────────────────────────────────────────────────────
+  build-extension:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          # pack.py 用 git describe --tags 取版本；浅克隆拿不到 tag。
+          fetch-depth: 0
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Extract version from tag
+        shell: pwsh
+        run: |
+          $ver = "$env:GITHUB_REF_NAME" -replace '^v', ''
+          echo "VERSION=$ver" >> $env:GITHUB_ENV
+
+      - name: 打包扩展 zip
+        shell: pwsh
+        env:
+          # 直接跑系统 python（runner 的控制台代码页不一定是 UTF-8，
+          # 脚本里的中文提示会 UnicodeEncodeError，这两个变量把 IO 钉成 UTF-8）。
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          # --force：发布包必须每次实际生成。默认的「源码摘要没变就跳过」是给本地
+          # 反复打包用的，在 CI 里没有意义（每次都是干净检出），跳过只会导致
+          # 这个 tag 的 Release 缺附件。
+          python browser-ext/pack.py --force
+
+      - name: 校验扩展包与 tag 一致
+        shell: pwsh
+        env:
+          PYTHONUTF8: '1'
+          PYTHONIOENCODING: 'utf-8'
+        run: |
+          $code = @'
+          import glob, json, os, sys, zipfile
+
+          zips = sorted(glob.glob('browser-ext/dist/*.zip'))
+          if len(zips) != 1:
+              sys.exit(f'期望 1 个 zip，实际 {len(zips)} 个：{zips}')
+
+          path = zips[0]
+          with zipfile.ZipFile(path) as z:
+              names = z.namelist()
+              manifest = json.loads(z.read('manifest.json'))
+
+          want = os.environ['VERSION']
+          problems = []
+          if 'manifest.json' not in names:
+              problems.append('manifest.json 不在 zip 根目录')
+          if any('\\' in n for n in names):
+              problems.append('存在反斜杠路径')
+          leaked = [n for n in names if n.startswith('keys/') or n.endswith('.pem')]
+          if leaked:
+              problems.append(f'私钥被打进包：{leaked}')
+          if manifest['version'] != want:
+              problems.append(f"包内版本 {manifest['version']} 与 tag {want} 不一致")
+          if 'key' not in manifest:
+              problems.append('manifest 缺 key：扩展 ID 会随安装目录变化')
+          if problems:
+              sys.exit('扩展包校验失败：' + '；'.join(problems))
+
+          print(f"扩展包 OK：{os.path.basename(path)}  版本 {manifest['version']}  {len(names)} 个文件")
+          '@
+          # 必须走 Set-Content 而不是 `| Out-File`：后者按控制台列宽折行，
+          # 上面那两行 f-string 超过 80 列，折了就是语法错误（而且报错指向无关行）。
+          Set-Content -Path verify_ext.py -Value $code -Encoding utf8NoBOM
+          python verify_ext.py
+
+      - name: Upload extension artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ext
+          path: browser-ext/dist/*.zip
+          if-no-files-found: error
+
+  # ─────────────────────────────────────────────────────────────
+  # 3) macOS：**暂时移除**（2026-09-17）。原 build-macos job（matrix 双架构 macos-15 /
   #    macos-15-intel → .dmg + .zip）已停用，发版只产出 Windows 产物。
   #    恢复方式：从 git 历史取回本 job；同时需要一并恢复下方 publish-manifest 里的
   #    needs/mac zip 入参与 Upload Release Assets 的 mac 文件（三处齐全才闭环）。
@@ -242,10 +330,10 @@ jobs:
   # ─────────────────────────────────────────────────────────────
 
   # ─────────────────────────────────────────────────────────────
-  # 3) publish-manifest：合并所有产物 → 生成签名 manifest.json → 上传到 Release
+  # 4) publish-manifest：合并所有产物 → 生成签名 manifest.json → 上传到 Release
   # ─────────────────────────────────────────────────────────────
   publish-manifest:
-    needs: [build-windows]
+    needs: [build-windows, build-extension]
     # ⚠️ 勿改回 ubuntu-latest：本 job 需要 wails3 CLI（`wails3 updater manifest` 签名生成 manifest.json），
     # 而 `go install .../cmd/wails3` 在 Linux 上会连带编译 internal/operatingsystem，
     # 该包用 cgo + pkg-config 依赖 gtk4 / webkitgtk-6.0：
@@ -342,7 +430,13 @@ jobs:
       - name: Upload Release Assets
         uses: ncipollo/release-action@v1
         with:
-          artifacts: "dist/quickdock-amd64-installer.exe,dist/quickdock-amd64.exe,dist/manifest.json"
+          # 扩展 zip 由 build-extension 产出，经 download-artifact 摊平到 dist/。
+          # 它不进 updater manifest（那是桌面端的就地替换 payload），只作为附件分发。
+          artifacts: |
+            dist/quickdock-amd64-installer.exe
+            dist/quickdock-amd64.exe
+            dist/manifest.json
+            dist/quickdock-vault-extension-v*.zip
           generateReleaseNotes: true
           allowUpdates: true
           omitBodyDuringUpdate: true

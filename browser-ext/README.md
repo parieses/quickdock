@@ -86,6 +86,8 @@ python browser-ext/pack.py --force   # 无条件重打
 - 出包自查三件事：`manifest.json` 在 zip 根目录、没有反斜杠路径、`keys/` 没混进去
 - 直接加载源码目录时版本显示 `0.0.0`，看到它就说明当前是未打包状态
 
+**发版时由 CI 出包**：推 `v*` tag 后 `.github/workflows/release.yml` 里的 `build-extension` job 会跑 `pack.py --force`，校验包内版本与 tag 一致，把 zip 作为附件挂到 Release。所以本地通常不必再手动打一遍。
+
 `keys/` 下的签名私钥不入库，需要自己另存一份。
 
 ## 安全边界
