@@ -16,7 +16,8 @@ import (
 	"quickdock/internal/logger"
 )
 
-// 修订留痕原因。前端只展示 save 之外的三类，save 统一显示「自动保存点」。
+// 修订留痕原因。落库存稳定枚举（不做本地化）：节流判断与历史数据都按字面值比对，
+// 展示层的中英文案由前端 revisionReasonLabel 映射，别把中文写进这里。
 const (
 	noteRevisionSave     = "save"
 	noteRevisionImport   = "import"

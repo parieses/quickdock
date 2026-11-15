@@ -30,6 +30,7 @@ import {
   CreateNoteDoc,
   RenameNoteNode,
   UpdateNoteDoc,
+  UpdateNoteDocTags,
   MoveNoteNode,
   DeleteNoteNode,
   SetNoteDocFormat,
@@ -226,18 +227,19 @@ async function batchMove() {
 async function batchTag() {
   const tag = batchTagText.value.trim()
   if (!tag) return
-  await flushPendingSave() // 先把当前文档落盘，避免覆盖未保存正文
+  await flushPendingSave() // 先把当前文档落盘（正文与标签以编辑器为准）
   const ids = [...selectedIds.value]
   try {
     for (const id of ids) {
       const node = nodes.value.find(n => n.id === id)
       if (!node || node.isFolder) continue
-      // 当前打开的文档用编辑器实时内容，其余用库里内容，合并标签后回写（保留正文）。
-      const content = id === selectedDocId.value ? docContent.value : (node.content || '')
+      // 只改标签，不要把 node.content 回写：本地树是 load 时的快照，
+      // 万一比库里旧（外部 MCP / AI 改过，或保存还没同步），这一写就把正文覆盖了。
+      // UpdateNoteDocTags 走 db 层只 UPDATE tags，正文原封不动。
       const cur = parseTagsS(node.tags)
       if (!cur.includes(tag)) cur.push(tag)
       const tagsJSON = JSON.stringify(cur)
-      unwrap(await UpdateNoteDoc(id, content, tagsJSON))
+      unwrap(await UpdateNoteDocTags(id, tagsJSON))
       applyLocalTags(id, tagsJSON)
     }
     toast.success(t('notesBatchTagDone', { count: ids.length }))
@@ -306,6 +308,15 @@ async function load() {
     // 快捷笔记与树节点共用一张表：它的 keyword 固定，name 会回退成 keyword，
     // 于是会以一个叫 __quicknote__ 的节点挂在树里。它不是树的一部分，必须排除。
     const list = (r || []).filter(n => n.keyword !== QUICK_NOTE_KEYWORD)
+    // 新建 / 重命名 / 批量操作都会重拉整棵树。若此刻当前文档的防抖保存还没
+    // 落盘，拉回来的旧 content 会顶掉编辑器里的内容；这里以编辑器为准。
+    if (selectedDocId.value) {
+      const cur = list.find(n => n.id === selectedDocId.value)
+      if (cur) {
+        cur.content = docContent.value
+        cur.tags = buildTagsJSON(docTagsText.value)
+      }
+    }
     nodes.value = list
     allNodes.value = list
     void loadTags()
@@ -604,7 +615,7 @@ async function flushPendingSave() {
   try {
     const tagsJSON = buildTagsJSON(docTagsText.value)
     unwrap(await UpdateNoteDoc(id, content, tagsJSON))
-    applyLocalTags(id, tagsJSON)
+    applyLocalDoc(id, content, tagsJSON)
   } catch (e) {
     logErr('NoteManager:flushPendingSave', e)
     saveStatus.value = 'failed'
@@ -613,11 +624,11 @@ async function flushPendingSave() {
 }
 
 /**
- * 保存后只在本地同步 tags，不重拉整棵树。
+ * 批量打标签后只在本地同步 tags，不重拉整棵树。
  *
- * 自动保存每 800ms 就可能触发一次，而 ListNotesTree 返回的是整库节点：
- * 大库下每次保存都会重排/重渲染整棵树（滚动位置跳、输入卡顿），而实际上
- * 只有 tags 变了——内容不参与树渲染。
+ * 正文保存走 applyLocalDoc（必须连 content 一起同步）；这里是批量动作，
+ * 后端只改了 tags，不碰正文。不重拉树是因为 ListNotesTree 返回整库节点，
+ * 大库下重排/重渲染整棵树会让滚动位置跳、输入卡顿。
  */
 function applyLocalTags(id: string, tagsJSON: string) {
   for (const list of [nodes.value, allNodes.value]) {
@@ -625,18 +636,49 @@ function applyLocalTags(id: string, tagsJSON: string) {
   }
 }
 
+/**
+ * 保存成功后同步本地树缓存里的正文 / 标签 / 时间。
+ *
+ * 正文必须一起同步：onDoc 切文档时是从树节点读 content，而 ListNotesTree 只在
+ * load 时拉一次。以前只同步 tags + updatedAt，新建笔记保存成功后本地节点里的
+ * content 仍是建文档时的空串 —— 切到别的笔记再切回来，编辑器就被这个空串覆盖，
+ * 随后任意一次自动保存还会把空串写回 DB，显示异常变成真正的内容丢失。
+ *
+ * 与 applyLocalTags 分开：批量打标签不改正文，那几处只动 tags 就够了。
+ */
+function applyLocalDoc(id: string, content: string, tagsJSON: string) {
+  const stamp = new Date().toISOString()
+  for (const list of [nodes.value, allNodes.value]) {
+    const n = list.find(x => x.id === id)
+    if (!n) continue
+    n.content = content
+    n.tags = tagsJSON
+    n.updatedAt = stamp
+  }
+}
+
+let docSwitchSeq = 0
 async function onDoc(d: Note) {
   if (d.isFolder) return
+  // 点当前已打开的文档：只强制落盘，不用树节点快照重置编辑器，
+  // 否则防抖窗口内的输入会被旧 content 冲掉。
+  if (d.id === selectedDocId.value) { await flushPendingSave(); return }
+  const seq = ++docSwitchSeq
   await flushPendingSave() // 切文档前先落盘当前文档，避免防抖窗口内切换丢失内容
+  // flush 是异步的，等待期间用户可能又点了另一篇；这次切换已过期，别覆盖新选择。
+  if (seq !== docSwitchSeq) return
   aiOpen.value = false // 切走文档时关掉 AI 覆盖层：它贴在旧文档上，留着会写错地方
   savedCaret.value = -1
   if (saveStatus.value !== 'failed') saveStatus.value = 'idle'
-  selectedDocId.value = d.id
-  docContent.value = d.content || ''
+  // 树里的 n 是 buildTree 浅拷出来的 TreeNode，可能还是保存前的旧快照；
+  // 按 id 取本地最新节点，实在找不到（搜索子集）再退回传入对象。
+  const fresh = nodes.value.find(x => x.id === d.id) ?? allNodes.value.find(x => x.id === d.id) ?? d
+  selectedDocId.value = fresh.id
+  docContent.value = fresh.content || ''
   pushRecent(d.id)
-  docTagsText.value = parseTagsS(d.tags).join(', ')
+  docTagsText.value = parseTagsS(fresh.tags).join(', ')
   // 展开祖先
-  let cur = d.parentId
+  let cur = fresh.parentId
   const s = new Set(expanded.value)
   while (cur) {
     s.add(cur)
@@ -869,6 +911,23 @@ async function confirmRestore() {
     toast.error(getErrorMessage(e))
   }
 }
+/**
+ * 修订原因本地化。
+ *
+ * db 层存的是稳定枚举（save / import / rollback / clip），不能改成中文：
+ * 节流判断与历史数据都按这些字面值比对。以前模板直接渲染 r.reason，
+ * 中文界面里就冒出「save」「rollback」两个英文词。空值或未知值仍走
+ * 「自动保存」兜底，未知枚举显示原文便于排查，不把界面弄成空白。
+ */
+function revisionReasonLabel(reason: string): string {
+  switch (reason) {
+    case 'save': return t('notesHistoryAuto')
+    case 'import': return t('notesHistoryReasonImport')
+    case 'rollback': return t('notesHistoryReasonRollback')
+    case 'clip': return t('notesHistoryReasonClip')
+    default: return reason || t('notesHistoryAuto')
+  }
+}
 /** 版本列表里的「内容前 60 字」，rune 安全截断、压掉换行。 */
 function revisionExcerpt(s: string): string {
   const chars = Array.from(String(s || '').replace(/\s+/g, ' ').trim())
@@ -973,23 +1032,22 @@ function syncScroll(from: 'input' | 'preview') {
 async function saveDoc() {
   if (!selectedDocId.value) return
   const id = selectedDocId.value
+  // 先快照：await 期间用户可能已经切到另一篇或继续输入，
+  // 之后再读 docContent.value 会把别篇的正文写到这篇上。
+  const content = docContent.value
+  const tagsJSON = buildTagsJSON(docTagsText.value)
   saveStatus.value = 'saving'
   try {
-    const tagsJSON = buildTagsJSON(docTagsText.value)
-    unwrap(await UpdateNoteDoc(id, docContent.value, tagsJSON))
-    applyLocalTags(id, tagsJSON)
-    // 保存成功顺带把本地 updatedAt 推前，文档头部时间跟着刷新（不重拉整棵树）。
-    const stamp = new Date().toISOString()
-    for (const list of [nodes.value, allNodes.value]) {
-      const n = list.find(x => x.id === id)
-      if (n) n.updatedAt = stamp
-    }
+    unwrap(await UpdateNoteDoc(id, content, tagsJSON))
+    applyLocalDoc(id, content, tagsJSON)
+    // 异步保存回来时若已切走，别把「已保存」贴到新文档头上。
+    if (selectedDocId.value !== id) return
     saveStatus.value = 'saved'
     if (savedResetTimer) clearTimeout(savedResetTimer)
     savedResetTimer = setTimeout(() => { if (saveStatus.value === 'saved') saveStatus.value = 'idle' }, 2000)
   } catch (e) {
     logErr('NoteManager:saveDoc', e)
-    saveStatus.value = 'failed'
+    if (selectedDocId.value === id) saveStatus.value = 'failed'
     toast.error(getErrorMessage(e))
   }
 }
@@ -1411,7 +1469,7 @@ watch(pendingOpenNoteId, (id) => {
                 >
                   <div class="nh-item-top">
                     <span class="nh-time">{{ formatTime(r.createdAt) }}</span>
-                    <span class="nh-reason">{{ r.reason || t('notesHistoryAuto') }}</span>
+                    <span class="nh-reason">{{ revisionReasonLabel(r.reason) }}</span>
                   </div>
                   <div class="nh-excerpt">{{ revisionExcerpt(r.content) }}</div>
                 </button>
@@ -1421,7 +1479,7 @@ watch(pendingOpenNoteId, (id) => {
               <template v-if="historyPreview">
                 <div class="nh-preview-meta">
                   <span class="nh-time">{{ formatTime(historyPreview.createdAt) }}</span>
-                  <span class="nh-reason">{{ historyPreview.reason || t('notesHistoryAuto') }}</span>
+                  <span class="nh-reason">{{ revisionReasonLabel(historyPreview.reason) }}</span>
                 </div>
                 <pre class="nh-preview-text">{{ historyPreview.content }}</pre>
                 <div class="nh-preview-foot">
