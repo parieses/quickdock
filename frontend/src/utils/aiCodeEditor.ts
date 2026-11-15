@@ -26,6 +26,7 @@ import {
 } from '@codemirror/language'
 import { tags as t } from '@lezer/highlight'
 import { i18n } from '../i18n'
+import { log } from './logger'
 
 /** 查找栏文案。DOM 是命令式创建的，拿不到 useI18n() 的组件上下文，直接问全局实例 */
 const tf = (k: string): string => (i18n.global.t as (key: string) => string)(k)
@@ -117,8 +118,40 @@ export interface CodeEditorOpts {
   fold?: boolean
 }
 
+/**
+ * 动态 import 的统一入口：失败重试一次。
+ *
+ * 本文件的模块几乎全是动态 import，dev 期这些请求会撞上 vite 预构建（dep optimizer）
+ * 重排——优化器换了 browserHash 后，旧 `?v=` 的请求一律回 504 Outdated Optimize Dep。
+ * 静态 import 由 vite 客户端兜底（自动整页重载），动态 import 没有这层保护，错误直接
+ * 抛给调用方，表现就是「源码视图一片空白」。
+ * 重试一次基本够用：预构建是毫秒级的事，第二次请求就能命中新产物。
+ */
+async function importWithRetry<T>(load: () => Promise<T>): Promise<T> {
+  try {
+    return await load()
+  } catch (e) {
+    log.warn('CodeEditor', 'dynamic import failed, retrying once', e)
+    await new Promise((r) => setTimeout(r, 300))
+    return load()
+  }
+}
+
 // 语言按扩展名懒加载。default 返回 null = 纯文本编辑（行号/搜索/undo 照有）。
+//
+// 语言包是「锦上添花」：拿不到高亮照样能写，所以这层永远不抛异常——失败就退成纯文本。
+// 让它 reject 会顺着 createCodeEditor 的 Promise.all 冒出去，导致整个编辑器起不来
+// （宿主 div 永久空白），代价远大于丢掉语法着色。
 async function languageFor(filename: string): Promise<Extension | null> {
+  try {
+    return await importWithRetry(() => languageForOnce(filename))
+  } catch (e) {
+    log.warn('CodeEditor', 'language pack unavailable, falling back to plain text', e)
+    return null
+  }
+}
+
+async function languageForOnce(filename: string): Promise<Extension | null> {
   const name = (filename || '').trim().toLowerCase()
   // 没有文件名（配置文件编辑器：nginx / my.cnf / php.ini 一堆）按 ini 着色兜底，
   // 那类「键 值 / 键 = 值」的文本至少能让注释与字符串有区分。
@@ -214,14 +247,19 @@ function clampLine(lines: number, line: number): number {
 
 export async function createCodeEditor(host: HTMLElement, opts: CodeEditorOpts): Promise<CodeEditorHandle> {
   const [{ basicSetup }, { indentWithTab }, { EditorState, Transaction }, searchMod, lang] =
-    await Promise.all([
+    await importWithRetry(() => Promise.all([
       import('codemirror'),
       import('@codemirror/commands'),
       import('@codemirror/state'),
       import('@codemirror/search'),
       languageFor(opts.filename),
-    ])
-  await import('../styles/cm-theme.css')
+    ]))
+  // 主题样式同样降级处理：拿不到只是没有配色，编辑器本体还能用
+  try {
+    await importWithRetry(() => import('../styles/cm-theme.css'))
+  } catch (e) {
+    log.warn('CodeEditor', 'cm-theme.css unavailable, editor will be unstyled', e)
+  }
 
   // 搜索状态：命中列表 + 跳转 + 替换的原子操作，内置查找栏与调用方共用。
   let searchQ = ''

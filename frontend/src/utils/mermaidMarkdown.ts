@@ -191,8 +191,12 @@ interface MermaidApi {
 let loading: Promise<MermaidApi> | null = null
 
 function loadMermaid(): Promise<MermaidApi> {
+  // 失败不缓存：dev 期首次加载 mermaid 可能撞上 vite 预构建重排拿到 504，
+  // 把 rejected promise 留在 loading 里，这张图到下次整页刷新前都画不出来。
   if (!loading) {
-    loading = import('mermaid').then((mod) => ((mod as { default?: MermaidApi }).default ?? mod) as MermaidApi)
+    loading = import('mermaid')
+      .then((mod) => ((mod as { default?: MermaidApi }).default ?? mod) as MermaidApi)
+      .catch((e) => { loading = null; throw e })
   }
   return loading
 }

@@ -79,6 +79,13 @@ export default defineConfig({
       "@codemirror/legacy-modes/mode/shell",
       "@codemirror/legacy-modes/mode/toml",
       "@codemirror/legacy-modes/mode/nginx",
+      // ⚠ 列全了也不等于绝对安全：Vite 8(rolldown) 的优化器仍可能中途把
+      // node_modules/.vite/deps 拆掉重建却不收尾（deps 目录消失，只剩一堆只有
+      // package.json 的 deps_temp_*），此后任何「本进程还没缓存过」的依赖请求
+      // 一律 504 Outdated Optimize Dep。恢复手段：npx vite optimize --force
+      // 后刷新页面（或直接重启 dev）。代码侧已做 fail-soft 兜底
+      //（utils/aiCodeEditor.ts 的 importWithRetry）：语言包/主题样式拿不到
+      // 只降级成纯文本，不再让整个编辑器变成永久空白。
     ],
   },
   plugins: [
