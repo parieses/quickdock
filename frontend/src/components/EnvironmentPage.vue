@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import EnvCoreDialogs from './EnvCoreDialogs.vue'
+import EnvConfigDialogs from './EnvConfigDialogs.vue'
 import PageHeader from './PageHeader.vue'
 // EnvSidebar 由下方 import 引入（侧栏是纯展示壳，分组计算仍在本页）
 import { ref, reactive, computed, onMounted, onUnmounted, watch, inject, nextTick } from 'vue'
@@ -1763,6 +1765,86 @@ onUnmounted(() => {
 
 // s = currentRuntimeState，模板中复用，避免反复调用 stateFor
 const s = currentRuntimeState
+
+// 弹窗层共享上下文：状态留在本页，子组件只渲染 + 写回。
+// reactive 会 unwrap 其中的 ref，子组件里 ctx.x = v 等价于 x.value = v。
+const dialogCtx = reactive({
+  HAS_DATA_DIR,
+  addPathEntry,
+  applyGoProxy,
+  applyManifestActive,
+  avatarColor,
+  avatarIcon,
+  cancelEditVar,
+  closeLogModal,
+  closeRedisModal,
+  commitEditVar,
+  configModal,
+  confirmDelete,
+  copyTaskOutput,
+  deleteOllamaModel,
+  deleteUserVar,
+  diskUsage,
+  doDelete,
+  editing,
+  editorRef,
+  exportManifest,
+  formatSize,
+  ftpModal,
+  githubAccel,
+  goEnvModal,
+  goProxyPresets,
+  isQuickdockEntry,
+  loadDiskUsage,
+  logModal,
+  maint,
+  manifestInput,
+  manifestPanel,
+  ollamaDelTarget,
+  ollamaSize,
+  onManifestFile,
+  openConsole,
+  openLogTab,
+  openMaintenance,
+  panorama,
+  panoramaEntries,
+  pathEntries,
+  pathModal,
+  phpModal,
+  pickManifestFile,
+  pickProjectDir,
+  projectCheck,
+  projectMissing,
+  projectRuntimeName,
+  redisModal,
+  refresh,
+  refreshLogModal,
+  refreshRedisLog,
+  removePathEntry,
+  runProjectCheck,
+  runSourceCheck,
+  runTask,
+  runtimes,
+  saveAlias,
+  saveConfig,
+  saveFTPConfig,
+  saveGoEnv,
+  savePHPConfig,
+  saveRedisConfig,
+  saveUserVar,
+  setActiveFromProject,
+  sourceCheck,
+  startEditVar,
+  switchGoEnvScope,
+  taskKey,
+  taskModal,
+  toggleExt,
+  toggleGithubAccel,
+  toggleGoPath,
+  toggleLogAuto,
+  toggleLogModalAuto,
+  userEnv,
+})
 </script>
 
 <template>
@@ -2848,716 +2930,8 @@ const s = currentRuntimeState
       </main>
     </div>
 
-    <!-- 别名 / 备注编辑弹窗 -->
-    <div v-if="editing.open" class="modal-overlay" @click.self="editing.open = false">
-      <div class="modal">
-        <div class="modal-title">{{ t('editAliasNote') }} · {{ editing.version }}</div>
-        <label class="modal-label">{{ t('envAlias') }}</label>
-        <input v-model="editing.alias" class="env-input" :placeholder="t('aliasPlaceholder')" />
-        <label class="modal-label">{{ t('envNote') }}</label>
-        <textarea v-model="editing.note" class="env-textarea" :placeholder="t('envNotePlaceholder')" rows="3"></textarea>
-        <div class="modal-actions">
-          <button class="op-btn" @click="editing.open = false">{{ t('cancel') }}</button>
-          <button class="env-install-btn" @click="saveAlias">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 删除确认弹窗 -->
-    <div v-if="confirmDelete.open" class="modal-overlay" @click.self="confirmDelete.open = false">
-      <div class="modal">
-        <div class="modal-title">{{ t('confirmDeleteTitle') }}</div>
-        <p class="modal-text">{{ t('confirmDeleteVersion', { version: confirmDelete.version }) }}</p>
-        <label v-if="HAS_DATA_DIR.has(confirmDelete.runtime)" class="modal-check">
-          <input type="checkbox" v-model="confirmDelete.removeData" />
-          <span>{{ t('deleteWithData') }}</span>
-        </label>
-        <div class="modal-actions">
-          <button class="op-btn" @click="confirmDelete.open = false">{{ t('cancel') }}</button>
-          <button class="env-install-btn danger" @click="doDelete">{{ t('deleteVersion') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 模型删除确认弹窗：与版本删除分开，避免误把「删模型」当成「删程序」 -->
-    <div v-if="ollamaDelTarget" class="modal-overlay" @click.self="ollamaDelTarget = null">
-      <div class="modal">
-        <div class="modal-title">{{ t('ollamaConfirmDeleteTitle') }}</div>
-        <p class="modal-text">{{ t('ollamaConfirmDelete', { name: ollamaDelTarget.name, size: ollamaSize(ollamaDelTarget.size) }) }}</p>
-        <div class="modal-actions">
-          <button class="op-btn" @click="ollamaDelTarget = null">{{ t('cancel') }}</button>
-          <button class="env-install-btn danger" @click="deleteOllamaModel">{{ t('delete') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 通用日志弹窗：任意实现了 LogProvider 的运行时（nginx/redis/caddy/traefik/apache/postgresql/mysql/mariadb/mongodb/memcached/minio/mailpit…）-->
-    <div v-if="logModal.open" class="modal-overlay" @click.self="closeLogModal()">
-      <div class="modal php-modal">
-        <div class="modal-title">{{ t('viewLog') }} · {{ logModal.runtime }} · {{ logModal.version }}</div>
-        <div class="php-tab-body">
-          <!-- 日志查看器自带搜索高亮 / 级别着色 / 跟随末尾；自动刷新仍由本页负责（要调后端） -->
-          <RuntimeLogView
-            :text="logModal.log"
-            :empty-text="t('logEmpty')"
-            @refresh="refreshLogModal()"
-          >
-            <template #actions>
-              <button class="log-btn" :class="{ active: logModal.logAuto }" @click="toggleLogModalAuto()">
-                {{ logModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
-              </button>
-            </template>
-          </RuntimeLogView>
-        </div>
-        <div class="modal-actions">
-          <button class="op-btn" @click="closeLogModal()">{{ t('cancel') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 特色操作输出弹窗：各语言生态的只读查询 / 可逆写操作 / 清理动作共用一个文本视图 -->
-    <div v-if="taskModal.open" class="modal-overlay" @click.self="taskModal.open = false">
-      <div class="modal task-modal">
-        <div class="modal-title">
-          {{ t('task_' + taskKey(taskModal.taskId)) }}
-          <span class="task-ver">{{ taskModal.runtime }} · {{ taskModal.version }}</span>
-        </div>
-        <p class="modal-text">{{ t('task_' + taskKey(taskModal.taskId) + '_desc') }}</p>
-
-        <div v-if="taskModal.needsConfirm" class="task-confirm">
-          <span class="task-confirm-icon">!</span>
-          <div>
-            <div class="task-confirm-title">{{ t('taskDangerTitle') }}</div>
-            <p class="task-confirm-text">{{ t('taskDangerDesc') }}</p>
-          </div>
-        </div>
-
-        <div v-if="taskModal.busy" class="env-msg">{{ t('taskRunning') }}</div>
-        <div v-else-if="taskModal.error" class="env-msg error">{{ taskModal.error }}</div>
-
-        <pre v-if="taskModal.output" class="task-output">{{ taskModal.output }}</pre>
-        <p v-if="taskModal.truncated" class="task-hint">{{ t('taskTruncated') }}</p>
-        <p v-if="taskModal.durationMs" class="task-hint">{{ t('taskDuration', { ms: taskModal.durationMs }) }}</p>
-
-        <div class="modal-actions">
-          <button class="op-btn" @click="taskModal.open = false">{{ t('close') }}</button>
-          <button v-if="taskModal.output" class="op-btn" @click="copyTaskOutput">{{ t('copy') }}</button>
-          <button
-            v-if="taskModal.needsConfirm || taskModal.error"
-            class="env-install-btn"
-            :class="{ busy: taskModal.busy, danger: taskModal.kind === 'danger' }"
-            :disabled="taskModal.busy"
-            @click="runTask"
-          >{{ taskModal.needsConfirm ? t('taskRun') : t('taskRetry') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 端口全景弹窗：所有运行中服务的端口与控制台一览 -->
-    <!-- 项目版本要求检查：探测目录里的版本声明，与已装/激活对比 -->
-    <div v-if="projectCheck.open" class="modal-overlay" @click.self="projectCheck.open = false">
-      <div class="modal path-modal path-modal--760">
-        <div class="modal-actions-top">
-          <div>
-            <div class="modal-title">{{ t('projectCheck') }}</div>
-            <p class="modal-text">{{ t('projectCheckDesc') }}</p>
-          </div>
-          <button class="cfg-close" type="button" :title="t('close')" @click="projectCheck.open = false">×</button>
-        </div>
-
-        <div class="pc-row">
-          <input
-            v-model="projectCheck.dir"
-            class="env-input"
-            :placeholder="t('projectCheckPh')"
-            @keyup.enter="runProjectCheck"
-          />
-          <button class="op-btn" @click="pickProjectDir">{{ t('projectCheckPick') }}</button>
-          <button
-            class="op-btn"
-            :disabled="projectCheck.loading || !projectCheck.dir.trim()"
-            @click="runProjectCheck"
-          >{{ projectCheck.loading ? t('checking') : t('projectCheckRun') }}</button>
-        </div>
-
-        <p v-if="projectCheck.error" class="env-msg error">{{ projectCheck.error }}</p>
-        <div v-else-if="!projectCheck.rows.length && !projectCheck.deps.length" class="empty-state">
-          <div class="empty-text">{{ projectCheck.dir ? t('projectCheckNone') : t('projectCheckEmpty') }}</div>
-        </div>
-        <template v-else>
-          <!-- 版本要求：可能为空（项目没写 engines / require.php），但依赖侧仍能识别出项目 -->
-          <template v-if="projectCheck.rows.length">
-            <div class="pc-section-head">{{ t('projectDepsVersionSection') }}</div>
-            <p v-if="projectMissing" class="env-msg error">{{ t('projectCheckMissing', { n: projectMissing }) }}</p>
-            <table class="panorama-table">
-              <thead>
-                <tr>
-                  <th>{{ t('runtime') }}</th>
-                  <th>{{ t('projectCheckRequire') }}</th>
-                  <th>{{ t('projectCheckMatched') }}</th>
-                  <th>{{ t('projectCheckActive') }}</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr v-for="row in projectCheck.rows" :key="row.runtime + '|' + row.require">
-                  <td>{{ projectRuntimeName(row.runtime) }}</td>
-                  <td>
-                    <span class="mono">{{ row.require || '—' }}</span>
-                    <span v-if="row.source" class="muted"> · {{ row.source }}</span>
-                  </td>
-                  <td>
-                    <span v-if="row.matched" class="pc-ok">{{ row.matched }}</span>
-                    <span v-else class="pc-bad">{{ t('projectCheckNoMatch') }}</span>
-                  </td>
-                  <td>
-                    <span v-if="row.active" class="mono">{{ row.active }}</span>
-                    <span v-else class="muted">—</span>
-                    <select
-                      v-if="row.installed.length"
-                      class="pc-select"
-                      :value="row.active"
-                      @change="setActiveFromProject(row, ($event.target as HTMLSelectElement).value)"
-                    >
-                      <option value="">{{ t('projectCheckSwitch') }}</option>
-                      <option v-for="v in row.installed" :key="v" :value="v">{{ v }}</option>
-                    </select>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </template>
-          <p v-else class="pc-note">{{ t('projectDepsNoVersion') }}</p>
-
-          <!-- 依赖状态：PHP / Composer 与 Node 各一张卡，全部来自 EnvProjectDeps 的只读快照 -->
-          <template v-if="projectCheck.deps.length">
-            <div class="pc-section-head">
-              {{ t('projectDepsSection') }}
-              <span class="pc-section-hint">{{ t('projectDepsReadonly') }}</span>
-            </div>
-            <div class="pd-list">
-              <div v-for="d in projectCheck.deps" :key="d.kind" class="pd-card">
-                <div class="pd-head">
-                  <span class="pd-kind">{{ d.kind === 'php' ? t('projectDepsKindPhp') : t('projectDepsKindNode') }}</span>
-                  <span class="pd-manager mono">{{ d.manager }}<span v-if="d.managerSpec" class="pd-manager-ver"> {{ d.managerSpec }}</span></span>
-                  <span class="pd-manifest mono" :title="d.manifestDir">{{ d.manifest }}</span>
-                </div>
-                <div class="pd-grid">
-                  <div class="pd-item">
-                    <span class="pd-label">{{ t('projectDepsLock') }}</span>
-                    <span v-if="d.lockPresent" class="pc-ok">{{ d.lockFile }}</span>
-                    <span v-else class="pc-bad">{{ t('projectDepsLockMissing') }}</span>
-                    <span v-if="d.lockDeps >= 0" class="muted"> · {{ t('projectDepsLockCount', { n: d.lockDeps }) }}</span>
-                    <span v-if="d.lockStale" class="pd-stale" :title="t('projectDepsStale')">!</span>
-                  </div>
-                  <div class="pd-item">
-                    <span class="pd-label">{{ t('projectDepsDir') }}</span>
-                    <span v-if="d.depsInstalled" class="pc-ok mono">{{ d.depsDir }}/</span>
-                    <span v-else class="pc-bad">{{ t('projectDepsNotInstalled', { dir: d.depsDir }) }}</span>
-                  </div>
-                  <div class="pd-item">
-                    <span class="pd-label">{{ t('projectDepsDeclared') }}</span>
-                    <span class="mono">{{ d.manifestDeps }}</span>
-                  </div>
-                </div>
-                <div class="pd-path mono" :title="d.manifestDir">{{ d.manifestDir }}</div>
-              </div>
-            </div>
-          </template>
-        </template>
-      </div>
-    </div>
-
-    <div v-if="panorama.open" class="modal-overlay" @click.self="panorama.open = false">
-      <div class="modal path-modal path-modal--640">
-        <div class="modal-actions-top">
-          <div>
-            <div class="modal-title">{{ t('portPanorama') }}</div>
-            <p class="modal-text">{{ t('portPanoramaDesc') }}</p>
-          </div>
-          <button class="cfg-close" type="button" :title="t('close')" @click="panorama.open = false">×</button>
-        </div>
-        <div v-if="!panoramaEntries.length" class="empty-state">
-          <div class="empty-icon">∅</div>
-          <div class="empty-text">{{ t('noRunningService') }}</div>
-        </div>
-        <table v-else class="panorama-table">
-          <thead>
-            <tr>
-              <th>{{ t('runtime') }}</th>
-              <th>{{ t('version') }}</th>
-              <th>{{ t('svcPort') }}</th>
-              <th>{{ t('console') }}</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="p in panoramaEntries" :key="p.id + p.version">
-              <td><span class="pano-dot" :style="{ background: avatarColor(p.id) }"></span>{{ p.name }}</td>
-              <td>{{ p.version }}</td>
-              <td><span class="mono">{{ p.ports.length ? p.ports.join(' / ') : (p.port || '—') }}</span></td>
-              <td>
-                <a v-if="p.consolePort" class="svc-port-link" @click="openConsole(p.consolePort)">:{{ p.consolePort }} ↗</a>
-                <span v-else class="muted">—</span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
-
-    <!-- PHP 配置弹窗：php.ini / 禁用函数 / 错误日志 / 扩展 -->
-    <div v-if="phpModal.open" class="modal-overlay" @click.self="phpModal.open = false">
-      <div class="modal php-modal">
-        <div class="modal-title">{{ t('phpConfigTitle') }} · {{ phpModal.version }}</div>
-        <div class="php-tabs">
-          <button class="php-tab" :class="{ active: phpModal.tab === 'ini' }" @click="phpModal.tab = 'ini'">{{ t('phpIni') }}</button>
-          <button class="php-tab" :class="{ active: phpModal.tab === 'disable' }" @click="phpModal.tab = 'disable'">{{ t('phpDisableFunctions') }}</button>
-          <button class="php-tab" :class="{ active: phpModal.tab === 'errorlog' }" @click="phpModal.tab = 'errorlog'">{{ t('phpErrorLog') }}</button>
-          <button class="php-tab" :class="{ active: phpModal.tab === 'ext' }" @click="phpModal.tab = 'ext'">{{ t('phpExtensions') }}</button>
-        </div>
-        <div class="php-tab-body">
-          <template v-if="phpModal.tab === 'ini'">
-            <label class="modal-label">{{ t('phpIni') }}（{{ t('phpIniHint') }}）</label>
-            <!-- 原来是个 12 行的裸 textarea：php.ini 是上千行的键值配置，
-                 至少要行号、搜索和撤销，直接用配置文件编辑器 -->
-            <div class="env-cfg-embed">
-              <ConfigEditor v-model="phpModal.raw" filename="php.ini" @save="savePHPConfig" />
-            </div>
-          </template>
-          <template v-else-if="phpModal.tab === 'disable'">
-            <label class="modal-label">{{ t('phpDisableFunctions') }}</label>
-            <textarea v-model="phpModal.disableFunctions" class="env-textarea" rows="4" :placeholder="t('phpDisablePlaceholder')"></textarea>
-          </template>
-          <template v-else-if="phpModal.tab === 'errorlog'">
-            <label class="modal-label">{{ t('phpErrorLog') }}</label>
-            <input v-model="phpModal.errorLog" class="env-input" :placeholder="t('phpErrorLogPlaceholder')" />
-            <label class="modal-label">{{ t('phpErrorLogContent') }}</label>
-            <!-- 只读快照：不提供刷新（内容随 php.ini 保存才更新），但搜索/高亮要有 -->
-            <RuntimeLogView :text="phpModal.errorLogContent" :empty-text="t('phpNoLog')" hide-refresh />
-          </template>
-          <template v-else>
-            <label class="modal-label">{{ t('phpExtensions') }}</label>
-            <div class="ext-list">
-              <label v-for="(e, i) in phpModal.extensions" :key="e.name" class="ext-row">
-                <input type="checkbox" :checked="e.enabled" @change="toggleExt(i)" />
-                <span class="ext-name">{{ e.name }}</span>
-                <span class="ext-file">{{ e.file }}</span>
-              </label>
-              <div v-if="!phpModal.extensions.length" class="empty-text">{{ t('phpNoExt') }}</div>
-            </div>
-          </template>
-        </div>
-        <div class="modal-actions">
-          <button class="op-btn" @click="phpModal.open = false">{{ t('cancel') }}</button>
-          <button class="env-install-btn" @click="savePHPConfig">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Go 环境配置弹窗：上半是 PATH（命令能否被找到），下半是 go.env（go 的行为） -->
-    <div v-if="goEnvModal.open" class="modal-overlay" @click.self="goEnvModal.open = false">
-      <div class="modal go-env-modal">
-        <div class="modal-title">{{ t('goEnvConfig') }} · {{ goEnvModal.version }}</div>
-        <div class="go-path-box">
-          <div class="go-path-row">
-            <span class="go-path-label">{{ t('goEnvBinLabel') }}</span>
-            <code class="go-path-value" :title="goEnvModal.binDir">{{ goEnvModal.binDir || '—' }}</code>
-            <span class="path-flag" :class="goEnvModal.inPath ? 'ok' : 'no'">
-              <span class="path-flag-dot"></span>{{ goEnvModal.inPath ? t('inPath') : t('notInPath') }}
-            </span>
-            <button class="op-btn" :disabled="goEnvModal.pathBusy" @click="toggleGoPath">
-              {{ goEnvModal.inPath ? t('unsetEnvVar') : t('setEnvVar') }}
-            </button>
-          </div>
-          <p class="go-path-hint">{{ t('goEnvPathHint') }}</p>
-        </div>
-        <div class="php-tabs go-env-tabs">
-          <button class="php-tab" :class="{ active: goEnvModal.scope === 'version' }" @click="switchGoEnvScope('version')">
-            {{ t('goEnvScopeVersion', { v: goEnvModal.version }) }}
-          </button>
-          <button class="php-tab" :class="{ active: goEnvModal.scope === 'global' }" @click="switchGoEnvScope('global')">
-            {{ t('goEnvScopeGlobal') }}
-          </button>
-        </div>
-        <p class="modal-text go-env-desc">
-          {{ goEnvModal.scope === 'global' ? t('goEnvGlobalHint') : t('goEnvDesc') }}
-        </p>
-        <div v-if="goEnvModal.loading" class="env-msg">{{ t('loading') }}</div>
-        <div v-else-if="goEnvModal.error" class="env-msg error">{{ goEnvModal.error }}</div>
-        <div v-else class="go-env-form">
-          <div class="go-env-row go-env-presets">
-            <span class="go-env-name">{{ t('goEnvProxyPreset') }}</span>
-            <div class="go-env-preset-row">
-              <button
-                v-for="p in goProxyPresets"
-                :key="p.value"
-                class="go-env-preset"
-                :class="{ active: goEnvModal.values['GOPROXY'] === p.value }"
-                @click="applyGoProxy(p.value)"
-              >{{ p.label }}</button>
-              <button class="go-env-preset" @click="applyGoProxy('')">{{ t('goEnvDefault') }}</button>
-            </div>
-          </div>
-          <div v-for="k in goEnvModal.keys" :key="k.key" class="go-env-row">
-            <label class="go-env-label">
-              <span class="go-env-key">{{ k.key }}</span>
-              <span class="go-env-name">{{ k.label }}</span>
-            </label>
-            <select v-if="k.choices && k.choices.length" v-model="goEnvModal.values[k.key]" class="env-input go-env-input">
-              <option value="">{{ t('goEnvDefault') }}</option>
-              <option v-for="c in k.choices" :key="c" :value="c">{{ c || t('goEnvDefault') }}</option>
-            </select>
-            <input
-              v-else
-              v-model="goEnvModal.values[k.key]"
-              :type="k.secret ? 'password' : 'text'"
-              class="env-input go-env-input"
-              :placeholder="k.placeholder"
-            />
-            <p v-if="k.desc" class="go-env-hint">{{ k.desc }}</p>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button class="op-btn" @click="goEnvModal.open = false">{{ t('cancel') }}</button>
-          <button class="env-install-btn" :class="{ busy: goEnvModal.saving }" :disabled="goEnvModal.saving" @click="saveGoEnv">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- Redis 配置 / 日志弹窗：redis.conf 编辑 + 运行日志查询 -->
-    <!-- PATH 可视化面板 -->
-    <div v-if="pathModal.open" class="modal-overlay" @click.self="pathModal.open = false">
-      <div class="modal path-modal path-modal--600">
-        <div class="path-modal-head">
-          <span class="path-modal-icon">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.5 6H14a4 4 0 0 1 4 4v0M15.5 18H10a4 4 0 0 1-4-4v0"/></svg>
-          </span>
-          <div class="path-modal-titles">
-            <div class="modal-title">{{ t('pathPanel') }}</div>
-            <p class="modal-text">{{ t('pathPanelDesc') }}</p>
-          </div>
-        </div>
-        <div class="path-summary" v-if="pathEntries.length">
-          <span class="path-summary-dot" :class="{ ok: pathEntries.some(e => e.inPath) }"></span>
-          {{ pathEntries.filter(e => e.inPath).length }} / {{ pathEntries.length }} {{ t('pathSummary') }}
-        </div>
-        <div class="path-list">
-          <div v-for="e in pathEntries" :key="e.id + e.version" class="path-row">
-            <span class="path-badge" :style="{ background: avatarColor(e.id) }" v-html="avatarIcon(e.id)"></span>
-            <span class="path-name">{{ e.name }} <em>{{ e.version }}</em></span>
-            <span class="path-dir">{{ e.binDir }}</span>
-            <span class="path-flag" :class="e.inPath ? 'ok' : 'no'">
-              <span class="path-flag-dot"></span>{{ e.inPath ? t('inPath') : t('notInPath') }}
-            </span>
-          </div>
-          <div v-if="!pathEntries.length" class="path-empty">{{ t('pathEmpty') }}</div>
-        </div>
-        <div class="modal-actions">
-          <button class="op-btn" @click="pathModal.open = false">{{ t('close') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <div v-if="redisModal.open" class="modal-overlay" @click.self="closeRedisModal()">
-      <div class="modal php-modal">
-        <div class="modal-title">{{ t('redisConfigTitle') }} · {{ redisModal.version }}</div>
-        <div class="php-tabs">
-          <button class="php-tab" :class="{ active: redisModal.tab === 'config' }" @click="redisModal.tab = 'config'">{{ t('redisConfigFile') }}</button>
-          <button class="php-tab" :class="{ active: redisModal.tab === 'log' }" @click="openLogTab()">{{ t('redisLog') }}</button>
-        </div>
-        <div class="php-tab-body">
-          <template v-if="redisModal.tab === 'config'">
-            <label class="modal-label">{{ t('redisConfigFile') }}（{{ redisModal.path }}）</label>
-            <!-- redis.conf 同样是键值配置：换成带行号/高亮/查找的编辑器 -->
-            <div class="env-cfg-embed">
-              <ConfigEditor v-model="redisModal.raw" filename="redis.conf" @save="saveRedisConfig" />
-            </div>
-            <p class="env-msg">{{ t('redisConfigHint') }}</p>
-          </template>
-          <template v-else>
-            <RuntimeLogView
-              :text="redisModal.log"
-              :empty-text="t('redisNoLog')"
-              @refresh="refreshRedisLog()"
-            >
-              <template #actions>
-                <button class="log-btn" :class="{ active: redisModal.logAuto }" @click="toggleLogAuto()">
-                  {{ redisModal.logAuto ? t('logAutoOn') : t('logAutoOff') }}
-                </button>
-              </template>
-            </RuntimeLogView>
-          </template>
-        </div>
-        <div class="modal-actions">
-          <button class="op-btn" @click="closeRedisModal()">{{ t('cancel') }}</button>
-          <button v-if="redisModal.tab === 'config'" class="env-install-btn" @click="saveRedisConfig">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- FTP 启动参数弹窗：结构化表单（端口 / 根目录 / 只读），底层写 ftpdmin.args -->
-    <div v-if="ftpModal.open" class="modal-overlay" @click.self="ftpModal.open = false">
-      <div class="modal php-modal">
-        <div class="modal-title">{{ t('ftpConfigTitle') }} · {{ ftpModal.version }}</div>
-        <div class="ftp-form">
-          <label class="modal-label">{{ t('ftpConfigPort') }}</label>
-          <input v-model.number="ftpModal.port" class="env-input" type="number" min="1" max="65535" />
-          <label class="modal-label">{{ t('ftpConfigRootDir') }}</label>
-          <input v-model="ftpModal.rootDir" class="env-input" :placeholder="t('pickDirTitle')" />
-          <label class="ftp-check">
-            <input type="checkbox" v-model="ftpModal.readOnly" />
-            <span>{{ t('ftpConfigReadOnly') }}</span>
-          </label>
-          <p class="env-msg">{{ t('ftpConfigReadOnlyHint') }}</p>
-          <p class="env-msg">{{ t('ftpConfigHint') }}</p>
-        </div>
-        <div class="modal-actions">
-          <button class="op-btn" @click="ftpModal.open = false">{{ t('cancel') }}</button>
-          <button class="env-install-btn" @click="saveFTPConfig">{{ t('save') }}</button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 通用配置编辑弹窗（Nginx / Apache / Caddy 等实现了 ConfigProvider 的运行时） -->
-    <div v-if="configModal.open" class="modal-overlay cfg-overlay" @click.self="configModal.open = false">
-      <div class="cfg-modal">
-        <header class="cfg-head">
-          <div class="cfg-titles">
-            <div class="cfg-title">{{ t('editConfig') }}</div>
-            <span class="cfg-version">{{ configModal.version }}</span>
-          </div>
-          <button class="cfg-close" type="button" :title="t('close')" @click="configModal.open = false">×</button>
-        </header>
-        <div class="cfg-path">
-          <svg class="cfg-path-ico" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg>
-          <code class="cfg-path-text">{{ configModal.path }}</code>
-        </div>
-        <ConfigEditor ref="editorRef" v-model="configModal.raw" :filename="configModal.path" @save="saveConfig" />
-        <p class="cfg-hint">{{ t('configRestartHint') }}</p>
-        <footer class="cfg-foot">
-          <button class="cfg-btn ghost" @click="configModal.open = false">{{ t('cancel') }}</button>
-          <button class="cfg-btn primary" @click="saveConfig">{{ t('save') }}</button>
-        </footer>
-      </div>
-    </div>
-
-    <!-- 操作下拉点击外部关闭 -->
-    <!-- 维护面板：源体检 / 磁盘占用 / 镜像加速 / 环境清单 -->
-    <div v-if="maint.open" class="modal-overlay" @click.self="maint.open = false">
-      <div class="modal maint-modal">
-        <div class="modal-title">{{ t('maintTitle') }}</div>
-        <div class="php-tabs">
-          <button class="php-tab" :class="{ active: maint.tab === 'check' }" @click="openMaintenance('check')">{{ t('maintTabCheck') }}</button>
-          <button class="php-tab" :class="{ active: maint.tab === 'disk' }" @click="openMaintenance('disk')">{{ t('maintTabDisk') }}</button>
-          <button class="php-tab" :class="{ active: maint.tab === 'manifest' }" @click="openMaintenance('manifest')">{{ t('maintTabManifest') }}</button>
-          <button class="php-tab" :class="{ active: maint.tab === 'envvar' }" @click="openMaintenance('envvar')">{{ t('maintTabEnvVar') }}</button>
-        </div>
-
-        <div class="php-tab-body maint-body">
-          <!-- ① 源体检 -->
-          <template v-if="maint.tab === 'check'">
-            <p class="modal-text">{{ t('maintCheckDesc') }}</p>
-            <div class="maint-actions">
-              <button class="env-install-btn" :disabled="sourceCheck.running" @click="runSourceCheck">
-                {{ sourceCheck.running ? t('maintChecking') : t('maintCheckRun') }}
-              </button>
-              <span v-if="sourceCheck.running" class="maint-summary">
-                {{ t('maintCheckReceived', { n: sourceCheck.sources.length + sourceCheck.versions.length }) }}
-              </span>
-              <span v-else-if="sourceCheck.report" class="maint-summary">
-                {{ t('maintCheckSummary', { ok: sourceCheck.report.ok, mirror: sourceCheck.report.mirrorOnly, failed: sourceCheck.report.failed, sec: (sourceCheck.report.durationMs / 1000).toFixed(1) }) }}
-              </span>
-            </div>
-            <div v-if="sourceCheck.error" class="env-msg error">{{ sourceCheck.error }}</div>
-            <!-- GitHub 下载加速：体检里「需加速」的项要靠这个开关才真正走 gh-proxy -->
-            <label class="gh-accel">
-              <input
-                type="checkbox"
-                :checked="githubAccel.enabled"
-                :disabled="githubAccel.busy || githubAccel.loading"
-                @change="toggleGithubAccel"
-              />
-              <span class="gh-accel-label">{{ t('ghAccelLabel') }}</span>
-              <em class="gh-accel-hint">{{ t('ghAccelHint') }}</em>
-            </label>
-
-            <div v-if="sourceCheck.sources.length" class="maint-table">
-              <div class="maint-row maint-head">
-                <span>{{ t('maintColRuntime') }}</span>
-                <span>{{ t('maintColSource') }}</span>
-                <span>{{ t('maintColStatus') }}</span>
-                <span>{{ t('maintColLatency') }}</span>
-              </div>
-              <div v-for="it in sourceCheck.sources" :key="it.runtime + '/' + it.sourceId" class="maint-row">
-                <span class="maint-rt">{{ it.name }}<em v-if="it.version">{{ it.version }}</em></span>
-                <span class="maint-src" :title="it.url || it.error">{{ it.source }}</span>
-                <span
-                  class="maint-status"
-                  :class="it.ok ? 'ok' : (it.mirrorOk ? 'warn' : 'bad')"
-                  :title="!it.ok && it.mirrorOk ? t('maintMirrorOnlyHint', { ms: it.mirrorMs }) : it.error"
-                >
-                  {{ it.ok ? t('maintOK') : (it.mirrorOk ? t('maintMirrorOnly') : (it.code ? 'HTTP ' + it.code : t('maintUnreachable'))) }}
-                </span>
-                <span class="maint-lat">{{ it.latencyMs }}ms</span>
-              </div>
-            </div>
-
-            <div v-if="sourceCheck.versions.length" class="maint-sub">
-              <div class="maint-sub-title">{{ t('maintVersionSources') }}</div>
-              <div class="maint-table">
-                <div class="maint-row maint-head">
-                  <span>{{ t('maintColRuntime') }}</span>
-                  <span>{{ t('maintColLatest') }}</span>
-                  <span>{{ t('maintColStatus') }}</span>
-                  <span>{{ t('maintColLatency') }}</span>
-                </div>
-                <div v-for="v in sourceCheck.versions" :key="'v/' + v.runtime" class="maint-row">
-                  <span class="maint-rt">{{ v.name }}</span>
-                  <span class="maint-src" :title="v.url || v.error">
-                    <template v-if="v.url">{{ v.latest || '—' }}<em v-if="v.stale"> · {{ t('maintStaleHint', { rec: v.recommended }) }}</em></template>
-                    <template v-else>{{ t('maintNoUpstream') }}</template>
-                  </span>
-                  <span class="maint-status" :class="v.ok ? (v.stale ? 'warn' : 'ok') : 'bad'">
-                    {{ v.ok ? (v.stale ? t('maintStaleTag') : t('maintOK')) : (v.code ? 'HTTP ' + v.code : t('maintUnreachable')) }}
-                  </span>
-                  <span class="maint-lat">{{ v.latencyMs }}ms</span>
-                </div>
-              </div>
-            </div>
-            <div v-if="!sourceCheck.running && !sourceCheck.sources.length && !sourceCheck.error" class="empty-text">
-              {{ t('maintCheckIdle') }}
-            </div>
-          </template>
-
-          <!-- ⑦ 磁盘占用 -->
-          <template v-else-if="maint.tab === 'disk'">
-            <p class="modal-text">{{ t('maintDiskDesc') }}</p>
-            <div class="maint-actions">
-              <button class="op-btn" :disabled="diskUsage.loading" @click="loadDiskUsage">
-                {{ diskUsage.loading ? t('loading') : t('maintDiskRefresh') }}
-              </button>
-              <span v-if="diskUsage.totalBytes" class="maint-summary">{{ t('maintDiskTotal', { size: formatSize(diskUsage.totalBytes) }) }}</span>
-            </div>
-            <div v-if="diskUsage.items.length" class="disk-list">
-              <div v-for="d in diskUsage.items" :key="d.runtime" class="disk-row">
-                <div class="disk-head">
-                  <span class="disk-name">{{ d.name }}</span>
-                  <span class="disk-size">{{ formatSize(d.bytes) }}</span>
-                </div>
-                <div class="disk-chips">
-                  <span v-for="v in d.versions" :key="v.version" class="disk-chip">{{ v.version }} · {{ formatSize(v.bytes) }}</span>
-                </div>
-              </div>
-            </div>
-            <div v-else class="empty-text">{{ diskUsage.loading ? t('loading') : t('maintDiskEmpty') }}</div>
-          </template>
-
-          <!-- ⑧ 环境清单 -->
-          <template v-else-if="maint.tab === 'manifest'">
-            <p class="modal-text">{{ t('maintManifestDesc') }}</p>
-            <div class="maint-actions">
-              <button class="env-install-btn" :disabled="manifestPanel.busy" @click="exportManifest">{{ t('maintManifestExport') }}</button>
-              <button class="op-btn" :disabled="manifestPanel.busy" @click="pickManifestFile">{{ t('maintManifestImport') }}</button>
-              <button
-                v-if="manifestPanel.report && manifestPanel.report.runtimes.some((d: any) => d.activeChanged)"
-                class="op-btn"
-                :disabled="manifestPanel.busy"
-                @click="applyManifestActive"
-              >{{ t('maintManifestApplyActive') }}</button>
-              <input ref="manifestInput" type="file" accept=".json,application/json" class="hidden-file" @change="onManifestFile" />
-            </div>
-            <div v-if="manifestPanel.error" class="env-msg error">{{ manifestPanel.error }}</div>
-            <div v-if="manifestPanel.report" class="manifest-report">
-              <div class="maint-summary">
-                {{ t('maintManifestSummary', { matched: manifestPanel.report.matchedTotal, missing: manifestPanel.report.missingTotal }) }}
-              </div>
-              <div v-for="d in manifestPanel.report.runtimes" :key="d.runtime" class="manifest-row">
-                <span class="manifest-name">{{ d.name }}</span>
-                <span v-if="d.missing.length" class="manifest-tag bad">{{ t('maintManifestMissing') }}: {{ d.missing.join(', ') }}</span>
-                <span v-if="d.extra.length" class="manifest-tag extra">{{ t('maintManifestExtra') }}: {{ d.extra.join(', ') }}</span>
-                <span v-if="d.activeChanged" class="manifest-tag warn">{{ t('maintManifestActiveHint', { v: d.activeWanted }) }}</span>
-                <span v-if="!d.missing.length && !d.extra.length && !d.activeChanged" class="manifest-tag ok">{{ t('maintManifestSame') }}</span>
-              </div>
-              <div v-if="manifestPanel.applied.length" class="maint-summary">{{ t('maintManifestApplied', { n: manifestPanel.applied.length }) }}</div>
-            </div>
-          </template>
-
-          <!-- ⑤ 用户环境变量（HKCU\Environment）—— 链尾，兼作未知 tab 的兜底 -->
-          <template v-else>
-            <p class="modal-text">{{ t('maintEnvDesc') }}</p>
-            <div v-if="userEnv.error" class="env-msg error">{{ userEnv.error }}</div>
-
-            <div class="maint-sub">
-              <div class="maint-sub-title">{{ t('maintEnvPathTitle') }}</div>
-              <div class="maint-table">
-                <div v-for="p in userEnv.pathEntries" :key="p" class="maint-row envvar-path-row">
-                  <span class="envvar-path">
-                    {{ p }}
-                    <em v-if="isQuickdockEntry(p)" class="envvar-badge">{{ t('maintEnvManaged') }}</em>
-                  </span>
-                  <button class="op-btn danger" :disabled="userEnv.saving" @click="removePathEntry(p)">{{ t('maintEnvRemove') }}</button>
-                </div>
-                <div v-if="!userEnv.pathEntries.length" class="empty-text">{{ t('maintEnvPathEmpty') }}</div>
-              </div>
-              <div class="maint-actions">
-                <input v-model="userEnv.newPathEntry" class="env-input" :placeholder="t('maintEnvPathPlaceholder')" @keyup.enter="addPathEntry" />
-                <button class="op-btn" :disabled="userEnv.saving" @click="addPathEntry">{{ t('maintEnvAdd') }}</button>
-              </div>
-            </div>
-
-            <div class="maint-sub">
-              <div class="maint-sub-title">{{ t('maintEnvVarTitle') }}</div>
-              <div class="maint-table">
-                <div v-for="v in userEnv.vars" :key="v.name" class="maint-row envvar-row">
-                  <span class="envvar-name">
-                    {{ v.name }}
-                    <em v-if="v.managed" class="envvar-badge">{{ t('maintEnvManaged') }}</em>
-                  </span>
-                  <!-- 编辑态：value 列变输入框，按钮区换成 保存 / 取消 -->
-                  <template v-if="userEnv.editingName === v.name">
-                    <input
-                      v-model="userEnv.editingValue"
-                      class="env-input"
-                      @keyup.enter="commitEditVar"
-                      @keyup.esc="cancelEditVar"
-                    />
-                    <span class="envvar-actions">
-                      <button class="op-btn" :disabled="userEnv.saving" @click="commitEditVar">{{ t('save') }}</button>
-                      <button class="op-btn" @click="cancelEditVar">{{ t('cancel') }}</button>
-                    </span>
-                  </template>
-                  <template v-else>
-                    <span class="envvar-value" :title="v.value">{{ v.value }}</span>
-                    <span class="envvar-actions">
-                      <button class="op-btn" :disabled="userEnv.saving" @click="startEditVar(v)">{{ t('edit') }}</button>
-                      <button
-                        class="op-btn"
-                        :class="{ danger: userEnv.pendingDelete === v.name }"
-                        :disabled="userEnv.saving"
-                        @click="deleteUserVar(v.name)"
-                      >{{ userEnv.pendingDelete === v.name ? t('maintEnvConfirmDelete') : t('maintEnvRemove') }}</button>
-                    </span>
-                  </template>
-                </div>
-                <div v-if="!userEnv.vars.length" class="empty-text">{{ t('maintEnvVarEmpty') }}</div>
-              </div>
-              <div class="maint-actions">
-                <input v-model="userEnv.newName" class="env-input envvar-name-input" :placeholder="t('maintEnvNamePlaceholder')" />
-                <input v-model="userEnv.newValue" class="env-input" :placeholder="t('maintEnvValuePlaceholder')" @keyup.enter="saveUserVar" />
-                <button class="op-btn" :disabled="userEnv.saving" @click="saveUserVar">{{ t('maintEnvAdd') }}</button>
-              </div>
-            </div>
-
-            <p class="env-msg">{{ t('maintEnvScopeHint') }}</p>
-          </template>
-        </div>
-
-        <div class="modal-actions">
-          <button class="op-btn" @click="maint.open = false">{{ t('close') }}</button>
-        </div>
-      </div>
-    </div>
-
+    <EnvCoreDialogs :ctx="dialogCtx" />
+    <EnvConfigDialogs :ctx="dialogCtx" />
     <div v-if="openMenu" class="menu-backdrop" @click="openMenu = null"></div>
   </div>
 </template>
@@ -3940,29 +3314,7 @@ const s = currentRuntimeState
 .svc-port-link.disabled:hover { color: var(--color-text-disabled); text-decoration: none; }
 
 /* 端口全景弹窗 */
-.modal-actions-top {
-  display: flex; align-items: flex-start; justify-content: space-between; gap: 16px;
-  margin-bottom: 14px;
-}
-.modal-actions-top .modal-text { margin: 4px 0 0; }
-.panorama-table {
-  width: 100%; border-collapse: collapse; font-size: 13px;
-}
-.panorama-table th {
-  text-align: left; font-weight: 600; color: var(--color-text-muted);
-  padding: 8px 10px; border-bottom: 1px solid var(--color-border);
-}
-.panorama-table td {
-  padding: 9px 10px; border-bottom: 1px solid var(--color-border);
-  color: var(--color-text-primary);
-}
-.panorama-table tr:last-child td { border-bottom: none; }
-.pano-dot {
-  display: inline-block; width: 8px; height: 8px; border-radius: 50%;
-  margin-right: 8px; vertical-align: middle; flex: none;
-}
 .mono { font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace); }
-.muted { color: var(--color-text-muted); }
 
 .col-ops { position: relative; display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
 .op-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
@@ -4067,31 +3419,8 @@ const s = currentRuntimeState
 .menu-backdrop { position: fixed; inset: 0; z-index: 20; }
 .env-install-btn.danger { background: var(--color-danger); }
 .env-install-btn.danger:hover { opacity: 0.9; }
-.modal-text { font-size: 12px; color: var(--color-text-muted); margin: 6px 0 0; line-height: 1.5; }
-.modal-check { display: flex; align-items: center; gap: 8px; margin: 10px 0 2px; font-size: 12px; color: var(--color-text-primary); cursor: pointer; user-select: none; }
 .env-header-actions { display: flex; align-items: center; gap: 8px; }
-.path-list { display: flex; flex-direction: column; gap: 7px; margin: 4px 0 12px; max-height: 52vh; overflow: auto; }
-.path-row { display: grid; grid-template-columns: 26px 130px 1fr auto; align-items: center; gap: 10px; padding: 9px 11px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border); border-radius: var(--radius-md); font-size: 12px; transition: border-color .12s ease, background .12s ease; }
-.path-row:hover { border-color: var(--color-border-focus); background: var(--color-bg-secondary); }
-.path-badge { width: 26px; height: 26px; border-radius: var(--radius-sm); display: inline-flex; align-items: center; justify-content: center; overflow: hidden; flex: none; }
-.path-badge :deep(svg) { width: 16px; height: 16px; }
-.path-name { font-weight: 600; color: var(--color-text-primary); white-space: nowrap; }
-.path-name em { font-style: normal; color: var(--color-text-muted); font-weight: 400; margin-left: 5px; }
-.path-dir { color: var(--color-text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; word-break: break-all; min-width: 0; }
-.path-flag { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 3px 9px; border-radius: var(--radius-full); white-space: nowrap; font-weight: 600; }
-.path-flag-dot { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .path-flag.ok { color: var(--color-success); background: var(--color-success-bg); }
-.path-flag.no { color: var(--color-danger); background: var(--color-danger-bg); }
-.path-empty { color: var(--color-text-muted); font-size: 12px; padding: 10px 2px; text-align: center; }
-.path-modal-head { display: flex; align-items: center; gap: 12px; margin: 2px 0 4px; }
-.path-modal-icon { width: 34px; height: 34px; border-radius: var(--radius-md); flex: none; display: inline-flex; align-items: center; justify-content: center; background: var(--color-accent-bg); color: var(--color-accent); }
-.path-modal-icon svg { width: 18px; height: 18px; }
-.path-modal-titles { min-width: 0; }
-.path-modal--760 { max-width: 760px; }
-.path-modal--640 { max-width: 640px; }
-.path-modal--600 { max-width: 600px; }
-.path-summary { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--color-text-secondary); margin: 8px 0 2px; }
-.path-summary-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--color-text-disabled); flex: none; }
 .path-summary-dot.ok { background: var(--color-success); }
 
 .empty-state { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 26px 0; }
@@ -4148,9 +3477,7 @@ const s = currentRuntimeState
 .env-progress-text { display: flex; justify-content: space-between; font-size: 11px; color: var(--color-text-muted); }
 .env-msg { font-size: 11px; color: var(--color-text-disabled); margin: 10px 0 0; word-break: break-all; user-select: text; -webkit-user-select: text; }
 .env-msg.error { color: var(--color-danger); }
-.ftp-form { padding: 4px 2px 0; display: flex; flex-direction: column; gap: 4px; }
 .ftp-form .env-input { margin-bottom: 6px; }
-.ftp-check { display: flex; align-items: center; gap: 8px; margin: 4px 0 0; font-size: 13px; color: var(--color-text-primary); cursor: pointer; }
 .env-update-hint {
   display: flex; align-items: center; gap: 8px; margin-top: 12px;
   padding: 7px 10px; border-radius: var(--radius-sm);
@@ -4162,172 +3489,24 @@ const s = currentRuntimeState
 }
 
 /* 弹窗（通用遮罩，供各类子弹窗复用） */
-.modal-overlay {
-  position: fixed; inset: 0; background: var(--color-bg-overlay);
-  display: flex; align-items: center; justify-content: center; z-index: 50;
-}
 
 /* 弹窗卡片基础样式：所有 class="modal" 的内部容器共用（别名 / 删除 / PHP / Redis / PATH 等）。
    此前该类缺失定义，导致弹框裸奔为浏览器默认白底、无边框、无圆角、无阴影，呈现“透明感+丑”。
    此处补齐为不透明卡片。 */
-.modal {
-  position: relative;
-  width: 560px;
-  max-width: 94vw;
-  max-height: 88vh;
-  background: var(--color-popover-bg);
-  border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 18px 56px var(--color-bg-overlay);
-  display: flex;
-  flex-direction: column;
-  padding: 20px 22px;
-  overflow: hidden;
-  color: var(--color-text-primary);
-}
-.modal-title {
-  font-size: 15px; font-weight: 600; color: var(--color-text-primary);
-  margin: 0 0 4px; line-height: 1.4;
-}
-.modal-actions {
-  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
-  margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--color-border); flex-shrink: 0;
-}
 
 /* 通用配置编辑弹窗（现代化：分层头部 / 路径胶囊 / 等宽编辑器 / 分隔页脚） */
-.cfg-overlay { background: var(--color-bg-overlay); backdrop-filter: blur(2px); }
-.cfg-modal {
-  width: 860px; max-width: 94vw; height: 82vh; max-height: 88vh;
-  background: var(--color-popover-bg); border: 1px solid var(--popover-border-color);
-  border-radius: var(--radius-lg); box-shadow: 0 18px 56px var(--color-bg-overlay);
-  display: flex; flex-direction: column; overflow: hidden;
-}
-.cfg-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 15px 18px 13px; border-bottom: 1px solid var(--color-border); flex-shrink: 0;
-}
-.cfg-titles { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-.cfg-title { font-size: 15px; font-weight: 600; color: var(--color-text-primary); }
-.cfg-version {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
-  color: var(--color-accent); background: var(--color-accent-bg); padding: 2px 8px; border-radius: var(--radius-full);
-  white-space: nowrap;
-}
-.cfg-close {
-  width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm);
-  border: 1px solid transparent; background: transparent; color: var(--color-text-muted);
-  font-size: var(--text-xl); line-height: 1; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: background var(--transition-fast), color var(--transition-fast);
-}
-.cfg-close:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.cfg-path {
-  display: flex; align-items: center; gap: 8px; margin: 14px 18px 0;
-  padding: 9px 11px; background: var(--color-bg-tertiary); border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); min-width: 0;
-}
-.cfg-path-ico { color: var(--color-text-muted); flex: none; }
-.cfg-path-text {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px;
-  color: var(--color-text-secondary); word-break: break-all;
-}
-.cfg-hint { margin: 9px 18px 0; font-size: 11px; color: var(--color-text-disabled); }
-.cfg-foot {
-  display: flex; align-items: center; justify-content: flex-end; gap: 9px;
-  padding: 13px 18px 16px; border-top: 1px solid var(--color-border); flex-shrink: 0;
-}
-.cfg-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  font-family: inherit; font-size: 13px; height: 32px; padding: 0 16px; border-radius: var(--radius-sm);
-  cursor: pointer; border: 1px solid transparent;
-  transition: opacity var(--transition-fast), background var(--transition-fast), color var(--transition-fast);
-}
-.cfg-btn.ghost { background: transparent; border-color: var(--color-border); color: var(--color-text-secondary); }
-.cfg-btn.ghost:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
-.cfg-btn.primary { background: var(--color-accent); color: var(--color-accent-text); font-weight: 500; }
-.cfg-btn.primary:hover { opacity: 0.9; }
 
 /* 分组侧栏 */
 .import-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px;  margin-left: auto; font-size: 11px; height: 24px; padding: 0 8px; border-radius: var(--radius-sm); }
 .op-sep { height: 1px; background: var(--color-border); margin: 3px 0; }
 
 /* PHP 配置弹窗 */
-.php-modal { width: 540px; max-width: 94vw; }
 /* Go 环境变量配置弹窗（go env） */
-.go-env-modal { width: 560px; max-width: 94vw; }
 /* PATH 区块：与下方 go.env 表单明确分区——前者管「命令找不找得到」，后者管「命令的行为」 */
-.go-path-box {
-  border: 1px solid var(--color-border); background: var(--color-bg-tertiary);
-  border-radius: var(--radius-md); padding: 10px 12px; margin: 4px 0 14px;
-}
-.go-path-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.go-path-label { font-size: 12px; color: var(--color-text-secondary); flex: none; }
-.go-path-value {
-  flex: 1 1 200px; min-width: 0; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px; color: var(--color-text-primary); background: var(--color-bg-primary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm); padding: 3px 8px;
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.go-path-hint { margin: 7px 0 0; font-size: 12px; line-height: 1.5; color: var(--color-text-muted); }
-.go-env-desc { font-size: 12px; color: var(--color-text-muted); margin: 0 0 12px; line-height: 1.5; }
-.go-env-form { max-height: 64vh; overflow: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; }
-.go-env-row { display: flex; flex-direction: column; gap: 5px; }
-.go-env-label { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
-.go-env-key {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-weight: 600;
-  color: var(--color-accent); background: var(--color-accent-bg); padding: 1px 7px; border-radius: var(--radius-full);
-}
-.go-env-name { font-size: 12px; color: var(--color-text-secondary); }
-.go-env-input { width: 100%; }
-.go-env-hint { font-size: 11px; color: var(--color-text-disabled); margin: 0; line-height: 1.45; }
-.go-env-presets { gap: 7px; }
-.go-env-preset-row { display: flex; flex-wrap: wrap; gap: 6px; }
-.go-env-preset {
-  font-size: 12px; padding: 4px 10px; border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
-  font-family: inherit;
-}
-.go-env-preset:hover { border-color: var(--color-border-focus); color: var(--color-text-primary); }
-.go-env-preset.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
-
-.php-tabs { display: flex; gap: 4px; margin: 4px 0 10px; flex-wrap: wrap; }
-.php-tab {
-  font-size: 12px; padding: 5px 11px; border-radius: var(--radius-sm); cursor: pointer;
-  border: 1px solid var(--color-border); background: transparent; color: var(--color-text-secondary);
-  font-family: inherit;
-}
-.php-tab.active { background: var(--color-accent-bg); color: var(--color-accent); border-color: var(--color-border-focus); }
-.php-tab-body { min-height: 200px; flex: 1 1 auto; max-height: 60vh; overflow: auto; }
 /* 弹窗里内嵌 ConfigEditor：它自带 margin:12px 18px 0 与 flex:1（那是给整页编辑区定的），
    这里给一个定高容器并抹掉 margin，高度按原 12 行 textarea 的观感取 */
-.env-cfg-embed { display: flex; flex-direction: column; height: 260px; margin-top: 6px; }
-.env-cfg-embed :deep(.ce) { flex: 1 1 auto; margin: 0; min-height: 0; }
 /* 日志区域（.lv-*）已随查看器迁到 RuntimeLogView.vue 自身的 scoped 样式里 */
 /* 特色操作输出弹窗：宽度略宽于普通弹窗，输出区可滚动 */
-.task-modal { width: 680px; }
-.task-ver {
-  margin-left: 8px; font-size: 12px; font-weight: 400; color: var(--color-text-muted);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-}
-.task-confirm {
-  display: flex; gap: 10px; margin-top: 12px; padding: 10px 12px;
-  border-radius: var(--radius-sm); border: 1px solid var(--color-danger);
-  background: var(--color-danger-bg);
-}
-.task-confirm-icon {
-  width: 20px; height: 20px; flex: none; border-radius: 50%; background: var(--color-danger);
-  color: var(--color-accent-text); font-size: 12px; font-weight: 700;
-  display: flex; align-items: center; justify-content: center;
-}
-.task-confirm-title { font-size: 12px; font-weight: 600; color: var(--color-text-primary); }
-.task-confirm-text { margin: 2px 0 0; font-size: 12px; line-height: 1.5; color: var(--color-text-secondary); }
-.task-output {
-  margin: 12px 0 0; padding: 10px 12px; flex: 1 1 auto; max-height: 52vh; overflow: auto;
-  background: var(--color-bg-primary); border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px; line-height: 1.6; color: var(--color-text-primary);
-  white-space: pre-wrap; word-break: break-word;
-}
-.task-hint { margin: 6px 0 0; font-size: 11px; color: var(--color-text-muted); }
 .op-group {
   padding: 4px 10px 2px; font-size: 10px; letter-spacing: 0.04em;
   color: var(--color-text-disabled); 
@@ -4335,107 +3514,13 @@ const s = currentRuntimeState
 
 /* 日志工具栏只剩「自动刷新」这一个按钮（搜索/跟随由 RuntimeLogView 自带），
    所以 .log-toolbar / .log-filter / .log-count 一并去掉，只留按钮样式给 slot 用。 */
-.log-btn {display: inline-flex; align-items: center; justify-content: center; gap: 4px; 
-  height: 28px; padding: 0 11px; font-size: 12px; cursor: pointer;
-  background: var(--color-bg-tertiary); color: var(--color-text-secondary);
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm); white-space: nowrap;
-}
-.log-btn:hover { border-color: var(--color-accent); color: var(--color-accent); }
-.log-btn.active { background: var(--color-accent); color: var(--color-accent-text); border-color: var(--color-accent); }
-.ext-list { display: flex; flex-direction: column; gap: 2px; max-height: 300px; overflow: auto; }
-.ext-row {
-  display: flex; align-items: center; gap: 8px; font-size: 12px; padding: 5px 8px;
-  border-radius: var(--radius-sm); cursor: pointer; color: var(--color-text-secondary);
-}
-.ext-row:hover { background: var(--color-bg-tertiary); }
-.ext-name { font-weight: 600; }
-.ext-file { margin-left: auto; font-size: 10px; color: var(--color-text-disabled); font-family: monospace; }
 
 /* ===== 维护面板（源体检 / 磁盘 / 镜像 / 清单）===== */
-.maint-modal {
-  width: min(940px, 94vw);
-  max-height: 84vh;
-  display: flex;
-  flex-direction: column;
-}
-.maint-body {
-  overflow-y: auto;
-  min-height: 200px;
-}
-.maint-actions {
-  display: flex;
-  align-items: center;
-  gap: var(--space-4);
-  flex-wrap: wrap;
-  margin-bottom: var(--space-5);
-}
-.maint-summary {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-}
-.maint-sub { margin-top: var(--space-6); }
-.maint-sub-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--color-text-secondary);
-  margin-bottom: var(--space-3);
-}
-.maint-table { display: flex; flex-direction: column; gap: 2px; }
-.maint-row {
-  display: grid;
-  grid-template-columns: 160px minmax(0, 1fr) 96px 68px;
-  gap: var(--space-3);
-  align-items: center;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-xs);
-  font-size: 12px;
-}
-.maint-row:not(.maint-head):hover { background: var(--color-bg-tertiary); }
-.maint-head {
-  color: var(--color-text-muted);
-  font-size: 11px;
-  letter-spacing: 0.04em;
-  border-bottom: 1px solid var(--color-border);
-}
-.maint-rt {
-  display: flex;
-  flex-direction: column;
-  color: var(--color-text-primary);
-  overflow: hidden;
-}
-.maint-rt em {
-  font-style: normal;
-  font-size: 10px;
-  color: var(--color-text-disabled);
-  font-family: monospace;
-}
-.maint-src {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-secondary);
-}
-.maint-src em { font-style: normal; color: var(--color-warning); }
-.maint-status {
-  font-size: 11px;
-  padding: 2px var(--space-3);
-  border-radius: var(--radius-full);
-  text-align: center;
-}
 .maint-status.ok { color: var(--color-success); background: var(--color-success-bg); }
-.maint-status.bad { color: var(--color-danger); background: var(--color-danger-bg); }
 .maint-status.warn { color: var(--color-warning); background: var(--color-warning-bg); }
 .maint-status.off { color: var(--color-text-muted); background: var(--color-bg-tertiary); }
-.maint-lat {
-  text-align: right;
-  color: var(--color-text-muted);
-  font-variant-numeric: tabular-nums;
-}
 /* 系统环境变量面板：PATH 行是「路径 + 删除」，变量行是「名 + 值 + 删除」，列宽各自定制 */
-.envvar-path-row { grid-template-columns: minmax(0, 1fr) 72px; }
-.envvar-row { grid-template-columns: 170px minmax(0, 1fr) 148px; }
 /* 行尾两个按钮（编辑 / 删除，或 保存 / 取消）：右对齐，不占额外列宽 */
-.envvar-actions { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
 
 /* Everything 测试搜索：输入行 + 结果列表 */
 .ev-test { display: flex; flex-direction: column; gap: 6px; }
@@ -4458,149 +3543,13 @@ const s = currentRuntimeState
 .ev-res-dir { font-size: 10px; font-family: monospace; color: var(--color-text-disabled); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 项目版本要求检查弹窗 */
-.pc-row { display: flex; gap: 8px; margin-bottom: 10px; }
 .pc-row .env-input { flex: 1; }
-.pc-ok { color: var(--color-success); font-family: monospace; font-size: 11px; }
-.pc-bad { color: var(--color-danger); font-size: 11px; }
-.pc-select {
-  margin-left: 6px; padding: 2px 5px; font-size: 11px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-xs);
-  background: var(--color-bg-tertiary); color: var(--color-text-primary);
-}
 
 /* 项目体检：版本要求 / 依赖状态两块，小标题与卡片共用一套间距。
    卡片用 auto-fit 网格，760px 弹窗里两个生态并排，窄窗自动换行。 */
-.pc-section-head {
-  display: flex; align-items: baseline; gap: 8px;
-  margin: 14px 0 8px; font-size: 12px; font-weight: 600;
-  color: var(--color-text-secondary);
-}
-.pc-section-hint { font-size: 10px; font-weight: 400; color: var(--color-text-disabled); }
-.pc-note { margin: 12px 0 4px; font-size: 11px; color: var(--color-text-muted); }
-.pd-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 8px; }
-.pd-card {
-  min-width: 0; padding: 9px 10px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-tertiary);
-}
-.pd-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.pd-kind { font-size: 12px; font-weight: 600; color: var(--color-text-primary); white-space: nowrap; }
-.pd-manager { font-size: 11px; color: var(--color-accent); white-space: nowrap; }
-.pd-manager-ver { color: var(--color-text-muted); }
-.pd-manifest {
-  margin-left: auto; min-width: 0; font-size: 10px; color: var(--color-text-muted);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.pd-grid { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 8px; }
-.pd-item { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 11px; }
-.pd-label { flex-shrink: 0; color: var(--color-text-muted); }
-.pd-stale {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 14px; height: 14px; border-radius: 50%;
-  font-size: 10px; font-weight: 700; cursor: help;
-  color: var(--color-warning); background: var(--color-warning-bg);
-}
-.pd-path {
-  margin-top: 7px; font-size: 10px; color: var(--color-text-disabled);
-  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.envvar-path,
-.envvar-name {
-  display: flex;
-  align-items: center;
-  gap: var(--space-2);
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: monospace;
-  color: var(--color-text-primary);
-}
-.envvar-value {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: monospace;
-  font-size: 11px;
-  color: var(--color-text-secondary);
-}
-.envvar-badge {
-  flex-shrink: 0;
-  font-style: normal;
-  font-size: 10px;
-  padding: 1px var(--space-2);
-  border-radius: var(--radius-full);
-  color: var(--color-accent);
-  background: var(--color-bg-tertiary);
-}
-.envvar-name-input { max-width: 170px; font-family: monospace; text-transform: uppercase; }
-.disk-list { display: flex; flex-direction: column; gap: var(--space-3); }
-.disk-row {
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-card-bg);
-  border: 1px solid var(--card-border-color);
-  border-radius: var(--radius-sm);
-}
-.disk-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: baseline;
-}
-.disk-name { font-weight: 600; font-size: 13px; }
-.disk-size {
-  font-size: 12px;
-  color: var(--color-text-secondary);
-  font-variant-numeric: tabular-nums;
-}
-.disk-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-2);
-  margin-top: var(--space-2);
-}
-.disk-chip {
-  font-size: 11px;
-  padding: 2px var(--space-4);
-  border-radius: var(--radius-full);
-  background: var(--color-bg-tertiary);
-  color: var(--color-text-secondary);
-}
 /* GitHub 下载加速开关（体检页内） */
-.gh-accel {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  margin: var(--space-2) 0 var(--space-3); padding: 8px 12px;
-  border: 1px solid var(--color-border); border-radius: var(--radius-sm);
-  background: var(--color-bg-secondary); cursor: pointer;
-}
-.gh-accel input { flex: none; }
-.gh-accel-label { font-size: 13px; color: var(--color-text-primary); }
-.gh-accel-hint { font-size: 12px; color: var(--color-text-muted); font-style: normal; }
-.manifest-report {
-  margin-top: var(--space-4);
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-2);
-}
-.manifest-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  align-items: center;
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-xs);
-  background: var(--color-card-bg);
-}
-.manifest-name { font-weight: 600; font-size: 12px; min-width: 110px; }
-.manifest-tag {
-  font-size: 11px;
-  padding: 2px var(--space-4);
-  border-radius: var(--radius-full);
-}
-.manifest-tag.bad { color: var(--color-danger); background: var(--color-danger-bg); }
 .manifest-tag.warn { color: var(--color-warning); background: var(--color-warning-bg); }
-.manifest-tag.extra { color: var(--color-text-secondary); background: var(--color-bg-tertiary); }
 .manifest-tag.ok { color: var(--color-success); background: var(--color-success-bg); }
-.hidden-file { display: none; }
 
 /* Everything 文件搜索面板 */
 .ev-state-running { color: var(--color-success); }
@@ -4614,5 +3563,4 @@ const s = currentRuntimeState
 .ev-field { display: flex; flex-direction: column; gap: 5px; margin-bottom: 12px; }
 .ev-field label { font-size: 12px; color: var(--color-text-secondary); }
 .ev-field .env-input { max-width: 420px; }
-
 </style>
