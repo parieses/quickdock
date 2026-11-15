@@ -11,6 +11,7 @@ package weather
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,15 @@ type location struct {
 	city      string
 	latitude  float64
 	longitude float64
+	// source 选哪个数据源（auto / open-meteo / wttr / qweather / caiyun）。
+	// 存归一后的值：结构体比较要能识别「配置真变了」，"wttr.in" 与 "wttr"
+	// 都被认成同一个源，否则每次切页回来都以为变了、把快照清掉。
+	source string
+	// apiKey 当前源要用的 key（和风的 Key / 彩云的 Token）；免 key 源为空。
+	// 只保留当前源的：切到别的源时旧 key 不跟着进内存，少一份泄漏面。
+	apiKey string
+	// apiHost 和风的专属 API Host；只有和风用得上。
+	apiHost string
 }
 
 // WeatherService 天气快照服务。
@@ -62,14 +72,28 @@ func NewWeatherService() *WeatherService {
 	return s
 }
 
-// SetWeatherConfig 由前端在读回 / 保存设置后调用，后端据此决定后台刷不刷、刷哪个城市。
+// SetWeatherConfig 由前端在读回 / 保存设置后调用，后端据此决定后台刷不刷、
+// 刷哪个城市、用哪个数据源。source 传空或未知值按 auto 处理（见 NormalizeSource）。
+//
+// apiKey / apiHost 只对需要 key 的源有意义（和风 / 彩云）；缺 key 不在这里拒绝，
+// 而是在真正取数时返回「去设置里填」——否则用户先选源、再填 key 这两步
+// 中间那一次保存会被打回，界面看着像坏了。
+//
 // 配置真变了才废弃旧快照：切页回来会重复报同一份配置，那时不该把缓存清掉，
 // 也不该把 lastAt 清零（否则冷启动失败节流形同虚设）。
-func (s *WeatherService) SetWeatherConfig(enabled bool, latitude, longitude float64, city string) *services.ApiResult {
+func (s *WeatherService) SetWeatherConfig(enabled bool, latitude, longitude float64, city, source, apiKey, apiHost string) *services.ApiResult {
 	if latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180 {
 		return services.FailMsg("无效的经纬度")
 	}
-	next := location{enabled: enabled, city: city, latitude: latitude, longitude: longitude}
+	next := location{
+		enabled:   enabled,
+		city:      city,
+		latitude:  latitude,
+		longitude: longitude,
+		source:    internalweather.NormalizeSource(source),
+		apiKey:    strings.TrimSpace(apiKey),
+		apiHost:   strings.TrimSpace(apiHost),
+	}
 	s.mu.Lock()
 	changed := s.loc != next
 	s.loc = next
@@ -97,13 +121,30 @@ func (s *WeatherService) GetWeather() *services.ApiResult {
 	if !last.IsZero() && time.Since(last) < coldRetryGap {
 		return services.FailMsg("天气暂不可用，稍后自动重试")
 	}
-	return services.Wrap(s.fetchNow())
+	// 不用 services.Wrap：它失败时走 Fail()，那是 [E] 错误级。天气取不到是网络
+	// 不可达（api.open-meteo.com 在国内部分网络整域名不通），不是程序出错，
+	// 按错误级刷日志会让用户扒出一条红字来问「这是不是坏了」。
+	//
+	// 变量名不能叫 d：上面那个 d 是 *Conditions 快照，同名 `:=` 会复用它，
+	// 编译器报「struct 不能赋给 *struct」。
+	cond, err := s.fetchNow()
+	if err != nil {
+		logger.W("[WRN] weather: %v", err)
+		return services.FailMsg(err.Error())
+	}
+	return services.Ok(cond)
 }
 
 // RefreshWeather 手动刷新（天气区的刷新按钮 / 改城市后的重试）：无视冷却，
 // 强制取一次最新数据并覆盖快照。
 func (s *WeatherService) RefreshWeather() *services.ApiResult {
-	return services.Wrap(s.fetchNow())
+	d, err := s.fetchNow()
+	if err != nil {
+		// 同 GetWeather：网络问题降一级，不占错误日志
+		logger.W("[WRN] weather refresh: %v", err)
+		return services.FailMsg(err.Error())
+	}
+	return services.Ok(d)
 }
 
 // fetchNow 单飞拉取：网络请求期间不持锁，并发调用等同一次结果。
@@ -137,7 +178,14 @@ func (s *WeatherService) fetchNow() (internalweather.Conditions, error) {
 		if !loc.enabled || loc.city == "" {
 			data, err = internalweather.Conditions{}, fmt.Errorf("天气未启用")
 		} else {
-			data, err = internalweather.FetchConditions(loc.latitude, loc.longitude, loc.city)
+			data, err = internalweather.FetchConditions(internalweather.Options{
+				Lat:     loc.latitude,
+				Lon:     loc.longitude,
+				City:    loc.city,
+				Source:  loc.source,
+				APIKey:  loc.apiKey,
+				APIHost: loc.apiHost,
+			})
 		}
 		s.mu.Lock()
 		if err == nil && s.loc == loc {

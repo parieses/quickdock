@@ -38,10 +38,11 @@ import type { LunarDay } from '../utils/lunar'
 import { describeHuangLi } from '../utils/huangli'
 import type { HuangLiDay } from '../utils/huangli'
 import {
-  DEFAULT_WEATHER, readWeatherCache, writeWeatherCache,
+  DEFAULT_WEATHER, WEATHER_SOURCES, WEATHER_SOURCE_META, normalizeSource, actualSource,
+  readWeatherCache, writeWeatherCache,
   fetchWeather, refreshWeather, setWeatherConfig, searchCities, weatherGroup,
 } from '../utils/weather'
-import type { WeatherConfig, WeatherData, CityHit } from '../utils/weather'
+import type { WeatherConfig, WeatherData, CityHit, WeatherSource } from '../utils/weather'
 import { ListTodos, ToggleTodo } from '../../bindings/quickdock/services/todo/todoservice'
 import { ListMonitors, ListMonitorStats, GetMonitorLogsSince } from '../../bindings/quickdock/services/monitor/monitorservice'
 import { EnvList, EnvEverythingStatus } from '../../bindings/quickdock/services/env/environmentservice'
@@ -65,7 +66,7 @@ import {
   FolderGit2, CalendarDays, Settings2, MapPin, X,
   Sun, CloudSun, Cloud, CloudFog, CloudRain, CloudSnow, CloudLightning, CloudOff,
   Mail, Layers, Copy, Trash2, Plus, File, Folder, AlertCircle, ShieldAlert,
-  Coins,
+  Coins, ExternalLink,
 } from '@lucide/vue'
 import TypeIcon from './TypeIcon.vue'
 import MailDetailDialog from './MailDetailDialog.vue'
@@ -1236,7 +1237,12 @@ async function toggleYiJi() {
 async function loadWeatherCfg() {
   try {
     const raw = unwrap<string>(await GetValue(WEATHER_CFG_KEY))
-    if (raw) weatherCfg.value = { ...DEFAULT_WEATHER, ...(JSON.parse(raw) as Partial<WeatherConfig>) }
+    if (raw) {
+      const parsed = JSON.parse(raw) as Partial<WeatherConfig>
+      // 老配置没有 source 字段、或用户手改过 JSON：一律按 auto 认，
+      // 否则 select 的 value 匹配不到任何 option 会显示空白。
+      weatherCfg.value = { ...DEFAULT_WEATHER, ...parsed, source: normalizeSource(parsed.source) }
+    }
     // 后台刷新要知道坐标与开关；配置没变时后端不会清快照，切页回来是秒回。
     await setWeatherConfig(weatherCfg.value)
   } catch (e) {
@@ -1256,33 +1262,38 @@ async function saveWeatherCfg() {
 }
 
 /**
- * 读后端快照（不发外网请求）。force 只给手动刷新 / 改城市后的重试：
- * 那两个场景用户明确要「现在就要新数据」，才值得让 Go 立刻打一次 Open-Meteo。
+ * 读后端快照（不发外网请求）。force 只给手动刷新 / 改城市 / 改数据源后的重试：
+ * 那几个场景用户明确要「现在就要新数据」，才值得让 Go 立刻打一次外网。
  * 后台 30 分钟轮询由 services/weather 自己负责，这里不要再加任何定时器。
+ *
+ * 返回是否取到了新数据——「失败时保留旧快照」在界面上是看不出来的，
+ * 调它的地方（改源、手动刷新）得能自己决定要不要提示。
  */
-async function loadWeather(force = false) {
+async function loadWeather(force = false): Promise<boolean> {
   const cfg = weatherCfg.value
   if (!cfg.enabled || !cfg.city) {
     weather.value = null
     weatherError.value = false
-    return
+    return false
   }
   if (!force) {
     const cached = readWeatherCache(cfg.latitude, cfg.longitude)
     if (cached) weather.value = cached
   }
-  if (weatherBusy.value) return
+  if (weatherBusy.value) return false
   weatherBusy.value = true
   try {
     const data = force ? await refreshWeather() : await fetchWeather()
     weather.value = data
     weatherError.value = false
     writeWeatherCache(cfg.latitude, cfg.longitude, data)
+    return true
   } catch (e) {
     // 后台失败不弹 toast；有旧数据时连日志都省了——否则失败冷却那 5 分钟里
     // 每分钟读一次快照会刷出 5 条一模一样的错误。手动刷新失败仍要留痕。
     if (!weather.value) weatherError.value = true
     if (force || !weather.value) logErr('dashboard.weather', e)
+    return false
   } finally {
     weatherBusy.value = false
   }
@@ -1322,12 +1333,59 @@ async function doSearchCity() {
 
 async function pickCity(c: CityHit) {
   weatherCfg.value = {
+    ...weatherCfg.value,
     enabled: true, city: c.name, latitude: c.latitude, longitude: c.longitude,
   }
   cityHits.value = []
   cityQuery.value = ''
   await saveWeatherCfg()
   await loadWeather(true)
+}
+
+/** 设置面板里数据源下拉的显示名。需要 key 的两项带后缀，选之前就知道要准备什么。 */
+function sourceLabel(s: WeatherSource): string {
+  if (s === 'open-meteo') return t('daybarWeatherSourceOpenMeteo')
+  if (s === 'wttr') return t('daybarWeatherSourceWttr')
+  if (s === 'qweather') return t('daybarWeatherSourceQWeather')
+  if (s === 'caiyun') return t('daybarWeatherSourceCaiyun')
+  return t('daybarWeatherSourceAuto')
+}
+
+/** 当前源要用的 key：两个收费源字段不同，但界面同一时间只显示其中一个。 */
+const apiKeyModel = computed({
+  get: () => (weatherCfg.value.source === 'caiyun' ? weatherCfg.value.caiyunToken : weatherCfg.value.qweatherKey),
+  set: (v: string) => {
+    weatherCfg.value = weatherCfg.value.source === 'caiyun'
+      ? { ...weatherCfg.value, caiyunToken: v }
+      : { ...weatherCfg.value, qweatherKey: v }
+  },
+})
+
+/** 「去申请 key」：走系统浏览器，不用裸 <a>（WebView 会把应用界面导航走）。 */
+function openWeatherConsole() {
+  const url = WEATHER_SOURCE_META[weatherCfg.value.source].consoleUrl
+  if (!url) return
+  void openExternal(url).catch((e: unknown) => logErr('dashboard.weatherConsole', e))
+}
+
+/**
+ * 改数据源 / 改 key：立刻存盘并强制重取一次。
+ * 不强制的话用户改完看到的是旧源的快照，最长要等 30 分钟才换过来。
+ */
+async function applyWeatherChange() {
+  await saveWeatherCfg()
+  const src = weatherCfg.value.source
+  if (WEATHER_SOURCE_META[src].needsKey && !apiKeyModel.value.trim()) {
+    // 配置照样存下（否则下次进页面又回到旧源），但不打外网：后端只会回
+    // 「需要 key」。提示就地面板里显示（见模板里的 db-key-warn），不弹 toast——
+    // 用户正把光标放在那个空输入框上，再弹一条浮层是噪音。
+    return
+  }
+  if (!weatherCfg.value.enabled || !weatherCfg.value.city) return
+  const ok = await loadWeather(true)
+  // 取不到时界面会继续显示上一份数据（旧源），看着像「换成功了」。明说一句，
+  // 并指向上面那行「当前数据来自 …」，用户能看到实际还停在哪个源。
+  if (!ok) toast.error(t('daybarWeatherSourceFailed', { source: sourceLabel(src) }))
 }
 
 /** 跨天重算农历/节气/宜忌：搭 60 秒监控轮询的便车，不另起定时器。 */
@@ -1461,10 +1519,13 @@ function seedPreview() {
     { name: 'env-runtime', path: 'E:\\pp\\env-runtime', branch: 'feat/wsl', ahead: 1, behind: 0, changes: 0, error: '' },
     { name: 'docs', path: 'E:\\pp\\docs', branch: 'main', ahead: 0, behind: 0, changes: 0, error: '' },
   ]
-  weatherCfg.value = { enabled: true, city: '北京', latitude: 39.9075, longitude: 116.39723 }
+  weatherCfg.value = {
+    enabled: true, city: '北京', latitude: 39.9075, longitude: 116.39723, source: 'auto',
+    qweatherKey: '', qweatherHost: '', caiyunToken: '',
+  }
   weather.value = {
     temp: 14, apparent: 12, humidity: 48, wind: 9, code: 2, isDay: true,
-    max: 17, min: 6, updatedAt: Date.now(), city: '北京',
+    max: 17, min: 6, updatedAt: Date.now(), city: '北京', source: 'open-meteo',
   }
 }
 // ===== PREVIEW-ONLY END =====
@@ -1777,6 +1838,69 @@ onUnmounted(() => {
                 <span class="toggle-knob"></span>
               </button>
             </label>
+            <div class="field">
+              <span class="field-label">{{ t('daybarWeatherSource') }}</span>
+              <!-- 原生 select 够用：这三个选项没有图标，也就没有 AiHero 那种
+                   「选项里放不了 SVG」的问题，不值得为它写一套自定义下拉。 -->
+              <select
+                v-model="weatherCfg.source"
+                class="field-input"
+                :title="t('daybarWeatherSourceHint')"
+                @change="applyWeatherChange"
+              >
+                <option v-for="s in WEATHER_SOURCES" :key="s" :value="s">{{ sourceLabel(s) }}</option>
+              </select>
+              <span class="db-pref-hint">{{ t('daybarWeatherSourceHint') }}</span>
+              <!-- 需要 key 的源就地摊开输入框：选中后再去别处找地方填 key，
+                   用户会以为「切完就生效了」，然后盯着没变化的天气发愣。 -->
+              <template v-if="WEATHER_SOURCE_META[weatherCfg.source].needsKey">
+                <div v-if="weatherCfg.source === 'qweather'" class="field db-key-field">
+                  <span class="field-label">{{ t('daybarWeatherHost') }}</span>
+                  <input
+                    v-model="weatherCfg.qweatherHost"
+                    class="field-input"
+                    placeholder="abc123.xy.qweatherapi.com"
+                    spellcheck="false"
+                    @change="applyWeatherChange"
+                  />
+                  <span class="db-pref-hint">{{ t('daybarWeatherHostHint') }}</span>
+                  <!-- 公共地址实际已经连不上了（实测 403 / 直接断连），不填 Host 的
+                       结果就是「认证失败」——让它先在这里说清楚。 -->
+                  <span v-if="!weatherCfg.qweatherHost.trim()" class="db-pref-hint db-key-warn">
+                    {{ t('daybarWeatherHostRequired') }}
+                  </span>
+                </div>
+                <div class="field db-key-field">
+                  <span class="field-label">
+                    {{ weatherCfg.source === 'qweather' ? t('daybarWeatherKey') : t('daybarWeatherToken') }}
+                  </span>
+                  <input
+                    v-model="apiKeyModel"
+                    type="password"
+                    class="field-input"
+                    spellcheck="false"
+                    autocomplete="off"
+                    @change="applyWeatherChange"
+                  />
+                  <span class="db-pref-hint">{{ t('daybarWeatherKeyHint') }}</span>
+                  <!-- 没填 key 就顶到眼前：否则切完源看着一切正常，只是天气一直不更新。 -->
+                  <span v-if="!apiKeyModel.trim()" class="db-pref-hint db-key-warn">
+                    {{ t('daybarWeatherKeyMissing') }}
+                  </span>
+                </div>
+                <div class="db-key-row">
+                  <button type="button" class="btn btn-secondary" @click="openWeatherConsole">
+                    {{ t('daybarWeatherGetKey') }} <ExternalLink :size="11" />
+                  </button>
+                  <span class="db-pref-hint">{{ t('daybarWeatherKeyQuota') }}</span>
+                </div>
+              </template>
+              <!-- 当前实际生效的源：切源失败时卡片会继续显示旧源的数据，
+                   用户得能从这里看出「它并没有换过去」。 -->
+              <span v-if="weather?.source" class="db-pref-hint db-src-now">
+                {{ t('daybarWeatherSourceNow', { source: sourceLabel(actualSource(weather.source)) }) }}
+              </span>
+            </div>
             <div class="field">
               <span class="field-label">{{ t('daybarCity') }}</span>
               <div class="db-city-row">
@@ -2868,6 +2992,14 @@ onUnmounted(() => {
 .yj-facts b { margin-right: var(--space-2); font-weight: 500; color: var(--color-text-disabled); }
 .yj-disclaimer { font-size: 10px; color: var(--color-text-disabled); }
 .db-pref-hint { font-size: 10px; line-height: 1.5; color: var(--color-text-disabled); }
+/* 当前生效的数据源：单独一行，不然会和上面的说明挤成一条长句 */
+.db-src-now { display: block; margin-top: 2px; color: var(--color-text-secondary); }
+/* 需要 key 的源：输入区与上面的下拉拉开一点，否则会被读成同一组控件 */
+.db-key-field { margin-top: 8px; }
+.db-key-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
+.db-key-row .btn { flex-shrink: 0; }
+.db-key-row .db-pref-hint { margin: 0; }
+.db-key-warn { display: block; margin-top: 2px; color: var(--color-warning); }
 
 /* 邮箱配置教程：链接用按钮 + openExternal，不用裸 <a>（WebView 会把应用界面导航走）。 */
 .mail-guide { margin-top: 6px; }

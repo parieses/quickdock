@@ -114,6 +114,19 @@ func proxyTransport() http.RoundTripper {
 	return &http.Transport{Proxy: systemProxyURL, TLSHandshakeTimeout: 10 * time.Second}
 }
 
+// HasProxy 报告当前是否真的配了代理（环境变量或 WinINET 系统代理）。
+//
+// 供「直连失败 → 代理兜底」这类重试链使用：没有代理时那次兜底其实就是再来一次
+// 直连，只是白等一个超时。判定复用 systemProxyURL，保证与真正的 Transport 一致。
+func HasProxy() bool {
+	req, err := http.NewRequest(http.MethodGet, "http://example.invalid", nil)
+	if err != nil {
+		return false
+	}
+	u, err := systemProxyURL(req)
+	return err == nil && u != nil
+}
+
 func systemProxyURL(req *http.Request) (*url.URL, error) {
 	if u, err := http.ProxyFromEnvironment(req); u != nil || err != nil {
 		return u, err
